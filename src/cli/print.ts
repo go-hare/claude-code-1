@@ -1703,10 +1703,13 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
             `Error: Exceeded USD budget ($${options.maxBudgetUsd}).\nTip: Increase the limit with --max-budget-usd or start a new session to continue.`,
           )
           break
-        case 'error_max_structured_output_retries':
+        case 'error_max_structured_output_retries': {
+          const errors = lastMessage.errors as string[] | undefined
           writeToStdout(
-            `Error: Failed to provide valid structured output after maximum retries.\nTip: Simplify your schema or check if the output format matches the expected structure.`,
+            `Error: ${errors?.[0] ?? 'Failed to provide valid structured output after maximum retries'}`,
           )
+          break
+        }
       }
   }
 
@@ -4293,20 +4296,12 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
           }
 
           // Generate and emit prompt suggestion for SDK consumers.
-          // Official ENABLE_PROMPT_SUGGESTION densable pure env half.
-          let promptSuggestionEnvOff = isEnvDefinedFalsy(
-            process.env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION,
-          )
-          try {
-            const { resolvePromptSuggestionEnvOverride } =
-              // eslint-disable-next-line @typescript-eslint/no-require-imports
-              require('../utils/residualFinalEnvGates.js') as typeof import('../utils/residualFinalEnvGates.js')
-            promptSuggestionEnvOff =
-              resolvePromptSuggestionEnvOverride() === false
-          } catch {
-            // keep raw env fallback
-          }
-          if (options.promptSuggestions && !promptSuggestionEnvOff) {
+          // #175 SEA `AMt` (@298675596): honor CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION
+          // and cloud/setting gates.
+          const { shouldAllowPromptSuggestionInSdk } =
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require('../services/PromptSuggestion/promptSuggestion.js') as typeof import('../services/PromptSuggestion/promptSuggestion.js')
+          if (options.promptSuggestions && shouldAllowPromptSuggestionInSdk()) {
             // TS narrows suggestionState to never in the while loop body;
             // cast via unknown to reset narrowing.
             const state = suggestionState as unknown as typeof suggestionState
@@ -5499,10 +5494,17 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               getAppState,
             )
 
-            // Enable prompt suggestions in AppState when SDK consumer opts in.
-            // shouldEnablePromptSuggestion() returns false for non-interactive
-            // sessions, but the SDK consumer explicitly requested suggestions.
-            if (msg.request.promptSuggestions) {
+            // Enable prompt suggestions in AppState when SDK consumer opts in,
+            // unless disabled by CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION / AMt (#175).
+            const {
+              shouldAllowPromptSuggestionInSdk: shouldAllowSdkPromptSuggestion,
+            } =
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              require('../services/PromptSuggestion/promptSuggestion.js') as typeof import('../services/PromptSuggestion/promptSuggestion.js')
+            if (
+              msg.request.promptSuggestions &&
+              shouldAllowSdkPromptSuggestion()
+            ) {
               setAppState(prev => {
                 if (prev.promptSuggestionEnabled) return prev
                 return { ...prev, promptSuggestionEnabled: true }

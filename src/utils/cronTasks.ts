@@ -85,6 +85,11 @@ export type CronTask = {
    * Written to disk when explicitly set.
    */
   enabled?: boolean
+  createdBySessionId?: string
+  createdByPid?: number
+  createdByProcStart?: string
+  createdInProject?: string
+  plugin?: string
 }
 
 type CronFile = { tasks: CronTask[] }
@@ -100,6 +105,9 @@ export function getCronFilePath(dir?: string): string {
   return join(dir ?? getProjectRoot(), CRON_FILE_REL)
 }
 
+const UNREADABLE_TASKS_ERROR =
+  'The scheduled tasks file (.claude/scheduled_tasks.json) could not be read as a list of tasks, so nothing was removed from it. Check or repair that file, then try again.'
+
 /**
  * Read and parse .claude/scheduled_tasks.json. Returns an empty task list if the file
  * is missing, empty, or malformed. Tasks with invalid cron strings are
@@ -107,6 +115,18 @@ export function getCronFilePath(dir?: string): string {
  * blocks the whole file.
  */
 export async function readCronTasks(dir?: string): Promise<CronTask[]> {
+  const result = await readCronTasksStrict(dir)
+  return result === 'unreadable' ? [] : result
+}
+
+/**
+ * densable `PRo` — strict variant returning `'unreadable'` when the file exists
+ * but cannot be read or parsed as `{ tasks: [...] }`, so `removeCronTasks` refuses
+ * to clobber a corrupted file.
+ */
+export async function readCronTasksStrict(
+  dir?: string,
+): Promise<CronTask[] | 'unreadable'> {
   const fs = getFsImplementation()
   let raw: string
   try {
@@ -114,13 +134,14 @@ export async function readCronTasks(dir?: string): Promise<CronTask[]> {
   } catch (e: unknown) {
     if (isFsInaccessible(e)) return []
     logError(e)
-    return []
+    return 'unreadable'
   }
+  if (raw.trim() === '') return []
 
   const parsed = safeParseJSON(raw, false)
-  if (!parsed || typeof parsed !== 'object') return []
+  if (!parsed || typeof parsed !== 'object') return 'unreadable'
   const file = parsed as Partial<CronFile>
-  if (!Array.isArray(file.tasks)) return []
+  if (!Array.isArray(file.tasks)) return 'unreadable'
 
   const out: CronTask[] = []
   for (const t of file.tasks) {
@@ -154,6 +175,19 @@ export async function readCronTasks(dir?: string): Promise<CronTask[]> {
       ...(t.permanent ? { permanent: true } : {}),
       // densable mGa: enabled defaults true when omitted
       ...(t.enabled === false ? { enabled: false } : {}),
+      ...(typeof t.createdBySessionId === 'string'
+        ? { createdBySessionId: t.createdBySessionId }
+        : {}),
+      ...(typeof t.createdByPid === 'number'
+        ? { createdByPid: t.createdByPid }
+        : {}),
+      ...(typeof t.createdByProcStart === 'string'
+        ? { createdByProcStart: t.createdByProcStart }
+        : {}),
+      ...(typeof t.createdInProject === 'string'
+        ? { createdInProject: t.createdInProject }
+        : {}),
+      ...(typeof t.plugin === 'string' ? { plugin: t.plugin } : {}),
     })
   }
   return out
@@ -280,7 +314,10 @@ export async function removeCronTasks(
     return
   }
   const idSet = new Set(ids)
-  const tasks = await readCronTasks(dir)
+  const tasks = await readCronTasksStrict(dir)
+  if (tasks === 'unreadable') {
+    throw new Error(UNREADABLE_TASKS_ERROR)
+  }
   const remaining = tasks.filter(t => !idSet.has(t.id))
   if (remaining.length === tasks.length) return
   await writeCronTasks(remaining, dir)

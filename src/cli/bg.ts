@@ -67,12 +67,17 @@ export function findSession(
   target: string,
 ): SessionEntry | undefined {
   const asNum = parseInt(target, 10)
-  return sessions.find(
+  const exact = sessions.find(
     s =>
       s.sessionId === target ||
       s.pid === asNum ||
       (s.name && s.name === target),
   )
+  if (exact) return exact
+  const needle = target.trim().toLowerCase()
+  if (!needle) return undefined
+  const partial = sessions.filter(s => s.name?.toLowerCase().includes(needle))
+  return partial.length === 1 ? partial[0] : undefined
 }
 
 function formatTime(ts: number): string {
@@ -134,9 +139,14 @@ const CLI_BG_LOGS_READ_FAILED =
 const CLI_BG_RESPAWN =
   'cli_bg_respawn' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
 
-const LOGS_USAGE = 'claude logs <id>'
-const LOGS_DESCRIPTION =
-  "Print the background session's recent terminal output."
+const NAME_HINT =
+  'Part of the session name works in place of the id. Put a name with spaces in quotes.'
+const LOGS_USAGE = 'claude logs <id|name>'
+const LOGS_DESCRIPTION = `Print the background session's recent terminal output. ${NAME_HINT}`
+const HEX_PREFIX_RE = /^[a-f0-9]{1,8}$/
+const JOB_SHORT_ID_RE = /^[a-f0-9]{8}$/
+const MAX_NAME_MATCHES = 20
+const MAX_TASK_TEXT_NOTES = 3
 
 /** Gold `ov` @187616399 sha=0bd2593aeb86dc1f — flushed stdout write. */
 async function writeStdoutFlushed(text: string): Promise<void> {
@@ -162,11 +172,35 @@ async function exitAfterAnalyticsFlush(code: number): Promise<void> {
   process.exit(code)
 }
 
+/** Official rAn — rank job name/intent match (3 exact name, 2 substr name, 1 intent, 0 none). */
+export function rankJobNameMatch(
+  state: { name?: string; displayIntent?: string; intent: string },
+  needleLower: string,
+): 0 | 1 | 2 | 3 {
+  if (!needleLower) return 0
+  const name = state.name?.toLowerCase() ?? ''
+  if (name === needleLower) return 3
+  if (name.includes(needleLower)) return 2
+  if (
+    state.displayIntent?.toLowerCase().includes(needleLower) ||
+    state.intent.toLowerCase().includes(needleLower)
+  ) {
+    return 1
+  }
+  return 0
+}
+
+function sanitizeJobPreview(text: string): string {
+  const clean = text.replace(/\s+/g, ' ').trim()
+  return clean.length > 32 ? `${clean.slice(0, 31)}\u2026` : clean
+}
+
 /**
- * Gold `dn` @189641683 sha=3e886fec3a355447 — resolve 8-hex job prefix.
- * Disk list is `sn(iS())`; storageV5 `bqt` is unlanded (no listJobIdsV5).
+ * Gold `dn`/`ht` — resolve 8-hex job prefix or partial session name.
  */
-async function resolveLogsJobId(target: string | undefined): Promise<string> {
+async function resolveLogsJobId(
+  target: string | undefined,
+): Promise<{ short: string; byName: boolean; nameLines: string }> {
   if (target === '--help' || target === '-h') {
     process.stdout.write(`Usage: ${LOGS_USAGE}\n\n  ${LOGS_DESCRIPTION}\n`)
     process.exit(0)
@@ -182,17 +216,102 @@ async function resolveLogsJobId(target: string | undefined): Promise<string> {
 
   const { resolveJobShortByPrefix } = await import('../daemon/deleteJob.js')
   const resolved = await resolveJobShortByPrefix(target)
-  if (resolved.ok) return resolved.short
+  if (resolved.ok) {
+    return { short: resolved.short, byName: false, nameLines: '' }
+  }
+
+  const trimmedLower = target.trim().toLowerCase()
+  const canTryName =
+    resolved.kind === 'none' && !HEX_PREFIX_RE.test(trimmedLower)
+  if (canTryName) {
+    const { isBhSettled, isTerminalState, listAllJobs } = await import(
+      '../daemon/jobState.js'
+    )
+    const jobs = await listAllJobs().catch(() => [])
+    const ranked = jobs
+      .filter(j => JOB_SHORT_ID_RE.test(j.short))
+      .map(j => ({
+        id: j.short,
+        state: j.state,
+        rank: rankJobNameMatch(j.state, trimmedLower),
+      }))
+      .filter(j => j.rank !== 0)
+    const hasNameMatch = ranked.some(j => j.rank === 2 || j.rank === 3)
+    const isFinished = (s: (typeof ranked)[number]['state']) =>
+      isTerminalState(s) && !(s.state === 'done' && isBhSettled(s))
+    const candidates = ranked.filter(j => j.rank !== 1 || !isFinished(j.state))
+    if (candidates.length === 1 && hasNameMatch) {
+      const { id, state } = candidates[0]!
+      const others = ranked
+        .filter(j => j.id !== id)
+        .sort((a, b) => {
+          const at = a.state.firstTerminalAt ?? ''
+          const bt = b.state.firstTerminalAt ?? ''
+          if (at !== bt) return at < bt ? 1 : -1
+          return a.id < b.id ? -1 : 1
+        })
+      const shown = others
+        .slice(0, MAX_TASK_TEXT_NOTES)
+        .map(
+          j =>
+            `  ${j.id}  ${sanitizeJobPreview(j.state.name || (j.state as { displayIntent?: string }).displayIntent || j.state.intent)}\n`,
+        )
+      const more = others.length - shown.length
+      const extra =
+        others.length > 0
+          ? `The task text of ${others.length} finished ${others.length === 1 ? 'session' : 'sessions'} has '${sanitizeJobPreview(target)}' too:\n${shown.join('')}${more > 0 ? `  \u2026 and ${more} more\n` : ''}`
+          : ''
+      const nameLines = `Session ${id} \u00b7 ${sanitizeJobPreview(state.name ?? '')}\n${extra}`
+      process.stderr.write(nameLines)
+      return { short: id, byName: true, nameLines }
+    }
+    if (ranked.length > 0) {
+      const sorted = ranked
+        .slice()
+        .sort(
+          (a, b) =>
+            Number(a.rank === 1) - Number(b.rank === 1) ||
+            (a.id < b.id ? -1 : 1),
+        )
+      const shown = sorted
+        .slice(0, MAX_NAME_MATCHES)
+        .map(
+          ({ id, state, rank }) =>
+            `  ${id}  ${sanitizeJobPreview(state.name || (state as { displayIntent?: string }).displayIntent || state.intent)}${hasNameMatch && rank === 1 ? '  (task text)' : ''}\n`,
+        )
+      const more = ranked.length - shown.length
+      const preview = sanitizeJobPreview(target)
+      const header = hasNameMatch
+        ? `${ranked.length} sessions match '${preview}'`
+        : `No session name matches '${preview}'.\nThe task text of ${ranked.length} ${ranked.length === 1 ? 'session' : 'sessions'} has it`
+      const footer = !hasNameMatch
+        ? 'Use the id, or a session name.'
+        : ranked.some(j => j.rank === 2)
+          ? 'Use more of the name, or the id.'
+          : 'Use the id.'
+      process.stderr.write(
+        `${header}:\n${shown.join('')}${more > 0 ? `  \u2026 and ${more} more\n` : ''}${footer}\n`,
+      )
+      process.exit(1)
+    }
+  }
+
+  const hexHint =
+    resolved.kind === 'none' &&
+    !JOB_SHORT_ID_RE.test(trimmedLower) &&
+    !canTryName
+      ? 'Text that can be the start of an id is not read as a name. Use more of the name.\n'
+      : ''
   process.stderr.write(
     resolved.kind === 'none'
-      ? `No job matching '${target}'. Run 'claude agents' to list running sessions.\n`
+      ? `No job matching '${target}'. Run 'claude agents' to list running sessions.\n${hexHint}`
       : `Ambiguous prefix '${target}', matches: ${resolved.matches.join(', ')}\n`,
   )
   process.exit(1)
 }
 
 /**
- * Official `claude logs <id>` — densable `Pmr` @189642272 sha=90e236fb25f3e1ac
+ * Official `claude logs <id|name>` — densable `Pmr` @189642272 sha=90e236fb25f3e1ac
  * (export `Pmr as logsHandler`). Replay streamTail via `tr`, write via `ov`,
  * exit via `Pi(0)`.
  */
@@ -200,7 +319,7 @@ export async function logsHandler(
   target: string | undefined,
   _storageV5?: unknown,
 ): Promise<void> {
-  const short = await resolveLogsJobId(target)
+  const { short } = await resolveLogsJobId(target)
   const streamTail = await new Promise<string[] | string>(resolve => {
     const unsub = subscribeJobStreamTail(
       short,

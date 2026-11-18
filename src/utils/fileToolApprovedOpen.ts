@@ -337,6 +337,158 @@ export type ApprovedRead = {
   close: () => Promise<void>
 }
 
+export type ReadBoundInodeIdentity = {
+  dev: bigint
+  ino: bigint
+}
+
+export type ProcFdFallbackMode = 'by-spelling' | 'refused'
+
+async function readProcFdLink(
+  fd: number,
+  filePath: string,
+  mode: ProcFdFallbackMode,
+): Promise<string | undefined> {
+  try {
+    try {
+      return await readlink(`/proc/self/fd/${fd}`)
+    } catch (err) {
+      if (getErrnoCode(err) === 'ENOENT') return undefined
+      throw err
+    }
+  } catch (err) {
+    if (mode === 'by-spelling') return undefined
+    const code = getErrnoCode(err)
+    throw new SymlinkResolutionChangedError(
+      `Refusing to read ${filePath}: the system would not say where it was opened (reading /proc/self/fd failed with ${code ?? 'an error'}), so it cannot be told apart from a path this session may not read.`,
+    )
+  }
+}
+
+/**
+ * densable `due(e)` — snapshot `{ dev, ino }` of the last regular-file
+ * spelling in `approved` for macOS `openReadBoundToApproval` (`wx`) fallback.
+ */
+export async function snapshotApprovedReadIdentity(
+  approved: Iterable<string>,
+): Promise<ReadBoundInodeIdentity | null> {
+  const list = Array.from(approved)
+  for (let i = list.length - 1; i >= 0; i--) {
+    const candidate = list[i]!
+    if (
+      !isAbsolute(candidate) ||
+      isUncOrNtObjectPath(candidate) ||
+      isProcFdPath(candidate)
+    ) {
+      continue
+    }
+    try {
+      const st = await lstat(candidate, { bigint: true })
+      if (st.isFile()) {
+        return { dev: st.dev, ino: st.ino }
+      }
+    } catch {
+      // try earlier spelling
+    }
+  }
+  return null
+}
+
+/**
+ * densable 2.1.290 #96 `Nat` (`openReadBoundToApproval`) — open `filePath`
+ * bound to `approved` spellings, optional `pinnedInode` (`due`), and
+ * `/proc/self/fd` fallback mode (`'by-spelling' | 'refused'`).
+ */
+export async function openReadBoundToApproval(
+  filePath: string,
+  approved: ReadonlySet<string>,
+  signal?: AbortSignal,
+  pinnedInode?: ReadBoundInodeIdentity | null,
+  procFdMode: ProcFdFallbackMode = 'by-spelling',
+): Promise<ApprovedRead> {
+  try {
+    const opened = await openApprovedRead(filePath, approved, signal)
+    const platform = getPlatform()
+    if (
+      (platform === 'linux' || platform === 'wsl') &&
+      procFdMode !== 'by-spelling' &&
+      !opened.ioPath.startsWith('/proc/')
+    ) {
+      const target = await readProcFdLink(
+        opened.handle.fd,
+        filePath,
+        procFdMode,
+      ).catch(async err => {
+        await opened.close().catch(() => {})
+        throw err
+      })
+      if (target !== undefined) {
+        if (target !== opened.canonicalPath && !approved.has(target)) {
+          await opened.close().catch(() => {})
+          throw readRefusal(filePath)
+        }
+        return {
+          ...opened,
+          ioPath: `/proc/${process.pid}/fd/${opened.handle.fd}`,
+        }
+      }
+    }
+    return opened
+  } catch (err) {
+    const platform = getPlatform()
+    if (
+      platform === 'macos' &&
+      pinnedInode != null &&
+      err instanceof SymlinkResolutionChangedError
+    ) {
+      const flags = readOpenFlags('macos') & ~(constants.O_NOFOLLOW ?? 0)
+      const list = Array.from(approved)
+      for (let i = list.length - 1; i >= 0; i--) {
+        const candidate = list[i]!
+        if (
+          !isAbsolute(candidate) ||
+          isUncOrNtObjectPath(candidate) ||
+          isProcFdPath(candidate)
+        ) {
+          continue
+        }
+        let handle: FileHandle
+        try {
+          handle = await openAbortable(
+            candidate,
+            flags | (constants.O_NONBLOCK ?? 0),
+            'macos',
+            false,
+            signal,
+          )
+        } catch (openErr) {
+          if (signal?.aborted) throw signal.reason ?? openErr
+          continue
+        }
+        try {
+          const st = await handle.stat({ bigint: true })
+          if (
+            st.isFile() &&
+            st.dev === pinnedInode.dev &&
+            st.ino === pinnedInode.ino
+          ) {
+            return {
+              canonicalPath: candidate,
+              ioPath: candidate,
+              handle,
+              close: () => handle.close(),
+            }
+          }
+        } catch {
+          // ignore stat failure and close
+        }
+        await handle.close().catch(() => {})
+      }
+    }
+    throw err
+  }
+}
+
 /**
  * densable `UWt` @182185287 — open `filePath` only if every `ao` hop and the
  * opened inode stay inside `approved`. Single `/proc/self/fd/${fd}` readlink;

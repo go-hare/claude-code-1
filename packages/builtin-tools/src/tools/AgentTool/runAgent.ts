@@ -1,5 +1,6 @@
 import { feature } from 'bun:bundle'
 import { subagentStartHookMessages } from './subagentStartHookMessages.js'
+import { createSubagentTurnHookTracker } from './subagentTurnHooks.js'
 import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
 import { SAME_CWD_CHILD_NOTE } from 'src/utils/agentSharesCwd.js'
@@ -1322,6 +1323,30 @@ export async function* runAgent({
   // densable runAgent `eo` — true only when the query loop finishes.
   // An abort/throw leaves it false so finally still fires SubagentStop.
   let queryCompleted = false
+  let queryError: unknown
+  const settingsHooksOff =
+    (toolUseContext.options as { settingsHooksOff?: boolean } | undefined)
+      ?.settingsHooksOff === true
+  const initialPromptText = settingsHooksOff
+    ? ''
+    : promptMessages
+        .map(m =>
+          m.type === 'user' && typeof m.message?.content === 'string'
+            ? m.message.content
+            : '',
+        )
+        .filter(Boolean)
+        .join('\n')
+  const turnHookTracker = createSubagentTurnHookTracker({
+    text: initialPromptText,
+    agentId,
+    signal: agentAbortController.signal,
+    hookOrigin: (
+      toolUseContext as {
+        hookOrigin?: import('src/utils/plugins/functionHooksModules.js').HookOriginEntry[]
+      }
+    ).hookOrigin,
+  })
   try {
     for await (const message of query({
       messages: initialMessages,
@@ -1408,6 +1433,7 @@ export async function* runAgent({
         )
         if (message.type !== 'progress') {
           lastRecordedUuid = message.uuid
+          turnHookTracker.saw(message)
         }
 
         // densable 2.1.219 #6 — async bg agents write stream-json frames via
@@ -1481,7 +1507,16 @@ export async function* runAgent({
     if (isBuiltInAgent(agentDefinition) && agentDefinition.callback) {
       agentDefinition.callback()
     }
+  } catch (err) {
+    queryError = err
+    throw err
   } finally {
+    turnHookTracker.ended({
+      isAborted:
+        agentAbortController.signal.aborted ||
+        (!queryCompleted && queryError === undefined),
+      hasFailed: queryError !== undefined,
+    })
     // densable cleanup stage "SubagentStop": when the query did not finish
     // (Esc / abort), fire SubagentStop once. No permission mode, no parent
     // signal (that signal is already aborted), 5000ms. Failures are logged.

@@ -2,7 +2,7 @@ import type { ContentBlockParam, TextBlockParam } from '@anthropic-ai/sdk/resour
 import { randomUUID, type UUID } from 'crypto';
 import figures from 'figures';
 import * as React from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -84,7 +84,10 @@ type Props = {
   preselectedMessage?: UserMessage;
   onResumePreviousSession?: () => void;
   parentSessionId?: string;
-  confirmDescription?: string;
+  extraEntry?: { label: string; onSelect: () => void };
+  confirmDescription?: (message: UserMessage) => string | undefined;
+  restoreWait?: { message: string; onStopWaiting: () => void };
+  pickListNote?: string;
 };
 
 export function MessageSelector({
@@ -97,7 +100,10 @@ export function MessageSelector({
   preselectedMessage,
   onResumePreviousSession,
   parentSessionId,
+  extraEntry,
   confirmDescription,
+  restoreWait,
+  pickListNote,
 }: Props): React.ReactNode {
   const fileHistory = useAppState(s => s.fileHistory);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -111,12 +117,15 @@ export function MessageSelector({
       ? Math.floor(terminalSize.rows / 2)
       : terminalSize.rows;
   const itemRows = isFileHistoryEnabled ? 3 : 2;
-  const visibleMessages = Math.max(2, Math.floor((availableRows - 12) / itemRows));
+  const extraHeaderRows = 12 + (pickListNote ? 3 : 0) + (error ? 4 : 0);
+  const visibleMessages = Math.max(2, Math.floor((availableRows - extraHeaderRows) / itemRows));
 
-  // Add current prompt (and optional pre-clear session entry) as virtual messages
+  // Add current prompt (and optional pre-clear session entry / extraEntry) as virtual messages
   const currentUUID = useMemo(randomUUID, []);
   const preClearUUID = useMemo(randomUUID, []);
   const hasPreviousSession = !!onResumePreviousSession;
+  const extraEntryUUID = useMemo(randomUUID, []);
+  const hasExtraEntry = extraEntry !== undefined;
   const messageOptions = useMemo(
     () => [
       ...(hasPreviousSession
@@ -128,6 +137,14 @@ export function MessageSelector({
           ]
         : []),
       ...messages.filter(selectableUserMessagesFilter),
+      ...(hasExtraEntry
+        ? [
+            {
+              ...createUserMessage({ content: '' }),
+              uuid: extraEntryUUID,
+            } as UserMessage,
+          ]
+        : []),
       {
         ...createUserMessage({
           content: '',
@@ -135,7 +152,7 @@ export function MessageSelector({
         uuid: currentUUID,
       } as UserMessage,
     ],
-    [messages, currentUUID, preClearUUID, hasPreviousSession],
+    [messages, currentUUID, preClearUUID, hasPreviousSession, extraEntryUUID, hasExtraEntry],
   );
   const [selectedIndex, setSelectedIndex] = useState(messageOptions.length - 1);
   const maxWindowStart = Math.max(0, messageOptions.length - visibleMessages);
@@ -146,6 +163,9 @@ export function MessageSelector({
   const hasMessagesToSelect = messageOptions.length > 1;
 
   const [messageToRestore, setMessageToRestore] = useState<UserMessage | undefined>(preselectedMessage);
+  const [confirmDesc, setConfirmDesc] = useState<string | undefined>(() =>
+    preselectedMessage === undefined ? undefined : confirmDescription?.(preselectedMessage),
+  );
   const [confirmOpenedAt, setConfirmOpenedAt] = useState(() => new Date());
   const [diffStatsForRestore, setDiffStatsForRestore] = useState<DiffStats | undefined>(undefined);
 
@@ -227,10 +247,16 @@ export function MessageSelector({
   }
 
   async function handleSelect(message: UserMessage) {
+    setError(undefined);
     if (message.uuid === preClearUUID) {
       onPreRestore();
       onClose();
       onResumePreviousSession?.();
+      return;
+    }
+    if (message.uuid === extraEntryUUID) {
+      onClose();
+      extraEntry?.onSelect();
       return;
     }
 
@@ -255,12 +281,14 @@ export function MessageSelector({
         return;
       }
       setConfirmOpenedAt(new Date());
+      setConfirmDesc(confirmDescription(message));
       setMessageToRestore(message);
       return;
     }
 
     const diffStats = await fileHistoryGetDiffStats(fileHistory, message.uuid);
     setConfirmOpenedAt(new Date());
+    setConfirmDesc(confirmDescription?.(message));
     setMessageToRestore(message);
     setDiffStatsForRestore(diffStats);
   }
@@ -427,41 +455,48 @@ export function MessageSelector({
   const [fileHistoryMetadata, setFileHistoryMetadata] = useState<Record<number, DiffStats | undefined>>({});
 
   useEffect(() => {
-    async function loadFileHistoryMetadata() {
-      if (!isFileHistoryEnabled) {
-        return;
-      }
-      // Load file snapshot metadata
-      void Promise.all(
-        messageOptions.map(async (userMessage, itemIndex) => {
-          if (userMessage.uuid !== currentUUID && userMessage.uuid !== preClearUUID) {
-            const canRestore = fileHistoryCanRestore(fileHistory, userMessage.uuid);
-
-            const nextUserMessage = messageOptions.at(itemIndex + 1);
-            const diffStats = canRestore
-              ? computeDiffStatsBetweenMessages(
-                  messages,
-                  userMessage.uuid,
-                  nextUserMessage?.uuid !== currentUUID ? nextUserMessage?.uuid : undefined,
-                )
-              : undefined;
-
-            if (diffStats !== undefined) {
-              setFileHistoryMetadata(prev => ({
-                ...prev,
-                [itemIndex]: diffStats,
-              }));
-            } else {
-              setFileHistoryMetadata(prev => ({
-                ...prev,
-                [itemIndex]: undefined,
-              }));
-            }
-          }
-        }),
-      );
+    if (!isFileHistoryEnabled) {
+      return;
     }
-    void loadFileHistoryMetadata();
+    const controller = new AbortController();
+    const SLICE_MS = 16;
+
+    async function loadFileHistoryMetadata() {
+      const nextMetadata: Record<number, DiffStats | undefined> = {};
+      let deadline = performance.now() + SLICE_MS;
+      for (let itemIndex = messageOptions.length - 1; itemIndex >= 0; itemIndex--) {
+        if (controller.signal.aborted) return;
+        const userMessage = messageOptions[itemIndex]!;
+        if (
+          userMessage.uuid !== currentUUID &&
+          userMessage.uuid !== preClearUUID &&
+          userMessage.uuid !== extraEntryUUID
+        ) {
+          const canRestore = fileHistoryCanRestore(fileHistory, userMessage.uuid);
+          const nextUserMessage = messageOptions.at(itemIndex + 1);
+          nextMetadata[itemIndex] = canRestore
+            ? computeDiffStatsBetweenMessages(
+                messages,
+                userMessage.uuid,
+                nextUserMessage?.uuid !== currentUUID ? nextUserMessage?.uuid : undefined,
+              )
+            : undefined;
+        }
+        if (performance.now() >= deadline) {
+          setFileHistoryMetadata({ ...nextMetadata });
+          await new Promise<void>(resolve => setTimeout(resolve, 0));
+          deadline = performance.now() + SLICE_MS;
+        }
+      }
+      if (!controller.signal.aborted) {
+        setFileHistoryMetadata({ ...nextMetadata });
+      }
+    }
+
+    void loadFileHistoryMetadata().catch(logError);
+    return () => {
+      controller.abort();
+    };
   }, [messageOptions, messages, currentUUID, preClearUUID, fileHistory, isFileHistoryEnabled]);
 
   const canRestoreCode =
@@ -486,7 +521,12 @@ export function MessageSelector({
       }
     >
       {error && <Text color="error">Error: {error}</Text>}
-      {!hasMessagesToSelect && <Text dimColor>Nothing to rewind to yet.</Text>}
+      {!hasMessagesToSelect && (
+        <>
+          <Text dimColor>{pickListNote === undefined ? 'Nothing to rewind to yet.' : 'Nothing to rewind to.'}</Text>
+          {pickListNote !== undefined && <Text dimColor>{pickListNote}</Text>}
+        </>
+      )}
       {!error && messageToRestore && hasMessagesToSelect && (
         <>
           <Text>
@@ -512,9 +552,11 @@ export function MessageSelector({
               )
             </Text>
           </Box>
-          {confirmDescription !== undefined && !isSummarizeOption(selectedRestoreOption) ? (
+          {confirmDescription !== undefined &&
+          messageToRestore !== undefined &&
+          !isSummarizeOption(selectedRestoreOption) ? (
             <Text dimColor>
-              {selectedRestoreOption === 'nevermind' ? 'The conversation will be unchanged.' : confirmDescription}
+              {selectedRestoreOption === 'nevermind' ? 'The conversation will be unchanged.' : confirmDesc}
             </Text>
           ) : (
             <RestoreOptionDescription
@@ -527,6 +569,11 @@ export function MessageSelector({
             <Box flexDirection="row" gap={1}>
               <Spinner />
               <Text>Summarizing…</Text>
+            </Box>
+          ) : isRestoring && restoreWait !== undefined ? (
+            <Box flexDirection="row" gap={1}>
+              <Spinner />
+              <Text>{restoreWait.message}</Text>
             </Box>
           ) : (
             <Select
@@ -552,6 +599,7 @@ export function MessageSelector({
           ) : (
             <Text>Restore and fork the conversation to the point before…</Text>
           )}
+          {pickListNote !== undefined && <Text dimColor>{pickListNote}</Text>}
           <Box width="100%" flexDirection="column" onWheel={maxWindowStart > 0 ? handleWheel : undefined}>
             {moreAbove > 0 && (
               <Box paddingLeft={1}>
@@ -565,6 +613,7 @@ export function MessageSelector({
               const isSelected = optionIndex === selectedIndex;
               const isCurrent = msg.uuid === currentUUID;
               const isPreClear = msg.uuid === preClearUUID;
+              const isExtraEntry = msg.uuid === extraEntryUUID;
 
               const metadataLoaded = isFileHistoryEnabled && optionIndex in fileHistoryMetadata;
               const metadata = fileHistoryMetadata[optionIndex];
@@ -592,6 +641,10 @@ export function MessageSelector({
                             <Text color={isSelected ? 'suggestion' : undefined}>
                               /resume {parentSessionId} (previous session)
                             </Text>
+                          </Box>
+                        ) : isExtraEntry && extraEntry ? (
+                          <Box width="100%">
+                            <Text color={isSelected ? 'suggestion' : undefined}>{extraEntry.label}</Text>
                           </Box>
                         ) : (
                           <UserMessageOption
@@ -734,7 +787,7 @@ function DiffStatsText({ diffStats }: { diffStats: DiffStats | undefined }): Rea
   );
 }
 
-function UserMessageOption({
+const UserMessageOption = memo(function UserMessageOption({
   userMessage,
   color,
   dimColor,
@@ -748,6 +801,27 @@ function UserMessageOption({
   paddingRight?: number;
 }): React.ReactNode {
   const { columns } = useTerminalSize();
+  // Strip display-unfriendly tags (like <ide_opened_file>) before showing in the list, memoized per userMessage
+  const messageText = useMemo(() => {
+    const content = userMessage.message!.content;
+    const lastBlock = typeof content === 'string' ? null : content![content!.length - 1];
+    const rawMessageText =
+      typeof content === 'string'
+        ? content.trim()
+        : lastBlock && isTextBlock(lastBlock)
+          ? lastBlock.text.trim()
+          : '(no prompt)';
+    return stripDisplayTags(rawMessageText);
+  }, [userMessage]);
+
+  const renderedPromptText = useMemo(
+    () =>
+      paddingRight
+        ? truncate(messageText, columns - paddingRight, true)
+        : messageText.slice(0, 500).split('\n').slice(0, 4).join('\n'),
+    [messageText, columns, paddingRight],
+  );
+
   if (isCurrent) {
     return (
       <Box width="100%">
@@ -757,18 +831,6 @@ function UserMessageOption({
       </Box>
     );
   }
-
-  const content = userMessage.message!.content;
-  const lastBlock = typeof content === 'string' ? null : content![content!.length - 1];
-  const rawMessageText =
-    typeof content === 'string'
-      ? content.trim()
-      : lastBlock && isTextBlock(lastBlock)
-        ? lastBlock.text.trim()
-        : '(no prompt)';
-
-  // Strip display-unfriendly tags (like <ide_opened_file>) before showing in the list
-  const messageText = stripDisplayTags(rawMessageText);
 
   if (isEmptyMessageText(messageText)) {
     return (
@@ -829,13 +891,11 @@ function UserMessageOption({
   return (
     <Box flexDirection="row" width="100%">
       <Text color={color} dimColor={dimColor}>
-        {paddingRight
-          ? truncate(messageText, columns - paddingRight, true)
-          : messageText.slice(0, 500).split('\n').slice(0, 4).join('\n')}
+        {renderedPromptText}
       </Text>
     </Box>
   );
-}
+});
 
 /**
  * Computes the diff stats for all the file edits in-between two messages.

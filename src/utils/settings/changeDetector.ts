@@ -1,11 +1,15 @@
 import chokidar, { type FSWatcher } from 'chokidar'
-import { watch as watchDirectory, type FSWatcher as DirectoryWatcher } from 'fs'
-import { readdir, realpath, stat } from 'fs/promises'
+import {
+  constants as fsConstants,
+  watch as watchDirectory,
+  type FSWatcher as DirectoryWatcher,
+} from 'fs'
+import { lstat, open, readdir, realpath, stat } from 'fs/promises'
 import * as platformPath from 'path'
 import { getIsRemoteMode } from '../../bootstrap/state.js'
 import { registerCleanup } from '../cleanupRegistry.js'
 import { logForDebugging } from '../debug.js'
-import { errorMessage } from '../errors.js'
+import { errorMessage, getErrnoCode } from '../errors.js'
 import {
   type ConfigChangeSource,
   executeConfigChangeHooks,
@@ -17,7 +21,11 @@ import {
   probeNativeFileWatching,
   type FileWatchVerdict,
 } from './fsWatchProbe.js'
-import { clearInternalWrites, consumeInternalWrite } from './internalWrites.js'
+import {
+  clearInternalWrites,
+  consumeInternalWrite,
+  hashSettingsContent,
+} from './internalWrites.js'
 import { getManagedSettingsDropInDir } from './managedPath.js'
 import {
   getHkcuSettings,
@@ -534,6 +542,107 @@ function canonicalPath(path: string): string {
   const normalized = platformPath.normalize(path)
   return realpathToCanonical.get(normalized) ?? normalized
 }
+const MAX_SETTINGS_ECHO_BYTES = 2 * 1024 * 1024
+
+/**
+ * SEA `Ne(e)` + `SI` + `TKt`: read settings file safely to compare its content
+ * hash against what we wrote, guarding against `noFileSeen` / identity swap /
+ * oversize files. Returns `'absent'` on ENOENT/ENOTDIR, or `undefined` when
+ * unreadable / unvetted / over size cap.
+ */
+async function readSettingsHashForEchoCheck(
+  filePath: string,
+): Promise<string | 'absent' | undefined> {
+  try {
+    const lstatInfo = await lstat(filePath, { bigint: true })
+    let targetPath = filePath
+    let expectedIdentity:
+      | { dev: bigint; ino: bigint; ctimeNs: bigint }
+      | undefined
+    if (lstatInfo.isSymbolicLink()) {
+      targetPath = await realpath(filePath)
+      const targetLstat = await lstat(targetPath, { bigint: true })
+      if (!targetLstat.isFile()) {
+        // noFileSeen: symlink did not land on a regular file
+        return undefined
+      }
+      expectedIdentity = {
+        dev: targetLstat.dev,
+        ino: targetLstat.ino,
+        ctimeNs: targetLstat.ctimeNs,
+      }
+    } else if (!lstatInfo.isFile()) {
+      // noFileSeen: path is not a regular file
+      return undefined
+    } else {
+      expectedIdentity = {
+        dev: lstatInfo.dev,
+        ino: lstatInfo.ino,
+        ctimeNs: lstatInfo.ctimeNs,
+      }
+    }
+
+    const flags =
+      process.platform === 'win32'
+        ? fsConstants.O_RDONLY
+        : fsConstants.O_RDONLY |
+          fsConstants.O_NONBLOCK |
+          fsConstants.O_NOFOLLOW |
+          fsConstants.O_NOCTTY
+    const handle = await open(targetPath, flags)
+    try {
+      const fstat = await handle.stat({ bigint: true })
+      if (!fstat.isFile()) return undefined
+      if (
+        fstat.ino !== expectedIdentity.ino ||
+        fstat.ctimeNs !== expectedIdentity.ctimeNs ||
+        (process.platform !== 'win32' && fstat.dev !== expectedIdentity.dev)
+      ) {
+        return undefined
+      }
+      if (Number(fstat.size) > MAX_SETTINGS_ECHO_BYTES) {
+        return undefined
+      }
+      const buf = Buffer.allocUnsafe(Number(fstat.size) + 1)
+      let total = 0
+      while (total <= MAX_SETTINGS_ECHO_BYTES) {
+        const { bytesRead } = await handle.read(
+          buf,
+          total,
+          buf.length - total,
+          total,
+        )
+        if (bytesRead === 0) break
+        total += bytesRead
+      }
+      if (total > MAX_SETTINGS_ECHO_BYTES) return undefined
+      return hashSettingsContent(buf.subarray(0, total))
+    } finally {
+      await handle.close()
+    }
+  } catch (err) {
+    const code = getErrnoCode(err)
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      return 'absent'
+    }
+    logForDebugging(
+      `Could not read settings file ${filePath} to compare it with what we wrote, so treating it as changed: ${code ?? errorMessage(err)}`,
+    )
+    return undefined
+  }
+}
+
+function scheduleDeletion(source: SettingSource, canonical: string): void {
+  if (pendingDeletions.has(canonical)) return
+  pendingDeletions.set(
+    canonical,
+    setTimeout(() => {
+      pendingDeletions.delete(canonical)
+      applyExternalChange(source, canonical)
+    }, deletionGrace()),
+  )
+}
+
 function handleChange(path: string): void {
   if (disposed) return
   const canonical = canonicalPath(path)
@@ -543,10 +652,37 @@ function handleChange(path: string): void {
   if (pending) {
     clearTimeout(pending)
     pendingDeletions.delete(canonical)
+    logForDebugging(
+      `Cancelled pending deletion of ${canonical} — file was recreated`,
+    )
   }
-  if (consumeInternalWrite(canonical, INTERNAL_WRITE_WINDOW_MS)) return
-  logForDebugging(`Detected change to ${canonical}`)
-  applyExternalChange(source, canonical)
+  const expectedHash = consumeInternalWrite(canonical, INTERNAL_WRITE_WINDOW_MS)
+  if (expectedHash === undefined) {
+    logForDebugging(`Detected change to ${canonical}`)
+    applyExternalChange(source, canonical)
+    return
+  }
+  if (expectedHash === '') {
+    return
+  }
+  const lifecycle = lifecycleGeneration
+  void readSettingsHashForEchoCheck(canonical).then(currentHash => {
+    if (disposed || lifecycle !== lifecycleGeneration) return
+    if (currentHash === expectedHash) {
+      logForDebugging(
+        `Suppressed change to ${canonical} — echo of our own write within the last ${INTERNAL_WRITE_WINDOW_MS}ms`,
+      )
+      return
+    }
+    if (currentHash === 'absent') {
+      scheduleDeletion(source, canonical)
+      return
+    }
+    logForDebugging(
+      `Treating the change to ${canonical} as somebody else's: the file no longer holds what we wrote, or could not be read`,
+    )
+    applyExternalChange(source, canonical)
+  })
 }
 function handleAdd(path: string): void {
   handleChange(path)
@@ -557,13 +693,7 @@ function handleDelete(path: string): void {
   const source = getSourceForPath(canonical)
   if (!source || pendingDeletions.has(canonical)) return
   logForDebugging(`Detected deletion of ${canonical}`)
-  pendingDeletions.set(
-    canonical,
-    setTimeout(() => {
-      pendingDeletions.delete(canonical)
-      applyExternalChange(source, canonical)
-    }, deletionGrace()),
-  )
+  scheduleDeletion(source, canonical)
 }
 function applyExternalChange(source: SettingSource, path: string): void {
   const lifecycle = lifecycleGeneration

@@ -10,7 +10,7 @@ import { Box, Text } from '@anthropic/ink';
 import { useTerminalSize } from 'src/hooks/useTerminalSize.js';
 import { count } from 'src/utils/array.js';
 import { getDisplayPath } from 'src/utils/file.js';
-import type { BashEditDiff, BashEditDiffHunk } from './bashEditDiff.js';
+import { commandHasGitStateSwitch, type BashEditDiff, type BashEditDiffHunk } from './bashEditDiff.js';
 import type { Out as BashOut } from './BashTool.js';
 
 type Props = {
@@ -18,11 +18,14 @@ type Props = {
   verbose: boolean;
   timeoutMs?: number;
   style?: 'condensed';
+  command?: string;
 };
 
 const MAX_BASH_DIFF_LINES = 40;
 const CONCURRENT_COMMAND_NOTE =
   '(another command ran in this repository at the same time; a change made by either may show under either result)';
+const TREE_MOVED_NOTE =
+  '(a git step in this command can move the working tree, so these may be its changes, not edits)';
 let firstExplainedDiff: BashEditDiff | null = null;
 
 function formatFileCount(n: number): string {
@@ -56,10 +59,12 @@ function BashEditDiffView({
   diff,
   verbose,
   style,
+  treeMoved,
 }: {
   diff: BashEditDiff;
   verbose: boolean;
   style?: 'condensed';
+  treeMoved?: boolean;
 }): React.ReactNode {
   const { columns } = useTerminalSize();
   if (diff.skipped || ((diff.unavailable || diff.shared) && diff.files.length === 0)) {
@@ -67,7 +72,9 @@ function BashEditDiffView({
       ? '(file diff skipped for this git command)'
       : diff.unavailable
         ? diff.moreFiles > 0
-          ? `(file diff unavailable for this command; ${formatFileCount(diff.moreFiles)} changed)`
+          ? diff.shared
+            ? `(file diff unavailable for this command; ${formatFileCount(diff.moreFiles)} changed in this repository while it ran, by it or by other commands)`
+            : `(file diff unavailable for this command; ${formatFileCount(diff.moreFiles)} changed)`
           : '(file diff unavailable for this command)'
         : CONCURRENT_COMMAND_NOTE;
     return (
@@ -82,6 +89,7 @@ function BashEditDiffView({
       ? '(what this command changed; a convenience view, not a review or audit of the command)'
       : null;
   const sharedNote = diff.shared ? CONCURRENT_COMMAND_NOTE : null;
+  const hideBody = (style === 'condensed' || treeMoved) && !verbose;
   return (
     <Box flexDirection="column">
       {diff.files.map(file => {
@@ -90,7 +98,6 @@ function BashEditDiffView({
         const { hunks, hiddenLines } = verbose
           ? { hunks: file.hunks, hiddenLines: 0 }
           : capBashDiffHunks(file.hunks, MAX_BASH_DIFF_LINES);
-        const hideBody = style === 'condensed' && !verbose;
         return (
           <MessageResponse key={file.filePath}>
             <Box flexDirection="column">
@@ -125,6 +132,19 @@ function BashEditDiffView({
               ? `… ${diff.moreFiles} more ${diff.moreFiles === 1 ? 'file' : 'files'} changed`
               : `${formatFileCount(diff.moreFiles)} changed (binary, mode only or too large to show)`}
             {diff.unavailable ? ' (part of the diff is unavailable)' : ''}
+          </Text>
+        </MessageResponse>
+      ) : null}
+      {treeMoved ? (
+        <MessageResponse>
+          <Text dimColor>
+            {TREE_MOVED_NOTE}
+            {verbose ? null : (
+              <>
+                {' '}
+                <CtrlOToExpand />
+              </>
+            )}
           </Text>
         </MessageResponse>
       ) : null}
@@ -201,7 +221,9 @@ export default function BashToolResultMessage({
   verbose,
   timeoutMs,
   style,
+  command,
 }: Props): React.ReactNode {
+  const treeMoved = bashEditDiff !== undefined && command !== undefined && commandHasGitStateSwitch(command);
   // Extract sandbox violations from stderr as it feels cleaner on the UI
   // We want the model to see the violations, so it can explain what went wrong, and the
   // user can access them in the violation logs
@@ -228,7 +250,9 @@ export default function BashToolResultMessage({
           <Text dimColor>{cwdResetWarning}</Text>
         </MessageResponse>
       ) : null}
-      {bashEditDiff ? <BashEditDiffView diff={bashEditDiff} verbose={verbose} style={style} /> : null}
+      {bashEditDiff ? (
+        <BashEditDiffView diff={bashEditDiff} verbose={verbose} style={style} treeMoved={treeMoved} />
+      ) : null}
       {stdout === '' && stderr.trim() === '' && !cwdResetWarning && !bashEditDiff ? (
         <MessageResponse height={1}>
           <Text dimColor>

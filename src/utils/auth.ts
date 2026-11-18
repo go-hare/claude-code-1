@@ -1551,6 +1551,8 @@ async function maybeRemoveApiKeyFromMacOSKeychain(): Promise<void> {
 export function saveOAuthTokensIfNeeded(tokens: OAuthTokens): {
   success: boolean
   warning?: string
+  transient?: boolean
+  fallbackWritten?: boolean
 } {
   if (!shouldUseClaudeAIAuth(tokens.scopes)) {
     logEvent('tengu_oauth_tokens_not_claude_ai', {})

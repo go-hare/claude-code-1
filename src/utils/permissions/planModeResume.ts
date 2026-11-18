@@ -25,7 +25,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
 } from '../../services/analytics/index.js'
 
-export type PlanModeResumeSource = 'none' | 'internal' | 'transcript'
+export type PlanModeResumeSource = 'none' | 'internal' | 'transcript' | 'stored'
 
 export type PlanModeRecordedMode = ExternalPermissionMode | 'absent' | 'invalid'
 
@@ -264,7 +264,12 @@ export function syncWorkerPermissionModeRecord(options: {
 export function recordPlanModeResumeTelemetry(
   tracker: PlanModeResumeTracker,
   options: {
-    lane: 'print' | 'sdk_url' | 'interactive'
+    lane:
+      | 'print'
+      | 'sdk_url'
+      | 'interactive'
+      | 'interactive_slash'
+      | 'interactive_picker'
     hadExternal: boolean
     hadInternal: boolean
     isGuardEnabled?: () => boolean
@@ -590,7 +595,12 @@ export function hydratePlanModeFromRestoredWorker<
   restored: RestoredWorkerMetadata,
   options: {
     forkSession?: boolean
-    lane: 'print' | 'sdk_url' | 'interactive'
+    lane:
+      | 'print'
+      | 'sdk_url'
+      | 'interactive'
+      | 'interactive_slash'
+      | 'interactive_picker'
     transcript?: readonly TranscriptPlanScanMessage[]
     applyTranscriptHydrate?: boolean
     sdkUrl?: string
@@ -724,4 +734,99 @@ export function clearRestoredWorkerForPlanResumeForTests(): void {
   stashedRestoredWorker = null
   restoredWorkerListeners.clear()
   skipPlanModeResumeBecauseContinue = false
+}
+
+export type PlanModeOnInteractiveResumeOptions = {
+  storedPermissionMode?: string | null
+  messages: readonly TranscriptPlanScanMessage[]
+  forkSession: boolean
+  startupModePinned: boolean
+  lane: 'interactive' | 'interactive_slash' | 'interactive_picker'
+  isGuardEnabled?: () => boolean
+  isExitPlanModeEnabled?: () => boolean
+  isExitPlanModeDenied?: (ctx: ToolPermissionContext) => boolean
+  log?: (message: string, extra?: { level?: string }) => void
+}
+
+/**
+ * #97 SEA `VKa` (@309678704):
+ * Restore plan mode on interactive `--continue` / `--resume` / `/resume`.
+ */
+export function planModeOnInteractiveResume(
+  ctx: ToolPermissionContext,
+  options: PlanModeOnInteractiveResumeOptions,
+): ToolPermissionContext | undefined {
+  const tracker = createPlanModeResumeTracker()
+  tracker.trustedMode = ctx.mode
+  tracker.recordedMode =
+    options.storedPermissionMode !== undefined &&
+    options.storedPermissionMode !== null
+      ? (parseExternalPermissionMode(options.storedPermissionMode) ?? 'invalid')
+      : 'absent'
+  const isGuardEnabled = options.isGuardEnabled ?? isPlanModeResumeGuardEnabled
+  const isExitEnabled =
+    options.isExitPlanModeEnabled ?? defaultIsExitPlanModeEnabled
+  const isExitDenied =
+    options.isExitPlanModeDenied ?? defaultIsExitPlanModeDenied
+  const canEnter =
+    isGuardEnabled() &&
+    ctx.mode !== 'plan' &&
+    isExitEnabled() &&
+    !isExitDenied(ctx)
+
+  if (!options.startupModePinned && !options.forkSession && canEnter) {
+    if (tracker.recordedMode === 'plan') {
+      tracker.recordTranscriptState = scanTranscriptPlanState(options.messages)
+      if (tracker.recordTranscriptState !== 'exited') {
+        tracker.source = 'stored'
+      }
+    } else if (
+      (tracker.recordedMode === 'absent' ||
+        tracker.recordedMode === 'invalid') &&
+      scanTranscriptPlanState(options.messages) === 'open'
+    ) {
+      tracker.transcriptOpen = true
+      tracker.source = 'transcript'
+    }
+  }
+
+  recordPlanModeResumeTelemetry(tracker, {
+    lane: options.lane,
+    hadExternal: false,
+    hadInternal: false,
+    isGuardEnabled,
+  })
+  if (tracker.source === 'none') {
+    return undefined
+  }
+  const log = options.log ?? logForDebugging
+  log(
+    `[planModeResume] re-entering plan mode on resume (source: ${tracker.source}, was ${ctx.mode})`,
+  )
+  return enterPlanModeFromWorkerRecord({ toolPermissionContext: ctx })
+    .toolPermissionContext
+}
+
+/** #97 SEA `EXt` (@299213365). */
+export async function preparePlanModeRestoreOnInteractiveResume(options: {
+  storedPermissionMode?: string | null
+  messages: readonly TranscriptPlanScanMessage[]
+  forkSession: boolean
+  permissionModeSuppliedOnInvocation: boolean
+  lane: 'interactive' | 'interactive_slash' | 'interactive_picker'
+}): Promise<(ctx: ToolPermissionContext) => ToolPermissionContext | undefined> {
+  return (ctx: ToolPermissionContext) => {
+    try {
+      return planModeOnInteractiveResume(ctx, {
+        storedPermissionMode: options.storedPermissionMode,
+        messages: options.messages,
+        forkSession: options.forkSession,
+        startupModePinned: options.permissionModeSuppliedOnInvocation,
+        lane: options.lane,
+      })
+    } catch (err) {
+      logForDebugging(`[planModeResume] interactive restore failed: ${err}`)
+      return undefined
+    }
+  }
 }

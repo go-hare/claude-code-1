@@ -1,10 +1,9 @@
 // @ts-nocheck — SourceTextModule evaluates this as JS; no TypeScript syntax.
 /**
- * densable 2.1.283 built-in plugin `agents-md` (`$e` / `et`).
- * Loaded by the function-hooks compositor. Core CLAUDE.md walk stays GEn.
+ * 2.1.325 built-in plugin `cc-plugin-agents-md`.
  * Plain JS: SourceTextModule cannot evaluate TypeScript `as` / types.
  */
-export const PLUGIN_NAME = 'agents-md'
+export const PLUGIN_NAME = 'cc-plugin-agents-md'
 export const PLUGIN_DESCRIPTION =
   'AGENTS.md as project instructions: by default loaded where the project has no CLAUDE.md; by its instructionFiles option, loaded beside CLAUDE.md, left out, or with the project instructions dropped'
 
@@ -14,6 +13,8 @@ export const CLAUDE_NAMES = [
   '.claude/CLAUDE.md',
   'CLAUDE.local.md',
 ]
+export const DEFAULT_LOOP = 'main'
+export const RESET_COMMANDS = ['clear', 'compact', 'resume']
 export const DEFAULT_MODE = 'claude-md-or-agents-md'
 export const DROPPED_KINDS = ['project', 'local', 'user']
 export const MODES = [
@@ -41,150 +42,151 @@ export const USER_CONFIG = {
   },
 }
 
-const MAIN_LOOP = 'main'
-const FEATURE_NAME = 'agents_md'
-const LOAD_EVENT = 'agents_md_load'
-const MODE_EVENT = 'agents_md_mode'
-const NESTED_EVENT = 'agents_md_nested'
-const WALK_FAILED_REASON = 'walk_failed'
-const EMPTY = []
 const TRUTHY = new Set(['1', 'true', 'yes', 'on'])
+const isTruthyEnv = value =>
+  value !== undefined && TRUTHY.has(value.trim().toLowerCase())
 
-export function chainRootOf(file, byPath) {
+const sepFor = path => (path.includes('\\') ? '\\' : '/')
+
+export function normalizePath(path) {
+  return path.replaceAll('\\', '/').replace(/(?<=.)\/+$/, '')
+}
+
+export function isWithin(path, root) {
+  return normalizePath(path).startsWith(`${normalizePath(root)}/`)
+}
+
+export function samePath(file, target) {
+  return normalizePath(file.path) === normalizePath(target)
+}
+
+export function formatContextEntry(file) {
+  return `Contents of ${file.path}:\n\n${file.content}`
+}
+
+export function excludeDirs(candidates, claudeHits) {
+  const dirs = new Set(claudeHits.map(item => item.dir))
+  return candidates.filter(item => !dirs.has(item.dir))
+}
+
+export function appendContext(existing, additions) {
+  return [...(existing ?? []), ...additions.map(formatContextEntry)]
+}
+
+export function isProjectOrLocal(file) {
+  return file.kind === 'project' || file.kind === 'local'
+}
+
+export function resolveRootPath(file, byPath) {
   const seen = new Set([file.path])
-  let path = file.path
+  let cur = file.path
   let parent = file.parent
   while (parent !== undefined && !seen.has(parent)) {
     seen.add(parent)
-    path = parent
+    cur = parent
     parent = byPath.get(parent)?.parent
   }
-  return path
+  return cur
 }
 
-export function filesOf(hits) {
-  return hits.flatMap(hit =>
-    hit.parts.map((part, index) => ({
+export function ancestorDirOf(filePath) {
+  const norm = normalizePath(filePath)
+  const dotClaudeIdx = norm.lastIndexOf('/.claude/')
+  const idx = dotClaudeIdx === -1 ? norm.lastIndexOf('/') : dotClaudeIdx
+  return idx <= 0 ? '/' : norm.slice(0, idx)
+}
+
+export function insertionIndexForDir(files, dir) {
+  const byPath = new Map(files.map(file => [file.path, file]))
+  const deeperIdx = files.findIndex(
+    file =>
+      isProjectOrLocal(file) &&
+      isWithin(ancestorDirOf(resolveRootPath(file, byPath)), dir),
+  )
+  if (deeperIdx !== -1) return deeperIdx
+  const lastProjectIdx = files.findLastIndex(isProjectOrLocal)
+  if (lastProjectIdx !== -1) return lastProjectIdx + 1
+  const memoryIdx = files.findIndex(file => file.kind === 'memory')
+  return memoryIdx === -1 ? files.length : memoryIdx
+}
+
+export function expandHomeOrRelative(targetPath, cwd, home) {
+  if (
+    (targetPath === '~' || targetPath.startsWith('~/')) &&
+    home !== undefined
+  ) {
+    const cleanHome = home.replace(/(?<=.)[\\/]+$/, '')
+    return targetPath === '~'
+      ? cleanHome
+      : `${cleanHome}${sepFor(cleanHome)}${targetPath.slice(2)}`
+  }
+  return /^(?:[A-Za-z]:)?[\\/]/.test(targetPath)
+    ? targetPath
+    : `${cwd}${sepFor(cwd)}${targetPath}`
+}
+
+export function ancestorsToInstructionFiles(ancestors) {
+  return ancestors.flatMap(entry =>
+    entry.parts.map((part, index) => ({
       path: part.path,
       kind: 'project',
       content: part.content,
-      ...(index > 0 && { parent: hit.parts[0]?.path ?? part.path }),
+      ...(index > 0 && { parent: entry.parts[0]?.path ?? part.path }),
     })),
   )
 }
 
-function pathSep(sample) {
-  return sample.includes('\\') ? '\\' : '/'
-}
-
-export function absoluteOf(filePath, cwd, home) {
-  if ((filePath === '~' || filePath.startsWith('~/')) && home !== undefined) {
-    const root = home.replace(/(?<=.)[\\/]+$/, '')
-    return filePath === '~'
-      ? root
-      : `${root}${pathSep(root)}${filePath.slice(2)}`
-  }
-  return /^(?:[A-Za-z]:)?[\\/]/.test(filePath)
-    ? filePath
-    : `${cwd}${pathSep(cwd)}${filePath}`
-}
-
-export function normalSpellingOf(path) {
-  return path.replaceAll('\\', '/').replace(/(?<=.)\/+$/, '')
-}
-
-export function isBelow(path, root) {
-  return normalSpellingOf(path).startsWith(`${normalSpellingOf(root)}/`)
-}
-
-export function isFileAt(file, path) {
-  return normalSpellingOf(file.path) === normalSpellingOf(path)
-}
-
-export function nestedFrame(file) {
-  return `Contents of ${file.path}:\n\n${file.content}`
-}
-
-export function outsideClaudeDirs(agents, claude) {
-  const dirs = new Set(claude.map(hit => hit.dir))
-  return agents.filter(hit => !dirs.has(hit.dir))
-}
-
-export function isProjectOwn(file) {
-  return file.kind === 'project' || file.kind === 'local'
-}
-
-export function projectDirOf(path) {
-  const spelling = normalSpellingOf(path)
-  const claude = spelling.lastIndexOf('/.claude/')
-  const slash = claude === -1 ? spelling.lastIndexOf('/') : claude
-  return slash <= 0 ? '/' : spelling.slice(0, slash)
-}
-
-export function insertionIndex(files, projectDir) {
-  const byPath = new Map(files.map(file => [file.path, file]))
-  const below = files.findIndex(
-    file =>
-      isProjectOwn(file) &&
-      isBelow(projectDirOf(chainRootOf(file, byPath)), projectDir),
-  )
-  if (below !== -1) return below
-  const lastOwn = files.findLastIndex(isProjectOwn)
-  if (lastOwn !== -1) return lastOwn + 1
-  const memory = files.findIndex(file => file.kind === 'memory')
-  return memory === -1 ? files.length : memory
-}
-
-export function isClaudeFileOnWalk(file, root) {
+export function isClaudeProjectFile(file, root) {
   if (
     !(
-      isProjectOwn(file) &&
+      isProjectOrLocal(file) &&
       file.parent === undefined &&
-      CLAUDE_NAMES.some(name =>
-        normalSpellingOf(file.path).endsWith(`/${name}`),
-      )
+      CLAUDE_NAMES.some(name => normalizePath(file.path).endsWith(`/${name}`))
     )
   ) {
     return false
   }
-  const dir = projectDirOf(file.path)
-  const spelling = normalSpellingOf(root)
-  return dir === spelling || isBelow(spelling, dir)
+  const dir = ancestorDirOf(file.path)
+  const normRoot = normalizePath(root)
+  return dir === normRoot || isWithin(normRoot, dir)
 }
 
-export function isKeptWithoutInstructions(file) {
+export function keepNonDropped(file) {
   return !DROPPED_KINDS.includes(file.kind)
 }
 
-export function unseenFiles(incoming, existing) {
-  const paths = new Set(existing.map(file => normalSpellingOf(file.path)))
-  const contents = new Set(
-    existing.filter(isProjectOwn).map(file => file.content.trim()),
+export function dedupInstructionFiles(candidates, existing) {
+  const seenPaths = new Set(existing.map(file => normalizePath(file.path)))
+  const seenContent = new Set(
+    existing.filter(isProjectOrLocal).map(file => file.content.trim()),
   )
-  const out = []
-  for (const file of incoming) {
-    const path = normalSpellingOf(file.path)
-    const content = file.content.trim()
-    if (paths.has(path) || (content !== '' && contents.has(content))) continue
-    paths.add(path)
-    out.push(file)
+  const result = []
+  for (const file of candidates) {
+    const norm = normalizePath(file.path)
+    const trimmed = file.content.trim()
+    if (
+      !(seenPaths.has(norm) || (trimmed !== '' && seenContent.has(trimmed)))
+    ) {
+      seenPaths.add(norm)
+      result.push(file)
+    }
   }
-  return out
+  return result
 }
 
-export function withProjectFiles(existing, added) {
-  if (added.length === 0) return [...existing]
-  const next = [...existing]
-  const byPath = new Map(added.map(file => [file.path, file]))
+export function insertAgentsMdFiles(existing, additions) {
+  if (additions.length === 0) return existing
+  const result = [...existing]
+  const byPath = new Map(additions.map(file => [file.path, file]))
   const grouped = new Map()
-  for (const file of added) {
-    const dir = projectDirOf(chainRootOf(file, byPath))
+  for (const file of additions) {
+    const dir = ancestorDirOf(resolveRootPath(file, byPath))
     grouped.set(dir, [...(grouped.get(dir) ?? []), file])
   }
-  for (const [dir, files] of grouped) {
-    next.splice(insertionIndex(next, dir), 0, ...files)
+  for (const [dir, group] of grouped) {
+    result.splice(insertionIndexForDir(result, dir), 0, ...group)
   }
-  return next
+  return result
 }
 
 export function legacyModeOf(value) {
@@ -196,15 +198,14 @@ export function legacyModeOf(value) {
   )
 }
 
-export function modeOf(value) {
+export function resolveMode(value) {
   return MODES.find(mode => mode === value) ?? DEFAULT_MODE
 }
 
-export function isSwitchedOn(value) {
-  return value !== undefined && TRUTHY.has(value.trim().toLowerCase())
-}
+const TELEMETRY_FEATURE = 'agents_md'
+const MODE_ENUM = value => ({ value, of: MODES })
 
-export function loadCountsOf(files, isYielded, isWalkFailed) {
+function summarizeLoad(files, isYielded, isWalkFailed) {
   const importCount = files.reduce(
     (sum, file) => sum + (file.parent === undefined ? 0 : 1),
     0,
@@ -221,251 +222,410 @@ export function loadCountsOf(files, isYielded, isWalkFailed) {
   }
 }
 
-function loadMarkOf(counts) {
-  return counts.isWalkFailed
-    ? { feature: FEATURE_NAME, kind: 'sad', reason: WALK_FAILED_REASON }
-    : { feature: FEATURE_NAME, kind: 'ok' }
-}
+const markForLoad = summary =>
+  summary.isWalkFailed
+    ? { feature: TELEMETRY_FEATURE, kind: 'sad', reason: 'walk_failed' }
+    : { feature: TELEMETRY_FEATURE, kind: 'ok' }
 
-function modeChoiceOf(mode) {
-  return { value: mode, of: MODES }
-}
+const loadTelemetryEvent = (mode, summary) => ({
+  event: 'agents_md_load',
+  props: {
+    mode: MODE_ENUM(mode),
+    file_count: summary.fileCount,
+    import_count: summary.importCount,
+    total_content_length: summary.totalContentLength,
+    yielded: summary.isYielded,
+    walk_failed: summary.isWalkFailed,
+  },
+})
 
-function loadRowOf(mode, counts) {
-  return {
-    event: LOAD_EVENT,
-    props: {
-      mode: modeChoiceOf(mode),
-      file_count: counts.fileCount,
-      import_count: counts.importCount,
-      total_content_length: counts.totalContentLength,
-      yielded: counts.isYielded,
-      walk_failed: counts.isWalkFailed,
-    },
-  }
-}
+const modeTelemetryEvent = (mode, isInteractive) => ({
+  event: 'agents_md_mode',
+  props: {
+    mode: MODE_ENUM(mode),
+    is_interactive: isInteractive,
+  },
+})
 
-function modeRowOf(mode, isInteractive) {
-  return {
-    event: MODE_EVENT,
-    props: { mode: modeChoiceOf(mode), is_interactive: isInteractive },
-  }
-}
+const nestedTelemetryEvent = (mode, fileCount) => ({
+  event: 'agents_md_nested',
+  props: {
+    mode: MODE_ENUM(mode),
+    file_count: fileCount,
+  },
+})
 
-function nestedRowOf(mode, fileCount) {
-  return {
-    event: NESTED_EVENT,
-    props: { mode: modeChoiceOf(mode), file_count: fileCount },
-  }
-}
-
-function quietly(work) {
+const fireAndForget = fn => {
   Promise.resolve()
-    .then(work)
-    .catch(() => {
-      return
-    })
+    .then(fn)
+    .catch(() => undefined)
 }
 
-function isRecord(value) {
-  return typeof value === 'object' && value !== null
+const PENDING_STAGES = ['read', 'submitted', 'riding']
+const RIDING_STAGES = ['riding']
+
+function recordPending(state, loop, files) {
+  const map = state.pending.get(loop) ?? new Map()
+  state.pending.set(loop, map)
+  for (const file of files) {
+    map.set(file.path, 'read')
+  }
 }
 
-function asFiles(value) {
-  return Array.isArray(value) ? value : undefined
+function clearPending(state, loop, stages) {
+  const pendingMap = state.pending.get(loop)
+  const givenSet = state.given.get(loop)
+  for (const [path, stage] of pendingMap ?? []) {
+    if (stages === undefined || stages.includes(stage)) {
+      givenSet?.delete(path)
+      pendingMap?.delete(path)
+    }
+  }
 }
 
-function isTruncatedRead(result) {
-  if (!isRecord(result) || result.type !== 'text') return false
-  const file = result.file
-  if (!isRecord(file)) return true
-  const truncated = file.truncatedByTokenCap
-  const startLine = file.startLine
-  const numLines = file.numLines
-  const totalLines = file.totalLines
-  return !(
-    (truncated === undefined || truncated === false) &&
-    startLine === 1 &&
-    typeof numLines === 'number' &&
-    typeof totalLines === 'number' &&
-    numLines >= totalLines
-  )
+function settlePendingOnTurnComplete(state, loop, event) {
+  const pendingMap = state.pending.get(loop)
+  const stages = [...(pendingMap?.values() ?? [])].includes('riding')
+    ? RIDING_STAGES
+    : undefined
+  if (event.isAborted) {
+    clearPending(state, loop, stages)
+  }
+  for (const [path, stage] of [...(pendingMap ?? [])]) {
+    if (stages === undefined || stages.includes(stage)) {
+      pendingMap?.delete(path)
+    }
+  }
 }
 
-async function attachmentsEnabled(api) {
+function advancePending(state, loop, nextStage) {
+  const pendingMap = state.pending.get(loop)
+  const nextIdx = PENDING_STAGES.indexOf(nextStage)
+  for (const [path, stage] of [...(pendingMap ?? [])]) {
+    if (PENDING_STAGES.indexOf(stage) < nextIdx) {
+      pendingMap?.set(path, nextStage)
+    }
+  }
+}
+
+function commitPendingToGiven(state) {
+  state.given.clear()
+  for (const [loop, pendingMap] of state.pending) {
+    state.given.set(loop, new Set(pendingMap.keys()))
+  }
+}
+
+const targetSpec = (path, event, road) => ({
+  path,
+  road,
+  loop: event.agentId ?? DEFAULT_LOOP,
+  isWhole: event.offset === undefined && event.limit === undefined,
+})
+
+const createSubdirState = mode => ({
+  mode,
+  isFallback: mode === 'claude-md-or-agents-md',
+  given: new Map(),
+  pending: new Map(),
+  inContext: [],
+  home: undefined,
+  isClaudeProject: undefined,
+  rootSeen: undefined,
+})
+
+const EMPTY = []
+const NO_DEDUP = {}
+
+async function attachmentsAllowed($) {
   const [simple, disabled] = await Promise.all([
-    api.env.get('CLAUDE_CODE_SIMPLE'),
-    api.env.get('CLAUDE_CODE_DISABLE_ATTACHMENTS'),
+    $.env.get('CLAUDE_CODE_SIMPLE'),
+    $.env.get('CLAUDE_CODE_DISABLE_ATTACHMENTS'),
   ])
-  return !isSwitchedOn(simple) && !isSwitchedOn(disabled)
+  return !isTruthyEnv(simple) && !isTruthyEnv(disabled)
 }
 
-async function homeOf(api, cwd) {
-  const [home, profile] = await Promise.all([
-    api.env.get('HOME'),
-    api.env.get('USERPROFILE'),
+async function readUsageDedupeKey($, mode) {
+  try {
+    if (
+      isTruthyEnv(await $.env.get('CLAUDE_CODE_AGENTS_MD_ROWS_EVERY_PROCESS'))
+    ) {
+      return NO_DEDUP
+    }
+    return {
+      key: `${await $.session.id()} ${mode}`,
+      noted: await $.store.get('usage-rows-queued'),
+    }
+  } catch (err) {
+    $.ui.log(
+      `AGENTS.md usage rows: could not read whether this session already sent them, so this process sends them (${String(err)})`,
+      { to: 'debug' },
+    )
+    return NO_DEDUP
+  }
+}
+
+async function resolveHome($, cwd) {
+  const [home, userProfile] = await Promise.all([
+    $.env.get('HOME'),
+    $.env.get('USERPROFILE'),
   ])
-  return cwd.includes('\\') ? (profile ?? home) : (home ?? profile)
+  return cwd.includes('\\') ? (userProfile ?? home) : (home ?? userProfile)
+}
+
+async function collectSubdirAgentsMd($, target, state) {
+  if (!(await attachmentsAllowed($))) return []
+  const [root, cwd] = await Promise.all([$.session.root(), $.session.cwd()])
+  state.home ??= await resolveHome($, cwd)
+  const resolved = expandHomeOrRelative(target.path, cwd, state.home)
+  if (root !== state.rootSeen) {
+    state.rootSeen = root
+    state.isClaudeProject = undefined
+    state.given.clear()
+    state.pending.clear()
+  }
+  state.isClaudeProject ??=
+    state.isFallback &&
+    (await $.fs.ancestors({ names: CLAUDE_NAMES })).length > 0
+  if (state.isClaudeProject || !isWithin(resolved, root)) return []
+
+  const [agentsHits, claudeHits] = await Promise.all([
+    $.fs.ancestors({ names: AGENTS_NAMES, of: resolved, below: root }),
+    $.fs.ancestors({ names: CLAUDE_NAMES, of: resolved, below: root }),
+  ]).catch(() => [EMPTY, EMPTY])
+
+  const givenSet = state.given.get(target.loop) ?? new Set()
+  state.given.set(target.loop, givenSet)
+  const filteredHits = (
+    state.isFallback ? excludeDirs(agentsHits, claudeHits) : agentsHits
+  ).filter(hit => isWithin(hit.dir, root))
+  const fresh = dedupInstructionFiles(
+    ancestorsToInstructionFiles(filteredHits),
+    [...state.inContext, ...ancestorsToInstructionFiles(claudeHits)],
+  ).filter(file => !givenSet.has(file.path))
+  const toInject = fresh.filter(file => !samePath(file, resolved))
+  const toMarkGiven = fresh.filter(
+    file =>
+      toInject.includes(file) || (samePath(file, resolved) && target.isWhole),
+  )
+  for (const file of toMarkGiven) {
+    givenSet.add(file.path)
+  }
+  if (target.road === 'mention') {
+    recordPending(state, target.loop, toMarkGiven)
+  }
+  if (toInject.length > 0) {
+    fireAndForget(() =>
+      $.telemetry.log(nestedTelemetryEvent(state.mode, toInject.length)),
+    )
+  }
+  return toInject
 }
 
 export function register(on, options = {}) {
-  const instructionFilesMode = modeOf(options.instructionFiles)
-  const legacy = legacyModeOf(options.projectInstructions)
-  const honourLegacy =
-    legacy !== undefined && instructionFilesMode === DEFAULT_MODE
-  const mode = honourLegacy ? legacy : instructionFilesMode
-  let warnedLegacy = legacy === undefined
-  on('session.start', (_api, event, next) => {
-    const api = _api
-    quietly(() =>
-      api.telemetry?.log?.(modeRowOf(mode, Boolean(event.isInteractive))),
-    )
-    if (!warnedLegacy) {
-      warnedLegacy = true
-      api.ui.log(
-        honourLegacy
-          ? `option projectInstructions in settings is honoured for now, read as instructionFiles ${mode}; set instructionFiles to ${mode} and remove projectInstructions`
-          : `option projectInstructions in settings is not read: instructionFiles ${mode} is set; remove projectInstructions`,
+  const mode = resolveMode(options.instructionFiles)
+  const legacyMode = legacyModeOf(options.projectInstructions)
+  const useLegacy = legacyMode !== undefined && mode === DEFAULT_MODE
+  const effectiveMode = useLegacy ? legacyMode : mode
+  let legacyNotified = legacyMode === undefined
+  const usesAgentsMd =
+    effectiveMode !== 'claude-md' && effectiveMode !== 'managed-only'
+  const usageKeyPromise = Promise.withResolvers()
+  let sessionStartSeen = false
+
+  on('session.start', ($, e, next) => {
+    sessionStartSeen = true
+    fireAndForget(async () => {
+      let dedup = NO_DEDUP
+      try {
+        const info = e.isInteractive
+          ? NO_DEDUP
+          : await readUsageDedupeKey($, effectiveMode)
+        const { key, noted } = info
+        const alreadySent =
+          key !== undefined &&
+          typeof noted === 'string' &&
+          (noted === key || noted.startsWith(`${key} `))
+        if (!alreadySent) {
+          await $.telemetry.log(
+            modeTelemetryEvent(effectiveMode, e.isInteractive),
+          )
+        }
+        dedup = info
+        if (!alreadySent && !usesAgentsMd && key !== undefined) {
+          await $.store.set('usage-rows-queued', key)
+        }
+      } finally {
+        usageKeyPromise.resolve(dedup)
+      }
+    })
+    if (!legacyNotified) {
+      legacyNotified = true
+      $.ui.log(
+        useLegacy
+          ? `option projectInstructions in settings is honoured for now, read as instructionFiles ${effectiveMode}; set instructionFiles to ${effectiveMode} and remove projectInstructions`
+          : `option projectInstructions in settings is not read: instructionFiles ${effectiveMode} is set; remove projectInstructions`,
       )
     }
-    return next(event)
+    return next(e)
   })
-  if (mode === 'claude-md') return
-  if (mode === 'managed-only') {
-    // Gold matcher `{instructionFiles:{kind}}` is an engine field filter.
-    // Local matcherAllows is `===`, so the hook is registered without it.
-    on('prompt.context', (_api, event, next) =>
-      next({
-        ...event,
-        instructionFiles: asFiles(event.instructionFiles)?.filter(
-          isKeptWithoutInstructions,
-        ),
-      }),
+
+  if (effectiveMode === 'claude-md') return
+
+  if (effectiveMode === 'managed-only') {
+    on(
+      'prompt.context',
+      { instructionFiles: { kind: DROPPED_KINDS } },
+      ($, e, next) =>
+        next({
+          ...e,
+          instructionFiles: e.instructionFiles?.filter(keepNonDropped),
+        }),
     )
     return
   }
-  const fallback = mode === 'claude-md-or-agents-md'
-  const nestedSeen = new Map()
-  let lastContextFiles = []
-  let home
-  let yieldedClaude
-  let lastRoot
-  let loggedRoot
-  let loggedLoad = false
-  on('prompt.context', async (api, event, next) => {
-    const files = asFiles(event.instructionFiles)
+
+  const state = createSubdirState(effectiveMode)
+  const { isFallback, given } = state
+  let lastLoggedRoot
+  let loadTelemetrySent = false
+
+  on('prompt.context', async ($, e, next) => {
+    const files = e.instructionFiles
     if (files === undefined) {
-      return next(event).finally(() => {
-        nestedSeen.clear()
+      return next(e).finally(() => {
+        commitPendingToGiven(state)
       })
     }
-    const root = fallback ? await api.session.root() : undefined
-    lastRoot = root ?? lastRoot
+    const root = isFallback ? await $.session.root() : undefined
+    state.rootSeen = root ?? state.rootSeen
     let walkFailed = false
-    yieldedClaude =
+    const isClaudeProj =
       root !== undefined &&
-      (files.some(file => isClaudeFileOnWalk(file, root)) ||
-        (await api.fs.ancestors({ names: CLAUDE_NAMES }).then(
+      (files.some(file => isClaudeProjectFile(file, root)) ||
+        (await $.fs.ancestors({ names: CLAUDE_NAMES }).then(
           hits => hits.length > 0,
           () => {
             walkFailed = true
             return true
           },
         )))
-    const hits = yieldedClaude
+    state.isClaudeProject = isClaudeProj
+    const ancestors = isClaudeProj
       ? EMPTY
-      : await api.fs.ancestors({ names: AGENTS_NAMES }).catch(() => {
+      : await $.fs.ancestors({ names: AGENTS_NAMES }).catch(() => {
           walkFailed = true
           return EMPTY
         })
-    const added = unseenFiles(filesOf(hits), files)
-    if (!loggedLoad) {
-      loggedLoad = true
-      const counts = loadCountsOf(
-        added,
-        Boolean(yieldedClaude && !walkFailed),
+    const fresh = dedupInstructionFiles(
+      ancestorsToInstructionFiles(ancestors),
+      files,
+    )
+    if (!loadTelemetrySent) {
+      loadTelemetrySent = true
+      const summary = summarizeLoad(
+        fresh,
+        isClaudeProj && !walkFailed,
         walkFailed,
       )
-      quietly(() => api.telemetry?.log?.(loadRowOf(mode, counts)))
-      quietly(() => api.telemetry?.mark?.(loadMarkOf(counts)))
+      fireAndForget(async () => {
+        const { key, noted } = await usageKeyPromise.promise
+        const mark = markForLoad(summary)
+        const stored = key && `${key} ${mark.kind}`
+        if (stored !== undefined && noted === stored) return
+        await Promise.all([
+          $.telemetry.log(loadTelemetryEvent(effectiveMode, summary)),
+          $.telemetry.mark(mark),
+        ])
+        if (stored !== undefined) {
+          await $.store.set('usage-rows-queued', stored)
+        }
+      })
     }
-    if (root !== undefined && root !== loggedRoot && added.length > 0) {
-      loggedRoot = root
-      api.ui.log(
+    if (root !== undefined && root !== lastLoggedRoot && fresh.length > 0) {
+      lastLoggedRoot = root
+      $.ui.log(
         'no CLAUDE.md found; AGENTS.md loaded: ' +
-          added
+          fresh
             .filter(file => file.parent === undefined)
             .map(file => file.path)
             .join(', '),
+        { to: 'debug' },
       )
     }
-    const merged = withProjectFiles(files, added)
-    return next({ ...event, instructionFiles: merged }).finally(() => {
-      nestedSeen.clear()
-      lastContextFiles = merged
+    const merged = insertAgentsMdFiles(files, fresh)
+    return next({ ...e, instructionFiles: merged }).finally(() => {
+      commitPendingToGiven(state)
+      state.inContext = merged
     })
   })
-  on('agent.spawn', { fork: true }, async (_api, event, next) => {
-    const spawned = await next(event)
-    if (spawned.agentId !== undefined) {
-      const parent = nestedSeen.get(String(event.parentAgentId ?? MAIN_LOOP))
-      nestedSeen.set(String(spawned.agentId), new Set(parent))
-    }
-    return spawned
+
+  on('command.run', { command: RESET_COMMANDS }, async ($, e, next) => {
+    const res = await next(e)
+    given.clear()
+    state.pending.clear()
+    return res
   })
-  on('tool.call', { tool: 'Read' }, async (api, event, next) => {
-    const result = await next(event)
-    if (event.tool !== 'Read' || result.deny !== undefined || result.isError) {
-      return result
+
+  on('session.compact', async ($, e, next) => {
+    const res = await next(e)
+    if (res.skip === undefined) {
+      clearPending(state, e.agentId ?? DEFAULT_LOOP)
     }
-    if (!(await attachmentsEnabled(api))) return result
-    const [root, cwd] = await Promise.all([
-      api.session.root(),
-      api.session.cwd(),
-    ])
-    home ??= await homeOf(api, cwd)
-    const filePath = absoluteOf(String(event.file_path ?? ''), cwd, home)
-    if (root !== lastRoot) {
-      lastRoot = root
-      yieldedClaude = undefined
-      nestedSeen.clear()
+    return res
+  })
+
+  on('prompt.submit', ($, e, next) => {
+    clearPending(state, DEFAULT_LOOP, ['submitted'])
+    advancePending(state, DEFAULT_LOOP, 'submitted')
+    return next(e)
+  })
+
+  on('turn.start', ($, e, next) => {
+    if (!sessionStartSeen) {
+      usageKeyPromise.resolve(NO_DEDUP)
     }
-    yieldedClaude ??=
-      fallback && (await api.fs.ancestors({ names: CLAUDE_NAMES })).length > 0
-    if (yieldedClaude || !isBelow(filePath, root)) return result
-    const [agents, claude] = await Promise.all([
-      api.fs.ancestors({ names: AGENTS_NAMES, of: filePath, below: root }),
-      api.fs.ancestors({ names: CLAUDE_NAMES, of: filePath, below: root }),
-    ]).catch(() => [EMPTY, EMPTY])
-    const agentId = String(event.agentId ?? MAIN_LOOP)
-    const seen = nestedSeen.get(agentId) ?? new Set()
-    nestedSeen.set(agentId, seen)
-    const scoped = (
-      fallback ? outsideClaudeDirs(agents, claude) : agents
-    ).filter(hit => isBelow(hit.dir, root))
-    const fresh = unseenFiles(filesOf(scoped), [
-      ...lastContextFiles,
-      ...filesOf(claude),
-    ]).filter(file => !seen.has(file.path))
-    const extra = fresh.filter(file => !isFileAt(file, filePath))
-    const fullRead =
-      event.offset === undefined &&
-      event.limit === undefined &&
-      !isTruncatedRead(result.result)
-    for (const file of fresh) {
-      if (extra.includes(file) || (isFileAt(file, filePath) && fullRead)) {
-        seen.add(file.path)
-      }
+    if (e.agentId === undefined) {
+      advancePending(state, DEFAULT_LOOP, 'riding')
     }
-    const injected = extra.length > 0
-    if (injected) {
-      quietly(() => api.telemetry?.log?.(nestedRowOf(mode, extra.length)))
+    return next(e)
+  })
+
+  on('turn.complete', ($, e, next) => {
+    settlePendingOnTurnComplete(state, e.agentId ?? DEFAULT_LOOP, e)
+    return next(e)
+  })
+
+  on('agent.spawn', { fork: true }, async ($, e, next) => {
+    const res = await next(e)
+    if (e.resume === undefined && res.agentId !== undefined) {
+      const parentSet = given.get(e.parentAgentId ?? DEFAULT_LOOP)
+      const childSet = given.get(res.agentId)
+      given.set(
+        res.agentId,
+        new Set([...(parentSet ?? []), ...(childSet ?? [])]),
+      )
     }
-    return injected
-      ? {
-          ...result,
-          context: [...(result.context ?? []), ...extra.map(nestedFrame)],
-        }
-      : result
+    return res
+  })
+
+  on('tool.call', { tool: 'Read' }, async ($, e, next) => {
+    const res = await next(e)
+    if (e.tool !== 'Read' || res.deny !== undefined || res.isError) return res
+    const target = targetSpec(e.file_path, e, 'read')
+    const injections = await collectSubdirAgentsMd($, target, state)
+    return injections.length > 0
+      ? { ...res, context: appendContext(res.context, injections) }
+      : res
+  })
+
+  on('prompt.mention', async ($, e, next) => {
+    const res = await next(e)
+    const target = targetSpec(e.path, e, 'mention')
+    clearPending(state, target.loop, ['submitted'])
+    if (res.deny !== undefined || res.type === 'pdf_reference') return res
+    const injections = await collectSubdirAgentsMd($, target, state)
+    return injections.length > 0
+      ? { ...res, context: appendContext(res.context, injections) }
+      : res
   })
 }

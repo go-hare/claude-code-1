@@ -346,12 +346,25 @@ function handleMessage(line: string): void {
 
     case 'reply':
       if (typeof msg.text === 'string') {
+        // Official #156: nextTurn enqueues prompt directly skipping slash/immediate/question gates.
+        if (msg.nextTurn === true) {
+          enqueue({
+            mode: 'prompt',
+            value: msg.text,
+            priority: 'next',
+            origin: { kind: 'human' },
+            skipSlashCommands: true,
+          })
+          break
+        }
         // Official bg-rv densable:
         //   if (nZK(text)) return  // peer answered an in-session question
+        //   if (A(w(), text)) return  // immediate /model /effort /rename /usage
         //   mw({ mode: pR(text), value: Vh(text), priority: 'next' })
-        // Do NOT push text+'\n' into stdin — that leaves the cursor on a new
-        // line under the injected prompt when the user later attaches.
         if (tryAnswerPeerQuestion(msg.text)) {
+          break
+        }
+        if (tryImmediateCommand(msg.text)) {
           break
         }
         enqueueReplyAsQueuedCommand(msg.text)
@@ -405,6 +418,26 @@ export function setPeerQuestionHandler(
 function tryAnswerPeerQuestion(text: string): boolean {
   try {
     return peerQuestionHandler?.(text) ?? false
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Official Kns — immediate command runner for peer replies (/model, /effort, /rename, /usage).
+ */
+type ImmediateCommandRunner = (text: string) => boolean
+let immediateCommandRunner: ImmediateCommandRunner | null = null
+
+export function registerImmediateCommandRunner(
+  runner: ImmediateCommandRunner | null,
+): void {
+  immediateCommandRunner = runner
+}
+
+function tryImmediateCommand(text: string): boolean {
+  try {
+    return immediateCommandRunner?.(text) ?? false
   } catch {
     return false
   }

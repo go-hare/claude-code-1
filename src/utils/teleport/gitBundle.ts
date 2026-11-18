@@ -42,6 +42,7 @@ import {
   bindSeedAdminDir,
   probeSeedGitLayout,
   type SeedGitLayout,
+  formatSeedTamperedError,
 } from './seedGitLayout.js'
 import {
   formatSeedListingRefuse,
@@ -690,7 +691,7 @@ async function _bundleWithFallback(
     return {
       ok: false,
       error: partialClone
-        ? `This partial clone does not hold every file of its working tree locally (a sparse checkout, or blobs never downloaded), so it cannot be uploaded without fetching from its remote, which the upload does not do. Start the cloud session from the repository's GitHub source instead. (git: ${clipSeedGitError(squashResult.stderr, huOpts.hardened)})`
+        ? 'This partial clone does not hold every file of its working tree locally (a sparse checkout, or blobs never downloaded), so it cannot be uploaded without fetching from its remote, which the upload does not do — a full clone, made without --filter, would upload. If no file is missing from the working tree, the index names an object that this repository has lost: `git fsck --name-objects` prints it as “missing blob <id> (:<path>)”, and `git rm --cached <path>` then `git add <path>` stores it again'
         : `git bundle create ${seedRefs.root} failed (${squashResult.code}): ${clipSeedGitError(squashResult.stderr, huOpts.hardened)}`,
       failReason: 'git_error',
     }
@@ -818,8 +819,7 @@ export async function createAndUploadGitBundle(
         })
         return {
           success: false,
-          error:
-            'Could not read where git keeps this checkout (git rev-parse did not name its git directory), so nothing was uploaded. Check `git status` here, then retry.',
+          error: formatSeedTamperedError(layout),
           failReason: 'git_dir_tampered',
         }
       }
@@ -1047,20 +1047,28 @@ export async function createAndUploadGitBundle(
       })
       if (stashResult.code === 0) {
         wipStashSha = stashResult.stdout.trim()
-      } else if (stashResult.stderr.trim() === '') {
-        logForDebugging(
-          `[gitBundle] git stash create exited ${stashResult.code} with no output — treating as no uncommitted changes`,
-        )
-      } else if (headResolves) {
-        const detail = stashResult.stderr.trim().slice(0, 200)
-        logEvent('tengu_ccr_bundle_upload', {
-          outcome:
-            'stash_failed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        })
-        return {
-          success: false,
-          error: `Could not capture uncommitted changes (git stash create: ${detail || 'unknown error'}). Run \`git add .\` or commit, then retry.`,
-          failReason: 'stash_failed',
+      } else {
+        const noOutput =
+          stashResult.stderr.trim() === '' && stashResult.stdout.trim() === ''
+        if (stashResult.code === 1 && noOutput) {
+          logForDebugging(
+            `[gitBundle] git stash create exited ${stashResult.code} with no output — treating as no uncommitted changes`,
+          )
+        } else if (headResolves) {
+          const detail = noOutput
+            ? stashResult.code === undefined
+              ? 'it was stopped, ran out of time or could not start, and left no message'
+              : `it ended with exit status ${stashResult.code} and left no message`
+            : stashResult.stderr.trim().slice(0, 200)
+          logEvent('tengu_ccr_bundle_upload', {
+            outcome:
+              'stash_failed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+          return {
+            success: false,
+            error: `Could not capture uncommitted changes (git stash create: ${detail}). Run \`git add .\` or commit, then retry.`,
+            failReason: 'stash_failed',
+          }
         }
       }
       if (wipStashSha !== '') {

@@ -4,6 +4,10 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { isEnvDefinedFalsy, isEnvTruthy } from 'src/utils/envUtils.js'
 import { logForDebugging } from 'src/utils/debug.js'
+import { parseForSecurityFromAst } from 'src/utils/bash/ast.js'
+import { getParserModule } from 'src/utils/bash/bashParser.js'
+import { splitCommand_DEPRECATED } from 'src/utils/bash/commands.js'
+import { tryParseShellCommand } from 'src/utils/bash/shellQuote.js'
 import type { PermissionMode } from 'src/utils/permissions/PermissionMode.js'
 import {
   getInitialSettings,
@@ -18,8 +22,23 @@ const MAX_CHANGED_FILES = 200
 const MAX_HUNK_LINES = 400
 const MAX_HUNK_CHARS = 64_000
 
-const GIT_STATE_SWITCH =
-  /^[ \t]*(?:sudo[ \t]+)?git[ \t]+(?:checkout|switch|stash|pull|merge|rebase|reset|restore|clean|cherry-pick|revert)(?:[ \t]+[A-Za-z0-9._/@~^][A-Za-z0-9._/@~^-]*){0,16}\s*$/
+const GIT_STATE_SWITCH_SUBCOMMANDS = [
+  'checkout',
+  'switch',
+  'stash',
+  'pull',
+  'merge',
+  'rebase',
+  'reset',
+  'restore',
+  'clean',
+  'cherry-pick',
+  'revert',
+]
+
+const GIT_STATE_SWITCH = new RegExp(
+  String.raw`^[ \t]*(?:sudo[ \t]+)?git[ \t]+(?:${GIT_STATE_SWITCH_SUBCOMMANDS.join('|')})(?:[ \t]+[A-Za-z0-9._/@~^][A-Za-z0-9._/@~^-]*){0,16}\s*$`,
+)
 
 export type BashEditDiffHunk = {
   oldStart: number
@@ -105,6 +124,50 @@ export function isBashEditDiffEnabled(mode: PermissionMode): boolean {
 /** densable _5t — skip snapshot around git checkout/switch/stash/… */
 export function isGitStateSwitchCommand(command: string): boolean {
   return GIT_STATE_SWITCH.test(command)
+}
+
+/** SEA `SIt` (@294057169) — extract git subcommand skipping leading flags. */
+function getGitSubcommand(argv: string[]): string | undefined {
+  if (argv[0] !== 'git') return undefined
+  for (let i = 1; i < argv.length; i++) {
+    const arg = argv[i]
+    if (!arg) continue
+    if (arg.startsWith('-')) {
+      if (arg === '-C' || arg === '-c') i++
+      continue
+    }
+    return arg
+  }
+  return undefined
+}
+
+/**
+ * SEA `Fxs` (@294112531) — true when any subcommand in a compound command
+ * runs a git state-switching subcommand (`treeMoved` in BashToolResultMessage).
+ */
+export function commandHasGitStateSwitch(command: string): boolean {
+  try {
+    const tree =
+      command.length <= 10_000 ? getParserModule()?.parse(command) : null
+    const ast = tree ? parseForSecurityFromAst(command, tree) : undefined
+    const argvs: string[][] =
+      ast?.kind === 'simple'
+        ? ast.commands.map(c => c.argv)
+        : splitCommand_DEPRECATED(command).map(sub => {
+            const parsed = tryParseShellCommand(sub)
+            return parsed.success
+              ? parsed.tokens.filter((t): t is string => typeof t === 'string')
+              : []
+          })
+    return argvs.some(argv =>
+      GIT_STATE_SWITCH_SUBCOMMANDS.includes(
+        getGitSubcommand(argv[0] === 'sudo' ? argv.slice(1) : argv) ?? '',
+      ),
+    )
+  } catch (err) {
+    logForDebugging(`bashEditDiff: command parse failed: ${String(err)}`)
+    return false
+  }
 }
 
 function runGit(

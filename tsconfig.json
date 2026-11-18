@@ -34,5 +34,9 @@
     "packages/**/*.ts",
     "packages/**/*.tsx"
   ],
-  "exclude": ["node_modules", "packages/remote-control-server/web"]
+  "exclude": [
+    "node_modules",
+    "packages/remote-control-server/web",
+    "src/skills/bundled/plugin-authoring/examples/**"
+  ]
 }

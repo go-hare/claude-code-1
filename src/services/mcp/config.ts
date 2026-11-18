@@ -62,6 +62,11 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../analytics/index.js'
+import { randomBytes } from 'crypto'
+import {
+  parseUrlPattern,
+  urlMatchesPattern,
+} from '../../utils/hooks/execHttpHook.js'
 import { fetchClaudeAIMcpConfigsIfEligible } from './claudeai.js'
 import { expandEnvVarsInString } from './envExpansion.js'
 import { z } from 'zod/v4'
@@ -478,28 +483,232 @@ export function dedupClaudeAiMcpServers(
   return { servers, suppressed }
 }
 
-/**
- * Convert a URL pattern with wildcards to a RegExp
- * Supports * as wildcard matching any characters
- * Examples:
- *   "https://example.com/*" matches "https://example.com/api/v1"
- *   "https://*.example.com/*" matches "https://api.example.com/path"
- *   "https://example.com:*\/*" matches any port
- */
-function urlPatternToRegex(pattern: string): RegExp {
-  // Escape regex special characters except *
-  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-  // Replace * with regex equivalent (match any characters)
-  const regexStr = escaped.replace(/\*/g, '.*')
-  return new RegExp(`^${regexStr}$`)
+const ADMIN_WILDCARD_TOKEN = `zzadminwc${randomBytes(8).toString('hex')}zz`
+const NEUTRAL_ENV_SUB = 'zzenvsubzz'
+const ENV_VAR_REF_RE = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-[^}]*)?\}/g
+const URL_REST_DELIM_RE = /[/@#?\\\s]/
+const URL_SCHEME_DELIM_RE = /[:/@#?\\\s]/
+const PATH_DOT_SEGMENT_RE = /(^|\/)(\.|%2e)(\.|%2e)?(\/|$)/i
+
+function neutralizeEnvSubstitution(value: string): string {
+  const trailingDots = /\.+$/.exec(value)?.[0]
+  if (trailingDots && value.length > trailingDots.length) {
+    return `${neutralizeEnvSubstitution(value.slice(0, -trailingDots.length))}${trailingDots}`
+  }
+  if (/^[0-9]+(\.[0-9]+)*$/.test(value)) {
+    return value.replace(/[0-9]+/g, '0')
+  }
+  if (value.includes(':') && /^[0-9a-fA-F:.]+$/.test(value)) {
+    return '::'
+  }
+  return NEUTRAL_ENV_SUB
+}
+
+function classifyPolicyUrlEnvPositions(
+  pattern: string,
+  env: NodeJS.Dict<string> | Record<string, string | undefined>,
+): Map<string, 'scheme' | 'authority' | 'rest'> {
+  const varNames: string[] = []
+  for (const match of pattern.matchAll(
+    new RegExp(ENV_VAR_REF_RE.source, 'g'),
+  )) {
+    const name = match[1]!
+    if (
+      !varNames.includes(name) &&
+      Object.hasOwn(env, name) &&
+      typeof env[name] === 'string'
+    ) {
+      varNames.push(name)
+    }
+  }
+  const positions = new Map<string, 'scheme' | 'authority' | 'rest'>()
+  const probe = (
+    targetVar: string,
+    schemeVars: Set<string>,
+  ): 'scheme' | 'authority' | 'rest' => {
+    const marker = `zzv${varNames.indexOf(targetVar)}zz`
+    const proxy = new Proxy({} as Record<string, string | undefined>, {
+      get: (_, key) => {
+        if (typeof key !== 'string') return undefined
+        if (key === targetVar) return marker
+        if (!Object.hasOwn(env, key) || typeof env[key] !== 'string') {
+          return undefined
+        }
+        return schemeVars.has(key)
+          ? String(env[key])
+          : neutralizeEnvSubstitution(String(env[key]))
+      },
+    })
+    const expanded = expandEnvVarsInString(pattern, proxy).expanded
+    const parsed = parseUrlPattern(expanded, ADMIN_WILDCARD_TOKEN)
+    if (parsed === null) return 'authority'
+    if (parsed.protocol.includes(marker)) return 'scheme'
+    if (
+      parsed.username.includes(marker) ||
+      parsed.password.includes(marker) ||
+      parsed.hostname.includes(marker) ||
+      parsed.port.includes(marker)
+    ) {
+      return 'authority'
+    }
+    if (
+      parsed.pathname.includes(marker) ||
+      parsed.search.includes(marker) ||
+      parsed.hash.includes(marker)
+    ) {
+      return 'rest'
+    }
+    return 'scheme'
+  }
+  const emptySet = new Set<string>()
+  const schemeVars = new Set(
+    varNames.filter(v => probe(v, emptySet) === 'scheme'),
+  )
+  for (const v of varNames) {
+    positions.set(v, schemeVars.has(v) ? 'scheme' : probe(v, schemeVars))
+  }
+  return positions
+}
+
+function envInjectsUrlDelimiters(
+  positions: Map<string, 'scheme' | 'authority' | 'rest'>,
+  env: NodeJS.Dict<string> | Record<string, string | undefined>,
+): boolean {
+  for (const [name, pos] of positions) {
+    if (pos === 'rest') continue
+    const val = env[name]
+    if (
+      typeof val === 'string' &&
+      (pos === 'scheme' ? URL_SCHEME_DELIM_RE : URL_REST_DELIM_RE).test(val)
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+function envInjectsPathDotsOrQuery(
+  pattern: string,
+  env: NodeJS.Dict<string> | Record<string, string | undefined>,
+): boolean {
+  for (const match of pattern.matchAll(
+    new RegExp(ENV_VAR_REF_RE.source, 'g'),
+  )) {
+    const val = env[match[1]!]
+    if (typeof val !== 'string') continue
+    if (/[?#]/.test(val)) return true
+    const normalized = val
+      .replace(/[\t\n\r]/g, '')
+      .replaceAll('\\', '/')
+      .replace(/%2e/gi, '.')
+    if (PATH_DOT_SEGMENT_RE.test(normalized)) return true
+  }
+  return false
+}
+
+function urlHasDotSegment(url: string): boolean {
+  let start = 0
+  let end = url.length
+  while (start < end && url.charCodeAt(start) <= 32) start++
+  while (end > start && url.charCodeAt(end - 1) <= 32) end--
+  const normalized = url
+    .slice(start, end)
+    .replace(/[\t\n\r]/g, '')
+    .replaceAll('\\', '/')
+    .replace(/%2e/gi, '.')
+  const qIdx = normalized.search(/[?#]/)
+  const pathPart = qIdx === -1 ? normalized : normalized.slice(0, qIdx)
+  return PATH_DOT_SEGMENT_RE.test(pathPart)
 }
 
 /**
- * Check if a URL matches a pattern with wildcard support
+ * Official TCt — expand a policy URL predicate and detect unsafe structural
+ * restructuring, wildcard injection, or dot-segment path traversal.
  */
-function urlMatchesPattern(url: string, pattern: string): boolean {
-  const regex = urlPatternToRegex(pattern)
-  return regex.test(url)
+export function expandMcpPolicyUrlPredicate(
+  pattern: string,
+  env: NodeJS.Dict<string> | Record<string, string | undefined>,
+  fallbackEnv?: NodeJS.Dict<string> | Record<string, string | undefined>,
+): { expanded: string; unsafeExpansion: boolean; missingVars: string[] } {
+  const sanitized = pattern.replace(/[\t\n\r]/g, '')
+  const masked = sanitized.replaceAll('*', ADMIN_WILDCARD_TOKEN)
+  const expandedResult = expandEnvVarsInString(masked, env, fallbackEnv)
+  const neutralProxy = new Proxy({} as Record<string, string | undefined>, {
+    get: (_, key) =>
+      typeof key === 'string' && Object.hasOwn(env, key)
+        ? neutralizeEnvSubstitution(String(env[key]))
+        : undefined,
+  })
+  const neutralResult = expandEnvVarsInString(masked, neutralProxy)
+  const parsedExpanded = parseUrlPattern(
+    expandedResult.expanded,
+    ADMIN_WILDCARD_TOKEN,
+  )
+  const parsedNeutral = parseUrlPattern(
+    neutralResult.expanded,
+    ADMIN_WILDCARD_TOKEN,
+  )
+  const expandedHost = parsedExpanded?.hostname ?? null
+  const neutralHost = parsedNeutral?.hostname ?? null
+  const didExpand = neutralResult.expanded !== masked
+  const positions = didExpand
+    ? classifyPolicyUrlEnvPositions(masked, env)
+    : new Map<
+        'scheme' | 'authority' | 'rest' extends never ? never : string,
+        'scheme' | 'authority' | 'rest'
+      >()
+  const hasDotSegment =
+    sanitized.includes('$') && urlHasDotSegment(expandedResult.expanded)
+  const unsafeExpansion =
+    expandedResult.wildcardVars.length > 0 ||
+    (didExpand && envInjectsUrlDelimiters(positions, env)) ||
+    (expandedHost === null) !== (neutralHost === null) ||
+    (didExpand && expandedHost === null) ||
+    (parsedExpanded !== null &&
+      ((parsedExpanded.hash !== '' && (parsedNeutral?.hash ?? '') === '') ||
+        (parsedExpanded.search !== '' &&
+          (parsedNeutral?.search ?? '') === ''))) ||
+    (didExpand && envInjectsPathDotsOrQuery(masked, env)) ||
+    hasDotSegment ||
+    (expandedHost !== null &&
+      ((expandedHost.includes('*') && !(neutralHost ?? '').includes('*')) ||
+        (expandedHost.endsWith('.') && !(neutralHost ?? '').endsWith('.')) ||
+        (expandedHost.includes(ADMIN_WILDCARD_TOKEN) &&
+          !(neutralHost ?? '').includes(ADMIN_WILDCARD_TOKEN))))
+
+  if (expandedResult.missingVars.length > 0) {
+    logForDebugging(
+      `MCP policy predicate references environment variable(s) not present in the policy expansion env: ${expandedResult.missingVars.join(', ')}`,
+    )
+  }
+  if (unsafeExpansion) {
+    const vars =
+      expandedResult.wildcardVars.length > 0
+        ? expandedResult.wildcardVars
+        : [
+            ...Object.keys(env).filter(
+              k =>
+                pattern.includes('${' + k + '}') ||
+                pattern.includes('${' + k + ':'),
+            ),
+            ...expandedResult.missingVars,
+          ]
+    const hasRef = new RegExp(ENV_VAR_REF_RE.source).test(sanitized)
+    const reason =
+      expandedResult.wildcardVars.length > 0
+        ? 'a value injected wildcard semantics'
+        : hasDotSegment
+          ? `the expanded entry's path carries a dot segment ('..' or '.') that URL parsing would collapse — remove dot segments from the pattern${hasRef ? ', or set the referenced variable(s)' : " (the pattern's '$' text is not a ${NAME} reference, so environment values cannot affect it)"}`
+          : 'a value restructured the URL, or the expansion is unparseable as a URL (e.g. a whole-URL ${VAR}: rewrite as https://${HOST}/path — hostname-position variables are fully supported)'
+    logForDebugging(
+      `MCP policy URL predicate expansion was unsafe — ${reason} (variables: ${vars.join(', ') || 'unknown'}) — allowlist URL entries using it fail closed; denylist entries are unaffected`,
+    )
+  }
+  return {
+    expanded: expandedResult.expanded.replaceAll(ADMIN_WILDCARD_TOKEN, '*'),
+    unsafeExpansion,
+    missingVars: expandedResult.missingVars,
+  }
 }
 
 /**
@@ -603,7 +812,7 @@ export function isMcpServerDenied(
       for (const entry of settings.deniedMcpServers) {
         if (!isMcpServerUrlEntry(entry)) continue
         // densable: denylist URL expansion is unaffected by J6u unsafe fail-closed
-        const { expanded: expandedPattern } = expandMcpPolicyPredicate(
+        const { expanded: expandedPattern } = expandMcpPolicyUrlPredicate(
           entry.serverUrl,
           env,
           fallbackEnv,
@@ -693,13 +902,10 @@ export function isMcpServerAllowedByPolicy(
         const expandedServerUrl = expandMcpServerSideString(serverUrl)
         for (const entry of settings.allowedMcpServers) {
           if (!isMcpServerUrlEntry(entry)) continue
-          // densable J6u: allowlist fail-closed on wildcard-injecting values
-          const { expanded: expandedPattern, wildcardVars } =
-            expandMcpPolicyPredicate(entry.serverUrl, policyEnv)
-          if (wildcardVars.length > 0) {
-            logForDebugging(
-              `MCP policy URL predicate expansion was unsafe — a value injected wildcard semantics (variables: ${wildcardVars.join(', ')}) — allowlist URL entries using it fail closed; denylist entries are unaffected`,
-            )
+          // densable J6u/TCt: allowlist fail-closed on unsafe URL expansion
+          const { expanded: expandedPattern, unsafeExpansion } =
+            expandMcpPolicyUrlPredicate(entry.serverUrl, policyEnv)
+          if (unsafeExpansion) {
             continue
           }
           if (urlMatchesPattern(expandedServerUrl, expandedPattern)) {
@@ -1261,6 +1467,30 @@ export function getMcpConfigsByScope(
 }
 
 /**
+ * Official Oio(e, n) @293143537: scope-level policy block reason for an MCP server.
+ * Returns 'managed-policy' when enterprise/plugin-only lockdown rejects non-managed scopes,
+ * 'project-approval' when a project-scoped server is not approved, or null if admitted.
+ */
+export function getMcpServerPolicyBlockReason(
+  name: string,
+  config: ScopedMcpServerConfig,
+): 'managed-policy' | 'project-approval' | null {
+  const scope = config.scope
+  if (scope !== 'user' && scope !== 'project' && scope !== 'local') {
+    return null
+  }
+  if (doesEnterpriseMcpConfigExist() || isRestrictedToPluginOnly('mcp')) {
+    return 'managed-policy'
+  }
+  if (scope === 'project') {
+    return getProjectMcpServerStatus(name) === 'approved'
+      ? null
+      : 'project-approval'
+  }
+  return null
+}
+
+/**
  * Get an MCP server configuration by name
  * @param name The name of the server
  * @returns The server configuration with scope, or undefined if not found
@@ -1268,9 +1498,10 @@ export function getMcpConfigsByScope(
 export function getMcpConfigByName(name: string): ScopedMcpServerConfig | null {
   const { servers: enterpriseServers } = getMcpConfigsByScope('enterprise')
 
-  // When MCP is locked to plugin-only, only enterprise servers are reachable
-  // by name. User/project/local servers are blocked — same as getClaudeCodeMcpConfigs().
-  if (isRestrictedToPluginOnly('mcp')) {
+  // Official AM/Oio: when enterprise MCP config exists or MCP is locked to
+  // plugin-only, only enterprise servers are reachable by name. User/project/local
+  // servers are blocked — same as getClaudeCodeMcpConfigs().
+  if (doesEnterpriseMcpConfigExist() || isRestrictedToPluginOnly('mcp')) {
     return enterpriseServers[name] ?? null
   }
 

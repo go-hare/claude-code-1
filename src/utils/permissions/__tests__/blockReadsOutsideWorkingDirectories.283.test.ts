@@ -562,9 +562,9 @@ describe('permissions.blockReadsOutsideWorkingDirectories (2.1.283)', () => {
   test('NHo DualInk yBt is inside auto after requiresUserInteraction', () => {
     const src = readFileSync(join(import.meta.dir, '../permissions.ts'), 'utf8')
     const autoEntry = src.indexOf('isAutoModeOrPlanActingAsAuto(')
-    const requires = src.indexOf('tool.requiresUserInteraction?.()')
-    const dualInk = src.indexOf('shouldOfferBlockOutsideReads({')
-    const outsidePrompt = src.indexOf("'outside_read_first_prompt'")
+    const requires = src.indexOf('tool.requiresUserInteraction?.()', autoEntry)
+    const dualInk = src.indexOf('shouldOfferBlockOutsideReads({', autoEntry)
+    const outsidePrompt = src.indexOf("'outside_read_first_prompt'", autoEntry)
     expect(autoEntry).toBeGreaterThan(-1)
     expect(requires).toBeGreaterThan(autoEntry)
     expect(dualInk).toBeGreaterThan(requires)

@@ -44,7 +44,7 @@ import {
   getConditionalRulesForCwdLevelDirectory,
   type MemoryFileInfo,
 } from './claudemd.js'
-import { dirname, parse, relative, resolve } from 'path'
+import { dirname, join, parse, relative, resolve } from 'path'
 import { getCwd } from 'src/utils/cwd.js'
 import { getViewedTeammateTask } from '../state/selectors.js'
 import { logError } from './log.js'
@@ -2670,7 +2670,7 @@ async function processAtMentionedFiles(
         ) {
           return null
         }
-        // official Wdt @183550610
+        // official Wdt @183550610 + SEA #48 qps landing/symlink check
         if (
           appState.toolPermissionContext.restricted &&
           !pathInAllowedWorkingPath(
@@ -2684,6 +2684,31 @@ async function processAtMentionedFiles(
           return null
         }
 
+        const walked = walkPermissionPaths(absoluteFilename)
+        if (walked.unresolved) {
+          logEvent('tengu_at_mention_extracting_filename_error', {
+            reason: 'landing_unsettled',
+          } as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
+          return {
+            type: 'at_mention_reference' as const,
+            mentions: [filename],
+            unread: 'unexamined' as const,
+          }
+        }
+        if (
+          walked.paths.some(
+            p =>
+              isFileReadDenied(p, appState.toolPermissionContext) ||
+              (appState.toolPermissionContext.restricted &&
+                !pathInAllowedWorkingPath(p, appState.toolPermissionContext)),
+          )
+        ) {
+          logEvent('tengu_at_mention_extracting_filename_error', {
+            reason: 'denied_at_landing',
+          } as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
+          return null
+        }
+
         // Check if it's a directory
         try {
           const stats = await stat(absoluteFilename)
@@ -2692,14 +2717,11 @@ async function processAtMentionedFiles(
               const entries = await readdir(absoluteFilename, {
                 withFileTypes: true,
               })
-              const MAX_DIR_ENTRIES = 1000
-              const truncated = entries.length > MAX_DIR_ENTRIES
-              const names = entries.slice(0, MAX_DIR_ENTRIES).map(e => e.name)
-              if (truncated) {
-                names.push(
-                  `\u2026 and ${entries.length - MAX_DIR_ENTRIES} more entries`,
-                )
-              }
+              const names = filterAtMentionDirEntries(
+                entries,
+                absoluteFilename,
+                appState.toolPermissionContext,
+              )
               const stdout = names.join('\n')
               logEvent('tengu_at_mention_extracting_directory_success', {})
 
@@ -4899,6 +4921,54 @@ function hasReadDenyRules(
       'deny',
     ).size > 0
   )
+}
+
+/**
+ * SEA `KMr` + `f_n` (#53): filter `@`-mention directory listing entries
+ * against Read deny rules (and symlink landings for non-file/non-dir entries),
+ * scanning at most 10,000 entries and returning at most 1,000 names.
+ */
+export function filterAtMentionDirEntries(
+  entries: ReadonlyArray<{
+    name: string
+    isFile: () => boolean
+    isDirectory: () => boolean
+  }>,
+  dirPath: string,
+  toolPermissionContext: ToolPermissionContext,
+): string[] {
+  const MAX_DIR_SCAN = 10_000
+  const MAX_DIR_ENTRIES = 1000
+  const names: string[] = []
+  const limit = Math.min(entries.length, MAX_DIR_SCAN)
+  let scanned = 0
+  while (scanned < limit && names.length < MAX_DIR_ENTRIES) {
+    const entry = entries[scanned]!
+    scanned++
+    const entryPath = join(dirPath, entry.name)
+    if (isFileReadDenied(entryPath, toolPermissionContext)) {
+      continue
+    }
+    if (!entry.isFile() && !entry.isDirectory()) {
+      const walked = walkPermissionPaths(entryPath)
+      if (
+        walked.unresolved ||
+        walked.paths.some(
+          p =>
+            isFileReadDenied(p, toolPermissionContext) ||
+            (toolPermissionContext.restricted &&
+              !pathInAllowedWorkingPath(p, toolPermissionContext)),
+        )
+      ) {
+        continue
+      }
+    }
+    names.push(entry.name)
+  }
+  if (scanned < entries.length) {
+    names.push(`\u2026 and ${entries.length - scanned} more entries`)
+  }
+  return names
 }
 
 function isFileReadDenied(

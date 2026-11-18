@@ -168,7 +168,7 @@ export class BridgeClient implements SocketClient {
     const startTime = Date.now()
     const timeoutMs = isTabsContext
       ? this.tabsContextCollectionTimeoutMs
-      : this.toolCallTimeoutMs
+      : (this.context.getToolCallTimeoutMs?.(name) ?? this.toolCallTimeoutMs)
 
     // Track tool call start
     trackEvent?.('chrome_bridge_tool_call_started', {

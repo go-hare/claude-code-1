@@ -118,6 +118,8 @@ type Lexer = {
   heredocs: HeredocPending[]
   /** Precomputed byte offset for each char index (lazy for non-ASCII) */
   byteTable: Uint32Array | null
+  /** #78 SEA: `[[(` or `[\\\n[(` zsh vs bash conditional paren diff */
+  zshCondParenDiff: boolean
 }
 
 type HeredocPending = {
@@ -139,6 +141,7 @@ function makeLexer(src: string): Lexer {
     b: 0,
     heredocs: [],
     byteTable: null,
+    zshCondParenDiff: false,
   }
 }
 
@@ -453,9 +456,13 @@ function nextToken(L: Lexer, ctx: 'cmd' | 'arg' = 'arg'): Token {
   // In cmd position, [ [[ { start test/group; in arg position they're word chars
   if (ctx === 'cmd') {
     if (c === '[' && c1 === '[') {
-      advance(L)
-      advance(L)
-      return { type: 'OP', value: '[[', start, end: L.b }
+      const c2 = peek(L, 2)
+      if (c2 === ' ' || c2 === '\t' || c2 === '\n' || c2 === '' || c2 === '(') {
+        if (c2 === '(') L.zshCondParenDiff = true
+        advance(L)
+        advance(L)
+        return { type: 'OP', value: '[[', start, end: L.b }
+      }
     }
     if (c === '[') {
       advance(L)
@@ -609,7 +616,19 @@ type ParseState = {
   inBacktick: number
   /** When set, parseSimpleCommand stops at this token (for `[` backtrack) */
   stopToken: string | null
+  /** #78 SEA `ze` (@284381800) zsh/bash differential flags */
+  zshBraceDiff: boolean
+  dollarOperandDiff: boolean
+  zshMathDiff: boolean
 }
+
+const DOLLAR_OPERAND_DIFF_RE = /\$\$[({[]/
+const QUOTED_OR_COMMENT_TYPES = new Set([
+  'raw_string',
+  'ansi_c_string',
+  'comment',
+  'heredoc_body',
+])
 
 function parseSource(source: string, timeoutMs?: number): TsNode | null {
   const L = makeLexer(source)
@@ -624,10 +643,59 @@ function parseSource(source: string, timeoutMs?: number): TsNode | null {
     aborted: false,
     inBacktick: 0,
     stopToken: null,
+    zshBraceDiff: source.includes('$\\\n'),
+    dollarOperandDiff: DOLLAR_OPERAND_DIFF_RE.test(source),
+    zshMathDiff: false,
   }
   try {
     const program = parseProgram(P)
     if (P.aborted) return null
+    if (!P.zshMathDiff) {
+      const diffOffsets: number[] = []
+      for (const m of source.matchAll(/(\$+)(\[|\((?:\\\n)*\()?/g)) {
+        const dollarCount = m[1]?.length ?? 1
+        let bsCount = 0
+        const matchIdx = m.index ?? 0
+        while (
+          matchIdx - bsCount - 1 >= 0 &&
+          source[matchIdx - bsCount - 1] === '\\'
+        ) {
+          bsCount++
+        }
+        const dollarEndCharIdx = matchIdx + dollarCount - 1
+        const hasLineCont = m[2]?.includes('\n') ?? false
+        if (
+          m[2] !== undefined &&
+          (dollarCount - (bsCount % 2)) % 2 === 1 &&
+          (hasLineCont || m[2] === '[')
+        ) {
+          diffOffsets.push(byteAt(P.L, dollarEndCharIdx))
+        }
+      }
+      if (diffOffsets.length > 0) {
+        const quotedRanges: TsNode[] = []
+        const stack: TsNode[] = [program]
+        for (let node = stack.pop(); node; node = stack.pop()) {
+          if (QUOTED_OR_COMMENT_TYPES.has(node.type)) {
+            quotedRanges.push(node)
+          } else {
+            stack.push(...node.children)
+          }
+        }
+        P.zshMathDiff = diffOffsets.some(
+          off =>
+            !quotedRanges.some(r => r.startIndex <= off && off < r.endIndex),
+        )
+      }
+    }
+    if (
+      P.zshBraceDiff ||
+      P.L.zshCondParenDiff ||
+      P.dollarOperandDiff ||
+      P.zshMathDiff
+    ) {
+      return mk(P, 'ERROR', program.startIndex, program.endIndex, [program])
+    }
     return program
   } catch {
     return null

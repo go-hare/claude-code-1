@@ -364,6 +364,20 @@ export function formatJobAge(
   return formatDuration(ms, { mostSignificantOnly: true })
 }
 
+/**
+ * Official Br — format age/countdown column: `in <dur>` when loop nextAt > now, else age.
+ */
+export function formatFleetRowWhen(
+  startedAt: number,
+  nextAt?: number | null,
+  now: number = Date.now(),
+): string {
+  if (nextAt != null && nextAt > now) {
+    return `in ${formatDuration(nextAt - now, { mostSignificantOnly: true })}`
+  }
+  return formatJobAge(startedAt, now)
+}
+
 // ---------------------------------------------------------------------------
 // PR parsing
 // ---------------------------------------------------------------------------

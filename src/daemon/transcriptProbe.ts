@@ -10,7 +10,7 @@
 
 import { randomUUID } from 'crypto'
 import { createReadStream } from 'fs'
-import { lstat, readdir, rename } from 'fs/promises'
+import { lstat, open, readdir, rename, stat } from 'fs/promises'
 import { dirname, join } from 'path'
 import { createInterface } from 'readline'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
@@ -315,20 +315,64 @@ export async function quarantineOrphanTranscript(
 }
 
 /**
- * densable gpn(jobDir, state, initialPrompt) — persist queuedPrompt for a later
+ * SEA yXe(r, e): true when a reply cannot be queued across a restart —
+ * bash (!), slash command (/), or answering a multi-choice question block.
+ */
+export function isUnqueueableReply(
+  text: string,
+  state: BgJobState | null,
+): boolean {
+  const trimmed = text.trimStart()
+  return (
+    trimmed.startsWith('!') ||
+    trimmed.startsWith('/') ||
+    (state?.tempo === 'blocked' && (state.block?.questions?.length ?? 0) > 0)
+  )
+}
+
+/**
+ * SEA WIt(r): drop queuedPrompt if it starts with / or ! (unqueueable).
+ */
+export function sanitizeQueuedPrompt(
+  state: Pick<BgJobState, 'queuedPrompt'>,
+): string | undefined {
+  return state.queuedPrompt !== undefined &&
+    isUnqueueableReply(state.queuedPrompt, null)
+    ? undefined
+    : state.queuedPrompt
+}
+
+/**
+ * SEA SXo(r, e): true if `existing` already equals or ends with `\n\n${next}`.
+ */
+export function endsWithQueuedReply(existing: string, next: string): boolean {
+  return existing === next || existing.endsWith(`\n\n${next}`)
+}
+
+/**
+ * SEA zfe(r, e, s, E, h) — persist queuedPrompt for a later
  * successful respawn. Returns true when the write succeeded.
  */
 export async function queueRespawnInitialPrompt(
   short: string,
   state: BgJobState,
   initialPrompt: string,
+  keepQueuedPrompt?: boolean,
 ): Promise<boolean> {
-  if (!short || !initialPrompt) return false
+  if (!short || !initialPrompt || isUnqueueableReply(initialPrompt, null)) {
+    return false
+  }
   try {
     const { writeBgJobState } = await import('./jobState.js')
+    const prev = keepQueuedPrompt ? sanitizeQueuedPrompt(state) : undefined
+    const queuedPrompt = !prev
+      ? initialPrompt
+      : endsWithQueuedReply(prev, initialPrompt)
+        ? prev
+        : `${prev}\n\n${initialPrompt}`
     writeBgJobState(short, {
       ...state,
-      queuedPrompt: initialPrompt,
+      queuedPrompt,
       updatedAt: new Date().toISOString(),
     })
     return true
@@ -338,24 +382,33 @@ export async function queueRespawnInitialPrompt(
 }
 
 /**
- * densable Xyr `$` prompt selection for spawn argv:
- *   initialPrompt ?? queuedPrompt ?? (skipIntentReplay ? undefined : intent)
+ * SEA Xyr `$` prompt selection for spawn argv:
+ *   keepQueuedPrompt && initialPrompt && sanitizedQueued
+ *     ? (SXo(sanitizedQueued, initialPrompt) ? sanitizedQueued : `${sanitizedQueued}\n\n${initialPrompt}`)
+ *     : initialPrompt ?? sanitizedQueued ?? (skipIntentReplay ? undefined : intent)
  *
- * skipIntentReplay densable: `w || N` — pure resume-with-messages, or
- * resumeSessionId points at a different session than the job's own.
- * When true, intent is NOT auto-replayed (only explicit/queued prompts apply).
+ * skipIntentReplay: `Ae || tt || Ee` — hasMessages, resumeSessionId points
+ * elsewhere, or fresh no-transcript respawn (bgIsolation === 'none' / forceRefusalRetry).
  */
 export function resolveRespawnLaunchPrompt(opts: {
   initialPrompt?: string | null
   queuedPrompt?: string | null
   intent?: string | null
-  /** densable w||N — do not fall back to intent */
+  /** Do not fall back to intent */
   skipIntentReplay?: boolean
+  keepQueuedPrompt?: boolean
 }): string | undefined {
   const fromInitial = opts.initialPrompt?.trim()
+  const sanitizedQueued = sanitizeQueuedPrompt({
+    queuedPrompt: opts.queuedPrompt ?? undefined,
+  })?.trim()
+  if (opts.keepQueuedPrompt && fromInitial && sanitizedQueued) {
+    return endsWithQueuedReply(sanitizedQueued, fromInitial)
+      ? sanitizedQueued
+      : `${sanitizedQueued}\n\n${fromInitial}`
+  }
   if (fromInitial) return fromInitial
-  const fromQueued = opts.queuedPrompt?.trim()
-  if (fromQueued) return fromQueued
+  if (sanitizedQueued) return sanitizedQueued
   if (opts.skipIntentReplay) return undefined
   const fromIntent = opts.intent?.trim()
   return fromIntent || undefined
@@ -379,6 +432,122 @@ export async function clearQueuedPrompt(short: string): Promise<boolean> {
   }
 }
 
+const CONTINUED_IN_MARKER = '"type":"continued-in"'
+const PARENT_UUID_MARKER = '"parentUuid":'
+const ZXI_BATCH_SIZE = 32
+
+/**
+ * Gold 2.1.325 `MOr(tail)`: scan tail lines backwards for a
+ * `{"type":"continued-in","continuedInSessionId":...}` record before any
+ * real assistant/user message. Returns the continuedInSessionId if found.
+ */
+export function findContinuedInSessionId(tail: string): string | undefined {
+  if (!tail.includes(CONTINUED_IN_MARKER)) return undefined
+  let end = tail.length
+  while (end > 0) {
+    const nl = tail.lastIndexOf('\n', end - 1)
+    const line = tail.slice(nl + 1, end)
+    end = nl
+    const hasContinued = line.includes(CONTINUED_IN_MARKER)
+    const hasTurn =
+      line.includes('"type":"user"') || line.includes('"type":"assistant"')
+    if (hasContinued || hasTurn) {
+      try {
+        const parsed = JSON.parse(line) as Record<string, unknown>
+        if (
+          hasContinued &&
+          parsed.type === 'continued-in' &&
+          typeof parsed.continuedInSessionId === 'string' &&
+          parsed.continuedInSessionId.length > 0
+        ) {
+          return parsed.continuedInSessionId
+        }
+        if (hasTurn) {
+          const msg = parsed.message as { stop_reason?: unknown } | undefined
+          if (
+            parsed.type === 'assistant' &&
+            parsed.isApiErrorMessage !== true &&
+            typeof msg?.stop_reason === 'string'
+          ) {
+            return undefined
+          }
+          if (parsed.type === 'user') {
+            return undefined
+          }
+        }
+      } catch {
+        // ignore malformed JSONL line
+      }
+    }
+    if (nl < 0) break
+  }
+  return undefined
+}
+
+/**
+ * Gold 2.1.325 `Zxi(projectsDir, sessionId)`: scan `.jsonl` transcripts in
+ * `projectsDir` in batches of 32 for a parked transcript whose tail carries a
+ * `continued-in` pointer to `sessionId` and has a `parentUuid` message.
+ */
+export async function scanParkedContinuedInTranscript(
+  projectsDir: string,
+  targetSessionId: string,
+): Promise<string | undefined> {
+  let entries: string[]
+  try {
+    entries = await readdir(projectsDir)
+  } catch {
+    return undefined
+  }
+  const files = entries
+    .filter(name => name.endsWith('.jsonl'))
+    .map(name => join(projectsDir, name))
+
+  for (let i = 0; i < files.length; i += ZXI_BATCH_SIZE) {
+    const batch = files.slice(i, i + ZXI_BATCH_SIZE)
+    const results = await Promise.all(
+      batch.map(async filePath => {
+        try {
+          const st = await stat(filePath)
+          if (!st.isFile() || st.size === 0) return undefined
+          const headSize = Math.min(st.size, 65_536)
+          const tailOffset = Math.max(0, st.size - 65_536)
+          const fh = await open(filePath, 'r')
+          try {
+            const headBuf = Buffer.allocUnsafe(headSize)
+            const headRes = await fh.read(headBuf, 0, headSize, 0)
+            const head = headBuf.toString('utf8', 0, headRes.bytesRead)
+            let tail = head
+            if (tailOffset > 0) {
+              const tailLen = st.size - tailOffset
+              const tailBuf = Buffer.allocUnsafe(tailLen)
+              const tailRes = await fh.read(tailBuf, 0, tailLen, tailOffset)
+              tail = tailBuf.toString('utf8', 0, tailRes.bytesRead)
+            }
+            if (findContinuedInSessionId(tail) !== targetSessionId) {
+              return undefined
+            }
+            if (
+              head.includes(PARENT_UUID_MARKER) ||
+              tail.includes(PARENT_UUID_MARKER)
+            ) {
+              return filePath
+            }
+            return undefined
+          } finally {
+            await fh.close()
+          }
+        } catch {
+          return undefined
+        }
+      }),
+    )
+    const match = results.find(r => r !== undefined)
+    if (match !== undefined) return match
+  }
+  return undefined
+}
+
 /**
  * densable Xyr core refuse condition (without full kill/alive machinery):
  * !hasMessages && bgIsolation==="none" && resumeId===sessionId
@@ -391,7 +560,7 @@ export async function evaluateRespawnTranscriptGate(
   input: RespawnTranscriptGateInput,
 ): Promise<RespawnTranscriptGate> {
   const resumeId = input.resumeSessionId ?? input.sessionId
-  const probe = await probeResumeTranscript(
+  let probe = await probeResumeTranscript(
     resumeId,
     input.cwd,
     input.linkScanPath,
@@ -402,10 +571,38 @@ export async function evaluateRespawnTranscriptGate(
   }
 
   const isolation = input.bgIsolation ?? 'none'
+  let parkedMatch: string | undefined
+  if (
+    !probe.hasMessages &&
+    isolation === 'none' &&
+    !input.forceFreshPrompt &&
+    input.linkScanPath === undefined
+  ) {
+    parkedMatch = await scanParkedContinuedInTranscript(
+      dirname(probe.path),
+      input.sessionId,
+    )
+    const reprobe = await probeResumeTranscript(
+      resumeId,
+      input.cwd,
+      input.linkScanPath,
+    )
+    if (reprobe.hasMessages) {
+      probe = reprobe
+      parkedMatch = undefined
+      return { allow: true, probe }
+    }
+  }
+
   const forced =
     input.force || input.forceRefusalRetry || input.forceFreshPrompt
   // densable: only refuse fork-handoff same-tree when resume id is the job's own session
-  if (!forced && isolation === 'none' && resumeId === input.sessionId) {
+  if (
+    parkedMatch === undefined &&
+    !forced &&
+    isolation === 'none' &&
+    resumeId === input.sessionId
+  ) {
     return {
       allow: false,
       errorCode: FORK_TRANSCRIPT_NEVER_MATERIALIZED,
@@ -420,6 +617,7 @@ export async function evaluateRespawnTranscriptGate(
     input.resumeSessionId !== undefined &&
     input.resumeSessionId !== input.sessionId
   if (
+    parkedMatch === undefined &&
     input.deadEpochReapedAt !== undefined &&
     !input.force &&
     !resumePointsElsewhere

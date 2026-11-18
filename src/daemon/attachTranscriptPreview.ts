@@ -12,6 +12,7 @@
 
 import { closeSync, lstatSync, openSync, type PathLike, readSync } from 'fs'
 import chalk from 'chalk'
+import stripAnsi from 'strip-ansi'
 import { color, stringWidth } from '@anthropic/ink'
 import { BLACK_CIRCLE } from '../constants/figures.js'
 import { applyMarkdown } from '../utils/markdown.js'
@@ -205,8 +206,8 @@ export function formatTranscriptTailFrame(
             !looksLikeHeavyMarkdown(raw)
           ) {
             try {
-              // densable X5_ — applyMarkdown with theme
-              md = applyMarkdown(raw, themeName, null)
+              // densable X5_ — applyMarkdown with theme + Nr non-SGR strip
+              md = stripNonSgrAnsi(applyMarkdown(raw, themeName, null))
             } catch {
               md = raw
             }
@@ -281,17 +282,99 @@ function resolveAttachTheme(raw: string | undefined): ThemeName {
   return ATTACH_DEFAULT_THEME
 }
 
-/** densable N5_ — skip markdown for heavy/code-heavy blobs (cheap heuristic). */
+/** Official Rr — skip markdown for pathological bracket/setext/blockquote blobs. */
 function looksLikeHeavyMarkdown(text: string): boolean {
-  if (text.includes('```')) return true
   if (text.length > ATTACH_MARKDOWN_BUDGET) return true
-  return false
+  let bracketDepth = 0
+  let setextCount = 0
+  let blockquoteCount = 0
+  for (const line of text.split('\n')) {
+    let i = 0
+    while (i < line.length && (line[i] === '>' || line[i] === ' ')) {
+      if (line[i] === '>') blockquoteCount++
+      i++
+    }
+    if (/^ {0,3}(?:=+|-+)\s*$/.test(line)) setextCount++
+    for (let j = i; j < line.length; j++) {
+      const ch = line[j]
+      if (ch === '[') bracketDepth++
+      else if (ch === ']' && bracketDepth > 0) bracketDepth--
+    }
+  }
+  return bracketDepth > 256 || setextCount > 64 || blockquoteCount > 512
 }
 
-function stripControlChars(text: string): string {
-  // Keep content; strip orphan C0 controls that break wrap widths.
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional strip of C0
-  return text.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional SGR-only CSI check
+const SGR_CSI_RE = /^\x1B\[[0-9;]*m$/
+
+/** Official Nr — keep only SGR CSI sequences from rendered markdown output. */
+export function stripNonSgrAnsi(text: string): string {
+  if (!text.includes('\x1B')) return text
+  let out = ''
+  let i = 0
+  while (i < text.length) {
+    const esc = text.indexOf('\x1B', i)
+    if (esc < 0) {
+      out += text.slice(i)
+      break
+    }
+    out += text.slice(i, esc)
+    const next = text[esc + 1]
+    if (next === '[') {
+      let j = esc + 2
+      while (j < text.length) {
+        const code = text.charCodeAt(j)
+        if (code >= 64 && code <= 126) {
+          const seq = text.slice(esc, j + 1)
+          if (SGR_CSI_RE.test(seq)) out += seq
+          j++
+          break
+        }
+        if (code < 32 || code > 63) break
+        j++
+      }
+      i = j
+    } else if (
+      next === ']' ||
+      next === 'P' ||
+      next === 'X' ||
+      next === '^' ||
+      next === '_'
+    ) {
+      let j = esc + 2
+      let end = text.length
+      while (j < text.length) {
+        if (next === ']' && text.charCodeAt(j) === 7) {
+          end = j + 1
+          break
+        }
+        if (text.charCodeAt(j) === 27 && text[j + 1] === '\\') {
+          end = j + 2
+          break
+        }
+        j++
+      }
+      i = end
+    } else if (next === undefined) {
+      i = text.length
+    } else {
+      i = esc + 2
+    }
+  }
+  return out
+}
+
+/** Official Cr — strip ANSI/OSC/C0/C1 escape sequences and normalize tabs/CR. */
+export function stripControlChars(text: string): string {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional strip of C0/C1
+  if (!/[\x00-\x09\x0b-\x1f\x7f-\x9f]/.test(text)) return text
+  return (
+    stripAnsi(text)
+      .replace(/\t/g, '  ')
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional strip of C0/C1
+      .replace(/[\x00-\x08\x0E-\x1F\x7F-\x9F]/g, '')
+      .replace(/[\v\f\r]/g, '')
+  )
 }
 
 function hardWrapOne(text: string, width: number): string {

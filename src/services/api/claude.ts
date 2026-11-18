@@ -89,7 +89,13 @@ import {
   isThirdPartyServerClassifierRefused,
   stickySendBeta,
   markRelayThinkingStripRecorded,
+  getRefusalFallbackModelLatch,
+  getMainLoopModelOverride,
 } from '../../bootstrap/state.js'
+import {
+  checkStreamIdleSuspend,
+  StreamSuspendedError,
+} from '../../utils/firstByteWatchdog.js'
 import {
   isStreamPingEvent,
   planStreamCloseAfterComplete,
@@ -378,8 +384,11 @@ import { NO_CONTENT_MESSAGE } from '../../constants/messages.js'
 import {
   API_ERROR_MESSAGE_PREFIX,
   CUSTOM_OFF_SWITCH_MESSAGE,
+  findRejectedBetaHeaders,
   getAssistantMessageFromError,
   getErrorMessageIfRefusal,
+  isOutputBlockedByContentFilterError,
+  isUnprocessableMediaError,
 } from './errors.js'
 import { extractConnectionErrorDetails } from './errorUtils.js'
 import {
@@ -582,6 +591,11 @@ export type Options = {
    * visible/server lane (pi densable).
    */
   refusalFallbackSilentArmActive?: boolean
+  /**
+   * Official refusalFallbackEffort (#36) — loop-level carried effort from a
+   * refusal fallback when not latched onto the main session.
+   */
+  refusalFallbackEffort?: EffortLevel
   /**
    * densable serverRefusalFallback — server-lane arm `{forModel, model}`.
    * When set, stream materializes content_block_start type "fallback" into
@@ -884,6 +898,115 @@ export async function* executeNonStreamingRequest(
  * only re-inject when new deferred tools appear (e.g. MCP server connects).
  */
 const lastAnnouncedDeferredTools = new Set<string>()
+
+/** Official c0e — output-content-filter streaming retry cap (#14). */
+const OUTPUT_FILTERED_RETRY_CAP = 1
+
+class OutputFilteredStreamRetryError extends Error {
+  constructor() {
+    super('Output content filter retry')
+    this.name = 'OutputFilteredStreamRetryError'
+  }
+}
+
+/** Official Rya — media item limit step-down ladder (#13). */
+export const MEDIA_ITEM_LIMIT_STEPS = [510, 255, 127] as const
+
+type MediaItemCapEntry = {
+  model: string
+  limit?: number
+  gaveUp: boolean
+}
+
+const mediaItemCapBySession = new Map<string, MediaItemCapEntry>()
+
+export function getSessionMediaItemCap(
+  sessionId: string,
+  model: string,
+): MediaItemCapEntry | undefined {
+  const entry = mediaItemCapBySession.get(sessionId)
+  return entry?.model === model ? entry : undefined
+}
+
+export function setSessionMediaItemCap(
+  sessionId: string,
+  entry: MediaItemCapEntry,
+): void {
+  mediaItemCapBySession.set(sessionId, entry)
+}
+
+export function clearSessionMediaItemCap(sessionId: string): void {
+  mediaItemCapBySession.delete(sessionId)
+}
+
+function isMediaBlock(block: unknown): boolean {
+  if (typeof block !== 'object' || block === null) return false
+  const b = block as { type?: unknown }
+  return b.type === 'image' || b.type === 'document'
+}
+
+/** Official ros(messages) — count stored image/document blocks (#13). */
+export function countStoredMediaItems(
+  messages: readonly (UserMessage | AssistantMessage | ApiSystemMessage)[],
+): number {
+  let total = 0
+  for (const msg of messages) {
+    const content = (msg as { message?: { content?: unknown } }).message
+      ?.content
+    if (!Array.isArray(content)) continue
+    for (const block of content) {
+      if (isMediaBlock(block)) {
+        total++
+      } else if (
+        typeof block === 'object' &&
+        block !== null &&
+        (block as { type?: unknown }).type === 'tool_result' &&
+        Array.isArray((block as { content?: unknown }).content)
+      ) {
+        for (const inner of (block as { content: unknown[] }).content) {
+          if (isMediaBlock(inner)) total++
+        }
+      }
+    }
+  }
+  return total
+}
+
+/** Official Hqn — block types that suppress synthetic content_block_stop (#121). */
+const SUPPRESS_ABANDONED_BLOCK_STOP_TYPES = new Set([
+  'tool_use',
+  'server_tool_use',
+  'mcp_tool_use',
+])
+
+/** Official Mjr — resolve carriedEffort from loop override or session latch (#36). */
+export function resolveCarriedEffortForModel(
+  opts: {
+    loopEffort?: EffortLevel
+    continuesMainConversation: boolean
+  },
+  resolvedModel: string,
+): EffortLevel | null {
+  const killed = getFeatureValue_CACHED_MAY_BE_STALE(
+    'tengu_loggia_passage',
+    false,
+  )
+  if (opts.loopEffort !== undefined) {
+    return killed ? null : opts.loopEffort
+  }
+  if (!opts.continuesMainConversation || killed) {
+    return null
+  }
+  const latch = getRefusalFallbackModelLatch()
+  const override = getMainLoopModelOverride()
+  if (latch?.carriedEffort === undefined || override == null) {
+    return null
+  }
+  const matches =
+    override.toLowerCase() === latch.fallbackModel.toLowerCase() &&
+    resolvedModel.toLowerCase() === latch.fallbackModel.toLowerCase()
+  return matches ? latch.carriedEffort : null
+}
 
 async function* queryModel(
   messages: Message[],
@@ -1303,7 +1426,15 @@ async function* queryModel(
   // densable qWT → HWT after query_message_normalization_end (keep 100/600 +
   // pad 20 + NWT byte cap). Not gated on LWT / tengu_subagent_cache_evict.
   // Does not invent display-window GC of tool results.
-  const hwtKeep = getRequestLimitMediaKeepCount(options.model, betas)
+  const sessionIdForMediaCap = getSessionId()
+  const activeMediaCap = getSessionMediaItemCap(
+    sessionIdForMediaCap,
+    resolvedModel,
+  )
+  const hwtKeep = Math.min(
+    getRequestLimitMediaKeepCount(options.model, betas),
+    activeMediaCap?.limit ?? Infinity,
+  )
   const hwtByteCap = getRequestLimitMediaByteCap()
   const applyHwt = (
     msgs: (UserMessage | AssistantMessage | ApiSystemMessage)[],
@@ -1574,7 +1705,16 @@ async function* queryModel(
     }
   }
 
-  const effort = resolveAppliedEffort(options.model, options.effortValue)
+  const carriedEffort = resolveCarriedEffortForModel(
+    {
+      loopEffort: options.refusalFallbackEffort,
+      continuesMainConversation: !(options.agentContext ?? getAgentContext()),
+    },
+    resolvedModel,
+  )
+  const effort = resolveAppliedEffort(options.model, options.effortValue, {
+    carriedEffort,
+  })
   // densable Ie — string effort level from last request's output_config.effort
   // stamped onto every AssistantMessage for transcript persistence (#44).
   // Numeric effort_override (ant-only) is intentionally NOT recorded.
@@ -1680,14 +1820,52 @@ async function* queryModel(
   let lastSentTokenCount = false
   let lastBindingControlsOnThirdParty = false
   let prefixLockStripAttempt = 0
+  // Official lM — active media-item-limit retry state (#13)
+  let pendingMediaCap:
+    | { limit: number; steps: number; refusedAt: number }
+    | undefined
+
+  const recordMediaItemCapSuccess = (): void => {
+    try {
+      const existing = getSessionMediaItemCap(
+        sessionIdForMediaCap,
+        resolvedModel,
+      )
+      if (pendingMediaCap === undefined) {
+        if (existing?.gaveUp && existing.limit === undefined) {
+          clearSessionMediaItemCap(sessionIdForMediaCap)
+        } else if (existing?.gaveUp) {
+          setSessionMediaItemCap(sessionIdForMediaCap, {
+            ...existing,
+            gaveUp: false,
+          })
+        }
+        return
+      }
+      const { limit, steps, refusedAt } = pendingMediaCap
+      pendingMediaCap = undefined
+      setSessionMediaItemCap(sessionIdForMediaCap, {
+        model: resolvedModel,
+        limit: Math.min(limit, existing?.limit ?? Infinity),
+        gaveUp: false,
+      })
+      logEvent('tengu_api_request_media_limit_lowered', {
+        query_source:
+          options.querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        media_items_refused: refusedAt,
+        media_item_limit: limit,
+        steps,
+      })
+    } catch {
+      // ignore media cap telemetry errors
+    }
+  }
 
   /**
    * densable aggregator @184994549: zue → Kue → Vue → dY → dGe on unique
    * `r.onError` tokens. Yue `surface:resume-prefill` is not a retry token.
    */
-  const onThinkingDisplayApiError = (
-    error: unknown,
-  ): ReturnType<typeof classifyThinkingDisplayRetry> => {
+  const onThinkingDisplayApiError = (error: unknown): string | undefined => {
     const lastBetas = lastRequestBetas ?? []
     const token = classifyThinkingDisplayRetry(
       error,
@@ -1740,7 +1918,86 @@ async function* queryModel(
     ) {
       betas = betas.filter(b => b !== DANGEROUS_TOOL_USE_BETA_HEADER)
     }
-    return token
+    if (token != null) {
+      return token
+    }
+
+    // Official M0o (#12) — strip all rejected beta headers at once (including
+    // non-400 statuses such as 422) and log tengu_beta_400_healed.
+    const rejectedBetas = findRejectedBetaHeaders(error, lastBetas)
+    if (rejectedBetas.length > 0) {
+      const rejectedSet = new Set(rejectedBetas.map(r => r.header))
+      betas = betas.filter(b => !rejectedSet.has(b))
+      for (const match of rejectedBetas) {
+        logEvent('tengu_beta_400_healed', {
+          beta: match.header as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          model:
+            options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          provider:
+            getAPIProvider() as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          ...(error instanceof APIError && { status: error.status }),
+          only_mentioned: match.onlyMentioned,
+        })
+      }
+      return `retry:beta-rejected:${rejectedBetas.map(r => r.header).join(',')}`
+    }
+
+    // Official OLt (#13) — strip oldest images/documents on unprocessable
+    // media limit rejection and step down through [510, 255, 127].
+    const existingCap = getSessionMediaItemCap(
+      sessionIdForMediaCap,
+      resolvedModel,
+    )
+    if (isUnprocessableMediaError(error) && !existingCap?.gaveUp) {
+      const currentCount = countStoredMediaItems(messagesForAPI)
+      const capBound = Math.min(
+        currentCount,
+        pendingMediaCap?.limit ?? Infinity,
+      )
+      const nextLimit = MEDIA_ITEM_LIMIT_STEPS.find(step => step < capBound)
+      if (nextLimit === undefined) {
+        if (pendingMediaCap !== undefined) {
+          const { steps, refusedAt } = pendingMediaCap
+          pendingMediaCap = undefined
+          setSessionMediaItemCap(sessionIdForMediaCap, {
+            model: resolvedModel,
+            limit: existingCap?.limit,
+            gaveUp: true,
+          })
+          logForDebugging(
+            `[media-item-limit] The model still refuses this request as unprocessable with ${currentCount} images and documents left. Not removing any more.`,
+            { level: 'warn' },
+          )
+          logEvent('tengu_api_request_media_limit_gave_up', {
+            query_source:
+              options.querySource as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            media_items_refused: refusedAt,
+            steps,
+          })
+        }
+        return undefined
+      }
+      const stripToLimit = (
+        msgs: (UserMessage | AssistantMessage | ApiSystemMessage)[],
+      ) => stripStoredMediaForRequestLimit(msgs, nextLimit, HWT_KEEP_PADDING)
+      messagesForAPI = stripToLimit(messagesForAPI)
+      if (midConvFallback) {
+        const prevFallback = midConvFallback
+        midConvFallback = () => stripToLimit(prevFallback())
+      }
+      pendingMediaCap = {
+        limit: nextLimit,
+        steps: (pendingMediaCap?.steps ?? 0) + 1,
+        refusedAt: pendingMediaCap?.refusedAt ?? currentCount,
+      }
+      logForDebugging(
+        `[media-item-limit] The model refused this request as unprocessable. It held ${currentCount} images and documents; the oldest were removed to fit a limit of ${nextLimit}, and it is being sent again. If it is answered, this conversation keeps that limit.`,
+        { level: 'warn' },
+      )
+      return `retry:media-item-limit:${nextLimit}`
+    }
+
+    return undefined
   }
 
   // densable `n2` — log the effort clamp once per queryModel call (retries
@@ -2438,6 +2695,8 @@ async function* queryModel(
   // densable 2.1.232 #26 — Tn/oo thinking-only stream re-loop (Po=1, sr=2)
   let thinkingOnlyWatchdogRetryCount = 0
   let thinkingOnlyStaleRetryCount = 0
+  // Official Qc.outputFiltered (#14) — retry streaming once on outputFiltered
+  let outputFilteredRetryCount = 0
 
   // densable labeled stream loop (`e:`): withRetry + for-await + partial path.
   while (true) {
@@ -2620,6 +2879,53 @@ async function* queryModel(
         // densable To / at — #5 close-after-complete (Br=stopReason)
         let messageDeltaCompleted = false
         let openContentBlockIndex: number | null = null
+        // Official Fh, Sb, lE, Aw, _h, QS (#121) — close abandoned stream envelope
+        let streamMessageEnvelopeOpen = false
+        let openBlockIndexForEnvelope: number | null = null
+        let openBlockSuppressStop = false
+        let currentApiMessageId: string | null = null
+        let abandonedFromBlockIndex = 0
+        function* closeAbandonedStreamEnvelope({
+          responseUnfinished,
+        }: {
+          responseUnfinished: boolean
+        }): Generator<StreamEvent, void, unknown> {
+          if (!streamMessageEnvelopeOpen) {
+            return
+          }
+          const blockToClose = openBlockSuppressStop
+            ? null
+            : openBlockIndexForEnvelope
+          streamMessageEnvelopeOpen = false
+          openBlockIndexForEnvelope = null
+          openBlockSuppressStop = false
+          const idPart =
+            currentApiMessageId !== null
+              ? { apiMessageId: currentApiMessageId }
+              : undefined
+          if (blockToClose !== null) {
+            yield {
+              type: 'stream_event',
+              event: { type: 'content_block_stop', index: blockToClose },
+              ...idPart,
+            } as StreamEvent
+          }
+          yield {
+            type: 'stream_event',
+            event: { type: 'message_stop' },
+            ...idPart,
+            ...(responseUnfinished &&
+            currentApiMessageId !== null &&
+            Number.isSafeInteger(abandonedFromBlockIndex)
+              ? {
+                  abandonedBlocks: {
+                    apiMessageId: currentApiMessageId,
+                    fromBlockIndex: abandonedFromBlockIndex,
+                  },
+                }
+              : undefined),
+          } as StreamEvent
+        }
         streamCostCredit = 'none'
         isAdvisorInProgress = false
 
@@ -2694,6 +3000,8 @@ async function* queryModel(
           // pure helper optional
         }
         let streamIdleAborted = false
+        // Official zC (#89) — StreamSuspendedError when streamIdleTimer fires across sleep
+        let streamSuspendedError: StreamSuspendedError | undefined
         // performance.now() snapshot when watchdog fires, for measuring abort propagation delay
         let streamWatchdogFiredAt: number | null = null
         let streamIdleWarningTimer: ReturnType<typeof setTimeout> | null = null
@@ -2769,7 +3077,21 @@ async function* queryModel(
             STREAM_IDLE_WARNING_MS,
             STREAM_IDLE_WARNING_MS,
           )
+          const armedAt = performance.now()
+          const wallArmedAt = Date.now()
           streamIdleTimer = setTimeout(() => {
+            const suspendedErr = checkStreamIdleSuspend(
+              {
+                monotonicNow: () => performance.now(),
+                now: () => Date.now(),
+              },
+              { armedAt, wallArmedAt, idleMs: STREAM_IDLE_TIMEOUT_MS },
+            )
+            if (suspendedErr !== undefined) {
+              streamSuspendedError = suspendedErr
+              releaseStreamResources()
+              return
+            }
             streamIdleAborted = true
             streamWatchdogFiredAt = performance.now()
             logForDebugging(
@@ -3722,11 +4044,44 @@ async function* queryModel(
                 break
             }
 
+            const includeApiMessageId =
+              streamMessageEnvelopeOpen || part.type === 'message_start'
+            if (part.type === 'message_start') {
+              streamMessageEnvelopeOpen = true
+              openBlockIndexForEnvelope = null
+              openBlockSuppressStop = false
+              const msgId = (part.message as { id?: unknown }).id
+              currentApiMessageId =
+                typeof msgId === 'string' && msgId !== '' ? msgId : null
+            } else if (part.type === 'content_block_start') {
+              openBlockIndexForEnvelope = part.index
+              openBlockSuppressStop = SUPPRESS_ABANDONED_BLOCK_STOP_TYPES.has(
+                part.content_block.type,
+              )
+            } else if (part.type === 'content_block_stop') {
+              openBlockIndexForEnvelope = null
+              openBlockSuppressStop = false
+              if (Number.isSafeInteger(part.index) && part.index >= 0) {
+                abandonedFromBlockIndex = Math.max(
+                  abandonedFromBlockIndex,
+                  part.index + 1,
+                )
+              }
+            } else if (part.type === 'message_stop') {
+              streamMessageEnvelopeOpen = false
+              openBlockIndexForEnvelope = null
+              openBlockSuppressStop = false
+              recordMediaItemCapSuccess()
+            }
+
             yield {
               type: 'stream_event',
               event: part,
               ...(part.type === 'message_start' ? { ttftMs } : undefined),
-            }
+              ...(includeApiMessageId && currentApiMessageId !== null
+                ? { apiMessageId: currentApiMessageId }
+                : undefined),
+            } as StreamEvent
           }
           // densable Xs() — flush deferred server_fallback hop when stream ends
           // without midStream emission (no assistant partials at hop time).
@@ -3758,6 +4113,9 @@ async function* queryModel(
 
           // If the stream was aborted by our idle timeout watchdog, fall back to
           // non-streaming retry rather than treating it as a completed stream.
+          if (streamSuspendedError !== undefined) {
+            throw streamSuspendedError
+          }
           if (streamIdleAborted) {
             // Instrumentation: proves the for-await exited after the watchdog fired
             // (vs. hung forever). exit_delay_ms measures abort propagation latency:
@@ -3863,9 +4221,18 @@ async function* queryModel(
             // Store headers for gateway detection
             responseHeaders = resp.headers
           }
-        } catch (streamingError) {
+        } catch (rawStreamingError) {
           // Clear the idle timeout watchdog on error path too
           clearStreamIdleTimers()
+          // Official zC (#89) — substitute StreamSuspendedError when idle timer
+          // aborted the stream across sleep/suspend (not a user abort).
+          const streamingError =
+            streamSuspendedError !== undefined &&
+            !streamIdleAborted &&
+            !signal.aborted &&
+            rawStreamingError instanceof APIUserAbortError
+              ? streamSuspendedError
+              : rawStreamingError
 
           // Instrumentation: if the watchdog had already fired and the for-await
           // threw (rather than exiting cleanly), record that the loop DID exit and
@@ -3910,6 +4277,7 @@ async function* queryModel(
                     'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                 })
               }
+              yield* closeAbandonedStreamEnvelope({ responseUnfinished: true })
               throw streamingError
             } else {
               // The SDK threw APIUserAbortError but our signal wasn't aborted
@@ -4046,20 +4414,9 @@ async function* queryModel(
                       )
                     }
                   }
-                  if (openContentBlockIndex !== null) {
-                    yield {
-                      type: 'stream_event',
-                      event: {
-                        type: 'content_block_stop',
-                        index: openContentBlockIndex,
-                      },
-                    } as StreamEvent
-                    openContentBlockIndex = null
-                  }
-                  yield {
-                    type: 'stream_event',
-                    event: { type: 'message_stop' },
-                  } as StreamEvent
+                  yield* closeAbandonedStreamEnvelope({
+                    responseUnfinished: true,
+                  })
                   releaseStreamResources()
                   clearStreamIdleTimers()
                   // densable continue e — outer catch rethrows ThinkingOnlyStreamRetryError
@@ -4096,6 +4453,9 @@ async function* queryModel(
                     'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                 })
                 // densable break e — success exit, no mid-response banner
+                yield* closeAbandonedStreamEnvelope({
+                  responseUnfinished: false,
+                })
                 return
               }
 
@@ -4136,6 +4496,7 @@ async function* queryModel(
                 : streamIdleAborted
                   ? `${API_ERROR_MESSAGE_PREFIX}: Response stalled while thinking, before producing a response. Try again.`
                   : `${API_ERROR_MESSAGE_PREFIX}: Connection closed while thinking, before producing a response. Try again.`
+              yield* closeAbandonedStreamEnvelope({ responseUnfinished: true })
               yield createAssistantAPIErrorMessage({
                 content: incompleteBanner,
                 apiError: 'server_error',
@@ -4147,6 +4508,47 @@ async function* queryModel(
               // densable `break e` — exit streaming successfully with partial kept
               return
             }
+          }
+
+          // Official lg?.cause === "outputFiltered" (#14) — retry streaming once
+          // without falling back to non-streaming when output content filter stops
+          // the response before any answer was shown.
+          if (isOutputBlockedByContentFilterError(streamingError)) {
+            if (outputFilteredRetryCount < OUTPUT_FILTERED_RETRY_CAP) {
+              outputFilteredRetryCount += 1
+              logForDebugging(
+                `Output content filter stopped the response before any of the answer was shown: retrying streaming (${outputFilteredRetryCount}/${OUTPUT_FILTERED_RETRY_CAP})`,
+                { level: 'warn' },
+              )
+              logEvent('tengu_streaming_output_filter_retry', {
+                model:
+                  options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                retry_attempt: outputFilteredRetryCount,
+                request_id: (streamRequestId ??
+                  'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              })
+              yield* closeAbandonedStreamEnvelope({ responseUnfinished: true })
+              releaseStreamResources()
+              clearStreamIdleTimers()
+              throw new OutputFilteredStreamRetryError()
+            }
+            logEvent('tengu_streaming_fallback_to_non_streaming', {
+              model:
+                options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              error:
+                'output_content_filtered' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              attemptNumber,
+              maxOutputTokens,
+              thinkingType:
+                thinkingConfig.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              fallback_disabled: true,
+              request_id: (streamRequestId ??
+                'unknown') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              fallback_cause:
+                'output_content_filtered' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              any_stream_event_yielded: partialMessage !== undefined,
+            })
+            throw streamingError
           }
 
           // When the flag is enabled, skip the non-streaming fallback and let the
@@ -4211,6 +4613,7 @@ async function* queryModel(
             throw streamingError
           }
 
+          yield* closeAbandonedStreamEnvelope({ responseUnfinished: true })
           logForDebugging(
             `Error streaming, falling back to non-streaming mode: ${errorMessage(streamingError)}`,
             { level: 'error' },
@@ -4480,6 +4883,9 @@ async function* queryModel(
       } catch (errorFromRetry) {
         // densable #26 thinking-only re-stream — bubble to streamAttempt loop.
         if (errorFromRetry instanceof ThinkingOnlyStreamRetryError) {
+          throw errorFromRetry
+        }
+        if (errorFromRetry instanceof OutputFilteredStreamRetryError) {
           throw errorFromRetry
         }
         // FallbackTriggeredError must propagate to query.ts, which performs the
@@ -4879,6 +5285,12 @@ async function* queryModel(
         if (streamAttemptError.backoffMs > 0) {
           await sleep(streamAttemptError.backoffMs, signal)
         }
+        if (signal.aborted) {
+          return
+        }
+        continue
+      }
+      if (streamAttemptError instanceof OutputFilteredStreamRetryError) {
         if (signal.aborted) {
           return
         }

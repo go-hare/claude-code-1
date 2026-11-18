@@ -12,8 +12,12 @@ import { addKeepaliveReason, removeKeepaliveReason } from 'src/utils/task/framew
 import { isBackgroundTasksDisabled } from 'src/utils/residualFinalEnvGates.js';
 import { createTaskRegistry } from 'src/utils/taskRegistry.js';
 import { bashToolHasPermission } from '../BashTool/bashPermissions.js';
+import { BASH_TOOL_NAME } from '../BashTool/toolName.js';
 import { shouldUseSandbox } from '../BashTool/shouldUseSandbox.js';
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js';
+import { getAskRuleForTool, getDenyRuleForTool } from 'src/utils/permissions/permissions.js';
+import type { PermissionRule } from 'src/utils/permissions/PermissionRule.js';
+import type { ToolPermissionContext } from 'src/Tool.js';
 import { isIP } from 'net';
 import { lazySchema } from 'src/utils/lazySchema.js';
 import { formatDuration, truncate } from 'src/utils/format.js';
@@ -152,6 +156,36 @@ function monitorWebSocketPrecondition(url: string): {
       kind: 'sandbox-policy',
       host,
       detail: sandboxCheck.reason,
+    };
+  }
+  return null;
+}
+
+/** SEA `Sln` (@287793665) — check whole-tool Bash deny/ask rules for code-exec tools. */
+function checkBashRuleForCodeExec(
+  toolPermissionContext: ToolPermissionContext,
+  surfaceLabel: string,
+): { rule: PermissionRule; verdict: PermissionResult } | null {
+  const denyRule = getDenyRuleForTool(toolPermissionContext, { name: BASH_TOOL_NAME });
+  if (denyRule !== null) {
+    return {
+      rule: denyRule,
+      verdict: {
+        behavior: 'deny',
+        message: `Permission to use ${surfaceLabel} has been denied: it runs code as ${BASH_TOOL_NAME} does, and a rule denies ${BASH_TOOL_NAME}.`,
+        decisionReason: { type: 'rule', rule: denyRule },
+      },
+    };
+  }
+  const askRule = getAskRuleForTool(toolPermissionContext, { name: BASH_TOOL_NAME });
+  if (askRule !== null) {
+    return {
+      rule: askRule,
+      verdict: {
+        behavior: 'ask',
+        message: `${surfaceLabel} runs code as ${BASH_TOOL_NAME} does, and a rule asks before ${BASH_TOOL_NAME} runs.`,
+        decisionReason: { type: 'rule', rule: askRule },
+      },
     };
   }
   return null;
@@ -408,23 +442,51 @@ export const MonitorTool = buildTool({
 
   async checkPermissions(input: MonitorInput, context: ToolUseContext): Promise<PermissionResult> {
     if (input.ws !== undefined) {
-      return checkMonitorWebSocketPermission(input.ws, context);
+      const wsResult = checkMonitorWebSocketPermission(input.ws, context);
+      const bashRule = checkBashRuleForCodeExec(context.getAppState().toolPermissionContext, MONITOR_TOOL_NAME);
+      if (bashRule !== null) {
+        if (bashRule.verdict.behavior === 'deny') {
+          return bashRule.verdict;
+        }
+        if (wsResult.behavior === 'ask') {
+          return { ...wsResult, matchedAskRule: bashRule.rule };
+        }
+      }
+      return wsResult;
+    }
+    const appState = context.getAppState();
+    const bashRule = checkBashRuleForCodeExec(appState.toolPermissionContext, MONITOR_TOOL_NAME);
+    if (bashRule?.verdict.behavior === 'deny') {
+      return bashRule.verdict;
     }
     // densable 2.1.289 @194307650 `Dzn({ ...n, command: n.command }, r.shellPermission)` —
     // preserve `description`, `timeout_ms`, and `persistent` in `updatedInput` so toolExecution
     // never overwrites MonitorInput with `{ command }` alone (`Monitor event: "undefined"`).
+    // 2.1.290 `Ne` (@297418221): suspend sandbox auto-allow so Monitor doesn't silently bypass rules.
     const bashInput = {
       ...input,
       command: input.command ?? '',
     } as unknown as Parameters<typeof bashToolHasPermission>[0];
-    const perm = await bashToolHasPermission(bashInput, context);
-    if ((perm.behavior === 'allow' || perm.behavior === 'ask') && perm.updatedInput !== undefined) {
-      return {
-        ...perm,
-        updatedInput: { ...input, ...perm.updatedInput },
-      };
+    const suspendedContext: ToolUseContext = {
+      ...context,
+      permissionLayers: [...(context.permissionLayers ?? []), { kind: 'sandbox_auto_allow_suspended' }],
+    };
+    const perm = await bashToolHasPermission(bashInput, suspendedContext);
+    const mergedPerm: PermissionResult =
+      (perm.behavior === 'allow' || perm.behavior === 'ask') && perm.updatedInput !== undefined
+        ? {
+            ...perm,
+            updatedInput: { ...input, ...perm.updatedInput },
+          }
+        : perm;
+    if (bashRule === null || mergedPerm.behavior === 'deny') {
+      return mergedPerm;
     }
-    return perm;
+    if (mergedPerm.behavior === 'ask') {
+      const { suggestions: _suggestions, ...rest } = mergedPerm;
+      return { ...rest, matchedAskRule: bashRule.rule };
+    }
+    return bashRule.verdict;
   },
 
   userFacingName() {

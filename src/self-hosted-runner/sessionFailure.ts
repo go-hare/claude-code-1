@@ -3,6 +3,7 @@
  * child crash / setup failure, with session-gone / epoch-stale classification.
  */
 import { randomUUID } from 'node:crypto'
+import stripAnsi from 'strip-ansi'
 import type { SelfHostedRunnerApi } from './runnerApi.js'
 import { truncateSessionErrorText } from './sessionText.js'
 
@@ -101,10 +102,16 @@ export function buildFailureWorkerEvents(
     exitCode === null ? 'failed to start' : `exited with code ${exitCode}`
   }. You can try again by sending a new message or starting a new session.`
   if (stderrTail.trim().length > 0) {
+    // Official lc(QHe(s)): strip ANSI and C0/C1 control chars before slicing tail.
+    const clean = stripAnsi(stderrTail).replace(
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional strip of C0/C1
+      /[\x00-\x08\x0E-\x1F\x7F-\x9F]/g,
+      '',
+    )
     const s =
-      stderrTail.length > FAILURE_STDERR_TAIL_MAX
-        ? `…${stderrTail.slice(-FAILURE_STDERR_TAIL_MAX)}`
-        : stderrTail
+      clean.length > FAILURE_STDERR_TAIL_MAX
+        ? `…${clean.slice(-FAILURE_STDERR_TAIL_MAX)}`
+        : clean
     text += `\n\nLast output before exit:\n${s}`
   }
   const assistant = {

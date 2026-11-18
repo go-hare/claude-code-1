@@ -55,7 +55,9 @@ import {
   isTerminalState,
   isEligibleForRetire,
   hasBlockingInFlight,
+  RETIRE_DETRITUS_KINDS,
 } from './jobState.js'
+import { gt as semverGt } from '../utils/semver.js'
 import { logForDebugging } from '../utils/debug.js'
 import { logEvent } from '../services/analytics/index.js'
 import {
@@ -69,6 +71,14 @@ import {
   applyWorkerProviderStrips,
   applyWorkerSessionStrips,
 } from './bgHostManagedEnv.js'
+
+function isNewerCliVersion(workerVer: string, hostVer: string): boolean {
+  try {
+    return semverGt(workerVer, hostVer)
+  } catch {
+    return false
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Constants — official values from 2.1.153
@@ -1087,6 +1097,10 @@ export interface DispatchRequest {
   forceRefusalRetry?: boolean
   /** densable Xyr `force` — skip alive/refuse soft gates when true. */
   force?: boolean
+  /** Official #49 `forceUnresponsive` — kill unresponsive worker before respawn. */
+  forceUnresponsive?: boolean
+  /** Official #49 `replyOnResume` — pass --reply-on-resume on active-tempo resume. */
+  replyOnResume?: boolean
   /**
    * densable Xyr `initialPrompt` — when refuse/spawn-fail, gpn queues this as
    * job.queuedPrompt for a later successful respawn.
@@ -1428,6 +1442,13 @@ export class BgWorker {
   get isUnverified(): boolean {
     return this.unverifiedSock !== undefined
   }
+  get isVersionStale(): boolean {
+    return Boolean(
+      this.record.cliVersion &&
+        typeof MACRO !== 'undefined' &&
+        this.record.cliVersion !== MACRO.VERSION,
+    )
+  }
   getPhase(): WorkerPhase {
     return this.phase
   }
@@ -1643,7 +1664,14 @@ export class BgWorker {
     if (entry.decModes) w.decModes.seed(entry.decModes)
     w.connectRv()
 
-    if (entry.pendingRespawn === 'upgrade') {
+    if (
+      entry.pendingRespawn === 'upgrade' &&
+      !(
+        entry.cliVersion &&
+        typeof MACRO !== 'undefined' &&
+        isNewerCliVersion(entry.cliVersion, MACRO.VERSION)
+      )
+    ) {
       w.transitionTo({ kind: 'upgrading' })
       setTimeout(
         (worker: BgWorker) => {
@@ -1876,14 +1904,27 @@ export class BgWorker {
     )
   }
 
-  async reply(text: string): Promise<boolean> {
+  async reply(
+    text: string,
+    { nextTurn = false }: { nextTurn?: boolean } = {},
+  ): Promise<boolean> {
     this.lastInputAt = Date.now()
-    const jobDir = getJobDirPath(this.dispatch.short)
     const state = readBgJobState(this.dispatch.short)
     const tempo = state?.tempo ?? this.record.tempo
+    const blocked = tempo === 'blocked' || this.record.tempo === 'blocked'
 
-    if (tempo === 'blocked' && this.rv?.send({ type: 'reply', text })) {
+    if (
+      (!state || blocked || nextTurn) &&
+      this.rv?.send({
+        type: 'reply',
+        text,
+        ...(nextTurn ? { nextTurn } : {}),
+      })
+    ) {
       return true
+    }
+    if (nextTurn || (blocked && this.dispatch.launch.mode !== 'exec')) {
+      return false
     }
 
     if (this.pty) {
@@ -2050,8 +2091,9 @@ export class BgWorker {
     graceMs: number,
     pinned?: Set<string>,
     bridgeGraceMs: number = graceMs,
+    { shedMonitoringOnly = false }: { shedMonitoringOnly?: boolean } = {},
   ): Promise<{ retired: boolean; reason?: string }> {
-    // densable zF.retireIfSettled — reclaim idle/blocked non-exec workers (#27)
+    // SEA zF.retireIfSettled — reclaim idle/blocked/stale non-exec workers (#155)
     if (this.isTransitioning) return { retired: false, reason: 'in-progress' }
     if (this.record.outcome) return { retired: false, reason: 'no-state' }
     if (this.attachers.size > 0) return { retired: false, reason: 'attached' }
@@ -2091,7 +2133,7 @@ export class BgWorker {
       return { retired: false, reason: 'no-state' }
     }
 
-    // Empty idle session (no name, no intent, blocked) — densable empty-idle
+    // Empty idle session (no name, no intent, blocked) — SEA empty-idle
     if (
       this.dispatch.source !== 'shell' &&
       !state.name &&
@@ -2099,9 +2141,13 @@ export class BgWorker {
       !state.worktreePath &&
       state.template === 'bg' &&
       state.state === 'working' &&
-      state.tempo === 'blocked'
+      state.tempo === 'blocked' &&
+      !((state.inFlight?.tasks ?? 0) > 0)
     ) {
-      const age = Date.now() - Date.parse(state.createdAt)
+      const createdAtMs = Date.parse(state.createdAt)
+      const updatedAtMs = Date.parse(state.updatedAt)
+      const age =
+        Date.now() - (updatedAtMs > createdAtMs ? updatedAtMs : createdAtMs)
       if (age < EMPTY_IDLE_GRACE_MS)
         return { retired: false, reason: 'empty-idle-grace' }
       if (!this.transitionTo({ kind: 'retiring', reason: 'grace' })) {
@@ -2112,27 +2158,66 @@ export class BgWorker {
       return { retired: true }
     }
 
-    // densable: bh(n) || non-exec (tempo idle | blocked-blocked | YP lineage)
-    // Previously only isTerminalState — left-arrow park (tempo:idle) never retired.
-    if (
-      !isEligibleForRetire(state, {
-        launchMode: this.dispatch.launch.mode,
-        workerCliVersion: this.record.cliVersion,
-        hostCliVersion:
-          typeof MACRO !== 'undefined' ? MACRO.VERSION : undefined,
-      })
-    ) {
+    const hostVersion = typeof MACRO !== 'undefined' ? MACRO.VERSION : undefined
+    const eligible = isEligibleForRetire(state, {
+      launchMode: this.dispatch.launch.mode,
+      workerCliVersion: this.record.cliVersion,
+      hostCliVersion: hostVersion,
+    })
+    const updatedAtMs = Date.parse(state.updatedAt)
+    const needsOther =
+      state.tempo === 'blocked' &&
+      state.state !== 'blocked' &&
+      state.needs !== undefined &&
+      state.needs !== 'permission'
+    const staleRetire =
+      this.isVersionStale &&
+      !(
+        this.record.cliVersion &&
+        hostVersion &&
+        isNewerCliVersion(this.record.cliVersion, hostVersion)
+      ) &&
+      this.dispatch.launch.mode !== 'exec' &&
+      state.tempo !== 'active' &&
+      !needsOther &&
+      !state.routine &&
+      (state.inFlight?.tasks ?? 0) -
+        (state.inFlight?.drainableMonitors ?? 0) ===
+        0 &&
+      (state.inFlight?.queued ?? 0) === 0 &&
+      !(state.inFlight?.kinds ?? []).includes('session_cron') &&
+      updatedAtMs < Date.now() - graceMs
+
+    if (!eligible && !staleRetire) {
       return { retired: false, reason: 'not-settled' }
     }
-    if (hasBlockingInFlight(state)) {
-      return {
-        retired: false,
-        reason: state.inFlight?.kinds.includes('session_cron')
-          ? 'session-cron'
-          : 'inflight',
-      }
+
+    const drainableMonitors =
+      shedMonitoringOnly || staleRetire
+        ? (state.inFlight?.drainableMonitors ?? 0)
+        : 0
+    const kinds = (state.inFlight?.kinds ?? []).filter(
+      k => k !== 'artifact_watch' || drainableMonitors === 0,
+    )
+    const detritusOnly =
+      isTerminalState(state) &&
+      state.tempo !== 'active' &&
+      kinds.length > 0 &&
+      kinds.every(k => (RETIRE_DETRITUS_KINDS as readonly string[]).includes(k))
+    const defaultInflight = staleRetire ? 0 : 1
+    if (
+      (state.inFlight?.queued ?? defaultInflight) > 0 ||
+      ((state.inFlight?.tasks ?? defaultInflight) - drainableMonitors > 0 &&
+        !detritusOnly)
+    ) {
+      return { retired: false, reason: 'inflight' }
+    }
+    if (kinds.includes('session_cron')) {
+      return { retired: false, reason: 'session-cron' }
     }
     if (state.routine) return { retired: false, reason: 'routine' }
+    // Keep legacy helper referenced for backward-compatible invariants
+    void hasBlockingInFlight
 
     const effectiveGrace = state.bridgeSessionId
       ? Math.max(graceMs, bridgeGraceMs)

@@ -59,6 +59,11 @@ import {
   type McpProbeFallbackReason,
   type McpProbeTimedOutTransport,
 } from './mcpConnectTimeout.js'
+import {
+  CLAUDEAI_CONNECTORS_DISABLED_ERROR_CODE,
+  isSdkServerWithConnectorsOff,
+} from './claudeai.js'
+import { wrapFetchWithResponseLimit } from './httpResponseLimit.js'
 import mapValues from 'lodash-es/mapValues.js'
 import memoize from 'lodash-es/memoize.js'
 import zipObject from 'lodash-es/zipObject.js'
@@ -650,10 +655,8 @@ const connectToServerMemo = memoize(
           `Proxy options: ${proxyOptions.dispatcher ? 'custom dispatcher' : 'default'}`,
         )
 
-        const httpBaseFetch = wrapRemoteMcpFetch(
-          authProvider,
-          firstPartyBag,
-          serverRef,
+        const httpBaseFetch = wrapFetchWithResponseLimit(
+          wrapRemoteMcpFetch(authProvider, firstPartyBag, serverRef),
         )
         const allowLegacySse = shouldApplyLegacyHttpSseGet401Guard({
           isCcrProxy: isMcpCcrProxyServerConfig(serverRef),
@@ -749,7 +752,9 @@ const connectToServerMemo = memoize(
         const fetchWithAuth = createClaudeAiProxyFetch(globalThis.fetch)
 
         const proxyOptions = getProxyFetchOptions()
-        const timedFetch = wrapFetchWithTimeout(fetchWithAuth)
+        const timedFetch = wrapFetchWithResponseLimit(
+          wrapFetchWithTimeout(fetchWithAuth),
+        )
         const transportOptions: StreamableHTTPClientTransportOptions = {
           // Wrap fetchWithAuth with fresh timeout per request.
           // densable: oGn(t)?F_f(dGn(oe,t),re):dGn(oe,t) + Accept-Encoding identity.
@@ -1052,15 +1057,17 @@ const connectToServerMemo = memoize(
             : undefined
           const hasOAuthTokens = !!(await authProvider?.tokens())
           const proxyOptions = getProxyFetchOptions()
-          const httpFetch = wrapLegacyHttpSseGet401Guard(
-            wrapRemoteMcpFetch(authProvider, firstPartyBag, serverRef),
-            shouldApplyLegacyHttpSseGet401Guard({
-              isCcrProxy: isMcpCcrProxyServerConfig(serverRef),
-              isFirstPartyAnthropicMcp: isFirstPartyAnthropicMcpUrl(
-                serverRef.url,
-              ),
-              isCliOwnedBearer: isCliOwnedBearerConfig(serverRef),
-            }),
+          const httpFetch = wrapFetchWithResponseLimit(
+            wrapLegacyHttpSseGet401Guard(
+              wrapRemoteMcpFetch(authProvider, firstPartyBag, serverRef),
+              shouldApplyLegacyHttpSseGet401Guard({
+                isCcrProxy: isMcpCcrProxyServerConfig(serverRef),
+                isFirstPartyAnthropicMcp: isFirstPartyAnthropicMcpUrl(
+                  serverRef.url,
+                ),
+                isCliOwnedBearer: isCliOwnedBearerConfig(serverRef),
+              }),
+            ),
           )
           const transportOptions: StreamableHTTPClientTransportOptions = {
             ...(authProvider ? { authProvider } : {}),
@@ -1092,7 +1099,9 @@ const connectToServerMemo = memoize(
           // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
           const fetchWithAuth = createClaudeAiProxyFetch(globalThis.fetch)
           const proxyOptions = getProxyFetchOptions()
-          const timedFetch = wrapFetchWithTimeout(fetchWithAuth)
+          const timedFetch = wrapFetchWithResponseLimit(
+            wrapFetchWithTimeout(fetchWithAuth),
+          )
           const transportOptions: StreamableHTTPClientTransportOptions = {
             fetch: isStatelessClaudeAiProxy(serverRef)
               ? suppressGetSseOnEndpoint(timedFetch, proxyUrl)
@@ -1611,9 +1620,17 @@ const connectToServerMemo = memoize(
             logMCPError(name, error)
           }
 
-          // StreamableHTTPError has a `code` property with the HTTP status
-          const errorCode = (error as Error & { code?: number }).code
-          if (errorCode === 401 && !isClaudeAiBearerRejectedError(error)) {
+          // StreamableHTTPError has a `code` property with the HTTP status;
+          // SdkHttpError carries `status`. Both 401 and 403 are user_auth
+          // failures (early abort to needs-auth instead of retrying).
+          const errorCode =
+            error instanceof SdkHttpError
+              ? error.status
+              : (error as Error & { code?: number }).code
+          if (
+            (errorCode === 401 || errorCode === 403) &&
+            !isClaudeAiBearerRejectedError(error)
+          ) {
             return handleRemoteAuthFailure(name, serverRef, 'claudeai-proxy')
           }
         } else if (
@@ -1635,6 +1652,21 @@ const connectToServerMemo = memoize(
       }
 
       const capabilities = client.getServerCapabilities()
+      if (isSdkServerWithConnectorsOff(serverRef, capabilities)) {
+        client.close().catch(() => {})
+        logMCPDebug(name, 'Skipping connection (disableClaudeAiConnectors)')
+        logEvent(
+          'mcp_connectors_off_in_desktop' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          {},
+        )
+        return {
+          name,
+          config: serverRef,
+          type: 'failed',
+          error: 'Disabled by disableClaudeAiConnectors setting',
+          errorCode: CLAUDEAI_CONNECTORS_DISABLED_ERROR_CODE,
+        }
+      }
       const serverVersion = client.getServerVersion()
       const rawInstructions = client.getInstructions()
       let instructions = rawInstructions

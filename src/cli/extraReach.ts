@@ -1082,6 +1082,12 @@ export type ShellScanContext = {
   shell?: string
   make?: boolean
   nesting?: number
+  commandAfterConditional?: boolean
+  quotedBackslashKept?: boolean
+  closingBraceHeld?: boolean
+  shortLoopLists?: boolean
+  substitutionHeredocs?: boolean
+  relativeNamedValues?: boolean
 }
 
 export type ShellParseResult = {
@@ -3636,13 +3642,30 @@ export function nestedShellUnreadRefuse(
   ctx: ShellScanContext,
   depth = 0,
   seams?: {
-    parseShell?: (text: string, opts: { make: boolean }) => ShellParseResult
+    parseShell?: (
+      text: string,
+      opts: {
+        make: boolean
+        commandAfterConditional?: boolean
+        quotedBackslashKept?: boolean
+        closingBraceHeld?: boolean
+        shortLoopLists?: boolean
+        substitutionHeredocs?: boolean
+      },
+    ) => ShellParseResult
     scanCommand?: typeof scanShellCommand
   },
 ): string | undefined {
   const parse = seams?.parseShell ?? defaultParseShell
   const scan = seams?.scanCommand ?? scanShellCommand
-  const { commands: h, unreadable: g } = parse(text, { make })
+  const { commands: h, unreadable: g } = parse(text, {
+    make,
+    commandAfterConditional: ctx.commandAfterConditional,
+    quotedBackslashKept: ctx.quotedBackslashKept,
+    closingBraceHeld: ctx.closingBraceHeld,
+    shortLoopLists: ctx.shortLoopLists,
+    substitutionHeredocs: ctx.substitutionHeredocs,
+  })
   const v: string[] = []
   const w = new Set(ctx.relativeNames)
   for (const { program: b, args: R, assignments: I } of h) {
@@ -3650,8 +3673,8 @@ export function nestedShellUnreadRefuse(
       ? [...I, ...R]
       : I
     for (const P of x) {
-      const O = /^([A-Za-z_][A-Za-z0-9_]*)=([^/~$][\s\S]*)$/.exec(P.text)
-      if (O !== null) w.add(O[1])
+      const O = /^([A-Za-z_][A-Za-z0-9_]*)=([\s\S]+)$/.exec(P.text)
+      if (O !== null && !/^[/~$]/.test(O[2])) w.add(O[1])
     }
   }
   for (const b of h) {
@@ -3659,14 +3682,16 @@ export function nestedShellUnreadRefuse(
     if (R !== undefined) return R
   }
   if (g !== null) return couldNotBeReadToEndAsShellCopy(g)
-  for (const b of v) {
+  for (const b of new Set(v)) {
     const R =
       depth >= 3
         ? shellCodeNestedTooDeepRefuseCopy()
         : nestedShellUnreadRefuse(
             b,
             false,
-            { ...ctx, fromPayload: true },
+            ctx.relativeNamedValues === false
+              ? { ...ctx, fromPayload: true }
+              : { ...ctx, fromPayload: true, relativeNames: w },
             depth + 1,
             seams,
           )

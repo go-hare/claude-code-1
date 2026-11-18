@@ -70,6 +70,10 @@ import { headlessProfilerCheckpoint } from './utils/headlessProfiler.js'
 import { registerStructuredOutputEnforcement } from './utils/hooks/hookHelpers.js'
 import { getInMemoryErrors, logError } from './utils/log.js'
 import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from './services/analytics/index.js'
+import {
   applyTurnStartOriginFraming,
   countToolCalls,
   isHumanLikeOrigin,
@@ -178,6 +182,399 @@ const snipProjection = feature('HISTORY_SNIP')
   ? (require('./services/compact/snipProjection.js') as typeof import('./services/compact/snipProjection.js'))
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
+
+const STREAM_TOOL_USE_BLOCK_TYPES = new Set([
+  'tool_use',
+  'server_tool_use',
+  'mcp_tool_use',
+])
+
+export type OuterStreamEvent = {
+  type: 'stream_event'
+  event: Record<string, unknown>
+  session_id: string
+  parent_tool_use_id: string | null
+  uuid: string
+  ttft_ms?: number
+  thinking_display?: unknown
+  api_message_id?: string
+  abandoned_blocks?: {
+    api_message_id: string
+    from_block_index: number
+  }
+  text_runs_joined?: boolean
+}
+
+function apiMessageIdFields(
+  apiMessageId: string | null | undefined,
+): { api_message_id: string } | Record<string, never> {
+  return typeof apiMessageId === 'string' && apiMessageId !== ''
+    ? { api_message_id: apiMessageId }
+    : {}
+}
+
+function normalizeDeltaUsage(
+  usage: BetaMessageDeltaUsage | NonNullableUsage,
+): Record<string, unknown> {
+  const u = usage as unknown as Record<string, unknown>
+  return {
+    output_tokens_details: u.output_tokens_details ?? null,
+    cache_creation_input_tokens: u.cache_creation_input_tokens ?? null,
+    cache_read_input_tokens: u.cache_read_input_tokens ?? null,
+    input_tokens: u.input_tokens ?? null,
+    iterations: u.iterations ?? null,
+    output_tokens: u.output_tokens ?? 0,
+    server_tool_use: u.server_tool_use ?? null,
+    fallback_credit: u.fallback_credit ?? null,
+  }
+}
+
+function buildSyntheticBlockStop(
+  apiMessageId: string | null,
+  index: number,
+): OuterStreamEvent {
+  return {
+    type: 'stream_event',
+    event: { type: 'content_block_stop', index },
+    session_id: getSessionId(),
+    parent_tool_use_id: null,
+    uuid: randomUUID(),
+    ...apiMessageIdFields(apiMessageId),
+  }
+}
+
+function buildSyntheticMessageStop(
+  apiMessageId: string | null,
+  fromBlockIndex?: number,
+): OuterStreamEvent {
+  const idFields = apiMessageIdFields(apiMessageId)
+  return {
+    type: 'stream_event',
+    event: { type: 'message_stop' },
+    session_id: getSessionId(),
+    parent_tool_use_id: null,
+    uuid: randomUUID(),
+    ...idFields,
+    ...(idFields.api_message_id !== undefined &&
+    fromBlockIndex !== undefined &&
+    Number.isSafeInteger(fromBlockIndex)
+      ? {
+          abandoned_blocks: {
+            api_message_id: idFields.api_message_id,
+            from_block_index: fromBlockIndex,
+          },
+        }
+      : {}),
+  }
+}
+
+function buildSyntheticMessageEnd(
+  apiMessageId: string | null,
+  stopReason: string | null,
+  stopSequence: string | null,
+  usage: Record<string, unknown>,
+  fromBlockIndex?: number,
+): OuterStreamEvent[] {
+  return [
+    {
+      type: 'stream_event',
+      event: {
+        type: 'message_delta',
+        context_management: null,
+        delta: {
+          container: null,
+          stop_details: null,
+          stop_reason: stopReason,
+          stop_sequence: stopSequence,
+        },
+        usage,
+      },
+      session_id: getSessionId(),
+      parent_tool_use_id: null,
+      uuid: randomUUID(),
+      ...apiMessageIdFields(apiMessageId),
+    },
+    buildSyntheticMessageStop(apiMessageId, fromBlockIndex),
+  ]
+}
+
+/** Gold sr(e, n) — forward stream_event fields including api_message_id and abandoned_blocks. */
+export function buildStreamEventOut(
+  streamMsg: {
+    event: Record<string, unknown>
+    ttftMs?: number
+    thinkingDisplay?: unknown
+    apiMessageId?: string
+    abandonedBlocks?: { apiMessageId: string; fromBlockIndex: number }
+    textRunsJoined?: boolean
+  },
+  meta: { session_id: string; uuid: string },
+): OuterStreamEvent {
+  const out: OuterStreamEvent = {
+    type: 'stream_event',
+    event: streamMsg.event,
+    session_id: meta.session_id,
+    parent_tool_use_id: null,
+    uuid: meta.uuid,
+  }
+  if (streamMsg.ttftMs !== undefined) out.ttft_ms = streamMsg.ttftMs
+  if (streamMsg.thinkingDisplay !== undefined) {
+    out.thinking_display = streamMsg.thinkingDisplay
+  }
+  if (streamMsg.apiMessageId !== undefined) {
+    out.api_message_id = streamMsg.apiMessageId
+  }
+  if (streamMsg.abandonedBlocks !== undefined) {
+    out.abandoned_blocks = {
+      api_message_id: streamMsg.abandonedBlocks.apiMessageId,
+      from_block_index: streamMsg.abandonedBlocks.fromBlockIndex,
+    }
+  }
+  if (streamMsg.textRunsJoined) out.text_runs_joined = true
+  return out
+}
+
+const NOOP_PARTIAL_STREAM_CLOSER = {
+  onStreamEvent: (): OuterStreamEvent[] => [],
+  onAssistantMessage: (): void => {},
+  onTombstone: (): OuterStreamEvent[] => [],
+  closeAtTurnEnd: (): OuterStreamEvent[] => [],
+}
+
+/**
+ * Gold Xo(includePartialMessages) — tracks open partial-stream blocks and
+ * emits synthetic content_block_stop/message_delta/message_stop with
+ * api_message_id + abandoned_blocks on tombstone, stale message_start, or turn end.
+ */
+export function createPartialStreamRetractionCloser(enabled: boolean) {
+  if (!enabled) return NOOP_PARTIAL_STREAM_CLOSER
+  let currentMessageId: string | null = null
+  let openBlockIndex: number | null = null
+  let sawAnyBlockStop = false
+  let stopReasonSent = false
+  let openBlockIsToolUse = false
+  const deliveredBlockNextIndex = new Map<string, number>()
+  let deferredClose: {
+    messageId: string
+    retracted: {
+      stop_reason?: string | null
+      stop_sequence?: string | null
+      usage?: BetaMessageDeltaUsage | NonNullableUsage
+    }
+  } | null = null
+
+  function runSafe(fn: () => OuterStreamEvent[]): OuterStreamEvent[] {
+    try {
+      return fn()
+    } catch (err) {
+      logError(err)
+      return []
+    }
+  }
+
+  function flushDeferredClose(): OuterStreamEvent[] {
+    if (deferredClose === null) return []
+    const d = deferredClose
+    deferredClose = null
+    logEvent('tengu_partial_stream_retraction_closed', {
+      stop_reason: (d.retracted.stop_reason ??
+        undefined) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      had_open_block: false,
+    })
+    return buildSyntheticMessageEnd(
+      d.messageId,
+      d.retracted.stop_reason ?? null,
+      d.retracted.stop_sequence ?? null,
+      normalizeDeltaUsage(d.retracted.usage ?? EMPTY_USAGE),
+    )
+  }
+
+  function closeOpenStream(
+    usage: BetaMessageDeltaUsage | NonNullableUsage,
+    source: string,
+    sameMessageId: boolean,
+  ): OuterStreamEvent[] {
+    if (currentMessageId === null) return []
+    const events: OuterStreamEvent[] = []
+    const hadOpenBlock = openBlockIndex !== null
+    if (openBlockIndex !== null && !openBlockIsToolUse) {
+      events.push(buildSyntheticBlockStop(currentMessageId, openBlockIndex))
+    }
+    if (stopReasonSent) {
+      events.push(buildSyntheticMessageStop(currentMessageId))
+    } else {
+      events.push(
+        ...buildSyntheticMessageEnd(
+          currentMessageId,
+          null,
+          null,
+          normalizeDeltaUsage(usage),
+          sameMessageId
+            ? undefined
+            : (deliveredBlockNextIndex.get(currentMessageId) ?? 0),
+        ),
+      )
+    }
+    logEvent('tengu_partial_stream_retraction_closed', {
+      had_open_block: hadOpenBlock,
+      stop_reason_already_sent: stopReasonSent,
+      source:
+        source as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    currentMessageId = null
+    openBlockIndex = null
+    openBlockIsToolUse = false
+    stopReasonSent = false
+    return events
+  }
+
+  return {
+    onStreamEvent(
+      event: Record<string, unknown>,
+      usage: BetaMessageDeltaUsage | NonNullableUsage,
+    ): OuterStreamEvent[] {
+      return runSafe(() => {
+        const out: OuterStreamEvent[] = []
+        if (deferredClose !== null) {
+          if (event.type === 'ping') {
+            // keep deferredClose across pings
+          } else if (event.type === 'message_start') {
+            out.push(...flushDeferredClose())
+          } else {
+            currentMessageId = deferredClose.messageId
+            deferredClose = null
+          }
+        }
+        if (event.type === 'message_start') {
+          const msg = event.message as { id?: string } | undefined
+          const nextId = msg?.id ?? null
+          out.push(
+            ...closeOpenStream(
+              usage,
+              'stale_message_start',
+              nextId === currentMessageId,
+            ),
+          )
+          currentMessageId = nextId
+          openBlockIndex = null
+          openBlockIsToolUse = false
+          sawAnyBlockStop = false
+          stopReasonSent = false
+        } else if (event.type === 'content_block_start') {
+          openBlockIndex = typeof event.index === 'number' ? event.index : null
+          const cb = event.content_block as { type?: string } | undefined
+          openBlockIsToolUse =
+            cb?.type !== undefined && STREAM_TOOL_USE_BLOCK_TYPES.has(cb.type)
+          stopReasonSent = false
+        } else if (event.type === 'content_block_stop') {
+          openBlockIndex = null
+          openBlockIsToolUse = false
+          sawAnyBlockStop = true
+        } else if (event.type === 'message_delta') {
+          const delta = event.delta as
+            | { stop_reason?: string | null }
+            | undefined
+          if (delta?.stop_reason != null && openBlockIndex === null) {
+            stopReasonSent = true
+          }
+        } else if (event.type === 'message_stop') {
+          currentMessageId = null
+          openBlockIndex = null
+          openBlockIsToolUse = false
+          stopReasonSent = false
+        }
+        void sawAnyBlockStop
+        return out
+      })
+    },
+    onAssistantMessage(msg: Message): void {
+      try {
+        const m = msg as unknown as {
+          message?: { id?: string }
+          apiBlockIndex?: number
+        }
+        const id = m.message?.id
+        if (!id) return
+        const idx = m.apiBlockIndex
+        const nextIdx =
+          idx !== undefined && Number.isSafeInteger(idx) && idx >= 0
+            ? idx + 1
+            : Number.NaN
+        deliveredBlockNextIndex.set(
+          id,
+          Math.max(deliveredBlockNextIndex.get(id) ?? 0, nextIdx),
+        )
+      } catch (err) {
+        logError(err)
+      }
+    },
+    onTombstone(tombstone: {
+      message?: Message
+      displayOnly?: boolean
+    }): OuterStreamEvent[] {
+      return runSafe(() => {
+        const inner = tombstone.message as
+          | {
+              type?: string
+              message?: {
+                id?: string
+                stop_reason?: string | null
+                stop_sequence?: string | null
+                usage?: BetaMessageDeltaUsage | NonNullableUsage
+              }
+            }
+          | undefined
+        if (
+          currentMessageId === null ||
+          inner?.type !== 'assistant' ||
+          inner.message?.id !== currentMessageId
+        ) {
+          return []
+        }
+        if (tombstone.displayOnly === true) {
+          logEvent('tengu_partial_stream_retraction_display_only', {
+            had_open_block: openBlockIndex !== null,
+          })
+          return []
+        }
+        const retracted = inner.message
+        if (openBlockIndex === null) {
+          deferredClose = { messageId: currentMessageId, retracted }
+          currentMessageId = null
+          return []
+        }
+        const out: OuterStreamEvent[] = [
+          ...(openBlockIsToolUse
+            ? []
+            : [buildSyntheticBlockStop(currentMessageId, openBlockIndex)]),
+          ...buildSyntheticMessageEnd(
+            currentMessageId,
+            retracted.stop_reason ?? null,
+            retracted.stop_sequence ?? null,
+            normalizeDeltaUsage(retracted.usage ?? EMPTY_USAGE),
+          ),
+        ]
+        logEvent('tengu_partial_stream_retraction_closed', {
+          stop_reason: (retracted.stop_reason ??
+            undefined) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          had_open_block: true,
+        })
+        currentMessageId = null
+        openBlockIndex = null
+        openBlockIsToolUse = false
+        return out
+      })
+    },
+    closeAtTurnEnd(
+      usage: BetaMessageDeltaUsage | NonNullableUsage,
+    ): OuterStreamEvent[] {
+      return runSafe(() => [
+        ...flushDeferredClose(),
+        ...closeOpenStream(usage, 'turn_end', false),
+      ])
+    },
+  }
+}
 
 export type QueryEngineConfig = {
   cwd: string
@@ -1106,6 +1503,16 @@ export class QueryEngine {
     const initialStructuredOutputCalls = jsonSchema
       ? countToolCalls(this.mutableMessages, SYNTHETIC_OUTPUT_TOOL_NAME)
       : 0
+    // Gold Qt / ln / Dr — track surviving vs tombstoned StructuredOutput calls
+    const survivingStructuredOutputs: Array<{
+      toolUseID?: string
+      attachmentUuid: string
+    }> = []
+    let tombstonedStructuredOutputCalls = 0
+    const tombstonedStructuredOutputIDs = new Set<string>()
+    const partialStreamCloser = createPartialStreamRetractionCloser(
+      Boolean(includePartialMessages),
+    )
     // Official ke — only this ask's hook_deferred_tool, not the whole history.
     let deferredThisTurn: HookDeferredToolAttachment | undefined
 
@@ -1225,9 +1632,58 @@ export class QueryEngine {
       }
 
       switch (message.type) {
-        case 'tombstone':
-          // Tombstone messages are control signals for removing messages, skip them
+        case 'tombstone': {
+          const tombstonePayload = message as unknown as {
+            message?: Message
+            displayOnly?: boolean
+          }
+          for (const ev of partialStreamCloser.onTombstone(tombstonePayload)) {
+            yield ev as unknown as SDKMessage
+          }
+          const tombstonedMsg = tombstonePayload.message
+          if (
+            tombstonedMsg?.type === 'assistant' &&
+            Array.isArray(tombstonedMsg.message?.content)
+          ) {
+            const retractedIds = tombstonedMsg.message.content.flatMap(block =>
+              block &&
+              typeof block === 'object' &&
+              block.type === 'tool_use' &&
+              block.name === SYNTHETIC_OUTPUT_TOOL_NAME &&
+              typeof block.id === 'string'
+                ? [block.id]
+                : [],
+            )
+            if (retractedIds.length > 0) {
+              tombstonedStructuredOutputCalls++
+              for (const id of retractedIds) {
+                tombstonedStructuredOutputIDs.add(id)
+              }
+              const isRetracted = (entry: {
+                toolUseID?: string
+                attachmentUuid: string
+              }) =>
+                entry.toolUseID === undefined ||
+                retractedIds.includes(entry.toolUseID)
+              const retractedResults =
+                survivingStructuredOutputs.filter(isRetracted)
+              for (let i = survivingStructuredOutputs.length - 1; i >= 0; i--) {
+                if (isRetracted(survivingStructuredOutputs[i]!)) {
+                  survivingStructuredOutputs.splice(i, 1)
+                }
+              }
+              if (survivingStructuredOutputs.length === 0) {
+                structuredOutputFromTool = undefined
+              }
+              logEvent('tengu_structured_output_retracted', {
+                retracted_results: retractedResults.length,
+                surviving_results: survivingStructuredOutputs.length,
+                tombstoned_calls: tombstonedStructuredOutputCalls,
+              })
+            }
+          }
           break
+        }
         case 'active_goal': {
           // densable worker: setAppState only (no idle-checkin cancel here).
           const value =
@@ -1250,6 +1706,7 @@ export class QueryEngine {
           if (stopReason != null) {
             lastStopReason = stopReason
           }
+          partialStreamCloser.onAssistantMessage(msg)
           this.mutableMessages.push(msg)
           // densable Tth — SDK completed-message MessageDisplay (Ath→ilr→GCr)
           // after mutableMessages.push, yield transformed when different.
@@ -1292,9 +1749,21 @@ export class QueryEngine {
           break
         }
         case 'stream_event': {
-          const event = (
-            message as unknown as { event: Record<string, unknown> }
-          ).event
+          const streamMsg = message as unknown as {
+            event: Record<string, unknown>
+            ttftMs?: number
+            thinkingDisplay?: unknown
+            apiMessageId?: string
+            abandonedBlocks?: { apiMessageId: string; fromBlockIndex: number }
+            textRunsJoined?: boolean
+          }
+          const event = streamMsg.event
+          for (const ev of partialStreamCloser.onStreamEvent(
+            event,
+            currentMessageUsage,
+          )) {
+            yield ev as unknown as SDKMessage
+          }
           if (event.type === 'message_start') {
             // Reset current message usage for new message
             currentMessageUsage = EMPTY_USAGE
@@ -1355,13 +1824,10 @@ export class QueryEngine {
           }
 
           if (includePartialMessages) {
-            yield {
-              type: 'stream_event' as const,
-              event,
+            yield buildStreamEventOut(streamMsg, {
               session_id: getSessionId(),
-              parent_tool_use_id: null,
               uuid: randomUUID(),
-            }
+            }) as unknown as SDKMessage
           }
 
           break
@@ -1392,7 +1858,20 @@ export class QueryEngine {
 
           // Extract structured output from StructuredOutput tool calls
           if (attachment.type === 'structured_output') {
-            structuredOutputFromTool = attachment.data
+            const toolUseID = attachment.toolUseID as string | undefined
+            if (
+              toolUseID !== undefined
+                ? tombstonedStructuredOutputIDs.has(toolUseID)
+                : tombstonedStructuredOutputIDs.size > 0
+            ) {
+              logEvent('tengu_structured_output_late_retraction_drop', {})
+            } else {
+              survivingStructuredOutputs.push({
+                toolUseID,
+                attachmentUuid: msg.uuid,
+              })
+              structuredOutputFromTool = attachment.data
+            }
           }
           // Handle max turns reached signal from query.ts
           else if (attachment.type === 'max_turns_reached') {
@@ -1671,9 +2150,17 @@ export class QueryEngine {
           process.env.MAX_STRUCTURED_OUTPUT_RETRIES || '5',
           10,
         )
-        if (callsThisQuery >= maxRetries) {
+        if (
+          callsThisQuery + tombstonedStructuredOutputCalls >= maxRetries &&
+          survivingStructuredOutputs.length === 0
+        ) {
           if (persistSession) {
             await flushSessionStorage()
+          }
+          for (const ev of partialStreamCloser.closeAtTurnEnd(
+            currentMessageUsage,
+          )) {
+            yield ev as unknown as SDKMessage
           }
           yield {
             type: 'result',
@@ -1694,7 +2181,9 @@ export class QueryEngine {
             ),
             uuid: randomUUID(),
             errors: [
-              `Failed to provide valid structured output after ${maxRetries} attempts`,
+              tombstonedStructuredOutputCalls > 0
+                ? `Failed to provide surviving structured output after ${maxRetries} attempts (${tombstonedStructuredOutputCalls} retracted by a model fallback)`
+                : `Failed to provide valid structured output after ${maxRetries} attempts`,
             ],
           }
           return
@@ -1729,6 +2218,46 @@ export class QueryEngine {
     // result message, so any unflushed writes would be lost.
     if (persistSession) {
       await flushSessionStorage()
+    }
+
+    for (const ev of partialStreamCloser.closeAtTurnEnd(currentMessageUsage)) {
+      yield ev as unknown as SDKMessage
+    }
+
+    if (
+      jsonSchema !== undefined &&
+      isResultSuccessful(result, lastStopReason) &&
+      !deferredThisTurn &&
+      survivingStructuredOutputs.length === 0 &&
+      tombstonedStructuredOutputCalls > 0
+    ) {
+      logEvent('tengu_structured_output_retraction_exhausted', {
+        tombstoned_calls: tombstonedStructuredOutputCalls,
+        num_turns: turnCount,
+      })
+      yield {
+        type: 'result',
+        subtype: 'error_max_structured_output_retries',
+        duration_ms: Date.now() - startTime,
+        duration_api_ms: getTotalAPIDuration(),
+        is_error: true,
+        num_turns: turnCount,
+        stop_reason: lastStopReason,
+        session_id: getSessionId(),
+        total_cost_usd: getTotalCost(),
+        usage: this.totalUsage,
+        modelUsage: getModelUsage(),
+        permission_denials: this.permissionDenials,
+        fast_mode_state: getFastModeState(
+          mainLoopModel,
+          initialAppState.fastMode,
+        ),
+        uuid: randomUUID(),
+        errors: [
+          'Structured output was retracted by a model fallback and no retry produced a valid result',
+        ],
+      }
+      return
     }
 
     if (!isResultSuccessful(result, lastStopReason)) {

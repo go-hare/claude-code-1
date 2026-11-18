@@ -260,6 +260,7 @@ const PTL_RETRY_MARKER = '[earlier conversation truncated for compaction retry]'
 export function truncateHeadForPTLRetry(
   messages: Message[],
   ptlResponse: AssistantMessage,
+  mediaStripped = false,
 ): Message[] | null {
   // Strip our own synthetic marker from a previous retry before grouping.
   // Otherwise it becomes its own group 0 and the 20% fallback stalls
@@ -280,8 +281,9 @@ export function truncateHeadForPTLRetry(
     let acc = 0
     dropCount = 0
     for (const g of groups) {
+      const target = mediaStripped ? stripImagesFromMessages(g) : g
       acc += roughTokenCountEstimationForMessages(
-        g as Parameters<typeof roughTokenCountEstimationForMessages>[0],
+        target as Parameters<typeof roughTokenCountEstimationForMessages>[0],
       )
       dropCount++
       if (acc >= tokenGap) break
@@ -293,11 +295,12 @@ export function truncateHeadForPTLRetry(
     // tool-heavy rounds. Ensure we drop at least 20% of groups AND at least
     // 25% of estimated token volume across the groups.
     const minGroupDrop = Math.max(1, Math.floor(groups.length * 0.2))
-    const groupTokens = groups.map(g =>
-      roughTokenCountEstimationForMessages(
-        g as Parameters<typeof roughTokenCountEstimationForMessages>[0],
-      ),
-    )
+    const groupTokens = groups.map(g => {
+      const target = mediaStripped ? stripImagesFromMessages(g) : g
+      return roughTokenCountEstimationForMessages(
+        target as Parameters<typeof roughTokenCountEstimationForMessages>[0],
+      )
+    })
     const totalTokens = groupTokens.reduce((sum, n) => sum + n, 0)
     const targetTokenDrop = Math.ceil(totalTokens * 0.25)
     let accTokens = 0
@@ -602,7 +605,7 @@ export async function compactConversation(
     let summary: string | null
     let ptlAttempts = 0
     for (;;) {
-      summaryResponse = await streamCompactSummary({
+      const streamResult = await streamCompactSummary({
         messages: messagesToSummarize,
         summaryRequest,
         appState,
@@ -615,6 +618,7 @@ export async function compactConversation(
         // the doomed cache-sharing fork and strips thinking/tool payloads.
         stripNonEssential: stripNonEssential || ptlAttempts > 0,
       })
+      summaryResponse = streamResult.response
       summary = getAssistantMessageText(summaryResponse)
       if (!summary?.startsWith(PROMPT_TOO_LONG_ERROR_MESSAGE)) break
 
@@ -623,7 +627,11 @@ export async function compactConversation(
       ptlAttempts++
       const truncated =
         ptlAttempts <= MAX_PTL_RETRIES
-          ? truncateHeadForPTLRetry(messagesToSummarize, summaryResponse)
+          ? truncateHeadForPTLRetry(
+              messagesToSummarize,
+              summaryResponse,
+              streamResult.mediaStripped,
+            )
           : null
       if (!truncated) {
         logEvent('tengu_compact_failed', {
@@ -1191,7 +1199,7 @@ export async function partialCompactConversation(
     let summary: string | null
     let ptlAttempts = 0
     for (;;) {
-      summaryResponse = await streamCompactSummary({
+      const streamResult = await streamCompactSummary({
         messages: apiMessages,
         summaryRequest,
         appState: context.getAppState(),
@@ -1201,13 +1209,18 @@ export async function partialCompactConversation(
         thinkingStripPlan: buildThinkingStripPlanFromMessages(allMessages),
         advisorStripPlan: buildAdvisorStripPlanFromMessages(allMessages),
       })
+      summaryResponse = streamResult.response
       summary = getAssistantMessageText(summaryResponse)
       if (!summary?.startsWith(PROMPT_TOO_LONG_ERROR_MESSAGE)) break
 
       ptlAttempts++
       const truncated =
         ptlAttempts <= MAX_PTL_RETRIES
-          ? truncateHeadForPTLRetry(apiMessages, summaryResponse)
+          ? truncateHeadForPTLRetry(
+              apiMessages,
+              summaryResponse,
+              streamResult.mediaStripped,
+            )
           : null
       if (!truncated) {
         logEvent('tengu_partial_compact_failed', {
@@ -1495,7 +1508,7 @@ async function streamCompactSummary({
   stripNonEssential?: boolean
   thinkingStripPlan?: import('../../utils/thinking.js').ThinkingStripPlan
   advisorStripPlan?: import('../../utils/messages.js').AdvisorStripPlan
-}): Promise<AssistantMessage> {
+}): Promise<{ response: AssistantMessage; mediaStripped: boolean }> {
   // When prompt cache sharing is enabled, use forked agent to reuse the
   // main conversation's cached prefix (system prompt, tools, context messages).
   // Falls back to regular streaming path on failure.
@@ -1584,7 +1597,7 @@ async function streamCompactSummary({
                   : 0,
             })
           }
-          return assistantMsg
+          return { response: assistantMsg, mediaStripped: false }
         }
         logForDebugging(
           `Compact cache sharing: no text in response, falling back. Response: ${jsonStringify(assistantMsg)}`,
@@ -1704,8 +1717,8 @@ async function streamCompactSummary({
         if (
           !hasStartedStreaming &&
           streamEvent.type === 'stream_event' &&
-          streamEvent.event.type === 'content_block_start' &&
-          streamEvent.event.content_block.type === 'text'
+          streamEvent.event?.type === 'content_block_start' &&
+          streamEvent.event?.content_block?.type === 'text'
         ) {
           hasStartedStreaming = true
           context.setStreamMode?.('responding')
@@ -1713,8 +1726,8 @@ async function streamCompactSummary({
 
         if (
           streamEvent.type === 'stream_event' &&
-          streamEvent.event.type === 'content_block_delta' &&
-          streamEvent.event.delta.type === 'text_delta'
+          streamEvent.event?.type === 'content_block_delta' &&
+          streamEvent.event?.delta?.type === 'text_delta'
         ) {
           const charactersStreamed = streamEvent.event.delta.text.length
           context.setResponseLength?.(length => length + charactersStreamed)
@@ -1728,7 +1741,7 @@ async function streamCompactSummary({
       }
 
       if (response) {
-        return response
+        return { response, mediaStripped: true }
       }
 
       if (attempt < maxAttempts) {

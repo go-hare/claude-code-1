@@ -12,26 +12,54 @@
  * lives in settings.ts, so settings.ts does it before calling here. No imports.
  */
 
-const timestamps = new Map<string, number>()
+import { createHash } from 'crypto'
 
-export function markInternalWrite(path: string): void {
-  timestamps.set(path, Date.now())
+type InternalWriteRecord = {
+  markedAt: number
+  contentHash: string | undefined
+}
+
+const writes = new Map<string, InternalWriteRecord>()
+
+/**
+ * Normalize line endings (CRLF -> LF, matching SEA `sV`) and hash with SHA-256
+ * so `changeDetector` can compare disk contents against what we wrote.
+ */
+export function hashSettingsContent(content: string | Buffer): string {
+  const text = (
+    typeof content === 'string' ? content : content.toString('utf8')
+  ).replaceAll('\r\n', '\n')
+  return createHash('sha256').update(text, 'utf8').digest('hex')
+}
+
+export function markInternalWrite(
+  path: string,
+  content?: string | Buffer,
+): void {
+  writes.set(path, {
+    markedAt: Date.now(),
+    contentHash:
+      content !== undefined ? hashSettingsContent(content) : undefined,
+  })
 }
 
 /**
- * True if `path` was marked within `windowMs`. Consumes the mark on match —
- * the watcher fires once per write, so a matched mark shouldn't suppress
- * the next (real, external) change to the same file.
+ * Returns the recorded content hash (or `''` if marked without content) if
+ * `path` was marked within `windowMs`, consuming the mark on match.
+ * Returns `undefined` when no fresh mark exists.
  */
-export function consumeInternalWrite(path: string, windowMs: number): boolean {
-  const ts = timestamps.get(path)
-  if (ts !== undefined && Date.now() - ts < windowMs) {
-    timestamps.delete(path)
-    return true
+export function consumeInternalWrite(
+  path: string,
+  windowMs: number,
+): string | undefined {
+  const rec = writes.get(path)
+  if (rec !== undefined && Date.now() - rec.markedAt < windowMs) {
+    writes.delete(path)
+    return rec.contentHash ?? ''
   }
-  return false
+  return undefined
 }
 
 export function clearInternalWrites(): void {
-  timestamps.clear()
+  writes.clear()
 }

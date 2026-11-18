@@ -459,6 +459,107 @@ export function toolAlwaysAllowedRule(
 }
 
 /**
+ * #22 SEA `$Fe`: true when the decisionReason is a server-pushed ask rule
+ * (`mcpServerPolicy`).
+ */
+export function isMcpServerPolicyAskReason(
+  reason: PermissionDecisionReason | undefined,
+): boolean {
+  return (
+    reason?.type === 'rule' &&
+    reason.rule.ruleBehavior === 'ask' &&
+    reason.rule.source === 'mcpServerPolicy'
+  )
+}
+
+/**
+ * #22 SEA `Ern` / `ekt`: in plan mode, non-read-only MCP connector tools
+ * carrying a server-pushed `mcpServerPolicy` ask rule must hit `plan_mode_floor`
+ * instead of being sent to the auto mode classifier.
+ */
+export function isPlanModeWriteFloorForMcpServerPolicy(
+  reason: PermissionDecisionReason | undefined,
+  tool: Pick<Tool, 'name' | 'mcpInfo' | 'inputSchema' | 'isReadOnly'>,
+  input: { [key: string]: unknown },
+  permissionContext: Pick<ToolPermissionContext, 'mode'>,
+): boolean {
+  if (!isMcpServerPolicyAskReason(reason)) return false
+  if (permissionContext.mode !== 'plan') return false
+  if (!tool.mcpInfo) return false
+  try {
+    const parsedInput = tool.inputSchema.parse(input)
+    return (
+      !tool.isReadOnly(parsedInput) &&
+      !isChromeMcpReadOnlyTool(getToolNameForPermissionCheck(tool), parsedInput)
+    )
+  } catch {
+    return true
+  }
+}
+
+/**
+ * #64 SEA `yis` + `e1n` + `wBr`: return the tool name to suggest for an
+ * allow rule in an auto-mode denial message, or `undefined` if suggesting a
+ * whole-tool rule would skip the classifier or be ignored by Claude Code.
+ */
+export function getAutoModeDenialAllowRuleToolName(
+  tool: Pick<
+    Tool,
+    'name' | 'mcpInfo' | 'requiresUserInteraction' | 'suppressesAlwaysAllowRule'
+  > & {
+    suppressesAllPermissionUpdates?: (input: Record<string, unknown>) => boolean
+    ignoresWholeToolAllowRule?: (input: Record<string, unknown>) => boolean
+  },
+  input: Record<string, unknown>,
+  permissionResult: PermissionDecision | undefined,
+  context: Pick<ToolUseContext, 'forRemoteExecution'>,
+): string | undefined {
+  if (permissionResult === undefined) return undefined
+  if (
+    isMcpServerPolicyAskReason(permissionResult.decisionReason) ||
+    (permissionResult.behavior === 'ask' &&
+      permissionResult.matchedAskRule?.source === 'mcpServerPolicy')
+  ) {
+    return undefined
+  }
+  if (
+    permissionResult.decisionReason?.type === 'hook' ||
+    permissionResult.decisionReason?.type === 'sandboxOverride' ||
+    findSafetyCheckDecision(permissionResult.decisionReason) !== undefined
+  ) {
+    return undefined
+  }
+  if (
+    (permissionResult.behavior === 'ask' &&
+      permissionResult.suppressAlwaysAllowRule === true) ||
+    context.forRemoteExecution === true
+  ) {
+    return undefined
+  }
+  if (
+    tool.requiresUserInteraction?.() === true ||
+    tool.suppressesAlwaysAllowRule?.(input) === true ||
+    tool.suppressesAllPermissionUpdates?.(input) === true ||
+    tool.ignoresWholeToolAllowRule?.(input) === true
+  ) {
+    return undefined
+  }
+  const toolName = getToolNameForPermissionCheck(tool)
+  if (toolName === BASH_TOOL_NAME || toolName === POWERSHELL_TOOL_NAME) {
+    // SEA `wBr` / `ece`: omit Bash/PowerShell when sandbox auto-allow or
+    // classifier-skip would be bypassed by a whole-tool rule.
+    if (
+      SandboxManager.isSandboxingEnabled() &&
+      SandboxManager.isAutoAllowBashIfSandboxedEnabled()
+    ) {
+      return undefined
+    }
+    return toolName
+  }
+  return toolName
+}
+
+/**
  * densable 2.1.235 #12 `jze` / stripWholeToolGrantsForAsk.
  *
  * When an ask sets suppressAlwaysAllowRule (or the tool's
@@ -802,16 +903,31 @@ function markToolCheckEvaluatedForCall(
 
 const toolCheckSite: FunctionHookHopSite = {
   restoreArgument: (passed, original) =>
-    restorePinnedKeys(['tool_use_id'], passed, original),
+    restorePinnedKeys(
+      ['tool_use_id', 'agentId', 'ceiling', 'approver', 'isReadOnly'],
+      passed,
+      original,
+    ),
   checkArgument: (passed, original) => {
     if (
       passed.tool !== original.tool ||
       pinValue(passed.input) !== pinValue(original.input) ||
-      passed.tool_use_id !== original.tool_use_id
+      passed.tool_use_id !== original.tool_use_id ||
+      passed.agentId !== original.agentId ||
+      passed.ceiling !== original.ceiling ||
+      passed.approver !== original.approver ||
+      passed.isReadOnly !== original.isReadOnly
     ) {
       return 'the tool, its input and the call are the question and are pinned; a hook answers { decision }, it does not ask about another call'
     }
     return undefined
+  },
+  restoreResult: (returned, priorResults, original) => {
+    const { ceiling: _dropped, ...rest } = returned
+    const ceiling =
+      original.ceiling ??
+      priorResults.find(entry => entry.ceiling !== undefined)?.ceiling
+    return ceiling === undefined ? rest : { ...rest, ceiling }
   },
 }
 
@@ -1008,10 +1124,21 @@ export async function evaluatePermissionWithToolCheck<
   markToolCheckEvaluatedForCall(context, toolUseID, input)
   let decided: PermissionDecision<Input> | undefined
   const hookFloor = context.hookAskFloor === true ? 'PreToolUse' : undefined
+  let isToolReadOnly: boolean | undefined
+  if (typeof tool.isReadOnly === 'function') {
+    try {
+      isToolReadOnly = tool.isReadOnly(input as never)
+    } catch {
+      isToolReadOnly = undefined
+    }
+  }
   const payload: Record<string, unknown> = {
     tool: tool.name,
     input,
     ...(toolUseID !== undefined && { tool_use_id: toolUseID }),
+    ...(context.agentId !== undefined && { agentId: context.agentId }),
+    ...(tool.requiresUserInteraction?.() && { ceiling: 'ask' }),
+    ...(isToolReadOnly !== undefined && { isReadOnly: isToolReadOnly }),
   }
   let rawOut: unknown
   try {
@@ -1234,15 +1361,25 @@ const evaluateToolPermission: CanUseToolFn = async (
         })
         return result
       }
-      // densable 2.1.218 fXd plan_mode_floor:
+      // densable 2.1.218 fXd plan_mode_floor + #22 2.1.290 Ern/ekt:
       //   x = decisionReason?.type === 'mode' && mode === 'plan' && !OFo(tool, input)
-      // Only when checkPermissions itself returned a plan-mode block — not for
-      // every Bash ask while the session is in plan mode. Plan+auto lets the
-      // classifier judge Bash the static analyzer cannot prove read-only (#30).
+      //     || !hookAskFloor && Ern(decisionReason, tool, input, context)
+      // Non-read-only MCP connector tools with a server-pushed mcpServerPolicy
+      // ask rule must also hit plan_mode_floor in plan+auto mode (#22).
       const planModeFloorHit =
-        result.decisionReason?.type === 'mode' &&
-        result.decisionReason.mode === 'plan' &&
-        !isChromeMcpReadOnlyTool(getToolNameForPermissionCheck(tool), input)
+        (result.decisionReason?.type === 'mode' &&
+          result.decisionReason.mode === 'plan' &&
+          !isChromeMcpReadOnlyTool(
+            getToolNameForPermissionCheck(tool),
+            input,
+          )) ||
+        (!context.hookAskFloor &&
+          isPlanModeWriteFloorForMcpServerPolicy(
+            result.decisionReason,
+            tool,
+            input,
+            layeredPermissionContext,
+          ))
       if (planModeFloorHit) {
         if (layeredPermissionContext.shouldAvoidPermissionPrompts) {
           return {
@@ -1967,7 +2104,14 @@ const evaluateToolPermission: CanUseToolFn = async (
             classifier: 'auto-mode',
             reason: classifierResult.reason,
           },
-          message: buildYoloRejectionMessage(classifierResult.reason),
+          message: buildYoloRejectionMessage(classifierResult.reason, {
+            allowRuleToolName: getAutoModeDenialAllowRuleToolName(
+              tool,
+              input,
+              result,
+              context,
+            ),
+          }),
         }
       }
 
@@ -2153,10 +2297,34 @@ function handleDenialLimitExceeded(
  *
  * Caller must pre-check tool.requiresUserInteraction() — step 1e is not replicated.
  */
+function resolvePermissionCheckFailureDecision(
+  tool: Tool,
+  input: { [key: string]: unknown },
+  context: ToolUseContext,
+): PermissionDecision | undefined {
+  const fn = (
+    tool as {
+      permissionCheckFailureDecision?: (
+        input: unknown,
+        context: ToolUseContext,
+      ) => PermissionResult | undefined
+    }
+  ).permissionCheckFailureDecision
+  const failureDecision = fn?.(input, context)
+  if (
+    failureDecision?.behavior === 'deny' ||
+    failureDecision?.behavior === 'ask'
+  ) {
+    return failureDecision
+  }
+  return undefined
+}
+
 export async function checkRuleBasedPermissions(
   tool: Tool,
   input: { [key: string]: unknown },
   context: ToolUseContext,
+  options?: { crashIsObjection?: boolean },
 ): Promise<PermissionAskDecision | PermissionDenyDecision | null> {
   // densable bn: sticky layers overlay for rule-based checks
   const toolPermissionContext = getToolPermissionContextFromLayers(context)
@@ -2209,6 +2377,24 @@ export async function checkRuleBasedPermissions(
       throw e
     }
     logError(e)
+    const failureDecision = resolvePermissionCheckFailureDecision(
+      tool,
+      input,
+      context,
+    )
+    if (failureDecision && failureDecision.behavior !== 'allow') {
+      return failureDecision
+    }
+    if (options?.crashIsObjection) {
+      return {
+        behavior: 'ask',
+        decisionReason: {
+          type: 'other',
+          reason: 'permission check failed',
+        },
+        message: createPermissionRequestMessage(tool.name),
+      }
+    }
   }
 
   // 1d. Tool implementation denied (catches bash subcommand denies wrapped
@@ -2349,6 +2535,14 @@ async function hasPermissionsToUseToolInner(
       throw e
     }
     logError(e)
+    const failureDecision = resolvePermissionCheckFailureDecision(
+      tool,
+      input,
+      context,
+    )
+    if (failureDecision && failureDecision.behavior !== 'allow') {
+      return failureDecision
+    }
   }
 
   // 1d. Tool implementation denied permission

@@ -40,11 +40,19 @@ function normalizeScriptLookupPath(raw: string): string {
   return /^[A-Za-z]:\//.test(normalized) ? normalized.toLowerCase() : normalized
 }
 
-export function extractCommandScriptPaths(command: string): string[] {
-  const tokens: string[] = []
+export type ScriptPathCandidate = {
+  path: string
+  cutFrom?: string
+}
+
+export function extractCommandScriptCandidates(
+  command: string,
+): ScriptPathCandidate[] {
+  const tokens: Array<{ value: string; quoted: boolean }> = []
   let current = ''
   let quote: '"' | "'" | undefined
   let active = false
+  let wasQuoted = false
   for (let i = 0; i < command.length; i++) {
     const ch = command[i]!
     if (quote !== undefined) {
@@ -55,29 +63,50 @@ export function extractCommandScriptPaths(command: string): string[] {
     if (ch === '"' || ch === "'") {
       quote = ch
       active = true
+      wasQuoted = true
     } else if (ch === '\\' && i + 1 < command.length) {
       current += command[++i]!
       active = true
     } else if (/\s/.test(ch)) {
       if (active) {
-        tokens.push(current)
+        tokens.push({ value: current, quoted: wasQuoted })
         current = ''
         active = false
+        wasQuoted = false
       }
     } else {
       current += ch
       active = true
     }
   }
-  if (active) tokens.push(current)
-  return tokens.filter(
-    (token, idx) =>
-      idx > 0 &&
-      !token.startsWith('-') &&
-      (token.includes('/') ||
-        token.includes('\\') ||
-        /\.(?:sh|bash|zsh|py|js|mjs|cjs|ts|pl|rb|ps1)$/i.test(token)),
-  )
+  if (active) tokens.push({ value: current, quoted: wasQuoted })
+  const candidates: ScriptPathCandidate[] = []
+  for (let idx = 0; idx < tokens.length; idx++) {
+    const { value, quoted } = tokens[idx]!
+    if (
+      idx === 0 ||
+      value.startsWith('-') ||
+      !(
+        value.includes('/') ||
+        value.includes('\\') ||
+        /\.(?:sh|bash|zsh|py|js|mjs|cjs|ts|pl|rb|ps1)$/i.test(value)
+      )
+    ) {
+      continue
+    }
+    candidates.push({ path: value, cutFrom: undefined })
+    if (!quoted) {
+      const splitPrefix = /^[^ \t\n]+(?= )/.exec(value)?.[0]
+      if (splitPrefix !== undefined) {
+        candidates.push({ path: splitPrefix, cutFrom: value })
+      }
+    }
+  }
+  return candidates
+}
+
+export function extractCommandScriptPaths(command: string): string[] {
+  return extractCommandScriptCandidates(command).map(c => c.path)
 }
 
 const MISSING_SCRIPT_LINE_RE =
@@ -222,12 +251,15 @@ export function executeInBackground({
           }
         }
       }
+      const scriptCandidates = scriptPaths
+        ? scriptPaths.map(p => ({ path: p, cutFrom: undefined }))
+        : extractCommandScriptCandidates(command)
       const missingScript =
         result.code === 2
           ? await detectMissingAsyncRewakeScript({
               stdout,
               stderr,
-              scriptPaths: scriptPaths ?? extractCommandScriptPaths(command),
+              scriptPaths: scriptCandidates.map(c => c.path),
             })
           : undefined
       if (
@@ -247,8 +279,16 @@ export function executeInBackground({
         let summary: string
         let output: string
         if (missingScript !== undefined) {
-          prefix = `${hookName} hook could not run: ${missingScript.scriptPath} cannot be opened, so its command exited with code 2 without doing any work. This is a broken hook installation, not feedback on your work; it is reported this once and identical repeats are dropped. Interpreter output:`
+          const cutFrom = scriptCandidates.find(
+            c => c.path === missingScript.scriptPath,
+          )?.cutFrom
+          let splitHint = ''
           summary = `${hookEvent} hook could not open ${basename(missingScript.scriptPath)}`
+          if (cutFrom !== undefined) {
+            splitHint = ` (the hook's command passes ${cutFrom} without quotes, so the shell split it at the space)`
+            summary = `${hookEvent} hook needs quotes around a path with a space (${basename(cutFrom)})`
+          }
+          prefix = `${hookName} hook could not run: ${missingScript.scriptPath} cannot be opened${splitHint}, so its command exited with code 2 without doing any work. This is a broken hook installation, not feedback on your work; it is reported this once and identical repeats are dropped. Interpreter output:`
           output = missingScript.output
         } else {
           prefix =

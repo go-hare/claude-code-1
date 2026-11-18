@@ -27,6 +27,12 @@ type SecretRule = {
   source: string
   /** Optional JS regex flags (most rules are case-sensitive by default) */
   flags?: string
+  /** Optional cheap prefilter regex checked before running `re` (avoids lookahead backtracking) */
+  prefilter?: RegExp
+  /** Character class for run-guarded scan/redact lookahead (prevents ReDoS on long token runs) */
+  run?: string
+  /** Character class for run-guarded display-redact lookahead */
+  displayRun?: string
   /**
    * densable `WKc.confidence`. Display redaction (`redactForDisplay` / `tAt`)
    * only applies `high`. Full redaction (`redactSecrets` / `pp`) applies all.
@@ -60,6 +66,14 @@ const DISPLAY_LEADING = '(?<![a-zA-Z0-9_\\-])'
 /** densable `Mhy` — min chars between BEGIN/END private-key markers. */
 const PRIVATE_KEY_MIN_GAP = 64
 
+const JWT_CHAR = '[A-Za-z0-9_-]'
+const JWT_PART = `${JWT_CHAR}{10}${JWT_CHAR}*`
+const JWT_TAIL = `\\.${JWT_PART}\\.${JWT_PART}`
+const LOOSE_JWT_SOURCE = `(?<!${JWT_CHAR})(?=${JWT_CHAR}+${JWT_TAIL})(?:${JWT_CHAR}*?-)??(eyJ${JWT_PART}${JWT_TAIL})`
+
+const GITLAB_TOKEN_CHAR = '[\\w=-]'
+const GITLAB_TOKEN_BODY = `${GITLAB_TOKEN_CHAR}{20,}(?:\\.[0-9a-z]{9})?`
+
 const SECRET_RULES: SecretRule[] = [
   // — densable low-confidence (full redact only; not used by scanForSecrets high path) —
   {
@@ -86,8 +100,8 @@ const SECRET_RULES: SecretRule[] = [
   },
   {
     id: 'loose-jwt',
-    source:
-      '\\b(eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,})',
+    prefilter: /eyJ/,
+    source: LOOSE_JWT_SOURCE,
     confidence: 'low',
   },
 
@@ -132,6 +146,7 @@ const SECRET_RULES: SecretRule[] = [
   {
     id: 'anthropic-oauth-token',
     source: `\\b(sk-ant-(?:oat|ort)\\d{2}-[\\w-]{20,})(?:[\\x60'"\\s;]|\\\\[nr]|$)`,
+    run: '[\\w-]',
   },
   {
     id: 'openai-api-key',
@@ -182,47 +197,58 @@ const SECRET_RULES: SecretRule[] = [
   {
     id: 'gitlab-pat',
     // densable: full redaction of routable glpat-
-    source: 'glpat-[\\w-]{20,}',
+    source: `glpat-${GITLAB_TOKEN_BODY}`,
+    displayRun: GITLAB_TOKEN_CHAR,
   },
   {
     id: 'gitlab-deploy-token',
-    source: 'gldt-[0-9a-zA-Z_\\-]{20,}',
+    source: `gldt-${GITLAB_TOKEN_BODY}`,
+    displayRun: GITLAB_TOKEN_CHAR,
   },
   {
     id: 'gitlab-runner-authentication-token',
-    source: 'glrt-[0-9a-zA-Z_\\-]{20,}',
+    source: `glrt-${GITLAB_TOKEN_BODY}`,
+    displayRun: GITLAB_TOKEN_CHAR,
   },
   {
     id: 'gitlab-oauth-app-secret',
-    source: 'gloas-[0-9a-zA-Z_\\-]{20,}',
+    source: `gloas-${GITLAB_TOKEN_BODY}`,
+    displayRun: GITLAB_TOKEN_CHAR,
   },
   {
     id: 'gitlab-pipeline-trigger-token',
-    source: 'glptt-[0-9a-zA-Z_\\-]{20,}',
+    source: `glptt-${GITLAB_TOKEN_BODY}`,
+    displayRun: GITLAB_TOKEN_CHAR,
   },
   {
     id: 'gitlab-kubernetes-agent-token',
-    source: 'glagent-[0-9a-zA-Z_\\-]{20,}',
+    source: `glagent-${GITLAB_TOKEN_BODY}`,
+    displayRun: GITLAB_TOKEN_CHAR,
   },
   {
     id: 'gitlab-incoming-mail-token',
-    source: 'glimt-[0-9a-zA-Z_\\-]{20,}',
+    source: `glimt-${GITLAB_TOKEN_BODY}`,
+    displayRun: GITLAB_TOKEN_CHAR,
   },
   {
     id: 'gitlab-scim-oauth-token',
-    source: 'glsoat-[0-9a-zA-Z_\\-]{20,}',
+    source: `glsoat-${GITLAB_TOKEN_BODY}`,
+    displayRun: GITLAB_TOKEN_CHAR,
   },
   {
     id: 'gitlab-ci-build-token',
-    source: 'glcbt-[0-9a-zA-Z_\\-]{20,}',
+    source: `glcbt-${GITLAB_TOKEN_BODY}`,
+    displayRun: GITLAB_TOKEN_CHAR,
   },
   {
     id: 'gitlab-feed-token',
-    source: 'glft-[0-9a-zA-Z_\\-]{20,}',
+    source: `glft-${GITLAB_TOKEN_BODY}`,
+    displayRun: GITLAB_TOKEN_CHAR,
   },
   {
     id: 'gitlab-feature-flag-client-token',
-    source: 'glffct-[0-9a-zA-Z_\\-]{20,}',
+    source: `glffct-${GITLAB_TOKEN_BODY}`,
+    displayRun: GITLAB_TOKEN_CHAR,
   },
 
   // — Communication —
@@ -353,6 +379,7 @@ const DISPLAY_PATH_CHARS = /[/.@:~*?\\]/
 type CompiledRule = {
   id: string
   confidence: 'high' | 'low'
+  prefilter?: RegExp
   re: RegExp
 }
 
@@ -372,33 +399,68 @@ function flagsWithGlobal(
   return forceGlobal ? `${base}g` : base
 }
 
+function stripTrailingBoundary(source: string): string {
+  return source.endsWith(TRAILING_BOUNDARY)
+    ? source.slice(0, -TRAILING_BOUNDARY.length)
+    : source
+}
+
 function compileRules(forRedact: boolean): CompiledRule[] {
-  return SECRET_RULES.map(r => ({
-    id: r.id,
-    confidence: r.confidence ?? 'high',
-    re: new RegExp(r.source, flagsWithGlobal(r.flags, forRedact)),
-  }))
+  return SECRET_RULES.map(r => {
+    const baseFlags = (r.flags ?? '').replaceAll('g', '')
+    const confidence = r.confidence ?? 'high'
+    if (r.run === undefined) {
+      return {
+        id: r.id,
+        confidence,
+        ...(r.prefilter !== undefined && { prefilter: r.prefilter }),
+        re: new RegExp(r.source, flagsWithGlobal(r.flags, forRedact)),
+      }
+    }
+    return {
+      id: r.id,
+      confidence,
+      prefilter: new RegExp(stripTrailingBoundary(r.source), baseFlags),
+      re: new RegExp(
+        `(?:(?<!${r.run})|(?<=\\\\[nr]))(?=${r.run}+${TRAILING_BOUNDARY})${r.run}*?${r.source}`,
+        flagsWithGlobal(r.flags, forRedact),
+      ),
+    }
+  })
 }
 
 /** densable `$hy` — high-confidence display rules with shell-delimiter-safe boundaries. */
 function compileDisplayRules(): CompiledRule[] {
   return SECRET_RULES.map(r => {
     const confidence = r.confidence ?? 'high'
-    let source = r.source
-    if (confidence === 'high') {
-      if (source.endsWith(TRAILING_BOUNDARY)) {
-        source =
-          DISPLAY_LEADING +
-          source.slice(0, -TRAILING_BOUNDARY.length) +
-          DISPLAY_BOUNDARY
-      } else {
-        source = DISPLAY_LEADING + source + DISPLAY_BOUNDARY
+    const baseFlags = (r.flags ?? '').replaceAll('g', '')
+    const globalFlags = flagsWithGlobal(r.flags, true)
+    if (confidence !== 'high') {
+      return {
+        id: r.id,
+        confidence,
+        re: new RegExp(r.source, globalFlags),
+      }
+    }
+    const stripped = stripTrailingBoundary(r.source)
+    if (r.displayRun === undefined) {
+      return {
+        id: r.id,
+        confidence,
+        re: new RegExp(
+          DISPLAY_LEADING + stripped + DISPLAY_BOUNDARY,
+          globalFlags,
+        ),
       }
     }
     return {
       id: r.id,
       confidence,
-      re: new RegExp(source, flagsWithGlobal(r.flags, true)),
+      prefilter: new RegExp(stripped, baseFlags),
+      re: new RegExp(
+        `(?<!${r.displayRun})(?=${r.displayRun}+${DISPLAY_BOUNDARY})${r.displayRun}*?${DISPLAY_LEADING}(${stripped})${DISPLAY_BOUNDARY}`,
+        globalFlags,
+      ),
     }
   })
 }
@@ -532,6 +594,7 @@ export function scanForSecrets(content: string): SecretMatch[] {
   for (const rule of getScanRules()) {
     if (rule.confidence !== 'high') continue
     if (seen.has(rule.id)) continue
+    if (rule.prefilter?.test(content) === false) continue
     if (rule.re.test(content)) {
       seen.add(rule.id)
       matches.push({
@@ -565,6 +628,7 @@ export function redactSecrets(content: string): string {
 
   let out = redactPrivateKeyBlocks(content)
   for (const rule of getFullRedactRules()) {
+    if (rule.prefilter?.test(out) === false) continue
     out = out.replace(rule.re, replaceMatchWithRedacted)
   }
 
@@ -588,7 +652,9 @@ export function redactSecrets(content: string): string {
 export function redactSecretsForDisplay(content: string): string {
   let out = content
   for (const rule of getDisplayRedactRules()) {
-    if (rule.confidence !== 'high') continue
+    if (rule.confidence !== 'high' || rule.prefilter?.test(out) === false) {
+      continue
+    }
     out = out.replace(rule.re, displayRedactReplacer)
   }
   return out

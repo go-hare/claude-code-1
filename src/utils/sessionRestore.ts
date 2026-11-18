@@ -419,6 +419,8 @@ type ResumeLoadResult = {
    * resume only when set; tombstone (user-off) leaves this undefined.
    */
   bridgeSessionId?: string
+  /** densable 2.1.290 #97 — persisted permissionMode from transcript/metadata. */
+  permissionMode?: string
 }
 
 /**
@@ -608,6 +610,8 @@ export async function processResumedConversation(
     replyOnResume?: boolean
     /** densable Jqy: continue must not run y_u even if CCR stash leaks. */
     continueRequested?: boolean
+    /** densable 2.1.290 #97: CLI --permission-mode / pinned startup mode. */
+    permissionModeSuppliedOnInvocation?: boolean
   },
   context: {
     modeApi: CoordinatorModeApi | null
@@ -766,9 +770,13 @@ export async function processResumedConversation(
   }
 
   // densable #13 / Jqy: continue never y_u. Resume applies CCR stash.
+  // densable 2.1.290 #97 (`EXt` / `VKa`): interactive planModeOnInteractiveResume.
   let planHydratedState = context.initialState
   {
-    const { applyStashedPlanModeResumeForLaunch } =
+    const {
+      applyStashedPlanModeResumeForLaunch,
+      preparePlanModeRestoreOnInteractiveResume,
+    } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('./permissions/planModeResume.js') as typeof import('./permissions/planModeResume.js')
     planHydratedState = applyStashedPlanModeResumeForLaunch<AppState>(
@@ -778,6 +786,26 @@ export async function processResumedConversation(
         continueRequested: !!opts.continueRequested,
       },
     )
+    const applyPlanModeResume = await preparePlanModeRestoreOnInteractiveResume(
+      {
+        storedPermissionMode: result.permissionMode,
+        messages:
+          result.messages as unknown as readonly import('./permissions/planModeResume.js').TranscriptPlanScanMessage[],
+        forkSession: opts.forkSession,
+        permissionModeSuppliedOnInvocation:
+          !!opts.permissionModeSuppliedOnInvocation,
+        lane: 'interactive',
+      },
+    )
+    const restoredToolPermissionContext = applyPlanModeResume(
+      planHydratedState.toolPermissionContext,
+    )
+    if (restoredToolPermissionContext !== undefined) {
+      planHydratedState = {
+        ...planHydratedState,
+        toolPermissionContext: restoredToolPermissionContext,
+      }
+    }
   }
 
   return {

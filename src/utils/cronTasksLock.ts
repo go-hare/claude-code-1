@@ -15,7 +15,11 @@ import { getProjectRoot, getSessionId } from '../bootstrap/state.js'
 import { registerCleanup } from './cleanupRegistry.js'
 import { logForDebugging } from './debug.js'
 import { getErrnoCode } from './errors.js'
-import { isProcessRunning } from './genericProcessUtils.js'
+import {
+  isProcessRunning,
+  ownProcStartAsync,
+  processLstartMatches,
+} from './genericProcessUtils.js'
 import { safeParseJSON } from './json.js'
 import { lazySchema } from './lazySchema.js'
 import { jsonStringify } from './slowOperations.js'
@@ -26,6 +30,7 @@ const schedulerLockSchema = lazySchema(() =>
   z.object({
     sessionId: z.string(),
     pid: z.number(),
+    procStart: z.string().optional(),
     acquiredAt: z.number(),
   }),
 )
@@ -119,6 +124,7 @@ export async function tryAcquireSchedulerLock(
   const lock: SchedulerLock = {
     sessionId,
     pid: process.pid,
+    procStart: await ownProcStartAsync(),
     acquiredAt: Date.now(),
   }
 
@@ -145,8 +151,12 @@ export async function tryAcquireSchedulerLock(
   }
 
   // Corrupt or unparseable — treat as stale.
-  // Another live session — blocked.
-  if (existing && isProcessRunning(existing.pid)) {
+  // Another live session (same PID + matching procStart) — blocked.
+  if (
+    existing &&
+    isProcessRunning(existing.pid) &&
+    (await processLstartMatches(existing.pid, existing.procStart))
+  ) {
     if (lastBlockedBy !== existing.sessionId) {
       lastBlockedBy = existing.sessionId
       logForDebugging(
@@ -186,6 +196,13 @@ export async function releaseSchedulerLock(
   const sessionId = opts?.lockIdentity ?? getSessionId()
   const existing = await readLock(dir)
   if (!existing || existing.sessionId !== sessionId) return
+  if (
+    existing.pid !== process.pid &&
+    isProcessRunning(existing.pid) &&
+    (await processLstartMatches(existing.pid, existing.procStart))
+  ) {
+    return
+  }
   try {
     await unlink(getLockPath(dir))
     logForDebugging('[ScheduledTasks] released scheduler lock')

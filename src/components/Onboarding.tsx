@@ -7,8 +7,16 @@ import { setupTerminal, shouldOfferTerminalSetup } from '../commands/terminalSet
 import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { Box, Byline, KeyboardShortcutHint, Link, Newline, Text, useTheme } from '@anthropic/ink';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
-import { isAnthropicAuthEnabled } from '../utils/auth.js';
-import { shouldSkipOnboardingPreflight } from '../utils/forceLoginMethod.js';
+import {
+  getAnthropicApiKeyWithSource,
+  getAuthTokenSource,
+  getClaudeAIOAuthTokens,
+  isAnthropicAuthEnabled,
+} from '../utils/auth.js';
+import { logForDebugging } from '../utils/debug.js';
+import { errorMessage } from '../utils/errors.js';
+import { resolveEffectiveForceLoginMethod, shouldSkipOnboardingPreflight } from '../utils/forceLoginMethod.js';
+import { getSettingsForSource } from '../utils/settings/settings.js';
 import { normalizeApiKeyForConfig } from '../utils/authPortable.js';
 import { getCustomApiKeyStatus } from '../utils/config.js';
 import { env } from '../utils/env.js';
@@ -39,11 +47,54 @@ type Props = {
   onDone(): void;
 };
 
+const OAUTH_EXISTING_SOURCES = new Set([
+  'claude.ai',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR',
+  'CCR_OAUTH_TOKEN_FILE',
+]);
+
+/**
+ * Official `vXs` (2.1.290 #117) — checks whether the user is already signed in
+ * via `claude auth login` or existing credentials before showing the OAuth step.
+ */
+export function hasExistingOnboardingSignIn(): boolean {
+  try {
+    const forceMethod = resolveEffectiveForceLoginMethod();
+    if (forceMethod === 'gateway') return false;
+    if (getSettingsForSource('policySettings')?.forceLoginOrgUUID !== undefined) return false;
+    const { source } = getAuthTokenSource();
+    const tokens = source === 'claude.ai' ? getClaudeAIOAuthTokens() : null;
+    const hasRefresh =
+      Boolean(tokens?.refreshToken) &&
+      (typeof tokens?.refreshTokenExpiresAt !== 'number' || tokens.refreshTokenExpiresAt > Date.now());
+    const hasOAuth =
+      OAUTH_EXISTING_SOURCES.has(source) &&
+      (source !== 'claude.ai' ||
+        (tokens !== null && (hasRefresh || (tokens.expiresAt !== null && Date.now() + 300_000 < tokens.expiresAt))));
+    const hasConsoleKey =
+      source === 'none' &&
+      getAnthropicApiKeyWithSource({ skipRetrievingKeyFromApiKeyHelper: true }).source === '/login managed key';
+    switch (forceMethod) {
+      case 'claudeai':
+        return hasOAuth;
+      case 'console':
+        return hasConsoleKey;
+      case undefined:
+        return hasOAuth || hasConsoleKey;
+    }
+  } catch (err) {
+    logForDebugging(`Existing sign-in check failed: ${errorMessage(err)}`, { level: 'warn' });
+    return false;
+  }
+}
+
 export function Onboarding({ onDone }: Props): React.ReactNode {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [oauthEnabled] = useState(() => isAnthropicAuthEnabled());
   // densable 2.1.247 l = Ae()||Ie() = Q$()||Z$()
   const [skipAnthropicPreflight] = useState(() => shouldSkipOnboardingPreflight());
+  const skippedSignInRef = useRef(false);
   const completedRef = useRef(false);
   const [theme, setTheme] = useTheme();
 
@@ -54,10 +105,23 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
   }, [oauthEnabled]);
 
   function goToNextStep(stepDelta = 1) {
-    const nextIndex = currentStepIndex + stepDelta;
+    let nextIndex = currentStepIndex + stepDelta;
+    let skippedOAuth = false;
+    if (steps[nextIndex]?.id === 'oauth') {
+      try {
+        skippedOAuth = hasExistingOnboardingSignIn();
+      } catch {
+        skippedOAuth = false;
+      }
+    }
+    if (skippedOAuth) {
+      skippedSignInRef.current = true;
+      nextIndex++;
+    }
     if (nextIndex < steps.length) {
       setCurrentStepIndex(nextIndex);
       for (let i = currentStepIndex + 1; i <= nextIndex; i++) {
+        if (skippedOAuth && steps[i]?.id === 'oauth') continue;
         logEvent('tengu_onboarding_step', {
           oauthEnabled,
           stepId: steps[i]?.id as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,

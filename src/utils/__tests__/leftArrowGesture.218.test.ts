@@ -14,11 +14,13 @@ import {
 
 describe('densable 2.1.218 #4 leftArrowGesture (idp/sdp)', () => {
   test('odp initial state is zeros', () => {
-    expect(createLeftArrowGestureState()).toEqual({
+    expect(createLeftArrowGestureState()).toMatchObject({
       editedEmptyAtMs: 0,
       armedAtMs: 0,
-      lastLeftPressMs: 0,
+      lastQualifiedLeftPressMs: 0,
       attachConfirmArmedAtMs: 0,
+      absorbAnchorMs: 0,
+      absorbLogged: false,
     })
   })
 
@@ -70,7 +72,7 @@ describe('densable 2.1.218 #4 leftArrowGesture (idp/sdp)', () => {
     expect(decideLeftArrowEmptyGesture(s, t2, true, true)).toBe('fire')
     applyLeftArrowGestureDecision(s, 'fire', t2)
     expect(s.armedAtMs).toBe(0)
-    expect(s.lastLeftPressMs).toBe(t2)
+    expect(s.lastQualifiedLeftPressMs).toBe(t2)
   })
 
   test('double-tap within absorb window is absorb', () => {

@@ -3,6 +3,12 @@ import { resolve } from 'path'
 import { tryProcessCwd } from '../utils/cachePaths.js'
 import { buildCliLaunch, spawnCli } from '../utils/cliLaunch.js'
 import {
+  getProcessWrapperArgv,
+  getProcessWrapperError,
+  isProcessWrapperRunnable,
+} from '../utils/processWrapper.js'
+import { gt as semverGt } from '../utils/semver.js'
+import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../services/analytics/index.js'
@@ -34,6 +40,135 @@ const BACKOFF_INITIAL_MS = 2_000
 const BACKOFF_CAP_MS = 120_000
 const BACKOFF_MULTIPLIER = 2
 const MAX_RAPID_FAILURES = 5 // Park worker after this many fast crashes
+
+// SEA rr(r) / UD / mV (#145): JSON-quote multi-line daemon log messages and
+// \uXXXX-escape control/invisible code points on single-line messages.
+const DAEMON_LOG_ANSI_RE =
+  // eslint-disable-next-line no-control-regex
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: strip ANSI escape sequences
+  /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><~]/g
+const DAEMON_LOG_INVISIBLE_RE =
+  /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}\u2028\u2029\p{Default_Ignorable_Code_Point}\u2800]/gu
+const DAEMON_LOG_JSON_ESCAPE_RE =
+  /[\p{Cf}\p{Co}\p{Cn}\u2028\u2029\u007F-\u009F\p{Default_Ignorable_Code_Point}\u2800]/gu
+
+function escapeDaemonCodeUnits(s: string): string {
+  return s
+    .split('')
+    .map(ch => '\\u' + ch.charCodeAt(0).toString(16).padStart(4, '0'))
+    .join('')
+}
+
+function escapeDaemonJsonInvisible(s: string): string {
+  return s.replace(DAEMON_LOG_JSON_ESCAPE_RE, match =>
+    Array.from(
+      { length: match.length },
+      (_, i) => '\\u' + match.charCodeAt(i).toString(16).padStart(4, '0'),
+    ).join(''),
+  )
+}
+
+export function formatDaemonLogMessage(raw: string): string {
+  const clean = raw.replace(DAEMON_LOG_ANSI_RE, '').trimEnd()
+  return clean.includes('\n')
+    ? escapeDaemonJsonInvisible(JSON.stringify(clean))
+    : clean.replace(DAEMON_LOG_INVISIBLE_RE, escapeDaemonCodeUnits)
+}
+
+export type DaemonUpgradePollState = {
+  refusedStaleTarget: string | null
+  deferredLauncherLogged: boolean
+}
+
+export type DaemonUpgradePollResult =
+  | { shouldRestart: true }
+  | {
+      shouldRestart: false
+      reason: 'unchanged' | 'stale_binary' | 'launcher_unrunnable'
+    }
+
+function isOlderVersionBuild(running: string, candidate: string): boolean {
+  try {
+    return semverGt(running, candidate)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * SEA Ve upgrade poll (#74):
+ * 1. Refuse downgrade to an older build (`tengu_daemon_upgrade_refused_stale_binary`).
+ * 2. When non-service and CLAUDE_CODE_PROCESS_WRAPPER is configured, defer
+ *    restart if the launcher is not runnable (`upgrade_deferred_launcher_unrunnable`).
+ * 3. Otherwise proceed with self-restart (`tengu_daemon_self_restart_on_upgrade`).
+ */
+export function evaluateDaemonUpgradePoll(opts: {
+  startupVersion: string
+  currentVersion: string
+  origin: string
+  state: DaemonUpgradePollState
+  log?: (msg: string) => void
+  checkLauncherRunnable?: () => boolean
+  getWrapperError?: () => string | null
+  getWrapperArgv?: () => string[]
+}): DaemonUpgradePollResult {
+  const { startupVersion, currentVersion, origin, state } = opts
+  if (currentVersion === startupVersion || currentVersion === 'unknown') {
+    state.refusedStaleTarget = null
+    return { shouldRestart: false, reason: 'unchanged' }
+  }
+
+  const log =
+    opts.log ??
+    ((msg: string) => console.log(`[daemon] ${formatDaemonLogMessage(msg)}`))
+
+  if (
+    startupVersion !== 'unknown' &&
+    isOlderVersionBuild(startupVersion, currentVersion)
+  ) {
+    if (state.refusedStaleTarget !== currentVersion) {
+      state.refusedStaleTarget = currentVersion
+      log(
+        `binary changed to an OLDER build (${startupVersion} → ${currentVersion}) — refusing self-restart for upgrade; keeping the running build (\`claude daemon stop --any\` to override)`,
+      )
+      logEvent('tengu_daemon_upgrade_refused_stale_binary', {})
+    }
+    return { shouldRestart: false, reason: 'stale_binary' }
+  }
+
+  const wrapperErr = (opts.getWrapperError ?? getProcessWrapperError)()
+  const wrapperArgv = (opts.getWrapperArgv ?? getProcessWrapperArgv)()
+  if (origin !== 'service' && (wrapperArgv.length > 0 || wrapperErr !== null)) {
+    const runnable = (opts.checkLauncherRunnable ?? isProcessWrapperRunnable)()
+    if (!runnable) {
+      if (!state.deferredLauncherLogged) {
+        state.deferredLauncherLogged = true
+        log(
+          wrapperErr !== null
+            ? `binary changed but CLAUDE_CODE_PROCESS_WRAPPER cannot be used (${wrapperErr}) — deferring the upgrade restart until it is fixed (re-checked every poll)`
+            : `binary changed but launcher \`${wrapperArgv[0]}\` is not runnable right now — deferring the upgrade restart until it is (re-checked every poll)`,
+        )
+        logEvent('tengu_daemon_upgrade_deferred_launcher_unrunnable' as never, {
+          reason:
+            'upgrade_deferred_launcher_unrunnable' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+      }
+      return { shouldRestart: false, reason: 'launcher_unrunnable' }
+    }
+    state.deferredLauncherLogged = false
+  }
+
+  log(
+    `version changed from ${startupVersion} to ${currentVersion} — restarting`,
+  )
+  logEvent('tengu_daemon_self_restart_on_upgrade', {
+    old_version:
+      startupVersion as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    new_version:
+      currentVersion as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  })
+  return { shouldRestart: true }
+}
 
 interface WorkerState {
   kind: string
@@ -624,7 +759,7 @@ async function runSupervisor(
 
   const slot = await claimDaemonSupervisorSlot({
     origin,
-    log: msg => console.log(`[daemon] ${msg}`),
+    log: msg => console.log(`[daemon] ${formatDaemonLogMessage(msg)}`),
   })
   if (!slot.ok) {
     // Official: yield failure → e_('daemon_start','daemon_start_yield_failed');
@@ -719,19 +854,20 @@ async function runSupervisor(
   process.on('SIGTERM', shutdown)
   process.on('SIGINT', shutdown)
 
-  // Periodic version check for self-restart on upgrade
+  // Periodic version check for self-restart on upgrade (with stale-build refusal & launcher check)
+  const upgradePollState: DaemonUpgradePollState = {
+    refusedStaleTarget: null,
+    deferredLauncherLogged: false,
+  }
   const versionCheckInterval = setInterval(() => {
     const currentVersion = process.env.CLAUDE_CODE_VERSION || 'unknown'
-    if (currentVersion !== startupVersion && currentVersion !== 'unknown') {
-      console.log(
-        `[daemon] version changed from ${startupVersion} to ${currentVersion} — restarting`,
-      )
-      logEvent('tengu_daemon_self_restart_on_upgrade', {
-        old_version:
-          startupVersion as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        new_version:
-          currentVersion as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      })
+    const result = evaluateDaemonUpgradePoll({
+      startupVersion,
+      currentVersion,
+      origin,
+      state: upgradePollState,
+    })
+    if (result.shouldRestart) {
       shutdown()
     }
   }, 30_000) // Check every 30s
@@ -939,7 +1075,7 @@ async function runBgManagerStandalone(opts?: {
   // Official tG4: claim slot before write (transient never displaces a live lock).
   const slot = await claimDaemonSupervisorSlot({
     origin,
-    log: msg => console.log(`[daemon] ${msg}`),
+    log: msg => console.log(`[daemon] ${formatDaemonLogMessage(msg)}`),
   })
   if (!slot.ok) {
     if (slot.askedYield) {
@@ -1041,7 +1177,7 @@ async function runBgManagerStandalone(opts?: {
   }
 
   manager = await startBgManager({
-    onLog: (msg: string) => console.log(`  ${msg}`),
+    onLog: (msg: string) => console.log(`  ${formatDaemonLogMessage(msg)}`),
     onYield,
   })
 

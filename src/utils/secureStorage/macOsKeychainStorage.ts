@@ -56,6 +56,7 @@ export const macOsKeychainStorage = {
       )
       if (result) {
         const data = jsonParse(result)
+        keychainCacheState.keychainHoldsItem = true
         keychainCacheState.cache = { data, cachedAt: Date.now() }
         return data
       }
@@ -126,7 +127,9 @@ export const macOsKeychainStorage = {
     keychainCacheState.readInFlight = promise
     return promise
   },
-  update(data: SecureStorageData): { success: boolean; warning?: string } {
+  update(
+    data: SecureStorageData,
+  ): import('./types.js').SecureStorageUpdateResult {
     // Invalidate cache before update
     clearKeychainCache()
 
@@ -178,15 +181,30 @@ export const macOsKeychainStorage = {
       }
 
       if (result.exitCode !== 0) {
-        return { success: false }
+        const timedOut = 'timedOut' in result && Boolean(result.timedOut)
+        if (
+          result.exitCode === SECURITY_ERR_SEC_INTERACTION_NOT_ALLOWED &&
+          keychainCacheState.keychainHoldsItem
+        ) {
+          return { success: false, transient: true, keychainLocked: true }
+        }
+        return {
+          success: false,
+          ...(timedOut && { transient: true }),
+          exitCode: result.exitCode,
+        }
       }
 
       // Update cache with new data on success
+      keychainCacheState.keychainHoldsItem = true
       keychainCacheState.cache = { data, cachedAt: Date.now() }
       return { success: true }
     } catch (_e) {
       return { success: false }
     }
+  },
+  invalidateCache(): void {
+    clearKeychainCache()
   },
   delete(): boolean {
     // Invalidate cache before delete
@@ -197,10 +215,18 @@ export const macOsKeychainStorage = {
         CREDENTIALS_SERVICE_SUFFIX,
       )
       const username = getUsername()
-      execSyncWithDefaults_DEPRECATED(
-        `security delete-generic-password -a "${username}" -s "${storageServiceName}"`,
+      const result = execaSync(
+        'security',
+        ['delete-generic-password', '-a', username, '-s', storageServiceName],
+        { stdio: ['ignore', 'pipe', 'pipe'], reject: false },
       )
-      return true
+      const ok =
+        result.exitCode === 0 ||
+        result.exitCode === SECURITY_ERR_SEC_ITEM_NOT_FOUND
+      if (ok) {
+        keychainCacheState.keychainHoldsItem = false
+      }
+      return ok
     } catch (_e) {
       return false
     }
@@ -225,7 +251,11 @@ async function doReadAsync(): Promise<
       { useCwd: false, preserveOutputOnError: false },
     )
     if (code === 0 && stdout) {
+      keychainCacheState.keychainHoldsItem = true
       return jsonParse(stdout.trim())
+    }
+    if (code === SECURITY_ERR_SEC_ITEM_NOT_FOUND) {
+      keychainCacheState.keychainHoldsItem = false
     }
     // densable: n===0 || n===44 || n===36 → null; else MQ
     if (

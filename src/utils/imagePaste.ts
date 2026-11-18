@@ -14,7 +14,17 @@ import { getImageProcessor } from '@claude-code/builtin-tools/tools/FileReadTool
 import { isInBundledMode } from './bundledMode.js'
 import { logForDebugging } from './debug.js'
 import { execFileNoThrowWithCwd } from './execFileNoThrow.js'
-import { getFsImplementation } from './fsOperations.js'
+import {
+  getEmptyToolPermissionContext,
+  type ToolPermissionContext,
+} from '../Tool.js'
+import { getFsImplementation, walkPermissionPaths } from './fsOperations.js'
+import {
+  matchingRuleForInput,
+  pathInAllowedWorkingPath,
+} from './permissions/filesystem.js'
+import { loadAllPermissionRulesFromDisk } from './permissions/permissionsLoader.js'
+import { permissionRuleValueToString } from './permissions/permissionRuleParser.js'
 import {
   detectImageFormatFromBase64,
   type ImageDimensions,
@@ -831,13 +841,61 @@ export function asImageFilePath(text: string): string | null {
   return null
 }
 
+function buildDiskDenyContext(): ToolPermissionContext {
+  const ctx = getEmptyToolPermissionContext()
+  const rulesFromDisk = loadAllPermissionRulesFromDisk()
+  const alwaysDenyRules: Record<string, string[]> = {}
+  for (const rule of rulesFromDisk) {
+    if (rule.ruleBehavior !== 'deny') continue
+    const str = permissionRuleValueToString(rule.ruleValue)
+    const list = alwaysDenyRules[rule.source] ?? []
+    if (!list.includes(str)) {
+      list.push(str)
+      alwaysDenyRules[rule.source] = list
+    }
+  }
+  return {
+    ...ctx,
+    alwaysDenyRules: { ...ctx.alwaysDenyRules, ...alwaysDenyRules },
+  }
+}
+
+/**
+ * SEA `y_n` / `DWa` (#53): refuse reading pasted/dragged image paths that are
+ * blocked by Read deny rules, restricted outside working dirs, or whose
+ * symlink chain cannot be vetted.
+ */
+export function isPastedImageReadRefused(
+  targetPath: string,
+  toolPermissionContext?: ToolPermissionContext,
+): boolean {
+  const ctx = toolPermissionContext ?? buildDiskDenyContext()
+  if (matchingRuleForInput(targetPath, ctx, 'read', 'deny') !== null) {
+    return true
+  }
+  if (ctx.restricted && !pathInAllowedWorkingPath(targetPath, ctx)) {
+    return true
+  }
+  const walked = walkPermissionPaths(targetPath)
+  if (walked.unresolved) {
+    return true
+  }
+  return walked.paths.some(
+    p =>
+      matchingRuleForInput(p, ctx, 'read', 'deny') !== null ||
+      (ctx.restricted && !pathInAllowedWorkingPath(p, ctx)),
+  )
+}
+
 /**
  * Try to find and read an image file, falling back to clipboard search
  * @param text Pasted text that might be an image filename or path
+ * @param toolPermissionContext Optional permission context for Read-deny checks
  * @returns Object containing the image path and base64 data, or null if not found
  */
 export async function tryReadImageFromPath(
   text: string,
+  toolPermissionContext?: ToolPermissionContext,
 ): Promise<(ImageWithDimensions & { path: string }) | null> {
   // Strip terminal added spaces or quotes to dragged in paths
   const cleanedPath = asImageFilePath(text)
@@ -847,20 +905,37 @@ export async function tryReadImageFromPath(
   }
 
   const imagePath = cleanedPath
-  let imageBuffer
+  let targetPath: string | null = null
 
   try {
     if (isAbsolute(imagePath)) {
-      imageBuffer = getFsImplementation().readFileBytesSync(imagePath)
+      targetPath = imagePath
     } else {
       // VSCode Terminal just grabs the text content which is the filename
       // instead of getting the full path of the file pasted with cmd-v. So
       // we check if it matches the filename of the image in the clipboard.
       const clipboardPath = await getImagePathFromClipboard()
       if (clipboardPath && imagePath === basename(clipboardPath)) {
-        imageBuffer = getFsImplementation().readFileBytesSync(clipboardPath)
+        targetPath = clipboardPath
       }
     }
+  } catch (e) {
+    logError(e as Error)
+    return null
+  }
+  if (!targetPath) {
+    return null
+  }
+  if (isPastedImageReadRefused(targetPath, toolPermissionContext)) {
+    logForDebugging('Pasted path is not read: the read is refused', {
+      level: 'warn',
+    })
+    return null
+  }
+
+  let imageBuffer
+  try {
+    imageBuffer = getFsImplementation().readFileBytesSync(targetPath)
   } catch (e) {
     logError(e as Error)
     return null

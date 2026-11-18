@@ -6364,132 +6364,146 @@ export async function loadTranscriptFile(
       }
     }
 
-    const entries = parseJSONL<Entry>(buf)
-
-    // Bridge map for legacy progress entries: progress_uuid → progress_parent_uuid.
-    // PR #24099 removed progress from isTranscriptMessage, so old transcripts with
-    // progress in the parentUuid chain would truncate at buildConversationChain
-    // when messages.get(progressUuid) returns undefined. Since transcripts are
-    // append-only (parents before children), we record each progress→parent link
-    // as we see it, chain-resolving through consecutive progress entries, then
-    // rewrite any subsequent message whose parentUuid lands in the bridge.
     const progressBridge = new Map<UUID, UUID | null>()
 
-    for (const entry of entries) {
-      // Legacy progress check runs before the Entry-typed else-if chain —
-      // progress is not in the Entry union, so checking it after TypeScript
-      // has narrowed `entry` intersects to `never`.
-      if (isLegacyProgressEntry(entry)) {
-        // Chain-resolve through consecutive progress entries so a later
-        // message pointing at the tail of a progress run bridges to the
-        // nearest non-progress ancestor in one lookup.
-        const parent = entry.parentUuid
-        progressBridge.set(
-          entry.uuid,
-          parent && progressBridge.has(parent)
-            ? (progressBridge.get(parent) ?? null)
-            : parent,
-        )
-        continue
-      }
-      if (isTranscriptMessage(entry)) {
-        if (entry.parentUuid && progressBridge.has(entry.parentUuid)) {
-          entry.parentUuid = progressBridge.get(entry.parentUuid) ?? null
-        }
-        messages.set(entry.uuid, entry)
-        // Compact boundary: prior marble-origami-commit entries reference
-        // messages that won't be in the post-boundary chain. The >5MB
-        // backward-scan path discards them naturally by never reading the
-        // pre-boundary bytes; the <5MB path reads everything, so discard
-        // here. Without this, getStats().collapsedSpans in /context
-        // overcounts (projectView silently skips the stale commits but
-        // they're still in the log).
-        if (isCompactBoundaryMessage(entry)) {
-          contextCollapseCommits.length = 0
-          contextCollapseSnapshot = undefined
-        }
-      } else if (entry.type === 'summary' && entry.leafUuid) {
-        summaries.set(entry.leafUuid, entry.summary)
-      } else if (entry.type === 'custom-title' && entry.sessionId) {
-        customTitles.set(entry.sessionId, entry.customTitle)
-      } else if (entry.type === 'ai-title' && entry.sessionId) {
-        aiTitles.set(entry.sessionId, entry.aiTitle)
-      } else if (entry.type === 'ended-by-model' && entry.sessionId) {
-        // densable: if (X.type==="ended-by-model"&&X.sessionId&&!eKn()) i.add
-        endedByModelSessions.add(entry.sessionId)
-      } else if (entry.type === 'tag' && entry.sessionId) {
-        tags.set(entry.sessionId, entry.tag)
-      } else if (entry.type === 'agent-name' && entry.sessionId) {
-        agentNames.set(entry.sessionId, entry.agentName)
-      } else if (entry.type === 'agent-color' && entry.sessionId) {
-        agentColors.set(entry.sessionId, entry.agentColor)
-      } else if (entry.type === 'agent-setting' && entry.sessionId) {
-        agentSettings.set(entry.sessionId, entry.agentSetting)
-      } else if (entry.type === 'mode' && entry.sessionId) {
-        modes.set(entry.sessionId, entry.mode)
-      } else if (entry.type === 'worktree-state' && entry.sessionId) {
-        worktreeStates.set(entry.sessionId, entry.worktreeSession)
-      } else if (entry.type === 'dev-mods' && entry.sessionId) {
-        if (
-          typeof entry.folder === 'string' &&
-          leftoverDevModsFolderMatches(entry.folder, entry.sessionId)
-        ) {
-          devModsFolders.set(entry.sessionId, entry.folder)
-        } else {
-          logForDebugging(
-            'dev mods: dropped a dev-mods entry naming a folder not its own',
+    const processEntries = (entries: Entry[]): void => {
+      for (const entry of entries) {
+        // Legacy progress check runs before the Entry-typed else-if chain —
+        // progress is not in the Entry union, so checking it after TypeScript
+        // has narrowed `entry` intersects to `never`.
+        if (isLegacyProgressEntry(entry)) {
+          // Chain-resolve through consecutive progress entries so a later
+          // message pointing at the tail of a progress run bridges to the
+          // nearest non-progress ancestor in one lookup.
+          const parent = entry.parentUuid
+          progressBridge.set(
+            entry.uuid,
+            parent && progressBridge.has(parent)
+              ? (progressBridge.get(parent) ?? null)
+              : parent,
           )
+          continue
         }
-      } else if (entry.type === 'goal' && entry.sessionId) {
-        goals.set(entry.sessionId, entry.state)
-      } else if (entry.type === 'goal-cleared' && entry.sessionId) {
-        goals.delete(entry.sessionId)
-      } else if (entry.type === 'pr-link' && entry.sessionId) {
-        prNumbers.set(entry.sessionId, entry.prNumber)
-        prUrls.set(entry.sessionId, entry.prUrl)
-        prRepositories.set(entry.sessionId, entry.prRepository)
-      } else if (entry.type === 'file-history-snapshot') {
-        fileHistorySnapshots.set(entry.messageId, entry)
-      } else if (entry.type === 'attribution-snapshot') {
-        attributionSnapshots.set(entry.messageId, entry)
-      } else if (entry.type === 'content-replacement') {
-        // Subagent decisions key by agentId (sidechain resume); main-thread
-        // decisions key by sessionId (/resume).
-        if (entry.agentId) {
-          const existing = agentContentReplacements.get(entry.agentId) ?? []
-          agentContentReplacements.set(entry.agentId, existing)
-          existing.push(...entry.replacements)
-        } else {
-          const existing = contentReplacements.get(entry.sessionId) ?? []
-          contentReplacements.set(entry.sessionId, existing)
-          existing.push(...entry.replacements)
+        if (isTranscriptMessage(entry)) {
+          if (entry.parentUuid && progressBridge.has(entry.parentUuid)) {
+            entry.parentUuid = progressBridge.get(entry.parentUuid) ?? null
+          }
+          messages.set(entry.uuid, entry)
+          // Compact boundary: prior marble-origami-commit entries reference
+          // messages that won't be in the post-boundary chain. The >5MB
+          // backward-scan path discards them naturally by never reading the
+          // pre-boundary bytes; the <5MB path reads everything, so discard
+          // here. Without this, getStats().collapsedSpans in /context
+          // overcounts (projectView silently skips the stale commits but
+          // they're still in the log).
+          if (isCompactBoundaryMessage(entry)) {
+            contextCollapseCommits.length = 0
+            contextCollapseSnapshot = undefined
+          }
+        } else if (entry.type === 'summary' && entry.leafUuid) {
+          summaries.set(entry.leafUuid, entry.summary)
+        } else if (entry.type === 'custom-title' && entry.sessionId) {
+          customTitles.set(entry.sessionId, entry.customTitle)
+        } else if (entry.type === 'ai-title' && entry.sessionId) {
+          aiTitles.set(entry.sessionId, entry.aiTitle)
+        } else if (entry.type === 'ended-by-model' && entry.sessionId) {
+          // densable: if (X.type==="ended-by-model"&&X.sessionId&&!eKn()) i.add
+          endedByModelSessions.add(entry.sessionId)
+        } else if (entry.type === 'tag' && entry.sessionId) {
+          tags.set(entry.sessionId, entry.tag)
+        } else if (entry.type === 'agent-name' && entry.sessionId) {
+          agentNames.set(entry.sessionId, entry.agentName)
+        } else if (entry.type === 'agent-color' && entry.sessionId) {
+          agentColors.set(entry.sessionId, entry.agentColor)
+        } else if (entry.type === 'agent-setting' && entry.sessionId) {
+          agentSettings.set(entry.sessionId, entry.agentSetting)
+        } else if (entry.type === 'mode' && entry.sessionId) {
+          modes.set(entry.sessionId, entry.mode)
+        } else if (entry.type === 'worktree-state' && entry.sessionId) {
+          worktreeStates.set(entry.sessionId, entry.worktreeSession)
+        } else if (entry.type === 'dev-mods' && entry.sessionId) {
+          if (
+            typeof entry.folder === 'string' &&
+            leftoverDevModsFolderMatches(entry.folder, entry.sessionId)
+          ) {
+            devModsFolders.set(entry.sessionId, entry.folder)
+          } else {
+            logForDebugging(
+              'dev mods: dropped a dev-mods entry naming a folder not its own',
+            )
+          }
+        } else if (entry.type === 'goal' && entry.sessionId) {
+          goals.set(entry.sessionId, entry.state)
+        } else if (entry.type === 'goal-cleared' && entry.sessionId) {
+          goals.delete(entry.sessionId)
+        } else if (entry.type === 'pr-link' && entry.sessionId) {
+          prNumbers.set(entry.sessionId, entry.prNumber)
+          prUrls.set(entry.sessionId, entry.prUrl)
+          prRepositories.set(entry.sessionId, entry.prRepository)
+        } else if (entry.type === 'file-history-snapshot') {
+          fileHistorySnapshots.set(entry.messageId, entry)
+        } else if (entry.type === 'attribution-snapshot') {
+          attributionSnapshots.set(entry.messageId, entry)
+        } else if (entry.type === 'content-replacement') {
+          // Subagent decisions key by agentId (sidechain resume); main-thread
+          // decisions key by sessionId (/resume).
+          if (entry.agentId) {
+            const existing = agentContentReplacements.get(entry.agentId) ?? []
+            agentContentReplacements.set(entry.agentId, existing)
+            existing.push(...entry.replacements)
+          } else {
+            const existing = contentReplacements.get(entry.sessionId) ?? []
+            contentReplacements.set(entry.sessionId, existing)
+            existing.push(...entry.replacements)
+          }
+        } else if (entry.type === 'marble-origami-commit') {
+          contextCollapseCommits.push(entry)
+        } else if (entry.type === 'marble-origami-snapshot') {
+          contextCollapseSnapshot = entry
+        } else if (
+          entry.type === 'relocated' &&
+          entry.sessionId &&
+          entry.relocatedCwd
+        ) {
+          // densable 2.1.223 #8 — last-wins per sessionId
+          relocatedCwds.set(entry.sessionId as UUID, entry.relocatedCwd)
+        } else if (entry.type === 'bridge-session') {
+          applyBridgeSessionEntry(
+            entry,
+            bridgeSessionIds,
+            bridgeLastSeqs,
+            bridgeDialogKindsBySession,
+            bridgeSessionGroupingIds,
+            bridgeNoBackfill,
+            bridgeOwnerAccountUuids,
+            bridgeOwnerOrganizationUuids,
+          )
+        } else if (entry.type === 'history-suppression' && entry.sessionId) {
+          historySuppressed.add(entry.sessionId)
+        } else if (entry.type === 'cost-state' && entry.sessionId) {
+          costStates.set(entry.sessionId as UUID, entry)
         }
-      } else if (entry.type === 'marble-origami-commit') {
-        contextCollapseCommits.push(entry)
-      } else if (entry.type === 'marble-origami-snapshot') {
-        contextCollapseSnapshot = entry
-      } else if (
-        entry.type === 'relocated' &&
-        entry.sessionId &&
-        entry.relocatedCwd
-      ) {
-        // densable 2.1.223 #8 — last-wins per sessionId
-        relocatedCwds.set(entry.sessionId as UUID, entry.relocatedCwd)
-      } else if (entry.type === 'bridge-session') {
-        applyBridgeSessionEntry(
-          entry,
-          bridgeSessionIds,
-          bridgeLastSeqs,
-          bridgeDialogKindsBySession,
-          bridgeSessionGroupingIds,
-          bridgeNoBackfill,
-          bridgeOwnerAccountUuids,
-          bridgeOwnerOrganizationUuids,
-        )
-      } else if (entry.type === 'history-suppression' && entry.sessionId) {
-        historySuppressed.add(entry.sessionId)
-      } else if (entry.type === 'cost-state' && entry.sessionId) {
-        costStates.set(entry.sessionId as UUID, entry)
+      }
+    }
+
+    // #139: parse & process large transcripts in chunks with setImmediate yields
+    // so timers, input, and rendering are not blocked on the event loop.
+    const TRANSCRIPT_PARSE_CHUNK_BYTES = 256 * 1024
+    if (buf.length <= TRANSCRIPT_PARSE_CHUNK_BYTES) {
+      processEntries(parseJSONL<Entry>(buf))
+    } else {
+      let offset = 0
+      while (offset < buf.length) {
+        let end = Math.min(offset + TRANSCRIPT_PARSE_CHUNK_BYTES, buf.length)
+        if (end < buf.length) {
+          const nl = buf.indexOf(0x0a, end)
+          end = nl === -1 ? buf.length : nl + 1
+        }
+        processEntries(parseJSONL<Entry>(buf.subarray(offset, end)))
+        offset = end
+        if (offset < buf.length) {
+          await new Promise<void>(resolve => setImmediate(resolve))
+        }
       }
     }
   } catch {

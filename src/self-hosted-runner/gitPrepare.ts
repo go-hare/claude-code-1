@@ -1866,7 +1866,19 @@ export async function addSessionWorktree(opts: {
   await runGitPrepare(s, t, ['worktree', 'prune']).catch(u => {
     o(`[byoc:git] worktree prune failed (continuing): ${u}`)
   })
-  await runGitPrepare(s, t, ['worktree', 'add', '--detach', r, a])
+  try {
+    await runGitPrepare(s, t, ['worktree', 'add', '--detach', r, a])
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (!msg.includes('is a missing but already registered worktree')) {
+      throw err
+    }
+    o(
+      `[byoc:git] git still registers ${r} with its folder gone; pruning and retrying worktree add`,
+    )
+    await runGitPrepare(s, t, ['worktree', 'prune']).catch(() => {})
+    await runGitPrepare(s, t, ['worktree', 'add', '--detach', r, a])
+  }
   const c = (
     await runGitPrepare(s, r, ['rev-parse', '--absolute-git-dir'])
   ).trim()

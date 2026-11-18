@@ -150,7 +150,12 @@ export type ProgressTracker = {
   // so we keep the latest value. output_tokens is per-turn, so we sum those.
   latestInputTokens: number;
   cumulativeOutputTokens: number;
+  /** Official oAr/OSo/iAr live streamed thinking/text token estimate. */
+  streamedTokenEstimate: number;
+  streamedTokenEstimateAtResponseStart: number;
+  lastStampedResponseId: string | undefined;
   recentActivities: ToolActivity[];
+  seenToolUseIds: Set<string>;
   /**
    * Incremental content-token estimate cache. getProgressUpdate used to re-scan
    * the entire message list on every progress tick (O(n) per call → O(n²) over
@@ -166,12 +171,30 @@ export function createProgressTracker(): ProgressTracker {
     toolUseCount: 0,
     latestInputTokens: 0,
     cumulativeOutputTokens: 0,
+    streamedTokenEstimate: 0,
+    streamedTokenEstimateAtResponseStart: 0,
+    lastStampedResponseId: undefined,
     recentActivities: [],
+    seenToolUseIds: new Set(),
   };
 }
 
 export function getTokenCountFromTracker(tracker: ProgressTracker): number {
-  return tracker.latestInputTokens + tracker.cumulativeOutputTokens;
+  return tracker.latestInputTokens + tracker.cumulativeOutputTokens + tracker.streamedTokenEstimate;
+}
+
+export type StreamTokenEstimateEvent = { type: 'response_start' } | { type: 'tokens'; estimatedTokensDelta: number };
+
+/** Official iAr — update live streamed thinking/output token estimate. */
+export function updateProgressFromStreamTokenEstimate(tracker: ProgressTracker, event: StreamTokenEstimateEvent): void {
+  switch (event.type) {
+    case 'response_start':
+      tracker.streamedTokenEstimateAtResponseStart = tracker.streamedTokenEstimate;
+      return;
+    case 'tokens':
+      tracker.streamedTokenEstimate += event.estimatedTokensDelta;
+      return;
+  }
 }
 
 /**
@@ -193,11 +216,20 @@ export function updateProgressFromMessage(
 
   // Tool activity is independent of usage — providers may omit usage on
   // intermediate assistant turns while still emitting tool_use blocks.
-  for (const content of (message.message!.content ?? []) as Array<{ type: string; name?: string; input?: unknown }>) {
+  for (const content of (message.message!.content ?? []) as Array<{
+    type: string;
+    id?: string;
+    name?: string;
+    input?: unknown;
+  }>) {
     if (content.type === 'tool_use') {
       tracker.toolUseCount++;
       // Omit StructuredOutput from preview - it's an internal tool
       if (content.name !== SYNTHETIC_OUTPUT_TOOL_NAME) {
+        if (typeof content.id === 'string') {
+          if (tracker.seenToolUseIds.has(content.id)) continue;
+          tracker.seenToolUseIds.add(content.id);
+        }
         const input = content.input as Record<string, unknown>;
         const classification = tools ? getToolSearchOrReadInfo(content.name!, input, tools) : undefined;
         tracker.recentActivities.push({
@@ -236,6 +268,12 @@ export function updateProgressFromMessage(
   const outputTokens = usage.output_tokens as number;
   if (typeof outputTokens === 'number' && outputTokens > 0) {
     tracker.cumulativeOutputTokens += outputTokens;
+  }
+  const msgId = (message.message as { id?: string } | undefined)?.id;
+  if (msgId !== undefined && msgId !== tracker.lastStampedResponseId) {
+    tracker.lastStampedResponseId = msgId;
+    tracker.streamedTokenEstimate -= tracker.streamedTokenEstimateAtResponseStart;
+    tracker.streamedTokenEstimateAtResponseStart = 0;
   }
 }
 

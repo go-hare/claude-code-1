@@ -43,6 +43,7 @@ import { registerFileGateReader } from '../../utils/file.js'
 import { i_ } from '../../utils/toolSchemaCache.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { isTelemetryDisabled } from '../../utils/privacyLevel.js'
+import { isGatewayPolicyOrServerProcess } from './config.js'
 import {
   is1PEventLoggingEnabled,
   logGrowthBookExperimentTo1P,
@@ -574,6 +575,9 @@ function getLocalGateDefault(feature: string): unknown | undefined {
 function isNonFirstPartyUnlessHostManaged(): boolean {
   if (isEnvTruthy(process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST)) {
     return false
+  }
+  if (isGatewayPolicyOrServerProcess()) {
+    return true
   }
   try {
     const { getAPIProvider } =

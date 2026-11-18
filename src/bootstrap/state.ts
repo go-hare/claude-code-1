@@ -856,6 +856,27 @@ export type RefusalFallbackModelLatch = {
   previousOverride: ModelSetting | undefined
   previousAppStateModel?: ModelSetting | undefined
   previousModelForSession?: ModelSetting | undefined
+  carriedEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+}
+
+const carriedEffortEndBySlot = new WeakMap<object, string>()
+
+function replaceLatchWithCarriedEffortTracking(
+  modelSelection: ReturnType<typeof getBootstrapSession>['modelSelection'],
+  next: RefusalFallbackModelLatch | undefined,
+  endReason = 'superseded',
+): void {
+  const prev = modelSelection.refusalFallbackModelLatch() as
+    | RefusalFallbackModelLatch
+    | undefined
+  if (prev?.carriedEffort !== undefined && next?.carriedEffort === undefined) {
+    carriedEffortEndBySlot.set(modelSelection, endReason)
+  }
+  if (next === undefined) {
+    modelSelection.unlatchRefusalFallbackModel()
+  } else {
+    modelSelection.replaceRefusalFallbackModelLatch(next)
+  }
 }
 
 /**
@@ -873,19 +894,49 @@ export function setRefusalFallbackModelLatch(
     | ModelSetting
     | undefined
   if (cur && override === cur.fallbackModel) {
-    const next = {
+    const next: RefusalFallbackModelLatch = {
       ...cur,
       fallbackModel: latch.fallbackModel,
+      ...(latch.carriedEffort !== undefined && {
+        carriedEffort: latch.carriedEffort,
+      }),
     }
-    session.modelSelection.replaceRefusalFallbackModelLatch(next)
+    replaceLatchWithCarriedEffortTracking(session.modelSelection, next)
     return
   }
-  session.modelSelection.replaceRefusalFallbackModelLatch(latch)
+  replaceLatchWithCarriedEffortTracking(session.modelSelection, latch)
 }
 
 /** Official rke  - clear latch without restoring override. */
-export function clearRefusalFallbackModelLatch(): void {
-  getBootstrapSession().modelSelection.unlatchRefusalFallbackModel()
+export function clearRefusalFallbackModelLatch(reason = 'superseded'): void {
+  replaceLatchWithCarriedEffortTracking(
+    getBootstrapSession().modelSelection,
+    undefined,
+    reason,
+  )
+}
+
+/** Official Qnr - clear only carriedEffort from the active refusal latch. */
+export function clearCarriedEffortFromLatch(reason: string): void {
+  const { modelSelection } = getBootstrapSession()
+  const cur = modelSelection.refusalFallbackModelLatch() as
+    | RefusalFallbackModelLatch
+    | undefined
+  if (cur !== undefined) {
+    replaceLatchWithCarriedEffortTracking(
+      modelSelection,
+      { ...cur, carriedEffort: undefined },
+      reason,
+    )
+  }
+}
+
+/** Official pfi - consume and clear the recorded carriedEffort end reason. */
+export function takeCarriedEffortEnd(): string | undefined {
+  const { modelSelection } = getBootstrapSession()
+  const reason = carriedEffortEndBySlot.get(modelSelection)
+  carriedEffortEndBySlot.delete(modelSelection)
+  return reason
 }
 
 /** Official Y8o  - read latch. */
@@ -913,7 +964,7 @@ export function updateRefusalFallbackLatchPreviousOverride(
     ...cur,
     previousOverride,
   }
-  session.modelSelection.replaceRefusalFallbackModelLatch(next)
+  replaceLatchWithCarriedEffortTracking(session.modelSelection, next)
 }
 
 export type RefusalFallbackLatchResetResult = {
@@ -936,7 +987,11 @@ export function consumeRefusalFallbackModelLatch():
   const latch = session.modelSelection.refusalFallbackModelLatch() as
     | RefusalFallbackModelLatch
     | undefined
-  session.modelSelection.unlatchRefusalFallbackModel()
+  replaceLatchWithCarriedEffortTracking(
+    session.modelSelection,
+    undefined,
+    'unlatched',
+  )
   const current = session.modelSelection.mainLoopModelOverride() as
     | ModelSetting
     | undefined

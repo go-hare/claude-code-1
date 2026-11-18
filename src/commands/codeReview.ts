@@ -281,7 +281,7 @@ const CODE_REVIEW_CELLS: Record<
 > = {
   default: {
     low: 'low',
-    medium: 'o5-bmin',
+    medium: 'o48-high-v1',
     high: 'o48-high-v1',
     xhigh: 'o48-xhigh-v1',
     max: 'max',
@@ -326,6 +326,16 @@ export function codeReviewEffortCell(
   level: EffortLevel,
 ): string {
   return CODE_REVIEW_CELLS[codeReviewModelFamily(model)][level]
+}
+
+/** densable `tt` — modelEffort for a family/level (`claude-sonnet-5` low -> `medium`, else `level`). */
+export function codeReviewModelEffort(
+  model: string | undefined,
+  level: EffortLevel,
+): EffortLevel {
+  const family = codeReviewModelFamily(model)
+  if (family === 'claude-sonnet-5' && level === 'low') return 'medium'
+  return level
 }
 
 /**

@@ -1022,12 +1022,51 @@ export async function startBgManager(opts?: {
       }
     }
 
-    // Retire settled workers
-    await Promise.all(
+    // Retire settled workers (with SEA #155 low-mem shedMonitoringOnly + pinned last resort)
+    const isLowMem = (): boolean => {
+      const thresh = getBgLowMemThresholdBytes()
+      return thresh > 0 && freemem() < thresh
+    }
+    const lowMem = isLowMem()
+    const effectiveGrace = lowMem ? RETIRE_GRACE_MS : graceMs
+    const retireResults = await Promise.all(
       [...handles.values()].map(w =>
-        w.retireIfSettled(graceMs, pinned).catch(() => ({ retired: false })),
+        w
+          .retireIfSettled(effectiveGrace, pinned)
+          .then(r => r.retired)
+          .catch(() => false),
       ),
     )
+    let retiredCount = retireResults.filter(Boolean).length
+
+    if (lowMem && retiredCount === 0 && isLowMem()) {
+      const shedResults = await Promise.all(
+        [...handles.values()].map(w =>
+          w
+            .retireIfSettled(graceMs, pinned, graceMs, {
+              shedMonitoringOnly: true,
+            })
+            .then(r => r.retired)
+            .catch(() => false),
+        ),
+      )
+      retiredCount += shedResults.filter(Boolean).length
+    }
+
+    if (lowMem && retiredCount === 0 && isLowMem()) {
+      const pinnedWorkers = [...handles.values()].filter(w =>
+        pinned.has(w.dispatch.short),
+      )
+      if (pinnedWorkers.length > 0) {
+        log(
+          'bg: low memory persists after shedding non-pinned — retiring pinned settled workers as a last resort',
+        )
+        logEvent('tengu_bg_retire_pinned_low_mem', {})
+        for (const w of pinnedWorkers) {
+          void w.retireIfSettled(effectiveGrace, undefined).catch(() => {})
+        }
+      }
+    }
 
     onKeepAliveChange()
     // Official: E() = J at end of tick
@@ -1203,6 +1242,27 @@ async function handleControlRequest(
       if (!d || !d.short || !d.sessionId) {
         return { ok: false, error: 'missing dispatch fields' }
       }
+      // Official #49: forceUnresponsive kills an alive unresponsive worker before respawn
+      if (d.forceUnresponsive) {
+        const existing = handles.get(d.short)
+        if (existing && !existing.record.outcome && !existing.isKilling) {
+          existing.kill('SIGTERM', 'killed')
+          const deadline = Date.now() + 3000
+          while (Date.now() < deadline && handles.has(d.short)) {
+            await new Promise(r => setTimeout(r, 100))
+          }
+          if (handles.has(d.short)) {
+            return {
+              ok: false,
+              alive: true,
+              short: d.short,
+              error:
+                "Couldn't stop the previous worker — supervisor may be starting, retry in a moment",
+              errorCode: 'kill_unconfirmed',
+            }
+          }
+        }
+      }
       // densable Xyr core: refuse fork handoff with no materialized transcript
       // on respawn / resume before cold spawn (forceRefusalRetry bypasses).
       // Non-refuse empty path runs BJe orphan rename inside the gate; refuse
@@ -1217,6 +1277,7 @@ async function handleControlRequest(
           evaluateRespawnTranscriptGate,
           queueRespawnInitialPrompt,
           resolveRespawnLaunchPrompt,
+          sanitizeQueuedPrompt,
           clearQueuedPrompt,
         } = await import('./transcriptProbe.js')
         const resumeSessionId =
@@ -1274,19 +1335,42 @@ async function handleControlRequest(
         //   success → queuedPrompt: void 0
         if (d.source === 'respawn' || d.forceRefusalRetry || d.force) {
           const hasMessages = gate.probe.hasMessages
-          // densable N: resume id points at a different session than the job's own
+          // SEA N: resume id points at a different session than the job's own
           const resumePointsElsewhere =
             state?.resumeSessionId !== undefined &&
             state.resumeSessionId !== jobSessionId
-          const skipIntentReplay = hasMessages || resumePointsElsewhere
+          // SEA oe / Ee: empty-transcript fresh respawn (bgIsolation==="none" & !exec & !resumePointsElsewhere)
+          const execIntent =
+            state?.template === 'exec' &&
+            (state.respawnFlags?.length ?? 0) === 0
+              ? state.intent
+              : undefined
+          const isolation = state?.bgIsolation ?? d.isolation ?? 'none'
+          const freshNoTranscript =
+            !hasMessages &&
+            (d.forceRefusalRetry === true ||
+              (!execIntent && isolation === 'none' && !resumePointsElsewhere))
+          const skipIntentReplay =
+            hasMessages || resumePointsElsewhere || freshNoTranscript
+          const sanitizedQueued = state
+            ? sanitizeQueuedPrompt(state)
+            : undefined
+          if (sanitizedQueued !== state?.queuedPrompt) {
+            log(
+              `bg: respawn of ${d.short} — the saved reply starts with / or !, so no restart sends it`,
+            )
+          }
           const resolvedPrompt = resolveRespawnLaunchPrompt({
             initialPrompt: d.initialPrompt,
-            queuedPrompt: state?.queuedPrompt,
+            queuedPrompt: sanitizedQueued,
             intent:
               typeof d.intent === 'string' && d.intent.trim()
                 ? d.intent
                 : state?.intent,
             skipIntentReplay,
+            keepQueuedPrompt: Boolean(
+              (d as unknown as Record<string, unknown>).keepQueuedPrompt,
+            ),
           })
           // densable R = w && !x (x=exec). Local: resume when messages and not force-fresh.
           const useResume = hasMessages && !d.forceRefusalRetry && !d.force
@@ -1296,11 +1380,18 @@ async function handleControlRequest(
             ? (['--', resolvedPrompt] as string[])
             : []
           if (useResume) {
+            const baseFlags = d.launch?.flagArgs ?? d.respawnFlags ?? []
+            const shouldReplyOnResume =
+              Boolean(d.replyOnResume) &&
+              !resolvedPrompt &&
+              !baseFlags.includes('--reply-on-resume')
             d.launch = {
               ...d.launch,
               mode: 'resume',
               sessionId: d.launch?.sessionId ?? resumeSessionId ?? d.sessionId,
-              flagArgs: d.launch?.flagArgs ?? d.respawnFlags,
+              flagArgs: shouldReplyOnResume
+                ? [...baseFlags, '--reply-on-resume']
+                : baseFlags,
               args: promptArgs,
             }
           } else {
@@ -1341,6 +1432,7 @@ async function handleControlRequest(
 
     case 'reply': {
       const short = req.short as string
+      const nextTurn = req.nextTurn === true
       const worker = handles.get(short)
       if (
         !worker ||
@@ -1354,7 +1446,14 @@ async function handleControlRequest(
           code: 'ENOJOB',
         }
       }
-      if (!(await worker.reply(req.text as string))) {
+      if (nextTurn && worker.record.cliVersion !== MACRO.VERSION) {
+        return {
+          ok: false,
+          error: 'it runs a different Claude Code build',
+          code: 'ESKEW',
+        }
+      }
+      if (!(await worker.reply(req.text as string, { nextTurn }))) {
         return {
           ok: false,
           error:

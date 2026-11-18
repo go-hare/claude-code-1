@@ -12,17 +12,22 @@ export const LEFT_ARROW_ARM_WINDOW_MS = 3000
 /** densable: empty-after-edit gate window (ms) — recent clear requires confirm */
 export const LEFT_ARROW_EDITING_QUIET_MS = 2000
 
-/** densable ndp — double-tap absorb window (ms) */
+/** densable Gt — double-tap / attach absorb window (ms) */
 export const LEFT_ARROW_ABSORB_MS = 1000
 
-/** densable _3y — attach-quiet fire min after arm (ms) */
+/** densable wto — rapid repeat absorb window (ms) */
+export const LEFT_ARROW_REPEAT_ABSORB_MS = 150
+
+/** densable _3y / Tr — attach-quiet fire min after arm (ms) */
 export const LEFT_ARROW_ATTACH_FIRE_MIN_MS = 150
 
 export type LeftArrowGestureState = {
   editedEmptyAtMs: number
   armedAtMs: number
-  lastLeftPressMs: number
+  absorbAnchorMs: number
+  lastQualifiedLeftPressMs: number
   attachConfirmArmedAtMs: number
+  absorbLogged: boolean
 }
 
 export type LeftArrowGestureDecision =
@@ -33,25 +38,27 @@ export type LeftArrowGestureDecision =
   | 'attach-arm'
   | 'attach-absorb'
 
-/** densable odp() */
+/** densable Eto() */
 export function createLeftArrowGestureState(): LeftArrowGestureState {
   return {
     editedEmptyAtMs: 0,
     armedAtMs: 0,
-    lastLeftPressMs: 0,
+    absorbAnchorMs: 0,
+    lastQualifiedLeftPressMs: 0,
     attachConfirmArmedAtMs: 0,
+    absorbLogged: false,
   }
 }
 
 /**
- * densable idp(e, t, r, n, o=xKr(t), i=Ske())
+ * densable vto(e, t, r, n, o=HPn(t), i=jpt())
  *
  * @param state gesture state
  * @param nowMs current time
  * @param soloKeypress densable Me.soloKeypress — false → reject (move cursor)
- * @param editingGuard densable Je("tengu_left_arrow_editing_guard", true)
- * @param attachQuiet densable xKr — attach-quiet window (usually false)
- * @param monotonicFloor densable Ske() — timestamps must be ≥ floor when non-zero
+ * @param editingGuard densable b("tengu_left_arrow_editing_guard", true)
+ * @param attachQuiet densable o / HPn — attach-quiet window (usually false)
+ * @param monotonicFloor densable jpt() — timestamps must be ≥ floor when non-zero
  */
 export function decideLeftArrowEmptyGesture(
   state: LeftArrowGestureState,
@@ -65,11 +72,11 @@ export function decideLeftArrowEmptyGesture(
 
   const isLive = (ts: number): boolean => ts !== 0 && ts >= monotonicFloor
 
-  // densable attach-quiet branch (o / xKr) — currently always false in official build
+  // densable attach-quiet branch
   if (attachQuiet) {
     if (
-      isLive(state.lastLeftPressMs) &&
-      nowMs - state.lastLeftPressMs < LEFT_ARROW_ABSORB_MS
+      isLive(state.absorbAnchorMs) &&
+      nowMs - state.absorbAnchorMs < LEFT_ARROW_ABSORB_MS
     ) {
       return 'attach-absorb'
     }
@@ -89,8 +96,8 @@ export function decideLeftArrowEmptyGesture(
   if (!editingGuard) return 'fire'
 
   if (
-    isLive(state.lastLeftPressMs) &&
-    nowMs - state.lastLeftPressMs < LEFT_ARROW_ABSORB_MS
+    isLive(state.lastQualifiedLeftPressMs) &&
+    nowMs - state.lastQualifiedLeftPressMs < LEFT_ARROW_REPEAT_ABSORB_MS
   ) {
     return 'absorb'
   }
@@ -100,6 +107,12 @@ export function decideLeftArrowEmptyGesture(
   ) {
     return 'fire'
   }
+  if (
+    isLive(state.absorbAnchorMs) &&
+    nowMs - state.absorbAnchorMs < LEFT_ARROW_ABSORB_MS
+  ) {
+    return 'absorb'
+  }
   // Recent empty-after-edit → arm (require second ←); else fire immediately
   return isLive(state.editedEmptyAtMs) &&
     nowMs - state.editedEmptyAtMs < LEFT_ARROW_EDITING_QUIET_MS
@@ -107,7 +120,7 @@ export function decideLeftArrowEmptyGesture(
     : 'fire'
 }
 
-/** densable sdp(e, t, r) — mutate gesture state after decision */
+/** densable kto(e, t, r) — mutate gesture state after decision */
 export function applyLeftArrowGestureDecision(
   state: LeftArrowGestureState,
   decision: LeftArrowGestureDecision,
@@ -115,16 +128,27 @@ export function applyLeftArrowGestureDecision(
 ): void {
   switch (decision) {
     case 'fire':
+      if (state.armedAtMs !== 0) state.editedEmptyAtMs = 0
       state.armedAtMs = 0
       state.attachConfirmArmedAtMs = 0
-      state.lastLeftPressMs = nowMs
+      state.absorbAnchorMs = nowMs
+      state.lastQualifiedLeftPressMs = nowMs
+      state.absorbLogged = false
       return
     case 'arm':
       state.armedAtMs = nowMs
-      state.lastLeftPressMs = nowMs
+      state.absorbAnchorMs = nowMs
+      state.lastQualifiedLeftPressMs = nowMs
+      state.absorbLogged = false
       return
     case 'absorb':
-      state.lastLeftPressMs = nowMs
+      if (
+        nowMs - state.lastQualifiedLeftPressMs <
+        LEFT_ARROW_REPEAT_ABSORB_MS
+      ) {
+        state.absorbAnchorMs = nowMs
+      }
+      state.lastQualifiedLeftPressMs = nowMs
       return
     case 'reject':
       return

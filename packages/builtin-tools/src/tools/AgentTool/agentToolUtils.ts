@@ -794,6 +794,7 @@ export function createLocalAgentIsIdleTracker(
   track: (message: MessageType) => void
   sync: () => void
   seedFromMessages: (messages: readonly MessageType[]) => void
+  inFlightCount?: () => number
 } {
   const inFlightToolUseIds = new Set<string>()
   const nestedAgentToolUseIds = new Set<string>()
@@ -840,7 +841,12 @@ export function createLocalAgentIsIdleTracker(
     for (const m of messages) track(m)
     sync()
   }
-  return { track, sync, seedFromMessages }
+  return {
+    track,
+    sync,
+    seedFromMessages,
+    inFlightCount: () => inFlightToolUseIds.size,
+  }
 }
 
 export function parkAgentOnKeepaliveDeferNotify(
@@ -912,6 +918,38 @@ export function sweepAndDetectLiveAgentChildren(
   return hasLiveAgentKeepaliveChildren(taskId, registry)
 }
 
+const ASYNC_AGENT_STALL_GRACE_MS = 300_000
+const ASYNC_AGENT_STALL_FALLBACK_MS = 600_000
+const MAX_SET_TIMEOUT_MS = 2_147_483_647
+const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 90_000
+
+/**
+ * Gold 2.1.325 `Hus()` — stall watchdog timeout for async subagents.
+ */
+export function getAsyncAgentStallTimeoutMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  const explicit = Number(env.CLAUDE_ASYNC_AGENT_STALL_TIMEOUT_MS)
+  if (Number.isFinite(explicit) && explicit > 0) {
+    return Math.min(explicit, MAX_SET_TIMEOUT_MS)
+  }
+  const watchdogRaw = env.CLAUDE_ENABLE_STREAM_WATCHDOG
+  const watchdogEnabled =
+    watchdogRaw === undefined ||
+    (watchdogRaw !== '0' &&
+      watchdogRaw.toLowerCase() !== 'false' &&
+      watchdogRaw.toLowerCase() !== 'no')
+  if (!watchdogEnabled) {
+    return ASYNC_AGENT_STALL_FALLBACK_MS
+  }
+  const streamIdle = Number(env.CLAUDE_STREAM_IDLE_TIMEOUT_MS)
+  const baseIdleMs =
+    Number.isFinite(streamIdle) && streamIdle > 0
+      ? streamIdle
+      : DEFAULT_STREAM_IDLE_TIMEOUT_MS
+  return Math.min(baseIdleMs + ASYNC_AGENT_STALL_GRACE_MS, MAX_SET_TIMEOUT_MS)
+}
+
 /**
  * Drives a background agent from spawn to terminal notification.
  * Shared between AgentTool's async-from-start path and resumeAgentBackground.
@@ -964,6 +1002,64 @@ export async function runAsyncAgentLifecycle({
   // densable X8a finalText — return extracted text so awaitCompletion callers
   // do not race task.result AppState writes after lifecycle settles.
   let settledFinalText: string | undefined
+  const stallMs = getAsyncAgentStallTimeoutMs()
+  let stallTimer: ReturnType<typeof setTimeout> | null = null
+  let stallFired = false
+  let lastMessageType = 'none'
+  let lastStallBumpAt = 0
+  const stallBumpThrottleMs = Math.min(stallMs * 0.1, 1000)
+  const clearStallWatchdog = () => {
+    if (stallTimer !== null) {
+      clearTimeout(stallTimer)
+      stallTimer = null
+    }
+  }
+  const armStallWatchdog = () => {
+    clearStallWatchdog()
+    stallTimer = setTimeout(() => {
+      stallTimer = null
+      if (stallFired) return
+      const inFlight = isIdleTracker.inFlightCount?.() ?? 0
+      if (inFlight > 0) {
+        logForDebugging(
+          `[AsyncAgent ${taskId}] stall watchdog deferred — ${inFlight} tool(s) in flight`,
+        )
+        armStallWatchdog()
+        return
+      }
+      stallFired = true
+      logForDebugging(
+        `[AsyncAgent ${taskId}] stall watchdog fired after ${stallMs}ms with no progress (last message: ${lastMessageType}); aborting`,
+        { level: 'error' },
+      )
+      logEvent('tengu_async_agent_stall_timeout', {
+        agent_type:
+          metadata.agentType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        stall_ms: stallMs,
+        last_message_type:
+          lastMessageType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        message_count: agentMessages.length,
+      })
+      abortController.abort()
+      stopSummarization?.()
+      clearStallWatchdog()
+      const stallError = `Agent stalled: no progress for ${stallMs / 1000}s (stream watchdog did not recover)`
+      const registry = createTaskRegistry(
+        toolUseContext.getAppState,
+        rootSetAppState,
+      )
+      failAsyncAgent(taskId, stallError, registry)
+      enqueueAgentNotification({
+        taskId,
+        description,
+        status: 'failed',
+        error: stallError,
+        registry,
+        toolUseId: toolUseContext.toolUseId,
+      })
+    }, stallMs)
+    stallTimer.unref?.()
+  }
   try {
     // densable N5: T8e at run start. The finally settles it when this run exits.
     try {
@@ -990,6 +1086,7 @@ export async function runAsyncAgentLifecycle({
           stopSummarization = stop
         }
       : undefined
+    armStallWatchdog()
     for await (const message of makeStream(onCacheSafeParams)) {
       // densable Phn/Ohr — query yields spinner_mode for teammate Phn.setMode.
       // Do not retain control events in agentMessages / task.messages.
@@ -998,6 +1095,12 @@ export async function runAsyncAgentLifecycle({
       }
       agentMessages.push(message)
       isIdleTracker.track(message)
+      lastMessageType = message.type
+      const nowMs = Date.now()
+      if (nowMs - lastStallBumpAt >= stallBumpThrottleMs) {
+        lastStallBumpAt = nowMs
+        armStallWatchdog()
+      }
       // Append immediately when UI holds the task (retain). Bootstrap reads
       // disk in parallel and UUID-merges the prefix — disk-write-before-yield
       // means live is always a suffix of disk, so merge is order-correct.
@@ -1204,6 +1307,10 @@ export async function runAsyncAgentLifecycle({
     })
   } catch (error) {
     stopSummarization?.()
+    clearStallWatchdog()
+    if (stallFired) {
+      return
+    }
     // densable Yqe: te instanceof Xl (AbortError family)
     if (isAbortError(error) || error instanceof AbortError) {
       // densable m(): RT(signal.reason)==="background" → XV + Kle, no BRt
@@ -1313,6 +1420,7 @@ export async function runAsyncAgentLifecycle({
       ...worktreeResult,
     })
   } finally {
+    clearStallWatchdog()
     try {
       const { settleAgentKillLoop } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports

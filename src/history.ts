@@ -106,6 +106,388 @@ export function expandPastedTextRefs(
   return expanded
 }
 
+// --- densable Jin / PEe / AIs / Yin / Tc / Ec — NFD expanded paste & overlapping paste (#107/#119) ---
+
+const LEADING_COMBINING_RE =
+  /^[\p{M}\u1161-\u1175\u11A8-\u11C2\u{16D67}\u{16D68}]+/u
+
+/**
+ * densable `Jin` — return unique non-empty variants of a pasted string:
+ * raw, NFC-normalized (for NFD macOS/IME pastes), and leading-combining-stripped.
+ */
+export function expandPasteVariants(text: string): string[] {
+  const nfc = text.normalize('NFC')
+  const stripped = nfc.replace(LEADING_COMBINING_RE, '').trimStart()
+  return [...new Set([text, nfc, stripped])].filter(s => s !== '')
+}
+
+/**
+ * densable `PEe` — collect all inline pasted string variants sorted longest-first.
+ */
+export function getInlinePastedStrings(
+  pastedContents: Record<number, PastedContent>,
+  includeSlashNameOnly = false,
+): string[] {
+  const set = new Set<string>()
+  for (const entry of Object.values(pastedContents)) {
+    if (
+      entry.type === 'text' &&
+      (entry as { inline?: boolean }).inline &&
+      entry.content !== '' &&
+      (includeSlashNameOnly ||
+        !(entry as { slashNameOnly?: boolean }).slashNameOnly)
+    ) {
+      for (const variant of expandPasteVariants(entry.content)) {
+        set.add(variant)
+      }
+    }
+  }
+  return [...set].sort((a, b) => b.length - a.length)
+}
+
+/**
+ * densable `AIs` — find merged, non-overlapping [start, end] spans in `input`
+ * matching inline pasted strings outside `[ref]` placeholders.
+ */
+export function findInlinePastedSpans(
+  input: string,
+  pastedContents: Record<number, PastedContent> | undefined,
+  includeSlashNameOnly = false,
+): Array<[number, number]> {
+  if (pastedContents === undefined) return []
+  const strings = getInlinePastedStrings(pastedContents, includeSlashNameOnly)
+  if (strings.length === 0) return []
+  const spans: Array<[number, number]> = []
+  const addSpan = (start: number, end: number) => {
+    let curStart = start
+    for (const [s, e] of [...spans].sort((a, b) => a[0] - b[0])) {
+      if (e <= curStart || s >= end) continue
+      if (s > curStart) spans.push([curStart, s])
+      curStart = Math.max(curStart, e)
+    }
+    if (curStart < end) spans.push([curStart, end])
+  }
+  const scanRange = (from: number, to: number) => {
+    const slice = input.slice(from, to)
+    for (const needle of strings) {
+      let idx = slice.indexOf(needle)
+      while (idx !== -1) {
+        addSpan(from + idx, from + idx + needle.length)
+        idx = slice.indexOf(needle, idx + 1)
+      }
+    }
+  }
+  let pos = 0
+  for (const ref of parseReferences(input)) {
+    if (pastedContents[ref.id] === undefined) continue
+    scanRange(pos, ref.index)
+    pos = ref.index + ref.match.length
+  }
+  scanRange(pos, input.length)
+  return spans.sort((a, b) => a[0] - b[0])
+}
+
+const OPENER_PUNCT_RE = /[([{"'`]/
+const CLOSER_PUNCT_RE = /[)\]}"'`.,;:!?]/
+const WORD_PRECEDE_RE = /[\p{L}\p{N}_@#./\\]/u
+
+type BoundaryCache = {
+  openersFrom: number
+  openersTo: number
+  closersFrom: number
+  closersTo: number
+}
+
+function makeBoundaryCache(): BoundaryCache {
+  return { openersFrom: 0, openersTo: -1, closersFrom: 0, closersTo: 0 }
+}
+
+function toUtf16Codes(s: string): Uint16Array {
+  const out = new Uint16Array(s.length)
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i)
+  return out
+}
+
+function buildKmpPrefix(codes: Uint16Array): Int32Array {
+  const pi = new Int32Array(codes.length)
+  for (let i = 1, k = 0; i < codes.length; i++) {
+    while (k > 0 && codes[i] !== codes[k]) k = pi[k - 1]!
+    if (codes[i] === codes[k]) k++
+    pi[i] = k
+  }
+  return pi
+}
+
+const KMP_PREFIX_LEN = 8
+const KMP_CACHE_CAP = 1024
+
+function createNeedleFinder(haystack: string) {
+  let hayCodes: Uint16Array | undefined
+  const cache = new Map<string, (from: number) => number>()
+  return (needle: string): ((from: number) => number) => {
+    const cached = cache.get(needle)
+    if (cached !== undefined) return cached
+    const prefix = needle.slice(0, KMP_PREFIX_LEN)
+    const first =
+      needle.length > haystack.length ? -1 : haystack.indexOf(prefix)
+    if (first === -1) {
+      const none = () => -1
+      cache.set(needle, none)
+      return none
+    }
+    const nCodes = toUtf16Codes(needle)
+    const pi = buildKmpPrefix(nCodes)
+    const period = nCodes.length - pi.at(-1)!
+    const runStarts: number[] = []
+    const runEnds: number[] = []
+    const h = (hayCodes ??= toUtf16Codes(haystack))
+    for (let i = first, k = 0; i < h.length; i++) {
+      if (k === 0) {
+        const jump = haystack.indexOf(prefix, i)
+        if (jump === -1) break
+        i = jump + prefix.length - 1
+        k = prefix.length - 1
+      }
+      const ch = h[i]!
+      while (k > 0 && ch !== nCodes[k]) k = pi[k - 1]!
+      if (ch === nCodes[k]) k++
+      if (k === nCodes.length) {
+        const start = i + 1 - nCodes.length
+        const lastIdx = runEnds.length - 1
+        if (lastIdx >= 0 && start - runEnds[lastIdx]! === period) {
+          runEnds[lastIdx] = start
+        } else {
+          runStarts.push(start)
+          runEnds.push(start)
+        }
+        k = pi[k - 1]!
+      }
+    }
+    const findFrom = (from: number): number => {
+      let lo = 0
+      let hi = runEnds.length
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1
+        if (runEnds[mid]! < from) lo = mid + 1
+        else hi = mid
+      }
+      const start = runStarts[lo]
+      if (start === undefined) return -1
+      return from > start
+        ? start + Math.ceil((from - start) / period) * period
+        : start
+    }
+    if (runStarts.length <= KMP_CACHE_CAP) cache.set(needle, findFrom)
+    return findFrom
+  }
+}
+
+function isBoundaryMatch(
+  text: string,
+  start: number,
+  end: number,
+  leftBound: number,
+  rightBound: number,
+  adjacentToPrev: boolean,
+  cache: BoundaryCache,
+): boolean {
+  if (!adjacentToPrev) {
+    let i = start - 1
+    while (i >= leftBound && OPENER_PUNCT_RE.test(text[i]!)) {
+      i =
+        i <= cache.openersTo && i >= cache.openersFrom
+          ? cache.openersFrom - 1
+          : i - 1
+    }
+    if (start - 1 >= leftBound && i < start - 1) {
+      cache.openersFrom = Math.max(i + 1, leftBound)
+      cache.openersTo = start - 1
+    }
+    if (i >= leftBound && WORD_PRECEDE_RE.test(text[i]!)) return false
+  }
+  let j = end
+  while (j < rightBound && CLOSER_PUNCT_RE.test(text[j]!)) {
+    j = j >= cache.closersFrom && j < cache.closersTo ? cache.closersTo : j + 1
+  }
+  j = Math.min(j, rightBound)
+  if (j > end) {
+    cache.closersFrom = end
+    cache.closersTo = j
+  }
+  return j >= rightBound || /\s/.test(text[j]!)
+}
+
+type PasteSpan = { from: number; to: number }
+
+function mergeOverlappingSpans(spans: PasteSpan[]): PasteSpan[] {
+  const merged: PasteSpan[] = []
+  for (const span of [...spans].sort((a, b) => a.from - b.from)) {
+    const prev = merged.at(-1)
+    if (prev !== undefined && span.from < prev.to) {
+      prev.to = Math.max(prev.to, span.to)
+    } else {
+      merged.push({ ...span })
+    }
+  }
+  return merged
+}
+
+function collectPasteSpansPass(
+  text: string,
+  needles: string[],
+  findNeedle: (needle: string) => (from: number) => number,
+  greedyMerge: boolean,
+  mode: 'anyCopy' | 'standingCopy',
+): { spans: PasteSpan[]; skipped: boolean } {
+  let committed: PasteSpan[] = []
+  let deferred: PasteSpan[] = []
+  let skipped = false
+  const sorted = [...new Set(needles)]
+    .filter(s => s !== '')
+    .sort((a, b) => b.length - a.length)
+
+  for (const needle of sorted) {
+    const findFrom = findNeedle(needle)
+    const exact: PasteSpan[] = []
+    const overlapped: PasteSpan[] = []
+    const cache = makeBoundaryCache()
+    let ci = 0
+    let leftBound = 0
+    let rightBound = committed[0]?.from ?? text.length
+    let cursor = 0
+    let prevEnd = 0
+
+    for (;;) {
+      const start = findFrom(cursor)
+      if (start === -1) break
+      const end = start + needle.length
+      if (end > rightBound || start < leftBound) {
+        while (ci < committed.length && start >= committed[ci]!.from) {
+          leftBound = committed[ci]!.to
+          ci++
+        }
+        rightBound = committed[ci]?.from ?? text.length
+        if (end <= leftBound) {
+          cursor = leftBound - needle.length + 1
+          continue
+        }
+        const fits = start >= leftBound && end <= rightBound
+        let accepted = false
+        if (
+          !fits &&
+          isBoundaryMatch(
+            text,
+            start,
+            end,
+            leftBound,
+            rightBound,
+            start === prevEnd,
+            cache,
+          )
+        ) {
+          const nextInRight = start < leftBound ? findFrom(leftBound) : -1
+          let hasStanding =
+            nextInRight !== -1 && nextInRight < Math.min(end, rightBound)
+          if (hasStanding && mode === 'standingCopy') {
+            let k = leftBound
+            while (k < nextInRight && /\s/.test(text[k]!)) k++
+            hasStanding =
+              k === nextInRight &&
+              isBoundaryMatch(
+                text,
+                nextInRight,
+                nextInRight + needle.length,
+                leftBound,
+                rightBound,
+                nextInRight === leftBound,
+                makeBoundaryCache(),
+              )
+          }
+          if (hasStanding) skipped = true
+          else {
+            overlapped.push({ from: start, to: end })
+            accepted = true
+          }
+        }
+        if (start >= leftBound && end > rightBound) {
+          leftBound = committed[ci]!.to
+          ci++
+          rightBound = committed[ci]?.from ?? text.length
+          cursor = end
+        } else {
+          cursor = Math.max(start, leftBound)
+        }
+        prevEnd = greedyMerge && accepted ? Math.max(end, leftBound) : leftBound
+        continue
+      }
+      if (
+        isBoundaryMatch(
+          text,
+          start,
+          end,
+          leftBound,
+          rightBound,
+          start === prevEnd,
+          cache,
+        )
+      ) {
+        exact.push({ from: start, to: end })
+        prevEnd = end
+      }
+      cursor = end
+    }
+    if (greedyMerge) {
+      if (exact.length > 0 || overlapped.length > 0) {
+        committed = mergeOverlappingSpans([
+          ...committed,
+          ...exact,
+          ...overlapped,
+        ])
+      }
+      continue
+    }
+    if (exact.length > 0) {
+      committed = [...committed, ...exact].sort((a, b) => a.from - b.from)
+    }
+    if (overlapped.length > 0) {
+      deferred = mergeOverlappingSpans([...deferred, ...overlapped])
+    }
+  }
+  return {
+    spans:
+      deferred.length === 0
+        ? committed
+        : mergeOverlappingSpans([...committed, ...deferred]),
+    skipped,
+  }
+}
+
+/**
+ * densable `Yin` — find non-overlapping spans for inline pasted strings,
+ * handling overlapping-paste edge cases (greedy + non-greedy + standingCopy).
+ */
+export function findNonOverlappingPasteSpans(
+  text: string,
+  needles: string[],
+  findNeedle = createNeedleFinder(text),
+): PasteSpan[] {
+  const first = collectPasteSpansPass(
+    text,
+    needles,
+    findNeedle,
+    true,
+    'anyCopy',
+  )
+  return mergeOverlappingSpans([
+    ...first.spans,
+    ...collectPasteSpansPass(text, needles, findNeedle, false, 'anyCopy').spans,
+    ...(first.skipped
+      ? collectPasteSpansPass(text, needles, findNeedle, true, 'standingCopy')
+          .spans
+      : []),
+  ])
+}
+
 /** densable mLd removed entry — label is "Pasted text" | "Truncated text". */
 export type UnavailablePastedRef = {
   id: number

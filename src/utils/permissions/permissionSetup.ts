@@ -85,6 +85,8 @@ import {
   safeResolvePath,
 } from '../../utils/fsOperations.js'
 import { modelSupportsAutoMode, providerSupportsAutoMode } from '../betas.js'
+import { isBgSession } from '../concurrentSessions.js'
+import { getGlobalConfig } from '../config.js'
 import { logForDebugging } from '../debug.js'
 import { gracefulShutdown } from '../gracefulShutdown.js'
 import { getMainLoopModel } from '../model/model.js'
@@ -825,6 +827,32 @@ export function subprocessEnvScrubNotification({
     : undefined
 }
 
+/** Gold U3s / UGt — background worker bypass consent guard. */
+export const BG_BYPASS_UNCONSENTED_MESSAGE =
+  'bypass in a background worker needs consent recorded in your user settings — add "skipDangerousModePermissionPrompt": true to ~/.claude/settings.json (accepting the interactive disclaimer writes the same key, but that dialog is skipped while consent already exists in .claude/settings.local.json or via --settings, which does not count here). A launch with user settings off does not read that file: relaunch with them on'
+
+export const BG_BYPASS_DOWNGRADED_NOTIFICATION = `Permission mode downgraded to default: ${BG_BYPASS_UNCONSENTED_MESSAGE}`
+
+/** Gold $Rt — only policySettings or userSettings vouch for bypass in bg workers. */
+export function hasVouchedSkipDangerousModePermissionPrompt(): boolean {
+  return !!(
+    getSettingsForSource('policySettings')?.skipDangerousModePermissionPrompt ||
+    getSettingsForSource('userSettings')?.skipDangerousModePermissionPrompt
+  )
+}
+
+/** Gold hKn — true when a bg worker asks for bypassPermissions without user/policy consent. */
+export function isUnconsentedBgBypass(mode: PermissionMode): boolean {
+  if (!isBgSession()) return false
+  if (mode === 'bypassPermissions') {
+    return (
+      !hasVouchedSkipDangerousModePermissionPrompt() &&
+      !getGlobalConfig().bypassPermissionsModeAccepted
+    )
+  }
+  return false
+}
+
 /**
  * Safely convert CLI flags to a PermissionMode
  *
@@ -902,11 +930,19 @@ export function initialPermissionModeFromCLI({
   let notification: string | undefined
 
   if (dangerouslySkipPermissions) {
-    orderedModes.push('bypassPermissions')
+    if (isUnconsentedBgBypass('bypassPermissions')) {
+      notification = BG_BYPASS_DOWNGRADED_NOTIFICATION
+      orderedModes.push('default')
+    } else {
+      orderedModes.push('bypassPermissions')
+    }
   }
   if (permissionModeCli) {
     const parsedMode = permissionModeFromString(permissionModeCli)
-    if (feature('TRANSCRIPT_CLASSIFIER') && parsedMode === 'auto') {
+    if (isUnconsentedBgBypass(parsedMode)) {
+      notification = BG_BYPASS_DOWNGRADED_NOTIFICATION
+      orderedModes.push('default')
+    } else if (feature('TRANSCRIPT_CLASSIFIER') && parsedMode === 'auto') {
       if (autoModeCircuitBrokenSync) {
         logForDebugging(
           'auto mode circuit breaker active (cached) — falling back to default',
@@ -921,7 +957,15 @@ export function initialPermissionModeFromCLI({
   }
   // gold inheritPermissionMode: parent session mode, only when nothing else configures one
   if (!permissionModeCli && inheritPermissionModeCli) {
-    orderedModes.push(permissionModeFromString(inheritPermissionModeCli))
+    const inheritedParsed = permissionModeFromString(inheritPermissionModeCli)
+    if (isUnconsentedBgBypass(inheritedParsed)) {
+      if (orderedModes.length === 0) {
+        notification = BG_BYPASS_DOWNGRADED_NOTIFICATION
+      }
+      orderedModes.push('default')
+    } else {
+      orderedModes.push(inheritedParsed)
+    }
   }
   if (settings.permissions?.defaultMode) {
     const settingsMode = settings.permissions.defaultMode as PermissionMode
@@ -959,6 +1003,11 @@ export function initialPermissionModeFromCLI({
         if (!agentPermissionMode) {
           orderedModes.push('default')
         }
+      } else if (isUnconsentedBgBypass('bypassPermissions')) {
+        if (orderedModes.length === 0) {
+          notification = BG_BYPASS_DOWNGRADED_NOTIFICATION
+        }
+        orderedModes.push('default')
       } else {
         orderedModes.push(settingsMode)
       }

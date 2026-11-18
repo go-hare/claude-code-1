@@ -132,6 +132,8 @@ export interface ClaudeForChromeContext {
   getPersistedDeviceId?: () => string | undefined
   /** Called when a remote extension is auto-selected (only option available). */
   onRemoteExtensionWarning?: (ext: ChromeExtensionInfo) => void
+  /** Optional per-tool call timeout override in ms (e.g. 90s for browser_batch). */
+  getToolCallTimeoutMs?: (toolName: string) => number
 }
 
 /**

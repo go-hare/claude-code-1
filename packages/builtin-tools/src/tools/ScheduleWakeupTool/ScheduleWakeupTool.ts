@@ -55,6 +55,44 @@ function hasFable5Mitigations(canonical: string, raw?: string): boolean {
   return false
 }
 
+/** densable `fMr` — unnamed plugin subagent cannot schedule work after Stop. */
+export const UNNAMED_PLUGIN_SCHEDULE_REFUSAL =
+  'A plugin started or resumed this subagent, or the one that spawned it, and that plugin is not known in this session. It cannot schedule work: nothing would hold that work after a Stop.'
+
+/**
+ * Gold 2.1.325 `Sre(context)`: true when an unnamed plugin started/resumed
+ * this subagent (no `hookCaller`, `pluginUnnamed === true`) and non-builtin
+ * function-hook modules are loaded.
+ */
+export function isUnnamedPluginScheduleRefused(
+  context:
+    | {
+        hookCaller?: string
+        pluginUnnamed?: boolean
+      }
+    | undefined,
+): boolean {
+  if (
+    !context ||
+    context.hookCaller !== undefined ||
+    context.pluginUnnamed !== true
+  ) {
+    return false
+  }
+  try {
+    const { getLoadedFunctionHooksModules } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('src/utils/plugins/functionHooksModules.js') as typeof import('src/utils/plugins/functionHooksModules.js')
+    const mods = getLoadedFunctionHooksModules()
+    return mods.some(
+      mod =>
+        mod.tier !== 'builtin' && mod.tier !== 'prepend' && mod.tier !== 'core',
+    )
+  } catch {
+    return false
+  }
+}
+
 /** densable `H3o` */
 export class ScheduleWakeupInputError extends Error {
   constructor(message: string) {
@@ -190,8 +228,26 @@ export const ScheduleWakeupTool = buildTool({
     return null
   },
 
-  async call(input: ScheduleWakeupInput) {
+  async call(
+    input: ScheduleWakeupInput,
+    context?: { hookCaller?: string; pluginUnnamed?: boolean },
+  ) {
     const { delaySeconds, reason, prompt, stop } = input
+    const refusal =
+      stop !== true && isUnnamedPluginScheduleRefused(context)
+        ? UNNAMED_PLUGIN_SCHEDULE_REFUSAL
+        : undefined
+    if (refusal !== undefined) {
+      try {
+        const { logForDebugging } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('src/utils/debug.js') as typeof import('src/utils/debug.js')
+        logForDebugging(`ScheduleWakeup refused: ${refusal}`)
+      } catch {
+        // debug log optional
+      }
+      throw new ScheduleWakeupInputError(refusal)
+    }
     // densable stop path → QKu
     if (stop === true) {
       return {

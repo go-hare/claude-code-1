@@ -1429,6 +1429,19 @@ async function publishUrlMarketplaceCatalog(
       'marketplace reserved-name/source validation failed',
     )
   }
+  if (
+    marketplace.name === '' ||
+    marketplace.name === '.' ||
+    marketplace.name === '..' ||
+    marketplace.name.includes('/') ||
+    marketplace.name.includes('\\') ||
+    marketplace.name.includes('\0')
+  ) {
+    throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+      `Marketplace name ${JSON.stringify(marketplace.name)} is not a plain directory name; refusing to cache it`,
+      'fetched url marketplace name is not a plain cache component',
+    )
+  }
   const key = marketplaceCacheFormKey(marketplace.name, 'catalog')
   if (key === null) {
     return { declined: marketplace }

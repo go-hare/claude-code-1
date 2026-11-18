@@ -351,6 +351,19 @@ function isTipCloudArtifactsUploadOpen(): boolean {
 
 let readPageDataSchemaFreezeStarted = false
 
+function getTargetArtifactEnv(): 'prod' | 'staging' {
+  try {
+    const { getOauthConfig } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('src/constants/oauth.js') as typeof import('src/constants/oauth.js')
+    return getOauthConfig().CLAUDE_AI_ORIGIN.includes('staging')
+      ? 'staging'
+      : 'prod'
+  } catch {
+    return 'prod'
+  }
+}
+
 export const ArtifactTool = buildTool({
   name: ARTIFACT_TOOL_NAME,
   // tip lowercase kept for existing transcripts / cloud upload callers
@@ -477,6 +490,19 @@ export const ArtifactTool = buildTool({
   async validateInput(input: ArtifactInput) {
     if (input && 'action' in input && input.action === 'quickstart') {
       return validateQuickstartInput(input)
+    }
+    if (input && typeof input.url === 'string') {
+      const parsed = parseArtifactUrlInput(input.url)
+      if (parsed !== null) {
+        const targetEnv = getTargetArtifactEnv()
+        if (parsed.env !== targetEnv) {
+          return {
+            result: false as const,
+            message: `that artifact URL is for ${parsed.env}, but this session targets ${targetEnv} claude.ai — republish it here to mint a ${targetEnv} URL, or switch environments`,
+            errorCode: 5,
+          }
+        }
+      }
     }
     return { result: true as const }
   },

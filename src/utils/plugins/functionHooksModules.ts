@@ -14,7 +14,13 @@
 import { AsyncLocalStorage } from 'async_hooks'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
-import { createHash } from 'crypto'
+import { createHash, createHmac, randomBytes } from 'crypto'
+import {
+  lstat as fsLstat,
+  open as fsOpen,
+  realpath as fsRealpath,
+} from 'fs/promises'
+import { isDeepStrictEqual } from 'util'
 import { MessageChannel, Worker, type MessagePort } from 'worker_threads'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'path'
 import { pathToFileURL } from 'url'
@@ -148,7 +154,7 @@ type HookCallOrigin = {
   readonly tier: string
 }
 
-type HookOriginEntry =
+export type HookOriginEntry =
   | string
   | {
       readonly plugin: string
@@ -1183,6 +1189,7 @@ export async function runFunctionHookChain(
     let inFlightDownstream: Promise<unknown> | undefined
     let lastDownstreamResult: unknown
     let hasDownstreamResult = false
+    const downstreamResults: Record<string, unknown>[] = []
     const beneathHolder: { beneath?: HookTraceNode } = {}
 
     const nextFloorsForTo = (tiers: readonly string[]): readonly HopFloor[] => {
@@ -1254,6 +1261,9 @@ export async function runFunctionHookChain(
           callAt(index + 1, onward, targetFloors, childNode),
         )
         .then(res => {
+          if (isEventRecord(res)) {
+            downstreamResults.push(res)
+          }
           lastDownstreamResult = res
           hasDownstreamResult = true
           return res
@@ -1351,7 +1361,17 @@ export async function runFunctionHookChain(
     })
     if (!hostHandler) watchHookBudget(running, step.mod.name, event)
     return running
-      .then(returned => {
+      .then(rawReturned => {
+        const returned =
+          !hostHandler &&
+          callOptions?.site?.restoreResult !== undefined &&
+          isEventRecord(rawReturned)
+            ? callOptions.site.restoreResult(
+                rawReturned,
+                downstreamResults,
+                value,
+              )
+            : rawReturned
         if (!hostHandler && callOptions?.site?.check !== undefined) {
           const problem = callOptions.site.check(returned)
           if (problem !== undefined) {
@@ -1516,6 +1536,11 @@ export type FunctionHookHopSite = {
   ) => string | undefined
   restoreArgument?: (
     passed: Record<string, unknown>,
+    original: Record<string, unknown>,
+  ) => Record<string, unknown>
+  restoreResult?: (
+    returned: Record<string, unknown>,
+    priorResults: readonly Record<string, unknown>[],
     original: Record<string, unknown>,
   ) => Record<string, unknown>
   check?: (returned: unknown) => string | undefined
@@ -1688,6 +1713,7 @@ export async function runFunctionHookHop(
     let inFlightDownstream: Promise<unknown> | undefined
     let lastDownstreamResult: unknown
     let hasDownstreamResult = false
+    const downstreamResults: Record<string, unknown>[] = []
     const beneathHolder: { beneath?: HookTraceNode } = {}
     const nextFloorsForTo = (tiers: readonly string[]): readonly HopFloor[] => {
       const named =
@@ -1723,6 +1749,9 @@ export async function runFunctionHookHop(
           callAt(index + 1, onward, targetFloors, childNode),
         )
         .then(res => {
+          if (isEventRecord(res)) {
+            downstreamResults.push(res)
+          }
           lastDownstreamResult = res
           hasDownstreamResult = true
           return res
@@ -1771,8 +1800,14 @@ export async function runFunctionHookHop(
           },
         )
         .then(reply => {
+          const restored =
+            step.isCore !== true &&
+            site?.restoreResult !== undefined &&
+            isEventRecord(reply.returned)
+              ? site.restoreResult(reply.returned, downstreamResults, value)
+              : reply.returned
           if (step.isCore !== true && site?.check !== undefined) {
-            const problem = site.check(reply.returned)
+            const problem = site.check(restored)
             if (problem !== undefined) {
               throw new Error(`${step.name}: returned ${problem}`)
             }
@@ -1785,9 +1820,9 @@ export async function runFunctionHookHop(
             outcome: 'returned',
             ms: Math.max(0, performance.now() - stepStarted),
             received: value,
-            returned: reply.returned,
+            returned: restored,
           })
-          return reply.returned
+          return restored
         })
         .finally(() => leaveModule(step.name))
     }
@@ -1806,7 +1841,13 @@ export async function runFunctionHookHop(
     )
     watchHookBudget(running, step.name, event)
     return running
-      .then(returned => {
+      .then(rawReturned => {
+        const returned =
+          step.isCore !== true &&
+          site?.restoreResult !== undefined &&
+          isEventRecord(rawReturned)
+            ? site.restoreResult(rawReturned, downstreamResults, value)
+            : rawReturned
         if (step.isCore !== true && site?.check !== undefined) {
           const problem = site.check(returned)
           if (problem !== undefined) {
@@ -3878,6 +3919,14 @@ function pluginEngine(
         ])
       },
     },
+    theme: {
+      set(attributes: unknown) {
+        return hostOp(environmentId, 'theme.set', [attributes])
+      },
+      clear() {
+        return hostOp(environmentId, 'theme.clear', [{}])
+      },
+    },
     session: {
       messages: (input?: unknown) => {
         const reason = sessionMessagesCheck(input)
@@ -4344,16 +4393,203 @@ async function runProcess(
   }
 }
 
-async function spawnDetached(argv: unknown): Promise<{ pid: number }> {
-  const command = argvFrom(argv)
-  if (command.length === 0) return { pid: 0 }
+const PROCESS_SPAWN_HIGH_WATER = 1_048_576 // 1 MiB (pRt)
+
+function validateProcessSpawnRequest(req: unknown): string | undefined {
+  if (!isEventRecord(req)) {
+    return 'takes { argv, cwd?, env?, input? }'
+  }
+  const { argv, cwd, env, input } = req
+  if (
+    !Array.isArray(argv) ||
+    argv.length === 0 ||
+    argv.some(a => typeof a !== 'string')
+  ) {
+    return 'argv must be a non-empty list of strings'
+  }
+  if (cwd !== undefined && (typeof cwd !== 'string' || cwd === '')) {
+    return 'cwd is a non-empty path'
+  }
+  if (
+    env !== undefined &&
+    (!isEventRecord(env) || Object.values(env).some(v => typeof v !== 'string'))
+  ) {
+    return 'env must be a record of strings'
+  }
+  if (input !== undefined && typeof input !== 'string') {
+    return 'input is a string'
+  }
+  return undefined
+}
+
+type SpawnQueueItem =
+  | { stream: 'stdout' | 'stderr'; text: string }
+  | { failed: Error }
+  | { ended: { code: number | null; signal: NodeJS.Signals | null } }
+
+/**
+ * Official `F1s` — streaming `$.process.spawn` generator yielding
+ * `{ stream: 'stdout' | 'stderr', text }` chunks with 1 MiB backpressure
+ * and returning `{ code, signal }`.
+ */
+async function* spawnProcessStream(
+  req: {
+    argv: string[]
+    cwd?: string
+    env?: Record<string, string>
+    input?: string
+  },
+  plugin: string,
+  opts: { signal?: AbortSignal; cwd?: string } = {},
+): AsyncGenerator<
+  { stream: 'stdout' | 'stderr'; text: string },
+  { code: number | null; signal: NodeJS.Signals | null },
+  unknown
+> {
+  const [command = '', ...args] = req.argv
+  const baseCwd = opts.cwd ?? (await resolvePluginFsBaseCwd())
+  const resolvedCwd =
+    req.cwd === undefined ? baseCwd : resolve(baseCwd, req.cwd)
+  const label = `$.process.spawn (${plugin})`
+  const startedAt = Date.now()
+  const queue: SpawnQueueItem[] = []
+  let bufferedBytes = 0
+  let paused = false
+  let chunkCount = 0
+  let wake: (() => void) | undefined
+
+  const push = (item: SpawnQueueItem) => {
+    queue.push(item)
+    wake?.()
+  }
+
+  if (opts.signal?.aborted === true) {
+    throw new Error(`${label}: ${command} aborted`)
+  }
+
   const { spawn } = await import('child_process')
-  const child = spawn(command[0]!, command.slice(1), {
-    stdio: 'ignore',
-    detached: true,
+  let child: ReturnType<typeof spawn>
+  try {
+    child = spawn(command, args, {
+      cwd: resolvedCwd,
+      env: req.env ? { ...process.env, ...req.env } : process.env,
+      stdio: [req.input !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    logForDebugging(`${label}: ${command} ${msg}`, { level: 'warn' })
+    throw new Error(`${label}: ${command} ${msg}`)
+  }
+
+  const streams = [child.stdout, child.stderr]
+  let killed = false
+  const killChild = (graceMs = 300) => {
+    if (killed) return false
+    killed = true
+    try {
+      child.kill('SIGTERM')
+    } catch {
+      return false
+    }
+    const timer = setTimeout(() => {
+      try {
+        child.kill('SIGKILL')
+      } catch {
+        // already exited
+      }
+    }, graceMs)
+    timer.unref?.()
+    return true
+  }
+
+  logForDebugging(
+    `${label}: ${command} with ${args.length} args in ${resolvedCwd} (pid ${child.pid ?? '?'})`,
+  )
+
+  const setFlow = (flowing: boolean) => {
+    paused = !flowing
+    for (const s of streams) {
+      if (flowing) s?.resume()
+      else s?.pause()
+    }
+  }
+
+  const attachStream = (
+    stream: NodeJS.ReadableStream | null | undefined,
+    kind: 'stdout' | 'stderr',
+  ) => {
+    if (!stream) return
+    stream.setEncoding('utf8')
+    stream.on('data', (chunk: string) => {
+      if (chunk === '') return
+      bufferedBytes += chunk.length
+      push({ stream: kind, text: chunk })
+      if (bufferedBytes > PROCESS_SPAWN_HIGH_WATER && !paused) {
+        setFlow(false)
+      }
+    })
+    stream.once('error', () => {})
+  }
+
+  attachStream(child.stdout, 'stdout')
+  attachStream(child.stderr, 'stderr')
+  child.once('error', err => {
+    const msg = err instanceof Error ? err.message : String(err)
+    logForDebugging(`${label}: ${command} ${msg}`, { level: 'warn' })
+    push({ failed: new Error(`${label}: ${command} ${msg}`) })
   })
-  child.unref()
-  return { pid: child.pid ?? 0 }
+  child.once('close', (code, signal) => {
+    push({ ended: { code, signal } })
+  })
+
+  const onAbort = () => {
+    const didKill = killChild()
+    queue.length = 0
+    push({ failed: new Error(`${label}: ${command} aborted`) })
+    if (didKill) {
+      logForDebugging(`${label}: ${command} stopped: the op was aborted`)
+    }
+  }
+  opts.signal?.addEventListener('abort', onAbort, { once: true })
+
+  if (req.input !== undefined && child.stdin !== null) {
+    child.stdin.once('error', () => {})
+    child.stdin.end(req.input)
+  }
+
+  try {
+    while (true) {
+      const item = queue.shift()
+      if (item === undefined) {
+        await new Promise<void>(r => {
+          wake = r
+        })
+        wake = undefined
+        continue
+      }
+      if ('failed' in item) throw item.failed
+      if ('ended' in item) {
+        const { ended } = item
+        logForDebugging(
+          `${label}: ${command} ended (${ended.code ?? ended.signal}) in ${Date.now() - startedAt}ms, ${chunkCount} chunks`,
+        )
+        return ended
+      }
+      bufferedBytes -= item.text.length
+      chunkCount += 1
+      if (paused && bufferedBytes <= PROCESS_SPAWN_HIGH_WATER) {
+        setFlow(true)
+      }
+      yield item
+    }
+  } finally {
+    opts.signal?.removeEventListener('abort', onAbort)
+    if (!killed && killChild()) {
+      logForDebugging(
+        `${label}: ${command} stopped after ${Date.now() - startedAt}ms: the stream was let go`,
+      )
+    }
+  }
 }
 
 /** densable `UB` — `$.http.fetch` 4 MiB request/response body cap. */
@@ -4924,8 +5160,17 @@ export async function handleHostOp(
     return runProcess(argv, init, plugin)
   }
   if (op === 'process.spawn') {
-    const argv = rec ? rec.argv : args[0]
-    return spawnDetached(argv)
+    const problem = validateProcessSpawnRequest(rec)
+    if (problem !== undefined) {
+      hostCheck(op, problem, plugin)
+    }
+    const req = rec as {
+      argv: string[]
+      cwd?: string
+      env?: Record<string, string>
+      input?: string
+    }
+    return spawnProcessStream(req, plugin ?? 'unknown')
   }
   if (op === 'ui.ask') {
     return runUiAsk(args, plugin)
@@ -5036,6 +5281,15 @@ export async function handleHostOp(
     op === 'ui.invalidate'
   ) {
     return runUiHost(op, rec ?? {}, plugin)
+  }
+  if (op === 'theme.set') {
+    const rawArg = args[0]
+    const err = themeSetCheck(rawArg)
+    if (err !== undefined) hostCheck(op, err, plugin)
+    return runThemeSet(rawArg as Record<string, unknown>, plugin)
+  }
+  if (op === 'theme.clear') {
+    return runThemeClear()
   }
   if (op === 'settings.read') {
     return runSettingsRead(rec, op, plugin)
@@ -7139,6 +7393,7 @@ const UI_RENDER_COMPONENTS = {
   PromptHint: 'PromptHintSite',
   AbovePrompt: 'AbovePromptSite',
   Pane: 'PaneSite',
+  Backdrop: 'BackdropSite',
 } as const
 /** densable `ye` — every surface name (`Object.keys(Nz)`). */
 const UI_SURFACE_NAMES = Object.freeze(Object.keys(UI_SURFACES))
@@ -7165,6 +7420,7 @@ const UI_RENDER_COMPONENT_SURFACES: Readonly<
   PromptHint: ['terminal', 'desktop'],
   AbovePrompt: ['terminal', 'desktop'],
   Pane: UI_SURFACE_NAMES,
+  Backdrop: ['desktop', 'mobile'],
 })
 const UI_INVALIDATE_EVENTS = [
   'ui.render',
@@ -8504,8 +8760,14 @@ export async function evaluateUiRender(
       throw new Error(propsReason)
     }
   }
+  const clippedTree =
+    isEventRecord(tree) &&
+    tree.type === 'engine' &&
+    tree !== UI_RENDER_ENGINE_FALLBACK
+      ? clipRewrittenUiRenderProps(tree, input, component)
+      : tree
   const accepted = stripUnknownBoxBorderStyles(
-    acceptAskUserQuestionRewrite(tree, input, component),
+    acceptAskUserQuestionRewrite(clippedTree, input, component),
   )
   // densable `i8n` / `eBo` — Vmn-failing Links become Text; pane keeps drawing.
   drawn = rewriteDrawnLinksToPlainText(accepted, surface, problems => {
@@ -8522,6 +8784,157 @@ export async function evaluateUiRender(
     noteSlowUiRender(liveNames, Date.now() - startedAt)
   }
   return drawn
+}
+
+const UI_RENDER_SHORT_STRING_MAX = 256 // XTo
+const UI_RENDER_PROP_BUDGET = 100_000 // yVt
+const UI_RENDER_PROP_MAX_DEPTH = 32 // Kke
+
+function createUiRenderPropBudget() {
+  let remaining = UI_RENDER_PROP_BUDGET
+  let written = 0
+  let drawn = 0
+  let markedCut = false
+  let wasCut = false
+  return {
+    written: () => written,
+    drawn: () => drawn,
+    isCut: () => wasCut,
+    shown: (value: string, sep: string): string => {
+      written += value.length
+      if (value.length <= remaining) {
+        remaining -= value.length
+        drawn += value.length
+        return value
+      }
+      const cut = value.slice(0, remaining)
+      const firstCut = !markedCut
+      drawn += cut.length
+      remaining = 0
+      markedCut = true
+      wasCut = true
+      return firstCut
+        ? `${cut}${sep}… (${value.length - cut.length} more chars)`
+        : cut
+    },
+  }
+}
+
+function measureShortStringsAndKeys(value: unknown, depth: number): number {
+  if (typeof value === 'string') {
+    return value.length <= UI_RENDER_SHORT_STRING_MAX ? value.length : 0
+  }
+  const isArr = Array.isArray(value)
+  if (!isArr && !isEventRecord(value)) return 0
+  if (depth > UI_RENDER_PROP_MAX_DEPTH) return Infinity
+  if (isArr) {
+    return value.reduce(
+      (sum: number, item) => sum + measureShortStringsAndKeys(item, depth + 1),
+      0,
+    )
+  }
+  return Object.entries(value).reduce(
+    (sum, [key, val]) =>
+      sum + key.length + measureShortStringsAndKeys(val, depth + 1),
+    0,
+  )
+}
+
+function clipLongPropStrings(
+  value: unknown,
+  budget: ReturnType<typeof createUiRenderPropBudget>,
+): unknown {
+  if (typeof value === 'string') {
+    return value.length <= UI_RENDER_SHORT_STRING_MAX
+      ? value
+      : budget.shown(value, ' ')
+  }
+  if (Array.isArray(value)) {
+    const mapped = value.map(item => clipLongPropStrings(item, budget))
+    return mapped.every((m, i) => m === value[i]) ? value : mapped
+  }
+  if (!isEventRecord(value)) return value
+  const entries = Object.entries(value)
+  const mapped = entries.map(
+    ([k, v]) => [k, clipLongPropStrings(v, budget)] as const,
+  )
+  return mapped.every(([, v], i) => v === entries[i]?.[1])
+    ? value
+    : Object.fromEntries(mapped)
+}
+
+function totalPropTextLength(value: unknown): number {
+  if (typeof value === 'string') return value.length
+  if (Array.isArray(value)) {
+    return value.reduce((sum: number, v) => sum + totalPropTextLength(v), 0)
+  }
+  if (isEventRecord(value)) {
+    return Object.entries(value).reduce(
+      (sum, [k, v]) => sum + k.length + totalPropTextLength(v),
+      0,
+    )
+  }
+  return 0
+}
+
+/**
+ * Official `EQi` — clip rewritten `ui.render` engine props > 256 chars under
+ * the 100k prop budget, or restore original props when short strings/keys
+ * exceed 100k or nesting exceeds 32.
+ */
+function clipRewrittenUiRenderProps(
+  tree: Record<string, unknown>,
+  input: Record<string, unknown>,
+  component: string,
+): Record<string, unknown> {
+  const treeProps = isEventRecord(tree.props) ? tree.props : undefined
+  const origProps = isEventRecord(input.props) ? input.props : undefined
+  if (!treeProps || !origProps) return tree
+  const budget = createUiRenderPropBudget()
+  const changes: Array<{ key: string; drawn: unknown; isOwn: boolean }> = []
+  for (const [key, val] of Object.entries(treeProps)) {
+    if (
+      val === origProps[key] ||
+      totalPropTextLength(val) <= totalPropTextLength(origProps[key])
+    ) {
+      continue
+    }
+    const isOwn = measureShortStringsAndKeys(val, 0) > UI_RENDER_PROP_BUDGET
+    const drawn = isOwn ? origProps[key] : clipLongPropStrings(val, budget)
+    if (drawn !== val) {
+      changes.push({ key, drawn, isOwn })
+    }
+  }
+  if (budget.isCut()) {
+    logForDebugging(
+      `ui.render (${component}): ${budget.written()} characters of text are drawn up to the first ${UI_RENDER_PROP_BUDGET}`,
+      { level: 'warn' },
+    )
+  }
+  const ownNames = changes.filter(c => c.isOwn).map(c => c.key)
+  if (ownNames.length > 0) {
+    logForDebugging(
+      `ui.render (${component}): props.${ownNames.join(', props.')} rewritten with more than ${UI_RENDER_PROP_BUDGET} characters of keys and short strings, or nested past ${UI_RENDER_PROP_MAX_DEPTH} deep; the engine's own is drawn`,
+      { level: 'warn' },
+    )
+  }
+  if (changes.length === 0) return tree
+  return {
+    ...tree,
+    props: {
+      ...treeProps,
+      ...Object.fromEntries(changes.map(c => [c.key, c.drawn])),
+    },
+  }
+}
+
+/**
+ * Official `S8s` — valid theme color / name / hex pattern for `color`,
+ * `backgroundColor`, and `borderColor` props.
+ */
+const THEME_COLOR_PROP_RE = /^[#a-zA-Z0-9_().,% -]{1,40}$/
+function isValidThemeColorProp(value: unknown): boolean {
+  return typeof value === 'string' && THEME_COLOR_PROP_RE.test(value)
 }
 
 /** densable `DBr` / `tBo` — refusal still lets the engine draw its own. */
@@ -11589,6 +12002,14 @@ export function uiRenderHoverCheck(tree: unknown): string | undefined {
         if (HOVER_SHIFT_PROPS.has(field) && drawn.position !== 'absolute') {
           return `${propLabel} would shift a Box still in the flow over its siblings; a hover moves only a Box drawn position "absolute"`
         }
+        if (
+          (field === 'color' ||
+            field === 'backgroundColor' ||
+            field === 'borderColor') &&
+          !isValidThemeColorProp(value)
+        ) {
+          return `${propLabel} must be a color (a theme key, a name, or hex)`
+        }
       }
     }
     const childScope = nodeScope
@@ -12292,16 +12713,31 @@ async function runToolCall(
 
 const TOOL_CHECK_HOP_SITE: FunctionHookHopSite = {
   restoreArgument: (passed, original) =>
-    restorePinnedKeys(['tool_use_id'], passed, original),
+    restorePinnedKeys(
+      ['tool_use_id', 'agentId', 'ceiling', 'approver', 'isReadOnly'],
+      passed,
+      original,
+    ),
   checkArgument: (passed, original) => {
     if (
       passed.tool !== original.tool ||
       pinValue(passed.input) !== pinValue(original.input) ||
-      passed.tool_use_id !== original.tool_use_id
+      passed.tool_use_id !== original.tool_use_id ||
+      passed.agentId !== original.agentId ||
+      passed.ceiling !== original.ceiling ||
+      passed.approver !== original.approver ||
+      passed.isReadOnly !== original.isReadOnly
     ) {
       return 'the tool, its input and the call are the question and are pinned; a hook answers { decision }, it does not ask about another call'
     }
     return undefined
+  },
+  restoreResult: (returned, priorResults, original) => {
+    const { ceiling: _dropped, ...rest } = returned
+    const ceiling =
+      original.ceiling ??
+      priorResults.find(entry => entry.ceiling !== undefined)?.ceiling
+    return ceiling === undefined ? rest : { ...rest, ceiling }
   },
 }
 
@@ -15905,6 +16341,7 @@ function unloadModule(name: string): void {
     if (key.startsWith(`${name}\0`)) pluginStore.delete(key)
   }
   forgetPluginSessionAuthHandles(name)
+  themeClearOnUnload(name)
   ownedTables.delete(name)
   resolvedTables.delete(name)
   resolvedByKey.delete(name)
@@ -16676,7 +17113,7 @@ function matcherAllows(
 const REGISTER_FILE = 'hooks/register.ts'
 
 /** densable `uQe` + `WEn` tails after `classic.<HookEvent>` (gold 2.1.289). */
-const FUNCTION_HOOK_EVENTS = [
+export const FUNCTION_HOOK_EVENTS = [
   'tool.call',
   'tool.check',
   'ui.render',
@@ -16758,6 +17195,8 @@ const FUNCTION_HOOK_EVENTS = [
   'ui.open',
   'ui.close',
   'ui.panes',
+  'theme.set',
+  'theme.clear',
   'ui.selection',
   'ui.copy',
   'ui.blit',
@@ -17684,5 +18123,718 @@ async function recordRegisterPatterns(
     ...(plugin.tier !== undefined && { tier: plugin.tier }),
     ...(plugin.tier === 'prepend' && { isManaged: true }),
     ...(nativeModule !== undefined && { native: true }),
+  }
+}
+
+// ============================================================================
+// $.theme.set / $.theme.clear (v2.1.325 1:1)
+// ============================================================================
+
+const THEME_TOP_KEYS = ['backdrop', 'overrideColorScheme', 'colors'] as const
+const THEME_BACKDROP_GROUNDS = [
+  'scene',
+  'color',
+  'gradient',
+  'vector',
+  'image',
+] as const
+const THEME_BACKDROP_GROUND_SET = new Set<string>(THEME_BACKDROP_GROUNDS)
+const THEME_BACKDROP_NESTED: Record<string, string> = {
+  stops: 'gradient',
+  angle: 'gradient',
+  shape: 'gradient',
+  viewBox: 'vector',
+  paths: 'vector',
+  colors:
+    "the set itself: a look's theme is the colors attribute, beside backdrop",
+  size: 'gradient, vector or image: a color or a scene takes none',
+  repeat: 'gradient, vector or image: a color or a scene takes none',
+}
+const THEME_BACKDROP_GROUND_SHAPES: Record<string, string> = {
+  gradient: '{ stops, angle?, shape?, size?, repeat? }',
+  vector: '{ viewBox, paths, color?, size?, repeat? }',
+  image: '{ source, size?, repeat? }',
+}
+const THEME_BACKDROP_USAGE =
+  'backdrop is a scene, { scene, glass? }, or a still ground: { color }, { gradient: { stops } }, { vector: { viewBox, paths } } or { image: { source } }'
+const THEME_PROTO_KEYS = Object.freeze([
+  '__proto__',
+  'constructor',
+  'prototype',
+])
+const THEME_COLORS_MAX_CHARS = 65536
+const THEME_COLORS_MAX_NODES = 1500
+const THEME_COLORS_START_DEPTH = 3
+const THEME_JSON_MAX_DEPTH = 32
+const THEME_BACKDROP_MAX_NODES = 480
+const THEME_IMAGE_SOURCE_MAX = 256
+const THEME_GLASS_BLUR_MAX = 64
+const THEME_GLASS_TINT_MAX = 64
+const THEME_IMAGE_MAX_BYTES = 1048576
+const THEME_IMAGE_MAX_SIDE = 4096
+const THEME_IMAGE_CHUNK_BYTES = 40960
+const THEME_GLASS_DEFAULT = { blur: 16, opacity: 0.6 }
+const THEME_RAW_COLOR_RE =
+  /^(#([0-9A-Fa-f]{3,4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})|(rgb|hsl)a?\( *(\d+(\.\d+)?|\.\d+)%?( *, *| +)(\d+(\.\d+)?|\.\d+)%?( *, *| +)(\d+(\.\d+)?|\.\d+)%?( *[,/] *(\d+(\.\d+)?|\.\d+)%?)? *\))$/
+
+export type SessionThemeState = {
+  plugin: string
+  backdrop?: Record<string, unknown>
+  image?: { id: string; hash: string; data: Buffer }
+  overrideColorScheme?: 'light' | 'dark'
+  colors?: Record<string, unknown>
+}
+
+let sessionTheme: SessionThemeState | undefined
+const sessionThemeListeners = new Set<() => void>()
+const themeTurns = {
+  taken: 0,
+  landed: 0,
+  gone: new Map<string, number>(),
+}
+const themeImageKey = randomBytes(32)
+
+function setSessionThemeState(
+  updater: (
+    prev: SessionThemeState | undefined,
+  ) => SessionThemeState | undefined,
+): void {
+  const next = updater(sessionTheme)
+  sessionTheme = next
+  for (const listener of sessionThemeListeners) {
+    try {
+      listener()
+    } catch {
+      // ignore listener errors
+    }
+  }
+}
+
+export function getSessionTheme(): SessionThemeState | undefined {
+  return sessionTheme
+}
+
+export function subscribeSessionTheme(listener: () => void): () => void {
+  sessionThemeListeners.add(listener)
+  return () => {
+    sessionThemeListeners.delete(listener)
+  }
+}
+
+export function resetSessionThemeForTests(): void {
+  sessionTheme = undefined
+  themeTurns.taken = 0
+  themeTurns.landed = 0
+  themeTurns.gone.clear()
+}
+
+export function getBackdropRenderProps(
+  instanceId: string,
+): Record<string, unknown> | undefined {
+  const theme = sessionTheme
+  const backdrop = theme?.backdrop
+  if (
+    theme !== undefined &&
+    backdrop !== undefined &&
+    backdrop.scene !== undefined &&
+    instanceId === 'backdrop'
+  ) {
+    return {
+      scene: backdrop.scene,
+      plugin: theme.plugin,
+      glass: backdrop.glass,
+      ...(theme.overrideColorScheme !== undefined && {
+        overrideColorScheme: theme.overrideColorScheme,
+      }),
+    }
+  }
+  return undefined
+}
+
+export function getThemeRenderProps(
+  instanceId: string,
+): Record<string, unknown> | undefined {
+  const theme = sessionTheme
+  if (theme === undefined) return undefined
+  if (instanceId.startsWith('image:')) {
+    const img = theme.image
+    if (img === undefined) return undefined
+    const [, id, idxStr, ...rest] = instanceId.split(':')
+    const index = Number(idxStr)
+    const of = Math.ceil(img.data.length / THEME_IMAGE_CHUNK_BYTES)
+    if (
+      id === img.id &&
+      rest.length === 0 &&
+      /^\d+$/.test(idxStr ?? '') &&
+      index < of
+    ) {
+      return {
+        data: img.data
+          .subarray(
+            index * THEME_IMAGE_CHUNK_BYTES,
+            (index + 1) * THEME_IMAGE_CHUNK_BYTES,
+          )
+          .toString('base64'),
+        index,
+        of,
+        hash: img.hash,
+        bytes: img.data.length,
+      }
+    }
+    return undefined
+  }
+  if (instanceId !== 'theme') return undefined
+  const hasScene = theme.backdrop?.scene !== undefined
+  if (hasScene && theme.colors === undefined) return undefined
+  return {
+    plugin: theme.plugin,
+    ...(theme.overrideColorScheme !== undefined && {
+      overrideColorScheme: theme.overrideColorScheme,
+    }),
+    ...(theme.colors !== undefined && { colors: theme.colors }),
+    ...(theme.backdrop !== undefined &&
+      !hasScene && { backdrop: theme.backdrop }),
+  }
+}
+
+function themeFindForbiddenKey(
+  value: unknown,
+  seen = new WeakSet<object>(),
+): string | undefined {
+  if (typeof value !== 'object' || value === null || seen.has(value)) {
+    return undefined
+  }
+  seen.add(value)
+  if (Array.isArray(value)) {
+    const extraKey = Object.keys(value)[value.length]
+    if (extraKey !== undefined) return String(extraKey)
+    for (const item of value) {
+      const hit = themeFindForbiddenKey(item, seen)
+      if (hit !== undefined) return hit
+    }
+    return undefined
+  }
+  const protoHit = THEME_PROTO_KEYS.find(k => Object.hasOwn(value, k))
+  if (protoHit !== undefined) return protoHit
+  for (const [, v] of Object.entries(value)) {
+    const hit = themeFindForbiddenKey(v, seen)
+    if (hit !== undefined) return hit
+  }
+  return undefined
+}
+
+function isPlainThemeObject(value: unknown): value is Record<string, unknown> {
+  if (!isEventRecord(value)) return false
+  const proto = Object.getPrototypeOf(value)
+  return proto === Object.prototype || proto === null
+}
+
+function measurePlainJson(
+  value: unknown,
+  depth: number,
+  state: { nodes: number; chars: number; seen: WeakSet<object> },
+): string | undefined {
+  if (depth > THEME_JSON_MAX_DEPTH) {
+    return `nests deeper than ${THEME_JSON_MAX_DEPTH}`
+  }
+  state.nodes += 1
+  if (value === null || typeof value === 'boolean') {
+    state.chars += value === null ? 4 : value ? 4 : 5
+    return undefined
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return `holds ${String(value)}`
+    state.chars += String(value).length
+    return undefined
+  }
+  if (typeof value === 'string') {
+    state.chars += value.length + 2
+    return undefined
+  }
+  if (value === undefined) {
+    return 'holds undefined (an array hole, a missing value)'
+  }
+  if (typeof value !== 'object') {
+    return `holds a ${typeof value}`
+  }
+  if (state.seen.has(value)) {
+    return 'contains a cycle'
+  }
+  state.seen.add(value)
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      const err = measurePlainJson(value[i], depth + 1, state)
+      if (err !== undefined) return err
+    }
+    return undefined
+  }
+  if (!isPlainThemeObject(value)) {
+    return 'is not plain JSON data'
+  }
+  for (const [k, v] of Object.entries(value)) {
+    if (v === undefined) continue
+    state.chars += k.length + 3
+    const err = measurePlainJson(v, depth + 1, state)
+    if (err !== undefined) return err
+  }
+  return undefined
+}
+
+function validateThemeColors(colors: unknown): string | undefined {
+  const maxDepth = THEME_JSON_MAX_DEPTH - THEME_COLORS_START_DEPTH
+  const prefix = `colors must be a plain JSON object, a whole palette, of at most ${THEME_COLORS_MAX_NODES} values in about ${THEME_COLORS_MAX_CHARS} characters, nested at most ${maxDepth} deep`
+  if (!isPlainThemeObject(colors)) return prefix
+  const state = { nodes: 0, chars: 0, seen: new WeakSet<object>() }
+  const err = measurePlainJson(colors, THEME_COLORS_START_DEPTH, state)
+  if (err?.startsWith('nests deeper') === true) {
+    return `${prefix}: this one nests too deep`
+  }
+  if (err !== undefined) return `${prefix}: this one ${err}`
+  if (
+    state.nodes > THEME_COLORS_MAX_NODES ||
+    state.chars > THEME_COLORS_MAX_CHARS
+  ) {
+    return `${prefix}: this one holds ${state.nodes} values in about ${state.chars} characters`
+  }
+  const forbidden = themeFindForbiddenKey(colors)
+  if (forbidden !== undefined) {
+    return `colors may hold no key named ${forbidden} here: a list holds no named key, and a surface that merges colors reaches a prototype through __proto__, constructor or prototype`
+  }
+  return undefined
+}
+
+function validateThemeBackdrop(backdrop: unknown): string | undefined {
+  if (!isPlainThemeObject(backdrop)) return THEME_BACKDROP_USAGE
+  const clean: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(backdrop)) {
+    if (v !== null && v !== undefined) clean[k] = v
+  }
+  const { scene, glass } = clean
+  const grounds = THEME_BACKDROP_GROUNDS.filter(g => clean[g] !== undefined)
+  const nestedKey = Object.keys(THEME_BACKDROP_NESTED).find(
+    k => clean[k] !== undefined,
+  )
+  if (nestedKey !== undefined) {
+    return `backdrop.${nestedKey} goes inside ${THEME_BACKDROP_NESTED[nestedKey]}`
+  }
+  if (grounds.length > 1) {
+    return `backdrop takes just one of scene, color, gradient, vector or image, and this names ${grounds.join(' and ')}`
+  }
+  if (grounds.length === 0) return THEME_BACKDROP_USAGE
+
+  if (scene === undefined) {
+    const shaped = grounds.find(g =>
+      Object.hasOwn(THEME_BACKDROP_GROUND_SHAPES, g),
+    )
+    if (shaped !== undefined && !isPlainThemeObject(clean[shaped])) {
+      return `backdrop.${shaped} is ${THEME_BACKDROP_GROUND_SHAPES[shaped]}`
+    }
+    if (isPlainThemeObject(clean.image)) {
+      const src = clean.image.source
+      const srcValid =
+        typeof src === 'string' &&
+        src !== '' &&
+        src.length <= THEME_IMAGE_SOURCE_MAX &&
+        !src.includes('\0') &&
+        !src.includes('\\') &&
+        !src.startsWith('/') &&
+        !src.split('/').includes('..')
+      if (!srcValid) {
+        return `backdrop.image.source is a path of 1 to ${THEME_IMAGE_SOURCE_MAX} characters, relative to the mod's folder, with / between folders and no ".." in it`
+      }
+    }
+    if (glass !== undefined) {
+      return 'backdrop.glass is for a scene: a still ground has none'
+    }
+    const state = { nodes: 0, chars: 0, seen: new WeakSet<object>() }
+    const err = measurePlainJson(backdrop, THEME_COLORS_START_DEPTH, state)
+    if (err !== undefined) {
+      return `backdrop must be plain JSON data of at most ${THEME_BACKDROP_MAX_NODES} values: this one ${err}`
+    }
+    if (state.nodes > THEME_BACKDROP_MAX_NODES) {
+      return `backdrop may hold at most ${THEME_BACKDROP_MAX_NODES} values: this holds ${state.nodes}`
+    }
+    const forbidden = themeFindForbiddenKey(backdrop)
+    if (forbidden !== undefined) {
+      return THEME_PROTO_KEYS.includes(forbidden)
+        ? `backdrop may hold no key named ${forbidden}: a surface's merge of it would reach a prototype`
+        : `backdrop may hold no named key on a list, and a list here has one named ${forbidden}`
+    }
+    return undefined
+  }
+
+  if (
+    typeof scene !== 'string' ||
+    scene.length < 1 ||
+    scene.length > 64 ||
+    !/^[A-Za-z0-9_-]+$/.test(scene)
+  ) {
+    return 'backdrop needs a scene: 1 to 64 of letters, digits, _ or -'
+  }
+  if (glass === undefined || glass === false) return undefined
+  if (typeof glass !== 'object' || glass === null || Array.isArray(glass)) {
+    return 'glass is { blur?, tint?, opacity? } or false'
+  }
+  const glassRec = glass as Record<string, unknown>
+  const blur = 'blur' in glassRec ? glassRec.blur : undefined
+  const opacity = 'opacity' in glassRec ? glassRec.opacity : undefined
+  const tint = 'tint' in glassRec ? glassRec.tint : undefined
+  if (
+    blur !== undefined &&
+    !(typeof blur === 'number' && blur >= 0 && blur <= THEME_GLASS_BLUR_MAX)
+  ) {
+    return `glass.blur is a number of points, 0 to ${THEME_GLASS_BLUR_MAX}`
+  }
+  if (
+    opacity !== undefined &&
+    !(typeof opacity === 'number' && opacity >= 0 && opacity <= 1)
+  ) {
+    return 'glass.opacity is a number, 0 to 1'
+  }
+  if (
+    tint !== undefined &&
+    !(
+      typeof tint === 'string' &&
+      tint.length <= THEME_GLASS_TINT_MAX &&
+      THEME_RAW_COLOR_RE.test(tint)
+    )
+  ) {
+    return `glass.tint is a raw color, #hex or rgb(), rgba(), hsl() or hsla() of numbers, at most ${THEME_GLASS_TINT_MAX} characters`
+  }
+  return undefined
+}
+
+function themeSetCheck(input: unknown): string | undefined {
+  if (!isPlainThemeObject(input)) {
+    return `the argument is an object with any of ${THEME_TOP_KEYS.join(', ')}`
+  }
+  const unknownKey = Reflect.ownKeys(input).find(
+    k =>
+      typeof k !== 'string' ||
+      !(THEME_TOP_KEYS as readonly string[]).includes(k),
+  )
+  if (unknownKey !== undefined) {
+    return `theme.set does not know the attribute "${String(unknownKey)}": this build takes ${THEME_TOP_KEYS.join(', ')}`
+  }
+  const { backdrop, overrideColorScheme, colors } = input
+  if (THEME_TOP_KEYS.every(k => input[k] === undefined)) {
+    return `theme.set needs at least one of ${THEME_TOP_KEYS.join(', ')}; $.theme.clear() clears the theme`
+  }
+  if (
+    overrideColorScheme !== undefined &&
+    overrideColorScheme !== 'light' &&
+    overrideColorScheme !== 'dark'
+  ) {
+    return 'overrideColorScheme is light or dark'
+  }
+  return (
+    (backdrop === undefined ? undefined : validateThemeBackdrop(backdrop)) ??
+    (colors === undefined ? undefined : validateThemeColors(colors))
+  )
+}
+
+function normalizeThemeGlass(
+  glass: unknown,
+): false | { blur: number; opacity: number; tint?: string } {
+  if (glass === false) return false
+  const rec = isEventRecord(glass) ? glass : {}
+  return {
+    blur: typeof rec.blur === 'number' ? rec.blur : THEME_GLASS_DEFAULT.blur,
+    opacity:
+      typeof rec.opacity === 'number'
+        ? rec.opacity
+        : THEME_GLASS_DEFAULT.opacity,
+    ...(typeof rec.tint === 'string' && { tint: rec.tint }),
+  }
+}
+
+function parsePngDimensions(
+  buf: Buffer,
+): { width: number; height: number } | undefined {
+  if (buf.length < 33) return undefined
+  const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+  if (!sig.every((b, i) => buf[i] === b)) return undefined
+  if (buf.toString('latin1', 12, 16) !== 'IHDR') return undefined
+  if (!buf.toString('latin1', buf.length - 8).startsWith('IEND'))
+    return undefined
+  return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) }
+}
+
+function parseJpegDimensions(
+  buf: Buffer,
+): { width: number; height: number } | undefined {
+  if (buf.length < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) return undefined
+  let i = 2
+  while (i + 3 < buf.length) {
+    if (buf[i] !== 0xff) {
+      i = buf.indexOf(0xff, i)
+      if (i === -1 || i + 3 >= buf.length) break
+    }
+    const marker = buf[i + 1] ?? 0
+    if (marker === 0xff) {
+      i++
+      continue
+    }
+    if (marker === 0xd9) break
+    if (marker <= 0x01 || (marker >= 0xd0 && marker <= 0xd8)) {
+      i += 2
+      continue
+    }
+    const len = buf.readUInt16BE(i + 2)
+    if (len < 2 || i + 2 + len > buf.length) break
+    if (marker === 0xc0 || marker === 0xc1 || marker === 0xc2) {
+      if (i + 8 < buf.length && buf[i + 4] === 8) {
+        return {
+          height: buf.readUInt16BE(i + 5),
+          width: buf.readUInt16BE(i + 7),
+        }
+      }
+      return undefined
+    }
+    i += 2 + len
+  }
+  return undefined
+}
+
+function validateThemeImageBytes(bytes: Buffer):
+  | {
+      facts: { type: 'jpeg' | 'png'; width: number; height: number }
+      bytes: Buffer
+    }
+  | string {
+  const isPng =
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47
+  const isJpeg = bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8
+  if (!isPng && !isJpeg) {
+    return 'it has to be a JPEG or PNG file'
+  }
+  const dims = isJpeg ? parseJpegDimensions(bytes) : parsePngDimensions(bytes)
+  if (!dims || dims.width < 1 || dims.height < 1) {
+    return isJpeg
+      ? "it's a JPEG that can't be read here: save it again as a standard JPEG"
+      : "it isn't a whole JPEG or PNG file"
+  }
+  if (dims.width > THEME_IMAGE_MAX_SIDE || dims.height > THEME_IMAGE_MAX_SIDE) {
+    return `it's ${dims.width} by ${dims.height}: at most ${THEME_IMAGE_MAX_SIDE} on a side, so save it smaller`
+  }
+  return {
+    facts: {
+      type: isJpeg ? 'jpeg' : 'png',
+      width: dims.width,
+      height: dims.height,
+    },
+    bytes,
+  }
+}
+
+async function readThemeImage(
+  source: string,
+  pluginName: string,
+  pluginRoot: string,
+): Promise<{
+  wire: { type: 'jpeg' | 'png'; width: number; height: number; id: string }
+  hash: string
+  data: Buffer
+}> {
+  const realRoot = await fsRealpath(pluginRoot)
+  const target = resolve(realRoot, source)
+  const rel = relative(realRoot, target)
+  if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
+    throw new Error(
+      `${pluginName}: theme.set: ${source} is outside the mod's folder`,
+    )
+  }
+  const realTarget = await fsRealpath(target)
+  const realRel = relative(realRoot, realTarget)
+  if (realRel === '' || realRel.startsWith('..') || isAbsolute(realRel)) {
+    throw new Error(
+      `${pluginName}: theme.set: ${source} escapes the mod's folder`,
+    )
+  }
+  const st = await fsLstat(realTarget, { bigint: true })
+  if (!st.isFile()) {
+    throw new Error(`${pluginName}: theme.set: ${source} is not a file`)
+  }
+  if (st.nlink > 1n) {
+    throw new Error(
+      `${pluginName}: theme.set: ${source} has a second name (a hard link), so it isn't read: copy it to a file of its own`,
+    )
+  }
+  if (st.size > BigInt(THEME_IMAGE_MAX_BYTES)) {
+    throw new Error(
+      `${pluginName}: theme.set: ${source} is too big: at most ${THEME_IMAGE_MAX_BYTES} bytes, so save it about 2560 wide as a JPEG`,
+    )
+  }
+  const handle = await fsOpen(realTarget, 'r')
+  let buf: Buffer
+  try {
+    buf = await handle.readFile()
+  } finally {
+    await handle.close()
+  }
+  if (buf.length > THEME_IMAGE_MAX_BYTES) {
+    throw new Error(
+      `${pluginName}: theme.set: ${source} is too big: at most ${THEME_IMAGE_MAX_BYTES} bytes, so save it about 2560 wide as a JPEG`,
+    )
+  }
+  const validated = validateThemeImageBytes(buf)
+  if (typeof validated === 'string') {
+    throw new Error(`${pluginName}: theme.set: ${source}: ${validated}`)
+  }
+  const id = createHmac('sha256', themeImageKey)
+    .update(validated.bytes)
+    .digest('hex')
+  const hash = createHash('sha256').update(validated.bytes).digest('hex')
+  return {
+    wire: { ...validated.facts, id },
+    hash,
+    data: validated.bytes,
+  }
+}
+
+async function themeUndrawnReason(): Promise<string | undefined> {
+  const { listSurfaceViewportClients } = await import(
+    './surfaceViewportClients.js'
+  )
+  const drawn = listSurfaceViewportClients().some(c => {
+    const rec = c as { surface?: string; draws?: unknown }
+    return (
+      (rec.surface === 'desktop' || rec.surface === 'mobile') &&
+      Array.isArray(rec.draws) &&
+      rec.draws.includes('Theme')
+    )
+  })
+  return drawn
+    ? undefined
+    : 'no attached desktop or mobile client draws themes yet; the theme stands and draws when one attaches'
+}
+
+async function runThemeSet(
+  input: Record<string, unknown>,
+  plugin?: string,
+): Promise<{ isDrawn: boolean; requestId?: string; reason?: string }> {
+  const pluginName = plugin && plugin !== '' ? plugin : 'unattributed'
+  const mod = loadedModules.find(m => m.name === pluginName)
+  const turn = (themeTurns.taken += 1)
+  const backdropRec = isEventRecord(input.backdrop) ? input.backdrop : undefined
+  const imageRec =
+    backdropRec && isEventRecord(backdropRec.image)
+      ? backdropRec.image
+      : undefined
+  const imageSource =
+    imageRec && typeof imageRec.source === 'string'
+      ? imageRec.source
+      : undefined
+
+  let loadedImage:
+    | {
+        wire: {
+          type: 'jpeg' | 'png'
+          width: number
+          height: number
+          id: string
+        }
+        hash: string
+        data: Buffer
+      }
+    | undefined
+  if (imageSource !== undefined) {
+    const root = mod?.root
+    if (!root || root === BUILTIN_MARKETPLACE_NAME) {
+      throw new Error(
+        `${pluginName}: theme.set: ${imageSource} isn't read, so nothing was set: an image is read only through a safe handle on the mod's folder`,
+      )
+    }
+    loadedImage = await readThemeImage(imageSource, pluginName, root)
+  }
+
+  const goneTurn = themeTurns.gone.get(pluginName) ?? 0
+  if (turn < themeTurns.landed || turn < goneTurn) {
+    return {
+      isDrawn: false,
+      reason:
+        'nothing was set: a later $.theme.set or $.theme.clear came first, this mod unloaded, or the call was aborted',
+    }
+  }
+  themeTurns.landed = turn
+
+  const scene =
+    backdropRec && typeof backdropRec.scene === 'string'
+      ? backdropRec.scene
+      : undefined
+  const requestId = scene === undefined ? 'theme' : 'backdrop'
+  const nextState: SessionThemeState = {
+    plugin: pluginName,
+    ...(backdropRec !== undefined && {
+      backdrop:
+        scene === undefined
+          ? {
+              ...backdropRec,
+              scene: undefined,
+              ...(loadedImage !== undefined && {
+                image: {
+                  ...loadedImage.wire,
+                  size: imageRec?.size,
+                  repeat: imageRec?.repeat,
+                },
+              }),
+            }
+          : {
+              scene,
+              glass: normalizeThemeGlass(backdropRec.glass),
+            },
+    }),
+    ...(loadedImage !== undefined && {
+      image: {
+        id: loadedImage.wire.id,
+        hash: loadedImage.hash,
+        data: loadedImage.data,
+      },
+    }),
+    ...(input.overrideColorScheme !== undefined && {
+      overrideColorScheme: input.overrideColorScheme as 'light' | 'dark',
+    }),
+    ...(input.colors !== undefined && {
+      colors: input.colors as Record<string, unknown>,
+    }),
+  }
+
+  if (!isDeepStrictEqual(sessionTheme, nextState)) {
+    setSessionThemeState(() => nextState)
+  }
+
+  const undrawn = await themeUndrawnReason()
+  if (undrawn === undefined) {
+    return { isDrawn: true, requestId }
+  }
+  return { isDrawn: false, requestId, reason: undrawn }
+}
+
+function runThemeClear(): { isDrawn: false; reason: string } {
+  themeTurns.taken += 1
+  themeTurns.landed = themeTurns.taken
+  const stood = sessionTheme !== undefined
+  if (stood) {
+    setSessionThemeState(() => undefined)
+  }
+  return {
+    isDrawn: false,
+    reason: stood
+      ? 'the theme is cleared'
+      : 'no theme stood, so nothing was cleared',
+  }
+}
+
+function themeClearOnUnload(pluginName: string): void {
+  themeTurns.taken += 1
+  themeTurns.gone.set(pluginName, themeTurns.taken)
+  if (sessionTheme?.plugin === pluginName) {
+    setSessionThemeState(prev =>
+      prev?.plugin === pluginName ? undefined : prev,
+    )
   }
 }

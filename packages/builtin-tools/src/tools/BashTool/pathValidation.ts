@@ -144,7 +144,33 @@ function filterOutFlags(args: string[]): string[] {
   return result
 }
 
-// Helper: Parse grep/rg style commands (pattern then paths)
+/** SEA `Dtt` (@289998239) — extract attached value from `--flag=VAL` or `-fVAL`. */
+function extractAttachedFlagValue(
+  arg: string,
+  flagNames: string[],
+): string | undefined {
+  if (!arg.startsWith('-')) return undefined
+  const eqIdx = arg.indexOf('=')
+  if (eqIdx >= 0) {
+    if (flagNames.includes(arg.slice(0, eqIdx))) {
+      return arg.slice(eqIdx + 1)
+    }
+    return undefined
+  }
+  for (const name of flagNames) {
+    if (
+      name.length === 2 &&
+      name[0] === '-' &&
+      arg.startsWith(name) &&
+      arg !== name
+    ) {
+      return arg.slice(2)
+    }
+  }
+  return undefined
+}
+
+// Helper: Parse grep/rg style commands (pattern then paths) — SEA `Itt` (@289997344)
 function parsePatternCommand(
   args: string[],
   flagsWithArgs: Set<string>,
@@ -155,28 +181,78 @@ function parsePatternCommand(
   // SECURITY: Track `--` end-of-options delimiter. After `--`, all args are
   // positional regardless of leading `-`. See filterOutFlags() doc comment.
   let afterDoubleDash = false
+  let seenPositional = false
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
     if (arg === undefined || arg === null) continue
 
-    if (!afterDoubleDash && arg === '--') {
+    if (!afterDoubleDash && !seenPositional && arg === '--') {
       afterDoubleDash = true
       continue
     }
 
-    if (!afterDoubleDash && arg.startsWith('-')) {
-      const flag = arg.split('=')[0]
-      // Pattern flags mark that we've found the pattern
-      if (flag && ['-e', '--regexp', '-f', '--file'].includes(flag)) {
+    if (
+      !afterDoubleDash &&
+      !seenPositional &&
+      arg !== '-' &&
+      arg.startsWith('-')
+    ) {
+      const eqIdx = arg.indexOf('=')
+      const flag = eqIdx >= 0 ? arg.slice(0, eqIdx) : arg
+      // Pattern/file flags mark that we've found the pattern; -f/--file also reads a path
+      if (['-e', '--regexp', '-f', '--file'].includes(flag)) {
         patternFound = true
+        if (flag === '-f' || flag === '--file') {
+          const fileArg = eqIdx >= 0 ? arg.slice(eqIdx + 1) : args[i + 1]
+          if (fileArg) paths.push(fileArg)
+        }
       }
-      // Skip next arg if flag needs it
-      if (flag && flagsWithArgs.has(flag) && !arg.includes('=')) {
+      if (
+        /^-[a-zA-Z]*f$/.test(flag) &&
+        flag !== '-f' &&
+        eqIdx < 0 &&
+        args[i + 1] !== undefined
+      ) {
+        patternFound = true
+        paths.push(args[i + 1]!)
+        i++
+        continue
+      }
+      if (
+        ['--exclude-from', '--include-from', '--ignore-file'].includes(flag)
+      ) {
+        const fileArg = eqIdx >= 0 ? arg.slice(eqIdx + 1) : args[i + 1]
+        if (fileArg) paths.push(fileArg)
+        if (eqIdx < 0) i++
+        continue
+      }
+      if (eqIdx < 0) {
+        const attachedFile = extractAttachedFlagValue(arg, ['-f', '--file'])
+        if (attachedFile !== undefined) {
+          patternFound = true
+          paths.push(attachedFile)
+          continue
+        }
+        if (arg.length > 2 && arg.startsWith('-e')) {
+          patternFound = true
+          continue
+        }
+      }
+      // Skip next arg if flag needs it (and didn't use =value)
+      if (flagsWithArgs.has(flag) && eqIdx < 0) {
         i++
       }
       continue
     }
+
+    if (seenPositional && !afterDoubleDash) {
+      const attachedFile = extractAttachedFlagValue(arg, ['-f', '--file'])
+      if (attachedFile !== undefined) {
+        paths.push(attachedFile)
+      }
+    }
+    seenPositional = true
 
     // First non-flag is pattern, rest are paths
     if (!patternFound) {

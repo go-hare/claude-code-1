@@ -1949,6 +1949,31 @@ export const SDKPartialAssistantMessageSchema = lazySchema(() =>
     parent_tool_use_id: z.string().nullable(),
     uuid: UUIDPlaceholder(),
     session_id: z.string(),
+    api_message_id: z
+      .string()
+      .optional()
+      .describe(
+        "@internal The API's id (`msg_…`) of the response this event belongs to: `event.message.id` on its `message_start`, `message.id` on its assistant messages. Not a message `uuid`. Set on every event from a response's `message_start` to its `message_stop`, so that a consumer that missed the `message_start` can still tell responses apart. Two responses can share an id, as when a `message_start` is replayed; the key does not tell those apart. Absent on pings, when the `message_start` had no id or an empty one, on Remote Control (interactive terminal) sessions and from older producers. The events that Claude Code produces itself to close a response cut short carry it too. Events that a plugin produced or rewrote, and those that Claude Code builds in their place or to close them, can lack it. An absent key states nothing about which response the event belongs to.",
+      ),
+    abandoned_blocks: z
+      .object({
+        api_message_id: z
+          .string()
+          .describe(
+            "The API's id (`msg_…`) of the response that was cut short: `event.message.id` on its `message_start`, `message.id` on its assistant messages. Not a message `uuid`. Should two responses share an id, the one meant is the one this `message_stop` closes.",
+          ),
+        from_block_index: z
+          .number()
+          .int()
+          .nonnegative()
+          .describe(
+            "Blocks of the response at this index and above have no assistant message and never will. It is an `event.index` as on the response's `content_block_*` events, not a count of assistant messages. 0 means the whole response. Can be higher than every index the consumer has seen, and then there is nothing to remove.",
+          ),
+      })
+      .optional()
+      .describe(
+        "@internal Set on a `message_stop` that Claude Code produced itself, after it stopped reading the response that `message_stop` closes because the API's stream failed, stalled or ended early, or because the turn was interrupted. That response's content blocks at index `from_block_index` and above have no assistant message and will never get one, so a consumer that drew or stored them from stream events, and holds no assistant message for them, can remove them, even a block that has had its `content_block_stop`. Nothing is stated about lower blocks: some may have no assistant message, and what follows may repeat or replace them. What follows can be, among others, a retry (a new `message_start`), the same request without streaming (assistant messages under another id, with no `message_start` before them), or a `result`. Absent when the stream ran to completion, from older producers, or when `api_message_id` is absent.",
+      ),
   }),
 )
 

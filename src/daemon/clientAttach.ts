@@ -714,3 +714,162 @@ function getTerminalCaps(): Record<string, unknown> {
     editor: process.env.VISUAL?.trim() || process.env.EDITOR?.trim() || null,
   }
 }
+
+export const BG_REPLY_NOT_RUNNING_ERROR =
+  "That session isn't running — respawn it first"
+export const BG_REPLY_QUEUED_SUFFIX =
+  ' — your message was saved and will be sent when you next restart this session'
+
+/**
+ * Gold 2.1.325 `BIt(state, text)` — update BgJobState immediately after a
+ * successful reply (mark terminal states back to `working`, update detail,
+ * clear `suggestedReply`/`output`, and promote non-blocked tempo to `active`).
+ */
+export function applyBgReplyStateUpdate(
+  state: import('./jobState.js').BgJobState,
+  text: string,
+): import('./jobState.js').BgJobState {
+  const isBlocked = state.tempo === 'blocked'
+  const isTerminal =
+    state.state === 'done' ||
+    state.state === 'failed' ||
+    (state.state as string) === 'killed' ||
+    state.state === 'stopped'
+  return {
+    ...state,
+    ...(isTerminal ? { state: 'working' as const } : {}),
+    detail: text.replace(/\s+/g, ' ').trim().slice(0, 120),
+    ...(!isBlocked
+      ? { tempo: 'active' as const, needs: undefined, block: undefined }
+      : {}),
+    suggestedReply: undefined,
+    output: null,
+    updatedAt: new Date().toISOString(),
+  }
+}
+
+export type SendBgReplyResult = null | {
+  err: string
+  code: string
+  queued?: boolean
+}
+
+/**
+ * Gold 2.1.325 `jIt` — send a reply to a background job via the control
+ * socket, retrying transient startup states (`ESTARTING` / `ENOREPLY` /
+ * `ERESPAWNING`), updating job state on success, and mapping `ENOJOB` /
+ * `ENOCONN` / `ESKEW` errors (queueing the message on disconnect when safe).
+ */
+export async function sendBgReply(
+  short: string,
+  text: string,
+  opts?: {
+    nextTurn?: boolean
+    sendRequest?: (
+      req: Record<string, unknown>,
+    ) => Promise<
+      | { ok: true; [k: string]: unknown }
+      | { ok: false; error?: string; code?: string; connected?: boolean }
+    >
+    sleepMs?: (ms: number) => Promise<void>
+  },
+): Promise<SendBgReplyResult> {
+  const { sendControlRequest } = await import('./controlSocket.js')
+  const { readBgJobState, writeBgJobState } = await import('./jobState.js')
+  const { isUnqueueableReply, queueRespawnInitialPrompt } = await import(
+    './transcriptProbe.js'
+  )
+
+  const nextTurn = opts?.nextTurn === true
+  const send =
+    opts?.sendRequest ??
+    (req =>
+      sendControlRequest(req as never) as Promise<
+        | { ok: true; [k: string]: unknown }
+        | { ok: false; error?: string; code?: string; connected?: boolean }
+      >)
+  const sleep =
+    opts?.sleepMs ?? (ms => new Promise<void>(r => setTimeout(r, ms)))
+
+  let connected = false
+  const sendOnce = async () => {
+    const res = await send({
+      proto: 1,
+      op: 'reply',
+      short,
+      text,
+      ...(nextTurn ? { nextTurn: true } : {}),
+    })
+    if (!res.ok && res.connected === true) connected = true
+    return res
+  }
+
+  let res = await sendOnce()
+  let maxRetries = 10
+  for (
+    let attempt = 0;
+    !res.ok &&
+    (res.code === 'ESTARTING' ||
+      res.code === 'ENOREPLY' ||
+      res.code === 'ERESPAWNING') &&
+    attempt < maxRetries;
+    attempt++
+  ) {
+    if (res.code === 'ERESPAWNING') maxRetries = 60
+    await sleep(200)
+    res = await sendOnce()
+  }
+
+  if (res.ok) {
+    const current = readBgJobState(short)
+    if (current) {
+      const updated = applyBgReplyStateUpdate(current, text)
+      if (updated.queuedPrompt === text) updated.queuedPrompt = undefined
+      writeBgJobState(short, updated)
+    }
+    return null
+  }
+
+  const code = res.code ?? 'EUNKNOWN'
+  if (code === 'ESKEW') {
+    return { err: res.error ?? 'it runs a different Claude Code build', code }
+  }
+  if (code === 'ENOJOB') {
+    return { err: BG_REPLY_NOT_RUNNING_ERROR, code }
+  }
+
+  const tryQueue = async (): Promise<boolean> => {
+    const current = readBgJobState(short)
+    if (!current || isUnqueueableReply(text, current)) return false
+    return queueRespawnInitialPrompt(short, current, text)
+  }
+
+  if (code === 'ENOCONN' || code === 'ETIMEOUT') {
+    const queued = code === 'ENOCONN' && !connected && (await tryQueue())
+    if (nextTurn && !connected) {
+      return {
+        err:
+          'its supervisor did not answer' +
+          (queued ? BG_REPLY_QUEUED_SUFFIX : ''),
+        code: 'EUNREACHABLE',
+        queued,
+      }
+    }
+    return {
+      err:
+        "Couldn't reach the daemon — it may be restarting. Press Enter to retry" +
+        (queued ? BG_REPLY_QUEUED_SUFFIX : ''),
+      code,
+      queued,
+    }
+  }
+
+  const queued = !connected && (await tryQueue())
+  return {
+    err:
+      `Couldn't send your message — ${res.error ?? 'unknown error'}` +
+      (queued ? BG_REPLY_QUEUED_SUFFIX : ''),
+    code,
+    queued,
+  }
+}

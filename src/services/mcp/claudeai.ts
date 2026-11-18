@@ -281,3 +281,71 @@ export function hasClaudeAiMcpSessionConnected(name: string): boolean {
 export function clearClaudeAiMcpSessionConnected(): void {
   sessionClaudeAiMcpConnected.clear()
 }
+
+export const CLAUDE_AI_CONNECTOR_CAPABILITY = 'anthropic/claudeAiConnector'
+export const CLAUDEAI_CONNECTORS_DISABLED_ERROR_CODE =
+  'CLAUDEAI_CONNECTORS_DISABLED'
+
+/**
+ * Official `Iri` — whether managed policy settings set `disableClaudeAiConnectors`.
+ */
+export function isManagedDisableClaudeAiConnectorsSet(): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { getSettingsForSource } = require('../../utils/settings/settings.js')
+  return (
+    getSettingsForSource('policySettings')?.disableClaudeAiConnectors === true
+  )
+}
+
+function isDesktopConnectorsDisabled(): boolean {
+  return (
+    process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop' &&
+    isManagedDisableClaudeAiConnectorsSet()
+  )
+}
+
+/**
+ * Official `Igs` — true when a claude-desktop SDK server advertises
+ * `capabilities.experimental['anthropic/claudeAiConnector'].showsConnectorsOff === true`
+ * while managed `disableClaudeAiConnectors` is set.
+ */
+export function isSdkServerWithConnectorsOff(
+  config: { type?: string },
+  capabilities?: { experimental?: Record<string, unknown> },
+): boolean {
+  const ext = capabilities?.experimental?.[CLAUDE_AI_CONNECTOR_CAPABILITY]
+  return (
+    config.type === 'sdk' &&
+    typeof ext === 'object' &&
+    ext !== null &&
+    'showsConnectorsOff' in ext &&
+    (ext as { showsConnectorsOff?: unknown }).showsConnectorsOff === true &&
+    isDesktopConnectorsDisabled()
+  )
+}
+
+/**
+ * Official `Kbr` — classify whether a server was left out due to
+ * `disableClaudeAiConnectors` in claude-desktop.
+ */
+export function classifyConnectorsOffServer(server: {
+  name: string
+  config: { type?: string }
+  errorCode?: string
+  capabilities?: { experimental?: Record<string, unknown> }
+}): 'left_out' | 'kept' | 'unreadable' {
+  try {
+    const leftOut =
+      server.errorCode === CLAUDEAI_CONNECTORS_DISABLED_ERROR_CODE
+        ? isDesktopConnectorsDisabled()
+        : isSdkServerWithConnectorsOff(server.config, server.capabilities)
+    return leftOut ? 'left_out' : 'kept'
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    logForDebugging(
+      `MCP server "${server.name}": could not read disableClaudeAiConnectors from the managed sources: ${msg}`,
+      { level: 'warn' },
+    )
+    return 'unreadable'
+  }
+}

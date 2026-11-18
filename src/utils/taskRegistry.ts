@@ -5,6 +5,10 @@
 import type { AppState } from '../state/AppState.js'
 import type { Message } from '../types/message.js'
 import type { TaskState } from '../tasks/types.js'
+import {
+  createWebSearchBudget,
+  type WebSearchBudget,
+} from './sessionSpawnCaps.js'
 import { createSignal } from './signal.js'
 import {
   applyTaskOffsetsAndEvictions,
@@ -48,6 +52,8 @@ export type TaskRegistry = {
   incrementWebSearchCalls(): void
   getWebSearchCalls(): number
   resetWebSearchCalls(): void
+  getWebSearchBudget(): WebSearchBudget
+  resetWebSearchBudget(): void
   takeConcurrencySlot(): () => void
   getConcurrentSubagents(): number
 }
@@ -56,8 +62,12 @@ export type TaskRegistry = {
 export function createTaskRegistry(
   getAppState: () => AppState,
   setAppState: SetAppState,
+  options?: { refillWebSearchBudgetByDefault?: boolean },
 ): TaskRegistry {
   let webSearchCalls = 0
+  let webSearchBudget: WebSearchBudget | undefined
+  const refillWebSearchBudgetByDefault =
+    options?.refillWebSearchBudgetByDefault ?? false
   return {
     get(id) {
       return getAppState().tasks?.[id]
@@ -114,6 +124,16 @@ export function createTaskRegistry(
       return webSearchCalls
     },
     resetWebSearchCalls() {
+      webSearchCalls = 0
+    },
+    getWebSearchBudget() {
+      webSearchBudget ??= createWebSearchBudget({
+        refillsByDefault: refillWebSearchBudgetByDefault,
+      })
+      return webSearchBudget
+    },
+    resetWebSearchBudget() {
+      webSearchBudget = undefined
       webSearchCalls = 0
     },
     takeConcurrencySlot() {

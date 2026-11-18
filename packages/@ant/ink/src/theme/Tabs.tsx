@@ -108,7 +108,7 @@ type TabsContextValue = {
   width: number | undefined;
   headerFocused: boolean;
   focusHeader: () => void;
-  blurHeader: () => void;
+  blurHeader: (target?: DOMElement | null) => void;
   registerOptIn: () => () => void;
   registerNavigationOwner: () => () => void;
 };
@@ -199,10 +199,17 @@ export function Tabs({
     if (headerRef.current) focusManager?.focus(headerRef.current);
     setHeaderFocused(true);
   }, [focusManager]);
-  const blurHeader = useCallback(() => {
-    focusManager?.blur();
-    setHeaderFocused(false);
-  }, [focusManager]);
+  const blurHeader = useCallback(
+    (target?: DOMElement | null) => {
+      if (target) {
+        focusManager?.focus(target);
+      } else {
+        focusManager?.blur();
+      }
+      setHeaderFocused(false);
+    },
+    [focusManager],
+  );
 
   const [optedIn, registerOptIn] = useRegistrationCounter();
   const [navOwned, registerNavigationOwner] = useRegistrationCounter();
@@ -491,7 +498,7 @@ export function useTabsWidth(): number | undefined {
 export function useTabHeaderFocus(): {
   headerFocused: boolean;
   focusHeader: () => void;
-  blurHeader: () => void;
+  blurHeader: (target?: DOMElement | null) => void;
 } {
   const { headerFocused, focusHeader, blurHeader, registerOptIn } = useContext(TabsContext);
   useLayoutEffect(registerOptIn, [registerOptIn]);

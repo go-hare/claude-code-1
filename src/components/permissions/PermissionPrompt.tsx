@@ -1,12 +1,14 @@
 import React, { type ReactNode, type Ref, useCallback, useEffect, useMemo, useState } from 'react';
-import { Box, type DOMElement, Text } from '@anthropic/ink';
+import { Box, type DOMElement, Text, formatShortcutString, shortcutFormatPlatform } from '@anthropic/ink';
+import type { PermissionRequestSource } from '../../dialog/permissionRequestSource.js';
 import type { KeybindingAction } from '../../keybindings/types.js';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
+import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../../services/analytics/index.js';
-import { useSetAppState } from '../../state/AppState.js';
+import { useAppState, useSetAppState } from '../../state/AppState.js';
 import type { PastedContent } from '../../utils/config.js';
 import type { ImageDimensions } from '../../utils/imageResizer.js';
 import { type OptionWithDescription, Select } from '../CustomSelect/select.js';
@@ -80,6 +82,8 @@ export type PermissionPromptProps<T extends string> = {
   onAmendHintChange?: (visible: boolean) => void;
   /** densable Cmy classifier approved — lock Select + Esc. */
   isDisabled?: boolean;
+  /** densable y8 requestSource — enables ctrl+x ctrl+k stoppable hint (`iXe`). */
+  requestSource?: PermissionRequestSource;
 };
 
 const DEFAULT_PLACEHOLDERS: Record<FeedbackType, string> = {
@@ -97,6 +101,35 @@ const DEFAULT_PLACEHOLDERS: Record<FeedbackType, string> = {
  * - Analytics events for feedback interactions
  * - Transforming options to Select-compatible format
  */
+/** densable 2.1.290 `iXe(o)` — ctrl+x ctrl+k hint for stoppable async agents. */
+function useKillAgentsHint(requestSource: PermissionRequestSource | undefined): React.ReactNode {
+  const killAgentsChord = useShortcutDisplay('chat:killAgents', 'Chat', 'ctrl+x ctrl+k');
+  const isConfirming = useAppState(s => s.notifications.current?.key === 'kill-agents-confirm');
+  return useMemo(() => {
+    if (
+      !(
+        (requestSource?.type === 'subagent' || requestSource?.type === 'workflow-agent') &&
+        requestSource.stoppableByKillAgents === true
+      ) ||
+      killAgentsChord === ''
+    ) {
+      return null;
+    }
+    const formatted = formatShortcutString(killAgentsChord, {
+      keyCase: 'lower',
+      platform: shortcutFormatPlatform(),
+    });
+    if (!formatted) return null;
+    const action = isConfirming ? 'again to stop background agents' : 'twice to stop background agents';
+    const hint = (
+      <Text>
+        {formatted} {action}
+      </Text>
+    );
+    return isConfirming ? <Text color="text">{hint}</Text> : hint;
+  }, [requestSource, killAgentsChord, isConfirming]);
+}
+
 export function PermissionPrompt<T extends string>({
   options,
   onSelect,
@@ -111,8 +144,10 @@ export function PermissionPrompt<T extends string>({
   hostChrome,
   onAmendHintChange,
   isDisabled = false,
+  requestSource,
 }: PermissionPromptProps<T>): React.ReactNode {
   const setAppState = useSetAppState();
+  const killAgentsHint = useKillAgentsHint(requestSource);
   const [acceptFeedback, setAcceptFeedback] = useState('');
   const [rejectFeedback, setRejectFeedback] = useState('');
   const [acceptInputMode, setAcceptInputMode] = useState(false);
@@ -364,7 +399,11 @@ export function PermissionPrompt<T extends string>({
       )}
       {!hostChrome && (
         <Box marginTop={1}>
-          <Text dimColor>Esc to cancel{showTabHint && ' · Tab to amend'}</Text>
+          <Text dimColor wrap={killAgentsHint ? 'truncate' : undefined}>
+            Esc to cancel{showTabHint && ' · Tab to amend'}
+            {killAgentsHint ? ' · ' : null}
+            {killAgentsHint}
+          </Text>
         </Box>
       )}
     </Box>

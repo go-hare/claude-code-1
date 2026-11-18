@@ -56,6 +56,87 @@ const BLOCK_PATTERN = /```!\s*\n?([\s\S]*?)\n?```/g
 // eslint-disable-next-line custom-rules/no-lookbehind-regex -- gated by text.includes('!`') below (PR#22986)
 const INLINE_PATTERN = /(?<=^|\s)!`([^`]+)`/gm
 
+/** official Xdn — invisible characters refused for non-Bash prompt shell tools */
+const INVISIBLE_PROMPT_SHELL_CHAR_RE = /[\u180e\ufeff]/
+
+/** official QCr */
+const INVISIBLE_PROMPT_SHELL_CHAR_MSG =
+  'command contains the invisible character U+FEFF (byte order mark) or U+180E (Mongolian vowel separator), and was not run. Remove the character, keep the text that needs it in a file that the command reads, or write it as $([char]0xFEFF) or $([char]0x180E) inside a double-quoted string'
+
+/** official ebs — trim and normalize Windows CRLF line endings to LF */
+export function normalizePromptShellCommand(raw: string): string {
+  return raw.trim().replaceAll('\r\n', '\n')
+}
+
+export type ExtractedPromptShellCommand = {
+  raw: string
+  command: string
+  at: number | undefined
+}
+
+/**
+ * official Umo — extract and CRLF-normalize embedded shell commands from prompt text.
+ */
+export function extractPromptShellCommands(
+  text: string,
+): ExtractedPromptShellCommand[] {
+  const blockMatches = text.matchAll(BLOCK_PATTERN)
+  const inlineMatches = text.includes('!`') ? text.matchAll(INLINE_PATTERN) : []
+  const extracted: ExtractedPromptShellCommand[] = []
+  for (const match of [...blockMatches, ...inlineMatches]) {
+    const command = normalizePromptShellCommand(match[1] ?? '')
+    if (command) {
+      extracted.push({ raw: match[0], command, at: match.index })
+    }
+  }
+  return extracted
+}
+
+/** Replace raw C0/C1 control characters (except \n/\t) with U+FFFD for error display (official ri/$h). */
+function sanitizeControlCharsForDisplay(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: strip C0/C1 control characters
+  return text.replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '\uFFFD')
+}
+
+/**
+ * official Zds — validate all extracted prompt shell commands against the target
+ * tool's inputSchema (plus U+FEFF / U+180E check for non-Bash tools) BEFORE running
+ * any command, throwing MalformedCommandError with U+FFFD-marked display on refusal.
+ */
+export function validatePromptShellCommands(
+  text: string,
+  shellTool: Tool,
+  slashCommandName: string,
+): ExtractedPromptShellCommand[] {
+  return extractPromptShellCommands(text).map(entry => {
+    const parsed = shellTool.inputSchema.safeParse({ command: entry.command })
+    const hasInvisibleChar =
+      shellTool !== BashTool &&
+      INVISIBLE_PROMPT_SHELL_CHAR_RE.test(entry.command)
+    if (parsed.success && !hasInvisibleChar) {
+      return entry
+    }
+    const reason = parsed.success
+      ? INVISIBLE_PROMPT_SHELL_CHAR_MSG
+      : parsed.error.issues.map(issue => issue.message).join('; ')
+    const crlfHint = entry.command.includes('\r\n')
+      ? ' A \uFFFD at the end of a line is a carriage return from Windows (CR LF) line endings: if the file has them, save it with LF line endings.'
+      : ''
+    const displayCommand = hasInvisibleChar
+      ? entry.command.replace(
+          new RegExp(INVISIBLE_PROMPT_SHELL_CHAR_RE.source, 'g'),
+          '\uFFFD',
+        )
+      : entry.command
+    throw new MalformedCommandError(
+      sanitizeControlCharsForDisplay(
+        `No shell command in ${slashCommandName} was run, because the ${shellTool.name} tool does not accept one of them: ${reason}. Unprintable characters are shown as \uFFFD below: remove them from the skill or command file, or from the arguments or options substituted into it.${crlfHint}\n${displayCommand}`,
+      ),
+    )
+  })
+}
+
 /**
  * Parses prompt text and executes any embedded shell commands.
  * Supports two syntaxes:
@@ -120,68 +201,64 @@ export async function executeShellCommandsInPrompt(
       ? getPowerShellTool()
       : BashTool
 
-  // INLINE_PATTERN's lookbehind is ~100x slower than BLOCK_PATTERN on large
-  // skill content (265µs vs 2µs @ 17KB). 93% of skills have no !` at all,
-  // so gate the expensive scan on a cheap substring check. BLOCK_PATTERN
-  // (```!) doesn't require !` in the text, so it's always scanned.
-  const blockMatches = text.matchAll(BLOCK_PATTERN)
-  const inlineMatches = text.includes('!`') ? text.matchAll(INLINE_PATTERN) : []
+  const commands = validatePromptShellCommands(
+    text,
+    shellTool,
+    slashCommandName,
+  )
 
   await Promise.all(
-    [...blockMatches, ...inlineMatches].map(async match => {
-      const command = match[1]?.trim()
-      if (command) {
-        try {
-          // Check permissions before executing
-          const permissionResult = await hasPermissionsToUseTool(
-            shellTool,
-            { command },
-            context,
-            createAssistantMessage({ content: [] }),
-            '',
-          )
+    commands.map(async ({ raw, command }) => {
+      try {
+        // Check permissions before executing
+        const permissionResult = await hasPermissionsToUseTool(
+          shellTool,
+          { command },
+          context,
+          createAssistantMessage({ content: [] }),
+          '',
+        )
 
-          if (permissionResult.behavior !== 'allow') {
-            logForDebugging(
-              `Shell command permission check failed for command in ${slashCommandName}: ${command}. Error: ${permissionResult.message}`,
-            )
-            throw new MalformedCommandError(
-              `Shell command permission check failed for pattern "${match[0]}": ${permissionResult.message || 'Permission denied'}`,
-            )
-          }
-
-          // densable 2.1.289 Ct — nested skill-shell tool.call stamps innerCall.
-          // Gold promptShellHandOff collector when skill has no dedicated agent.
-          context.promptShellHandOff?.push({
-            tool: BASH_TOOL_NAME,
-            command,
-          })
-          const { data } = await shellTool.call(
-            { command },
-            { ...context, innerCall: true },
+        if (permissionResult.behavior !== 'allow') {
+          logForDebugging(
+            `Shell command permission check failed for command in ${slashCommandName}: ${command}. Error: ${permissionResult.message}`,
           )
-          // Reuse the same persistence flow as regular Bash tool calls
-          const toolResultBlock = await processToolResultBlock(
-            shellTool,
-            data,
-            randomUUID(),
+          throw new MalformedCommandError(
+            `Shell command permission check failed for pattern "${raw}": ${permissionResult.message || 'Permission denied'}`,
           )
-          // Extract the string content from the block
-          const output =
-            typeof toolResultBlock.content === 'string'
-              ? toolResultBlock.content
-              : formatBashOutput(data.stdout, data.stderr)
-          // Function replacer — String.replace interprets $$, $&, $`, $' in
-          // the replacement string even with a string search pattern. Shell
-          // output (especially PowerShell: $env:PATH, $$, $PSVersionTable)
-          // is arbitrary user data; a bare string arg would corrupt it.
-          result = result.replace(match[0], () => output)
-        } catch (e) {
-          if (e instanceof MalformedCommandError) {
-            throw e
-          }
-          formatBashError(e, match[0])
         }
+
+        // densable 2.1.289 Ct — nested skill-shell tool.call stamps innerCall.
+        // Gold promptShellHandOff collector when skill has no dedicated agent.
+        context.promptShellHandOff?.push({
+          tool: BASH_TOOL_NAME,
+          command,
+        })
+        const { data } = await shellTool.call(
+          { command },
+          { ...context, innerCall: true },
+        )
+        // Reuse the same persistence flow as regular Bash tool calls
+        const toolResultBlock = await processToolResultBlock(
+          shellTool,
+          data,
+          randomUUID(),
+        )
+        // Extract the string content from the block
+        const output =
+          typeof toolResultBlock.content === 'string'
+            ? toolResultBlock.content
+            : formatBashOutput(data.stdout, data.stderr)
+        // Function replacer — String.replace interprets $$, $&, $`, $' in
+        // the replacement string even with a string search pattern. Shell
+        // output (especially PowerShell: $env:PATH, $$, $PSVersionTable)
+        // is arbitrary user data; a bare string arg would corrupt it.
+        result = result.replace(raw, () => output)
+      } catch (e) {
+        if (e instanceof MalformedCommandError) {
+          throw e
+        }
+        formatBashError(e, raw)
       }
     }),
   )

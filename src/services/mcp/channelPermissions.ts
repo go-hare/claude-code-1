@@ -24,6 +24,7 @@
  */
 
 import { neutralizeChannelPreviewText } from '../../utils/channelPreviewSanitize.js'
+import { logForDebugging } from '../../utils/debug.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import {
@@ -260,6 +261,7 @@ export function createChannelPermissionCallbacks(
     string,
     (response: ChannelPermissionResponse) => void
   >()
+  const seen = new Set<string>()
 
   return {
     isServerRegistered,
@@ -269,6 +271,17 @@ export function createChannelPermissionCallbacks(
       // shortRequestId always emits lowercase so this is a noop today,
       // but the symmetry makes the contract explicit.
       const key = requestId.toLowerCase()
+      if (getFeatureValue_CACHED_MAY_BE_STALE('tengu_quiet_elephant', true)) {
+        if (seen.has(key)) {
+          pending.delete(key)
+          logForDebugging(
+            'Channel permission relay: a request ID was drawn twice in one session; channel replies with that ID are ignored \u2014 answer in the terminal',
+            { level: 'warn' },
+          )
+          return () => {}
+        }
+        seen.add(key)
+      }
       pending.set(key, handler)
       return () => {
         pending.delete(key)

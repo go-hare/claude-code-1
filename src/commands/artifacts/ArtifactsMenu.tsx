@@ -27,8 +27,9 @@ export function ArtifactsMenu({ artifacts, onExit }: Props): React.ReactElement 
     }
     if (key.return) {
       const target = artifacts[selected];
-      if (target.url) {
+      if (target?.url) {
         void openBrowser(target.url);
+        onExit();
       }
       return;
     }

@@ -2529,7 +2529,7 @@ export const AgentTool = buildTool({
           {
             type: 'text',
             text: `Spawned successfully. (This tool result is internal metadata — never quote or paste any part of it, including the ID below, into a user-facing reply.)
-agent_id: ${spawnData.teammate_id}
+agent_id: ${spawnData.agent_id}
 name: ${spawnData.name}
 The agent is now running and will receive instructions via mailbox.`,
           },

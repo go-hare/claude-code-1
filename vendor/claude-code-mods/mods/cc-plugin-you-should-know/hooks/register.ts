@@ -1295,6 +1295,7 @@ Do not repeat it; rewrite it.
 `) +
     pn(fn[t?.direction ?? 'first']) +
     `
+Write the title and the explanation in the language the session’s Language instruction names; if there is none, in the language the user has been writing in.
 Output only the explanation.`
   )
 }
@@ -1516,8 +1517,12 @@ var dn = (e, t) =>
       'naturally follow.  ',
     '* \u201Ctag\u201D: You should know or Heads up. This is shown when ' +
       'presenting the suggestion.  ',
-    '* \u201Cexplain:\u201D with a plain-english explanation for someone ' +
+    '* \u201Cexplain:\u201D with a plain-language explanation for someone ' +
       'with no context (note: the user will have the opportunity to drill in further)',
+    '',
+    'Write the learn line, the title and the explanation in the language ' +
+      'the session\u2019s Language instruction names; if there is none, in ' +
+      'the language the user has been writing in. Keep the labels learn:, tag:, explain:, the word none, and the tags You should know / Heads up exactly as written, in English.',
     '',
     '### learn: examples',
     '',

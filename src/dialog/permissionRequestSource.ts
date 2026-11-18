@@ -8,8 +8,16 @@
  */
 export type PermissionRequestSource =
   | { type: 'remote-agent' }
-  | { type: 'workflow-agent'; workflowName?: string }
-  | { type: 'subagent'; agentName?: string }
+  | {
+      type: 'workflow-agent'
+      workflowName?: string
+      stoppableByKillAgents?: boolean
+    }
+  | {
+      type: 'subagent'
+      agentName?: string
+      stoppableByKillAgents?: boolean
+    }
 
 /** Fields gold xSl reads off toolUseContext (not on the tip ToolUseContext type). */
 export type PermissionRequestSourceContext = {
@@ -22,6 +30,7 @@ export type PermissionRequestSourceContext = {
     displayName?: string
     subagentName?: string
     isMainSession?: boolean
+    isAsync?: boolean
   }
 }
 
@@ -45,6 +54,11 @@ export function resolvePermissionRequestSource(
   if (ctx.forRemoteExecution === true) {
     return { type: 'remote-agent' }
   }
+  const stoppable =
+    ctx.agentContext?.agentType === 'subagent' &&
+    ctx.agentContext.isAsync === true
+      ? { stoppableByKillAgents: true as const }
+      : {}
   const workflowRunId = ctx.spawnedByWorkflowRunId
   if (workflowRunId !== undefined) {
     const all = ctx.taskRegistry?.all?.()
@@ -65,7 +79,7 @@ export function resolvePermissionRequestSource(
         workflowName = match.workflowName
       }
     }
-    return { type: 'workflow-agent', workflowName }
+    return { type: 'workflow-agent', workflowName, ...stoppable }
   }
   const agent = ctx.agentContext
   if (!agent) return undefined
@@ -77,6 +91,7 @@ export function resolvePermissionRequestSource(
     return {
       type: 'subagent',
       agentName: agent.displayName ?? agent.subagentName,
+      ...stoppable,
     }
   }
   return undefined

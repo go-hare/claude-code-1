@@ -170,31 +170,73 @@ export const WebSearchTool = buildTool({
     const startTime = performance.now()
     const { query } = input
 
-    // densable 2.1.212: vtu + taskRegistry web search budget (soft return).
+    // densable 2.1.212 / 2.1.325: sessionSpawnCaps token-bucket WebSearch budget.
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { consumeWebSearchBudgetOrCapMessage } =
+      const {
+        consumeWebSearchBudgetOrCapMessage,
+        resolveMaxWebSearchesPerSession,
+      } =
         require('src/utils/sessionSpawnCaps.js') as typeof import('src/utils/sessionSpawnCaps.js')
-      const cap = consumeWebSearchBudgetOrCapMessage({
-        taskRegistry: context.taskRegistry,
-      })
-      if (cap) {
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports
-          const { logEvent } =
-            require('src/services/analytics/index.js') as typeof import('src/services/analytics/index.js')
-          logEvent('web_search_session_cap', {
-            max_web_searches_per_session: cap.max,
-          })
-        } catch {
-          // analytics optional
+      const budget = context.taskRegistry?.getWebSearchBudget?.()
+      if (budget) {
+        if (!budget.tryConsume()) {
+          const max = resolveMaxWebSearchesPerSession()
+          const refillsPerHour = budget.refillsPerHour()
+          const msUntilNext = budget.msUntilNextCall()
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { logEvent } =
+              require('src/services/analytics/index.js') as typeof import('src/services/analytics/index.js')
+            logEvent('web_search_session_cap', {
+              max_web_searches_per_session: max,
+              web_search_refills_per_hour: refillsPerHour,
+              ...(Number.isFinite(msUntilNext)
+                ? { ms_until_next_web_search: msUntilNext }
+                : {}),
+            })
+          } catch {
+            // analytics optional
+          }
+          const hasRefill = refillsPerHour > 0
+          const limitCount = `${max} WebSearch ${max === 1 ? 'call' : 'calls'}`
+          const limitText = hasRefill
+            ? `limit: ${limitCount} shared by every agent in this session; the budget refills at about ${refillsPerHour} ${refillsPerHour === 1 ? 'call' : 'calls'} per hour, so searching becomes possible again later in the session`
+            : `limit: ${limitCount}, shared by every agent in this session; it does not refill`
+          const continueText = hasRefill
+            ? 'Do not pause or wait for the refill: continue with the information already gathered and say so in your answer'
+            : 'Continue with the information already gathered instead of searching again, and say so in your answer'
+          const message = `Web search was not performed: this session's web search budget is used up (${limitText}). ${continueText}; do not work around the limit by querying search engines with curl or wget from Bash, by querying them in a browser or through a computer-use tool, or by searching or fetching through a third-party reader, proxy or archive service. If more searches are genuinely needed, ask the user to raise CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION.`
+          return {
+            data: {
+              query,
+              results: [message],
+              durationSeconds: 0,
+            },
+          }
         }
-        return {
-          data: {
-            query,
-            results: [cap.message],
-            durationSeconds: 0,
-          },
+      } else {
+        const cap = consumeWebSearchBudgetOrCapMessage({
+          taskRegistry: context.taskRegistry,
+        })
+        if (cap) {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { logEvent } =
+              require('src/services/analytics/index.js') as typeof import('src/services/analytics/index.js')
+            logEvent('web_search_session_cap', {
+              max_web_searches_per_session: cap.max,
+            })
+          } catch {
+            // analytics optional
+          }
+          return {
+            data: {
+              query,
+              results: [cap.message],
+              durationSeconds: 0,
+            },
+          }
         }
       }
     } catch {

@@ -403,7 +403,7 @@ export function isClassifierDenial(content: string): boolean {
  */
 export function buildYoloRejectionMessage(
   reason: string,
-  opts?: { refused?: boolean },
+  opts?: { refused?: boolean; allowRuleToolName?: string },
 ): string {
   if (opts?.refused) {
     // densable HSa(e,{refused:!0}) — no AUTO_MODE_REJECTION_PREFIX (distinct copy)
@@ -418,16 +418,15 @@ export function buildYoloRejectionMessage(
 
   const prefix = AUTO_MODE_REJECTION_PREFIX
 
-  // Official CXa — suppress settings/config permission-rule hint for remote
-  // entrypoints or when CLAUDE_CODE_HIDE_SETTINGS_HINT is set.
+  // Official CXa / Bvo — suppress settings/config permission-rule hint for remote
+  // entrypoints, when CLAUDE_CODE_HIDE_SETTINGS_HINT is set, or when no safe
+  // allowRuleToolName is eligible (#64: never suggest whole-tool classifier-skipping
+  // or ignored rules).
   const showSettingsHint = shouldShowSettingsHint()
-  const ruleHint = !showSettingsHint
-    ? ''
-    : feature('BASH_CLASSIFIER')
-      ? `To allow this type of action in the future, the user can add a permission rule like ` +
-        `Bash(prompt: <description of allowed action>) to their settings. ` +
-        `At the end of your session, recommend what permission rules to add so you don't get blocked again.`
-      : `To allow this type of action in the future, the user can add a Bash permission rule to their settings.`
+  const ruleHint =
+    !showSettingsHint || opts?.allowRuleToolName === undefined
+      ? ''
+      : `To allow this type of action in the future, the user can add a permission rule for ${opts.allowRuleToolName} to their settings.`
 
   return (
     `${prefix}${reason}. ` +

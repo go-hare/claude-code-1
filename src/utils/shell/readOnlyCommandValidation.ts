@@ -100,6 +100,91 @@ const GIT_AUTHOR_FILTER_FLAGS: Record<string, FlagArgType> = {
   '--grep': 'string',
 }
 
+const CMDSUB_SENTINEL = '__CMDSUB_OUTPUT__'
+const TRACKED_VAR_SENTINEL = '__TRACKED_VAR__'
+const UNCERTAIN_VAR_SENTINEL = '__UNCERTAIN_VAR__'
+
+/** Gold Gs — true when a token contains an unexpanded AST placeholder sentinel. */
+export function hasSentinelToken(token: string): boolean {
+  return (
+    token.includes(CMDSUB_SENTINEL) ||
+    token.includes(TRACKED_VAR_SENTINEL) ||
+    token.includes(UNCERTAIN_VAR_SENTINEL)
+  )
+}
+
+/** Gold kGs — true when a flag argument value starts with an AST sentinel. */
+export function startsWithSentinelToken(token: string): boolean {
+  return (
+    token.startsWith(CMDSUB_SENTINEL) ||
+    token.startsWith(TRACKED_VAR_SENTINEL) ||
+    token.startsWith(UNCERTAIN_VAR_SENTINEL)
+  )
+}
+
+const TILDE_ARG_PREFIX_RE = /(?:^|[=:])~/
+
+/** Gold W4n — true if any arg has a tilde prefix or tilde+brace expansion. */
+export function hasTildeExpansionArg(args: string[]): boolean {
+  return args.some(
+    arg =>
+      TILDE_ARG_PREFIX_RE.test(arg) || (arg.includes('~') && arg.includes('{')),
+  )
+}
+
+/** Gold rDo — true if any arg contains `~`. */
+function hasTildeArg(args: string[]): boolean {
+  return args.some(arg => arg.includes('~'))
+}
+
+const GIT_SIGNATURE_FORMAT_RE = /%[-+ ]?G|%\(\*?signature/
+const GIT_SAFE_PRETTY_FORMATS = new Set([
+  'oneline',
+  'short',
+  'medium',
+  'full',
+  'fuller',
+  'email',
+  'raw',
+])
+
+function isUnsafeGitPrettyName(val: string): boolean {
+  if (val === '') return false
+  if (val.includes('%')) return false
+  if (val.startsWith('format:') || val.startsWith('tformat:')) return false
+  return !GIT_SAFE_PRETTY_FORMATS.has(val)
+}
+
+/** Gold pt — blocks git --format/--pretty/--sort/--group with signature/tilde/sentinel/unknown format. */
+export function gitFormatOrSentinelIsDangerous(args: string[]): boolean {
+  const isDangerousVal = (val: string): boolean =>
+    hasTildeExpansionArg([val]) ||
+    hasSentinelToken(val) ||
+    GIT_SIGNATURE_FORMAT_RE.test(val) ||
+    val.includes('signature')
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!
+    if (GIT_SIGNATURE_FORMAT_RE.test(arg)) return true
+    for (const flag of ['--format', '--pretty', '--sort', '--group']) {
+      let val: string | undefined
+      if (arg === flag && i + 1 < args.length) {
+        val = args[i + 1]
+      } else if (arg.startsWith(`${flag}=`)) {
+        val = arg.slice(flag.length + 1)
+      }
+      if (val === undefined) continue
+      if (isDangerousVal(val)) return true
+      if (
+        (flag === '--format' || flag === '--pretty') &&
+        isUnsafeGitPrettyName(val)
+      ) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
 // ---------------------------------------------------------------------------
 // GIT_READ_ONLY_COMMANDS — complete map of all git subcommands
 // ---------------------------------------------------------------------------
@@ -171,6 +256,10 @@ export const GIT_READ_ONLY_COMMANDS: Record<string, ExternalCommandConfig> = {
       '-O': 'string',
       '-R': 'none',
     },
+    additionalCommandIsDangerousCallback: (
+      _rawCommand: string,
+      args: string[],
+    ) => gitFormatOrSentinelIsDangerous(args),
   },
   'git log': {
     safeFlags: {
@@ -222,6 +311,10 @@ export const GIT_READ_ONLY_COMMANDS: Record<string, ExternalCommandConfig> = {
       '--pickaxe-regex': 'none',
       '--pickaxe-all': 'none',
     },
+    additionalCommandIsDangerousCallback: (
+      _rawCommand: string,
+      args: string[],
+    ) => gitFormatOrSentinelIsDangerous(args),
   },
   'git show': {
     safeFlags: {
@@ -244,6 +337,10 @@ export const GIT_READ_ONLY_COMMANDS: Record<string, ExternalCommandConfig> = {
       '-m': 'none',
       '--quiet': 'none',
     },
+    additionalCommandIsDangerousCallback: (
+      _rawCommand: string,
+      args: string[],
+    ) => gitFormatOrSentinelIsDangerous(args),
   },
   'git shortlog': {
     safeFlags: {
@@ -571,6 +668,10 @@ export const GIT_READ_ONLY_COMMANDS: Record<string, ExternalCommandConfig> = {
       '--source': 'none',
       '--graph': 'none',
     },
+    additionalCommandIsDangerousCallback: (
+      _rawCommand: string,
+      args: string[],
+    ) => gitFormatOrSentinelIsDangerous(args),
   },
   // git describe is read-only — describes commits relative to the most recent tag
   'git describe': {
@@ -740,6 +841,7 @@ export const GIT_READ_ONLY_COMMANDS: Record<string, ExternalCommandConfig> = {
       _rawCommand: string,
       args: string[],
     ) => {
+      if (gitFormatOrSentinelIsDangerous(args)) return true
       // Safe uses: `git tag` (list), `git tag -l pattern` (list filtered),
       // `git tag --contains <ref>` (list containing). A bare positional arg
       // without -l/--list is a tag name to CREATE — dangerous.
@@ -852,6 +954,7 @@ export const GIT_READ_ONLY_COMMANDS: Record<string, ExternalCommandConfig> = {
       _rawCommand: string,
       args: string[],
     ) => {
+      if (gitFormatOrSentinelIsDangerous(args)) return true
       // Block branch creation: "git branch <name>" or "git branch <name> <start-point>"
       // Only safe uses are: "git branch" (list), "git branch -flags" (list with options),
       // or "git branch --contains/--merged/etc <ref>" (filtering)
@@ -942,6 +1045,7 @@ export const GIT_READ_ONLY_COMMANDS: Record<string, ExternalCommandConfig> = {
 // This covers BOTH --repo values AND positional URL/repo arguments, INCLUDING
 // the equals-attached form `--repo=HOST/OWNER/REPO` (cobra accepts both forms).
 function ghIsDangerousCallback(_rawCommand: string, args: string[]): boolean {
+  if (hasTildeArg(args)) return true
   for (const token of args) {
     if (!token) continue
     // For flag tokens, extract the VALUE after `=` for inspection. Without this,
@@ -954,6 +1058,9 @@ function ghIsDangerousCallback(_rawCommand: string, args: string[]): boolean {
       if (eqIdx === -1) continue // flag without inline value, nothing to inspect
       value = token.slice(eqIdx + 1)
       if (!value) continue
+    }
+    if (hasSentinelToken(value)) {
+      return true
     }
     // Skip values that are clearly not repo specs (no `/` at all, or pure numbers)
     if (
@@ -1451,7 +1558,9 @@ export const DOCKER_READ_ONLY_COMMANDS: Record<string, ExternalCommandConfig> =
         '--details': 'none',
       },
       additionalCommandIsDangerousCallback: (_raw, args) =>
-        dockerDaemonRedirectIsDangerous(args),
+        dockerDaemonRedirectIsDangerous(args) ||
+        hasTildeExpansionArg(args) ||
+        args.some(hasSentinelToken),
     },
     'docker inspect': {
       safeFlags: {
@@ -1462,7 +1571,9 @@ export const DOCKER_READ_ONLY_COMMANDS: Record<string, ExternalCommandConfig> =
         '-s': 'none',
       },
       additionalCommandIsDangerousCallback: (_raw, args) =>
-        dockerDaemonRedirectIsDangerous(args),
+        dockerDaemonRedirectIsDangerous(args) ||
+        hasTildeExpansionArg(args) ||
+        args.some(hasSentinelToken),
     },
   }
 
@@ -1946,6 +2057,10 @@ export function validateFlags(
           i += 2
         }
 
+        if (startsWithSentinelToken(argValue)) {
+          return false
+        }
+
         // Defense-in-depth: For string arguments, reject values that start with '-'
         // This prevents type confusion attacks where a flag marked as 'string'
         // but actually takes no arguments could be used to inject dangerous flags
@@ -1971,6 +2086,10 @@ export function validateFlags(
       }
     } else {
       // Non-flag argument (like revision specs, file paths, etc.) - this is allowed
+      // unless it contains an unexpanded AST sentinel.
+      if (hasSentinelToken(token)) {
+        return false
+      }
       i++
     }
   }

@@ -4,6 +4,7 @@ import type { Message } from '../../types/message.js'
 import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js'
 import { count } from '../../utils/array.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from '../../utils/envUtils.js'
+import { getEnvironmentKind } from '../../utils/filePersistence/outputsScanner.js'
 import { toError } from '../../utils/errors.js'
 import {
   type CacheSafeParams,
@@ -32,6 +33,36 @@ export type PromptVariant = 'user_intent' | 'stated_intent'
 
 export function getPromptVariant(): PromptVariant {
   return 'user_intent'
+}
+
+/**
+ * #175 SEA `AMt` (@298675596):
+ * Resolve whether prompt suggestions may be enabled for an SDK/cloud session,
+ * honoring `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION` (from env / cloud env vars)
+ * before GrowthBook and settings.
+ */
+export function shouldAllowPromptSuggestionInSdk(): boolean {
+  let envOverride: boolean | null = null
+  try {
+    const { resolvePromptSuggestionEnvOverride } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/residualFinalEnvGates.js') as typeof import('../../utils/residualFinalEnvGates.js')
+    envOverride = resolvePromptSuggestionEnvOverride()
+  } catch {
+    const raw = process.env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION
+    if (isEnvDefinedFalsy(raw)) envOverride = false
+    else if (isEnvTruthy(raw)) envOverride = true
+  }
+  if (envOverride !== null) {
+    return envOverride
+  }
+  if (
+    getEnvironmentKind() !== null &&
+    !getFeatureValue_CACHED_MAY_BE_STALE('tengu_chomp_inflection', false)
+  ) {
+    return false
+  }
+  return getInitialSettings()?.promptSuggestionEnabled !== false
 }
 
 export function shouldEnablePromptSuggestion(): boolean {

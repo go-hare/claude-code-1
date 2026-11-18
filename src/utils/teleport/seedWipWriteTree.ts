@@ -65,7 +65,12 @@ export type SeedWipBuildResult =
   | SeedInspectResult
   | { kind: 'refused'; refused: SeedPathRow[]; decidedOn: 'listing' | 'tree' }
   | { kind: 'none'; leftOut: SeedPathRow[] }
-  | { kind: 'created'; commit: string; leftOut: SeedPathRow[] }
+  | {
+      kind: 'created'
+      commit: string
+      leftOut: SeedPathRow[]
+      deletedUnstaged?: string[]
+    }
 
 function fail(step: string, detail: string): SeedWipBuildResult {
   return { kind: 'failed', step, detail }
@@ -429,6 +434,7 @@ export async function buildSeedWipCommit(
     const toStage = (
       await keepNonDirectoryPaths(workTree, uniq(dirty.map(row => row.path)))
     ).filter(includePath)
+    let deletedUnstaged: string[] | undefined
     if (toStage.length > 0) {
       // densable `an` (`N as uZb`) — scratch parent when adminDir is unset.
       const tmpBase = layout.adminDir ?? tmpdir()
@@ -487,6 +493,9 @@ export async function buildSeedWipCommit(
         staged.entries.filter(row => !skip.has(row.path)),
       )
       if (hashed !== null) return hashed
+      deletedUnstaged = staged.entries.flatMap(row =>
+        row.kind === 'absent' && !skip.has(row.path) ? [row.path] : [],
+      )
       const updatePaths = staged.entries.flatMap(row =>
         (row.kind === 'file' || row.kind === 'absent') && !skip.has(row.path)
           ? [row.path]
@@ -608,7 +617,12 @@ export async function buildSeedWipCommit(
       STASH_AUTHOR,
     )
     if (wip.code !== 0) return fail('commit-tree', wip.stderr)
-    return { kind: 'created', commit: wip.stdout.trim(), leftOut }
+    return {
+      kind: 'created',
+      commit: wip.stdout.trim(),
+      leftOut,
+      deletedUnstaged,
+    }
   } catch (err) {
     return fail('scratch-index', String(err))
   } finally {

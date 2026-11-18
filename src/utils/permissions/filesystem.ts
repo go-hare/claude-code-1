@@ -3,7 +3,7 @@ import { randomBytes } from 'crypto'
 import ignore from 'ignore'
 import memoize from 'lodash-es/memoize.js'
 import { homedir, tmpdir } from 'os'
-import { join, normalize, posix, sep } from 'path'
+import { basename, dirname, join, normalize, posix, sep } from 'path'
 import { hasAutoMemPathOverride, isAutoMemPath } from 'src/memdir/paths.js'
 import { isAgentMemoryPath } from '@claude-code/builtin-tools/tools/AgentTool/agentMemory.js'
 import {
@@ -230,11 +230,7 @@ function getSettingsPaths(): string[] {
   ).filter(path => path !== undefined)
 }
 
-export function isClaudeSettingsPath(filePath: string): boolean {
-  // SECURITY: Normalize path structure first to prevent bypass via redundant ./
-  // sequences like `./.claude/./settings.json` which would evade the endsWith() check
-  const expandedPath = expandPath(filePath)
-
+function isClaudeSettingsPathLexical(expandedPath: string): boolean {
   // Normalize for case-insensitive comparison to prevent bypassing security
   // with paths like .cLauDe/Settings.locaL.json
   const normalizedPath = normalizeCaseForComparison(expandedPath)
@@ -252,6 +248,62 @@ export function isClaudeSettingsPath(filePath: string): boolean {
   return getSettingsPaths().some(
     settingsPath => normalizeCaseForComparison(settingsPath) === normalizedPath,
   )
+}
+
+export function isClaudeSettingsPath(filePath: string): boolean {
+  // SECURITY: Normalize path structure first to prevent bypass via redundant ./
+  // sequences like `./.claude/./settings.json` which would evade the endsWith() check
+  const expandedPath = expandPath(filePath)
+  if (isClaudeSettingsPathLexical(expandedPath)) {
+    return true
+  }
+
+  // SEA `bIe` / `cc`: also check symlink-resolved path so editing a symlink
+  // pointing to a settings file (or editing the real target of a symlinked
+  // .claude directory) cannot bypass settings protection.
+  const fs = getFsImplementation()
+  try {
+    const resolvedPath = expandPath(fs.realpathSync(expandedPath))
+    if (
+      resolvedPath !== expandedPath &&
+      isClaudeSettingsPathLexical(resolvedPath)
+    ) {
+      return true
+    }
+  } catch {
+    // Target may not exist yet (e.g. dangling symlink or new file under symlinked dir);
+    // resolve parent directory if possible.
+    try {
+      const parentReal = fs.realpathSync(dirname(expandedPath))
+      const viaParent = expandPath(join(parentReal, basename(expandedPath)))
+      if (
+        viaParent !== expandedPath &&
+        isClaudeSettingsPathLexical(viaParent)
+      ) {
+        return true
+      }
+    } catch {
+      // Ignore unresolvable parent
+    }
+  }
+
+  // Check if expandedPath matches a settings file whose parent .claude dir is a symlink
+  const normalizedExpanded = normalizeCaseForComparison(expandedPath)
+  const fileName = normalizeCaseForComparison(basename(expandedPath))
+  return getSettingsPaths().some(settingsPath => {
+    if (normalizeCaseForComparison(basename(settingsPath)) !== fileName) {
+      return false
+    }
+    try {
+      const realDir = fs.realpathSync(dirname(settingsPath))
+      return (
+        normalizeCaseForComparison(join(realDir, basename(settingsPath))) ===
+        normalizedExpanded
+      )
+    } catch {
+      return false
+    }
+  })
 }
 
 // Always ask when Claude Code tries to edit its own config files
@@ -500,6 +552,71 @@ export function isScratchpadFile(absolutePath: string): boolean {
   const scratchpadDir = getScratchpadDir()
   const normalizedPath = normalize(absolutePath)
   return normalizedPath.startsWith(scratchpadDir + sep)
+}
+
+/**
+ * SEA `Qye(e, h, CZ)`: check whether any relative path segment after `prefix`
+ * names a dangerous directory or (at the leaf) a dangerous file.
+ */
+function hasDangerousSegmentAfterPrefix(
+  filePath: string,
+  prefix: string,
+): boolean {
+  const segments = filePath.slice(prefix.length).split(sep)
+  const lastIdx = segments.length - 1
+  for (let i = 0; i < segments.length; i++) {
+    const seg = normalizeCaseForComparison(segments[i] ?? '')
+    if (
+      (DANGEROUS_DIRECTORIES as readonly string[]).some(
+        d => normalizeCaseForComparison(d) === seg,
+      )
+    ) {
+      return true
+    }
+    if (
+      i === lastIdx &&
+      (DANGEROUS_FILES as readonly string[]).some(
+        f => normalizeCaseForComparison(f) === seg,
+      )
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * SEA `kc(e)` (#51): allow reading files under `$CLAUDE_JOB_DIR/tmp/` for
+ * background (`CLAUDE_CODE_SESSION_KIND === 'bg'`) sessions, provided
+ * `CLAUDE_JOB_DIR` sits under `~/.claude/jobs/` and no dangerous subpath
+ * segments appear under `tmp/`.
+ */
+export function isBgJobTmpPath(absolutePath: string): boolean {
+  if (process.env.CLAUDE_CODE_SESSION_KIND !== 'bg') return false
+  const jobDir = process.env.CLAUDE_JOB_DIR
+  if (!jobDir) return false
+
+  const jobsRoot = join(getClaudeConfigHomeDir(), 'jobs')
+  const jobDirForms = getPathsForPermissionCheck(jobDir).map(normalize)
+  const jobsRootForms = getPathsForPermissionCheck(jobsRoot).map(normalize)
+  const isUnderJobsRoot = jobDirForms.every(jd =>
+    jobsRootForms.some(jr =>
+      normalizeCaseForComparison(jd).startsWith(
+        normalizeCaseForComparison(jr + sep),
+      ),
+    ),
+  )
+  if (!isUnderJobsRoot) return false
+
+  const normalizedTarget = normalize(absolutePath)
+  const normalizedTargetCmp = normalizeCaseForComparison(normalizedTarget)
+  for (const jd of jobDirForms) {
+    const tmpPrefix = jd + sep + 'tmp' + sep
+    if (normalizedTargetCmp.startsWith(normalizeCaseForComparison(tmpPrefix))) {
+      return !hasDangerousSegmentAfterPrefix(normalizedTarget, tmpPrefix)
+    }
+  }
+  return false
 }
 
 /**
@@ -2582,6 +2699,19 @@ export function checkReadableInternalPath(
       decisionReason: {
         type: 'other',
         reason: 'Scratchpad files for current session are allowed for reading',
+      },
+    }
+  }
+
+  // Job tmp/ subtree for current bg session (SEA #51 kc)
+  if (isBgJobTmpPath(normalizedPath)) {
+    return {
+      behavior: 'allow',
+      updatedInput: input,
+      decisionReason: {
+        type: 'other',
+        reason:
+          'Job tmp/ subtree for current bg session is allowed for reading',
       },
     }
   }

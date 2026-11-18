@@ -42,11 +42,20 @@ type TurnStepChunk =
       ref?: number
     }
 
+type TurnStepServerToolUse = {
+  id: string
+  name: string
+  input: unknown
+  startedAt: number
+  endedAt?: number
+}
+
 type TurnStepResult = {
   turnId: string
   index: number
   answer: string
   toolUses: Array<{ name: string; input: unknown }>
+  serverToolUses?: TurnStepServerToolUse[]
   stopReason: TurnStepStopReason
   usage: TurnStepUsage | null
 }
@@ -80,6 +89,130 @@ function isRecordAssistantItem(
   if (item.type !== 'assistant' || item.isApiErrorMessage === true) return false
   const msgObj: unknown = item.message
   return isPlainRecord(msgObj) && Array.isArray(msgObj.content)
+}
+
+type NotedTurnStepMessage = {
+  uuid: string
+  timestamp: string
+  content: unknown[]
+  reply: AssistantMessage
+}
+
+/** densable Ir — drop noted messages discarded by streaming/server fallback. */
+function applyTurnStepFallbackDiscard(
+  noted: NotedTurnStepMessage[],
+  item: unknown,
+): NotedTurnStepMessage[] {
+  try {
+    if (!isPlainRecord(item)) return noted
+    if (item.type === 'streaming_fallback_began') return []
+    const discarded = item.discardedMessages
+    if (!(item.type === 'server_fallback' && Array.isArray(discarded))) {
+      return noted
+    }
+    const discardedIds = new Set(
+      discarded.map(msg => (isPlainRecord(msg) ? msg.uuid : undefined)),
+    )
+    return noted.filter(msg => !discardedIds.has(msg.uuid))
+  } catch {
+    return noted
+  }
+}
+
+/** densable Dr — clone assistant content blocks for turn.step result. */
+function cloneNotedAssistant(item: AssistantMessage): NotedTurnStepMessage {
+  const { uuid } = item
+  const timestamp = typeof item.timestamp === 'string' ? item.timestamp : ''
+  const content = item.message.content as unknown[]
+  try {
+    return { uuid, timestamp, content: structuredClone(content), reply: item }
+  } catch {
+    return { uuid, timestamp, content: [...content], reply: item }
+  }
+}
+
+/** densable Nr — track server_tool_use / mcp_tool_use start and result end times. */
+function noteServerToolUseBlock(
+  acc: Map<string, TurnStepServerToolUse>,
+  block: unknown,
+  timestamp: string,
+): Map<string, TurnStepServerToolUse> {
+  try {
+    if (!isPlainRecord(block)) return acc
+    const ts = Date.parse(timestamp) || Date.now()
+    if (block.type === 'server_tool_use' || block.type === 'mcp_tool_use') {
+      const id = typeof block.id === 'string' ? block.id : ''
+      const name = typeof block.name === 'string' ? block.name : ''
+      if (id === '' || acc.has(id)) return acc
+      return new Map([
+        ...acc,
+        [id, { id, name, input: block.input, startedAt: ts }],
+      ])
+    }
+    const existing =
+      typeof block.tool_use_id === 'string'
+        ? acc.get(block.tool_use_id)
+        : undefined
+    if (existing !== undefined && existing.endedAt === undefined) {
+      return new Map([...acc, [existing.id, { ...existing, endedAt: ts }]])
+    }
+    return acc
+  } catch {
+    return acc
+  }
+}
+
+/** densable Lr — accumulate noted assistant messages for turn.step result. */
+function createTurnStepNoteTracker(fallbackModel: string) {
+  let noted: NotedTurnStepMessage[] = []
+  return {
+    note(item: ModelStreamItem): void {
+      noted = isRecordAssistantItem(item)
+        ? [...noted, cloneNotedAssistant(item)]
+        : applyTurnStepFallbackDiscard(noted, item)
+    },
+    result(turnId: string, index: number): TurnStepResult {
+      const lastReply = noted.at(-1)?.reply
+      const allContent = noted.flatMap(entry => entry.content)
+      const serverToolUsesMap = noted.reduce<
+        Map<string, TurnStepServerToolUse>
+      >(
+        (acc, entry) =>
+          entry.content.reduce<Map<string, TurnStepServerToolUse>>(
+            (inner, block) =>
+              noteServerToolUseBlock(inner, block, entry.timestamp),
+            acc,
+          ),
+        new Map<string, TurnStepServerToolUse>(),
+      )
+      return {
+        turnId,
+        index,
+        answer: allContent
+          .flatMap(block =>
+            isPlainRecord(block) &&
+            block.type === 'text' &&
+            typeof block.text === 'string'
+              ? [block.text]
+              : [],
+          )
+          .join('\n')
+          .trim(),
+        toolUses: allContent.flatMap(block =>
+          isPlainRecord(block) &&
+          block.type === 'tool_use' &&
+          typeof block.name === 'string'
+            ? [{ name: block.name, input: block.input }]
+            : [],
+        ),
+        ...(serverToolUsesMap.size > 0 && {
+          serverToolUses: [...serverToolUsesMap.values()],
+        }),
+        stopReason: normalizeTurnStopReason(lastReply?.message.stop_reason),
+        usage: extractTurnUsageFromAssistant(lastReply, fallbackModel),
+      }
+    },
+  }
 }
 
 function extractTurnUsageFromAssistant(
@@ -301,17 +434,15 @@ export async function* streamTurnStepWithHooks(params: {
           }
         : callArgs
 
-    const answerParts: string[] = []
-    const recordedToolUses: Array<{ name: string; input: unknown }> = []
-    let lastAssistant: AssistantMessage | undefined
+    const noteTracker = createTurnStepNoteTracker(nextModel)
 
     try {
       for await (const rawItem of callModel(effectiveArgs)) {
+        noteTracker.note(rawItem)
         const ref = heldItems.size + 1
         heldItems.set(ref, rawItem)
 
         if (isRecordAssistantItem(rawItem)) {
-          lastAssistant = rawItem
           latestEnvelopeUsageMessage = rawItem
           const msgObj: unknown = rawItem.message
           const contentArr =
@@ -364,17 +495,6 @@ export async function* streamTurnStepWithHooks(params: {
           assistantBlockIndices.set(ref, mappedIndices)
           for (const idx of mappedIndices) {
             seenEngineRecordBlocks.add(idx)
-          }
-          for (const block of contentArr) {
-            if (!isPlainRecord(block)) continue
-            if (block.type === 'text' && typeof block.text === 'string') {
-              answerParts.push(block.text)
-            } else if (
-              block.type === 'tool_use' &&
-              typeof block.name === 'string'
-            ) {
-              recordedToolUses.push({ name: block.name, input: block.input })
-            }
           }
           const engineChunk: TurnStepChunk = { kind: 'engine', ref }
           sentChunks.set(ref, engineChunk)
@@ -506,14 +626,7 @@ export async function* streamTurnStepWithHooks(params: {
       throw err
     }
 
-    return {
-      turnId,
-      index: stepIndex,
-      answer: answerParts.join('\n').trim(),
-      toolUses: recordedToolUses,
-      stopReason: normalizeTurnStopReason(lastAssistant?.message.stop_reason),
-      usage: extractTurnUsageFromAssistant(lastAssistant, nextModel),
-    }
+    return noteTracker.result(turnId, stepIndex)
   }
 
   type HookBlockState = {

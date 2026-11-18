@@ -1,4 +1,8 @@
-import type { SecureStorage, SecureStorageData } from './types.js'
+import type {
+  SecureStorage,
+  SecureStorageData,
+  SecureStorageUpdateResult,
+} from './types.js'
 
 /**
  * Creates a fallback storage that tries to use the primary storage first,
@@ -24,7 +28,11 @@ export function createFallbackStorage(
       }
       return (await secondary.readAsync()) || {}
     },
-    update(data: SecureStorageData): { success: boolean; warning?: string } {
+    invalidateCache(): void {
+      primary.invalidateCache?.()
+      secondary.invalidateCache?.()
+    },
+    update(data: SecureStorageData): SecureStorageUpdateResult {
       // Capture state before update
       const primaryDataBefore = primary.read()
 
@@ -40,6 +48,10 @@ export function createFallbackStorage(
         return result
       }
 
+      if (result.transient) {
+        return result
+      }
+
       const fallbackResult = secondary.update(data)
 
       if (fallbackResult.success) {
@@ -47,11 +59,17 @@ export function createFallbackStorage(
         // entry. read() prefers primary whenever it returns non-null, so that
         // stale entry would shadow the fresh data we just wrote to secondary —
         // e.g. a refresh token the server has already rotated away, causing a
-        // /login loop (#30337). Best-effort delete; if this also fails the
-        // user's keychain is in a bad state we can't fix from here.
-        if (primaryDataBefore !== null) {
-          primary.delete()
+        // /login loop (#30337). If delete() fails, surface transient+fallbackWritten
+        // so callers know the write landed in fallback while primary still holds
+        // the older entry.
+        if (primaryDataBefore !== null && !primary.delete()) {
+          return {
+            success: false,
+            transient: true,
+            fallbackWritten: true,
+          }
         }
+        primary.invalidateCache?.()
         return {
           success: true,
           warning: fallbackResult.warning,

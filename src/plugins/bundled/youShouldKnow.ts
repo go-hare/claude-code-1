@@ -85,7 +85,16 @@ export function registerYouShouldKnowBuiltinPlugin(): void {
           ],
           runCommands: ['plugin'],
           env: {
-            reads: ['CLAUDE_CODE_YOU_SHOULD_KNOW_DEBUG', 'USER_TYPE'],
+            reads: [
+              'CLAUDECODE',
+              'CLAUDE_CODE_CHILD_SESSION',
+              'CLAUDE_CODE_SESSION_KIND',
+              'CLAUDE_CODE_SKIP_PROMPT_HISTORY',
+              'CLAUDE_CODE_YOU_SHOULD_KNOW_AUTO_SEND',
+              'CLAUDE_CODE_YOU_SHOULD_KNOW_DEBUG',
+              'CLAUDE_JOB_DIR',
+              'USER_TYPE',
+            ],
             writes: [],
           },
           state: {

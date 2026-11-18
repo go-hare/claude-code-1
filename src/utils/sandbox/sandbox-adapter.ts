@@ -2206,12 +2206,42 @@ export interface ISandboxManager {
  * see raw lists when package getConfig() is not yet populated; shape matches
  * densable `e.filesystem.denyRead` (no credential-file paths).
  */
+let fsReadConfigMemo:
+  | { cfg: unknown; result: FsReadRestrictionConfig }
+  | undefined
+
+function stripTrailingGlob(p: string): string {
+  return p.endsWith('/**') ? p.slice(0, -3) : p
+}
+
+function hasGlobCharacters(p: string): boolean {
+  return /[*?[\]]/.test(p)
+}
+
+function buildRawFsReadConfig(
+  cfg: ReturnType<NonNullable<typeof BaseSandboxManager.getConfig>>,
+  credPaths: readonly string[],
+): FsReadRestrictionConfig {
+  const denySet = new Set([
+    ...(cfg?.filesystem?.denyRead ?? []).map(stripTrailingGlob),
+    ...credPaths.map(stripTrailingGlob),
+  ])
+  return {
+    denyOnly: [...denySet],
+    allowWithinDeny: (cfg?.filesystem?.allowRead ?? []).map(stripTrailingGlob),
+  }
+}
+
+export function clearFsReadConfigMemoForTests(): void {
+  fsReadConfigMemo = undefined
+}
+
 function getFsReadConfig(): FsReadRestrictionConfig {
   const cfg = BaseSandboxManager.getConfig?.()
   if (cfg?.filesystem?.disabled) {
     return {
-      denyOnly: [...cfg.filesystem.denyRead],
-      allowWithinDeny: [...(cfg.filesystem.allowRead ?? [])],
+      denyOnly: cfg.filesystem.denyRead.map(stripTrailingGlob),
+      allowWithinDeny: (cfg.filesystem.allowRead ?? []).map(stripTrailingGlob),
     }
   }
   if (resolveSandboxFilesystemDisabled()) {
@@ -2224,7 +2254,52 @@ function getFsReadConfig(): FsReadRestrictionConfig {
     // convert not yet run — densable empty until hl is set
     return getDisabledSandboxFsReadConfig()
   }
-  return BaseSandboxManager.getFsReadConfig()
+  if (fsReadConfigMemo !== undefined && fsReadConfigMemo.cfg === cfg) {
+    return fsReadConfigMemo.result
+  }
+  const platform = getPlatform()
+  const credFiles =
+    (
+      cfg as
+        | (typeof cfg & {
+            credentials?: { files?: Array<{ mode?: string; path: string }> }
+          })
+        | undefined
+    )?.credentials?.files ?? []
+  const denyCredPaths = credFiles
+    .filter(f => f.mode === 'deny')
+    .map(f => f.path)
+  // #90 SEA (@286068500): on Linux/WSL, avoid synchronous glob expansion in
+  // BaseSandboxManager.getFsReadConfig() when any read rule contains a glob
+  // (e.g. `~/**/.env`), which would walk large directory trees and freeze
+  // before the first request and in `/sandbox` Config tab.
+  if (
+    (platform === 'linux' || platform === 'wsl') &&
+    [
+      ...(cfg?.filesystem?.denyRead ?? []),
+      ...(cfg?.filesystem?.allowRead ?? []),
+      ...denyCredPaths,
+    ].some(p => hasGlobCharacters(stripTrailingGlob(p)))
+  ) {
+    const result = buildRawFsReadConfig(cfg, denyCredPaths)
+    fsReadConfigMemo = { cfg, result }
+    return result
+  }
+  try {
+    const result = BaseSandboxManager.getFsReadConfig()
+    fsReadConfigMemo = { cfg, result }
+    return result
+  } catch (err) {
+    logForDebugging(
+      `[sandbox] getFsReadConfig threw; falling back to raw deny lists: ${errorMessage(err)}`,
+    )
+    const result = buildRawFsReadConfig(
+      cfg,
+      credFiles.map(f => f.path),
+    )
+    fsReadConfigMemo = { cfg, result }
+    return result
+  }
 }
 
 /**

@@ -39,6 +39,15 @@ export type SimpleCommand = {
   text: string
 }
 
+export type ParseForSecurityOptions = {
+  /**
+   * #73 SEA `plainUnquotedHeredocs`: allow unquoted heredoc delimiters when
+   * the body contains no backticks/escapes and only plain tracked `$VAR` /
+   * `${VAR}` expansions (used for sandbox auto-allow of `cat <<EOF | python3`).
+   */
+  plainUnquotedHeredocs?: boolean
+}
+
 export type ParseForSecurityResult =
   | { kind: 'simple'; commands: SimpleCommand[]; bareAssignmentNames: string[] }
   | {
@@ -47,6 +56,8 @@ export type ParseForSecurityResult =
       nodeType?: string
       /** densable differential shell semantics (e.g. zsh-only `[[ ]]` & split). */
       differential?: boolean
+      /** #73 SEA: too-complex inside trailing pipeline after heredoc delimiter. */
+      afterHeredocDelimiter?: boolean
     }
   | { kind: 'parse-unavailable' }
 
@@ -462,6 +473,7 @@ const DOLLAR = String.fromCharCode(0x24)
  */
 export async function parseForSecurity(
   cmd: string,
+  options?: ParseForSecurityOptions,
 ): Promise<ParseForSecurityResult> {
   // parseCommandRaw('') returns null (falsy check), so short-circuit here.
   // Don't use .trim() — it strips Unicode whitespace (\u00a0 etc.) which the
@@ -471,7 +483,7 @@ export async function parseForSecurity(
   const root = await parseCommandRaw(cmd)
   return root === null
     ? { kind: 'parse-unavailable' }
-    : parseForSecurityFromAst(cmd, root)
+    : parseForSecurityFromAst(cmd, root, options)
 }
 
 /**
@@ -480,9 +492,12 @@ export async function parseForSecurity(
  * still run on `cmd` — they catch tree-sitter/bash differentials that a
  * successful parse doesn't.
  */
+let currentPlainUnquotedHeredocs = false
+
 export function parseForSecurityFromAst(
   cmd: string,
   root: Node | typeof PARSE_ABORTED,
+  options?: ParseForSecurityOptions,
 ): ParseForSecurityResult {
   // Pre-checks: characters that cause tree-sitter and bash to disagree on
   // word boundaries. These run before tree-sitter because they're the known
@@ -564,7 +579,13 @@ export function parseForSecurityFromAst(
     }
   }
 
-  return walkProgram(root)
+  const prevPlain = currentPlainUnquotedHeredocs
+  currentPlainUnquotedHeredocs = options?.plainUnquotedHeredocs === true
+  try {
+    return walkProgram(root)
+  } finally {
+    currentPlainUnquotedHeredocs = prevPlain
+  }
 }
 
 function walkProgram(root: Node): ParseForSecurityResult {
@@ -1757,8 +1778,25 @@ function walkRedirectedStatement(
     redirects.push(r)
   }
   for (const hn of heredocNodes) {
-    const r = walkHeredocRedirect(hn)
+    const trailingPipeline =
+      hn.children.find(c => c?.type === 'pipeline') ?? null
+    const r = walkHeredocRedirect(
+      hn,
+      redirectScope,
+      trailingPipeline,
+      commands,
+      bareAssignmentNames,
+    )
     if (r) return r
+    if (trailingPipeline) {
+      const err = collectCommands(
+        trailingPipeline,
+        commands,
+        redirectScope,
+        bareAssignmentNames,
+      )
+      if (err) return err
+    }
   }
 
   if (redirects.length > 0) {
@@ -2011,30 +2049,80 @@ function walkFileRedirect(
  * substitution. Keep rejecting all unquoted heredocs. Users should use
  * <<'EOF' to get a literal body, which the model already prefers.
  */
-function walkHeredocRedirect(node: Node): ParseForSecurityResult | null {
+const HEREDOC_UNQUOTED_DISALLOWED_RE = /`|\\[$`\\\n]/
+const HEREDOC_DELIM_IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
+const HEREDOC_PLAIN_VAR_RE =
+  /\$(?:[A-Za-z_][A-Za-z0-9_]*(?![A-Za-z0-9_\u0080-\uffff])|\{[A-Za-z_][A-Za-z0-9_]*\})(?!\[|:[A-Za-z&])/g
+
+function walkHeredocRedirect(
+  node: Node,
+  varScope?: Map<string, string>,
+  trailingPipeline?: Node | null,
+  commands?: SimpleCommand[],
+  bareAssignmentNames?: string[],
+): ParseForSecurityResult | null {
   let startText: string | null = null
+  let endText: string | null = null
   let body: Node | null = null
 
   for (const child of node.children) {
     if (!child) continue
     if (child.type === 'heredoc_start') startText = child.text
     else if (child.type === 'heredoc_body') body = child
+    else if (child.type === 'heredoc_end') endText = child.text
     else if (
       child.type === '<<' ||
       child.type === '<<-' ||
-      child.type === 'heredoc_end' ||
       child.type === 'file_descriptor'
     ) {
-      // expected structural tokens — safe to skip. file_descriptor
-      // covers fd-prefixed heredocs (`cat 3<<'EOF'`) — walkFileRedirect
-      // already treats it as a benign structural token.
+      // expected structural tokens — safe to skip.
+    } else if (
+      trailingPipeline &&
+      child === trailingPipeline &&
+      child.children.at(-1)?.type === 'command' &&
+      child.children.every(
+        d =>
+          d?.type === '|' ||
+          (d?.type === 'command' &&
+            !d.children.some(m => m?.type.endsWith('_redirect'))),
+      )
+    ) {
+      // #73 SEA `Xe`: trailing pipeline on heredoc delimiter line (e.g. `cat <<EOF | python3`).
+    } else if (
+      STRUCTURAL_TYPES.has(child.type) &&
+      commands &&
+      varScope &&
+      bareAssignmentNames
+    ) {
+      const d = collectCommands(child, commands, varScope, bareAssignmentNames)
+      if (d) {
+        return d.kind === 'too-complex'
+          ? { ...d, afterHeredocDelimiter: true }
+          : d
+      }
     } else {
-      // SECURITY: tree-sitter places pipeline / command / file_redirect /
-      // && / etc. as children of heredoc_redirect when they follow the
-      // delimiter on the same line (e.g. `ls <<'EOF' | rm x`). Previously
-      // these were silently skipped, hiding the piped command from
-      // permission checks. Fail closed like every other walker.
       return tooComplex(child)
+    }
+  }
+
+  if (trailingPipeline && body) {
+    const header = Buffer.from(node.text, 'utf8')
+      .subarray(0, body.startIndex - node.startIndex)
+      .toString('utf8')
+    const expected = node.children
+      .slice(0, node.children.indexOf(body))
+      .map(m => (m === trailingPipeline ? '|' : '') + (m?.text ?? ''))
+      .join('')
+    if (
+      header.indexOf('\n') !== header.length - 1 ||
+      header.includes('\\') ||
+      header.replace(/[ \t\n]/g, '') !== expected.replace(/[ \t]/g, '')
+    ) {
+      return {
+        kind: 'too-complex',
+        reason:
+          'More than a pipeline follows the heredoc delimiter on its line',
+      }
     }
   }
 
@@ -2045,14 +2133,37 @@ function walkHeredocRedirect(node: Node): ParseForSecurityResult | null {
       startText.startsWith('\\'))
 
   if (!isQuoted) {
-    return {
-      kind: 'too-complex',
-      reason: 'Heredoc with unquoted delimiter undergoes shell expansion',
-      nodeType: 'heredoc_redirect',
+    const nonContentChildren = body
+      ? body.children.filter(m => m?.type !== 'heredoc_content')
+      : []
+    const canAllowPlain =
+      currentPlainUnquotedHeredocs &&
+      varScope !== undefined &&
+      body !== null &&
+      startText !== null &&
+      HEREDOC_DELIM_IDENT_RE.test(startText) &&
+      endText === startText &&
+      !HEREDOC_UNQUOTED_DISALLOWED_RE.test(body.text) &&
+      (body.text.match(/\$/g)?.length ?? 0) === nonContentChildren.length &&
+      (body.text.match(HEREDOC_PLAIN_VAR_RE)?.length ?? 0) ===
+        nonContentChildren.length &&
+      nonContentChildren.every(
+        m =>
+          m !== null &&
+          (m.type === 'simple_expansion' || m.type === 'expansion') &&
+          typeof resolveSimpleExpansion(m, varScope, true) === 'string',
+      )
+    if (!canAllowPlain) {
+      return {
+        kind: 'too-complex',
+        reason: 'Heredoc with unquoted delimiter undergoes shell expansion',
+        nodeType: 'heredoc_redirect',
+        differential: true,
+      }
     }
   }
 
-  if (body) {
+  if (body && isQuoted) {
     for (const child of body.children) {
       if (!child) continue
       if (child.type !== 'heredoc_content') {

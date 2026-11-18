@@ -18,6 +18,7 @@ import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/grow
 import type { AppState } from 'src/state/AppState.js'
 import { getAbortReasonMessage } from 'src/utils/abortController.js'
 import type { AgentContext } from 'src/utils/agentContext.js'
+import { logForDebugging } from 'src/utils/debug.js'
 import { type EffortValue, isUltracodeModeActive } from 'src/utils/effort.js'
 import { recordSubagentSpawnRefused } from 'src/utils/subagentSpawnLedger.js'
 import { createTaskRegistry } from 'src/utils/taskRegistry.js'
@@ -30,6 +31,11 @@ import { createTaskRegistry } from 'src/utils/taskRegistry.js'
  */
 export const DEFAULT_MAX_SUBAGENTS_PER_SESSION = Number.POSITIVE_INFINITY
 export const DEFAULT_MAX_WEB_SEARCHES_PER_SESSION = 200
+/** official nt=100, bn=3600, yn="tengu_memoized_turtle" — WebSearch hourly refill */
+export const DEFAULT_WEB_SEARCH_REFILLS_PER_HOUR = 100
+export const MAX_WEB_SEARCH_REFILLS_PER_HOUR = 3600
+export const WEB_SEARCH_REFILL_FEATURE = 'tengu_memoized_turtle'
+const WEB_SEARCH_REFILL_WINDOW_MS = 3_600_000
 /** densable vBg */
 export const DEFAULT_MAX_CONCURRENT_SUBAGENTS = 20
 /** densable qPu/Evu (2.1.219) — main depth 0; default max 3 ⇒ nested spawn allowed */
@@ -385,6 +391,118 @@ export function assertCanSpawnSubagent(options?: {
     )
   }
   incrementTotalAgentSpawns()
+}
+
+/**
+ * official _n({ refillsByDefault }) — resolve WebSearch refills/hour.
+ * Env CLAUDE_CODE_WEB_SEARCH_REFILLS_PER_HOUR overrides; otherwise returns 0
+ * unless refillsByDefault is true, in which case GB tengu_memoized_turtle
+ * (integer 0..3600) or DEFAULT_WEB_SEARCH_REFILLS_PER_HOUR (100).
+ */
+export function resolveWebSearchRefillsPerHour(options?: {
+  refillsByDefault?: boolean
+  env?: NodeJS.ProcessEnv
+}): number {
+  const env = options?.env ?? process.env
+  const rawEnv = env.CLAUDE_CODE_WEB_SEARCH_REFILLS_PER_HOUR
+  if (rawEnv !== undefined && rawEnv !== '') {
+    const n = /^\d+$/.test(rawEnv) ? Number(rawEnv) : Number(rawEnv)
+    if (Number.isInteger(n) && n >= 0 && n <= MAX_WEB_SEARCH_REFILLS_PER_HOUR) {
+      return n
+    }
+  }
+  if (!options?.refillsByDefault) {
+    return 0
+  }
+  const served = getFeatureValue_CACHED_MAY_BE_STALE(
+    WEB_SEARCH_REFILL_FEATURE,
+    DEFAULT_WEB_SEARCH_REFILLS_PER_HOUR,
+  )
+  const coerced =
+    typeof served === 'string' && /^\d+$/.test(served) ? Number(served) : served
+  if (
+    typeof coerced === 'number' &&
+    Number.isInteger(coerced) &&
+    coerced >= 0 &&
+    coerced <= MAX_WEB_SEARCH_REFILLS_PER_HOUR
+  ) {
+    return coerced
+  }
+  logForDebugging(
+    `WebSearch budget: ignoring the served ${WEB_SEARCH_REFILL_FEATURE} value ${JSON.stringify(served)} (not an integer from 0 to ${MAX_WEB_SEARCH_REFILLS_PER_HOUR}); using ${DEFAULT_WEB_SEARCH_REFILLS_PER_HOUR} refills per hour`,
+    { level: 'warn' },
+  )
+  return DEFAULT_WEB_SEARCH_REFILLS_PER_HOUR
+}
+
+export type WebSearchBudget = {
+  tryConsume(): boolean
+  msUntilNextCall(): number
+  refillsPerHour(): number
+}
+
+/**
+ * official wn({ refillsByDefault, now }) — token-bucket WebSearch budget
+ * with 200-call burst cap and 100/hr default refill.
+ */
+export function createWebSearchBudget(options?: {
+  refillsByDefault?: boolean
+  now?: () => number
+  env?: NodeJS.ProcessEnv
+}): WebSearchBudget {
+  const refillsByDefault = options?.refillsByDefault ?? false
+  const now = options?.now ?? (() => Date.now())
+  const env = options?.env
+  let used = 0
+  let carryMs = 0
+  let lastAt = now()
+  let rate = resolveWebSearchRefillsPerHour({ refillsByDefault, env })
+
+  function refill(): void {
+    const current = now()
+    const nextRate = resolveWebSearchRefillsPerHour({ refillsByDefault, env })
+    const effectiveRate = Math.min(nextRate, rate)
+    rate = nextRate
+    const elapsed = Math.max(0, current - lastAt)
+    lastAt = current
+    if (used === 0) {
+      carryMs = 0
+      return
+    }
+    carryMs += elapsed * effectiveRate
+    const recovered = Math.floor(carryMs / WEB_SEARCH_REFILL_WINDOW_MS)
+    if (recovered >= used) {
+      used = 0
+      carryMs = 0
+      return
+    }
+    used -= recovered
+    carryMs -= recovered * WEB_SEARCH_REFILL_WINDOW_MS
+  }
+
+  return {
+    tryConsume(): boolean {
+      refill()
+      const max = resolveMaxWebSearchesPerSession(env)
+      if (used >= max) {
+        return false
+      }
+      used++
+      return true
+    },
+    msUntilNextCall(): number {
+      refill()
+      const max = resolveMaxWebSearchesPerSession(env)
+      const over = used - max
+      if (over < 0) return 0
+      if (rate === 0) return Infinity
+      const needed = (over + 1) * WEB_SEARCH_REFILL_WINDOW_MS - carryMs
+      return Math.max(1, Math.ceil(needed / rate))
+    },
+    refillsPerHour(): number {
+      return rate
+    },
+  }
 }
 
 /** densable WebSearch soft budget message body (results[0] string). */

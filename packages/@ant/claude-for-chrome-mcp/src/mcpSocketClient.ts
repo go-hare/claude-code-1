@@ -346,7 +346,8 @@ class McpSocketClient {
       },
     }
 
-    return this.sendRequestWithRetry(request)
+    const timeoutMs = this.context.getToolCallTimeoutMs?.(name) ?? 30000
+    return this.sendRequestWithRetry(request, timeoutMs)
   }
 
   /**
@@ -356,11 +357,14 @@ class McpSocketClient {
    * to dead Chrome). Force reconnect to pick up a fresh native host process
    * and retry once.
    */
-  private async sendRequestWithRetry(request: ToolRequest): Promise<unknown> {
+  private async sendRequestWithRetry(
+    request: ToolRequest,
+    timeoutMs = 30000,
+  ): Promise<unknown> {
     const { serverName, logger } = this.context
 
     try {
-      return await this.sendRequest(request)
+      return await this.sendRequest(request, timeoutMs)
     } catch (error) {
       if (!(error instanceof SocketConnectionError)) {
         throw error
@@ -373,7 +377,7 @@ class McpSocketClient {
       this.closeSocket()
       await this.ensureConnected()
 
-      return await this.sendRequest(request)
+      return await this.sendRequest(request, timeoutMs)
     }
   }
 

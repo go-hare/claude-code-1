@@ -11,12 +11,12 @@ import {
 import {
   DEFAULT_MODE,
   USER_CONFIG,
-  isKeptWithoutInstructions,
+  keepNonDropped as isKeptWithoutInstructions,
   legacyModeOf,
-  modeOf,
+  resolveMode as modeOf,
   register,
-  unseenFiles,
-  withProjectFiles,
+  dedupInstructionFiles as unseenFiles,
+  insertAgentsMdFiles as withProjectFiles,
 } from '../../../vendor/claude-code-mods/mods/agents-md/hooks/register.js'
 
 const settingsSnap = snapshotModuleExports(realSettings)
@@ -128,7 +128,7 @@ describe('AGENTS.md densable 2.1.283 compositor', () => {
     const merged = withProjectFiles(existing, [
       file('/repo/AGENTS.md', 'project', 'a'),
     ])
-    expect(merged.map(item => item.path)).toEqual([
+    expect(merged.map((item: InstructionFile) => item.path)).toEqual([
       '/managed',
       '/repo/CLAUDE.md',
       '/repo/AGENTS.md',

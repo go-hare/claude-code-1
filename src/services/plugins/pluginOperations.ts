@@ -215,6 +215,8 @@ export type PluginUpdateResult = {
   skipReason?: 'entry_helper_deferred'
   /** densable vun — cwe.failureCode or command_source_refused. */
   failureCode?: string
+  /** Official `folderNote` — note for folder-sourced plugins on update. */
+  folderNote?: string
 }
 
 // ============================================================================
@@ -1214,7 +1216,23 @@ export async function updatePluginOp(
   )
 
   // Get plugin info from marketplace (needs name@marketplace)
-  const pluginInfo = await getPluginById(pluginId)
+  let pluginInfo: Awaited<ReturnType<typeof getPluginById>>
+  try {
+    pluginInfo = await getPluginById(pluginId)
+  } catch (err) {
+    const parsedMarketplace = parsePluginIdentifier(pluginId).marketplace
+    if (parsedMarketplace === 'claude-plugins-directory') {
+      const msg = err instanceof Error ? err.message : String(err)
+      return {
+        success: false,
+        message: `Could not check "${pluginName}" for updates. ${msg}`,
+        pluginId,
+        scope,
+        failureCode: 'directory_unavailable',
+      }
+    }
+    throw err
+  }
   if (!pluginInfo) {
     return {
       success: false,
@@ -1604,9 +1622,13 @@ async function performPluginUpdate({
       installation.installPath === versionedPath ||
       installation.installPath === zipPath
     if (isUpToDate) {
+      const isFolderSource = typeof entry.source === 'string'
       return {
         success: true,
         message: `${pluginName} is already at the latest version (${newVersion}).`,
+        ...(isFolderSource && {
+          folderNote: `${pluginName} is read from its folder, ${sourcePath}: nothing to update. Edits there take effect at the next session start or /reload-plugins.`,
+        }),
         pluginId,
         newVersion,
         oldVersion,

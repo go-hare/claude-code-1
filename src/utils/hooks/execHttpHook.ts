@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto'
 import axios from 'axios'
 import type { HookEvent } from 'src/entrypoints/agentSdkTypes.js'
 import { createCombinedAbortSignal } from '../combinedAbortSignal.js'
@@ -57,14 +58,245 @@ function getHttpHookPolicy(): {
   }
 }
 
+const URL_WILDCARD_TOKEN = `zzwildcard${randomBytes(8).toString('hex')}zz`
+const URL_PUNYCODE_TOKEN = `zzpunycode${randomBytes(8).toString('hex')}zz`
+const SPECIAL_URL_PROTOCOLS = new Set([
+  'http:',
+  'https:',
+  'ws:',
+  'wss:',
+  'ftp:',
+  'file:',
+])
+
+function compileWildcardFinder(needle: string) {
+  if (!needle.includes(needle.charAt(0), 1)) {
+    return (haystack: string, start: number, end: number): number => {
+      const idx = haystack.indexOf(needle, start)
+      return idx === -1 || idx + needle.length > end ? -1 : idx
+    }
+  }
+  const lps = new Int32Array(needle.length)
+  for (let i = 1, len = 0; i < needle.length; i++) {
+    while (len > 0 && needle.charCodeAt(i) !== needle.charCodeAt(len)) {
+      len = lps[len - 1] ?? 0
+    }
+    if (needle.charCodeAt(i) === needle.charCodeAt(len)) len++
+    lps[i] = len
+  }
+  return (haystack: string, start: number, end: number): number => {
+    for (let i = start, j = 0; i < end; i++) {
+      while (j > 0 && haystack.charCodeAt(i) !== needle.charCodeAt(j)) {
+        j = lps[j - 1] ?? 0
+      }
+      if (haystack.charCodeAt(i) === needle.charCodeAt(j)) j++
+      if (j === needle.length) return i - needle.length + 1
+    }
+    return -1
+  }
+}
+
+function matchWildcard(pattern: string, target: string): boolean {
+  const parts = pattern.split('*')
+  const head = parts[0] ?? ''
+  if (parts.length === 1) return head === target
+  const tail = parts.at(-1) ?? ''
+  const limit = target.length - tail.length
+  if (
+    limit < head.length ||
+    !target.startsWith(head) ||
+    !target.endsWith(tail)
+  ) {
+    return false
+  }
+  const middle = parts.slice(1, -1).filter(p => p !== '')
+  const finders: Array<(h: string, s: number, e: number) => number> = []
+  let cursor = head.length
+  for (let idx = 0; idx < middle.length; idx++) {
+    const part = middle[idx]!
+    const finder = (finders[idx] ??= compileWildcardFinder(part))
+    const found = finder(target, cursor, limit)
+    if (found === -1) return false
+    cursor = found + part.length
+  }
+  return true
+}
+
+function matchSegmentedWildcard(
+  pattern: string,
+  target: string,
+  delimiters: string,
+): boolean {
+  const nextDelim = (str: string, from: number): number => {
+    let i = from
+    while (i < str.length && !delimiters.includes(str.charAt(i))) i++
+    return i
+  }
+  let pIdx = 0
+  let tIdx = 0
+  for (;;) {
+    const pEnd = nextDelim(pattern, pIdx)
+    const tEnd = nextDelim(target, tIdx)
+    if (
+      pattern.charAt(pEnd) !== target.charAt(tEnd) ||
+      !matchWildcard(pattern.slice(pIdx, pEnd), target.slice(tIdx, tEnd))
+    ) {
+      return false
+    }
+    if (pEnd === pattern.length) return true
+    pIdx = pEnd + 1
+    tIdx = tEnd + 1
+  }
+}
+
+function protectPunycodeWildcards(input: string, extraToken?: string): string {
+  return input.replace(/[a-z0-9-]+/gi, label =>
+    /^xn--/i.test(label) &&
+    (label.includes(URL_WILDCARD_TOKEN) ||
+      (extraToken !== undefined && label.includes(extraToken)))
+      ? URL_PUNYCODE_TOKEN + label
+      : label,
+  )
+}
+
+function unprotectPunycodeWildcards(input: string): string {
+  return input.replaceAll(URL_PUNYCODE_TOKEN, '')
+}
+
+function hasProtectedPunycodeLabel(parsed: URL, extraToken?: string): boolean {
+  return (
+    SPECIAL_URL_PROTOCOLS.has(parsed.protocol) &&
+    parsed.hostname
+      .split('.')
+      .some(
+        label =>
+          label.startsWith('xn--') &&
+          (label.includes(URL_WILDCARD_TOKEN) ||
+            (extraToken !== undefined && label.includes(extraToken))),
+      )
+  )
+}
+
+/**
+ * Parse a URL pattern with `*` wildcards (and optional extra placeholder token)
+ * without letting URL() reject wildcard ports or punycode-looking wildcard labels.
+ */
+export function parseUrlPattern(
+  pattern: string,
+  extraToken?: string,
+): {
+  protocol: string
+  hostname: string
+  username: string
+  password: string
+  port: string
+  pathname: string
+  search: string
+  hash: string
+} | null {
+  const masked = protectPunycodeWildcards(
+    pattern.replaceAll('*', URL_WILDCARD_TOKEN),
+    extraToken,
+  )
+  let parsed: URL
+  try {
+    parsed = new URL(masked)
+  } catch {
+    const portFix = masked.replace(
+      new RegExp(
+        `:(?:${URL_WILDCARD_TOKEN}${extraToken ? `|${extraToken}` : ''})(?=[/?#]|$)`,
+      ),
+      ':0',
+    )
+    if (portFix === masked) return null
+    try {
+      parsed = new URL(portFix)
+    } catch {
+      return null
+    }
+  }
+  if (hasProtectedPunycodeLabel(parsed, extraToken)) return null
+  const unmask = (val: string) =>
+    unprotectPunycodeWildcards(val).replaceAll(URL_WILDCARD_TOKEN, '*')
+  return {
+    protocol: unmask(parsed.protocol),
+    hostname: unmask(parsed.hostname),
+    username: unmask(parsed.username),
+    password: unmask(parsed.password),
+    port: unmask(parsed.port),
+    pathname: unmask(parsed.pathname),
+    search: unmask(parsed.search),
+    hash: unmask(parsed.hash),
+  }
+}
+
 /**
  * Match a URL against a pattern with * as a wildcard (any characters).
- * Same semantics as the MCP server allowlist patterns.
+ * Same semantics as the MCP server allowlist patterns (official R8).
  */
-function urlMatchesPattern(url: string, pattern: string): boolean {
-  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-  const regexStr = escaped.replace(/\*/g, '.*')
-  return new RegExp(`^${regexStr}$`).test(url)
+export function urlMatchesPattern(url: string, pattern: string): boolean {
+  if (pattern === '*') return true
+  let parsedUrl: URL
+  try {
+    parsedUrl = new URL(url)
+  } catch {
+    return false
+  }
+  const masked = protectPunycodeWildcards(
+    pattern.replaceAll('*', URL_WILDCARD_TOKEN),
+  )
+  let wildcardPort = false
+  let parsedPattern: URL | undefined
+  try {
+    parsedPattern = new URL(masked)
+  } catch {
+    const portFix = masked.replace(
+      new RegExp(`:${URL_WILDCARD_TOKEN}(?=[/?#]|$)`),
+      ':0',
+    )
+    if (portFix !== masked) {
+      try {
+        parsedPattern = new URL(portFix)
+        wildcardPort = true
+      } catch {
+        // fall through to segmented fallback
+      }
+    }
+  }
+  if (!parsedPattern || hasProtectedPunycodeLabel(parsedPattern)) {
+    const normalized = `${parsedUrl.protocol}//${parsedUrl.host}${parsedUrl.pathname}${parsedUrl.search}`
+    return matchSegmentedWildcard(pattern, normalized, '/')
+  }
+  if (
+    parsedPattern.protocol !== `${URL_WILDCARD_TOKEN}:` &&
+    parsedPattern.protocol !== parsedUrl.protocol
+  ) {
+    return false
+  }
+  const targetHost = parsedUrl.hostname.replace(/\.$/, '').toLowerCase()
+  const patternHost = unprotectPunycodeWildcards(parsedPattern.hostname)
+    .replace(/\.$/, '')
+    .toLowerCase()
+    .replaceAll(URL_WILDCARD_TOKEN, '*')
+  if (!matchWildcard(patternHost, targetHost)) return false
+  if (
+    parsedPattern.port === '' &&
+    parsedPattern.hostname.includes(URL_WILDCARD_TOKEN)
+  ) {
+    wildcardPort = true
+  }
+  if (!wildcardPort && parsedPattern.port !== parsedUrl.port) return false
+  if (
+    (parsedPattern.pathname === '/' || parsedPattern.pathname === '') &&
+    parsedPattern.search === '' &&
+    !masked.endsWith('/')
+  ) {
+    return true
+  }
+  const patternRest = unprotectPunycodeWildcards(
+    parsedPattern.pathname + parsedPattern.search,
+  ).replaceAll(URL_WILDCARD_TOKEN, '*')
+  return matchWildcard(patternRest, parsedUrl.pathname + parsedUrl.search)
 }
 
 /**

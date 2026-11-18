@@ -6,12 +6,17 @@ import type { Command } from '../../commands.js'
 import type { Tool } from '../../Tool.js'
 import {
   clearServerCache,
+  detachAndCloseConnection,
   fetchCommandsForClient,
   fetchResourcesForClient,
   fetchToolsForClient,
   getMcpToolsCommandsAndResources,
   reconnectMcpServerImpl,
 } from './client.js'
+import {
+  getMcpIdentityEpoch,
+  mcpConfigDependsOnAccountIdentity,
+} from './mcpIdentity.js'
 import {
   formatListChangedRefreshFailed,
   resolvePromptsListChangedRefresh,
@@ -48,6 +53,7 @@ import {
   doesEnterpriseMcpConfigExist,
   filterMcpServersByPolicy,
   getClaudeCodeMcpConfigs,
+  getMcpServerPolicyBlockReason,
   isMcpServerDisabled,
   setMcpServerEnabled,
 } from 'src/services/mcp/config.js'
@@ -395,12 +401,49 @@ export function useManageMCPConnections(
       tools,
       commands,
       resources,
+      attemptEpoch,
     }: {
       client: MCPServerConnection
       tools: Tool[]
       commands: Command[]
       resources?: ServerResource[]
+      attemptEpoch?: number
     }) => {
+      // Official $Qr: drop late connection settlements superseded by an account
+      // switch (sign-in / org change) so org-managed / previous-account servers
+      // are never relisted under the new session.
+      if (
+        attemptEpoch !== undefined &&
+        attemptEpoch !== getMcpIdentityEpoch() &&
+        mcpConfigDependsOnAccountIdentity(client.config)
+      ) {
+        logMCPDebug(
+          client.name,
+          'applyConnectionResult: settlement superseded by an account switch — closed, not installed',
+        )
+        if (client.type === 'connected') {
+          void detachAndCloseConnection(client).catch(() => {})
+        }
+        return
+      }
+      // Official $Qr / ju / Oio: refuse late settlements whose scope is blocked
+      // by enterprise/managed policy.
+      if (client.type !== 'failed' && client.type !== 'disabled') {
+        const blockReason = getMcpServerPolicyBlockReason(
+          client.name,
+          client.config,
+        )
+        if (blockReason === 'managed-policy') {
+          logMCPDebug(
+            client.name,
+            `applyConnectionResult: disposing connect that settled after a ${blockReason} deny`,
+          )
+          if (client.type === 'connected') {
+            void detachAndCloseConnection(client).catch(() => {})
+          }
+          return
+        }
+      }
       updateServer({ ...client, tools, commands, resources })
 
       // Handle side effects based on client state

@@ -1,6 +1,7 @@
 import { memoize } from 'lodash-es'
 import type { Command } from 'src/commands.js'
 import {
+  findCommand,
   getCommandName,
   getSlashCommandToolSkills,
   mergeSkillToolCommands,
@@ -73,7 +74,37 @@ function getCommandDescription(cmd: Command): string {
   return desc.length > maxChars ? desc.slice(0, maxChars - 1) + '…' : desc
 }
 
-function formatCommandDescription(cmd: Command): string {
+const MAX_SKILL_ALIAS_LEN = 256
+const SAFE_SKILL_ALIAS_RE = /^[\p{L}\p{M}\p{N}_:.-]+$/u
+
+/** Official `qrn(e, n)` — format skill name with user-facing alias when unambiguous. */
+export function formatSkillListingName(
+  cmd: Command,
+  allCommands: Command[],
+): string {
+  const displayName = getCommandName(cmd)
+  if (
+    displayName === cmd.name ||
+    cmd.name.endsWith(`:${displayName}`) ||
+    displayName.length > MAX_SKILL_ALIAS_LEN ||
+    !SAFE_SKILL_ALIAS_RE.test(displayName)
+  ) {
+    return cmd.name
+  }
+  try {
+    if (findCommand(displayName, allCommands)?.name !== cmd.name) {
+      return cmd.name
+    }
+  } catch {
+    return cmd.name
+  }
+  return `${cmd.name} (${displayName})`
+}
+
+function formatCommandDescription(
+  cmd: Command,
+  allCommands: Command[] = [cmd],
+): string {
   // Debug: log if userFacingName differs from cmd.name for plugin skills
   const displayName = getCommandName(cmd)
   if (
@@ -86,7 +117,7 @@ function formatCommandDescription(cmd: Command): string {
     )
   }
 
-  return `- ${cmd.name}: ${getCommandDescription(cmd)}`
+  return `- ${formatSkillListingName(cmd, allCommands)}: ${getCommandDescription(cmd)}`
 }
 
 function isCommandNameOnly(cmd: Command): boolean {
@@ -130,9 +161,11 @@ export function formatCommandsWithinBudget(
   const fullEntries = commands.map((cmd, i) => {
     if (isCommandNameOnly(cmd)) {
       nameOnlyIndices.add(i)
-      return { cmd, full: `- ${cmd.name}` }
+      const nameOnly = `- ${cmd.name}`
+      return { cmd, nameOnly, full: nameOnly }
     }
-    return { cmd, full: formatCommandDescription(cmd) }
+    const nameOnly = `- ${formatSkillListingName(cmd, commands)}`
+    return { cmd, nameOnly, full: formatCommandDescription(cmd, commands) }
   })
 
   // join('\n') produces N-1 newlines for N entries
@@ -165,7 +198,7 @@ export function formatCommandsWithinBudget(
   }
 
   const nameOnlyWidth = (i: number): number =>
-    stringWidth(commands[i]!.name) + 2
+    stringWidth(fullEntries[i]!.nameOnly)
   const fullWidth = (i: number): number => stringWidth(fullEntries[i]!.full)
   const baseUsed =
     commands.reduce(
@@ -187,10 +220,10 @@ export function formatCommandsWithinBudget(
   }
 
   return commands
-    .map((cmd, i) =>
+    .map((_, i) =>
       fixedIndices.has(i) || keptFullIndices.has(i)
         ? fullEntries[i]!.full
-        : `- ${cmd.name}`,
+        : fullEntries[i]!.nameOnly,
     )
     .join('\n')
 }

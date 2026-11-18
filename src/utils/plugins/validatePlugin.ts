@@ -139,6 +139,13 @@ const MARKETPLACE_ONLY_MANIFEST_FIELDS = new Set([
   'id',
 ])
 
+export type GatingHookInfo = {
+  module: string
+  pattern: string
+  hook: string
+  hasCatch: boolean
+}
+
 export type ValidationResult = {
   success: boolean
   errors: ValidationError[]
@@ -146,6 +153,7 @@ export type ValidationResult = {
   filePath: string
   fileType: 'plugin' | 'marketplace' | 'skill' | 'agent' | 'command' | 'hooks'
   notes?: string[]
+  gatingHooks?: GatingHookInfo[]
 }
 
 /** densable `n9r`. */
@@ -789,6 +797,280 @@ function validateComponentFile(
   return { success: errors.length === 0, errors, warnings, filePath, fileType }
 }
 
+const NON_GATING_HOOK_EVENTS = new Set<string>([
+  'tool.describe',
+  'prompt.fill',
+  'prompt.suggest',
+  'prompt.edit',
+  'prompt.change',
+  'prompt.autocomplete',
+  'prompt.section',
+  'prompt.context',
+  'prompt.attachment',
+  'prompt.compose',
+  'command.describe',
+  'config.describe',
+  'skill.prompt',
+  'attribution.text',
+  'session.start',
+  'session.attach',
+  'session.detach',
+  'session.measure',
+  'session.end',
+  'turn.start',
+  'turn.step',
+  'turn.complete',
+  'ui.render',
+  'ui.resolve',
+  'ui.press',
+  'ui.input',
+  'ui.select',
+  'ui.message',
+  'ui.fault',
+  'engine.create',
+])
+
+/** Official `R$o` — true when pattern matches at least one gating hook event. */
+export function isGatingHookPattern(pattern: string): boolean {
+  const { FUNCTION_HOOK_EVENTS, functionHookPatternMatches } =
+    require('./functionHooksModules.js') as typeof import('./functionHooksModules.js')
+  if (!pattern.includes('*')) {
+    return !NON_GATING_HOOK_EVENTS.has(pattern)
+  }
+  const matched = FUNCTION_HOOK_EVENTS.filter(ev =>
+    functionHookPatternMatches(pattern, ev),
+  )
+  return (
+    matched.length === 0 || matched.some(ev => !NON_GATING_HOOK_EVENTS.has(ev))
+  )
+}
+
+function tsStringLiteral(
+  ts: typeof import('typescript'),
+  node: import('typescript').Node | undefined,
+): string | undefined {
+  if (!node) return undefined
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return node.text
+  }
+  return undefined
+}
+
+function tsIdentifierUsed(
+  ts: typeof import('typescript'),
+  root: import('typescript').Node,
+  targetName: string,
+): boolean {
+  let used = false
+  const visit = (node: import('typescript').Node): void => {
+    if (used) return
+    if (ts.isIdentifier(node) && node.text === targetName) {
+      const p = node.parent
+      if (
+        p &&
+        ((ts.isPropertyAccessExpression(p) && p.name === node) ||
+          (ts.isPropertyAssignment(p) && p.name === node))
+      ) {
+        // property name, not a value reference
+      } else {
+        used = true
+        return
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(root, visit)
+  return used
+}
+
+function isTsHookFnReachingNext(
+  ts: typeof import('typescript'),
+  fnArg: import('typescript').Node | undefined,
+  namedFns: Map<string, import('typescript').FunctionLikeDeclaration>,
+): boolean {
+  if (!fnArg) return true
+  const fnNode = ts.isIdentifier(fnArg)
+    ? namedFns.get(fnArg.text)
+    : ts.isFunctionExpression(fnArg) || ts.isArrowFunction(fnArg)
+      ? fnArg
+      : undefined
+  if (!fnNode || !fnNode.body) return true
+  const nextParam = fnNode.parameters[2]
+  if (nextParam !== undefined) {
+    if (!ts.isIdentifier(nextParam.name)) return true
+    if (tsIdentifierUsed(ts, fnNode.body, nextParam.name.text)) return true
+  }
+  return tsIdentifierUsed(ts, fnNode.body, 'eval')
+}
+
+function extractTsCommandsFromMatcher(
+  ts: typeof import('typescript'),
+  matcherNode: import('typescript').Node | undefined,
+): string[] {
+  if (!matcherNode || !ts.isObjectLiteralExpression(matcherNode)) return []
+  for (const prop of matcherNode.properties) {
+    if (!ts.isPropertyAssignment(prop)) continue
+    const keyName = ts.isIdentifier(prop.name)
+      ? prop.name.text
+      : tsStringLiteral(ts, prop.name)
+    if (keyName !== 'command') continue
+    const single = tsStringLiteral(ts, prop.initializer)
+    if (single !== undefined) return [single]
+    if (ts.isArrayLiteralExpression(prop.initializer)) {
+      const out: string[] = []
+      for (const el of prop.initializer.elements) {
+        const s = tsStringLiteral(ts, el)
+        if (s !== undefined) out.push(s)
+      }
+      return out
+    }
+  }
+  return []
+}
+
+/**
+ * Official `Yja` / `wQt` AST validator for plugin hook modules:
+ * detects `on(pattern, ...)` registrations, `.catch(...)` wrappers (`ave`),
+ * own-command `command.run` handlers (`_Qt`), and gating hooks (`R$o`).
+ */
+export function analyzeGatingHooksInSource(
+  moduleName: string,
+  source: string,
+  options?: { shippedCommands?: ReadonlySet<string> },
+): {
+  gatingHooks: GatingHookInfo[]
+  ownCommandRegistrations: string[]
+  notes: string[]
+} {
+  let ts: typeof import('typescript')
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    ts = require('typescript') as typeof import('typescript')
+  } catch {
+    return { gatingHooks: [], ownCommandRegistrations: [], notes: [] }
+  }
+
+  const sf = ts.createSourceFile(
+    moduleName,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+  )
+  const namedFns = new Map<
+    string,
+    import('typescript').FunctionLikeDeclaration
+  >()
+  const registeredCommands = new Set<string>()
+  const onCalls: import('typescript').CallExpression[] = []
+
+  const visit = (node: import('typescript').Node): void => {
+    if (ts.isFunctionDeclaration(node) && node.name) {
+      namedFns.set(node.name.text, node)
+    }
+    if (ts.isCallExpression(node)) {
+      const callee = node.expression
+      if (ts.isIdentifier(callee) && callee.text === 'on') {
+        onCalls.push(node)
+      }
+      if (
+        ts.isPropertyAccessExpression(callee) &&
+        callee.name.text === 'register' &&
+        ts.isPropertyAccessExpression(callee.expression) &&
+        callee.expression.name.text === 'command'
+      ) {
+        const arg0 = node.arguments[0]
+        const firstStr = tsStringLiteral(ts, arg0)
+        if (firstStr !== undefined) {
+          registeredCommands.add(firstStr)
+        } else if (arg0 && ts.isObjectLiteralExpression(arg0)) {
+          for (const prop of arg0.properties) {
+            if (
+              ts.isPropertyAssignment(prop) &&
+              ts.isIdentifier(prop.name) &&
+              prop.name.text === 'name'
+            ) {
+              const nameVal = tsStringLiteral(ts, prop.initializer)
+              if (nameVal !== undefined) registeredCommands.add(nameVal)
+            }
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(sf, visit)
+
+  const gatingHooks: GatingHookInfo[] = []
+  const ownCommandRegistrations: string[] = []
+  const notes: string[] = []
+
+  for (const call of onCalls) {
+    const pattern = tsStringLiteral(ts, call.arguments[0])
+    if (pattern === undefined) continue
+
+    const matcherNode =
+      call.arguments.length >= 3 ? call.arguments[1] : undefined
+    const commands =
+      pattern === 'command.run'
+        ? extractTsCommandsFromMatcher(ts, matcherNode)
+        : []
+    const registration =
+      commands.length > 0
+        ? `on("${pattern}", { command: ${commands.map(c => `"${c}"`).join(', ')} })`
+        : `on("${pattern}")`
+
+    // Official `ave`: call.catch(...)
+    const p1 = call.parent
+    const hasCatch =
+      p1 !== undefined &&
+      ts.isPropertyAccessExpression(p1) &&
+      p1.expression === call &&
+      p1.name.text === 'catch'
+
+    const catchCall =
+      hasCatch && p1.parent && ts.isCallExpression(p1.parent)
+        ? p1.parent
+        : undefined
+    const handlerNodes = [
+      ...call.arguments.slice(-1),
+      ...(catchCall ? catchCall.arguments : []),
+    ]
+    const reachesNext = handlerNodes.some(h =>
+      isTsHookFnReachingNext(ts, h, namedFns),
+    )
+
+    const isOwnCommand =
+      pattern === 'command.run' &&
+      !reachesNext &&
+      commands.length > 0 &&
+      commands.every(c => registeredCommands.has(c)) &&
+      !(
+        options?.shippedCommands &&
+        commands.some(c => options.shippedCommands!.has(c))
+      )
+
+    if (isOwnCommand) {
+      ownCommandRegistrations.push(registration)
+      notes.push(`[${moduleName}] answers its own command: ${registration}`)
+      continue
+    }
+
+    if (isGatingHookPattern(pattern)) {
+      gatingHooks.push({
+        module: moduleName,
+        pattern,
+        hook: registration,
+        hasCatch,
+      })
+      notes.push(
+        `[${moduleName}] gating hook ${hasCatch ? 'with' : 'without'} .catch: ${registration}`,
+      )
+    }
+  }
+
+  return { gatingHooks, ownCommandRegistrations, notes }
+}
+
 /**
  * Validate a plugin's hooks.json file. Unlike frontmatter, this one HARD-ERRORS
  * at runtime (pluginLoader uses .parse() not .safeParse()) — a bad hooks.json
@@ -866,12 +1148,49 @@ async function validateHooksJson(filePath: string): Promise<ValidationResult> {
     })
   }
 
+  const notes: string[] = []
+  const gatingHooks: GatingHookInfo[] = []
+  const hooksDir = path.dirname(filePath)
+  const moduleEntries =
+    parsed !== null &&
+    typeof parsed === 'object' &&
+    !Array.isArray(parsed) &&
+    'modules' in parsed
+      ? (parsed as { modules?: Record<string, unknown> }).modules
+      : undefined
+  const modulePaths: Array<[string, string]> = []
+  if (moduleEntries && typeof moduleEntries === 'object') {
+    for (const [modKey, modVal] of Object.entries(moduleEntries)) {
+      if (typeof modVal === 'string') {
+        modulePaths.push([modKey, path.resolve(hooksDir, modVal)])
+      }
+    }
+  }
+  if (modulePaths.length === 0) {
+    modulePaths.push(
+      ['register.ts', path.join(hooksDir, 'register.ts')],
+      ['register.js', path.join(hooksDir, 'register.js')],
+    )
+  }
+  for (const [modName, modFullPath] of modulePaths) {
+    try {
+      const modSrc = await readFile(modFullPath, { encoding: 'utf-8' })
+      const analysis = analyzeGatingHooksInSource(modName, modSrc)
+      notes.push(...analysis.notes)
+      gatingHooks.push(...analysis.gatingHooks)
+    } catch {
+      // Missing or unreadable module handled elsewhere
+    }
+  }
+
   return {
     success: true,
     errors: [],
     warnings,
     filePath,
     fileType: 'hooks',
+    ...(notes.length > 0 && { notes }),
+    ...(gatingHooks.length > 0 && { gatingHooks }),
   }
 }
 
@@ -966,7 +1285,12 @@ export async function validatePluginContents(
   const hooksResult = await validateHooksJson(
     path.join(pluginDir, 'hooks', 'hooks.json'),
   )
-  if (hooksResult.errors.length > 0 || hooksResult.warnings.length > 0) {
+  if (
+    hooksResult.errors.length > 0 ||
+    hooksResult.warnings.length > 0 ||
+    (hooksResult.notes?.length ?? 0) > 0 ||
+    (hooksResult.gatingHooks?.length ?? 0) > 0
+  ) {
     results.push(hooksResult)
   }
 

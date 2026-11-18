@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import { copyFile, writeFile } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
-import { join, resolve, sep } from 'path'
+import { basename, dirname, join, resolve, sep } from 'path'
 import type { AgentId, SessionId } from 'src/types/ids.js'
 import type { LogOption } from 'src/types/logs.js'
 import type {
@@ -23,6 +23,7 @@ import { isENOENT } from './errors.js'
 import { getEnvironmentKind } from './filePersistence/outputsScanner.js'
 import { getFsImplementation } from './fsOperations.js'
 import { logError } from './log.js'
+import { getPlatform } from './platform.js'
 import { getInitialSettings } from './settings/settings.js'
 import { generateWordSlug } from './words.js'
 
@@ -90,10 +91,18 @@ export const getPlansDirectory = memoize(function getPlansDirectory(): string {
     const cwd = getCwd()
     const resolved = resolve(cwd, settingsDir)
 
-    // Validate path stays within project root to prevent path traversal
-    if (!resolved.startsWith(cwd + sep) && resolved !== cwd) {
+    // Validate path stays within project root to prevent path traversal,
+    // and reject backslashes off Windows (gold wl() / cu() check).
+    const hasDisallowedBackslash =
+      getPlatform() !== 'windows' && resolved.includes('\\')
+    if (
+      (!resolved.startsWith(cwd + sep) && resolved !== cwd) ||
+      hasDisallowedBackslash
+    ) {
       logError(
-        new Error(`plansDirectory must be within project root: ${settingsDir}`),
+        new Error(
+          `plansDirectory must be within project root, with no backslash in its path off Windows: ${settingsDir}`,
+        ),
       )
       plansPath = join(getClaudeConfigHomeDir(), 'plans')
     } else {
@@ -136,12 +145,83 @@ export function getPlanFilePath(agentId?: AgentId): string {
  * Get the plan content for a session
  * @param agentId Optional agent ID for subagents. If not provided, returns main session plan.
  */
+/**
+ * #92 SEA `_l` (`planFileCache` @284728500):
+ * Persist and recover plan file contents across cloud session container
+ * restarts before the plan is presented.
+ */
+export type PlanFileBackend = {
+  readText?: (key: string) => Promise<string | null>
+  writeText?: (key: string, content: string) => Promise<void>
+}
+
+let planFileCache: Map<string, string | null> | null = null
+let planFileBackend: PlanFileBackend | null = null
+
+function planCacheKeyForPath(filePath: string): string | null {
+  const plansDir = getPlansDirectory()
+  if (dirname(filePath) !== plansDir) return null
+  return basename(filePath)
+}
+
+export function activatePlanFileCache(backend: PlanFileBackend): void {
+  planFileCache ??= new Map()
+  planFileBackend = backend
+}
+
+export function notePlanFileWritten(filePath: string, content: string): void {
+  const key = planCacheKeyForPath(filePath)
+  if (!key) return
+  planFileCache ??= new Map()
+  planFileCache.set(key, content)
+  if (planFileBackend?.writeText) {
+    void planFileBackend.writeText(key, content).catch(() => {})
+  }
+}
+
+export function notePlanFileForgotten(filePath: string): void {
+  const key = planCacheKeyForPath(filePath)
+  if (!key || !planFileCache) return
+  planFileCache.delete(key)
+}
+
+export async function hydratePlanFromBackend(
+  agentId?: AgentId,
+): Promise<string | null> {
+  const filePath = getPlanFilePath(agentId)
+  const key = planCacheKeyForPath(filePath)
+  if (!key || !planFileBackend?.readText) return null
+  try {
+    const content = await planFileBackend.readText(key)
+    if (typeof content === 'string') {
+      planFileCache ??= new Map()
+      planFileCache.set(key, content)
+      return content
+    }
+  } catch {
+    // ignore backend read error
+  }
+  return null
+}
+
+export function resetPlanFileCacheForTests(): void {
+  planFileCache = null
+  planFileBackend = null
+}
+
 export function getPlan(agentId?: AgentId): string | null {
   const filePath = getPlanFilePath(agentId)
   try {
     return getFsImplementation().readFileSync(filePath, { encoding: 'utf-8' })
   } catch (error) {
-    if (isENOENT(error)) return null
+    if (isENOENT(error)) {
+      const key = planCacheKeyForPath(filePath)
+      const cached = key ? planFileCache?.get(key) : undefined
+      if (typeof cached === 'string') {
+        return cached
+      }
+      return null
+    }
     logError(error)
     return null
   }

@@ -165,6 +165,12 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (args[0] === 'plugin' && args[1] === 'test') {
+    const { pluginTestMain } = await import('../services/plugins/pluginTestRunner.js');
+    process.exitCode = await pluginTestMain(args.slice(2));
+    return;
+  }
+
   if (process.argv[2] === '--eval-mock-server') {
     profileCheckpoint('cli_eval_mock_server_path');
     const { runEvalMockServer } = await import('../utils/plugins/pluginEval/evalMockServer.js');

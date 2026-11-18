@@ -30,6 +30,7 @@ import ignore from 'ignore'
 import memoize from 'lodash-es/memoize.js'
 import { Lexer } from 'marked'
 import { filterCompilableIgnorePatterns } from './ignorePatterns.js'
+import { settingsHaveBlockReadsOutsideWorkingDirectories } from './permissions/outsideReads.js'
 import {
   basename,
   dirname,
@@ -572,6 +573,14 @@ function isClaudeMdExcluded(filePath: string, type: MemoryType): boolean {
   return picomatch.isMatch(normalizedPath, expandedPatterns, matchOpts)
 }
 
+/** official T3 — symlink whose target could not be canonicalized (broken/loop/unresolvable). */
+function isUnresolvedSymlink(resolved: {
+  isSymlink: boolean
+  isCanonical: boolean
+}): boolean {
+  return resolved.isSymlink && !resolved.isCanonical
+}
+
 /**
  * Expands exclude patterns by resolving symlinks in absolute path prefixes.
  * For each absolute pattern (starting with /), tries to resolve the longest
@@ -596,8 +605,14 @@ function resolveExcludePatterns(patterns: string[]): string[] {
     const dirToResolve = dirname(staticPrefix)
 
     try {
-      // sync IO: called from sync context (isClaudeMdExcluded -> processMemoryFile -> getMemoryFiles)
-      const resolvedDir = fs.realpathSync(dirToResolve).replaceAll('\\', '/')
+      const resolved = safeResolvePath(fs, dirToResolve)
+      if (
+        isUnsafeNetworkOrNtIncludePath(resolved.resolvedPath) ||
+        isUnresolvedSymlink(resolved)
+      ) {
+        continue
+      }
+      const resolvedDir = resolved.resolvedPath.replaceAll('\\', '/')
       if (resolvedDir !== dirToResolve) {
         const resolvedPattern =
           resolvedDir + normalized.slice(dirToResolve.length)
@@ -643,12 +658,26 @@ export async function processMemoryFile(
   }
 
   // Resolve symlink path early for @import resolution
-  const { resolvedPath, isSymlink } = safeResolvePath(
-    getFsImplementation(),
-    filePath,
-  )
+  const resolved = safeResolvePath(getFsImplementation(), filePath)
+  const { resolvedPath, isSymlink } = resolved
 
-  if (isUnsafeNetworkOrNtIncludePath(resolvedPath)) {
+  if (
+    isUnsafeNetworkOrNtIncludePath(resolvedPath) ||
+    isUnresolvedSymlink(resolved)
+  ) {
+    return []
+  }
+
+  // official #23 (HMr/outsideReads): when blockReadsOutsideWorkingDirectories is
+  // enabled, refuse symlinked Project/Local/ExperimentalUltraClaudeMd memory files
+  // whose resolved target lies outside the working directories.
+  if (
+    type !== 'User' &&
+    type !== 'Managed' &&
+    isSymlink &&
+    !pathInOriginalCwd(resolvedPath) &&
+    settingsHaveBlockReadsOutsideWorkingDirectories()
+  ) {
     return []
   }
 
@@ -726,10 +755,14 @@ export async function processMdRules({
   try {
     const fs = getFsImplementation()
 
-    const { resolvedPath: resolvedRulesDir, isSymlink } = safeResolvePath(
-      fs,
-      rulesDir,
-    )
+    const resolvedDir = safeResolvePath(fs, rulesDir)
+    const { resolvedPath: resolvedRulesDir, isSymlink } = resolvedDir
+    if (
+      isUnsafeNetworkOrNtIncludePath(resolvedRulesDir) ||
+      isUnresolvedSymlink(resolvedDir)
+    ) {
+      return []
+    }
 
     visitedDirs.add(rulesDir)
     if (isSymlink) {
@@ -750,10 +783,14 @@ export async function processMdRules({
 
     for (const entry of entries) {
       const entryPath = join(rulesDir, entry.name)
-      const { resolvedPath: resolvedEntryPath, isSymlink } = safeResolvePath(
-        fs,
-        entryPath,
-      )
+      const resolvedEntry = safeResolvePath(fs, entryPath)
+      const { resolvedPath: resolvedEntryPath, isSymlink } = resolvedEntry
+      if (
+        isUnsafeNetworkOrNtIncludePath(resolvedEntryPath) ||
+        isUnresolvedSymlink(resolvedEntry)
+      ) {
+        continue
+      }
 
       // Use Dirent methods for non-symlinks to avoid extra stat calls.
       // For symlinks, we need stat to determine what the target is.
@@ -1181,10 +1218,23 @@ export async function directoryHasAgentsMd(dir: string): Promise<boolean> {
   try {
     const fs = getFsImplementation()
     const resolved = safeResolvePath(fs, filePath)
-    if (isUnsafeNetworkOrNtIncludePath(resolved.resolvedPath)) {
+    if (
+      isUnsafeNetworkOrNtIncludePath(resolved.resolvedPath) ||
+      isUnresolvedSymlink(resolved)
+    ) {
+      return false
+    }
+    if (
+      resolved.isSymlink &&
+      !pathInOriginalCwd(resolved.resolvedPath) &&
+      settingsHaveBlockReadsOutsideWorkingDirectories()
+    ) {
       return false
     }
     const stats = fs.lstatSync(filePath)
+    if (stats.isSymbolicLink() && !resolved.isCanonical) {
+      return false
+    }
     return stats.isFile() || stats.isSymbolicLink()
   } catch {
     return false

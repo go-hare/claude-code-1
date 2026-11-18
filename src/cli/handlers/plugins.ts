@@ -1165,3 +1165,22 @@ export async function pluginUpdateHandler(
     acceptCommand: options.acceptCommand,
   })
 }
+
+export {
+  CHILD_ARGV_LENGTH,
+  LATE_TURNS,
+  PLUGIN_TEST_USAGE,
+  REPORT_MARK,
+  discoverPluginTestFiles,
+  formatTestFileReport,
+  formatTestStack,
+  isTeardownError,
+  parseChildReport,
+  pluginTestFormOf,
+  pluginTestMain,
+  runChild,
+  runPluginTestFiles,
+  type PluginTestCaseResult,
+  type PluginTestFileReport,
+  type PluginTestForm,
+} from '../../services/plugins/pluginTestRunner.js'

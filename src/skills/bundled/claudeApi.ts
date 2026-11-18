@@ -114,6 +114,7 @@ export const CLAUDE_API_SUBCOMMANDS = [
   'cost-optimize',
   'migrate',
   'managed-agents-onboard',
+  'managed-agents-secure',
   'prompt-audit',
   'upgrade',
   'build-eval',
@@ -147,6 +148,7 @@ export function buildClaudeApiPrompt(
   args: string,
   content: SkillContent,
   extracted: boolean,
+  securityCheckAvailable = true,
 ): string {
   const parts: string[] = [
     processSkillMarkdown(
@@ -155,17 +157,42 @@ export function buildClaudeApiPrompt(
     ).trimEnd(),
   ]
 
+  const subcommand = matchSubcommand(args)
+
   if (!extracted) {
+    const liveSources = processSkillMarkdown(
+      content.SKILL_FILES['shared/live-sources.md'] ?? '',
+      content.SKILL_MODEL_VARS,
+    )
+      .trim()
+      .replace(/^(\|[^|\n]*\|[^|\n]*\|)[^|\n]*\|[ \t]*$/gm, '$1')
     parts.push(`## Reference Files Unavailable
 
-This skill's reference files could not be written to disk for this session, so the \`{lang}/…\`, \`shared/…\`, and \`curl/…\` files cited above cannot be Read. Do not guess their contents — WebFetch the matching URL from \`shared/live-sources.md\`, included below, whenever the Reading Guide points at one of those files. If a cited \`shared/…\` file has no matching URL below (skill-authored guides such as \`shared/prompt-audit.md\`, \`shared/agent-design.md\`, \`shared/platform-availability.md\`), state that the reference is unavailable this session and proceed best-effort from this document.
+This skill's reference files could not be written to disk for this session, so the \`{lang}/…\`, \`shared/…\`, and \`curl/…\` files cited above cannot be Read. Do not guess their contents — fetch the matching URL from \`shared/live-sources.md\`, included below, whenever the Reading Guide points at one of those files. If a cited \`shared/…\` file has no matching URL below (skill-authored guides such as \`shared/prompt-audit.md\`, \`shared/agent-design.md\`, \`shared/platform-availability.md\`), state that the reference is unavailable this session and proceed best-effort from this document.
 
 <doc path="shared/live-sources.md">
-${processSkillMarkdown(content.SKILL_FILES['shared/live-sources.md'] ?? '', content.SKILL_MODEL_VARS).trim()}
+${liveSources}
 </doc>`)
+    if (subcommand === 'managed-agents-secure' || subcommand === 'none') {
+      parts.push(
+        '## Security Comparison Unavailable\n\nThe `managed-agents-secure` command follows a guide from the reference files, which are not on disk this session. If the request is for it, say that it is unavailable and stop: do not run `ant` commands or check the deployment by hand.',
+      )
+    }
+    parts.push(
+      "## Onboarding From a URL Unavailable\n\nSetting up an agent from a page (`managed-agents-onboard <url>`, or a request in plain words to copy a setup from a cookbook, post or docs page) follows `shared/managed-agents-onboarding-from-url.md`, which isn't available this session. If the request is for that, tell the user it isn't possible right now because the skill's files couldn't be saved and that running `/claude-api` again will retry saving them, then stop without fetching the page or writing any files.",
+    )
+  } else if (!securityCheckAvailable) {
+    parts.push(
+      '## Security Comparison Unavailable\n\nClaude Code cannot check the `ant` commands of `managed-agents-secure` in this session. If the request is for it, say that it is unavailable in this session and stop: do not run its `ant` commands or check the deployment by hand.',
+    )
   }
 
-  if (lang) {
+  const securityHint =
+    subcommand === 'none'
+      ? `If the request is to compare a Managed Agents deployment with the published security guide, none is needed: ${securityCheckAvailable && extracted ? 'follow the `managed-agents-secure` row in the Managed Agents section above' : 'see Security Comparison Unavailable above'}. Otherwise, ask the user which language they are using (see Language Detection above)`
+      : 'Ask the user which language they are using (see Language Detection above)'
+
+  if (lang && !(!extracted && subcommand === 'managed-agents-onboard')) {
     const readmePath = `${lang}/claude-api/README.md`
     const readme = content.SKILL_FILES[readmePath]
     if (readme) {
@@ -180,16 +207,29 @@ ${processSkillMarkdown(content.SKILL_FILES['shared/live-sources.md'] ?? '', cont
 ${processSkillMarkdown(readme, content.SKILL_MODEL_VARS).trim()}
 </doc>`)
     }
-  } else if (matchSubcommand(args) !== 'prompt-audit') {
+  } else if (lang) {
+    parts.push(`## Detected Language: ${lang}`)
+  } else if (
+    subcommand !== 'prompt-audit' &&
+    subcommand !== 'managed-agents-secure'
+  ) {
     parts.push(
       extracted
-        ? 'No project language was auto-detected. Ask the user which language they are using (see Language Detection above), then Read the matching `{lang}/claude-api/README.md` (or `curl/examples.md` for cURL/raw HTTP or an unsupported language) from the base directory before anything else.'
-        : 'No project language was auto-detected. Ask the user which language they are using (see Language Detection above) before writing code.',
+        ? `No project language was auto-detected. ${securityHint}, then Read the matching \`{lang}/claude-api/README.md\` (or \`curl/examples.md\` for cURL/raw HTTP or an unsupported language) from the base directory before anything else.`
+        : `No project language was auto-detected. ${securityHint} before writing code.`,
     )
   }
 
+  const shouldQuote =
+    subcommand === 'managed-agents-onboard' ||
+    !/^[ -~]*$/.test(args) ||
+    /[#`~<]|:\/\//.test(args)
   if (args) {
-    parts.push(`## User Request\n\n${args}`)
+    const body = shouldQuote
+      ? // biome-ignore lint/suspicious/noControlCharactersInRegex: split on control chars for markdown quoting
+        `> ${args.split(/\r\n|[\0-\x08\n-\x1f\x7f-\x9f\u2028\u2029]/).join('\n> ')}`
+      : args
+    parts.push(`## User Request\n\n${body}`)
   }
 
   return parts.join('\n\n')

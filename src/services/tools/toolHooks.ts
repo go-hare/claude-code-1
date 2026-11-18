@@ -645,6 +645,7 @@ export async function resolveHookPermissionDecision(
       tool,
       hookInput,
       toolUseContext,
+      { crashIsObjection: true },
     )
     if (ruleCheck === null) {
       const effectiveMode = getEffectivePermissionMode(

@@ -93,6 +93,50 @@ function getErrorMessage(
   return String(errorCode)
 }
 
+function isErrnoError(err: unknown): err is {
+  errno: number
+  code?: string
+  syscall?: string
+  message?: string
+} {
+  return (
+    err !== null &&
+    typeof err === 'object' &&
+    'errno' in err &&
+    typeof (err as { errno: unknown }).errno === 'number'
+  )
+}
+
+/**
+ * Official Sn(result, spawnError) — when execa fails to spawn (e.g. ENOENT)
+ * under `reject: false`, surface the captured child_process `error` event's
+ * code/syscall/message instead of generic "Premature close".
+ */
+export function formatSpawnError(
+  result: {
+    exitCode?: number
+    timedOut?: boolean
+    isCanceled?: boolean
+    command?: string
+    code?: string
+  },
+  spawnError: unknown,
+): string | undefined {
+  if (
+    !isErrnoError(spawnError) ||
+    spawnError.code === undefined ||
+    typeof spawnError.syscall !== 'string' ||
+    !spawnError.syscall.startsWith('spawn') ||
+    result.exitCode !== undefined ||
+    result.timedOut ||
+    result.isCanceled ||
+    result.code === spawnError.code
+  ) {
+    return undefined
+  }
+  return `Command failed with ${spawnError.code}: ${result.command}\n${spawnError.message}`
+}
+
 /**
  * execFile, but always resolves (never throws)
  */
@@ -118,8 +162,9 @@ export function execFileNoThrowWithCwd(
   },
 ): Promise<{ stdout: string; stderr: string; code: number; error?: string }> {
   return new Promise(resolve => {
+    let spawnError: unknown
     // Use execa for cross-platform .bat/.cmd compatibility on Windows
-    execa(file, args, {
+    const child = execa(file, args, {
       maxBuffer,
       cancelSignal: abortSignal,
       timeout: finalTimeout,
@@ -134,6 +179,10 @@ export function execFileNoThrowWithCwd(
       ...(finalStripFinalNewline === false ? { stripFinalNewline: false } : {}),
       reject: false, // Don't throw on non-zero exit codes
     })
+    child.once('error', err => {
+      spawnError = err
+    })
+    child
       .then(result => {
         if (result.failed) {
           if (finalPreserveOutput) {
@@ -142,10 +191,21 @@ export function execFileNoThrowWithCwd(
               stdout: result.stdout || '',
               stderr: result.stderr || '',
               code: errorCode,
-              error: getErrorMessage(
-                result as unknown as ExecaResultWithError,
-                errorCode,
-              ),
+              error:
+                formatSpawnError(
+                  result as unknown as {
+                    exitCode?: number
+                    timedOut?: boolean
+                    isCanceled?: boolean
+                    command?: string
+                    code?: string
+                  },
+                  spawnError,
+                ) ??
+                getErrorMessage(
+                  result as unknown as ExecaResultWithError,
+                  errorCode,
+                ),
             })
           } else {
             void resolve({ stdout: '', stderr: '', code: result.exitCode ?? 1 })

@@ -52,14 +52,22 @@ export const SEED_GIT_FE = Object.freeze([
   'core.fsmonitor=',
 ] as const)
 
-/** densable `$r` */
+/** densable `$r` / `Ss` */
 export const SEED_GIT_HARDENED_C = Object.freeze([
   '-c',
   'submodule.recurse=false',
   '-c',
+  'core.safecrlf=false',
+  '-c',
   'core.commitGraph=false',
   '-c',
   'core.multiPackIndex=false',
+  '-c',
+  'pack.useBitmaps=false',
+  '-c',
+  'pack.readReverseIndex=false',
+  '-c',
+  'core.useReplaceRefs=false',
 ] as const)
 
 /** densable `Hr` */

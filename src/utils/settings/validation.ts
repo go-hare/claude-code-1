@@ -289,3 +289,94 @@ export function filterInvalidPermissionRules(
   }
   return warnings
 }
+
+/**
+ * official iy / qr — withhold grants in a block when a restriction in the
+ * same block is unreadable or had invalid entries trimmed.
+ * Handles sandbox.network (deniedDomains → allowedDomains) and
+ * sandbox.filesystem (denyWrite/denyRead → allowWrite/allowRead).
+ */
+export function filterAndWithholdSandboxRestrictions(
+  data: unknown,
+  filePath: string,
+): ValidationError[] {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return []
+  const root = data as Record<string, unknown>
+  if (
+    !root.sandbox ||
+    typeof root.sandbox !== 'object' ||
+    Array.isArray(root.sandbox)
+  ) {
+    return []
+  }
+  const sandbox = root.sandbox as Record<string, unknown>
+  const warnings: ValidationError[] = []
+
+  const blocks: Array<{
+    blockName: 'network' | 'filesystem'
+    restrictions: string[]
+    grants: string[]
+  }> = [
+    {
+      blockName: 'network',
+      restrictions: ['deniedDomains'],
+      grants: ['allowedDomains'],
+    },
+    {
+      blockName: 'filesystem',
+      restrictions: ['denyWrite', 'denyRead'],
+      grants: ['allowWrite', 'allowRead'],
+    },
+  ]
+
+  for (const { blockName, restrictions, grants } of blocks) {
+    const block = sandbox[blockName]
+    if (!block || typeof block !== 'object' || Array.isArray(block)) continue
+    const blockObj = block as Record<string, unknown>
+    const badReasons: string[] = []
+
+    for (const key of restrictions) {
+      if (!(key in blockObj) || blockObj[key] === undefined) continue
+      const val = blockObj[key]
+      if (!Array.isArray(val)) {
+        badReasons.push(`"${key}"`)
+        delete blockObj[key]
+        warnings.push({
+          file: filePath,
+          path: `sandbox.${blockName}.${key}`,
+          message: `"${key}" was not an array and was ignored.`,
+          invalidValue: val,
+        })
+        continue
+      }
+      const validEntries = val.filter(
+        (entry): entry is string =>
+          typeof entry === 'string' && entry.length > 0,
+      )
+      if (validEntries.length < val.length) {
+        badReasons.push(`an entry of "${key}"`)
+        blockObj[key] = validEntries
+        warnings.push({
+          file: filePath,
+          path: `sandbox.${blockName}.${key}`,
+          message: `Invalid entry in "${key}" was ignored.`,
+        })
+      }
+    }
+
+    if (badReasons.length === 0) continue
+    const because = badReasons.join(' and ')
+    for (const grantKey of grants) {
+      if (blockObj[grantKey] === undefined) continue
+      delete blockObj[grantKey]
+      warnings.push({
+        file: filePath,
+        path: `sandbox.${blockName}.${grantKey}`,
+        message: `"${grantKey}" was withheld because ${because} in the same block could not be read; it takes effect again once that is fixed.`,
+        severity: 'warning',
+      })
+    }
+  }
+
+  return warnings
+}

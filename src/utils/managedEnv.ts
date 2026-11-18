@@ -7,6 +7,7 @@ import {
   isHostTransportSensitiveEnvVar,
   isProviderManagedEnvVar,
   isSafeManagedEnv,
+  stripProjectScopeBlockedEnv,
 } from './managedEnvConstants.js'
 import { clearMTLSCache } from './mtls.js'
 import { clearProxyCache, configureGlobalAgents } from './proxy.js'
@@ -556,10 +557,16 @@ function filterSettingsEnv(
   env: Record<string, string> | undefined,
   source = 'settings',
 ): Record<string, string> {
-  // densable N first in the gold filter chain (project/local vyr keys).
+  // densable N first in the gold filter chain (project/local vyr keys),
+  // followed by SEA Q() PROJECT_SCOPE_BLOCKED_ENV_VARS stripping.
   return withoutCcdSpawnEnvKeys(
     withoutHostManagedProviderVars(
-      withoutSSHTunnelVars(stripProjectScopedTracingEnv(env, source)),
+      withoutSSHTunnelVars(
+        stripProjectScopeBlockedEnv(
+          stripProjectScopedTracingEnv(env, source),
+          source,
+        ),
+      ),
       source,
     ),
   )

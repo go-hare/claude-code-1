@@ -457,6 +457,16 @@ export function registerCliHostCommands(
       },
     )
 
+  pluginCmd
+    .command('test [dir]', { hidden: true })
+    .description("Run a mod's tests under dir")
+    .action(async (dir?: string) => {
+      const { pluginTestMain } = await import(
+        '../services/plugins/pluginTestRunner.js'
+      )
+      process.exitCode = await pluginTestMain(dir ? [dir] : [])
+    })
+
   const pluginEvalCmd = pluginCmd
     .command('eval [target]')
     .description(describe(['plugin', 'eval']))

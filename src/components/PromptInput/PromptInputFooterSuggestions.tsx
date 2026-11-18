@@ -1,6 +1,7 @@
-import { memo, type ReactNode, useState } from 'react';
+import { memo, type ReactNode, useContext, useState } from 'react';
+import figures from 'figures';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { Box, type ClickEvent, Text, stringWidth } from '@anthropic/ink';
+import { AccessibilityContext, Box, type ClickEvent, Text, stringWidth } from '@anthropic/ink';
 import { truncatePathMiddle, truncateToWidth } from '../../utils/format.js';
 import { truncateStartToWidth, truncateToWidthNoEllipsis } from '../../utils/truncate.js';
 import type { Theme } from '../../utils/theme.js';
@@ -72,7 +73,11 @@ const SuggestionItemRow = memo(function SuggestionItemRow({
   allowWrap?: boolean;
 }): ReactNode {
   const columns = useTerminalSize().columns;
+  const isScreenReader = useContext(AccessibilityContext);
   const isUnified = isUnifiedSuggestion(item.id);
+  const isEmoji = item.id.startsWith('emoji:');
+  const pointer = isScreenReader && !isEmoji ? '' : isSelected ? `${figures.pointer} ` : '  ';
+  const pointerWidth = stringWidth(pointer);
 
   // For unified suggestions (file, mcp-resource, mcp-template, agent), use single-line layout with icon
   if (isUnified) {
@@ -86,7 +91,7 @@ const SuggestionItemRow = memo(function SuggestionItemRow({
     const isMcpTemplate = item.id.startsWith('mcp-template::');
 
     // Calculate layout widths
-    // Layout: "X " (2) + displayText + " – " (3) + description + padding (4)
+    // Layout: pointer + "X " (2) + displayText + " – " (3) + description + padding (4)
     const iconWidth = 2; // icon + space (fixed)
     const paddingWidth = 4;
     const separatorWidth = item.description ? 3 : 0; // ' – ' separator
@@ -98,7 +103,7 @@ const SuggestionItemRow = memo(function SuggestionItemRow({
     if (isFile || isMcpTemplate || isMcpTemplateValue) {
       // Reserve space for description if present, otherwise use all available space
       const descReserve = item.description ? Math.min(20, stringWidth(item.description)) : 0;
-      const maxPathLength = columns - iconWidth - paddingWidth - separatorWidth - descReserve;
+      const maxPathLength = columns - pointerWidth - iconWidth - paddingWidth - separatorWidth - descReserve;
       displayText = isFile
         ? truncatePathMiddle(item.displayText, maxPathLength)
         : isMcpTemplateValue
@@ -111,16 +116,17 @@ const SuggestionItemRow = memo(function SuggestionItemRow({
       displayText = item.displayText;
     }
 
-    const availableWidth = columns - iconWidth - stringWidth(displayText) - separatorWidth - paddingWidth;
+    const availableWidth =
+      columns - pointerWidth - iconWidth - stringWidth(displayText) - separatorWidth - paddingWidth;
 
     // Build the full line as a single string to prevent wrapping
     let lineContent: string;
     if (item.description) {
       const maxDescLength = Math.max(0, availableWidth);
       const truncatedDesc = truncateToWidth(item.description.replace(/\s+/g, ' '), maxDescLength);
-      lineContent = `${icon} ${displayText} – ${truncatedDesc}`;
+      lineContent = `${pointer}${icon} ${displayText} – ${truncatedDesc}`;
     } else {
-      lineContent = `${icon} ${displayText}`;
+      lineContent = `${pointer}${icon} ${displayText}`;
     }
 
     return (
@@ -138,22 +144,18 @@ const SuggestionItemRow = memo(function SuggestionItemRow({
 
   const textColor = item.color || (isSelected ? 'suggestion' : undefined);
   const shouldDim = !isSelected;
-  // densable: emoji: id rows get pointer + bold when selected
-  const isEmoji = item.id.startsWith('emoji:');
-  // densable Ge.pointer = '❯' (❯) when selected, two spaces when not
-  const emojiPointer = isEmoji ? (isSelected ? '❯ ' : '  ') : '';
-  const emojiPointerWidth = stringWidth(emojiPointer);
   const nameBold = isEmoji && isSelected;
 
   // Truncate and pad the display text to fixed width
+  const maxTextWidth = displayTextWidth - 2 - (hasTrailing && !isEmoji ? pointerWidth : 0);
   let displayText = item.displayText;
-  if (stringWidth(displayText) > displayTextWidth - 2) {
+  if (stringWidth(displayText) > maxTextWidth) {
     displayText =
       displayText.includes('/') || displayText.includes('\\')
-        ? truncatePathMiddle(displayText, displayTextWidth - 2)
-        : truncateToWidth(displayText, displayTextWidth - 2);
+        ? truncatePathMiddle(displayText, maxTextWidth)
+        : truncateToWidth(displayText, maxTextWidth);
   }
-  const padSpaces = ' '.repeat(Math.max(0, displayTextWidth - stringWidth(displayText) - emojiPointerWidth));
+  const padSpaces = ' '.repeat(Math.max(0, displayTextWidth - stringWidth(displayText) - pointerWidth));
 
   const tagText = item.tag ? `[${item.tag}] ` : '';
   const tagWidth = stringWidth(tagText);
@@ -173,9 +175,9 @@ const SuggestionItemRow = memo(function SuggestionItemRow({
 
   const mainLine = (
     <Text wrap="truncate">
-      {emojiPointer ? (
+      {pointer ? (
         <Text color={textColor} dimColor={shouldDim} bold={nameBold}>
-          {emojiPointer}
+          {pointer}
         </Text>
       ) : null}
       {/* densable wZt — name column: match bold, not recolor */}

@@ -270,7 +270,34 @@ function getUserSnapshotContent(configFile: string): string {
  * Generates Claude Code specific snapshot content
  * This content is always included regardless of user configuration
  */
-async function getClaudeCodeSnapshotContent(): Promise<string> {
+/**
+ * #93 SEA `wkt` (@292212895): append plugin bin/ directories to PATH while
+ * dropping any entry that contains the PATH delimiter or is already present.
+ */
+export function appendPluginBinPathsToPath(
+  basePath: string | undefined,
+  pluginBinPaths: readonly string[],
+  delimiter: string,
+): { appended: string[]; path: string } {
+  const existing = new Set((basePath ?? '').split(delimiter))
+  const appended = pluginBinPaths.filter(p => {
+    if (p.includes(delimiter)) {
+      logForDebugging(
+        `Dropping plugin bin path that holds the PATH delimiter: ${p}`,
+      )
+      return false
+    }
+    return !existing.has(p)
+  })
+  return {
+    appended,
+    path: [basePath, ...appended].filter(Boolean).join(delimiter),
+  }
+}
+
+async function getClaudeCodeSnapshotContent(
+  pluginBinPaths: readonly string[] = [],
+): Promise<string> {
   // Get the appropriate PATH based on platform
   let pathValue = process.env.PATH
   if (getPlatform() === 'windows') {
@@ -342,11 +369,17 @@ ${pkillGuard}
 PKILL_FUNC_END
     `
 
+  const { path: finalPathValue } = appendPluginBinPathsToPath(
+    pathValue,
+    pluginBinPaths,
+    ':',
+  )
+
   // Add PATH to the file
   content += `
 
       # Add PATH to the file
-      echo "export PATH=${quote([pathValue || ''])}" >> "$SNAPSHOT_FILE"
+      echo "export PATH=${quote([finalPathValue || ''])}" >> "$SNAPSHOT_FILE"
   `
 
   return content
@@ -391,6 +424,7 @@ async function getSnapshotScript(
   shellPath: string,
   snapshotFilePath: string,
   configFileExists: boolean,
+  pluginBinPaths: readonly string[] = [],
 ): Promise<string> {
   const configFile = getConfigFile(shellPath)
   const isZsh = configFile.endsWith('.zshrc')
@@ -402,7 +436,7 @@ async function getSnapshotScript(
       ? // we need to manually force alias expansion in bash - normally `getUserSnapshotContent` takes care of this
         'echo "shopt -s expand_aliases" >> "$SNAPSHOT_FILE"'
       : ''
-  const claudeCodeContent = await getClaudeCodeSnapshotContent()
+  const claudeCodeContent = await getClaudeCodeSnapshotContent(pluginBinPaths)
 
   const script = `SNAPSHOT_FILE=${quote([snapshotFilePath])}
       ${configFileExists ? `source "${configFile}" < /dev/null` : '# No user config file to source'}
@@ -457,6 +491,7 @@ async function getSnapshotScript(
  */
 export const createAndSaveSnapshot = async (
   binShell: string,
+  pluginBinPaths: readonly string[] = [],
 ): Promise<string | undefined> => {
   const shellType = binShell.includes('zsh')
     ? 'zsh'
@@ -496,6 +531,7 @@ export const createAndSaveSnapshot = async (
         binShell,
         shellSnapshotPath,
         configFileExists,
+        pluginBinPaths,
       )
       logForDebugging(`Creating snapshot at: ${shellSnapshotPath}`)
       logForDebugging(`Execution timeout: ${SNAPSHOT_CREATION_TIMEOUT}ms`)

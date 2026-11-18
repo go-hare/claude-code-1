@@ -1,5 +1,6 @@
 import type { Base64ImageSource } from '@anthropic-ai/sdk/resources/index.mjs'
-import { readdir, readFile as readFileAsync } from 'fs/promises'
+import { constants as fsConstants } from 'fs'
+import { lstat, open, readdir, readFile as readFileAsync } from 'fs/promises'
 import * as path from 'path'
 import { posix, win32 } from 'path'
 import { z } from 'zod/v4'
@@ -557,7 +558,7 @@ export const FileReadTool = buildTool({
     ) {
       return {
         result: false,
-        message: `This tool cannot read binary files. The file appears to be a binary ${ext} file. Please use appropriate tools for binary file analysis.`,
+        message: `This tool cannot read binary files. The file appears to be a binary ${ext} file. Use a skill for this file type if one is available, or a shell command or script that can read the format.`,
         errorCode: 4,
       }
     }
@@ -1286,16 +1287,56 @@ function countCharInStringLocal(s: string, ch: string): number {
  * @param maxTokens - Maximum token budget for the image
  * @returns Image data with appropriate compression applied
  */
+/**
+ * SEA `readFileBytes` / `readFileFdGated` (#44): open with `O_NOFOLLOW | O_NONBLOCK`
+ * (and `lstat().isFile()` on Windows) so a symlink swapped in after path
+ * resolution cannot be followed on read.
+ */
+async function readImageBytesNoFollow(
+  filePath: string,
+  maxBytes?: number,
+): Promise<Buffer> {
+  if (process.platform === 'win32') {
+    if (!(await lstat(filePath)).isFile()) {
+      return Buffer.alloc(0)
+    }
+  }
+  const flags =
+    process.platform === 'win32'
+      ? fsConstants.O_RDONLY
+      : fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK
+  const handle = await open(filePath, flags)
+  try {
+    const st = await handle.stat()
+    if (!st.isFile()) {
+      return Buffer.alloc(0)
+    }
+    if (maxBytes === undefined) {
+      return await handle.readFile()
+    }
+    const chunks: Buffer[] = []
+    let total = 0
+    const buf = Buffer.allocUnsafe(Math.min(65536, Math.max(1, maxBytes)))
+    while (total < maxBytes) {
+      const toRead = Math.min(buf.length, maxBytes - total)
+      const { bytesRead } = await handle.read(buf, 0, toRead, total)
+      if (bytesRead === 0) break
+      chunks.push(Buffer.from(buf.subarray(0, bytesRead)))
+      total += bytesRead
+    }
+    return Buffer.concat(chunks, total)
+  } finally {
+    await handle.close()
+  }
+}
+
 export async function readImageWithTokenBudget(
   filePath: string,
   maxTokens: number = getDefaultFileReadingLimits().maxTokens,
   maxBytes?: number,
 ): Promise<ImageResult> {
-  // Read file ONCE — capped to maxBytes to avoid OOM on huge files
-  const imageBuffer = await getFsImplementation().readFileBytes(
-    filePath,
-    maxBytes,
-  )
+  // Read file ONCE with O_NOFOLLOW — capped to maxBytes to avoid OOM on huge files
+  const imageBuffer = await readImageBytesNoFollow(filePath, maxBytes)
   const originalSize = imageBuffer.length
 
   if (originalSize === 0) {

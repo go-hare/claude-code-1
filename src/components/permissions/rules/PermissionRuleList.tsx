@@ -209,10 +209,10 @@ function RulesTabContent(props: RulesTabContentProps): React.ReactNode {
   } = props;
   const tabWidth = useTabsWidth();
   const { headerFocused, focusHeader, blurHeader } = useTabHeaderFocus();
-  useEffect(() => {
-    if (isSearchMode && headerFocused) blurHeader();
-  }, [isSearchMode, headerFocused, blurHeader]);
   const containerRef = useRef<DOMElement | null>(null);
+  useEffect(() => {
+    if (isSearchMode && headerFocused) blurHeader(containerRef.current);
+  }, [isSearchMode, headerFocused, blurHeader]);
   useFocusReclaim(containerRef, isSearchMode);
   useEffect(() => {
     onHeaderFocusChange?.(headerFocused);

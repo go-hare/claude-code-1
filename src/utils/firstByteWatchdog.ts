@@ -252,3 +252,54 @@ async function dispatchWithFirstByteTimeout(
     clearInterval(interval)
   }
 }
+
+export type StreamSuspendClock = {
+  monotonicNow: () => number
+  now: () => number
+}
+
+/**
+ * Official Mg(clock, { armedAt, wallArmedAt, idleMs }) — detect when a
+ * streamIdleTimer fired across a system sleep/suspend.
+ */
+export function detectStreamSuspend(
+  clock: StreamSuspendClock,
+  {
+    armedAt,
+    wallArmedAt,
+    idleMs,
+  }: { armedAt: number; wallArmedAt: number; idleMs: number },
+): { lateMs: number; sleptMs: number; suspended: boolean } {
+  const monoNow = clock.monotonicNow()
+  const wallNow = clock.now()
+  const lateMs = Math.round(monoNow - armedAt - idleMs)
+  const sleptMs = Math.max(
+    0,
+    Math.round(wallNow - wallArmedAt - (monoNow - armedAt)),
+  )
+  const suspended = lateMs < -idleMs / 2 && sleptMs > idleMs / 2
+  return { lateMs, sleptMs, suspended }
+}
+
+/**
+ * Official Zua(clock, opts) — returns StreamSuspendedError if the idle timer
+ * fired across system sleep/suspend, otherwise undefined.
+ */
+export function checkStreamIdleSuspend(
+  clock: StreamSuspendClock,
+  opts: { armedAt: number; wallArmedAt: number; idleMs: number },
+): StreamSuspendedError | undefined {
+  try {
+    const { lateMs, sleptMs, suspended } = detectStreamSuspend(clock, opts)
+    if (!suspended) {
+      return undefined
+    }
+    logForDebugging(
+      `Streaming idle timer fired across sleep/suspend: late=${lateMs}ms slept=${sleptMs}ms, aborting stream`,
+      { level: 'warn' },
+    )
+    return new StreamSuspendedError(sleptMs)
+  } catch {
+    return undefined
+  }
+}

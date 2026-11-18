@@ -15,7 +15,8 @@
 import { feature } from 'bun:bundle'
 import axios from 'axios'
 import { randomUUID } from 'crypto'
-import { readFile } from 'fs/promises'
+import { constants } from 'fs'
+import { open } from 'fs/promises'
 import { basename, extname } from 'path'
 import { z } from 'zod/v4'
 
@@ -26,6 +27,7 @@ import {
 import { getOauthConfig } from 'src/constants/oauth.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
+import { getPlatform } from 'src/utils/platform.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 
 // Matches the private_api backend limit
@@ -112,7 +114,25 @@ export async function uploadBriefAttachment(
 
     let content: Buffer
     try {
-      content = await readFile(fullPath)
+      const platform = getPlatform()
+      const flags =
+        platform === 'windows'
+          ? constants.O_RDONLY
+          : constants.O_RDONLY |
+            (constants.O_NOFOLLOW ?? 0) |
+            (constants.O_NONBLOCK ?? 0) |
+            (constants.O_NOCTTY ?? 0)
+      const handle = await open(fullPath, flags)
+      try {
+        const st = await handle.stat({ bigint: true })
+        if (!st.isFile()) {
+          debug(`skip ${fullPath}: not a regular file`)
+          return undefined
+        }
+        content = await handle.readFile()
+      } finally {
+        await handle.close().catch(() => {})
+      }
     } catch (e) {
       debug(`read failed for ${fullPath}: ${e}`)
       return undefined

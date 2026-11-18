@@ -1643,6 +1643,37 @@ async function* queryLoop(
       let refusalFallbackPreferenceChoice:
         | import('./utils/printRequestDialog.js').RefusalFallbackResult
         | undefined
+      // Official B3s / KSa carriedEffort loop state + turn-start latch reconciliation
+      let refusalFallbackEffort:
+        | { model: string; level: 'low' | 'medium' | 'high' | 'xhigh' | 'max' }
+        | undefined
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const {
+          getRefusalFallbackModelLatch,
+          getMainLoopModelOverride,
+          clearCarriedEffortFromLatch,
+        } =
+          require('./bootstrap/state.js') as typeof import('./bootstrap/state.js')
+        const latch = getRefusalFallbackModelLatch()
+        if (latch?.carriedEffort !== undefined) {
+          const killed = getFeatureValue_CACHED_MAY_BE_STALE(
+            'tengu_loggia_passage',
+            false,
+          )
+          const override = getMainLoopModelOverride()
+          if (killed) {
+            clearCarriedEffortFromLatch('kill_switch')
+          } else if (
+            override == null ||
+            override.toLowerCase() !== latch.fallbackModel.toLowerCase()
+          ) {
+            clearCarriedEffortFromLatch('model_change')
+          }
+        }
+      } catch {
+        // carriedEffort reconciliation optional
+      }
 
       // densable 2.1.222 #6 — Br/To capture + ARd clear once per query API loop
       // (main/subagent only). Stamps set by MCP tool call; cost attrs only for
@@ -1858,6 +1889,9 @@ async function* queryLoop(
                       }),
                       ...(refusalFallbackPreferencePending && {
                         refusalFallbackPreferencePending: true,
+                      }),
+                      ...(refusalFallbackEffort?.model === currentModel && {
+                        refusalFallbackEffort: refusalFallbackEffort.level,
                       }),
                     }
                   } catch {
@@ -2632,6 +2666,27 @@ async function* queryLoop(
                 leftoverStampTurnEffort(switchTo)
                 attemptWithFallback = true
 
+                // Official B3s carriedEffort — latch on main conversation or carry in loop
+                const carriedFromError = (
+                  innerError as {
+                    carriedEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+                  }
+                ).carriedEffort
+                const carriedLevel =
+                  carriedFromError ??
+                  (refusalFallbackEffort?.model === currentModel
+                    ? refusalFallbackEffort.level
+                    : undefined)
+                const heldBySession = !toolUseContext.agentId
+                if (heldBySession) {
+                  refusalFallbackEffort = undefined
+                } else if (carriedLevel !== undefined) {
+                  refusalFallbackEffort = {
+                    model: switchTo,
+                    level: carriedLevel,
+                  }
+                }
+
                 // Official BMg densable — rebind AppState + latch previous models.
                 try {
                   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -2655,7 +2710,16 @@ async function* queryLoop(
                     previousOverride: getMainLoopModelOverride(),
                     previousAppStateModel: appState.mainLoopModel,
                     previousModelForSession: appState.mainLoopModelForSession,
-                    setLatch: setRefusalFallbackModelLatch,
+                    setLatch: latch =>
+                      setRefusalFallbackModelLatch({
+                        ...(latch as Parameters<
+                          typeof setRefusalFallbackModelLatch
+                        >[0]),
+                        ...(heldBySession &&
+                          carriedLevel !== undefined && {
+                            carriedEffort: carriedLevel,
+                          }),
+                      }),
                     setMainLoopModelOverride,
                     markOccurred: markRefusalFallbackOccurred,
                   })

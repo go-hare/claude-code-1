@@ -11,6 +11,7 @@ import {
 } from '../../bootstrap/state.js'
 import { uniq } from '../array.js'
 import { logForDebugging } from '../debug.js'
+import { stripProjectScopeBlockedEnv } from '../managedEnvConstants.js'
 import { stripProjectScopedTracingSettings } from '../projectScopedTracingStrip.js'
 import { logForDiagnosticsNoPII } from '../diagLogs.js'
 import { getClaudeConfigHomeDir, isEnvTruthy } from '../envUtils.js'
@@ -55,6 +56,7 @@ import {
 } from './hostModelOverlay.js'
 import { applySettingsKeyAliases } from './settingsAliases.js'
 import {
+  filterAndWithholdSandboxRestrictions,
   filterInvalidPermissionRules,
   formatZodError,
   type SettingsWithErrors,
@@ -218,6 +220,92 @@ function getManagedSettingsFilePath(): string {
   return join(getManagedFilePath(), 'managed-settings.json')
 }
 
+export type ManagedDocumentLinkKind = 'inside' | 'outside' | 'unverified'
+
+export type ManagedDocumentLink = {
+  path: string
+  folder: string
+  kind: ManagedDocumentLinkKind
+}
+
+/**
+ * official GVo / su — detect whether a managed-settings document (or its
+ * containing folder) is reached via a symlink leading outside `managedDir`.
+ */
+export function inspectManagedDocumentLink(
+  managedDir: string,
+  segments: string[],
+): ManagedDocumentLink | null {
+  const fs = getFsImplementation()
+  const fullPath = join(managedDir, ...segments)
+  let linked = false
+  try {
+    if (fs.lstatSync(managedDir).isSymbolicLink()) {
+      linked = true
+    } else {
+      let cursor = managedDir
+      for (const seg of segments) {
+        cursor = join(cursor, seg)
+        if (fs.lstatSync(cursor).isSymbolicLink()) {
+          linked = true
+          break
+        }
+      }
+    }
+  } catch {
+    return null
+  }
+  if (!linked) return null
+
+  try {
+    const realFolder = fs.realpathSync(managedDir)
+    const realTarget = fs.realpathSync(fullPath)
+    const inside =
+      realTarget === realFolder ||
+      realTarget.startsWith(
+        realFolder.endsWith('/') || realFolder.endsWith('\\')
+          ? realFolder
+          : `${realFolder}/`,
+      ) ||
+      realTarget.startsWith(
+        realFolder.endsWith('/') || realFolder.endsWith('\\')
+          ? realFolder
+          : `${realFolder}\\`,
+      )
+    return {
+      path: fullPath,
+      folder: managedDir,
+      kind: inside ? 'inside' : 'outside',
+    }
+  } catch {
+    return {
+      path: fullPath,
+      folder: managedDir,
+      kind: 'unverified',
+    }
+  }
+}
+
+/**
+ * official FHa — format warning lines for an outside/unverified managed-settings link.
+ */
+export function formatManagedDocumentLinkWarning(
+  link: ManagedDocumentLink,
+  readSucceeded: boolean,
+): [string, string] | null {
+  if (link.kind === 'inside') return null
+  const name = link.path.split(/[\\/]/).pop() ?? link.path
+  const base = `${link.path}: ${name} is reached through a link`
+  const detail =
+    link.kind === 'outside'
+      ? `${base} that leads outside ${link.folder}.`
+      : `${base}, and Claude Code couldn't tell whether the link leads outside ${link.folder}.`
+  return [
+    readSucceeded ? `${detail} Claude Code still reads it.` : detail,
+    'Suggested fix: Ask your administrator to replace the link with the file or folder it points to.',
+  ]
+}
+
 /**
  * Load file-based managed settings: managed-settings.json + managed-settings.d/*.json.
  */
@@ -228,11 +316,26 @@ export function loadManagedFileSettings(): {
   const errors: ValidationError[] = []
   let merged: SettingsJson = {}
   let found = false
+  const managedDir = getManagedFilePath()
 
-  const { settings, errors: baseErrors } = parseSettingsFile(
-    getManagedSettingsFilePath(),
-  )
+  const basePath = getManagedSettingsFilePath()
+  const { settings, errors: baseErrors } = parseSettingsFile(basePath)
   errors.push(...baseErrors)
+  const baseLink = inspectManagedDocumentLink(managedDir, [
+    'managed-settings.json',
+  ])
+  if (baseLink) {
+    const msg = formatManagedDocumentLinkWarning(baseLink, settings !== null)
+    if (msg) {
+      errors.push({
+        file: basePath,
+        path: '',
+        message: msg[0],
+        suggestion: msg[1],
+        severity: 'warning',
+      })
+    }
+  }
   if (settings && Object.keys(settings).length > 0) {
     merged = mergeWith(merged, settings, settingsMergeCustomizer)
     found = true
@@ -251,10 +354,29 @@ export function loadManagedFileSettings(): {
       .map(d => d.name)
       .sort()
     for (const name of entries) {
-      const { settings: dropSettings, errors: fileErrors } = parseSettingsFile(
-        join(dropInDir, name),
-      )
+      const dropPath = join(dropInDir, name)
+      const { settings: dropSettings, errors: fileErrors } =
+        parseSettingsFile(dropPath)
       errors.push(...fileErrors)
+      const dropLink = inspectManagedDocumentLink(managedDir, [
+        'managed-settings.d',
+        name,
+      ])
+      if (dropLink) {
+        const msg = formatManagedDocumentLinkWarning(
+          dropLink,
+          dropSettings !== null,
+        )
+        if (msg) {
+          errors.push({
+            file: dropPath,
+            path: '',
+            message: msg[0],
+            suggestion: msg[1],
+            severity: 'warning',
+          })
+        }
+      }
       if (dropSettings && Object.keys(dropSettings).length > 0) {
         merged = mergeWith(merged, dropSettings, settingsMergeCustomizer)
         found = true
@@ -352,6 +474,11 @@ export function parseSettingsFileContent(
   // rule doesn't cause the entire settings file to be rejected.
   const ruleWarnings = filterInvalidPermissionRules(data, path)
 
+  // official qr/iy (#11): withhold allowRead/allowWrite/allowedDomains when a
+  // restriction (denyRead/denyWrite/deniedDomains) in the same block is
+  // unreadable or had invalid entries trimmed.
+  const sandboxWarnings = filterAndWithholdSandboxRestrictions(data, path)
+
   // densable 2.1.248 #37 ho() user-path — strip unrecognized
   // crossSessionInbound so the rest of the file still loads, and emit the
   // settings warning N() reads. Hold only.
@@ -366,6 +493,7 @@ export function parseSettingsFileContent(
       errors: [
         ...aliasWarnings,
         ...ruleWarnings,
+        ...sandboxWarnings,
         ...inboundWarnings,
         ...errors,
       ],
@@ -374,7 +502,12 @@ export function parseSettingsFileContent(
 
   return {
     settings: result.data,
-    errors: [...aliasWarnings, ...ruleWarnings, ...inboundWarnings],
+    errors: [
+      ...aliasWarnings,
+      ...ruleWarnings,
+      ...sandboxWarnings,
+      ...inboundWarnings,
+    ],
   }
 }
 
@@ -569,10 +702,21 @@ export function getSettingsForSourceUncached(
     fileSettings &&
     (source === 'projectSettings' || source === 'localSettings')
   ) {
-    return stripProjectScopedTracingSettings(fileSettings, source)
+    return stripProjectScopedSettings(fileSettings, source)
   }
 
   return fileSettings
+}
+
+function stripProjectScopedSettings(
+  settings: SettingsJson,
+  source: 'projectSettings' | 'localSettings',
+): SettingsJson {
+  const afterTracing = stripProjectScopedTracingSettings(settings, source)
+  if (!afterTracing.env) return afterTracing
+  const filteredEnv = stripProjectScopeBlockedEnv(afterTracing.env, source)
+  if (filteredEnv === afterTracing.env) return afterTracing
+  return { ...afterTracing, env: filteredEnv }
 }
 
 /**
@@ -830,11 +974,9 @@ function writeSettingsFile(
   filePath: string,
   updatedSettings: SettingsJson,
 ): void {
-  markInternalWrite(filePath)
-  writeFileSyncAndFlush_DEPRECATED(
-    filePath,
-    jsonStringify(updatedSettings, null, 2) + '\n',
-  )
+  const serialized = jsonStringify(updatedSettings, null, 2) + '\n'
+  markInternalWrite(filePath, serialized)
+  writeFileSyncAndFlush_DEPRECATED(filePath, serialized)
   resetSettingsCache()
   if (source === 'localSettings') {
     noteLocalSettingsGitignore()
@@ -1221,7 +1363,7 @@ function loadSettingsFromDisk(): SettingsWithErrors {
           if (settings) {
             const layer =
               source === 'projectSettings' || source === 'localSettings'
-                ? stripProjectScopedTracingSettings(settings, source)
+                ? stripProjectScopedSettings(settings, source)
                 : settings
             mergedSettings = mergeWith(
               mergedSettings,
@@ -1486,17 +1628,45 @@ export function resolveDialogExpiryFromSources(
   return undefined
 }
 
+const SCI_INT_RE = /^[+-]?(\d+(\.\d*)?|\.\d+)[eE][+-]?\d+$/
+const GROUPED_INT_RE = /^[+-]?\d{1,3}([_,\u00A0\u202F ])\d{3}(?:\1\d{3})*$/
+const GROUP_SEP_RE = /[_,\u00A0\u202F ]/g
+
+/**
+ * SEA `H.int({ wholeValue: true })` (`ngi` + `qp`): strict whole-integer parser
+ * so values with unit suffixes like `"5m"` or decimals like `"12.5"` do not
+ * silently parse via `parseInt` prefix matching.
+ */
+function parseWholeIntEnv(raw: string): number | undefined {
+  const trimmed = raw.trim()
+  if (/^[+-]?\d+$/.test(trimmed)) {
+    const n = parseInt(trimmed, 10)
+    return Number.isFinite(n) ? n : undefined
+  }
+  if (trimmed.length <= 32) {
+    if (SCI_INT_RE.test(trimmed)) {
+      const n = Number(trimmed)
+      return Number.isInteger(n) && Number.isFinite(n) ? n : undefined
+    }
+    if (GROUPED_INT_RE.test(trimmed)) {
+      const n = parseInt(trimmed.replace(GROUP_SEP_RE, ''), 10)
+      return Number.isFinite(n) ? n : undefined
+    }
+  }
+  return undefined
+}
+
 /**
  * densable dialogExpiry → ms; null when "never".
- * CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS overrides when set (positive int).
+ * CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS overrides when set (strict positive whole int).
  */
 export function dialogExpiryToMs(
   value: DialogExpiry | undefined = getDialogExpiry(),
 ): number | null {
   const envMs = process.env.CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS
   if (envMs !== undefined && envMs !== '') {
-    const parsed = parseInt(envMs, 10)
-    if (!Number.isNaN(parsed) && parsed > 0) {
+    const parsed = parseWholeIntEnv(envMs)
+    if (parsed !== undefined && parsed > 0) {
       return parsed
     }
   }

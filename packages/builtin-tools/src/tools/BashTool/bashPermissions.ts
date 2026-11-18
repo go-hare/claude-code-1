@@ -2732,6 +2732,36 @@ async function bashToolHasPermissionInner(
     // fall through to ask if no deny matched — don't downgrade deny to ask.
     const earlyExit = checkEarlyExitDeny(input, appState.toolPermissionContext)
     if (earlyExit !== null) return earlyExit
+    // #73 SEA `plainUnquotedHeredocs` + `tengu_amber_larch` (@290168397):
+    // Sandboxed commands that pipe a plain unquoted heredoc into another
+    // command (`cat <<EOF | python3`) can be auto-allowed by the sandbox.
+    const canTryPlainUnquotedHeredoc =
+      !context.forRemoteExecution &&
+      ((astResult.nodeType === 'heredoc_redirect' &&
+        astResult.differential === true) ||
+        (astResult.nodeType === 'pipeline' &&
+          astResult.afterHeredocDelimiter === true)) &&
+      SandboxManager.isSandboxingEnabled() &&
+      SandboxManager.isAutoAllowBashIfSandboxedEnabled() &&
+      shouldUseSandbox(input) &&
+      getFeatureValue_CACHED_MAY_BE_STALE('tengu_amber_larch', true)
+    if (canTryPlainUnquotedHeredoc && astRoot) {
+      const plainResult = parseForSecurityFromAst(input.command, astRoot, {
+        plainUnquotedHeredocs: true,
+      })
+      if (
+        plainResult.kind === 'simple' &&
+        checkSemantics(plainResult.commands).ok
+      ) {
+        const sandboxAutoAllowResult = checkSandboxAutoAllow(
+          input,
+          appState.toolPermissionContext,
+        )
+        if (sandboxAutoAllowResult.behavior !== 'passthrough') {
+          return sandboxAutoAllowResult
+        }
+      }
+    }
     const decisionReason: PermissionDecisionReason = {
       type: 'other' as const,
       reason: astResult.reason,
@@ -2815,9 +2845,17 @@ async function bashToolHasPermissionInner(
     }
   }
 
+  const isSandboxAutoAllowSuspended =
+    (appState.toolPermissionContext as { sandboxAutoAllowSuspended?: boolean })
+      .sandboxAutoAllowSuspended === true ||
+    context.permissionLayers?.some(
+      layer => layer.kind === 'sandbox_auto_allow_suspended',
+    ) === true
+
   // Check sandbox auto-allow (which respects explicit deny/ask rules)
   // Only call this if sandboxing and auto-allow are both enabled
   if (
+    !isSandboxAutoAllowSuspended &&
     SandboxManager.isSandboxingEnabled() &&
     SandboxManager.isAutoAllowBashIfSandboxedEnabled() &&
     shouldUseSandbox(input)

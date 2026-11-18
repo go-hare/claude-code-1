@@ -24,6 +24,10 @@ export function useMcpReconnect() {
   return context.reconnectMcpServer;
 }
 
+export function useOptionalMcpReconnect() {
+  return useContext(MCPConnectionContext)?.reconnectMcpServer ?? null;
+}
+
 export function useMcpToggleEnabled() {
   const context = useContext(MCPConnectionContext);
   if (!context) {

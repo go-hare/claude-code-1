@@ -1,5 +1,6 @@
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { splitCommand_DEPRECATED } from 'src/utils/bash/commands.js'
+import { tryParseShellCommand } from 'src/utils/bash/shellQuote.js'
 import { getPlatform } from 'src/utils/platform.js'
 import { SandboxManager } from 'src/utils/sandbox/sandbox-adapter.js'
 import { isSettingSourceEnabled } from 'src/utils/settings/constants.js'
@@ -27,6 +28,204 @@ type SandboxInput = {
  * densable gxy — shell metacharacters. H0d fails closed (never exclude) when present.
  */
 export const SANDBOX_EXCLUSION_METACHAR_RE = /[;|&`$(){}<>#\n\r]/
+
+/**
+ * SEA `Zwr.git` / `ebr` / `obr` / `dbr` (@290191510–290193800) —
+ * Git subcommand flags (including `git clone` short options `-u`, `-c`,
+ * `--config`, `--template`, and bundled forms like `-bu`) that execute code or
+ * alter config, so `sandbox.excludedCommands` must NOT exempt them from sandbox.
+ */
+const GIT_SUBCOMMAND_DANGEROUS_FLAGS: ReadonlyArray<
+  readonly [string, readonly string[]]
+> = [
+  ['-x', ['rebase', 'difftool']],
+  ['-d', ['instaweb']],
+  ['--file', ['config']],
+  ['-f', ['config']],
+  ['--prefix', ['checkout-index']],
+  [
+    '-o',
+    [
+      'archive',
+      'bugreport',
+      'diagnose',
+      'format-patch',
+      'index-pack',
+      'mailsplit',
+    ],
+  ],
+  ['--output-directory', ['bugreport', 'diagnose', 'format-patch']],
+  ['--suffix', ['bugreport', 'diagnose', 'format-patch']],
+  ['-s', ['bugreport', 'diagnose']],
+  ['--pid-file', ['daemon']],
+  ['--file', ['credential-store']],
+  ['-d', ['filter-branch']],
+  ['--export-marks', ['fast-export', 'fast-import']],
+  ['--export-pack-edges', ['fast-import']],
+  ['--rename-section', ['config']],
+  ['rename-section', ['config']],
+  ['--template', ['clone', 'init']],
+  ['-c', ['clone']],
+  ['--config', ['clone']],
+  ['edit', ['config']],
+  ['--edit', ['config']],
+  ['-e', ['config']],
+  ['-O', ['grep']],
+  ['--tree-filter', ['filter-branch']],
+  ['--index-filter', ['filter-branch']],
+  ['--msg-filter', ['filter-branch']],
+  ['--env-filter', ['filter-branch']],
+  ['--commit-filter', ['filter-branch']],
+  ['--parent-filter', ['filter-branch']],
+  ['--tag-name-filter', ['filter-branch']],
+  ['--setup', ['filter-branch']],
+  ['--sendmail-cmd', ['send-email']],
+  ['--smtp-server', ['send-email']],
+  ['--to-cmd', ['send-email']],
+  ['--cc-cmd', ['send-email']],
+]
+
+const GIT_CLONE_UPLOAD_PACK_SHORT_FLAG: readonly [string, readonly string[]] = [
+  '-u',
+  ['clone'],
+]
+
+const GIT_SUBCOMMAND_VALUED_SHORT_FLAGS: Record<string, readonly string[]> = {
+  clone: ['b', 'o', 'j', 'u'],
+  rebase: ['C', 'S', 'X', 's'],
+  difftool: ['t'],
+  instaweb: ['b', 'm', 'p'],
+  config: [],
+  archive: [],
+  'format-patch': ['v'],
+  grep: ['e', 'f', 'A', 'B', 'C', 'm'],
+}
+
+function matchesBundledShortFlag(
+  arg: string,
+  flagChar: string,
+  valuedShortFlags: readonly string[],
+): boolean {
+  const cluster = /^[-+](?!-)([^=]*)/.exec(arg)?.[1] ?? ''
+  for (const ch of cluster) {
+    if (ch === flagChar) return true
+    if (valuedShortFlags.includes(ch)) return false
+  }
+  return false
+}
+
+function matchesFlagToken(
+  arg: string,
+  targetFlag: string,
+  caseInsensitive: boolean,
+  isSingleCharShort: boolean,
+  valuedShortFlags: readonly string[],
+  supportsLongPrefixAbbrev: boolean,
+): boolean {
+  const normalized = caseInsensitive
+    ? arg.toLowerCase().replace(/^[\u2013\u2014\u2015]/, '-')
+    : arg
+  if (normalized === targetFlag || normalized.startsWith(`${targetFlag}=`)) {
+    return true
+  }
+  if (targetFlag.endsWith(':') && normalized.startsWith(targetFlag)) {
+    return true
+  }
+  if (targetFlag.startsWith('/')) {
+    return normalized.replace(/^(?:\/\/|-)/, '/').includes(targetFlag)
+  }
+  if (supportsLongPrefixAbbrev && targetFlag.startsWith('--')) {
+    const eqIdx = normalized.indexOf('=')
+    const prefix = eqIdx >= 0 ? normalized.slice(0, eqIdx) : normalized
+    if (prefix.length > 2 && targetFlag.startsWith(prefix)) {
+      return true
+    }
+  }
+  if (
+    caseInsensitive &&
+    normalized.length > 1 &&
+    targetFlag.startsWith(normalized)
+  ) {
+    return true
+  }
+  if (!(!targetFlag.startsWith('--') && targetFlag.length === 2)) {
+    return false
+  }
+  const flagChar = targetFlag[1]!
+  if (isSingleCharShort && normalized.startsWith('+')) {
+    return matchesBundledShortFlag(normalized, flagChar, valuedShortFlags)
+  }
+  if (normalized.startsWith(targetFlag)) return true
+  if (!isSingleCharShort) return false
+  return matchesBundledShortFlag(normalized, flagChar, valuedShortFlags)
+}
+
+function extractGitSubcommandPositionals(argv: string[]): string[] {
+  const positionals: string[] = []
+  let afterDoubleDash = false
+  for (let i = 1; i < argv.length; i++) {
+    const arg = argv[i]!
+    if (!afterDoubleDash && arg === '--') {
+      afterDoubleDash = true
+      continue
+    }
+    if (!afterDoubleDash && arg.startsWith('-')) {
+      if (
+        arg === '-C' ||
+        arg === '-c' ||
+        arg === '--git-dir' ||
+        arg === '--work-tree' ||
+        arg === '--namespace' ||
+        arg === '--super-prefix' ||
+        arg === '--config-env' ||
+        arg === '--attr-source'
+      ) {
+        i++
+      }
+      continue
+    }
+    positionals.push(arg)
+  }
+  return positionals
+}
+
+export function hasDangerousGitSubcommandFlag(argv: string[]): boolean {
+  const cmdName = argv[0]?.split(/[\\/]/).pop()
+  if (cmdName !== 'git') return false
+  const rules = getFeatureValue_CACHED_MAY_BE_STALE('tengu_mossy_crayon', true)
+    ? [...GIT_SUBCOMMAND_DANGEROUS_FLAGS, GIT_CLONE_UPLOAD_PACK_SHORT_FLAG]
+    : GIT_SUBCOMMAND_DANGEROUS_FLAGS
+  const positionals = extractGitSubcommandPositionals(argv).map(p =>
+    p.toLowerCase(),
+  )
+  return rules.some(([flag, subcommands]) => {
+    const matchedSub = positionals.find(p => subcommands.includes(p))
+    if (matchedSub === undefined) return false
+    const isSingleCharShort = /^-[A-Za-z]$/.test(flag)
+    const valuedShortFlags = GIT_SUBCOMMAND_VALUED_SHORT_FLAGS[matchedSub] ?? []
+    return argv.some(
+      arg =>
+        arg === flag ||
+        (flag.startsWith('-') &&
+          (arg.startsWith(flag) ||
+            matchesFlagToken(
+              arg,
+              flag,
+              false,
+              isSingleCharShort,
+              valuedShortFlags,
+              true,
+            ))),
+    )
+  })
+}
+
+function commandHasDangerousGitFlags(command: string): boolean {
+  const parsed = tryParseShellCommand(command)
+  if (!parsed.success) return false
+  const argv = parsed.tokens.filter((t): t is string => typeof t === 'string')
+  return hasDangerousGitSubcommandFlag(argv)
+}
 
 // NOTE: excludedCommands is a user-facing convenience feature, not a security boundary.
 // It is not a security bug to be able to bypass excludedCommands — the sandbox permission
@@ -83,6 +282,9 @@ function containsExcludedCommand(command: string): boolean {
 
   for (const subcommand of subcommands) {
     const trimmed = subcommand.trim()
+    if (commandHasDangerousGitFlags(trimmed)) {
+      return false
+    }
     // Also try matching with env var prefixes and wrapper commands stripped, so
     // that `FOO=bar bazel ...` and `timeout 30 bazel ...` match `bazel:*`. Not a
     // security boundary (see NOTE at top); the &&-split above already lets
@@ -188,7 +390,8 @@ export function isFullyExcludedCommandForPolicyWithPatterns(
   if (
     patterns.length === 0 ||
     !trimmed ||
-    SANDBOX_EXCLUSION_METACHAR_RE.test(trimmed)
+    SANDBOX_EXCLUSION_METACHAR_RE.test(trimmed) ||
+    commandHasDangerousGitFlags(trimmed)
   ) {
     return false
   }

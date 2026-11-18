@@ -4026,13 +4026,24 @@ export function REPL({
 
         // densable 2.1.239 OMo after S1 switchSession (print.ts already did).
         // Then y_u from CCR stash when present (interactive #13).
-        const { takeRestoredWorkerForPlanResume } =
+        const { takeRestoredWorkerForPlanResume, preparePlanModeRestoreOnInteractiveResume } =
           require('../utils/permissions/planModeResume.js') as typeof import('../utils/permissions/planModeResume.js');
         restoreSessionStateFromLog(log, setAppState, {
           applyPlanModeResume: true,
           restoredWorker: takeRestoredWorkerForPlanResume(),
           forkSession: entrypoint === 'fork',
           planModeResumeLane: 'interactive',
+        });
+        const applyInteractivePlanModeRestore = await preparePlanModeRestoreOnInteractiveResume({
+          storedPermissionMode: log.mode,
+          messages: log.messages as import('../utils/permissions/planModeResume.js').TranscriptPlanScanMessage[],
+          forkSession: entrypoint === 'fork',
+          permissionModeSuppliedOnInvocation: false,
+          lane: 'interactive_slash',
+        });
+        setAppState(prev => {
+          const nextCtx = applyInteractivePlanModeRestore(prev.toolPermissionContext);
+          return nextCtx ? { ...prev, toolPermissionContext: nextCtx } : prev;
         });
 
         // Clear then restore session metadata so it's re-appended on exit via

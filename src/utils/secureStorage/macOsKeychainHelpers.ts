@@ -94,11 +94,18 @@ export const keychainCacheState: {
    * without re-spawning security.
    */
   lastReadFailure: number | null
+  /**
+   * official S0.keychainHoldsItem — tracks whether keychain holds an item so
+   * exit code 36 (locked) is reported as transient+keychainLocked instead of
+   * falling back to plaintext and leaving a stale keychain entry behind.
+   */
+  keychainHoldsItem: boolean
 } = {
   cache: { data: null, cachedAt: 0 },
   generation: 0,
   readInFlight: null,
   lastReadFailure: null,
+  keychainHoldsItem: false,
 }
 
 export function clearKeychainCache(): void {

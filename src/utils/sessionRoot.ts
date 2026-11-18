@@ -73,6 +73,7 @@ export type SessionProject = {
   readonly originalCwd: string
   readonly projectRoot: string
   readonly cwd: string
+  readonly isolationRoot?: string | null
 }
 
 export type Session = {
@@ -112,6 +113,7 @@ export type Session = {
   writePermissionStash: WritePermissionStash
   subscribe(d: () => void): () => void
   setCwd(d: string): void
+  setIsolationRoot(d: string | null | undefined): void
   withProject(d: Partial<SessionProject>): Session
   update(d: {
     id?: string
@@ -132,10 +134,16 @@ type SessionKind =
 /**
  * Official en @178531824 sha=379ff8dd5d0d4188
  */
-export function bindSession(e: SessionKind, t: SessionProject): Session {
+export function bindSession(
+  e: SessionKind,
+  t: SessionProject,
+  isolationRoot?: string | null,
+): Session {
   let o = nfcPath(t.originalCwd)
   let r = nfcPath(t.projectRoot)
   let i = nfcPath(t.cwd)
+  let isoRoot: string | null | undefined =
+    isolationRoot !== undefined ? isolationRoot : t.isolationRoot
   const s = createSignal()
   const a = e.kind === 'fork' ? e.root.observers : new SessionObservers()
   const l =
@@ -152,6 +160,9 @@ export function bindSession(e: SessionKind, t: SessionProject): Session {
     },
     get cwd() {
       return i
+    },
+    get isolationRoot() {
+      return isoRoot
     },
   }
   let id = e.kind === 'fork' ? e.root.id : e.id
@@ -243,14 +254,24 @@ export function bindSession(e: SessionKind, t: SessionProject): Session {
     setCwd(d) {
       S.update({ project: { cwd: d } })
     },
+    setIsolationRoot(d) {
+      if (d !== isoRoot) {
+        isoRoot = d
+        s.emit()
+      }
+    },
     withProject(d) {
+      const nextIsolationRoot =
+        d.isolationRoot !== undefined ? d.isolationRoot : isoRoot
       return bindSession(
         { kind: 'fork', root: S.root },
         {
           originalCwd: d.originalCwd ?? o,
           projectRoot: d.projectRoot ?? r,
           cwd: d.cwd ?? i,
+          isolationRoot: nextIsolationRoot,
         },
+        nextIsolationRoot,
       )
     },
     update(d) {
@@ -292,6 +313,10 @@ export function bindSession(e: SessionKind, t: SessionProject): Session {
             i = m
             c = true
           }
+        }
+        if (f.isolationRoot !== undefined && f.isolationRoot !== isoRoot) {
+          isoRoot = f.isolationRoot
+          c = true
         }
       }
       if (c) s.emit()

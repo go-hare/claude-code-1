@@ -156,14 +156,14 @@ export function AutoModeRulesTab({
   const { columns } = useTerminalSize();
   const tabWidth = useTabsWidth();
   const { headerFocused, focusHeader, blurHeader } = useTabHeaderFocus();
+  const containerRef = useRef<DOMElement | null>(null);
 
   useEffect(() => {
     if (isSearchMode && headerFocused) {
-      blurHeader();
+      blurHeader(containerRef.current);
     }
   }, [isSearchMode, headerFocused, blurHeader]);
 
-  const containerRef = useRef<DOMElement | null>(null);
   useFocusReclaim(containerRef, isSearchMode && mode.kind === 'list');
 
   const isSubdialogOpen = mode.kind !== 'list';

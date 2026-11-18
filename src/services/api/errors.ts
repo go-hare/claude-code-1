@@ -1900,3 +1900,97 @@ export function getErrorMessageIfRefusal(
     error: 'invalid_request',
   })
 }
+
+/** Official sjr / VO(e) — output blocked by content filtering policy (#14). */
+export const OUTPUT_CONTENT_FILTERED_MESSAGE =
+  'Output blocked by content filtering policy'
+
+export function isOutputBlockedByContentFilterError(error: unknown): boolean {
+  if (
+    !(error instanceof Error) ||
+    !error.message.includes(OUTPUT_CONTENT_FILTERED_MESSAGE)
+  ) {
+    return false
+  }
+  const orig =
+    'originalError' in error && error.originalError instanceof Error
+      ? error.originalError
+      : error
+  const status = orig instanceof APIError ? orig.status : undefined
+  return status === undefined || status === 400
+}
+
+/** Official ijr / qvn(e) — unprocessable media item limit error (#13). */
+export const UNPROCESSABLE_MEDIA_ERROR_MESSAGE =
+  'Request rejected as unprocessable by the model (too many or oversized images, or unsupported parameters)'
+
+function getApiErrorFirstLine(err: APIError): string {
+  const inner = (err.error as { error?: { message?: unknown } } | undefined)
+    ?.error?.message
+  const raw =
+    typeof inner === 'string' ? inner : err.message.replace(/^\d{3} /, '')
+  const nl = raw.indexOf('\n')
+  return nl === -1 ? raw : raw.slice(0, nl)
+}
+
+export function isUnprocessableMediaError(error: unknown): boolean {
+  if (!(error instanceof APIError)) {
+    return false
+  }
+  const status = error.status
+  return (
+    (status === undefined || status === 400) &&
+    getApiErrorFirstLine(error).includes(UNPROCESSABLE_MEDIA_ERROR_MESSAGE)
+  )
+}
+
+const UNEXPECTED_BETA_VALUES_RE =
+  /Unexpected value\(s\) ((?:`[^`]+`(?:, )?)+) for the `anthropic[-_]beta`/
+
+export type RejectedBetaMatch = {
+  header: string
+  exactMatch: boolean
+  onlyMentioned: boolean
+}
+
+/**
+ * Official rdt(e, sentBetas) + WB(e, beta) + fDe(e, beta) (#12) —
+ * identify all rejected beta headers from an APIError (including non-400
+ * statuses such as 422) so the caller can strip them in a single retry.
+ */
+export function findRejectedBetaHeaders(
+  error: unknown,
+  sentBetas: readonly string[],
+): RejectedBetaMatch[] {
+  if (!(error instanceof APIError)) {
+    return []
+  }
+  const firstLine = getApiErrorFirstLine(error)
+  const headerListMatch = UNEXPECTED_BETA_VALUES_RE.exec(firstLine)
+  const msgListMatch = UNEXPECTED_BETA_VALUES_RE.exec(error.message)
+  const results: RejectedBetaMatch[] = []
+  const seen = new Set<string>()
+  for (const header of sentBetas) {
+    if (!header || seen.has(header)) {
+      continue
+    }
+    const exactByUnexpected =
+      headerListMatch?.index === 0 &&
+      headerListMatch[1]?.includes(`\`${header}\``) === true
+    const exactByTag = error.message.includes(`beta_header:${header}`)
+    const exactMatch = exactByUnexpected || exactByTag
+    const mentionedIn400 =
+      error.status === 400 &&
+      error.message.includes(header) &&
+      msgListMatch?.[1]?.includes(`\`${header}\``) === true
+    if (exactMatch || mentionedIn400) {
+      seen.add(header)
+      results.push({
+        header,
+        exactMatch,
+        onlyMentioned: !exactMatch && !mentionedIn400,
+      })
+    }
+  }
+  return results
+}

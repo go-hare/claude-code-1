@@ -76,15 +76,20 @@ type CronSchedulerOptions = {
   /**
    * When provided, receives the full CronTask on normal fires (and onFire is
    * NOT called for that fire). Lets daemon callers see the task id/cron/etc
-   * instead of just the prompt string.
+   * instead of just the prompt string. Returning `true` defers deletion of
+   * one-shot tasks until the passed `remove()` callback is invoked.
    */
-  onFireTask?: (task: CronTask) => void
+  onFireTask?: (task: CronTask, remove?: () => void) => boolean | undefined
   /**
    * When provided, receives the missed one-shot tasks on initial load (and
    * onFire is NOT called with the pre-formatted notification). Daemon decides
-   * how to surface them.
+   * how to surface them. Returning an array of task IDs keeps those tasks
+   * from being immediately removed from disk.
    */
-  onMissed?: (tasks: CronTask[]) => void
+  onMissed?: (
+    tasks: CronTask[],
+    remove?: (toRemove: CronTask[]) => void,
+  ) => string[] | undefined
   /**
    * Directory containing .claude/scheduled_tasks.json. When provided, the
    * scheduler never touches bootstrap state: getProjectRoot/getSessionId are
@@ -142,6 +147,8 @@ export type CronScheduler = {
    * subprocess or keep it warm for an imminent fire.
    */
   getNextFireTime: () => number | null
+  /** True when any eligible task is currently due to fire. */
+  isFireDue: () => boolean
 }
 
 export function createCronScheduler(
@@ -181,6 +188,18 @@ export function createCronScheduler(
   let stopped = false
   let isOwner = false
 
+  function removeFileTasks(toRemove: CronTask[]): void {
+    if (toRemove.length === 0) return
+    void removeCronTasks(
+      toRemove.map(t => t.id),
+      dir,
+    ).catch(e =>
+      logForDebugging(`[ScheduledTasks] failed to remove tasks: ${e}`, {
+        level: 'error',
+      }),
+    )
+  }
+
   async function load(initial: boolean) {
     const next = await readCronTasks(dir)
     if (stopped) return
@@ -215,19 +234,16 @@ export function createCronScheduler(
             ',',
           ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
+      let keptBack = new Set<string>()
       if (onMissed) {
-        onMissed(missed)
+        keptBack = new Set(onMissed(missed, removeFileTasks) ?? [])
+        for (const id of keptBack) missedAsked.add(id)
       } else {
         onFire(buildMissedTaskNotification(missed))
       }
-      void removeCronTasks(
-        missed.map(t => t.id),
-        dir,
-      ).catch(e =>
-        logForDebugging(`[ScheduledTasks] failed to remove missed tasks: ${e}`),
-      )
+      removeFileTasks(missed.filter(t => !keptBack.has(t.id)))
       logForDebugging(
-        `[ScheduledTasks] surfaced ${missed.length} missed one-shot task(s)`,
+        `[ScheduledTasks] surfaced ${missed.length - keptBack.size} missed one-shot task(s), kept back ${keptBack.size}`,
       )
     }
   }
@@ -297,8 +313,9 @@ export function createCronScheduler(
         taskId:
           t.id as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
+      let deferDelete = false
       if (onFireTask) {
-        onFireTask(t)
+        deferDelete = onFireTask(t, () => removeFileTasks([t])) === true
       } else {
         onFire(t.prompt)
       }
@@ -335,11 +352,15 @@ export function createCronScheduler(
         // store without this id.
         removeSessionCronTasks([t.id])
         nextFireAt.delete(t.id)
+      } else if (deferDelete) {
+        missedAsked.add(t.id)
+        nextFireAt.set(t.id, Infinity)
       } else {
         // One-shot (or aged-out recurring) file task: delete from disk.
         // inFlight guards against double-fire during the async
         // removeCronTasks + chokidar reload.
         inFlight.add(t.id)
+        nextFireAt.set(t.id, Infinity)
         void removeCronTasks([t.id], dir)
           .catch(e =>
             logForDebugging(
@@ -347,7 +368,6 @@ export function createCronScheduler(
             ),
           )
           .finally(() => inFlight.delete(t.id))
-        nextFireAt.delete(t.id)
       }
     }
 
@@ -445,26 +465,49 @@ export function createCronScheduler(
     void load(true)
 
     const path = getCronFilePath(dir)
-    watcher = chokidar.watch(path, {
-      persistent: false,
-      ignoreInitial: true,
-      awaitWriteFinish: { stabilityThreshold: FILE_STABILITY_MS },
-      ignorePermissionErrors: true,
-    })
-    watcher.on('add', () => void load(false))
-    watcher.on('change', () => void load(false))
-    watcher.on('unlink', () => {
-      if (!stopped) {
-        tasks = []
-        nextFireAt.clear()
-      }
-    })
-    // densable #14: unhandled chokidar 'error' can crash process
-    watcher.on('error', (err: unknown) => {
-      logForDebugging(`[ScheduledTasks] watcher error: ${err}`, {
-        level: 'warn',
+    const attachWatcher = (create: () => FSWatcher): FSWatcher => {
+      const w = create()
+      // densable #14: unhandled chokidar 'error' can crash process
+      w.on('error', (err: unknown) => {
+        logForDebugging(`[ScheduledTasks] watcher error: ${err}`, {
+          level: 'warn',
+        })
       })
-    })
+      const onChangeOrAdd = () => {
+        if (stopped || watcher !== w) return
+        watcher = attachWatcher(create)
+        watcher.once('ready', () => void load(false))
+        w.close().catch(err =>
+          logForDebugging(`[ScheduledTasks] watcher close failed: ${err}`, {
+            level: 'warn',
+          }),
+        )
+      }
+      w.on('add', onChangeOrAdd)
+      w.on('change', onChangeOrAdd)
+      w.on('unlink', () => {
+        if (!stopped) {
+          tasks = []
+          // Only evict file-backed tasks; preserve session tasks' nextFireAt.
+          const keep = new Set<string>()
+          if (dir === undefined) {
+            for (const t of getSessionCronTasks()) keep.add(t.id)
+          }
+          for (const id of nextFireAt.keys()) {
+            if (!keep.has(id)) nextFireAt.delete(id)
+          }
+        }
+      })
+      return w
+    }
+    watcher = attachWatcher(() =>
+      chokidar.watch(path, {
+        persistent: false,
+        ignoreInitial: true,
+        awaitWriteFinish: { stabilityThreshold: FILE_STABILITY_MS },
+        ignorePermissionErrors: true,
+      }),
+    )
 
     checkTimer = setInterval(check, CHECK_INTERVAL_MS)
     // Don't keep the process alive for the scheduler alone — in -p text mode
@@ -543,6 +586,41 @@ export function createCronScheduler(
         if (t < min) min = t
       }
       return min === Infinity ? null : min
+    },
+    isFireDue() {
+      if (isKilled?.()) return false
+      const now = Date.now()
+      const jitterCfg = getJitterConfig?.() ?? DEFAULT_CRON_JITTER_CONFIG
+      const due = (t: CronTask, isSession: boolean): boolean => {
+        if (t.enabled === false) return false
+        const scheduled =
+          nextFireAt.get(t.id) ??
+          (t.recurring
+            ? jitteredNextCronRunMs(
+                t.cron,
+                t.lastFiredAt ?? t.createdAt,
+                t.id,
+                jitterCfg,
+              )
+            : oneShotJitteredNextCronRunMs(
+                t.cron,
+                t.createdAt,
+                t.id,
+                jitterCfg,
+              ))
+        return (
+          scheduled !== null &&
+          now >= scheduled &&
+          t.agentId === undefined &&
+          (!filter || filter(t)) &&
+          !inFlight.has(t.id) &&
+          (isSession || !missedAsked.has(t.id))
+        )
+      }
+      return (
+        tasks.some(t => due(t, false)) ||
+        (dir === undefined && getSessionCronTasks().some(t => due(t, true)))
+      )
     },
   }
 }

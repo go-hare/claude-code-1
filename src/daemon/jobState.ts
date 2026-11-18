@@ -115,7 +115,12 @@ export interface BgJobState {
    */
   archived?: boolean
   /** In-flight operations (densable tDt stamp) */
-  inFlight?: { tasks: number; queued: number; kinds: string[] }
+  inFlight?: {
+    tasks: number
+    queued: number
+    kinds: string[]
+    drainableMonitors?: number
+  }
   /**
    * densable u7u `fan` — fan-out item roster from t7r.items when non-empty.
    * Compared via densable Jat() before write.

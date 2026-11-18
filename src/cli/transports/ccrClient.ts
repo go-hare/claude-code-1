@@ -305,8 +305,13 @@ export class CCRClient {
   // stream_event delay buffer — accumulates content deltas for up to
   // STREAM_EVENT_FLUSH_INTERVAL_MS before enqueueing (reduces POST count
   // and enables text_delta coalescing). Mirrors HybridTransport's pattern.
+  private streamEventFlushIntervalMs = STREAM_EVENT_FLUSH_INTERVAL_MS
   private streamEventBuffer: SDKPartialAssistantMessage[] = []
   private streamEventTimer: ReturnType<typeof setTimeout> | null = null
+  private pickupBarriers: unknown[] = []
+  private guardsClientRows: unknown = undefined
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: official stream ephemeral tracking slot
+  private streamedEphemeralSinceLastAssistant = false
   // Full-so-far text accumulator. Persists across flushes so each emitted
   // text_delta event carries the complete text from the start of the block —
   // mid-stream reconnects see a self-contained snapshot. Keyed by API message
@@ -977,29 +982,77 @@ export class CCRClient {
    * flush). A non-stream_event write flushes the buffer first so downstream
    * ordering is preserved.
    */
-  async writeEvent(message: StdoutMessage): Promise<void> {
-    if (message.type === 'stream_event') {
-      this.streamEventBuffer.push(message)
-      if (!this.streamEventTimer) {
-        this.streamEventTimer = setTimeout(
-          () => void this.flushStreamEventBuffer(),
-          STREAM_EVENT_FLUSH_INTERVAL_MS,
-        )
-      }
-      return
+  writeEvent(message: StdoutMessage): Promise<void> {
+    try {
+      if (this.bufferLoneDelta(message)) return Promise.resolve()
+    } catch (err) {
+      return Promise.reject(err)
     }
-    await this.flushStreamEventBuffer()
-    if (message.type === 'assistant') {
-      clearStreamAccumulatorForMessage(
-        this.streamTextAccumulator,
-        message as {
-          session_id: string
-          parent_tool_use_id: string | null
-          message: { id: string }
-        },
+    return this.writeEvents([message])
+  }
+
+  /**
+   * Gold 2.1.325 `bufferLoneDelta`: synchronous fast-path for lone
+   * `content_block_delta` stream events when batching is active, no pickup
+   * barriers or client-row guards are held, and `resume_reason` is absent.
+   */
+  bufferLoneDelta(message: StdoutMessage): boolean {
+    if (
+      this.streamEventFlushIntervalMs <= 0 ||
+      this.pickupBarriers.length > 0 ||
+      this.guardsClientRows !== undefined ||
+      message.type !== 'stream_event' ||
+      typeof message.event !== 'object' ||
+      message.event === null ||
+      !('type' in message.event) ||
+      (message.event as { type?: unknown }).type !== 'content_block_delta' ||
+      'resume_reason' in message
+    ) {
+      return false
+    }
+    this.streamedEphemeralSinceLastAssistant = true
+    this.bufferEphemeral(message)
+    return true
+  }
+
+  private bufferEphemeral(message: SDKPartialAssistantMessage): void {
+    this.streamEventBuffer.push(message)
+    if (!this.streamEventTimer) {
+      this.streamEventTimer = setTimeout(
+        () => void this.flushStreamEventBuffer(),
+        this.streamEventFlushIntervalMs,
       )
     }
-    await this.eventUploader.enqueue(this.toClientEvent(message))
+  }
+
+  async writeEvents(messages: StdoutMessage[]): Promise<void> {
+    for (const message of messages) {
+      if (message.type === 'stream_event') {
+        this.streamedEphemeralSinceLastAssistant = true
+        if (this.streamEventFlushIntervalMs <= 0) {
+          await this.eventUploader.enqueue({
+            payload: message as unknown as EventPayload,
+            ephemeral: true,
+          })
+          continue
+        }
+        this.bufferEphemeral(message)
+        continue
+      }
+      await this.flushStreamEventBuffer()
+      if (message.type === 'assistant') {
+        this.streamedEphemeralSinceLastAssistant = false
+        clearStreamAccumulatorForMessage(
+          this.streamTextAccumulator,
+          message as {
+            session_id: string
+            parent_tool_use_id: string | null
+            message: { id: string }
+          },
+        )
+      }
+      await this.eventUploader.enqueue(this.toClientEvent(message))
+    }
   }
 
   /** Wrap a StdoutMessage as a ClientEvent, injecting a UUID if missing. */

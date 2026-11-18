@@ -197,16 +197,27 @@ export function renderToolResultMessage(
     theme: _theme,
     tools: _tools,
     style,
+    input,
   }: {
     verbose: boolean;
     theme: ThemeName;
     tools: Tool[];
     style?: 'condensed';
+    input?: unknown;
   },
 ): React.ReactNode {
   const lastProgress = progressMessagesForMessage.at(-1);
   const timeoutMs = lastProgress?.data?.timeoutMs;
-  return <BashToolResultMessage content={content} verbose={verbose} timeoutMs={timeoutMs} style={style} />;
+  const command =
+    typeof input === 'object' &&
+    input !== null &&
+    'command' in input &&
+    typeof (input as { command?: unknown }).command === 'string'
+      ? (input as { command: string }).command
+      : undefined;
+  return (
+    <BashToolResultMessage content={content} verbose={verbose} timeoutMs={timeoutMs} style={style} command={command} />
+  );
 }
 
 export function renderToolUseErrorMessage(

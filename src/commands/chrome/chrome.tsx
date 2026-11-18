@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { type OptionWithDescription, Select } from '../../components/CustomSelect/select.js';
 import { Dialog } from '@anthropic/ink';
 import { Box, Text } from '@anthropic/ink';
@@ -20,13 +20,51 @@ import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
 import { env } from '../../utils/env.js';
 import { isRunningOnHomespace } from '../../utils/envUtils.js';
 import { clearServerCache } from '../../services/mcp/client.js';
+import { useOptionalMcpReconnect } from '../../services/mcp/MCPConnectionManager.js';
 import { applyPermissionUpdate } from '../../utils/permissions/PermissionUpdate.js';
-import type { ScopedMcpServerConfig } from '../../services/mcp/types.js';
+import type { MCPServerConnection, ScopedMcpServerConfig } from '../../services/mcp/types.js';
 
 const CHROME_EXTENSION_URL = 'https://claude.ai/chrome';
 const CHROME_PERMISSIONS_URL = 'https://clau.de/chrome/permissions';
 /** densable Web Store handshake — keep for official Reconnect; local uses Connect local. */
 const CHROME_RECONNECT_URL = 'https://clau.de/chrome/reconnect';
+const RECONNECT_RETRY_HINT =
+  ' Select "Reconnect extension" to try again, or open /mcp and select claude-in-chrome for details.';
+
+/**
+ * Official o0t(result, serverName) @332116500: format MCP reconnect result for UI.
+ */
+export function formatChromeReconnectOutcome(
+  result: { client: MCPServerConnection },
+  serverName: string,
+): { message: string; success: boolean } {
+  const { client } = result;
+  switch (client.type) {
+    case 'connected':
+      return { message: `Reconnected to ${serverName}.`, success: true };
+    case 'needs-auth': {
+      const hasHeadersHelper = 'headersHelper' in client.config && client.config.headersHelper !== undefined;
+      return {
+        message: hasHeadersHelper
+          ? `${serverName} requires authentication. Use 'Authenticate' if the upstream server uses OAuth, or check the headersHelper script and use 'Reconnect'.`
+          : `${serverName} requires authentication. Use the 'Authenticate' option.`,
+        success: false,
+      };
+    }
+    case 'failed': {
+      const detail = client.error;
+      return {
+        message: detail ? `Failed to reconnect to ${serverName}: ${detail}` : `Failed to reconnect to ${serverName}.`,
+        success: false,
+      };
+    }
+    default:
+      return {
+        message: `Unknown result when reconnecting to ${serverName}.`,
+        success: false,
+      };
+  }
+}
 
 type MenuAction =
   | 'install-extension'
@@ -56,6 +94,7 @@ function ClaudeInChromeMenu({
 }: Props): React.ReactNode {
   const mcpClients = useAppState(s => s.mcp.clients);
   const setAppState = useSetAppState();
+  const reconnectMcpServer = useOptionalMcpReconnect();
   const [selectKey, setSelectKey] = useState(0);
   const [enabledByDefault, setEnabledByDefault] = useState(configEnabled ?? false);
   const [showInstallHint, setShowInstallHint] = useState(false);
@@ -63,6 +102,17 @@ function ClaudeInChromeMenu({
   const [sessionBusy, setSessionBusy] = useState(false);
   const [localConnectHint, setLocalConnectHint] = useState<string | null>(null);
   const [localInstallHint, setLocalInstallHint] = useState<string | null>(null);
+  const [reconnectStatus, setReconnectStatus] = useState<{
+    text: string;
+    color: 'warning' | 'error';
+  } | null>(null);
+  const reconnectingRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const localPackageDir = resolveLocalChromeExtensionPackageDir();
 
   const isHomespace = process.env.USER_TYPE === 'ant' && isRunningOnHomespace();
@@ -284,14 +334,55 @@ function ClaudeInChromeMenu({
           }
         })();
         break;
-      case 'reconnect':
-        // Official densable: open reconnect page, then return to REPL (not stuck in dialog).
-        void isChromeExtensionInstalled().then(installed => {
-          setIsExtensionInstalled(installed);
+      case 'reconnect': {
+        setSelectKey(k => k + 1);
+        void isChromeExtensionInstalled().then(extInstalled => {
+          setIsExtensionInstalled(extInstalled);
+          if (extInstalled) {
+            setShowInstallHint(false);
+          }
         });
-        openUrl(CHROME_RECONNECT_URL);
-        onDone('Opened official Chrome reconnect page (clau.de/chrome/reconnect).');
+        if (reconnectingRef.current) break;
+        if (isConnected || isPending) {
+          setReconnectStatus(null);
+          openUrl(CHROME_RECONNECT_URL);
+          break;
+        }
+        if (!reconnectMcpServer) {
+          setReconnectStatus({
+            text: "Reconnect isn't available from this view. Open /mcp, select claude-in-chrome, and choose Reconnect.",
+            color: 'warning',
+          });
+          break;
+        }
+        reconnectingRef.current = true;
+        setReconnectStatus({ text: 'Reconnecting\u2026', color: 'warning' });
+        void (async () => {
+          try {
+            const result = await reconnectMcpServer(CLAUDE_IN_CHROME_MCP_SERVER_NAME);
+            const { message, success } = formatChromeReconnectOutcome(result, CLAUDE_IN_CHROME_MCP_SERVER_NAME);
+            if (!mountedRef.current) return;
+            if (success) {
+              openUrl(CHROME_RECONNECT_URL);
+              onDone(
+                `${message} Its browser tools are back in this session. If a browser action still doesn't work, check that Chrome is open and the extension is signed in.`,
+              );
+            } else {
+              setReconnectStatus({ text: message + RECONNECT_RETRY_HINT, color: 'error' });
+            }
+          } catch (error) {
+            if (!mountedRef.current) return;
+            const detail = error instanceof Error ? error.message : String(error);
+            setReconnectStatus({
+              text: `Error reconnecting to ${CLAUDE_IN_CHROME_MCP_SERVER_NAME}: ${detail}` + RECONNECT_RETRY_HINT,
+              color: 'error',
+            });
+          } finally {
+            reconnectingRef.current = false;
+          }
+        })();
         break;
+      }
       case 'connect-local':
         connectLocal();
         break;
@@ -437,6 +528,8 @@ function ClaudeInChromeMenu({
             {localInstallHint && <Text color="warning">{localInstallHint}</Text>}
 
             {localConnectHint && <Text color="warning">{localConnectHint}</Text>}
+
+            {reconnectStatus && <Text color={reconnectStatus.color}>{reconnectStatus.text}</Text>}
 
             <Text>
               <Text dimColor>Usage: </Text>

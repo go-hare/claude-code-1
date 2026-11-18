@@ -524,6 +524,9 @@ export async function updatePluginCli(
         newVersion: result.newVersion,
       })
     } else {
+      if (result.folderNote !== undefined) {
+        writeToStdout(`${result.folderNote}\n`)
+      }
       writeToStdout(`${Io(`${figures.tick} ${result.message}`)}\n`)
     }
 

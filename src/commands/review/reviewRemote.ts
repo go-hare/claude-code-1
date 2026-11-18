@@ -37,6 +37,10 @@ import {
   execFileNoThrowWithCwd,
 } from '../../utils/execFileNoThrow.js'
 import {
+  formatSeedTamperedError,
+  probeSeedGitLayout,
+} from '../../utils/teleport/seedGitLayout.js'
+import {
   findGitRoot,
   getBranch,
   getDefaultBranch,
@@ -54,6 +58,36 @@ import {
 } from './githubAccessPrecheck.js'
 
 /** densable H1g — default CCR bundle cap (100 MiB) */
+
+/**
+ * #81 SEA (@294657577): Refuse `/ultrareview` on a local branch when the
+ * repository keeps its branches outside `.git` (e.g. git 2.54+ reftable or
+ * external ref/commondir storage), instead of silently leaving uncommitted
+ * work out of the upload.
+ */
+export async function checkGitBranchStorageForUltrareview(
+  cwd: string,
+  invocation = '/ultrareview',
+): Promise<string | null> {
+  const layout = await probeSeedGitLayout(cwd)
+  if (layout.kind === 'tampered') {
+    if (layout.misplaced === 'reftable' || layout.misplaced === 'common_dir') {
+      return formatSeedTamperedError(layout)
+    }
+  }
+  const refFmt = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['rev-parse', '--show-ref-format'],
+    { cwd, preserveOutputOnError: false },
+  )
+  if (refFmt.code === 0) {
+    const fmt = refFmt.stdout.trim()
+    if (fmt && fmt !== 'files') {
+      return `Ultrareview cannot upload this local branch because this repository stores its branches outside .git (ref format: ${fmt}), so uncommitted changes cannot be safely bundled. Push a PR and use \`${invocation} <PR#>\` instead.`
+    }
+  }
+  return null
+}
 const DEFAULT_CCR_BUNDLE_MAX_BYTES = 100 * 1024 * 1024
 
 /** Cast safe enum/tag strings into analytics metadata (densable `ke`/`be`). */
@@ -1264,6 +1298,14 @@ export async function launchRemoteReview(
 
     logPrArgRecovery('succeeded')
     launchMode = 'pr'
+    const refStorageRefusal = await checkGitBranchStorageForUltrareview(
+      getCwd(),
+      invocation,
+    )
+    if (refStorageRefusal !== null) {
+      return [{ type: 'text', text: refStorageRefusal }]
+    }
+
     session = await teleportToRemote({
       initialMessage: null,
       description: `ultrareview: ${repo.owner}/${repo.name}#${prNumber}`,
@@ -1680,6 +1722,14 @@ export async function launchRemoteReview(
       logFetchRecovery('succeeded')
       launchMode = 'branch'
       scopeDiffStat = diffStat.trim()
+    }
+
+    const refStorageRefusal = await checkGitBranchStorageForUltrareview(
+      getCwd(),
+      invocation,
+    )
+    if (refStorageRefusal !== null) {
+      return [{ type: 'text', text: refStorageRefusal }]
     }
 
     session = await teleportToRemote({

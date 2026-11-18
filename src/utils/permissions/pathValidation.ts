@@ -1,6 +1,7 @@
 import memoize from 'lodash-es/memoize.js'
 import { homedir } from 'os'
 import { dirname, isAbsolute, resolve } from 'path'
+import { FILE_READ_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileReadTool/prompt.js'
 import type { ToolPermissionContext } from '../../Tool.js'
 import { getPlatform } from '../../utils/platform.js'
 import { posixPathToWindowsPath } from '../windowsPaths.js'
@@ -32,6 +33,7 @@ import type { PermissionDecisionReason } from './PermissionResult.js'
 
 const MAX_DIRS_TO_LIST = 5
 const GLOB_PATTERN_REGEX = /[*?[\]{}]/
+const BRACE_CHARACTER_REGEX = /[{}]/
 
 export type FileOperationType = 'read' | 'write' | 'create'
 
@@ -459,6 +461,109 @@ export function isDangerousRemovalPath(resolvedPath: string): boolean {
   return false
 }
 
+/** Gold mGn — true when a glob precedes a `..` segment. */
+export function hasGlobBeforeDotDot(pathStr: string): boolean {
+  const segments = pathStr.split(/[\\/]+/)
+  return segments.some((seg, idx) => {
+    if (seg !== '..') return false
+    const before = segments.slice(0, idx).join('/')
+    return (
+      GLOB_PATTERN_REGEX.test(before) ||
+      (before.includes('[') &&
+        segments
+          .slice(idx + 1)
+          .join('/')
+          .includes(']'))
+    )
+  })
+}
+
+function hasReadDenyRules(context: ToolPermissionContext): boolean {
+  return Object.values(context.alwaysDenyRules).some(rules =>
+    rules?.some(
+      r => r === FILE_READ_TOOL_NAME || r.startsWith(`${FILE_READ_TOOL_NAME}(`),
+    ),
+  )
+}
+
+/** Gold J() — resolve path segments across `..` to surface explicit deny/safetyCheck reasons. */
+function resolveTraversalForDenyCheck(
+  cleanPath: string,
+  cwd: string,
+  context: ToolPermissionContext,
+  operationType: FileOperationType,
+): ResolvedPathCheckResult | undefined {
+  const fs = getFsImplementation()
+  const full = isAbsolute(cleanPath) ? cleanPath : `${cwd}/${cleanPath}`
+  let base = '/'
+  let pending: string[] = []
+  for (const seg of full.split('/')) {
+    if (seg === '' || seg === '.') continue
+    if (seg !== '..') {
+      pending.push(seg)
+      continue
+    }
+    if (pending.length > 0) {
+      const resolvedPrefix = safeResolvePath(fs, resolve(base, ...pending))
+      if (!resolvedPrefix.isCanonical) return undefined
+      base = resolvedPrefix.resolvedPath
+      pending = []
+    }
+    base = dirname(base)
+  }
+  const target = resolve(base, ...pending)
+  const { resolvedPath, isCanonical } = safeResolvePath(fs, target)
+  const res = isPathAllowed(
+    resolvedPath,
+    context,
+    operationType,
+    isCanonical ? [resolvedPath] : undefined,
+  )
+  if (res.allowed || res.decisionReason === undefined) {
+    return undefined
+  }
+  return {
+    allowed: res.allowed,
+    resolvedPath,
+    decisionReason: res.decisionReason,
+  }
+}
+
+/** Gold Z() — surface deny rules, safety checks, or glob-before-`..` read blocks. */
+function checkPathTraversalOverride(
+  cleanPath: string,
+  cwd: string,
+  context: ToolPermissionContext,
+  operationType: FileOperationType,
+): ResolvedPathCheckResult | undefined {
+  if (getPlatform() === 'windows') return undefined
+  const inner = resolveTraversalForDenyCheck(
+    cleanPath,
+    cwd,
+    context,
+    operationType,
+  )
+  if (
+    operationType === 'read' &&
+    inner?.decisionReason?.type !== 'rule' &&
+    hasGlobBeforeDotDot(cleanPath) &&
+    (context.blockReadsOutsideWorkingDirectories === true ||
+      hasReadDenyRules(context))
+  ) {
+    return {
+      allowed: false,
+      resolvedPath: cleanPath,
+      decisionReason: {
+        type: 'safetyCheck',
+        reason: `A glob before the '..' in '${cleanPath}' is expanded by the shell before the path is opened, so the target cannot be checked against the read block (permissions.blockReadsOutsideWorkingDirectories) or the Read deny rules. Spell the path without the glob.`,
+        classifierApprovable: false,
+        circuitBreaker: 'outsideReadsBlocked',
+      },
+    }
+  }
+  return inner
+}
+
 /**
  * Validates a file system path, handling tilde expansion and glob patterns.
  * Returns whether the path is allowed and the resolved path for error messages.
@@ -528,6 +633,45 @@ export function validatePath(
     }
   }
 
+  // densable IRr / SAn: `..` after a real directory segment can follow a
+  // symlink outside the working directory — always ask (but surface explicit
+  // deny rules, safety checks, or glob-before-`..` read blocks first).
+  if (containsPathTraversal(cleanPath)) {
+    return (
+      checkPathTraversalOverride(
+        cleanPath,
+        cwd,
+        toolPermissionContext,
+        operationType,
+      ) ?? {
+        allowed: false,
+        resolvedPath: cleanPath,
+        decisionReason: {
+          type: 'other',
+          reason:
+            "Path contains '..' traversal after a directory segment, which may follow a symlink outside the working directory",
+        },
+      }
+    )
+  }
+
+  // Gold H.test(i) — brace characters in write/create targets may brace-expand
+  // to paths outside the working directory.
+  if (
+    (operationType === 'write' || operationType === 'create') &&
+    BRACE_CHARACTER_REGEX.test(cleanPath)
+  ) {
+    return {
+      allowed: false,
+      resolvedPath: cleanPath,
+      decisionReason: {
+        type: 'other',
+        reason:
+          'Brace characters in write target require manual approval — bash may brace-expand to paths outside the working directory',
+      },
+    }
+  }
+
   // SECURITY: Block glob patterns in write/create operations
   // Write tools don't expand globs - they use paths literally.
   // Allowing globs in write operations could bypass security checks.
@@ -553,20 +697,6 @@ export function validatePath(
       toolPermissionContext,
       operationType,
     )
-  }
-
-  // densable IRr / SAn: `..` after a real directory segment can follow a
-  // symlink outside the working directory — always ask.
-  if (containsPathTraversal(cleanPath)) {
-    return {
-      allowed: false,
-      resolvedPath: cleanPath,
-      decisionReason: {
-        type: 'other',
-        reason:
-          "Path contains '..' traversal after a directory segment, which may follow a symlink outside the working directory",
-      },
-    }
   }
 
   // Resolve path

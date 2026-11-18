@@ -118,7 +118,14 @@ export async function setup(
     // and $CLAUDE_CODE_MESSAGING_SOCKET is exported before any hook
     // (SessionStart in particular) can spawn and snapshot process.env.
     if (feature('UDS_INBOX')) {
-      if (!isHarborKiteEnabled()) {
+      const { isRestrictedSession } = await import('./utils/restricted.js')
+      if (isRestrictedSession()) {
+        logForDebugging(
+          messagingSocketPath === undefined
+            ? '[uds-messaging] Skipped: restricted session'
+            : '[uds-messaging] Skipped: restricted session (--messaging-socket-path ignored)',
+        )
+      } else if (!isHarborKiteEnabled()) {
         logForDebugging(
           '[uds-messaging] Skipped: cross-session messaging gate off',
         )

@@ -16,6 +16,7 @@ import {
 } from '../../services/analytics/index.js'
 
 import { getClaudeAIOAuthTokens } from '../auth.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import { enableConfigs, getGlobalConfig, saveGlobalConfig } from '../config.js'
 import { logForDebugging } from '../debug.js'
 import { isEnvTruthy } from '../envUtils.js'
@@ -162,6 +163,15 @@ export function createChromeContext(
     },
     getPersistedDeviceId: () => {
       return getGlobalConfig().chromeExtension?.pairedDeviceId
+    },
+    getToolCallTimeoutMs: (toolName: string) => {
+      if (toolName !== 'browser_batch') return 30_000
+      return getFeatureValue_CACHED_MAY_BE_STALE(
+        'tengu_serene_gizmo',
+        false,
+      ) === true
+        ? 150_000
+        : 90_000
     },
     ...(chromeBridgeUrl && {
       bridgeConfig: {

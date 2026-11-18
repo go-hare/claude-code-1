@@ -222,3 +222,259 @@ export function sanitizeDisplayText(text: string): string {
 export function displaySanitizeChanged(text: string): boolean {
   return sanitizeDisplayText(text) !== text
 }
+
+/** densable WP — chunk size when soft-wrapping lines > LINE_CHAR_CAP (4096). */
+const SOFT_WRAP_CHUNK_CAP = 256
+
+/**
+ * densable ROa — split lines exceeding LINE_CHAR_CAP (4096) into <=256-char
+ * grapheme-safe chunks joined by `\n` so terminal soft-wrap does not stall.
+ */
+export function softWrapLongLines(text: string): string {
+  if (text.length <= LINE_CHAR_CAP) return text
+  const segmenter = getGraphemeSegmenter()
+  return text
+    .split('\n')
+    .map(line => {
+      if (line.length <= LINE_CHAR_CAP) return line
+      const chunks: string[] = []
+      let cur = ''
+      for (const { segment } of segmenter.segment(line)) {
+        if (
+          cur.length > 0 &&
+          cur.length + segment.length > SOFT_WRAP_CHUNK_CAP
+        ) {
+          chunks.push(cur)
+          cur = segment
+        } else {
+          cur += segment
+        }
+      }
+      if (cur.length > 0) chunks.push(cur)
+      return chunks.join('\n')
+    })
+    .join('\n')
+}
+
+/** densable ba — replace line/paragraph separators with U+FFFD for single-line display. */
+export function sanitizeNewlinesForDisplay(text: string): string {
+  return text.replace(/[\n\r\u2028\u2029]/g, '\uFFFD')
+}
+
+/** densable pz — strip Cc/Cf/Cs/Zl/Zp control/format/surrogate/separator chars. */
+export function stripControlChars(text: unknown): string {
+  return typeof text === 'string'
+    ? text.replace(/[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/gu, '')
+    : ''
+}
+
+/** densable Pkt — strip Cc/Cf/Cs/Zl/Zp except `\n` and `\t`. */
+export function stripControlCharsKeepWhitespace(text: unknown): string {
+  return typeof text === 'string'
+    ? text.replace(/(?![\n\t])[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/gu, '')
+    : ''
+}
+
+// --- densable eui / pe / ce — O(n) combining-mark run guard for normalize() ---
+
+const EXTRA_COMBINING_MARKS =
+  '\\u05C8\\u05C9\\u1ADE\\u1ADF\\u1AEC-\\u1AF0\\u{10ECB}-\\u{10ECF}\\u{10EF0}-\\u{10EF9}\\u{1D127}\\u{1D128}\\u{1D250}-\\u{1D252}\\u{1D25B}\\u{1D25C}\\u{1D25F}\\u{1D280}\\u{1D281}'
+const COMBINING_MARK_CLASS = `[\\p{M}\\uFF9E\\uFF9F${EXTRA_COMBINING_MARKS}]`
+/** densable ce */
+const COMBINING_RUN_RE = new RegExp(`${COMBINING_MARK_CLASS}{32,}`, 'gu')
+/** densable le */
+const SINGLE_COMBINING_RE = new RegExp(COMBINING_MARK_CLASS, 'u')
+
+type CombiningOrderEntry = { order: number; sample: string }
+const cccOrderCache = new Map<number, CombiningOrderEntry | null>()
+const cccOrderTable: CombiningOrderEntry[] = []
+const nfkdCache = new Map<number, number[]>()
+
+function reordersBefore(a: string, b: string): boolean {
+  return a !== b && (a + b).normalize('NFD') === b + a
+}
+
+function getCombiningOrder(cp: number): CombiningOrderEntry | null {
+  const cached = cccOrderCache.get(cp)
+  if (cached !== undefined) return cached
+  const ch = String.fromCodePoint(cp)
+  let entry: CombiningOrderEntry | null = null
+  if (
+    ch === '\u0334' ||
+    reordersBefore(ch, '\u0334') ||
+    reordersBefore('\u0345', ch)
+  ) {
+    let lo = 0
+    let hi = cccOrderTable.length
+    while (lo < hi && entry === null) {
+      const mid = (lo + hi) >> 1
+      const probe = cccOrderTable[mid]!
+      if (reordersBefore(ch, probe.sample)) lo = mid + 1
+      else if (reordersBefore(probe.sample, ch)) hi = mid
+      else entry = probe
+    }
+    if (entry === null) {
+      entry = { order: lo, sample: ch }
+      cccOrderTable.splice(lo, 0, entry)
+      for (let i = lo + 1; i < cccOrderTable.length; i++) {
+        cccOrderTable[i]!.order = i
+      }
+    }
+  }
+  cccOrderCache.set(cp, entry)
+  return entry
+}
+
+function getNfkdCodePoints(cp: number): number[] {
+  let cached = nfkdCache.get(cp)
+  if (cached === undefined) {
+    cached = Array.from(
+      String.fromCodePoint(cp).normalize('NFKD'),
+      c => c.codePointAt(0)!,
+    )
+    nfkdCache.set(cp, cached)
+  }
+  return cached
+}
+
+const CODE_POINT_CHUNK = 4096
+function fromCodePointsChunked(buf: Int32Array, len: number): string {
+  let out = ''
+  for (let i = 0; i < len; i += CODE_POINT_CHUNK) {
+    out += String.fromCodePoint(
+      ...buf.subarray(i, Math.min(i + CODE_POINT_CHUNK, len)),
+    )
+  }
+  return out
+}
+
+/** densable pe — O(n) canonical-order sort for long combining-mark runs. */
+function sortCombiningRun(run: string): string {
+  let buf = new Int32Array(run.length + 16)
+  let len = 0
+  for (let i = 0; i < run.length; ) {
+    const cp = run.codePointAt(i)!
+    i += cp > 0xffff ? 2 : 1
+    for (const expanded of getNfkdCodePoints(cp)) {
+      if (len === buf.length) {
+        const grown = new Int32Array(buf.length * 2)
+        grown.set(buf)
+        buf = grown
+      }
+      buf[len++] = expanded
+      getCombiningOrder(expanded)
+    }
+  }
+  const orders = new Int16Array(len)
+  for (let i = 0; i < len; i++) {
+    orders[i] = cccOrderCache.get(buf[i]!)?.order ?? -1
+  }
+  const sorted = buf.slice(0, len)
+  const counts = new Int32Array(cccOrderTable.length)
+  for (let i = 0; i < len; ) {
+    let end = i
+    let alreadySorted = true
+    while (end < len && orders[end]! >= 0) {
+      alreadySorted &&= end === i || orders[end - 1]! <= orders[end]!
+      end++
+    }
+    if (alreadySorted) {
+      i = end + 1
+      continue
+    }
+    counts.fill(0)
+    for (let k = i; k < end; k++) counts[orders[k]!]!++
+    let offset = i
+    for (let k = 0; k < counts.length; k++) {
+      const c = counts[k]!
+      counts[k] = offset
+      offset += c
+    }
+    for (let k = i; k < end; k++) {
+      sorted[counts[orders[k]!]!++] = buf[k]!
+    }
+    i = end
+  }
+  return fromCodePointsChunked(sorted, len)
+}
+
+/** densable eui — pre-sort combining runs >= 32 chars before normalize(). */
+export function guardCombiningRuns(text: string): string {
+  return text.length < 32
+    ? text
+    : text.replace(COMBINING_RUN_RE, sortCombiningRun)
+}
+
+const NORMALIZE_CHUNK = 128
+function isStarterCodePoint(cp: number): boolean {
+  if (cp < 0x300) return true
+  const cached = nfkdCache.get(cp)
+  if (
+    cached === undefined &&
+    !SINGLE_COMBINING_RE.test(String.fromCodePoint(cp))
+  ) {
+    return true
+  }
+  return getCombiningOrder((cached ?? getNfkdCodePoints(cp))[0]!) === null
+}
+
+function findNextStarter(text: string, from: number): number {
+  let i = from
+  if (
+    i < text.length &&
+    (text.charCodeAt(i) & 0xfc00) === 0xdc00 &&
+    (text.charCodeAt(i - 1) & 0xfc00) === 0xd800
+  ) {
+    i++
+  }
+  while (i < text.length) {
+    const cp = text.codePointAt(i)!
+    if (isStarterCodePoint(cp)) break
+    i += cp > 0xffff ? 2 : 1
+  }
+  return Math.min(i, text.length)
+}
+
+function findLastStarter(text: string): number {
+  let i = text.length
+  while (i > 0) {
+    i--
+    if (
+      i > 0 &&
+      (text.charCodeAt(i) & 0xfc00) === 0xdc00 &&
+      (text.charCodeAt(i - 1) & 0xfc00) === 0xd800
+    ) {
+      i--
+    }
+    if (isStarterCodePoint(text.codePointAt(i)!)) return i
+  }
+  return 0
+}
+
+/** densable V — chunked NFKC/NFKD normalization guarded by eui. */
+function safeNormalize(text: string, form: 'NFKC' | 'NFKD'): string {
+  const guarded = guardCombiningRuns(text)
+  if (guarded.length <= NORMALIZE_CHUNK) return guarded.normalize(form)
+  const parts: string[] = []
+  let carry = ''
+  for (let i = 0; i < guarded.length; ) {
+    const next = findNextStarter(guarded, i + NORMALIZE_CHUNK)
+    const normalized = (carry + guarded.slice(i, next)).normalize(form)
+    const split =
+      next === guarded.length ? normalized.length : findLastStarter(normalized)
+    parts.push(normalized.slice(0, split))
+    carry = normalized.slice(split)
+    i = next
+  }
+  return parts.join('')
+}
+
+/** densable A6 */
+export function safeNormalizeNFKC(text: string): string {
+  return safeNormalize(text, 'NFKC')
+}
+
+/** densable lUa */
+export function safeNormalizeNFKD(text: string): string {
+  return safeNormalize(text, 'NFKD')
+}

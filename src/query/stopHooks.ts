@@ -45,7 +45,12 @@ import {
 } from '../utils/messages.js'
 import type { SystemPrompt } from '../utils/systemPromptType.js'
 import { getTaskListId, listTasks } from '../utils/tasks.js'
-import { getAgentName, getTeamName, isTeammate } from '../utils/teammate.js'
+import {
+  getAgentId,
+  getAgentName,
+  getTeamName,
+  isTeammate,
+} from '../utils/teammate.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const jobClassifierModule = feature('TEMPLATES')
@@ -810,7 +815,11 @@ export async function* handleStopHooks(
     }
 
     // After Stop hooks pass, run TeammateIdle and TaskCompleted hooks if this is a teammate
-    if (isTeammate()) {
+    // Official @298812800: `if (eo !== void 0 && h.agentId === eo.agentId)` — skip subagents/forks spawned by a teammate.
+    if (
+      isTeammate() &&
+      (!toolUseContext.agentId || toolUseContext.agentId === getAgentId())
+    ) {
       const teammateName = getAgentName() ?? ''
       const teamName = getTeamName() ?? ''
       teammateBlockingErrors = []

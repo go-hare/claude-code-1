@@ -651,17 +651,37 @@ export async function fetchContentWithTavily(
   return entry
 }
 
+/** Surrogate-pair safe slice from character offset (`pa(text, text.length - offset)`). */
+export function sliceFromOffset(text: string, offset: number): string {
+  if (offset <= 0) return text
+  const remaining = text.length - offset
+  if (remaining <= 0) return ''
+  const sliced = text.slice(-remaining)
+  const code = sliced.charCodeAt(0)
+  return code >= 0xdc00 && code <= 0xdfff ? sliced.slice(1) : sliced
+}
+
+/** Surrogate-pair safe prefix slice (`Z(text, max)`). */
+export function sliceToMax(text: string, max: number): string {
+  if (max <= 0) return ''
+  if (text.length <= max) return text
+  const sliced = text.slice(0, max)
+  const code = sliced.charCodeAt(max - 1)
+  return code >= 0xd800 && code <= 0xdbff ? sliced.slice(0, -1) : sliced
+}
+
 export async function applyPromptToMarkdown(
   prompt: string,
   markdownContent: string,
   signal: AbortSignal,
   isNonInteractiveSession: boolean,
   isPreapprovedDomain: boolean,
+  contentLead = '',
 ): Promise<string> {
   // Truncate content to avoid "Prompt is too long" errors from the secondary model
   const truncatedContent =
     markdownContent.length > MAX_MARKDOWN_LENGTH
-      ? markdownContent.slice(0, MAX_MARKDOWN_LENGTH) +
+      ? sliceToMax(markdownContent, MAX_MARKDOWN_LENGTH) +
         '\n\n[Content truncated due to length...]'
       : markdownContent
 
@@ -672,7 +692,7 @@ export async function applyPromptToMarkdown(
   )
   const assistantMessage = await queryHaiku({
     systemPrompt: asSystemPrompt([]),
-    userPrompt: modelPrompt,
+    userPrompt: `${contentLead}${modelPrompt}`,
     signal,
     options: {
       // densable querySource:"web_fetch_apply" — in swh/FOREGROUND_529 so 529/429

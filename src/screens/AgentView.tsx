@@ -65,6 +65,7 @@ import {
   glyphColor,
   sortSessions,
   jobLabel,
+  formatFleetRowWhen,
   formatJobAge,
   pickIcon,
   fleetHeaderBudget,
@@ -257,6 +258,24 @@ const EMPTY_REMOTE_JOBS: FleetRemoteJob[] = [];
 
 /** Module-level arm for densable double-enter force fresh after tYo. */
 let forceFreshNextShort: string | null = null;
+let restartOfferedJobId: string | null = null;
+const FLEET_RESTART_OFFER_MSG =
+  "Press enter again to restart this session — it isn't responding (its conversation is saved and resumes).";
+const FLEET_RESTART_STOP_UNCONFIRMED_MSG =
+  "Press enter to try the restart again — couldn't stop the unresponsive session yet (the background service may be restarting).";
+
+export function findNonHeaderRowIndex(rows: ReadonlyArray<{ kind: string }>, preferredIndex: number): number {
+  if (rows.length === 0) return 0;
+  const clamped = Math.max(0, Math.min(preferredIndex, rows.length - 1));
+  if (rows[clamped]?.kind !== 'header') return clamped;
+  for (let i = clamped - 1; i >= 0; i--) {
+    if (rows[i]?.kind !== 'header') return i;
+  }
+  for (let i = clamped + 1; i < rows.length; i++) {
+    if (rows[i]?.kind !== 'header') return i;
+  }
+  return clamped;
+}
 /** densable h.deadEpochOfferedJobId + #u timestamp. */
 let deadEpochOfferedJobId: string | null = null;
 let deadEpochOfferedAt = 0;
@@ -408,9 +427,29 @@ export function worstPrReviewState(
 async function sendReplyToSession(
   session: SessionEntry | undefined,
   text: string,
+  opts?: { nextTurn?: boolean },
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!session) {
     return { ok: false, error: 'No session selected' };
+  }
+  if (opts?.nextTurn && session.short) {
+    try {
+      const { sendControlRequest } = await import('../daemon/controlSocket.js');
+      const res = await sendControlRequest({
+        proto: 1,
+        op: 'reply',
+        short: session.short,
+        text,
+        nextTurn: true,
+      } as never);
+      if (res.ok) return { ok: true };
+      return {
+        ok: false,
+        error: typeof res.error === 'string' && res.error ? res.error : 'Reply failed',
+      };
+    } catch (e) {
+      return { ok: false, error: `Reply failed: ${(e as Error).message}` };
+    }
   }
   if (!session.messagingSocketPath) {
     const short = session.short ?? session.sessionId?.slice(0, 8) ?? '?';
@@ -523,6 +562,7 @@ function SessionRow({
   logTail,
   deleteRefused,
   loopKickCount,
+  loopNextAt,
   liveStatus,
   renameValue,
   renameCursor,
@@ -556,6 +596,8 @@ function SessionRow({
   deleteRefused?: string;
   /** Official Ss `loopKickCount:Cs.get(sessionId)?.count`. */
   loopKickCount?: number;
+  /** Official cl/Br `nextAt:Cs.get(sessionId)?.nextAt`. */
+  loopNextAt?: number | null;
   /** Official Ss `status:xs(at)` — leftover glyph overlay only, not list grouping. */
   liveStatus?: string;
   renameValue: string;
@@ -574,7 +616,7 @@ function SessionRow({
   const { color, dim } = glyphColor(glyphBand, activity, session);
   const icon = pickIcon(band, activity, session.pinned);
   const name = jobLabel(session);
-  const age = formatJobAge(session.startedAt);
+  const age = formatFleetRowWhen(session.startedAt, loopNextAt);
   const artifact = sessionArtifactLabel(session);
 
   // Official xhO detail: "→ to return" only when origin session is focused.
@@ -1131,7 +1173,15 @@ function AgentViewApp({
   initialError?: string | null;
   onAction?: (
     action:
-      | { type: 'open'; sessionId: string; short: string; logPath?: string }
+      | {
+          type: 'open';
+          sessionId: string;
+          short: string;
+          logPath?: string;
+          forceUnresponsive?: boolean;
+          replyOnResume?: boolean;
+          afterNoResponse?: boolean;
+        }
       | { type: 'done'; resumeHintRequested?: boolean }
       | { type: 'login' },
   ) => void;
@@ -1401,6 +1451,8 @@ function AgentViewApp({
   /** densable attach.attachingJobId. */
   const attachingJobIdRef = useRef<string | null>(null);
   const [sessionModel, setSessionModel] = useState<string | undefined>(undefined);
+  const [sessionEffort, setSessionEffort] = useState<string | undefined>(undefined);
+  void sessionEffort;
   const lastRelaunchRef = useRef(0);
   /** Monotonic refresh generation — stale async passes must not clobber newer results. */
   const refreshGenerationRef = useRef(0);
@@ -2443,13 +2495,13 @@ function AgentViewApp({
     setSelectedIndex(simpleView ? 0 : fleetHomeIdx(flatRows, getCwd()));
   }, [flatRows, restoreSessionId, simpleView]);
 
-  // Clamp selection
+  // Clamp selection (avoid landing on a section header after bottom-row deletion)
   useEffect(() => {
     if (selectedIndex >= flatRows.length && flatRows.length > 0) {
       setMouseSelectedIndex(null);
-      setSelectedIndex(flatRows.length - 1);
+      setSelectedIndex(findNonHeaderRowIndex(flatRows, flatRows.length - 1));
     }
-  }, [flatRows.length, selectedIndex]);
+  }, [flatRows, selectedIndex]);
 
   // Official fl: scroll focused row into view inside main ScrollBox
   useLayoutEffect(() => {
@@ -2663,6 +2715,30 @@ function AgentViewApp({
           } else {
             setError(null);
             setInfo('Usage: /model <name> — session-scoped, not persisted');
+          }
+          return;
+        }
+        if (quitToken === '/effort' || quitToken.startsWith('/effort ')) {
+          const arg = dispatchInput.trim().slice(7).trim();
+          const lower = arg.toLowerCase();
+          if (/^(default|auto)$/.test(lower)) {
+            setDispatchInput('');
+            setCursorOffset(0);
+            setSessionEffort(undefined);
+            setError(null);
+            setInfo('Effort for new sessions reset to the default');
+          } else if (['low', 'medium', 'high', 'xhigh', 'max'].includes(lower)) {
+            setDispatchInput('');
+            setCursorOffset(0);
+            setSessionEffort(lower);
+            setError(null);
+            setInfo(`Effort set to ${lower} for new sessions from this window (not saved)`);
+          } else if (!arg) {
+            setError(null);
+            setInfo('Usage: /effort <low|medium|high|xhigh|max|default>');
+          } else {
+            setError(null);
+            setInfo(`Unknown effort '${arg}' — use low, medium, high, xhigh, max or default`);
           }
           return;
         }
@@ -3196,8 +3272,18 @@ function AgentViewApp({
   // -------------------------------------------------------------------------
 
   const checkAndAttach = useCallback(
-    async (short: string, session: SessionEntry, onActionCb: typeof onAction, setErr: (msg: string | null) => void) => {
+    async (
+      short: string,
+      session: SessionEntry,
+      onActionCb: typeof onAction,
+      setErr: (msg: string | null) => void,
+      trigger: 'enter' | 'esc' | 'click' = 'enter',
+    ) => {
       const jobId = session.short ?? short;
+      const isExec = isFleetExecJob({
+        template: session.template,
+        respawnFlags: session.respawnFlags,
+      });
       const held =
         terminalHolderOf(
           {
@@ -3214,10 +3300,7 @@ function AgentViewApp({
           state: session.daemonState,
           tempo: session.tempo,
         }),
-        isExec: isFleetExecJob({
-          template: session.template,
-          respawnFlags: session.respawnFlags,
-        }),
+        isExec,
         jobId,
         forkRefusedJobId: forceFreshNextShort,
         deadEpochGoneJobId,
@@ -3240,6 +3323,7 @@ function AgentViewApp({
       }
       if (gate.action === 'offer') {
         forceFreshNextShort = null;
+        restartOfferedJobId = null;
         deadEpochOfferedJobId = jobId;
         deadEpochOfferedAt = Date.now();
         setErr(gate.error);
@@ -3252,6 +3336,16 @@ function AgentViewApp({
       if (gate.clearOffered) {
         deadEpochOfferedJobId = null;
       }
+      // Official #49: only confirm unresponsive restart on non-Esc trigger when offer banner is active
+      const forceUnresponsive =
+        trigger !== 'esc' &&
+        (error === FLEET_RESTART_OFFER_MSG || error === FLEET_RESTART_STOP_UNCONFIRMED_MSG) &&
+        restartOfferedJobId === jobId &&
+        !isExec;
+      const afterNoResponse = restartOfferedJobId === jobId;
+      if (afterNoResponse) {
+        restartOfferedJobId = null;
+      }
       // Official: Enter → respawnJob → onAction({type:'open'})
       // Attach goes through daemon control socket, no need to probe PTY socket directly
       if (onActionCb) {
@@ -3260,6 +3354,8 @@ function AgentViewApp({
           sessionId: session.sessionId ?? '',
           short: session.short ?? short,
           logPath: session.logPath,
+          ...(forceUnresponsive ? { forceUnresponsive: true, replyOnResume: session.tempo === 'active' } : {}),
+          ...(afterNoResponse ? { afterNoResponse: true } : {}),
         });
       }
     },
@@ -4125,6 +4221,7 @@ function AgentViewApp({
           setDispatchMode('prompt');
           dispatchVim.setMode('INSERT');
           setVimMode('INSERT');
+          setSelectedIndex(idx => findNonHeaderRowIndex(flatRows, idx));
         } else if (deleteConfirmSessionId || ungroupConfirmSessionId) {
           // densable MD.current → NO(null): cancel delete/ungroup arm first.
           clearPending();
@@ -4235,16 +4332,7 @@ function AgentViewApp({
       }
       const session = getSelectedSession();
       if (!session) {
-        // Header/fold selected: only delete-all when focused on completed header,
-        // and always require a second confirm via deleteConfirmSessionId='*done*'.
-        if (currentRow?.kind === 'header' && currentRow.group === 'done' && done.length > 0) {
-          if (deleteConfirmSessionId === '*done*') {
-            clearDeleteArm();
-            void handleDeleteAll();
-          } else {
-            armDeleteConfirm('*done*');
-          }
-        }
+        // #56 / #61: never bulk-delete a section when focused on a header/fold row
         return;
       }
       // Prefer ungroup when job is in a custom group and second press is ungroup-confirm
@@ -4309,6 +4397,7 @@ function AgentViewApp({
         setDispatchMode('prompt');
         dispatchVimSetModeRef.current('INSERT');
         setVimMode('INSERT');
+        setSelectedIndex(idx => findNonHeaderRowIndex(flatRows, idx));
       } else if (deleteConfirmSessionId || ungroupConfirmSessionId) {
         clearPending();
       } else {
@@ -4718,6 +4807,9 @@ function AgentViewApp({
                     deleteRefused={deleteRefusals.get(session.short ?? '')}
                     loopKickCount={
                       loopJobIds.has(session.short ?? '') ? loopKicks.get(session.sessionId)?.count : undefined
+                    }
+                    loopNextAt={
+                      loopJobIds.has(session.short ?? '') ? loopKicks.get(session.sessionId)?.nextAt : undefined
                     }
                     liveStatus={fleetLiveStatus(
                       {
@@ -5184,7 +5276,7 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
         const { resolveRespawnLaunchPrompt } = await import('../daemon/transcriptProbe.js');
         const resumePointsElsewhere =
           job.state.resumeSessionId !== undefined && job.state.resumeSessionId !== job.state.sessionId;
-        const skipIntentReplay = hasMessages || resumePointsElsewhere;
+        const skipIntentReplay = hasMessages || resumePointsElsewhere || forceFresh;
         const resolvedPrompt = resolveRespawnLaunchPrompt({
           queuedPrompt: job.state.queuedPrompt,
           intent: job.state.intent,

@@ -1,4 +1,5 @@
 import type { z } from 'zod/v4'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { getOriginalCwd } from 'src/bootstrap/state.js'
 import {
   extractOutputRedirections,
@@ -17,7 +18,6 @@ import {
   type FlagArgType,
   GH_READ_ONLY_COMMANDS,
   GIT_READ_ONLY_COMMANDS,
-  PYRIGHT_READ_ONLY_COMMANDS,
   RIPGREP_READ_ONLY_COMMANDS,
   validateFlags,
 } from 'src/utils/shell/readOnlyCommandValidation.js'
@@ -493,16 +493,24 @@ const COMMAND_ALLOWLIST: Record<string, CommandConfig> = {
       '-V': 'none',
       '--version': 'none',
     },
-    // Block BSD-style 'e' modifier which shows environment variables
-    // BSD options are letter-only tokens without a leading dash
+    // Block BSD-style 'e' modifier and unsafe dashed '-e' combinations (#148 SEA ps)
     additionalCommandIsDangerousCallback: (
       _rawCommand: string,
       args: string[],
     ) => {
-      // Check for BSD-style 'e' in letter-only tokens (not -e which is UNIX-style)
-      // A BSD-style option is a token of only letters (no leading dash) containing 'e'
-      return args.some(
-        a => !a.startsWith('-') && /^[a-zA-Z]*e[a-zA-Z]*$/.test(a),
+      const isFlag = (a: string) =>
+        a.startsWith('-') && a.length > 1 && /^-[a-zA-Z0-9_-]/.test(a)
+      const hasBsdE = args.some(a => !isFlag(a) && /[eE]/.test(a))
+      const hasDashedE = args.some(a => /^-[a-zA-Z]*e/.test(a))
+      const allSafeDashed = args.every(
+        a => a === '--forest' || /^-[AacdeFfjlwHLTm]+$/.test(a),
+      )
+      const threadOrForestFlags = args.flatMap(a =>
+        a === '--forest' ? [a] : (a.match(/[HLTm]/g) ?? []),
+      )
+      return (
+        hasBsdE ||
+        (hasDashedE && !(allSafeDashed && threadOrForestFlags.length <= 1))
       )
     },
   },
@@ -1210,7 +1218,7 @@ const COMMAND_ALLOWLIST: Record<string, CommandConfig> = {
   // fdfind is the Debian/Ubuntu package name for fd — same binary, same flags
   fdfind: { safeFlags: { ...FD_SAFE_FLAGS } },
 
-  ...PYRIGHT_READ_ONLY_COMMANDS,
+  // #143 SEA: pyright removed from read-only allowlist (runs python3 in cwd)
   ...DOCKER_READ_ONLY_COMMANDS,
 }
 
@@ -1321,17 +1329,57 @@ const SAFE_TARGET_COMMANDS_FOR_XARGS = [
  * Uses declarative configuration from COMMAND_ALLOWLIST to validate commands and their flags.
  * Handles combined flags, argument validation, and shell quoting bypass detection.
  */
+/**
+ * #76 SEA `A_r` (@290060500): commands whose read-only safety is preserved
+ * even when arguments contain unquoted shell globs (`*`, `?`, `[...]`).
+ * Commands NOT in this set (such as `rg` or `git grep`) must prompt when
+ * arguments would be expanded as wildcards by the shell.
+ */
+export const SAFE_GLOB_READONLY_COMMANDS = new Set([
+  'ls',
+  'cat',
+  'head',
+  'tail',
+  'wc',
+  'stat',
+  'grep',
+  'egrep',
+  'fgrep',
+  'diff',
+  'du',
+  'df',
+  'echo',
+  'strings',
+  'hexdump',
+  'od',
+  'nl',
+  'cut',
+  'column',
+  'tr',
+  'tac',
+  'rev',
+  'cmp',
+  'basename',
+  'dirname',
+  'realpath',
+  'readlink',
+  'sha256sum',
+  'sha1sum',
+  'md5sum',
+  'cd',
+])
+
 export function isCommandSafeViaFlagParsing(command: string): boolean {
   // Parse the command to get individual tokens using shell-quote for accuracy
-  // Handle glob operators by converting them to strings, they don't matter from the perspective
-  // of this function
   const parseResult = tryParseShellCommand(command, env => `$${env}`)
   if (!parseResult.success) return false
 
+  let hasUnquotedGlob = false
   const parsed = parseResult.tokens.map(token => {
     if (typeof token !== 'string') {
       token = token as { op: 'glob'; pattern: string }
       if (token.op === 'glob') {
+        hasUnquotedGlob = true
         return token.pattern
       }
     }
@@ -1350,6 +1398,12 @@ export function isCommandSafeViaFlagParsing(command: string): boolean {
   const tokens = parsed as string[]
 
   if (tokens.length === 0) {
+    return false
+  }
+
+  // #76 SEA `unt`: reject unquoted globs on commands not in SAFE_GLOB_READONLY_COMMANDS
+  // (e.g. `rg foo *`, `git grep foo *` where `*` could expand to `--pre=bash`).
+  if (hasUnquotedGlob && !SAFE_GLOB_READONLY_COMMANDS.has(tokens[0]!)) {
     return false
   }
 
@@ -1443,6 +1497,42 @@ export function isCommandSafeViaFlagParsing(command: string): boolean {
     // `{1..5}` also needs checking (has `{` + `..`).
     if (token.includes('{') && (token.includes(',') || token.includes('..'))) {
       return false
+    }
+  }
+
+  // #76 SEA `Dot` (@284772170): guard Windows git `://` / sentinels and sentinel tokens
+  const hasAnalysisSentinel = (t: string): boolean =>
+    t.includes('__CMDSUB_OUTPUT__') ||
+    t.includes('__TRACKED_VAR__') ||
+    t.includes('__UNCERTAIN_VAR__')
+  if (
+    tokens[0] === 'git' &&
+    getPlatform() === 'windows' &&
+    tokens
+      .slice(commandTokens)
+      .some(t => /:[\\/]{2}/.test(t) || hasAnalysisSentinel(t)) &&
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_jaunty_honey', true)
+  ) {
+    return false
+  }
+  if (tokens.slice(commandTokens).some(hasAnalysisSentinel)) {
+    return false
+  }
+  if (getFeatureValue_CACHED_MAY_BE_STALE('tengu_amber_thimble', true)) {
+    for (let i = commandTokens; i < tokens.length; i++) {
+      const tok = tokens[i]
+      if (!tok) continue
+      if (tok === '--') {
+        if (commandConfig.respectsDoubleDash !== false) break
+        continue
+      }
+      if (
+        tok.startsWith('-') &&
+        tok.length > 1 &&
+        !/^-[a-zA-Z0-9_-]/.test(tok)
+      ) {
+        return false
+      }
     }
   }
 
@@ -1675,75 +1765,122 @@ const READONLY_COMMAND_REGEXES = new Set([
  * @param command The command string to check
  * @returns true if the command contains unquoted glob or expandable `$`
  */
-function containsUnquotedExpansion(command: string): boolean {
-  // Track quote state to avoid false positives for patterns inside quoted strings
+export function containsUnquotedExpansion(
+  command: string,
+): 'variable' | 'glob' | false {
+  // #104 SEA `tnt` (@290059975): distinguish 'variable' vs 'glob',
+  // skip globs inside double quotes (literal in bash/zsh), handle backticks,
+  // # comments at word boundaries, and \\\n line continuations.
   let inSingleQuote = false
   let inDoubleQuote = false
+  let inBacktick = false
   let escaped = false
+  let hasGlob = false
+  let inBracket = false
+  let atWordStart = true
 
   for (let i = 0; i < command.length; i++) {
     const currentChar = command[i]
 
-    // Handle escape sequences
     if (escaped) {
       escaped = false
+      atWordStart = false
       continue
     }
 
-    // SECURITY: Only treat backslash as escape OUTSIDE single quotes. In bash,
-    // `\` inside `'...'` is LITERAL — it does not escape the next character.
-    // Without this guard, `'\'` desyncs the quote tracker: the `\` sets
-    // escaped=true, then the closing `'` is consumed by the escaped-skip
-    // instead of toggling inSingleQuote. Parser stays in single-quote
-    // mode for the rest of the command, missing ALL subsequent expansions.
-    // Example: `ls '\' *` — bash sees glob `*`, but desynced parser thinks
-    // `*` is inside quotes → returns false (glob NOT detected).
-    // Defense-in-depth: hasShellQuoteSingleQuoteBug catches `'\'` patterns
-    // before this function is reached, but we fix the tracker anyway for
-    // consistency with the correct implementations in bashSecurity.ts.
     if (currentChar === '\\' && !inSingleQuote) {
+      if (command[i + 1] === '\n') {
+        i++
+        continue
+      }
       escaped = true
       continue
     }
 
-    // Update quote state
+    if (inBacktick) {
+      if (currentChar === '`') {
+        inBacktick = false
+        atWordStart = false
+      }
+      continue
+    }
+
+    if (currentChar === '`' && !inSingleQuote) {
+      inBacktick = true
+      atWordStart = false
+      continue
+    }
+
+    if (
+      currentChar === '#' &&
+      atWordStart &&
+      !inSingleQuote &&
+      !inDoubleQuote
+    ) {
+      while (i < command.length && command[i] !== '\n') i++
+      atWordStart = true
+      continue
+    }
+
     if (currentChar === "'" && !inDoubleQuote) {
       inSingleQuote = !inSingleQuote
+      atWordStart = false
       continue
     }
 
     if (currentChar === '"' && !inSingleQuote) {
       inDoubleQuote = !inDoubleQuote
+      atWordStart = false
       continue
     }
 
-    // Inside single quotes: everything is literal. Skip.
     if (inSingleQuote) {
       continue
     }
 
-    // Check `$` followed by variable-name or special-parameter character.
-    // `$` expands inside double quotes AND unquoted (only SQ makes it literal).
     if (currentChar === '$') {
       const next = command[i + 1]
       if (next && /[A-Za-z_@*#?!$0-9-]/.test(next)) {
-        return true
+        return 'variable'
       }
     }
 
-    // Globs are literal inside double quotes too. Only check unquoted.
     if (inDoubleQuote) {
       continue
     }
 
-    // Check for glob characters outside all quotes.
-    // These could expand to anything, including dangerous flags.
-    if (currentChar && /[?*[\]]/.test(currentChar)) {
-      return true
+    if (
+      currentChar === ' ' ||
+      currentChar === '\t' ||
+      currentChar === '\n' ||
+      currentChar === '|' ||
+      currentChar === '&' ||
+      currentChar === ';' ||
+      currentChar === '(' ||
+      currentChar === ')' ||
+      currentChar === '<' ||
+      currentChar === '>'
+    ) {
+      inBracket = false
+      atWordStart = true
+      continue
+    }
+
+    atWordStart = false
+    if (currentChar === '?' || currentChar === '*') {
+      hasGlob = true
+      continue
+    }
+    if (currentChar === '[') {
+      inBracket = true
+      continue
+    }
+    if (currentChar === ']' && inBracket) {
+      hasGlob = true
     }
   }
 
-  return false
+  return hasGlob ? 'glob' : false
 }
 
 /**
@@ -1782,8 +1919,15 @@ function isCommandReadOnly(command: string): boolean {
   // check inside isCommandSafeViaFlagParsing only covers COMMAND_ALLOWLIST
   // commands; hand-written regexes in READONLY_COMMAND_REGEXES (uniq, jq, cd)
   // have no such guard. See containsUnquotedExpansion for full analysis.
-  if (containsUnquotedExpansion(testCommand)) {
+  const expansion = containsUnquotedExpansion(testCommand)
+  if (expansion === 'variable') {
     return false
+  }
+  if (expansion === 'glob') {
+    const firstWord = testCommand.trim().split(/\s+/)[0] ?? ''
+    if (!SAFE_GLOB_READONLY_COMMANDS.has(firstWord)) {
+      return false
+    }
   }
 
   // Tools like git allow `--upload-pack=cmd` to be abbreviated as `--up=cmd`
