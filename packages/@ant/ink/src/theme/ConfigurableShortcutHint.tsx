@@ -1,12 +1,5 @@
-/**
- * Simplified ConfigurableShortcutHint for the standalone @anthropic/ink package.
- *
- * The full version reads user-configured keybindings via useShortcutDisplay.
- * This stub just renders the fallback shortcut — sufficient for the package's
- * internal theme components.
- */
-
 import React from 'react';
+import { useOptionalKeybindingContext } from '../keybindings/KeybindingContext.js';
 import { KeyboardShortcutHint } from './KeyboardShortcutHint.js';
 
 type Props = {
@@ -18,6 +11,15 @@ type Props = {
   bold?: boolean;
 };
 
-export function ConfigurableShortcutHint({ fallback, description, parens, bold }: Props): React.ReactNode {
-  return <KeyboardShortcutHint shortcut={fallback} action={description} parens={parens} bold={bold} />;
+export function ConfigurableShortcutHint({
+  action,
+  context,
+  fallback,
+  description,
+  parens,
+  bold,
+}: Props): React.ReactNode {
+  const keybindingContext = useOptionalKeybindingContext();
+  const shortcut = keybindingContext?.getDisplayText(action, context) ?? fallback;
+  return <KeyboardShortcutHint shortcut={shortcut} action={description} parens={parens} bold={bold} />;
 }
