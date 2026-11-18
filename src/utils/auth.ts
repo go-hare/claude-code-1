@@ -2016,9 +2016,28 @@ async function handleOAuth401ErrorImpl(
       const keepUserSuppliedEnvToken =
         hasEnvToken && !isRemoteSession && !process.env.ANTHROPIC_UNIX_SOCKET
 
+      // Official 2.1.309 (#1136): desktop/IDE app sessions launched with
+      // CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR must not fall back to local
+      // secureStorage credentials on 401 (may belong to a different account).
+      const isAppOAuthRefreshSession =
+        Boolean(process.env.CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH) &&
+        new Set(['claude-desktop', 'local-agent', 'claude-vscode']).has(
+          process.env.CLAUDE_CODE_ENTRYPOINT ?? '',
+        )
+      const keepInjectedAppSessionToken =
+        !hasEnvToken &&
+        isAppOAuthRefreshSession &&
+        hasFdToken &&
+        !isRemoteSession
+
       if (keepUserSuppliedEnvToken) {
         logForDebugging(
           'OAuth 401: keeping the user-supplied CLAUDE_CODE_OAUTH_TOKEN instead of adopting the stored credential. Mint a fresh token with `claude setup-token` and restart with it, or unset the variable and run /login.',
+          { level: 'error' },
+        )
+      } else if (keepInjectedAppSessionToken) {
+        logForDebugging(
+          'OAuth 401: the login this session is using was refused. The login saved on this machine was not used because it may be a different account. Sign in again in the app that started this session, or run /login.',
           { level: 'error' },
         )
       } else if (hasEnvToken || hasFdToken) {

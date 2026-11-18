@@ -21,6 +21,7 @@ import { type GlobalConfig, saveGlobalConfig, getCurrentProjectConfig, type Outp
 import { normalizeApiKeyForConfig } from '../../utils/authPortable.js';
 import { getClaudeAIOAuthTokens, isClaudeAISubscriber } from '../../utils/auth.js';
 import { getOauthConfig } from '../../constants/oauth.js';
+import { refreshPolicyLimits } from '../../services/policyLimits/index.js';
 import { runFunctionHookChain } from '../../utils/plugins/functionHooksModules.js';
 
 /**
@@ -268,6 +269,15 @@ import {
 } from '../../utils/plugins/pluginConfigSources.js';
 import { clearPluginOptionsCache, getPluginStorageId } from '../../utils/plugins/pluginOptionsStorage.js';
 import { jsonStringify } from '../../utils/slowOperations.js';
+
+function isIdleCompactionRowVisible(): boolean {
+  for (const source of ['flagSettings', 'policySettings', 'localSettings', 'projectSettings'] as const) {
+    if (isSettingSourceEnabled(source) && getSettingsForSource(source)?.idleCompaction !== undefined) {
+      return false;
+    }
+  }
+  return isSettingSourceEnabled('userSettings');
+}
 
 /**
  * densable `rDa` — hide /config row when the key is set by a non-user source
@@ -815,6 +825,37 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
           });
         },
       },
+      // Official 2.1.302 (#895): Idle compaction row in /config
+      ...(isIdleCompactionRowVisible()
+        ? [
+            {
+              id: 'idleCompaction',
+              label: 'Idle compaction',
+              value: settingsData?.idleCompaction ?? true,
+              type: 'boolean' as const,
+              onChange(idleCompaction: boolean) {
+                const prevValue = settingsData?.idleCompaction ?? true;
+                setSettingsData(prev => ({
+                  ...prev,
+                  idleCompaction,
+                }));
+                const { error } = updateSettingsForSource('userSettings', {
+                  idleCompaction,
+                });
+                if (error) {
+                  setSettingsData(prev => ({
+                    ...prev,
+                    idleCompaction: prevValue,
+                  }));
+                  return;
+                }
+                logEvent('tengu_idle_compaction_setting_changed', {
+                  enabled: idleCompaction,
+                });
+              },
+            } satisfies Setting,
+          ]
+        : []),
       // densable 2.1.234: ...S?[{id:"autoContinueAtUsageLimit",...}] gated by vgt/tengu_maple_sundial
       ...(isAutoContinueAtUsageLimitToggleable()
         ? [
@@ -2202,6 +2243,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
                   }
                   return updated;
                 });
+                void refreshPolicyLimits();
                 setGlobalConfig(getGlobalConfig());
               },
             },
@@ -2814,6 +2856,9 @@ export function Config({
     }
     if (globalConfig.autoScrollEnabled !== initialConfig.current.autoScrollEnabled) {
       formattedChanges.push(`${globalConfig.autoScrollEnabled ? 'Enabled' : 'Disabled'} auto-scroll`);
+    }
+    if ((settingsData?.idleCompaction ?? true) !== (initialSettingsData.current?.idleCompaction ?? true)) {
+      formattedChanges.push(`${(settingsData?.idleCompaction ?? true) ? 'Enabled' : 'Disabled'} idle compaction`);
     }
     if (
       (settingsData?.autoContinueAtUsageLimit ?? true) !==

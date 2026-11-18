@@ -4,9 +4,11 @@ import type { ToolProgressData } from 'src/Tool.js';
 import type { ProgressMessage } from 'src/types/message.js';
 import { formatArtifactWatchStatus } from 'src/services/artifactAutoReact/watchActions.js';
 import {
+  classifyConflictResendUiMessage,
   formatArtifactDeleteResult,
   formatAssetDeleteResult,
   formatAssetListResult,
+  formatPathPinConflictUiMessage,
   type ArtifactOutput,
 } from './ArtifactTool.js';
 import { formatFileListResult, formatFileReadResult, formatFilesReadResult } from './mapToolResultSentences.js';
@@ -17,6 +19,17 @@ export function renderToolResultMessage(
   _options: { verbose: boolean; theme?: string },
 ): React.ReactNode {
   if (content.error) {
+    if (!_options.verbose) {
+      const conflictSummary =
+        classifyConflictResendUiMessage(content.error) ?? formatPathPinConflictUiMessage(content.error);
+      if (conflictSummary !== undefined) {
+        return (
+          <Box>
+            <Text color="error">{conflictSummary}</Text>
+          </Box>
+        );
+      }
+    }
     return (
       <Box>
         <Text color="error">⚠ Artifact upload failed: {content.error}</Text>

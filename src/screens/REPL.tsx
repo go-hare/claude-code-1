@@ -262,6 +262,7 @@ import {
   useTopDialog,
   useTopDialogKind,
 } from '../dialog/index.js';
+import { openColdResumeQuotaIfNeeded } from '../components/ColdResumeQuotaDialog.js';
 import { resolveHostWaitingFor, resolveSessionPromptStatus } from '../dialog/permissionWaiting.js';
 import { legacyFocusForUqc, setLegacyDialogFocus } from '../dialog/legacyDialogFocus.js';
 import {
@@ -454,6 +455,7 @@ import { useMergedCommands } from '../hooks/useMergedCommands.js';
 import { useSkillsChange } from '../hooks/useSkillsChange.js';
 import { useManagePlugins } from '../hooks/useManagePlugins.js';
 import { Messages } from '../components/Messages.js';
+import { WaitingTranscriptMessages } from '../components/messages/WaitingTranscriptMessages.js';
 import { TaskListV2 } from '../components/TaskListV2.js';
 import { TeammateViewHeader } from '../components/TeammateViewHeader.js';
 import { getPipeIpc } from '../utils/pipeTransport.js';
@@ -2155,17 +2157,31 @@ export function REPL({
   const dialogStore = useDialogStore();
   // densable cu → iXg(Gxt): compact submit is assigned after onSubmit exists.
   const resumeReturnCompactRef = React.useRef<() => void>(() => {});
+  const resumeReturnClearRef = React.useRef<() => void>(() => {});
   const offerResumeReturnIfNeeded = React.useCallback(
     (msgs: readonly MessageType[]) => {
-      void openResumeReturnIfNeeded({
-        requestDialog,
-        dialogStore,
-        messages: msgs,
-        estimateTokens: estimateMsgs => tokenCountFromLastAPIResponse(estimateMsgs as MessageType[]),
-        runCompact: () => resumeReturnCompactRef.current(),
-      });
+      void (async () => {
+        const coldResult = await openColdResumeQuotaIfNeeded({
+          requestDialog,
+          dialogStore,
+          messages: msgs,
+          model: String(store.getState().mainLoopModel ?? ''),
+          trigger: 'resume',
+          estimateTokens: estimateMsgs => tokenCountFromLastAPIResponse(estimateMsgs as MessageType[]),
+          startNewConversation: () => resumeReturnClearRef.current(),
+          resumeFromSummary: () => resumeReturnCompactRef.current(),
+        });
+        if (coldResult !== 'skipped') return;
+        await openResumeReturnIfNeeded({
+          requestDialog,
+          dialogStore,
+          messages: msgs,
+          estimateTokens: estimateMsgs => tokenCountFromLastAPIResponse(estimateMsgs as MessageType[]),
+          runCompact: () => resumeReturnCompactRef.current(),
+        });
+      })();
     },
-    [requestDialog, dialogStore],
+    [requestDialog, dialogStore, store],
   );
   // densable #13: CCR bridge initialize stashes restored.internal — apply y_u
   // when stash arrives (and any pending stash at mount). Jqy continue skip
@@ -5907,6 +5923,7 @@ export function REPL({
       },
       options?: {
         fromKeybinding?: boolean;
+        inputModeOverride?: PromptInputMode;
         pastedContentsOverride?: Record<number, PastedContent>;
         resumesStaleQuotaWait?: boolean;
         sendNow?: boolean;
@@ -6118,6 +6135,17 @@ export function REPL({
       })
       .catch(err => {
         logForDebugging(`Resume-return compact failed: ${errorMessage(err)}`);
+      });
+  };
+  resumeReturnClearRef.current = () => {
+    void onSubmitRef
+      .current('/clear', {
+        setCursorOffset: () => {},
+        clearBuffer: () => {},
+        resetHistory: () => {},
+      })
+      .catch(err => {
+        logForDebugging(`Cold-resume new conversation (/clear) failed: ${errorMessage(err)}`);
       });
   };
 
@@ -7261,6 +7289,11 @@ export function REPL({
             scrollable={
               <>
                 {transcriptMessagesElement}
+                <WaitingTranscriptMessages
+                  task={viewedAgentTask}
+                  messages={viewedAgentTask ? displayedMessages : transcriptMessages}
+                  isLoading={focusedIsLoading}
+                />
                 {transcriptToolJSX}
                 <SandboxViolationExpandedView />
               </>
@@ -7323,6 +7356,11 @@ export function REPL({
         ) : (
           <>
             {transcriptMessagesElement}
+            <WaitingTranscriptMessages
+              task={viewedAgentTask}
+              messages={viewedAgentTask ? displayedMessages : transcriptMessages}
+              isLoading={focusedIsLoading}
+            />
             {transcriptToolJSX}
             <SandboxViolationExpandedView />
             <TranscriptModeFooter

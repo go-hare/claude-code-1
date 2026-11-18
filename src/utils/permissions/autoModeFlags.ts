@@ -52,6 +52,8 @@ export type AutoModeFlagConfig = {
   repoVisibility?: boolean
   forceExternalPermissions?: boolean
   jsonlTranscript?: boolean
+  tagConnectorWrites?: boolean
+  envOnboarding?: boolean
   /** densable qTa.severityByModel — SEA keys only when baked. */
   severityByModel?: Record<string, { t1?: number; t2?: number }>
 }
@@ -74,6 +76,8 @@ export const BAKED_AUTO_MODE_CONFIG: Readonly<AutoModeFlagConfig> =
     repoVisibility: true,
     gitStatusType: true,
     gitStatusUploads: false,
+    tagConnectorWrites: false,
+    envOnboarding: true,
     severityByModel: Object.freeze({
       'claude-sonnet-5[1m]': Object.freeze({ t1: 25, t2: 35 }),
       'claude-opus-4-8[1m]': Object.freeze({ t1: 45, t2: 35 }),

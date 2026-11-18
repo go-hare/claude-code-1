@@ -1,6 +1,7 @@
 import React from 'react';
 import { Dialog, Text } from '@anthropic/ink';
 import { saveGlobalConfig } from '../utils/config.js';
+import { refreshPolicyLimits } from '../services/policyLimits/index.js';
 import { ConfirmSelect } from './ConfirmSelect.js';
 
 type Props = {
@@ -19,6 +20,7 @@ export function ApproveApiKey({ customApiKeyTruncated, onDone }: Props): React.R
             approved: [...(current.customApiKeyResponses?.approved ?? []), customApiKeyTruncated],
           },
         }));
+        void refreshPolicyLimits();
         onDone(true);
         break;
       }

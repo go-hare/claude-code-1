@@ -27,6 +27,10 @@ export type BgTaskSnapshot = {
   wakeupInMs?: number
   /** densable `_t` — holding busy across bg-result → follow-up gap */
   bgResultAwaitingFollowup?: boolean
+  /** densable #1160 — child output observed before init / turn_began_before_init */
+  childAlive?: boolean
+  /** densable #1160 — StartupSilenceWatchdog fired after startupTimeoutMs */
+  childSilent?: boolean
 }
 
 export type SessionActivityHandler = (
@@ -82,6 +86,59 @@ export type ActivityPipeState = {
   followUpTaskIds: Set<string>
   /** densable `Ee` — grace ms (env or ZGi) */
   followUpGraceMs: number
+  /** densable `Et` — channel on which turn_began_before_init was observed */
+  turnBeganBeforeInitSource?: 'tee' | 'stderr'
+  /** densable `Cn` — turn_began_before_init observed on activity channel */
+  turnBeganBeforeInitOnTee: boolean
+}
+
+function watchdogQuarterMs(limitMs: number): number {
+  return limitMs <= 0
+    ? 0
+    : Math.max(1, Math.min(20_000, Math.floor(limitMs / 4)))
+}
+
+/** densable `Vi` — startup silence watchdog while turn_began_before_init runs */
+export class StartupSilenceWatchdog {
+  private state: 'waiting' | 'armed' | 'ended' = 'waiting'
+  private timer: ReturnType<typeof setTimeout> | undefined
+  private readonly lastStretchMs: number
+
+  constructor(
+    private readonly limitMs: number,
+    private readonly onSilent: () => void,
+  ) {
+    this.lastStretchMs = 2 * watchdogQuarterMs(limitMs)
+  }
+
+  arm(): void {
+    if (this.state === 'waiting' && this.limitMs > 0) this.state = 'armed'
+    this.heard()
+  }
+
+  heard(): void {
+    if (this.state !== 'armed') return
+    this.wait(Math.max(0, this.limitMs - this.lastStretchMs), () =>
+      this.wait(this.lastStretchMs, () => {
+        this.heard()
+        this.onSilent()
+      }),
+    )
+  }
+
+  end(): void {
+    this.state = 'ended'
+    if (this.timer !== undefined) {
+      clearTimeout(this.timer)
+      this.timer = undefined
+    }
+  }
+
+  private wait(ms: number, fn: () => void): void {
+    if (this.timer !== undefined) clearTimeout(this.timer)
+    this.timer = setTimeout(fn, ms)
+    this.timer.unref?.()
+  }
 }
 
 /**
@@ -118,6 +175,7 @@ export function createActivityPipeState(
     subagentOwnedTaskIds: new Set(),
     followUpTaskIds: new Set(),
     followUpGraceMs: resolveBgResultFollowUpGraceMs(env),
+    turnBeganBeforeInitOnTee: false,
   }
 }
 
@@ -168,6 +226,12 @@ type ActivityHandlers = {
   onBgResultFollowUpBusy?: (busy: boolean, childExited?: boolean) => void
   /** densable g_ ScheduleWakeup tool name — optional exact match */
   scheduleWakeupToolName?: string
+  /** densable `Vi` — startup silence watchdog */
+  startupSilenceWatchdog?: StartupSilenceWatchdog
+  /** densable `Mn` — startup timeout ms for log message */
+  startupTimeoutMs?: number
+  /** densable `q.noteTurnStart()` hook for turn_began_before_init on tee */
+  onNoteTurnStart?: () => void
 }
 
 function logSession(handlers: ActivityHandlers, msg: string): void {
@@ -301,6 +365,54 @@ function onBackgroundTaskTerminal(
   startFollowUpHold(state, handlers)
 }
 
+/** densable `Yn` — handle turn_began_before_init on tee or stderr */
+export function handleTurnBeganBeforeInit(
+  source: 'tee' | 'stderr',
+  state: ActivityPipeState,
+  handlers: ActivityHandlers,
+): void {
+  if (
+    state.sawInit ||
+    (source === 'stderr' && state.turnBeganBeforeInitSource !== undefined) ||
+    process.env.CLAUDE_RUNNER_DISABLE_TURN_BEGAN_BEFORE_INIT
+  ) {
+    return
+  }
+  const startupMs = handlers.startupTimeoutMs ?? 0
+  if (state.turnBeganBeforeInitSource === undefined) {
+    logSession(
+      handlers,
+      `a turn started (signal on ${source === 'tee' ? 'the activity channel' : 'stderr'})${startupMs > 0 ? ': until the child has initialized, --startup-timeout-min now counts from its last line on the activity channel' : ''}`,
+    )
+  }
+  if (source === 'tee' && state.turnBeganBeforeInitSource === 'stderr') {
+    handlers.onDebug?.(
+      handlers.sessionId
+        ? `[runner:session] ${handlers.sessionId} a turn started: signal also read on the activity channel, after stderr (both channels work; no action needed)`
+        : '[runner:session] a turn started: signal also read on the activity channel, after stderr (both channels work; no action needed)',
+    )
+  }
+  state.turnBeganBeforeInitSource = source
+  handlers.startupSilenceWatchdog?.arm()
+  if (source === 'stderr') {
+    handlers.onSessionActivity?.('init-observed')
+    return
+  }
+  const wasIdle = !state.turnInFlight
+  state.turnInFlight = true
+  state.turnBeganBeforeInitOnTee = true
+  handlers.onNoteTurnStart?.()
+  handlers.onSessionActivity?.('activity')
+  if (wasIdle) {
+    state.wakeupUntil = null
+    if (state.deferredTimer !== undefined) {
+      clearTimeout(state.deferredTimer)
+      state.deferredTimer = undefined
+    }
+    clearFollowUpHold(state, handlers, 'follow-up turn opened')
+  }
+}
+
 /**
  * densable He — parse one NDJSON line from stdout / FD3 activity pipe.
  */
@@ -317,6 +429,9 @@ export function handleActivityLine(
   }
   if (!parsed || typeof parsed !== 'object') return
   const msg = parsed as Record<string, unknown>
+  if (typeof msg.type === 'string') {
+    handlers.startupSilenceWatchdog?.heard()
+  }
   const emit = handlers.onSessionActivity
   const debug = handlers.onDebug
 
@@ -411,9 +526,14 @@ export function handleActivityLine(
   if (msg.type === 'system' && msg.subtype === 'init') {
     if (!state.sawInit) {
       state.sawInit = true
+      handlers.startupSilenceWatchdog?.end()
       handlers.onInitObserved?.()
     }
     emit?.('activity')
+    return
+  }
+  if (msg.type === 'system' && msg.subtype === 'turn_began_before_init') {
+    handleTurnBeganBeforeInit('tee', state, handlers)
     return
   }
   if (msg.type === 'system' && msg.subtype === 'turn_starting') {
@@ -538,6 +658,15 @@ export function handleActivityLine(
   if (msg.type === 'user' || msg.type === 'assistant') {
     // densable: ignore from_subagent user/assistant for turn tracking
     if ((msg as { from_subagent?: unknown }).from_subagent === true) return
+    if (
+      state.turnBeganBeforeInitSource === undefined &&
+      !state.sawInit &&
+      !state.sawSessionState &&
+      !state.sawResult
+    ) {
+      emit?.('startup', { ...snapshotBgTasks(state), childAlive: true })
+      return
+    }
     if (!state.turnInFlight && msg.type === 'user') state.wakeupUntil = null
     const wasIdle = !state.turnInFlight
     state.turnInFlight = true
@@ -584,18 +713,19 @@ function maybeEmitTurnEnd(
 export function handleStderrInitMarker(
   line: string,
   state: ActivityPipeState,
-  handlers: {
-    onInitObserved?: () => void
-    onSessionActivity?: SessionActivityHandler
-  },
+  handlers: ActivityHandlers,
 ): void {
   if (
     !state.sawInit &&
     line.startsWith('SDKStartup: phase=system_init_emitted')
   ) {
     state.sawInit = true
+    handlers.startupSilenceWatchdog?.end()
     handlers.onInitObserved?.()
     handlers.onSessionActivity?.('init-observed')
+  }
+  if (/^SDKStartup: phase=turn_began_before_init(?: |$)/.test(line)) {
+    handleTurnBeganBeforeInit('stderr', state, handlers)
   }
 }
 
@@ -611,6 +741,7 @@ export function disposeActivityPipeState(
   reason = 'dispose',
   childExited = false,
 ): void {
+  handlers?.startupSilenceWatchdog?.end()
   if (state.deferredTimer !== undefined) {
     clearTimeout(state.deferredTimer)
     state.deferredTimer = undefined

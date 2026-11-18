@@ -33,6 +33,7 @@ import type { AgentHook } from '../settings/types.js'
 import { jsonStringify } from '../slowOperations.js'
 import { asSystemPrompt } from '../systemPromptType.js'
 import { HOOK_EVALUATOR_OK_GUIDANCE } from './execPromptHook.js'
+import { acquireModelHookSlot } from './modelHookConcurrency.js'
 import {
   addArgumentsToPrompt,
   createStructuredOutputTool,
@@ -79,6 +80,10 @@ export async function execAgentHook(
     ? getAgentTranscriptPath(toolUseContext.agentId)
     : getTranscriptPath()
   const hookStartTime = Date.now()
+  const releaseSlot = await acquireModelHookSlot(hookEvent, signal)
+  if (releaseSlot === undefined) {
+    return { hook, outcome: 'cancelled' }
+  }
   try {
     // Replace $ARGUMENTS with the JSON input
     const processedPrompt = addArgumentsToPrompt(hook.prompt, jsonInput)
@@ -438,5 +443,7 @@ ${HOOK_EVALUATOR_OK_GUIDANCE}`,
         exitCode: 1,
       }),
     }
+  } finally {
+    releaseSlot()
   }
 }

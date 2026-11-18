@@ -222,7 +222,8 @@ export function createSelectionClearKeyDownCapture(
     clearSelection: () => void;
     copySelection: () => string;
   },
-  copyOnSelect: boolean,
+  lastCopiedOrCopyOnSelect: { readonly current: string | null } | boolean,
+  onCopied?: (text: string) => void,
 ): (event: {
   key: string;
   name: string;
@@ -233,13 +234,24 @@ export function createSelectionClearKeyDownCapture(
   stopImmediatePropagation: () => void;
   preventDefault: () => void;
 }) => void {
-  // densable vvh:
-  // return(r)=>{if(!e.hasSelection())return;if(r.ctrl&&!r.shift&&!r.meta&&r.key==="c"){if(t)e.clearSelection();else e.copySelection();r.consume();return}if(Jew(r))e.clearSelection()}
+  // Official 2.1.304 (#999) `$bi`:
+  // When Ctrl+C is pressed while a selection is active, only skip copying if
+  // `useCopyOnSelect` has already copied it (lastCopiedRef.current !== null).
+  // If pressed before mouse-up (isDragging), lastCopiedRef.current is null so
+  // Ctrl+C still copies instead of silently clearing.
   return event => {
     if (!selection.hasSelection()) return;
     if (event.ctrl && !event.shift && !event.meta && event.key === 'c') {
-      if (copyOnSelect) selection.clearSelection();
-      else selection.copySelection();
+      const alreadyCopied =
+        typeof lastCopiedOrCopyOnSelect === 'boolean'
+          ? lastCopiedOrCopyOnSelect
+          : lastCopiedOrCopyOnSelect.current !== null;
+      if (alreadyCopied) {
+        selection.clearSelection();
+      } else {
+        const copied = selection.copySelection();
+        if (copied) onCopied?.(copied);
+      }
       event.stopImmediatePropagation();
       event.preventDefault();
       return;

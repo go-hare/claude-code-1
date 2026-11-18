@@ -107,6 +107,7 @@ export type SubmitPromptOptions = {
   sendNow?: boolean
   queueSubmit?: boolean
   composerEnter?: unknown
+  inputModeOverride?: PromptInputMode
 }
 
 export type SubmitPromptDeps = {
@@ -335,12 +336,22 @@ export class SubmitController {
         mode: 'prompt',
         isTurnRunning: () => this.#queryGuard.isRunning,
         isTurnActive: () => this.#queryGuard.isActive,
+        isDispatchingForModel: () =>
+          this.#queryGuard.isActive && !this.#queryGuard.isRunning,
         abortSignal: deps.getAbortController(),
         lowLatency: deps.queuedNowLowLatencyHost,
         interruptForSubmit,
       })
       return
     }
+
+    // Official 2.1.309 (#1131): key-bound slash commands run in 'prompt' mode
+    // even when the composer is in 'bash' (!) mode.
+    const effectiveInputMode: PromptInputMode =
+      options?.inputModeOverride ??
+      (options?.fromKeybinding && input.trim().startsWith('/')
+        ? 'prompt'
+        : deps.inputMode)
 
     deps.repinScroll(true, 'submit')
 
@@ -395,12 +406,12 @@ export class SubmitController {
       options?.fromKeybinding || speculationAccept
         ? undefined
         : {
-            display: prependModeCharacterToInput(input, deps.inputMode),
+            display: prependModeCharacterToInput(input, effectiveInputMode),
             pastedContents: effectivePastedContents,
           }
     if (submitsNow && historyEntry) {
       addToHistory(historyEntry)
-      if (deps.inputMode === 'bash') {
+      if (effectiveInputMode === 'bash') {
         prependToShellHistoryCache(input.trim())
       }
     }
@@ -417,7 +428,9 @@ export class SubmitController {
     }
 
     if (submitsNow) {
-      deps.setInputMode('prompt')
+      if (effectiveInputMode === deps.inputMode) {
+        deps.setInputMode('prompt')
+      }
       deps.setIDESelection(undefined)
       deps.setSubmitCount(_ => _ + 1)
       helpers.clearBuffer()
@@ -425,7 +438,7 @@ export class SubmitController {
 
       if (
         !isSlashCommand &&
-        deps.inputMode === 'prompt' &&
+        effectiveInputMode === 'prompt' &&
         !speculationAccept &&
         !deps.activeRemote.isRemoteMode
       ) {
@@ -492,7 +505,7 @@ export class SubmitController {
       helpers,
       queryGuard: this.#queryGuard,
       isExternalLoading: deps.isExternalLoading,
-      mode: deps.inputMode,
+      mode: effectiveInputMode,
       commands: deps.commands,
       onInputChange: deps.setInputValue,
       setPastedContents: deps.setPastedContents,
@@ -530,7 +543,7 @@ export class SubmitController {
       resumesStaleQuotaWait: options?.resumesStaleQuotaWait,
       composerEnter: options?.composerEnter,
       takeIdeSelectionForQueue:
-        deps.inputMode !== 'bash' &&
+        effectiveInputMode !== 'bash' &&
         Boolean(deps.ideSelection?.text || deps.ideSelection?.filePath) &&
         (deps.ideSelection?.source !== 'diff' || !isSlashCommand)
           ? () => {
@@ -557,14 +570,16 @@ export class SubmitController {
     const sameAbort =
       abortBeforeSubmit !== null && currentAc === abortBeforeSubmit
     const leaderEmptyKey =
-      deps.inputMode === 'prompt' && viewed.type === 'leader' && sameAbort
+      effectiveInputMode === 'prompt' && viewed.type === 'leader' && sameAbort
     const namedAgentSendNow =
-      deps.inputMode === 'prompt' && namedTaskId !== undefined
+      effectiveInputMode === 'prompt' && namedTaskId !== undefined
     if (leaderEmptyKey) {
       trySendQueuedNowKey(() => this.#store.getState(), deps.setAppState, {
         mode: 'prompt',
         isTurnRunning: () => this.#queryGuard.isRunning,
         isTurnActive: () => this.#queryGuard.isActive,
+        isDispatchingForModel: () =>
+          this.#queryGuard.isActive && !this.#queryGuard.isRunning,
         abortSignal: currentAc,
         lowLatency: deps.queuedNowLowLatencyHost,
         interruptForSubmit,

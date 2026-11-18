@@ -1577,6 +1577,7 @@ function renderNodeToOutput(
       cached.width === width &&
       cached.height === height &&
       cached.background === inheritedBackgroundColor &&
+      !cached.shifted &&
       prevScreen &&
       !leftoverGsSkipBlitMiss(node, cached, clips)
     ) {
@@ -1601,7 +1602,8 @@ function renderNodeToOutput(
     // above changed height), old cells still on the terminal.
     const positionChanged =
       cached !== undefined &&
-      (cached.x !== x ||
+      ((cached.shifted === true && prevScreen !== undefined) ||
+        cached.x !== x ||
         cached.y !== y ||
         cached.width !== width ||
         cached.height !== height)
@@ -2333,7 +2335,7 @@ function renderNodeToOutput(
               for (const childNode of content.childNodes) {
                 const childElem = childNode as DOMElement
                 const isDirty = dirtyChildren.has(childNode)
-                if (!isDirty && cumHeightShift === 0) {
+                if (!isDirty && !hasRemovedChild && cumHeightShift === 0) {
                   if (childElem.cachedLayout !== undefined) continue
                   // Uncached = culled last frame, now re-entering. blit
                   // never painted it → fall through to yoga + render.
@@ -2352,12 +2354,14 @@ function renderNodeToOutput(
                     cumHeightShift += childH - prev.height
                   }
                 }
-                // Skip culled children (outside viewport)
+                // Skip culled children (outside viewport) and drop stale cache
                 if (
                   childBottom <= scrollTop ||
                   childTop >= scrollTop + innerHeight
-                )
+                ) {
+                  leftoverGsDropCachedLayout(childElem)
                   continue
+                }
                 // Skip children entirely within edge rows (already rendered)
                 if (childTop >= edgeTopLocal && childBottom <= edgeBottomLocal)
                   continue
@@ -2873,7 +2877,9 @@ function renderScrolledChildren(
       let height: number
       if (
         leftoverGsWidthUnchanged &&
+        !hasRemovedChild &&
         cached?.top !== undefined &&
+        !cached.shifted &&
         !childElem.dirty &&
         cumHeightShift === 0
       ) {

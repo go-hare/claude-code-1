@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Ansi, Box, type Color, isXtermJs, Text, useAnimationFrame } from '@anthropic/ink';
+import { AccessibilityContext, Ansi, Box, type Color, isXtermJs, Text, useAnimationFrame } from '@anthropic/ink';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
 import { AppStoreContext } from '../../state/AppState.js';
 import { segmentTextByHighlights, type TextHighlight } from '../../utils/textHighlighting.js';
@@ -93,10 +93,19 @@ export function HighlightedInput({ text, highlights }: Props): React.ReactNode {
     return { lines, hasShimmer, sweepStart, cycleLength };
   }, [text, highlights]);
 
+  const isScreenReader = React.useContext(AccessibilityContext);
   const reducedMotion = useReducedMotion();
-  const shouldAnimate = hasShimmer && !reducedMotion;
+  const shouldAnimate = hasShimmer && !reducedMotion && !isScreenReader;
   const [ref, time] = useAnimationFrame(shouldAnimate ? 50 : null);
   const glimmerIndex = shouldAnimate ? sweepStart + (Math.floor(time / 50) % cycleLength) : -100;
+
+  if (isScreenReader) {
+    return (
+      <Text aria-preserve-whitespace>
+        <Ansi>{text}</Ansi>
+      </Text>
+    );
+  }
 
   return (
     <Box ref={ref} flexDirection="column">

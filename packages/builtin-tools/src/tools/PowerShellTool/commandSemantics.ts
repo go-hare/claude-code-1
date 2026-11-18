@@ -9,6 +9,8 @@
  * - git grep / git diff subcommands map to the same informational semantics.
  */
 
+import { COMMON_ALIASES } from 'src/utils/powershell/parser.js'
+
 export type CommandSemantic = (
   exitCode: number,
   stdout: string,
@@ -101,13 +103,34 @@ export function parseNativeCommandToken(segment: string): {
   }
 }
 
+/** SEA `Hds` (@292279392) — formatting/pass-through cmdlets at tail of a pipeline */
+const FORMAT_PASSTHROUGH_CMDLETS = new Set([
+  'select-object',
+  'sort-object',
+  'group-object',
+  'get-unique',
+  'format-table',
+  'format-list',
+  'format-wide',
+  'out-string',
+  'out-host',
+])
+
 /**
- * densable Mny (simplified) — last pipeline/statement segment drives exit code.
- * Respects single/double quotes and PowerShell backticks inside doubles.
+ * SEA `S5n` (@292279597) — split PowerShell command into segments, tracking
+ * `&&` gating and walking back past formatting cmdlets at the tail of a pipeline.
  */
-export function lastCommandSegment(command: string): string {
-  const segments: string[] = []
+export function splitCommandSegments(command: string): {
+  segment: string
+  andGated: boolean
+  feeder: string | undefined
+} {
+  const segments: Array<{ text: string; andGated: boolean; piped: boolean }> =
+    []
   let start = 0
+  let andGated = false
+  let piped = false
+  let canWalkPipe = true
   let inSingle = false
   let inDouble = false
   for (let i = 0; i < command.length; i++) {
@@ -124,7 +147,7 @@ export function lastCommandSegment(command: string): string {
       if (ch === '"') inDouble = false
       continue
     }
-    // densable: # after space/tab/start/newline starts a comment to EOL
+    // # after space/tab/start/newline starts a comment to EOL
     if (
       ch === '#' &&
       (i === 0 ||
@@ -133,7 +156,7 @@ export function lastCommandSegment(command: string): string {
         command[i - 1] === '\n' ||
         command[i - 1] === '\r')
     ) {
-      segments.push(command.slice(start, i))
+      segments.push({ text: command.slice(start, i), andGated, piped })
       while (
         i + 1 < command.length &&
         command[i + 1] !== '\n' &&
@@ -142,6 +165,7 @@ export function lastCommandSegment(command: string): string {
         i++
       }
       start = i + 1
+      piped = false
       continue
     }
     if (ch === "'") {
@@ -152,21 +176,75 @@ export function lastCommandSegment(command: string): string {
       inDouble = true
       continue
     }
-    if (ch === ';' || ch === '\n' || ch === '\r') {
-      segments.push(command.slice(start, i))
+    if (
+      ch === '(' ||
+      ch === ')' ||
+      ch === '{' ||
+      ch === '}' ||
+      (ch === '>' && command.slice(i - 1, i + 3) !== '2>&1')
+    ) {
+      canWalkPipe = false
+    }
+    if (ch === ';' || ch === '|' || ch === '\n' || ch === '\r') {
+      if (ch === '|' && command[i + 1] === '|') {
+        canWalkPipe = false
+      }
+      segments.push({ text: command.slice(start, i), andGated, piped })
       start = i + 1
+      piped = ch === '|'
+      if (!piped) andGated = false
       continue
     }
-    // densable Mny: | and || / & and && split segments
-    if (ch === '|' || ch === '&') {
-      segments.push(command.slice(start, i))
-      if (command[i + 1] === ch) i++
-      start = i + 1
+    if (ch === '&') {
+      if (command[i + 1] === '&') {
+        segments.push({ text: command.slice(start, i), andGated, piped })
+        i++
+        start = i + 1
+        andGated = true
+        piped = false
+        canWalkPipe = false
+        continue
+      }
+      const prev = command[i - 1]
+      if (
+        (prev === ' ' || prev === '\t') &&
+        command.slice(start, i).trim() !== ''
+      ) {
+        segments.push({ text: command.slice(start, i), andGated, piped })
+        start = i + 1
+        andGated = false
+        piped = false
+      }
     }
   }
-  segments.push(command.slice(start))
-  const nonEmpty = segments.map(s => s.trim()).filter(Boolean)
-  return nonEmpty[nonEmpty.length - 1] || command
+  segments.push({ text: command.slice(start), andGated, piped })
+  const lastIdx = segments.findLastIndex(s => s.text.trim())
+  const last = segments[lastIdx]
+  if (!last) {
+    return { segment: command, andGated: false, feeder: undefined }
+  }
+  let idx = lastIdx
+  while (canWalkPipe && idx > 0 && segments[idx]!.piped) {
+    const cmd =
+      /^\s*([\w-]+)(?=\s|$)/.exec(segments[idx]!.text)?.[1]?.toLowerCase() ?? ''
+    const canonical = COMMON_ALIASES[cmd]?.toLowerCase() ?? cmd
+    if (!FORMAT_PASSTHROUGH_CMDLETS.has(canonical)) break
+    idx--
+  }
+  const feederText = segments[idx]!.text
+  return {
+    segment: last.text,
+    andGated: last.andGated,
+    feeder: idx !== lastIdx && feederText.trim() ? feederText : undefined,
+  }
+}
+
+/**
+ * densable Mny — last pipeline/statement segment drives exit code.
+ * Respects single/double quotes and PowerShell backticks inside doubles.
+ */
+export function lastCommandSegment(command: string): string {
+  return splitCommandSegments(command).segment
 }
 
 /** densable Ony — first non-flag token after `git` */
@@ -194,7 +272,7 @@ function gitSubcommand(segment: string): string | null {
 }
 
 /**
- * densable u9u — interpret PowerShell command result.
+ * SEA `tks` + `R5n` (@292289201) — interpret PowerShell command result.
  */
 export function interpretCommandResult(
   command: string,
@@ -205,21 +283,31 @@ export function interpretCommandResult(
   isError: boolean
   message?: string
 } {
-  const segment = lastCommandSegment(command)
+  const split = splitCommandSegments(command)
+  const hasOutput = stdout.trim() !== '' || stderr.trim() !== ''
+  const segment = (hasOutput ? undefined : split.feeder) ?? split.segment
   const { base, nativeExt } = parseNativeCommandToken(segment)
 
+  let result: { isError: boolean; message?: string } | undefined
   if (base === 'git') {
     const sub = gitSubcommand(segment)
-    if (sub === 'grep') return NO_MATCHES(exitCode, stdout, stderr)
-    if (sub === 'diff') return FILES_DIFFER(exitCode, stdout, stderr)
+    if (sub === 'grep') result = NO_MATCHES(exitCode, stdout, stderr)
+    else if (sub === 'diff') result = FILES_DIFFER(exitCode, stdout, stderr)
   }
 
-  const hasOutput = stdout.trim() !== '' || stderr.trim() !== ''
-  const nativeSemantic =
-    nativeExt === 'exe' && hasOutput
-      ? NATIVE_EXE_SEMANTICS.get(base)
-      : undefined
-  const semantic =
-    nativeSemantic ?? ALWAYS_SEMANTICS.get(base) ?? DEFAULT_SEMANTIC
-  return semantic(exitCode, stdout, stderr)
+  if (!result) {
+    const nativeSemantic =
+      nativeExt === 'exe' && hasOutput
+        ? NATIVE_EXE_SEMANTICS.get(base)
+        : undefined
+    const semantic =
+      nativeSemantic ?? ALWAYS_SEMANTICS.get(base) ?? DEFAULT_SEMANTIC
+    result = semantic(exitCode, stdout, stderr)
+  }
+
+  if (exitCode === 0 || result.isError) return result
+  if (split.andGated) {
+    return DEFAULT_SEMANTIC(exitCode, stdout, stderr)
+  }
+  return result
 }

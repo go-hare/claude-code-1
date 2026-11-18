@@ -15,6 +15,7 @@ import {
   fetchToolsForClient,
   getMcpToolsCommandsAndResources,
   reconnectMcpServerImpl,
+  shouldApplyMcpClientUpdate,
 } from './client.js'
 import {
   getMcpIdentityEpoch,
@@ -334,12 +335,16 @@ export function useManageMCPConnections(
             : rawRes
 
         const prefix = getMcpPrefix(client.name)
-        const existingClientIndex = mcp.clients.findIndex(
-          c => c.name === client.name,
-        )
+        const existingClient = mcp.clients.find(c => c.name === client.name)
+        if (
+          existingClient &&
+          !shouldApplyMcpClientUpdate(existingClient, client)
+        ) {
+          continue
+        }
 
         const updatedClients =
-          existingClientIndex === -1
+          existingClient === undefined
             ? [...mcp.clients, client]
             : mcp.clients.map(c => (c.name === client.name ? client : c))
 
@@ -1152,10 +1157,27 @@ export function useManageMCPConnections(
 
       const configs = { ...claudeCodeConfigs, ...dynamicMcpConfig }
 
+      // Official #1040: protect already-registered dynamic/SDK MCP servers
+      // from being overwritten later in the session by same-named settings servers.
+      const protectedDynamicNames = new Set(
+        store
+          .getState()
+          .mcp.clients.filter(
+            c => c.config.scope === 'dynamic' || c.config.type === 'sdk',
+          )
+          .map(c => c.name),
+      )
+
       // Start connecting to Claude Code servers (don't wait - runs concurrently with Phase 2)
       // Filter out disabled servers to avoid unnecessary connection attempts
       const enabledConfigs = Object.fromEntries(
-        Object.entries(configs).filter(([name]) => !isMcpServerDisabled(name)),
+        Object.entries(configs).filter(
+          ([name]) =>
+            !isMcpServerDisabled(name) &&
+            (!protectedDynamicNames.has(name) ||
+              (dynamicMcpConfig !== undefined &&
+                Object.hasOwn(dynamicMcpConfig, name))),
+        ),
       )
       getMcpToolsCommandsAndResources(
         onConnectionAttempt,

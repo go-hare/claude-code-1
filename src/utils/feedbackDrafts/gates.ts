@@ -118,6 +118,26 @@ export function setFeedbackDraftsSetting(
 
 export type FeedbackCommandName = '/feedback' | '/bug' | '/share'
 
+export const FEEDBACK_GITHUB_ISSUES_URL =
+  'https://github.com/anthropics/claude-code/issues'
+const ORG_POLICY_FEEDBACK_DISABLED_MSG =
+  "Feedback submission is disabled by your organization's policy."
+
+/**
+ * Official 2.1.302 `BBs` (#929): append GitHub issues guidance unless the org
+ * explicitly suppressed it or custom bug-report instructions apply.
+ */
+export function formatFeedbackWithIssueFallback(
+  message: string,
+  rawReason?: string,
+): string {
+  const terminated = /[.!?…]$/.test(message) ? message : `${message}.`
+  if (rawReason === ORG_POLICY_FEEDBACK_DISABLED_MSG) {
+    return terminated
+  }
+  return `${terminated} To report a bug, open an issue at ${FEEDBACK_GITHUB_ISSUES_URL}. Issues are public, so leave out anything confidential.`
+}
+
 /**
  * densable `TG` — the disabled sentence names the command that was invoked.
  * Default `/feedback` matches `TG()` with no argument.
@@ -135,7 +155,9 @@ export function getFeedbackCommandDisabledReason(
     return `${command} has been disabled via the CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC environment variable`
   }
   if (!isPolicyAllowed('allow_product_feedback')) {
-    return `${command} has been disabled by your organization's policy`
+    return formatFeedbackWithIssueFallback(
+      `${command} is disabled by your organization's policy.`,
+    )
   }
   return null
 }

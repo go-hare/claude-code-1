@@ -38,6 +38,12 @@ type Props = {
  * A side-by-side question view for questions with preview content.
  * Displays a vertical option list on the left with a preview panel on the right.
  */
+/** Official 2.1.304 (#993): compute Notes TextInput columns so narrow terminals wrap instead of truncating. */
+export function computePreviewNotesColumns(columns: number): number {
+  const previewMaxWidth = columns - 30 - 4;
+  return Math.max(1, previewMaxWidth - stringWidth('Notes:') - 1);
+}
+
 export function PreviewQuestionView({
   question,
   questions,
@@ -274,6 +280,7 @@ export function PreviewQuestionView({
   const LEFT_PANEL_WIDTH = 30;
   const { columns, rows } = useTerminalSize();
   const previewMaxWidth = columns - LEFT_PANEL_WIDTH - 4;
+  const notesColumns = computePreviewNotesColumns(columns);
 
   // Lines used within the content area that aren't preview content:
   // 1: marginTop on side-by-side box
@@ -339,7 +346,9 @@ export function PreviewQuestionView({
                 maxWidth={previewMaxWidth}
               />
               <Box marginTop={1} flexDirection="row" gap={1}>
-                <Text color="suggestion">Notes:</Text>
+                <Box flexShrink={0}>
+                  <Text color="suggestion">Notes:</Text>
+                </Box>
                 {isInNotesInput ? (
                   <TextInput
                     value={notesValue}
@@ -351,7 +360,8 @@ export function PreviewQuestionView({
                     onExit={handleNotesExit}
                     focus={true}
                     showCursor={true}
-                    columns={60}
+                    columns={notesColumns}
+                    maxVisibleLines={5}
                     cursorOffset={cursorOffset}
                     onChangeCursorOffset={setCursorOffset}
                     disableEscapeDoublePress={true}

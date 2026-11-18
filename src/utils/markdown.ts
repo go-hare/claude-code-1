@@ -241,12 +241,16 @@ function fallbackAtMaxNesting(
 
 let markedConfigured = false
 
+const HTTP_URL_RE = /^https?:\/\/[\w\-.~:/?#[\]@!$&'()*+,;=%]+$/i
+
 export type FormatTokenOptions = {
   listIndent?: string
   glueProse?: boolean
   screenReader?: boolean
   promptMode?: boolean
   quotesAround?: number
+  linkCap?: boolean
+  windowed?: boolean
 }
 
 export function configureMarked(): void {
@@ -464,6 +468,8 @@ export function formatToken(
   const screenReader = resolved.screenReader ?? false
   const promptMode = resolved.promptMode ?? false
   const quotesAround = resolved.quotesAround ?? 0
+  const windowed = resolved.windowed ?? false
+  const linkCap = !windowed && (resolved.linkCap ?? supportsHyperlinks())
   const childOpts = (
     overrides: FormatTokenOptions = {},
   ): FormatTokenOptions => ({
@@ -471,6 +477,8 @@ export function formatToken(
     glueProse,
     screenReader,
     promptMode,
+    linkCap,
+    windowed,
     ...overrides,
   })
 
@@ -509,7 +517,26 @@ export function formatToken(
     }
     case 'codespan': {
       // inline code
-      return color('permission', theme)(stripRawOsc8Sequences(token.text))
+      const styled = color(
+        'permission',
+        theme,
+      )(stripRawOsc8Sequences(token.text))
+      const skipHyperlink =
+        promptMode ||
+        parent?.type === 'link' ||
+        ('defanged' in token && token.defanged === true) ||
+        ('afterStyle' in token && token.afterStyle === true)
+      if (
+        linkCap &&
+        !skipHyperlink &&
+        HTTP_URL_RE.test(token.text) &&
+        URL.canParse(token.text)
+      ) {
+        return createHyperlink(token.text, styled, {
+          supportsHyperlinks: true,
+        })
+      }
+      return styled
     }
     case 'em':
       return chalk.italic(

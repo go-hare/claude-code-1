@@ -8,7 +8,13 @@ import {
   jsonStringify,
   writeFileSync_DEPRECATED,
 } from '../slowOperations.js'
-import type { SecureStorage, SecureStorageData } from './types.js'
+import {
+  SECURE_STORAGE_READ_FAILED,
+  type ReadAsyncStrictOptions,
+  type SecureStorage,
+  type SecureStorageData,
+  type SecureStorageReadFailed,
+} from './types.js'
 
 function getStoragePath(): { storageDir: string; storagePath: string } {
   const storageDir = getClaudeConfigHomeDir()
@@ -39,6 +45,25 @@ export const plainTextStorage = {
       return jsonParse(data)
     } catch {
       return null
+    }
+  },
+  async readAsyncStrict(
+    _key?: unknown,
+    options?: ReadAsyncStrictOptions,
+  ): Promise<SecureStorageData | null | SecureStorageReadFailed> {
+    const { storagePath } = getStoragePath()
+    try {
+      const data = await getFsImplementation().readFile(storagePath, {
+        encoding: 'utf8',
+      })
+      return jsonParse(data)
+    } catch (e: unknown) {
+      if (getErrnoCode(e) === 'ENOENT') {
+        return null
+      }
+      return options?.unreadableFileAs === 'failure'
+        ? SECURE_STORAGE_READ_FAILED
+        : null
     }
   },
   update(data: SecureStorageData): { success: boolean; warning?: string } {

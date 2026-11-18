@@ -34,9 +34,11 @@ import {
 } from '../SessionMemory/sessionMemoryUtils.js'
 import {
   annotateBoundaryWithPreservedSegment,
+  attachPreCompactArtifactReadVersions,
   buildPostCompactMessages,
   type CompactionResult,
   createPlanAttachmentIfNeeded,
+  type PreCompactArtifactAppState,
 } from './compact.js'
 import { estimateMessageTokens } from './microCompact.js'
 import { getCompactUserSummaryMessage } from './prompt.js'
@@ -443,6 +445,7 @@ function createCompactionResultFromSessionMemory(
   hookResults: HookResultMessage[],
   transcriptPath: string,
   agentId?: AgentId,
+  appState?: PreCompactArtifactAppState,
 ): CompactionResult {
   const preCompactTokenCount = tokenCountFromLastAPIResponse(messages)
 
@@ -457,6 +460,7 @@ function createCompactionResultFromSessionMemory(
       ...preCompactDiscovered,
     ].sort()
   }
+  attachPreCompactArtifactReadVersions(boundaryMarker, agentId, appState)
 
   // Truncate oversized sections to prevent session memory from consuming
   // the entire post-compact token budget
@@ -517,6 +521,7 @@ export async function trySessionMemoryCompaction(
   messages: Message[],
   agentId?: AgentId,
   autoCompactThreshold?: number,
+  appState?: PreCompactArtifactAppState,
 ): Promise<CompactionResult | null> {
   if (!shouldUseSessionMemoryCompaction()) {
     return null
@@ -597,6 +602,7 @@ export async function trySessionMemoryCompaction(
       hookResults,
       transcriptPath,
       agentId,
+      appState,
     )
 
     const postCompactMessages = buildPostCompactMessages(compactionResult)

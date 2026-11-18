@@ -24,6 +24,7 @@
  */
 
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
+import { isForkSubagentDisabled } from './sessionBackgroundGates.js'
 
 export type ForkSubagentSource = 'env' | 'default' | 'disabled' | 'disabled_ant'
 
@@ -73,6 +74,7 @@ export function resolveForkSubagentSource(input?: {
    */
   gbValue?: boolean
 }): ForkSubagentSource {
+  if (isForkSubagentDisabled()) return 'disabled'
   const env = input?.env ?? process.env
   // densable FDd: CLAUDE_CODE_FORK_SUBAGENT===false → "disabled" (before sticky)
   if (isEnvDefinedFalsy(env.CLAUDE_CODE_FORK_SUBAGENT)) return 'disabled'

@@ -985,7 +985,8 @@ export async function execCommandHook(
           `PowerShell, or remove "shell": "powershell" to use bash.`,
       )
     }
-    child = spawn(pwshPath, buildPowerShellArgs(finalCommand), {
+    const psCommand = wrapPowerShellHookCommand(finalCommand, hookEvent)
+    child = spawn(pwshPath, buildPowerShellArgs(psCommand), {
       env: envVars,
       cwd: safeCwd,
       // Prevent visible console window on Windows (no-op on other platforms)
@@ -1681,11 +1682,57 @@ export function isOnFailureBlock(hook: HookWithOnFailure): boolean {
 /**
  * Gold `YQe` — true when `onFailure: "block"` applies to this hook + event.
  */
+const PS_NAMED_BLOCKS = 'begin|process|end|clean|dynamicparam'
+const PS_NAMED_BLOCK_START_RE = new RegExp(`^(${PS_NAMED_BLOCKS})\\s*\\{`, 'i')
+const PS_NAMED_BLOCK_ANY_RE = new RegExp(
+  `(?:^|[^-$.\\w])(?:${PS_NAMED_BLOCKS})(?=[\\s\\u0085]*(?:\\{|#|<#|\`))`,
+  'i',
+)
+
+/** Official `FCe` + `cen`: detect PowerShell script headers where trailing `; if (-not $?) ...` is invalid. */
+function isPowerShellScriptHeader(command: string): boolean {
+  let i = 0
+  for (;;) {
+    while (i < command.length && /[\s;]/.test(command[i]!)) i++
+    if (command[i] === '#') {
+      while (i < command.length && command[i] !== '\n') i++
+      continue
+    }
+    if (command.startsWith('<#', i)) {
+      const close = command.indexOf('#>', i + 2)
+      i = close === -1 ? command.length : close + 2
+      continue
+    }
+    break
+  }
+  const rest = command.slice(i)
+  const startsHeader =
+    /^using\s+(namespace|module|assembly)\b/i.test(rest) ||
+    /^param\s*\(/i.test(rest) ||
+    PS_NAMED_BLOCK_START_RE.test(rest) ||
+    (/^\[\w/.test(rest) && !/^\[[\w.]+\]::/.test(rest))
+  return startsHeader && PS_NAMED_BLOCK_ANY_RE.test(command)
+}
+
 /**
- * Official rRe(e, n) (#698): on Windows without Git for Windows, a PreToolUse
- * or PermissionRequest command hook that sets no shell (and no onFailure:
- * "continue") acts as a guard — if it fails, block the call instead of
- * failing open.
+ * #1149: propagate native program exit code 2 from PowerShell hooks
+ * (PowerShell otherwise swallows `$LASTEXITCODE` on non-PermissionRequest hooks).
+ */
+export function wrapPowerShellHookCommand(
+  command: string,
+  hookEvent: HookEvent | 'StatusLine' | 'FileSuggestion',
+): string {
+  if (hookEvent === 'PermissionRequest' || isPowerShellScriptHeader(command)) {
+    return command
+  }
+  return `${command}\n; if (-not $?) { if ($LASTEXITCODE -eq 2) { exit 2 } }`
+}
+
+/**
+ * Official rRe(e, n) (#698, #1149): on Windows without Git for Windows, a PreToolUse
+ * or PermissionRequest command hook (even with `shell: "powershell"`) that sets
+ * no `args` and no `onFailure: "continue"` acts as a guard — if it fails, block
+ * the call instead of failing open.
  */
 export function shouldBlockNoBashGuard(
   hook: HookWithOnFailure & {
@@ -1704,7 +1751,6 @@ export function shouldBlockNoBashGuard(
     hook.async !== true &&
     hook.asyncRewake !== true &&
     hook.args === undefined &&
-    hook.shell === undefined &&
     hook.onFailure !== 'continue' &&
     isWindows &&
     !hasGitBash &&
@@ -1778,7 +1824,10 @@ export function applyOnFailureBlockToHookResult(
   const sanitizedDetail = escapeSystemReminderTags(detail)
   const reasonPhrase =
     blockReason === 'noBash'
-      ? "blocking because Git Bash wasn't found"
+      ? hook.type === 'command' &&
+        (hook as { shell?: string }).shell === 'powershell'
+        ? 'blocking because Git Bash wasn\'t found, so only exit code 0 or 2 counts as this hook\'s verdict. Make the hook end with exit code 0 or 2, or set "onFailure" to "continue" to let its failures pass.'
+        : "blocking because Git Bash wasn't found"
       : 'blocking because onFailure is "block"'
   const blockingText = `[${command}]: ${failureKind}; ${reasonPhrase}${sanitizedDetail === '' ? '' : `\n${sanitizedDetail}`}`
 
@@ -3224,6 +3273,28 @@ function mergeManagedAndDownstreamClassicEvent(
  * @param messages Optional conversation history for prompt/function hooks
  * @returns Async generator that yields progress messages and hook results
  */
+/** #928 (official `fJe = 12`): max concurrent prompt/agent hooks per event. */
+export const MAX_CONCURRENT_MODEL_HOOKS_PER_EVENT = 12
+
+/**
+ * #928 (official `zan`): run non-model hooks uncapped while capping prompt/agent
+ * hooks at `MAX_CONCURRENT_MODEL_HOOKS_PER_EVENT` (12) per event.
+ */
+export function mergeHookGeneratorsWithModelCap<T>(
+  entries: ReadonlyArray<{
+    isModelHook: boolean
+    generator: AsyncGenerator<T, void>
+  }>,
+  maxConcurrentModelHooks = MAX_CONCURRENT_MODEL_HOOKS_PER_EVENT,
+): AsyncGenerator<T, void> {
+  const modelGens = entries.filter(e => e.isModelHook).map(e => e.generator)
+  if (modelGens.length <= 1) {
+    return all(entries.map(e => e.generator))
+  }
+  const nonModelGens = entries.filter(e => !e.isModelHook).map(e => e.generator)
+  return all([...nonModelGens, all(modelGens, maxConcurrentModelHooks)])
+}
+
 async function* executeHooks({
   hookInput,
   toolUseID,
@@ -4717,8 +4788,15 @@ async function* executeHooks({
   )
 
   try {
-    // Run all hooks in parallel and wait for all to complete
-    for await (const rawResult of all(hookPromises)) {
+    // Run non-model hooks in parallel and cap prompt/agent hooks at 12 per event (#928)
+    const mergedHooks = mergeHookGeneratorsWithModelCap(
+      matchingHooks.map((entry, idx) => ({
+        isModelHook:
+          entry.hook.type === 'prompt' || entry.hook.type === 'agent',
+        generator: hookPromises[idx]!,
+      })),
+    )
+    for await (const rawResult of mergedHooks) {
       const result = applyOnFailureBlockToHookResult(
         rawResult,
         hookEvent,

@@ -14,7 +14,13 @@ import {
   keychainCacheState,
   type KeychainReadFailed,
 } from './macOsKeychainHelpers.js'
-import type { SecureStorage, SecureStorageData } from './types.js'
+import {
+  SECURE_STORAGE_READ_FAILED,
+  type ReadAsyncStrictOptions,
+  type SecureStorage,
+  type SecureStorageData,
+  type SecureStorageReadFailed,
+} from './types.js'
 
 /** densable CE_ / AE_ — security exit codes treated as "no item" (null, not MQ). */
 const SECURITY_ERR_SEC_ITEM_NOT_FOUND = 44
@@ -126,6 +132,48 @@ export const macOsKeychainStorage = {
     })
     keychainCacheState.readInFlight = promise
     return promise
+  },
+  async readAsyncStrict(
+    _key?: unknown,
+    options?: ReadAsyncStrictOptions,
+  ): Promise<SecureStorageData | null | SecureStorageReadFailed> {
+    const gen = keychainCacheState.generation
+    const strict = await doReadAsyncStrict()
+    let result: SecureStorageData | null | SecureStorageReadFailed = null
+    switch (strict.said) {
+      case 'item':
+        result = strict.data
+        break
+      case 'nothing':
+        result = SECURE_STORAGE_READ_FAILED
+        break
+      case 'unparsable':
+        if (options?.unparsableEntryAs === 'failure') {
+          result = SECURE_STORAGE_READ_FAILED
+        }
+        break
+      case 'locked':
+        if (
+          options?.inaccessibleAs === 'failure' ||
+          (options?.inaccessibleAs === 'failureIfTransient' &&
+            keychainCacheState.keychainHoldsItem)
+        ) {
+          result = SECURE_STORAGE_READ_FAILED
+        }
+        break
+      case 'no such item':
+      case 'empty':
+        break
+    }
+    if (
+      result !== SECURE_STORAGE_READ_FAILED &&
+      gen === keychainCacheState.generation
+    ) {
+      const next = result ?? keychainCacheState.cache.data
+      keychainCacheState.cache = { data: next, cachedAt: Date.now() }
+      keychainCacheState.lastReadFailure = null
+    }
+    return result
   },
   update(
     data: SecureStorageData,
@@ -270,6 +318,49 @@ async function doReadAsync(): Promise<
     // densable MQ: spawn/timeout/unexpected throw is a hard failure — enter
     // cooldown so we do not re-spawn security in a tight loop.
     return KEYCHAIN_READ_FAILED
+  }
+}
+
+type KeychainStrictResult =
+  | { said: 'item'; data: SecureStorageData }
+  | { said: 'nothing' }
+  | { said: 'unparsable' }
+  | { said: 'locked' }
+  | { said: 'no such item' }
+  | { said: 'empty' }
+
+async function doReadAsyncStrict(): Promise<KeychainStrictResult> {
+  try {
+    const storageServiceName = getMacOsKeychainStorageServiceName(
+      CREDENTIALS_SERVICE_SUFFIX,
+    )
+    const username = getUsername()
+    const { stdout, code } = await execFileNoThrow(
+      'security',
+      ['find-generic-password', '-a', username, '-w', '-s', storageServiceName],
+      { useCwd: false, preserveOutputOnError: false },
+    )
+    if (code === 0) {
+      if (!stdout || !stdout.trim()) {
+        return { said: 'empty' }
+      }
+      keychainCacheState.keychainHoldsItem = true
+      try {
+        return { said: 'item', data: jsonParse(stdout.trim()) }
+      } catch {
+        return { said: 'unparsable' }
+      }
+    }
+    if (code === SECURITY_ERR_SEC_ITEM_NOT_FOUND) {
+      keychainCacheState.keychainHoldsItem = false
+      return { said: 'no such item' }
+    }
+    if (code === SECURITY_ERR_SEC_INTERACTION_NOT_ALLOWED) {
+      return { said: 'locked' }
+    }
+    return { said: 'nothing' }
+  } catch {
+    return { said: 'nothing' }
   }
 }
 

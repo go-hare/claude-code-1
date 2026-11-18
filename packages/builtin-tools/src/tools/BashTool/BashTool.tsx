@@ -89,7 +89,8 @@ import { checkReadOnlyConstraints } from './readOnlyValidation.js';
 import { validateCoordinatorBashWriteAccess } from './coordinatorWriteValidation.js';
 import { parseSedEditCommand } from './sedEditParser.js';
 import { extractSandboxViolationSuffix, mergeBashStderr } from './sandboxViolationResult.js';
-import { shouldUseSandbox } from './shouldUseSandbox.js';
+import { createOutputFileCleanup, persistLargeOutputFile } from './outputFileCleanup.js';
+import { getSandboxPolicyRefusal, SandboxPolicyRefusalError, shouldUseSandbox } from './shouldUseSandbox.js';
 import { BASH_TOOL_NAME } from './toolName.js';
 import {
   extractHookIfFallbackCommands,
@@ -1179,16 +1180,6 @@ export const BashTool = buildTool({
     if (!input) {
       return 'Bash';
     }
-    // Render sed in-place edits as file edits
-    if (input.command) {
-      const sedInfo = parseSedEditCommand(input.command);
-      if (sedInfo) {
-        return fileEditUserFacingName({
-          file_path: sedInfo.filePath,
-          old_string: 'x',
-        });
-      }
-    }
     // Env var FIRST: shouldUseSandbox → splitCommand_DEPRECATED → shell-quote's
     // `new RegExp` per call. userFacingName runs per-render for every bash
     // message in history; with ~50 msgs + one slow-to-tokenize command, this
@@ -1216,6 +1207,10 @@ export const BashTool = buildTool({
     // densable BT() && dK(n).requested — named host is not forwarded (errorCode 11)
     const hostRefusal = remoteHostForwardRefusal(input, BASH_TOOL_NAME);
     if (hostRefusal) return { ...hostRefusal, errorCode: 11 };
+    const policyRefusal = getSandboxPolicyRefusal(shouldUseSandbox(input), input.command, false, 'bash');
+    if (policyRefusal !== null) {
+      return { result: false, message: policyRefusal, errorCode: 14 };
+    }
     if (feature('MONITOR_TOOL') && !isBackgroundTasksDisabled && !input.run_in_background) {
       const sleepPattern = detectBlockedSleepPattern(input.command);
       if (sleepPattern !== null) {
@@ -1375,16 +1370,16 @@ export const BashTool = buildTool({
     input: BashToolInput,
     toolUseContext,
     _canUseTool?: CanUseToolFn,
-    parentMessage?: AssistantMessage,
+    _parentMessage?: AssistantMessage,
     onProgress?: ToolCallProgress<BashProgress>,
   ) {
-    // Handle simulated sed edit - apply directly instead of running sed
-    // This ensures what the user previewed is exactly what gets written
-    if (input._simulatedSedEdit) {
-      return applySedEdit(input._simulatedSedEdit, toolUseContext, parentMessage);
+    const policyRefusal = getSandboxPolicyRefusal(shouldUseSandbox(input), input.command, false, 'bash');
+    if (policyRefusal !== null) {
+      throw new SandboxPolicyRefusalError(policyRefusal);
     }
 
     const { abortController, getAppState, setAppState, setToolJSX } = toolUseContext;
+    const outputCleanup = createOutputFileCleanup({ get: id => getAppState().tasks[id] });
 
     const stdoutAccumulator = new EndTruncatingAccumulator();
     let stderrForShellReset = '';
@@ -1413,181 +1408,173 @@ export const BashTool = buildTool({
       };
     }
 
-    try {
-      // Use the new async generator version of runShellCommand
-      const commandGenerator = runShellCommand({
-        input,
-        abortController,
-        // Use the always-shared task channel so async agents' background
-        // bash tasks are actually registered (and killable on agent exit).
-        setAppState: toolUseContext.setAppStateForTasks ?? setAppState,
-        getAppState,
-        setToolJSX,
-        preventCwdChanges,
-        isMainThread,
-        toolUseId: toolUseContext.toolUseId,
-        agentId: toolUseContext.agentId,
-        innerCall: toolUseContext.innerCall,
-        // densable 2.1.217 VRu/ZRu — pin isolation worktree into shell gates
-        agentWorktree: toolUseContext.agentWorktree,
-      });
-
-      // Consume the generator and capture the return value
-      let generatorResult;
-      do {
-        generatorResult = await commandGenerator.next();
-        if (!generatorResult.done && onProgress) {
-          const progress = generatorResult.value;
-          onProgress({
-            toolUseID: `bash-progress-${progressCounter++}`,
-            data: {
-              type: 'bash_progress',
-              output: progress.output,
-              fullOutput: progress.fullOutput,
-              elapsedTimeSeconds: progress.elapsedTimeSeconds,
-              totalLines: progress.totalLines,
-              totalBytes: progress.totalBytes,
-              taskId: progress.taskId,
-              timeoutMs: progress.timeoutMs,
-            },
-          });
-        }
-      } while (!generatorResult.done);
-
-      // Get the final result from the generator's return value
-      result = generatorResult.value;
-
-      trackGitOperations(input.command, result.code, result.stdout);
-
-      const isInterrupt = result.interrupted && abortController.signal.reason === 'interrupt';
-
-      // stderr is interleaved in stdout (merged fd) — result.stdout has both
-      stdoutAccumulator.append((result.stdout || '').trimEnd() + EOL);
-
-      // Interpret the command result using semantic rules
-      interpretationResult = interpretCommandResult(input.command, result.code, result.stdout || '', '');
-
-      // Check for git index.lock error (stderr is in stdout now)
-      if (result.stdout && result.stdout.includes(".git/index.lock': File exists")) {
-        logEvent('tengu_git_index_lock_error', {});
-      }
-
-      if (interpretationResult.isError && !isInterrupt) {
-        // Only add exit code if it's actually an error
-        if (result.code !== 0) {
-          stdoutAccumulator.append(`Exit code ${result.code}`);
-        }
-      }
-
-      if (!preventCwdChanges) {
-        const appState = getAppState();
-        if (resetCwdIfOutsideProject(appState.toolPermissionContext)) {
-          stderrForShellReset = stdErrAppendShellResetMessage('');
-        }
-      }
-
-      // Annotate output with sandbox violations if any (stderr is in stdout)
-      const originalStdout = result.stdout || '';
-      const outputWithSbFailures = SandboxManager.annotateStderrWithSandboxFailures(input.command, originalStdout);
-      // densable 2.1.243 #35: keep the appended <sandbox_violations> on
-      // success (exit 0) — error path already throws with the full annotate.
-      sandboxViolationSuffix = extractSandboxViolationSuffix(originalStdout, outputWithSbFailures);
-
-      if (result.preSpawnError) {
-        throw new Error(result.preSpawnError);
-      }
-      if (interpretationResult.isError && !isInterrupt) {
-        // stderr is merged into stdout (merged fd); outputWithSbFailures
-        // already has the full output. Pass '' for stdout to avoid
-        // duplication in getErrorParts() and processBashCommand.
-        throw new ShellError('', outputWithSbFailures, result.code, result.interrupted);
-      }
-      wasInterrupted = result.interrupted;
-    } finally {
-      if (setToolJSX) setToolJSX(null);
-    }
-
-    // Get final string from accumulator
-    const stdout = stdoutAccumulator.toString();
-
-    // Large output: the file on disk has more than getMaxOutputLength() bytes.
-    // stdout already contains the first chunk (from getStdout()). Copy the
-    // output file to the tool-results dir so the model can read it via
-    // FileRead. If > 64 MB, truncate after copying.
     let persistedOutputPath: string | undefined;
     let persistedOutputSize: number | undefined;
-    if (result.outputFilePath && result.outputTaskId) {
+    let isImage = false;
+    let compressedStdout = '';
+    let strippedStdout = '';
+    let stdout = '';
+    try {
       try {
-        const fileStat = await fsStat(result.outputFilePath);
-        persistedOutputSize = fileStat.size;
+        // Use the new async generator version of runShellCommand
+        const commandGenerator = runShellCommand({
+          input,
+          abortController,
+          // Use the always-shared task channel so async agents' background
+          // bash tasks are actually registered (and killable on agent exit).
+          setAppState: toolUseContext.setAppStateForTasks ?? setAppState,
+          getAppState,
+          setToolJSX,
+          preventCwdChanges,
+          isMainThread,
+          toolUseId: toolUseContext.toolUseId,
+          agentId: toolUseContext.agentId,
+          innerCall: toolUseContext.innerCall,
+          // densable 2.1.217 VRu/ZRu — pin isolation worktree into shell gates
+          agentWorktree: toolUseContext.agentWorktree,
+        });
 
-        await ensureToolResultsDir();
-        const dest = getToolResultPath(result.outputTaskId, false);
-        if (fileStat.size > MAX_PERSISTED_SIZE) {
-          await fsTruncate(result.outputFilePath, MAX_PERSISTED_SIZE);
+        // Consume the generator and capture the return value
+        let generatorResult;
+        do {
+          generatorResult = await commandGenerator.next();
+          if (!generatorResult.done && onProgress) {
+            const progress = generatorResult.value;
+            onProgress({
+              toolUseID: `bash-progress-${progressCounter++}`,
+              data: {
+                type: 'bash_progress',
+                output: progress.output,
+                fullOutput: progress.fullOutput,
+                elapsedTimeSeconds: progress.elapsedTimeSeconds,
+                totalLines: progress.totalLines,
+                totalBytes: progress.totalBytes,
+                taskId: progress.taskId,
+                timeoutMs: progress.timeoutMs,
+              },
+            });
+          }
+        } while (!generatorResult.done);
+
+        // Get the final result from the generator's return value
+        result = generatorResult.value;
+        outputCleanup.track(result);
+
+        trackGitOperations(input.command, result.code, result.stdout);
+
+        const isInterrupt = result.interrupted && abortController.signal.reason === 'interrupt';
+
+        // stderr is interleaved in stdout (merged fd) — result.stdout has both
+        stdoutAccumulator.append((result.stdout || '').trimEnd() + EOL);
+
+        // Interpret the command result using semantic rules
+        interpretationResult = interpretCommandResult(input.command, result.code, result.stdout || '', '');
+
+        // Check for git index.lock error (stderr is in stdout now)
+        if (result.stdout && result.stdout.includes(".git/index.lock': File exists")) {
+          logEvent('tengu_git_index_lock_error', {});
         }
-        try {
-          await link(result.outputFilePath, dest);
-        } catch {
-          await copyFile(result.outputFilePath, dest);
+
+        if (interpretationResult.isError && !isInterrupt) {
+          // Only add exit code if it's actually an error
+          if (result.code !== 0) {
+            stdoutAccumulator.append(`Exit code ${result.code}`);
+          }
         }
-        persistedOutputPath = dest;
-      } catch {
-        // File may already be gone — stdout preview is sufficient
+
+        if (!preventCwdChanges) {
+          const appState = getAppState();
+          if (resetCwdIfOutsideProject(appState.toolPermissionContext)) {
+            stderrForShellReset = stdErrAppendShellResetMessage('');
+          }
+        }
+
+        // Annotate output with sandbox violations if any (stderr is in stdout)
+        const originalStdout = result.stdout || '';
+        const outputWithSbFailures = SandboxManager.annotateStderrWithSandboxFailures(input.command, originalStdout);
+        // densable 2.1.243 #35: keep the appended <sandbox_violations> on
+        // success (exit 0) — error path already throws with the full annotate.
+        sandboxViolationSuffix = extractSandboxViolationSuffix(originalStdout, outputWithSbFailures);
+
+        if (result.preSpawnError) {
+          throw new Error(result.preSpawnError);
+        }
+        if (interpretationResult.isError && !isInterrupt) {
+          // stderr is merged into stdout (merged fd); outputWithSbFailures
+          // already has the full output. Pass '' for stdout to avoid
+          // duplication in getErrorParts() and processBashCommand.
+          throw new ShellError('', outputWithSbFailures, result.code, result.interrupted);
+        }
+        wasInterrupted = result.interrupted;
+      } finally {
+        if (setToolJSX) setToolJSX(null);
       }
-    }
 
-    const commandType = input.command.split(' ')[0];
+      // Get final string from accumulator
+      stdout = stdoutAccumulator.toString();
 
-    logEvent('tengu_bash_tool_command_executed', {
-      command_type: commandType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      stdout_length: stdout.length,
-      stderr_length: 0,
-      exit_code: result.code,
-      interrupted: wasInterrupted,
-    });
+      // Large output: the file on disk has more than getMaxOutputLength() bytes.
+      // stdout already contains the first chunk (from getStdout()). Copy the
+      // output file to the tool-results dir so the model can read it via
+      // FileRead. If > 64 MB, truncate after copying.
+      const persisted = await persistLargeOutputFile(result, outputCleanup);
+      persistedOutputPath = persisted.persistedOutputPath;
+      persistedOutputSize = persisted.persistedOutputSize;
 
-    // Log code indexing tool usage
-    const codeIndexingTool = detectCodeIndexingFromCommand(input.command);
-    if (codeIndexingTool) {
-      logEvent('tengu_code_indexing_tool_used', {
-        tool: codeIndexingTool as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        source: 'cli' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        success: result.code === 0,
+      const commandType = input.command.split(' ')[0];
+
+      logEvent('tengu_bash_tool_command_executed', {
+        command_type: commandType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        stdout_length: stdout.length,
+        stderr_length: 0,
+        exit_code: result.code,
+        interrupted: wasInterrupted,
       });
-    }
 
-    let strippedStdout = stripEmptyLines(stdout);
-
-    // Claude Code hints protocol: CLIs/SDKs gated on CLAUDECODE=1 emit a
-    // `<claude-code-hint />` tag to stderr (merged into stdout here). Scan,
-    // record for useClaudeCodeHintRecommendation to surface, then strip
-    // so the model never sees the tag — a zero-token side channel.
-    // Stripping runs unconditionally (subagent output must stay clean too);
-    // only the dialog recording is main-thread-only.
-    const extracted = extractClaudeCodeHints(strippedStdout, input.command);
-    strippedStdout = extracted.stripped;
-    if (isMainThread && extracted.hints.length > 0) {
-      for (const hint of extracted.hints) maybeRecordPluginHint(hint);
-    }
-
-    let isImage = isImageOutput(strippedStdout);
-
-    // Cap image dimensions + size if present (CC-304 — see
-    // resizeShellImageOutput). Scope the decoded buffer so it can be reclaimed
-    // before we build the output Out object.
-    let compressedStdout = strippedStdout;
-    if (isImage) {
-      const resized = await resizeShellImageOutput(strippedStdout, result.outputFilePath, persistedOutputSize);
-      if (resized) {
-        compressedStdout = resized;
-      } else {
-        // Parse failed or file too large (e.g. exceeds MAX_IMAGE_FILE_SIZE).
-        // Keep isImage in sync with what we actually send so the UI label stays
-        // accurate — mapToolResultToToolResultBlockParam's defensive
-        // fallthrough will send text, not an image block.
-        isImage = false;
+      // Log code indexing tool usage
+      const codeIndexingTool = detectCodeIndexingFromCommand(input.command);
+      if (codeIndexingTool) {
+        logEvent('tengu_code_indexing_tool_used', {
+          tool: codeIndexingTool as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          source: 'cli' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          success: result.code === 0,
+        });
       }
+
+      strippedStdout = stripEmptyLines(stdout);
+
+      // Claude Code hints protocol: CLIs/SDKs gated on CLAUDECODE=1 emit a
+      // `<claude-code-hint />` tag to stderr (merged into stdout here). Scan,
+      // record for useClaudeCodeHintRecommendation to surface, then strip
+      // so the model never sees the tag — a zero-token side channel.
+      // Stripping runs unconditionally (subagent output must stay clean too);
+      // only the dialog recording is main-thread-only.
+      const extracted = extractClaudeCodeHints(strippedStdout, input.command);
+      strippedStdout = extracted.stripped;
+      if (isMainThread && extracted.hints.length > 0) {
+        for (const hint of extracted.hints) maybeRecordPluginHint(hint);
+      }
+
+      isImage = isImageOutput(strippedStdout);
+
+      // Cap image dimensions + size if present (CC-304 — see
+      // resizeShellImageOutput). Scope the decoded buffer so it can be reclaimed
+      // before we build the output Out object.
+      compressedStdout = strippedStdout;
+      if (isImage) {
+        const resized = await resizeShellImageOutput(strippedStdout, result.outputFilePath, persistedOutputSize);
+        if (resized) {
+          compressedStdout = resized;
+        } else {
+          // Parse failed or file too large (e.g. exceeds MAX_IMAGE_FILE_SIZE).
+          // Keep isImage in sync with what we actually send so the UI label stays
+          // accurate — mapToolResultToToolResultBlockParam's defensive
+          // fallthrough will send text, not an image block.
+          isImage = false;
+        }
+      }
+    } finally {
+      await outputCleanup.dispose();
     }
 
     const backgroundEndsWithFinalResponse = backgroundShellReapedAtFinalResponse(
@@ -1973,7 +1960,23 @@ async function* runShellCommand({
           // Clean up stream resources for foreground commands
           // (backgrounded commands are cleaned up by LocalShellTask)
           shellCommand.cleanup();
-          return result;
+          // Official 2.1.309 #1163 (`P6o` @289027877): diagnose disk-full on failed
+          // foreground commands that spilled stdout to a temp output file.
+          let finalResult = result;
+          if (shellCommand.taskOutput.stdoutToFile && result.code !== 0 && !result.interrupted) {
+            const { diagnoseDiskFullOnCommandFailure } = await import('./utils.js');
+            const diskNote = await diagnoseDiskFullOnCommandFailure(
+              shellCommand.taskOutput.path,
+              result.stdout === '',
+            ).catch(() => null);
+            if (diskNote) {
+              finalResult = {
+                ...result,
+                stdout: result.stdout ? `${diskNote}\n${result.stdout}` : diskNote,
+              };
+            }
+          }
+          return finalResult;
         }
 
         // Check if command was backgrounded (either via old mechanism or new backgroundAll)

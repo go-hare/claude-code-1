@@ -274,6 +274,10 @@ function applyModelOverrides(ms: ModelStrings): ModelStrings {
  * it is returned unchanged. Safe to call during module init (no-ops if settings
  * aren't loaded yet).
  */
+function strip1mTag(modelId: string): string {
+  return modelId.replace(/(\[1m\])+$/i, '').trim()
+}
+
 export function resolveOverriddenModel(modelId: string): string {
   let overrides: Record<string, string> | undefined
   try {
@@ -284,8 +288,9 @@ export function resolveOverriddenModel(modelId: string): string {
   if (!overrides) {
     return modelId
   }
+  const normalizedInput = strip1mTag(modelId).toLowerCase()
   for (const [canonicalId, override] of Object.entries(overrides)) {
-    if (override === modelId) {
+    if (strip1mTag(override).toLowerCase() === normalizedInput) {
       return canonicalId
     }
   }

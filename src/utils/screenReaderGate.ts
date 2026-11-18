@@ -43,16 +43,27 @@ function hasAxScreenReaderFlag(argv: readonly string[]): boolean {
   return argv.includes(AX_SCREEN_READER_FLAG)
 }
 
+const TRUSTED_AX_SCREEN_READER_SOURCES = [
+  'policySettings',
+  'flagSettings',
+  'userSettings',
+] as const
+
 function readAxScreenReaderSetting(injected: boolean | undefined): boolean {
   if (injected !== undefined) return injected
-  try {
-    const settings = getSettingsForSource('userSettings') as
-      | { axScreenReader?: boolean }
-      | undefined
-    return settings?.axScreenReader === true
-  } catch {
-    return false
+  for (const source of TRUSTED_AX_SCREEN_READER_SOURCES) {
+    try {
+      const settings = getSettingsForSource(source) as
+        | { axScreenReader?: boolean }
+        | undefined
+      if (settings?.axScreenReader !== undefined) {
+        return settings.axScreenReader === true
+      }
+    } catch {
+      // keep checking lower-precedence trusted sources
+    }
   }
+  return false
 }
 
 /**

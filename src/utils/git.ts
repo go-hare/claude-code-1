@@ -1,5 +1,6 @@
+import { execSync } from 'child_process'
 import { createHash } from 'crypto'
-import { readFileSync, realpathSync, statSync } from 'fs'
+import { existsSync, readFileSync, realpathSync, statSync } from 'fs'
 import { open, readFile, realpath, stat } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
 import { basename, dirname, join, resolve, sep } from 'path'
@@ -21,8 +22,56 @@ import {
 import { logError } from './log.js'
 import { memoizeWithLRU } from './memoize.js'
 import { whichSync } from './which.js'
+import { resolveGitForWindowsDirectExe } from './windowsPaths.js'
 
 const GIT_ROOT_NOT_FOUND = Symbol('git-root-not-found')
+
+/**
+ * 2.1.309 #1127 & #1161 (SEA V / Es / j5t):
+ * Force English git messages (`LC_ALL=C`, `LANGUAGE=C`) and ignore replace
+ * refs (`GIT_NO_REPLACE_OBJECTS=1`) for internal git subprocesses.
+ */
+export function gitSubprocessEnv(extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    LC_ALL: 'C',
+    LANGUAGE: 'C',
+    GIT_NO_REPLACE_OBJECTS: '1',
+    ...extra,
+  }
+}
+
+/**
+ * 2.1.309 #1161 (SEA Es): Disable slow commit-graph / multi-pack-index /
+ * bitmap / reverse-index / replace-refs reads on Windows.
+ */
+export function gitFastConfigArgs(
+  platform: NodeJS.Platform = process.platform,
+): string[] {
+  if (platform !== 'win32') return []
+  return [
+    '-c',
+    'core.commitGraph=false',
+    '-c',
+    'core.multiPackIndex=false',
+    '-c',
+    'pack.useBitmaps=false',
+    '-c',
+    'pack.readReverseIndex=false',
+    '-c',
+    'core.useReplaceRefs=false',
+  ]
+}
+
+async function execGit(
+  args: string[],
+  options?: Parameters<typeof execFileNoThrow>[2],
+) {
+  return execFileNoThrow(gitExe(), [...gitFastConfigArgs(), ...args], {
+    ...options,
+    env: gitSubprocessEnv(options?.env),
+  })
+}
 
 /**
  * densable `Kdu` — walk for `.git` without reading/writing the LRU.
@@ -266,7 +315,16 @@ export function findCanonicalGitRootUncached(startPath: string): string | null {
 export const gitExe = memoize((): string => {
   // Every time we spawn a process, we have to lookup the path.
   // Let's instead avoid that lookup so we only do it once.
-  return whichSync('git') || 'git'
+  const found = whichSync('git')
+  if (!found) return 'git'
+  return process.platform === 'win32'
+    ? resolveGitForWindowsDirectExe(found, {
+        checkExists: existsSync,
+        execCommand: cmd =>
+          execSync(cmd, { stdio: 'pipe', encoding: 'utf8' }).trim(),
+        cwdFn: getCwd,
+      })
+    : found
 })
 
 /**
@@ -399,17 +457,18 @@ export async function getRepoRemoteHash(): Promise<string | null> {
 }
 
 export const getIsHeadOnRemote = async (): Promise<boolean> => {
-  const { code } = await execFileNoThrow(gitExe(), ['rev-parse', '@{u}'], {
+  const { code } = await execGit(['rev-parse', '@{u}'], {
     preserveOutputOnError: false,
   })
   return code === 0
 }
 
 export const hasUnpushedCommits = async (): Promise<boolean> => {
-  const { stdout, code } = await execFileNoThrow(
-    gitExe(),
+  const { stdout, code } = await execGit(
     ['rev-list', '--count', '@{u}..HEAD'],
-    { preserveOutputOnError: false },
+    {
+      preserveOutputOnError: false,
+    },
   )
   return code === 0 && parseInt(stdout.trim(), 10) > 0
 }
@@ -421,15 +480,14 @@ export const getIsClean = async (options?: {
   if (options?.ignoreUntracked) {
     args.push('-uno')
   }
-  const { stdout } = await execFileNoThrow(gitExe(), args, {
+  const { stdout } = await execGit(args, {
     preserveOutputOnError: false,
   })
   return stdout.trim().length === 0
 }
 
 export const getChangedFiles = async (): Promise<string[]> => {
-  const { stdout } = await execFileNoThrow(
-    gitExe(),
+  const { stdout } = await execGit(
     ['--no-optional-locks', 'status', '--porcelain'],
     {
       preserveOutputOnError: false,
@@ -448,8 +506,7 @@ export type GitFileStatus = {
 }
 
 export const getFileStatus = async (): Promise<GitFileStatus> => {
-  const { stdout } = await execFileNoThrow(
-    gitExe(),
+  const { stdout } = await execGit(
     ['--no-optional-locks', 'status', '--porcelain'],
     {
       preserveOutputOnError: false,
@@ -794,7 +851,7 @@ export async function preserveGitStateForIssue(): Promise<PreservedGitState | nu
       logForDebugging('Shallow clone detected, using HEAD-only mode for issue')
       const [{ stdout: patch }, untrackedFiles] = await Promise.all([
         // densable rqi: diff ...gnr HEAD
-        execFileNoThrow(gitExe(), ['diff', ...RAW_GIT_DIFF_FLAGS, 'HEAD']),
+        execGit(['diff', ...RAW_GIT_DIFF_FLAGS, 'HEAD']),
         captureUntrackedFiles(),
       ])
       return {
@@ -816,7 +873,7 @@ export async function preserveGitStateForIssue(): Promise<PreservedGitState | nu
       logForDebugging('No remote found, using HEAD-only mode for issue')
       const [{ stdout: patch }, untrackedFiles] = await Promise.all([
         // densable rqi: diff ...gnr HEAD
-        execFileNoThrow(gitExe(), ['diff', ...RAW_GIT_DIFF_FLAGS, 'HEAD']),
+        execGit(['diff', ...RAW_GIT_DIFF_FLAGS, 'HEAD']),
         captureUntrackedFiles(),
       ])
       return {
@@ -842,7 +899,7 @@ export async function preserveGitStateForIssue(): Promise<PreservedGitState | nu
       logForDebugging('Merge-base failed, using HEAD-only mode for issue')
       const [{ stdout: patch }, untrackedFiles] = await Promise.all([
         // densable rqi: diff ...gnr HEAD
-        execFileNoThrow(gitExe(), ['diff', ...RAW_GIT_DIFF_FLAGS, 'HEAD']),
+        execGit(['diff', ...RAW_GIT_DIFF_FLAGS, 'HEAD']),
         captureUntrackedFiles(),
       ])
       return {
@@ -868,23 +925,23 @@ export async function preserveGitStateForIssue(): Promise<PreservedGitState | nu
       { stdout: branchName },
     ] = await Promise.all([
       // densable: diff ...gnr mergeBaseSha
-      execFileNoThrow(gitExe(), ['diff', ...RAW_GIT_DIFF_FLAGS, remoteBaseSha]),
+      execGit(['diff', ...RAW_GIT_DIFF_FLAGS, remoteBaseSha]),
       // Untracked files captured separately
       captureUntrackedFiles(),
       // densable format-patch --no-ext-diff --no-textconv (inline, same as gnr)
       // Preserves the actual commit chain (author, date, message) so replay
       // containers can reconstruct the branch with real commits instead of a
       // squashed diff. Uses --stdout to emit all patches as a single text stream.
-      execFileNoThrow(gitExe(), [
+      execGit([
         'format-patch',
         ...RAW_GIT_DIFF_FLAGS,
         `${remoteBaseSha}..HEAD`,
         '--stdout',
       ]),
       // HEAD SHA for replay
-      execFileNoThrow(gitExe(), ['rev-parse', 'HEAD']),
+      execGit(['rev-parse', 'HEAD']),
       // Branch name for replay
-      execFileNoThrow(gitExe(), ['rev-parse', '--abbrev-ref', 'HEAD']),
+      execGit(['rev-parse', '--abbrev-ref', 'HEAD']),
     ])
 
     let formatPatch: string | null = null

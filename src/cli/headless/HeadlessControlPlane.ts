@@ -203,6 +203,40 @@ type McpSetServersToolPolicy = {
  * model/flag-settings updates, dynamic MCP server reconciliation, and OAuth
  * flows for MCP servers and Anthropic auth.
  */
+export const SET_MODEL_CONFIRM_TIMEOUT_MS = 15_000
+
+export async function confirmModelWithTimeout(
+  model: string,
+  timeoutMs: number = SET_MODEL_CONFIRM_TIMEOUT_MS,
+  confirmFn?: (m: string) => Promise<{ valid: boolean; error?: string }>,
+): Promise<{ valid: boolean; error?: string; timedOut?: boolean }> {
+  const probe =
+    confirmFn ??
+    (async (m: string) => {
+      const { validateModel } = await import('src/utils/model/validateModel.js')
+      return validateModel(m)
+    })
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const result = await Promise.race([
+      probe(model).then(r => ({ ...r, timedOut: false as const })),
+      new Promise<{ valid: false; error: string; timedOut: true }>(resolve => {
+        timer = setTimeout(() => {
+          resolve({
+            valid: false,
+            error: `Couldn't confirm model "${model}" with the API. Try again.`,
+            timedOut: true,
+          })
+        }, timeoutMs)
+      }),
+    ])
+    return result
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
 export class HeadlessControlPlane {
   // Track active OAuth flows per server so we can abort a previous flow
   // when a new mcp_authenticate request arrives for the same server.
@@ -288,6 +322,8 @@ export class HeadlessControlPlane {
         requestedArg: string,
         resolvedModel: string,
       ) => void
+      confirmWithServer?: boolean
+      confirmModel?: (m: string) => Promise<{ valid: boolean; error?: string }>
     },
   ): Promise<void> {
     // densable 2.1.212 print set_model (RGf/DGf/h5/Z0 + Ye/HS/session):
@@ -344,6 +380,29 @@ export class HeadlessControlPlane {
       decision.requestedArg.trim().toLowerCase() === 'default'
         ? null
         : decision.requestedArg
+
+    if (
+      requestedModel !== null &&
+      !decision.steppedDown &&
+      opts.confirmWithServer !== false &&
+      (opts.confirmModel !== undefined ||
+        opts.confirmWithServer === true ||
+        process.env.NODE_ENV !== 'test')
+    ) {
+      const confirmation = await confirmModelWithTimeout(
+        decision.model,
+        SET_MODEL_CONFIRM_TIMEOUT_MS,
+        opts.confirmModel,
+      )
+      if (!confirmation.valid) {
+        this.sendControlResponseError(
+          msg,
+          confirmation.error ??
+            `Couldn't confirm model "${decision.model}" with the API. Try again.`,
+        )
+        return
+      }
+    }
     const pre = await executePreModelSwitchHooks(
       {
         fromModel,

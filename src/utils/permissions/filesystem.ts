@@ -1,10 +1,21 @@
 import { feature } from 'bun:bundle'
 import { randomBytes } from 'crypto'
-import { readdirSync, readlinkSync, realpathSync } from 'fs'
+import { readdirSync, readFileSync, readlinkSync, realpathSync } from 'fs'
 import ignore from 'ignore'
 import memoize from 'lodash-es/memoize.js'
 import { homedir, tmpdir } from 'os'
-import { basename, dirname, join, normalize, posix, resolve, sep } from 'path'
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  normalize,
+  parse,
+  posix,
+  relative,
+  resolve,
+  sep,
+} from 'path'
 import { hasAutoMemPathOverride, isAutoMemPath } from 'src/memdir/paths.js'
 import { isAgentMemoryPath } from '@claude-code/builtin-tools/tools/AgentTool/agentMemory.js'
 import {
@@ -23,6 +34,10 @@ import type { AnyObject, Tool, ToolPermissionContext } from '../../Tool.js'
 import { FILE_READ_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileReadTool/prompt.js'
 import { GLOB_TOOL_NAME } from '@claude-code/builtin-tools/tools/GlobTool/prompt.js'
 import { getCwd } from '../cwd.js'
+import {
+  getActiveAnthropicProfileName,
+  getAnthropicConfigDir,
+} from '../anthropicProfile.js'
 import { getClaudeConfigHomeDir } from '../envUtils.js'
 import { isEvalConfined } from './evalConfined.js'
 import {
@@ -227,10 +242,201 @@ export function toPosixPath(path: string): string {
   return path
 }
 
+let flagMcpConfigFilePathsList: readonly string[] = []
+
+/**
+ * Official 325 `Opi(e)` — registers `--mcp-config` file paths for settings
+ * write protection and sandbox `denyWrite` (#1120).
+ */
+export function setFlagMcpConfigFilePaths(paths: readonly string[]): void {
+  flagMcpConfigFilePathsList = [...paths]
+}
+
+/**
+ * Official 325 `nLe()` — returns `--mcp-config` file paths (#1120).
+ */
+export function getFlagMcpConfigFilePaths(): readonly string[] {
+  return flagMcpConfigFilePathsList
+}
+
+const PROFILE_STORE_SUBDIRS = ['configs', 'credentials'] as const
+const PROFILE_STORE_FILES = ['active_config'] as const
+
+export type ProfileStoreDenyPaths = {
+  dirs: string[]
+  files: string[]
+}
+
+/**
+ * Official 325 `b(e)` — resolve symlinks (walking up to the nearest existing
+ * ancestor if the leaf doesn't exist yet) and lowercase for case-insensitive
+ * containment comparison.
+ */
+function normalizeForContainmentCheck(p: string): string {
+  const fs = getFsImplementation()
+  let cur = resolve(p)
+  let tail = ''
+  for (;;) {
+    try {
+      cur = join(fs.realpathSync(cur), tail)
+      break
+    } catch {
+      const parent = dirname(cur)
+      if (parent === cur) {
+        cur = join(cur, tail)
+        break
+      }
+      tail = tail ? join(basename(cur), tail) : basename(cur)
+      cur = parent
+    }
+  }
+  return cur.toLowerCase()
+}
+
+/**
+ * Official 325 `D(e)` — returns true when `dirPath` is the filesystem root or
+ * contains/equals `cwd`, in which case denying the directory as a whole would
+ * block `cwd` itself.
+ */
+function isRootOrContainsCwd(dirPath: string): boolean {
+  const normalized = normalizeForContainmentCheck(dirPath)
+  if (normalized === parse(normalized).root) return true
+  const rel = relative(normalized, normalizeForContainmentCheck(getCwd()))
+  const firstSegment = rel.split(sep)[0]
+  return rel === '' || (firstSegment !== '..' && !isAbsolute(rel))
+}
+
+/**
+ * Official 325 `Ger()` / `ye()` — resolves Anthropic profile store paths
+ * (following symlinks on the config dir and active credentials_path) so
+ * sandbox `denyWrite` and write-protection apply even through symlinks (#1128).
+ * Only narrows to `configs`/`credentials`/`active_config` when `resolvedDir`
+ * is the filesystem root or contains `cwd`; otherwise denies `resolvedDir` as
+ * a whole.
+ */
+export function getProfileStoreDenyPaths(): ProfileStoreDenyPaths | null {
+  const configDir = getAnthropicConfigDir()
+  if (!configDir) return null
+  const fs = getFsImplementation()
+  let dirs: string[] = [configDir]
+  let files: string[] = []
+  try {
+    const resolvedDir = fs.realpathSync(configDir)
+    if (isRootOrContainsCwd(resolvedDir)) {
+      dirs = PROFILE_STORE_SUBDIRS.map(sub => join(resolvedDir, sub))
+      files = PROFILE_STORE_FILES.map(f => join(resolvedDir, f))
+    } else {
+      dirs = [resolvedDir]
+      files = []
+    }
+    const activeProfile =
+      process.env.ANTHROPIC_PROFILE?.trim() ||
+      getActiveAnthropicProfileName(configDir)
+    const configPath = join(configDir, 'configs', `${activeProfile}.json`)
+    try {
+      const raw = readFileSync(configPath, 'utf8')
+      const parsed = JSON.parse(raw) as {
+        authentication?: { credentials_path?: unknown }
+      }
+      const credPath = parsed?.authentication?.credentials_path
+      if (typeof credPath === 'string' && credPath.trim()) {
+        const candidates = isAbsolute(credPath)
+          ? [credPath]
+          : [resolve(configDir, credPath), resolve(credPath)]
+        for (const candidate of candidates) {
+          let resolvedCred = candidate
+          try {
+            resolvedCred = fs.realpathSync(candidate)
+          } catch {
+            // Keep lexical candidate if target doesn't exist yet
+          }
+          for (const p of new Set([candidate, resolvedCred])) {
+            const insideDir = dirs.some(d => p === d || p.startsWith(d + sep))
+            if (insideDir || files.includes(p) || isRootOrContainsCwd(p)) {
+              continue
+            }
+            try {
+              const st = fs.lstatSync(p)
+              if (st.isDirectory() || st.isSymbolicLink()) continue
+            } catch {
+              // Non-existent credentials file is still protected
+            }
+            files.push(p)
+          }
+        }
+      }
+    } catch {
+      // No active profile config or unreadable JSON
+    }
+    return { dirs, files }
+  } catch {
+    return { dirs, files }
+  }
+}
+
+/**
+ * Official 325 `li(e)` — returns true if `filePath` (or its symlink-resolved
+ * target) lies inside the Anthropic profile store (#1128).
+ */
+export function isProfileStorePath(filePath: string): boolean {
+  const store = getProfileStoreDenyPaths()
+  if (store === null) return false
+  const fs = getFsImplementation()
+  const expanded = expandPath(filePath)
+  const candidates = new Set<string>([expanded])
+  try {
+    candidates.add(expandPath(fs.realpathSync(expanded)))
+  } catch {
+    try {
+      const parentReal = fs.realpathSync(dirname(expanded))
+      candidates.add(expandPath(join(parentReal, basename(expanded))))
+    } catch {
+      // Ignore unresolvable parent
+    }
+  }
+  const normalizedDirs = new Set<string>()
+  for (const d of store.dirs) {
+    normalizedDirs.add(normalizeCaseForComparison(expandPath(d)))
+    try {
+      normalizedDirs.add(
+        normalizeCaseForComparison(expandPath(fs.realpathSync(d))),
+      )
+    } catch {
+      // Ignore
+    }
+  }
+  const normalizedFiles = new Set<string>()
+  for (const f of store.files) {
+    normalizedFiles.add(normalizeCaseForComparison(expandPath(f)))
+    try {
+      normalizedFiles.add(
+        normalizeCaseForComparison(expandPath(fs.realpathSync(f))),
+      )
+    } catch {
+      // Ignore
+    }
+  }
+  for (const candidate of candidates) {
+    const norm = normalizeCaseForComparison(candidate)
+    for (const dir of normalizedDirs) {
+      if (norm === dir || norm.startsWith(dir + sep)) {
+        return true
+      }
+    }
+    if (normalizedFiles.has(norm)) {
+      return true
+    }
+  }
+  return false
+}
+
 function getSettingsPaths(): string[] {
-  return SETTING_SOURCES.map(source =>
-    getSettingsFilePathForSource(source),
-  ).filter(path => path !== undefined)
+  return [
+    ...SETTING_SOURCES.map(source =>
+      getSettingsFilePathForSource(source),
+    ).filter(path => path !== undefined),
+    ...getFlagMcpConfigFilePaths().map(p => expandPath(p)),
+  ]
 }
 
 function isClaudeSettingsPathLexical(expandedPath: string): boolean {
@@ -311,7 +517,7 @@ export function isClaudeSettingsPath(filePath: string): boolean {
 
 // Always ask when Claude Code tries to edit its own config files
 function isClaudeConfigFilePath(filePath: string): boolean {
-  if (isClaudeSettingsPath(filePath)) {
+  if (isClaudeSettingsPath(filePath) || isProfileStorePath(filePath)) {
     return true
   }
 

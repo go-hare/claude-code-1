@@ -3,7 +3,9 @@ import {
   checkGate_CACHED_OR_BLOCKING,
   getDynamicConfig_CACHED_MAY_BE_STALE,
   getFeatureValue_CACHED_MAY_BE_STALE,
+  isGrowthBookEnabled,
 } from '../services/analytics/growthbook.js'
+import { getPrivacyLevel } from '../utils/privacyLevel.js'
 import { isSelfHostedBridge } from './bridgeConfig.js'
 // Namespace import breaks the bridgeEnabled → auth → config → bridgeEnabled
 // cycle — authModule.foo is a live binding, so by the time the helpers below
@@ -63,7 +65,8 @@ export function isBridgeEnabled(): boolean {
   // inline string literals from external builds.
   return feature('BRIDGE_MODE')
     ? isClaudeAISubscriber() &&
-        getFeatureValue_CACHED_MAY_BE_STALE('tengu_ccr_bridge', false)
+        (getFeatureValue_CACHED_MAY_BE_STALE('tengu_ccr_bridge', false) ||
+          isPaidPlanNoTelemetryBridgeFallback())
     : false
 }
 
@@ -88,7 +91,8 @@ export async function isBridgeEnabledBlocking(): Promise<boolean> {
   }
   return feature('BRIDGE_MODE')
     ? isClaudeAISubscriber() &&
-        (await checkGate_CACHED_OR_BLOCKING('tengu_ccr_bridge'))
+        (isPaidPlanNoTelemetryBridgeFallback() ||
+          (await checkGate_CACHED_OR_BLOCKING('tengu_ccr_bridge')))
     : false
 }
 
@@ -163,7 +167,10 @@ export async function getBridgeDisabledReason(): Promise<string | null> {
     if (!getOauthAccountInfo()?.organizationUuid) {
       return 'Unable to determine your organization for Remote Control eligibility. Run `claude auth login` to refresh your account information.'
     }
-    if (!(await checkGate_CACHED_OR_BLOCKING('tengu_ccr_bridge'))) {
+    if (
+      !isPaidPlanNoTelemetryBridgeFallback() &&
+      !(await checkGate_CACHED_OR_BLOCKING('tengu_ccr_bridge'))
+    ) {
       return "Remote Control isn't enabled for this account. If you recently changed plans, run `claude auth logout` then `claude auth login` to refresh your entitlements, or `claude doctor` for details."
     }
     return null
@@ -179,6 +186,40 @@ export async function getBridgeDisabledReason(): Promise<string | null> {
 function isClaudeAISubscriber(): boolean {
   try {
     return authModule.isClaudeAISubscriber()
+  } catch {
+    return false
+  }
+}
+
+const PAID_BRIDGE_SUBSCRIPTION_TYPES = ['pro', 'max', 'team', 'enterprise']
+
+function isFeatureFlagsDisabledByEnv(): boolean {
+  return (
+    isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_FEATURE_FLAGS) ||
+    isEnvTruthy(process.env.DISABLE_GROWTHBOOK)
+  )
+}
+
+export function isPaidPlanNoTelemetryBridgeFallback(): boolean {
+  if (
+    isGrowthBookEnabled() ||
+    isFeatureFlagsDisabledByEnv() ||
+    getPrivacyLevel() !== 'no-telemetry'
+  ) {
+    return false
+  }
+  if (!hasProfileScope() || !getOauthAccountInfo()?.organizationUuid) {
+    return false
+  }
+  try {
+    const tokens = authModule.getClaudeAIOAuthTokens()
+    const subscriptionType = tokens?.refreshToken
+      ? (tokens.subscriptionType ?? null)
+      : null
+    return (
+      subscriptionType !== null &&
+      PAID_BRIDGE_SUBSCRIPTION_TYPES.includes(subscriptionType)
+    )
   } catch {
     return false
   }

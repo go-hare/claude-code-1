@@ -4,6 +4,14 @@
 
 import type { Command, LocalCommandResult } from '../types/command.js'
 
+function formatReloadDiff(added: number, removed: number): string {
+  const parts = [
+    ...(added > 0 ? [`${added} added`] : []),
+    ...(removed > 0 ? [`${removed} removed`] : []),
+  ]
+  return parts.length > 0 ? parts.join(', ') : 'none added or removed'
+}
+
 const reloadSkills = {
   type: 'local',
   name: 'reload-skills',
@@ -17,14 +25,22 @@ const reloadSkills = {
           const { getSkillDirCommands } = await import(
             '../skills/loadSkillsDir.js'
           )
-          // Clear cached skills and reload
-          getSkillDirCommands.cache?.clear?.()
+          const { clearCommandsCache } = await import('../commands.js')
           const cwd = (await import('../bootstrap/state.js')).getOriginalCwd()
-          await getSkillDirCommands(cwd)
+          const before = await getSkillDirCommands(cwd)
+          const beforeNames = new Set(before.map(s => s.name))
+          // Clear cached skills and reload without resetSentSkillNames() so only
+          // new or changed skills are sent on the next turn (2.1.304 #1016).
+          clearCommandsCache()
+          getSkillDirCommands.cache?.clear?.()
+          const after = await getSkillDirCommands(cwd)
+          const afterNames = new Set(after.map(s => s.name))
+          const added = after.filter(s => !beforeNames.has(s.name)).length
+          const removed = before.filter(s => !afterNames.has(s.name)).length
+          const diff = formatReloadDiff(added, removed)
           return {
             type: 'text',
-            value:
-              'Skills reloaded. The full skill list will be re-sent to Claude on the next turn (which restores skills after compaction).',
+            value: `Reloaded skills: ${after.length} ${after.length === 1 ? 'skill' : 'skills'} available (${diff}).`,
           }
         } catch (e) {
           return {

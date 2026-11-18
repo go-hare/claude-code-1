@@ -371,24 +371,6 @@ export function isSearchExtraToolsEnabledOptimistic(): boolean {
     return false
   }
 
-  // densable Y4: default-on only on real first-party Anthropic hosts. Custom
-  // ANTHROPIC_BASE_URL proxies must opt in via ENABLE_TOOL_SEARCH /
-  // ENABLE_SEARCH_EXTRA_TOOLS=true (or auto / auto:N) — they may not forward
-  // tool_reference / tool-search.
-  if (
-    !envValue &&
-    getAPIProvider() === 'firstParty' &&
-    !isFirstPartyAnthropicBaseUrl()
-  ) {
-    if (!loggedOptimistic) {
-      loggedOptimistic = true
-      logForDebugging(
-        `[SearchExtraTools:optimistic] disabled: ANTHROPIC_BASE_URL=${process.env.ANTHROPIC_BASE_URL} is not a first-party Anthropic host. Set ENABLE_TOOL_SEARCH=true or ENABLE_SEARCH_EXTRA_TOOLS=true (or auto / auto:N) if your proxy forwards tool_reference blocks.`,
-      )
-    }
-    return false
-  }
-
   if (!loggedOptimistic) {
     loggedOptimistic = true
     logForDebugging(

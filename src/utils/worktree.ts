@@ -527,6 +527,40 @@ type WorktreeCreateResult =
 const GIT_NO_PROMPT_ENV = {
   GIT_TERMINAL_PROMPT: '0',
   GIT_ASKPASS: '',
+  GIT_NO_REPLACE_OBJECTS: '1',
+  GIT_NO_LAZY_FETCH: '1',
+  LC_ALL: 'C',
+  LANGUAGE: 'C',
+}
+
+/**
+ * 2.1.309 #1173 (SEA Hq): Env overrides when on-demand lazy fetching is disabled.
+ */
+export function getWorktreeNoLazyFetchEnv(inForce: boolean): NodeJS.ProcessEnv {
+  return inForce ? { GIT_NO_LAZY_FETCH: '1', GIT_ALLOW_PROTOCOL: '/' } : {}
+}
+
+/**
+ * 2.1.309 #1173 (SEA oTt): Actionable hint when `git worktree add` fails
+ * because `GIT_NO_LAZY_FETCH=1` prevented on-demand promisor fetching.
+ */
+export function formatNoLazyFetchObjectMissingHint(
+  stderr: string,
+  baseSha?: string,
+  isSubmodule = false,
+): string {
+  if (
+    !/lazy fetching disabled|could not fetch [0-9a-f]+ from promisor remote|transport '[^']*' not allowed/.test(
+      stderr,
+    )
+  ) {
+    return ''
+  }
+  const shortSha = baseSha ? baseSha.slice(0, 12) : '<the base commit>'
+  if (isSubmodule) {
+    return `\nThis checkout ran with git's on-demand fetching switched off, and git needed an object this repository does not have. Fetch the missing objects for commit ${shortSha} in the submodule yourself and try again.`
+  }
+  return `\nThis checkout ran with git's on-demand fetching switched off, and git needed an object this repository does not have. If the repository is a partial clone, fetch the missing objects for commit ${shortSha} in its main checkout yourself and try again. If it is not a partial clone, it may be damaged: check it, then try again.`
 }
 
 /**
@@ -957,10 +991,14 @@ export async function getOrCreateWorktree(
   // before any mkdir or `git worktree add` that could follow it out of tree.
   await assertWorktreeCreatePathsNotSymlinked(repoRoot, worktreePath)
 
+  // 2.1.302 #916 (SEA Fys): Self-heal orphaned worktree dir with stray `.git`
+  // pointer to a nonexistent admin dir (e.g. under git 2.56+).
+  await healOrphanedWorktreeDir(repoRoot, worktreePath, worktreeBranch)
+
   // New worktree: fetch base branch then add
   await mkdir(worktreesDir(repoRoot), { recursive: true })
 
-  const fetchEnv = gitWorktreeEnv()
+  const fetchEnv = gitWorktreeEnv({ GIT_NO_LAZY_FETCH: undefined })
 
   let baseBranch: string
   let baseSource: WorktreeBaseSource = 'head'
@@ -1079,7 +1117,12 @@ export async function getOrCreateWorktree(
     if (await readWorktreeHeadSha(worktreePath)) {
       await teardownFailedWorktreeCreate(worktreePath, repoRoot)
     }
-    throw new Error(`Failed to create worktree: ${createStderr}`)
+    const lazyHint = formatNoLazyFetchObjectMissingHint(
+      createStderr,
+      baseSha,
+      false,
+    )
+    throw new Error(`Failed to create worktree: ${createStderr}${lazyHint}`)
   }
 
   // densable: post-add realpath containment (defense in depth after xqi)
@@ -3993,6 +4036,191 @@ export async function hasWorktreeChanges(
   }
 
   return false
+}
+
+/**
+ * 2.1.302 #916 (SEA Fys): Self-heal an orphaned worktree directory whose `.git`
+ * file points to a nonexistent admin directory (so git 2.56+ won't refuse
+ * creating or resuming the worktree), unless it belongs to another repo or has
+ * unpushed commits.
+ */
+export async function healOrphanedWorktreeDir(
+  repoRoot: string,
+  worktreePath: string,
+  worktreeBranch: string,
+): Promise<boolean> {
+  const worktreeGitDir = await readWorktreeGitDir(worktreePath)
+  if (!worktreeGitDir) return false
+
+  let missingAdminDir = false
+  try {
+    await readdir(worktreeGitDir)
+  } catch (err) {
+    missingAdminDir = isENOENT(err)
+  }
+  if (!missingAdminDir) return false
+
+  const repoGitDir = await resolveGitDir(repoRoot)
+  if (repoGitDir) {
+    const pointerParent = dirname(worktreeGitDir)
+    const expectedWorktreesDir = join(repoGitDir, 'worktrees')
+    const resolvedExpected = await realpath(repoGitDir)
+      .then(p => join(p, 'worktrees'))
+      .catch(() => null)
+    if (
+      pointerParent !== expectedWorktreesDir &&
+      pointerParent !== resolvedExpected
+    ) {
+      throw new Error(
+        `The folder ${worktreePath} is a leftover worktree whose .git file points to another location, so it was left as is. Remove it if it has no work to keep, or choose a different worktree name.`,
+      )
+    }
+  }
+
+  const remoteRes = await execFileNoThrowWithCwd(gitExe(), ['remote'], {
+    cwd: repoRoot,
+    env: gitWorktreeEnv(),
+  })
+  if (remoteRes.code !== 0) {
+    throw new Error(
+      `Orphaned worktree dir at ${worktreePath} but \`git remote\` failed (${remoteRes.stderr.trim() || 'nothing'}) — refusing to self-heal. Remove ${worktreePath} manually if it has no work to keep.`,
+    )
+  }
+
+  const revParseRes = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['rev-parse', '--verify', '--quiet', worktreeBranch],
+    { cwd: repoRoot, env: gitWorktreeEnv() },
+  )
+  if (revParseRes.code !== 0 && revParseRes.stderr.trim().length > 0) {
+    throw new Error(
+      `Orphaned worktree dir at ${worktreePath} but rev-parse on ${worktreeBranch} failed (${revParseRes.stderr.trim() || 'nothing'}) — refusing to self-heal. Remove ${worktreePath} manually if it has no work to keep.`,
+    )
+  }
+
+  if (remoteRes.stdout.trim().length > 0 && revParseRes.code === 0) {
+    const unpushedRes = await execFileNoThrowWithCwd(
+      gitExe(),
+      ['rev-list', '--max-count=1', worktreeBranch, '--not', '--remotes'],
+      { cwd: repoRoot, env: gitWorktreeEnv() },
+    )
+    if (unpushedRes.code !== 0) {
+      throw new Error(
+        `Orphaned worktree dir at ${worktreePath} but rev-list on ${worktreeBranch} failed (${unpushedRes.stderr.trim() || 'nothing'}) — refusing to self-heal. Remove ${worktreePath} manually if it has no work to keep.`,
+      )
+    }
+    if (unpushedRes.stdout.trim().length > 0) {
+      throw new Error(
+        `Orphaned worktree dir at ${worktreePath} but branch ${worktreeBranch} has unpushed commits — refusing to self-heal. Push or delete the branch, then retry.`,
+      )
+    }
+  }
+
+  await rm(worktreePath, { recursive: true, force: true })
+  logForDebugging(
+    `[worktree] removed orphaned worktree directory at ${worktreePath}`,
+  )
+  return true
+}
+
+export type WorktreeHeadState =
+  | { head: 'its_branch'; commits: number | null }
+  | { head: 'like_its_branch'; commits: null }
+  | { head: 'another_branch'; branch: string; commits: number | null }
+  | { head: 'detached'; commits: number | null }
+  | { head: 'unreadable'; commits: null }
+  | { head: 'not_read'; commits: number | null }
+
+/**
+ * 2.1.304 #987 (SEA qys / $rn): Inspects whether a worktree's HEAD is on its
+ * own branch, another branch, or detached, and counts commits relative to
+ * `originalHeadCommit` so exit cleanup does not silently drop detached or
+ * switched-branch commits.
+ */
+export async function inspectWorktreeHeadState(params: {
+  worktreePath: string
+  worktreeBranch: string
+  originalHeadCommit?: string
+}): Promise<WorktreeHeadState> {
+  const { worktreePath, worktreeBranch, originalHeadCommit } = params
+  const symRes = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['symbolic-ref', '--quiet', 'HEAD'],
+    { cwd: worktreePath, env: gitWorktreeEnv() },
+  )
+  const rawSym = symRes.stdout.trim()
+  const checkedOutBranch =
+    symRes.code === 0 && rawSym.startsWith('refs/heads/')
+      ? rawSym.slice('refs/heads/'.length)
+      : undefined
+  const isDetached =
+    symRes.code === 1 &&
+    symRes.stdout.trim() === '' &&
+    symRes.stderr.trim() === ''
+
+  if (checkedOutBranch === undefined && !isDetached) {
+    return { head: 'unreadable', commits: null }
+  }
+  if (
+    checkedOutBranch !== undefined &&
+    checkedOutBranch !== worktreeBranch &&
+    checkedOutBranch.toLowerCase() === worktreeBranch.toLowerCase()
+  ) {
+    return { head: 'like_its_branch', commits: null }
+  }
+
+  const countAgainstOriginal = async (
+    refs: string[],
+  ): Promise<number | null> => {
+    if (!originalHeadCommit) return null
+    const res = await execFileNoThrowWithCwd(
+      gitExe(),
+      ['rev-list', '--count', ...refs, '--not', originalHeadCommit],
+      { cwd: worktreePath, env: gitWorktreeEnv() },
+    )
+    if (res.code !== 0) return null
+    const n = parseInt(res.stdout.trim(), 10)
+    return Number.isNaN(n) ? null : n
+  }
+
+  if (checkedOutBranch === worktreeBranch) {
+    return {
+      head: 'its_branch',
+      commits: await countAgainstOriginal([worktreeBranch]),
+    }
+  }
+  if (checkedOutBranch !== undefined) {
+    return {
+      head: 'another_branch',
+      branch: checkedOutBranch,
+      commits: await countAgainstOriginal([
+        `refs/heads/${checkedOutBranch}`,
+        worktreeBranch,
+      ]),
+    }
+  }
+  return {
+    head: 'detached',
+    commits: await countAgainstOriginal([worktreeBranch, 'HEAD']),
+  }
+}
+
+export function formatWorktreeCommitDescription(
+  state: WorktreeHeadState,
+  worktreeBranch: string,
+  baseCommitLabel: string,
+): string {
+  switch (state.head) {
+    case 'another_branch':
+    case 'like_its_branch':
+      return `on ${worktreeBranch} that ${baseCommitLabel} doesn't have`
+    case 'detached':
+      return `on ${worktreeBranch} or at the detached HEAD`
+    case 'its_branch':
+    case 'unreadable':
+    case 'not_read':
+      return `on ${worktreeBranch}`
+  }
 }
 
 /**

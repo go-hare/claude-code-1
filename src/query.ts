@@ -7,14 +7,18 @@ import type { CanUseToolFn } from './hooks/useCanUseTool.js'
 import { FallbackTriggeredError } from './services/api/withRetry.js'
 import { randomUUID } from 'crypto'
 import {
+  AUTOCOMPACT_THRASHING_MESSAGE,
   calculateTokenWarningState,
+  checkRapidRefillBreaker,
   estimateMaxTurnGrowth,
   getEffectiveContextWindowSize,
   isAutoCompactEnabled,
-  AUTOCOMPACT_THRASHING_MESSAGE,
   type AutoCompactTrackingState,
 } from './services/compact/autoCompact.js'
-import { buildPostCompactMessages } from './services/compact/compact.js'
+import {
+  buildPostCompactMessages,
+  compactConversation,
+} from './services/compact/compact.js'
 import { applyStreamMediaReplay } from './services/compact/streamMediaReplay.js'
 /* eslint-disable @typescript-eslint/no-require-imports */
 const reactiveCompact = feature('REACTIVE_COMPACT')
@@ -86,6 +90,7 @@ import {
   createMicrocompactBoundaryMessage,
   isHumanLikeOrigin,
   isThinkingMessage,
+  isUnparsedToolInput,
   stripSignatureBlocks,
 } from './utils/messages.js'
 import { generateToolUseSummary } from './services/toolUseSummary/toolUseSummaryGenerator.js'
@@ -344,6 +349,103 @@ export type QueryParams = {
   deps?: QueryDeps
 }
 
+export type AmberMoleskinEntry = {
+  windowSize?: number
+  repl: number
+  sdk: number
+}
+
+export type AmberMoleskinTable = {
+  entries: Array<{ windowSize: number; repl: number; sdk: number }>
+  defaultEntry: { repl: number; sdk: number } | null
+}
+
+function parseAmberMoleskinFraction(value: unknown): number | null {
+  if (
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value < 1
+  ) {
+    return value
+  }
+  return null
+}
+
+function parseAmberMoleskinEntry(
+  value: unknown,
+): { repl: number; sdk: number } | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null
+  }
+  const rec = value as Record<string, unknown>
+  const repl = parseAmberMoleskinFraction(rec.repl)
+  const sdk = parseAmberMoleskinFraction(rec.sdk)
+  return repl === null || sdk === null ? null : { repl, sdk }
+}
+
+/** Official JEn — parse `tengu_amber_moleskin` window-keyed precompute table. */
+export function parseAmberMoleskinTable(
+  raw: unknown,
+): AmberMoleskinTable | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return null
+  }
+  const entries: Array<{ windowSize: number; repl: number; sdk: number }> = []
+  let defaultEntry: { repl: number; sdk: number } | null = null
+  for (const [key, val] of Object.entries(raw)) {
+    const parsed = parseAmberMoleskinEntry(val)
+    if (parsed === null) return null
+    if (key === 'default') {
+      defaultEntry = parsed
+      continue
+    }
+    const windowSize = Number(key)
+    if (!Number.isSafeInteger(windowSize) || windowSize <= 0) return null
+    entries.push({ windowSize, ...parsed })
+  }
+  if (entries.length === 0 && defaultEntry === null) return null
+  return { entries, defaultEntry }
+}
+
+/** Official Nlt — resolve precompute buffer fraction from `tengu_amber_moleskin`. */
+export function resolvePrecomputeBufferFraction(
+  tableValue: unknown,
+  windowSize: number,
+  entrypoint: string | undefined,
+  fallbackFraction: number,
+): {
+  fraction: number
+  source:
+    | 'scalar'
+    | 'malformed'
+    | 'table_no_match'
+    | 'table_exact'
+    | 'table_default'
+  matchedWindowKey?: number
+} {
+  if (tableValue === null || tableValue === undefined) {
+    return { fraction: fallbackFraction, source: 'scalar' }
+  }
+  const table = parseAmberMoleskinTable(tableValue)
+  if (table === null) {
+    return { fraction: fallbackFraction, source: 'malformed' }
+  }
+  const kind = entrypoint === 'sdk' ? 'sdk' : 'repl'
+  const exact = table.entries.find(e => e.windowSize === windowSize)
+  if (exact !== undefined) {
+    return {
+      fraction: exact[kind],
+      source: 'table_exact',
+      matchedWindowKey: exact.windowSize,
+    }
+  }
+  if (table.defaultEntry === null) {
+    return { fraction: fallbackFraction, source: 'table_no_match' }
+  }
+  return { fraction: table.defaultEntry[kind], source: 'table_default' }
+}
+
 // -- query loop state
 
 // Mutable state carried between loop iterations
@@ -363,6 +465,7 @@ type State = {
    * a jlt nudge (gold-251-g #11). Not React AppState.
    */
   thinkingOnlyNudged: boolean
+  malformedToolUseRetryCount?: number
   // Why the previous iteration continued. Undefined on first iteration.
   // Lets tests assert recovery paths fired without inspecting message contents.
   transition: Continue | undefined
@@ -762,6 +865,7 @@ async function* queryLoop(
     pendingToolUseSummary: undefined,
     // densable Pe.thinkingOnlyNudged — first iteration false.
     thinkingOnlyNudged: false,
+    malformedToolUseRetryCount: 0,
     transition: undefined,
   }
   const budgetTracker = feature('TOKEN_BUDGET') ? createBudgetTracker() : null
@@ -907,6 +1011,7 @@ async function* queryLoop(
         turnCount,
         thinkingOnlyNudged,
       } = state
+      const malformedToolUseRetryCount = state.malformedToolUseRetryCount ?? 0
 
       // densable fl(H.transition, f.agentId) — gold skips when agentId is set
       // (subagent spinner store is per-id via $xe). Analog: only the main REPL
@@ -1200,12 +1305,7 @@ async function* queryLoop(
       )
 
       queryCheckpoint('query_autocompact_start')
-      const {
-        compactionResult,
-        consecutiveFailures,
-        consecutiveRapidRefills,
-        rapidRefillBreakerTripped,
-      } = await deps.autocompact(
+      const autocompactOutcome = await deps.autocompact(
         messagesForQuery,
         toolUseContext,
         {
@@ -1219,7 +1319,22 @@ async function* queryLoop(
         tracking,
         snipTokensFreed,
       )
+      let { compactionResult } = autocompactOutcome
+      const {
+        consecutiveFailures,
+        consecutiveRapidRefills,
+        rapidRefillBreakerTripped,
+      } = autocompactOutcome
       queryCheckpoint('query_autocompact_end')
+
+      if (
+        !compactionResult &&
+        !rapidRefillBreakerTripped &&
+        toolUseContext.abortController.signal.aborted
+      ) {
+        yield* leftoverDrainSpinnerModes()
+        return { reason: 'aborted_streaming' }
+      }
 
       if (rapidRefillBreakerTripped) {
         yield createAssistantAPIErrorMessage({
@@ -1228,7 +1343,111 @@ async function* queryLoop(
           apiError: 'autocompact_thrashing',
         })
         yield* leftoverDrainSpinnerModes()
-        return { reason: 'blocking_limit' }
+        return { reason: 'rapid_refill_breaker' }
+      }
+
+      // #921 — consume pending classifier overflow compact request (EJr)
+      {
+        const canCompactNext =
+          isAutoCompactEnabled() &&
+          querySource !== 'compact' &&
+          querySource !== 'session_memory' &&
+          (consecutiveFailures ?? tracking?.consecutiveFailures ?? 0) < 3
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const {
+          consumeClassifierOverflowCompact,
+          markClassifierOverflowCompactSpent,
+        } =
+          require('./utils/permissions/permissions.js') as typeof import('./utils/permissions/permissions.js')
+        const { pending: classifierOverflowPending, stale } =
+          consumeClassifierOverflowCompact(
+            toolUseContext.agentId,
+            messagesForQuery,
+            canCompactNext,
+          )
+        if (classifierOverflowPending !== undefined && !compactionResult) {
+          const currentMode =
+            toolUseContext.getAppState().toolPermissionContext.mode
+          const leftAutoMode =
+            stale !== 'epoch' &&
+            currentMode !== classifierOverflowPending.mode &&
+            currentMode !== 'auto' &&
+            currentMode !== 'dontAsk'
+          if (stale === 'epoch' || leftAutoMode) {
+            logEvent('tengu_auto_mode_classifier_overflow_compact', {
+              stage:
+                'dropped' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              reason: (stale === 'epoch'
+                ? 'stale'
+                : 'left_auto_mode') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              isSubagent: toolUseContext.agentId !== undefined,
+            })
+          } else if (!canCompactNext) {
+            logEvent('tengu_auto_mode_classifier_overflow_compact', {
+              stage:
+                'skipped' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              reason:
+                'unavailable' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              deniedCalls: classifierOverflowPending.deniedToolNames.length,
+              isSubagent: toolUseContext.agentId !== undefined,
+            })
+          } else {
+            try {
+              compactionResult = await compactConversation(
+                messagesForQuery,
+                toolUseContext,
+                {
+                  systemPrompt,
+                  userContext,
+                  systemContext,
+                  toolUseContext,
+                  forkContextMessages: messagesForQuery,
+                },
+                true,
+                undefined,
+                true,
+              )
+              markClassifierOverflowCompactSpent(
+                toolUseContext.agentId,
+                classifierOverflowPending.epoch,
+              )
+              logEvent('tengu_auto_mode_classifier_overflow_compact', {
+                stage:
+                  'compacted' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                deniedCalls: classifierOverflowPending.deniedToolNames.length,
+                isSubagent: toolUseContext.agentId !== undefined,
+                preCompactTokenCount: compactionResult.preCompactTokenCount,
+                postCompactTokenCount: compactionResult.postCompactTokenCount,
+                truePostCompactTokenCount:
+                  compactionResult.truePostCompactTokenCount,
+              })
+            } catch (err) {
+              const aborted = toolUseContext.abortController.signal.aborted
+              logEvent('tengu_auto_mode_classifier_overflow_compact', {
+                stage: (aborted
+                  ? 'skipped'
+                  : 'failed') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                reason: (aborted
+                  ? 'aborted'
+                  : 'error') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                deniedCalls: classifierOverflowPending.deniedToolNames.length,
+                isSubagent: toolUseContext.agentId !== undefined,
+              })
+              if (aborted) {
+                yield* leftoverDrainSpinnerModes()
+                return { reason: 'aborted_streaming' }
+              }
+              markClassifierOverflowCompactSpent(
+                toolUseContext.agentId,
+                classifierOverflowPending.epoch,
+              )
+              logForDebugging(
+                `Classifier overflow compaction failed: ${errorMessage(err)}`,
+                { level: 'warn' },
+              )
+            }
+          }
+        }
       }
 
       if (compactionResult) {
@@ -1617,6 +1836,14 @@ async function* queryLoop(
             tracking,
             snipTokensFreed,
           )
+          if (
+            !predictiveResult.compactionResult &&
+            !predictiveResult.rapidRefillBreakerTripped &&
+            toolUseContext.abortController.signal.aborted
+          ) {
+            yield* leftoverDrainSpinnerModes()
+            return { reason: 'aborted_streaming' }
+          }
           if (predictiveResult.rapidRefillBreakerTripped) {
             yield createAssistantAPIErrorMessage({
               content: AUTOCOMPACT_THRASHING_MESSAGE,
@@ -1624,7 +1851,7 @@ async function* queryLoop(
               apiError: 'autocompact_thrashing',
             })
             yield* leftoverDrainSpinnerModes()
-            return { reason: 'blocking_limit' }
+            return { reason: 'rapid_refill_breaker' }
           }
           if (predictiveResult.compactionResult) {
             messagesForQuery = buildPostCompactMessages(
@@ -3232,6 +3459,19 @@ async function* queryLoop(
           }
         }
         if ((isWithheld413 || isWithheldMedia) && reactiveCompact) {
+          const reactiveBreaker = checkRapidRefillBreaker(tracking)
+          if (
+            !hasAttemptedReactiveCompact &&
+            reactiveBreaker.action === 'trip'
+          ) {
+            yield createAssistantAPIErrorMessage({
+              content: AUTOCOMPACT_THRASHING_MESSAGE,
+              error: 'invalid_request',
+              apiError: 'autocompact_thrashing',
+            })
+            yield* leftoverDrainSpinnerModes()
+            return { reason: 'rapid_refill_breaker' }
+          }
           const { result: compacted, failure: compactFailure } =
             await reactiveCompact.tryReactiveCompact({
               hasAttempted: hasAttemptedReactiveCompact,
@@ -3268,7 +3508,14 @@ async function* queryLoop(
             const next: State = {
               messages: postCompactMessages,
               toolUseContext: leftoverUnwrapStreamMode(toolUseContext),
-              autoCompactTracking: undefined,
+              autoCompactTracking: {
+                compacted: true,
+                turnId: deps.uuid(),
+                turnCounter: 0,
+                consecutiveFailures: 0,
+                consecutiveRapidRefills:
+                  reactiveBreaker.consecutiveRapidRefills,
+              },
               maxOutputTokensRecoveryCount,
               hasAttemptedReactiveCompact: true,
               maxOutputTokensOverride: undefined,
@@ -3282,6 +3529,30 @@ async function* queryLoop(
             state = next
             yield* leftoverDrainSpinnerModes()
             continue
+          }
+
+          // #984: if aborted while compacting a 413 PTL (not withheld media),
+          // return aborted_streaming instead of surfacing Prompt is too long.
+          if (
+            !isWithheldMedia &&
+            toolUseContext.abortController.signal.aborted
+          ) {
+            if (
+              !shouldSuppressInterruptionMessage(
+                toolUseContext.abortController.signal.reason,
+              )
+            ) {
+              yield createUserInterruptionMessage({
+                toolUse: false,
+                interruptedByShutdown: isShutdownAbortReason(
+                  toolUseContext.abortController.signal.reason,
+                )
+                  ? true
+                  : undefined,
+              })
+            }
+            yield* leftoverDrainSpinnerModes()
+            return { reason: 'aborted_streaming' }
           }
 
           // No recovery — surface the withheld error and exit. Do NOT fall
@@ -3473,22 +3744,28 @@ async function* queryLoop(
         // — do not invent; nullish stop_reason is not "tool_use". Tombstone +
         // Blt retry once. Exhausted: qo + x0e + OS(ct,A,Li).
         const rawStopReason = lastMessage?.message.stop_reason
+        const parsedToolUseCount = toolUseBlocks.filter(
+          b => !isUnparsedToolInput(b.input),
+        ).length
         const malformedToolUse = malformedToolUseRetryAction({
           stopReason:
             typeof rawStopReason === 'string' ? rawStopReason : undefined,
-          parsedToolUseCount: toolUseBlocks.length,
+          parsedToolUseCount,
           isApiErrorMessage: lastMessage?.isApiErrorMessage === true,
           previousReason: state.transition?.reason,
+          retryCount: malformedToolUseRetryCount,
         })
         const leakedInvoke = assistantTextHasLeakedInvoke(assistantMessages)
         if (malformedToolUse.action !== 'continue') {
           // Gold excerpt: one s("tengu_malformed_tool_use_response",
           // {will_retry:ls,...}) then if(ls) retry else exhausted.
+          const malformedModelMeta =
+            currentModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
           logEvent('tengu_malformed_tool_use_response', {
             will_retry: malformedToolUse.action === 'retry',
-            model:
-              currentModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            model: malformedModelMeta,
             text_has_leaked_invoke: leakedInvoke,
+            retry_count: malformedToolUseRetryCount,
           })
           if (malformedToolUse.action === 'retry') {
             for (const msg of assistantMessages) {
@@ -3513,6 +3790,7 @@ async function* queryLoop(
               turnCount,
               thinkingOnlyNudged,
               transition: { reason: 'malformed_tool_use_retry' },
+              malformedToolUseRetryCount: malformedToolUseRetryCount + 1,
             }
             yield* leftoverDrainSpinnerModes()
             continue
@@ -3520,6 +3798,7 @@ async function* queryLoop(
           if (malformedToolUse.action === 'exhausted') {
             const exhaustedMessage = createAssistantAPIErrorMessage({
               content: malformedToolUse.text,
+              apiError: 'malformed_tool_use_exhausted',
             })
             yield exhaustedMessage
             // densable: x0e(Li,ct), OS(ct,A,Li)

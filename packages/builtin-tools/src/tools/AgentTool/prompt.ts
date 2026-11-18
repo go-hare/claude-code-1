@@ -26,7 +26,10 @@ import {
   AGENT_TOOL_NAME,
   SUBAGENT_TYPE_REQUIRED_GP_UNAVAILABLE,
 } from './constants.js'
-import { isForkSubagentProductEnabled } from './forkSubagent.js'
+import {
+  isForkSubagentForceAsyncEnabled,
+  isForkSubagentProductEnabled,
+} from './forkSubagent.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
 
 export type AgentPromptAvailability = {
@@ -260,13 +263,11 @@ If the target is already known, use the direct tool: ${FILE_READ_TOOL_NAME} for 
 
   const backgroundAvailable =
     !isBackgroundAgentLaunchBlocked() && !isInProcessTeammate()
-  // densable w = Yne() — fork overlay product gate (not Ce / non-interactive).
-  const forkProductEnabled = isForkSubagentProductEnabled()
+  // densable w = IFt() — fork auto-background gate (terminal, desktop, VS Code, or env).
+  const forkForceAsync = isForkSubagentForceAsyncEnabled()
   // densable ke = T4o()&&!w&&!nV() — launch-rule installed, Ier false.
   const explicitBackgroundMayRefuse =
-    hasActiveBackgroundLaunchRule() &&
-    !forkProductEnabled &&
-    !isInProcessTeammate()
+    hasActiveBackgroundLaunchRule() && !forkForceAsync && !isInProcessTeammate()
 
   // densable kLo K = Pqe()&&TRe() — GB tengu_twinkling_boole default false.
   const sharesCwdDispatchNote =
@@ -277,7 +278,7 @@ If the target is already known, use the direct tool: ${FILE_READ_TOOL_NAME} for 
   if (lean) {
     const shortBgNote =
       backgroundAvailable && !forkEnabled
-        ? forkProductEnabled
+        ? forkForceAsync
           ? `
 - Subagents run in the background; you'll be notified when one completes. Never fabricate or predict a pending agent's results — the notification is never something you write yourself; if the user asks before it arrives, say it's still running.`
           : "\n- Subagents run in the background by default; you'll be notified when one completes. Pass `run_in_background: false` only when your very next action depends on the result and nothing else could usefully happen while it runs — otherwise background it so the user can interject. Never fabricate or predict a pending agent's results — the notification is never something you write yourself; if the user asks before it arrives, say it's still running."
@@ -337,7 +338,7 @@ ${whenNotToUseSection}
 - Always include a short description summarizing what the agent will do
 - ${doneLine}
 - Trust but verify: an agent's summary describes what it intended to do, not necessarily what it did. When an agent writes or edits code, check the actual changes before reporting the work as done.${
-    backgroundAvailable && !forkProductEnabled
+    backgroundAvailable && !forkForceAsync
       ? `
 - Agents run in the background by default. When an agent runs in the background, you will be automatically notified when it completes — do NOT sleep, poll, or proactively check on its progress. Continue with other work or respond to the user instead.
 - **Foreground vs background**: Pass \`run_in_background: false\` only when your very next action depends on the agent's result and nothing else could usefully happen while it runs — e.g., a research agent whose finding gates the edit you're about to make. Otherwise let it run in the background (the default) — this includes fire-and-forget work, independent investigations, and anything where the user might hand you something else in the meantime. Wanting the result "next" is not enough on its own.`

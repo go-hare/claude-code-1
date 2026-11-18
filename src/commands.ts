@@ -734,16 +734,22 @@ const loadAllCommands = memoize(async (cwd: string): Promise<Command[]> => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { applySyncedSkillShadowFilter } =
     require('./skills/syncedSkillsHarden.js') as typeof import('./skills/syncedSkillsHarden.js')
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { disambiguateAddDirSkills } =
+    require('./skills/loadSkillsDir.js') as typeof import('./skills/loadSkillsDir.js')
   return applySyncedSkillShadowFilter(
-    stripCollidingPluginAliases([
-      ...bundledSkills,
-      ...builtinPluginSkills,
-      ...skillDirCommands,
-      ...(workflowCommands as Command[]),
-      ...(pluginCommands as Command[]),
-      ...pluginSkills,
-      ...COMMANDS(),
-    ]),
+    disambiguateAddDirSkills(
+      stripCollidingPluginAliases([
+        ...bundledSkills,
+        ...builtinPluginSkills,
+        ...skillDirCommands,
+        ...(workflowCommands as Command[]),
+        ...(pluginCommands as Command[]),
+        ...pluginSkills,
+        ...COMMANDS(),
+      ]),
+      cwd,
+    ),
   )
 })
 
@@ -839,9 +845,12 @@ function createPluginRegisteredCommand(entry: {
 function appendPluginRegisteredCommands(commands: Command[]): Command[] {
   const registered = getPluginRegisteredCommands()
   if (registered.length === 0) return commands
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { isAccountSyncedSkill } =
+    require('./skills/syncedSkillsHarden.js') as typeof import('./skills/syncedSkillsHarden.js')
   const claimed = new Set<string>()
   for (const cmd of commands) {
-    if (cmd.loadedFrom === 'syncedSkills') continue
+    if (isAccountSyncedSkill(cmd)) continue
     claimed.add(cmd.name)
     claimed.add(getCommandName(cmd))
     for (const alias of cmd.aliases ?? []) {

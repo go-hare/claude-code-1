@@ -3,6 +3,8 @@
 // By using execa, Windows automatically gets shell escaping + BAT / CMD handling
 
 import { type ExecaError, execa } from 'execa'
+import { existsSync, lstatSync, readdirSync, statSync } from 'fs'
+import { isAbsolute, join } from 'path'
 import { tryProcessCwd } from './cachePaths.js'
 import { getCwd } from '../utils/cwd.js'
 import { logError } from './log.js'
@@ -34,7 +36,13 @@ export function execFileNoThrow(
     preserveOutputOnError: true,
     useCwd: true,
   },
-): Promise<{ stdout: string; stderr: string; code: number; error?: string }> {
+): Promise<{
+  stdout: string
+  stderr: string
+  code: number
+  error?: string
+  noChildLeft?: boolean
+}> {
   return execFileNoThrowWithCwd(file, args, {
     abortSignal: options.abortSignal,
     timeout: options.timeout,
@@ -143,6 +151,52 @@ export function formatSpawnError(
 /**
  * execFile, but always resolves (never throws)
  */
+export const MACOS_GIT_NOT_INSTALLED_MESSAGE =
+  'git is not installed on this Mac. To install it, run xcode-select --install, then try again.'
+
+/**
+ * densable `nYe` — avoid triggering macOS's GUI "Install Command Line
+ * Developer Tools" dialog when `/usr/bin/git` is only the xcrun shim and
+ * neither CommandLineTools, xcode_select_link, nor Xcode*.app is present.
+ */
+export function isMacosMissingGitCommandLineTools(
+  file: string,
+  env: NodeJS.ProcessEnv,
+  deps: {
+    platform?: NodeJS.Platform
+    existsSync?: (p: string) => boolean
+    statSync?: (p: string, opts: { throwIfNoEntry: false }) => unknown
+    lstatSync?: (p: string, opts: { throwIfNoEntry: false }) => unknown
+    readdirSync?: (p: string) => string[]
+  } = {},
+): boolean {
+  if ((deps.platform ?? process.platform) !== 'darwin') return false
+  if (env.DEVELOPER_DIR) return false
+  const exists = deps.existsSync ?? existsSync
+  const stat = deps.statSync ?? statSync
+  const lstat = deps.lstatSync ?? lstatSync
+  const readdir = deps.readdirSync ?? readdirSync
+  try {
+    const resolved = file.includes('/')
+      ? file
+      : (env.PATH ?? '')
+          .split(':')
+          .filter(p => isAbsolute(p))
+          .map(p => join(p, file))
+          .find(p => exists(p))
+    return (
+      resolved === '/usr/bin/git' &&
+      stat('/Library/Developer/CommandLineTools', { throwIfNoEntry: false }) ===
+        undefined &&
+      lstat('/var/db/xcode_select_link', { throwIfNoEntry: false }) ===
+        undefined &&
+      !readdir('/Applications').some(name => /^Xcode.*\.app$/i.test(name))
+    )
+  } catch {
+    return false
+  }
+}
+
 export function execFileNoThrowWithCwd(
   file: string,
   args: string[],
@@ -164,7 +218,27 @@ export function execFileNoThrowWithCwd(
     preserveOutputOnError: true,
     maxBuffer: 1_000_000,
   },
-): Promise<{ stdout: string; stderr: string; code: number; error?: string }> {
+): Promise<{
+  stdout: string
+  stderr: string
+  code: number
+  error?: string
+  noChildLeft?: boolean
+}> {
+  const effectiveEnv =
+    finalEnv === undefined
+      ? process.env
+      : extendEnv === false
+        ? finalEnv
+        : { ...process.env, ...finalEnv }
+  if (isMacosMissingGitCommandLineTools(file, effectiveEnv)) {
+    return Promise.resolve({
+      stdout: '',
+      stderr: MACOS_GIT_NOT_INSTALLED_MESSAGE,
+      code: 127,
+      error: MACOS_GIT_NOT_INSTALLED_MESSAGE,
+    })
+  }
   return new Promise(resolve => {
     let spawnError: unknown
     // Use execa for cross-platform .bat/.cmd compatibility on Windows
@@ -197,6 +271,12 @@ export function execFileNoThrowWithCwd(
     })
     child
       .then(result => {
+        const noChildLeft =
+          process.platform === 'linux' &&
+          child.pid === undefined &&
+          isErrnoError(spawnError)
+            ? true
+            : undefined
         if (result.failed) {
           if (finalPreserveOutput) {
             const errorCode = result.exitCode ?? 1
@@ -204,6 +284,7 @@ export function execFileNoThrowWithCwd(
               stdout: result.stdout || '',
               stderr: result.stderr || '',
               code: errorCode,
+              ...(noChildLeft ? { noChildLeft } : {}),
               error:
                 formatSpawnError(
                   result as unknown as {
@@ -221,7 +302,12 @@ export function execFileNoThrowWithCwd(
                 ),
             })
           } else {
-            void resolve({ stdout: '', stderr: '', code: result.exitCode ?? 1 })
+            void resolve({
+              stdout: '',
+              stderr: '',
+              code: result.exitCode ?? 1,
+              ...(noChildLeft ? { noChildLeft } : {}),
+            })
           }
         } else {
           void resolve({
@@ -233,7 +319,18 @@ export function execFileNoThrowWithCwd(
       })
       .catch((error: ExecaError) => {
         logError(error)
-        void resolve({ stdout: '', stderr: '', code: 1 })
+        const noChildLeft =
+          process.platform === 'linux' &&
+          child.pid === undefined &&
+          isErrnoError(error)
+            ? true
+            : undefined
+        void resolve({
+          stdout: '',
+          stderr: '',
+          code: 1,
+          ...(noChildLeft ? { noChildLeft } : {}),
+        })
       })
   })
 }

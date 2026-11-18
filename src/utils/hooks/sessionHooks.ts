@@ -13,6 +13,7 @@ import type { Message } from 'src/types/message.js'
 import { logForDebugging } from '../debug.js'
 import type { AggregatedHookResult } from '../hooks.js'
 import type { HookCommand } from '../settings/types.js'
+import { isHookEqual } from './hooksSettings.js'
 
 export type OnHookSuccess = (
   hook: HookCommand | FunctionHook,
@@ -226,21 +227,95 @@ function addHookToSession(
   )
 }
 
+function applyRemoveHookWithScope(
+  sessions: SessionHooksState,
+  sessionId: string,
+  event: HookEvent,
+  hook: HookCommand,
+  options?: { skillRoot?: string },
+): boolean {
+  const store = sessions.get(sessionId)
+  if (!store) {
+    return false
+  }
+  const eventMatchers = store.hooks[event] || []
+  const updatedMatchers = eventMatchers
+    .map(matcher => {
+      if (options !== undefined && matcher.skillRoot !== options.skillRoot) {
+        return matcher
+      }
+      const updatedHooks = matcher.hooks.filter(h => !isHookEqual(h.hook, hook))
+      return updatedHooks.length > 0
+        ? { ...matcher, hooks: updatedHooks }
+        : null
+    })
+    .filter((m): m is SessionHookMatcher => m !== null)
+
+  const newHooks =
+    updatedMatchers.length > 0
+      ? { ...store.hooks, [event]: updatedMatchers }
+      : { ...store.hooks }
+  if (updatedMatchers.length === 0) {
+    delete newHooks[event]
+  }
+  sessions.set(sessionId, { ...store, hooks: newHooks })
+  return true
+}
+
 /**
  * Remove a specific hook from the session
  * @param setAppState The function to update the app state
  * @param sessionId The session ID
  * @param event The hook event
  * @param hook The hook command to remove
+ * @param options Optional scope filter (e.g. skillRoot for skill-scoped once hooks)
  */
 export function removeSessionHook(
   setAppState: (updater: (prev: AppState) => AppState) => void,
   sessionId: string,
   event: HookEvent,
   hook: HookCommand,
+  options?: { skillRoot?: string },
 ): void {
   const registry = getSessionHooksRegistry(setAppState)
-  if (registry) {
+  if (options !== undefined) {
+    if (registry) {
+      const changedReg = applyRemoveHookWithScope(
+        registry.sessions,
+        sessionId,
+        event,
+        hook,
+        options,
+      )
+      if (changedReg) {
+        registry.changed.emit()
+      }
+    }
+    setAppState(prev => {
+      const changed = applyRemoveHookWithScope(
+        prev.sessionHooks,
+        sessionId,
+        event,
+        hook,
+        options,
+      )
+      const bound = getSessionHooksRegistry(prev.sessionHooks)
+      let boundChanged = false
+      if (bound && bound !== registry) {
+        boundChanged = applyRemoveHookWithScope(
+          bound.sessions,
+          sessionId,
+          event,
+          hook,
+          options,
+        )
+      }
+      if (changed || boundChanged) {
+        bound?.changed.emit()
+      }
+      return prev
+    })
+  } else if (registry) {
     registry.removeHook(sessionId, event, hook)
   } else {
     setAppState(prev => {
@@ -355,6 +430,26 @@ export function getSessionHookCallback(
   )
 }
 
+export type SkillHookSourceDraw = {
+  hooks: number
+  characters: number
+  texts: Map<string, 'count' | 'characters' | 'matcher' | undefined>
+  unfitTexts: number
+}
+
+const skillDrawsBySession = new Map<string, Map<string, SkillHookSourceDraw>>()
+
+export function getSkillHookDraws(
+  sessionId: string,
+): Map<string, SkillHookSourceDraw> {
+  let map = skillDrawsBySession.get(sessionId)
+  if (!map) {
+    map = new Map()
+    skillDrawsBySession.set(sessionId, map)
+  }
+  return map
+}
+
 /**
  * Clear all session hooks for a specific session
  * @param setAppState The function to update the app state
@@ -364,6 +459,7 @@ export function clearSessionHooks(
   setAppState: (updater: (prev: AppState) => AppState) => void,
   sessionId: string,
 ): void {
+  skillDrawsBySession.delete(sessionId)
   const registry = getSessionHooksRegistry(setAppState)
   if (registry) {
     registry.clearSession(sessionId)

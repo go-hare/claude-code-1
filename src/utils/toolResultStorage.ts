@@ -391,7 +391,19 @@ async function maybePersistLargeToolResult(
 }
 
 /**
- * Generate a preview of content, truncating at a newline boundary when possible.
+ * Slice a string up to `maxLen` UTF-16 code units without splitting a surrogate pair.
+ */
+export function sliceSurrogateSafe(s: string, maxLen: number): string {
+  if (maxLen <= 0) return ''
+  if (s.length <= maxLen) return s
+  const sliced = s.slice(0, maxLen)
+  const lastCode = sliced.charCodeAt(sliced.length - 1)
+  return lastCode >= 0xd800 && lastCode <= 0xdbff ? sliced.slice(0, -1) : sliced
+}
+
+/**
+ * Generate a preview of content, truncating at a newline boundary when possible
+ * and never splitting a UTF-16 surrogate pair.
  */
 export function generatePreview(
   content: string,
@@ -402,14 +414,15 @@ export function generatePreview(
   }
 
   // Find the last newline within the limit to avoid cutting mid-line
-  const truncated = content.slice(0, maxBytes)
+  const truncated = sliceSurrogateSafe(content, maxBytes)
   const lastNewline = truncated.lastIndexOf('\n')
 
   // If we found a newline reasonably close to the limit, use it
-  // Otherwise fall back to the exact limit
-  const cutPoint = lastNewline > maxBytes * 0.5 ? lastNewline : maxBytes
+  // Otherwise fall back to the surrogate-safe limit
+  const preview =
+    lastNewline > maxBytes * 0.5 ? content.slice(0, lastNewline) : truncated
 
-  return { preview: content.slice(0, cutPoint), hasMore: true }
+  return { preview, hasMore: true }
 }
 
 /**

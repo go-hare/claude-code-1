@@ -16,6 +16,7 @@ import type {
 import type { PermissionDecision } from '../../types/permissions.js'
 import { createAttachmentMessage } from '../../utils/attachments.js'
 import { logForDebugging } from '../../utils/debug.js'
+import { isAbortError } from '../../utils/errors.js'
 import {
   executePostToolHooks,
   executePostToolUseFailureHooks,
@@ -1155,8 +1156,54 @@ export async function* runPreToolUseHooks(
       yield { type: 'defer', hookName: deferredHookName }
     }
   } catch (error) {
-    logError(error)
-    // densable outer catch: bare stop (abort/timeout handled by isAbortError paths)
+    if (isAbortError(error)) {
+      if (toolUseContext.abortController.signal.aborted) {
+        logForDebugging('PreToolUse hook cancelled (parent abort)')
+      } else {
+        logForDebugging('PreToolUse hook timed out (per-hook abort)')
+        logEvent('tengu_sdk_hook_callback_timeout', {
+          hookEvent:
+            'PreToolUse' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          toolName: sanitizeToolNameForAnalytics(tool.name),
+        })
+        if (deniedPermissionResult) {
+          yield {
+            type: 'hookPermissionResult',
+            hookPermissionResult: deniedPermissionResult,
+          }
+        } else {
+          if (deferredHookName) {
+            yield { type: 'defer', hookName: deferredHookName }
+          }
+          yield {
+            type: 'stop',
+            stopReason:
+              lastStopReason ??
+              'PreToolUse hook timed out. The tool call was not executed; other configured hooks may not have completed.',
+          }
+        }
+        return
+      }
+    } else {
+      logError(error)
+      if (deniedPermissionResult) {
+        yield {
+          type: 'hookPermissionResult',
+          hookPermissionResult: deniedPermissionResult,
+        }
+      } else {
+        if (deferredHookName) {
+          yield { type: 'defer', hookName: deferredHookName }
+        }
+        yield {
+          type: 'stop',
+          stopReason:
+            lastStopReason ??
+            'PreToolUse hook failed with an unexpected error. The tool call was not executed; other configured hooks may not have completed.',
+        }
+      }
+      return
+    }
     yield { type: 'stop' }
     return
   }

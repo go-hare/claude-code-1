@@ -1818,15 +1818,95 @@ export function isBgExitHandoffDisabled(
   return isEnvTruthy(env.CLAUDE_CODE_DISABLE_BG_EXIT_HANDOFF)
 }
 
-/** Official AUTO_COMPACT_WINDOW densable — positive int tokens or null. */
+const AUTO_COMPACT_ENV_MIN = 100_000
+const AUTO_COMPACT_ENV_MAX = 1_000_000
+
+export type AutoCompactWindowEnvParse =
+  | { kind: 'in_range'; tokens: number; suffixed: boolean }
+  | { kind: 'below_minimum'; tokens: number }
+  | { kind: 'above_maximum' }
+  | { kind: 'unusable' }
+
+/**
+ * Official DIe(e, { bareThousands: false }) (2.1.304 #998) — parse
+ * CLAUDE_CODE_AUTO_COMPACT_WINDOW accepting k/M suffixes.
+ */
+export function parseAutoCompactWindowEnvValue(
+  raw: string,
+): AutoCompactWindowEnvParse {
+  const trimmed = raw.trim()
+  const suffix = trimmed.slice(-1).toLowerCase()
+  const multiplier =
+    suffix === 'm' ? 1_000_000 : suffix === 'k' ? 1_000 : undefined
+  const value =
+    multiplier === undefined
+      ? parseInt(trimmed, 10)
+      : parseFloat(trimmed) * multiplier
+  if (Number.isNaN(value) || value < 1) {
+    return { kind: 'unusable' }
+  }
+  if (value < AUTO_COMPACT_ENV_MIN) {
+    return {
+      kind: 'below_minimum',
+      tokens: Math.min(AUTO_COMPACT_ENV_MIN - 1, Math.round(value)),
+    }
+  }
+  if (value > AUTO_COMPACT_ENV_MAX) {
+    return { kind: 'above_maximum' }
+  }
+  return {
+    kind: 'in_range',
+    tokens: Math.round(value),
+    suffixed: multiplier !== undefined,
+  }
+}
+
+/**
+ * Official VEn / QZe (2.1.304 #998) — human-readable warning when
+ * CLAUDE_CODE_AUTO_COMPACT_WINDOW is out of range or ignored, or null if valid.
+ */
+export function getAutoCompactWindowEnvWarning(
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const raw = env.CLAUDE_CODE_AUTO_COMPACT_WINDOW
+  if (raw === undefined) return null
+  const parsed = parseAutoCompactWindowEnvValue(raw)
+  if (parsed.kind === 'in_range') return null
+  const maxLen = 32
+  const preview =
+    raw.slice(0, maxLen).replace(/[^\w.,+ $%{}=;-]+/g, '?') +
+    (raw.length > maxLen ? '…' : '')
+  const label = `CLAUDE_CODE_AUTO_COMPACT_WINDOW="${preview}"`
+  const minLabel = `${AUTO_COMPACT_ENV_MIN / 1000}k`
+  const maxLabel = `${AUTO_COMPACT_ENV_MAX / 1_000_000}M`
+  const hint = `Set it to a size from ${minLabel} to ${maxLabel}, such as 200k or 200000, or unset it.`
+  switch (parsed.kind) {
+    case 'below_minimum':
+      return `${label} reads as ${parsed.tokens.toLocaleString('en-US')} ${parsed.tokens === 1 ? 'token' : 'tokens'}, so Claude Code treats it as the ${minLabel} minimum. ${hint}`
+    case 'above_maximum':
+      return `${label} is too large, so Claude Code treats it as the ${maxLabel} maximum. ${hint}`
+    case 'unusable':
+      return `${label} isn't a usable size, so Claude Code ignores it. ${hint}`
+  }
+}
+
+/** Official AUTO_COMPACT_WINDOW densable (qEn, 2.1.304 #998) — tokens or null. */
 export function resolveAutoCompactWindowOverride(
   env: NodeJS.ProcessEnv = process.env,
 ): number | null {
   const raw = env.CLAUDE_CODE_AUTO_COMPACT_WINDOW
-  if (!raw) return null
-  const n = parseInt(raw, 10)
-  if (!Number.isFinite(n) || n <= 0) return null
-  return n
+  if (raw === undefined) return null
+  const parsed = parseAutoCompactWindowEnvValue(raw)
+  switch (parsed.kind) {
+    case 'in_range':
+      return parsed.tokens
+    case 'below_minimum':
+      return AUTO_COMPACT_ENV_MIN
+    case 'above_maximum':
+      return AUTO_COMPACT_ENV_MAX
+    case 'unusable':
+      return null
+  }
 }
 
 /** Official BLOCKING_LIMIT_OVERRIDE densable — positive int tokens or null. */

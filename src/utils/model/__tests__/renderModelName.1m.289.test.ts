@@ -2,7 +2,11 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { em } from '../modelNoticeCode.js'
-import { modelDisplayString, renderModelName } from '../model.js'
+import {
+  modelDisplayString,
+  parseUserSpecifiedModel,
+  renderModelName,
+} from '../model.js'
 
 const modelSrc = readFileSync(join(import.meta.dir, '../model.ts'), 'utf8')
 const modelCmd = readFileSync(
@@ -49,5 +53,14 @@ describe('densable 2.1.289 model [1m] display + picker footer', () => {
     expect(pickerSrc).not.toContain('1M context on')
     expect(pickerSrc).not.toContain('modelPicker:toggle1M')
     expect(pickerSrc).toContain('onSetDefault')
+  })
+
+  test('#1076 parseUserSpecifiedModel strips repeated [1m][1m] suffixes', () => {
+    expect(parseUserSpecifiedModel('claude-custom-model[1m][1m]')).toBe(
+      'claude-custom-model[1m]',
+    )
+    const opusRes = parseUserSpecifiedModel('opus[1m][1m]')
+    expect(opusRes.endsWith('[1m]')).toBe(true)
+    expect(opusRes.endsWith('[1m][1m]')).toBe(false)
   })
 })

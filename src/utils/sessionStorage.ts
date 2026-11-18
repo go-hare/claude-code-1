@@ -1080,6 +1080,9 @@ class Project {
   private drainChain: Promise<void> = Promise.resolve()
   private FLUSH_INTERVAL_MS = 100
   private readonly MAX_CHUNK_BYTES = 100 * 1024 * 1024
+  private bytesSinceCompact = 0
+  private backstopThresholdBytes = TRANSCRIPT_COMPACT_BACKSTOP_BYTES
+  private minCompactFileBytes = TRANSCRIPT_COMPACT_MIN_BYTES
   /** densable Project.mirrors — SessionStore transcript_mirror callbacks. */
   private mirrors: Array<(filePath: string, entries: Entry[]) => void> = []
 
@@ -1098,6 +1101,9 @@ class Project {
     // densable _resetFlushState also clears mirrors[]
     this.mirrors = []
     this.tornTailToSeal = null
+    this.bytesSinceCompact = 0
+    this.backstopThresholdBytes = TRANSCRIPT_COMPACT_BACKSTOP_BYTES
+    this.minCompactFileBytes = TRANSCRIPT_COMPACT_MIN_BYTES
   }
 
   addMirror(cb: (filePath: string, entries: Entry[]) => void): void {
@@ -1184,6 +1190,9 @@ class Project {
       await leftoverAppendSerial.run(filePath, async () => {
         await leftoverPye(filePath, data, getPinnedStorageV5())
       })
+      if (filePath === this.sessionFile) {
+        this.bytesSinceCompact += Buffer.byteLength(data, 'utf8')
+      }
       recordTranscriptWriteSuccess(filePath)
     } catch (err) {
       recordTranscriptWriteFailure('drain', err, filePath)
@@ -1248,11 +1257,65 @@ class Project {
         this.writeQueues.delete(filePath)
       }
     }
+
+    if (
+      isLocalGcEnabled() &&
+      this.sessionFile &&
+      this.bytesSinceCompact >= this.backstopThresholdBytes
+    ) {
+      this.bytesSinceCompact = 0
+      await this.performCompactTranscript(this.sessionFile)
+    }
+  }
+
+  async performCompactTranscript(
+    filePath: string,
+    shouldKeepLine: (
+      line: string,
+      index: number,
+    ) => boolean = defaultTranscriptGcKeepLine,
+  ): Promise<void> {
+    if (!isLocalGcEnabled()) return
+    try {
+      const fileStat = await stat(filePath)
+      if (fileStat.size < this.minCompactFileBytes) return
+      const res = await compactTranscriptFileAtomic(filePath, shouldKeepLine)
+      if (res.compacted) {
+        logEvent('tengu_transcript_compact', {
+          bytesBefore: res.bytesBefore,
+          bytesAfter: res.bytesAfter,
+        })
+      }
+    } catch (err) {
+      logEvent('tengu_transcript_compact_failed', {
+        reason: 'io',
+        error_code: getErrnoCode(err),
+      })
+      logForDebugging(
+        `Transcript compact failed (${getErrnoCode(err) ?? 'unknown'}): ${errorMessage(err)}`,
+        { level: 'warn' },
+      )
+    }
+  }
+
+  /** @internal Configure local GC thresholds for testing. */
+  _setLocalGcThresholdsForTest(opts: {
+    backstopThresholdBytes?: number
+    minCompactFileBytes?: number
+  }): void {
+    if (opts.backstopThresholdBytes !== undefined) {
+      this.backstopThresholdBytes = opts.backstopThresholdBytes
+    }
+    if (opts.minCompactFileBytes !== undefined) {
+      this.minCompactFileBytes = opts.minCompactFileBytes
+    }
   }
 
   resetSessionFile(): void {
     this.setSessionFile(null)
     this.pendingEntries = []
+    this.bytesSinceCompact = 0
+    this.backstopThresholdBytes = TRANSCRIPT_COMPACT_BACKSTOP_BYTES
   }
 
   /**
@@ -2360,8 +2423,15 @@ export async function recordSidechainTranscript(
   agentId?: string,
   startingParentUuid?: UUID | null,
 ) {
+  // 2.1.307 #1089 (SEA pyt): Do not persist in-progress streaming assistant
+  // chunks with `stop_reason === null` (placeholder all-zero usage); wait for
+  // the finalized message with a non-null stop_reason.
+  const settledMessages = messages.filter(
+    m => !(m.type === 'assistant' && m.message?.stop_reason === null),
+  )
+  if (settledMessages.length === 0) return
   await getProject().insertMessageChain(
-    cleanMessagesForLogging(messages),
+    cleanMessagesForLogging(settledMessages),
     true,
     agentId,
     startingParentUuid,
@@ -2783,10 +2853,25 @@ export async function flushSessionStorage(): Promise<void> {
   await getProject().flush()
 }
 
-// ── Official CLAUDE_CODE_TRANSCRIPT_LOCAL_GC (#530, #543) ────────────────────
+// ── Official CLAUDE_CODE_TRANSCRIPT_LOCAL_GC (#530, #543, #968) ──────────────
+const TRANSCRIPT_COMPACT_MIN_BYTES = 5_242_880 // SEA L9i (5 MiB)
+const TRANSCRIPT_COMPACT_BACKSTOP_BYTES = 20_971_520 // SEA O4 (20 MiB)
 const LOW_YIELD_COMPACT_RATIO = 0.1
 let localGcEnabledState = false
 let lowYieldCompactSkipEnabledState = false
+
+function defaultTranscriptGcKeepLine(line: string): boolean {
+  if (!line) return false
+  try {
+    const parsed = jsonParse(line) as { type?: unknown } | null
+    if (parsed && typeof parsed === 'object' && parsed.type === 'tombstone') {
+      return false
+    }
+  } catch {
+    // Preserve unparseable lines rather than silently dropping data
+  }
+  return true
+}
 
 export function setLocalGcEnabled(enabled: boolean): void {
   localGcEnabledState = enabled
@@ -2896,6 +2981,68 @@ export function compactTranscriptJsonl(
     skippedLowYield: false,
     bytesBefore,
     reclaimableBytes,
+  }
+}
+
+/**
+ * 2.1.304 #968 (SEA atomic publish): Atomically compact a transcript JSONL file
+ * via temp file + sync + rename so ENOSPC / disk-full never truncates or drops
+ * messages from the saved transcript.
+ */
+export async function compactTranscriptFileAtomic(
+  filePath: string,
+  shouldKeepLine: (line: string, index: number) => boolean,
+): Promise<{
+  compacted: boolean
+  skippedLowYield: boolean
+  bytesBefore: number
+  bytesAfter: number
+}> {
+  const beforeStat = await stat(filePath)
+  const content = await readFile(filePath, 'utf8')
+  const { compacted, skippedLowYield, bytesBefore, reclaimableBytes } =
+    compactTranscriptJsonl(content, shouldKeepLine)
+  if (skippedLowYield || reclaimableBytes === 0) {
+    return {
+      compacted: false,
+      skippedLowYield,
+      bytesBefore,
+      bytesAfter: bytesBefore,
+    }
+  }
+  const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`
+  let handle: Awaited<ReturnType<typeof fsOpen>> | undefined
+  try {
+    handle = await fsOpen(tmpPath, 'wx', 0o600)
+    await handle.writeFile(compacted, 'utf8')
+    await handle.sync()
+    await handle.close()
+    handle = undefined
+    const currentStat = await stat(filePath)
+    if (
+      currentStat.size !== beforeStat.size ||
+      currentStat.mtimeMs !== beforeStat.mtimeMs
+    ) {
+      // Source changed concurrently; abort without overwriting new writes.
+      return {
+        compacted: false,
+        skippedLowYield: false,
+        bytesBefore,
+        bytesAfter: currentStat.size,
+      }
+    }
+    await fsRename(tmpPath, filePath)
+    return {
+      compacted: true,
+      skippedLowYield: false,
+      bytesBefore,
+      bytesAfter: Buffer.byteLength(compacted, 'utf8'),
+    }
+  } finally {
+    if (handle !== undefined) {
+      await handle.close().catch(() => {})
+    }
+    await unlink(tmpPath).catch(() => {})
   }
 }
 
@@ -4411,6 +4558,37 @@ export async function writeCustomTitleSidecar(
       level: 'error',
     })
   }
+}
+
+/**
+ * 2.1.309 #1139 (SEA rXi / DOr): Fallback reader for `<dir>/<sessionId>/custom-title.json`
+ * when the JSONL tail does not contain a `custom-title` entry.
+ */
+export async function readCustomTitleSidecar(
+  transcriptPath: string,
+  sessionId: string,
+): Promise<string | undefined> {
+  const sidecarPath = join(
+    dirname(transcriptPath),
+    sessionId,
+    'custom-title.json',
+  )
+  try {
+    const raw = await readFile(sidecarPath, 'utf8')
+    const parsed: unknown = jsonParse(raw)
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      'customTitle' in parsed &&
+      typeof (parsed as { customTitle?: unknown }).customTitle === 'string'
+    ) {
+      const trimmed = (parsed as { customTitle: string }).customTitle.trim()
+      return trimmed || undefined
+    }
+  } catch {
+    // Missing or unreadable sidecar is expected when never renamed
+  }
+  return undefined
 }
 
 export async function saveCustomTitle(
@@ -7082,6 +7260,16 @@ export async function loadTranscriptFile(
     logEvent('tengu_transcript_parent_cycle', {})
   }
 
+  // 2.1.309 #1139: Fall back to `<dir>/<sessionId>/custom-title.json` sidecar
+  // when custom-title is absent from the JSONL transcript.
+  const fileSessionId = validateUuid(basename(filePath, '.jsonl'))
+  if (fileSessionId && !customTitles.has(fileSessionId)) {
+    const sidecarTitle = await readCustomTitleSidecar(filePath, fileSessionId)
+    if (sidecarTitle) {
+      customTitles.set(fileSessionId, sidecarTitle)
+    }
+  }
+
   return {
     messages,
     summaries,
@@ -7610,9 +7798,10 @@ export async function getAgentTranscript(agentId: AgentId): Promise<{
 
     return {
       // Convert TranscriptMessage[] to Message[] and rewrite shutdown-interrupted
-      // tool_result blocks (#499 SEA HKr/bxn)
+      // tool_result blocks (#499 SEA HKr/bxn, updated 2.1.309 #1166 YR)
       messages: rewriteResumedSubagentShutdownToolResults(
         agentTranscript.map(({ isSidechain, parentUuid, ...msg }) => msg),
+        "[Tool call interrupted: the session ended before this call's result was recorded, so its outcome is unknown. Check whether it took effect before relying on it or running it again.]",
       ),
       contentReplacements: agentContentReplacements.get(agentId) ?? [],
     }
@@ -8007,6 +8196,10 @@ type LiteMetadata = {
   prUrl?: string
   prRepository?: string
   sessionKind?: string
+  /** 2.1.309 #1139: customTitle extracted specifically from the JSONL tail. */
+  customTitleFromTail?: string
+  /** 2.1.305 #1045 (SEA zBn): true if transcript has no user/assistant messages. */
+  bookkeepingOnly?: boolean
 }
 
 /**
@@ -8187,13 +8380,68 @@ async function getLogsWithoutIndex(
  *
  * Accepts a shared buffer to avoid per-file allocation overhead.
  */
+const PARENT_UUID_MARKER = '"parentUuid":'
+const BOOKKEEPING_SCAN_MAX_BYTES = 16 * 1024 * 1024
+const BOOKKEEPING_SCAN_CHUNK_BYTES = 1024 * 1024
+
+/**
+ * 2.1.305 #1045 (SEA zBn): Returns true if the transcript file contains at least
+ * one message entry (`"parentUuid":`). Files smaller than `LITE_READ_BUF_SIZE`
+ * were already fully read in `head`/`tail`.
+ */
+export async function hasTranscriptMessages(
+  filePath: string,
+  head: string,
+  tail: string,
+  fileSize: number,
+): Promise<boolean> {
+  if (head.includes(PARENT_UUID_MARKER) || tail.includes(PARENT_UUID_MARKER)) {
+    return true
+  }
+  if (fileSize <= LITE_READ_BUF_SIZE) {
+    return false
+  }
+  try {
+    const handle = await fsOpen(filePath, 'r')
+    try {
+      const markerBuf = Buffer.from(PARENT_UUID_MARKER, 'utf8')
+      const chunk = Buffer.allocUnsafe(
+        BOOKKEEPING_SCAN_CHUNK_BYTES + markerBuf.length,
+      )
+      let carry = 0
+      let offset = 0
+      while (offset < BOOKKEEPING_SCAN_MAX_BYTES) {
+        const { bytesRead } = await handle.read(
+          chunk,
+          carry,
+          BOOKKEEPING_SCAN_CHUNK_BYTES,
+          offset,
+        )
+        if (bytesRead === 0) return false
+        const len = carry + bytesRead
+        if (chunk.subarray(0, len).includes(markerBuf)) return true
+        carry = Math.min(markerBuf.length, len)
+        chunk.copyWithin(0, len - carry, len)
+        offset += bytesRead
+      }
+      return true
+    } finally {
+      await handle.close()
+    }
+  } catch {
+    return false
+  }
+}
+
 async function readLiteMetadata(
   filePath: string,
   fileSize: number,
   buf: Buffer,
 ): Promise<LiteMetadata> {
   const { head, tail } = await readHeadAndTail(filePath, fileSize, buf)
-  if (!head) return { firstPrompt: '', isSidechain: false }
+  if (!head) {
+    return { firstPrompt: '', isSidechain: false, bookkeepingOnly: true }
+  }
 
   // Extract stable metadata from the first line via string search.
   // Works even when the first line is truncated (>64KB message).
@@ -8222,9 +8470,9 @@ async function readLiteMetadata(
   // Extract tail metadata via string search (last occurrence wins).
   // Keep customTitle and aiTitle distinct so resume can hydrate the tab
   // title without treating an AI title as a user /rename.
+  const customTitleFromTail = extractLastJsonStringField(tail, 'customTitle')
   const customTitle =
-    extractLastJsonStringField(tail, 'customTitle') ??
-    extractLastJsonStringField(head, 'customTitle')
+    customTitleFromTail ?? extractLastJsonStringField(head, 'customTitle')
   const aiTitle =
     extractLastJsonStringField(tail, 'aiTitle') ??
     extractLastJsonStringField(head, 'aiTitle')
@@ -8251,6 +8499,13 @@ async function readLiteMetadata(
     }
   }
 
+  const bookkeepingOnly = !(await hasTranscriptMessages(
+    filePath,
+    head,
+    tail,
+    fileSize,
+  ))
+
   return {
     firstPrompt,
     gitBranch,
@@ -8261,6 +8516,7 @@ async function readLiteMetadata(
     relocatedCwd,
     teamName,
     customTitle,
+    customTitleFromTail,
     aiTitle,
     summary,
     tag,
@@ -8269,6 +8525,7 @@ async function readLiteMetadata(
     prUrl,
     prRepository,
     sessionKind: extractJsonStringField(head, 'sessionKind') ?? undefined,
+    bookkeepingOnly,
   }
 }
 
@@ -8517,6 +8774,14 @@ async function enrichLog(
       ? new Date(Math.min(meta.lastMessageAtMs, log.modified.getTime()))
       : undefined
 
+  let customTitle = meta.customTitleFromTail
+  if (customTitle === undefined) {
+    customTitle =
+      (log.sessionId !== undefined
+        ? await readCustomTitleSidecar(log.fullPath, log.sessionId)
+        : undefined) ?? meta.customTitle
+  }
+
   const enriched: LogOption = {
     ...log,
     isLite: false,
@@ -8524,7 +8789,7 @@ async function enrichLog(
     gitBranch: meta.gitBranch,
     isSidechain: meta.isSidechain,
     teamName: meta.teamName,
-    customTitle: meta.customTitle,
+    customTitle,
     aiTitle: meta.aiTitle,
     summary: meta.summary,
     tag: meta.tag,
@@ -8545,6 +8810,12 @@ async function enrichLog(
   // prompt (e.g., large first messages that exceed the 16KB read buffer).
   // Previously these sessions were silently dropped, making them inaccessible
   // via /resume after crashes or large-context sessions.
+  if (meta.bookkeepingOnly) {
+    logForDebugging(
+      `Session ${log.sessionId} filtered from /resume: bookkeepingOnly=true`,
+    )
+    return null
+  }
   if (!enriched.firstPrompt && !enriched.customTitle && !enriched.aiTitle) {
     enriched.firstPrompt = '(session)'
   }

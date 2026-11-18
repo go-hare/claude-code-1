@@ -84,6 +84,7 @@ import {
   shouldCacheControlOnApiSystem,
 } from '../../utils/midConversationSystem.js'
 import {
+  getStickyBetas,
   isStickyBetaRejected,
   isStickyBetaSentActive,
   isThirdPartyServerClassifierRefused,
@@ -92,6 +93,48 @@ import {
   getRefusalFallbackModelLatch,
   getMainLoopModelOverride,
 } from '../../bootstrap/state.js'
+
+const declaredToolsByStickyBetas = new WeakMap<object, ReadonlySet<string>>()
+
+export function getHeldInlineTools(
+  stickyBetas: object = getStickyBetas(),
+): ReadonlySet<string> | undefined {
+  return declaredToolsByStickyBetas.get(stickyBetas)
+}
+
+export function latchDeclaredTools(
+  stickyBetas: object,
+  inlineToolNames: Iterable<string>,
+): ReadonlySet<string> {
+  const set = new Set(inlineToolNames)
+  declaredToolsByStickyBetas.set(stickyBetas, set)
+  return set
+}
+
+export function computeDeferredToolNamesForRequest(
+  tools: Tools,
+  useSearchExtraTools: boolean,
+  heldInlineTools: ReadonlySet<string> | undefined,
+  isDeferredFn: (tool: Tool) => boolean = isDeferredTool,
+): Set<string> {
+  const deferredToolNames = new Set<string>()
+  if (!useSearchExtraTools) return deferredToolNames
+  if (heldInlineTools === undefined) {
+    for (const t of tools) {
+      if (isDeferredFn(t)) deferredToolNames.add(t.name)
+    }
+  } else {
+    for (const t of tools) {
+      if (
+        !heldInlineTools.has(t.name) &&
+        !toolMatchesName(t, SEARCH_EXTRA_TOOLS_TOOL_NAME)
+      ) {
+        deferredToolNames.add(t.name)
+      }
+    }
+  }
+  return deferredToolNames
+}
 import {
   checkStreamIdleSuspend,
   StreamSuspendedError,
@@ -396,6 +439,7 @@ import {
   getAssistantMessageFromError,
   getErrorMessageIfRefusal,
   isOutputBlockedByContentFilterError,
+  isPromptTooLongErrorMessage,
   isUnprocessableMediaError,
 } from './errors.js'
 import { extractConnectionErrorDetails } from './errorUtils.js'
@@ -533,6 +577,13 @@ export async function verifyApiKey(
   }
 }
 
+export class ToolSearchRefusalError extends Error {
+  constructor(cause: unknown) {
+    super('the model call is made again', { cause })
+    this.name = 'ToolSearchRefusalError'
+  }
+}
+
 export type Options = {
   getToolPermissionContext: () => Promise<ToolPermissionContext>
   model: string
@@ -542,6 +593,7 @@ export type Options = {
   maxOutputTokensOverride?: number
   fallbackModel?: string
   _availabilityFallbackRetried?: boolean
+  _toolSearchRefusalRetried?: boolean
   onStreamingFallback?: () => void
   querySource: QuerySource
   agents: AgentDefinition[]
@@ -1234,21 +1286,24 @@ async function* queryModel(
 
   // Check if tool search is enabled (checks mode, model support, and threshold for auto mode)
   // This is async because it may need to calculate MCP tool description sizes for TstAuto mode
-  let useSearchExtraTools = await isSearchExtraToolsEnabled(
-    options.model,
-    tools,
-    options.getToolPermissionContext,
-    options.agents,
-    'query',
-  )
+  let useSearchExtraTools = options._toolSearchRefusalRetried
+    ? false
+    : await isSearchExtraToolsEnabled(
+        options.model,
+        tools,
+        options.getToolPermissionContext,
+        options.agents,
+        'query',
+      )
 
   // Precompute once — isDeferredTool does 2 GrowthBook lookups per call
-  const deferredToolNames = new Set<string>()
-  if (useSearchExtraTools) {
-    for (const t of tools) {
-      if (isDeferredTool(t)) deferredToolNames.add(t.name)
-    }
-  }
+  const stickyBetas = getStickyBetas()
+  const heldInlineTools = getHeldInlineTools(stickyBetas)
+  const deferredToolNames = computeDeferredToolNamesForRequest(
+    tools,
+    useSearchExtraTools,
+    heldInlineTools,
+  )
 
   // Even if tool search mode is enabled, skip if there are no deferred tools
   // AND no MCP servers are still connecting. When servers are pending, keep
@@ -1348,6 +1403,13 @@ async function* queryModel(
   const shouldDeferForToolSearch = (tool: Tool): boolean =>
     useSearchExtraTools &&
     (deferredToolNames.has(tool.name) || shouldDeferLspTool(tool))
+
+  if (useSearchExtraTools && heldInlineTools === undefined) {
+    latchDeclaredTools(
+      stickyBetas,
+      filteredTools.filter(t => !shouldDeferForToolSearch(t)).map(t => t.name),
+    )
+  }
 
   const toolSchemas = await Promise.all(
     filteredTools.map(tool =>
@@ -2107,6 +2169,24 @@ async function* queryModel(
       return toolSchemaRetry
     }
 
+    // Official 2.1.304 (#1015) / 2.1.305 (#1036) — qZ / VZ: retry without
+    // tool search (defer_loading / tool-search beta) on 400 or 422 refusal.
+    if (
+      useSearchExtraTools &&
+      !options._toolSearchRefusalRetried &&
+      error instanceof APIError &&
+      (error.status === 400 || error.status === 422) &&
+      (error.error as { type?: string } | undefined)?.type !==
+        'billing_error' &&
+      !isPromptTooLongErrorMessage(error.message)
+    ) {
+      logForDebugging(
+        `[ToolSearch] HTTP ${error.status}; sending the request again without deferred tools`,
+        { level: 'warn' },
+      )
+      throw new ToolSearchRefusalError(error)
+    }
+
     return undefined
   }
 
@@ -2608,15 +2688,8 @@ async function* queryModel(
           agentId: options.agentId,
         })
       : undefined
-    if (
-      serverClassifierRequest !== undefined &&
-      classifierContext !== undefined
-    ) {
-      recordServerClassifierRequest(
-        serverClassifierRequest.key,
-        slimClassifierContextForHistory(classifierContext),
-      )
-    }
+    // Official 2.1.304 (#1005): do not store slimmed safety classifier
+    // context with every request in serverClassifierHistory.
     lastSentThinkingDisplay =
       thinking !== undefined &&
       thinking !== null &&
@@ -3106,10 +3179,10 @@ async function* queryModel(
         let stallDt = byteStreamIdleTimeoutMs
         let stallGraceMs = 0
         try {
-          const { ADVISOR_STALL_POLL_MS, resolveAdvisorStallGraceMs } =
+          const { getAdvisorStallPollMs, resolveAdvisorStallGraceMs } =
             // eslint-disable-next-line @typescript-eslint/no-require-imports
             require('../../utils/advisorNetworkStall.js') as typeof import('../../utils/advisorNetworkStall.js')
-          stallPollMs = ADVISOR_STALL_POLL_MS
+          stallPollMs = getAdvisorStallPollMs()
           const grace = resolveAdvisorStallGraceMs({
             byteIdleTimeoutMs: byteStreamIdleTimeoutMs,
             streamWatchdogEnabled,
@@ -5042,6 +5115,24 @@ async function* queryModel(
         // actual model switch. Swallowing it here would turn the fallback into a
         // no-op — the user would just see "Model fallback triggered: X -> Y" as
         // an error message with no actual retry on the fallback model.
+        if (errorFromRetry instanceof ToolSearchRefusalError) {
+          if (!options._toolSearchRefusalRetried) {
+            yield* queryModelWithStreaming({
+              messages,
+              systemPrompt,
+              thinkingConfig,
+              tools,
+              signal,
+              options: {
+                ...options,
+                _toolSearchRefusalRetried: true,
+              },
+            })
+            return
+          }
+          throw errorFromRetry.cause ?? errorFromRetry
+        }
+
         if (errorFromRetry instanceof FallbackTriggeredError) {
           if (
             !options.fallbackModel &&

@@ -152,6 +152,11 @@ import {
 import { setCwd } from 'src/utils/Shell.js'
 import { isEvalConfined } from 'src/utils/permissions/evalConfined.js'
 import {
+  markSessionStoppedForPluginInput,
+  setBackgroundCeilingProvider,
+  setSpawnedTurnTakenCallback,
+} from 'src/utils/plugins/functionHooksModules.js'
+import {
   buildErrorDuringExecutionResult,
   buildNotClaimedExecutionResult,
   isClaimSessionRequest,
@@ -388,6 +393,19 @@ import {
   setAdditionalDirectoriesForClaudeMd,
   getRegisteredHooks,
   getOriginalCwd,
+  setCostStateForRestore,
+  getTotalCostUSD,
+  getTotalAPIDuration,
+  getTotalAPIDurationWithoutRetries,
+  getTotalToolDuration,
+  getTotalLinesAdded,
+  getTotalLinesRemoved,
+  getTotalDuration,
+  getTotalInputTokens,
+  getTotalOutputTokens,
+  getTotalCacheReadInputTokens,
+  getTotalCacheCreationInputTokens,
+  getModelUsage,
 } from 'src/bootstrap/state.js'
 import {
   createSyntheticOutputTool,
@@ -589,7 +607,10 @@ import {
   restoreSessionStateFromLog,
   restoreWorktreeForResume,
 } from 'src/utils/sessionRestore.js'
-import { adoptResumedSessionFile } from 'src/utils/sessionStorage.js'
+import {
+  adoptResumedSessionFile,
+  clearBridgeSession,
+} from 'src/utils/sessionStorage.js'
 import { SandboxManager } from 'src/utils/sandbox/sandbox-adapter.js'
 import {
   headlessProfilerStartTurn,
@@ -1170,6 +1191,121 @@ function countsAsHeadlessLastMessage(message: {
     typeof message.subtype === 'string' &&
     HEADLESS_LAST_MESSAGE_SKIP_SYSTEM_SUBTYPES.has(message.subtype)
   )
+}
+
+// ---------------------------------------------------------------------------
+// #917: Cloud session cost restore & metadata push (official dA / Qy)
+// ---------------------------------------------------------------------------
+
+const MAX_COST_STATE_METADATA_BYTES = 16_384
+
+type PersistedCostStatePayload = {
+  totalCostUSD: number
+  totalAPIDuration: number
+  totalAPIDurationWithoutRetries: number
+  totalToolDuration: number
+  totalLinesAdded: number
+  totalLinesRemoved: number
+  lastDuration?: number
+  modelUsage?: ReturnType<typeof getModelUsage>
+}
+
+function isValidPersistedCostState(
+  raw: unknown,
+): raw is PersistedCostStatePayload {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false
+  const rec = raw as Record<string, unknown>
+  return (
+    typeof rec.totalCostUSD === 'number' &&
+    Number.isFinite(rec.totalCostUSD) &&
+    typeof rec.totalAPIDuration === 'number' &&
+    Number.isFinite(rec.totalAPIDuration) &&
+    typeof rec.totalAPIDurationWithoutRetries === 'number' &&
+    Number.isFinite(rec.totalAPIDurationWithoutRetries) &&
+    typeof rec.totalToolDuration === 'number' &&
+    Number.isFinite(rec.totalToolDuration) &&
+    typeof rec.totalLinesAdded === 'number' &&
+    Number.isFinite(rec.totalLinesAdded) &&
+    typeof rec.totalLinesRemoved === 'number' &&
+    Number.isFinite(rec.totalLinesRemoved)
+  )
+}
+
+export function restoreCostStateFromWorker(
+  restored: RestoredWorkerState | null | undefined,
+): boolean {
+  const raw = restored?.internal?.cost_state
+  if (
+    typeof raw !== 'string' ||
+    Buffer.byteLength(raw) > MAX_COST_STATE_METADATA_BYTES
+  ) {
+    return false
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (!isValidPersistedCostState(parsed)) return false
+    if (parsed.totalCostUSD < getTotalCostUSD()) return false
+    setCostStateForRestore({
+      totalCostUSD: parsed.totalCostUSD,
+      totalAPIDuration: parsed.totalAPIDuration,
+      totalAPIDurationWithoutRetries: parsed.totalAPIDurationWithoutRetries,
+      totalToolDuration: parsed.totalToolDuration,
+      totalLinesAdded: parsed.totalLinesAdded,
+      totalLinesRemoved: parsed.totalLinesRemoved,
+      lastDuration: parsed.lastDuration,
+      modelUsage: parsed.modelUsage,
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+export class CostMetadataPusher {
+  private lastPushedCostUsd = 0
+  private lastSavedTotalCostUsd = getTotalCostUSD()
+  constructor(
+    private readonly notifyInternal: (patch: Record<string, unknown>) => void,
+  ) {}
+
+  pushIfChanged(extra?: Record<string, unknown>): void {
+    const totalCost = getTotalCostUSD()
+    const costChanged = totalCost !== this.lastPushedCostUsd
+    if (!costChanged && totalCost === this.lastSavedTotalCostUsd) {
+      if (extra !== undefined) {
+        this.notifyInternal(extra)
+      }
+      return
+    }
+    const snapshot: PersistedCostStatePayload = {
+      totalCostUSD: totalCost,
+      totalAPIDuration: getTotalAPIDuration(),
+      totalAPIDurationWithoutRetries: getTotalAPIDurationWithoutRetries(),
+      totalToolDuration: getTotalToolDuration(),
+      totalLinesAdded: getTotalLinesAdded(),
+      totalLinesRemoved: getTotalLinesRemoved(),
+      lastDuration: getTotalDuration(),
+      modelUsage: getModelUsage(),
+    }
+    const serialized = JSON.stringify(snapshot)
+    this.notifyInternal({
+      ...extra,
+      ...(costChanged
+        ? {
+            cumulative_cost_usd: totalCost,
+            cumulative_input_tokens: getTotalInputTokens(),
+            cumulative_output_tokens: getTotalOutputTokens(),
+            cumulative_cache_read_tokens: getTotalCacheReadInputTokens(),
+            cumulative_cache_write_tokens: getTotalCacheCreationInputTokens(),
+          }
+        : {}),
+      ...(Buffer.byteLength(serialized) <= MAX_COST_STATE_METADATA_BYTES
+        ? { cost_state: serialized }
+        : {}),
+    })
+    this.lastSavedTotalCostUsd = totalCost
+    this.lastPushedCostUsd = totalCost
+  }
 }
 
 export async function runHeadless<TState extends HeadlessAppState = AppState>(
@@ -1844,6 +1980,7 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
   // EF = dialog-kinds in loadInitialMessages; AF here; DF is empty.
   const restoredWorker = await structuredIO.restoredWorkerState
   restoreMemoryToggleFromWorkerState(restoredWorker)
+  restoreCostStateFromWorker(restoredWorker)
 
   // Official XWy — enable worker_permission_mode record; skip when this is a
   // restarted worker with no restored CCR metadata.
@@ -2208,6 +2345,32 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
   // subscribe arms via this latch once drain is live.
   let printStartGate: ReturnType<typeof createPrintStartGate> | undefined
   let printPrewait: ReturnType<typeof createPrintPrewaitLatch> | undefined
+  const costMetadataPusher = new CostMetadataPusher(
+    notifyInternalMetadataChanged,
+  )
+  let pluginCeilingTurns = 0
+  setBackgroundCeilingProvider(() => {
+    if (
+      options.maxBudgetUsd !== undefined &&
+      getTotalCostUSD() >= options.maxBudgetUsd
+    ) {
+      return 'the run is past its --max-budget-usd limit'
+    }
+    if (
+      options.maxTurns !== undefined &&
+      options.maxTurns > 0 &&
+      pluginCeilingTurns >= options.maxTurns
+    ) {
+      return 'the run reached its --max-turns limit'
+    }
+    if (inputClosed) {
+      return 'the host has ended its input'
+    }
+    return undefined
+  })
+  setSpawnedTurnTakenCallback(() => {
+    pluginCeilingTurns += 1
+  })
   // densable `g.drainingHandoff` — currently-running handed-off turn.
   // Print-scope so extras `peekRunningHandoff` (outside `run`) can see it.
   let drainingHandoff: QueuedCommand | undefined
@@ -2786,7 +2949,11 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
     }
   }
 
-  async function updateSdkMcp() {
+  let sdkMcpBackgroundRetry: Promise<void> | undefined
+
+  async function updateSdkMcp(
+    failedPolicy: 'retry' | 'skip' = 'retry',
+  ): Promise<void> {
     // Check if SDK MCP servers need to be updated (new servers added or removed)
     const currentServerNames = new Set(Object.keys(sdkMcpConfigs))
     const connectedServerNames = new Set(sdkClients.map(c => c.name))
@@ -2804,7 +2971,8 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
     // Without this, a client that lands in 'failed' (e.g. handshake timeout on
     // a WS reconnect race) stays failed forever — its name satisfies the
     // connectedServerNames diff but it contributes zero tools.
-    const hasFailedSdkClients = sdkClients.some(c => c.type === 'failed')
+    const hasFailedSdkClients =
+      failedPolicy === 'retry' && sdkClients.some(c => c.type === 'failed')
 
     const haveServersChanged =
       hasNewServers ||
@@ -2971,9 +3139,11 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
     if (clients.length > 0) seedHeadlessMcpIdentity()
     attachHeadlessRemoteReconnect([...clients, ...dynamicMcpState.clients])
   })
+  let pendingContextUsagePromise: Promise<void> = Promise.resolve()
   if (releaseMcpStateSubscription) registerCleanup(releaseMcpStateSubscription)
   registerCleanup(async () => {
     headlessMcpRunEnding = true
+    await pendingContextUsagePromise.catch(() => {})
     const clients = [...getAppState().mcp.clients, ...dynamicMcpState.clients]
     if (clients.some(c => c.type === 'connected')) {
       await cleanupConnectedMcpClients(clients)
@@ -3116,6 +3286,9 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
       bridgeLastForwardedIndex = 0
       overdueSessionStartHooks?.abort()
       sessionStartState.clears++
+      if (!bridgeHandle) {
+        clearBridgeSession()
+      }
     }
     for (const event of events) {
       if (forwardParentFrames) {
@@ -3774,8 +3947,68 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
     headlessProfilerCheckpoint('run_entry')
     // TODO(custom-tool-refactor): Should move to the init message, like browser
 
-    await updateSdkMcp()
+    if (options.sdkUrl) {
+      const { getMcpConnectTimeoutMs } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../services/mcp/mcpConnectTimeout.js') as typeof import('../services/mcp/mcpConnectTimeout.js')
+      const budgetMs = getMcpConnectTimeoutMs()
+      const sdkMcpUpdatePromise = updateSdkMcp('skip')
+      const raced = await raceWithTimeoutMs(sdkMcpUpdatePromise, budgetMs)
+      if (raced.status === 'timeout') {
+        sdkMcpUpdatePromise.catch(logError)
+        logEvent('tengu_sdk_mcp_update_wait_timeout', {
+          budget_ms: budgetMs,
+        })
+        logForDebugging(
+          `[print.ts] sdk_mcp_update_wait_timeout after ${budgetMs}ms`,
+          { level: 'warn' },
+        )
+      }
+      if (!sdkMcpBackgroundRetry && sdkClients.some(c => c.type === 'failed')) {
+        logForDebugging('[print.ts] sdk_mcp_retry_not_awaited', {
+          level: 'info',
+        })
+        sdkMcpBackgroundRetry = updateSdkMcp('retry')
+          .catch(logError)
+          .finally(() => {
+            sdkMcpBackgroundRetry = undefined
+          })
+      }
+    } else {
+      await updateSdkMcp()
+    }
     headlessProfilerCheckpoint('after_updateSdkMcp')
+
+    function sdkToolRelistJoin(joinOpts: {
+      shouldQuery?: boolean
+    }): Promise<void> | null {
+      if (
+        joinOpts.shouldQuery === false ||
+        sdkMcpBackgroundRetry ||
+        !sdkClients.some(c => c.type === 'pending')
+      ) {
+        return null
+      }
+      const { getMcpConnectTimeoutMs } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../services/mcp/mcpConnectTimeout.js') as typeof import('../services/mcp/mcpConnectTimeout.js')
+      const budgetMs = getMcpConnectTimeoutMs()
+      const started = performance.now()
+      const updatePromise = updateSdkMcp('skip')
+      return raceWithTimeoutMs(updatePromise, budgetMs)
+        .then(raced => {
+          const timedOut = raced.status === 'timeout'
+          if (timedOut) {
+            updatePromise.catch(logError)
+          }
+          logForDebugging(
+            `[print.ts] sdk_mcp_relist_wait budget_ms=${budgetMs} waited_ms=${Math.round(performance.now() - started)} timed_out=${timedOut}`,
+            { level: timedOut ? 'warn' : 'info' },
+          )
+        })
+        .catch(logError)
+    }
+    void sdkToolRelistJoin
 
     // Resolve deferred plugin installation (CLAUDE_CODE_SYNC_PLUGIN_INSTALL).
     // The promise was started eagerly so installation overlaps with other init.
@@ -4698,6 +4931,8 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
 
           // Forward messages to bridge after each turn
           forwardMessagesToBridge()
+          costMetadataPusher.pushIfChanged()
+          pluginCeilingTurns += lastResultNumTurns
           bridgeHandle?.sendResult()
 
           if (feature('FILE_PERSISTENCE') && turnStartTime !== undefined) {
@@ -5993,6 +6228,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               }))
             }
             if (abortController) {
+              markSessionStoppedForPluginInput()
               abortController.abort()
             }
             suggestionState.abortController?.abort()
@@ -6005,6 +6241,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               `[print.ts] end_session received, reason=${req.reason ?? 'unspecified'}`,
             )
             if (abortController) {
+              markSessionStoppedForPluginInput()
               abortController.abort()
             }
             suggestionState.abortController?.abort()
@@ -6120,25 +6357,34 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               mcpServers: buildMcpServerStatuses(),
             })
           } else if (msg.request.subtype === 'get_context_usage') {
-            try {
-              const appState = getAppState()
-              const data = await collectContextData({
-                messages: mutableMessages,
-                getAppState,
-                options: {
-                  mainLoopModel: getMainLoopModel(),
-                  tools: buildAllTools(appState),
-                  agentDefinitions: appState.agentDefinitions,
-                  customSystemPrompt: resolvePrintSystemPrompt(
-                    options.systemPrompt,
-                  ),
-                  appendSystemPrompt: options.appendSystemPrompt,
-                },
-              })
-              sendControlResponseSuccess(msg, { ...data })
-            } catch (error) {
-              sendControlResponseError(msg, errorMessage(error))
+            const contextUsageMsg = msg
+            const runContextUsage = async (): Promise<void> => {
+              try {
+                const appState = getAppState()
+                const data = await collectContextData({
+                  messages: mutableMessages,
+                  getAppState,
+                  options: {
+                    mainLoopModel: getMainLoopModel(),
+                    tools: buildAllTools(appState),
+                    agentDefinitions: appState.agentDefinitions,
+                    customSystemPrompt: resolvePrintSystemPrompt(
+                      options.systemPrompt,
+                    ),
+                    appendSystemPrompt: options.appendSystemPrompt,
+                  },
+                })
+                sendControlResponseSuccess(contextUsageMsg, { ...data })
+              } catch (error) {
+                sendControlResponseError(contextUsageMsg, errorMessage(error))
+              }
             }
+            // Serialize get_context_usage requests with each other without
+            // blocking set_model, messages, or interrupts in the control loop.
+            pendingContextUsagePromise = pendingContextUsagePromise.then(
+              runContextUsage,
+              runContextUsage,
+            )
           } else if (msg.request.subtype === 'mcp_message') {
             // Handle MCP notifications from SDK servers
             const mcpRequest = msg.request as Record<string, unknown>
@@ -7707,6 +7953,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                       structuredIO.injectControlResponse(response)
                     },
                     onInterrupt() {
+                      markSessionStoppedForPluginInput()
                       abortController?.abort()
                     },
                     onSetModel(model) {
@@ -8970,6 +9217,8 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
       unsubscribeAuthStatus?.()
       statusListeners.delete(rateLimitListener)
       controlPlane.dispose()
+      setBackgroundCeilingProvider(undefined)
+      setSpawnedTurnTakenCallback(undefined)
       output.done()
     }
   })()

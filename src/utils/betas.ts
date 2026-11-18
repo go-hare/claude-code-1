@@ -335,8 +335,21 @@ export function shouldIncludeFirstPartyOnlyBetas(): boolean {
 export function shouldUseGlobalCacheScope(): boolean {
   return (
     getAPIProvider() === 'firstParty' &&
+    isFirstPartyAnthropicBaseUrl() &&
     !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS)
   )
+}
+
+/**
+ * Official nee() (2.1.307 #1077) — prompt-caching-scope beta header is only
+ * sent on firstParty or anthropicAws with a genuine first-party Anthropic
+ * base URL (excluded behind custom ANTHROPIC_BASE_URL gateways and Foundry).
+ */
+export function shouldUsePromptCachingScopeBeta(): boolean {
+  if (!shouldIncludeFirstPartyOnlyBetas()) return false
+  if (!isFirstPartyAnthropicBaseUrl()) return false
+  const provider = getAPIProvider()
+  return provider === 'firstParty' || provider === 'anthropicAws'
 }
 
 export const getAllModelBetas = memoize((model: string): string[] => {
@@ -455,8 +468,8 @@ export const getAllModelBetas = memoize((model: string): string[] => {
     betaHeaders.push(MID_CONVERSATION_SYSTEM_BETA_HEADER)
   }
 
-  // Always send the beta header for 1P. The header is a no-op without a scope field.
-  if (includeFirstPartyOnlyBetas) {
+  // Always send the beta header for 1P/anthropicAws with first-party base URL.
+  if (shouldUsePromptCachingScopeBeta()) {
     betaHeaders.push(PROMPT_CACHING_SCOPE_BETA_HEADER)
   }
 

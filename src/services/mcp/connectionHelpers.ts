@@ -81,14 +81,66 @@ export class McpAuthError extends Error {
   }
 }
 
+export type McpSessionExpiryKind =
+  | 'session_expired_404'
+  | 'connection_closed_call_refused'
+  | 'connection_closed_call_not_run'
+  | 'connection_closed_http'
+
 /**
  * Thrown when an MCP session has expired and the connection cache has been cleared.
- * The caller should get a fresh client via ensureConnectedClient and retry.
+ * The caller should get a fresh client via ensureConnectedClient and retry
+ * (gated by `mayHaveRun` / `readOnlyHint` / `idempotentHint`).
  */
 export class McpSessionExpiredError extends Error {
-  constructor(serverName: string) {
+  readonly expiryKind: McpSessionExpiryKind
+
+  constructor(
+    serverName: string,
+    expiryKind: McpSessionExpiryKind = 'session_expired_404',
+  ) {
     super(`MCP server "${serverName}" session expired`)
     this.name = 'McpSessionExpiredError'
+    this.expiryKind = expiryKind
+  }
+
+  get mayHaveRun(): boolean {
+    switch (this.expiryKind) {
+      case 'session_expired_404':
+      case 'connection_closed_call_refused':
+      case 'connection_closed_call_not_run':
+        return false
+      case 'connection_closed_http':
+      default:
+        return true
+    }
+  }
+}
+
+/**
+ * 2.1.307 #1078 (SEA zlt): Thrown when the credential store (e.g. locked macOS
+ * login keychain) cannot be read, so the client does not report stored
+ * credentials as absent / overwrite needs-auth state.
+ */
+export class McpCredentialStoreUnavailableError extends TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS {
+  readonly code = 'CREDENTIAL_STORE_UNAVAILABLE' as const
+
+  constructor(
+    serverName: string,
+    reason: 'unreadable' | 'read-too-late' = 'unreadable',
+  ) {
+    if (reason === 'unreadable') {
+      super(
+        `Couldn't read the stored credentials for MCP server "${serverName}", so the request didn't run. ${process.platform === 'darwin' ? "If your Mac's keychain is locked, unlock it, then try again." : 'Try again.'}`,
+        'MCP credential store could not be read',
+      )
+    } else {
+      super(
+        `A request to MCP server "${serverName}" was sent without your stored credentials, so the server rejected it. The credentials are available now. Try again.`,
+        'MCP credentials were read only after a request went out without them',
+      )
+    }
+    this.name = 'McpCredentialStoreUnavailableError'
   }
 }
 

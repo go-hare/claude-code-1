@@ -2,6 +2,7 @@ import { Server } from '@modelcontextprotocol/server'
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
 import { listToolsResult } from 'src/services/mcp/listToolsResult.js'
 import type { CallToolResult } from 'src/services/mcp/types.js'
+import { disableForkSubagent } from 'src/utils/sessionBackgroundGates.js'
 import { getDefaultAppState } from 'src/state/AppStateStore.js'
 import review from '../commands/review.js'
 import type { Command } from '../commands.js'
@@ -106,6 +107,8 @@ export async function startMCPServer(
   )
   const toolState = new ToolStateSlots()
   setCwd(cwd)
+  // Official 2.1.302 #924: `claude mcp serve` never offers fork subagents.
+  disableForkSubagent()
   const server = new Server(
     {
       name: 'claude/tengu',

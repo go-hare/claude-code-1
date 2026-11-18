@@ -98,13 +98,6 @@ export function renderToolUseMessage(
   // maps TAB→⇥ and other approval-hiding units→�.
   const displayCommand = replaceHiddenControlChars(command);
 
-  // Render sed in-place edits like file edits (show file path only)
-  // Use raw command for parser (TAB-as-space semantics), display path as-is.
-  const sedInfo = parseSedEditCommand(command);
-  if (sedInfo) {
-    return verbose ? sedInfo.filePath : getDisplayPath(sedInfo.filePath);
-  }
-
   if (!verbose) {
     const lines = displayCommand.split('\n');
 

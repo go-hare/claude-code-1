@@ -34,6 +34,9 @@ Output: \`{ id, url, expiresAt }\`.
 - \`delete\` — permanent delete (confirm pin + schema gate)
 - \`room_send\` — live room broadcast (host often unbound)
 
+## Multi-view hash routing
+Only a plain \`#name\` passes between the artifact's link and \`location.hash\`, never \`#/path\`, \`#key=value\`, a \`pushState\` path or a query string. The address bar on the artifact's own page and Share's Copy link follow the page's hash; beside a chat, in a project or in an app the bar may not. Only where a page has several views worth bookmarking or sending, route on the hash: name each in ASCII letters, digits and hyphens (never \`settings\`, \`sidebar\`, \`customize\`, \`upgrade\`, \`downloads\` or \`comment-*\`, which claude.ai reserves) and show the one in \`location.hash\`, or the start view if none, on load and on \`hashchange\`. Keep other state in the page, and keys, tokens or private values out of the hash: it shows in history and copied links.
+
 ## CDN library pinning
 Pin every library URL to an exact version (\`react@18.3.1\` on jsDelivr or unpkg, \`react/18.3.1/…\` on cdnjs, \`cdn.tailwindcss.com/3.4.17\`), never a bare name, a range or a tag (\`react\`, \`react@18\`, \`@latest\`). Choose a version at least two weeks old. Any version you knew before this conversation is old enough; if you look versions up, skip any published in the last two weeks.
 

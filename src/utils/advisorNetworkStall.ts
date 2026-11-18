@@ -19,8 +19,35 @@
  * Byte idle clock lives on Response._chunkTimes.lastAt (s8h pull stamps).
  */
 
-/** densable Avs — poll interval for stalled UI. */
+import {
+  getAPIProvider,
+  isFirstPartyAnthropicBaseUrl,
+} from './model/providers.js'
+
+/** densable Avs / $qn — poll interval for stalled UI on direct Anthropic/AWS backends. */
 export const ADVISOR_STALL_POLL_MS = 20_000
+
+/** Official los (2.1.309 #1155) — poll interval off Anthropic's backend (45s). */
+export const ADVISOR_STALL_POLL_OFF_BACKEND_MS = 45_000
+
+/**
+ * Official dos() (2.1.309 #1155) — routes off Anthropic's backend wait 45s
+ * before showing "Waiting for API response" so keepalive-only gateways don't flicker.
+ */
+export function getAdvisorStallPollMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  try {
+    const provider = getAPIProvider()
+    const isDirect =
+      provider === 'anthropicAws'
+        ? env.ANTHROPIC_AWS_BASE_URL === undefined
+        : provider === 'firstParty' && isFirstPartyAnthropicBaseUrl(env)
+    return isDirect ? ADVISOR_STALL_POLL_MS : ADVISOR_STALL_POLL_OFF_BACKEND_MS
+  } catch {
+    return ADVISOR_STALL_POLL_MS
+  }
+}
 
 /** densable gSy — max advisor grace while waiting for body bytes. */
 export const ADVISOR_STALL_GRACE_CAP_MS = 90_000

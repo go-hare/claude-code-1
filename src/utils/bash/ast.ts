@@ -53,7 +53,13 @@ export type ParseForSecurityOptions = {
 }
 
 export type ParseForSecurityResult =
-  | { kind: 'simple'; commands: SimpleCommand[]; bareAssignmentNames: string[] }
+  | {
+      kind: 'simple'
+      commands: SimpleCommand[]
+      bareAssignmentNames: string[]
+      uncertainWrite?: boolean
+      usesAssignedValue?: boolean
+    }
   | {
       kind: 'too-complex'
       reason: string
@@ -597,6 +603,9 @@ export function parseForSecurityFromAst(
   }
 }
 
+let activeUncertainWrite = false
+let activeUsesAssignedValue = false
+
 function walkProgram(root: Node): ParseForSecurityResult {
   // ERROR-node check folded into collectCommands — any unhandled node type
   // (including ERROR) falls through to tooComplex() in the default branch.
@@ -614,9 +623,24 @@ function walkProgram(root: Node): ParseForSecurityResult {
   // `NOW=$(date) && jq --arg now "$NOW" ...` — $NOW is known to be the
   // $(date) output (already extracted as inner command).
   const varScope = new Map<string, string>()
-  const err = collectCommands(root, commands, varScope, bareAssignmentNames)
-  if (err) return err
-  return { kind: 'simple', commands, bareAssignmentNames }
+  const prevUncertain = activeUncertainWrite
+  const prevAssigned = activeUsesAssignedValue
+  activeUncertainWrite = false
+  activeUsesAssignedValue = false
+  try {
+    const err = collectCommands(root, commands, varScope, bareAssignmentNames)
+    if (err) return err
+    return {
+      kind: 'simple',
+      commands,
+      bareAssignmentNames,
+      ...(activeUncertainWrite ? { uncertainWrite: true } : {}),
+      ...(activeUsesAssignedValue ? { usesAssignedValue: true } : {}),
+    }
+  } finally {
+    activeUncertainWrite = prevUncertain
+    activeUsesAssignedValue = prevAssigned
+  }
 }
 
 /**
@@ -1764,6 +1788,7 @@ function walkRedirectedStatement(
   // - else (command, negation, declaration, unset, test): snapshot PRE-body
   //   then walk body (redirects do not see body-side assignments).
   let redirectScope: Map<string, string>
+  let hasConditionalScope = false
   if (body.type === 'list') {
     const kids = body.children
     if (kids.length === 3 && kids[0] && kids[1]?.type === '&&' && kids[2]) {
@@ -1775,6 +1800,7 @@ function walkRedirectedStatement(
       )
       if (errA) return errA
       redirectScope = new Map(varScope)
+      hasConditionalScope = true
       const errB = collectCommands(
         kids[2],
         commands,
@@ -1793,8 +1819,26 @@ function walkRedirectedStatement(
     redirectScope = varScope
   } else {
     redirectScope = new Map(varScope)
+    hasConditionalScope = true
     const err = collectCommands(body, commands, varScope, bareAssignmentNames)
     if (err) return err
+  }
+  if (hasConditionalScope) {
+    // SEA #1122 (`Xt` @284494995): if the redirect fails to open, assignments
+    // inside `body` never executed. Mark any variable whose value changed
+    // relative to the pre-body snapshot as uncertain.
+    for (const [k, v] of varScope) {
+      if (redirectScope.get(k) !== v) {
+        activeUncertainWrite = true
+        varScope.set(k, VAR_PLACEHOLDER)
+      }
+    }
+    for (const k of redirectScope.keys()) {
+      if (!varScope.has(k)) {
+        activeUncertainWrite = true
+        varScope.set(k, VAR_PLACEHOLDER)
+      }
+    }
   }
 
   const redirects: Redirect[] = []
@@ -2260,6 +2304,14 @@ function walkCommand(
   const argv: string[] = []
   const envVars: { name: string; value: string }[] = []
   const redirects: Redirect[] = [...extraRedirects]
+  const redirectScope = node.children.some(
+    c =>
+      c?.type === 'file_redirect' ||
+      c?.type === 'heredoc_redirect' ||
+      c?.type === 'herestring_redirect',
+  )
+    ? new Map(varScope)
+    : null
 
   for (const child of node.children) {
     if (!child) continue
@@ -2406,6 +2458,38 @@ function walkCommand(
   // declare-like argv forms / mapfile / etc. into the thr `n` list.
   const ypg = densableYPg(argv, envVars, varScope, bareAssignmentNames)
   if (ypg) return ypg
+  if (redirectScope !== null) {
+    // SEA #1122 (`Xt` in `walkCommand` @284516800): a redirected command (e.g.
+    // `X=/tmp/foo > /tmp/out`) may fail to open the redirect, leaving writes
+    // unexecuted. Mark uncertainWrite and preserve static literal values for
+    // newly-assigned env-only commands so subsequent `"$X"` reads can still
+    // resolve while flagging `usesAssignedValue` + `uncertainWrite`.
+    const envLiteralByName =
+      argv.length === 0
+        ? new Map(envVars.map(e => [e.name, e.value]))
+        : undefined
+    for (const [k, v] of varScope) {
+      if (redirectScope.get(k) !== v) {
+        activeUncertainWrite = true
+        const literal =
+          !redirectScope.has(k) && envLiteralByName !== undefined
+            ? envLiteralByName.get(k)
+            : undefined
+        varScope.set(
+          k,
+          literal !== undefined && !containsAnyPlaceholder(literal)
+            ? literal
+            : VAR_PLACEHOLDER,
+        )
+      }
+    }
+    for (const k of redirectScope.keys()) {
+      if (!varScope.has(k)) {
+        activeUncertainWrite = true
+        varScope.set(k, VAR_PLACEHOLDER)
+      }
+    }
+  }
   return {
     kind: 'simple',
     commands: [{ argv, envVars, redirects, text }],
@@ -3607,27 +3691,16 @@ function resolveSimpleExpansion(
       // Non-literal: bare → reject, inside string → VAR_PLACEHOLDER
       // (walkString's solo-placeholder gate rejects `"$VAR"` alone).
       if (!insideString) return tooComplex(node)
+      if (trackedValue !== VAR_PLACEHOLDER) {
+        activeUsesAssignedValue = true
+      }
       return VAR_PLACEHOLDER
     }
-    // Pure literal (e.g. '/tmp', 'foo') — return it directly. Downstream
-    // path validation / checkSemantics operate on the REAL value.
-    //
-    // SECURITY: For BARE args (not inside a string), bash word-splits on
-    // $IFS and glob-expands the result. `VAR="-rf /" && rm $VAR` → bash
-    // runs `rm -rf /` (two args); `VAR="/etc/*" && cat $VAR` → expands to
-    // all files. Reject values containing IFS/glob chars unless in "...".
-    //
-    // SECURITY: Empty value as bare arg. Bash word-splitting on "" produces
-    // ZERO fields — the expansion disappears. `V="" && $V eval x` → bash
-    // runs `eval x` (our argv would be ["","eval","x"] with name="" —
-    // every EVAL_LIKE/ZSH/keyword check misses). `V="" && ls $V /etc` →
-    // bash runs `ls /etc`, our argv has a phantom "" shifting positions.
-    // Inside "...": `"$V"` → bash produces one empty-string arg → our ""
-    // is correct, keep allowing.
     if (!insideString) {
       if (trackedValue === '') return tooComplex(node)
       if (BARE_VAR_UNSAFE_RE.test(trackedValue)) return tooComplex(node)
     }
+    activeUsesAssignedValue = true
     return trackedValue
   }
   // SAFE_ENV_VARS + special vars ($?, $$, $@, $1, etc.): value unknown

@@ -168,17 +168,36 @@ export function addCommandNamesToOwnedSet(
 }
 
 /**
+ * SEA `iG(e)`: true when a prompt command came from the host skill catalog
+ * (`CLAUDE_CODE_HOST_SKILL_CATALOG`), e.g. claude.ai Directory plugins in Cowork.
+ */
+export function isFromHostCatalog(
+  cmd: Pick<Command, 'type'> & { fromHostCatalog?: boolean },
+): boolean {
+  return cmd.type === 'prompt' && cmd.fromHostCatalog === true
+}
+
+/**
+ * SEA `oB(e)`: true when a command is an account-synced skill (not host catalog).
+ */
+export function isAccountSyncedSkill(
+  cmd: Pick<Command, 'type' | 'loadedFrom'> & { fromHostCatalog?: boolean },
+): boolean {
+  return cmd.loadedFrom === 'syncedSkills' && !isFromHostCatalog(cmd)
+}
+
+/**
  * densable ULo — seed ownership set from non-synced commands.
  */
 export function buildOwnedCommandNameSet(
   commands: readonly Pick<
     Command,
-    'name' | 'aliases' | 'userFacingName' | 'loadedFrom'
+    'name' | 'aliases' | 'userFacingName' | 'loadedFrom' | 'type'
   >[],
 ): Set<string> {
   const owned = new Set<string>()
   for (const cmd of commands) {
-    if (cmd.loadedFrom === 'syncedSkills') continue
+    if (isAccountSyncedSkill(cmd)) continue
     addCommandNamesToOwnedSet(owned, cmd)
   }
   return owned
@@ -204,10 +223,13 @@ export function isSyncedSkillNameBlocked(
  * so earlier synced skills own later ones.
  */
 export function filterSyncedSkillsAgainstOwnedNames<
-  T extends Pick<Command, 'name' | 'aliases' | 'userFacingName' | 'loadedFrom'>,
+  T extends Pick<
+    Command,
+    'name' | 'aliases' | 'userFacingName' | 'loadedFrom' | 'type'
+  >,
 >(skills: readonly T[], owned: Set<string>): T[] {
   return skills.filter(cmd => {
-    if (cmd.loadedFrom !== 'syncedSkills') return true
+    if (!isAccountSyncedSkill(cmd)) return true
     if (isSyncedSkillNameBlocked(cmd, owned)) return false
     addCommandNamesToOwnedSet(owned, cmd)
     return true
@@ -219,11 +241,11 @@ export function filterSyncedSkillsAgainstOwnedNames<
  * the list so synced entries cannot shadow local/plugin/MCP/builtins.
  */
 export function applySyncedSkillShadowFilter(commands: Command[]): Command[] {
-  if (!commands.some(c => c.loadedFrom === 'syncedSkills')) {
+  if (!commands.some(c => isAccountSyncedSkill(c))) {
     return commands
   }
-  const nonSynced = commands.filter(c => c.loadedFrom !== 'syncedSkills')
-  const synced = commands.filter(c => c.loadedFrom === 'syncedSkills')
+  const nonSynced = commands.filter(c => !isAccountSyncedSkill(c))
+  const synced = commands.filter(c => isAccountSyncedSkill(c))
   const owned = buildOwnedCommandNameSet(nonSynced)
   const keptSynced = filterSyncedSkillsAgainstOwnedNames(synced, owned)
   // Preserve original relative order: non-synced first (as densable d=...), then kept synced
@@ -232,7 +254,7 @@ export function applySyncedSkillShadowFilter(commands: Command[]): Command[] {
   const keptSet = new Set(keptSynced)
   const out: Command[] = []
   for (const c of commands) {
-    if (c.loadedFrom !== 'syncedSkills') {
+    if (!isAccountSyncedSkill(c)) {
       out.push(c)
     } else if (keptSet.has(c)) {
       out.push(c)

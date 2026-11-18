@@ -9,6 +9,9 @@
  */
 import type { LocalCommandCall } from '../../types/command.js'
 import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
+import { logEvent } from '../../services/analytics/index.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import { checkHasTrustDialogAccepted } from '../../utils/config.js'
 import {
   checkOverageGate,
   isUltrareviewOverageConfirmed,
@@ -17,6 +20,85 @@ import {
   parseUltrareviewArgs,
   ultrareviewLaunchAcknowledgementNudge,
 } from './reviewRemote.js'
+
+// ---------------------------------------------------------------------------
+// #1170: claude ultrareview --trust-workspace (official ZIr / Oe)
+// ---------------------------------------------------------------------------
+
+export function shouldRunUltrareviewTrustCheck(): boolean {
+  const disabled = process.env.CLAUDE_CODE_DISABLE_ULTRAREVIEW_TRUST_CHECK
+  if (!disabled) {
+    if (getFeatureValue_CACHED_MAY_BE_STALE('tengu_twinkly_breeze', false)) {
+      return true
+    }
+  }
+  logEvent('cli_ultrareview_workspace_trust', {
+    reason: disabled ? 'check_switched_off_by_env' : 'check_switched_off',
+  })
+  return false
+}
+
+export function validateTrustWorkspaceFlag(
+  argv: readonly string[],
+  trustWorkspace: boolean | undefined,
+  jsonMode = false,
+): string | null {
+  const trailing = argv.find(
+    (arg, idx) => argv[idx - 1] === '--trust-workspace' && !/^-./.test(arg),
+  )
+  if (trustWorkspace === true && trailing !== undefined) {
+    logEvent('cli_ultrareview', { reason: 'trust_flag_given_a_value' })
+    const hint = jsonMode
+      ? ''
+      : ' To trust it for this run, put nothing after the flag: a PR number or base branch goes before it.'
+    return `Ultrareview did not start: \`--trust-workspace\` takes no value, but ${JSON.stringify(trailing)} follows it. If you do not trust this folder, leave the flag out.${hint}`
+  }
+  return null
+}
+
+export function checkUltrareviewWorkspaceTrust(opts: {
+  trustWorkspace?: boolean
+  argv?: readonly string[]
+  isTrusted?: () => boolean
+  canPrompt?: boolean
+  jsonMode?: boolean
+}): { trusted: true } | { trusted: false; reason: string; message: string } {
+  const flagError = validateTrustWorkspaceFlag(
+    opts.argv ?? [],
+    opts.trustWorkspace,
+    opts.jsonMode ?? false,
+  )
+  if (flagError !== null) {
+    return {
+      trusted: false,
+      reason: 'trust_flag_given_a_value',
+      message: flagError,
+    }
+  }
+  const isTrusted = opts.isTrusted ?? checkHasTrustDialogAccepted
+  if (isTrusted()) {
+    return { trusted: true }
+  }
+  if (opts.trustWorkspace === true) {
+    logEvent('cli_ultrareview_workspace_trust', { trust_source: 'flag' })
+    return { trusted: true }
+  }
+  const canPrompt = opts.canPrompt ?? false
+  if (canPrompt || shouldRunUltrareviewTrustCheck()) {
+    if (!canPrompt) {
+      const remedy = opts.jsonMode
+        ? ''
+        : ' Or, in a script or CI job, pass `--trust-workspace` to trust the folder for this run only.'
+      const message =
+        'Ultrareview runs git in this folder to collect your changes: ' +
+        "This folder's git settings can make git run other programs. Trusting the folder also applies to Claude Code: sessions started here can read, edit, and execute files, and this folder's project settings (hooks, MCP servers, permission rules, helper commands) apply to them." +
+        remedy
+      logEvent('cli_ultrareview', { reason: 'workspace_not_trusted' })
+      return { trusted: false, reason: 'workspace_not_trusted', message }
+    }
+  }
+  return { trusted: true }
+}
 
 function contentBlocksToString(
   blocks: Array<{ type: string; text?: string }>,

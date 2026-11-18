@@ -196,7 +196,7 @@ export function setUltracodeEffort(
 
   const envOverride = getEffortEnvOverride();
   const effectiveEnv = envOverride === null ? undefined : envOverride;
-  const stayed = effectiveEnv ?? currentEffort ?? getDisplayedEffortLevel(model, currentEffort);
+  const stayed = effectiveEnv ?? currentEffort ?? resolveAppliedEffort(model, currentEffort) ?? 'auto';
 
   return {
     message: `Ultracode on (this session only): ${ULTRACODE_DESCRIPTION}. Effort stays ${stayed}.`,
@@ -211,7 +211,8 @@ export function clearUltracodeFlag(currentEffort: EffortValue | undefined, model
   });
   const envOverride = getEffortEnvOverride();
   const effectiveEnv = envOverride === null ? undefined : envOverride;
-  const stayed = effectiveEnv ?? currentEffort ?? (model ? getDisplayedEffortLevel(model, currentEffort) : 'auto');
+  const stayed =
+    effectiveEnv ?? currentEffort ?? (model ? (resolveAppliedEffort(model, currentEffort) ?? 'auto') : 'auto');
   return {
     message: `Ultracode off. Effort stays ${stayed}.`,
     effortUpdate: { ultracode: false },
@@ -228,11 +229,12 @@ export function showCurrentEffort(
   const envOverride = getEffortEnvOverride();
   const effectiveValue = envOverride === null ? undefined : (envOverride ?? appStateEffort);
   if (effectiveValue === undefined) {
-    const level = getDisplayedEffortLevel(model, appStateEffort);
+    const level = resolveAppliedEffort(model, appStateEffort);
+    if (level === undefined) {
+      return { message: `Effort level: auto${ultracodeSuffix}` };
+    }
     const orgNote =
-      getOrgDefaultEffort(model) !== null && resolveAppliedEffort(model, appStateEffort) !== undefined
-        ? ', set by your organization'
-        : '';
+      getOrgDefaultEffort(model) !== null && getEffortEnvOverride() !== null ? ', set by your organization' : '';
     return { message: `Effort level: auto (currently ${level}${orgNote})${ultracodeSuffix}` };
   }
   const description = getEffortValueDescription(effectiveValue);

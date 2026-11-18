@@ -8,9 +8,10 @@ import {
 import {
   type EffortLevel,
   type EffortValue,
-  getDisplayedEffortLevel,
+  convertEffortValueToLevel,
   getUltracodeEffortForModel,
   isUltracodeModeActive,
+  resolveAppliedEffort,
   shouldShowEffortUI,
 } from '../utils/effort.js'
 
@@ -25,10 +26,12 @@ export function getEffortNotificationText(
   model: string,
   ultracodeFlag?: boolean,
 ): string | undefined {
-  // densable y8: show whenever the model (or an explicit session/env override)
-  // has a displayed effort — idle first paint, not only after a panel.
   if (!shouldShowEffortUI(model, effortValue)) return undefined
-  const level = getDisplayedEffortLevel(model, effortValue)
+  // Official 2.1.304 (#990): do not guess a level when CLAUDE_CODE_EFFORT_LEVEL=auto|unset
+  // and no effort level is sent (resolveAppliedEffort returns undefined).
+  const applied = resolveAppliedEffort(model, effortValue)
+  if (applied === undefined) return undefined
+  const level = convertEffortValueToLevel(applied)
   if (isUltracodeModeActive(model, effortValue, ultracodeFlag)) {
     const wire = getUltracodeEffortForModel(model) ?? level
     // densable uses the effort symbol for the wire tier (vHr), not a separate ultra glyph.

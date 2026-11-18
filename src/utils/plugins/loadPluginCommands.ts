@@ -123,7 +123,6 @@ async function collectMarkdownFiles(
   await walkPluginMarkdown(
     dirPath,
     async fullPath => {
-      if (isDuplicatePath(fs, fullPath, loadedPaths)) return
       const content = await fs.readFile(fullPath, { encoding: 'utf-8' })
       const {
         frontmatter,
@@ -140,7 +139,7 @@ async function collectMarkdownFiles(
         content: markdownContent,
       })
     },
-    { stopAtSkillDir: true, logLabel: 'commands' },
+    { stopAtSkillDir: true, logLabel: 'commands', loadedPaths },
   )
 
   return files

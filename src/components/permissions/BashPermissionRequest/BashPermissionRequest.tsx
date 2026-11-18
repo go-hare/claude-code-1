@@ -12,7 +12,6 @@ import {
   getSimpleCommandPrefix,
 } from '@claude-code/builtin-tools/tools/BashTool/bashPermissions.js';
 import { getDestructiveCommandWarning } from '@claude-code/builtin-tools/tools/BashTool/destructiveCommandWarning.js';
-import { parseSedEditCommand } from '@claude-code/builtin-tools/tools/BashTool/sedEditParser.js';
 import { shouldUseSandbox } from '@claude-code/builtin-tools/tools/BashTool/shouldUseSandbox.js';
 import { getCompoundCommandPrefixesStatic } from '../../../utils/bash/prefix.js';
 import { extractRules } from '../../../utils/permissions/PermissionUpdate.js';
@@ -25,7 +24,6 @@ import { PermissionOverflowBox } from '../PermissionOverflowBox.js';
 import { PermissionPreviewGutter } from '../PermissionPreviewGutter.js';
 import type { PermissionRequestProps } from '../PermissionRequest.js';
 import { PermissionRuleExplanation } from '../PermissionRuleExplanation.js';
-import { SedEditPermissionRequest } from '../SedEditPermissionRequest/SedEditPermissionRequest.js';
 import { useShellPermissionFeedback } from '../useShellPermissionFeedback.js';
 import { logUnaryPermissionEvent } from '../utils.js';
 import { isBashAlwaysAllowVetoed, isBashCommandWithheld } from '../../../dialog/permissionBash.js';
@@ -49,25 +47,8 @@ export function BashPermissionRequest(props: PermissionRequestProps): React.Reac
 
   const { command, description } = BashTool.inputSchema.parse(toolUseConfirm.input);
 
-  // Detect sed in-place edit commands and delegate to SedEditPermissionRequest
-  // This renders sed edits like file edits with a diff view
-  const sedInfo = parseSedEditCommand(command);
-
-  if (sedInfo) {
-    return (
-      <SedEditPermissionRequest
-        toolUseConfirm={toolUseConfirm}
-        toolUseContext={toolUseContext}
-        onDone={onDone}
-        onReject={onReject}
-        verbose={verbose}
-        workerBadge={workerBadge}
-        sedInfo={sedInfo}
-      />
-    );
-  }
-
-  // Regular bash command - render with hooks
+  // Official 2.1.309 (#1169): sed -i gets the standard Bash prompt and runs as
+  // written, not a simulated file-edit preview.
   return (
     <BashPermissionRequestInner
       toolUseConfirm={toolUseConfirm}

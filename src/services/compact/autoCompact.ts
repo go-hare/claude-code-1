@@ -52,14 +52,7 @@ export function getEffectiveContextWindowSize(model: string): number {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('../../utils/autoCompactWindow.js') as typeof import('../../utils/autoCompactWindow.js')
     const resolved = resolveAutoCompactWindow(model)
-    if (
-      resolved.source === 'env' ||
-      resolved.source === 'settings' ||
-      resolved.source === 'model-default' ||
-      resolved.source === 'unknown-model'
-    ) {
-      contextWindow = Math.min(contextWindow, resolved.window)
-    }
+    contextWindow = Math.min(contextWindow, resolved.window)
   } catch {
     try {
       const { resolveAutoCompactWindowOverride } =
@@ -213,7 +206,12 @@ export function calculateTokenWarningState(
   const isAboveAutoCompactThreshold =
     isAutoCompactEnabled() && tokenUsage >= autoCompactThreshold
 
-  const actualContextWindow = getEffectiveContextWindowSize(model)
+  const reservedTokensForSummary = Math.min(
+    getMaxOutputTokensForModel(model),
+    MAX_OUTPUT_TOKENS_FOR_SUMMARY,
+  )
+  const actualContextWindow =
+    getContextWindowForModel(model, getSdkBetas()) - reservedTokensForSummary
   const defaultBlockingLimit =
     actualContextWindow - MANUAL_COMPACT_BUFFER_TOKENS
 
@@ -401,12 +399,10 @@ export async function shouldAutoCompact(
     `autocompact: tokens=${tokenCount} threshold=${threshold} effectiveWindow=${effectiveWindow}${snipTokensFreed > 0 ? ` snipFreed=${snipTokensFreed}` : ''}`,
   )
 
-  const { isAboveAutoCompactThreshold } = calculateTokenWarningState(
-    tokenCount,
-    model,
-  )
+  const { isAboveAutoCompactThreshold, isAtBlockingLimit } =
+    calculateTokenWarningState(tokenCount, model)
 
-  return isAboveAutoCompactThreshold
+  return isAboveAutoCompactThreshold || isAtBlockingLimit
 }
 
 /**
@@ -538,6 +534,7 @@ export async function autoCompactIfNeeded(
     messages,
     toolUseContext.agentId,
     recompactionInfo.autoCompactThreshold,
+    toolUseContext.getAppState(),
   )
   if (sessionMemoryResult) {
     // Reset lastSummarizedMessageId since session memory compaction prunes messages

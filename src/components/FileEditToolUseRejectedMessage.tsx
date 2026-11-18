@@ -1,8 +1,7 @@
 import type { StructuredPatchHunk } from 'diff';
-import { relative } from 'path';
 import * as React from 'react';
 import { useTerminalSize } from 'src/hooks/useTerminalSize.js';
-import { getCwd } from 'src/utils/cwd.js';
+import { getDisplayPath } from 'src/utils/file.js';
 import { Box, Text } from '@anthropic/ink';
 import { HighlightedCode } from './HighlightedCode.js';
 import { MessageResponse } from './MessageResponse.js';
@@ -38,7 +37,7 @@ export function FileEditToolUseRejectedMessage({
     <Box flexDirection="row">
       <Text color="subtle">User rejected {operation} to </Text>
       <Text bold color="subtle">
-        {verbose ? file_path : relative(getCwd(), file_path)}
+        {verbose ? file_path : getDisplayPath(file_path)}
       </Text>
     </Box>
   );

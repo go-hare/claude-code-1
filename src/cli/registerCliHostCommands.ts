@@ -590,6 +590,23 @@ export function registerCliHostCommands(
       },
     )
 
+  pluginCmd
+    .command('details <name>')
+    .description("Show a plugin's component inventory and projected token cost")
+    .option('--json', 'Output as JSON')
+    .addOption(coworkOption())
+    .action(
+      async (
+        name: string,
+        commandOptions: { json?: boolean; cowork?: boolean },
+      ) => {
+        const { pluginDetailsHandler } = await import(
+          '../cli/handlers/plugins.js'
+        )
+        await pluginDetailsHandler(name, commandOptions)
+      },
+    )
+
   const marketplaceCmd = pluginCmd
     .command('marketplace')
     .description(describe(['plugin', 'marketplace']))

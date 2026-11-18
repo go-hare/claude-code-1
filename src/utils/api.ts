@@ -47,12 +47,14 @@ import {
 } from './betas.js'
 import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
-import { isEnvTruthy } from './envUtils.js'
+import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 import { remoteHostSchemaProperty } from '../services/tools/remoteToolHost.js'
 import { createUserMessage } from './messages.js'
+import { getModelEagerInputStreamingSupport } from './model/modelCatalogCapabilities.js'
 import {
   getAPIProvider,
   isFirstPartyAnthropicBaseUrl,
+  isGenuineBedrockEndpoint,
 } from './model/providers.js'
 import {
   getFileReadIgnorePatterns,
@@ -292,6 +294,15 @@ export async function toolToAPISchema(
     // Gated to direct api.anthropic.com: proxies (LiteLLM etc.) and Bedrock/Vertex
     // with Claude 4.5 reject this field with 400. See GH#32742, PR #21729.
     // Official ENABLE_FINE_GRAINED_TOOL_STREAMING densable.
+    // Official _bn(provider, eagerSupport) (2.1.309 #1154):
+    // - explicit falsy env disables
+    // - firstParty + firstPartyBaseUrl + tengu_fgts
+    // - vertex + !ANTHROPIC_VERTEX_BASE_URL + model.eager_input_streaming.vertex
+    // - bedrock + isGenuineBedrockEndpoint() + model.eager_input_streaming.bedrock
+    // - explicit truthy env enables
+    const fgtsExplicitOff = isEnvDefinedFalsy(
+      process.env.CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING,
+    )
     let fineGrainedToolStreaming = isEnvTruthy(
       process.env.CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING,
     )
@@ -303,10 +314,19 @@ export async function toolToAPISchema(
     } catch {
       // keep raw env fallback
     }
+    const provider = getAPIProvider()
+    const eagerSupport = getModelEagerInputStreamingSupport(options.model)
     if (
-      getAPIProvider() === 'firstParty' &&
-      isFirstPartyAnthropicBaseUrl() &&
-      (getFeatureValue_CACHED_MAY_BE_STALE('tengu_fgts', false) ||
+      !fgtsExplicitOff &&
+      ((provider === 'firstParty' &&
+        isFirstPartyAnthropicBaseUrl() &&
+        getFeatureValue_CACHED_MAY_BE_STALE('tengu_fgts', false)) ||
+        (provider === 'vertex' &&
+          !process.env.ANTHROPIC_VERTEX_BASE_URL &&
+          eagerSupport?.vertex) ||
+        (provider === 'bedrock' &&
+          isGenuineBedrockEndpoint() &&
+          eagerSupport?.bedrock) ||
         fineGrainedToolStreaming)
     ) {
       base.eager_input_streaming = true

@@ -8,6 +8,8 @@ import { logForDebugging } from '../utils/debug.js'
 import { errorMessage, isAbortError } from '../utils/errors.js'
 import { getMainThreadTurn } from '../utils/mainThreadTurn.js'
 import { createAssistantMessage } from '../utils/messages.js'
+import { parseUserSpecifiedModel } from '../utils/model/model.js'
+import { isModelAllowed } from '../utils/model/modelAllowlist.js'
 import type { QueryDeps } from './deps.js'
 
 type TurnStepStopReason =
@@ -359,6 +361,22 @@ async function waitTurnStartedForStep(
   }
 }
 
+export function resolveTurnStepModel(
+  requestedModel: string,
+  fallbackModel: string,
+): string {
+  if (requestedModel === fallbackModel) return fallbackModel
+  const resolved = parseUserSpecifiedModel(requestedModel)
+  if (isModelAllowed(requestedModel) && isModelAllowed(resolved)) {
+    return resolved
+  }
+  logForDebugging(
+    `turn.step: model ${requestedModel} is not allowed by policy; the request keeps ${fallbackModel}`,
+    { level: 'warn' },
+  )
+  return fallbackModel
+}
+
 export async function* streamTurnStepWithHooks(params: {
   hooks: typeof import('../utils/plugins/functionHooksModules.js')
   callModel: QueryDeps['callModel']
@@ -409,10 +427,14 @@ export async function* streamTurnStepWithHooks(params: {
   ): AsyncGenerator<TurnStepChunk, TurnStepResult, unknown> {
     state.requests += 1
     state.thrown = undefined
-    const nextModel =
+    const requestedModel =
       typeof event.model === 'string' && event.model.trim() !== ''
         ? event.model
         : callArgs.options.model
+    const nextModel = resolveTurnStepModel(
+      requestedModel,
+      callArgs.options.model,
+    )
     const rawEffort = event.effort
     const hasRewrittenEffort =
       rawEffort !== resolvedEffort &&

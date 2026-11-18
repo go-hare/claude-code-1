@@ -1963,6 +1963,16 @@ export default class Ink {
     if (hasDiff) {
       this.maybeProactiveAtlasReset(optimized);
     }
+    // Official 2.1.305 (#1054): emit iTerm2 inline images (OSC 1337) for placeholder cells.
+    const itermSeq = this.terminalImages.placeIterm(frame.screen, prevFrame.screen, (col, row) => {
+      if (col < 0 || row < 0 || col >= terminalWidth || row >= terminalRows) {
+        return undefined;
+      }
+      return `\x1b[${row + 1};${col + 1}H`;
+    });
+    if (itermSeq !== '') {
+      optimized.push({ type: 'stdout', content: itermSeq });
+    }
     // densable: terminalImages.drain() prepended onto the patch list.
     const imageSeq = this.terminalImages.drain();
     if (imageSeq !== '') {

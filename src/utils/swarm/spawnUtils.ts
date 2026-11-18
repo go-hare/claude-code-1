@@ -39,6 +39,8 @@ export function getTeammateCommand(): string {
 export function buildInheritedCliFlags(options?: {
   planModeRequired?: boolean
   permissionMode?: PermissionMode
+  disallowedTools?: readonly string[]
+  tools?: readonly string[]
 }): string {
   return quote(buildInheritedCliArgParts(options))
 }
@@ -46,9 +48,12 @@ export function buildInheritedCliFlags(options?: {
 export function buildInheritedCliArgParts(options?: {
   planModeRequired?: boolean
   permissionMode?: PermissionMode
+  disallowedTools?: readonly string[]
+  tools?: readonly string[]
 }): string[] {
   const flags: string[] = []
-  const { planModeRequired, permissionMode } = options || {}
+  const { planModeRequired, permissionMode, disallowedTools, tools } =
+    options || {}
 
   // Propagate permission mode to teammates, but NOT if plan mode is required
   // Plan mode takes precedence over bypass permissions for safety
@@ -64,6 +69,14 @@ export function buildInheritedCliArgParts(options?: {
   } else if (permissionMode === 'auto') {
     // Teammates inherit auto mode so the classifier evaluates their tool calls too.
     flags.push('--permission-mode', 'auto')
+  }
+
+  // Official 2.1.309 #1138: forward leader --disallowed-tools and --tools to teammates.
+  for (const rule of disallowedTools ?? []) {
+    flags.push('--disallowed-tools', rule)
+  }
+  for (const tool of tools ?? []) {
+    flags.push('--tools', tool)
   }
 
   // Propagate --model if explicitly set via CLI

@@ -412,6 +412,34 @@ export async function resolveHookPath(
   }
 }
 
+export const DEFAULT_CHECKOUT_HOOK_TIMEOUT_MS = 1_800_000
+
+const CHECKOUT_HOOK_SIGTERM_GRACE_MS = 5_000
+const CHECKOUT_HOOK_ABANDON_SETTLE_MS = 1_000
+const CHECKOUT_HOOK_PIPE_WAIT_MS = 1_000
+
+function formatDurationMs(ms: number): string {
+  if (ms < 1000) return `${ms}ms`
+  if (ms % 60_000 === 0) return `${ms / 60_000}min`
+  return ms % 1000 === 0 ? `${ms / 1000}s` : `${(ms / 1000).toFixed(1)}s`
+}
+
+export class CheckoutHookFailedError extends Error {
+  readonly exitCode: number | null
+  constructor(message: string, exitCode: number | null) {
+    super(message)
+    this.name = 'CheckoutHookFailedError'
+    this.exitCode = exitCode
+  }
+}
+
+export class CheckoutHookTimedOutError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'CheckoutHookTimedOutError'
+  }
+}
+
 export type CheckoutHookOpts = {
   hookPath: string
   sessionId: string
@@ -424,7 +452,11 @@ export type CheckoutHookOpts = {
   cwd: string
   onStatus: (msg: string) => void
   onDebug: (msg: string) => void
+  onStderrLine?: (line: string) => void
   signal?: AbortSignal
+  timeoutMs?: number
+  /** inject for tests */
+  sigtermGraceMs?: number
   /** inject for tests */
   spawnFn?: typeof spawn
   skipGitVerify?: boolean
@@ -451,29 +483,24 @@ export async function runCheckoutHook(opts: CheckoutHookOpts): Promise<void> {
   )
   const stderrTail: string[] = []
   let aborted = false
+  let timedOut = false
+  const sigtermGraceMs = opts.sigtermGraceMs ?? CHECKOUT_HOOK_SIGTERM_GRACE_MS
+  const timeoutMs = opts.timeoutMs
   await new Promise<void>((resolve, reject) => {
     const child = spawnFn(opts.hookPath, [], {
       cwd: opts.cwd,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true,
+      ...(process.platform !== 'win32' ? { detached: true } : undefined),
     })
-    let killTimer: ReturnType<typeof setTimeout> | undefined
-    const onAbort = (): void => {
-      aborted = true
-      opts.onDebug(
-        `[runner:hook:checkout] abort received, sending SIGTERM to pid=${child.pid}`,
-      )
-      child.kill('SIGTERM')
-      killTimer = setTimeout(() => {
-        opts.onDebug(
-          `[runner:hook:checkout] still running after SIGTERM, sending SIGKILL to pid=${child.pid}`,
-        )
-        child.kill('SIGKILL')
-      }, 5_000)
+    let finished = false
+    let stopping = false
+    let sigtermSent = false
+    const timers: Array<ReturnType<typeof setTimeout>> = []
+    const clearAllTimers = (): void => {
+      for (const t of timers.splice(0)) clearTimeout(t)
     }
-    if (opts.signal?.aborted) onAbort()
-    else opts.signal?.addEventListener('abort', onAbort, { once: true })
 
     let stdoutBuf = ''
     let stderrBuf = ''
@@ -483,7 +510,10 @@ export async function runCheckoutHook(opts: CheckoutHookOpts): Promise<void> {
       for (const line of parts) {
         const cleaned = redactLogText(line)
         opts.onDebug(`[runner:hook:checkout] ${cleaned}`)
-        if (keepTail) stderrTail.push(`${cleaned}\n`)
+        if (keepTail) {
+          stderrTail.push(`${cleaned}\n`)
+          opts.onStderrLine?.(cleaned)
+        }
       }
       if (keepTail) {
         let total = stderrTail.reduce((n, s) => n + s.length, 0)
@@ -499,14 +529,19 @@ export async function runCheckoutHook(opts: CheckoutHookOpts): Promise<void> {
     child.stderr?.on('data', (d: Buffer | string) => {
       stderrBuf = onLines(stderrBuf + d.toString(), true)
     })
-    child.on('error', err => {
-      if (killTimer) clearTimeout(killTimer)
+
+    let onAbort = (): void => {}
+
+    const settle = (code: number | null, abandonNote?: string): void => {
+      if (finished) return
+      finished = true
+      clearAllTimers()
       opts.signal?.removeEventListener('abort', onAbort)
-      reject(err)
-    })
-    child.on('close', code => {
-      if (killTimer) clearTimeout(killTimer)
-      opts.signal?.removeEventListener('abort', onAbort)
+      if (abandonNote !== undefined) {
+        opts.onStatus(`[runner:hook:checkout] ${abandonNote}`)
+        child.stdout?.destroy()
+        child.stderr?.destroy()
+      }
       if (stdoutBuf) {
         opts.onDebug(`[runner:hook:checkout] ${redactLogText(stdoutBuf)}`)
       }
@@ -514,16 +549,146 @@ export async function runCheckoutHook(opts: CheckoutHookOpts): Promise<void> {
         const cleaned = redactLogText(stderrBuf)
         opts.onDebug(`[runner:hook:checkout] ${cleaned}`)
         stderrTail.push(cleaned)
+        opts.onStderrLine?.(cleaned)
       }
-      if (aborted) reject(new Error('checkout hook aborted'))
-      else if (code === 0) resolve()
-      else {
+      const tail = stderrTail.join('').slice(-4096)
+      if (timedOut) {
+        if (tail.trim() !== '') {
+          const cleanTail = redactLogText(tail).trimEnd()
+          const snippet =
+            cleanTail.length > 1500 ? `…${cleanTail.slice(-1500)}` : cleanTail
+          opts.onStatus(
+            `[runner:hook:checkout] the hook's last output before the time limit: ${snippet.replace(/\s*[\r\n]+\s*/g, ' | ')}`,
+          )
+        }
         reject(
-          new Error(
-            `checkout hook failed (exit ${code}): ${stderrTail.join('').slice(-4096)}`,
+          new CheckoutHookTimedOutError(
+            `checkout hook timed out after ${formatDurationMs(timeoutMs ?? 0)} (the runner's --checkout-hook-timeout-min limit)`,
+          ),
+        )
+      } else if (aborted) {
+        reject(new Error('checkout hook aborted'))
+      } else if (code === 0) {
+        resolve()
+      } else {
+        reject(
+          new CheckoutHookFailedError(
+            `checkout hook failed (exit ${code}): ${tail}`,
+            code,
           ),
         )
       }
+    }
+
+    const isAlive = (): boolean =>
+      child.exitCode === null && child.signalCode === null
+
+    const killTree = (sig: 'SIGTERM' | 'SIGKILL', reason: string): void => {
+      const pid = child.pid
+      if (pid === undefined || !isAlive()) return
+      let sent = false
+      if (process.platform !== 'win32') {
+        try {
+          process.kill(-pid, sig)
+          sent = true
+        } catch {
+          /* fall back to direct child.kill */
+        }
+      }
+      if (!sent) {
+        try {
+          sent = child.kill(sig)
+        } catch {
+          /* ignore */
+        }
+      }
+      if (sent) sigtermSent = true
+      opts.onDebug(
+        sent
+          ? `[runner:hook:checkout] ${reason}, sending ${sig} to the hook's process tree (pid=${pid})`
+          : `[runner:hook:checkout] ${reason}, but the hook process could no longer be sent ${sig}`,
+      )
+    }
+
+    const abandon = (): void => {
+      if (finished) return
+      const stillAlive = isAlive()
+      if (stillAlive && typeof child.unref === 'function') {
+        child.unref()
+      }
+      settle(
+        child.exitCode,
+        stillAlive
+          ? 'hook process did not exit after SIGTERM and then SIGKILL; abandoning it, and not waiting for its output pipes to close'
+          : `hook exited (status ${child.exitCode ?? child.signalCode}) but a process it started still holds its output pipes; not waiting for them to close`,
+      )
+    }
+
+    const stopHook = (reason: string): void => {
+      if (stopping || finished) return
+      if (!isAlive()) {
+        opts.onStatus(
+          `[runner:hook:checkout] ${reason}, but the hook has already exited and there is nothing left to stop; still waiting for its output pipes to close`,
+        )
+        return
+      }
+      stopping = true
+      killTree('SIGTERM', reason)
+      timers.push(
+        setTimeout(() => {
+          killTree('SIGKILL', 'still running after SIGTERM')
+          timers.push(setTimeout(abandon, CHECKOUT_HOOK_ABANDON_SETTLE_MS))
+        }, sigtermGraceMs),
+      )
+    }
+
+    onAbort = (): void => {
+      aborted = true
+      stopHook('abort received')
+    }
+    if (opts.signal?.aborted) onAbort()
+    else opts.signal?.addEventListener('abort', onAbort, { once: true })
+
+    if (timeoutMs !== undefined && timeoutMs > 0) {
+      timers.push(
+        setTimeout(
+          () => {
+            if (finished || aborted || !isAlive()) return
+            timedOut = true
+            opts.onStatus(
+              `[runner:hook:checkout] timed out after ${formatDurationMs(timeoutMs)} (--checkout-hook-timeout-min) — stopping the hook and failing this session's setup`,
+            )
+            stopHook(`timed out after ${formatDurationMs(timeoutMs)}`)
+          },
+          Math.min(timeoutMs, 2_147_483_647),
+        ),
+      )
+    }
+
+    child.on('error', err => {
+      if (finished) return
+      finished = true
+      clearAllTimers()
+      opts.signal?.removeEventListener('abort', onAbort)
+      reject(err)
+    })
+    child.on('exit', code => {
+      if (finished) return
+      if (sigtermSent) {
+        timers.push(
+          setTimeout(
+            () =>
+              settle(
+                code,
+                `hook exited (status ${code ?? child.signalCode}) but a process it started still holds its output pipes; not waiting for them to close`,
+              ),
+            CHECKOUT_HOOK_PIPE_WAIT_MS,
+          ),
+        )
+      }
+    })
+    child.on('close', code => {
+      settle(code)
     })
   })
 

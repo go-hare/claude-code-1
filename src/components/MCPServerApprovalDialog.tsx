@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js';
+import { LOGIN_HANDOFF_WINDOW_MS, useIsWithinWindow, useRefusedWithin } from '../hooks/useRefuseWithin.js';
 import { formatMcpServerLabel } from '../services/mcp/formatMcpServerLabel.js';
 import { approveSessionMcpServers, rejectSessionMcpServers } from '../services/mcp/mcpSessionApprovedServers.js';
 import { getProjectPathForConfig } from '../utils/config.js';
@@ -23,7 +24,18 @@ type Props = {
 };
 
 export function MCPServerApprovalDialog({ serverName, isPluginServer = false, onDone }: Props): React.ReactNode {
+  const isWithinWindow = useIsWithinWindow(LOGIN_HANDOFF_WINDOW_MS);
+  const { refusedWithin, noteRefused } = useRefusedWithin();
+  const refuseInput = useCallback(() => {
+    if (isWithinWindow() || refusedWithin(LOGIN_HANDOFF_WINDOW_MS)) {
+      noteRefused();
+      return true;
+    }
+    return false;
+  }, [isWithinWindow, refusedWithin, noteRefused]);
+
   function onChange(value: 'yes' | 'yes_all' | 'no') {
+    if (refuseInput()) return;
     logEvent('tengu_mcp_dialog_choice', {
       choice: value as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     });
@@ -90,6 +102,7 @@ export function MCPServerApprovalDialog({ serverName, isPluginServer = false, on
           { label: `Continue without using this MCP server`, value: 'no' },
         ]}
         hideIndexes
+        refuseInput={refuseInput}
         defaultFocusValue="no"
         onChange={value => onChange(value as 'yes_all' | 'yes' | 'no')}
         onCancel={() => onChange('no')}

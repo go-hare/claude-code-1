@@ -90,7 +90,11 @@ import { FILE_READ_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileReadTo
 import { WEB_FETCH_TOOL_NAME } from '@claude-code/builtin-tools/tools/WebFetchTool/prompt.js'
 import { errorMessage } from '../errors.js'
 import { readHostProxyPorts } from '../hostProxyPorts.js'
-import { getClaudeTempDir } from '../permissions/filesystem.js'
+import {
+  getClaudeTempDir,
+  getFlagMcpConfigFilePaths,
+  getProfileStoreDenyPaths,
+} from '../permissions/filesystem.js'
 import type { PermissionRuleValue } from '../permissions/PermissionRule.js'
 import {
   collectUngatedAdditionalDirectories,
@@ -302,6 +306,62 @@ function permissionRuleValueFromString(
 function permissionRuleExtractPrefix(permissionRule: string): string | null {
   const match = permissionRule.match(/^(.+):\*$/)
   return match?.[1] ?? null
+}
+
+const GLOB_META_RE = /[*?[\]{}]/
+
+/**
+ * Official 325 `tk(e)` / `nk(n, e)` (#1119): for macOS Seatbelt `denyWrite`
+ * glob patterns whose folder is reached through a symlink, also emit the
+ * realpath-resolved glob pattern so `@anthropic-ai/sandbox-runtime`
+ * `generateWriteRules` denies writes at the real location.
+ */
+export function expandSymlinkedDenyWriteGlobs(
+  patterns: readonly string[],
+): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  const add = (p: string) => {
+    if (!seen.has(p)) {
+      seen.add(p)
+      out.push(p)
+    }
+  }
+  for (const pattern of patterns) {
+    add(pattern)
+    const idx = pattern.search(GLOB_META_RE)
+    if (idx <= 0) continue
+    const prefix = pattern.slice(0, idx)
+    const suffix = pattern.slice(idx)
+    const lastSep = prefix.lastIndexOf('/')
+    const anchor =
+      lastSep === -1 ? '' : lastSep === 0 ? '/' : prefix.slice(0, lastSep)
+    const restPrefix = lastSep === -1 ? prefix : prefix.slice(lastSep + 1)
+    if (!anchor || anchor === '/' || anchor.startsWith('/dev')) continue
+    const missing: string[] = []
+    let cur = anchor
+    let realAnchor: string | null = null
+    while (true) {
+      try {
+        const real = realpathSync(cur)
+        realAnchor = missing.length === 0 ? real : join(real, ...missing)
+        break
+      } catch {
+        const parent = dirname(cur)
+        if (parent === cur) break
+        missing.unshift(cur.slice(parent === '/' ? 1 : parent.length + 1))
+        cur = parent
+      }
+    }
+    if (
+      realAnchor !== null &&
+      realAnchor !== anchor &&
+      !realAnchor.startsWith('/dev')
+    ) {
+      add(`${realAnchor}/${restPrefix}${suffix}`)
+    }
+  }
+  return out
 }
 
 /**
@@ -1268,6 +1328,48 @@ export function convertToSandboxRuntimeConfig(
     forwardedUntrustedGrants,
   })
 
+  // #1120 SEA: include --mcp-config file paths (and resolved targets) in denyWrite
+  for (const mcpPath of getFlagMcpConfigFilePaths()) {
+    denyWrite.push(mcpPath)
+    try {
+      const realMcp = realpathSync(mcpPath)
+      if (realMcp !== mcpPath) denyWrite.push(realMcp)
+    } catch {
+      // Target may not exist yet
+    }
+  }
+
+  // #1128 SEA Ger(): include Anthropic profile store dirs/files in denyWrite
+  const profileStore = getProfileStoreDenyPaths()
+  if (profileStore !== null) {
+    for (const d of profileStore.dirs) {
+      denyWrite.push(d)
+      try {
+        const realD = realpathSync(d)
+        if (realD !== d) denyWrite.push(realD)
+      } catch {
+        // Ignore
+      }
+    }
+    for (const f of profileStore.files) {
+      denyWrite.push(f)
+      try {
+        const realF = realpathSync(f)
+        if (realF !== f) denyWrite.push(realF)
+      } catch {
+        // Ignore
+      }
+    }
+  }
+
+  // #1119 SEA tk/nk: on macOS, expand denyWrite glob patterns whose parent
+  // folder is reached through a symlink so Seatbelt denies writes at the real path.
+  if (getPlatform() === 'macos') {
+    const expanded = expandSymlinkedDenyWriteGlobs(denyWrite)
+    denyWrite.length = 0
+    denyWrite.push(...expanded)
+  }
+
   // densable Xot()==="relaxed": attach filesystem.disabled + keep full path lists
   // on getConfig(). sandbox-runtime@0.0.70 honors filesystem.disabled natively
   // (Gvg empty / Wvg allowOnly['/'] / Bou skip FS mounts). OUTER getFs* still
@@ -1339,6 +1441,7 @@ export function convertToSandboxRuntimeConfig(
     enableWeakerNetworkIsolation:
       settings.sandbox?.enableWeakerNetworkIsolation,
     allowAppleEvents: settings.sandbox?.allowAppleEvents,
+    allowNestedUserNamespaces: settings.sandbox?.allowNestedUserNamespaces,
     ripgrep: ripgrepConfig,
   }
   rememberBuiltConfigAllowlist(config, false)

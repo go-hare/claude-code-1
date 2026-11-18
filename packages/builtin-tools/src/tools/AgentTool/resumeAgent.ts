@@ -452,26 +452,45 @@ async function resumeAgentBackgroundAfterClaim({
           err instanceof Error ? err.message : String(err),
         )
   }
-  // densable Aye: disk missing → in-memory mirror (taskRegistry.getTranscript
-  // messages written during the run). Local mirror is LocalAgentTask.messages.
-  if (!transcript) {
-    const liveTasks = toolUseContext.getAppState().tasks
-    const task = liveTasks?.[agentId]
-    const mirrored =
-      task &&
-      typeof task === 'object' &&
-      'messages' in task &&
-      Array.isArray(task.messages) &&
-      task.messages.length > 0
-        ? task.messages
-        : undefined
-    if (mirrored) {
+  // densable Aye / #985: disk missing or partial → merge/fallback to
+  // in-memory mirror (`LocalAgentTask.messages`) written during the run.
+  const liveTasks = toolUseContext.getAppState().tasks
+  const task = liveTasks?.[agentId]
+  const mirrored =
+    task &&
+    typeof task === 'object' &&
+    'messages' in task &&
+    Array.isArray(task.messages) &&
+    task.messages.length > 0
+      ? (task.messages as NonNullable<typeof transcript>['messages'])
+      : undefined
+  if (!transcript && mirrored) {
+    logForDebugging(
+      `[resumeAgentBackground ${agentId}] disk transcript missing; using ${mirrored.length} in-memory messages mirrored during the run`,
+    )
+    transcript = {
+      messages: mirrored,
+      contentReplacements: [],
+    }
+  } else if (
+    transcript &&
+    mirrored &&
+    mirrored.length > transcript.messages.length
+  ) {
+    const diskUuids = new Set(transcript.messages.map(m => m.uuid))
+    const missing = mirrored.filter(m => !diskUuids.has(m.uuid))
+    if (missing.length > 0) {
       logForDebugging(
-        `[resumeAgentBackground ${agentId}] disk transcript missing; using ${mirrored.length} in-memory messages mirrored during the run`,
+        `[resumeAgentBackground ${agentId}] disk transcript partial (${transcript.messages.length}); appending ${missing.length} in-memory messages`,
       )
       transcript = {
-        messages: mirrored as NonNullable<typeof transcript>['messages'],
-        contentReplacements: [],
+        ...transcript,
+        messages: [...transcript.messages, ...missing],
+      }
+    } else if (mirrored.length > transcript.messages.length) {
+      transcript = {
+        ...transcript,
+        messages: mirrored,
       }
     }
   }

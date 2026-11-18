@@ -1,5 +1,6 @@
 import { homedir } from 'os'
-import { isAbsolute, resolve } from 'path'
+import { isAbsolute, normalize, resolve } from 'path'
+import { isEnvTruthy } from 'src/utils/envUtils.js'
 import type { z } from 'zod/v4'
 import type { ToolPermissionContext } from 'src/Tool.js'
 import type { Redirect, SimpleCommand } from 'src/utils/bash/ast.js'
@@ -65,6 +66,14 @@ export type PathCommand =
   | 'md5sum'
 
 /**
+ * SEA `_yr` (@289975469) — mounted drives, mount root folders, and their
+ * immediate top-level children (`/Volumes`, `/Volumes/Foo`, `/mnt/c`,
+ * `/mnt/c/Foo`, `/media/user/drive`, etc.).
+ */
+const MOUNTED_DRIVE_PATH_RE =
+  /^\/(?:system\/)?volumes(?:\/[^/]+){0,2}$|^\/mnt\/(?:[^/]+|[a-z]\/[^/]+)$|^\/(?:run\/)?media(?:\/[^/]+){0,3}$/i
+
+/**
  * Checks if an rm/rmdir command targets dangerous paths that should always
  * require explicit user approval, even if allowlist rules exist.
  * This prevents catastrophic data loss from commands like `rm -rf /`.
@@ -77,6 +86,9 @@ function checkDangerousRemovalPaths(
   // Extract paths using the existing path extractor
   const extractor = PATH_EXTRACTORS[command]
   const paths = extractor(args)
+  const doubleDashIdx = args.indexOf('--')
+  const flagArgs = doubleDashIdx >= 0 ? args.slice(0, doubleDashIdx) : args
+  const hasRecursiveFlag = flagArgs.some(a => /^--r|^-[a-zA-Z]*[rR]/.test(a))
 
   for (const path of paths) {
     // Expand tilde and resolve to absolute path
@@ -108,6 +120,30 @@ function checkDangerousRemovalPaths(
         },
         // Don't provide suggestions - we don't want to encourage saving dangerous commands
         suggestions: [],
+      }
+    }
+
+    // SEA #967 (@289979782): mounted drive or top-level volume folder
+    const isGlobStar = /(?:^|[\\/])\*$/.test(absolutePath)
+    if (
+      !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_MOUNTED_DRIVE_RM_PROMPT) &&
+      command === 'rm' &&
+      (hasRecursiveFlag || isGlobStar) &&
+      absolutePath.startsWith('/')
+    ) {
+      const trimmedMountPath = normalize(absolutePath).replace(/(.)\/$/, '$1')
+      if (MOUNTED_DRIVE_PATH_RE.test(trimmedMountPath)) {
+        return {
+          behavior: 'ask',
+          message: `Dangerous rm operation detected: '${absolutePath}'\n\nThis command would remove a mounted drive, the folder that holds mounted drives, or a file or folder at the top level of a drive. This requires explicit approval and cannot be auto-allowed by permission rules.\n\nIf you meant something deeper inside, name it by its full path.`,
+          decisionReason: {
+            type: 'safetyCheck',
+            reason: `Dangerous rm operation on mounted drive or top-level path: ${absolutePath}`,
+            classifierApprovable: false,
+            circuitBreaker: 'dangerousRemoval',
+          },
+          suggestions: [],
+        }
       }
     }
   }
@@ -1086,13 +1122,36 @@ export function validateOutputRedirections(
   // Example attack: cd .claude/ && echo "malicious" > settings.json
   // The redirection target would be validated relative to the original CWD, but the
   // actual write happens in the changed directory after 'cd' executes.
+  // SEA #1124 (`Wcn` @290025174): validate non-discard targets (when cd is present,
+  // only absolute / ~ targets whose resolution doesn't depend on cd) FIRST so an
+  // Edit(path) deny rule returns 'deny' before cd-compound-redirect returns 'ask'.
+  const nonDiscard = redirections.filter(
+    r => !isDiscardOutputRedirectTarget(r.target),
+  )
+  const validations = nonDiscard
+    .filter(
+      r =>
+        !compoundCommandHasCd ||
+        isAbsolute(r.target) ||
+        r.target.startsWith('~'),
+    )
+    .map(r => validatePath(r.target, cwd, toolPermissionContext, 'create'))
+
+  const ruleDeny = validations.find(
+    v => !v.allowed && v.decisionReason?.type === 'rule',
+  )
+  if (ruleDeny?.decisionReason !== undefined) {
+    return {
+      behavior: 'deny',
+      message: `Output redirection to '${ruleDeny.resolvedPath}' was blocked by a deny rule.`,
+      decisionReason: ruleDeny.decisionReason,
+    }
+  }
+
   // Official 2.1.207: /dev/null-only redirects are safe (discard output) and must not
   // spuriously prompt — only non-discard targets trigger cd-compound-redirect.
   // densable 2.1.233 #20: also treat Windows NUL as discard (auto-mode regression).
-  if (
-    compoundCommandHasCd &&
-    redirections.some(r => !isDiscardOutputRedirectTarget(r.target))
-  ) {
+  if (compoundCommandHasCd && nonDiscard.length > 0) {
     return {
       behavior: 'ask',
       message: `Commands that change directories and write via output redirection require explicit approval to ensure paths are evaluated correctly. For security, Claude Code cannot automatically determine the final working directory when 'cd' is used in compound commands.`,
@@ -1104,18 +1163,8 @@ export function validateOutputRedirections(
       },
     }
   }
-  for (const { target } of redirections) {
-    // Discard devices are always safe
-    if (isDiscardOutputRedirectTarget(target)) {
-      continue
-    }
-    const { allowed, resolvedPath, decisionReason } = validatePath(
-      target,
-      cwd,
-      toolPermissionContext,
-      'create', // Treat > and >> as create operations
-    )
 
+  for (const { allowed, resolvedPath, decisionReason } of validations) {
     if (!allowed) {
       const workingDirs = Array.from(
         allWorkingDirectories(toolPermissionContext),

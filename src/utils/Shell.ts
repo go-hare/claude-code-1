@@ -1,9 +1,15 @@
-import { execFileSync, spawn } from 'child_process'
+import { execFileSync, spawn, type ChildProcess } from 'child_process'
 import { constants as fsConstants, readFileSync } from 'fs'
-import { type FileHandle, mkdir, open, realpath } from 'fs/promises'
+import { type FileHandle, mkdir, open, realpath, stat } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
 import { tmpdir } from 'os'
-import { isAbsolute, resolve } from 'path'
+import {
+  delimiter as pathDelimiter,
+  isAbsolute,
+  join as nativeJoin,
+  resolve,
+  sep as pathSep,
+} from 'path'
 import { join as posixJoin } from 'path/posix'
 import { logEvent } from 'src/services/analytics/index.js'
 import {
@@ -13,13 +19,17 @@ import {
 } from '../bootstrap/state.js'
 import { generateTaskId } from '../Task.js'
 import {
+  appendPluginBinPathsToPath,
+  getCapturedShellExports,
+} from './bash/ShellSnapshot.js'
+import {
   checkAgentWorktreeCwdEscape,
   checkAgentWorktreeGoneRecovery,
   resolveIsolationRoot,
 } from './bgIsolationContainment.js'
 import { getCwdOverride, pwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
-import { errorMessage, isENOENT } from './errors.js'
+import { errorMessage, getErrnoCode, isENOENT } from './errors.js'
 import { getFsImplementation } from './fsOperations.js'
 import { logError } from './log.js'
 import {
@@ -202,9 +212,152 @@ export async function findSuitableShell(): Promise<string> {
   return shellPath
 }
 
+const PLUGIN_BIN_STAT_TIMEOUT_MS = 2000
+
+/**
+ * densable `kAs` / `r5n` (#904): collect `bin/` directories of enabled
+ * non-builtin plugins, drop paths with shell metacharacters on POSIX, and
+ * verify each directory via stat (keeping on non-ENOENT/ENOTDIR failures).
+ */
+export async function resolvePluginBinPaths(): Promise<string[]> {
+  try {
+    const { loadAllPluginsCacheOnly } = await import(
+      './plugins/pluginLoader.js'
+    )
+    const { enabled } = await loadAllPluginsCacheOnly()
+    const candidates = enabled
+      .filter(p => !p.isBuiltin && p.path)
+      .map(p => nativeJoin(p.path, 'bin'))
+      .filter(p => {
+        if (pathSep !== '\\' && /[:"'$`\\\n\r]/.test(p)) {
+          logForDebugging(
+            `Dropping plugin bin path with shell metacharacters: ${p}`,
+          )
+          return false
+        }
+        return true
+      })
+    const results = await Promise.all(
+      candidates.map(async p => {
+        try {
+          const stats = await Promise.race([
+            stat(p),
+            new Promise<never>((_, reject) =>
+              setTimeout(
+                () =>
+                  reject(
+                    new Error(
+                      `stat timed out after ${PLUGIN_BIN_STAT_TIMEOUT_MS}ms`,
+                    ),
+                  ),
+                PLUGIN_BIN_STAT_TIMEOUT_MS,
+              ),
+            ),
+          ])
+          return stats.isDirectory()
+        } catch (err) {
+          const code = getErrnoCode(err)
+          if (code === 'ENOENT' || code === 'ENOTDIR') return false
+          logForDebugging(
+            `Keeping plugin bin path on PATH despite a failed stat (${code ?? errorMessage(err)}): ${p}`,
+          )
+          return true
+        }
+      }),
+    )
+    return candidates.filter((_, idx) => results[idx])
+  } catch (err) {
+    logForDebugging(
+      `Shell: leaving plugin bin/ dirs off PATH: ${errorMessage(err)}`,
+      { level: 'warn' },
+    )
+    logError(err)
+    return []
+  }
+}
+
+export const getPowerShellPluginBinPaths = memoize(resolvePluginBinPaths)
+
+/**
+ * densable `J6n` (#981): return captured shell startup exports only for
+ * unsandboxed bash commands.
+ */
+export function resolveCapturedShellExportsForSpawn(
+  shellType: ShellType,
+  shouldUseSandbox: boolean,
+): Record<string, string> | undefined {
+  return shellType === 'bash' && !shouldUseSandbox
+    ? getCapturedShellExports()
+    : undefined
+}
+
+/**
+ * densable `dSo` (#904, #981): assemble subprocess env from defaults
+ * (captured shell exports), subprocessEnv, overrides, and plugin bin/ PATH.
+ */
+export function buildShellSpawnEnv({
+  shellType,
+  binShell,
+  envOverrides,
+  spawnEnvPluginBinPaths = [],
+  envDefaults,
+  shouldUseSandbox = false,
+}: {
+  shellType: ShellType
+  binShell: string
+  envOverrides: Record<string, string | undefined>
+  spawnEnvPluginBinPaths?: readonly string[]
+  envDefaults?: Record<string, string>
+  shouldUseSandbox?: boolean
+}): Record<string, string | undefined> {
+  const baseSubprocessEnv: Record<string, string | undefined> = {
+    ...(envDefaults ?? {}),
+    ...subprocessEnv(),
+  }
+  // #383 SEA: Strip daemon-injected FORCE_COLOR=3 before merging overrides
+  stripDaemonForceColorFromEnv(baseSubprocessEnv)
+  // #1118 SEA: Prevent outer sandboxed shell from sourcing BASH_ENV / ENV
+  // outside the sandbox before executing the sandboxed command.
+  if (shouldUseSandbox) {
+    delete baseSubprocessEnv.BASH_ENV
+    delete baseSubprocessEnv.ENV
+  }
+  const env: Record<string, string | undefined> = {
+    ...baseSubprocessEnv,
+    SHELL: shellType === 'bash' ? binShell : undefined,
+    GIT_EDITOR: 'true',
+    // LOCAL (not official densable): skip interactive pager (less) so short
+    // git log/diff/show don't open a pager process.
+    GIT_PAGER: 'cat',
+    CLAUDECODE: '1',
+    // densable TCt: always stamp session id + child marker + CLAUDE_PID
+    // so snapshot pkill self-guard (K2g) can refuse patterns matching us.
+    CLAUDE_CODE_SESSION_ID: getSessionId(),
+    CLAUDE_CODE_CHILD_SESSION: '1',
+    CLAUDE_PID: String(process.pid),
+    ...envOverrides,
+  }
+  if (spawnEnvPluginBinPaths.length > 0) {
+    const pathKey =
+      Object.keys(env).find(k => k.toUpperCase() === 'PATH') ?? 'PATH'
+    const { appended, path } = appendPluginBinPathsToPath(
+      env[pathKey],
+      spawnEnvPluginBinPaths,
+      pathDelimiter,
+    )
+    if (appended.length > 0) {
+      env[pathKey] = path
+    }
+  }
+  return env
+}
+
 async function getShellConfigImpl(): Promise<ShellConfig> {
-  const binShell = await findSuitableShell()
-  const provider = await createBashShellProvider(binShell)
+  const [binShell, pluginBinPaths] = await Promise.all([
+    findSuitableShell(),
+    resolvePluginBinPaths(),
+  ])
+  const provider = await createBashShellProvider(binShell, { pluginBinPaths })
   return { provider }
 }
 
@@ -459,9 +612,14 @@ export async function exec(
   }
 
   const spawnBinary = isSandboxedPowerShell ? '/bin/sh' : binShell
-  const shellArgs = isSandboxedPowerShell
+  const rawShellArgs = isSandboxedPowerShell
     ? ['-c', commandString]
     : provider.getSpawnArgs(commandString)
+  // #1118 SEA: when sandboxed, the outer shell spawns outside the sandbox;
+  // strip login flags (-l / --login) so it does not run startup files outside.
+  const shellArgs = shouldUseSandbox
+    ? rawShellArgs.filter(arg => arg !== '-l' && arg !== '--login')
+    : rawShellArgs
   const envOverrides = await provider.getEnvironmentOverrides(command)
   if (shellType === 'powershell') {
     const sessionEnvVars = await getSessionEnvironmentVariables()
@@ -484,35 +642,37 @@ export async function exec(
   const usePipeMode = !!onStdout
   const taskId = generateTaskId('local_bash')
   const taskOutput = new TaskOutput(taskId, onProgress ?? null, !usePipeMode)
-  await mkdir(getTaskOutputDir(), { recursive: true })
-
-  // In file mode, both stdout and stderr go to the same file fd.
-  // On POSIX, O_APPEND makes each write atomic (seek-to-end + write), so
-  // stdout and stderr are interleaved chronologically without tearing.
-  // densable 2.1.251 Que/nt exclusive create: O_CREAT|O_EXCL|O_NOFOLLOW
-  // (windows 'wx'). O_EXCL refuses a pre-planted symlink/hardlink leaf;
-  // O_NOFOLLOW blocks follow-on open races from the sandbox.
-  // On Windows, numeric flags can produce EINVAL through libuv — use 'wx'.
-  // 'wx' grants FILE_WRITE_DATA (unlike 'a'), so MSYS2/Cygwin does not
-  // discard inherited-handle output. Atomicity is preserved because
-  // duplicated handles share the same FILE_OBJECT with
-  // FILE_SYNCHRONOUS_IO_NONALERT.
   let outputHandle: FileHandle | undefined
-  if (!usePipeMode) {
-    const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0
-    outputHandle = await open(
-      taskOutput.path,
-      process.platform === 'win32'
-        ? 'wx'
-        : fsConstants.O_WRONLY |
-            fsConstants.O_APPEND |
-            fsConstants.O_CREAT |
-            fsConstants.O_EXCL |
-            O_NOFOLLOW,
-    )
-  }
+  let childProcess: ChildProcess | undefined
 
   try {
+    await mkdir(getTaskOutputDir(), { recursive: true })
+
+    // In file mode, both stdout and stderr go to the same file fd.
+    // On POSIX, O_APPEND makes each write atomic (seek-to-end + write), so
+    // stdout and stderr are interleaved chronologically without tearing.
+    // densable 2.1.251 Que/nt exclusive create: O_CREAT|O_EXCL|O_NOFOLLOW
+    // (windows 'wx'). O_EXCL refuses a pre-planted symlink/hardlink leaf;
+    // O_NOFOLLOW blocks follow-on open races from the sandbox.
+    // On Windows, numeric flags can produce EINVAL through libuv — use 'wx'.
+    // 'wx' grants FILE_WRITE_DATA (unlike 'a'), so MSYS2/Cygwin does not
+    // discard inherited-handle output. Atomicity is preserved because
+    // duplicated handles share the same FILE_OBJECT with
+    // FILE_SYNCHRONOUS_IO_NONALERT.
+    if (!usePipeMode) {
+      const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0
+      outputHandle = await open(
+        taskOutput.path,
+        process.platform === 'win32'
+          ? 'wx'
+          : fsConstants.O_WRONLY |
+              fsConstants.O_APPEND |
+              fsConstants.O_CREAT |
+              fsConstants.O_EXCL |
+              O_NOFOLLOW,
+      )
+    }
+
     // densable 2.1.233: yhp.spawn(..., { cgroup: y ? Qfp() : void 0 }).
     // Bun's child_process.spawn accepts `cgroup` (atomic at process create).
     // Pure Node has no cgroup option → post-spawn cgroup.procs attach only.
@@ -520,29 +680,23 @@ export async function exec(
     const useAtomicCgroup =
       typeof Bun !== 'undefined' && cgroupDir !== undefined
 
-    const baseSubprocessEnv: Record<string, string | undefined> = {
-      ...subprocessEnv(),
-    }
-    // #383 SEA: Strip daemon-injected FORCE_COLOR=3 before merging overrides
-    stripDaemonForceColorFromEnv(baseSubprocessEnv)
+    const powerShellPluginBinPaths =
+      shellType === 'powershell' && !shouldUseSandbox
+        ? await getPowerShellPluginBinPaths()
+        : []
 
-    const childProcess = spawn(spawnBinary, shellArgs, {
-      env: {
-        ...baseSubprocessEnv,
-        SHELL: shellType === 'bash' ? binShell : undefined,
-        GIT_EDITOR: 'true',
-        // LOCAL (not official densable): skip interactive pager (less) so short
-        // git log/diff/show don't open a pager process. Does not hide nested
-        // Git-for-Windows conhost; prefer serial/combined git on Windows too.
-        GIT_PAGER: 'cat',
-        CLAUDECODE: '1',
-        // densable TCt: always stamp session id + child marker + CLAUDE_PID
-        // so snapshot pkill self-guard (K2g) can refuse patterns matching us.
-        CLAUDE_CODE_SESSION_ID: getSessionId(),
-        CLAUDE_CODE_CHILD_SESSION: '1',
-        CLAUDE_PID: String(process.pid),
-        ...envOverrides,
-      },
+    childProcess = spawn(spawnBinary, shellArgs, {
+      env: buildShellSpawnEnv({
+        shellType,
+        binShell,
+        envOverrides,
+        spawnEnvPluginBinPaths: powerShellPluginBinPaths,
+        envDefaults: resolveCapturedShellExportsForSpawn(
+          shellType,
+          shouldUseSandbox ?? false,
+        ),
+        shouldUseSandbox: shouldUseSandbox ?? false,
+      }),
       cwd,
       // densable 2.1.214 #21: PowerShell provider.stdin === 'ignore' so children
       // waiting on stdin do not hang until tool timeout. Bash keeps 'pipe'.
@@ -641,7 +795,7 @@ export async function exec(
       }
       // densable `$0f`: if the child is still running, unlink on exit so
       // kill/timeout/interrupt still remove `/tmp/claude-*-cwd`.
-      if (shouldDeferCwdTrackingUnlink(childProcess)) {
+      if (childProcess && shouldDeferCwdTrackingUnlink(childProcess)) {
         childProcess.once('exit', () => {
           void unlinkCwdTrackingFile(nativeCwdFilePath)
         })
@@ -664,11 +818,42 @@ export async function exec(
 
     logForDebugging(`Shell exec error: ${errorMessage(error)}`)
 
+    const preSpawnDiskFull = formatPreSpawnDiskFullError(error, childProcess)
+    if (preSpawnDiskFull !== undefined) {
+      return createAbortedCommand(undefined, {
+        code: 1,
+        stderr: preSpawnDiskFull,
+      })
+    }
+
     return createAbortedCommand(undefined, {
       code: 126, // Standard Unix code for execution errors
       stderr: errorMessage(error),
     })
   }
+}
+
+/**
+ * densable `oj` / `Lxe` (#1039): format friendly pre-spawn ENOSPC/EDQUOT
+ * message when output-file creation fails before the child process spawns.
+ */
+export function formatPreSpawnDiskFullError(
+  error: unknown,
+  childProcess: ChildProcess | undefined,
+): string | undefined {
+  const code = getErrnoCode(error)
+  if (childProcess !== undefined || (code !== 'ENOSPC' && code !== 'EDQUOT')) {
+    return undefined
+  }
+  const reason =
+    code === 'EDQUOT'
+      ? `the user's disk quota is used up (${code})`
+      : `this computer's disk is full (${code})`
+  const tempRoot = nativeJoin(
+    process.env.CLAUDE_CODE_TMPDIR || tmpdir(),
+    getClaudeTempDirName(),
+  )
+  return `The command was not started: ${reason} on the volume holding ${tempRoot} (Claude Code's temporary directory), so the file that captures command output could not be created there and nothing ran. Free space on that volume, or set CLAUDE_CODE_TMPDIR to a directory on another one, then try again.`
 }
 
 /**

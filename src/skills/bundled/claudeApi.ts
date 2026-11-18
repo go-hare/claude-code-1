@@ -117,6 +117,7 @@ export const CLAUDE_API_SUBCOMMANDS = [
   'managed-agents-secure',
   'prompt-audit',
   'upgrade',
+  'api-version',
   'build-eval',
   'hillclimb',
   'preserved-thinking-migration',

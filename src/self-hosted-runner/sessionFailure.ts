@@ -4,6 +4,11 @@
  */
 import { randomUUID } from 'node:crypto'
 import stripAnsi from 'strip-ansi'
+import {
+  RepositoryAccessError,
+  type RepositoryAccessInfo,
+  type RepositoryDenial,
+} from './gitPrepare.js'
 import type { SelfHostedRunnerApi } from './runnerApi.js'
 import { truncateSessionErrorText } from './sessionText.js'
 
@@ -91,16 +96,65 @@ export function notifyChildSessionGone(opts: {
   return { gone: true, sent: true }
 }
 
+const REPO_NAME_SEGMENT_RE = /^(?!\.{1,2}$)[a-zA-Z0-9._-]+$/
+const REPO_NAME_MAX_LEN = 200
+
+export function isSafeRepoDisplayName(repo: string): boolean {
+  return (
+    repo.length <= REPO_NAME_MAX_LEN &&
+    repo.split('/').every(seg => REPO_NAME_SEGMENT_RE.test(seg)) &&
+    truncateSessionErrorText(repo) === repo
+  )
+}
+
+/** densable `xf` */
+export function formatRepoNotFoundHint(repo: string): string {
+  const display = isSafeRepoDisplayName(repo)
+    ? repo
+    : "one of this session's repositories (the output below may show which)"
+  return `This runner couldn't read ${display}. Either it doesn't exist or this runner can't access it. If it's the wrong repository, start a new session with the right one. If it's the right one, ask the team that manages your runners to check that the runners can access it. Once that's fixed, start a new session.`
+}
+
+/** densable `wu` */
+export function repositoryAccessDenialFromError(err: unknown):
+  | {
+      denial: RepositoryDenial
+      error: RepositoryAccessError
+      repository: RepositoryAccessInfo
+    }
+  | undefined {
+  if (!(err instanceof RepositoryAccessError) || err.denial === undefined) {
+    return undefined
+  }
+  return {
+    denial: err.denial,
+    error: err,
+    repository: err.repository,
+  }
+}
+
+/** densable `vu` */
+export function insteadOfRetryHintFromError(err: unknown): string | undefined {
+  const info = repositoryAccessDenialFromError(err)
+  return info?.denial === 'repo_not_found_or_no_permission'
+    ? formatRepoNotFoundHint(info.repository.repo)
+    : undefined
+}
+
 /**
  * densable `jjv` — synthetic assistant + result events for failure post.
  */
 export function buildFailureWorkerEvents(
   exitCode: number | null,
   stderrTail: string,
+  insteadOfRetryHint?: string,
 ): unknown[] {
+  const hint =
+    insteadOfRetryHint ??
+    'You can try again by sending a new message or starting a new session.'
   let text = `The session process ${
     exitCode === null ? 'failed to start' : `exited with code ${exitCode}`
-  }. You can try again by sending a new message or starting a new session.`
+  }. ${hint}`
   if (stderrTail.trim().length > 0) {
     // Official lc(QHe(s)): strip ANSI and C0/C1 control chars before slicing tail.
     const clean = stripAnsi(stderrTail).replace(
@@ -164,6 +218,7 @@ export type PostFailureResultOpts = {
   workerEpoch: number
   exitCode: number | null
   stderrTail: string
+  insteadOfRetryHint?: string
   onDebug: (msg: string) => void
   onStatus: (msg: string) => void
   signal: AbortSignal
@@ -197,6 +252,7 @@ export async function postSessionFailureResult(
     workerEpoch,
     exitCode,
     stderrTail,
+    insteadOfRetryHint,
     onDebug,
     onStatus,
     signal,
@@ -208,7 +264,11 @@ export async function postSessionFailureResult(
     return 'skipped'
   }
   const sleep = opts.sleepMs ?? defaultSleep
-  const events = buildFailureWorkerEvents(exitCode, stderrTail)
+  const events = buildFailureWorkerEvents(
+    exitCode,
+    stderrTail,
+    insteadOfRetryHint,
+  )
   const once = (): Promise<void> =>
     apiClient.postWorkerEvents(
       apiBaseUrl,

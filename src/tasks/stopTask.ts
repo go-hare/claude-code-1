@@ -16,6 +16,7 @@ import type { AppState } from '../state/AppState.js'
 import type { TaskStateBase } from '../Task.js'
 import { getTaskByType } from '../tasks.js'
 import {
+  OUTPUT_FILE_TAG,
   STATUS_TAG,
   SUMMARY_TAG,
   TASK_ID_TAG,
@@ -141,10 +142,14 @@ function notifyUserStoppedMainShellTask(opts: {
   toolUseId?: string
   description: string
   source?: 'user' | 'client' | 'system'
+  outputFile?: string
   note?: string
 }): void {
   const toolUseXml = opts.toolUseId
     ? `\n<${TOOL_USE_ID_TAG}>${escapeXml(opts.toolUseId)}</${TOOL_USE_ID_TAG}>`
+    : ''
+  const outputFileXml = opts.outputFile
+    ? `\n<${OUTPUT_FILE_TAG}>${escapeXml(opts.outputFile)}</${OUTPUT_FILE_TAG}>`
     : ''
   const base =
     opts.source === 'client'
@@ -152,7 +157,7 @@ function notifyUserStoppedMainShellTask(opts: {
       : `Task "${opts.description}" was stopped by the user`
   const summary = opts.note === undefined ? base : `${base}. ${opts.note}`
   const value = `<${TASK_NOTIFICATION_TAG}>
-<${TASK_ID_TAG}>${escapeXml(opts.taskId)}</${TASK_ID_TAG}>${toolUseXml}
+<${TASK_ID_TAG}>${escapeXml(opts.taskId)}</${TASK_ID_TAG}>${toolUseXml}${outputFileXml}
 <${STATUS_TAG}>killed</${STATUS_TAG}>
 <${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
 </${TASK_NOTIFICATION_TAG}>`
@@ -406,6 +411,7 @@ export async function stopTask(
         toolUseId: task.toolUseId,
         description: task.description,
         source,
+        outputFile: task.outputFile,
       })
     }
   }

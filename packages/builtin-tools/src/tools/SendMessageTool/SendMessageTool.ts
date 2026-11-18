@@ -57,6 +57,7 @@ import {
   getTeammateColor,
   getTeamName,
   isTeamLead,
+  getDynamicTeamContext,
   isTeammate,
 } from 'src/utils/teammate.js'
 import {
@@ -1348,6 +1349,17 @@ async function handleShutdownApproval(
   requestId: string,
   context: ToolUseContext,
 ): Promise<{ data: ResponseOutput }> {
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const { getTeammateContext } =
+    require('src/utils/teammateContext.js') as typeof import('src/utils/teammateContext.js')
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  const teammateContext = getTeammateContext()
+  if (teammateContext === undefined && !getDynamicTeamContext()) {
+    throw new Error(
+      'Only a teammate can approve a shutdown request, and this session is not running as one. Nothing was sent. To shut down a teammate, send that teammate a shutdown_request message. The teammate is the one that approves it.',
+    )
+  }
+
   const teamName = getTeamName()
   const agentId = getAgentId()
   const agentName = getAgentName() || 'teammate'
@@ -1396,7 +1408,12 @@ async function handleShutdownApproval(
       ? ({ degradedClass: 'mailbox_write_failed' } as const)
       : undefined
 
-  if (ownBackendType === 'in-process') {
+  if (teammateContext !== undefined) {
+    logForDebugging(
+      `[SendMessageTool] In-process teammate ${agentName} approving shutdown - aborting its own loop`,
+    )
+    teammateContext.abortController.abort()
+  } else if (ownBackendType === 'in-process') {
     logForDebugging(
       `[SendMessageTool] In-process teammate ${agentName} approving shutdown - signaling abort`,
     )

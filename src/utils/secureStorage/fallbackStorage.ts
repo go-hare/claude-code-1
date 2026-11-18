@@ -1,7 +1,10 @@
-import type {
-  SecureStorage,
-  SecureStorageData,
-  SecureStorageUpdateResult,
+import {
+  SECURE_STORAGE_READ_FAILED,
+  type ReadAsyncStrictOptions,
+  type SecureStorage,
+  type SecureStorageData,
+  type SecureStorageReadFailed,
+  type SecureStorageUpdateResult,
 } from './types.js'
 
 /**
@@ -27,6 +30,28 @@ export function createFallbackStorage(
         return result
       }
       return (await secondary.readAsync()) || {}
+    },
+    async readAsyncStrict(
+      key?: unknown,
+      options?: ReadAsyncStrictOptions,
+    ): Promise<SecureStorageData | null | SecureStorageReadFailed> {
+      const primaryResult = await (primary.readAsyncStrict?.(
+        undefined,
+        options,
+      ) ?? primary.readAsync())
+      if (primaryResult === SECURE_STORAGE_READ_FAILED) {
+        return SECURE_STORAGE_READ_FAILED
+      }
+      if (primaryResult !== null || options?.inaccessibleAs === 'failure') {
+        return primaryResult
+      }
+      const secondaryResult = await (secondary.readAsyncStrict?.(
+        key,
+        options,
+      ) ?? secondary.readAsync(key))
+      return secondaryResult === SECURE_STORAGE_READ_FAILED
+        ? secondaryResult
+        : secondaryResult || {}
     },
     invalidateCache(): void {
       primary.invalidateCache?.()

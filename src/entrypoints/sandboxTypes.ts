@@ -464,6 +464,12 @@ export const SandboxSettingsSchema = lazySchema(() =>
       credentials: SandboxCredentialsConfigSchema(),
       ignoreViolations: z.record(z.string(), z.array(z.string())).optional(),
       enableWeakerNestedSandbox: z.boolean().optional(),
+      allowNestedUserNamespaces: z
+        .boolean()
+        .optional()
+        .describe(
+          'Linux/WSL only: Let sandboxed commands create user namespaces of their own, which the sandbox refuses by default. Needed by tools that sandbox themselves that way, such as Chromium’s and Electron’s sandbox, a nested bubblewrap, and `unshare`. **Removes code-execution isolation** — in any folder a hostile command may write, it can then bypass filesystem.denyWrite.',
+        ),
       enableWeakerNetworkIsolation: z
         .boolean()
         .optional()

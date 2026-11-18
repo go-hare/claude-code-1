@@ -12,6 +12,11 @@
  */
 
 import axios from 'axios'
+import { logEvent } from '../services/analytics/index.js'
+import {
+  extractSafeServiceErrorDetail,
+  isPlainSingleLineDetail,
+} from '../services/api/errors.js'
 import { isEnvTruthy } from './envUtils.js'
 import { isAbortError } from './errors.js'
 import { logForDebugging } from './debug.js'
@@ -366,19 +371,21 @@ export async function postCcrSessionWorker(input: {
     }
   }
   if (response.status !== 200) {
-    const data = response.data as { message?: unknown } | null
-    const msg =
-      typeof data?.message === 'string' ? data.message.slice(0, 200) : undefined
+    const rawDetail = extractSafeServiceErrorDetail(response.data)
+    const msg = rawDetail ? rawDetail.slice(0, 200) : undefined
     logForDebugging(
       `ccr ${input.logLabel} returned HTTP ${response.status}${msg ? `: ${msg}` : ''}`,
       { level: 'warn' },
     )
+    const isRedirect = [301, 302, 303, 307, 308].includes(response.status)
     return {
       ok: false,
       source: 'proxy',
       statusCode: response.status,
       errorType: 'PROXY_REJECTED',
-      errorMessage: `The ${input.toolName} proxy rejected the request (HTTP ${response.status}${msg ? `: ${msg}` : ''}).`,
+      errorMessage: isRedirect
+        ? `The ${input.toolName} proxy itself answered with a redirect (HTTP ${response.status}), which is not followed. Asking again will not change that.`
+        : `The ${input.toolName} proxy rejected the request (HTTP ${response.status})${msg ? `: ${msg}` : '.'}`,
     }
   }
   const data = response.data as CcrWorkerEnvelope | null
@@ -395,16 +402,31 @@ export async function postCcrSessionWorker(input: {
     }
   }
   if (data.error) {
+    const rawType = data.error.error_type || undefined
+    const rawMessage = data.error.error_message || undefined
+    const safeType = rawType && /^\w{1,64}$/.test(rawType) ? rawType : undefined
+    const safeMessage =
+      rawMessage && isPlainSingleLineDetail(rawMessage, 1024)
+        ? rawMessage
+        : undefined
+    if (safeType !== rawType || safeMessage !== rawMessage) {
+      logEvent('tengu_ccr_proxy_target_error_left_out', {
+        type_left_out: safeType !== rawType,
+        type_length: rawType?.length ?? 0,
+        message_left_out: safeMessage !== rawMessage,
+        message_length: rawMessage?.length ?? 0,
+      })
+    }
     logForDebugging(
-      `ccr ${input.logLabel} ${input.targetErrorLabel}: ${data.error.error_type}`,
+      `ccr ${input.logLabel} ${input.targetErrorLabel}: ${safeType ?? `no type (${rawType?.length ?? 0} UTF-16 units left out)`}${safeMessage !== rawMessage ? `, message left out (${rawMessage?.length})` : ''}`,
       { level: 'warn' },
     )
     return {
       ok: false,
       source: 'target',
       statusCode: 502,
-      errorType: data.error.error_type,
-      errorMessage: data.error.error_message,
+      errorType: safeType ?? 'UNKNOWN',
+      errorMessage: safeMessage ?? '',
     }
   }
   return { ok: true, data }

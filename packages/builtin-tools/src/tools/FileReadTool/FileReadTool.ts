@@ -1210,9 +1210,14 @@ async function callInner(
 
   // --- Image (single read, no double-read) ---
   if (IMAGE_EXTENSIONS.has(ext)) {
-    // Images have their own size limits (token budget + compression) —
+    // Images have their own size limits (token budget + compression + 128MB hard cap) —
     // don't apply the text maxSizeBytes cap.
-    const data = await readImageWithTokenBudget(resolvedFilePath, maxTokens)
+    const data = await readImageWithTokenBudget(
+      resolvedFilePath,
+      maxTokens,
+      undefined,
+      context.abortController.signal,
+    )
     context.nestedMemoryAttachmentTriggers?.add(fullFilePath)
 
     logFileOperation({
@@ -1578,16 +1583,53 @@ function countCharInStringLocal(s: string, ch: string): number {
  * @param maxTokens - Maximum token budget for the image
  * @returns Image data with appropriate compression applied
  */
+const IMAGE_MAX_BYTES = 134_217_728 // 128 MB (SEA O$s / Mq)
+const IMAGE_STREAM_CHUNK_BYTES = 65536
+
 /**
- * SEA `readFileBytes` / `readFileFdGated` (#44): open with `O_NOFOLLOW | O_NONBLOCK`
- * (and `lstat().isFile()` on Windows) so a symlink swapped in after path
- * resolution cannot be followed on read.
+ * SEA `readFileBytes` / `readImageStream` (`xcs` / `Q3n`): open with
+ * `O_RDONLY | O_NOFOLLOW | O_NONBLOCK` (and `lstat` on Windows) so a symlink
+ * swapped in after path resolution cannot be followed on read, regular files
+ * over 128 MB are refused, and non-regular files (pipes/devices) are bounded
+ * to 128 MB instead of reading unboundedly into memory.
  */
+/**
+ * Official `ir(promise, signal, () => new AbortError())` (#989):
+ * Race an async read against `signal` so an interrupt immediately ends a Read
+ * waiting on an idle pipe or device.
+ */
+async function raceReadWithSignal<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T> {
+  if (!signal) return promise
+  if (signal.aborted) {
+    throw new Error('Aborted')
+  }
+  return await new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      reject(new Error('Aborted'))
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      val => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(val)
+      },
+      err => {
+        signal.removeEventListener('abort', onAbort)
+        reject(err)
+      },
+    )
+  })
+}
+
 async function readImageBytesNoFollow(
   filePath: string,
   maxBytes?: number,
+  signal?: AbortSignal,
 ): Promise<Buffer> {
-  if (process.platform === 'win32') {
+  if (process.platform === 'win32' && maxBytes !== undefined) {
     if (!(await lstat(filePath)).isFile()) {
       return Buffer.alloc(0)
     }
@@ -1599,21 +1641,80 @@ async function readImageBytesNoFollow(
   const handle = await open(filePath, flags)
   try {
     const st = await handle.stat()
-    if (!st.isFile()) {
-      return Buffer.alloc(0)
+    if (maxBytes !== undefined) {
+      if (!st.isFile()) {
+        return Buffer.alloc(0)
+      }
+      const chunks: Buffer[] = []
+      let total = 0
+      const buf = Buffer.allocUnsafe(Math.min(65536, Math.max(1, maxBytes)))
+      while (total < maxBytes) {
+        if (signal?.aborted) {
+          throw new Error('Aborted')
+        }
+        const toRead = Math.min(buf.length, maxBytes - total)
+        const { bytesRead } = await handle.read(buf, 0, toRead, total)
+        if (bytesRead === 0) break
+        chunks.push(Buffer.from(buf.subarray(0, bytesRead)))
+        total += bytesRead
+      }
+      return Buffer.concat(chunks, total)
     }
-    if (maxBytes === undefined) {
-      return await handle.readFile()
+
+    if (st.isFile()) {
+      if (st.size > IMAGE_MAX_BYTES) {
+        throw new Error(
+          `File is too large to read as an image (the limit is ${formatFileSize(IMAGE_MAX_BYTES)}): ${filePath}. If it is an image, resize it or export a smaller copy, then read that.`,
+        )
+      }
+      const chunks: Buffer[] = []
+      let total = 0
+      const cap = IMAGE_MAX_BYTES + 1
+      const buf = Buffer.allocUnsafe(Math.min(IMAGE_STREAM_CHUNK_BYTES, cap))
+      while (total < cap) {
+        if (signal?.aborted) {
+          throw new Error('Aborted')
+        }
+        const toRead = Math.min(buf.length, cap - total)
+        const { bytesRead } = await handle.read(buf, 0, toRead, total)
+        if (bytesRead === 0) break
+        chunks.push(Buffer.from(buf.subarray(0, bytesRead)))
+        total += bytesRead
+      }
+      if (total > IMAGE_MAX_BYTES) {
+        throw new Error(
+          `File is too large to read as an image (the limit is ${formatFileSize(IMAGE_MAX_BYTES)}): ${filePath}. If it is an image, resize it or export a smaller copy, then read that.`,
+        )
+      }
+      return Buffer.concat(chunks, total)
     }
+
+    // Non-regular file (pipe / device): read bounded stream up to 128 MB
     const chunks: Buffer[] = []
     let total = 0
-    const buf = Buffer.allocUnsafe(Math.min(65536, Math.max(1, maxBytes)))
-    while (total < maxBytes) {
-      const toRead = Math.min(buf.length, maxBytes - total)
-      const { bytesRead } = await handle.read(buf, 0, toRead, total)
+    while (total <= IMAGE_MAX_BYTES) {
+      if (signal?.aborted) {
+        throw new Error('Aborted')
+      }
+      const chunkSize = Math.min(
+        Math.max(total, IMAGE_STREAM_CHUNK_BYTES),
+        IMAGE_MAX_BYTES + 1 - total,
+      )
+      const chunk = Buffer.allocUnsafe(chunkSize)
+      const { bytesRead } = await raceReadWithSignal(
+        handle.read(chunk, 0, chunkSize, null),
+        signal,
+      )
       if (bytesRead === 0) break
-      chunks.push(Buffer.from(buf.subarray(0, bytesRead)))
+      chunks.push(
+        bytesRead === chunkSize ? chunk : chunk.subarray(0, bytesRead),
+      )
       total += bytesRead
+    }
+    if (total > IMAGE_MAX_BYTES) {
+      throw new Error(
+        `Cannot read this as an image: ${filePath} is a pipe or a device, not a regular file, and it sent more than ${formatFileSize(IMAGE_MAX_BYTES)} without ending.`,
+      )
     }
     return Buffer.concat(chunks, total)
   } finally {
@@ -1625,9 +1726,10 @@ export async function readImageWithTokenBudget(
   filePath: string,
   maxTokens: number = getDefaultFileReadingLimits().maxTokens,
   maxBytes?: number,
+  signal?: AbortSignal,
 ): Promise<ImageResult> {
-  // Read file ONCE with O_NOFOLLOW — capped to maxBytes to avoid OOM on huge files
-  const imageBuffer = await readImageBytesNoFollow(filePath, maxBytes)
+  // Read file ONCE with O_NOFOLLOW — capped to maxBytes (or 128 MB default) to avoid OOM
+  const imageBuffer = await readImageBytesNoFollow(filePath, maxBytes, signal)
   const originalSize = imageBuffer.length
 
   if (originalSize === 0) {

@@ -113,9 +113,17 @@ function leftoverModsWatchIgnored(
 
 const ASK_CHOICES = [
   { value: 'explain' as const, label: 'How does this work?' },
-  { value: 'allow' as const, label: 'Enable for this session' },
-  { value: 'not_now' as const, label: 'Not now' },
+  { value: 'allow' as const, label: 'Turn them on' },
+  {
+    value: 'not_now' as const,
+    label: 'Not now',
+    description:
+      'New and changed mods load without asking the next time this session starts.',
+  },
 ]
+
+export const DEV_MODS_QUESTION =
+  'Turn on the mods Claude writes in this session?'
 
 type PluginDevModsAsk =
   | 'enable'
@@ -637,20 +645,22 @@ function loadWhen(when: 'now' | 'turn-end'): string {
   return when === 'now' ? 'now' : 'when this turn ends'
 }
 
-function shortQuestion(folder: string, when: 'now' | 'turn-end'): string {
-  return `Enable hot reloading for this session?\n\nMods in ${folderMarkdown(folder)} load ${loadWhen(when)} and reload when their files change. They run with your permissions.`
+function shortQuestion(_folder: string, when: 'now' | 'turn-end'): string {
+  return `${DEV_MODS_QUESTION}\n\nThey'll load ${loadWhen(when)}, and they'll reload whenever they change. A mod is code, and it runs with the same access you have here.`
 }
 
-function longQuestion(folder: string, when: 'now' | 'turn-end'): string {
+function longQuestion(_folder: string, when: 'now' | 'turn-end'): string {
   return [
-    'Enable hot reloading for this session?',
+    DEV_MODS_QUESTION,
     '',
-    `Mods live in ${folderMarkdown(folder)}.`,
-    'A mod is code Claude wrote; it runs with your permissions.',
-    `Enable: they load ${loadWhen(when)} and reload when their files change.`,
-    'Enable holds for this session, also after a restart.',
-    'Not now: they stay unloaded until this session next starts.',
-    '/plugin lists what loaded and turns it off.',
+    'A mod is a small program that changes how Claude looks or behaves here.',
+    'Claude wrote these mods, and they run with the same access you have.',
+    when === 'now'
+      ? "If you turn them on, they'll load now and reload whenever they change."
+      : "Once they're on, they load when this turn ends and reload when they change.",
+    'That lasts for the rest of this session, even if it restarts.',
+    'If you choose Not now, nothing new will load until this session next starts.',
+    "You can see what's loaded, and turn it off, with /plugin.",
   ].join('\n')
 }
 
@@ -1033,6 +1043,72 @@ function devModLoadSentence(
   }
 }
 
+function stripTrailingSentencePunct(text: string): string {
+  return text.trimEnd().replace(/[.!?]$/u, '')
+}
+
+export type DevModReloadStatusEvent =
+  | { kind: 'reloaded'; refused?: string; earlierStopped?: boolean }
+  | { kind: 'unnamed' }
+  | { kind: 'restart' }
+  | { kind: 'vetoed'; isServing: boolean }
+  | { kind: 'failed'; isServing: boolean; reason: string }
+  | { kind: 'folder-failed'; hadLoaded: boolean; reason: string }
+  | { kind: 'paused' }
+  | { kind: 'folder-paused' }
+  | { kind: 'removed'; stayedLoaded: boolean }
+
+/** Upstream v2.1.304 `Yfo` / `Vfo` — human-readable mod status lines. */
+export function formatDevModReloadStatus(
+  event: DevModReloadStatusEvent,
+): string | undefined {
+  switch (event.kind) {
+    case 'reloaded':
+      if (event.refused === undefined) {
+        return 'This mod reloaded after a change to its files.'
+      }
+      return event.earlierStopped
+        ? `This mod didn't load, and the earlier version is no longer running: ${stripTrailingSentencePunct(event.refused)}.`
+        : `This mod didn't load: ${stripTrailingSentencePunct(event.refused)}.`
+    case 'unnamed':
+      return 'This mod no longer names any code to run, so nothing of it is running.'
+    case 'restart':
+      return "This mod changed in a way that needs a restart. It'll load the next time this session starts."
+    case 'vetoed':
+      return event.isServing
+        ? 'A change to this mod was blocked by one of your hooks, so the earlier version is still running.'
+        : undefined
+    case 'failed':
+      return event.isServing
+        ? `This mod's change didn't load, so the earlier version is still running: ${stripTrailingSentencePunct(event.reason)}.`
+        : undefined
+    case 'folder-failed':
+      return event.hadLoaded
+        ? `Couldn't reload: ${stripTrailingSentencePunct(event.reason)}. The earlier versions are still running.`
+        : undefined
+    case 'paused':
+      return 'This mod is changing very often, so reloading is paused. The latest version loads once the changes stop.'
+    case 'folder-paused':
+      return undefined
+    case 'removed':
+      return event.stayedLoaded
+        ? 'This mod was removed. It stays loaded until this session restarts.'
+        : "This mod was removed, so it's no longer loaded."
+  }
+}
+
+/** Upstream v2.1.304 `tbo` — distinguish kept previous version on reload failure. */
+export function formatDevModReloadFailure(
+  name: string,
+  error: unknown,
+  previousVersionKept: boolean,
+): string {
+  const detail = leftoverWae(name, error)
+  return previousVersionKept
+    ? `reload failed, the previous version stays loaded: ${detail}`
+    : `reload failed: ${detail}`
+}
+
 function devModLine(outcome: DevModLoad, loaded: boolean): string | undefined {
   if (outcome === 'failed') return undefined
   if (outcome === 'held') {
@@ -1043,11 +1119,11 @@ function devModLine(outcome: DevModLoad, loaded: boolean): string | undefined {
   }
   if (outcome === 'kept-out') {
     return loaded
-      ? "loaded from this session's mods folder"
+      ? 'This mod is now loaded.'
       : "in this session's mods folder, not loaded; /plugin shows why"
   }
   return loaded
-    ? "loaded from this session's mods folder"
+    ? 'This mod is now loaded.'
     : "in this session's mods folder, not loaded; /plugin shows why"
 }
 
@@ -1230,14 +1306,16 @@ async function reloadDevMods(): Promise<DevModLoad> {
     return 'reloaded'
   } catch (error) {
     activeDevModStampTracker.markReloaded(false)
+    const msg = errorMessage(error)
+    leftoverUiLog(
+      'dev-mods',
+      formatDevModReloadFailure('dev-mods', error, true),
+    )
     try {
       const { logForDebugging } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         require('../debug.js') as typeof import('../debug.js')
-      const { errorMessage } =
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require('../errors.js') as typeof import('../errors.js')
-      logForDebugging(`dev mods: reload failed: ${errorMessage(error)}`, {
+      logForDebugging(`dev mods: reload failed: ${msg}`, {
         level: 'error',
       })
     } catch {
@@ -1605,16 +1683,7 @@ function leftoverWatchDevModsFolder(
       unpickedCount -= 1
     }
     lastWasUnpicked = false
-    if (
-      !(askAbort !== undefined && !askAbort.signal.aborted && askedByPersonTurn)
-    ) {
-      return
-    }
-    askAbort.abort()
-    if (!unansweredSent) {
-      unansweredSent = true
-      deps.unanswered()
-    }
+    // Upstream v2.1.304 (#1014): the prompt stays up when a new turn starts.
   })
   const offEnd = deps.turn.onEnd(() => {
     void runSafe(onTurnEnd)

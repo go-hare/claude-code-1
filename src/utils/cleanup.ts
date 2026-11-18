@@ -1445,7 +1445,48 @@ export async function cleanupOldVersionsThrottled(): Promise<void> {
   }
 }
 
+/**
+ * #1012 (official `ge(e = tOe)`): await `settings.read` hooks (up to `timeoutMs`)
+ * before a retention sweep reads `cleanupPeriodDays`, so a managed mod can
+ * enforce an organization ceiling on retention.
+ */
+export async function waitForSettingsReadHooksForRetentionSweep(
+  timeoutMs = 5000,
+  runMerge?: () => Promise<void>,
+): Promise<'asked' | 'timeout'> {
+  const mergeFn =
+    runMerge ??
+    (async () => {
+      const { scheduleEngineSettingsMerge } = await import(
+        './plugins/functionHooksModules.js'
+      )
+      await scheduleEngineSettingsMerge('a retention sweep starts')
+    })
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const settled = await Promise.race([
+      mergeFn()
+        .catch(() => {})
+        .then(() => 'asked' as const),
+      new Promise<'timeout'>(resolve => {
+        timer = setTimeout(() => resolve('timeout'), timeoutMs)
+        timer.unref?.()
+      }),
+    ])
+    if (settled === 'timeout') {
+      logForDebugging(
+        `Retention cleanup: the settings.read hooks were not asked within ${timeoutMs} ms; the sweep begins on the merge as last held.`,
+      )
+    }
+    return settled
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
 export async function cleanupOldMessageFilesInBackground(): Promise<void> {
+  await waitForSettingsReadHooksForRetentionSweep()
+
   // densable Jrt / $te: if settings have validation errors but a retention
   // key was explicitly set, skip rather than falling back to defaults.
   const { errors } = getSettingsWithAllErrors()

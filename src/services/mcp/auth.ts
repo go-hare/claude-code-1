@@ -34,15 +34,200 @@ import { errorMessage, getErrnoCode } from '../../utils/errors.js'
 import * as lockfile from '../../utils/lockfile.js'
 import { logMCPDebug } from '../../utils/log.js'
 import { getPlatform } from '../../utils/platform.js'
-import { getSecureStorage } from '../../utils/secureStorage/index.js'
+import {
+  getSecureStorage,
+  SECURE_STORAGE_READ_FAILED,
+  type SecureStorageReadFailed,
+} from '../../utils/secureStorage/index.js'
 import { clearKeychainCache } from '../../utils/secureStorage/macOsKeychainHelpers.js'
 import type { SecureStorageData } from '../../utils/secureStorage/types.js'
 import { sleep } from '../../utils/sleep.js'
 import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
 import { logEvent } from '../analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../analytics/metadata.js'
+import { McpCredentialStoreUnavailableError } from './connectionHelpers.js'
 import { emitMcpNeedsReauth } from './mcpReauthSignal.js'
 import { getMcpServerHeaders } from './headersHelper.js'
+
+const KEYCHAIN_STRICT_FAILED_TTL_MS = 1000
+const KEYCHAIN_STRICT_EMPTY_TTL_MS = 30_000
+
+type StrictReadProbeState = {
+  inFlight: Promise<SecureStorageData | null | SecureStorageReadFailed> | null
+  verdict: 'failed' | 'empty' | undefined
+  settledAt: number
+  seenPopulated: boolean
+  generation: number
+  keychainOnly: {
+    inFlight: Promise<SecureStorageData | null | SecureStorageReadFailed> | null
+    verdict: 'failed' | 'answered' | undefined
+    settledAt: number
+  }
+}
+
+function createStrictReadProbeState(): StrictReadProbeState {
+  return {
+    inFlight: null,
+    verdict: undefined,
+    settledAt: 0,
+    seenPopulated: false,
+    generation: 0,
+    keychainOnly: {
+      inFlight: null,
+      verdict: undefined,
+      settledAt: 0,
+    },
+  }
+}
+
+let strictReadProbeState: StrictReadProbeState = createStrictReadProbeState()
+
+export function resetCredentialStoreStrictProbeState(): void {
+  strictReadProbeState = createStrictReadProbeState()
+}
+
+function isEmptyStorageResult(
+  data: SecureStorageData | null | undefined | SecureStorageReadFailed,
+): data is null | undefined {
+  return (
+    data !== SECURE_STORAGE_READ_FAILED &&
+    (!data || Object.keys(data).length === 0)
+  )
+}
+
+function markStoragePopulated(state: StrictReadProbeState): void {
+  state.seenPopulated = true
+  state.generation++
+  if (state.verdict === 'empty') {
+    state.verdict = undefined
+  }
+}
+
+async function runStrictStorageProbe(
+  state: StrictReadProbeState,
+  probe: () => Promise<SecureStorageData | null | SecureStorageReadFailed>,
+): Promise<SecureStorageData | null | SecureStorageReadFailed> {
+  try {
+    const gen = state.generation
+    const result = await probe()
+    if (
+      result !== SECURE_STORAGE_READ_FAILED &&
+      !isEmptyStorageResult(result)
+    ) {
+      state.verdict = undefined
+      markStoragePopulated(state)
+    } else if (gen !== state.generation) {
+      return result
+    } else {
+      state.verdict = result === SECURE_STORAGE_READ_FAILED ? 'failed' : 'empty'
+    }
+    state.settledAt = Date.now()
+    return result
+  } finally {
+    state.inFlight = null
+  }
+}
+
+/**
+ * Gold `t6`: reads secure storage with `readAsyncStrict` fallback when
+ * `readAsync()` returns empty/null, distinguishing a locked/unavailable
+ * keychain (`SECURE_STORAGE_READ_FAILED`) from genuinely absent credentials.
+ */
+export async function readMcpCredentialStore(probe?: {
+  serverName: string
+  serverConfig: McpHTTPServerConfig | McpSSEServerConfig
+  challenged: boolean
+}): Promise<SecureStorageData | null | SecureStorageReadFailed> {
+  const storage = getSecureStorage()
+  if (probe !== undefined) {
+    const keychainOnly = strictReadProbeState.keychainOnly
+    const answeredFresh =
+      keychainOnly.verdict === 'answered' &&
+      Date.now() - keychainOnly.settledAt < KEYCHAIN_STRICT_EMPTY_TTL_MS
+    const base = await readMcpCredentialStore()
+    const readStrict = storage.readAsyncStrict
+    if (base === SECURE_STORAGE_READ_FAILED || !readStrict || answeredFresh) {
+      return base
+    }
+    const serverKey = getServerKey(probe.serverName, probe.serverConfig)
+    const existing = base?.mcpOAuth?.[serverKey]
+    if (
+      existing?.accessToken ||
+      existing?.refreshToken ||
+      !probe.challenged ||
+      process.platform !== 'darwin'
+    ) {
+      return base
+    }
+    if (
+      keychainOnly.verdict === 'failed' &&
+      Date.now() - keychainOnly.settledAt < KEYCHAIN_STRICT_FAILED_TTL_MS
+    ) {
+      return SECURE_STORAGE_READ_FAILED
+    }
+    keychainOnly.inFlight ??= readStrict
+      .call(storage, undefined, { inaccessibleAs: 'failure' })
+      .then(result => {
+        keychainOnly.verdict =
+          result === SECURE_STORAGE_READ_FAILED ? 'failed' : 'answered'
+        keychainOnly.settledAt = Date.now()
+        return result
+      })
+      .finally(() => {
+        keychainOnly.inFlight = null
+      })
+    const strict = await keychainOnly.inFlight
+    if (strict === SECURE_STORAGE_READ_FAILED || !probe.challenged) {
+      return strict ?? base
+    }
+    const found = strict?.mcpOAuth?.[serverKey]
+    if (!found?.accessToken && !found?.refreshToken) {
+      return strict ?? base
+    }
+    logMCPDebug(
+      probe.serverName,
+      'Stored credentials turned up only after the server challenged a request sent without them; failing that request so the next one sends them',
+    )
+    throw new McpCredentialStoreUnavailableError(
+      probe.serverName,
+      'read-too-late',
+    )
+  }
+
+  const data = await storage.readAsync()
+  const readStrict = storage.readAsyncStrict
+  if (!isEmptyStorageResult(data)) {
+    markStoragePopulated(strictReadProbeState)
+    return data
+  }
+  if (!readStrict) {
+    return data
+  }
+  const elapsed = Date.now() - strictReadProbeState.settledAt
+  if (
+    strictReadProbeState.verdict === 'failed' &&
+    elapsed < KEYCHAIN_STRICT_FAILED_TTL_MS
+  ) {
+    return strictReadProbeState.seenPopulated
+      ? SECURE_STORAGE_READ_FAILED
+      : data
+  }
+  if (
+    strictReadProbeState.verdict === 'empty' &&
+    elapsed < KEYCHAIN_STRICT_EMPTY_TTL_MS
+  ) {
+    return data
+  }
+  strictReadProbeState.inFlight ??= runStrictStorageProbe(
+    strictReadProbeState,
+    () => readStrict.call(storage),
+  )
+  const strict = await strictReadProbeState.inFlight
+  return strict === SECURE_STORAGE_READ_FAILED &&
+    !strictReadProbeState.seenPopulated
+    ? data
+    : strict
+}
 
 function oauthErrorCodeOf(error: unknown): string | undefined {
   if (!error || typeof error !== 'object') return undefined
@@ -1936,6 +2121,26 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
     }
   }
 
+  async readCredentialStore(): Promise<SecureStorageData | null> {
+    const data = await readMcpCredentialStore(
+      this.handleRedirection
+        ? undefined
+        : {
+            serverName: this.serverName,
+            serverConfig: this.serverConfig,
+            challenged: this.authChallengeOpen,
+          },
+    )
+    if (data === SECURE_STORAGE_READ_FAILED) {
+      logMCPDebug(
+        this.serverName,
+        'Credential store could not be read (the login keychain may be locked); not reporting credentials as absent',
+      )
+      throw new McpCredentialStoreUnavailableError(this.serverName)
+    }
+    return data
+  }
+
   async state(): Promise<string> {
     // Generate state if not already generated for this instance
     if (!this._state) {
@@ -1946,8 +2151,7 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
   }
 
   async clientInformation(): Promise<OAuthClientInformation | undefined> {
-    const storage = getSecureStorage()
-    const data = storage.read()
+    const data = await this.readCredentialStore()
     const serverKey = getServerKey(this.serverName, this.serverConfig)
 
     // Check session credentials first (from DCR or previous auth)
@@ -2013,8 +2217,7 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
     // _commonHeaders on every request, and forcing a cache miss would trigger
     // a blocking spawnSync(`security find-generic-password`) 30-40x/sec.
     // See CPU profile: spawnSync was 7.2% of total CPU after PR #19436.
-    const storage = getSecureStorage()
-    const data = await storage.readAsync()
+    const data = await this.readCredentialStore()
     const serverKey = getServerKey(this.serverName, this.serverConfig)
 
     const tokenData = data?.mcpOAuth?.[serverKey]
@@ -2536,6 +2739,9 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
   }
 
   async discoveryState(): Promise<OAuthDiscoveryState | undefined> {
+    if (this.authChallengeOpen) {
+      await this.readCredentialStore()
+    }
     const storage = getSecureStorage()
     const data = storage.read()
     const serverKey = getServerKey(this.serverName, this.serverConfig)

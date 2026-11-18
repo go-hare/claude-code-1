@@ -360,6 +360,53 @@ export function hasCompactSummaryTag(summary: string): boolean {
   )
 }
 
+const VALID_SUMMARY_TOOL_NAME_RE = /^[A-Za-z0-9_.:-]{1,256}$/
+const UNREADABLE_SUMMARY_TOOL_NAME = 'unreadable-tools-used-before-summary'
+export const TOOLS_USED_BEFORE_SUMMARY_TAG = 'tools-used-before-summary'
+
+function sanitizeToolNameForSummary(name: string): string {
+  return VALID_SUMMARY_TOOL_NAME_RE.test(name)
+    ? name
+    : UNREADABLE_SUMMARY_TOOL_NAME
+}
+
+export function formatToolsUsedBeforeSummaryTag(
+  names: readonly string[],
+): string {
+  return `<${TOOLS_USED_BEFORE_SUMMARY_TAG}>${names.map(sanitizeToolNameForSummary).join(', ')}</${TOOLS_USED_BEFORE_SUMMARY_TAG}>`
+}
+
+export function formatToolsUsedBeforeSummaryReminder(
+  names: readonly string[],
+): string {
+  return `<system-reminder>\n${formatToolsUsedBeforeSummaryTag(names)}\n</system-reminder>`
+}
+
+export function collectToolNamesUsedBeforeCompact(
+  messages: ReadonlyArray<{
+    type?: string
+    message?: { content?: unknown }
+  }>,
+): string[] {
+  const names = new Set<string>()
+  for (const msg of messages) {
+    if (msg.type !== 'assistant') continue
+    const content = msg.message?.content
+    if (!Array.isArray(content)) continue
+    for (const block of content) {
+      if (
+        block &&
+        typeof block === 'object' &&
+        (block as { type?: unknown }).type === 'tool_use' &&
+        typeof (block as { name?: unknown }).name === 'string'
+      ) {
+        names.add((block as { name: string }).name)
+      }
+    }
+  }
+  return Array.from(names).sort()
+}
+
 export type CompactUserSummaryOptions = {
   suppressFollowUpQuestions?: boolean
   transcriptPath?: string
@@ -367,6 +414,7 @@ export type CompactUserSummaryOptions = {
   foreignArtifactContent?: boolean
   headTruncated?: boolean
   isTranscriptSuppressed?: boolean
+  toolNamesUsed?: readonly string[]
 }
 
 export const COMPACT_FOREIGN_ARTIFACT_NOTICE =
@@ -419,14 +467,19 @@ export function getCompactUserSummaryMessage(
     foreignArtifactContent,
     headTruncated,
     isTranscriptSuppressed = false,
+    toolNamesUsed,
   } = opts
 
   const formattedSummary = formatCompactSummary(summary)
   const prefix = formatForeignArtifactPrefix(foreignArtifactContent === true)
+  const toolsBlock =
+    toolNamesUsed !== undefined
+      ? `${formatToolsUsedBeforeSummaryReminder(toolNamesUsed)}\n`
+      : ''
 
   let baseSummary = `${prefix}This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.
 
-${formattedSummary}`
+${toolsBlock}${formattedSummary}`
 
   if (transcriptPath && !isTranscriptSuppressed) {
     baseSummary += `\n\nIf you need specific details from before compaction (like exact code snippets, error messages, or content you generated), read the full transcript at: ${transcriptPath}`

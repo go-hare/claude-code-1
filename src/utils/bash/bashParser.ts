@@ -120,6 +120,9 @@ type Lexer = {
   byteTable: Uint32Array | null
   /** #78 SEA: `[[(` or `[\\\n[(` zsh vs bash conditional paren diff */
   zshCondParenDiff: boolean
+  /** SEA `dollarEnds` (@284375083) — char index of `$` -> char index after closer */
+  dollarEnds: Map<number, number>
+  dollarStarts: number[]
 }
 
 type HeredocPending = {
@@ -142,6 +145,24 @@ function makeLexer(src: string): Lexer {
     heredocs: [],
     byteTable: null,
     zshCondParenDiff: false,
+    dollarEnds: new Map(),
+    dollarStarts: [],
+  }
+}
+
+function recordDollarEnd(L: Lexer, startChar: number, endChar: number): void {
+  L.dollarEnds.set(startChar, endChar)
+  L.dollarStarts.push(startChar)
+}
+
+function pruneDollarEnds(L: Lexer): void {
+  for (
+    let s = L.dollarStarts.at(-1);
+    s !== undefined && s >= L.i;
+    s = L.dollarStarts.at(-1)
+  ) {
+    L.dollarEnds.delete(s)
+    L.dollarStarts.pop()
   }
 }
 
@@ -620,6 +641,8 @@ type ParseState = {
   zshBraceDiff: boolean
   dollarOperandDiff: boolean
   zshMathDiff: boolean
+  zshMathClosesAlike: boolean
+  inForHead: boolean
 }
 
 const DOLLAR_OPERAND_DIFF_RE = /\$\$[({[]/
@@ -646,6 +669,8 @@ function parseSource(source: string, timeoutMs?: number): TsNode | null {
     zshBraceDiff: source.includes('$\\\n'),
     dollarOperandDiff: DOLLAR_OPERAND_DIFF_RE.test(source),
     zshMathDiff: false,
+    zshMathClosesAlike: false,
+    inForHead: false,
   }
   try {
     const program = parseProgram(P)
@@ -667,7 +692,7 @@ function parseSource(source: string, timeoutMs?: number): TsNode | null {
         if (
           m[2] !== undefined &&
           (dollarCount - (bsCount % 2)) % 2 === 1 &&
-          (hasLineCont || m[2] === '[')
+          (hasLineCont || !P.L.dollarEnds.has(dollarEndCharIdx))
         ) {
           diffOffsets.push(byteAt(P.L, dollarEndCharIdx))
         }
@@ -831,6 +856,177 @@ function saveLex(L: Lexer): LexSave {
 function restoreLex(L: Lexer, s: LexSave): void {
   L.i = s & 0xffff
   L.b = s >>> 16
+  pruneDollarEnds(L)
+}
+
+const SAFE_ZSH_MATH_RE =
+  /^(?!.*<<)(?:[\w\s$+\-*/%<>=!&|^~?:,.()[\];]|\$\{#?\w+\})*$/s
+
+/** SEA `Me` (@284375083+) — find zsh's math closer index or -1 */
+function findZshMathClose(
+  src: string,
+  start: number,
+  targetClose: string,
+  dollarEnds: Map<number, number>,
+  inForHead: boolean,
+): number {
+  const trackNest = inForHead || targetClose === ')' || targetClose === ']'
+  let parenDepth = 0
+  let bracketDepth = 0
+  let braceDepth = 0
+  let i = start
+  while (i < src.length) {
+    let ch = src[i]!
+    i++
+    if (
+      ch === targetClose &&
+      braceDepth === 0 &&
+      !(trackNest && (parenDepth > 0 || bracketDepth > 0))
+    ) {
+      return i - 1
+    }
+    if (ch === '\\') {
+      const next = src[i]
+      i++
+      if (
+        next === '\n' ||
+        next === '$' ||
+        next === '\\' ||
+        next === '`' ||
+        next === targetClose ||
+        (next === '}' && braceDepth > 0) ||
+        (targetClose === ']' && next !== undefined && '[](){}'.includes(next))
+      ) {
+        continue
+      }
+      ch = next ?? ''
+    }
+    switch (ch) {
+      case '$': {
+        const next = src[i]
+        if (next === '(' || next === '[') {
+          const endIdx = dollarEnds.get(i - 1)
+          if (endIdx === undefined) return -1
+          i = endIdx
+        } else if (next === '{') {
+          i++
+          braceDepth++
+        } else if (next === '$') {
+          i++
+        }
+        break
+      }
+      case '}':
+        if (braceDepth > 0) braceDepth--
+        break
+      case '`':
+        return -1
+      case '(':
+        if (!trackNest || braceDepth === 0) parenDepth++
+        break
+      case ')':
+        if (!trackNest || braceDepth === 0) {
+          if (trackNest && parenDepth === 0) return -1
+          parenDepth--
+        }
+        break
+      case '[':
+        if (!trackNest || braceDepth === 0) bracketDepth++
+        break
+      case ']':
+        if (!trackNest || braceDepth === 0) {
+          if (trackNest && bracketDepth === 0) return -1
+          bracketDepth--
+        }
+        break
+      case '"': {
+        if (targetClose !== '"' && braceDepth === 0) break
+        if (braceDepth === 0) return -1
+        const inner = findZshMathClose(src, i, '"', dollarEnds, inForHead)
+        if (inner < 0) return inner
+        i = inner + 1
+        break
+      }
+    }
+  }
+  return -1
+}
+
+/** SEA `we` (@284443200) */
+function checkZshMathCloser(
+  P: ParseState,
+  startChar: number,
+  targetClose: string,
+  doubleParen: boolean,
+): number {
+  const L = P.L
+  const zshClose = findZshMathClose(
+    L.src,
+    startChar,
+    targetClose,
+    L.dollarEnds,
+    P.inForHead,
+  )
+  const bashClosed =
+    peek(L) === targetClose && (!doubleParen || peek(L, 1) === ')')
+  const diff =
+    zshClose < L.i ||
+    (bashClosed && zshClose !== L.i) ||
+    (doubleParen && L.src[zshClose + 1] !== ')') ||
+    !SAFE_ZSH_MATH_RE.test(L.src.slice(L.i, zshClose)) ||
+    (!bashClosed && /["']/.test(L.src.slice(startChar, zshClose)))
+  P.zshMathDiff ||= diff
+  P.zshMathClosesAlike = !diff
+  return zshClose
+}
+
+/** SEA `At` (@284443390) */
+function advanceToZshMathCloser(
+  P: ParseState,
+  zshClose: number,
+  doubleParen: boolean,
+): boolean {
+  const L = P.L
+  if (
+    !P.zshMathClosesAlike ||
+    zshClose < L.i ||
+    (doubleParen && L.src[zshClose + 1] !== ')')
+  ) {
+    return false
+  }
+  while (L.i < zshClose) advance(L)
+  return true
+}
+
+/** SEA `ht` (@284443510) */
+function noteZshMathGap(P: ParseState, zshClose: number): void {
+  if (P.L.i !== zshClose) P.zshMathDiff = true
+}
+
+/** SEA `pt` (@284442760) */
+function skipBalancedTo(P: ParseState, save: LexSave, closeTok: string): void {
+  restoreLex(P.L, save)
+  let depth = 0
+  while (P.L.i < P.L.len) {
+    const ch = peek(P.L)
+    if (closeTok === '))' || closeTok === ')') {
+      if (ch === '(') depth++
+      else if (ch === ')') {
+        if (depth === 0) {
+          if (closeTok === ')' || peek(P.L, 1) === ')') return
+        } else {
+          depth--
+        }
+      }
+    } else if (closeTok === ']') {
+      if (ch === '[') depth++
+      else if (ch === ']') {
+        if (depth === 0) return
+        depth--
+      }
+    }
+    advance(P.L)
+  }
 }
 
 /**
@@ -1118,15 +1314,24 @@ function parseCommand(P: ParseState): TsNode | null {
 
   if (t.type === 'OP' && t.value === '((') {
     const open = leaf(P, '((', t)
+    const startChar = P.L.i
     const exprs = parseArithCommaList(P, '))', 'var')
+    skipBlanks(P.L)
+    const zshClose = checkZshMathCloser(P, startChar, ')', true)
+    const kids: TsNode[] = [open, ...exprs]
+    if (
+      (peek(P.L) !== ')' || peek(P.L, 1) !== ')') &&
+      advanceToZshMathCloser(P, zshClose, true)
+    ) {
+      kids.push(mk(P, '))', open.endIndex, open.endIndex, []))
+    }
     const closeTok = nextToken(P.L, 'cmd')
     const close =
       closeTok.value === '))'
         ? leaf(P, '))', closeTok)
         : mk(P, '))', open.endIndex, open.endIndex, [])
     return mk(P, 'compound_statement', open.startIndex, close.endIndex, [
-      open,
-      ...exprs,
+      ...kids,
       close,
     ])
   }
@@ -2498,15 +2703,24 @@ function parseDoubleQuoted(P: ParseState): TsNode {
 function parseDollarLike(P: ParseState): TsNode | null {
   const c1 = peek(P.L, 1)
   const dStart = P.L.b
+  const dChar = P.L.i
   if (c1 === '(' && peek(P.L, 2) === '(') {
     // $(( arithmetic ))
     advance(P.L)
     advance(P.L)
     advance(P.L)
     const open = mk(P, '$((', dStart, P.L.b, [])
+    const bodySave = saveLex(P.L)
+    const startChar = P.L.i
     const exprs = parseArithCommaList(P, '))', 'var')
     skipBlanks(P.L)
+    const zshClose = checkZshMathCloser(P, startChar, ')', true)
     let close: TsNode
+    if (peek(P.L) !== ')' || peek(P.L, 1) !== ')') {
+      skipBalancedTo(P, bodySave, '))')
+      noteZshMathGap(P, zshClose)
+    }
+    recordDollarEnd(P.L, dChar, P.L.i + 2)
     if (peek(P.L) === ')' && peek(P.L, 1) === ')') {
       const cStart = P.L.b
       advance(P.L)
@@ -2526,9 +2740,17 @@ function parseDollarLike(P: ParseState): TsNode | null {
     advance(P.L)
     advance(P.L)
     const open = mk(P, '$[', dStart, P.L.b, [])
+    const bodySave = saveLex(P.L)
+    const startChar = P.L.i
     const exprs = parseArithCommaList(P, ']', 'var')
     skipBlanks(P.L)
+    const zshClose = checkZshMathCloser(P, startChar, ']', false)
     let close: TsNode
+    if (peek(P.L) !== ']') {
+      skipBalancedTo(P, bodySave, ']')
+      noteZshMathGap(P, zshClose)
+    }
+    recordDollarEnd(P.L, dChar, P.L.i + 1)
     if (peek(P.L) === ']') {
       const cStart = P.L.b
       advance(P.L)
@@ -3279,17 +3501,37 @@ function parseFor(P: ParseState, forTok: Token): TsNode {
     // init; cond; update — all three use 'assign' mode so `c = expr` emits
     // variable_assignment, while bare idents (c in `c<=5`) → word. Each
     // clause may be a comma-separated list.
-    for (let k = 0; k < 3; k++) {
-      skipBlanks(P.L)
-      const es = parseArithCommaList(P, k < 2 ? ';' : '))', 'assign')
-      kids.push(...es)
-      if (k < 2) {
-        if (peek(P.L) === ';') {
-          const s = P.L.b
-          advance(P.L)
-          kids.push(mk(P, ';', s, P.L.b, []))
+    const prevInForHead = P.inForHead
+    P.inForHead = true
+    try {
+      for (let k = 0; k < 3; k++) {
+        skipBlanks(P.L)
+        const clauseStart = P.L.i
+        const es = parseArithCommaList(P, k < 2 ? ';' : '))', 'assign')
+        kids.push(...es)
+        skipBlanks(P.L)
+        const targetClose = k < 2 ? ';' : ')'
+        const zshClose = checkZshMathCloser(
+          P,
+          clauseStart,
+          targetClose,
+          k === 2,
+        )
+        const bashAtClose =
+          k < 2 ? peek(P.L) === ';' : peek(P.L) === ')' && peek(P.L, 1) === ')'
+        if (!bashAtClose && advanceToZshMathCloser(P, zshClose, k === 2)) {
+          kids.push(mk(P, 'ERROR', P.L.b, P.L.b, []))
+        }
+        if (k < 2) {
+          if (peek(P.L) === ';') {
+            const s = P.L.b
+            advance(P.L)
+            kids.push(mk(P, ';', s, P.L.b, []))
+          }
         }
       }
+    } finally {
+      P.inForHead = prevInForHead
     }
     skipBlanks(P.L)
     if (peek(P.L) === ')' && peek(P.L, 1) === ')') {

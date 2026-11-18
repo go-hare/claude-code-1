@@ -19,7 +19,20 @@ import {
   subscribeKittyGraphicsSupported,
   KITTY_SINK_REFUSED,
 } from '../utils/plugins/kittyGraphics.js';
-import { Jk, tD, type TerminalCapabilityReading } from '../../packages/@ant/ink/src/core/terminalCapabilities.js';
+import {
+  encodeIterm2InlineImage,
+  iterm2PlaceholderGrid,
+  rgbaToPngBase64,
+} from '../../packages/@ant/ink/src/core/iterm2Image.js';
+import {
+  getImageProtocol,
+  Jk,
+  subscribeImageProtocol,
+  tD,
+  type ImageProtocol,
+  type TerminalCapabilityReading,
+} from '../../packages/@ant/ink/src/core/terminalCapabilities.js';
+import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
 
 export function isKittyReferenceSource(source: unknown): boolean {
   return (
@@ -27,29 +40,93 @@ export function isKittyReferenceSource(source: unknown): boolean {
   );
 }
 
-/** densable 2.1.289 `mo` — Image blit refusal diagnostics. */
+function isPngImageSource(source: unknown): source is { png: string } {
+  return source !== null && typeof source === 'object' && typeof (source as { png?: unknown }).png === 'string';
+}
+
+function isRgbaImageSource(source: unknown): source is { rgba: string; width: number; height: number } {
+  if (source === null || typeof source !== 'object') return false;
+  const s = source as { rgba?: unknown; width?: unknown; height?: unknown };
+  return typeof s.rgba === 'string' && typeof s.width === 'number' && typeof s.height === 'number';
+}
+
+/** Official 2.1.305 `b` (#1054): iTerm2 inline images gate (requires fullscreen without full-repaint). */
+export function getItermInlineImagesReading(): TerminalCapabilityReading {
+  const reading = tD().get('itermImages');
+  if (reading.state !== 'settled' || !reading.value) return reading;
+  if (!isFullscreenEnvEnabled()) {
+    return {
+      state: 'settled',
+      value: false,
+      source:
+        "Claude Code's classic renderer would send the picture again for every new line; fullscreen rendering (/tui fullscreen) draws it",
+    };
+  }
+  if (process.env.CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT) {
+    return {
+      state: 'settled',
+      value: false,
+      source:
+        'CLAUDE_CODE_ALT_SCREEN_FULL_REPAINT is set, so every frame repaints the screen and would send the picture again each time',
+    };
+  }
+  return reading;
+}
+
+/** Official 2.1.305 `u9i` (#1054) — Image blit refusal diagnostics (kitty + iTerm2). */
 export function describeImageBlitRefusal(input: {
   hasRoot: boolean;
   placeholders: TerminalCapabilityReading;
+  inlineImages?: TerminalCapabilityReading;
   hasId: boolean;
   isReference: boolean;
   files: ReturnType<ReturnType<typeof Jk>['imageFiles']['get']>;
 }): string | undefined {
-  const { hasRoot, placeholders, hasId, isReference, files } = input;
+  const { hasRoot, placeholders, inlineImages, hasId, isReference, files } = input;
   const hasPlaceholders = placeholders.state === 'settled' && placeholders.value;
+  const hasInline = !hasPlaceholders && inlineImages?.state === 'settled' && inlineImages.value;
   const canReadFiles = !isReference || (files.state === 'settled' && files.value);
   const filesPending = !canReadFiles && files.state !== 'settled';
   const filesSource = files.state === 'settled' ? files.source : '';
   if (!hasRoot) return 'the Image is not drawn under a terminal root';
-  if (!hasPlaceholders) {
+  if (!hasPlaceholders && !hasInline) {
+    if (inlineImages !== undefined) {
+      return `the Image draws its alt here: the terminal draws neither kitty placeholder images (${placeholders.source}) nor iTerm2 inline images (${inlineImages.source})`;
+    }
     return `the Image draws its alt here: the terminal draws no placeholder images (${placeholders.source})`;
   }
   if (!hasId) return 'the Image draws its alt here: every 8-bit image id is in use';
+  if (hasInline) {
+    return isReference
+      ? 'the Image draws its alt here: iTerm2 inline images carry bytes and read no file or shared-memory name; send the picture as png or rgba bytes to draw it here'
+      : undefined;
+  }
   if (filesPending) {
     return 'the terminal has not yet said whether it reads files on this machine; asked now, blit again';
   }
   if (canReadFiles) return undefined;
   return `the Image draws its alt here: this terminal cannot read files on this machine (${filesSource}); a { file } or { shm } source shows nothing, bytes still draw`;
+}
+
+function encodeImageTransmit(
+  protocol: ImageProtocol,
+  imageId: number,
+  source: unknown,
+  columns: number,
+  rows: number,
+): string {
+  if (protocol === 'iterm') {
+    if (isKittyReferenceSource(source)) {
+      throw new TypeError('iTerm2 image: a file or shm source is not sent');
+    }
+    const pngBase64 = isPngImageSource(source)
+      ? source.png
+      : isRgbaImageSource(source)
+        ? rgbaToPngBase64(source.rgba, source.width, source.height)
+        : '';
+    return encodeIterm2InlineImage({ pngBase64, columns, rows });
+  }
+  return encodeKittyTransmit(imageId, source, columns, rows);
 }
 
 /** densable `ko` — waiting palette retry. */
@@ -228,9 +305,10 @@ export type PluginImageProps = {
 export function PluginImage(props: PluginImageProps): ReactNode {
   const { plugin, requestId, elementKey, source: initialSource, columns, rows, alt = 'image' } = props;
   const { terminalImages } = useApp();
-  const [allocated, setAllocated] = useState<{ id: number; images: NonNullable<typeof terminalImages> } | undefined>(
-    undefined,
-  );
+  const [protocol, setProtocol] = useState<ImageProtocol | undefined>(() => getImageProtocol());
+  const [allocated, setAllocated] = useState<
+    { id: number; images: NonNullable<typeof terminalImages>; protocol: ImageProtocol } | undefined
+  >(undefined);
   const [kittyId, setKittyId] = useState<number | undefined>(undefined);
   const [kittyProbe, setKittyProbe] = useState(0);
   const transmittedRef = useRef<{
@@ -240,49 +318,76 @@ export function PluginImage(props: PluginImageProps): ReactNode {
   }>({ sourceKey: undefined, source: undefined, box: undefined });
   const imageColumns = columns;
   const imageRows = rows;
+  const activeProtocol = allocated?.protocol ?? protocol;
   const placeholder = useMemo(() => {
     if (kittyId === undefined) return undefined;
     try {
-      return kittyPlaceholderGrid(kittyId, imageColumns, imageRows);
+      return activeProtocol === 'iterm'
+        ? iterm2PlaceholderGrid(kittyId, imageColumns, imageRows)
+        : kittyPlaceholderGrid(kittyId, imageColumns, imageRows);
     } catch {
       return undefined;
     }
-  }, [kittyId, imageColumns, imageRows]);
+  }, [kittyId, activeProtocol, imageColumns, imageRows]);
   const placeholderFailed = kittyId !== undefined && placeholder === undefined;
 
   useEffect(() => {
-    return subscribeKittyGraphicsSupported(() => {
+    const unsubKitty = subscribeKittyGraphicsSupported(() => {
       setKittyProbe(n => n + 1);
     });
+    const unsubProto = subscribeImageProtocol(next => {
+      setProtocol(next);
+    });
+    return () => {
+      unsubKitty();
+      unsubProto();
+    };
   }, []);
 
   useLayoutEffect(() => {
-    // densable `ko`: allocate(k, xo) on `HC().terminalImages` when yo() has bits.
-    const bits = kittyImageIdBits();
+    // Official 2.1.305 (#1054): support kitty and iTerm2 3.5+ fullscreen inline images.
+    const itermReading = protocol === 'iterm' ? getItermInlineImagesReading() : undefined;
+    const resolvedProto: ImageProtocol | undefined =
+      protocol === 'iterm' ? (itermReading?.state === 'settled' && itermReading.value ? 'iterm' : undefined) : protocol;
+    const bits = resolvedProto === 'iterm' ? 8 : kittyImageIdBits();
     const id =
-      terminalImages === null || bits === undefined
+      terminalImages === null || bits === undefined || resolvedProto === undefined
         ? undefined
-        : terminalImages.allocate(bits, createKittyRefusedLogger({ plugin, requestId, key: elementKey }));
-    setAllocated(id !== undefined && terminalImages !== null ? { id, images: terminalImages } : undefined);
+        : terminalImages.allocate(
+            bits,
+            createKittyRefusedLogger({ plugin, requestId, key: elementKey }),
+            resolvedProto,
+            `${requestId}:${elementKey}:${plugin}`,
+          );
+    setAllocated(
+      id !== undefined && terminalImages !== null && resolvedProto !== undefined
+        ? { id, images: terminalImages, protocol: resolvedProto }
+        : undefined,
+    );
     const detach = attachImageWidgetSwap(plugin, requestId, elementKey, source => {
       const refusal = describeImageBlitRefusal({
         hasRoot: terminalImages !== null,
         placeholders: tD().get('kittyGraphics'),
+        inlineImages: getItermInlineImagesReading(),
         hasId: id !== undefined,
         isReference: isKittyReferenceSource(source),
         files: Jk().imageFiles.get(),
       });
-      if (refusal !== undefined || id === undefined || terminalImages === null) {
+      if (refusal !== undefined || id === undefined || terminalImages === null || resolvedProto === undefined) {
         return refusal;
       }
-      const consumed = isKittyShmSource(source);
+      const consumed = resolvedProto === 'kitty' && isKittyShmSource(source);
       if (consumed && terminalImages.isBackedUp(id)) {
         return 'the surface has not written its last frames (paused or busy); the object was not sent, unlink it and blit again later';
       }
-      // densable `Qt({source,columns,rows})` + `{resend:!HUr}`.
-      const ok = terminalImages.transmit(id, imageId => encodeKittyTransmit(imageId, source, columns, rows), {
-        resend: !consumed,
-      });
+      const ok = terminalImages.transmit(
+        id,
+        imageId => encodeImageTransmit(resolvedProto, imageId, source, columns, rows),
+        {
+          resend: !consumed,
+          box: { columns, rows },
+        },
+      );
       if (!ok) return KITTY_SINK_REFUSED;
       transmittedRef.current = {
         ...transmittedRef.current,
@@ -303,13 +408,14 @@ export function PluginImage(props: PluginImageProps): ReactNode {
       setKittyId(undefined);
       bumpRasterFrames();
     };
-  }, [plugin, requestId, elementKey, columns, rows, terminalImages, kittyProbe]);
+  }, [plugin, requestId, elementKey, columns, rows, terminalImages, kittyProbe, protocol]);
 
   useLayoutEffect(() => {
     if (allocated === undefined) return;
     const isRef = isKittyReferenceSource(initialSource);
     const filesReading = Jk().imageFiles.get();
-    const canReadFiles = !isRef || (filesReading.state === 'settled' && filesReading.value);
+    const canReadFiles =
+      allocated.protocol === 'iterm' ? !isRef : !isRef || (filesReading.state === 'settled' && filesReading.value);
     if (!canReadFiles) {
       transmittedRef.current = { sourceKey: undefined, source: undefined, box: undefined };
       setKittyId(undefined);
@@ -333,13 +439,13 @@ export function PluginImage(props: PluginImageProps): ReactNode {
       }
       return;
     }
-    const activeConsumed = isKittyShmSource(activeSource);
+    const activeConsumed = allocated.protocol === 'kitty' && isKittyShmSource(activeSource);
     if (!sourceChanged && (box === transmittedRef.current.box || activeConsumed)) return;
     try {
       const ok = allocated.images.transmit(
         allocated.id,
-        imageId => encodeKittyTransmit(imageId, activeSource, columns, rows),
-        { resend: !activeConsumed },
+        imageId => encodeImageTransmit(allocated.protocol, imageId, activeSource, columns, rows),
+        { resend: !activeConsumed, box: { columns, rows } },
       );
       transmittedRef.current = { sourceKey, source: activeSource, box };
       setKittyId(ok ? allocated.id : undefined);

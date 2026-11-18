@@ -5,6 +5,8 @@ description: Push a React design system to claude.ai/design. This runs a convert
 
 # Sync a design system to claude.ai/design
 
+> **Note:** Standalone Claude Design (claude.ai/design) closes by December 14, 2026. Claude Design now lives in Claude.
+
 ## What this is for
 
 **Claude Design** (claude.ai/design) is Claude's design tool: users prompt a design agent and it builds working UI - screens, flows, prototypes - rendered live in the browser from real React code. Out of the box it designs with generic components. This skill changes that: it converts the user's design-system repo into the format Claude Design consumes and uploads it, so from then on **the design agent builds with the customer's actual components** - every design it produces is on-brand, made of their real parts, and maps 1:1 onto code their engineers can ship.

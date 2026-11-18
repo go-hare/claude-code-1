@@ -63,12 +63,8 @@ import {
   getToolResultPath,
   PREVIEW_SIZE_BYTES,
 } from 'src/utils/toolResultStorage.js';
-import {
-  isWindowsSandboxPolicyViolation,
-  SandboxPolicyRefusalError,
-  shouldUseSandbox,
-  WINDOWS_SANDBOX_POLICY_REFUSAL,
-} from '../BashTool/shouldUseSandbox.js';
+import { createOutputFileCleanup, persistLargeOutputFile } from '../BashTool/outputFileCleanup.js';
+import { getSandboxPolicyRefusal, SandboxPolicyRefusalError, shouldUseSandbox } from '../BashTool/shouldUseSandbox.js';
 import { BackgroundHint } from '../BashTool/UI.js';
 import {
   buildImageToolResult,
@@ -483,10 +479,11 @@ export const PowerShellTool = buildTool({
         dangerouslyDisableSandbox: input.dangerouslyDisableSandbox,
         shellType: 'powershell',
       });
-      if (isWindowsSandboxPolicyViolation(useSandbox, input.command)) {
+      const policyRefusal = getSandboxPolicyRefusal(useSandbox, input.command, false, 'powershell');
+      if (policyRefusal !== null) {
         return {
           result: false,
-          message: WINDOWS_SANDBOX_POLICY_REFUSAL,
+          message: policyRefusal,
           errorCode: 11,
         };
       }
@@ -627,12 +624,14 @@ export const PowerShellTool = buildTool({
         dangerouslyDisableSandbox: input.dangerouslyDisableSandbox,
         shellType: 'powershell',
       });
-      if (isWindowsSandboxPolicyViolation(useSandbox, input.command)) {
-        throw new SandboxPolicyRefusalError(WINDOWS_SANDBOX_POLICY_REFUSAL);
+      const policyRefusal = getSandboxPolicyRefusal(useSandbox, input.command, false, 'powershell');
+      if (policyRefusal !== null) {
+        throw new SandboxPolicyRefusalError(policyRefusal);
       }
     }
 
     const { abortController, getAppState, setAppState, setToolJSX } = toolUseContext;
+    const outputCleanup = createOutputFileCleanup({ get: id => getAppState().tasks[id] });
 
     const isMainThread = !toolUseContext.agentId;
 
@@ -693,6 +692,7 @@ export const PowerShellTool = buildTool({
       // BashTool is safe — its pre-flight goes through createFailedCommand
       // (code: 1) so tracking early-returns. Skip tracking on this sentinel.
       const isPreFlightSentinel = result.code === 0 && !result.stdout && result.stderr && !result.backgroundTaskId;
+      outputCleanup.track(result);
       if (!isPreFlightSentinel) {
         trackGitOperations(input.command, result.code, result.stdout);
       }
@@ -805,28 +805,7 @@ export const PowerShellTool = buildTool({
       // ordering, where persistence is post-try/finally): a failing command
       // that also produced >maxOutputLength bytes would otherwise do 3-4 disk
       // syscalls, store to tool-results/, then throw — orphaning the file.
-      let persistedOutputPath: string | undefined;
-      let persistedOutputSize: number | undefined;
-      if (result.outputFilePath && result.outputTaskId) {
-        try {
-          const fileStat = await fsStat(result.outputFilePath);
-          persistedOutputSize = fileStat.size;
-
-          await ensureToolResultsDir();
-          const dest = getToolResultPath(result.outputTaskId, false);
-          if (fileStat.size > MAX_PERSISTED_SIZE) {
-            await fsTruncate(result.outputFilePath, MAX_PERSISTED_SIZE);
-          }
-          try {
-            await link(result.outputFilePath, dest);
-          } catch {
-            await copyFile(result.outputFilePath, dest);
-          }
-          persistedOutputPath = dest;
-        } catch {
-          // File may already be gone — stdout preview is sufficient
-        }
-      }
+      const { persistedOutputPath, persistedOutputSize } = await persistLargeOutputFile(result, outputCleanup);
 
       // Cap image dimensions + size if present (CC-304 — see
       // resizeShellImageOutput). Scope the decoded buffer so it can be
@@ -869,6 +848,7 @@ export const PowerShellTool = buildTool({
       };
     } finally {
       if (setToolJSX) setToolJSX(null);
+      await outputCleanup.dispose();
     }
   },
   isResultTruncated(output: Out): boolean {

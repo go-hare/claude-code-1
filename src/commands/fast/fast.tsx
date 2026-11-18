@@ -22,9 +22,16 @@ import {
 } from '../../utils/fastMode.js';
 import { formatDuration } from '../../utils/format.js';
 import { formatModelPricing, getOpus46CostTier } from '../../utils/modelCost.js';
+import { getCanonicalName } from '../../utils/model/model.js';
 import { em } from '../../utils/model/modelNoticeCode.js';
 import { updateSettingsForSource } from '../../utils/settings/settings.js';
 import { saveFastModeWithConfigSetHook } from './index.js';
+
+export function isFastModeResearchPreview(model: string | null | undefined): boolean {
+  const resolved = model && isFastModeSupportedByModel(model) ? model : getFastModeModel();
+  const canonical = getCanonicalName(resolved);
+  return canonical === 'claude-opus-4-8' || canonical === 'claude-opus-5';
+}
 
 function applyFastMode(enable: boolean, setAppState: (f: (prev: AppState) => AppState) => void): void {
   clearFastModeCooldown();
@@ -118,9 +125,11 @@ export function FastModePicker({
     { context: 'Confirmation' },
   );
 
+  const isResearchPreview = isFastModeResearchPreview(model);
   const title = (
     <Text>
-      <FastIcon cooldown={isCooldown} /> Fast mode (research preview)
+      <FastIcon cooldown={isCooldown} /> Fast mode
+      {isResearchPreview ? ' (research preview)' : ''}
     </Text>
   );
 

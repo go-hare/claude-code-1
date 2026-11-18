@@ -23,7 +23,11 @@ import {
   getCommandSubcommandPrefix,
   splitCommand_DEPRECATED,
 } from 'src/utils/bash/commands.js'
-import { PARSE_ABORTED, parseCommandRaw } from 'src/utils/bash/parser.js'
+import {
+  PARSE_ABORTED,
+  parseCommandRaw,
+  type Node,
+} from 'src/utils/bash/parser.js'
 import { tryParseShellCommand } from 'src/utils/bash/shellQuote.js'
 import { isAbsolute, resolve as resolvePath } from 'path'
 import { getCwd } from 'src/utils/cwd.js'
@@ -80,7 +84,10 @@ import {
   stripSafeHeredocSubstitutions,
 } from './bashSecurity.js'
 import { checkPermissionMode } from './modeValidation.js'
-import { checkPathConstraints } from './pathValidation.js'
+import {
+  checkPathConstraints,
+  validateOutputRedirections,
+} from './pathValidation.js'
 import { commandWritesToGitInternalPaths } from './readOnlyValidation.js'
 import { checkSedConstraints } from './sedValidation.js'
 import { shouldUseSandbox } from './shouldUseSandbox.js'
@@ -2877,6 +2884,98 @@ async function applyBackgroundOperatorCircuitBreaker(
 }
 
 /**
+ * SEA #1124 (`FSr` / `Wcn` @290117751): collect output redirections (`>`, `>>`,
+ * `&>`, `&>>`) from an AST (even when `too-complex` due to a subshell) so
+ * `Edit(path)` deny rules still block the redirect instead of falling back to ask.
+ */
+/** @internal exported for unit tests */
+export function checkTooComplexRedirectDeny(
+  astRoot: Node | null,
+  command: string,
+  toolPermissionContext: ToolPermissionContext,
+): PermissionResult | null {
+  if (!astRoot) return null
+  const redirections: Array<{ target: string; operator: '>' | '>>' }> = []
+  const stack: Node[] = [astRoot]
+  while (stack.length > 0) {
+    const node = stack.pop()!
+    if (node.type === 'file_redirect') {
+      let op: '>' | '>>' | null = null
+      let target: string | null = null
+      for (const ch of node.children) {
+        if (!ch) continue
+        if (ch.type === '>' || ch.type === '&>' || ch.type === '>|') {
+          op = '>'
+        } else if (ch.type === '>>' || ch.type === '&>>') {
+          op = '>>'
+        } else if (
+          ch.type === 'word' ||
+          ch.type === 'string' ||
+          ch.type === 'raw_string'
+        ) {
+          target = ch.text.replace(/^['"]|['"]$/g, '')
+        }
+      }
+      if (op && target) {
+        redirections.push({ target, operator: op })
+      }
+      continue
+    }
+    for (const ch of node.children) {
+      if (ch) stack.push(ch)
+    }
+  }
+  if (redirections.length === 0) return null
+  const redirResult = validateOutputRedirections(
+    redirections,
+    getCwd(),
+    toolPermissionContext,
+    commandHasAnyCd(command),
+  )
+  return redirResult.behavior === 'deny' ? redirResult : null
+}
+
+/**
+ * SEA #1122 (`Vpn` @290162585): do not auto-allow a command that reads a
+ * variable assigned earlier in the same command.
+ * @internal exported for unit tests
+ */
+export function applyAssignedVariableGate(
+  command: string,
+  result: PermissionResult,
+  astResult: ParseForSecurityResult | undefined,
+): PermissionResult {
+  if (astResult?.kind !== 'simple') return result
+  const hasAssignedRead = astResult.usesAssignedValue === true
+  if (!hasAssignedRead) return result
+  const isExactRule =
+    result.decisionReason?.type === 'rule' &&
+    result.decisionReason.rule.ruleValue.ruleContent === command.trim()
+  const isSandboxAutoAllow =
+    result.decisionReason?.type === 'other' &&
+    result.decisionReason.reason ===
+      'Auto-allowed with sandbox (autoAllowBashIfSandboxed enabled)'
+  if (isExactRule || isSandboxAutoAllow) return result
+  if (result.behavior === 'ask') {
+    return { ...result, suggestions: [] }
+  }
+  if (result.behavior !== 'allow') {
+    return result
+  }
+  const decisionReason: PermissionDecisionReason = {
+    type: 'other',
+    reason: "A variable set in this command can't be checked before it runs",
+    bashMissKind: 'assigned-variable',
+  }
+  return {
+    behavior: 'ask',
+    decisionReason,
+    message: createPermissionRequestMessage(BashTool.name, decisionReason),
+    suggestions: [],
+  }
+}
+
+/**
  * The main implementation to check if we need to ask for user permission to call BashTool with a given input
  */
 export async function bashToolHasPermission(
@@ -2912,10 +3011,17 @@ export async function bashToolHasPermission(
     return awkDanger
   }
 
-  const result = await bashToolHasPermissionInner(
+  const astCapture: { astResult?: ParseForSecurityResult } = {}
+  const innerResult = await bashToolHasPermissionInner(
     input,
     context,
     getCommandSubcommandPrefixFn,
+    astCapture,
+  )
+  const result = applyAssignedVariableGate(
+    input.command,
+    innerResult,
+    astCapture.astResult,
   )
   return applyBackgroundOperatorCircuitBreaker(input, result)
 }
@@ -2924,6 +3030,7 @@ async function bashToolHasPermissionInner(
   input: z.infer<typeof BashTool.inputSchema>,
   context: ToolUseContext,
   getCommandSubcommandPrefixFn = getCommandSubcommandPrefix,
+  astCapture?: { astResult?: ParseForSecurityResult },
 ): Promise<PermissionResult> {
   let appState = context.getAppState()
 
@@ -2996,6 +3103,10 @@ async function bashToolHasPermissionInner(
     astRoot = null
   }
 
+  if (astCapture) {
+    astCapture.astResult = astResult
+  }
+
   if (astResult.kind === 'too-complex') {
     // Parse succeeded but found structure we can't statically analyze
     // (command substitution, expansion, control flow, parser differential).
@@ -3003,6 +3114,12 @@ async function bashToolHasPermissionInner(
     // fall through to ask if no deny matched — don't downgrade deny to ask.
     const earlyExit = checkEarlyExitDeny(input, appState.toolPermissionContext)
     if (earlyExit !== null) return earlyExit
+    const redirectDeny = checkTooComplexRedirectDeny(
+      astRoot && astRoot !== PARSE_ABORTED ? astRoot : null,
+      input.command,
+      appState.toolPermissionContext,
+    )
+    if (redirectDeny !== null) return redirectDeny
     // #73 SEA `plainUnquotedHeredocs` + `tengu_amber_larch` (@290168397):
     // Sandboxed commands that pipe a plain unquoted heredoc into another
     // command (`cat <<EOF | python3`) can be auto-allowed by the sandbox.
@@ -3867,6 +3984,64 @@ async function bashToolHasPermissionInner(
   }
 }
 
+const TIME_KEYWORD_PREFIX_RE = /^(?:time[ \t]+(?:--[ \t]+)?)+/
+
+/**
+ * SEA `fnt` (@290066617) — strip shell keywords/builtins (`command [-p...] [--]`,
+ * `builtin [--]`, `noglob`) from tokenized argv.
+ */
+function stripShellKeywordsFromArgv(argv: string[]): string[] {
+  let args = argv.slice()
+  for (;;) {
+    if (args[0] === 'command') {
+      let i = 1
+      while (args[i] !== undefined && /^-p+$/.test(args[i]!)) i++
+      if (args[i] === '--') i++
+      if (i >= args.length || args[i]!.startsWith('-')) return args
+      args = args.slice(i)
+    } else if (args[0] === 'builtin') {
+      const i = args[1] === '--' ? 2 : 1
+      if (i >= args.length) return args
+      args = args.slice(i)
+    } else if (args[0] === 'noglob') {
+      if (args.length <= 1) return args
+      args = args.slice(1)
+    } else {
+      return args
+    }
+  }
+}
+
+function tokenizeCommand(command: string): string[] {
+  const parsed = tryParseShellCommand(command)
+  if (parsed.success) {
+    return parsed.tokens.filter((t): t is string => typeof t === 'string')
+  }
+  return command.trim().split(/\s+/).filter(Boolean)
+}
+
+/**
+ * SEA `Xmn` (@290179103) — check `predicate` after `stripSafeWrappers`, and if
+ * `tengu_wild_octopus` is enabled, also after stripping `time` + `stripFn`.
+ */
+function matchesNormalizedCommand(
+  command: string,
+  stripFn: (argv: string[]) => string[],
+  predicate: (tokens: string[]) => boolean,
+): boolean {
+  const stripped = stripSafeWrappers(command)
+  const tokens = tokenizeCommand(stripped)
+  if (predicate(tokens)) return true
+  if (!getFeatureValue_CACHED_MAY_BE_STALE('tengu_wild_octopus', true)) {
+    return false
+  }
+  const afterTime =
+    stripped === command
+      ? tokens
+      : tokenizeCommand(command.replace(TIME_KEYWORD_PREFIX_RE, ''))
+  return predicate(stripFn(afterTime))
+}
+
 /**
  * Checks if a subcommand is a git command after normalizing away safe wrappers
  * (env vars, timeout, etc.) and shell quotes.
@@ -3880,22 +4055,16 @@ export function isNormalizedGitCommand(command: string): boolean {
   if (command.startsWith('git ') || command === 'git') {
     return true
   }
-  const stripped = stripSafeWrappers(command)
-  const parsed = tryParseShellCommand(stripped)
-  if (parsed.success && parsed.tokens.length > 0) {
-    // Direct git command
-    if (parsed.tokens[0] === 'git') {
-      return true
-    }
-    // "xargs git ..." — xargs runs git in the current directory,
-    // so it must be treated as a git command for cd+git security checks.
-    // This matches the xargs prefix handling in filterRulesByContentsMatchingInput.
-    if (parsed.tokens[0] === 'xargs' && parsed.tokens.includes('git')) {
-      return true
-    }
-    return false
-  }
-  return /^git(?:\s|$)/.test(stripped)
+  return matchesNormalizedCommand(
+    command,
+    argv => {
+      let i = 0
+      while (i < argv.length && ENV_VAR_ASSIGN_RE.test(argv[i]!)) i++
+      return stripWrappersFromArgv(argv.slice(i))
+    },
+    tokens =>
+      tokens[0] === 'git' || (tokens[0] === 'xargs' && tokens.includes('git')),
+  )
 }
 
 /**
@@ -3906,19 +4075,26 @@ export function isNormalizedGitCommand(command: string): boolean {
  *   FORCE_COLOR=1 cd sub — env var prefix hides the cd from a naive /^cd / regex
  *   This mirrors isNormalizedGitCommand to ensure symmetric normalization.
  *
- * Also matches pushd/popd — they change cwd just like cd, so
+ * Also matches pushd/popd/chdir — they change cwd just like cd, so
  *   pushd /tmp/bare-repo && git status
  * must trigger the same cd+git guard. Mirrors PowerShell's
  * DIRECTORY_CHANGE_ALIASES (src/utils/powershell/parser.ts).
  */
 export function isNormalizedCdCommand(command: string): boolean {
-  const stripped = stripSafeWrappers(command)
-  const parsed = tryParseShellCommand(stripped)
-  if (parsed.success && parsed.tokens.length > 0) {
-    const cmd = parsed.tokens[0]
-    return cmd === 'cd' || cmd === 'pushd' || cmd === 'popd'
-  }
-  return /^(?:cd|pushd|popd)(?:\s|$)/.test(stripped)
+  return matchesNormalizedCommand(
+    command,
+    argv => {
+      let i = 0
+      while (i < argv.length && ENV_VAR_ASSIGN_RE.test(argv[i]!)) i++
+      return stripShellKeywordsFromArgv(argv.slice(i))
+    },
+    tokens => {
+      const cmd = tokens[0]
+      return (
+        cmd === 'cd' || cmd === 'pushd' || cmd === 'popd' || cmd === 'chdir'
+      )
+    },
+  )
 }
 
 /**

@@ -5,18 +5,15 @@
  * D7r: not present as a closed text dump; mapped to TRANSCRIPT_CLASSIFIER
  * (auto-mode product surface). Re-peel if SEA shows a different predicate.
  */
-import { feature } from 'bun:bundle'
 import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import { resolveTenguAutoModeConfig } from '../../utils/permissions/autoModeFlags.js'
 import { getSettings_DEPRECATED } from '../../utils/settings/settings.js'
 import { resolveAutoModeSetupClassifierModel } from './classifierModel.js'
 
-/** densable B4w: `!V.CLAUDE_CODE_REMOTE && D7r()` — any non-empty string disables. */
+/** densable B4w / Q1r: `!V.CLAUDE_CODE_REMOTE && gme()` (gme() === true in 325). */
 export function isAutoModeSetupBaseGate(): boolean {
   if (process.env.CLAUDE_CODE_REMOTE) return false
-  // densable D7r — tip: auto-mode product compile gate
-  if (feature('TRANSCRIPT_CLASSIFIER')) return true
-  return false
+  return true
 }
 
 /** densable KHl — base + classifier model available */

@@ -140,15 +140,18 @@ export function assistantTextHasLeakedInvoke(
   return LEAKED_INVOKE_RE.test(lastText)
 }
 
+export const MAX_MALFORMED_TOOL_USE_RETRIES = 2
+
 /**
  * densable query loop: stop_reason tool_use, zero parsed tool uses, not an
- * API error. One retry, then exhausted.
+ * API error. Retries up to MAX_MALFORMED_TOOL_USE_RETRIES (2) times before exhausted.
  */
 export function malformedToolUseRetryAction(input: {
   stopReason: string | null | undefined
   parsedToolUseCount: number
   isApiErrorMessage: boolean
   previousReason: string | undefined
+  retryCount?: number
 }): MalformedToolUseRetryAction {
   if (
     input.stopReason !== 'tool_use' ||
@@ -156,6 +159,12 @@ export function malformedToolUseRetryAction(input: {
     input.isApiErrorMessage
   ) {
     return { action: 'continue' }
+  }
+  if (input.retryCount !== undefined) {
+    if (input.retryCount < MAX_MALFORMED_TOOL_USE_RETRIES) {
+      return { action: 'retry', prompt: MALFORMED_TOOL_USE_RETRY_PROMPT }
+    }
+    return { action: 'exhausted', text: MALFORMED_TOOL_USE_EXHAUSTED_TEXT }
   }
   if (input.previousReason !== 'malformed_tool_use_retry') {
     return { action: 'retry', prompt: MALFORMED_TOOL_USE_RETRY_PROMPT }

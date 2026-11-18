@@ -9,6 +9,7 @@ import { createAttachmentMessage } from '../attachments.js'
 import { createCombinedAbortSignal } from '../combinedAbortSignal.js'
 import { catalogDeclaresNative1mWindow, has1mContext } from '../context.js'
 import { logForDebugging } from '../debug.js'
+import { acquireModelHookSlot } from './modelHookConcurrency.js'
 import { errorMessage } from '../errors.js'
 import type { HookResult } from '../hooks.js'
 import { safeParseJSON, stripMarkdownJsonFence } from '../json.js'
@@ -159,6 +160,10 @@ export async function execPromptHook(
       exitCode: 1,
     }),
   })
+  const releaseSlot = await acquireModelHookSlot(hookEvent, signal)
+  if (releaseSlot === undefined) {
+    return { hook, outcome: 'cancelled' }
+  }
   try {
     const prompt = isStop
       ? `Based on the conversation transcript above, has the following stopping condition been satisfied? Answer based on transcript evidence only.
@@ -298,5 +303,7 @@ Condition: ${hook.prompt}`
     const errorMsg = errorMessage(error)
     logForDebugging(`Hooks: Prompt hook error: ${errorMsg}`)
     return failure(`Error executing prompt hook: ${errorMsg}`)
+  } finally {
+    releaseSlot()
   }
 }

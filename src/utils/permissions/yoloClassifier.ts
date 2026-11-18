@@ -37,7 +37,12 @@ import {
   formatClassifierWaitDuration,
 } from '../messages.js'
 import { resolveAntModel } from '../model/antModels.js'
-import { getMainLoopModel } from '../model/model.js'
+import {
+  getCanonicalName,
+  getMainLoopModel,
+  parseUserSpecifiedModel,
+} from '../model/model.js'
+import { isModelAllowed } from '../model/modelAllowlist.js'
 import { getAutoModeConfig } from '../settings/settings.js'
 import { sideQuery } from '../sideQuery.js'
 import {
@@ -1665,11 +1670,71 @@ function getClassifierModelLookupKeys(mainModel: string): string[] {
 function resolveModelByMainModel(
   mapping: Record<string, string> | undefined,
   mainModel: string,
+  vet?: (model: string) => string | undefined,
 ): string | undefined {
   if (mapping == null || typeof mapping !== 'object') return undefined
+  const applyVet = vet ?? (m => m)
   for (const key of getClassifierModelLookupKeys(mainModel)) {
     const mapped = mapping[key]
-    if (mapped) return mapped
+    const vetted = mapped ? applyVet(mapped) : undefined
+    if (vetted) return vetted
+  }
+  return undefined
+}
+
+const CLASSIFIER_UNSUPPORTED_ESCALATION_CANONICAL_MODELS = [
+  'claude-sonnet-5-5',
+  'claude-opus-5-5',
+  'claude-opus-5',
+]
+
+const loggedClassifierPolicySkips = new Set<string>()
+
+export function clearClassifierPolicySkipsForTesting(): void {
+  loggedClassifierPolicySkips.clear()
+}
+
+/**
+ * Official 325 `OYs(e)`: checks if the model supports escalated classifier
+ * checks without API safeguard refusal.
+ */
+export function isClassifierEscalationAllowed(model: string): boolean {
+  const resolved = parseUserSpecifiedModel(model)
+  return !CLASSIFIER_UNSUPPORTED_ESCALATION_CANONICAL_MODELS.includes(
+    getCanonicalName(resolved),
+  )
+}
+
+/**
+ * Official 325 `H0e(e, n)`: validates a candidate classifier model against
+ * org model policy (`isModelAllowed`) and (for env override) API safeguards.
+ */
+export function vetClassifierModel(
+  model: string | undefined,
+  source: 'modelByMainModel' | 'model' | 'env',
+): string | undefined {
+  if (!model) return undefined
+  const rejection = !isModelAllowed(model)
+    ? {
+        why: "your organization's model policy does not allow it",
+        next: "Unset it or pin a model your organization's policy allows.",
+      }
+    : source === 'env' && !isClassifierEscalationAllowed(model)
+      ? {
+          why: "the API's safeguards refuse the classifier's escalated check on it",
+          next: 'Unset it or pin a different model, such as claude-sonnet-5.',
+        }
+      : undefined
+  if (rejection === undefined) return model
+  const key = `${source}:${model}`
+  if (!loggedClassifierPolicySkips.has(key)) {
+    loggedClassifierPolicySkips.add(key)
+    logForDebugging(
+      source === 'env'
+        ? `Auto mode classifier: ignoring CLAUDE_CODE_AUTO_MODE_MODEL=${model} because ${rejection.why}; using the default classifier model instead. ${rejection.next}`
+        : `Auto mode classifier: skipping server-configured classifier model ${model} (tengu_auto_mode_config.${source}) because ${rejection.why}`,
+      { level: source === 'env' ? 'warn' : 'info' },
+    )
   }
   return undefined
 }
@@ -1677,34 +1742,47 @@ function resolveModelByMainModel(
 /**
  * Get the model for the classifier.
  *
- * Aligned with official Claude Code 2.1.207 `oOu()` / `jPu()`:
- * 1. CLAUDE_CODE_AUTO_MODE_MODEL env (fork: exposed to all users; official
- *    registers the env name but the 2.1.207 classifier path does not read it)
- * 2. GrowthBook tengu_auto_mode_config.modelByMainModel[mainModel]
- * 3. GrowthBook tengu_auto_mode_config.model
+ * Aligned with official Claude Code 2.1.325 `BFn()`:
+ * 1. GrowthBook tengu_auto_mode_config.modelByMainModel[mainModel] (vetted)
+ * 2. GrowthBook tengu_auto_mode_config.model (vetted)
+ *    (if server model is chosen and CLAUDE_CODE_AUTO_MODE_MODEL is set, logs
+ *    `env:shadowed` warning once)
+ * 3. CLAUDE_CODE_AUTO_MODE_MODEL env (vetted against org policy + safeguards)
+ *    or CLAUDE_CODE_BG_CLASSIFIER_MODEL fallback
  * 4. Main loop model
- *
- * densable 2.1.236: config via KD()/resolveTenguAutoModeConfig (qTa when !KIt).
  */
-function getClassifierModel(): string {
-  // Fork extension: allow external users to pin the classifier model.
-  // Official 2.1.207 ships CLAUDE_CODE_AUTO_MODE_MODEL / BG_CLASSIFIER_MODEL
-  // in its env schema; oOu() does not consume them — only GB + main-model
-  // fallbacks. We honor both envs so hosts/scripts can pin without GB.
-  const envModel =
-    process.env.CLAUDE_CODE_AUTO_MODE_MODEL ||
-    process.env.CLAUDE_CODE_BG_CLASSIFIER_MODEL
-  if (envModel) return envModel
-
+export function getClassifierModel(): string {
   const mainModel = getMainLoopModel()
   const config = resolveTenguAutoModeConfig()
 
-  const mapped = resolveModelByMainModel(config?.modelByMainModel, mainModel)
-  if (mapped) return mapped
+  const serverModel =
+    resolveModelByMainModel(config?.modelByMainModel, mainModel, m =>
+      vetClassifierModel(m, 'modelByMainModel'),
+    ) ?? vetClassifierModel(config?.model, 'model')
 
-  if (config?.model) {
-    return config.model
+  if (serverModel) {
+    const envModel = process.env.CLAUDE_CODE_AUTO_MODE_MODEL
+    if (envModel && !loggedClassifierPolicySkips.has('env:shadowed')) {
+      loggedClassifierPolicySkips.add('env:shadowed')
+      logForDebugging(
+        `Auto mode classifier: ignoring CLAUDE_CODE_AUTO_MODE_MODEL=${envModel} because a server-configured classifier model (${serverModel}) takes priority; using that model instead`,
+        { level: 'warn' },
+      )
+    }
+    return serverModel
   }
+
+  const vettedEnvModel = vetClassifierModel(
+    process.env.CLAUDE_CODE_AUTO_MODE_MODEL,
+    'env',
+  )
+  if (vettedEnvModel) return vettedEnvModel
+
+  const bgEnvModel = vetClassifierModel(
+    process.env.CLAUDE_CODE_BG_CLASSIFIER_MODEL,
+    'env',
+  )
+  if (bgEnvModel) return bgEnvModel
 
   return mainModel
 }

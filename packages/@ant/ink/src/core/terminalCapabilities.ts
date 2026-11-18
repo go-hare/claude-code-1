@@ -11,6 +11,7 @@ export type TerminalCapabilityName =
   | 'synchronizedOutput'
   | 'kittyKeyboard'
   | 'kittyGraphics'
+  | 'itermImages'
   | 'mousePixels'
   | 'programStatus'
 
@@ -30,6 +31,7 @@ const PENDING_NOW: Record<TerminalCapabilityName, boolean> = {
   synchronizedOutput: false,
   kittyKeyboard: true,
   kittyGraphics: false,
+  itermImages: false,
   mousePixels: false,
   programStatus: false,
 }
@@ -327,10 +329,44 @@ function mousePixelsSeed(input: {
   }
 }
 
+/** Official 2.1.305 `OOr` (#1054): iTerm2 3.5.0+ supports inline images. */
+export function isIterm2VersionAtLeast35(xtversion: string | null): boolean {
+  if (xtversion === null || !/^iTerm2\s/.test(xtversion)) return false
+  const match = xtversion
+    .slice(6)
+    .trim()
+    .match(/^(\d+)\.(\d+)/)
+  if (!match) return false
+  const major = Number(match[1])
+  const minor = Number(match[2])
+  return major > 3 || (major === 3 && minor >= 5)
+}
+
+function itermImagesSeed(input: {
+  terminal: string | null
+  bgWorker: boolean
+  multiplexed: boolean
+  tmux: boolean
+}): CapabilitySeed {
+  if (input.bgWorker) return { settled: false, source: 'bg worker' }
+  if (input.tmux) {
+    return { likely: false, source: 'env: inside tmux, not asked yet' }
+  }
+  if (input.multiplexed) {
+    return { settled: false, source: 'env: inside screen, not supported' }
+  }
+  return {
+    likely: false,
+    source: `env: terminal=${input.terminal || 'unknown'}, not asked yet`,
+  }
+}
+
 /** densable `d()`. */
 export function defaultCapabilityReadings(): CapabilityDefaults {
   const terminal = envTerminalName()
   const bgWorker = isBgSession()
+  const multiplexed = isMultiplexed()
+  const tmux = Boolean(process.env.TMUX) && !process.env.STY
   return {
     extendedKeys: extendedKeysSeed(terminal, bgWorker),
     synchronizedOutput: synchronizedOutputSeed(),
@@ -338,13 +374,19 @@ export function defaultCapabilityReadings(): CapabilityDefaults {
     kittyGraphics: kittyGraphicsSeed({
       terminal,
       bgWorker,
-      multiplexed: isMultiplexed(),
+      multiplexed,
       forced: Boolean(process.env.CLAUDE_CODE_FORCE_TERMINAL_IMAGES),
+    }),
+    itermImages: itermImagesSeed({
+      terminal,
+      bgWorker,
+      multiplexed,
+      tmux,
     }),
     mousePixels: mousePixelsSeed({
       terminal,
       bgWorker,
-      multiplexed: isMultiplexed(),
+      multiplexed,
     }),
     programStatus: {
       likely: false,
@@ -541,4 +583,29 @@ export function Jk(): TerminalHostState {
 /** densable `tD()` — `return Jk().capabilities`. */
 export function tD(): TerminalCapabilityStore {
   return Jk().capabilities
+}
+
+export type ImageProtocol = 'kitty' | 'iterm'
+
+/** Official 2.1.305 `JMn` (#1054). */
+export function getImageProtocol(): ImageProtocol | undefined {
+  const caps = tD()
+  if (caps.now('kittyGraphics')) return 'kitty'
+  if (caps.now('itermImages')) return 'iterm'
+  return undefined
+}
+
+/** Official 2.1.305 `i1i` (#1054). */
+export function subscribeImageProtocol(
+  listener: (protocol: ImageProtocol | undefined) => void,
+): () => void {
+  const caps = tD()
+  const notify = () => listener(getImageProtocol())
+  const unsubs = [
+    caps.onSettle('kittyGraphics', notify),
+    caps.onSettle('itermImages', notify),
+  ]
+  return () => {
+    for (const unsub of unsubs) unsub()
+  }
 }

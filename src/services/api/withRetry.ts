@@ -267,6 +267,8 @@ interface RetryOptions {
       error: { status?: number; formatted: string }
     } | null,
   ) => void
+  /** Official 2.1.305 (#1035): check whether a usage limit lifted early. */
+  isUsageLimitLifted?: () => Promise<boolean>
 }
 
 export class CannotRetryError extends Error {
@@ -997,6 +999,14 @@ export async function* withRetry<T>(
         // Chunk long sleeps so the host sees periodic stdout activity and
         // does not mark the session idle. Each yield surfaces as
         // {type:'system', subtype:'api_retry'} on stdout via QueryEngine.
+        // Official 2.1.305 (#1035): when CLAUDE_CODE_RETRY_WATCHDOG_USAGE_LIMIT_RECHECK_MS
+        // is set during a usage-limit wait, periodically check isUsageLimitLifted().
+        const recheckMs =
+          isUsageLimit429 && watchdogActive && options.isUsageLimitLifted
+            ? getRetryWatchdogUsageLimitRecheckMs()
+            : undefined
+        let recheckRemaining =
+          recheckMs !== undefined && recheckMs > 0 ? recheckMs : Infinity
         let remaining = delayMs
         while (remaining > 0) {
           if (options.signal?.aborted) throw new APIUserAbortError()
@@ -1008,9 +1018,32 @@ export async function* withRetry<T>(
               maxRetries,
             )
           }
-          const chunk = Math.min(remaining, HEARTBEAT_INTERVAL_MS)
+          const chunk = Math.min(
+            remaining,
+            HEARTBEAT_INTERVAL_MS,
+            recheckRemaining,
+          )
           await sleep(chunk, options.signal, { abortError })
           remaining -= chunk
+          if (recheckMs !== undefined && recheckMs > 0) {
+            recheckRemaining -= chunk
+            if (
+              recheckRemaining <= 0 &&
+              remaining > HEARTBEAT_INTERVAL_MS &&
+              options.isUsageLimitLifted
+            ) {
+              recheckRemaining = recheckMs
+              let lifted = false
+              try {
+                lifted = await options.isUsageLimitLifted()
+              } catch {
+                lifted = false
+              }
+              if (lifted) {
+                break
+              }
+            }
+          }
         }
         // Clamp so the for-loop never terminates. Backoff uses the separate
         // persistentAttempt counter which keeps growing to the 5-min cap.
@@ -1074,6 +1107,13 @@ export function getRetryWatchdogMaxWaitMs(
 export function getRetryWatchdogMaxUsageLimitWaitMs(): number | undefined {
   return parseOptionalNonNegativeIntEnv(
     'CLAUDE_CODE_RETRY_WATCHDOG_MAX_USAGE_LIMIT_WAIT_MS',
+  )
+}
+
+/** Official 2.1.305 (#1035): CLAUDE_CODE_RETRY_WATCHDOG_USAGE_LIMIT_RECHECK_MS */
+export function getRetryWatchdogUsageLimitRecheckMs(): number | undefined {
+  return parseOptionalNonNegativeIntEnv(
+    'CLAUDE_CODE_RETRY_WATCHDOG_USAGE_LIMIT_RECHECK_MS',
   )
 }
 

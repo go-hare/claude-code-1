@@ -3,6 +3,7 @@ import type { QuerySource } from '../../constants/querySource.js'
 import { clearSystemPromptSections } from '../../constants/systemPromptSections.js'
 import { getUserContext } from '../../context.js'
 import { clearSpeculativeChecks } from '@claude-code/builtin-tools/tools/BashTool/bashPermissions.js'
+import { resetSentSkillNames } from '../../utils/attachments.js'
 import { clearClassifierApprovals } from '../../utils/classifierApprovals.js'
 import { resetGetMemoryFilesCache } from '../../utils/claudemd.js'
 import { logError } from '../../utils/log.js'
@@ -80,11 +81,8 @@ export function runPostCompactCleanup(querySource?: QuerySource): void {
   }
   clearClassifierApprovals()
   clearSpeculativeChecks()
-  // Intentionally NOT calling resetSentSkillNames(): re-injecting the full
-  // skill_listing (~4K tokens) post-compact is pure cache_creation. The
-  // model still has SkillTool in schema, invoked_skills preserves used
-  // skills, and dynamic additions are handled by skillChangeDetector /
-  // cacheUtils resets. See compactConversation() for full rationale.
+  // 2.1.304 #1016: reset sentSkillNames so skill_listing is re-sent post-compact.
+  resetSentSkillNames()
   clearBetaTracingState()
   if (feature('COMMIT_ATTRIBUTION')) {
     // Intentionally fire-and-forget: the file-content cache sweep is a

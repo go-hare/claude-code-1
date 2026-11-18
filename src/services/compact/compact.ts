@@ -61,6 +61,7 @@ import {
   tokenStatsToStatsigMetrics,
 } from '../../utils/contextAnalysis.js'
 import { logForDebugging } from '../../utils/debug.js'
+import { isEnvTruthy } from '../../utils/envUtils.js'
 import { hasExactErrorMessage } from '../../utils/errors.js'
 import { cacheToObject } from '../../utils/fileStateCache.js'
 import {
@@ -131,6 +132,7 @@ import {
 } from '../tokenEstimation.js'
 import { groupMessagesByApiRound } from './grouping.js'
 import {
+  collectToolNamesUsedBeforeCompact,
   getCompactPrompt,
   appendKeptMessagesCompactNote,
   getCompactUserSummaryMessage,
@@ -710,6 +712,45 @@ export function annotateBoundaryWithPreservedSegment(
   }
 }
 
+const MAX_PRE_COMPACT_ARTIFACT_READ_VERSIONS = 256
+
+function isMainArtifactObserver(
+  observers: Record<string, string> | undefined,
+): boolean {
+  return observers === undefined || Object.hasOwn(observers, 'main')
+}
+
+export type PreCompactArtifactAppState = {
+  artifactReadVersions?: Record<string, string>
+  artifactReadObservers?: Record<string, Record<string, string>>
+}
+
+export function collectPreCompactArtifactReadVersions(
+  appState: PreCompactArtifactAppState,
+): Array<{ slug: string; ver: string }> | undefined {
+  const versions = appState.artifactReadVersions
+  if (versions === undefined) return undefined
+  const out: Array<{ slug: string; ver: string }> = []
+  for (const [slug, ver] of Object.entries(versions)) {
+    if (isMainArtifactObserver(appState.artifactReadObservers?.[slug])) {
+      out.push({ slug, ver })
+    }
+  }
+  return out.reverse().slice(0, MAX_PRE_COMPACT_ARTIFACT_READ_VERSIONS)
+}
+
+export function attachPreCompactArtifactReadVersions(
+  boundaryMarker: SystemCompactBoundaryMessage,
+  agentId: AgentId | undefined,
+  appState: PreCompactArtifactAppState | undefined,
+): void {
+  if (agentId !== undefined || appState === undefined) return
+  const versions = collectPreCompactArtifactReadVersions(appState)
+  if (versions !== undefined) {
+    boundaryMarker.compactMetadata.preCompactArtifactReadVersions = versions
+  }
+}
+
 /**
  * Merges user-supplied custom instructions with hook-provided instructions.
  * User instructions come first; hook instructions are appended.
@@ -991,15 +1032,22 @@ export async function compactConversation(
         ...preCompactDiscovered,
       ].sort()
     }
+    attachPreCompactArtifactReadVersions(
+      boundaryMarker,
+      context.agentId,
+      context.getAppState(),
+    )
 
     const transcriptPath = getTranscriptPath()
     const summaryMessages: UserMessage[] = [
       createUserMessage({
-        content: getCompactUserSummaryMessage(
-          summary,
+        content: getCompactUserSummaryMessage(summary, {
           suppressFollowUpQuestions,
           transcriptPath,
-        ),
+          headTruncated: ptlAttempts > 0,
+          toolNamesUsed: collectToolNamesUsedBeforeCompact(messages),
+          isTranscriptSuppressed: isEnvTruthy(process.env.CLAUDE_CODE_REMOTE),
+        }),
         isCompactSummary: true,
         isVisibleInTranscriptOnly: true,
       }),
@@ -1589,11 +1637,22 @@ export async function partialCompactConversation(
         ...preCompactDiscovered,
       ].sort()
     }
+    attachPreCompactArtifactReadVersions(
+      boundaryMarker,
+      context.agentId,
+      context.getAppState(),
+    )
 
     const transcriptPath = getTranscriptPath()
     const summaryMessages: UserMessage[] = [
       createUserMessage({
-        content: getCompactUserSummaryMessage(summary, false, transcriptPath),
+        content: getCompactUserSummaryMessage(summary, {
+          suppressFollowUpQuestions: false,
+          transcriptPath,
+          headTruncated: ptlAttempts > 0,
+          toolNamesUsed: collectToolNamesUsedBeforeCompact(allMessages),
+          isTranscriptSuppressed: isEnvTruthy(process.env.CLAUDE_CODE_REMOTE),
+        }),
         isCompactSummary: true,
         ...(messagesToKeep.length > 0
           ? {

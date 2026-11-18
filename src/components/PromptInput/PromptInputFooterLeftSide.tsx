@@ -62,14 +62,70 @@ const MAX_VOICE_HINT_SHOWS = 3;
 
 /** Official Hzp — flash duration after needsInput increase / succeeded increase. */
 const FLEET_NUDGE_FLASH_MS = 2_500;
+/** Official 2.1.302 (#926): hide `← for agents` 10s after session opens. */
+const AGENTS_HINT_TIMEOUT_MS = 10_000;
+
+let agentsHintExpiredState = false;
+let agentsHintTimerStarted = false;
+const agentsHintListeners = new Set<() => void>();
+
+function ensureAgentsHintTimer(): void {
+  if (agentsHintTimerStarted || agentsHintExpiredState) return;
+  agentsHintTimerStarted = true;
+  const timer = setTimeout(() => {
+    agentsHintExpiredState = true;
+    for (const listener of agentsHintListeners) listener();
+  }, AGENTS_HINT_TIMEOUT_MS);
+  if (typeof timer === 'object' && 'unref' in timer) {
+    timer.unref();
+  }
+}
+
+function subscribeAgentsHintExpired(listener: () => void): () => void {
+  agentsHintListeners.add(listener);
+  return () => {
+    agentsHintListeners.delete(listener);
+  };
+}
+
+function getAgentsHintExpiredSnapshot(): boolean {
+  return agentsHintExpiredState;
+}
+
+export function resetAgentsHintExpiredForTest(): void {
+  agentsHintExpiredState = false;
+  agentsHintTimerStarted = false;
+}
+
+export function setAgentsHintExpiredForTest(expired: boolean): void {
+  agentsHintExpiredState = expired;
+  for (const listener of agentsHintListeners) listener();
+}
 
 /**
  * densable K2e / FFe — fleet/agents entry hint.
- * - Default / GB off / zero needs: "← for agents" (or "← again for agents")
+ * - Default / GB off / zero needs: "← for agents" (or "← again for agents"), hidden after 10s
  * - needs===0 + succeeded delta (fpf>0): pulse "← N done" (success on N) for Ozo=2500ms
- * - needsInput > 0: "← N agent(s)" with warning/success flash on change
+ * - needsInput > 0: "← N agent(s)" with warning/success flash on change (always shown)
  */
-function AgentsFooterHint({ leftArrowAgain }: { leftArrowAgain?: boolean }): React.ReactNode {
+export function AgentsFooterHint({
+  leftArrowAgain,
+  restingHintExpired: restingHintExpiredProp,
+}: {
+  leftArrowAgain?: boolean;
+  restingHintExpired?: boolean;
+}): React.ReactNode {
+  useEffect(() => {
+    if (restingHintExpiredProp === undefined) {
+      ensureAgentsHintTimer();
+    }
+  }, [restingHintExpiredProp]);
+  const storeExpired = useSyncExternalStore(
+    subscribeAgentsHintExpired,
+    getAgentsHintExpiredSnapshot,
+    getAgentsHintExpiredSnapshot,
+  );
+  const restingHintExpired = restingHintExpiredProp ?? storeExpired;
   const nudgeEnabled = isFleetNeedsInputNudgeEnabled();
   const store = useMemo(() => getFleetNudgeExternalStore(nudgeEnabled), [nudgeEnabled]);
   const snap = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
@@ -174,8 +230,9 @@ function AgentsFooterHint({ leftArrowAgain }: { leftArrowAgain?: boolean }): Rea
     );
   }
 
-  // densable: !zAr || needs void/0 → plain "← for agents"
+  // densable: !zAr || needs void/0 → plain "← for agents" (hidden once 10s hint timer expires)
   if (!nudgeEnabled || needsInput === undefined || needsInput === 0) {
+    if (restingHintExpired) return null;
     return (
       <Text dimColor>
         {leftArrowAgain ? `${figures.arrowLeft} again for agents` : `${figures.arrowLeft} for agents`}

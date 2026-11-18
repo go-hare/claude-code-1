@@ -41,14 +41,15 @@ describe('Skills / ReloadSkills / Bundled Docs alignment (#708, #709, #718, #814
     }
   })
 
-  test('#709 /reload-skills reports that the full skill list is re-sent to Claude', async () => {
+  test('#709 /reload-skills reports reloaded skill count and diff (2.1.304 #1016)', async () => {
     expect(reloadSkills.description).toContain('added or changed on disk')
     const mod = await reloadSkills.load()
     const result = await mod.call()
     expect(result.type).toBe('text')
     if (result.type === 'text') {
-      expect(result.value).toContain('full skill list')
-      expect(result.value).toContain('compaction')
+      expect(result.value).toMatch(
+        /^Reloaded skills: \d+ skills? available \((none added or removed|\d+ added|\d+ removed|\d+ added, \d+ removed)\)\.$/,
+      )
     }
   })
 
@@ -75,7 +76,7 @@ describe('Skills / ReloadSkills / Bundled Docs alignment (#708, #709, #718, #814
       'utf8',
     )
     expect(skillMd).toContain(
-      'Leave Managed Agents sessions in place unless the user explicitly asks to archive or delete them.',
+      "Don't delete or archive sessions or other Managed Agents resources unless the user explicitly asks.",
     )
   })
 

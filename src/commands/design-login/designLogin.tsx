@@ -13,6 +13,9 @@ const PASTE_PROMPT = 'Paste code here if prompted > ';
 
 const AUTHORIZED = 'Design-system access authorized. /design-sync can now reach your claude.ai/design projects.';
 
+export const DESIGN_LOGIN_SUNSET_NOTICE =
+  'This sign-in is only for standalone Claude Design (claude.ai/design). It goes away when standalone closes, by December 14, 2026. Until then it still works, so sign in if /design-sync or /design consent sent you here.';
+
 export async function call(onDone: LocalJSXCommandOnDone): Promise<React.ReactNode> {
   return <DesignLogin onDone={onDone} />;
 }
@@ -88,6 +91,7 @@ function DesignLogin(props: { onDone: LocalJSXCommandOnDone }): React.ReactNode 
 
   return (
     <Box flexDirection="column">
+      <Text dimColor>{DESIGN_LOGIN_SUNSET_NOTICE}</Text>
       <Text>Starting design login…</Text>
       {url !== null ? <Text>{url}</Text> : null}
       <Text>

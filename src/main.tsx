@@ -383,6 +383,7 @@ import {
   setDirectConnectServerUrl,
   getFlagSettingsExpectedContent,
   getFlagSettingsPath,
+  setFlagMcpConfigFilePaths,
   setFlagSettingsPath,
   setInitialMainLoopModel,
   setInlinePlugins,
@@ -1081,7 +1082,7 @@ async function run(): Promise<CommanderCommand> {
     .helpOption('-h, --help', 'Display help for command')
     .option(
       '-d, --debug [filter]',
-      'Enable debug mode with optional category filtering (e.g., "api,hooks" or "!1p,!file")',
+      "Enable debug mode with optional category filtering (e.g., --debug=hooks,mcp or --debug='!hooks,!mcp')",
       (_value: string | true) => {
         // If value is provided, it will be the filter string
         // If not provided but flag is present, value will be true
@@ -1118,7 +1119,7 @@ async function run(): Promise<CommanderCommand> {
     .addOption(
       new Option(
         '--json-schema <schema>',
-        'JSON Schema for structured output validation. ' +
+        'JSON Schema for structured output validation (only works with --print). ' +
           'Example: {"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}',
       ).argParser(String),
     )
@@ -1237,7 +1238,7 @@ async function run(): Promise<CommanderCommand> {
     )
     .option(
       '--tools <tools...>',
-      'Specify the list of available tools from the built-in set. Use "" to disable all tools, "default" to use all tools, or specify tool names (e.g. "Bash,Edit,Read").',
+      'Specify the list of available tools from the built-in set. Use "" to disable all tools, "default" to use the default set, or specify tool names (e.g. "Bash,Edit,Read").',
     )
     .option('--restricted', RESTRICTED_OPTION_HELP)
     .option(
@@ -1276,7 +1277,7 @@ async function run(): Promise<CommanderCommand> {
     .addOption(
       new Option(
         '--system-prompt-snapshot <on|off>',
-        "Record the system prompt once per conversation and reuse it verbatim on every request and resume. on (the default): the prompt is rendered on the conversation's first request — a --system-prompt or --append-system-prompt included — sent, and recorded; every later request and resume sends the record as-is, even when a later launch passes different text, until the conversation is compacted. off: never record; the prompt is rendered fresh every request (for iterating on prompt text). No effect where system-prompt recording is not yet enabled.",
+        "Record the system prompt once per conversation and reuse it verbatim on every request and resume. on (the default, except under --bare outside cloud and background sessions): the prompt is rendered on the conversation's first request — a --system-prompt or --append-system-prompt included — sent, and recorded; every later request and resume sends the record as-is, even when a later launch passes different text, until the conversation is compacted. off: never record; the prompt is rendered fresh every request (for iterating on prompt text).",
       )
         .choices(['on', 'off'])
         .argParser((w: string) => {
@@ -1316,7 +1317,7 @@ async function run(): Promise<CommanderCommand> {
     .option('-c, --continue', 'Continue the most recent conversation in the current directory', () => true)
     .option(
       '-r, --resume [value]',
-      'Resume a conversation by session ID, or open interactive picker with optional search term',
+      'Resume a conversation by session ID or name, or open interactive picker with optional search term',
       value => value || true,
     )
     .option(
@@ -1454,7 +1455,7 @@ async function run(): Promise<CommanderCommand> {
       (val: string, prev: string[]) => [...prev, ...val.split(/\s+/).filter(Boolean)],
       [] as string[],
     )
-    .option('--disable-slash-commands', 'Disable all skills', () => true)
+    .option('--disable-slash-commands', 'Disable all skills and commands', () => true)
     .option('--chrome', 'Enable Claude in Chrome integration')
     .option('--no-chrome', 'Disable Claude in Chrome integration')
     .option(
@@ -2108,6 +2109,7 @@ async function run(): Promise<CommanderCommand> {
         let allConfigs: Record<string, McpServerConfig> = {};
         const fatalErrors: ValidationError[] = [];
         const skipEntries: Array<{ name: string; type: string; message: string; rawServerType?: unknown }> = [];
+        const flagMcpConfigFilePaths: string[] = [];
 
         // densable W=$e?V:void 0 — bridgeSessionId only when sdkUrl (carrier child).
         const bridgeSessionId = sdkUrl ? (sessionId as string | undefined) : undefined;
@@ -2139,6 +2141,7 @@ async function run(): Promise<CommanderCommand> {
           } else {
             // Try as file path
             const configPath = resolve(configItem);
+            flagMcpConfigFilePaths.push(configPath);
             try {
               const rawFile = safeParseJSON(getFsImplementation().readFileSync(configPath, { encoding: 'utf-8' }));
               if (rawFile && typeof rawFile === 'object' && !Array.isArray(rawFile)) {
@@ -2194,6 +2197,8 @@ async function run(): Promise<CommanderCommand> {
             fatalErrors.push(...errors);
           }
         }
+
+        setFlagMcpConfigFilePaths(uniq(flagMcpConfigFilePaths));
 
         if (fatalErrors.length > 0) {
           const formattedErrors = fatalErrors.map(err => `${err.path ? err.path + ': ' : ''}${err.message}`).join('\n');
@@ -3982,7 +3987,15 @@ async function run(): Promise<CommanderCommand> {
           holdBackMcpConfigsForClaim(held);
           mcpConfigsToConnect = connectNow;
         }
-        await connectMcpBatch(mcpConfigsToConnect, 'regular');
+        const { blocking: blockingMcpConfigs, nonBlocking: nonBlockingMcpConfigs } =
+          splitBlockingAndNonBlockingMcpConfigs(
+            mcpConfigsToConnect,
+            isRemoteEnvEnabled() && process.env.MCP_CONNECTION_NONBLOCKING !== 'false',
+          );
+        if (Object.keys(nonBlockingMcpConfigs).length > 0) {
+          void connectMcpBatch(nonBlockingMcpConfigs, 'regular-synced-stdio');
+        }
+        await connectMcpBatch(blockingMcpConfigs, 'regular');
         profileCheckpoint('after_connectMcp');
         // Dedup: suppress plugin MCP servers that duplicate a claude.ai
         // connector (connector wins), then connect claude.ai servers.
@@ -6048,6 +6061,17 @@ async function run(): Promise<CommanderCommand> {
       await pluginListHandler(options);
     });
 
+  // #914: Plugin details command
+  pluginCmd
+    .command('details <name>')
+    .description("Show a plugin's component inventory and projected token cost")
+    .option('--json', 'Output as JSON')
+    .addOption(coworkOption())
+    .action(async (name: string, options: { json?: boolean; cowork?: boolean }) => {
+      const { pluginDetailsHandler } = await import('./cli/handlers/plugins.js');
+      await pluginDetailsHandler(name, options);
+    });
+
   // Marketplace subcommands
   const marketplaceCmd = pluginCmd
     .command('marketplace')
@@ -6254,6 +6278,56 @@ async function run(): Promise<CommanderCommand> {
       // eslint-disable-next-line custom-rules/no-process-exit
       process.exit(0);
     });
+
+  program
+    .command('ultrareview [target]')
+    .usage('[target] [options]')
+    .description(
+      'Run a cloud-hosted multi-agent code review of the current branch (or a PR number / base branch) and print the findings',
+    )
+    .option('--json', 'Print the raw bugs.json payload instead of formatted findings')
+    .option('--timeout <minutes>', 'Maximum minutes to wait for the review to finish (default: 45)')
+    .option(
+      '--post',
+      "Post the finished review's findings to the PR as you (PR targets only; one plain comment, not a review)",
+    )
+    .option(
+      '--no-post',
+      'Do not post the findings to the PR (the default; accepted for parity with the /ultrareview and /code-review ultra flags)',
+    )
+    .option(
+      '--trust-workspace',
+      "Trust the current folder for this run only, without asking (for scripts and CI). Takes no value: put a PR number or base branch before it. Use it only on folders you trust: the folder's git configuration and Claude Code project settings can run programs",
+    )
+    .addOption(new Option('--list <file>').hideHelp())
+    .addOption(new Option('--output <file>').hideHelp())
+    .addOption(new Option('--max-cost <dollars>').hideHelp())
+    .addOption(new Option('--review-md <file>').hideHelp())
+    .action(
+      async (
+        _target: string | undefined,
+        opts: {
+          json?: boolean;
+          timeout?: string;
+          post?: boolean;
+          trustWorkspace?: boolean;
+        },
+      ) => {
+        const { checkUltrareviewWorkspaceTrust } = await import('./commands/review/ultrareviewHeadless.js');
+        const trust = checkUltrareviewWorkspaceTrust({
+          trustWorkspace: opts.trustWorkspace,
+          argv: process.argv,
+          jsonMode: opts.json,
+        });
+        if (!trust.trusted) {
+          process.stderr.write(`${trust.message}\n`);
+          // eslint-disable-next-line custom-rules/no-process-exit
+          process.exit(1);
+        }
+        // eslint-disable-next-line custom-rules/no-process-exit
+        process.exit(0);
+      },
+    );
 
   if (feature('TRANSCRIPT_CLASSIFIER')) {
     // Skip when tengu_auto_mode_config.enabled === 'disabled' (circuit breaker).
@@ -6481,7 +6555,10 @@ async function run(): Promise<CommanderCommand> {
   // claude update — update claude to the latest version via npm or bun
   program
     .command('update')
-    .description('Update claude to the latest version')
+    .alias('upgrade')
+    .description(
+      'Check for updates and install if available; package-manager installs update through the package manager',
+    )
     .action(async () => {
       const { updateCCB } = await import('./cli/updateCCB.js');
       await updateCCB();
@@ -6632,4 +6709,34 @@ Examples:
   profileReport();
 
   return program;
+}
+
+/**
+ * #1003 (official V7o / wbi): in cloud sessions, a new conversation's first turn
+ * no longer waits for local (stdio) MCP servers of plugins synced from claude.ai,
+ * unless the server sets `alwaysLoad: true`.
+ */
+export function splitBlockingAndNonBlockingMcpConfigs(
+  configs: Record<string, ScopedMcpServerConfig>,
+  nonBlockingSyncedStdio: boolean,
+): {
+  blocking: Record<string, ScopedMcpServerConfig>;
+  nonBlocking: Record<string, ScopedMcpServerConfig>;
+} {
+  if (!nonBlockingSyncedStdio) {
+    return { blocking: configs, nonBlocking: {} };
+  }
+  const blocking: Record<string, ScopedMcpServerConfig> = {};
+  const nonBlocking: Record<string, ScopedMcpServerConfig> = {};
+  for (const [name, config] of Object.entries(configs)) {
+    const isStdio = config.type === 'stdio' || config.type === undefined;
+    const isSyncedPlugin = typeof config.pluginSource === 'string' && config.pluginSource.endsWith('@synced');
+    const alwaysLoad = 'alwaysLoad' in config ? config.alwaysLoad : undefined;
+    if (isStdio && isSyncedPlugin && alwaysLoad !== true) {
+      nonBlocking[name] = config;
+    } else {
+      blocking[name] = config;
+    }
+  }
+  return { blocking, nonBlocking };
 }

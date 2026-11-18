@@ -131,6 +131,140 @@ export class FetchRefNotFoundError extends Error {
   }
 }
 
+export type RepositoryDenial =
+  | 'repo_not_found_or_no_permission'
+  | 'no_credentials'
+  | 'authentication_failed'
+  | 'blocked_by_git_proxy'
+
+export const REPOSITORY_DENIAL_LABELS: Record<RepositoryDenial, string> = {
+  repo_not_found_or_no_permission: 'repository not found or no permission',
+  no_credentials: "no credentials for the repository's git host",
+  authentication_failed: 'authentication failed',
+  blocked_by_git_proxy: 'blocked by the git proxy',
+}
+
+const REPO_DENIAL_PATTERNS: Array<[RegExp, RepositoryDenial]> = [
+  [/^fatal: repository '.*' not found$/, 'repo_not_found_or_no_permission'],
+  [
+    /^fatal: unable to access '.*': the requested url returned error: 404$/,
+    'repo_not_found_or_no_permission',
+  ],
+  [/^error: repository not found\.?$/, 'repo_not_found_or_no_permission'],
+  [/^fatal: could not read (username|password) for /, 'no_credentials'],
+  [/^fatal: authentication failed for /, 'authentication_failed'],
+  [
+    /^fatal: unable to access '.*': the requested url returned error: 401$/,
+    'authentication_failed',
+  ],
+  [
+    /^\S+@\S+: permission denied \(publickey(,[a-z0-9,-]+)?\)\.?$/,
+    'authentication_failed',
+  ],
+]
+
+const OTHER_HTTP_ERROR_RE =
+  /^fatal: unable to access '.*': the requested url returned error: (?!40[14]$)\d+$/
+
+export function classifyRepositoryDenial(
+  message: string,
+  viaGitProxy: boolean,
+): RepositoryDenial | undefined {
+  if (/^git \S+ failed \(watchdog:/.test(message)) return undefined
+  const body = message.replace(/^git \S+ failed: /, '')
+  if (body.length >= 2000) return undefined
+  const lines = body
+    .toLowerCase()
+    .split('\n')
+    .map(s => s.trim())
+  if (viaGitProxy) {
+    return lines.some(s =>
+      s.startsWith('remote: access denied by the git proxy'),
+    )
+      ? 'blocked_by_git_proxy'
+      : undefined
+  }
+  if (lines.some(s => OTHER_HTTP_ERROR_RE.test(s))) return undefined
+  for (const [re, denial] of REPO_DENIAL_PATTERNS) {
+    if (lines.some(line => re.test(line))) return denial
+  }
+  return undefined
+}
+
+export type RepositoryThrottle = 'refused_by_git_wrapper' | 'http_429'
+
+const HTTP_429_RE =
+  /^fatal: unable to access '.*': the requested url returned error: 429$/
+
+export function classifyRepositoryThrottle(
+  message: string,
+  exitCode: number | null | undefined,
+  gitURL: string,
+): RepositoryThrottle | undefined {
+  if (/^git \S+ failed \(watchdog:/.test(message)) return undefined
+  if (exitCode === 75) return 'refused_by_git_wrapper'
+  if (!/^https?:/i.test(gitURL)) return undefined
+  const body = message.replace(/^git \S+ failed: /, '')
+  if (body.length >= 2000) return undefined
+  const lines = body
+    .toLowerCase()
+    .split(/\r|\n/)
+    .map(s => s.trim())
+    .filter(s => s !== '' && !s.startsWith('remote:'))
+  return lines.length > 0 && lines.every(s => HTTP_429_RE.test(s))
+    ? 'http_429'
+    : undefined
+}
+
+export type RepositoryAddress = {
+  scheme: string
+  host: string
+  port?: string
+}
+
+export type RepositoryAccessInfo = {
+  repo: string
+  address?: RepositoryAddress
+}
+
+/** densable `ten` — repository access validation failure with structured denial & repo */
+export class RepositoryAccessError extends Error {
+  readonly denial: RepositoryDenial | undefined
+  readonly throttle: RepositoryThrottle | undefined
+  readonly repository: RepositoryAccessInfo
+
+  constructor(
+    err: unknown,
+    viaGitProxy: boolean,
+    info: { repo: string; gitURL: string; lastAttemptExitCode?: number | null },
+  ) {
+    const msg = errText(err)
+    super(
+      `Repository access validation failed after ${GIT_VALIDATE_ATTEMPTS} attempts: ${msg}`,
+    )
+    this.name = 'RepositoryAccessError'
+    const parsed = URL.canParse(info.gitURL) ? new URL(info.gitURL) : undefined
+    this.repository = {
+      repo: info.repo,
+      address:
+        parsed !== undefined &&
+        (parsed.protocol === 'https:' || parsed.protocol === 'http:') &&
+        parsed.hostname !== ''
+          ? {
+              scheme: parsed.protocol.slice(0, -1),
+              host: parsed.hostname,
+              port: parsed.port || undefined,
+            }
+          : undefined,
+    }
+    this.denial = classifyRepositoryDenial(msg, viaGitProxy)
+    this.throttle =
+      this.denial === undefined
+        ? classifyRepositoryThrottle(msg, info.lastAttemptExitCode, info.gitURL)
+        : undefined
+  }
+}
+
 /** densable `fo` — permanent setup failure when source branch/ref is missing on remote */
 export class SourceRefNotFoundError extends Error {
   readonly repo: string
@@ -203,6 +337,10 @@ export type GitRepoCtx = {
   getAuthToken?: () => string
   governedMount?: boolean
   sanitized?: { onIndexFromHead?: () => void }
+  gitEnvironment?: {
+    envOverrides?: Record<string, string | undefined>
+    commandScopeEntries?: Array<[string, string]>
+  }
   onDebug: (msg: string) => void
   onPhase?: (phase: string, ms: number, extra?: Record<string, string>) => void
   onProgress?: (cmd: string, progress: GitProgress) => void
@@ -903,12 +1041,15 @@ export async function runGitPrepare(
     redactGitArg(w, ctx.authURL, ctx.gitURL, secret),
   )
   ctx.onDebug(`[byoc:git] git ${debugArgs.join(' ')} (dir=${cwd || '.'})`)
+  const clearGitConfig = !authCmd || hasProxyAuth || Boolean(ctx.token)
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     ...extraEnv,
+    ...ctx.gitEnvironment?.envOverrides,
     ...(token ? { [SHR_GIT_PROXY_TOKEN_ENV]: token } : undefined),
     CLAUDE_CODE_SESSION_ACCESS_TOKEN: undefined,
     ...(hasProxyAuth ? { GIT_CONFIG_GLOBAL: '/dev/null' } : undefined),
+    ...(clearGitConfig ? { GIT_CONFIG: undefined } : undefined),
     GIT_TERMINAL_PROMPT: '0',
     // densable 2.1.229 #23 — rR: GCM_INTERACTIVE:h0t.GCM_INTERACTIVE (fail-fast GCM)
     GCM_INTERACTIVE: GIT_H0T_ENV.GCM_INTERACTIVE,
@@ -921,6 +1062,11 @@ export async function runGitPrepare(
         }
       : undefined),
     GIT_SSH_COMMAND: `${process.env.GIT_SSH_COMMAND || 'ssh'} -o BatchMode=yes -o ConnectTimeout=30`,
+  }
+  if (clearGitConfig) {
+    for (const key of Object.keys(env)) {
+      if (key.toUpperCase() === 'GIT_CONFIG') env[key] = undefined
+    }
   }
   const { signal: f, dispose: m } = hardCapSignal(ctx.signal, hardCapMs)
   const noAuthVerb = verb !== undefined && NO_AUTH_GIT_COMMANDS.has(verb)
@@ -1237,24 +1383,39 @@ async function normalizeOriginFetch(ctx: GitRepoCtx): Promise<void> {
 }
 
 /** densable `Bjy` */
-export async function validateRepoAccess(ctx: GitRepoCtx): Promise<void> {
-  let backoff = 2000 + Math.random() * 2000
+export async function validateRepoAccess(
+  ctx: GitRepoCtx,
+  repo = '',
+  throttleBackoff = false,
+): Promise<void> {
+  const backoff = 2000 + Math.random() * 2000
   let last: unknown
+  let exitInfo: { exitCode?: number | null } = {}
   for (let n = 0; n < GIT_VALIDATE_ATTEMPTS; n++) {
     if (n > 0) {
-      const o = backoff * 2 ** (n - 1)
+      const throttled =
+        throttleBackoff &&
+        classifyRepositoryThrottle(
+          errText(last),
+          exitInfo.exitCode,
+          ctx.gitURL,
+        ) !== undefined
+      const o = backoff * 2 ** (n - 1) * (throttled ? 6 : 1)
       ctx.onDebug(
         `[byoc:git] Validation retry ${n + 1}/${GIT_VALIDATE_ATTEMPTS}, backing off ${Math.round(o)}ms`,
       )
       await abortableSleep(o, ctx.signal, { throwOnAbort: true })
     }
+    exitInfo = {}
     try {
-      await runGitPrepare(ctx, '', [
-        'ls-remote',
-        '--heads',
-        ctx.authURL,
-        'HEAD',
-      ])
+      await runGitPrepare(
+        ctx,
+        '',
+        ['ls-remote', '--heads', ctx.authURL, 'HEAD'],
+        undefined,
+        undefined,
+        exitInfo,
+      )
       if (n > 0) {
         ctx.onDebug(`[byoc:git] Validation succeeded on attempt ${n + 1}`)
       }
@@ -1263,9 +1424,11 @@ export async function validateRepoAccess(ctx: GitRepoCtx): Promise<void> {
       last = o
     }
   }
-  throw new Error(
-    `Repository access validation failed after ${GIT_VALIDATE_ATTEMPTS} attempts: ${errText(last)}`,
-  )
+  throw new RepositoryAccessError(last, ctx.getAuthToken !== undefined, {
+    repo,
+    gitURL: ctx.gitURL,
+    lastAttemptExitCode: exitInfo.exitCode,
+  })
 }
 
 /** densable `Ujy` — ensure local repo (prefetched or fresh init) */
@@ -1705,7 +1868,7 @@ export async function prepareOneRepo(opts: {
     signal: u,
   }
   if (!o) {
-    await withGitPhase(g, 'validateAccess', () => validateRepoAccess(g))
+    await withGitPhase(g, 'validateAccess', () => validateRepoAccess(g, r.repo))
   }
   const _ = await withGitPhase(g, 'ensureRepository', () =>
     ensureRepository(g, t),
@@ -1942,6 +2105,15 @@ export async function sanitizeCanonicalGitState(
       }
       await rm(join(n, f), { recursive: true, force: true })
     }
+    try {
+      await rm(join(n, 'refs', 'heads'))
+      onDebug(
+        '[runner:session] sanitize: .git/refs/heads was not a directory — removed (a reftable repository leaves a placeholder file there)',
+      )
+    } catch (b) {
+      const code = (b as NodeJS.ErrnoException).code
+      if (code !== 'ENOENT' && code !== 'ERR_FS_EISDIR') throw b
+    }
     await purgeSymlinks(join(n, 'refs'), true)
     await purgeSymlinks(join(n, 'objects'), false)
     await rm(join(n, 'objects', 'info'), { recursive: true, force: true })
@@ -1954,22 +2126,25 @@ export async function sanitizeCanonicalGitState(
     const u =
       c && c.size <= 1024 ? await readFile(l, 'utf-8').catch(() => '') : ''
     const d = /^ref: (refs\/[A-Za-z0-9._/-]+)\n?$/.exec(u)
-    if (
-      !(
-        d &&
-        d[1]!
-          .split('/')
-          .every(
-            f =>
-              f.length > 0 &&
-              !f.startsWith('.') &&
-              !f.endsWith('.') &&
-              !f.endsWith('.lock') &&
-              !f.includes('..'),
-          )
-      ) &&
-      !/^[0-9a-f]{40}([0-9a-f]{24})?\n?$/.test(u)
-    ) {
+    const validRef =
+      d &&
+      d[1]!
+        .split('/')
+        .every(
+          f =>
+            f.length > 0 &&
+            !f.startsWith('.') &&
+            !f.endsWith('.') &&
+            !f.endsWith('.lock') &&
+            !f.includes('..'),
+        )
+    if (/^ref: refs\/heads\/\.invalid\n?$/.test(u)) {
+      await rm(l, { force: true })
+      await writeFile(l, 'ref: refs/heads/main\n', {
+        flag: 'wx',
+        mode: 0o644,
+      })
+    } else if (!validRef && !/^[0-9a-f]{40}([0-9a-f]{24})?\n?$/.test(u)) {
       await rm(l, { force: true })
     }
     await writeFile(join(n, 'config'), s, { mode: 0o644 })

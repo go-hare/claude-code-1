@@ -907,9 +907,13 @@ export async function runSpawnRunnerHook(
   let exitCode: number | null = null
   let execError = false
 
+  const EXIT_CLOSE_GRACE_MS = 1_000
+  const AFTER_EXIT_LOG_CAP = 65_536
+  const LINE_BUF_CAP = 65_536
+
   try {
     await new Promise<void>(resolve => {
-      let child
+      let child: ReturnType<typeof spawn>
       try {
         child = spawn(opts.hookPath, [], {
           cwd: undefined,
@@ -927,15 +931,19 @@ export async function runSpawnRunnerHook(
 
       let killTimer: ReturnType<typeof setTimeout> | undefined
       let forceTimer: ReturnType<typeof setTimeout> | undefined
-      let abandonTimer: ReturnType<typeof setTimeout> | undefined
+      let exitGraceTimer: ReturnType<typeof setTimeout> | undefined
       let abortKillTimer: ReturnType<typeof setTimeout> | undefined
+      let sigtermSent = false
 
-      const timeout = setTimeout(() => {
-        timedOut = true
+      const sendSigterm = (reason: string): void => {
+        const first = !sigtermSent
+        sigtermSent = true
         opts.onStatus(
-          `[runner:orchestrator] spawn-runner jti=${claims.jti} timed out after ${opts.timeoutMs}ms, sending SIGTERM to process tree`,
+          first
+            ? `${reason}, sending SIGTERM to process tree`
+            : `${reason}; its process tree was already sent SIGTERM, so it is not sent another`,
         )
-        if (child.pid !== undefined) {
+        if (first && child.pid !== undefined) {
           try {
             process.kill(-child.pid, 'SIGTERM')
           } catch {
@@ -946,6 +954,132 @@ export async function runSpawnRunnerHook(
             }
           }
         }
+      }
+
+      child.stdout?.setEncoding('utf8')
+      child.stderr?.setEncoding('utf8')
+      let stdoutBuf = ''
+      let stderrBuf = ''
+      let afterExit = false
+      let afterExitBytes = 0
+      let skipStdoutPartial = false
+      let skipStderrPartial = false
+      const afterExitCapped = (): boolean =>
+        afterExit && afterExitBytes > AFTER_EXIT_LOG_CAP
+
+      const onChunk = (chunk: string, isStderr: boolean): string => {
+        const lines = chunk.split('\n')
+        const rest = lines.pop() ?? ''
+        for (const line of lines) {
+          const cleaned = stripControlCharsForLog(redactLogText(line))
+          if (afterExit) {
+            afterExitBytes += Buffer.byteLength(cleaned) + 1
+            opts.onStatus(
+              afterExitCapped()
+                ? `[runner:orchestrator] spawn-runner jti=${claims.jti}: a process the hook left running has written more than ${AFTER_EXIT_LOG_CAP / 1024} KB since the hook exited; its further output is not logged.`
+                : `[runner:hook:spawn-runner:after-exit jti=${claims.jti}] ${cleaned}`,
+            )
+            if (afterExitCapped()) return ''
+            continue
+          }
+          opts.onStatus(`[runner:hook:spawn-runner] ${cleaned}`)
+          if (isStderr) {
+            stderrTail = (stderrTail + cleaned + '\n').slice(-512)
+          }
+        }
+        return rest
+      }
+
+      child.stdout?.on('data', (d: string) => {
+        if (afterExitCapped()) return
+        let chunk = d
+        if (skipStdoutPartial) {
+          const nl = chunk.indexOf('\n')
+          if (nl < 0) return
+          skipStdoutPartial = false
+          chunk = chunk.slice(nl + 1)
+        }
+        stdoutBuf = onChunk(stdoutBuf + chunk, false)
+        if (stdoutBuf.length > LINE_BUF_CAP) {
+          stdoutBuf = stdoutBuf.slice(-LINE_BUF_CAP)
+        }
+      })
+      child.stderr?.on('data', (d: string) => {
+        if (afterExitCapped()) return
+        let chunk = d
+        if (skipStderrPartial) {
+          const nl = chunk.indexOf('\n')
+          if (nl < 0) return
+          skipStderrPartial = false
+          chunk = chunk.slice(nl + 1)
+        }
+        stderrBuf = onChunk(stderrBuf + chunk, true)
+        if (stderrBuf.length > LINE_BUF_CAP) {
+          stderrBuf = stderrBuf.slice(-LINE_BUF_CAP)
+        }
+      })
+      const onStreamErr = (err: unknown): void => {
+        opts.onDebug(
+          `[runner:orchestrator] spawn-runner jti=${claims.jti} output read failed: ${errMsg(err)}`,
+        )
+      }
+      child.stdout?.on('error', onStreamErr)
+      child.stderr?.on('error', onStreamErr)
+
+      let onAbort = (): void => {}
+
+      const finish = (closedNormally: boolean): void => {
+        if (afterExit) return
+        clearTimeout(timeout)
+        if (exitGraceTimer) clearTimeout(exitGraceTimer)
+        if (killTimer) clearTimeout(killTimer)
+        if (forceTimer) clearTimeout(forceTimer)
+        if (abortKillTimer) clearTimeout(abortKillTimer)
+        opts.signal?.removeEventListener('abort', onAbort)
+        for (const [name, stream, buf] of [
+          ['stdout', child.stdout, stdoutBuf],
+          ['stderr', child.stderr, stderrBuf],
+        ] as const) {
+          if (!buf) continue
+          if (closedNormally || stream?.readableEnded) {
+            onChunk(buf + '\n', name === 'stderr')
+            continue
+          }
+          const orMore = buf.length >= LINE_BUF_CAP ? ' or more' : ''
+          opts.onStatus(
+            `[runner:hook:spawn-runner] (The last ${buf.length}${orMore} characters written to ${name} are not shown: they did not end in a newline, and a process still has ${name} open, so the line may be incomplete. End each message the hook writes with a newline.)`,
+          )
+          if (name === 'stdout') skipStdoutPartial = true
+          else skipStderrPartial = true
+        }
+        stdoutBuf = ''
+        stderrBuf = ''
+        afterExit = true
+        const exited = child.exitCode !== null || child.signalCode !== null
+        if (!closedNormally && exited) {
+          opts.onStatus(
+            `[runner:orchestrator] spawn-runner jti=${claims.jti} exited, but a process it started still has the hook's stdout or stderr open. Up to ${AFTER_EXIT_LOG_CAP / 1024} KB more of that output is logged as [runner:hook:spawn-runner:after-exit jti=${claims.jti}]. Send a runner's output to a file: once the orchestrator exits, writes there fail.`,
+          )
+        }
+        if (!closedNormally) {
+          for (const stream of [child.stdout, child.stderr]) {
+            if (
+              stream &&
+              'unref' in stream &&
+              typeof (stream as { unref?: () => void }).unref === 'function'
+            ) {
+              ;(stream as { unref: () => void }).unref()
+            }
+          }
+        }
+        resolve()
+      }
+
+      const timeout = setTimeout(() => {
+        timedOut = true
+        sendSigterm(
+          `[runner:orchestrator] spawn-runner jti=${claims.jti} timed out after ${opts.timeoutMs}ms`,
+        )
         killTimer = setTimeout(() => {
           if (child.pid !== undefined) {
             try {
@@ -959,53 +1093,21 @@ export async function runSpawnRunnerHook(
             }
           }
           forceTimer = setTimeout(() => {
-            opts.onStatus(
-              `[runner:orchestrator] spawn-runner jti=${claims.jti} did not exit after SIGKILL within ${ORCH_SIGKILL_GRACE_MS}ms (likely D-state); abandoning child and resolving as timed out`,
-            )
-            opts.signal?.removeEventListener('abort', onAbort)
-            resolve()
+            if (child.exitCode === null && child.signalCode === null) {
+              opts.onStatus(
+                `[runner:orchestrator] spawn-runner jti=${claims.jti} did not exit after SIGKILL within ${ORCH_SIGKILL_GRACE_MS}ms (likely D-state); abandoning child and resolving as timed out`,
+              )
+              finish(false)
+            }
           }, ORCH_SIGKILL_GRACE_MS)
         }, ORCH_SIGKILL_GRACE_MS)
       }, opts.timeoutMs)
 
-      child.stdout?.setEncoding('utf8')
-      child.stderr?.setEncoding('utf8')
-      let stdoutBuf = ''
-      let stderrBuf = ''
-      const onChunk = (chunk: string, isStderr: boolean): void => {
-        const lines = chunk.split('\n')
-        const rest = lines.pop() ?? ''
-        for (const line of lines) {
-          const cleaned = stripControlCharsForLog(redactLogText(line))
-          opts.onStatus(`[runner:hook:spawn-runner] ${cleaned}`)
-          if (isStderr) {
-            stderrTail = (stderrTail + cleaned + '\n').slice(-65_536)
-          }
-        }
-        if (isStderr) stderrBuf = rest
-        else stdoutBuf = rest
-      }
-      child.stdout?.on('data', (d: string) => {
-        onChunk(stdoutBuf + d, false)
-      })
-      child.stderr?.on('data', (d: string) => {
-        onChunk(stderrBuf + d, true)
-      })
-
-      const onAbort = (): void => {
-        opts.onStatus(
-          `[runner:orchestrator] spawn-runner jti=${claims.jti} aborted by shutdown, sending SIGTERM to process tree`,
+      onAbort = (): void => {
+        sendSigterm(
+          `[runner:orchestrator] spawn-runner jti=${claims.jti} aborted by shutdown`,
         )
         if (child.pid !== undefined) {
-          try {
-            process.kill(-child.pid, 'SIGTERM')
-          } catch {
-            try {
-              child.kill('SIGTERM')
-            } catch {
-              /* ignore */
-            }
-          }
           abortKillTimer = setTimeout(() => {
             if (child.pid !== undefined) {
               try {
@@ -1022,27 +1124,28 @@ export async function runSpawnRunnerHook(
       if (opts.signal?.aborted) onAbort()
 
       child.on('error', err => {
-        clearTimeout(timeout)
-        if (killTimer) clearTimeout(killTimer)
-        if (forceTimer) clearTimeout(forceTimer)
-        if (abortKillTimer) clearTimeout(abortKillTimer)
-        opts.signal?.removeEventListener('abort', onAbort)
+        if (afterExit) return
         execError = true
         const code = (err as NodeJS.ErrnoException).code
         stderrTail =
           code === 'ENOENT'
             ? 'spawn-runner hook missing (ENOENT)'
             : `spawn-runner hook exec failed: ${errMsg(err)}`
-        resolve()
+        finish(true)
       })
-      child.on('close', code => {
-        clearTimeout(timeout)
-        if (killTimer) clearTimeout(killTimer)
-        if (forceTimer) clearTimeout(forceTimer)
-        if (abortKillTimer) clearTimeout(abortKillTimer)
-        opts.signal?.removeEventListener('abort', onAbort)
+      child.once('exit', (code, signal) => {
+        if (afterExit) return
         exitCode = code
-        resolve()
+        if (sigtermSent || signal !== null) return
+        clearTimeout(timeout)
+        opts.signal?.removeEventListener('abort', onAbort)
+        exitGraceTimer = setTimeout(() => {
+          exitGraceTimer = setTimeout(() => finish(false), 0)
+        }, EXIT_CLOSE_GRACE_MS)
+      })
+      child.once('close', code => {
+        if (!afterExit) exitCode ??= code
+        finish(true)
       })
     })
   } finally {

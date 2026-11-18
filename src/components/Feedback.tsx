@@ -26,6 +26,7 @@ import { type GitRepoState, getGitState, getIsGit } from '../utils/git.js';
 import { getAuthHeaders, getUserAgent } from '../utils/http.js';
 import { getInMemoryErrors, logError } from '../utils/log.js';
 import { isEssentialTrafficOnly } from '../utils/privacyLevel.js';
+import { formatFeedbackWithIssueFallback, getFeedbackCommandDisabledReason } from '../utils/feedbackDrafts/gates.js';
 import {
   extractTeammateTranscriptsFromTasks,
   getTranscriptPath,
@@ -422,9 +423,7 @@ export function Feedback({
         }
         setStep('done');
       } else {
-        const failureReason = result.isZdrOrg
-          ? 'Feedback collection is not available for organizations with custom data retention policies.'
-          : `Couldn't send feedback. If it keeps failing, you can file at ${GITHUB_ISSUES_REPO_URL} instead.`;
+        const failureReason = formatFeedbackFailureMessage(result);
         setError(failureReason);
         sendStore.fail(failureReason);
         // Stay on userInput step so user can retry with their content preserved
@@ -874,14 +873,126 @@ function sanitizeAndLogError(err: unknown): void {
   }
 }
 
-async function submitFeedback(
-  data: FeedbackData,
-  signal?: AbortSignal,
-): Promise<{ success: boolean; feedbackId?: string; isZdrOrg?: boolean }> {
-  if (isEssentialTrafficOnly()) {
-    return { success: false };
+export type FeedbackRefusal = {
+  kind: 'org' | 'credential' | 'transient' | 'other';
+  serverMessage?: string;
+  thirdParty?: boolean;
+};
+
+export type FeedbackSubmitResult = {
+  success: boolean;
+  feedbackId?: string;
+  isZdrOrg?: boolean;
+  payloadTooLarge?: boolean;
+  failureReason?: string;
+  statusCode?: number;
+  refusal?: FeedbackRefusal;
+};
+
+const FEEDBACK_NOT_ENABLED_MSG = 'Feedback has not been enabled for your organization.';
+const FEEDBACK_POLICY_DISABLED_MSG = "Feedback submission is disabled by your organization's policy.";
+const ZDR_ORG_MSG = 'Feedback collection is not available for organizations with custom data retention policies.';
+
+export function parseFeedbackHttpError(status: number, errorData: unknown): FeedbackSubmitResult {
+  const errObj =
+    errorData !== null && typeof errorData === 'object' && 'error' in errorData
+      ? (errorData as { error?: { type?: string; message?: string; details?: { error_code?: string } } }).error
+      : undefined;
+  const errorCode = errObj?.details?.error_code;
+  const message = typeof errObj?.message === 'string' ? errObj.message.trim() || undefined : undefined;
+
+  if (
+    errorCode === 'feedback_retention_blocked' ||
+    (errorCode === undefined &&
+      status === 403 &&
+      errObj?.type === 'permission_error' &&
+      message?.includes('Custom data retention settings'))
+  ) {
+    return {
+      success: false,
+      isZdrOrg: true,
+      failureReason: 'zdr_org',
+      statusCode: status,
+      refusal: { kind: 'org', serverMessage: message },
+    };
   }
 
+  if (
+    errorCode === 'feedback_disabled' ||
+    errorCode === 'feedback_third_party_blocked' ||
+    (errorCode === undefined &&
+      status === 403 &&
+      (message === FEEDBACK_NOT_ENABLED_MSG || message === FEEDBACK_POLICY_DISABLED_MSG))
+  ) {
+    return {
+      success: false,
+      failureReason: 'org_refused',
+      statusCode: status,
+      refusal: {
+        kind: 'org',
+        serverMessage: message,
+        ...(errorCode === 'feedback_third_party_blocked' && { thirdParty: true }),
+      },
+    };
+  }
+
+  if (errorCode === 'oauth_scope_insufficient' || status === 401) {
+    return {
+      success: false,
+      failureReason: errorCode === 'oauth_scope_insufficient' ? 'scope_refused' : 'auth_refused',
+      statusCode: status,
+      refusal: { kind: 'credential', serverMessage: message },
+    };
+  }
+
+  const isTransient = errorCode === 'feedback_check_unavailable' || status === 408 || status === 429 || status >= 500;
+  return {
+    success: false,
+    failureReason: 'http_error',
+    statusCode: status,
+    refusal: { kind: isTransient ? 'transient' : 'other', serverMessage: message },
+  };
+}
+
+function formatServerStatusSuffix(result: FeedbackSubmitResult): string | undefined {
+  if (!result.statusCode) return undefined;
+  const serverMsg = result.refusal?.serverMessage?.replace(/\.$/, '');
+  return ` (server returned ${result.statusCode}${serverMsg === undefined ? '' : `: ${serverMsg}`})`;
+}
+
+/** Official 2.1.309 (#1142): format org/credential/HTTP refusal with server reason + GitHub issues fallback. */
+export function formatFeedbackFailureMessage(result: FeedbackSubmitResult): string {
+  const orgMsg = result.isZdrOrg
+    ? ZDR_ORG_MSG
+    : result.refusal?.kind === 'org'
+      ? (result.refusal.serverMessage ?? 'Your organization does not accept feedback.')
+      : undefined;
+  if (orgMsg !== undefined) {
+    return formatFeedbackWithIssueFallback(`Couldn't send feedback: ${orgMsg}`, orgMsg);
+  }
+  if (result.refusal?.kind === 'credential') {
+    const suffix = formatServerStatusSuffix(result) ?? '';
+    return result.failureReason === 'scope_refused'
+      ? `Couldn't send feedback: the sign-in this session uses is not allowed to send feedback${suffix}.`
+      : `Couldn't send feedback: the server did not accept the credentials this session uses${suffix}.`;
+  }
+  if (result.failureReason === 'auth_error') {
+    return "Couldn't send feedback: not signed in. Run /login, then retry.";
+  }
+  if (result.failureReason === 'policy_blocked') {
+    return getFeedbackCommandDisabledReason('/feedback') ?? "Feedback is disabled by your organization's policy.";
+  }
+  const detail =
+    formatServerStatusSuffix(result) ??
+    (result.failureReason === 'timeout'
+      ? ' (request timed out)'
+      : result.failureReason === 'network_error'
+        ? " (couldn't reach the service)"
+        : '');
+  return `Couldn't send feedback${detail}. If it keeps failing, you can file at ${GITHUB_ISSUES_REPO_URL} instead.`;
+}
+
+async function postFeedbackPayload(data: FeedbackData, signal?: AbortSignal): Promise<FeedbackSubmitResult> {
   try {
     // Ensure OAuth token is fresh before getting auth headers
     // This prevents 401 errors from stale cached tokens
@@ -889,7 +1000,7 @@ async function submitFeedback(
 
     const authResult = getAuthHeaders();
     if (authResult.error) {
-      return { success: false };
+      return { success: false, failureReason: 'auth_error' };
     }
 
     const headers: Record<string, string> = {
@@ -898,10 +1009,11 @@ async function submitFeedback(
       ...authResult.headers,
     };
 
+    const serialized = jsonStringify(data);
     const response = await axios.post(
       'https://api.anthropic.com/api/claude_cli_feedback',
       {
-        content: jsonStringify(data),
+        content: serialized,
       },
       {
         headers,
@@ -916,29 +1028,58 @@ async function submitFeedback(
         return { success: true, feedbackId: result.feedback_id };
       }
       sanitizeAndLogError(new Error('Failed to submit feedback: request did not return feedback_id'));
-      return { success: false };
+      return { success: false, failureReason: 'missing_feedback_id' };
+    }
+
+    if (response.status === 413) {
+      return { success: false, payloadTooLarge: true, failureReason: 'payload_too_large_413', statusCode: 413 };
     }
 
     sanitizeAndLogError(new Error('Failed to submit feedback:' + response.status));
-    return { success: false };
+    return parseFeedbackHttpError(response.status, response.data);
   } catch (err) {
     // Handle cancellation/abort - don't log as error
     if (axios.isCancel(err)) {
       return { success: false };
     }
-
-    if (axios.isAxiosError(err) && err.response?.status === 403) {
-      const errorData = err.response.data;
-      if (
-        errorData?.error?.type === 'permission_error' &&
-        errorData?.error?.message?.includes('Custom data retention settings')
-      ) {
-        sanitizeAndLogError(new Error('Cannot submit feedback because custom data retention settings are enabled'));
-        return { success: false, isZdrOrg: true };
-      }
+    if (err instanceof RangeError) {
+      return { success: false, payloadTooLarge: true, failureReason: 'payload_too_large_range_error' };
     }
-    // Use our safe error logging function to avoid leaking API keys
+    if (axios.isAxiosError(err) && err.response) {
+      if (err.response.status === 413) {
+        return { success: false, payloadTooLarge: true, failureReason: 'payload_too_large_413', statusCode: 413 };
+      }
+      const parsed = parseFeedbackHttpError(err.response.status, err.response.data);
+      if (parsed.isZdrOrg) {
+        sanitizeAndLogError(new Error('Cannot submit feedback because custom data retention settings are enabled'));
+      } else {
+        sanitizeAndLogError(err);
+      }
+      return parsed;
+    }
     sanitizeAndLogError(err);
+    if (axios.isAxiosError(err)) {
+      return { success: false, failureReason: err.code === 'ECONNABORTED' ? 'timeout' : 'network_error' };
+    }
     return { success: false };
   }
+}
+
+/**
+ * Official 2.1.309 (#1143): if the initial submission fails because the payload
+ * is too large (413 or RangeError), strip `transcript` and resend.
+ */
+export async function submitFeedback(
+  data: FeedbackData,
+  signal?: AbortSignal,
+  sender: (payload: FeedbackData, signal?: AbortSignal) => Promise<FeedbackSubmitResult> = postFeedbackPayload,
+): Promise<FeedbackSubmitResult> {
+  if (isEssentialTrafficOnly()) {
+    return { success: false };
+  }
+  const first = await sender(data, signal);
+  if (!first.success && first.payloadTooLarge && data.transcript.length > 0) {
+    return sender({ ...data, transcript: [] }, signal);
+  }
+  return first;
 }

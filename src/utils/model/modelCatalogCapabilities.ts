@@ -300,3 +300,22 @@ export const DENSABLE_PRICING_TIERS_FROM_CATALOG: Readonly<
     nIcFromPricingTier(v),
   ]),
 )
+
+export function getModelEagerInputStreamingSupport(
+  model: string | undefined,
+): { readonly bedrock?: boolean; readonly vertex?: boolean } | undefined {
+  if (!model) return undefined
+  const normalized = model
+    .replace(/(\[1m\])+$/i, '')
+    .trim()
+    .toLowerCase()
+  const catalog = getDensableModelCatalog()
+  const found = catalog.models.find(
+    m =>
+      m.id.toLowerCase() === normalized ||
+      Object.values(m.provider_ids).some(
+        pid => typeof pid === 'string' && pid.toLowerCase() === normalized,
+      ),
+  )
+  return found?.eager_input_streaming
+}

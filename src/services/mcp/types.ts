@@ -316,6 +316,11 @@ export type ScopedMcpServerConfig = McpServerConfig & {
   /** densable `pluginPath` — absolute plugin root for headersHelper cwd/overlay. */
   pluginPath?: string
   /**
+   * 2.1.305 #1056 (SEA pUs): True when an enterprise/managed-mcp.json entry
+   * contained `${VAR}` in `command`, `args`, `url`, or `headers` (NOT `env`).
+   */
+  expandedFromEnv?: boolean
+  /**
    * densable `agentSource` — Umf maps projectSettings/localSettings → repo,
    * plugin/additionalDirectory → thirdParty, user/flag/policy/built-in → operator.
    */

@@ -71,6 +71,19 @@ export const inputSchema = lazySchema(() =>
       .optional()
       .describe('Published artifact viewer or frame URL.'),
     prompt: z.string().optional(),
+    force: z
+      .boolean()
+      .optional()
+      .describe(
+        'publish: a last-resort overwrite that **discards** the newer published version. On a conflict, Claude merges its changes onto the newer content that the rejection hands it and publishes again. Claude passes true only when the person explicitly said to discard that specific version, and the server may still refuse it over a version saved from inside the page.',
+      ),
+    overwrite_unread: z
+      .array(z.string().min(1).max(512))
+      .max(256)
+      .optional()
+      .describe(
+        'publish with `files` or `root` to an existing artifact: published paths this call may replace or remove although you have not read or listed them in this session. Every other path the call touches must be one you read by its `path`, saw in a file listing, or published yourself, and must not have changed since — otherwise nothing is sent and the refusal names each path. Name a path here only when the user asked for it to be replaced without looking at what is there; it never excuses a path that changed after you read it.',
+      ),
     thread_id: z.string().optional().describe('Comment thread id to reply on.'),
     text: z
       .string()

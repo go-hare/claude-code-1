@@ -2267,16 +2267,19 @@ async function getMessagesForPromptSlashCommand(
   // densable: `(!Id("hooks")||V2(source))&&!I`
   const hooksAllowedForThisSkill =
     (!isRestrictedToPluginOnly('hooks') || isSourceAdminTrusted(command.source)) && !readOnlySkillLoad;
-  if (command.hooks && hooksAllowedForThisSkill) {
-    const sessionId = getSessionId();
-    registerSkillHooks(
-      context.setAppState,
-      sessionId,
-      command.hooks,
-      command.name,
-      command.type === 'prompt' ? command.skillRoot : undefined,
-    );
-  }
+  // #1018 (official ce / P): if a skill declares hooks and they are blocked
+  // (e.g. under allowManagedHooksOnly) or rejected by bounds, revoke allowed-tools.
+  const hooksBlockedForThisSkill = command.hooks !== undefined && !hooksAllowedForThisSkill;
+  const hooksBoundsFailure =
+    command.hooks && hooksAllowedForThisSkill
+      ? registerSkillHooks(
+          context.setAppState,
+          getSessionId(),
+          command.hooks,
+          command.name,
+          command.type === 'prompt' ? command.skillRoot : undefined,
+        )
+      : undefined;
 
   // Record skill invocation for compaction preservation, scoped by agent context.
   // Skills are tagged with their agentId so only skills belonging to the current
@@ -2294,9 +2297,10 @@ async function getMessagesForPromptSlashCommand(
 
   const metadata = formatCommandLoadingMetadata(command, args);
 
-  const additionalAllowedTools = readOnlySkillLoad
-    ? []
-    : parseToolListFromCLI(await resolveTrustedSkillAllowedTools(command));
+  const additionalAllowedTools =
+    readOnlySkillLoad || hooksBlockedForThisSkill || hooksBoundsFailure !== undefined
+      ? []
+      : parseToolListFromCLI(await resolveTrustedSkillAllowedTools(command));
   // densable 2.1.229 — command.disallowedTools → alwaysDenyRules.command
   const additionalDisallowedTools = parseToolListFromCLI(
     command.type === 'prompt' ? (command.disallowedTools ?? []) : [],

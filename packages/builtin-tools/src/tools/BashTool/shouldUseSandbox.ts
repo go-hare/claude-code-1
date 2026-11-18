@@ -1,4 +1,5 @@
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
+import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { splitCommand_DEPRECATED } from 'src/utils/bash/commands.js'
 import { tryParseShellCommand } from 'src/utils/bash/shellQuote.js'
 import { getPlatform } from 'src/utils/platform.js'
@@ -406,6 +407,76 @@ export function isFullyExcludedCommandForPolicy(command: string): boolean {
     command,
     getLayeredExcludedCommandsForPolicy(),
   )
+}
+
+/** SEA `UAe` (@290202060) */
+function formatSandboxStrictRefusal(reason: string, guidance: string): string {
+  return `The command did not run. Strict sandbox mode is on, so no command may run outside the sandbox, and ${reason}. ${guidance} Changing sandbox settings is for the user or their administrator to decide, not you. So is running this command, or one that does the same, through another tool or program.`
+}
+
+/**
+ * SEA `ZVe` (@290202377) — returns a strict-sandbox refusal message when a
+ * command would run unsandboxed (including when sandbox is enabled in settings
+ * but cannot run, or when an excluded command would bypass strict mode), or
+ * `null` when allowed to proceed.
+ */
+export function getSandboxPolicyRefusal(
+  useSandbox: boolean,
+  command: string,
+  userTypedDangerouslyDisableSandbox: boolean,
+  shellType: 'bash' | 'powershell',
+): string | null {
+  if (
+    userTypedDangerouslyDisableSandbox ||
+    useSandbox ||
+    getPlatform() !== 'windows' ||
+    !SandboxManager.isSandboxEnabledInSettings() ||
+    !SandboxManager.isPlatformInEnabledList() ||
+    !SandboxManager.isStrictSandboxModeConfigured()
+  ) {
+    return null
+  }
+  const sandboxActive = SandboxManager.isSandboxingEnabled()
+  const nankeenKestrel =
+    isEnvTruthy(process.env.CLAUDE_CODE_NANKEEN_KESTREL) ||
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_nankeen_kestrel', false)
+  if (
+    shellType === 'bash' &&
+    (sandboxActive ||
+      !nankeenKestrel ||
+      !getFeatureValue_CACHED_MAY_BE_STALE('tengu_nifty_ripple', true))
+  ) {
+    return null
+  }
+  const isExcluded = isFullyExcludedCommandForPolicy(command)
+  const unsandboxedCommandsDisabled =
+    !SandboxManager.areUnsandboxedCommandsAllowed()
+  if (isExcluded && !unsandboxedCommandsDisabled) {
+    return null
+  }
+  const excludedNeedsPrompt =
+    'command matches a sandbox exclusion, but an exclusion exempts a command only where a permission prompt can approve the unsandboxed run, and none is available here'
+  if (sandboxActive) {
+    return isExcluded
+      ? formatSandboxStrictRefusal(
+          `the ${excludedNeedsPrompt}`,
+          'Here the command can run only inside the sandbox.',
+        )
+      : formatSandboxStrictRefusal(
+          "no sandbox.excludedCommands entry in user settings, managed settings or a --settings file exempts this command; an entry in a project's .claude/settings.json or settings.local.json does not count under strict mode",
+          'Only an entry in one of those three counts.',
+        )
+  }
+  const reason = 'the sandbox failed to start in this session'
+  const guidance =
+    'The user can restart Claude Code to try starting the sandbox again.'
+  if (isExcluded) {
+    return formatSandboxStrictRefusal(
+      `${reason}. The ${excludedNeedsPrompt}`,
+      guidance,
+    )
+  }
+  return formatSandboxStrictRefusal(reason, guidance)
 }
 
 /**

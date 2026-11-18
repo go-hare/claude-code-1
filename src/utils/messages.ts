@@ -4289,6 +4289,41 @@ export type NormalizeContentFromAPIMeta = {
 
 // Sometimes the API returns empty messages (eg. "\n\n"). We need to filter these out,
 // otherwise they will give an API error when we send them to the API next time we call query().
+export const UNPARSED_TOOL_INPUT_KEY = '__unparsedToolInput'
+
+export function isUnparsedToolInput(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false
+  }
+  const entries = Object.entries(value)
+  if (entries.length !== 1) return false
+  const [key, val] = entries[0]!
+  return (
+    key === UNPARSED_TOOL_INPUT_KEY &&
+    typeof val === 'object' &&
+    val !== null &&
+    typeof (val as Record<string, unknown>).raw === 'string' &&
+    typeof (val as Record<string, unknown>).len === 'number'
+  )
+}
+
+export function describeUnparsedToolInput(value: unknown): string | null {
+  if (!isUnparsedToolInput(value)) return null
+  const entry = (value as Record<string, { raw: string; len: number }>)[
+    UNPARSED_TOOL_INPUT_KEY
+  ]!
+  return `input JSON failed to parse — ${entry.len} bytes`
+}
+
+function makeUnparsedToolInput(raw: string): Record<string, unknown> {
+  return {
+    [UNPARSED_TOOL_INPUT_KEY]: {
+      raw: raw.slice(0, 2048),
+      len: raw.length,
+    },
+  }
+}
+
 export function normalizeContentFromAPI(
   contentBlocks: BetaMessage['content'],
   tools: Tools,
@@ -4343,8 +4378,10 @@ export function normalizeContentFromAPI(
                 { level: 'warn' },
               )
             }
+            normalizedInput = makeUnparsedToolInput(contentBlock.input)
+          } else {
+            normalizedInput = parsed ?? {}
           }
-          normalizedInput = parsed ?? {}
         } else {
           normalizedInput = contentBlock.input
         }
@@ -4355,7 +4392,8 @@ export function normalizeContentFromAPI(
         if (
           typeof normalizedInput === 'object' &&
           normalizedInput !== null &&
-          !Array.isArray(normalizedInput)
+          !Array.isArray(normalizedInput) &&
+          !isUnparsedToolInput(normalizedInput)
         ) {
           const tool = findToolByName(tools, contentBlock.name)
           if (tool) {

@@ -327,6 +327,7 @@ type Props = {
     },
     options?: {
       fromKeybinding?: boolean;
+      inputModeOverride?: PromptInputMode;
       /**
        * Live paste map from PromptInput dual-write ref. Parent React state can
        * still be {} on the same tick as paste+Enter; without this, images are

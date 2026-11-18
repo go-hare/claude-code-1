@@ -1,6 +1,6 @@
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import type { StructuredPatchHunk } from 'diff';
-import { isAbsolute, relative, resolve } from 'path';
+import { isAbsolute, resolve } from 'path';
 import * as React from 'react';
 import { Suspense, use, useState } from 'react';
 import { MessageResponse } from 'src/components/MessageResponse.js';
@@ -108,7 +108,7 @@ function FileWriteToolCreatedMessage({
       <Box flexDirection="column">
         <Text>
           Wrote <Text bold>{numLines}</Text> {plural(numLines, 'line')} to{' '}
-          <Text bold>{verbose ? filePath : relative(getCwd(), filePath)}</Text>
+          <Text bold>{verbose ? filePath : getDisplayPath(filePath)}</Text>
           {replacedUndiffedContent && <ReplacedUndiffedNotice />}
         </Text>
         <Box
@@ -362,7 +362,7 @@ function renderFileWriteResult(
         return (
           <Text>
             Wrote <Text bold>{numLines}</Text> {numLines === 1 ? 'line' : 'lines'} to{' '}
-            <Text bold>{relative(getCwd(), filePath)}</Text>
+            <Text bold>{getDisplayPath(filePath)}</Text>
             {replacedUndiffedContent && <ReplacedUndiffedNotice />}
           </Text>
         );

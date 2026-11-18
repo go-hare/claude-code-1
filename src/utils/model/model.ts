@@ -823,6 +823,10 @@ export function getPublicModelName(model: ModelName): string {
  *
  * @param modelInput The model alias or name provided by the user.
  */
+function with1mSuffix(model: string): string {
+  return model.replace(/(\[1m\])+$/i, '') + '[1m]'
+}
+
 export function parseUserSpecifiedModel(
   modelInput: ModelName | ModelAlias,
 ): ModelName {
@@ -830,8 +834,9 @@ export function parseUserSpecifiedModel(
   const normalizedModel = modelInputTrimmed.toLowerCase()
 
   const has1mTag = has1mContext(normalizedModel)
-  const modelString = has1mTag
-    ? normalizedModel.replace(/\[1m]$/i, '').trim()
+  const has1mSuffix = /(\[1m\])+$/i.test(normalizedModel)
+  const modelString = has1mSuffix
+    ? normalizedModel.replace(/(\[1m\])+$/i, '').trim()
     : normalizedModel
 
   if (isModelAlias(modelString)) {
@@ -846,13 +851,21 @@ export function parseUserSpecifiedModel(
         return resolved + (append1m ? '[1m]' : '')
       }
       case 'opusplan':
-        return getDefaultSonnetModel() + (has1mTag ? '[1m]' : '') // Sonnet is default, Opus in plan mode
+        return has1mTag
+          ? with1mSuffix(getDefaultSonnetModel())
+          : getDefaultSonnetModel() // Sonnet is default, Opus in plan mode
       case 'sonnet':
-        return getDefaultSonnetModel() + (has1mTag ? '[1m]' : '')
+        return has1mTag
+          ? with1mSuffix(getDefaultSonnetModel())
+          : getDefaultSonnetModel()
       case 'haiku':
-        return getDefaultHaikuModel() + (has1mTag ? '[1m]' : '')
+        return has1mTag
+          ? with1mSuffix(getDefaultHaikuModel())
+          : getDefaultHaikuModel()
       case 'opus':
-        return getDefaultOpusModel() + (has1mTag ? '[1m]' : '')
+        return has1mTag
+          ? with1mSuffix(getDefaultOpusModel())
+          : getDefaultOpusModel()
       case 'best':
         return getBestModel()
       default:
@@ -870,12 +883,14 @@ export function parseUserSpecifiedModel(
     isLegacyOpusFirstParty(modelString) &&
     isLegacyModelRemapEnabled()
   ) {
-    return getDefaultOpusModel() + (has1mTag ? '[1m]' : '')
+    return has1mTag
+      ? with1mSuffix(getDefaultOpusModel())
+      : getDefaultOpusModel()
   }
 
   if (process.env.USER_TYPE === 'ant') {
     const has1mAntTag = has1mContext(normalizedModel)
-    const baseAntModel = normalizedModel.replace(/\[1m]$/i, '').trim()
+    const baseAntModel = normalizedModel.replace(/(\[1m\])+$/i, '').trim()
 
     const antModel = resolveAntModel(baseAntModel)
     if (antModel) {
@@ -891,7 +906,7 @@ export function parseUserSpecifiedModel(
   // Preserve original case for custom model names (e.g., Azure Foundry deployment IDs)
   // Only strip [1m] suffix if present, maintaining case of the base model
   if (has1mTag) {
-    return modelInputTrimmed.replace(/\[1m\]$/i, '').trim() + '[1m]'
+    return modelInputTrimmed.replace(/(\[1m\])+$/i, '').trim() + '[1m]'
   }
   return modelInputTrimmed
 }

@@ -3,6 +3,7 @@ import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs
 import uniqBy from 'lodash-es/uniqBy.js'
 import { dirname } from 'path'
 import { getProjectRoot } from 'src/bootstrap/state.js'
+import { getCwd } from 'src/utils/cwd.js'
 import {
   builtInCommandNames,
   findCommand,
@@ -844,6 +845,22 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
       // Track skill usage for ranking (gold skips this on coordinator main)
       if (!coordinatorMain) {
         recordSkillUsage(commandName)
+      }
+
+      // Official 2.1.309 #1145 (`m0n`): before running `/verify` or `/code-review`,
+      // discover nested package skills for shell-modified files in git status.
+      if (command?.type === 'prompt' && command.unqualifiedName == null) {
+        const {
+          discoverNestedSkillsForChangedFiles,
+          isVerifyOrReviewSkillName,
+        } = await import('src/skills/loadSkillsDir.js')
+        if (isVerifyOrReviewSkillName(command.name)) {
+          await discoverNestedSkillsForChangedFiles(getCwd()).catch(err => {
+            logForDebugging(
+              `[skills] Changed files not searched for nested skills: ${err}`,
+            )
+          })
+        }
       }
 
       // densable `k_n(g,n||"",s)==="fork"&&!k`

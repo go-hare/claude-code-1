@@ -50,7 +50,7 @@ function GracePeriodContentBody(): React.ReactNode {
         <Box paddingLeft={1}>
           <Text>
             <Text>· </Text>
-            <Text bold>You can help improve Claude </Text>
+            <Text bold>Help improve our AI models </Text>
             <Text>
               — Allow the use of your chats and coding sessions to train and improve Anthropic AI models. Change anytime
               in your Privacy Settings (<Link url={'https://claude.ai/settings/data-privacy-controls'}></Link>
@@ -87,7 +87,7 @@ function PostGracePeriodContentBody(): React.ReactNode {
         <Text>What&apos;s changing?</Text>
 
         <Box flexDirection="column">
-          <Text bold>Help improve Claude</Text>
+          <Text bold>Help improve our AI models</Text>
           <Text>
             Allow the use of your chats and coding sessions to train and improve Anthropic AI models. You can change
             this anytime in Privacy Settings
@@ -192,17 +192,17 @@ export function GroveDialog({ showIfAlreadyViewed, location, onDone }: Props): R
   const acceptOptions = groveConfig?.domain_excluded
     ? [
         {
-          label: 'Accept terms · Help improve Claude: OFF (for emails with your domain)',
+          label: 'Accept terms · Help improve our AI models: OFF (for emails with your domain)',
           value: 'accept_opt_out',
         },
       ]
     : [
         {
-          label: 'Accept terms · Help improve Claude: ON',
+          label: 'Accept terms · Help improve our AI models: ON',
           value: 'accept_opt_in',
         },
         {
-          label: 'Accept terms · Help improve Claude: OFF',
+          label: 'Accept terms · Help improve our AI models: OFF',
           value: 'accept_opt_out',
         },
       ];
@@ -263,15 +263,18 @@ export function GroveDialog({ showIfAlreadyViewed, location, onDone }: Props): R
 type PrivacySettingsDialogProps = {
   settings: AccountSettings;
   domainExcluded?: boolean;
+  lockedByClaudeScience?: boolean;
   onDone(): void;
 };
 
 export function PrivacySettingsDialog({
   settings,
   domainExcluded,
+  lockedByClaudeScience,
   onDone,
 }: PrivacySettingsDialogProps): React.ReactNode {
   const [groveEnabled, setGroveEnabled] = useState(settings.grove_enabled);
+  const locked = domainExcluded || lockedByClaudeScience;
 
   React.useEffect(() => {
     logEvent('tengu_grove_privacy_settings_viewed', {});
@@ -279,7 +282,7 @@ export function PrivacySettingsDialog({
 
   useInput(async (input, key) => {
     // Toggle the setting when enter/tab/space is pressed
-    if (!domainExcluded && (key.tab || key.return || input === ' ')) {
+    if (!locked && (key.tab || key.return || input === ' ')) {
       const newValue = !groveEnabled;
       setGroveEnabled(newValue);
       await updateGroveSettings(newValue);
@@ -287,7 +290,9 @@ export function PrivacySettingsDialog({
   });
 
   let valueComponent = <Text color="error">false</Text>;
-  if (domainExcluded) {
+  if (lockedByClaudeScience) {
+    valueComponent = <Text dimColor>false</Text>;
+  } else if (domainExcluded) {
     valueComponent = <Text color="error">false (for emails with your domain)</Text>;
   } else if (groveEnabled) {
     valueComponent = <Text color="success">true</Text>;
@@ -295,13 +300,13 @@ export function PrivacySettingsDialog({
 
   return (
     <Dialog
-      title="Data Privacy"
+      title="Data privacy"
       color="professionalBlue"
       onCancel={onDone}
       inputGuide={exitState =>
         exitState.pending ? (
           <Text>Press {exitState.keyName} again to exit</Text>
-        ) : domainExcluded ? (
+        ) : locked ? (
           <KeyboardShortcutHint shortcut="Esc" action="cancel" />
         ) : (
           <Byline>
@@ -316,11 +321,14 @@ export function PrivacySettingsDialog({
         <Link url={'https://claude.ai/settings/data-privacy-controls'}></Link>
       </Text>
 
-      <Box>
-        <Box width={44}>
-          <Text bold>Help improve Claude</Text>
+      <Box flexDirection="column">
+        <Box gap={1}>
+          <Box width={43}>
+            <Text bold>Help improve our AI models</Text>
+          </Box>
+          <Box minWidth={5}>{valueComponent}</Box>
         </Box>
-        <Box>{valueComponent}</Box>
+        {lockedByClaudeScience && <Text dimColor>Not available for this account.</Text>}
       </Box>
     </Dialog>
   );

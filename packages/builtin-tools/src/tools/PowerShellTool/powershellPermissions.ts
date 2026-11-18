@@ -5,6 +5,7 @@
 
 import { resolve } from 'path'
 import type { ToolPermissionContext, ToolUseContext } from 'src/Tool.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import type {
   PermissionDecisionReason,
   PermissionResult,
@@ -1465,6 +1466,12 @@ export async function powershellToolHasPermission(
     }
     const canonical = resolveToCanonical(element.name)
     if (canonical === 'set-location' && element.args.length > 0) {
+      // SEA #1158 (@307077437): when tengu_plumb_kestrel is enabled, do not
+      // auto-drop Set-Location/cd with args from the approval list even if the
+      // target resolves to getCwd(), because extra args may be unsafe.
+      if (getFeatureValue_CACHED_MAY_BE_STALE('tengu_plumb_kestrel', true)) {
+        return true
+      }
       // SECURITY: use PS_TOKENIZER_DASH_CHARS, not ASCII-only startsWith('-').
       // `Set-Location –Path .` (en-dash) would otherwise treat `–Path` as the
       // target, resolve it against cwd (mismatch), and keep the command in the

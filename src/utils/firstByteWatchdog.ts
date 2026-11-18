@@ -1,7 +1,10 @@
 import { logEvent } from 'src/services/analytics/index.js'
 import { logForDebugging } from './debug.js'
-import { shouldEnableBodyIdleWatchdog } from './streamWatchdogGates.js'
-import { resolveByteStreamIdleTimeoutMs } from './streamWatchdogGates.js'
+import {
+  isByteWatchdogEnabled,
+  resolveByteStreamIdleTimeoutMs,
+  shouldEnableBodyIdleWatchdog,
+} from './streamWatchdogGates.js'
 
 /** Official Qft — first-byte timeout floor (10s). */
 export const FIRST_BYTE_TIMEOUT_MIN_MS = 10_000
@@ -130,7 +133,13 @@ export function resolveFirstByteDispatchTimeoutMs(
   input: FirstByteDispatchInput,
 ): number | undefined {
   const env = input.env ?? process.env
-  const armed = consumeStreamFirstByteArm(input.clientRequestId)
+  const gatewayExplicitTimeout =
+    input.routedProvider === 'gateway' &&
+    env.CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS !== undefined &&
+    isByteWatchdogEnabled({ env }) &&
+    input.method === 'POST'
+  const armed =
+    gatewayExplicitTimeout || consumeStreamFirstByteArm(input.clientRequestId)
   const bedrockStream =
     input.provider === 'bedrock' &&
     input.method === 'POST' &&
@@ -139,6 +148,7 @@ export function resolveFirstByteDispatchTimeoutMs(
     return undefined
   }
   if (
+    !gatewayExplicitTimeout &&
     !shouldEnableBodyIdleWatchdog({
       requestProvider: input.routedProvider,
       currentProvider: input.routedProvider,

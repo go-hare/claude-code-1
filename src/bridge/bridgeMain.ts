@@ -2273,6 +2273,10 @@ export function parseArgs(args: string[]): ParsedArgs {
   }
 }
 
+export async function printRemoteControlHelp(): Promise<void> {
+  return printHelp()
+}
+
 async function printHelp(): Promise<void> {
   // Use EXTERNAL_PERMISSION_MODES for help text — internal modes (bubble)
   // are ant-only and auto is feature-gated; they're still accepted by validation.
@@ -2595,7 +2599,8 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
   // Precheck worktree availability for the first-run dialog and the `w`
   // toggle. Unconditional so we know upfront whether worktree is an option.
   const { hasWorktreeCreateHook } = await import('../utils/hooks.js')
-  const worktreeAvailable = hasWorktreeCreateHook() || findGitRoot(dir) !== null
+  const isGitRepo = findGitRoot(dir) !== null
+  const worktreeAvailable = hasWorktreeCreateHook() || isGitRepo
 
   // Load saved per-project spawn-mode preference. Gated by multiSessionEnabled
   // so a GrowthBook rollback cleanly reverts users to single-session —
@@ -2683,6 +2688,11 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
   } else {
     spawnMode = multiSessionEnabled ? 'same-dir' : 'single-session'
     spawnModeSource = 'gate_default'
+  }
+  if (spawnModeSource === 'saved' && multiSessionEnabled) {
+    console.log(
+      `Spawn mode: ${spawnMode} (saved for this folder${process.stdin.isTTY === true ? '; press w to change' : ''})`,
+    )
   }
   const maxSessions =
     spawnMode === 'single-session'
@@ -3134,7 +3144,7 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
   const ownerRepo = gitRepoUrl ? parseGitHubRepository(gitRepoUrl) : null
   // Use the repo name from the parsed owner/repo, or fall back to the dir basename
   const repoName = ownerRepo ? ownerRepo.split('/').pop()! : basename(dir)
-  logger.setRepoInfo(repoName, branch)
+  logger.setRepoInfo(repoName, isGitRepo ? branch : '')
 
   // `w` toggle is available iff we're in a multi-session mode AND worktree
   // is a valid option. When unavailable, the mode suffix and hint are hidden.
@@ -3167,9 +3177,11 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
           newMode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
       logger.logStatus(
-        newMode === 'worktree'
-          ? 'Spawn mode: worktree (new sessions get isolated git worktrees)'
-          : 'Spawn mode: same-dir (new sessions share the current directory)',
+        `${
+          newMode === 'worktree'
+            ? 'Spawn mode: worktree (new sessions get isolated git worktrees)'
+            : 'Spawn mode: same-dir (new sessions share the current directory)'
+        }. Saved for this folder; w switches back.`,
       )
       logger.setSpawnModeDisplay(newMode)
       logger.refreshDisplay()

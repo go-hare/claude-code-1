@@ -1325,6 +1325,9 @@ const INITIALIZE_FIELD_FATE: Record<string, 'lost' | 'preference'> = {
   workspaceTrust: 'preference',
   proactivity: 'preference',
   attachServeRequest: 'preference',
+  sdkMcpServerConfigs: 'lost',
+  sdkMcpServerManifests: 'lost',
+  sdkMcpServerManifestsOrigin: 'preference',
 }
 
 /** densable `$eo` @191131188 */
@@ -1428,6 +1431,81 @@ export function classifyCloudInitializeOptions(
     }
   }
   return { outcome: 'accept', ignored: [...blocked, ...ignored] }
+}
+
+// ---------------------------------------------------------------------------
+// #1081: sdkMcpServerManifests validation & origin check (official Bki / nxi / exi)
+// ---------------------------------------------------------------------------
+
+export type SdkMcpServerManifestEntry = {
+  initializeResult: {
+    protocolVersion?: string
+    capabilities?: Record<string, unknown>
+    serverInfo?: Record<string, unknown>
+    instructions?: string
+    [key: string]: unknown
+  }
+  [key: string]: unknown
+}
+
+export type ParsedSdkMcpServerManifests = {
+  manifests: Map<string, SdkMcpServerManifestEntry>
+  malformedField: boolean
+  malformedServerNames: string[]
+}
+
+const MAX_MANIFEST_FRAME_AGE_MS = 300_000
+
+export function parseSdkMcpServerManifests(
+  rawManifests: unknown,
+  sdkMcpServers: unknown,
+): ParsedSdkMcpServerManifests {
+  const manifests = new Map<string, SdkMcpServerManifestEntry>()
+  const malformedServerNames: string[] = []
+  if (rawManifests === undefined || rawManifests === null) {
+    return { manifests, malformedField: false, malformedServerNames }
+  }
+  if (typeof rawManifests !== 'object' || Array.isArray(rawManifests)) {
+    return { manifests, malformedField: true, malformedServerNames }
+  }
+  const serverSet = new Set(
+    Array.isArray(sdkMcpServers)
+      ? sdkMcpServers.filter((s): s is string => typeof s === 'string')
+      : [],
+  )
+  const record = rawManifests as Record<string, unknown>
+  for (const [name, entry] of Object.entries(record)) {
+    if (!serverSet.has(name)) continue
+    if (
+      typeof entry !== 'object' ||
+      entry === null ||
+      Array.isArray(entry) ||
+      typeof (entry as { initializeResult?: unknown }).initializeResult !==
+        'object' ||
+      (entry as { initializeResult?: unknown }).initializeResult === null
+    ) {
+      malformedServerNames.push(name)
+      continue
+    }
+    manifests.set(name, entry as SdkMcpServerManifestEntry)
+  }
+  return { manifests, malformedField: false, malformedServerNames }
+}
+
+export function checkSdkMcpManifestsOrigin(input: {
+  origin: unknown
+  frameCreatedAt?: number
+  now?: number
+}): 'no_origin_marker' | 'frame_too_old' | undefined {
+  if (input.origin !== 'host_per_send') return 'no_origin_marker'
+  const now = input.now ?? Date.now()
+  if (
+    input.frameCreatedAt !== undefined &&
+    now - input.frameCreatedAt > MAX_MANIFEST_FRAME_AGE_MS
+  ) {
+    return 'frame_too_old'
+  }
+  return undefined
 }
 
 export type CloudHostedControlRoute =
@@ -5274,10 +5352,17 @@ export type HeadlessCloudSessionHost = {
   launchOptions: {
     mayForwardHomeSettings(): boolean
     homeSettingsHostConsent(): 'forward' | null
+    autoCompactWindowSurface?: () => string | undefined
   }
   extensionsConfig: {
     allowedChannels(): unknown[]
   }
+}
+
+export function readAutoCompactWindowSurface(
+  sessionHost: HeadlessCloudSessionHost | undefined,
+): string | undefined {
+  return sessionHost?.launchOptions.autoCompactWindowSurface?.()
 }
 
 type HeadlessCloudRefuse = {

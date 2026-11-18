@@ -272,6 +272,7 @@ export const getGroveNoticeConfig = memoize(
       }
     } catch (err) {
       logForDebugging(`Failed to fetch Grove notice config: ${err}`)
+      getGroveNoticeConfig.cache.clear?.()
       return { success: false }
     }
   },
@@ -320,11 +321,78 @@ export function calculateShouldShowGrove(
   }
 }
 
+const GROVE_CHOICE_SEEN_TTL_MS = 3_600_000
+
+function isRecentGroveChoiceSeen(timestamp: unknown): boolean {
+  if (typeof timestamp !== 'number') return false
+  const elapsed = Date.now() - timestamp
+  return elapsed >= 0 && elapsed < GROVE_CHOICE_SEEN_TTL_MS
+}
+
+function getGroveChoiceSeenMap(
+  config: ReturnType<typeof getGlobalConfig>,
+): Record<string, number> {
+  const raw = (config as { groveChoiceSeenAt?: unknown }).groveChoiceSeenAt
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const result: Record<string, number> = {}
+  for (const [k, v] of Object.entries(raw)) {
+    if (typeof v === 'number') result[k] = v
+  }
+  return result
+}
+
+function getNormalizedGroveAccountKey(): string | undefined {
+  const uuid =
+    getOauthAccountInfo()?.accountUuid ?? process.env.CLAUDE_CODE_ACCOUNT_UUID
+  return uuid?.trim().toLowerCase() || undefined
+}
+
 export async function checkGroveForNonInteractive(): Promise<void> {
+  const accountKey = getNormalizedGroveAccountKey()
+  if (
+    accountKey !== undefined &&
+    isRecentGroveChoiceSeen(
+      getGroveChoiceSeenMap(getGlobalConfig())[accountKey],
+    )
+  ) {
+    logForDebugging(
+      'Grove: the server recently confirmed a Consumer Terms answer; not asking again',
+    )
+    return
+  }
+
   const [settingsResult, configResult] = await Promise.all([
     getGroveSettings(),
     getGroveNoticeConfig(),
   ])
+
+  if (settingsResult.success && accountKey !== undefined) {
+    const hasChosen = settingsResult.data.grove_enabled !== null
+    const now = Date.now()
+    if (
+      hasChosen !==
+      isRecentGroveChoiceSeen(
+        getGroveChoiceSeenMap(getGlobalConfig())[accountKey],
+      )
+    ) {
+      saveGlobalConfig(current => {
+        const seen = getGroveChoiceSeenMap(current)
+        if (hasChosen === isRecentGroveChoiceSeen(seen[accountKey])) {
+          return current
+        }
+        const pruned = Object.entries(seen).filter(
+          ([k, ts]) => k !== accountKey && isRecentGroveChoiceSeen(ts),
+        )
+        const nextSeen = Object.fromEntries(
+          hasChosen ? [...pruned, [accountKey, now]] : pruned,
+        )
+        return {
+          ...current,
+          groveChoiceSeenAt: nextSeen,
+        } as typeof current
+      })
+    }
+  }
 
   // Check if user hasn't made a choice yet (returns false on API failure)
   const shouldShowGrove = calculateShouldShowGrove(

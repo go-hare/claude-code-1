@@ -20,6 +20,7 @@ export const PLUGIN_AUTHORING_PLUGIN_DESCRIPTION =
 
 export const SCAN_SECRETS_TOOL_NAME = 'scan_secrets'
 export const SCAN_SECRETS_MCP_SERVER_NAME = 'plugin-authoring'
+export const SCAN_SECRETS_FULL_TOOL_NAME = `mcp__${SCAN_SECRETS_MCP_SERVER_NAME}__${SCAN_SECRETS_TOOL_NAME}`
 export const SCAN_SECRETS_MAX_FILE_BYTES = 10 * 1024 * 1024
 export const SCAN_SECRETS_MAX_TOTAL_BYTES = 25 * 1024 * 1024
 export const SCAN_SECRETS_MAX_ENTRIES = 20_000
@@ -27,6 +28,64 @@ export const SCAN_SECRETS_MAX_FINDINGS = 100
 export const SCAN_SECRETS_MAX_SKIPPED = 30
 const REDACTED_SECRET_NAME = '<name holding a secret>'
 const LFS_POINTER_PREFIX = 'version https://git-lfs.github.com/spec/v1'
+
+export type PluginAuthoringComplianceOff = 'tainted' | 'pending' | undefined
+
+export const SKILL_PROMPT_COMPLIANCE_REASONS: Record<
+  Exclude<PluginAuthoringComplianceOff, undefined>,
+  string
+> = {
+  tainted: "your organization's compliance settings turn it off.",
+  pending:
+    "your organization's policy has not loaded, and the scan cannot run until it does; once it has, loading the skill again adds the tool.",
+}
+
+export const TOOL_CALL_COMPLIANCE_REASONS: Record<
+  Exclude<PluginAuthoringComplianceOff, undefined>,
+  string
+> = {
+  tainted: "your organization's compliance settings turn the scan off.",
+  pending:
+    "your organization's policy has not loaded, and the scan cannot run until it does.",
+}
+
+export type ComplianceHostLike = {
+  complianceTaints: readonly string[]
+  hintedTaints: readonly string[]
+  verdict?: { complianceTaintsSettled: () => boolean } | null
+}
+
+/**
+ * Upstream v2.1.304 `ce()` — checks if compliance taints (hipaa/zdr) or
+ * unsettled organization policy (`pending`) disable the secret scan.
+ */
+export function getPluginAuthoringComplianceOff(
+  hostOverride?: ComplianceHostLike,
+): PluginAuthoringComplianceOff {
+  try {
+    const host =
+      hostOverride ??
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      (
+        require('../../cli/leftoverTulip.js') as typeof import('../../cli/leftoverTulip.js')
+      ).leftoverPolicyLimitsHost()
+    if (
+      host.complianceTaints.includes('hipaa') ||
+      host.complianceTaints.includes('zdr') ||
+      host.hintedTaints.includes('hipaa') ||
+      host.hintedTaints.includes('zdr')
+    ) {
+      return 'tainted'
+    }
+    const settled = host.verdict?.complianceTaintsSettled()
+    if (settled === false) {
+      return 'pending'
+    }
+    return undefined
+  } catch {
+    return undefined
+  }
+}
 
 const SECRET_PATTERNS: ReadonlyArray<{ label: string; pattern: RegExp }> = [
   {
@@ -312,6 +371,18 @@ export function createPluginAuthoringMcpServer() {
         ),
     },
     async ({ folder }) => {
+      const complianceOff = getPluginAuthoringComplianceOff()
+      if (complianceOff !== undefined) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Result: the scan could not run: ${TOOL_CALL_COMPLIANCE_REASONS[complianceOff]}`,
+            },
+          ],
+          isError: true,
+        }
+      }
       const res = await scanModSecretsFolder(folder)
       return {
         content: [{ type: 'text' as const, text: res.text }],
@@ -330,12 +401,85 @@ export function isPluginAuthoringPluginAvailable(): boolean {
   return leftoverHooksModulesOn()
 }
 
+export function registerPluginAuthoringHooks(
+  on: (
+    event: string,
+    matcherOrHandler: unknown,
+    maybeHandler?: unknown,
+  ) => void,
+  complianceOff: () => PluginAuthoringComplianceOff = getPluginAuthoringComplianceOff,
+): void {
+  on(
+    'skill.prompt',
+    { skill: 'plugin-authoring', source: 'built-in' },
+    async (
+      _api: unknown,
+      input: { text?: string },
+      next: (arg: { text?: string }) => Promise<{ text?: string }>,
+    ) => {
+      const res = await next(input)
+      const off = complianceOff()
+      if (off === undefined) return res
+      const reason = SKILL_PROMPT_COMPLIANCE_REASONS[off]
+      return {
+        ...res,
+        text: `${res.text ?? ''}\n\nThe secret scan tool is not available in this session: ${reason} So the scan in the share steps cannot run here, and a mod cannot be shared until it can: do not open, print or search any file in the folder of a mod to be shared, and tell the person why it can't be shared.`,
+      }
+    },
+  )
+  on(
+    'tool.call',
+    { tool: SCAN_SECRETS_FULL_TOOL_NAME },
+    async (
+      _api: unknown,
+      input: unknown,
+      next: (arg: unknown) => Promise<unknown>,
+    ) => {
+      const off = complianceOff()
+      if (off !== undefined) {
+        return {
+          result: `Result: the scan could not run: ${TOOL_CALL_COMPLIANCE_REASONS[off]}`,
+          isError: true,
+        }
+      }
+      return next(input)
+    },
+  )
+}
+
 export function registerPluginAuthoringBuiltinPlugin(): void {
+  const { leftoverFu } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../../utils/plugins/functionHooksModules.js') as typeof import('../../utils/plugins/functionHooksModules.js')
   registerBuiltinPlugin({
     name: PLUGIN_AUTHORING_PLUGIN_NAME,
     description: PLUGIN_AUTHORING_PLUGIN_DESCRIPTION,
     // gold uS omits defaultEnabled → PZ ?? true
     isAvailable: isPluginAuthoringPluginAvailable,
+    hooksModule: leftoverFu(
+      join(
+        import.meta.dir,
+        '../../../vendor/claude-code-mods/mods/cc-plugin-plugin-authoring',
+      ),
+      {
+        register: (on: unknown) => {
+          registerPluginAuthoringHooks(
+            on as (
+              event: string,
+              matcherOrHandler: unknown,
+              maybeHandler?: unknown,
+            ) => void,
+          )
+        },
+      },
+      () => ({
+        scan: {
+          hooks: ['skill.prompt', 'tool.call'],
+          calls: [],
+        },
+        files: {},
+      }),
+    ),
     skills: [createPluginAuthoringSkill()],
     mcpServers: {
       [SCAN_SECRETS_MCP_SERVER_NAME]: createPluginAuthoringMcpServer(),

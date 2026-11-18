@@ -2,7 +2,7 @@ import figures from 'figures';
 import * as React from 'react';
 import { useContext } from 'react';
 import { useQueuedMessage } from '../../context/QueuedMessageContext.js';
-import { Box, Divider, Text, type Theme } from '@anthropic/ink';
+import { AccessibilityContext, Box, Divider, Text, type Theme } from '@anthropic/ink';
 import { formatBriefTimestamp } from '../../utils/formatBriefTimestamp.js';
 import { findThinkingTriggerPositions, getRainbowColor, isUltrathinkEnabled } from '../../utils/thinking.js';
 import { Markdown } from '../Markdown.js';
@@ -24,7 +24,8 @@ type Props = {
 
 /** densable Gfr — plain / ultrathink rainbow text (no Markdown). */
 function RainbowOrPlainText({ text, color }: { text: string; color: keyof Theme }): React.ReactNode {
-  const triggers = isUltrathinkEnabled() ? findThinkingTriggerPositions(text) : [];
+  const isScreenReader = useContext(AccessibilityContext);
+  const triggers = !isScreenReader && isUltrathinkEnabled() ? findThinkingTriggerPositions(text) : [];
 
   if (triggers.length === 0) {
     return <Text color={color}>{text}</Text>;

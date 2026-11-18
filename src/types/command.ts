@@ -333,6 +333,8 @@ export type CommandBase = {
   >
   /** Official menu/typeahead blurb (Fmr menuDescription). Distinct from whenToUse. */
   menuDescription?: string
+  /** Official 2.1.307 (#1088): short listing description for skills/commands. */
+  listingDescription?: string
   whenToUse?: string // From the "Skill" spec. Detailed usage scenarios for when to use this command
   version?: string // Version of the command/skill
   disableModelInvocation?: boolean // Whether to disable this command from being invoked by models

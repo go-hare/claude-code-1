@@ -32,6 +32,8 @@ export type HarborWillowPlanInput = {
    * When true, silent auto arms even if harbor_willow is off.
    */
   bridgeChildAutoDefault?: boolean
+  /** Official 325 `Pe(r.CLAUDE_CODE_REMOTE)` — disables harborPath in CCR. */
+  isRemote?: boolean
 }
 
 export type HarborWillowPlan = {
@@ -53,7 +55,9 @@ export function planHarborWillowAutoFallback(
     return { mode: 'default', fromAutoFallback: false }
   }
   const harborPath =
-    input.harborWillow && (!input.isNonInteractiveSession || input.mossAnchor)
+    !input.isRemote &&
+    input.harborWillow &&
+    (!input.isNonInteractiveSession || input.mossAnchor)
   if (harborPath || input.bridgeChildAutoDefault === true) {
     return { mode: 'auto', fromAutoFallback: true }
   }

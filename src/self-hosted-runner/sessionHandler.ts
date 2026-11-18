@@ -32,6 +32,7 @@ import {
   sessionIngressTokenPath,
 } from './sessionChild.js'
 import {
+  DEFAULT_CHECKOUT_HOOK_TIMEOUT_MS,
   isCheckoutHookSourceType,
   mapSourcesForCheckout,
   parseGovernedGitConfig,
@@ -44,10 +45,12 @@ import {
 } from './sessionHooks.js'
 import { isSafeGitRevision, isSafeGitUrl } from './orchestrator.js'
 import {
+  StartupSilenceWatchdog,
   createActivityPipeState,
   disposeActivityPipeState,
   handleActivityLine,
   handleStderrInitMarker,
+  snapshotBgTasks,
   type SessionActivityHandler,
 } from './sessionActivity.js'
 import {
@@ -92,12 +95,15 @@ import {
 import { materializeLauncherHooks } from './launcherHooks.js'
 import {
   buildSessionGoneEndSessionLine,
+  insteadOfRetryHintFromError,
   isEpochMismatchRunnerError,
   notifyChildSessionGone,
   postSessionFailureResult,
 } from './sessionFailure.js'
 import {
+  buildGitTrustBundle,
   createGitTlsSessionState,
+  formatCertificatesLeftOutWarning,
   formatRunnerMountTlsWarning,
   governedSigningEntries,
   governedGitSpawn,
@@ -179,6 +185,8 @@ export type HandleSessionOpts = {
   gitHostRewrites?: Array<[string, string]>
   pushOutcomeOnRelease?: boolean
   postSessionHookTimeoutMs?: number
+  checkoutHookTimeoutMs?: number
+  startupTimeoutMs?: number
   /** densable inject point used by xBh tests */
   spawnChild?: typeof spawnSessionChild
   /** skip child spawn after register (tests / dry-run) */
@@ -326,6 +334,7 @@ export type SpawnSessionChildOpts = {
   onStatus: (msg: string) => void
   signal: AbortSignal
   postSessionHookTimeoutMs?: number
+  startupTimeoutMs?: number
   pushOutcomeOnRelease?: boolean
   onSessionActivity?: SessionActivityHandler
   onBgTaskLedger?: (liveNonMonitor: number) => void
@@ -454,18 +463,32 @@ export async function spawnSessionChild(
   if (opts.signal.aborted) supervisor.terminate()
 
   const activityState = createActivityPipeState()
+  const startupTimeoutMs =
+    opts.startupTimeoutMs ?? readEnvMs('SELF_HOSTED_RUNNER_STARTUP_TIMEOUT_MS')
+  const startupSilenceWatchdog = new StartupSilenceWatchdog(
+    startupTimeoutMs,
+    () =>
+      opts.onSessionActivity?.('startup', {
+        ...snapshotBgTasks(activityState),
+        childSilent: true,
+      }),
+  )
+  const activityHandlers = {
+    onSessionActivity: opts.onSessionActivity,
+    onBgTaskLedger: opts.onBgTaskLedger,
+    onTokenAck: opts.onTokenAck,
+    onSessionStartHookError: opts.onSessionStartHookError,
+    onInitObserved: opts.onInitObserved,
+    onDebug: opts.onDebug,
+    onStatus: opts.onStatus,
+    sessionId: opts.sessionId,
+    onBgResultFollowUpBusy: opts.onBgResultFollowUpBusy,
+    startupSilenceWatchdog,
+    startupTimeoutMs,
+    onNoteTurnStart: () => supervisor.noteTurnStart(),
+  }
   const onActivityLine = (line: string): void => {
-    handleActivityLine(line, activityState, {
-      onSessionActivity: opts.onSessionActivity,
-      onBgTaskLedger: opts.onBgTaskLedger,
-      onTokenAck: opts.onTokenAck,
-      onSessionStartHookError: opts.onSessionStartHookError,
-      onInitObserved: opts.onInitObserved,
-      onDebug: opts.onDebug,
-      onStatus: opts.onStatus,
-      sessionId: opts.sessionId,
-      onBgResultFollowUpBusy: opts.onBgResultFollowUpBusy,
-    })
+    handleActivityLine(line, activityState, activityHandlers)
     // densable ct.noteTurnStart / noteTurnEnd (qi spawn activity)
     let parsed: unknown
     try {
@@ -487,10 +510,7 @@ export async function spawnSessionChild(
   const maxStderr = 50
   if (child.stderr) {
     createInterface({ input: child.stderr }).on('line', line => {
-      handleStderrInitMarker(line, activityState, {
-        onInitObserved: opts.onInitObserved,
-        onSessionActivity: opts.onSessionActivity,
-      })
+      handleStderrInitMarker(line, activityState, activityHandlers)
       const trimmed = line.length > 500 ? `${line.slice(0, 500)}…` : line
       opts.onDebug(`[runner:session] stderr: ${trimmed}`)
       stderrLines.push(trimmed)
@@ -521,6 +541,7 @@ export async function spawnSessionChild(
           onDebug: opts.onDebug,
           onBgResultFollowUpBusy: opts.onBgResultFollowUpBusy,
           sessionId: opts.sessionId,
+          startupSilenceWatchdog,
         },
         'child exited',
         true,
@@ -744,6 +765,7 @@ export async function handleSession(
             signingArtifacts: opts.configureGitSigningArtifacts,
           },
           onDebug,
+          onStatus,
         )
       }
     }
@@ -851,10 +873,13 @@ export async function handleSession(
         join(sessionDir, 'runner-trust-bundle.pem'),
         multiCap,
       )
-      await prepareGitTlsTrustBundle(gitTlsState, async () => ({
-        status: 'unavailable',
-        reason: 'bundle_write_failed',
-      }))
+      await prepareGitTlsTrustBundle(gitTlsState, (certFile, bundlePath) =>
+        buildGitTrustBundle(certFile, bundlePath, onDebug),
+      )
+      const leftOutWarning = formatCertificatesLeftOutWarning([
+        gitTlsState.trustBundle,
+      ])
+      if (leftOutWarning) onStatus(leftOutWarning)
       const mountTlsWarning = formatRunnerMountTlsWarning(gitTlsState)
       if (mountTlsWarning) onStatus(mountTlsWarning)
     }
@@ -1132,6 +1157,8 @@ export async function handleSession(
               onStatus,
               onDebug,
               signal,
+              timeoutMs:
+                opts.checkoutHookTimeoutMs ?? DEFAULT_CHECKOUT_HOOK_TIMEOUT_MS,
             })
             preparedPaths.push(checkoutPath)
             preparedRepos.push(src.repo)
@@ -1867,6 +1894,7 @@ export async function handleSession(
         onStatus,
         signal,
         postSessionHookTimeoutMs: opts.postSessionHookTimeoutMs,
+        startupTimeoutMs: opts.startupTimeoutMs,
         pushOutcomeOnRelease: opts.pushOutcomeOnRelease,
         onSessionActivity: opts.onSessionActivity,
         onBgTaskLedger: opts.onBgTaskLedger,
@@ -2033,6 +2061,7 @@ export async function handleSession(
         workerEpoch: workerEpochLive,
         exitCode: null,
         stderrTail: classified.failureReason ?? errMsg(err),
+        insteadOfRetryHint: insteadOfRetryHintFromError(err),
         onDebug,
         onStatus,
         signal,

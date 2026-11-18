@@ -22,6 +22,7 @@ import { PermissionPowerShellDialog } from './dialogs/PermissionPowerShellDialog
 import { PermissionPromptDialog } from './dialogs/PermissionPromptDialog.js';
 import { PermissionSkillDialog } from './dialogs/PermissionSkillDialog.js';
 import { PermissionWebFetchDialog } from './dialogs/PermissionWebFetchDialog.js';
+import { ColdResumeQuotaDialog, type ColdResumeQuotaDialogProps } from '../components/ColdResumeQuotaDialog.js';
 import { JSU_NON_PERMISSION_COMPONENTS } from './jsuRenderers.js';
 import {
   AUTO_MODE_FLAGGED_ALLOW_KIND,
@@ -300,6 +301,26 @@ function DialogHostNotification({
   return null;
 }
 
+const COLD_RESUME_QUOTA_KIND = 'cold_resume_quota';
+
+/** Official G$o — cold_resume_quota DialogHost renderer (2.1.304 #964). */
+const coldResumeQuotaRenderer: DialogRenderer = ({ payload, answer }) => {
+  const p = payload as Omit<ColdResumeQuotaDialogProps, 'onDone'>;
+  return (
+    <ColdResumeQuotaDialog
+      inactiveSince={p.inactiveSince}
+      contextTokens={p.contextTokens}
+      percentOfFiveHourLimit={p.percentOfFiveHourLimit}
+      trigger={p.trigger}
+      focusedAction={p.focusedAction}
+      offersLookUp={p.offersLookUp}
+      offersSummary={p.offersSummary}
+      hasUnsentDraft={p.hasUnsentDraft}
+      onDone={action => answer(action)}
+    />
+  );
+};
+
 /** densable jsu — permission_* + pealed non-permission arms */
 const DIALOG_COMPONENTS: Record<string, DialogRenderer> = {
   [PERMISSION_PROMPT_KIND]: PermissionPromptDialog,
@@ -314,6 +335,7 @@ const DIALOG_COMPONENTS: Record<string, DialogRenderer> = {
   [PERMISSION_BROWSER_KIND]: PermissionBrowserDialog,
   [PERMISSION_MONITOR_KIND]: PermissionMonitorDialog,
   [PERMISSION_WORKFLOW_KIND]: PermissionPromptDialog,
+  [COLD_RESUME_QUOTA_KIND]: coldResumeQuotaRenderer,
   ...JSU_NON_PERMISSION_COMPONENTS,
 };
 

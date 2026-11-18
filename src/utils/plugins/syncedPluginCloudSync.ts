@@ -600,6 +600,37 @@ type SyncErrorRow =
     }
   | { type: 'generic-error'; source: string; plugin?: string; error: string }
 
+export type LastCompleteSyncedList = {
+  bucket: string
+  dirsById: Map<string, Set<string>>
+  removalOwed: Set<string>
+}
+
+export type SyncedRefusalReason =
+  | 'sync_off'
+  | 'other_account'
+  | 'no_account'
+  | 'not_listed'
+  | 'list_unreadable'
+  | 'no_folder'
+
+export const SYNCED_REFUSAL_MESSAGES: Record<SyncedRefusalReason, string> = {
+  sync_off:
+    "plugins sync is turned off in the person's own settings, in an admin's, or by the organization's policy",
+  other_account: 'its plugin was synced for another account',
+  no_account: 'no account could be resolved for its synced plugin',
+  not_listed:
+    "the account's latest complete list of plugins does not hold its plugin's folder",
+  list_unreadable:
+    "this session's record of the account's plugins could not be read",
+  no_folder:
+    "its plugin's folder could not be found under the synced plugins' folder",
+}
+
+export function formatSyncedRefusalReason(reason: SyncedRefusalReason): string {
+  return SYNCED_REFUSAL_MESSAGES[reason]
+}
+
 type PluginsSyncState = {
   syncErrors: SyncErrorRow[]
   pendingTrashRemovals: Array<Promise<void>>
@@ -613,6 +644,7 @@ type PluginsSyncState = {
   syncedDirsLoadedHere: Set<string>
   dirsNewHere: Set<string>
   awaitsFirstRun: boolean
+  lastCompleteList: LastCompleteSyncedList | null
 }
 
 const pluginsSync: PluginsSyncState = {
@@ -628,6 +660,7 @@ const pluginsSync: PluginsSyncState = {
   syncedDirsLoadedHere: new Set(),
   dirsNewHere: new Set(),
   awaitsFirstRun: false,
+  lastCompleteList: null,
 }
 
 export function getPluginsSyncState(): Readonly<PluginsSyncState> {
@@ -672,6 +705,90 @@ export function resetSyncedLaneState(): void {
   pluginsSync.dirsNewHere.clear()
   pluginsSync.lastSyncedLaneLoad = null
   pluginsSync.awaitsFirstRun = false
+  pluginsSync.lastCompleteList = null
+}
+
+function extractSyncedChildDirName(baseDir: string, fullPath: string): string {
+  const [first = ''] = fullPath.slice(baseDir.length + 1).split('/')
+  return foldSyncedPathKey(first)
+}
+
+/**
+ * Upstream v2.1.309 `usa(e, n, s)`: checks whether a synced plugin folder is
+ * present in `lastCompleteList`. Returns `'list_unreadable'` on read/inspection
+ * error so callers do not treat a disk/record read error as delisted.
+ */
+export function checkSyncedPluginListStatus(
+  bucket: string,
+  roots: readonly string[],
+  pluginPath: string,
+  readList: () => LastCompleteSyncedList | null = () =>
+    pluginsSync.lastCompleteList,
+): 'not_listed' | 'list_unreadable' | undefined {
+  try {
+    const lastList = readList()
+    const matchedRoot = roots
+      .map(r => `${r}/${bucket}`)
+      .find(r => pluginPath.startsWith(`${r}/`))
+    if (
+      lastList === null ||
+      lastList.bucket !== bucket ||
+      matchedRoot === undefined
+    ) {
+      return undefined
+    }
+    const dirKey = extractSyncedChildDirName(matchedRoot, pluginPath)
+    return Array.from(lastList.dirsById.values()).some(dirs => dirs.has(dirKey))
+      ? undefined
+      : 'not_listed'
+  } catch (err) {
+    logForDebugging(
+      `plugins_sync_last_list_unreadable: ${err instanceof Error ? err.message : String(err)}`,
+      { level: 'warn' },
+    )
+    return 'list_unreadable'
+  }
+}
+
+export function recordCompleteSyncedPluginsList(
+  bucket: string,
+  listed: readonly SyncedCloudPlugin[],
+  root = getSyncedPluginsRoot(),
+): LastCompleteSyncedList {
+  const prev = pluginsSync.lastCompleteList
+  const dirsById = new Map<string, Set<string>>()
+  for (const row of listed) {
+    try {
+      const dirKey = foldSyncedPathKey(
+        basename(resolveSyncedPluginDir(row.name, root)),
+      )
+      let set = dirsById.get(row.pluginId)
+      if (!set) {
+        set = new Set<string>()
+        dirsById.set(row.pluginId, set)
+      }
+      set.add(dirKey)
+    } catch {
+      // skip invalid name
+    }
+  }
+  const prevDirs =
+    prev !== null && prev.bucket === bucket
+      ? prev.dirsById
+      : new Map<string, Set<string>>()
+  const delistedDirs = new Set<string>([
+    ...Array.from(prevDirs.entries()).flatMap(([id, dirs]) =>
+      dirsById.has(id) ? [] : Array.from(dirs),
+    ),
+    ...(prev?.bucket === bucket ? prev.removalOwed : []),
+  ])
+  const next: LastCompleteSyncedList = {
+    bucket,
+    dirsById,
+    removalOwed: delistedDirs.size > 0 ? new Set() : delistedDirs,
+  }
+  pluginsSync.lastCompleteList = next
+  return next
 }
 
 export type SyncedSyncPlan = {
@@ -1497,6 +1614,11 @@ export async function syncCloudSyncedPlugins(): Promise<void> {
       },
     )
     await trashOrphanSyncedDirs(ctx, listed.plugins)
+    recordCompleteSyncedPluginsList(
+      basename(getSyncedPluginsRoot()),
+      listed.plugins,
+      getSyncedPluginsRoot(),
+    )
     logForDebugging('plugins_sync_complete', { level: 'info' })
     logEvent('tengu_plugins_sync_success', {
       downloaded: downloaded.length,

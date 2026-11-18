@@ -1,21 +1,9 @@
 /**
  * densable _Et().value — classifier model for auto-mode-setup propose.
- * Wraps tip classifier model resolution; empty string disables KHl.
+ * Delegates to getClassifierModel() (BFn().value); empty string disables KHl.
  */
-import { getMainLoopModel } from '../../utils/model/model.js'
 import { resolveTenguAutoModeConfig } from '../../utils/permissions/autoModeFlags.js'
-
-function resolveMappedModel(
-  map: Record<string, string> | undefined,
-  main: string,
-): string | undefined {
-  if (!map || typeof map !== 'object') return undefined
-  if (map[main]) return map[main]
-  for (const [prefix, model] of Object.entries(map)) {
-    if (main.startsWith(prefix)) return model
-  }
-  return undefined
-}
+import { getClassifierModel } from '../../utils/permissions/yoloClassifier.js'
 
 /**
  * densable Z1m(_Et()) — fallbackModelByModel exact key, skip identity mapping.
@@ -31,19 +19,8 @@ export function resolveAutoModeSetupFallbackModel(
 }
 
 /**
- * densable _Et — returns model id or "".
- * Prefer CLAUDE_CODE_AUTO_MODE_MODEL / BG_CLASSIFIER_MODEL, then GB, then main.
+ * densable _Et / $yt — returns BFn().value or "".
  */
 export function resolveAutoModeSetupClassifierModel(): string {
-  const envModel =
-    process.env.CLAUDE_CODE_AUTO_MODE_MODEL ||
-    process.env.CLAUDE_CODE_BG_CLASSIFIER_MODEL
-  if (envModel && envModel.trim() !== '') return envModel.trim()
-
-  const config = resolveTenguAutoModeConfig()
-  const main = getMainLoopModel()
-  const mapped = resolveMappedModel(config.modelByMainModel, main)
-  if (mapped) return mapped
-  if (config.model && config.model.trim() !== '') return config.model.trim()
-  return main || ''
+  return getClassifierModel() || ''
 }

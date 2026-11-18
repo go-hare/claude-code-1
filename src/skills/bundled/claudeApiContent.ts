@@ -61,6 +61,9 @@ import sharedAdminApi from './claude-api/shared/admin-api.md' with {
 import sharedAgentDesign from './claude-api/shared/agent-design.md' with {
   type: 'text',
 }
+import sharedApiVersionMigration from './claude-api/shared/api-version-migration.md' with {
+  type: 'text',
+}
 import sharedClaudePlatformOnAws from './claude-api/shared/claude-platform-on-aws.md' with {
   type: 'text',
 }
@@ -71,6 +74,12 @@ import sharedErrorCodes from './claude-api/shared/error-codes.md' with {
   type: 'text',
 }
 import sharedLiveSources from './claude-api/shared/live-sources.md' with {
+  type: 'text',
+}
+import sharedManagedAgentsMultiagent from './claude-api/shared/managed-agents-multiagent.md' with {
+  type: 'text',
+}
+import sharedManagedAgentsSecure from './claude-api/shared/managed-agents-secure.md' with {
   type: 'text',
 }
 import sharedManagedAgentsSelfHosted from './claude-api/shared/managed-agents-self-hosted-sandboxes.md' with {
@@ -170,10 +179,13 @@ export const SKILL_FILES: Record<string, string> = {
   'ruby/claude-api/README.md': rubyClaudeApi,
   'shared/admin-api.md': sharedAdminApi,
   'shared/agent-design.md': sharedAgentDesign,
+  'shared/api-version-migration.md': sharedApiVersionMigration,
   'shared/claude-platform-on-aws.md': sharedClaudePlatformOnAws,
   'shared/cost-optimization.md': sharedCostOptimization,
   'shared/error-codes.md': sharedErrorCodes,
   'shared/live-sources.md': sharedLiveSources,
+  'shared/managed-agents-multiagent.md': sharedManagedAgentsMultiagent,
+  'shared/managed-agents-secure.md': sharedManagedAgentsSecure,
   'shared/managed-agents-self-hosted-sandboxes.md':
     sharedManagedAgentsSelfHosted,
   'shared/managed-agents-tools.md': sharedManagedAgentsTools,

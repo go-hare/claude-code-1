@@ -100,6 +100,10 @@ async function resolveHookAttributionText(
   return text
 }
 
+/** SEA `Fnn` (@290427749) — avoid accidental GitHub @mentions in PRs, issues, and comments. */
+export const GITHUB_MENTION_RULE =
+  'GitHub notifies the owner of any `@name` written in a PR, issue, or comment. Write a bare `@name` only for a real login you mean to notify. Put roles, placeholders, and code (`@human`, `@reviewer`, `@types/node`) in backticks or drop the `@`, even when copied from project files'
+
 async function getCommitAndPRInstructions(): Promise<string> {
   // Defense-in-depth: undercover instructions must survive even if the user
   // has disabled git instructions entirely. Attribution stripping and model-ID
@@ -131,6 +135,8 @@ Before creating a pull request, run \`/simplify\` to review your changes, then t
 ${skillsSection}IMPORTANT: NEVER skip hooks (--no-verify, --no-gpg-sign, etc) unless the user explicitly requests it.
 
 Use the gh command via the Bash tool for other GitHub-related tasks including working with issues, checks, and releases. If given a Github URL use the gh command to get the information needed.
+
+${GITHUB_MENTION_RULE}.
 
 # Other common operations
 - View comments on a Github PR: gh api repos/foo/bar/pulls/123/comments`
@@ -217,6 +223,8 @@ git commit -m "$(cat <<'EOF'
 
 # Creating pull requests
 Use the gh command via the Bash tool for ALL GitHub-related tasks including working with issues, pull requests, checks, and releases. If given a Github URL use the gh command to get the information needed.
+
+${GITHUB_MENTION_RULE}.
 
 IMPORTANT: When the user asks you to create a pull request, follow these steps carefully:
 

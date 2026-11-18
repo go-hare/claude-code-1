@@ -89,8 +89,6 @@ const SAFE_YOLO_ALLOWLISTED_TOOLS = new Set([
   ...(TERMINAL_CAPTURE_TOOL_NAME ? [TERMINAL_CAPTURE_TOOL_NAME] : []),
   ...(OVERFLOW_TEST_TOOL_NAME ? [OVERFLOW_TEST_TOOL_NAME] : []),
   ...(VERIFY_PLAN_EXECUTION_TOOL_NAME ? [VERIFY_PLAN_EXECUTION_TOOL_NAME] : []),
-  // Internal classifier tool
-  YOLO_CLASSIFIER_TOOL_NAME,
 ])
 
 /**
@@ -119,5 +117,8 @@ export function isAutoModeFastPathExcludedTool(toolName: string): boolean {
  * `isChromeMcpSafeForAutoMode` at the call site.
  */
 export function isAutoModeAllowlistedTool(toolName: string): boolean {
-  return SAFE_YOLO_ALLOWLISTED_TOOLS.has(toolName)
+  return (
+    toolName === YOLO_CLASSIFIER_TOOL_NAME ||
+    SAFE_YOLO_ALLOWLISTED_TOOLS.has(toolName)
+  )
 }

@@ -75,8 +75,9 @@ export async function createBashShellProvider(
         logForDebugging(`Failed to create shell snapshot: ${error}`)
         return undefined
       })
-  // Track the last resolved snapshot path for use in getSpawnArgs
+  // Track the last resolved snapshot path and sandbox flag for use in getSpawnArgs
   let lastSnapshotFilePath: string | undefined
+  let lastUseSandbox = false
 
   return {
     type: 'bash',
@@ -97,8 +98,10 @@ export async function createBashShellProvider(
         id: number | string
         sandboxTmpDir?: string
         useSandbox: boolean
+        noBashEnv?: boolean
       },
     ): Promise<{ commandString: string; cwdFilePath: string }> {
+      lastUseSandbox = opts.useSandbox || Boolean(opts.noBashEnv)
       let snapshotFilePath = await snapshotPromise
       // This access() check is NOT pure TOCTOU — it's the fallback decision
       // point for getSpawnArgs. When the snapshot disappears mid-session
@@ -225,6 +228,15 @@ export async function createBashShellProvider(
     },
 
     getSpawnArgs(commandString: string): string[] {
+      if (lastUseSandbox) {
+        logForDebugging(
+          'Spawning shell without login (-l flag skipped for sandbox)',
+        )
+        if (/(?:^|[/\\])bash(?:\.exe)?$/i.test(shellPath)) {
+          return ['--noprofile', '--norc', '-c', commandString]
+        }
+        return ['-c', commandString]
+      }
       const skipLoginShell = lastSnapshotFilePath !== undefined
       if (skipLoginShell) {
         logForDebugging('Spawning shell without login (-l flag skipped)')

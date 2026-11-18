@@ -1004,6 +1004,34 @@ export function VirtualMessageList({
   stepRef.current = step;
 
   const promptJumpIdxRef = useRef<number | null>(null);
+  const pendingJumpRef = useRef<number | null>(null);
+
+  function getFirstContentMarginTop(el: DOMElement): number {
+    let marginTop = 0;
+    let cur = el.childNodes[0];
+    while (cur && cur.nodeName !== '#text' && 'yogaNode' in cur && cur.yogaNode) {
+      marginTop += cur.yogaNode.getComputedTop();
+      cur = cur.childNodes[0];
+    }
+    return marginTop;
+  }
+
+  function scrollToMessageElement(s: ScrollBoxHandle, el: DOMElement, top: number): void {
+    const marginTop = getFirstContentMarginTop(el);
+    s.scrollTo(top + marginTop);
+    s.scrollToElement(el, marginTop);
+  }
+
+  function getAnchorIfVisible(): number | null {
+    const idx = promptJumpIdxRef.current;
+    const s = scrollRef.current;
+    if (idx === null || !s) return idx;
+    const { getItemElement: getEl, getItemTop: getTop } = jumpState.current;
+    const top = getTop(idx);
+    const h = getEl(idx)?.yogaNode?.getComputedHeight() ?? 0;
+    const scrollTop = s.getScrollTop();
+    return top >= 0 && top + Math.max(h, 1) > scrollTop && top < scrollTop + s.getViewportHeight() ? idx : null;
+  }
 
   function findPromptFrom(from: number, dir: 1 | -1): number {
     const { messages: msgs } = jumpState.current;
@@ -1018,7 +1046,7 @@ export function VirtualMessageList({
     const { offsets: offs, start: st, getItemTop: getTop, messages: msgs } = jumpState.current;
     const len = msgs.length;
     if (!s || len === 0) return -1;
-    const targetTop = s.getScrollTop() + HEADROOM;
+    const targetTop = s.getScrollTop();
     const firstTop = getTop(st);
     if (firstTop >= 0 && firstTop <= targetTop) {
       let cur = st;
@@ -1043,15 +1071,38 @@ export function VirtualMessageList({
 
   function scrollToMessageIndex(idx: number): void {
     const s = scrollRef.current;
-    const { messages: msgs, getItemTop: getTop, scrollToIndex: scrollIdx } = jumpState.current;
+    const { messages: msgs, getItemElement: getEl, scrollToIndex: scrollIdx } = jumpState.current;
     if (!s || idx < 0 || idx >= msgs.length) return;
     releaseReveal();
-    if (getTop(idx) >= 0) {
-      s.scrollTo(targetFor(idx));
-    } else {
-      scrollIdx(idx);
+    scanRequestRef.current = null;
+    if (s.getPendingDelta() !== 0) {
+      s.scrollTo(s.getScrollTop());
     }
+    const el = getEl(idx);
+    const yoga = el?.yogaNode;
+    const h = yoga?.getComputedHeight() ?? 0;
+    if (el && yoga && h > 0 && yoga.getComputedWidth() > 0) {
+      pendingJumpRef.current = null;
+      scrollToMessageElement(s, el, yoga.getComputedTop());
+      return;
+    }
+    pendingJumpRef.current = idx;
+    if (!el) scrollIdx(idx);
+    bumpSeek();
   }
+
+  useEffect(() => {
+    const idx = pendingJumpRef.current;
+    if (idx === null) return;
+    const s = scrollRef.current;
+    const el = jumpState.current.getItemElement(idx);
+    const yoga = el?.yogaNode;
+    const h = yoga?.getComputedHeight() ?? 0;
+    if (s && el && yoga && h > 0 && yoga.getComputedWidth() > 0) {
+      pendingJumpRef.current = null;
+      scrollToMessageElement(s, el, yoga.getComputedTop());
+    }
+  });
 
   useImperativeHandle(
     jumpRef,
@@ -1065,7 +1116,7 @@ export function VirtualMessageList({
         }
       },
       nextMessage: () => {
-        const cur = promptJumpIdxRef.current ?? findCurrentScrollIndex();
+        const cur = getAnchorIfVisible() ?? findCurrentScrollIndex();
         if (cur < 0) return;
         const next = findPromptFrom(cur, 1);
         if (next < 0) return;
@@ -1073,21 +1124,21 @@ export function VirtualMessageList({
         promptJumpIdxRef.current = next;
       },
       prevMessage: () => {
-        const prevJump = promptJumpIdxRef.current;
-        const cur = prevJump ?? findCurrentScrollIndex();
+        const anchor = getAnchorIfVisible();
+        const cur = anchor ?? findCurrentScrollIndex();
         if (cur < 0) return;
-        if (prevJump === null && stickyPromptText(jumpState.current.messages[cur]!) === null) {
-          const prev = findPromptFrom(cur, -1);
-          if (prev >= 0) {
-            scrollToMessageIndex(prev);
-            promptJumpIdxRef.current = prev;
-          }
-          return;
-        }
-        const prev = findPromptFrom(cur, -1);
-        if (prev < 0) return;
-        scrollToMessageIndex(prev);
-        promptJumpIdxRef.current = prev;
+        const s = scrollRef.current;
+        const el = anchor === null ? jumpState.current.getItemElement(cur) : null;
+        const target =
+          s &&
+          el &&
+          stickyPromptText(jumpState.current.messages[cur]!) !== null &&
+          jumpState.current.getItemTop(cur) + getFirstContentMarginTop(el) < s.getScrollTop()
+            ? cur
+            : findPromptFrom(cur, -1);
+        if (target < 0) return;
+        scrollToMessageIndex(target);
+        promptJumpIdxRef.current = target;
       },
       setSearchQuery: (q: string) => {
         // New search invalidates everything.

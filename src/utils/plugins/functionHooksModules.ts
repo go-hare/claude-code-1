@@ -1335,6 +1335,104 @@ function notifyHookFailed(
  * densable `u8e` `{only}`: when set, only that plugin's hooks run
  * (`N1t` `qP("ui.message", void 0, {only:e})` / `dO` `{only:r}`).
  */
+const MAX_PASSED_BY_SESSIONS = 16
+const MAX_PASSED_BY_ENTRIES_PER_SESSION = 256
+
+type PassedByRecord = {
+  plugin: string
+  event: string
+  by: string
+  count: number
+}
+
+const hooksPassedBySessions = new Map<string, Map<string, PassedByRecord>>()
+const hooksPassedByLines: Array<{
+  plugin: string
+  event: string
+  by: string
+  line: string
+}> = []
+
+export function formatHookPassedByLine(
+  event: string,
+  byPlugin: string,
+): string {
+  return `its ${event} hook was skipped. "${byPlugin}" runs first and sent the event on past it.`
+}
+
+function getPassedBySessionMap(sessionId: string): Map<string, PassedByRecord> {
+  const existing = hooksPassedBySessions.get(sessionId)
+  if (existing !== undefined) {
+    hooksPassedBySessions.delete(sessionId)
+    hooksPassedBySessions.set(sessionId, existing)
+    return existing
+  }
+  const created = new Map<string, PassedByRecord>()
+  if (hooksPassedBySessions.size >= MAX_PASSED_BY_SESSIONS) {
+    const oldest = hooksPassedBySessions.keys().next()
+    if (!oldest.done) {
+      hooksPassedBySessions.delete(oldest.value)
+    }
+  }
+  hooksPassedBySessions.set(sessionId, created)
+  return created
+}
+
+export function recordHooksPassedBy(opts: {
+  sessionId?: string
+  event: string
+  by: string
+  plugins: readonly string[]
+  count?: number
+}): string[] {
+  if (opts.event === 'tool.list' || opts.plugins.length === 0) return []
+  const sessionKey = opts.sessionId ?? ''
+  const sessionMap = getPassedBySessionMap(sessionKey)
+  const count = opts.count ?? 1
+  const newlyEmitted: string[] = []
+  for (const plugin of opts.plugins) {
+    if (plugin === opts.by) continue
+    const key = `${opts.event} ${plugin} ${opts.by}`
+    const prev = sessionMap.get(key)
+    const canTrack =
+      prev !== undefined || sessionMap.size < MAX_PASSED_BY_ENTRIES_PER_SESSION
+    if (!canTrack) continue
+    sessionMap.set(key, {
+      plugin,
+      event: opts.event,
+      by: opts.by,
+      count: (prev?.count ?? 0) + count,
+    })
+    if (prev !== undefined) continue
+    const line = formatHookPassedByLine(opts.event, opts.by)
+    newlyEmitted.push(line)
+    hooksPassedByLines.push({ plugin, event: opts.event, by: opts.by, line })
+    try {
+      const { recordPluginUiLog } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./pluginUiLog.js') as typeof import('./pluginUiLog.js')
+      recordPluginUiLog(plugin, line)
+    } catch {
+      // ignore if ui log unavailable
+    }
+  }
+  return newlyEmitted
+}
+
+export function getHooksPassedByLines(): ReadonlyArray<{
+  plugin: string
+  event: string
+  by: string
+  line: string
+}> {
+  return hooksPassedByLines
+}
+
+export function resetHooksPassedByForTests(): void {
+  hooksPassedBySessions.clear()
+  hooksPassedByLines.length = 0
+}
+
 export async function runFunctionHookChain(
   event: string,
   payload: Record<string, unknown>,
@@ -1620,6 +1718,14 @@ export async function runFunctionHookChain(
       logForDebugging(
         `${step.mod.name}: ${event} ${bypass} (tier ${stepTier}); beneath runs`,
       )
+      const byPlugin = floors.at(-1)?.plugin
+      if (byPlugin !== undefined) {
+        recordHooksPassedBy({
+          event,
+          by: byPlugin,
+          plugins: [step.mod.name],
+        })
+      }
       runNode.entry = Object.freeze({
         index,
         plugin: step.mod.name,
@@ -1904,6 +2010,16 @@ export async function runFunctionHookChain(
           (!isEventRecord(returned) || returned.deny === undefined)
         ) {
           throw new Error(`${step.mod.name}: ${AGENT_SPAWN_HOOK_REFUSE}`)
+        }
+        if (!hostHandler && !nextCalled && index + 1 < matched.length) {
+          recordHooksPassedBy({
+            event,
+            by: step.mod.name,
+            plugins: matched
+              .slice(index + 1)
+              .filter(m => !hostHandlers.has(m.hook))
+              .map(m => m.mod.name),
+          })
         }
         const outcome =
           hasDownstreamResult && Object.is(returned, lastDownstreamResult)
@@ -2432,6 +2548,16 @@ export async function runFunctionHookHop(
           if (problem !== undefined) {
             throw new Error(`${step.name}: returned ${problem}`)
           }
+        }
+        if (!step.isCore && !nextCalled && index + 1 < handlers.length) {
+          recordHooksPassedBy({
+            event,
+            by: step.name,
+            plugins: handlers
+              .slice(index + 1)
+              .filter(m => !m.isCore)
+              .map(m => m.name),
+          })
         }
         const outcome =
           hasDownstreamResult && Object.is(returned, lastDownstreamResult)
@@ -3680,9 +3806,6 @@ export async function engineMergeRead(): Promise<
   HookedMergeEntry[] | undefined
 > {
   const hookOrigin = buildOpHookOrigin(undefined)
-  if (!hasMatchingFunctionHookForOp('settings.read', {}, hookOrigin)) {
-    return undefined
-  }
   const layers: Array<{ source: string; settings: Record<string, unknown> }> =
     []
   let base: Record<string, unknown> = hookedMergeState.computed ?? {}
@@ -3703,6 +3826,9 @@ export async function engineMergeRead(): Promise<
     }
   } catch {
     // Keep empty layers / computed fallback in isolated test environments.
+  }
+  if (!hasMatchingFunctionHookForOp('settings.read', { layers }, hookOrigin)) {
+    return undefined
   }
 
   let answered: Record<string, unknown>
@@ -4109,17 +4235,27 @@ function engineSettings(
 ): Record<string, unknown> {
   return {
     read: (input?: unknown) => {
-      if (input !== undefined && !isEventRecord(input)) {
+      const source = isEventRecord(input) ? input.source : undefined
+      const key = isEventRecord(input) ? input.key : undefined
+      if (
+        (input !== undefined && !isEventRecord(input)) ||
+        (key !== undefined && typeof key !== 'string')
+      ) {
         return Promise.reject(
-          new Error(`${plugin}: $.settings.read takes { source } or nothing`),
+          new Error(
+            `${plugin}: $.settings.read takes { source }, { key } or nothing`,
+          ),
         )
       }
-      const source = isEventRecord(input) ? input.source : undefined
       return hostOp(
         environmentId,
         'settings.read',
         source !== undefined ? [{ source }] : [{}],
-      )
+      ).then(res => {
+        if (key === undefined) return res
+        if (!isEventRecord(res)) return undefined
+        return Object.entries(res).find(([k]) => k === key)?.[1]
+      })
     },
   }
 }
@@ -6497,6 +6633,13 @@ async function handleHostOpInner(
     if (Array.isArray(attachments) && attachments.length > 0) {
       hostCheck(op, 'takes text alone; attachments cannot be submitted', plugin)
     }
+    const inputRefused = checkPluginInputRefusal(
+      { plugin: plugin ?? '' },
+      '$.prompt.submit',
+    )
+    if (inputRefused !== undefined) {
+      return { drop: inputRefused }
+    }
     return withSessionStartDedup(
       'prompt.submit',
       rec ?? {},
@@ -8526,12 +8669,87 @@ export async function runWorkflowAgentSpawn(
   return { ok: true, value: launched }
 }
 
+// #969 (official `qbs` / `Xae` / `Vgt` / `wO` / `mus`): background-ceiling and
+// Stop/inputClosed refusal helpers for plugin subagent spawns & inputs.
+let backgroundCeilingProvider: (() => string | undefined) | undefined
+let stoppedSessionForPluginInput:
+  | { sessionKey: object; stoppedAt: number }
+  | undefined
+let spawnedTurnTakenCallback: (() => void) | undefined
+const DEFAULT_PLUGIN_INPUT_SESSION_KEY = {}
+
+export function setBackgroundCeilingProvider(
+  provider: (() => string | undefined) | undefined,
+): void {
+  backgroundCeilingProvider = provider
+}
+
+export function markSessionStoppedForPluginInput(
+  sessionKey: object = DEFAULT_PLUGIN_INPUT_SESSION_KEY,
+  stoppedAt = Date.now(),
+): void {
+  stoppedSessionForPluginInput = { sessionKey, stoppedAt }
+}
+
+export function clearSessionStoppedForPluginInput(): void {
+  stoppedSessionForPluginInput = undefined
+}
+
+export function setSpawnedTurnTakenCallback(
+  cb: (() => void) | undefined,
+): void {
+  spawnedTurnTakenCallback = cb
+}
+
+export function notePluginSpawnedTurnTaken(): void {
+  spawnedTurnTakenCallback?.()
+}
+
+export function getPluginInputRefusalReason(
+  sessionKey: object = DEFAULT_PLUGIN_INPUT_SESSION_KEY,
+): string | undefined {
+  if (
+    stoppedSessionForPluginInput !== undefined &&
+    stoppedSessionForPluginInput.sessionKey === sessionKey
+  ) {
+    return 'the session was stopped and nobody has sent input since'
+  }
+  return backgroundCeilingProvider?.()
+}
+
+export function checkPluginInputRefusal(
+  opts: { plugin: string; vouchedPressAt?: number; sessionKey?: object },
+  opName: string,
+): string | undefined {
+  if (
+    stoppedSessionForPluginInput !== undefined &&
+    opts.vouchedPressAt !== undefined &&
+    opts.vouchedPressAt >= stoppedSessionForPluginInput.stoppedAt
+  ) {
+    clearSessionStoppedForPluginInput()
+  }
+  const reason = getPluginInputRefusalReason(opts.sessionKey)
+  if (reason !== undefined) {
+    logForDebugging(`${opName} (${opts.plugin}): refused: ${reason}`)
+  }
+  return reason
+}
+
 async function runAgentSpawn(
   input: Record<string, unknown>,
   plugin?: string,
 ): Promise<unknown> {
   if (input.tool !== AGENT_TOOL_NAME && input.workflow === undefined) {
     hostCheck('agent.spawn', "takes the Agent tool's input", plugin)
+  }
+  if (input.servesModel !== true) {
+    const refused = checkPluginInputRefusal(
+      { plugin: plugin ?? '' },
+      '$.agent.spawn',
+    )
+    if (refused !== undefined) {
+      return agentSpawnHookRefuse({ deny: refused }, input)
+    }
   }
   const hookOrigin = buildOpHookOrigin(plugin)
   if (!hasMatchingFunctionHookForOp('agent.spawn', input, hookOrigin)) {
@@ -8911,6 +9129,10 @@ async function runPluginCommand(
     )
   }
   const slash = args === '' ? `/${command}` : `/${command} ${args}`
+  const refused = checkPluginInputRefusal({ plugin: prefix }, '$.command.run')
+  if (refused !== undefined) {
+    return Promise.reject(new Error(`${prefix}: $.command.run: ${refused}`))
+  }
   if (commandRunHandler) return commandRunHandler(slash)
   // densable W0n / Loe / Noe / Nv later.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -10626,10 +10848,11 @@ function rememberUiRenderDrawing(
     ...heldPressStore.holdersOf(site),
     ...grouped.keys(),
   ])
+  const drawnFingerprint = computeDrawingFingerprint(tree)
   for (const name of plugins) {
     const { released } = heldPressStore.holdDrawing(
       name,
-      site,
+      { ...site, drawn: drawnFingerprint },
       grouped.get(name) ?? [],
     )
     if (released.length > 0) {
@@ -17282,7 +17505,48 @@ const HELD_PRESS_ID_BOUND = 1_073_741_824
  * densable `IP` / `T3` — DualInk held-press metadata. Lookup is by hosted id
  * (gold `e.get(h)`) or original handle. DualInk press does not invent baseButton.
  */
-function createHeldPressStore(): {
+export function computeDrawingFingerprint(tree: unknown): string {
+  try {
+    return JSON.stringify(tree, (key, val) => {
+      if (key === 'handle' || key === 'press') return undefined
+      return val
+    })
+  } catch {
+    return ''
+  }
+}
+
+function inheritUnchangedHandles(opts: {
+  previous: Map<unknown, number>
+  handles: unknown[]
+  hostedOfHandle: (
+    plugin: string,
+    except: string,
+    handle: unknown,
+  ) => number | undefined
+  plugin: string
+  except: string
+}): Map<unknown, number> {
+  const { previous, handles, hostedOfHandle, plugin, except } = opts
+  const nextSet = new Set(handles)
+  const inherited = new Map(previous)
+  let idx = 0
+  for (const [prevHandle, hostedId] of previous) {
+    const nextHandle = handles[idx++]
+    if (
+      nextHandle !== undefined &&
+      !previous.has(nextHandle) &&
+      !nextSet.has(prevHandle) &&
+      hostedOfHandle(plugin, except, prevHandle) === undefined &&
+      hostedOfHandle(plugin, except, nextHandle) === undefined
+    ) {
+      inherited.set(nextHandle, hostedId)
+    }
+  }
+  return inherited
+}
+
+export function createHeldPressStore(): {
   heldPress: (
     plugin: string,
     handle: unknown,
@@ -17290,7 +17554,7 @@ function createHeldPressStore(): {
   ) => HeldPressRecord | undefined
   holdDrawing: (
     plugin: string,
-    site: HeldPressSite,
+    site: HeldPressSite & { drawn?: string },
     buttons: Array<{
       tag: string
       handle: unknown
@@ -17317,6 +17581,7 @@ function createHeldPressStore(): {
 } {
   const byHosted = new Map<number, HeldPressRecord>()
   const byDrawing = new Map<string, Map<unknown, number>>()
+  const byDrawn = new Map<string, string | undefined>()
   let next = Math.floor(Math.random() * HELD_PRESS_ID_BOUND)
   const drawingKey = (plugin: string, site: HeldPressSite): string =>
     `${plugin}\0${site.component}\0${site.requestId}\0${site.surface}`
@@ -17356,30 +17621,49 @@ function createHeldPressStore(): {
       }
       return undefined
     },
-    holdDrawing(plugin, site, buttons) {
+    holdDrawing(plugin, siteWithDrawn, buttons) {
+      const { drawn, ...site } = siteWithDrawn
       const key = drawingKey(plugin, site)
       const previous = byDrawing.get(key) ?? new Map<unknown, number>()
       const hosted = new Map<unknown, number>()
+      const prevMap =
+        drawn !== undefined &&
+        drawn === byDrawn.get(key) &&
+        buttons.length === previous.size
+          ? inheritUnchangedHandles({
+              previous,
+              handles: buttons.map(b => b.handle),
+              hostedOfHandle,
+              plugin,
+              except: key,
+            })
+          : previous
       for (const button of buttons) {
         const id =
-          previous.get(button.handle) ??
+          prevMap.get(button.handle) ??
           hostedOfHandle(plugin, key, button.handle) ??
           ++next
         hosted.set(button.handle, id)
         byHosted.set(id, { ...button, plugin, ...site })
       }
       const released: unknown[] = []
+      const hostedValues = new Set(hosted.values())
       for (const [handle, id] of previous) {
         if (
           !hosted.has(handle) &&
           hostedOfHandle(plugin, key, handle) === undefined
         ) {
-          byHosted.delete(id)
+          if (!hostedValues.has(id)) byHosted.delete(id)
           released.push(handle)
         }
       }
-      if (hosted.size === 0) byDrawing.delete(key)
-      else byDrawing.set(key, hosted)
+      if (hosted.size === 0) {
+        byDrawing.delete(key)
+        byDrawn.delete(key)
+      } else {
+        byDrawing.set(key, hosted)
+        byDrawn.set(key, drawn)
+      }
       return { hosted, released }
     },
     holdersOf(site) {
@@ -20734,7 +21018,10 @@ class ScanNestingRefusal extends Error {
   }
 }
 
-export function scanFunctionHookSource(source: string): {
+export function scanFunctionHookSource(
+  source: string,
+  filePath?: string,
+): {
   ok: boolean
   patterns: string[]
   reason?: string
@@ -20856,20 +21143,22 @@ export function scanFunctionHookSource(source: string): {
     }
   } catch (err) {
     if (err instanceof ScanNestingRefusal) {
+      const baseMsg =
+        err.line !== undefined
+          ? `line ${err.line}: ${err.message}`
+          : err.message
       return {
         ok: false,
         patterns: [],
-        reason:
-          err.line !== undefined
-            ? `line ${err.line}: ${err.message}`
-            : err.message,
+        reason: filePath !== undefined ? `${filePath}: ${baseMsg}` : baseMsg,
       }
     }
     if (err instanceof RangeError) {
+      const baseMsg = `code nested too deep to scan (the parser stopped: ${err.message})`
       return {
         ok: false,
         patterns: [],
-        reason: `code nested too deep to scan (the parser stopped: ${err.message})`,
+        reason: filePath !== undefined ? `${filePath}: ${baseMsg}` : baseMsg,
       }
     }
     const re = /\bon\(\s*(['"`])([^'"`]+)\1/g
@@ -21024,8 +21313,14 @@ async function recordRegisterPatterns(
     } catch {
       return null
     }
-    const scanned = scanFunctionHookSource(source)
-    if (!scanned.ok) return null
+    const scanned = scanFunctionHookSource(source, modulePath)
+    if (!scanned.ok) {
+      logForDebugging(
+        `Failed to scan function hooks module ${modulePath}: ${scanned.reason ?? 'scan refused'}`,
+        { level: 'warn' },
+      )
+      return null
+    }
     try {
       loaded = await loadRegisterNamespace(plugin, modulePath)
     } catch {

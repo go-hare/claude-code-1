@@ -8,6 +8,7 @@ import {
   join,
   sep as pathSep,
   relative,
+  resolve,
 } from 'path'
 import {
   getAdditionalDirectoriesForClaudeMd,
@@ -555,6 +556,8 @@ export function createSkillCommand({
 async function loadSkillsFromSkillsDir(
   basePath: string,
   source: SettingSource,
+  loadedFrom: 'skills' | 'syncedSkills' = 'skills',
+  hostCatalogSkills?: ReadonlySet<string>,
 ): Promise<SkillWithPath[]> {
   const fs = getFsImplementation()
 
@@ -572,6 +575,13 @@ async function loadSkillsFromSkillsDir(
         // Only support directory format: skill-name/SKILL.md
         if (!entry.isDirectory() && !entry.isSymbolicLink()) {
           // Single .md files are NOT supported in /skills/ directory
+          return null
+        }
+
+        if (
+          hostCatalogSkills !== undefined &&
+          !hostCatalogSkills.has(entry.name)
+        ) {
           return null
         }
 
@@ -611,23 +621,28 @@ async function loadSkillsFromSkillsDir(
         )
         const paths = parseSkillPaths(frontmatter)
 
+        const skill = createSkillCommand({
+          ...parsed,
+          skillName,
+          markdownContent,
+          // densable disk load: contentHash:Bun.hash(p).toString(36) on full file
+          contentHash: Bun.hash(content).toString(36),
+          source,
+          baseDir: skillDirPath,
+          loadedFrom,
+          paths,
+          skillFile: buildSkillFile(
+            frontmatterAsWritten,
+            skillFilePath,
+            asWrittenProblem,
+          ),
+        })
+        if (hostCatalogSkills !== undefined && skill.type === 'prompt') {
+          ;(skill as Command & { fromHostCatalog?: boolean }).fromHostCatalog =
+            true
+        }
         return {
-          skill: createSkillCommand({
-            ...parsed,
-            skillName,
-            markdownContent,
-            // densable disk load: contentHash:Bun.hash(p).toString(36) on full file
-            contentHash: Bun.hash(content).toString(36),
-            source,
-            baseDir: skillDirPath,
-            loadedFrom: 'skills',
-            paths,
-            skillFile: buildSkillFile(
-              frontmatterAsWritten,
-              skillFilePath,
-              asWrittenProblem,
-            ),
-          }),
+          skill,
           filePath: skillFilePath,
         }
       } catch (error) {
@@ -843,9 +858,15 @@ export const getSkillDirCommands = memoize(
 
     // Load from /skills/ directories, additional dirs, and legacy /commands/ in parallel
     // (all independent — different directories, no shared state)
+    const hostCatalog =
+      isSettingSourceEnabled('userSettings') && !skillsLocked
+        ? parseHostSkillCatalog()
+        : null
+
     const [
       managedSkills,
       userSkills,
+      hostCatalogSkills,
       projectSkillsNested,
       additionalSkillsNested,
       legacyCommands,
@@ -864,6 +885,9 @@ export const getSkillDirCommands = memoize(
         : loadSkillsFromSkillsDir(managedSkillsDir, 'policySettings'),
       isSettingSourceEnabled('userSettings') && !skillsLocked
         ? loadSkillsFromSkillsDir(userSkillsDir, 'userSettings')
+        : Promise.resolve([]),
+      hostCatalog !== null
+        ? loadHostCatalogSkills(hostCatalog)
         : Promise.resolve([]),
       projectSettingsEnabled
         ? Promise.all(
@@ -941,6 +965,24 @@ export const getSkillDirCommands = memoize(
       logForDebugging(`Deduplicated ${duplicatesRemoved} skills (same file)`)
     }
 
+    if (hostCatalogSkills.length > 0) {
+      const hostFileIds = await Promise.all(
+        hostCatalogSkills.map(({ filePath }) => getFileIdentity(filePath)),
+      )
+      for (let i = 0; i < hostCatalogSkills.length; i++) {
+        const entry = hostCatalogSkills[i]
+        if (!entry) continue
+        const fileId = hostFileIds[i]
+        if (fileId && seenFileIds.has(fileId)) {
+          logForDebugging(
+            `Skipping host catalog skill '${entry.skill.name}': another skills folder links to the same file`,
+          )
+          continue
+        }
+        deduplicatedSkills.push(entry.skill)
+      }
+    }
+
     // Separate conditional skills (with paths frontmatter) from unconditional ones
     const unconditionalSkills: Command[] = []
     const newConditionalSkills: Command[] = []
@@ -979,6 +1021,158 @@ export const getSkillDirCommands = memoize(
     return unconditionalSkills
   },
 )
+
+export const HOST_SKILL_CATALOG_DIR = '/mnt/skills/public'
+const HOST_SKILL_CATALOG_MAX = 64
+const HOST_SKILL_FOLDER_RE = /^[A-Za-z0-9._-]+$/
+
+export type HostSkillCatalog = {
+  dir: string
+  skills: Set<string>
+}
+
+/**
+ * SEA `$Ht` — parse `CLAUDE_CODE_HOST_SKILL_CATALOG` JSON `{"skills": [...]}`.
+ */
+export function parseHostSkillCatalog(
+  raw: string | undefined = process.env.CLAUDE_CODE_HOST_SKILL_CATALOG,
+): HostSkillCatalog | null {
+  if (raw === undefined) return null
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Array.isArray(parsed) ||
+      !Array.isArray((parsed as { skills?: unknown }).skills)
+    ) {
+      logForDebugging(
+        'Ignoring CLAUDE_CODE_HOST_SKILL_CATALOG: expected {"skills": 1 to 64 folder names of ASCII letters, digits, ".", "_" or "-", other than "." and ".."}',
+        { level: 'warn' },
+      )
+      return null
+    }
+    const skills = (parsed as { skills: unknown[] }).skills
+    if (skills.length < 1 || skills.length > HOST_SKILL_CATALOG_MAX) {
+      logForDebugging(
+        'Ignoring CLAUDE_CODE_HOST_SKILL_CATALOG: expected {"skills": 1 to 64 folder names of ASCII letters, digits, ".", "_" or "-", other than "." and ".."}',
+        { level: 'warn' },
+      )
+      return null
+    }
+    const valid: string[] = []
+    for (const s of skills) {
+      if (
+        typeof s !== 'string' ||
+        s.length > 255 ||
+        s === '.' ||
+        s === '..' ||
+        !HOST_SKILL_FOLDER_RE.test(s)
+      ) {
+        logForDebugging(
+          'Ignoring CLAUDE_CODE_HOST_SKILL_CATALOG: expected {"skills": 1 to 64 folder names of ASCII letters, digits, ".", "_" or "-", other than "." and ".."}',
+          { level: 'warn' },
+        )
+        return null
+      }
+      valid.push(s)
+    }
+    return { dir: HOST_SKILL_CATALOG_DIR, skills: new Set(valid) }
+  } catch {
+    logForDebugging(
+      'Ignoring CLAUDE_CODE_HOST_SKILL_CATALOG: expected {"skills": 1 to 64 folder names of ASCII letters, digits, ".", "_" or "-", other than "." and ".."}',
+      { level: 'warn' },
+    )
+    return null
+  }
+}
+
+/**
+ * SEA `kus` — load Cowork / claude.ai Directory plugin skills named in host catalog.
+ */
+export async function loadHostCatalogSkills(
+  catalog: HostSkillCatalog,
+): Promise<SkillWithPath[]> {
+  return loadSkillsFromSkillsDir(
+    catalog.dir,
+    'userSettings',
+    'syncedSkills',
+    catalog.skills,
+  )
+}
+
+/**
+ * SEA `tNe` / `p5r` — return the folder prefix for a skill outside `cwd` (e.g. `--add-dir`),
+ * or `null` for skills directly under `cwd` or non-directory skills.
+ */
+export function getAddDirSkillPrefix(
+  cmd: Pick<Command, 'type'> & { skillRoot?: string },
+  cwd: string,
+): string | null {
+  if (cmd.type !== 'prompt' || !cmd.skillRoot) return null
+  const marker = `${pathSep}.claude${pathSep}`
+  const idx = cmd.skillRoot.lastIndexOf(marker)
+  if (idx === -1) return null
+  const baseDir = cmd.skillRoot.slice(0, idx)
+  const rel = relative(cwd, baseDir)
+  if (rel === '') return null
+  if (rel.startsWith('..') || isAbsolute(rel)) {
+    return basename(baseDir)
+  }
+  return rel.split(pathSep).join('/')
+}
+
+/**
+ * SEA `h5r` / `m5r` — when a skill in `--add-dir` (or nested dir) collides with an existing
+ * command/skill name, offer it as `<folder>:<name>` instead of dropping or shadowing it.
+ */
+export function disambiguateAddDirSkills(
+  commands: Command[],
+  cwd: string = getOriginalCwd(),
+): Command[] {
+  const nameCounts = new Map<string, number>()
+  for (const cmd of commands) {
+    nameCounts.set(cmd.name, (nameCounts.get(cmd.name) ?? 0) + 1)
+    for (const alias of cmd.aliases ?? []) {
+      nameCounts.set(alias, (nameCounts.get(alias) ?? 0) + 1)
+    }
+  }
+
+  const seenNames = new Set<string>()
+  const out: Command[] = []
+  for (const cmd of commands) {
+    const prefix = getAddDirSkillPrefix(cmd, cwd)
+    const collides =
+      seenNames.has(cmd.name) || (nameCounts.get(cmd.name) ?? 0) > 1
+    if (
+      cmd.type === 'prompt' &&
+      prefix !== null &&
+      collides &&
+      cmd.loadedFrom !== 'syncedSkills'
+    ) {
+      const qualifiedName = `${prefix}:${cmd.name}`
+      if (!seenNames.has(qualifiedName)) {
+        seenNames.add(qualifiedName)
+        const isShadowed = seenNames.has(cmd.name)
+        const hint = isShadowed
+          ? `scoped to ${prefix}/ — use this instead of the unscoped "${cmd.name}" skill when the files being changed are under ${prefix}/`
+          : `from ${prefix}/.claude/skills — applies when working on files under ${prefix}/`
+        out.push({
+          ...cmd,
+          name: qualifiedName,
+          unqualifiedName: cmd.name,
+          aliases: undefined,
+          userFacingName: () => qualifiedName,
+          description: `${cmd.description} (${hint})`,
+        } as Command)
+        continue
+      }
+    }
+    seenNames.add(cmd.name)
+    out.push(cmd)
+  }
+  return out
+}
 
 export function clearSkillCaches() {
   getSkillDirCommands.cache?.clear?.()
@@ -1302,6 +1496,81 @@ export function clearDynamicSkills(): void {
   dynamicSkills.clear()
   conditionalSkills.clear()
   activatedConditionalSkillNames.clear()
+}
+
+const MAX_CHANGED_SKILL_DISCOVERY_DIRS = 100
+const VERIFY_OR_REVIEW_SKILLS = new Set(['verify', 'code-review'])
+
+export function isVerifyOrReviewSkillName(name: string): boolean {
+  return VERIFY_OR_REVIEW_SKILLS.has(name)
+}
+
+/**
+ * Official `O(cwd)` @298208500 (#1145):
+ * Collect changed/untracked file paths from `git status --porcelain -z`
+ * (capped at 100 unique parent directories) so `/verify` and `/code-review`
+ * discover nested package skills even when files were modified via shell.
+ */
+export async function getChangedFilesForSkillDiscovery(
+  cwd: string,
+): Promise<string[]> {
+  if (isBareMode()) return []
+  const { isRestrictedToPluginOnly } = await import(
+    '../utils/settings/pluginOnlyPolicy.js'
+  )
+  if (isRestrictedToPluginOnly('skills')) return []
+  const { isSettingSourceEnabled } = await import(
+    '../utils/settings/constants.js'
+  )
+  if (!isSettingSourceEnabled('projectSettings')) return []
+
+  const { findGitRoot, gitExe } = await import('../utils/git.js')
+  const gitRoot = findGitRoot(cwd)
+  if (!gitRoot) return []
+
+  const { execFileNoThrowWithCwd } = await import('../utils/execFileNoThrow.js')
+  const res = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['status', '--porcelain', '-z', '--untracked-files=normal'],
+    { cwd: gitRoot, stdin: 'ignore' },
+  )
+  if (res.code !== 0 || !res.stdout) return []
+
+  const entries = res.stdout.split('\0')
+  const byDir = new Map<string, string>()
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i] ?? ''
+    if (entry.length < 4) continue
+    const paths = [entry.slice(3)]
+    if (/[RC]/.test(entry.slice(0, 2))) {
+      i++
+      paths.push(entries[i] ?? '')
+    }
+    for (const rel of paths) {
+      if (!rel) continue
+      const full = resolve(gitRoot, rel)
+      if (full === gitRoot) continue
+      if (byDir.size >= MAX_CHANGED_SKILL_DISCOVERY_DIRS) break
+      byDir.set(dirname(full), full)
+    }
+  }
+  return [...byDir.values()]
+}
+
+/**
+ * Official `m0n` discovery step (#1145): discover and load nested
+ * `.claude/skills` directories for shell-modified files.
+ */
+export async function discoverNestedSkillsForChangedFiles(
+  cwd: string,
+): Promise<string[]> {
+  const changed = await getChangedFilesForSkillDiscovery(cwd)
+  if (changed.length === 0) return []
+  const newDirs = await discoverSkillDirsForPaths(changed, cwd)
+  if (newDirs.length > 0) {
+    await addSkillDirectories(newDirs)
+  }
+  return newDirs
 }
 
 // Expose createSkillCommand + parseSkillFrontmatterFields to MCP skill

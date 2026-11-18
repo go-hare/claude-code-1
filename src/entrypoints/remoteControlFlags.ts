@@ -182,6 +182,11 @@ export async function enterRemoteControl(
   storage?: unknown,
   extra?: unknown,
 ): Promise<void> {
+  if (args.some(a => a === '--help' || a === '-h')) {
+    const { printRemoteControlHelp } = await import('../bridge/bridgeMain.js')
+    await printRemoteControlHelp()
+    return
+  }
   const local = await refuseRemoteControlLocally()
   const ineligible = await refuseRemoteControlIneligible(local)
   await startRemoteControl(ineligible, args, storage, extra)

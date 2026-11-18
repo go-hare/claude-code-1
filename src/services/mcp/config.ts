@@ -846,6 +846,19 @@ export function isMcpServerAllowedByPolicy(
     return false
   }
 
+  // 2.1.305 #1056 (SEA ek): enterprise/managed-mcp.json entries that do NOT
+  // interpolate `${VAR}` into command/args/url/headers (using `${VAR}` only in
+  // `env` is fine) bypass allowedMcpServers.
+  const scopedConfig = config as ScopedMcpServerConfig | undefined
+  if (
+    scopedConfig?.scope !== undefined &&
+    (scopedConfig.scope === 'enterprise' || scopedConfig.scope === 'managed') &&
+    !scopedConfig.expandedFromEnv &&
+    !scopedConfig.pluginSource
+  ) {
+    return true
+  }
+
   const settings = getMcpAllowlistSettings()
   if (!settings.allowedMcpServers) {
     return true // No allowlist restrictions (undefined)
@@ -984,6 +997,42 @@ export function filterMcpServersByPolicy<T>(configs: Record<string, T>): {
     }
   }
   return { allowed, blocked }
+}
+
+const MCP_ENV_VAR_REF_RE = /\$\{[^}]+\}/
+
+/**
+ * 2.1.305 #1056 (SEA pUs): Returns true only when `command`, `args`, `url`,
+ * or `headers` contains a `${VAR}` reference — intentionally excludes `env`.
+ */
+export function hasEnvVarInCommandArgsUrlOrHeaders(
+  config: McpServerConfig,
+): boolean {
+  switch (config.type) {
+    case undefined:
+    case 'stdio': {
+      const stdioConfig = config as McpStdioServerConfig
+      if (MCP_ENV_VAR_REF_RE.test(stdioConfig.command)) return true
+      return stdioConfig.args.some(arg => MCP_ENV_VAR_REF_RE.test(arg))
+    }
+    case 'sse':
+    case 'http':
+    case 'ws': {
+      const remoteConfig = config as
+        | McpSSEServerConfig
+        | McpHTTPServerConfig
+        | McpWebSocketServerConfig
+      if (MCP_ENV_VAR_REF_RE.test(remoteConfig.url)) return true
+      if (remoteConfig.headers) {
+        return Object.values(remoteConfig.headers).some(v =>
+          MCP_ENV_VAR_REF_RE.test(v),
+        )
+      }
+      return false
+    }
+    default:
+      return false
+  }
 }
 
 /**
@@ -2044,7 +2093,8 @@ export function parseMcpConfig(params: {
       continue
     }
 
-    let configToCheck = parsed.data as McpServerConfig
+    const unexpandedConfig = parsed.data as McpServerConfig
+    let configToCheck = unexpandedConfig
 
     // densable eft carrier arm: scope==="dynamic" && isBridgeCarrierChild
     if (scope === 'dynamic' && carrierChild) {
@@ -2139,7 +2189,16 @@ export function parseMcpConfig(params: {
       })
     }
 
-    validatedServers[name] = configToCheck
+    if (
+      scope === 'enterprise' &&
+      hasEnvVarInCommandArgsUrlOrHeaders(unexpandedConfig)
+    ) {
+      validatedServers[name] = Object.assign({}, configToCheck, {
+        expandedFromEnv: true,
+      })
+    } else {
+      validatedServers[name] = configToCheck
+    }
   }
 
   return {

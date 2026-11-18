@@ -79,6 +79,7 @@ export type DOMElement = {
     width: number
     height: number
     top?: number
+    shifted?: boolean
     background?: Color
     clip?: {
       x1: number | undefined

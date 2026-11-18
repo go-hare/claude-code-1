@@ -29,6 +29,22 @@ export const PLUGIN_ORIGIN_INLINE = 'inline'
 /** densable `Su` — skills-directory plugin with no marketplace. */
 export const PLUGIN_ORIGIN_SKILLS_DIR = 'skills-dir'
 
+const CLAUDE_DESKTOP_ENTRYPOINTS = new Set([
+  'claude-desktop',
+  'claude-desktop-3p',
+  'local-agent',
+])
+
+/**
+ * Official 325 `Vd()` — true when running as a Claude Desktop / local-agent
+ * entrypoint that can mount plugins by path.
+ */
+export function isClaudeDesktopEntrypoint(
+  entrypoint: string | undefined = process.env.CLAUDE_CODE_ENTRYPOINT,
+): boolean {
+  return entrypoint !== undefined && CLAUDE_DESKTOP_ENTRYPOINTS.has(entrypoint)
+}
+
 export type SkillAllowedToolsPluginInfo = {
   /** densable Vu `e?.id` — ije passes pluginInfo.repository here. */
   id?: string
@@ -63,7 +79,11 @@ export function isPluginAllowedToolsTrusted(
     return false
   }
   if (origin === BUILTIN_MARKETPLACE_NAME) return true
-  if (origin === PLUGIN_ORIGIN_INLINE) return true
+  if (origin === PLUGIN_ORIGIN_INLINE) {
+    return !(
+      isClaudeDesktopEntrypoint() && shouldAllowManagedPermissionRulesOnly()
+    )
+  }
   if (origin === SYNCED_MARKETPLACE_NAME) {
     return pluginInfo?.officiallyAttested === true
   }

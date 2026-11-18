@@ -520,6 +520,7 @@ export function isQueuedNowHeldByDialog(
 
 export type SendQueuedNowOpts = {
   isTurnRunning?: () => boolean
+  isDispatchingForModel?: () => boolean
   isTurnActive?: () => boolean
   subscribeTurnGuard?: (onChange: () => void) => () => void
   interruptForSubmit?: () => boolean | undefined
@@ -567,6 +568,7 @@ export type QueuedNowLowLatencyHost = {
   turn: {
     guard: {
       readonly isRunning: boolean
+      readonly isDispatchingForModel?: boolean
       readonly isActive: boolean
       subscribe: (onChange: () => void) => () => void
     }
@@ -628,6 +630,7 @@ export type QueuedNowCAtBag = {
     guard: {
       readonly isActive: boolean
       readonly isRunning: boolean
+      readonly isDispatchingForModel?: boolean
       subscribe: (onChange: () => void) => () => void
     }
     readonly abortController: AbortController | null
@@ -834,7 +837,7 @@ export class QueuedNowCoordinator {
     this.#u(() => {
       if (this.#disposed) return
       const { messageQueue, turn } = this.#t
-      if (!turn.guard.isRunning) {
+      if (!turn.guard.isRunning && !turn.guard.isDispatchingForModel) {
         this.#s()
         return
       }
@@ -1434,6 +1437,9 @@ function testQueuedNowHost(): QueuedNowLowLatencyHost {
         get isRunning() {
           return processLowLatencyOpts?.isTurnRunning?.() ?? false
         },
+        get isDispatchingForModel() {
+          return processLowLatencyOpts?.isDispatchingForModel?.() ?? false
+        },
         get isActive() {
           return (
             processLowLatencyOpts?.isTurnActive?.() ??
@@ -1652,7 +1658,8 @@ export function trySendQueuedNowKey(
   const mode = opts.mode ?? 'prompt'
   const eligible =
     mode === 'prompt' &&
-    (opts.isTurnActive ?? opts.isTurnRunning)?.() === true &&
+    ((opts.isTurnActive ?? opts.isTurnRunning)?.() === true ||
+      opts.isDispatchingForModel?.() === true) &&
     hasMainThreadQueuedNowPrompt()
   const armed = opts.lowLatency
     ? opts.lowLatency.sendQueuedNow(undefined)

@@ -18,6 +18,7 @@ import {
 import {
   CAPABILITY_NAMES,
   envTerminalName,
+  isIterm2VersionAtLeast35,
   Jk,
   tD,
   type TerminalCapabilityStore,
@@ -124,6 +125,13 @@ export async function probeTerminalIdentity(
     }
     setXtversionName(name)
     log(`XTVERSION: terminal identified as "${name}"`)
+    if (!process.env.TMUX) {
+      capabilities.answer(
+        'itermImages',
+        isIterm2VersionAtLeast35(name),
+        `probe: XTVERSION ${name}`,
+      )
+    }
   } else {
     log('XTVERSION: no reply (terminal ignored query)')
   }

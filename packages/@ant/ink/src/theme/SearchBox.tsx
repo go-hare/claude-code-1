@@ -298,8 +298,9 @@ export function SearchBox({
   );
   const borderCols = hasBorder ? 2 : 0;
   const borderRows = hasBorder ? 1 : 0;
-  const prefixAndQuery = `${prefix} ${displayQuery}`;
-  const prefixOffset = prefix.length + 1;
+  const displayPrefix = isScreenReader && prefix === '⌕' ? (displayQuery ? 'Search:' : null) : prefix;
+  const prefixAndQuery = displayPrefix === null ? displayQuery : `${displayPrefix} ${displayQuery}`;
+  const prefixOffset = displayPrefix === null ? 0 : displayPrefix.length + 1;
   const layout = useMemo(
     () => layoutWrappedSearchText(prefixAndQuery, wrapColumns ?? 0),
     [prefixAndQuery, wrapColumns],
@@ -318,9 +319,13 @@ export function SearchBox({
   const showPaintedCursor = isTerminalFocused && !(nativeCursor && !mask && !fullRepaint && cursorChar === undefined);
   const content = (
     <Text dimColor={!isFocused}>
-      <Text dimColor={prefixDim} color={prefixColor}>
-        {prefix}
-      </Text>{' '}
+      {displayPrefix !== null ? (
+        <>
+          <Text dimColor={prefixDim} color={prefixColor}>
+            {displayPrefix}
+          </Text>{' '}
+        </>
+      ) : null}
       {isFocused ? (
         displayQuery ? (
           renderQuerySegments(displayQuery, highlights ?? [], dimRange, showPaintedCursor ? offset : -1, cursorChar)

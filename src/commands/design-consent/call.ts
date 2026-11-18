@@ -1,4 +1,6 @@
 import type { LocalCommandResult } from '../../types/command.js'
+import { logForDebugging } from '../../utils/debug.js'
+import { isEnvTruthy } from '../../utils/envUtils.js'
 import { errorMessage } from '../../utils/errors.js'
 import {
   deleteDesignConsent,
@@ -35,6 +37,17 @@ export async function callDesignConsent(
           'Design agent access granted for your Claude Design projects. Use /design revoke to undo.',
       }
     } catch (err) {
+      if (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)) {
+        logForDebugging(
+          `/design consent failed in a cloud session: ${errorMessage(err)}`,
+          { level: 'error' },
+        )
+        return {
+          type: 'text',
+          value:
+            "Couldn't record Design agent access for your Claude Design projects from this cloud session. Try again, or grant it at claude.ai/design/settings and then retry your Design request.",
+        }
+      }
       return {
         type: 'text',
         value: `Couldn't record Design agent access for your Claude Design projects — ${errorMessage(err)}. Try again, or run /design-login to authorize Claude Design for this account.`,
@@ -48,6 +61,17 @@ export async function callDesignConsent(
       value: 'Design agent access revoked for your Claude Design projects.',
     }
   } catch (err) {
+    if (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)) {
+      logForDebugging(
+        `/design revoke failed in a cloud session: ${errorMessage(err)}`,
+        { level: 'error' },
+      )
+      return {
+        type: 'text',
+        value:
+          "Couldn't revoke Design agent access for your Claude Design projects from this cloud session. Try again, or revoke it at claude.ai/design/settings.",
+      }
+    }
     return {
       type: 'text',
       value: `Couldn't revoke Design agent access for your Claude Design projects — ${errorMessage(err)}. Try again, or run /design-login to authorize Claude Design for this account.`,

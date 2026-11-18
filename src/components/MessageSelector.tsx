@@ -665,7 +665,10 @@ export function MessageSelector({
                                     ? `${path.basename(metadata.filesChanged![0])} `
                                     : `${numFilesChanged} files changed `}
                                   <DiffStatsText diffStats={metadata} />
+                                  {metadata.hasUncheckedFiles && ', other files not checked'}
                                 </>
+                              ) : metadata.hasUncheckedFiles ? (
+                                <>Code changes unknown</>
                               ) : (
                                 <>No code changes</>
                               )}

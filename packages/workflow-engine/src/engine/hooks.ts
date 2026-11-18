@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { createHash } from 'node:crypto'
 import { MAX_ITEMS_PER_CALL, MAX_TOTAL_AGENTS } from '../constants.js'
 import type {
   AgentProgressUpdate,
@@ -71,10 +73,57 @@ export function resolveWorkflowSubagentModel(
   return raw
 }
 
+function chainSlotKey(
+  prev: string,
+  op: string,
+  arg: number | 'fork' | string | string[],
+): string {
+  const h = createHash('sha256')
+    .update(prev)
+    .update('\0')
+    .update(op)
+    .update('\0')
+  if (typeof arg === 'number') {
+    h.update(`slot:${arg}`)
+  } else if (Array.isArray(arg)) {
+    h.update('join')
+    for (const k of arg) {
+      h.update('\0').update(k)
+    }
+  } else {
+    h.update(arg)
+  }
+  return h.digest('hex')
+}
+
 export function makeHooks(
   ctx: EngineContext,
   runSubWorkflow: SubWorkflowRunner,
 ): WorkflowHooks {
+  const slotStorage = new AsyncLocalStorage<{ prev: string }>()
+  const rootSlotState = { prev: '' }
+
+  const enterSlotScope = (op: 'parallel' | 'pipeline') => {
+    const parent = slotStorage.getStore() ?? rootSlotState
+    const basePrev = parent.prev
+    parent.prev = chainSlotKey(basePrev, op, 'fork')
+    const slotStates: Array<{ prev: string } | undefined> = []
+    return {
+      inSlot<R>(index: number, fn: () => Promise<R>): Promise<R> {
+        const state = { prev: chainSlotKey(basePrev, op, index) }
+        slotStates[index] = state
+        return slotStorage.run(state, fn)
+      },
+      join(): void {
+        parent.prev = chainSlotKey(
+          parent.prev,
+          op,
+          slotStates.map(s => s?.prev ?? ''),
+        )
+      },
+    }
+  }
+
   // All progress events auto-inject runId so the adapter can route them to the corresponding task (multiple concurrent workflows)
   const emit = (init: HookProgressInit): void => {
     ctx.ports.progressEmitter.emit({
@@ -118,8 +167,31 @@ export function makeHooks(
     const phase =
       (opts.phase as string | undefined) ?? ctx.currentPhase ?? undefined
 
-    // Journal hit -> return cached result directly
-    if (!ctx.journalInvalidated && ctx.journalIndex < ctx.journal.length) {
+    const activeSlot = slotStorage.getStore()
+    const slotKey = activeSlot
+      ? chainSlotKey(activeSlot.prev, 'agent', key)
+      : undefined
+    if (activeSlot && slotKey !== undefined) {
+      activeSlot.prev = slotKey
+      // Per-slot journal replay: look up by deterministic slotKey so parallel/pipeline
+      // completion order or partial failure never invalidates sibling slots.
+      const matchedEntry = ctx.journal.find(e => e.key === slotKey)
+      if (matchedEntry !== undefined) {
+        emit({
+          type: 'agent_done',
+          agentId,
+          label,
+          phase,
+          result: matchedEntry.result,
+          cached: true,
+        })
+        return resultToOutput(matchedEntry.result)
+      }
+    } else if (
+      !ctx.journalInvalidated &&
+      ctx.journalIndex < ctx.journal.length
+    ) {
+      // Journal hit -> return cached result directly
       const entry = ctx.journal[ctx.journalIndex]!
       if (entry.key === key) {
         ctx.journalIndex++
@@ -268,11 +340,17 @@ export function makeHooks(
       }
       emit({ type: 'agent_done', agentId, label, phase, result })
 
-      const entry: JournalEntry = { key, seq: agentId, result }
+      const entry: JournalEntry = {
+        key: slotKey ?? key,
+        seq: agentId,
+        result,
+      }
       // Key point: push order = completion order (not call order); read() already re-sorts by seq,
       // so during resume the call order aligns with the journal order and the key index stays stable.
       ctx.journal.push(entry)
-      ctx.journalIndex++
+      if (!activeSlot) {
+        ctx.journalIndex++
+      }
       await ctx.ports.journalStore.append(ctx.runId, entry)
       return resultToOutput(result)
     } finally {
@@ -286,19 +364,26 @@ export function makeHooks(
         `parallel exceeds the per-call items cap (${MAX_ITEMS_PER_CALL})`,
       )
     }
-    return Promise.all(
-      thunks.map(async (t, i) => {
-        try {
-          return await t()
-        } catch (e) {
-          // The "null on error" contract is unchanged, but it should log — otherwise the workflow author cannot locate why an agent failed
-          ctx.ports.logger.warn?.(
-            `parallel thunk #${i} failed: ${(e as Error).message}`,
-          )
-          return null
-        }
-      }),
-    )
+    const scope = enterSlotScope('parallel')
+    try {
+      return await Promise.all(
+        thunks.map((t, i) =>
+          scope.inSlot(i, async () => {
+            try {
+              return await t()
+            } catch (e) {
+              // The "null on error" contract is unchanged, but it should log — otherwise the workflow author cannot locate why an agent failed
+              ctx.ports.logger.warn?.(
+                `parallel thunk #${i} failed: ${(e as Error).message}`,
+              )
+              return null
+            }
+          }),
+        ),
+      )
+    } finally {
+      scope.join()
+    }
   }
 
   const pipeline: WorkflowHooks['pipeline'] = async <T, R>(
@@ -312,22 +397,29 @@ export function makeHooks(
         `pipeline exceeds the per-call items cap (${MAX_ITEMS_PER_CALL})`,
       )
     }
-    return Promise.all(
-      items.map(async (item, index): Promise<R | null> => {
-        try {
-          let prev: unknown = item
-          for (const stage of stages) {
-            prev = await stage(prev, item, index)
-          }
-          return prev as R
-        } catch (e) {
-          ctx.ports.logger.warn?.(
-            `pipeline item #${index} failed: ${(e as Error).message}`,
-          )
-          return null
-        }
-      }),
-    )
+    const scope = enterSlotScope('pipeline')
+    try {
+      return await Promise.all(
+        items.map((item, index) =>
+          scope.inSlot(index, async (): Promise<R | null> => {
+            try {
+              let prev: unknown = item
+              for (const stage of stages) {
+                prev = await stage(prev, item, index)
+              }
+              return prev as R
+            } catch (e) {
+              ctx.ports.logger.warn?.(
+                `pipeline item #${index} failed: ${(e as Error).message}`,
+              )
+              return null
+            }
+          }),
+        ),
+      )
+    } finally {
+      scope.join()
+    }
   }
 
   const phase: WorkflowHooks['phase'] = title => {

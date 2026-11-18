@@ -881,7 +881,17 @@ function APn(e: string): string | null {
           native?: (p: string) => string
         }
       ).native
-      const real = realNative ? realNative(e) : realpathSync(e)
+      let real: string
+      if (realNative) {
+        try {
+          real = realNative(e)
+        } catch {
+          // exFAT/FAT32 volumes can fail realpathSync.native; fall back to realpathSync
+          real = realpathSync(e)
+        }
+      } else {
+        real = realpathSync(e)
+      }
       return wPn(real)
     } catch (r) {
       const n =

@@ -1,3 +1,5 @@
+import { homedir } from 'os'
+import { basename, isAbsolute, sep } from 'path'
 import {
   APIConnectionError,
   APIConnectionTimeoutError,
@@ -10,6 +12,7 @@ import type {
 import {
   AFK_MODE_BETA_HEADER,
   CONTEXT_1M_BETA_HEADER,
+  CONTEXT_MANAGEMENT_BETA_HEADER,
 } from 'src/constants/betas.js'
 import type { SDKAssistantMessageError } from 'src/entrypoints/agentSdkTypes.js'
 import type {
@@ -39,6 +42,8 @@ import {
   PDF_TARGET_RAW_SIZE,
 } from '../../constants/apiLimits.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
+import { logForDebugging } from '../../utils/debug.js'
+import { sanitizeInvisibleText } from '../../utils/plugins/escapeSafeText.js'
 import { formatFileSize } from '../../utils/format.js'
 import {
   formatAccountOnHoldUseMessage,
@@ -81,6 +86,138 @@ export const GOOGLE_CLOUD_CREDENTIALS_EXPIRED_MESSAGE =
 export const GOOGLE_CLOUD_AUTHENTICATION_FAILED_MESSAGE =
   'Google Cloud authentication failed'
 
+// ---------------------------------------------------------------------------
+// #922: CLAUDE_BG_GATEWAY_WITHHELD (official HTr / bvn / jEs / WEs)
+// ---------------------------------------------------------------------------
+
+const BG_GATEWAY_WITHHELD_MAX_DIR_LEN = 1024
+const BG_GATEWAY_WITHHELD_DIR_RE = /^[\p{L}\p{M}\p{N}/\\._~+@,:=-]+$/u
+const BG_GATEWAY_WITHHELD_PREFIX =
+  "No LLM gateway: a gateway set in your shell isn't passed to a session opened from another folder."
+
+function contractHomePathForDisplay(p: string): string {
+  const home = homedir()
+  if (p === home) return '~'
+  if (p.startsWith(home + sep)) return '~' + p.slice(home.length)
+  return p
+}
+
+export function isBgGatewayWithheld(): boolean {
+  return (
+    process.env.CLAUDE_CODE_SESSION_KIND === 'bg' &&
+    Boolean(process.env.CLAUDE_BG_GATEWAY_WITHHELD) &&
+    !process.env.ANTHROPIC_BASE_URL
+  )
+}
+
+function getBgGatewayWithheldDir(): string | undefined {
+  const dir = process.env.CLAUDE_BG_GATEWAY_WITHHELD
+  return dir &&
+    dir.length <= BG_GATEWAY_WITHHELD_MAX_DIR_LEN &&
+    isAbsolute(dir) &&
+    BG_GATEWAY_WITHHELD_DIR_RE.test(dir)
+    ? contractHomePathForDisplay(dir)
+    : undefined
+}
+
+function formatBgRespawnCommand(): string {
+  const id = process.env.CLAUDE_JOB_DIR && basename(process.env.CLAUDE_JOB_DIR)
+  return id && /^[A-Za-z0-9_-]{1,64}$/.test(id)
+    ? `\`claude respawn ${id}\``
+    : '`claude respawn <id>` (the id is in the agents view)'
+}
+
+export function getBgGatewayWithheldMessage(): string {
+  const dir = getBgGatewayWithheldDir() ?? "this session's own folder"
+  return `${BG_GATEWAY_WITHHELD_PREFIX} To fix, run ${formatBgRespawnCommand()} from ${dir} in another terminal where your gateway is set, or set ANTHROPIC_BASE_URL and its API key or token in a settings file's env block.`
+}
+
+export function isBgGatewayWithheldMessage(message: string): boolean {
+  return message.startsWith(`${BG_GATEWAY_WITHHELD_PREFIX} To fix, run `)
+}
+
+export function getBgGatewayWithheldShortMessage(): string {
+  return `No LLM gateway: opened from another folder · respawn from ${getBgGatewayWithheldDir() ?? 'its own folder'}`
+}
+
+// ---------------------------------------------------------------------------
+// #1100: Safe service error detail extraction (official JL / vz / n9n / e5t)
+// ---------------------------------------------------------------------------
+
+// eslint-disable-next-line no-control-regex
+const ANSI_SEQ_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: strip ANSI escape sequences
+  /\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]|\x1b[\]PX^_][^\x1b\x07]*(?:\x07|\x1b\\)/g
+const INVISIBLE_CHARS =
+  '\\p{Cc}\\p{Cf}\\p{Cs}\\p{Co}\\p{Cn}\\u2028\\u2029\\p{Default_Ignorable_Code_Point}\\u2800'
+const NON_PLAIN_RE = new RegExp(`[^\\S ]|[${INVISIBLE_CHARS}]`, 'u')
+const LEADING_JOINER_RE = /(?<![^\s\p{P}])\p{M}+/gu
+
+function stripAnsiLimited(text: string): string {
+  let out = text
+  for (let i = 0; i < 4; i++) {
+    const next = out.replace(ANSI_SEQ_RE, '')
+    if (next === out) break
+    out = next
+  }
+  return out
+}
+
+export function isPlainSingleLineDetail(text: string, maxLen: number): boolean {
+  if (text.length > maxLen || NON_PLAIN_RE.test(text)) return false
+  const cleaned = sanitizeInvisibleText(
+    stripAnsiLimited(text.slice(0, maxLen)),
+    ' ',
+    { keepEmojiJoiners: true },
+  )
+    .replace(/ {2,}/g, ' ')
+    .trim()
+    .normalize('NFC')
+    .replace(/[`\uff40\u02cb\u1fef\u2035]/g, "'")
+    .replace(LEADING_JOINER_RE, '')
+  return cleaned === text.replaceAll('`', "'")
+}
+
+export function extractServiceErrorMessage(data: unknown): string | undefined {
+  if (!data || typeof data !== 'object') return undefined
+  if ('message' in data && typeof data.message === 'string') {
+    return data.message
+  }
+  if (
+    'error' in data &&
+    data.error !== null &&
+    typeof data.error === 'object' &&
+    'message' in data.error &&
+    typeof data.error.message === 'string'
+  ) {
+    return data.error.message
+  }
+  return undefined
+}
+
+export function sanitizeServiceErrorDetail(
+  text: string,
+  source: string,
+): string | undefined {
+  if (isPlainSingleLineDetail(text, 1024)) return text
+  logForDebugging(
+    `[error-detail] left the service's text (${source}) out of the error shown: it has ${text.length} UTF-16 units and is not one plain line of at most 1,024 units`,
+  )
+  logEvent('tengu_service_error_detail_not_plain', {
+    length: text.length,
+    source:
+      source as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  })
+  return undefined
+}
+
+export function extractSafeServiceErrorDetail(
+  data: unknown,
+): string | undefined {
+  const msg = extractServiceErrorMessage(data)
+  return msg ? sanitizeServiceErrorDetail(msg, 'error_message') : undefined
+}
+
 /**
  * densable Cre — permanent auth-failure prefixes that should not be long-retried
  * by compact / reactive paths (startsWith KKd/YKd/GKd/VKd or API Error).
@@ -122,11 +259,28 @@ export function isPromptTooLongMessage(msg: AssistantMessage): boolean {
  * Used by getAssistantMessageFromError so reactive compact can withhold + n8o
  * instead of surfacing a raw API Error 400 that the user retries with 「继续」.
  */
+const PROMPT_TOO_LONG_EXCLUSIONS = [
+  'policy_blocked',
+  'dlp_request_denied',
+  'string too long. expected a string with maximum length',
+  'expected maxlength',
+]
+
+const PROMPT_TOO_LONG_ERROR_STATUSES: ReadonlySet<number | undefined> = new Set(
+  [undefined, 400, 413, 422],
+)
+
+function isDirectPromptTooLongMessage(lower: string): boolean {
+  return (
+    lower.includes('prompt is too long') ||
+    lower.includes('input is too long for requested model')
+  )
+}
+
 export function isPromptTooLongErrorMessage(raw: string): boolean {
   const lower = raw.toLowerCase()
-  if (lower.includes('prompt is too long')) return true
-  // densable gzr: "input is too long for requested model"
-  if (lower.includes('input is too long for requested model')) return true
+  if (isDirectPromptTooLongMessage(lower)) return true
+  if (PROMPT_TOO_LONG_EXCLUSIONS.some(ex => lower.includes(ex))) return false
   // densable z$r: "input length and `max_tokens` exceed context limit"
   if (
     lower.includes('input length and') &&
@@ -1047,7 +1201,14 @@ function buildAssistantMessageFromError(
   // (often nested in JSON). Must normalize to PROMPT_TOO_LONG so query.ts
   // reactive compact (cup/n8o) can withhold and recover — otherwise the UI
   // shows raw API Error 400 and 「继续」only grows the context.
-  if (error instanceof Error && isPromptTooLongErrorMessage(error.message)) {
+  if (
+    error instanceof Error &&
+    (isDirectPromptTooLongMessage(error.message.toLowerCase()) ||
+      (PROMPT_TOO_LONG_ERROR_STATUSES.has(
+        error instanceof APIError ? error.status : undefined,
+      ) &&
+        isPromptTooLongErrorMessage(error.message)))
+  ) {
     // Content stays generic (UI matches on exact string). The raw error with
     // token counts goes into errorDetails — reactive compact's retry loop
     // parses the gap from there via getPromptTooLongTokenGap.
@@ -1362,6 +1523,13 @@ function buildAssistantMessageFromError(
       return createAssistantAPIErrorMessage({
         error: 'authentication_failed',
         content: CCR_AUTH_ERROR_MESSAGE,
+      })
+    }
+
+    if (isBgGatewayWithheld()) {
+      return createAssistantAPIErrorMessage({
+        error: 'invalid_request',
+        content: getBgGatewayWithheldMessage(),
       })
     }
 
@@ -1990,7 +2158,13 @@ export function findRejectedBetaHeaders(
       headerListMatch?.index === 0 &&
       headerListMatch[1]?.includes(`\`${header}\``) === true
     const exactByTag = error.message.includes(`beta_header:${header}`)
-    const exactMatch = exactByUnexpected || exactByTag
+    const exactByContextManagementExtra =
+      header === CONTEXT_MANAGEMENT_BETA_HEADER &&
+      error.message.includes(
+        'context_management: Extra inputs are not permitted',
+      )
+    const exactMatch =
+      exactByUnexpected || exactByTag || exactByContextManagementExtra
     const mentionedIn400 =
       error.status === 400 &&
       error.message.includes(header) &&

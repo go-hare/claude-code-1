@@ -23,6 +23,107 @@ import { quote } from './shellQuote.js'
 
 const SNAPSHOT_CREATION_TIMEOUT = 10000 // 10 seconds
 
+/** SEA `lHe` (@292220140) */
+export const SHELL_EXPORTS_DELIMITER = '--- claude-code-shell-exports ---'
+
+const SKIP_SHELL_EXPORTS = new Set([
+  'PWD',
+  'OLDPWD',
+  'SHLVL',
+  '_',
+  'GIT_EDITOR',
+  'CLAUDECODE',
+  'AWKPATH',
+  'AWKLIBPATH',
+])
+
+const FORBIDDEN_EXPORT_NAMES = new Set([
+  'IFS',
+  'PS4',
+  'PROMPT4',
+  'BASH_ENV',
+  'ENV',
+  'CDPATH',
+  'GLOBIGNORE',
+  'BASH_XTRACEFD',
+])
+
+function isForbiddenShellExportKey(name: string): boolean {
+  const lower = name.toLowerCase()
+  return (
+    FORBIDDEN_EXPORT_NAMES.has(name) ||
+    lower.startsWith('ld_') ||
+    lower.startsWith('dyld_') ||
+    lower.startsWith('bash_func_')
+  )
+}
+
+/** SEA `uls` (@292220264) */
+export const SHELL_EXPORTS_PROBE_SCRIPT = `
+      printf '\\n%s\\n' '${SHELL_EXPORTS_DELIMITER}'
+      command awk 'BEGIN {
+        for (name in ENVIRON) {
+          value = ENVIRON[name]; size += length(name) + length(value)
+          gsub(/%/, "%25", value); gsub(/\\n/, "%0A", value); gsub(/\\r/, "%0D", value)
+          report = report name "=" value "\\n"
+        }
+        if (size <= 262144) printf "%s", report
+      }'
+      printf '%s\\n' '${SHELL_EXPORTS_DELIMITER}'
+`
+
+/** SEA `cls` (@292220593) */
+export function parseShellExports(stdout: string): Map<string, string> {
+  const result = new Map<string, string>()
+  const baseEnv = subprocessEnv()
+  const lines = stdout.split('\n')
+  const markers: number[] = []
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i] === SHELL_EXPORTS_DELIMITER) markers.push(i)
+  }
+  const [start, end, ...extra] = markers
+  if (start === undefined || end === undefined || extra.length > 0) {
+    return result
+  }
+  for (const line of lines.slice(start + 1, end)) {
+    const eqIdx = line.indexOf('=')
+    const name = line.slice(0, Math.max(eqIdx, 0))
+    if (
+      /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) &&
+      baseEnv[name] === undefined &&
+      !SKIP_SHELL_EXPORTS.has(name) &&
+      !isForbiddenShellExportKey(name) &&
+      !line.includes('\uFFFD')
+    ) {
+      result.set(
+        name,
+        line
+          .slice(name.length + 1)
+          .replace(/%(25|0A|0D)/g, (_, hex: string) =>
+            hex === '25' ? '%' : hex === '0A' ? '\n' : '\r',
+          ),
+      )
+    }
+  }
+  return result
+}
+
+let capturedShellExports: Record<string, string> | undefined
+
+export function getCapturedShellExports(): Record<string, string> | undefined {
+  return capturedShellExports
+}
+
+export function clearCapturedShellExportsForTesting(): void {
+  capturedShellExports = undefined
+}
+
+function isDesktopNonWindowsClient(): boolean {
+  if (getPlatform() === 'windows') return false
+  const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT
+  return entrypoint === 'claude-desktop' || entrypoint === 'claude-desktop-3p'
+}
+
 /**
  * Creates a shell function that invokes `binaryPath` with a specific argv[0].
  * This uses the bun-internal ARGV0 dispatch trick: the bun binary checks its
@@ -480,11 +581,12 @@ export function createPkillSelfGuardShellIntegration(): string {
 /**
  * Creates the appropriate shell script for capturing environment
  */
-async function getSnapshotScript(
+export async function getSnapshotScript(
   shellPath: string,
   snapshotFilePath: string,
   configFileExists: boolean,
   pluginBinPaths: readonly string[] = [],
+  captureShellExports = false,
 ): Promise<string> {
   const configFile = getConfigFile(shellPath)
   const isZsh = configFile.endsWith('.zshrc')
@@ -503,6 +605,7 @@ async function getSnapshotScript(
 
   const script = `SNAPSHOT_FILE=${quote([snapshotFilePath])}
       ${configFileExists ? `source "${configFile}" < /dev/null` : '# No user config file to source'}
+      ${captureShellExports ? SHELL_EXPORTS_PROBE_SCRIPT : ''}
 
       # First, create/clear the snapshot file
       echo "# Snapshot file" >| "$SNAPSHOT_FILE"
@@ -590,11 +693,13 @@ export const createAndSaveSnapshot = async (
       // Ensure snapshots directory exists
       await mkdir(snapshotsDir, { recursive: true })
 
+      const captureShellExports = isDesktopNonWindowsClient()
       const snapshotScript = await getSnapshotScript(
         binShell,
         shellSnapshotPath,
         configFileExists,
         pluginBinPaths,
+        captureShellExports,
       )
       logForDebugging(`Creating snapshot at: ${shellSnapshotPath}`)
       logForDebugging(`Execution timeout: ${SNAPSHOT_CREATION_TIMEOUT}ms`)
@@ -651,7 +756,7 @@ export const createAndSaveSnapshot = async (
             logForDebugging(`Full snapshot script:\n${snapshotScript}`)
             if (stdout) {
               logForDebugging(
-                `stdout output (${stdout.length} chars):\n${stdout}`,
+                `stdout output (${stdout.length} chars):\n${stdout.split(SHELL_EXPORTS_DELIMITER)[0]}`,
               )
             } else {
               logForDebugging(`No stdout output captured`)
@@ -705,6 +810,12 @@ export const createAndSaveSnapshot = async (
                   )
                 }
               })
+
+              if (captureShellExports) {
+                capturedShellExports ??= Object.fromEntries(
+                  parseShellExports(stdout),
+                )
+              }
 
               resolve(shellSnapshotPath)
             } else {

@@ -1281,7 +1281,7 @@ export async function getAttachments(
     maybe('nested_memory', () => getNestedMemoryAttachments(context)),
     // relevant_memories moved to async prefetch (startRelevantMemoryPrefetch)
     maybe('dynamic_skill', () => getDynamicSkillAttachments(context)),
-    maybe('skill_listing', () => getSkillListingAttachments(context)),
+    maybe('skill_listing', () => getSkillListingAttachments(context, messages)),
     // Inter-turn skill discovery now runs via startSkillDiscoveryPrefetch
     // (query.ts, concurrent with the main turn). The blocking call that
     // previously lived here was the assistant_turn signal — 97% of those
@@ -2550,6 +2550,40 @@ function isInstructionsMemoryType(
   )
 }
 
+const NESTED_MEMORY_MIN_CHAR_LIMIT = 40_000
+const NESTED_MEMORY_ONLY_START_MARKER =
+  '\n\n> Only the start of this file is shown.'
+
+export function getNestedMemoryCharLimit(model?: string): number {
+  const contextWindow = model
+    ? getContextWindowForModel(model, getSdkBetas())
+    : 200_000
+  const safeWindow =
+    Number.isFinite(contextWindow) && contextWindow > 0
+      ? contextWindow
+      : 200_000
+  return Math.max(
+    NESTED_MEMORY_MIN_CHAR_LIMIT,
+    Math.round(safeWindow * 0.05 * 4),
+  )
+}
+
+export function truncateNestedMemoryToStart(
+  content: string,
+  filePath: string | undefined,
+  limit: number,
+): string {
+  if (content.length <= limit) return content
+  const lastNewline = content.lastIndexOf('\n', limit)
+  const cut = lastNewline > 0 ? lastNewline : limit
+  const head = content.slice(0, cut)
+  if (filePath === undefined) {
+    return `${head}${NESTED_MEMORY_ONLY_START_MARKER}`
+  }
+  const offset = lastNewline > 0 ? head.split('\n').length + 1 : 1
+  return `${head}${NESTED_MEMORY_ONLY_START_MARKER} For the rest, call Read on ${filePath} with offset=${offset} and a limit.`
+}
+
 /** Exported for testing — regression guard for LRU-eviction re-injection. */
 export function memoryFilesToAttachments(
   memoryFiles: MemoryFileInfo[],
@@ -2558,6 +2592,9 @@ export function memoryFilesToAttachments(
 ): Attachment[] {
   const attachments: Attachment[] = []
   const shouldFireHook = hasInstructionsLoadedHook()
+  const charLimit = getNestedMemoryCharLimit(
+    toolUseContext.options?.mainLoopModel,
+  )
 
   for (const memoryFile of memoryFiles) {
     // Dedup: loadedNestedMemoryPaths is a non-evicting Set; readFileState
@@ -2567,10 +2604,24 @@ export function memoryFilesToAttachments(
       continue
     }
     if (!toolUseContext.readFileState.has(memoryFile.path)) {
+      const trimmed = memoryFile.content.trim()
+      const isTruncated =
+        memoryFile.type !== 'Managed' && trimmed.length > charLimit
+      const attachmentContent = isTruncated
+        ? {
+            ...memoryFile,
+            content: truncateNestedMemoryToStart(
+              trimmed,
+              memoryFile.path,
+              charLimit,
+            ),
+            rawContent: undefined,
+          }
+        : memoryFile
       attachments.push({
         type: 'nested_memory',
         path: memoryFile.path,
-        content: memoryFile,
+        content: attachmentContent,
         displayPath: relative(getCwd(), memoryFile.path),
       })
       toolUseContext.loadedNestedMemoryPaths?.add(memoryFile.path)
@@ -2590,7 +2641,7 @@ export function memoryFilesToAttachments(
         timestamp: Date.now(),
         offset: undefined,
         limit: undefined,
-        isPartialView: memoryFile.contentDiffersFromDisk,
+        isPartialView: isTruncated || memoryFile.contentDiffersFromDisk,
       })
 
       // Fire InstructionsLoaded hook for audit/observability (fire-and-forget)
@@ -3700,8 +3751,70 @@ export function filterToBundledAndMcp(commands: Command[]): Command[] {
   return filtered
 }
 
+function getSkillDigest(cmd: Command): string {
+  const desc = cmd.description ?? ''
+  const when = cmd.type === 'prompt' ? (cmd.whenToUse ?? '') : ''
+  return Bun.hash(`${cmd.name}\0${desc}\0${when}`).toString(36)
+}
+
+export function collectPriorSkillListings(
+  messages: readonly Message[],
+): Map<string, Set<string | undefined>> {
+  const entries: Array<{ names?: string[]; digests?: string[] }> = []
+  for (const msg of messages) {
+    if (
+      msg.type !== 'attachment' ||
+      !msg.attachment ||
+      msg.attachment.type !== 'skill_listing'
+    ) {
+      continue
+    }
+    const att = msg.attachment as {
+      isInitial?: boolean
+      addsToEarlier?: boolean
+      names?: string[]
+      digests?: string[]
+    }
+    if (att.isInitial === false && att.addsToEarlier !== true) {
+      entries.length = 0
+    } else {
+      entries.push({ names: att.names, digests: att.digests })
+    }
+  }
+  const sent = new Map<string, Set<string | undefined>>()
+  for (const { names = [], digests } of entries) {
+    for (let i = 0; i < names.length; i++) {
+      const name = names[i]!
+      let set = sent.get(name)
+      if (!set) {
+        set = new Set()
+        sent.set(name, set)
+      }
+      set.add(digests?.[i])
+    }
+  }
+  return sent
+}
+
+export function filterUnsentSkillsFromTranscript(
+  allCommands: readonly Command[],
+  messages: readonly Message[],
+): { newSkills: Command[]; isInitial: boolean; digests: string[] } {
+  const sent = collectPriorSkillListings(messages)
+  const newSkills = allCommands.filter(cmd => {
+    const seen = sent.get(cmd.name)
+    return !seen?.has(undefined) && !seen?.has(getSkillDigest(cmd))
+  })
+  return {
+    newSkills,
+    isInitial: sent.size === 0,
+    digests: newSkills.map(getSkillDigest),
+  }
+}
+
 export async function getSkillListingAttachments(
   toolUseContext: ToolUseContext,
+  messages?: readonly Message[],
 ): Promise<Attachment[]> {
   if (process.env.NODE_ENV === 'test') {
     return []
@@ -3750,15 +3863,23 @@ export async function getSkillListingAttachments(
     return []
   }
 
-  // Find skills we haven't sent yet
-  const newSkills = allCommands.filter(cmd => !sent.has(cmd.name))
+  let newSkills: Command[]
+  let isInitial: boolean
+  let digests: string[] | undefined
+
+  if (messages !== undefined) {
+    const delta = filterUnsentSkillsFromTranscript(allCommands, messages)
+    newSkills = delta.newSkills
+    isInitial = delta.isInitial
+    digests = delta.digests
+  } else {
+    newSkills = allCommands.filter(cmd => !sent.has(cmd.name))
+    isInitial = sent.size === 0
+  }
 
   if (newSkills.length === 0) {
     return []
   }
-
-  // If no skills have been sent yet, this is the initial batch
-  const isInitial = sent.size === 0
 
   // Mark as sent
   for (const cmd of newSkills) {
@@ -3783,7 +3904,9 @@ export async function getSkillListingAttachments(
       skillCount: newSkills.length,
       isInitial,
       names: newSkills.map(s => s.name),
-    },
+      ...(digests !== undefined ? { digests } : {}),
+      ...(!isInitial ? { addsToEarlier: true } : {}),
+    } as Attachment,
   ]
 }
 

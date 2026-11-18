@@ -194,3 +194,37 @@ export function classifyClassifierProviderKind(
       return provider
   }
 }
+
+const AWS_REGION_RE = '[a-z]{2,4}(?:-[a-z]{2,5})?-[a-z]+-\\d+'
+const BEDROCK_DOMAINS_RE =
+  'amazonaws\\.com|api\\.aws|amazonaws\\.com\\.cn|amazonaws\\.eu|c2s\\.ic\\.gov|sc2s\\.sgov\\.gov|cloud\\.adc-e\\.uk|csp\\.hci\\.ic\\.gov'
+const BEDROCK_OWN_HOST_RE = new RegExp(
+  `^(?:vpce-[a-z0-9-]+\\.)?bedrock(?:-runtime)?(?:-fips)?\\.${AWS_REGION_RE}\\.(?:vpce\\.)?(?:${BEDROCK_DOMAINS_RE})$`,
+)
+const BEDROCK_COMMERCIAL_HOST_RE = new RegExp(
+  `\\.(?!us-gov-)${AWS_REGION_RE}\\.(?:vpce\\.)?(?:amazonaws\\.com|api\\.aws)$`,
+)
+
+/**
+ * Official z5r() (2.1.309 #1154) — true when ANTHROPIC_BEDROCK_BASE_URL is unset
+ * or points to a commercial HTTPS AWS Bedrock endpoint (e.g.
+ * https://bedrock-runtime.<region>.amazonaws.com).
+ */
+export function isGenuineBedrockEndpoint(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const url = env.ANTHROPIC_BEDROCK_BASE_URL
+  if (url === undefined) return true
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return false
+  }
+  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '')
+  return (
+    parsed.protocol === 'https:' &&
+    BEDROCK_OWN_HOST_RE.test(hostname) &&
+    BEDROCK_COMMERCIAL_HOST_RE.test(hostname)
+  )
+}

@@ -184,6 +184,7 @@ export class PaneBackendExecutor implements TeammateExecutor {
       let inheritedArgParts = buildInheritedCliArgParts({
         planModeRequired: config.planModeRequired,
         permissionMode: appState.toolPermissionContext.mode,
+        disallowedTools: appState.toolPermissionContext.alwaysDenyRules.cliArg,
       })
 
       // If teammate has a custom model, add --model flag (or replace inherited one)

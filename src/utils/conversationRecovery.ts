@@ -32,7 +32,10 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../services/analytics/index.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { logForDebugging } from './debug.js'
+import { isEnvTruthy } from './envUtils.js'
+import { errorMessage } from './errors.js'
 import { logError } from './log.js'
 import {
   createAssistantMessage,
@@ -43,6 +46,7 @@ import {
   isToolUseResultMessage,
   NO_RESPONSE_REQUESTED,
   normalizeMessages,
+  rewriteResumedSubagentShutdownToolResults,
 } from './messages.js'
 import { copyPlanForResume } from './plans.js'
 import { scanDeferredToolUseFromTranscriptTail } from './queryHelpers.js'
@@ -316,6 +320,66 @@ export function deserializeMessages(serializedMessages: Message[]): Message[] {
 }
 
 /**
+ * Official 2.1.309 (#1166) `YR`: tool result text for tool calls whose result
+ * was not recorded before the session/runner ended.
+ */
+export const SESSION_ENDED_TOOL_RESULT_MESSAGE =
+  "[Tool call interrupted: the session ended before this call's result was recorded, so its outcome is unknown. Check whether it took effect before relying on it or running it again.]"
+
+/** Official `Hxn` / `Fc` — `tengu_foamy_spring` defaults true. */
+function isFoamySpringEnabled(): boolean {
+  return (
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_foamy_spring', true) !== false
+  )
+}
+
+/**
+ * Official `bLe` — synthesize `[Tool call interrupted: ...]` tool_result user
+ * messages for trailing unresolved `tool_use` blocks when resuming with
+ * `CLAUDE_CODE_RESUME_SHOWS_CUT_OFF_CALLS=1` (#1166).
+ */
+function synthesizeInterruptedToolResultsForCutOffCalls(
+  messages: Message[],
+  preserveUnresolvedToolUseIds?: Set<string>,
+): Message[] {
+  const resolvedIds = new Set<string>(preserveUnresolvedToolUseIds)
+  for (const msg of messages) {
+    if (msg.type === 'user' && Array.isArray(msg.message?.content)) {
+      for (const block of msg.message.content) {
+        if (block.type === 'tool_result') {
+          resolvedIds.add(block.tool_use_id)
+        }
+      }
+    }
+  }
+  const synthesized: Message[] = []
+  for (const msg of messages) {
+    if (msg.type !== 'assistant' || !Array.isArray(msg.message?.content)) {
+      continue
+    }
+    for (const block of msg.message.content) {
+      if (block.type === 'tool_use' && !resolvedIds.has(block.id)) {
+        synthesized.push(
+          createUserMessage({
+            content: [
+              {
+                type: 'tool_result',
+                content: SESSION_ENDED_TOOL_RESULT_MESSAGE,
+                is_error: true,
+                tool_use_id: block.id,
+              },
+            ],
+            toolUseResult: SESSION_ENDED_TOOL_RESULT_MESSAGE,
+            sourceToolAssistantUUID: msg.uuid,
+          }),
+        )
+      }
+    }
+  }
+  return synthesized.length > 0 ? [...messages, ...synthesized] : messages
+}
+
+/**
  * Like deserializeMessages, but also detects whether the session was
  * interrupted mid-turn. Used by the SDK resume path to auto-continue
  * interrupted turns after a gateway-triggered restart.
@@ -355,9 +419,35 @@ export function deserializeMessagesWithInterruptDetection(
       }
     }
 
+    // Official `Wxn` (#1166): rewrite `interruptedByShutdown` tool_result blocks
+    // to `YR` (`SESSION_ENDED_TOOL_RESULT_MESSAGE`), and when
+    // `CLAUDE_CODE_RESUME_SHOWS_CUT_OFF_CALLS` is set, synthesize `YR`
+    // tool_result blocks for cut-off `tool_use` calls.
+    const foamySpring = isFoamySpringEnabled()
+    const afterShutdownRewrite = foamySpring
+      ? rewriteResumedSubagentShutdownToolResults(
+          migratedMessages,
+          SESSION_ENDED_TOOL_RESULT_MESSAGE,
+        )
+      : migratedMessages
+    const showsCutOffCalls =
+      foamySpring &&
+      !replyOnResume &&
+      isEnvTruthy(process.env.CLAUDE_CODE_RESUME_SHOWS_CUT_OFF_CALLS) &&
+      !getFeatureValue_CACHED_MAY_BE_STALE(
+        'tengu_mutable_phoenix_killswitch',
+        false,
+      )
+    const withCutOffToolResults = showsCutOffCalls
+      ? synthesizeInterruptedToolResultsForCutOffCalls(
+          afterShutdownRewrite,
+          preserveUnresolvedToolUseIds,
+        )
+      : afterShutdownRewrite
+
     // Filter out unresolved tool uses and any synthetic messages that follow them
     const filteredToolUses = filterUnresolvedToolUses(
-      migratedMessages,
+      withCutOffToolResults,
       preserveUnresolvedToolUseIds,
     ) as NormalizedMessage[]
 
@@ -957,6 +1047,11 @@ export async function loadConversationForResume(
     replyOnResume?: boolean
     forkSession?: boolean
     supportOverdueSessionStartHooks?: boolean
+    /** Official `xxe` `onSessionResolved` (#1007) — invoked as soon as sessionId is known. */
+    onSessionResolved?: (resolved: {
+      sessionId: string
+      transcriptPath?: string
+    }) => Promise<(() => void) | undefined> | (() => void) | void
   },
 ): Promise<{
   messages: Message[]
@@ -1003,6 +1098,24 @@ export async function loadConversationForResume(
   /** #520: SessionStart hooks still running after CLAUDE_CODE_RESUME_SESSIONSTART_HOOKS_WAIT_MS. */
   overdueSessionStartHooks?: OverdueSessionStartHooks
 } | null> {
+  let resolvedHookPromise: Promise<void | (() => void) | undefined> | undefined
+  const fireSessionResolved = (
+    resolvedSessionId: string,
+    transcriptPath: string | undefined,
+  ) => {
+    const hook = opts?.onSessionResolved
+    if (hook === undefined) return
+    resolvedHookPromise ??= Promise.resolve()
+      .then(() => hook({ sessionId: resolvedSessionId, transcriptPath }))
+      .catch(err => {
+        logForDebugging(
+          `resume: onSessionResolved hook failed: ${errorMessage(err)}`,
+        )
+      })
+  }
+  const cleanupSessionResolved = () => {
+    void resolvedHookPromise?.then(cleanup => cleanup?.()).catch(() => {})
+  }
   try {
     let log: LogOption | null = null
     let messages: Message[] | null = null
@@ -1053,6 +1166,10 @@ export async function loadConversationForResume(
       bridgeFromJsonl = loaded.bridgeSessionId
       aiTitleFromJsonl = loaded.aiTitle
       devModsFromJsonl = loaded.devModsFolder
+      if (sessionId) {
+        fireSessionResolved(sessionId, sourceJsonlFile)
+        await resolvedHookPromise
+      }
     } else if (typeof source === 'string') {
       // Load specific session by ID
       log = await getLastSessionLog(source as UUID)
@@ -1079,7 +1196,15 @@ export async function loadConversationForResume(
       // Pass the original session ID to ensure the plan slug is associated with
       // the session we're resuming, not the temporary session ID before resume
       if (sessionId) {
-        await copyPlanForResume(log, asSessionId(sessionId))
+        fireSessionResolved(sessionId, log.fullPath)
+        if (resolvedHookPromise === undefined) {
+          await copyPlanForResume(log, asSessionId(sessionId))
+        } else {
+          await Promise.all([
+            copyPlanForResume(log, asSessionId(sessionId)),
+            resolvedHookPromise,
+          ])
+        }
       }
 
       // Copy file history for resume
@@ -1197,6 +1322,7 @@ export async function loadConversationForResume(
       overdueSessionStartHooks,
     }
   } catch (error) {
+    cleanupSessionResolved()
     logError(error as Error)
     throw error
   }

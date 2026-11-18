@@ -21,6 +21,8 @@ import type {
   RestoredWorkerState,
   SessionState,
 } from '../../utils/sessionState.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import { logEvent } from '../../services/analytics/index.js'
 import { sleep } from '../../utils/sleep.js'
 import { getClaudeCodeUserAgent } from '../../utils/userAgent.js'
 import {
@@ -28,7 +30,6 @@ import {
   SerialBatchEventUploader,
 } from './SerialBatchEventUploader.js'
 import type { SSETransport, StreamClientEvent } from './SSETransport.js'
-import { WorkerStateUploader } from './WorkerStateUploader.js'
 
 /** Default interval between heartbeat events (20s; server TTL is 60s). */
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 20_000
@@ -289,6 +290,412 @@ type WorkerStateResponse = {
  *
  * All writes go through this.request().
  */
+// ---------------------------------------------------------------------------
+// #1004: Worker state coalescing uploader with requeueMetadata / requeueStatus
+// ---------------------------------------------------------------------------
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isWorkerStateRefused4xx(status: number | undefined): boolean {
+  return status === 400 || status === 413 || status === 422
+}
+
+function coalesceWorkerPatches(
+  base: Record<string, unknown>,
+  overlay: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...base }
+  for (const [key, value] of Object.entries(overlay)) {
+    if (
+      (key === 'external_metadata' || key === 'internal_metadata') &&
+      isPlainRecord(merged[key]) &&
+      isPlainRecord(value)
+    ) {
+      merged[key] = { ...merged[key], ...value }
+    } else {
+      merged[key] = value
+    }
+  }
+  return merged
+}
+
+function subtractWorkerPatch(
+  base: Record<string, unknown>,
+  covered: Record<string, unknown>,
+): Record<string, unknown> | null {
+  const remaining: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(base)) {
+    if (!isPlainRecord(value)) continue
+    const coveredMap = isPlainRecord(covered[key]) ? covered[key] : {}
+    const filtered: Record<string, unknown> = {}
+    for (const [subKey, subValue] of Object.entries(value)) {
+      if (!(subKey in coveredMap)) {
+        filtered[subKey] = subValue
+      }
+    }
+    if (Object.keys(filtered).length > 0) {
+      remaining[key] = filtered
+    }
+  }
+  return Object.keys(remaining).length > 0 ? remaining : null
+}
+
+function pickMetadataEntries(meta: unknown): Array<[string, unknown]> {
+  if (!isPlainRecord(meta)) return []
+  return Object.entries(meta).filter(([, v]) => v !== undefined)
+}
+
+type CcrWorkerStateUploaderConfig = {
+  send: (body: Record<string, unknown>) => Promise<boolean>
+  baseDelayMs: number
+  maxDelayMs: number
+  jitterMs: number
+  ridesAStatus?: string[]
+  deleteOutlivesStatus?: string[]
+  requeuedAlone?: string[]
+}
+
+export class CcrWorkerStateUploader {
+  private inflight: Promise<void> | null = null
+  private pending: Record<string, unknown> | null = null
+  private sending: Record<string, unknown> | null = null
+  private requeued: Record<string, unknown> | null = null
+  private requeuedMetadata: Record<string, unknown> | null = null
+  private closingToNewPatches = new AbortController()
+  private hasDroppedSomething = false
+  private closed = false
+  private readonly config: CcrWorkerStateUploaderConfig
+
+  constructor(config: CcrWorkerStateUploaderConfig) {
+    this.config = config
+  }
+
+  enqueue(patch: Record<string, unknown>): void {
+    if (this.closed || this.isClosedToNewPatches) {
+      this.hasDroppedSomething = true
+      return
+    }
+    if (
+      this.pending &&
+      'worker_status' in this.pending &&
+      'worker_status' in patch
+    ) {
+      void this.drain()
+    }
+    this.pending = this.pending
+      ? coalesceWorkerPatches(this.pending, patch)
+      : patch
+    if ('worker_status' in patch) {
+      this.requeued = null
+    }
+    if (this.requeuedMetadata) {
+      this.requeuedMetadata = subtractWorkerPatch(this.requeuedMetadata, patch)
+    }
+    void this.drain()
+  }
+
+  requeueStatus(statusPatch: Record<string, unknown>): void {
+    if (this.closed || this.isClosedToNewPatches) {
+      this.hasDroppedSomething = true
+      return
+    }
+    if (this.pending && 'worker_status' in this.pending) return
+    this.requeued = statusPatch
+    void this.drain()
+  }
+
+  requeueMetadata(metadataPatch: Record<string, unknown>): void {
+    if (this.closed || this.isClosedToNewPatches) {
+      this.hasDroppedSomething = true
+      return
+    }
+    this.putBackMetadata(metadataPatch)
+  }
+
+  private putBackMetadata(metadataPatch: Record<string, unknown>): void {
+    this.requeuedMetadata = subtractWorkerPatch(
+      coalesceWorkerPatches(this.requeuedMetadata ?? {}, metadataPatch),
+      this.pending ?? {},
+    )
+    void this.drain()
+  }
+
+  get isClosedToNewPatches(): boolean {
+    return this.closingToNewPatches.signal.aborted
+  }
+
+  keepsWithoutStatus(patch: Record<string, unknown>): boolean {
+    return this.withoutStatus(patch) !== null
+  }
+
+  withoutStatus(
+    patch: Record<string, unknown>,
+  ): Record<string, unknown> | null {
+    if (!('worker_status' in patch)) return patch
+    const internal = patch.internal_metadata
+    if (!isPlainRecord(internal)) return null
+    const kept: Record<string, unknown> = {}
+    for (const key of this.config.ridesAStatus ?? []) {
+      if (
+        key in internal &&
+        (internal[key] !== null ||
+          !this.config.deleteOutlivesStatus?.includes(key))
+      ) {
+        kept[key] = internal[key]
+      }
+    }
+    return Object.keys(kept).length > 0 ? { internal_metadata: kept } : null
+  }
+
+  close(): void {
+    void this.drain()
+    this.closed = true
+    this.pending = null
+    this.requeued = null
+    this.requeuedMetadata = null
+  }
+
+  async flush(): Promise<boolean> {
+    while (!this.closed) {
+      if (this.inflight) {
+        await this.inflight
+      } else if (this.pending || this.requeued || this.requeuedMetadata) {
+        await this.drain()
+      } else {
+        return !this.hasDroppedSomething
+      }
+    }
+    return false
+  }
+
+  private async drain(): Promise<void> {
+    if (this.inflight || this.closed) return
+    const pendingPatch = this.pending
+    let payload: Record<string, unknown> | null = pendingPatch ?? this.requeued
+    const isRequeued = !pendingPatch
+    if (pendingPatch) {
+      this.pending = null
+    } else if (this.requeued) {
+      this.requeued = null
+    } else if (this.requeuedMetadata) {
+      const aloneKeys = Object.fromEntries(
+        (this.config.requeuedAlone ?? []).map(k => [k, null]),
+      )
+      const rest = subtractWorkerPatch(this.requeuedMetadata, {
+        internal_metadata: aloneKeys,
+      })
+      if (rest === null && this.pending) return
+      const entries = Object.entries(rest ?? this.requeuedMetadata)
+      const first = entries[0]
+      payload = first ? { [first[0]]: first[1] } : null
+      if (payload) {
+        this.requeuedMetadata = subtractWorkerPatch(
+          this.requeuedMetadata,
+          payload,
+        )
+      }
+    }
+    if (!payload) return
+    this.inflight = this.sendWithRetry(payload, isRequeued).then(() => {
+      this.inflight = null
+      this.sending = null
+      if (
+        (this.pending || this.requeued || this.requeuedMetadata) &&
+        !this.closed
+      ) {
+        void this.drain()
+      }
+    })
+  }
+
+  private async sendWithRetry(
+    payload: Record<string, unknown>,
+    isRequeued: boolean,
+  ): Promise<void> {
+    let current = payload
+    let failures = 0
+    while (!this.closed) {
+      this.sending = current
+      if (await this.config.send(current)) return
+      if (
+        this.isClosedToNewPatches &&
+        isRequeued &&
+        !('worker_status' in current) &&
+        this.pending &&
+        !this.closed
+      ) {
+        this.putBackMetadata(current)
+        return
+      }
+      failures++
+      await sleep(this.retryDelay(failures))
+      if (this.pending && !this.closed) {
+        if (isRequeued) {
+          if (!('worker_status' in current)) {
+            this.putBackMetadata(current)
+            return
+          }
+          if ('worker_status' in current && 'worker_status' in this.pending) {
+            return
+          }
+          continue
+        }
+        current = coalesceWorkerPatches(current, this.pending)
+        this.pending = null
+      }
+    }
+  }
+
+  private retryDelay(failures: number): number {
+    const exponential = Math.min(
+      this.config.baseDelayMs * 2 ** (failures - 1),
+      this.config.maxDelayMs,
+    )
+    const jitter = Math.random() * this.config.jitterMs
+    return exponential + jitter
+  }
+}
+
+// ---------------------------------------------------------------------------
+// #1102: Tool result image/PDF/whole-file trimming for CCR upload
+// ---------------------------------------------------------------------------
+
+export type UploadTrimConfig = {
+  media?: boolean
+  mcp_images?: boolean
+}
+
+const MCP_TOOL_RESULT_KEYS = new Set([
+  'content',
+  '_meta',
+  'structuredContent',
+  'structuredContentOmitted',
+  'resourceLinks',
+  'url',
+  'title',
+])
+
+function isBase64ImageBlock(
+  block: unknown,
+): block is { type: 'image'; source: { type: string; data: string } } {
+  if (!isPlainRecord(block) || block.type !== 'image') return false
+  const source = block.source
+  return (
+    isPlainRecord(source) &&
+    source.type === 'base64' &&
+    typeof source.data === 'string'
+  )
+}
+
+function isToolResultWithArrayContent(
+  block: unknown,
+): block is { type: 'tool_result'; content: unknown[] } {
+  return (
+    isPlainRecord(block) &&
+    block.type === 'tool_result' &&
+    Array.isArray(block.content)
+  )
+}
+
+export function trimMediaToolResult(
+  toolUseResult: unknown,
+  trim: UploadTrimConfig,
+): unknown {
+  if (trim.media !== true || !isPlainRecord(toolUseResult)) {
+    return toolUseResult
+  }
+  const file = toolUseResult.file
+  if (
+    isPlainRecord(file) &&
+    (toolUseResult.type === 'image' || toolUseResult.type === 'pdf') &&
+    typeof file.base64 === 'string' &&
+    file.base64 !== ''
+  ) {
+    return { ...toolUseResult, file: { ...file, base64: '' } }
+  }
+  return toolUseResult
+}
+
+function stripWholeFileFields(
+  record: Record<string, unknown>,
+): Record<string, unknown> {
+  const patch: Record<string, unknown> = {}
+  if (
+    typeof record.originalFile === 'string' &&
+    record.originalFile !== '' &&
+    record.originalFile !== record.content
+  ) {
+    patch.originalFile = null
+  }
+  if (
+    record.type === 'update' &&
+    Array.isArray(record.structuredPatch) &&
+    record.structuredPatch.length > 0
+  ) {
+    patch.structuredPatch = []
+  }
+  for (const key of ['original_file', 'updated_file'] as const) {
+    if (typeof record[key] === 'string' && record[key] !== '') {
+      patch[key] = ''
+    }
+  }
+  return Object.keys(patch).length > 0 ? { ...record, ...patch } : record
+}
+
+export function withholdWholeFileToolResult(toolUseResult: unknown): unknown {
+  if (!isPlainRecord(toolUseResult)) return toolUseResult
+  let next = stripWholeFileFields(toolUseResult)
+  for (const key of ['content', 'structuredContent'] as const) {
+    const val = next[key]
+    const stripped = isPlainRecord(val) ? stripWholeFileFields(val) : val
+    if (stripped !== val) {
+      next = { ...next, [key]: stripped }
+    }
+  }
+  return next
+}
+
+export function trimMcpImageToolResult(
+  toolUseResult: unknown,
+  message: unknown,
+  trim: UploadTrimConfig,
+): unknown {
+  if (trim.mcp_images !== true) return toolUseResult
+  const wrapped =
+    isPlainRecord(toolUseResult) &&
+    Object.keys(toolUseResult).every(k => MCP_TOOL_RESULT_KEYS.has(k))
+  const items = wrapped ? toolUseResult.content : toolUseResult
+  const msgContent = isPlainRecord(message) ? message.content : undefined
+  if (!Array.isArray(items) || !Array.isArray(msgContent)) return toolUseResult
+  const toolResults = msgContent.filter(isToolResultWithArrayContent)
+  if (toolResults.length !== 1) return toolUseResult
+  const toolResult = toolResults[0]!
+  if (toolResult.content.length !== items.length) return toolUseResult
+  let changed = false
+  const mapped = items.map((item, idx) => {
+    const sibling = toolResult.content[idx]
+    if (!isBase64ImageBlock(item) || !isBase64ImageBlock(sibling)) return item
+    if (item.source.data !== sibling.source.data || item.source.data === '') {
+      return item
+    }
+    changed = true
+    return { ...item, source: { ...item.source, data: '' } }
+  })
+  if (!changed) return toolUseResult
+  return wrapped ? { ...toolUseResult, content: mapped } : mapped
+}
+
+export function trimmedToolResult(
+  toolUseResult: unknown,
+  message: unknown,
+  trim: UploadTrimConfig,
+): unknown {
+  const mediaTrimmed = trimMediaToolResult(toolUseResult, trim)
+  return trimMcpImageToolResult(mediaTrimmed, message, trim)
+}
+
 export class CCRClient {
   private workerEpoch = 0
   private readonly heartbeatIntervalMs: number
@@ -318,7 +725,9 @@ export class CCRClient {
   // ID; cleared in writeEvent when the complete assistant message arrives.
   private streamTextAccumulator = createStreamAccumulator()
 
-  private readonly workerState: WorkerStateUploader
+  private readonly workerState: CcrWorkerStateUploader
+  private loggedToolResultBlank = false
+  private loggedMcpImageBlank = false
   private readonly eventUploader: SerialBatchEventUploader<ClientEvent>
   private readonly internalEventUploader: SerialBatchEventUploader<WorkerEvent>
   private readonly deliveryUploader: SerialBatchEventUploader<{
@@ -352,6 +761,8 @@ export class CCRClient {
    * path is a process global and would stomp across sessions.
    */
   private readonly getAuthHeaders: () => Record<string, string>
+  private droppedWorkerStatePatchCount = 0
+  private droppedOwedMetadataPatchCount = 0
 
   constructor(
     transport: SSETransport,
@@ -389,17 +800,98 @@ export class CCRClient {
     // Extract session ID from the URL path (last segment)
     this.sessionId = pathname.split('/').pop() || ''
 
-    this.workerState = new WorkerStateUploader({
-      send: body =>
-        this.request(
+    this.workerState = new CcrWorkerStateUploader({
+      send: async body => {
+        const result = await this.request(
           'put',
           '/worker',
           { worker_epoch: this.workerEpoch, ...body },
           'PUT worker',
-        ).then(r => r.ok),
+        )
+        if (result.ok) return true
+        if (this.closed && result.status === 409) {
+          logForDiagnosticsNoPII('warn', 'cli_worker_state_4xx_dropped', {
+            status: result.status,
+          })
+          this.droppedWorkerStatePatchCount++
+          if (this.workerState.keepsWithoutStatus(body)) {
+            this.droppedOwedMetadataPatchCount++
+          }
+          return true
+        }
+        if (isWorkerStateRefused4xx(result.status)) {
+          logForDiagnosticsNoPII('warn', 'cli_worker_state_4xx_dropped', {
+            status: result.status,
+          })
+          this.droppedWorkerStatePatchCount++
+          if (this.workerState.keepsWithoutStatus(body)) {
+            this.droppedOwedMetadataPatchCount++
+          }
+          const {
+            internal_metadata: internalMetaRaw,
+            external_metadata: externalMetaRaw,
+            ...rest
+          } = body
+          const internalMeta = isPlainRecord(internalMetaRaw)
+            ? internalMetaRaw
+            : {}
+          const externalMeta = isPlainRecord(externalMetaRaw)
+            ? externalMetaRaw
+            : {}
+          const internalEntries = pickMetadataEntries(internalMeta)
+          const externalEntries = pickMetadataEntries(externalMeta)
+          const totalFields =
+            Object.keys(rest).length +
+            Object.keys(internalMeta).length +
+            Object.keys(externalMeta).length
+          if (
+            (internalEntries.length > 0 && externalEntries.length > 0) ||
+            (internalEntries.length + externalEntries.length > 0 &&
+              internalEntries.length + externalEntries.length < totalFields)
+          ) {
+            this.workerState.requeueMetadata({
+              ...(internalEntries.length > 0
+                ? { internal_metadata: Object.fromEntries(internalEntries) }
+                : {}),
+              ...(externalEntries.length > 0
+                ? { external_metadata: Object.fromEntries(externalEntries) }
+                : {}),
+            })
+          }
+          if (body.worker_status !== undefined) {
+            const statusOnly: Record<string, unknown> = {
+              worker_status: body.worker_status,
+              ...('requires_action_details' in body
+                ? { requires_action_details: body.requires_action_details }
+                : {}),
+              ...('reply_degraded' in internalMeta
+                ? {
+                    internal_metadata: {
+                      reply_degraded: internalMeta.reply_degraded,
+                    },
+                  }
+                : {}),
+            }
+            if (
+              Object.keys(body).length > Object.keys(statusOnly).length ||
+              Object.keys(internalMeta).length > 1
+            ) {
+              this.workerState.requeueStatus(statusOnly)
+              return true
+            }
+            logEvent('ccr_worker_state_publish', {
+              outcome: 'state_4xx_dropped',
+            })
+          }
+          return true
+        }
+        return false
+      },
       baseDelayMs: 500,
       maxDelayMs: 30_000,
       jitterMs: 500,
+      ridesAStatus: ['reply_degraded', 'card_turn_stamp'],
+      deleteOutlivesStatus: ['card_turn_stamp'],
     })
 
     this.eventUploader = new SerialBatchEventUploader<ClientEvent>({
@@ -1055,12 +1547,51 @@ export class CCRClient {
     }
   }
 
+  private currentUploadTrim(): UploadTrimConfig {
+    const val = getFeatureValue_CACHED_MAY_BE_STALE<unknown>(
+      'tengu_ccr_upload_trim',
+      {},
+    )
+    return isPlainRecord(val) ? (val as UploadTrimConfig) : {}
+  }
+
+  private trimToolResultForUpload(
+    toolUseResult: unknown,
+    message: unknown,
+    isVirtual: boolean,
+  ): unknown {
+    if (isVirtual) return toolUseResult
+    const trim = this.currentUploadTrim()
+    const mediaTrimmed = trimMediaToolResult(toolUseResult, trim)
+    if (mediaTrimmed !== toolUseResult && !this.loggedToolResultBlank) {
+      this.loggedToolResultBlank = true
+      logEvent('ccr_tool_result_blank', {})
+    }
+    const mcpTrimmed = trimMcpImageToolResult(mediaTrimmed, message, trim)
+    if (mcpTrimmed !== mediaTrimmed && !this.loggedMcpImageBlank) {
+      this.loggedMcpImageBlank = true
+      logEvent('ccr_mcp_image_blank', {})
+    }
+    return mcpTrimmed
+  }
+
   /** Wrap a StdoutMessage as a ClientEvent, injecting a UUID if missing. */
   private toClientEvent(message: StdoutMessage): ClientEvent {
     const msg = message as unknown as Record<string, unknown>
+    const trimmedResult =
+      msg.type === 'user'
+        ? this.trimToolResultForUpload(
+            msg.tool_use_result,
+            msg.message,
+            msg.is_virtual === true,
+          )
+        : msg.tool_use_result
     return {
       payload: {
         ...msg,
+        ...(trimmedResult !== msg.tool_use_result
+          ? { tool_use_result: trimmedResult }
+          : {}),
         uuid: typeof msg.uuid === 'string' ? msg.uuid : randomUUID(),
       } as EventPayload,
     }

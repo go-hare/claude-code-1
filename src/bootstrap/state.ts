@@ -3266,3 +3266,28 @@ export function markMidConvCachePromotionRejected(): void {
 export function resetRequestLatches(): void {
   getBootstrapSessionHost().requestLatches.reset()
 }
+
+// #1083: LaunchOptions.autoCompactWindowSurface() (official kmi)
+const autoCompactWindowSurfaceByHost = new WeakMap<object, string | undefined>()
+
+export function getAutoCompactWindowSurface(): string | undefined {
+  return autoCompactWindowSurfaceByHost.get(getBootstrapSessionHost())
+}
+
+export function setAutoCompactWindowSurface(surface: string | undefined): void {
+  autoCompactWindowSurfaceByHost.set(getBootstrapSessionHost(), surface)
+}
+
+// #1120: SettingsSource.flagMcpConfigFilePaths() (official nLe / Opi)
+const flagMcpConfigFilePathsByHost = new WeakMap<object, readonly string[]>()
+
+export function getFlagMcpConfigFilePaths(): readonly string[] {
+  return flagMcpConfigFilePathsByHost.get(getBootstrapSessionHost()) ?? []
+}
+
+export function setFlagMcpConfigFilePaths(paths: readonly string[]): void {
+  flagMcpConfigFilePathsByHost.set(
+    getBootstrapSessionHost(),
+    Object.freeze([...paths]),
+  )
+}

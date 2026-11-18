@@ -119,10 +119,25 @@ export type ClampedWakeup = {
  * densable `NU_` — clamp delaySeconds and snap fire time to minute boundary,
  * optionally pulling earlier by cacheLeadMs when within 5m cache TTL.
  */
+export const LOOP_PROMPT_CACHE_1H_TTL_MS = 3_600_000
+export const LOOP_CACHE_ANCHOR_WINDOW_MS = 600_000
+
+function getLastMainThreadRequestAtSafe(): number | null {
+  try {
+    const { getLastApiCompletionTimestamp } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../bootstrap/state.js') as typeof import('../bootstrap/state.js')
+    return getLastApiCompletionTimestamp()
+  } catch {
+    return null
+  }
+}
+
 export function clampWakeupDelaySeconds(
   delaySeconds: number,
   nowMs: number = Date.now(),
   jitterCfg: CronJitterConfig = getCronJitterConfigSafe(),
+  lastMainThreadRequestAtMs: number | null = getLastMainThreadRequestAtSafe(),
 ): ClampedWakeup {
   let rounded: number
   if (Number.isNaN(delaySeconds)) rounded = LOOP_WAKEUP_MIN_SECONDS
@@ -143,6 +158,21 @@ export function clampWakeupDelaySeconds(
     const maxLead = LOOP_PROMPT_CACHE_TTL_MS - cacheLeadMs
     while (
       targetMs - nowMs > maxLead &&
+      targetMs - 60_000 >= nowMs + LOOP_WAKEUP_MIN_SECONDS * 1000
+    ) {
+      targetMs -= 60_000
+    }
+  }
+  if (cacheLeadMs > 0) {
+    const anchor = lastMainThreadRequestAtMs ?? nowMs
+    const deadline =
+      (nowMs - anchor <= LOOP_CACHE_ANCHOR_WINDOW_MS
+        ? Math.min(nowMs, anchor)
+        : nowMs) +
+      LOOP_PROMPT_CACHE_1H_TTL_MS -
+      cacheLeadMs
+    while (
+      targetMs > deadline &&
       targetMs - 60_000 >= nowMs + LOOP_WAKEUP_MIN_SECONDS * 1000
     ) {
       targetMs -= 60_000

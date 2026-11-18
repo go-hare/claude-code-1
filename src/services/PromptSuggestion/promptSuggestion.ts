@@ -145,7 +145,10 @@ export function abortPromptSuggestion(): void {
  * Returns a suppression reason if suggestions should not be generated,
  * or null if generation is allowed. Shared by main and pipelined paths.
  */
-export function getSuggestionSuppressReason(appState: AppState): string | null {
+export function getSuggestionSuppressReason(
+  appState: AppState,
+  billedToUsageCredits?: boolean,
+): string | null {
   if (!appState.promptSuggestionEnabled) return 'disabled'
   if (appState.pendingWorkerRequest || appState.pendingSandboxRequest)
     return 'pending_permission'
@@ -153,8 +156,9 @@ export function getSuggestionSuppressReason(appState: AppState): string | null {
   if (appState.toolPermissionContext.mode === 'plan') return 'plan_mode'
   // densable 2.1.238 YUv: allowed_warning + CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION===true
   // still allows suggestions; other non-allowed statuses suppress as rate_limit.
+  // Official 2.1.302 (#912): skip after a reply billed to usage credits.
   if (process.env.USER_TYPE === 'external') {
-    const { status } = currentLimits
+    const { status, overageInUse } = currentLimits
     let envPromptSuggestionOn = false
     try {
       const { resolvePromptSuggestionEnvOverride } =
@@ -168,6 +172,7 @@ export function getSuggestionSuppressReason(appState: AppState): string | null {
     }
     const warningAllowed = status === 'allowed_warning' && envPromptSuggestionOn
     if (status !== 'allowed' && !warningAllowed) return 'rate_limit'
+    if (billedToUsageCredits ?? overageInUse === true) return 'usage_credits'
   }
   return null
 }

@@ -38,8 +38,10 @@ import { extractMcpConnectionErrorCode } from './mcpConnectionIssue.js'
 import { readClientProtocolEra } from './channelPermissions.js'
 import { listMcpCursorPages, listMcpToolsAggregated } from './listPagination.js'
 import {
+  captureConnectClockSnapshot,
   classifyMcpAutoProbeFallback,
   createMcpConnectionTimeoutError,
+  detectConnectSuspendedMessage,
   formatMcpProbeFallbackDebugMessage,
   formatPinnedLegacyRetryPreserveTimeoutLog,
   getMcpClientConnectTimeoutMs,
@@ -47,6 +49,7 @@ import {
   getMcpTimeoutMs,
   isMcpCcrProxyServerConfig,
   isRememberedLegacyStdio,
+  type ModernCompatTransportLike,
   recordRememberedLegacyStdio,
   resolveMcpNegotiationTransportKind,
   resolveMcpProtocolNegotiationPlan,
@@ -55,6 +58,7 @@ import {
   shouldPreserveConnectTimeoutAfterPinnedLegacyRetry,
   truncateMcpErrorSnippet,
   wrapLegacyHttpSseGet401Guard,
+  wrapModernProtocolResultCompat,
   createLegacyHttpSseFallbackFetches,
   getLegacySseErrorStatus,
   isLegacySseAuthChallenge,
@@ -324,6 +328,7 @@ import {
   MCP_REQUEST_TIMEOUT_MS,
   maybeConnectAuthHeaderRejection,
   McpAuthError,
+  McpCredentialStoreUnavailableError,
   McpSessionExpiredError,
   McpToolCallError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   mcpBaseUrlAnalytics,
@@ -348,6 +353,7 @@ export {
   isMcpSessionExpiredError,
   MCP_TOOL_CALL_INTERRUPTED,
   McpAuthError,
+  McpCredentialStoreUnavailableError,
   type MCPResultType,
   McpToolCallError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   mcpToolInputToAutoClassifierInput,
@@ -410,6 +416,7 @@ const connectToServerMemo = memoize(
     },
   ): Promise<MCPServerConnection> => {
     const connectStartTime = Date.now()
+    const connectClockSnapshot = captureConnectClockSnapshot()
     // #644/#645: never spawn or dial a server blocked by managed policy.
     if (
       serverRef.type !== 'sdk' &&
@@ -1235,6 +1242,13 @@ const connectToServerMemo = memoize(
       if (serverRef.type === 'claudeai-proxy') {
         wrapStatelessClaudeAiProxyTransport(transport, serverRef, msg =>
           logMCPDebug(name, msg),
+        )
+      }
+      if (protocolPlan.mode === 'auto') {
+        wrapModernProtocolResultCompat(
+          transport as unknown as ModernCompatTransportLike,
+          name,
+          msg => logMCPDebug(name, msg),
         )
       }
 
@@ -2248,10 +2262,20 @@ const connectToServerMemo = memoize(
       // densable 2.1.219: surface errorCode (HTTP / errno / ENDPOINT_NOT_FOUND)
       // so mcp list / /mcp can show status — issue (fSp/mSp).
       let errorText = errorMessage(error)
-      const errorCode = extractMcpConnectionErrorCode(error, {
+      let errorCode = extractMcpConnectionErrorCode(error, {
         transportType: serverRef.type,
         hasSessionId: false,
       })
+      if (errorCode === 'CONNECT_TIMEOUT') {
+        const suspendedMessage = detectConnectSuspendedMessage(
+          name,
+          connectClockSnapshot,
+        )
+        if (suspendedMessage !== undefined) {
+          errorCode = 'CONNECT_SUSPENDED'
+          errorText = suspendedMessage
+        }
+      }
       if (errorCode === 'ENDPOINT_NOT_FOUND' && 'url' in serverRef) {
         // densable 2.1.234 #13 cHr — connection-failure details show only origin
         const origin = getMcpServerUrlOrigin(serverRef) ?? '(unparseable url)'
@@ -3123,7 +3147,10 @@ export const fetchToolsForClient = memoizeWithLRU(
                     // cleared, so retry with a fresh client.
                     if (
                       error instanceof McpSessionExpiredError &&
-                      attempt < MAX_SESSION_RETRIES
+                      attempt < MAX_SESSION_RETRIES &&
+                      (!error.mayHaveRun ||
+                        tool.annotations?.readOnlyHint === true ||
+                        tool.annotations?.idempotentHint === true)
                     ) {
                       logMCPDebug(
                         client.name,
@@ -4501,7 +4528,10 @@ async function callMCPTool({
         )
         logEvent('tengu_mcp_session_expired', {})
         await clearServerCache(name, config)
-        throw new McpSessionExpiredError(name)
+        throw new McpSessionExpiredError(
+          name,
+          isSessionExpired ? 'session_expired_404' : 'connection_closed_http',
+        )
       }
     }
 
@@ -4669,4 +4699,25 @@ export async function setupSdkMcpClients(
   }
 
   return { clients, tools, commands }
+}
+
+/**
+ * Official `Zqt` @278801674 (#1121):
+ * Prevent `'cached'` MCP client updates from overwriting a live `'connected'`,
+ * un-held `'disabled'` (`heldBy === undefined`), or `'needs-auth'` client.
+ */
+export function shouldApplyMcpClientUpdate(
+  existing: MCPServerConnection | undefined,
+  incoming: MCPServerConnection | { type: string; name: string },
+): boolean {
+  if (incoming.type !== 'cached' || !existing) return true
+  const heldBy =
+    existing.type === 'disabled' && 'heldBy' in existing
+      ? existing.heldBy
+      : undefined
+  return !(
+    existing.type === 'connected' ||
+    (existing.type === 'disabled' && heldBy === undefined) ||
+    existing.type === 'needs-auth'
+  )
 }

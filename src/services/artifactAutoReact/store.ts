@@ -541,7 +541,9 @@ export type ArtifactAutoReactStore = {
   /** densable pathPinSeq — QXt stamps seq on restore. */
   pathPinSeq: number
   /** densable pathPins — F7e clears unless continuesConversation. */
-  pathPins: Map<string, Map<string, { seq?: number }>>
+  pathPins: Map<string, Map<string, PathPinEntry>>
+  /** densable refusedPublishBodies — optimistic-concurrency resend guard. */
+  refusedPublishBodies: Map<string, RefusedPublishBodyEntry>
   /** densable resultNotes — F7e resets unless continuesConversation. */
   resultNotes: {
     kindSaid: boolean
@@ -850,6 +852,7 @@ export function createArtifactAutoReactStore(): ArtifactAutoReactStore {
     },
     pathPinSeq: 0,
     pathPins: new Map(),
+    refusedPublishBodies: new Map(),
     resultNotes: {
       kindSaid: false,
       watchCodesSaid: new Set(),
@@ -907,6 +910,316 @@ export function un(): ArtifactAutoReactStore {
 /** Test helper — drop store (densable account-switch wipe subset). */
 export function resetArtifactAutoReactStoreForTests(): void {
   holder.current = undefined
+}
+
+export type RefusedPublishBodyEntry = {
+  sha256: string
+  live?: string
+  forceRefused?: boolean
+  batch?: string
+  observedFrom?: string
+  unreadSourcePath?: string
+  unviewed?: boolean
+}
+
+export type PathPinBehind = {
+  sha256: string | null
+  sizeBytes?: number
+  ver: string
+}
+
+export type PathPinEntry = {
+  seq?: number
+  sha256?: string | null
+  ver?: string
+  via?: 'read' | 'list' | 'publish'
+  behind?: PathPinBehind
+}
+
+const PATH_PIN_CONFLICT_LEAD =
+  'Nothing was published or removed: this publish touches files whose published content is not what you last saw'
+const PATH_PIN_CHANGED_HEADER = 'Changed since you last saw them:'
+const PATH_PIN_UNREAD_HEADER =
+  'Already published, and not read as published or listed by you in this session:'
+const PATH_PIN_HIDDEN_HEADER = 'Already published, and not shown to you:'
+const PATH_PIN_MAX_LISTED = 20
+
+function getSlugPins(slug: string): Map<string, PathPinEntry> {
+  const store = un()
+  let pins = store.pathPins.get(slug)
+  if (pins === undefined) {
+    pins = new Map()
+    store.pathPins.set(slug, pins)
+  }
+  return pins
+}
+
+function nextPathPinSeq(): number {
+  const store = un()
+  store.pathPinSeq += 1
+  return store.pathPinSeq
+}
+
+function setPinIfNotStale(
+  pins: Map<string, PathPinEntry>,
+  path: string,
+  entry: Omit<PathPinEntry, 'seq'>,
+  seq: number,
+): void {
+  const existing = pins.get(path)
+  if (existing !== undefined && (existing.seq ?? 0) > seq) return
+  pins.set(path, { ...entry, seq })
+}
+
+export function pinArtifactPath(
+  slug: string,
+  path: string,
+  sha256: string | null,
+  ver: string,
+  via: 'read' | 'list',
+  seq = nextPathPinSeq(),
+): void {
+  setPinIfNotStale(getSlugPins(slug), path, { sha256, ver, via }, seq)
+}
+
+export function unpinArtifactPath(
+  slug: string,
+  path: string,
+  seq = nextPathPinSeq(),
+): void {
+  const pins = un().pathPins.get(slug)
+  const existing = pins?.get(path)
+  if (existing !== undefined && (existing.seq ?? 0) < seq) {
+    pins?.delete(path)
+  }
+}
+
+export function recordPublishedPathPins(
+  slug: string,
+  ver: string,
+  committed: {
+    written: Array<{ path: string; sha256?: string }>
+    removed: string[]
+  },
+): void {
+  const pins = getSlugPins(slug)
+  const seq = nextPathPinSeq()
+  for (const w of committed.written) {
+    if (w.sha256 === undefined) {
+      pins.delete(w.path)
+    } else {
+      setPinIfNotStale(
+        pins,
+        w.path,
+        { sha256: w.sha256, ver, via: 'publish' },
+        seq,
+      )
+    }
+  }
+  for (const removedPath of committed.removed) {
+    setPinIfNotStale(
+      pins,
+      removedPath,
+      { sha256: null, ver, via: 'publish' },
+      seq,
+    )
+  }
+}
+
+export type PathPinWriteInput = { path: string; sha256?: string }
+
+export type PathPinDiffItem =
+  | {
+      kind: 'unread'
+      path: string
+      operation: 'write' | 'remove'
+    }
+  | {
+      kind: 'changed'
+      path: string
+      operation: 'write' | 'remove'
+      readSha256: string | null | undefined
+      readVer: string | undefined
+      readVia: 'read' | 'list' | 'publish' | undefined
+      liveSha256: string | null
+    }
+
+/** Gold `D()` — evaluate path pins against live file sha256s and `overwrite_unread` (`acknowledged`). */
+export function diffPublishPathPins(input: {
+  pins: Map<string, PathPinEntry> | undefined
+  live: Map<string, string | null>
+  liveDocs?: Set<string>
+  writes: PathPinWriteInput[]
+  removes: string[]
+  acknowledged: Set<string>
+}): PathPinDiffItem[] {
+  const conflicts: PathPinDiffItem[] = []
+  const ops: Array<{
+    path: string
+    operation: 'write' | 'remove'
+    sha256?: string
+  }> = [
+    ...input.writes.map(w => ({ ...w, operation: 'write' as const })),
+    ...input.removes.map(p => ({
+      path: p,
+      operation: 'remove' as const,
+      sha256: undefined,
+    })),
+  ]
+  for (const op of ops) {
+    if (input.liveDocs?.has(op.path)) continue
+    const pin = input.pins?.get(op.path)
+    const liveSha = input.live.get(op.path) ?? null
+    if (pin === undefined) {
+      if (liveSha === null || input.acknowledged.has(op.path)) continue
+      if (op.operation === 'write' && op.sha256 === liveSha) continue
+      conflicts.push({ kind: 'unread', path: op.path, operation: op.operation })
+      continue
+    }
+    if (pin.sha256 === liveSha) continue
+    if (
+      op.operation === 'write' &&
+      op.sha256 !== undefined &&
+      op.sha256 === liveSha
+    ) {
+      continue
+    }
+    if (op.operation === 'remove' && liveSha === null) continue
+    conflicts.push({
+      kind: 'changed',
+      path: op.path,
+      operation: op.operation,
+      readSha256: pin.sha256,
+      readVer: pin.ver,
+      readVia: pin.via,
+      liveSha256: liveSha,
+    })
+  }
+  return conflicts
+}
+
+function formatPinChangedLine(
+  item: Extract<PathPinDiffItem, { kind: 'changed' }>,
+  liveVer: string,
+  files: Map<string, { sha256: string; sizeBytes?: number }>,
+): string {
+  const seenNote =
+    item.readSha256 !== null
+      ? `you last saw it at version ${item.readVer ?? 'unknown'}`
+      : item.readVia === 'publish'
+        ? `you removed it at version ${item.readVer ?? 'unknown'}`
+        : `it was gone when you last checked (version ${item.readVer ?? 'unknown'})`
+  const nowNote =
+    item.liveSha256 === null
+      ? `it has since been removed (version ${liveVer})`
+      : item.readSha256 === null
+        ? `someone has since published a file there (version ${liveVer})`
+        : `someone has since replaced it (version ${liveVer})`
+  const info = files.get(item.path)
+  const detail =
+    info === undefined
+      ? '  now: deleted; publishing this path again creates it afresh, so do that only if the user wants it back'
+      : `  now: sha256 ${info.sha256}${info.sizeBytes !== undefined ? `, ${info.sizeBytes} ${info.sizeBytes === 1 ? 'byte' : 'bytes'}` : ''}`
+  return `- ${JSON.stringify(item.path)}: ${seenNote}; ${nowNote}\n${detail}`
+}
+
+/** Gold `H()` — format path-pin refusal message for `changed` and `unread` conflicts. */
+export function formatPathPinRefusalMessage(
+  conflicts: PathPinDiffItem[],
+  liveVer: string,
+  opts: {
+    files: Map<string, { sha256: string; sizeBytes?: number }>
+    forced: boolean
+    ackOffered?: boolean
+  },
+): string {
+  const changed = conflicts.filter(
+    (c): c is Extract<PathPinDiffItem, { kind: 'changed' }> =>
+      c.kind === 'changed',
+  )
+  const unread = conflicts.filter(
+    (c): c is Extract<PathPinDiffItem, { kind: 'unread' }> =>
+      c.kind === 'unread',
+  )
+  const sections: string[] = [
+    changed.length > 0
+      ? `${PATH_PIN_CONFLICT_LEAD}, and sending your copy would replace a newer edit.`
+      : `${PATH_PIN_CONFLICT_LEAD}, and sending your copy could discard content you have not read.`,
+  ]
+  const changedSlice = changed.slice(0, PATH_PIN_MAX_LISTED)
+  if (changed.length > 0) {
+    const hasDeleted = changed.some(c => c.liveSha256 === null)
+    sections.push(
+      `${PATH_PIN_CHANGED_HEADER}\n${changedSlice.map(c => formatPinChangedLine(c, liveVer, opts.files)).join('\n')}\nRead each one${hasDeleted ? ' that still exists' : ''} again (action "read_file"), re-apply your change to what it holds now, and publish again${hasDeleted ? '; a deleted one needs no read' : ''}. Never resend your earlier copy.${opts.forced ? ' `force` does not override this.' : ''}`,
+    )
+  }
+  if (unread.length > 0) {
+    const unreadSlice = unread.slice(
+      0,
+      Math.max(0, PATH_PIN_MAX_LISTED - changedSlice.length),
+    )
+    sections.push(
+      `${PATH_PIN_UNREAD_HEADER}\n${unreadSlice.map(u => `- ${JSON.stringify(u.path)}`).join('\n')}\nRead each one first (action "read_file") and build on it.${opts.ackOffered === false ? ' Do so even when the user wants the file replaced outright.' : ' Only when the user asked for the file to be replaced without looking, name it in `overwrite_unread`.'}`,
+    )
+  }
+  return sections.join('\n\n')
+}
+
+/** Gold `AUi()` — concise UI error summary for path-pin refusals. */
+export function formatPathPinConflictUiMessage(
+  errorText: string,
+): string | undefined {
+  if (!errorText.startsWith(PATH_PIN_CONFLICT_LEAD)) return undefined
+  const sliceSection = (start: number, ends: number[]): string => {
+    if (start === -1) return ''
+    const end = ends.filter(e => e > start).sort((a, b) => a - b)[0]
+    return errorText.slice(start, end)
+  }
+  const changedIdx = errorText.indexOf(`\n${PATH_PIN_CHANGED_HEADER}`)
+  const unreadIdx = errorText.indexOf(`\n${PATH_PIN_UNREAD_HEADER}`)
+  const hiddenIdx = errorText.indexOf(`\n${PATH_PIN_HIDDEN_HEADER}`)
+  const changedSec = sliceSection(changedIdx, [unreadIdx, hiddenIdx])
+  const unreadSec = sliceSection(unreadIdx, [hiddenIdx])
+  const hiddenSec = sliceSection(hiddenIdx, [])
+  const matchPaths = (sec: string): string[] =>
+    [...sec.matchAll(/^- ("(?:[^"\\]|\\.)*")/gm)].map(m => m[1]!)
+  const matchExtra = (sec: string): number =>
+    Number(
+      /^- (?:and )?(\d+) (?:more|paths?, not named here):/m.exec(sec)?.[1] ?? 0,
+    )
+  const changedPaths = matchPaths(changedSec)
+  const unreadPaths = matchPaths(unreadSec)
+  const changedCount = changedPaths.length + matchExtra(changedSec)
+  const unreadCount = unreadPaths.length + matchExtra(unreadSec)
+  const hiddenPaths = matchPaths(hiddenSec)
+  const removedCount = [
+    ...changedSec.matchAll(
+      /^- "(?:[^"\\]|\\.)*": [^\n]*it has since been removed/gm,
+    ),
+  ].length
+  if (hiddenPaths.length > 0) {
+    if (changedCount > 0 || unreadCount > 0) {
+      return "Not published: some files on the artifact changed or haven't been read by Claude, and others Claude can't see. Claude needs to read the ones it can, and won't replace the others unless you ask."
+    }
+    return hiddenPaths.length === 1
+      ? `Not published: ${hiddenPaths[0]} is already on the artifact and Claude can't see it. Claude won't replace or remove it unless you ask.`
+      : `Not published: ${hiddenPaths.length} files are already on the artifact and Claude can't see them. Claude won't replace or remove them unless you ask.`
+  }
+  if (changedCount > 0 && unreadCount > 0) {
+    return 'Not published: some files on the artifact changed since Claude last saw them, and others Claude has not read yet. Claude needs to read the latest versions before publishing again.'
+  }
+  if (changedCount === 1) {
+    return removedCount === 1
+      ? `Not published: ${changedPaths[0]} was removed from the artifact since Claude last saw it. Publishing again creates it afresh.`
+      : `Not published: ${changedPaths[0]} changed on the artifact since Claude last saw it. Claude needs to read the latest version before publishing again.`
+  }
+  if (changedCount > 1) {
+    return `Not published: ${changedCount} files changed on the artifact since Claude last saw them. Claude needs to read the latest versions before publishing again.`
+  }
+  if (unreadCount === 1) {
+    return `Not published: ${unreadPaths[0]} is already on the artifact and Claude has not read it. Claude needs to read it before replacing or removing it.`
+  }
+  return `Not published: ${unreadCount} files are already on the artifact and Claude has not read them. Claude needs to read them before replacing or removing them.`
 }
 
 void REWATCH_TIMING

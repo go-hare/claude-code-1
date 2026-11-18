@@ -860,6 +860,21 @@ export type SelectProps<T> = {
   readonly disableSelection?: boolean;
 
   /**
+   * Official 2.1.305 (#1053): when true, printable keys do not trigger numeric
+   * or letter shortcuts, and when `declineValue` is set, typing a printable key
+   * moves focus to `declineValue` instead of accepting.
+   *
+   * @default false
+   */
+  readonly disablePrintableKeybindings?: boolean;
+
+  /**
+   * Official 2.1.305 (#1053): option value to focus when a printable key is
+   * pressed while `disablePrintableKeybindings` is true.
+   */
+  readonly declineValue?: T;
+
+  /**
    * densable g5 `refuseInput` — `I?.()` aborts return / arrows / digits.
    */
   readonly refuseInput?: () => boolean;
@@ -1086,6 +1101,8 @@ export function Select<T>({
   defaultFocusValue,
   layout = 'compact',
   disableSelection = false,
+  disablePrintableKeybindings = false,
+  declineValue,
   refuseInput,
   hidePromptWhileDisabled = false,
   arrowNav = false,
@@ -1450,6 +1467,24 @@ export function Select<T>({
   };
   const leftoverBindKeyDown = (event: KeyboardEvent) => {
     if (isDisabled) return;
+    // Official 2.1.305 (#1053): when disablePrintableKeybindings is set and focus
+    // is not on an input option, printable keys move focus to declineValue (if set)
+    // and non-key-name sequences are ignored.
+    const focusedOpt = options.find(opt => opt.value === state.getFocusedValue());
+    const isInputFocused = focusedOpt?.type === 'input';
+    const isNonKeyName = event.key.length > 1 && event.name !== event.key;
+    const isPrintable = isNonKeyName || (!event.ctrl && !event.meta && !event.superKey && [...event.key].length === 1);
+    if (disablePrintableKeybindings && declineValue !== undefined && !isInputFocused && isPrintable) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      state.focusOption(declineValue);
+      return;
+    }
+    if (disablePrintableKeybindings && isNonKeyName) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
     if (leftoverSrRadio) {
       if (event.ctrl || event.meta) return;
       if (event.key === 'escape') {
@@ -1527,7 +1562,7 @@ export function Select<T>({
 
   useSelectInput({
     isDisabled,
-    disableSelection: disableSelection || (hideIndexes ? 'numeric' : false),
+    disableSelection: disableSelection || (hideIndexes || disablePrintableKeybindings ? 'numeric' : false),
     state,
     options,
     isMultiSelect: false, // Select is always single-choice

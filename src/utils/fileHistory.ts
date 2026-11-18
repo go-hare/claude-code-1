@@ -67,6 +67,7 @@ export type DiffStats =
       filesChanged?: string[]
       insertions: number
       deletions: number
+      hasUncheckedFiles?: boolean
     }
   | undefined
 
@@ -496,6 +497,7 @@ export async function fileHistoryGetDiffStats(
     return undefined
   }
 
+  let hasUncheckedFiles = false
   const results = await Promise.all(
     Array.from(state.trackedFiles, async trackingPath => {
       try {
@@ -508,6 +510,7 @@ export async function fileHistoryGetDiffStats(
 
         if (backupFileName === undefined) {
           // Error resolving the backup, so don't touch the file
+          hasUncheckedFiles = true
           logError(
             new Error('FileHistory: Error finding the backup file to apply'),
           )
@@ -531,6 +534,7 @@ export async function fileHistoryGetDiffStats(
         }
         return null
       } catch (error) {
+        hasUncheckedFiles = true
         logError(error)
         logEvent('tengu_file_history_rewind_restore_file_failed', {
           dryRun: true,
@@ -549,7 +553,12 @@ export async function fileHistoryGetDiffStats(
     insertions += r.stats?.insertions || 0
     deletions += r.stats?.deletions || 0
   }
-  return { filesChanged, insertions, deletions }
+  return {
+    filesChanged,
+    insertions,
+    deletions,
+    ...(hasUncheckedFiles ? { hasUncheckedFiles: true } : {}),
+  }
 }
 
 /**

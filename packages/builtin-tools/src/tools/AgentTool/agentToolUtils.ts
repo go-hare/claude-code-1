@@ -57,6 +57,10 @@ import {
 import type { WebFetchSavedFiles } from 'src/utils/subagentSpawnLedger.js'
 import { isBackgroundAbortReason } from 'src/utils/abortController.js'
 import {
+  normalizeModelStringForAPI,
+  renderModelName,
+} from 'src/utils/model/model.js'
+import {
   AgentApiErrorTerminationError,
   AbortError,
   errorMessage,
@@ -436,6 +440,8 @@ export const agentToolResultSchema = lazySchema(() =>
         frameCount: z.number().optional(),
       })
       .optional(),
+    resolvedModel: z.string().optional(),
+    modelsUsed: z.array(z.string()).optional(),
     usage: z.object({
       input_tokens: z.number(),
       output_tokens: z.number(),
@@ -524,6 +530,91 @@ export function formatApiErrorForParent(
   return parts.length > 0 ? `${text} (${parts.join(', ')})` : text
 }
 
+function modelsEqual(a: string, b: string): boolean {
+  return normalizeModelStringForAPI(a) === normalizeModelStringForAPI(b)
+}
+
+/** SEA `P_r` — append model to used list when it differs from the last entry. */
+export function appendModelUsed(
+  modelsUsed: readonly string[],
+  model: string,
+): string[] {
+  return modelsUsed.at(-1) === model ? [...modelsUsed] : [...modelsUsed, model]
+}
+
+/** Collect all models used across the subagent's messages (SEA `modelsUsed`). */
+export function collectModelsUsed(
+  agentMessages: readonly MessageType[],
+  initialModel: string,
+  priorModelsUsed?: readonly string[],
+): string[] {
+  let result =
+    priorModelsUsed && priorModelsUsed.length > 0
+      ? [...priorModelsUsed]
+      : [initialModel]
+  for (const m of agentMessages) {
+    if (m.type === 'system' && m.subtype === 'model_fallback') {
+      const fallbackModel = (m as { fallbackModel?: unknown }).fallbackModel
+      if (typeof fallbackModel === 'string') {
+        result = appendModelUsed(result, fallbackModel)
+      }
+    } else if (
+      m.type === 'assistant' &&
+      !m.isApiErrorMessage &&
+      typeof m.message?.model === 'string'
+    ) {
+      result = appendModelUsed(result, m.message.model)
+    }
+  }
+  return result
+}
+
+/**
+ * SEA `Bp(e)` (2.1.305 #1041) — walk backwards from the end of the transcript
+ * to check if the final assistant message(s) ran on a `model_fallback` model
+ * that differs from `originalModel`.
+ */
+export function findModelFallbackNotice(
+  agentMessages: readonly MessageType[],
+): { fallbackModel: string; originalModel: string } | undefined {
+  let lastModel: string | undefined
+  for (let i = agentMessages.length - 1; i >= 0; i--) {
+    const m = agentMessages[i]!
+    if (
+      m.type === 'user' ||
+      (m.type === 'assistant' && (m.isVirtual || m.isApiErrorMessage))
+    ) {
+      continue
+    }
+    if (m.type === 'assistant') {
+      const model =
+        typeof m.message?.model === 'string' ? m.message.model : undefined
+      if (model === undefined) return undefined
+      if (lastModel === undefined) {
+        lastModel = model
+      } else if (!modelsEqual(model, lastModel)) {
+        return undefined
+      }
+    } else if (
+      lastModel !== undefined &&
+      m.type === 'system' &&
+      m.subtype === 'model_fallback'
+    ) {
+      const fallbackModel = (m as { fallbackModel?: unknown }).fallbackModel
+      const originalModel = (m as { originalModel?: unknown }).originalModel
+      if (
+        typeof fallbackModel === 'string' &&
+        typeof originalModel === 'string' &&
+        modelsEqual(lastModel, fallbackModel) &&
+        !modelsEqual(fallbackModel, originalModel)
+      ) {
+        return { fallbackModel, originalModel }
+      }
+    }
+  }
+  return undefined
+}
+
 export function finalizeAgentTool(
   agentMessages: MessageType[],
   agentId: string,
@@ -535,6 +626,7 @@ export function finalizeAgentTool(
     agentType: string
     isAsync: boolean
     persistedToolResultFiles?: WebFetchSavedFiles
+    modelsUsed?: readonly string[]
   },
   /**
    * densable Cns(..., {suppressTelemetry:Z}) where Z = JXt after Jeo.
@@ -596,6 +688,12 @@ export function finalizeAgentTool(
     tracker.toolUseCount,
   )
 
+  const modelsUsed = collectModelsUsed(
+    agentMessages,
+    resolvedAgentModel,
+    metadata.modelsUsed,
+  )
+
   // densable: if(!Z) j("completed"); Cns(..., {suppressTelemetry:Z})
   // Z = JXt after Jeo — suppress when any agent: child KA remains.
   if (!suppressTelemetry) {
@@ -604,6 +702,9 @@ export function finalizeAgentTool(
         agentType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       model:
         resolvedAgentModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      final_model: (modelsUsed.at(-1) ??
+        resolvedAgentModel) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      model_swapped: modelsUsed.length > 1,
       prompt_char_count: prompt.length,
       response_char_count: content.length,
       assistant_message_count: agentMessages.length,
@@ -663,6 +764,15 @@ export function finalizeAgentTool(
       text: `${MAX_TURNS_PARTIAL_PREFIX}${maxTurnsReached}-turn limit before finishing. The text below is PARTIAL output; treat it as incomplete.${continueHint}\n`,
     })
   }
+  if (content.length > 0) {
+    const fallbackNotice = findModelFallbackNotice(agentMessages)
+    if (fallbackNotice !== undefined) {
+      notes.push({
+        type: 'text',
+        text: `⚠ This agent switched to ${renderModelName(fallbackNotice.fallbackModel)} because its earlier model could not be used.\n`,
+      })
+    }
+  }
 
   // densable W$n: persistedToolResultFiles?al(B, files, on(Z)):{report:B,harnessTail:[]}
   const notesChars = notes.reduce((sum, block) => sum + block.text.length, 0)
@@ -682,6 +792,8 @@ export function finalizeAgentTool(
     harnessNoteCount: notes.length,
     harnessTailCount: harnessTail.length,
     harnessSectionHash: hashHarnessSectionBlocks(content),
+    resolvedModel: resolvedAgentModel,
+    ...(modelsUsed.length > 1 && { modelsUsed }),
     totalDurationMs: Date.now() - startTime,
     totalTokens,
     totalToolUseCount,

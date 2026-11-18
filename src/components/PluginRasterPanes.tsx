@@ -1343,24 +1343,25 @@ export function keepPluginPaneRoom(): void {
   });
 }
 
-/** densable `yy.DOCK_MIN_COLUMNS` / `h7`. */
+/** densable `yy.DOCK_MIN_COLUMNS` / `P2`. */
 const DOCK_MIN_COLUMNS = 24;
-/** densable `yy.DOCK_TRANSCRIPT_MIN_COLUMNS` / `b7`. */
-const DOCK_TRANSCRIPT_MIN_COLUMNS = 24;
+/** Official 2.1.305 (#1059): `Zue` = 60, `Xue` = 0.45. */
+const DOCK_TRANSCRIPT_MIN_COLUMNS = 60;
+const DOCK_MAX_SHARE = 0.45;
 /** densable `nq` — dock is 0 when transcript columns are below this. */
 const DOCK_FLOOR_COLUMNS = 110;
 
 /**
- * densable `ZP` / `V7` default (`ZN`): min(floor(h*0.45), 90, h-70),
- * clamped to [h7, h-b7], 0 if h<nq.
+ * Official 2.1.305 `VO` (#1059): default `pW`: min(floor(h*0.45), 90, h-70),
+ * clamped to [DOCK_MIN_COLUMNS, min(floor(h*0.45), h-60)], 0 if h<110.
  */
 export function pluginPaneDockColumns(columns: number, chosen?: number | null, requested?: number | null): number {
   if (columns < DOCK_FLOOR_COLUMNS) return 0;
-  const clamp = (value: number) => Math.min(columns - DOCK_TRANSCRIPT_MIN_COLUMNS, Math.max(DOCK_MIN_COLUMNS, value));
+  const maxWidth = Math.min(Math.floor(columns * DOCK_MAX_SHARE), columns - DOCK_TRANSCRIPT_MIN_COLUMNS);
+  const clamp = (value: number) => Math.min(maxWidth, Math.max(DOCK_MIN_COLUMNS, value));
   if (typeof chosen === 'number') return clamp(chosen);
   if (typeof requested === 'number') return clamp(requested);
-  const raw = Math.min(Math.floor(columns * 0.45), 90, columns - 70);
-  return clamp(raw);
+  return Math.min(Math.floor(columns * DOCK_MAX_SHARE), 90, columns - 70);
 }
 
 /** densable `_7` / `R7` / `A7` / `I7` — inline pane rows (`oA` / `Q7`). */

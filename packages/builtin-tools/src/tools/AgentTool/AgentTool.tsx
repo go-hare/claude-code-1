@@ -148,6 +148,7 @@ import {
   buildWorktreeNotice,
   FORK_AGENT,
   FORK_SUBAGENT_TYPE,
+  isForkSubagentForceAsyncEnabled,
   isForkSubagentProductEnabled,
   isForkSubagentScriptCallEnabled,
   isInForkChild,
@@ -292,7 +293,7 @@ type InputSchema = ReturnType<typeof staticInputSchema>;
 export function inputSchema(): InputSchema {
   const base = staticInputSchema();
   // densable r_r: omit when Ier() || Yne(). Yne does not look at Ce.
-  if (isForkSubagentProductEnabled() || isBackgroundLaunchDisabled()) {
+  if (isForkSubagentForceAsyncEnabled() || isBackgroundLaunchDisabled()) {
     return base.omit({ run_in_background: true }) as unknown as InputSchema;
   }
   const launchRule = getBackgroundLaunchRule();
@@ -999,7 +1000,7 @@ export const AgentTool = buildTool({
     // Fork gate forces eligible spawns async for a unified
     // <task-notification> interaction model (not just fork spawns).
     // Gold 289 has no KAIROS/kairosEnabled "force all agents async" arm.
-    const forceAsync = forkProductEnabled && !callerIsInProcessTeammate && !callerIsHeadlessSubagent;
+    const forceAsync = isForkSubagentForceAsyncEnabled() && !callerIsInProcessTeammate && !callerIsHeadlessSubagent;
     // Official q resolve: Gji → Iq ignore → Tno fallback. Then U = j || (... && !G).
     const effectiveIsolation = resolveEffectiveIsolation(isolation, selectedAgent);
     const isRemoteIsolation = effectiveIsolation === 'remote';
@@ -1159,7 +1160,7 @@ export const AgentTool = buildTool({
           appendSystemPrompt: toolUseContext.options.appendSystemPrompt,
         });
       }
-      promptMessages = buildForkedMessages(prompt, assistantMessage);
+      promptMessages = buildForkedMessages(prompt, assistantMessage, toolUseContext.toolUseId);
     } else {
       try {
         const additionalWorkingDirectories = Array.from(

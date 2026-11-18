@@ -189,6 +189,143 @@ const outputSchema = lazySchema(() =>
 type OutputSchema = ReturnType<typeof outputSchema>
 export type ArtifactOutput = z.infer<OutputSchema>
 
+export { formatPathPinConflictUiMessage } from 'src/services/artifactAutoReact/store.js'
+
+/** Gold `JTe` — optimistic-concurrency refusal prefix. */
+export const PUBLISH_REFUSED_PREFIX =
+  'Publish refused \u2014 nothing was merged or published:'
+
+const RESEND_EDITS_NOTE =
+  ' (a resend is judged by the file alone, not by its edits)'
+const FORCE_REFUSED_SUFFIX =
+  ' The server refuses force:true over a version saved from inside the page; only a publish built on that version is accepted.'
+const FORCE_ADVISORY =
+  "; use force:true only on the user's explicit confirmation."
+const REFETCH_NOTE =
+  "fetch the artifact's URL again to confirm it (re-Reading a file an earlier refusal handed you does not count; if that fetch's result says the version counts as viewed only once its saved file is Read, Read every line of that file first) and, once you have that fetch's result,"
+const EDITS_RESEND_CLAUSE =
+  "then send the publish again without any pair that adds that version's lines, each old_str copied from the merged file"
+const SAME_TURN_NOTE =
+  ". This artifact's live version reached you, or was checked, earlier in this same turn, after this publish was composed: "
+const SAME_TURN_CONTENT =
+  "if your content already includes that version's changes, publish it again in your next turn and it will go through; if it leaves anything out, merge that in first."
+const SAME_TURN_EDITS =
+  "if your file itself already holds that version's changes, send the publish again in your next turn and it will go through; if your file leaves anything out, merge that into it with Edit or Write first."
+
+/** Gold `Et(e, n)` */
+export function formatResendRefusal(
+  liveVer: string | undefined,
+  withEdits = false,
+): string {
+  const target =
+    liveVer === undefined
+      ? "because you had not viewed this artifact's live version"
+      : `against the newer version ${liveVer}`
+  return withEdits
+    ? `${PUBLISH_REFUSED_PREFIX} no edits were applied and your file at file_path is unchanged since it was refused ${target}${RESEND_EDITS_NOTE}`
+    : `${PUBLISH_REFUSED_PREFIX} this is the identical content already refused ${target}, resent unchanged`
+}
+
+/** Gold `$n(e, n)` */
+export function formatUnviewedResendRefusal(
+  liveVer: string,
+  withEdits = false,
+): string {
+  return `${PUBLISH_REFUSED_PREFIX} the newer version ${liveVer} still does not count as viewed, so ${withEdits ? 'this publish (no edits applied; your file was already refused against that version)' : 'this content (already refused against it)'} was not reconsidered`
+}
+
+/** Gold `en(e, n, s)` */
+export function formatConflictMergePrompt(
+  liveVer: string | undefined,
+  forced: boolean,
+  withEdits = false,
+): string {
+  const label = liveVer === undefined ? "the live version's" : "that version's"
+  const tail = withEdits
+    ? `. Merge ${label} lines into your file itself with Edit or Write (${label} source was handed to you, or read, in the turn that refused your publish; if neither, fetch the artifact's URL first), ${EDITS_RESEND_CLAUSE}. If your file genuinely already holds everything in that version, ${REFETCH_NOTE} send the publish again`
+    : `. Merge your edits onto ${label} source (handed to you or read in the turn that refused this content; if neither, fetch the artifact's URL first) and publish the merged result. If your content genuinely already includes that version's changes, ${REFETCH_NOTE} publish again`
+  return `${formatResendRefusal(liveVer, withEdits)}${tail}${forced ? `.${FORCE_REFUSED_SUFFIX}` : FORCE_ADVISORY}`
+}
+
+/** Gold `tn(e, n, s)` */
+export function formatSameTurnConflictPrompt(
+  liveVer: string | undefined,
+  forced: boolean,
+  withEdits = false,
+): string {
+  return `${formatResendRefusal(liveVer, withEdits)}${SAME_TURN_NOTE}${withEdits ? SAME_TURN_EDITS : SAME_TURN_CONTENT}${forced ? FORCE_REFUSED_SUFFIX : ''}`
+}
+
+/** Gold `rn(e, n, s, d)` */
+export function formatCheckedConflictPrompt(
+  liveVer: string | undefined,
+  unreadSourcePath: string | undefined,
+  forced: boolean,
+  withEdits = false,
+): string {
+  const sourceClause =
+    unreadSourcePath === undefined
+      ? 'and its source has already reached you.'
+      : `but its source was saved for you at ${unreadSourcePath}, a file you may not have read: Read it first.`
+  const body = withEdits
+    ? ` If your file leaves out anything in that version, merge it into your file with Edit or Write, ${EDITS_RESEND_CLAUSE}; if your file itself genuinely already holds that version's changes, send the publish again and it will go through unless the artifact changes again first.`
+    : ` If your content leaves out anything in that version, merge it in and publish the merged result; if, checked against that source, it genuinely already includes that version's changes, publish it again unchanged and it will go through unless the artifact changes again first.`
+  return `${formatResendRefusal(liveVer, withEdits)}. ${liveVer} is still the live version (checked just now) ${sourceClause}${body}${forced ? FORCE_REFUSED_SUFFIX : ''}`
+}
+
+const RESEND_PREFIX_PAIRS: ReadonlyArray<readonly [boolean, string]> = [
+  [
+    false,
+    `${PUBLISH_REFUSED_PREFIX} this is the identical content already refused against the newer version `,
+  ],
+  [
+    true,
+    `${PUBLISH_REFUSED_PREFIX} no edits were applied and your file at file_path is unchanged since it was refused against the newer version `,
+  ],
+]
+const VERSION_TOKEN_RE = /^[\w-]{1,64}/
+
+const UI_CONFLICT_RESEND_CHECKED =
+  "Not published: Claude sent the same content again after a newer version of the artifact turned it away. The artifact hasn't changed since, so publishing it once more should go through."
+const UI_CONFLICT_RESEND_NEEDS_MERGE =
+  'Not published: Claude sent the same content again after a newer version of the artifact turned it away. Claude needs to work from that newer version first.'
+const UI_CONFLICT_EDITS_RESEND_CHECKED =
+  "Not published: Claude sent its changes again over the same file after a newer version of the artifact turned them away. The artifact hasn't changed since, so publishing it once more should go through."
+const UI_CONFLICT_EDITS_RESEND_NEEDS_MERGE =
+  'Not published: Claude sent its changes again over the same file after a newer version of the artifact turned them away. Claude needs to work from that newer version first.'
+
+/** Gold `gHi(e)` — distinguish `en`/`tn` (needs merge) vs `rn` (checked, retry should succeed) for UI. */
+export function classifyConflictResendUiMessage(
+  errorText: string,
+): string | undefined {
+  const matched = RESEND_PREFIX_PAIRS.find(([, prefix]) =>
+    errorText.startsWith(prefix),
+  )
+  if (matched === undefined) return undefined
+  const [withEdits, prefix] = matched
+  const ver = VERSION_TOKEN_RE.exec(errorText.slice(prefix.length))?.[0]
+  if (ver === undefined) return undefined
+  for (const forced of [false, true]) {
+    if (
+      errorText === formatConflictMergePrompt(ver, forced, withEdits) ||
+      errorText === formatSameTurnConflictPrompt(ver, forced, withEdits)
+    ) {
+      return withEdits
+        ? UI_CONFLICT_EDITS_RESEND_NEEDS_MERGE
+        : UI_CONFLICT_RESEND_NEEDS_MERGE
+    }
+    if (
+      errorText ===
+      formatCheckedConflictPrompt(ver, undefined, forced, withEdits)
+    ) {
+      return withEdits
+        ? UI_CONFLICT_EDITS_RESEND_CHECKED
+        : UI_CONFLICT_RESEND_CHECKED
+    }
+  }
+  return undefined
+}
+
 /** Gold mapToolResult `artifact_delete` @211325340. */
 export function formatArtifactDeleteResult(del: unknown): string {
   const rec =
@@ -382,6 +519,29 @@ function getTargetArtifactEnv(): 'prod' | 'staging' {
   }
 }
 
+export function coerceArtifactPublishInput(input: unknown): {
+  input: ArtifactInput
+  shapeClass: string
+} | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return null
+  }
+  const record = input as Record<string, unknown>
+  const isPublish = record.action === undefined || record.action === 'publish'
+  const hasEmptyEdits =
+    isPublish && Array.isArray(record.edits) && record.edits.length === 0
+  if (!hasEmptyEdits) {
+    return null
+  }
+  const rest = { ...record }
+  delete rest.edits
+  const parsed = inputSchema().safeParse(rest)
+  if (!parsed.success) {
+    return null
+  }
+  return { input: parsed.data, shapeClass: 'edits_empty' }
+}
+
 export const ArtifactTool = buildTool({
   name: ARTIFACT_TOOL_NAME,
   // tip lowercase kept for existing transcripts / cloud upload callers
@@ -411,6 +571,7 @@ export const ArtifactTool = buildTool({
   get outputSchema(): OutputSchema {
     return outputSchema()
   },
+  coerceInput: coerceArtifactPublishInput,
 
   async description(input) {
     if (input && typeof input === 'object' && 'action' in input) {
@@ -1938,6 +2099,19 @@ async function callListFiles(
   })
   // Gold single_page / public_refused messages are already in r.message.
   if (r.kind === 'error') return emptyErr(r.message)
+  const { pinArtifactPath, un } = await import(
+    'src/services/artifactAutoReact/store.js'
+  )
+  const existingPins = un().pathPins.get(parsed.slug)
+  for (const f of r.files.slice(0, 256)) {
+    const existing = existingPins?.get(f.path)
+    if (
+      existing === undefined ||
+      (existing.via === 'list' && existing.sha256 !== null)
+    ) {
+      pinArtifactPath(parsed.slug, f.path, f.sha256, r.ver, 'list')
+    }
+  }
   return {
     data: {
       id: '',
@@ -1999,6 +2173,29 @@ async function callReadFile(
       : {}),
   })
   if ('error' in r) return emptyErr(r.error)
+  const parsed = parsedInputUrlAnyCase(input.url)
+  if (parsed) {
+    const { pinArtifactPath, unpinArtifactPath } = await import(
+      'src/services/artifactAutoReact/store.js'
+    )
+    if ('file_read' in r.data) {
+      const fr = r.data.file_read
+      if (!fr.source && fr.sha256) {
+        pinArtifactPath(parsed.slug, fr.path, fr.sha256, fr.ver, 'read')
+      } else {
+        unpinArtifactPath(parsed.slug, fr.path)
+      }
+    } else if ('files_read' in r.data) {
+      const frs = r.data.files_read
+      for (const f of frs.files) {
+        if (!('error' in f) && !f.source && f.sha256) {
+          pinArtifactPath(parsed.slug, f.path, f.sha256, frs.ver, 'read')
+        } else {
+          unpinArtifactPath(parsed.slug, f.path)
+        }
+      }
+    }
+  }
   return {
     data: {
       id: '',
@@ -2994,7 +3191,9 @@ async function callUpload(
   }
   let rawContent = decodePublishSourceBytes(origBytes)
 
-  const edits = (input as { edits?: readonly PublishEdit[] }).edits
+  const rawEdits = (input as { edits?: readonly PublishEdit[] }).edits
+  const edits =
+    rawEdits !== undefined && rawEdits.length === 0 ? undefined : rawEdits
   if (edits !== undefined) {
     const editResult = applyPublishEdits(rawContent, edits)
     if (!editResult.ok) {
@@ -3020,6 +3219,114 @@ async function callUpload(
     }
   }
 
+  const bodySha256 = sha256Hex(Buffer.from(rawContent, 'utf8'))
+  const withEdits = edits !== undefined
+  const forced = input.force === true
+  const parsedUrl = parsedInputUrlAnyCase(input.url)
+  const targetPath = (input.path ?? 'index.html')
+    .normalize('NFC')
+    .replace(/^\.\//, '')
+
+  const {
+    diffPublishPathPins,
+    formatPathPinRefusalMessage,
+    recordPublishedPathPins,
+    un: getArtifactStore,
+  } = await import('src/services/artifactAutoReact/store.js')
+  const artifactStore = getArtifactStore()
+
+  if (parsedUrl !== null) {
+    const refused = artifactStore.refusedPublishBodies.get(parsedUrl.slug)
+    if (
+      refused !== undefined &&
+      refused.sha256 === bodySha256 &&
+      (!forced || refused.forceRefused === true)
+    ) {
+      if (refused.unviewed === true && refused.live !== undefined) {
+        return emptyErr(formatUnviewedResendRefusal(refused.live, withEdits))
+      }
+      if (
+        refused.observedFrom !== undefined &&
+        refused.observedFrom === (context?.agentId ?? 'main')
+      ) {
+        return emptyErr(
+          formatSameTurnConflictPrompt(refused.live, forced, withEdits),
+        )
+      }
+      const pinnedTarget = artifactStore.pathPins
+        .get(parsedUrl.slug)
+        ?.get(targetPath)
+      if (
+        refused.live !== undefined &&
+        pinnedTarget?.via === 'read' &&
+        pinnedTarget.ver === refused.live
+      ) {
+        return emptyErr(
+          formatCheckedConflictPrompt(
+            refused.live,
+            refused.unreadSourcePath,
+            forced,
+            withEdits,
+          ),
+        )
+      }
+      return emptyErr(
+        formatConflictMergePrompt(refused.live, forced, withEdits),
+      )
+    }
+
+    if (isArtifactToolRegistered()) {
+      const acknowledged = new Set(
+        (input.overwrite_unread ?? []).map(p =>
+          p.normalize('NFC').replace(/^\.\//, ''),
+        ),
+      )
+      const { listArtifactFiles } = await import(
+        'src/services/artifactAutoReact/restApis.js'
+      )
+      const listRes = await listArtifactFiles({
+        slug: parsedUrl.slug,
+        signal: context?.abortController?.signal,
+      })
+      if (listRes.kind !== 'error') {
+        const live = new Map<string, string | null>(
+          listRes.files.map(f => [f.path, f.sha256]),
+        )
+        const liveDocs = new Set(
+          listRes.files.filter(f => f.live).map(f => f.path),
+        )
+        const filesInfo = new Map(
+          listRes.files.map(f => [
+            f.path,
+            { sha256: f.sha256, sizeBytes: f.sizeBytes },
+          ]),
+        )
+        const conflicts = diffPublishPathPins({
+          pins: artifactStore.pathPins.get(parsedUrl.slug),
+          live,
+          liveDocs,
+          writes: [{ path: targetPath, sha256: bodySha256 }],
+          removes: [],
+          acknowledged,
+        })
+        if (conflicts.length > 0) {
+          artifactStore.refusedPublishBodies.set(parsedUrl.slug, {
+            sha256: bodySha256,
+            live: listRes.ver,
+            forceRefused: forced,
+            batch: context?.toolUseId,
+          })
+          return emptyErr(
+            formatPathPinRefusalMessage(conflicts, listRes.ver, {
+              files: filesInfo,
+              forced,
+            }),
+          )
+        }
+      }
+    }
+  }
+
   try {
     const result = await uploadArtifact({
       html,
@@ -3028,6 +3335,15 @@ async function callUpload(
       hash,
       ttl,
     })
+
+    const publishedSlug = parsedUrl?.slug ?? result.id
+    if (publishedSlug) {
+      artifactStore.refusedPublishBodies.delete(publishedSlug)
+      recordPublishedPathPins(publishedSlug, result.expiresAt || '1', {
+        written: [{ path: targetPath, sha256: bodySha256 }],
+        removed: [],
+      })
+    }
 
     let editsNotWritten: PublishEditsNotWrittenReason | undefined
     if (edits !== undefined) {

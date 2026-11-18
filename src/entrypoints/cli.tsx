@@ -356,6 +356,12 @@ async function main(): Promise<void> {
       }
     }
 
+    if (args.slice(1).some(a => a === '--help' || a === '-h')) {
+      const { printRemoteControlHelp } = await import('../bridge/bridgeMain.js');
+      await printRemoteControlHelp();
+      return;
+    }
+
     // densable 2.1.248 #33 — gold R: m() then g() then y()/bridgeMain.
     // Verb-first only (args[0]); flags before the verb go to commander.
     const { enterRemoteControl } = await import('./remoteControlFlags.js');

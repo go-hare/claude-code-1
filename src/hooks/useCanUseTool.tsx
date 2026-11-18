@@ -17,7 +17,12 @@ import {
 } from '@claude-code/builtin-tools/tools/BashTool/bashPermissions.js';
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js';
 import type { AssistantMessage } from '../types/message.js';
-import { recordAutoModeDenial } from '../utils/autoModeDenials.js';
+import {
+  computeAutoModeDenialInputKey,
+  consumeApprovedAutoModeDenial,
+  recordAutoModeDenial,
+  removeAutoModeDenial,
+} from '../utils/autoModeDenials.js';
 import {
   clearClassifierChecking,
   setClassifierApproval,
@@ -137,6 +142,25 @@ function useCanUseTool(
             // Does not have permissions to use tool, check the behavior
             switch (result.behavior) {
               case 'deny': {
+                if (
+                  feature('TRANSCRIPT_CLASSIFIER') &&
+                  result.decisionReason?.type === 'classifier' &&
+                  result.decisionReason.classifier === 'auto-mode'
+                ) {
+                  const inputKey = computeAutoModeDenialInputKey(tool.name, input);
+                  if (consumeApprovedAutoModeDenial(tool.name, inputKey)) {
+                    ctx.logDecision({ decision: 'accept', source: 'config' });
+                    resolve(
+                      ctx.buildAllow(input, {
+                        decisionReason: {
+                          type: 'other',
+                          reason: 'Approved from recently denied permissions',
+                        },
+                      }),
+                    );
+                    return;
+                  }
+                }
                 logPermissionDecision(
                   {
                     tool,
@@ -154,9 +178,23 @@ function useCanUseTool(
                 ) {
                   // densable: reason D2b → K8o; if length>80 then Jd(K8o,79)+…
                   const rawReason = result.decisionReason.reason ?? '';
+                  const isShellTool = !tool.mcpInfo && (tool.name === BASH_TOOL_NAME || tool.name === 'PowerShell');
+                  const rawCommand =
+                    isShellTool &&
+                    input !== null &&
+                    typeof input === 'object' &&
+                    'command' in input &&
+                    typeof (input as { command?: unknown }).command === 'string'
+                      ? (input as { command: string }).command
+                      : undefined;
+                  const shellCommand = rawCommand && rawCommand !== '' ? rawCommand : undefined;
+                  const inputKey = computeAutoModeDenialInputKey(tool.name, input);
+                  removeAutoModeDenial(tool.name, inputKey);
                   recordAutoModeDenial({
                     toolName: tool.name,
-                    display: description,
+                    display: shellCommand ?? description,
+                    ...(shellCommand !== undefined && { command: shellCommand }),
+                    inputKey,
                     reason: rawReason,
                     timestamp: Date.now(),
                   });

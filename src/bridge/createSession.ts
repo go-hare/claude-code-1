@@ -58,13 +58,14 @@ export async function createBridgeSession(params: {
 
   let gitSource: GitSource | null = null
   let gitOutcome: GitOutcome | null = null
+  const branch = params.branch === 'HEAD' ? '' : params.branch
 
   if (params.gitRepoUrl) {
     const { parseGitRemote } = await import('../utils/detectRepository.js')
     const parsed = parseGitRemote(params.gitRepoUrl)
     if (parsed) {
       const { host, owner, name } = parsed
-      const revision = params.branch || (await getDefaultBranch()) || undefined
+      const revision = branch || (await getDefaultBranch()) || undefined
       gitSource = {
         type: 'git_repository',
         url: `https://${host}/${owner}/${name}`,
@@ -75,7 +76,7 @@ export async function createBridgeSession(params: {
         git_info: {
           type: 'github',
           repo: `${owner}/${name}`,
-          branches: [`claude/${params.branch || 'task'}`],
+          branches: [`claude/${branch || 'task'}`],
         },
       }
     } else {
@@ -83,8 +84,7 @@ export async function createBridgeSession(params: {
       if (ownerRepo) {
         const [owner, name] = ownerRepo.split('/')
         if (owner && name) {
-          const revision =
-            params.branch || (await getDefaultBranch()) || undefined
+          const revision = branch || (await getDefaultBranch()) || undefined
           gitSource = {
             type: 'git_repository',
             url: `https://github.com/${owner}/${name}`,
@@ -95,7 +95,7 @@ export async function createBridgeSession(params: {
             git_info: {
               type: 'github',
               repo: `${owner}/${name}`,
-              branches: [`claude/${params.branch || 'task'}`],
+              branches: [`claude/${branch || 'task'}`],
             },
           }
         }

@@ -288,14 +288,19 @@ function createCommandSuggestionItem(
       ? 'local'
       : undefined
 
-  // Official: when lanes on prefer menuDescription for prompt commands.
+  // Official 2.1.307 (#1088): bundled skills use menuDescription in the / menu
+  // even when lanesEnabled is off; when lanesEnabled is on, any prompt command
+  // with menuDescription prefers it.
+  const effectiveCmd =
+    cmd.type === 'prompt' && cmd.loadedFrom === 'bundled' && cmd.menuDescription
+      ? { ...cmd, description: cmd.menuDescription }
+      : cmd
   const descriptionBase =
-    lanesEnabled && cmd.type === 'prompt' && 'menuDescription' in cmd
-      ? ((cmd as { menuDescription?: string }).menuDescription ??
-        (isWorkflow ? cmd.description : formatDescriptionWithSource(cmd)))
+    lanesEnabled && cmd.type === 'prompt' && cmd.menuDescription
+      ? cmd.menuDescription
       : isWorkflow
-        ? cmd.description
-        : formatDescriptionWithSource(cmd)
+        ? effectiveCmd.description
+        : formatDescriptionWithSource(effectiveCmd)
 
   const fullDescription =
     descriptionBase +

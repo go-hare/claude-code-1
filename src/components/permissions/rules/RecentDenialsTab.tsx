@@ -115,7 +115,7 @@ function RecentDenialsList({
       label: (
         <Text>
           <StatusIcon status={isApproved ? 'success' : 'error'} withSpace />
-          {d.display}
+          {d.command ?? d.display}
           <Text dimColor>{suffix}</Text>
         </Text>
       ),

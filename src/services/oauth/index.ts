@@ -102,6 +102,13 @@ export class OAuthService {
         options?.expiresIn,
       )
 
+      // Handle success redirect immediately after token exchange (before profile
+      // fetch) so the browser shows the success page without waiting on profile API.
+      if (isAutomaticFlow) {
+        const scopes = client.parseScopes(tokenResponse.scope)
+        this.authCodeListener?.handleSuccessRedirect(scopes)
+      }
+
       // Fetch profile info (subscription type and rate limit tier) for the
       // returned OAuthTokens. Logout and account storage are handled by the
       // caller (installOAuthTokens in auth.ts).
@@ -114,12 +121,6 @@ export class OAuthService {
             billingType: null,
           }
         : await client.fetchProfileInfo(tokenResponse.access_token)
-
-      // Handle success redirect for automatic flow
-      if (isAutomaticFlow) {
-        const scopes = client.parseScopes(tokenResponse.scope)
-        this.authCodeListener?.handleSuccessRedirect(scopes)
-      }
 
       return this.formatTokens(
         tokenResponse,

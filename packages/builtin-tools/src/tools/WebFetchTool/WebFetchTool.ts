@@ -1,5 +1,9 @@
 import { z } from 'zod/v4'
 import { buildTool, type ToolDef, type ToolUseContext } from 'src/Tool.js'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from 'src/services/analytics/index.js'
 import type { PermissionUpdate } from 'src/types/permissions.js'
 import {
   getEffortValueFromLayers,
@@ -123,6 +127,43 @@ export function coerceWebFetchInputRaw(input: unknown): {
     input: next,
     shapeClass: present.map(k => `drop_${k}`).join(','),
   }
+}
+
+const CCR_PROXY_MARKER = ' [web-fetch-ccr-proxy]'
+const SITE_ANSWER_ERROR_TYPES = new Set([
+  'url_not_found',
+  'client_error',
+  'robots_disallowed',
+])
+
+/**
+ * Official `OXr` / `CAr` / `Lks` (#1092): in Cowork cloud sessions, when the
+ * fetch proxy reports a target-side 4xx / robots.txt refusal (`source === 'target'`
+ * and `error_type` in `url_not_found | client_error | robots_disallowed`), return
+ * a normal `Not Fetched` tool result rather than throwing a tool error.
+ */
+export function extractCcrSiteAnswerErrorType(
+  err: unknown,
+): string | undefined {
+  if (!(err instanceof Error) || !err.message.includes(CCR_PROXY_MARKER)) {
+    return undefined
+  }
+  const rawJson = err.message.replace(CCR_PROXY_MARKER, '').trim()
+  try {
+    const parsed = JSON.parse(rawJson) as {
+      source?: unknown
+      error_type?: unknown
+    }
+    if (parsed.source === 'target' && typeof parsed.error_type === 'string') {
+      const normalized = parsed.error_type.toLowerCase()
+      if (SITE_ANSWER_ERROR_TYPES.has(normalized)) {
+        return normalized
+      }
+    }
+  } catch {
+    // Not JSON-formatted CCR proxy error
+  }
+  return undefined
 }
 
 export const WebFetchTool = Object.assign(
@@ -374,7 +415,30 @@ Please use WebFetch again with the redirect URL.`
       }
 
       // HTTP direct path (original behavior): fetch + turndown + queryHaiku
-      const response = await getURLMarkdownContent(url, abortController)
+      let response: Awaited<ReturnType<typeof getURLMarkdownContent>>
+      try {
+        response = await getURLMarkdownContent(url, abortController)
+      } catch (err) {
+        const siteErrorType = extractCcrSiteAnswerErrorType(err)
+        if (siteErrorType === undefined) {
+          throw err
+        }
+        logEvent('tengu_web_fetch_site_answer', {
+          error_type:
+            siteErrorType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        const siteResult = `Not fetched: ${url} failed at its site (${siteErrorType}), and nothing of the page was retrieved.`
+        return {
+          data: {
+            bytes: Buffer.byteLength(siteResult),
+            code: 0,
+            codeText: 'Not Fetched',
+            result: siteResult,
+            durationMs: Date.now() - start,
+            url,
+          },
+        }
+      }
 
       // Check if we got a redirect to a different host
       if ('type' in response && response.type === 'redirect') {

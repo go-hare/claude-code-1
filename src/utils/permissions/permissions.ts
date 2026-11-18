@@ -37,7 +37,7 @@ import { WEB_SEARCH_TOOL_NAME } from '@claude-code/builtin-tools/tools/WebSearch
 import type { AssistantMessage } from '../../types/message.js'
 import { extractOutputRedirections } from '../bash/commands.js'
 import { logForDebugging } from '../debug.js'
-import { AbortError, toError } from '../errors.js'
+import { AbortError, isAbortError, toError } from '../errors.js'
 import { logError } from '../log.js'
 import { SandboxManager } from '../sandbox/sandbox-adapter.js'
 import {
@@ -45,7 +45,7 @@ import {
   SETTING_SOURCES,
 } from '../settings/constants.js'
 import { plural } from '../stringUtils.js'
-import { permissionModeTitle } from './PermissionMode.js'
+import { type PermissionMode, permissionModeTitle } from './PermissionMode.js'
 import type {
   PermissionAskDecision,
   PermissionDecision,
@@ -1246,18 +1246,175 @@ function pluginToolCheckCanOnlyTightenInProjects(toolName: string): boolean {
   return !(magpie.value === true && magpie.source === 'payload')
 }
 
+const TRANSCRIPT_TOO_LONG_COMPACT_REASON =
+  'Auto mode classifier transcript exceeded context window; will try to compact the conversation before the next request'
+
+type ClassifierOverflowCompactEntry = {
+  canCompact: boolean
+  spentEpoch?: string
+  pending?: {
+    epoch: string
+    mode: PermissionMode
+    toolName: string
+    deniedToolNames: string[]
+  }
+}
+
+const classifierOverflowCompactByAgent = new Map<
+  string,
+  ClassifierOverflowCompactEntry
+>()
+
+export function consumeClassifierOverflowCompact(
+  agentId: string | undefined,
+  messages: readonly { uuid?: string }[],
+  canCompactNext: boolean,
+  currentMode?: PermissionMode,
+): {
+  pending?: ClassifierOverflowCompactEntry['pending']
+  stale?: 'epoch' | 'mode'
+} {
+  const key = agentId ?? 'main'
+  const prev = classifierOverflowCompactByAgent.get(key)
+  classifierOverflowCompactByAgent.set(key, {
+    canCompact: canCompactNext,
+    spentEpoch: prev?.spentEpoch,
+  })
+  const pending = prev?.pending
+  if (pending === undefined) return {}
+  if (pending.epoch !== messages[0]?.uuid) {
+    return { pending, stale: 'epoch' }
+  }
+  if (currentMode !== undefined && pending.mode !== currentMode) {
+    return { pending, stale: 'mode' }
+  }
+  return { pending }
+}
+
+/**
+ * Official 325 `Fhn` — marks the classifier overflow compact epoch as spent
+ * once compaction completes (or fails non-aborted), leaving `pending` cleared.
+ */
+export function markClassifierOverflowCompactSpent(
+  agentId: string | undefined,
+  epoch: string,
+): void {
+  const key = agentId ?? 'main'
+  const prev = classifierOverflowCompactByAgent.get(key)
+  classifierOverflowCompactByAgent.set(key, {
+    canCompact: prev?.canCompact ?? false,
+    ...prev,
+    pending: undefined,
+    spentEpoch: epoch,
+  })
+}
+
+export function requestClassifierOverflowCompact(
+  agentId: string | undefined,
+  messages: readonly { uuid?: string }[],
+  opts: { toolName: string; denied: boolean; mode: PermissionMode },
+): 'requested' | 'joined' | undefined {
+  if (
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_merry_popcorn', true) !== true
+  ) {
+    return undefined
+  }
+  const epoch = messages[0]?.uuid
+  if (epoch === undefined) return undefined
+  const key = agentId ?? 'main'
+  const entry = classifierOverflowCompactByAgent.get(key)
+  if (entry?.canCompact !== true || entry.spentEpoch === epoch) {
+    return undefined
+  }
+  const existing = entry.pending?.epoch === epoch ? entry.pending : undefined
+  const base = existing ?? {
+    epoch,
+    mode: opts.mode,
+    toolName: opts.toolName,
+    deniedToolNames: [],
+  }
+  classifierOverflowCompactByAgent.set(key, {
+    ...entry,
+    pending: opts.denied
+      ? { ...base, deniedToolNames: [...base.deniedToolNames, opts.toolName] }
+      : base,
+  })
+  return existing ? 'joined' : 'requested'
+}
+
+function hasAsksNoHost(context: ToolUseContext): boolean {
+  return (
+    'asksNoHost' in context &&
+    (context as { asksNoHost?: unknown }).asksNoHost === true
+  )
+}
+
+function getToolCheckApprover(context: ToolUseContext): {
+  approver?: 'host' | 'person'
+} {
+  const permCtx = getToolPermissionContextFromLayers(context)
+  if (
+    hasAsksNoHost(context) ||
+    permCtx.mode === 'dontAsk' ||
+    permCtx.shouldAvoidPermissionPrompts === true
+  ) {
+    return {}
+  }
+  return { approver: 'person' }
+}
+
+function safeCheckIsReadOnly(
+  tool: Tool,
+  input: unknown,
+  context: ToolUseContext,
+): { isReadOnly: true } | Record<string, never> {
+  if (typeof tool.isReadOnly !== 'function') return {}
+  try {
+    const parsed = tool.inputSchema?.safeParse?.(input)
+    return parsed?.success && tool.isReadOnly(parsed.data)
+      ? { isReadOnly: true }
+      : {}
+  } catch (err) {
+    if (!isAbortError(err)) {
+      logForDebugging(
+        `tool.check ${tool.name}: isReadOnly threw (${toError(err).message})`,
+      )
+    }
+    return {}
+  }
+}
+
+function markAskPersonOnly<Input extends Record<string, unknown>>(
+  decision: PermissionDecision<Input>,
+): PermissionDecision<Input> {
+  if (decision.behavior !== 'ask') return decision
+  return {
+    ...decision,
+    suggestions: undefined,
+    personOnly: true as const,
+    suppressAlwaysAllowRule: true,
+  }
+}
+
 function applyToolCheckHookResult<Input extends Record<string, unknown>>(
-  rawResult: { decision: 'allow' | 'ask' | 'deny'; reason?: string },
+  rawResult: {
+    decision: 'allow' | 'ask' | 'deny'
+    reason?: string
+    decider?: string
+  },
   decided: PermissionDecision<Input> | undefined,
   toolName: string,
   input: Input,
   toolUseID: string | undefined,
 ): PermissionDecision<Input> {
+  const personAsked =
+    rawResult.decision === 'ask' && rawResult.decider === 'person'
   if (decided?.behavior === rawResult.decision) {
     if (decided.behavior === 'allow') return decided
-    return rawResult.reason
+    const withMsg = rawResult.reason
       ? { ...decided, message: rawResult.reason }
       : decided
+    return personAsked ? markAskPersonOnly(withMsg) : withMsg
   }
   const { getLoadedFunctionHooksModules, hasMatchingFunctionHook } =
     getFunctionHooksMod()
@@ -1296,8 +1453,15 @@ function applyToolCheckHookResult<Input extends Record<string, unknown>>(
       return { behavior: 'allow', updatedInput, decisionReason }
     case 'deny':
       return { behavior: 'deny', message, decisionReason }
-    case 'ask':
-      return { behavior: 'ask', message, updatedInput, decisionReason }
+    case 'ask': {
+      const askDecision: PermissionDecision<Input> = {
+        behavior: 'ask',
+        message,
+        updatedInput,
+        decisionReason,
+      }
+      return personAsked ? markAskPersonOnly(askDecision) : askDecision
+    }
   }
 }
 
@@ -1338,21 +1502,15 @@ export async function evaluatePermissionWithToolCheck<
   markToolCheckEvaluatedForCall(context, toolUseID, input)
   let decided: PermissionDecision<Input> | undefined
   const hookFloor = context.hookAskFloor === true ? 'PreToolUse' : undefined
-  let isToolReadOnly: boolean | undefined
-  if (typeof tool.isReadOnly === 'function') {
-    try {
-      isToolReadOnly = tool.isReadOnly(input as never)
-    } catch {
-      isToolReadOnly = undefined
-    }
-  }
+  const approverInfo = getToolCheckApprover(context)
   const payload: Record<string, unknown> = {
     tool: tool.name,
     input,
     ...(toolUseID !== undefined && { tool_use_id: toolUseID }),
     ...(context.agentId !== undefined && { agentId: context.agentId }),
     ...(tool.requiresUserInteraction?.() && { ceiling: 'ask' }),
-    ...(isToolReadOnly !== undefined && { isReadOnly: isToolReadOnly }),
+    ...safeCheckIsReadOnly(tool, input, context),
+    ...approverInfo,
   }
   let rawOut: unknown
   try {
@@ -1392,10 +1550,19 @@ export async function evaluatePermissionWithToolCheck<
     const rec = rawOut as {
       decision: 'allow' | 'ask' | 'deny'
       reason?: unknown
+      decider?: unknown
     }
+    const decider = typeof rec.decider === 'string' ? rec.decider : undefined
+    const effectiveDecision =
+      rec.decision === 'ask' &&
+      decider === 'person' &&
+      approverInfo.approver === undefined
+        ? ('deny' as const)
+        : rec.decision
     const normalizedResult = {
-      decision: rec.decision,
+      decision: effectiveDecision,
       reason: typeof rec.reason === 'string' ? rec.reason : undefined,
+      ...(decider !== undefined && { decider }),
     }
     if (normalizedResult.decision === 'deny') {
       markToolCheckEvaluatedForCall(context, toolUseID, input, {
@@ -2256,6 +2423,17 @@ const evaluateToolPermission: CanUseToolFn = async (
           const classifierOnlyInteractive =
             classifierOnly !== undefined &&
             !layeredPermissionContext.shouldAvoidPermissionPrompts
+          const willCompact =
+            requestClassifierOverflowCompact(
+              context.agentId,
+              context.messages,
+              {
+                toolName: tool.name,
+                denied:
+                  classifierOnlyInteractive || tool.name !== AGENT_TOOL_NAME,
+                mode: layeredPermissionContext.mode,
+              },
+            ) !== undefined
           if (classifierOnlyInteractive) {
             logForDebugging(
               `Auto mode classifier transcript too long for ${tool.name}, denying (classifierOnly: no prompt fallback)`,
@@ -2269,7 +2447,9 @@ const evaluateToolPermission: CanUseToolFn = async (
                 reason: TRANSCRIPT_TOO_LONG_REASON,
                 noVerdict: true,
               },
-              message: `${tool.name} was not reviewed: the auto mode classifier transcript exceeded its context window, and no permission prompt is raised for this tool. This is not a judgment that the action is unsafe; the same call will hit the same limit until the conversation is shorter.`,
+              message: willCompact
+                ? `${tool.name} was not reviewed and did not run: the conversation is too long for auto mode's classifier, and no permission prompt is raised for this tool. This is not a judgment that the action is unsafe. Claude Code will try to compact the conversation before the next request; if this action is still needed after that, issue it again.`
+                : `${tool.name} was not reviewed: the auto mode classifier transcript exceeded its context window, and no permission prompt is raised for this tool. This is not a judgment that the action is unsafe; the same call will hit the same limit until the conversation is shorter.`,
             }
           }
           if (tool.name === AGENT_TOOL_NAME) {
@@ -2277,6 +2457,22 @@ const evaluateToolPermission: CanUseToolFn = async (
               behavior: 'allow',
               updatedInput: result.updatedInput ?? input,
               decisionReason: { type: 'mode', mode: 'auto' },
+            }
+          }
+          if (willCompact) {
+            logForDebugging(
+              `Auto mode classifier transcript too long for ${tool.name}, denying and compacting before the next request`,
+              { level: 'warn' },
+            )
+            return {
+              behavior: 'deny',
+              decisionReason: {
+                type: 'classifier',
+                classifier: 'auto-mode',
+                reason: TRANSCRIPT_TOO_LONG_COMPACT_REASON,
+                noVerdict: true,
+              },
+              message: `${tool.name} was not reviewed and did not run: the conversation is too long for auto mode's classifier. Claude Code will try to compact the conversation before the next request; if this action is still needed after that, issue it again and it will be reviewed normally.`,
             }
           }
           if (layeredPermissionContext.shouldAvoidPermissionPrompts) {
@@ -2463,10 +2659,26 @@ const evaluateToolPermission: CanUseToolFn = async (
       }
     }
 
-    // When permission prompts should be avoided (e.g., background/headless agents),
-    // run PermissionRequest hooks first to give them a chance to allow/deny.
-    // Only auto-deny if no hook provides a decision.
-    if (layeredPermissionContext.shouldAvoidPermissionPrompts) {
+    // When permission prompts should be avoided (e.g., background/headless agents,
+    // or remote_cowork_trigger scheduled sessions #973), run PermissionRequest
+    // hooks first (unless remote_cowork_trigger fast-deny) and auto-deny if no
+    // hook provides a decision.
+    if (
+      layeredPermissionContext.shouldAvoidPermissionPrompts ||
+      hasAsksNoHost(context) ||
+      process.env.CLAUDE_CODE_ENTRYPOINT === 'remote_cowork_trigger'
+    ) {
+      if (process.env.CLAUDE_CODE_ENTRYPOINT === 'remote_cowork_trigger') {
+        return {
+          behavior: 'deny',
+          decisionReason: {
+            type: 'asyncAgent',
+            reason:
+              'Permission prompts are not available in scheduled Cowork sessions',
+          },
+          message: AUTO_REJECT_MESSAGE(tool.name),
+        }
+      }
       const hookDecision = await runPermissionRequestHooksForHeadlessAgent(
         tool,
         input,
@@ -2944,12 +3156,20 @@ async function hasPermissionsToUseToolInner(
   // `.git/`, shell configs, etc.) fall through to step 2a so bypass mode
   // can allow them without Host can_use_tool. auto mode still uses the
   // classifier for those (see TRANSCRIPT_CLASSIFIER branch above).
+  // #1171: in bypassPermissions on host-card surfaces (Desktop/VS Code),
+  // deny dangerousRemoval at once with a rewrite hint instead of prompting.
   if (
     toolPermissionResult?.behavior === 'ask' &&
-    toolPermissionResult.decisionReason?.type === 'safetyCheck' &&
-    !toolPermissionResult.decisionReason.classifierApprovable
+    findSafetyCheckDecision(
+      toolPermissionResult.decisionReason,
+      check => !check.classifierApprovable,
+    ) !== undefined
   ) {
-    return toolPermissionResult
+    const modeNow = getEffectivePermissionMode(
+      tool,
+      getToolPermissionContextFromLayers(context),
+    )
+    return applySplendidHorizonBypassDeny(toolPermissionResult, modeNow)
   }
 
   // 2a. Check if mode allows the tool to run
@@ -3180,4 +3400,149 @@ function getUpdatedInputOrFallback(
       ? permissionResult.updatedInput
       : undefined) ?? fallback
   )
+}
+
+export type SplendidHorizonConfig = {
+  enabled: boolean
+  showDialog: boolean
+  denyOnHostCard: boolean
+  timeoutMs: number
+  maxDialogTimeouts: number
+}
+
+const SPLENDID_HORIZON_DEFAULTS: SplendidHorizonConfig = {
+  enabled: true,
+  showDialog: true,
+  denyOnHostCard: true,
+  timeoutMs: 120_000,
+  maxDialogTimeouts: 3,
+}
+
+/**
+ * densable `wP()` (#1171): GrowthBook config for `tengu_splendid_horizon`
+ * controlling dangerous `rm`/`rmdir` deny in bypassPermissions mode on host cards.
+ */
+export function getSplendidHorizonConfig(): SplendidHorizonConfig {
+  const { value: raw, source } = getFeatureValueWithSource<
+    Partial<SplendidHorizonConfig>
+  >('tengu_splendid_horizon', {})
+  return {
+    enabled: process.env.CLAUDE_CODE_DISABLE_DANGEROUS_RM_TIMEOUT
+      ? false
+      : typeof raw?.enabled === 'boolean' && source === 'payload'
+        ? raw.enabled
+        : SPLENDID_HORIZON_DEFAULTS.enabled,
+    showDialog:
+      typeof raw?.showDialog === 'boolean'
+        ? raw.showDialog
+        : SPLENDID_HORIZON_DEFAULTS.showDialog,
+    denyOnHostCard:
+      typeof raw?.denyOnHostCard === 'boolean'
+        ? raw.denyOnHostCard
+        : SPLENDID_HORIZON_DEFAULTS.denyOnHostCard,
+    timeoutMs:
+      typeof raw?.timeoutMs === 'number' &&
+      Number.isFinite(raw.timeoutMs) &&
+      raw.timeoutMs >= 5000 &&
+      raw.timeoutMs <= 3_600_000
+        ? raw.timeoutMs
+        : SPLENDID_HORIZON_DEFAULTS.timeoutMs,
+    maxDialogTimeouts:
+      typeof raw?.maxDialogTimeouts === 'number' &&
+      Number.isInteger(raw.maxDialogTimeouts) &&
+      raw.maxDialogTimeouts >= 0 &&
+      raw.maxDialogTimeouts <= 100
+        ? raw.maxDialogTimeouts
+        : SPLENDID_HORIZON_DEFAULTS.maxDialogTimeouts,
+  }
+}
+
+/**
+ * densable `Ra` (#1171): locate a `dangerousRemoval` safetyCheck reason
+ * directly or inside `subcommandResults`.
+ */
+export function findDangerousRemovalReason(
+  decisionReason: PermissionDecisionReason | undefined,
+): PermissionDecisionReason | undefined {
+  if (!decisionReason) return undefined
+  if (
+    decisionReason.type === 'safetyCheck' &&
+    decisionReason.circuitBreaker === 'dangerousRemoval'
+  ) {
+    return decisionReason
+  }
+  if (decisionReason.type === 'subcommandResults') {
+    for (const sub of decisionReason.reasons.values()) {
+      if (sub.behavior === 'ask') {
+        const found = findDangerousRemovalReason(sub.decisionReason)
+        if (found) return found
+      }
+    }
+  }
+  return undefined
+}
+
+const HOST_CARD_ENTRYPOINTS = new Set([
+  'claude-desktop',
+  'claude-desktop-3p',
+  'claude-vscode',
+])
+
+export function isHostCardEntrypoint(): boolean {
+  const ep = process.env.CLAUDE_CODE_ENTRYPOINT
+  return ep !== undefined && HOST_CARD_ENTRYPOINTS.has(ep)
+}
+
+export function formatDangerousRmBypassDenyMessage(
+  innerMessage: string,
+  timeoutCount?: number,
+): string {
+  const countNote =
+    timeoutCount !== undefined
+      ? `The prompt for such removals has already gone unanswered ${timeoutCount} times in this session, so it was not shown again. `
+      : ''
+  return `Dangerous removal blocked in bypassPermissions mode, not by the user. The check stops removals that can delete far more than intended: a system, home or workspace directory, or a target it cannot resolve, such as a shell variable that, if unset or empty, turns this into \`rm -rf /\` or \`rm -rf /*\`. Only a person may approve such a removal, and no person did (the permission prompt timed out, or none was shown). ${countNote}The command was NOT run; do not claim it succeeded. Do not work around the check by splitting, scripting, or re-issuing the removal through another tool or shell: the check exists because a removal like this can destroy the user's data, and getting past it would not make it safe. If the text below suggests a safe rewrite, run that instead; it goes through the same check.\n\n${innerMessage}`
+}
+
+/**
+ * Official 325 `Wyo(e, n)` — extract the nested safetyCheck message when the
+ * outer result is a `subcommandResults` wrapper.
+ */
+function extractSafetyCheckMessage(
+  result: PermissionDecision & { behavior: 'ask' },
+  reason: PermissionDecisionReason,
+): string {
+  if (result.decisionReason?.type === 'subcommandResults') {
+    for (const sub of result.decisionReason.reasons.values()) {
+      if (sub.behavior === 'ask' && sub.decisionReason === reason) {
+        return sub.message
+      }
+    }
+  }
+  return result.message
+}
+
+/**
+ * densable `uVn` (#1171): in bypassPermissions mode on host-card surfaces
+ * (Desktop, VS Code), deny dangerous `rm`/`rmdir` at once with a rewrite hint.
+ */
+export function applySplendidHorizonBypassDeny(
+  result: PermissionDecision,
+  effectiveMode: PermissionMode,
+  isHostCard = isHostCardEntrypoint(),
+  config: SplendidHorizonConfig = getSplendidHorizonConfig(),
+): PermissionDecision {
+  if (effectiveMode !== 'bypassPermissions' || result.behavior !== 'ask') {
+    return result
+  }
+  const dangerousReason = findDangerousRemovalReason(result.decisionReason)
+  if (!dangerousReason || !config.enabled) return result
+  if (!isHostCard || !config.denyOnHostCard) return result
+  return {
+    behavior: 'deny',
+    message: formatDangerousRmBypassDenyMessage(
+      extractSafetyCheckMessage(result, dangerousReason),
+    ),
+    decisionReason: dangerousReason,
+  }
 }

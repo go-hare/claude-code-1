@@ -7,7 +7,10 @@ import type { ToolUseContext } from '../Tool.js'
 import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { isBuiltInAgent } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { isEnvTruthy } from './envUtils.js'
-import { resolveChromeAppendSystemPrompt } from './claudeInChrome/prompt.js'
+import {
+  getChromeSystemPrompt,
+  resolveChromeAppendSystemPrompt,
+} from './claudeInChrome/prompt.js'
 import { asSystemPrompt, type SystemPrompt } from './systemPromptType.js'
 
 export { asSystemPrompt, type SystemPrompt } from './systemPromptType.js'
@@ -36,6 +39,35 @@ export function splitCustomSystemPrompt(prompt: string): string[] {
 function withChromeAppend(appendSystemPrompt: string | undefined): string[] {
   const resolved = resolveChromeAppendSystemPrompt(appendSystemPrompt)
   return resolved ? [resolved] : []
+}
+
+function withChromeAppendAndBoundary(
+  baseParts: string[],
+  appendSystemPrompt: string | undefined,
+): string[] {
+  const resolved = resolveChromeAppendSystemPrompt(appendSystemPrompt)
+  if (!resolved) {
+    return baseParts
+  }
+  const boundaryIdx = baseParts.indexOf(SYSTEM_PROMPT_DYNAMIC_BOUNDARY)
+  if (boundaryIdx === -1) {
+    return [...baseParts, resolved]
+  }
+  const chrome = getChromeSystemPrompt()
+  if (!resolved.includes(chrome)) {
+    return [...baseParts, resolved]
+  }
+  const remainder = resolved
+    .split(chrome)
+    .join('')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  return [
+    ...baseParts.slice(0, boundaryIdx),
+    chrome,
+    ...baseParts.slice(boundaryIdx),
+    ...(remainder ? [remainder] : []),
+  ]
 }
 
 // Dead code elimination: conditional import for proactive mode.
@@ -139,11 +171,15 @@ export function buildEffectiveSystemPrompt({
     (feature('PROACTIVE') || feature('KAIROS')) &&
     isProactiveActive_SAFE_TO_CALL_ANYWHERE()
   ) {
-    return asSystemPrompt([
-      ...defaultSystemPrompt,
-      `\n# Custom Agent Instructions\n${agentSystemPrompt}`,
-      ...withChromeAppend(appendSystemPrompt),
-    ])
+    return asSystemPrompt(
+      withChromeAppendAndBoundary(
+        [
+          ...defaultSystemPrompt,
+          `\n# Custom Agent Instructions\n${agentSystemPrompt}`,
+        ],
+        appendSystemPrompt,
+      ),
+    )
   }
 
   const shouldAppendAgentPrompt = Boolean(
@@ -153,15 +189,18 @@ export function buildEffectiveSystemPrompt({
         .appendSystemPrompt,
   )
   if (agentSystemPrompt && shouldAppendAgentPrompt) {
-    return asSystemPrompt([
-      ...baseSystemPrompt,
-      agentSystemPrompt,
-      ...withChromeAppend(appendSystemPrompt),
-    ])
+    return asSystemPrompt(
+      withChromeAppendAndBoundary(
+        [...baseSystemPrompt, agentSystemPrompt],
+        appendSystemPrompt,
+      ),
+    )
   }
 
-  return asSystemPrompt([
-    ...(agentSystemPrompt ? [agentSystemPrompt] : baseSystemPrompt),
-    ...withChromeAppend(appendSystemPrompt),
-  ])
+  return asSystemPrompt(
+    withChromeAppendAndBoundary(
+      agentSystemPrompt ? [agentSystemPrompt] : baseSystemPrompt,
+      appendSystemPrompt,
+    ),
+  )
 }

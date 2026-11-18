@@ -12,9 +12,19 @@ type Props = {
   screen: Screen;
 };
 
+const TOOLS_USED_BLOCK_RE =
+  /(?:<system-reminder>\s*)?<tools-used-before-summary>([^<]*)<\/tools-used-before-summary>(?:\s*<\/system-reminder>)?\n?/;
+
+export function formatCompactSummaryForTranscript(text: string): string {
+  return text.replace(TOOLS_USED_BLOCK_RE, (_match, rawTools: string) => {
+    const tools = rawTools.trim();
+    return tools ? `Tools called before this summary: ${tools}\n` : '';
+  });
+}
+
 export function CompactSummary({ message, screen }: Props): React.ReactNode {
   const isTranscriptMode = screen === 'transcript';
-  const textContent = getUserMessageText(message) || '';
+  const textContent = formatCompactSummaryForTranscript(getUserMessageText(message) || '');
   const metadata = message.summarizeMetadata as
     | {
         messagesSummarized?: number;

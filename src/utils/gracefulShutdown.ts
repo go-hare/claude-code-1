@@ -53,7 +53,12 @@ import { sleep } from './sleep.js'
 import { closeSentry } from './sentry.js'
 import { emitScrollTelemetrySummary } from './scrollTelemetry.js'
 import { profileReport } from './startupProfiler.js'
-import { getCurrentWorktreeSession } from './worktree.js'
+import {
+  formatWorktreeCommitDescription,
+  getCurrentWorktreeSession,
+  inspectWorktreeHeadState,
+  type WorktreeHeadState,
+} from './worktree.js'
 import {
   markShutdownCommitted,
   resetShutdownCommittedForTests,
@@ -837,6 +842,58 @@ export function getPendingShutdownForTesting(): Promise<void> | undefined {
   return pendingShutdown
 }
 
+export type WorktreeRemovalTask = {
+  path: string
+  run: () => Promise<string | undefined>
+  budgetMs?: number
+  ignoresHangup?: boolean
+}
+
+export async function inspectWorktreeSafetyBeforeShutdownRemoval(): Promise<{
+  keep: boolean
+  reason?: string
+  state?: WorktreeHeadState
+}> {
+  const session = getCurrentWorktreeSession()
+  if (!session || !session.worktreeBranch) {
+    return { keep: false }
+  }
+  const state = await inspectWorktreeHeadState({
+    worktreePath: session.worktreePath,
+    worktreeBranch: session.worktreeBranch,
+    originalHeadCommit: session.originalHeadCommit,
+  })
+  if (
+    (state.head === 'detached' ||
+      state.head === 'another_branch' ||
+      state.head === 'like_its_branch') &&
+    (state.commits === null || state.commits > 0)
+  ) {
+    const desc = formatWorktreeCommitDescription(
+      state,
+      session.worktreeBranch,
+      session.originalHeadCommit ?? 'the base commit',
+    )
+    return {
+      keep: true,
+      reason: `Kept worktree ${session.worktreePath}: commits exist ${desc}.`,
+      state,
+    }
+  }
+  return { keep: false, state }
+}
+
+function isWorktreeRemovalTask(value: unknown): value is WorktreeRemovalTask {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    'path' in value &&
+    typeof (value as { path: unknown }).path === 'string' &&
+    'run' in value &&
+    typeof (value as { run: unknown }).run === 'function'
+  )
+}
+
 // Graceful shutdown function that drains the event loop
 export async function gracefulShutdown(
   exitCode = 0,
@@ -855,7 +912,7 @@ export async function gracefulShutdown(
      * When set, omit `--worktree <name>` from the printed resume hint
      * (densable WMo.resumeHintOmitsWorktree).
      */
-    removeWorktree?: unknown
+    removeWorktree?: WorktreeRemovalTask | unknown
   },
 ): Promise<void> {
   if (shutdownInProgress) {
@@ -994,6 +1051,29 @@ export async function gracefulShutdown(
     // best-effort — never block shutdown
   }
 
+  // #987: inspect worktree HEAD state before removing at exit so detached HEAD
+  // or switched-branch commits are not silently lost.
+  if (isWorktreeRemovalTask(options?.removeWorktree)) {
+    try {
+      const safety = await inspectWorktreeSafetyBeforeShutdownRemoval()
+      if (safety.keep) {
+        if (safety.reason) {
+          try {
+            // eslint-disable-next-line custom-rules/no-sync-fs -- must flush before exit
+            writeSync(2, safety.reason + '\n')
+          } catch {
+            // ignore stderr write errors
+          }
+        }
+      } else {
+        const budgetMs = options.removeWorktree.budgetMs ?? 15_000
+        await Promise.race([options.removeWorktree.run(), sleep(budgetMs)])
+      }
+    } catch {
+      // best-effort — never block shutdown
+    }
+  }
+
   // Execute SessionEnd hooks. Per-hook default is `_go` (env ?? 1500);
   // overall AbortSignal is `Kfe` (env if set, else matcher timeout clamp).
   try {
@@ -1013,6 +1093,29 @@ export async function gracefulShutdown(
     await awaitPendingShellKillBackstops()
   } catch {
     // best-effort — never block shutdown
+  }
+
+  // #987: inspect worktree HEAD state before removing at exit so detached HEAD
+  // or switched-branch commits are not silently lost.
+  if (isWorktreeRemovalTask(options?.removeWorktree)) {
+    try {
+      const safety = await inspectWorktreeSafetyBeforeShutdownRemoval()
+      if (safety.keep) {
+        if (safety.reason) {
+          try {
+            // eslint-disable-next-line custom-rules/no-sync-fs -- must flush before exit
+            writeSync(2, safety.reason + '\n')
+          } catch {
+            // ignore stderr write errors
+          }
+        }
+      } else {
+        const budgetMs = options.removeWorktree.budgetMs ?? 15_000
+        await Promise.race([options.removeWorktree.run(), sleep(budgetMs)])
+      }
+    } catch {
+      // best-effort — never block shutdown
+    }
   }
 
   // Log startup perf before analytics shutdown flushes/cancels timers

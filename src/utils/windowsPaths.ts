@@ -224,6 +224,62 @@ export function shouldSkipWhereCandidateAsCwdShadow(
  * Pure variant — takes its dependencies as parameters so it can be unit-tested
  * without process-global mocks.
  */
+const GIT_FOR_WINDOWS_ARCHS = ['mingw64', 'ucrt64'] as const
+
+/**
+ * Resolve a Git for Windows `cmd\git.exe` launcher to its underlying
+ * `<arch>\bin\git.exe` (for git >= 2.26) when `MSYSTEM` is unset, avoiding
+ * the `cmd` wrapper process on every git invocation. Falls back to
+ * `launcherPath` if probing fails, is shadowed by cwd, or version < 2.26.
+ */
+export function resolveGitForWindowsDirectExe(
+  launcherPath: string,
+  deps: GitBashDiscoveryDeps,
+): string {
+  if (process.env.MSYSTEM !== undefined) {
+    return launcherPath
+  }
+  const normalizedLauncher = pathWin32.normalize(launcherPath)
+  if (!normalizedLauncher.toLowerCase().endsWith('\\cmd\\git.exe')) {
+    return launcherPath
+  }
+  const gitRoot = pathWin32.join(normalizedLauncher, '..', '..')
+  try {
+    const execPathOut = deps.execCommand(`"${normalizedLauncher}" --exec-path`)
+    const execPathNorm = pathWin32
+      .normalize(execPathOut.trim())
+      .replace(/[\\/]+$/, '')
+      .toLowerCase()
+    const arch = GIT_FOR_WINDOWS_ARCHS.find(
+      a =>
+        pathWin32.join(gitRoot, a, 'libexec', 'git-core').toLowerCase() ===
+        execPathNorm,
+    )
+    if (!arch) {
+      return launcherPath
+    }
+    const directExe = pathWin32.join(gitRoot, arch, 'bin', 'git.exe')
+    if (shouldSkipWhereCandidateAsCwdShadow(directExe, deps.cwdFn())) {
+      return launcherPath
+    }
+    if (!deps.checkExists(directExe)) {
+      return launcherPath
+    }
+    const versionOut = deps.execCommand(`"${directExe}" version`)
+    const m = /^git version (\d+)\.(\d+)\.\d+\S*\.windows\.\d+/.exec(
+      versionOut.trim(),
+    )
+    const major = Number(m?.[1])
+    const minor = Number(m?.[2])
+    if (major > 2 || (major === 2 && minor >= 26)) {
+      return directExe
+    }
+  } catch {
+    // Fall back to launcher if probe fails
+  }
+  return launcherPath
+}
+
 function findExecutableWithDeps(
   executable: string,
   deps: GitBashDiscoveryDeps,
@@ -234,13 +290,11 @@ function findExecutableWithDeps(
       // check 64 bit before 32 bit
       'C:\\Program Files\\Git\\cmd\\git.exe',
       'C:\\Program Files (x86)\\Git\\cmd\\git.exe',
-      // intentionally don't look for C:\Program Files\Git\mingw64\bin\git.exe
-      // because that directory is the "raw" tools with no environment setup
     ]
 
     for (const location of defaultLocations) {
       if (deps.checkExists(location)) {
-        return location
+        return resolveGitForWindowsDirectExe(location, deps)
       }
     }
   }
@@ -270,7 +324,9 @@ function findExecutableWithDeps(
       }
 
       // Return the first valid path that's not a cwd shadow
-      return candidatePath
+      return executable === 'git'
+        ? resolveGitForWindowsDirectExe(candidatePath, deps)
+        : candidatePath
     }
 
     return null

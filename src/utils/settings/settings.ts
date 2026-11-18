@@ -10,6 +10,7 @@ import {
   getUseCoworkPlugins,
 } from '../../bootstrap/state.js'
 import { uniq } from '../array.js'
+import { registerCleanup } from '../cleanupRegistry.js'
 import { logForDebugging } from '../debug.js'
 import { stripProjectScopeBlockedEnv } from '../managedEnvConstants.js'
 import { stripProjectScopedTracingSettings } from '../projectScopedTracingStrip.js'
@@ -1029,6 +1030,43 @@ export function updateSettingsForSource(
   return { error: null }
 }
 
+const settingsWriteQueues = new Map<string, Promise<unknown>>()
+
+/**
+ * densable `FRt` — serialize async settings writes per key (file path) so
+ * overlapping writes don't race and `drainSettingsWrites()` can await them.
+ */
+export function runInSettingsWriteQueue<T>(
+  key: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const prev = settingsWriteQueues.get(key) ?? Promise.resolve()
+  const next = prev.then(fn, fn)
+  const tracked = next.then(
+    () => {
+      if (settingsWriteQueues.get(key) === tracked) {
+        settingsWriteQueues.delete(key)
+      }
+    },
+    () => {
+      if (settingsWriteQueues.get(key) === tracked) {
+        settingsWriteQueues.delete(key)
+      }
+    },
+  )
+  settingsWriteQueues.set(key, tracked)
+  return next
+}
+
+/** densable `Qlt` — wait for all queued settings writes to settle before exit. */
+export async function drainSettingsWrites(): Promise<void> {
+  while (settingsWriteQueues.size > 0) {
+    await Promise.all([...settingsWriteQueues.values()])
+  }
+}
+
+registerCleanup(drainSettingsWrites)
+
 /**
  * densable `Is` userSettings V5 arm: `A()&&i&&ke` →
  * `i.write(q.userSettings(), P, {publishDiscipline:"followAtomic"})`.
@@ -1063,36 +1101,38 @@ export async function persistSettingsForSource(
     return updateSettingsForSource(source, settings, storageV5)
   }
 
-  try {
-    getFsImplementation().mkdirSync(dirname(filePath))
-    const loaded = loadExistingSettingsForWrite(source, filePath)
-    if ('error' in loaded) {
-      return { error: loaded.error }
+  return runInSettingsWriteQueue(filePath, async () => {
+    try {
+      getFsImplementation().mkdirSync(dirname(filePath))
+      const loaded = loadExistingSettingsForWrite(source, filePath)
+      if ('error' in loaded) {
+        return { error: loaded.error }
+      }
+      const updatedSettings = mergeSettingsForSource(loaded.settings, settings)
+      const payload = jsonStringify(updatedSettings, null, 2) + '\n'
+      const written = await write(userSettingsStorageV5Key(), payload, {
+        publishDiscipline: 'followAtomic',
+      })
+      if (!written.ok) {
+        const code =
+          written.error !== null &&
+          typeof written.error === 'object' &&
+          'code' in written.error
+            ? String(written.error.code)
+            : String(written.error)
+        throw new Error(`settings storageV5 write failed: ${code}`)
+      }
+      resetSettingsCache()
+    } catch (e) {
+      const error = new Error(
+        `Failed to read raw settings from ${filePath}: ${e}`,
+      )
+      logError(error)
+      return { error }
     }
-    const updatedSettings = mergeSettingsForSource(loaded.settings, settings)
-    const payload = jsonStringify(updatedSettings, null, 2) + '\n'
-    const written = await write(userSettingsStorageV5Key(), payload, {
-      publishDiscipline: 'followAtomic',
-    })
-    if (!written.ok) {
-      const code =
-        written.error !== null &&
-        typeof written.error === 'object' &&
-        'code' in written.error
-          ? String(written.error.code)
-          : String(written.error)
-      throw new Error(`settings storageV5 write failed: ${code}`)
-    }
-    resetSettingsCache()
-  } catch (e) {
-    const error = new Error(
-      `Failed to read raw settings from ${filePath}: ${e}`,
-    )
-    logError(error)
-    return { error }
-  }
 
-  return { error: null }
+    return { error: null }
+  })
 }
 
 /**
@@ -1197,6 +1237,7 @@ export function getManagedSettingsKeysForLogging(
       'excludedCommands',
       'autoAllowBashIfSandboxed',
       'enableWeakerNestedSandbox',
+      'allowNestedUserNamespaces',
       'enableWeakerNetworkIsolation',
       'ripgrep',
     ]),

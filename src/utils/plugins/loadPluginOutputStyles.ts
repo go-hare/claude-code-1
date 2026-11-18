@@ -21,14 +21,10 @@ async function loadOutputStylesFromDirectory(
   await walkPluginMarkdown(
     outputStylesPath,
     async fullPath => {
-      const style = await loadOutputStyleFromFile(
-        fullPath,
-        pluginName,
-        loadedPaths,
-      )
+      const style = await loadOutputStyleFromFile(fullPath, pluginName)
       if (style) styles.push(style)
     },
-    { logLabel: 'output-styles' },
+    { logLabel: 'output-styles', loadedPaths },
   )
   return styles
 }
@@ -36,10 +32,10 @@ async function loadOutputStylesFromDirectory(
 async function loadOutputStyleFromFile(
   filePath: string,
   pluginName: string,
-  loadedPaths: Set<string>,
+  loadedPaths?: Set<string>,
 ): Promise<OutputStyleConfig | null> {
   const fs = getFsImplementation()
-  if (isDuplicatePath(fs, filePath, loadedPaths)) {
+  if (loadedPaths !== undefined && isDuplicatePath(fs, filePath, loadedPaths)) {
     return null
   }
   try {

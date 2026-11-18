@@ -46,6 +46,12 @@ import {
   isClaudeAISubscriber,
 } from 'src/utils/auth.js'
 import { getPlatform, getWslVersion } from 'src/utils/platform.js'
+import {
+  formatGatewaySessionExpiredError,
+  getGatewayAuth,
+  isGatewayAuthExpired,
+  isGatewayAuthPinned,
+} from 'src/utils/gatewayEnv.js'
 
 import { registerCleanup } from '../cleanupRegistry.js'
 import { getHasFormattedOutput, logForDebugging } from '../debug.js'
@@ -159,7 +165,10 @@ async function getOtlpReaders() {
         process.env.OTEL_EXPORTER_OTLP_METRICS_PROTOCOL?.trim() ||
         process.env.OTEL_EXPORTER_OTLP_PROTOCOL?.trim()
 
-      const httpConfig = getOTLPExporterConfig(protocol)
+      const { onlyConfigHeaders, ...httpConfig } = getOTLPExporterConfig(
+        protocol,
+        'metrics',
+      )
 
       switch (protocol) {
         case 'grpc': {
@@ -168,21 +177,39 @@ async function getOtlpReaders() {
           const { OTLPMetricExporter } = await import(
             '@opentelemetry/exporter-metrics-otlp-grpc'
           )
-          exporters.push(new OTLPMetricExporter())
+          exporters.push(
+            withSuppressedOtelHeadersEnv(
+              'METRICS',
+              onlyConfigHeaders,
+              () => new OTLPMetricExporter(),
+            ),
+          )
           break
         }
         case 'http/json': {
           const { OTLPMetricExporter } = await import(
             '@opentelemetry/exporter-metrics-otlp-http'
           )
-          exporters.push(new OTLPMetricExporter(httpConfig))
+          exporters.push(
+            withSuppressedOtelHeadersEnv(
+              'METRICS',
+              onlyConfigHeaders,
+              () => new OTLPMetricExporter(httpConfig),
+            ),
+          )
           break
         }
         case 'http/protobuf': {
           const { OTLPMetricExporter } = await import(
             '@opentelemetry/exporter-metrics-otlp-proto'
           )
-          exporters.push(new OTLPMetricExporter(httpConfig))
+          exporters.push(
+            withSuppressedOtelHeadersEnv(
+              'METRICS',
+              onlyConfigHeaders,
+              () => new OTLPMetricExporter(httpConfig),
+            ),
+          )
           break
         }
         default:
@@ -234,28 +261,49 @@ async function getOtlpLogExporters() {
     if (exporterType === 'console') {
       exporters.push(new ConsoleLogRecordExporter())
     } else if (exporterType === 'otlp') {
-      const httpConfig = getOTLPExporterConfig(protocol)
+      const { onlyConfigHeaders, ...httpConfig } = getOTLPExporterConfig(
+        protocol,
+        'logs',
+      )
 
       switch (protocol) {
         case 'grpc': {
           const { OTLPLogExporter } = await import(
             '@opentelemetry/exporter-logs-otlp-grpc'
           )
-          exporters.push(new OTLPLogExporter())
+          exporters.push(
+            withSuppressedOtelHeadersEnv(
+              'LOGS',
+              onlyConfigHeaders,
+              () => new OTLPLogExporter(),
+            ),
+          )
           break
         }
         case 'http/json': {
           const { OTLPLogExporter } = await import(
             '@opentelemetry/exporter-logs-otlp-http'
           )
-          exporters.push(new OTLPLogExporter(httpConfig))
+          exporters.push(
+            withSuppressedOtelHeadersEnv(
+              'LOGS',
+              onlyConfigHeaders,
+              () => new OTLPLogExporter(httpConfig),
+            ),
+          )
           break
         }
         case 'http/protobuf': {
           const { OTLPLogExporter } = await import(
             '@opentelemetry/exporter-logs-otlp-proto'
           )
-          exporters.push(new OTLPLogExporter(httpConfig))
+          exporters.push(
+            withSuppressedOtelHeadersEnv(
+              'LOGS',
+              onlyConfigHeaders,
+              () => new OTLPLogExporter(httpConfig),
+            ),
+          )
           break
         }
         default:
@@ -285,28 +333,49 @@ async function getOtlpTraceExporters() {
         process.env.OTEL_EXPORTER_OTLP_TRACES_PROTOCOL?.trim() ||
         process.env.OTEL_EXPORTER_OTLP_PROTOCOL?.trim()
 
-      const httpConfig = getOTLPExporterConfig(protocol)
+      const { onlyConfigHeaders, ...httpConfig } = getOTLPExporterConfig(
+        protocol,
+        'traces',
+      )
 
       switch (protocol) {
         case 'grpc': {
           const { OTLPTraceExporter } = await import(
             '@opentelemetry/exporter-trace-otlp-grpc'
           )
-          exporters.push(new OTLPTraceExporter())
+          exporters.push(
+            withSuppressedOtelHeadersEnv(
+              'TRACES',
+              onlyConfigHeaders,
+              () => new OTLPTraceExporter(),
+            ),
+          )
           break
         }
         case 'http/json': {
           const { OTLPTraceExporter } = await import(
             '@opentelemetry/exporter-trace-otlp-http'
           )
-          exporters.push(new OTLPTraceExporter(httpConfig))
+          exporters.push(
+            withSuppressedOtelHeadersEnv(
+              'TRACES',
+              onlyConfigHeaders,
+              () => new OTLPTraceExporter(httpConfig),
+            ),
+          )
           break
         }
         case 'http/protobuf': {
           const { OTLPTraceExporter } = await import(
             '@opentelemetry/exporter-trace-otlp-proto'
           )
-          exporters.push(new OTLPTraceExporter(httpConfig))
+          exporters.push(
+            withSuppressedOtelHeadersEnv(
+              'TRACES',
+              onlyConfigHeaders,
+              () => new OTLPTraceExporter(httpConfig),
+            ),
+          )
           break
         }
         default:
@@ -782,11 +851,59 @@ function parseOtelHeadersEnvVar(): Record<string, string> {
  * - $Nr prefetch when helper + http/json|http/protobuf
  * - httpAgentOptions always = Mvd(endpoint) so YAo sets Content-Length (#31)
  */
-function getOTLPExporterConfig(protocol?: string) {
+export function withSuppressedOtelHeadersEnv<T>(
+  signal: 'METRICS' | 'LOGS' | 'TRACES',
+  onlyConfigHeaders: boolean | undefined,
+  fn: () => T,
+): T {
+  if (!onlyConfigHeaders) return fn()
+  const names = [
+    'OTEL_EXPORTER_OTLP_HEADERS',
+    `OTEL_EXPORTER_OTLP_${signal}_HEADERS`,
+  ]
+  const saved: Array<{ name: string; value: string }> = []
+  for (const name of names) {
+    const value = process.env[name]
+    if (value !== undefined) {
+      saved.push({ name, value })
+      delete process.env[name]
+    }
+  }
+  try {
+    return fn()
+  } finally {
+    for (const { name, value } of saved) {
+      process.env[name] = value
+    }
+  }
+}
+
+export function getOTLPExporterConfig(
+  protocol?: string,
+  signal?: 'metrics' | 'logs' | 'traces',
+) {
+  const gatewayAuth = getGatewayAuth()
+  if (isGatewayAuthPinned(gatewayAuth) && gatewayAuth) {
+    const baseUrl = gatewayAuth.url
+    return {
+      ...(signal ? { url: `${baseUrl}/v1/${signal}` } : {}),
+      onlyConfigHeaders: true,
+      headers: async (): Promise<Record<string, string>> => {
+        const current = getGatewayAuth()
+        if (!current || current.url !== baseUrl) return {}
+        if (isGatewayAuthExpired(current)) {
+          throw new Error(formatGatewaySessionExpiredError())
+        }
+        return { Authorization: `Bearer ${current.jwt}` }
+      },
+      httpAgentOptions: createOtlpHttpAgentFactory(baseUrl),
+    }
+  }
+
   const settings = getSettings_DEPRECATED()
 
   // Build base config
-  const config: Record<string, unknown> = {}
+  const config: Record<string, unknown> & { onlyConfigHeaders?: boolean } = {}
 
   // Parse static headers from env var once (doesn't change at runtime)
   const staticHeaders = parseOtelHeadersEnvVar()

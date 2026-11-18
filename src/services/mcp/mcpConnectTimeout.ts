@@ -925,3 +925,208 @@ export function clearRememberedLegacyStdio(config: {
 export function resetStdioDiscoverVerdictCacheForTest(): void {
   stdioDiscoverVerdictCache.clear()
 }
+
+// ── 2.1.302 #911: 2026-07-28 result compatibility shim (SEA o0o) ─────────────
+
+export const MODERN_MCP_PROTOCOL_VERSION = '2026-07-28'
+const PROTOCOL_VERSION_META_KEY = 'io.modelcontextprotocol/protocolVersion'
+const CACHED_LIST_METHODS = new Set([
+  'tools/list',
+  'prompts/list',
+  'resources/list',
+  'resources/templates/list',
+  'resources/read',
+  'server/discover',
+])
+const MAX_PENDING_MODERN_REQUESTS = 256
+
+export type ModernCompatTransportLike = {
+  send: (message: Record<string, unknown>, options?: unknown) => Promise<void>
+  onmessage?: (message: Record<string, unknown>, extra?: unknown) => void
+}
+
+function hasProtocolVersionMeta(message: Record<string, unknown>): boolean {
+  if (!('params' in message)) return false
+  const params = message.params
+  if (typeof params !== 'object' || params === null) return false
+  const meta = (params as { _meta?: unknown })._meta
+  return (
+    typeof meta === 'object' &&
+    meta !== null &&
+    PROTOCOL_VERSION_META_KEY in meta &&
+    typeof (meta as Record<string, unknown>)[PROTOCOL_VERSION_META_KEY] ===
+      'string'
+  )
+}
+
+export function fillMissingModernResultFields(
+  method: string,
+  result: Record<string, unknown>,
+): string[] {
+  const filled: string[] = []
+  if (result.resultType === undefined) {
+    result.resultType = 'complete'
+    filled.push('resultType="complete"')
+  }
+  if (result.resultType === 'complete' && CACHED_LIST_METHODS.has(method)) {
+    if (result.ttlMs === undefined) {
+      result.ttlMs = 0
+      filled.push('ttlMs=0')
+    }
+    if (result.cacheScope === undefined) {
+      result.cacheScope = 'private'
+      filled.push('cacheScope="private"')
+    }
+  }
+  return filled
+}
+
+/**
+ * SEA `o0o(transport, serverName)` — for servers negotiating `2026-07-28`,
+ * fills omitted `resultType`, `ttlMs`, or `cacheScope` on inbound responses
+ * before the SDK's `Protocol._onresponse` validates the result.
+ */
+export function wrapModernProtocolResultCompat<
+  T extends ModernCompatTransportLike,
+>(
+  transport: T,
+  serverName: string,
+  log: (message: string) => void = msg =>
+    logForDebugging(`[MCP:${serverName}] ${msg}`),
+): T {
+  const pending = new Map<string, string>()
+  const loggedMethods = new Set<string>()
+  const origSend = transport.send.bind(transport)
+  transport.send = (message, options) => {
+    if (
+      'method' in message &&
+      'id' in message &&
+      message.id !== undefined &&
+      typeof message.method === 'string' &&
+      hasProtocolVersionMeta(message)
+    ) {
+      if (pending.size >= MAX_PENDING_MODERN_REQUESTS) {
+        const oldest = pending.keys().next()
+        if (!oldest.done) pending.delete(oldest.value)
+      }
+      pending.set(String(message.id), message.method)
+    }
+    return origSend(message, options)
+  }
+
+  const prevOnMessage = transport.onmessage
+  transport.onmessage = (message, extra) => {
+    prevOnMessage?.(message, extra)
+    if ('method' in message || !('id' in message) || message.id === undefined) {
+      return
+    }
+    const idKey = String(message.id)
+    const method = pending.get(idKey)
+    if (method === undefined) return
+    pending.delete(idKey)
+    if (!('result' in message)) return
+    const result = message.result
+    if (
+      typeof result !== 'object' ||
+      result === null ||
+      Array.isArray(result)
+    ) {
+      return
+    }
+    const filled = fillMissingModernResultFields(
+      method,
+      result as Record<string, unknown>,
+    )
+    if (filled.length > 0 && !loggedMethods.has(method)) {
+      loggedMethods.add(method)
+      log(
+        `${method} result omits required fields although the server negotiated ${MODERN_MCP_PROTOCOL_VERSION}; filled in ${filled.join(', ')} instead of rejecting it (not logged again for ${method} on this connection)`,
+      )
+    }
+  }
+  return transport
+}
+
+// ── 2.1.307 #1079: CONNECT_SUSPENDED sleep/clock-jump detection (SEA hr/zs) ──
+
+export const SUSPEND_DRIFT_THRESHOLD_MS = 1_000
+export const MAX_CONNECT_SUSPEND_REDIALS = 10
+
+export type ConnectClock = {
+  now: () => number
+  monotonicNow: () => number
+}
+
+export type ConnectClockSnapshot = {
+  clock: ConnectClock
+  awakeStart: number
+  wallStart: number
+}
+
+const defaultConnectClock: ConnectClock = {
+  now: () => Date.now(),
+  monotonicNow: () => performance.now(),
+}
+
+export function captureConnectClockSnapshot(
+  clock: ConnectClock = defaultConnectClock,
+): ConnectClockSnapshot {
+  return {
+    clock,
+    awakeStart: clock.monotonicNow(),
+    wallStart: clock.now(),
+  }
+}
+
+export function detectConnectSuspendedMessage(
+  serverName: string,
+  snapshot: ConnectClockSnapshot,
+): string | undefined {
+  const wallElapsed = snapshot.clock.now() - snapshot.wallStart
+  const awakeElapsed = snapshot.clock.monotonicNow() - snapshot.awakeStart
+  if (
+    !(wallElapsed - awakeElapsed > SUSPEND_DRIFT_THRESHOLD_MS) ||
+    !getFeatureValue_CACHED_MAY_BE_STALE(
+      'tengu_mcp_connect_suspend_redial',
+      true,
+    )
+  ) {
+    return undefined
+  }
+  return `MCP server "${serverName}" connection timed out. Your computer went to sleep or its clock changed while connecting.`
+}
+
+export async function redialOnConnectSuspended<
+  T extends { name: string; type: string; errorCode?: string },
+>(
+  dial: () => Promise<T>,
+  isStillActive: () => boolean,
+  onExhausted: () => void = () => {},
+  log: (serverName: string, message: string) => void = (s, m) =>
+    logForDebugging(`[MCP:${s}] ${m}`),
+): Promise<T> {
+  let result = await dial()
+  let attempts = 0
+  while (
+    attempts < MAX_CONNECT_SUSPEND_REDIALS &&
+    result.type === 'failed' &&
+    result.errorCode === 'CONNECT_SUSPENDED' &&
+    isStillActive()
+  ) {
+    attempts++
+    log(
+      result.name,
+      `Connecting again after a sleep or a clock change (${attempts} of at most ${MAX_CONNECT_SUSPEND_REDIALS})`,
+    )
+    result = await dial()
+  }
+  if (
+    attempts === MAX_CONNECT_SUSPEND_REDIALS &&
+    result.type === 'failed' &&
+    result.errorCode === 'CONNECT_SUSPENDED' &&
+    isStillActive()
+  ) {
+    onExhausted()
+  }
+  return result
+}

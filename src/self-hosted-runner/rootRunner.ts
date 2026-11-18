@@ -30,6 +30,7 @@ import { homedir, hostname } from 'node:os'
 import { dirname, join, resolve as pathResolve } from 'node:path'
 import { isEnvDefinedFalsy, isEnvTruthy } from 'src/utils/envUtils.js'
 import { sanitizePermanentRefWording } from './gitPrepare.js'
+import { DEFAULT_CHECKOUT_HOOK_TIMEOUT_MS } from './sessionHooks.js'
 import {
   captureGovernedGitConfigSeed,
   codeSignArtifacts,
@@ -127,6 +128,16 @@ export const RETIRE_AT_MAX_SEC = 100_000_000_000
 export const DEFAULT_SESSION_STOP_GRACE_MS = 5_000
 /** densable `yGr` — default post-session hook timeout 60s */
 export const DEFAULT_POST_SESSION_HOOK_TIMEOUT_MS = 60_000
+
+/** densable `Vl` — checkout hook timeout (default 30 min, 0 disables) */
+export function resolveCheckoutHookTimeoutMs(): number {
+  const raw = process.env.SELF_HOSTED_RUNNER_CHECKOUT_HOOK_TIMEOUT_MS
+  if (raw === undefined || raw === '') return DEFAULT_CHECKOUT_HOOK_TIMEOUT_MS
+  const n = readEnvMs('SELF_HOSTED_RUNNER_CHECKOUT_HOOK_TIMEOUT_MS')
+  return n > 0 || (raw.trim() !== '' && Number(raw) === 0)
+    ? n
+    : DEFAULT_CHECKOUT_HOOK_TIMEOUT_MS
+}
 /** densable `GUi` — fixed addend in shutdown budget calc */
 export const SHUTDOWN_BUDGET_PAD_MS = 15_000
 /** densable `_Gr` — push-outcome-on-release extra budget */
@@ -859,6 +870,20 @@ export function parseRootArgs(argv: string[]): RootRunnerArgs {
         )
         break
       }
+      case '--checkout-hook-timeout-min': {
+        const s = argv[++n]
+        const a = Number(s)
+        if (!s || !Number.isFinite(a) || a < 0 || a > MAX_MINUTES_FLAG) {
+          throw new Error(
+            `--checkout-hook-timeout-min must be a non-negative number of minutes (0 disables, max ${MAX_MINUTES_FLAG}), got: ${s}`,
+          )
+        }
+        process.env.SELF_HOSTED_RUNNER_CHECKOUT_HOOK_TIMEOUT_MS = String(
+          a * 60 * 1000,
+        )
+        t.envSetByFlag.add('SELF_HOSTED_RUNNER_CHECKOUT_HOOK_TIMEOUT_MS')
+        break
+      }
       case '--drain-wait-bg-tasks-sec':
       case '--drain-wait-sec': {
         if (o === '--drain-wait-bg-tasks-sec') {
@@ -1126,6 +1151,12 @@ Runtime:
                               SIGTERM budget for the post-session lifecycle hook, on every session
                               end including runner shutdown. Default: ${postHook}.
                               [env: SELF_HOSTED_RUNNER_POST_SESSION_HOOK_TIMEOUT_MS, in ms]
+  --checkout-hook-timeout-min <n>
+                              Wall-clock budget for each run of the checkout lifecycle hook. A hook
+                              still running at the budget is stopped (SIGTERM, then SIGKILL) and the
+                              session fails setup with a "checkout hook timed out" error instead of
+                              staying at "Preparing…". Default: ${DEFAULT_CHECKOUT_HOOK_TIMEOUT_MS / 60_000}. 0 disables. Max: ${MAX_MINUTES_FLAG}.
+                              [env: SELF_HOSTED_RUNNER_CHECKOUT_HOOK_TIMEOUT_MS, in ms]
   --drain-wait-sec <n>        On SIGTERM/SIGINT, wait up to N seconds for each session's in-flight
                               turn and running background tasks before sending the session process
                               its SIGTERM. Default: 0. Max: 86400.
@@ -1937,6 +1968,16 @@ export async function runPollSkeleton(
             )
             return
           }
+          const childSilent =
+            kind === 'startup' &&
+            (snap as (BgTaskSnapshot & { childSilent?: boolean }) | undefined)
+              ?.childSilent === true
+          if (childSilent && releasedAwaitingDeassign.has(sessionId)) {
+            opts.onDebug(
+              `[runner:session] ${sessionId} no child output for ${formatDelayMs(startupTimeoutMs)}, but a release is already in flight: leaving it to that one`,
+            )
+            return
+          }
           clearIdleTimer()
           if (!finished && health) {
             if (
@@ -1963,7 +2004,9 @@ export async function runPollSkeleton(
             retireAttempt = 0
             clearDeferredRemind()
             clearIdleTimer()
-            releaseFalseCounts.delete(sessionId)
+            if (lastIdleKind !== 'startup') {
+              releaseFalseCounts.delete(sessionId)
+            }
             return
           }
           if (kind === 'turn-end-deferred') {
@@ -1984,13 +2027,15 @@ export async function runPollSkeleton(
           setTurn(false)
           deferredHold = false
           lastIdleKind = kind
-          const baseMs = initObserved
-            ? retireAttempt === 0
-              ? 0
-              : retireReleaseRetryMs
-            : kind === 'startup'
-              ? startupTimeoutMs
-              : sessionIdleMs
+          const baseMs = childSilent
+            ? 0
+            : initObserved
+              ? retireAttempt === 0
+                ? 0
+                : retireReleaseRetryMs
+              : kind === 'startup'
+                ? startupTimeoutMs
+                : sessionIdleMs
           const waitMs = initObserved ? retireReleaseRetryMs : baseMs
           const whenLabel = (): string =>
             initObserved
@@ -2001,11 +2046,11 @@ export async function runPollSkeleton(
           const why = initObserved
             ? standingWhy()
             : kind === 'startup'
-              ? `no child output for ${formatDelayMs(baseMs)}`
+              ? `no child output for ${formatDelayMs(startupTimeoutMs)}`
               : kind === 'awaiting-action'
                 ? `awaiting user action ${formatDelayMs(baseMs)}`
                 : `user idle ${formatDelayMs(baseMs)}`
-          if (!initObserved && baseMs <= 0) return
+          if (!initObserved && !childSilent && baseMs <= 0) return
           if (finished || childAc.signal.aborted) return
           if (
             kind === 'awaiting-action' &&
@@ -2025,7 +2070,7 @@ export async function runPollSkeleton(
               `[runner:session] ${sessionId} awaiting user action overrides deferral (${parts.join(' / ')}) — idle clock armed`,
             )
           }
-          if (!initObserved) {
+          if (!initObserved && !childSilent) {
             opts.onStatus(
               `[runner:session] ${sessionId} idle clock armed (${kind}): releases in ${formatDelayMs(baseMs)} at ${new Date(Date.now() + baseMs).toISOString()} unless new activity arrives`,
             )
@@ -2268,6 +2313,8 @@ export async function runPollSkeleton(
                 gitHostRewrites: opts.gitHostRewrites,
                 pushOutcomeOnRelease: opts.pushOutcomeOnRelease,
                 postSessionHookTimeoutMs,
+                checkoutHookTimeoutMs: resolveCheckoutHookTimeoutMs(),
+                startupTimeoutMs,
                 onSessionActivity,
                 onBgTaskLedger: n => {
                   const slot = active.get(sessionId)

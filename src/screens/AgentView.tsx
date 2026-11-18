@@ -1146,10 +1146,10 @@ function FleetPeekPanel({
  * `vvh` onKeyDownCapture is wired on AgentViewApp root Box (SEA E7=vvh(...)).
  * Must mount under AppStateProvider + KeybindingSetup (createRoot path).
  */
-function AgentsSelectionChrome(): null {
+function AgentsSelectionChrome({ lastCopiedRef }: { lastCopiedRef: React.MutableRefObject<string | null> }): null {
   const selection = useSelection();
   const { addNotification } = useNotifications();
-  useCopyOnSelect(selection, true, text => notifySelectionCopied(addNotification, text));
+  useCopyOnSelect(selection, true, text => notifySelectionCopied(addNotification, text), lastCopiedRef);
   useSelectionBgColor(selection);
   useSelectionClearKeybinding(selection, true);
   return null;
@@ -4666,10 +4666,10 @@ function AgentViewApp({
   // -------------------------------------------------------------------------
   // densable FleetView: let E7=vvh(yC,or().copyOnSelect??!0); onKeyDownCapture:E7
   const selectionForClear = useSelection();
-  const copyOnSelect = getGlobalConfig().copyOnSelect ?? true;
+  const lastCopiedRef = useRef<string | null>(null);
   const selectionKeyDownCapture = useMemo(
-    () => createSelectionClearKeyDownCapture(selectionForClear, copyOnSelect),
-    [selectionForClear, copyOnSelect],
+    () => createSelectionClearKeyDownCapture(selectionForClear, lastCopiedRef),
+    [selectionForClear],
   );
 
   // densable GP isActive: Ct — leftover always u(t); cursor not gated on focusArea.
@@ -4708,6 +4708,7 @@ function AgentViewApp({
           scrollRef.current?.scrollBy(e.deltaY > 0 ? 3 : -3);
         }}
       >
+        <AgentsSelectionChrome lastCopiedRef={lastCopiedRef} />
         {/* Top: scrollable list area (2.1.289 fl ScrollBox) */}
         <ScrollBox ref={scrollRef} flexDirection="column" flexGrow={1} paddingTop={1} stickyScroll={false}>
           {/* Header — densable Od_/WB exact (2.1.211):
@@ -5691,7 +5692,6 @@ export async function renderAgentView(options?: {
           <ThemeProvider initialState={getThemeSetting()} onThemeSave={saveThemeSetting}>
             <AppStateProvider>
               <KeybindingSetup>
-                <AgentsSelectionChrome />
                 <AgentViewApp
                   enteredViaLeftArrow={enteredViaLeftArrow}
                   dispatchExtraArgs={options?.dispatchExtraArgs}

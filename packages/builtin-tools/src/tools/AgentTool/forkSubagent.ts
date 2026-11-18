@@ -7,10 +7,12 @@ import {
   FORK_DIRECTIVE_PREFIX,
 } from 'src/constants/xml.js'
 import { isCoordinatorMode } from 'src/coordinator/coordinatorMode.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
+import { isForkSubagentDisabled } from 'src/utils/sessionBackgroundGates.js'
 import type {
   AssistantMessage,
   Message as MessageType,
@@ -54,23 +56,60 @@ export function resetForkSubagentProductSource(): void {
   forkProductSource = undefined
 }
 
-export function isForkSubagentProductEnabled(): boolean {
-  // Omo: coordinator and env false win before the sticky read.
-  if (isCoordinatorMode()) return false
-  if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_FORK_SUBAGENT)) return false
-  if (forkProductSource !== undefined) return true
-  // Imo: env true → env; Ce() headless → disabled (not stored); else default.
-  let source: ForkProductSource | 'disabled'
-  if (isEnvTruthy(process.env.CLAUDE_CODE_FORK_SUBAGENT)) source = 'env'
-  else if (getIsNonInteractiveSession()) source = 'disabled'
-  else source = 'default'
-  if (source === 'disabled') return false
+export function resolveForkSubagentProductSource():
+  | ForkProductSource
+  | 'disabled' {
+  // Omo / wLn: coordinator, mcp serve, and env false win before the sticky read.
+  if (isCoordinatorMode()) return 'disabled'
+  if (isForkSubagentDisabled()) return 'disabled'
+  if (process.env.CLAUDE_CODE_ENTRYPOINT === 'mcp') return 'disabled'
+  if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_FORK_SUBAGENT))
+    return 'disabled'
+  if (forkProductSource !== undefined) return forkProductSource
+  // wLn (2.1.302 #924): on by default in claude -p / SDK / desktop / VS Code
+  // unless tengu_federated_ullman disables non-interactive default-on.
+  if (
+    !isEnvTruthy(process.env.CLAUDE_CODE_FORK_SUBAGENT) &&
+    getIsNonInteractiveSession() &&
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_federated_ullman', false)
+  ) {
+    return 'disabled'
+  }
+  const source: ForkProductSource = isEnvTruthy(
+    process.env.CLAUDE_CODE_FORK_SUBAGENT,
+  )
+    ? 'env'
+    : 'default'
   forkProductSource = source
   logEvent('tengu_fork_subagent_enabled', {
     source:
       source as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   })
-  return true
+  return source
+}
+
+export function isForkSubagentProductEnabled(): boolean {
+  return resolveForkSubagentProductSource() !== 'disabled'
+}
+
+/**
+ * SEA `IFt()` (2.1.302 #925) — true when fork subagent gating forces
+ * main-thread spawns into the background (terminal, desktop app, VS Code, or
+ * `CLAUDE_CODE_FORK_SUBAGENT=1`). False in `claude -p` / Agent SDK unless
+ * `CLAUDE_CODE_FORK_SUBAGENT=1`.
+ */
+export function isForkSubagentForceAsyncEnabled(): boolean {
+  const source = resolveForkSubagentProductSource()
+  if (source === 'disabled') return false
+  if (source === 'env') return true
+  if (!getIsNonInteractiveSession()) return true
+  const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT
+  return (
+    entrypoint === 'claude-desktop' ||
+    entrypoint === 'claude-desktop-3p' ||
+    entrypoint === 'local-agent' ||
+    entrypoint === 'claude-vscode'
+  )
 }
 
 /**
@@ -134,25 +173,23 @@ export function isInForkChild(messages: MessageType[]): boolean {
   })
 }
 
-/** Placeholder text used for all tool_result blocks in the fork prefix.
- * Must be identical across all fork children for prompt cache sharing. */
-const FORK_PLACEHOLDER_RESULT = 'Fork started — processing in background'
+export const FORK_OWN_PLACEHOLDER_RESULT = 'Fork started — that fork is you.'
+export const FORK_OWN_NON_AGENT_PLACEHOLDER_RESULT =
+  "This call started a fork, and that fork is you. The call's other work and its result belong to the parent."
+export const FORK_SIBLING_PLACEHOLDER_RESULT =
+  "This is the parent's call, not yours. It may not have run yet, and its result goes to the parent."
 
 /**
  * Build the forked conversation messages for the child agent.
  *
- * For prompt cache sharing, all fork children must produce byte-identical
- * API request prefixes. This function:
- * 1. Keeps the full parent assistant message (all tool_use blocks, thinking, text)
- * 2. Builds a single user message with tool_results for every tool_use block
- *    using an identical placeholder, then appends a per-child directive text block
- *
- * Result: [...history, assistant(all_tool_uses), user(placeholder_results..., directive)]
- * Only the final text block differs per child, maximizing cache hits.
+ * For prompt cache sharing, all fork children share the parent assistant message
+ * and receive tool_results for every tool_use block, distinguishing the child's
+ * own launch (`ownToolUseId`) from sibling parent calls (SEA `ZEs` 2.1.307 #1098).
  */
 export function buildForkedMessages(
   directive: string,
   assistantMessage: AssistantMessage,
+  ownToolUseId?: string,
 ): MessageType[] {
   // Clone the assistant message to avoid mutating the original, keeping all
   // content blocks (thinking, text, and every tool_use)
@@ -190,14 +227,21 @@ export function buildForkedMessages(
     ]
   }
 
-  // Build tool_result blocks for every tool_use, all with identical placeholder text
+  // Build tool_result blocks for every tool_use, identifying this fork's own
+  // tool_use_id vs sibling parent calls (SEA ZEs: S9r / A9r / P9r).
+  const ownId = toolUseBlocks.length === 1 ? toolUseBlocks[0]?.id : ownToolUseId
   const toolResultBlocks = toolUseBlocks.map(block => ({
     type: 'tool_result' as const,
     tool_use_id: block.id,
     content: [
       {
         type: 'text' as const,
-        text: FORK_PLACEHOLDER_RESULT,
+        text:
+          block.id !== ownId
+            ? FORK_SIBLING_PLACEHOLDER_RESULT
+            : block.name === AGENT_TOOL_NAME || block.name === 'Task'
+              ? FORK_OWN_PLACEHOLDER_RESULT
+              : FORK_OWN_NON_AGENT_PLACEHOLDER_RESULT,
       },
     ],
   }))

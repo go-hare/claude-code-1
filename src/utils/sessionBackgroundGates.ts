@@ -70,6 +70,7 @@ export class SessionBackgroundGates {
   remoteAgentIsolationDisabled = false
   unsandboxedCommandsDisabled = false
   backgroundDeadlineDisabled = false
+  forkSubagentDisabled = false
   backgroundLaunchRule: BackgroundLaunchRule | undefined
 
   reset(): void {
@@ -78,6 +79,7 @@ export class SessionBackgroundGates {
     this.remoteAgentIsolationDisabled = false
     this.unsandboxedCommandsDisabled = false
     this.backgroundDeadlineDisabled = false
+    this.forkSubagentDisabled = false
     this.backgroundLaunchRule = undefined
   }
 }
@@ -143,6 +145,14 @@ export function disableUnsandboxedCommands(): void {
 
 export function disableBackgroundDeadline(): void {
   getSessionBackgroundGates().backgroundDeadlineDisabled = true
+}
+
+export function disableForkSubagent(): void {
+  getSessionBackgroundGates().forkSubagentDisabled = true
+}
+
+export function isForkSubagentDisabled(): boolean {
+  return getSessionBackgroundGates().forkSubagentDisabled
 }
 
 /**

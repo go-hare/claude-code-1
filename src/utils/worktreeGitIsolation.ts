@@ -107,9 +107,14 @@ const XARGS_LIKE = new Set(['xargs', 'parallel'])
 /** densable ezg */
 const FIND_EXEC_DIR = new Set(['-execdir', '-okdir'])
 
-/** densable q6g / z6g */
+/** densable q6g / z6g / JOs */
 const CD_CMDS = new Set(['cd', 'pushd', 'popd', 'chdir'])
 const CD_PREFIX = new Set(['command', 'builtin', 'time', 'noglob', 'nocorrect'])
+const ENV_ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=/
+const EXEC_ARG_FLAG_RE = /^-(?=[acl])[cl]*(?:a(.*))?$/
+const NICE_NUM_RE = /^(?:-?\d+|-\d+)$/
+const TIMEOUT_DURATION_RE =
+  /^\+?(?:(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?|0[xX](?:[\da-fA-F]+\.?[\da-fA-F]*|\.[\da-fA-F]+)(?:[pP][+-]?\d+)?|[iI][nN][fF](?:[iI][nN][iI][tT][yY])?)[smhd]?$/
 
 /** densable K6g / Y6g */
 const ENV_LIKE = new Set([
@@ -369,14 +374,124 @@ function nzg(argv: string[]): number[] {
   return t
 }
 
-/** densable rDu / YRu — cd/pushd/popd after command/builtin/time prefixes. */
-function rDu(argv: string[]): number {
-  let t = 0
-  while (t < argv.length && CD_PREFIX.has(argv[t]!.toLowerCase())) {
-    t += 1
-    while (t < argv.length && argv[t]!.startsWith('-')) t += 1
+/**
+ * 2.1.309 #1125 (SEA JOs): Skip leading env/locale assignments (`LC_ALL=C`, etc.)
+ * and shell/command wrapper prefixes before matching a target command.
+ */
+export function skipWrapperPrefixes(
+  argv: string[],
+  isTarget: (cmd: string) => boolean,
+): number {
+  let i = 0
+  while (i < argv.length && ENV_ASSIGNMENT_RE.test(argv[i]!)) i++
+  while (i < argv.length) {
+    const word = argv[i]!
+    const lower = word.toLowerCase()
+    switch (lower) {
+      case 'noglob':
+      case 'nocorrect':
+        i++
+        continue
+      case 'builtin':
+        i++
+        continue
+      case 'command':
+        i++
+        if (argv[i] === '-p') i++
+        if (argv[i] === '--') i++
+        continue
+      case 'exec':
+        i++
+        while (i < argv.length) {
+          const m = EXEC_ARG_FLAG_RE.exec(argv[i] ?? '')
+          if (!m) break
+          i += m[1] === '' ? 2 : 1
+        }
+        if (argv[i] === '--') i++
+        continue
+      case 'nohup':
+        i++
+        if (argv[i] === '--') i++
+        continue
+      case 'time':
+        i++
+        if (argv[i] === '-p') i++
+        if (argv[i] === '--') i++
+        while (i < argv.length && ENV_ASSIGNMENT_RE.test(argv[i]!)) i++
+        continue
+      case 'nice':
+        i++
+        while (i < argv.length && argv[i] !== undefined) {
+          const opt = argv[i]!
+          if (opt === '-n' || opt === '--adjustment') {
+            i += 2
+          } else if (NICE_NUM_RE.test(opt)) {
+            i++
+          } else {
+            break
+          }
+        }
+        if (argv[i] === '--') i++
+        continue
+      case 'env':
+        i++
+        while (
+          argv[i] === '-i' ||
+          argv[i] === '-' ||
+          argv[i] === '--ignore-environment'
+        ) {
+          i++
+        }
+        if (argv[i] === '--') i++
+        while (i < argv.length && /^[^-=][^=]*=/.test(argv[i]!)) i++
+        if (argv[i]?.startsWith('-') === true) return -1
+        continue
+      case 'timeout':
+      case 'gtimeout': {
+        i++
+        while (i < argv.length && argv[i]!.startsWith('-')) {
+          const flag = argv[i]!
+          if (flag === '--') {
+            i++
+            break
+          }
+          if (
+            flag === '-k' ||
+            flag === '-s' ||
+            flag === '--kill-after' ||
+            flag === '--signal'
+          ) {
+            i += 2
+          } else if (
+            flag === '--preserve-status' ||
+            flag === '--foreground' ||
+            flag === '-v' ||
+            flag === '--verbose' ||
+            flag.startsWith('--kill-after=') ||
+            flag.startsWith('--signal=') ||
+            /^-[ks]\S+$/.test(flag)
+          ) {
+            i++
+          } else {
+            return -1
+          }
+        }
+        const dur = argv[i]
+        if (dur === undefined) return -1
+        if (!TIMEOUT_DURATION_RE.test(dur)) return -1
+        i++
+        continue
+      }
+      default:
+        return isTarget(lower) ? i : -1
+    }
   }
-  return CD_CMDS.has((argv[t] ?? '').toLowerCase()) ? t : -1
+  return -1
+}
+
+/** densable rDu / YRu — cd/pushd/popd after locale/env/wrapper prefixes. */
+function rDu(argv: string[]): number {
+  return skipWrapperPrefixes(argv, cmd => CD_CMDS.has(cmd))
 }
 
 function YRu(argv: string[]): boolean {

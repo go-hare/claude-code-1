@@ -28,8 +28,7 @@ import {
   useTerminalFocus,
 } from '@anthropic/ink';
 import { useKeybinding } from '../../../keybindings/useKeybinding.js';
-import * as autoModeDenialsModule from '../../../utils/autoModeDenials.js';
-import { type AutoModeDenial, getAutoModeDenials } from '../../../utils/autoModeDenials.js';
+import { type AutoModeDenial, getAutoModeDenials, markAutoModeDenialApproved } from '../../../utils/autoModeDenials.js';
 import type {
   PermissionBehavior,
   PermissionRule,
@@ -78,24 +77,28 @@ function getRuleBehaviorLabel(ruleBehavior: PermissionBehavior): string {
   }
 }
 
-function removeDenial(denial: AutoModeDenial): void {
-  const mod = autoModeDenialsModule as {
-    removeDenial?: (d: AutoModeDenial) => void;
-    removeAutoModeDenial?: (d: AutoModeDenial) => void;
-  };
-  if (typeof mod.removeDenial === 'function') {
-    mod.removeDenial(denial);
-    return;
-  }
-  if (typeof mod.removeAutoModeDenial === 'function') {
-    mod.removeAutoModeDenial(denial);
-    return;
-  }
-  const current = getAutoModeDenials() as AutoModeDenial[];
-  const idx = current.indexOf(denial);
-  if (idx !== -1) {
-    current.splice(idx, 1);
-  }
+const NON_ASCII_SPACE_OR_CONTROL_RE = /(?! )[\p{C}\p{Z}\p{Default_Ignorable_Code_Point}]/gu;
+
+function escapeControlChar(ch: string): string {
+  return Array.from({ length: ch.length }, (_, i) => `\\u${ch.charCodeAt(i).toString(16).padStart(4, '0')}`).join('');
+}
+
+function formatDenialApprovalMessage(denials: readonly AutoModeDenial[]): string {
+  const formatted = denials.map(d =>
+    JSON.stringify(d.command ?? d.display).replace(NON_ASCII_SPACE_OR_CONTROL_RE, escapeControlChar),
+  );
+  const allCommands = denials.every(d => d.command !== undefined);
+  const noun = allCommands ? 'command' : 'call';
+  const single = denials.length === 1;
+  const target = single ? `this exact ${noun}` : `these exact ${noun}s`;
+  return `Permission granted for ${target} only, ${single ? 'as one whole string' : 'each as one whole string'}: ${formatted.join(', ')}. This does not approve any other ${noun}, any part of ${single ? 'this one' : 'these'}, or running ${single ? 'it' : 'them'} with added options such as turning off the sandbox, extra network access, or running in the background. You may now retry ${target} if you would like.`;
+}
+
+function formatDenialCommandsForRetry(denials: readonly AutoModeDenial[]): string[] {
+  return denials.map(d => {
+    const raw = (d.command ?? d.display).trim();
+    return raw.length > 200 ? `${raw.slice(0, 200)}…` : raw;
+  });
 }
 
 // Component for showing tool details and managing the interactive deletion workflow
@@ -535,13 +538,13 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
 
     const retryDenials = denialsFor(s.retry);
     if (retryDenials.length > 0) {
-      const commands = retryDenials.map(d => d.display);
-      onRetryDenials?.(commands);
+      for (const denial of retryDenials) {
+        markAutoModeDenialApproved(denial);
+      }
+      onRetryDenials?.(formatDenialCommandsForRetry(retryDenials));
       onExit(undefined, {
         shouldQuery: true,
-        metaMessages: [
-          `Permission granted for: ${commands.join(', ')}. You may now retry ${commands.length === 1 ? 'this command' : 'these commands'} if you would like.`,
-        ],
+        metaMessages: [formatDenialApprovalMessage(retryDenials)],
       });
       return;
     }
@@ -549,17 +552,16 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
     const approvedDenials = denialsFor(s.approved);
     if (approvedDenials.length > 0 || changes.length > 0) {
       for (const denial of approvedDenials) {
-        removeDenial(denial);
+        markAutoModeDenialApproved(denial);
       }
-      const commands = approvedDenials.map(d => d.display);
-      const approvedMsg = commands.length > 0 ? [`Approved ${commands.map(cmd => chalk.bold(cmd)).join(', ')}`] : [];
+      if (approvedDenials.length > 0) {
+        onRetryDenials?.(formatDenialCommandsForRetry(approvedDenials));
+      }
       onExit(
-        [...approvedMsg, ...changes].join('\n'),
-        commands.length > 0
+        changes.join('\n'),
+        approvedDenials.length > 0
           ? {
-              metaMessages: [
-                `Permission granted for: ${commands.join(', ')}. You may now retry ${commands.length === 1 ? 'this command' : 'these commands'} if you would like.`,
-              ],
+              metaMessages: [formatDenialApprovalMessage(approvedDenials)],
             }
           : undefined,
       );

@@ -1,4 +1,11 @@
-import { fstatSync, writeSync as fsWriteSync } from 'fs'
+import {
+  closeSync,
+  constants as fsConstants,
+  fstatSync,
+  openSync,
+  writeSync as fsWriteSync,
+} from 'fs'
+import { isatty } from 'tty'
 
 /** SEA `Cn = 262144` — 256 KiB per-stream ring buffer cap (#804). */
 export const RUNNER_LOG_RING_MAX_BYTES = 262_144
@@ -17,45 +24,50 @@ const GONE_ERRNO_CODES = new Set([
 ])
 
 const WORKER_ERRNOS = [
-  'EAGAIN',
-  'EINTR',
   'EPIPE',
-  'EBADF',
+  'ECONNRESET',
   'ENXIO',
+  'EBADF',
   'EIO',
-  'ESHUTDOWN',
+  'ENOSPC',
   'EINVAL',
 ] as const
 
 const WORKER_SCRIPT = `
-const fs = require('fs');
-self.onmessage = (ev) => {
-  const data = ev.data;
-  if (data && typeof data.fd === 'number' && data.shared) {
-    self._fd = data.fd;
-    self._shared = data.shared;
-    self._errnos = data.errnos || [];
+const { writeSync } = require('fs');
+let fd, shared, errnos;
+onmessage = ({ data }) => {
+  if (shared === undefined) {
+    ({ fd, shared, errnos } = data);
+    Atomics.store(shared, 3, 1);
     return;
   }
-  const buf = data;
-  const shared = self._shared;
   let written = 0;
-  let errIdx = 0;
-  try {
-    Atomics.store(shared, 3, 1);
-    written = fs.writeSync(self._fd, buf, 0, buf.byteLength);
-  } catch (e) {
-    const code = e && e.code ? String(e.code) : '';
-    const idx = self._errnos.indexOf(code);
-    errIdx = idx >= 0 ? idx + 1 : 1;
-  } finally {
-    Atomics.store(shared, 3, 0);
-    Atomics.store(shared, 1, written);
-    Atomics.store(shared, 2, errIdx);
-    Atomics.store(shared, 0, 2);
-    Atomics.notify(shared, 0);
-    self.postMessage(1);
+  let errno = 0;
+  while (written < data.length) {
+    let end = Math.min(written + 4096, data.length);
+    if (end < data.length) {
+      const lastNewline = data.lastIndexOf(10, end - 1);
+      end = lastNewline >= written ? lastNewline + 1 : data.indexOf(10, written) + 1 || data.length;
+    }
+    try {
+      written += writeSync(fd, data, written, end - written);
+    } catch (e) {
+      if (e && e.code === 'EAGAIN') {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+      } else if (!e || e.code !== 'EINTR') {
+        const code = e && e.code ? String(e.code) : '';
+        const idx = errnos.indexOf(code);
+        errno = idx >= 0 ? idx + 1 : errnos.length + 1;
+        break;
+      }
+    }
   }
+  Atomics.store(shared, 1, written);
+  Atomics.store(shared, 2, errno);
+  Atomics.store(shared, 0, 2);
+  Atomics.notify(shared, 0);
+  postMessage(0);
 };
 `
 
@@ -64,9 +76,12 @@ export type ThreadWriter = {
   wait?: (ms: number) => void
 }
 
+export type OpenOwnResult = number | { refused: string; writtenHere: boolean }
+
 export type NonBlockingLogIo = {
   sameFile: (fd1: number, fd2: number) => boolean
   canWriteDirectly: (fd: number) => boolean
+  openOwn?: (fd: number) => OpenOwnResult
   writeSync: (fd: number, buf: Buffer, offset: number) => number
   writeOnAThread: (fd: number, onDone: () => void) => ThreadWriter | undefined
   sleep: (ms: number) => void
@@ -109,6 +124,47 @@ function countLines(buf: Buffer): number {
   return Math.max(1, n)
 }
 
+function openTtyNonBlocking(
+  fd: number,
+): number | { reason: string; errno?: string } {
+  if (!(fd === 1 ? process.stdout.isTTY : isatty(fd))) {
+    return { reason: 'not_a_tty' }
+  }
+  if (process.platform !== 'linux') {
+    return { reason: 'unsupported_platform' }
+  }
+  let opened: number
+  try {
+    const cloexec =
+      'O_CLOEXEC' in fsConstants
+        ? Number((fsConstants as Record<string, unknown>).O_CLOEXEC ?? 0)
+        : 0
+    opened = openSync(
+      `/proc/self/fd/${fd}`,
+      fsConstants.O_WRONLY |
+        fsConstants.O_NONBLOCK |
+        fsConstants.O_NOCTTY |
+        cloexec,
+    )
+  } catch (err) {
+    return { reason: 'open_failed', errno: getErrCode(err) }
+  }
+  let result: { reason: string; errno?: string } = { reason: 'not_same_tty' }
+  try {
+    const a = fstatSync(opened)
+    const b = fstatSync(fd)
+    if (a.rdev === b.rdev && a.ino === b.ino) return opened
+  } catch (err) {
+    result = { reason: 'fstat_failed', errno: getErrCode(err) }
+  }
+  try {
+    closeSync(opened)
+  } catch {
+    /* ignore */
+  }
+  return result
+}
+
 const defaultIo: NonBlockingLogIo = {
   sameFile(fd1, fd2) {
     try {
@@ -125,6 +181,31 @@ const defaultIo: NonBlockingLogIo = {
       return st.isFile() || st.isCharacterDevice()
     } catch {
       return false
+    }
+  },
+  openOwn(fd) {
+    const win = process.platform === 'win32'
+    try {
+      if (isatty(fd)) {
+        const res = openTtyNonBlocking(fd)
+        if (typeof res === 'number') return res
+        return {
+          refused: `the terminal could not be opened a second time: ${res.errno ?? res.reason}`,
+          writtenHere: win,
+        }
+      }
+      const st = fstatSync(fd)
+      return {
+        refused: st.isSocket()
+          ? 'a socket cannot be opened a second time'
+          : 'only a terminal, or a pipe on Linux, can be opened a second time',
+        writtenHere: st.isFile() || st.isCharacterDevice() || win,
+      }
+    } catch (err) {
+      return {
+        refused: `it could not be opened a second time: ${getErrCode(err) ?? 'unknown'}`,
+        writtenHere: win,
+      }
     }
   },
   writeSync(fd, buf, offset) {
@@ -271,15 +352,24 @@ export function createNonBlockingRunnerLogWriter(
   const maxRingBytes = opts.maxRingBytes ?? RUNNER_LOG_RING_MAX_BYTES
 
   const makeStream = (fd: number, name: string): StreamState => {
-    const direct = io.canWriteDirectly(fd)
-    const threaded = direct
-      ? undefined
-      : io.writeOnAThread(fd, () => pump(stream))
+    let targetFd = fd
+    let threaded: ThreadWriter | undefined
+    if (io.openOwn) {
+      const owned = io.openOwn(fd)
+      if (typeof owned === 'number') {
+        targetFd = owned
+      } else if (!owned.writtenHere) {
+        threaded = io.writeOnAThread(fd, () => pump(stream))
+      }
+    } else if (!io.canWriteDirectly(fd)) {
+      threaded = io.writeOnAThread(fd, () => pump(stream))
+    }
     const stream: StreamState = {
       name,
-      fd,
+      fd: targetFd,
       write:
-        threaded?.write ?? ((buf, offset) => io.writeSync(fd, buf, offset)),
+        threaded?.write ??
+        ((buf, offset) => io.writeSync(targetFd, buf, offset)),
       waitForTheThread: threaded?.wait,
       waiting: [],
       waitingBytes: 0,

@@ -112,11 +112,11 @@ async function loadAgentsFromDirectory(
         sourceName,
         pluginPath,
         pluginManifest,
-        loadedPaths,
+        undefined,
       )
       if (agent) agents.push(agent)
     },
-    { logLabel: 'agents', isRootOptional },
+    { logLabel: 'agents', isRootOptional, loadedPaths },
   )
   return agents
 }
@@ -312,10 +312,10 @@ async function loadAgentFromFile(
   sourceName: string,
   pluginPath: string,
   pluginManifest: PluginManifest,
-  loadedPaths: Set<string>,
+  loadedPaths?: Set<string>,
 ): Promise<AgentDefinition | null> {
   const fs = getFsImplementation()
-  if (isDuplicatePath(fs, filePath, loadedPaths)) {
+  if (loadedPaths !== undefined && isDuplicatePath(fs, filePath, loadedPaths)) {
     return null
   }
   try {

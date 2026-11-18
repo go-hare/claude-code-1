@@ -71,11 +71,29 @@ import { isBareMode } from '../../utils/envUtils.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { getDisplayPath } from '../../utils/file.js'
 import {
+  drainSettingsWrites,
   getSettingsFilePathForSource,
   getSettingsWithErrors,
   projectSettingsAliasesUserSettings,
 } from '../../utils/settings/settings.js'
 import { cliError, cliOk } from '../exit.js'
+
+/** #902: await queued settings writes before exiting a plugin CLI subcommand. */
+async function drainAndExit(code: number): Promise<never> {
+  await drainSettingsWrites().catch(() => {})
+  process.exit(code)
+  return undefined as never
+}
+
+async function cliOkDrained(msg?: string): Promise<never> {
+  await drainSettingsWrites().catch(() => {})
+  return cliOk(msg)
+}
+
+async function cliErrorDrained(msg?: string): Promise<never> {
+  await drainSettingsWrites().catch(() => {})
+  return cliError(msg)
+}
 
 /** densable CLI `U`/`ke` — human plugin/marketplace lines go through `re`. */
 function printCli(line: string): void {
@@ -247,7 +265,7 @@ export async function pluginValidateHandler(
           }),
         ) + '\n',
       )
-      process.exit(outcome.allSuccess ? 0 : 1)
+      await drainAndExit(outcome.allSuccess ? 0 : 1)
       return
     }
 
@@ -272,7 +290,7 @@ export async function pluginValidateHandler(
     }
 
     if (outcome.allSuccess) {
-      cliOk(
+      await cliOkDrained(
         outcome.hasWarnings
           ? `${figures.tick} Validation passed with warnings`
           : `${figures.tick} Validation passed`,
@@ -283,7 +301,7 @@ export async function pluginValidateHandler(
           ? `${figures.cross} Validation failed (--strict treats warnings as errors)`
           : `${figures.cross} Validation failed`,
       )
-      process.exit(1)
+      await drainAndExit(1)
     }
   } catch (error) {
     logError(error)
@@ -292,7 +310,7 @@ export async function pluginValidateHandler(
         `${figures.cross} Unexpected error during validation: ${errorMessage(error)}`,
       ),
     )
-    process.exit(2)
+    await drainAndExit(2)
   }
 }
 
@@ -1153,7 +1171,7 @@ export async function pluginInstallHandler(
       })
     }
     console.log('Aborted.')
-    process.exit(1)
+    await drainAndExit(1)
   }
 
   // densable 2.1.238 #3 — catalog entry headersHelper confirm before install
@@ -1200,7 +1218,7 @@ export async function pluginInstallHandler(
       })
     }
     console.log(ENTRY_HELPER_INSTALL_ABORT_MESSAGE)
-    process.exit(1)
+    await drainAndExit(1)
   }
 
   const configEntries = Array.isArray(options.config)
@@ -1219,6 +1237,7 @@ export async function pluginInstallHandler(
       : undefined,
     { json: options.json, scope, shownCommand },
   )
+  await drainSettingsWrites().catch(() => {})
 }
 
 // plugin uninstall (lines 5738–5769)
@@ -1261,6 +1280,7 @@ export async function pluginUninstallHandler(
     options.keepData,
     { json: options.json, scope },
   )
+  await drainSettingsWrites().catch(() => {})
 }
 
 // plugin enable (lines 5783–5818)
@@ -1303,6 +1323,7 @@ export async function pluginEnableHandler(
   })
 
   await enablePlugin(plugin, scope, { json: options.json, scope })
+  await drainSettingsWrites().catch(() => {})
 }
 
 // plugin disable (lines 5833–5902)
@@ -1330,6 +1351,7 @@ export async function pluginDisableHandler(
     logEvent('tengu_plugin_disable_command', {})
 
     await disableAllPlugins({ json: options.json })
+    await drainSettingsWrites().catch(() => {})
     return
   }
 
@@ -1367,6 +1389,7 @@ export async function pluginDisableHandler(
   })
 
   await disablePlugin(plugin!, scope, { json: options.json, scope })
+  await drainSettingsWrites().catch(() => {})
 }
 
 // plugin update (lines 5918–5948)
@@ -1415,6 +1438,68 @@ export async function pluginUpdateHandler(
     json: options.json,
     acceptCommand: options.acceptCommand,
   })
+  await drainSettingsWrites().catch(() => {})
+}
+
+/**
+ * #914 (official v3a): when `claude plugin details <name>@builtin` is not found,
+ * point to `/plugin` (Installed tab) rather than `claude plugin list` (which
+ * never shows built-in plugins).
+ */
+export function formatPluginDetailsNotFoundMessage(pluginArg: string): string {
+  const { marketplace } = parsePluginIdentifier(pluginArg)
+  const hint =
+    marketplace === 'builtin'
+      ? "Built-in plugins don't appear in `claude plugin list`. To see the ones available in a session, run /plugin in Claude Code and open the Installed tab."
+      : 'Run `claude plugin list` to see installed plugins, or pass --plugin-dir <path> to load one from disk.'
+  return `Plugin "${Io(pluginArg)}" not found. ${hint}`
+}
+
+export async function pluginDetailsHandler(
+  name: string,
+  options: { json?: boolean; cowork?: boolean },
+): Promise<void> {
+  if (options.cowork) setUseCoworkPlugins(true)
+  logEvent('tengu_plugin_details_command', {})
+  const { enabled, disabled } = await loadAllPlugins()
+  const { name: parsedName, marketplace } = parsePluginIdentifier(name)
+  const target = marketplace ? `${parsedName}@${marketplace}` : parsedName
+  const found = [...enabled, ...disabled].find(plugin =>
+    marketplace ? plugin.source === target : plugin.name === target,
+  )
+  if (!found) {
+    const msg = formatPluginDetailsNotFoundMessage(name)
+    if (options.json) {
+      await cliErrorDrained(msg)
+    } else {
+      console.error(re(msg))
+      await drainAndExit(1)
+    }
+    return
+  }
+  if (options.json) {
+    await cliOkDrained(
+      jsonStringify(
+        {
+          plugin: found.name,
+          source: found.source,
+          version: found.manifest.version,
+          description: found.manifest.description,
+          enabled: found.enabled,
+        },
+        null,
+        2,
+      ),
+    )
+    return
+  }
+  printCli(
+    `${found.name}${found.manifest.version ? ` (${found.manifest.version})` : ''}`,
+  )
+  if (found.manifest.description) {
+    printCli(found.manifest.description)
+  }
+  await drainAndExit(0)
 }
 
 export {

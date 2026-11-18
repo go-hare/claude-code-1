@@ -128,6 +128,54 @@ function isListableFilePath(path: string): boolean {
   return !/[\p{Cc}\p{Cf}\p{Co}\p{Zl}\p{Zp}]/u.test(path)
 }
 
+function matchesTransientReadReset(error: Error): boolean {
+  const msg = error.message
+  if (
+    msg.startsWith('The socket connection was closed unexpectedly') ||
+    msg.includes('ECONNRESET') ||
+    msg.includes('UND_ERR_SOCKET')
+  ) {
+    return true
+  }
+  const code =
+    'code' in error && typeof (error as { code?: unknown }).code === 'string'
+      ? (error as { code: string }).code
+      : undefined
+  return (
+    code === 'ECONNRESET' ||
+    code === 'UND_ERR_SOCKET' ||
+    code === 'ConnectionClosed' ||
+    code === 'ERR_SOCKET_CLOSED'
+  )
+}
+
+function isTransientReadResetError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  if (matchesTransientReadReset(error)) return true
+  const cause = error.cause
+  return cause instanceof Error && matchesTransientReadReset(cause)
+}
+
+async function fetchWithResetRetry(
+  url: string,
+  init: RequestInit,
+): Promise<Response> {
+  try {
+    return await fetch(url, init)
+  } catch (err) {
+    if (init.signal?.aborted || !isTransientReadResetError(err)) {
+      throw err
+    }
+    const headers = new Headers(init.headers)
+    headers.set('Connection', 'close')
+    return await fetch(url, {
+      ...init,
+      headers,
+      keepalive: false,
+    })
+  }
+}
+
 async function fetchContentHostJson(input: {
   slug: string
   servedPath: string
@@ -181,7 +229,7 @@ async function fetchContentHostJson(input: {
       : ''
   const url = `${contentHostBase(input.slug)}${input.servedPath}${tokenQ}`
   try {
-    const response = await fetch(url, {
+    const response = await fetchWithResetRetry(url, {
       method: 'GET',
       signal: input.signal,
       redirect: 'manual',
@@ -745,7 +793,7 @@ async function probeArtifactPageHead(input: {
 }): Promise<boolean> {
   const url = `${contentHostBase(input.slug)}/_f/${encodeURIComponent(input.ver)}/`
   try {
-    const res = await fetch(url, {
+    const res = await fetchWithResetRetry(url, {
       method: 'HEAD',
       signal: input.signal,
       redirect: 'manual',
@@ -1515,7 +1563,7 @@ export async function fetchArtifactAssetBytes(input: {
       : ''
   const url = `${contentHostBase(input.slug, input.env)}${servedPath}${tokenQ}`
   try {
-    const res = await fetch(url, {
+    const res = await fetchWithResetRetry(url, {
       method: 'GET',
       signal: input.signal,
       redirect: 'manual',
@@ -1754,7 +1802,7 @@ export async function fetchArtifactFileBytes(input: {
         : ''
     const url = `${contentHostBase(input.slug, input.env)}${readPath}${tokenQ}`
     try {
-      const res = await fetch(url, {
+      const res = await fetchWithResetRetry(url, {
         method: 'GET',
         signal: input.signal,
         redirect: 'manual',

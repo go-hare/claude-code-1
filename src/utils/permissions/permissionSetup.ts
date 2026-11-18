@@ -1093,6 +1093,7 @@ export function initialPermissionModeFromCLI({
         mossAnchor:
           checkStatsigFeatureGate_CACHED_MAY_BE_STALE('tengu_moss_anchor'),
         bridgeChildAutoDefault: isBridgeChildAutoDefaultEnabled(),
+        isRemote: isEnvTruthy(process.env.CLAUDE_CODE_REMOTE),
       })
       mode = planned.mode
       fromAutoFallback = planned.fromAutoFallback

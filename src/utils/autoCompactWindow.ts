@@ -3,18 +3,25 @@
  * Gold: bDn (parse), Nq (resolve sources), CVr (apply).
  */
 
-import { resolveAutoCompactWindowOverride } from './residualFinalEnvGates.js'
-import { getSdkBetas } from '../bootstrap/state.js'
+import {
+  getAutoCompactWindowEnvWarning,
+  resolveAutoCompactWindowOverride,
+} from './residualFinalEnvGates.js'
+import { logForDebugging } from './debug.js'
+import { getAutoCompactWindowSurface, getSdkBetas } from '../bootstrap/state.js'
+import { getBootstrapSessionHost } from './sessionRoot.js'
 import {
   getContextWindowForModel,
   isRecognizedModelForWindowEnforcement,
   isUnknownModelWindowEnforcementDisabled,
 } from './context.js'
+import { canonicalEffortModelKey } from './effort.js'
 import { getCanonicalName } from './model/model.js'
 import {
   getInitialSettings,
   updateSettingsForSource,
 } from './settings/settings.js'
+import type { SettingsJson } from './settings/types.js'
 import { formatTokens } from './format.js'
 import { logEvent } from '../services/analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../services/analytics/index.js'
@@ -62,7 +69,8 @@ export function resolveModelAutoCompactWindowEntry(
     return undefined
   }
   const { surfaces, ...rest } = entry
-  const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT
+  const entrypoint =
+    getAutoCompactWindowSurface() ?? process.env.CLAUDE_CODE_ENTRYPOINT
   const surface =
     entrypoint && surfaces && Object.hasOwn(surfaces, entrypoint)
       ? surfaces[entrypoint]
@@ -151,18 +159,171 @@ export function parseAutoCompactWindowArg(
   return Math.round(n)
 }
 
+export type AutoCompactWindowValue = 'auto' | number
+export type AutoCompactWindowsMap = Record<string, AutoCompactWindowValue>
+
+export type AutoCompactWindowMetadataSink = {
+  notifyInternalMetadataChanged: (metadata: {
+    auto_compact_windows: AutoCompactWindowsMap
+  }) => void
+}
+
+type SessionAutoCompactWindowsState = {
+  windows: AutoCompactWindowsMap
+  sink?: AutoCompactWindowMetadataSink
+}
+
+/** Gold `xlt` — per-host session auto_compact_windows + metadata sink. */
+const sessionAutoCompactWindows = new WeakMap<
+  object,
+  SessionAutoCompactWindowsState
+>()
+
+function getOrCreateSessionWindowsState(
+  host: object,
+): SessionAutoCompactWindowsState {
+  let state = sessionAutoCompactWindows.get(host)
+  if (state === undefined) {
+    state = { windows: {} }
+    sessionAutoCompactWindows.set(host, state)
+  }
+  return state
+}
+
+function isValidAutoCompactWindowValue(
+  value: unknown,
+): value is AutoCompactWindowValue {
+  return (
+    value === 'auto' ||
+    (typeof value === 'number' &&
+      Number.isInteger(value) &&
+      value >= AUTO_COMPACT_WINDOW_MIN &&
+      value <= AUTO_COMPACT_WINDOW_MAX)
+  )
+}
+
+/**
+ * Gold `_4i` — hydrate per-session `auto_compact_windows` from resumed/session
+ * internal metadata and bind the metadata sink.
+ */
+export function hydrateSessionAutoCompactWindows(
+  host: object,
+  metadata: {
+    readFailed?: boolean
+    internal?: { auto_compact_windows?: unknown }
+  } | null,
+  sink?: AutoCompactWindowMetadataSink,
+  onHydrated?: (windows: AutoCompactWindowsMap) => void,
+): void {
+  if (metadata === null || metadata.readFailed === true) return
+  try {
+    const state = getOrCreateSessionWindowsState(host)
+    if (sink !== undefined) {
+      state.sink = sink
+    }
+    const raw = metadata.internal?.auto_compact_windows
+    const filtered: AutoCompactWindowsMap = {}
+    if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+      for (const [key, val] of Object.entries(raw)) {
+        if (
+          !Object.hasOwn(Object.prototype, key) &&
+          isValidAutoCompactWindowValue(val)
+        ) {
+          filtered[key] = val
+        }
+      }
+    }
+    state.windows = filtered
+    if (Object.keys(filtered).length === 0) return
+    onHydrated?.(filtered)
+  } catch (err) {
+    logForDebugging(
+      `[autocompact] hydrateSessionAutoCompactWindows failed: ${String(err)}`,
+      { level: 'warn' },
+    )
+  }
+}
+
+/**
+ * Gold `y4i` — update per-session `auto_compact_windows` and notify the
+ * internal metadata sink.
+ */
+export function persistSessionAutoCompactWindow(
+  modelKey: string,
+  value: AutoCompactWindowValue,
+  host: object = getBootstrapSessionHost(),
+): void {
+  const state = sessionAutoCompactWindows.get(host)
+  if (state?.sink === undefined || Object.hasOwn(Object.prototype, modelKey)) {
+    return
+  }
+  try {
+    state.windows = { ...state.windows, [modelKey]: value }
+    state.sink.notifyInternalMetadataChanged({
+      auto_compact_windows: state.windows,
+    })
+  } catch (err) {
+    logForDebugging(
+      `[autocompact] persistSessionAutoCompactWindow failed: ${String(err)}`,
+      { level: 'warn' },
+    )
+  }
+}
+
+export function getSessionAutoCompactWindows(
+  host: object = getBootstrapSessionHost(),
+): AutoCompactWindowsMap {
+  return sessionAutoCompactWindows.get(host)?.windows ?? {}
+}
+
+/**
+ * Official #900 — resolve per-model `modelSettings.<canonical>.autoCompactWindow`
+ * (or top-level `autoCompactWindow` fallback; `'auto'` resolves to `undefined`).
+ */
+export function resolvePerModelSettingsAutoCompactWindow(
+  model: string,
+  settings: Pick<
+    SettingsJson,
+    'autoCompactWindow' | 'modelSettings'
+  > = getInitialSettings(),
+): number | undefined {
+  const targetKey = canonicalEffortModelKey(model)
+  let matched: 'auto' | number | undefined
+  for (const [rawKey, entry] of Object.entries(settings.modelSettings ?? {})) {
+    const win = entry?.autoCompactWindow
+    if (win === undefined) continue
+    const canonical = canonicalEffortModelKey(rawKey)
+    if (canonical !== targetKey) continue
+    if (rawKey === canonical) {
+      matched = win
+      break
+    }
+    matched ??= win
+  }
+  if (matched !== undefined) {
+    return matched === 'auto' ? undefined : matched
+  }
+  return settings.autoCompactWindow
+}
+
 /**
  * densable Nq core (env → settings → auto). Full clientdata/experiment tables
  * are optional product surfaces; env + settings + model max match the command.
  */
 export function resolveAutoCompactWindow(
   model: string,
-  settingsWindow: number | undefined = getInitialSettings().autoCompactWindow,
+  settingsWindow: number | undefined = resolvePerModelSettingsAutoCompactWindow(
+    model,
+  ),
 ): ResolvedAutoCompactWindow {
   const modelMax = getContextWindowForModel(model, getSdkBetas())
 
   const envOverride = resolveAutoCompactWindowOverride()
   if (envOverride !== null) {
+    const warning = getAutoCompactWindowEnvWarning()
+    if (warning) {
+      logForDebugging(`[autocompact] ${warning}`, { level: 'warn' })
+    }
     const configured = Math.max(AUTO_COMPACT_WINDOW_MIN, envOverride)
     return {
       window: Math.min(modelMax, configured),
@@ -170,11 +331,30 @@ export function resolveAutoCompactWindow(
       source: 'env',
     }
   }
+  const ignoredWarning = getAutoCompactWindowEnvWarning()
+  if (ignoredWarning) {
+    logForDebugging(`[autocompact] ${ignoredWarning}`, { level: 'warn' })
+  }
 
   if (settingsWindow !== undefined) {
     return {
       window: Math.min(modelMax, settingsWindow),
       configured: settingsWindow,
+      source: 'settings',
+    }
+  }
+
+  const sessionWindows = getSessionAutoCompactWindows()
+  const canonicalModel = getCanonicalName(model)
+  const sessionWindow = Object.hasOwn(sessionWindows, model)
+    ? sessionWindows[model]
+    : Object.hasOwn(sessionWindows, canonicalModel)
+      ? sessionWindows[canonicalModel]
+      : undefined
+  if (typeof sessionWindow === 'number') {
+    return {
+      window: Math.min(modelMax, sessionWindow),
+      configured: sessionWindow,
       source: 'settings',
     }
   }
@@ -295,6 +475,7 @@ export function applyAutoCompactWindow(raw: string, model: string): string {
   if (error) {
     return `Couldn't save setting: ${error.message}`
   }
+  persistSessionAutoCompactWindow(getCanonicalName(model), parsed)
 
   const after = getInitialSettings().autoCompactWindow
   const { window, source } = resolveAutoCompactWindow(model, after)

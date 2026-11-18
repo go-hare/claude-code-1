@@ -199,6 +199,10 @@ export const init = memoize(async (): Promise<void> => {
     setupGracefulShutdown()
     profileCheckpoint('init_after_graceful_shutdown')
 
+    // densable Ku() — verify temp directory volume has space at startup.
+    const { ensureClaudeTempDir } = await import('../utils/tempDir.js')
+    ensureClaudeTempDir()
+
     // Initialize 1P event logging (no security concerns, but deferred to avoid
     // loading OpenTelemetry sdk-logs at startup). growthbook.js is already in
     // the module cache by this point (firstPartyEventLogger imports it), so the
@@ -433,7 +437,9 @@ async function doInitializeTelemetry(): Promise<void> {
     // keep raw env fallback
   }
   if (!telemetryEnabled) {
-    telemetryInitialized = true
+    // Do not latch telemetryInitialized = true when disabled: server-managed
+    // settings fetched after first-run login or post-/logout sign-in may enable
+    // CLAUDE_CODE_ENABLE_TELEMETRY later in the same session.
     logForDebugging(
       '[3P telemetry] Skipped — CLAUDE_CODE_ENABLE_TELEMETRY not set',
     )
