@@ -37,15 +37,19 @@ const MAX_QUERY_LEN = 64
 // older Windows hardware.
 const CHUNK_MS = 4
 
-// Reusable buffer: records where each needle char matched during the indexOf scan
+// Reusable buffers: record where each needle char matched during the indexOf scan
 const posBuf = new Int32Array(MAX_QUERY_LEN)
+const nameMatchPositions = new Int32Array(MAX_QUERY_LEN)
 
 export class FileIndex {
   private paths: string[] = []
   private lowerPaths: string[] = []
   private charBits: Int32Array = new Int32Array(0)
   private pathLens: Uint16Array = new Uint16Array(0)
+  private nameStarts: Uint16Array = new Uint16Array(0)
+  private nameCharBits: Int32Array = new Int32Array(0)
   private topLevelCache: SearchResult[] | null = null
+  private buildGen = 0
   // During async build, tracks how many paths have bitmap/lowerPath filled.
   // search() uses this to search the ready prefix while build continues.
   // biome-ignore lint/correctness/noUnusedPrivateClassMembers: used via destructuring in search()
@@ -83,7 +87,7 @@ export class FileIndex {
    */
   loadFromFileListAsync(fileList: string[]): {
     queryable: Promise<void>
-    done: Promise<void>
+    done: Promise<boolean>
   } {
     let markQueryable: () => void = () => {}
     const queryable = new Promise<void>(resolve => {
@@ -96,7 +100,8 @@ export class FileIndex {
   private async buildAsync(
     fileList: string[],
     markQueryable: () => void,
-  ): Promise<void> {
+  ): Promise<boolean> {
+    const gen = ++this.buildGen
     const seen = new Set<string>()
     const paths: string[] = []
     let chunkStart = performance.now()
@@ -109,10 +114,18 @@ export class FileIndex {
       // Check every 256 iterations to amortize performance.now() overhead
       if ((i & 0xff) === 0xff && performance.now() - chunkStart > CHUNK_MS) {
         await yieldToEventLoop()
+        if (this.buildGen !== gen) {
+          markQueryable()
+          return false
+        }
         chunkStart = performance.now()
       }
     }
 
+    if (this.buildGen !== gen) {
+      markQueryable()
+      return false
+    }
     this.resetArrays(paths)
 
     chunkStart = performance.now()
@@ -126,14 +139,24 @@ export class FileIndex {
           firstChunk = false
         }
         await yieldToEventLoop()
+        if (this.buildGen !== gen) {
+          markQueryable()
+          return false
+        }
         chunkStart = performance.now()
       }
     }
+    if (this.buildGen !== gen) {
+      markQueryable()
+      return false
+    }
     this.readyCount = paths.length
     markQueryable()
+    return true
   }
 
   private buildIndex(paths: string[]): void {
+    ++this.buildGen
     this.resetArrays(paths)
     for (let i = 0; i < paths.length; i++) {
       this.indexPath(i)
@@ -147,24 +170,35 @@ export class FileIndex {
     this.lowerPaths = new Array(n)
     this.charBits = new Int32Array(n)
     this.pathLens = new Uint16Array(n)
+    this.nameStarts = new Uint16Array(n)
+    this.nameCharBits = new Int32Array(n)
     this.readyCount = 0
     this.topLevelCache = computeTopLevelEntries(paths, TOP_LEVEL_CACHE_LIMIT)
   }
 
-  // Precompute: lowercase, a–z bitmap, length. Bitmap gives O(1) rejection
-  // of paths missing any needle letter (89% survival for broad queries like
-  // "test" → still a 10%+ free win; 90%+ rejection for rare chars).
+  // Precompute: lowercase, a–z bitmap (full path + basename), length, and
+  // basename start offset. Bitmap gives O(1) rejection of paths missing any
+  // needle letter.
   private indexPath(i: number): void {
     const lp = this.paths[i]!.toLowerCase()
     this.lowerPaths[i] = lp
     const len = lp.length
     this.pathLens[i] = len
+    const lastSep = Math.max(lp.lastIndexOf('/'), lp.lastIndexOf('\\'))
+    const nameStart = lastSep + 1
+    this.nameStarts[i] = nameStart
     let bits = 0
+    let nameBits = 0
     for (let j = 0; j < len; j++) {
       const c = lp.charCodeAt(j)
-      if (c >= 97 && c <= 122) bits |= 1 << (c - 97)
+      if (c >= 97 && c <= 122) {
+        const bit = 1 << (c - 97)
+        bits |= bit
+        if (j >= nameStart) nameBits |= bit
+      }
     }
     this.charBits[i] = bits
+    this.nameCharBits[i] = nameBits
   }
 
   /**
@@ -204,7 +238,15 @@ export class FileIndex {
     const topK: { path: string; fuzzScore: number }[] = []
     let threshold = -Infinity
 
-    const { paths, lowerPaths, charBits, pathLens, readyCount } = this
+    const {
+      paths,
+      lowerPaths,
+      charBits,
+      pathLens,
+      nameStarts,
+      nameCharBits,
+      readyCount,
+    } = this
 
     for (let i = 0; i < readyCount; i++) {
       // O(1) bitmap reject: path must contain every letter in the needle
@@ -290,6 +332,48 @@ export class FileIndex {
         score += lengthBonus
 
         if (score > bestScore) bestScore = score
+      }
+
+      // Independent basename bitmask filter + match-position scoring
+      if ((nameCharBits[i]! & needleBitmap) === needleBitmap) {
+        const nameStart = nameStarts[i]!
+        const nameFirstPos = haystack.indexOf(firstChar, nameStart)
+        if (nameFirstPos !== -1) {
+          nameMatchPositions[0] = nameFirstPos
+          let gapPenalty = 0
+          let consecBonus = 0
+          let prev = nameFirstPos
+          let matched = true
+          for (let j = 1; j < nLen; j++) {
+            const pos = haystack.indexOf(needleChars[j]!, prev + 1)
+            if (pos === -1) {
+              matched = false
+              break
+            }
+            nameMatchPositions[j] = pos
+            const gap = pos - prev - 1
+            if (gap === 0) consecBonus += BONUS_CONSECUTIVE
+            else gapPenalty += PENALTY_GAP_START + gap * PENALTY_GAP_EXTENSION
+            prev = pos
+          }
+          if (matched) {
+            let nameScore = nLen * SCORE_MATCH + consecBonus - gapPenalty
+            nameScore += scoreBonusAt(
+              originalPath,
+              nameMatchPositions[0]!,
+              true,
+            )
+            for (let j = 1; j < nLen; j++) {
+              nameScore += scoreBonusAt(
+                originalPath,
+                nameMatchPositions[j]!,
+                false,
+              )
+            }
+            nameScore += lengthBonus + BONUS_FIRST_CHAR
+            if (nameScore > bestScore) bestScore = nameScore
+          }
+        }
       }
 
       if (bestScore === -Infinity) continue

@@ -20,12 +20,17 @@ const defaultCallbacks: Required<AppCallbacks> = {
   isShutdownCommitted: () => false,
 };
 
+import { setDispatcherLogError } from '../core/events/dispatcher.js';
+
 /**
  * Override the default no-op callbacks. Call this from the business layer
  * (e.g. src/ink.tsx) before mounting <App>.
  */
 export function setAppCallbacks(cb: AppCallbacks): void {
   Object.assign(defaultCallbacks, cb);
+  if (cb.logError) {
+    setDispatcherLogError(cb.logError);
+  }
 }
 
 import { EventEmitter } from '../core/events/emitter.js';

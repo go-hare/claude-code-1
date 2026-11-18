@@ -5,7 +5,11 @@ import type { Attributes, MetricOptions } from '@opentelemetry/api'
 import memoize from 'lodash-es/memoize.js'
 import { getIsNonInteractiveSession } from 'src/bootstrap/state.js'
 import type { AttributedCounter } from '../bootstrap/state.js'
-import { getSessionCounter, setMeter } from '../bootstrap/state.js'
+import {
+  getSessionCounter,
+  setMeter,
+  updateLastInteractionTime,
+} from '../bootstrap/state.js'
 import { shutdownLspServerManager } from '../services/lsp/manager.js'
 import { populateOAuthAccountInfoIfNeeded } from '../services/oauth/client.js'
 import {
@@ -18,6 +22,7 @@ import { registerCleanup } from '../utils/cleanupRegistry.js'
 import { applyHostCredsFromFileIfManaged } from '../utils/hostCredsFile.js'
 import { enableConfigs, recordFirstStartTime } from '../utils/config.js'
 import { logForDebugging } from '../utils/debug.js'
+import { logError } from '../utils/log.js'
 import { detectCurrentRepository } from '../utils/detectRepository.js'
 import { logForDiagnosticsNoPII } from '../utils/diagLogs.js'
 import { initJetBrainsDetection } from '../utils/envDynamic.js'
@@ -112,8 +117,24 @@ export const init = memoize(async (): Promise<void> => {
     // densable handleSetRawMode calls M6() directly. Ink cannot import src,
     // so the same stop is the callback it already invokes.
     setAppCallbacks({
-      isShutdownCommitted: isShuttingDown,
+      updateLastInteractionTime,
       stopCapturingEarlyInput,
+      logError,
+      logForDebugging: (message, opts) =>
+        logForDebugging(
+          message,
+          opts?.level
+            ? {
+                level: opts.level as
+                  | 'verbose'
+                  | 'debug'
+                  | 'info'
+                  | 'warn'
+                  | 'error',
+              }
+            : undefined,
+        ),
+      isShutdownCommitted: isShuttingDown,
     })
     // densable Ws `Em(Ko(cr))` — LoadingState spinner honors prefersReducedMotion.
     const { getInitialSettings } = await import('../utils/settings/settings.js')

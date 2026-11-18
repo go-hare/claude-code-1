@@ -7,9 +7,13 @@ import {
 import { HANDLER_FOR_EVENT } from './event-handlers.js'
 import type { EventTarget, TerminalEvent } from './terminal-event.js'
 
-// logError stub — replaced from business dependency; use injected logger in production
-const logError = (error: unknown): void => {
+// logError stub — replaced from business dependency via setDispatcherLogError
+let logError = (error: unknown): void => {
   console.error(error)
+}
+
+export function setDispatcherLogError(fn: (error: unknown) => void): void {
+  logError = fn
 }
 
 // --
