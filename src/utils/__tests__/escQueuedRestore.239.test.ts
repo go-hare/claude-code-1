@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const REPL = readFileSync(
-  join(import.meta.dir, '../../screens/REPL.tsx'),
+  join(import.meta.dir, '../../screens/repl/runReplTurn.ts'),
   'utf8',
 )
 const QUEUE_PROC = readFileSync(

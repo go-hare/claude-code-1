@@ -897,6 +897,7 @@ async function executeReplTurnImpl(
   }
 
   {
+    // densable _runImpl post-query
     const arm = leftArrowDeferRef.current
     if (arm) {
       arm.clearCapTimer()
@@ -939,6 +940,7 @@ async function executeReplTurnImpl(
                       `${abandon} background ${abandon === 1 ? 'task' : 'tasks'} would be abandoned`,
                       'Press \u2190 again to confirm.',
                     ]
+          // densable post-query refuse: K({append, Ss(...,"warning")}) — not yi
           setMessages(prev => [
             ...prev,
             createSystemMessage(
@@ -948,6 +950,9 @@ async function executeReplTurnImpl(
           ])
           markIdleForkMidTurn()
         } else {
+          // densable: q.current=!0; await K9(W.getSnapshot(),…); $e=await he.proceed();
+          // append Ss($e,"warning"); G()
+          // tip: recordTranscript (storageV5 5th arg invent-ban)
           leftArrowToAgentsFired.current = true
           try {
             const { recordTranscript } = await import(

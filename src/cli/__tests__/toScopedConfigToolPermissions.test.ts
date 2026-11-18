@@ -60,9 +60,12 @@ describe('densable a$f toolPermissionsFromSetServersTools', () => {
   })
 })
 
-describe('print.ts toScopedConfig densable uUt fold', () => {
+describe('HeadlessControlPlane.ts toScopedConfig densable uUt fold', () => {
   test('source folds tools org_max_permission into toolPermissions', () => {
-    const src = readFileSync(join(import.meta.dir, '../print.ts'), 'utf8')
+    const src = readFileSync(
+      join(import.meta.dir, '../headless/HeadlessControlPlane.ts'),
+      'utf8',
+    )
     expect(src).toContain('toolPermissionsFromSetServersTools')
     expect(src).toContain('org_max_permission')
     expect(src).toContain("rec.type === 'http' || rec.type === 'sse'")

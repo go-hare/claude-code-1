@@ -8,6 +8,11 @@ import {
   selectCompleteHookOutput,
   stdioFailClosedEvents,
 } from '../hooks/hookStdIO.js'
+import {
+  shouldDowngradeMissingHookScriptExit2,
+  shouldFailClosedHookInput,
+} from '../hooks/hookInputHelpers.js'
+import { formatHookProgressText } from '../hooks/hooksSettings.js'
 
 // Evaluate the real executor with inert boundaries: no settings, subprocesses,
 // API calls, or process-global mock.module registrations are involved.
@@ -25,11 +30,11 @@ const progressDisplayHelper = hookSettingsSource
   .replace('export function', 'function')
 const helpers = source.slice(
   source.indexOf('function classicResultFields('),
-  source.indexOf('/**\n * densable 2.1.248 Eve'),
+  source.indexOf('function processHookJSONOutput('),
 )
 const executor = source.slice(
-  source.indexOf('async function* executeHooks('),
-  source.indexOf('export type HookOutsideReplResult'),
+  source.indexOf('const PERMISSION_DECISION_RANK'),
+  source.indexOf('function holdOutsideHookActivity('),
 )
 
 function harness(
@@ -57,6 +62,16 @@ function harness(
     getHookStdioError,
     selectCompleteHookOutput,
     stdioFailClosedEvents,
+    shouldDowngradeMissingHookScriptExit2,
+    shouldFailClosedHookInput,
+    formatHookProgressText,
+    CLASSIC_HOOK_HOP_SITE: {},
+    logError: () => {},
+    validateHookInputSize: () => {},
+    trackHookExecution: () => ({
+      settle: () => {},
+      [Symbol.dispose]: () => {},
+    }),
     TOOL_HOOK_EXECUTION_TIMEOUT_MS: 600000,
     shouldDisableAllHooksIncludingManaged: () => false,
     isEnvTruthy: () => false,
@@ -535,10 +550,6 @@ describe('densable 289 hook dispatch', () => {
             ),
           ) +
           source.slice(
-            source.indexOf('function shouldFailClosedHookInput('),
-            source.indexOf('export type HookOutsideReplResult'),
-          ) +
-          source.slice(
             source.indexOf('function holdOutsideHookActivity('),
             source.indexOf('export function hasBlockingResult'),
           ) +
@@ -547,6 +558,10 @@ describe('densable 289 hook dispatch', () => {
       {
         bufferConstants,
         stripAnsi,
+        shouldFailClosedHookInput,
+        CLASSIC_HOOK_HOP_SITE: {},
+        logError: () => {},
+        validateHookInputSize: () => {},
         trackHookExecution: () => ({
           settle: () => {},
           [Symbol.dispose]: () => {},
@@ -633,8 +648,8 @@ describe('densable 289 hook dispatch', () => {
             ),
           ) +
           source.slice(
-            source.indexOf('function shouldFailClosedHookInput('),
-            source.indexOf('export type HookOutsideReplResult'),
+            source.indexOf('const PERMISSION_DECISION_RANK'),
+            source.indexOf('async function* executeHooks('),
           ) +
           source.slice(
             source.indexOf('function holdOutsideHookActivity('),
@@ -645,6 +660,10 @@ describe('densable 289 hook dispatch', () => {
       {
         bufferConstants,
         stripAnsi,
+        shouldFailClosedHookInput,
+        CLASSIC_HOOK_HOP_SITE: {},
+        logError: () => {},
+        validateHookInputSize: () => {},
         trackHookExecution: () => ({
           settle: () => {},
           [Symbol.dispose]: () => {},
@@ -771,6 +790,7 @@ describe('densable 289 hook dispatch', () => {
     expect(
       preserved.map((result: { output: string }) => result.output),
     ).toEqual(['/managed'])
+    managedHooks = []
     tailHooks = [
       {
         hook: {

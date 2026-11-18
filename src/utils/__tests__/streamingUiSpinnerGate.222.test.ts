@@ -126,9 +126,10 @@ describe('densable zm streaming spinner gate', () => {
   })
 
   test('salvage drop sites remain land / esc / !isLoading j2a / refusal end', () => {
-    const src = readFileSync(
-      join(ROOT, 'src/screens/REPL.tsx'),
-      'utf8',
+    const src = (
+      readFileSync(join(ROOT, 'src/screens/REPL.tsx'), 'utf8') +
+      '\n' +
+      readFileSync(join(ROOT, 'src/screens/repl/runReplTurn.ts'), 'utf8')
     ).replace(/\r\n/g, '\n')
     // !Ln && j2a effect
     expect(src).toContain(

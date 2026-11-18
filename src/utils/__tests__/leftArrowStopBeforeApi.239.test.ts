@@ -21,7 +21,10 @@ describe('shouldStopBeforeNextApiCall → background_requested (239)', () => {
   })
 
   test('REPL wires Ki hook + onCancel clear + post-query proceed', () => {
-    const repl = readFileSync(join(root, 'screens/REPL.tsx'), 'utf8')
+    const repl =
+      readFileSync(join(root, 'screens/REPL.tsx'), 'utf8') +
+      '\n' +
+      readFileSync(join(root, 'screens/repl/runReplTurn.ts'), 'utf8')
     expect(repl).toContain(
       'shouldStopBeforeNextApiCall: () => leftArrowDeferRef.current !== null',
     )
@@ -55,7 +58,7 @@ describe('shouldStopBeforeNextApiCall → background_requested (239)', () => {
 
     // densable post-query refuse → Ss / createSystemMessage (not yi toast)
     expect(repl).toContain('densable post-query refuse')
-    expect(repl).toContain('createSystemMessage(`Backgrounding cancelled')
+    expect(repl).toMatch(/createSystemMessage\(\s*`Backgrounding cancelled/)
 
     // Mu fields must survive REPL → launcher → aAf telemetry
     const launcher = readFileSync(join(root, 'replLauncher.tsx'), 'utf8')

@@ -336,7 +336,7 @@ describe('goalIdleCheckin densable 2.1.236 (#25)', () => {
     expect(clearBlock).toContain('if (hooks.length === 0) return null')
 
     const replSrc = readFileSync(
-      join(import.meta.dir, '../../../screens/REPL.tsx'),
+      join(import.meta.dir, '../../../screens/repl/runReplTurn.ts'),
       'utf8',
     )
     const onActiveIdx = replSrc.indexOf('onActiveGoal:')

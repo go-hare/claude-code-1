@@ -129,7 +129,10 @@ describe('leftArrowVia densable dtn/CRw/kRw (239)', () => {
   })
 
   test('REPL wires dtn + Ki.proceed via defer-then-fork', () => {
-    const repl = readFileSync(join(root, 'src/screens/REPL.tsx'), 'utf8')
+    const repl =
+      readFileSync(join(root, 'src/screens/REPL.tsx'), 'utf8') +
+      '\n' +
+      readFileSync(join(root, 'src/screens/repl/runReplTurn.ts'), 'utf8')
     expect(repl).toContain('resolveLeftArrowVia')
     expect(repl).toContain('rewriteLeftArrowViaForAbortController')
     expect(repl).toContain("forceVia: 'defer-then-fork'")

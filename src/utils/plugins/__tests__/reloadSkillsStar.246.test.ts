@@ -72,11 +72,11 @@ describe('/reload-plugins skills/*/SKILL.md (2.1.246 #22)', () => {
       'if (applyStagedInstalls) clearPluginCacheExclusions()',
     )
     expect(reloadSrc).toContain('applyStagedInstalls: false')
-    const replSrc = readFileSync(
-      join(import.meta.dir, '../../../screens/REPL.tsx'),
+    const sessionEngineSrc = readFileSync(
+      join(import.meta.dir, '../../../screens/repl/SessionEngine.ts'),
       'utf8',
     )
-    expect(replSrc).toContain('applyStagedInstalls: false')
+    expect(sessionEngineSrc).toContain('applyStagedInstalls: false')
     const printSrc = readFileSync(
       join(import.meta.dir, '../../../cli/print.ts'),
       'utf8',

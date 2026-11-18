@@ -1409,6 +1409,7 @@ export function collectPortableCheckpoint(input: {
     }
     for (const id of carriedMonitorTaskIds) {
       oF(id, registry, { quiet: true })
+      removers?.removeTaskIds?.([id])
     }
   }
   return {

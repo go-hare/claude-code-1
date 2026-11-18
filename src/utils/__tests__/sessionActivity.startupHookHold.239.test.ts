@@ -39,10 +39,16 @@ describe('densable 2.1.239 #47 startup-hook-hold', () => {
     expect(HOOKS_SRC).toContain(
       "stopSessionActivity('hook_exec', STARTUP_HOOK_HOLD)",
     )
-    expect(HOOKS_SRC.match(/startSessionActivity\('hook_exec'/g)?.length).toBe(
-      2,
-    )
-    expect(HOOKS_SRC.match(/stopSessionActivity\('hook_exec'/g)?.length).toBe(2)
+    expect(
+      HOOKS_SRC.match(
+        /startSessionActivity\('hook_exec',\s*STARTUP_HOOK_HOLD\)/g,
+      )?.length,
+    ).toBe(2)
+    expect(
+      HOOKS_SRC.match(
+        /stopSessionActivity\('hook_exec',\s*STARTUP_HOOK_HOLD\)/g,
+      )?.length,
+    ).toBe(2)
     const subagent = HOOKS_SRC.slice(
       HOOKS_SRC.indexOf('export async function* executeSubagentStartHooks'),
     )

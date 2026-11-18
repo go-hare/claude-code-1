@@ -6,7 +6,10 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const replSrc = readFileSync(join(import.meta.dir, '../REPL.tsx'), 'utf8')
+const replSrc =
+  readFileSync(join(import.meta.dir, '../REPL.tsx'), 'utf8') +
+  '\n' +
+  readFileSync(join(import.meta.dir, '../repl/runReplTurn.ts'), 'utf8')
 const spinnerSrc = readFileSync(
   join(import.meta.dir, '../../components/Spinner.tsx'),
   'utf8',

@@ -197,11 +197,12 @@ describe('densable 2.1.248 #1 --restricted / CLAUDE_CODE_RESTRICTED', () => {
     expect(helpers).toContain('@178178450')
 
     const main = src('../../main.tsx')
+    const bootstrap = src('../../cli/mainBootstrap.ts')
     expect(main).toContain(".option('--restricted', RESTRICTED_OPTION_HELP)")
-    expect(main).toContain(
+    expect(bootstrap).toContain(
       "if (eagerHasCliFlag('--restricted') || isRestrictedEnv())",
     )
-    expect(main).toContain("loadSettingSourcesFromFlag('')")
+    expect(bootstrap).toContain("loadSettingSourcesFromFlag('')")
     expect(main).toContain('refuseRestrictedBypass')
     expect(main).toContain('setForkRestrictedLaunchConfig')
 

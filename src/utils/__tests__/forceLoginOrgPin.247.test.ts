@@ -193,7 +193,7 @@ describe('login sites share oauthLoginOrgUUIDHint', () => {
     const files = [
       new URL('../../components/ConsoleOAuthFlow.tsx', import.meta.url),
       new URL('../../cli/handlers/auth.ts', import.meta.url),
-      new URL('../../cli/print.ts', import.meta.url),
+      new URL('../../cli/headless/HeadlessControlPlane.ts', import.meta.url),
     ]
     for (const file of files) {
       const src = await Bun.file(file).text()

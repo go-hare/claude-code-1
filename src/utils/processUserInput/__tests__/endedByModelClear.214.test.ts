@@ -58,7 +58,9 @@ describe('isEndedByModelClearEscape', () => {
       isEndedByModelClearEscape('/help', [{ name: 'help', type: 'local-jsx' }]),
     ).toBe(true)
     expect(
-      isEndedByModelClearEscape('/bug', [{ name: 'bug', type: 'local-jsx' }]),
+      isEndedByModelClearEscape('/bug', [
+        { name: 'feedback', type: 'local-jsx', aliases: ['bug'] },
+      ]),
     ).toBe(true)
   })
 })

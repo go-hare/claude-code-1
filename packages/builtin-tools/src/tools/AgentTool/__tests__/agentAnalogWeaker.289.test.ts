@@ -86,12 +86,19 @@ describe('densable 2.1.289 remaining analog-weaker wrap', () => {
       '...(!outputFileReadable ? { outputFileUnreadable: true } : {})',
     )
     const query = readFileSync(join(repoRoot, 'src', 'query.ts'), 'utf-8')
+    const queryHelpers = readFileSync(
+      join(repoRoot, 'src', 'query', 'queryHelpers.ts'),
+      'utf-8',
+    )
     expect(query).not.toContain('toolNamesChanged')
     expect(query).toContain('runTurnEndReactions')
-    expect(query).toContain('function* maybeHandbackBounce')
+    expect(queryHelpers).toContain('function* maybeHandbackBounce')
+    expect(query).toContain('maybeHandbackBounce')
     expect(query).toContain("reason: 'max_turns'")
-    expect(query).toContain('sweepStaleKeepaliveReasons(agentId, registry)')
-    expect(query).toContain('hasHandbackWaitKids(agentId, registry)')
+    expect(queryHelpers).toContain(
+      'sweepStaleKeepaliveReasons(agentId, registry)',
+    )
+    expect(queryHelpers).toContain('hasHandbackWaitKids(agentId, registry)')
     expect(query).toContain('maybeSkillInlineCommandHandoffNotRun')
     expect(query).toContain("return { reason: 'hook_stopped' }")
     const prevent = query.indexOf('if (shouldPreventContinuation)')

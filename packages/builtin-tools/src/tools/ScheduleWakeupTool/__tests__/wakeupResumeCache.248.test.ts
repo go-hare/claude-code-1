@@ -8,7 +8,10 @@ import { join } from 'path'
 
 const promptSrc = readFileSync(join(import.meta.dir, '../prompt.ts'), 'utf8')
 const claudeSrc = readFileSync(
-  join(import.meta.dir, '../../../../../../src/services/api/claude.ts'),
+  join(
+    import.meta.dir,
+    '../../../../../../src/services/api/claude/promptCaching.ts',
+  ),
   'utf8',
 )
 const gbSrc = readFileSync(

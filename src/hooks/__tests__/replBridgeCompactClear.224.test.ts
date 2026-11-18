@@ -20,7 +20,7 @@ const sdkQ = readFileSync(
   'utf8',
 )
 const repl = readFileSync(
-  join(import.meta.dir, '../../screens/REPL.tsx'),
+  join(import.meta.dir, '../../screens/repl/SessionEngine.ts'),
   'utf8',
 )
 

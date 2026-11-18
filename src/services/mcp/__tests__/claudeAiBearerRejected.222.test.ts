@@ -35,13 +35,18 @@ describe('densable 2.1.222 #10 ClaudeAiProxyBearerRejectedError + ati', () => {
   })
 
   test('source exports ClaudeAiProxyBearerRejectedError + throw path', async () => {
-    const text = await Bun.file('src/services/mcp/client.ts').text()
-    expect(text).toContain('class ClaudeAiProxyBearerRejectedError')
-    expect(text).toContain("code = 'CLAUDEAI_BEARER_REJECTED'")
-    expect(text).toContain('throw new ClaudeAiProxyBearerRejectedError()')
-    expect(text).toContain('discoveryBearerRejected')
-    expect(text).toContain('toolsListError')
-    expect(text).toContain('isClaudeAiBearerRejectedError')
+    const clientText = await Bun.file('src/services/mcp/client.ts').text()
+    const helpersText = await Bun.file(
+      'src/services/mcp/connectionHelpers.ts',
+    ).text()
+    expect(helpersText).toContain('class ClaudeAiProxyBearerRejectedError')
+    expect(helpersText).toContain("code = 'CLAUDEAI_BEARER_REJECTED'")
+    expect(helpersText).toContain(
+      'throw new ClaudeAiProxyBearerRejectedError()',
+    )
+    expect(clientText).toContain('discoveryBearerRejected')
+    expect(clientText).toContain('toolsListError')
+    expect(clientText).toContain('isClaudeAiBearerRejectedError')
   })
 
   test('reconnectHelpers ati: discoveryBearerRejected message', () => {

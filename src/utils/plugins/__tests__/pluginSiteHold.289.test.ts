@@ -165,7 +165,7 @@ describe('densable 2.1.289 pr / nr / sr', () => {
 
   test('UserMessage BO wraps only the plugin tree', () => {
     const start = PANES.indexOf('export function PluginUserMessageSite')
-    const body = PANES.slice(start, start + 3500)
+    const body = PANES.slice(start)
     expect(body).toContain('hasPluginDrawing')
     expect(body).toContain('fallback={engine}')
     expect(body).toContain('component="UserMessage"')

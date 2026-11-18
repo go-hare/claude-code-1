@@ -89,10 +89,13 @@ describe('densable 2.1.247 #7 tss / l2e', () => {
     const repo = join(import.meta.dir, '../../../../../..')
     // densable `_buildToolUseContextWith` destructures fallbackModel, so the
     // interactive host has to supply it too or --fallback-model is headless-only.
-    const repl = readFileSync(join(repo, 'src/screens/REPL.tsx'), 'utf8')
-    const options = repl.slice(
-      repl.indexOf('isNonInteractiveSession: false') - 2000,
-      repl.indexOf('isNonInteractiveSession: false'),
+    const sessionEngine = readFileSync(
+      join(repo, 'src/screens/repl/SessionEngine.ts'),
+      'utf8',
+    )
+    const options = sessionEngine.slice(
+      sessionEngine.indexOf('isNonInteractiveSession: false') - 2000,
+      sessionEngine.indexOf('isNonInteractiveSession: false'),
     )
     expect(options).toContain('fallbackModel,')
 

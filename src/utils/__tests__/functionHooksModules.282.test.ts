@@ -197,11 +197,11 @@ describe('function-hooks classic pattern', () => {
       'takes { server, tool, args? }',
     )
     const ran = await handleHostOp('process.run', [
-      ['node', '-e', 'process.stdout.write("ok")'],
+      [process.execPath, '-e', 'process.stdout.write("ok")'],
     ])
     expect((ran as { stdout?: string }).stdout).toBe('ok')
     const ranBag = await handleHostOp('process.run', [
-      { argv: ['node', '-e', 'process.stdout.write("bag")'] },
+      { argv: [process.execPath, '-e', 'process.stdout.write("bag")'] },
     ])
     expect((ranBag as { stdout?: string }).stdout).toBe('bag')
     const dir = mkdtempSync(join(tmpdir(), 'fn-hooks-fs-'))
@@ -1415,12 +1415,10 @@ describe('function-hooks classic pattern', () => {
       content: [{ type: 'text', text: 'pong' }],
       isError: false,
     }))
-    const warnSpy = (...args: unknown[]) => {
-      warnMessages.push(args.map(String).join(' '))
-    }
     const warnMessages: string[] = []
-    const previousWarn = console.warn
-    console.warn = warnSpy as typeof console.warn
+    const debugSpy = spyOn(debug, 'logForDebugging').mockImplementation(msg => {
+      warnMessages.push(String(msg))
+    })
     try {
       await expect(
         handleHostOp('mcp.call', [{ server: 'missing', tool: 'nope' }], 'demo'),
@@ -1428,7 +1426,7 @@ describe('function-hooks classic pattern', () => {
         '$.mcp.call: no connected MCP tool "nope" on a server named "missing"',
       )
     } finally {
-      console.warn = previousWarn
+      debugSpy.mockRestore()
     }
     // densable a_t: log servers-with-tools BEFORE throw (throw string unchanged)
     expect(warnMessages.join('\n')).toContain(

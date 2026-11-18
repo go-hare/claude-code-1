@@ -227,7 +227,7 @@ describe('densable 2.1.251 iCe applyMessageStoreAction', () => {
     const { readFileSync } = require('node:fs') as typeof import('node:fs')
     const { join } = require('node:path') as typeof import('node:path')
     const src = readFileSync(
-      join(import.meta.dir, '../../screens/REPL.tsx'),
+      join(import.meta.dir, '../../screens/repl/runReplTurn.ts'),
       'utf8',
     )
     expect(src).toContain("type: 'append-or-move-by-uuid'")

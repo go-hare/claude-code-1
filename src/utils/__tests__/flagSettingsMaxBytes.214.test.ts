@@ -74,7 +74,7 @@ describe('densable #17 FLAG_SETTINGS_MAX_BYTES / assertRegularFileWithinMaxBytes
     // Source-contract: keep message templates 1:1 with densable without
     // importing main.tsx (heavy side-effects).
     const mainSrc = await Bun.file(
-      join(import.meta.dir, '../../main.tsx'),
+      join(import.meta.dir, '../../cli/mainBootstrap.ts'),
     ).text()
     expect(mainSrc).toContain('FLAG_SETTINGS_MAX_BYTES')
     expect(mainSrc).toContain('assertRegularFileWithinMaxBytes')

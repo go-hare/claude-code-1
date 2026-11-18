@@ -21,6 +21,10 @@ import {
 } from '../connectAuthClassify.js'
 
 const clientSrc = readFileSync(join(import.meta.dir, '../client.ts'), 'utf8')
+const connectionHelpersSrc = readFileSync(
+  join(import.meta.dir, '../connectionHelpers.ts'),
+  'utf8',
+)
 
 function unauthorized(status = 401): Error & { code: number } {
   return Object.assign(new Error('Unauthorized'), {
@@ -31,10 +35,11 @@ function unauthorized(status = 401): Error & { code: number } {
 
 describe('densable 2.1.248 #24 headersHelper 401 vs OAuth', () => {
   test('HOST skips authProvider and classifies minted Authorization', () => {
-    expect(clientSrc).toContain('resolveRemoteConnectAuth')
-    expect(clientSrc).toContain('shouldSkipOAuthAuthProvider')
-    expect(clientSrc).toContain('maybeConnectAuthHeaderRejection')
-    expect(clientSrc).toContain('helperMintsAuthHeader')
+    expect(connectionHelpersSrc).toContain('resolveRemoteConnectAuth')
+    expect(connectionHelpersSrc).toContain('shouldSkipOAuthAuthProvider')
+    expect(connectionHelpersSrc).toContain('maybeConnectAuthHeaderRejection')
+    expect(connectionHelpersSrc).toContain('helperMintsAuthHeader')
+    expect(connectionHelpersSrc).not.toContain('helperMintsAuthHeader: !!')
     expect(clientSrc).not.toContain('helperMintsAuthHeader: !!')
     expect(HIDDEN_MCP_ERROR_CODES.has(HEADERS_HELPER_AUTH_REJECTED)).toBe(true)
   })
@@ -84,9 +89,9 @@ describe('densable 2.1.248 #24 headersHelper 401 vs OAuth', () => {
   })
 
   test('me: resolveRemoteConnectAuth skips EFe when cliOwned bearer is registered', () => {
-    const fn = clientSrc.slice(
-      clientSrc.indexOf('function resolveRemoteConnectAuth'),
-      clientSrc.indexOf('function handleRemoteAuthFailure'),
+    const fn = connectionHelpersSrc.slice(
+      connectionHelpersSrc.indexOf('function resolveRemoteConnectAuth'),
+      connectionHelpersSrc.indexOf('function handleRemoteAuthFailure'),
     )
     expect(fn).toContain('getCliOwnedBearerProvider(serverRef)')
     expect(fn).toContain('isCliOwnedBearerConfig(serverRef)')
@@ -94,16 +99,16 @@ describe('densable 2.1.248 #24 headersHelper 401 vs OAuth', () => {
   })
 
   test('L: first-party auto-auth skip EFe + Bt wrap; jo is not L', () => {
-    const fn = clientSrc.slice(
-      clientSrc.indexOf('function resolveRemoteConnectAuth'),
-      clientSrc.indexOf('function handleRemoteAuthFailure'),
+    const fn = connectionHelpersSrc.slice(
+      connectionHelpersSrc.indexOf('function resolveRemoteConnectAuth'),
+      connectionHelpersSrc.indexOf('function handleRemoteAuthFailure'),
     )
     expect(fn).toContain('shouldUseFirstPartyAutoAuth')
     expect(fn).toContain('useFirstPartyAuth')
     expect(fn).not.toContain('isFirstPartyDesignMcpServer')
     expect(clientSrc).toContain('wrapFirstPartyAutoAuthFetch')
     expect(clientSrc).toContain('classifyFirstPartyAuthRejection')
-    expect(clientSrc).toContain('tengu_mcp_first_party_auto_auth')
+    expect(connectionHelpersSrc).toContain('tengu_mcp_first_party_auto_auth')
   })
 
   test('ko: static Authorization → AUTH_HEADER_REJECTED (wins over helper)', () => {

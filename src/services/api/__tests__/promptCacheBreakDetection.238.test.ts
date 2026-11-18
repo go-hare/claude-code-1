@@ -359,7 +359,14 @@ describe('t1f extras (238)', () => {
       join(dirname(fileURLToPath(import.meta.url)), '../claude.ts'),
       'utf8',
     )
-    expect(claudeSrc).toContain('tengu_prompt_cache_diagnostics')
+    const promptCachingSrc = readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        '../claude/promptCaching.ts',
+      ),
+      'utf8',
+    )
+    expect(promptCachingSrc).toContain('tengu_prompt_cache_diagnostics')
     expect(claudeSrc).toContain('CACHE_DIAGNOSIS_BETA_HEADER')
     expect(claudeSrc).toContain('lastAssistantMessageId(messages)')
     // MWT latch is independent of YNe / tracking feature.

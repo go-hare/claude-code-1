@@ -323,6 +323,21 @@ describe('MCP default clients accessor lifecycle', () => {
         logForDebugging: () => {},
         execMcpToolHook: env.helper,
         parseHookOutput: () => ({}),
+        validateHookInputSize: () => {},
+        logError: () => {},
+        hookTelemetryFeatureName: (e: string) => e,
+        shouldFailClosedHookInput: () => false,
+        holdOutsideHookActivity: () => () => {},
+        trackHookExecution: () => ({
+          settle: () => {},
+          [Symbol.dispose]: () => {},
+        }),
+        incrementPluginUsage: () => {},
+        getFeatureValueWithSource: () => ({ value: false, source: 'fallback' }),
+        formatHookProgressText: () => '',
+        consumeOutsideHookOutput: () => {},
+        stripAnsi: (s: string) => s,
+        bufferConstants: { MAX_STRING_LENGTH: 0x1fffffe8 },
       },
     )
     const results = await outside({

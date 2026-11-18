@@ -13,6 +13,10 @@ const CLAUDE_SRC = readFileSync(
   join(dirname(fileURLToPath(import.meta.url)), '../claude.ts'),
   'utf8',
 )
+const REQUEST_PARAMS_SRC = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), '../claude/requestParams.ts'),
+  'utf8',
+)
 
 function asAPIError(
   message: string,
@@ -154,10 +158,14 @@ describe('densable 2.1.238 #17 formatAPIError T9r', () => {
   })
 
   test('STREAM_NETWORK_DOWN_CODES still includes ERR_PROXY_TUNNEL (no F4y / new cause)', () => {
-    const start = CLAUDE_SRC.indexOf('const STREAM_NETWORK_DOWN_CODES')
+    const start = REQUEST_PARAMS_SRC.indexOf('const STREAM_NETWORK_DOWN_CODES')
     expect(start).toBeGreaterThan(0)
-    const block = CLAUDE_SRC.slice(start, CLAUDE_SRC.indexOf('])', start) + 2)
+    const block = REQUEST_PARAMS_SRC.slice(
+      start,
+      REQUEST_PARAMS_SRC.indexOf('])', start) + 2,
+    )
     expect(block).toContain("'ERR_PROXY_TUNNEL'")
     expect(CLAUDE_SRC).not.toContain('asset_proxy_refused')
+    expect(REQUEST_PARAMS_SRC).not.toContain('asset_proxy_refused')
   })
 })

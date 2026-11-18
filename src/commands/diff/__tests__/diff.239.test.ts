@@ -11,7 +11,7 @@ import { isCommandImmediate } from '../../../utils/immediateCommand.js'
 const indexSrc = readFileSync(join(import.meta.dir, '../index.ts'), 'utf8')
 const callSrc = readFileSync(join(import.meta.dir, '../diff.tsx'), 'utf8')
 const replSrc = readFileSync(
-  join(import.meta.dir, '../../../screens/REPL.tsx'),
+  join(import.meta.dir, '../../../screens/repl/SessionEngine.ts'),
   'utf8',
 )
 const slashSrc = readFileSync(

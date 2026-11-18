@@ -159,9 +159,16 @@ describe('densable 2.1.283 send-now backgroundNow', () => {
       join(import.meta.dir, '../../screens/REPL.tsx'),
       'utf8',
     )
+    const submitController = readFileSync(
+      join(import.meta.dir, '../../screens/repl/SubmitController.ts'),
+      'utf8',
+    )
     expect(repl).not.toContain('hostSendQueuedNow')
     expect(repl).toContain('trySendQueuedNowKey')
-    expect(repl).toContain('queuedNowLowLatencyHost.sendQueuedNow(namedTaskId)')
+    expect(submitController).toContain('trySendQueuedNowKey')
+    expect(submitController).toContain(
+      'queuedNowLowLatencyHost.sendQueuedNow(namedTaskId)',
+    )
     expect(repl).toContain('isVelvetPandaEnabled')
     expect(repl).toContain('spinnerStore: leftoverIhr')
   })

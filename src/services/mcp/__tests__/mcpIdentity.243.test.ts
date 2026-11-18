@@ -10,6 +10,7 @@ import {
   setMcpAccountIdentityResolver,
   takeUnownedMcpIdentityChange,
   mcpConfigDependsOnAccountIdentity,
+  rearmMcpIdentityBaseline,
   resetMcpIdentityStateForTests,
   seedMcpIdentityCheck,
 } from '../mcpIdentity.js'
@@ -68,10 +69,13 @@ describe('mcp identity 243', () => {
       boundaries++
     })
     installed = false
+    // 2.1.289 #1: transient logged-out reads do not trip epoch; rearmMcpIdentityBaseline() invalidates once.
+    expect(getMcpIdentityEpoch()).toBe(epoch)
+    rearmMcpIdentityBaseline()
     expect(getMcpIdentityEpoch()).toBe(epoch + 1)
     expect(getMcpIdentityEpoch()).toBe(epoch + 1)
     await Promise.resolve()
-    expect(boundaries).toBe(1)
+    expect(boundaries).toBe(0)
     release()
   })
 
@@ -80,7 +84,7 @@ describe('mcp identity 243', () => {
     process.env.MCP_DISCOVERY_CACHE = 'true'
     setMcpAccountIdentityResolver(() => undefined)
     expect(resolveMcpAccountIdentity().kind).toBe('logged-out')
-    expect(currentMcpAccountToken()).toBeUndefined()
+    expect(currentMcpAccountToken()).toBe('acct:logged-out')
     expect(mcpIdentityChangedSinceLastCheck()).toBe(true)
     setMcpAccountIdentityResolver(() => ({
       accountUuid: 'a',

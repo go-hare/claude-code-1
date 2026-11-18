@@ -3,6 +3,10 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const REPL = join(fileURLToPath(new URL('.', import.meta.url)), '../REPL.tsx')
+const SUBMIT_CONTROLLER = join(
+  fileURLToPath(new URL('.', import.meta.url)),
+  '../repl/SubmitController.ts',
+)
 const SCROLL_BOX = join(
   fileURLToPath(new URL('.', import.meta.url)),
   '../../../packages/@ant/ink/src/components/ScrollBox.tsx',
@@ -52,7 +56,10 @@ describe('REPL type-into-empty Hi latch (SEA typedIntoEmpty)', () => {
   })
 
   test('source: lastMsgIsHuman / agent-view / overlay / submit force flags', async () => {
-    const src = await Bun.file(REPL).text()
+    const src =
+      (await Bun.file(REPL).text()) +
+      '\n' +
+      (await Bun.file(SUBMIT_CONTROLLER).text())
     expect(src).toMatch(/repinScroll\(false,\s*'lastMsgIsHuman'\)/)
     expect(src).toMatch(/repinScroll\(true,\s*'agent-view-change'\)/)
     expect(src).toMatch(/repinScroll\(true,\s*'overlay'\)/)

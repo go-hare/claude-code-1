@@ -37,15 +37,24 @@ describe('densable 2.1.289 Ctrl+C draft recover wiring', () => {
     expect(src.slice(stash, stash + 1200)).not.toContain(
       "text: 'Draft restored'",
     )
-    const repl = readFileSync(
-      join(import.meta.dir, '../../../screens/REPL.tsx'),
+    const submitController = readFileSync(
+      join(import.meta.dir, '../../../screens/repl/SubmitController.ts'),
       'utf8',
     )
-    const restores = [...repl.matchAll(/setStashedPrompt\(undefined\)/g)]
-    expect(restores.length).toBeGreaterThanOrEqual(2)
+    const restores = [
+      ...submitController.matchAll(/setStashedPrompt\(undefined\)/g),
+    ]
+    expect(restores.length).toBeGreaterThanOrEqual(1)
     for (const hit of restores) {
-      const after = repl.slice(hit.index ?? 0, (hit.index ?? 0) + 280)
+      const after = submitController.slice(
+        hit.index ?? 0,
+        (hit.index ?? 0) + 280,
+      )
       expect(after).toContain("text: 'Draft restored'")
     }
+    const helperCalls = [
+      ...submitController.matchAll(/this\.#restoreStashedPrompt\(/g),
+    ]
+    expect(helperCalls.length).toBeGreaterThanOrEqual(2)
   })
 })

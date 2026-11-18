@@ -9,7 +9,10 @@ import { describe, expect, test } from 'bun:test'
  * enqueue payload — not message extras / priority inventing.
  */
 describe('REPL concurrent onquery densable Ace', () => {
-  const src = readFileSync(join(import.meta.dir, '../REPL.tsx'), 'utf8')
+  const src = readFileSync(
+    join(import.meta.dir, '../repl/runReplTurn.ts'),
+    'utf8',
+  )
 
   test('uses isMetaVisibleOrigin instead of blanket !isMeta drop', () => {
     expect(src).toContain('isMetaVisibleOrigin')

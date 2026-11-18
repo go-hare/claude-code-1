@@ -89,7 +89,10 @@ describe('densable 2.1.246 generateSessionTitle fe/B', () => {
     expect(src).not.toContain(
       'Generate a concise, sentence-case title (3-7 words)',
     )
-    const repl = readFileSync(join(srcRoot, 'screens/REPL.tsx'), 'utf8')
+    const repl = readFileSync(
+      join(srcRoot, 'screens/repl/runReplTurn.ts'),
+      'utf8',
+    )
     expect(repl).toContain('!sessionAiTitle')
     expect(repl).toContain('titleSessionId !== getSessionId()')
     expect(repl).toContain('isSyntheticSessionTitleText')

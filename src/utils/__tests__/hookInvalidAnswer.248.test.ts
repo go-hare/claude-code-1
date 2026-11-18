@@ -20,6 +20,10 @@ import {
 import { Eve, parseHookOutput, Uct, wwt } from '../hooks.js'
 
 const hooksSrc = readFileSync(join(import.meta.dir, '../hooks.ts'), 'utf8')
+const hookValidationSrc = readFileSync(
+  join(import.meta.dir, '../hooks/hookOutputValidation.ts'),
+  'utf8',
+)
 const hostSrc = readFileSync(
   join(import.meta.dir, '../../dialog/DialogHost.tsx'),
   'utf8',
@@ -31,15 +35,15 @@ describe('densable 2.1.248 #21 hook invalid answer', () => {
   })
 
   test('gold wwt / Eve / caller strings are in leftover hosts', () => {
-    expect(hooksSrc).toContain('export const Eve =')
-    expect(hooksSrc).toContain('export function wwt(')
+    expect(hookValidationSrc).toContain('export const Eve =')
+    expect(hookValidationSrc).toContain('export function wwt(')
     expect(hooksSrc).toContain(
       'noteHookFailure(toolUseID, wwt(hookEvent, stderr))',
     )
-    expect(hooksSrc).toContain(
+    expect(hookValidationSrc).toContain(
       'PermissionRequest decision must be {"behavior": "allow"}',
     )
-    expect(hooksSrc).toContain(
+    expect(hookValidationSrc).toContain(
       'top-level decision is the legacy approve|block field',
     )
     expect(hostSrc).toContain("emitBgNeedsInput(label, 'permission'")

@@ -23,19 +23,25 @@ import {
 
 const srcRoot = join(import.meta.dir, '../..')
 const query = readFileSync(join(srcRoot, 'query.ts'), 'utf8')
+const queryHelpers = readFileSync(
+  join(srcRoot, 'query/queryHelpers.ts'),
+  'utf8',
+)
 const transitions = readFileSync(join(srcRoot, 'query/transitions.ts'), 'utf8')
 const messages = readFileSync(join(srcRoot, 'utils/messages.ts'), 'utf8')
 const claude = readFileSync(join(srcRoot, 'services/api/claude.ts'), 'utf8')
 
 describe('#55 GJn truncated recovery (2.1.246)', () => {
   test('GJn host + producer field are landed 1:1', () => {
-    expect(query).toContain('function isTruncatedAfterOutputRecovery(')
-    expect(query).toContain('tengu_truncated_response_recovery')
+    expect(queryHelpers).toContain('function isTruncatedAfterOutputRecovery(')
+    expect(queryHelpers).toContain('tengu_truncated_response_recovery')
     expect(query).toContain('truncated_response_recovery')
-    expect(query).toContain('cut off mid-stream')
-    expect(query).toContain('Write the complete response again from the start')
-    expect(query).toContain("family === 'subagent'")
-    expect(query).toContain('MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3')
+    expect(queryHelpers).toContain('cut off mid-stream')
+    expect(queryHelpers).toContain(
+      'Write the complete response again from the start',
+    )
+    expect(queryHelpers).toContain("family === 'subagent'")
+    expect(queryHelpers).toContain('MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3')
     expect(transitions).toContain('truncated_response_recovery')
     expect(messages).toContain('truncatedAfterOutput')
     expect(claude).toContain('truncatedAfterOutput')
@@ -44,7 +50,7 @@ describe('#55 GJn truncated recovery (2.1.246)', () => {
     expect(messages).toContain('turnCompanion?: true')
     expect(messages).toContain('uMsg.turnCompanion === true ? true : undefined')
     const gjn = query.slice(
-      query.indexOf('cut off mid-stream'),
+      query.indexOf('truncatedRecoveryCopy('),
       query.indexOf("reason: 'truncated_response_recovery'"),
     )
     expect(gjn).toContain('turnCompanion: true')
@@ -55,7 +61,7 @@ describe('#55 GJn truncated recovery (2.1.246)', () => {
     expect(qjn).toContain('turnCompanion: true')
     // densable fl — spinner recovering bag on max_output_tokens_recovery continue
     expect(query).toContain('announceOutputLimitRecovery')
-    expect(query).toContain('setOutputLimitRecovery')
+    expect(queryHelpers).toContain('setOutputLimitRecovery')
     // densable ap(): stream withhold + exhausted yield h.
     expect(query).toContain('truncatedAfterOutput:')
     expect(query).toContain('isTruncatedAfterOutputRecovery(')
