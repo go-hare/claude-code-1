@@ -22,19 +22,9 @@ type SleepInput = z.infer<InputSchema>
 
 type SleepOutput = { slept_seconds: number; interrupted: boolean }
 
-function isProactiveAutomationEnabled(): boolean {
+function isProactiveAutomationEnabled(fallbackWhenFlagOff = false): boolean {
   if (!(feature('PROACTIVE') || feature('KAIROS'))) {
-    return false
-  }
-
-  const mod =
-    require('src/proactive/index.js') as typeof import('src/proactive/index.js')
-  return mod.isProactiveActive()
-}
-
-function isProactiveSleepAllowed(): boolean {
-  if (!(feature('PROACTIVE') || feature('KAIROS'))) {
-    return true
+    return fallbackWhenFlagOff
   }
 
   const mod =
@@ -49,7 +39,7 @@ function hasQueuedWakeSignal(): boolean {
 }
 
 function shouldInterruptSleep(): boolean {
-  return !isProactiveSleepAllowed() || hasQueuedWakeSignal()
+  return !isProactiveAutomationEnabled(true) || hasQueuedWakeSignal()
 }
 
 export const SleepTool = buildTool({
