@@ -380,6 +380,10 @@ export function buildHookBaseEnv(
     ...env,
     SELF_HOSTED_RUNNER_POOL_SECRET: undefined,
     SELF_HOSTED_RUNNER_ENVIRONMENT_SECRET: undefined,
+    CCR_AUTO_MODE_APPLY: undefined,
+    CCR_AUTO_MODE_ALLOW: undefined,
+    CCR_AUTO_MODE_ENVIRONMENT: undefined,
+    CCR_AUTO_MODE_SOFT_DENY: undefined,
   }
 }
 

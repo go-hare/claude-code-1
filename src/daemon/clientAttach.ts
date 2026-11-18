@@ -18,6 +18,7 @@ import { Yot } from '@anthropic/ink'
 import { getControlSocketPath } from './controlSocket.js'
 import { createDecModeTracker } from './bgWorker.js'
 import { jsonStringify, jsonParse } from '../utils/slowOperations.js'
+import { logEvent } from '../services/analytics/index.js'
 import {
   ATTACH_WAITING_REDRAW,
   COLD_ATTACH_ONCE_READY,
@@ -760,6 +761,53 @@ export type SendBgReplyResult = null | {
  * `ERESPAWNING`), updating job state on success, and mapping `ENOJOB` /
  * `ENOCONN` / `ESKEW` errors (queueing the message on disconnect when safe).
  */
+/**
+ * Official Nr — notice printed when `claude agents` exits while background
+ * sessions are still running without a persistent service.
+ */
+export const BG_ATTACH_HELD_EXIT_NOTICE =
+  "Background sessions still running will stop in about a minute. Run 'claude agents' to keep them."
+
+export type BgAttachHeldAtExitReason = 'loop_head' | 'first_attach'
+
+export function formatBgAttachHeldExitNotice(opts: {
+  daemonUp: boolean
+  viaService: boolean
+  platform?: NodeJS.Platform
+  stdoutIsTTY?: boolean
+}): string {
+  const platform = opts.platform ?? process.platform
+  const isTTY = opts.stdoutIsTTY ?? process.stdout.isTTY === true
+  if (!opts.daemonUp && !opts.viaService && platform !== 'win32' && isTTY) {
+    return `${BG_ATTACH_HELD_EXIT_NOTICE}\n`
+  }
+  return ''
+}
+
+export function reportBgAttachHeldAtExit(opts: {
+  reason: BgAttachHeldAtExitReason
+  daemonUp: boolean
+  viaService: boolean
+  alreadyInAlt?: boolean
+  onExitNotice?: (notice: string) => void
+  platform?: NodeJS.Platform
+  stdoutIsTTY?: boolean
+}): void {
+  const notice = formatBgAttachHeldExitNotice(opts)
+  logEvent('tengu_bg_attach_held_at_exit', {
+    loop_head: opts.reason === 'loop_head',
+    first_attach: opts.reason === 'first_attach',
+    daemon_up: opts.daemonUp,
+    service_restart: opts.viaService,
+    notice: notice !== '',
+  })
+  if (opts.alreadyInAlt) {
+    opts.onExitNotice?.(notice)
+  } else if (notice) {
+    process.stdout.write(notice)
+  }
+}
+
 export async function sendBgReply(
   short: string,
   text: string,

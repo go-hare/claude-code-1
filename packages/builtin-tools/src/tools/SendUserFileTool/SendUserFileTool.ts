@@ -20,7 +20,13 @@ const inputSchema = lazySchema(() =>
 type InputSchema = ReturnType<typeof inputSchema>
 type SendUserFileInput = z.infer<InputSchema>
 
-type SendUserFileOutput = { sent: boolean; file_path: string }
+type SendUserFileOutput = {
+  sent: boolean
+  file_path: string
+  error?: string
+  size?: number
+  file_uuid?: string
+}
 
 export const SendUserFileTool = buildTool({
   name: SEND_USER_FILE_TOOL_NAME,
@@ -73,7 +79,9 @@ Guidelines:
       type: 'tool_result',
       content: content.sent
         ? `File sent: ${content.file_path}`
-        : `Failed to send file: ${content.file_path}`,
+        : content.error
+          ? `Failed to send file ${content.file_path}: ${content.error}`
+          : `Failed to send file: ${content.file_path}`,
     }
   },
 
@@ -120,17 +128,37 @@ Guidelines:
     // Attempt bridge upload if available (so web viewers can download)
     const appState = context.getAppState()
     let fileUuid: string | undefined
+    let uploadError: string | undefined
     if (appState.replBridgeEnabled) {
       try {
-        const { uploadBriefAttachment } = await import(
-          '@claude-code/builtin-tools/tools/BriefTool/upload.js'
+        const {
+          formatLargeFileUploadFailure,
+          SUSPECTED_UPLOAD_LIMIT_BYTES,
+          uploadBriefAttachmentWithStatus,
+        } = await import('@claude-code/builtin-tools/tools/BriefTool/upload.js')
+        const outcome = await uploadBriefAttachmentWithStatus(
+          file_path,
+          fileSize,
+          {
+            replBridgeEnabled: true,
+            signal: context.abortController.signal,
+          },
         )
-        fileUuid = await uploadBriefAttachment(file_path, fileSize, {
-          replBridgeEnabled: true,
-          signal: context.abortController.signal,
-        })
-      } catch {
-        // Best-effort upload — local path is always available
+        if ('fileUuid' in outcome) {
+          fileUuid = outcome.fileUuid
+        } else {
+          uploadError = formatLargeFileUploadFailure({
+            size: fileSize,
+            uploadError: outcome.error,
+            suspectedLimitBytes:
+              outcome.suspectedLimitBytes ??
+              (fileSize > SUSPECTED_UPLOAD_LIMIT_BYTES
+                ? SUSPECTED_UPLOAD_LIMIT_BYTES
+                : undefined),
+          })
+        }
+      } catch (e) {
+        uploadError = e instanceof Error ? e.message : String(e)
       }
     }
 
@@ -142,7 +170,11 @@ Guidelines:
         size: fileSize,
         ...(fileUuid ? { file_uuid: fileUuid } : {}),
         ...(!delivered
-          ? { error: 'Bridge upload failed. File available at local path.' }
+          ? {
+              error:
+                uploadError ??
+                'Bridge upload failed. File available at local path.',
+            }
           : {}),
       },
     }

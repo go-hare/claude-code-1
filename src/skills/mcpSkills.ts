@@ -22,8 +22,17 @@ const MCP_FETCH_CACHE_SIZE = 20
  * return the cached result. Callers invalidate via `.cache.delete(name)`.
  */
 export const fetchMcpSkillsForClient = memoizeWithLRU(
-  async (client: MCPServerConnection): Promise<Command[]> => {
+  async (
+    client: MCPServerConnection,
+    signal?: AbortSignal,
+  ): Promise<Command[]> => {
     if (client.type !== 'connected') return []
+    if (signal?.aborted) {
+      fetchMcpSkillsForClient.cache.delete(client.name)
+      return []
+    }
+
+    const requestOptions = signal ? { signal } : undefined
 
     try {
       if (!client.capabilities?.resources) {
@@ -32,7 +41,10 @@ export const fetchMcpSkillsForClient = memoizeWithLRU(
 
       // List all resources and filter to skill:// URIs
       // v2 Client exposes typed listResources/readResource (no ResultSchema arg)
-      const result = await client.client.listResources()
+      const result = await client.client.listResources(
+        undefined,
+        requestOptions,
+      )
 
       if (!result.resources) return []
 
@@ -53,11 +65,18 @@ export const fetchMcpSkillsForClient = memoizeWithLRU(
       const commands: Command[] = []
 
       for (const resource of skillResources) {
+        if (signal?.aborted) {
+          fetchMcpSkillsForClient.cache.delete(client.name)
+          return []
+        }
         try {
           // Read the skill resource content
-          const readResult = await client.client.readResource({
-            uri: resource.uri,
-          })
+          const readResult = await client.client.readResource(
+            {
+              uri: resource.uri,
+            },
+            requestOptions,
+          )
 
           // Extract text content from the resource
           const textContent = readResult.contents
@@ -118,6 +137,10 @@ export const fetchMcpSkillsForClient = memoizeWithLRU(
 
       return commands
     } catch (error) {
+      if (signal?.aborted) {
+        fetchMcpSkillsForClient.cache.delete(client.name)
+        return []
+      }
       logMCPError(
         client.name,
         `Failed to fetch skill resources: ${errorMessage(error)}`,

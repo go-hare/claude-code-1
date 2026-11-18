@@ -15,7 +15,10 @@ import {
   formatModelPricing,
 } from '../modelCost.js'
 import { getModelPickerSetting } from './modelPickerSetting.js'
-import { getSettings_DEPRECATED } from '../settings/settings.js'
+import {
+  getInitialSettings,
+  getSettings_DEPRECATED,
+} from '../settings/settings.js'
 import { checkOpus1mAccess, checkSonnet1mAccess } from './check1mAccess.js'
 import { getAPIProvider } from './providers.js'
 import { ALL_MODEL_CONFIGS } from './configs.js'
@@ -46,6 +49,7 @@ import {
 import { applyFableCreditsLabel } from './fableCreditsLabel.js'
 import {
   applyPinnedFablePickerValue,
+  getFable5Option,
   insertFablePickerOption,
   isFablePickerInsertValue,
   isSameFablePickerRow,
@@ -69,6 +73,7 @@ export type ModelOption = {
   label: string
   description: string
   descriptionForModel?: string
+  disabled?: boolean
 }
 
 export function getDefaultOptionForUser(fastMode = false): ModelOption {
@@ -816,8 +821,14 @@ function applyCuratedModelPickerOptions(options: ModelOption[]): ModelOption[] {
 
   const next = [...options]
   for (const row of curated) {
-    if (!next.some(existing => existing.value === row.value)) {
+    const existingIndex = next.findIndex(existing =>
+      isSameFablePickerRow(existing, row),
+    )
+    const existing = existingIndex === -1 ? undefined : next[existingIndex]
+    if (existing === undefined) {
       next.push(row)
+    } else if (existing.disabled === true && row.disabled !== true) {
+      next[existingIndex] = row
     }
   }
   return next
@@ -855,6 +866,26 @@ export function getModelOptions(fastMode = false): ModelOption[] {
     const refreshed = applyFableCreditsLabel(opt)
     if (!options.some(existing => isSameFablePickerRow(existing, refreshed))) {
       insertFablePickerOption(options, refreshed)
+    }
+  }
+
+  // Official pw (2.1.295 #374): Fable models listed in availableModels appear in
+  // the /model picker for gateway sessions using their built-in row.
+  const provider = getAPIProvider()
+  const availableModels = getInitialSettings().availableModels
+  if (provider === 'gateway' && Array.isArray(availableModels)) {
+    for (const rawModel of availableModels) {
+      const trimmed = rawModel.trim()
+      if (!trimmed || options.some(existing => existing.value === trimmed)) {
+        continue
+      }
+      if (!isFablePickerInsertValue(trimmed)) {
+        continue
+      }
+      const builtIn = getKnownModelOption(trimmed) ?? getFable5Option(provider)
+      if (!options.some(existing => isSameFablePickerRow(existing, builtIn))) {
+        insertFablePickerOption(options, builtIn)
+      }
     }
   }
 

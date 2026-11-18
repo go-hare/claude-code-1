@@ -11,6 +11,7 @@ import { saveGlobalConfig } from '../../utils/config.js';
 import { gracefulShutdownSync } from '../../utils/gracefulShutdown.js';
 import { getSecureStorage } from '../../utils/secureStorage/index.js';
 import { getSettingsForSource, updateSettingsForSource } from '../../utils/settings/settings.js';
+import { logOTelAuthEvent } from '../../utils/sessionSlots.js';
 import { clearToolSchemaCache } from '../../utils/toolSchemaCache.js';
 import { resetUserCache } from '../../utils/user.js';
 
@@ -120,6 +121,7 @@ export async function clearAuthRelatedCaches(): Promise<void> {
 }
 
 export async function call(): Promise<React.ReactNode> {
+  logOTelAuthEvent({ action: 'logout', success: true, authMethod: 'oauth' });
   await performLogout({ clearOnboarding: true });
 
   const message = <Text>Successfully logged out.</Text>;

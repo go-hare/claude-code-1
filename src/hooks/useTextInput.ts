@@ -785,3 +785,30 @@ export function useTextInput({
     renderedRowStartOffsets: cursor.getRenderedRowStartOffsets(maxVisibleLines),
   }
 }
+
+/**
+ * Official 2.1.293 (#314) `hb = 150`, `vp = new WeakMap`, `bb`, `wb` —
+ * track same-microtask / 150ms same-chunk input window so pasted text
+ * (e.g. with repeated start/end words) is not re-processed as typed.
+ */
+export const SAME_CHUNK_WINDOW_MS = 150
+const sameChunkTimestamps = new WeakMap<
+  object,
+  { sameChunk: boolean; at: number }
+>()
+
+export function markSameChunkInput(key: object): void {
+  const entry = { sameChunk: true, at: performance.now() }
+  sameChunkTimestamps.set(key, entry)
+  queueMicrotask(() => {
+    entry.sameChunk = false
+  })
+}
+
+export function isWithinSameChunk(key: object): boolean {
+  const entry = sameChunkTimestamps.get(key)
+  return (
+    entry !== undefined &&
+    (entry.sameChunk || performance.now() - entry.at < SAME_CHUNK_WINDOW_MS)
+  )
+}

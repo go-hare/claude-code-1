@@ -42,6 +42,7 @@ import { getCurrentTurnTokenBudget, getTurnOutputTokens } from '../bootstrap/sta
 import { TeammateSpinnerTree } from './Spinner/TeammateSpinnerTree.js';
 import { useAnimationFrame } from '@anthropic/ink';
 import { getGlobalConfig } from '../utils/config.js';
+import { FOCUS_TIP_ACTIVE, FOCUS_TIP_INVITE } from '../utils/focusView.js';
 import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 import { truncateToWidth } from '../utils/truncate.js';
 export type { SpinnerMode } from './Spinner/index.js';
@@ -107,6 +108,29 @@ export function resolveSpinnerTipLabel(
   label: string | undefined,
 ): string {
   return displayedTip === selectedTip && label ? label : 'Tip';
+}
+
+/**
+ * Official 2.1.292 (#262) `rt` — mid-turn `/focus` tip rendering:
+ * `nt ? Next: ... : F === hhr && gt ? TMi : Ct ? `${Et}: ${Ct}` : undefined`
+ */
+export function resolveSpinnerTipText(opts: {
+  nextTaskSubject?: string;
+  spinnerTip?: string;
+  spinnerTipLabel?: string;
+  effectiveTip?: string;
+  briefTranscript?: boolean;
+}): string | undefined {
+  if (opts.nextTaskSubject) {
+    return `Next: ${opts.nextTaskSubject.replace(/\s+/g, ' ').trim()}`;
+  }
+  if (opts.spinnerTip === FOCUS_TIP_INVITE && opts.briefTranscript) {
+    return FOCUS_TIP_ACTIVE;
+  }
+  if (opts.effectiveTip) {
+    return `${resolveSpinnerTipLabel(opts.effectiveTip, opts.spinnerTip, opts.spinnerTipLabel)}: ${opts.effectiveTip}`;
+  }
+  return undefined;
 }
 
 const SPINNER_VERB_HAS_ELLIPSIS = /(?:…|\.\.\.)$/;
@@ -338,6 +362,7 @@ function SpinnerWithVerbInner({
   const foregroundedTeammate = viewingAgentTaskId ? getViewedTeammateTask({ viewingAgentTaskId, tasks }) : undefined;
   const { columns } = useTerminalSize();
   const tasksV2 = useTasksV2();
+  const briefTranscript = useAppState(s => s.briefTranscript);
 
   // Track thinking status: 'thinking' | number (duration in ms) | null
   // Shows each state for minimum 2s to avoid UI jank
@@ -554,6 +579,13 @@ function SpinnerWithVerbInner({
   }
 
   const persistLine = retryStatus ? overloadPersistLine(retryStatus) : null;
+  const tipLineText = resolveSpinnerTipText({
+    nextTaskSubject: nextTask?.subject,
+    spinnerTip,
+    spinnerTipLabel,
+    effectiveTip,
+    briefTranscript,
+  });
 
   return (
     <Box flexDirection="column" width="100%" alignItems="flex-start">
@@ -615,7 +647,7 @@ function SpinnerWithVerbInner({
             </MessageResponse>
           </Box>
         ) : null
-      ) : nextTask || effectiveTip || budgetText ? (
+      ) : tipLineText || budgetText ? (
         // IMPORTANT: we need this width="100%" to avoid an Ink bug where the
         // tip gets duplicated over and over while the spinner is running if
         // the terminal is very small. TODO: fix this in Ink.
@@ -627,12 +659,10 @@ function SpinnerWithVerbInner({
               <Text dimColor>{budgetText}</Text>
             </MessageResponse>
           )}
-          {(nextTask || effectiveTip) && (
+          {tipLineText && (
             <MessageResponse>
               <Text dimColor wrap={nextTask ? 'truncate-end' : 'wrap'}>
-                {nextTask
-                  ? `Next: ${nextTask.subject.replace(/\s+/g, ' ').trim()}`
-                  : `${resolveSpinnerTipLabel(effectiveTip, spinnerTip, spinnerTipLabel)}: ${effectiveTip}`}
+                {tipLineText}
               </Text>
             </MessageResponse>
           )}

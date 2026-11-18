@@ -602,9 +602,32 @@ export function stripWholeToolGrantsForAsk(
  */
 export function getDenyRuleForTool(
   context: ToolPermissionContext,
-  tool: Pick<Tool, 'name' | 'mcpInfo'>,
+  tool: Pick<Tool, 'name' | 'mcpInfo'> & {
+    enablesCodeExecution?: boolean
+    underlyingV1ToolName?: string
+  },
 ): PermissionRule | null {
-  return getDenyRules(context).find(rule => toolMatchesRule(tool, rule)) || null
+  const rules = getDenyRules(context)
+  const direct = rules.find(rule => toolMatchesRule(tool, rule))
+  if (direct) return direct
+  if (tool.underlyingV1ToolName) {
+    const v1Rule = rules.find(rule =>
+      toolMatchesRule({ name: tool.underlyingV1ToolName! }, rule),
+    )
+    if (v1Rule) return v1Rule
+  }
+  if (
+    context.restricted &&
+    context.toolsKeptByLaunchList === undefined &&
+    tool.enablesCodeExecution
+  ) {
+    return {
+      source: 'toolsNarrowing',
+      ruleBehavior: 'deny',
+      ruleValue: { toolName: tool.name },
+    }
+  }
+  return null
 }
 
 /**

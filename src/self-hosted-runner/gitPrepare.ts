@@ -30,6 +30,8 @@ import {
 export const DEFAULT_FETCH_DEPTH = 50
 /** densable `vjy` — silence budget before progress */
 export const GIT_SILENCE_BUDGET_MS = 120_000
+/** densable `$e` — default server-progress pre-transfer cap */
+export const GIT_SERVER_PROGRESS_CAP_DEFAULT_MS = 600_000
 /** densable `Q5d` — silence budget after resolving-deltas 100% */
 export const GIT_SILENCE_BUDGET_AFTER_DELTAS_MS = 300_000
 /** densable `j7s` — hard cap for single git invoke / fetch wall-clock */
@@ -106,6 +108,9 @@ const PERMANENT_REF_MARKERS = ["couldn't find remote ref"]
 /** densable `iWd` progress regex */
 const GIT_PROGRESS_RE =
   /^(Counting objects|Compressing objects|Receiving objects|Resolving deltas|Updating files|Checking out files|Filtering content):\s+(\d+)%(?:\s+\((\d+)\/(\d+)\))?(?:, ([\d.]+) (KiB|MiB|GiB))?/
+
+/** densable `rt` — server-side enumerating objects regex */
+const GIT_ENUMERATING_OBJECTS_RE = /^(Enumerating objects): (\d{1,15})\b/
 
 const BYTE_UNITS: Record<string, number> = {
   KiB: 1024,
@@ -268,6 +273,41 @@ export function resolveFetchDepth(env: NodeJS.ProcessEnv = process.env): {
   return { depth: DEFAULT_FETCH_DEPTH, invalid: e }
 }
 
+/** densable `tt` — resolve CLAUDE_RUNNER_FETCH_SERVER_PROGRESS_CAP_MS */
+export function resolveFetchServerProgressCapMs(
+  env: NodeJS.ProcessEnv = process.env,
+): {
+  capMs: number
+  invalid: string | undefined
+  clamped: string | undefined
+} {
+  const e = env.CLAUDE_RUNNER_FETCH_SERVER_PROGRESS_CAP_MS
+  if (e === undefined) {
+    return {
+      capMs: GIT_SERVER_PROGRESS_CAP_DEFAULT_MS,
+      invalid: undefined,
+      clamped: undefined,
+    }
+  }
+  if (e === '0' || e.toLowerCase() === 'off') {
+    return { capMs: 0, invalid: undefined, clamped: undefined }
+  }
+  const t = Number(e)
+  if (Number.isInteger(t) && t > 0) {
+    const capMs = Math.min(Math.max(t, GIT_SILENCE_BUDGET_MS), GIT_HARD_CAP_MS)
+    return {
+      capMs,
+      invalid: undefined,
+      clamped: capMs === t ? undefined : e,
+    }
+  }
+  return {
+    capMs: GIT_SERVER_PROGRESS_CAP_DEFAULT_MS,
+    invalid: e,
+    clamped: undefined,
+  }
+}
+
 /** densable `nWd` */
 export function fetchDepthArgs(repoExisted: boolean): string[] {
   if (repoExisted) return []
@@ -424,25 +464,51 @@ export function isPermanentFetchRefError(msg: string): boolean {
 
 /** densable `Ijy` */
 export function isProgressLine(line: string): boolean {
-  const t = line.startsWith('remote: ') ? line.slice(8) : line
-  return GIT_PROGRESS_RE.test(t)
+  const sideband = line.startsWith('remote: ')
+  const t = sideband ? line.slice(8) : line
+  return (
+    GIT_PROGRESS_RE.test(t) || (sideband && GIT_ENUMERATING_OBJECTS_RE.test(t))
+  )
 }
 
 /** densable `Rjy` */
 export function parseGitProgressChunk(
   chunk: string,
   midLine = false,
-): { display?: GitProgress; client?: GitProgress } {
+): {
+  display?: GitProgress
+  client?: GitProgress
+  server?: GitProgress
+  remoteLines: number
+} {
   let display: GitProgress | undefined
   let client: GitProgress | undefined
+  let server: GitProgress | undefined
+  let remoteLines = 0
   let lines = chunk.split(/\r|\n/)
   if (midLine) lines = lines.slice(1)
   for (const i of lines) {
     if (i.length === 0) continue
     const sideband = i.startsWith('remote: ')
+    if (sideband) remoteLines++
     const a = sideband ? i.slice(8) : i
     const l = GIT_PROGRESS_RE.exec(a)
-    if (l === null) continue
+    if (l === null) {
+      if (sideband) {
+        const enumMatch = GIT_ENUMERATING_OBJECTS_RE.exec(a)
+        if (enumMatch !== null) {
+          const done = Number(enumMatch[2])
+          server = {
+            sideband,
+            label: enumMatch[1]!,
+            pct: 0,
+            done,
+            raw: `remote: ${enumMatch[1]}: ${done}`,
+          }
+        }
+      }
+      continue
+    }
     const [, c, u, d, p, f, m] = l
     const h: GitProgress = {
       sideband,
@@ -457,9 +523,26 @@ export function parseGitProgressChunk(
       raw: `${sideband ? 'remote: ' : ''}${c}: ${u}%${d !== undefined ? ` (${d}/${p})` : ''}`,
     }
     display = h
-    if (!sideband) client = h
+    if (sideband) server = h
+    else client = h
   }
-  return { display, client }
+  return { display, client, server, remoteLines }
+}
+
+/** densable `Mt` — server-side progress advance check */
+export function isServerForwardProgress(
+  prev: GitProgress | undefined,
+  seenLabels: Set<string>,
+  next: GitProgress,
+): boolean {
+  if (prev === undefined || next.label !== prev.label) {
+    return !seenLabels.has(next.label)
+  }
+  if (next.done !== undefined && prev.done !== undefined) {
+    return next.done > prev.done
+  }
+  if ((next.done === undefined) !== (prev.done === undefined)) return false
+  return next.pct > prev.pct
 }
 
 /** densable `xjy` */
@@ -800,8 +883,14 @@ export async function runGitPrepare(
   let silenceBudget = noAuthVerb
     ? GIT_LONG_FS_TIMEOUT_MS
     : GIT_SILENCE_BUDGET_MS
+  const initialSilenceBudget = silenceBudget
+  let effectiveBudget = initialSilenceBudget
   let lastProgress: GitProgress | undefined
   let lastForwardAt = Date.now()
+  const preTransferCapMs = resolveFetchServerProgressCapMs().capMs
+  let lastServerProgress: GitProgress | undefined
+  const seenServerLabels = new Set<string>()
+  let lastServerProgressAt: number | undefined
   let killReason: 'silence' | 'hard-cap' | 'escalated' | undefined
   let truncated = false
   const startedAt = Date.now()
@@ -848,7 +937,7 @@ export async function runGitPrepare(
         resolve(stdout)
       }
 
-      const armSilence = (): void => {
+      const armSilence = (budget: number = silenceBudget): void => {
         clearTimeout(silenceTimer)
         silenceTimer = setTimeout(() => {
           killReason = 'silence'
@@ -866,10 +955,10 @@ export async function runGitPrepare(
             )
           }, GIT_SIGTERM_GRACE_MS)
           unref(escalateTimer)
-        }, silenceBudget)
+        }, budget)
         unref(silenceTimer!)
       }
-      armSilence()
+      armSilence(initialSilenceBudget)
 
       child.stdout?.on('data', (re: Buffer) => {
         if (outLen < 10_485_760) {
@@ -882,7 +971,7 @@ export async function runGitPrepare(
         const oe = stderrTail + ie
         if (oe.length > 8192) truncated = true
         stderrTail = oe.slice(-8192)
-        const { display, client } = parseGitProgressChunk(ie, midLine)
+        const { display, client, server } = parseGitProgressChunk(ie, midLine)
         if (ie.length > 0) midLine = !/[\r\n]$/.test(ie)
         if (client) {
           if (
@@ -890,13 +979,38 @@ export async function runGitPrepare(
             isResolvingDeltasComplete(client)
           ) {
             silenceBudget = GIT_SILENCE_BUDGET_AFTER_DELTAS_MS
+            effectiveBudget = silenceBudget
             armSilence()
           }
           if (isForwardProgress(lastProgress, client)) {
             lastForwardAt = Date.now()
+            effectiveBudget = silenceBudget
             armSilence()
           }
           lastProgress = client
+        } else if (server !== undefined && lastProgress === undefined) {
+          if (
+            isServerForwardProgress(
+              lastServerProgress,
+              seenServerLabels,
+              server,
+            )
+          ) {
+            lastServerProgress = server
+            const capRemaining = startedAt + preTransferCapMs - Date.now()
+            if (preTransferCapMs > 0 && capRemaining > 0) {
+              lastServerProgressAt = Date.now()
+              const nextSlice = Math.min(silenceBudget, capRemaining)
+              const initialRemaining =
+                startedAt + initialSilenceBudget - Date.now()
+              effectiveBudget =
+                nextSlice > initialRemaining
+                  ? silenceBudget
+                  : initialSilenceBudget
+              armSilence(Math.max(nextSlice, initialRemaining))
+            }
+          }
+          seenServerLabels.add(server.label)
         }
         if (display) {
           if (display.label !== lastLabel) {
@@ -1013,12 +1127,33 @@ export async function runGitPrepare(
       const R = lastProgress
         ? ` at ${lastProgress.label} ${lastProgress.pct}%${lastProgress.total ? ` (${lastProgress.done}/${lastProgress.total})` : ''}`
         : ''
-      const P = Date.now() - lastForwardAt
+      const now = Date.now()
+      const P = now - lastForwardAt
+      let silenceMsg = `no forward progress for ${P}ms (budget ${effectiveBudget}ms)${R}`
+      if (
+        lastProgress === undefined &&
+        lastServerProgress !== undefined &&
+        lastServerProgressAt !== undefined
+      ) {
+        const srv = lastServerProgress
+        const srvDetail =
+          srv.done !== undefined
+            ? srv.pct > 0
+              ? ` ${srv.pct}% (${srv.done}${srv.total !== undefined ? `/${srv.total}` : ''})`
+              : ` ${srv.done}`
+            : ` ${srv.pct}%`
+        const srvSuffix = ` — no pack data received; server-side progress last advanced ${now - lastServerProgressAt}ms ago at ${srv.label}${srvDetail}`
+        silenceMsg =
+          preTransferCapMs >= initialSilenceBudget &&
+          now - startedAt >= preTransferCapMs
+            ? `pre-transfer cap ${preTransferCapMs}ms reached with no client-side progress${srvSuffix}`
+            : `no client-side progress for ${now - startedAt}ms and server-side progress stopped advancing (budget ${effectiveBudget}ms)${srvSuffix}`
+      }
       const O =
         killReason === 'silence'
-          ? `no forward progress for ${P}ms (budget ${silenceBudget}ms)${R}`
+          ? silenceMsg
           : killReason === 'hard-cap'
-            ? `hard cap ${hardCapMs}ms after ${Date.now() - startedAt}ms${R}`
+            ? `hard cap ${hardCapMs}ms after ${now - startedAt}ms${R}`
             : `did not exit within ${GIT_SIGTERM_GRACE_MS}ms of SIGTERM (D-state? — last forward ${P}ms ago)${R}`
       ctx.onDebug(
         `[runner:stuck] git ${debugArgs.join(' ')} (dir=${cwd || '.'}) — ${O} — killing subprocess`,
@@ -1468,6 +1603,16 @@ export async function prepareOneRepo(opts: {
   if (h !== undefined) {
     a(
       `[byoc:git] Ignoring CLAUDE_RUNNER_FETCH_DEPTH='${h}' — expected 'full', '0', or a positive integer; using default ${DEFAULT_FETCH_DEPTH}`,
+    )
+  }
+  const serverCap = resolveFetchServerProgressCapMs()
+  if (serverCap.invalid !== undefined) {
+    a(
+      `[byoc:git] Ignoring CLAUDE_RUNNER_FETCH_SERVER_PROGRESS_CAP_MS='${serverCap.invalid}' — expected a positive integer (milliseconds), '0' or 'off'; using default ${GIT_SERVER_PROGRESS_CAP_DEFAULT_MS}`,
+    )
+  } else if (serverCap.clamped !== undefined) {
+    a(
+      `[byoc:git] CLAUDE_RUNNER_FETCH_SERVER_PROGRESS_CAP_MS='${serverCap.clamped}' is ${serverCap.capMs === GIT_HARD_CAP_MS ? 'above the thirty-minute ceiling' : 'below the two-minute floor'}; using ${serverCap.capMs} ms`,
     )
   }
   const g: GitRepoCtx = {

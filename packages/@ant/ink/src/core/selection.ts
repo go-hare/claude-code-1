@@ -1175,3 +1175,82 @@ export function applySelectionOverlay(
     }
   }
 }
+
+export type LinkSpan = { row: number; from: number; to: number }
+
+/** densable `rr` — hyperlink URL at (col, row), stepping left across wide char spacer tail. */
+export function hyperlinkAt(
+  screen: Screen,
+  col: number,
+  row: number,
+): string | undefined {
+  const cell = cellAt(screen, col, row)
+  if (!cell?.hyperlink && cell?.width === CellWidth.SpacerTail) {
+    return cellAt(screen, col - 1, row)?.hyperlink
+  }
+  return cell?.hyperlink
+}
+
+function linkSpanOnRow(
+  screen: Screen,
+  col: number,
+  row: number,
+  link: string,
+): LinkSpan {
+  let from = col
+  while (hyperlinkAt(screen, from - 1, row) === link) from--
+  let to = col
+  while (hyperlinkAt(screen, to + 1, row) === link) to++
+  return { row, from, to }
+}
+
+/**
+ * densable `Nb` — underline the contiguous (and soft-wrapped) span of the
+ * hovered link on `screen`. Returns the underlined spans.
+ */
+export function underlineHoveredLink(
+  screen: Screen,
+  col: number,
+  row: number,
+  link: string | undefined,
+  stylePool: StylePool,
+): LinkSpan[] {
+  if (link === undefined || hyperlinkAt(screen, col, row) !== link) return []
+  const origin = linkSpanOnRow(screen, col, row, link)
+  const spans: LinkSpan[] = [origin]
+  let cur = origin
+  for (let r = row + 1; r < screen.height; r++) {
+    const packed = screen.softWrap[r]!
+    const startCol = softWrapStartCol(packed)
+    if (
+      packed === 0 ||
+      cur.to + 1 !== softWrapContentEnd(packed) ||
+      hyperlinkAt(screen, startCol, r) !== link
+    ) {
+      break
+    }
+    cur = linkSpanOnRow(screen, startCol, r, link)
+    spans.push(cur)
+  }
+  cur = origin
+  for (let r = row; r > 0; r--) {
+    const packed = screen.softWrap[r]!
+    const prevEndCol = softWrapContentEnd(packed) - 1
+    if (
+      packed === 0 ||
+      cur.from !== softWrapStartCol(packed) ||
+      hyperlinkAt(screen, prevEndCol, r - 1) !== link
+    ) {
+      break
+    }
+    cur = linkSpanOnRow(screen, prevEndCol, r - 1, link)
+    spans.push(cur)
+  }
+  for (const span of spans) {
+    for (let c = span.from; c <= span.to; c++) {
+      const cell = cellAtIndex(screen, span.row * screen.width + c)
+      setCellStyleId(screen, c, span.row, stylePool.withUnderline(cell.styleId))
+    }
+  }
+  return spans
+}

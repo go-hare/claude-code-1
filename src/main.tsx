@@ -301,6 +301,7 @@ import {
   getManagedSettingsKeysForLogging,
   getSettingsForSource,
   getSettingsWithErrors,
+  rereadManagedSettingsIfNeeded,
 } from './utils/settings/settings.js';
 import { resetSettingsCache } from './utils/settings/settingsCache.js';
 import { ensureMdmSettingsLoaded } from './utils/settings/mdm/settings.js';
@@ -1054,6 +1055,9 @@ async function run(): Promise<CommanderCommand> {
 
     runMigrations();
     profileCheckpoint('preAction_after_migrations');
+    if (await rereadManagedSettingsIfNeeded()) {
+      applyConfigEnvironmentVariables();
+    }
 
     void loadPolicyLimits();
 
@@ -2577,6 +2581,9 @@ async function run(): Promise<CommanderCommand> {
         logForDebugging(
           `--permission-prompts none: permission prompts are answered with a local deny; the ${sdkUrl ? 'SDK host' : '--permission-prompt-tool'} is not consulted`,
         );
+      }
+      if (await rereadManagedSettingsIfNeeded()) {
+        applyConfigEnvironmentVariables();
       }
       const initResult = await initializeToolPermissionContext({
         allowedToolsCli: allowedTools,
@@ -6117,11 +6124,20 @@ async function run(): Promise<CommanderCommand> {
       [] as string[],
     )
     .option('-y, --yes', 'Accept command-source plugin install without prompting')
+    .option(
+      '--marketplace <source>',
+      "Install <plugin> (its bare name) from the marketplace at this source: owner/repo, a git or https URL, or a path. A marketplace not added yet is added first, in user settings, under the same checks as 'plugin marketplace add'",
+    )
     .addOption(coworkOption())
-    .action(async (plugin: string, options: { scope?: string; cowork?: boolean; config?: string[]; yes?: boolean }) => {
-      const { pluginInstallHandler } = await import('./cli/handlers/plugins.js');
-      await pluginInstallHandler(plugin, options);
-    });
+    .action(
+      async (
+        plugin: string,
+        options: { scope?: string; cowork?: boolean; config?: string[]; yes?: boolean; marketplace?: string },
+      ) => {
+        const { pluginInstallHandler } = await import('./cli/handlers/plugins.js');
+        await pluginInstallHandler(plugin, options);
+      },
+    );
 
   // Plugin uninstall command
   pluginCmd

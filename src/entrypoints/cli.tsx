@@ -171,6 +171,20 @@ async function main(): Promise<void> {
     return;
   }
 
+  // #193: `claude plugin install <plugin> --marketplace <source>`
+  if (
+    args[0] === 'plugin' &&
+    (args[1] === 'install' || args[1] === 'i') &&
+    args.slice(2).some(a => a === '--marketplace' || a.startsWith('--marketplace='))
+  ) {
+    profileCheckpoint('cli_plugin_install_marketplace_path');
+    const { enableConfigs } = await import('../utils/config.js');
+    enableConfigs();
+    const { pluginInstallFromSourceFromCliArgs } = await import('../cli/handlers/plugins.js');
+    await pluginInstallFromSourceFromCliArgs(args.slice(2));
+    return;
+  }
+
   if (process.argv[2] === '--eval-mock-server') {
     profileCheckpoint('cli_eval_mock_server_path');
     const { runEvalMockServer } = await import('../utils/plugins/pluginEval/evalMockServer.js');
@@ -432,6 +446,7 @@ async function main(): Promise<void> {
     feature('BG_SESSIONS') &&
     (args[0] === 'ps' ||
       args[0] === 'logs' ||
+      args[0] === 'stop' ||
       args[0] === 'attach' ||
       args[0] === 'kill' ||
       args[0] === 'rm' ||
@@ -444,12 +459,17 @@ async function main(): Promise<void> {
       console.error(`[deprecated] Use: claude daemon ${mapped}${args[1] ? ' ' + args[1] : ''}`);
     }
     profileCheckpoint('cli_daemon_path');
-    // Official emO bg path: loadFastPathPolicy (warn-only for logs/kill/rm style).
+    // Official emO bg path: loadFastPathPolicy (warn-only for logs/stop/kill/rm style).
     const { loadFastPathPolicy } = await import('../utils/fastPathPolicy.js');
     {
       const policyErr = await loadFastPathPolicy();
       const warnOnly =
-        args[0] === 'logs' || args[0] === 'kill' || args[0] === 'ps' || args[0] === 'rm' || args[0] === 'respawn';
+        args[0] === 'logs' ||
+        args[0] === 'stop' ||
+        args[0] === 'kill' ||
+        args[0] === 'ps' ||
+        args[0] === 'rm' ||
+        args[0] === 'respawn';
       if (policyErr) {
         if (warnOnly) {
           process.stderr.write(`${policyErr}\n`);

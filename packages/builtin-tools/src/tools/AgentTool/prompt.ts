@@ -32,6 +32,8 @@ import type { AgentDefinition } from './loadAgentsDir.js'
 export type AgentPromptAvailability = {
   forkAvailable?: boolean
   generalPurposeAvailable?: boolean
+  /** #293 SEA `continueAvailable`: false when SendMessage is removed by host, rule, or --tools. */
+  continueAvailable?: boolean
   /** densable kLo `model` — Ix({model, leanPrompt}). */
   model?: string
   /** densable kLo `leanPrompt` — when true, short prompt. */
@@ -156,6 +158,7 @@ export async function getPrompt(
   // densable n = generalPurposeAvailable (Abf); default true when unspecified
   // so existing callers keep prior omit-defaults-to-GP copy.
   const generalPurposeAvailable = availability?.generalPurposeAvailable ?? true
+  const continueAvailable = availability?.continueAvailable ?? true
 
   const whenToForkSection = forkEnabled
     ? `
@@ -316,7 +319,7 @@ ${
         ? "The agent's final report is not shown to the user — relay what matters."
         : "The agent's final message is returned to you as the tool result; it is not shown to the user — relay what matters."
     }
-- Use ${SEND_MESSAGE_TOOL_NAME} with the agent's ID or name to continue a previously spawned agent with its context intact; a new ${AGENT_TOOL_NAME} call starts fresh${forkEnabled ? ' (except subagent_type: "fork", which inherits your context)' : ''}.
+- ${continueAvailable ? `Use ${SEND_MESSAGE_TOOL_NAME} with the agent's ID or name to continue a previously spawned agent with its context intact; a new ${AGENT_TOOL_NAME} call starts fresh` : `A previously spawned agent cannot be continued from here; every ${AGENT_TOOL_NAME} call starts fresh`}${forkEnabled ? ' (except subagent_type: "fork", which inherits your context)' : ''}.
 - Each agent type's model, reasoning effort, and tools come from its definition (\`.claude/agents/*.md\` frontmatter or SDK \`agents\`).
 - \`isolation: "worktree"\` gives the agent its own git worktree (auto-cleaned if unchanged).${sharesCwdDispatchNote ? ` ${sharesCwdDispatchNote} Each result comes back with a branch and worktree path to merge.` : ''}${shortRemoteNote}${shortBgNote}${shortNameNote}`
   }
@@ -349,7 +352,7 @@ ${whenNotToUseSection}
       ? '\n- **Background agents**: an agent runs in the background only if you pass `run_in_background: true`, and a call that passes it may still run in the foreground or be refused. When an agent does run in the background, the call returns at once without its report, and you will be automatically notified when it completes — do NOT sleep, poll, or proactively check on its progress. Continue with other work or respond to the user instead. After launching a background agent, you know nothing about its results. Never fabricate or predict them in any format — not as prose, summary, or structured output. The completion notification arrives in a later turn; it is never something you write yourself. If the user asks before it lands, say the agent is still running — give status, not a guess.'
       : ''
   }
-- To continue a previously spawned agent, use ${SEND_MESSAGE_TOOL_NAME} with the agent's ID or name as the \`to\` field — that resumes it with full context. A new ${AGENT_TOOL_NAME} call starts a fresh agent with no memory of prior runs${forkEnabled ? ' (except subagent_type: "fork")' : ''}, so the prompt must be self-contained.
+- ${continueAvailable ? `To continue a previously spawned agent, use ${SEND_MESSAGE_TOOL_NAME} with the agent's ID or name as the \`to\` field — that resumes it with full context. A new ${AGENT_TOOL_NAME} call` : `A previously spawned agent cannot be continued from here. Every ${AGENT_TOOL_NAME} call`} starts a fresh agent with no memory of prior runs${forkEnabled ? ' (except subagent_type: "fork")' : ''}, so the prompt must be self-contained.
 - Each agent type's model, reasoning effort, and tool access are set in its definition (\`.claude/agents/*.md\` frontmatter, or the SDK \`agents\` option)${isSubagentModelForceEnabled() ? '' : '; the `model` parameter here overrides the definition for this one call'}.
 - Clearly tell the agent whether you expect it to write code or just to do research (search, file reads, web fetches, etc.), since a fresh agent is not aware of the user's intent${
     steerDefault

@@ -75,19 +75,32 @@ function isValidContext(value: string): value is KeybindingContextName {
  * Validate a single keystroke string and return any parse errors.
  */
 function validateKeystroke(keystroke: string): KeybindingWarning | null {
-  const parts = keystroke.toLowerCase().split('+')
+  const trimmed = keystroke.trim()
+  const strokes = keystroke === ' ' ? [] : trimmed.split(/\s+/)
+  const hasEmptyPart =
+    keystroke !== ' ' && keystroke.split('+').some(part => !part.trim())
+  const hasSpaceNextToPlus =
+    /\s\+|\+\s/.test(trimmed) &&
+    strokes.some(stroke => parseKeystroke(stroke).key === '')
 
-  for (const part of parts) {
-    const trimmed = part.trim()
-    if (!trimmed) {
-      return {
-        type: 'parse_error',
-        severity: 'error',
-        message: `Empty key part in "${keystroke}"`,
-        key: keystroke,
-        suggestion: 'Remove extra "+" characters',
-      }
+  if (hasEmptyPart || hasSpaceNextToPlus) {
+    const displayKey =
+      keystroke.length > 80 ? keystroke.slice(0, 79) + '…' : keystroke
+    return {
+      type: 'parse_error',
+      severity: 'error',
+      message: hasEmptyPart
+        ? `Empty key part in "${displayKey}"`
+        : `A space next to "+" splits "${displayKey}" into separate presses, and one of them has no key`,
+      key: keystroke,
+      suggestion: hasEmptyPart
+        ? 'Remove extra "+" characters'
+        : 'Remove the spaces next to "+"',
     }
+  }
+
+  if (keystroke === ' ') {
+    return null
   }
 
   // Try to parse and see if it fails

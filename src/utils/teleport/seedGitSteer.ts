@@ -11,11 +11,10 @@
  * V4n `j()` startup env is unset here — official `if(n===void 0)return`.
  */
 
-import { statSync } from 'fs'
 import { join } from 'path'
 import { uniq } from '../array.js'
 import { logForDebugging } from '../debug.js'
-import { errorMessage, getErrnoCode } from '../errors.js'
+import { errorMessage } from '../errors.js'
 import {
   getSettingsFilePathForSource,
   getSettingsForSource,
@@ -76,14 +75,15 @@ export type SeedSteerWorkTree = {
   workTree: string
 }
 
-/** densable `hn(e)` — `En` is parseSettingsFile. */
+/** densable `q` / `hn(e)` — `En` is parseSettingsFile; missing file (`settings===null && errors.length===0`) is readable. */
 function settingsFileUnreadable(path: string): boolean {
   const { settings, errors } = parseSettingsFile(path)
+  if (settings === null && errors.length === 0) return false
   return settings === null || errors.some(error => error.severity !== 'warning')
 }
 
 /**
- * densable `Ri` / `G4n`.
+ * densable `wia` / `Ri` / `G4n`.
  * `yn` / `bn` / `_n` unlocked — n and t stay undefined (more accept).
  */
 function settingsFilesUnreadable(layout: SeedSteerWorkTree): boolean {
@@ -96,14 +96,7 @@ function settingsFilesUnreadable(layout: SeedSteerWorkTree): boolean {
       join(layout.workTree, '.claude', 'settings.local.json'),
     ].filter((path): path is string => path !== undefined),
   )
-  return paths.some(path => {
-    try {
-      if (!statSync(path).isFile()) return true
-    } catch (error) {
-      return getErrnoCode(error) !== 'ENOENT'
-    }
-    return settingsFileUnreadable(path)
-  })
+  return paths.some(path => settingsFileUnreadable(path))
 }
 
 /**

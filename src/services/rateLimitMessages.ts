@@ -178,7 +178,7 @@ function isUsageBasedBilling(): boolean {
 }
 
 const CONSUMER_USAGE_SETTINGS_URL =
-  'claude.ai/settings/usage?from=cc_cli_limit_message'
+  'https://claude.ai/settings/usage?from=cc_cli_limit_message'
 
 /**
  * densable 2.1.248 v_() — hint gate only. SEA kS() is `return null`;

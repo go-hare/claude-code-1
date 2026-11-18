@@ -1,3 +1,5 @@
+import { isUtf8 } from 'buffer'
+import { createHash } from 'crypto'
 import { isAbsolute, sep } from 'path'
 import { validateCoordinatorWriteAccess } from 'src/coordinator/writeGuard.js'
 import { logEvent } from 'src/services/analytics/index.js'
@@ -283,19 +285,18 @@ export const FileEditTool = buildTool({
       }
     }
 
-    // Read the file as bytes first so we can detect encoding from the buffer
-    // instead of calling detectFileEncoding (which does its own sync readSync
-    // and would fail with a wasted ENOENT when the file doesn't exist).
+    // Read the file as bytes first so we can detect encoding and invalid UTF-8
+    // from the buffer instead of calling detectFileEncoding (which does its own
+    // sync readSync and would fail with a wasted ENOENT when the file doesn't exist).
     let fileContent: string | null
+    let notText: NonTextReason | undefined
     try {
       const fileBuffer = await fs.readFileBytes(fullFilePath)
-      const encoding: BufferEncoding =
-        fileBuffer.length >= 2 &&
-        fileBuffer[0] === 0xff &&
-        fileBuffer[1] === 0xfe
-          ? 'utf16le'
-          : 'utf8'
-      fileContent = fileBuffer.toString(encoding).replaceAll('\r\n', '\n')
+      const detected = detectBufferTextEncoding(fileBuffer)
+      notText = detected.notText
+      fileContent = fileBuffer
+        .toString(detected.encoding)
+        .replaceAll('\r\n', '\n')
     } catch (e) {
       if (isENOENT(e)) {
         fileContent = null
@@ -388,16 +389,16 @@ export const FileEditTool = buildTool({
     }
 
     // densable: if (p) { mtime > timestamp → HOe && xOe bypass, else stale errorCode 7 }
-    // When guardSkipped with no read state, skip mtime gate (same as densable).
+    // Also check content/baseline even when mtime did not advance (#430 wKe).
     if (readTimestamp) {
       const lastWriteTime = getFileModificationTime(fullFilePath)
+      const normalizedContent = stripBom(fileContent)
+      const matchesBaseline = matchesReadStateOrBaseline(
+        readTimestamp,
+        normalizedContent,
+      )
       if (lastWriteTime > readTimestamp.timestamp) {
-        if (
-          !(
-            isFullEnoughFileRead(readTimestamp) &&
-            fileStateContentMatches(readTimestamp, fileContent)
-          )
-        ) {
+        if (!(isFullEnoughFileRead(readTimestamp) && matchesBaseline)) {
           logEvent('tengu_edit_tool_stale_read', {})
           return {
             result: false,
@@ -407,6 +408,23 @@ export const FileEditTool = buildTool({
             errorCode: 7,
           }
         }
+      } else if (isFullEnoughFileRead(readTimestamp) && !matchesBaseline) {
+        logEvent('tengu_edit_tool_stale_read', {})
+        return {
+          result: false,
+          behavior: 'ask',
+          message:
+            'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
+          errorCode: 7,
+        }
+      }
+    }
+
+    if (notText) {
+      return {
+        result: false,
+        message: formatNonTextFileRefusal(notText),
+        errorCode: 15,
       }
     }
 
@@ -560,6 +578,11 @@ export const FileEditTool = buildTool({
 
       try {
         openedRead = await openApprovedRead(absoluteFilePath, approved)
+        const rawBytes = await openedRead.handle.readFile()
+        const detected = detectBufferTextEncoding(rawBytes)
+        if (detected.notText) {
+          throw new Error(formatNonTextFileRefusal(detected.notText))
+        }
         const loaded = readFileForEdit(openedRead.ioPath)
         originalFileContents = loaded.content
         fileExists = loaded.fileExists
@@ -572,6 +595,7 @@ export const FileEditTool = buildTool({
       if (fileExists) {
         const lastWriteTime = getFileModificationTime(absoluteFilePath)
         const lastRead = readFileState.get(absoluteFilePath)
+        const normalizedContent = stripBom(originalFileContents)
         // densable 2.1.228 #17 call-path: missing/partial may pass when the same
         // guardSkipped as validateInput would; true staleness still throws.
         if (!lastRead || lastRead.isPartialView) {
@@ -586,13 +610,19 @@ export const FileEditTool = buildTool({
             throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
           }
         } else if (
-          lastWriteTime > lastRead.timestamp &&
+          (lastWriteTime > lastRead.timestamp ||
+            isFullEnoughFileRead(lastRead)) &&
           !(
             isFullEnoughFileRead(lastRead) &&
-            fileStateContentMatches(lastRead, originalFileContents)
+            matchesReadStateOrBaseline(lastRead, normalizedContent)
           )
         ) {
-          throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
+          if (
+            lastWriteTime > lastRead.timestamp ||
+            isFullEnoughFileRead(lastRead)
+          ) {
+            throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
+          }
         }
       }
 
@@ -772,4 +802,65 @@ function readFileForEdit(absoluteFilePath: string): {
     }
     throw e
   }
+}
+
+type NonTextReason = 'not_utf8' | 'nul' | 'utf16be'
+
+const NON_TEXT_REASON_DESCRIPTIONS: Record<NonTextReason, string> = {
+  not_utf8:
+    'is not valid UTF-8: it uses a legacy encoding such as Windows-1252, Shift-JIS or GBK, or it is binary',
+  nul: 'has NUL bytes in its first 8 KB: binary data, UTF-16/UTF-32 without a byte-order mark, or text with embedded NULs',
+  utf16be:
+    'is UTF-16 big-endian (it starts FE FF), which these tools cannot write',
+}
+
+export function formatNonTextFileRefusal(reason: NonTextReason): string {
+  return `File ${NON_TEXT_REASON_DESCRIPTIONS[reason]}. These tools write UTF-8 (or UTF-16LE behind its byte-order mark) and never convert a file's encoding on their own, so nothing was written. If the file is text, make the change with a shell command that reads and writes it in its own encoding (iconv, or PowerShell Get-Content/Set-Content -Encoding), or ask the user whether to convert it to UTF-8 first. To replace the whole file with new UTF-8 text anyway, delete it first, then Write it.`
+}
+
+export function detectBufferTextEncoding(buf: Buffer): {
+  encoding: BufferEncoding
+  notText?: NonTextReason
+} {
+  if (buf.byteLength >= 2 && buf[0] === 0xff && buf[1] === 0xfe) {
+    return { encoding: 'utf16le' }
+  }
+  if (buf.byteLength >= 2 && buf[0] === 0xfe && buf[1] === 0xff) {
+    return { encoding: 'utf8', notText: 'utf16be' }
+  }
+  if (buf.subarray(0, 8000).includes(0)) {
+    return { encoding: 'utf8', notText: 'nul' }
+  }
+  return isUtf8(buf)
+    ? { encoding: 'utf8' }
+    : { encoding: 'utf8', notText: 'not_utf8' }
+}
+
+function stripBom(content: string): string {
+  return content.charCodeAt(0) === 0xfeff ? content.slice(1) : content
+}
+
+export type ReadBaseline = { sha256: string; bytes: number }
+
+export function matchesReadBaseline(
+  baseline: ReadBaseline,
+  content: string,
+): boolean {
+  return (
+    Buffer.byteLength(content, 'utf8') === baseline.bytes &&
+    createHash('sha256').update(content, 'utf8').digest('hex') ===
+      baseline.sha256
+  )
+}
+
+function matchesReadStateOrBaseline(
+  readState: NonNullable<ReturnType<ToolUseContext['readFileState']['get']>> & {
+    readBaseline?: ReadBaseline
+  },
+  content: string,
+): boolean {
+  if (readState.readBaseline !== undefined) {
+    return matchesReadBaseline(readState.readBaseline, content)
+  }
+  return fileStateContentMatches(readState, content)
 }

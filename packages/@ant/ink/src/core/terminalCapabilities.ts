@@ -12,6 +12,7 @@ export type TerminalCapabilityName =
   | 'kittyKeyboard'
   | 'kittyGraphics'
   | 'mousePixels'
+  | 'programStatus'
 
 export type TerminalCapabilityReading =
   | { state: 'settled'; value: boolean; source: string }
@@ -30,6 +31,7 @@ const PENDING_NOW: Record<TerminalCapabilityName, boolean> = {
   kittyKeyboard: true,
   kittyGraphics: false,
   mousePixels: false,
+  programStatus: false,
 }
 
 /** densable `FDn`. */
@@ -344,6 +346,10 @@ export function defaultCapabilityReadings(): CapabilityDefaults {
       bgWorker,
       multiplexed: isMultiplexed(),
     }),
+    programStatus: {
+      likely: false,
+      source: 'env: default',
+    },
   }
 }
 

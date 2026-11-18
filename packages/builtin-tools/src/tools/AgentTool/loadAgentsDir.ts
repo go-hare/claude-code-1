@@ -74,6 +74,9 @@ const AgentMcpServerSpecSchema = lazySchema(() =>
 // Zod schemas for JSON agent validation
 // Note: HooksSchema is lazy so the circular chain AppState -> loadAgentsDir -> settings/types
 // is broken at module load time
+export const AUTO_COMPACT_WINDOW_MIN = 100_000
+export const AUTO_COMPACT_WINDOW_MAX = 1_000_000
+
 const AgentJsonSchema = lazySchema(() =>
   z.object({
     description: z.string().min(1, 'Description cannot be empty'),
@@ -91,6 +94,12 @@ const AgentJsonSchema = lazySchema(() =>
     mcpServers: z.array(AgentMcpServerSpecSchema()).optional(),
     hooks: HooksSchema().optional(),
     maxTurns: z.number().int().positive().optional(),
+    autoCompactWindow: z
+      .number()
+      .int()
+      .min(AUTO_COMPACT_WINDOW_MIN)
+      .max(AUTO_COMPACT_WINDOW_MAX)
+      .optional(),
     skills: z.array(z.string()).optional(),
     initialPrompt: z.string().optional(),
     memory: z.enum(['user', 'project', 'local']).optional(),
@@ -133,6 +142,7 @@ export type BaseAgentDefinition = {
   effort?: EffortValue
   permissionMode?: PermissionMode
   maxTurns?: number // Maximum number of agentic turns before stopping
+  autoCompactWindow?: number // Custom auto-compact context window for subagent
   /** densable 2.1.248 #2 mUt — experimental.cacheTtl ("5m" | "1h"). */
   cacheTtl?: PromptCacheTtl
   filename?: string // Original filename without .md extension (for user/project/managed agents)
@@ -568,6 +578,9 @@ export function parseAgentFromJson(
         : {}),
       ...(parsed.hooks ? { hooks: parsed.hooks } : {}),
       ...(parsed.maxTurns !== undefined ? { maxTurns: parsed.maxTurns } : {}),
+      ...(parsed.autoCompactWindow !== undefined
+        ? { autoCompactWindow: parsed.autoCompactWindow }
+        : {}),
       ...(parsed.skills && parsed.skills.length > 0
         ? { skills: parsed.skills }
         : {}),
@@ -753,6 +766,24 @@ export function parseAgentFromMarkdown(
       )
     }
 
+    // Parse autoCompactWindow from frontmatter (#487)
+    const autoCompactWindowRaw = frontmatter['autoCompactWindow']
+    const autoCompactWindow =
+      parseAutoCompactWindowFromFrontmatter(autoCompactWindowRaw)
+    if (autoCompactWindowRaw !== undefined && autoCompactWindow === undefined) {
+      logForDebugging(
+        `Agent file ${filePath} has invalid autoCompactWindow '${autoCompactWindowRaw}'. Must be an integer from ${AUTO_COMPACT_WINDOW_MIN} to ${AUTO_COMPACT_WINDOW_MAX}.`,
+        { level: 'warn' },
+      )
+    }
+
+    // Warn on unrecognized frontmatter keys in --debug (#540)
+    warnUnknownAgentFrontmatterKeys({
+      subject: 'Agent file',
+      filePath,
+      frontmatter,
+    })
+
     // densable 2.1.248 #2 mUt — experimental.cacheTtl ("5m" | "1h")
     const cacheTtl = parseAgentFrontmatterCacheTtl(frontmatter)
 
@@ -856,6 +887,7 @@ export function parseAgentFromMarkdown(
         ? { permissionMode: permissionModeRaw as PermissionMode }
         : {}),
       ...(maxTurns !== undefined ? { maxTurns } : {}),
+      ...(autoCompactWindow !== undefined ? { autoCompactWindow } : {}),
       ...(cacheTtl !== undefined ? { cacheTtl } : {}),
       ...(background ? { background } : {}),
       ...(memory ? { memory } : {}),
@@ -871,4 +903,122 @@ export function parseAgentFromMarkdown(
     logError(error)
     return null
   }
+}
+
+export function parseAutoCompactWindowFromFrontmatter(
+  raw: unknown,
+): number | undefined {
+  const n = parsePositiveIntFromFrontmatter(raw)
+  return n !== undefined &&
+    n >= AUTO_COMPACT_WINDOW_MIN &&
+    n <= AUTO_COMPACT_WINDOW_MAX
+    ? n
+    : undefined
+}
+
+const KNOWN_AGENT_FRONTMATTER_KEYS = [
+  'name',
+  'description',
+  'tools',
+  'disallowedTools',
+  'model',
+  'effort',
+  'permissionMode',
+  'mcpServers',
+  'hooks',
+  'maxTurns',
+  'autoCompactWindow',
+  'skills',
+  'initialPrompt',
+  'memory',
+  'background',
+  'isolation',
+  'color',
+  'observer',
+  'observerMessage',
+  'omitClaudeMd',
+  'experimental',
+] as const
+
+const AGENT_FRONTMATTER_KEY_ALIASES = new Map<string, string | null>([
+  ['allowedtools', 'tools'],
+  ['whentouse', 'description'],
+  ['mode', null],
+])
+
+function levenshteinDistance(a: string, b: string): number {
+  const m = a.length
+  const n = b.length
+  const dp: number[] = Array.from({ length: n + 1 }, (_, j) => j)
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0]!
+    dp[0] = i
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j]!
+      dp[j] =
+        a[i - 1] === b[j - 1] ? prev : 1 + Math.min(prev, dp[j]!, dp[j - 1]!)
+      prev = tmp
+    }
+  }
+  return dp[n]!
+}
+
+function suggestFrontmatterKey(
+  unknownKey: string,
+  candidates: readonly string[],
+): string | undefined {
+  const lower = unknownKey.toLowerCase()
+  const alias = AGENT_FRONTMATTER_KEY_ALIASES.get(lower)
+  if (alias !== undefined) {
+    return alias ?? undefined
+  }
+  const caseMatch = candidates.find(c => c.toLowerCase() === lower)
+  if (caseMatch !== undefined) return caseMatch
+  let best: string | undefined
+  let bestDist = Infinity
+  const maxDist = Math.max(2, Math.floor(unknownKey.length / 2))
+  for (const candidate of candidates) {
+    const dist = levenshteinDistance(lower, candidate.toLowerCase())
+    if (dist <= maxDist && dist < bestDist) {
+      bestDist = dist
+      best = candidate
+    }
+  }
+  return best
+}
+
+const warnedUnknownFrontmatterKeys = new Map<string, string>()
+
+export function warnUnknownAgentFrontmatterKeys({
+  subject,
+  filePath,
+  frontmatter,
+  unhintedKeys = [],
+}: {
+  subject: string
+  filePath: string
+  frontmatter: Record<string, unknown>
+  unhintedKeys?: readonly string[]
+}): string {
+  const allowed =
+    subject === 'Plugin agent file'
+      ? [...KNOWN_AGENT_FRONTMATTER_KEYS, 'when_to_use', 'when-to-use']
+      : [...KNOWN_AGENT_FRONTMATTER_KEYS]
+  const allowedSet = new Set(allowed)
+  const hintable = allowed.filter(k => !unhintedKeys.includes(k))
+  const unknownKeys = Object.keys(frontmatter).filter(k => !allowedSet.has(k))
+  if (unknownKeys.length === 0) return ''
+  const formatted = unknownKeys.map(key => {
+    const suggestion = suggestFrontmatterKey(key, hintable)
+    return suggestion !== undefined && hintable.includes(suggestion)
+      ? `"${key}" (did you mean "${suggestion}"?)`
+      : `"${key}"`
+  })
+  const message = `${subject} ${filePath} has ${unknownKeys.length === 1 ? 'a frontmatter key' : 'frontmatter keys'} Claude Code does not recognize or apply: ${formatted.join(', ')}`
+  const cacheKey = `${subject}:${filePath}`
+  if (warnedUnknownFrontmatterKeys.get(cacheKey) !== message) {
+    warnedUnknownFrontmatterKeys.set(cacheKey, message)
+    logForDebugging(message, { level: 'warn' })
+  }
+  return message
 }

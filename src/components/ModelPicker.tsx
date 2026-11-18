@@ -529,11 +529,12 @@ function EffortLevelIndicator({ effort }: { effort?: EffortLevel }): React.React
 }
 
 /**
- * densable gbp-shaped cycle over the picker ladder (MDe levels).
+ * Official 2.1.293 (#291) `NYe`: clamp effort ←/→ at the lowest/highest
+ * level instead of wrapping around.
  * When current isn't in the ladder (e.g. medium on DeepSeek),
  * snap to high if present else the last rung, then step.
  */
-function cyclePickerEffort(
+export function cyclePickerEffort(
   current: EffortLevel,
   direction: 'left' | 'right',
   levels: readonly EffortLevel[],
@@ -543,9 +544,9 @@ function cyclePickerEffort(
   const highIdx = levels.indexOf('high');
   const currentIndex = idx !== -1 ? idx : highIdx !== -1 ? highIdx : levels.length - 1;
   if (direction === 'right') {
-    return levels[(currentIndex + 1) % levels.length]!;
+    return levels[Math.min(currentIndex + 1, levels.length - 1)]!;
   }
-  return levels[(currentIndex - 1 + levels.length) % levels.length]!;
+  return levels[Math.max(currentIndex - 1, 0)]!;
 }
 
 function getDefaultEffortLevelForOption(value?: string): EffortLevel {

@@ -11,8 +11,18 @@ import {
   getSettingsForSource,
 } from './settings/settings.js'
 
-/** densable sog — tip id suffixes cleared on focus toggle. */
-const FOCUS_MODE_TIP_SUFFIXES = ['', ':L'] as const
+/** densable sog — tip id suffixes cleared on focus toggle (325: ["", ":L", ":L:R"]). */
+const FOCUS_MODE_TIP_SUFFIXES = ['', ':L', ':L:R'] as const
+
+/**
+ * Official 2.1.292 (#262) `hhr`, `TMi`, `CMi` — /focus tip copy for inviting
+ * focus view mid-turn and showing how to switch back.
+ */
+export const FOCUS_TIP_INVITE =
+  'Just want the answer? Run /focus now to hide the steps along the way'
+export const FOCUS_TIP_ACTIVE =
+  'Focus view is on and the steps are hidden. Run /focus to show them'
+export const FOCUS_TIP_MAX_SHOWS = 10
 
 /**
  * densable J7t-shaped predicate for settings + session seed:

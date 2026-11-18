@@ -71,7 +71,7 @@ type StopTaskContext = {
    * densable pNe has NO default; TaskStop tool omits source (parent kill).
    * True user UI (BackgroundTasksDialog / SDK stop_task) must pass source:"user".
    */
-  source?: 'user' | 'system'
+  source?: 'user' | 'client' | 'system'
   /**
    * densable H1e killedBy (default "user"). TaskStop tool uses "parent".
    */
@@ -82,6 +82,7 @@ type StopTaskResult = {
   taskId: string
   taskType: string
   command: string | undefined
+  note?: string
 }
 
 /** densable tns(caller, owner): undefined caller always owns. */
@@ -128,19 +129,28 @@ function notifyBashOwnerOfCrossStop(opts: {
   })
 }
 
+const MCP_TASK_STOPPED_NOTE =
+  'No result will follow. The MCP server may already have done some of the work, or may still finish it.'
+
 /**
- * densable `Jvo` @194278680 — passive main-session notification when user stops
- * a main-thread background shell (`_Te()` = `tengu_rosy_donut`, default true).
+ * densable `Jvo` / SEA `z_r` — passive main-session notification when user or
+ * connected client stops a background task (`tengu_rosy_donut`, default true).
  */
 function notifyUserStoppedMainShellTask(opts: {
   taskId: string
   toolUseId?: string
   description: string
+  source?: 'user' | 'client' | 'system'
+  note?: string
 }): void {
   const toolUseXml = opts.toolUseId
     ? `\n<${TOOL_USE_ID_TAG}>${escapeXml(opts.toolUseId)}</${TOOL_USE_ID_TAG}>`
     : ''
-  const summary = `Task "${opts.description}" was stopped by the user`
+  const base =
+    opts.source === 'client'
+      ? `Task "${opts.description}" was stopped by the user or by the app connected to this session`
+      : `Task "${opts.description}" was stopped by the user`
+  const summary = opts.note === undefined ? base : `${base}. ${opts.note}`
   const value = `<${TASK_NOTIFICATION_TAG}>
 <${TASK_ID_TAG}>${escapeXml(opts.taskId)}</${TASK_ID_TAG}>${toolUseXml}
 <${STATUS_TAG}>killed</${STATUS_TAG}>
@@ -388,18 +398,43 @@ export async function stopTask(
     }
     if (
       bashOwner === undefined &&
-      source === 'user' &&
+      source !== undefined &&
       getFeatureValue_CACHED_MAY_BE_STALE('tengu_rosy_donut', true)
     ) {
       notifyUserStoppedMainShellTask({
         taskId: resolvedId,
         toolUseId: task.toolUseId,
         description: task.description,
+        source,
       })
     }
   }
 
   const command = isLocalShellTask(task) ? task.command : task.description
+
+  if (
+    task.type === 'mcp_task' &&
+    getAppState().tasks?.[resolvedId]?.status === 'killed'
+  ) {
+    if (
+      source !== undefined &&
+      getFeatureValue_CACHED_MAY_BE_STALE('tengu_rosy_donut', true)
+    ) {
+      notifyUserStoppedMainShellTask({
+        taskId: resolvedId,
+        toolUseId: task.toolUseId,
+        description: task.description,
+        source,
+        note: MCP_TASK_STOPPED_NOTE,
+      })
+    }
+    return {
+      taskId: resolvedId,
+      taskType: task.type,
+      command,
+      note: `(${task.description}) is stopped. Cancellations are fire and forget, so there is no confirmation from the MCP server, and it may already have done some of the work. Only check on it if the user asks.`,
+    }
+  }
 
   return { taskId: resolvedId, taskType: task.type, command }
 }

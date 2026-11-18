@@ -53,6 +53,7 @@ import { snapshotHostConfig, type HostConfigSnapshot } from './hostConfig.js'
 import { readWarmupCompleteOs } from './prefetchWarmup.js'
 import {
   createSelfHostedRunnerApi,
+  formatRegisterRunnerRefusal,
   isRetryableRunnerError,
   resolveRunnerVersion,
   type SelfHostedRunnerApi,
@@ -2898,7 +2899,19 @@ export async function selfHostedRunnerMain(
     }
   } catch (q) {
     const Y = errMsg(q)
-    if (isAuthFailure(q)) {
+    const refusal = formatRegisterRunnerRefusal(q, secret)
+    if (refusal !== null) {
+      onStatus(`[runner:fatal] ${refusal.line}`)
+    } else if (
+      q instanceof Error &&
+      'isSelfHostedDisabledByOrg' in q &&
+      (q as { isSelfHostedDisabledByOrg?: boolean })
+        .isSelfHostedDisabledByOrg === true
+    ) {
+      onStatus(
+        `[runner:fatal] RegisterRunner refused because self-hosted environments are not enabled for this organization. Usually the 'Allow self-hosted environments' setting on the Cloud environments admin page (claude.ai/admin-settings/cloud-environments) is off, and an organization Owner can turn it on. Self-hosted environments also need a Team or Enterprise plan, and the setting usually applies within a few minutes. If this message still appears after that, contact your Anthropic account team. The environment secret was accepted, so do not rotate it. (${Y})`,
+      )
+    } else if (isAuthFailure(q)) {
       onStatus(
         `[runner:fatal] RegisterRunner auth failed — environment secret invalid or revoked. Check --environment-secret-file or SELF_HOSTED_RUNNER_ENVIRONMENT_SECRET. (${Y})`,
       )
@@ -2906,7 +2919,7 @@ export async function selfHostedRunnerMain(
       onStatus(`[runner:fatal] RegisterRunner failed: ${Y}`)
     }
     await flushLog()
-    process.exit(1)
+    process.exit(refusal?.exitCode ?? 1)
   }
   onStatus(`Registered: runner_id=${runnerId}`)
 

@@ -25,6 +25,7 @@ import { getFableSessionFallbackConsented, setFableSessionFallbackConsented } fr
 import { shouldApplyDeferredEffortCommit, shouldShowFableConsentDialog } from '../../utils/fableConsent.js';
 import { saveSessionModel } from '../../utils/sessionStorage.js';
 import { updateSettingsForSource } from '../../utils/settings/settings.js';
+import { runFunctionHookChain } from '../../utils/plugins/functionHooksModules.js';
 import { MODEL_ALIASES } from '../../utils/model/aliases.js';
 import { checkOpus1mAccess, checkSonnet1mAccess } from '../../utils/model/check1mAccess.js';
 import { executePostModelSwitchHooks, executePreModelSwitchHooks } from '../../utils/hooks.js';
@@ -40,6 +41,56 @@ import {
 import { formatDeniedModelsBlockMessage, isModelAllowed } from '../../utils/model/modelAllowlist.js';
 import { em } from '../../utils/model/modelNoticeCode.js';
 import { validateModel } from '../../utils/model/validateModel.js';
+
+export type SaveModelHookResult = { kind: 'saved'; saved: string | null } | { kind: 'refused'; reason?: string };
+
+/**
+ * Official 2.1.295 (#407): ask plugin `config.set` hooks before persisting
+ * a default model selection via `/model`.
+ */
+export async function saveModelWithConfigSetHook(
+  model: string | null,
+  previousModel: string | null | undefined,
+  persistFn: (finalModel: string | null) => void = finalModel => {
+    updateSettingsForSource('userSettings', { model: finalModel ?? undefined });
+  },
+  signal?: AbortSignal,
+): Promise<SaveModelHookResult> {
+  let saved: string | null | undefined;
+  let didSave = false;
+  try {
+    const res = await runFunctionHookChain(
+      'config.set',
+      {
+        key: 'model',
+        value: model ?? '',
+        previous: previousModel ?? '',
+        origin: { kind: 'composer' },
+      },
+      async arg => {
+        const finalModel = typeof arg?.value === 'string' ? (arg.value === '' ? null : arg.value) : model;
+        saved = finalModel;
+        didSave = true;
+        persistFn(finalModel);
+        return { value: finalModel ?? '' };
+      },
+      undefined,
+      undefined,
+      signal ? { signal } : undefined,
+    );
+    if (didSave) {
+      return { kind: 'saved', saved: saved ?? null };
+    }
+    const deny =
+      res && typeof res === 'object' && 'deny' in res && typeof (res as { deny?: unknown }).deny === 'string'
+        ? (res as { deny: string }).deny
+        : undefined;
+    return { kind: 'refused', reason: deny };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { kind: 'refused', reason: message };
+  }
+}
 
 function ModelPickerWrapper({
   onDone,
@@ -114,14 +165,30 @@ function ModelPickerWrapper({
     }));
     saveSessionModel(model);
     // densable 2.1.289: Enter saves default; s is session-only (Gat vs not).
+    // Official 2.1.295 (#407): ask plugin `config.set` hooks before persisting.
+    let persistRefusedReason: string | undefined;
+    let persistedDefault = false;
     if (persistAsDefault) {
-      updateSettingsForSource('userSettings', { model: model ?? undefined });
+      const saveResult = await saveModelWithConfigSetHook(model, mainLoopModel);
+      if (saveResult.kind === 'saved') {
+        persistedDefault = true;
+      } else {
+        persistRefusedReason = saveResult.reason;
+      }
     }
 
     let message = `Set model to ${em(renderModelLabel(model))}`;
-    message += persistAsDefault ? ' and saved as your default for new sessions' : ' for this session only';
+    message += persistedDefault
+      ? ' and saved as your default for new sessions'
+      : persistRefusedReason
+        ? ` for this session only (default not saved: ${persistRefusedReason})`
+        : ' for this session only';
     if (effort !== undefined) {
-      message += ` with ${em(effort)} effort`;
+      const effortSaved = persistAsDefault && effort !== 'max';
+      message +=
+        persistAsDefault && !effortSaved
+          ? ` \xB7 ${em(effort)} effort for this session only`
+          : ` with ${em(effort)} effort`;
     }
 
     // densable 2.1.218 #31 — Rft/uU/dU on /model picker confirm

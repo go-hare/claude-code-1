@@ -226,6 +226,19 @@ export function verifyAndDemote(plugins: readonly LoadedPlugin[]): {
 } {
   const known = new Set(plugins.map(p => p.source))
   const enabled = new Set(plugins.filter(p => p.enabled).map(p => p.source))
+  // #526: Synced plugins from claude.ai have source `name@synced` (or similar)
+  // while carrying their original `marketplaceName`. Index `name@marketplaceName`
+  // so a synced plugin's declared marketplace dependency (also synced from
+  // claude.ai) satisfies `enabled.has(dep)` / `known.has(dep)`.
+  for (const p of plugins) {
+    if (p.marketplaceName) {
+      const attributedId = `${p.name}@${p.marketplaceName}`
+      known.add(attributedId)
+      if (p.enabled) {
+        enabled.add(attributedId)
+      }
+    }
+  }
   // Name-only indexes for bare deps from --plugin-dir (@inline) plugins:
   // the real marketplace is unknown, so match "B" against any enabled "B@*".
   // enabledByName is a multiset: if B@epic AND B@other are both enabled,
@@ -255,6 +268,9 @@ export function verifyAndDemote(plugins: readonly LoadedPlugin[]): {
         )
         if (!satisfied) {
           enabled.delete(p.source)
+          if (p.marketplaceName) {
+            enabled.delete(`${p.name}@${p.marketplaceName}`)
+          }
           const count = enabledByName.get(p.name) ?? 0
           if (count <= 1) enabledByName.delete(p.name)
           else enabledByName.set(p.name, count - 1)

@@ -19,6 +19,15 @@ type WebSocketLike = {
   send(data: string): void
 }
 
+/** SEA `hke` / `Xn` = 16 MiB WebSocket message size cap. */
+export const MAX_WEBSOCKET_MESSAGE_BYTES = 16_777_216
+
+function mcpWebSocketMessageOverCapError(): Error {
+  return new Error(
+    `MCP server sent a WebSocket message over ${MAX_WEBSOCKET_MESSAGE_BYTES / 1024 / 1024} MiB. Claude Code did not read it and closed the connection.`,
+  )
+}
+
 export class WebSocketTransport implements Transport {
   private started = false
   private opened: Promise<void>
@@ -78,6 +87,11 @@ export class WebSocketTransport implements Transport {
     try {
       const data =
         typeof event.data === 'string' ? event.data : String(event.data)
+      if (Buffer.byteLength(data) > MAX_WEBSOCKET_MESSAGE_BYTES) {
+        this.handleError(mcpWebSocketMessageOverCapError())
+        this.close().catch(() => {})
+        return
+      }
       const messageObj = jsonParse(data)
       const message = parseJSONRPCMessage(messageObj) as JSONRPCMessage
       this.onmessage?.(message)
@@ -97,6 +111,11 @@ export class WebSocketTransport implements Transport {
   // Node (ws package) event handlers
   private onNodeMessage = (data: Buffer) => {
     try {
+      if (data.byteLength > MAX_WEBSOCKET_MESSAGE_BYTES) {
+        this.handleError(mcpWebSocketMessageOverCapError())
+        this.close().catch(() => {})
+        return
+      }
       const messageObj = jsonParse(data.toString('utf-8'))
       const message = parseJSONRPCMessage(messageObj) as JSONRPCMessage
       this.onmessage?.(message)

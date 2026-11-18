@@ -1220,8 +1220,9 @@ export class Cursor {
     let found = 0
 
     if (forward) {
+      const lineEnd = this.findLogicalLineEnd()
       let pos = this.measuredText.nextOffset(this.offset)
-      while (pos < text.length) {
+      while (pos < lineEnd) {
         const grapheme = this.graphemeAt(pos)
         if (grapheme === char) {
           found++
@@ -1234,9 +1235,10 @@ export class Cursor {
         pos = this.measuredText.nextOffset(pos)
       }
     } else {
-      if (this.offset === 0) return null
+      const lineStart = this.findLogicalLineStart()
+      if (this.offset <= lineStart) return null
       let pos = this.measuredText.prevOffset(this.offset)
-      while (pos >= 0) {
+      while (pos >= lineStart) {
         const grapheme = this.graphemeAt(pos)
         if (grapheme === char) {
           found++
@@ -1246,7 +1248,7 @@ export class Cursor {
               : pos
           }
         }
-        if (pos === 0) break
+        if (pos === lineStart) break
         pos = this.measuredText.prevOffset(pos)
       }
     }

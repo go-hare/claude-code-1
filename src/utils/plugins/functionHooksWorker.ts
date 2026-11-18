@@ -89,6 +89,10 @@ type CallMessage = {
   environmentId: string
   call?: { name?: string; method?: string; args?: unknown[] }
   callers?: unknown
+  hookOrigin?: readonly (
+    | string
+    | { readonly plugin: string; readonly registration: number }
+  )[]
 }
 type PressMessage = {
   type: 'press'
@@ -334,6 +338,9 @@ if (parentPort) {
         }
         const args = Array.isArray(message.call?.args) ? message.call.args : []
         const callers = Array.isArray(message.callers) ? message.callers : []
+        const hookOrigin = Array.isArray(message.hookOrigin)
+          ? message.hookOrigin
+          : undefined
         const value = await callPluginInterface(
           message.environmentId,
           {
@@ -342,6 +349,7 @@ if (parentPort) {
           },
           args,
           callers,
+          hookOrigin,
         )
         port.postMessage({
           type: 'call_result',

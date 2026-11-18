@@ -28,6 +28,12 @@ import { isShutdownApproved } from '../../utils/teammateMailbox.js';
 import { CtrlOToExpand } from '../CtrlOToExpand.js';
 
 import { feature } from 'bun:bundle';
+import {
+  formatWithheldMemoryLine,
+  formatWithheldMore,
+  withheldShown,
+  type WithheldMemoryAttachmentEntry,
+} from '../../utils/claudemd.js';
 import { useSelectedMessageBg } from '../messageActions.js';
 
 type Props = {
@@ -193,6 +199,25 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
           Referenced file <Text bold>{attachment.displayPath}</Text>
         </Line>
       );
+    case 'at_mention_reference': {
+      const label =
+        attachment.unread === 'too_large'
+          ? getDisplayPath(attachment.displayPath ?? attachment.mentions[0] ?? '')
+          : attachment.mentions.join(', ');
+      const reason =
+        attachment.unread === 'unexamined'
+          ? 'not read: could not be examined'
+          : attachment.unread === 'too_large' && attachment.fileSize !== undefined
+            ? `not read: too large, ${formatFileSize(attachment.fileSize)}`
+            : attachment.unread === 'too_large'
+              ? 'not read: too large'
+              : 'not read';
+      return (
+        <Line>
+          Referenced <Text bold>{label}</Text> ({reason})
+        </Line>
+      );
+    }
     case 'pdf_reference':
       return (
         <Line>
@@ -224,6 +249,8 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
           Loaded <Text bold>{attachment.displayPath}</Text>
         </Line>
       );
+    case 'withheld_memory':
+      return <WithheldMemoryMessage entries={attachment.entries} />;
     case 'relevant_memories':
       // Usually absorbed into a CollapsedReadSearchGroup (collapseReadSearch.ts)
       // so this only renders when the preceding tool was non-collapsible (Edit,
@@ -541,6 +568,27 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
 }
 
 type TaskStatusAttachment = Extract<Attachment, { type: 'task_status' }>;
+
+function WithheldMemoryMessage({ entries }: { entries: WithheldMemoryAttachmentEntry[] }): React.ReactNode {
+  const { shown, more } = withheldShown(entries);
+  return (
+    <Box flexDirection="column">
+      {shown.map((entry, idx) => {
+        const line = formatWithheldMemoryLine(entry.why, entry.displayPath);
+        return (
+          <Line key={`${idx} ${entry.path}`}>
+            {line.lead} <Text dimColor>{line.mark}</Text> <Text bold>{line.path}</Text>
+          </Line>
+        );
+      })}
+      {more > 0 ? (
+        <Box>
+          <Text dimColor>{formatWithheldMore(more)}</Text>
+        </Box>
+      ) : null}
+    </Box>
+  );
+}
 
 function TaskStatusMessage({ attachment }: { attachment: TaskStatusAttachment }): React.ReactNode {
   // For ants, killed task status is shown in the CoordinatorTaskPanel.

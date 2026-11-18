@@ -1,3 +1,4 @@
+import type { FileHandle } from 'fs/promises'
 import type {
   ImageBlockParam,
   TextBlockParam,
@@ -160,14 +161,26 @@ function getToolResultFromCell(cell: NotebookCellSource) {
 }
 
 /**
- * Reads and parses a Jupyter notebook file into processed cell data
+ * Reads and parses a Jupyter notebook file (or an already-opened FileHandle
+ * bound to permission approval) into processed cell data.
  */
 export async function readNotebook(
-  notebookPath: string,
+  notebookPathOrHandle: string | FileHandle,
   cellId?: string,
 ): Promise<NotebookCellSource[]> {
-  const fullPath = expandPath(notebookPath)
-  const buffer = await getFsImplementation().readFileBytes(fullPath)
+  let buffer: Buffer
+  if (typeof notebookPathOrHandle === 'string') {
+    const fullPath = expandPath(notebookPathOrHandle)
+    buffer = await getFsImplementation().readFileBytes(fullPath)
+  } else {
+    const stat = await notebookPathOrHandle.stat()
+    if (!stat.isFile() && !stat.isDirectory()) {
+      throw new Error(
+        'Notebook path is not a regular file (device, FIFO, or socket).',
+      )
+    }
+    buffer = await notebookPathOrHandle.readFile()
+  }
   const content = buffer.toString('utf-8')
   const notebook = jsonParse(content) as NotebookContent
   const language = notebook.metadata.language_info?.name ?? 'python'

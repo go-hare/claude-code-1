@@ -316,8 +316,10 @@ async function makeTestQuery() {
 }
 
 export async function checkQuotaStatus(): Promise<void> {
-  // Skip network requests if nonessential traffic is disabled
-  if (isEssentialTrafficOnly()) {
+  // Skip network requests if nonessential traffic is disabled, except when
+  // signed in to a Claude apps gateway (gateway spend limit goes to the
+  // gateway the session is signed in to).
+  if (isEssentialTrafficOnly() && getAPIProvider() !== 'gateway') {
     return
   }
 

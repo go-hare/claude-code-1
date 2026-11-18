@@ -302,9 +302,76 @@ export type LoadedFunctionHooksModule = {
   isCore?: boolean
   /** densable `rD` / `elo` — built-in module loaded natively in-process. */
   native?: boolean
+  /** densable per-load environment ID (`#510`). */
+  environmentId?: string
 }
 
 let loadedModules: LoadedFunctionHooksModule[] = []
+const environmentArgs = new Map<string, LoadedFunctionHooksModule>()
+
+export type HookServingContext = {
+  cwd?: string
+  turnHeld?: string
+}
+
+const activeHookModuleAls = new AsyncLocalStorage<LoadedFunctionHooksModule>()
+const activeHookServingAls = new AsyncLocalStorage<HookServingContext>()
+
+export function getCurrentHeldTurnId(): string | undefined {
+  return activeHookServingAls.getStore()?.turnHeld
+}
+
+export const MAX_HOOK_VALUE_DEPTH = 100_000
+export const MAX_HOOK_VM_DEPTH = 28_000
+export const HOOK_DEPTH_LIMIT_MESSAGE =
+  'nesting deeper than 100000 levels is not supported'
+export const HOOK_VM_DEPTH_LIMIT_MESSAGE =
+  'nesting deeper than 28000 levels is not supported'
+
+/**
+ * Iterative depth check (`T7s` / `X5e` in SEA #381) so deeply nested tool
+ * inputs never silently truncate or blow the JS stack.
+ */
+export function assertHookValueDepth(
+  value: unknown,
+  maxDepth: number = MAX_HOOK_VALUE_DEPTH,
+): void {
+  if (typeof value !== 'object' || value === null) return
+  const seen = new WeakSet<object>()
+  const stack: Array<{ val: object; depth: number }> = [
+    { val: value, depth: 1 },
+  ]
+  while (stack.length > 0) {
+    const { val, depth } = stack.pop()!
+    if (depth > maxDepth) {
+      throw new RangeError(
+        maxDepth === MAX_HOOK_VM_DEPTH
+          ? HOOK_VM_DEPTH_LIMIT_MESSAGE
+          : HOOK_DEPTH_LIMIT_MESSAGE,
+      )
+    }
+    if (seen.has(val)) continue
+    seen.add(val)
+    if (Array.isArray(val)) {
+      for (let i = val.length - 1; i >= 0; i--) {
+        const item = val[i]
+        if (typeof item === 'object' && item !== null) {
+          stack.push({ val: item, depth: depth + 1 })
+        }
+      }
+    } else {
+      const proto = Object.getPrototypeOf(val)
+      if (proto === Object.prototype || proto === null) {
+        for (const k of Object.keys(val)) {
+          const child = (val as Record<string, unknown>)[k]
+          if (typeof child === 'object' && child !== null) {
+            stack.push({ val: child, depth: depth + 1 })
+          }
+        }
+      }
+    }
+  }
+}
 
 /**
  * densable `Azn` — `yn` installs the late-load `session.start` callback
@@ -458,24 +525,34 @@ export function setLoadedFunctionHooksModules(
 function replaceLoadedFunctionHooksModules(
   modules: readonly LoadedFunctionHooksModule[],
 ): void {
-  loadedModules = modules.map(mod => ({
-    name: mod.name,
-    root: mod.root,
-    patterns: [...mod.patterns],
-    hooks: [...(mod.hooks ?? [])],
-    status: mod.status ?? 'live',
-    ...(mod.surfaceModules !== undefined && {
-      surfaceModules: [...mod.surfaceModules],
-    }),
-    ...(mod.pluginStorageId !== undefined && {
-      pluginStorageId: mod.pluginStorageId,
-    }),
-    ...(mod.link !== undefined && { link: mod.link }),
-    ...(mod.tier !== undefined && { tier: mod.tier }),
-    ...(mod.isManaged !== undefined && { isManaged: mod.isManaged }),
-    ...(mod.isCore !== undefined && { isCore: mod.isCore }),
-    ...(mod.native !== undefined && { native: mod.native }),
-  }))
+  environmentArgs.clear()
+  loadedModules = modules.map(mod => {
+    const entry: LoadedFunctionHooksModule = {
+      name: mod.name,
+      root: mod.root,
+      patterns: [...mod.patterns],
+      hooks: [...(mod.hooks ?? [])],
+      status: mod.status ?? 'live',
+      ...(mod.surfaceModules !== undefined && {
+        surfaceModules: [...mod.surfaceModules],
+      }),
+      ...(mod.pluginStorageId !== undefined && {
+        pluginStorageId: mod.pluginStorageId,
+      }),
+      ...(mod.link !== undefined && { link: mod.link }),
+      ...(mod.tier !== undefined && { tier: mod.tier }),
+      ...(mod.isManaged !== undefined && { isManaged: mod.isManaged }),
+      ...(mod.isCore !== undefined && { isCore: mod.isCore }),
+      ...(mod.native !== undefined && { native: mod.native }),
+      ...(mod.environmentId !== undefined && {
+        environmentId: mod.environmentId,
+      }),
+    }
+    if (entry.status !== 'unloaded') {
+      environmentArgs.set(entry.environmentId ?? entry.name, entry)
+    }
+    return entry
+  })
   for (const mod of loadedModules) {
     setPluginSurfaceModules(mod.name, mod.root, mod.surfaceModules ?? [])
   }
@@ -509,6 +586,7 @@ function replaceLoadedFunctionHooksModules(
 
 /** densable `cLo` — exact `classic.<event>` on a loaded module. */
 export function hasClassicFunctionHook(event: string): boolean {
+  if (workerReplacementPromise !== undefined) return true
   const needle = `classic.${event}`
   return loadedModules.some(mod => mod.patterns.includes(needle))
 }
@@ -542,6 +620,11 @@ export function hasMatchingFunctionHook(
   payload?: Record<string, unknown>,
   among?: readonly LoadedFunctionHooksModule[],
 ): boolean {
+  // #305: while the hooks worker is restarting, don't skip classic.* events
+  // before runFunctionHookChain can wait for the replacement modules.
+  if (among === undefined && workerReplacementPromise !== undefined) {
+    return true
+  }
   const needle = event.includes('.') ? event : `classic.${event}`
   return (among ?? loadedModules).some(mod =>
     (mod.hooks ?? []).some(hook => {
@@ -938,6 +1021,9 @@ export async function runFunctionHookChain(
     withoutModuleHandlers?: boolean
     /** Engine-owned handlers in the same hop chain, ahead of plugin handlers. */
     handlersBefore?: readonly FunctionHookHostHandler[]
+    /** #509: calling agent cwd and held turn propagated to served `$` methods. */
+    cwd?: string
+    turnHeld?: string
   },
 ): Promise<unknown> {
   if (hookDispatch.getStore() === undefined) {
@@ -954,6 +1040,45 @@ export async function runFunctionHookChain(
   }
   if (callOptions?.withoutModuleHandlers === true) {
     return tail(payload, callOptions.floors ?? EMPTY_HOP_FLOORS)
+  }
+  // #305: wait for a pending worker replacement BEFORE computing moduleSteps
+  // so classic.* and other hooks on the replacement modules are never skipped.
+  if (workerReplacementPromise !== undefined) {
+    await waitForWorkerReplacement(event, callOptions?.signal)
+  }
+  // #381: validate payload nesting depth iteratively before handing to hooks.
+  assertHookValueDepth(payload)
+  const parentServing = activeHookServingAls.getStore()
+  const servingContext: HookServingContext = {
+    cwd:
+      callOptions?.cwd ??
+      (typeof payload.cwd === 'string' && payload.cwd !== ''
+        ? payload.cwd
+        : undefined) ??
+      parentServing?.cwd,
+    turnHeld:
+      callOptions?.turnHeld ??
+      (typeof payload.turnId === 'string' && payload.turnId !== ''
+        ? payload.turnId
+        : undefined) ??
+      parentServing?.turnHeld,
+  }
+  const hasServing =
+    servingContext.cwd !== undefined || servingContext.turnHeld !== undefined
+  if (
+    hasServing &&
+    (parentServing?.cwd !== servingContext.cwd ||
+      parentServing?.turnHeld !== servingContext.turnHeld)
+  ) {
+    // Run the chain under the resolved serving context so nested host ops
+    // and served $ calls inherit the calling agent's cwd and held turn.
+    return activeHookServingAls.run(servingContext, () =>
+      runFunctionHookChain(event, payload, tail, only, environments, {
+        ...callOptions,
+        cwd: servingContext.cwd,
+        turnHeld: servingContext.turnHeld,
+      }),
+    )
   }
   // densable F0/r1: classic events are `classic.<HookEvent>`; yOt
   // function events (`plugin.register`, `tool.call`, …) are the dotted name.
@@ -1012,10 +1137,7 @@ export async function runFunctionHookChain(
       (inFlightByModule.get(mod.name) ?? 0) === 0
     )
       return []
-    const leftOut = leftOutRegistrationsForModule(
-      callOptions?.hookOrigin,
-      mod.name,
-    )
+    const leftOut = leftOutRegistrationsForModule(outerHookOrigin, mod.name)
     if (leftOut === 'every') return []
     return (mod.hooks ?? [])
       .map((hook, registration) => ({ hook, registration }))
@@ -1055,6 +1177,9 @@ export async function runFunctionHookChain(
       entry.mod.isManaged === true ||
       entry.hook.isManaged === true,
   )
+  if (workerOwnsDispatch && workerReplacementPromise !== undefined) {
+    await waitForWorkerReplacement(event, callOptions?.signal)
+  }
   if (workerOwnsDispatch && functionHooksWorker) {
     if (functionHooksWorker.died !== undefined) {
       throw new Error(functionHooksWorker.died)
@@ -1311,8 +1436,12 @@ export async function runFunctionHookChain(
           },
         )
         .then(reply => {
+          const workerReturned = truncateHostHookResultField(
+            event,
+            reply.returned,
+          )
           if (callOptions?.site?.check !== undefined) {
-            const problem = callOptions.site.check(reply.returned)
+            const problem = callOptions.site.check(workerReturned)
             if (problem !== undefined) {
               throw new Error(`${step.mod.name}: returned ${problem}`)
             }
@@ -1325,23 +1454,23 @@ export async function runFunctionHookChain(
             outcome: 'returned',
             ms: Math.max(0, performance.now() - stepStarted),
             received: value,
-            returned: reply.returned,
+            returned: workerReturned,
           })
           traces.push({
             plugin: step.mod.name,
             outcome: 'returned',
-            returned: reply.returned,
+            returned: workerReturned,
           })
           if (
             (event === 'ui.render' || needle === 'classic.ui.render') &&
-            reply.returned !== undefined
+            workerReturned !== undefined
           ) {
             lastUiRenderPlugin =
-              pluginFromDrawing(reply.returned) ??
-              (isEngineDrawing(reply.returned) ? '' : step.mod.name)
-            return stampPluginOnDrawing(reply.returned, lastUiRenderPlugin)
+              pluginFromDrawing(workerReturned) ??
+              (isEngineDrawing(workerReturned) ? '' : step.mod.name)
+            return stampPluginOnDrawing(workerReturned, lastUiRenderPlugin)
           }
-          return reply.returned
+          return workerReturned
         })
         .finally(() => leaveModule(step.mod.name))
     }
@@ -1356,27 +1485,50 @@ export async function runFunctionHookChain(
         return hostHandler.run(value, next as FunctionHookNext)
       }
       return activeHookOriginAls.run(stepHookOrigin, () =>
-        step.hook.hook(engine, value, next),
+        activeHookModuleAls.run(step.mod, () =>
+          step.hook.hook(engine, value, next),
+        ),
       )
     })
     if (!hostHandler) watchHookBudget(running, step.mod.name, event)
     return running
       .then(rawReturned => {
+        const truncated = truncateHostHookResultField(event, rawReturned)
         const returned =
           !hostHandler &&
           callOptions?.site?.restoreResult !== undefined &&
-          isEventRecord(rawReturned)
+          isEventRecord(truncated)
             ? callOptions.site.restoreResult(
-                rawReturned,
+                truncated,
                 downstreamResults,
                 value,
               )
-            : rawReturned
+            : truncated
         if (!hostHandler && callOptions?.site?.check !== undefined) {
           const problem = callOptions.site.check(returned)
           if (problem !== undefined) {
             throw new Error(`${step.mod.name}: returned ${problem}`)
           }
+        }
+        if (
+          !hostHandler &&
+          nextCalled &&
+          DENY_AFTER_NEXT_EVENTS.has(event) &&
+          isEventRecord(returned) &&
+          returned.deny !== undefined &&
+          downstreamResults.some(r => r.deny === undefined)
+        ) {
+          throw new Error(
+            `${step.mod.name}: returned a deny after its next() was answered (deny in place of next)`,
+          )
+        }
+        if (
+          !hostHandler &&
+          event === 'agent.spawn' &&
+          !nextCalled &&
+          (!isEventRecord(returned) || returned.deny === undefined)
+        ) {
+          throw new Error(`${step.mod.name}: ${AGENT_SPAWN_HOOK_REFUSE}`)
         }
         const outcome =
           hasDownstreamResult && Object.is(returned, lastDownstreamResult)
@@ -1419,7 +1571,33 @@ export async function runFunctionHookChain(
           },
           thrown,
         )
-        if (!step.hook.catch) {
+        if (
+          step.hook.catch &&
+          (workerReplacementPromise !== undefined ||
+            (err instanceof Error && err.message.includes('hooks worker')))
+        ) {
+          // #399: a .catch must not silently pass a guard hook when the worker
+          // was replaced/restarted during the call; refuse instead.
+          logForDebugging(
+            `${step.mod.name}: the hooks worker was replaced during ${event}; ${step.mod.name}'s .catch answered in place of its hook`,
+            { level: 'error' },
+          )
+          runNode.entry = Object.freeze({
+            index,
+            plugin: step.mod.name,
+            tier: stepTier,
+            event: needle,
+            outcome: 'rejected',
+            ms: Math.max(0, performance.now() - stepStarted),
+            received: value,
+            returned: undefined,
+          })
+          throw err
+        }
+        if (
+          !step.hook.catch ||
+          (nextCalled && isSignalAbortedNotInterrupt(callOptions?.signal))
+        ) {
           runNode.entry = Object.freeze({
             index,
             plugin: step.mod.name,
@@ -1505,6 +1683,14 @@ export async function runFunctionHookChain(
   return hookEvalAls.run(true, () =>
     callAt(0, payload, initialFloors, rootTraceNode)
       .then(returned => {
+        if (
+          event === 'tool.check' &&
+          payload.ceiling === 'ask' &&
+          isEventRecord(returned) &&
+          returned.decision === 'allow'
+        ) {
+          return { ...returned, decision: 'ask' }
+        }
         if (
           event === 'prompt.submit' &&
           isEventRecord(returned) &&
@@ -2445,6 +2631,48 @@ const AGENT_SPAWN_HOOK_REFUSE =
   'agent.spawn: a hook answered without passing the spawn on'
 const AGENT_SPAWN_DESC_WORDS = 5
 const HOST_TEXT_LIMIT = 4096
+const DENY_AFTER_NEXT_EVENTS = new Set([
+  'config.set',
+  'state.set',
+  'env.set',
+  'agent.spawn',
+])
+
+function truncateHostHookResultField(
+  event: string,
+  returned: unknown,
+): unknown {
+  if (!isEventRecord(returned)) return returned
+  const field =
+    event === 'prompt.submit'
+      ? 'drop'
+      : event === 'config.set'
+        ? 'deny'
+        : undefined
+  if (field === undefined) return returned
+  const val = returned[field]
+  if (typeof val === 'string' && val.length > HOST_TEXT_LIMIT) {
+    return {
+      ...returned,
+      [field]: `${val.slice(0, HOST_TEXT_LIMIT)}…`,
+    }
+  }
+  return returned
+}
+
+function isSignalAbortedNotInterrupt(
+  signal: AbortSignal | undefined,
+  isBackground = false,
+): boolean {
+  if (!signal?.aborted) return false
+  if (!isBackground) return true
+  const reason = signal.reason
+  const kind =
+    reason && typeof reason === 'object' && 'kind' in reason
+      ? (reason as { kind?: unknown }).kind
+      : reason
+  return kind !== 'interrupt'
+}
 const AGENT_REGISTER_KEYS = [
   'name',
   'description',
@@ -3146,7 +3374,7 @@ function engineTool(
       ) {
         return Promise.reject(
           new Error(
-            `${plugin}: $.tool.register takes { name, description, inputSchema? }; name is letters, digits, _ or - (up to 64)`,
+            `${plugin}: $.tool.register takes { name, description, inputSchema?, isDeferred? }; name is letters, digits, _ or - (up to 64)`,
           ),
         )
       }
@@ -3157,6 +3385,16 @@ function engineTool(
         return Promise.reject(
           new Error(
             `${plugin}: $.tool.register: ${input.name} needs a description (what the model reads)`,
+          ),
+        )
+      }
+      if (
+        input.isDeferred !== undefined &&
+        typeof input.isDeferred !== 'boolean'
+      ) {
+        return Promise.reject(
+          new Error(
+            `${plugin}: $.tool.register: ${input.name}'s isDeferred must be true or false`,
           ),
         )
       }
@@ -3173,6 +3411,9 @@ function engineTool(
           name: input.name,
           description: input.description,
           inputSchema: { type: 'object', ...schema },
+          ...(input.isDeferred !== undefined && {
+            isDeferred: input.isDeferred,
+          }),
         },
       ])
     },
@@ -3579,6 +3820,8 @@ const FS_BYTE_LIMIT = 4_194_304
 
 async function resolvePluginFsBaseCwd(cwd?: unknown): Promise<string> {
   if (typeof cwd === 'string' && cwd !== '') return cwd
+  const servingCwd = activeHookServingAls.getStore()?.cwd
+  if (typeof servingCwd === 'string' && servingCwd !== '') return servingCwd
   try {
     const { getCwd } = await import('../cwd.js')
     return getCwd()
@@ -3809,6 +4052,21 @@ function pluginEngine(
               : {}),
           },
         ]).catch(() => {})
+      },
+      notify(text: unknown, opts: Record<string, unknown> = {}) {
+        return hostOp(environmentId, 'ui.notify', [
+          {
+            text,
+            ...(opts?.title !== undefined && { title: opts.title }),
+            ...(opts?.key !== undefined && { key: opts.key }),
+            ...(opts?.delayMs !== undefined && { delayMs: opts.delayMs }),
+            ...(opts?.at !== undefined && { at: opts.at }),
+            ...(opts?.untilBack !== undefined && { untilBack: opts.untilBack }),
+          },
+        ])
+      },
+      cancelNotify(key: unknown) {
+        return hostOp(environmentId, 'ui.cancelNotify', [{ key }])
       },
       status(text: unknown) {
         uiLog.push({
@@ -4135,8 +4393,31 @@ function pluginEngine(
       },
     },
     model: {
-      complete: (input: unknown) =>
-        hostOp(environmentId, 'model.complete', [input]),
+      complete: async (input: unknown, options?: { signal?: AbortSignal }) => {
+        const signal = options?.signal
+        if (signal?.aborted === true) {
+          return {
+            isAnswered: false,
+            reason: 'aborted',
+            usage: { ...EMPTY_MODEL_USAGE },
+          }
+        }
+        const normalized = isEventRecord(input)
+          ? normalizeModelCompleteInput(input)
+          : input
+        try {
+          return await hostOp(environmentId, 'model.complete', [normalized])
+        } catch (err) {
+          if ((signal as AbortSignal | undefined)?.aborted === true) {
+            return {
+              isAnswered: false,
+              reason: 'aborted',
+              usage: { ...EMPTY_MODEL_USAGE },
+            }
+          }
+          throw err
+        }
+      },
       fork: (input: unknown) => hostOp(environmentId, 'model.fork', [input]),
       classify: (text: unknown, labels: unknown, options?: unknown) =>
         hostOp(environmentId, 'model.classify', [{ text, labels, options }]),
@@ -4196,6 +4477,7 @@ function hostOp(
     activeFrame.plugin === environmentId
       ? activeFrame.registration
       : undefined
+  const activeServing = activeHookServingAls.getStore()
   return new Promise((resolve, reject) => {
     pendingHostOps.set(opId, { resolve, reject })
     port.postMessage({
@@ -4206,6 +4488,7 @@ function hostOp(
       ...(registration !== undefined && { registration }),
       ...(activeOrigin !== undefined &&
         activeOrigin.length > 0 && { hookOrigin: activeOrigin }),
+      ...(activeServing !== undefined && { serving: activeServing }),
     })
   })
 }
@@ -4714,6 +4997,9 @@ async function fetchHttp(
     controller.abort()
   }, timeoutMs)
   try {
+    const method = (
+      typeof init?.method === 'string' ? init.method : 'GET'
+    ).toUpperCase()
     const response = await fetch(parsedUrl.href, {
       method: typeof init?.method === 'string' ? init.method : undefined,
       headers:
@@ -4723,6 +5009,10 @@ async function fetchHttp(
     })
     const contentLength = Number(response.headers.get('content-length'))
     if (
+      method !== 'HEAD' &&
+      response.status !== 204 &&
+      response.status !== 205 &&
+      response.status !== 304 &&
       Number.isFinite(contentLength) &&
       contentLength > HTTP_FETCH_BODY_LIMIT
     ) {
@@ -4779,6 +5069,10 @@ export async function handleHostOp(
   })
   const rec = firstRecord(args)
   if (op === 'session.cwd') {
+    const servingCwd = activeHookServingAls.getStore()?.cwd
+    if (typeof servingCwd === 'string' && servingCwd !== '') {
+      return servingCwd
+    }
     try {
       const { getCwd } = await import('../cwd.js')
       return getCwd()
@@ -4944,6 +5238,49 @@ export async function handleHostOp(
     })
     return undefined
   }
+  if (op === 'ui.notify') {
+    const err = validateUiNotifyInput(rec ?? {})
+    if (err !== undefined) hostCheck(op, err, plugin)
+    const pluginName = plugin ?? ''
+    const text = String(rec?.text ?? '')
+    const title =
+      typeof rec?.title === 'string' && rec.title !== ''
+        ? rec.title
+        : pluginName
+    const channel = uiNotifyHandler
+      ? await uiNotifyHandler({
+          plugin: pluginName,
+          message: text,
+          title,
+          notificationType: 'plugin_notification',
+          ...(typeof rec?.key === 'string' && { key: rec.key }),
+          ...(typeof rec?.delayMs === 'number' && { delayMs: rec.delayMs }),
+          ...(typeof rec?.at === 'number' && { at: rec.at }),
+          ...(typeof rec?.untilBack === 'boolean' && {
+            untilBack: rec.untilBack,
+          }),
+        })
+      : 'no_surface'
+    const mapped = mapUiNotifyChannel(channel, pluginName)
+    logForDebugging(
+      `$.ui.notify (${pluginName}): ${text.length} chars: ${mapped.isSent ? `sent by ${mapped.channel}` : mapped.reason}`,
+    )
+    return mapped
+  }
+  if (op === 'ui.cancelNotify') {
+    const err = validateNotifyKey(rec?.key)
+    if (err !== undefined) hostCheck(op, err, plugin)
+    const pluginName = plugin ?? ''
+    const isSent = uiCancelNotifyHandler
+      ? Boolean(
+          await uiCancelNotifyHandler({
+            plugin: pluginName,
+            key: String(rec?.key),
+          }),
+        )
+      : false
+    return { isSent }
+  }
   if (op === 'ui.status') {
     if (rec?.text !== undefined) {
       const textCheck = hostTextCheck(rec.text)
@@ -5055,7 +5392,13 @@ export async function handleHostOp(
     if (Array.isArray(attachments) && attachments.length > 0) {
       hostCheck(op, 'takes text alone; attachments cannot be submitted', plugin)
     }
-    return runPromptSubmit(rec ?? {}, plugin)
+    return withSessionStartDedup(
+      'prompt.submit',
+      rec ?? {},
+      plugin ?? '',
+      undefined,
+      () => runPromptSubmit(rec ?? {}, plugin),
+    )
   }
   if (op === 'prompt.read') {
     // densable Iss.read: sU("ui_prompt_read") then requester.readPrompt,
@@ -5236,10 +5579,26 @@ export async function handleHostOp(
     return listPluginAgents()
   }
   if (op === 'agent.register') {
+    const activeMod = activeHookModuleAls.getStore()
+    if (
+      activeMod !== undefined &&
+      (!loadedModules.includes(activeMod) || activeMod.status === 'unloaded')
+    ) {
+      const who = plugin ?? activeMod.name
+      throw new Error(
+        `${who}: $.agent.register refused: the hooks module that made the call is no longer loaded (it was reloaded or removed)`,
+      )
+    }
     return registerPluginAgent(rec ?? {}, plugin)
   }
   if (op === 'agent.spawn') {
-    return runAgentSpawn(rec ?? {}, plugin)
+    return withSessionStartDedup(
+      'agent.spawn',
+      rec ?? {},
+      plugin ?? '',
+      undefined,
+      () => runAgentSpawn(rec ?? {}, plugin),
+    )
   }
   if (op === 'command.list') {
     return listPluginCommands()
@@ -5248,7 +5607,13 @@ export async function handleHostOp(
     return registerPluginCommand(rec ?? {}, plugin)
   }
   if (op === 'command.run') {
-    return runPluginCommand(rec ?? {}, plugin)
+    return withSessionStartDedup(
+      'command.run',
+      rec ?? {},
+      plugin ?? '',
+      undefined,
+      () => runPluginCommand(rec ?? {}, plugin),
+    )
   }
   if (op === 'tool.list') {
     return runToolList(plugin)
@@ -5505,15 +5870,116 @@ async function runUiAsk(args: unknown[], plugin?: string): Promise<unknown> {
   return { result: { answers } }
 }
 
+type ModelPromptBlock = { text: string; cache?: boolean }
+
+function isPromptBlockList(value: unknown): value is ModelPromptBlock[] {
+  return (
+    Array.isArray(value) &&
+    Array.from(value).every(
+      item =>
+        typeof item === 'object' &&
+        item !== null &&
+        'text' in item &&
+        typeof (item as { text: unknown }).text === 'string' &&
+        Object.entries(item as Record<string, unknown>).every(
+          ([key, val]) =>
+            key === 'text' ||
+            (key === 'cache' &&
+              (val === undefined || typeof val === 'boolean')),
+        ),
+    )
+  )
+}
+
+function normalizeModelCompleteInput(
+  input: Record<string, unknown>,
+): Record<string, unknown> {
+  const { prompt, system, ...rest } = input
+  const normalizedPrompt = isPromptBlockList(prompt)
+    ? { prompt: prompt.map(b => b.text).join(''), promptBlocks: prompt }
+    : { prompt }
+  const normalizedSystem = isPromptBlockList(system)
+    ? { system: system.map(b => b.text).join(''), systemBlocks: system }
+    : { system }
+  const hasSystem = Boolean(system)
+  return {
+    ...rest,
+    ...normalizedPrompt,
+    ...(hasSystem && normalizedSystem),
+  }
+}
+
+function validateModelCompleteInput(input: {
+  model?: unknown
+  prompt?: unknown
+  system?: unknown
+  promptBlocks?: unknown
+  systemBlocks?: unknown
+}): string | undefined {
+  if (!(typeof input?.model === 'string' && typeof input.prompt === 'string')) {
+    return 'takes { model, prompt }, the prompt a string or a list of blocks, each { text } and at most `cache: true`'
+  }
+  if (!(typeof input.system === 'string' || !input.system)) {
+    return 'takes a system that is a string or a list of blocks, each { text } and at most `cache: true`'
+  }
+  return [input.promptBlocks, input.systemBlocks].every(
+    blocks => blocks === undefined || isPromptBlockList(blocks),
+  )
+    ? undefined
+    : 'takes promptBlocks and systemBlocks that are lists of blocks, each { text } and at most `cache: true`'
+}
+
+function buildCachedBlocks(
+  text: string,
+  blocks: readonly ModelPromptBlock[] = [],
+):
+  | string
+  | Array<{
+      type: 'text'
+      text: string
+      cache_control?: { type: 'ephemeral' }
+    }> {
+  let count = 0
+  let offset = 0
+  for (const block of blocks) {
+    if (!text.startsWith(block.text, offset)) break
+    count += 1
+    offset += block.text.length
+  }
+  const plain = count === 0 || text === ''
+  const tail = text.slice(offset)
+  if (plain) return text
+  const parts: ModelPromptBlock[] = [
+    ...blocks.slice(0, count),
+    ...(tail === '' ? [] : [{ text: tail }]),
+  ]
+  return parts.map(block => ({
+    type: 'text' as const,
+    text: block.text,
+    ...(block.cache === true
+      ? { cache_control: { type: 'ephemeral' as const } }
+      : {}),
+  }))
+}
+
 async function runModelComplete(
   input: Record<string, unknown>,
   plugin?: string,
 ): Promise<unknown> {
-  const model = input.model
-  const prompt = input.prompt
-  if (typeof model !== 'string' || typeof prompt !== 'string') {
-    hostCheck('model.complete', 'takes { model, prompt }', plugin)
+  const inputError = validateModelCompleteInput({
+    model: input.model,
+    prompt: input.prompt,
+    system: input.system,
+    promptBlocks: input.promptBlocks,
+    systemBlocks: input.systemBlocks,
+  })
+  if (inputError !== undefined) {
+    hostCheck('model.complete', inputError, plugin)
   }
+  const model = input.model as string
+  const prompt = input.prompt as string
+  const promptBlocks = input.promptBlocks as ModelPromptBlock[] | undefined
+  const systemBlocks = input.systemBlocks as ModelPromptBlock[] | undefined
   const maxTokens = input.maxTokens
   if (
     maxTokens !== undefined &&
@@ -5582,10 +6048,14 @@ async function runModelComplete(
   const { asSystemPrompt } = await import('../systemPromptType.js')
   const { createAbortController } = await import('../abortController.js')
   const { getEmptyToolPermissionContext } = await import('../../Tool.js')
-  const system =
-    typeof input.system === 'string' && input.system !== ''
-      ? asSystemPrompt([input.system])
+  const systemStr = typeof input.system === 'string' ? input.system : ''
+  const systemBlocksBuilt = buildCachedBlocks(systemStr, systemBlocks)
+  const system = Array.isArray(systemBlocksBuilt)
+    ? asSystemPrompt(systemBlocksBuilt.map(b => b.text))
+    : systemStr !== ''
+      ? asSystemPrompt([systemStr])
       : asSystemPrompt([])
+  const userContent = buildCachedBlocks(prompt, promptBlocks)
   const controller = createAbortController()
   const started = Date.now()
   // densable LH thinking:ve — Cae false → disabled/mechanical; undefined → adaptive
@@ -5594,7 +6064,7 @@ async function runModelComplete(
       ? ({ type: 'disabled', mechanical: true } as const)
       : ({ type: 'adaptive' } as const)
   const work = queryModelWithoutStreaming({
-    messages: [createUserMessage({ content: prompt })],
+    messages: [createUserMessage({ content: userContent })],
     systemPrompt: system,
     thinkingConfig,
     tools: [],
@@ -5602,7 +6072,6 @@ async function runModelComplete(
     options: {
       model,
       querySource: 'hook_prompt',
-      enablePromptCaching: false,
       isNonInteractiveSession: true,
       hasAppendSystemPrompt: false,
       agents: [],
@@ -6736,11 +7205,205 @@ async function launchAgentSpawn(
   }
 }
 
+const PINNED_AGENT_SPAWN_KEYS = [
+  'tool_use_id',
+  'name',
+  'fork',
+  'isTeammate',
+  'workflow',
+  'resume',
+  'parentModel',
+  'permissionMode',
+  'parentAgentId',
+  'provider',
+] as const
+
+const RESTORE_AGENT_SPAWN_KEYS = [
+  'isTeammate',
+  'workflow',
+  'resume',
+  'parentAgentId',
+  'provider',
+] as const
+
+const UNAPPLIED_RESUME_KEYS = [
+  'prompt',
+  'description',
+  'subagentType',
+  'model',
+  'background',
+  'cwd',
+] as const
+
+const UNAPPLIED_TEAMMATE_KEYS = ['background', 'cwd'] as const
+
+const UNAPPLIED_WORKFLOW_KEYS = [
+  'description',
+  'subagentType',
+  'background',
+  'cwd',
+] as const
+
+function agentSpawnUnappliedSpec(original: Record<string, unknown>):
+  | {
+      keys: readonly string[]
+      kind: 'resume' | 'teammate' | 'workflow'
+    }
+  | undefined {
+  if (original.resume !== undefined) {
+    return { keys: UNAPPLIED_RESUME_KEYS, kind: 'resume' }
+  }
+  if (original.workflow !== undefined) {
+    return { keys: UNAPPLIED_WORKFLOW_KEYS, kind: 'workflow' }
+  }
+  if (original.isTeammate === true) {
+    return { keys: UNAPPLIED_TEAMMATE_KEYS, kind: 'teammate' }
+  }
+  return undefined
+}
+
+export function agentSpawnUnappliedWarning(
+  passed: Record<string, unknown>,
+  original: Record<string, unknown>,
+): string | undefined {
+  const spec = agentSpawnUnappliedSpec(original)
+  if (!spec) return undefined
+  const changed = spec.keys
+    .filter(key => Object.hasOwn(passed, key) && passed[key] !== original[key])
+    .map(key => `\`${key}\``)
+  if (changed.length === 0) return undefined
+  const plural = changed.length > 1
+  const joined = changed.join(', ')
+  switch (spec.kind) {
+    case 'resume':
+      return `${joined} ${plural ? 'were' : 'was'} ignored: a hook can only refuse a resumed agent's run`
+    case 'teammate':
+      return `${joined} ${plural ? 'do' : 'does'} not apply to a teammate`
+    case 'workflow':
+      return `${joined} ${plural ? 'do' : 'does'} not apply to a workflow agent`
+  }
+}
+
+export const AGENT_SPAWN_HOP_SITE: FunctionHookHopSite = {
+  restoreArgument: (passed, original) => {
+    const restored = restorePinnedKeys(
+      RESTORE_AGENT_SPAWN_KEYS,
+      passed,
+      original,
+    )
+    const spec = agentSpawnUnappliedSpec(original)
+    if (!spec) return restored
+    if (spec.keys.some(k => restored[k] !== original[k])) {
+      const next = { ...restored }
+      for (const k of spec.keys) next[k] = original[k]
+      return next
+    }
+    return restored
+  },
+  checkArgument: (passed, original) => {
+    for (const key of PINNED_AGENT_SPAWN_KEYS) {
+      if (!isDeepStrictEqual(passed[key], original[key])) {
+        return `the identity of the spawn and its parent is pinned; a rewrite keeps ${PINNED_AGENT_SPAWN_KEYS.join(', ')}`
+      }
+    }
+    if (typeof passed.prompt !== 'string' || passed.prompt.trim() === '') {
+      return 'no { prompt } (a non-empty string)'
+    }
+    if (
+      passed.description !== undefined &&
+      typeof passed.description !== 'string'
+    ) {
+      return 'a description that is not a string'
+    }
+    if (
+      passed.subagentType !== undefined &&
+      typeof passed.subagentType !== 'string'
+    ) {
+      return 'a subagentType that is not a string'
+    }
+    if (passed.model !== undefined && typeof passed.model !== 'string') {
+      return 'a model that is neither a string nor undefined'
+    }
+    if (
+      passed.background !== undefined &&
+      typeof passed.background !== 'boolean'
+    ) {
+      return 'a background that is not a boolean'
+    }
+    if (
+      passed.cwd !== undefined &&
+      (typeof passed.cwd !== 'string' || !isAbsolute(passed.cwd))
+    ) {
+      return 'a cwd that is not an absolute path'
+    }
+    return undefined
+  },
+  check: returned => {
+    if (!isEventRecord(returned)) return undefined
+    if (returned.model !== undefined && typeof returned.model !== 'string') {
+      return 'a model that is not a string'
+    }
+    if (returned.deny !== undefined && typeof returned.deny !== 'string') {
+      return 'a deny that is not a string'
+    }
+    return undefined
+  },
+}
+
+export async function runWorkflowAgentSpawn(
+  input: {
+    prompt: string
+    workflow: { run: string; index: number }
+    description?: string
+    subagentType?: string
+    model?: string
+    background?: boolean
+    cwd?: string
+    parentAgentId?: string
+    parentModel?: string
+    permissionMode?: string
+  },
+  launch: (passed: Record<string, unknown>) => Promise<unknown>,
+  signal?: AbortSignal,
+): Promise<{ ok: true; value: unknown } | { ok: false; deny: string }> {
+  const payload: Record<string, unknown> = {
+    ...input,
+    description: input.description ?? '',
+    subagentType: input.subagentType ?? '',
+    background: input.background ?? false,
+  }
+  let arrived = false
+  let launched: unknown
+  const result = await runFunctionHookChain(
+    'agent.spawn',
+    payload,
+    async passed => {
+      arrived = true
+      launched = await launch(passed)
+      return launched
+    },
+    undefined,
+    undefined,
+    {
+      site: AGENT_SPAWN_HOP_SITE,
+      signal,
+    },
+  )
+  if (!arrived) {
+    const deny =
+      isEventRecord(result) && typeof result.deny === 'string'
+        ? result.deny
+        : AGENT_SPAWN_HOOK_REFUSE
+    return { ok: false, deny }
+  }
+  return { ok: true, value: launched }
+}
+
 async function runAgentSpawn(
   input: Record<string, unknown>,
   plugin?: string,
 ): Promise<unknown> {
-  if (input.tool !== AGENT_TOOL_NAME) {
+  if (input.tool !== AGENT_TOOL_NAME && input.workflow === undefined) {
     hostCheck('agent.spawn', "takes the Agent tool's input", plugin)
   }
   const hookOrigin = buildOpHookOrigin(plugin)
@@ -6764,12 +7427,218 @@ async function runAgentSpawn(
     {
       origin: resolveHookCallOrigin(plugin),
       hookOrigin,
+      site: AGENT_SPAWN_HOP_SITE,
     },
   )
   if (!arrived) {
     return agentSpawnHookRefuse(result, input)
   }
   return launched
+}
+
+export type PromptAutocompleteSuggestion = {
+  text: string
+  label?: string
+  description?: string
+}
+
+export function extractAutocompleteToken(input: {
+  text: string
+  cursor: number
+}): { text: string; cursor: number; token: string; start: number } | undefined {
+  const cursor = Math.min(Math.max(input.cursor, 0), input.text.length)
+  let start = cursor
+  while (start > 0 && input.text.charAt(start - 1).trim() !== '') {
+    start -= 1
+  }
+  if (start === cursor) return undefined
+  return {
+    text: input.text,
+    cursor,
+    token: input.text.slice(start, cursor),
+    start,
+  }
+}
+
+export function normalizeAutocompleteSuggestions(
+  suggestions: unknown,
+): PromptAutocompleteSuggestion[] {
+  if (!Array.isArray(suggestions)) return []
+  const out: PromptAutocompleteSuggestion[] = []
+  for (const item of suggestions) {
+    if (!isEventRecord(item) || typeof item.text !== 'string') continue
+    const text = item.text.trim()
+    if (text === '') continue
+    const label =
+      typeof item.label === 'string'
+        ? item.label.replace(/\s+/gu, ' ').trim()
+        : undefined
+    const description =
+      typeof item.description === 'string' ? item.description : undefined
+    out.push({
+      text,
+      ...(label !== undefined && label !== '' && { label }),
+      ...(description !== undefined && { description }),
+    })
+  }
+  return out
+}
+
+export const SESSION_RECEIVE_HOP_SITE: FunctionHookHopSite = {
+  restoreArgument: (passed, original) =>
+    restorePinnedKeys(['agentId'], passed, original),
+  checkArgument: (passed, original) => {
+    if (!isDeepStrictEqual(passed.origin, original.origin)) {
+      return 'a changed origin (the bridge set it; next(e) passes it on)'
+    }
+    if (!isDeepStrictEqual(passed.event, original.event)) {
+      return 'a changed event (parsed from the delivery; next(e) passes it on)'
+    }
+    if (passed.agentId !== original.agentId) {
+      return 'a changed agentId (the loop the delivery is for; next(e) passes it on)'
+    }
+    return typeof passed.text === 'string'
+      ? undefined
+      : 'no { text } (a string)'
+  },
+  check: returned => {
+    if (!isEventRecord(returned)) {
+      return 'not an object'
+    }
+    if (
+      returned.consumed !== undefined &&
+      typeof returned.consumed !== 'string'
+    ) {
+      return 'a consumed that is not a string'
+    }
+    if (returned.consumed === undefined && typeof returned.text !== 'string') {
+      return 'neither { consumed } nor { text } (a string)'
+    }
+    return undefined
+  },
+}
+
+export const PROMPT_AUTOCOMPLETE_HOP_SITE: FunctionHookHopSite = {
+  restoreArgument: (passed, original) =>
+    restorePinnedKeys(['text', 'cursor', 'token', 'start'], passed, original),
+  checkArgument: (passed, original) => {
+    if (
+      passed.text !== original.text ||
+      passed.cursor !== original.cursor ||
+      passed.token !== original.token ||
+      passed.start !== original.start
+    ) {
+      return 'a changed text, cursor, token, or start (pinned)'
+    }
+    return undefined
+  },
+  check: returned => {
+    if (!isEventRecord(returned) || !Array.isArray(returned.suggestions)) {
+      return 'no { suggestions } (a list)'
+    }
+    for (const item of returned.suggestions) {
+      if (!isEventRecord(item) || typeof item.text !== 'string') {
+        return 'a suggestion without { text } (a string)'
+      }
+    }
+    return undefined
+  },
+}
+
+export async function runPromptAutocomplete(
+  input: { text: string; cursor: number },
+  signal?: AbortSignal,
+): Promise<{ suggestions: PromptAutocompleteSuggestion[]; start?: number }> {
+  const tokenInfo = extractAutocompleteToken(input)
+  if (!tokenInfo) return { suggestions: [] }
+  const raw = await runFunctionHookChain(
+    'prompt.autocomplete',
+    tokenInfo,
+    async () => ({ suggestions: [] }),
+    undefined,
+    undefined,
+    {
+      site: PROMPT_AUTOCOMPLETE_HOP_SITE,
+      signal,
+    },
+  )
+  const suggestions = isEventRecord(raw)
+    ? normalizeAutocompleteSuggestions(raw.suggestions)
+    : []
+  return { suggestions, start: tokenInfo.start }
+}
+
+export function createRemoteAutocompleteDispatcher(
+  askFn: (
+    tokenInfo: { text: string; cursor: number; token: string; start: number },
+    signal: AbortSignal,
+  ) => Promise<{ suggestions: PromptAutocompleteSuggestion[] }> = (
+    tokenInfo,
+    signal,
+  ) => runPromptAutocomplete(tokenInfo, signal),
+): {
+  ask: (
+    clientKey: string,
+    input: { text: string; cursor: number },
+  ) => Promise<{
+    suggestions: PromptAutocompleteSuggestion[]
+    start?: number
+    superseded?: true
+  }>
+} {
+  type PendingAsk = {
+    input: { text: string; cursor: number }
+    resolve: (res: {
+      suggestions: PromptAutocompleteSuggestion[]
+      start?: number
+      superseded?: true
+    }) => void
+  }
+  const byClient = new Map<
+    string,
+    { inFlight?: AbortController; waiting?: PendingAsk }
+  >()
+
+  const pump = (
+    clientKey: string,
+    slot: { inFlight?: AbortController; waiting?: PendingAsk },
+  ): void => {
+    const next = slot.waiting
+    if (!next || slot.inFlight) return
+    slot.waiting = undefined
+    const tokenInfo = extractAutocompleteToken(next.input)
+    if (!tokenInfo) {
+      next.resolve({ suggestions: [] })
+      pump(clientKey, slot)
+      return
+    }
+    const controller = new AbortController()
+    slot.inFlight = controller
+    void Promise.resolve()
+      .then(() => askFn(tokenInfo, controller.signal))
+      .then(res => normalizeAutocompleteSuggestions(res?.suggestions))
+      .catch(() => [] as PromptAutocompleteSuggestion[])
+      .then(suggestions => {
+        slot.inFlight = undefined
+        if (controller.signal.aborted) {
+          next.resolve({ suggestions: [], superseded: true })
+        } else {
+          next.resolve({ suggestions, start: tokenInfo.start })
+        }
+        pump(clientKey, slot)
+      })
+  }
+
+  return {
+    ask: (clientKey, input) =>
+      new Promise(resolve => {
+        const slot = byClient.get(clientKey) ?? {}
+        byClient.set(clientKey, slot)
+        slot.waiting?.resolve({ suggestions: [], superseded: true })
+        slot.waiting = { input, resolve }
+        pump(clientKey, slot)
+      }),
+  }
 }
 
 let toolCallHandler:
@@ -11387,6 +12256,29 @@ function makeUiResolveTable(
       let pressStamp: { plugin: string; handle: number } | undefined
       let keepChildren = true
       if (name === 'Button') {
+        for (const child of childList) {
+          if (typeof child === 'string') continue
+          if (
+            isEventRecord(child) &&
+            typeof child.type === 'string' &&
+            child.type === 'Text'
+          ) {
+            continue
+          }
+          const childType =
+            isEventRecord(child) && typeof child.type === 'string'
+              ? child.type === 'engine'
+                ? 'engine node'
+                : child.type
+              : typeof child
+          const buttonLabel =
+            typeof rest.key === 'string' && rest.key !== ''
+              ? `Button "${rest.key}"`
+              : 'Button'
+          throw new Error(
+            `${childType} inside ${buttonLabel} (a Button holds strings and Text)`,
+          )
+        }
         if (rest.label === undefined && childList.length > 0) {
           const joined = childList.map(extractUiChildText).join('')
           if (joined !== '') rest.label = joined
@@ -11401,7 +12293,7 @@ function makeUiResolveTable(
           holdPress(plugin, handle, onPress)
           pressStamp = { plugin, handle }
         }
-        keepChildren = false
+        keepChildren = true
       } else if (name === 'Select') {
         if (typeof rest.onSelect === 'function') {
           const onSelect = rest.onSelect as (
@@ -12682,6 +13574,12 @@ function resolveSessionToolName(name: string): string {
   return sessionTools().find(tool => tool.name === name)?.name ?? name
 }
 
+const TOOL_CALL_WITHHELD_SUFFIX = {
+  nothing: '',
+  started: ' started, and a plugin withheld its result',
+  ran: ' ran, and a plugin withheld its result',
+} as const
+
 async function runToolCall(
   input: Record<string, unknown>,
   plugin?: string,
@@ -12696,19 +13594,54 @@ async function runToolCall(
   const resolved = resolveSessionToolName(input.tool)
   const reserved = RESERVED_HOST_TOOLS[resolved]
   if (reserved !== undefined) hostCheck('tool.call', reserved, plugin)
-  // densable XL — share the mcp.call host helper; stripHostIsError ≈ xxr.
-  const xl = await runHostToolCallXL(
-    { ...input, tool: resolved },
-    { plugin, throwIfMissing: false },
-  )
-  if ('deny' in xl) {
-    return stripHostIsError({ deny: xl.deny })
+  const callPayload: Record<string, unknown> = { ...input, tool: resolved }
+  const executeBottom = async (
+    passed: Record<string, unknown>,
+  ): Promise<unknown> => {
+    // densable XL — share the mcp.call host helper; stripHostIsError ≈ xxr.
+    const xl = await runHostToolCallXL(passed, {
+      plugin,
+      throwIfMissing: false,
+    })
+    if ('deny' in xl) {
+      return stripHostIsError({ deny: xl.deny })
+    }
+    return stripHostIsError({
+      ...(xl.result !== undefined ? { result: xl.result } : {}),
+      text: xl.text,
+      ...(xl.isError === true ? { isError: true as const } : {}),
+    })
   }
-  return stripHostIsError({
-    ...(xl.result !== undefined ? { result: xl.result } : {}),
-    text: xl.text,
-    ...(xl.isError === true ? { isError: true as const } : {}),
-  })
+
+  const hookOrigin = buildOpHookOrigin(plugin)
+  if (!hasMatchingFunctionHookForOp('tool.call', callPayload, hookOrigin)) {
+    return executeBottom(callPayload)
+  }
+
+  let phase: keyof typeof TOOL_CALL_WITHHELD_SUFFIX = 'nothing'
+  const out = await runFunctionHookChain(
+    'tool.call',
+    callPayload,
+    async passed => {
+      phase = 'started'
+      const result = await executeBottom(passed)
+      phase = 'ran'
+      return result
+    },
+    undefined,
+    undefined,
+    {
+      origin: resolveHookCallOrigin(plugin),
+      hookOrigin,
+    },
+  )
+  if (isEventRecord(out) && out.deny !== undefined) {
+    const prefix = plugin !== undefined && plugin !== '' ? `${plugin}: ` : ''
+    throw new Error(
+      `${prefix}$.tool.call${TOOL_CALL_WITHHELD_SUFFIX[phase]}: ${String(out.deny)}`,
+    )
+  }
+  return out
 }
 
 const TOOL_CHECK_HOP_SITE: FunctionHookHopSite = {
@@ -12721,7 +13654,7 @@ const TOOL_CHECK_HOP_SITE: FunctionHookHopSite = {
   checkArgument: (passed, original) => {
     if (
       passed.tool !== original.tool ||
-      pinValue(passed.input) !== pinValue(original.input) ||
+      !isDeepStrictEqual(passed.input, original.input) ||
       passed.tool_use_id !== original.tool_use_id ||
       passed.agentId !== original.agentId ||
       passed.ceiling !== original.ceiling ||
@@ -12737,7 +13670,11 @@ const TOOL_CHECK_HOP_SITE: FunctionHookHopSite = {
     const ceiling =
       original.ceiling ??
       priorResults.find(entry => entry.ceiling !== undefined)?.ceiling
-    return ceiling === undefined ? rest : { ...rest, ceiling }
+    const clamped =
+      ceiling === 'ask' && rest.decision === 'allow'
+        ? { ...rest, decision: 'ask' }
+        : rest
+    return ceiling === undefined ? clamped : { ...clamped, ceiling }
   },
 }
 
@@ -12778,20 +13715,22 @@ async function runToolCheck(
   }
   const toolName = input.tool
   const toolArgs = input.input
-  const tools = sessionTools()
-  if (
-    !toolCheckHandler &&
-    tools.length > 0 &&
-    !tools.some(tool => tool.name === toolName)
-  ) {
+  const tools = sessionTools() as Array<{
+    name: string
+    requiresUserInteraction?: () => boolean
+  }>
+  const matchedTool = tools.find(tool => tool.name === toolName)
+  if (!toolCheckHandler && tools.length > 0 && !matchedTool) {
     const prefix = plugin !== undefined && plugin !== '' ? `${plugin}: ` : ''
     throw new Error(
       `${prefix}$.tool.check: no tool named "${toolName}" in this session`,
     )
   }
+  const requiresInteraction = matchedTool?.requiresUserInteraction?.() === true
   const payload: Record<string, unknown> = {
     tool: toolName,
     input: toolArgs,
+    ...(requiresInteraction && { ceiling: 'ask' }),
   }
   const hookOrigin = buildOpHookOrigin(plugin)
   if (!hasMatchingFunctionHookForOp('tool.check', payload, hookOrigin)) {
@@ -12838,7 +13777,7 @@ async function runToolCheck(
 function checkToolRegisterInput(
   input: Record<string, unknown>,
   plugin?: string,
-): PluginRegisteredToolSpec {
+): PluginRegisteredToolSpec & { isDeferred?: boolean } {
   const nameCheck = agentRegisterNameCheck(input)
   if (nameCheck !== undefined) hostCheck('tool.register', nameCheck, plugin)
   const description = input.description
@@ -12856,6 +13795,9 @@ function checkToolRegisterInput(
       plugin,
     )
   }
+  if (input.isDeferred !== undefined && typeof input.isDeferred !== 'boolean') {
+    hostCheck('tool.register', 'isDeferred must be true or false', plugin)
+  }
   const schemaRaw = input.inputSchema ?? { type: 'object' }
   if (!isEventRecord(schemaRaw)) {
     hostCheck(
@@ -12868,6 +13810,9 @@ function checkToolRegisterInput(
     name: String(input.name),
     description: String(description),
     inputSchema: { type: 'object', ...schemaRaw },
+    ...(typeof input.isDeferred === 'boolean' && {
+      isDeferred: input.isDeferred,
+    }),
   }
 }
 
@@ -12880,6 +13825,7 @@ async function runToolRegister(
     name: checked.name,
     description: checked.description,
     inputSchema: checked.inputSchema,
+    ...(checked.isDeferred !== undefined && { isDeferred: checked.isDeferred }),
   }
   const hookOrigin = buildOpHookOrigin(plugin)
   if (!hasMatchingFunctionHookForOp('tool.register', payload, hookOrigin)) {
@@ -12896,6 +13842,9 @@ async function runToolRegister(
             name: nextChecked.name,
             description: nextChecked.description,
             inputSchema: nextChecked.inputSchema,
+            ...(nextChecked.isDeferred !== undefined && {
+              isDeferred: nextChecked.isDeferred,
+            }),
           },
           plugin,
         ),
@@ -13137,7 +14086,11 @@ function runTurnAbort(
   input: Record<string, unknown>,
   plugin?: string,
 ): Promise<unknown> {
-  const turnId = typeof input.turnId === 'string' ? input.turnId : ''
+  const heldTurn = activeHookServingAls.getStore()?.turnHeld
+  const turnId =
+    typeof input.turnId === 'string' && input.turnId !== ''
+      ? input.turnId
+      : (heldTurn ?? '')
   const who = plugin !== undefined && plugin !== '' ? `${plugin}: ` : ''
   const running = getMainThreadTurn()
   if (!running) {
@@ -14521,6 +15474,20 @@ function suppressedInterface(
  * densable `Ra` — activation.finalize(table, suppressed).
  * Second finalize throws `$ is already built`. Freezes the owned table.
  */
+function moduleTierRank(name: string): number {
+  const mod = loadedModules.find(m => m.name === name)
+  if (!mod) return 0
+  if (mod.isCore === true) return 3
+  if (
+    mod.isManaged === true ||
+    mod.tier === 'prepend' ||
+    mod.tier === 'append'
+  ) {
+    return 2
+  }
+  return 1
+}
+
 export function finalizeOwnedTable(
   environmentId: string,
   table: unknown,
@@ -14534,8 +15501,29 @@ export function finalizeOwnedTable(
     ...(ownedTables.get(environmentId) ?? {}),
   }
   if (isEventRecord(table)) {
+    const incomingRank = moduleTierRank(environmentId)
     for (const [name, methods] of Object.entries(table)) {
-      if (isEventRecord(methods)) next[name] = { ...methods }
+      if (!isEventRecord(methods)) continue
+      for (const [otherEnvId, otherTable] of ownedTables.entries()) {
+        if (otherEnvId === environmentId) continue
+        if (!Object.hasOwn(otherTable, name)) continue
+        const otherRank = moduleTierRank(otherEnvId)
+        if (incomingRank > otherRank) {
+          logForDebugging(
+            `$.${name}: ${environmentId} (higher tier) replaces conflicting user mod ${otherEnvId}`,
+          )
+          unloadModule(otherEnvId)
+        } else {
+          logForDebugging(
+            `$.${name}: ${environmentId} conflicts with ${otherEnvId}; unloading ${environmentId}`,
+          )
+          unloadModule(environmentId)
+          throw new Error(
+            `${environmentId}: $.${name} is already provided by ${otherEnvId}`,
+          )
+        }
+      }
+      next[name] = { ...methods }
     }
   }
   if (isEventRecord(suppressed)) {
@@ -14636,34 +15624,49 @@ export async function callPluginInterface(
   call: { name: string; method: string },
   args: unknown[] = [],
   callers: unknown[] = [],
+  hookOrigin?: readonly HookOriginEntry[],
 ): Promise<unknown> {
-  const clonedArgs = args.map(cloneIn)
-  lastInterfaceCallers = [...callers]
-  interfaceCallerStack.push(lastInterfaceCallers)
-  try {
-    const own = ownedTables.get(environmentId)
-    const table = own?.[call.name]
-    const method = table?.[call.method]
-    if (typeof method === 'function') {
-      return method(...clonedArgs)
-    }
-    const engine = pluginEngine({ name: environmentId }, environmentId)
-    const ns = engine[call.name]
-    if (!isEventRecord(ns)) {
-      throw new Error(
-        `${environmentId} provides no interface named ${call.name}`,
-      )
-    }
-    const fn = ns[call.method]
-    if (typeof fn !== 'function') {
-      throw new Error(
-        `$.${call.name} (${environmentId}) has no method ${call.method}`,
-      )
-    }
-    return fn(...clonedArgs)
-  } finally {
-    interfaceCallerStack.pop()
+  if (workerReplacementPromise !== undefined) {
+    await waitForWorkerReplacement('interface.call')
   }
+  const resolvedOrigin = hookOrigin ?? activeHookOriginAls.getStore()
+  const resolvedServing = activeHookServingAls.getStore()
+  const invoke = async (): Promise<unknown> => {
+    const clonedArgs = args.map(cloneIn)
+    lastInterfaceCallers = [...callers]
+    interfaceCallerStack.push(lastInterfaceCallers)
+    try {
+      const own = ownedTables.get(environmentId)
+      const table = own?.[call.name]
+      const method = table?.[call.method]
+      if (typeof method === 'function') {
+        return await method(...clonedArgs)
+      }
+      const engine = pluginEngine({ name: environmentId }, environmentId)
+      const ns = engine[call.name]
+      if (!isEventRecord(ns)) {
+        throw new Error(
+          `${environmentId} provides no interface named ${call.name}`,
+        )
+      }
+      const fn = ns[call.method]
+      if (typeof fn !== 'function') {
+        throw new Error(
+          `$.${call.name} (${environmentId}) has no method ${call.method}`,
+        )
+      }
+      return await fn(...clonedArgs)
+    } finally {
+      interfaceCallerStack.pop()
+    }
+  }
+  const runWithOrigin = () =>
+    resolvedOrigin !== undefined
+      ? activeHookOriginAls.run(resolvedOrigin, invoke)
+      : invoke()
+  return resolvedServing !== undefined
+    ? activeHookServingAls.run(resolvedServing, runWithOrigin)
+    : runWithOrigin()
 }
 
 /** densable `Mme` — press answering window / host press timeout. */
@@ -14968,6 +15971,9 @@ export async function invokePress(
 ): Promise<unknown> {
   const held = pressHandlers.get(pressSlot(environmentId, handle))
   if (held === undefined) {
+    if (workerOwnsDispatch && workerReplacementPromise !== undefined) {
+      await waitForWorkerReplacement('ui.press')
+    }
     if (workerOwnsDispatch && functionHooksWorker) {
       const mod = loadedModules.find(
         item => item.name === environmentId && item.status !== 'unloaded',
@@ -15190,6 +16196,123 @@ let uiAskHostHandler:
 let uiToastShowHandler:
   | ((input: { plugin: string; text: string; timeoutMs?: number }) => void)
   | undefined
+
+export type UiNotifyChannelResult =
+  | 'no_surface'
+  | 'iterm2'
+  | 'iterm2_with_bell'
+  | 'kitty'
+  | 'ghostty'
+  | 'terminal_bell'
+  | 'client'
+  | 'disabled'
+  | 'none'
+  | 'no_method_available'
+  | 'error'
+
+let uiNotifyHandler:
+  | ((input: {
+      plugin: string
+      message: string
+      title: string
+      notificationType: 'plugin_notification'
+      key?: string
+      delayMs?: number
+      at?: number
+      untilBack?: boolean
+    }) => Promise<UiNotifyChannelResult> | UiNotifyChannelResult)
+  | undefined
+
+let uiCancelNotifyHandler:
+  | ((input: { plugin: string; key: string }) => Promise<boolean> | boolean)
+  | undefined
+
+export function setUiNotifyHandler(handler: typeof uiNotifyHandler): void {
+  uiNotifyHandler = handler
+}
+
+export function setUiCancelNotifyHandler(
+  handler: typeof uiCancelNotifyHandler,
+): void {
+  uiCancelNotifyHandler = handler
+}
+
+const UI_NOTIFY_KEY_MAX = 64
+const UI_NOTIFY_DELAY_MAX_MS = 604_800_000
+
+function validateNotifyKey(key: unknown): string | undefined {
+  if (
+    typeof key === 'string' &&
+    key.length > 0 &&
+    key.length <= UI_NOTIFY_KEY_MAX &&
+    key.trim() === key &&
+    !/[\r\n\t\0]/.test(key) &&
+    !(key in Object.prototype)
+  ) {
+    return undefined
+  }
+  return `key is a string of 1 to ${UI_NOTIFY_KEY_MAX} characters, with no hidden characters or stray spaces, and not a name every object has, such as constructor`
+}
+
+function isNotifyWindowMs(value: unknown, max: number): boolean {
+  return (
+    value === undefined ||
+    (Number.isSafeInteger(value) && Number(value) >= 0 && Number(value) <= max)
+  )
+}
+
+function validateUiNotifyInput(
+  input: Record<string, unknown>,
+): string | undefined {
+  const textErr = hostTextCheck(input.text)
+  if (textErr !== undefined) return textErr
+  if (input.title !== undefined && typeof input.title !== 'string') {
+    return 'title is a string, when given'
+  }
+  if (input.key !== undefined) {
+    const keyErr = validateNotifyKey(input.key)
+    if (keyErr !== undefined) return keyErr
+  }
+  const timingOk =
+    isNotifyWindowMs(input.delayMs, UI_NOTIFY_DELAY_MAX_MS) &&
+    isNotifyWindowMs(input.at, Date.now() + UI_NOTIFY_DELAY_MAX_MS) &&
+    (input.delayMs === undefined || input.at === undefined)
+  if (!timingOk) {
+    return 'give delayMs or at, not both. Each is a whole number of 0 or more: delayMs in milliseconds, up to 7 days, and at in epoch milliseconds, up to 7 days from now'
+  }
+  if (input.untilBack !== undefined && typeof input.untilBack !== 'boolean') {
+    return 'untilBack is a boolean, when given'
+  }
+  return undefined
+}
+
+function mapUiNotifyChannel(
+  channel: UiNotifyChannelResult,
+  plugin: string,
+):
+  | { isSent: true; channel: string }
+  | { isSent: false; reason: 'no-surface' | 'disabled' | 'no-channel' } {
+  switch (channel) {
+    case 'no_surface':
+      return { isSent: false, reason: 'no-surface' }
+    case 'iterm2':
+    case 'iterm2_with_bell':
+    case 'kitty':
+    case 'ghostty':
+    case 'terminal_bell':
+    case 'client':
+      return { isSent: true, channel }
+    case 'disabled':
+      return { isSent: false, reason: 'disabled' }
+    case 'none':
+    case 'no_method_available':
+      return { isSent: false, reason: 'no-channel' }
+    case 'error': {
+      const prefix = plugin !== '' ? `${plugin}: ` : ''
+      throw new Error(`${prefix}$.ui.notify: the channel's write failed`)
+    }
+  }
+}
 
 let uiStatusHandler:
   | ((input: { plugin: string; text: string | undefined }) => void)
@@ -15651,6 +16774,7 @@ class FunctionHooksWorkerClient {
   private callCounter = 0
   private pressCounter = 0
   private resolveCounter = 0
+  culpritPlugin?: string
 
   constructor() {
     const stamp = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT)
@@ -15930,6 +17054,9 @@ class FunctionHooksWorkerClient {
     const count = (this.overruns.get(plugin) ?? 0) + 1
     this.overruns.set(plugin, count)
     if (count >= HOOKS_WORKER_OVERRUN_CAP) {
+      // #429: attribute the runaway culprit so worker replacement isolates it
+      // rather than unloading other healthy plugins (e.g. large-interface mods).
+      this.culpritPlugin = plugin
       this.markDied(
         `${plugin} ignored its signal ${count} times in a row: a runaway plugin in the hooks worker`,
       )
@@ -15971,6 +17098,7 @@ class FunctionHooksWorkerClient {
 
   private post(frame: Record<string, unknown>, transfer?: MessagePort[]): void {
     if (this.died !== undefined) return
+    assertHookValueDepth(frame, MAX_HOOK_VM_DEPTH)
     if (transfer && transfer.length > 0)
       this.worker.postMessage(frame, transfer)
     else this.worker.postMessage(frame)
@@ -15995,16 +17123,23 @@ class FunctionHooksWorkerClient {
         : registration !== undefined
           ? ([{ plugin: plugin.name, registration }] as const)
           : undefined
+      const forwardedServing = isEventRecord(message.serving)
+        ? (message.serving as HookServingContext)
+        : undefined
       const runOp = () =>
         handleHostOp(
           String(message.op ?? ''),
           Array.isArray(message.args) ? message.args : [],
           plugin.name,
         )
+      const runWithServing = () =>
+        forwardedServing !== undefined
+          ? activeHookServingAls.run(forwardedServing, runOp)
+          : runOp()
       const pending =
         forwardedOrigin !== undefined
-          ? activeHookOriginAls.run(forwardedOrigin, runOp)
-          : runOp()
+          ? activeHookOriginAls.run(forwardedOrigin, runWithServing)
+          : runWithServing()
       void pending.then(
         value => {
           channel.port1.postMessage({
@@ -16287,6 +17422,51 @@ class FunctionHooksWorkerClient {
 
 let functionHooksWorker: FunctionHooksWorkerClient | null = null
 let workerOwnsDispatch = false
+let workerReplacementPromise: Promise<void> | undefined
+let resolveWorkerReplacement: (() => void) | undefined
+
+export function beginFunctionHooksWorkerReplacement(): () => void {
+  if (workerReplacementPromise === undefined) {
+    workerReplacementPromise = new Promise<void>(resolve => {
+      resolveWorkerReplacement = resolve
+    })
+  }
+  return () => {
+    const resolve = resolveWorkerReplacement
+    workerReplacementPromise = undefined
+    resolveWorkerReplacement = undefined
+    resolve?.()
+  }
+}
+
+async function waitForWorkerReplacement(
+  event: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const pending = workerReplacementPromise
+  if (pending === undefined) return
+  logForDebugging(
+    `hooks module: ${event} waits for the hooks worker's replacement`,
+  )
+  await new Promise<void>(resolve => {
+    if (signal?.aborted) {
+      resolve()
+      return
+    }
+    const onAbort = () => resolve()
+    signal?.addEventListener('abort', onAbort, { once: true })
+    void pending.then(
+      () => {
+        signal?.removeEventListener('abort', onAbort)
+        resolve()
+      },
+      () => {
+        signal?.removeEventListener('abort', onAbort)
+        resolve()
+      },
+    )
+  })
+}
 
 async function ensureFunctionHooksWorker(): Promise<FunctionHooksWorkerClient> {
   if (!functionHooksWorker)
@@ -16299,6 +17479,124 @@ export async function stopFunctionHooksWorker(): Promise<void> {
   const worker = functionHooksWorker
   functionHooksWorker = null
   if (worker) await worker.stop()
+}
+
+type SessionStartDedupOp = 'prompt.submit' | 'command.run' | 'agent.spawn'
+type SessionStartDedupEntry = {
+  args: unknown
+  result: Promise<unknown>
+  starts: Set<string>
+  isRepeated: boolean
+  endsWith?: AbortSignal
+}
+type SessionStartDedupRecord = {
+  load: { args: unknown; shown: unknown }
+  calls: Record<SessionStartDedupOp, SessionStartDedupEntry[]>
+  copies: Set<string>
+}
+
+const sessionStartDedupStore = new Map<string, SessionStartDedupRecord>()
+
+function isSessionStartDedupAbortedOrDenied(
+  entry: SessionStartDedupEntry,
+  res: unknown,
+): boolean {
+  if (entry.endsWith?.aborted !== true) return false
+  if (!isEventRecord(res)) return true
+  return Object.hasOwn(res, 'deny') || res.isError === true
+}
+
+export function recordSessionStartLoad({
+  name,
+  args,
+  shown,
+  environmentId,
+}: {
+  name: string
+  args: unknown
+  shown?: unknown
+  environmentId: string
+}): boolean {
+  const { isDeepStrictEqual } = require('util') as typeof import('util')
+  const load = { args, shown }
+  const existing = sessionStartDedupStore.get(name)
+  const same = existing !== undefined && isDeepStrictEqual(existing.load, load)
+  if (!same) {
+    sessionStartDedupStore.set(name, {
+      load,
+      calls: {
+        'prompt.submit': [],
+        'command.run': [],
+        'agent.spawn': [],
+      },
+      copies: new Set([environmentId]),
+    })
+  } else {
+    existing.copies.add(environmentId)
+  }
+  return same
+}
+
+export function withSessionStartDedup(
+  op: SessionStartDedupOp,
+  args: unknown,
+  plugin: string,
+  environmentId: string | undefined,
+  run: () => Promise<unknown>,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  const rec =
+    getLiveHookEvent() === 'session.start'
+      ? sessionStartDedupStore.get(plugin)
+      : undefined
+  const envId = environmentId ?? plugin
+  if (rec === undefined || !rec.copies.has(envId)) {
+    return run()
+  }
+  const { isDeepStrictEqual } = require('util') as typeof import('util')
+  const existing = rec.calls[op].find(c => isDeepStrictEqual(c.args, args))
+  const remove = (entry: SessionStartDedupEntry) => {
+    rec.calls = {
+      ...rec.calls,
+      [op]: rec.calls[op].filter(c => c !== entry),
+    }
+  }
+  if (existing === undefined) {
+    const entry: SessionStartDedupEntry = {
+      args,
+      result: run(),
+      starts: new Set([envId]),
+      isRepeated: false,
+      endsWith: op === 'prompt.submit' ? signal : undefined,
+    }
+    rec.calls = {
+      ...rec.calls,
+      [op]: rec.calls[op].concat(entry),
+    }
+    void entry.result.then(
+      res => {
+        if (isSessionStartDedupAbortedOrDenied(entry, res)) remove(entry)
+      },
+      () => remove(entry),
+    )
+    return entry.result
+  }
+  const alreadyStarted = existing.starts.has(envId)
+  const canReuse = !existing.isRepeated && !alreadyStarted
+  existing.isRepeated = existing.isRepeated || alreadyStarted
+  if (!canReuse) {
+    return run()
+  }
+  existing.starts.add(envId)
+  return existing.result.then(res => {
+    const rerun = isSessionStartDedupAbortedOrDenied(existing, res)
+    if (!rerun) {
+      logForDebugging(
+        `${plugin}: its session.start ran again in a fresh copy; the $.${op} call it had already made was not made again`,
+      )
+    }
+    return rerun ? run() : res
+  })
 }
 
 const inFlightByModule = new Map<string, number>()
@@ -17131,9 +18429,12 @@ export const FUNCTION_HOOK_EVENTS = [
   'prompt.fill',
   'prompt.suggest',
   'prompt.edit',
+  'prompt.change',
+  'prompt.autocomplete',
   'prompt.section',
   'prompt.context',
   'prompt.attachment',
+  'prompt.mention',
   'prompt.compose',
   'tool.describe',
   'command.run',
@@ -17188,6 +18489,8 @@ export const FUNCTION_HOOK_EVENTS = [
   'agent.list',
   'agent.register',
   'ui.toast',
+  'ui.notify',
+  'ui.cancelNotify',
   'ui.status',
   'ui.log',
   'ui.notice',
@@ -17666,53 +18969,95 @@ export async function loadFunctionHooksModules(
     replaceLoadedFunctionHooksModules(await loadFunctionHooksInProcess(plugins))
     return
   }
-  const loaded: LoadedFunctionHooksModule[] = []
-  let worker: FunctionHooksWorkerClient | null = null
+  const maxRespawnAttempts = 2
+  const excludedPlugins = new Set<string>()
+  let loaded: LoadedFunctionHooksModule[] = []
   let loadedAnyWorkerPlugin = false
-  for (const plugin of plugins) {
-    if (!(await admitUserPluginIfAllowed(plugin, loaded))) {
-      continue
+
+  for (let attempt = 0; attempt <= maxRespawnAttempts; attempt++) {
+    loaded = []
+    loadedAnyWorkerPlugin = false
+    let worker: FunctionHooksWorkerClient | null = null
+    let workerDiedDuringPass = false
+
+    for (const plugin of plugins) {
+      if (excludedPlugins.has(plugin.name)) continue
+      if (!(await admitUserPluginIfAllowed(plugin, loaded))) {
+        continue
+      }
+      const withOptions: FunctionHookPlugin = {
+        ...plugin,
+        options: resolveEffectivePluginOptions(plugin),
+      }
+      if (resolveNativeBuiltinHooksModule(withOptions) !== undefined) {
+        const recorded = await recordRegisterPatterns(withOptions)
+        if (recorded !== null) loaded.push(recorded)
+        continue
+      }
+      if (!worker) {
+        worker = await ensureFunctionHooksWorker()
+        if (worker.died !== undefined) {
+          await stopFunctionHooksWorker()
+          worker = await ensureFunctionHooksWorker()
+        }
+      }
+      let reply: WorkerReply
+      try {
+        reply = await worker.load(withOptions)
+      } catch (err) {
+        // #429 (SEA tJ/sxt): if the worker died mid-load, abandon this pass
+        // without unloading innocent plugins and respawn with any culprit
+        // excluded; if the worker is alive, only skip the failing plugin.
+        if (worker.died !== undefined) {
+          if (worker.culpritPlugin !== undefined) {
+            excludedPlugins.add(worker.culpritPlugin)
+          }
+          await stopFunctionHooksWorker()
+          workerDiedDuringPass = true
+          break
+        }
+        logForDebugging(
+          `hooks module ${plugin.name} failed to load: ${err instanceof Error ? err.message : String(err)}`,
+          { level: 'error' },
+        )
+        excludedPlugins.add(plugin.name)
+        continue
+      }
+      loadedAnyWorkerPlugin = true
+      const registered = Array.isArray(reply.registered) ? reply.registered : []
+      for (const mod of registered.filter(isWorkerModule)) {
+        loaded.push({
+          name: mod.name,
+          root: mod.root,
+          patterns: mod.patterns,
+          hooks: mod.hooks.map(hook => ({
+            pattern: hook.pattern,
+            matcher: hook.matcher,
+            hook: () => undefined,
+          })),
+          ...(Array.isArray(
+            (mod as { surfaceModules?: unknown }).surfaceModules,
+          ) && {
+            surfaceModules: (
+              mod as unknown as { surfaceModules: SurfaceModuleScan[] }
+            ).surfaceModules,
+          }),
+          ...(plugin.source !== undefined && {
+            pluginStorageId: plugin.source,
+          }),
+          ...(plugin.link !== undefined && { link: plugin.link }),
+          ...(plugin.tier !== undefined && { tier: plugin.tier }),
+          ...(plugin.tier === 'prepend' && { isManaged: true }),
+        })
+      }
     }
-    const withOptions: FunctionHookPlugin = {
-      ...plugin,
-      options: resolveEffectivePluginOptions(plugin),
-    }
-    if (resolveNativeBuiltinHooksModule(withOptions) !== undefined) {
-      const recorded = await recordRegisterPatterns(withOptions)
-      if (recorded !== null) loaded.push(recorded)
-      continue
-    }
-    if (!worker) {
-      worker = await ensureFunctionHooksWorker()
-      if (worker.died !== undefined) throw new Error(worker.died)
-    }
-    const reply = await worker.load(withOptions)
-    loadedAnyWorkerPlugin = true
-    const registered = Array.isArray(reply.registered) ? reply.registered : []
-    for (const mod of registered.filter(isWorkerModule)) {
-      loaded.push({
-        name: mod.name,
-        root: mod.root,
-        patterns: mod.patterns,
-        hooks: mod.hooks.map(hook => ({
-          pattern: hook.pattern,
-          matcher: hook.matcher,
-          hook: () => undefined,
-        })),
-        ...(Array.isArray(
-          (mod as { surfaceModules?: unknown }).surfaceModules,
-        ) && {
-          surfaceModules: (
-            mod as unknown as { surfaceModules: SurfaceModuleScan[] }
-          ).surfaceModules,
-        }),
-        ...(plugin.source !== undefined && {
-          pluginStorageId: plugin.source,
-        }),
-        ...(plugin.link !== undefined && { link: plugin.link }),
-        ...(plugin.tier !== undefined && { tier: plugin.tier }),
-        ...(plugin.tier === 'prepend' && { isManaged: true }),
-      })
+
+    if (!workerDiedDuringPass) break
+    if (attempt === maxRespawnAttempts) {
+      logForDebugging(
+        'hooks worker died repeatedly during load; remaining worker plugins skipped',
+        { level: 'error' },
+      )
     }
   }
   // densable reload: retire modules that disappeared so Xj.forget +
@@ -17840,6 +19185,17 @@ function scanLiteral(
  * Prefer an AST walk of `on(...)` CallExpressions; fall back to a regex
  * when the source is not parseable as a module.
  */
+const MAX_SCAN_SCOPE_DEPTH = 2000
+
+class ScanNestingRefusal extends Error {
+  line?: number
+  constructor(message: string, line?: number) {
+    super(message)
+    this.name = 'ScanNestingRefusal'
+    this.line = line
+  }
+}
+
 export function scanFunctionHookSource(source: string): {
   ok: boolean
   patterns: string[]
@@ -17847,25 +19203,137 @@ export function scanFunctionHookSource(source: string): {
 } {
   const patterns: string[] = []
   try {
-    const { parse } = require('acorn') as {
-      parse: (
-        code: string,
-        opts: { ecmaVersion: 'latest'; sourceType: 'module' },
-      ) => unknown
+    let parsedWithAcorn = false
+    try {
+      const { Parser } = require('acorn') as {
+        Parser: {
+          extend: (...plugins: Array<(Base: unknown) => unknown>) => {
+            parse: (
+              code: string,
+              opts: {
+                ecmaVersion: 'latest'
+                sourceType: 'module'
+                locations?: boolean
+              },
+            ) => unknown
+          }
+        }
+      }
+      const scopeLimitPlugin = (Base: unknown) => {
+        const BaseClass = Base as new (
+          ...args: unknown[]
+        ) => {
+          enterScope(flags: number): void
+          scopeStack: unknown[]
+          lastTokStartLoc?: { line?: number }
+        }
+        return class extends BaseClass {
+          enterScope(flags: number) {
+            super.enterScope(flags)
+            if (this.scopeStack.length > MAX_SCAN_SCOPE_DEPTH + 1) {
+              const line = this.lastTokStartLoc?.line
+              throw new ScanNestingRefusal(
+                `code nested too deep to scan: more than ${MAX_SCAN_SCOPE_DEPTH} scopes (functions, blocks, loops) open inside one another`,
+                line,
+              )
+            }
+          }
+        }
+      }
+      const tree = Parser.extend(scopeLimitPlugin).parse(source, {
+        ecmaVersion: 'latest',
+        sourceType: 'module',
+        locations: true,
+      })
+      parsedWithAcorn = true
+      walkScanNode(tree, node => {
+        if (node.type !== 'CallExpression') return
+        if (node.callee?.type !== 'Identifier' || node.callee.name !== 'on')
+          return
+        const literal = scanLiteral(node.arguments?.[0])
+        if (literal === undefined) return
+        patterns.push(literal)
+      })
+    } catch (acornErr) {
+      if (
+        acornErr instanceof ScanNestingRefusal ||
+        acornErr instanceof RangeError
+      ) {
+        throw acornErr
+      }
     }
-    const tree = parse(source, {
-      ecmaVersion: 'latest',
-      sourceType: 'module',
-    })
-    walkScanNode(tree, node => {
-      if (node.type !== 'CallExpression') return
-      if (node.callee?.type !== 'Identifier' || node.callee.name !== 'on')
-        return
-      const literal = scanLiteral(node.arguments?.[0])
-      if (literal === undefined) return
-      patterns.push(literal)
-    })
-  } catch {
+    if (!parsedWithAcorn) {
+      const ts = require('typescript') as typeof import('typescript')
+      const sf = ts.createSourceFile(
+        'hooks.ts',
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+      )
+      const stack: Array<{ node: import('typescript').Node; depth: number }> = [
+        { node: sf, depth: 0 },
+      ]
+      while (stack.length > 0) {
+        const current = stack.pop()!
+        const isScope =
+          ts.isFunctionDeclaration(current.node) ||
+          ts.isFunctionExpression(current.node) ||
+          ts.isArrowFunction(current.node) ||
+          ts.isMethodDeclaration(current.node) ||
+          ts.isBlock(current.node) ||
+          ts.isForStatement(current.node) ||
+          ts.isForInStatement(current.node) ||
+          ts.isForOfStatement(current.node) ||
+          ts.isWhileStatement(current.node) ||
+          ts.isDoStatement(current.node) ||
+          ts.isSwitchStatement(current.node) ||
+          ts.isCatchClause(current.node)
+        const nextDepth = isScope ? current.depth + 1 : current.depth
+        if (nextDepth > MAX_SCAN_SCOPE_DEPTH) {
+          const line =
+            sf.getLineAndCharacterOfPosition(current.node.getStart(sf)).line + 1
+          throw new ScanNestingRefusal(
+            `code nested too deep to scan: more than ${MAX_SCAN_SCOPE_DEPTH} scopes (functions, blocks, loops) open inside one another`,
+            line,
+          )
+        }
+        if (
+          ts.isCallExpression(current.node) &&
+          ts.isIdentifier(current.node.expression) &&
+          current.node.expression.text === 'on'
+        ) {
+          const firstArg = current.node.arguments[0]
+          if (
+            firstArg &&
+            (ts.isStringLiteral(firstArg) ||
+              ts.isNoSubstitutionTemplateLiteral(firstArg))
+          ) {
+            patterns.push(firstArg.text)
+          }
+        }
+        ts.forEachChild(current.node, child => {
+          stack.push({ node: child, depth: nextDepth })
+        })
+      }
+    }
+  } catch (err) {
+    if (err instanceof ScanNestingRefusal) {
+      return {
+        ok: false,
+        patterns: [],
+        reason:
+          err.line !== undefined
+            ? `line ${err.line}: ${err.message}`
+            : err.message,
+      }
+    }
+    if (err instanceof RangeError) {
+      return {
+        ok: false,
+        patterns: [],
+        reason: `code nested too deep to scan (the parser stopped: ${err.message})`,
+      }
+    }
     const re = /\bon\(\s*(['"`])([^'"`]+)\1/g
     let match: RegExpExecArray | null
     while ((match = re.exec(source)) !== null) {

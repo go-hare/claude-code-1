@@ -293,16 +293,48 @@ function getAuthHeaders(): {
   }
 }
 
+import {
+  type AbortableAttempt,
+  hedgeStalledRequest,
+  STALLED_POLICY_FETCH_HEDGE_DELAY_MS,
+  startAbortableAttempt,
+} from './stalledPolicyRetry.js'
+
+export {
+  type AbortableAttempt,
+  hedgeStalledRequest,
+  STALLED_POLICY_FETCH_HEDGE_DELAY_MS,
+  startAbortableAttempt,
+}
+
 /**
  * Fetch policy limits with retry logic and exponential backoff
  */
 async function fetchWithRetry(
   cachedChecksum?: string,
+  options?: { hedge?: boolean; hedgeDelayMs?: number },
 ): Promise<PolicyLimitsFetchResult> {
   let lastResult: PolicyLimitsFetchResult | null = null
+  const useHedge = options?.hedge ?? true
 
   for (let attempt = 1; attempt <= DEFAULT_MAX_RETRIES + 1; attempt++) {
-    lastResult = await fetchPolicyLimits(cachedChecksum)
+    if (useHedge && attempt === 1) {
+      const hedged = await hedgeStalledRequest({
+        first: startAbortableAttempt(signal =>
+          fetchPolicyLimits(cachedChecksum, signal),
+        ),
+        send: signal => fetchPolicyLimits(cachedChecksum, signal),
+        isAnswer: (res, otherInFlight) =>
+          res.success ||
+          (res.skipRetry === true &&
+            !(otherInFlight && res.httpStatus === 401)),
+        delayMs: options?.hedgeDelayMs,
+        retryFollows: DEFAULT_MAX_RETRIES > 0,
+      })
+      lastResult = hedged.result
+    } else {
+      lastResult = await fetchPolicyLimits(cachedChecksum)
+    }
 
     if (lastResult.success) {
       return lastResult
@@ -339,6 +371,7 @@ async function fetchWithRetry(
  */
 async function fetchPolicyLimits(
   cachedChecksum?: string,
+  signal?: AbortSignal,
 ): Promise<PolicyLimitsFetchResult> {
   try {
     await checkAndRefreshOAuthTokenIfNeeded()
@@ -371,6 +404,7 @@ async function fetchPolicyLimits(
     const response = await axios.get(endpoint, {
       headers,
       timeout: FETCH_TIMEOUT_MS,
+      ...(signal ? { signal } : {}),
       validateStatus: status =>
         status === 200 || status === 304 || status === 404,
     })

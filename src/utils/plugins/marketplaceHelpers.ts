@@ -1,9 +1,12 @@
 import isEqual from 'lodash-es/isEqual.js'
 import { logForDebugging } from '../debug.js'
 import { toError } from '../errors.js'
+import { execFileNoThrow, execFileNoThrowWithCwd } from '../execFileNoThrow.js'
 import { logError } from '../log.js'
+import { getPlatform } from '../platform.js'
 import { getSettingsForSource } from '../settings/settings.js'
 import { plural } from '../stringUtils.js'
+import { which } from '../which.js'
 import { re } from './escapeSafeText.js'
 import { checkGitAvailable } from './gitAvailability.js'
 import { getMarketplace } from './marketplaceManager.js'
@@ -1196,4 +1199,156 @@ export async function detectEmptyMarketplaceReason({
   // Marketplaces are configured and loaded, but no plugins available
   // This typically means all plugins are already installed
   return 'all-plugins-installed'
+}
+
+export type SshProbeResult = 'configured' | 'not-configured' | 'unknown'
+
+export type SshProbeHandle = {
+  probeSsh: () => Promise<SshProbeResult>
+}
+
+/**
+ * Official `z8e` — true when an SSH failure message indicates missing/rejected
+ * SSH keys or unknown host key rather than a transient network error.
+ */
+export function isSshAuthError(message: string): boolean {
+  return (
+    message.includes('Permission denied (publickey') ||
+    message.includes('Host key verification failed')
+  )
+}
+
+/**
+ * Official `eQt` — parse `ssh -G` output and confirm `git@github.com` connects
+ * directly to `github.com` without ProxyCommand or ProxyJump.
+ */
+export function isDirectGithubSshConfig(sshGOutput: string): boolean {
+  const lines = sshGOutput.split('\n').map(line => line.trim().toLowerCase())
+  return (
+    lines.includes('hostname github.com') &&
+    !lines.some(line => /^proxy(command|jump)(?! none$)/.test(line))
+  )
+}
+
+/**
+ * Official `nQt` — probe `ssh -T ... git@github.com` to see if GitHub SSH is configured.
+ */
+export async function probeSsh(
+  cwd?: string,
+  execFn = execFileNoThrowWithCwd,
+  whichFn = which,
+): Promise<SshProbeResult> {
+  try {
+    const result = await execFn(
+      'ssh',
+      [
+        '-T',
+        '-o',
+        'BatchMode=yes',
+        '-o',
+        'ConnectTimeout=2',
+        '-o',
+        'StrictHostKeyChecking=yes',
+        'git@github.com',
+      ],
+      { cwd, timeout: 3000 },
+    )
+    const combined = `${result.stdout ?? ''}\n${result.stderr ?? ''}`
+    const configured =
+      result.code === 1 && combined.includes('successfully authenticated')
+    logForDebugging(
+      `SSH config check: code=${result.code} configured=${configured}`,
+    )
+    if (configured) return 'configured'
+    if (result.error?.includes('timed out')) return 'unknown'
+    if (result.code === 255 && isSshAuthError(combined)) {
+      return 'not-configured'
+    }
+    return (await whichFn('ssh')) === null ? 'not-configured' : 'unknown'
+  } catch (err) {
+    logForDebugging(`SSH configuration check failed: ${toError(err).message}`, {
+      level: 'warn',
+    })
+    return 'unknown'
+  }
+}
+
+export function createSshProbe(cwd?: string): SshProbeHandle {
+  let cached: Promise<SshProbeResult> | undefined
+  return {
+    probeSsh: () => (cached ??= probeSsh(cwd)),
+  }
+}
+
+/**
+ * Official `G8e` — decide whether a GitHub `owner/repo` clone should use HTTPS
+ * instead of SSH. On Windows (`onWindows = true`), this runs after an SSH
+ * `Permission denied` / host-key failure to check `git ls-remote` with `-G`.
+ * On non-Windows (`onWindows = false`), this runs pre-clone.
+ */
+export async function shouldUseHttpsInsteadOfSsh(
+  sshProbe: SshProbeHandle,
+  sshUrl: string,
+  onWindows: boolean,
+  deps: {
+    platform?: string
+    env?: NodeJS.ProcessEnv
+    cwd?: string
+    execFn?: typeof execFileNoThrowWithCwd
+    whichFn?: typeof which
+  } = {},
+): Promise<boolean> {
+  const platform = deps.platform ?? getPlatform()
+  const isWin = platform === 'windows'
+  if (isWin !== onWindows) return false
+
+  const env = deps.env ?? process.env
+  if (env.GIT_SSH_COMMAND !== undefined || env.GIT_SSH !== undefined) {
+    return false
+  }
+
+  const execFn = deps.execFn ?? execFileNoThrowWithCwd
+  const whichFn = deps.whichFn ?? which
+
+  const getUrlRes = await execFn(
+    'git',
+    ['ls-remote', '--get-url', '--', sshUrl],
+    { cwd: deps.cwd, env, stdin: 'ignore', timeout: 5000 },
+  )
+  if (getUrlRes.code !== 0 || getUrlRes.stdout.trim() !== sshUrl) {
+    logForDebugging(
+      `GitHub SSH URL is rewritten by git config, or git could not say (code=${getUrlRes.code}): staying on SSH`,
+    )
+    return false
+  }
+
+  if (isWin) {
+    const baseSshCmd = 'ssh -o BatchMode=yes -o StrictHostKeyChecking=yes'
+    const lsRemoteRes = await execFn('git', ['ls-remote', '--', sshUrl], {
+      cwd: deps.cwd,
+      env: { ...env, GIT_SSH_COMMAND: `${baseSshCmd} -G >&2` },
+      stdin: 'ignore',
+      timeout: 5000,
+    })
+    return (
+      !lsRemoteRes.error?.includes('timed out') &&
+      isDirectGithubSshConfig(lsRemoteRes.stderr)
+    )
+  }
+
+  if ((await sshProbe.probeSsh()) !== 'not-configured') return false
+  if ((await whichFn('ssh')) === null) return true
+
+  const sshGRes = await execFn('ssh', ['-G', 'git@github.com'], {
+    cwd: deps.cwd,
+    env,
+    timeout: 5000,
+  })
+  if (sshGRes.code === 0 && isDirectGithubSshConfig(sshGRes.stdout)) {
+    return true
+  }
+  logForDebugging(
+    `ssh -G does not show git@github.com going straight to github.com (code=${sshGRes.code}): staying on SSH`,
+  )
+  return false
 }

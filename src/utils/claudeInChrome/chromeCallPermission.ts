@@ -43,6 +43,31 @@ export function normalizeChromeHost(host: string): string {
 }
 
 /**
+ * SEA 325 `Zen` + `Gpe` helper — check both `host` and (for plain http:// or
+ * unknown-scheme hosts without an explicit port) `host:80`.
+ */
+export function isChromeHostInSet(
+  set: ReadonlySet<string>,
+  host: string,
+  url?: string,
+): boolean {
+  const normalized = normalizeChromeHost(host)
+  if (set.has(normalized)) return true
+  if (normalized.includes(':')) return false
+  if (url !== undefined) {
+    try {
+      const parsed = new URL(url)
+      if (parsed.protocol !== 'http:' || parsed.port !== '') {
+        return false
+      }
+    } catch {
+      return false
+    }
+  }
+  return set.has(`${normalized}:80`)
+}
+
+/**
  * densable `x` — collect chrome domain allow/deny from permission rules.
  */
 export function chromeDomainSetsFromContext(
@@ -63,7 +88,7 @@ export function chromeDomainSetsFromContext(
       for (const rule of list) {
         const s = typeof rule === 'string' ? rule : String(rule ?? '')
         const hostMatch = s.match(
-          /(?:claude-in-chrome|Chrome)[^\s]*[:\s@]+([a-z0-9.-]+\.[a-z]{2,})/i,
+          /(?:claude-in-chrome|Chrome)[^\s]*[:\s@]+([a-z0-9.-]+\.[a-z]{2,}(?::\d+)?)/i,
         )
         const bare = s.match(/^([a-z0-9.-]+\.[a-z]{2,}(?::\d+)?)$/i)
         const host = hostMatch?.[1] ?? bare?.[1]
@@ -88,8 +113,9 @@ export function createChromeOnPermissionRequest(
 ): (request: BridgePermissionRequest) => Promise<boolean> {
   return async request => {
     let host: string | undefined
+    let url = ''
     try {
-      const url =
+      url =
         request && typeof request === 'object' && 'url' in request
           ? String((request as { url?: string }).url ?? '')
           : ''
@@ -97,7 +123,7 @@ export function createChromeOnPermissionRequest(
     } catch {
       host = undefined
     }
-    const ok = !!host && allowed.has(normalizeChromeHost(host))
+    const ok = !!host && isChromeHostInSet(allowed, host, url || undefined)
     if (!ok) {
       logEvent('chrome_permission_prompt', {})
     }
@@ -138,7 +164,11 @@ export function resolveChromeCallPermissionOverrides(
 
   const sets = chromeDomainSetsFromContext(ctx)
   const host = resolved?.host
-  if (host && !sets.allowed.has(normalizeChromeHost(host))) {
+  if (
+    host &&
+    !isChromeHostInSet(sets.denied, host, resolvedUrl) &&
+    !sets.allowed.has(normalizeChromeHost(host))
+  ) {
     sets.allowed.add(normalizeChromeHost(host))
     if (!sets.allowedRaw.includes(host)) sets.allowedRaw.push(host)
   }
@@ -182,4 +212,269 @@ export function chromePermissionModeFromSession(): PermissionMode {
 /** densable Nq mirror. */
 export function isChromeSessionBypass(): boolean {
   return getSessionBypassPermissionsMode()
+}
+
+// ── 2.1.293 #325: tab lookup with slow-browser retry (SEA `x`, `K`, `q`) ──
+
+export const TAB_LOOKUP_CAP_MS = 5000
+export const TAB_LOOKUP_RETRY_DELAY_MS = 2500
+
+const TAB_LOOKUP_TIMEOUT_FAILURES = new Set([
+  'connect_timeout',
+  'no_browser_selected_timeout',
+  'browser_selected_late_timeout',
+  'answer_timeout',
+])
+
+export type ChromeTabEntry = {
+  tabId: number
+  url?: unknown
+}
+
+export type ChromeTabsQueryResult =
+  | { ok: true; tabs: ChromeTabEntry[]; connectMs: number; callMs: number }
+  | { ok: false; failure: string; connectMs: number; callMs: number }
+
+export type ChromeTabUrlResult =
+  | { ok: true; url: string; connectMs: number; callMs: number }
+  | {
+      ok: false
+      failure: string
+      connectMs: number
+      callMs: number
+      retryCallMs?: number
+    }
+
+function hasValidTabUrl(res: ChromeTabUrlResult): boolean {
+  if (!res.ok) return false
+  try {
+    new URL(res.url)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** SEA `K(e, o)` — match `tabId` in the returned `availableTabs` list. */
+export function matchTabUrl(
+  result: ChromeTabsQueryResult,
+  tabId: number,
+): ChromeTabUrlResult {
+  if (!result.ok) return result
+  const { tabs, connectMs, callMs } = result
+  const idx = tabs.findIndex(t => t == null || t.tabId === tabId)
+  const entry = tabs[idx]
+  if (idx === -1) {
+    return {
+      ok: false,
+      failure: tabs.length === 0 ? 'empty_tab_list' : 'tab_not_listed',
+      connectMs,
+      callMs,
+    }
+  }
+  if (entry == null || typeof entry.url !== 'string') {
+    return { ok: false, failure: 'malformed_tab_list', connectMs, callMs }
+  }
+  if (entry.url === '') {
+    return { ok: false, failure: 'tab_url_empty', connectMs, callMs }
+  }
+  return { ok: true, url: entry.url, connectMs, callMs }
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out`)), ms)
+    timer.unref?.()
+    promise.then(
+      v => {
+        clearTimeout(timer)
+        resolve(v)
+      },
+      err => {
+        clearTimeout(timer)
+        reject(err)
+      },
+    )
+  })
+}
+
+/**
+ * SEA `x(e)` — query `tabs_context_mcp` with a bounded timeout (`capMs`, default 5000ms).
+ */
+export async function queryTabUrl(opts?: {
+  capMs?: number
+  onSentToSelectedBrowser?: () => void
+}): Promise<ChromeTabsQueryResult> {
+  const started = performance.now()
+  const track: { browserSelected?: boolean; startedAt?: number } = {}
+  let outcome: ChromeTabEntry[] | string
+  try {
+    const binding = getChromeInstallSessionState().bridgeBinding
+    if (!binding) {
+      return { ok: false, failure: 'binding_missing', connectMs: 0, callMs: 0 }
+    }
+    const { socketClient } = binding
+    outcome = await withTimeout(
+      (async (): Promise<ChromeTabEntry[] | string> => {
+        if (socketClient.ensureConnected) {
+          if (!(await socketClient.ensureConnected())) return 'not_connected'
+        } else if (!socketClient.isConnected()) {
+          return 'not_connected'
+        }
+        track.browserSelected = socketClient.hasActiveSelection?.()
+        track.startedAt = performance.now()
+        if (track.browserSelected === true) {
+          opts?.onSentToSelectedBrowser?.()
+        }
+        const raw = (await socketClient.callTool(
+          'tabs_context_mcp',
+          { createIfEmpty: false, includePermissionState: false },
+          { permissionMode: 'ask', sessionScope: chromeSessionScope() },
+        )) as
+          | {
+              error?: unknown
+              result?: { content?: Array<{ text?: unknown }> }
+            }
+          | undefined
+        if (!raw) return 'empty_result'
+        if (raw.error) return 'tool_error'
+        const content = raw.result?.content
+        const text =
+          Array.isArray(content) &&
+          content[0] &&
+          typeof content[0] === 'object' &&
+          typeof content[0].text === 'string'
+            ? content[0].text
+            : undefined
+        if (!text) return 'no_text'
+        let parsed: { availableTabs?: unknown } | undefined
+        try {
+          parsed = JSON.parse(text) as { availableTabs?: unknown }
+        } catch {
+          return text.includes('createIfEmpty') ? 'no_tab_group' : 'not_json'
+        }
+        return Array.isArray(parsed?.availableTabs)
+          ? (parsed.availableTabs as ChromeTabEntry[])
+          : 'no_tab_list'
+      })().catch((err: unknown): string => {
+        if (track.startedAt === undefined) return 'connect_threw'
+        if (
+          err instanceof Error &&
+          (err.name === 'SocketConnectionError' ||
+            err.name === 'ToolCallLostError')
+        ) {
+          return 'connection_lost'
+        }
+        return 'call_threw'
+      }),
+      opts?.capMs ?? TAB_LOOKUP_CAP_MS,
+      'queryTabUrl bridge call',
+    ).catch(() => {
+      if (track.startedAt === undefined) return 'connect_timeout'
+      if (socketClient.hasActiveSelection?.() === false) {
+        return 'no_browser_selected_timeout'
+      }
+      return track.browserSelected === false
+        ? 'browser_selected_late_timeout'
+        : 'answer_timeout'
+    })
+  } catch {
+    outcome = 'other_threw'
+  }
+  const now = performance.now()
+  const connectMs = Math.round((track.startedAt ?? now) - started)
+  const callMs =
+    track.startedAt === undefined ? 0 : Math.round(now - track.startedAt)
+  return typeof outcome === 'string'
+    ? { ok: false, failure: outcome, connectMs, callMs }
+    : { ok: true, tabs: outcome, connectMs, callMs }
+}
+
+/**
+ * SEA `q(e)` (2.1.293 #325) — resolve a tab's URL, firing a parallel retry after
+ * `retryDelayMs` (default 2500ms) if the selected browser is slow to report tabs.
+ */
+export async function resolveTabUrlWithRetry(
+  tabId: number,
+  opts?: {
+    capMs?: number
+    retryDelayMs?: number
+    query?: typeof queryTabUrl
+  },
+): Promise<ChromeTabUrlResult> {
+  const capMs = opts?.capMs ?? TAB_LOOKUP_CAP_MS
+  const retryDelayMs = opts?.retryDelayMs ?? TAB_LOOKUP_RETRY_DELAY_MS
+  const query = opts?.query ?? queryTabUrl
+  const started = performance.now()
+
+  let resolveSent!: () => void
+  const sentPromise = new Promise<void>(r => {
+    resolveSent = r
+  })
+  const retryAbort = new AbortController()
+  const retryState: { sent: boolean; callMs?: number } = { sent: false }
+
+  const primary = query({
+    capMs,
+    onSentToSelectedBrowser: resolveSent,
+  }).then(res => {
+    retryAbort.abort()
+    return matchTabUrl(res, tabId)
+  })
+
+  const retry = sentPromise
+    .then(async (): Promise<ChromeTabUrlResult | undefined> => {
+      await new Promise<void>(resolve => {
+        if (retryAbort.signal.aborted) {
+          resolve()
+          return
+        }
+        const t = setTimeout(resolve, retryDelayMs)
+        t.unref?.()
+        retryAbort.signal.addEventListener(
+          'abort',
+          () => {
+            clearTimeout(t)
+            resolve()
+          },
+          { once: true },
+        )
+      })
+      const remaining = capMs - (performance.now() - started)
+      const client = getChromeInstallSessionState().bridgeBinding?.socketClient
+      if (
+        retryAbort.signal.aborted ||
+        remaining <= 0 ||
+        client?.isConnected() !== true ||
+        client.hasActiveSelection?.() !== true
+      ) {
+        return undefined
+      }
+      retryState.sent = true
+      const res = matchTabUrl(await query({ capMs: remaining }), tabId)
+      if (hasValidTabUrl(res)) return res
+      if (res.ok || !TAB_LOOKUP_TIMEOUT_FAILURES.has(res.failure)) {
+        retryState.callMs = res.callMs
+      }
+      return undefined
+    })
+    .catch(() => undefined)
+
+  const rescued = await Promise.race([primary.then(() => undefined), retry])
+  if (rescued === undefined) {
+    const first = await primary
+    if (retryState.sent && !first.ok && first.failure === 'answer_timeout') {
+      return {
+        ...first,
+        failure: 'answer_timeout_after_retry',
+        retryCallMs: retryState.callMs,
+      }
+    }
+    return first
+  }
+  return rescued
 }

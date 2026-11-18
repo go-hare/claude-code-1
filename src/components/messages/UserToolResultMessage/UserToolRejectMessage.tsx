@@ -15,6 +15,7 @@ type Props = {
   lookups: ReturnType<typeof buildMessageLookups>;
   verbose: boolean;
   isTranscriptMode?: boolean;
+  isInterrupted?: boolean;
 };
 
 export function UserToolRejectMessage({
@@ -25,6 +26,7 @@ export function UserToolRejectMessage({
   tools,
   verbose,
   isTranscriptMode,
+  isInterrupted,
 }: Props): React.ReactNode {
   const { columns } = useTerminalSize();
   const [theme] = useTheme();
@@ -38,16 +40,19 @@ export function UserToolRejectMessage({
     return <FallbackToolUseRejectedMessage />;
   }
 
-  return (
-    tool.renderToolUseRejectedMessage(parsedInput.data, {
-      columns,
-      messages: [],
-      tools,
-      verbose,
-      progressMessagesForMessage: filterToolProgressMessages(progressMessagesForMessage),
-      style,
-      theme,
-      isTranscriptMode,
-    }) ?? <FallbackToolUseRejectedMessage />
-  );
+  const rejectOptions = {
+    columns,
+    messages: [],
+    tools,
+    verbose,
+    progressMessagesForMessage: filterToolProgressMessages(progressMessagesForMessage),
+    style,
+    theme,
+    isTranscriptMode,
+    isInterrupted,
+  } as Parameters<NonNullable<Tool['renderToolUseRejectedMessage']>>[1] & {
+    isInterrupted?: boolean;
+  };
+
+  return tool.renderToolUseRejectedMessage(parsedInput.data, rejectOptions) ?? <FallbackToolUseRejectedMessage />;
 }

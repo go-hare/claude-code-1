@@ -137,12 +137,16 @@ function MultipleEnvironmentsContent({
       ? ` (from ${getSettingSourceName(selectedEnvironmentSource)} settings)`
       : '';
 
+  const defaultEnvironmentId = selectedEnvironmentSource ? selectedEnvironment.environment_id : undefined;
+
   const subtitle = selectedEnvironmentSource ? (
     <Text>
       Currently using: <Text bold>{selectedEnvironment.name}</Text>
       {sourceSuffix}
     </Text>
-  ) : undefined;
+  ) : (
+    'None of these is your default'
+  );
 
   return (
     <Dialog title={DIALOG_TITLE} subtitle={subtitle} onCancel={onCancel} hideInputGuide>
@@ -151,11 +155,12 @@ function MultipleEnvironmentsContent({
         <LoadingState message="Updating…" />
       ) : (
         <ItemList
+          defaultFocusIndex={environments.findIndex(env => env.environment_id === defaultEnvironmentId)}
           options={environments.map(env => ({
             label: env.name,
             value: env.environment_id,
             icon:
-              env.environment_id === selectedEnvironment.environment_id ? (
+              env.environment_id === defaultEnvironmentId ? (
                 <StatusIcon status="success" aria-label="current:" />
               ) : undefined,
             facts: [env.environment_id],

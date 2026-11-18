@@ -20,7 +20,7 @@ describe('plugin CLI --json / --accept-command densable 2.1.283', () => {
     )
   })
 
-  test('does not invent commander --marketplace on claude plugin install', () => {
+  test('wires commander --marketplace <source> on claude plugin install', () => {
     const src = readFileSync(
       join(ROOT, 'src/cli/registerCliHostCommands.ts'),
       'utf8',
@@ -29,7 +29,8 @@ describe('plugin CLI --json / --accept-command densable 2.1.283', () => {
       src.indexOf("command('install <plugin>')"),
       src.indexOf("command('uninstall <plugin>')"),
     )
-    expect(installBlock).not.toContain('--marketplace')
+    expect(installBlock).toContain("'--marketplace <source>'")
+    expect(installBlock).toContain('marketplace?: string')
   })
 
   test('eval empty-case is after scan, with --case/--tag interpolation', () => {

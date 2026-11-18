@@ -53,6 +53,12 @@ const DRIFT_KEYS = [
   'CLAUDE_CODE_USE_COWORK_PLUGINS',
 ] as const
 
+export type SeedAdminFailReason =
+  | 'setup'
+  | 'placement'
+  | 'shared_index'
+  | 'shared_index_too_large'
+
 export type SeedAdminResult =
   | {
       kind: 'made'
@@ -62,7 +68,7 @@ export type SeedAdminResult =
     }
   | {
       kind: 'failed'
-      reason: 'setup' | 'placement'
+      reason: SeedAdminFailReason
       detail: string
       [Symbol.asyncDispose]: () => Promise<void>
     }
@@ -70,7 +76,7 @@ export type SeedAdminResult =
 /** densable `O` */
 function fail(
   detail: string,
-  reason: 'setup' | 'placement' = 'setup',
+  reason: SeedAdminFailReason = 'setup',
 ): SeedAdminResult {
   return {
     kind: 'failed',
@@ -157,7 +163,7 @@ async function copyRegularFile(
   }
   let src
   try {
-    src = await open(from, constants.O_RDONLY)
+    src = await open(from, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0))
   } catch (err) {
     if (getErrnoCode(err) === 'ENOENT') return
     throw err
@@ -245,6 +251,46 @@ async function sweepSeedAdmin(
     )
   } catch {
     /* official yr swallows */
+  }
+}
+
+/**
+ * Official Goa — retention-cleanup entry point for `~/.claude/seed-admin`.
+ * Safely verifies the directory is owned by the current user and not inside
+ * a repository before sweeping stale `claude-seed-admin-*` / `claude-seed-stage-*`.
+ */
+export async function sweepSeedAdminFromCleanup(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{ refused: string }> {
+  try {
+    const configHome = getClaudeConfigHomeDir()
+    if (!isAbsolute(configHome)) {
+      return { refused: 'relative_config_home' }
+    }
+    const adminRoot = join(configHome, 'seed-admin')
+    let st
+    try {
+      st = await lstat(adminRoot)
+    } catch (err) {
+      const code = (err as { code?: string }).code
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
+        return { refused: 'no' }
+      }
+      return { refused: 'no' }
+    }
+    if (st.isFile()) return { refused: 'no' }
+    if (
+      !st.isDirectory() ||
+      (process.platform !== 'win32' &&
+        ((st.uid !== process.getuid?.() && st.uid !== 0) ||
+          (st.mode & 0o022) !== 0))
+    ) {
+      return { refused: 'shared_directory' }
+    }
+    await sweepSeedAdmin(adminRoot, env)
+    return { refused: 'no' }
+  } catch {
+    return { refused: 'no' }
   }
 }
 
@@ -385,7 +431,10 @@ export async function makeSeedAdminDir(
     /^sharedindex\.[0-9a-f]{40,64}$/.test(name),
   )
   if (shared.length > SHAREDINDEX_CAP) {
-    return fail('too many sharedindex files stand in the git dir')
+    return fail(
+      `more than ${SHAREDINDEX_CAP} split-index files (sharedindex.*) stand in the git dir`,
+      'shared_index',
+    )
   }
   const sharedBytes = (
     await Promise.all(
@@ -398,7 +447,10 @@ export async function makeSeedAdminDir(
     )
   ).reduce((sum, size) => sum + size, 0)
   if (sharedBytes > COPY_BUDGET) {
-    return fail('the sharedindex files in the git dir are too large to copy')
+    return fail(
+      'the split-index files (sharedindex.*) in the git dir are too large to copy',
+      'shared_index',
+    )
   }
   const linkType = getPlatform() === 'windows' ? 'junction' : undefined
   const commonParent = dirname(layout.commonDir)
@@ -490,7 +542,19 @@ export async function makeSeedAdminDir(
         budget,
       ),
       ...shared.map(name =>
-        copyRegularFile(join(layout.gitDir, name), join(made, name), budget),
+        copyRegularFile(
+          join(layout.gitDir, name),
+          join(made, name),
+          budget,
+        ).catch(err => {
+          const msg = String(err)
+          const reason: SeedAdminFailReason = msg.includes(
+            'larger than an index or refs file gets',
+          )
+            ? 'shared_index_too_large'
+            : 'shared_index'
+          throw Object.assign(new Error(msg), { seedAdminReason: reason })
+        }),
       ),
     ])
     if (signal?.aborted) throw Error('aborted')
@@ -500,14 +564,24 @@ export async function makeSeedAdminDir(
     return { kind: 'made', path, dispose, [Symbol.asyncDispose]: dispose }
   } catch (err) {
     await rm(made, { recursive: true, force: true }).catch(() => {})
-    return fail(String(err))
+    const reason =
+      (err as { seedAdminReason?: SeedAdminFailReason }).seedAdminReason ??
+      'setup'
+    return fail(String(err), reason)
   }
 }
+
+const FRESH_CLONE_ADVICE =
+  'a fresh clone from the remote (with no remote: a new folder and git init), copy your files over by hand, but not the .git folder, then retry there. Keep this folder: commits that you have not pushed, other branches and stashes exist only here.'
+
+const SHARED_INDEX_ADVICE = ` Look at the split-index files (sharedindex.*) first (ls -l; a link shows an arrow, ->). If one is a link, git did not make it so, and git reads the index through it: do not run git in this folder, and use ${FRESH_CLONE_ADVICE} If none is a link, do not delete any of these files by hand: the index may need one of them, and which one can change whenever git writes the index. Use a fresh clone in this case too, by the same steps.`
+
+const SHARED_INDEX_TOO_LARGE_ADVICE = ` Do not delete that split-index file by hand: the index may need it. If this project has so many files that a fresh clone\u2019s index would be over that limit too, this upload has no way round it. If not, use ${FRESH_CLONE_ADVICE}`
 
 /** densable TCt `bp($l(Bc(T.detail)), yCt=300)` — `Bc`=`Pzd` first line. */
 export function formatSeedAdminFail(
   detail: string,
-  reason: 'setup' | 'placement',
+  reason: SeedAdminFailReason,
 ): string {
   const shown = truncateSeedDisplay(
     sanitizeSeedDisplay(washSeedStderr(detail)),
@@ -516,5 +590,12 @@ export function formatSeedAdminFail(
   if (reason === 'placement') {
     return `Not uploading this working tree this way: the private git directory the upload must trust would stand where a cloud session can write \u2014 ${shown}. Nothing was uploaded; retry once that is changed.`
   }
-  return `Could not prepare a private git directory for the upload (${shown}), so nothing was uploaded this way. It is made under ~/.claude/seed-admin from this checkout's HEAD and index: check that those are plain files git wrote (HEAD naming a branch or a commit) and that ~/.claude is a writable directory of yours, then retry.`
+  const base = `Could not prepare a private git directory for the upload (${shown}), so nothing was uploaded this way. It is made under ~/.claude/seed-admin from this checkout's HEAD and index: check that those are plain files git wrote (HEAD naming a branch or a commit) and that ~/.claude is a writable directory of yours, then retry.`
+  if (reason === 'shared_index') {
+    return `${base}${SHARED_INDEX_ADVICE}`
+  }
+  if (reason === 'shared_index_too_large') {
+    return `${base}${SHARED_INDEX_TOO_LARGE_ADVICE}`
+  }
+  return base
 }

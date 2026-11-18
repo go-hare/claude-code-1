@@ -5,6 +5,7 @@ import { buildTool } from 'src/Tool.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { isBridgeEnabled } from 'src/bridge/bridgeEnabled.js'
+import { getGlobalConfig } from 'src/utils/config.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { shouldSuppressPushForUserPresence } from 'src/utils/residualUiEnvGates.js'
 
@@ -25,7 +26,15 @@ const inputSchema = lazySchema(() =>
 type InputSchema = ReturnType<typeof inputSchema>
 type PushInput = z.infer<InputSchema>
 
-type PushOutput = { sent: boolean }
+type PushDisabledReason = 'config_off' | 'user_present' | 'no_transport'
+
+type PushOutput = {
+  sent: boolean
+  pushSent?: boolean
+  localSent?: boolean
+  disabledReason?: PushDisabledReason
+  error?: string
+}
 
 export const PushNotificationTool = buildTool({
   name: PUSH_NOTIFICATION_TOOL_NAME,
@@ -73,12 +82,27 @@ Requires Remote Control to be configured. Respects user notification settings (t
     content: PushOutput,
     toolUseID: string,
   ): ToolResultBlockParam {
+    let text: string
+    if (content.disabledReason === 'config_off') {
+      text = 'Push not sent \u2014 mobile push is disabled in /config.'
+    } else if (content.disabledReason === 'user_present') {
+      text =
+        'Not sent \u2014 this terminal is active, so your output here already reaches the user; a separate notification would be redundant.'
+    } else if (content.disabledReason === 'no_transport') {
+      text = content.localSent
+        ? 'Terminal notification sent. Mobile push not sent (Remote Control inactive).'
+        : 'Mobile push not sent (Remote Control inactive).'
+    } else if (content.sent || content.pushSent) {
+      text = content.localSent
+        ? 'Terminal notification sent. Mobile push requested.'
+        : 'Mobile push requested.'
+    } else {
+      text = 'Mobile push not sent (Remote Control inactive).'
+    }
     return {
       tool_use_id: toolUseID,
       type: 'tool_result',
-      content: content.sent
-        ? 'Notification sent.'
-        : 'Failed to send notification.',
+      content: text,
     }
   },
 
@@ -95,32 +119,81 @@ Requires Remote Control to be configured. Respects user notification settings (t
       // keep raw env fallback
     }
 
-    // Official densable: skip push when user is present (last interaction < 60s)
-    // unless CLAUDE_CODE_DISABLE_NOTIFICATION_PRESENCE_CHECK or remote session.
-    try {
-      const { getLastInteractionTime } = await import('src/bootstrap/state.js')
-      if (
-        shouldSuppressPushForUserPresence({
-          isRemote,
-          lastInteractionAgeMs: Date.now() - getLastInteractionTime(),
-        })
-      ) {
-        logForDebugging(
-          `[PushNotification] suppressed: user_present (${input.title})`,
-        )
-        return {
-          data: {
-            sent: false,
-            error: 'Notification suppressed: user is present.',
-          },
-        }
+    // Official 2.1.325: c = isRemote || isRemoteControlSession; f = c || replBridgeActive
+    const isRemoteControl =
+      isRemote ||
+      appState.replBridgeExplicit ||
+      appState.replBridgeSessionActive
+    const hasTransport =
+      isRemoteControl ||
+      appState.replBridgeEnabled ||
+      appState.replBridgeConnected
+    const localSent = !context.options?.isNonInteractiveSession
+
+    if (
+      hasTransport &&
+      !isRemoteControl &&
+      getGlobalConfig().agentPushNotifEnabled !== true
+    ) {
+      return {
+        data: {
+          sent: false,
+          pushSent: false,
+          localSent: false,
+          disabledReason: 'config_off' as const,
+        },
       }
-    } catch (e) {
-      logForDebugging(`[PushNotification] presence check failed: ${e}`)
     }
 
-    // Try bridge delivery first (for remote/mobile viewers)
-    if (appState.replBridgeEnabled) {
+    // Official densable: skip push when user is present (last interaction < 60s)
+    // unless CLAUDE_CODE_DISABLE_NOTIFICATION_PRESENCE_CHECK or remote / remote-control session (#369).
+    if (!isRemoteControl) {
+      try {
+        const { getLastInteractionTime } = await import(
+          'src/bootstrap/state.js'
+        )
+        if (
+          shouldSuppressPushForUserPresence({
+            isRemote,
+            lastInteractionAgeMs: Date.now() - getLastInteractionTime(),
+          })
+        ) {
+          logForDebugging(
+            `[PushNotification] suppressed: user_present (${input.title})`,
+          )
+          return {
+            data: {
+              sent: false,
+              pushSent: false,
+              localSent: false,
+              disabledReason: 'user_present' as const,
+              error: 'Notification suppressed: user is present.',
+            },
+          }
+        }
+      } catch (e) {
+        logForDebugging(`[PushNotification] presence check failed: ${e}`)
+      }
+    }
+
+    if (!hasTransport) {
+      logForDebugging(
+        `[PushNotification] no transport active, not delivered: ${input.title}`,
+      )
+      return {
+        data: {
+          sent: false,
+          pushSent: false,
+          localSent,
+          disabledReason: 'no_transport' as const,
+          error:
+            'No Remote Control bridge configured. Notification not delivered.',
+        },
+      }
+    }
+
+    // Try bridge delivery (for remote / remote-control / mobile viewers)
+    if (hasTransport) {
       if (feature('BRIDGE_MODE')) {
         try {
           const { getBridgeAccessToken, getBridgeBaseUrl } = await import(
@@ -158,7 +231,7 @@ Requires Remote Control to be configured. Respects user notification settings (t
               logForDebugging(
                 `[PushNotification] delivered via bridge session=${sessionId}`,
               )
-              return { data: { sent: true } }
+              return { data: { sent: true, pushSent: true, localSent } }
             }
             logForDebugging(
               `[PushNotification] bridge delivery failed: status=${response.status}`,
@@ -177,6 +250,9 @@ Requires Remote Control to be configured. Respects user notification settings (t
     return {
       data: {
         sent: false,
+        pushSent: false,
+        localSent,
+        disabledReason: 'no_transport' as const,
         error:
           'No Remote Control bridge configured. Notification not delivered.',
       },

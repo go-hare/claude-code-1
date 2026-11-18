@@ -54,7 +54,7 @@ async function loadHistoryEntries(minCount: number, modeFilter?: HistoryMode): P
   pendingLoad = (async () => {
     const entries: HistoryEntry[] = [];
     let loaded = 0;
-    for await (const entry of getHistory()) {
+    for await (const entry of getHistory({ withClearedDrafts: true })) {
       // If mode filter is specified, only include entries that match the mode
       if (modeFilter) {
         const entryMode = getModeFromInput(entry.display);

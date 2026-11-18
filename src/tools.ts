@@ -181,6 +181,16 @@ const WorkflowTool = feature('WORKFLOW_SCRIPTS')
   : null
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 import { getDenyRuleForTool } from './utils/permissions/permissions.js'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from './services/analytics/index.js'
+import { sanitizeToolNameForAnalytics } from './services/analytics/metadata.js'
+import { logForDebugging } from './utils/debug.js'
+import {
+  restrictedAlwaysCodeRunningNames,
+  restrictedDenyToolNames,
+} from './utils/restricted.js'
 import { hasEmbeddedSearchTools } from './utils/embeddedTools.js'
 import { isBareMode, isEnvTruthy } from './utils/envUtils.js'
 import { isPowerShellToolEnabled } from './utils/shell/shellToolUtils.js'
@@ -319,9 +329,60 @@ export function getAllBaseTools(): Tools {
  * server-prefix rules like `mcp__server` strip all tools from that server
  * before the model sees them — not just at call time.
  */
+const withheldOutsideLaunchListLogged = new Set<string>()
+
+/**
+ * #379 SEA `yln`: Returns true if `tool` should be withheld because it is not
+ * on the session's `--tools` launch list (`toolsKeptByLaunchList`).
+ * MCP tools and `StructuredOutput` are exempt.
+ */
+export function isWithheldOutsideLaunchList(
+  permissionContext: ToolPermissionContext,
+  tool: { name: string; mcpInfo?: unknown; isMcp?: boolean },
+): boolean {
+  const kept = permissionContext.toolsKeptByLaunchList
+  if (
+    kept === undefined ||
+    tool.name.startsWith('mcp__') ||
+    tool.isMcp === true ||
+    tool.mcpInfo !== undefined ||
+    tool.name === SYNTHETIC_OUTPUT_TOOL_NAME ||
+    kept.includes(tool.name)
+  ) {
+    return false
+  }
+  return true
+}
+
+/**
+ * #379 SEA `J`: Dynamically synthesize `toolsNarrowing` deny tool names when
+ * `restricted === true && toolsKeptByLaunchList === undefined`.
+ */
+function synthesizeRestrictedDenyNames(
+  tools: readonly { name: string; enablesCodeExecution?: boolean }[],
+  permissionContext: ToolPermissionContext,
+): Set<string> {
+  if (
+    !(
+      permissionContext.restricted === true &&
+      permissionContext.toolsKeptByLaunchList === undefined
+    )
+  ) {
+    return new Set()
+  }
+  const codeRunning = new Set([
+    ...tools.filter(t => t.enablesCodeExecution).map(t => t.name),
+    ...restrictedAlwaysCodeRunningNames(),
+  ])
+  return new Set(restrictedDenyToolNames(codeRunning, new Set()))
+}
+
 export function filterToolsByDenyRules<
   T extends {
     name: string
+    isMcp?: boolean
+    enablesCodeExecution?: boolean
+    underlyingV1ToolName?: string
     mcpInfo?: {
       serverName: string
       toolName: string
@@ -332,12 +393,38 @@ export function filterToolsByDenyRules<
   // Official 2.1.x: also strip org-blocked MCP tools (effectiveMaxPermission).
   // StructuredOutput is appended after getTools for --json-schema / SDK
   // json_schema and must survive `--tools ""` deny-all (densable 2.1.283).
-  return tools.filter(
-    tool =>
-      tool.name === SYNTHETIC_OUTPUT_TOOL_NAME ||
-      (!getDenyRuleForTool(permissionContext, tool) &&
-        tool.mcpInfo?.effectiveMaxPermission !== 'blocked'),
+  const dynamicRestrictedDenySet = synthesizeRestrictedDenyNames(
+    tools,
+    permissionContext,
   )
+  return tools.filter(tool => {
+    if (tool.name === SYNTHETIC_OUTPUT_TOOL_NAME) {
+      return true
+    }
+    if (
+      getDenyRuleForTool(permissionContext, tool) ||
+      dynamicRestrictedDenySet.has(tool.name) ||
+      tool.mcpInfo?.effectiveMaxPermission === 'blocked'
+    ) {
+      return false
+    }
+    if (!isWithheldOutsideLaunchList(permissionContext, tool)) {
+      return true
+    }
+    if (!withheldOutsideLaunchListLogged.has(tool.name)) {
+      withheldOutsideLaunchListLogged.add(tool.name)
+      logForDebugging(
+        `${tool.name} is not on this session's --tools list and no deny rule names it; withheld. Name it in --tools to offer it`,
+        { level: 'warn' },
+      )
+      logEvent('tengu_tool_withheld_outside_launch_list', {
+        toolName: sanitizeToolNameForAnalytics(
+          tool.name,
+        ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+    }
+    return false
+  })
 }
 
 export const getTools = (permissionContext: ToolPermissionContext): Tools => {

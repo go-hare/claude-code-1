@@ -11,6 +11,7 @@ import {
   decrqm,
   kittyGraphicsQuery,
   kittyKeyboard,
+  programStatusQuery,
   xtversion,
 } from './terminal-querier.js'
 import {
@@ -93,11 +94,25 @@ export async function probeTerminalIdentity(
   const askKeys =
     capabilities.get('extendedKeys').state === 'pending' ||
     capabilities.get('kittyKeyboard').state === 'pending'
-  const [xtReply, kittyFlags, flushedKeys] = await Promise.all([
-    querier.send(xtversion()),
-    askKeys ? querier.send(kittyKeyboard()) : Promise.resolve(undefined),
-    querier.flush(),
-  ])
+  const askProgramStatus = capabilities.get('programStatus').state === 'pending'
+  const [xtReply, kittyFlags, programStatusReply, flushedKeys] =
+    await Promise.all([
+      querier.send(xtversion()),
+      askKeys ? querier.send(kittyKeyboard()) : Promise.resolve(undefined),
+      askProgramStatus
+        ? querier.send(programStatusQuery()).then(reply => {
+            if (reply) {
+              capabilities.answer(
+                'programStatus',
+                true,
+                'probe: OSC 7501 reply',
+              )
+            }
+            return reply
+          })
+        : Promise.resolve(undefined),
+      querier.flush(),
+    ])
   clearTimeout(firstDeadline)
   if (xtReply) {
     let name = xtReply.name
@@ -123,6 +138,13 @@ export async function probeTerminalIdentity(
       'kittyKeyboard',
       kittyFlags !== undefined,
       `probe: ${flagsNote}`,
+    )
+  }
+  if (askProgramStatus && programStatusReply === undefined && flushedKeys) {
+    capabilities.answer(
+      'programStatus',
+      false,
+      'probe: no reply to OSC 7501 ; ?',
     )
   }
   const skipDecrqm = !xtReply || process.env.TERM_PROGRAM === 'Apple_Terminal'

@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { readFile, stat } from 'fs/promises';
 import * as React from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { getIsRemoteMode, getLastAPIRequest } from 'src/bootstrap/state.js';
 import { logEventTo1P } from 'src/services/analytics/firstPartyEventLogger.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js';
@@ -90,11 +90,92 @@ const MODE_COPY: Record<
   },
 };
 
+export type FeedbackSendSnapshot =
+  | { status: 'none' }
+  | { status: 'sending' }
+  | { status: 'delivered'; referenceId: string }
+  | { status: 'saved'; referenceId: string; bundlePath: string; transcriptProblem?: string }
+  | { status: 'failed'; reason: string; final?: boolean };
+
+export type FeedbackSendStore = {
+  subscribe: (listener: () => void) => () => void;
+  getSnapshot: () => FeedbackSendSnapshot;
+  start: () => void;
+  deliver: (referenceId: string) => void;
+  save: (referenceId: string, bundlePath: string, transcriptProblem?: string) => void;
+  fail: (reason: string, final?: boolean) => void;
+  abandon: () => void;
+};
+
+/**
+ * Official 2.1.292 (#221) `Me(mode)` — external send-state store so Ctrl+O /
+ * Ctrl+Z unmount+remount while sending preserves progress instead of
+ * restarting from userInput.
+ */
+export function createFeedbackSendStore(mode: FeedbackMode): FeedbackSendStore {
+  let state: FeedbackSendSnapshot = { status: 'none' };
+  const listeners = new Set<() => void>();
+  const subscribe = (listener: () => void) => {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  };
+  const getSnapshot = () => state;
+  const setState = (updater: (prev: FeedbackSendSnapshot) => FeedbackSendSnapshot) => {
+    const next = updater(state);
+    if (Object.is(next, state)) return;
+    state = next;
+    for (const listener of listeners) {
+      listener();
+    }
+  };
+  if (mode === 'share') {
+    return {
+      subscribe,
+      getSnapshot,
+      start() {},
+      deliver() {},
+      save() {},
+      fail() {},
+      abandon() {},
+    };
+  }
+  return {
+    subscribe,
+    getSnapshot,
+    start() {
+      setState(() => ({ status: 'sending' }));
+    },
+    deliver(referenceId: string) {
+      setState(() => ({ status: 'delivered', referenceId }));
+    },
+    save(referenceId: string, bundlePath: string, transcriptProblem?: string) {
+      setState(() => ({
+        status: 'saved',
+        referenceId,
+        bundlePath,
+        ...(transcriptProblem !== undefined && { transcriptProblem }),
+      }));
+    },
+    fail(reason: string, final?: boolean) {
+      setState(prev =>
+        prev.status === 'delivered' || prev.status === 'saved'
+          ? prev
+          : { status: 'failed', reason, ...(final === true && { final: true }) },
+      );
+    },
+    abandon() {
+      setState(prev => (prev.status === 'sending' ? { status: 'none' } : prev));
+    },
+  };
+}
+
 type Props = {
   abortSignal: AbortSignal;
   messages: Message[];
   initialDescription?: string;
-  onDone(result: string, options?: { display?: CommandResultDisplay }): void;
+  onDone(result?: string, options?: { display?: CommandResultDisplay }): void;
   backgroundTasks?: {
     [taskId: string]: {
       type: string;
@@ -105,6 +186,7 @@ type Props = {
   mode?: FeedbackMode;
   readFileState?: FileStateCache;
   command?: string;
+  send?: FeedbackSendStore;
 };
 
 type Step = 'userInput' | 'scope' | 'consent' | 'submitting' | 'done';
@@ -221,13 +303,35 @@ export function Feedback({
   onDone,
   backgroundTasks = {},
   mode = 'post',
+  send,
 }: Props): React.ReactNode {
-  const [step, setStep] = useState<Step>('userInput');
+  const [localStep, setStep] = useState<Step>('userInput');
   const [cursorOffset, setCursorOffset] = useState(0);
   const [description, setDescription] = useState(initialDescription ?? '');
-  const [feedbackId, setFeedbackId] = useState<string | null>(null);
-  const [bundlePath] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [localFeedbackId, setFeedbackId] = useState<string | null>(null);
+  const [localBundlePath] = useState<string | null>(null);
+  const [localError, setError] = useState<string | null>(null);
+  const [sendStore] = useState<FeedbackSendStore>(() => send ?? createFeedbackSendStore(mode));
+  const sendSnapshot = useSyncExternalStore(sendStore.subscribe, sendStore.getSnapshot);
+  const [userEdited, setUserEdited] = useState(false);
+  const [frozenSnapshot, setFrozenSnapshot] = useState<FeedbackSendSnapshot | null>(null);
+
+  const effectiveSnapshot = frozenSnapshot ?? sendSnapshot;
+  const followSendStore = mode !== 'share' && !userEdited && effectiveSnapshot.status !== 'none';
+  const step: Step =
+    followSendStore && effectiveSnapshot.status !== 'failed'
+      ? effectiveSnapshot.status === 'sending'
+        ? 'submitting'
+        : 'done'
+      : localStep;
+  const error =
+    localError ?? (followSendStore && effectiveSnapshot.status === 'failed' ? effectiveSnapshot.reason : null);
+  const feedbackId =
+    followSendStore && (effectiveSnapshot.status === 'delivered' || effectiveSnapshot.status === 'saved')
+      ? effectiveSnapshot.referenceId
+      : localFeedbackId;
+  const bundlePath =
+    followSendStore && effectiveSnapshot.status === 'saved' ? effectiveSnapshot.bundlePath : localBundlePath;
   const isRemote = getIsRemoteMode();
   const [envInfo, setEnvInfo] = useState<{
     isGit: boolean;
@@ -255,87 +359,93 @@ export function Feedback({
     setStep('submitting');
     setError(null);
     setFeedbackId(null);
+    sendStore.start();
 
-    // Get sanitized errors for the report
-    const sanitizedErrors = getSanitizedErrorLogs();
+    try {
+      // Get sanitized errors for the report
+      const sanitizedErrors = getSanitizedErrorLogs();
 
-    // Extract last assistant message ID from messages array
-    const lastAssistantMessage = getLastAssistantMessage(messages);
-    const lastAssistantMessageId = lastAssistantMessage?.requestId ?? null;
+      // Extract last assistant message ID from messages array
+      const lastAssistantMessage = getLastAssistantMessage(messages);
+      const lastAssistantMessageId = lastAssistantMessage?.requestId ?? null;
 
-    const [diskTranscripts, rawTranscriptJsonl] = await Promise.all([
-      loadAllSubagentTranscriptsFromDisk(),
-      loadRawTranscriptJsonl(),
-    ]);
-    const teammateTranscripts = extractTeammateTranscriptsFromTasks(backgroundTasks);
-    const subagentTranscripts = { ...diskTranscripts, ...teammateTranscripts };
+      const [diskTranscripts, rawTranscriptJsonl] = await Promise.all([
+        loadAllSubagentTranscriptsFromDisk(),
+        loadRawTranscriptJsonl(),
+      ]);
+      const teammateTranscripts = extractTeammateTranscriptsFromTasks(backgroundTasks);
+      const subagentTranscripts = { ...diskTranscripts, ...teammateTranscripts };
 
-    const reportData = {
-      latestAssistantMessageId: lastAssistantMessageId,
-      message_count: messages.length,
-      datetime: new Date().toISOString(),
-      description,
-      platform: env.platform,
-      gitRepo: envInfo.isGit,
-      terminal: env.terminal,
-      version: MACRO.VERSION,
-      transcript: normalizeMessagesForAPI(messages),
-      errors: sanitizedErrors,
-      lastApiRequest: getLastAPIRequest(),
-      ...(Object.keys(subagentTranscripts).length > 0 && {
-        subagentTranscripts,
-      }),
-      ...(rawTranscriptJsonl && { rawTranscriptJsonl }),
-    };
+      const reportData = {
+        latestAssistantMessageId: lastAssistantMessageId,
+        message_count: messages.length,
+        datetime: new Date().toISOString(),
+        description,
+        platform: env.platform,
+        gitRepo: envInfo.isGit,
+        terminal: env.terminal,
+        version: MACRO.VERSION,
+        transcript: normalizeMessagesForAPI(messages),
+        errors: sanitizedErrors,
+        lastApiRequest: getLastAPIRequest(),
+        ...(Object.keys(subagentTranscripts).length > 0 && {
+          subagentTranscripts,
+        }),
+        ...(rawTranscriptJsonl && { rawTranscriptJsonl }),
+      };
 
-    const [result, t] = await Promise.all([
-      submitFeedback(reportData as FeedbackData, abortSignal),
-      hideGitHubIssue ? Promise.resolve(null) : generateTitle(description, abortSignal),
-    ]);
+      const [result, t] = await Promise.all([
+        submitFeedback(reportData as FeedbackData, abortSignal),
+        hideGitHubIssue ? Promise.resolve(null) : generateTitle(description, abortSignal),
+      ]);
 
-    if (abortSignal.aborted) return;
+      if (abortSignal.aborted) return;
 
-    setTitle(t);
+      setTitle(t);
 
-    if (result.success) {
-      if (result.feedbackId) {
-        setFeedbackId(result.feedbackId);
-        logEvent('tengu_bug_report_submitted', {
-          feedback_id: result.feedbackId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          last_assistant_message_id:
-            lastAssistantMessageId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        });
-        // 1P-only: freeform text approved for BQ. Join on feedback_id.
-        logEventTo1P('tengu_bug_report_description', {
-          feedback_id: result.feedbackId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          description: redactSensitiveInfo(description) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        });
-      }
-      setStep('done');
-    } else {
-      if (result.isZdrOrg) {
-        setError('Feedback collection is not available for organizations with custom data retention policies.');
+      if (result.success) {
+        if (result.feedbackId) {
+          setFeedbackId(result.feedbackId);
+          sendStore.deliver(result.feedbackId);
+          logEvent('tengu_bug_report_submitted', {
+            feedback_id: result.feedbackId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            last_assistant_message_id:
+              lastAssistantMessageId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          });
+          // 1P-only: freeform text approved for BQ. Join on feedback_id.
+          logEventTo1P('tengu_bug_report_description', {
+            feedback_id: result.feedbackId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            description: redactSensitiveInfo(description) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          });
+        } else {
+          sendStore.deliver('');
+        }
+        setStep('done');
       } else {
-        setError(`Couldn't send feedback. If it keeps failing, you can file at ${GITHUB_ISSUES_REPO_URL} instead.`);
+        const failureReason = result.isZdrOrg
+          ? 'Feedback collection is not available for organizations with custom data retention policies.'
+          : `Couldn't send feedback. If it keeps failing, you can file at ${GITHUB_ISSUES_REPO_URL} instead.`;
+        setError(failureReason);
+        sendStore.fail(failureReason);
+        // Stay on userInput step so user can retry with their content preserved
+        setStep('userInput');
       }
-      // Stay on userInput step so user can retry with their content preserved
-      setStep('userInput');
+    } finally {
+      sendStore.abandon();
     }
-  }, [abortSignal, backgroundTasks, description, envInfo.isGit, hideGitHubIssue, messages]);
+  }, [abortSignal, backgroundTasks, description, envInfo.isGit, hideGitHubIssue, messages, sendStore]);
 
   const handleCancel = useCallback(() => {
     if (step === 'done') {
-      if (error) {
-        onDone('Error submitting feedback / bug report', {
-          display: 'system',
-        });
-      } else {
-        onDone('Feedback / bug report submitted', { display: 'system' });
-      }
+      onDone(undefined, { display: 'skip' });
       return;
     }
+    if (followSendStore) {
+      const snap = sendStore.getSnapshot();
+      setFrozenSnapshot(prev => prev ?? snap);
+    }
     onDone('Feedback / bug report cancelled', { display: 'system' });
-  }, [step, error, onDone]);
+  }, [step, followSendStore, sendStore, onDone]);
 
   // During text input, use Settings context where only Escape (not 'n') triggers confirm:no.
   // This allows typing 'n' in the text field while still supporting Escape to cancel.
@@ -421,6 +531,7 @@ export function Feedback({
             value={description}
             onChange={value => {
               setDescription(value);
+              setUserEdited(true);
               // Clear error when user starts editing to allow retry
               if (error) {
                 setError(null);
@@ -428,6 +539,7 @@ export function Feedback({
             }}
             columns={textInputColumns}
             onSubmit={value => {
+              setUserEdited(true);
               if (mode !== 'share' && !value.trim()) {
                 setError('Please describe the issue before submitting.');
                 return;

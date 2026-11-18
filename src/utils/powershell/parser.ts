@@ -309,6 +309,7 @@ type RawParsedOutput = {
  */
 // exported for testing
 export const PARSE_SCRIPT_BODY = `
+$EncodedCommand = [Console]::In.ReadToEnd()
 if (-not $EncodedCommand) {
     Write-Output '{"valid":false,"errors":[{"message":"No command provided","errorId":"NoInput"}],"statements":[],"variables":[],"hasStopParsing":false,"originalCommand":""}'
     exit 0
@@ -618,23 +619,11 @@ const SAFETY_MARGIN = 100
 const SCRIPT_CHARS_BUDGET = ((WINDOWS_ARGV_CAP - FIXED_ARGV_OVERHEAD) * 3) / 8
 const CMD_B64_BUDGET =
   SCRIPT_CHARS_BUDGET - PARSE_SCRIPT_BODY.length - ENCODED_CMD_WRAPPER
-// Exported for drift-guard tests (the drift-prone value is the Windows one).
 // Unit: UTF-8 BYTES. Compare against Buffer.byteLength, not .length.
-export const WINDOWS_MAX_COMMAND_LENGTH = Math.max(
-  0,
-  Math.floor((CMD_B64_BUDGET * 3) / 4) - SAFETY_MARGIN,
-)
-// Pre-existing value, known to work on Unix. See comment above re: why the
-// Windows derivation must NOT be applied here. Unit: UTF-8 BYTES — for ASCII
-// commands (the common case) bytes==chars so no regression; for multibyte
-// commands this is slightly tighter but still far below Unix ARG_MAX (~128KB
-// per-arg), so the argv spawn cannot overflow.
-const UNIX_MAX_COMMAND_LENGTH = 4_500
-// Unit: UTF-8 BYTES (see SECURITY note above).
-export const MAX_COMMAND_LENGTH =
-  process.platform === 'win32'
-    ? WINDOWS_MAX_COMMAND_LENGTH
-    : UNIX_MAX_COMMAND_LENGTH
+// #532 SEA hQe = 32767: command is passed via stdin rather than -EncodedCommand argv.
+export const WINDOWS_MAX_COMMAND_LENGTH = 32_767
+// Unit: UTF-8 BYTES.
+export const MAX_COMMAND_LENGTH = WINDOWS_MAX_COMMAND_LENGTH
 
 const INVALID_RESULT_BASE: Omit<
   ParsedPowerShellCommand,
@@ -1158,15 +1147,11 @@ async function parsePowerShellCommandImpl(
     )
   }
 
-  const script = buildParseScript(command)
-
-  // Pass the script to PowerShell via -EncodedCommand.
-  // -EncodedCommand takes a Base64-encoded UTF-16LE string and executes it,
-  // which avoids: (1) stdin interactive-mode issues where -File - produces
-  // PS prompts and ANSI escapes in stdout, (2) command-line escaping issues,
-  // (3) temp files. The script itself is large but well within OS arg limits
-  // (Windows: 32K chars, Unix: typically 2MB+).
-  const encodedScript = toUtf16LeBase64(script)
+  // Pass the static parse script via -EncodedCommand and the base64-encoded
+  // command via stdin so Windows CreateProcess argv limits (~32KB) never
+  // truncate commands up to MAX_COMMAND_LENGTH (32,767 bytes).
+  const encodedScript = toUtf16LeBase64(PARSE_SCRIPT_BODY)
+  const encodedInput = Buffer.from(command, 'utf8').toString('base64')
   const args = [
     '-NoProfile',
     '-NonInteractive',
@@ -1189,6 +1174,7 @@ async function parsePowerShellCommandImpl(
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const result = await execa(pwshPath, args, {
+        input: encodedInput,
         timeout: parseTimeoutMs,
         reject: false,
       })

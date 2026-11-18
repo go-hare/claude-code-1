@@ -190,8 +190,14 @@ export {
   type ClipboardAttacherCaps,
   type ClipboardPath,
   CLEAR_ITERM2_PROGRESS,
+  CLEAR_PROGRAM_STATUS,
   CLEAR_TAB_STATUS,
   CLEAR_TERMINAL_TITLE,
+  clearProgramStatusForId,
+  programStatus,
+  sanitizeProgramStatusId,
+  type ProgramStatusOptions,
+  type ProgramStatusState,
   wrapForMultiplexer,
 } from './core/termio/osc.js'
 export {

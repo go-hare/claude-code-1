@@ -132,6 +132,7 @@ import {
 import { groupMessagesByApiRound } from './grouping.js'
 import {
   getCompactPrompt,
+  appendKeptMessagesCompactNote,
   getCompactUserSummaryMessage,
   getPartialCompactPrompt,
 } from './prompt.js'
@@ -1427,10 +1428,14 @@ export async function partialCompactConversation(
       context,
     )
 
+    const annotatedSummaryMessages =
+      direction === 'up_to' && messagesToKeep.length > 0
+        ? summaryMessages.map(appendKeptMessagesCompactNote)
+        : summaryMessages
     // 'from': prefix-preserving → boundary; 'up_to': suffix → last summary
     const anchorUuid =
       direction === 'up_to'
-        ? (summaryMessages.at(-1)?.uuid ?? boundaryMarker.uuid)
+        ? (annotatedSummaryMessages.at(-1)?.uuid ?? boundaryMarker.uuid)
         : boundaryMarker.uuid
     return {
       boundaryMarker: annotateBoundaryWithPreservedSegment(
@@ -1438,7 +1443,7 @@ export async function partialCompactConversation(
         anchorUuid,
         messagesToKeep,
       ),
-      summaryMessages,
+      summaryMessages: annotatedSummaryMessages,
       messagesToKeep,
       attachments: postCompactFileAttachments,
       hookResults: hookMessages,

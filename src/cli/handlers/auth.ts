@@ -37,6 +37,7 @@ import { isRunningOnHomespace } from '../../utils/envUtils.js'
 import { errorMessage } from '../../utils/errors.js'
 import { logError } from '../../utils/log.js'
 import { getAPIProvider } from '../../utils/model/providers.js'
+import { logOTelAuthEvent } from '../../utils/sessionSlots.js'
 import { getInitialSettings } from '../../utils/settings/settings.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import {
@@ -82,6 +83,7 @@ export async function installOAuthTokens(
 
   const storageResult = saveOAuthTokensIfNeeded(tokens)
   clearOAuthTokenCache()
+  logOTelAuthEvent({ action: 'login', success: true, authMethod: 'oauth' })
 
   if (storageResult.warning) {
     logEvent('tengu_oauth_storage_warning', {
@@ -197,6 +199,12 @@ export async function authLogin({
       process.stdout.write('Login successful.\n')
       process.exit(0)
     } catch (err) {
+      logOTelAuthEvent({
+        action: 'login',
+        success: false,
+        authMethod: 'oauth',
+        error: err,
+      })
       logError(err)
       const sslHint = getSSLErrorHint(err)
       process.stderr.write(
@@ -241,6 +249,12 @@ export async function authLogin({
     process.stdout.write('Login successful.\n')
     process.exit(0)
   } catch (err) {
+    logOTelAuthEvent({
+      action: 'login',
+      success: false,
+      authMethod: 'oauth',
+      error: err,
+    })
     logError(err)
     const sslHint = getSSLErrorHint(err)
     process.stderr.write(
@@ -342,6 +356,7 @@ export async function authStatus(opts: {
 }
 
 export async function authLogout(): Promise<void> {
+  logOTelAuthEvent({ action: 'logout', success: true, authMethod: 'oauth' })
   try {
     await performLogout({ clearOnboarding: false })
   } catch {

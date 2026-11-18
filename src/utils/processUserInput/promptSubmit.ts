@@ -139,23 +139,51 @@ export function createArrivedLatch(reason: string): {
   }
 }
 
+export const PROMPT_CHECK_INTERRUPTED =
+  'the turn was interrupted while the prompt was checked'
+
 export async function raceArrived<T>(
   latch: ReturnType<typeof createArrivedLatch>,
   answered: Promise<T>,
-): Promise<{ arrived: ArrivedValue } | { answered: T }> {
-  await Promise.race([
-    latch.arrived,
-    answered.then(
-      () => {
-        return
-      },
-      () => {
-        return
-      },
-    ),
-  ])
+  signal?: AbortSignal,
+): Promise<{ arrived: ArrivedValue } | { answered: T } | undefined> {
+  if (signal?.aborted && !latch.hasArrived()) {
+    latch[Symbol.dispose]()
+    return undefined
+  }
+  let onAbort: (() => void) | undefined
+  const abortPromise = signal
+    ? new Promise<void>(resolve => {
+        if (signal.aborted) {
+          resolve()
+          return
+        }
+        onAbort = () => resolve()
+        signal.addEventListener('abort', onAbort, { once: true })
+      })
+    : undefined
+
+  try {
+    await Promise.race([
+      latch.arrived,
+      answered.then(
+        () => {
+          return
+        },
+        () => {
+          return
+        },
+      ),
+      ...(abortPromise ? [abortPromise] : []),
+    ])
+  } finally {
+    if (signal && onAbort) {
+      signal.removeEventListener('abort', onAbort)
+    }
+  }
   if (latch.hasArrived()) return { arrived: await latch.arrived }
   latch[Symbol.dispose]()
+  if (signal?.aborted) return undefined
   return { answered: await answered }
 }
 
@@ -753,6 +781,9 @@ export type PromptSubmitEnterValue =
       context?: string[]
       wasCancelled?: boolean
     }
+  | {
+      wasCancelled: true
+    }
 
 export type PromptSubmitOutcome =
   | {
@@ -820,8 +851,21 @@ export async function runPromptSubmit({
     if (latch) await latch
   }
 
-  const arrivedLatch = createArrivedLatch(NOT_SUBMITTED)
+  const signal = context.abortController.signal
   const screen = snapshotPromptScreen(context)
+  const hasScreener =
+    screen.hooks !== '' ||
+    screen.plugins !== '' ||
+    hasMatchingFunctionHook('prompt.submit')
+  if (hasScreener && signal.aborted) {
+    queued?.settle({ drop: PROMPT_CHECK_INTERRUPTED })
+    return {
+      kind: 'return',
+      result: { messages: [], shouldQuery: false },
+      value: { wasCancelled: true },
+    }
+  }
+  const arrivedLatch = createArrivedLatch(NOT_SUBMITTED)
   const cloneResult = (base: SubmitResult): SubmitResult => ({
     ...base,
     messages: [...base.messages],
@@ -883,7 +927,36 @@ export async function runPromptSubmit({
   })
 
   const answered = runFunctionHookChain('prompt.submit', payload, tail)
-  const raced = await raceArrived(arrivedLatch, answered)
+  const raced = await raceArrived(arrivedLatch, answered, signal)
+
+  if (raced === undefined) {
+    if (lastPass?.outcome.kind === 'blocking') {
+      commitScratch(lastPass.scratch)
+      const ended = {
+        messages: lastPass.outcome.messages,
+        shouldQuery: false,
+        allowedTools: lastPass.outcome.allowedTools,
+      }
+      logForDebugging(
+        'prompt.submit: interrupted while a hook checked the prompt: the block given beneath it stands',
+      )
+      queued?.settle({ drop: 'blocking' })
+      return {
+        kind: 'return',
+        result: ended,
+        value: { ended, text, wasCancelled: true },
+      }
+    }
+    logForDebugging(
+      'prompt.submit: interrupted while a hook checked the prompt: no verdict',
+    )
+    queued?.settle({ drop: PROMPT_CHECK_INTERRUPTED })
+    return {
+      kind: 'return',
+      result: { messages: [], shouldQuery: false },
+      value: { wasCancelled: true },
+    }
+  }
 
   if ('arrived' in raced) {
     const arrived = raced.arrived

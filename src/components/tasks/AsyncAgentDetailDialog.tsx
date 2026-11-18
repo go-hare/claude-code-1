@@ -25,6 +25,17 @@ type Props = {
   killAllAgentsShortcut?: string;
 };
 
+/**
+ * Official 2.1.293 (#298): fall back to `agent.agentType` when
+ * `selectedAgent` is cleared after the agent finishes, instead of `'agent'`.
+ */
+export function getAsyncAgentDetailAgentType(agent: {
+  selectedAgent?: { agentType: string };
+  agentType: string;
+}): string {
+  return agent.selectedAgent?.agentType ?? agent.agentType;
+}
+
 function canStopCompletedAgent(agent: DeepImmutable<LocalAgentTaskState>): boolean {
   return (
     agent.status === 'completed' &&
@@ -102,7 +113,7 @@ export function AsyncAgentDetailDialog({
 
   const title = (
     <Text>
-      {agent.selectedAgent?.agentType ?? 'agent'} › {agent.description || 'Async agent'}
+      {getAsyncAgentDetailAgentType(agent)} › {agent.description || 'Async agent'}
     </Text>
   );
 

@@ -125,7 +125,11 @@ import { getBranch } from './git.js'
 import { gracefulShutdownSync, isShuttingDown } from './gracefulShutdown.js'
 import { parseJSONL } from './json.js'
 import { logError } from './log.js'
-import { extractTag, isCompactBoundaryMessage } from './messages.js'
+import {
+  extractTag,
+  isCompactBoundaryMessage,
+  rewriteResumedSubagentShutdownToolResults,
+} from './messages.js'
 import { sanitizePath } from './path.js'
 import {
   dirBelongsToProject,
@@ -295,6 +299,77 @@ function getEntrypoint(): string | undefined {
 
 let project: Project | null = null
 let cleanupRegistered = false
+let exitReStampRan = false
+let writerDegradedInfo: { code: string; source: string } | null = null
+const exitDrains = new Set<() => void | Promise<void>>()
+
+export function registerSessionExitDrain(
+  fn: () => void | Promise<void>,
+): () => void {
+  exitDrains.add(fn)
+  return () => {
+    exitDrains.delete(fn)
+  }
+}
+
+export function noteTranscriptWriterDegraded(
+  code: string,
+  source: string,
+): void {
+  if (writerDegradedInfo === null) {
+    writerDegradedInfo = { code, source }
+  }
+}
+
+export function getTranscriptWriterDegraded(): {
+  code: string
+  source: string
+} | null {
+  return writerDegradedInfo
+}
+
+/**
+ * Official XAs — synchronous exit re-stamp (called both from `process.on('exit')`
+ * and from `flushSessionStorageAtExit` finally, guarded by one-shot `exitReStampRan`).
+ */
+export function syncExitReStamp(): void {
+  if (exitReStampRan) return
+  exitReStampRan = true
+  try {
+    project?.reAppendSessionMetadata()
+  } catch {
+    // Best-effort — don't let metadata re-append crash process exit
+  }
+}
+
+/**
+ * Official f6a — async exit flush registered via `registerCleanup` and called on
+ * graceful shutdown so the last messages of a session are never lost on quit.
+ */
+export async function flushSessionStorageAtExit(): Promise<void> {
+  try {
+    if (exitDrains.size > 0) {
+      await Promise.race([
+        Promise.allSettled(
+          [...exitDrains].map(fn => Promise.resolve().then(fn)),
+        ),
+        new Promise<void>(resolve => setTimeout(resolve, 500)),
+      ])
+    }
+    await project?.flush()
+  } catch {
+    // Best-effort flush at exit
+  } finally {
+    syncExitReStamp()
+    const degraded = writerDegradedInfo
+    if (degraded !== null) {
+      logForDebugging(
+        `flushSessionStorageAtExit: transcript writer degraded (${degraded.code} at ${degraded.source}) — entries since the failure window may be missing from the transcript`,
+        { level: 'error' },
+      )
+    }
+  }
+}
 
 export function getProject(): Project {
   if (!project) {
@@ -302,20 +377,10 @@ export function getProject(): Project {
 
     // Register flush as a cleanup handler (only once)
     if (!cleanupRegistered) {
-      registerCleanup(async () => {
-        // Flush queued writes first, then re-append session metadata
-        // (customTitle, tag) so they always appear in the last 64KB tail
-        // window. readLiteMetadata only reads the tail to extract these
-        // fields — if enough messages are appended after a /rename, the
-        // custom-title entry gets pushed outside the window and --resume
-        // shows the auto-generated firstPrompt instead.
-        await project?.flush()
-        try {
-          project?.reAppendSessionMetadata()
-        } catch {
-          // Best-effort — don't let metadata re-append crash the cleanup
-        }
-      })
+      registerCleanup(flushSessionStorageAtExit)
+      if (!process.listeners('exit').includes(syncExitReStamp)) {
+        process.on('exit', syncExitReStamp)
+      }
       cleanupRegistered = true
     }
   }
@@ -328,6 +393,8 @@ export function getProject(): Project {
  */
 export function resetProjectFlushStateForTesting(): void {
   project?._resetFlushState()
+  exitReStampRan = false
+  writerDegradedInfo = null
 }
 
 /**
@@ -337,6 +404,8 @@ export function resetProjectFlushStateForTesting(): void {
  */
 export function resetProjectForTesting(): void {
   project = null
+  exitReStampRan = false
+  writerDegradedInfo = null
 }
 
 export function setSessionFileForTesting(path: string): void {
@@ -2618,6 +2687,122 @@ export async function flushSessionStorage(): Promise<void> {
   await getProject().flush()
 }
 
+// ── Official CLAUDE_CODE_TRANSCRIPT_LOCAL_GC (#530, #543) ────────────────────
+const LOW_YIELD_COMPACT_RATIO = 0.1
+let localGcEnabledState = false
+let lowYieldCompactSkipEnabledState = false
+
+export function setLocalGcEnabled(enabled: boolean): void {
+  localGcEnabledState = enabled
+}
+
+export function isLocalGcEnabled(): boolean {
+  return (
+    localGcEnabledState ||
+    isEnvTruthy(process.env.CLAUDE_CODE_TRANSCRIPT_LOCAL_GC)
+  )
+}
+
+export function setLowYieldCompactSkipEnabled(enabled: boolean): void {
+  lowYieldCompactSkipEnabledState = enabled
+}
+
+export function isLowYieldCompactSkipEnabled(): boolean {
+  return lowYieldCompactSkipEnabledState
+}
+
+/**
+ * Official $Yt — returns true when reclaimableBytes < bytesBefore * 0.1.
+ */
+export function isLowYieldCompact(
+  bytesBefore: number,
+  reclaimableBytes: number,
+): boolean {
+  return reclaimableBytes < bytesBefore * LOW_YIELD_COMPACT_RATIO
+}
+
+/**
+ * Official skipLowYieldCompact — skip rewriting large transcript files when
+ * lowYieldCompactSkipEnabled is on and reclaiming would free under 10%.
+ */
+export function shouldSkipLowYieldCompact(
+  bytesBefore: number,
+  reclaimableBytes: number,
+): boolean {
+  if (!lowYieldCompactSkipEnabledState) return false
+  if (!isLowYieldCompact(bytesBefore, reclaimableBytes)) return false
+  logEvent('tengu_transcript_compact_skipped', {
+    bytesBefore,
+    reclaimableBytes,
+  })
+  return true
+}
+
+/**
+ * Official #530 — split JSONL transcript strictly on `\n` (and strip trailing
+ * `\r`), NEVER on Unicode line/paragraph separators U+2028 / U+2029, so
+ * messages containing U+2028 or U+2029 are preserved intact during local GC.
+ */
+export function splitTranscriptJsonlLines(content: string): string[] {
+  const lines: string[] = []
+  let start = 0
+  for (let i = 0; i <= content.length; i++) {
+    if (i === content.length || content.charCodeAt(i) === 10) {
+      let line = content.slice(start, i)
+      if (line.endsWith('\r')) {
+        line = line.slice(0, -1)
+      }
+      if (line.length > 0) {
+        lines.push(line)
+      }
+      start = i + 1
+    }
+  }
+  return lines
+}
+
+/**
+ * Compact a transcript JSONL string by keeping only reachable/non-superseded
+ * lines while preserving U+2028 / U+2029 and skipping low-yield rewrites (<10%).
+ */
+export function compactTranscriptJsonl(
+  content: string,
+  shouldKeepLine: (line: string, index: number) => boolean,
+): {
+  compacted: string
+  skippedLowYield: boolean
+  bytesBefore: number
+  reclaimableBytes: number
+} {
+  const bytesBefore = Buffer.byteLength(content, 'utf8')
+  const lines = splitTranscriptJsonlLines(content)
+  const kept: string[] = []
+  let keptBytes = 0
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!
+    if (shouldKeepLine(line, i)) {
+      kept.push(line)
+      keptBytes += Buffer.byteLength(line, 'utf8') + 1
+    }
+  }
+  const reclaimableBytes = Math.max(0, bytesBefore - keptBytes)
+  if (shouldSkipLowYieldCompact(bytesBefore, reclaimableBytes)) {
+    return {
+      compacted: content,
+      skippedLowYield: true,
+      bytesBefore,
+      reclaimableBytes,
+    }
+  }
+  const compacted = kept.length > 0 ? `${kept.join('\n')}\n` : ''
+  return {
+    compacted,
+    skippedLowYield: false,
+    bytesBefore,
+    reclaimableBytes,
+  }
+}
+
 export async function hydrateRemoteSession(
   sessionId: string,
   ingressUrl: string,
@@ -4322,20 +4507,25 @@ export function getCurrentSessionAgentColor(): string | undefined {
  */
 export async function recordForkBoundaryLeaf(
   leafUuid: string | null | undefined,
-  options?: { rewound?: boolean },
+  options?: { rewound?: boolean; cutUuid?: string },
 ): Promise<void> {
   const project = getProject()
-  const entry: LastPromptMessage = {
-    type: 'last-prompt',
+  const entry = {
+    type: 'last-prompt' as const,
     sessionId: getSessionId() as UUID,
     ...(project.currentSessionLastPrompt
       ? { lastPrompt: project.currentSessionLastPrompt }
       : {}),
     leafUuid: leafUuid ?? null,
     explicit: true,
-    ...(options?.rewound ? { rewound: true } : {}),
+    ...(options?.rewound
+      ? {
+          rewound: true,
+          ...(options.cutUuid ? { cutUuid: options.cutUuid } : {}),
+        }
+      : {}),
     timestamp: new Date().toISOString(),
-  }
+  } as LastPromptMessage
   await project.appendEntry(entry)
 }
 
@@ -6214,6 +6404,81 @@ export async function loadTranscriptFile(
   // Last-wins — later entries supersede.
   let contextCollapseSnapshot: ContextCollapseSnapshotEntry | undefined
 
+  // Official #437: track last-prompt rewind/checkpoint state so removed turns
+  // do not come back and a new prompt sent after /rewind is preserved.
+  let checkpointLeafUuid: UUID | undefined
+  let checkpointExplicit = false
+  let lastPromptWasRewound = false
+  let rewindCutUuid: UUID | undefined
+  let resetChain = false
+  let lastNonSidechainUuid: UUID | undefined
+  let postRewindRows: Map<UUID, UUID | null> | undefined
+
+  function isTypedUserPromptRow(msg: TranscriptMessage | undefined): boolean {
+    if (!msg || msg.type !== 'user') return false
+    const rec = msg as unknown as {
+      promptSource?: string
+      isMeta?: boolean
+    }
+    return (
+      rec.promptSource !== undefined &&
+      rec.promptSource !== 'system' &&
+      rec.isMeta !== true
+    )
+  }
+
+  function findPromptRoot(
+    startUuid: UUID,
+    cutUuid: UUID | undefined,
+  ): UUID | undefined {
+    const seen = new Set<UUID>()
+    let cur = messages.get(startUuid)
+    while (cur && cur.uuid !== cutUuid && !seen.has(cur.uuid)) {
+      const rec = cur as unknown as { promptSource?: string }
+      if (
+        (cur.type === 'user' && rec.promptSource !== undefined) ||
+        (cur.type === 'user' && cur.isMeta !== true) ||
+        !cur.parentUuid
+      ) {
+        return cur.uuid
+      }
+      seen.add(cur.uuid)
+      cur = messages.get(cur.parentUuid)
+    }
+    return undefined
+  }
+
+  function hasNewPromptPastRewind(
+    rows: Map<UUID, UUID | null> | undefined,
+    lastRowUuid: UUID,
+    cpUuid: UUID,
+    cutUuid: UUID | undefined,
+  ): boolean {
+    if (!rows) return false
+    let sawPrompt = false
+    let cur: UUID | null | undefined = lastRowUuid
+    for (let i = 0; cur && rows.has(cur) && i < rows.size; i++) {
+      const msg = messages.get(cur)
+      if (
+        !msg ||
+        cur === cutUuid ||
+        (msg.parentUuid ?? null) !== rows.get(cur)
+      ) {
+        return false
+      }
+      if (
+        isTypedUserPromptRow(msg) ||
+        (msg.type === 'user' && msg.isMeta !== true)
+      ) {
+        sawPrompt = true
+      }
+      cur = msg.parentUuid
+    }
+    if (!sawPrompt || !cur || rows.has(cur)) return false
+    const root = findPromptRoot(cur, cutUuid)
+    return root !== undefined && root === findPromptRoot(cpUuid, cutUuid)
+  }
+
   try {
     // For large transcripts, avoid materializing megabytes of stale content.
     // Single forward chunked read: attribution-snapshot lines are skipped at
@@ -6388,7 +6653,17 @@ export async function loadTranscriptFile(
           if (entry.parentUuid && progressBridge.has(entry.parentUuid)) {
             entry.parentUuid = progressBridge.get(entry.parentUuid) ?? null
           }
+          const isNewMessage = !messages.has(entry.uuid)
           messages.set(entry.uuid, entry)
+          if (!entry.isSidechain) {
+            if (isNewMessage) {
+              postRewindRows?.set(entry.uuid, entry.parentUuid ?? null)
+            }
+            lastNonSidechainUuid = entry.uuid
+            checkpointExplicit = false
+            resetChain = false
+            lastPromptWasRewound = false
+          }
           // Compact boundary: prior marble-origami-commit entries reference
           // messages that won't be in the post-boundary chain. The >5MB
           // backward-scan path discards them naturally by never reading the
@@ -6399,6 +6674,33 @@ export async function loadTranscriptFile(
           if (isCompactBoundaryMessage(entry)) {
             contextCollapseCommits.length = 0
             contextCollapseSnapshot = undefined
+            checkpointLeafUuid = undefined
+            checkpointExplicit = false
+          }
+        } else if (entry.type === 'last-prompt') {
+          const lp = entry as LastPromptMessage & { cutUuid?: UUID }
+          if (lp.leafUuid) {
+            rewindCutUuid =
+              lp.rewound === true
+                ? lp.cutUuid
+                : lastPromptWasRewound && lp.leafUuid === checkpointLeafUuid
+                  ? rewindCutUuid
+                  : undefined
+            checkpointExplicit =
+              lp.explicit === true ||
+              (checkpointExplicit && lp.leafUuid === checkpointLeafUuid)
+            lastPromptWasRewound =
+              lp.rewound === true ||
+              (lastPromptWasRewound && lp.leafUuid === checkpointLeafUuid)
+            postRewindRows = lp.rewound === true ? new Map() : undefined
+            checkpointLeafUuid = lp.leafUuid as UUID
+            resetChain = false
+          } else if (lp.leafUuid === null && lp.explicit === true) {
+            resetChain = true
+            rewindCutUuid = lp.rewound === true ? lp.cutUuid : undefined
+            checkpointLeafUuid = undefined
+            checkpointExplicit = false
+            lastPromptWasRewound = false
           }
         } else if (entry.type === 'summary' && entry.leafUuid) {
           summaries.set(entry.leafUuid, entry.summary)
@@ -6537,7 +6839,46 @@ export async function loadTranscriptFile(
   const leafUuids = new Set<UUID>()
   let hasCycle = false
 
-  if (getFeatureValue_CACHED_MAY_BE_STALE('tengu_pebble_leaf_prune', false)) {
+  if (!opts?.keepAllLeaves && resetChain) {
+    // Rewound to before the first message: return empty leafUuids so removed
+    // turns do not come back on resume.
+  } else if (
+    !opts?.keepAllLeaves &&
+    checkpointLeafUuid &&
+    messages.has(checkpointLeafUuid)
+  ) {
+    let selectedUuid: UUID = checkpointLeafUuid
+    if (
+      lastNonSidechainUuid &&
+      lastNonSidechainUuid !== checkpointLeafUuid &&
+      hasNewPromptPastRewind(
+        postRewindRows,
+        lastNonSidechainUuid,
+        checkpointLeafUuid,
+        rewindCutUuid,
+      )
+    ) {
+      selectedUuid = lastNonSidechainUuid
+    }
+    const seen = new Set<UUID>()
+    let current: TranscriptMessage | undefined = messages.get(selectedUuid)
+    while (current) {
+      if (seen.has(current.uuid)) {
+        hasCycle = true
+        break
+      }
+      seen.add(current.uuid)
+      if (current.type === 'user' || current.type === 'assistant') {
+        leafUuids.add(current.uuid)
+        break
+      }
+      current = current.parentUuid
+        ? messages.get(current.parentUuid)
+        : undefined
+    }
+  } else if (
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_pebble_leaf_prune', false)
+  ) {
     // Build a set of UUIDs that have user/assistant children
     // (these are mid-conversation nodes, not dead ends)
     const hasUserAssistantChild = new Set<UUID>()
@@ -7125,9 +7466,10 @@ export async function getAgentTranscript(agentId: AgentId): Promise<{
     const agentTranscript = transcript.filter(msg => msg.agentId === agentId)
 
     return {
-      // Convert TranscriptMessage[] to Message[]
-      messages: agentTranscript.map(
-        ({ isSidechain, parentUuid, ...msg }) => msg,
+      // Convert TranscriptMessage[] to Message[] and rewrite shutdown-interrupted
+      // tool_result blocks (#499 SEA HKr/bxn)
+      messages: rewriteResumedSubagentShutdownToolResults(
+        agentTranscript.map(({ isSidechain, parentUuid, ...msg }) => msg),
       ),
       contentReplacements: agentContentReplacements.get(agentId) ?? [],
     }

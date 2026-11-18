@@ -28,6 +28,16 @@ export type PluginErrorExtended =
       message: string;
     }
   | {
+      type: 'hooks-left-out-by-name';
+      source: string;
+      heldBy: string;
+    }
+  | {
+      type: 'hooks-module-left-out-by-name';
+      source: string;
+      heldBy: string;
+    }
+  | {
       type: 'autoupdate-disabled-by-policy';
       source: string;
       plugin?: string;
@@ -126,6 +136,10 @@ export function formatErrorMessage(error: PluginErrorExtended): string {
       return error.error;
     case 'synced-plugin-shadowed':
       return formatSyncedPluginShadowedStatus(error.source, error.shadowedBy);
+    case 'hooks-left-out-by-name':
+      return `Its hooks.json hooks do not run. "${error.heldBy}" holds the same plugin name and comes first`;
+    case 'hooks-module-left-out-by-name':
+      return `Its hooks module does not load. "${error.heldBy}" holds the same plugin name and comes first`;
   }
   const _exhaustive: never = error;
   return getPluginErrorMessage(_exhaustive);
@@ -226,6 +240,10 @@ export function getErrorGuidance(error: PluginErrorExtended): string | null {
       return null;
     case 'synced-plugin-shadowed':
       return formatSyncedPluginShadowedMessage(error.source, error.shadowedBy);
+    case 'hooks-left-out-by-name':
+      return `One plugin per name runs hooks.json hooks, so this copy's run only while "${error.heldBy}" is disabled. Disable or uninstall the copy you don't need`;
+    case 'hooks-module-left-out-by-name':
+      return `One plugin per name loads a hooks module, so this copy's loads only while "${error.heldBy}" is disabled. Disable or uninstall the copy you don't need`;
   }
   const _exhaustive: never = error;
   return null;

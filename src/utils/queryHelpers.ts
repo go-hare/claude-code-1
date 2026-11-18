@@ -526,9 +526,22 @@ export function findToolByNameWithAliases(
   tools: Tools,
   name: string,
   aliases?: Record<string, string>,
+  visited?: Set<string>,
 ): ReturnType<typeof findToolByName> {
-  if (aliases && Object.hasOwn(aliases, name) && aliases[name] !== name) {
-    return findToolByNameWithAliases(tools, aliases[name]!, aliases)
+  if (
+    aliases &&
+    Object.hasOwn(aliases, name) &&
+    aliases[name] !== name &&
+    !visited?.has(name)
+  ) {
+    const nextVisited = visited ?? new Set<string>()
+    nextVisited.add(name)
+    return findToolByNameWithAliases(
+      tools,
+      aliases[name]!,
+      aliases,
+      nextVisited,
+    )
   }
   return findToolByName(tools, name)
 }

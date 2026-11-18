@@ -21,6 +21,7 @@ import { hasPermissionsToUseTool } from '../utils/permissions/permissions.js'
 import { setCwd } from '../utils/Shell.js'
 import { jsonStringify } from '../utils/slowOperations.js'
 import { credentialsStoreFor } from '../utils/storageV5/credentialsStore.js'
+import { getTaskOutputPath } from '../utils/task/diskOutput.js'
 import { formatZodValidationError, getErrorParts } from '../utils/toolErrors.js'
 import { zodToJsonSchema } from '../utils/zodToJsonSchema.js'
 
@@ -52,6 +53,40 @@ export function mcpServeToolStorage(storageV5: unknown): {
   return {
     storageV5,
     credentials: credentialsStoreFor(storageV5),
+  }
+}
+
+/**
+ * Gold `sJr` tools/call result serializer (#411): when a tool returns a
+ * `backgroundTaskId`, include `backgroundOutputPath` so MCP callers can read
+ * the background Bash/task output file directly.
+ */
+export function formatMcpServeToolResult(
+  finalResult: string | { data: unknown },
+): CallToolResult {
+  const resultText =
+    typeof finalResult === 'string'
+      ? finalResult
+      : jsonStringify(
+          typeof finalResult.data === 'object' &&
+            finalResult.data !== null &&
+            'backgroundTaskId' in finalResult.data &&
+            typeof finalResult.data.backgroundTaskId === 'string'
+            ? {
+                ...finalResult.data,
+                backgroundOutputPath: getTaskOutputPath(
+                  finalResult.data.backgroundTaskId,
+                ),
+              }
+            : finalResult.data,
+        )
+  return {
+    content: [
+      {
+        type: 'text' as const,
+        text: resultText,
+      },
+    ],
   }
 }
 
@@ -216,17 +251,7 @@ export async function startMCPServer(
           }),
         )
 
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text:
-                typeof finalResult === 'string'
-                  ? finalResult
-                  : jsonStringify(finalResult.data),
-            },
-          ],
-        }
+        return formatMcpServeToolResult(finalResult)
       } catch (error) {
         logError(error)
 

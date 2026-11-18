@@ -278,3 +278,192 @@ export function runOrphanCronResumePass(
     skipped: r.skipped,
   }
 }
+
+// ── Official #213: pending /loop ScheduleWakeup persistence & resume (Vwi/aAn/Oi) ──
+
+import { readFile, rm, writeFile } from 'fs/promises'
+import { join } from 'path'
+
+export const PENDING_WAKEUP_FILENAME = '.pending-wakeup'
+const PENDING_WAKEUP_MAX_BYTES = 1024
+
+export type PendingWakeupRecord = {
+  toolUseId: string
+  scheduledFor: number
+  chainStartedAt: number
+}
+
+export type PendingWakeupCall = {
+  toolUseId: string
+  createdAt: number
+  input: { prompt?: unknown; reason?: unknown }
+}
+
+export type PendingWakeupResult = {
+  stopped?: unknown
+  scheduledFor?: unknown
+  plugin?: unknown
+}
+
+export async function readPendingWakeup(
+  sessionDir: string,
+): Promise<PendingWakeupRecord | null> {
+  try {
+    const raw = await readFile(
+      join(sessionDir, PENDING_WAKEUP_FILENAME),
+      'utf8',
+    )
+    if (!raw || Buffer.byteLength(raw, 'utf8') > PENDING_WAKEUP_MAX_BYTES) {
+      return null
+    }
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    if (
+      typeof parsed.toolUseId !== 'string' ||
+      parsed.toolUseId.length < 1 ||
+      parsed.toolUseId.length > 256 ||
+      typeof parsed.scheduledFor !== 'number' ||
+      !Number.isInteger(parsed.scheduledFor) ||
+      parsed.scheduledFor <= 0 ||
+      typeof parsed.chainStartedAt !== 'number' ||
+      !Number.isInteger(parsed.chainStartedAt) ||
+      parsed.chainStartedAt < 0
+    ) {
+      return null
+    }
+    return {
+      toolUseId: parsed.toolUseId,
+      scheduledFor: parsed.scheduledFor,
+      chainStartedAt: parsed.chainStartedAt,
+    }
+  } catch {
+    return null
+  }
+}
+
+export async function writePendingWakeup(
+  sessionDir: string,
+  record: PendingWakeupRecord | undefined,
+): Promise<void> {
+  const filePath = join(sessionDir, PENDING_WAKEUP_FILENAME)
+  if (record === undefined) {
+    await rm(filePath, { force: true }).catch(() => {})
+    return
+  }
+  await writeFile(filePath, JSON.stringify(record), 'utf8')
+}
+
+export type ResurrectPendingWakeupOutcome =
+  | { kind: 'none' }
+  | { kind: 'rearmed'; scheduledFor: number; prompt: string }
+  | {
+      kind: 'past_due_notified'
+      toolUseId: string
+      lateByMs: number
+      summary: string
+    }
+
+/**
+ * Official Oi — restore a pending /loop ScheduleWakeup after a background
+ * session process restarts (e.g. after a crash).
+ */
+export async function resurrectPendingWakeupFromScan(opts: {
+  sessionDir: string
+  wakeupCalls: readonly PendingWakeupCall[]
+  wakeupCallsAtLastLoopFire?: number
+  results: ReadonlyMap<string, PendingWakeupResult>
+  notifiedTaskIds: ReadonlySet<string>
+  /** SEA Oi `BV() || jie() !== null` — skip past-due notice if a new loop is already active. */
+  hasActiveLoop?: boolean
+  cronEnabled?: boolean
+  nowMs?: number
+  maxDelaySeconds?: number
+  recurringMaxAgeMs?: number
+  rearmWakeup: (args: {
+    scheduledFor: number
+    prompt: string
+    reason?: string
+    chainStartedAt: number
+    plugin?: string
+  }) => void
+  onPastDueNotification?: (notification: {
+    toolUseId: string
+    summary: string
+    body: string
+  }) => void
+}): Promise<ResurrectPendingWakeupOutcome> {
+  if (opts.cronEnabled === false) return { kind: 'none' }
+  const pending = await readPendingWakeup(opts.sessionDir)
+  if (pending === null) return { kind: 'none' }
+
+  let idx = -1
+  for (let i = opts.wakeupCalls.length - 1; i >= 0; i--) {
+    if (opts.results.has(opts.wakeupCalls[i]!.toolUseId)) {
+      idx = i
+      break
+    }
+  }
+  if (idx === -1) return { kind: 'none' }
+  const call = opts.wakeupCalls[idx]!
+  const res = opts.results.get(call.toolUseId)
+  const prompt = call.input.prompt
+  const reason = call.input.reason
+  const now = opts.nowMs ?? Date.now()
+  const maxDelayMs = (opts.maxDelaySeconds ?? 3600) * 2 * 1000
+
+  if (
+    !res ||
+    call.toolUseId !== pending.toolUseId ||
+    res.stopped === true ||
+    res.scheduledFor !== pending.scheduledFor ||
+    typeof prompt !== 'string' ||
+    !(pending.scheduledFor - call.createdAt <= maxDelayMs)
+  ) {
+    return { kind: 'none' }
+  }
+
+  if (pending.scheduledFor <= now) {
+    if (
+      opts.notifiedTaskIds.has(call.toolUseId) ||
+      (opts.wakeupCallsAtLastLoopFire ?? -1) > idx ||
+      opts.hasActiveLoop === true
+    ) {
+      return { kind: 'none' }
+    }
+    const lateByMs = now - pending.scheduledFor
+    const lateText =
+      lateByMs < 60_000
+        ? 'less than a minute'
+        : `${Math.round(lateByMs / 60_000)}m`
+    const summary = `This session restarted ${lateText} after its next /loop wakeup was due, so that wakeup will not fire. The loop stays stopped until Claude schedules it again: reply to continue it.`
+    const body = `The wakeup scheduled by the ScheduleWakeup call this notification names was still pending when this session's process ended, and its fire time passed before a new process took the session over. It will not fire. A ScheduleWakeup call made since the new process started is not affected. Otherwise nothing wakes this session for the loop: call ScheduleWakeup again only if the loop is still wanted, and when the conversation does not make that clear, ask the user first.`
+    opts.onPastDueNotification?.({ toolUseId: call.toolUseId, summary, body })
+    return {
+      kind: 'past_due_notified',
+      toolUseId: call.toolUseId,
+      lateByMs,
+      summary,
+    }
+  }
+
+  const maxAgeMs =
+    opts.recurringMaxAgeMs ??
+    DEFAULT_CRON_JITTER_CONFIG.recurringMaxAgeMs ??
+    604_800_000
+  const chainStartedAt =
+    maxAgeMs > 0
+      ? Math.max(pending.chainStartedAt, call.createdAt - maxAgeMs)
+      : pending.chainStartedAt
+
+  opts.rearmWakeup({
+    scheduledFor: pending.scheduledFor,
+    prompt,
+    reason: typeof reason === 'string' ? reason : undefined,
+    chainStartedAt,
+    plugin: typeof res.plugin === 'string' ? res.plugin : undefined,
+  })
+  return {
+    kind: 'rearmed',
+    scheduledFor: pending.scheduledFor,
+    prompt,
+  }
+}

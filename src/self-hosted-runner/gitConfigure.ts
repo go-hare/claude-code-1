@@ -632,3 +632,272 @@ export async function restoreGitHookStubs(
     )
   }
 }
+
+export type OperatorGitTlsVar = { name: string; value: string }
+export type OperatorGitTls = {
+  certificateFile: OperatorGitTlsVar[]
+  skipVerification: OperatorGitTlsVar[]
+}
+export type GovernedGitRouting = {
+  governedHosts?: string[]
+  directHosts?: string[]
+  mountBaseUrl: string
+  pushBaseUrl?: string
+}
+export type TrustBundleState =
+  | { status: 'built'; path: string; certificatesLeftOut?: number }
+  | {
+      status: 'unavailable'
+      reason:
+        | 'variable_unset'
+        | 'file_unreadable'
+        | 'file_too_large'
+        | 'file_not_pem'
+        | 'file_other_certificate_kinds'
+        | 'bundle_write_failed'
+        | 'no_system_roots'
+        | 'shared_with_other_sessions'
+    }
+
+export type GitTlsSessionState = {
+  operator: OperatorGitTls
+  routing: GovernedGitRouting | undefined
+  trustBundlePath: string
+  trustBundle: TrustBundleState
+  otherSessionsShareTheAccount: boolean
+  anySourceOnGitMount: boolean
+}
+
+function collectEnvCaseAware(
+  env: NodeJS.ProcessEnv,
+  name: string,
+  caseInsensitive: boolean,
+): OperatorGitTlsVar[] {
+  const out: OperatorGitTlsVar[] = []
+  for (const [k, v] of Object.entries(env)) {
+    if (v === undefined) continue
+    if (k === name) out.unshift({ name: k, value: v })
+    else if (caseInsensitive && k.toUpperCase() === name) {
+      out.push({ name: k, value: v })
+    }
+  }
+  return out
+}
+
+/** densable `H$i` */
+export function resolveOperatorGitTls(
+  env: NodeJS.ProcessEnv,
+  caseInsensitive = process.platform === 'win32',
+): OperatorGitTls {
+  return {
+    certificateFile: collectEnvCaseAware(
+      env,
+      'GIT_SSL_CAINFO',
+      caseInsensitive,
+    ),
+    skipVerification: collectEnvCaseAware(
+      env,
+      'GIT_SSL_NO_VERIFY',
+      caseInsensitive,
+    ),
+  }
+}
+
+function unsetVars(vars: OperatorGitTlsVar[]): Record<string, undefined> {
+  const out: Record<string, undefined> = {}
+  for (const { name } of vars) out[name] = undefined
+  return out
+}
+
+function mountUrlOrigins(routing: GovernedGitRouting): string[] {
+  const set = new Set<string>()
+  for (const u of [routing.mountBaseUrl, routing.pushBaseUrl]) {
+    if (u && URL.canParse(u)) {
+      for (const candidate of [new URL(u).origin, u]) {
+        if (!candidate.includes('=')) set.add(candidate)
+      }
+    }
+  }
+  return [...set]
+}
+
+/** densable `GDn` — compute envOverrides and -c entries for prep/hook/child */
+export function computeGovernedGitTls(opts: {
+  role: 'prep' | 'resume' | 'outcome' | 'hook' | 'child'
+  operator: OperatorGitTls
+  routing: GovernedGitRouting | undefined
+  target?: { url: string; mountRouted: boolean }
+  trustBundle?: TrustBundleState
+  reachesGitMount?: boolean
+}): {
+  envOverrides: Record<string, string | undefined>
+  commandScopeEntries: Array<[string, string]>
+} {
+  const hasCert = opts.operator.certificateFile.length > 0
+  const hasSkip = opts.operator.skipVerification.length > 0
+  if (!opts.routing) {
+    return { envOverrides: {}, commandScopeEntries: [] }
+  }
+  if (opts.role === 'hook') {
+    if (!opts.reachesGitMount) {
+      return { envOverrides: {}, commandScopeEntries: [] }
+    }
+    const origins = URL.canParse(opts.routing.mountBaseUrl)
+      ? mountUrlOrigins(opts.routing)
+      : []
+    const pinned = origins.map((u): [string, string] => [
+      `http.${u}.sslVerify`,
+      'true',
+    ])
+    const moveSkip = hasSkip && origins.length > 0
+    return {
+      envOverrides: hasSkip ? unsetVars(opts.operator.skipVerification) : {},
+      commandScopeEntries: moveSkip
+        ? [['http.sslVerify', 'false'], ...pinned]
+        : pinned,
+    }
+  }
+  if (
+    opts.role === 'prep' ||
+    opts.role === 'resume' ||
+    opts.role === 'outcome'
+  ) {
+    const target = opts.target
+    if (!target?.mountRouted) {
+      return { envOverrides: {}, commandScopeEntries: [] }
+    }
+    const skipOverrides = unsetVars(opts.operator.skipVerification)
+    const trustBundle = opts.trustBundle
+    if (
+      !hasCert ||
+      trustBundle?.status !== 'built' ||
+      !URL.canParse(target.url)
+    ) {
+      return { envOverrides: skipOverrides, commandScopeEntries: [] }
+    }
+    const origin = new URL(target.url).origin
+    const entries: Array<[string, string]> = [
+      '',
+      `${origin}.`,
+      `${target.url}.`,
+    ].map(suffix => [`http.${suffix}sslCAInfo`, trustBundle.path])
+    return {
+      envOverrides: {
+        ...unsetVars(opts.operator.certificateFile),
+        ...skipOverrides,
+      },
+      commandScopeEntries: entries,
+    }
+  }
+  return { envOverrides: {}, commandScopeEntries: [] }
+}
+
+/** densable `jd` */
+export function createGitTlsSessionState(
+  env: NodeJS.ProcessEnv,
+  caseInsensitive: boolean,
+  routing: GovernedGitRouting | undefined,
+  trustBundlePath: string,
+  otherSessionsShareTheAccount = false,
+): GitTlsSessionState {
+  return {
+    operator: resolveOperatorGitTls(env, caseInsensitive),
+    routing,
+    trustBundlePath,
+    trustBundle: { status: 'unavailable', reason: 'variable_unset' },
+    otherSessionsShareTheAccount,
+    anySourceOnGitMount: false,
+  }
+}
+
+/** densable `xi` */
+export async function prepareGitTlsTrustBundle(
+  state: GitTlsSessionState,
+  buildBundle: (
+    certFile: string,
+    trustBundlePath: string,
+  ) => Promise<TrustBundleState>,
+): Promise<void> {
+  const certFile = state.operator.certificateFile[0]?.value.trim()
+  if (!state.routing || !certFile) {
+    state.trustBundle = { status: 'unavailable', reason: 'variable_unset' }
+    return
+  }
+  if (state.otherSessionsShareTheAccount) {
+    state.trustBundle = {
+      status: 'unavailable',
+      reason: 'shared_with_other_sessions',
+    }
+    return
+  }
+  state.trustBundle = { status: 'unavailable', reason: 'bundle_write_failed' }
+  state.trustBundle = await buildBundle(certFile, state.trustBundlePath)
+}
+
+const TRUST_BUNDLE_UNAVAILABLE_REASONS: Record<
+  Exclude<
+    Extract<TrustBundleState, { status: 'unavailable' }>['reason'],
+    'variable_unset'
+  >,
+  { because: string; first: string }
+> = {
+  file_unreadable: {
+    because:
+      'the file the variable names could not be read (missing, not a regular file, or not readable by the runner account)',
+    first: 'Fix the path or its permissions: git cannot read it either.',
+  },
+  file_too_large: {
+    because: 'the file the variable names is larger than 1 MiB',
+    first:
+      "Cut it down to your company's own certificate authorities; the runner adds the public ones itself.",
+  },
+  file_not_pem: {
+    because: 'the file the variable names holds no certificate in PEM form',
+    first:
+      'Put your certificate authorities in it in PEM form: git cannot use it as it is either.',
+  },
+  file_other_certificate_kinds: {
+    because:
+      'the file the variable names holds a TRUSTED CERTIFICATE or X509 CERTIFICATE block, which the certificate file the runner builds cannot carry',
+    first:
+      'Give every certificate authority in it as a plain CERTIFICATE block (openssl x509 without -trustout).',
+  },
+  bundle_write_failed: {
+    because:
+      'the runner could not finish building the file in the _sessions folder under its --base-dir',
+    first: "Check that folder's permissions and free space.",
+  },
+  no_system_roots: {
+    because:
+      'this machine has no usable file of public certificate authorities at a standard Linux location',
+    first:
+      'On Linux, install or update your distribution ca-certificates package.',
+  },
+  shared_with_other_sessions: {
+    because:
+      "this runner runs more than one session at a time (--capacity above 1), and another session's process, which runs under the same account, could rewrite a certificate file the runner builds",
+    first:
+      "Run with --capacity 1, or put the public certificate authorities in the company's file yourself.",
+  },
+}
+
+/** densable `Xd` */
+export function formatRunnerMountTlsWarning(
+  state: GitTlsSessionState,
+): string | undefined {
+  if (
+    !state.routing ||
+    state.operator.certificateFile.length === 0 ||
+    state.trustBundle.status === 'built' ||
+    state.trustBundle.reason === 'variable_unset'
+  ) {
+    return undefined
+  }
+  const { because, first } =
+    TRUST_BUNDLE_UNAVAILABLE_REASONS[state.trustBundle.reason]
+  const otherwise =
+    state.trustBundle.reason === 'shared_with_other_sessions'
+      ? 'Otherwise unset'
+      : 'Otherwise add the public certificate authorities to the file, or unset'
+  return `[runner:warn] governed git: GIT_SSL_CAINFO is set on this runner and ${because}, so the runner did not build the certificate file it gives its own git for Anthropic-managed git (the git mount): the public certificate authorities plus yours. The runner's own fetches from the mount keep the variable as it is, and fail if the file holds only your company's certificate authority, because the mount presents a public certificate. ${first} ${otherwise} the variable for the runner and name your company's file for your own server in the machine's system git config (an http.<your server's URL>.sslCAInfo entry).`
+}

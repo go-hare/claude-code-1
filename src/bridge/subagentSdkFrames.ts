@@ -148,6 +148,10 @@ export function forwardParentToolUseSdkFrame(
     if (
       !(
         message.subtype === 'thinking_tokens' ||
+        message.subtype === 'background_tasks_changed' ||
+        message.subtype === 'task_started' ||
+        message.subtype === 'task_updated' ||
+        message.subtype === 'task_notification' ||
         (message.subtype === 'status' &&
           shouldForwardBridgeStatus(message.status))
       )

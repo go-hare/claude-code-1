@@ -10,9 +10,16 @@
  *   --json         (output session list as JSON and exit)
  */
 
+import type { Root } from '@anthropic/ink'
 import { realpath } from 'fs/promises'
 import { isAbsolute, relative, resolve } from 'path'
+import React from 'react'
 import type { BgJobState } from '../daemon/jobState.js'
+import type { FleetDispatchDefaults } from '../screens/fleetView/fleetDispatchDefaults.js'
+import { logForDebugging } from '../utils/debug.js'
+import { isEnvTruthy } from '../utils/envUtils.js'
+import { isBypassPermissionsModeDisabled } from '../utils/permissions/permissionSetup.js'
+import { getSettingsForSource } from '../utils/settings/settings.js'
 
 export interface AgentViewAction {
   type: 'attach' | 'create' | 'kill' | 'done'
@@ -174,6 +181,122 @@ function extractPassthroughArgs(args: string[]): string[] {
   return result
 }
 
+function wantsBypass(defaults: FleetDispatchDefaults | undefined): boolean {
+  return (
+    defaults?.permissionMode === 'bypassPermissions' ||
+    defaults?.allowBypass === true
+  )
+}
+
+function isRootOutsideDeliberateSandbox(): boolean {
+  return (
+    typeof process.getuid === 'function' &&
+    process.getuid() === 0 &&
+    !isEnvTruthy(process.env.IS_SANDBOX)
+  )
+}
+
+/**
+ * Official `g` (chunk-mej4q5zz.js, 2.1.293 #309) — refuse bypass under root
+ * outside a deliberate sandbox.
+ */
+export function refuseBypassUnderRoot(
+  defaults: FleetDispatchDefaults | undefined,
+): void {
+  if (!wantsBypass(defaults)) return
+  if (isRootOutsideDeliberateSandbox()) {
+    console.error(
+      '--dangerously-skip-permissions cannot be used with root/sudo privileges for security reasons',
+    )
+    process.exit(1)
+  }
+}
+
+/**
+ * Official `B` / `applyBypassPolicyGate` (chunk-mej4q5zz.js, 2.1.293 #309) —
+ * strip bypass defaults when policy disables bypassPermissions mode.
+ */
+export function applyBypassPolicyGate(
+  defaults: FleetDispatchDefaults | undefined,
+  isDisabledFn: () => boolean = isBypassPermissionsModeDisabled,
+): FleetDispatchDefaults | undefined {
+  if (!defaults || !wantsBypass(defaults)) return defaults
+  if (!isDisabledFn()) return defaults
+  console.error('Bypass permissions mode is disabled by organization policy.')
+  return {
+    ...defaults,
+    permissionMode:
+      defaults.permissionMode === 'bypassPermissions'
+        ? undefined
+        : defaults.permissionMode,
+    allowBypass: undefined,
+  }
+}
+
+export type AgentsBypassConsentDeps = {
+  isDisabled?: () => boolean
+  getSettings?: typeof getSettingsForSource
+  renderDialog?: (root: Root, onAccept: () => void) => void
+}
+
+/**
+ * Official `c` / `ensureAgentsBypassConsent` (chunk-mej4q5zz.js, 2.1.293 #309) —
+ * ask for bypass consent when missing from user/policy settings (even if
+ * `.claude/settings.local.json` or `--settings` already has it, because
+ * background workers only honor user/policy consent).
+ */
+export async function ensureAgentsBypassConsent(
+  root: Root,
+  defaults: FleetDispatchDefaults | undefined,
+  deps: AgentsBypassConsentDeps = {},
+): Promise<void> {
+  if (!wantsBypass(defaults)) return
+  const isDisabled = deps.isDisabled ?? isBypassPermissionsModeDisabled
+  if (isDisabled()) return
+  const getSettings = deps.getSettings ?? getSettingsForSource
+  const hasBgConsent = (): boolean =>
+    Boolean(
+      getSettings('policySettings')?.skipDangerousModePermissionPrompt ||
+        getSettings('userSettings')?.skipDangerousModePermissionPrompt,
+    )
+  const hasAnyConsent = (): boolean =>
+    Boolean(
+      hasBgConsent() ||
+        getSettings('localSettings')?.skipDangerousModePermissionPrompt ||
+        getSettings('flagSettings')?.skipDangerousModePermissionPrompt,
+    )
+  if (hasBgConsent()) return
+  if (
+    defaults?.permissionModeInherited &&
+    !defaults.allowBypass &&
+    hasAnyConsent()
+  ) {
+    return
+  }
+  if (deps.renderDialog) {
+    await new Promise<void>(resolveAccept => {
+      deps.renderDialog!(root, () => resolveAccept())
+    })
+  } else {
+    const { BypassPermissionsModeDialog } = await import(
+      '../components/BypassPermissionsModeDialog.js'
+    )
+    await new Promise<void>(resolveAccept => {
+      root.render(
+        React.createElement(BypassPermissionsModeDialog, {
+          onAccept: () => resolveAccept(),
+        }),
+      )
+    })
+  }
+  if (!hasBgConsent()) {
+    logForDebugging(
+      '[permissions] bypass consent was accepted but user settings do not show it (the write failed, or the file has an invalid value), so bypass is not passed on',
+      { level: 'warn' },
+    )
+  }
+}
+
 export async function agentsMain(args: string[]): Promise<void> {
   // --json flag: output job list as JSON (same source as FleetView dashboard)
   if (args.includes('--json')) {
@@ -193,6 +316,8 @@ export async function agentsMain(args: string[]): Promise<void> {
   )
   const { dispatchDefaults, rest: afterDefaults } =
     parseAgentsDispatchArgv(args)
+  refuseBypassUnderRoot(dispatchDefaults)
+  const effectiveDispatchDefaults = applyBypassPolicyGate(dispatchDefaults)
 
   // --cwd <path>: scope session list to a directory
   let cwdFilter: string | undefined
@@ -234,6 +359,7 @@ export async function agentsMain(args: string[]): Promise<void> {
     const trustRoot = await createRoot({ exitOnCtrlC: false })
     try {
       await ensureAgentsWorkspaceTrust(trustRoot, agentsTrustDecision())
+      await ensureAgentsBypassConsent(trustRoot, effectiveDispatchDefaults)
     } finally {
       try {
         trustRoot.unmount()
@@ -248,7 +374,7 @@ export async function agentsMain(args: string[]): Promise<void> {
   try {
     await renderAgentView({
       dispatchExtraArgs,
-      dispatchDefaults,
+      dispatchDefaults: effectiveDispatchDefaults,
       cwdFilter,
       restoreSessionId: restoreSessionId || undefined,
       enteredViaLeftArrow,

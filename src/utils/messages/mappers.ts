@@ -280,6 +280,7 @@ export function localCommandOutputToSDKAssistantMessage(
  */
 export function toSDKRateLimitInfo(
   limits: ClaudeAILimits | undefined,
+  options?: { overageEnabled?: boolean },
 ): SDKRateLimitInfo | undefined {
   if (!limits) {
     return undefined
@@ -309,7 +310,10 @@ export function toSDKRateLimitInfo(
     ...(limits.surpassedThreshold !== undefined && {
       surpassedThreshold: limits.surpassedThreshold,
     }),
-  }
+    ...(options?.overageEnabled !== undefined && {
+      overageEnabled: options.overageEnabled,
+    }),
+  } as SDKRateLimitInfo
 }
 
 /**

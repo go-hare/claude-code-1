@@ -1071,6 +1071,972 @@ export function analyzeGatingHooksInSource(
   return { gatingHooks, ownCommandRegistrations, notes }
 }
 
+export type HookModuleStateRef = { plugin: string; key: string }
+
+export type HookModuleStateAndMatcherAnalysis = {
+  stateReads: HookModuleStateRef[]
+  stateWrites: HookModuleStateRef[]
+  matchers: Array<{ pattern: string; matcher: Record<string, unknown> }>
+  error?: string
+}
+
+const VAR_REBOUND_MESSAGES = {
+  declared:
+    'is declared here too, so the value it names cannot be listed. Declare it once',
+  assigned:
+    'is assigned here, so the value it names cannot be listed. Leave it unassigned, or write the reference at the call',
+  doubted:
+    'may be assigned here, where the engine can bind the name apart from the text, so the value it names cannot be listed. Rename one of the two',
+  looped:
+    "is spelled in a loop's head here, and the engine can write such a target past a nearer name of that spelling, so the value it names cannot be listed. Rename one of the two",
+  early:
+    'is read here as the file loads, above its declaration, where it is still undefined, so the value it names cannot be listed. Declare it above this read',
+} as const
+
+function binarySearchIntervalEnd(
+  starts: readonly number[],
+  pos: number,
+): number {
+  let lo = 0
+  let hi = starts.length
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1
+    if (starts[mid]! <= pos) lo = mid + 1
+    else hi = mid
+  }
+  return lo
+}
+
+function isTsFunctionLike(
+  ts: typeof import('typescript'),
+  node: import('typescript').Node | undefined,
+): node is import('typescript').FunctionLikeDeclaration {
+  return (
+    node !== undefined &&
+    (ts.isFunctionDeclaration(node) ||
+      ts.isFunctionExpression(node) ||
+      ts.isArrowFunction(node) ||
+      ts.isMethodDeclaration(node))
+  )
+}
+
+function isTsScopeNode(
+  ts: typeof import('typescript'),
+  node: import('typescript').Node,
+): boolean {
+  return (
+    ts.isSourceFile(node) ||
+    isTsFunctionLike(ts, node) ||
+    ts.isBlock(node) ||
+    ts.isCatchClause(node) ||
+    ts.isSwitchStatement(node) ||
+    ts.isForStatement(node) ||
+    ts.isForInStatement(node) ||
+    ts.isForOfStatement(node)
+  )
+}
+
+function isTsLexicalScope(
+  ts: typeof import('typescript'),
+  node: import('typescript').Node,
+): boolean {
+  return (
+    ts.isSourceFile(node) ||
+    isTsFunctionLike(ts, node) ||
+    ts.isBlock(node) ||
+    ts.isSwitchStatement(node) ||
+    ts.isForStatement(node) ||
+    ts.isForInStatement(node) ||
+    ts.isForOfStatement(node)
+  )
+}
+
+function isTsVarScope(
+  ts: typeof import('typescript'),
+  node: import('typescript').Node,
+): boolean {
+  return ts.isSourceFile(node) || isTsFunctionLike(ts, node)
+}
+
+function collectPatternIdentifiers(
+  ts: typeof import('typescript'),
+  node: import('typescript').Node | undefined,
+): import('typescript').Identifier[] {
+  if (!node) return []
+  if (ts.isIdentifier(node)) return [node]
+  if (ts.isArrayBindingPattern(node) || ts.isArrayLiteralExpression(node)) {
+    return node.elements.flatMap(el =>
+      ts.isOmittedExpression(el) ? [] : collectPatternIdentifiers(ts, el),
+    )
+  }
+  if (ts.isObjectBindingPattern(node)) {
+    return node.elements.flatMap(el => collectPatternIdentifiers(ts, el.name))
+  }
+  if (ts.isObjectLiteralExpression(node)) {
+    return node.properties.flatMap(prop => {
+      if (ts.isShorthandPropertyAssignment(prop)) return [prop.name]
+      if (ts.isPropertyAssignment(prop)) {
+        return collectPatternIdentifiers(ts, prop.initializer)
+      }
+      if (ts.isSpreadAssignment(prop)) {
+        return collectPatternIdentifiers(ts, prop.expression)
+      }
+      return []
+    })
+  }
+  if (ts.isBindingElement(node)) {
+    return collectPatternIdentifiers(ts, node.name)
+  }
+  if (ts.isSpreadElement(node)) {
+    return collectPatternIdentifiers(ts, node.expression)
+  }
+  return []
+}
+
+/**
+ * Official AST `$.state` & `matcher` static analyzer (2.1.292 #237/#238/#239):
+ * - O(N log N) `counted()` + `apart()` + binary-search `starts`
+ * - `shadowOf` ("engine") vs `writtenShadowOf` ("written")
+ * - refuses redeclared/reassigned/early-read/looped top-level `var` for `$.state`
+ */
+const MAX_SCAN_SCOPE_DEPTH = 2000
+const SCAN_EXCERPT_LIMIT = 80
+
+function formatScanRefusalMessage(
+  file: string,
+  sourceLines: readonly string[],
+  line: number | undefined,
+  construct: string,
+): string {
+  const raw = line !== undefined ? (sourceLines[line - 1]?.trim() ?? '') : ''
+  const excerpt =
+    raw.length > SCAN_EXCERPT_LIMIT
+      ? `${raw.slice(0, SCAN_EXCERPT_LIMIT)}...`
+      : raw
+  const location =
+    line === undefined
+      ? ''
+      : excerpt === ''
+        ? `:${line}`
+        : `, compiled line ${line} \`${excerpt}\``
+  return `${file}${location}: ${construct}`
+}
+
+export function analyzeHookModuleStateAndMatchers(
+  moduleName: string,
+  source: string,
+): HookModuleStateAndMatcherAnalysis {
+  const sourceLines = source.split(/\r?\n/)
+  let ts: typeof import('typescript')
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    ts = require('typescript') as typeof import('typescript')
+  } catch {
+    return { stateReads: [], stateWrites: [], matchers: [] }
+  }
+
+  let sf: import('typescript').SourceFile
+  try {
+    sf = ts.createSourceFile(moduleName, source, ts.ScriptTarget.Latest, true)
+  } catch (err) {
+    if (err instanceof RangeError) {
+      return {
+        stateReads: [],
+        stateWrites: [],
+        matchers: [],
+        error: formatScanRefusalMessage(
+          moduleName,
+          sourceLines,
+          undefined,
+          `code nested too deep to scan (the parser stopped: ${err.message})`,
+        ),
+      }
+    }
+    throw err
+  }
+
+  // Iterative scope-depth check (#400): refuse > 2000 nested scopes before
+  // recursive AST walks can overflow the call stack.
+  {
+    const stack: Array<{ node: import('typescript').Node; depth: number }> = [
+      { node: sf, depth: 0 },
+    ]
+    while (stack.length > 0) {
+      const current = stack.pop()!
+      const isScope =
+        isTsFunctionLike(ts, current.node) ||
+        ts.isBlock(current.node) ||
+        ts.isForStatement(current.node) ||
+        ts.isForInStatement(current.node) ||
+        ts.isForOfStatement(current.node) ||
+        ts.isWhileStatement(current.node) ||
+        ts.isDoStatement(current.node) ||
+        ts.isSwitchStatement(current.node) ||
+        ts.isCatchClause(current.node)
+      const nextDepth = isScope ? current.depth + 1 : current.depth
+      if (nextDepth > MAX_SCAN_SCOPE_DEPTH) {
+        const line =
+          sf.getLineAndCharacterOfPosition(current.node.getStart(sf)).line + 1
+        return {
+          stateReads: [],
+          stateWrites: [],
+          matchers: [],
+          error: formatScanRefusalMessage(
+            moduleName,
+            sourceLines,
+            line,
+            `code nested too deep to scan: more than ${MAX_SCAN_SCOPE_DEPTH} scopes (functions, blocks, loops) open inside one another`,
+          ),
+        }
+      }
+      ts.forEachChild(current.node, child => {
+        stack.push({ node: child, depth: nextDepth })
+      })
+    }
+  }
+
+  const declared = new Map<string, import('typescript').Identifier[]>()
+  const read = new Map<string, import('typescript').Identifier[]>()
+  const assignedAt = new Map<string, import('typescript').Identifier[]>()
+  const loopAssigned = new Map<string, import('typescript').Identifier[]>()
+  const stateCalls: Array<{
+    call: import('typescript').CallExpression
+    spelling: 'state.get' | 'state.set'
+  }> = []
+  const onCalls: import('typescript').CallExpression[] = []
+  const libraryHelpers = new Set<string>(['atom', 'memberOf', 'derive'])
+  const libraryCallSet = new Set<import('typescript').Node>()
+
+  const pushMap = (
+    map: Map<string, import('typescript').Identifier[]>,
+    key: string,
+    val: import('typescript').Identifier,
+  ) => {
+    const arr = map.get(key)
+    if (arr) arr.push(val)
+    else map.set(key, [val])
+  }
+
+  const isDeclarationId = (node: import('typescript').Identifier): boolean => {
+    const p = node.parent
+    if (!p) return false
+    if (ts.isVariableDeclaration(p) && p.name === node) return true
+    if (ts.isParameter(p) && p.name === node) return true
+    if (ts.isBindingElement(p) && p.name === node) return true
+    if (
+      (ts.isFunctionDeclaration(p) ||
+        ts.isFunctionExpression(p) ||
+        ts.isClassDeclaration(p) ||
+        ts.isClassExpression(p)) &&
+      p.name === node
+    ) {
+      return true
+    }
+    if (
+      (ts.isImportClause(p) && p.name === node) ||
+      (ts.isImportSpecifier(p) && p.name === node) ||
+      (ts.isNamespaceImport(p) && p.name === node)
+    ) {
+      return true
+    }
+    return false
+  }
+
+  const isNonValueId = (node: import('typescript').Identifier): boolean => {
+    const p = node.parent
+    if (!p) return false
+    if (ts.isPropertyAccessExpression(p) && p.name === node) return true
+    if (ts.isPropertyAssignment(p) && p.name === node) return true
+    if (ts.isMethodDeclaration(p) && p.name === node) return true
+    if (ts.isLabeledStatement(p) && p.label === node) return true
+    if (ts.isBreakStatement(p) && p.label === node) return true
+    if (ts.isContinueStatement(p) && p.label === node) return true
+    if (ts.isImportSpecifier(p) || ts.isExportSpecifier(p)) return true
+    return false
+  }
+
+  const visit = (node: import('typescript').Node): void => {
+    if (ts.isBinaryExpression(node)) {
+      const op = node.operatorToken.kind
+      if (
+        op === ts.SyntaxKind.EqualsToken ||
+        (op >= ts.SyntaxKind.FirstCompoundAssignment &&
+          op <= ts.SyntaxKind.LastCompoundAssignment)
+      ) {
+        for (const id of collectPatternIdentifiers(ts, node.left)) {
+          pushMap(assignedAt, id.text, id)
+        }
+      }
+    } else if (
+      ts.isPrefixUnaryExpression(node) ||
+      ts.isPostfixUnaryExpression(node)
+    ) {
+      if (
+        node.operator === ts.SyntaxKind.PlusPlusToken ||
+        node.operator === ts.SyntaxKind.MinusMinusToken
+      ) {
+        for (const id of collectPatternIdentifiers(ts, node.operand)) {
+          pushMap(assignedAt, id.text, id)
+        }
+      }
+    } else if (ts.isForInStatement(node) || ts.isForOfStatement(node)) {
+      for (const id of collectPatternIdentifiers(ts, node.initializer)) {
+        pushMap(assignedAt, id.text, id)
+        pushMap(loopAssigned, id.text, id)
+      }
+    } else if (ts.isCallExpression(node)) {
+      const callee = node.expression
+      if (ts.isIdentifier(callee) && callee.text === 'on') {
+        onCalls.push(node)
+      }
+      if (ts.isIdentifier(callee) && libraryHelpers.has(callee.text)) {
+        libraryCallSet.add(node)
+      }
+      if (
+        ts.isPropertyAccessExpression(callee) &&
+        ts.isPropertyAccessExpression(callee.expression) &&
+        ts.isIdentifier(callee.expression.expression) &&
+        callee.expression.expression.text === '$' &&
+        callee.expression.name.text === 'state' &&
+        (callee.name.text === 'get' || callee.name.text === 'set')
+      ) {
+        stateCalls.push({
+          call: node,
+          spelling: `state.${callee.name.text}` as 'state.get' | 'state.set',
+        })
+      }
+    } else if (ts.isIdentifier(node)) {
+      if (isDeclarationId(node)) {
+        pushMap(declared, node.text, node)
+      } else if (!isNonValueId(node)) {
+        pushMap(read, node.text, node)
+      }
+    }
+    ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(sf, visit)
+
+  const climbTo = (
+    node: import('typescript').Node | undefined,
+    pred: (n: import('typescript').Node) => boolean,
+  ): import('typescript').Node | undefined => {
+    let cur = node
+    while (cur !== undefined) {
+      if (pred(cur)) return cur
+      cur = cur.parent
+    }
+    return undefined
+  }
+
+  const deferrerOf = (
+    node: import('typescript').Node,
+  ): import('typescript').Node | undefined =>
+    climbTo(node.parent, n => isTsFunctionLike(ts, n))
+
+  const declScopeOf = (
+    id: import('typescript').Identifier,
+  ): import('typescript').Node | 'unplaced' => {
+    let cur: import('typescript').Node | undefined = id.parent
+    while (
+      cur &&
+      (ts.isBindingElement(cur) ||
+        ts.isObjectBindingPattern(cur) ||
+        ts.isArrayBindingPattern(cur))
+    ) {
+      cur = cur.parent
+    }
+    if (!cur) return 'unplaced'
+    if (ts.isVariableDeclaration(cur)) {
+      const list = cur.parent
+      const isConstOrLet =
+        ts.isVariableDeclarationList(list) &&
+        (list.flags & (ts.NodeFlags.Const | ts.NodeFlags.Let)) !== 0
+      return (
+        climbTo(cur, n =>
+          isConstOrLet ? isTsLexicalScope(ts, n) : isTsVarScope(ts, n),
+        ) ?? 'unplaced'
+      )
+    }
+    if (ts.isParameter(cur)) {
+      return climbTo(cur, n => isTsFunctionLike(ts, n)) ?? 'unplaced'
+    }
+    if (ts.isFunctionDeclaration(cur) || ts.isClassDeclaration(cur)) {
+      return cur.name === id
+        ? (climbTo(cur.parent, n => isTsLexicalScope(ts, n)) ?? 'unplaced')
+        : cur
+    }
+    if (
+      ts.isFunctionExpression(cur) ||
+      ts.isArrowFunction(cur) ||
+      ts.isClassExpression(cur) ||
+      ts.isCatchClause(cur)
+    ) {
+      return cur
+    }
+    if (
+      ts.isImportClause(cur) ||
+      ts.isImportSpecifier(cur) ||
+      ts.isNamespaceImport(cur)
+    ) {
+      return sf
+    }
+    return 'unplaced'
+  }
+
+  type Span = {
+    start: number
+    end: number
+    declaration: import('typescript').Identifier
+  }
+  const buildSpanLookup = (
+    spans: Span[],
+  ): ((pos: number) => import('typescript').Identifier | undefined) => {
+    const events: Array<{
+      place: number
+      span: Span
+      isStart: boolean
+      rank: number
+    }> = []
+    for (const span of spans) {
+      if (span.start >= span.end) continue
+      events.push({
+        place: span.start,
+        span,
+        isStart: true,
+        rank: -span.end,
+      })
+      events.push({
+        place: span.end,
+        span,
+        isStart: false,
+        rank: -span.start,
+      })
+    }
+    events.sort(
+      (a, b) =>
+        a.place - b.place ||
+        Number(a.isStart) - Number(b.isStart) ||
+        a.rank - b.rank,
+    )
+    const stack: Span[] = []
+    const starts: number[] = []
+    const owners: Array<import('typescript').Identifier | undefined> = []
+    for (const ev of events) {
+      if (ev.isStart) stack.push(ev.span)
+      else {
+        const idx = stack.lastIndexOf(ev.span)
+        if (idx !== -1) stack.splice(idx, 1)
+      }
+      starts.push(ev.place)
+      owners.push(stack.at(-1)?.declaration)
+    }
+    return (pos: number) => owners[binarySearchIntervalEnd(starts, pos) - 1]
+  }
+
+  const shadowCache = new Map<
+    string,
+    Map<
+      import('typescript').Identifier,
+      import('typescript').Identifier | undefined
+    >
+  >()
+  const makeShadowOf = (mode: 'engine' | 'written') => {
+    const fnCache = new Map<
+      string,
+      (pos: number) => import('typescript').Identifier | undefined
+    >()
+    return (
+      id: import('typescript').Identifier,
+    ): import('typescript').Identifier | undefined => {
+      const cacheKey = `${mode}:${id.text}`
+      let byId = shadowCache.get(cacheKey)
+      if (!byId) {
+        byId = new Map()
+        shadowCache.set(cacheKey, byId)
+      }
+      if (byId.has(id)) return byId.get(id)
+      let lookup = fnCache.get(id.text)
+      if (!lookup) {
+        const decls = declared.get(id.text) ?? []
+        const spans: Span[] = []
+        for (const decl of decls) {
+          const scope = declScopeOf(decl)
+          if (scope === 'unplaced' || ts.isSourceFile(scope)) continue
+          if (ts.isSwitchStatement(scope)) {
+            spans.push(
+              {
+                start: scope.getStart(sf),
+                end: scope.expression.getStart(sf),
+                declaration: decl,
+              },
+              {
+                start: scope.expression.end,
+                end: scope.end,
+                declaration: decl,
+              },
+            )
+            continue
+          }
+          // In "engine" mode, a parameter declaration shadows the whole function
+          // (including parameter defaults); if the body redeclares the name,
+          // "written" mode binds the body declaration across the body block.
+          const targetScope =
+            mode === 'engine' &&
+            ts.isBlock(scope) &&
+            isTsFunctionLike(ts, scope.parent)
+              ? scope.parent
+              : scope
+          if (isTsScopeNode(ts, targetScope)) {
+            spans.push({
+              start: targetScope.getStart(sf),
+              end: targetScope.end,
+              declaration: decl,
+            })
+          }
+        }
+        lookup = buildSpanLookup(spans)
+        fnCache.set(id.text, lookup)
+      }
+      const res = lookup(id.getStart(sf))
+      byId.set(id, res)
+      return res
+    }
+  }
+
+  const shadowOf = makeShadowOf('engine')
+  const writtenShadowOf = makeShadowOf('written')
+
+  const initsCache = new Map<
+    import('typescript').Node,
+    Map<
+      string,
+      {
+        id: import('typescript').Identifier
+        init: import('typescript').Expression
+        isVar: boolean
+      }
+    >
+  >()
+  const getInits = (scope: import('typescript').Node) => {
+    const cached = initsCache.get(scope)
+    if (cached) return cached
+    const map = new Map<
+      string,
+      {
+        id: import('typescript').Identifier
+        init: import('typescript').Expression
+        isVar: boolean
+      }
+    >()
+    const stmts =
+      ts.isSourceFile(scope) || ts.isBlock(scope) ? scope.statements : []
+    for (const stmt of stmts) {
+      if (!ts.isVariableStatement(stmt)) continue
+      const isExported =
+        stmt.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword) ??
+        false
+      const flags = stmt.declarationList.flags
+      const isConst = (flags & ts.NodeFlags.Const) !== 0
+      const isTopVar =
+        !isConst &&
+        (flags & ts.NodeFlags.Let) === 0 &&
+        ts.isSourceFile(scope) &&
+        !isExported
+      if (!isConst && !isTopVar) continue
+      for (const decl of stmt.declarationList.declarations) {
+        if (ts.isIdentifier(decl.name) && decl.initializer) {
+          map.set(decl.name.text, {
+            id: decl.name,
+            init: decl.initializer,
+            isVar: isTopVar,
+          })
+        }
+      }
+    }
+    initsCache.set(scope, map)
+    return map
+  }
+
+  const exportingIds = new Set<string>()
+  for (const stmt of sf.statements) {
+    if (ts.isVariableStatement(stmt)) {
+      const isExported =
+        stmt.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword) ??
+        false
+      if (isExported) {
+        for (const decl of stmt.declarationList.declarations) {
+          if (ts.isIdentifier(decl.name)) exportingIds.add(decl.name.text)
+        }
+      }
+    } else if (
+      ts.isExportDeclaration(stmt) &&
+      stmt.exportClause &&
+      ts.isNamedExports(stmt.exportClause)
+    ) {
+      for (const spec of stmt.exportClause.elements) {
+        exportingIds.add((spec.propertyName ?? spec.name).text)
+      }
+    }
+  }
+
+  const formatVarRebound = (
+    name: string,
+    cause: keyof typeof VAR_REBOUND_MESSAGES,
+    at: import('typescript').Node,
+  ): string => {
+    const line = sf.getLineAndCharacterOfPosition(at.getStart(sf)).line + 1
+    return formatScanRefusalMessage(
+      moduleName,
+      sourceLines,
+      line,
+      `the var ${name}, read for a $.state reference, ${VAR_REBOUND_MESSAGES[cause]}`,
+    )
+  }
+
+  const checkVarRebound = (
+    varId: import('typescript').Identifier,
+  ): string | undefined => {
+    const name = varId.text
+    const topDecls = (declared.get(name) ?? []).filter(
+      d => declScopeOf(d) === sf,
+    )
+    if (topDecls.length > 1) {
+      const at = topDecls.includes(varId) ? topDecls[1]! : varId
+      return formatVarRebound(name, 'declared', at)
+    }
+    const isTopUnshadowed = (id: import('typescript').Identifier) =>
+      writtenShadowOf(id) === undefined || writtenShadowOf(id) !== shadowOf(id)
+    const assigned = (assignedAt.get(name) ?? []).filter(isTopUnshadowed)
+    const unshadowedAssigned = assigned.find(
+      a => writtenShadowOf(a) === undefined,
+    )
+    if (unshadowedAssigned) {
+      return formatVarRebound(name, 'assigned', unshadowedAssigned)
+    }
+    if (assigned.length > 0) {
+      return formatVarRebound(name, 'doubted', assigned[0]!)
+    }
+    const looped = loopAssigned.get(name)?.[0]
+    if (looped) {
+      return formatVarRebound(name, 'looped', looped)
+    }
+    const earlyRead = (read.get(name) ?? []).find(
+      r =>
+        r.getStart(sf) < varId.getStart(sf) &&
+        deferrerOf(r) === undefined &&
+        isTopUnshadowed(r),
+    )
+    if (earlyRead) {
+      return formatVarRebound(name, 'early', earlyRead)
+    }
+    return undefined
+  }
+
+  // O(N log N) counted() & apart() for const plain-read verification (#237)
+  type CountedEntry = {
+    owned: Map<
+      import('typescript').Identifier | undefined,
+      Array<{ use: import('typescript').Identifier; at: number }>
+    >
+  }
+  const countedCache = new Map<string, CountedEntry>()
+  const counted = (name: string): CountedEntry => {
+    const cached = countedCache.get(name)
+    if (cached) return cached
+    const uses = read.get(name) ?? []
+    const owned = new Map<
+      import('typescript').Identifier | undefined,
+      Array<{ use: import('typescript').Identifier; at: number }>
+    >()
+    uses.forEach((use, at) => {
+      const owner = writtenShadowOf(use)
+      const list = owned.get(owner)
+      if (list) list.push({ use, at })
+      else owned.set(owner, [{ use, at }])
+    })
+    const entry = { owned }
+    countedCache.set(name, entry)
+    return entry
+  }
+
+  const apart = (
+    name: string,
+    exceptSet: ReadonlySet<import('typescript').Node>,
+  ): {
+    placed: Array<{ use: import('typescript').Identifier; at: number }>
+    starts: number[]
+  } => {
+    const uses = read.get(name) ?? []
+    const placed: Array<{ use: import('typescript').Identifier; at: number }> =
+      []
+    const starts: number[] = []
+    uses.forEach((use, at) => {
+      const callAncestor = climbTo(use, n => exceptSet.has(n))
+      if (callAncestor !== undefined) return
+      placed.push({ use, at })
+      starts.push(use.getStart(sf))
+    })
+    return { placed, starts }
+  }
+
+  const isPlainConstUse = (
+    use: import('typescript').Identifier,
+    exceptSet: ReadonlySet<import('typescript').Node>,
+  ): boolean => {
+    const p = use.parent
+    if (!p) return false
+    if (climbTo(use, n => exceptSet.has(n)) !== undefined) return true
+    if (ts.isSpreadAssignment(p) && ts.isObjectLiteralExpression(p.parent)) {
+      return true
+    }
+    if (ts.isPropertyAccessExpression(p) && p.expression === use) return true
+    return false
+  }
+
+  const resolveBinding = (
+    id: import('typescript').Identifier,
+  ):
+    | {
+        init: import('typescript').Expression
+        scope: import('typescript').Node
+        isVar: boolean
+      }
+    | { error: string }
+    | undefined => {
+    const eng = shadowOf(id)
+    const writ = writtenShadowOf(id)
+    if (eng !== writ) {
+      return {
+        error: `"${id.text}" is read among the parameters of a function whose body declares that name again: the engine may bind such a read apart from the text, so the value it names cannot be listed. Rename one of the two`,
+      }
+    }
+    const scope =
+      eng === undefined ? sf : (climbTo(eng, n => isTsScopeNode(ts, n)) ?? sf)
+    const binding = getInits(scope).get(id.text)
+    if (!binding) return undefined
+    if (binding.isVar) {
+      const varErr = checkVarRebound(binding.id)
+      if (varErr !== undefined) return { error: varErr }
+    }
+    return { init: binding.init, scope, isVar: binding.isVar }
+  }
+
+  const exceptCalls = new Set<import('typescript').Node>([
+    ...stateCalls.map(s => s.call),
+    ...libraryCallSet,
+  ])
+
+  const stateConstsToCheck: Array<{
+    read: import('typescript').Identifier
+    scope: import('typescript').Node
+    isVar: boolean
+    spelling: string
+  }> = []
+
+  const resolveStateRef = (
+    expr: import('typescript').Expression,
+    spelling: string,
+    seen = new Set<string>(),
+  ): HookModuleStateRef[] | { error: string } | undefined => {
+    if (ts.isIdentifier(expr)) {
+      if (seen.has(expr.text)) return undefined
+      const bound = resolveBinding(expr)
+      if (!bound) return undefined
+      if ('error' in bound) return bound
+      stateConstsToCheck.push({
+        read: expr,
+        scope: bound.scope,
+        isVar: bound.isVar,
+        spelling,
+      })
+      return resolveStateRef(
+        bound.init,
+        spelling,
+        new Set([...seen, expr.text]),
+      )
+    }
+    if (ts.isCallExpression(expr)) {
+      const callee = expr.expression
+      const helper = ts.isIdentifier(callee) ? callee.text : undefined
+      const arg0 = expr.arguments[0]
+      if ((helper === 'atom' || helper === 'memberOf') && arg0) {
+        return resolveStateRef(arg0, spelling, seen)
+      }
+      if (helper === 'derive' && arg0 && ts.isArrayLiteralExpression(arg0)) {
+        const out: HookModuleStateRef[] = []
+        for (const el of arg0.elements) {
+          const r = resolveStateRef(el, spelling, seen)
+          if (!r) return undefined
+          if ('error' in r) return r
+          out.push(...r)
+        }
+        return out
+      }
+      return undefined
+    }
+    if (!ts.isObjectLiteralExpression(expr)) return undefined
+    let plugin: string | undefined
+    let key: string | undefined
+    for (const prop of expr.properties) {
+      if (ts.isSpreadAssignment(prop)) {
+        const sub = resolveStateRef(prop.expression, spelling, seen)
+        if (!sub) return undefined
+        if ('error' in sub) return sub
+        if (sub[0]) {
+          plugin = sub[0].plugin
+          key = sub[0].key
+        }
+        continue
+      }
+      if (!ts.isPropertyAssignment(prop)) return undefined
+      const propName = ts.isIdentifier(prop.name)
+        ? prop.name.text
+        : tsStringLiteral(ts, prop.name)
+      if (propName === 'plugin') {
+        const v = tsStringLiteral(ts, prop.initializer)
+        if (v === undefined) return undefined
+        plugin = v
+      } else if (propName === 'key') {
+        const v = tsStringLiteral(ts, prop.initializer)
+        if (v === undefined) return undefined
+        key = v
+      }
+    }
+    if (plugin !== undefined && key !== undefined) {
+      return [{ plugin, key }]
+    }
+    return undefined
+  }
+
+  const resolveMatcherObject = (
+    expr: import('typescript').Expression,
+    seen = new Set<string>(),
+  ): Record<string, unknown> | { error: string } | undefined => {
+    if (ts.isIdentifier(expr)) {
+      if (seen.has(expr.text)) return undefined
+      const bound = resolveBinding(expr)
+      if (!bound) return undefined
+      if ('error' in bound) return bound
+      return resolveMatcherObject(bound.init, new Set([...seen, expr.text]))
+    }
+    if (!ts.isObjectLiteralExpression(expr)) return undefined
+    const out: Record<string, unknown> = {}
+    for (const prop of expr.properties) {
+      if (!ts.isPropertyAssignment(prop)) continue
+      const k = ts.isIdentifier(prop.name)
+        ? prop.name.text
+        : tsStringLiteral(ts, prop.name)
+      if (k === undefined) continue
+      const str = tsStringLiteral(ts, prop.initializer)
+      if (str !== undefined) {
+        out[k] = str
+      } else if (ts.isArrayLiteralExpression(prop.initializer)) {
+        const arr = prop.initializer.elements
+          .map(el => tsStringLiteral(ts, el))
+          .filter((v): v is string => v !== undefined)
+        out[k] = arr
+      }
+    }
+    return out
+  }
+
+  const stateReadsMap = new Map<string, HookModuleStateRef>()
+  const stateWritesMap = new Map<string, HookModuleStateRef>()
+  const matchers: Array<{ pattern: string; matcher: Record<string, unknown> }> =
+    []
+
+  for (const { call, spelling } of stateCalls) {
+    const arg0 = call.arguments[0]
+    if (!arg0) continue
+    const resolved = resolveStateRef(arg0, spelling)
+    if (resolved && 'error' in resolved) {
+      return {
+        stateReads: [],
+        stateWrites: [],
+        matchers: [],
+        error: resolved.error,
+      }
+    }
+    if (resolved) {
+      const target = spelling === 'state.get' ? stateReadsMap : stateWritesMap
+      for (const ref of resolved) {
+        target.set(`${ref.plugin}\x00${ref.key}`, ref)
+      }
+    }
+  }
+
+  // Verify every const used in a $.state reference is only plain-read (O(log N) via apart)
+  const checkedScopes = new Set<import('typescript').Node>()
+  for (const item of stateConstsToCheck) {
+    if (item.isVar || checkedScopes.has(item.scope)) continue
+    checkedScopes.add(item.scope)
+    const name = item.read.text
+    if (ts.isSourceFile(item.scope) && exportingIds.has(name)) {
+      return {
+        stateReads: [],
+        stateWrites: [],
+        matchers: [],
+        error: `the const ${name}, read as the reference of a $.${item.spelling} call, is also written through, handed on or exported here, and const does not freeze: what it holds at the call could not be listed.`,
+      }
+    }
+    const owner = writtenShadowOf(item.read)
+    const owned = (counted(name).owned.get(owner) ?? []).filter(
+      h =>
+        h.use.getStart(sf) >= item.scope.getStart(sf) &&
+        h.use.end <= item.scope.end,
+    )
+    const badOwned = owned.find(h => !isPlainConstUse(h.use, exceptCalls))
+    if (badOwned) {
+      return {
+        stateReads: [],
+        stateWrites: [],
+        matchers: [],
+        error: `the const ${name}, read as the reference of a $.${item.spelling} call, is also written through, handed on or exported here, and const does not freeze: what it holds at the call could not be listed.`,
+      }
+    }
+    const ap = apart(name, exceptCalls)
+    const lo = binarySearchIntervalEnd(ap.starts, item.scope.getStart(sf) - 1)
+    const hi = binarySearchIntervalEnd(ap.starts, item.scope.end - 1)
+    const outside = ap.placed.slice(lo, hi)
+    if (
+      outside.length > 0 &&
+      outside.some(h => !isPlainConstUse(h.use, exceptCalls))
+    ) {
+      return {
+        stateReads: [],
+        stateWrites: [],
+        matchers: [],
+        error: `the const ${name}, read as the reference of a $.${item.spelling} call, is also written through, handed on or exported here, and const does not freeze: what it holds at the call could not be listed.`,
+      }
+    }
+  }
+
+  for (const call of onCalls) {
+    const pattern = tsStringLiteral(ts, call.arguments[0])
+    if (pattern === undefined || call.arguments.length < 3) continue
+    const matcherArg = call.arguments[1]
+    if (!matcherArg) continue
+    const resolved = resolveMatcherObject(matcherArg)
+    if (resolved && 'error' in resolved && typeof resolved.error === 'string') {
+      return {
+        stateReads: [],
+        stateWrites: [],
+        matchers: [],
+        error: resolved.error,
+      }
+    }
+    if (resolved) {
+      matchers.push({ pattern, matcher: resolved })
+    }
+  }
+
+  return {
+    stateReads: [...stateReadsMap.values()],
+    stateWrites: [...stateWritesMap.values()],
+    matchers,
+  }
+}
+
 /**
  * Validate a plugin's hooks.json file. Unlike frontmatter, this one HARD-ERRORS
  * at runtime (pluginLoader uses .parse() not .safeParse()) — a bad hooks.json
@@ -1172,20 +2138,35 @@ async function validateHooksJson(filePath: string): Promise<ValidationResult> {
       ['register.js', path.join(hooksDir, 'register.js')],
     )
   }
+  const errors: ValidationError[] = []
   for (const [modName, modFullPath] of modulePaths) {
     try {
       const modSrc = await readFile(modFullPath, { encoding: 'utf-8' })
       const analysis = analyzeGatingHooksInSource(modName, modSrc)
       notes.push(...analysis.notes)
       gatingHooks.push(...analysis.gatingHooks)
+      const stateAnalysis = analyzeHookModuleStateAndMatchers(modName, modSrc)
+      if (stateAnalysis.error !== undefined) {
+        errors.push({
+          path: `modules.${modName}`,
+          message: stateAnalysis.error,
+        })
+      } else {
+        for (const ref of stateAnalysis.stateReads) {
+          notes.push(`[${modName}] state.get: ${ref.plugin}.${ref.key}`)
+        }
+        for (const ref of stateAnalysis.stateWrites) {
+          notes.push(`[${modName}] state.set: ${ref.plugin}.${ref.key}`)
+        }
+      }
     } catch {
       // Missing or unreadable module handled elsewhere
     }
   }
 
   return {
-    success: true,
-    errors: [],
+    success: errors.length === 0,
+    errors,
     warnings,
     filePath,
     fileType: 'hooks',
@@ -1520,4 +2501,352 @@ export async function validateManifest(
       return validatePluginManifest(filePath)
     }
   }
+}
+
+export type ReadmeInstallAdvice = {
+  file: string
+  message: string
+  installLine: string
+}
+
+const README_ADVICE_PLACEHOLDER = '<owner>/<repo>'
+const README_ADVICE_VALID_NAME_MAX = 128
+const README_ADVICE_FIELD_CAP = 1024
+const README_INSTALL_FLAGS = new Set([
+  '--marketplace',
+  '--scope',
+  '-s',
+  '--config',
+  '--accept-command',
+])
+
+function trimReadmeToken(token: string): string {
+  const keep = [...token].map(ch => !'`\'"()<>[]*.,;:!?'.includes(ch))
+  const first = keep.findIndex(Boolean)
+  if (first === -1) return ''
+  const last = keep.findLastIndex(Boolean)
+  return token.slice(first, last + 1)
+}
+
+function parseReadmeInstallLines(content: string): {
+  bySource: Set<string>
+  byName: Set<string>
+} {
+  const lines = content
+    .split('\n')
+    .flatMap(line => line.split(/plugin[ \t]+(?:install|i)[ \t]+/).slice(1))
+    .map(part =>
+      part
+        .split(/\s+/)
+        .map(trimReadmeToken)
+        .filter(tok => tok !== ''),
+    )
+
+  const hasMarketplaceFlag = (tokens: string[]): boolean =>
+    tokens.some((tok, idx) =>
+      tok.startsWith('--marketplace=')
+        ? /^--marketplace=[^<>]+$/.test(tok)
+        : tok === '--marketplace' &&
+          /^[^-<>][^<>]*$/.test(tokens[idx + 1] ?? ''),
+    )
+
+  const extractPositionalName = (tokens: string[]): string =>
+    tokens.find(
+      (tok, idx) =>
+        !tok.startsWith('-') &&
+        !README_INSTALL_FLAGS.has(tokens[idx - 1] ?? ''),
+    ) ?? ''
+
+  const extractQualifiedName = (tokens: string[]): string => {
+    const qualified = tokens.find(tok => tok.lastIndexOf('@') > 0) ?? ''
+    const at = qualified.indexOf('@')
+    return at > 0 && qualified.length > at + 1 && !/[<>]/.test(qualified)
+      ? qualified.slice(0, at)
+      : ''
+  }
+
+  return {
+    bySource: new Set(
+      lines.filter(hasMarketplaceFlag).map(extractPositionalName),
+    ),
+    byName: new Set(lines.map(extractQualifiedName)),
+  }
+}
+
+function readmeInstallsPlugin(
+  installs: { bySource: Set<string>; byName: Set<string> },
+  name: string,
+): boolean {
+  return (
+    installs.byName.has(name) || installs.bySource.has(trimReadmeToken(name))
+  )
+}
+
+function truncateAdviceField(
+  text: string,
+  cap = README_ADVICE_FIELD_CAP,
+): string {
+  return text.length <= cap ? text : `${text.slice(0, cap - 1)}…`
+}
+
+function formatReadmeAdviceSentence(
+  name: string,
+  listing?: { root: string; entry?: unknown },
+): string {
+  const missingEntry = listing !== undefined && listing.entry === undefined
+  return [
+    `This README has no line that installs "${name}"`,
+    'from a marketplace.',
+    ...(missingEntry
+      ? [
+          path.join(listing.root, '.claude-plugin', 'marketplace.json'),
+          'has no entry for it. Add one.',
+        ]
+      : []),
+    `${missingEntry ? 'Then add' : 'Add'} the install line,`,
+    'which works in one step on Claude Code 2.1.275 or later.',
+  ].join(' ')
+}
+
+function inferMarketplaceRepoFromGitConfig(
+  configText: string,
+): string | undefined {
+  const urlMatch =
+    configText.match(/^\s*pushurl\s*=\s*(.+)$/m) ??
+    configText.match(/^\s*url\s*=\s*(.+)$/m)
+  const raw = urlMatch?.[1]?.trim() ?? ''
+  if (!raw) return undefined
+  const sshScp = raw.match(/^(?:[^@]+@)?([^:]+):([^/]+)\/(.+?)(?:\.git)?$/)
+  if (sshScp && !raw.includes('://')) {
+    const [, host, owner, repo] = sshScp
+    return host === 'github.com'
+      ? `${owner}/${repo}`
+      : `https://${host}/${owner}/${repo}.git`
+  }
+  try {
+    const parsed = new URL(raw)
+    const parts = parsed.pathname.replace(/^\/+|\.git$/g, '').split('/')
+    if (parts.length >= 2 && parts[0] && parts[1]) {
+      return parsed.hostname === 'github.com'
+        ? `${parts[0]}/${parts[1]}`
+        : `https://${parsed.hostname}/${parts[0]}/${parts[1]}.git`
+    }
+  } catch {
+    return undefined
+  }
+  return undefined
+}
+
+async function readReadmeInfo(
+  dir: string,
+): Promise<
+  | { file: string; installs: { bySource: Set<string>; byName: Set<string> } }
+  | undefined
+> {
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => [])
+  const candidates = entries
+    .filter(e => e.isFile() && /^readme(\.[a-z0-9.-]+)?$/i.test(e.name))
+    .map(e => e.name)
+  const chosen =
+    candidates.find(n => n.toLowerCase() === 'readme.md') ??
+    candidates.toSorted()[0]
+  if (!chosen) return undefined
+  const filePath = path.join(dir, chosen)
+  const text = await readFile(filePath, { encoding: 'utf-8' }).catch(
+    () => undefined,
+  )
+  if (text === undefined) return undefined
+  return { file: filePath, installs: parseReadmeInstallLines(text) }
+}
+
+/**
+ * Collect non-fatal README install-line advice for `claude plugin validate` (#352).
+ * Never changes validation success or exit code, even under `--strict`.
+ */
+export async function collectReadmeInstallAdvice(
+  targetPath: string,
+  primaryResult: ValidationResult | undefined,
+  extraResults: readonly (ValidationResult | undefined)[] = [],
+): Promise<ReadmeInstallAdvice[]> {
+  if (!primaryResult) return []
+  const allValid = [primaryResult, ...extraResults].every(
+    r => r === undefined || r.errors.length === 0,
+  )
+  if (!allValid) return []
+
+  const manifestDir = path.dirname(primaryResult.filePath)
+  const rootDir = path.dirname(manifestDir)
+  if (path.basename(manifestDir) !== '.claude-plugin') return []
+
+  const readPluginName = async (dir: string): Promise<string | undefined> => {
+    try {
+      const raw = await readFile(
+        path.join(dir, '.claude-plugin', 'plugin.json'),
+        { encoding: 'utf-8' },
+      )
+      const parsed = jsonParse(raw) as { name?: unknown }
+      return typeof parsed?.name === 'string' ? parsed.name : undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  const targets: Array<{
+    root: string
+    name: string
+    listing?: { root: string; pluginsCount: number; entry?: unknown }
+  }> = []
+
+  if (primaryResult.fileType === 'plugin') {
+    targets.push({
+      root: rootDir,
+      name: (await readPluginName(rootDir)) ?? '',
+    })
+  } else if (
+    primaryResult.fileType === 'marketplace' &&
+    path.resolve(targetPath) === path.resolve(rootDir)
+  ) {
+    try {
+      const raw = await readFile(
+        path.join(rootDir, '.claude-plugin', 'marketplace.json'),
+        { encoding: 'utf-8' },
+      )
+      const mkt = jsonParse(raw) as {
+        plugins?: Array<{ name?: string; source?: unknown }>
+      }
+      const plugins = Array.isArray(mkt?.plugins) ? mkt.plugins : []
+      for (const entry of plugins.slice(0, 64)) {
+        if (
+          typeof entry.source === 'string' &&
+          !entry.source.split(/[\\/]/).includes('..') &&
+          typeof entry.name === 'string'
+        ) {
+          targets.push({
+            root: path.resolve(rootDir, entry.source),
+            name: entry.name,
+            listing: { root: rootDir, pluginsCount: plugins.length, entry },
+          })
+        }
+      }
+      if (!targets.some(t => path.resolve(t.root) === path.resolve(rootDir))) {
+        const selfName = (await readPluginName(rootDir)) ?? ''
+        if (selfName) {
+          const selfEntry = plugins.find(p => p.name === selfName)
+          targets.push({
+            root: rootDir,
+            name: selfEntry?.name ?? selfName,
+            listing: {
+              root: rootDir,
+              pluginsCount: plugins.length,
+              entry: selfEntry,
+            },
+          })
+        }
+      }
+    } catch {
+      return []
+    }
+  }
+
+  const readmeCache = new Map<
+    string,
+    Awaited<ReturnType<typeof readReadmeInfo>>
+  >()
+  const getReadme = async (dir: string) => {
+    if (!readmeCache.has(dir)) {
+      readmeCache.set(dir, await readReadmeInfo(dir))
+    }
+    return readmeCache.get(dir)
+  }
+
+  const advice: ReadmeInstallAdvice[] = []
+  for (const t of targets) {
+    if (
+      !t.name ||
+      t.name.length > README_ADVICE_VALID_NAME_MAX ||
+      /[\s<>]/.test(t.name)
+    ) {
+      continue
+    }
+    const localReadme = await getReadme(t.root)
+    const isNested =
+      t.listing?.entry !== undefined &&
+      path.resolve(t.listing.root) !== path.resolve(t.root)
+    const singlePluginMarketplace = isNested && t.listing!.pluginsCount === 1
+    const needMarketplaceReadme =
+      isNested &&
+      (singlePluginMarketplace ||
+        (localReadme !== undefined &&
+          !readmeInstallsPlugin(localReadme.installs, t.name)))
+    const marketReadme = needMarketplaceReadme
+      ? await getReadme(t.listing!.root)
+      : undefined
+    if (
+      [localReadme, marketReadme].some(
+        r => r !== undefined && readmeInstallsPlugin(r.installs, t.name),
+      )
+    ) {
+      continue
+    }
+    const chosen =
+      localReadme ?? (singlePluginMarketplace ? marketReadme : undefined)
+    if (!chosen) continue
+
+    let marketplaceSource: string | undefined
+    if (t.listing !== undefined) {
+      const gitCfg = await readFile(
+        path.join(t.listing.root, '.git', 'config'),
+        { encoding: 'utf-8' },
+      ).catch(() => undefined)
+      if (gitCfg !== undefined) {
+        marketplaceSource = inferMarketplaceRepoFromGitConfig(gitCfg)
+      }
+    }
+
+    const extraHint =
+      t.listing === undefined
+        ? [
+            'Validate the folder that holds its marketplace.json',
+            `to have ${README_ADVICE_PLACEHOLDER} filled in,`,
+            'and the name its marketplace lists it under.',
+          ].join(' ')
+        : marketplaceSource !== undefined
+          ? ''
+          : [
+              `In it, replace ${README_ADVICE_PLACEHOLDER}`,
+              'with the repository that holds the marketplace.',
+            ].join(' ')
+
+    const sentence = formatReadmeAdviceSentence(t.name, t.listing)
+    const message = truncateAdviceField(
+      extraHint ? `${sentence} ${extraHint}` : sentence,
+    )
+    const installLine = truncateAdviceField(
+      `/plugin install ${t.name} --marketplace ${marketplaceSource ?? README_ADVICE_PLACEHOLDER}`,
+    )
+    advice.push({
+      file: truncateAdviceField(chosen.file),
+      message,
+      installLine,
+    })
+  }
+  return advice
+}
+
+export function formatReadmeInstallAdvice(
+  advice: readonly ReadmeInstallAdvice[],
+  icons: { info?: string; pointer?: string } = {},
+): string[] {
+  if (advice.length === 0) return []
+  const info = icons.info ?? 'i'
+  const pointer = icons.pointer ?? '>'
+  return [
+    `${info} Advice (does not change the verdict):`,
+    '',
+    ...advice.flatMap(item => [
+      `  ${pointer} ${item.file}: ${item.message}`,
+      `      ${item.installLine}`,
+    ]),
+    '',
+  ]
 }

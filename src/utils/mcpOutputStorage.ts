@@ -112,6 +112,31 @@ export function extensionForMimeType(mimeType: string | undefined): string {
       return 'webp'
     case 'image/svg+xml':
       return 'svg'
+    case 'image/x-icon':
+    case 'image/vnd.microsoft.icon':
+      return 'ico'
+    case 'text/css':
+      return 'css'
+    case 'text/javascript':
+    case 'application/javascript':
+      return 'js'
+    case 'application/xml':
+    case 'text/xml':
+      return 'xml'
+    case 'application/manifest+json':
+      return 'webmanifest'
+    case 'font/woff2':
+    case 'application/font-woff2':
+      return 'woff2'
+    case 'font/woff':
+    case 'application/font-woff':
+      return 'woff'
+    case 'font/ttf':
+      return 'ttf'
+    case 'font/otf':
+      return 'otf'
+    case 'application/wasm':
+      return 'wasm'
     default:
       return 'bin'
   }

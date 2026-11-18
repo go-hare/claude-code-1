@@ -2608,3 +2608,63 @@ export class Proactivity {
     this.replaceHostGateSubscription(emptyUnsub)
   }
 }
+
+export type OTelAuthErrorCategory = {
+  kind: 'auth' | 'timeout' | 'network' | 'http' | 'other'
+  status?: number
+}
+
+/** Official Wi(n) — categorize an error for OTel auth telemetry. */
+export function categorizeAuthError(error: unknown): OTelAuthErrorCategory {
+  if (
+    !error ||
+    typeof error !== 'object' ||
+    !('isAxiosError' in error) ||
+    !error.isAxiosError
+  ) {
+    return { kind: 'other' }
+  }
+  const axiosErr = error as {
+    response?: { status?: number }
+    code?: string
+  }
+  const status = axiosErr.response?.status
+  if (status === 401 || status === 403) {
+    return { kind: 'auth', status }
+  }
+  if (axiosErr.code === 'ECONNABORTED') {
+    return { kind: 'timeout', status }
+  }
+  if (axiosErr.code === 'ECONNREFUSED' || axiosErr.code === 'ENOTFOUND') {
+    return { kind: 'network', status }
+  }
+  return { kind: 'http', status }
+}
+
+/**
+ * Official kke(e) (2.1.295 #428) — emit `claude_code.auth` OTel event.
+ * Exported from sessionSlots for login/logout/gateway sign-in callers.
+ */
+export function logOTelAuthEvent(params: {
+  action: 'login' | 'logout'
+  success: boolean
+  authMethod: string
+  error?: unknown
+}): void {
+  const categorized =
+    params.error !== undefined ? categorizeAuthError(params.error) : null
+  const { logOTelEvent } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('./telemetry/events.js') as typeof import('./telemetry/events.js')
+  void logOTelEvent('auth', {
+    action: params.action,
+    success: String(params.success),
+    auth_method: params.authMethod,
+    ...(categorized && {
+      error_category: categorized.kind,
+      ...(categorized.status !== undefined && {
+        status_code: String(categorized.status),
+      }),
+    }),
+  })
+}

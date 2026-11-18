@@ -123,6 +123,7 @@ import {
   getSettingsForSource,
   getAdminManagedPolicyUnreadableError,
   formatPolicyUnreadableFailClose,
+  rereadManagedSettingsIfNeeded,
 } from './settings/settings.js'
 import { sleep } from './sleep.js'
 import { jsonParse } from './slowOperations.js'
@@ -3270,12 +3271,17 @@ function hasNonOAuthAnthropicCredential(): boolean {
  * token's org (network error, missing profile data), validation fails.
  */
 export async function validateForceLoginOrg(): Promise<OrgValidationResult> {
+  const prevPolicy = getSettingsForSource('policySettings')
+  await rereadManagedSettingsIfNeeded()
   const policy = getSettingsForSource('policySettings')
-  const configuredOrgUuid = policy?.forceLoginOrgUUID
+  const configuredOrgUuid =
+    policy?.forceLoginOrgUUID ?? prevPolicy?.forceLoginOrgUUID
+  const configuredLoginMethod =
+    policy?.forceLoginMethod ?? prevPolicy?.forceLoginMethod
   // densable J$ `r` — either key counts as "an auth pin is configured", and both
   // are read from policySettings only, never from merged settings.
   const pinConfigured =
-    configuredOrgUuid !== undefined || policy?.forceLoginMethod !== undefined
+    configuredOrgUuid !== undefined || configuredLoginMethod !== undefined
 
   // densable J$ — the host injects credentials, so the pin cannot apply here.
   // Mirrors validateForcedLoginMethod's host-managed branch.

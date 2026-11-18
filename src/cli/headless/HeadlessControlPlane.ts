@@ -146,6 +146,7 @@ import { AwsAuthStatusManager } from 'src/utils/awsAuthStatusManager.js'
 import { findUnresolvedToolUse } from 'src/utils/sessionStorage.js'
 import { settingsChangeDetector } from 'src/utils/settings/changeDetector.js'
 import { getSettings_DEPRECATED } from 'src/utils/settings/settings.js'
+import { resetSettingsCache } from 'src/utils/settings/settingsCache.js'
 import type { Stream } from 'src/utils/stream.js'
 import type {
   AppState,
@@ -1339,23 +1340,26 @@ export function handleSetPermissionMode(
   }
 
   // Check if trying to switch to auto mode without the classifier gate
-  if (
-    feature('TRANSCRIPT_CLASSIFIER') &&
-    request.mode === 'auto' &&
-    !isAutoModeGateEnabled()
-  ) {
-    const reason = getAutoModeUnavailableReason()
-    output.enqueue({
-      type: 'control_response',
-      response: {
-        subtype: 'error',
-        request_id: requestId,
-        error: reason
-          ? `Cannot set permission mode to auto: ${getAutoModeUnavailableNotification(reason)}`
-          : 'Cannot set permission mode to auto',
-      },
-    })
-    return toolPermissionContext
+  if (feature('TRANSCRIPT_CLASSIFIER') && request.mode === 'auto') {
+    // #435: Re-read settings if gated out so removing disableAutoMode from
+    // settings.json takes effect immediately without restarting the session.
+    if (!isAutoModeGateEnabled()) {
+      resetSettingsCache()
+    }
+    if (!isAutoModeGateEnabled()) {
+      const reason = getAutoModeUnavailableReason()
+      output.enqueue({
+        type: 'control_response',
+        response: {
+          subtype: 'error',
+          request_id: requestId,
+          error: reason
+            ? `Cannot set permission mode to auto: ${getAutoModeUnavailableNotification(reason)}`
+            : 'Cannot set permission mode to auto',
+        },
+      })
+      return toolPermissionContext
+    }
   }
 
   // Allow the mode switch

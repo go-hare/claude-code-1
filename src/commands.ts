@@ -1193,6 +1193,20 @@ export function hasCommand(commandName: string, commands: Command[]): boolean {
   return findCommand(commandName, commands) !== undefined
 }
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional ASCII-range check for mYe comparator
+const ASCII_NAME_RE = /^[\x00-\x7f]*$/
+
+/**
+ * Official `mYe` (2.1.293 #330) — sort ASCII names before non-ASCII names.
+ */
+export function compareAsciiFirst(a: string, b: string): number {
+  const aAscii = ASCII_NAME_RE.test(a)
+  if (aAscii !== ASCII_NAME_RE.test(b)) return aAscii ? -1 : 1
+  if (aAscii) return a.localeCompare(b)
+  if (a === b) return 0
+  return a < b ? -1 : 1
+}
+
 export function getCommand(commandName: string, commands: Command[]): Command {
   const command = findCommand(commandName, commands)
   if (!command) {
@@ -1202,7 +1216,7 @@ export function getCommand(commandName: string, commands: Command[]): Command {
           const name = getCommandName(_)
           return _.aliases ? `${name} (aliases: ${_.aliases.join(', ')})` : name
         })
-        .sort((a, b) => a.localeCompare(b))
+        .sort(compareAsciiFirst)
         .join(', ')}`,
     )
   }

@@ -22,6 +22,7 @@ import { getCustomApiKeyStatus } from '../utils/config.js';
 import { env } from '../utils/env.js';
 import { isRunningOnHomespace } from '../utils/envUtils.js';
 import { PreflightStep } from '../utils/preflightChecks.js';
+import { hasMatchingFunctionHook } from '../utils/plugins/functionHooksModules.js';
 import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 import type { ThemeSetting } from '../utils/theme.js';
 import { ApproveApiKey } from './ApproveApiKey.js';
@@ -97,6 +98,7 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
   const skippedSignInRef = useRef(false);
   const completedRef = useRef(false);
   const [theme, setTheme] = useTheme();
+  const [themeError, setThemeError] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     logEvent('tengu_began_setup', {
@@ -137,8 +139,19 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
   }
 
   function handleThemeSelection(newTheme: ThemeSetting) {
-    setTheme(newTheme);
+    if (!hasMatchingFunctionHook('config.set')) {
+      setTheme(newTheme);
+      goToNextStep();
+      return;
+    }
     goToNextStep();
+    void import('../commands/theme/theme.js')
+      .then(({ saveThemeWithConfigSetHook }) => saveThemeWithConfigSetHook(newTheme, setTheme))
+      .then(result => {
+        if (result.kind === 'refused') {
+          setThemeError(result.reason ?? '');
+        }
+      });
   }
 
   const exitState = useExitOnCtrlCDWithKeybindings();
@@ -314,6 +327,11 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
       <WelcomeV2 />
       <Box flexDirection="column" marginTop={1}>
         {currentStep?.component}
+        {themeError !== undefined && (
+          <Box paddingX={1}>
+            <Text color="warning">Couldn&apos;t save Theme{themeError ? `: ${themeError}` : ''}</Text>
+          </Box>
+        )}
         {exitState.pending && (
           <Box padding={1}>
             <Text dimColor>Press {exitState.keyName} again to exit</Text>

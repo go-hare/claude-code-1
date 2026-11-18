@@ -33,10 +33,15 @@ import {
   toolBelongsToServer,
 } from './utils.js'
 
-/** Official `ko` — same 5 as interactive MAX_RECONNECT_ATTEMPTS. */
+/** Official `Yge` — same 5 as interactive MAX_RECONNECT_ATTEMPTS. */
 export const HEADLESS_MCP_MAX_RECONNECT_ATTEMPTS = 5
+/** Official `YWr` — background slow reconnect attempts after fast phase. */
+export const HEADLESS_MCP_SLOW_RECONNECT_ATTEMPTS = 8
 const INITIAL_BACKOFF_MS = 1000
 const MAX_BACKOFF_MS = 30000
+const SLOW_BACKOFF_BASE_MS = 30000
+const SLOW_BACKOFF_CAP_MS = 300000
+const YOUNG_CLOSE_THRESHOLD_MS = 10000
 
 const POLICY_BLOCKED_ERROR = 'MCP server blocked by policy'
 
@@ -76,6 +81,9 @@ export type HeadlessMcpReconnectDeps = {
   isRunEnding: () => boolean
   onReconnected: (client: ConnectedMCPServer) => void
   sleep?: (ms: number) => Promise<void>
+  random?: () => number
+  now?: () => number
+  onHeldOff?: (connection: ConnectedMCPServer, delayMs: number) => void
   storageV5?: unknown
   credentials?: unknown
   /** Official `Fl()` — tests inject; production uses mcpClientModule(). */
@@ -93,9 +101,30 @@ export function isHeadlessReconnectingTransport(
   )
 }
 
-/** Official `iu`. */
+/** Official `mzt`. */
 export function headlessReconnectBackoffMs(afterAttempt: number): number {
   return Math.min(INITIAL_BACKOFF_MS * 2 ** (afterAttempt - 1), MAX_BACKOFF_MS)
+}
+
+/** Official `aN` for slow background reconnect phase (30s..300s, floor 15s). */
+export function slowReconnectBackoffMs(
+  slowAttemptIndex: number,
+  random: () => number = Math.random,
+): number {
+  const raw = Math.min(
+    SLOW_BACKOFF_BASE_MS * 2 ** slowAttemptIndex,
+    SLOW_BACKOFF_CAP_MS,
+  )
+  const jittered = Math.floor(raw * (0.5 + 0.5 * random()))
+  return Math.max(SLOW_BACKOFF_BASE_MS / 2, jittered)
+}
+
+function isRetryableReconnectFailure(client: MCPServerConnection): boolean {
+  if (client.type === 'needs-auth' || client.type === 'disabled') return false
+  if (client.type === 'failed' && client.errorCode === 'UNCONFIGURED') {
+    return false
+  }
+  return true
 }
 
 /** Official `XA` — unref so `-p` can exit while waiting. */
@@ -307,14 +336,17 @@ export function applyHeadlessMcpSettlement(
   })
 }
 
-/** Official `ZA`. */
+/** Official `le` (`reconnectHeadlessRemoteMcpAfterClose`). */
 export async function reconnectHeadlessRemoteMcpAfterClose(
   deps: HeadlessMcpReconnectDeps,
   closed: ConnectedMCPServer,
   foundClosed = false,
+  youngCloses = 0,
+  recordYoungCloses?: (connection: ConnectedMCPServer, count: number) => void,
 ): Promise<void> {
   const { name, config } = closed
-  const max = HEADLESS_MCP_MAX_RECONNECT_ATTEMPTS
+  const maxFast = HEADLESS_MCP_MAX_RECONNECT_ATTEMPTS
+  const maxTotal = maxFast + HEADLESS_MCP_SLOW_RECONNECT_ATTEMPTS
   const sleep = deps.sleep ?? unrefSleep
   const startEpoch = getMcpIdentityEpoch()
   const shouldAbort = (): boolean =>
@@ -328,38 +360,47 @@ export async function reconnectHeadlessRemoteMcpAfterClose(
     applyHeadlessMcpSettlement(deps, name, settlement)
   const module = mcpClient(deps)
 
-  for (let attempt = 1; attempt <= max; attempt++) {
+  for (let attempt = 1; attempt <= maxTotal; attempt++) {
+    const slowAttempt = attempt - maxFast
     if (attempt > 1) {
-      await sleep(headlessReconnectBackoffMs(attempt - 1))
+      await sleep(
+        slowAttempt > 0
+          ? slowReconnectBackoffMs(slowAttempt - 1, deps.random)
+          : headlessReconnectBackoffMs(attempt - 1),
+      )
     }
     if (shouldAbort() || !stillExpected()) return
 
     const attemptEpoch = getMcpIdentityEpoch()
     const prefix = getMcpPrefix(name)
     const mcp = deps.getAppState().mcp
-    const pending: MCPServerConnection = {
-      name,
-      type: 'pending',
-      config,
-      reconnectAttempt: attempt,
-      maxReconnectAttempts: max,
+    if (slowAttempt <= 0) {
+      const pending: MCPServerConnection = {
+        name,
+        type: 'pending',
+        config,
+        reconnectAttempt: attempt,
+        maxReconnectAttempts: maxFast,
+      }
+      apply({
+        client: pending,
+        tools: mcp.tools.filter(t => toolBelongsToServer(t, name, prefix)),
+        commands: mcp.commands.filter(c => commandBelongsToServer(c, name)),
+        resources: mcp.resources[name],
+        resourceTemplates: mcp.resourceTemplates[name],
+        attemptEpoch,
+      })
+      expected = pending
     }
-    apply({
-      client: pending,
-      tools: mcp.tools.filter(t => toolBelongsToServer(t, name, prefix)),
-      commands: mcp.commands.filter(c => commandBelongsToServer(c, name)),
-      resources: mcp.resources[name],
-      resourceTemplates: mcp.resourceTemplates[name],
-      attemptEpoch,
-    })
-    expected = pending
     if (!stillExpected() || deps.isControlReconnectInFlight(name)) return
 
     logMCPDebug(
       name,
       attempt === 1
-        ? `${config.type} transport ${foundClosed ? 'had already closed when wired' : 'closed'} — reconnecting (attempt 1/${max})`
-        : `Reconnect attempt ${attempt}/${max}`,
+        ? `${config.type} transport ${foundClosed ? 'had already closed when wired' : 'closed'} — reconnecting (attempt 1/${maxFast})`
+        : slowAttempt > 0
+          ? `Background reconnect attempt ${slowAttempt}/${HEADLESS_MCP_SLOW_RECONNECT_ATTEMPTS}`
+          : `Reconnect attempt ${attempt}/${maxFast}`,
     )
 
     const result = await module
@@ -404,13 +445,16 @@ export async function reconnectHeadlessRemoteMcpAfterClose(
     }
 
     if (connected && stillSettled) {
+      recordYoungCloses?.(connected, youngCloses + attempt - 1)
       apply({ ...result, attemptEpoch })
       if (findClient(deps, name) === connected) {
         logMCPDebug(name, `Reconnected (attempt ${attempt})`)
         logEvent('tengu_feature_ok', {
-          feature_name: 'mcp_auto_reconnect',
+          feature_name:
+            slowAttempt > 0 ? 'mcp_slow_reconnect' : 'mcp_auto_reconnect',
           attempts: attempt,
           found_closed: foundClosed,
+          young_closes: youngCloses,
         })
         deps.onReconnected(connected)
       }
@@ -426,10 +470,16 @@ export async function reconnectHeadlessRemoteMcpAfterClose(
           error: 'Connection closed again while reconnecting',
         }
       : result.client
-    if (attempt === max) {
+    const retryable = isRetryableReconnectFailure(failed)
+    if (
+      attempt === maxFast ||
+      (slowAttempt > 0 && (!retryable || attempt === maxTotal))
+    ) {
       logMCPDebug(
         name,
-        `Reconnect gave up after ${attempt} attempts: ${failed.type}`,
+        slowAttempt <= 0 && retryable
+          ? `Still failing after ${attempt} attempts`
+          : `Reconnect gave up after ${attempt} attempts: ${failed.type}`,
       )
       apply({
         client: failed,
@@ -440,49 +490,110 @@ export async function reconnectHeadlessRemoteMcpAfterClose(
         commands: [],
         attemptEpoch,
       })
-      if (findClient(deps, name) === failed) {
-        logEvent(
-          failed.type === 'needs-auth'
-            ? 'tengu_feature_sad'
-            : 'tengu_feature_bad',
-          {
-            feature_name: 'mcp_auto_reconnect',
-            error_code:
-              failed.type === 'needs-auth' ? 'needs_auth' : 'exhausted',
-            attempts: attempt,
-            found_closed: foundClosed,
-          },
-        )
+      if (findClient(deps, name) !== failed) return
+      if (failed.type === 'needs-auth') {
+        logEvent('tengu_feature_sad', {
+          feature_name:
+            slowAttempt > 0 ? 'mcp_slow_reconnect' : 'mcp_auto_reconnect',
+          error_code: 'needs_auth',
+          attempts: attempt,
+          found_closed: foundClosed,
+          young_closes: youngCloses,
+        })
+        return
       }
-      return
+      if (slowAttempt > 0) {
+        logEvent('tengu_feature_bad', {
+          feature_name: 'mcp_slow_reconnect',
+          error_code: retryable ? 'gave_up' : 'not_retryable',
+          attempts: attempt,
+          found_closed: foundClosed,
+        })
+        return
+      }
+      logEvent('tengu_feature_bad', {
+        feature_name: 'mcp_auto_reconnect',
+        error_code: 'exhausted',
+        attempts: attempt,
+        found_closed: foundClosed,
+        young_closes: youngCloses,
+        goes_slow: retryable,
+      })
+      if (!retryable) return
+      expected = failed
+      logMCPDebug(
+        name,
+        `Reconnect attempts spent; retrying in the background, up to ${HEADLESS_MCP_SLOW_RECONNECT_ATTEMPTS} more times`,
+      )
+      continue
     }
     logMCPDebug(
       name,
-      `Reconnect attempt ${attempt} did not connect (${failed.type}); next in ${headlessReconnectBackoffMs(attempt)}ms`,
+      slowAttempt > 0
+        ? `Background reconnect attempt ${slowAttempt} did not connect (${failed.type})`
+        : `Reconnect attempt ${attempt} did not connect (${failed.type}); next in ${headlessReconnectBackoffMs(attempt)}ms`,
     )
   }
 }
 
 /**
- * Official `mS` — attach onclose once per connected remote client (WeakSet).
+ * Official `mS` — attach onclose once per connected remote client (WeakSet),
+ * with young-close hold-off backoff up to 30s.
  */
 export function attachHeadlessRemoteMcpReconnect(
   deps: HeadlessMcpReconnectDeps,
 ): (clients: readonly MCPServerConnection[]) => void {
   const wired = new WeakSet<object>()
+  const latestByClient = new WeakMap<object, ConnectedMCPServer>()
+  const youngClosesByClient = new WeakMap<object, number>()
+  const now = deps.now ?? Date.now
+  const sleep = deps.sleep ?? unrefSleep
   return clients => {
     for (const connection of clients) {
+      if (connection.type === 'connected') {
+        latestByClient.set(connection.client, connection)
+      }
       if (connection.type !== 'connected') continue
       if (wired.has(connection.client)) continue
       if (!isHeadlessReconnectingTransport(connection.config)) continue
       wired.add(connection.client)
+      const wiredAt = now()
       const reconnect = (foundClosed: boolean): void => {
         if (isShuttingDown() || deps.isRunEnding()) return
-        void reconnectHeadlessRemoteMcpAfterClose(
-          deps,
-          connection,
-          foundClosed,
-        ).catch(err => {
+        const uptime = Math.max(0, now() - wiredAt)
+        const youngCloses =
+          uptime < YOUNG_CLOSE_THRESHOLD_MS
+            ? (youngClosesByClient.get(connection.client) ?? 0) + 1
+            : 0
+        const holdOffMs =
+          youngCloses > 0 && !deps.isControlReconnectInFlight(connection.name)
+            ? headlessReconnectBackoffMs(youngCloses)
+            : 0
+        void (async () => {
+          if (holdOffMs > 0) {
+            try {
+              deps.onHeldOff?.(connection, holdOffMs)
+            } catch (err) {
+              logForDebugging(
+                `MCP reconnect hold-off observer failed for ${connection.name}: ${errorMessage(err)}`,
+                { level: 'warn' },
+              )
+            }
+            logMCPDebug(
+              connection.name,
+              `${connection.config.type} transport closed again soon after it connected: reconnecting in ${holdOffMs}ms`,
+            )
+            await sleep(holdOffMs)
+          }
+          const latest = latestByClient.get(connection.client) ?? connection
+          await reconnectHeadlessRemoteMcpAfterClose(
+            deps,
+            latest,
+            foundClosed,
+            youngCloses,
+            (conn, count) => youngClosesByClient.set(conn.client, count),
+          )
+        })().catch(err => {
           logForDebugging(
             `MCP reconnect after close failed for ${connection.name}: ${errorMessage(err)}`,
             { level: 'warn' },

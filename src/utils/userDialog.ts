@@ -182,6 +182,36 @@ export async function waitForParkedPermissionAnswer<T>(input: {
   }
 }
 
+function parseMcpPermissionToolName(
+  toolName: string,
+): { serverName: string; toolName: string } | undefined {
+  if (!toolName.startsWith('mcp__')) return undefined
+  const parts = toolName.split('__')
+  if (parts.length < 3) return undefined
+  const serverName = parts[1]
+  const mcpToolName = parts.slice(2).join('__')
+  if (!serverName || !mcpToolName) return undefined
+  return { serverName, toolName: mcpToolName }
+}
+
+function titleCaseMcpPart(part: string): string {
+  return part
+    .replace(/_+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, ch => ch.toUpperCase())
+}
+
+/** SEA `kGr` (2.1.295 #445) — format an MCP server + tool name as `server — Tool Name`. */
+export function formatMcpPermissionDisplayName(
+  serverName: string,
+  toolName: string,
+): string {
+  const server = serverName.trim() || '(unnamed server)'
+  const formattedTool =
+    titleCaseMcpPart(toolName) || toolName.trim() || '(unnamed tool)'
+  return `${server} \u2014 ${formattedTool}`.replace(/\s+/g, ' ').trim()
+}
+
 /** Official post_turn_summary copy for dialog-blocked sessions. */
 export function buildUserDialogBlockedSummary(details: RequiresActionDetails): {
   status_category: 'blocked'
@@ -195,9 +225,14 @@ export function buildUserDialogBlockedSummary(details: RequiresActionDetails): {
       needs_action: details.action_description,
     }
   }
+  const parsed = parseMcpPermissionToolName(details.tool_name)
+  const label =
+    !parsed || parsed.serverName === 'claude-in-chrome'
+      ? details.tool_name
+      : formatMcpPermissionDisplayName(parsed.serverName, parsed.toolName)
   return {
     status_category: 'blocked',
-    status_detail: `Waiting on permission: ${details.tool_name}`,
-    needs_action: `Approve or deny ${details.tool_name}`,
+    status_detail: `Waiting on permission: ${label}`,
+    needs_action: `Approve or deny ${label}`,
   }
 }

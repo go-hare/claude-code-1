@@ -7,6 +7,7 @@
 
 import { resolveMotion } from './motions.js'
 import {
+  clampVimNormalOffset,
   executeIndent,
   executeJoin,
   executeLineOp,
@@ -19,6 +20,7 @@ import {
   executePaste,
   executeReplace,
   executeToggleCase,
+  executeVisualOp,
   executeX,
   type OperatorContext,
 } from './operators.js'
@@ -35,14 +37,20 @@ import {
   TEXT_OBJ_SCOPES,
   TEXT_OBJ_TYPES,
   type TextObjScope,
+  type VisualCommandState,
+  type VisualKind,
+  type WantedColumn,
 } from './types.js'
 
 /**
  * Context passed to transition functions.
  */
 export type TransitionContext = OperatorContext & {
+  wantedColumn?: WantedColumn | null
   onUndo?: () => void
   onDotRepeat?: () => void
+  onEnterVisual?: (kind: VisualKind, wanted?: WantedColumn | null) => void
+  onExitVisual?: () => void
 }
 
 /**
@@ -51,6 +59,7 @@ export type TransitionContext = OperatorContext & {
 export type TransitionResult = {
   next?: CommandState
   execute?: () => void
+  wanted?: WantedColumn | null
 }
 
 /**
@@ -105,11 +114,24 @@ function handleNormalInput(
   }
 
   if (SIMPLE_MOTIONS.has(input)) {
+    if (input === 'j' || input === 'k') {
+      return applyVerticalMotion(
+        resolveLogicalVerticalMotion(input === 'j', count, ctx),
+        ctx,
+      )
+    }
     return {
       execute: () => {
         const target = resolveMotion(input, ctx.cursor, count)
-        ctx.setOffset(target.offset)
+        ctx.setOffset(clampVimNormalOffset(target, target.offset))
       },
+    }
+  }
+
+  if (input === 'v' || input === 'V') {
+    return {
+      execute: () =>
+        ctx.onEnterVisual?.(input === 'V' ? 'line' : 'char', ctx.wantedColumn),
     }
   }
 
@@ -487,4 +509,180 @@ function executeRepeatFind(
   if (result !== null) {
     ctx.setOffset(result)
   }
+}
+
+// ============================================================================
+// Vertical Motion Preferred Column & Visual Mode (densable 2.1.292-295)
+// ============================================================================
+
+function getWantedColumn(
+  cursor: TransitionContext['cursor'],
+  wanted?: WantedColumn | null,
+): number {
+  if (
+    wanted &&
+    wanted.offset === cursor.offset &&
+    wanted.text === cursor.text
+  ) {
+    return wanted.column
+  }
+  const lineStart = cursor.startOfLogicalLine().offset
+  const lineText = cursor.text.slice(lineStart, cursor.offset)
+  return cursor.measuredText.stringIndexToDisplayWidth(
+    lineText,
+    lineText.length,
+  )
+}
+
+function resolveLogicalVerticalMotion(
+  down: boolean,
+  count: number,
+  ctx: TransitionContext,
+): { offset: number | null; column: number } {
+  const { cursor } = ctx
+  const text = cursor.text
+  const currentLineStart = cursor.startOfLogicalLine().offset
+  const column = getWantedColumn(cursor, ctx.wantedColumn)
+  let lineStart = currentLineStart
+
+  for (let i = 0; i < count; i++) {
+    if (down) {
+      const nl = text.indexOf('\n', lineStart)
+      if (nl === -1) break
+      lineStart = nl + 1
+    } else {
+      if (lineStart === 0) break
+      lineStart =
+        lineStart === 1 ? 0 : text.lastIndexOf('\n', lineStart - 2) + 1
+    }
+  }
+
+  if (lineStart === currentLineStart) {
+    return { offset: null, column }
+  }
+
+  const nextNl = text.indexOf('\n', lineStart)
+  const lineEnd = nextNl === -1 ? text.length : nextNl
+  const lineText = text.slice(lineStart, lineEnd)
+  const rel = cursor.measuredText.displayWidthToStringIndex(lineText, column)
+  const rawOffset = lineStart + rel
+  return { offset: rawOffset, column }
+}
+
+function applyVerticalMotion(
+  move: { offset: number | null; column: number | null },
+  ctx: TransitionContext,
+): TransitionResult {
+  if (move.offset === null) {
+    return { next: { type: 'idle' } }
+  }
+  const clamped = clampVimNormalOffset(ctx.cursor, move.offset)
+  if (clamped === ctx.cursor.offset) {
+    return { next: { type: 'idle' } }
+  }
+  return {
+    execute: () => ctx.setOffset(clamped),
+    wanted:
+      move.column === null
+        ? null
+        : { column: move.column, offset: clamped, text: ctx.cursor.text },
+  }
+}
+
+export type VisualTransitionResult = {
+  next?: VisualCommandState
+  execute?: () => void
+  exitVisual?: boolean
+  wanted?: WantedColumn | null
+}
+
+/**
+ * State transitions for VISUAL / VISUAL LINE mode (`V` + `d`, etc.).
+ */
+export function visualTransition(
+  state: VisualCommandState,
+  input: string,
+  anchor: number,
+  linewise: boolean,
+  ctx: TransitionContext,
+): VisualTransitionResult {
+  if (state.type === 'count') {
+    if (/[0-9]/.test(input)) {
+      const count = Math.min(parseInt(state.digits + input, 10), MAX_VIM_COUNT)
+      return { next: { type: 'count', digits: String(count) } }
+    }
+    const count = parseInt(state.digits, 10)
+    const res = handleVisualInput(input, count, anchor, linewise, ctx)
+    return res ?? { next: { type: 'idle' } }
+  }
+
+  if (state.type === 'find') {
+    return {
+      execute: () => {
+        const result = ctx.cursor.findCharacter(input, state.find, state.count)
+        if (result !== null) {
+          ctx.setOffset(result)
+          ctx.setLastFind(state.find, input)
+        }
+      },
+      next: { type: 'idle' },
+    }
+  }
+
+  if (/[1-9]/.test(input)) {
+    return { next: { type: 'count', digits: input } }
+  }
+
+  const res = handleVisualInput(input, 1, anchor, linewise, ctx)
+  return res ?? {}
+}
+
+function handleVisualInput(
+  input: string,
+  count: number,
+  anchor: number,
+  linewise: boolean,
+  ctx: TransitionContext,
+): VisualTransitionResult | null {
+  if (isOperatorKey(input)) {
+    const op = OPERATORS[input]
+    return {
+      execute: () => executeVisualOp(op, anchor, ctx, linewise),
+      exitVisual: op !== 'change',
+    }
+  }
+  if (input === 'x' || input === 'X') {
+    return {
+      execute: () => executeVisualOp('delete', anchor, ctx, linewise),
+      exitVisual: true,
+    }
+  }
+  if (SIMPLE_MOTIONS.has(input)) {
+    if (input === 'j' || input === 'k') {
+      const move = resolveLogicalVerticalMotion(input === 'j', count, ctx)
+      const res = applyVerticalMotion(move, ctx)
+      return {
+        execute: res.execute,
+        next: { type: 'idle' },
+        wanted: res.wanted,
+      }
+    }
+    return {
+      execute: () => {
+        const target = resolveMotion(input, ctx.cursor, count)
+        ctx.setOffset(clampVimNormalOffset(target, target.offset))
+      },
+      next: { type: 'idle' },
+    }
+  }
+  if (FIND_KEYS.has(input)) {
+    return { next: { type: 'find', find: input as FindType, count } }
+  }
+  if (input === '0') {
+    return {
+      execute: () => ctx.setOffset(ctx.cursor.startOfLogicalLine().offset),
+      next: { type: 'idle' },
+    }
+  }
+  return null
 }

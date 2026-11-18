@@ -151,6 +151,10 @@ export async function getBridgeDisabledReason(): Promise<string | null> {
       return cloudDenial
     }
     if (!isClaudeAISubscriber()) {
+      const overrideReason = getApiKeyOverrideReasonForBridge()
+      if (overrideReason) {
+        return overrideReason
+      }
       return 'Remote Control requires a claude.ai subscription. Run `claude auth login` to sign in with your claude.ai account.'
     }
     if (!hasProfileScope()) {
@@ -193,6 +197,141 @@ function getOauthAccountInfo(): ReturnType<
     return authModule.getOauthAccountInfo()
   } catch {
     return undefined
+  }
+}
+
+/**
+ * densable `rot` — explain when an API key / auth token / apiKeyHelper
+ * overrides the user's claude.ai login.
+ */
+export function formatApiKeyOverrideReason({
+  prefix,
+  suffix,
+  env = process.env,
+  apiKeySource,
+}: {
+  prefix: string
+  suffix: string
+  env?: NodeJS.ProcessEnv
+  apiKeySource?: { key: string | null; source: string }
+}): string {
+  try {
+    if (env.ANTHROPIC_UNIX_SOCKET && !env.CLAUDE_CODE_OAUTH_TOKEN) {
+      return `${prefix} ANTHROPIC_UNIX_SOCKET is set without CLAUDE_CODE_OAUTH_TOKEN, so requests on the socket carry no claude.ai login (on a claude ssh remote: the local machine is API-key-authed).`
+    }
+    const { key, source } =
+      apiKeySource ??
+      authModule.getAnthropicApiKeyWithSource({
+        skipRetrievingKeyFromApiKeyHelper: true,
+      })
+    if (source === 'ANTHROPIC_API_KEY') {
+      if (key !== env.ANTHROPIC_API_KEY) {
+        return `${prefix} The program that started this session passed it an API key, so this session uses API-key auth — start the session without that key ${suffix}`
+      }
+      return `${prefix} ANTHROPIC_API_KEY is set, so this session is using API-key auth — unset it (or run in a shell without it) ${suffix}`
+    }
+    if (source === 'apiKeyHelper') {
+      return `${prefix} apiKeyHelper is configured, so this session is using API-key auth — unset it ${suffix}`
+    }
+    if (env.ANTHROPIC_AUTH_TOKEN) {
+      return `${prefix} ANTHROPIC_AUTH_TOKEN is set, so this session is using API-key auth — unset it (or run in a shell without it) ${suffix}`
+    }
+  } catch {
+    // fall through to generic unset hint
+  }
+  return `${prefix} Unset ANTHROPIC_API_KEY / apiKeyHelper / ANTHROPIC_AUTH_TOKEN ${suffix}`
+}
+
+function getApiKeyOverrideReasonForBridge(): string | null {
+  try {
+    const hasUnixSocket =
+      Boolean(process.env.ANTHROPIC_UNIX_SOCKET) &&
+      !process.env.CLAUDE_CODE_OAUTH_TOKEN
+    const apiKeyInfo = authModule.getAnthropicApiKeyWithSource({
+      skipRetrievingKeyFromApiKeyHelper: true,
+    })
+    const hasApiKey =
+      apiKeyInfo.source === 'ANTHROPIC_API_KEY' ||
+      apiKeyInfo.source === 'apiKeyHelper'
+    const hasAuthToken = Boolean(process.env.ANTHROPIC_AUTH_TOKEN)
+    if (!hasUnixSocket && !hasApiKey && !hasAuthToken) {
+      return null
+    }
+    return formatApiKeyOverrideReason({
+      prefix: 'Remote Control requires claude.ai subscription auth.',
+      suffix: 'to use Remote Control.',
+      apiKeySource: apiKeyInfo,
+    })
+  } catch {
+    return null
+  }
+}
+
+export type OrgPolicyLoadFailureInfo = {
+  errorCode:
+    | 'parse_failed'
+    | 'network_error'
+    | 'timeout'
+    | 'auth_failed'
+    | 'spurious_304'
+    | 'stale_tunnel_credential'
+    | 'request_failed'
+  host: string
+  httpStatus: number | null
+}
+
+const ORG_POLICY_PATH = '/api/claude_code/organizations/policy'
+
+/** densable `dqt` */
+export function formatOrgPolicy404Error(
+  featureName: string,
+  policyPath: string = ORG_POLICY_PATH,
+): string {
+  return `Couldn't load your organization's policy, which governs ${featureName.toLowerCase()}. The request for ${policyPath} got a 404, which usually means a proxy or gateway between you and the API isn't forwarding that path. Ask your network admin to allow it; \`claude doctor\` (or /status in a session) shows which host was asked.`
+}
+
+/** densable `fGo` */
+export function formatOrgPolicyLoadError(
+  featureName: string,
+  verb: 'is' | 'are',
+  info: OrgPolicyLoadFailureInfo,
+  policyPath: string = ORG_POLICY_PATH,
+): string {
+  const unavailable = `${featureName} ${verb === 'are' ? "aren't" : "isn't"} available`
+  const { host, httpStatus } = info
+  switch (info.errorCode) {
+    case 'parse_failed':
+      return `${unavailable}: Claude Code couldn't read the reply when it asked ${host} for your organization's policy, which usually means a network proxy or web filter answered instead.`
+    case 'network_error':
+    case 'timeout':
+      return `${unavailable}: couldn't reach ${host} to load your organization's policy. Check your network or proxy.`
+    case 'auth_failed':
+      if (httpStatus === 403) {
+        return `${unavailable}: ${host}, or a proxy in front of it, refused the request for your organization's policy (HTTP 403).`
+      }
+      return httpStatus === 401
+        ? `${unavailable}: ${host} didn't accept this session's credentials when Claude Code asked for your organization's policy.`
+        : `${unavailable}: no credentials could be attached to the request for your organization's policy.`
+    case 'spurious_304':
+      return `${unavailable}: the saved copy of your organization's policy belongs to a previous sign-in, and a fresh one hasn't loaded yet.`
+    case 'stale_tunnel_credential':
+      return `${unavailable}: the machine running claude ssh changed credentials while your organization's policy was loading, and a fresh copy hasn't loaded yet.`
+    case 'request_failed':
+      if (httpStatus === 404) {
+        return `${unavailable}: the request for your organization's policy got a 404 from ${host}, which usually means a proxy or gateway isn't forwarding ${policyPath}.`
+      }
+      if (httpStatus === 304) {
+        return `${unavailable}: a caching proxy answered in place of ${host} when Claude Code asked for your organization's policy.`
+      }
+      if (httpStatus === 407) {
+        return `${unavailable}: your proxy asked for authentication before it would forward the request for your organization's policy to ${host}.`
+      }
+      if (httpStatus !== null && (httpStatus >= 500 || httpStatus === 429)) {
+        return `${unavailable}: your organization's policy couldn't be loaded from ${host} (HTTP ${httpStatus}). Try again later.`
+      }
+      return httpStatus !== null
+        ? `${unavailable}: your organization's policy couldn't be loaded from ${host} (HTTP ${httpStatus}). Check your proxy settings.`
+        : `${unavailable}: the request to ${host} for your organization's policy didn't complete. If you use a proxy, check that it lets ${host} through.`
   }
 }
 

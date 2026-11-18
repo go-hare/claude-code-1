@@ -61,6 +61,10 @@ function DirectoryDisplay({ path }: { path: string }): React.ReactNode {
   );
 }
 
+function stripNewlines(input: string): string {
+  return input.replace(/[\r\n]/g, '');
+}
+
 function DirectoryInput({
   value,
   onChange,
@@ -94,6 +98,7 @@ function DirectoryInput({
           columns={80}
           cursorOffset={cursorOffset}
           onChangeCursorOffset={onChangeCursorOffset}
+          inputFilter={stripNewlines}
           disableCursorMovementForUpDownKeys={true}
         />
       </Box>
@@ -176,7 +181,8 @@ export function AddWorkspaceDirectory({
     (e: KeyboardEvent) => {
       if (suggestions.length > 0) {
         // Tab: accept selected suggestion and continue (for drilling into subdirs)
-        if (e.key === 'tab') {
+        // Use e.name (not e.key) so fast-typed "tab", "up", "down" aren't treated as keys.
+        if (e.name === 'tab') {
           e.preventDefault();
           const suggestion = suggestions[selectedSuggestion];
           if (suggestion) {
@@ -185,13 +191,13 @@ export function AddWorkspaceDirectory({
           return;
         }
 
-        if (e.key === 'up' || (e.ctrl && e.key === 'p')) {
+        if (e.name === 'up' || (e.ctrl && e.name === 'p')) {
           e.preventDefault();
           setSelectedSuggestion(prev => (prev <= 0 ? suggestions.length - 1 : prev - 1));
           return;
         }
 
-        if (e.key === 'down' || (e.ctrl && e.key === 'n')) {
+        if (e.name === 'down' || (e.ctrl && e.name === 'n')) {
           e.preventDefault();
           setSelectedSuggestion(prev => (prev >= suggestions.length - 1 ? 0 : prev + 1));
           return;

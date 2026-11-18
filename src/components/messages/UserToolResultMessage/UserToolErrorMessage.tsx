@@ -3,7 +3,7 @@ import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs
 import * as React from 'react';
 import stripAnsi from 'strip-ansi';
 import { BULLET_OPERATOR } from '../../../constants/figures.js';
-import { Link, Text } from '@anthropic/ink';
+import { Byline, Link, Text } from '@anthropic/ink';
 import { filterToolProgressMessages, type Tool, type Tools } from '../../../Tool.js';
 import type { ProgressMessage } from '../../../types/message.js';
 import {
@@ -36,6 +36,25 @@ function extractClassifierDenialReason(content: string): string | null {
   return rest.slice(0, idx);
 }
 
+/**
+ * Official 2.1.296 (#541): Ri(toolDenialKind, verbose) & On({ callCount })
+ */
+export const AUTOMODE_UNAVAILABLE_REASON = "auto mode's check had no usable answer";
+
+export function isAutomodeUnavailable(toolDenialKind: string | undefined, verbose: boolean): boolean {
+  return (toolDenialKind === 'automode-unavailable' || toolDenialKind === 'automode-parsing-error') && verbose !== true;
+}
+
+export function AutomodeNotRunRow({ callCount }: { callCount?: number }): React.ReactNode {
+  const label = callCount === undefined ? 'Not run' : `${callCount} ${callCount === 1 ? 'action' : 'actions'} not run`;
+  return (
+    <Byline>
+      <Text>{label}</Text>
+      <Text>{AUTOMODE_UNAVAILABLE_REASON}</Text>
+    </Byline>
+  );
+}
+
 type Props = {
   progressMessagesForMessage: ProgressMessage[];
   tool?: Tool; // undefined when resuming an old conversation that uses an old tool
@@ -45,6 +64,7 @@ type Props = {
   output?: unknown;
   verbose: boolean;
   isTranscriptMode?: boolean;
+  toolDenialKind?: string;
 };
 
 export function UserToolErrorMessage({
@@ -56,6 +76,7 @@ export function UserToolErrorMessage({
   output,
   verbose,
   isTranscriptMode,
+  toolDenialKind,
 }: Props): React.ReactNode {
   if (typeof param.content === 'string' && param.content.includes(INTERRUPT_MESSAGE_FOR_TOOL_USE)) {
     return (
@@ -93,6 +114,22 @@ export function UserToolErrorMessage({
     );
   }
 
+  if (isAutomodeUnavailable(toolDenialKind, verbose)) {
+    return (
+      <MessageResponse>
+        <Text dimColor wrap="wrap">
+          <AutomodeNotRunRow />
+        </Text>
+      </MessageResponse>
+    );
+  }
+
+  // Official 2.1.292 (#231): when a mod / permission-rule denied the tool call,
+  // show the denial reason instead of a generic "Error writing/reading file".
+  if (toolDenialKind === 'permission-rule' && !verbose) {
+    return <FallbackToolUseErrorMessage result={param.content} verbose={verbose} />;
+  }
+
   const errorRenderOptions = {
     progressMessagesForMessage: filterToolProgressMessages(progressMessagesForMessage),
     tools,
@@ -100,6 +137,7 @@ export function UserToolErrorMessage({
     isTranscriptMode,
     input,
     output,
+    toolDenialKind,
   };
 
   return (

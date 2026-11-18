@@ -9,6 +9,7 @@ import {
   isSessionPersistenceDisabled,
 } from 'src/bootstrap/state.js'
 import { createSessionToolUseContext } from './engine/createSessionToolUseContext.js'
+import { clearCommandScopedAllowRules } from './utils/permissions/permissionSetup.js'
 import type {
   PermissionMode,
   SDKCompactBoundaryMessage,
@@ -1220,18 +1221,20 @@ export class QueryEngine {
         denyExtra.length === 0
           ? curDeny
           : Array.from(new Set([...curDeny, ...denyExtra]))
+      const cleared = clearCommandScopedAllowRules(prev.toolPermissionContext)
       return {
         ...prev,
         toolPermissionContext: {
-          ...prev.toolPermissionContext,
+          ...cleared,
           alwaysAllowRules: {
-            ...prev.toolPermissionContext.alwaysAllowRules,
+            ...cleared.alwaysAllowRules,
             command: allowedTools,
           },
           alwaysDenyRules: {
-            ...prev.toolPermissionContext.alwaysDenyRules,
+            ...cleared.alwaysDenyRules,
             command: nextDeny.length > 0 ? nextDeny : undefined,
           },
+          pollEventDeliveryGuard: undefined,
         },
       }
     })

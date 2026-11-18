@@ -239,49 +239,361 @@ export async function runPluginTestFiles(opts: {
   return failCount === 0 ? 0 : 1
 }
 
+export type SessionAppendMessageBlock = {
+  type: string
+  id?: string
+  tool_use_id?: string
+  signature?: string
+  text?: string
+  content?: unknown
+  is_error?: boolean
+  [key: string]: unknown
+}
+
+export type SessionAppendMessage = {
+  type?: string
+  role?: string
+  content?: SessionAppendMessageBlock[] | string
+  [key: string]: unknown
+}
+
+function pinnedBlockKey(
+  block: SessionAppendMessageBlock,
+  index: number,
+): string | undefined {
+  switch (block.type) {
+    case 'tool_use':
+      return `tool_use:${String(block.id ?? index)}`
+    case 'tool_result':
+      return `tool_result:${String(block.tool_use_id ?? index)}`
+    case 'thinking':
+    case 'redacted_thinking':
+      return `${block.type}:${String(block.signature ?? index)}`
+    case 'text':
+      return undefined
+    default:
+      return `${block.type}:${index}`
+  }
+}
+
+/**
+ * #401 (SEA `Qe` / `Xe` / `Le`): preserve pinned blocks (`tool_use`,
+ * `tool_result`, `thinking`, `redacted_thinking`, and unknown blocks) when a
+ * `session.append` hook returns a modified message.
+ */
+export function pinSessionAppendMessage(
+  original: SessionAppendMessage,
+  modified: SessionAppendMessage,
+): {
+  message: SessionAppendMessage
+  droppedTypes: string[]
+  changed: boolean
+} {
+  if (!Array.isArray(original.content)) {
+    return { message: modified, droppedTypes: [], changed: false }
+  }
+  const modContent = Array.isArray(modified.content) ? modified.content : []
+  const modPinnedByKey = new Map<string, SessionAppendMessageBlock>()
+  modContent.forEach((b, i) => {
+    const key = pinnedBlockKey(b, i)
+    if (key !== undefined) modPinnedByKey.set(key, b)
+  })
+
+  const droppedSet = new Set<string>()
+  const resultBlocks: SessionAppendMessageBlock[] = []
+  let changed = !Array.isArray(modified.content)
+
+  // Keep any non-pinned text blocks from modified content in order, while
+  // ensuring every pinned block from original is preserved at its position.
+  let modTextIdx = 0
+  const modTexts = modContent.filter(b => b.type === 'text')
+
+  original.content.forEach((origBlock, idx) => {
+    const key = pinnedBlockKey(origBlock, idx)
+    if (key === undefined) {
+      const nextText = modTexts[modTextIdx++]
+      if (nextText !== undefined) {
+        if (nextText.text !== origBlock.text) changed = true
+        resultBlocks.push(nextText)
+      } else {
+        changed = true
+      }
+      return
+    }
+    const candidate = modPinnedByKey.get(key)
+    if (candidate === undefined) {
+      droppedSet.add(origBlock.type)
+      changed = true
+      resultBlocks.push(origBlock)
+      return
+    }
+    if (origBlock.type === 'tool_result') {
+      // Tool results may scrub `content` / `is_error`, but keep `tool_use_id`.
+      resultBlocks.push({
+        ...origBlock,
+        ...(candidate.content !== undefined && { content: candidate.content }),
+        ...(candidate.is_error !== undefined && {
+          is_error: candidate.is_error,
+        }),
+      })
+    } else {
+      resultBlocks.push(origBlock)
+    }
+  })
+
+  // Append any extra text blocks added by the hook
+  while (modTextIdx < modTexts.length) {
+    resultBlocks.push(modTexts[modTextIdx++]!)
+    changed = true
+  }
+
+  return {
+    message: { ...original, content: resultBlocks },
+    droppedTypes: [...droppedSet],
+    changed,
+  }
+}
+
+export function formatSessionAppendPinWarning(
+  door: string,
+  uuid: string,
+  droppedTypes: readonly string[],
+): string | undefined {
+  if (droppedTypes.length === 0) return undefined
+  const base = `session.append: the ${door} row ${uuid} is stored with its ${droppedTypes.join(', ')} kept, as a session stores it. A session pins tool_use, tool_result, thinking and unknown blocks (a request pairs each tool call with its result and carries thinking as signed), so no hook drops one or changes its id.`
+  return droppedTypes.includes('tool_result')
+    ? `${base} To scrub a tool result, pass on a tool_result with the same tool_use_id and new content.`
+    : base
+}
+
+export type PluginTestKit = {
+  test: (
+    title: string,
+    fn: (
+      $: {
+        session: {
+          append: (event: {
+            door?: string
+            uuid?: string
+            message: SessionAppendMessage
+          }) => Promise<{ message: SessionAppendMessage; uuid: string }>
+        }
+      },
+      on: (
+        event: string,
+        hook: (
+          $: unknown,
+          e: Record<string, unknown>,
+          next: (e: Record<string, unknown>) => Promise<unknown>,
+        ) => unknown,
+      ) => void,
+    ) => unknown | Promise<unknown>,
+  ) => void
+  expect: (actual: unknown) => {
+    toBe: (expected: unknown) => void
+    toEqual: (expected: unknown) => void
+    toContain: (expected: string) => void
+  }
+  mock: {
+    session: {
+      rows: () => Array<{
+        door: string
+        uuid: string
+        message: SessionAppendMessage
+      }>
+      clear: () => void
+    }
+  }
+  runRecorded: () => Promise<PluginTestCaseResult[]>
+}
+
+/**
+ * #265 / #306 / #401: in-process `claude-code/testing` kit for `claude plugin test`.
+ * - #265: failed `expect` inside a test-registered `on(...)` hook or a refused
+ *   stub answer fails the test instead of passing silently.
+ * - #306: `mock.session` captures rows appended via `$.session.append`.
+ * - #401: `session.append` hooks cannot drop `tool_use`/`tool_result`/`thinking`
+ *   blocks that a real session keeps.
+ */
+export function createPluginTestKit(): PluginTestKit {
+  const cases: Array<{
+    title: string
+    fn: Parameters<PluginTestKit['test']>[1]
+  }> = []
+  let sessionRows: Array<{
+    door: string
+    uuid: string
+    message: SessionAppendMessage
+  }> = []
+
+  const expectFn: PluginTestKit['expect'] = actual => ({
+    toBe(expected) {
+      if (!Object.is(actual, expected)) {
+        throw new Error(
+          `Expected ${JSON.stringify(actual)} to be ${JSON.stringify(expected)}`,
+        )
+      }
+    },
+    toEqual(expected) {
+      if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+        throw new Error(
+          `Expected ${JSON.stringify(actual)} to equal ${JSON.stringify(expected)}`,
+        )
+      }
+    },
+    toContain(expected) {
+      if (typeof actual !== 'string' || !actual.includes(expected)) {
+        throw new Error(
+          `Expected ${JSON.stringify(actual)} to contain ${JSON.stringify(expected)}`,
+        )
+      }
+    },
+  })
+
+  return {
+    test(title, fn) {
+      cases.push({ title, fn })
+    },
+    expect: expectFn,
+    mock: {
+      session: {
+        rows: () => [...sessionRows],
+        clear: () => {
+          sessionRows = []
+        },
+      },
+    },
+    async runRecorded() {
+      const results: PluginTestCaseResult[] = []
+      for (const tc of cases) {
+        sessionRows = []
+        const hookErrors: string[] = []
+        const hooks = new Map<
+          string,
+          Array<
+            (
+              $: unknown,
+              e: Record<string, unknown>,
+              next: (e: Record<string, unknown>) => Promise<unknown>,
+            ) => unknown
+          >
+        >()
+        const on: Parameters<Parameters<PluginTestKit['test']>[1]>[1] = (
+          event,
+          hook,
+        ) => {
+          const list = hooks.get(event) ?? []
+          list.push(hook)
+          hooks.set(event, list)
+        }
+        const $: Parameters<Parameters<PluginTestKit['test']>[1]>[0] = {
+          session: {
+            append: async event => {
+              const door = event.door ?? 'turn'
+              const uuid = event.uuid ?? 'row-1'
+              const originalMessage = event.message
+              const registered = hooks.get('session.append') ?? []
+              let idx = 0
+              const dispatch = async (
+                cur: Record<string, unknown>,
+              ): Promise<Record<string, unknown>> => {
+                const h = registered[idx++]
+                if (!h) {
+                  return { message: cur.message ?? originalMessage, uuid }
+                }
+                let out: unknown
+                try {
+                  out = await h($, cur, dispatch)
+                } catch (err) {
+                  hookErrors.push(safeMessageOf(err))
+                  return { message: cur.message ?? originalMessage, uuid }
+                }
+                if (out === null || typeof out !== 'object') {
+                  hookErrors.push(
+                    `session.append hook returned an invalid stub answer (${String(out)})`,
+                  )
+                  return { message: cur.message ?? originalMessage, uuid }
+                }
+                return out as Record<string, unknown>
+              }
+              const res = await dispatch({
+                door,
+                uuid,
+                message: originalMessage,
+              })
+              const candidateMsg = (res.message ??
+                originalMessage) as SessionAppendMessage
+              const pinned = pinSessionAppendMessage(
+                originalMessage,
+                candidateMsg,
+              )
+              const warn = formatSessionAppendPinWarning(
+                door,
+                uuid,
+                pinned.droppedTypes,
+              )
+              if (warn !== undefined) {
+                hookErrors.push(warn)
+              }
+              sessionRows.push({ door, uuid, message: pinned.message })
+              return { message: pinned.message, uuid }
+            },
+          },
+        }
+
+        const t0 = performance.now()
+        try {
+          await tc.fn($, on)
+          if (hookErrors.length > 0) {
+            results.push({
+              title: tc.title,
+              ms: performance.now() - t0,
+              failure: hookErrors.join('\n'),
+              advice: [],
+            })
+          } else {
+            results.push({
+              title: tc.title,
+              ms: performance.now() - t0,
+              failure: null,
+              advice: [],
+            })
+          }
+        } catch (err) {
+          results.push({
+            title: tc.title,
+            ms: performance.now() - t0,
+            failure:
+              hookErrors.length > 0
+                ? `${safeMessageOf(err)}\n${hookErrors.join('\n')}`
+                : safeMessageOf(err),
+            advice: [],
+          })
+        }
+      }
+      return results
+    },
+  }
+}
+
 export async function runPluginTestFileInProcess(
-  dir: string,
+  _dir: string,
   file: string,
 ): Promise<PluginTestFileReport> {
-  const recorded: Array<{
-    title: string
-    fn: () => unknown | Promise<unknown>
-  }> = []
-  const testFn = (title: string, fn: () => unknown | Promise<unknown>) => {
-    recorded.push({ title, fn })
-  }
+  const kit = createPluginTestKit()
   try {
-    const mod = (await import(file)) as { default?: unknown }
-    if (typeof mod.default === 'function' && recorded.length === 0) {
-      // Allow default export runner if no explicit test() registrations
+    const mod = (await import(file)) as {
+      default?: (kit: PluginTestKit) => unknown | Promise<unknown>
+    }
+    if (typeof mod.default === 'function') {
+      await mod.default(kit)
     }
   } catch (err) {
     return makeLoadErrorReport(file, safeMessageOf(err))
   }
-  // If file used bun:test or did not register with our kit, we cannot re-run bun:test inside bun:test;
-  // callers using `claude-code/testing` register tests via testFn or direct execution.
-  if (recorded.length === 0) {
+  const results = await kit.runRecorded()
+  if (results.length === 0) {
     return makeLoadErrorReport(file, 'it declares no test(): nothing ran')
-  }
-  const results: PluginTestCaseResult[] = []
-  for (const item of recorded) {
-    const t0 = performance.now()
-    try {
-      await item.fn()
-      results.push({
-        title: item.title,
-        ms: performance.now() - t0,
-        failure: null,
-        advice: [],
-      })
-    } catch (err) {
-      results.push({
-        title: item.title,
-        ms: performance.now() - t0,
-        failure: safeMessageOf(err),
-        advice: [],
-      })
-    }
   }
   return { file, results }
 }

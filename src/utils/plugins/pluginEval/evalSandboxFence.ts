@@ -4,6 +4,7 @@
  * `sandbox.configDir/settings.json`.
  */
 import {
+  lstat,
   mkdir,
   readdir,
   readFile,
@@ -23,6 +24,7 @@ import {
   posix,
   relative,
   resolve,
+  sep,
 } from 'path'
 import { logForDebugging } from '../../debug.js'
 import { getErrnoCode } from '../../errors.js'
@@ -1140,7 +1142,7 @@ async function krb5ConfigCredentialPaths(
     } catch (error) {
       const code = getErrnoCode(error)
       if (code === 'ENOENT' || code === 'ENOTDIR') return
-      throw credentialsPointerUnreadable('a credential store')
+      throw credentialsPointerUnreadable('a krb5.conf file')
     }
     let inLibdefaults = false
     for (const line of text.split(/\r?\n/)) {
@@ -1266,7 +1268,7 @@ async function sshConfigCredentialPaths(home: string): Promise<string[]> {
     } catch (error) {
       const code = getErrnoCode(error)
       if (code === 'ENOENT' || code === 'ENOTDIR') return
-      throw credentialsPointerUnreadable('a credential store')
+      throw credentialsPointerUnreadable('a krb5.conf file')
     }
     if (depth > 16) {
       throw credentialsPointerUnreadable(
@@ -1509,7 +1511,7 @@ async function readGitconfigText(path: string): Promise<string | null> {
   } catch (error) {
     const code = getErrnoCode(error)
     if (code === 'ENOENT' || code === 'ENOTDIR') return null
-    throw credentialsPointerUnreadable('a credential store')
+    throw credentialsPointerUnreadable('a gitconfig file')
   }
 }
 
@@ -1626,6 +1628,121 @@ function outsideHomeCredentialFiles(
   ]
 }
 
+export const DOCKER_CREDENTIAL_SKIPPED = new Set([
+  'cli-plugins',
+  'buildx',
+  'desktop',
+  'mutagen',
+  'scan',
+  'run',
+  'features.json',
+  'daemon.json',
+  'desktop-build',
+])
+
+export const DOCKER_CREDENTIAL_SKIPPED_AT_ROOT = new Set(['bin', 'completions'])
+
+export const NAMED_CREDENTIAL_ENTRIES = new Set([
+  'config.json',
+  'ca.pem',
+  'cert.pem',
+  'key.pem',
+  'contexts',
+  'trust',
+  'machine',
+  'models',
+  'model-runner',
+  'mcp',
+  'modules',
+  'scout',
+  'cloud',
+  'certs.d',
+  'sso',
+  'cli',
+  'credentials',
+  'config',
+  'login',
+  'configurations',
+  'legacy_credentials',
+  'credentials.db',
+  'access_tokens.db',
+  'application_default_credentials.json',
+  'cache',
+])
+
+const MAX_CREDENTIAL_STORE_ENTRIES = 10000
+
+/**
+ * Official `up(e, n, r, l)` — walk a credential store directory and refuse any
+ * inner symbolic link (naming which entry held it), while skipping benign
+ * tool/UI entries such as macOS Docker Desktop's `~/.docker/bin`.
+ */
+export async function checkCredentialStoreLinks(
+  storePath: string,
+  label: string,
+  skipped: Set<string>,
+  skippedAtRoot: Set<string>,
+): Promise<string | null> {
+  const fail = (detail: string): Error =>
+    new Error(
+      `the ${label} credential store on this machine ${detail}, so the Bash sandbox cannot reliably exclude it — a Bash-granting evaluation cannot run here; keep the store's contents in one plain directory (its root may be a link)`,
+    )
+  let rootReal: string
+  try {
+    rootReal = await realpath(storePath)
+  } catch (error) {
+    const code = getErrnoCode(error)
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      const st = await lstat(storePath).catch(() => null)
+      if (st === null) return null
+      if (st.isSymbolicLink()) {
+        throw fail('is behind a link whose target is not there')
+      }
+      return null
+    }
+    throw fail(`could not be resolved (${code ?? 'unreadable'})`)
+  }
+  const queue: string[] = [rootReal]
+  let visited = 0
+  for (let dir = queue.shift(); dir !== undefined; dir = queue.shift()) {
+    let entries: import('fs').Dirent[]
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch (error) {
+      const code = getErrnoCode(error)
+      if (code === 'ENOTDIR' && dir === rootReal) break
+      if (code === 'ENOENT') continue
+      throw fail(`could not be read (${code ?? 'unreadable'})`)
+    }
+    for (const entry of entries) {
+      if (++visited > MAX_CREDENTIAL_STORE_ENTRIES) {
+        throw fail('is too large to check for symbolic links')
+      }
+      if (
+        skipped.has(entry.name) ||
+        (dir === rootReal && skippedAtRoot.has(entry.name))
+      ) {
+        continue
+      }
+      const full = join(dir, entry.name)
+      if (entry.isSymbolicLink()) {
+        const top = relative(rootReal, full).split(sep)[0] ?? ''
+        throw fail(
+          `holds a symbolic link inside it (at or under ${
+            NAMED_CREDENTIAL_ENTRIES.has(top)
+              ? `its "${top}" entry`
+              : 'an entry this check has no name for'
+          })`,
+        )
+      }
+      if (entry.isDirectory()) {
+        queue.push(full)
+      }
+    }
+  }
+  return rootReal === resolve(storePath) ? null : rootReal
+}
+
 /**
  * densable leftover `af` `mn` without the `ve` walker (`Xf`/`Vp`).
  * `Qa` pointers from child env and process.env, plus default kube/helm/sops
@@ -1643,6 +1760,14 @@ async function operatorCredentialFiles(
     'DOCKER_CONFIG',
     join(home, '.docker'),
   )
+  for (const dir of docker) {
+    await checkCredentialStoreLinks(
+      dir,
+      'Docker (~/.docker, DOCKER_CONFIG)',
+      DOCKER_CREDENTIAL_SKIPPED,
+      DOCKER_CREDENTIAL_SKIPPED_AT_ROOT,
+    )
+  }
   const dockerCert = pointerOrFallback(
     childEnv,
     home,

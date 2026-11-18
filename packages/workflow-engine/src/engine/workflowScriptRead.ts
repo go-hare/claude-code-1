@@ -48,9 +48,14 @@ export type WorkflowScriptReadableSet = {
   permissionMode?: string
 }
 
-/** densable `It` — still quotes the caller-supplied path. */
+/** Official `QUe` (2.1.296 #528) — normalize CRLF line endings to LF. */
+export function normalizeWorkflowScriptLineEndings(source: string): string {
+  return source.replaceAll('\r\n', '\n')
+}
+
+/** densable `It` / `vo` (2.1.295 #452) — still quotes the caller-supplied path. */
 export function workflowScriptReadRefusal(scriptPath: string): string {
-  return `scriptPath must be a script path this tool returned, or a file you can already read (the working directory or a directory you have added): ${scriptPath}`
+  return `scriptPath must be a script path this tool returned, or a file you can already read (the working directory or a directory you have added): ${scriptPath}\nA session that cannot call ${WORKFLOW_SCRIPT_READ_TOOL_NAME} cannot load any scriptPath. Pass the whole script inline through Workflow's \`script\` input instead.`
 }
 
 function errnoCode(err: unknown): string | undefined {
@@ -330,7 +335,8 @@ export async function readAllowedWorkflowScript(
     if (!(await realpathStaysReadable(real, cwd, extraRoots, gate))) {
       throw new Error(workflowScriptReadRefusal(scriptPath))
     }
-    const script = await handle.readFile({ encoding: 'utf8' })
+    const rawScript = await handle.readFile({ encoding: 'utf8' })
+    const script = normalizeWorkflowScriptLineEndings(rawScript)
     return { script, path: real }
   } finally {
     await handle.close()

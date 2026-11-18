@@ -236,7 +236,15 @@ async function executeForkedSkill(
     }),
   })
 
-  const background = shouldBackgroundForkedSkill(command)
+  // #387 SEA Pgr: When invoked from a Workflow subagent
+  // (spawnedByWorkflowRunId !== undefined), run synchronously so the result
+  // delivers to the invoking agent rather than the main conversation.
+  const spawnedByWorkflowRunId = (
+    context as { spawnedByWorkflowRunId?: string }
+  ).spawnedByWorkflowRunId
+  const background =
+    spawnedByWorkflowRunId === undefined && shouldBackgroundForkedSkill(command)
+  const deferRules = background || spawnedByWorkflowRunId !== undefined
   const {
     modifiedGetAppState,
     baseAgent,
@@ -248,9 +256,9 @@ async function executeForkedSkill(
     recordInvocation,
     forkReadFileState,
   } = await prepareForkedCommandContext(command, args || '', context, {
-    replaceCommandRules: background,
-    freezeCommandDenies: background,
-    deferInvocationRecording: background,
+    replaceCommandRules: deferRules,
+    freezeCommandDenies: deferRules,
+    deferInvocationRecording: deferRules,
   })
   const permissionLayers =
     contextLayers.length > 0
@@ -372,6 +380,9 @@ async function executeForkedSkill(
       agentMessages,
       'Skill execution completed',
     )
+    if (spawnedByWorkflowRunId !== undefined) {
+      recordInvocation()
+    }
     // Release message memory after extracting result
     agentMessages.length = 0
 

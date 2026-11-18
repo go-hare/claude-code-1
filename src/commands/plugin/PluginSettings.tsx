@@ -44,7 +44,7 @@ import { BrowseMarketplace } from './BrowseMarketplace.js';
 import { DiscoverPlugins } from './DiscoverPlugins.js';
 import { ManageMarketplaces } from './ManageMarketplaces.js';
 import { ManagePlugins } from './ManagePlugins.js';
-import { formatErrorMessage, getErrorGuidance } from './PluginErrors.js';
+import { formatErrorMessage, getErrorGuidance, type PluginErrorExtended } from './PluginErrors.js';
 import { type ParsedCommand, parsePluginArgs } from './parseArgs.js';
 import type { PluginSettingsProps, ViewState } from './types.js';
 import { PluginEval } from './PluginEval.js';
@@ -55,6 +55,12 @@ type TabId = 'discover' | 'installed' | 'marketplaces' | 'errors' | 'stats';
 /** densable `_l` — queued reload toast when the main query is still running. */
 export const PLUGIN_MENU_DEFERRED_RELOAD_MESSAGE =
   'Plugin changes apply when the current response finishes (/reload-plugins is queued).';
+
+/** 325 `ef` — join non-empty message segments with newline. */
+export function joinNonEmptyLines(...parts: Array<string | undefined>): string | undefined {
+  const filtered = parts.filter(part => part !== undefined && part !== '');
+  return filtered.length > 0 ? filtered.join('\n') : undefined;
+}
 
 function isMainQueryRunning(): boolean {
   return getBootstrapSession().surfaceCapabilities.mainLoopBusy();
@@ -210,8 +216,13 @@ type ErrorRow = {
   isAdvisory?: boolean;
 };
 
-function isAdvisoryPluginError(error: PluginError): boolean {
-  return error.type === 'mcp-server-suppressed-duplicate' || error.type === 'synced-plugin-shadowed';
+function isAdvisoryPluginError(error: PluginErrorExtended): boolean {
+  return (
+    error.type === 'mcp-server-suppressed-duplicate' ||
+    error.type === 'synced-plugin-shadowed' ||
+    error.type === 'hooks-left-out-by-name' ||
+    error.type === 'hooks-module-left-out-by-name'
+  );
 }
 
 /**
@@ -1153,7 +1164,7 @@ export function PluginSettings({
         onComplete(message);
         return;
       }
-      onComplete(outcome === 'deferred' ? PLUGIN_MENU_DEFERRED_RELOAD_MESSAGE : message, {
+      onComplete(outcome === 'deferred' ? joinNonEmptyLines(message, PLUGIN_MENU_DEFERRED_RELOAD_MESSAGE) : message, {
         nextInput: '/reload-plugins',
         submitNextInput: true,
       });

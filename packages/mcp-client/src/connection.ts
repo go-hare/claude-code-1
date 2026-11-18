@@ -13,8 +13,11 @@ import type { ConnectedMCPServer, ScopedMcpServerConfig } from './types.js'
 /** Default connection timeout in milliseconds */
 export const DEFAULT_CONNECTION_TIMEOUT_MS = 30_000
 
-/** Maximum length for MCP descriptions/instructions */
-export const MAX_MCP_DESCRIPTION_LENGTH = 2048
+/** Maximum length for MCP descriptions/instructions sent up front */
+export const MAX_MCP_DESCRIPTION_LENGTH = 4096
+
+/** Maximum length for MCP tool descriptions loaded through tool search */
+export const MAX_LOADED_MCP_DESCRIPTION_LENGTH = 16384
 
 /** Maximum consecutive terminal errors before triggering reconnection */
 export const MAX_ERRORS_BEFORE_RECONNECT = 3

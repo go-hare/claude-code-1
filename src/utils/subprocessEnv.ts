@@ -1,4 +1,10 @@
-import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
+import {
+  isEnvDefinedFalsy,
+  isEnvTruthy,
+  stripDaemonForceColorFromEnv,
+  shouldStripDaemonForceColor,
+} from './envUtils.js'
+import { getSettings_DEPRECATED } from './settings/settings.js'
 import { getScreenReaderChildEnv } from './screenReaderGate.js'
 
 /**
@@ -128,17 +134,35 @@ export function subprocessEnv(): NodeJS.ProcessEnv {
   const proxyEnv = _getUpstreamProxyEnv?.() ?? {}
   // Official FXe — propagate CLAUDE_AX_SCREEN_READER=1 when screen-reader mode is on.
   const screenReaderEnv = getScreenReaderChildEnv()
+  const settingsEnv = getSettings_DEPRECATED()?.env ?? {}
+  const stripForceColor = shouldStripDaemonForceColor(settingsEnv)
 
   if (!shouldScrubSubprocessEnv()) {
     if (
       Object.keys(proxyEnv).length === 0 &&
-      Object.keys(screenReaderEnv).length === 0
+      Object.keys(screenReaderEnv).length === 0 &&
+      !stripForceColor
     ) {
       return process.env
     }
-    return { ...process.env, ...proxyEnv, ...screenReaderEnv }
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      ...proxyEnv,
+      ...screenReaderEnv,
+    }
+    if (stripForceColor) {
+      stripDaemonForceColorFromEnv(env, settingsEnv)
+    }
+    return env
   }
-  const env = { ...process.env, ...proxyEnv, ...screenReaderEnv }
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    ...proxyEnv,
+    ...screenReaderEnv,
+  }
+  if (stripForceColor) {
+    stripDaemonForceColorFromEnv(env, settingsEnv)
+  }
   for (const k of GHA_SUBPROCESS_SCRUB) {
     delete env[k]
     // GitHub Actions auto-creates INPUT_<NAME> for `with:` inputs, duplicating

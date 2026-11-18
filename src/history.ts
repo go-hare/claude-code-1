@@ -835,6 +835,62 @@ export async function* getTimestampedHistory(): AsyncGenerator<TimestampedHistor
  * predicate (mode filter). Caps at MAX_HISTORY_ITEMS of project hits.
  * Catch → null (Gie shows bare "History").
  */
+const MAX_CLEARED_DRAFTS = 10
+const MAX_CLEARED_DRAFTS_CHARS = 1e7
+
+type ClearedDraftEntry = {
+  entry: HistoryEntry
+  timestamp: number
+  project: string
+  sessionId: string
+  length: number
+}
+
+let clearedDrafts: ClearedDraftEntry[] = []
+
+function clearedDraftKey(entry: HistoryEntry): string {
+  const pasteKeys = Object.keys(entry.pastedContents ?? {})
+    .sort()
+    .map(k => {
+      const p = entry.pastedContents[Number(k)]
+      return `${k}:${p?.type ?? ''}:${p?.content?.length ?? 0}`
+    })
+    .join(',')
+  return `${entry.display}\0${pasteKeys}`
+}
+
+/**
+ * Official 2.1.292 `uQi` / `keepClearedDraft`: retain a Ctrl+C cleared draft in
+ * an in-memory ring buffer so Up-arrow history can still reach it after a slash
+ * command or sent message without writing it to disk.
+ */
+export function keepClearedDraftToHistory(
+  entry: HistoryEntry,
+  timestamp: number = Date.now(),
+): void {
+  const project = getProjectRoot()
+  const sessionId = getSessionId()
+  const key = clearedDraftKey(entry)
+  clearedDrafts = clearedDrafts.filter(
+    item =>
+      item.project !== project ||
+      item.sessionId !== sessionId ||
+      clearedDraftKey(item.entry) !== key,
+  )
+  const length = Object.values(entry.pastedContents ?? {}).reduce(
+    (sum, p) => sum + (p.content?.length ?? 0),
+    entry.display.length,
+  )
+  clearedDrafts.push({ entry, timestamp, project, sessionId, length })
+  let totalChars = clearedDrafts.reduce((sum, item) => sum + item.length, 0)
+  while (
+    clearedDrafts.length > MAX_CLEARED_DRAFTS ||
+    totalChars > MAX_CLEARED_DRAFTS_CHARS
+  ) {
+    totalChars -= clearedDrafts.shift()!.length
+  }
+}
+
 export async function countHistoryForProject(
   predicate?: (display: string) => boolean,
 ): Promise<number | null> {
@@ -852,6 +908,16 @@ export async function countHistoryForProject(
   } catch {
     return null
   }
+  const currentSession = getSessionId()
+  for (const item of clearedDrafts) {
+    if (
+      item.project === currentProject &&
+      item.sessionId === currentSession &&
+      (!predicate || predicate(item.entry.display))
+    ) {
+      matched++
+    }
+  }
   return matched
 }
 
@@ -863,11 +929,20 @@ export async function countHistoryForProject(
  * order is newest-first. Scans the same MAX_HISTORY_ITEMS window as before —
  * entries are reordered within that window, not beyond it.
  */
-export async function* getHistory(): AsyncGenerator<HistoryEntry> {
+export async function* getHistory(options?: {
+  withClearedDrafts?: boolean
+}): AsyncGenerator<HistoryEntry> {
   const currentProject = getProjectRoot()
   const currentSession = getSessionId()
   const otherSessionEntries: LogEntry[] = []
   let yielded = 0
+  const matchingDrafts = options?.withClearedDrafts
+    ? clearedDrafts.filter(
+        item =>
+          item.project === currentProject && item.sessionId === currentSession,
+      )
+    : []
+  let draftIdx = matchingDrafts.length - 1
 
   for await (const entry of makeLogEntryReader()) {
     // Skip malformed entries (corrupted file, old format, or invalid JSON structure)
@@ -875,6 +950,13 @@ export async function* getHistory(): AsyncGenerator<HistoryEntry> {
     if (entry.project !== currentProject) continue
 
     if (entry.sessionId === currentSession) {
+      while (
+        draftIdx >= 0 &&
+        matchingDrafts[draftIdx]!.timestamp > entry.timestamp
+      ) {
+        yield matchingDrafts[draftIdx]!.entry
+        draftIdx--
+      }
       yield await logEntryToHistoryEntry(entry)
       yielded++
     } else {
@@ -883,6 +965,11 @@ export async function* getHistory(): AsyncGenerator<HistoryEntry> {
 
     // Same MAX_HISTORY_ITEMS window as before — just reordered within it.
     if (yielded + otherSessionEntries.length >= MAX_HISTORY_ITEMS) break
+  }
+
+  while (draftIdx >= 0) {
+    yield matchingDrafts[draftIdx]!.entry
+    draftIdx--
   }
 
   for (const entry of otherSessionEntries) {
@@ -1101,6 +1188,7 @@ async function flushPromptHistory(retries: number): Promise<void> {
 
 async function addToPromptHistory(
   command: HistoryEntry | string,
+  options?: { armUndo?: boolean },
 ): Promise<void> {
   const entry =
     typeof command === 'string'
@@ -1109,12 +1197,15 @@ async function addToPromptHistory(
 
   const project = getProjectRoot()
   const sessionId = getSessionId()
+  const armUndo = options?.armUndo !== false
 
   // densable `_ty` / VDo — consecutive duplicate suppress
   if (
     isConsecutiveDuplicateHistory(lastAddedEntry, entry, project, sessionId)
   ) {
-    lastAddWasDeduped = true
+    if (armUndo) {
+      lastAddWasDeduped = true
+    }
     return
   }
 
@@ -1161,13 +1252,18 @@ async function addToPromptHistory(
   }
 
   pendingEntries.push(logEntry)
-  lastAddedEntry = logEntry
-  lastAddWasDeduped = false
+  if (armUndo) {
+    lastAddedEntry = logEntry
+    lastAddWasDeduped = false
+  }
   currentFlushPromise = flushPromptHistory(0)
   void currentFlushPromise
 }
 
-export function addToHistory(command: HistoryEntry | string): void {
+export function addToHistory(
+  command: HistoryEntry | string,
+  options?: { armUndo?: boolean },
+): void {
   // Skip history when running in a tmux session spawned by Claude Code's Tungsten tool.
   // This prevents verification/test sessions from polluting the user's real command history.
   if (shouldSkipPromptHistory()) {
@@ -1190,11 +1286,12 @@ export function addToHistory(command: HistoryEntry | string): void {
     })
   }
 
-  void addToPromptHistory(command)
+  void addToPromptHistory(command, options)
 }
 
 export function clearPendingHistoryEntries(): void {
   pendingEntries = []
+  clearedDrafts = []
   lastAddedEntry = null
   lastAddWasDeduped = false
   skippedHistoryKeys.clear()

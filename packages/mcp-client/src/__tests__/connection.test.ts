@@ -10,7 +10,7 @@ import {
 describe('connection constants', () => {
   test('has reasonable defaults', () => {
     expect(DEFAULT_CONNECTION_TIMEOUT_MS).toBe(30_000)
-    expect(MAX_MCP_DESCRIPTION_LENGTH).toBe(2048)
+    expect(MAX_MCP_DESCRIPTION_LENGTH).toBe(4096)
     expect(MAX_ERRORS_BEFORE_RECONNECT).toBe(3)
   })
 })

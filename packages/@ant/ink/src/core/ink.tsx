@@ -94,7 +94,9 @@ import {
   findPlainTextUrlAt,
   getSelectedText,
   hasSelection,
+  hyperlinkAt,
   leftoverGsSelectionBothEndsOff,
+  type LinkSpan,
   moveFocus,
   type SelectionState,
   selectLineAt,
@@ -103,6 +105,7 @@ import {
   shiftSelection,
   selectionScopeAt,
   startSelection,
+  underlineHoveredLink,
   updateSelection,
 } from './selection.js';
 import {
@@ -120,9 +123,11 @@ import { expandTabsForWrap as r7 } from './tabstops.js';
 import { wrapAnsi } from './wrapAnsi.js';
 import { stringWidth } from './stringWidth.js';
 import { isJediTermEnv } from './jediTermInput.js';
+import { eraseViewportInPlace } from './clearTerminal.js';
 import {
   getCellPixels,
   getMousePixelsSupported,
+  isITerm2OrTmuxXtversion,
   isNativeCursorEnabled,
   isSynchronizedOutputSupported,
   isXtermJs,
@@ -701,6 +706,8 @@ export default class Ink {
    */
   private keptForNextFrame = '';
   private leftAltScreenSinceFrame = false;
+  private hoveredLink: string | undefined = undefined;
+  private hoveredLinkSpans: LinkSpan[] = [];
   // Set by handleResize: prepend ERASE_SCREEN to the next onRender's patches
   // INSIDE the BSU/ESU block so clear+paint is atomic. Writing ERASE_SCREEN
   // synchronously in handleResize would leave the screen blank for the ~80ms
@@ -1676,7 +1683,22 @@ export default class Ink {
     // the frame-after-selection-clears case.
     let selActive = false;
     let hlActive = false;
+    let hoveredLinkPainted = false;
     if (this.altScreenActive) {
+      if (this.hoveredLink !== undefined || this.hoveredLinkSpans.length > 0) {
+        const hadSpans = this.hoveredLinkSpans.length > 0;
+        this.hoveredLinkSpans = underlineHoveredLink(
+          frame.screen,
+          this.hoverCol,
+          this.hoverRow,
+          this.hoveredLink,
+          this.stylePool,
+        );
+        if (this.hoveredLinkSpans.length === 0) {
+          this.hoveredLink = undefined;
+        }
+        hoveredLinkPainted = hadSpans || this.hoveredLinkSpans.length > 0;
+      }
       selActive = hasSelection(this.selection) && !leftoverGsSelectionBothEndsOff(this.selection);
       if (selActive) {
         applySelectionOverlay(frame.screen, this.selection, this.stylePool);
@@ -1711,6 +1733,7 @@ export default class Ink {
       didLayoutShift() ||
       selActive ||
       hlActive ||
+      hoveredLinkPainted ||
       leftoverGsContaminated ||
       (this.altScreenFullRepaint && this.altScreenActive)
     ) {
@@ -1829,7 +1852,11 @@ export default class Ink {
       // render() takes.
       if (this.needsEraseBeforePaint) {
         this.needsEraseBeforePaint = false;
-        optimized.unshift(ERASE_THEN_HOME_PATCH);
+        optimized.unshift(
+          isITerm2OrTmuxXtversion() && process.env.CLAUDE_BG_BACKEND !== 'daemon'
+            ? { type: 'stdout', content: eraseViewportInPlace(terminalRows) }
+            : ERASE_THEN_HOME_PATCH,
+        );
       } else {
         optimized.unshift(CURSOR_HOME_PATCH);
       }
@@ -3487,6 +3514,12 @@ export default class Ink {
 
   dispatchHover(col: number, row: number): void {
     if (!this.altScreenActive) return;
+    const link = this.isHoverTracked() ? hyperlinkAt(this.frontFrame.screen, col, row) : undefined;
+    const inSpans = this.hoveredLinkSpans.some(span => span.row === row && col >= span.from && col <= span.to);
+    if (link !== this.hoveredLink || (link !== undefined && !inSpans)) {
+      this.hoveredLink = link;
+      this.scheduleRender();
+    }
     this.hoverCol = col;
     this.hoverRow = row;
     this.hoverFollowStreak = 0;
@@ -3499,6 +3532,10 @@ export default class Ink {
     this.hoverRow = -1;
     this.hoverFollowStreak = 0;
     this.hoverFollowHeldUntil = 0;
+    if (this.hoveredLink !== undefined) {
+      this.hoveredLink = undefined;
+      this.scheduleRender();
+    }
     const app = this.appRef.current;
     if (app !== null) {
       app.lastHoverCol = -1;

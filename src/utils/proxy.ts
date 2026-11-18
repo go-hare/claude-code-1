@@ -374,6 +374,12 @@ export function shouldDisableFetchTimeoutForBodyIdle(opts?: {
 export function getProxyFetchOptions(opts?: {
   forAnthropicAPI?: boolean
   hasBodyIdleWatchdog?: boolean
+  url?: string
+  fallbackProxy?: {
+    url: string
+    noProxy?: string
+    ca?: string
+  }
 }): {
   tls?: TLSConfig
   dispatcher?: undici.Dispatcher
@@ -409,6 +415,9 @@ export function getProxyFetchOptions(opts?: {
   // Proxy-Authorization via {url, headers}; Node path uses undici ProxyAgent
   // with token densable (see getProxyAgent).
   if (proxyUrl) {
+    if (opts?.url && shouldBypassProxy(opts.url)) {
+      return { ...base, ...getTLSFetchOptions() }
+    }
     // Lazy require to avoid circular import with proxyAuthHelper → proxy.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { getCachedProxyAuthHelperValue, buildProxyOptionWithAuth } =
@@ -426,6 +435,24 @@ export function getProxyFetchOptions(opts?: {
     }
     // Auth-aware dispatcher (ProxyAgent when cache hit, else EnvHttpProxyAgent)
     return { ...base, dispatcher: getProxyAgent(proxyUrl) }
+  }
+
+  if (opts?.fallbackProxy) {
+    if (
+      opts.url &&
+      (shouldBypassProxy(opts.url, opts.fallbackProxy.noProxy) ||
+        shouldBypassProxy(opts.url))
+    ) {
+      return { ...base, ...getTLSFetchOptions() }
+    }
+    const tlsOpts = getTLSFetchOptions()
+    return {
+      ...base,
+      proxy: opts.fallbackProxy.url,
+      ...(opts.fallbackProxy.ca
+        ? { tls: { ...tlsOpts.tls, ca: opts.fallbackProxy.ca } }
+        : tlsOpts),
+    }
   }
 
   // Otherwise, use TLS options directly if available

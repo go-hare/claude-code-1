@@ -14,6 +14,8 @@ import {
   isValidAdvisorModel,
   modelSupportsAdvisor,
 } from '../../utils/advisor.js';
+import { isModelDenied } from '../../utils/model/entitlementOverlay.js';
+import { isModelAllowed } from '../../utils/model/modelAllowlist.js';
 import {
   getDefaultMainLoopModelSetting,
   normalizeModelStringForAPI,
@@ -63,6 +65,22 @@ export function applyAdvisor(
   return msg;
 }
 
+/**
+ * Official TPe(e) -> CPe(jn(Ut(e))) (2.1.295 #394):
+ * Check model entitlement, policy allowlist, and advisor rank/validity so
+ * an unavailable saved advisor model falls back to "No advisor".
+ */
+export function isAdvisorModelAvailable(model: string): boolean {
+  const resolved = parseUserSpecifiedModel(model).replace(/\[(1|2)m\]$/gi, '');
+  if (!isModelAllowed(resolved)) {
+    return false;
+  }
+  if (isModelDenied(resolved)) {
+    return false;
+  }
+  return isValidAdvisorModel(resolved);
+}
+
 function AdvisorDialog({ onDone }: { onDone: LocalJSXCommandOnDone }): React.ReactNode {
   const advisorModel = useAppState(s => s.advisorModel);
   const mainLoopModel = useAppState(s => s.mainLoopModel);
@@ -84,7 +102,7 @@ function AdvisorDialog({ onDone }: { onDone: LocalJSXCommandOnDone }): React.Rea
     const currentLower = advisorModel?.toLowerCase();
     const matchedAlias = currentLower ? aliases.find(a => currentLower.includes(a)) : undefined;
     const custom =
-      advisorModel && !matchedAlias && isValidAdvisorModel(advisorModel)
+      advisorModel && !matchedAlias && isAdvisorModelAvailable(advisorModel)
         ? [
             {
               label: renderModelName(advisorModel),
@@ -96,12 +114,11 @@ function AdvisorDialog({ onDone }: { onDone: LocalJSXCommandOnDone }): React.Rea
   }, [aliases, advisorModel]);
 
   const defaultValue = useMemo(() => {
-    if (!advisorModel) return 'off';
+    if (!advisorModel || !isAdvisorModelAvailable(advisorModel)) return 'off';
     const currentLower = advisorModel.toLowerCase();
     const matched = aliases.find(a => currentLower.includes(a));
     if (matched) return matched;
-    if (isValidAdvisorModel(advisorModel)) return advisorModel;
-    return 'off';
+    return advisorModel;
   }, [advisorModel, aliases]);
 
   return (

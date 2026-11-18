@@ -157,8 +157,19 @@ export function getAllInProcessTeammateTasks(tasks: Record<string, TaskStateBase
  * and useBackgroundTaskNavigation — selectedIPAgentIndex maps into this
  * array, so all three must agree on sort order.
  */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional ASCII-range check for mYe comparator
+const ASCII_NAME_RE = /^[\x00-\x7f]*$/;
+
+function compareAsciiFirst(a: string, b: string): number {
+  const aAscii = ASCII_NAME_RE.test(a);
+  if (aAscii !== ASCII_NAME_RE.test(b)) return aAscii ? -1 : 1;
+  if (aAscii) return a.localeCompare(b);
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
 export function getRunningTeammatesSorted(tasks: Record<string, TaskStateBase>): InProcessTeammateTaskState[] {
   return getAllInProcessTeammateTasks(tasks)
     .filter(t => t.status === 'running')
-    .sort((a, b) => a.identity.agentName.localeCompare(b.identity.agentName));
+    .sort((a, b) => compareAsciiFirst(a.identity.agentName, b.identity.agentName));
 }

@@ -46,9 +46,32 @@ export type TextObjScope = 'inner' | 'around'
  * INSERT mode: Track text being typed (for dot-repeat)
  * NORMAL mode: Track command being parsed (state machine)
  */
+export type WantedColumn = {
+  column: number
+  offset: number
+  text: string
+}
+
+export type VisualKind = 'char' | 'line'
+
+export type VisualCommandState =
+  | { type: 'idle' }
+  | { type: 'count'; digits: string }
+  | { type: 'find'; find: FindType; count: number }
+  | { type: 'g'; count: number }
+  | { type: 'textObj'; scope: TextObjScope }
+  | { type: 'replace' }
+
 export type VimState =
   | { mode: 'INSERT'; insertedText: string }
-  | { mode: 'NORMAL'; command: CommandState }
+  | { mode: 'NORMAL'; command: CommandState; wanted?: WantedColumn | null }
+  | {
+      mode: 'VISUAL'
+      kind: VisualKind
+      anchor: number
+      command: VisualCommandState
+      wanted?: WantedColumn | null
+    }
 
 /**
  * Command state machine for NORMAL mode.
@@ -125,6 +148,12 @@ export type RecordedChange =
   | { type: 'join'; count: number }
   | { type: 'paste'; after: boolean; count: number }
   | {
+      type: 'visualOp'
+      op: Operator
+      span: number
+      linewise: boolean
+    }
+  | {
       type: 'visualChange'
       from: number
       to: number
@@ -146,6 +175,7 @@ export function isChangeOperatorRecord(
     case 'operator':
     case 'operatorFind':
     case 'operatorTextObj':
+    case 'visualOp':
       return change.op === 'change'
     default:
       return false

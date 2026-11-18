@@ -1,3 +1,4 @@
+import { lstatSync, readFileSync } from 'fs'
 import { homedir } from 'os'
 import {
   dirname,
@@ -460,18 +461,85 @@ function isPathInsideRoot(value: string, root: string): boolean {
   return folded === foldedRoot || folded.startsWith(`${foldedRoot}\\`)
 }
 
+export type DarwinHomeAutomountDeps = {
+  readAutoMaster: () => string
+  homeIsOwnMount: () => boolean
+}
+
+const DEFAULT_DARWIN_HOME_AUTOMOUNT_DEPS: DarwinHomeAutomountDeps = {
+  readAutoMaster: () => readFileSync('/etc/auto_master', 'utf8'),
+  homeIsOwnMount: () => {
+    let homeStat: { dev: number | bigint }
+    try {
+      homeStat = lstatSync('/home')
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') return true
+      throw err
+    }
+    return homeStat.dev !== lstatSync('/Users').dev
+  },
+}
+
+let cachedDarwinHomeAutomounted: boolean | undefined
+
+export function resetDarwinHomeAutomountedForTesting(): void {
+  cachedDarwinHomeAutomounted = undefined
+}
+
 /**
- * densable `p6` — darwin `/network/…` and a `/home/<user>` that is not this
- * user's home. Other platforms are never a darwin network mount.
+ * Gold `ht()` — check whether `/home` is automounted on macOS via
+ * `/etc/auto_master` or `lstatSync('/home').dev !== lstatSync('/Users').dev`.
+ * Fails safe to `true` on unexpected errors.
  */
-function isDarwinNetworkMountPath(value: string): boolean {
-  if (process.platform !== 'darwin') return false
+export function isDarwinHomeAutomounted(
+  deps: DarwinHomeAutomountDeps = DEFAULT_DARWIN_HOME_AUTOMOUNT_DEPS,
+): boolean {
+  const useDefault = deps === DEFAULT_DARWIN_HOME_AUTOMOUNT_DEPS
+  if (useDefault && cachedDarwinHomeAutomounted !== undefined) {
+    return cachedDarwinHomeAutomounted
+  }
+  let result: boolean
+  try {
+    let hasHomeEntry = false
+    try {
+      hasHomeEntry = deps
+        .readAutoMaster()
+        .split('\n')
+        .some(line => {
+          const fields = line.replace(/#.*$/, '').trim().split(/\s+/)
+          return fields.length >= 2 && fields[0]!.toLowerCase() === '/home'
+        })
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') throw err
+    }
+    result = hasHomeEntry || deps.homeIsOwnMount()
+  } catch {
+    return true
+  }
+  if (useDefault) {
+    cachedDarwinHomeAutomounted = result
+  }
+  return result
+}
+
+/**
+ * densable `p6` / `nj` — darwin `/network/…` and (when `/home` is
+ * automounted) a `/home/<user>` that is not this user's home.
+ * Other platforms are never a darwin network mount.
+ */
+function isDarwinNetworkMountPath(
+  value: string,
+  platform: NodeJS.Platform = process.platform,
+  homeAutomounted: boolean = platform === 'darwin' && isDarwinHomeAutomounted(),
+): boolean {
+  if (platform !== 'darwin') return false
   if (isPosixAutomountRoot(value, 'network') || isDarwinDotVolPath(value)) {
     return true
   }
   if (!value.startsWith('/')) return false
   const ancestors = posixAncestorPaths(value)
   if (ancestors.some(segment => segment.startsWith('/NETWORK/'))) return true
+  if (!homeAutomounted) return false
   const homes = ancestors.filter(segment => segment.startsWith('/HOME/'))
   if (homes.length === 0) return false
   const own = ownDarwinHomePrefix()

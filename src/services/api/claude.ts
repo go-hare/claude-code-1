@@ -383,7 +383,9 @@ import { CLIENT_REQUEST_ID_HEADER, getAnthropicClient } from './client.js'
 import { NO_CONTENT_MESSAGE } from '../../constants/messages.js'
 import {
   API_ERROR_MESSAGE_PREFIX,
+  type Context1mBetaRetryPhase,
   CUSTOM_OFF_SWITCH_MESSAGE,
+  decideContext1mBetaRetry,
   findRejectedBetaHeaders,
   getAssistantMessageFromError,
   getErrorMessageIfRefusal,
@@ -1824,6 +1826,8 @@ async function* queryModel(
   let pendingMediaCap:
     | { limit: number; steps: number; refusedAt: number }
     | undefined
+  // Official Xc (2.1.295 #358) — context-1m beta fallback state machine.
+  let context1mBetaRetryPhase: Context1mBetaRetryPhase = 'idle'
 
   const recordMediaItemCapSuccess = (): void => {
     try {
@@ -1942,6 +1946,26 @@ async function* queryModel(
       return `retry:beta-rejected:${rejectedBetas.map(r => r.header).join(',')}`
     }
 
+    // Official I0o (2.1.295 #358) — resend once without context-1m beta when a
+    // gateway / 3P provider rejects it (including vague "invalid beta flag" 400).
+    const context1mRetry = decideContext1mBetaRetry({
+      error,
+      phase: context1mBetaRetryPhase,
+      context1mBetaSent: lastBetas.includes(CONTEXT_1M_BETA_HEADER),
+      isKnownNative1mModel: false,
+      isFirstParty:
+        getAPIProvider() === 'firstParty' && isFirstPartyAnthropicBaseUrl(),
+    })
+    context1mBetaRetryPhase = context1mRetry.nextPhase
+    if (context1mRetry.action === 'retry:context-1m-beta') {
+      betas = betas.filter(b => b !== CONTEXT_1M_BETA_HEADER)
+      logForDebugging(
+        `[betas] an HTTP 400 ${context1mRetry.nextPhase === 'retrying' ? 'reads as the backend rejecting' : 'says "invalid beta flag", which may be about'} ${CONTEXT_1M_BETA_HEADER}; resending once without it`,
+        { level: 'warn' },
+      )
+      return 'retry:context-1m-beta'
+    }
+
     // Official OLt (#13) — strip oldest images/documents on unprocessable
     // media limit rejection and step down through [510, 255, 127].
     const existingCap = getSessionMediaItemCap(
@@ -2010,6 +2034,7 @@ async function* queryModel(
 
     // Append 1M beta dynamically for the Sonnet 1M experiment.
     if (
+      context1mBetaRetryPhase === 'idle' &&
       !betasParams.includes(CONTEXT_1M_BETA_HEADER) &&
       getSonnet1mExpTreatmentEnabled(retryContext.model)
     ) {
@@ -4072,6 +4097,26 @@ async function* queryModel(
               openBlockIndexForEnvelope = null
               openBlockSuppressStop = false
               recordMediaItemCapSuccess()
+              // Official GLt (2.1.295 #358) — lock context-1m beta removal on success.
+              const active1mPhase =
+                context1mBetaRetryPhase as Context1mBetaRetryPhase
+              if (
+                active1mPhase === 'retrying' ||
+                active1mPhase === 'guessing'
+              ) {
+                const unnamed = active1mPhase === 'guessing'
+                context1mBetaRetryPhase = 'spent'
+                betas = betas.filter(b => b !== CONTEXT_1M_BETA_HEADER)
+                logEvent('tengu_beta_400_healed', {
+                  beta: CONTEXT_1M_BETA_HEADER as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  model:
+                    options.model as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  provider:
+                    getAPIProvider() as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  status: 400,
+                  unnamed,
+                })
+              }
             }
 
             yield {

@@ -16,11 +16,13 @@ import {
   isFoundationModel,
 } from '../utils/model/bedrock.js'
 import {
+  getCanonicalName,
   getDefaultSonnetModel,
   getMainLoopModel,
   getSmallFastModel,
   normalizeModelStringForAPI,
 } from '../utils/model/model.js'
+import { resolveAdaptiveThinkingType } from '../utils/thinking.js'
 import { jsonStringify } from '../utils/slowOperations.js'
 import { isToolReferenceBlock } from '../utils/searchExtraTools.js'
 import { getAPIMetadata, getExtraBodyParams } from './api/claude.js'
@@ -38,6 +40,30 @@ import { withTokenCountVCR } from './vcr.js'
 // API constraint: max_tokens must be greater than thinking.budget_tokens
 const TOKEN_COUNT_THINKING_BUDGET = 1024
 const TOKEN_COUNT_MAX_TOKENS = 2048
+
+/**
+ * Official DJe(e, n = e) (2.1.296 #498):
+ * Use adaptive thinking for Haiku 5.5 and other adaptive-only models when
+ * counting tokens instead of hardcoding budget thinking.
+ */
+export function getTokenCountThinkingConfig(
+  configuredModel: string,
+  resolvedModel: string = configuredModel,
+): { type: 'adaptive' } | { type: 'enabled'; budget_tokens: number } {
+  const canonical = getCanonicalName(resolvedModel)
+  const thinkingType = resolveAdaptiveThinkingType({
+    runtimeOverride: undefined,
+    resolvedModel,
+    canonicalModel: canonical,
+  })
+  if (thinkingType === 'adaptive' || canonical.includes('haiku-5-5')) {
+    return { type: 'adaptive' }
+  }
+  return {
+    type: 'enabled',
+    budget_tokens: TOKEN_COUNT_THINKING_BUDGET,
+  }
+}
 
 /**
  * Check if messages contain thinking blocks
@@ -191,10 +217,7 @@ export async function countMessagesTokensWithAPI(
         ...(filteredBetas.length > 0 && { betas: filteredBetas }),
         // Enable thinking if messages contain thinking blocks
         ...(containsThinking && {
-          thinking: {
-            type: 'enabled',
-            budget_tokens: TOKEN_COUNT_THINKING_BUDGET,
-          },
+          thinking: getTokenCountThinkingConfig(model),
         }),
       })
 
@@ -343,10 +366,7 @@ export async function countTokensViaHaikuFallback(
     ...getExtraBodyParams(),
     // Enable thinking if messages contain thinking blocks
     ...(containsThinking && {
-      thinking: {
-        type: 'enabled',
-        budget_tokens: TOKEN_COUNT_THINKING_BUDGET,
-      },
+      thinking: getTokenCountThinkingConfig(model),
     }),
   })
 
@@ -550,10 +570,7 @@ async function countTokensWithBedrock({
       ...(tools.length > 0 && { tools }),
       ...(betas.length > 0 && { anthropic_beta: betas }),
       ...(containsThinking && {
-        thinking: {
-          type: 'enabled',
-          budget_tokens: TOKEN_COUNT_THINKING_BUDGET,
-        },
+        thinking: getTokenCountThinkingConfig(model, modelId),
       }),
     }
 

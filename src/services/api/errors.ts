@@ -7,7 +7,10 @@ import type {
   BetaMessage,
   BetaStopReason,
 } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
-import { AFK_MODE_BETA_HEADER } from 'src/constants/betas.js'
+import {
+  AFK_MODE_BETA_HEADER,
+  CONTEXT_1M_BETA_HEADER,
+} from 'src/constants/betas.js'
 import type { SDKAssistantMessageError } from 'src/entrypoints/agentSdkTypes.js'
 import type {
   AssistantMessage,
@@ -1993,4 +1996,82 @@ export function findRejectedBetaHeaders(
     }
   }
   return results
+}
+
+/**
+ * Official Jz(e) (2.1.295 #358) — HTTP 400 with vague "invalid beta flag".
+ */
+export function isInvalidBetaFlagError(error: unknown): boolean {
+  return (
+    error instanceof APIError &&
+    error.status === 400 &&
+    error.message.toLowerCase().includes('invalid beta flag')
+  )
+}
+
+/**
+ * Official cDe(e) (2.1.295 #358) — HTTP 400 naming context-1m beta or
+ * "long context beta".
+ */
+export function isContext1mBetaRejectedError(error: unknown): boolean {
+  return (
+    error instanceof APIError &&
+    error.status === 400 &&
+    (error.message.includes(CONTEXT_1M_BETA_HEADER) ||
+      error.message.includes('long context beta'))
+  )
+}
+
+export type Context1mBetaRetryPhase =
+  | 'idle'
+  | 'retrying'
+  | 'guessing'
+  | 'spent'
+  | 'unproven'
+
+/**
+ * Official I0o(eo) (2.1.295 #358) — decide whether an HTTP 400 on a [1m]
+ * request should resend once without context-1m-2025-08-07.
+ */
+export function decideContext1mBetaRetry(params: {
+  error: unknown
+  phase: Context1mBetaRetryPhase
+  context1mBetaSent: boolean
+  isKnownNative1mModel?: boolean
+  isFirstParty?: boolean
+}): {
+  action: 'retry:context-1m-beta' | null
+  nextPhase: Context1mBetaRetryPhase
+} {
+  const {
+    error,
+    phase,
+    context1mBetaSent,
+    isKnownNative1mModel = false,
+    isFirstParty = false,
+  } = params
+  if (!(error instanceof APIError) || error.status !== 400) {
+    return { action: null, nextPhase: phase }
+  }
+  const explicit = isContext1mBetaRejectedError(error)
+  const vague = !explicit && isInvalidBetaFlagError(error)
+  if (phase === 'spent') {
+    return { action: null, nextPhase: 'spent' }
+  }
+  if (phase !== 'idle') {
+    const nextPhase: Context1mBetaRetryPhase =
+      phase === 'guessing' && vague ? 'spent' : 'unproven'
+    return { action: null, nextPhase }
+  }
+  if (
+    !context1mBetaSent ||
+    isKnownNative1mModel ||
+    !(explicit || (vague && !isFirstParty))
+  ) {
+    return { action: null, nextPhase: phase }
+  }
+  return {
+    action: 'retry:context-1m-beta',
+    nextPhase: explicit ? 'retrying' : 'guessing',
+  }
 }

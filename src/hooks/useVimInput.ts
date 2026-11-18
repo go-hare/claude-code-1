@@ -8,6 +8,7 @@ import {
 import { Cursor } from '@anthropic/ink'
 import { firstGrapheme, lastGrapheme } from '../utils/intl.js'
 import {
+  clampVimNormalOffset,
   executeIndent,
   executeJoin,
   executeLineOp,
@@ -19,9 +20,14 @@ import {
   executeReplace,
   executeToggleCase,
   executeX,
+  repeatVisualOp,
   type OperatorContext,
 } from '../vim/operators.js'
-import { type TransitionContext, transition } from '../vim/transitions.js'
+import {
+  type TransitionContext,
+  transition,
+  visualTransition,
+} from '../vim/transitions.js'
 import {
   createInitialPersistentState,
   createInitialVimState,
@@ -29,6 +35,7 @@ import {
   type PersistentState,
   type RecordedChange,
   type VimState,
+  type WantedColumn,
 } from '../vim/types.js'
 import {
   getVimInsertModeRemaps,
@@ -305,6 +312,10 @@ export function useVimInput(props: UseVimInputProps): VimInputState {
         executePaste(change.after, change.count, ctx)
         break
 
+      case 'visualOp':
+        repeatVisualOp(change.op, change.span, change.linewise, ctx)
+        break
+
       case 'visualChange': {
         // densable vPp simplified: replace [from,to) with text
         const { from, to, text: ins } = change
@@ -319,6 +330,42 @@ export function useVimInput(props: UseVimInputProps): VimInputState {
     }
   }
 
+  function withWantedTracking(
+    ctx: TransitionContext,
+    onMutate: () => void,
+  ): TransitionContext {
+    return {
+      ...ctx,
+      setText: (newText: string) => {
+        onMutate()
+        ctx.setText(newText)
+      },
+      setOffset: (offset: number) => {
+        onMutate()
+        ctx.setOffset(offset)
+      },
+      enterInsert: (offset: number) => {
+        onMutate()
+        ctx.enterInsert(offset)
+      },
+      setRegister: (content: string, linewise: boolean) => {
+        onMutate()
+        ctx.setRegister(content, linewise)
+      },
+    }
+  }
+
+  function resolveWantedColumn(
+    nextWanted: WantedColumn | null | undefined,
+    mutated: boolean,
+    prevWanted: WantedColumn | null | undefined,
+  ): WantedColumn | undefined {
+    if (nextWanted !== undefined) {
+      return nextWanted ?? undefined
+    }
+    return mutated ? undefined : (prevWanted ?? undefined)
+  }
+
   function handleVimInput(rawInput: string, key: Key): void {
     const state = vimStateRef.current
     // Run inputFilter in all modes so stateful filters disarm on any key,
@@ -329,6 +376,10 @@ export function useVimInput(props: UseVimInputProps): VimInputState {
     const cursor = Cursor.fromText(props.value, props.columns, textInput.offset)
 
     if (key.ctrl) {
+      if (state.mode === 'VISUAL') {
+        switchToNormalMode()
+        return
+      }
       textInput.onInput(input, key)
       return
     }
@@ -343,12 +394,30 @@ export function useVimInput(props: UseVimInputProps): VimInputState {
 
     // Escape in NORMAL mode cancels any pending command (replace, operator, etc.)
     if (key.escape && state.mode === 'NORMAL') {
-      vimStateRef.current = { mode: 'NORMAL', command: { type: 'idle' } }
+      vimStateRef.current = {
+        mode: 'NORMAL',
+        command: { type: 'idle' },
+        wanted: state.wanted,
+      }
+      return
+    }
+
+    // Escape in VISUAL mode cancels pending visual command or exits VISUAL to NORMAL
+    if (key.escape && state.mode === 'VISUAL') {
+      if (state.command.type !== 'idle') {
+        vimStateRef.current = { ...state, command: { type: 'idle' } }
+      } else {
+        const clamped = clampVimNormalOffset(cursor, cursor.offset)
+        if (clamped !== cursor.offset) {
+          textInput.setOffset(clamped)
+        }
+        switchToNormalMode()
+      }
       return
     }
 
     // Pass Enter to base handler regardless of mode (allows submission from NORMAL)
-    if (key.return) {
+    if (key.return && state.mode !== 'VISUAL') {
       textInput.onInput(input, key)
       return
     }
@@ -442,6 +511,62 @@ export function useVimInput(props: UseVimInputProps): VimInputState {
       return
     }
 
+    if (state.mode === 'VISUAL') {
+      let cursorMovedOrMutated = false
+      const baseCtx: TransitionContext = {
+        ...createOperatorContext(cursor, false),
+        onUndo: props.onUndo,
+        onDotRepeat: replayLastChange,
+        wantedColumn: state.wanted,
+      }
+      const ctx = withWantedTracking(baseCtx, () => {
+        cursorMovedOrMutated = true
+      })
+
+      const expectsVisualMotion =
+        state.command.type === 'idle' || state.command.type === 'count'
+      let vimInput = input
+      if (key.leftArrow) vimInput = expectsVisualMotion ? 'h' : ''
+      else if (key.rightArrow) vimInput = expectsVisualMotion ? 'l' : ''
+      else if (key.upArrow) vimInput = expectsVisualMotion ? 'k' : ''
+      else if (key.downArrow) vimInput = expectsVisualMotion ? 'j' : ''
+      else if (key.return) vimInput = expectsVisualMotion ? 'j' : '\n'
+      else if (key.backspace) vimInput = expectsVisualMotion ? 'h' : ''
+      else if (key.delete)
+        vimInput =
+          expectsVisualMotion && state.command.type !== 'count' ? 'x' : ''
+
+      if (!vimInput) return
+
+      const res = visualTransition(
+        state.command,
+        vimInput,
+        state.anchor,
+        state.kind === 'line',
+        ctx,
+      )
+      if (res.execute) {
+        res.execute()
+      }
+      if (res.exitVisual && vimStateRef.current.mode === 'VISUAL') {
+        switchToNormalMode()
+      } else if (
+        vimStateRef.current.mode === 'VISUAL' &&
+        (res.next || res.execute || res.wanted !== undefined)
+      ) {
+        vimStateRef.current = {
+          ...state,
+          command: res.next ?? { type: 'idle' },
+          wanted: resolveWantedColumn(
+            res.wanted,
+            cursorMovedOrMutated,
+            state.wanted,
+          ),
+        }
+      }
+      return
+    }
+
     if (state.mode !== 'NORMAL') {
       return
     }
@@ -467,11 +592,25 @@ export function useVimInput(props: UseVimInputProps): VimInputState {
       return
     }
 
-    const ctx: TransitionContext = {
+    let cursorMovedOrMutated = false
+    const baseCtx: TransitionContext = {
       ...createOperatorContext(cursor, false),
       onUndo: props.onUndo,
       onDotRepeat: replayLastChange,
+      wantedColumn: state.wanted,
+      onEnterVisual: (kind, wanted) => {
+        vimStateRef.current = {
+          mode: 'VISUAL',
+          kind,
+          anchor: cursor.offset,
+          command: { type: 'idle' },
+          wanted: wanted ?? state.wanted,
+        }
+      },
     }
+    const ctx = withWantedTracking(baseCtx, () => {
+      cursorMovedOrMutated = true
+    })
 
     // Backspace/Delete are only mapped in motion-expecting states. In
     // literal-char states (replace, find, operatorFind), mapping would turn
@@ -501,12 +640,19 @@ export function useVimInput(props: UseVimInputProps): VimInputState {
       result.execute()
     }
 
-    // Update command state (only if execute didn't switch to INSERT)
-    if (vimStateRef.current.mode === 'NORMAL') {
-      if (result.next) {
-        vimStateRef.current = { mode: 'NORMAL', command: result.next }
-      } else if (result.execute) {
-        vimStateRef.current = { mode: 'NORMAL', command: { type: 'idle' } }
+    // Update command state (only if execute didn't switch to INSERT or VISUAL)
+    if (
+      vimStateRef.current.mode === 'NORMAL' &&
+      (result.next || result.execute || result.wanted !== undefined)
+    ) {
+      vimStateRef.current = {
+        mode: 'NORMAL',
+        command: result.next ?? { type: 'idle' },
+        wanted: resolveWantedColumn(
+          result.wanted,
+          cursorMovedOrMutated,
+          state.wanted,
+        ),
       }
     }
 

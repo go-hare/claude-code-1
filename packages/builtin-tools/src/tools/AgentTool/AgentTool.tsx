@@ -1,9 +1,10 @@
 import { feature } from 'bun:bundle';
 import * as React from 'react';
 import { buildTool, type ToolDef, toolMatchesName } from 'src/Tool.js';
+import { SEND_MESSAGE_TOOL_NAME } from '@claude-code/builtin-tools/tools/SendMessageTool/constants.js';
 import type { AssistantMessage, Message as MessageType, NormalizedUserMessage } from 'src/types/message.js';
 import type { AppState } from 'src/state/AppState.js';
-import { pdSessionEffort } from 'src/utils/effort.js';
+import { EFFORT_LEVELS, type EffortValue, pdSessionEffort } from 'src/utils/effort.js';
 import { getQuerySourceForAgent } from 'src/utils/promptCategory.js';
 import { z } from 'zod/v4';
 import {
@@ -203,6 +204,13 @@ const baseInputSchema = lazySchema(() =>
     prompt: z.string().describe('The task for the agent to perform'),
     subagent_type: z.string().optional().describe('The type of specialized agent to use for this task'),
     model: z.enum(['sonnet', 'opus', 'haiku', 'fable']).optional().describe(agentModelParameterDescription()),
+    effort: z
+      .enum(EFFORT_LEVELS)
+      .optional()
+      .describe(
+        'Reasoning effort for this agent. Set this ONLY when the user, or instructions such as CLAUDE.md or a skill, explicitly ask that this agent or delegated work run at a specific effort level, never on your own judgment; otherwise omit it and the agent runs at its usual effort.' +
+          (isForkSubagentProductEnabled() ? ' Ignored for subagent_type: "fork": a fork runs at your own effort.' : ''),
+      ),
     run_in_background: z
       .boolean()
       .optional()
@@ -316,6 +324,10 @@ export const outputSchema = lazySchema(() => {
     prompt: z.string(),
     worktreePath: z.string().optional(),
     worktreeBranch: z.string().optional(),
+    canContinueAgent: z
+      .boolean()
+      .optional()
+      .describe('Whether the calling agent has SendMessage available to continue this agent'),
   });
 
   const asyncOutputSchema = z.object({
@@ -338,6 +350,10 @@ export const outputSchema = lazySchema(() => {
       .boolean()
       .optional()
       .describe('Whether the calling agent has Read/Bash tools to check progress'),
+    canContinueAgent: z
+      .boolean()
+      .optional()
+      .describe('Whether the calling agent has SendMessage available to continue this agent'),
     sharesCwd: z
       .boolean()
       .optional()
@@ -476,6 +492,7 @@ export const AgentTool = buildTool({
       subagent_type,
       description,
       model: modelParam,
+      effort,
       run_in_background,
       name,
       team_name,
@@ -1312,7 +1329,8 @@ export const AgentTool = buildTool({
     }
 
     const runAgentParams: Parameters<typeof runAgent>[0] = {
-      agentDefinition: selectedAgent,
+      agentDefinition:
+        !isForkPath && effort !== undefined ? { ...selectedAgent, effort: effort as EffortValue } : selectedAgent,
       promptMessages,
       toolUseContext,
       canUseTool,
@@ -1466,6 +1484,7 @@ export const AgentTool = buildTool({
       const canReadOutputFile = toolUseContext.options.tools.some(
         t => toolMatchesName(t, FILE_READ_TOOL_NAME) || toolMatchesName(t, BASH_TOOL_NAME),
       );
+      const canContinueAgent = toolUseContext.options.tools.some(t => toolMatchesName(t, SEND_MESSAGE_TOOL_NAME));
       const spawnedSubagent = recordSubagentSpawn({
         agentType: selectedAgent.agentType,
         runInBackground: run_in_background,
@@ -1611,6 +1630,7 @@ export const AgentTool = buildTool({
           agentType: selectedAgent.agentType,
           outputFile: getTaskOutputPath(agentBackgroundTask.agentId),
           canReadOutputFile,
+          canContinueAgent,
           ...(sharesCwd ? { sharesCwd: true as const } : {}),
         },
       };
@@ -2118,6 +2138,9 @@ export const AgentTool = buildTool({
                     const canReadOutputFile = toolUseContext.options.tools.some(
                       t => toolMatchesName(t, FILE_READ_TOOL_NAME) || toolMatchesName(t, BASH_TOOL_NAME),
                     );
+                    const canContinueAgent = toolUseContext.options.tools.some(t =>
+                      toolMatchesName(t, SEND_MESSAGE_TOOL_NAME),
+                    );
                     return {
                       data: {
                         isAsync: true as const,
@@ -2130,6 +2153,7 @@ export const AgentTool = buildTool({
                         agentType: selectedAgent.agentType,
                         outputFile: getTaskOutputPath(backgroundedTaskId),
                         canReadOutputFile,
+                        canContinueAgent,
                         ...(sharesCwd ? { sharesCwd: true as const } : {}),
                       },
                     };
@@ -2466,10 +2490,12 @@ export const AgentTool = buildTool({
               }
             }
 
+            const canContinueAgent = toolUseContext.options.tools.some(t => toolMatchesName(t, SEND_MESSAGE_TOOL_NAME));
             return {
               data: {
                 status: 'completed' as const,
                 prompt,
+                canContinueAgent,
                 ...agentResult,
                 ...worktreeResult,
               },
@@ -2554,8 +2580,12 @@ In your own words, briefly tell the user what you launched — do not echo this 
       };
     }
     if (data.status === 'async_launched') {
+      const continueHint =
+        data.canContinueAgent === false
+          ? ''
+          : ` Use SendMessage with to: '${data.agentId}', summary: '<5-10 word recap>' to continue this agent.`;
       const g = `Async agent launched successfully. (This tool result is internal metadata — never quote or paste any part of it, including the agentId below, into a user-facing reply.)
-agentId: ${data.agentId} (internal ID - do not mention to user. Use SendMessage with to: '${data.agentId}', summary: '<5-10 word recap>' to continue this agent.)
+agentId: ${data.agentId} (internal ID - do not mention to user.${continueHint})
 The agent is working in the background. You will be notified automatically when it completes. You know nothing about its results until that notification arrives — do not report, assume, or predict them; continue other work or respond to the user in the meantime.`;
       const h =
         data.canReadOutputFile && data.outputFile
@@ -2613,7 +2643,11 @@ Do NOT ${FILE_READ_TOOL_NAME} or tail this file via the shell tool — it is the
           content: provenanced,
         };
       }
-      const trailer = `agentId: ${data.agentId} (use SendMessage with to: '${data.agentId}', summary: '<5-10 word recap>' to continue this agent)${worktreeInfoText}
+      const continueTrailer =
+        data.canContinueAgent === false
+          ? ''
+          : ` (use SendMessage with to: '${data.agentId}', summary: '<5-10 word recap>' to continue this agent)`;
+      const trailer = `agentId: ${data.agentId}${continueTrailer}${worktreeInfoText}
 <usage>subagent_tokens: ${data.totalTokens}
 tool_uses: ${data.totalToolUseCount}
 duration_ms: ${data.totalDurationMs}</usage>`;

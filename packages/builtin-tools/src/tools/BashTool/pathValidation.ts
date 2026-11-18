@@ -21,6 +21,7 @@ import {
   validatePath,
 } from 'src/utils/permissions/pathValidation.js'
 import { getPlatform } from 'src/utils/platform.js'
+import { posixPathToWindowsPath } from 'src/utils/windowsPaths.js'
 import type { BashTool } from './BashTool.js'
 import { stripSafeWrappers } from './bashPermissions.js'
 import { sedCommandIsAllowedByAllowlist } from './sedValidation.js'
@@ -82,9 +83,14 @@ function checkDangerousRemovalPaths(
     // NOTE: We check the path WITHOUT resolving symlinks, because dangerous paths
     // like /tmp should be caught even though /tmp is a symlink to /private/tmp on macOS
     const cleanPath = expandTilde(path.replace(/^['"]|['"]$/g, ''))
-    const absolutePath = isAbsolute(cleanPath)
-      ? cleanPath
-      : resolve(cwd, cleanPath)
+    const normalizedPath =
+      getPlatform() === 'windows' &&
+      /^\/(?:cygdrive\/)?[A-Za-z]\//.test(cleanPath)
+        ? posixPathToWindowsPath(cleanPath)
+        : cleanPath
+    const absolutePath = isAbsolute(normalizedPath)
+      ? normalizedPath
+      : resolve(cwd, normalizedPath)
 
     // Check if this is a dangerous path (using the non-symlink-resolved path)
     // densable Ize: safetyCheck + circuitBreaker:"dangerousRemoval" so auto mode

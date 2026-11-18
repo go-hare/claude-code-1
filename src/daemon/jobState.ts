@@ -426,14 +426,38 @@ export function hasBlockingInFlight(state: BgJobState): boolean {
 // List all jobs
 // ---------------------------------------------------------------------------
 
-export async function listAllJobs(): Promise<
-  Array<{ short: string; state: BgJobState }>
-> {
+const TRANSIENT_FS_READ_ERRORS = new Set([
+  'EBUSY',
+  'EMFILE',
+  'ENFILE',
+  'EAGAIN',
+  'EINTR',
+])
+
+/** densable `nU` — transient fs read error (EMFILE/ENFILE/EBUSY/EAGAIN/EINTR) */
+export function isTransientFsReadError(err: unknown): boolean {
+  const code =
+    err !== null && typeof err === 'object' && 'code' in err
+      ? String((err as { code: unknown }).code)
+      : undefined
+  if (code === undefined) return false
+  return (
+    TRANSIENT_FS_READ_ERRORS.has(code) ||
+    (code === 'EPERM' && process.platform === 'win32')
+  )
+}
+
+export async function listAllJobs(opts?: {
+  onTransientReadError?: () => void
+}): Promise<Array<{ short: string; state: BgJobState }>> {
   const baseDir = getJobsBaseDir()
   let dirs: string[]
   try {
     dirs = await readdir(baseDir)
-  } catch {
+  } catch (err) {
+    if (isTransientFsReadError(err)) {
+      opts?.onTransientReadError?.()
+    }
     return []
   }
 

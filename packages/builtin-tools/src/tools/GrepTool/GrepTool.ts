@@ -161,6 +161,77 @@ type OutputSchema = ReturnType<typeof outputSchema>
 
 type Output = z.infer<OutputSchema>
 
+const GREP_FLAG_MODE_MAP: ReadonlyArray<
+  readonly [string, string, 'files_with_matches' | 'count']
+> = [
+  ['-l', 'flag_l', 'files_with_matches'],
+  ['-c', 'flag_c', 'count'],
+]
+
+function normalizeBoolFlag(val: unknown): unknown {
+  return val === 'true' ? true : val === 'false' ? false : val
+}
+
+/**
+ * Official 2.1.325 `YSn` (`coerceInput` for GrepTool):
+ * - `file_path` -> `path` (when `path` absent or identical)
+ * - `-l` -> `output_mode: "files_with_matches"`
+ * - `-c` -> `output_mode: "count"`
+ * - `-r` -> dropped (Grep always searches recursively)
+ */
+export function coerceGrepInput(raw: unknown): {
+  input: z.infer<InputSchema>
+  shapeClass: string
+  resultNote: string
+} | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return null
+  }
+  const next: Record<string, unknown> = { ...(raw as Record<string, unknown>) }
+  const shapes: string[] = []
+  const notes: string[] = []
+  const filePath = next.file_path
+  if (typeof filePath === 'string' && filePath !== '') {
+    const noPath = !Object.hasOwn(next, 'path')
+    if (noPath || next.path === filePath) {
+      delete next.file_path
+      next.path = filePath
+      shapes.push(noPath ? 'file_path' : 'repeated_file_path')
+      notes.push(
+        `${GREP_TOOL_NAME}'s parameter for where to search is named \`path\`. ${noPath ? '`file_path` was read as `path`.' : '`file_path` repeated `path` and was ignored.'}`,
+      )
+    }
+  }
+  for (const [flag, shapeName, mode] of GREP_FLAG_MODE_MAP) {
+    if (normalizeBoolFlag(next[flag]) !== true) continue
+    const noMode = !Object.hasOwn(next, 'output_mode')
+    if (noMode || next.output_mode === mode) {
+      delete next[flag]
+      next.output_mode = mode
+      shapes.push(noMode ? shapeName : `repeated_${shapeName}`)
+      notes.push(
+        noMode
+          ? `\`${flag}\` is not a ${GREP_TOOL_NAME} parameter and was read as \`output_mode: "${mode}"\`.`
+          : `\`${flag}\` repeated \`output_mode\` and was ignored.`,
+      )
+    }
+  }
+  if (normalizeBoolFlag(next['-r']) === true) {
+    delete next['-r']
+    shapes.push('flag_r')
+    notes.push(
+      `\`-r\` was ignored: ${GREP_TOOL_NAME} always searches a directory recursively.`,
+    )
+  }
+  return shapes.length > 0
+    ? {
+        input: next as z.infer<InputSchema>,
+        shapeClass: shapes.join(','),
+        resultNote: `Note: ${notes.join(' ')}`,
+      }
+    : null
+}
+
 export const GrepTool = buildTool({
   name: GREP_TOOL_NAME,
   searchHint: 'search file contents with regex (ripgrep)',
@@ -184,6 +255,7 @@ export const GrepTool = buildTool({
   get inputSchema(): InputSchema {
     return inputSchema()
   },
+  coerceInput: coerceGrepInput,
   get outputSchema(): OutputSchema {
     return outputSchema()
   },

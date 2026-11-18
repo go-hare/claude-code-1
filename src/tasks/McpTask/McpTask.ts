@@ -23,6 +23,8 @@ export type McpTaskState = TaskStateBase & {
   sidecarWrite?: Promise<unknown>
   sep2663Cancel?: () => void
   onWorkerWakeOutcome?: (outcome: { kind: string }) => void
+  endingGoesTo?: (kind: string) => void
+  newsToConfirm?: Array<() => void>
   terminal?: {
     summary?: string
     resource_links?: unknown[]
@@ -215,7 +217,12 @@ export async function killMcpTask(
   const task = registry.get(taskId)
   if (!isMcpTask(task)) return
   const sidecarWrite = task.sidecarWrite
+  // SEA 325 `q_s.kill` @317071891: abort controllers + sep2663Cancel first.
+  task.abortController?.abort()
+  task.driveAbortController?.abort()
+  task.sep2663Cancel?.()
   let killed = false
+  let endingGoesTo: ((kind: string) => void) | undefined
   registry.update(taskId, current => {
     if (
       !isMcpTask(current) ||
@@ -225,22 +232,19 @@ export async function killMcpTask(
       return current
     }
     killed = true
+    endingGoesTo = current.endingGoesTo
     return {
       ...current,
       status: 'killed',
       endTime: Date.now(),
+      endingGoesTo: undefined,
       parked: undefined,
+      newsToConfirm: undefined,
       notified: true,
       abortController: undefined,
       driveAbortController: undefined,
     }
   })
-  // densable @212118667: abort controllers + sep2663Cancel run unconditionally
-  // even when `notified` was already true, while registry status is already
-  // `'killed'` for `mcpAutoBackground` abort listeners when transitioning from running.
-  task.abortController?.abort()
-  task.driveAbortController?.abort()
-  task.sep2663Cancel?.()
   if (killed) {
     emitMcpTaskTerminatedSdk(
       taskId,
@@ -249,10 +253,18 @@ export async function killMcpTask(
       task.toolUseId,
     )
     try {
+      endingGoesTo?.('stopped')
       task.onWorkerWakeOutcome?.({ kind: 'stopped' })
     } catch (err) {
       logForDebugging(
-        `McpTask.kill: onWorkerWakeOutcome threw, the stop continues: ${err instanceof Error ? err.message : String(err)}`,
+        `McpTask.kill: onWorkerWakeOutcome or endingGoesTo threw, the stop continues: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+    try {
+      task.newsToConfirm?.forEach(confirm => confirm())
+    } catch (err) {
+      logForDebugging(
+        `McpTask.kill: a confirm of mcp_tasks_changed threw, the stop continues: ${err instanceof Error ? err.message : String(err)}`,
       )
     }
   }

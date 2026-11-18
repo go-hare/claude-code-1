@@ -1,6 +1,12 @@
 import type { Base64ImageSource } from '@anthropic-ai/sdk/resources/index.mjs'
 import { constants as fsConstants } from 'fs'
-import { lstat, open, readdir, readFile as readFileAsync } from 'fs/promises'
+import {
+  type FileHandle,
+  lstat,
+  open,
+  readdir,
+  readFile as readFileAsync,
+} from 'fs/promises'
 import * as path from 'path'
 import { posix, win32 } from 'path'
 import { z } from 'zod/v4'
@@ -60,11 +66,21 @@ import {
 } from 'src/utils/notebook.js'
 import {
   noteApprovedFileToolPath,
-  openApprovedRead,
+  openReadBoundToApproval,
+  snapshotApprovedReadIdentity,
   takeApprovedFileToolPath,
 } from 'src/utils/fileToolApprovedOpen.js'
+import { getSdkBetas } from 'src/bootstrap/state.js'
+import { getContextWindowForModel } from 'src/utils/context.js'
+import { getModelFacts } from 'src/utils/model/modelFacts.js'
+import { getPlatform } from 'src/utils/platform.js'
 import { expandPath, isNtObjectNamespacePath } from 'src/utils/path.js'
-import { extractPDFPages, getPDFPageCount, readPDF } from 'src/utils/pdf.js'
+import {
+  extractPDFPages,
+  getPDFPageCount,
+  readPDF,
+  readPDFFromHandle,
+} from 'src/utils/pdf.js'
 import {
   isPDFExtension,
   isPDFSupported,
@@ -76,7 +92,10 @@ import {
   matchesPathRule,
 } from 'src/utils/permissions/filesystem.js'
 import type { PermissionDecision } from 'src/utils/permissions/PermissionResult.js'
-import { readFileInRange } from 'src/utils/readFileInRange.js'
+import {
+  FileTooLargeError,
+  readFileInRange,
+} from 'src/utils/readFileInRange.js'
 import { semanticNumber } from 'src/utils/semanticNumber.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import { BASH_TOOL_NAME } from '../BashTool/toolName.js'
@@ -183,12 +202,212 @@ export class MaxFileReadTokenExceededError extends Error {
   constructor(
     public tokenCount: number,
     public maxTokens: number,
+    suffix = '',
   ) {
     super(
-      `File content (${tokenCount} tokens) exceeds maximum allowed tokens (${maxTokens}). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.`,
+      `File content (${tokenCount} tokens) exceeds maximum allowed tokens (${maxTokens}). Use offset and limit parameters to read specific portions of the file, or search for specific content instead of reading the whole file.${suffix}`,
     )
     this.name = 'MaxFileReadTokenExceededError'
   }
+}
+
+const ALLOW_LARGE_ROOM_FRACTION = 0.7
+const ALLOW_LARGE_BYTES_PER_TOKEN_MULTIPLIER = 3
+const ALLOW_LARGE_RETRY_HINT = ` To read it anyway, up to what still fits in your context, call ${FILE_READ_TOOL_NAME} again with allow_large: true \u2014 only if you genuinely need all of it or the user asked for the whole file.`
+const ALLOW_LARGE_OVERFLOW_HINT =
+  ' Even with allow_large, this is more than fits in the context you have left this turn (other large reads in the same turn share that room).'
+const ALLOW_LARGE_UNAVAILABLE_HINT =
+  ' allow_large is not available where this read runs; read it in parts with offset and limit.'
+
+type AllowLargeRoomResult = {
+  roomTokens: number | undefined
+  raised: { maxTokens: number; maxSizeBytes: number } | undefined
+}
+
+function parseOptionalInt(val: unknown): number | undefined {
+  if (typeof val === 'number' && Number.isFinite(val)) return val
+  if (typeof val === 'string' && /^[-+]?\d+$/.test(val.trim())) {
+    return Number(val)
+  }
+  return undefined
+}
+
+/**
+ * Official 2.1.325 `Dbo` (`coerceInput` for FileReadTool):
+ * - Unwrap 1-element array offset/limit
+ * - Drop negative offset / non-positive limit
+ * - Map `length` to `limit` if `limit` is absent and `length > 0`
+ * - Drop stray `description`
+ */
+export function coerceFileReadInput(
+  raw: unknown,
+): { input: Input; shapeClass: string } | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return null
+  }
+  const next: Record<string, unknown> = { ...(raw as Record<string, unknown>) }
+  const shapes: string[] = []
+  if (Array.isArray(next.offset) && next.offset.length === 1) {
+    next.offset = next.offset[0]
+    shapes.push('offset_array')
+  }
+  if (Array.isArray(next.limit) && next.limit.length === 1) {
+    next.limit = next.limit[0]
+    shapes.push('limit_array')
+  }
+  const offsetNum = parseOptionalInt(next.offset)
+  if (offsetNum !== undefined && offsetNum < 0) {
+    delete next.offset
+    shapes.push('offset_neg')
+  }
+  const limitNum = parseOptionalInt(next.limit)
+  if (limitNum !== undefined && limitNum <= 0) {
+    delete next.limit
+    shapes.push('limit_dropped')
+  }
+  if ('length' in next) {
+    const lenNum = parseOptionalInt(next.length)
+    if (!('limit' in next) && lenNum !== undefined && lenNum > 0) {
+      next.limit = lenNum
+    }
+    delete next.length
+    shapes.push('length')
+  }
+  if (Object.hasOwn(next, 'description')) {
+    delete next.description
+    shapes.push('drop_description')
+  }
+  return shapes.length > 0
+    ? { input: next as Input, shapeClass: shapes.join(',') }
+    : null
+}
+
+function computeAllowLargeRoom(
+  context: ToolUseContext,
+  parentMessage:
+    | Parameters<ToolDef<InputSchema, Output>['call']>[3]
+    | undefined,
+  limits: { maxSizeBytes: number; maxTokens: number },
+): AllowLargeRoomResult {
+  const model = context.options?.mainLoopModel
+  if (!model) {
+    return { roomTokens: undefined, raised: undefined }
+  }
+  const contextWindow = getContextWindowForModel(model, getSdkBetas())
+  const usage = (
+    parentMessage as
+      | {
+          message?: {
+            usage?: {
+              input_tokens?: number
+              cache_creation_input_tokens?: number
+              cache_read_input_tokens?: number
+              output_tokens?: number
+            }
+          }
+        }
+      | undefined
+  )?.message?.usage
+  const usedTokens = usage
+    ? (usage.input_tokens ?? 0) +
+      (usage.cache_creation_input_tokens ?? 0) +
+      (usage.cache_read_input_tokens ?? 0) +
+      (usage.output_tokens ?? 0)
+    : 0
+  const roomTokens = Math.max(
+    0,
+    Math.floor((contextWindow - usedTokens) * ALLOW_LARGE_ROOM_FRACTION),
+  )
+  if (roomTokens <= limits.maxTokens) {
+    return { roomTokens, raised: undefined }
+  }
+  const { bytesPerToken } = getModelFacts(model)
+  return {
+    roomTokens,
+    raised: {
+      maxTokens: roomTokens,
+      maxSizeBytes: Math.max(
+        limits.maxSizeBytes,
+        roomTokens * bytesPerToken * ALLOW_LARGE_BYTES_PER_TOKEN_MULTIPLIER,
+      ),
+    },
+  }
+}
+
+function formatAllowLargeHint(
+  room: AllowLargeRoomResult,
+  optedIn: boolean,
+  measured: { bytes?: number; tokens?: number },
+): string {
+  if (room.roomTokens === undefined) {
+    return optedIn ? ALLOW_LARGE_UNAVAILABLE_HINT : ''
+  }
+  if (optedIn || room.raised === undefined) {
+    return ALLOW_LARGE_OVERFLOW_HINT
+  }
+  const fitsBytes =
+    measured.bytes === undefined || measured.bytes <= room.raised.maxSizeBytes
+  const fitsTokens =
+    measured.tokens === undefined || measured.tokens <= room.raised.maxTokens
+  return fitsBytes && fitsTokens
+    ? ALLOW_LARGE_RETRY_HINT
+    : ALLOW_LARGE_OVERFLOW_HINT
+}
+
+function wrapAllowLargeError(
+  error: unknown,
+  opts: {
+    room: () => AllowLargeRoomResult
+    optedIn: boolean
+    readMaxSizeBytes: number
+    ext: string
+  },
+): unknown {
+  let wrapped: Error
+  let extra: Record<string, number>
+  let roomResult: AllowLargeRoomResult
+  if (
+    error instanceof FileTooLargeError &&
+    error.maxSizeBytes === opts.readMaxSizeBytes
+  ) {
+    roomResult = opts.room()
+    const hint = formatAllowLargeHint(roomResult, opts.optedIn, {
+      bytes: error.sizeInBytes,
+    })
+    wrapped = new FileTooLargeError(error.sizeInBytes, error.maxSizeBytes)
+    wrapped.message = `${error.message}${hint}`
+    extra = { totalBytes: error.sizeInBytes }
+  } else if (error instanceof MaxFileReadTokenExceededError) {
+    roomResult = opts.room()
+    const hint = formatAllowLargeHint(roomResult, opts.optedIn, {
+      tokens: error.tokenCount,
+    })
+    wrapped = new MaxFileReadTokenExceededError(
+      error.tokenCount,
+      error.maxTokens,
+      hint,
+    )
+    extra = { tokens: error.tokenCount }
+  } else {
+    return error
+  }
+  if (opts.optedIn) {
+    const outcome =
+      roomResult.roomTokens === undefined ? 'unavailable' : 'too_large'
+    logEvent('tengu_file_read_allow_large', {
+      outcome:
+        outcome as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      lifted: roomResult.raised !== undefined,
+      ...(roomResult.roomTokens !== undefined && {
+        roomTokens: roomResult.roomTokens,
+      }),
+      ...extra,
+      ...(opts.ext !== undefined && {
+        ext: opts.ext as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      }),
+    })
+  }
+  return wrapped
 }
 
 /**
@@ -261,10 +480,18 @@ const inputSchema = lazySchema(() =>
       'The number of lines to read. Only provide if the file is too large to read at once.',
     ),
     pages: z
-      .string()
-      .optional()
+      .preprocess(
+        val => (typeof val === 'string' && val.trim() === '' ? undefined : val),
+        z.string().optional(),
+      )
       .describe(
         `Page range for PDF files (e.g., "1-5", "3", "10-20"). Only applicable to PDF files. Maximum ${PDF_MAX_PAGES_PER_READ} pages per request.`,
+      ),
+    allow_large: z
+      .boolean()
+      .optional()
+      .describe(
+        'Set to true to read a text file, or a line range of one, that is over the usual size limits, up to what still fits in your context. Only use this when you genuinely need all of it or the user asked for the whole file; otherwise read it in parts with offset and limit, or search it.',
       ),
   }),
 )
@@ -404,6 +631,7 @@ export const FileReadTool = buildTool({
   get inputSchema(): InputSchema {
     return inputSchema()
   },
+  coerceInput: coerceFileReadInput,
   get outputSchema(): OutputSchema {
     return outputSchema()
   },
@@ -475,7 +703,7 @@ export const FileReadTool = buildTool({
       if (!parsed) {
         return {
           result: false,
-          message: `Invalid pages parameter: "${pages}". Use formats like "1-5", "3", or "10-20". Pages are 1-indexed.`,
+          message: `Invalid pages parameter: "${pages}". Give one page ("3") or one range ("1-5"), not a list. To read several pages or ranges, read each one separately. Pages are 1-indexed.`,
           errorCode: 7,
         }
       }
@@ -576,7 +804,7 @@ export const FileReadTool = buildTool({
     return { result: true }
   },
   async call(
-    { file_path, offset = 1, limit = undefined, pages },
+    { file_path, offset = 1, limit = undefined, pages, allow_large },
     context,
     _canUseTool?,
     parentMessage?,
@@ -587,6 +815,12 @@ export const FileReadTool = buildTool({
     const maxSizeBytes =
       fileReadingLimits?.maxSizeBytes ?? defaults.maxSizeBytes
     const maxTokens = fileReadingLimits?.maxTokens ?? defaults.maxTokens
+    const room = () =>
+      computeAllowLargeRoom(context, parentMessage, {
+        maxSizeBytes,
+        maxTokens,
+      })
+    const allowLargeRoom = allow_large ? room() : undefined
 
     // Telemetry: track when callers override default read limits.
     // Only fires on override (low volume) — event count = override frequency.
@@ -674,12 +908,18 @@ export const FileReadTool = buildTool({
     }
 
     try {
-      let opened: Awaited<ReturnType<typeof openApprovedRead>> | null = null
+      let opened: Awaited<ReturnType<typeof openReadBoundToApproval>> | null =
+        null
       try {
-        opened = await openApprovedRead(
+        const pinnedInode =
+          getPlatform() === 'macos'
+            ? await snapshotApprovedReadIdentity(approvedReadPaths)
+            : undefined
+        opened = await openReadBoundToApproval(
           fullFilePath,
           approvedReadPaths,
           context.abortController.signal,
+          pinnedInode,
         )
       } catch (error) {
         // ENOENT stays on the similar-file path; a swapped symlink does not.
@@ -699,6 +939,9 @@ export const FileReadTool = buildTool({
           readFileState,
           context,
           parentMessage?.message.id,
+          opened?.handle,
+          room,
+          allowLargeRoom,
         )
       } finally {
         await opened?.close()
@@ -725,6 +968,9 @@ export const FileReadTool = buildTool({
               readFileState,
               context,
               parentMessage?.message.id,
+              undefined,
+              room,
+              allowLargeRoom,
             )
           } catch (altError) {
             if (!isENOENT(altError)) {
@@ -906,13 +1152,19 @@ async function callInner(
   readFileState: ToolUseContext['readFileState'],
   context: ToolUseContext,
   messageId: string | undefined,
+  openedHandle?: FileHandle,
+  room: () => AllowLargeRoomResult = () => ({
+    roomTokens: undefined,
+    raised: undefined,
+  }),
+  allowLargeRoom?: AllowLargeRoomResult,
 ): Promise<{
   data: Output
   newMessages?: ReturnType<typeof createUserMessage>[]
 }> {
   // --- Notebook ---
   if (ext === 'ipynb') {
-    const cells = await readNotebook(resolvedFilePath)
+    const cells = await readNotebook(openedHandle ?? resolvedFilePath)
     const cellsJson = jsonStringify(cells)
 
     const cellsJsonBytes = Buffer.byteLength(cellsJson)
@@ -929,8 +1181,10 @@ async function callInner(
 
     await validateContentTokens(cellsJson, ext, maxTokens)
 
-    // Get mtime via async stat (single call, no prior existence check)
-    const stats = await getFsImplementation().stat(resolvedFilePath)
+    // Get mtime via bound handle when available (no symlink swap TOCTOU)
+    const stats = openedHandle
+      ? await openedHandle.stat()
+      : await getFsImplementation().stat(resolvedFilePath)
     readFileState.set(fullFilePath, {
       content: cellsJson,
       timestamp: Math.floor(stats.mtimeMs),
@@ -990,10 +1244,11 @@ async function callInner(
   if (isPDFExtension(ext)) {
     if (pages) {
       const parsedRange = parsePDFPageRange(pages)
-      const extractResult = await extractPDFPages(
-        resolvedFilePath,
-        parsedRange ?? undefined,
-      )
+      const extractResult = await extractPDFPages(resolvedFilePath, {
+        ...(parsedRange ?? {}),
+        held: openedHandle,
+        signal: context.abortController.signal,
+      })
       if (!extractResult.success) {
         throw new Error((extractResult as any).error.message)
       }
@@ -1045,7 +1300,20 @@ async function callInner(
       }
     }
 
-    const pageCount = await getPDFPageCount(resolvedFilePath)
+    const stats = openedHandle
+      ? await openedHandle.stat()
+      : await getFsImplementation().stat(resolvedFilePath)
+
+    const pageCount = await getPDFPageCount(
+      resolvedFilePath,
+      openedHandle
+        ? {
+            handle: openedHandle,
+            size: stats.size,
+            signal: context.abortController.signal,
+          }
+        : undefined,
+    )
     if (pageCount !== null && pageCount > PDF_AT_MENTION_INLINE_THRESHOLD) {
       throw new Error(
         `This PDF has ${pageCount} pages, which is too many to read at once. ` +
@@ -1054,13 +1322,14 @@ async function callInner(
       )
     }
 
-    const fs = getFsImplementation()
-    const stats = await fs.stat(resolvedFilePath)
     const shouldExtractPages =
       !isPDFSupported() || stats.size > PDF_EXTRACT_SIZE_THRESHOLD
 
     if (shouldExtractPages) {
-      const extractResult = await extractPDFPages(resolvedFilePath)
+      const extractResult = await extractPDFPages(resolvedFilePath, {
+        held: openedHandle,
+        signal: context.abortController.signal,
+      })
       if (extractResult.success) {
         logEvent('tengu_pdf_page_extraction', {
           success: true,
@@ -1084,7 +1353,17 @@ async function callInner(
       )
     }
 
-    const readResult = await readPDF(resolvedFilePath)
+    const readResult = openedHandle
+      ? await readPDFFromHandle(
+          openedHandle,
+          resolvedFilePath,
+          context.abortController.signal,
+        )
+      : await readPDF(
+          resolvedFilePath,
+          undefined,
+          context.abortController.signal,
+        )
     if (!readResult.success) {
       throw new Error((readResult as any).error.message)
     }
@@ -1118,15 +1397,29 @@ async function callInner(
   }
 
   // --- Text file (single async read via readFileInRange) ---
+  const effectiveMaxSizeBytes =
+    allowLargeRoom?.raised?.maxSizeBytes ?? maxSizeBytes
+  const effectiveMaxTokens =
+    allowLargeRoom?.raised?.maxTokens ??
+    maxTokens ??
+    getDefaultFileReadingLimits().maxTokens
+  const allowLargeOpts = {
+    room,
+    optedIn: allowLargeRoom !== undefined,
+    readMaxSizeBytes: effectiveMaxSizeBytes,
+    ext: getFileExtensionForAnalytics(fullFilePath) ?? ext,
+  }
   const lineOffset = offset === 0 ? 0 : offset - 1
   const { content, lineCount, totalLines, totalBytes, readBytes, mtimeMs } =
     await readFileInRange(
       resolvedFilePath,
       lineOffset,
       limit,
-      limit === undefined ? maxSizeBytes : undefined,
+      limit === undefined ? effectiveMaxSizeBytes : undefined,
       context.abortController.signal,
-    )
+    ).catch(err => {
+      throw wrapAllowLargeError(err, allowLargeOpts)
+    })
 
   // densable token-cap auto-page: whole-file reads that exceed the cap return
   // the first page with truncatedByTokenCap + isPartialView instead of throw.
@@ -1138,14 +1431,12 @@ async function callInner(
   let tokenCapBanner: string | undefined
   const isWholeFileRead =
     (offset ?? 1) <= 1 && limit === undefined && pages === undefined
-  const effectiveMaxTokens =
-    maxTokens ?? getDefaultFileReadingLimits().maxTokens
 
   try {
-    await validateContentTokens(content, ext, maxTokens)
+    await validateContentTokens(content, ext, effectiveMaxTokens)
   } catch (err) {
     if (!(err instanceof MaxFileReadTokenExceededError) || !isWholeFileRead) {
-      throw err
+      throw wrapAllowLargeError(err, allowLargeOpts)
     }
     // densable: estimate bytes/token from full content vs measured tokenCount,
     // shrink line window until under cap (max 6 shrinks), else char-slice path.

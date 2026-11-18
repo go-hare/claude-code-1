@@ -262,3 +262,62 @@ export function getVertexRegionForModel(
   }
   return getDefaultVertexRegion(env)
 }
+
+const DAEMON_INJECTED_FORCE_COLOR = '3'
+
+/**
+ * #383 SEA `oC`: Resolve an env var key case-insensitively on Windows, exact on POSIX.
+ */
+export function findEnvKey(
+  env: Record<string, string | undefined>,
+  name: string,
+): string {
+  if (process.platform !== 'win32' || Object.hasOwn(env, name)) {
+    return name
+  }
+  const upper = name.toUpperCase()
+  return Object.keys(env).find(k => k.toUpperCase() === upper) ?? name
+}
+
+/**
+ * #383 SEA `J6o`: True when running in a background daemon worker that injected FORCE_COLOR=3.
+ */
+export function isDaemonInjectedForceColor(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return (
+    env.CLAUDE_BG_BACKEND === 'daemon' &&
+    env.FORCE_COLOR === DAEMON_INJECTED_FORCE_COLOR
+  )
+}
+
+/**
+ * #383 SEA `Q6o`: True when FORCE_COLOR=3 was injected by the background daemon
+ * and NOT explicitly configured in settings.env for child processes.
+ */
+export function shouldStripDaemonForceColor(
+  settingsEnvForChildren: Record<string, string | undefined> = {},
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (!isDaemonInjectedForceColor(env)) {
+    return false
+  }
+  return !Object.hasOwn(
+    settingsEnvForChildren,
+    findEnvKey(settingsEnvForChildren, 'FORCE_COLOR'),
+  )
+}
+
+/**
+ * #383 SEA: Strip daemon-injected FORCE_COLOR from child process env when
+ * shouldStripDaemonForceColor() is true.
+ */
+export function stripDaemonForceColorFromEnv(
+  targetEnv: Record<string, string | undefined>,
+  settingsEnvForChildren: Record<string, string | undefined> = {},
+  processEnv: NodeJS.ProcessEnv = process.env,
+): void {
+  if (shouldStripDaemonForceColor(settingsEnvForChildren, processEnv)) {
+    delete targetEnv[findEnvKey(targetEnv, 'FORCE_COLOR')]
+  }
+}

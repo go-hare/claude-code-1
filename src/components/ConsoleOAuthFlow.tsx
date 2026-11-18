@@ -42,6 +42,7 @@ import { isHeadlessBrowserEnvironment, openBrowser } from '../utils/browser.js';
 import { isFullscreenActive, resolveMouseTrackingMode } from '../utils/fullscreen.js';
 import { getNativeSelectionHoldKey } from './ScrollKeybindingHandler.js';
 import { resolveInteractiveForceLoginMethod } from '../utils/forceLoginMethod.js';
+import { logOTelAuthEvent } from '../utils/sessionSlots.js';
 import { logError } from '../utils/log.js';
 import { getSettings_DEPRECATED, updateSettingsForSource } from '../utils/settings/settings.js';
 import { CHINA_LLM_PROVIDERS, type ProviderPreset, resolveChinaProviderBaseURL } from 'src/utils/chinaLlmProviders.js';
@@ -433,6 +434,9 @@ export function ConsoleOAuthFlow({
         );
       }
     } catch (err) {
+      if (mode !== 'setup-token') {
+        logOTelAuthEvent({ action: 'login', success: false, authMethod: 'oauth', error: err });
+      }
       const errorMessage = (err as Error).message;
       const sslHint = getSSLErrorHint(err);
       setOAuthStatus({
@@ -627,6 +631,7 @@ function OAuthStatusMessage({
           initialUrl={forceLoginGatewayUrl}
           screenLocked={gatewayScreenLocked}
           onDone={() => {
+            logOTelAuthEvent({ action: 'login', success: true, authMethod: 'oauth' });
             setOAuthStatus({ state: 'gateway_done' });
           }}
           onCancel={() => setOAuthStatus({ state: 'idle' })}

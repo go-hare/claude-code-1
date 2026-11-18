@@ -23,6 +23,7 @@ import {
 import {
   closeSync,
   lstatSync,
+  mkdirSync,
   openSync,
   readFileSync,
   readdirSync,
@@ -109,6 +110,11 @@ import {
   ensureAtomicWriteStagingDirs,
   ensureBridgeSpawnRootDirForWrap,
 } from './wrapPreflight.js'
+import {
+  type ForwardedUntrustedGrant,
+  recheckReadDenyAndCredentialMasksBeforeWrap,
+  recordReadDenyRecheckBaseline,
+} from './readDenyRecheck.js'
 
 // ============================================================================
 // Credential Protection Constants (from official sandbox.credentials)
@@ -795,6 +801,8 @@ export function convertToSandboxRuntimeConfig(
   const denyWrite: string[] = []
   const denyRead: string[] = []
   const allowRead: string[] = []
+  const trustedDenyRoots: string[] = []
+  const forwardedUntrustedGrants: ForwardedUntrustedGrant[] = []
 
   // Always deny writes to settings.json files to prevent sandbox escape
   // This blocks settings in the original working directory (where Claude Code started)
@@ -1048,6 +1056,28 @@ export function convertToSandboxRuntimeConfig(
   denyRead.push(...DENY_READ_SOCKET_PATHS)
   denyRead.push(...DENY_READ_ENV_GLOBS)
 
+  // #200 SEA CXq: ~/.claude/seed-admin holds private git directories of
+  // cloud-session /ultrareview uploads — materialize and block both reads and writes.
+  const seedAdminDir = join(getClaudeConfigHomeDir(), 'seed-admin')
+  try {
+    mkdirSync(seedAdminDir, { recursive: true, mode: 0o700 })
+  } catch {
+    // Best-effort materialization; deny rules still apply.
+  }
+  denyWrite.push(seedAdminDir)
+  denyRead.push(seedAdminDir)
+  trustedDenyRoots.push(seedAdminDir)
+  try {
+    const realSeedAdminDir = realpathSync(seedAdminDir)
+    if (realSeedAdminDir !== seedAdminDir) {
+      denyWrite.push(realSeedAdminDir)
+      denyRead.push(realSeedAdminDir)
+      trustedDenyRoots.push(realSeedAdminDir)
+    }
+  } catch {
+    // Directory may not exist if mkdirSync failed.
+  }
+
   // densable WZ returns the main `.git` dir (not the repo root). Worktree
   // git ops need write access there for index.lock etc.
   if (worktreeMainRepoPath && worktreeMainRepoPath !== cwd) {
@@ -1095,9 +1125,17 @@ export function convertToSandboxRuntimeConfig(
         : sourceSettings.permissions.allow || []) {
         const rule = permissionRuleValueFromString(ruleString)
         if (rule.toolName === FILE_EDIT_TOOL_NAME && rule.ruleContent) {
-          allowWrite.push(
-            resolvePathPatternForSandbox(rule.ruleContent, source),
+          const resolvedWrite = resolvePathPatternForSandbox(
+            rule.ruleContent,
+            source,
           )
+          allowWrite.push(resolvedWrite)
+          if (source === 'projectSettings' || source === 'localSettings') {
+            forwardedUntrustedGrants.push({
+              literal: resolvedWrite,
+              list: 'allowWrite',
+            })
+          }
         }
       }
 
@@ -1107,7 +1145,18 @@ export function convertToSandboxRuntimeConfig(
           denyWrite.push(resolvePathPatternForSandbox(rule.ruleContent, source))
         }
         if (rule.toolName === FILE_READ_TOOL_NAME && rule.ruleContent) {
-          denyRead.push(resolvePathPatternForSandbox(rule.ruleContent, source))
+          const resolvedDeny = resolvePathPatternForSandbox(
+            rule.ruleContent,
+            source,
+          )
+          denyRead.push(resolvedDeny)
+          if (
+            source === 'policySettings' ||
+            source === 'flagSettings' ||
+            source === 'userSettings'
+          ) {
+            trustedDenyRoots.push(resolvedDeny)
+          }
         }
       }
     }
@@ -1118,17 +1167,39 @@ export function convertToSandboxRuntimeConfig(
     const fs = sourceSettings?.sandbox?.filesystem
     if (fs) {
       for (const p of fs.allowWrite || []) {
-        allowWrite.push(resolveSandboxFilesystemPath(p, source))
+        const resolvedWrite = resolveSandboxFilesystemPath(p, source)
+        allowWrite.push(resolvedWrite)
+        if (source === 'projectSettings' || source === 'localSettings') {
+          forwardedUntrustedGrants.push({
+            literal: resolvedWrite,
+            list: 'allowWrite',
+          })
+        }
       }
       for (const p of fs.denyWrite || []) {
         denyWrite.push(resolveSandboxFilesystemPath(p, source))
       }
       for (const p of fs.denyRead || []) {
-        denyRead.push(resolveSandboxFilesystemPath(p, source))
+        const resolvedDeny = resolveSandboxFilesystemPath(p, source)
+        denyRead.push(resolvedDeny)
+        if (
+          source === 'policySettings' ||
+          source === 'flagSettings' ||
+          source === 'userSettings'
+        ) {
+          trustedDenyRoots.push(resolvedDeny)
+        }
       }
       if (!shouldAllowManagedReadPathsOnly() || source === 'policySettings') {
         for (const p of fs.allowRead || []) {
-          allowRead.push(resolveSandboxFilesystemPath(p, source))
+          const resolvedRead = resolveSandboxFilesystemPath(p, source)
+          allowRead.push(resolvedRead)
+          if (source === 'projectSettings' || source === 'localSettings') {
+            forwardedUntrustedGrants.push({
+              literal: resolvedRead,
+              list: 'allowRead',
+            })
+          }
         }
       }
     }
@@ -1155,6 +1226,10 @@ export function convertToSandboxRuntimeConfig(
 
   // densable credentials merge (files path-resolved; env mask trust gates)
   const credentials = mergeSandboxCredentialsForRuntime()
+  recordReadDenyRecheckBaseline({
+    trustedDenyRoots,
+    forwardedUntrustedGrants,
+  })
 
   // densable Xot()==="relaxed": attach filesystem.disabled + keep full path lists
   // on getConfig(). sandbox-runtime@0.0.70 honors filesystem.disabled natively
@@ -1917,6 +1992,12 @@ async function wrapWithSandbox(
     await ensureBridgeSpawnRootDirForWrap()
     ensureAtomicWriteStagingDirs()
     promoteDenyLiteralSymlinkTargets({
+      getConfig: () => BaseSandboxManager.getConfig?.(),
+      updateConfig: cfg => {
+        BaseSandboxManager.updateConfig(cfg)
+      },
+    })
+    recheckReadDenyAndCredentialMasksBeforeWrap({
       getConfig: () => BaseSandboxManager.getConfig?.(),
       updateConfig: cfg => {
         BaseSandboxManager.updateConfig(cfg)

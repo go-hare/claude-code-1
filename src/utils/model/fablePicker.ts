@@ -302,7 +302,7 @@ export function maybeInsertFablePickerRow<T extends FablePickerOption>(
   }
   const provider = deps.provider ?? getAPIProvider()
   const custom = getCustomFableOption(provider)
-  if (isAnthropicStyleApiProvider(provider)) {
+  if (isAnthropicStyleApiProvider(provider) && provider !== 'gateway') {
     if (custom) {
       insertFablePickerOption(options, custom as T, deps.insertDeps)
     } else if (

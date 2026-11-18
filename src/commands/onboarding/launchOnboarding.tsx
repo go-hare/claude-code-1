@@ -7,6 +7,7 @@ import {
 import type { LocalJSXCommandCall } from '../../types/command.js';
 import { ThemePicker } from '../../components/ThemePicker.js';
 import { getGlobalConfig, saveCurrentProjectConfig, saveGlobalConfig } from '../../utils/config.js';
+import { hasMatchingFunctionHook } from '../../utils/plugins/functionHooksModules.js';
 import type { ThemeSetting } from '../../utils/theme.js';
 
 /**
@@ -59,9 +60,22 @@ function ThemeSubcommand({ onDone }: { onDone: (msg: string) => void }): React.R
     <Pane color="permission">
       <ThemePicker
         onThemeSelect={(setting: ThemeSetting) => {
-          setTheme(setting);
-          logEvent('tengu_onboarding_step', { stepId: meta('theme') });
-          onDone(`Theme set to ${setting}.`);
+          if (!hasMatchingFunctionHook('config.set')) {
+            setTheme(setting);
+            logEvent('tengu_onboarding_step', { stepId: meta('theme') });
+            onDone(`Theme set to ${setting}.`);
+            return;
+          }
+          void import('../theme/theme.js')
+            .then(({ saveThemeWithConfigSetHook }) => saveThemeWithConfigSetHook(setting, setTheme))
+            .then(result => {
+              if (result.kind === 'saved') {
+                logEvent('tengu_onboarding_step', { stepId: meta('theme') });
+                onDone(`Theme set to ${result.saved}.`);
+              } else {
+                onDone(`Couldn't save Theme${result.reason ? `: ${result.reason}` : ''}`);
+              }
+            });
         }}
         onCancel={() => onDone('Theme picker dismissed.')}
         skipExitHandling={true}

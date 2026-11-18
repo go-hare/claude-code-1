@@ -55,6 +55,7 @@ import {
   getMemoryPath,
   getUserClaudeRulesDir,
 } from './config.js'
+import { randomUUID } from 'crypto'
 import { logForDebugging } from './debug.js'
 import { logForDiagnosticsNoPII } from './diagLogs.js'
 import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
@@ -665,6 +666,9 @@ export async function processMemoryFile(
     isUnsafeNetworkOrNtIncludePath(resolvedPath) ||
     isUnresolvedSymlink(resolved)
   ) {
+    if (isUnresolvedSymlink(resolved)) {
+      recordWithheldMemoryPaths([{ path: filePath, why: 'unsettled' }])
+    }
     return []
   }
 
@@ -678,6 +682,7 @@ export async function processMemoryFile(
     !pathInOriginalCwd(resolvedPath) &&
     settingsHaveBlockReadsOutsideWorkingDirectories()
   ) {
+    recordWithheldMemoryPaths([{ path: filePath, why: 'outside' }])
     return []
   }
 
@@ -691,6 +696,8 @@ export async function processMemoryFile(
   if (!memoryFile || !memoryFile.content.trim()) {
     return []
   }
+
+  markWithheldMemoryLoaded([filePath])
 
   // Add parent information
   if (parent) {
@@ -1574,4 +1581,146 @@ export function getAllMemoryFilePaths(
   }
 
   return Array.from(paths)
+}
+
+// ============================================================================
+// #229: Withheld memory tracking & transcript formatting (NE / d3 / tst / nst / ost)
+// ============================================================================
+
+export type WithheldMemoryWhy = 'denied' | 'outside' | 'unjudged' | 'unsettled'
+
+export type WithheldMemoryEntry = {
+  path: string
+  why: WithheldMemoryWhy
+}
+
+export type WithheldMemoryAttachmentEntry = WithheldMemoryEntry & {
+  displayPath: string
+}
+
+export const WITHHELD_MEMORY_REASON_LABELS: Record<WithheldMemoryWhy, string> =
+  {
+    denied: 'a Read deny rule covers it',
+    outside:
+      "it's read from outside your working directories, where reads are blocked",
+    unjudged:
+      "a Read deny rule couldn't be checked without a working directory",
+    unsettled: "where it leads couldn't be worked out",
+  }
+
+const MAX_WITHHELD_TRACKED = 200
+const WITHHELD_SHOWN_LIMIT = 20
+
+const withheldMemoryState = {
+  owed: new Map<string, WithheldMemoryEntry>(),
+  logged: new Set<string>(),
+  token: randomUUID(),
+  seen: new Set<string>(),
+}
+
+export function getWithheldMemoryToken(): string {
+  return withheldMemoryState.token
+}
+
+export function logWithheldMemoryPaths(
+  entries: readonly WithheldMemoryEntry[],
+): void {
+  for (const { path, why } of entries) {
+    if (
+      !withheldMemoryState.logged.has(path) &&
+      withheldMemoryState.logged.size < MAX_WITHHELD_TRACKED
+    ) {
+      withheldMemoryState.logged.add(path)
+      logForDebugging(
+        `Instruction file not loaded: ${path} (${WITHHELD_MEMORY_REASON_LABELS[why]})`,
+      )
+    }
+  }
+}
+
+export function recordWithheldMemoryPaths(
+  entries: readonly WithheldMemoryEntry[],
+  isNonInteractive = false,
+): void {
+  logWithheldMemoryPaths(entries)
+  if (isNonInteractive) return
+  for (const entry of entries) {
+    if (
+      !withheldMemoryState.owed.has(entry.path) &&
+      withheldMemoryState.owed.size < MAX_WITHHELD_TRACKED
+    ) {
+      withheldMemoryState.owed.set(entry.path, entry)
+    }
+  }
+}
+
+export function markWithheldMemoryLoaded(paths: readonly string[]): void {
+  for (const p of paths) {
+    withheldMemoryState.owed.delete(p)
+  }
+}
+
+export function drainWithheldMemoryOwed(
+  excludePaths: ReadonlySet<string> | readonly string[],
+): WithheldMemoryEntry[] {
+  for (const p of excludePaths) {
+    withheldMemoryState.owed.delete(p)
+  }
+  return Array.from(withheldMemoryState.owed.values())
+}
+
+export function collectWithheldMemorySeen(
+  attachments: ReadonlyArray<{ type: string; [key: string]: unknown }>,
+  token = withheldMemoryState.token,
+): Set<string> {
+  const fromAttachments = new Set<string>()
+  for (const att of attachments) {
+    if (att.type !== 'withheld_memory' || att.by !== token) continue
+    if (!Array.isArray(att.entries)) continue
+    for (const entry of att.entries) {
+      if (
+        typeof entry === 'object' &&
+        entry !== null &&
+        typeof (entry as { path?: unknown }).path === 'string'
+      ) {
+        const p = (entry as { path: string }).path
+        fromAttachments.add(p)
+        if (withheldMemoryState.seen.size < MAX_WITHHELD_TRACKED) {
+          withheldMemoryState.seen.add(p)
+        }
+      }
+    }
+  }
+  return new Set([...withheldMemoryState.seen, ...fromAttachments])
+}
+
+export function resetWithheldMemoryStateForTests(): void {
+  withheldMemoryState.owed.clear()
+  withheldMemoryState.logged.clear()
+  withheldMemoryState.seen.clear()
+}
+
+export function formatWithheldMemoryLine(
+  why: WithheldMemoryWhy,
+  displayPath: string,
+): { lead: string; mark: string; path: string } {
+  return {
+    lead: `Instruction file not loaded (${WITHHELD_MEMORY_REASON_LABELS[why]}):`,
+    mark: 'path:',
+    path: displayPath.replace(/\s+/g, ' '),
+  }
+}
+
+export function formatWithheldMore(more: number): string {
+  return `and ${more} more instruction ${more === 1 ? 'file' : 'files'} not loaded`
+}
+
+export function withheldShown<T>(entries: readonly T[]): {
+  shown: T[]
+  more: number
+} {
+  return {
+    shown: entries.slice(0, WITHHELD_SHOWN_LIMIT),
+    more: Math.max(entries.length - WITHHELD_SHOWN_LIMIT, 0),
+  }
 }

@@ -7,6 +7,7 @@ import { spawn } from 'child_process'
 import { readFileSync } from 'fs'
 import { isAbsolute, win32 } from 'path'
 import { logForDebugging } from '../../utils/debug.js'
+import { envTerminalName } from '../terminalCapabilities.js'
 import { BEL, ESC, ESC_TYPE, SEP } from './ansi.js'
 
 /** densable Al() snapshot — injected; ink cannot import src/bootstrap. */
@@ -20,6 +21,10 @@ export type ClipboardAttacherCaps = {
   isVscodeTerm?: boolean
   /** densable `nu()?.keyDialect` — `Wy()` / `gst(TERM)` `'st' | 'rxvt' | null`. */
   keyDialect?: 'st' | 'rxvt' | null
+  /** densable `op()?.terminal` — outer terminal type for VTE OSC 52 guard. */
+  terminal?: string | null
+  /** densable `op()?.printsUnknownSequences` — older VTE (< 5300) OSC 52 guard. */
+  printsUnknownSequences?: boolean
 }
 
 let attacherCapsGetter:
@@ -437,19 +442,84 @@ export function formatScreenOsc52Clipboard(b64: string): string {
   return `${ESC}P${ESC}]52;c;${chunks.join(`${ST}${ESC}P`)}${BEL}${ST}`
 }
 
+/**
+ * Official 2.1.296 (#502): VTE-based terminal detection matching
+ * TerminalPlatform.isVteBasedTerminal(termType).
+ */
+export function isVteBasedTerminal(
+  termType: string | null | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return (
+    Boolean(env.VTE_VERSION) &&
+    (termType === 'vte-based' || termType === 'gnome-terminal') &&
+    (env.TERM ?? '').trim().startsWith('xterm') &&
+    !env.TMUX &&
+    !env.STY &&
+    env.ZELLIJ === undefined &&
+    !env.XTERM_VERSION &&
+    !env.ALACRITTY_WINDOW_ID &&
+    !env.ALACRITTY_LOG &&
+    !env.KITTY_WINDOW_ID &&
+    !env.WEZTERM_PANE &&
+    !env.INSIDE_EMACS &&
+    !env.VIM_TERMINAL &&
+    !env.NVIM
+  )
+}
+
+/**
+ * Official 2.1.296 (#502): older VTE (< 5300, e.g. MATE Terminal) prints
+ * unknown OSC 52 sequences as stray `52;c;…` text on screen.
+ */
+export function hasUnknownSequencePrintingBug(
+  termType: string | null | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return (
+    isVteBasedTerminal(termType, env) &&
+    Number.parseInt(env.VTE_VERSION ?? '', 10) < 5300
+  )
+}
+
 export async function setClipboard(text: string): Promise<string> {
   const b64 = Buffer.from(text, 'utf8').toString('base64')
+  const ssh = isSshSession()
+  const host = getClipboardHostPlatform()
+  let nativeCopied = false
 
-  // densable yy: native when !p(), then W(t) (result unused), emit by y5e().
-  if (!isSshSession()) copyNative(text)
+  // Official 2.1.296: probe Linux clipboard tool before copyNative so
+  // nativeCopied accurately reflects whether a native tool handled the copy.
+  if (!ssh) {
+    if (host === 'linux' && typeof linuxCopy !== 'string') {
+      await probeLinuxClipboardTool()
+    }
+    nativeCopied = copyNative(text)
+  }
   await tmuxLoadBuffer(text)
 
   const mux = muxFromAttacherOrEnv()
-  const ssh = isSshSession()
-  const emit = mux === 'tmux' ? 'raw+dcs' : mux === 'screen' ? 'dcs' : 'raw'
+  const caps = attacherCaps()
+  const term = caps?.terminal !== undefined ? caps.terminal : envTerminalName()
+  const printsUnknown =
+    caps?.printsUnknownSequences ??
+    hasUnknownSequencePrintingBug(envTerminalName())
+  const suppressOsc52 =
+    (nativeCopied &&
+      (host === 'linux' || host === 'wsl') &&
+      isVteBasedTerminal(term)) ||
+    printsUnknown
+  const emit = suppressOsc52
+    ? 'none(vte)'
+    : mux === 'tmux'
+      ? 'raw+dcs'
+      : mux === 'screen'
+        ? 'dcs'
+        : 'raw'
   logForDebugging(
-    `clipboard: setClipboard mux=${mux ?? 'none'} ssh=${ssh} native=${!ssh} predicted=${getClipboardPath()} emit=${emit} bytes=${text.length}`,
+    `clipboard: setClipboard mux=${mux ?? 'none'} ssh=${ssh} native=${nativeCopied} predicted=${getClipboardPath()} emit=${emit} bytes=${text.length}`,
   )
+  if (suppressOsc52) return ''
   if (mux === 'tmux') {
     const inner = `${ESC}]52;c;${b64}${BEL}`
     return inner + wrapForMultiplexer(inner)
@@ -518,38 +588,37 @@ async function copyWaylandClipboardAndPrimary(text: string): Promise<void> {
  * Fire-and-forget at call site; densable 2.1.224 #15: Linux dual-writes
  * CLIPBOARD then PRIMARY so Wayland selection paste works without race.
  */
-function copyNative(text: string): void {
+function copyNative(text: string): boolean {
   const opts = { input: text, useCwd: false, timeout: 2000 }
   // densable L3u: switch(Wt()) — not process.platform
   switch (getClipboardHostPlatform()) {
     case 'macos':
       void execFileNoThrow('pbcopy', [], opts)
-      return
+      return true
     case 'linux': {
-      if (linuxCopy === null) return
+      if (linuxCopy === null) return false
       if (typeof linuxCopy !== 'string') {
-        // densable: if(typeof kDe!=="string")Xws().then(()=>{if(typeof kDe==="string")L3u(e)})
         void probeLinuxClipboardTool().then(() => {
           if (typeof linuxCopy === 'string') copyNative(text)
         })
-        return
+        return false
       }
       if (linuxCopy === 'wl-copy') {
         void copyWaylandClipboardAndPrimary(text)
-        return
+        return true
       }
       if (linuxCopy === 'xclip') {
         // densable: dual fire clipboard + primary (xclip does not need await race fix)
         void execFileNoThrow('xclip', ['-selection', 'clipboard'], opts)
         void execFileNoThrow('xclip', ['-selection', 'primary'], opts)
-        return
+        return true
       }
       if (linuxCopy === 'xsel') {
         void execFileNoThrow('xsel', ['--clipboard', '--input'], opts)
         void execFileNoThrow('xsel', ['--primary', '--input'], opts)
-        return
+        return true
       }
-      return
+      return false
     }
     case 'wsl': {
       // densable L3u wsl: powershell.exe + O3u → Windows host clipboard
@@ -558,7 +627,7 @@ function copyNative(text: string): void {
         ['-NoProfile', '-NonInteractive', '-Command', POWERSHELL_SET_CLIPBOARD],
         opts,
       )
-      return
+      return true
     }
     case 'windows': {
       // densable L3u windows: powershell + O3u (SEA has no clip.exe)
@@ -567,9 +636,10 @@ function copyNative(text: string): void {
         ['-NoProfile', '-NonInteractive', '-Command', POWERSHELL_SET_CLIPBOARD],
         opts,
       )
-      return
+      return true
     }
   }
+  return false
 }
 
 /**
@@ -671,6 +741,7 @@ export const OSC = {
   RESET_CURSOR_COLOR: 112,
   SEMANTIC_PROMPT: 133,
   GHOSTTY: 777, // Ghostty notification protocol
+  PROGRAM_STATUS: 7501, // Program Status Protocol
   TAB_STATUS: 21337, // Tab status extension
 } as const
 
@@ -916,4 +987,69 @@ export function tabStatus(fields: TabStatusAction): string {
       `status-color=${fields.statusColor ? rgb(fields.statusColor) : ''}`,
     )
   return osc(OSC.TAB_STATUS, parts.join(';'))
+}
+
+// ============================================================================
+// Program Status Protocol (OSC 7501)
+// ============================================================================
+
+export type ProgramStatusState = 'working' | 'blocked' | 'done' | 'clear'
+
+export type ProgramStatusOptions = {
+  state: ProgramStatusState
+  id?: string
+  kind?: string
+  progress?: number
+  title?: string
+  msg?: string
+}
+
+const PROGRAM_STATUS_MSG_MAX = 2048
+const PROGRAM_STATUS_TITLE_MAX = 192
+const PROGRAM_STATUS_ID_MAX = 32
+
+export function sanitizeProgramStatusId(id: string): string | undefined {
+  const sanitized = id
+    .replace(/[^A-Za-z0-9_.+-]/g, '-')
+    .slice(0, PROGRAM_STATUS_ID_MAX)
+  return sanitized.length > 0 ? sanitized : undefined
+}
+
+function encodeProgramStatusField(text: string, maxLen: number): string {
+  const collapsed = text.replace(/\s+/g, ' ').slice(0, maxLen)
+  return Buffer.from(collapsed).toString('base64')
+}
+
+/** Emit an OSC 7501 Program Status Protocol sequence. */
+export function programStatus(options: ProgramStatusOptions): string {
+  const parts: string[] = [`state=${options.state}`, 'app=claude-code']
+  if (options.id !== undefined) parts.push(`id=${options.id}`)
+  if (options.state === 'blocked' && options.kind) {
+    parts.push(`kind=${options.kind}`)
+  }
+  if (
+    (options.state === 'working' || options.state === 'blocked') &&
+    options.progress !== undefined &&
+    Number.isFinite(options.progress)
+  ) {
+    const clamped = Math.min(100, Math.max(0, Math.round(options.progress)))
+    parts.push(`progress=${clamped}`)
+  }
+  if (options.title) {
+    parts.push(
+      `title=${encodeProgramStatusField(options.title, PROGRAM_STATUS_TITLE_MAX)}`,
+    )
+  }
+  if (options.msg) {
+    parts.push(
+      `msg=${encodeProgramStatusField(options.msg, PROGRAM_STATUS_MSG_MAX)}`,
+    )
+  }
+  return osc(OSC.PROGRAM_STATUS, parts.join(':'))
+}
+
+export const CLEAR_PROGRAM_STATUS = osc(OSC.PROGRAM_STATUS, 'state=clear')
+
+export function clearProgramStatusForId(id: string): string {
+  return osc(OSC.PROGRAM_STATUS, `state=clear:id=${id}`)
 }

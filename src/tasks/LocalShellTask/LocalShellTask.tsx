@@ -129,7 +129,7 @@ const PROMPT_PATTERNS = [
 ];
 
 export function looksLikePrompt(tail: string): boolean {
-  const lastLine = tail.trimEnd().split('\n').pop() ?? '';
+  const lastLine = tail.replace(/\r\n/g, '\n').trimEnd().split('\n').pop() ?? '';
   return PROMPT_PATTERNS.some(p => p.test(lastLine));
 }
 

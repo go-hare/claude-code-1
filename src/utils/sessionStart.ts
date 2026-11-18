@@ -12,11 +12,104 @@ import { withDiagnosticsTiming } from './diagLogs.js'
 import { isBareMode } from './envUtils.js'
 import { updateWatchPaths } from './hooks/fileChangedWatcher.js'
 import { shouldAllowManagedHooksOnly } from './hooks/hooksConfigSnapshot.js'
-import { executeSessionStartHooks, executeSetupHooks } from './hooks.js'
+import {
+  executeSessionStartHooks,
+  executeSetupHooks,
+  type PluginHookMatcherIdentity,
+  type SessionStartHookExecutionOptions,
+} from './hooks.js'
 import { logError } from './log.js'
 import { loadPluginHooks } from './plugins/loadPluginHooks.js'
 import { cacheSessionTitle, getCurrentSessionTitle } from './sessionStorage.js'
 import { sanitizeSessionTitle } from './sessionTitleSanitize.js'
+
+export type SessionStartCoverageState = {
+  pluginsCovered: Map<string, string>
+  pluginsSucceeded: Set<string>
+  hooksDispatched: number
+  hasDispatched: boolean
+}
+
+export function createSessionStartCoverageState(): SessionStartCoverageState {
+  return {
+    pluginsCovered: new Map(),
+    pluginsSucceeded: new Set(),
+    hooksDispatched: 0,
+    hasDispatched: false,
+  }
+}
+
+const sessionCoverageState = createSessionStartCoverageState()
+
+function foldPluginKey(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function isInlinePluginId(pluginId: string): boolean {
+  return !pluginId.includes('@') || pluginId.endsWith('@inline')
+}
+
+/**
+ * Gold `Wft` (#505) — compute which late-loaded plugins still owe a
+ * SessionStart run. Tracks covered plugins by folded `pluginId` (not just
+ * `pluginName`), and only allows a same-name stand-in when the prior entry is
+ * no longer active, has not succeeded, has not already stood in, and at least
+ * one side is an inline/unqualified plugin id.
+ */
+export function computeOwedSessionStartPlugins(
+  state: Pick<SessionStartCoverageState, 'pluginsCovered' | 'pluginsSucceeded'>,
+  matchers: readonly PluginHookMatcherIdentity[],
+  activePluginIds: ReadonlySet<string> = new Set(),
+): {
+  owed: PluginHookMatcherIdentity[]
+  stoodFor: Map<string, string>
+} {
+  const covered = Array.from(state.pluginsCovered, ([id, name]) => ({
+    id,
+    name: foldPluginKey(name),
+    folded: foldPluginKey(id),
+  }))
+  const coveredIds = new Set(covered.map(entry => entry.folded))
+  const succeededIds = new Set(
+    Array.from(state.pluginsSucceeded, foldPluginKey),
+  )
+  const activeFolded = new Set(Array.from(activePluginIds, foldPluginKey))
+  const owed: PluginHookMatcherIdentity[] = []
+  const stoodFor = new Map<string, string>()
+  const used = new Set<string>()
+
+  for (const matcher of matchers) {
+    const { pluginId } = matcher
+    const foldedId = foldPluginKey(pluginId)
+    if (coveredIds.has(foldedId) || stoodFor.has(foldedId)) {
+      continue
+    }
+    const foldedName = foldPluginKey(matcher.pluginName)
+    const standIn = covered.find(
+      entry =>
+        entry.name === foldedName &&
+        !activeFolded.has(entry.folded) &&
+        !succeededIds.has(entry.folded) &&
+        !used.has(entry.folded) &&
+        (isInlinePluginId(entry.id) || isInlinePluginId(pluginId)),
+    )
+    if (standIn === undefined) {
+      owed.push(matcher)
+      continue
+    }
+    stoodFor.set(foldedId, standIn.id)
+    used.add(standIn.folded)
+  }
+
+  return { owed, stoodFor }
+}
+
+export function resetSessionStartCoverageForTesting(): void {
+  sessionCoverageState.pluginsCovered.clear()
+  sessionCoverageState.pluginsSucceeded.clear()
+  sessionCoverageState.hooksDispatched = 0
+  sessionCoverageState.hasDispatched = false
+}
 
 type SessionStartHooksOptions = {
   sessionId?: string
@@ -24,6 +117,10 @@ type SessionStartHooksOptions = {
   model?: string
   forceSyncExecution?: boolean
   messages?: Message[]
+  signal?: AbortSignal
+  orphaned?: AbortSignal
+  newPluginsOnly?: SessionStartHookExecutionOptions['newPluginsOnly']
+  storageV5?: unknown
 }
 
 // Set by processSessionStartHooks when a hook emits initialUserMessage;
@@ -91,8 +188,15 @@ export async function processSessionStartHooks(
     model,
     forceSyncExecution,
     messages,
+    signal,
+    orphaned,
+    newPluginsOnly,
+    storageV5,
   }: SessionStartHooksOptions = {},
 ): Promise<HookResultMessage[]> {
+  if (orphaned?.aborted) {
+    return []
+  }
   // densable ipr — Unn awaits this latch unless the uuid is ahead of
   // session start. Compact is not a session (re)start.
   let sessionStart: { complete: () => void } | undefined
@@ -217,19 +321,51 @@ export async function processSessionStartHooks(
       }
     }
 
+    if (orphaned?.aborted) {
+      return []
+    }
+
     // Execute SessionStart hooks, ignoring blocking errors
     // Use the provided agentType or fall back to the one stored in bootstrap state
     const resolvedAgentType = agentType ?? getMainThreadAgentType()
+    sessionCoverageState.hasDispatched = true
     for await (const hookResult of executeSessionStartHooks(
       source,
       sessionId,
       resolvedAgentType,
       model,
-      undefined,
+      signal,
       undefined,
       forceSyncExecution,
       messages,
+      {
+        newPluginsOnly,
+        orphaned,
+        storageV5,
+        onMatched: (matchedPlugins, count) => {
+          sessionCoverageState.hooksDispatched += count
+          if (source === 'compact') return
+          const stoodFor = newPluginsOnly
+            ? []
+            : computeOwedSessionStartPlugins(
+                sessionCoverageState,
+                matchedPlugins,
+              ).stoodFor.values()
+          for (const id of stoodFor) {
+            sessionCoverageState.pluginsSucceeded.add(id)
+          }
+          for (const p of matchedPlugins) {
+            sessionCoverageState.pluginsCovered.set(
+              p.pluginId,
+              foldPluginKey(p.pluginName),
+            )
+          }
+        },
+      },
     )) {
+      if (signal?.aborted || orphaned?.aborted) {
+        return []
+      }
       if (hookResult.message) {
         hookMessages.push(hookResult.message)
       }
@@ -251,6 +387,10 @@ export async function processSessionStartHooks(
       if (hookResult.watchPaths && hookResult.watchPaths.length > 0) {
         allWatchPaths.push(...hookResult.watchPaths)
       }
+    }
+
+    if (signal?.aborted || orphaned?.aborted) {
+      return []
     }
 
     // Official 2.1.x: reload skills before applying title so skills installed

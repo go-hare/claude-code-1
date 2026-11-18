@@ -86,7 +86,10 @@ import { FILE_READ_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileReadTo
 import { FILE_WRITE_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileWriteTool/prompt.js'
 import { NOTEBOOK_EDIT_TOOL_NAME } from '@claude-code/builtin-tools/tools/NotebookEditTool/constants.js'
 import { POWERSHELL_TOOL_NAME } from '@claude-code/builtin-tools/tools/PowerShellTool/toolName.js'
+import { resolve as resolvePath } from 'path'
 import { parseGitCommitId } from '@claude-code/builtin-tools/tools/shared/gitOperationTracking.js'
+import { getCwd } from '../../utils/cwd.js'
+import { getHeadForDir } from '../../utils/git/gitFilesystem.js'
 import {
   isDeferredTool,
   SEARCH_EXTRA_TOOLS_TOOL_NAME,
@@ -2935,11 +2938,9 @@ async function dispatchToolCallCore(
   toolCallCapture?: ToolCallCoreCapture,
 ): Promise<MessageUpdateLazy[]> {
   if (!isInsideAgentSpawnLaunch() && hasMatchingFunctionHook('tool.call')) {
-    const rawCoerced =
-      (tool as { coerceInputBeforePluginHooks?: boolean })
-        .coerceInputBeforePluginHooks && tool.coerceInput
-        ? tool.coerceInput(input)?.input
-        : undefined
+    const rawCoerced = tool.coerceInput
+      ? tool.coerceInput(input)?.input
+      : undefined
     const baseInput = isPlainRecord(rawCoerced) ? rawCoerced : input
     const toolCallEnvelope = buildToolCallHookInput(
       tool.name,
@@ -3411,42 +3412,50 @@ async function dispatchCheckPermissionsAndCallTool(
     input,
     toolUseContext,
   )
-  if (drained.result.deny !== undefined) {
+  const earlyDenyReason =
+    drained.result.deny !== undefined
+      ? drained.result.deny
+      : didAccountMemoryHookRewriteInput(
+            tool,
+            input,
+            drained.result.updatedInput,
+          )
+        ? accountMemoryHookRewriteDenied(tool, 'PreToolUse', 'policySettings')
+            .message
+        : undefined
+  if (earlyDenyReason !== undefined) {
     const messages = buildToolCallDenyMessages(
       toolUseID,
-      drained.result.deny,
+      earlyDenyReason,
       assistantMessage.uuid,
     )
     // A managed refusal never reaches the core PreToolUse consumer.
-    // Preserve the stop signal on that early-return path as well.
-    for (const item of drained.yields as Array<{
-      preventContinuation?: boolean
-      stopReason?: string
-    }>) {
-      if (item.preventContinuation) {
-        messages.push({
-          message: createAttachmentMessage({
-            type: 'hook_stopped_continuation',
-            message: item.stopReason || 'Execution stopped by PreToolUse hook',
-            hookName: `PreToolUse:${tool.name}`,
-            toolUseID,
-            hookEvent: 'PreToolUse',
-          }),
-        })
-        break
-      }
+    // Preserve the stop signal on that early-return path as well (SEA lHs).
+    const stoppedYields = (
+      drained.yields as Array<{
+        preventContinuation?: boolean
+        stopReason?: string
+      }>
+    ).filter(item => item.preventContinuation === true)
+    if (
+      stoppedYields.length > 0 &&
+      !toolUseContext.abortController.signal.aborted
+    ) {
+      const lastStopReason = stoppedYields.findLast(
+        item => item.stopReason,
+      )?.stopReason
+      messages.push({
+        message: createAttachmentMessage({
+          type: 'hook_stopped_continuation',
+          message:
+            lastStopReason || earlyDenyReason || 'Execution stopped by hook',
+          hookName: `PreToolUse:${tool.name}`,
+          toolUseID,
+          hookEvent: 'PreToolUse',
+        }),
+      })
     }
     return messages
-  }
-  if (
-    didAccountMemoryHookRewriteInput(tool, input, drained.result.updatedInput)
-  ) {
-    return buildToolCallDenyMessages(
-      toolUseID,
-      accountMemoryHookRewriteDenied(tool, 'PreToolUse', 'policySettings')
-        .message,
-      assistantMessage.uuid,
-    )
   }
 
   const nextInput = (drained.result.updatedInput ?? input) as typeof input
@@ -5096,12 +5105,21 @@ async function checkPermissionsAndCallTool(
       (tool.name === BASH_TOOL_NAME || tool.name === POWERSHELL_TOOL_NAME) &&
       'command' in processedInput &&
       typeof processedInput.command === 'string' &&
-      processedInput.command.match(/\bgit\s+commit\b/) &&
+      isGitCommitCommand(processedInput.command) &&
       result.data &&
       typeof result.data === 'object' &&
       'stdout' in result.data
     ) {
-      const gitCommitId = parseGitCommitId(String(result.data.stdout))
+      const isBgOrInterrupted =
+        ('backgroundTaskId' in result.data &&
+          Boolean(result.data.backgroundTaskId)) ||
+        ('interrupted' in result.data && result.data.interrupted === true)
+      const gitCommitId = await resolveGitCommitIdForTelemetry(
+        processedInput.command,
+        String(result.data.stdout),
+        getCwd(),
+        isBgOrInterrupted,
+      )
       if (gitCommitId) {
         toolParameters.git_commit_id = gitCommitId
       }
@@ -5569,4 +5587,48 @@ async function checkPermissionsAndCallTool(
       toolUseContext.toolDecisions?.delete(toolUseID)
     }
   }
+}
+
+const GIT_COMMIT_COMMAND_RE =
+  /\bgit(?:\s+-[cC]\s+\S+|\s+--[^\s=]+=\S+)*\s+commit\b/
+const GIT_DASH_C_RE = /\bgit\s+(?:-\S+\s+)*-C\s+("([^"]+)"|'([^']+)'|(\S+))/
+
+/** Official `hZi` (2.1.296 #529) — matches `git commit` and `git -C <dir> commit`. */
+export function isGitCommitCommand(command: string): boolean {
+  return GIT_COMMIT_COMMAND_RE.test(command)
+}
+
+/** Resolve target git working directory when `-C <dir>` is passed. */
+export function resolveGitCommitCwd(
+  command: string,
+  baseCwd: string | null,
+): string | null {
+  const m = command.match(GIT_DASH_C_RE)
+  const dir = m?.[2] ?? m?.[3] ?? m?.[4]
+  if (!dir) return baseCwd
+  return baseCwd ? resolvePath(baseCwd, dir) : dir
+}
+
+/**
+ * Official `gZi` + `WEn` (2.1.296 #529) — parse `git_commit_id` from stdout,
+ * falling back to `getHeadForDir(targetCwd)` when `git commit -q` emits no stdout,
+ * and expanding short SHAs to full HEAD SHA when they prefix-match.
+ */
+export async function resolveGitCommitIdForTelemetry(
+  command: string,
+  stdout: string,
+  baseCwd: string | null,
+  isBackgroundOrInterrupted = false,
+  getHeadFn: (cwd: string) => Promise<string | null> = getHeadForDir,
+): Promise<string | undefined> {
+  const targetCwd = resolveGitCommitCwd(command, baseCwd)
+  const parsedSha = parseGitCommitId(stdout)
+  if (!parsedSha) {
+    if (isBackgroundOrInterrupted || !targetCwd) return undefined
+    const head = await getHeadFn(targetCwd).catch(() => null)
+    return head ?? undefined
+  }
+  if (!targetCwd) return parsedSha
+  const head = await getHeadFn(targetCwd).catch(() => null)
+  return head?.startsWith(parsedSha) ? head : parsedSha
 }

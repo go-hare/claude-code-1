@@ -162,6 +162,7 @@ export function buildReplConfigArgv(opts: {
   fallbackModel?: string
   allowDangerouslySkipPermissions?: boolean
   disableSlashCommands?: boolean
+  chrome?: boolean
   channels?: string | string[]
 }): string[] {
   const asList = (v: string | string[] | undefined): string[] => {
@@ -198,6 +199,9 @@ export function buildReplConfigArgv(opts: {
   }
   if (opts.disableSlashCommands) {
     out.push('--disable-slash-commands')
+  }
+  if (opts.chrome !== undefined) {
+    out.push(opts.chrome ? '--chrome' : '--no-chrome')
   }
   for (const ch of asList(opts.channels)) {
     out.push('--channels', ch)

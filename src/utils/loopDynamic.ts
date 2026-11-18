@@ -394,8 +394,32 @@ export function hasPendingLoopWakeups(): boolean {
   return getSessionCronTasks().some(t => t.kind === 'loop')
 }
 
-/** densable Vwo end reason — Esc/SIGINT = user_abort; SIGTERM/remote = remote_cancel. */
+/** densable `Vwo` end reason — Esc/SIGINT = user_abort; SIGTERM/remote = remote_cancel. */
 export type LoopWakeupCancelReason = 'user_abort' | 'remote_cancel'
+
+/** Official 2.1.295 (#382) `CKe` / `xGt` — notification on Esc wakeup cancel. */
+export const LOOP_WAKEUP_CANCELLED_NOTIFICATION_KEY = 'loop-wakeup-cancelled'
+export const LOOP_WAKEUP_CANCELLED_NOTIFICATION_TEXT =
+  'Pending wakeup cancelled'
+
+export type LoopWakeupsCancelledEvent = {
+  reason: LoopWakeupCancelReason
+  loopsCancelled: number
+}
+
+const loopWakeupsCancelledListeners = new Set<
+  (event: LoopWakeupsCancelledEvent) => void
+>()
+
+/** Official 2.1.295 (#382) `CDn.subscribe` — notify REPL/transcript when loop wakeups cancel. */
+export function subscribeLoopWakeupsCancelled(
+  listener: (event: LoopWakeupsCancelledEvent) => void,
+): () => void {
+  loopWakeupsCancelledListeners.add(listener)
+  return () => {
+    loopWakeupsCancelledListeners.delete(listener)
+  }
+}
 
 /**
  * densable `Vwo` — user/remote abort cancels pending loop wakeups + in-flight tick chain.
@@ -420,6 +444,13 @@ export function cancelLoopWakeupsOnUserAbort(
   )
   markLoopEnded(reason, { loops_cancelled: pending.length })
   logEvent('loop_cancel_all' as never, { reason } as never)
+  for (const listener of loopWakeupsCancelledListeners) {
+    try {
+      listener({ reason, loopsCancelled: pending.length })
+    } catch {
+      // ignore listener errors
+    }
+  }
   return pending.length
 }
 

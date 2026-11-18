@@ -141,7 +141,7 @@ export function createChromeContext(
           `Docs: ${EXTENSION_DOWNLOAD_URL}`,
         ].join(' ')
       }
-      return `Browser extension is not connected. Please ensure the Claude browser extension is installed and running (${EXTENSION_DOWNLOAD_URL}), and that you are logged into claude.ai with the same account as Claude Code. If this is your first time connecting to Chrome, you may need to restart Chrome for the installation to take effect. If you continue to experience issues, please report a bug: ${BUG_REPORT_URL}`
+      return `Browser extension is not connected. Please ensure the Claude browser extension is installed and running (${EXTENSION_DOWNLOAD_URL}), and that you are logged into claude.ai with the same account as Claude Code. If this is your first time connecting to Chrome, you may need to restart Chrome for the installation to take effect. If the user belongs to more than one organization, the extension must also be signed in to the same organization as this conversation. To change the extension's organization, the user logs out in the extension's settings, then logs in and selects this conversation's organization. Logging out erases the shortcuts and scheduled tasks saved in the extension, so suggest it only if the other checks did not help and the user is in more than one organization, and tell the user about that loss first. If you continue to experience issues, please report a bug: ${BUG_REPORT_URL}`
     },
     onExtensionPaired: (deviceId: string, name: string) => {
       saveGlobalConfig(config => {

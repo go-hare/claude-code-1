@@ -89,6 +89,7 @@ export { recursivelySanitizeUnicode } from './sanitization.js'
 export {
   DEFAULT_CONNECTION_TIMEOUT_MS,
   MAX_MCP_DESCRIPTION_LENGTH,
+  MAX_LOADED_MCP_DESCRIPTION_LENGTH,
   MAX_ERRORS_BEFORE_RECONNECT,
   createMcpClient,
   withConnectionTimeout,

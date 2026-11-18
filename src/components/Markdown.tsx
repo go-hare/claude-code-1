@@ -8,12 +8,11 @@ import { type CliHighlight, peekCliHighlight } from '../utils/cliHighlight.js';
 import { logForDebugging } from '../utils/debug.js';
 import { hashContent } from '../utils/hash.js';
 import { logError } from '../utils/log.js';
-import { configureMarked, endsWithBlankLine, formatToken, shouldUseInkListLayout } from '../utils/markdown.js';
+import { configureMarked, endsWithBlankLine, formatToken, stripRawOsc8Sequences } from '../utils/markdown.js';
 import { stripPromptXMLTags } from '../utils/messages.js';
 import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 import { countCharInString } from '../utils/stringUtils.js';
 import type { ThemeName } from '../utils/theme.js';
-import { MarkdownList } from './MarkdownList.js';
 import { MarkdownTable } from './MarkdownTable.js';
 
 type Props = {
@@ -44,6 +43,10 @@ type Props = {
    * Markdown without polluting the immutable history token cache.
    */
   skipTokenCache?: boolean;
+  /**
+   * Official 2.1.296 (#537): bypass the module-level syntax-highlight cache.
+   */
+  skipHighlightCache?: boolean;
   /**
    * densable Sh tailWrap — Text wrap mode for the last non-table flush
    * (e.g. wrap-stream for incomplete streaming line).
@@ -76,6 +79,61 @@ type Props = {
 // immutable in history; same content → same tokens. Keyed by hash to avoid
 // retaining full content strings (turn50→turn99 RSS regression, #24180).
 const tokenCache = new LRUCache<string, Token[]>({ max: 500 });
+
+// Official 2.1.296 (#537): module-level syntax-highlighted code cache so ctrl+o
+// transcript toggles don't re-run cliHighlight on every code block.
+const highlightCache = new LRUCache<string, { variant: string; code: string; highlighted: string; cost: number }>({
+  max: 500,
+});
+
+// Official 2.1.295 (#398): cap per-message highlight work and window huge
+// markdown inputs (> 1000 lines) so tens of thousands of lines don't freeze
+// the event loop or block Ctrl+C.
+const HIGHLIGHT_WORK_BUDGET = 1_600_000;
+const SYNTAX_HIGHLIGHT_CAP_NOTICE =
+  'Syntax highlighting stops here. This message has more code than is highlighted at once.';
+const WINDOW_LINE_LIMIT = 1000;
+
+export function wrapHighlightWithCacheAndBudget(
+  rawHighlight: CliHighlight | null,
+  theme: ThemeName,
+  skipHighlightCache = false,
+): CliHighlight | null {
+  if (rawHighlight === null) return null;
+  let budgetLeft = HIGHLIGHT_WORK_BUDGET;
+  let capNotified = false;
+  return {
+    supportsLanguage: rawHighlight.supportsLanguage,
+    highlight(code, options) {
+      const lang = options?.language ?? 'plaintext';
+      const variant = `${lang}\x00${theme}`;
+      const cacheKey = skipHighlightCache ? '' : `${code.length}:${hashContent(`${variant}\x00${code}`)}`;
+      if (!skipHighlightCache) {
+        const hit = highlightCache.get(cacheKey);
+        if (hit !== undefined && hit.code === code && hit.variant === variant) {
+          budgetLeft -= hit.cost;
+          return hit.highlighted;
+        }
+      }
+      if (budgetLeft <= 0) {
+        const out = !capNotified && chalk.level > 0 ? `${chalk.dim(SYNTAX_HIGHLIGHT_CAP_NOTICE)}\n${code}` : code;
+        capNotified = true;
+        return out;
+      }
+      const cost = Math.max(1, code.length);
+      budgetLeft -= cost;
+      const highlighted = rawHighlight.highlight(code, options);
+      if (!skipHighlightCache) {
+        highlightCache.set(cacheKey, { variant, code, highlighted, cost });
+      }
+      return highlighted;
+    },
+  };
+}
+
+export function _clearHighlightCacheForTest(): void {
+  highlightCache.clear();
+}
 
 // densable 2.1.289 an: CRLF blank lines, `N)` / `+` lists, setext `=`.
 const MD_SYNTAX_RE =
@@ -185,8 +243,55 @@ function plainParagraphTokens(content: string): Token[] {
   ];
 }
 
+function splitMarkdownWindows(content: string): string[] | null {
+  const normalized = content.replace(/\r\n?/g, '\n');
+  const lines = normalized.split('\n');
+  if (lines.length <= WINDOW_LINE_LIMIT) return null;
+
+  const windows: string[] = [];
+  let start = 0;
+  let inFence = false;
+  let fenceChar = '';
+  let lastSafeBreak = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const fenceMatch = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+    if (fenceMatch) {
+      const ch = fenceMatch[1]![0]!;
+      if (!inFence) {
+        inFence = true;
+        fenceChar = ch;
+      } else if (ch === fenceChar) {
+        inFence = false;
+        fenceChar = '';
+      }
+    } else if (!inFence && line.trim() === '') {
+      lastSafeBreak = i + 1;
+    }
+
+    if (i - start >= WINDOW_LINE_LIMIT && lastSafeBreak > start) {
+      windows.push(lines.slice(start, lastSafeBreak).join('\n'));
+      start = lastSafeBreak;
+      lastSafeBreak = -1;
+    }
+  }
+  if (start < lines.length) {
+    windows.push(lines.slice(start).join('\n'));
+  }
+  return windows.length > 1 ? windows : null;
+}
+
 function safeLex(lexer: Marked | typeof marked, content: string): Token[] {
   try {
+    const windows = splitMarkdownWindows(content);
+    if (windows) {
+      const tokens: Token[] = [];
+      for (const win of windows) {
+        tokens.push(...lexer.lexer(win));
+      }
+      return tokens;
+    }
     return lexer.lexer(content);
   } catch (err) {
     if (err instanceof RangeError) {
@@ -333,11 +438,17 @@ function MarkdownBlockquote({
  */
 export function Markdown(props: Props): React.ReactNode {
   const settings = useSettings();
+  const [theme] = useTheme();
   // gold oa: gN() is a sync snapshot (null until loaded). Do not Suspense —
   // fallback→highlight remount DualInk leftoverGs-clears the spinner row
   // on the first streaming token. Do not subscribe — gold oa does not
   // re-render markdown when gN later lands.
-  const highlight = settings.syntaxHighlightingDisabled ? null : peekCliHighlight();
+  const rawHighlight = settings.syntaxHighlightingDisabled ? null : peekCliHighlight();
+  const skipHighlightCache = props.skipHighlightCache ?? false;
+  const highlight = useMemo(
+    () => wrapHighlightWithCacheAndBudget(rawHighlight, theme, skipHighlightCache),
+    [rawHighlight, theme, skipHighlightCache],
+  );
   return <MarkdownBody {...props} highlight={highlight} />;
 }
 
@@ -366,7 +477,8 @@ function MarkdownBody({
   const isScreenReader = isScreenReaderModeEnabled();
 
   const elements = useMemo(() => {
-    const source = shouldStrip ? stripPromptXMLTags(children) : children;
+    const rawSource = shouldStrip ? stripPromptXMLTags(children) : children;
+    const source = stripRawOsc8Sequences(rawSource);
     const tokens = lexMarkdown(source, skipTokenCache !== true, promptMode);
     const elements: React.ReactNode[] = [];
     let nonTableContent = '';
@@ -435,25 +547,13 @@ function MarkdownBody({
       pushBlock(node, marginTop, kind);
     }
 
-    // densable Or: `U = !F && !u && Pr(M)` — disable Ink list layout in screen-reader or promptMode.
-    const useInkLists = !isScreenReader && !promptMode && shouldUseInkListLayout(tokens);
+    // Official 2.1.292 (#253): render lists via pure-string formatToken path
+    // instead of Ink MarkdownList flex layout so long lists stream, resize,
+    // and re-open in the transcript much faster.
     const lastNonSpaceIndex = tokens.findLastIndex(t => t.type !== 'space');
-
     for (const [index, token] of tokens.entries()) {
       if (token.type === 'table') {
         pushStructuredBlock(<MarkdownTable token={token as Tokens.Table} highlight={highlight} />, 'block');
-      } else if (token.type === 'list' && useInkLists) {
-        pushStructuredBlock(
-          <MarkdownList
-            token={token as Tokens.List}
-            highlight={highlight}
-            dimColor={dimColor}
-            italic={italic}
-            tailWrap={index === lastNonSpaceIndex ? tailWrap : undefined}
-            maxProseWidth={maxProseWidth}
-          />,
-          'list',
-        );
       } else if (token.type === 'blockquote') {
         pushStructuredBlock(
           <MarkdownBlockquote

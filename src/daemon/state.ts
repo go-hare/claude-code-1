@@ -155,3 +155,22 @@ export async function stopDaemonByPid(
   removeDaemonState(name)
   return true
 }
+
+/**
+ * Official 2.1.295 (#384): track process-level stop signals (SIGTERM/SIGHUP/SIGINT)
+ * so `claude agents` exiting alongside a stopping daemon never spawns or
+ * respawns a new background service on teardown.
+ */
+let daemonShutdownSignaled = false
+
+export function markDaemonShutdownSignaled(): void {
+  daemonShutdownSignaled = true
+}
+
+export function isDaemonShutdownSignaled(): boolean {
+  return daemonShutdownSignaled
+}
+
+export function resetDaemonShutdownSignaled(): void {
+  daemonShutdownSignaled = false
+}

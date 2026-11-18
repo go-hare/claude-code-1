@@ -23,7 +23,7 @@
 import type { TerminalResponse } from './parse-keypress.js'
 import { ESC, ESC_TYPE } from './termio/ansi.js'
 import { csi } from './termio/csi.js'
-import { osc } from './termio/osc.js'
+import { OSC, osc } from './termio/osc.js'
 
 /** A terminal query: an outbound request sequence paired with a matcher
  *  that recognizes the expected inbound response. Built by `decrqm()`,
@@ -115,6 +115,17 @@ export function xtversion(): TerminalQuery<XtversionResponse> {
   return {
     request: csi('>0q'),
     match: (r): r is XtversionResponse => r.type === 'xtversion',
+  }
+}
+
+/** Program Status Protocol query (OSC 7501 ; ?). */
+export function programStatusQuery(): TerminalQuery<OscResponse> {
+  return {
+    request: osc(OSC.PROGRAM_STATUS, '?'),
+    match: (r): r is OscResponse =>
+      r.type === 'osc' &&
+      r.code === OSC.PROGRAM_STATUS &&
+      r.data.startsWith('?'),
   }
 }
 

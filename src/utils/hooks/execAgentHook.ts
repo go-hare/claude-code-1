@@ -18,15 +18,17 @@ import { createAbortController } from '../abortController.js'
 import { createAttachmentMessage } from '../attachments.js'
 import { createCombinedAbortSignal } from '../combinedAbortSignal.js'
 import { logForDebugging } from '../debug.js'
+import { DEFAULT_SESSION_EFFORT } from '../effort.js'
 import { errorMessage } from '../errors.js'
 import type { HookResult } from '../hooks.js'
 import { createUserMessage, handleMessageFromStream } from '../messages.js'
-import { getSmallFastModel } from '../model/model.js'
+import { getCanonicalName, getSmallFastModel } from '../model/model.js'
 import { hasPermissionsToUseTool } from '../permissions/permissions.js'
 import { getAgentTranscriptPath, getTranscriptPath } from '../sessionPaths.js'
 import type { AgentHook } from '../settings/types.js'
 import { jsonStringify } from '../slowOperations.js'
 import { asSystemPrompt } from '../systemPromptType.js'
+import { HOOK_EVALUATOR_OK_GUIDANCE } from './execPromptHook.js'
 import {
   addArgumentsToPrompt,
   createStructuredOutputTool,
@@ -135,12 +137,19 @@ export async function execAgentHook(
 Use the available tools to inspect the codebase and verify the condition.
 Use as few steps as possible - be efficient and direct.
 
-When done, return your result using the ${SYNTHETIC_OUTPUT_TOOL_NAME} tool with:
-- ok: true if the condition is met
-- ok: false with reason if the condition is not met`,
+When done, return your result using the ${SYNTHETIC_OUTPUT_TOOL_NAME} tool, always with a reason.
+
+${HOOK_EVALUATOR_OK_GUIDANCE}`,
       ])
 
       const model = hook.model ?? getSmallFastModel()
+      const parentModel = toolUseContext.options.mainLoopModel
+      // #485 SEA kmn/kNo: When the hook runs on a different model (e.g. Haiku)
+      // than the parent turn (e.g. Opus at xhigh/max effort), do not inherit the
+      // parent's effort layer or level-tagged sessionEffort.
+      const sameModel =
+        parentModel !== undefined &&
+        getCanonicalName(model) === getCanonicalName(parentModel)
       const MAX_AGENT_TURNS = 50
 
       // Create a modified toolUseContext for the agent
@@ -148,6 +157,9 @@ When done, return your result using the ${SYNTHETIC_OUTPUT_TOOL_NAME} tool with:
         ...toolUseContext,
         agentId: hookAgentId,
         abortController: hookAbortController,
+        permissionLayers: (toolUseContext.permissionLayers ?? [])
+          .filter(layer => sameModel || layer.kind !== 'effort')
+          .concat({ kind: 'model', mainLoopModel: model }),
         options: {
           ...toolUseContext.options,
           tools,
@@ -157,7 +169,11 @@ When done, return your result using the ${SYNTHETIC_OUTPUT_TOOL_NAME} tool with:
         },
         setInProgressToolUseIDs: () => {},
         getAppState() {
-          const appState = toolUseContext.getAppState()
+          const rawAppState = toolUseContext.getAppState()
+          const appState =
+            !sameModel && rawAppState.sessionEffort?.kind === 'level'
+              ? { ...rawAppState, sessionEffort: DEFAULT_SESSION_EFFORT }
+              : rawAppState
           // Add session rule to allow reading transcript file
           const existingSessionRules =
             appState.toolPermissionContext.alwaysAllowRules.session ?? []

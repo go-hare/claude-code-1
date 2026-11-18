@@ -35,6 +35,7 @@ import {
   filterUnresolvedToolUses,
   filterWhitespaceOnlyAssistantMessages,
   isMetaVisibleOrigin,
+  rewriteResumedSubagentShutdownToolResults,
   wrapResumePromptOrigin,
 } from 'src/utils/messages.js'
 import { getAgentModel } from 'src/utils/model/agent.js'
@@ -516,6 +517,10 @@ async function resumeAgentBackgroundAfterClaim({
       'src/utils/orphanAgentResume.js'
     )
     rawForResume = stripInterruptedTrailingTurns(rawForResume)
+  } else {
+    rawForResume = rewriteResumedSubagentShutdownToolResults(
+      rawForResume as never,
+    ) as typeof rawForResume
   }
   const resumedMessages = filterWhitespaceOnlyAssistantMessages(
     filterOrphanedThinkingOnlyMessages(

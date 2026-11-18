@@ -8,6 +8,7 @@ import {
   CLAUDE_3_5_V2_SONNET_CONFIG,
   CLAUDE_3_7_SONNET_CONFIG,
   CLAUDE_HAIKU_4_5_CONFIG,
+  CLAUDE_HAIKU_5_5_CONFIG,
   CLAUDE_OPUS_4_1_CONFIG,
   CLAUDE_OPUS_4_5_CONFIG,
   CLAUDE_OPUS_4_6_CONFIG,
@@ -20,6 +21,7 @@ import {
   CLAUDE_SONNET_4_6_CONFIG,
   CLAUDE_SONNET_4_CONFIG,
   CLAUDE_SONNET_5_CONFIG,
+  CLAUDE_SONNET_5_5_CONFIG,
 } from './model/configs.js'
 import {
   expandTigModelCosts,
@@ -62,6 +64,16 @@ export type ModelCosts = {
   promptCacheWrite1hTokens?: number
   promptCacheReadTokens: number
   webSearchRequests: number
+  /** Official 2.1.293 #285: long-prompt tier (e.g. Haiku 5.5 > 100K tokens). */
+  longPrompt?: {
+    abovePromptTokens: number
+    inputTokens: number
+    outputTokens: number
+    promptCacheWriteTokens: number
+    promptCacheWrite1hTokens?: number
+    promptCacheReadTokens: number
+    webSearchRequests: number
+  }
 }
 
 /**
@@ -94,6 +106,18 @@ export const COST_TIER_2_10 = {
   webSearchRequests: 0.01,
 } as const satisfies ModelCosts
 
+/**
+ * Official 2.1.296 #544 `tier_2_10_cache_read_0_10` — Sonnet 5.5 cache read at $0.10/Mtok.
+ */
+export const COST_TIER_2_10_CACHE_READ_0_10 = {
+  inputTokens: 2,
+  outputTokens: 10,
+  promptCacheWriteTokens: 2.5,
+  promptCacheWrite1hTokens: 4,
+  promptCacheReadTokens: 0.1,
+  webSearchRequests: 0.01,
+} as const satisfies ModelCosts
+
 /** densable tier_3_15 — Sonnet 3.5/3.7/4/4.5/4.6 list */
 export const COST_TIER_3_15 = requireTier('tier_3_15')
 /** densable tier_15_75 — Opus 4 / 4.1 list */
@@ -106,6 +130,24 @@ export const COST_TIER_10_50 = requireTier('tier_10_50')
 export const COST_HAIKU_35 = requireTier('haiku_35')
 /** densable haiku_45 */
 export const COST_HAIKU_45 = requireTier('haiku_45')
+/** Official 2.1.293 #285 `haiku_55` ($0.10/$0.50; >100K: $0.50/$2.50) */
+export const COST_HAIKU_55: ModelCosts = {
+  inputTokens: 0.1,
+  outputTokens: 0.5,
+  promptCacheWriteTokens: 0.125,
+  promptCacheWrite1hTokens: 0.2,
+  promptCacheReadTokens: 0.01,
+  webSearchRequests: 0.01,
+  longPrompt: {
+    abovePromptTokens: 100_000,
+    inputTokens: 0.5,
+    outputTokens: 2.5,
+    promptCacheWriteTokens: 0.625,
+    promptCacheWrite1hTokens: 1,
+    promptCacheReadTokens: 0.05,
+    webSearchRequests: 0.01,
+  },
+}
 
 /**
  * densable LIc — NOT in catalog pricing_tiers; runtime hardcode for GHt fallthrough
@@ -193,6 +235,8 @@ export const MODEL_COSTS: Record<ModelShortName, ModelCosts> = {
     COST_HAIKU_35,
   [firstPartyNameToCanonical(CLAUDE_HAIKU_4_5_CONFIG.firstParty)]:
     COST_HAIKU_45,
+  [firstPartyNameToCanonical(CLAUDE_HAIKU_5_5_CONFIG.firstParty)]:
+    COST_HAIKU_55,
   // densable: sonnet 3.5/3.7/4/4.5/4.6 → "tier_3_15"
   [firstPartyNameToCanonical(CLAUDE_3_5_V2_SONNET_CONFIG.firstParty)]:
     COST_TIER_3_15,
@@ -207,6 +251,9 @@ export const MODEL_COSTS: Record<ModelShortName, ModelCosts> = {
   // densable 2.1.243 #52: sonnet-5 list = tier_2_10 ($2/$10 standard, not promo).
   [firstPartyNameToCanonical(CLAUDE_SONNET_5_CONFIG.firstParty)]:
     COST_TIER_2_10,
+  // Official 2.1.296 #544: sonnet-5-5 = tier_2_10_cache_read_0_10 ($0.10/Mtok cache read).
+  [firstPartyNameToCanonical(CLAUDE_SONNET_5_5_CONFIG.firstParty)]:
+    COST_TIER_2_10_CACHE_READ_0_10,
   // densable: opus-4-0 / 4-1 → "tier_15_75"
   [firstPartyNameToCanonical(CLAUDE_OPUS_4_CONFIG.firstParty)]: COST_TIER_15_75,
   [firstPartyNameToCanonical(CLAUDE_OPUS_4_1_CONFIG.firstParty)]:
@@ -257,20 +304,39 @@ function usOnlyInferenceMultiplier(usage: Usage): number {
   return usage.inference_geo === 'us' ? US_ONLY_INFERENCE_PREMIUM : 1
 }
 
+/** Official i$(e, n) — switch to longPrompt tier when total prompt tokens exceed abovePromptTokens. */
+function resolveLongPromptCosts(
+  modelCosts: ModelCosts,
+  usage: Usage,
+): ModelCosts {
+  const longPrompt = modelCosts.longPrompt
+  if (longPrompt === undefined) {
+    return modelCosts
+  }
+  const totalPromptTokens =
+    usage.input_tokens +
+    (usage.cache_read_input_tokens ?? 0) +
+    (usage.cache_creation_input_tokens ?? 0)
+  return totalPromptTokens > longPrompt.abovePromptTokens
+    ? longPrompt
+    : modelCosts
+}
+
 /**
  * densable ima(e,t) — token USD * tWb(usage) + web search.
  * Web search is not multiplied (official `r*tWb(t)+n`).
  */
 function tokensToUSDCost(modelCosts: ModelCosts, usage: Usage): number {
+  const effective = resolveLongPromptCosts(modelCosts, usage)
   const tokenCost =
-    (usage.input_tokens / 1_000_000) * modelCosts.inputTokens +
-    (usage.output_tokens / 1_000_000) * modelCosts.outputTokens +
+    (usage.input_tokens / 1_000_000) * effective.inputTokens +
+    (usage.output_tokens / 1_000_000) * effective.outputTokens +
     ((usage.cache_read_input_tokens ?? 0) / 1_000_000) *
-      modelCosts.promptCacheReadTokens +
-    cacheCreationUSDCost(modelCosts, usage)
+      effective.promptCacheReadTokens +
+    cacheCreationUSDCost(effective, usage)
   const webSearch =
     (usage.server_tool_use?.web_search_requests ?? 0) *
-    modelCosts.webSearchRequests
+    effective.webSearchRequests
   return tokenCost * usOnlyInferenceMultiplier(usage) + webSearch
 }
 

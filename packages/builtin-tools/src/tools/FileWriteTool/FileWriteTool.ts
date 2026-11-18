@@ -165,6 +165,85 @@ function isExistingDirectoryOrFifo(fileStat: {
 export type Output = z.infer<OutputSchema>
 export type FileWriteToolInput = InputSchema
 
+const WRITE_ALT_CONTENT_KEYS = ['file_text', 'file_content'] as const
+const WRITE_REPEATED_ALIASES: Record<
+  'file_path' | 'content',
+  readonly string[]
+> = {
+  file_path: ['path', 'file'],
+  content: [...WRITE_ALT_CONTENT_KEYS, 'new_text', 'body', 'text', 'contents'],
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * SEA `Qgo` — repair common Write parameter aliases and ignore stray parameters.
+ */
+export function coerceWriteInputRaw(input: unknown): {
+  input: Record<string, unknown>
+  shapeClass: string
+  resultNote: string
+} | null {
+  if (!isPlainRecord(input)) return null
+  const next: Record<string, unknown> = { ...input }
+  const shapeClasses: string[] = []
+  const notes: string[] = []
+
+  if (!Object.hasOwn(next, 'file_path') && typeof next.path === 'string') {
+    next.file_path = next.path
+    delete next.path
+    shapeClasses.push('path')
+    notes.push('`path` was read as `file_path`.')
+  }
+
+  const presentAltContent = WRITE_ALT_CONTENT_KEYS.filter(k =>
+    Object.hasOwn(next, k),
+  )
+  const [altKey] = presentAltContent
+  if (
+    altKey !== undefined &&
+    presentAltContent.length === 1 &&
+    !Object.hasOwn(next, 'content') &&
+    typeof next[altKey] === 'string'
+  ) {
+    next.content = next[altKey]
+    delete next[altKey]
+    shapeClasses.push(altKey)
+    notes.push(`\`${altKey}\` was read as \`content\`.`)
+  }
+
+  if (Object.hasOwn(next, 'description')) {
+    delete next.description
+    shapeClasses.push('drop_description')
+    notes.push('`description` was ignored.')
+  }
+
+  if (next.command === 'create') {
+    delete next.command
+    shapeClasses.push('drop_command_create')
+    notes.push('`command` was ignored.')
+  }
+
+  for (const field of ['file_path', 'content'] as const) {
+    for (const alias of WRITE_REPEATED_ALIASES[field]) {
+      if (typeof next[field] === 'string' && next[alias] === next[field]) {
+        delete next[alias]
+        shapeClasses.push(`repeated_${alias}`)
+        notes.push(`\`${alias}\` repeated \`${field}\` and was ignored.`)
+      }
+    }
+  }
+
+  if (shapeClasses.length === 0) return null
+  return {
+    input: next,
+    shapeClass: shapeClasses.join(','),
+    resultNote: `Note: ${FILE_WRITE_TOOL_NAME}'s parameters are named \`file_path\` and \`content\`. ${notes.join(' ')}`,
+  }
+}
+
 export const FileWriteTool = buildTool({
   name: FILE_WRITE_TOOL_NAME,
   searchHint: 'create or overwrite files',
@@ -192,6 +271,12 @@ export const FileWriteTool = buildTool({
   isResultTruncated,
   get inputSchema(): InputSchema {
     return inputSchema()
+  },
+  coerceInput(input) {
+    const coerced = coerceWriteInputRaw(input)
+    if (coerced === null) return null
+    const parsed = inputSchema().safeParse(coerced.input)
+    return parsed.success ? { ...coerced, input: parsed.data } : null
   },
   get outputSchema(): OutputSchema {
     return outputSchema()

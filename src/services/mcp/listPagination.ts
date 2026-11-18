@@ -26,7 +26,11 @@ import { logMCPError } from '../../utils/log.js'
 import { sleep } from '../../utils/sleep.js'
 import { getMcpTimeoutMs } from './mcpConnectTimeout.js'
 
-type McpListPaginatedOutcome = 'complete' | 'capped' | 'error'
+type McpListPaginatedOutcome =
+  | 'complete'
+  | 'capped'
+  | 'repeated_cursor'
+  | 'error'
 
 /**
  * Gold `fo(e,r,n,s)` — `{method, pageCount, itemCount, outcome}`.
@@ -109,18 +113,22 @@ export async function listAllWithCursorPagination<T>(
 ): Promise<T[]> {
   const maxPages = opts?.maxPages ?? MCP_LIST_MAX_PAGES
   const all: T[] = []
+  const seenCursors = new Set<string>()
   let cursor: string | undefined
   for (let page = 0; page < maxPages; page++) {
     const result = await fetchPage(cursor)
     if (result.items.length > 0) {
       all.push(...result.items)
     }
+    if (cursor) {
+      seenCursors.add(cursor)
+    }
     const next = result.nextCursor
     if (typeof next !== 'string' || next.length === 0) {
       break
     }
-    // Guard against servers that re-emit the same cursor.
-    if (next === cursor) {
+    // Guard against servers that re-emit any previously seen cursor.
+    if (seenCursors.has(next)) {
       break
     }
     // Last allowed page still has a cursor → capped.
@@ -217,9 +225,10 @@ export async function listMcpCursorPages<T>(
   let loggedError = false
   for (let attempt = 0; ; attempt++) {
     const items: T[] = []
+    const seenCursors = new Set<string>()
     let cursor: string | undefined
     let pages = 0
-    let capped = false
+    let outcome: 'complete' | 'capped' | 'repeated_cursor' | undefined
     try {
       do {
         const page = await client.request(
@@ -229,16 +238,29 @@ export async function listMcpCursorPages<T>(
         pages++
         const chunk = pick(page)
         if (chunk) items.push(...chunk)
+        if (cursor) {
+          seenCursors.add(cursor)
+        }
         cursor =
           typeof page.nextCursor === 'string' && page.nextCursor.length > 0
             ? page.nextCursor
             : undefined
+        if (cursor && seenCursors.has(cursor)) {
+          outcome = 'repeated_cursor'
+          break
+        }
         if (cursor && pages >= MCP_LIST_MAX_PAGES) {
-          capped = true
+          outcome = 'capped'
           break
         }
       } while (cursor)
-      if (capped) {
+      if (outcome === 'repeated_cursor') {
+        logMCPError(
+          serverName,
+          `${method} returned a nextCursor already sent in this walk (page ${pages}); stopping`,
+        )
+      }
+      if (outcome === 'capped') {
         logMCPError(
           serverName,
           `${method} still returning nextCursor after ${MCP_LIST_MAX_PAGES} pages; stopping`,
@@ -246,12 +268,7 @@ export async function listMcpCursorPages<T>(
       }
       // Gold `fo`: emit when more than one page was walked.
       if (pages > 1) {
-        emitMcpListPaginated(
-          method,
-          pages,
-          items.length,
-          capped ? 'capped' : 'complete',
-        )
+        emitMcpListPaginated(method, pages, items.length, outcome ?? 'complete')
       }
       return items
     } catch (error) {

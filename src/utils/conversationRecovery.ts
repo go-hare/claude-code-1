@@ -48,6 +48,7 @@ import { copyPlanForResume } from './plans.js'
 import { scanDeferredToolUseFromTranscriptTail } from './queryHelpers.js'
 import { getResumePrompt } from './resumeReturn.js'
 import { processSessionStartHooks } from './sessionStart.js'
+import type { HookResultMessage } from '../types/message.js'
 import {
   buildConversationChain,
   checkResumeConsistency,
@@ -464,7 +465,7 @@ type InternalInterruptionState =
  * message — they are bookkeeping artifacts that should not mask a genuine
  * interruption. Attachments are kept as part of the turn.
  */
-function detectTurnInterruption(
+export function detectTurnInterruption(
   messages: NormalizedMessage[],
 ): InternalInterruptionState {
   if (messages.length === 0) {
@@ -509,7 +510,10 @@ function detectTurnInterruption(
       // brief-mode session as interrupted mid-turn and injects a phantom
       // "Continue from where you left off." before the user's real next
       // prompt. Look back one step for the originating tool_use.
-      if (isTerminalToolResult(lastMessage, messages, lastMessageIdx)) {
+      if (
+        isTerminalToolResult(lastMessage, messages, lastMessageIdx) ||
+        isMcpEndTurnToolResult(lastMessage)
+      ) {
         return { kind: 'none' }
       }
       return { kind: 'interrupted_turn' }
@@ -576,6 +580,32 @@ function isTerminalToolResult(
     }
   }
   return false
+}
+
+/**
+ * densable `hnt` / `Oxn` — true when an MCP tool_result (via
+ * `mcpMeta._meta['claude/endTurn']`, `toolEndsTurn`, or `toolDenialEndsTurn`)
+ * legitimately ended the turn so CLAUDE_CODE_RESUME_INTERRUPTED_TURN does not
+ * re-run it after a restart.
+ */
+export function isMcpEndTurnToolResult(result: NormalizedUserMessage): boolean {
+  const rec = result as NormalizedUserMessage & {
+    toolEndsTurn?: boolean
+    toolDenialEndsTurn?: boolean
+    mcpMeta?: { _meta?: Record<string, unknown> }
+  }
+  if (rec.toolDenialEndsTurn === true) return true
+  const hasEndTurnFlag =
+    rec.toolEndsTurn === true || rec.mcpMeta?._meta?.['claude/endTurn'] === true
+  if (!hasEndTurnFlag) return false
+  const content = result.message.content
+  if (
+    Array.isArray(content) &&
+    content.some(b => b.type === 'tool_result' && b.is_error === true)
+  ) {
+    return false
+  }
+  return true
 }
 
 /**
@@ -694,6 +724,11 @@ export async function loadMessagesFromJsonlPath(path: string): Promise<{
  *   transcript lives outside the current project dir.
  * @returns Object containing the deserialized messages and the original log, or null if not found
  */
+export type OverdueSessionStartHooks = {
+  promise: Promise<HookResultMessage[]>
+  abort: () => void
+}
+
 export async function loadConversationForResume(
   source: string | LogOption | undefined,
   sourceJsonlFile: string | undefined,
@@ -702,7 +737,11 @@ export async function loadConversationForResume(
    * so interactive REPL can consume via initialMessage:{replay:true}.
    * densable 2.1.214 #47: forkSession → SessionStart source "fork".
    */
-  opts?: { replyOnResume?: boolean; forkSession?: boolean },
+  opts?: {
+    replyOnResume?: boolean
+    forkSession?: boolean
+    supportOverdueSessionStartHooks?: boolean
+  },
 ): Promise<{
   messages: Message[]
   turnInterruptionState: TurnInterruptionState
@@ -745,6 +784,8 @@ export async function loadConversationForResume(
   deferredToolUse?: HookDeferredToolAttachment
   /** densable currentSessionDevModsFolder — last-wins `type:"dev-mods"`. */
   devModsFolder?: string
+  /** #520: SessionStart hooks still running after CLAUDE_CODE_RESUME_SESSIONSTART_HOOKS_WAIT_MS. */
+  overdueSessionStartHooks?: OverdueSessionStartHooks
 } | null> {
   try {
     let log: LogOption | null = null
@@ -854,13 +895,53 @@ export async function loadConversationForResume(
     messages = deserialized.messages
 
     // densable 2.1.214 #47: I1e(r.forkSession?"fork":"resume", ...)
-    const hookMessages = await processSessionStartHooks(
-      opts?.forkSession ? 'fork' : 'resume',
-      { sessionId, messages },
-    )
-
-    // Append hook messages to the conversation
-    messages.push(...hookMessages)
+    // #520: When CLAUDE_CODE_RESUME_SESSIONSTART_HOOKS_WAIT_MS is set and
+    // caller supports overdue SessionStart hooks, race against the wait budget.
+    const waitMsRaw = process.env.CLAUDE_CODE_RESUME_SESSIONSTART_HOOKS_WAIT_MS
+    const waitMs =
+      waitMsRaw !== undefined && waitMsRaw !== '' ? Number(waitMsRaw) : NaN
+    let overdueSessionStartHooks: OverdueSessionStartHooks | undefined
+    if (
+      opts?.supportOverdueSessionStartHooks &&
+      Number.isFinite(waitMs) &&
+      waitMs >= 0 &&
+      messages.length > 0
+    ) {
+      const overdueController = new AbortController()
+      const hookPromise = processSessionStartHooks(
+        opts.forkSession ? 'fork' : 'resume',
+        { sessionId, messages, orphaned: overdueController.signal },
+      )
+      const RACE_TIMEOUT = Symbol('overdue')
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const raceResult = await Promise.race([
+        hookPromise,
+        new Promise<typeof RACE_TIMEOUT>(resolve => {
+          timer = setTimeout(() => resolve(RACE_TIMEOUT), waitMs)
+          timer.unref?.()
+        }),
+      ]).finally(() => {
+        if (timer !== undefined) clearTimeout(timer)
+      })
+      if (raceResult === RACE_TIMEOUT) {
+        logForDebugging(
+          `SessionStart hooks are still running after ${waitMs} ms: reading messages now, their output joins a later turn`,
+        )
+        overdueSessionStartHooks = {
+          promise: hookPromise,
+          abort: () => overdueController.abort(),
+        }
+      } else {
+        messages.push(...raceResult)
+      }
+    } else {
+      const hookMessages = await processSessionStartHooks(
+        opts?.forkSession ? 'fork' : 'resume',
+        { sessionId, messages },
+      )
+      // Append hook messages to the conversation
+      messages.push(...hookMessages)
+    }
 
     return {
       messages,
@@ -896,6 +977,7 @@ export async function loadConversationForResume(
       // densable iLr — consented mods folder for restoreSessionMetadata / bOn
       devModsFolder: log?.devModsFolder ?? devModsFromJsonl,
       deferredToolUse,
+      overdueSessionStartHooks,
     }
   } catch (error) {
     logError(error as Error)

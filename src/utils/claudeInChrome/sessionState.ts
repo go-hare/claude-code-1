@@ -10,6 +10,8 @@ import { getBootstrapSessionHost } from '../sessionHost.js'
 
 export type ChromeTabGroupSocketClient = {
   isConnected(): boolean
+  ensureConnected?(): Promise<boolean>
+  hasActiveSelection?(): boolean
   callTool(
     name: string,
     args: Record<string, unknown>,

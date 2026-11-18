@@ -36,10 +36,11 @@ export function tryFormatJson(line: string): string {
 const MAX_JSON_FORMAT_LENGTH = 10_000;
 
 export function tryJsonFormatContent(content: string): string {
-  if (content.length > MAX_JSON_FORMAT_LENGTH) {
-    return content;
+  const normalized = content.replace(/\r\n/g, '\n');
+  if (normalized.length > MAX_JSON_FORMAT_LENGTH) {
+    return normalized;
   }
-  const allLines = content.split('\n');
+  const allLines = normalized.split('\n');
   return allLines.map(tryFormatJson).join('\n');
 }
 

@@ -1,5 +1,5 @@
 import memoize from 'lodash-es/memoize.js'
-import { homedir } from 'os'
+import { homedir, hostname, networkInterfaces } from 'os'
 import { dirname, isAbsolute, resolve } from 'path'
 import { FILE_READ_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileReadTool/prompt.js'
 import type { ToolPermissionContext } from '../../Tool.js'
@@ -412,28 +412,406 @@ export function validateGlobPattern(
 
 const WINDOWS_DRIVE_ROOT_REGEX = /^[A-Za-z]:\/?$/
 const WINDOWS_DRIVE_CHILD_REGEX = /^[A-Za-z]:\/[^/]+$/
+const WINDOWS_DRIVE_PREFIX_REGEX = /^[A-Za-z]:\//
+const UNC_ADMIN_DRIVE_SHARE_REGEX = /^\\\\([^\\]+)\\([a-z])\$(?=$|\\)/
+const MACOS_KERNEL_VOL_FILE_REGEX = /^\/\.(?:vol|file)(?:\/|$)/i
+const WINDOWS_PATH_CANDIDATE_REGEX =
+  /^(?:[A-Za-z]:[\\/]|[\\/]{2}|[\\/]\?\?[\\/])/
+const DANGEROUS_UNC_PREFIX_REGEX =
+  /^[\\/]{2}(?:[?.][\\/]|;|[^\\/]+[\\/]admin\$(?=$|[\\/]))/i
 
-/**
- * Checks if a resolved path is dangerous for removal operations (rm/rmdir).
- * Dangerous paths are:
- * - Wildcard '*' (removes all files in directory)
- * - Any path ending with '/*' or '\*' (e.g., /path/to/dir/*, C:\foo\*)
- * - Root directory (/)
- * - Home directory (~)
- * - Direct children of root (/usr, /tmp, /etc, etc.)
- * - Windows drive root (C:\, D:\) and direct children (C:\Windows, C:\Users)
- */
-export function isDangerousRemovalPath(resolvedPath: string): boolean {
-  // Callers pass both slash forms; collapse runs so C:\\Windows (valid in
-  // PowerShell) doesn't bypass the drive-child check.
-  const forwardSlashed = resolvedPath.replace(/[\\/]+/g, '/')
+const WSL_MNT_UNC_REGEX =
+  /^[\\/]{2}(?:wsl\.localhost|wsl\$)[\\/][^\\/]+[\\/]mnt[\\/]([a-z])(?=$|[\\/])/i
+const NT_DEVICE_PREFIX_REGEX = /^(?:[\\/]{2,}[?.][\\/]+|\\\?\?\\)(?=[A-Za-z]:)/
+const NT_UNC_PREFIX_REGEX = /^(?:[\\/]{2,}[?.][\\/]+|\\\?\?\\)UNC[\\/]+/i
+const NT_ANY_DEVICE_PREFIX_REGEX = /^(?:[\\/]{2}[?.]|[\\/]\?\?)(?:[\\/]|$)/
+const UNC_DRIVE_SHARE_ANY_REGEX =
+  /^[\\/]{2,}([^\\/]+)[\\/]+([A-Za-z])\$(?:[\\/]+|$)/
+const WEBDAV_HOST_REGEX =
+  /^((?=[^@]*[a-z])[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?:@ssl(?:@\d+)?|@\d+)$/i
+const ODD_HOST_REGEX = /[:@]|[^\x21-\x7e]|^\.+$/
+const NUMERIC_HOST_REGEX =
+  /^(?:(?:0x[0-9a-f]*|\d+)(?:\.(?:0x[0-9a-f]*|\d+)){0,3}|.*\.ipv6-literal\.net)$/i
+const DRIVE_RELATIVE_REGEX = /^[a-z]:(?![\\/]|$)/
+const WSL_HOST_SET = new Set(['wsl.localhost', 'wsl$'])
+const BIDI_ZERO_WIDTH_REGEX = /[\u200c-\u200f\u202a-\u202e\u206a-\u206f\ufeff]/g
+const NETBIOS_NAME_MAX = 15
 
+const canonicalHomedirByHome = new Map<string, string>()
+
+function foldCaseUnicode(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/\u0131/g, 'i')
+    .replace(/\u017f/g, 's')
+}
+
+function foldSegmentForComparison(segment: string): string {
+  const folded = foldCaseUnicode(segment).replace(BIDI_ZERO_WIDTH_REGEX, '')
+  return (
+    folded.replace(/:.*$/, '').replace(/[. ]+$/, '') || foldCaseUnicode(segment)
+  )
+}
+
+function foldWin32SegmentForHost(segment: string): string {
+  if (/^[?.]$/.test(segment)) return segment
+  const folded = segment.toLowerCase().toUpperCase().toLowerCase()
+  return segment.includes(':')
+    ? folded.replace(/[. ]+$/, '')
+    : foldSegmentForComparison(folded)
+}
+
+function isShort83Segment(segment: string): boolean {
+  return /^(?=[^.]{3,8}(?:\.|$))[^.]{1,6}~[0-9]{1,6}(?:\.[^.]{1,3})?$/.test(
+    segment,
+  )
+}
+
+function isShort83OrDotless(segment: string): boolean {
+  return isShort83Segment(segment.replace(/\u0307/g, ''))
+}
+
+function isShortNameSegment(segment: string): boolean {
+  return /^[\x20-\x7e]*$/.test(segment)
+    ? isShort83Segment(segment.replaceAll('ss', 's'))
+    : /~\d+(?:\.[^.]*)?$/.test(segment)
+}
+
+function foldUpperLower(value: string): string {
+  return Array.from(value, ch => {
+    const up = ch.toUpperCase()
+    return [...up].length === 1 ? up : ch
+  })
+    .join('')
+    .toLowerCase()
+}
+
+function isWindowsUsersOrDocsSegment(segment: string): boolean {
+  const folded = foldUpperLower(segment)
+  return (
+    folded === 'users' ||
+    folded === 'documents and settings' ||
+    folded === 'dokumente und einstellungen' ||
+    /^do[ck]ume~[0-9]+$/.test(folded)
+  )
+}
+
+const KNOWN_WINDOWS_PROFILE_SUBDIRS = new Map<string, string[]>([
+  ['my documents', ['documents']],
+  ['application data', ['appdata', 'roaming']],
+  ['local settings', ['appdata', 'local']],
+])
+
+const KNOWN_WINDOWS_PROFILE_SHORT_SUBDIRS: Array<[RegExp, string[]]> = [
+  [/^mydocu~[0-9]+$/, ['documents']],
+  [/^applic~[0-9]+$/, ['appdata', 'roaming']],
+  [/^locals~[0-9]+$/, ['appdata', 'local']],
+]
+
+function expandKnownProfileSubdir(segments: string[]): string[] | undefined {
+  if (segments.length < 3 || !isWindowsUsersOrDocsSegment(segments[0]!)) {
+    return undefined
+  }
+  const seg2 = segments[2]!
+  const mapped =
+    KNOWN_WINDOWS_PROFILE_SUBDIRS.get(seg2) ??
+    KNOWN_WINDOWS_PROFILE_SHORT_SUBDIRS.find(([re]) => re.test(seg2))?.[1]
+  return mapped === undefined
+    ? undefined
+    : [...segments.slice(0, 2), ...mapped, ...segments.slice(3)]
+}
+
+function splitFoldedSegments(pathAfterDrive: string): string[] {
+  return foldUpperLower(pathAfterDrive).split('/').filter(Boolean)
+}
+
+function segmentVariants(pathAfterDrive: string): string[][] {
+  const base = splitFoldedSegments(pathAfterDrive)
+  const expanded = expandKnownProfileSubdir(base)
+  return expanded === undefined ? [base] : [base, expanded]
+}
+
+function segmentsEqualOrShort(idx: number, a: string, b: string): boolean {
+  return (
+    a === b ||
+    isShort83OrDotless(a) ||
+    isShort83OrDotless(b) ||
+    (idx === 0 &&
+      isWindowsUsersOrDocsSegment(a) &&
+      isWindowsUsersOrDocsSegment(b))
+  )
+}
+
+function remainingSubpathVariants(
+  homeAfterDrive: string,
+  candidateAfterDrive: string,
+): string[][] {
+  const candidateVariants = segmentVariants(candidateAfterDrive)
+  return segmentVariants(homeAfterDrive).flatMap(homeSegs =>
+    candidateVariants.flatMap(candSegs =>
+      homeSegs.length <= candSegs.length &&
+      homeSegs.every((seg, idx) =>
+        segmentsEqualOrShort(idx, seg, candSegs[idx]!),
+      )
+        ? [candSegs.slice(homeSegs.length)]
+        : [],
+    ),
+  )
+}
+
+function stripTrailingDotsAndSpaces(segment: string): string {
+  let end = segment.length
+  for (;;) {
+    let wsEnd = end
+    while (wsEnd > 0 && segment[wsEnd - 1] === ' ') wsEnd--
+    const trimmed = segment.slice(0, wsEnd)
+    if (trimmed === '.' || trimmed === '..') return trimmed
+    let dotEnd = wsEnd
+    while (dotEnd > 0 && segment[dotEnd - 1] === '.') dotEnd--
+    if (dotEnd === end) return trimmed
+    end = dotEnd
+  }
+}
+
+function normalizeWindowsSlashesAndPrefix(input: string): string {
+  const normalized = input
+    .replace(/(?!^)[\\/]+/g, '\\')
+    .replace(/^[\\/]\?\?(?=[\\/])/, '\\\\?')
+    .replace(/^[\\/]{2}[?.][\\/]UNC(?=[\\/])/i, '\\')
+  return input.startsWith('\\\\?\\')
+    ? normalized
+    : normalized.replace(/^([\\/]{2}[?.][\\/][a-z]:)[. ]+(?=[\\/]|$)/i, '$1')
+}
+
+function stripDevicePrefixToUncOrDrive(input: string): string {
+  return NT_UNC_PREFIX_REGEX.test(input)
+    ? `\\\\${input.replace(NT_UNC_PREFIX_REGEX, '')}`
+    : input.replace(NT_DEVICE_PREFIX_REGEX, '')
+}
+
+function ownNetworkIpSet(): Set<string> | null {
+  let ifaces: ReturnType<typeof networkInterfaces>
+  try {
+    ifaces = networkInterfaces()
+  } catch {
+    return null
+  }
+  return new Set(
+    Object.values(ifaces).flatMap(entries =>
+      (entries ?? []).flatMap(({ address }) => {
+        const lower = address.toLowerCase()
+        return [
+          lower,
+          `${lower.replaceAll(':', '-').replaceAll('%', 's')}.ipv6-literal.net`,
+        ]
+      }),
+    ),
+  )
+}
+
+const IP_OR_IPV6_LITERAL_REGEX =
+  /^\d{1,3}(?:\.\d{1,3}){3}$|\.ipv6-literal\.net$/
+
+function isOwnHostName(host: string, allowNetbios = true): boolean {
+  const clean = host.toLowerCase().replace(/\.$/, '')
+  const isWin = getPlatform() === 'windows'
+  const norm = (s: string) =>
+    isWin && allowNetbios ? foldWin32SegmentForHost(s) : s.toLowerCase()
+  const rawHost = hostname()
+  const selfName = norm(rawHost)
+  const dotIdx = selfName.indexOf('.')
+  const selfShort = dotIdx === -1 ? selfName : selfName.slice(0, dotIdx)
+  const rawDotIdx = rawHost.indexOf('.')
+  const rawShort = rawDotIdx === -1 ? rawHost : rawHost.slice(0, rawDotIdx)
+  return (
+    clean === 'localhost' ||
+    /^127(?:\.\d{1,3}){3}$/.test(clean) ||
+    clean === selfName ||
+    (isWin &&
+      (clean === selfShort ||
+        (allowNetbios &&
+          (clean === selfShort.slice(0, NETBIOS_NAME_MAX) ||
+            clean === norm(rawShort.slice(0, NETBIOS_NAME_MAX)))))) ||
+    clean.startsWith(`${selfShort}.`) ||
+    (IP_OR_IPV6_LITERAL_REGEX.test(clean) &&
+      (ownNetworkIpSet()?.has(clean) ?? allowNetbios))
+  )
+}
+
+function collapseOwnAdminShare(input: string): string {
+  const stripped = stripDevicePrefixToUncOrDrive(input)
+  const match = UNC_DRIVE_SHARE_ANY_REGEX.exec(stripped)
+  return match !== null && isOwnHostName(match[1]!, false)
+    ? `${match[2]}:\\${stripped.slice(match[0].length)}`
+    : stripped
+}
+
+function canonicalizeWin32Segments(input: string): string {
+  const collapsed = collapseOwnAdminShare(input)
+  const leadingSlashes = /^[\\/]+/.exec(collapsed)?.[0] ?? ''
+  const parts = collapsed.slice(leadingSlashes.length).split(/[\\/]+/)
+  const hasColonDrive =
+    leadingSlashes === '' && /^[A-Za-z]:$/.test(parts[0] ?? '')
+  const hasColonDriveRest =
+    leadingSlashes === '' && /^[A-Za-z]:./.test(parts[0] ?? '')
+  const out: string[] = []
+  parts.forEach((seg, idx) => {
+    if (idx === 0 && (hasColonDrive || hasColonDriveRest)) {
+      out.push(seg.toLowerCase())
+    } else if (idx === 0 && leadingSlashes.length >= 2) {
+      out.push(foldWin32SegmentForHost(seg))
+    } else if (seg === '..') {
+      if (
+        out.length >
+        (hasColonDrive || hasColonDriveRest
+          ? 1
+          : leadingSlashes.length >= 2
+            ? 2
+            : 0)
+      ) {
+        out.pop()
+      }
+    } else if (/^[. ]+$/.test(seg) && seg !== '.') {
+      out.push('')
+    } else if (seg !== '.' && seg !== '') {
+      out.push(
+        foldSegmentForComparison(seg.toLowerCase().toUpperCase().toLowerCase()),
+      )
+    }
+  })
+  const nonEmpty = out.filter(seg => seg !== '')
+  const prefix =
+    leadingSlashes.length >= 2
+      ? '\\\\'
+      : leadingSlashes.length === 1
+        ? '\\'
+        : ''
+  return (
+    prefix +
+    nonEmpty.join('\\') +
+    (/[\\/]$/.test(collapsed) && nonEmpty.length > 0 ? '\\' : '')
+  )
+}
+
+function classifyUncOrWinPath(uncPath: string): string | undefined {
+  const host = /^\\\\([^\\]+)\\/.exec(uncPath)?.[1]
+  const webdavHost =
+    host === undefined ? undefined : WEBDAV_HOST_REGEX.exec(host)?.[1]
+  if (host !== undefined && isOwnHostName(webdavHost ?? host)) {
+    return 'own_host'
+  }
+  if (host !== undefined && WSL_HOST_SET.has(host)) {
+    return 'wsl_host'
+  }
+  if (uncPath.split('\\').some(isShortNameSegment)) {
+    return 'short_name'
+  }
+  if (NT_ANY_DEVICE_PREFIX_REGEX.test(uncPath)) {
+    return 'device_namespace'
+  }
+  if (DRIVE_RELATIVE_REGEX.test(uncPath)) {
+    return 'drive_relative'
+  }
+  if (host === undefined) return undefined
+  if (webdavHost !== undefined) {
+    return NUMERIC_HOST_REGEX.test(webdavHost) ? 'numeric_host' : 'webdav_host'
+  }
+  if (ODD_HOST_REGEX.test(host)) return 'odd_host'
+  if (NUMERIC_HOST_REGEX.test(host)) return 'numeric_host'
+  return undefined
+}
+
+function expandOwnAdminShareSpellings(winPath: string): string[] {
+  const match = UNC_ADMIN_DRIVE_SHARE_REGEX.exec(winPath)
+  return match !== null &&
+    classifyUncOrWinPath(`\\\\${match[1]}\\`) === 'own_host'
+    ? [winPath, `${match[2]}:${winPath.slice(match[0].length) || '\\'}`]
+    : [winPath]
+}
+
+function isNumericOrOddUncShare(winPath: string): boolean {
+  if (!/^[\\/]{2}/.test(winPath)) return false
+  const match = UNC_ADMIN_DRIVE_SHARE_REGEX.exec(
+    canonicalizeWin32Segments(winPath),
+  )
+  const kind =
+    match === null ? undefined : classifyUncOrWinPath(`\\\\${match[1]}\\`)
+  return kind === 'numeric_host' || kind === 'odd_host'
+}
+
+function stripDeviceAndLocalhostPrefix(input: string): string {
+  const match =
+    /^[\\/]{2}(?:[?.][\\/]([A-Za-z]):|(?:localhost|127\.0\.0\.1)[\\/]([A-Za-z])\$)(?=$|[\\/])/i.exec(
+      input,
+    )
+  if (match === null) return input
+  const rest = input.slice(match[0].length)
+  return `${match[1] ?? match[2]}:${rest === '' ? '\\' : rest}`
+}
+
+function normalizeWindowsLikeSpelling(input: string): string {
+  return stripDeviceAndLocalhostPrefix(
+    collapseOwnAdminShare(
+      normalizeWindowsSlashesAndPrefix(input).replace(WSL_MNT_UNC_REGEX, '$1:'),
+    ),
+  )
+}
+
+function getCanonicalHomedir(home: string): string {
+  const cached = canonicalHomedirByHome.get(home)
+  if (cached !== undefined) return cached
+  const resolved = normalizeWindowsLikeSpelling(
+    safeResolvePath(getFsImplementation(), home).resolvedPath,
+  )
+    .replace(/[\\/]+/g, '/')
+    .replace(/\/$/, '')
+  canonicalHomedirByHome.set(home, resolved)
+  return resolved
+}
+
+function collectRemovalPathVariants(rawPath: string): string[] {
+  const dotFiltered =
+    rawPath
+      .split('/')
+      .filter((seg, idx) => seg !== '.' || idx === 0)
+      .join('/') || (rawPath.startsWith('/') ? '/' : '')
+  const variants = [rawPath, dotFiltered]
+  if (
+    WINDOWS_PATH_CANDIDATE_REGEX.test(rawPath) ||
+    getPlatform() === 'windows'
+  ) {
+    const seeds = Array.from(
+      new Set([rawPath, normalizeWindowsSlashesAndPrefix(rawPath)]),
+    )
+    for (const seed of seeds) {
+      variants.push(
+        ...expandOwnAdminShareSpellings(canonicalizeWin32Segments(seed)),
+        ...expandOwnAdminShareSpellings(
+          canonicalizeWin32Segments(
+            seed.replace(/[^\\/]+/g, seg => {
+              const trimmed = stripTrailingDotsAndSpaces(seg)
+              return trimmed === '.' || trimmed === '..' ? trimmed : seg
+            }),
+          ),
+        ),
+      )
+    }
+  }
+  return Array.from(new Set(variants))
+}
+
+function isDangerousForwardSlashedPath(forwardSlashed: string): boolean {
   if (forwardSlashed === '*' || forwardSlashed.endsWith('/*')) {
     return true
   }
 
+  const isMac = getPlatform() === 'macos'
+  const stripMacPrivate = (p: string) =>
+    isMac ? p.replace(/^\/private\/(etc|var|tmp|home)(\/|$)/i, '/$1$2') : p
+
+  const stripped = stripMacPrivate(forwardSlashed)
   const normalizedPath =
-    forwardSlashed === '/' ? forwardSlashed : forwardSlashed.replace(/\/$/, '')
+    stripped === '/' ? stripped : stripped.replace(/\/$/, '')
 
   if (normalizedPath === '/') {
     return true
@@ -443,14 +821,56 @@ export function isDangerousRemovalPath(resolvedPath: string): boolean {
     return true
   }
 
-  const normalizedHome = homedir().replace(/[\\/]+/g, '/')
-  if (normalizedPath === normalizedHome) {
+  const rawHome = homedir()
+  const normalizedHome = stripMacPrivate(
+    normalizeWindowsLikeSpelling(rawHome).replace(/[\\/]+/g, '/'),
+  ).replace(/\/$/, '')
+  if (foldCaseUnicode(normalizedPath) === foldCaseUnicode(normalizedHome)) {
     return true
   }
 
+  const canonicalHome = getCanonicalHomedir(rawHome)
+  const homeVariants = Array.from(
+    new Set([
+      normalizedHome,
+      canonicalHome,
+      ...(/^[\\/]{2}/.test(rawHome)
+        ? expandOwnAdminShareSpellings(
+            canonicalizeWin32Segments(
+              normalizeWindowsSlashesAndPrefix(rawHome),
+            ),
+          ).map(p => p.replace(/[\\/]+/g, '/').replace(/\/$/, ''))
+        : []),
+    ]),
+  )
+
+  if (
+    homeVariants.some(
+      variant =>
+        variant !== normalizedHome &&
+        foldCaseUnicode(normalizedPath) === foldCaseUnicode(variant),
+    )
+  ) {
+    return true
+  }
+
+  for (const homeVariant of homeVariants) {
+    const drivePrefix = WINDOWS_DRIVE_PREFIX_REGEX.exec(homeVariant)?.[0]
+    if (
+      drivePrefix !== undefined &&
+      foldCaseUnicode(normalizedPath.slice(0, drivePrefix.length)) ===
+        foldCaseUnicode(drivePrefix) &&
+      remainingSubpathVariants(
+        homeVariant.slice(drivePrefix.length),
+        normalizedPath.slice(drivePrefix.length),
+      ).some(rem => rem.length === 0)
+    ) {
+      return true
+    }
+  }
+
   // Direct children of root: /usr, /tmp, /etc (but not /usr/local)
-  const parentDir = dirname(normalizedPath)
-  if (parentDir === '/') {
+  if (dirname(normalizedPath) === '/') {
     return true
   }
 
@@ -459,6 +879,36 @@ export function isDangerousRemovalPath(resolvedPath: string): boolean {
   }
 
   return false
+}
+
+/**
+ * Checks if a resolved path is dangerous for removal operations (rm/rmdir).
+ * Dangerous paths are:
+ * - Wildcard '*' (removes all files in directory)
+ * - Any path ending with '/*' or '\*' (e.g., /path/to/dir/*, C:\foo\*)
+ * - Root directory (/)
+ * - Home directory (~), including Windows 8.3 short names and alternate spellings
+ * - Direct children of root (/usr, /tmp, /etc, etc.)
+ * - Windows drive root (C:\, D:\), direct children (C:\Windows, C:\Users), and dangerous UNC/device forms
+ */
+export function isDangerousRemovalPath(resolvedPath: string): boolean {
+  return collectRemovalPathVariants(resolvedPath).some(variant => {
+    const normalized = normalizeWindowsLikeSpelling(variant)
+    if (
+      DANGEROUS_UNC_PREFIX_REGEX.test(normalized) ||
+      isNumericOrOddUncShare(normalized)
+    ) {
+      return true
+    }
+    const forwardSlashed = normalized.replace(/[\\/]+/g, '/')
+    if (
+      getPlatform() === 'macos' &&
+      MACOS_KERNEL_VOL_FILE_REGEX.test(forwardSlashed)
+    ) {
+      return true
+    }
+    return isDangerousForwardSlashedPath(forwardSlashed)
+  })
 }
 
 /** Gold mGn — true when a glob precedes a `..` segment. */

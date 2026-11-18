@@ -39,12 +39,14 @@ import {
 } from './terminal.js'
 import {
   CLEAR_ITERM2_PROGRESS,
+  CLEAR_PROGRAM_STATUS,
   CLEAR_TAB_STATUS,
   OSC,
   osc,
   supportsTabStatus,
   wrapForMultiplexer,
 } from './termio/osc.js'
+import { tD } from './terminalCapabilities.js'
 
 export type TerminalModeName =
   | 'bracketedPaste'
@@ -319,7 +321,8 @@ export function restoreTerminalModes(
     RESET_SCROLL_REGION +
     '\x1b8' +
     (isProgressReportingAvailable() ? CLEAR_ITERM2_PROGRESS : '') +
-    (supportsTabStatus() ? wrapForMultiplexer(CLEAR_TAB_STATUS) : '')
+    (supportsTabStatus() ? wrapForMultiplexer(CLEAR_TAB_STATUS) : '') +
+    (tD().now('programStatus') ? CLEAR_PROGRAM_STATUS : '')
   try {
     write(seq)
   } catch (err) {

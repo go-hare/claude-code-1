@@ -1951,3 +1951,82 @@ export function rawSettingsContainsKey(key: string): boolean {
 
   return false
 }
+
+// #371 SEA oee/dz/uz: Coalesced async re-read of managed-settings.json and
+// managed-settings.d/*.json after startup / login refresh when an initial read
+// may have hit a transient error or raced with drop-in directory population.
+const MANAGED_REREAD_TIMEOUT_MS = 5000
+const MANAGED_REREAD_MAX_RETRIES = 2
+
+let _managedRereadInFlight: Promise<boolean> | undefined
+let _managedRereadGivenUp = false
+
+export function managedRereadInFlight(): Promise<boolean> | undefined {
+  return _managedRereadInFlight
+}
+
+export function beginManagedReread(promise: Promise<boolean>): void {
+  _managedRereadInFlight = promise
+}
+
+export function releaseManagedReread(promise: Promise<boolean>): void {
+  if (_managedRereadInFlight === promise) {
+    _managedRereadInFlight = undefined
+  }
+}
+
+export function giveUpManagedReread(): void {
+  _managedRereadGivenUp = true
+}
+
+export function managedRereadGivenUp(): boolean {
+  return _managedRereadGivenUp
+}
+
+export function resetManagedRereadStateForTesting(): void {
+  _managedRereadInFlight = undefined
+  _managedRereadGivenUp = false
+}
+
+export async function rereadManagedSettingsIfNeeded(
+  timeoutMs: number = MANAGED_REREAD_TIMEOUT_MS,
+): Promise<boolean> {
+  if (_managedRereadInFlight !== undefined) {
+    return _managedRereadInFlight
+  }
+  if (_managedRereadGivenUp) {
+    return false
+  }
+  const prev = getSettingsForSource('policySettings')
+  let timedOut = false
+  const run = (async (): Promise<boolean> => {
+    const deadline = Date.now() + timeoutMs
+    for (let attempt = 0; attempt <= MANAGED_REREAD_MAX_RETRIES; attempt++) {
+      const remaining = Math.max(0, deadline - Date.now())
+      if (remaining === 0 && attempt > 0) {
+        timedOut = true
+        giveUpManagedReread()
+        return false
+      }
+      const next = loadManagedFileSettings().settings
+      const prevJson = JSON.stringify(prev ?? null)
+      const nextJson = JSON.stringify(next ?? null)
+      if (prevJson !== nextJson) {
+        resetSettingsCache()
+        return true
+      }
+      return false
+    }
+    return false
+  })()
+  beginManagedReread(run)
+  try {
+    return await run
+  } finally {
+    if (timedOut && !_managedRereadGivenUp) {
+      releaseManagedReread(run)
+    } else if (_managedRereadInFlight === run) {
+      beginManagedReread(Promise.resolve(false))
+    }
+  }
+}

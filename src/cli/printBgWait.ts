@@ -32,13 +32,26 @@ export function getPrintBgWaitCeilingMs(
   return Math.floor(n)
 }
 
+export type PrintBgWaitTask = {
+  id: string
+  type: string
+  isBackgrounded?: boolean
+  kind?: string
+  agentId?: string
+  ambient?: boolean
+}
+
 export type PrintBgWaitGateInput = {
   /** Running background tasks (excluding in_process_teammate). */
-  runningBackgroundTasks: readonly { id: string; type: string }[]
+  runningBackgroundTasks: readonly PrintBgWaitTask[]
   inputClosed: boolean
   hasMainThreadQueued: boolean
   hasActiveTeammates: boolean
   hasPendingNotification: boolean
+  /** Official $nt / tengu_tidy_sloth — hold for backgrounded local_bash shells. */
+  holdForBackgroundShells?: boolean
+  /** Official tengu_giggly_dragonfly — hold for armed monitors. */
+  holdForArmedMonitors?: boolean
   /** True when elapsed already exceeds the ceiling (or ceiling is null=false). */
   ceilingExceeded: boolean
   deadline: number | null
@@ -72,7 +85,12 @@ export function nextPrintBgWaitGate(
     input.runningBackgroundTasks.length > 0 &&
     (input.ceilingExceeded ||
       (!input.hasPendingNotification &&
-        !input.runningBackgroundTasks.some(isPrintBgWaitForeverTask)))
+        !input.runningBackgroundTasks.some(
+          t =>
+            isPrintBgWaitForeverTask(t) ||
+            (input.holdForArmedMonitors && isArmedMonitorTask(t)) ||
+            (input.holdForBackgroundShells && isBackgroundedLocalBashTask(t)),
+        )))
 
   if (!canWind) {
     return { deadline: null, swept: false, shouldSweep: false }
@@ -107,10 +125,53 @@ export function nextPrintBgWaitGate(
 
 /**
  * Tasks that should not force early wind-down while still "must wait"
- * (official dOe subset — local_agent keeps waiting; local_bash is wind-downable).
+ * (official $7 — local_agent keeps waiting).
  */
 export function isPrintBgWaitForeverTask(task: { type: string }): boolean {
   return task.type === 'local_agent'
+}
+
+/**
+ * Official rfa — backgrounded local_bash shell (not monitor, not agent-owned).
+ */
+export function isBackgroundedLocalBashTask(task: PrintBgWaitTask): boolean {
+  return (
+    task.type === 'local_bash' &&
+    task.isBackgrounded === true &&
+    task.kind !== 'monitor' &&
+    task.agentId === undefined
+  )
+}
+
+/**
+ * Official oWt — armed monitor task.
+ */
+export function isArmedMonitorTask(task: PrintBgWaitTask): boolean {
+  return (
+    (task.type === 'local_bash' && task.kind === 'monitor') ||
+    task.type === 'monitor_mcp' ||
+    (task.type === 'monitor_ws' && task.ambient !== true)
+  )
+}
+
+/** Official K0 = 120000ms — scheduled wakeup grace window. */
+export const SCHEDULED_WAKEUP_HOLD_GRACE_MS = 120_000
+
+/**
+ * Official Fy — true when a session has a pending `/loop` scheduled wakeup.
+ */
+export function hasPendingSessionWakeup(
+  cronTasks: readonly { kind?: string; scheduledFor?: number }[],
+  { now, parkedSince }: { now: number; parkedSince: number | null },
+): boolean {
+  const baseline = parkedSince ?? now
+  return cronTasks.some(
+    t =>
+      t.kind === 'loop' &&
+      (t.scheduledFor === undefined ||
+        now <=
+          Math.max(t.scheduledFor, baseline) + SCHEDULED_WAKEUP_HOLD_GRACE_MS),
+  )
 }
 
 /** Stderr line when ceiling exceeded (official message). */

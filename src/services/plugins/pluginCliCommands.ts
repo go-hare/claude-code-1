@@ -7,6 +7,8 @@
  * For the core operations (without CLI side effects), see pluginOperations.ts
  */
 import figures from 'figures'
+import { basename } from 'path'
+import { logForDebugging } from '../../utils/debug.js'
 import { errorMessage } from '../../utils/errors.js'
 import { gracefulShutdown } from '../../utils/gracefulShutdown.js'
 import { logError } from '../../utils/log.js'
@@ -17,10 +19,18 @@ import {
   errorFromPluginFailureCode,
 } from '../../utils/plugins/pluginCommandRefusal.js'
 import { Io, re } from '../../utils/plugins/escapeSafeText.js'
-import { parsePluginIdentifier } from '../../utils/plugins/pluginIdentifier.js'
+import {
+  parsePluginIdentifier,
+  scopeToSettingSource,
+} from '../../utils/plugins/pluginIdentifier.js'
 import { hydrateSyncedPluginDirsFromDisk } from '../../utils/plugins/syncedPluginHydrate.js'
 import type { PluginScope } from '../../utils/plugins/schemas.js'
 import { writeToStdout } from '../../utils/process.js'
+import {
+  getSettingsFilePathForSource,
+  parseSettingsFile,
+} from '../../utils/settings/settings.js'
+import { plural } from '../../utils/stringUtils.js'
 import {
   buildPluginTelemetryFields,
   classifyPluginCommandError,
@@ -49,6 +59,72 @@ import {
 } from './pluginOperations.js'
 
 export { VALID_INSTALLABLE_SCOPES, VALID_UPDATE_SCOPES }
+
+/**
+ * Official `u9o` (#346) — check if the settings file for `scope` has fatal
+ * validation/parse errors that prevent Claude Code from loading it.
+ */
+export function getUnloadedSettingsWarning(
+  scope?: PluginScope,
+  deps: {
+    getPath?: typeof getSettingsFilePathForSource
+    parseFile?: typeof parseSettingsFile
+  } = {},
+): string | null {
+  try {
+    if (scope === undefined || scope === 'managed') return null
+    const source = scopeToSettingSource(scope)
+    const getPath = deps.getPath ?? getSettingsFilePathForSource
+    const parseFile = deps.parseFile ?? parseSettingsFile
+    const file = getPath(source)
+    if (
+      file === undefined ||
+      (source === 'userSettings' && basename(file) === 'cowork_settings.json')
+    ) {
+      return null
+    }
+    const errors = parseFile(file).errors.filter(
+      err =>
+        (err.file === undefined || err.file === file) &&
+        err.severity !== 'warning',
+    )
+    const [first] = errors
+    if (first === undefined) return null
+    const rest = errors.length - 1
+    const errorClass =
+      'errorClass' in first && typeof first.errorClass === 'string'
+        ? first.errorClass
+        : undefined
+    const detail =
+      first.path !== ''
+        ? `its "${first.path.slice(0, 80)}" ${
+            rest > 0 ? `and ${rest} other ${plural(rest, 'value')} are` : 'is'
+          } not valid`
+        : errorClass === 'unreadable'
+          ? 'it could not be read'
+          : 'it is not a JSON object'
+    return `${file} does not load (${detail}), so Claude Code ignores the whole file, including anything this command wrote there. Fix the file, then run this command again if its change is missing. If a newer Claude Code wrote the file, update Claude Code instead.`
+  } catch (err) {
+    logForDebugging(
+      `settings file check after a plugin command skipped: ${errorMessage(err)}`,
+      { level: 'warn' },
+    )
+    return null
+  }
+}
+
+/**
+ * Official `$or` (#346) — append a warning when the target settings file does not load.
+ */
+export function withUnloadedSettingsWarning(
+  message: string,
+  scope?: PluginScope,
+): string {
+  const warning = getUnloadedSettingsWarning(scope)
+  return warning === null
+    ? message
+    : `${message}\n${figures.warning} ${warning}`
+}
 
 type PluginCliCommand =
   | 'install'
@@ -177,7 +253,11 @@ export async function installPlugin(
     }
 
     if (!jsonOptions.json) {
-      console.log(Io(`${figures.tick} ${result.message}`))
+      console.log(
+        Io(
+          `${figures.tick} ${withUnloadedSettingsWarning(result.message, result.scope || scope)}`,
+        ),
+      )
     }
 
     // densable Kao: nothingWritten skips --config save (gold `$Jy` only on write).
@@ -201,7 +281,10 @@ export async function installPlugin(
     if (notice && !jsonOptions.json) {
       console.log(Io(notice))
     }
-    const combined = notice ? `${result.message}\n${notice}` : result.message
+    const combined = withUnloadedSettingsWarning(
+      notice ? `${result.message}\n${notice}` : result.message,
+      result.scope || scope,
+    )
     if (jsonOptions.json) {
       await printPluginCliJsonLine({
         command: 'install',
@@ -314,6 +397,10 @@ export async function enablePlugin(
       throw new Error(result.message)
     }
 
+    const enableMessage = withUnloadedSettingsWarning(
+      result.message,
+      result.scope ?? scope,
+    )
     if (jsonOptions.json) {
       await printPluginCliJsonLine({
         command: 'enable',
@@ -321,10 +408,10 @@ export async function enablePlugin(
         plugin,
         pluginId: result.pluginId,
         scope: result.scope ?? scope,
-        message: result.message,
+        message: enableMessage,
       })
     } else {
-      console.log(Io(`${figures.tick} ${result.message}`))
+      console.log(Io(`${figures.tick} ${enableMessage}`))
     }
 
     const { name, marketplace } = parsePluginIdentifier(
@@ -367,6 +454,10 @@ export async function disablePlugin(
       throw new Error(result.message)
     }
 
+    const disableMessage = withUnloadedSettingsWarning(
+      result.message,
+      result.scope ?? scope,
+    )
     if (jsonOptions.json) {
       await printPluginCliJsonLine({
         command: 'disable',
@@ -374,10 +465,10 @@ export async function disablePlugin(
         plugin,
         pluginId: result.pluginId,
         scope: result.scope ?? scope,
-        message: result.message,
+        message: disableMessage,
       })
     } else {
-      console.log(Io(`${figures.tick} ${result.message}`))
+      console.log(Io(`${figures.tick} ${disableMessage}`))
     }
 
     const { name, marketplace } = parsePluginIdentifier(

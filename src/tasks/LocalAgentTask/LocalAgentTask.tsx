@@ -21,7 +21,7 @@ import { findToolByName } from '../../Tool.js';
 import type { AgentToolResult } from '@claude-code/builtin-tools/tools/AgentTool/agentToolUtils.js';
 import { VERIFICATION_AGENT_TYPE } from '@claude-code/builtin-tools/tools/AgentTool/constants.js';
 import { SEND_MESSAGE_TOOL_NAME } from '@claude-code/builtin-tools/tools/SendMessageTool/constants.js';
-import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js';
+import { type AgentDefinition, isBuiltInAgent } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js';
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js';
 import { asAgentId } from '../../types/ids.js';
 import type { AgentId } from '../../types/ids.js';
@@ -38,6 +38,7 @@ import { registerCleanup } from '../../utils/cleanupRegistry.js';
 import { getToolSearchOrReadInfo } from '../../utils/collapseReadSearch.js';
 import { dequeueAllMatching, enqueuePendingNotification, getCommandQueue } from '../../utils/messageQueueManager.js';
 import { logForDebugging } from '../../utils/debug.js';
+import { exclusiveCallQueuedBehind } from '../../services/tools/StreamingToolExecutor.js';
 import {
   getAgentTranscriptPath,
   isTranscriptPersistenceDisabled,
@@ -558,6 +559,8 @@ export type LocalAgentTaskState = TaskStateBase & {
   prompt: string;
   selectedAgent?: AgentDefinition;
   agentType: string;
+  /** #385 SEA `isBuiltInAgent: Nd(r)`: distinguishes custom agents named `worker` from built-in worker. */
+  isBuiltInAgent?: boolean;
   /** densable Sot cwd — spawn working directory (explicit cwd or worktree). */
   cwd?: string;
   /**
@@ -2054,6 +2057,7 @@ export function registerAsyncAgent({
     prompt,
     selectedAgent,
     agentType: selectedAgent.agentType ?? 'general-purpose',
+    isBuiltInAgent: isBuiltInAgent(selectedAgent),
     // densable Sot: always stamp effort/model (gold `effort:w.effort` / `model:b`)
     effort: selectedAgent.effort,
     model,
@@ -2199,6 +2203,7 @@ export function registerAgentForeground({
     prompt,
     selectedAgent,
     agentType: selectedAgent.agentType ?? 'general-purpose',
+    isBuiltInAgent: isBuiltInAgent(selectedAgent),
     // densable vMr: always stamp effort/model
     effort: selectedAgent.effort,
     model,
@@ -2235,14 +2240,19 @@ export function registerAgentForeground({
   // Auto-background after timeout if configured
   let cancelAutoBackground: (() => void) | undefined;
   if (autoBackgroundMs !== undefined && autoBackgroundMs > 0) {
-    const timer = setTimeout(() => {
-      // densable T$e — full promote (terminal+Rde refuse), not a raw isBackgrounded flip
+    let activeTimer: ReturnType<typeof setTimeout>;
+    const onTimer = () => {
       const registry = xm(setAppState, getAppState);
-      if (registry) {
-        backgroundAgentTask(agentId, registry);
+      if (!registry) return;
+      const task = registry.get(agentId);
+      if (isLocalAgentTask(task) && getAutoBackgroundHoldReason(task) === 'response_streaming') {
+        activeTimer = setTimeout(onTimer, AUTO_BACKGROUND_RECHECK_MS);
+        return;
       }
-    }, autoBackgroundMs);
-    cancelAutoBackground = () => clearTimeout(timer);
+      autoBackgroundAgentIfNotHeld(agentId, registry);
+    };
+    activeTimer = setTimeout(onTimer, autoBackgroundMs);
+    cancelAutoBackground = () => clearTimeout(activeTimer);
   }
 
   return {
@@ -2252,6 +2262,52 @@ export function registerAgentForeground({
     outputFile: taskState.outputFile,
     abortController,
   };
+}
+
+const AUTO_BACKGROUND_RECHECK_MS = 1000;
+
+/**
+ * Gold `hOo` — returns why automatic backgrounding must hold for a foreground
+ * local-agent task:
+ * - `'call_queued_behind'` when a non-concurrency-safe tool is already queued
+ *   behind its Agent tool call;
+ * - `'response_streaming'` when the assistant response is still open so such a
+ *   call may yet be queued.
+ */
+export function getAutoBackgroundHoldReason(
+  task: LocalAgentTaskState,
+): 'call_queued_behind' | 'response_streaming' | undefined {
+  if (task.status !== 'running' || task.isBackgrounded || task.toolUseId === undefined) {
+    return undefined;
+  }
+  const entry = exclusiveCallQueuedBehind.get(task.toolUseId);
+  if (entry === undefined) {
+    return undefined;
+  }
+  if (!entry.isQueued()) {
+    return entry.mayYetBeQueued() ? 'response_streaming' : undefined;
+  }
+  if (!entry.holdLogged) {
+    entry.holdLogged = true;
+    logForDebugging(
+      `[local-agent] subagent ${task.id} stays in the foreground: no automatic move to the background while a tool call that must run alone is queued behind its Agent call ${task.toolUseId}`,
+    );
+  }
+  return 'call_queued_behind';
+}
+
+/** Gold `R1n` */
+export function isAutoBackgroundHeld(task: LocalAgentTaskState): boolean {
+  return getAutoBackgroundHoldReason(task) !== undefined;
+}
+
+/** Gold `yks` */
+export function autoBackgroundAgentIfNotHeld(taskId: string, registry: TaskRegistry): boolean {
+  const task = registry.get(taskId);
+  if (isLocalAgentTask(task) && isAutoBackgroundHeld(task)) {
+    return false;
+  }
+  return backgroundAgentTask(taskId, registry);
 }
 
 /**

@@ -18,6 +18,8 @@
  * argv[0] against permission rules and flag allowlists. If no, ask the user.
  */
 
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import { hasUnquotedGlobInText } from '../worktreeGitIsolation.js'
 import { SHELL_KEYWORDS } from './bashParser.js'
 import type { Node } from './parser.js'
 import { PARSE_ABORTED, parseCommandRaw } from './parser.js'
@@ -37,6 +39,8 @@ export type SimpleCommand = {
   redirects: Redirect[]
   /** Original source span for this command (for UI display) */
   text: string
+  /** True if the original command span contains an unquoted glob char (*, ?, [) */
+  hasUnquotedGlob?: boolean
 }
 
 export type ParseForSecurityOptions = {
@@ -186,6 +190,10 @@ const DENSABLE_OVU = new Set([
   'EPOCHREALTIME',
   'SRANDOM',
   'BASHPID',
+  'BASH_MONOSECONDS',
+  'BASH_TRAPSIG',
+  'HISTCMD',
+  'ERRNO',
   'REPLY',
   'reply',
   'PIPESTATUS',
@@ -197,6 +205,7 @@ const DENSABLE_OVU = new Set([
   'BASH_ARGC',
   'BASH_SUBSHELL',
   'BASH_LINENO',
+  'BASH_ARGV0',
   'BASH_REMATCH',
   'MATCH',
   'match',
@@ -945,6 +954,8 @@ function collectCommands(
     // potential path-validation bypass.
     let loopVar: string | null = null
     let doGroup: Node | null = null
+    const startLen = commands.length
+    let needsPlaceholder = false
     for (const child of node.children) {
       if (!child) continue
       if (child.type === 'variable_name') {
@@ -981,6 +992,14 @@ function collectCommands(
         // where the iteration word itself is a disallowed expansion.
         const arg = walkArgument(child, commands, varScope, bareAssignmentNames)
         if (typeof arg !== 'string') return arg
+        if (containsArithmeticExpansion(child)) {
+          needsPlaceholder = true
+        } else if (
+          (hasUnquotedGlobInText(child.text) || nodeHasUnquotedGlob(child)) &&
+          getFeatureValue_CACHED_MAY_BE_STALE('tengu_vast_puddle', true)
+        ) {
+          needsPlaceholder = true
+        }
       }
     }
     if (loopVar === null || doGroup === null) return tooComplex(node)
@@ -1019,6 +1038,15 @@ function collectCommands(
       if (c.type === 'do' || c.type === 'done' || c.type === ';') continue
       const err = collectCommands(c, commands, bodyScope, bareAssignmentNames)
       if (err) return err
+    }
+    if (needsPlaceholder && commands.length === startLen) {
+      commands.push({
+        argv: ['true'],
+        envVars: [],
+        redirects: [],
+        text: node.text,
+        hasUnquotedGlob: hasUnquotedGlobInText(node.text),
+      })
     }
     return null
   }
@@ -2538,6 +2566,40 @@ function isDangerousForLoopVar(name: string): boolean {
   if (densableYPgIsDangerousVar(name)) return true
   if (DENSABLE_VWS.has(name)) return true
   if (DENSABLE_OVU.has(name)) return true
+  return false
+}
+
+const UNQUOTED_GLOB_CHARS = '*?['
+
+function nodeHasUnquotedGlob(node: Node): boolean {
+  switch (node.type) {
+    case 'word':
+    case 'number':
+      for (let i = 0; i < node.text.length; i++) {
+        if (node.text[i] === '\\') {
+          i++
+        } else if (UNQUOTED_GLOB_CHARS.includes(node.text[i]!)) {
+          return true
+        }
+      }
+      return false
+    case 'string':
+    case 'raw_string':
+    case 'simple_expansion':
+    case 'arithmetic_expansion':
+      return false
+    case 'concatenation':
+      return node.children.some(c => c !== null && nodeHasUnquotedGlob(c))
+    default:
+      return true
+  }
+}
+
+function containsArithmeticExpansion(node: Node): boolean {
+  if (node.type === 'arithmetic_expansion') return true
+  for (const child of node.children) {
+    if (child && containsArithmeticExpansion(child)) return true
+  }
   return false
 }
 

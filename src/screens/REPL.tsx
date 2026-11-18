@@ -603,6 +603,8 @@ import {
   formatDeferMonitorCancelToast,
   formatDeferSkipAbandonToast,
   isLeftArrowDeferStickyQueueCmd,
+  LEFT_ARROW_IHT_DRAFT_TOAST,
+  LEFT_ARROW_STOPPED_TURN_TOAST,
   type LeftArrowConfirmState,
 } from '../utils/leftArrowConfirm.js';
 import { isPersistenceSuppressed } from '../utils/sessionPersistenceStatus.js';
@@ -4389,6 +4391,35 @@ export function REPL({
     proceed: () => Promise<string>;
   };
   const leftArrowDeferRef = useRef<LeftArrowDeferArm | null>(null);
+  const hasPendingQuestionRef = useRef(false);
+  hasPendingQuestionRef.current =
+    toolUseConfirmQueue.length > 0 ||
+    elicitation.queue.length > 0 ||
+    Boolean(pendingWorkerRequest) ||
+    workerSandboxPermissions.queue.length > 0;
+  // Official 2.1.295 (#382): show "Pending wakeup cancelled" when Esc cancels a pending /loop wakeup.
+  useEffect(() => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const {
+        subscribeLoopWakeupsCancelled,
+        LOOP_WAKEUP_CANCELLED_NOTIFICATION_KEY,
+        LOOP_WAKEUP_CANCELLED_NOTIFICATION_TEXT,
+      } = require('../utils/loopDynamic.js') as typeof import('../utils/loopDynamic.js');
+      return subscribeLoopWakeupsCancelled(event => {
+        if (event.reason === 'user_abort' && event.loopsCancelled > 0) {
+          addNotification({
+            key: LOOP_WAKEUP_CANCELLED_NOTIFICATION_KEY,
+            text: LOOP_WAKEUP_CANCELLED_NOTIFICATION_TEXT,
+            priority: 'immediate',
+            timeoutMs: 8000,
+          });
+        }
+      });
+    } catch {
+      return undefined;
+    }
+  }, [addNotification]);
   // densable jpt — leftArrowToAgentsFired (qpe in flight / post-query latch)
   const leftArrowToAgentsFired = useRef(false);
   // densable _r — LAc confirm open (iHt/HUo). Gold syncs via useEffect on Tt.
@@ -4621,13 +4652,30 @@ export function REPL({
     localJSXClosedAtRef.current = 0;
 
     // densable onCancel: clearCapTimer + Ki.current=null before forceEnd
+    // Official 2.1.295 (#349): notify "Backgrounding cancelled — the turn was stopped."
     const deferArm = leftArrowDeferRef.current;
     if (deferArm) {
       deferArm.clearCapTimer();
       leftArrowDeferRef.current = null;
+      addNotification({
+        key: 'left-arrow-defer',
+        text: LEFT_ARROW_STOPPED_TURN_TOAST,
+        color: 'warning',
+        priority: 'immediate',
+      });
     }
 
     logForDebugging(`[onCancel] focusedInputDialog=${focusedInputDialog} streamMode=${streamMode}`);
+
+    // Official 2.1.295 (#382): ensure direct onCancel also cancels pending /loop wakeups.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { cancelLoopWakeupsOnUserAbort } =
+        require('../utils/loopDynamic.js') as typeof import('../utils/loopDynamic.js');
+      cancelLoopWakeupsOnUserAbort('user_abort');
+    } catch {
+      // loopDynamic may be unavailable in partial test mocks
+    }
 
     // Pause proactive mode so the user gets control back.
     // It will resume when they submit their next input (see onSubmit).
@@ -5014,7 +5062,28 @@ export function REPL({
         appendSystemPrompt,
         appendSubagentSystemPrompt,
         mcpConnections,
-        shouldStopBeforeNextApiCall: () => leftArrowDeferRef.current !== null,
+        shouldStopBeforeNextApiCall: () => {
+          const arm = leftArrowDeferRef.current;
+          if (
+            arm !== null &&
+            inputValueRef.current.trim() !== '' &&
+            getFeatureValue_CACHED_MAY_BE_STALE('tengu_keen_sloth', true)
+          ) {
+            arm.clearCapTimer();
+            leftArrowDeferRef.current = null;
+            addNotification({
+              key: 'left-arrow-defer',
+              text: LEFT_ARROW_IHT_DRAFT_TOAST,
+              color: 'warning',
+              priority: 'immediate',
+            });
+            logEvent('tengu_defer_boundary_cancelled_draft', {
+              site: 'loop_top' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              wait_ms: Date.now() - arm.armedAtMs,
+            });
+          }
+          return leftArrowDeferRef.current !== null;
+        },
         taskRegistry,
         setAppState,
         setSessionToolPermissionContext,
@@ -6299,10 +6368,18 @@ export function REPL({
     }));
   }, [queuedCommands.length]);
 
+  const pendingPastesRef = useRef<string[]>([]);
+  const takePendingPastes = useCallback(() => pendingPastesRef.current.splice(0), []);
+
   // Process queued commands when query completes and queue has items
 
   const executeQueuedInput = useCallback(
     async (queuedCommands: QueuedCommand[]) => {
+      // Official 2.1.296 (#518): do not drain queued prompts in the foreground
+      // while a ← background handoff is in flight.
+      if (leftArrowToAgentsFired.current || leftArrowDeferRef.current !== null || leftArrowConfirmOpenRef.current) {
+        return;
+      }
       await submitController.executeQueuedInput(queuedCommands, {
         commands,
         mainLoopModel,
@@ -8372,6 +8449,31 @@ export function REPL({
                                           }
                                           const mre = abortControllerRef.current;
                                           if (mre && !mre.signal.aborted && queryGuard.isActive) {
+                                            if (inputValueRef.current.trim() !== '') {
+                                              logEvent('tengu_defer_cap_cancelled_draft', {
+                                                wait_ms: Date.now() - armedAtMs,
+                                              });
+                                              leftArrowDeferRef.current = null;
+                                              addNotification({
+                                                key: 'left-arrow-defer',
+                                                text: 'Backgrounding cancelled \u2014 you have unsent text in the input. Send it or clear it, then press \u2190 again.',
+                                                color: 'warning',
+                                                priority: 'immediate',
+                                              });
+                                              return;
+                                            }
+                                            if (hasPendingQuestionRef.current) {
+                                              logEvent('tengu_defer_cap_refused_ask', {
+                                                wait_ms: Date.now() - armedAtMs,
+                                              });
+                                              addNotification({
+                                                key: 'left-arrow-defer',
+                                                text: 'Still backgrounding after the current tool \u2014 a question is waiting for your answer.',
+                                                color: 'suggestion',
+                                                priority: 'immediate',
+                                              });
+                                              return;
+                                            }
                                             leftArrowDeferRef.current = null;
                                             void fireLeftArrowOpenAgents(arm.confirmedInterstitial, {
                                               forceVia: 'abort-then-fork',
@@ -8454,6 +8556,23 @@ export function REPL({
                                       };
                                       // densable qpe: jpt.current=!0; return vHy(...)
                                       leftArrowToAgentsFired.current = true;
+                                      // Official 2.1.296 (#547): stop any turn or ! command started while
+                                      // the session moves to the background instead of finishing out of sight.
+                                      const lateAc = abortControllerRef.current;
+                                      if (lateAc && !lateAc.signal.aborted && lateAc !== abortAfterFlush) {
+                                        lateAc.abort('background');
+                                      }
+                                      // Official 2.1.296 (#519): save queued prompts' historyEntry (e.g.
+                                      // sent while SessionStart hooks were running) so ↑ brings them back.
+                                      for (const qCmd of messageQueue.getCommands()) {
+                                        if (qCmd.historyEntry) {
+                                          try {
+                                            addToHistory(qCmd.historyEntry);
+                                          } catch {
+                                            /* best-effort history save */
+                                          }
+                                        }
+                                      }
                                       const { isLeftArrowDaemonDetachOnly, openAgentsViaLeftArrow } = await import(
                                         '../cli/bg/leftArrowAgents.js'
                                       );
@@ -8514,6 +8633,7 @@ export function REPL({
                                   }
                                 : undefined
                             }
+                            takePendingPastes={takePendingPastes}
                             insertTextRef={feature('VOICE_MODE') ? insertTextRef : undefined}
                             voiceInterimRange={voice.interimRange}
                           />

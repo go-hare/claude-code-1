@@ -173,6 +173,11 @@ export class RemoteSessionManager {
    */
   private seenControlResponseIds: Set<string> = new Set()
   /**
+   * 2.1.292 #233: retiredPermissionRequestIds — permission request_ids
+   * already answered or cancelled here so large-transcript replays don't re-arm.
+   */
+  private retiredPermissionRequestIds: Set<string> = new Set()
+  /**
    * gold `pendingServedRequests` — inbound `Cle` subtypes in hand.
    */
   private pendingServedRequests = new Map<
@@ -288,7 +293,7 @@ export class RemoteSessionManager {
       logForDebugging(
         `[RemoteSessionManager] Permission request cancelled: ${request_id}`,
       )
-      this.pendingPermissionRequests.delete(request_id)
+      this.retirePermissionRequest(request_id)
       this.callbacks.onPermissionCancelled?.(
         request_id,
         pendingRequest.tool_use_id,
@@ -305,7 +310,7 @@ export class RemoteSessionManager {
 
       const pendingPerm = this.pendingPermissionRequests.get(requestId)
       if (pendingPerm) {
-        this.pendingPermissionRequests.delete(requestId)
+        this.retirePermissionRequest(requestId)
         logForDebugging(
           `[RemoteSessionManager] Permission request ${requestId} answered elsewhere — dismissing`,
         )
@@ -376,6 +381,12 @@ export class RemoteSessionManager {
     }
   }
 
+  /** SEA retirePermissionRequest (2.1.292 #233) — delete pending & mark retired. */
+  private retirePermissionRequest(requestId: string): void {
+    this.pendingPermissionRequests.delete(requestId)
+    this.retiredPermissionRequestIds.add(requestId)
+  }
+
   /** densable recordSeenControlResponseId — FIFO-capped set (y5b=1000). */
   private recordSeenControlResponseId(requestId: string): void {
     this.seenControlResponseIds.add(requestId)
@@ -398,6 +409,18 @@ export class RemoteSessionManager {
 
     if (inner.subtype === 'can_use_tool') {
       const perm = inner as SDKControlPermissionRequest
+      if (this.pendingPermissionRequests.has(requestId)) {
+        logForDebugging(
+          `[RemoteSessionManager] Duplicate permission request ${requestId} — already pending, skipping`,
+        )
+        return
+      }
+      if (this.retiredPermissionRequestIds.has(requestId)) {
+        logForDebugging(
+          `[RemoteSessionManager] Permission request ${requestId} arrived again after it was retired here — not arming it`,
+        )
+        return
+      }
       logForDebugging(
         `[RemoteSessionManager] Permission request for tool: ${perm.tool_name}`,
       )
@@ -671,7 +694,8 @@ export class RemoteSessionManager {
       return
     }
 
-    this.pendingPermissionRequests.delete(requestId)
+    this.retirePermissionRequest(requestId)
+    this.recordSeenControlResponseId(requestId)
 
     const response: SDKControlResponse = {
       type: 'control_response',

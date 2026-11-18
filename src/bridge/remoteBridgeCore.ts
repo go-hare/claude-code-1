@@ -1669,7 +1669,6 @@ export async function initEnvLessBridgeCore(
           if (!tornDown) onStateChange?.('failed', SESSION_TELEPORTED_DETAIL)
           return
         }
-        initialFlushDone = false
         const rebuilt = await rebuildTransport(
           result,
           code === 401 ? 'auth_401_recovery' : 'proactive_refresh',

@@ -9,6 +9,7 @@ import { getIsNonInteractiveSession } from '../../bootstrap/state.js';
 import { getInitialSettings, updateSettingsForSource } from '../../utils/settings/settings.js';
 import { isSettingSourceEnabled } from '../../utils/settings/constants.js';
 import { escapeOutputStyleName } from '../../utils/xml.js';
+import { saveOutputStyleWithConfigSetHook } from './index.js';
 
 const SAVE_FAILURE_OFF_BOX = "Couldn't save the output style (detail withheld on this connection).";
 const CUSTOM_CURRENT_STYLE_PLACEHOLDER = 'a custom style';
@@ -64,13 +65,36 @@ export const call: LocalCommandCall = async (args, context) => {
     return { type: 'text', value: LOCAL_SETTINGS_DISABLED };
   }
 
-  const saved = updateSettingsForSource('localSettings', { outputStyle: match }, context.storageV5);
-  if (saved.error) {
+  let saveError: Error | undefined;
+  const hookResult = await saveOutputStyleWithConfigSetHook(
+    match,
+    current,
+    finalStyle => {
+      const saved = updateSettingsForSource('localSettings', { outputStyle: finalStyle }, context.storageV5);
+      saveError = saved.error ?? undefined;
+    },
+    context.abortController?.signal,
+  );
+  if (hookResult.kind === 'refused') {
     return {
       type: 'text',
       value: getIsNonInteractiveSession()
         ? SAVE_FAILURE_OFF_BOX
-        : `Could not save output style: ${saved.error.message}`,
+        : saveError
+          ? `Could not save output style: ${saveError.message}`
+          : (hookResult.reason ?? 'Could not save output style'),
+    };
+  }
+  if (saveError) {
+    return {
+      type: 'text',
+      value: getIsNonInteractiveSession() ? SAVE_FAILURE_OFF_BOX : `Could not save output style: ${saveError.message}`,
+    };
+  }
+  if (hookResult.saved !== match) {
+    return {
+      type: 'text',
+      value: `Output style set to ${escapeOutputStyleName(hookResult.saved)}`,
     };
   }
 

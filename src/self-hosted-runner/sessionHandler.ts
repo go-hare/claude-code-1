@@ -96,7 +96,13 @@ import {
   notifyChildSessionGone,
   postSessionFailureResult,
 } from './sessionFailure.js'
-import { governedSigningEntries, governedGitSpawn } from './gitConfigure.js'
+import {
+  createGitTlsSessionState,
+  formatRunnerMountTlsWarning,
+  governedSigningEntries,
+  governedGitSpawn,
+  prepareGitTlsTrustBundle,
+} from './gitConfigure.js'
 import { truncateSessionErrorText } from './sessionText.js'
 import {
   addSessionWorktree,
@@ -833,6 +839,19 @@ export async function handleSession(
           '[runner:warn] --push-outcome-on-release under governed git pushes to the PLAIN upstream URL with customer-managed credentials (the governed mount is read-only and the session relay ends with the child). If no ambient git credential covers the push target, the release-time push will fail naming this flag.',
         )
       }
+      const gitTlsState = createGitTlsSessionState(
+        process.env,
+        process.platform === 'win32',
+        { mountBaseUrl: governed.mountBaseUrl },
+        join(sessionDir, 'runner-trust-bundle.pem'),
+        multiCap,
+      )
+      await prepareGitTlsTrustBundle(gitTlsState, async () => ({
+        status: 'unavailable',
+        reason: 'bundle_write_failed',
+      }))
+      const mountTlsWarning = formatRunnerMountTlsWarning(gitTlsState)
+      if (mountTlsWarning) onStatus(mountTlsWarning)
     }
     const anthropicProxy = governed ? undefined : opts.anthropicGitProxyBaseUrl
 

@@ -87,29 +87,79 @@ export type BriefUploadContext = {
   signal?: AbortSignal
 }
 
+export type BriefUploadOutcome =
+  | { fileUuid: string }
+  | { error: string; suspectedLimitBytes?: number }
+
+/** SEA `uHr` = 30 MiB floor for suspected-limit reporting on unnamed failures. */
+export const SUSPECTED_UPLOAD_LIMIT_BYTES = 31_457_280
+const SUSPECTED_LIMIT_HTTP_STATUSES = new Set([502, 503, 504, 507, 520, 524])
+const UPLOAD_TIMEOUT_RE =
+  /^upload failed: (?:network error \(|the connection closed before the server answered$|the server did not answer within \d|the transfer stalled \()/
+const UPLOAD_INVALID_URL_OR_CERT_RE = /\bInvalid URL\b|certificate/i
+
+function formatMiB(bytes: number): string {
+  const mib = bytes / 1_048_576
+  return `${Number.isInteger(mib) ? mib : mib.toFixed(1)} MiB`
+}
+
 /**
- * Upload a single attachment. Returns file_uuid on success, undefined otherwise.
- * Every early-return is intentional graceful degradation.
+ * SEA `zxo` + `Be` + `fHr` — format bridge upload failure so large-file
+ * unnamed/transient failures tell Claude to report the failure instead of
+ * shrinking the file.
  */
-export async function uploadBriefAttachment(
+export function formatLargeFileUploadFailure(opts: {
+  size: number
+  uploadError: string
+  suspectedLimitBytes?: number
+}): string {
+  if (opts.uploadError === 'upload aborted') {
+    return 'upload aborted — the turn was stopped before the upload finished, which says nothing about the file or the network. Send the file again if the user still wants it'
+  }
+  const hasSuspectedLimit =
+    typeof opts.suspectedLimitBytes === 'number' &&
+    Number.isSafeInteger(opts.suspectedLimitBytes) &&
+    opts.suspectedLimitBytes > 0
+  const isUnknownOrTransient =
+    SUSPECTED_LIMIT_HTTP_STATUSES.has(
+      Number(/server returned (\d+)/.exec(opts.uploadError)?.[1]),
+    ) ||
+    (UPLOAD_TIMEOUT_RE.test(opts.uploadError) &&
+      !UPLOAD_INVALID_URL_OR_CERT_RE.test(opts.uploadError))
+  if (
+    hasSuspectedLimit &&
+    opts.size > SUSPECTED_UPLOAD_LIMIT_BYTES &&
+    isUnknownOrTransient
+  ) {
+    return `${opts.uploadError} — the cause is unknown and may pass. If the same file fails like this again, it may be over the upload limit that applies to this session, which was not named and is never under ${formatMiB(SUSPECTED_UPLOAD_LIMIT_BYTES)}. Report this failure to the user instead of shrinking the file.`
+  }
+  return opts.uploadError
+}
+
+/**
+ * Upload a single attachment and return either `fileUuid` or structured error.
+ */
+export async function uploadBriefAttachmentWithStatus(
   fullPath: string,
   size: number,
   ctx: BriefUploadContext,
-): Promise<string | undefined> {
-  // Positive pattern so bun:bundle eliminates the entire body from
-  // non-BRIDGE_MODE builds (negative `if (!feature(...)) return` does not).
+): Promise<BriefUploadOutcome> {
   if (feature('BRIDGE_MODE')) {
-    if (!ctx.replBridgeEnabled) return undefined
+    if (!ctx.replBridgeEnabled) {
+      return { error: 'upload failed: bridge is not enabled' }
+    }
 
     if (size > MAX_UPLOAD_BYTES) {
       debug(`skip ${fullPath}: ${size} bytes exceeds ${MAX_UPLOAD_BYTES} limit`)
-      return undefined
+      return {
+        error: `upload failed: file exceeds maximum upload size of ${formatMiB(MAX_UPLOAD_BYTES)}`,
+      }
     }
 
     const token = getBridgeAccessToken()
     if (!token) {
       debug('skip: no oauth token')
-      return undefined
+      return { error: 'upload failed: no OAuth token available' }
     }
 
     let content: Buffer
@@ -127,7 +177,7 @@ export async function uploadBriefAttachment(
         const st = await handle.stat({ bigint: true })
         if (!st.isFile()) {
           debug(`skip ${fullPath}: not a regular file`)
-          return undefined
+          return { error: 'upload failed: path is not a regular file' }
         }
         content = await handle.readFile()
       } finally {
@@ -135,7 +185,9 @@ export async function uploadBriefAttachment(
       }
     } catch (e) {
       debug(`read failed for ${fullPath}: ${e}`)
-      return undefined
+      return {
+        error: `upload failed: could not read file (${e instanceof Error ? e.message : String(e)})`,
+      }
     }
 
     const baseUrl = getBridgeBaseUrl()
@@ -144,8 +196,6 @@ export async function uploadBriefAttachment(
     const mimeType = guessMimeType(filename)
     const boundary = `----FormBoundary${randomUUID()}`
 
-    // Manual multipart — same pattern as filesApi.ts. The oauth endpoint takes
-    // a single "file" part (no "purpose" field like the public Files API).
     const body = Buffer.concat([
       Buffer.from(
         `--${boundary}\r\n` +
@@ -172,7 +222,14 @@ export async function uploadBriefAttachment(
         debug(
           `upload failed for ${fullPath}: status=${response.status} body=${jsonStringify(response.data).slice(0, 200)}`,
         )
-        return undefined
+        const error = `upload failed: server returned ${response.status}`
+        if (
+          SUSPECTED_LIMIT_HTTP_STATUSES.has(response.status) &&
+          size > SUSPECTED_UPLOAD_LIMIT_BYTES
+        ) {
+          return { error, suspectedLimitBytes: SUSPECTED_UPLOAD_LIMIT_BYTES }
+        }
+        return { error }
       }
 
       const parsed = uploadResponseSchema().safeParse(response.data)
@@ -180,15 +237,35 @@ export async function uploadBriefAttachment(
         debug(
           `unexpected response shape for ${fullPath}: ${parsed.error.message}`,
         )
-        return undefined
+        return { error: 'upload failed: unexpected server response' }
       }
 
       debug(`uploaded ${fullPath} → ${parsed.data.file_uuid} (${size} bytes)`)
-      return parsed.data.file_uuid
+      return { fileUuid: parsed.data.file_uuid }
     } catch (e) {
       debug(`upload threw for ${fullPath}: ${e}`)
-      return undefined
+      const aborted = ctx.signal?.aborted === true
+      const error = aborted
+        ? 'upload aborted'
+        : `upload failed: network error (${e instanceof Error ? e.message : String(e)})`
+      if (!aborted && size > SUSPECTED_UPLOAD_LIMIT_BYTES) {
+        return { error, suspectedLimitBytes: SUSPECTED_UPLOAD_LIMIT_BYTES }
+      }
+      return { error }
     }
   }
-  return undefined
+  return { error: 'upload failed: bridge mode disabled' }
+}
+
+/**
+ * Upload a single attachment. Returns file_uuid on success, undefined otherwise.
+ * Every early-return is intentional graceful degradation.
+ */
+export async function uploadBriefAttachment(
+  fullPath: string,
+  size: number,
+  ctx: BriefUploadContext,
+): Promise<string | undefined> {
+  const outcome = await uploadBriefAttachmentWithStatus(fullPath, size, ctx)
+  return 'fileUuid' in outcome ? outcome.fileUuid : undefined
 }

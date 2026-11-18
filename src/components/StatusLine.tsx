@@ -332,8 +332,15 @@ const STATUSLINE_ANSI_CARRY_RE =
   // biome-ignore lint/suspicious/noControlCharactersInRegex: carry SGR and OSC-8 sequences across statusline lines
   /\x1b\[[\d;]*m|\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)/g;
 
+const STATUSLINE_BIDI_RE = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+
+export function sanitizeStatusLineText(text: string): string {
+  return text.replaceAll('\t', '    ').replace(STATUSLINE_BIDI_RE, '');
+}
+
 export function splitStatusLineOutput(text: string): string[] {
-  const lines = text.split('\n');
+  const sanitized = sanitizeStatusLineText(text);
+  const lines = sanitized.split('\n');
   if (lines.length === 1) return lines;
   const result = [lines[0]!];
   let carriedAnsi = '';
@@ -349,7 +356,7 @@ function StatusLineOutput({ text }: { text: string }): React.ReactNode {
   if (lines.length === 1) {
     return (
       <Text dimColor wrap="truncate">
-        <Ansi>{text}</Ansi>
+        <Ansi>{lines[0]!}</Ansi>
       </Text>
     );
   }

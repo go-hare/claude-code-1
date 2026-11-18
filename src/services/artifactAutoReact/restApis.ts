@@ -54,7 +54,10 @@ const ASSET_CONTENT_TYPE_RE = /^[a-z0-9]{1,24}\/[a-z0-9.+-]{1,80}$/
 const ASSET_SHA256_RE = /^[0-9a-f]{64}$/
 
 /** densable _Gi keys. */
-const ASSET_EXTS = new Set(ARTIFACT_ASSET_CONTENT_TYPES.keys())
+let assetExtsCache: Set<string> | undefined
+function getAssetExts(): Set<string> {
+  return (assetExtsCache ??= new Set(ARTIFACT_ASSET_CONTENT_TYPES.keys()))
+}
 
 export type AssetRow = {
   id: string
@@ -397,7 +400,7 @@ export async function uploadArtifactAsset(input: {
   }
   const ext = extname(input.filePath).toLowerCase()
   const contentType = ARTIFACT_ASSET_CONTENT_TYPES.get(ext)
-  if (!ASSET_EXTS.has(ext) || contentType === undefined) {
+  if (!getAssetExts().has(ext) || contentType === undefined) {
     return {
       kind: 'error',
       code: 'unsupported_type',

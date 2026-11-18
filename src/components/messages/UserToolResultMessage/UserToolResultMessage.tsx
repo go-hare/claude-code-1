@@ -263,6 +263,11 @@ function UserToolResultMessageBody({
     return wrap(<UserToolCanceledMessage />);
   }
 
+  const isInterrupted =
+    typeof param.content !== 'string' ||
+    !(param.content.startsWith(REJECT_MESSAGE) || param.content.startsWith(REJECT_MESSAGE_WITH_REASON_PREFIX));
+  const toolDenialKind = (rewrittenMessage as { toolDenialKind?: string }).toolDenialKind;
+
   if (
     (typeof param.content === 'string' &&
       (param.content.startsWith(REJECT_MESSAGE) ||
@@ -280,6 +285,7 @@ function UserToolResultMessageBody({
         style={style}
         verbose={verbose}
         isTranscriptMode={isTranscriptMode}
+        isInterrupted={isInterrupted}
       />,
     );
   }
@@ -312,6 +318,7 @@ function UserToolResultMessageBody({
         output={rewrittenMessage.toolUseResult}
         verbose={verbose}
         isTranscriptMode={isTranscriptMode}
+        toolDenialKind={toolDenialKind}
       />,
     );
   }

@@ -373,6 +373,10 @@ export function formatDeferMonitorCancelToast(newMonitorCount: number): string {
   return `Backgrounding cancelled — ${n} Artifact comment ${plural(n, 'monitor')} started after you pressed ←. Press ← again to review and confirm.`
 }
 
+/** densable fuo = ZMn("the turn was stopped") — #349. */
+export const LEFT_ARROW_STOPPED_TURN_TOAST =
+  'Backgrounding cancelled — the turn was stopped.'
+
 /**
  * densable Swh / Ko — LAc when abandonable, parked monitors, or running workflow agents.
  */

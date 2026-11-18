@@ -7,9 +7,14 @@
 // tears everything down.
 
 import type { FSWatcher } from 'chokidar'
+import { lstat } from 'fs/promises'
+import { join } from 'path'
 import {
+  getProjectRoot,
   getScheduledTasksEnabled,
   getSessionCronTasks,
+  getSessionId,
+  onSessionSwitch,
   removeSessionCronTasks,
   setScheduledTasksEnabled,
 } from '../bootstrap/state.js'
@@ -24,24 +29,81 @@ import {
   DEFAULT_CRON_JITTER_CONFIG,
   findMissedTasks,
   getCronFilePath,
+  getOwnProcStartToken,
   hasCronTasksSync,
   jitteredNextCronRunMs,
   markCronTasksFired,
   oneShotJitteredNextCronRunMs,
+  peekOwnProcStartToken,
   readCronTasks,
   removeCronTasks,
+  writeCronTasks,
 } from './cronTasks.js'
 import {
   releaseSchedulerLock,
   tryAcquireSchedulerLock,
 } from './cronTasksLock.js'
 import { logForDebugging } from './debug.js'
+import { getErrnoCode } from './errors.js'
+import { getProcessStartTime, isProcessRunning } from './genericProcessUtils.js'
+import { getProjectDir } from './sessionStoragePortable.js'
+import { validateUuid } from './uuid.js'
 
 const CHECK_INTERVAL_MS = 1000
 const FILE_STABILITY_MS = 300
 // How often a non-owning session re-probes the scheduler lock. Coarse
 // because takeover only matters when the owning session has crashed.
 const LOCK_PROBE_INTERVAL_MS = 5000
+const PID_TOKEN_CACHE_TTL_MS = 60_000
+
+function canonicalizeProjectPath(p: string): string {
+  const normalized = p.replaceAll('\\', '/')
+  return process.platform === 'win32' || process.platform === 'darwin'
+    ? normalized.toLowerCase()
+    : normalized
+}
+
+async function findTranscriptSessions(
+  tasks: CronTask[],
+  currentSessionId: string | undefined,
+  projectRoot: string,
+): Promise<Set<string>> {
+  const projectDir = getProjectDir(projectRoot)
+  const found = new Set<string>()
+  const toCheck = new Set<string>()
+  for (const { createdBySessionId } of tasks) {
+    if (
+      createdBySessionId !== undefined &&
+      createdBySessionId !== currentSessionId
+    ) {
+      toCheck.add(createdBySessionId)
+    }
+  }
+  await Promise.all(
+    Array.from(toCheck, async sid => {
+      if (validateUuid(sid) === null) return
+      const exists = await lstat(join(projectDir, `${sid}.jsonl`)).then(
+        stat => stat.isFile(),
+        err => {
+          const code = getErrnoCode(err)
+          if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+            logForDebugging(
+              `[ScheduledTasks] could not look for a transcript of task creator ${sid} (${code}); treating it as not found`,
+            )
+          }
+          return false
+        },
+      )
+      if (exists) found.add(sid)
+    }),
+  )
+  if (found.size < toCheck.size) {
+    logForDebugging(
+      `[ScheduledTasks] found no transcript in ${projectDir} for ${toCheck.size - found.size} other session(s) named in scheduled_tasks.json (a file copied from another checkout looks like this); this session will not run their tasks`,
+    )
+  }
+  return found
+}
 /**
  * True when a recurring task was created more than `maxAgeMs` ago and should
  * be deleted on its next fire. Permanent tasks never age. `maxAgeMs === 0`
@@ -188,6 +250,69 @@ export function createCronScheduler(
   let stopped = false
   let isOwner = false
 
+  // Gold N8o (#212): track all session IDs visited by this process across
+  // /resume, /branch, /clear so file-backed tasks created earlier in this
+  // process remain owned by it even when another session holds the lock.
+  const lockSessionId = dir !== undefined ? lockIdentity : getSessionId()
+  const sessionIds = new Set<string>()
+  let unsubscribeSessionSwitch: (() => void) | null = null
+  let transcriptSessions = new Set<string>()
+  let canonicalProjectRoot = ''
+  const pidTokenCache = new Map<
+    number,
+    { at: number; token: string | undefined }
+  >()
+
+  function isPidDeadOrRecycled(
+    pid: number,
+    expectedProcStart: string | undefined,
+  ): boolean {
+    if (!isProcessRunning(pid)) {
+      pidTokenCache.delete(pid)
+      return true
+    }
+    if (expectedProcStart === undefined) return false
+    const now = Date.now()
+    let cached = pidTokenCache.get(pid)
+    if (!cached || now - cached.at >= PID_TOKEN_CACHE_TTL_MS) {
+      cached = { at: now, token: getProcessStartTime(pid) }
+      pidTokenCache.set(pid, cached)
+    }
+    return cached.token !== undefined && cached.token !== expectedProcStart
+  }
+
+  function isSameProject(t: CronTask): boolean {
+    if (t.createdInProject !== undefined) {
+      return (
+        canonicalizeProjectPath(t.createdInProject) === canonicalProjectRoot
+      )
+    }
+    return (
+      t.createdBySessionId !== undefined &&
+      transcriptSessions.has(t.createdBySessionId)
+    )
+  }
+
+  function canRunTask(t: CronTask): boolean {
+    if (t.createdBySessionId === undefined) return isOwner
+    if (t.createdBySessionId === lockSessionId) return true
+    if (
+      sessionIds.has(t.createdBySessionId) &&
+      t.createdByPid === process.pid &&
+      (t.createdByProcStart === undefined
+        ? t.createdAt >= performance.timeOrigin
+        : t.createdByProcStart === peekOwnProcStartToken())
+    ) {
+      return true
+    }
+    return (
+      isOwner &&
+      isSameProject(t) &&
+      (t.createdByPid === undefined ||
+        isPidDeadOrRecycled(t.createdByPid, t.createdByProcStart))
+    )
+  }
+
   function removeFileTasks(toRemove: CronTask[]): void {
     if (toRemove.length === 0) return
     void removeCronTasks(
@@ -202,8 +327,16 @@ export function createCronScheduler(
 
   async function load(initial: boolean) {
     const next = await readCronTasks(dir)
+    const projectRoot = dir ?? getProjectRoot()
+    const foundSessions = await findTranscriptSessions(
+      next.filter(t => t.createdInProject === undefined),
+      lockSessionId,
+      projectRoot,
+    )
     if (stopped) return
     tasks = next
+    transcriptSessions = foundSessions
+    canonicalProjectRoot = canonicalizeProjectPath(projectRoot)
 
     // Only surface missed tasks on initial load. Chokidar-triggered
     // reloads leave overdue tasks to check() (which anchors from createdAt
@@ -215,9 +348,31 @@ export function createCronScheduler(
     // missed tasks need user input (run once now, or discard forever).
     if (!initial) return
 
+    let refreshedPids = false
+    for (const t of next) {
+      if (
+        lockSessionId !== undefined &&
+        t.createdBySessionId === lockSessionId &&
+        t.createdByPid !== process.pid
+      ) {
+        t.createdByPid = process.pid
+        t.createdByProcStart = getOwnProcStartToken()
+        refreshedPids = true
+      }
+    }
+    if (refreshedPids) {
+      await writeCronTasks(next, dir).catch(e =>
+        logForDebugging(`[ScheduledTasks] failed to refresh task pids: ${e}`),
+      )
+    }
+
     const now = Date.now()
     const missed = findMissedTasks(next, now).filter(
-      t => !t.recurring && !missedAsked.has(t.id) && (!filter || filter(t)),
+      t =>
+        !t.recurring &&
+        !missedAsked.has(t.id) &&
+        (!filter || filter(t)) &&
+        canRunTask(t),
     )
     if (missed.length > 0) {
       for (const t of missed) {
@@ -371,29 +526,30 @@ export function createCronScheduler(
       }
     }
 
-    // File-backed tasks: only when we own the scheduler lock. The lock
-    // exists to stop two Claude sessions in the same cwd from double-firing
-    // the same on-disk task.
-    if (isOwner) {
-      for (const t of tasks) process(t, false)
-      // Batched lastFiredAt write. inFlight guards against double-fire
-      // during the chokidar-triggered reload (same pattern as removeCronTasks
-      // below) — the reload re-seeds `tasks` with the just-written
-      // lastFiredAt, and first-sight on that yields the same newNext we
-      // already set in-memory, so it's idempotent even without inFlight.
-      // Guarding anyway keeps the semantics obvious.
-      if (firedFileRecurring.length > 0) {
-        for (const id of firedFileRecurring) inFlight.add(id)
-        void markCronTasksFired(firedFileRecurring, now, dir)
-          .catch(e =>
-            logForDebugging(
-              `[ScheduledTasks] failed to persist lastFiredAt: ${e}`,
-            ),
-          )
-          .finally(() => {
-            for (const id of firedFileRecurring) inFlight.delete(id)
-          })
-      }
+    // File-backed tasks: filtered per-task by canRunTask(t) so tasks owned
+    // by this session/process (including across /resume, /branch, /clear)
+    // run even if another session holds the lock, while legacy/dead-PID
+    // same-project tasks run when isOwner is true.
+    for (const t of tasks) {
+      if (canRunTask(t)) process(t, false)
+    }
+    // Batched lastFiredAt write. inFlight guards against double-fire
+    // during the chokidar-triggered reload (same pattern as removeCronTasks
+    // below) — the reload re-seeds `tasks` with the just-written
+    // lastFiredAt, and first-sight on that yields the same newNext we
+    // already set in-memory, so it's idempotent even without inFlight.
+    // Guarding anyway keeps the semantics obvious.
+    if (firedFileRecurring.length > 0) {
+      for (const id of firedFileRecurring) inFlight.add(id)
+      void markCronTasksFired(firedFileRecurring, now, dir)
+        .catch(e =>
+          logForDebugging(
+            `[ScheduledTasks] failed to persist lastFiredAt: ${e}`,
+          ),
+        )
+        .finally(() => {
+          for (const id of firedFileRecurring) inFlight.delete(id)
+        })
     }
     // Session-only tasks: process-private, the lock does not apply — the
     // other session cannot see them and there is no double-fire risk. Read
@@ -531,6 +687,10 @@ export function createCronScheduler(
       logForDebugging(
         `[ScheduledTasks] scheduler start() — enabled=${getScheduledTasksEnabled()}, hasTasks=${hasCronTasksSync()}`,
       )
+      sessionIds.add(getSessionId())
+      unsubscribeSessionSwitch ??= onSessionSwitch(newId => {
+        sessionIds.add(newId)
+      })
       // Auto-enable when scheduled_tasks.json has entries. CronCreateTool
       // also sets this when a task is created mid-session.
       if (
@@ -554,6 +714,8 @@ export function createCronScheduler(
     },
     stop() {
       stopped = true
+      unsubscribeSessionSwitch?.()
+      unsubscribeSessionSwitch = null
       if (enablePoll) {
         clearInterval(enablePoll)
         enablePoll = null
@@ -618,7 +780,7 @@ export function createCronScheduler(
         )
       }
       return (
-        tasks.some(t => due(t, false)) ||
+        tasks.some(t => due(t, false) && canRunTask(t)) ||
         (dir === undefined && getSessionCronTasks().some(t => due(t, true)))
       )
     },

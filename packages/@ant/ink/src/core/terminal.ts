@@ -395,6 +395,15 @@ export function isGhosttyXtversion(): boolean {
   return Jk().xtversionName?.toLowerCase().startsWith('ghostty') ?? false
 }
 
+/** densable `OMi` — XTVERSION iterm2 or tmux (avoids CSI 2J scrollback push in iTerm2). */
+export function isITerm2OrTmuxXtversion(): boolean {
+  const name = Jk().xtversionName?.toLowerCase()
+  return (
+    name !== undefined &&
+    (name.startsWith('iterm2') || name.startsWith('tmux '))
+  )
+}
+
 /**
  * densable `y(r)` — named terminal is yyr allowlist; else `tD().now("extendedKeys")`.
  */

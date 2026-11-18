@@ -278,6 +278,12 @@ export const INTERRUPT_MESSAGE_FOR_PLUGIN_TOOL_USE =
   '[Request interrupted by a plugin for tool use]'
 /** densable `foe` — StreamingToolExecutor user_interrupted toolUseResult. */
 export const USER_REJECTED_TOOL_USE = 'User rejected tool use'
+/**
+ * Official 2.1.296 (#499) `zKn`: tool result text for tool calls interrupted
+ * by session shutdown so resumed subagents are not told the user rejected them.
+ */
+export const SHUTDOWN_INTERRUPTED_TOOL_RESULT_MESSAGE =
+  'The tool call was interrupted before a result was received. It may or may not have completed on the server — verify before assuming it succeeded, and retry if needed.'
 export const CANCEL_MESSAGE =
   "The user doesn't want to take this action right now. STOP what you are doing and wait for the user to tell you how to proceed."
 export const REJECT_MESSAGE =
@@ -1110,6 +1116,82 @@ export function createUserInterruptionMessage({
     interruptedMessageId,
     interruptedByShutdown,
   })
+}
+
+/**
+ * Official 2.1.296 (#499) `P3`: true when a user message was marked
+ * `interruptedByShutdown` and carries at least one `tool_result` block.
+ */
+export function isShutdownInterruptedToolResultMessage(
+  message: Message,
+): boolean {
+  if (message.type !== 'user' || message.interruptedByShutdown !== true) {
+    return false
+  }
+  const content = message.message?.content
+  return (
+    Array.isArray(content) &&
+    content.some(block => block.type === 'tool_result')
+  )
+}
+
+/**
+ * Official 2.1.296 (#499) `HKr`: rewrite a shutdown-interrupted user message
+ * so resumed subagents see `SHUTDOWN_INTERRUPTED_TOOL_RESULT_MESSAGE` instead
+ * of a user-rejection / user-interrupt message.
+ */
+export function rewriteShutdownInterruptedToolResult(
+  message: UserMessage,
+  replacement: string = SHUTDOWN_INTERRUPTED_TOOL_RESULT_MESSAGE,
+): UserMessage {
+  if (
+    message.interruptedByShutdown !== true ||
+    !Array.isArray(message.message.content)
+  ) {
+    return message
+  }
+  if (!isShutdownInterruptedToolResultMessage(message)) {
+    const isToolUseInterrupt = message.message.content.some(
+      block =>
+        block.type === 'text' && block.text === INTERRUPT_MESSAGE_FOR_TOOL_USE,
+    )
+    return isToolUseInterrupt
+      ? {
+          ...message,
+          message: {
+            ...message.message,
+            content: [{ type: 'text', text: INTERRUPT_MESSAGE }],
+          },
+        }
+      : message
+  }
+  return {
+    ...message,
+    toolUseResult: replacement,
+    message: {
+      ...message.message,
+      content: message.message.content.map(block =>
+        block.type === 'tool_result'
+          ? { ...block, content: replacement }
+          : block,
+      ),
+    },
+  }
+}
+
+/**
+ * Official 2.1.296 (#499) `bxn`: rewrite shutdown-interrupted tool_result
+ * messages in a resumed subagent's transcript.
+ */
+export function rewriteResumedSubagentShutdownToolResults(
+  messages: Message[],
+  replacement: string = SHUTDOWN_INTERRUPTED_TOOL_RESULT_MESSAGE,
+): Message[] {
+  return messages.map(msg =>
+    msg.type === 'user' && msg.interruptedByShutdown === true
+      ? rewriteShutdownInterruptedToolResult(msg as UserMessage, replacement)
+      : msg,
+  )
 }
 
 /**
@@ -5773,6 +5855,70 @@ Read the team config to discover your teammates' names. Check the task list peri
         }),
       ])
     }
+    case 'at_mention_reference': {
+      const intro = `The user @-mentioned ${attachment.mentions.join(', ')}`
+      const fallback = `${intro}. File contents are not attached automatically in this session: if these are files or directories in your working directory, read them with your file tools before responding.`
+      switch (attachment.unread) {
+        case 'in_ranges': {
+          const ranges = attachment.ranges
+          if (
+            !Number.isSafeInteger(attachment.fileSize) ||
+            !Number.isSafeInteger(attachment.totalLines) ||
+            !Array.isArray(ranges) ||
+            !ranges.every(
+              r =>
+                typeof r === 'object' &&
+                r !== null &&
+                Number.isSafeInteger(r.offset) &&
+                Number.isSafeInteger(r.limit),
+            )
+          ) {
+            return wrapMessagesInSystemReminder([
+              createUserMessage({ content: fallback, isMeta: true }),
+            ])
+          }
+          return wrapMessagesInSystemReminder([
+            createUserMessage({
+              content: `${intro} (${formatFileSize(attachment.fileSize!)}, ${attachment.totalLines!.toLocaleString('en-US')} lines). Its text is not in this message. Read all of it before you answer. ${FILE_READ_TOOL_NAME} returns at most 25,000 tokens a call, so make these ${ranges.length} ${FILE_READ_TOOL_NAME} calls on that path together, in one reply: ${ranges.map(({ offset, limit }) => `offset ${offset} limit ${limit}`).join('; ')}. Together they return the whole file.`,
+              isMeta: true,
+            }),
+          ])
+        }
+        case 'too_large': {
+          if (
+            attachment.readAllOfIt !== undefined &&
+            attachment.fileSize !== undefined
+          ) {
+            const calls = Math.ceil(attachment.fileSize / 60000)
+            return wrapMessagesInSystemReminder([
+              createUserMessage({
+                content: `${intro} (${formatFileSize(attachment.fileSize)}). It was too large to attach, so you have not seen any of it. Read all of it before you answer, in portions with ${FILE_READ_TOOL_NAME}'s offset and limit, unless the request needs only a part of it, such as one fact that a search can find or a first look at what the file holds. A search shows only the lines that match its words, so it misses what is worded differently. ${attachment.readAllOfIt === 'over_size_limit' ? `${FILE_READ_TOOL_NAME} needs a limit for a file this large, and it returns` : `${FILE_READ_TOOL_NAME} returns`} at most 25,000 tokens a call, about 60 KB of plain text, so the whole file takes about ${calls} ${calls === 1 ? 'call' : 'calls'}. If you answer from searches or from part of the file, tell the user so, and name what you searched for.`,
+                isMeta: true,
+              }),
+            ])
+          }
+          return wrapMessagesInSystemReminder([
+            createUserMessage({
+              content: `${intro}${attachment.fileSize !== undefined ? ` (${formatFileSize(attachment.fileSize)})` : ''}. Its contents were not attached because the file is too large to read all at once. Read it in portions with the offset and limit parameters, starting with a few hundred lines, or search for specific content instead of reading the whole file.`,
+              isMeta: true,
+            }),
+          ])
+        }
+        case 'unexamined': {
+          return wrapMessagesInSystemReminder([
+            createUserMessage({
+              content: `${intro}. They could not be examined and were not attached: if these are files or directories in your working directory, read them with your file tools before responding.`,
+              isMeta: true,
+            }),
+          ])
+        }
+        case undefined: {
+          return wrapMessagesInSystemReminder([
+            createUserMessage({ content: fallback, isMeta: true }),
+          ])
+        }
+      }
+    }
     case 'pdf_reference': {
       return wrapMessagesInSystemReminder([
         createUserMessage({
@@ -5893,6 +6039,9 @@ ${skillsContent}`,
           isMeta: true,
         }),
       ])
+    }
+    case 'withheld_memory': {
+      return []
     }
     case 'relevant_memories': {
       return wrapMessagesInSystemReminder(

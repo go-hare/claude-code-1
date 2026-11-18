@@ -161,11 +161,81 @@ export const SETUP_TOKEN_FORCE_LOGIN_REFUSED_SUFFIX =
 export const INSTALL_GITHUB_APP_FORCE_LOGIN_REFUSED_SUFFIX =
   'This step creates a long-lived Claude.ai subscription token, which this policy does not permit — use an API key instead.'
 
+function getSettingsGatewayUrl(
+  settings: SettingsJson | null | undefined,
+): string | undefined {
+  return settings?.forceLoginMethod === 'gateway'
+    ? settings.forceLoginGatewayUrl
+    : undefined
+}
+
+function hasManagedPolicyForGateway(): boolean {
+  const origin = getPolicySettingsOrigin()
+  const policy = getSettingsForSource('policySettings')
+  return origin !== null || (policy !== null && Object.keys(policy).length > 0)
+}
+
+/**
+ * Official Q0e() (2.1.295 #351):
+ * Return userSettings.forceLoginGatewayUrl when forceLoginMethod is "gateway"
+ * and no managed settings exist on the machine.
+ */
+export function getUserForceLoginGatewayUrl(): string | undefined {
+  const url = getSettingsGatewayUrl(getSettingsForSource('userSettings'))
+  if (!url || hasManagedPolicyForGateway()) {
+    return undefined
+  }
+  return url
+}
+
+/**
+ * Official uR(savedUrl) (2.1.296 #496):
+ * When managed settings pin forceLoginMethod: "gateway" with no
+ * forceLoginGatewayUrl, keep a saved gateway login instead of rejecting it
+ * (unless another pin like forceLoginOrgUUID or a different user URL conflicts).
+ */
+export function shouldRejectSavedGatewayLogin(savedUrl: string): boolean {
+  const policy = getSettingsForSource('policySettings')
+  const managedGatewayWithoutUrl =
+    policy?.forceLoginGatewayUrl === undefined &&
+    policy?.forceLoginMethod === 'gateway'
+  if (managedGatewayWithoutUrl) {
+    if (policy?.forceLoginOrgUUID !== undefined) {
+      return true
+    }
+    const userGatewayUrl = getSettingsGatewayUrl(
+      getSettingsForSource('userSettings'),
+    )
+    if (userGatewayUrl !== undefined) {
+      try {
+        return new URL(userGatewayUrl).origin !== new URL(savedUrl).origin
+      } catch {
+        return userGatewayUrl !== savedUrl
+      }
+    }
+    return false
+  }
+  if (hasManagedPolicyForGateway()) {
+    if (policy?.forceLoginGatewayUrl !== undefined) {
+      try {
+        return (
+          new URL(policy.forceLoginGatewayUrl).origin !==
+          new URL(savedUrl).origin
+        )
+      } catch {
+        return policy.forceLoginGatewayUrl !== savedUrl
+      }
+    }
+    return true
+  }
+  return false
+}
+
 /**
  * densable ConsoleOAuthFlow forceLoginMethod resolution for interactive UI.
  *
- * Admin gateway pin + forceLoginGatewayUrl only when origin is admin-managed.
- * Non-admin merged "gateway" is stripped (same as A9t).
+ * Admin gateway pin + forceLoginGatewayUrl when origin is admin-managed, or
+ * from userSettings on machines with no managed settings (#351).
  */
 export function resolveInteractiveForceLoginMethod(
   forceLoginMethodProp?: ForceLoginMethod,
@@ -177,14 +247,24 @@ export function resolveInteractiveForceLoginMethod(
   const origin = getPolicySettingsOrigin()
   const policy = getSettingsForSource('policySettings')
   const adminGateway =
-    isAdminManagedPolicyOrigin(origin) && policy?.forceLoginMethod === 'gateway'
+    isAdminManagedPolicyOrigin(origin) &&
+    (policy?.forceLoginMethod === 'gateway' ||
+      (policy?.forceLoginGatewayUrl !== undefined &&
+        policy?.forceLoginMethod === undefined))
+  const userGatewayUrl = getUserForceLoginGatewayUrl()
+  const userSettings = getSettingsForSource('userSettings')
+  const userGateway =
+    !hasManagedPolicyForGateway() &&
+    userSettings?.forceLoginMethod === 'gateway'
   const forceLoginGatewayUrl = adminGateway
     ? policy?.forceLoginGatewayUrl
-    : undefined
+    : userGateway
+      ? userGatewayUrl
+      : undefined
 
   const settings = getInitialSettings()
   const fromSettings: ForceLoginMethod | undefined =
-    settings.forceLoginMethod === 'gateway' && !adminGateway
+    settings.forceLoginMethod === 'gateway' && !adminGateway && !userGateway
       ? undefined
       : settings.forceLoginMethod === 'claudeai' ||
           settings.forceLoginMethod === 'console' ||
@@ -192,7 +272,10 @@ export function resolveInteractiveForceLoginMethod(
         ? settings.forceLoginMethod
         : undefined
 
-  const forceLoginMethod = forceLoginMethodProp ?? fromSettings
+  const forceLoginMethod =
+    forceLoginMethodProp ??
+    fromSettings ??
+    (userGateway ? 'gateway' : undefined)
   const gatewayForced =
     forceLoginMethod === 'gateway' || forceLoginGatewayUrl !== undefined
 

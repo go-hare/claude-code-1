@@ -53,8 +53,10 @@ import { resolve } from 'path'
 import {
   checkSecurityRestrictionGate,
   checkStatsigFeatureGate_CACHED_MAY_BE_STALE,
+  getApiBaseUrlHost,
   getDynamicConfig_BLOCKS_ON_INIT,
   getFeatureValue_CACHED_MAY_BE_STALE,
+  getFeatureValueWithSource,
 } from 'src/services/analytics/growthbook.js'
 import {
   addDirHelpMessage,
@@ -598,6 +600,7 @@ export function restoreDangerousPermissions(
   let result = context
   for (const [source, ruleStrings] of Object.entries(stash)) {
     if (!ruleStrings || ruleStrings.length === 0) continue
+    if (!isPermissionUpdateDestination(source as PermissionRuleSource)) continue
     result = applyPermissionUpdate(result, {
       type: 'addRules',
       rules: ruleStrings.map(permissionRuleValueFromString),
@@ -606,6 +609,30 @@ export function restoreDangerousPermissions(
     })
   }
   return { ...result, strippedDangerousRules: undefined }
+}
+
+/**
+ * #206 SEA `a5e`: Clear command-scoped allow rules (`alwaysAllowRules.command`
+ * and `strippedDangerousRules.command`) so a skill/slash-command's `allowed-tools`
+ * rule does not leak back in a later turn after leaving auto or plan mode.
+ */
+export function clearCommandScopedAllowRules(
+  context: ToolPermissionContext,
+): ToolPermissionContext {
+  const stripped = context.strippedDangerousRules
+  if (
+    context.alwaysAllowRules.command === undefined &&
+    stripped?.command === undefined
+  ) {
+    return context
+  }
+  return {
+    ...context,
+    alwaysAllowRules: { ...context.alwaysAllowRules, command: undefined },
+    ...(stripped
+      ? { strippedDangerousRules: { ...stripped, command: undefined } }
+      : {}),
+  }
 }
 
 /** densable kick-out qLe trigger (inAuto only; plan+auto has no qLe) */
@@ -1177,20 +1204,30 @@ export async function initializeToolPermissionContext({
   let parsedDisallowedToolsCli = parseToolListFromCLI(disallowedToolsCli)
 
   // If base tools are specified, automatically deny all tools NOT in the base set
-  // We need to check if base tools were explicitly provided (not just empty default)
+  // via toolsNarrowing (SEA fja / cO / yln) and record toolsKeptByLaunchList.
+  let baseToolsNarrowing: string[] = []
+  let toolsKeptByLaunchList: readonly string[] | undefined
   if (baseToolsCli && baseToolsCli.length > 0) {
+    const joined = baseToolsCli.join(' ').trim()
+    const baseToolsIsPreset =
+      parseToolPreset(joined) !== null ||
+      baseToolsCli.some(t => t.startsWith('preset:default'))
     const baseToolsResult = parseBaseToolsFromCLI(baseToolsCli)
     // Normalize legacy tool names (e.g., 'Task' → 'Agent') so user-provided
     // base tool lists using old names still match canonical names.
     const baseToolsSet = new Set(baseToolsResult.map(normalizeLegacyToolName))
-    const allToolNames = getToolsForDefaultPreset()
+    const allToolNames = baseToolsIsPreset
+      ? getToolsForDefaultPreset()
+      : getAllBaseTools().map(t => t.name)
     // densable 2.1.283: `--tools ""` denies the default preset, but
     // StructuredOutput is an implementation detail for `--json-schema` / SDK
     // output_format json_schema — never put it on the disallow list.
-    const toolsToDisallow = allToolNames.filter(
+    baseToolsNarrowing = allToolNames.filter(
       tool => tool !== SYNTHETIC_OUTPUT_TOOL_NAME && !baseToolsSet.has(tool),
     )
-    parsedDisallowedToolsCli = [...parsedDisallowedToolsCli, ...toolsToDisallow]
+    if (!baseToolsIsPreset) {
+      toolsKeptByLaunchList = Object.freeze([...baseToolsSet])
+    }
   }
 
   // official rrn: if(o)G=se([...G,...Nnt(Unt(),Fnt(U))]) into toolsNarrowing
@@ -1292,14 +1329,13 @@ export async function initializeToolPermissionContext({
   // - chrome/preview classifier floors demote elevated modes for browser MCP
   // - canAutoClassifierRun tracks whether auto-mode gate can run the classifier
   //   (kept in lockstep with isAutoModeAvailable by verifyAutoModeGateAccess)
-  const chromeClassifierFloorEnabled =
-    isEnvTruthy(process.env.CLAUDE_CHROME_CLASSIFIER_FLOOR) ||
-    getFeatureValue_CACHED_MAY_BE_STALE(
-      'tengu_cowork_chrome_automode_default',
-      false,
-    )
+  const chromeClassifierFloorEnabled = resolveChromeClassifierFloorEnabled()
   const previewClassifierFloorEnabled = isEnvTruthy(
     process.env.CLAUDE_PREVIEW_CLASSIFIER_FLOOR,
+  )
+
+  const combinedToolsNarrowing = Array.from(
+    new Set([...baseToolsNarrowing, ...restrictedToolsNarrowing]),
   )
 
   let toolPermissionContext = applyPermissionRulesToPermissionContext(
@@ -1309,8 +1345,8 @@ export async function initializeToolPermissionContext({
       alwaysAllowRules: { cliArg: parsedAllowedToolsCli },
       alwaysDenyRules: {
         cliArg: parsedDisallowedToolsCli,
-        ...(restrictedToolsNarrowing.length > 0
-          ? { toolsNarrowing: restrictedToolsNarrowing }
+        ...(combinedToolsNarrowing.length > 0
+          ? { toolsNarrowing: combinedToolsNarrowing }
           : {}),
       },
       alwaysAskRules: {},
@@ -1332,6 +1368,7 @@ export async function initializeToolPermissionContext({
       ...(isBuiltInToolsDisabledFromCli(baseToolsCli)
         ? { builtInToolsDisabled: true }
         : {}),
+      ...(toolsKeptByLaunchList !== undefined ? { toolsKeptByLaunchList } : {}),
     },
     rulesFromDisk,
   )
@@ -1678,11 +1715,37 @@ export function isAutoModeGateEnabled(): boolean {
 }
 
 /**
+ * #514 SEA `_uo()`: Resolve `chromeClassifierFloorEnabled`.
+ * In cloud sessions (`CLAUDE_CODE_REMOTE`), when feature flags have not loaded
+ * yet (`source !== 'payload'`), fail closed (enabled = true) via `Je(..., {safe: true})`
+ * so Chrome actions are still checked by auto mode.
+ */
+export function resolveChromeClassifierFloorEnabled(): boolean {
+  if (process.env.CLAUDE_CHROME_CLASSIFIER_FLOOR !== undefined) {
+    return isEnvTruthy(process.env.CLAUDE_CHROME_CLASSIFIER_FLOOR)
+  }
+  if (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)) {
+    const { value, source } = getFeatureValueWithSource(
+      'tengu_cowork_chrome_automode_default',
+      true,
+    )
+    const defaultHost = getApiBaseUrlHost() === undefined
+    return value === false && source === 'payload' && defaultHost ? false : true
+  }
+  return getFeatureValue_CACHED_MAY_BE_STALE(
+    'tengu_cowork_chrome_automode_default',
+    false,
+  )
+}
+
+/**
  * Official Kne — reason auto mode is unavailable, or null if available.
  * Order differs slightly from sR: settings → circuit-breaker → provider → model.
  * Synchronous.
  */
-export function getAutoModeUnavailableReason(): AutoModeUnavailableReason | null {
+export function getAutoModeUnavailableReason(
+  model?: string,
+): AutoModeUnavailableReason | null {
   if (isAutoModeDisabledBySettings()) return 'settings'
   if (autoModeStateModule?.isAutoModeCircuitBroken() ?? false) {
     return 'circuit-breaker'
@@ -1690,7 +1753,7 @@ export function getAutoModeUnavailableReason(): AutoModeUnavailableReason | null
   // Official t8t(vn()) — currently always true; keeps 'provider' reason live.
   if (!providerSupportsAutoMode(getAPIProvider())) return 'provider'
   if (feature('TRANSCRIPT_CLASSIFIER')) {
-    if (!modelSupportsAutoMode(getMainLoopModel())) return 'model'
+    if (!modelSupportsAutoMode(model ?? getMainLoopModel())) return 'model'
     return null
   }
   // Classifier feature off — treat as model-unavailable for notification path.

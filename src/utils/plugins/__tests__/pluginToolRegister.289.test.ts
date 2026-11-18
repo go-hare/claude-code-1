@@ -236,8 +236,9 @@ describe('densable 2.1.289 plugin tool register bag + registrar', () => {
     expect(config.type).toBe('http')
     expect(config.scope).toBe('dynamic')
     if (config.type === 'http') {
-      expect(config.url).toContain('127.0.0.1:1234/sec/')
+      expect(config.url).toContain('127.0.0.1:1234/my.plugin')
       expect(config.url).toContain('v=2')
+      expect(config.headers?.Authorization).toBe('Bearer sec')
     }
   })
 

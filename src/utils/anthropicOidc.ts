@@ -540,7 +540,12 @@ export function resolveOidcCredentialsPath(
 /** leftover 239 $Ur fetch wrap — proxy + AbortSignal.timeout(10000). */
 function wrapOidcTokenFetch(fetchFn: FetchLike): FetchLike {
   return (url, init) => {
-    const proxy = getProxyFetchOptions({ forAnthropicAPI: true })
+    const urlStr =
+      typeof url === 'string' ? url : url instanceof URL ? url.href : url.url
+    const proxy = getProxyFetchOptions({
+      forAnthropicAPI: true,
+      url: urlStr,
+    })
     return fetchFn(url, {
       ...init,
       ...proxy,

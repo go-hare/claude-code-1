@@ -25,7 +25,7 @@ and the chart body is written against roles rather than raw hex:
   :root:where(:not([data-theme="light"])) .viz-root {
     color-scheme: dark;
     --surface-1:      #1a1a19;
-    --text-primary:   #ffffff;
+    --text-primary:   #f0efec;
     --text-secondary: #c3c2b7;
     --series-1:       #3987e5;
   }
@@ -33,7 +33,7 @@ and the chart body is written against roles rather than raw hex:
 :root[data-theme="dark"] .viz-root {
   color-scheme: dark;
   --surface-1:      #1a1a19;
-  --text-primary:   #ffffff;
+  --text-primary:   #f0efec;
   --text-secondary: #c3c2b7;
   --series-1:       #3987e5;
 }
@@ -56,8 +56,8 @@ dark surface, not a separate palette:
 | 3 | aqua | `#1baf7a` | `#199e70` |
 | 4 | yellow | `#eda100` | `#c98500` |
 | 5 | magenta | `#e87ba4` | `#d55181` |
-| 6 | green | `#008300` | `#008300` |
-| 7 | violet | `#4a3aa7` | `#9085e9` |
+| 6 | green | `#008300` | `#0ca30c` |
+| 7 | violet | `#6250d6` | `#9085e9` |
 | 8 | red | `#e34948` | `#e66767` |
 
 This order passes every hard gate in both modes on the default *adjacent*
@@ -159,7 +159,7 @@ actually renders on.
 |---|---|---|
 | Chart surface | `#fcfcfb` | `#1a1a19` |
 | Page plane | `#f9f9f7` | `#0d0d0d` |
-| Primary ink | `#0b0b0b` | `#ffffff` |
+| Primary ink | `#0b0b0b` | `#f0efec` |
 | Secondary ink | `#52514e` | `#c3c2b7` |
 | Muted (axis/labels) | `#898781` | `#898781` |
 | Gridline (hairline) | `#e1e0d9` | `#2c2c2a` |

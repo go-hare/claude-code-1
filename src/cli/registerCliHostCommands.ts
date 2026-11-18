@@ -687,6 +687,10 @@ export function registerCliHostCommands(
       'Print one machine-readable result line on stdout instead of the human message (same exit codes; a marketplace-declared command is still shown and must be confirmed — pass -y when not interactive)',
     )
     .option(
+      '--marketplace <source>',
+      "Install <plugin> (its bare name) from the marketplace at this source: owner/repo, a git or https URL, or a path. A marketplace not added yet is added first, in user settings, under the same checks as 'plugin marketplace add'",
+    )
+    .option(
       '--config <key=value>',
       "Set a userConfig option declared in the plugin's manifest, or a bundled .mcpb server's own user_config field as <server>.<key>=<value> (a bare key works when only one bundled server declares it). Repeatable. Values are validated against the schema and stored via the same path as the interactive /plugin configure flow.",
       (value: string, previous: string[]) => [...previous, value],
@@ -702,6 +706,7 @@ export function registerCliHostCommands(
           yes?: boolean
           json?: boolean
           acceptCommand?: string
+          marketplace?: string
           config?: string[]
         },
       ) => {

@@ -90,6 +90,36 @@ function webFetchToolInputToPermissionRuleContent(input: {
   }
 }
 
+const WEB_FETCH_DROPPED_KEYS = [
+  'text_content_token_limit',
+  'html_extraction_method',
+  'web_fetch_pdf_extract_text',
+] as const
+
+/**
+ * SEA `uDn` — drop known stray WebFetch parameters so strict schema accepts them.
+ */
+export function coerceWebFetchInputRaw(input: unknown): {
+  input: Record<string, unknown>
+  shapeClass: string
+} | null {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    return null
+  }
+  const present = WEB_FETCH_DROPPED_KEYS.filter(k => Object.hasOwn(input, k))
+  if (present.length === 0) return null
+  const next: Record<string, unknown> = {
+    ...(input as Record<string, unknown>),
+  }
+  for (const k of present) {
+    delete next[k]
+  }
+  return {
+    input: next,
+    shapeClass: present.map(k => `drop_${k}`).join(','),
+  }
+}
+
 export const WebFetchTool = Object.assign(
   buildTool({
     name: WEB_FETCH_TOOL_NAME,
@@ -117,6 +147,12 @@ export const WebFetchTool = Object.assign(
     },
     get inputSchema(): InputSchema {
       return inputSchema()
+    },
+    coerceInput(input) {
+      const coerced = coerceWebFetchInputRaw(input)
+      if (coerced === null) return null
+      const parsed = inputSchema().safeParse(coerced.input)
+      return parsed.success ? { ...coerced, input: parsed.data } : null
     },
     get outputSchema(): OutputSchema {
       return outputSchema()

@@ -15,9 +15,11 @@ function buildChannelPreviewStrip(): RegExp {
   const c0c1: string[] = []
   for (let i = 0; i <= 0x1f; i++) c0c1.push(String.fromCharCode(i))
   for (let i = 0x7f; i <= 0x9f; i++) c0c1.push(String.fromCharCode(i))
-  // Zero-width / bidi overrides / isolates / BOM + quote lookalikes
+  // Zero-width / bidi overrides / isolates / ALM / line-sep / BOM + quote lookalikes
   const extras =
+    '\u061c' +
     '\u200b\u200c\u200d\u200e\u200f' +
+    '\u2028\u2029' +
     '\u202a\u202b\u202c\u202d\u202e' +
     '\u2066\u2067\u2068\u2069' +
     '\ufeff' +

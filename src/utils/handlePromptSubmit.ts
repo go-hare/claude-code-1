@@ -867,13 +867,6 @@ export async function handlePromptSubmit(
         )
         return
       }
-      if (historyEntry) {
-        try {
-          addToHistory(historyEntry)
-        } catch (err) {
-          logError(toError(err))
-        }
-      }
       if (shouldHandBackIdeSelection(getCommandQueue(), queuedIdeSelection)) {
         params.onPromptHandedBack?.(queuedUuid, queuedIdeSelection)
       }
@@ -1134,8 +1127,11 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
       }
     }
 
-    // densable JDr: flush historyEntry on drain — not at mid-turn enqueue (#20)
-    flushQueuedHistoryEntries(commands)
+    // Official 2.1.295 (#426): defer history flush until after prompt.submit
+    // hooks run so rewritten or dropped prompts are never saved as typed.
+    const historyToFlush: Array<{
+      historyEntry?: QueuedCommand['historyEntry']
+    }> = []
 
     // Compute the workload tag for this turn. queueProcessor can batch a
     // cron prompt with a same-tick human prompt; only tag when EVERY
@@ -1241,6 +1237,19 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
                 }
               }
             }
+            if (cmd.historyEntry && result.shouldQuery !== false) {
+              const rewrittenDisplay =
+                typeof cmd.promptSubmitted?.text === 'string' &&
+                cmd.promptSubmitted.text !== cmd.historyEntry.display
+                  ? cmd.promptSubmitted.text
+                  : undefined
+              historyToFlush.push({
+                historyEntry:
+                  rewrittenDisplay !== undefined
+                    ? { ...cmd.historyEntry, display: rewrittenDisplay }
+                    : cmd.historyEntry,
+              })
+            }
             newMessages.push(...result.messages)
             if (isFirst) {
               shouldQuery = result.shouldQuery
@@ -1252,6 +1261,8 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
               submitNextInput = result.submitNextInput
             }
           }
+
+          flushQueuedHistoryEntries(historyToFlush)
 
           queryCheckpoint('query_process_user_input_end')
           if (fileHistoryEnabled()) {

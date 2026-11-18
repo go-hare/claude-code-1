@@ -262,7 +262,7 @@ function leftoverParseForkedSkillLaunch(content: string): Array<{
 }
 
 /** densable kqb `ne` — "it" body + landing-hint tail. */
-function leftoverOrphanStoppedNote(
+export function leftoverOrphanStoppedNote(
   entry: OrphanAgentEntry,
   kind: 'redispatched' | 'transcript' | 'lost',
 ): string {
@@ -272,7 +272,7 @@ function leftoverOrphanStoppedNote(
       hint === 'webfetch'
         ? 'Send it another message with SendMessage to resume it and get its report before assuming the fetch landed.'
         : hint === 'output'
-          ? 'Check its worktree/output for partial work before assuming the task landed.'
+          ? 'Send it another message with SendMessage to resume it, or check its worktree/output for partial work before assuming the task landed.'
           : 'Send it another message with SendMessage to resume it and ask for a status report before assuming the task landed.'
     return `No completion record was found for it after it was re-dispatched via SendMessage in the previous session. It may have been stopped (via the UI, an SDK interrupt, or agent teardown — these leave no transcript marker), or it may have been running when the previous Claude Code process exited. ${tail}`
   }
@@ -1685,13 +1685,16 @@ export function buildOrphanWorkflowStoppedTitle(
   return leftoverOrphanDidntFinish(`Background workflow${name}${run}`)
 }
 
+export const ORPHAN_WORKFLOW_STOPPED_PHRASE =
+  'stopped or paused (for example via the UI — this leaves no transcript marker)'
+
 export function buildOrphanWorkflowStoppedSummary(
   entry: OrphanWorkflowEntry,
 ): string {
   const resumeHint = entry.runId
     ? ' To pick up where it left off, relaunch with Workflow({scriptPath, resumeFromRunId}) using the run id from the summary — completed agent() calls return cached.'
     : ''
-  return `No completion record was found for it in the previous session. It may have been stopped (via the UI or TaskStop — these leave no transcript marker), or it may have been running when the previous Claude Code process exited.${resumeHint}`
+  return `No completion record was found for it in the previous session. It may have been ${ORPHAN_WORKFLOW_STOPPED_PHRASE}, or it may have been running when the previous Claude Code process exited.${resumeHint}`
 }
 
 /**
@@ -1737,7 +1740,7 @@ export function notifyOrphanKindBatch(opts: {
   const why =
     opts.status === 'failed'
       ? `They were running when the previous Claude Code process exited and did not complete; their in-process state was lost.${checkOutput} They have been marked failed.`
-      : 'They may have been stopped (via the UI, Monitor timeout, or agent teardown — these leave no transcript marker), or they may have been running when the previous Claude Code process exited. They have been marked stopped.'
+      : `They may have been ${opts.kind === 'workflow' ? ORPHAN_WORKFLOW_STOPPED_PHRASE : 'stopped (via the UI, Monitor timeout, or agent teardown — these leave no transcript marker)'}, or they may have been running when the previous Claude Code process exited. They have been marked stopped.`
   const idNote =
     shown.length === opts.taskIds.length
       ? `Task ids: ${shown.join(', ')}.`

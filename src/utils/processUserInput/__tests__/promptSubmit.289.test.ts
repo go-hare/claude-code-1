@@ -38,6 +38,8 @@ describe('densable 2.1.289 Unn CLt/vLt/Ios/RNe', () => {
     const latch = createArrivedLatch('not submitted')
     const answered = latch.perform({ text: 'hi' })
     const raced = await raceArrived(latch, answered)
+    expect(raced).toBeDefined()
+    if (!raced) throw new Error('expected raced to be defined')
     expect('arrived' in raced).toBe(true)
     if ('arrived' in raced) expect(raced.arrived.text).toBe('hi')
     latch.done({ text: 'hi' })
@@ -47,6 +49,8 @@ describe('densable 2.1.289 Unn CLt/vLt/Ios/RNe', () => {
   test('vLt takes answered when perform never runs', async () => {
     const latch = createArrivedLatch('not submitted')
     const raced = await raceArrived(latch, Promise.resolve({ drop: 'blocked' }))
+    expect(raced).toBeDefined()
+    if (!raced) throw new Error('expected raced to be defined')
     expect('answered' in raced).toBe(true)
     if ('answered' in raced) expect(raced.answered).toEqual({ drop: 'blocked' })
   })

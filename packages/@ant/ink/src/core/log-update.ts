@@ -8,6 +8,7 @@ const logForDebugging = (_message: string) => {}
 import type { Diff, FlickerReason, Frame } from './frame.js'
 import type { Point } from './layout/geometry.js'
 import {
+  boldDimResetPrefix,
   type Cell,
   CellWidth,
   cellAt,
@@ -96,9 +97,16 @@ export class LogUpdate {
             currentHyperlink = cell.hyperlink
           }
           const cellStyles = this.options.stylePool.get(cell.styleId)
+          const prefix = boldDimResetPrefix(currentStyles, cellStyles)
           const styleDiff = diffAnsiCodes(currentStyles, cellStyles)
-          if (styleDiff.length > 0) {
-            line += ansiCodesToString(styleDiff)
+          if (prefix || styleDiff.length > 0) {
+            line +=
+              prefix +
+              ansiCodesToString(
+                prefix
+                  ? styleDiff.filter(c => c.code !== '\x1b[22m')
+                  : styleDiff,
+              )
             currentStyles = cellStyles
           }
           line += cell.char

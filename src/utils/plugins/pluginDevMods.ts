@@ -121,15 +121,18 @@ type PluginDevModsAsk =
   | 'decline'
   | 'withdrawn'
   | 'retry'
+  | 'closed'
+  | 'unpicked'
   | 'no_one_to_ask'
 
 export type PluginDevModsBinding = {
   canUseTool: CanUseToolFn
   toolContext: (abort: AbortController) => ToolUseContext
   reloadPlugins?: () => Promise<void>
+  permissionMode?: () => string | undefined
 }
 
-type DevModLoad = 'reloaded' | 'held' | 'unbound' | 'failed'
+type DevModLoad = 'reloaded' | 'held' | 'kept-out' | 'unbound' | 'failed'
 
 type LeftoverModsWatch = {
   declined: () => string[]
@@ -194,7 +197,8 @@ type LeftoverWatchDeps = {
   deferred: () => void
   withdrawn: () => void
   unanswered: () => void
-  stopped: (how: 'enabled' | 'refused' | 'no_one_to_ask') => void
+  stopped: (how: 'enabled' | 'refused' | 'no_one_to_ask' | 'no_pick') => void
+  isYesStanding?: () => boolean
   clock: {
     now: () => number
     setTimeout: (
@@ -251,6 +255,10 @@ const leftoverEnabledDirs = leftoverEtSlot(leftoverJsSlot<string[]>(), cell =>
 )
 const leftoverPresentDirs = leftoverEtSlot(leftoverJsSlot<string[]>(), cell =>
   cell.set(undefined),
+)
+const leftoverDeclinedFolders = leftoverEtSlot(
+  leftoverJsSlot<string[]>(),
+  cell => cell.set(undefined),
 )
 
 let binding: PluginDevModsBinding | undefined
@@ -507,7 +515,17 @@ function mapAsk(
     case 'aborted':
       return 'withdrawn'
     case 'unanswered':
-      return result.reason === 'no_one_to_ask' ? 'no_one_to_ask' : 'retry'
+      switch (result.reason as string) {
+        case 'no_one_to_ask':
+          return 'no_one_to_ask'
+        case 'host_closed':
+          return 'closed'
+        case 'no_selection':
+          return 'unpicked'
+        case 'error':
+        default:
+          return 'retry'
+      }
   }
 }
 
@@ -559,10 +577,12 @@ const REFUSAL_OFF: Record<string, string> = {
   safe_mode: 'the session runs in safe mode',
   diskless: 'this kind of cloud session has no disk to load mods from',
   bare_mode: 'the session runs in bare mode',
+  dont_ask: 'the session is in dontAsk mode',
   untrusted: 'the workspace is not trusted',
 }
 
 const NO_ONE_TO_ASK_OFF = 'nobody could be asked'
+const NO_PICK_OFF = 'the question got no pick three times'
 
 /** densable Kpn.get */
 export function leftoverDevModsCatchUpSlot(): (() => void) | undefined {
@@ -587,16 +607,20 @@ function leftoverOffNote(folder: string, reason: string): void {
   )
 }
 
-/** densable So / B — refused → To[g()]; no_one_to_ask → B. */
+/** densable So / B / Ye — refused → To[g()]; no_one_to_ask → B; no_pick → je. */
 function leftoverStopped(
   folder: string,
-  how: 'enabled' | 'refused' | 'no_one_to_ask',
+  how: 'enabled' | 'refused' | 'no_one_to_ask' | 'no_pick',
 ): void {
   if (how === 'enabled') return
   if (how === 'no_one_to_ask') {
     if (leftoverNoOneOff.get() === folder) return
     leftoverNoOneOff.set(folder)
     leftoverOffNote(folder, NO_ONE_TO_ASK_OFF)
+    return
+  }
+  if (how === 'no_pick') {
+    leftoverOffNote(folder, NO_PICK_OFF)
     return
   }
   const refusal = leftoverPluginDevModsRefusalProbe()
@@ -788,6 +812,10 @@ function leftoverPluginDevModsRefusalProbe(): string | undefined {
       },
     },
     {
+      refusal: 'dont_ask',
+      isRefused: () => binding?.permissionMode?.() === 'dontAsk',
+    },
+    {
       refusal: 'untrusted',
       isRefused: () => {
         try {
@@ -834,6 +862,30 @@ export function canAskPluginDevMods(): boolean {
   }
 }
 
+/** 325 `C` — auto-enable in bypassPermissions or non-circuit-broken auto mode. */
+export function canAutoEnablePluginDevMods(): boolean {
+  const mode = binding?.permissionMode?.()
+  if (mode === 'bypassPermissions') return true
+  if (mode !== 'auto') return false
+  try {
+    const { getPlatform } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../platform.js') as typeof import('../platform.js')
+    const plat = getPlatform()
+    if (plat === 'windows' || plat === 'wsl') return false
+  } catch {
+    return false
+  }
+  try {
+    const { isAutoModeCircuitBroken } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../permissions/autoModeState.js') as typeof import('../permissions/autoModeState.js')
+    return !isAutoModeCircuitBroken()
+  } catch {
+    return true
+  }
+}
+
 /** densable J — recurse explain up to 3. */
 async function askPluginDevModsLoop(
   folder: string,
@@ -847,25 +899,31 @@ async function askPluginDevModsLoop(
   const when = leftoverDevModsTurn.isRunning() ? 'turn-end' : 'now'
   const question =
     depth === 0 ? shortQuestion(folder, when) : longQuestion(folder, when)
-  const mapped = mapAsk(
-    await confirmWithUser({
-      canUseTool: binding.canUseTool,
-      toolUseContext: binding.toolContext(abort),
-      source: ASK_SOURCE,
-      header: 'Mods',
-      question,
-      choices: ASK_CHOICES,
-      personOnly: true,
-    }),
-  )
-  if (mapped !== 'explain') return mapped
-  try {
-    const { logEvent } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('../../services/analytics/index.js') as typeof import('../../services/analytics/index.js')
-    logEvent('plugin_dev_mods', { answer: asMeta('explain') })
-  } catch {
-    // ignore
+  const raw = await confirmWithUser({
+    canUseTool: binding.canUseTool,
+    toolUseContext: binding.toolContext(abort),
+    source: ASK_SOURCE,
+    header: 'Mods',
+    question,
+    choices: ASK_CHOICES,
+    personOnly: true,
+  })
+  const mapped = mapAsk(raw)
+  const isTypedOther =
+    mapped === 'decline' &&
+    raw.kind === 'declined' &&
+    raw.typedAnswer !== undefined &&
+    !/^\[.*\]$/u.test(raw.typedAnswer)
+  if (mapped !== 'explain' && !isTypedOther) return mapped
+  if (mapped === 'explain') {
+    try {
+      const { logEvent } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../../services/analytics/index.js') as typeof import('../../services/analytics/index.js')
+      logEvent('plugin_dev_mods', { answer: asMeta('explain') })
+    } catch {
+      // ignore
+    }
   }
   return depth < EXPLAIN_MAX
     ? askPluginDevModsLoop(folder, abort, depth + 1)
@@ -950,16 +1008,26 @@ export function listPluginDevModChildren(folder: string): string[] | undefined {
   }
 }
 
-function devModLoadSentence(where: string, outcome: DevModLoad): string {
+function devModLoadSentence(
+  where: string,
+  outcome: DevModLoad,
+  isUnasked = false,
+  keptOutCause?: string,
+): string {
+  const actor = isUnasked
+    ? 'The permission mode turned on'
+    : 'The person enabled'
   switch (outcome) {
     case 'held':
-      return `The person enabled mod hot-reloading for this session, but the mods under ${where} wait for /reload-plugins (the load would rewrite the prompt cache): they are NOT loaded yet.`
+      return `${actor} mod hot-reloading for this session, but the mods under ${where} wait for /reload-plugins (the load would rewrite the prompt cache): they are NOT loaded yet.`
+    case 'kept-out':
+      return `${actor} mod hot-reloading for this session, but the hooks modules of the mods under ${where} had NOT loaded when this notice was written. They count as a person's hooks modules, not an organization's. The reason: ${keptOutCause ?? 'policy or rollout flag'}. You get no further notice about them, so do not say they are running, and /reload-plugins does not load them sooner. A mod with no hooks module did load.`
     case 'unbound':
-      return `The person enabled mod hot-reloading for this session, but the mods under ${where} did not load (this session cannot reload its plugins; only a restart loads them).`
+      return `${actor} mod hot-reloading for this session, but the mods under ${where} did not load (this session cannot reload its plugins; only a restart loads them).`
     case 'failed':
-      return `The person enabled mod hot-reloading for this session, but the mods under ${where} did not load (the load failed; the transcript says why, and /reload-plugins tries again).`
+      return `${actor} mod hot-reloading for this session, but the mods under ${where} did not load (the load failed; the transcript says why, and /reload-plugins tries again).`
     case 'reloaded':
-      return `The person enabled mod hot-reloading for this session and the mods under ${where} loaded: they load and reload by themselves as their files change; the transcript names any mod that failed.`
+      return `${actor} mod hot-reloading for this session and the mods under ${where} loaded: they load and reload by themselves as their files change; the transcript names any mod that failed.`
   }
 }
 
@@ -970,6 +1038,11 @@ function devModLine(outcome: DevModLoad, loaded: boolean): string | undefined {
   }
   if (outcome === 'unbound') {
     return "in this session's mods folder; restart to apply"
+  }
+  if (outcome === 'kept-out') {
+    return loaded
+      ? "loaded from this session's mods folder"
+      : "in this session's mods folder, not loaded; /plugin shows why"
   }
   return loaded
     ? "loaded from this session's mods folder"
@@ -1133,7 +1206,10 @@ function leftoverEnableFailed(
 }
 
 /** densable j — person Enable / consented catch-up. `{enabled:!0}`, no D(). */
-async function leftoverEnableDevMods(folder: string): Promise<DevModLoad> {
+async function leftoverEnableDevMods(
+  folder: string,
+  isUnasked = false,
+): Promise<DevModLoad> {
   try {
     leftoverDevModsStage.set({ stage: 'enabled', folder })
     leftoverJoinSessionPluginDir(folder)
@@ -1147,7 +1223,9 @@ async function leftoverEnableDevMods(folder: string): Promise<DevModLoad> {
       leftoverPruneForeignSessionDevModsDirs(sessionDevModsFolder())
       return 'unbound'
     }
-    leftoverSaveDevModsFolder(folder)
+    if (!isUnasked) {
+      leftoverSaveDevModsFolder(folder)
+    }
     const outcome = await reloadDevMods()
     recordDevModLines(folder, outcome)
     try {
@@ -1169,7 +1247,9 @@ async function leftoverLoadDevModsAtStart(folder: string): Promise<void> {
   try {
     const children = listPluginDevModChildren(folder)
     if (children === undefined || children.length === 0) {
-      const canWatch = children !== undefined && canAskPluginDevMods()
+      const canWatch =
+        children !== undefined &&
+        (canAskPluginDevMods() || canAutoEnablePluginDevMods())
       leftoverDevModsStage.set(
         canWatch ? { stage: 'wanted', folder, loaded: children } : undefined,
       )
@@ -1214,7 +1294,12 @@ async function leftoverLoadDevModsAtStart(folder: string): Promise<void> {
 function leftoverNoteKind(
   folder: string,
   kind:
-    | { kind: 'enabled'; load: DevModLoad }
+    | {
+        kind: 'enabled'
+        load: DevModLoad
+        isUnasked?: boolean
+        keptOutCause?: string
+      }
     | { kind: 'declined' }
     | { kind: 'unanswered' }
     | { kind: 'off'; reason: string },
@@ -1222,7 +1307,9 @@ function leftoverNoteKind(
   const where = folderMarkdown(folder)
   switch (kind.kind) {
     case 'enabled':
-      notePluginDevMods(devModLoadSentence(where, kind.load))
+      notePluginDevMods(
+        devModLoadSentence(where, kind.load, kind.isUnasked, kind.keptOutCause),
+      )
       return
     case 'declined':
       notePluginDevMods(
@@ -1242,7 +1329,7 @@ function leftoverNoteKind(
 /** densable yo — watch stopped → wanted / off. enabled is already set by j. */
 function leftoverWatchStopped(
   folder: string,
-  how: 'enabled' | 'refused' | 'no_one_to_ask',
+  how: 'enabled' | 'refused' | 'no_one_to_ask' | 'no_pick',
 ): void {
   const current = leftoverDevModsStage.get()
   if (current?.stage !== 'watching' || current.folder !== folder) return
@@ -1255,6 +1342,7 @@ function leftoverWatchStopped(
       })
       return
     case 'no_one_to_ask':
+    case 'no_pick':
       leftoverDevModsStage.set({ stage: 'off', folder })
       return
     case 'enabled':
@@ -1353,6 +1441,8 @@ function leftoverWatchRoot(
   return { close: () => watcher.close() }
 }
 
+const MAX_UNPICKED = 3
+
 /**
  * densable ho(folder, deps) — inject watchRoot/clock/turn. Never export minify `ho`.
  */
@@ -1368,6 +1458,9 @@ function leftoverWatchDevModsFolder(
   let turnGen = 0
   let askedAt = Number.NEGATIVE_INFINITY
   let pending = false
+  let unpickedCount = 0
+  let askedByPersonTurn = false
+  let lastWasUnpicked = false
   let unansweredSent = false
   let asking = false
   let closed = false
@@ -1379,12 +1472,13 @@ function leftoverWatchDevModsFolder(
   })
   const offBegin = deps.turn.onBegin(() => {
     turnGen += 1
+    askedByPersonTurn = deps.turn.isPersonTurn()
+    if (lastWasUnpicked && askedByPersonTurn) {
+      unpickedCount -= 1
+    }
+    lastWasUnpicked = false
     if (
-      !(
-        askAbort !== undefined &&
-        !askAbort.signal.aborted &&
-        deps.turn.isPersonTurn()
-      )
+      !(askAbort !== undefined && !askAbort.signal.aborted && askedByPersonTurn)
     ) {
       return
     }
@@ -1437,7 +1531,13 @@ function leftoverWatchDevModsFolder(
       }
     }
     if (deferEnable) {
-      await finishEnable()
+      if (deps.isYesStanding?.() ?? true) {
+        await finishEnable()
+        return
+      }
+      deferEnable = false
+      askedAt = turnGen - 1
+      await runAsk()
       return
     }
     if (pending) {
@@ -1468,6 +1568,7 @@ function leftoverWatchDevModsFolder(
       return
     }
     asking = true
+    let retryNow = false
     try {
       const novel = firstDirty
         ? []
@@ -1488,6 +1589,8 @@ function leftoverWatchDevModsFolder(
         return
       }
       askedAt = turnGen
+      askedByPersonTurn = false
+      lastWasUnpicked = false
       const abort = new AbortController()
       askAbort = abort
       const answer = await deps.ask(folder, abort.signal).finally(() => {
@@ -1505,6 +1608,7 @@ function leftoverWatchDevModsFolder(
           return
         case 'decline': {
           unansweredSent = false
+          unpickedCount = 0
           declineDuringTurn = deps.turn.isRunning()
           const present = await deps.listChildren(folder)
           for (const name of [...novel, ...(present ?? [])]) {
@@ -1523,6 +1627,29 @@ function leftoverWatchDevModsFolder(
         case 'retry':
           pending = true
           return
+        case 'closed':
+        case 'unpicked':
+          if (!unansweredSent) {
+            unansweredSent = true
+            deps.unanswered()
+          }
+          if (!askedByPersonTurn) {
+            unpickedCount += 1
+            lastWasUnpicked = answer === 'unpicked'
+          }
+          if (unpickedCount >= MAX_UNPICKED) {
+            await dispose()
+            deps.stopped('no_pick')
+            return
+          }
+          if (answer === 'unpicked') {
+            askedAt = deps.turn.isRunning() ? turnGen - 1 : turnGen
+            pending = true
+            return
+          }
+          askedAt = turnGen - 1
+          retryNow = true
+          break
         case 'no_one_to_ask':
           await dispose()
           deps.stopped('no_one_to_ask')
@@ -1531,6 +1658,7 @@ function leftoverWatchDevModsFolder(
     } finally {
       asking = false
     }
+    if (retryNow) await runAsk()
   }
 
   async function dispose(): Promise<void> {
@@ -1564,7 +1692,7 @@ async function leftoverStartWatch(): Promise<void> {
     if (current?.stage !== 'wanted') return
     // densable M: if(g()!==void 0)return — silent. S/dot is the watch refusal callback.
     if (leftoverPluginDevModsRefusalProbe() !== undefined) return
-    if (!canAskPluginDevMods()) {
+    if (!canAskPluginDevMods() && !canAutoEnablePluginDevMods()) {
       try {
         const { logEvent } =
           // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -1583,25 +1711,52 @@ async function leftoverStartWatch(): Promise<void> {
     if (afterMkdir?.stage !== 'wanted') return
     const { folder, loaded } = afterMkdir
     const hold: { release?: () => void } = {}
+    let isUnasked = false
     const watch = leftoverWatchDevModsFolder(folder, {
       watchRoot: leftoverWatchRoot,
       loaded: loaded ?? [],
       listChildren: async root => listPluginDevModChildren(root),
       refusal: pluginDevModsRefusal,
       ask: async (root, signal) => {
+        isUnasked =
+          !(leftoverDeclinedFolders.get() ?? []).includes(root) &&
+          canAutoEnablePluginDevMods()
+        if (isUnasked) {
+          try {
+            const { logEvent } =
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              require('../../services/analytics/index.js') as typeof import('../../services/analytics/index.js')
+            logEvent('plugin_dev_mods', { answer: asMeta('unasked') })
+          } catch {
+            // ignore
+          }
+          leftoverUiLog(
+            basename(root),
+            'In this permission mode the mods Claude writes turn on without asking.',
+          )
+          return 'enable'
+        }
         const answer = await askPluginDevMods(root, signal)
         if (answer !== 'no_one_to_ask' && answer !== 'retry') {
           leftoverNoOneOff.set(undefined)
         }
-        if (answer === 'decline') leftoverNoteKind(root, { kind: 'declined' })
+        if (answer === 'decline') {
+          leftoverDeclinedFolders.set([
+            ...(leftoverDeclinedFolders.get() ?? []),
+            root,
+          ])
+          leftoverNoteKind(root, { kind: 'declined' })
+        }
         return answer
       },
       enable: async root => {
         leftoverNoteKind(root, {
           kind: 'enabled',
-          load: await leftoverEnableDevMods(root),
+          load: await leftoverEnableDevMods(root, isUnasked),
+          isUnasked,
         })
       },
+      isYesStanding: () => !isUnasked || canAutoEnablePluginDevMods(),
       deferred: () => leftoverUiLog(basename(folder), DEFERRED_ENABLE_LINE),
       withdrawn: () => leftoverUiLog(basename(folder), WITHDRAWN_LINE),
       unanswered: () => leftoverNoteKind(folder, { kind: 'unanswered' }),
@@ -1646,7 +1801,22 @@ export async function ensurePluginDevModsFolder(): Promise<string> {
       leftoverDevModsStage.set({ stage: 'wanted', folder })
     }
     pinLeftoverDevModsCatchUp()
-    await leftoverStartWatch()
+    const refusal = leftoverPluginDevModsRefusalProbe()
+    if (refusal !== undefined) {
+      leftoverPluginDevModsRefusalDot(refusal)
+      leftoverDebug(`dev mods: mod hot-reloading is off here (${refusal})`)
+    }
+    const stageAfter = leftoverDevModsStage.get()?.stage
+    if (refusal === undefined && stageAfter === 'consented') {
+      leftoverCatchUp()
+    } else if (refusal === undefined) {
+      if (stageAfter === 'present') {
+        leftoverDevModsStage.set({ stage: 'wanted', folder })
+      }
+      await leftoverStartWatch()
+    } else if (refusal === 'dont_ask') {
+      leftoverStopped(folder, 'no_one_to_ask')
+    }
   } catch (error) {
     leftoverDebug(
       `dev mods: handing out ${folder} started nothing: ${errorMessage(error)}`,
@@ -1678,7 +1848,9 @@ function leftoverCatchUp(): void {
         }
         return
       case 'present':
-        if (pluginDevModsRefusal() === undefined) {
+        if (binding?.permissionMode?.() === 'dontAsk') {
+          leftoverDevModsStage.set({ stage: 'wanted', folder: current.folder })
+        } else if (pluginDevModsRefusal() === undefined) {
           void leftoverLoadDevModsAtStart(current.folder)
         }
         return

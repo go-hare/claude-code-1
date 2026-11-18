@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
-import { mkdir, readdir, readFile } from 'fs/promises'
+import { constants } from 'fs'
+import { mkdir, open, readdir, type FileHandle } from 'fs/promises'
 import { join } from 'path'
 import {
   PDF_MAX_EXTRACT_SIZE,
@@ -8,8 +9,44 @@ import {
 import { errorMessage } from './errors.js'
 import { execFileNoThrow } from './execFileNoThrow.js'
 import { formatFileSize } from './format.js'
-import { getFsImplementation } from './fsOperations.js'
+import { getPlatform } from './platform.js'
 import { getToolResultsDir } from './toolResultStorage.js'
+
+const READ_CHUNK_SIZE = 1048576 // 1 MiB (SEA wSt Bus)
+const PDFINFO_TIMEOUT_MS = 10_000
+const PDF_PAGES_RE = /(?:^|\n)Pages:[ \t]+(\d+)[ \t\r]*(?=\n|$)/g
+
+function openReadOnlyFlags(): number {
+  const nonBlock = getPlatform() === 'windows' ? 0 : (constants.O_NONBLOCK ?? 0)
+  return constants.O_RDONLY | nonBlock
+}
+
+/**
+ * SEA `wSt` — read `size` bytes from an already-opened `FileHandle` using
+ * explicit positional offsets so no second path-based open is performed.
+ */
+export async function readBytesFromHandle(
+  handle: FileHandle,
+  size: number,
+  signal?: AbortSignal,
+): Promise<Buffer> {
+  const buf = Buffer.allocUnsafe(size)
+  let offset = 0
+  while (offset < size) {
+    if (signal?.aborted) {
+      throw signal.reason ?? new DOMException('Aborted', 'AbortError')
+    }
+    const { bytesRead } = await handle.read(
+      buf,
+      offset,
+      Math.min(READ_CHUNK_SIZE, size - offset),
+      offset,
+    )
+    if (bytesRead === 0) break
+    offset += bytesRead
+  }
+  return buf.subarray(0, offset)
+}
 
 export type PDFError = {
   reason:
@@ -26,27 +63,27 @@ export type PDFResult<T> =
   | { success: true; data: T }
   | { success: false; error: PDFError }
 
+export type PDFReadPayload = {
+  type: 'pdf'
+  file: {
+    filePath: string
+    base64: string
+    originalSize: number
+  }
+}
+
 /**
- * Read a PDF file and return it as base64-encoded data.
- * @param filePath Path to the PDF file
- * @returns Result containing PDF data or a structured error
+ * SEA `w3n` — read a PDF directly from a held `FileHandle` without reopening by path.
  */
-export async function readPDF(filePath: string): Promise<
-  PDFResult<{
-    type: 'pdf'
-    file: {
-      filePath: string
-      base64: string
-      originalSize: number
-    }
-  }>
-> {
+export async function readPDFFromHandle(
+  handle: FileHandle,
+  filePath: string,
+  signal?: AbortSignal,
+): Promise<PDFResult<PDFReadPayload>> {
   try {
-    const fs = getFsImplementation()
-    const stats = await fs.stat(filePath)
+    const stats = await handle.stat()
     const originalSize = stats.size
 
-    // Check if file is empty
     if (originalSize === 0) {
       return {
         success: false,
@@ -54,9 +91,6 @@ export async function readPDF(filePath: string): Promise<
       }
     }
 
-    // Check if PDF exceeds maximum size
-    // The API has a 32MB total request limit. After base64 encoding (~33% larger),
-    // a PDF must be under ~20MB raw to leave room for conversation context.
     if (originalSize > PDF_TARGET_RAW_SIZE) {
       return {
         success: false,
@@ -67,13 +101,7 @@ export async function readPDF(filePath: string): Promise<
       }
     }
 
-    const fileBuffer = await readFile(filePath)
-
-    // Validate PDF magic bytes — reject files that aren't actually PDFs
-    // (e.g., HTML files renamed to .pdf) before they enter conversation context.
-    // Once an invalid PDF document block is in the message history, every subsequent
-    // API call fails with 400 "The PDF specified was not valid" and the session
-    // becomes unrecoverable without /clear.
+    const fileBuffer = await readBytesFromHandle(handle, originalSize, signal)
     const header = fileBuffer.subarray(0, 5).toString('ascii')
     if (!header.startsWith('%PDF-')) {
       return {
@@ -85,18 +113,13 @@ export async function readPDF(filePath: string): Promise<
       }
     }
 
-    const base64 = fileBuffer.toString('base64')
-
-    // Note: We cannot check page count here without parsing the PDF
-    // The API will enforce the 100-page limit and return an error if exceeded
-
     return {
       success: true,
       data: {
         type: 'pdf',
         file: {
           filePath,
-          base64,
+          base64: fileBuffer.toString('base64'),
           originalSize,
         },
       },
@@ -113,25 +136,93 @@ export async function readPDF(filePath: string): Promise<
 }
 
 /**
+ * Read a PDF file and return it as base64-encoded data.
+ * Accepts either a held `FileHandle` (SEA `w3n` path, no second path open) or a file path.
+ */
+export async function readPDF(
+  filePathOrHandle: string | FileHandle,
+  displayPath?: string,
+  signal?: AbortSignal,
+): Promise<PDFResult<PDFReadPayload>> {
+  if (typeof filePathOrHandle !== 'string') {
+    return readPDFFromHandle(filePathOrHandle, displayPath ?? '', signal)
+  }
+  const filePath = displayPath ?? filePathOrHandle
+  let handle: FileHandle | undefined
+  try {
+    handle = await open(filePathOrHandle, openReadOnlyFlags())
+    return await readPDFFromHandle(handle, filePath, signal)
+  } catch (e: unknown) {
+    return {
+      success: false,
+      error: {
+        reason: 'unknown',
+        message: errorMessage(e),
+      },
+    }
+  } finally {
+    await handle?.close().catch(() => {})
+  }
+}
+
+/**
  * Get the number of pages in a PDF file using `pdfinfo` (from poppler-utils).
- * Returns `null` if pdfinfo is not available or if the page count cannot be determined.
+ * When `held` is provided, reads from the held `FileHandle` via stdin (`-`)
+ * so no second path-based open occurs (SEA `vHe`).
  */
 export async function getPDFPageCount(
   filePath: string,
+  held?: { handle: FileHandle; size: number; signal?: AbortSignal },
 ): Promise<number | null> {
+  if (held !== undefined) {
+    if (held.size > PDF_MAX_EXTRACT_SIZE) {
+      return null
+    }
+    try {
+      const timeoutSignal = AbortSignal.timeout(PDFINFO_TIMEOUT_MS)
+      const combinedSignal = held.signal
+        ? AbortSignal.any([held.signal, timeoutSignal])
+        : timeoutSignal
+      const bytes = await readBytesFromHandle(
+        held.handle,
+        held.size,
+        combinedSignal,
+      )
+      const { code, stdout } = await execFileNoThrow('pdfinfo', ['-'], {
+        timeout: PDFINFO_TIMEOUT_MS,
+        useCwd: false,
+        abortSignal: held.signal,
+        input: bytes as unknown as string,
+      })
+      if (code !== 0) return null
+      let pageCount: number | undefined
+      for (const match of stdout.matchAll(PDF_PAGES_RE)) {
+        const parsed = Number(match[1])
+        if (Number.isSafeInteger(parsed) && parsed >= (pageCount ?? 0)) {
+          pageCount = parsed
+        }
+      }
+      return pageCount ?? null
+    } catch {
+      return null
+    }
+  }
+
   const { code, stdout } = await execFileNoThrow('pdfinfo', [filePath], {
-    timeout: 10_000,
+    timeout: PDFINFO_TIMEOUT_MS,
     useCwd: false,
   })
   if (code !== 0) {
     return null
   }
-  const match = /^Pages:\s+(\d+)/m.exec(stdout)
-  if (!match) {
-    return null
+  let pageCount: number | undefined
+  for (const match of stdout.matchAll(PDF_PAGES_RE)) {
+    const parsed = Number(match[1])
+    if (Number.isSafeInteger(parsed) && parsed >= (pageCount ?? 0)) {
+      pageCount = parsed
+    }
   }
-  const count = parseInt(match[1]!, 10)
-  return isNaN(count) ? null : count
+  return pageCount ?? null
 }
 
 export type PDFExtractPagesResult = {
@@ -178,11 +269,34 @@ export async function isPdftoppmAvailable(): Promise<boolean> {
  */
 export async function extractPDFPages(
   filePath: string,
-  options?: { firstPage?: number; lastPage?: number },
+  options?: {
+    firstPage?: number
+    lastPage?: number
+    held?: FileHandle
+    signal?: AbortSignal
+  },
 ): Promise<PDFResult<PDFExtractPagesResult>> {
+  let ownedHandle: FileHandle | undefined
   try {
-    const fs = getFsImplementation()
-    const stats = await fs.stat(filePath)
+    const heldHandle = options?.held
+    const handle = heldHandle ?? (await open(filePath, openReadOnlyFlags()))
+    if (!heldHandle) ownedHandle = handle
+
+    const stats = await handle.stat().finally(async () => {
+      if (ownedHandle) {
+        await ownedHandle.close().catch(() => {})
+        ownedHandle = undefined
+      }
+    })
+    if (!stats.isFile()) {
+      return {
+        success: false,
+        error: {
+          reason: 'corrupted',
+          message: `Path is not a regular file: ${filePath}`,
+        },
+      }
+    }
     const originalSize = stats.size
 
     if (originalSize === 0) {
@@ -202,6 +316,13 @@ export async function extractPDFPages(
       }
     }
 
+    if (options?.signal?.aborted) {
+      return {
+        success: false,
+        error: { reason: 'unknown', message: 'PDF extraction aborted.' },
+      }
+    }
+
     const available = await isPdftoppmAvailable()
     if (!available) {
       return {
@@ -213,6 +334,10 @@ export async function extractPDFPages(
         },
       }
     }
+
+    const heldBytes = heldHandle
+      ? await readBytesFromHandle(heldHandle, originalSize, options?.signal)
+      : undefined
 
     const uuid = randomUUID()
     const outputDir = join(getToolResultsDir(), `pdf-${uuid}`)
@@ -227,10 +352,14 @@ export async function extractPDFPages(
     if (options?.lastPage && options.lastPage !== Infinity) {
       args.push('-l', String(options.lastPage))
     }
-    args.push(filePath, prefix)
+    args.push(heldBytes !== undefined ? '-' : filePath, prefix)
     const { code, stderr } = await execFileNoThrow('pdftoppm', args, {
       timeout: 120_000,
       useCwd: false,
+      abortSignal: options?.signal,
+      ...(heldBytes !== undefined && {
+        input: heldBytes as unknown as string,
+      }),
     })
 
     if (code !== 0) {
@@ -296,5 +425,7 @@ export async function extractPDFPages(
         message: errorMessage(e),
       },
     }
+  } finally {
+    await ownedHandle?.close().catch(() => {})
   }
 }

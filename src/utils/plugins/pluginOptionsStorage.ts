@@ -56,6 +56,24 @@ export function getPluginStorageId(plugin: LoadedPlugin): string {
   return plugin.source
 }
 
+function mergeNullProtoPluginOptions(
+  nonSensitive: PluginOptionValues,
+  sensitive: Record<string, string> | PluginOptionValues,
+): PluginOptionValues {
+  // #404: null-prototype container prevents `constructor` / `prototype` /
+  // `toString` option names from resolving to Object.prototype properties.
+  const merged = Object.create(null) as PluginOptionValues
+  for (const key of Object.keys(nonSensitive)) {
+    if (key === '__proto__') continue
+    merged[key] = nonSensitive[key]!
+  }
+  for (const key of Object.keys(sensitive)) {
+    if (key === '__proto__') continue
+    merged[key] = sensitive[key]!
+  }
+  return merged
+}
+
 /**
  * Load saved option values for a plugin, merging non-sensitive (from settings)
  * with sensitive (from secureStorage). SecureStorage wins on key collision.
@@ -69,7 +87,7 @@ export const loadPluginOptions = memoize(
     // Official 2.1.207: do not read project/local settings for pluginConfigs.
     const nonSensitive =
       loadPluginConfigFromAllowedSources(pluginId).options ??
-      ({} as PluginOptionValues)
+      (Object.create(null) as PluginOptionValues)
 
     // NOTE: storage.read() spawns `security find-generic-password` on macOS
     // (~50-100ms, synchronous). Mitigated by the memoize above (per-pluginId,
@@ -77,14 +95,16 @@ export const loadPluginOptions = memoize(
     // per session per plugin-with-options. /reload-plugins clears the memoize
     // and the next hook/MCP-load after that eats a fresh spawn.
     const storage = getSecureStorage()
+    const secrets = storage.read()?.pluginSecrets
     const sensitive =
-      storage.read()?.pluginSecrets?.[pluginId] ??
-      ({} as Record<string, string>)
+      secrets && Object.hasOwn(secrets, pluginId)
+        ? secrets[pluginId]!
+        : (Object.create(null) as Record<string, string>)
 
     // secureStorage wins on collision — schema determines destination so
     // collision shouldn't happen, but if a user hand-edits settings.json we
     // trust the more secure source.
-    return { ...nonSensitive, ...sensitive }
+    return mergeNullProtoPluginOptions(nonSensitive, sensitive)
   },
 )
 
@@ -119,16 +139,18 @@ async function loadPluginOptionsCt(
 ): Promise<PluginOptionValues> {
   const nonSensitive =
     loadPluginConfigFromAllowedSources(pluginId).options ??
-    ({} as PluginOptionValues)
+    (Object.create(null) as PluginOptionValues)
   const storage = getSecureStorage()
   const data =
     typeof storage.readAsync === 'function'
       ? await storage.readAsync(credentials)
       : storage.read()
-  return {
-    ...nonSensitive,
-    ...((data?.pluginSecrets?.[pluginId] ?? {}) as PluginOptionValues),
-  }
+  const secrets = data?.pluginSecrets
+  const sensitive =
+    secrets && Object.hasOwn(secrets, pluginId)
+      ? (secrets[pluginId] as PluginOptionValues)
+      : (Object.create(null) as PluginOptionValues)
+  return mergeNullProtoPluginOptions(nonSensitive, sensitive)
 }
 
 export function clearPluginOptionsCache(): void {
@@ -162,6 +184,26 @@ async function mutatePluginSecrets(
   return storage.update(next)
 }
 
+const PROTO_KEY = '__proto__'
+
+/**
+ * Filter a plain record into a null-prototype object, skipping `__proto__` so
+ * prototype-chain keys like `constructor` and `prototype` are preserved safely.
+ * Matches official `fP(o, r)`.
+ */
+function filterRecord<T>(
+  record: Record<string, T>,
+  predicate: (value: T, key: string) => boolean,
+): Record<string, T> {
+  const out = Object.create(null) as Record<string, T>
+  for (const [k, v] of Object.entries(record)) {
+    if (k !== PROTO_KEY && predicate(v, k)) {
+      out[k] = v
+    }
+  }
+  return out
+}
+
 /**
  * densable `BVe` — save option values, splitting by `schema[key].sensitive`.
  * Sensitive → `Un().mutate(..., credentials)`; non-sensitive →
@@ -174,11 +216,12 @@ export async function savePluginOptions(
   storageV5?: unknown,
   credentials?: unknown,
 ): Promise<void> {
-  const nonSensitive: PluginOptionValues = {}
-  const sensitive: Record<string, string> = {}
+  const nonSensitive = Object.create(null) as PluginOptionValues
+  const sensitive = Object.create(null) as Record<string, string>
 
   for (const [key, value] of Object.entries(values)) {
-    if (schema[key]?.sensitive === true) {
+    if (key === PROTO_KEY) continue
+    if (Object.hasOwn(schema, key) && schema[key]?.sensitive === true) {
       sensitive[key] = String(value)
     } else {
       nonSensitive[key] = value
@@ -189,15 +232,12 @@ export async function savePluginOptions(
   const nonSensitiveKeysInThisSave = new Set(Object.keys(nonSensitive))
 
   const result = await mutatePluginSecrets(data => {
-    const existing = data.pluginSecrets?.[pluginId] as
-      | Record<string, string>
-      | undefined
+    const existing =
+      data.pluginSecrets && Object.hasOwn(data.pluginSecrets, pluginId)
+        ? (data.pluginSecrets[pluginId] as Record<string, string> | undefined)
+        : undefined
     const scrubbed = existing
-      ? Object.fromEntries(
-          Object.entries(existing).filter(
-            ([k]) => !nonSensitiveKeysInThisSave.has(k),
-          ),
-        )
+      ? filterRecord(existing, (_v, k) => !nonSensitiveKeysInThisSave.has(k))
       : undefined
     const needSecureScrub =
       scrubbed !== undefined &&
@@ -209,7 +249,10 @@ export async function savePluginOptions(
     return {
       ...data,
       pluginSecrets: {
-        ...data.pluginSecrets,
+        ...filterRecord(
+          (data.pluginSecrets ?? {}) as Record<string, unknown>,
+          () => true,
+        ),
         [pluginId]: {
           ...scrubbed,
           ...sensitive,
@@ -233,10 +276,17 @@ export async function savePluginOptions(
   const pluginConfigs = getSettingsForSource('userSettings')?.pluginConfigs
   const patch: Record<string, { options: PluginOptionValues }> = {}
   for (const alias of pluginConfigIdAliases(pluginId)) {
-    const keysToScrub = Object.keys(
-      pluginConfigs?.[alias]?.options ?? {},
-    ).filter(k => sensitiveKeysInThisSave.has(k))
-    const scrubbed = Object.fromEntries(keysToScrub.map(k => [k, undefined]))
+    const configForAlias =
+      pluginConfigs && Object.hasOwn(pluginConfigs, alias)
+        ? pluginConfigs[alias]
+        : undefined
+    const keysToScrub = Object.keys(configForAlias?.options ?? {}).filter(k =>
+      sensitiveKeysInThisSave.has(k),
+    )
+    const scrubbed = Object.create(null) as Record<string, undefined>
+    for (const k of keysToScrub) {
+      if (k !== PROTO_KEY) scrubbed[k] = undefined
+    }
     const written = alias === pluginId ? nonSensitive : {}
     if (Object.keys(written).length > 0 || keysToScrub.length > 0) {
       patch[alias] = {
@@ -400,16 +450,18 @@ export async function getUnconfiguredOptions(
     getPluginStorageId(plugin),
     credentials,
   )
-  const unconfigured: PluginOptionSchema = {}
+  const unconfigured = Object.create(null) as PluginOptionSchema
   for (const [key, fieldSchema] of Object.entries(manifestSchema)) {
-    const value = saved[key]
+    const value = Object.hasOwn(saved, key) ? saved[key] : undefined
+    const singleVal = Object.create(null) as PluginOptionValues
+    singleVal[key] = value as PluginOptionValues[string]
+    const singleSchema = Object.create(null) as PluginOptionSchema
+    singleSchema[key] = fieldSchema
     if (
       value === undefined ||
       value === '' ||
       (fieldSchema.sensitive !== true &&
-        !validateUserConfig({ [key]: value } as PluginOptionValues, {
-          [key]: fieldSchema,
-        }).valid)
+        !validateUserConfig(singleVal, singleSchema).valid)
     ) {
       unconfigured[key] = fieldSchema
     }
@@ -466,7 +518,9 @@ export function substituteUserConfigVariables(
   userConfig: PluginOptionValues,
 ): string {
   return value.replace(/\$\{user_config\.([^}]+)\}/g, (_match, key) => {
-    const configValue = userConfig[key]
+    const configValue = Object.hasOwn(userConfig, key)
+      ? userConfig[key]
+      : undefined
     if (configValue === undefined) {
       throw new Error(
         `Missing required user configuration value: ${key}. ` +
@@ -496,10 +550,10 @@ export function substituteUserConfigInContent(
   schema: PluginOptionSchema,
 ): string {
   return content.replace(/\$\{user_config\.([^}]+)\}/g, (match, key) => {
-    if (schema[key]?.sensitive === true) {
+    if (Object.hasOwn(schema, key) && schema[key]?.sensitive === true) {
       return `[sensitive option '${key}' not available in skill content]`
     }
-    const value = options[key]
+    const value = Object.hasOwn(options, key) ? options[key] : undefined
     if (value === undefined) {
       return match
     }

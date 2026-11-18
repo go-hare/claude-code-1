@@ -1,6 +1,7 @@
 import type { StructuredPatchHunk } from 'diff';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
+import { useNotifications } from '../../context/notifications.js';
 import { useRegisterOverlay } from '../../context/overlayContext.js';
 import { type DiffData, useDiffData } from '../../hooks/useDiffData.js';
 import { type TurnDiff, useTurnDiffs } from '../../hooks/useTurnDiffs.js';
@@ -17,7 +18,7 @@ import {
 } from '@anthropic/ink';
 import { useRegisterKeybindingContext } from '../../keybindings/KeybindingContext.js';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
-import { useAppState } from '../../state/AppState.js';
+import { useAppState, useSetAppState } from '../../state/AppState.js';
 import type { Message } from '../../types/message.js';
 import { plural } from '../../utils/stringUtils.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
@@ -67,8 +68,20 @@ function turnDiffToDiffData(turn: TurnDiff): DiffData {
 
 export function DiffDialog({ messages, onDone }: Props): React.ReactNode {
   const revision = useAppState(s => s.fileHistory.snapshotSequence);
+  const setAppState = useSetAppState();
+  const { processQueue } = useNotifications();
   const gitDiffData = useDiffData('uncommitted', revision);
   const turnDiffs = useTurnDiffs(messages);
+
+  // Official 2.1.296 (#503) `uGe`: hold non-exempt toasts while /diff dialog
+  // is open and flush `processQueue()` immediately when it closes.
+  useEffect(() => {
+    setAppState(prev => (prev.paneHoldsToasts ? prev : { ...prev, paneHoldsToasts: true }));
+    return () => {
+      setAppState(prev => (prev.paneHoldsToasts ? { ...prev, paneHoldsToasts: false } : prev));
+      processQueue();
+    };
+  }, [setAppState, processQueue]);
 
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [sourceIndex, setSourceIndex] = useState<number>(0);

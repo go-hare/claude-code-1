@@ -558,21 +558,22 @@ export function resolveMcpProtocolNegotiationPlan(
   let plan: McpProtocolNegotiationPlan
   switch (kind) {
     case 'http':
-      plan = isFeatureEnabled('tengu_mcp_protocol_negotiation_http', false)
+      plan = isFeatureEnabled('tengu_mcp_protocol_negotiation_http', true)
         ? { mode: 'auto', probe: { timeoutMs: httpProbe } }
         : { mode: 'legacy' }
       break
     case 'claudeai-proxy':
-      plan = isFeatureEnabled('tengu_mcp_protocol_negotiation_claudeai', false)
+      plan = isFeatureEnabled('tengu_mcp_protocol_negotiation_claudeai', true)
         ? { mode: 'auto', probe: { timeoutMs: httpProbe } }
         : { mode: 'legacy' }
       break
     case 'stdio':
-      // densable 2.1.238: `case"stdio":return{mode:"legacy"}` — no GB.
-      plan = { mode: 'legacy' }
+      plan = isFeatureEnabled('tengu_mcp_protocol_negotiation_stdio', true)
+        ? { mode: 'auto', probe: { timeoutMs: stdioProbe } }
+        : { mode: 'legacy' }
       break
     case 'ccr-proxy':
-      plan = isFeatureEnabled('tengu_mcp_protocol_negotiation_ccr', false)
+      plan = isFeatureEnabled('tengu_mcp_protocol_negotiation_ccr', true)
         ? { mode: 'auto', probe: { timeoutMs: httpProbe } }
         : { mode: 'legacy' }
       break
@@ -834,4 +835,93 @@ export function truncateMcpErrorSnippet(raw: string, max = 200): string {
 /** Expose cause reader for client hard-throw checks. */
 export function getMcpErrorCause(error: unknown): unknown {
   return readErrorCause(error)
+}
+
+/**
+ * SEA 325 `#263` — 7-day cache for stdio MCP servers that ignore/stall on the
+ * `2026-07-28` `server/discover` probe. After one slow connect, subsequent
+ * connects skip the probe and use `{ mode: 'legacy' }` for 7 days unless
+ * `MCP_PROTOCOL_NEGOTIATION=auto` is explicitly forced.
+ */
+export const STDIO_DISCOVER_VERDICT_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 604_800_000
+
+type StdioDiscoverVerdictEntry = {
+  observedAt: number
+  modernProtocolVersion: string
+}
+
+const stdioDiscoverVerdictCache = new Map<string, StdioDiscoverVerdictEntry>()
+
+export function getStdioDiscoverVerdictKey(config: {
+  type?: string
+  command?: string
+  args?: readonly string[]
+  env?: Readonly<Record<string, string>>
+}): string | undefined {
+  if (
+    (config.type ?? 'stdio') !== 'stdio' ||
+    typeof config.command !== 'string'
+  ) {
+    return undefined
+  }
+  const sortedEnv = Object.entries(config.env ?? {}).sort(([a], [b]) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  )
+  return JSON.stringify([config.command, config.args ?? [], sortedEnv])
+}
+
+export function isRememberedLegacyStdio(
+  config: {
+    type?: string
+    command?: string
+    args?: readonly string[]
+    env?: Readonly<Record<string, string>>
+  },
+  env: NodeJS.ProcessEnv = process.env,
+  now = Date.now(),
+): boolean {
+  if (env.MCP_PROTOCOL_NEGOTIATION === 'auto') return false
+  const key = getStdioDiscoverVerdictKey(config)
+  if (!key) return false
+  const entry = stdioDiscoverVerdictCache.get(key)
+  if (!entry) return false
+  if (
+    now - entry.observedAt > STDIO_DISCOVER_VERDICT_TTL_MS ||
+    entry.observedAt > now + 300_000
+  ) {
+    stdioDiscoverVerdictCache.delete(key)
+    return false
+  }
+  return true
+}
+
+export function recordRememberedLegacyStdio(
+  config: {
+    type?: string
+    command?: string
+    args?: readonly string[]
+    env?: Readonly<Record<string, string>>
+  },
+  now = Date.now(),
+): void {
+  const key = getStdioDiscoverVerdictKey(config)
+  if (!key) return
+  stdioDiscoverVerdictCache.set(key, {
+    observedAt: now,
+    modernProtocolVersion: '2026-07-28',
+  })
+}
+
+export function clearRememberedLegacyStdio(config: {
+  type?: string
+  command?: string
+  args?: readonly string[]
+  env?: Readonly<Record<string, string>>
+}): void {
+  const key = getStdioDiscoverVerdictKey(config)
+  if (key) stdioDiscoverVerdictCache.delete(key)
+}
+
+export function resetStdioDiscoverVerdictCacheForTest(): void {
+  stdioDiscoverVerdictCache.clear()
 }

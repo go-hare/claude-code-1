@@ -112,6 +112,56 @@ function createStderrLogger(): ClientOptions['logger'] {
   }
 }
 
+function getClientTargetUrl(
+  provider: ReturnType<typeof getAPIProvider>,
+  model: string | undefined,
+): string | undefined {
+  switch (provider) {
+    case 'bedrock':
+      return (
+        process.env.ANTHROPIC_BEDROCK_BASE_URL ||
+        `https://bedrock-runtime.${getAWSRegion()}.amazonaws.com`
+      )
+    case 'mantle':
+      return (
+        process.env.ANTHROPIC_BEDROCK_MANTLE_BASE_URL ||
+        `https://bedrock-mantle.${getAWSRegion()}.api.aws`
+      )
+    case 'anthropicAws':
+      return (
+        process.env.ANTHROPIC_AWS_BASE_URL ||
+        `https://aws-external-anthropic.${getAWSRegion()}.api.aws`
+      )
+    case 'anthropicGoogleCloud':
+      return (
+        process.env.ANTHROPIC_GOOGLE_CLOUD_BASE_URL ||
+        'https://claude.googleapis.com'
+      )
+    case 'vertex': {
+      if (process.env.ANTHROPIC_VERTEX_BASE_URL) {
+        return process.env.ANTHROPIC_VERTEX_BASE_URL
+      }
+      const region = getVertexRegionForModel(model)
+      return region === 'global'
+        ? 'https://aiplatform.googleapis.com'
+        : `https://${region}-aiplatform.googleapis.com`
+    }
+    case 'foundry':
+      return (
+        process.env.ANTHROPIC_FOUNDRY_BASE_URL ||
+        (process.env.ANTHROPIC_FOUNDRY_RESOURCE
+          ? `https://${process.env.ANTHROPIC_FOUNDRY_RESOURCE}.services.ai.azure.com/anthropic`
+          : undefined)
+      )
+    case 'gateway':
+      return getGatewayAuth()?.url
+    case 'firstParty':
+      return process.env.ANTHROPIC_BASE_URL || getOauthConfig().BASE_API_URL
+    default:
+      return undefined
+  }
+}
+
 export async function getAnthropicClient({
   apiKey,
   maxRetries,
@@ -317,6 +367,7 @@ export async function getAnthropicClient({
   const baseFetchOptions = getProxyFetchOptions({
     forAnthropicAPI: true,
     hasBodyIdleWatchdog,
+    url: getClientTargetUrl(requestProvider, model),
   }) as ClientOptions['fetchOptions'] & {
     dispatcher?: unknown
   }

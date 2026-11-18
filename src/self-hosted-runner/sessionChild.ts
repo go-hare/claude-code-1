@@ -388,6 +388,10 @@ export function buildSessionChildEnv(
     ...sessionChildProxyEnvOverlay(),
     SELF_HOSTED_RUNNER_HOST_CONFIG_DIR: undefined,
     CLAUDE_CODE_EXIT_AFTER_STOP_DELAY: undefined,
+    CCR_AUTO_MODE_APPLY: undefined,
+    CCR_AUTO_MODE_ALLOW: undefined,
+    CCR_AUTO_MODE_ENVIRONMENT: undefined,
+    CCR_AUTO_MODE_SOFT_DENY: undefined,
     CLAUDE_CODE_WORKER_EPOCH: String(opts.workerEpoch),
     CLAUDE_CODE_RESUME_INTERRUPTED_TURN: opts.workerEpoch > 1 ? '1' : undefined,
     CLAUDE_CODE_RESUME_PROMPT:

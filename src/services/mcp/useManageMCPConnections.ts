@@ -1,7 +1,10 @@
 import { feature } from 'bun:bundle'
 import { basename } from 'path'
 import { useCallback, useContext, useEffect, useRef } from 'react'
-import { getSessionId } from '../../bootstrap/state.js'
+import {
+  getIsNonInteractiveSession,
+  getSessionId,
+} from '../../bootstrap/state.js'
 import type { Command } from '../../commands.js'
 import type { Tool } from '../../Tool.js'
 import {
@@ -1157,6 +1160,7 @@ export function useManageMCPConnections(
       getMcpToolsCommandsAndResources(
         onConnectionAttempt,
         enabledConfigs,
+        getIsNonInteractiveSession(),
       ).catch(error => {
         logMCPError(
           'useManageMcpConnections',
@@ -1223,6 +1227,7 @@ export function useManageMCPConnections(
           getMcpToolsCommandsAndResources(
             onConnectionAttempt,
             enabledClaudeaiConfigs,
+            getIsNonInteractiveSession(),
           ).catch(error => {
             logMCPError(
               'useManageMcpConnections',

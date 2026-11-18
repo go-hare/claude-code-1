@@ -1622,9 +1622,17 @@ function AgentViewApp({
     refreshInFlightRef.current = true;
     const generation = ++refreshGenerationRef.current;
     try {
-      // Official W1H: read job state files from ~/.claude/jobs/<short>/state.json
-      const jobs = await listAllJobs();
+      // Official W1H + 2.1.293 (#312): read job state files from ~/.claude/jobs/<short>/state.json.
+      // Preserve existing session list on transient fs errors (e.g. EMFILE/ENFILE) instead of
+      // replacing it with empty/placeholder rows.
+      let transientReadError = false;
+      const jobs = await listAllJobs({
+        onTransientReadError: () => {
+          transientReadError = true;
+        },
+      });
       if (generation !== refreshGenerationRef.current) return;
+      if (transientReadError) return;
 
       // Convert to SessionEntry (no stale detection on load — matches official)
       let entries: SessionEntry[] = jobs.map(({ short, state: job }) => {
@@ -5442,101 +5450,137 @@ export async function renderAgentView(options?: {
   // Official uses a persistent Root that survives across attach/detach cycles
   let root: Root = await createRoot({ exitOnCtrlC: false });
 
-  // Loop: render FleetView → handle action → re-render
-  for (;;) {
-    const action = await new Promise<
-      | { type: 'open'; sessionId: string; short: string; logPath?: string }
-      | { type: 'done'; resumeHintRequested?: boolean }
-      | { type: 'login' }
-    >(resolve => {
-      // ThemeProvider required: without it useTheme() defaults to 'dark', so
-      // selection userMessageBackground paints as rgb(55,55,55) on light terminals.
-      root.render(
-        <ThemeProvider initialState={getThemeSetting()} onThemeSave={saveThemeSetting}>
-          <AppStateProvider>
-            <KeybindingSetup>
-              <AgentsSelectionChrome />
-              <AgentViewApp
-                enteredViaLeftArrow={enteredViaLeftArrow}
-                dispatchExtraArgs={options?.dispatchExtraArgs}
-                dispatchDefaults={options?.dispatchDefaults}
-                cwdFilter={options?.cwdFilter}
-                currentSessionId={options?.currentSessionId}
-                restoreSessionId={lastSelectedSessionId}
-                initialError={remountError}
-                onAction={resolve}
-              />
-            </KeybindingSetup>
-          </AppStateProvider>
-        </ThemeProvider>,
-      );
-    });
+  // Official 2.1.295 (#384): if claude agents and the background daemon are
+  // both stopped (e.g. SIGTERM/SIGHUP at shutdown/reboot) while a session is
+  // open, exit immediately without respawning/starting a new background service.
+  let shutdownSignalReceived = false;
+  const onShutdownSignal = () => {
+    shutdownSignalReceived = true;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { markDaemonShutdownSignaled } = require('../daemon/state.js') as typeof import('../daemon/state.js');
+      markDaemonShutdownSignaled();
+    } catch {
+      // ignore
+    }
+  };
+  const shutdownSignals: NodeJS.Signals[] = ['SIGTERM', 'SIGHUP', 'SIGINT'];
+  for (const sig of shutdownSignals) {
+    process.on(sig, onShutdownSignal);
+  }
 
-    // Consume remount error after first paint of this iteration.
-    remountError = undefined;
-
-    if (action.type === 'open') {
-      // Official: handoffAltScreen prevents unmount from exiting alt screen
-      root.handoffAltScreen();
-      // Official (Windows only): handoffRawMode prevents unmount from disabling raw mode
-      if (getPlatform() === 'windows') {
-        root.handoffRawMode();
+  try {
+    // Loop: render FleetView → handle action → re-render
+    for (;;) {
+      if (shutdownSignalReceived) {
+        break;
       }
-    }
+      const action = await new Promise<
+        | { type: 'open'; sessionId: string; short: string; logPath?: string }
+        | { type: 'done'; resumeHintRequested?: boolean }
+        | { type: 'login' }
+      >(resolve => {
+        // ThemeProvider required: without it useTheme() defaults to 'dark', so
+        // selection userMessageBackground paints as rgb(55,55,55) on light terminals.
+        root.render(
+          <ThemeProvider initialState={getThemeSetting()} onThemeSave={saveThemeSetting}>
+            <AppStateProvider>
+              <KeybindingSetup>
+                <AgentsSelectionChrome />
+                <AgentViewApp
+                  enteredViaLeftArrow={enteredViaLeftArrow}
+                  dispatchExtraArgs={options?.dispatchExtraArgs}
+                  dispatchDefaults={options?.dispatchDefaults}
+                  cwdFilter={options?.cwdFilter}
+                  currentSessionId={options?.currentSessionId}
+                  restoreSessionId={lastSelectedSessionId}
+                  initialError={remountError}
+                  onAction={resolve}
+                />
+              </KeybindingSetup>
+            </AppStateProvider>
+          </ThemeProvider>,
+        );
+      });
 
-    root.unmount();
+      // Consume remount error after first paint of this iteration.
+      remountError = undefined;
 
-    if (action.type === 'done') {
-      resumeHintRequested = !!action.resumeHintRequested;
-      break;
-    }
+      if (action.type === 'open') {
+        // Official: handoffAltScreen prevents unmount from exiting alt screen
+        root.handoffAltScreen();
+        // Official (Windows only): handoffRawMode prevents unmount from disabling raw mode
+        if (getPlatform() === 'windows') {
+          root.handoffRawMode();
+        }
+      }
 
-    // Official fleet host: type==="login" → Tfr + Login, remount fleet.
-    // No invent: skip runOrgMemoryAuthBoundary / storageV5 Abs / hint (not in tip).
-    if (action.type === 'login') {
-      const { Login } = await import('../commands/login/login.js');
-      const { getOauthTokenEnvStartingMessage } = await import('../commands/login/oauthTokenEnvWarning.js');
-      const { getClientType } = await import('../bootstrap/state.js');
-      root = await createRoot({ exitOnCtrlC: false });
-      const loginResult = await Promise.race([
-        new Promise<boolean>(resolve => {
-          root.render(
-            <ThemeProvider initialState={getThemeSetting()} onThemeSave={saveThemeSetting}>
-              <AppStateProvider>
-                <KeybindingSetup>
-                  <Login onDone={success => resolve(success)} startingMessage={getOauthTokenEnvStartingMessage()} />
-                </KeybindingSetup>
-              </AppStateProvider>
-            </ThemeProvider>,
-          );
-        }),
-        root.waitUntilExit().then(() => 'exited' as const),
-      ]);
       root.unmount();
-      if (loginResult === 'exited') break;
-      if (loginResult && getClientType() === 'gateway') break;
-      root = await createRoot({ exitOnCtrlC: false });
-      continue;
-    }
 
-    if (action.type === 'open') {
-      // Official (Windows only): re-enable raw mode + ref stdin after Ink unmount
-      if (getPlatform() === 'windows' && process.stdin.isTTY) {
-        process.stdin.setRawMode(true);
-        process.stdin.ref();
+      if (action.type === 'done') {
+        resumeHintRequested = !!action.resumeHintRequested;
+        break;
       }
 
-      lastSelectedSessionId = action.sessionId;
-      // Attach to PTY socket (same as official: raw terminal ↔ PTY host)
-      // densable: after detach, if(X) process.stdout.write(BwH()) then cj_/createRoot.
-      // BwH is emitted at end of attachToPtySession (enterAltScreenSequence).
-      const attachResult = await attachToPtySession(action.short);
-      // Official: (J = k.msg) on attach_failed / still-starting settle.
-      remountError = attachResult.error;
-    }
+      if (shutdownSignalReceived) {
+        break;
+      }
 
-    // Re-create root for next iteration (official: cj_ / createRoot after detach)
-    root = await createRoot({ exitOnCtrlC: false });
+      // Official fleet host: type==="login" → Tfr + Login, remount fleet.
+      // No invent: skip runOrgMemoryAuthBoundary / storageV5 Abs / hint (not in tip).
+      if (action.type === 'login') {
+        const { Login } = await import('../commands/login/login.js');
+        const { getOauthTokenEnvStartingMessage } = await import('../commands/login/oauthTokenEnvWarning.js');
+        const { getClientType } = await import('../bootstrap/state.js');
+        root = await createRoot({ exitOnCtrlC: false });
+        const loginResult = await Promise.race([
+          new Promise<boolean>(resolve => {
+            root.render(
+              <ThemeProvider initialState={getThemeSetting()} onThemeSave={saveThemeSetting}>
+                <AppStateProvider>
+                  <KeybindingSetup>
+                    <Login onDone={success => resolve(success)} startingMessage={getOauthTokenEnvStartingMessage()} />
+                  </KeybindingSetup>
+                </AppStateProvider>
+              </ThemeProvider>,
+            );
+          }),
+          root.waitUntilExit().then(() => 'exited' as const),
+        ]);
+        root.unmount();
+        if (loginResult === 'exited') break;
+        if (loginResult && getClientType() === 'gateway') break;
+        if (shutdownSignalReceived) break;
+        root = await createRoot({ exitOnCtrlC: false });
+        continue;
+      }
+
+      if (action.type === 'open') {
+        // Official (Windows only): re-enable raw mode + ref stdin after Ink unmount
+        if (getPlatform() === 'windows' && process.stdin.isTTY) {
+          process.stdin.setRawMode(true);
+          process.stdin.ref();
+        }
+
+        lastSelectedSessionId = action.sessionId;
+        // Attach to PTY socket (same as official: raw terminal ↔ PTY host)
+        // densable: after detach, if(X) process.stdout.write(BwH()) then cj_/createRoot.
+        // BwH is emitted at end of attachToPtySession (enterAltScreenSequence).
+        const attachResult = await attachToPtySession(action.short);
+        // Official: (J = k.msg) on attach_failed / still-starting settle.
+        remountError = attachResult.error;
+        if (shutdownSignalReceived) {
+          break;
+        }
+      }
+
+      // Re-create root for next iteration (official: cj_ / createRoot after detach)
+      root = await createRoot({ exitOnCtrlC: false });
+    }
+  } finally {
+    for (const sig of shutdownSignals) {
+      process.off(sig, onShutdownSignal);
+    }
   }
 
   // Cleanup in-process bgManager if we started one

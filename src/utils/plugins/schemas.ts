@@ -150,6 +150,81 @@ export function isBlockedOfficialName(name: string): boolean {
 }
 
 /**
+ * Official `Xse` — true when a marketplace name is an ASCII look-alike of an
+ * official Anthropic marketplace (not a non-ASCII homograph).
+ */
+export function isAsciiLookalikeOfficialName(name: string): boolean {
+  return isBlockedOfficialName(name) && !NON_ASCII_PATTERN.test(name)
+}
+
+const REMOVE_CMD_MAX_NAME_LEN = 64
+
+function formatMarketplaceRemoveStep(name: string, target = 'it'): string {
+  const cmd =
+    name.length <= REMOVE_CMD_MAX_NAME_LEN
+      ? `claude plugin marketplace remove ${name}`
+      : null
+  return cmd === null
+    ? `Remove ${target} in /plugin → Marketplaces`
+    : `Remove ${target} with: ${cmd}`
+}
+
+const SETTINGS_LOOKALIKE_STEPS = (name: string): string[] => [
+  "It was added from a settings file. To keep it, do these in order (if your organization's managed settings add it, an administrator does step 1):",
+  "1. In each settings file that lists it under extraKnownMarketplaces, rename its entry (the key and its source.name) to a plain-ASCII name that doesn't look like one of Anthropic's.",
+  `2. ${formatMarketplaceRemoveStep(name, 'the old name')}`,
+  '(this also uninstalls its plugins and deletes their data, options and secrets).',
+  "3. Start Claude Code again, in that project's folder if it is a project's settings file, then install its plugins from the renamed one.",
+]
+
+/**
+ * Official `aWr` — improved remediation hint when a marketplace name looks like
+ * an official Anthropic marketplace, with ordered steps when declared in a settings file.
+ */
+export function formatMarketplaceLookalikeHint(
+  name: string,
+  options: { declaredInSettings?: boolean } = {},
+): string {
+  if (options.declaredInSettings === true) {
+    return `Reloading won't help. ${SETTINGS_LOOKALIKE_STEPS(name).join(' ')}`
+  }
+  return `Reloading won't help. ${formatMarketplaceRemoveStep(name)} (this also uninstalls its plugins and deletes their data, options and secrets; if its maintainer renames it, update it instead)`
+}
+
+/**
+ * Official `dqs` — multi-line CLI/list error message for look-alike marketplace names.
+ */
+export function formatMarketplaceLookalikeCliLines(
+  name: string,
+  options: { declaredInSettings?: boolean } = {},
+): string[] {
+  const header = [
+    `Claude Code refuses the marketplace name "${name}":`,
+    "it looks like one of Anthropic's own. Reloading won't help.",
+  ]
+  if (options.declaredInSettings === true) {
+    return [...header, ...SETTINGS_LOOKALIKE_STEPS(name)]
+  }
+  return [
+    ...header,
+    formatMarketplaceRemoveStep(name),
+    '(this also uninstalls its plugins and deletes their data, options and secrets;',
+    'if its maintainer renames it, update it instead).',
+  ]
+}
+
+/**
+ * Official `uqs` — refusal message when updating/reloading a look-alike marketplace.
+ */
+export function formatMarketplaceLookalikeUpdateRefusal(
+  declaredInSettings: boolean,
+): string {
+  return declaredInSettings
+    ? "Claude Code refuses this marketplace's name: it looks like one of Anthropic's own. Rename it in its settings file, remove the old name in /plugin → Marketplaces (plugins and data go), then restart."
+    : "Claude Code refuses this marketplace's name: it looks like one of Anthropic's own. Reloading won't help. Remove it in /plugin → Marketplaces (deletes its plugins and their data, options and secrets)."
+}
+
+/**
  * The official GitHub organization for Anthropic marketplaces.
  * Reserved names must come from this org.
  */

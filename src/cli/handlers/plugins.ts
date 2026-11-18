@@ -56,6 +56,8 @@ import { loadAllPlugins } from '../../utils/plugins/pluginLoader.js'
 import type { PluginSource } from '../../utils/plugins/schemas.js'
 import {
   type ValidationResult,
+  collectReadmeInstallAdvice,
+  formatReadmeInstallAdvice,
   pluginValidationOutcome,
   validateManifest,
   validatePluginContents,
@@ -63,7 +65,16 @@ import {
 } from '../../utils/plugins/validatePlugin.js'
 import { Io, re } from '../../utils/plugins/escapeSafeText.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
-import { plural } from '../../utils/stringUtils.js'
+import { plural, truncateCodeUnitsSafe } from '../../utils/stringUtils.js'
+import { isEqual } from 'lodash-es'
+import { isBareMode } from '../../utils/envUtils.js'
+import { logForDebugging } from '../../utils/debug.js'
+import { getDisplayPath } from '../../utils/file.js'
+import {
+  getSettingsFilePathForSource,
+  getSettingsWithErrors,
+  projectSettingsAliasesUserSettings,
+} from '../../utils/settings/settings.js'
 import { cliError, cliOk } from '../exit.js'
 
 /** densable CLI `U`/`ke` — human plugin/marketplace lines go through `re`. */
@@ -73,6 +84,70 @@ function printCli(line: string): void {
 
 // Re-export for main.tsx to reference in option definitions
 export { VALID_INSTALLABLE_SCOPES, VALID_UPDATE_SCOPES }
+
+/**
+ * Gold `u9o` (#346) — warn when the settings file written by a plugin or
+ * marketplace CLI command does not load due to syntax/validation errors.
+ */
+export function getSettingsFileLoadWarning(
+  scope: string | undefined,
+): string | null {
+  try {
+    if (scope === undefined || scope === 'managed') return null
+    const source = scopeToSettingSource(scope as 'user' | 'project' | 'local')
+    const filePath = getSettingsFilePathForSource(source)
+    if (
+      filePath === undefined ||
+      (source === 'userSettings' &&
+        basename(filePath) === 'cowork_settings.json')
+    ) {
+      return null
+    }
+    if (
+      (isBareMode() &&
+        (source === 'projectSettings' || source === 'localSettings')) ||
+      (source !== 'userSettings' && projectSettingsAliasesUserSettings())
+    ) {
+      return null
+    }
+    const errors = getSettingsWithErrors().errors.filter(
+      e => e.file === filePath && e.severity !== 'warning',
+    )
+    const first = errors[0]
+    if (first === undefined) return null
+    const extraCount = errors.length - 1
+    const isUnreadable =
+      ('errorClass' in first &&
+        (first as { errorClass?: string }).errorClass === 'unreadable') ||
+      first.message.toLowerCase().includes('could not be read')
+    const reason =
+      first.path !== ''
+        ? `its "${truncateCodeUnitsSafe(first.path, 80)}" ${extraCount > 0 ? `and ${extraCount} other ${plural(extraCount, 'value')} are` : 'is'} not valid`
+        : isUnreadable
+          ? 'it could not be read'
+          : 'it is not a JSON object'
+    return `${getDisplayPath(filePath)} does not load (${reason}), so Claude Code ignores the whole file, including anything this command wrote there. Fix the file, then run this command again if its change is missing. If a newer Claude Code wrote the file, update Claude Code instead.`
+  } catch (err) {
+    logForDebugging(
+      `settings file check after a plugin command skipped: ${errorMessage(err)}`,
+      { level: 'warn' },
+    )
+    return null
+  }
+}
+
+/**
+ * Gold `$or` (#346) — append the settings-load warning when present.
+ */
+export function appendSettingsLoadWarning(
+  message: string,
+  scope: string | undefined,
+): string {
+  const warning = getSettingsFileLoadWarning(scope)
+  return warning === null
+    ? message
+    : `${message}\n${figures.warning} ${warning}`
+}
 
 /**
  * Helper function to handle marketplace command errors consistently.
@@ -183,6 +258,17 @@ export async function pluginValidateHandler(
     for (const r of contentResults) {
       printCli(`Validating ${r.fileType}: ${r.filePath}\n`)
       printValidationResult(r)
+    }
+
+    // #352: README install advice is printed for human output and never
+    // changes the verdict or exit code, even under --strict.
+    const advice = await collectReadmeInstallAdvice(
+      manifestPath,
+      result,
+      contentResults,
+    )
+    for (const line of formatReadmeInstallAdvice(advice)) {
+      printCli(`${line}\n`)
     }
 
     if (outcome.allSuccess) {
@@ -662,15 +748,14 @@ export async function marketplaceAddHandler(
         sourceType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
 
-    cliOk(
-      alreadyMaterialized
-        ? re(
-            `${figures.tick} Marketplace '${name}' already on disk — declared in ${scope} settings`,
-          )
-        : re(
-            `${figures.tick} Successfully added marketplace: ${name} (declared in ${scope} settings)`,
-          ),
-    )
+    const successLine = alreadyMaterialized
+      ? re(
+          `${figures.tick} Marketplace '${name}' already on disk — declared in ${scope} settings`,
+        )
+      : re(
+          `${figures.tick} Successfully added marketplace: ${name} (declared in ${scope} settings)`,
+        )
+    cliOk(appendSettingsLoadWarning(successLine, scope))
   } catch (error) {
     handleMarketplaceError(error, 'add marketplace')
   }
@@ -825,6 +910,166 @@ export async function marketplaceUpdateHandler(
   }
 }
 
+const INSTALL_MARKETPLACE_CLI_USAGE =
+  'claude plugin install <plugin> --marketplace <source>'
+
+/**
+ * Gold `pluginInstallFromSourceHandler` (#193):
+ * `claude plugin install <plugin> --marketplace <source>`
+ * Adds the marketplace to userSettings if not already added (under the same
+ * policy checks as `claude plugin marketplace add`), then installs the plugin.
+ */
+export async function pluginInstallFromSourceHandler(
+  plugin: string,
+  marketplaceSourceInput: string,
+  options: {
+    scope?: string
+    cowork?: boolean
+    config?: string[]
+    yes?: boolean
+    json?: boolean
+    acceptCommand?: string
+  } = {},
+): Promise<void> {
+  if (options.cowork) setUseCoworkPlugins(true)
+  const { name: bareName, marketplace: inlineMarketplace } =
+    parsePluginIdentifier(plugin)
+  if (!bareName || inlineMarketplace) {
+    cliError(
+      `${figures.cross} --marketplace needs the plugin's bare name. (a marketplace already added is named after the plugin instead: <plugin>@<marketplace>) Usage: ${INSTALL_MARKETPLACE_CLI_USAGE}`,
+    )
+  }
+
+  let marketplaceName: string
+  let addedNow = false
+  try {
+    const parsed = await parseMarketplaceInput(marketplaceSourceInput)
+    if (!parsed) {
+      cliError(
+        `${figures.cross} Invalid marketplace source format. Try: owner/repo, https://..., or ./path`,
+      )
+    }
+    if ('error' in parsed) {
+      cliError(`${figures.cross} ${parsed.error}`)
+    }
+
+    const known = await loadKnownMarketplacesConfig()
+    const existingEntry = Object.entries(known).find(([, entry]) =>
+      isEqual(entry.source, parsed),
+    )
+    if (existingEntry) {
+      marketplaceName = existingEntry[0]
+      if (!options.json) {
+        printCli(`Marketplace '${marketplaceName}' is already added`)
+      }
+    } else {
+      if (!options.json) {
+        printCli('Adding marketplace...')
+      }
+      const { name, resolvedSource } = await addMarketplaceSource(
+        parsed,
+        message => {
+          if (!options.json) printCli(message)
+        },
+      )
+      saveMarketplaceToSettings(
+        name,
+        { source: resolvedSource },
+        'userSettings',
+      )
+      clearAllCaches()
+      logEvent('tengu_marketplace_added', {
+        _PROTO_marketplace_name:
+          name as AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
+        source_type:
+          parsed.source as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      marketplaceName = name
+      addedNow = true
+      if (!options.json) {
+        const line = appendSettingsLoadWarning(
+          `${figures.tick} Successfully added marketplace: ${name} (declared in user settings)`,
+          'user',
+        )
+        printCli(line)
+      }
+    }
+
+    if (marketplaceName.includes('@') || /\s/.test(marketplaceName)) {
+      const suffix = addedNow
+        ? ' The marketplace itself was added, and is declared in user settings.'
+        : ''
+      cliError(
+        `${figures.cross} Marketplace '${marketplaceName}' can't be named after a plugin as <plugin>@<marketplace>, so nothing was installed from it.${suffix}`,
+      )
+    }
+  } catch (error) {
+    handleMarketplaceError(error, 'add marketplace')
+  }
+
+  await pluginInstallHandler(`${bareName}@${marketplaceName}`, options)
+}
+
+/**
+ * Parse raw CLI args after `claude plugin install` when `--marketplace` is used.
+ */
+export async function pluginInstallFromSourceFromCliArgs(
+  args: string[],
+): Promise<void> {
+  let marketplaceSource: string | undefined
+  let scope: string | undefined
+  let yes = false
+  let json = false
+  let cowork = false
+  const config: string[] = []
+  const positional: string[] = []
+
+  for (let i = 0; i < args.length; i++) {
+    const token = args[i]!
+    if (token === '--marketplace') {
+      marketplaceSource = args[++i]
+    } else if (token.startsWith('--marketplace=')) {
+      marketplaceSource = token.slice('--marketplace='.length)
+    } else if (token === '-s' || token === '--scope') {
+      scope = args[++i]
+    } else if (token.startsWith('--scope=')) {
+      scope = token.slice('--scope='.length)
+    } else if (token === '--config') {
+      const val = args[++i]
+      if (val !== undefined) config.push(val)
+    } else if (token.startsWith('--config=')) {
+      config.push(token.slice('--config='.length))
+    } else if (token === '-y' || token === '--yes') {
+      yes = true
+    } else if (token === '--json') {
+      json = true
+    } else if (token === '--cowork') {
+      cowork = true
+    } else if (!token.startsWith('-')) {
+      positional.push(token)
+    }
+  }
+
+  if (!marketplaceSource) {
+    cliError(
+      `${figures.cross} --marketplace needs a marketplace source (owner/repo or a URL). Usage: ${INSTALL_MARKETPLACE_CLI_USAGE}`,
+    )
+  }
+  if (positional.length !== 1) {
+    cliError(
+      `${figures.cross} --marketplace needs exactly one plugin name. Usage: ${INSTALL_MARKETPLACE_CLI_USAGE}`,
+    )
+  }
+
+  await pluginInstallFromSourceHandler(positional[0]!, marketplaceSource, {
+    scope,
+    cowork,
+    config: config.length > 0 ? config : undefined,
+    yes,
+    json,
+  })
+}
+
 // plugin install (lines 5690–5721) + densable --config KEY=VALUE (BJy/$Jy)
 // densable 2.1.229 #4: -y/--yes + ftm/ptm command-source consent before install
 export async function pluginInstallHandler(
@@ -836,8 +1081,14 @@ export async function pluginInstallHandler(
     yes?: boolean
     json?: boolean
     acceptCommand?: string
+    marketplace?: string
   },
 ): Promise<void> {
+  if (options.marketplace !== undefined) {
+    const { marketplace, ...rest } = options
+    await pluginInstallFromSourceHandler(plugin, marketplace, rest)
+    return
+  }
   if (options.cowork) setUseCoworkPlugins(true)
   const scope = options.scope || 'user'
   if (options.cowork && scope !== 'user') {

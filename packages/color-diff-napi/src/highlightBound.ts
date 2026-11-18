@@ -11,6 +11,13 @@ export class HighlightBoundError extends Error {
   }
 }
 
+export class HighlightLimitError extends Error {
+  override name = 'HighlightLimitError'
+  constructor() {
+    super('this text is too long, or its lines are, for a grammar')
+  }
+}
+
 /** densable `he` — max emitter tree height before the bound is spent. */
 export const HIGHLIGHT_BOUND_MAX_HEIGHT = 32
 /** densable `me` — `Se(e)` sublanguage fan-out cap. */
@@ -23,6 +30,162 @@ export const HIGHLIGHT_BOUND_PER_CHAR = 24
 export const HIGHLIGHT_BOUND_PER_SUBLANG = 3
 /** densable `xe` — constructor charge. */
 export const HIGHLIGHT_BOUND_CONSTRUCTOR = 16
+
+/** densable `E` — default max code length for syntax highlighting. */
+export const HIGHLIGHT_MAX_LENGTH = 50000
+/** densable `d` — per-language length caps for expensive grammars. */
+export const HIGHLIGHT_LANG_MAX_LENGTH = new Map<string, number>([
+  ['asciidoc', 16000],
+  ['gcode', 20000],
+  ['http', 8000],
+  ['nestedtext', 8000],
+  ['sas', 20000],
+  ['wren', 20000],
+])
+export const HIGHLIGHT_MIN_LANG_MAX_LENGTH = Math.min(
+  HIGHLIGHT_MAX_LENGTH,
+  ...HIGHLIGHT_LANG_MAX_LENGTH.values(),
+)
+/** densable `UBn` — line/whitespace-run length threshold before quadratic work check. */
+export const HIGHLIGHT_LINE_LENGTH_SOFT_LIMIT = 256
+/** densable `hOr` — max cumulative long-line/whitespace-run work. */
+export const HIGHLIGHT_LINE_WORK_LIMIT = 16000000
+
+const COUNTED_LANGUAGES = new Set([
+  'abnf',
+  'accesslog',
+  'ada',
+  'angelscript',
+  'applescript',
+  'arcade',
+  'arduino',
+  'asciidoc',
+  'aspectj',
+  'autohotkey',
+  'awk',
+  'bash',
+  'brainfuck',
+  'c',
+  'cal',
+  'clojure',
+  'clojure-repl',
+  'coffeescript',
+  'cos',
+  'cpp',
+  'crmsh',
+  'crystal',
+  'csharp',
+  'css',
+  'dart',
+  'delphi',
+  'django',
+  'dns',
+  'dockerfile',
+  'dos',
+  'dsconfig',
+  'dts',
+  'dust',
+  'elixir',
+  'erb',
+  'erlang',
+  'excel',
+  'fsharp',
+  'gams',
+  'gauss',
+  'gcode',
+  'go',
+  'graphql',
+  'groovy',
+  'haml',
+  'handlebars',
+  'haskell',
+  'http',
+  'ini',
+  'java',
+  'javascript',
+  'jboss-cli',
+  'julia',
+  'julia-repl',
+  'kotlin',
+  'latex',
+  'leaf',
+  'less',
+  'livecodeserver',
+  'livescript',
+  'llvm',
+  'markdown',
+  'matlab',
+  'mipsasm',
+  'mojolicious',
+  'monkey',
+  'moonscript',
+  'nestedtext',
+  'nginx',
+  'nim',
+  'nix',
+  'node-repl',
+  'nsis',
+  'objectivec',
+  'ocaml',
+  'parser3',
+  'perl',
+  'pgsql',
+  'php',
+  'php-template',
+  'pony',
+  'powershell',
+  'processing',
+  'profile',
+  'properties',
+  'protobuf',
+  'puppet',
+  'python',
+  'python-repl',
+  'qml',
+  'r',
+  'reasonml',
+  'roboconf',
+  'routeros',
+  'ruby',
+  'rust',
+  'sas',
+  'scala',
+  'scheme',
+  'scilab',
+  'scss',
+  'shell',
+  'smali',
+  'smalltalk',
+  'sml',
+  'stan',
+  'stata',
+  'stylus',
+  'swift',
+  'tap',
+  'tcl',
+  'tp',
+  'twig',
+  'typescript',
+  'vbnet',
+  'vbscript',
+  'vbscript-html',
+  'verilog',
+  'wren',
+  'x86asm',
+  'xl',
+  'xml',
+  'xquery',
+  'yaml',
+  'zephir',
+])
+const KNOWN_LANGUAGES = new Set([
+  ...HIGHLIGHT_LANG_MAX_LENGTH.keys(),
+  ...COUNTED_LANGUAGES,
+])
+const SPECIAL_CHAR_MAP = new Map<string, [string, RegExp]>([
+  ['markdown', ['[`~<', /<(?:script|style)(?=\s|>)/iu]],
+])
+const LINE_OR_SPACES_RE = /\s+|[^\n]+/g
 
 type BoundWallet = { left: number }
 
@@ -210,6 +373,133 @@ function boundPlugin(
   }
 }
 
+/** densable `X` / `T` / `Y` / `zPs` / `VPs` / `Q` — pre-highlight length & long-line/whitespace guards. */
+function countSpecialChars(segment: string, chars: string | undefined): number {
+  if (chars === undefined) return segment.length
+  let count = 0
+  for (const ch of segment) {
+    if (chars.includes(ch)) count += 1
+  }
+  return count
+}
+
+function measureLongLineWork(code: string, chars: string | undefined): number {
+  let work = 0
+  if (code.length <= HIGHLIGHT_LINE_LENGTH_SOFT_LIMIT) return work
+  for (const [segment] of code.matchAll(LINE_OR_SPACES_RE)) {
+    if (segment.length > HIGHLIGHT_LINE_LENGTH_SOFT_LIMIT) {
+      work += countSpecialChars(segment, chars) * segment.length
+    }
+  }
+  return work
+}
+
+function passesFastCheck(code: string): boolean {
+  return (
+    code.length <= HIGHLIGHT_MIN_LANG_MAX_LENGTH &&
+    measureLongLineWork(code, undefined) <= HIGHLIGHT_LINE_WORK_LIMIT
+  )
+}
+
+function getSpecialCharsForLanguage(
+  code: string,
+  language: string | undefined,
+): string | undefined {
+  if (language === undefined) return undefined
+  const entry = SPECIAL_CHAR_MAP.get(language)
+  return entry === undefined || entry[1].test(code) ? undefined : entry[0]
+}
+
+function measureLanguageLineWork(
+  code: string,
+  language: string | undefined,
+): number {
+  if (
+    language !== undefined &&
+    COUNTED_LANGUAGES.has(language) &&
+    code.length > HIGHLIGHT_LINE_LENGTH_SOFT_LIMIT
+  ) {
+    return measureLongLineWork(code, getSpecialCharsForLanguage(code, language))
+  }
+  return 0
+}
+
+function passesLanguageCheck(
+  code: string,
+  language: string | undefined,
+): boolean {
+  const maxLen =
+    (language !== undefined
+      ? HIGHLIGHT_LANG_MAX_LENGTH.get(language)
+      : undefined) ?? HIGHLIGHT_MAX_LENGTH
+  return (
+    code.length <= maxLen &&
+    measureLanguageLineWork(code, language) <= HIGHLIGHT_LINE_WORK_LIMIT
+  )
+}
+
+function resolveLanguageForLimit(
+  hljs: HljsBoundApi,
+  language: string | undefined,
+): string | undefined {
+  if (language === undefined) return undefined
+  const langToName = new Map<unknown, string>(
+    [...KNOWN_LANGUAGES].flatMap(name => {
+      const langObj = hljs.getLanguage(name)
+      return langObj === undefined ? [] : [[langObj, name]]
+    }),
+  )
+  const seen = new Set<object>()
+  const queue: unknown[] = KNOWN_LANGUAGES.has(language)
+    ? []
+    : [hljs.getLanguage(language)]
+  let resolved: string | undefined = language
+  while (queue.length > 0) {
+    const cur = queue.pop()
+    if (typeof cur !== 'object' || cur === null || seen.has(cur)) continue
+    const rec = cur as LangNode
+    const match =
+      'subLanguage' in rec &&
+      Array.isArray(rec.subLanguage) &&
+      rec.subLanguage.length === 0
+        ? ([...langToName.values()].find(name => !SPECIAL_CHAR_MAP.has(name)) ??
+          langToName.values().next().value)
+        : langToName.get(cur)
+    if (match !== undefined && !SPECIAL_CHAR_MAP.has(match)) return match
+    resolved = match ?? resolved
+    seen.add(cur)
+    if (match === undefined) {
+      queue.push(
+        ...[rec.subLanguage ?? []]
+          .flat()
+          .filter((id): id is string => typeof id === 'string')
+          .map(id => hljs.getLanguage(id)),
+        ...(rec.contains ?? []),
+        ...('variants' in rec ? (rec.variants ?? []) : []),
+        'starts' in rec ? rec.starts : undefined,
+      )
+    }
+  }
+  return resolved
+}
+
+function limitPlugin(hljs: HljsBoundApi) {
+  return {
+    'before:highlight': (event: { language?: string; code: string }) => {
+      if (
+        !passesFastCheck(event.code) &&
+        !passesLanguageCheck(
+          event.code,
+          resolveLanguageForLimit(hljs, event.language),
+        )
+      ) {
+        throw new HighlightLimitError()
+      }
+    },
+    'after:highlight': () => {},
+  }
+}
+
 /** densable `z`. */
 export function bindHighlightBudget(
   hljs: HljsBoundApi,
@@ -218,6 +508,8 @@ export function bindHighlightBudget(
   const raw =
     hljs.highlightAuto('', [])._emitter?.constructor ??
     hljs.highlightAuto('', []).emitter?.constructor
+  if ('isBounded' in ((raw as object) ?? {})) return
+  hljs.addPlugin(limitPlugin(hljs))
   if (!isUnboundedEmitter(raw)) return
   const wallet: BoundWallet = { left: Number.POSITIVE_INFINITY }
   hljs.configure({ __emitter: boundedEmitter(raw, wallet) })

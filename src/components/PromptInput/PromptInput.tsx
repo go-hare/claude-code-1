@@ -79,6 +79,7 @@ import {
   instances,
   stringWidth,
   Text,
+  useApp,
   useInput,
   useProbeExternalClear,
   wrapText,
@@ -215,6 +216,7 @@ import VimTextInput from '../VimTextInput.js';
 import { dismissExitHintIfShowing } from './dismissExitHintIfShowing.js';
 import { getModeFromInput, getValueFromInput } from './inputModes.js';
 import { mergePastedContentsDualWrite, resolveSubmitInputFromLive } from './inputPaste.js';
+import { runPromptAutocomplete, type PromptAutocompleteSuggestion } from '../../utils/plugins/functionHooksModules.js';
 import { FOOTER_TEMPORARY_STATUS_TIMEOUT, Notifications, PinnedNotifications } from './Notifications.js';
 import PromptInputFooter from './PromptInputFooter.js';
 import type { SuggestionItem } from './PromptInputFooterSuggestions.js';
@@ -229,7 +231,7 @@ import {
   swarmBannerGradientSegments,
   useSwarmBanner,
 } from './useSwarmBanner.js';
-import { isNonSpacePrintable, isVimModeEnabled } from './utils.js';
+import { computeNfcInsertResult, isNonSpacePrintable, isVimModeEnabled } from './utils.js';
 import { resolveViewedTask, viewedAgentNameForPlaceholder } from './viewedAgent.js';
 import { getThemeSetting } from '../../utils/themeSetting.js';
 import { truncateToWidth } from '../../utils/format.js';
@@ -348,6 +350,7 @@ type Props = {
   hasSuppressedDialogs?: boolean;
   isLocalJSXCommandActive?: boolean;
   onLeftArrowOnEmpty?: () => void;
+  takePendingPastes?: () => string[];
   insertTextRef?: React.MutableRefObject<{
     insert: (text: string) => void;
     setInputWithCursor: (value: string, cursor: number) => void;
@@ -364,6 +367,111 @@ const noopSubscribe = (): (() => void) => () => {};
 const nullDraftSnapshot = (): null => null;
 
 // densable 2.1.218 #4: LEFT_ARROW_AGAIN_TIMEOUT removed — idp/sdp owns arm window (Dzs=3000)
+
+/**
+ * Official 2.1.293 (#315) `sR`, `Jin`, `_et`, `xet` — preserve pasted skill/text
+ * marks when a combining accent (\p{M}) typed or pasted right after merges
+ * into the last letter (e.g. NFC normalization).
+ */
+const LEADING_COMBINING_RE = /^[\p{M}\u1161-\u1175\u11A8-\u11C2\u{16D67}\u{16D68}]+/u;
+const COMBINING_MARK_RE = /\p{M}/u;
+
+export function inlinePasteVariants(text: string): string[] {
+  const nfc = text.normalize('NFC');
+  const trimmed = nfc.replace(LEADING_COMBINING_RE, '').trimStart();
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of [text, nfc, trimmed]) {
+    if (v !== '' && !seen.has(v)) {
+      seen.add(v);
+      out.push(v);
+    }
+  }
+  return out;
+}
+
+export function matchesWithCombiningMarks(haystack: string, needle: string): boolean {
+  let baseEnd = needle.length;
+  while (baseEnd > 0) {
+    const code = needle.charCodeAt(baseEnd - 1);
+    const step = baseEnd > 1 && code >= 0xdc00 && code <= 0xdfff ? 2 : 1;
+    if (!COMBINING_MARK_RE.test(needle.slice(baseEnd - step, baseEnd))) break;
+    baseEnd -= step;
+  }
+  if (baseEnd === needle.length || baseEnd === 0) return false;
+  const base = needle.slice(0, baseEnd);
+  const marks = Array.from(needle.slice(baseEnd));
+  const lastMark = marks.at(-1);
+  if (lastMark === undefined || !haystack.includes(lastMark)) return false;
+
+  const lps = new Int32Array(base.length);
+  for (let i = 1, j = 0; i < base.length; i++) {
+    while (j > 0 && base.charCodeAt(i) !== base.charCodeAt(j)) j = lps[j - 1]!;
+    if (base.charCodeAt(i) === base.charCodeAt(j)) j++;
+    lps[i] = j;
+  }
+  for (let i = 0, j = 0; i < haystack.length; i++) {
+    while (j > 0 && haystack.charCodeAt(i) !== base.charCodeAt(j)) j = lps[j - 1]!;
+    if (haystack.charCodeAt(i) === base.charCodeAt(j)) j++;
+    if (j < base.length) continue;
+    j = lps[j - 1]!;
+    let matched = 0;
+    for (let k = i + 1; k < haystack.length; ) {
+      const cp = haystack.codePointAt(k);
+      if (cp === undefined) break;
+      const ch = String.fromCodePoint(cp);
+      if (!COMBINING_MARK_RE.test(ch)) break;
+      if (ch === marks[matched]) matched++;
+      k += ch.length;
+    }
+    if (matched === marks.length) return true;
+  }
+  return false;
+}
+
+function isTrackablePaste(c: PastedContent): boolean {
+  return c.type === 'image' || (c.type === 'text' && (c.unavailable === true || c.inline === true));
+}
+
+/**
+ * Official 2.1.292 (#196) `mQe = 150`, `cQe`, `aJt` — map `prompt.autocomplete`
+ * hook suggestions to `SuggestionItem`s and apply token replacement.
+ */
+export const PROMPT_AUTOCOMPLETE_DEBOUNCE_MS = 150;
+
+export function mapPluginAutocompleteSuggestions(
+  suggestions: readonly PromptAutocompleteSuggestion[],
+  start?: number,
+): SuggestionItem[] {
+  const counts = new Map<string, number>();
+  return suggestions.map(({ text, label, description }) => {
+    const idx = counts.get(text) ?? 0;
+    counts.set(text, idx + 1);
+    return {
+      id: `autocomplete-${idx}-${text}`,
+      displayText: (label ?? text).replace(/\s+/gu, ' '),
+      ...(description !== undefined ? { description } : {}),
+      metadata: {
+        __pluginAutocomplete: true,
+        autocompleteText: text,
+        start,
+      },
+    };
+  });
+}
+
+export function applyPluginAutocompleteReplacement(
+  input: { text: string; cursor: number },
+  replacementText: string,
+  start?: number,
+): { text: string; cursor: number } {
+  const from = typeof start === 'number' && start >= 0 && start <= input.cursor ? start : input.cursor;
+  const nextText = input.text.slice(0, from) + replacementText + input.text.slice(input.cursor);
+  return {
+    text: nextText,
+    cursor: from + replacementText.length,
+  };
+}
 
 function PromptInput({
   debug,
@@ -411,6 +519,7 @@ function PromptInput({
   hasSuppressedDialogs,
   isLocalJSXCommandActive = false,
   onLeftArrowOnEmpty: onLeftArrowOnEmptyProp,
+  takePendingPastes,
   insertTextRef,
   voiceInterimRange,
 }: Props): React.ReactNode {
@@ -434,6 +543,14 @@ function PromptInput({
   // the draft mounted but must not steal keys from DialogHost Select.
   const hostBlocksKeys = useHasBlockingOpenDialogs();
   const isModalOverlayActive = useIsModalOverlayActive() || isLocalJSXCommandActive || hostBlocksKeys;
+  const { dispatchPasteEvent } = useApp();
+  const inputTakesFocus = !isModalOverlayActive && !isSearchingHistory && !helpOpen && !isSideQuestionVisible;
+  useEffect(() => {
+    if (!inputTakesFocus || !takePendingPastes || !dispatchPasteEvent) return;
+    for (const pending of takePendingPastes()) {
+      dispatchPasteEvent(pending);
+    }
+  }, [inputTakesFocus, takePendingPastes, dispatchPasteEvent]);
   // densable 2.1.238 #36 dT: ctrl+l / cmd+k bump → useLayoutEffect forceRedraw.
   const [clearScreenTick, setClearScreenTick] = useState(0);
   useLayoutEffect(() => {
@@ -1407,6 +1524,7 @@ function PromptInput({
       const mode = getModeFromInput(value);
 
       if (insertedAtStart && mode !== 'prompt') {
+        setAppState(prev => (prev.footerSelection === null ? prev : { ...prev, footerSelection: null }));
         if (isSingleCharInsertion) {
           onModeChange(mode);
           return;
@@ -1828,8 +1946,42 @@ function PromptInput({
     ],
   );
 
+  // Official 2.1.292 (#196): debounced prompt.autocomplete function hook dispatch.
+  const [pluginAutocompleteSuggestions, setPluginAutocompleteSuggestions] = useState<SuggestionItem[]>([]);
+  useEffect(() => {
+    if (
+      mode !== 'prompt' ||
+      isSearchingHistory ||
+      historyIndex > 0 ||
+      input.length === 0 ||
+      !hasMatchingFunctionHook('prompt.autocomplete')
+    ) {
+      setPluginAutocompleteSuggestions(prev => (prev.length === 0 ? prev : []));
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      void runPromptAutocomplete({ text: input, cursor: cursorOffset }, controller.signal)
+        .then(res => {
+          if (controller.signal.aborted) return;
+          setPluginAutocompleteSuggestions(
+            res.suggestions.length > 0 ? mapPluginAutocompleteSuggestions(res.suggestions, res.start) : [],
+          );
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) {
+            setPluginAutocompleteSuggestions(prev => (prev.length === 0 ? prev : []));
+          }
+        });
+    }, PROMPT_AUTOCOMPLETE_DEBOUNCE_MS);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [input, cursorOffset, mode, isSearchingHistory, historyIndex]);
+
   const {
-    suggestions,
+    suggestions: typeaheadSuggestions,
     selectedSuggestion,
     commandArgumentHint,
     inlineGhostText,
@@ -1850,6 +2002,13 @@ function PromptInput({
     markAccepted,
     onModeChange,
   });
+  const suggestions = useMemo(
+    () =>
+      pluginAutocompleteSuggestions.length > 0
+        ? [...typeaheadSuggestions, ...pluginAutocompleteSuggestions]
+        : typeaheadSuggestions,
+    [typeaheadSuggestions, pluginAutocompleteSuggestions],
+  );
 
   // Track if prompt suggestion should be shown (computed later with terminal width).
   // Hidden in teammate view — suggestion is leader-context only.
@@ -1931,24 +2090,35 @@ function PromptInput({
   // (paste map arrives one render before [Image #N] is in input prop) → submit
   // saw empty map → swallow. Use liveInputRef for referenced ids; never clobber
   // the dual-write ref here (merge + dual-write on paste keep submit path live).
-  const hasImagePaste = useMemo(() => Object.values(pastedContents).some(c => c.type === 'image'), [pastedContents]);
+  const hasTrackablePaste = useMemo(() => Object.values(pastedContents).some(isTrackablePaste), [pastedContents]);
   useEffect(() => {
-    if (!hasImagePaste) return;
+    if (!hasTrackablePaste) return;
     // Prefer live text (N1 already wrote the pill) over render-prop input.
-    const referencedIds = new Set(parseReferences(liveInputRef.current).map(r => r.id));
+    const liveText = liveInputRef.current;
+    const referencedIds = new Set(parseReferences(liveText).map(r => r.id));
     setPastedContents(prev => {
-      const orphaned = Object.values(prev).filter(c => c.type === 'image' && !referencedIds.has(c.id));
+      const orphaned = Object.values(prev).filter(c => {
+        if (c.type === 'text' && c.inline) {
+          const variants = inlinePasteVariants(c.content);
+          const stillPresent =
+            variants.some(v => liveText.includes(v)) || variants.some(v => matchesWithCombiningMarks(liveText, v));
+          return !stillPresent;
+        }
+        return isTrackablePaste(c) && !referencedIds.has(c.id);
+      });
       if (orphaned.length === 0) return prev;
       const next = { ...prev };
-      for (const img of orphaned) delete next[img.id];
+      for (const item of orphaned) delete next[item.id];
       return next;
     });
-  }, [input, hasImagePaste, setPastedContents]);
+  }, [input, hasTrackablePaste, setPastedContents]);
 
   function onTextPaste(rawText: string) {
     pendingSpaceAfterPillRef.current = false;
     // Clean up pasted text - strip ANSI escape codes and normalize line endings and tabs
-    let text = stripAnsi(rawText).replace(/\r/g, '\n').replaceAll('\t', '    ');
+    let text = stripAnsi(rawText)
+      .replace(/\r\n|\r/g, '\n')
+      .replaceAll('\t', '    ');
 
     // Match typed/auto-suggest: `!cmd` pasted into empty input enters bash mode.
     if (input.length === 0) {
@@ -2027,7 +2197,7 @@ function PromptInput({
     const currentOffset = cursorOffsetRef.current;
     pushToBuffer(currentInput, currentOffset, pastedContentsRef.current);
 
-    const newInput = currentInput.slice(0, currentOffset) + text + currentInput.slice(currentOffset);
+    const { newInput, newOffset } = computeNfcInsertResult(currentInput, currentOffset, text);
     // Paste / N1 does not go through onChange, so footerSelection (e.g. "2 shells"
     // tasks pill) would stay set: TextInput focus=false and Enter maps to
     // footer:openSelected → bashes dialog, pill left in the box ("吞"). Clear
@@ -2044,7 +2214,6 @@ function PromptInput({
       setPastedContents(stamped);
       pastedContentsRef.current = stamped;
     }
-    const newOffset = currentOffset + text.length;
     cursorOffsetRef.current = newOffset;
     setCursorOffset(newOffset);
   }
@@ -2717,8 +2886,19 @@ function PromptInput({
     // \n type-to-exits it inserts a newline and clears the pill (flash,
     // first Enter looks like it missed).
     if (footerItemSelected && char && char !== '\n' && !key.ctrl && !key.meta && !key.escape && !key.return) {
-      onChange(input.slice(0, cursorOffset) + char + input.slice(cursorOffset));
-      setCursorOffset(cursorOffset + char.length);
+      const liveVal = liveInputRef.current;
+      const liveOff = cursorOffsetRef.current;
+      const { newInput, newOffset } = computeNfcInsertResult(liveVal, liveOff, char);
+      setAppState(prev =>
+        prev.footerSelection === null ? prev : { ...prev, footerSelection: null, idleTeammatesExpanded: false },
+      );
+      onChange(newInput);
+      const enteredMode =
+        liveOff === 0 && newInput.length === liveVal.length + 1 && getModeFromInput(newInput) !== 'prompt';
+      if (!enteredMode) {
+        cursorOffsetRef.current = newOffset;
+        setCursorOffset(newOffset);
+      }
       return;
     }
 

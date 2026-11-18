@@ -51,6 +51,26 @@ type HookProgressInit =
     }
   | { type: 'log'; message: string }
 
+function isEnvTruthy(value: string | undefined): boolean {
+  if (!value) return false
+  const normalized = value.trim().toLowerCase()
+  return normalized === '1' || normalized === 'true' || normalized === 'yes'
+}
+
+/**
+ * Official `NEe()` (2.1.296 #488) — resolve `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL`.
+ * Returns `undefined` when unset or `"inherit"`.
+ */
+export function resolveWorkflowSubagentModel(
+  env: Record<string, string | undefined> = process.env,
+): string | undefined {
+  const raw = env.CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL?.trim()
+  if (!raw || raw.toLowerCase() === 'inherit') {
+    return undefined
+  }
+  return raw
+}
+
 export function makeHooks(
   ctx: EngineContext,
   runSubWorkflow: SubWorkflowRunner,
@@ -75,6 +95,24 @@ export function makeHooks(
     const agentId = r.agentIdSeq.value++
 
     const params: AgentRunParams = { prompt, ...opts }
+    const workflowSubagentModel = resolveWorkflowSubagentModel()
+    const forceSubagentModel = isEnvTruthy(
+      process.env.CLAUDE_CODE_SUBAGENT_MODEL_FORCE,
+    )
+    const ignoreReason =
+      workflowSubagentModel !== undefined
+        ? 'CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL is set'
+        : forceSubagentModel
+          ? 'CLAUDE_CODE_SUBAGENT_MODEL_FORCE is on'
+          : undefined
+    if (params.model !== undefined && ignoreReason !== undefined) {
+      ctx.ports.logger.warn?.(
+        `Workflow agent model "${params.model}" ignored: ${ignoreReason}`,
+      )
+      params.model = workflowSubagentModel
+    } else if (workflowSubagentModel !== undefined) {
+      params.model = workflowSubagentModel
+    }
     const key = agentCallKey(prompt, params)
     const label = opts.label as string | undefined
     const phase =

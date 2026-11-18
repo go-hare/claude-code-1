@@ -85,8 +85,8 @@ function BashEditDiffView({
   }
   firstExplainedDiff ??= diff;
   const convenienceNote =
-    firstExplainedDiff === diff
-      ? '(what this command changed; a convenience view, not a review or audit of the command)'
+    verbose || firstExplainedDiff === diff
+      ? '(files that changed while this command ran, by the command or by another process; a convenience view, not a review or audit of the command)'
       : null;
   const sharedNote = diff.shared ? CONCURRENT_COMMAND_NOTE : null;
   const hideBody = (style === 'condensed' || treeMoved) && !verbose;

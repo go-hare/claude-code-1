@@ -13,12 +13,13 @@
  * plugins active).
  */
 
-import { dirname, join } from 'path'
+import { dirname, join, win32 } from 'path'
 import { logForDebugging } from '../debug.js'
 import { errorMessage, isENOENT, toError } from '../errors.js'
 import { getFsImplementation } from '../fsOperations.js'
 import { stripBOM } from '../jsonRead.js'
 import { logError } from '../log.js'
+import { getPlatform } from '../platform.js'
 import {
   jsonParse,
   jsonStringify,
@@ -42,6 +43,95 @@ import {
 
 // Type alias for V2 plugins map
 type InstalledPluginsMapV2 = Record<string, PluginInstallationEntry[]>
+
+/**
+ * Normalize a Windows project path so drive-letter case differences (e.g. `C:\foo`
+ * vs `c:\foo`) and trailing separators match the same install record.
+ */
+export function normalizeWindowsProjectPath(
+  projectPath: string,
+  platform: string = getPlatform(),
+): string {
+  if (
+    platform !== 'windows' ||
+    /^\/(?!\/)/.test(projectPath) ||
+    /^[\\/]{2}[?.][\\/]/.test(projectPath) ||
+    /(^|[\\/])\.{1,2}([\\/]|$)/.test(projectPath)
+  ) {
+    return projectPath
+  }
+  const normalized = win32.normalize(projectPath)
+  const stripped =
+    normalized.length > win32.parse(normalized).root.length
+      ? normalized.replace(/[\\/]+$/, '')
+      : normalized
+  return /^[a-z]:/i.test(stripped)
+    ? stripped[0]!.toLowerCase() + stripped.slice(1)
+    : stripped
+}
+
+export function sameProjectPath(
+  a: string,
+  b: string,
+  platform: string = getPlatform(),
+): boolean {
+  return (
+    normalizeWindowsProjectPath(a, platform) ===
+    normalizeWindowsProjectPath(b, platform)
+  )
+}
+
+function exactInstallMatch(
+  entry: PluginInstallationEntry,
+  scope: PluginScope,
+  projectPath?: string,
+): boolean {
+  return entry.scope === scope && entry.projectPath === projectPath
+}
+
+function looseInstallMatch(
+  entry: PluginInstallationEntry,
+  scope: PluginScope,
+  projectPath?: string,
+  platform: string = getPlatform(),
+): boolean {
+  if (entry.scope !== scope) return false
+  if (entry.projectPath === undefined || projectPath === undefined) {
+    return entry.projectPath === projectPath
+  }
+  return sameProjectPath(entry.projectPath, projectPath, platform)
+}
+
+export function findInstallationIndex(
+  installations: PluginInstallationEntry[] | undefined,
+  scope: PluginScope,
+  projectPath?: string,
+  platform: string = getPlatform(),
+): number {
+  if (!installations) return -1
+  const exact = installations.findIndex(e =>
+    exactInstallMatch(e, scope, projectPath),
+  )
+  return exact >= 0
+    ? exact
+    : installations.findIndex(e =>
+        looseInstallMatch(e, scope, projectPath, platform),
+      )
+}
+
+export function findMatchingInstallations(
+  installations: PluginInstallationEntry[] | undefined,
+  scope: PluginScope,
+  projectPath?: string,
+  platform: string = getPlatform(),
+): PluginInstallationEntry[] {
+  const exact = (installations ?? []).filter(e =>
+    exactInstallMatch(e, scope, projectPath),
+  )
+  if (exact.length > 0) return exact
+  const idx = findInstallationIndex(installations, scope, projectPath, platform)
+  return idx >= 0 && installations ? [installations[idx]!] : []
+}
 
 // Type for persistable scopes (excludes 'flag' which is session-only)
 export type PersistableScope = Exclude<PluginScope, never> // All scopes are persistable in the schema
@@ -431,9 +521,7 @@ export function addPluginInstallation(
   const installations = data.plugins[pluginId] || []
 
   // Find existing entry for this scope+projectPath
-  const existingIndex = installations.findIndex(
-    entry => entry.scope === scope && entry.projectPath === projectPath,
-  )
+  const existingIndex = findInstallationIndex(installations, scope, projectPath)
 
   const newEntry: PluginInstallationEntry = {
     scope,
@@ -491,8 +579,10 @@ export function removePluginInstallation(
 
   // densable Dz_: gather producer dirs from the installation being removed
   const producerDirs: string[] = []
+  const matched = findMatchingInstallations(installations, scope, projectPath)
+  const matchedSet = new Set(matched)
   data.plugins[pluginId] = installations.filter(entry => {
-    const match = entry.scope === scope && entry.projectPath === projectPath
+    const match = matchedSet.has(entry)
     if (match) {
       if (entry.sourceProducerPath) {
         producerDirs.push(entry.sourceProducerPath)
@@ -607,9 +697,8 @@ export function updateInstallationPathOnDisk(
     return
   }
 
-  const entry = installations.find(
-    e => e.scope === scope && e.projectPath === projectPath,
-  )
+  const idx = findInstallationIndex(installations, scope, projectPath)
+  const entry = idx >= 0 ? installations[idx] : undefined
 
   if (entry) {
     entry.installPath = newPath
@@ -667,11 +756,12 @@ export function hasPendingUpdates(): boolean {
     if (!memoryInstallations) continue
 
     for (const diskEntry of diskInstallations) {
-      const memoryEntry = memoryInstallations.find(
-        m =>
-          m.scope === diskEntry.scope &&
-          m.projectPath === diskEntry.projectPath,
+      const idx = findInstallationIndex(
+        memoryInstallations,
+        diskEntry.scope,
+        diskEntry.projectPath,
       )
+      const memoryEntry = idx >= 0 ? memoryInstallations[idx] : undefined
       if (memoryEntry && memoryEntry.installPath !== diskEntry.installPath) {
         return true // Disk has different version than memory
       }
@@ -698,11 +788,12 @@ export function getPendingUpdateCount(): number {
     if (!memoryInstallations) continue
 
     for (const diskEntry of diskInstallations) {
-      const memoryEntry = memoryInstallations.find(
-        m =>
-          m.scope === diskEntry.scope &&
-          m.projectPath === diskEntry.projectPath,
+      const idx = findInstallationIndex(
+        memoryInstallations,
+        diskEntry.scope,
+        diskEntry.projectPath,
       )
+      const memoryEntry = idx >= 0 ? memoryInstallations[idx] : undefined
       if (memoryEntry && memoryEntry.installPath !== diskEntry.installPath) {
         count++
       }
@@ -740,11 +831,12 @@ export function getPendingUpdatesDetails(): Array<{
     if (!memoryInstallations) continue
 
     for (const diskEntry of diskInstallations) {
-      const memoryEntry = memoryInstallations.find(
-        m =>
-          m.scope === diskEntry.scope &&
-          m.projectPath === diskEntry.projectPath,
+      const idx = findInstallationIndex(
+        memoryInstallations,
+        diskEntry.scope,
+        diskEntry.projectPath,
       )
+      const memoryEntry = idx >= 0 ? memoryInstallations[idx] : undefined
       if (memoryEntry && memoryEntry.installPath !== diskEntry.installPath) {
         updates.push({
           pluginId,
@@ -878,11 +970,9 @@ export async function removeAllPluginsForMarketplace(
 export function isInstallationRelevantToCurrentProject(
   inst: PluginInstallationEntry,
 ): boolean {
-  return (
-    inst.scope === 'user' ||
-    inst.scope === 'managed' ||
-    inst.projectPath === getOriginalCwd()
-  )
+  if (inst.scope === 'user' || inst.scope === 'managed') return true
+  if (!inst.projectPath) return false
+  return sameProjectPath(inst.projectPath, getOriginalCwd())
 }
 
 /**
@@ -987,9 +1077,7 @@ export function addInstalledPlugin(
   const installations = v2Data.plugins[pluginId] || []
 
   // Find existing entry for this scope+projectPath
-  const existingIndex = installations.findIndex(
-    entry => entry.scope === scope && entry.projectPath === projectPath,
-  )
+  const existingIndex = findInstallationIndex(installations, scope, projectPath)
 
   const isUpdate = existingIndex >= 0
   if (isUpdate) {

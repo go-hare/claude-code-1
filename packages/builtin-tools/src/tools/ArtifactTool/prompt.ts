@@ -29,5 +29,8 @@ Output: \`{ id, url, expiresAt }\`.
 - \`delete\` — permanent delete (confirm pin + schema gate)
 - \`room_send\` — live room broadcast (host often unbound)
 
+## CDN library pinning
+Pin every library URL to an exact version (\`react@18.3.1\` on jsDelivr or unpkg, \`react/18.3.1/…\` on cdnjs, \`cdn.tailwindcss.com/3.4.17\`), never a bare name, a range or a tag (\`react\`, \`react@18\`, \`@latest\`). Choose a version at least two weeks old. Any version you knew before this conversation is old enough; if you look versions up, skip any published in the last two weeks.
+
 Official registration (ASe / cobalt) gates model availability; tip upload also opens when tip hosting env or \`CLAUDE_CODE_ARTIFACT=1\`.`
 }

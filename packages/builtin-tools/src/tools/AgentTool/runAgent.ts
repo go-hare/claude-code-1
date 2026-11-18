@@ -5,7 +5,10 @@ import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
 import { SAME_CWD_CHILD_NOTE } from 'src/utils/agentSharesCwd.js'
 import { logForDebugging } from 'src/utils/debug.js'
-import { isBypassPermissionsModeDisabled } from 'src/utils/permissions/permissionSetup.js'
+import {
+  getAutoModeUnavailableReason,
+  isBypassPermissionsModeDisabled,
+} from 'src/utils/permissions/permissionSetup.js'
 import { isEvalConfined } from 'src/utils/permissions/evalConfined.js'
 import type { HostPermissionLayer } from 'src/engine/hostPermissionLayers.js'
 import { levelSessionEffort } from 'src/utils/effort.js'
@@ -716,6 +719,21 @@ export async function* runAgent({
       agentPermissionMode = state.toolPermissionContext.mode
     }
 
+    // #199 SEA `Fbo`: Subagent definitions with permissionMode: 'auto' must
+    // fall back to parent mode when auto mode is unavailable (disabled by
+    // settings, circuit breaker, or unsupported model).
+    if (agentPermissionMode === 'auto') {
+      const autoUnavailableReason =
+        getAutoModeUnavailableReason(resolvedAgentModel)
+      if (autoUnavailableReason !== null) {
+        logForDebugging(
+          `Subagent definition's permissionMode would put it in auto mode, but auto mode is unavailable to this subagent (reason=${autoUnavailableReason}); keeping parent mode '${state.toolPermissionContext.mode}'.`,
+          { level: 'warn' },
+        )
+        agentPermissionMode = undefined
+      }
+    }
+
     // Override permission mode if agent defines one (unless parent is bypassPermissions, acceptEdits, or auto)
     if (
       agentPermissionMode &&
@@ -929,8 +947,16 @@ export async function* runAgent({
     }
   }
 
-  // Preload skills from agent frontmatter
-  const skillsToPreload = agentDefinition.skills ?? []
+  // Preload skills from agent frontmatter (deduped, capped at 32)
+  const MAX_PRELOADED_SKILLS = 32
+  const uniqueSkills = [...new Set(agentDefinition.skills ?? [])]
+  const skillsToPreload = uniqueSkills.slice(0, MAX_PRELOADED_SKILLS)
+  if (uniqueSkills.length > MAX_PRELOADED_SKILLS) {
+    logForDebugging(
+      `[Agent: ${agentDefinition.agentType}] Warning: the skills list has ${uniqueSkills.length} different names; only the first ${MAX_PRELOADED_SKILLS} are preloaded`,
+      { level: 'warn' },
+    )
+  }
   if (skillsToPreload.length > 0) {
     const allSkills = await getSkillToolCommands(getProjectRoot())
 

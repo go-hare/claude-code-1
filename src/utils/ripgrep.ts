@@ -9,7 +9,10 @@ import { isInBundledMode } from './bundledMode.js'
 import { logForDebugging } from './debug.js'
 import { distRoot } from './distRoot.js'
 import { isEnvDefinedFalsy } from './envUtils.js'
-import { TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from './errors.js'
+import {
+  getErrnoCode,
+  TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+} from './errors.js'
 import { execFileNoThrow } from './execFileNoThrow.js'
 import { findExecutable } from './findExecutable.js'
 import { logError } from './log.js'
@@ -305,6 +308,151 @@ export class RipgrepUsageError extends TelemetrySafeError_I_VERIFIED_THIS_IS_NOT
       'ripgrep usage error (input rejected, stderr redacted)',
     )
     this.name = 'RipgrepUsageError'
+  }
+}
+
+const DO_NOT_FALLBACK_SHELL =
+  'Do not run a recursive search in the shell instead (for example grep -r, find or rg)'
+
+const POSIX_EPERM = 1
+const POSIX_ENOENT = 2
+const POSIX_EIO = 5
+const POSIX_EACCES = 13
+const POSIX_ENOTDIR = 20
+const WIN_ERROR_FILE_NOT_FOUND = 2
+const WIN_ERROR_PATH_NOT_FOUND = 3
+const WIN_ERROR_ACCESS_DENIED = 5
+const PROC_SELF_FD_3 = '/proc/self/fd/3'
+const DEFAULT_MAX_BUFFER_BYTES = 20 * 1024 * 1024
+
+/**
+ * SEA `RW` — ripgrep exited 2 because it could not read the target path
+ * (permission denied, I/O error, etc.).
+ */
+export class RipgrepTargetUnreadableError extends TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS {
+  constructor(osError: number) {
+    const isWindows = getPlatform() === 'windows'
+    const isPermission = isWindows
+      ? osError === WIN_ERROR_ACCESS_DENIED
+      : osError === POSIX_EACCES || osError === POSIX_EPERM
+    const reason = isPermission
+      ? 'permission denied'
+      : !isWindows && osError === POSIX_EIO
+        ? 'input/output error'
+        : !isWindows && osError === POSIX_ENOENT
+          ? 'the file Claude Code opened was not passed to ripgrep'
+          : 'an operating system error'
+    const advice = isPermission
+      ? `Tell the user that the path could not be read. ${DO_NOT_FALLBACK_SHELL}.`
+      : `Run the search once more. If it fails again, tell the user that the search is failing. ${DO_NOT_FALLBACK_SHELL}: it can also reach other files, which this tool is set to leave out.`
+    super(
+      `Search failed: ripgrep could not read the path it was given (${reason}, os error ${osError}), so nothing was searched. This is not a "no matches" result. ${advice}`,
+      'ripgrep could not read its target',
+    )
+    this.name = 'RipgrepTargetUnreadableError'
+  }
+}
+
+/**
+ * SEA `AW` — ripgrep exited abnormally with no results under rejectOnInputError.
+ */
+export class RipgrepAbnormalExitError extends TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS {
+  constructor() {
+    super(
+      'The search failed, so this is not a "no matches" result: matches may exist. What happened to the search program (ripgrep) is not known, and no results were read. Run the search once more. If it fails again, tell the user that searches are failing. Do not run a recursive search in the shell instead (for example grep -r, find or rg): it can reach what this tool is set to leave out.',
+      'ripgrep unexpected exit with no results',
+    )
+    this.name = 'RipgrepAbnormalExitError'
+  }
+}
+
+/**
+ * SEA `kW` — ripgrep exceeded maxBuffer before a single complete line was read.
+ */
+export class RipgrepOutputTooLargeError extends TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS {
+  constructor(stream: 'stdout' | 'stderr') {
+    const capMb = DEFAULT_MAX_BUFFER_BYTES / 1e6
+    super(
+      stream === 'stdout'
+        ? `Ripgrep output passed the ${capMb}MB limit before a single complete line was read, so there are no usable results: at least one matching line is extremely long. Try a more specific pattern or path, or exclude very large files.`
+        : `Ripgrep produced more than ${capMb}MB of error output (for example per-file permission warnings) before any result line, so the search is incomplete. Try a more specific path.`,
+      'ripgrep output over cap before first complete line',
+    )
+    this.name = 'RipgrepOutputTooLargeError'
+  }
+}
+
+const SPAWN_RESOURCE_CODES = new Set(['EAGAIN', 'ENOMEM', 'EMFILE', 'ENFILE'])
+const SPAWN_RESOURCE_MESSAGES = new Map<
+  string,
+  { reason: string; advice: string }
+>([
+  [
+    'EAGAIN',
+    {
+      reason: 'a limit on processes or threads was reached',
+      advice:
+        'this machine has reached a limit on processes; closing other programs can help',
+    },
+  ],
+  [
+    'ENOMEM',
+    {
+      reason: 'there is not enough memory',
+      advice:
+        'this machine is short of memory; closing other programs can help',
+    },
+  ],
+  [
+    'EMFILE',
+    {
+      reason: 'this Claude Code process has too many files open',
+      advice: 'Claude Code needs a restart',
+    },
+  ],
+  [
+    'ENFILE',
+    {
+      reason: 'the system has too many files open',
+      advice:
+        'this machine has too many files open; closing other programs can help',
+    },
+  ],
+])
+const DEFAULT_SPAWN_RESOURCE_MSG = {
+  reason: 'the system ran out of a resource',
+  advice: 'this machine is short of a resource needed to start programs',
+}
+
+/**
+ * SEA `Uh` — ripgrep could not start due to OS resource exhaustion.
+ */
+export class RipgrepSpawnResourceError extends TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS {
+  constructor(code: string) {
+    const { reason, advice } =
+      SPAWN_RESOURCE_MESSAGES.get(code) ?? DEFAULT_SPAWN_RESOURCE_MSG
+    super(
+      `ripgrep could not start, so nothing was searched and matches may still exist: the operating system could not start it because ${reason} (${code}). Retry in a moment. If it keeps failing, tell the user that ${advice}.`,
+      'ripgrep not started: the OS could not create another process',
+    )
+    this.name = 'RipgrepSpawnResourceError'
+  }
+
+  static from(
+    err: unknown,
+    rejectOnInputError?: boolean,
+  ): RipgrepSpawnResourceError | undefined {
+    if (!rejectOnInputError) return undefined
+    const code = getErrnoCode(err)
+    const isSpawn =
+      err instanceof Error &&
+      'syscall' in err &&
+      typeof err.syscall === 'string' &&
+      err.syscall.startsWith('spawn')
+    if (code !== undefined && SPAWN_RESOURCE_CODES.has(code) && isSpawn) {
+      return new RipgrepSpawnResourceError(code)
+    }
+    return undefined
   }
 }
 
@@ -687,11 +835,66 @@ export async function ripGrep(
         return
       }
 
+      // SEA RW: rejectOnInputError + exit 2 + rg: <target>: ... (os error N)
+      if (
+        options?.rejectOnInputError &&
+        error.code === 2 &&
+        lines.every(l => l.endsWith('"type":"summary"}')) &&
+        stderr.startsWith(`rg: ${target}: `) &&
+        !stderr.trimEnd().includes('\n')
+      ) {
+        const osErrMatch = /\(os error (\d+)\)\s*$/.exec(stderr)
+        const osErr = osErrMatch ? Number(osErrMatch[1]) : NaN
+        const ignoredNotFound =
+          target !== PROC_SELF_FD_3 &&
+          (getPlatform() === 'windows'
+            ? [WIN_ERROR_FILE_NOT_FOUND, WIN_ERROR_PATH_NOT_FOUND]
+            : [POSIX_ENOENT, POSIX_ENOTDIR]
+          ).includes(osErr)
+        if (!Number.isNaN(osErr) && !ignoredNotFound) {
+          reject(new RipgrepTargetUnreadableError(osErr))
+          return
+        }
+      }
+
       // code 2 = ripgrep usage error (already handled); ABORT_ERR = caller
       // explicitly aborted (not an error, just a cancellation — interactive
       // callers may abort on every keystroke-after-debounce).
       if (error.code !== 2 && error.code !== 'ABORT_ERR') {
         logError(error)
+        const spawnErr = RipgrepSpawnResourceError.from(
+          error,
+          options?.rejectOnInputError,
+        )
+        if (spawnErr && lines.length === 0) {
+          reject(spawnErr)
+          return
+        }
+        if (
+          lines.length === 0 &&
+          options?.rejectOnInputError &&
+          (error.code as unknown) !== 'ECHILD' &&
+          !isTimeout &&
+          !isBufferOverflow &&
+          !isUnexplainedSignal &&
+          !abortSignal.aborted
+        ) {
+          reject(new RipgrepAbnormalExitError())
+          return
+        }
+      }
+
+      if (
+        isBufferOverflow &&
+        lines.length === 0 &&
+        options?.rejectOnInputError
+      ) {
+        reject(
+          new RipgrepOutputTooLargeError(
+            error.message.startsWith('stderr') ? 'stderr' : 'stdout',
+          ),
+        )
+        return
       }
 
       // If we timed out with no results, throw an error so Claude knows the search

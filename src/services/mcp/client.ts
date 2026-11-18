@@ -46,8 +46,11 @@ import {
   getMcpPinnedLegacyRetryTimeoutMs,
   getMcpTimeoutMs,
   isMcpCcrProxyServerConfig,
+  isRememberedLegacyStdio,
+  recordRememberedLegacyStdio,
   resolveMcpNegotiationTransportKind,
   resolveMcpProtocolNegotiationPlan,
+  type McpProtocolNegotiationPlan,
   shouldApplyLegacyHttpSseGet401Guard,
   shouldPreserveConnectTimeoutAfterPinnedLegacyRetry,
   truncateMcpErrorSnippet,
@@ -90,6 +93,7 @@ import {
 import { createMcpAuthTool } from '@claude-code/builtin-tools/tools/McpAuthTool/McpAuthTool.js'
 import { ReadMcpResourceTool } from '@claude-code/builtin-tools/tools/ReadMcpResourceTool/ReadMcpResourceTool.js'
 import { createAbortController } from '../../utils/abortController.js'
+import { getPlatform } from '../../utils/platform.js'
 import { count } from '../../utils/array.js'
 import { resolveMcpToolIdleTimeoutMs } from '../../utils/residualMsEnvGates.js'
 import {
@@ -279,13 +283,16 @@ import type {
 import {
   DEFAULT_MCP_TOOL_TIMEOUT_MS,
   extractToolUseId,
+  filterMcpToolsByNameLength,
+  getMaxMcpDescriptionLength,
   getMcpToolIdleTimeoutMs,
   getMcpToolTimeoutMs,
+  gracefulShutdownWindowsStdio,
   inertReconnectShape,
   inferCompactSchema,
   isClaudeAiProxyListAuthError,
+  isTerminalConnectionError,
   MAX_MCP_DESCRIPTION_LENGTH,
-  MCP_FETCH_CACHE_SIZE,
   MCP_TOOL_CALL_INTERRUPTED,
   type MCPResultType,
   type MCPToolCallResult,
@@ -927,12 +934,24 @@ const connectToServerMemo = memoize(
       )
 
       // densable 2.1.232/238: Pwi(kind, serverConfig) — GB denylist after auto.
-      const protocolPlan = resolveMcpProtocolNegotiationPlan(
-        negotiationTransportKind,
-        process.env,
-        (key, def) => getFeatureValue_CACHED_MAY_BE_STALE(key, def),
-        serverRef,
-      )
+      // SEA 325 #263: skip probe for 7 days if stdio server previously timed out/failed probe.
+      const protocolPlan: McpProtocolNegotiationPlan =
+        negotiationTransportKind === 'stdio' &&
+        isRememberedLegacyStdio(
+          serverRef as {
+            type?: string
+            command?: string
+            args?: readonly string[]
+            env?: Record<string, string>
+          },
+        )
+          ? { mode: 'legacy' }
+          : resolveMcpProtocolNegotiationPlan(
+              negotiationTransportKind,
+              process.env,
+              (key, def) => getFeatureValue_CACHED_MAY_BE_STALE(key, def),
+              serverRef,
+            )
       // densable k(Z) — factory takes versionNegotiation plan (BVa)
       // densable ze capability ternary + Lr initialize rewrite live in factory.
       let bareElicitationRetry = false
@@ -1351,6 +1370,19 @@ const connectToServerMemo = memoize(
                 canRecreateTransport: canRecreateForPinnedLegacy,
               },
             )
+            if (
+              decision.shouldFallback &&
+              negotiationTransportKind === 'stdio'
+            ) {
+              recordRememberedLegacyStdio(
+                serverRef as {
+                  type?: string
+                  command?: string
+                  args?: readonly string[]
+                  env?: Record<string, string>
+                },
+              )
+            }
             if (!decision.shouldFallback) {
               // densable bn → reconnect once without elicitation form/url.
               if (
@@ -1762,22 +1794,6 @@ const connectToServerMemo = memoize(
         })
       }
 
-      const isTerminalConnectionError = (msg: string): boolean => {
-        return (
-          msg.includes('ECONNRESET') ||
-          msg.includes('ETIMEDOUT') ||
-          msg.includes('EPIPE') ||
-          msg.includes('EHOSTUNREACH') ||
-          msg.includes('ECONNREFUSED') ||
-          msg.includes('Body Timeout Error') ||
-          msg.includes('terminated') ||
-          // SDK SSE reconnection intermediate errors — may be wrapped around the
-          // actual network error, so the substrings above won't match
-          msg.includes('SSE stream disconnected') ||
-          msg.includes('Failed to reconnect SSE stream')
-        )
-      }
-
       // Enhanced error handler with detailed logging
       client.onerror = (error: Error) => {
         const transportType = serverRef.type || 'stdio'
@@ -1881,7 +1897,7 @@ const connectToServerMemo = memoize(
             return
           }
 
-          if (isTerminalConnectionError(error.message)) {
+          if (isTerminalConnectionError(error)) {
             consecutiveConnectionErrors++
             transportErrorState.consecutiveErrors = consecutiveConnectionErrors
             // Official M(): arm in-flight callTool watchdogs so they abort if
@@ -1969,9 +1985,19 @@ const connectToServerMemo = memoize(
         if (serverRef.type === 'stdio') {
           try {
             const stdioTransport = transport as StdioClientTransport
+            const stdioTransportWithProc = stdioTransport as unknown as {
+              _process?: import('child_process').ChildProcess
+              serverProcess?: import('child_process').ChildProcess
+            }
+            const stdioProc =
+              stdioTransportWithProc.serverProcess ??
+              stdioTransportWithProc._process
             const childPid = stdioTransport.pid
 
-            if (childPid) {
+            if (stdioProc && getPlatform() === 'windows') {
+              logMCPDebug(name, 'Closing MCP server stdin')
+              await gracefulShutdownWindowsStdio(stdioProc)
+            } else if (childPid) {
               logMCPDebug(name, 'Sending SIGINT to MCP server process')
 
               // First try SIGINT (like Ctrl+C)
@@ -2626,6 +2652,8 @@ registerEnsureConnectedClient(ensureConnectedClient)
  * Compares two MCP server configurations to determine if they are equivalent.
  * Used to detect when a server needs to be reconnected due to config changes.
  */
+const MCP_FETCH_CACHE_SIZE = 20
+
 export const fetchToolsForClient = memoizeWithLRU(
   async (client: MCPServerConnection): Promise<Tool[]> => {
     if (client.type !== 'connected') return []
@@ -2704,522 +2732,541 @@ export const fetchToolsForClient = memoizeWithLRU(
         )
 
       // Convert MCP tools to our Tool format
-      return listedAfterSchema
-        .map((tool): Tool => {
-          const fullyQualifiedName = buildMcpToolName(client.name, tool.name)
-          const requiresUserInteraction = isMcpRequiresUserInteraction(
-            tool._meta,
-          )
-          const mcpInfo: NonNullable<Tool['mcpInfo']> & {
-            accountMemoryServer?: boolean
-          } = {
-            serverName: client.name,
-            toolName: tool.name,
-            scope: client.config.scope,
-            source: mcpInfoSource(client.name, client.config),
-            // Official org/admin ceiling from server config toolPermissions.
-            // hasOwn: plain maps + prototype-key tool names must not leak
-            // Object.prototype.constructor (Function) as a permission value.
-            effectiveMaxPermission:
-              toolPermissions && Object.hasOwn(toolPermissions, tool.name)
-                ? toolPermissions[tool.name]
-                : undefined,
-            // densable Dn — cliOwned / accountMemory (X2e) / accountMemoryServer (oe) stamps.
-            ...(isCliOwnedConfig(client.config) ? { cliOwned: true } : {}),
-            ...(isAccountMemoryTool(serverRefForMemory, tool.name)
-              ? { accountMemory: true }
-              : {}),
-            ...(accountMemoryServer ? { accountMemoryServer: true } : {}),
-          }
-          return {
-            ...MCPTool,
-            // In skip-prefix mode, use the original name for model invocation so MCP tools
-            // can override builtins by name. mcpInfo is used for permission checking.
-            name: skipPrefix ? tool.name : fullyQualifiedName,
-            mcpInfo,
-            isMcp: true,
-            // Collapse whitespace: _meta is open to external MCP servers, and
-            // a newline here would inject orphan lines into the deferred-tool
-            // list (formatDeferredToolLine joins on '\n').
-            searchHint:
-              typeof tool._meta?.['anthropic/searchHint'] === 'string'
-                ? tool._meta['anthropic/searchHint']
-                    .replace(/\s+/g, ' ')
-                    .trim() || undefined
-                : undefined,
-            alwaysLoad: tool._meta?.['anthropic/alwaysLoad'] === true,
-            async description() {
-              return tool.description ?? ''
-            },
-            async prompt() {
-              const desc = tool.description ?? ''
-              return desc.length > MAX_MCP_DESCRIPTION_LENGTH
-                ? desc.slice(0, MAX_MCP_DESCRIPTION_LENGTH) + '… [truncated]'
-                : desc
-            },
-            isConcurrencySafe() {
-              return tool.annotations?.readOnlyHint ?? false
-            },
-            isReadOnly() {
-              return tool.annotations?.readOnlyHint ?? false
-            },
-            toAutoClassifierInput(input) {
-              return mcpToolInputToAutoClassifierInput(input, tool.name)
-            },
-            isDestructive() {
-              return tool.annotations?.destructiveHint ?? false
-            },
-            isOpenWorld() {
-              return tool.annotations?.openWorldHint ?? false
-            },
-            isSearchOrReadCommand() {
-              return classifyMcpToolForCollapse(client.name, tool.name)
-            },
-            requiresUserInteraction() {
-              return requiresUserInteraction
-            },
-            suppressesAlwaysAllowRule: () =>
-              requiresUserInteraction ||
-              connectorDesignOmitsPersistentAllow(
-                isFirstPartyDesignServer,
-                tool.name,
-              ),
-            inputJSONSchema: tool.inputSchema as Tool['inputJSONSchema'],
-            async checkPermissions(input: unknown) {
-              // densable Gr/Ui — tokenless writes are native-tool-only here.
-              const denied = connectorDesignTokenlessWriteDeny(
-                isFirstPartyDesignServer,
-                tool.name,
-                input,
-              )
-              if (denied) return denied
-              return mcpToolCheckPermissionsResult(
-                requiresUserInteraction,
-                fullyQualifiedName,
-                client.name,
+      return filterMcpToolsByNameLength(
+        listedAfterSchema
+          .map((tool): Tool => {
+            const fullyQualifiedName = buildMcpToolName(client.name, tool.name)
+            const requiresUserInteraction = isMcpRequiresUserInteraction(
+              tool._meta,
+            )
+            const mcpInfo: NonNullable<Tool['mcpInfo']> & {
+              accountMemoryServer?: boolean
+            } = {
+              serverName: client.name,
+              toolName: tool.name,
+              scope: client.config.scope,
+              source: mcpInfoSource(client.name, client.config),
+              // Official org/admin ceiling from server config toolPermissions.
+              // hasOwn: plain maps + prototype-key tool names must not leak
+              // Object.prototype.constructor (Function) as a permission value.
+              effectiveMaxPermission:
+                toolPermissions && Object.hasOwn(toolPermissions, tool.name)
+                  ? toolPermissions[tool.name]
+                  : undefined,
+              // densable Dn — cliOwned / accountMemory (X2e) / accountMemoryServer (oe) stamps.
+              ...(isCliOwnedConfig(client.config) ? { cliOwned: true } : {}),
+              ...(isAccountMemoryTool(serverRefForMemory, tool.name)
+                ? { accountMemory: true }
+                : {}),
+              ...(accountMemoryServer ? { accountMemoryServer: true } : {}),
+            }
+            return {
+              ...MCPTool,
+              // In skip-prefix mode, use the original name for model invocation so MCP tools
+              // can override builtins by name. mcpInfo is used for permission checking.
+              name: skipPrefix ? tool.name : fullyQualifiedName,
+              mcpInfo,
+              isMcp: true,
+              // Collapse whitespace: _meta is open to external MCP servers, and
+              // a newline here would inject orphan lines into the deferred-tool
+              // list (formatDeferredToolLine joins on '\n').
+              searchHint:
+                typeof tool._meta?.['anthropic/searchHint'] === 'string'
+                  ? tool._meta['anthropic/searchHint']
+                      .replace(/\s+/g, ' ')
+                      .trim() || undefined
+                  : undefined,
+              alwaysLoad: tool._meta?.['anthropic/alwaysLoad'] === true,
+              async description() {
+                return tool.description ?? ''
+              },
+              async prompt(
+                options?: Parameters<Tool['prompt']>[0] & {
+                  loadedThroughToolSearch?: boolean
+                },
+              ) {
+                const desc = tool.description ?? ''
+                const cap = getMaxMcpDescriptionLength(
+                  options?.loadedThroughToolSearch === true,
+                )
+                return desc.length > cap
+                  ? desc.slice(0, cap) + '… [truncated]'
+                  : desc
+              },
+              isConcurrencySafe() {
+                return tool.annotations?.readOnlyHint ?? false
+              },
+              isReadOnly() {
+                return tool.annotations?.readOnlyHint ?? false
+              },
+              toAutoClassifierInput(input) {
+                return mcpToolInputToAutoClassifierInput(input, tool.name)
+              },
+              isDestructive() {
+                return tool.annotations?.destructiveHint ?? false
+              },
+              isOpenWorld() {
+                return tool.annotations?.openWorldHint ?? false
+              },
+              isSearchOrReadCommand() {
+                return classifyMcpToolForCollapse(client.name, tool.name)
+              },
+              requiresUserInteraction() {
+                return requiresUserInteraction
+              },
+              suppressesAlwaysAllowRule: () =>
+                requiresUserInteraction ||
                 connectorDesignOmitsPersistentAllow(
                   isFirstPartyDesignServer,
                   tool.name,
                 ),
-              )
-            },
-            async call(
-              args: Record<string, unknown>,
-              context,
-              _canUseTool,
-              parentMessage,
-              onProgress?: ToolCallProgress<MCPProgress>,
-            ) {
-              // densable Vr/Fi — one local path for both gold connector copies.
-              applyConnectorDesignMembership(
-                isFirstPartyDesignServer,
-                tool.name,
-                args,
-                (operation, projectId) => {
-                  // Lazy: designProjectGrant pulls function-hook modules.
-                  // A static import here would load that graph for every MCP client.
-                  const {
-                    designSessionState,
-                    noteDesignProjectMembershipChange,
-                  } =
-                    // eslint-disable-next-line @typescript-eslint/no-require-imports
-                    require('../designProjectGrant.js') as typeof import('../designProjectGrant.js')
-                  noteDesignProjectMembershipChange(
-                    designSessionState(context),
-                    operation,
-                    projectId,
-                  )
-                },
-              )
-              // densable 2.1.222 #6 — stamp active MCP for next API cost share
-              // (cleared after one attributed main/subagent request).
-              context.options.activeMcpServer = client.name
-              context.options.activeMcpTool = tool.name
-
-              const toolUseId = extractToolUseId(parentMessage)
-              const meta = toolUseId
-                ? { 'claudecode/toolUseId': toolUseId }
-                : {}
-
-              // Emit progress when tool starts
-              if (onProgress && toolUseId) {
-                onProgress({
-                  toolUseID: toolUseId,
-                  data: {
-                    type: 'mcp_progress',
-                    status: 'started',
-                    serverName: client.name,
-                    toolName: tool.name,
-                  },
-                })
-              }
-
-              const startTime = Date.now()
-              // densable Biy: Host-side file_upload path policy (Uiy/Ned) with live
-              // ToolPermissionContext before forwarding to Claude in Chrome MCP.
-              let callArgs = args
-              if (
-                isClaudeInChromeMCPServer(client.name) &&
-                isChromeFileUploadToolName(tool.name)
+              inputJSONSchema: tool.inputSchema as Tool['inputJSONSchema'],
+              async checkPermissions(input: unknown) {
+                // densable Gr/Ui — tokenless writes are native-tool-only here.
+                const denied = connectorDesignTokenlessWriteDeny(
+                  isFirstPartyDesignServer,
+                  tool.name,
+                  input,
+                )
+                if (denied) return denied
+                return mcpToolCheckPermissionsResult(
+                  requiresUserInteraction,
+                  fullyQualifiedName,
+                  client.name,
+                  connectorDesignOmitsPersistentAllow(
+                    isFirstPartyDesignServer,
+                    tool.name,
+                  ),
+                )
+              },
+              async call(
+                args: Record<string, unknown>,
+                context,
+                _canUseTool,
+                parentMessage,
+                onProgress?: ToolCallProgress<MCPProgress>,
               ) {
-                const permCtx = context.getAppState().toolPermissionContext
-                const prepared = await prepareChromeFileUploadInput(
+                // densable Vr/Fi — one local path for both gold connector copies.
+                applyConnectorDesignMembership(
+                  isFirstPartyDesignServer,
                   tool.name,
                   args,
-                  permCtx,
+                  (operation, projectId) => {
+                    // Lazy: designProjectGrant pulls function-hook modules.
+                    // A static import here would load that graph for every MCP client.
+                    const {
+                      designSessionState,
+                      noteDesignProjectMembershipChange,
+                    } =
+                      // eslint-disable-next-line @typescript-eslint/no-require-imports
+                      require('../designProjectGrant.js') as typeof import('../designProjectGrant.js')
+                    noteDesignProjectMembershipChange(
+                      designSessionState(context),
+                      operation,
+                      projectId,
+                    )
+                  },
                 )
-                if ('error' in prepared) {
-                  throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
-                    prepared.error,
-                    'chrome file_upload path rejected',
-                  )
-                }
-                callArgs = prepared.input
-              }
-              const MAX_SESSION_RETRIES = 1
-              // Official 2.1.193/206: headersHelper may mint short-lived auth
-              // headers; OAuth may hold a refresh_token. On 401 re-run the
-              // helper / refresh once, then reconnect (reauth_retry).
-              // Official recursive path retries with the new connected client
-              // object (isAuthRetry); we keep that client for the next loop
-              // iteration instead of only relying on the connection cache.
-              const MAX_AUTH_RECONNECT_RETRIES = 1
-              let authReconnectRetries = 0
-              let preferredClient: ConnectedMCPServer | null = null
-              for (let attempt = 0; ; attempt++) {
-                try {
-                  const connectedClient =
-                    preferredClient ?? (await ensureConnectedClient(client))
-                  preferredClient = null
-                  // densable 2.1.212: MCP > threshold → auto-background
-                  // eslint-disable-next-line @typescript-eslint/no-require-imports
-                  const {
-                    resolveMcpAutoBackgroundMs,
-                    callMcpToolWithAutoBackground,
-                  } =
-                    require('../../utils/mcpAutoBackground.js') as typeof import('../../utils/mcpAutoBackground.js')
-                  const transportType =
-                    typeof client === 'object' &&
-                    client &&
-                    'config' in client &&
-                    client.config &&
-                    typeof client.config === 'object' &&
-                    'type' in client.config
-                      ? String((client.config as { type?: string }).type ?? '')
-                      : typeof client === 'object' && client && 'type' in client
-                        ? String((client as { type?: string }).type ?? '')
-                        : ''
-                  const autoBgMs = resolveMcpAutoBackgroundMs(process.env, {
-                    transportType,
-                    isNonInteractiveSession:
-                      context.options.isNonInteractiveSession,
-                  })
+                // densable 2.1.222 #6 — stamp active MCP for next API cost share
+                // (cleared after one attributed main/subagent request).
+                context.options.activeMcpServer = client.name
+                context.options.activeMcpTool = tool.name
 
-                  const runMcp = (signal: AbortSignal) =>
-                    callMCPToolWithUrlElicitationRetry({
-                      client: connectedClient,
-                      clientConnection: client,
-                      tool: tool.name,
-                      args: callArgs,
-                      meta,
-                      signal,
-                      setAppState: context.setAppState,
-                      onProgress:
-                        onProgress && toolUseId
-                          ? progressData => {
-                              onProgress({
-                                toolUseID: toolUseId,
-                                data: progressData,
-                              })
-                            }
-                          : undefined,
-                      handleElicitation: context.handleElicitation,
-                      requestDialog: context.requestDialog,
-                      canUseTool: _canUseTool,
-                      toolUseContext: context,
+                const toolUseId = extractToolUseId(parentMessage)
+                const meta = toolUseId
+                  ? { 'claudecode/toolUseId': toolUseId }
+                  : {}
+
+                // Emit progress when tool starts
+                if (onProgress && toolUseId) {
+                  onProgress({
+                    toolUseID: toolUseId,
+                    data: {
+                      type: 'mcp_progress',
+                      status: 'started',
+                      serverName: client.name,
+                      toolName: tool.name,
+                    },
+                  })
+                }
+
+                const startTime = Date.now()
+                // densable Biy: Host-side file_upload path policy (Uiy/Ned) with live
+                // ToolPermissionContext before forwarding to Claude in Chrome MCP.
+                let callArgs = args
+                if (
+                  isClaudeInChromeMCPServer(client.name) &&
+                  isChromeFileUploadToolName(tool.name)
+                ) {
+                  const permCtx = context.getAppState().toolPermissionContext
+                  const prepared = await prepareChromeFileUploadInput(
+                    tool.name,
+                    args,
+                    permCtx,
+                  )
+                  if ('error' in prepared) {
+                    throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+                      prepared.error,
+                      'chrome file_upload path rejected',
+                    )
+                  }
+                  callArgs = prepared.input
+                }
+                const MAX_SESSION_RETRIES = 1
+                // Official 2.1.193/206: headersHelper may mint short-lived auth
+                // headers; OAuth may hold a refresh_token. On 401 re-run the
+                // helper / refresh once, then reconnect (reauth_retry).
+                // Official recursive path retries with the new connected client
+                // object (isAuthRetry); we keep that client for the next loop
+                // iteration instead of only relying on the connection cache.
+                const MAX_AUTH_RECONNECT_RETRIES = 1
+                let authReconnectRetries = 0
+                let preferredClient: ConnectedMCPServer | null = null
+                for (let attempt = 0; ; attempt++) {
+                  try {
+                    const connectedClient =
+                      preferredClient ?? (await ensureConnectedClient(client))
+                    preferredClient = null
+                    // densable 2.1.212: MCP > threshold → auto-background
+                    // eslint-disable-next-line @typescript-eslint/no-require-imports
+                    const {
+                      resolveMcpAutoBackgroundMs,
+                      callMcpToolWithAutoBackground,
+                    } =
+                      require('../../utils/mcpAutoBackground.js') as typeof import('../../utils/mcpAutoBackground.js')
+                    const transportType =
+                      typeof client === 'object' &&
+                      client &&
+                      'config' in client &&
+                      client.config &&
+                      typeof client.config === 'object' &&
+                      'type' in client.config
+                        ? String(
+                            (client.config as { type?: string }).type ?? '',
+                          )
+                        : typeof client === 'object' &&
+                            client &&
+                            'type' in client
+                          ? String((client as { type?: string }).type ?? '')
+                          : ''
+                    const autoBgMs = resolveMcpAutoBackgroundMs(process.env, {
+                      transportType,
+                      isNonInteractiveSession:
+                        context.options.isNonInteractiveSession,
                     })
 
-                  const mcpResult =
-                    autoBgMs > 0
-                      ? await callMcpToolWithAutoBackground({
-                          run: runMcp,
+                    const runMcp = (signal: AbortSignal) =>
+                      callMCPToolWithUrlElicitationRetry({
+                        client: connectedClient,
+                        clientConnection: client,
+                        tool: tool.name,
+                        args: callArgs,
+                        meta,
+                        signal,
+                        setAppState: context.setAppState,
+                        onProgress:
+                          onProgress && toolUseId
+                            ? progressData => {
+                                onProgress({
+                                  toolUseID: toolUseId,
+                                  data: progressData,
+                                })
+                              }
+                            : undefined,
+                        handleElicitation: context.handleElicitation,
+                        requestDialog: context.requestDialog,
+                        canUseTool: _canUseTool,
+                        toolUseContext: context,
+                      })
+
+                    const mcpResult =
+                      autoBgMs > 0
+                        ? await callMcpToolWithAutoBackground({
+                            run: runMcp,
+                            serverName: client.name,
+                            toolName: tool.name,
+                            toolUseId,
+                            parentAbortController: context.abortController,
+                            setAppState:
+                              context.setAppStateForTasks ??
+                              context.setAppState,
+                            autoBackgroundMs: autoBgMs,
+                            toolLabel: fullyQualifiedName,
+                            foregroundSession: (context as { session?: object })
+                              .session,
+                            // densable $cy: defer auto-bg while URL elicitation open.
+                            // Gold: process counter (begin/end around elicitation) OR
+                            // AppState elicitation.queue length (REPL dialog). Prefer
+                            // true on either signal — only return false when both
+                            // probes say clear (or throw).
+                            hasPendingElicitation: () => {
+                              let processPending = false
+                              try {
+                                // eslint-disable-next-line @typescript-eslint/no-require-imports
+                                const { hasPendingMcpElicitation } =
+                                  require('./transportErrorState.js') as typeof import('./transportErrorState.js')
+                                processPending = hasPendingMcpElicitation()
+                              } catch {
+                                /* optional */
+                              }
+                              if (processPending) return true
+                              try {
+                                const q =
+                                  context.getAppState().elicitation?.queue
+                                return Array.isArray(q) && q.length > 0
+                              } catch {
+                                return false
+                              }
+                            },
+                          })
+                        : await runMcp(context.abortController.signal)
+
+                    // densable 2.1.246 #10: `if(Ae.interrupted)throw new Rn(Q6)`
+                    // before completed progress — abort must not become empty
+                    // content → Dyo `(completed with no output)`.
+                    throwIfMcpToolCallInterrupted(mcpResult)
+
+                    // densable: auto-bg returns moved-to-background tool result while
+                    // the call still runs — do not emit false "completed" progress.
+                    const autoBackgrounded =
+                      !!mcpResult &&
+                      typeof mcpResult === 'object' &&
+                      'autoBackgrounded' in mcpResult &&
+                      (mcpResult as { autoBackgrounded?: boolean })
+                        .autoBackgrounded === true
+
+                    // Emit progress when tool completes successfully
+                    if (onProgress && toolUseId && !autoBackgrounded) {
+                      onProgress({
+                        toolUseID: toolUseId,
+                        data: {
+                          type: 'mcp_progress',
+                          status: 'completed',
                           serverName: client.name,
                           toolName: tool.name,
-                          toolUseId,
-                          parentAbortController: context.abortController,
-                          setAppState:
-                            context.setAppStateForTasks ?? context.setAppState,
-                          autoBackgroundMs: autoBgMs,
-                          toolLabel: fullyQualifiedName,
-                          foregroundSession: (context as { session?: object })
-                            .session,
-                          // densable $cy: defer auto-bg while URL elicitation open.
-                          // Gold: process counter (begin/end around elicitation) OR
-                          // AppState elicitation.queue length (REPL dialog). Prefer
-                          // true on either signal — only return false when both
-                          // probes say clear (or throw).
-                          hasPendingElicitation: () => {
-                            let processPending = false
-                            try {
-                              // eslint-disable-next-line @typescript-eslint/no-require-imports
-                              const { hasPendingMcpElicitation } =
-                                require('./transportErrorState.js') as typeof import('./transportErrorState.js')
-                              processPending = hasPendingMcpElicitation()
-                            } catch {
-                              /* optional */
-                            }
-                            if (processPending) return true
-                            try {
-                              const q = context.getAppState().elicitation?.queue
-                              return Array.isArray(q) && q.length > 0
-                            } catch {
-                              return false
-                            }
-                          },
-                        })
-                      : await runMcp(context.abortController.signal)
+                          elapsedTimeMs: Date.now() - startTime,
+                        },
+                      })
+                    }
 
-                  // densable 2.1.246 #10: `if(Ae.interrupted)throw new Rn(Q6)`
-                  // before completed progress — abort must not become empty
-                  // content → Dyo `(completed with no output)`.
-                  throwIfMcpToolCallInterrupted(mcpResult)
-
-                  // densable: auto-bg returns moved-to-background tool result while
-                  // the call still runs — do not emit false "completed" progress.
-                  const autoBackgrounded =
-                    !!mcpResult &&
-                    typeof mcpResult === 'object' &&
-                    'autoBackgrounded' in mcpResult &&
-                    (mcpResult as { autoBackgrounded?: boolean })
-                      .autoBackgrounded === true
-
-                  // Emit progress when tool completes successfully
-                  if (onProgress && toolUseId && !autoBackgrounded) {
-                    onProgress({
-                      toolUseID: toolUseId,
-                      data: {
-                        type: 'mcp_progress',
-                        status: 'completed',
-                        serverName: client.name,
-                        toolName: tool.name,
-                        elapsedTimeMs: Date.now() - startTime,
-                      },
-                    })
-                  }
-
-                  const mcpMeta =
-                    mcpResult &&
-                    typeof mcpResult === 'object' &&
-                    (('_meta' in mcpResult && mcpResult._meta) ||
-                      ('structuredContent' in mcpResult &&
-                        mcpResult.structuredContent))
-                      ? {
-                          ...('_meta' in mcpResult && mcpResult._meta
-                            ? {
-                                _meta: mcpResult._meta as Record<
-                                  string,
-                                  unknown
-                                >,
-                              }
-                            : {}),
-                          ...('structuredContent' in mcpResult &&
-                          mcpResult.structuredContent
-                            ? {
-                                structuredContent:
-                                  mcpResult.structuredContent as Record<
+                    const mcpMeta =
+                      mcpResult &&
+                      typeof mcpResult === 'object' &&
+                      (('_meta' in mcpResult && mcpResult._meta) ||
+                        ('structuredContent' in mcpResult &&
+                          mcpResult.structuredContent))
+                        ? {
+                            ...('_meta' in mcpResult && mcpResult._meta
+                              ? {
+                                  _meta: mcpResult._meta as Record<
                                     string,
                                     unknown
                                   >,
-                              }
-                            : {}),
-                        }
-                      : undefined
-
-                  return {
-                    data: mcpResult.content,
-                    ...(mcpMeta && Object.keys(mcpMeta).length > 0
-                      ? { mcpMeta }
-                      : {}),
-                  }
-                } catch (error) {
-                  // Session expired — the connection cache has been
-                  // cleared, so retry with a fresh client.
-                  if (
-                    error instanceof McpSessionExpiredError &&
-                    attempt < MAX_SESSION_RETRIES
-                  ) {
-                    logMCPDebug(
-                      client.name,
-                      `Retrying tool '${tool.name}' after session recovery`,
-                    )
-                    continue
-                  }
-
-                  // Official 2.1.193/206: 401 auth recovery — headersHelper
-                  // re-mint, or OAuth refresh_token reconnect, once only.
-                  // Concurrent callers rejoin the same in-flight reconnect
-                  // (OHs Map: reauth_retry leader / collateral_rejoin).
-                  if (authReconnectRetries < MAX_AUTH_RECONNECT_RETRIES) {
-                    const serverConfig = client.config as {
-                      headersHelper?: string
-                      type?: string
-                      url?: string
-                      headers?: Record<string, string>
-                      oauth?: unknown
-                    }
-                    const hasRefreshToken =
-                      (serverConfig.type === 'http' ||
-                        serverConfig.type === 'sse') &&
-                      !!serverConfig.url &&
-                      serverHasStoredRefreshToken(
-                        client.name,
-                        serverConfig as {
-                          type: 'http' | 'sse'
-                          url: string
-                          headers?: Record<string, string>
-                        },
-                      )
-                    const kind = classifyAuthReconnectKind({
-                      type: serverConfig.type,
-                      headersHelper: serverConfig.headersHelper,
-                      url: serverConfig.url,
-                      hasRefreshToken,
-                      hasUserAuthHeader: headersHaveAuthorization(
-                        serverConfig.headers,
-                      ),
-                    })
-                    const cacheKey = getServerCacheKey(
-                      client.name,
-                      client.config,
-                    )
-                    // Official W: ConnectionClosed mid-reconnect → rejoin
-                    // even if this call didn't see a 401 classification.
-                    const closedWhileReconnecting =
-                      kind !== null &&
-                      isConnectionClosedWhileReconnecting(
-                        error,
-                        hasAuthReconnectInFlight(cacheKey),
-                      )
-                    const shouldReconnect =
-                      kind !== null &&
-                      (error instanceof McpAuthError || closedWhileReconnecting)
-
-                    if (shouldReconnect && kind !== null) {
-                      authReconnectRetries++
-                      logMCPDebug(
-                        client.name,
-                        kind === 'mcp_headers_helper'
-                          ? `Tool '${tool.name}' returned 401; re-running headersHelper and retrying once`
-                          : `Tool '${tool.name}' returned 401; refresh token stored — reconnecting and retrying once`,
-                      )
-                      const reconnected = await joinOrStartAuthReconnect(
-                        cacheKey,
-                        kind,
-                        async () => {
-                          await clearServerCache(client.name, client.config)
-                          return connectToServer(client.name, client.config)
-                        },
-                        join => {
-                          // Official Ze(kind, role): telemetry distinguishes
-                          // the leader reauth_retry from collateral_rejoin.
-                          if (join.role === 'leader') {
-                            logEvent(
-                              kind === 'mcp_headers_helper'
-                                ? 'tengu_mcp_headers_helper_retry'
-                                : 'tengu_mcp_oauth_refresh_retry',
-                              {},
-                            )
-                          } else {
-                            logEvent(
-                              kind === 'mcp_headers_helper'
-                                ? 'tengu_mcp_headers_helper_collateral_rejoin'
-                                : 'tengu_mcp_oauth_refresh_collateral_rejoin',
-                              {},
-                            )
+                                }
+                              : {}),
+                            ...('structuredContent' in mcpResult &&
+                            mcpResult.structuredContent
+                              ? {
+                                  structuredContent:
+                                    mcpResult.structuredContent as Record<
+                                      string,
+                                      unknown
+                                    >,
+                                }
+                              : {}),
                           }
-                        },
-                      )
-                      if (reconnected.type === 'connected') {
-                        // Official: retry the tool with the reconnected client
-                        // (recursive JTo isAuthRetry). Prefer this object so
-                        // we don't race another cache miss after clear+connect.
-                        preferredClient = reconnected
-                        continue
-                      }
+                        : undefined
+
+                    return {
+                      data: mcpResult.content,
+                      ...(mcpMeta && Object.keys(mcpMeta).length > 0
+                        ? { mcpMeta }
+                        : {}),
+                    }
+                  } catch (error) {
+                    // Session expired — the connection cache has been
+                    // cleared, so retry with a fresh client.
+                    if (
+                      error instanceof McpSessionExpiredError &&
+                      attempt < MAX_SESSION_RETRIES
+                    ) {
                       logMCPDebug(
                         client.name,
-                        `Auth reconnect returned '${reconnected.type}'; falling through to needs-auth`,
+                        `Retrying tool '${tool.name}' after session recovery`,
                       )
+                      continue
                     }
-                  }
 
-                  // Emit progress when tool fails
-                  if (onProgress && toolUseId) {
-                    onProgress({
-                      toolUseID: toolUseId,
-                      data: {
-                        type: 'mcp_progress',
-                        status: 'failed',
-                        serverName: client.name,
-                        toolName: tool.name,
-                        elapsedTimeMs: Date.now() - startTime,
-                      },
-                    })
-                  }
-                  // Wrap MCP SDK errors so telemetry gets useful context
-                  // instead of just "Error" or "McpError" (the constructor
-                  // name). MCP SDK errors are protocol-level messages and
-                  // don't contain user file paths or code.
-                  if (
-                    error instanceof Error &&
-                    !(
-                      error instanceof
-                      TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
-                    )
-                  ) {
-                    const name = error.constructor.name
-                    if (name === 'Error') {
-                      throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
-                        error.message,
-                        error.message.slice(0, 200),
+                    // Official 2.1.193/206: 401 auth recovery — headersHelper
+                    // re-mint, or OAuth refresh_token reconnect, once only.
+                    // Concurrent callers rejoin the same in-flight reconnect
+                    // (OHs Map: reauth_retry leader / collateral_rejoin).
+                    if (authReconnectRetries < MAX_AUTH_RECONNECT_RETRIES) {
+                      const serverConfig = client.config as {
+                        headersHelper?: string
+                        type?: string
+                        url?: string
+                        headers?: Record<string, string>
+                        oauth?: unknown
+                      }
+                      const hasRefreshToken =
+                        (serverConfig.type === 'http' ||
+                          serverConfig.type === 'sse') &&
+                        !!serverConfig.url &&
+                        serverHasStoredRefreshToken(
+                          client.name,
+                          serverConfig as {
+                            type: 'http' | 'sse'
+                            url: string
+                            headers?: Record<string, string>
+                          },
+                        )
+                      const kind = classifyAuthReconnectKind({
+                        type: serverConfig.type,
+                        headersHelper: serverConfig.headersHelper,
+                        url: serverConfig.url,
+                        hasRefreshToken,
+                        hasUserAuthHeader: headersHaveAuthorization(
+                          serverConfig.headers,
+                        ),
+                      })
+                      const cacheKey = getServerCacheKey(
+                        client.name,
+                        client.config,
                       )
+                      // Official W: ConnectionClosed mid-reconnect → rejoin
+                      // even if this call didn't see a 401 classification.
+                      const closedWhileReconnecting =
+                        kind !== null &&
+                        isConnectionClosedWhileReconnecting(
+                          error,
+                          hasAuthReconnectInFlight(cacheKey),
+                        )
+                      const shouldReconnect =
+                        kind !== null &&
+                        (error instanceof McpAuthError ||
+                          closedWhileReconnecting)
+
+                      if (shouldReconnect && kind !== null) {
+                        authReconnectRetries++
+                        logMCPDebug(
+                          client.name,
+                          kind === 'mcp_headers_helper'
+                            ? `Tool '${tool.name}' returned 401; re-running headersHelper and retrying once`
+                            : `Tool '${tool.name}' returned 401; refresh token stored — reconnecting and retrying once`,
+                        )
+                        const reconnected = await joinOrStartAuthReconnect(
+                          cacheKey,
+                          kind,
+                          async () => {
+                            await clearServerCache(client.name, client.config)
+                            return connectToServer(client.name, client.config)
+                          },
+                          join => {
+                            // Official Ze(kind, role): telemetry distinguishes
+                            // the leader reauth_retry from collateral_rejoin.
+                            if (join.role === 'leader') {
+                              logEvent(
+                                kind === 'mcp_headers_helper'
+                                  ? 'tengu_mcp_headers_helper_retry'
+                                  : 'tengu_mcp_oauth_refresh_retry',
+                                {},
+                              )
+                            } else {
+                              logEvent(
+                                kind === 'mcp_headers_helper'
+                                  ? 'tengu_mcp_headers_helper_collateral_rejoin'
+                                  : 'tengu_mcp_oauth_refresh_collateral_rejoin',
+                                {},
+                              )
+                            }
+                          },
+                        )
+                        if (reconnected.type === 'connected') {
+                          // Official: retry the tool with the reconnected client
+                          // (recursive JTo isAuthRetry). Prefer this object so
+                          // we don't race another cache miss after clear+connect.
+                          preferredClient = reconnected
+                          continue
+                        }
+                        logMCPDebug(
+                          client.name,
+                          `Auth reconnect returned '${reconnected.type}'; falling through to needs-auth`,
+                        )
+                      }
                     }
-                    // McpError has a numeric `code` with the JSON-RPC error
-                    // code (e.g. -32000 ConnectionClosed, -32001 RequestTimeout)
+
+                    // Emit progress when tool fails
+                    if (onProgress && toolUseId) {
+                      onProgress({
+                        toolUseID: toolUseId,
+                        data: {
+                          type: 'mcp_progress',
+                          status: 'failed',
+                          serverName: client.name,
+                          toolName: tool.name,
+                          elapsedTimeMs: Date.now() - startTime,
+                        },
+                      })
+                    }
+                    // Wrap MCP SDK errors so telemetry gets useful context
+                    // instead of just "Error" or "McpError" (the constructor
+                    // name). MCP SDK errors are protocol-level messages and
+                    // don't contain user file paths or code.
                     if (
-                      name === 'McpError' &&
-                      'code' in error &&
-                      typeof error.code === 'number'
-                    ) {
-                      throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
-                        error.message,
-                        `McpError ${error.code}`,
+                      error instanceof Error &&
+                      !(
+                        error instanceof
+                        TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
                       )
+                    ) {
+                      const name = error.constructor.name
+                      if (name === 'Error') {
+                        throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+                          error.message,
+                          error.message.slice(0, 200),
+                        )
+                      }
+                      // McpError has a numeric `code` with the JSON-RPC error
+                      // code (e.g. -32000 ConnectionClosed, -32001 RequestTimeout)
+                      if (
+                        name === 'McpError' &&
+                        'code' in error &&
+                        typeof error.code === 'number'
+                      ) {
+                        throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+                          error.message,
+                          `McpError ${error.code}`,
+                        )
+                      }
                     }
+                    throw error
                   }
-                  throw error
                 }
-              }
-            },
-            userFacingName() {
-              // Prefer title annotation if available, otherwise use tool name
-              const displayName = tool.annotations?.title || tool.name
-              return `${client.name} - ${displayName} (MCP)`
-            },
-            ...(isClaudeInChromeMCPServer(client.name) &&
-            (client.config.type === 'stdio' || !client.config.type)
-              ? claudeInChromeToolRendering().getClaudeInChromeMCPToolOverrides(
-                  tool.name,
-                )
-              : {}),
-            ...(feature('CHICAGO_MCP') &&
-            (client.config.type === 'stdio' || !client.config.type) &&
-            isComputerUseMCPServer!(client.name)
-              ? computerUseWrapper!().getComputerUseMCPToolOverrides(tool.name)
-              : {}),
-          }
-        })
-        .filter(isIncludedMcpTool)
+              },
+              userFacingName() {
+                // Prefer title annotation if available, otherwise use tool name
+                const displayName = tool.annotations?.title || tool.name
+                return `${client.name} - ${displayName} (MCP)`
+              },
+              ...(isClaudeInChromeMCPServer(client.name) &&
+              (client.config.type === 'stdio' || !client.config.type)
+                ? claudeInChromeToolRendering().getClaudeInChromeMCPToolOverrides(
+                    tool.name,
+                  )
+                : {}),
+              ...(feature('CHICAGO_MCP') &&
+              (client.config.type === 'stdio' || !client.config.type) &&
+              isComputerUseMCPServer!(client.name)
+                ? computerUseWrapper!().getComputerUseMCPToolOverrides(
+                    tool.name,
+                  )
+                : {}),
+            }
+          })
+          .filter(isIncludedMcpTool),
+        client.name,
+      )
     } catch (error) {
       const msg = errorMessage(error)
       // densable n4e catch: claudeai-proxy bearer reject → discoveryBearerRejected
@@ -3553,6 +3600,7 @@ export async function getMcpToolsCommandsAndResources(
     attemptEpoch?: number
   }) => void,
   mcpConfigs?: Record<string, ScopedMcpServerConfig>,
+  deferResourcesForRemote = false,
 ): Promise<void> {
   let resourceToolsAdded = false
 
@@ -3676,18 +3724,30 @@ export async function getMcpToolsCommandsAndResources(
         }
       }
 
-      const [tools, mcpCommands, mcpSkills, resources] = await Promise.all([
+      const primaryPromise = Promise.all([
         fetchToolsForClient(client),
         settleEmpty(fetchCommandsForClient(client), []),
         // Discover skills from skill:// resources
         feature('MCP_SKILLS') && supportsResources
           ? settleEmpty(fetchMcpSkillsForClient!(client), [])
           : Promise.resolve([]),
-        // Fetch resources if supported
-        supportsResources
-          ? settleEmpty(fetchResourcesForClient(client), [])
-          : Promise.resolve([]),
       ])
+      const resourcesPromise = supportsResources
+        ? settleEmpty(fetchResourcesForClient(client), [])
+        : Promise.resolve([])
+
+      const shouldDeferResources =
+        deferResourcesForRemote === true &&
+        (config.type === 'http' || config.type === 'sse')
+      if (shouldDeferResources) {
+        resourcesPromise.catch(() => {})
+      }
+
+      const [[tools, mcpCommands, mcpSkills], eagerResources] =
+        await Promise.all([
+          primaryPromise,
+          shouldDeferResources ? Promise.resolve(undefined) : resourcesPromise,
+        ])
       const commands = [...mcpCommands, ...mcpSkills]
 
       // If this server resources and we haven't added resource tools yet,
@@ -3698,12 +3758,22 @@ export async function getMcpToolsCommandsAndResources(
         resourceTools.push(ListMcpResourcesTool, ReadMcpResourceTool)
       }
 
-      report({
-        client,
-        tools: [...tools, ...resourceTools],
-        commands,
-        resources: resources.length > 0 ? resources : undefined,
-      })
+      const emit = (resources: ServerResource[]) => {
+        report({
+          client,
+          tools: [...tools, ...resourceTools],
+          commands,
+          resources: resources.length > 0 ? resources : undefined,
+        })
+      }
+
+      if (shouldDeferResources) {
+        emit([])
+      }
+      const resources = eagerResources ?? (await resourcesPromise)
+      if (!shouldDeferResources) {
+        emit(resources)
+      }
     } catch (error) {
       // Handle errors gracefully - connection might have closed during fetch
       logMCPError(

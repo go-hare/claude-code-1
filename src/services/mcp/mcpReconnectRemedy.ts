@@ -7,6 +7,8 @@
  * Gold callees (2.1.251 #23): `G8`, `YHe`, `Qo`, `XS`, `y$`, `UQ`, `$je`, `qge`.
  */
 
+import { z } from 'zod/v4'
+import { isEnvTruthy } from '../../utils/envUtils.js'
 import { formatMcpServerLabel } from './formatMcpServerLabel.js'
 
 export type McpRemedyClient = {
@@ -298,13 +300,17 @@ export function formatMcpReconnectOutcome(
   target: string,
   results: ReadonlyArray<{ ok: true; type: string } | { ok: false }>,
   appendix: string | null,
+  options?: { isRemote?: boolean },
 ): string {
+  const isRemote =
+    options?.isRemote ?? isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
   if (target !== 'all') {
     const first = results[0]
     if (!first || !first.ok) return `Couldn't reconnect "${target}".`
     if (first.type === 'connected') return `Reconnected "${target}".`
-    const hint =
-      first.type === 'needs-auth'
+    const hint = isRemote
+      ? 'Open MCP servers from the command menu.'
+      : first.type === 'needs-auth'
         ? 'Authenticate with `/mcp` in the terminal.'
         : 'Check its config with `/mcp` in the terminal.'
     const label = STATUS_LABEL[first.type] ?? first.type
@@ -316,14 +322,26 @@ export function formatMcpReconnectOutcome(
   )
   const base = `Reconnected ${connected} of ${results.length} MCP server(s).`
   const withAppendix = appendix !== null ? `${base} ${appendix}` : base
-  return `${withAppendix} Run \`/mcp\` in the terminal to see status.`
+  const tail = isRemote
+    ? 'Open MCP servers from the command menu.'
+    : 'Run `/mcp` in the terminal to see status.'
+  return `${withAppendix} ${tail}`
 }
 
-export function missingMcpReconnectTarget(target: string): string {
+export function missingMcpReconnectTarget(
+  target: string,
+  options?: { isRemote?: boolean },
+): string {
+  const isRemote =
+    options?.isRemote ?? isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)
   if (target === 'all') {
-    return 'No MCP servers are configured. Add one with `claude mcp add`.'
+    return isRemote
+      ? 'No MCP servers are configured.'
+      : 'No MCP servers are configured. Add one with `claude mcp add`.'
   }
-  return `There's no MCP server named "${target}". Run \`/mcp\` in the terminal to see configured servers.`
+  return isRemote
+    ? `There's no MCP server named "${target}".`
+    : `There's no MCP server named "${target}". Run \`/mcp\` in the terminal to see configured servers.`
 }
 
 /**
@@ -336,4 +354,41 @@ export function mcpReconnectControlFailureMessage(client: {
 }): string {
   if (client.type === 'failed') return 'Connection failed'
   return `Server status: ${client.type}`
+}
+
+const replMcpNeedsAuthServerSchema = z.array(
+  z.object({
+    name: z.string(),
+    authTool: z.string(),
+  }),
+)
+
+export type ReplMcpNeedsAuthServer = z.infer<
+  typeof replMcpNeedsAuthServerSchema
+>[number]
+
+/**
+ * SEA `@306742584` `replMcpNeedsAuthServersOf` — validate `servers` on a
+ * `repl_mcp_needs_auth` attachment.
+ */
+export function replMcpNeedsAuthServersOf(attachment: {
+  servers?: unknown
+}): ReplMcpNeedsAuthServer[] {
+  const parsed = replMcpNeedsAuthServerSchema.safeParse(attachment.servers)
+  return parsed.success ? parsed.data : []
+}
+
+/**
+ * SEA `@306742584` `renderReplMcpNeedsAuthNotice` — render interactive auth
+ * notice for REPL/remote MCP servers that need authentication.
+ */
+export function renderReplMcpNeedsAuthNotice(
+  servers: readonly ReplMcpNeedsAuthServer[],
+): string {
+  return servers
+    .map(
+      server =>
+        `MCP server ${formatMcpServerLabel(server.name)} needs authentication before its tools answer; its ${server.authTool} tool is callable from a script.`,
+    )
+    .join('\n')
 }

@@ -292,6 +292,7 @@ import {
   pluginDirectoryExists,
   type StorageV5ScopeKindHost,
 } from './hooks/hookCommandRunner.js'
+import { getPinnedStorageV5 } from './storageV5/index.js'
 import {
   buildFailClosedHookMatchResult,
   computeSessionEndHooksBoundMs,
@@ -531,6 +532,42 @@ export function parseHookOutput(stdout: string): {
     logForDebugging(validationError)
     return { plainText: stdout, validationError }
   }
+}
+
+/**
+ * Gold #542 — format `--debug` completion log for command hooks on tool calls,
+ * prompts, SessionStart, and Stop (command, plugin, outcome, durationMs).
+ */
+export function formatHookCompletionDebugLog({
+  hookName,
+  command,
+  pluginId,
+  result,
+  timeoutMs,
+  durationMs,
+  parentAborted,
+}: {
+  hookName: string
+  command: string
+  pluginId?: string
+  result: Pick<
+    HookCommandResult,
+    'aborted' | 'backgrounded' | 'spawnFailed' | 'status'
+  >
+  timeoutMs: number
+  durationMs: number
+  parentAborted: boolean
+}): string {
+  const outcome = result.aborted
+    ? parentAborted
+      ? 'cancelled'
+      : `timed out after ${timeoutMs}ms`
+    : result.backgrounded
+      ? 'moved to the background'
+      : result.spawnFailed
+        ? 'failed to start'
+        : `finished with status ${result.status}`
+  return `Hooks: ${hookName} [${command}]${pluginId ? ` (plugin ${pluginId})` : ''} ${outcome} (${durationMs}ms)`
 }
 
 export async function execCommandHook(
@@ -1503,7 +1540,160 @@ interface TypedSyncHookOutput {
       }
 }
 
-function processHookJSONOutput({
+/**
+ * Gold `bO` / `XBt` — escape `<system-reminder>` and `</system-reminder>`
+ * (plus trailing `<` / `</`) in hook outputs before they reach Claude (#255).
+ */
+export function escapeSystemReminderTags(text: string): string {
+  return text
+    .replaceAll(/<(?=\s*(?:\/\s*)?system-reminder\b)/gi, '&lt;')
+    .replace(/<(?=\s*(?:\/\s*)?$)/, '&lt;')
+}
+
+/**
+ * Gold `jse` — hook events where `onFailure: "block"` is ignored because
+ * blocking those events on hook failure would trap the session/task (#343).
+ */
+export const ON_FAILURE_BLOCK_IGNORED_EVENTS: ReadonlySet<HookEvent> =
+  new Set<HookEvent>(['Stop', 'SubagentStop', 'TaskCompleted', 'TeammateIdle'])
+
+type HookWithOnFailure = {
+  type: string
+  async?: boolean
+  asyncRewake?: boolean
+  onFailure?: 'continue' | 'block'
+}
+
+/**
+ * Gold `HG` — returns true when the hook is configured with `onFailure: "block"`
+ * (excluding async/asyncRewake command hooks and non-command/http/callback hooks).
+ */
+export function isOnFailureBlock(hook: HookWithOnFailure): boolean {
+  switch (hook.type) {
+    case 'command':
+      return (
+        hook.onFailure === 'block' &&
+        hook.async !== true &&
+        hook.asyncRewake !== true
+      )
+    case 'http':
+    case 'callback':
+      return hook.onFailure === 'block'
+    default:
+      return false
+  }
+}
+
+/**
+ * Gold `YQe` — true when `onFailure: "block"` applies to this hook + event.
+ */
+export function shouldBlockOnFailureForEvent(
+  hook: HookWithOnFailure,
+  hookEvent: HookEvent,
+): boolean {
+  return (
+    isOnFailureBlock(hook) && !ON_FAILURE_BLOCK_IGNORED_EVENTS.has(hookEvent)
+  )
+}
+
+/**
+ * Gold `$in` — convert a failed or timed-out hook result into a blocking
+ * result when `onFailure: "block"` is active for the hook and event (#343).
+ */
+export function applyOnFailureBlockToHookResult(
+  result: HookResult,
+  hookEvent: HookEvent,
+  signal?: AbortSignal,
+): HookResult {
+  const hook = result.hook as HookResult['hook'] & HookWithOnFailure
+  if (!isOnFailureBlock(hook)) return result
+
+  const stoppedAfterItsTimeout =
+    (result as HookResult & { stoppedAfterItsTimeout?: boolean })
+      .stoppedAfterItsTimeout === true
+  const failureKind =
+    result.outcome === 'cancelled' &&
+    hook.type !== 'callback' &&
+    (signal?.aborted !== true || stoppedAfterItsTimeout)
+      ? 'timed out'
+      : result.outcome === 'non_blocking_error'
+        ? 'failed'
+        : undefined
+  if (failureKind === undefined) return result
+
+  if (ON_FAILURE_BLOCK_IGNORED_EVENTS.has(hookEvent)) {
+    logForDebugging(
+      `Hooks: ${hookEvent} ${hook.type} hook ${failureKind}; not blocking (onFailure: "block" is ignored on ${hookEvent})`,
+      { level: 'warn' },
+    )
+    return result
+  }
+
+  const command = getHookDisplayText(hook)
+  const att =
+    result.message &&
+    typeof result.message === 'object' &&
+    'type' in result.message &&
+    result.message.type === 'attachment' &&
+    'attachment' in result.message
+      ? (result.message.attachment as { type?: string; stderr?: string })
+      : undefined
+  const detail =
+    att?.type === 'hook_non_blocking_error' && typeof att.stderr === 'string'
+      ? att.stderr.trim()
+      : ''
+  const sanitizedDetail = escapeSystemReminderTags(detail)
+  const blockingText = `[${command}]: ${failureKind}; blocking because onFailure is "block"${sanitizedDetail === '' ? '' : `\n${sanitizedDetail}`}`
+
+  logForDebugging(
+    `Hooks: ${hookEvent} ${hook.type} hook ${failureKind}; blocking (onFailure: "block")`,
+    { level: 'warn' },
+  )
+
+  return {
+    ...result,
+    message: undefined,
+    blockingError: {
+      blockingError: blockingText,
+      command,
+    },
+    ...(hookEvent === 'PermissionRequest' && {
+      permissionRequestResult: {
+        behavior: 'deny' as const,
+        message: blockingText,
+      },
+    }),
+    suppressOriginalPrompt: true,
+    outcome: 'blocking',
+  }
+}
+
+/**
+ * Gold `Hin` — convert an unsuccessful, non-cancelled outside-REPL hook result
+ * into a blocked result when `onFailure: "block"` is set (#343).
+ */
+export function applyOnFailureBlockToAggregatedHookResult(
+  hook: HookWithOnFailure,
+  aggregated: HookOutsideReplResult,
+): HookOutsideReplResult {
+  if (
+    !isOnFailureBlock(hook) ||
+    aggregated.succeeded ||
+    aggregated.blocked ||
+    aggregated.cancelled === true
+  ) {
+    return aggregated
+  }
+  const timedOut = aggregated.output === 'Hook cancelled'
+  const detail = timedOut ? '' : aggregated.output.trim()
+  return {
+    ...aggregated,
+    blocked: true,
+    output: `${timedOut ? 'timed out' : 'failed'}; blocking because onFailure is "block"${detail === '' ? '' : `\n${detail}`}`,
+  }
+}
+
+export function processHookJSONOutput({
   json: rawJson,
   command,
   hookName,
@@ -1797,6 +1987,23 @@ function processHookJSONOutput({
         }
         break
     }
+  }
+
+  if (result.additionalContext !== undefined) {
+    result.additionalContext = escapeSystemReminderTags(
+      result.additionalContext,
+    )
+  }
+  if (result.blockingError !== undefined) {
+    result.blockingError = {
+      ...result.blockingError,
+      blockingError: escapeSystemReminderTags(
+        result.blockingError.blockingError,
+      ),
+    }
+  }
+  if (result.systemMessage !== undefined) {
+    result.systemMessage = escapeSystemReminderTags(result.systemMessage)
   }
 
   return {
@@ -2900,9 +3107,11 @@ async function* executeHooks({
   sessionFunctionHooksOnly,
   managedHooksOnly,
   managedHooksExcluded,
+  sessionStartOptions,
 }: {
   managedHooksOnly?: boolean
   managedHooksExcluded?: boolean
+  sessionStartOptions?: SessionStartHookExecutionOptions
   hookInput: HookInput
   toolUseID: string
   matchQuery?: string
@@ -3262,6 +3471,37 @@ async function* executeHooks({
     matchingHooks = matchingHooks.filter(h => h.hook.type === 'function')
   } else if (skipSessionFunctionHooks) {
     matchingHooks = matchingHooks.filter(h => h.hook.type !== 'function')
+  }
+  if (sessionStartOptions !== undefined) {
+    if (sessionStartOptions.newPluginsOnly) {
+      const pluginEntries = matchingHooks
+        .filter(
+          (m): m is typeof m & { pluginId: string } => m.pluginId !== undefined,
+        )
+        .map(m => ({
+          pluginId: m.pluginId,
+          pluginName: m.pluginId.split('@')[0] ?? m.pluginId,
+        }))
+      const owedIds = new Set(
+        sessionStartOptions.newPluginsOnly
+          .owed(pluginEntries)
+          .map(p => p.pluginId),
+      )
+      matchingHooks = matchingHooks.filter(
+        m => m.pluginId !== undefined && owedIds.has(m.pluginId),
+      )
+    }
+    if (sessionStartOptions.onMatched) {
+      const matchedPlugins = matchingHooks
+        .filter(
+          (m): m is typeof m & { pluginId: string } => m.pluginId !== undefined,
+        )
+        .map(m => ({
+          pluginId: m.pluginId,
+          pluginName: m.pluginId.split('@')[0] ?? m.pluginId,
+        }))
+      sessionStartOptions.onMatched(matchedPlugins, matchingHooks.length)
+    }
   }
   if (matchingHooks.length === 0) {
     return
@@ -3841,13 +4081,24 @@ async function* executeHooks({
         pluginRoot,
         pluginId,
         skillRoot,
-        forceSyncExecution,
+        forceSyncExecution || shouldBlockOnFailureForEvent(hook, hookEvent),
         boundRequestPrompt,
         persistStorageV5,
         persistCredentials,
       )
       cleanup?.()
       const durationMs = Date.now() - hookStartMs
+      logForDebugging(
+        formatHookCompletionDebugLog({
+          hookName,
+          command: hookCommand,
+          pluginId,
+          result,
+          timeoutMs: commandTimeoutMs,
+          durationMs,
+          parentAborted: signal?.aborted === true,
+        }),
+      )
 
       if (result.backgrounded) {
         yield {
@@ -3868,6 +4119,9 @@ async function* executeHooks({
           exitCode: result.status,
           outcome: 'cancelled',
         })
+        const commandResult = result as HookCommandResult & {
+          stoppedAfterItsTimeout?: boolean
+        }
         yield {
           message: createAttachmentMessage({
             type: 'hook_cancelled',
@@ -3879,6 +4133,9 @@ async function* executeHooks({
           }),
           outcome: 'cancelled' as const,
           hook,
+          ...(commandResult.stoppedAfterItsTimeout && {
+            stoppedAfterItsTimeout: true,
+          }),
         }
         return
       }
@@ -3984,7 +4241,9 @@ async function* executeHooks({
             })
             yield {
               blockingError: {
-                blockingError: `[${hookCommand}]: ${result.stderr || 'No stderr output'}`,
+                blockingError: escapeSystemReminderTags(
+                  `[${hookCommand}]: ${result.stderr || 'No stderr output'}`,
+                ),
                 command: hookCommand,
               },
               ...((result.stdioIncomplete || result.stdioClosedWithoutEnd) && {
@@ -4053,7 +4312,9 @@ async function* executeHooks({
         // (`if(we.status===2&&!pe.blockingError) pe.blockingError = stderr...`).
         if (result.status === 2 && !processed.blockingError) {
           processed.blockingError = {
-            blockingError: `[${hookCommand}]: ${result.stderr || 'No stderr output'}`,
+            blockingError: escapeSystemReminderTags(
+              `[${hookCommand}]: ${result.stderr || 'No stderr output'}`,
+            ),
             command: hookCommand,
           }
         }
@@ -4139,10 +4400,8 @@ async function* executeHooks({
             hookName,
             toolUseID,
             hookEvent,
-            content: await persistHookOutput(
-              result.stdout.trim(),
-              hookId,
-              'stdout',
+            content: escapeSystemReminderTags(
+              await persistHookOutput(result.stdout.trim(), hookId, 'stdout'),
             ),
             stdout: result.stdout,
             stderr: result.stderr,
@@ -4213,7 +4472,9 @@ async function* executeHooks({
         })
         yield {
           blockingError: {
-            blockingError: `[${hookCommand}]: ${result.stderr || 'No stderr output'}`,
+            blockingError: escapeSystemReminderTags(
+              `[${hookCommand}]: ${result.stderr || 'No stderr output'}`,
+            ),
             command: hookCommand,
           },
           ...((result.stdioIncomplete || result.stdioClosedWithoutEnd) && {
@@ -4320,7 +4581,12 @@ async function* executeHooks({
 
   try {
     // Run all hooks in parallel and wait for all to complete
-    for await (const result of all(hookPromises)) {
+    for await (const rawResult of all(hookPromises)) {
+      const result = applyOnFailureBlockToHookResult(
+        rawResult,
+        hookEvent,
+        signal,
+      )
       const progressIndex = progressIndices.get(result.hook)
       if (progressIndex !== undefined) {
         progress?.settle(progressIndex)
@@ -5359,6 +5625,7 @@ async function executeHooksOutsideREPL({
       // Handle command hooks
       const commandText = getHookDisplayText(hook)
       let exitedBlocking = false
+      const hookStartMs = Date.now()
       const commandTimeoutMs = hook.timeout ? hook.timeout * 1000 : timeoutMs
       const { signal: abortSignal, cleanup } = createCombinedAbortSignal(
         signal,
@@ -5376,7 +5643,10 @@ async function executeHooksOutsideREPL({
           pluginRoot,
           pluginId,
           skillRoot,
-          undefined,
+          shouldBlockOnFailureForEvent(
+            hook as HookWithOnFailure,
+            hookEvent as HookEvent,
+          ),
           undefined,
           storageV5,
           credentials,
@@ -5385,22 +5655,35 @@ async function executeHooksOutsideREPL({
         exitedBlocking = result.status === 2 && !result.backgrounded
         // Clear timeout if hook completes
         cleanup?.()
+        const durationMs = Date.now() - hookStartMs
+        logForDebugging(
+          formatHookCompletionDebugLog({
+            hookName,
+            command: commandText,
+            pluginId,
+            result,
+            timeoutMs: commandTimeoutMs,
+            durationMs,
+            parentAborted: signal?.aborted === true,
+          }),
+        )
 
         if (result.aborted) {
+          const commandResult = result as HookCommandResult & {
+            stoppedAfterItsTimeout?: boolean
+          }
+          const abortedByParent =
+            signal?.aborted === true &&
+            commandResult.stoppedAfterItsTimeout !== true
           failureReason ??= 'hook_cancelled'
-          logForDebugging(`${hookName} [${commandText}] cancelled`)
           return {
             command: commandText,
             succeeded: false,
             output: 'Hook cancelled',
             blocked: false,
-            ...(signal?.aborted && { cancelled: true }),
+            ...(abortedByParent && { cancelled: true }),
           }
         }
-
-        logForDebugging(
-          `${hookName} [${commandText}] completed with status ${result.status}`,
-        )
 
         // Parse JSON for any messages to print out.
         // densable 2.1.214 #40: `if(L&&k.status!==2)throw Error(L)` — schema
@@ -5503,13 +5786,22 @@ async function executeHooksOutsideREPL({
   )
 
   const results = await Promise.all(
-    hookPromises.map((promise, index) =>
-      promise.finally(() => {
-        const hook = matchingHooks[index]?.hook
-        const progressIndex = hook ? progressIndices.get(hook) : undefined
-        if (progressIndex !== undefined) progress?.settle(progressIndex)
-      }),
-    ),
+    hookPromises.map((promise, index) => {
+      const hook = matchingHooks[index]?.hook
+      return promise
+        .then(res =>
+          hook
+            ? applyOnFailureBlockToAggregatedHookResult(
+                hook as HookWithOnFailure,
+                res,
+              )
+            : res,
+        )
+        .finally(() => {
+          const progressIndex = hook ? progressIndices.get(hook) : undefined
+          if (progressIndex !== undefined) progress?.settle(progressIndex)
+        })
+    }),
   ).finally(() => {
     progress?.[Symbol.dispose]()
     releaseHold()
@@ -5922,6 +6214,7 @@ export async function executeNotificationHooks(
     notificationType: string
   },
   timeoutMs: number = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
+  persist: { storageV5?: unknown; credentials?: unknown } = {},
 ): Promise<void> {
   const { message, title, notificationType } = notificationData
   const hookInput: NotificationHookInput = {
@@ -5936,6 +6229,8 @@ export async function executeNotificationHooks(
     hookInput,
     timeoutMs,
     matchQuery: notificationType,
+    storageV5: persist.storageV5 ?? getPinnedStorageV5(),
+    credentials: persist.credentials,
   })
 }
 
@@ -5983,6 +6278,7 @@ export async function executeStopFailureHooks(
     hookInput,
     timeoutMs,
     matchQuery: error,
+    storageV5: toolUseContext?.storageV5 ?? getPinnedStorageV5(),
   })
 }
 
@@ -6097,6 +6393,7 @@ export async function* executeTeammateIdleHooks(
   permissionMode?: string,
   signal?: AbortSignal,
   timeoutMs: number = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
+  storageV5?: unknown,
 ): AsyncGenerator<AggregatedHookResult> {
   const hookInput: TeammateIdleHookInput = {
     ...createBaseHookInput(permissionMode),
@@ -6110,6 +6407,7 @@ export async function* executeTeammateIdleHooks(
     toolUseID: randomUUID(),
     signal,
     timeoutMs,
+    storageV5: storageV5 ?? getPinnedStorageV5(),
   })
 }
 
@@ -6362,7 +6660,7 @@ export async function runUserPromptExpansionHook<
         hookMessages.push(
           createAttachmentMessage({
             type: 'hook_additional_context',
-            content: result.additionalContexts,
+            content: result.additionalContexts.map(escapeSystemReminderTags),
             hookName: 'UserPromptExpansion',
             toolUseID: `hook-${randomUUID()}`,
             hookEvent: 'UserPromptExpansion',
@@ -6410,6 +6708,25 @@ type SessionStartLateLoadPayload = {
   isInteractive: boolean
 }
 
+export type PluginHookMatcherIdentity = {
+  pluginId: string
+  pluginName: string
+}
+
+export type SessionStartHookExecutionOptions = {
+  newPluginsOnly?: {
+    owed: (
+      plugins: readonly PluginHookMatcherIdentity[],
+    ) => PluginHookMatcherIdentity[]
+  }
+  onMatched?: (
+    matchedPlugins: readonly PluginHookMatcherIdentity[],
+    matchedCount: number,
+  ) => void
+  orphaned?: AbortSignal
+  storageV5?: unknown
+}
+
 /**
  * densable `hn`. Unique English:
  * `session.start: raised for ${name} (loaded later)`.
@@ -6419,8 +6736,16 @@ function raiseSessionStartForLaterLoadedModules(
   mods: readonly LoadedFunctionHooksModule[],
   seen: WeakSet<LoadedFunctionHooksModule>,
   payload: SessionStartLateLoadPayload,
+  signal?: AbortSignal,
+  orphaned?: AbortSignal,
 ): void {
+  if (signal?.aborted || orphaned?.aborted) return
+  const effectiveSignal =
+    signal && orphaned
+      ? AbortSignal.any([signal, orphaned])
+      : (signal ?? orphaned)
   for (const mod of mods) {
+    if (signal?.aborted || orphaned?.aborted) return
     if (seen.has(mod)) continue
     seen.add(mod)
     if (!hasMatchingFunctionHook('session.start', undefined, [mod])) continue
@@ -6428,8 +6753,9 @@ function raiseSessionStartForLaterLoadedModules(
     const name = mod.name
     const cwd = getCwd()
     Promise.resolve()
-      .then(() =>
-        runFunctionHookChain(
+      .then(() => {
+        if (signal?.aborted || orphaned?.aborted) return
+        return runFunctionHookChain(
           'session.start',
           {
             cwd,
@@ -6438,8 +6764,10 @@ function raiseSessionStartForLaterLoadedModules(
           },
           async () => ({ cwd }),
           name,
-        ),
-      )
+          undefined,
+          effectiveSignal ? { signal: effectiveSignal } : undefined,
+        )
+      })
       .catch((err: unknown) => {
         logForDebugging(
           `session.start: failed for ${name}: ${errorMessage(err)}`,
@@ -6452,12 +6780,20 @@ function raiseSessionStartForLaterLoadedModules(
 /** densable `yn` `Azn.set`. Never export minify `yn`. */
 function armLaterLoadedSessionStart(
   payload: SessionStartLateLoadPayload,
+  signal?: AbortSignal,
+  orphaned?: AbortSignal,
 ): void {
   const seen = new WeakSet<LoadedFunctionHooksModule>(
     getLoadedFunctionHooksModules(),
   )
   setLaterLoadedSessionStart(mods =>
-    raiseSessionStartForLaterLoadedModules(mods, seen, payload),
+    raiseSessionStartForLaterLoadedModules(
+      mods,
+      seen,
+      payload,
+      signal,
+      orphaned,
+    ),
   )
 }
 
@@ -6471,7 +6807,17 @@ export async function* executeSessionStartHooks(
   timeoutMs: number = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
   forceSyncExecution?: boolean,
   messages?: Message[],
+  sessionStartOptions?: SessionStartHookExecutionOptions,
 ): AsyncGenerator<AggregatedHookResult> {
+  const orphaned = sessionStartOptions?.orphaned
+  const storageV5 = sessionStartOptions?.storageV5 ?? getPinnedStorageV5()
+  if (orphaned?.aborted) {
+    return
+  }
+  const effectiveSignal =
+    signal && orphaned
+      ? AbortSignal.any([signal, orphaned])
+      : (signal ?? orphaned)
   const resolvedId = sessionId ?? getSessionId()
   const resumeFields =
     (source === 'resume' || source === 'fork') && messages
@@ -6500,7 +6846,7 @@ export async function* executeSessionStartHooks(
       const cwd = getCwd()
       const surface = isInteractive ? 'terminal' : null
       // densable leftover `yn` — WeakSet snapshot + Azn.set, then session.start.
-      armLaterLoadedSessionStart({ surface, isInteractive })
+      armLaterLoadedSessionStart({ surface, isInteractive }, signal, orphaned)
       if (hasMatchingFunctionHook('session.start')) {
         logForDebugging(
           `session.start: raised (surface ${surface ?? 'none'}, ${isInteractive ? 'interactive' : 'not interactive'})`,
@@ -6516,7 +6862,7 @@ export async function* executeSessionStartHooks(
             async () => ({ cwd }),
             undefined,
             undefined,
-            signal ? { signal } : undefined,
+            effectiveSignal ? { signal: effectiveSignal } : undefined,
           )
         } catch (err) {
           logForDebugging(`session.start: failed: ${errorMessage(err)}`, {
@@ -6539,13 +6885,18 @@ export async function* executeSessionStartHooks(
         }
       }
     }
+    if (orphaned?.aborted) {
+      return
+    }
     yield* executeHooks({
       hookInput,
       toolUseID: randomUUID(),
       matchQuery: source,
-      signal,
+      signal: effectiveSignal,
       timeoutMs,
       forceSyncExecution,
+      sessionStartOptions,
+      storageV5,
     })
   } finally {
     stopSessionActivity('hook_exec', STARTUP_HOOK_HOLD)
@@ -6797,6 +7148,7 @@ export async function* executeSubagentStartHooks(
   agentType: string,
   signal?: AbortSignal,
   timeoutMs: number = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
+  storageV5?: unknown,
 ): AsyncGenerator<AggregatedHookResult> {
   const hookInput: SubagentStartHookInput = {
     ...createBaseHookInput(undefined),
@@ -6811,6 +7163,7 @@ export async function* executeSubagentStartHooks(
     matchQuery: agentType,
     signal,
     timeoutMs,
+    storageV5: storageV5 ?? getPinnedStorageV5(),
   })
 }
 
@@ -6999,6 +7352,8 @@ export async function executeSessionEndHooks(
     setAppState?: (updater: (prev: AppState) => AppState) => void
     signal?: AbortSignal
     timeoutMs?: number
+    storageV5?: unknown
+    credentials?: unknown
   },
 ): Promise<void> {
   const {
@@ -7006,6 +7361,8 @@ export async function executeSessionEndHooks(
     setAppState,
     signal,
     timeoutMs = getSessionEndHookTimeoutMs(),
+    storageV5,
+    credentials,
   } = options || {}
 
   const endingSessionId = getSessionId()
@@ -7021,6 +7378,8 @@ export async function executeSessionEndHooks(
     matchQuery: reason,
     signal,
     timeoutMs,
+    storageV5: storageV5 ?? getPinnedStorageV5(),
+    credentials,
   })
 
   // During shutdown, Ink is unmounted so we can write directly to stderr
@@ -7156,6 +7515,7 @@ export async function executeConfigChangeHooks(
   source: ConfigChangeSource,
   filePath?: string,
   timeoutMs: number = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
+  persist: { storageV5?: unknown; credentials?: unknown } = {},
 ): Promise<HookOutsideReplResult[]> {
   const hookInput: ConfigChangeHookInput = {
     ...createBaseHookInput(undefined),
@@ -7168,6 +7528,8 @@ export async function executeConfigChangeHooks(
     hookInput,
     timeoutMs,
     matchQuery: source,
+    storageV5: persist.storageV5 ?? getPinnedStorageV5(),
+    credentials: persist.credentials,
   })
 
   // Policy settings are enterprise-managed — hooks fire for audit logging
@@ -7182,12 +7544,18 @@ export async function executeConfigChangeHooks(
 async function executeEnvHooks(
   hookInput: HookInput,
   timeoutMs: number,
+  persist: { storageV5?: unknown; credentials?: unknown } = {},
 ): Promise<{
   results: HookOutsideReplResult[]
   watchPaths: string[]
   systemMessages: string[]
 }> {
-  const results = await executeHooksOutsideREPL({ hookInput, timeoutMs })
+  const results = await executeHooksOutsideREPL({
+    hookInput,
+    timeoutMs,
+    storageV5: persist.storageV5 ?? getPinnedStorageV5(),
+    credentials: persist.credentials,
+  })
   if (results.length > 0) {
     invalidateSessionEnvCache()
   }
@@ -7202,6 +7570,7 @@ export function executeCwdChangedHooks(
   oldCwd: string,
   newCwd: string,
   timeoutMs: number = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
+  persist: { storageV5?: unknown; credentials?: unknown } = {},
 ): Promise<{
   results: HookOutsideReplResult[]
   watchPaths: string[]
@@ -7213,13 +7582,14 @@ export function executeCwdChangedHooks(
     old_cwd: oldCwd,
     new_cwd: newCwd,
   }
-  return executeEnvHooks(hookInput, timeoutMs)
+  return executeEnvHooks(hookInput, timeoutMs, persist)
 }
 
 export function executeFileChangedHooks(
   filePath: string,
   event: 'change' | 'add' | 'unlink',
   timeoutMs: number = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
+  persist: { storageV5?: unknown; credentials?: unknown } = {},
 ): Promise<{
   results: HookOutsideReplResult[]
   watchPaths: string[]
@@ -7231,7 +7601,7 @@ export function executeFileChangedHooks(
     file_path: filePath,
     event,
   } as unknown as FileChangedHookInput
-  return executeEnvHooks(hookInput, timeoutMs)
+  return executeEnvHooks(hookInput, timeoutMs, persist)
 }
 
 /**
@@ -7247,6 +7617,7 @@ export async function executeDirectoryAddedHooks(
   directory: string,
   source: 'slash_command' | 'register_repo_root',
   timeoutMs: number = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
+  persist: { storageV5?: unknown; credentials?: unknown } = {},
 ): Promise<{
   results: HookOutsideReplResult[]
   systemMessages: string[]
@@ -7261,6 +7632,8 @@ export async function executeDirectoryAddedHooks(
     hookInput,
     matchQuery: source,
     timeoutMs,
+    storageV5: persist.storageV5 ?? getPinnedStorageV5(),
+    credentials: persist.credentials,
   })
   const systemMessages = results
     .map(r => r.systemMessage)
@@ -7500,6 +7873,8 @@ export async function executeElicitationHooks({
   mode,
   url,
   elicitationId,
+  storageV5,
+  credentials,
 }: {
   serverName: string
   message: string
@@ -7510,6 +7885,8 @@ export async function executeElicitationHooks({
   mode?: 'form' | 'url'
   url?: string
   elicitationId?: string
+  storageV5?: unknown
+  credentials?: unknown
 }): Promise<ElicitationHookResult> {
   const hookInput: ElicitationHookInput = {
     ...createBaseHookInput(permissionMode),
@@ -7527,6 +7904,8 @@ export async function executeElicitationHooks({
     matchQuery: serverName,
     signal,
     timeoutMs,
+    storageV5: storageV5 ?? getPinnedStorageV5(),
+    credentials,
   })
 
   let elicitationResponse: ElicitationResponse | undefined
@@ -7554,6 +7933,8 @@ export async function executeElicitationResultHooks({
   timeoutMs = TOOL_HOOK_EXECUTION_TIMEOUT_MS,
   mode,
   elicitationId,
+  storageV5,
+  credentials,
 }: {
   serverName: string
   action: 'accept' | 'decline' | 'cancel'
@@ -7563,6 +7944,8 @@ export async function executeElicitationResultHooks({
   timeoutMs?: number
   mode?: 'form' | 'url'
   elicitationId?: string
+  storageV5?: unknown
+  credentials?: unknown
 }): Promise<ElicitationResultHookResult> {
   const hookInput: ElicitationResultHookInput = {
     ...createBaseHookInput(permissionMode),
@@ -7579,6 +7962,8 @@ export async function executeElicitationResultHooks({
     matchQuery: serverName,
     signal,
     timeoutMs,
+    storageV5: storageV5 ?? getPinnedStorageV5(),
+    credentials,
   })
 
   let elicitationResultResponse: ElicitationResponse | undefined
@@ -7609,6 +7994,7 @@ export async function executeStatusLineCommand(
   signal?: AbortSignal,
   timeoutMs: number = 5000, // Short timeout for status line
   logResult: boolean = false,
+  storageV5?: unknown,
 ): Promise<string | undefined> {
   // Check if all hooks (including statusLine) are disabled by managed settings
   if (shouldDisableAllHooksIncludingManaged()) {
@@ -7651,6 +8037,13 @@ export async function executeStatusLineCommand(
       jsonInput,
       abortSignal,
       randomUUID(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      storageV5 ?? getPinnedStorageV5(),
     )
 
     if (result.aborted) {
@@ -7699,6 +8092,7 @@ export async function executeFileSuggestionCommand(
   fileSuggestionInput: FileSuggestionCommandInput,
   signal?: AbortSignal,
   timeoutMs: number = 5000, // Short timeout for typeahead suggestions
+  storageV5?: unknown,
 ): Promise<string[]> {
   // Check if all hooks are disabled by managed settings
   if (shouldDisableAllHooksIncludingManaged()) {
@@ -7742,6 +8136,13 @@ export async function executeFileSuggestionCommand(
       jsonInput,
       abortSignal,
       randomUUID(),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      storageV5 ?? getPinnedStorageV5(),
     )
 
     if (result.aborted || result.status !== 0) {

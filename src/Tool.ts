@@ -178,6 +178,16 @@ export type ToolPermissionContext = DeepImmutable<{
    * Session takes no built-in tools and none from plugins either.
    */
   builtInToolsDisabled?: boolean
+  /**
+   * #379 SEA `toolsKeptByLaunchList`: frozen list of tool names kept by `--tools`
+   * at launch (when `--tools` is not a preset / `preset:default`).
+   */
+  toolsKeptByLaunchList?: readonly string[]
+  /**
+   * #206 SEA `pollEventDeliveryGuard`: guards against replacing/merging
+   * command-scoped allow rules during poll-event delivery.
+   */
+  pollEventDeliveryGuard?: boolean
 }>
 
 export const getEmptyToolPermissionContext: () => ToolPermissionContext =

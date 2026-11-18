@@ -1732,3 +1732,69 @@ export function backgroundForegroundBashToDeliverMessage(
   }
   return moved
 }
+
+export type HeadlessSendNowOutcome =
+  | 'nothing_waiting'
+  | 'delivering'
+  | 'stopped'
+
+export type HeadlessSendNowResult = {
+  still_queued: string[]
+  send_now: HeadlessSendNowOutcome
+}
+
+/**
+ * densable `$M` — headless `interrupt` with `send_now: true` (and not
+ * `cancel_queued: true`). Moves waiting foreground calls to background if
+ * `deliver()` succeeds instead of aborting the subagent/turn; only aborts
+ * when a turn is actively running with waiting messages and cannot be moved.
+ */
+export function handleHeadlessSendNow(opts: {
+  queuedCommands: ReadonlyArray<{
+    uuid?: string
+    isMeta?: boolean
+    origin?: Parameters<typeof isHumanLikeOrigin>[0]
+    shouldQuery?: boolean
+    passive?: boolean
+  }>
+  pressedUuid?: string | null
+  turnUnderWay: boolean
+  abortController: AbortController | null | undefined
+  endSessionRequested?: boolean
+  deliver?: () => boolean
+}): HeadlessSendNowResult {
+  const pressed =
+    opts.pressedUuid !== undefined &&
+    opts.pressedUuid !== null &&
+    opts.pressedUuid !== ''
+      ? opts.pressedUuid
+      : undefined
+  const waiting = opts.queuedCommands.filter(
+    cmd =>
+      !cmd.isMeta &&
+      isHumanLikeOrigin(cmd.origin) &&
+      cmd.shouldQuery !== false &&
+      cmd.passive !== true &&
+      (!pressed || cmd.uuid === pressed),
+  )
+  const still_queued = opts.queuedCommands
+    .map(c => c.uuid)
+    .filter((u): u is string => typeof u === 'string' && u.length > 0)
+
+  let send_now: HeadlessSendNowOutcome
+  if (waiting.length === 0) {
+    send_now = 'nothing_waiting'
+  } else if (
+    !opts.turnUnderWay ||
+    !opts.abortController ||
+    opts.abortController.signal.aborted ||
+    opts.endSessionRequested ||
+    opts.deliver?.() === true
+  ) {
+    send_now = 'delivering'
+  } else {
+    opts.abortController.abort()
+    send_now = 'stopped'
+  }
+  return { still_queued, send_now }
+}

@@ -240,15 +240,27 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
     !isOverlayActive &&
     !(isVimModeEnabled() && vimMode === 'INSERT')
 
+  let hasPendingLoopWakeup = false
+  try {
+    const { hasPendingLoopWakeups } =
+      require('../utils/loopDynamic.js') as typeof import('../utils/loopDynamic.js')
+    hasPendingLoopWakeup = hasPendingLoopWakeups()
+  } catch {
+    // loopDynamic may be unavailable in partial test mocks
+  }
+
   // Escape (chat:cancel) defers to mode-exit when in special mode with empty
   // input, and to useBackgroundTaskNavigation when viewing a teammate.
   // densable `Z=RPs()==="visible"` → `!Z` so Select owns Esc while chrome shows.
+  // Official 2.1.295 (#456): Esc at idle prompt cancels pending /loop wakeups,
+  // while Ctrl+C at idle prompt leaves them alone so double Ctrl+C detaches.
   const isEscapeActive =
     isContextActive &&
     !isDialogChromeVisible &&
     (canCancelRunningTask ||
       hasEditableQueuedCommands ||
-      isQuotaAutoResumeEscTarget) &&
+      isQuotaAutoResumeEscTarget ||
+      hasPendingLoopWakeup) &&
     !isInSpecialModeWithEmptyInput &&
     !isViewingTeammate
 

@@ -18,6 +18,56 @@ import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.j
 import figures from 'figures';
 import { type GlobalConfig, saveGlobalConfig, getCurrentProjectConfig, type OutputStyle } from '../../utils/config.js';
 import { normalizeApiKeyForConfig } from '../../utils/authPortable.js';
+import { runFunctionHookChain } from '../../utils/plugins/functionHooksModules.js';
+
+export type SaveAutoUpdatesChannelHookResult =
+  | { kind: 'saved'; saved: 'latest' | 'stable' }
+  | { kind: 'refused'; reason?: string };
+
+/**
+ * Official 2.1.295 (#441): ask plugin `config.set` hooks before persisting
+ * `autoUpdatesChannel` changes in `/config`.
+ */
+export async function saveAutoUpdatesChannelWithConfigSetHook(
+  nextChannel: 'latest' | 'stable',
+  previousChannel: 'latest' | 'stable',
+  applyPersist: (finalChannel: 'latest' | 'stable') => void,
+  signal?: AbortSignal,
+): Promise<SaveAutoUpdatesChannelHookResult> {
+  let saved: 'latest' | 'stable' | undefined;
+  try {
+    const res = await runFunctionHookChain(
+      'config.set',
+      {
+        key: 'autoUpdatesChannel',
+        value: nextChannel,
+        previous: previousChannel,
+        origin: { kind: 'composer' },
+      },
+      async arg => {
+        const finalChannel =
+          arg?.value === 'latest' || arg?.value === 'stable' ? (arg.value as 'latest' | 'stable') : nextChannel;
+        saved = finalChannel;
+        applyPersist(finalChannel);
+        return { value: finalChannel };
+      },
+      undefined,
+      undefined,
+      signal ? { signal } : undefined,
+    );
+    if (saved !== undefined) {
+      return { kind: 'saved', saved };
+    }
+    const deny =
+      res && typeof res === 'object' && 'deny' in res && typeof (res as { deny?: unknown }).deny === 'string'
+        ? (res as { deny: string }).deny
+        : undefined;
+    return { kind: 'refused', reason: deny };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { kind: 'refused', reason: message };
+  }
+}
 import {
   getGlobalConfig,
   getAutoUpdaterDisabledReason,
@@ -53,6 +103,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
 } from 'src/services/analytics/index.js';
 import { isBridgeEnabled } from '../../bridge/bridgeEnabled.js';
+import { saveThemeWithConfigSetHook } from '../../commands/theme/theme.js';
 import { ThemePicker } from '../ThemePicker.js';
 import { useAppState, useSetAppState, useAppStateStore } from '../../state/AppState.js';
 import { ModelPicker } from '../ModelPicker.js';
@@ -3021,19 +3072,22 @@ export function Config({
         setShowSubmenu('ChannelDowngrade');
         setTabsHidden(true);
       } else {
-        // Switching to latest - just do it and clear minimumVersion
-        isDirty.current = true;
-        F({
-          autoUpdatesChannel: undefined,
-          minimumVersion: undefined,
-        });
-        setSettingsData(prev => ({
-          ...prev,
-          autoUpdatesChannel: undefined,
-          minimumVersion: undefined,
-        }));
-        logEvent('tengu_autoupdate_channel_changed', {
-          channel: 'latest' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        // Switching to latest - ask config.set hook before persisting
+        void saveAutoUpdatesChannelWithConfigSetHook('latest', currentChannel, finalChannel => {
+          isDirty.current = true;
+          const nextChannelValue = finalChannel === 'latest' ? undefined : finalChannel;
+          F({
+            autoUpdatesChannel: nextChannelValue,
+            minimumVersion: undefined,
+          });
+          setSettingsData(prev => ({
+            ...prev,
+            autoUpdatesChannel: nextChannelValue,
+            minimumVersion: undefined,
+          }));
+          logEvent('tengu_autoupdate_channel_changed', {
+            channel: finalChannel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          });
         });
       }
       return;
@@ -3197,10 +3251,13 @@ export function Config({
         <>
           <ThemePicker
             onThemeSelect={setting => {
-              isDirty.current = true;
-              setTheme(setting);
-              setShowSubmenu(null);
-              setTabsHidden(false);
+              void saveThemeWithConfigSetHook(setting, saved => {
+                isDirty.current = true;
+                setTheme(saved);
+              }).then(() => {
+                setShowSubmenu(null);
+                setTabsHidden(false);
+              });
             }}
             onCancel={() => {
               setShowSubmenu(null);
@@ -3572,28 +3629,30 @@ export function Config({
               return;
             }
 
-            isDirty.current = true;
-            // Switch to stable channel
-            const newSettings: {
-              autoUpdatesChannel: 'stable';
-              minimumVersion?: string;
-            } = {
-              autoUpdatesChannel: 'stable',
-            };
+            const previousChannel = (settingsData?.autoUpdatesChannel ?? 'latest') as 'latest' | 'stable';
+            void saveAutoUpdatesChannelWithConfigSetHook('stable', previousChannel, finalChannel => {
+              isDirty.current = true;
+              const newSettings: {
+                autoUpdatesChannel: 'latest' | 'stable';
+                minimumVersion?: string;
+              } = {
+                autoUpdatesChannel: finalChannel,
+              };
 
-            if (choice === 'stay') {
-              // User wants to stay on current version until stable catches up
-              newSettings.minimumVersion = MACRO.VERSION;
-            }
+              if (finalChannel === 'stable' && choice === 'stay') {
+                // User wants to stay on current version until stable catches up
+                newSettings.minimumVersion = MACRO.VERSION;
+              }
 
-            F(newSettings);
-            setSettingsData(prev => ({
-              ...prev,
-              ...newSettings,
-            }));
-            logEvent('tengu_autoupdate_channel_changed', {
-              channel: 'stable' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-              minimum_version_set: choice === 'stay',
+              F(newSettings);
+              setSettingsData(prev => ({
+                ...prev,
+                ...newSettings,
+              }));
+              logEvent('tengu_autoupdate_channel_changed', {
+                channel: finalChannel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                minimum_version_set: finalChannel === 'stable' && choice === 'stay',
+              });
             });
           }}
         />

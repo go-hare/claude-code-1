@@ -736,7 +736,8 @@ describe('permissions.blockReadsOutsideWorkingDirectories (2.1.283)', () => {
     expect(result.behavior).toBe('ask')
     if (result.behavior === 'ask') {
       expect(result.decisionReason).toEqual({
-        type: 'other',
+        type: 'safetyCheck',
+        classifierApprovable: false,
         reason: 'Automount -hosts path detected (defense-in-depth check)',
       })
     }
@@ -753,7 +754,8 @@ describe('permissions.blockReadsOutsideWorkingDirectories (2.1.283)', () => {
     expect(untrusted.behavior).toBe('ask')
     if (untrusted.behavior === 'ask') {
       expect(untrusted.decisionReason).toEqual({
-        type: 'other',
+        type: 'safetyCheck',
+        classifierApprovable: false,
         reason: 'UNC path detected (defense-in-depth check)',
       })
     }

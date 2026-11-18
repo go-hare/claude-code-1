@@ -92,12 +92,49 @@ const SECRET_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
   // garbled share output. Token detection is limited to prefixed patterns above.
 ]
 
+// Official #501 (xA / A$ / T$ / C$ / R$ / O$ / z$) — key-value secret redactor
+// supporting keys with no value and JSON written inside a shell string
+// (up to 7 backslashes before quotes).
+const SECRET_KEY_NAME = String.raw`(?:aws[-_]?)?(?:secret[-_]?(?:access[-_]?)?key|session[-_]?token|security[-_]?token|bearer[-_]?token[-_]?bedrock)(?![A-Za-z0-9_-])`
+const SECRET_KEY_PREFIX = String.raw`(?:${SECRET_KEY_NAME}(?:\\{0,7}["'\`])?[ \t]*[:=][ \t]*(?:\\{0,7}["'\`])?|<${SECRET_KEY_NAME}>)`
+const SECRET_VALUE_LOOKAHEAD = String.raw`(?![{[(=]|arn:|~[\\/]|[a-z]:[\\/]|\\\\|(?:\.{1,2})?\/[^\s"':/]+\/[^\s"':]|[a-z][a-z0-9+.-]*:(?:[a-z][a-z0-9+.-]*:)?(?:\/\/|\\\/\\\/)|E[A-Z0-9]{1,15}: )`
+const SECRET_VALUE_BODY = String.raw`(?:(?!arn:)(?!plugin:)(?!https?:\/\/)(?!bearer\s)[A-Za-z0-9_]|[+/=%.@-](?!(?:ssh|git|gs|s3|file|s?ftp|wss?|postgres(?:ql)?|mysql|mongodb(?:\+srv)?|rediss?|amqps?):\/\/)|\\\/)+`
+const KEY_VALUE_SECRET_REGEX = new RegExp(
+  `(${SECRET_KEY_PREFIX})${SECRET_VALUE_LOOKAHEAD}(${SECRET_VALUE_BODY})`,
+  'gi',
+)
+const NON_SECRET_VALUE_WORDS = new Set([
+  'undefined',
+  'null',
+  'none',
+  'nil',
+  'true',
+  'false',
+  'bearer',
+  'basic',
+])
+
+export function redactKeyValueSecrets(text: string): string {
+  return text.replace(
+    KEY_VALUE_SECRET_REGEX,
+    (match, prefix: string, val: string) => {
+      if (
+        NON_SECRET_VALUE_WORDS.has(val.replace(/\.+$/, '').toLowerCase()) ||
+        (/[a-z]:$/i.test(prefix) && val.startsWith('\\/'))
+      ) {
+        return match
+      }
+      return `${prefix}[REDACTED]`
+    },
+  )
+}
+
 /**
  * Masks secret-looking strings in the given text.
  * Exported for testing.
  */
 export function maskSecrets(text: string): string {
-  let result = text
+  let result = redactKeyValueSecrets(text)
   for (const { pattern, replacement } of SECRET_PATTERNS) {
     result = result.replace(pattern, replacement)
   }

@@ -1697,6 +1697,26 @@ function askOther(message: string, reason: string): PermissionAskDecision {
   }
 }
 
+/**
+ * Gold `Xe` — network-shape read ask returns a non-classifier-approvable
+ * `safetyCheck` so PreToolUse hook `allow`, `bypassPermissions`, and auto mode
+ * cannot silently approve UNC/automount/kernel-redirect reads (#205).
+ */
+function askNetworkSafetyCheck(
+  message: string,
+  reason: string,
+): PermissionAskDecision {
+  return {
+    behavior: 'ask',
+    message,
+    decisionReason: {
+      type: 'safetyCheck',
+      classifierApprovable: false,
+      reason,
+    },
+  }
+}
+
 function isUntrustedUncForRead(
   spelling: string,
   trusted: ToolPermissionContext['trustedNetworkDirectories'],
@@ -1748,44 +1768,44 @@ function askNetworkReadDefense(
 ): PermissionAskDecision | null {
   const trusted = context.trustedNetworkDirectories
   if (isUntrustedNetAutomount(path, trusted)) {
-    return askOther(
+    return askNetworkSafetyCheck(
       `Claude requested permissions to read from ${path}, which is under the /net automount map and could trigger a DNS lookup and NFS mount to a remote host.`,
       'Automount -hosts path detected (defense-in-depth check)',
     )
   }
   if (isUntrustedNetworkBrowse(path, trusted)) {
-    return askOther(
+    return askNetworkSafetyCheck(
       `Claude requested permissions to read from ${path}, which is under the /Network automount browse surface and could trigger a directory-service lookup and mount to a remote host.`,
       'Automount browse surface detected (defense-in-depth check)',
     )
   }
   if (isUntrustedKernelRedirect(path, trusted)) {
-    return askOther(
+    return askNetworkSafetyCheck(
       `Claude requested permissions to read from ${path}, which is under /.vol, /.file, /.nofollow or /.resolve (paths the macOS kernel redirects) and could reach a network mount, triggering a DNS lookup and mount to a remote host.`,
       'Kernel-resolved path prefix (/.vol etc.) detected (defense-in-depth check)',
     )
   }
   for (const spelling of pathsToCheck) {
     if (isUntrustedUncForRead(spelling, trusted)) {
-      return askOther(
+      return askNetworkSafetyCheck(
         `Claude requested permissions to read from ${path}, which appears to be a UNC path that could access network resources.`,
         'UNC path detected (defense-in-depth check)',
       )
     }
     if (isUntrustedNetAutomount(spelling, trusted)) {
-      return askOther(
+      return askNetworkSafetyCheck(
         `Claude requested permissions to read from ${path}, which is under the /net automount map and could trigger a DNS lookup and NFS mount to a remote host.`,
         'Automount -hosts path detected (defense-in-depth check)',
       )
     }
     if (isUntrustedNetworkBrowse(spelling, trusted)) {
-      return askOther(
+      return askNetworkSafetyCheck(
         `Claude requested permissions to read from ${path}, which is under the /Network automount browse surface and could trigger a directory-service lookup and mount to a remote host.`,
         'Automount browse surface detected (defense-in-depth check)',
       )
     }
     if (isUntrustedKernelRedirect(spelling, trusted)) {
-      return askOther(
+      return askNetworkSafetyCheck(
         `Claude requested permissions to read from ${path}, which is under /.vol, /.file, /.nofollow or /.resolve (paths the macOS kernel redirects) and could reach a network mount, triggering a DNS lookup and mount to a remote host.`,
         'Kernel-resolved path prefix (/.vol etc.) detected (defense-in-depth check)',
       )
@@ -1795,25 +1815,25 @@ function askNetworkReadDefense(
     const pattern = input.pattern
     if (typeof pattern === 'string') {
       if (isUntrustedUncForRead(pattern, trusted)) {
-        return askOther(
+        return askNetworkSafetyCheck(
           `Claude requested permissions to glob ${pattern}, which appears to be a UNC pattern that could access network resources.`,
           'UNC glob pattern detected (defense-in-depth check)',
         )
       }
       if (isUntrustedNetAutomount(pattern, trusted)) {
-        return askOther(
+        return askNetworkSafetyCheck(
           `Claude requested permissions to glob ${pattern}, which is under the /net automount map and could trigger a DNS lookup and NFS mount to a remote host.`,
           'Automount -hosts glob pattern detected (defense-in-depth check)',
         )
       }
       if (isUntrustedNetworkBrowse(pattern, trusted)) {
-        return askOther(
+        return askNetworkSafetyCheck(
           `Claude requested permissions to glob ${pattern}, which is under the /Network automount browse surface and could trigger a directory-service lookup and mount to a remote host.`,
           'Automount browse surface glob pattern detected (defense-in-depth check)',
         )
       }
       if (isUntrustedKernelRedirect(pattern, trusted)) {
-        return askOther(
+        return askNetworkSafetyCheck(
           `Claude requested permissions to glob ${pattern}, which is under /.vol, /.file, /.nofollow or /.resolve (paths the macOS kernel redirects) and could reach a network mount, triggering a DNS lookup and mount to a remote host.`,
           'Kernel-resolved path prefix (/.vol etc.) glob pattern detected (defense-in-depth check)',
         )

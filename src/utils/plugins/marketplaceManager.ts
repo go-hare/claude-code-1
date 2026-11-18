@@ -19,7 +19,7 @@
  */
 
 import axios from 'axios'
-import { writeFile } from 'fs/promises'
+import { readlink, writeFile } from 'fs/promises'
 import isEqual from 'lodash-es/isEqual.js'
 import memoize from 'lodash-es/memoize.js'
 import {
@@ -27,6 +27,7 @@ import {
   dirname,
   isAbsolute,
   join,
+  posix,
   relative,
   resolve,
   sep,
@@ -82,12 +83,15 @@ import {
 } from './pluginArchive.js'
 import { removeAllPluginsForMarketplace } from './installedPluginsManager.js'
 import {
+  createSshProbe,
   extractHostFromSource,
   formatSourceForDisplay,
   getHostPatternsFromAllowlist,
   getStrictKnownMarketplaces,
   isSourceAllowedByPolicy,
   isSourceInBlocklist,
+  isSshAuthError,
+  shouldUseHttpsInsteadOfSsh,
 } from './marketplaceHelpers.js'
 import {
   OFFICIAL_MARKETPLACE_NAME,
@@ -119,11 +123,69 @@ import {
   type PluginMarketplace,
   type PluginMarketplaceEntry,
   ALLOWED_OFFICIAL_MARKETPLACE_NAMES,
+  formatMarketplaceLookalikeHint,
+  formatMarketplaceLookalikeUpdateRefusal,
+  isAsciiLookalikeOfficialName,
+  isBlockedOfficialName,
   PluginMarketplaceEntrySchema,
   PluginMarketplaceSchema,
   validateOfficialNameSource,
 } from './schemas.js'
 import { isEssentialTrafficOnly } from '../privacyLevel.js'
+
+/**
+ * Safe own-property lookup on KnownMarketplacesConfig so names like
+ * `constructor` or `toString` never resolve to `Object.prototype` members.
+ */
+export function getOwnMarketplaceEntry(
+  config: KnownMarketplacesConfig | undefined,
+  name: string,
+): KnownMarketplace | undefined {
+  if (!config || !Object.hasOwn(config, name)) {
+    return undefined
+  }
+  return config[name]
+}
+
+const PLUGIN_ID_HALF_RE = /^[A-Za-z0-9][-A-Za-z0-9._]*$/
+
+/**
+ * #367 (SEA `d6`): refuse adding a marketplace whose name cannot form the
+ * `@marketplace` half of a `plugin@marketplace` id unless already registered.
+ */
+export function assertMarketplaceNameCanRecordPluginIds(
+  name: string,
+  existingConfig?: KnownMarketplacesConfig,
+): void {
+  if (PLUGIN_ID_HALF_RE.test(name)) return
+  const lower = name.toLowerCase()
+  const hasExisting =
+    existingConfig !== undefined &&
+    (Object.hasOwn(existingConfig, name) ||
+      Object.keys(existingConfig).some(k => k.toLowerCase() === lower))
+  if (hasExisting) return
+  throw new Error(
+    `Cannot add marketplace "${name.slice(0, 64)}": Claude Code cannot install plugins from a marketplace with this name. Each part of a plugin id (plugin@marketplace) may use only the letters a-z and A-Z, digits, ".", "_" and "-", and must start with a letter or digit. The name is set by "name" in the marketplace's marketplace.json; ask its maintainer to change it.`,
+  )
+}
+
+/**
+ * Refuse adding a marketplace whose name is an inherited `Object.prototype`
+ * property (e.g. `constructor`, `prototype`, `toString`) unless already present.
+ */
+export function assertMarketplaceNameNotInheritedObjectMember(
+  name: string,
+  existingConfig?: KnownMarketplacesConfig,
+): void {
+  if (
+    Object.hasOwn(Object.prototype, name) &&
+    (!existingConfig || !Object.hasOwn(existingConfig, name))
+  ) {
+    throw new Error(
+      `Cannot add marketplace "${name.slice(0, 64)}": Claude Code reserves this name and cannot register a marketplace under it. The name is set by "name" in the marketplace's marketplace.json; ask its maintainer to change it.`,
+    )
+  }
+}
 
 /**
  * densable 2.1.238 — log non-fatal headersHelper authoring advisories after a
@@ -1786,6 +1848,226 @@ export async function gitPull(
  * --depth only affects not-yet-initialized submodules; existing shallow
  * submodules are unaffected.
  */
+const SUBMODULE_CMDLINE_MAX_CHARS = 24000
+const SUBMODULE_PLUGIN_PATH_MAX = 10000
+const PLUGIN_ROOT_REL_RE =
+  /(?:(?:^|[^.\w])\.|(?:\$(?:env:)?\{?|%)CLAUDE_PLUGIN_ROOT[}%]?["']?)[/\\]([^\s"'`$,;:()[\]{}\\]+)/g
+const ROOT_PLUGIN_CONFIG_FILES = [
+  '.mcp.json',
+  '.lsp.json',
+  join('hooks', 'hooks.json'),
+  join('monitors', 'monitors.json'),
+]
+
+/** Official `CGe` — normalize relative submodule/plugin path for prefix matching. */
+export function normalizeRelSubmodulePath(p: string): string | undefined {
+  const norm = posix
+    .normalize(p.replaceAll('\\', '/'))
+    .replace(/^\/+|\/+$/g, '')
+    .toLowerCase()
+  if (norm === '.' || norm === '') return ''
+  if (norm === '..' || norm.startsWith('../')) return undefined
+  return norm
+}
+
+/** Official `Hoi` — filter recorded submodules to only those overlapping needed paths. */
+export function matchSubmodulePaths(
+  recordedSubmodules: string[],
+  neededPaths: string[],
+): string[] {
+  const prefixes = neededPaths.map(p => (p === '' ? '' : `${p}/`))
+  return recordedSubmodules.filter(sub => {
+    const subPrefix = `${sub.toLowerCase()}/`
+    return prefixes.some(
+      p => p !== '' && (subPrefix.startsWith(p) || p.startsWith(subPrefix)),
+    )
+  })
+}
+
+function collectRelativePluginRefs(
+  value: unknown,
+  out: Set<string>,
+  disallowDotSelf: boolean,
+): boolean {
+  const stack: unknown[] = [value]
+  while (stack.length > 0) {
+    const cur = stack.pop()
+    if (typeof cur === 'object' && cur !== null) {
+      for (const v of Object.values(cur)) stack.push(v)
+      continue
+    }
+    if (typeof cur !== 'string') continue
+    const matches = Array.from(cur.matchAll(PLUGIN_ROOT_REL_RE), m => m[1]!)
+    const isRel = cur === '.' || /^\.[/\\]/.test(cur)
+    for (const candidate of isRel ? [...matches, cur] : matches) {
+      const norm = normalizeRelSubmodulePath(candidate)
+      if (norm === '') {
+        if (disallowDotSelf && candidate === cur) return false
+      } else if (norm !== undefined) {
+        out.add(norm)
+        if (out.size > SUBMODULE_PLUGIN_PATH_MAX) return false
+      }
+    }
+  }
+  return true
+}
+
+async function getRecordedSubmodulePaths(
+  cwd: string,
+  credentialArgs: string[],
+  env: NodeJS.ProcessEnv,
+): Promise<string[] | 'unreadable'> {
+  let gitmodulesText: string
+  try {
+    gitmodulesText = await getFsImplementation().readFile(
+      join(cwd, '.gitmodules'),
+      { encoding: 'utf8' },
+    )
+  } catch (err) {
+    if (isENOENT(err)) return []
+    return 'unreadable'
+  }
+  const res = await execFileNoThrowWithCwd(
+    gitExe(),
+    [
+      ...credentialArgs,
+      'config',
+      '--file',
+      '-',
+      '--no-includes',
+      '-z',
+      '--get-regexp',
+      '^submodule\\..*\\.path$',
+    ],
+    { cwd, env, input: gitmodulesText, timeout: getPluginGitTimeoutMs() },
+  )
+  if (res.code === 1 && !res.stderr) return []
+  if (res.code !== 0) return 'unreadable'
+  const paths = new Set<string>()
+  for (const entry of res.stdout.split('\0')) {
+    if (!entry) continue
+    const nl = entry.indexOf('\n')
+    const val = nl === -1 ? entry : entry.slice(nl + 1)
+    if (val) paths.add(val)
+  }
+  return [...paths]
+}
+
+async function getGitIndexPathsByMode(
+  cwd: string,
+  credentialArgs: string[],
+  env: NodeJS.ProcessEnv,
+  targetMode: '160000' | '120000',
+): Promise<string[] | 'unreadable'> {
+  const res = await execFileNoThrowWithCwd(
+    gitExe(),
+    [...credentialArgs, 'ls-files', '-s', '-z'],
+    { cwd, env, stdin: 'ignore', timeout: getPluginGitTimeoutMs() },
+  )
+  if (res.code !== 0) return 'unreadable'
+  const paths: string[] = []
+  for (const entry of res.stdout.split('\0')) {
+    if (!entry) continue
+    const tab = entry.indexOf('\t')
+    if (tab === -1) continue
+    const mode = entry.slice(0, entry.indexOf(' '))
+    if (mode === targetMode) {
+      paths.push(entry.slice(tab + 1))
+    }
+  }
+  return paths
+}
+
+async function readMarketplaceNeededPluginPaths(
+  cwd: string,
+): Promise<string[] | undefined> {
+  const manifestPath = join(cwd, '.claude-plugin', 'marketplace.json')
+  let raw: string
+  try {
+    raw = await getFsImplementation().readFile(manifestPath, {
+      encoding: 'utf8',
+    })
+  } catch {
+    return undefined
+  }
+  let parsed: { plugins?: Array<{ source?: unknown; [k: string]: unknown }> }
+  try {
+    parsed = jsonParse(raw) as typeof parsed
+  } catch {
+    return undefined
+  }
+  if (!parsed || !Array.isArray(parsed.plugins)) return undefined
+  const paths = new Set<string>()
+  const rootEntries: unknown[] = []
+  for (const plugin of parsed.plugins) {
+    if (!plugin || typeof plugin !== 'object') continue
+    const src = plugin.source
+    if (typeof src !== 'string') continue
+    const norm =
+      src === '.'
+        ? ''
+        : src.startsWith('./')
+          ? normalizeRelSubmodulePath(src)
+          : undefined
+    if (norm === '') {
+      rootEntries.push(plugin)
+    } else if (norm !== undefined) {
+      paths.add(norm)
+    }
+  }
+  if (rootEntries.length > 0) {
+    for (const entry of rootEntries) {
+      if (!collectRelativePluginRefs(entry, paths, true)) return undefined
+    }
+    for (const relFile of ROOT_PLUGIN_CONFIG_FILES) {
+      try {
+        const content = await getFsImplementation().readFile(
+          join(cwd, relFile),
+          { encoding: 'utf8' },
+        )
+        const obj = jsonParse(content)
+        if (!collectRelativePluginRefs(obj, paths, false)) return undefined
+      } catch {
+        // Absent or unreadable optional config file
+      }
+    }
+  }
+  if (paths.size > SUBMODULE_PLUGIN_PATH_MAX) return undefined
+  return [...paths]
+}
+
+export async function selectNeededSubmodules(
+  cwd: string,
+  recordedSubmodules: string[],
+  credentialArgs: string[],
+  env: NodeJS.ProcessEnv,
+): Promise<string[] | 'all'> {
+  const needed = await readMarketplaceNeededPluginPaths(cwd)
+  if (needed === undefined) return 'all'
+  const symlinks = await getGitIndexPathsByMode(
+    cwd,
+    credentialArgs,
+    env,
+    '120000',
+  )
+  if (symlinks === 'unreadable') return 'all'
+  const symlinkTargets: string[] = []
+  for (const linkPath of symlinks) {
+    try {
+      const target = await readlink(join(cwd, linkPath))
+      if (!isAbsolute(target)) {
+        const norm = normalizeRelSubmodulePath(
+          posix.join(posix.dirname(linkPath.replaceAll('\\', '/')), target),
+        )
+        if (norm !== undefined) symlinkTargets.push(norm)
+      }
+    } catch {
+      // Ignore unreadable symlink target
+    }
+  }
+  return matchSubmodulePaths(recordedSubmodules, [...needed, ...symlinkTargets])
+}
+
 async function gitSubmoduleUpdate(
   cwd: string,
   credentialArgs: string[],
@@ -1807,18 +2089,48 @@ async function gitSubmoduleUpdate(
         ),
   )
   if (!hasGitmodules) return
+
+  const recorded = await getRecordedSubmodulePaths(cwd, credentialArgs, env)
+  if (Array.isArray(recorded) && recorded.length === 0) return
+  const gitlinks = Array.isArray(recorded)
+    ? await getGitIndexPathsByMode(cwd, credentialArgs, env, '160000')
+    : recorded
+  const gitlinkSet = new Set(Array.isArray(gitlinks) ? gitlinks : [])
+  const intersection =
+    Array.isArray(recorded) && Array.isArray(gitlinks)
+      ? recorded.filter(s => gitlinkSet.has(s))
+      : undefined
+  const rawSelection: string[] | 'all' =
+    intersection === undefined
+      ? 'all'
+      : intersection.length === 0
+        ? []
+        : await selectNeededSubmodules(cwd, intersection, credentialArgs, env)
+  const selection: string[] | 'all' =
+    rawSelection !== 'all' &&
+    rawSelection.join(' ').length <= SUBMODULE_CMDLINE_MAX_CHARS
+      ? rawSelection
+      : 'all'
+
+  logForDebugging(
+    `Marketplace clone: ${intersection?.length ?? 'an unknown number of'} submodules recorded, fetching ${selection === 'all' ? 'all' : selection.length}`,
+  )
+  if (Array.isArray(selection) && selection.length === 0) return
+
   const result = await execFileNoThrowWithCwd(
     gitExe(),
     [
       '-c',
       'core.sshCommand=ssh -o BatchMode=yes -o StrictHostKeyChecking=yes',
       ...credentialArgs,
+      ...(selection === 'all' ? ['-c', 'submodule.active=.'] : []),
       'submodule',
       'update',
       '--init',
       '--recursive',
       '--depth',
       '1',
+      ...(selection === 'all' ? [] : ['--', ...selection]),
     ],
     { cwd, timeout: getPluginGitTimeoutMs(), stdin: 'ignore', env },
   )
@@ -2908,8 +3220,15 @@ async function loadAndCacheMarketplace(
           break
         }
 
-        // Quick check if SSH is likely to work
-        const sshConfigured = await isGitHubSshLikelyConfigured()
+        // Check if SSH should be bypassed in favor of HTTPS (non-Windows pre-clone)
+        const sshProbe = createSshProbe()
+        const useHttpsFirst = await shouldUseHttpsInsteadOfSsh(
+          sshProbe,
+          sshUrl,
+          false,
+        )
+        const sshConfigured =
+          !useHttpsFirst && (await isGitHubSshLikelyConfigured())
 
         if (sshConfigured) {
           // SSH looks good, try it first
@@ -2930,10 +3249,18 @@ async function loadAndCacheMarketplace(
             // Log SSH failure for monitoring
             logError(lastError)
 
+            // On Windows, if SSH failed with an auth/host-key error and git's
+            // SSH config points directly at github.com, fall back to HTTPS.
+            const winShouldFallback =
+              isSshAuthError(lastError.message) &&
+              (await shouldUseHttpsInsteadOfSsh(sshProbe, sshUrl, true))
+
             // SSH failed despite being configured, try HTTPS fallback
             safeCallProgress(
               onProgress,
-              `SSH clone failed, retrying with HTTPS: ${httpsUrl}`,
+              winShouldFallback
+                ? `SSH not configured, cloning via HTTPS: ${httpsUrl}`
+                : `SSH clone failed, retrying with HTTPS: ${httpsUrl}`,
             )
 
             logForDebugging(
@@ -3370,13 +3697,22 @@ export async function addMarketplaceSource(
     throw new Error(sourceValidationError)
   }
 
+  // #367: refuse marketplace names that cannot form a valid plugin@marketplace id
+  assertMarketplaceNameCanRecordPluginIds(marketplace.name, existingConfig)
+
+  // Refuse inherited Object.prototype property names (e.g. "constructor")
+  assertMarketplaceNameNotInheritedObjectMember(
+    marketplace.name,
+    existingConfig,
+  )
+
   // Name collision with different source: overwrite (settings intent wins).
   // Seed-managed entries are admin-controlled and cannot be overwritten.
   // densable ict: re-read config under lock after clone (may take a while;
   // another process may have written). Cleanup of old cache is best-effort
   // based on the disk snapshot under the same RMW.
   await updateKnownMarketplacesConfig(async config => {
-    const oldEntry = config[marketplace.name]
+    const oldEntry = getOwnMarketplaceEntry(config, marketplace.name)
     if (oldEntry) {
       const seedDir = seedDirFor(oldEntry.installLocation)
       if (seedDir) {
@@ -3491,10 +3827,10 @@ export async function removeMarketplaceSource(
   _credentials?: unknown,
 ): Promise<void> {
   const config = await loadKnownMarketplacesConfig(storageV5)
-  if (!config[name]) {
+  const entry = getOwnMarketplaceEntry(config, name)
+  if (!entry) {
     throw new Error(`Marketplace '${name}' not found`)
   }
-  const entry = config[name]
   const seedDir = seedDirFor(entry.installLocation)
   const disableHint = isMarketplaceCliRef(name)
     ? ` To stop using its plugins: claude plugin disable <plugin>@${name}`
@@ -3736,7 +4072,7 @@ export async function getMarketplaceCacheOnly(
   try {
     const content = await fs.readFile(configFile, { encoding: 'utf-8' })
     const config = jsonParse(content) as KnownMarketplacesConfig
-    const entry = config[name]
+    const entry = getOwnMarketplaceEntry(config, name)
     if (!entry) {
       return null
     }
@@ -3769,7 +4105,7 @@ export async function getMarketplaceCacheOnly(
 export const getMarketplace = memoize(
   async (name: string, storageV5?: unknown): Promise<PluginMarketplace> => {
     const config = await loadKnownMarketplacesConfig(storageV5)
-    const entry = config[name]
+    const entry = getOwnMarketplaceEntry(config, name)
 
     if (!entry) {
       throw withTelemetryMessage(
@@ -3777,6 +4113,16 @@ export const getMarketplace = memoize(
           `Marketplace '${name}' not found in configuration. Available marketplaces: ${Object.keys(config).join(', ')}`,
         ),
         'Marketplace not found in configuration',
+      )
+    }
+    if (isBlockedOfficialName(name)) {
+      const prefix = isAsciiLookalikeOfficialName(name)
+        ? `Claude Code refuses the marketplace name "${name}": it looks like one of Anthropic's own`
+        : `Failed to load marketplace "${name}": its name is reserved or non-ASCII`
+      throw new Error(
+        `${prefix}. ${formatMarketplaceLookalikeHint(name, {
+          declaredInSettings: entry.source.source === 'settings',
+        })}`,
       )
     }
 
@@ -3920,7 +4266,7 @@ export async function getPluginByIdCacheOnly(
   try {
     const content = await fs.readFile(configFile, { encoding: 'utf-8' })
     const config = jsonParse(content) as KnownMarketplacesConfig
-    const marketplaceConfig = config[marketplaceName]
+    const marketplaceConfig = getOwnMarketplaceEntry(config, marketplaceName)
 
     if (!marketplaceConfig) {
       return null
@@ -3974,7 +4320,7 @@ export async function getPluginById(
 
   try {
     const config = await loadKnownMarketplacesConfig(storageV5)
-    const marketplaceConfig = config[marketplaceName]
+    const marketplaceConfig = getOwnMarketplaceEntry(config, marketplaceName)
     if (!marketplaceConfig) {
       return null
     }
@@ -4289,11 +4635,24 @@ export async function refreshMarketplace(
   storageV5?: unknown,
 ): Promise<void> {
   const config = await loadKnownMarketplacesConfig(storageV5)
-  const entry = config[name]
+  const entry = getOwnMarketplaceEntry(config, name)
 
   if (!entry) {
     throw new Error(
       `Marketplace '${name}' not found. Available marketplaces: ${Object.keys(config).join(', ')}`,
+    )
+  }
+
+  if (isBlockedOfficialName(name)) {
+    if (isAsciiLookalikeOfficialName(name)) {
+      throw new Error(
+        formatMarketplaceLookalikeUpdateRefusal(
+          entry.source.source === 'settings',
+        ),
+      )
+    }
+    throw new Error(
+      `Failed to load marketplace "${name}": its name looks like one of Anthropic's own`,
     )
   }
 
@@ -4578,7 +4937,7 @@ export async function setMarketplaceAutoUpdate(
   let availableKeys: string[] = []
   const wrote = await updateKnownMarketplacesConfig(config => {
     availableKeys = Object.keys(config)
-    const entry = config[name]
+    const entry = getOwnMarketplaceEntry(config, name)
 
     if (!entry) {
       throw new Error(

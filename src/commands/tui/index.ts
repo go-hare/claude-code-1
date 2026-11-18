@@ -240,8 +240,27 @@ export function getTuiRelaunchSavedBlockerMessage(
 export const SCREEN_READER_TUI_NO_EFFECT =
   'Screen-reader mode always uses the classic renderer, so the tui setting has no effect while it is active.'
 
-/** Official gRr.catch copy after persist. */
-export function formatTuiRelaunchFailedMessage(detail: string): string {
+export const TUI_RELAUNCH_FAILED_OFF_BOX =
+  "Couldn't switch renderers (detail withheld on this connection). The setting was saved; restart Claude Code to apply it."
+
+/** Official gRr.catch / Rsr copy after persist. */
+export function formatTuiRelaunchFailedMessage(
+  detail: string,
+  withholdDetail?: boolean,
+): string {
+  if (withholdDetail === undefined) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getIsNonInteractiveSession } =
+        require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js')
+      withholdDetail = getIsNonInteractiveSession()
+    } catch {
+      withholdDetail = false
+    }
+  }
+  if (withholdDetail) {
+    return TUI_RELAUNCH_FAILED_OFF_BOX
+  }
   return `Couldn't switch renderers — ${detail}. The setting was saved; restart Claude Code to apply it.`
 }
 
@@ -263,8 +282,13 @@ async function applyTuiRelaunchAfterSwitch(
     const { acceptTuiRelaunch } =
       require('../../utils/cliRelaunch.js') as typeof import('../../utils/cliRelaunch.js')
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getSessionId } =
+    const { getChromeFlagOverride, getSessionId } =
       require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js')
+    const chromeFlag = getChromeFlagOverride()
+    const chromeExtraArgs =
+      chromeFlag !== undefined
+        ? [chromeFlag ? '--chrome' : '--no-chrome']
+        : undefined
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { transcriptHasBytes } =
       require('../../utils/sessionStorage.js') as typeof import('../../utils/sessionStorage.js')
@@ -287,6 +311,7 @@ async function applyTuiRelaunchAfterSwitch(
         target,
         sessionId: getSessionId(),
         hasNonEmptyTranscript,
+        extraArgs: chromeExtraArgs,
         toolPermissionContext: carry?.toolPermissionContext,
         effort: carry?.effort,
         proactivity: {

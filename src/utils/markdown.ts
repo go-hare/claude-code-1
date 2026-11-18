@@ -4,7 +4,7 @@ import stripAnsi from 'strip-ansi'
 import { color } from '@anthropic/ink'
 import { BLOCKQUOTE_BAR } from '../constants/figures.js'
 import { stringWidth, supportsHyperlinks } from '@anthropic/ink'
-import { createHyperlink } from '../utils/hyperlink.js'
+import { createHyperlink, HYPERLINK_STYLE_RESET } from '../utils/hyperlink.js'
 import { sanitizeMarkdownHref } from './markdownFileUrl.js'
 import type { CliHighlight } from './cliHighlight.js'
 import { logForDebugging } from './debug.js'
@@ -71,6 +71,27 @@ export function stripMarkdownHrefInvisibles(href: string): string {
       return cp !== 10697 && !isMarkdownInvisibleCodePoint(cp)
     })
     .join('')
+}
+
+// Official 2.1.295 (#392): Ue / Wt / $t — strip raw OSC 8 hyperlink sequences
+// and stray 8-bit/ESC introducers so untrusted replies cannot draw hidden
+// clickable links.
+const RAW_OSC8_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional OSC 8 match
+  /\x1b\]8;[^;\x07\x1b]*;[^\x07\x1b]*(?:\x07|\x1b\\)/g
+const STRAY_OSC_C1_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional C1 OSC introducer match
+  /\x9d/g
+const NON_CSI_ESC_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional non-CSI ESC match
+  /\x1b(?!\[)/g
+
+export function stripRawOsc8Sequences(text: string): string {
+  if (!text.includes('\x1b') && !text.includes('\x9d')) return text
+  return text
+    .replace(RAW_OSC8_RE, '')
+    .replace(STRAY_OSC_C1_RE, '')
+    .replace(NON_CSI_ESC_RE, '')
 }
 
 /**
@@ -159,8 +180,64 @@ export function markdownTableHasExtraColumns(
   return false
 }
 
-// densable `N6m` — stock marked Tokenizer.table before j6m override.
+// densable `N6m` — stock marked Tokenizer prototypes before overrides.
 const stockMarkdownTable = Tokenizer.prototype.table
+const stockMarkdownBlockquote = Tokenizer.prototype.blockquote
+const stockMarkdownList = Tokenizer.prototype.list
+const stockMarkdownEmStrong = Tokenizer.prototype.emStrong
+
+/**
+ * Official 2.1.295 (#409) `It()` / `F` — cap recursive lexer nesting
+ * (blockquote/list/emStrong) at 100 levels so deeply nested quotes do not
+ * freeze the terminal or exhaust memory.
+ */
+export const MAX_LEXER_NESTING_DEPTH = 100
+const lexerNestingDepths = new WeakMap<object, number>()
+
+function isAtMaxLexerNesting(lexer: object): boolean {
+  return (lexerNestingDepths.get(lexer) ?? 0) >= MAX_LEXER_NESTING_DEPTH
+}
+
+function lexAtLevel<T>(lexer: object, fn: () => T): T | undefined {
+  if (isAtMaxLexerNesting(lexer)) return undefined
+  const depth = lexerNestingDepths.get(lexer) ?? 0
+  lexerNestingDepths.set(lexer, depth + 1)
+  try {
+    return fn()
+  } finally {
+    lexerNestingDepths.set(lexer, depth)
+  }
+}
+
+const NESTED_BLOCK_MARKER_RE = /^[ \t>]+/gm
+const INLINE_WHITESPACE_RUN_RE = /[ \t]+/g
+const TRIPLE_NEWLINE_RE = /\n{3,}/g
+
+function flattenNestedBlockMarkers(src: string): string {
+  return src
+    .replace(NESTED_BLOCK_MARKER_RE, m =>
+      m.replace(INLINE_WHITESPACE_RUN_RE, ' ').trimStart(),
+    )
+    .replace(TRIPLE_NEWLINE_RE, '\n\n')
+    .trimEnd()
+}
+
+function fallbackAtMaxNesting(
+  tokenizer: Tokenizer,
+  src: string,
+): { raw: string; text: string; tokens: Token[] } | undefined {
+  if (
+    !isAtMaxLexerNesting(tokenizer.lexer) ||
+    !(
+      tokenizer.rules.block.list.test(src) ||
+      tokenizer.rules.other.blockquoteStart.test(src)
+    )
+  ) {
+    return undefined
+  }
+  const text = flattenNestedBlockMarkers(src)
+  return { raw: src, text, tokens: tokenizer.lexer.inline(text) }
+}
 
 let markedConfigured = false
 
@@ -169,6 +246,7 @@ export type FormatTokenOptions = {
   glueProse?: boolean
   screenReader?: boolean
   promptMode?: boolean
+  quotesAround?: number
 }
 
 export function configureMarked(): void {
@@ -191,6 +269,38 @@ export function configureMarked(): void {
               return undefined
             },
           }),
+      blockquote(this: Tokenizer, src: string) {
+        return this.rules.other.blockquoteStart.test(src)
+          ? lexAtLevel(this.lexer, () =>
+              stockMarkdownBlockquote.call(this, src),
+            )
+          : undefined
+      },
+      list(this: Tokenizer, src: string) {
+        return this.rules.block.list.test(src)
+          ? lexAtLevel(this.lexer, () => stockMarkdownList.call(this, src))
+          : undefined
+      },
+      emStrong(
+        this: Tokenizer,
+        src: string,
+        maskedSrc: string,
+        prevChar?: string,
+      ) {
+        return this.rules.inline.emStrongLDelim.test(src)
+          ? lexAtLevel(this.lexer, () =>
+              stockMarkdownEmStrong.call(this, src, maskedSrc, prevChar ?? ''),
+            )
+          : undefined
+      },
+      paragraph(this: Tokenizer, src: string) {
+        const flattened = fallbackAtMaxNesting(this, src)
+        return flattened ? { type: 'paragraph', ...flattened } : false
+      },
+      text(this: Tokenizer, src: string) {
+        const flattened = fallbackAtMaxNesting(this, src)
+        return flattened ? { type: 'text', ...flattened } : false
+      },
       def() {
         return undefined
       },
@@ -231,6 +341,113 @@ export function applyMarkdown(
     .trim()
 }
 
+/**
+ * Official 2.1.295 (#409) `At = 6`, `Ot = 16`, `Pe`/`Ce`/`Pt`/`Nt`/`Ct` —
+ * iterative blockquote renderer that avoids O(depth * lines) repeated ANSI
+ * split/re-join and caps rendered quote bar depth at `MAX_QUOTE_BARS` (16).
+ */
+export const MAX_ITALIC_QUOTE_DEPTH = 6
+export const MAX_QUOTE_BARS = 16
+
+type QuoteChunk = { rows: string; isDone: boolean }
+
+const asPendingChunk = (rows: string): QuoteChunk => ({ rows, isDone: false })
+const ensureTrailingNewline = (s: string): string =>
+  s === '' || s.endsWith(EOL) ? s : s + EOL
+const nonEmptyPending = (s: string): QuoteChunk[] =>
+  s === '' ? [] : [asPendingChunk(s)]
+const hasVisibleContent = (line: string): boolean =>
+  stripAnsi(line).trim() !== ''
+
+function wrapSingleQuoteBar(rows: string): QuoteChunk {
+  const bar = chalk.dim(BLOCKQUOTE_BAR)
+  return asPendingChunk(
+    rows
+      .split(EOL)
+      .map(line =>
+        hasVisibleContent(line) ? `${bar} ${chalk.italic(line)}` : line,
+      )
+      .join(EOL),
+  )
+}
+
+function buildQuoteBarsPrefix(count: number): string {
+  const bars = `${BLOCKQUOTE_BAR} `.repeat(Math.max(0, count)).trimEnd()
+  return bars === '' ? '' : `${chalk.dim(bars)} `
+}
+
+function wrapDeepQuoteBars(
+  rows: string,
+  depth: number,
+  around: number,
+): QuoteChunk {
+  const barCount = Math.min(depth + 1, MAX_QUOTE_BARS) - around
+  const isOutermost = around === 0
+  const outerPrefix = buildQuoteBarsPrefix(isOutermost ? 1 : barCount)
+  const innerPrefix = buildQuoteBarsPrefix(isOutermost ? barCount - 1 : 0)
+  const styleInner = isOutermost ? chalk.italic : (s: string) => s
+  return {
+    rows: ensureTrailingNewline(rows)
+      .split(EOL)
+      .map(line =>
+        hasVisibleContent(line)
+          ? outerPrefix + styleInner(innerPrefix + line)
+          : line,
+      )
+      .join(EOL),
+    isDone: true,
+  }
+}
+
+function flushAdjacentPendingChunks(chunks: QuoteChunk[]): QuoteChunk[] {
+  const out: QuoteChunk[] = []
+  let pending = ''
+  for (const chunk of chunks) {
+    if (chunk.isDone) {
+      out.push(...nonEmptyPending(ensureTrailingNewline(pending)), chunk)
+      pending = ''
+    } else {
+      pending += chunk.rows
+    }
+  }
+  return [...out, ...nonEmptyPending(pending)]
+}
+
+function renderBlockquoteLevel(
+  tokens: Token[],
+  depth: number,
+  ctx: {
+    around: number
+    draw: (token: Token, quotesAround: number) => string
+  },
+): QuoteChunk[] {
+  const wrap =
+    depth < MAX_ITALIC_QUOTE_DEPTH
+      ? wrapSingleQuoteBar
+      : (rows: string) => wrapDeepQuoteBars(rows, depth, ctx.around)
+  const children = flushAdjacentPendingChunks(
+    tokens.flatMap(child =>
+      child.type === 'blockquote'
+        ? renderBlockquoteLevel(child.tokens ?? [], depth + 1, ctx)
+        : [asPendingChunk(ctx.draw(child, depth + 1))],
+    ),
+  )
+  return children.map(chunk => (chunk.isDone ? chunk : wrap(chunk.rows)))
+}
+
+function renderBlockquoteTokens(
+  tokens: Token[],
+  quotesAround: number,
+  draw: (token: Token, quotesAround: number) => string,
+): string {
+  return renderBlockquoteLevel(tokens, quotesAround, {
+    around: quotesAround,
+    draw,
+  })
+    .map(chunk => chunk.rows)
+    .join('')
+}
+
 export function formatToken(
   token: Token,
   theme: ThemeName,
@@ -246,6 +463,7 @@ export function formatToken(
   const glueProse = resolved.glueProse ?? false
   const screenReader = resolved.screenReader ?? false
   const promptMode = resolved.promptMode ?? false
+  const quotesAround = resolved.quotesAround ?? 0
   const childOpts = (
     overrides: FormatTokenOptions = {},
   ): FormatTokenOptions => ({
@@ -258,18 +476,20 @@ export function formatToken(
 
   switch (token.type) {
     case 'blockquote': {
-      const inner = (token.tokens ?? [])
-        .map(_ => formatToken(_, theme, 0, null, null, highlight, childOpts()))
-        .join('')
-      // Prefix each line with a dim vertical bar. Keep text italic but at
-      // normal brightness — chalk.dim is nearly invisible on dark themes.
-      const bar = chalk.dim(BLOCKQUOTE_BAR)
-      return inner
-        .split(EOL)
-        .map(line =>
-          stripAnsi(line).trim() ? `${bar} ${chalk.italic(line)}` : line,
-        )
-        .join(EOL)
+      return renderBlockquoteTokens(
+        token.tokens ?? [],
+        quotesAround,
+        (child, nextQuotesAround) =>
+          formatToken(
+            child,
+            theme,
+            0,
+            null,
+            null,
+            highlight,
+            childOpts({ quotesAround: nextQuotesAround }),
+          ),
+      )
     }
     case 'code': {
       if (!highlight) {
@@ -289,7 +509,7 @@ export function formatToken(
     }
     case 'codespan': {
       // inline code
-      return color('permission', theme)(token.text)
+      return color('permission', theme)(stripRawOsc8Sequences(token.text))
     }
     case 'em':
       return chalk.italic(
@@ -379,10 +599,14 @@ export function formatToken(
         plainLinkText !== token.href &&
         plainLinkText !== href
       ) {
-        return createHyperlink(href, linkText)
+        return createHyperlink(href, stripRawOsc8Sequences(linkText), {
+          shownUrlStart: HYPERLINK_STYLE_RESET,
+        })
       }
       // When the display text matches the URL (or is empty), just show the URL
-      return createHyperlink(href)
+      return createHyperlink(href, undefined, {
+        shownUrlStart: HYPERLINK_STYLE_RESET,
+      })
     }
     case 'list': {
       return token.items
@@ -483,7 +707,7 @@ export function formatToken(
         // in an OSC 8 hyperlink. Linkifying here would nest a second OSC 8
         // sequence, and terminals honor the innermost one, overriding the
         // link's actual href.
-        return token.text
+        return stripRawOsc8Sequences(token.text)
       }
       if (parent?.type === 'list_item') {
         // densable: marker lives on list_item; text only emits body (+ task box).
@@ -502,7 +726,10 @@ export function formatToken(
               )
               .join('')
           : protectOrderedListMarkers(
-              linkifyIssueReferences(token.text, promptMode),
+              linkifyIssueReferences(
+                stripRawOsc8Sequences(token.text),
+                promptMode,
+              ),
             )
         const listItem = parent as Tokens.ListItem
         const firstContent = listItem.tokens?.find(
@@ -514,7 +741,10 @@ export function formatToken(
         return `${taskPrefix}${body}${EOL}`
       }
       {
-        const linked = linkifyIssueReferences(token.text, promptMode)
+        const linked = linkifyIssueReferences(
+          stripRawOsc8Sequences(token.text),
+          promptMode,
+        )
         return glueProse ? protectOrderedListMarkers(linked) : linked
       }
     case 'checkbox':

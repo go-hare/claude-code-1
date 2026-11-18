@@ -1,9 +1,18 @@
+import { readdir, readFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { join as posixJoin } from 'path/posix'
+import { getSessionId } from 'src/bootstrap/state.js'
+import { logForDebugging } from '../debug.js'
+import {
+  getClaudeConfigHomeDir,
+  shouldStripDaemonForceColor,
+} from '../envUtils.js'
+import { getErrnoCode } from '../errors.js'
 import { getPlatform } from '../platform.js'
 import { buildPowerShellInvocationFlags } from '../powershellExecutionPolicy.js'
 import { getSessionEnvVars } from '../sessionEnvVars.js'
+import { getSettings_DEPRECATED } from '../settings/settings.js'
 import type { ShellProvider } from './shellProvider.js'
 
 /**
@@ -13,6 +22,101 @@ import type { ShellProvider } from './shellProvider.js'
  */
 export const POWERSHELL_ENCODING_PREAMBLE =
   "try { $PSDefaultParameterValues['Out-File:Encoding'] = 'utf8' } catch {}; if ($ExecutionContext.SessionState.LanguageMode -eq 'FullLanguage') { try { $OutputEncoding = [System.Text.UTF8Encoding]::new() } catch {}; if ($null -ne $PSStyle) { try { $PSStyle.OutputRendering = 'PlainText' } catch {} } }; "
+
+const PLAIN_ASSIGNMENT_RE =
+  /^(?:\s*(?:#.*)?|(?:export +|declare -x +)?([A-Za-z_]\w*)=((?:[\w@%+=:,./-]|'[^'\0]*'|"(?:[^"\\$`\0]|\\[^\0])*")*))$/
+const UNQUOTE_RE = /'([^']*)'|"((?:[^"\\]|\\.)*)"/g
+const HAS_PATH_SEP_RE = /[/\\]/
+const HOOK_ENV_FILE_RE =
+  /^(setup|sessionstart|cwdchanged|filechanged)-hook-(\d+)\.sh$/
+const HOOK_PHASE_ORDER: Record<string, number> = {
+  setup: 0,
+  sessionstart: 1,
+  cwdchanged: 2,
+  filechanged: 3,
+}
+
+/**
+ * #521 SEA `E7i`: Parse a shell env file when it holds only plain assignments
+ * (`VAR=val`, `export VAR=val`, `declare -x VAR=val`, blanks, or `#` comments).
+ * Returns an empty Map if any line contains arbitrary shell syntax.
+ */
+export function parsePlainEnvAssignments(
+  script: string,
+  platform: string = getPlatform(),
+): Map<string, string> {
+  const result = new Map<string, string>()
+  for (const rawLine of script.split('\n')) {
+    const match = PLAIN_ASSIGNMENT_RE.exec(rawLine.trimEnd())
+    if (match === null) {
+      logForDebugging('Session environment is not all plain assignments')
+      return new Map()
+    }
+    const [, key, rawVal] = match
+    if (key === undefined || rawVal === undefined) continue
+    const val = rawVal.replace(
+      UNQUOTE_RE,
+      (_, single: string | undefined, dbl: string | undefined) =>
+        single ?? dbl?.replace(/\\([$`"\\])/g, '$1') ?? '',
+    )
+    if (platform === 'windows' && HAS_PATH_SEP_RE.test(val)) {
+      result.delete(key)
+    } else {
+      result.set(key, val)
+    }
+  }
+  return result
+}
+
+async function readPlainSessionEnvAssignments(): Promise<Map<string, string>> {
+  const parts: string[] = []
+  const envFile = process.env.CLAUDE_ENV_FILE
+  if (envFile) {
+    try {
+      const content = (await readFile(envFile, 'utf8')).trim()
+      if (content) parts.push(content)
+    } catch (e) {
+      if (getErrnoCode(e) !== 'ENOENT') {
+        logForDebugging(`Failed to read CLAUDE_ENV_FILE: ${String(e)}`)
+      }
+    }
+  }
+  const sessionEnvDir = join(
+    getClaudeConfigHomeDir(),
+    'session-env',
+    getSessionId(),
+  )
+  try {
+    const files = (await readdir(sessionEnvDir))
+      .filter(f => HOOK_ENV_FILE_RE.test(f))
+      .sort((a, b) => {
+        const ma = a.match(HOOK_ENV_FILE_RE)
+        const mb = b.match(HOOK_ENV_FILE_RE)
+        const pa = HOOK_PHASE_ORDER[ma?.[1] ?? ''] ?? 99
+        const pb = HOOK_PHASE_ORDER[mb?.[1] ?? ''] ?? 99
+        if (pa !== pb) return pa - pb
+        return parseInt(ma?.[2] || '0', 10) - parseInt(mb?.[2] || '0', 10)
+      })
+    for (const file of files) {
+      try {
+        const content = (
+          await readFile(join(sessionEnvDir, file), 'utf8')
+        ).trim()
+        if (content) parts.push(content)
+      } catch (e) {
+        if (getErrnoCode(e) !== 'ENOENT') {
+          logForDebugging(`Failed to read hook env file ${file}: ${String(e)}`)
+        }
+      }
+    }
+  } catch (e) {
+    if (getErrnoCode(e) !== 'ENOENT') {
+      logForDebugging(`Failed to list session-env dir: ${String(e)}`)
+    }
+  }
+  if (parts.length === 0) return new Map()
+  return parsePlainEnvAssignments(parts.join('\n'))
+}
 
 /**
  * densable Arg — default child env for PowerShell tool (#22 Python stdin).
@@ -146,21 +250,31 @@ export function createPowerShellProvider(shellPath: string): ShellProvider {
 
     async getEnvironmentOverrides(): Promise<Record<string, string>> {
       const env: Record<string, string> = {}
+      const settingsEnv = getSettings_DEPRECATED()?.env ?? {}
+      // #521 SEA E7i: Load plain env assignments from CLAUDE_ENV_FILE / hooks
+      // before checking FORCE_COLOR and before /env overrides.
+      const plainHookEnv = await readPlainSessionEnvAssignments()
       // densable Arg defaults — only when not already present on process.env.
-      // Skip NO_COLOR when FORCE_COLOR is set (densable i check).
+      // #383 SEA: Skip NO_COLOR when FORCE_COLOR is explicitly set (ignoring
+      // daemon-injected FORCE_COLOR=3 unless configured in settings.env).
       const forceColorPresent =
-        process.env.FORCE_COLOR !== undefined ||
+        (process.env.FORCE_COLOR !== undefined &&
+          !shouldStripDaemonForceColor(settingsEnv)) ||
+        plainHookEnv.has('FORCE_COLOR') ||
         getSessionEnvVars().has('FORCE_COLOR')
       for (const [key, value] of Object.entries(POWERSHELL_DEFAULT_ENV)) {
         if (process.env[key] !== undefined) continue
         if (key === 'NO_COLOR' && forceColorPresent) continue
         env[key] = value
       }
+      for (const [key, value] of plainHookEnv) {
+        env[key] = value
+      }
       // Apply session env vars set via /env (child processes only, not
       // the REPL). Without this, `/env PATH=...` affects Bash tool
       // commands but not PowerShell — so PyCharm users with a stripped
       // PATH can't self-rescue.
-      // Ordering: session vars after Arg so /env can override defaults;
+      // Ordering: session vars after Arg & CLAUDE_ENV_FILE so /env can override;
       // sandbox TMPDIR still wins last.
       for (const [key, value] of getSessionEnvVars()) {
         env[key] = value

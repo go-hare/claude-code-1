@@ -1477,6 +1477,10 @@ export async function cleanupOldMessageFilesInBackground(): Promise<void> {
   // Fe(e): parent storageV5 from pin when hover-rest handed one.
   const { getPinnedStorageV5 } = await import('./storageV5/index.js')
   await cleanupJobsRetentionSweep(getPinnedStorageV5())
+  const { sweepSeedAdminFromCleanup } = await import(
+    './teleport/seedGitAdmin.js'
+  )
+  await sweepSeedAdminFromCleanup()
   if (process.env.USER_TYPE === 'ant') {
     await cleanupNpmCacheForAnthropicPackages()
   }

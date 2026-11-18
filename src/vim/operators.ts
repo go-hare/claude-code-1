@@ -5,7 +5,11 @@
  */
 
 import { Cursor, isVimWhitespace } from '@anthropic/ink'
-import { firstGrapheme, lastGrapheme } from '../utils/intl.js'
+import {
+  firstGrapheme,
+  getGraphemeSegmenter,
+  lastGrapheme,
+} from '../utils/intl.js'
 import { countCharInString } from '../utils/stringUtils.js'
 import {
   isInclusiveMotion,
@@ -254,6 +258,7 @@ export function executeReplace(
  * Execute toggle case (~ command).
  */
 export function executeToggleCase(count: number, ctx: OperatorContext): void {
+  const columns = ctx.cursor.measuredText.columns
   const startOffset = ctx.cursor.offset
 
   if (startOffset >= ctx.text.length) return
@@ -262,14 +267,19 @@ export function executeToggleCase(count: number, ctx: OperatorContext): void {
   let offset = startOffset
   let toggled = 0
 
-  while (offset < newText.length && toggled < count) {
+  while (
+    offset < newText.length &&
+    newText[offset] !== '\n' &&
+    toggled < count
+  ) {
     const grapheme = firstGrapheme(newText.slice(offset))
     const graphemeLen = grapheme.length
 
-    const toggledGrapheme =
+    const toggledGrapheme = (
       grapheme === grapheme.toUpperCase()
         ? grapheme.toLowerCase()
         : grapheme.toUpperCase()
+    ).normalize('NFC')
 
     newText =
       newText.slice(0, offset) +
@@ -279,10 +289,11 @@ export function executeToggleCase(count: number, ctx: OperatorContext): void {
     toggled++
   }
 
+  if (toggled === 0) return
+
+  const newCursor = Cursor.fromText(newText, columns)
   ctx.setText(newText)
-  // Cursor moves to position after the last toggled character
-  // At end of line, cursor can be at the "end" position
-  ctx.setOffset(offset)
+  ctx.setOffset(clampVimNormalOffset(newCursor, offset))
   ctx.recordChange({ type: 'toggleCase', count })
 }
 
@@ -424,7 +435,7 @@ export function executeIndent(
 
   const newText = lines.join('\n')
   const currentLineText = lines[currentLine] ?? ''
-  const firstNonBlank = (currentLineText.match(/^\s*/)?.[0] ?? '').length
+  const firstNonBlank = firstNonBlankIndex(currentLineText)
 
   ctx.setText(newText)
   ctx.setOffset(getLineStartOffset(lines, currentLine) + firstNonBlank)
@@ -469,7 +480,7 @@ function recordNonYankChange(
   ctx: OperatorContext,
   change: Extract<
     RecordedChange,
-    { type: 'operator' | 'operatorFind' | 'operatorTextObj' }
+    { type: 'operator' | 'operatorFind' | 'operatorTextObj' | 'visualOp' }
   >,
 ): void {
   if (change.op !== 'yank') {
@@ -656,4 +667,205 @@ export function executeOperatorGg(
   const range = getOperatorRange(ctx.cursor, target, 'gg', op, count)
   applyOperator(op, range.from, range.to, ctx, range.linewise)
   recordNonYankChange(ctx, { type: 'operator', op, motion: 'gg', count })
+}
+
+// ============================================================================
+// Visual Mode & Clamping Helpers (densable 2.1.292-295)
+// ============================================================================
+
+/**
+ * densable `cbe` / `$te`: clamp a vim NORMAL offset so it never lands on a
+ * trailing `\n` (unless the line is empty) or past the end of a non-newline-
+ * terminated buffer, and never lands inside a placeholder.
+ */
+export function clampVimNormalOffset(
+  cursor: Cursor,
+  offset: number,
+  text: string = cursor.text,
+): number {
+  let clamped = offset
+  if (text[clamped] === '\n' && clamped > 0 && text[clamped - 1] !== '\n') {
+    clamped = clamped - (lastGrapheme(text.slice(0, clamped)).length || 1)
+  } else if (clamped >= text.length && !text.endsWith('\n')) {
+    clamped = Math.max(0, text.length - (lastGrapheme(text).length || 1))
+  }
+  return cursor.snapOutOfPlaceholder(clamped, 'start') === clamped
+    ? clamped
+    : offset
+}
+
+/**
+ * densable `ge`: index of first non-blank grapheme in a line, or the index of
+ * the last blank grapheme if the line is all spaces/tabs (0 for empty line).
+ * Prevents `>>`/`<<` on an all-whitespace line from placing the cursor past
+ * the end of the line.
+ */
+export function firstNonBlankIndex(line: string): number {
+  let idx = 0
+  for (const { segment, index } of getGraphemeSegmenter().segment(line)) {
+    idx = index
+    if (segment !== ' ' && segment !== '\t') break
+  }
+  return idx
+}
+
+function findLogicalLineStartInText(text: string, offset: number): number {
+  if (offset === 0) return 0
+  const prev = text.lastIndexOf('\n', offset - 1)
+  return prev === -1 ? 0 : prev + 1
+}
+
+function getVisualRange(
+  anchor: number,
+  cursor: Cursor,
+  linewise: boolean,
+): { from: number; to: number } {
+  const start = Math.min(anchor, cursor.offset)
+  const end = Math.max(anchor, cursor.offset)
+  if (!linewise) {
+    const endLine = cursor.text.indexOf('\n', end)
+    const nextOffset =
+      end < cursor.text.length && endLine !== end
+        ? cursor.measuredText.nextOffset(end)
+        : end
+    return { from: start, to: nextOffset }
+  }
+  const from = findLogicalLineStartInText(cursor.text, start)
+  const nlAfterEnd = cursor.text.indexOf('\n', end)
+  const to = nlAfterEnd === -1 ? cursor.text.length : nlAfterEnd + 1
+  return { from, to }
+}
+
+function countVisualSpan(slice: string, linewise: boolean): number {
+  if (linewise) {
+    const newlines = countCharInString(slice, '\n')
+    return slice.endsWith('\n') ? newlines : newlines + 1
+  }
+  let count = 0
+  for (const _ of getGraphemeSegmenter().segment(slice)) count++
+  return count
+}
+
+function getSpanRange(
+  ctx: OperatorContext,
+  span: number,
+  linewise: boolean,
+): { from: number; to: number } {
+  const text = ctx.text
+  if (linewise) {
+    const from = findLogicalLineStartInText(text, ctx.cursor.offset)
+    let to = from
+    for (let i = 0; i < span; i++) {
+      const nl = text.indexOf('\n', to)
+      if (nl === -1) {
+        to = text.length
+        break
+      }
+      to = nl + 1
+    }
+    return { from, to }
+  }
+  const from = ctx.cursor.offset
+  let to = from
+  for (let i = 0; i < span && to < text.length; i++) {
+    to = ctx.cursor.measuredText.nextOffset(to)
+  }
+  return { from, to }
+}
+
+function applyVisualRangeOp(
+  op: Operator,
+  from: number,
+  to: number,
+  ctx: OperatorContext,
+  linewise: boolean,
+  trailingEmptyLine: boolean = false,
+): void {
+  if (linewise && op === 'change') {
+    const raw = ctx.text.slice(from, to)
+    const reg = raw.endsWith('\n') ? raw : raw + '\n'
+    ctx.setRegister(reg, true)
+    const before = ctx.text.slice(0, from)
+    const after = ctx.text.slice(to)
+    const needNewline =
+      after !== '' || (raw.endsWith('\n') && !trailingEmptyLine)
+    ctx.setText(before + (needNewline ? '\n' : '') + after)
+    ctx.enterInsert(from)
+    return
+  }
+
+  if (linewise && op === 'delete') {
+    const raw = ctx.text.slice(from, to)
+    const reg = raw.endsWith('\n') ? raw : raw + '\n'
+    ctx.setRegister(reg, true)
+    let cutFrom = from
+    if (to === ctx.text.length && from > 0 && ctx.text[from - 1] === '\n') {
+      cutFrom -= 1
+    }
+    const hasFollowing = to < ctx.text.length
+    const newText = ctx.text.slice(0, cutFrom) + ctx.text.slice(to)
+    ctx.setText(newText)
+
+    const lineStart = hasFollowing
+      ? from
+      : findLogicalLineStartInText(newText, newText.length)
+    const lineEndIdx = newText.indexOf('\n', lineStart)
+    const lineEnd = lineEndIdx === -1 ? newText.length : lineEndIdx
+    const lineText = newText.slice(lineStart, lineEnd)
+    const lineCursor = Cursor.fromText(
+      lineText,
+      ctx.cursor.measuredText.columns + 1,
+    )
+    const firstNonBlank = firstNonBlankIndex(lineText)
+    const landing =
+      lineCursor.placeholderStartingAt(firstNonBlank) === null
+        ? firstNonBlank
+        : firstNonBlank > 0 || hasFollowing
+          ? 0
+          : clampVimNormalOffset(lineCursor, lineText.length)
+    const onTrailingPlaceholder =
+      !hasFollowing && lineCursor.placeholderStartingAt(landing) !== null
+    ctx.setOffset(
+      onTrailingPlaceholder
+        ? clampVimNormalOffset(ctx.cursor, newText.length, newText)
+        : lineStart + landing,
+    )
+    return
+  }
+
+  applyOperator(op, from, to, ctx, linewise)
+}
+
+/**
+ * Execute a visual mode operator (e.g. `V` + `d`) and record for `.` repeat.
+ */
+export function executeVisualOp(
+  op: Operator,
+  anchor: number,
+  ctx: OperatorContext,
+  linewise: boolean,
+): void {
+  const { from, to } = getVisualRange(anchor, ctx.cursor, linewise)
+  const span = countVisualSpan(ctx.text.slice(from, to), linewise)
+  const trailingEmpty =
+    linewise &&
+    ctx.text.endsWith('\n') &&
+    Math.max(anchor, ctx.cursor.offset) >= ctx.text.length
+  applyVisualRangeOp(op, from, to, ctx, linewise, trailingEmpty)
+  recordNonYankChange(ctx, { type: 'visualOp', op, span, linewise })
+}
+
+/**
+ * Repeat a recorded visual mode operator (`.` after `V` + `d`, etc.) on the
+ * current cursor's line/position.
+ */
+export function repeatVisualOp(
+  op: Operator,
+  span: number,
+  linewise: boolean,
+  ctx: OperatorContext,
+): void {
+  const { from, to } = getSpanRange(ctx, span, linewise)
+  if (from === to && !(linewise && ctx.text.length > 0)) return
+  applyVisualRangeOp(op, from, to, ctx, linewise)
 }

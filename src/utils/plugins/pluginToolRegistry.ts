@@ -9,6 +9,7 @@ export type PluginRegisteredToolSpec = {
   name: string
   description: string
   inputSchema: Record<string, unknown>
+  isDeferred?: boolean
 }
 
 type PluginBag = {

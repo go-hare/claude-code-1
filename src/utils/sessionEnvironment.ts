@@ -11,6 +11,7 @@ import { getPlatform } from './platform.js'
 // null = checked disk, no files exist (don't check again)
 // string = loaded and cached (use cached value)
 let sessionEnvScript: string | null | undefined
+let sessionEnvOwner: string | undefined
 
 export async function getSessionEnvDirPath(): Promise<string> {
   const sessionEnvDir = join(
@@ -55,15 +56,12 @@ export async function clearCwdEnvFiles(): Promise<void> {
 export function invalidateSessionEnvCache(): void {
   logForDebugging('Invalidating session environment cache')
   sessionEnvScript = undefined
+  sessionEnvOwner = undefined
 }
 
 export async function getSessionEnvironmentScript(): Promise<string | null> {
-  if (getPlatform() === 'windows') {
-    logForDebugging('Session environment not yet supported on Windows')
-    return null
-  }
-
-  if (sessionEnvScript !== undefined) {
+  const owner = getSessionId()
+  if (sessionEnvScript !== undefined && sessionEnvOwner === owner) {
     return sessionEnvScript
   }
 
@@ -133,14 +131,53 @@ export async function getSessionEnvironmentScript(): Promise<string | null> {
   if (scripts.length === 0) {
     logForDebugging('No session environment scripts found')
     sessionEnvScript = null
+    sessionEnvOwner = owner
     return sessionEnvScript
   }
 
   sessionEnvScript = scripts.join('\n')
+  sessionEnvOwner = owner
   logForDebugging(
     `Session environment script ready (${sessionEnvScript.length} chars total)`,
   )
   return sessionEnvScript
+}
+
+const PLAIN_ASSIGNMENT_RE =
+  /^(?:\s*(?:#.*)?|(?:export +|declare -x +)?([A-Za-z_]\w*)=((?:[\w@%+=:,./-]|'[^'\0]*'|"(?:[^"\\$`\0]|\\[^\0])*")*))$/
+const QUOTED_PART_RE = /'([^']*)'|"((?:[^"\\]|\\.)*)"/g
+const PATH_SEP_RE = /[/\\]/
+
+/**
+ * #521 SEA E7i: Parse CLAUDE_ENV_FILE / hook env scripts as plain KEY=VAL
+ * assignments so PowerShell commands can inherit them on Windows/POSIX.
+ * Returns an empty Map if any non-comment line is not a plain assignment.
+ */
+export async function getSessionEnvironmentVariables(): Promise<
+  Map<string, string>
+> {
+  const script = await getSessionEnvironmentScript()
+  const vars = new Map<string, string>()
+  for (const line of script?.split('\n') ?? []) {
+    const match = PLAIN_ASSIGNMENT_RE.exec(line.trimEnd())
+    if (match === null) {
+      logForDebugging('Session environment is not all plain assignments')
+      return new Map()
+    }
+    const [, name, rawVal] = match
+    if (name === undefined || rawVal === undefined) continue
+    const val = rawVal.replace(
+      QUOTED_PART_RE,
+      (_m, single: string | undefined, dbl: string | undefined) =>
+        single ?? dbl?.replace(/\\([$`"\\])/g, '$1') ?? '',
+    )
+    if (getPlatform() === 'windows' && PATH_SEP_RE.test(val)) {
+      vars.delete(name)
+    } else {
+      vars.set(name, val)
+    }
+  }
+  return vars
 }
 
 const HOOK_ENV_PRIORITY: Record<string, number> = {

@@ -285,6 +285,8 @@ function ToastBox({
   );
 }
 
+import { orderToastsForStack } from './utils.js';
+
 /** densable `wU` — stacked toast boxes on the scroll column. */
 function ToastBoxes({ toasts, paused }: { toasts: readonly ToastItem[]; paused: boolean }): ReactNode {
   const offset = useContext(TranscriptOverlayOffsetContext);
@@ -317,12 +319,13 @@ function ToastBoxes({ toasts, paused }: { toasts: readonly ToastItem[]; paused: 
   if (paused || toasts.length === 0) return null;
   const roomColumns = Math.max(1, columns - TOAST_EDGE_COLUMNS);
   const roomRows = (measuredHeight > 0 ? measuredHeight : rows - TOAST_STACK_BOTTOM) - offset;
-  const shapes = toasts.map(toast => toastShape(toast, roomColumns, framed));
+  const orderedToasts = orderToastsForStack(toasts);
+  const shapes = orderedToasts.map(toast => toastShape(toast, roomColumns, framed));
   const heights = shapes.map(shape => shape.rows);
-  const shownCount = fittingToastCount(heights, TOAST_STACK_MOST, roomRows, toasts.length);
-  const shown = toasts.slice(-shownCount);
+  const shownCount = fittingToastCount(heights, TOAST_STACK_MOST, roomRows, orderedToasts.length);
+  const shown = orderedToasts.slice(-shownCount);
   const shownShapes = shapes.slice(-shownCount);
-  const hidden = toasts.length - shown.length;
+  const hidden = orderedToasts.length - shown.length;
   const tops = stackedTops(
     shownShapes.map(shape => shape.rows),
     offset + (hidden > 0 ? 1 : 0),

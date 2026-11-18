@@ -4,6 +4,7 @@ import {
   getAdditionalDirectoriesForClaudeMd,
   setCachedClaudeMdContent,
 } from './bootstrap/state.js'
+import { getCwd } from './utils/cwd.js'
 import { getLocalISODate } from './constants/common.js'
 import {
   filterInjectedMemoryFiles,
@@ -47,88 +48,96 @@ export function setSystemPromptInjection(value: string | null): void {
   getSystemContext.cache.clear?.()
 }
 
-export const getGitStatus = memoize(async (): Promise<string | null> => {
-  if (process.env.NODE_ENV === 'test') {
-    // Avoid cycles in tests
-    return null
-  }
+export const getGitStatus = memoize(
+  async (): Promise<string | null> => {
+    if (process.env.NODE_ENV === 'test') {
+      // Avoid cycles in tests
+      return null
+    }
 
-  const startTime = Date.now()
-  logForDiagnosticsNoPII('info', 'git_status_started')
+    const startTime = Date.now()
+    logForDiagnosticsNoPII('info', 'git_status_started')
 
-  const isGitStart = Date.now()
-  const isGit = await getIsGit()
-  logForDiagnosticsNoPII('info', 'git_is_git_check_completed', {
-    duration_ms: Date.now() - isGitStart,
-    is_git: isGit,
-  })
-
-  if (!isGit) {
-    logForDiagnosticsNoPII('info', 'git_status_skipped_not_git', {
-      duration_ms: Date.now() - startTime,
+    const isGitStart = Date.now()
+    const isGit = await getIsGit()
+    logForDiagnosticsNoPII('info', 'git_is_git_check_completed', {
+      duration_ms: Date.now() - isGitStart,
+      is_git: isGit,
     })
-    return null
-  }
 
-  try {
-    const gitCmdsStart = Date.now()
-    const [branch, mainBranch, status, log, userName] = await Promise.all([
-      getBranch(),
-      getDefaultBranch(),
-      execFileNoThrow(gitExe(), ['--no-optional-locks', 'status', '--short'], {
-        preserveOutputOnError: false,
-      }).then(({ stdout }) => stdout.trim()),
-      execFileNoThrow(
-        gitExe(),
-        ['--no-optional-locks', 'log', '--oneline', '-n', '5'],
-        {
+    if (!isGit) {
+      logForDiagnosticsNoPII('info', 'git_status_skipped_not_git', {
+        duration_ms: Date.now() - startTime,
+      })
+      return null
+    }
+
+    try {
+      const gitCmdsStart = Date.now()
+      const [branch, mainBranch, status, log, userName] = await Promise.all([
+        getBranch(),
+        getDefaultBranch(),
+        execFileNoThrow(
+          gitExe(),
+          ['--no-optional-locks', 'status', '--short'],
+          {
+            preserveOutputOnError: false,
+          },
+        ).then(({ stdout }) => stdout.trim()),
+        execFileNoThrow(
+          gitExe(),
+          ['--no-optional-locks', 'log', '--oneline', '-n', '5'],
+          {
+            preserveOutputOnError: false,
+          },
+        ).then(({ stdout }) => stdout.trim()),
+        execFileNoThrow(gitExe(), ['config', 'user.name'], {
           preserveOutputOnError: false,
-        },
-      ).then(({ stdout }) => stdout.trim()),
-      execFileNoThrow(gitExe(), ['config', 'user.name'], {
-        preserveOutputOnError: false,
-      }).then(({ stdout }) => stdout.trim()),
-    ])
+        }).then(({ stdout }) => stdout.trim()),
+      ])
 
-    logForDiagnosticsNoPII('info', 'git_commands_completed', {
-      duration_ms: Date.now() - gitCmdsStart,
-      status_length: status.length,
-    })
+      logForDiagnosticsNoPII('info', 'git_commands_completed', {
+        duration_ms: Date.now() - gitCmdsStart,
+        status_length: status.length,
+      })
 
-    // Check if status exceeds character limit
-    const shellTool = isPowerShellToolEnabled()
-      ? POWERSHELL_TOOL_NAME
-      : BASH_TOOL_NAME
-    const truncatedStatus =
-      status.length > MAX_STATUS_CHARS
-        ? status.substring(0, MAX_STATUS_CHARS) +
-          `\n... (truncated because it exceeds 2k characters. If you need more information, run "git status" using ${shellTool})`
-        : status
+      // Check if status exceeds character limit
+      const shellTool = isPowerShellToolEnabled()
+        ? POWERSHELL_TOOL_NAME
+        : BASH_TOOL_NAME
+      const truncatedStatus =
+        status.length > MAX_STATUS_CHARS
+          ? status.substring(0, MAX_STATUS_CHARS) +
+            `\n... (truncated because it exceeds 2k characters. If you need more information, run "git status" using ${shellTool})`
+          : status
 
-    logForDiagnosticsNoPII('info', 'git_status_completed', {
-      duration_ms: Date.now() - startTime,
-      truncated: status.length > MAX_STATUS_CHARS,
-    })
+      logForDiagnosticsNoPII('info', 'git_status_completed', {
+        duration_ms: Date.now() - startTime,
+        truncated: status.length > MAX_STATUS_CHARS,
+      })
 
-    return [
-      `This is the git status at the start of the conversation. Note that this status is a snapshot in time, and will not update during the conversation.`,
-      `Current branch: ${branch}`,
-      `Main branch (you will usually use this for PRs): ${mainBranch}`,
-      ...(userName ? [`Git user: ${userName}`] : []),
-      `Status:\n${truncatedStatus || '(clean)'}`,
-      `Recent commits:\n${log}`,
-    ].join('\n\n')
-  } catch (error) {
-    logForDiagnosticsNoPII('error', 'git_status_failed', {
-      duration_ms: Date.now() - startTime,
-    })
-    logError(error)
-    return null
-  }
-})
+      return [
+        `This is the git status at the start of the conversation. Note that this status is a snapshot in time, and will not update during the conversation.`,
+        `Current branch: ${branch}`,
+        `Main branch (you will usually use this for PRs): ${mainBranch}`,
+        ...(userName ? [`Git user: ${userName}`] : []),
+        `Status:\n${truncatedStatus || '(clean)'}`,
+        `Recent commits:\n${log}`,
+      ].join('\n\n')
+    } catch (error) {
+      logForDiagnosticsNoPII('error', 'git_status_failed', {
+        duration_ms: Date.now() - startTime,
+      })
+      logError(error)
+      return null
+    }
+  },
+  () => getCwd(),
+)
 
 /**
- * This context is prepended to each conversation, and cached for the duration of the conversation.
+ * This context is prepended to each conversation, and cached per-cwd (worktree)
+ * for the duration of the conversation.
  */
 export const getSystemContext = memoize(
   async (): Promise<{
@@ -194,6 +203,7 @@ export const getSystemContext = memoize(
         : {}),
     }
   },
+  () => getCwd(),
 )
 
 export type PromptContextBlock = {

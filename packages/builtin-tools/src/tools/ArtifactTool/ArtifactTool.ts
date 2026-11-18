@@ -111,6 +111,8 @@ const outputSchema = lazySchema(() =>
       )
       .optional(),
     truncated: z.boolean().optional(),
+    total: z.number().int().optional(),
+    total_at_least: z.boolean().optional(),
     scope: z.string().optional(),
     threads: z.array(z.unknown()).optional(),
     scoped_dispatch: z.boolean().optional(),
@@ -602,10 +604,52 @@ export const ArtifactTool = buildTool({
       }
     }
     if (content.artifacts) {
+      const count = content.artifacts.length
+      const MAX_LIST_LIMIT = 200
+      const total =
+        typeof content.total === 'number' &&
+        Number.isInteger(content.total) &&
+        content.total >= count
+          ? content.total
+          : undefined
+      const totalAtLeast =
+        total !== undefined && content.total_at_least === true
+      const hidden =
+        total !== undefined && total > count ? total - count : undefined
+      const askForLink =
+        'If the user means one that is not here, ask them for its link.'
+      const canAskHigherLimit = count < MAX_LIST_LIMIT
+      let suffix = ''
+      if (hidden !== undefined) {
+        suffix = `\n(${totalAtLeast ? 'At least ' : ''}${hidden} more not shown — ${
+          canAskHigherLimit
+            ? `pass a higher \`limit\` (up to ${MAX_LIST_LIMIT}) to list them.`
+            : `one call lists at most ${MAX_LIST_LIMIT} and there is no next page.${totalAtLeast ? '' : ` ${askForLink}`}`
+        })`
+      } else if (total === undefined && content.truncated) {
+        suffix = `\n(More may exist: ${
+          canAskHigherLimit
+            ? `a higher \`limit\` (up to ${MAX_LIST_LIMIT}) may list more, and `
+            : ''
+        }others can exist that no \`limit\` reaches. ${askForLink})`
+      }
+      if (totalAtLeast) {
+        suffix += `\n(Not every artifact could be listed, so the count is a lower bound: others can exist that no \`limit\` reaches. ${askForLink})`
+      }
+      const label =
+        content.scope === 'shared'
+          ? 'shared artifact(s)'
+          : content.scope === 'all'
+            ? 'artifact(s)'
+            : 'published artifact(s)'
+      const summary =
+        total !== undefined
+          ? `Listed ${count} of ${totalAtLeast ? 'at least ' : ''}${total} ${label}${suffix}`
+          : `Listed ${count} ${label}${suffix}`
       return {
         tool_use_id: toolUseID,
         type: 'tool_result',
-        content: `Listed ${content.artifacts.length} artifact(s)`,
+        content: summary,
       }
     }
     if (content.threads) {

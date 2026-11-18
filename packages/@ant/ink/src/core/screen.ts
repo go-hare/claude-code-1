@@ -17,7 +17,7 @@ import { isAtlasTrackingEnabled, trackAtlasKey } from './xtermAtlas.js'
 
 const logForDebugging = (_message: string, _opts?: { level?: string }) => {}
 
-function boldDimResetPrefix(
+export function boldDimResetPrefix(
   fromCodes: AnsiCode[],
   toCodes: AnsiCode[],
 ): string {
@@ -269,6 +269,23 @@ export class StylePool {
       const hasInverse = baseCodes.some(c => c.endCode === '\x1b[27m')
       id = hasInverse ? baseId : this.intern([...baseCodes, INVERSE_CODE])
       this.inverseCache.set(baseId, id)
+    }
+    return id
+  }
+
+  private underlineCache = new Map<number, number>()
+  withUnderline(baseId: number): number {
+    let id = this.underlineCache.get(baseId)
+    if (id === undefined) {
+      const baseCodes = this.get(baseId)
+      const hasUnderline = baseCodes.some(c => c.endCode === '\x1b[24m')
+      id = hasUnderline
+        ? baseId
+        : this.intern([
+            ...baseCodes,
+            { type: 'ansi', code: '\x1b[4m', endCode: '\x1b[24m' },
+          ])
+      this.underlineCache.set(baseId, id)
     }
     return id
   }

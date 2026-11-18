@@ -485,7 +485,7 @@ function defaultMaxFindingsForLevel(level: EffortLevel): number {
   return 15
 }
 
-function buildPrompt(
+export function buildPrompt(
   level: EffortLevel,
   target: string,
   comment: boolean,
@@ -495,6 +495,7 @@ function buildPrompt(
   maxFindingsNote = '',
   maxFindingsCap?: number | 'all',
   cell?: string,
+  usesReportFindings = false,
 ): string {
   const header = `You are performing a thorough code review at **${level}** effort level.`
 
@@ -546,11 +547,15 @@ For each finding, note: file, line, severity (bug/perf/style), one-line summary,
 For each candidate finding, ask: "Can I construct a specific input or sequence that triggers this?" Drop findings where the answer is no.
 
 ### Phase 4 — Report
-Present confirmed findings as a numbered list:
+${
+  usesReportFindings
+    ? `Call the \`ReportFindings\` tool once with the verified findings ranked most-severe first (pass an empty array if nothing survived verification) and do not also print the findings as text.`
+    : `Present confirmed findings as a numbered list (never as a raw JSON array):
 \`\`\`
 1. [severity] file:line — title
    Description of the issue and how to fix it.
-\`\`\`
+\`\`\``
+}
 
 Cap at ${cap} findings. Prioritize bugs over style.
 If no issues found, say so clearly.`
@@ -794,6 +799,7 @@ const codeReview = {
       maxFindingsNote,
       maxResolved.stated,
       cell,
+      usesReportFindings,
     )
     return [{ type: 'text', text: prompt }]
   },

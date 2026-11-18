@@ -28,6 +28,14 @@ import {
   oauthScopesAcceptedByValidate,
 } from '../../utils/auth.js'
 import { leftoverIhrUxe } from '../../utils/collapseReadSearch.js'
+export {
+  type ArtifactPolicyFetchAnswer,
+  formatArtifactPolicyError,
+  formatArtifactPolicyToolGuidance,
+  formatArtifactPolicyUserMessage,
+  isCoworkOauthNotAllowedForOrg,
+} from './artifactPolicyMessages.js'
+import type { ArtifactPolicyFetchAnswer } from './artifactPolicyMessages.js'
 import { isBareMode } from '../../utils/envUtils.js'
 import { logError } from '../../utils/log.js'
 import {
@@ -55,14 +63,6 @@ export type AuthoringProgressSlot = {
 export type AuthoringProgressBag = {
   slotsByBlockIndex: Map<number, AuthoringProgressSlot>
   failureReported: boolean
-}
-
-/** densable DualInk `A().artifactPolicyFetchAnswer` — G_n fetch fail stash. */
-export type ArtifactPolicyFetchAnswer = {
-  success: boolean
-  retrying?: boolean
-  errorCode?: string
-  httpStatus?: number | null
 }
 
 const FLUSH_MS = 100

@@ -50,7 +50,9 @@ one swatch restates the title and costs space.
   segment to "solve" it — that crops the first/last characters and is worse than no
   label. Text never overflows or is clipped by its own mark.
 - Bars → value at the tip. Columns → value on the cap. Lines → value at the end.
-- Y-axis ticks: round to clean numbers (0 / 1,000 / 2,000), thousands-comma'd; they
+- Y-axis ticks: round to clean numbers, in full under 10,000 (0 / 1,000 / 2,000) and
+  compact on an axis that reaches it (0 / 10K / 20K), one style per axis; along a
+  horizontal axis, in full under a million where the labels fit side by side. They
   carry the values you didn't directly label, so keep them unless every value is labeled.
 - **Text never wears the data color.** Marks — bars, lines, dots, area fills — carry
   the series color; labels, values, legends, and axis text use **text tokens**

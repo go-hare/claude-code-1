@@ -363,6 +363,7 @@ export async function* withRetry<T>(
   let consecutive529Errors = options.initialConsecutive529Errors ?? 0
   let lastError: unknown
   let persistentAttempt = 0
+  let watchdogSpentMs = 0
   // densable 2.1.228 #14: cap GCP/AWS auth refresh retries (x6S/k6S = 2)
   let awsAuthRetryCount = 0
   let gcpAuthRetryCount = 0
@@ -800,6 +801,22 @@ export async function* withRetry<T>(
       // For other errors, proceed with normal retry logic
       // Get retry-after header if available
       const retryAfter = getRetryAfter(error)
+      const overloaded = is529Error(error)
+      const overloadedBaseDelayMs = overloaded
+        ? getOverloadedRetryBaseDelayMs()
+        : undefined
+      const overloadedMaxDelayMs = overloaded
+        ? getOverloadedRetryMaxDelayMs()
+        : undefined
+      const watchdogActive =
+        isRetryWatchdogActive() && isTransientCapacityError(error)
+      const maxWaitMs = watchdogActive
+        ? getRetryWatchdogMaxWaitMs(overloaded)
+        : undefined
+      if (maxWaitMs !== undefined && maxWaitMs - watchdogSpentMs <= 0) {
+        throw new CannotRetryError(error, retryContext)
+      }
+
       let delayMs: number
       if (persistent && error instanceof APIError && error.status === 429) {
         persistentAttempt++
@@ -825,12 +842,22 @@ export async function* withRetry<T>(
           getRetryDelay(
             persistentAttempt,
             retryAfter,
-            PERSISTENT_MAX_BACKOFF_MS,
+            overloadedMaxDelayMs ?? PERSISTENT_MAX_BACKOFF_MS,
+            overloadedBaseDelayMs,
           ),
           PERSISTENT_RESET_CAP_MS,
         )
       } else {
-        delayMs = getRetryDelay(attempt, retryAfter)
+        delayMs = getRetryDelay(
+          attempt,
+          retryAfter,
+          overloadedMaxDelayMs,
+          overloadedBaseDelayMs,
+        )
+      }
+      if (maxWaitMs !== undefined) {
+        delayMs = Math.min(delayMs, Math.max(0, maxWaitMs - watchdogSpentMs))
+        watchdogSpentMs += delayMs
       }
 
       // In persistent mode the for-loop `attempt` is clamped at maxRetries+1;
@@ -910,21 +937,57 @@ function getRetryAfter(error: unknown): string | null {
   )
 }
 
+function parseOptionalNonNegativeIntEnv(name: string): number | undefined {
+  const raw = process.env[name]
+  if (raw === undefined || raw === '') return undefined
+  const parsed = parseInt(raw, 10)
+  return !Number.isNaN(parsed) && parsed >= 0 ? parsed : undefined
+}
+
+export function getOverloadedRetryBaseDelayMs(): number | undefined {
+  return parseOptionalNonNegativeIntEnv(
+    'CLAUDE_CODE_OVERLOADED_RETRY_BASE_DELAY_MS',
+  )
+}
+
+export function getOverloadedRetryMaxDelayMs(): number | undefined {
+  return parseOptionalNonNegativeIntEnv(
+    'CLAUDE_CODE_OVERLOADED_RETRY_MAX_DELAY_MS',
+  )
+}
+
+export function getRetryWatchdogMaxWaitMs(
+  overloaded: boolean,
+): number | undefined {
+  if (overloaded) {
+    const overloadedWait = parseOptionalNonNegativeIntEnv(
+      'CLAUDE_CODE_OVERLOADED_RETRY_MAX_WAIT_MS',
+    )
+    if (overloadedWait !== undefined) return overloadedWait
+  }
+  return parseOptionalNonNegativeIntEnv(
+    'CLAUDE_CODE_RETRY_WATCHDOG_MAX_WAIT_MS',
+  )
+}
+
 export function getRetryDelay(
   attempt: number,
   retryAfterHeader?: string | null,
   maxDelayMs = 32000,
+  baseDelayMs = BASE_DELAY_MS,
 ): number {
+  const baseDelay = Math.min(baseDelayMs * 2 ** (attempt - 1), maxDelayMs)
+  const jitter = Math.random() * 0.25 * baseDelay
+  const backoffMs = Math.round(baseDelay + jitter)
+
   if (retryAfterHeader) {
     const seconds = parseInt(retryAfterHeader, 10)
     if (!isNaN(seconds)) {
-      return seconds * 1000
+      return Math.max(seconds * 1000, backoffMs)
     }
   }
 
-  const baseDelay = Math.min(BASE_DELAY_MS * 2 ** (attempt - 1), maxDelayMs)
-  const jitter = Math.random() * 0.25 * baseDelay
-  return baseDelay + jitter
+  return backoffMs
 }
 
 function parseMaxTokensContextOverflowError(error: APIError):

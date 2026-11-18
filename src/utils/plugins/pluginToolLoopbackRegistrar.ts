@@ -4,13 +4,14 @@
  *
  * Semantic exports only — never export minify LHt|MHt|OHt|DHt|Ais|YLo|YNo.
  */
-import { randomUUID } from 'crypto'
+import { randomUUID, timingSafeEqual } from 'crypto'
 import {
   Server,
   WebStandardStreamableHTTPServerTransport,
 } from '@modelcontextprotocol/server'
 import { buildMcpToolName } from 'src/services/mcp/mcpStringUtils.js'
 import type { ScopedMcpServerConfig } from 'src/services/mcp/types.js'
+import { registerCleanup } from '../cleanupRegistry.js'
 import { logForDebugging } from '../debug.js'
 import {
   listPluginRegisteredTools,
@@ -25,10 +26,12 @@ export type PluginToolRegistrarResult = {
   config: ScopedMcpServerConfig
 }
 
-export type PluginToolRegistrar = (
+export type PluginToolRegistrar = ((
   plugin: string,
   tools: PluginRegisteredToolSpec[],
-) => PluginToolRegistrarResult
+) => PluginToolRegistrarResult) & {
+  serves?: (url: string) => boolean
+}
 
 type LoopbackState = {
   port: number
@@ -91,7 +94,7 @@ function pluginToolServerKey(pluginName: string): string {
   return pluginName
 }
 
-/** densable DHt — dynamic HTTP MCP config for a plugin's registered tools. */
+/** densable DHt / 325 Rpo — dynamic HTTP MCP config for a plugin's registered tools. */
 export function buildPluginToolsDynamicHttpConfig(input: {
   pluginName: string
   port: number
@@ -101,14 +104,26 @@ export function buildPluginToolsDynamicHttpConfig(input: {
   const key = pluginToolServerKey(input.pluginName)
   const config: ScopedMcpServerConfig = {
     type: 'http',
-    url: `http://127.0.0.1:${input.port}/${input.secret}/${encodeURIComponent(input.pluginName)}?v=${input.version}`,
+    url: `http://127.0.0.1:${input.port}/${encodeURIComponent(input.pluginName)}?v=${input.version}`,
+    headers: {
+      Authorization: `Bearer ${input.secret}`,
+    },
     scope: 'dynamic',
   }
   return { key, config }
 }
 
+/** 325 `Tpo` — attach `anthropic/alwaysLoad` when `isDeferred` is specified. */
+function toolMeta(
+  tool: PluginRegisteredToolSpec,
+): { _meta: { 'anthropic/alwaysLoad': boolean } } | Record<string, never> {
+  return tool.isDeferred === undefined
+    ? {}
+    : { _meta: { 'anthropic/alwaysLoad': tool.isDeferred === false } }
+}
+
 /**
- * densable MHt — MCP Server listing bag tools; CallTool returns gold stub error
+ * densable MHt / 325 Epo — MCP Server listing bag tools; CallTool returns gold stub error
  * until a plugin `tool.call` hook answers.
  */
 export function createPluginToolsMcpServer(
@@ -135,6 +150,7 @@ export function createPluginToolsMcpServer(
         ...tool.inputSchema,
         type: 'object' as const,
       },
+      ...toolMeta(tool),
     }))
     return { tools }
   })
@@ -168,17 +184,19 @@ async function handleLoopbackFetch(
   generations: Map<string, number>,
 ): Promise<Response> {
   const url = new URL(request.url)
-  const parts = url.pathname.split('/')
-  const secret = parts[1] ?? ''
+  const [, rawPlugin = ''] = url.pathname.split('/')
   let plugin: string | undefined
   try {
-    plugin = parts[2] ? decodeURIComponent(parts[2]) : undefined
+    plugin = rawPlugin ? decodeURIComponent(rawPlugin) : undefined
   } catch {
     plugin = undefined
   }
   const generation = plugin === undefined ? undefined : generations.get(plugin)
+  const authHeader = Buffer.from(request.headers.get('authorization') ?? '')
+  const expectedAuth = Buffer.from(`Bearer ${state.secret}`)
   if (
-    secret !== state.secret ||
+    authHeader.byteLength !== expectedAuth.byteLength ||
+    !timingSafeEqual(authHeader, expectedAuth) ||
     plugin === undefined ||
     generation === undefined
   ) {
@@ -210,6 +228,9 @@ function ensureLoopbackListening(): LoopbackState {
     fetch: (req: Request) => handleLoopbackFetch(req, state, generations),
   })
   server.unref()
+  registerCleanup(() => {
+    stopLoopbackServerForTests()
+  })
   state.port = server.port ?? 0
   loopback = { state, server, generations }
   logForDebugging(
@@ -218,23 +239,30 @@ function ensureLoopbackListening(): LoopbackState {
   return state
 }
 
-/** densable LHt */
+/** densable LHt / 325 Apo */
 export function createBunPluginToolRegistrar(): PluginToolRegistrar {
-  return (plugin, tools) => {
-    const state = ensureLoopbackListening()
-    if (!loopback) {
-      throw new Error('plugin tool loopback failed to start')
-    }
-    const next = (loopback.generations.get(plugin) ?? 0) + 1
-    loopback.generations.set(plugin, next)
-    logForDebugging(
-      `$.tool.register (${plugin}): ${tools.length} tool(s) served at 127.0.0.1:${state.port}/<secret>/${plugin} v${next}`,
-    )
-    return buildPluginToolsDynamicHttpConfig({
-      pluginName: plugin,
-      port: state.port,
-      secret: state.secret,
-      version: next,
-    })
-  }
+  return Object.assign(
+    (plugin: string, tools: PluginRegisteredToolSpec[]) => {
+      const state = ensureLoopbackListening()
+      if (!loopback) {
+        throw new Error('plugin tool loopback failed to start')
+      }
+      const next = (loopback.generations.get(plugin) ?? 0) + 1
+      loopback.generations.set(plugin, next)
+      logForDebugging(
+        `$.tool.register (${plugin}): ${tools.length} tool(s) served at 127.0.0.1:${state.port}/${plugin} v${next}`,
+      )
+      return buildPluginToolsDynamicHttpConfig({
+        pluginName: plugin,
+        port: state.port,
+        secret: state.secret,
+        version: next,
+      })
+    },
+    {
+      serves: (url: string): boolean =>
+        loopback !== undefined &&
+        URL.parse(url)?.origin === `http://127.0.0.1:${loopback.state.port}`,
+    },
+  )
 }

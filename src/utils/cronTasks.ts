@@ -17,12 +17,14 @@ import {
   addSessionCronTask,
   getProjectRoot,
   getSessionCronTasks,
+  getSessionId,
   removeSessionCronTasks,
 } from '../bootstrap/state.js'
 import { computeNextCronRun, parseCronExpression } from './cron.js'
 import { logForDebugging } from './debug.js'
 import { isFsInaccessible } from './errors.js'
 import { getFsImplementation } from './fsOperations.js'
+import { getProcessStartTime } from './genericProcessUtils.js'
 import { safeParseJSON } from './json.js'
 import { logError } from './log.js'
 import { jsonStringify } from './slowOperations.js'
@@ -264,6 +266,22 @@ export async function writeCronTasks(
  * scheduler merges session tasks into its tick loop directly, so no file
  * change event is needed.
  */
+let cachedOwnProcStartToken: string | undefined
+
+/**
+ * Gold `FTe()` — memoized process start token (`NTe.token ?? NTe.set(plt(process.pid))`).
+ */
+export function getOwnProcStartToken(): string | undefined {
+  return (cachedOwnProcStartToken ??= getProcessStartTime(process.pid))
+}
+
+/**
+ * Gold `NTe.token` — peek cached process start token without spawning `ps`.
+ */
+export function peekOwnProcStartToken(): string | undefined {
+  return cachedOwnProcStartToken
+}
+
 export async function addCronTask(
   cron: string,
   prompt: string,
@@ -286,7 +304,13 @@ export async function addCronTask(
     return id
   }
   const tasks = await readCronTasks()
-  tasks.push(task)
+  tasks.push({
+    ...task,
+    createdBySessionId: getSessionId(),
+    createdByPid: process.pid,
+    createdByProcStart: getOwnProcStartToken(),
+    createdInProject: getProjectRoot(),
+  })
   await writeCronTasks(tasks)
   return id
 }

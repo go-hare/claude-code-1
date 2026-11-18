@@ -44,8 +44,12 @@ import {
   isNetworkUncPath,
   isNtObjectNamespacePath,
 } from './path.js'
+import { stripDaemonForceColorFromEnv } from './envUtils.js'
 import { SandboxManager } from './sandbox/sandbox-adapter.js'
-import { invalidateSessionEnvCache } from './sessionEnvironment.js'
+import {
+  getSessionEnvironmentVariables,
+  invalidateSessionEnvCache,
+} from './sessionEnvironment.js'
 import { createBashShellProvider } from './shell/bashProvider.js'
 import { getCachedPowerShellPath } from './shell/powershellDetection.js'
 import { createPowerShellProvider } from './shell/powershellProvider.js'
@@ -459,6 +463,20 @@ export async function exec(
     ? ['-c', commandString]
     : provider.getSpawnArgs(commandString)
   const envOverrides = await provider.getEnvironmentOverrides(command)
+  if (shellType === 'powershell') {
+    const sessionEnvVars = await getSessionEnvironmentVariables()
+    if (sessionEnvVars.size > 0) {
+      if (
+        sessionEnvVars.has('FORCE_COLOR') &&
+        process.env.NO_COLOR === undefined
+      ) {
+        delete envOverrides.NO_COLOR
+      }
+      for (const [k, v] of sessionEnvVars) {
+        envOverrides[k] = v
+      }
+    }
+  }
 
   // When onStdout is provided, use pipe mode: stdout flows through
   // StreamWrapper → TaskOutput in-memory buffer instead of a file fd.
@@ -502,9 +520,15 @@ export async function exec(
     const useAtomicCgroup =
       typeof Bun !== 'undefined' && cgroupDir !== undefined
 
+    const baseSubprocessEnv: Record<string, string | undefined> = {
+      ...subprocessEnv(),
+    }
+    // #383 SEA: Strip daemon-injected FORCE_COLOR=3 before merging overrides
+    stripDaemonForceColorFromEnv(baseSubprocessEnv)
+
     const childProcess = spawn(spawnBinary, shellArgs, {
       env: {
-        ...subprocessEnv(),
+        ...baseSubprocessEnv,
         SHELL: shellType === 'bash' ? binShell : undefined,
         GIT_EDITOR: 'true',
         // LOCAL (not official densable): skip interactive pager (less) so short

@@ -62,6 +62,21 @@ export const CLAUDE_HAIKU_4_5_CONFIG = {
   grok: 'claude-haiku-4-5-20251001',
 } as const satisfies ModelConfig
 
+// Official 2.1.293 #285: Claude Haiku 5.5 (1M context, default Haiku on 1P).
+export const CLAUDE_HAIKU_5_5_CONFIG = {
+  firstParty: 'claude-haiku-5-5',
+  bedrock: 'us.anthropic.claude-haiku-5-5',
+  vertex: 'claude-haiku-5-5',
+  foundry: 'claude-haiku-5-5',
+  anthropicAws: 'claude-haiku-5-5',
+  anthropicGoogleCloud: 'claude-haiku-5-5',
+  mantle: 'anthropic.claude-haiku-5-5',
+  gateway: 'claude-haiku-5-5',
+  openai: 'claude-haiku-5-5',
+  gemini: 'claude-haiku-5-5',
+  grok: 'claude-haiku-5-5',
+} as const satisfies ModelConfig
+
 export const CLAUDE_SONNET_4_CONFIG = {
   firstParty: 'claude-sonnet-4-20250514',
   bedrock: 'us.anthropic.claude-sonnet-4-20250514-v1:0',
@@ -283,6 +298,7 @@ export const CLAUDE_SONNET_5_5_CONFIG = {
 export const ALL_MODEL_CONFIGS = {
   haiku35: CLAUDE_3_5_HAIKU_CONFIG,
   haiku45: CLAUDE_HAIKU_4_5_CONFIG,
+  haiku55: CLAUDE_HAIKU_5_5_CONFIG,
   sonnet35: CLAUDE_3_5_V2_SONNET_CONFIG,
   sonnet37: CLAUDE_3_7_SONNET_CONFIG,
   sonnet40: CLAUDE_SONNET_4_CONFIG,

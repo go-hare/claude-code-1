@@ -1,5 +1,10 @@
 import { feature } from 'bun:bundle'
+import { readFileSync } from 'fs'
 import { extname, isAbsolute, resolve } from 'path'
+import {
+  detectBufferTextEncoding,
+  formatNonTextFileRefusal,
+} from '../FileEditTool/FileEditTool.js'
 import {
   fileHistoryEnabled,
   fileHistoryTrackEdit,
@@ -277,6 +282,15 @@ export const NotebookEditTool = buildTool({
 
     let content: string
     try {
+      const rawBytes = readFileSync(fullPath)
+      const detected = detectBufferTextEncoding(rawBytes)
+      if (detected.notText) {
+        return {
+          result: false,
+          message: formatNonTextFileRefusal(detected.notText),
+          errorCode: 15,
+        }
+      }
       content = readFileSyncWithMetadata(fullPath).content
     } catch (e) {
       if (isENOENT(e)) {
@@ -372,6 +386,11 @@ export const NotebookEditTool = buildTool({
       // one safeResolvePath + readFileSync pass, replacing the previous
       // detectFileEncoding + readFile + detectLineEndings chain (each of
       // which redid safeResolvePath and/or a 4KB readSync).
+      const rawBytes = readFileSync(openedWrite.ioPath)
+      const detected = detectBufferTextEncoding(rawBytes)
+      if (detected.notText) {
+        throw new Error(formatNonTextFileRefusal(detected.notText))
+      }
       const { content, encoding, lineEndings } = readFileSyncWithMetadata(
         openedWrite.ioPath,
       )

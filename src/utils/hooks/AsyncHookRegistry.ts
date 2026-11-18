@@ -163,6 +163,67 @@ function parseAsyncHookResponse(
   return response
 }
 
+function parseJsonObject(text: string): Record<string, unknown> | undefined {
+  if (!text.startsWith('{')) return undefined
+  try {
+    const parsed: unknown = jsonParse(text)
+    return typeof parsed === 'object' &&
+      parsed !== null &&
+      !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * #420 SEA `Can`: Extract a sync JSON response from async hook stdout,
+ * supporting both single-line JSON and multiline pretty-printed JSON
+ * (including after an initial `{"async": true}` line).
+ */
+export function extractAsyncHookSyncResponse(
+  stdout: string,
+): Record<string, unknown> | undefined {
+  const lines = stdout.trim().split('\n')
+  const [firstLine = ''] = lines
+  const firstParsed = parseJsonObject(firstLine.trim())
+  const candidates = [
+    (firstParsed !== undefined && 'async' in firstParsed
+      ? lines.slice(1)
+      : lines
+    )
+      .join('\n')
+      .trim(),
+    ...lines.map(line => line.trim()),
+  ]
+  for (const candidate of candidates) {
+    const parsed = parseJsonObject(candidate)
+    if (parsed !== undefined && !('async' in parsed)) {
+      return parsed
+    }
+  }
+  return undefined
+}
+
+/**
+ * #420 SEA `Ran`: True if stdout has a non-async line starting with `{`
+ * when the full stdout was not an `async` object.
+ */
+export function hasUnparsedAsyncHookJsonLine(stdout: string): boolean {
+  const isAsyncObj = (text: string): boolean => {
+    const obj = parseJsonObject(text)
+    return obj !== undefined && 'async' in obj
+  }
+  return (
+    !isAsyncObj(stdout.trim()) &&
+    stdout.split('\n').some(line => {
+      const trimmed = line.trim()
+      return trimmed.startsWith('{') && !isAsyncObj(trimmed)
+    })
+  )
+}
+
 export async function checkForAsyncHookResponses(): Promise<
   Array<{
     processId: string
@@ -242,26 +303,17 @@ export async function checkForAsyncHookResponses(): Promise<
       const exitCode = execResult.code
 
       let response: SyncHookJSONOutput = {}
-      for (const line of lines) {
-        if (line.trim().startsWith('{')) {
-          logForDebugging(
-            `Hooks: Found JSON line: ${line.trim().substring(0, 100)}...`,
-          )
-          try {
-            const parsed = jsonParse(line.trim())
-            if (!('async' in parsed)) {
-              logForDebugging(
-                `Hooks: Found sync response from ${hook.processId}: ${jsonStringify(parsed)}`,
-              )
-              response = parseAsyncHookResponse(parsed, hook.hookName)
-              break
-            }
-          } catch {
-            logForDebugging(
-              `Hooks: Failed to parse JSON from ${hook.processId}: ${line.trim()}`,
-            )
-          }
-        }
+      const parsed = extractAsyncHookSyncResponse(stdout)
+      if (parsed !== undefined) {
+        logForDebugging(
+          `Hooks: Found sync response from ${hook.processId}: ${jsonStringify(parsed)}`,
+        )
+        response = parseAsyncHookResponse(parsed, hook.hookName)
+      } else if (hasUnparsedAsyncHookJsonLine(stdout)) {
+        logForDebugging(
+          `Hooks: async hook ${hook.processId} (${hook.hookName}) printed a stdout line that begins with { but no JSON answer could be read. After any {"async":true} line, print one JSON object and nothing else, or put the object on one line.`,
+          { level: 'error' },
+        )
       }
 
       hook.responseAttachmentSent = true

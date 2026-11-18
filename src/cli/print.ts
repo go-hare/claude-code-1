@@ -107,7 +107,14 @@ import {
   countRemainingWakePollEventsAfter,
   consumeCancelPending,
   consumeCancelPendingAcked,
+  getCommandQueueSnapshot,
 } from 'src/utils/messageQueueManager.js'
+import {
+  backgroundForegroundBashToDeliverMessage,
+  backgroundForegroundToolCalls,
+  handleHeadlessSendNow,
+  queryForegroundSession,
+} from 'src/utils/foregroundToolCalls.js'
 import { notifyCommandLifecycle } from 'src/utils/commandLifecycle.js'
 import {
   shouldCompleteEventLifecycleImmediately,
@@ -205,6 +212,7 @@ import type { Stream } from 'src/utils/stream.js'
 import { EMPTY_USAGE } from '@ant/model-provider'
 import {
   loadConversationForResume,
+  type OverdueSessionStartHooks,
   type TurnInterruptionState,
 } from 'src/utils/conversationRecovery.js'
 import type { HookDeferredToolAttachment } from 'src/utils/attachments.js'
@@ -274,7 +282,10 @@ import type {
 import type { PermissionMode } from '@anthropic-ai/claude-agent-sdk'
 import type { PermissionMode as InternalPermissionMode } from 'src/types/permissions.js'
 import { getCwd } from 'src/utils/cwd.js'
-import { getMainThreadAgentId } from 'src/bootstrap/state.js'
+import {
+  getMainThreadAgentId,
+  getSessionCronTasks,
+} from 'src/bootstrap/state.js'
 import omit from 'lodash-es/omit.js'
 import reject from 'lodash-es/reject.js'
 import type { ReplBridgeHandle } from 'src/bridge/replBridge.js'
@@ -337,6 +348,7 @@ import {
   getFastModeState,
 } from 'src/utils/fastMode.js'
 import {
+  clearCommandScopedAllowRules,
   isAutoModeGateEnabled,
   getAutoModeUnavailableNotification,
   getAutoModeUnavailableReason,
@@ -355,7 +367,11 @@ import {
   type PromptVariant,
 } from 'src/services/PromptSuggestion/promptSuggestion.js'
 import { getLastCacheSafeParams } from 'src/utils/forkedAgent.js'
-import { getAccountInformation } from 'src/utils/auth.js'
+import {
+  getAccountInformation,
+  getOauthAccountInfo,
+  isClaudeAISubscriber,
+} from 'src/utils/auth.js'
 import { oauthLoginOrgUUIDHint } from 'src/utils/forceLoginOrg.js'
 import { OAuthService } from 'src/services/oauth/index.js'
 import { installOAuthTokens } from 'src/cli/handlers/auth.js'
@@ -631,6 +647,7 @@ import {
   formatPrintBgWaitCeilingMessage,
   formatPrintWindDownMessage,
   getPrintBgWaitCeilingMs,
+  hasPendingSessionWakeup,
   nextPrintBgWaitGate,
   PRINT_BG_WAIT_GRACE_MS,
 } from './printBgWait.js'
@@ -783,6 +800,196 @@ const HEADLESS_LAST_MESSAGE_SKIP_SYSTEM_SUBTYPES: ReadonlySet<string> = new Set(
     'instruction_size_warning',
   ],
 )
+
+/** densable `Y0 = _u = 5000` — delay before printing background wait notice */
+export const PRINT_WAIT_NOTICE_DELAY_MS = 5000
+
+/** densable `WP` — write wait notice on stderr when stderr is a TTY (unless json/stream-json also on TTY stdout) */
+export function shouldWriteWaitNoticeOnStderr(opts: {
+  outputFormat?: string
+  stderrIsTerminal: boolean
+  stdoutIsTerminal: boolean
+}): boolean {
+  return (
+    opts.stderrIsTerminal &&
+    !(
+      (opts.outputFormat === 'json' || opts.outputFormat === 'stream-json') &&
+      opts.stdoutIsTerminal
+    )
+  )
+}
+
+function truncateWaitDesc(desc: string | undefined, maxLen = 60): string {
+  if (!desc) return ''
+  return desc.length <= maxLen ? desc : `${desc.slice(0, maxLen - 1)}…`
+}
+
+function formatWaitTaskType(task: { type: string; kind?: string }): string {
+  if (task.type === 'local_bash' && task.kind === 'monitor') return 'monitor'
+  switch (task.type) {
+    case 'local_bash':
+      return 'bash'
+    case 'local_agent':
+      return 'agent'
+    case 'remote_agent':
+      return 'remote agent'
+    case 'local_workflow':
+      return 'workflow'
+    case 'monitor_mcp':
+    case 'monitor_ws':
+      return 'monitor'
+    default:
+      return task.type
+  }
+}
+
+/** densable `BP` + `announceLongWait` message builder */
+export function formatPrintWaitNotice(
+  tasks: ReadonlyArray<{ type: string; kind?: string; description?: string }>,
+  hasScheduledWakeup: boolean,
+): string {
+  const taskSummary = tasks
+    .map(t => {
+      const label = formatWaitTaskType(t)
+      const desc = truncateWaitDesc(t.description, 60)
+      return desc ? `${label} "${desc}"` : label
+    })
+    .join(', ')
+  const waitingFor = [taskSummary, hasScheduledWakeup ? 'scheduled wakeup' : '']
+    .filter(Boolean)
+    .join(', ')
+  return `Waiting for background work to finish${waitingFor ? ` (${waitingFor})` : ''}. Press Ctrl+C to exit now.`
+}
+
+/** densable `XA` — clear queued_turn_count when worker is stopping */
+export function finalizeHeldBackResultForShutdown<
+  T extends { type?: string; queued_turn_count?: number },
+>(result: T, stopping: boolean): T {
+  if (
+    !stopping ||
+    result.type !== 'result' ||
+    result.queued_turn_count === undefined ||
+    result.queued_turn_count === 0
+  ) {
+    return result
+  }
+  return { ...result, queued_turn_count: 0 }
+}
+
+/** densable `RP` — flush held results on non-shutdown abort */
+export function shouldFlushHeldBackResultOnAbort(opts: {
+  aborted: boolean
+  shuttingDown: boolean
+  abortedForShutdown: boolean
+  teardownRequested: boolean
+  heldResultCount: number
+}): boolean {
+  return (
+    opts.aborted &&
+    !opts.shuttingDown &&
+    !opts.abortedForShutdown &&
+    !opts.teardownRequested &&
+    opts.heldResultCount > 0
+  )
+}
+
+export type PrintTextResultMessage = {
+  type: 'result'
+  subtype: string
+  result?: unknown
+  errors?: unknown[]
+  terminal_reason?: unknown
+}
+
+function isBlankTextResult(
+  msg: PrintTextResultMessage,
+  extra?: string,
+): boolean {
+  return (
+    msg.subtype === 'success' &&
+    extra === undefined &&
+    typeof msg.result === 'string' &&
+    msg.result.trim() === ''
+  )
+}
+
+/**
+ * densable `Sk` — prints each turn's text result immediately when the turn ends
+ * so later background-triggered turns cannot drop earlier responses.
+ */
+export class PrintTextResults {
+  private lastPrinted: PrintTextResultMessage | undefined
+  private printedCount = 0
+  private endsWithNewline = true
+
+  constructor(
+    private readonly limits: {
+      maxTurns?: number
+      maxBudgetUsd?: number
+    },
+    private readonly write: (text: string) => void = writeToStdout,
+  ) {}
+
+  printAtTurnEnd(msg: PrintTextResultMessage, extra?: string): void {
+    try {
+      if (
+        getFeatureValue_CACHED_MAY_BE_STALE('tengu_jazzy_puddle', true) &&
+        !isBlankTextResult(msg, extra) &&
+        msg.terminal_reason !== 'tool_deferred_unavailable'
+      ) {
+        this.print(msg, extra)
+      }
+    } catch (err) {
+      logError(toError(err))
+    }
+  }
+
+  printAtExit(msg: PrintTextResultMessage, extra?: string): void {
+    if (
+      msg !== this.lastPrinted &&
+      (this.printedCount === 0 || !isBlankTextResult(msg, extra))
+    ) {
+      this.print(msg, extra)
+    }
+    if (this.printedCount > 1) {
+      logEvent('tengu_print_text_results', {
+        results_printed: this.printedCount,
+      })
+    }
+  }
+
+  private print(msg: PrintTextResultMessage, extra?: string): void {
+    let text = ''
+    switch (msg.subtype) {
+      case 'success': {
+        const raw = String(msg.result ?? '')
+        const combined = extra === undefined ? raw : `${extra}\n${raw}`
+        text = combined.endsWith('\n') ? combined : combined + '\n'
+        break
+      }
+      case 'error_during_execution':
+        text = 'Execution error'
+        break
+      case 'error_max_turns':
+        text = `Error: Reached max turns (${this.limits.maxTurns}).\nTip: Increase the limit with --max-turns or continue in a new session.`
+        break
+      case 'error_max_budget_usd':
+        text = `Error: Exceeded USD budget ($${this.limits.maxBudgetUsd}).\nTip: Increase the limit with --max-budget-usd or start a new session to continue.`
+        break
+      case 'error_max_structured_output_retries': {
+        const errors = msg.errors as string[] | undefined
+        text = `Error: ${errors?.[0] ?? 'Failed to provide valid structured output after maximum retries'}`
+        break
+      }
+    }
+    const prefix =
+      this.printedCount === 0 ? '' : this.endsWithNewline ? '\n' : '\n\n'
+    this.write(prefix + text)
+    this.lastPrinted = msg
+    this.printedCount++
+    this.endsWithNewline = text.endsWith('\n')
+  }
+}
 
 function countsAsHeadlessLastMessage(message: {
   type: string
@@ -1277,6 +1484,7 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
     agentSetting: resumedAgentSetting,
     planModeOnResume,
     deferredToolUse,
+    overdueSessionStartHooks,
   } = await loadInitialMessages(setAppState, {
     continue: options.continue,
     teleport: options.teleport,
@@ -1569,6 +1777,12 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
   // read for the exit code / final result. Avoid accumulating every message in
   // memory for the entire session.
   const needsFullArray = options.outputFormat === 'json' && options.verbose
+  const isTextOutput =
+    options.outputFormat !== 'json' && options.outputFormat !== 'stream-json'
+  const textResults = new PrintTextResults({
+    maxTurns: options.maxTurns,
+    maxBudgetUsd: options.maxBudgetUsd,
+  })
   const messages: SDKMessage[] = []
   let lastMessage: SDKMessage | undefined
   // Streamlined mode transforms messages when CLAUDE_CODE_STREAMLINED_OUTPUT=true and using stream-json
@@ -1604,7 +1818,7 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
     getAppState,
     setAppState,
     agents,
-    { ...options, planModeOnResume, deferredToolUse },
+    { ...options, planModeOnResume, deferredToolUse, overdueSessionStartHooks },
     turnInterruptionState,
     printRequestDialog,
   )) {
@@ -1661,6 +1875,9 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
         messages.push(message)
       }
       lastMessage = message
+      if (isTextOutput && message.type === 'result') {
+        textResults.printAtTurnEnd(message as PrintTextResultMessage)
+      }
     }
   }
 
@@ -1682,35 +1899,7 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
       if (!lastMessage || lastMessage.type !== 'result') {
         throw new Error('No messages returned')
       }
-      switch (lastMessage.subtype) {
-        case 'success':
-          writeToStdout(
-            (lastMessage.result as string).endsWith('\n')
-              ? (lastMessage.result as string)
-              : (lastMessage.result as string) + '\n',
-          )
-          break
-        case 'error_during_execution':
-          writeToStdout(`Execution error`)
-          break
-        case 'error_max_turns':
-          writeToStdout(
-            `Error: Reached max turns (${options.maxTurns}).\nTip: Increase the limit with --max-turns or continue in a new session.`,
-          )
-          break
-        case 'error_max_budget_usd':
-          writeToStdout(
-            `Error: Exceeded USD budget ($${options.maxBudgetUsd}).\nTip: Increase the limit with --max-budget-usd or start a new session to continue.`,
-          )
-          break
-        case 'error_max_structured_output_retries': {
-          const errors = lastMessage.errors as string[] | undefined
-          writeToStdout(
-            `Error: ${errors?.[0] ?? 'Failed to provide valid structured output after maximum retries'}`,
-          )
-          break
-        }
-      }
+      textResults.printAtExit(lastMessage as PrintTextResultMessage)
   }
 
   // Log headless latency metrics for the final turn
@@ -1774,6 +1963,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
     setSDKStatus?: (status: SDKStatus) => void
     promptSuggestions?: boolean | undefined
     workload?: string | undefined
+    overdueSessionStartHooks?: OverdueSessionStartHooks | undefined
     /** Official --reply-on-resume: auto-continue interrupted turn on resume. */
     replyOnResume?: boolean | undefined
     /** densable #27 stream-json commands_changed emission gate */
@@ -1840,6 +2030,8 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
   const CLAIM_SESSION_START_QUEUE_WAIT_MS = 30_000
   let shutdownPromptInjected = false
   let heldBackResult: StdoutMessage | null = null
+  let turnAbortedForShutdown = false
+  let shuttingDownForPrint = false
   let abortController: AbortController | undefined
   // densable 2.1.289 admits/doom — run() installs live gates; interrupt
   // subscribe arms via this latch once drain is live.
@@ -1886,8 +2078,10 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
   }
   const sigintHandler = () => {
     logForDiagnosticsNoPII('info', 'shutdown_signal', { signal: 'SIGINT' })
+    shuttingDownForPrint = true
     cancelLoopWakeupsOnSignal('user_abort')
     if (abortController && !abortController.signal.aborted) {
+      turnAbortedForShutdown = true
       abortController.abort(createAbortErrorReason('user-cancel'))
     }
     void gracefulShutdown(0)
@@ -1901,8 +2095,10 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
   // shutdown is slow or cleanup hooks re-enter the scheduler.
   const sigtermHandler = () => {
     logForDiagnosticsNoPII('info', 'shutdown_signal', { signal: 'SIGTERM' })
+    shuttingDownForPrint = true
     cancelLoopWakeupsOnSignal('remote_cancel')
     if (abortController && !abortController.signal.aborted) {
+      turnAbortedForShutdown = true
       abortController.abort(createAbortErrorReason('remote-cancel'))
     }
     void gracefulShutdown(143)
@@ -2004,7 +2200,15 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
   // Emitting for all statuses (including 'allowed') ensures consumers can clear warnings
   // when rate limits reset. The upstream emitStatusChange already deduplicates via isEqual.
   const rateLimitListener = (limits: ClaudeAILimits) => {
-    const rateLimitInfo = toSDKRateLimitInfo(limits)
+    const overageEnabled =
+      limits.status === 'allowed_warning' &&
+      limits.rateLimitType !== 'overage' &&
+      isClaudeAISubscriber()
+        ? getOauthAccountInfo()?.hasExtraUsageEnabled
+        : undefined
+    const rateLimitInfo = toSDKRateLimitInfo(limits, {
+      ...(overageEnabled !== undefined && { overageEnabled }),
+    })
     if (rateLimitInfo) {
       output.enqueue({
         type: 'rate_limit_event',
@@ -2696,6 +2900,55 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
   // Same index-based diff as useReplBridge's lastWrittenIndexRef.
   let bridgeLastForwardedIndex = 0
 
+  const sessionStartState = { clears: 0 }
+  const overdueSessionStartHooks = options.overdueSessionStartHooks
+  if (overdueSessionStartHooks) {
+    const snapshotClears = sessionStartState.clears
+    overdueSessionStartHooks.promise
+      .then(hookMessages => {
+        if (sessionStartState.clears !== snapshotClears) return
+        if (hookMessages.length > 0) {
+          mutableMessages.push(...hookMessages)
+        }
+        const lateInitialUserMessage = takeInitialUserMessage()
+        if (lateInitialUserMessage) {
+          structuredIO.prependUserMessage(lateInitialUserMessage)
+        }
+      })
+      .catch(err => {
+        logForDebugging(
+          `SessionStart hooks ended after the session stopped waiting for them, and their output could not be added to the conversation (dropped): ${errorMessage(err)}`,
+          { level: 'error' },
+        )
+      })
+  }
+
+  function drainPrintSdkEvents(forwardParentFrames = false): void {
+    const events = drainSdkEvents()
+    if (
+      events.some(
+        event => (event as { type?: string }).type === 'conversation_reset',
+      )
+    ) {
+      bridgeLastForwardedIndex = 0
+      overdueSessionStartHooks?.abort()
+      sessionStartState.clears++
+    }
+    for (const event of events) {
+      if (forwardParentFrames) {
+        forwardParentToolUseSdkFrame(
+          bridgeHandle,
+          event as {
+            type?: string
+            subtype?: unknown
+            status?: unknown
+          },
+        )
+      }
+      output.enqueue(event as StdoutMessage)
+    }
+  }
+
   // Forward new messages from mutableMessages to the bridge.
   // Called incrementally during each turn (so claude.ai sees progress
   // and stays alive during permission waits) and again after the turn.
@@ -3202,6 +3455,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
     const supportedConfigs: Record<string, McpServerConfigForProcessTransport> =
       {}
     for (const [name, config] of Object.entries(newConfigs)) {
+      if (isMcpServerDisabled(name)) continue
       const type = config.type
       if (
         type === undefined ||
@@ -3383,6 +3637,8 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
       let printBgWaitDeadline: number | null = null
       let printBgWaitSwept = false
       let printBgWaitCeilingWarned = false
+      const announcedWaitWork = new Set<string>()
+      let waitNoticeBroken = false
       // densable firstCommandMountJoin — one-shot await of hearth/grants
       // startup before the first ask(). takeFirstTurnJoins nulls its slots.
       let firstTurnJoinsPending = true
@@ -3546,11 +3802,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               setAppState(prev => ({
                 ...prev,
                 toolPermissionContext: {
-                  ...prev.toolPermissionContext,
-                  alwaysAllowRules: {
-                    ...prev.toolPermissionContext.alwaysAllowRules,
-                    command: undefined,
-                  },
+                  ...clearCommandScopedAllowRules(prev.toolPermissionContext),
                   pollEventDeliveryGuard: true,
                 } as typeof prev.toolPermissionContext,
               }))
@@ -3876,9 +4128,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                       : undefined,
                 })
               }
-              for (const event of drainSdkEvents()) {
-                output.enqueue(event as StdoutMessage)
-              }
+              drainPrintSdkEvents()
             }
             // No continue -- fall through to ask() so the model processes the result
           }
@@ -4160,9 +4410,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                           ? resultMsg.result
                           : ''
                       // Flush pending SDK events so they appear before result on the stream.
-                      for (const event of drainSdkEvents()) {
-                        output.enqueue(event as StdoutMessage)
-                      }
+                      drainPrintSdkEvents(true)
 
                       // Hold-back: don't emit result while background agents are running
                       const currentState = getAppState()
@@ -4185,9 +4433,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                       // task_progress stays a status payload. Tool frames with
                       // parent_tool_use_id are additionally written to Remote
                       // Control (densable Ce / idt).
-                      for (const event of drainSdkEvents()) {
-                        output.enqueue(event as StdoutMessage)
-                      }
+                      drainPrintSdkEvents(true)
                       forwardParentToolUseSdkFrame(
                         bridgeHandle,
                         message as {
@@ -4398,9 +4644,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
       do {
         // Drain SDK events (task_started, task_progress) before command queue
         // so progress events precede task_notification on the stream.
-        for (const event of drainSdkEvents()) {
-          output.enqueue(event as StdoutMessage)
-        }
+        drainPrintSdkEvents()
 
         runPhase = 'draining_commands'
         await drainCommandQueue()
@@ -4442,13 +4686,24 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
           const hasRunningBg = runningBg.length > 0
           const hasMainThreadQueued =
             peek(isPrintQueueableCommand) !== undefined
+          const maxBudgetHalted = shouldHaltBackgroundAgentsForBudget(
+            options.maxBudgetUsd,
+            Object.values(state.tasks ?? {}),
+          )
           const detachedOwes =
-            detachedToolCallsOweResult(Date.now()) &&
-            !shouldHaltBackgroundAgentsForBudget(
-              options.maxBudgetUsd,
-              Object.values(state.tasks ?? {}),
-            )
-          if (hasRunningBg || hasMainThreadQueued || detachedOwes) {
+            detachedToolCallsOweResult(Date.now()) && !maxBudgetHalted
+          const pendingWakeup = hasPendingSessionWakeup(getSessionCronTasks(), {
+            now: Date.now(),
+            parkedSince: printBgWaitStartedAt,
+          })
+          if (
+            (hasRunningBg ||
+              hasMainThreadQueued ||
+              detachedOwes ||
+              pendingWakeup) &&
+            !shuttingDownForPrint &&
+            !turnAbortedForShutdown
+          ) {
             waitingForAgents = true
             if (!hasMainThreadQueued) {
               runPhase = 'waiting_for_agents'
@@ -4456,6 +4711,43 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                 printBgWaitStartedAt = Date.now()
               }
               const now = Date.now()
+              if (
+                !waitNoticeBroken &&
+                now - printBgWaitStartedAt >= PRINT_WAIT_NOTICE_DELAY_MS
+              ) {
+                const waitIds = runningBg
+                  .map(t => t.id)
+                  .concat(pendingWakeup ? ['wakeup'] : [])
+                if (!waitIds.every(id => announcedWaitWork.has(id))) {
+                  for (const id of waitIds) announcedWaitWork.add(id)
+                  const notice = formatPrintWaitNotice(
+                    runningBg.map(t => {
+                      const rec = t as {
+                        type: string
+                        kind?: string
+                        description?: string
+                      }
+                      return {
+                        type: rec.type,
+                        kind: rec.kind,
+                        description: rec.description,
+                      }
+                    }),
+                    pendingWakeup,
+                  )
+                  const onStderr = shouldWriteWaitNoticeOnStderr({
+                    outputFormat: options.outputFormat,
+                    stderrIsTerminal: Boolean(process.stderr.isTTY),
+                    stdoutIsTerminal: Boolean(process.stdout.isTTY),
+                  })
+                  if (onStderr) {
+                    process.stderr.write(`\n${notice}\n`)
+                  } else {
+                    logForDebugging(notice)
+                  }
+                  logEvent('print_wait_notice', { on_stderr: onStderr })
+                }
+              }
               const ceiling = getPrintBgWaitCeilingMs()
               const ceilingExceeded =
                 ceiling !== null && now - printBgWaitStartedAt >= ceiling
@@ -4470,16 +4762,44 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                 process.stderr.write(formatPrintBgWaitCeilingMessage(ceiling))
               }
 
+              const holdForBackgroundShells =
+                inputClosed &&
+                !maxBudgetHalted &&
+                getFeatureValue_CACHED_MAY_BE_STALE('tengu_tidy_sloth', true)
+              const holdForArmedMonitors =
+                inputClosed &&
+                !maxBudgetHalted &&
+                getFeatureValue_CACHED_MAY_BE_STALE(
+                  'tengu_giggly_dragonfly',
+                  true,
+                )
+
               // Official pEf wind-down gate (input closed + grace / ceiling).
               const gate = nextPrintBgWaitGate({
-                runningBackgroundTasks: runningBg.map(t => ({
-                  id: t.id,
-                  type: t.type,
-                })),
+                runningBackgroundTasks: runningBg.map(t => {
+                  const rec = t as {
+                    id: string
+                    type: string
+                    isBackgrounded?: boolean
+                    kind?: string
+                    agentId?: string
+                    ambient?: boolean
+                  }
+                  return {
+                    id: rec.id,
+                    type: rec.type,
+                    isBackgrounded: rec.isBackgrounded,
+                    kind: rec.kind,
+                    agentId: rec.agentId,
+                    ambient: rec.ambient,
+                  }
+                }),
                 inputClosed,
                 hasMainThreadQueued: false,
                 hasActiveTeammates: hasActiveInProcessTeammates(state),
                 hasPendingNotification: detachedOwes,
+                holdForBackgroundShells,
+                holdForArmedMonitors,
                 ceilingExceeded,
                 deadline: printBgWaitDeadline,
                 swept: printBgWaitSwept,
@@ -4539,7 +4859,12 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
       } while (waitingForAgents)
 
       if (heldBackResult) {
-        output.enqueue(heldBackResult)
+        output.enqueue(
+          finalizeHeldBackResultForShutdown(
+            heldBackResult as StdoutMessage & { queued_turn_count?: number },
+            inputClosed || shuttingDownForPrint || turnAbortedForShutdown,
+          ),
+        )
         heldBackResult = null
         if (suggestionState.pendingSuggestion) {
           output.enqueue(suggestionState.pendingSuggestion)
@@ -4611,9 +4936,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
         // command. The do-while drain above only runs while
         // waitingForAgents; once we're here the next drain would be the
         // top of the next run(), which won't come if input is idle.
-        for (const event of drainSdkEvents()) {
-          output.enqueue(event as StdoutMessage)
-        }
+        drainPrintSdkEvents()
       }
       running = false
       // densable post-tick (REPL isLoading→false): clear aPt; YKu && !rmt() → XKu.
@@ -5432,6 +5755,41 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
             continue
           }
           if (msg.request.subtype === 'interrupt') {
+            const interruptReq = msg.request as {
+              subtype: 'interrupt'
+              send_now?: boolean
+              cancel_queued?: boolean
+              message_uuid?: string
+            }
+            if (
+              interruptReq.send_now === true &&
+              interruptReq.cancel_queued !== true
+            ) {
+              const sendNowRes = handleHeadlessSendNow({
+                queuedCommands: getCommandQueueSnapshot(),
+                pressedUuid: interruptReq.message_uuid,
+                turnUnderWay: Boolean(abortController),
+                abortController,
+                deliver: () => {
+                  const movedBash = backgroundForegroundBashToDeliverMessage(
+                    getAppState,
+                    setAppState,
+                  )
+                  const movedCalls = backgroundForegroundToolCalls(
+                    queryForegroundSession,
+                  )
+                  return movedBash > 0 || movedCalls > 0
+                },
+              })
+              logEvent('headless_interrupt_send_now', {
+                outcome: sendNowRes.send_now,
+              })
+              sendControlResponseSuccess(
+                msg,
+                sendNowRes as unknown as Record<string, unknown>,
+              )
+              continue
+            }
             // Track escapes for attribution (ant-only feature)
             if (feature('COMMIT_ATTRIBUTION')) {
               setAppState(prev => ({
@@ -6416,51 +6774,67 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
             } else if (!config) {
               sendControlResponseError(msg, `Server not found: ${serverName}`)
             } else {
+              const isSdkOwnedServer = Object.hasOwn(sdkMcpConfigs, serverName)
               const result = await withControlReconnect(serverName, () =>
                 reconnectMcpServerImpl(serverName, config),
               )
-              // Update appState.mcp with the new client, tools, commands, and resources
-              const prefix = getMcpPrefix(serverName)
-              setAppState(prev => ({
-                ...prev,
-                mcp: {
-                  ...prev.mcp,
-                  clients: prev.mcp.clients.map(c =>
-                    c.name === serverName ? result.client : c,
-                  ),
+              if (isSdkOwnedServer) {
+                sdkClients = sdkClients.map(c =>
+                  c.name === serverName ? result.client : c,
+                )
+                const prefix = getMcpPrefix(serverName)
+                sdkTools = [
+                  ...reject(sdkTools, t => t.name?.startsWith(prefix)),
+                  ...result.tools,
+                ]
+              } else {
+                // Update appState.mcp with the new client, tools, commands, and resources
+                const prefix = getMcpPrefix(serverName)
+                setAppState(prev => ({
+                  ...prev,
+                  mcp: {
+                    ...prev.mcp,
+                    clients: prev.mcp.clients.map(c =>
+                      c.name === serverName ? result.client : c,
+                    ),
+                    tools: [
+                      ...reject(prev.mcp.tools, t =>
+                        t.name?.startsWith(prefix),
+                      ),
+                      ...result.tools,
+                    ],
+                    commands: [
+                      ...reject(prev.mcp.commands, c =>
+                        commandBelongsToServer(c, serverName),
+                      ),
+                      ...result.commands,
+                    ],
+                    resources:
+                      result.resources && result.resources.length > 0
+                        ? {
+                            ...prev.mcp.resources,
+                            [serverName]: result.resources,
+                          }
+                        : omit(prev.mcp.resources, serverName),
+                  },
+                }))
+                // Also update dynamicMcpState so run() picks up the new tools
+                // on the next turn (run() reads dynamicMcpState, not appState)
+                dynamicMcpState = {
+                  ...dynamicMcpState,
+                  clients: [
+                    ...dynamicMcpState.clients.filter(
+                      c => c.name !== serverName,
+                    ),
+                    result.client,
+                  ],
                   tools: [
-                    ...reject(prev.mcp.tools, t => t.name?.startsWith(prefix)),
+                    ...dynamicMcpState.tools.filter(
+                      t => !t.name?.startsWith(prefix),
+                    ),
                     ...result.tools,
                   ],
-                  commands: [
-                    ...reject(prev.mcp.commands, c =>
-                      commandBelongsToServer(c, serverName),
-                    ),
-                    ...result.commands,
-                  ],
-                  resources:
-                    result.resources && result.resources.length > 0
-                      ? {
-                          ...prev.mcp.resources,
-                          [serverName]: result.resources,
-                        }
-                      : omit(prev.mcp.resources, serverName),
-                },
-              }))
-              // Also update dynamicMcpState so run() picks up the new tools
-              // on the next turn (run() reads dynamicMcpState, not appState)
-              dynamicMcpState = {
-                ...dynamicMcpState,
-                clients: [
-                  ...dynamicMcpState.clients.filter(c => c.name !== serverName),
-                  result.client,
-                ],
-                tools: [
-                  ...dynamicMcpState.tools.filter(
-                    t => !t.name?.startsWith(prefix),
-                  ),
-                  ...result.tools,
-                ],
+                }
               }
               if (result.client.type === 'connected') {
                 registerElicitationHandlers([result.client])
@@ -8688,6 +9062,7 @@ type LoadInitialMessagesResult = {
   agentSetting?: string
   planModeOnResume?: PlanModeOnResume
   deferredToolUse?: HookDeferredToolAttachment
+  overdueSessionStartHooks?: OverdueSessionStartHooks
 }
 
 function applyPrintPlanModeResume<TState extends HeadlessAppState = AppState>(
@@ -8754,7 +9129,10 @@ async function loadInitialMessages<TState extends HeadlessAppState = AppState>(
       const result = await loadConversationForResume(
         undefined /* sessionId */,
         undefined /* file path */,
-        { forkSession: !!options.forkSession },
+        {
+          forkSession: !!options.forkSession,
+          supportOverdueSessionStartHooks: true,
+        },
       )
       if (result) {
         // Match coordinator mode to the resumed session's mode.
@@ -8855,6 +9233,7 @@ async function loadInitialMessages<TState extends HeadlessAppState = AppState>(
           agentSetting: result.agentSetting,
           planModeOnResume,
           deferredToolUse: result.deferredToolUse,
+          overdueSessionStartHooks: result.overdueSessionStartHooks,
         }
       }
     } catch (error) {
@@ -9025,7 +9404,10 @@ async function loadInitialMessages<TState extends HeadlessAppState = AppState>(
       const result = await loadConversationForResume(
         parsedSessionId.sessionId,
         parsedSessionId.jsonlFile || undefined,
-        { forkSession: !!options.forkSession },
+        {
+          forkSession: !!options.forkSession,
+          supportOverdueSessionStartHooks: true,
+        },
       )
 
       // hydrateFromCCRv2InternalEvents writes an empty transcript file for
@@ -9206,6 +9588,7 @@ async function loadInitialMessages<TState extends HeadlessAppState = AppState>(
         agentSetting: result.agentSetting,
         planModeOnResume,
         deferredToolUse: result.deferredToolUse,
+        overdueSessionStartHooks: result.overdueSessionStartHooks,
       }
     } catch (error) {
       logError(error)

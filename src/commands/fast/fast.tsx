@@ -24,6 +24,7 @@ import { formatDuration } from '../../utils/format.js';
 import { formatModelPricing, getOpus46CostTier } from '../../utils/modelCost.js';
 import { em } from '../../utils/model/modelNoticeCode.js';
 import { updateSettingsForSource } from '../../utils/settings/settings.js';
+import { saveFastModeWithConfigSetHook } from './index.js';
 
 function applyFastMode(enable: boolean, setAppState: (f: (prev: AppState) => AppState) => void): void {
   clearFastModeCooldown();
@@ -61,15 +62,22 @@ export function FastModePicker({
   const isUnavailable = unavailableReason !== null;
   const pricing = formatModelPricing(getOpus46CostTier(true));
 
-  function handleConfirm(): void {
+  async function handleConfirm(): Promise<void> {
     if (isUnavailable) return;
-    applyFastMode(enableFastMode, setAppState);
+    const hookResult = await saveFastModeWithConfigSetHook(enableFastMode, initialFastMode ?? false, finalEnabled => {
+      applyFastMode(finalEnabled, setAppState);
+    });
+    if (hookResult.kind === 'refused') {
+      onDone(hookResult.reason ?? 'Fast mode was not changed', { display: 'system' });
+      return;
+    }
+    const finalEnabled = hookResult.saved;
     logEvent('tengu_fast_mode_toggled', {
-      enabled: enableFastMode,
+      enabled: finalEnabled,
       source: 'picker' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     });
-    if (enableFastMode) {
-      const fastIcon = getFastIconString(enableFastMode);
+    if (finalEnabled) {
+      const fastIcon = getFastIconString(finalEnabled);
       const modelUpdated = !isFastModeSupportedByModel(model) ? ` · model set to ${em(FAST_MODE_MODEL_DISPLAY)}` : '';
       onDone(`${fastIcon} Fast mode ON${modelUpdated} · ${pricing}`);
     } else {
@@ -98,7 +106,9 @@ export function FastModePicker({
 
   useKeybindings(
     {
-      'confirm:yes': handleConfirm,
+      'confirm:yes': () => {
+        void handleConfirm();
+      },
       'confirm:nextField': handleToggle,
       'confirm:next': handleToggle,
       'confirm:previous': handleToggle,
@@ -183,14 +193,20 @@ async function handleFastModeShortcut(
     return `Fast mode unavailable: ${unavailableReason}`;
   }
 
-  const { mainLoopModel } = getAppState();
-  applyFastMode(enable, setAppState);
+  const { mainLoopModel, fastMode: previousFastMode } = getAppState();
+  const hookResult = await saveFastModeWithConfigSetHook(enable, previousFastMode ?? false, finalEnabled => {
+    applyFastMode(finalEnabled, setAppState);
+  });
+  if (hookResult.kind === 'refused') {
+    return hookResult.reason ?? 'Fast mode was not changed';
+  }
+  const finalEnabled = hookResult.saved;
   logEvent('tengu_fast_mode_toggled', {
-    enabled: enable,
+    enabled: finalEnabled,
     source: 'shortcut' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   });
 
-  if (enable) {
+  if (finalEnabled) {
     const fastIcon = getFastIconString(true);
     const modelUpdated = !isFastModeSupportedByModel(mainLoopModel)
       ? ` · model set to ${em(FAST_MODE_MODEL_DISPLAY)}`

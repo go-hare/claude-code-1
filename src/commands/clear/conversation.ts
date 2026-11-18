@@ -54,6 +54,8 @@ import {
 import { getCurrentWorktreeSession } from '../../utils/worktree.js'
 import { clearSessionCaches } from './caches.js'
 
+let activeClearSessionStartController: AbortController | null = null
+
 function notifyRemoteConversationCleared(): void {
   // densable 2.1.224 #21 — /clear → conversation_reset to attached RC clients
   // (WS({type:"conversation_reset",new_conversation_id}) when bridge/CCR live).
@@ -358,10 +360,22 @@ export async function clearConversation({
 
   // Execute classic SessionStart settings hooks after clearing (function-hook
   // `session.start` does not fire on `'clear'`, per gold `claude-code.d.ts`).
-  const hookMessages = await processSessionStartHooks('clear')
+  activeClearSessionStartController?.abort()
+  const orphanedController = new AbortController()
+  activeClearSessionStartController = orphanedController
+  let hookMessages: Awaited<ReturnType<typeof processSessionStartHooks>>
+  try {
+    hookMessages = await processSessionStartHooks('clear', {
+      orphaned: orphanedController.signal,
+    })
+  } finally {
+    if (activeClearSessionStartController === orphanedController) {
+      activeClearSessionStartController = null
+    }
+  }
 
   // Update messages with hook results
-  if (hookMessages.length > 0) {
+  if (!orphanedController.signal.aborted && hookMessages.length > 0) {
     setMessages(() => hookMessages)
   }
 }

@@ -32,6 +32,7 @@ import { resolveTurnDurationWithBackgroundWait } from '../../components/messages
 import type { SpinnerMode } from '../../components/Spinner.js'
 import { getSystemPrompt } from '../../constants/prompts.js'
 import { getSystemContext, getUserContext } from '../../context.js'
+import { clearCommandScopedAllowRules } from '../../utils/permissions/permissionSetup.js'
 import type { HostEngine } from '../../engine/hostEngine.js'
 import { runHostEngineTurn } from '../../engine/hostEngineTurn.js'
 import { removeLastFromHistory } from '../../history.js'
@@ -58,6 +59,7 @@ import {
   countAbandonableLeftArrow,
   countLeftArrowBlockingQueuedCommands,
   countNewMonitorsSincePress,
+  LEFT_ARROW_STOPPED_TURN_TOAST,
 } from '../../utils/leftArrowConfirm.js'
 import { applyMessageStoreAction } from '../../utils/messageStore.js'
 import { pruneDisplayedMessageContent } from '../../utils/messageDisplayTransform.js'
@@ -730,21 +732,28 @@ async function executeReplTurnImpl(
     const denySame =
       curDeny.length === nextDeny.length &&
       curDeny.every((v, i) => v === nextDeny[i])
-    if (allowSame && denySame) {
+    if (
+      allowSame &&
+      denySame &&
+      prev.toolPermissionContext.pollEventDeliveryGuard !== true &&
+      prev.toolPermissionContext.strippedDangerousRules?.command === undefined
+    ) {
       return prev
     }
+    const cleared = clearCommandScopedAllowRules(prev.toolPermissionContext)
     return {
       ...prev,
       toolPermissionContext: {
-        ...prev.toolPermissionContext,
+        ...cleared,
         alwaysAllowRules: {
-          ...prev.toolPermissionContext.alwaysAllowRules,
+          ...cleared.alwaysAllowRules,
           command: additionalAllowedTools,
         },
         alwaysDenyRules: {
-          ...prev.toolPermissionContext.alwaysDenyRules,
+          ...cleared.alwaysDenyRules,
           command: nextDeny.length > 0 ? nextDeny : undefined,
         },
+        pollEventDeliveryGuard: undefined,
       },
     }
   })
@@ -966,6 +975,11 @@ async function executeReplTurnImpl(
           setMessages(prev => [...prev, createSystemMessage($e, 'warning')])
           markIdleForkMidTurn()
         }
+      } else if (abortController.signal.reason !== 'background') {
+        setMessages(prev => [
+          ...prev,
+          createSystemMessage(LEFT_ARROW_STOPPED_TURN_TOAST, 'warning'),
+        ])
       }
     }
   }

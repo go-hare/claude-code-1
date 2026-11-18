@@ -25,6 +25,7 @@ import {
   substituteArguments,
 } from '../utils/argumentSubstitution.js'
 import { logForDebugging } from '../utils/debug.js'
+import { isValidSkillName, recordNameNotShown } from '../utils/sanitization.js'
 import { filterCompilableIgnorePatterns } from '../utils/ignorePatterns.js'
 import {
   EFFORT_LEVELS,
@@ -586,6 +587,10 @@ async function loadSkillsFromSkillsDir(
         )
 
         const skillName = entry.name
+        if (!isValidSkillName(skillName)) {
+          recordNameNotShown(skillName, 'is not offered')
+          return null
+        }
         const parsed = parseSkillFrontmatterFields(
           frontmatter,
           markdownContent,
@@ -734,6 +739,11 @@ async function loadSkillsFromCommandsDir(
           cmdName,
           'Custom command',
         )
+
+        if (!isValidSkillName(cmdName)) {
+          recordNameNotShown(cmdName, 'is not offered')
+          continue
+        }
 
         skills.push({
           skill: createSkillCommand({

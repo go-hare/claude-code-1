@@ -28,24 +28,16 @@ import { countCharInString, truncateCodeUnitsSafe } from '../../utils/stringUtil
 
 const COPY_DIR = join(tmpdir(), 'claude');
 const RESPONSE_FILENAME = 'response.md';
+const QUOTE_FILENAME = 'copy.md';
 const MAX_LOOKBACK = 20;
 const CODE_BLOCK_LABEL_MAX_LEN = 120;
 
-type CodeBlock = {
-  code: string;
-  lang: string | undefined;
-};
+import { type CopyableBlock, extractCopyableBlocksFromText } from './copyBlocks.js';
 
-function extractCodeBlocks(markdown: string): CodeBlock[] {
-  const tokens = marked.lexer(stripPromptXMLTags(markdown));
-  const blocks: CodeBlock[] = [];
-  for (const token of tokens) {
-    if (token.type === 'code') {
-      const codeToken = token as Tokens.Code;
-      blocks.push({ code: codeToken.text, lang: codeToken.lang });
-    }
-  }
-  return blocks;
+export type { CopyableBlock };
+
+export function extractCopyableBlocks(markdown: string): CopyableBlock[] {
+  return extractCopyableBlocksFromText(stripPromptXMLTags(markdown));
 }
 
 function extractTableCellRaw(cell: Tokens.TableCell): string {
@@ -178,14 +170,14 @@ function formatCodeBlockLabel(code: string): string {
 
 type PickerProps = {
   fullText: string;
-  codeBlocks: CodeBlock[];
+  blocks: CopyableBlock[];
   messageAge: number;
   onDone: (result?: string, options?: { display?: CommandResultDisplay }) => void;
 };
 
 type PickerSelection = number | 'full' | 'always';
 
-function CopyPicker({ fullText, codeBlocks, messageAge, onDone }: PickerProps): React.ReactNode {
+function CopyPicker({ fullText, blocks, messageAge, onDone }: PickerProps): React.ReactNode {
   const focusedIndexRef = useRef(0);
   const handleCancel = (): void => {
     onDone('Copy cancelled', { display: 'system' });
@@ -194,7 +186,9 @@ function CopyPicker({ fullText, codeBlocks, messageAge, onDone }: PickerProps): 
   useKeybinding('select:cancel', handleCancel, { context: 'Select' });
   const isScreenReader = useContext(AccessibilityContext) || isScreenReaderModeEnabled();
 
-  const items: PickerSelection[] = ['full', ...codeBlocks.map((_, index) => index), 'always'];
+  const codeCount = blocks.filter(b => b.kind === 'code').length;
+  const quoteCount = blocks.length - codeCount;
+  const items: PickerSelection[] = ['full', ...blocks.map((_, index) => index), 'always'];
 
   const fullMeta = [`${fullText.length} chars`, `${countCharInString(fullText, '\n') + 1} lines`];
   const options = [
@@ -204,13 +198,14 @@ function CopyPicker({ fullText, codeBlocks, messageAge, onDone }: PickerProps): 
       meta: fullMeta,
       facts: fullMeta,
     },
-    ...codeBlocks.map((block, index) => {
-      const blockLines = countCharInString(block.code, '\n') + 1;
-      const meta = [block.lang, blockLines > 1 ? `${blockLines} lines` : undefined].filter((x): x is string =>
+    ...blocks.map((block, index) => {
+      const blockLines = countCharInString(block.text, '\n') + 1;
+      const kindLabel = block.kind === 'quote' ? 'quote' : block.lang;
+      const meta = [kindLabel, blockLines > 1 ? `${blockLines} lines` : undefined].filter((x): x is string =>
         Boolean(x),
       );
       return {
-        label: formatCodeBlockLabel(block.code),
+        label: formatCodeBlockLabel(block.text),
         value: index as PickerSelection,
         meta,
         facts: meta.length > 0 ? [meta.join(', ')] : [],
@@ -227,15 +222,24 @@ function CopyPicker({ fullText, codeBlocks, messageAge, onDone }: PickerProps): 
     text: string;
     filename: string;
     blockIndex?: number;
+    isQuote: boolean;
   } {
     if (selected === 'full' || selected === 'always') {
-      return { text: fullText, filename: RESPONSE_FILENAME };
+      return { text: fullText, filename: RESPONSE_FILENAME, isQuote: false };
     }
-    const block = codeBlocks[selected]!;
+    const block = blocks[selected]!;
+    if (block.kind === 'quote') {
+      return {
+        text: block.text,
+        filename: QUOTE_FILENAME,
+        isQuote: true,
+      };
+    }
     return {
-      text: block.code,
+      text: block.text,
       filename: `copy${fileExtension(block.lang)}`,
-      blockIndex: selected,
+      blockIndex: blocks.slice(0, selected).filter(b => b.kind === 'code').length,
+      isQuote: false,
     };
   }
 
@@ -246,7 +250,8 @@ function CopyPicker({ fullText, codeBlocks, messageAge, onDone }: PickerProps): 
         saveGlobalConfig(c => ({ ...c, copyFullResponse: true }));
       }
       logEvent('tengu_copy', {
-        block_count: codeBlocks.length,
+        block_count: codeCount,
+        quote_count: quoteCount,
         always: true,
         message_age: messageAge,
       });
@@ -256,7 +261,9 @@ function CopyPicker({ fullText, codeBlocks, messageAge, onDone }: PickerProps): 
     }
     logEvent('tengu_copy', {
       selected_block: content.blockIndex,
-      block_count: codeBlocks.length,
+      selected_quote: content.isQuote,
+      block_count: codeCount,
+      quote_count: quoteCount,
       message_age: messageAge,
     });
     const result = await copyOrWriteToFile(content.text, content.filename);
@@ -267,7 +274,9 @@ function CopyPicker({ fullText, codeBlocks, messageAge, onDone }: PickerProps): 
     const content = getSelectionContent(selected);
     logEvent('tengu_copy', {
       selected_block: content.blockIndex,
-      block_count: codeBlocks.length,
+      selected_quote: content.isQuote,
+      block_count: codeCount,
+      quote_count: quoteCount,
       message_age: messageAge,
       write_shortcut: true,
     });
@@ -361,13 +370,16 @@ export const call: LocalJSXCommandCall = async (onDone, context, args) => {
   }
 
   const text = normalizeTablesInMarkdown(stripPromptXMLTags(texts[age]!));
-  const codeBlocks = extractCodeBlocks(text);
+  const blocks = extractCopyableBlocks(text);
+  const codeCount = blocks.filter(b => b.kind === 'code').length;
+  const quoteCount = blocks.length - codeCount;
   const config = getGlobalConfig();
 
-  if (codeBlocks.length === 0 || config.copyFullResponse) {
+  if (blocks.length === 0 || config.copyFullResponse) {
     logEvent('tengu_copy', {
       always: config.copyFullResponse,
-      block_count: codeBlocks.length,
+      block_count: codeCount,
+      quote_count: quoteCount,
       message_age: age,
     });
     const result = await copyOrWriteToFile(text, RESPONSE_FILENAME);
@@ -375,5 +387,5 @@ export const call: LocalJSXCommandCall = async (onDone, context, args) => {
     return null;
   }
 
-  return <CopyPicker fullText={text} codeBlocks={codeBlocks} messageAge={age} onDone={onDone} />;
+  return <CopyPicker fullText={text} blocks={blocks} messageAge={age} onDone={onDone} />;
 };

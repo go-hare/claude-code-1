@@ -35,6 +35,8 @@ import type { AssistantMessage } from 'src/types/message.js';
 import { parseForSecurity } from 'src/utils/bash/ast.js';
 import { PARSE_ABORTED, parseCommandRaw } from 'src/utils/bash/parser.js';
 import { splitCommand_DEPRECATED, splitCommandWithOperators } from 'src/utils/bash/commands.js';
+import { tryParseShellCommand } from 'src/utils/bash/shellQuote.js';
+import { matchingRuleForInput } from 'src/utils/permissions/filesystem.js';
 import { extractClaudeCodeHints } from 'src/utils/claudeCodeHints.js';
 import { detectCodeIndexingFromCommand } from 'src/utils/codeIndexing.js';
 import { clampTimeoutForAutoBackground } from 'src/utils/autoBackgroundTimeout.js';
@@ -376,6 +378,37 @@ For commands that are harder to parse at a glance (piped commands, obscure flags
 // Exposing it in the schema would let the model bypass permission checks and the
 // sandbox by pairing an innocuous command with an arbitrary file write.
 // Also conditionally remove run_in_background when background tasks are disabled.
+/**
+ * Official 2.1.325 `vIo` (`coerceInput` for BashTool):
+ * - `timeout_ms` -> `timeout` when `timeout` is absent
+ * - `command_description` -> `description` (or `command_description_dropped` if `description` already present)
+ */
+export function coerceBashInput(raw: unknown): { input: z.infer<InputSchema>; shapeClass: string } | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    return null;
+  }
+  const next: Record<string, unknown> = { ...(raw as Record<string, unknown>) };
+  const shapes: string[] = [];
+  if ('timeout_ms' in next && !('timeout' in next)) {
+    const val = next.timeout_ms;
+    if (typeof val === 'number' || (typeof val === 'string' && /^\d+$/.test(val))) {
+      next.timeout = val;
+      delete next.timeout_ms;
+      shapes.push('timeout_ms');
+    }
+  }
+  if ('command_description' in next) {
+    if (!('description' in next) && typeof next.command_description === 'string') {
+      next.description = next.command_description;
+      shapes.push('command_description');
+    } else {
+      shapes.push('command_description_dropped');
+    }
+    delete next.command_description;
+  }
+  return shapes.length > 0 ? { input: next as z.infer<InputSchema>, shapeClass: shapes.join(',') } : null;
+}
+
 const inputSchema = lazySchema(() =>
   isBackgroundTasksDisabled
     ? fullInputSchema().omit({
@@ -655,6 +688,379 @@ async function applySedEdit(
   };
 }
 
+type ParsedBashFileRead = {
+  filePath: string;
+  startLine: number | undefined;
+  endLine: number | undefined;
+  tailLines?: number;
+  numbered?: boolean;
+  requiresExitZero?: boolean;
+  contentNotInModelContext?: boolean;
+};
+
+const BASH_DEFAULT_HEAD_TAIL_LINES = 10;
+const SED_RANGE_RE = /^(\d+),(\d+)p$/;
+const SED_SINGLE_LINE_RE = /^(\d+)p$/;
+const NOOP_PREFIX_RE = /^\s*(echo|printf|true|:)\b/;
+const CAT_LIKE_ALLOWED_FLAGS = new Map<string, Set<string>>([
+  ['cat', new Set(['-n', '--number'])],
+  ['nl', new Set()],
+  ['bat', new Set(['-n', '--number', '-p', '--plain'])],
+  ['batcat', new Set(['-n', '--number', '-p', '--plain'])],
+]);
+const GREP_CONTEXT_SHORT_RE = /^-[ABC]\d+$/;
+const RG_CONTEXT_LONG_RE = /^--(?:after-context|before-context|context)=\d+$/;
+const GREP_FLAGS_RE = /^-[niwxEFGPHh]+$/;
+const GREP_LONG_FLAGS = new Set([
+  '--line-number',
+  '--ignore-case',
+  '--word-regexp',
+  '--line-regexp',
+  '--extended-regexp',
+  '--fixed-strings',
+  '--basic-regexp',
+  '--perl-regexp',
+  '--with-filename',
+  '--no-filename',
+  '--color=never',
+  '--color=auto',
+]);
+const RG_FLAGS_RE = /^-[iSswxFnNHUP]+$/;
+const RG_LONG_FLAGS = new Set([
+  '--ignore-case',
+  '--smart-case',
+  '--case-sensitive',
+  '--word-regexp',
+  '--line-regexp',
+  '--fixed-strings',
+  '--line-number',
+  '--no-line-number',
+  '--with-filename',
+  '--no-filename',
+  '--multiline',
+  '--pcre2',
+]);
+
+function tokenizeSimpleSubcommand(subcommand: string): string[] | null {
+  const parsed = tryParseShellCommand(subcommand);
+  if (!parsed.success) return null;
+  if (parsed.tokens.some(t => typeof t !== 'string')) return null;
+  return parsed.tokens as string[];
+}
+
+function parseSedSingleFileRead(subcommand: string): ParsedBashFileRead | null {
+  const tokens = tokenizeSimpleSubcommand(subcommand);
+  if (!tokens || tokens[0] !== 'sed') return null;
+  let quiet = false;
+  let script: string | null = null;
+  let filePath: string | null = null;
+  for (let i = 1; i < tokens.length; i++) {
+    const tok = tokens[i]!;
+    if (tok.startsWith('-')) {
+      if (tok.startsWith('--')) {
+        if (tok === '--in-place' || tok.startsWith('--in-place=')) return null;
+        if (tok === '--expression') return null;
+        if (tok === '--quiet' || tok === '--silent') quiet = true;
+      } else {
+        if (tok.includes('i')) return null;
+        if (tok === '-e') return null;
+        if (tok.includes('n')) quiet = true;
+      }
+      continue;
+    }
+    if (script === null) script = tok;
+    else if (filePath === null) filePath = tok;
+    else return null;
+  }
+  if (!quiet || script === null || filePath === null) return null;
+  const rangeMatch = SED_RANGE_RE.exec(script);
+  if (rangeMatch) {
+    return {
+      filePath,
+      startLine: Number(rangeMatch[1]),
+      endLine: Number(rangeMatch[2]),
+    };
+  }
+  const singleMatch = SED_SINGLE_LINE_RE.exec(script);
+  if (singleMatch) {
+    const line = Number(singleMatch[1]);
+    return { filePath, startLine: line, endLine: line };
+  }
+  return null;
+}
+
+function parseCatLikeSingleFileRead(subcommand: string): ParsedBashFileRead | null {
+  const tokens = tokenizeSimpleSubcommand(subcommand);
+  if (!tokens) return null;
+  const allowedFlags = CAT_LIKE_ALLOWED_FLAGS.get(tokens[0] ?? '');
+  if (allowedFlags === undefined) return null;
+  let filePath: string | null = null;
+  for (let i = 1; i < tokens.length; i++) {
+    const tok = tokens[i]!;
+    if (tok.startsWith('-') && tok !== '-') {
+      if (!allowedFlags.has(tok)) return null;
+      continue;
+    }
+    if (filePath !== null) return null;
+    filePath = tok;
+  }
+  if (filePath === null || filePath === '-') return null;
+  const numbered = tokens[0] === 'nl' || tokens.includes('-n') || tokens.includes('--number');
+  return {
+    filePath,
+    startLine: undefined,
+    endLine: undefined,
+    ...(numbered ? { numbered } : {}),
+  };
+}
+
+function parseHeadTailArgs(tokens: string[], defaultCount: number): { count: number; filePath: string } | null {
+  let count: number | null = null;
+  let filePath: string | null = null;
+  for (let i = 1; i < tokens.length; i++) {
+    const tok = tokens[i]!;
+    if (tok === '-n' || tok === '--lines') {
+      const next = tokens[++i];
+      if (next === undefined || !/^\d+$/.test(next)) return null;
+      count = Number(next);
+      continue;
+    }
+    if (tok.startsWith('--lines=')) {
+      const raw = tok.slice(8);
+      if (!/^\d+$/.test(raw)) return null;
+      count = Number(raw);
+      continue;
+    }
+    if (/^-n\d+$/.test(tok)) {
+      count = Number(tok.slice(2));
+      continue;
+    }
+    if (/^-\d+$/.test(tok)) {
+      count = Number(tok.slice(1));
+      continue;
+    }
+    if (tok.startsWith('-')) return null;
+    if (filePath !== null) return null;
+    filePath = tok;
+  }
+  if (filePath === null || filePath === '-' || count === 0) return null;
+  return { count: count ?? defaultCount, filePath };
+}
+
+function parseHeadSingleFileRead(subcommand: string): ParsedBashFileRead | null {
+  const tokens = tokenizeSimpleSubcommand(subcommand);
+  if (!tokens || tokens[0] !== 'head') return null;
+  const parsed = parseHeadTailArgs(tokens, BASH_DEFAULT_HEAD_TAIL_LINES);
+  if (!parsed) return null;
+  return { filePath: parsed.filePath, startLine: 1, endLine: parsed.count };
+}
+
+function parseTailSingleFileRead(subcommand: string): ParsedBashFileRead | null {
+  const tokens = tokenizeSimpleSubcommand(subcommand);
+  if (!tokens || tokens[0] !== 'tail') return null;
+  const parsed = parseHeadTailArgs(tokens, BASH_DEFAULT_HEAD_TAIL_LINES);
+  if (!parsed) return null;
+  return {
+    filePath: parsed.filePath,
+    startLine: undefined,
+    endLine: undefined,
+    tailLines: parsed.count,
+  };
+}
+
+function parseGrepSingleFileRead(subcommand: string): ParsedBashFileRead | null {
+  const tokens = tokenizeSimpleSubcommand(subcommand);
+  if (!tokens) return null;
+  const isRg = tokens[0] === 'rg';
+  if (!isRg && tokens[0] !== 'grep' && tokens[0] !== 'egrep' && tokens[0] !== 'fgrep') {
+    return null;
+  }
+  const shortRe = isRg ? RG_FLAGS_RE : GREP_FLAGS_RE;
+  const longSet = isRg ? RG_LONG_FLAGS : GREP_LONG_FLAGS;
+  let pattern: string | null = null;
+  let filePath: string | null = null;
+  for (let i = 1; i < tokens.length; i++) {
+    const tok = tokens[i]!;
+    if (tok.startsWith('-') && tok !== '-') {
+      if (tok === '-A' || tok === '-B' || tok === '-C') {
+        const next = tokens[++i];
+        if (next === undefined || !/^\d+$/.test(next)) return null;
+        continue;
+      }
+      if (isRg && (tok === '--after-context' || tok === '--before-context' || tok === '--context')) {
+        const next = tokens[++i];
+        if (next === undefined || !/^\d+$/.test(next)) return null;
+        continue;
+      }
+      if (GREP_CONTEXT_SHORT_RE.test(tok) || RG_CONTEXT_LONG_RE.test(tok) || shortRe.test(tok) || longSet.has(tok)) {
+        continue;
+      }
+      return null;
+    }
+    if (pattern === null) pattern = tok;
+    else if (filePath === null) filePath = tok;
+    else return null;
+  }
+  if (pattern === null || filePath === null || filePath === '-') return null;
+  if (/[*?[{]/.test(filePath)) return null;
+  return {
+    filePath,
+    startLine: undefined,
+    endLine: undefined,
+    requiresExitZero: true,
+    contentNotInModelContext: true,
+  };
+}
+
+/** #313 SEA `Nxs`: parse single-file cat/head/tail/sed -n/grep commands. */
+export function parseSingleFileReadCommands(command: string): ParsedBashFileRead[] {
+  if (/[|<>]/.test(command)) return [];
+  let subcommands: string[];
+  try {
+    subcommands = splitCommand_DEPRECATED(command);
+  } catch {
+    return [];
+  }
+  if (subcommands.length === 0) return [];
+  const out: ParsedBashFileRead[] = [];
+  for (const sub of subcommands) {
+    const parsed =
+      parseSedSingleFileRead(sub) ??
+      parseCatLikeSingleFileRead(sub) ??
+      parseHeadSingleFileRead(sub) ??
+      parseTailSingleFileRead(sub) ??
+      (subcommands.length === 1 ? parseGrepSingleFileRead(sub) : null);
+    if (parsed) {
+      out.push(parsed);
+    } else if (subcommands.length > 1 && !NOOP_PREFIX_RE.test(sub)) {
+      return [];
+    }
+  }
+  return out;
+}
+
+function extractSliceForBashRead(
+  content: string,
+  parsed: ParsedBashFileRead,
+): { content: string; offset: number | undefined; limit: number | undefined } | null {
+  if (parsed.tailLines !== undefined) {
+    const lines = content.split('\n');
+    if (lines.length > 0 && lines.at(-1) === '') lines.pop();
+    if (lines.length === 0) return null;
+    const count = Math.min(parsed.tailLines, lines.length);
+    const offset = lines.length - count + 1;
+    return {
+      content: lines.slice(offset - 1).join('\n'),
+      offset,
+      limit: count,
+    };
+  }
+  if (parsed.startLine === undefined) {
+    return { content, offset: undefined, limit: undefined };
+  }
+  const lines = content.split('\n');
+  const start = Math.max(1, parsed.startLine);
+  const end = Math.max(start, parsed.endLine ?? start);
+  if (start > lines.length) return null;
+  return {
+    content: lines.slice(start - 1, end).join('\n'),
+    offset: start,
+    limit: end - start + 1,
+  };
+}
+
+function stripLineNumberPrefix(line: string): string {
+  const m = /^[ \t]*\d+[ \t]/.exec(line);
+  return m ? line.slice(m[0].length) : /^[ \t]*$/.test(line) ? '' : line;
+}
+
+/** #403 SEA `mpi`: verify file content was actually printed in Bash stdout. */
+export function isContentPrintedInStdout(stdout: string, fileSlice: string, numbered?: boolean): boolean {
+  const needle = fileSlice.replace(/^(\s*\n)+/, '').trimEnd();
+  const haystack = stdout.replaceAll('\r\n', '\n');
+  if (haystack.includes(needle)) return true;
+  if (numbered === true) {
+    return haystack.split('\n').map(stripLineNumberPrefix).join('\n').includes(needle);
+  }
+  return false;
+}
+
+const BASH_READ_TRACK_MAX_BYTES = 10 * 1024 * 1024;
+
+/**
+ * #313 / #403 SEA `xIo`: track single-file reads from BashTool (`cat`, `head`,
+ * `tail`, `sed -n`, `grep`/`rg`) in `readFileState` (only when printed to stdout)
+ * and trigger `nestedMemoryAttachmentTriggers` (unless read-denied).
+ */
+export async function trackBashSingleFileReads(
+  command: string,
+  readFileState: ToolUseContext['readFileState'],
+  signal: AbortSignal,
+  exitCode: number,
+  stdoutForVerify: string | undefined,
+  nestedMemoryOpts?: {
+    triggers: Set<string>;
+    permissions: () => ToolUseContext['getAppState'] extends () => infer S
+      ? S extends { toolPermissionContext: infer P }
+        ? P
+        : never
+      : never;
+  },
+): Promise<void> {
+  const entries = parseSingleFileReadCommands(command).filter(
+    h => Boolean(h.filePath) && (!h.requiresExitZero || exitCode === 0),
+  );
+  if (entries.length === 0) return;
+  const fs = getFsImplementation();
+  await Promise.all(
+    entries.map(async h => {
+      const absPath = expandPath(h.filePath);
+      try {
+        if (readFileState.get(absPath)) {
+          if (
+            nestedMemoryOpts &&
+            matchingRuleForInput(absPath, nestedMemoryOpts.permissions(), 'read', 'deny') === null
+          ) {
+            nestedMemoryOpts.triggers.add(absPath);
+          }
+          return;
+        }
+        const stats = await fs.stat(absPath);
+        if (!stats.isFile() || stats.size > BASH_READ_TRACK_MAX_BYTES) return;
+        if (signal.aborted) return;
+        const raw = await fs.readFile(absPath, { encoding: 'utf8' });
+        const normalized = raw.replaceAll('\r\n', '\n');
+        const sliced = extractSliceForBashRead(normalized, h);
+        if (sliced === null || (!sliced.content.trim() && normalized.trim())) {
+          return;
+        }
+        if (
+          stdoutForVerify !== undefined &&
+          !h.contentNotInModelContext &&
+          !isContentPrintedInStdout(stdoutForVerify, sliced.content, h.numbered)
+        ) {
+          return;
+        }
+        readFileState.set(absPath, {
+          content: sliced.content,
+          timestamp: Math.floor(stats.mtimeMs),
+          offset: sliced.offset,
+          limit: sliced.limit,
+          ...(h.contentNotInModelContext || stdoutForVerify === undefined ? { contentNotInModelContext: true } : {}),
+        });
+        if (
+          nestedMemoryOpts &&
+          matchingRuleForInput(absPath, nestedMemoryOpts.permissions(), 'read', 'deny') === null
+        ) {
+          nestedMemoryOpts.triggers.add(absPath);
+        }
+      } catch {
+        // Ignore stat/read failures for non-existent or unreadable paths
+      }
+    }),
+  );
+}
+
 export const BashTool = buildTool({
   name: BASH_TOOL_NAME,
   searchHint: 'execute shell commands',
@@ -728,6 +1134,7 @@ export const BashTool = buildTool({
   get inputSchema(): InputSchema {
     return inputSchema();
   },
+  coerceInput: coerceBashInput,
   get outputSchema(): OutputSchema {
     return outputSchema();
   },
@@ -1138,6 +1545,22 @@ export const BashTool = buildTool({
       result.backgroundTaskId && commandHasAnyCd(input.command)
         ? `Session cwd remains ${getCwd()}; directory changes made by the backgrounded command do not apply to subsequent commands.`
         : undefined;
+    if (!result.backgroundTaskId && !wasInterrupted) {
+      await trackBashSingleFileReads(
+        input.command,
+        toolUseContext.readFileState,
+        toolUseContext.abortController.signal,
+        result.code,
+        persistedOutputPath !== undefined || isImage ? undefined : compressedStdout,
+        toolUseContext.nestedMemoryAttachmentTriggers
+          ? {
+              triggers: toolUseContext.nestedMemoryAttachmentTriggers,
+              permissions: () => toolUseContext.getAppState().toolPermissionContext,
+            }
+          : undefined,
+      );
+    }
+
     const data: Out = {
       stdout: compressedStdout,
       stderr: mergeBashStderr(stderrForShellReset, sandboxViolationSuffix, EOL),

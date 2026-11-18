@@ -3,11 +3,18 @@ import type {
   ContentBlockParam,
   MessageParam,
 } from '@anthropic-ai/sdk/resources/index.mjs'
-import { MAX_MCP_DESCRIPTION_LENGTH as PKG_MAX_MCP_DESCRIPTION_LENGTH } from '@claude-code/mcp-client'
+import {
+  MAX_LOADED_MCP_DESCRIPTION_LENGTH as PKG_MAX_LOADED_MCP_DESCRIPTION_LENGTH,
+  MAX_MCP_DESCRIPTION_LENGTH as PKG_MAX_MCP_DESCRIPTION_LENGTH,
+} from '@claude-code/mcp-client'
+import type { ChildProcess } from 'child_process'
+import { spawn } from 'child_process'
+import { join } from 'path'
 import { UnauthorizedError } from '@modelcontextprotocol/client'
 import type { AssistantMessage } from 'src/types/message.js'
 import type { Command } from '../../commands.js'
 import type { Tool } from '../../Tool.js'
+import { logForDebugging } from '../../utils/debug.js'
 import { isEnvDefinedFalsy } from '../../utils/envUtils.js'
 import {
   AbortError,
@@ -57,11 +64,31 @@ import type {
 export const DEFAULT_MCP_TOOL_TIMEOUT_MS = 100_000_000
 
 /**
- * Cap on MCP tool descriptions and server instructions sent to the model.
- * OpenAPI-generated MCP servers have been observed dumping 15-60KB of endpoint
- * docs into tool.description; this caps the p95 tail without losing the intent.
+ * Cap on MCP tool descriptions and server instructions sent up front (4096).
  */
 export const MAX_MCP_DESCRIPTION_LENGTH = PKG_MAX_MCP_DESCRIPTION_LENGTH
+
+/**
+ * Cap on MCP tool descriptions loaded through tool search (16384).
+ */
+export const MAX_LOADED_MCP_DESCRIPTION_LENGTH =
+  PKG_MAX_LOADED_MCP_DESCRIPTION_LENGTH
+
+/**
+ * SEA 325 `Pne(isLoaded = false)` — resolve description cap with env override.
+ */
+export function getMaxMcpDescriptionLength(isLoaded = false): number {
+  const raw = process.env.CLAUDE_CODE_MAX_MCP_DESCRIPTION_LENGTH
+  if (raw !== undefined) {
+    const parsed = Number(raw)
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed
+    }
+  }
+  return isLoaded
+    ? MAX_LOADED_MCP_DESCRIPTION_LENGTH
+    : MAX_MCP_DESCRIPTION_LENGTH
+}
 
 /**
  * Max cache size for fetch* caches. Keyed by server name (stable across
@@ -614,4 +641,187 @@ export function extractToolUseId(
     return undefined
   }
   return firstBlock.id
+}
+
+/**
+ * SEA 325 `_We = 128` (`C3e`) — API max tool name length.
+ * Tools with names > 128 chars are omitted and reported once per tool name.
+ */
+export const MAX_MCP_TOOL_NAME_LENGTH = 128
+const MAX_REPORTED_LONG_TOOL_NAMES = 256
+const reportedLongToolNames = new Set<string>()
+
+export function resetReportedLongToolNamesForTest(): void {
+  reportedLongToolNames.clear()
+}
+
+export function filterMcpToolsByNameLength<
+  T extends { name: string; mcpInfo?: { serverName: string } },
+>(tools: readonly T[], fallbackServerName?: string): T[] {
+  const skippedByServer = new Map<string, number>()
+  const kept = tools.filter(tool => {
+    if (tool.name.length <= MAX_MCP_TOOL_NAME_LENGTH) {
+      return true
+    }
+    const serverName =
+      tool.mcpInfo?.serverName ?? fallbackServerName ?? 'unknown'
+    if (
+      reportedLongToolNames.size < MAX_REPORTED_LONG_TOOL_NAMES &&
+      !reportedLongToolNames.has(tool.name)
+    ) {
+      reportedLongToolNames.add(tool.name)
+      skippedByServer.set(
+        serverName,
+        (skippedByServer.get(serverName) ?? 0) + 1,
+      )
+      logMCPError(
+        serverName,
+        `Tool "${tool.name}" is not sent to Claude: its name has ${tool.name.length} characters and the API accepts at most ${MAX_MCP_TOOL_NAME_LENGTH}`,
+      )
+    }
+    return false
+  })
+  for (const [_serverName, skippedCount] of skippedByServer) {
+    logEvent('tengu_mcp_degraded', {
+      reason:
+        'tool_name_too_long' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      skippedCount,
+    })
+  }
+  return kept
+}
+
+const TERMINAL_ERROR_CODES = [
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EPIPE',
+  'EHOSTUNREACH',
+  'ECONNREFUSED',
+]
+const TERMINAL_CODE_SET = new Set([
+  ...TERMINAL_ERROR_CODES,
+  'ConnectionRefused',
+  'ConnectionClosed',
+])
+const HTTP_POST_STATUS_RE = /^Error POSTing to endpoint \(HTTP (\d+)\)/
+
+function isHttpStatusCode(v: unknown): boolean {
+  return typeof v === 'number' && v >= 100 && v <= 599
+}
+
+/**
+ * SEA 325 `tu(e)` (`isTerminalConnectionError`) — distinguish transport-level
+ * network errors from server/HTTP/JSON-RPC error replies that happen to mention
+ * a network error name in their message text.
+ */
+export function isTerminalConnectionError(error: Error): boolean {
+  if (error.name === 'AbortError') return true
+  const code = 'code' in error ? (error as { code?: unknown }).code : undefined
+  const status =
+    'status' in error ? (error as { status?: unknown }).status : undefined
+  const httpStatusMatch = HTTP_POST_STATUS_RE.exec(error.message)?.[1]
+  if (
+    isHttpStatusCode(status) ||
+    isHttpStatusCode(code) ||
+    (typeof code === 'number' && code < 0) ||
+    (httpStatusMatch !== undefined && isHttpStatusCode(Number(httpStatusMatch)))
+  ) {
+    return false
+  }
+  if (typeof code === 'string' && TERMINAL_CODE_SET.has(code)) {
+    return true
+  }
+  const msg = error.message
+  return (
+    TERMINAL_ERROR_CODES.some(c => msg.includes(c)) ||
+    msg.includes('Body Timeout Error') ||
+    /\bterminated\b/.test(msg) ||
+    msg.includes('SSE stream disconnected') ||
+    msg.includes('Failed to reconnect SSE stream')
+  )
+}
+
+export const WINDOWS_STDIO_STDIN_CLOSE_GRACE_MS = 300
+export const WINDOWS_STDIO_KILL_WAIT_MS = 600
+
+function isProcessExited(
+  proc: Pick<ChildProcess, 'exitCode' | 'signalCode'>,
+): boolean {
+  return proc.exitCode !== null || proc.signalCode !== null
+}
+
+function raceExitWithTimeout(
+  exitPromise: Promise<void>,
+  timeoutMs: number,
+): Promise<void> {
+  return new Promise<void>(resolve => {
+    const timer = setTimeout(resolve, timeoutMs)
+    if (typeof timer === 'object' && 'unref' in timer) {
+      timer.unref()
+    }
+    void exitPromise.then(() => {
+      clearTimeout(timer)
+      resolve()
+    })
+  })
+}
+
+function killWindowsProcessTree(pid: number): void {
+  const systemRoot = process.env.SystemRoot || 'C:\\Windows'
+  const taskkillExe = join(systemRoot, 'System32', 'taskkill.exe')
+  try {
+    const child = spawn(taskkillExe, ['/PID', String(pid), '/T', '/F'], {
+      stdio: 'ignore',
+      windowsHide: true,
+      shell: false,
+    })
+    child.on('error', () => {
+      try {
+        spawn('taskkill', ['/PID', String(pid), '/T', '/F'], {
+          stdio: 'ignore',
+          windowsHide: true,
+          shell: false,
+        }).on('error', () => {})
+      } catch {
+        // ignore
+      }
+    })
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * SEA 325 `yr(e)` — Windows stdio MCP shutdown: close stdin first, wait 300 ms,
+ * and only kill the process tree if the server is still running.
+ */
+export async function gracefulShutdownWindowsStdio(
+  proc: Pick<
+    ChildProcess,
+    'pid' | 'exitCode' | 'signalCode' | 'stdin' | 'once'
+  >,
+  options: {
+    graceMs?: number
+    killWaitMs?: number
+    killTree?: (pid: number) => void
+  } = {},
+): Promise<void> {
+  const pid = proc.pid
+  if (pid === undefined || isProcessExited(proc)) return
+  const graceMs = options.graceMs ?? WINDOWS_STDIO_STDIN_CLOSE_GRACE_MS
+  const killWaitMs = options.killWaitMs ?? WINDOWS_STDIO_KILL_WAIT_MS
+  const killTree = options.killTree ?? killWindowsProcessTree
+
+  const exited = new Promise<void>(resolve => {
+    proc.once('exit', () => resolve())
+  })
+  proc.stdin?.end()
+  await raceExitWithTimeout(exited, graceMs)
+  if (isProcessExited(proc)) return
+
+  logForDebugging(
+    `[MCP] stdio server process ${pid} is still running ${graceMs}ms after stdin closed; terminating its process tree`,
+  )
+  killTree(pid)
+  await raceExitWithTimeout(exited, killWaitMs)
 }

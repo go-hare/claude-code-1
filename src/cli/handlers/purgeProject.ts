@@ -261,25 +261,53 @@ async function askInteractive(
   }
 }
 
+export type PurgeFailure = {
+  message: string
+  code: string
+}
+
 async function deleteItem(
   item: PurgePlanItem,
   projectPath: string | null,
-): Promise<void> {
+): Promise<PurgeFailure | null> {
   if (item.kind === 'dir' || item.kind === 'file') {
-    await rm(item.path, { recursive: true, force: true })
-    return
+    try {
+      await rm(item.path, { recursive: true, force: true })
+      return null
+    } catch (err) {
+      const code =
+        typeof err === 'object' &&
+        err !== null &&
+        'code' in err &&
+        typeof (err as { code?: unknown }).code === 'string'
+          ? (err as { code: string }).code
+          : undefined
+      if (code === undefined) throw err
+      const msg = err instanceof Error ? err.message : String(err)
+      return {
+        message: `Could not delete ${item.path} — ${msg}`,
+        code: `delete_failed_${code}`,
+      }
+    }
   }
   if (item.kind === 'config') {
-    saveGlobalConfig(current => {
-      if (!current.projects) return current
-      if (projectPath === null) {
-        return { ...current, projects: {} }
+    try {
+      saveGlobalConfig(current => {
+        if (!current.projects) return current
+        if (projectPath === null) {
+          return { ...current, projects: {} }
+        }
+        const next = { ...current.projects }
+        delete next[projectPath]
+        return { ...current, projects: next }
+      })
+      return null
+    } catch {
+      return {
+        message: `Failed to remove projects["${projectPath ?? ''}"] from .claude.json — is your config directory writable?`,
+        code: 'config_write_failed',
       }
-      const next = { ...current.projects }
-      delete next[projectPath]
-      return { ...current, projects: next }
-    })
-    return
+    }
   }
   if (item.kind === 'history') {
     const hp = historyPath()
@@ -299,10 +327,63 @@ async function deleteItem(
         kept.push(line)
       }
       await writeFile(hp, kept.length ? `${kept.join('\n')}\n` : '', 'utf8')
-    } catch {
-      // missing history is fine
+      return null
+    } catch (err) {
+      const code =
+        typeof err === 'object' &&
+        err !== null &&
+        'code' in err &&
+        typeof (err as { code?: unknown }).code === 'string'
+          ? (err as { code: string }).code
+          : undefined
+      if (code === 'ENOENT') return null
+      const msg = err instanceof Error ? err.message : String(err)
+      return {
+        message: `Could not update ${hp} — ${msg}`,
+        code: 'history_rewrite_refused',
+      }
     }
   }
+  return null
+}
+
+/**
+ * Official Y() — report any per-item deletion failures, list what could not be
+ * deleted, and set exitCode = 1; otherwise print the success message.
+ */
+function finishPurge(failures: PurgeFailure[], successMessage: string): void {
+  if (failures.length > 0) {
+    const hasDeleteFailed = failures.some(f =>
+      f.code.startsWith('delete_failed_'),
+    )
+    const hint = hasDeleteFailed
+      ? '\nWhat could not be deleted is still on disk: fix the cause and run the command again, or delete those paths by hand.'
+      : ''
+    process.stderr.write(
+      `${failures.length} item(s) failed:\n  ${failures.map(f => f.message).join('\n  ')}${hint}\n`,
+    )
+    const codes = new Set(failures.map(f => f.code))
+    logEvent('cli_purge_project', {
+      result: (codes.size === 1
+        ? failures[0]!.code
+        : 'multiple_failures') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    process.exitCode = 1
+    return
+  }
+  process.stdout.write(`${successMessage}\n`)
+  logEvent('cli_purge_project', {
+    result:
+      'success' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  })
+}
+
+export function purgeStoppedByError(err: unknown): void {
+  const msg = err instanceof Error ? err.message : String(err)
+  process.stderr.write(
+    `Purge stopped before it finished: ${msg}\nSome items may still be on disk. Run the command again; \`--dry-run\` lists what is left.\n`,
+  )
+  process.exitCode = 1
 }
 
 export async function purgeProjectHandler(
@@ -369,6 +450,7 @@ export async function purgeProjectHandler(
   if (options.interactive) {
     let deleteRest = false
     let deleted = 0
+    const failures: PurgeFailure[] = []
     for (const [i, item] of plan.items.entries()) {
       let action: 'delete' | 'skip' | 'all' = deleteRest
         ? 'delete'
@@ -378,14 +460,23 @@ export async function purgeProjectHandler(
         action = 'delete'
       }
       if (action === 'skip') continue
-      await deleteItem(item, plan.projectPath)
+      const failure = await deleteItem(item, plan.projectPath)
+      if (failure) {
+        failures.push(failure)
+        continue
+      }
       deleted++
     }
-    process.stdout.write(`${deleted} item(s) deleted.\n`)
-    logEvent('cli_purge_project', {
-      count:
-        deleted as unknown as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-    })
+    const summary = `Purged ${deleted}/${plan.items.length} item(s)${plan.projectPath ? ` for ${plan.projectPath}` : ''}.`
+    if (deleted === 0 && failures.length === 0) {
+      process.stdout.write(`${summary}\n`)
+      logEvent('cli_purge_project', {
+        count:
+          0 as unknown as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      return
+    }
+    finishPurge(failures, summary)
     return
   }
 
@@ -401,16 +492,17 @@ export async function purgeProjectHandler(
     }
   }
 
+  const failures: PurgeFailure[] = []
   for (const item of plan.items) {
-    await deleteItem(item, plan.projectPath)
+    const failure = await deleteItem(item, plan.projectPath)
+    if (failure) {
+      failures.push(failure)
+    }
   }
-  process.stdout.write(
+  finishPurge(
+    failures,
     options.all
-      ? `${plan.items.length} item(s) across all projects.\n`
-      : `${plan.items.length} item(s) deleted.\n`,
+      ? `Purged ${plan.items.length} item(s) across all projects.`
+      : `Purged ${plan.items.length} item(s) for ${plan.projectPath}.`,
   )
-  logEvent('cli_purge_project', {
-    count: plan.items
-      .length as unknown as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-  })
 }

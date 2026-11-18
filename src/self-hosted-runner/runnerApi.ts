@@ -81,21 +81,20 @@ export function sessionAuthHeaders(token: string): Record<string, string> {
   }
 }
 
+function errorFieldFromBody(data: unknown, field: string): string | undefined {
+  if (data === null || typeof data !== 'object') return undefined
+  const obj = data as Record<string, unknown>
+  if (obj.error !== null && typeof obj.error === 'object') {
+    const val = (obj.error as Record<string, unknown>)[field]
+    if (typeof val === 'string') return val
+  }
+  const top = obj[field]
+  return typeof top === 'string' ? top : undefined
+}
+
 /** densable `eqv` */
 function errorTypeFromBody(data: unknown): string | undefined {
-  if (
-    data !== null &&
-    typeof data === 'object' &&
-    'error' in data &&
-    (data as { error: unknown }).error !== null &&
-    typeof (data as { error: unknown }).error === 'object' &&
-    'type' in ((data as { error: object }).error as object) &&
-    typeof ((data as { error: { type: unknown } }).error as { type: unknown })
-      .type === 'string'
-  ) {
-    return (data as { error: { type: string } }).error.type
-  }
-  return undefined
+  return errorFieldFromBody(data, 'type')
 }
 
 export type RunnerApiError = Error & {
@@ -104,6 +103,10 @@ export type RunnerApiError = Error & {
   isNotFound?: boolean
   isEpochMismatch?: boolean
   isSessionNotActive?: boolean
+  isSelfHostedDisabledByOrg?: boolean
+  errorType?: string
+  errorReason?: string
+  serverMessage?: string
 }
 
 /** densable `Oae` */
@@ -114,14 +117,18 @@ export function assertRunnerApiOk(
 ): void {
   if (status >= 200 && status < 300) return
   const detail = extractRunnerApiErrorDetail(data)
+  const errorType = errorTypeFromBody(data)
+  const errorReason = errorFieldFromBody(data, 'reason')
+  const serverMessage = errorFieldFromBody(data, 'message')
+  const selfHostedDisabled = errorReason === 'self_hosted_environments_disabled'
   const err = new Error(
     status === 401
       ? `${op}: Authentication failed (401)${detail ? `: ${detail}` : ''}. Check your credentials.`
       : status === 403
-        ? `${op}: Access denied (403)${detail ? `: ${detail}` : ''}. Token may be revoked.`
+        ? `${op}: Access denied (403)${detail ? `: ${detail}` : ''}. ${selfHostedDisabled ? 'The organization is not enabled for self-hosted environments.' : 'Token may be revoked.'}`
         : status === 404
           ? (detail ?? `${op}: Not found (404). The resource may not exist.`)
-          : status === 409 && errorTypeFromBody(data) === 'session_not_active'
+          : status === 409 && errorType === 'session_not_active'
             ? 'Session not active (409): the session was archived or deleted.'
             : status === 409
               ? `${op}: Epoch conflict (409)${detail ? `: ${detail}` : ''}. Another runner has taken over this session.`
@@ -130,15 +137,146 @@ export function assertRunnerApiOk(
                 : `${op}: Failed with status ${status}${detail ? `: ${detail}` : ''}`,
   ) as RunnerApiError
   err.httpStatus = status
-  if (status === 401 || status === 403) err.isAuthFailure = true
+  if (errorType !== undefined) err.errorType = errorType
+  if (errorReason !== undefined) err.errorReason = errorReason
+  if (serverMessage !== undefined) err.serverMessage = serverMessage
+  if (status === 401 || status === 403) {
+    err.isAuthFailure = true
+    if (status === 403 && selfHostedDisabled) {
+      err.isSelfHostedDisabledByOrg = true
+    }
+  }
   if (status === 404) err.isNotFound = true
   if (status === 409) {
     err.isEpochMismatch = true
-    if (errorTypeFromBody(data) === 'session_not_active') {
+    if (errorType === 'session_not_active') {
       err.isSessionNotActive = true
     }
   }
   throw err
+}
+
+const WORK_ORDER_USED_REFUSAL = {
+  cause:
+    'this work order has already been used, or another runner already has its session',
+  exitCode: 1,
+} as const
+
+const WORK_ORDER_NOT_NEEDED_REFUSAL = {
+  cause: 'this work order can no longer be used, so this runner is not needed',
+  exitCode: 0,
+} as const
+
+const WORK_ORDER_REFUSALS = new Map<
+  string,
+  { cause: string; exitCode: number }
+>([
+  ['already_registered', WORK_ORDER_USED_REFUSAL],
+  ['standby_already_redeemed', WORK_ORDER_USED_REFUSAL],
+  [
+    'superseded',
+    {
+      cause:
+        'this work order has been superseded, so this runner is not needed',
+      exitCode: 1,
+    },
+  ],
+  [
+    'session_paused',
+    {
+      cause: 'the session is paused, so no runner is needed for it right now',
+      exitCode: 0,
+    },
+  ],
+  ['queue_entry_gone', WORK_ORDER_NOT_NEEDED_REFUSAL],
+  ['pool_moved', WORK_ORDER_NOT_NEEDED_REFUSAL],
+  ['standby_gone', WORK_ORDER_NOT_NEEDED_REFUSAL],
+])
+
+const WORK_ORDER_FALLBACK_REFUSAL = {
+  cause: 'this work order can no longer be used',
+  exitCode: 1,
+} as const
+
+const RUNNER_TROUBLESHOOTING_URL =
+  'See https://code.claude.com/docs/en/self-hosted-environments-deploy#troubleshooting'
+const WORK_ORDER_RESTART_HINT =
+  'A work order is single-use and short-lived, so restarting this runner with the same one cannot help. A restarted runner needs a fresh work order, which comes only with a new spawn request.'
+
+function decodeWorkOrderExpSeconds(token: string): number | undefined {
+  const parts = token.split('.')
+  if (parts.length !== 3 || !parts[1]) return undefined
+  try {
+    const payload = JSON.parse(
+      Buffer.from(parts[1], 'base64url').toString('utf8'),
+    ) as { exp?: unknown }
+    return typeof payload.exp === 'number' ? payload.exp : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * densable `ic` — format RegisterRunner refusal for work-order & session-inactive errors.
+ */
+export function formatRegisterRunnerRefusal(
+  err: unknown,
+  workOrderToken?: string,
+): { line: string; exitCode: number } | null {
+  const status = getHttpStatusFromError(err)
+  const e = (
+    err !== null && typeof err === 'object' ? err : {}
+  ) as RunnerApiError
+  const errorType = typeof e.errorType === 'string' ? e.errorType : undefined
+  const errorReason =
+    typeof e.errorReason === 'string' ? e.errorReason : undefined
+  const serverMessage =
+    typeof e.serverMessage === 'string' && e.serverMessage.length <= 1024
+      ? e.serverMessage
+      : undefined
+  const parts = [
+    [errorType, errorReason].filter(Boolean).join(', '),
+    serverMessage,
+  ].filter(Boolean)
+  const answer =
+    `The server answered (HTTP ${status}) ${parts.join(': ')}`.trimEnd()
+
+  let refusal: { cause: string; exitCode: number }
+  if (
+    status === 401 &&
+    workOrderToken &&
+    workOrderToken.split('.').length === 3
+  ) {
+    const expSec = decodeWorkOrderExpSeconds(workOrderToken)
+    const expDate = new Date((expSec ?? NaN) * 1000)
+    const validExp = !Number.isNaN(expDate.getTime())
+    if (!validExp || expDate.getTime() > Date.now()) {
+      return {
+        line: `RegisterRunner refused because the server did not accept this work order${validExp ? ", which has not expired by this host's clock" : ', which may have expired'}. Check the work order${validExp ? ', --api-url, and the clock' : ' and --api-url'}. A restart alone cannot help. This does not show the environment secret is bad, so do not rotate it. ${RUNNER_TROUBLESHOOTING_URL} ${answer}`,
+        exitCode: 1,
+      }
+    }
+    refusal = {
+      cause: `this work order expired at ${expDate.toISOString()}`,
+      exitCode: 1,
+    }
+  } else if (status === 409 && errorType === 'work_order_not_redeemable') {
+    refusal =
+      (errorReason ? WORK_ORDER_REFUSALS.get(errorReason) : undefined) ??
+      WORK_ORDER_FALLBACK_REFUSAL
+  } else if (status === 409 && errorType === 'session_not_active') {
+    refusal = {
+      cause: 'the session is no longer active, so this runner is not needed',
+      exitCode: 0,
+    }
+  } else {
+    return null
+  }
+
+  return {
+    line: `RegisterRunner refused because ${refusal.cause}. ${WORK_ORDER_RESTART_HINT} The environment secret is not at fault, so do not rotate it. ${RUNNER_TROUBLESHOOTING_URL} ${answer}`,
+    exitCode: refusal.exitCode,
+  }
 }
 
 /** densable `qrr` */

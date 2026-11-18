@@ -57,6 +57,8 @@ export type SubagentStatusTaskRow = {
   id: string
   name: string | undefined
   type: string
+  /** 2.1.293 #286: custom/built-in subagent type so scripts can tell types apart. */
+  agentType: string
   status: string
   description: string
   label: string
@@ -181,6 +183,7 @@ export async function executeSubagentStatusLine(
         id: g.id,
         name: nameByAgentId.get(g.id),
         type: g.type,
+        agentType: g.agentType,
         status: g.status,
         description: g.description,
         label: taskLabelForStatusLine(g),

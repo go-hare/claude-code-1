@@ -9,6 +9,7 @@ import {
   attachHeadlessRemoteMcpReconnect,
   chainMcpClientOnclose,
   HEADLESS_MCP_MAX_RECONNECT_ATTEMPTS,
+  HEADLESS_MCP_SLOW_RECONNECT_ATTEMPTS,
   headlessReconnectBackoffMs,
   isHeadlessReconnectingTransport,
   reconnectHeadlessRemoteMcpAfterClose,
@@ -160,7 +161,10 @@ describe('headless MCP reconnect 243', () => {
       cleanupConnectedMcpClients: async () => {},
     }
     await reconnectHeadlessRemoteMcpAfterClose(deps, closed)
-    expect(calls).toBe(HEADLESS_MCP_MAX_RECONNECT_ATTEMPTS)
+    expect(calls).toBe(
+      HEADLESS_MCP_MAX_RECONNECT_ATTEMPTS +
+        HEADLESS_MCP_SLOW_RECONNECT_ATTEMPTS,
+    )
     expect(getClients()[0]?.type).toBe('failed')
     expect(reconnected).toEqual([])
   })
@@ -246,12 +250,18 @@ describe('headless MCP reconnect 243', () => {
     expect(calls).toBe(0)
     expect(getClients()[0]).toBe(closed)
     await new Promise<void>(resolve => setImmediate(resolve))
-    expect(calls).toBe(HEADLESS_MCP_MAX_RECONNECT_ATTEMPTS)
+    expect(calls).toBe(
+      HEADLESS_MCP_MAX_RECONNECT_ATTEMPTS +
+        HEADLESS_MCP_SLOW_RECONNECT_ATTEMPTS,
+    )
     expect(getClients()[0]?.type).toBe('failed')
     closed.client.onclose?.()
     closed.client.onclose?.()
     await Promise.resolve()
-    expect(calls).toBe(HEADLESS_MCP_MAX_RECONNECT_ATTEMPTS)
+    expect(calls).toBe(
+      HEADLESS_MCP_MAX_RECONNECT_ATTEMPTS +
+        HEADLESS_MCP_SLOW_RECONNECT_ATTEMPTS,
+    )
   })
 
   test('289: an onclose before the scheduled closed-client check does not duplicate the dial', async () => {

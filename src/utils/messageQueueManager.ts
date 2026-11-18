@@ -1,5 +1,6 @@
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import type { Permutations } from 'src/types/utils.js'
+import { addToHistory } from '../history.js'
 import {
   getMainThreadAgentId,
   getSessionId,
@@ -747,6 +748,16 @@ export class MessageQueueInstance {
         'popAll',
         typeof command.value === 'string' ? command.value : undefined,
       )
+      // Official 2.1.295 (#424): keep pulled-back queued messages in prompt
+      // history (with armUndo: false) so they aren't lost after ← + ↑/Esc.
+      const text = extractTextFromValue(command.value)
+      if (text) {
+        const display = command.mode === 'bash' ? `!${text}` : text
+        addToHistory(
+          { display, pastedContents: command.pastedContents ?? {} },
+          { armUndo: false },
+        )
+      }
     }
 
     // densable: keep commands not in Ft (incl. bash left behind on prompt restore)

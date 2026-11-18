@@ -306,6 +306,17 @@ type TrackedTool = {
   contextModifiersApplied?: boolean
 }
 
+export type ExclusiveCallQueuedBehindEntry = {
+  isQueued: () => boolean
+  mayYetBeQueued: () => boolean
+  holdLogged: boolean
+}
+
+export const exclusiveCallQueuedBehind = new Map<
+  string,
+  ExclusiveCallQueuedBehindEntry
+>()
+
 /**
  * Executes tools as they stream in with concurrency control.
  * - Concurrent-safe tools can execute in parallel with other concurrent-safe tools
@@ -319,6 +330,7 @@ export class StreamingToolExecutor {
   private erroredToolDescription = ''
   private siblingAbortController: AbortController
   private discarded = false
+  private responseOpen = true
   private progressAvailableResolve?: () => void
   private drainableResolve?: () => void
   private drainGeneration = 0
@@ -707,6 +719,23 @@ export class StreamingToolExecutor {
       // the query controller so the query loop's post-tool abort check ends
       // the turn. Without bubble-up, ExitPlanMode "clear context + auto"
       // sends REJECT_MESSAGE to the model instead of aborting (#21056 regression).
+      const exclusiveEntry: ExclusiveCallQueuedBehindEntry = {
+        isQueued: () =>
+          !this.discarded &&
+          this.tools
+            .slice(this.tools.indexOf(tool) + 1)
+            .some(t => t.status === 'queued' && !t.isConcurrencySafe),
+        mayYetBeQueued: () => !this.discarded && this.responseOpen,
+        holdLogged: false,
+      }
+      exclusiveCallQueuedBehind.set(tool.id, exclusiveEntry)
+      using _releaseExclusiveHold = {
+        [Symbol.dispose]: () => {
+          if (exclusiveCallQueuedBehind.get(tool.id) === exclusiveEntry) {
+            exclusiveCallQueuedBehind.delete(tool.id)
+          }
+        },
+      }
       const session = this.toolUseContext.session
       const runnerHandlesDetach = Boolean(
         (runToolUse as unknown as Record<symbol, unknown>)[
@@ -1188,6 +1217,7 @@ export class StreamingToolExecutor {
    * Also yields progress messages as they become available
    */
   async *getRemainingResults(): AsyncGenerator<MessageUpdate, void> {
+    this.responseOpen = false
     if (this.discarded) {
       return
     }

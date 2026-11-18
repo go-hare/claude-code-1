@@ -55,8 +55,34 @@ export const ORCH_DEFAULT_HOOK_TIMEOUT_MS = 60_000
 export const ORCH_DEFAULT_EXPECTED_SPAWN_SECONDS = 120
 /** densable `Tqv` */
 export const ORCH_SECRET_READ_TIMEOUT_MS = 10_000
-/** densable `Eqv` */
+/** densable `Eqv` — 4–6s jittered poll interval (base 5s ± 1s) */
 export const ORCH_POLL_INTERVAL_MS = 5_000
+export const ORCH_POLL_INTERVAL_MIN_MS = 4_000
+export const ORCH_POLL_INTERVAL_MAX_MS = 6_000
+
+/**
+ * Official #332 — sleep 4 to 6 seconds between polls instead of a constant 5s
+ * so several replicas for one environment stop polling at the same moment.
+ */
+export function getJitteredPollIntervalMs(
+  baseMs: number = ORCH_POLL_INTERVAL_MS,
+  randomFn: () => number = Math.random,
+): number {
+  if (baseMs === ORCH_POLL_INTERVAL_MS) {
+    return (
+      ORCH_POLL_INTERVAL_MIN_MS +
+      Math.floor(
+        randomFn() *
+          (ORCH_POLL_INTERVAL_MAX_MS - ORCH_POLL_INTERVAL_MIN_MS + 1),
+      )
+    )
+  }
+  const jitter = Math.floor(baseMs * 0.2)
+  return Math.max(
+    0,
+    baseMs - jitter + Math.floor(randomFn() * (2 * jitter + 1)),
+  )
+}
 /** densable `PFh` / `wqv` — poll error backoff */
 export const ORCH_POLL_BACKOFF_INITIAL_MS = 1_000
 export const ORCH_POLL_BACKOFF_MAX_MS = 30_000
@@ -1521,7 +1547,7 @@ export async function runOrchestratorLoop(
         ...warm.map(h => dispatch(h, poll.server_date, true)),
       ])
     }
-    await sleepMs(pollIntervalMs, signal)
+    await sleepMs(getJitteredPollIntervalMs(pollIntervalMs), signal)
   }
 }
 

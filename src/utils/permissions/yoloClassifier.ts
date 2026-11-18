@@ -1889,3 +1889,141 @@ export function formatActionForClassifier(
     content: [{ type: 'tool_use', name: toolName, input: toolInput }],
   }
 }
+
+/**
+ * Official 2.1.325 `Eii` (#524) — known auto-mode classifier rule slugs,
+ * including `live_shared_artifact_sensitive_delta`.
+ */
+export const AUTO_MODE_CLASSIFIER_RULE_SLUGS = [
+  'account_standing_rule_changes',
+  'auto_mode_bypass',
+  'blind_apply',
+  'browser_file_upload_exfil',
+  'browser_input_exfil',
+  'browser_js_exfil',
+  'browser_navigate_exfil',
+  'browser_shortcut_execution',
+  'chatops_trigger_comments',
+  'ci_bypass',
+  'cloud_storage_mass_delete',
+  'cluster_wide_workload_creation',
+  'code_from_external',
+  'code_that_leaks_when_run',
+  'command_network_lists',
+  'containment_escape',
+  'create_public_surface',
+  'create_rce_surface',
+  'create_unsafe_agents',
+  'credential_exploration',
+  'credential_leakage',
+  'credential_materialization',
+  'data_exfiltration',
+  'dns_domain_cert_changes',
+  'excess_sensitive_detail',
+  'exfil_scouting',
+  'expose_local_services',
+  'external_ingress_tunnel',
+  'external_system_writes',
+  'feature_flag_writes',
+  'git_destructive',
+  'instruction_poisoning',
+  'interfere_with_workloads',
+  'irreversible_deletion_general',
+  'irreversible_local_destruction',
+  'live_shared_artifact_sensitive_delta',
+  'logging_audit_tampering',
+  'merge_without_review',
+  'modify_shared_resources',
+  'node_lifecycle_operations',
+  'out_of_place_publication',
+  'package_registry_bypass',
+  'permission_grant',
+  'pii_data_handling',
+  'production_deploy',
+  'production_reads',
+  'protected_scope_iac_apply',
+  'public_data_sharing_upload',
+  'real_world_transactions',
+  'remote_repoint',
+  'remote_shell_writes',
+  'safety_bypass_flag',
+  'sandbox_network_callback',
+  'secret_store_writes',
+  'security_test_removal',
+  'security_weaken',
+  'self_approval',
+  'self_modification',
+  'sensitive_remote_exec',
+  'sensitive_source_provenance',
+  'session_transcript_tampering',
+  'shared_cluster_mutation',
+  'shared_scratch_sweep',
+  'third_party_attack',
+  'tls_auth_weaken',
+  'tmux_self_drive',
+  'traffic_redirection',
+  'unauthorized_persistence',
+  'unrequested_artifact_publish',
+  'unrequested_commit_in_a_connected_app',
+  'untrusted_code_integration',
+  'unverifiable_deletion_scope',
+  'unverifiable_deletion_target',
+] as const
+
+const COWORK_CLASSIFIER_RULE_SLUGS = [
+  'cowork_delete_grant',
+  'cowork_folder_access',
+  'cowork_run_routine_now',
+  'cowork_scheduled_task_delete',
+  'cowork_scheduled_task_write',
+  'cowork_skill_persistence',
+] as const
+
+const EXTRA_CLASSIFIER_RULE_SLUGS = [
+  'access_added_as_a_means',
+  'bot_check_circumvention',
+  'consent_given_for_the_user',
+  'identity_not_given',
+  'notes_for_later_sessions',
+  'save_over_an_occupied_name',
+  'stated_interface_sidestepped',
+  'walled_content_from_a_copy',
+  'website_access_circumvention',
+] as const
+
+const CATEGORY_CLASSIFIER_RULE_SLUGS = [
+  'destructive_or_unwanted_actions',
+  'unauthorized_access',
+  'undermining_oversight',
+  'unsanctioned_communication',
+] as const
+
+const KNOWN_CLASSIFIER_RULE_SLUG_SET = new Set<string>([
+  ...AUTO_MODE_CLASSIFIER_RULE_SLUGS,
+  ...COWORK_CLASSIFIER_RULE_SLUGS,
+  ...EXTRA_CLASSIFIER_RULE_SLUGS,
+  ...CATEGORY_CLASSIFIER_RULE_SLUGS,
+])
+
+/** Official 2.1.325 `Gwn` — normalize a bracketed rule label to snake_case slug. */
+export function normalizeClassifierRuleSlug(label: string): string {
+  return label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
+/** Official 2.1.325 `wii` — extract `[Rule Label]` prefix into a normalized slug. */
+export function extractClassifierRuleSlug(line: string): string | undefined {
+  const match = /^\[([^[\]]{1,80})\]/.exec(line)?.[1]
+  return (match && normalizeClassifierRuleSlug(match)) || undefined
+}
+
+/** Official 2.1.325 `cN` — return the slug if it is in the known allowlist, else undefined. */
+export function sanitizeClassifierRuleSlug(
+  slug: string | undefined,
+): string | undefined {
+  return slug !== undefined && KNOWN_CLASSIFIER_RULE_SLUG_SET.has(slug)
+    ? slug
+    : undefined
+}

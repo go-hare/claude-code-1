@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useState } from 'react';
 import type { CommandResultDisplay, LocalJSXCommandContext } from '../../commands.js';
-import { Feedback } from '../../components/Feedback.js';
+import { createFeedbackSendStore, Feedback } from '../../components/Feedback.js';
 import { FeedbackDrafts } from '../../components/FeedbackDrafts.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import type { Message } from '../../types/message.js';
@@ -50,6 +50,7 @@ export function renderFeedbackComponent(
     onDone(K.reason);
     return null;
   }
+  const send = createFeedbackSendStore(K.kind);
   // Extra gold fields live on gt; Feedback.tsx is outside exclusive dirs.
   return (
     <Feedback
@@ -62,6 +63,7 @@ export function renderFeedbackComponent(
         mode: K.kind,
         readFileState,
         command,
+        send,
       } as unknown as React.ComponentProps<typeof Feedback>)}
     />
   );

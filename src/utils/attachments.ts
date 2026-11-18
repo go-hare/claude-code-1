@@ -4,6 +4,7 @@ import {
   logEvent,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
 } from 'src/services/analytics/index.js'
+import { logOTelEvent } from 'src/utils/telemetry/events.js'
 import {
   toolMatchesName,
   type Tools,
@@ -39,10 +40,15 @@ import {
 import { getPlanFilePath, getPlan } from './plans.js'
 import { getConnectedIdeName } from './ide.js'
 import {
+  collectWithheldMemorySeen,
+  drainWithheldMemoryOwed,
   getManagedAndUserConditionalRules,
   getMemoryFilesForNestedDirectory,
   getConditionalRulesForCwdLevelDirectory,
+  getWithheldMemoryToken,
   type MemoryFileInfo,
+  type WithheldMemoryAttachmentEntry,
+  type WithheldMemoryEntry,
 } from './claudemd.js'
 import { dirname, join, parse, relative, resolve } from 'path'
 import { getCwd } from 'src/utils/cwd.js'
@@ -396,6 +402,8 @@ export type AsyncHookResponseAttachment = {
   hookName: string
   hookEvent: HookEvent | 'StatusLine' | 'FileSuggestion'
   toolName?: string
+  command?: string
+  pluginId?: string
   response: SyncHookJSONOutput
   stdout: string
   stderr: string
@@ -503,6 +511,17 @@ export type HookNonBlockingErrorAttachment = {
   durationMs?: number
 }
 
+export type AtMentionReferenceAttachment = {
+  type: 'at_mention_reference'
+  mentions: string[]
+  unread?: 'too_large' | 'unexamined' | 'in_ranges'
+  fileSize?: number
+  totalLines?: number
+  ranges?: Array<{ offset: number; limit: number }>
+  readAllOfIt?: 'over_size_limit' | 'within_size_limit'
+  displayPath?: string
+}
+
 export type Attachment =
   /**
    * User at-mentioned the file
@@ -512,6 +531,7 @@ export type Attachment =
   | PDFReferenceAttachment
   | AlreadyReadFileAttachment
   | ReadTruncationNoticeAttachment
+  | AtMentionReferenceAttachment
   /**
    * An at-mentioned file was edited
    */
@@ -569,6 +589,11 @@ export type Attachment =
       content: MemoryFileInfo
       /** Path relative to CWD at creation time, for stable display */
       displayPath: string
+    }
+  | {
+      type: 'withheld_memory'
+      entries: WithheldMemoryAttachmentEntry[]
+      by: string
     }
   | {
       type: 'relevant_memories'
@@ -1343,7 +1368,7 @@ export async function getAttachments(
           getUnifiedTaskAttachments(toolUseContext),
         ),
         maybe('async_hook_responses', async () =>
-          getAsyncHookResponseAttachments(),
+          getAsyncHookResponseAttachments(messages),
         ),
         maybe('token_usage', async () =>
           Promise.resolve(
@@ -1414,13 +1439,49 @@ export async function getAttachments(
 
   clearTimeout(timeoutId)
   // Defensive: a getter leaking [undefined] crashes .map(a => a.type) below.
-  return (
+  const combined = (
     [
       ...userAttachmentResults.flat(),
       ...threadAttachmentResults.flat(),
       ...mainThreadAttachmentResults.flat(),
     ] as Attachment[]
   ).filter(a => a !== undefined && a !== null)
+  return filterWithheldMemoryDuplicates(combined)
+}
+
+export function createWithheldMemoryAttachments(
+  entries: readonly WithheldMemoryEntry[],
+  isNonInteractive = getIsNonInteractiveSession(),
+): Attachment[] {
+  if (entries.length === 0 || isNonInteractive) {
+    return []
+  }
+  const cwd = getCwd()
+  return [
+    {
+      type: 'withheld_memory',
+      entries: entries.map(entry => ({
+        ...entry,
+        displayPath: relative(cwd, entry.path),
+      })),
+      by: getWithheldMemoryToken(),
+    },
+  ]
+}
+
+export function filterWithheldMemoryDuplicates(
+  attachments: Attachment[],
+): Attachment[] {
+  const seen = new Set<string>(
+    attachments.flatMap(a => (a.type === 'nested_memory' ? [a.path] : [])),
+  )
+  return attachments.flatMap((a): Attachment[] => {
+    if (a.type !== 'withheld_memory') return [a]
+    const filtered = a.entries.filter(
+      ({ path }) => !seen.has(path) && seen.add(path),
+    )
+    return filtered.length === 0 ? [] : [{ ...a, entries: filtered }]
+  })
 }
 
 async function maybe<A>(label: string, f: () => Promise<A[]>): Promise<A[]> {
@@ -2684,6 +2745,20 @@ async function processAtMentionedFiles(
           return null
         }
 
+        // #228: stat before walkPermissionPaths so @-words that name no file
+        // (ENOENT/ENOTDIR) return null instead of a spurious `unread: "unexamined"`
+        // when a Read deny rule is set and cwd is under a symlink.
+        let stats: Awaited<ReturnType<typeof stat>> | undefined
+        try {
+          stats = await stat(absoluteFilename)
+        } catch (statError) {
+          if (isENOENT(statError)) {
+            return null
+          }
+          // Non-ENOENT errors (e.g. EACCES, ELOOP) fall through to
+          // walkPermissionPaths so unexamined/denied paths are handled properly.
+        }
+
         const walked = walkPermissionPaths(absoluteFilename)
         if (walked.unresolved) {
           logEvent('tengu_at_mention_extracting_filename_error', {
@@ -2710,33 +2785,28 @@ async function processAtMentionedFiles(
         }
 
         // Check if it's a directory
-        try {
-          const stats = await stat(absoluteFilename)
-          if (stats.isDirectory()) {
-            try {
-              const entries = await readdir(absoluteFilename, {
-                withFileTypes: true,
-              })
-              const names = filterAtMentionDirEntries(
-                entries,
-                absoluteFilename,
-                appState.toolPermissionContext,
-              )
-              const stdout = names.join('\n')
-              logEvent('tengu_at_mention_extracting_directory_success', {})
+        if (stats?.isDirectory()) {
+          try {
+            const entries = await readdir(absoluteFilename, {
+              withFileTypes: true,
+            })
+            const names = filterAtMentionDirEntries(
+              entries,
+              absoluteFilename,
+              appState.toolPermissionContext,
+            )
+            const stdout = names.join('\n')
+            logEvent('tengu_at_mention_extracting_directory_success', {})
 
-              return {
-                type: 'directory' as const,
-                path: absoluteFilename,
-                content: stdout,
-                displayPath: relative(getCwd(), absoluteFilename),
-              }
-            } catch {
-              return null
+            return {
+              type: 'directory' as const,
+              path: absoluteFilename,
+              content: stdout,
+              displayPath: relative(getCwd(), absoluteFilename),
             }
+          } catch {
+            return null
           }
-        } catch {
-          // If stat fails, continue with file logic
         }
 
         return await generateFileAttachment(
@@ -2758,23 +2828,66 @@ async function processAtMentionedFiles(
   return results.filter(Boolean) as Attachment[]
 }
 
-function processAgentMentions(
+/** #331: cap per-prompt OTEL/telemetry @-mention logging at 100 per type. */
+export const MAX_AT_MENTION_TELEMETRY_PER_PROMPT = 100
+
+function logAtMentionOutcome(
+  index: number,
+  mentionType: 'agent' | 'mcp_resource',
+  success: boolean,
+): void {
+  if (index >= MAX_AT_MENTION_TELEMETRY_PER_PROMPT) return
+  if (mentionType === 'agent') {
+    logEvent(
+      success
+        ? 'tengu_at_mention_agent_success'
+        : 'tengu_at_mention_agent_not_found',
+      {},
+    )
+  } else {
+    logEvent(
+      success
+        ? 'tengu_at_mention_mcp_resource_success'
+        : 'tengu_at_mention_mcp_resource_error',
+      {},
+    )
+  }
+  void logOTelEvent('at_mention', {
+    mention_type: mentionType,
+    success: String(success),
+  })
+}
+
+function logUnreportedAtMentions(
+  mentionType: 'agent' | 'mcp_resource',
+  totalCount: number,
+): void {
+  if (totalCount > MAX_AT_MENTION_TELEMETRY_PER_PROMPT) {
+    logEvent('tengu_at_mention_unreported', {
+      mention_type: mentionType,
+      count: totalCount - MAX_AT_MENTION_TELEMETRY_PER_PROMPT,
+    } as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
+  }
+}
+
+export function processAgentMentions(
   input: string,
   agents: AgentDefinition[],
 ): Attachment[] {
   const agentMentions = extractAgentMentions(input)
   if (agentMentions.length === 0) return []
 
-  const results = agentMentions.map(mention => {
+  logUnreportedAtMentions('agent', agentMentions.length)
+  const results = agentMentions.map((mention, index) => {
     const agentType = mention.replace('agent-', '')
     const agentDef = agents.find(def => def.agentType === agentType)
 
     if (!agentDef) {
-      logEvent('tengu_at_mention_agent_not_found', {})
+      logAtMentionOutcome(index, 'agent', false)
       return null
     }
 
-    logEvent('tengu_at_mention_agent_success', {})
+    logAtMentionOutcome(index, 'agent', true)
 
     return {
       type: 'agent_mention' as const,
@@ -2787,7 +2900,7 @@ function processAgentMentions(
   )
 }
 
-async function processMcpResourceAttachments(
+export async function processMcpResourceAttachments(
   input: string,
   toolUseContext: ToolUseContext,
 ): Promise<Attachment[]> {
@@ -2795,22 +2908,23 @@ async function processMcpResourceAttachments(
   if (resourceMentions.length === 0) return []
 
   const mcpClients = toolUseContext.options.mcpClients || []
+  logUnreportedAtMentions('mcp_resource', resourceMentions.length)
 
   const results = await Promise.all(
-    resourceMentions.map(async mention => {
+    resourceMentions.map(async (mention, index) => {
       try {
         const [serverName, ...uriParts] = mention.split(':')
         const uri = uriParts.join(':') // Rejoin in case URI contains colons
 
         if (!serverName || !uri) {
-          logEvent('tengu_at_mention_mcp_resource_error', {})
+          logAtMentionOutcome(index, 'mcp_resource', false)
           return null
         }
 
         // Find the MCP client
         const client = mcpClients.find(c => c.name === serverName)
         if (!client || client.type !== 'connected') {
-          logEvent('tengu_at_mention_mcp_resource_error', {})
+          logAtMentionOutcome(index, 'mcp_resource', false)
           return null
         }
 
@@ -2819,7 +2933,7 @@ async function processMcpResourceAttachments(
           toolUseContext.options.mcpResources?.[serverName] || []
         const resourceInfo = serverResources.find(r => r.uri === uri)
         if (!resourceInfo) {
-          logEvent('tengu_at_mention_mcp_resource_error', {})
+          logAtMentionOutcome(index, 'mcp_resource', false)
           return null
         }
 
@@ -2828,7 +2942,7 @@ async function processMcpResourceAttachments(
             uri,
           })
 
-          logEvent('tengu_at_mention_mcp_resource_success', {})
+          logAtMentionOutcome(index, 'mcp_resource', true)
 
           return {
             type: 'mcp_resource' as const,
@@ -2839,12 +2953,12 @@ async function processMcpResourceAttachments(
             content: result,
           }
         } catch (error) {
-          logEvent('tengu_at_mention_mcp_resource_error', {})
+          logAtMentionOutcome(index, 'mcp_resource', false)
           logError(error)
           return null
         }
       } catch {
-        logEvent('tengu_at_mention_mcp_resource_error', {})
+        logAtMentionOutcome(index, 'mcp_resource', false)
         return null
       }
     }),
@@ -3023,6 +3137,13 @@ async function getNestedMemoryAttachments(
   }
 
   toolUseContext.nestedMemoryAttachmentTriggers.clear()
+
+  if (!toolUseContext.agentId) {
+    const owed = drainWithheldMemoryOwed([])
+    if (owed.length > 0) {
+      attachments.push(...createWithheldMemoryAttachments(owed))
+    }
+  }
 
   return attachments
 }
@@ -3897,6 +4018,7 @@ export async function generateFileAttachment(
   | CompactFileReferenceAttachment
   | PDFReferenceAttachment
   | AlreadyReadFileAttachment
+  | AtMentionReferenceAttachment
   | null
 > {
   const { offset, limit } = options ?? {}
@@ -3930,7 +4052,13 @@ export async function generateFileAttachment(
           size_bytes: stats.size,
           mode,
         } as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
-        return null
+        return {
+          type: 'at_mention_reference' as const,
+          mentions: [filename],
+          unread: 'too_large' as const,
+          fileSize: stats.size,
+          displayPath: relative(getCwd(), filename),
+        }
       } catch {
         // If we can't stat the file, proceed with normal reading (will fail later if file doesn't exist)
       }
@@ -4349,7 +4477,69 @@ async function getUnifiedTaskAttachments(
   }))
 }
 
-async function getAsyncHookResponseAttachments(): Promise<Attachment[]> {
+function extractSessionStartResponseTexts(response: unknown): string[] {
+  if (!response || typeof response !== 'object') return []
+  const r = response as Record<string, unknown>
+  const texts: string[] = []
+  if (typeof r.systemMessage === 'string' && r.systemMessage) {
+    texts.push(r.systemMessage)
+  }
+  const specific = r.hookSpecificOutput
+  if (specific && typeof specific === 'object') {
+    const addCtx = (specific as Record<string, unknown>).additionalContext
+    if (typeof addCtx === 'string' && addCtx) {
+      texts.push(addCtx)
+    }
+  }
+  return texts
+}
+
+export function isDuplicateSessionStartHookResponse(
+  candidate: {
+    response: unknown
+    command?: string
+    pluginId?: string
+  },
+  priorAttachments: readonly Attachment[],
+): boolean {
+  const texts = extractSessionStartResponseTexts(candidate.response)
+  if (texts.length === 0) return false
+  for (let i = priorAttachments.length - 1; i >= 0; i--) {
+    const att = priorAttachments[i]
+    if (!att || !('hookEvent' in att) || att.hookEvent !== 'SessionStart') {
+      continue
+    }
+    if (att.type === 'async_hook_response') {
+      const sameSource =
+        att.command === candidate.command && att.pluginId === candidate.pluginId
+      if (att.command !== undefined && !sameSource) {
+        continue
+      }
+      const priorTexts = extractSessionStartResponseTexts(att.response)
+      if (priorTexts.length > 0) {
+        return texts.every(t => priorTexts.includes(t))
+      }
+      if (sameSource && att.exitCode === 0) {
+        return false
+      }
+    } else if (att.type === 'hook_additional_context') {
+      const priorTexts = Array.isArray(att.content) ? att.content : []
+      if (priorTexts.length > 0) {
+        return texts.every(t => priorTexts.includes(t))
+      }
+    } else if (att.type === 'hook_success') {
+      const priorTexts = att.content ? [att.content] : []
+      if (priorTexts.length > 0) {
+        return texts.every(t => priorTexts.includes(t))
+      }
+    }
+  }
+  return false
+}
+
+export async function getAsyncHookResponseAttachments(
+  messages?: Message[],
+): Promise<Attachment[]> {
   const responses = await checkForAsyncHookResponses()
 
   if (responses.length === 0) {
@@ -4360,34 +4550,60 @@ async function getAsyncHookResponseAttachments(): Promise<Attachment[]> {
     `Hooks: getAsyncHookResponseAttachments found ${responses.length} responses`,
   )
 
-  const attachments = responses.map(
-    ({
+  const priorAttachments: Attachment[] = responses.some(
+    r => r.hookEvent === 'SessionStart',
+  )
+    ? (messages ?? []).flatMap(m =>
+        m?.type === 'attachment' && m.attachment
+          ? [m.attachment as Attachment]
+          : [],
+      )
+    : []
+
+  const attachments: Attachment[] = []
+  for (const r of responses) {
+    const {
       processId,
       response,
       hookName,
       hookEvent,
       toolName,
-      pluginId: _pluginId,
+      pluginId,
       stdout,
       stderr,
       exitCode,
-    }) => {
-      logForDebugging(
-        `Hooks: Creating attachment for ${processId} (${hookName}): ${jsonStringify(response)}`,
+    } = r
+    const command = (r as { command?: string }).command
+    if (
+      hookEvent === 'SessionStart' &&
+      isDuplicateSessionStartHookResponse(
+        { response, command, pluginId },
+        priorAttachments,
       )
-      return {
-        type: 'async_hook_response' as const,
-        processId,
-        hookName,
-        hookEvent,
-        toolName,
-        response,
-        stdout,
-        stderr,
-        exitCode,
-      }
-    },
-  )
+    ) {
+      logForDebugging(
+        `Hooks: Not adding the output of ${processId} (${hookName}) to the conversation: Claude already sees the same text from an earlier SessionStart run`,
+      )
+      continue
+    }
+    logForDebugging(
+      `Hooks: Creating attachment for ${processId} (${hookName}): ${jsonStringify(response)}`,
+    )
+    const attachment: AsyncHookResponseAttachment = {
+      type: 'async_hook_response' as const,
+      processId,
+      hookName,
+      hookEvent,
+      toolName,
+      ...(hookEvent === 'SessionStart' && { command, pluginId }),
+      response,
+      stdout,
+      stderr,
+      exitCode,
+    }
+    attachments.push(attachment)
+    priorAttachments.push(attachment)
+  }
 
   // Remove delivered hooks from registry to prevent re-processing
   if (responses.length > 0) {

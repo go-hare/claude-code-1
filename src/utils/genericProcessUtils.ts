@@ -331,8 +331,95 @@ export async function getProcessStartTimeMs(
 }
 
 /**
+ * Gold `pje` — alias for `getProcessStartTimeMs`.
+ */
+export const getProcessCreationTimeMsAsync = getProcessStartTimeMs
+
+/**
+ * Gold `plt` — synchronous process start identity (`lstart` on Unix,
+ * kernel32 FILETIME on win32 when FFI is available).
+ */
+export function getProcessStartTime(pid: number): string | undefined {
+  if (!Number.isInteger(pid) || pid <= 0) return undefined
+  if (process.platform === 'win32') {
+    if (isWin32ProcTimesFfiAvailable()) {
+      const ft = getWin32CreationFileTime(pid)
+      return ft === undefined ? undefined : ft.toString()
+    }
+    return undefined
+  }
+  try {
+    const out = execSyncWithDefaults_DEPRECATED(
+      `LC_ALL=C TZ=UTC ps -o lstart= -p ${pid}`,
+      { timeout: 1000 },
+    )
+    return out ? out.trim() : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Gold `uqr` — synchronous process identity match (returns true when expected
+ * is undefined, current is undefined, equal, or win32 cross-format).
+ */
+export function isSameProcess(
+  pid: number,
+  expectedStartTime: string | undefined,
+): boolean {
+  if (expectedStartTime === undefined) return true
+  return processStartIdentityEquals(expectedStartTime, getProcessStartTime(pid))
+}
+
+/**
+ * Gold `S_` — proven same process (strict check, returns undefined if live
+ * process start time could not be read).
+ */
+export async function provenSameProcessAsync(
+  pid: number,
+  expectedStartTime: string,
+): Promise<boolean | undefined> {
+  const current = await getProcessLstartString(pid)
+  return current === undefined ? undefined : expectedStartTime === current
+}
+
+/**
+ * Gold `oye` — send SIGTERM to the first killable target in `pids`, then
+ * schedule an unref'd SIGKILL after 5s guarded by `isSameProcess`.
+ */
+export function sigtermThenKill(
+  pids: number[],
+  expectedStartTime?: string,
+  sigkillDelayMs = 5000,
+): boolean {
+  const valid = pids.filter(pid => Math.abs(pid) > 1)
+  for (const pid of valid) {
+    try {
+      process.kill(pid, 'SIGTERM')
+    } catch {
+      continue
+    }
+    setTimeout(
+      (targetPid: number, checkPid: number, startTime?: string) => {
+        if (!isSameProcess(checkPid, startTime)) return
+        try {
+          process.kill(targetPid, 'SIGKILL')
+        } catch {
+          // Process already exited
+        }
+      },
+      sigkillDelayMs,
+      pid,
+      Math.abs(valid[0]!),
+      expectedStartTime,
+    ).unref()
+    return true
+  }
+  return false
+}
+
+/**
  * densable zU / nU / iB — identity still matches when expected is undefined,
- * current is undefined (ps race), equal, or win32 cross-format (Yzc).
  */
 export async function processLstartMatches(
   pid: number,

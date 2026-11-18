@@ -7,6 +7,10 @@ import type { ConnectedMCPServer } from './types.js'
 import type { McpClientDependencies } from './interfaces.js'
 import { buildMcpToolName } from './strings.js'
 import { memoizeWithLRU } from './cache.js'
+import {
+  MAX_LOADED_MCP_DESCRIPTION_LENGTH,
+  MAX_MCP_DESCRIPTION_LENGTH,
+} from './connection.js'
 import { recursivelySanitizeUnicode } from './sanitization.js'
 
 // ============================================================================
@@ -15,9 +19,6 @@ import { recursivelySanitizeUnicode } from './sanitization.js'
 
 /** Default max cache size for tool discovery (keyed by server name) */
 export const MCP_FETCH_CACHE_SIZE = 20
-
-/** Maximum description length before truncation */
-const MAX_MCP_DESCRIPTION_LENGTH = 2048
 
 // ============================================================================
 // Tool discovery
@@ -68,11 +69,16 @@ export async function discoverTools(
         async description() {
           return tool.description ?? ''
         },
-        async prompt() {
+        async prompt(
+          options?: Parameters<CoreTool['prompt']>[0] & {
+            loadedThroughToolSearch?: boolean
+          },
+        ) {
           const desc = tool.description ?? ''
-          return desc.length > MAX_MCP_DESCRIPTION_LENGTH
-            ? desc.slice(0, MAX_MCP_DESCRIPTION_LENGTH) + '… [truncated]'
-            : desc
+          const cap = options?.loadedThroughToolSearch
+            ? MAX_LOADED_MCP_DESCRIPTION_LENGTH
+            : MAX_MCP_DESCRIPTION_LENGTH
+          return desc.length > cap ? desc.slice(0, cap) + '… [truncated]' : desc
         },
         isConcurrencySafe: () => tool.annotations?.readOnlyHint ?? false,
         isReadOnly: () => tool.annotations?.readOnlyHint ?? false,

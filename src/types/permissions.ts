@@ -595,4 +595,17 @@ export type ToolPermissionContext = {
    * Session takes no built-in tools and none from plugins either.
    */
   readonly builtInToolsDisabled?: boolean
+  /**
+   * #379 SEA `toolsKeptByLaunchList`: frozen list of tool names kept by `--tools`
+   * at launch (when `--tools` is not a preset / `preset:default`). Used for
+   * post-launch dynamic tool withholding (`yln`) and `restricted` code-execution
+   * synthesis (`J`).
+   */
+  readonly toolsKeptByLaunchList?: readonly string[]
+  /**
+   * #206 SEA `pollEventDeliveryGuard`: when true during poll-event delivery,
+   * guards against replacing/merging command-scoped allow rules. Cleared on
+   * normal turn-start (`czs`).
+   */
+  readonly pollEventDeliveryGuard?: boolean
 }

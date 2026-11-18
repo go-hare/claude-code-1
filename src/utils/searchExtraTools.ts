@@ -24,6 +24,8 @@ import {
   isDeferredTool,
   SEARCH_EXTRA_TOOLS_TOOL_NAME,
 } from '@claude-code/builtin-tools/tools/SearchExtraToolsTool/prompt.js'
+import { SEND_MESSAGE_TOOL_NAME } from '@claude-code/builtin-tools/tools/SendMessageTool/constants.js'
+import { isTeammate } from './teammate.js'
 import type { Message } from '../types/message.js'
 import {
   countToolDefinitionTokens,
@@ -49,8 +51,12 @@ import { zodToJsonSchema } from './zodToJsonSchema.js'
  * Overridable via GrowthBook `tengu_tool_search_unsupported_models`.
  */
 const DEFAULT_TOOL_SEARCH_UNSUPPORTED_MODELS = [
-  'claude-3-5-haiku',
+  'claude-3-opus',
+  'claude-3-sonnet',
   'claude-3-haiku',
+  'claude-3-5-sonnet',
+  'claude-3-5-haiku',
+  'claude-3-7-sonnet',
 ] as const
 
 /**
@@ -244,6 +250,17 @@ export function getAutoSearchExtraToolsCharThreshold(model: string): number {
  * Memoized by deferred tool names — cache is invalidated when MCP servers connect/disconnect.
  * Returns null if the API is unavailable (caller should fall back to char heuristic).
  */
+/**
+ * Official 2.1.295 #388: Teammates (including in-process agent teammates)
+ * must receive SendMessage inline rather than deferred behind ToolSearch.
+ */
+export function shouldDeferToolForSearch(tool: Tool): boolean {
+  if (tool.name === SEND_MESSAGE_TOOL_NAME && isTeammate()) {
+    return false
+  }
+  return isDeferredTool(tool)
+}
+
 const getDeferredToolTokenCount = memoize(
   async (
     tools: Tools,
@@ -251,7 +268,7 @@ const getDeferredToolTokenCount = memoize(
     agents: AgentDefinition[],
     model: string,
   ): Promise<number | null> => {
-    const deferredTools = tools.filter(t => isDeferredTool(t))
+    const deferredTools = tools.filter(t => shouldDeferToolForSearch(t))
     if (deferredTools.length === 0) return 0
 
     try {
@@ -269,7 +286,7 @@ const getDeferredToolTokenCount = memoize(
   },
   (tools: Tools) =>
     tools
-      .filter(t => isDeferredTool(t))
+      .filter(t => shouldDeferToolForSearch(t))
       .map(t => t.name)
       .join(','),
 )
@@ -404,7 +421,7 @@ async function calculateDeferredToolDescriptionChars(
   getToolPermissionContext: () => Promise<ToolPermissionContext>,
   agents: AgentDefinition[],
 ): Promise<number> {
-  const deferredTools = tools.filter(t => isDeferredTool(t))
+  const deferredTools = tools.filter(t => shouldDeferToolForSearch(t))
   if (deferredTools.length === 0) return 0
 
   const sizes = await Promise.all(
@@ -950,7 +967,7 @@ export function getDeferredToolsDelta(
     }
   }
 
-  const deferred: Tool[] = tools.filter(isDeferredTool)
+  const deferred: Tool[] = tools.filter(shouldDeferToolForSearch)
   const deferredNames = new Set(deferred.map(t => t.name))
   const poolNames = new Set(tools.map(t => t.name))
 
