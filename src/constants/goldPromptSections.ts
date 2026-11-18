@@ -3,6 +3,7 @@
  * _go / kgo / ogo / Zmo). Analog hosts — never export minify names.
  */
 import { getIsNonInteractiveSession } from '../bootstrap/state.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
 import { AGENT_TOOL_NAME } from '@claude-code/builtin-tools/tools/AgentTool/constants.js'
 import { FILE_WRITE_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileWriteTool/prompt.js'
@@ -187,6 +188,22 @@ export function getOpus5ReducedDelegationSection(model: string): string | null {
   }
   if (process.env.CLAUDE_CODE_SLATE_BITTERN === '0') return null
   return getOpus5ReducedDelegationBody()
+}
+
+export function getSubagentSteerDelegationSection(
+  enabledTools: ReadonlySet<string>,
+): string | null {
+  if (!enabledTools.has(AGENT_TOOL_NAME)) {
+    return null
+  }
+  const mode =
+    process.env.CLAUDE_CODE_SUBAGENT_STEER ??
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_subagent_steer', '')
+  if (mode !== 'counter_steer') {
+    return null
+  }
+  return `## Delegating to subagents
+Only delegate to the ${AGENT_TOOL_NAME} tool when the task genuinely benefits from isolation, parallel exploration, or a specialized context window. For straightforward single-file reads, quick searches, or small edits you can do directly in a couple of tool calls, do the work yourself instead of spawning a subagent.`
 }
 
 /** densable eLt extra bullets. */

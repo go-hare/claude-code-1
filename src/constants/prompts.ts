@@ -83,12 +83,13 @@ import {
   getDeliveringWorkSection,
   getFableIdentitySection,
   getOpus5ReducedDelegationSection,
+  getSubagentSteerDelegationSection,
   getWillowTernSection,
 } from './goldPromptSections.js'
 import { SLEEP_TOOL_NAME } from '@claude-code/builtin-tools/tools/SleepTool/prompt.js'
 import { TICK_TAG } from './xml.js'
 import { logForDebugging } from '../utils/debug.js'
-import { loadMemoryPrompt } from '../memdir/memdir.js'
+import { getStaticMemoryPrompt, loadMemoryPrompt } from '../memdir/memdir.js'
 import { isUndercover } from '../utils/undercover.js'
 import { getAntModelOverrideConfig } from '../utils/model/antModels.js'
 import { isMcpInstructionsDeltaEnabled } from '../utils/mcpInstructionsDelta.js'
@@ -789,7 +790,12 @@ ${CYBER_RISK_INSTRUCTION}`,
         ),
       ),
     ],
-    ['memory', systemPromptSection('memory', () => loadMemoryPrompt())],
+    [
+      'memory',
+      systemPromptSection('memory', () =>
+        options?.excludeDynamicSections ? null : loadMemoryPrompt(),
+      ),
+    ],
     [
       'ant_model_override',
       systemPromptSection('ant_model_override', () =>
@@ -912,6 +918,12 @@ ${CYBER_RISK_INSTRUCTION}`,
       'opus5_reduced_delegation',
       systemPromptSection('opus5_reduced_delegation', () =>
         getOpus5ReducedDelegationSection(model),
+      ),
+    ],
+    [
+      'subagent_steer_delegation',
+      systemPromptSection('subagent_steer_delegation', () =>
+        getSubagentSteerDelegationSection(enabledTools),
       ),
     ],
     // When lean simple path is active, ownership is folded into wrg intro —
@@ -1044,6 +1056,9 @@ ${CYBER_RISK_INSTRUCTION}`,
           event !== undefined && Array.isArray(event.traits)
             ? event.traits.includes('lean')
             : useSimpleSystemPrompt
+        const staticMemoryPair = options?.excludeDynamicSections
+          ? ([['memory_static', getStaticMemoryPrompt()]] as const)
+          : ([] as const)
         const sharedSections = effectiveLean
           ? buildNamedPromptComposeSections('shared', [
               [
@@ -1054,6 +1069,7 @@ ${CYBER_RISK_INSTRUCTION}`,
                   cyberRiskInstruction: CYBER_RISK_INSTRUCTION,
                 }),
               ],
+              ...staticMemoryPair,
             ])
           : buildNamedPromptComposeSections('shared', [
               ['intro', getSimpleIntroSection(outputStyleConfig)],
@@ -1068,6 +1084,7 @@ ${CYBER_RISK_INSTRUCTION}`,
               ['actions', getActionsSection()],
               ['tools', getUsingYourToolsSection(effectiveEnabledTools)],
               ['tone', getOutputEfficiencySection()],
+              ...staticMemoryPair,
             ])
         const sessionPairs: Array<readonly [string, string | null]> =
           resolvedDynamicSections.length === dynamicSectionSpecs.length
@@ -1089,6 +1106,10 @@ ${CYBER_RISK_INSTRUCTION}`,
     return flattenComposedSections(composed, boundary)
   }
 
+  const staticMemorySection = options?.excludeDynamicSections
+    ? getStaticMemoryPrompt()
+    : null
+
   // Official l$ / Jb: lean wrg static body replaces dense intro/system/tasks stack.
   if (useSimpleSystemPrompt) {
     logForDebugging(
@@ -1100,6 +1121,7 @@ ${CYBER_RISK_INSTRUCTION}`,
         ownershipFrame: isOwnershipFrameEnabled(),
         cyberRiskInstruction: CYBER_RISK_INSTRUCTION,
       }),
+      staticMemorySection,
       ...(shouldUseGlobalCacheScope() ? [SYSTEM_PROMPT_DYNAMIC_BOUNDARY] : []),
       ...resolvedDynamicSections,
     ].filter(s => s !== null)
@@ -1116,6 +1138,7 @@ ${CYBER_RISK_INSTRUCTION}`,
     getActionsSection(),
     getUsingYourToolsSection(enabledTools),
     getOutputEfficiencySection(),
+    staticMemorySection,
     // === BOUNDARY MARKER - DO NOT MOVE OR REMOVE ===
     ...(shouldUseGlobalCacheScope() ? [SYSTEM_PROMPT_DYNAMIC_BOUNDARY] : []),
     // --- Dynamic content (registry-managed) ---

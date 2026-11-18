@@ -560,3 +560,30 @@ export async function loadMemoryPrompt(): Promise<string | null> {
   }
   return null
 }
+
+/**
+ * Static memory prompt for SDK preset / `excludeDynamicSections` mode.
+ * Returns the static memory instructions without reading MEMORY.md from disk
+ * or mutating the filesystem.
+ */
+export function getStaticMemoryPrompt(): string | null {
+  if (!isAutoMemoryEnabled()) {
+    return null
+  }
+  const coworkGuidelines = process.env.CLAUDE_COWORK_MEMORY_GUIDELINES?.trim()
+  if (coworkGuidelines) {
+    return `# auto memory\n${coworkGuidelines}`
+  }
+  const coworkExtraGuidelines =
+    process.env.CLAUDE_COWORK_MEMORY_EXTRA_GUIDELINES
+  const extraGuidelines =
+    coworkExtraGuidelines && coworkExtraGuidelines.trim().length > 0
+      ? [coworkExtraGuidelines]
+      : undefined
+  return buildMemoryLines(
+    'auto memory',
+    getAutoMemPath(),
+    extraGuidelines,
+    true,
+  ).join('\n')
+}
