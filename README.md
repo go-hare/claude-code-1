@@ -12,7 +12,7 @@
 
 > 本仓库**不是** Anthropic 官方产品。商标与官方 Claude Code 权利归 [Anthropic](https://www.anthropic.com/) 所有；本项目仅供学习与研究。
 >
-> 当前源码 / 构建版本：**`2.7.309`**（Headless、sessionEffort、工具权限与 TUI 宿主对齐 2.1.289）。npm 安装：`npm i -g @go-hare/claude-code`。
+> 当前源码 / 构建版本：**`2.7.310`**（Headless、sessionEffort、工具权限与 TUI 宿主对齐 2.1.289）。npm 安装：`npm i -g @go-hare/claude-code`。
 
 | 能力 | 说明 |
 | ---- | ---- |
@@ -21,7 +21,6 @@
 | **ACP** | Agent Client Protocol，可对接 IDE / 代理宿主 |
 | **Agents / Daemon** | `claude agents` dashboard、daemon job、后台会话 resume / fork |
 | **Fullscreen** | 对齐 densable 滚轮、Jump-to-bottom、alt-screen 等交互 |
-| **Poor Mode** | `/poor` 穷鬼模式：跳过记忆提取 / 建议等，降 token |
 | **KAIROS / Buddy** | 常驻助手与终端 buddy（feature 可开关） |
 | **Computer Use / Chrome** | 截图键鼠、Chrome MCP（平台完整度不一） |
 | **Artifacts** | HTML 上传托管（独立 Cloudflare Worker 包） |
@@ -45,9 +44,11 @@
 
 仓库里**没有**独立的 `src/core` / `src/hosts` / `src/runtime` 包级 Agent Core 分层；旧文档里的 `createAgent from 'claude/core'`、`./core` 子路径描述已过时，请勿依赖。
 
-近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248 → 2.1.251 → 2.1.252 → 2.1.283 → 2.1.289** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2** + **251 HAVE 65 / N/A 6** + **252 hotfix #1/#2/#4 HAVE / #3 N/A** + **283 leftover DualInk / plugin-eval fence / unique cloud+headless / gold `h1`/`yi`** + **289 classifier fail-open copy cleared (not a whole-tree English diff) / wrapable extras·paint empty / 遥测 BODY + Ivt 默认开**；官方无 2.1.230 / 无 240·241 bullets；**284–288 不单独 pack**）。**源码 / 构建版本以 `package.json` 为准**（当前 **2.7.309**；二进制 `MACRO.VERSION` 与包版本一致）；npm 已发布版本以 registry 为准，与 git tag 可能不同步。分 pack 金标以各 `official-*-checklist.md` 与 `cross-pack-residuals.md` 为准（README 计数过期时以那两份为准）。
+近期主线已收口 **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248 → 2.1.251 → 2.1.252 → 2.1.283 → 2.1.289** 产品对齐（229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 单栈 HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2** + **251 HAVE 65 / N/A 6** + **252 hotfix #1/#2/#4 HAVE / #3 N/A** + **283 leftover DualInk / plugin-eval fence / unique cloud+headless / gold `h1`/`yi`** + **289 classifier fail-open copy cleared (not a whole-tree English diff) / wrapable extras·paint empty / 遥测 BODY + Ivt 默认开**；官方无 2.1.230 / 无 240·241 bullets；**284–288 不单独 pack**）。**源码 / 构建版本以 `package.json` 为准**（当前 **2.7.310**；二进制 `MACRO.VERSION` 与包版本一致）；npm 已发布版本以 registry 为准，与 git tag 可能不同步。分 pack 金标以各 `official-*-checklist.md` 与 `cross-pack-residuals.md` 为准（README 计数过期时以那两份为准）。
 
-#### densable 2.1.289（2.7.289 / 2.7.290 / 2.7.291 / 2.7.292 / 2.7.293 / 2.7.294 / 2.7.295 / 2.7.296 / 2.7.297 / 2.7.298 / 2.7.299 / 2.7.300 / 2.7.301 / 2.7.302 / 2.7.303 / 2.7.304 / 2.7.305 / 2.7.306 / 2.7.307 / 2.7.308 / 2.7.309）
+#### densable 2.1.289（2.7.289 / 2.7.290 / 2.7.291 / 2.7.292 / 2.7.293 / 2.7.294 / 2.7.295 / 2.7.296 / 2.7.297 / 2.7.298 / 2.7.299 / 2.7.300 / 2.7.301 / 2.7.302 / 2.7.303 / 2.7.304 / 2.7.305 / 2.7.306 / 2.7.307 / 2.7.308 / 2.7.309 / 2.7.310）
+
+**2.7.310**：对齐运行时状态宿主与控制器模块化（`AppState`、`SessionEngine`、`SubmitController`、`TurnController`、`mainBootstrap`、`HeadlessControlPlane`、`query`/`hooks`/`api`/`mcp`）；移除非官方 `/poor` 与 `VaultHttpFetch`；补齐 `FileIndex`（`buildGen` + basename 索引）、`@ant/ink` `AppCallbacks`/`Dialog` keybindings 与 `BAT_THEME`、`prompts`（`memory_static` + `subagent_steer_delegation`）、`getNextPermissionMode` + `bypassPermissionsKillswitch` 与 `/provider` 切换修复。
 
 **2.7.309**：Headless 控制面、sessionEffort、会话命令与构建检查对齐 2.1.289；补齐 `ui.render` 宿主、消息渲染、插件输入包裹与 TUI 面板；远程工具审批、Detached 排空、子 Agent 权限层与内置工具；Hooks 容错、插件宿主、MCP 身份边界与跨会话信封；后台任务注册表、GetTask 投递与 Monitor 流生命周期；`@ant/ink` Cursor、SearchBox 与 Vim 引擎。**不是** minify 1:1。
 

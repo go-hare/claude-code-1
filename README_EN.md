@@ -12,7 +12,7 @@ A **source restoration / engineering rebuild** of Anthropic’s official Claude 
 
 > This is **not** an Anthropic product. Claude Code trademarks and rights belong to [Anthropic](https://www.anthropic.com/). This project is for learning and research.
 >
-> Current source / build version: **`2.7.309`** (Headless, sessionEffort, tool permissions, and TUI hosts aligned to 2.1.289). Install from npm: `npm i -g @go-hare/claude-code`.
+> Current source / build version: **`2.7.310`** (Headless, sessionEffort, tool permissions, and TUI hosts aligned to 2.1.289). Install from npm: `npm i -g @go-hare/claude-code`.
 
 | Capability | Notes |
 | ---------- | ----- |
@@ -21,7 +21,6 @@ A **source restoration / engineering rebuild** of Anthropic’s official Claude 
 | **ACP** | Agent Client Protocol for IDE / proxy hosts |
 | **Agents / Daemon** | `claude agents` dashboard, daemon jobs, background session resume / fork |
 | **Fullscreen** | densable-aligned wheel, Jump-to-bottom, alt-screen behavior |
-| **Poor Mode** | `/poor` skips memory extract / suggestions to cut token spend |
 | **KAIROS / Buddy** | Persistent assistant and terminal buddy (feature-gated) |
 | **Computer Use / Chrome** | Screenshot + input, Chrome MCP (platform coverage varies) |
 | **Artifacts** | HTML upload hosting (standalone Cloudflare Worker package) |
@@ -45,9 +44,11 @@ This is a **CLI-first** Claude Code–compatible runtime:
 
 There is **no** package-level Agent Core split at `src/core`, `src/hosts`, or `src/runtime`, and no `createAgent` / `claude/core` export. Older docs that claim those paths are outdated.
 
-Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248 → 2.1.251 → 2.1.252 → 2.1.283 → 2.1.289** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2** + **251 HAVE 65 / N/A 6** + **252 hotfix #1/#2/#4 HAVE / #3 N/A** + **283 leftover DualInk / plugin-eval fence / unique cloud+headless / gold `h1`/`yi`** + **289 classifier fail-open copy cleared (not a whole-tree English diff) / wrapable extras·paint empty / telemetry BODY + Ivt default-on**; no public **2.1.230** / no 240·241 bullets; **do not pack 284–288**). **The source / build version comes from `package.json`** (currently **2.7.309**; binary `MACRO.VERSION` matches the package). Published npm versions come from the registry and may not match git tags. Per-pack gold is the `official-*-checklist.md` files plus `cross-pack-residuals.md` (those win if this README drifts).
+Recent work closed **densable 2.1.211 → … → 2.1.229 → 2.1.231 → 2.1.232 → 2.1.233 → 2.1.234 → 2.1.235 → 2.1.236 → 2.1.237 → 2.1.238 → 2.1.239 → 2.1.243 → 2.1.246 → 2.1.247 → 2.1.248 → 2.1.251 → 2.1.252 → 2.1.283 → 2.1.289** product alignment (229 REACTIVE_COMPACT + **231 OAuth FLv** + **232 HAVE 43 / PARTIAL 2 / N/A 4** + **233 MCP v2 single-stack HAVE 14** + **234 quota auto-resume** + **235 HAVE 15 + analog 3 / N/A 1** + **236 HAVE 32 / N/A 1** + **237 HAVE 3** + **238 HAVE 39** + **239 HAVE 59** + **243 HAVE 49 / N/A 11** + **246 HAVE 59 / N/A 2** + **247 HAVE 31 / N/A 2** + **248 HAVE 47 / N/A 2** + **251 HAVE 65 / N/A 6** + **252 hotfix #1/#2/#4 HAVE / #3 N/A** + **283 leftover DualInk / plugin-eval fence / unique cloud+headless / gold `h1`/`yi`** + **289 classifier fail-open copy cleared (not a whole-tree English diff) / wrapable extras·paint empty / telemetry BODY + Ivt default-on**; no public **2.1.230** / no 240·241 bullets; **do not pack 284–288**). **The source / build version comes from `package.json`** (currently **2.7.310**; binary `MACRO.VERSION` matches the package). Published npm versions come from the registry and may not match git tags. Per-pack gold is the `official-*-checklist.md` files plus `cross-pack-residuals.md` (those win if this README drifts).
 
-#### densable 2.1.289 (2.7.289 / 2.7.290 / 2.7.291 / 2.7.292 / 2.7.293 / 2.7.294 / 2.7.295 / 2.7.296 / 2.7.297 / 2.7.298 / 2.7.299 / 2.7.300 / 2.7.301 / 2.7.302 / 2.7.303 / 2.7.304 / 2.7.305 / 2.7.306 / 2.7.307 / 2.7.308 / 2.7.309)
+#### densable 2.1.289 (2.7.289 / 2.7.290 / 2.7.291 / 2.7.292 / 2.7.293 / 2.7.294 / 2.7.295 / 2.7.296 / 2.7.297 / 2.7.298 / 2.7.299 / 2.7.300 / 2.7.301 / 2.7.302 / 2.7.303 / 2.7.304 / 2.7.305 / 2.7.306 / 2.7.307 / 2.7.308 / 2.7.309 / 2.7.310)
+
+**2.7.310**: Aligned runtime state hosts & controller modularization (`AppState`, `SessionEngine`, `SubmitController`, `TurnController`, `mainBootstrap`, `HeadlessControlPlane`, `query`/`hooks`/`api`/`mcp`); removed non-official `/poor` & `VaultHttpFetch`; added `FileIndex` (`buildGen` + basename index), `@ant/ink` `AppCallbacks`/`Dialog` keybindings & `BAT_THEME`, `prompts` (`memory_static` + `subagent_steer_delegation`), `getNextPermissionMode` + `bypassPermissionsKillswitch`, and `/provider` fixes.
 
 **2.7.309**: Headless control, sessionEffort, session commands, and build checks aligned to 2.1.289; `ui.render` hosts, message rendering, plugin input wrappers, and TUI panels; remote tool approvals, Detached draining, subagent permission layers, and built-in tools; hook fault tolerance, plugin hosts, MCP identity boundaries, and cross-session envelopes; background task registry, GetTask delivery, and Monitor stream lifecycle; `@ant/ink` Cursor, SearchBox, and Vim engine. **Not** minify 1:1.
 
