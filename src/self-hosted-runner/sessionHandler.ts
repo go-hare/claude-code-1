@@ -9,11 +9,16 @@
  *   outcome branches (Ojv/Djv/Pjv) → njv host seed → spawn (sjv) →
  *   push-on-release (Hjv) → Y2h on fail → M2h
  */
+import { randomUUID } from 'node:crypto'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdir, rm } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../services/analytics/index.js'
 import {
   isRetryableRunnerError,
   type SelfHostedRunnerApi,
@@ -75,11 +80,11 @@ import {
   cleanupSessionIngressToken,
   cleanupSessionSideFiles,
   createIngressFenceBgController,
-  forwardDebugLogDiagnostics,
   inferenceRefreshIntervalMs,
   initMilestoneEvent,
   startIntervalRefreshLoop,
   type IntervalRefreshLoop,
+  type RefreshLoopErrorInfo,
 } from './sessionRuntime.js'
 import {
   createRunnerTokenRefreshScheduler,
@@ -202,6 +207,11 @@ export type HandleSessionOpts = {
    * Default true at azv/root (SELF_HOSTED_RUNNER_TRUST_WORKSPACE).
    */
   trustWorkspace?: boolean
+  /**
+   * #1826: `--remove-session-state` / `SELF_HOSTED_RUNNER_REMOVE_SESSION_STATE`.
+   * Default false: keep failed session debug log & per-session state on host.
+   */
+  removeSessionState?: boolean
   /** densable governedGitConfigSeed (eBh) — written when governed git_config */
   governedGitConfigSeed?: string
   /**
@@ -349,11 +359,269 @@ export type SpawnSessionChildOpts = {
   /** stdin write hook for token push (densable A) */
   onStdinReady?: (write: (line: string) => void) => void
   onTokenAck?: (requestId: string) => void
+  /** #1781: Forward `--trust-workspace` to child env (`CLAUDE_CODE_IGNORE_PERSISTED_TRUST: '1'` when false). */
+  trustWorkspace?: boolean
 }
 
 function errMsg(err: unknown): string {
   if (err instanceof Error) return err.message
   return String(err)
+}
+
+/**
+ * #1825 (2.1.319): Allocate a unique per-session checkout folder name under
+ * `sessionDir` (case-insensitive), appending `-2`, `-3`, ... on collision so
+ * multi-repo sessions never overwrite an earlier repo's `CLAUDE_RUNNER_CHECKOUT_PATH`.
+ */
+export function allocateCheckoutFolderName(
+  slug: string,
+  usedLowerNames: Set<string>,
+): string {
+  let candidate = slug
+  for (let suffix = 2; usedLowerNames.has(candidate.toLowerCase()); suffix++) {
+    candidate = `${slug}-${suffix}`
+  }
+  usedLowerNames.add(candidate.toLowerCase())
+  return candidate
+}
+
+const RENEWAL_REFUSAL_WARN_THRESHOLD = 5
+const RENEWAL_REFUSAL_MAX_SERVER_MSG = 300
+const RENEWAL_REFUSAL_WARN_TAG = 'model_access_renewal_refused'
+const RENEWAL_REFUSAL_RESUMED_TAG = 'model_access_renewal_resumed'
+
+function getRunnerErrorHttpStatus(err: unknown): number | undefined {
+  if (typeof err === 'object' && err !== null) {
+    const rec = err as { httpStatus?: unknown; status?: unknown }
+    if (typeof rec.httpStatus === 'number') return rec.httpStatus
+    if (typeof rec.status === 'number') return rec.status
+  }
+  return undefined
+}
+
+function getRunnerErrorServerMessage(err: unknown): string | undefined {
+  if (typeof err === 'object' && err !== null) {
+    const rec = err as { serverMessage?: unknown; message?: unknown }
+    if (typeof rec.serverMessage === 'string' && rec.serverMessage.trim()) {
+      return rec.serverMessage.trim()
+    }
+    if (typeof rec.message === 'string' && rec.message.trim()) {
+      return rec.message.trim()
+    }
+  }
+  return undefined
+}
+
+/**
+ * #1769 (official `Cl`): Identify definite server refusals of `inference_token`
+ * renewal (HTTP 400 with a server error response — not transient 5xx/429/401/403
+ * or network errors).
+ */
+export function isDefiniteInferenceRenewalRefusal(err: unknown): boolean {
+  const status = getRunnerErrorHttpStatus(err)
+  return status === 400
+}
+
+export type InferenceRenewalRefusalReporter = {
+  refused: (err: unknown, info: RefreshLoopErrorInfo) => void
+  renewed: () => void
+  idle: () => Promise<void>
+}
+
+function formatUtcHhMm(tsMs: number): string {
+  return new Date(tsMs).toISOString().slice(11, 16)
+}
+
+function isPermanentPostFailure(err: unknown): boolean {
+  const status = getRunnerErrorHttpStatus(err)
+  return (
+    status !== undefined &&
+    status >= 400 &&
+    status < 500 &&
+    ![401, 403, 408, 409, 429].includes(status)
+  )
+}
+
+/**
+ * #1769 (official `Iu`): Tracks consecutive `inference_token` renewal refusals;
+ * once the child's token is dead (`info.dead`) and consecutive refusals reach
+ * `RENEWAL_REFUSAL_WARN_THRESHOLD`, emits `self_hosted_renewal_refused` /
+ * `token_dead`, logs an ERROR status line, and posts an in-session warning.
+ * When a later renewal succeeds, posts a resumed notice and resets state.
+ */
+export function createInferenceRenewalRefusalReporter(opts: {
+  sessionId: string
+  post: (event: Record<string, unknown>) => Promise<unknown>
+  onStatus: (msg: string) => void
+  over: () => boolean
+  now?: () => number
+  onTelemetry?: (
+    outcome: 'token_dead' | 'resumed',
+    meta: Record<string, number>,
+  ) => void
+}): InferenceRenewalRefusalReporter {
+  const now = opts.now ?? Date.now
+  let firstRefusedAt: number | undefined
+  let reportedDead = false
+  let pendingWarning: Record<string, unknown> | undefined
+  let warningPosted: 'no' | 'maybe' | 'yes' = 'no'
+  let pendingResumed: Record<string, unknown> | undefined
+  let postingWarning = false
+  let stopPosting = false
+  let chain: Promise<void> = Promise.resolve()
+
+  const enqueue = (
+    description: string,
+    retryHint: string,
+    fn: () => Promise<void>,
+  ): void => {
+    chain = chain.then(fn).catch(err => {
+      try {
+        if (opts.over()) return
+        const status = getRunnerErrorHttpStatus(err)
+        stopPosting ||= isPermanentPostFailure(err)
+        opts.onStatus(
+          `[runner:session] could not post ${description} in ${opts.sessionId} (${status === undefined ? `no answer: ${errMsg(err)}` : `HTTP ${status}`}). ${stopPosting ? 'Posting nothing more about renewals in this session.' : `Trying again at ${retryHint}.`}`,
+        )
+      } catch {
+        // best-effort status reporting
+      }
+    })
+  }
+
+  return {
+    refused(err, info) {
+      try {
+        firstRefusedAt ??= now()
+        pendingResumed = undefined
+        if (
+          !info.dead ||
+          info.definiteSinceSuccess < RENEWAL_REFUSAL_WARN_THRESHOLD
+        ) {
+          return
+        }
+        const rawMsg = getRunnerErrorServerMessage(err)
+        const clipped =
+          rawMsg !== undefined && rawMsg.length > RENEWAL_REFUSAL_MAX_SERVER_MSG
+            ? `${rawMsg.slice(0, RENEWAL_REFUSAL_MAX_SERVER_MSG)}…`
+            : rawMsg
+        const summary = `${info.definiteSinceSuccess} times since ${formatUtcHhMm(firstRefusedAt)} UTC`
+        if (pendingWarning === undefined && warningPosted !== 'yes') {
+          pendingWarning = {
+            type: 'system',
+            subtype: 'informational',
+            level: 'warning',
+            tag: RENEWAL_REFUSAL_WARN_TAG,
+            uuid: randomUUID(),
+            session_id: opts.sessionId,
+            content: `The server has refused to renew this session's access to the model ${summary}${clipped === undefined ? '' : `. Its answer: "${clipped}"`}. Messages in this session will fail until a renewal succeeds. A new session may work. If it does not, or this keeps happening, tell whoever runs this self-hosted runner, and give them this session's id: ${opts.sessionId}`,
+          }
+        }
+        if (
+          pendingWarning !== undefined &&
+          !postingWarning &&
+          !stopPosting &&
+          !opts.over()
+        ) {
+          postingWarning = true
+          enqueue(
+            'the warning that the server refuses to renew the inference_token',
+            'the next refused renewal',
+            async () => {
+              try {
+                const ev = pendingWarning
+                if (ev === undefined || stopPosting || opts.over()) return
+                await opts.post(ev)
+                warningPosted = 'yes'
+                if (pendingWarning === ev) pendingWarning = undefined
+              } catch (postErr) {
+                const status = getRunnerErrorHttpStatus(postErr)
+                if ((status ?? 500) >= 500 && warningPosted === 'no') {
+                  warningPosted = 'maybe'
+                }
+                throw postErr
+              } finally {
+                postingWarning = false
+              }
+            },
+          )
+        }
+        if (!reportedDead) {
+          reportedDead = true
+          try {
+            opts.onTelemetry?.('token_dead', {
+              refusals: info.definiteSinceSuccess,
+            })
+            logEvent('tengu_self_hosted_renewal_refused', {
+              outcome:
+                'token_dead' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              refusals: info.definiteSinceSuccess,
+            })
+          } catch {
+            // telemetry is best-effort
+          }
+          const status = getRunnerErrorHttpStatus(err)
+          opts.onStatus(
+            `[runner:session] ERROR: the server has refused to renew the inference_token for ${opts.sessionId} ${summary} (HTTP ${status ?? 'none'}${clipped === undefined ? '' : `: ${clipped}`}), and the child's token has expired. Its turns fail until a renewal succeeds. If new sessions are refused too, and no proxy or gateway of yours gave that answer, contact Anthropic support with this session id.`,
+          )
+        }
+      } catch {
+        // never crash refresh loop
+      }
+    },
+    renewed() {
+      try {
+        const ts = now()
+        if (reportedDead && firstRefusedAt !== undefined) {
+          const runMs = ts - firstRefusedAt
+          try {
+            opts.onTelemetry?.('resumed', { run_ms: runMs })
+            logEvent('tengu_self_hosted_renewal_refused', {
+              outcome:
+                'resumed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+              run_ms: runMs,
+            })
+          } catch {
+            // telemetry is best-effort
+          }
+        }
+        firstRefusedAt = undefined
+        reportedDead = false
+        pendingWarning = undefined
+        if (stopPosting || (warningPosted === 'no' && !postingWarning)) {
+          return
+        }
+        enqueue(
+          'the line that says the server renewed the inference_token',
+          'the next renewal that succeeds',
+          async () => {
+            if (warningPosted === 'no' || stopPosting || opts.over()) return
+            pendingResumed ??= {
+              type: 'system',
+              subtype: 'informational',
+              level: 'notice',
+              tag: RENEWAL_REFUSAL_RESUMED_TAG,
+              uuid: randomUUID(),
+              session_id: opts.sessionId,
+              content: `The server renewed this session's access to the model at ${formatUtcHhMm(ts)} UTC. Try your message again.`,
+            }
+            try {
+              await opts.post(pendingResumed)
+            } catch (postErr) {
+              const status = getRunnerErrorHttpStatus(postErr)
+              if ((status ?? 500) >= 500) warningPosted = 'maybe'
+              throw postErr
+            }
+            pendingResumed = undefined
+            warningPosted = 'no'
+          },
+        )
+      } catch {
+        // best-effort
+      }
+    },
+    idle: () => chain,
+  }
 }
 
 /** densable `sjv` core — spawn Claude child with FD3 activity pipe. */
@@ -392,6 +660,7 @@ export async function spawnSessionChild(
     governedGitConfig: opts.governedGitConfig,
     governedGhPathShim: opts.governedGhPathShim,
     governedGitConfigPath: opts.governedGitConfigPath,
+    trustWorkspace: opts.trustWorkspace,
   })
 
   opts.onDebug(
@@ -685,6 +954,7 @@ export async function handleSession(
   let epochStaleForCleanup = false
   let prepHeartbeat: IntervalRefreshLoop | undefined
   let inferenceRefresh: IntervalRefreshLoop | undefined
+  let sessionEnding = false
   let childStdinWrite: ((line: string) => void) | undefined
   // densable ke / Ze / $e — session-gone once-only end_session to child
   let sessionGoneNotified = false
@@ -1114,6 +1384,8 @@ export async function handleSession(
       const preparedSources: MappedCheckoutSource[] = []
       const preparedUrls: string[] = []
       const preparedPaths: string[] = []
+      // #1825: track used checkout folder names per session (case-insensitive)
+      const usedCheckoutFolderNames = new Set<string>()
       let lastSkippedError: unknown
       let lastThrottledError: unknown
 
@@ -1148,7 +1420,16 @@ export async function handleSession(
                 `[runner:session] refusing to pass unsafe repo URL to checkout hook: ${repoUrl}`,
               )
             }
-            const checkoutPath = join(sessionDir, slug)
+            const folderName = allocateCheckoutFolderName(
+              slug,
+              usedCheckoutFolderNames,
+            )
+            if (folderName !== slug) {
+              onStatus(
+                `[runner:hook] the folder name ${slug} is already used in this session (ignoring case); ${src.repo} goes in ${folderName}`,
+              )
+            }
+            const checkoutPath = join(sessionDir, folderName)
             await runCheckoutHook({
               hookPath: checkoutHookPath,
               sessionId,
@@ -1820,21 +2101,57 @@ export async function handleSession(
       | undefined
     const accessTokenLive = inferenceAuthLive?.access_token ?? accessToken
 
+    // #1769: Track consecutive inference_token renewal refusals and warn in-session once token is dead
+    const renewalRefusalReporter = createInferenceRenewalRefusalReporter({
+      sessionId,
+      post: async event => {
+        if (workerEpochLive === undefined) return
+        await api.postWorkerEvents(
+          apiBaseUrlLive,
+          sessionId,
+          sessionTokenLive,
+          workerEpochLive,
+          [event],
+          signal,
+        )
+      },
+      onStatus,
+      over: () => sessionEnding || signal.aborted,
+    })
+
     // densable z2h + W2h — inference token interval refresh via /remote + q2h/j2h
+    const initialExpiresInSec =
+      inferenceAuthLive?.expires_in_seconds ?? inferenceAuth?.expires_in_seconds
     inferenceRefresh = startIntervalRefreshLoop({
-      intervalMs: inferenceRefreshIntervalMs(
-        inferenceAuthLive?.expires_in_seconds ??
-          inferenceAuth?.expires_in_seconds,
-      ),
+      intervalMs: inferenceRefreshIntervalMs(initialExpiresInSec),
+      ttlMs:
+        initialExpiresInSec && initialExpiresInSec > 0
+          ? initialExpiresInSec * 1000
+          : 1_800_000,
       signal,
+      isDefiniteRefusal: isDefiniteInferenceRenewalRefusal,
+      isTransient: err => {
+        const status = getRunnerErrorHttpStatus(err)
+        return isRetryableRunnerError(err) || status === 401 || status === 403
+      },
+      onSuccess: () => {
+        renewalRefusalReporter.renewed()
+      },
       refresh: async () => {
         const next = await api.getSessionRemoteConfig(
           sessionId,
           sessionTokenLive,
           signal,
         )
-        const nextTok = (next as { inference_auth?: { access_token?: string } })
-          .inference_auth?.access_token
+        const nextAuth = (
+          next as {
+            inference_auth?: {
+              access_token?: string
+              expires_in_seconds?: number
+            }
+          }
+        ).inference_auth
+        const nextTok = nextAuth?.access_token
         if (!nextTok) {
           throw new Error(
             'getSessionRemoteConfig returned no inference_auth.access_token',
@@ -1852,30 +2169,41 @@ export async function handleSession(
           sessionId,
           label: 'inference_token',
           onStatus,
-          expiresInSeconds: (
-            next as {
-              inference_auth?: { expires_in_seconds?: number }
-            }
-          ).inference_auth?.expires_in_seconds,
+          expiresInSeconds: nextAuth?.expires_in_seconds,
           pendingAcks: pendingTokenAcks,
         })
-        return inferenceRefreshIntervalMs(
-          (
-            next as {
-              inference_auth?: { expires_in_seconds?: number }
-            }
-          ).inference_auth?.expires_in_seconds,
-        )
+        const nextExpiresSec = nextAuth?.expires_in_seconds
+        return {
+          intervalMs: inferenceRefreshIntervalMs(nextExpiresSec),
+          ttlMs:
+            nextExpiresSec && nextExpiresSec > 0
+              ? nextExpiresSec * 1000
+              : 1_800_000,
+        }
       },
-      onError: err => {
+      onError: (err, info) => {
         // densable $e(err, "/remote") → cancel z2h permanently
         if (handleSessionGone(err, '/remote')) {
           inferenceRefresh?.cancel()
           return
         }
+        const delayLabel =
+          info.delayMs >= 120_000
+            ? `${Math.round(info.delayMs / 60_000)}m`
+            : `${Math.round(info.delayMs / 1000)}s`
+        const isRefusal = isDefiniteInferenceRenewalRefusal(err)
+        const reasonText = info.transient
+          ? `Retrying shortly (in ${delayLabel})`
+          : `${isRefusal ? `The server refused it, refusal ${info.definiteSinceSuccess} since the last success` : 'Not retrying early'} (HTTP ${getRunnerErrorHttpStatus(err) ?? 'none'}); next ${isRefusal ? '' : 'scheduled '}attempt in ${delayLabel}`
+        const expiryText = info.expired
+          ? " The child's current token has expired or is within a minute of expiring; its turns will fail until a refresh succeeds."
+          : ''
         onStatus(
-          `[runner:session] inference_token refresh failed: ${errMsg(err)}. Retrying shortly.`,
+          `[runner:session] inference_token refresh failed for ${sessionId}: ${errMsg(err)}. ${reasonText}.${expiryText}`,
         )
+        if (isRefusal) {
+          renewalRefusalReporter.refused(err, info)
+        }
       },
     })
 
@@ -1945,6 +2273,7 @@ export async function handleSession(
         onTokenAck: requestId => {
           pendingTokenAcks.delete(requestId)
         },
+        trustWorkspace: opts.trustWorkspace,
       })
     } catch (err) {
       onStatus(`[runner:session] ${sessionId} spawn failed: ${errMsg(err)}`)
@@ -2115,27 +2444,13 @@ export async function handleSession(
     if (!initEnded) {
       exitBeforeInit(exitResultForCleanup === 'failed')
     }
+    sessionEnding = true
     prepHeartbeat?.cancel()
     inferenceRefresh?.cancel()
     sessionTokenRefresh?.cancelAll()
     childStdinWrite = undefined
-    // densable Fjv — if(le&&q.current&&Y.api_base_url) always, not only Je
-    if (workerEpochLive !== undefined && sessionTokenLive && apiBaseUrlLive) {
-      await forwardDebugLogDiagnostics({
-        apiClient: api,
-        apiBaseUrl: apiBaseUrlLive,
-        sessionId,
-        sessionToken: sessionTokenLive,
-        workerEpoch: workerEpochLive,
-        debugFile,
-        onDebug,
-      }).catch(err => {
-        onDebug(
-          `[runner:session] debug log flush failed (best-effort): ${errMsg(err)}`,
-        )
-      })
-    }
-    // densable: completed → unlink debug; always unlink mcp + Pe/_e launcher paths
+    // #1826 (2.1.319): Removed end-of-session debug log upload (`forwardDebugLogDiagnostics`).
+    // A failed session's debug log stays on the runner host unless `--remove-session-state` is set.
     await cleanupSessionSideFiles({
       sessionId,
       exitResult: exitResultForCleanup,
@@ -2145,6 +2460,7 @@ export async function handleSession(
         ...(launcherSettingsPathLive ? [launcherSettingsPathLive] : []),
         ...launcherCleanupPaths,
       ],
+      removeSessionState: opts.removeSessionState,
       onStatus,
     })
     if (worktreesLive.length > 0) {
@@ -2199,6 +2515,22 @@ export async function handleSession(
           .backgroundAll()
           .then(() => cleanupSessionIngressToken(path, onStatus, undefined))
           .catch(() => {})
+      }
+    }
+    // #1826: Remove per-session state directories and gitconfig last, after
+    // worktrees, proxy credential helpers, and ingress token fence cleanup finish.
+    if (opts.removeSessionState === true) {
+      for (const statePath of [
+        configDir,
+        stageFileRoot,
+        sessionDir,
+        gitconfigPath,
+      ]) {
+        await rm(statePath, { recursive: true, force: true }).catch(err => {
+          onDebug(
+            `[runner:session] removeSessionState cleanup ${statePath} failed: ${errMsg(err)}`,
+          )
+        })
       }
     }
   }

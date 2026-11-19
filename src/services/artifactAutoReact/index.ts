@@ -80,6 +80,28 @@ export {
 } from './intent.js'
 
 export {
+  ARTIFACT_DB_MARKER_PREFIX,
+  ARTIFACT_DB_MARKER_SUFFIX,
+  checkRememberedDbUndeclared,
+  clearDbUndeclared,
+  DB_UNDECLARED_REMEMBERED_REASON,
+  DB_UNDECLARED_TTL_MS,
+  executeArtifactDbAction,
+  formatArtifactDbError,
+  formatArtifactDbQuotaOrRateReason,
+  getArtifactDbRowMarkerPath,
+  isRememberedDbUndeclared,
+  parseArtifactDbHttpError,
+  rememberDbUndeclared,
+  saveArtifactDbRowWithMarker,
+  type ArtifactDbCallResult,
+  type ArtifactDbErrorCode,
+  type ArtifactDbErrorDetails,
+  type ArtifactDbOp,
+  type SaveArtifactDbRowResult,
+} from './artifactDb.js'
+
+export {
   monitorSocketRegistry,
   oF,
   type OfOptions,

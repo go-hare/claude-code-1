@@ -1,3 +1,4 @@
+import figures from 'figures';
 import capitalize from 'lodash-es/capitalize.js';
 import * as React from 'react';
 import { useCallback, useMemo, useState } from 'react';
@@ -55,6 +56,7 @@ import {
   isModelPickerFastModeNoticeChrome,
 } from '../utils/model/modelPickerVisible.js';
 import { getModelOptions } from '../utils/model/modelOptions.js';
+import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 import { updateSettingsForSource } from '../utils/settings/settings.js';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
 import { Select } from './CustomSelect/index.js';
@@ -160,6 +162,56 @@ export function findMatchingModelOptionValue(
   return typeof hit?.value === 'string' ? hit.value : undefined;
 }
 
+/** Official `jh` (2.1.319 #1801 / 2.1.321 #1920): unnumbered collapsible "More models" row. */
+export const MORE_MODELS_OPTION_VALUE = '__more_models__';
+
+export type ModelPickerRowOption = {
+  value: string;
+  label: string;
+  description: string;
+  disabled?: boolean;
+  overflow?: boolean;
+  marker?: string;
+};
+
+/**
+ * Official 2.1.319 (#1801) & 2.1.321 (#1920): partition older (`overflow: true`)
+ * models under an unnumbered "More models" row below every other option, opening
+ * underneath without renumbering the primary options.
+ */
+export function buildVisibleModelPickerOptions<T extends ModelPickerRowOption>(
+  options: readonly T[],
+  opts: {
+    currentValue: string;
+    baseValue: string;
+    expanded: boolean;
+    screenReader?: boolean;
+  },
+): Array<T | ModelPickerRowOption> {
+  const overflowOpts: T[] = [];
+  const primaryOpts: T[] = [];
+  for (const opt of options) {
+    if (opt.overflow === true && opt.value !== opts.currentValue && opt.value !== opts.baseValue) {
+      overflowOpts.push(opt);
+    } else {
+      primaryOpts.push(opt);
+    }
+  }
+  const enabledPrimary = primaryOpts.filter(o => !o.disabled).length;
+  const enabledOverflow = overflowOpts.filter(o => !o.disabled).length;
+  if (enabledPrimary < 2 || enabledOverflow < 2) {
+    return [...options];
+  }
+  const moreRow: ModelPickerRowOption = {
+    value: MORE_MODELS_OPTION_VALUE,
+    marker: opts.expanded ? figures.triangleDownSmall : figures.triangleRightSmall,
+    disabled: false,
+    label: opts.screenReader ? `More models, ${opts.expanded ? 'expanded' : 'collapsed'}` : 'More models',
+    description: '',
+  };
+  return [...primaryOpts, moreRow, ...(opts.expanded ? overflowOpts : [])];
+}
+
 function isMaxEffortReminderEnabled(): boolean {
   if (process.env.CLAUDE_CODE_MAX_EFFORT_REMINDER !== undefined) {
     return isEnvTruthy(process.env.CLAUDE_CODE_MAX_EFFORT_REMINDER);
@@ -258,7 +310,10 @@ export function ModelPicker({
     return [...withDefaultDesc.slice(0, disabledIdx), ...extra, ...withDefaultDesc.slice(disabledIdx)];
   }, [modelOptions, currentModel, sessionOverride, initial, defaultOptionDescription]);
 
-  const selectOptions = useMemo(
+  const [moreModelsExpanded, setMoreModelsExpanded] = useState(false);
+  const screenReader = isScreenReaderModeEnabled();
+
+  const allSelectOptions = useMemo(
     () =>
       optionsWithInitial.map(opt => ({
         ...opt,
@@ -266,22 +321,36 @@ export function ModelPicker({
       })),
     [optionsWithInitial],
   );
+  const baseOptionValue =
+    initial === null ? NO_PREFERENCE : (findMatchingModelOptionValue(modelOptions, initial) ?? initial);
+  const selectOptions = useMemo(
+    () =>
+      buildVisibleModelPickerOptions(allSelectOptions, {
+        currentValue: initialValue,
+        baseValue: baseOptionValue,
+        expanded: moreModelsExpanded,
+        screenReader,
+      }),
+    [allSelectOptions, initialValue, baseOptionValue, moreModelsExpanded, screenReader],
+  );
   const initialFocusValue = useMemo(
     () => (selectOptions.some(_ => _.value === initialValue) ? initialValue : (selectOptions[0]?.value ?? undefined)),
     [selectOptions, initialValue],
   );
   const visibleCount = Math.min(maxVisible, selectOptions.length);
 
-  const focusedOption = selectOptions.find(opt => opt.value === focusedValue);
+  const isMoreModelsFocused = focusedValue === MORE_MODELS_OPTION_VALUE;
+  const effectiveFocusedValue = isMoreModelsFocused ? undefined : focusedValue;
+  const focusedOption = allSelectOptions.find(opt => opt.value === effectiveFocusedValue);
   const focusedModelName = focusedOption?.label;
   const focusedDisabled = (focusedOption as { disabled?: boolean } | undefined)?.disabled === true;
-  const focusedModel = resolveOptionModel(focusedValue);
+  const focusedModel = resolveOptionModel(effectiveFocusedValue);
   const focusedSupportsEffort = focusedModel ? modelSupportsEffort(focusedModel) : false;
   // densable MDe-shaped ladder (capability ∩ org). Exclusive catalog rows
   // (DeepSeek high|max, Grok low|medium|high, Kimi low|high|max) replace the
   // densable low/medium/high + max/xhigh flag filter.
   const focusedEffortLevels = focusedModel ? getSupportedEffortLevels(focusedModel) : [];
-  const focusedDefaultEffort = getDefaultEffortLevelForOption(focusedValue);
+  const focusedDefaultEffort = getDefaultEffortLevelForOption(effectiveFocusedValue);
   // densable r7s: !IGe && Ave(focused) → force model default for display/cycle base.
   // Session effort under pin is ignored until the user cycles (then confirm N9).
   const pinHoldsDisplay = !hasToggledEffort && focusedModel !== undefined && isEffortLaunchPinned(focusedModel);
@@ -329,7 +398,7 @@ export function ModelPicker({
       'modelPicker:increaseEffort': () => handleCycleEffort('right'),
       'modelPicker:thisSessionOnly': () => {
         if (!onSetDefault) return;
-        const value = focusedValue;
+        const value = effectiveFocusedValue;
         if (!value || focusedDisabled) return;
         commitSelection(value, false);
       },
@@ -393,6 +462,10 @@ export function ModelPicker({
   }
 
   function handleSelect(value: string): void {
+    if (value === MORE_MODELS_OPTION_VALUE) {
+      setMoreModelsExpanded(prev => !prev);
+      return;
+    }
     commitSelection(value, true);
   }
 
@@ -443,27 +516,26 @@ export function ModelPicker({
         </Box>
 
         <Ratchet>
-          {focusedValue !== undefined && !focusedDisabled && (
+          {effectiveFocusedValue !== undefined && !focusedDisabled && (
             <Box marginBottom={1} flexDirection="column">
               {focusedSupportsEffort ? (
                 <>
                   <Text dimColor>
                     <EffortLevelIndicator effort={displayEffort} />{' '}
                     {displayEffort === 'xhigh' ? 'xHigh' : capitalize(displayEffort ?? 'high')} effort
-                    {displayEffort === focusedDefaultEffort ? ' (default)' : ''}{' '}
-                    <Text color="subtle">← → to adjust</Text>
+                    {displayEffort === focusedDefaultEffort ? ' (default)' : ''} <Text dimColor>← → to adjust</Text>
                     {ultracodeActiveForFocused ? ' · Ultracode on (/effort)' : ''}
                   </Text>
                   {displayEffort === 'max' ? (
                     showMaxReminder ? (
                       <Text color="warning">⚠ {MAX_EFFORT_WARNING}</Text>
                     ) : (
-                      <Text color="subtle">{MAX_EFFORT_WARNING}</Text>
+                      <Text dimColor>{MAX_EFFORT_WARNING}</Text>
                     )
                   ) : null}
                 </>
               ) : (
-                <Text color="subtle">
+                <Text dimColor>
                   <EffortLevelIndicator effort={undefined} /> Effort not supported
                   {focusedModelName ? ` for ${focusedModelName}` : ''}
                 </Text>
@@ -476,14 +548,14 @@ export function ModelPicker({
           showFastModeNotice ? (
             <Box marginBottom={1}>
               <Text dimColor>
-                Fast mode is <Text bold>ON</Text> and available with {FAST_MODE_MODEL_DISPLAY} only (/fast). Switching
-                to other models turns off fast mode.
+                Fast mode is <Text bold>ON</Text> (/fast). Switching models can turn it off.
               </Text>
             </Box>
           ) : isFastModeAvailable() && !isFastModeCooldown() ? (
             <Box marginBottom={1}>
               <Text dimColor>
-                Use <Text bold>/fast</Text> to turn on Fast mode ({FAST_MODE_MODEL_DISPLAY} only).
+                Use <Text bold>/fast</Text> to turn on Fast mode (
+                {currentModel ? modelDisplayString(currentModel) : FAST_MODE_MODEL_DISPLAY}).
               </Text>
             </Box>
           ) : null

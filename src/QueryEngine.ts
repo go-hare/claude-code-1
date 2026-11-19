@@ -43,7 +43,12 @@ import { query } from './query.js'
 import { categorizeRetryableAPIError } from './services/api/errors.js'
 import type { MCPServerConnection } from './services/mcp/types.js'
 import type { AppState } from './state/AppState.js'
-import { type Tools, type ToolUseContext, toolMatchesName } from './Tool.js'
+import {
+  findToolByName,
+  type Tools,
+  type ToolUseContext,
+  toolMatchesName,
+} from './Tool.js'
 import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
 import type { APIError } from '@anthropic-ai/sdk'
@@ -58,6 +63,7 @@ import { transformCompletedAssistantMessage } from './utils/messageDisplayTransf
 import type { OrphanedPermission } from './types/textInputTypes.js'
 import { createAbortController } from './utils/abortController.js'
 import { getCwd } from './utils/cwd.js'
+import { logForDebugging } from './utils/debug.js'
 import { isBareMode } from './utils/envUtils.js'
 import { getFastModeState } from './utils/fastMode.js'
 import {
@@ -580,6 +586,92 @@ export function createPartialStreamRetractionCloser(enabled: boolean) {
   }
 }
 
+/**
+ * #1734: Normalize an informational system message's `content` so SDK clients
+ * never lose text (whether stored as a plain string or an array of text blocks).
+ */
+export function normalizeInformationalContent(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content
+      .map(block => {
+        if (typeof block === 'string') return block
+        if (
+          block !== null &&
+          typeof block === 'object' &&
+          'text' in block &&
+          typeof (block as { text?: unknown }).text === 'string'
+        ) {
+          return (block as { text: string }).text
+        }
+        return ''
+      })
+      .filter(Boolean)
+      .join('\n')
+  }
+  return content == null ? '' : String(content)
+}
+
+/**
+ * #1864 / official `hs = 600_000` (`zln` / `zDr` / `VDr`) — in non-interactive
+ * `-p` mode, background commands default to the 10-minute (600,000 ms) cap
+ * (never telling Claude 30 minutes when stopped at 10 minutes), bounded by
+ * the maximum timeout cap.
+ */
+export const NON_INTERACTIVE_BG_TIMEOUT_CAP_MS = 600_000
+export const DEFAULT_BG_TIMEOUT_MAX_MS = 1_800_000
+
+export function resolveNonInteractiveBgTimeoutMs(opts?: {
+  isNonInteractive?: boolean
+  configuredDefaultMs?: number
+  configuredMaxMs?: number
+  minFloorMs?: number
+}): number {
+  const maxMs = opts?.configuredMaxMs ?? DEFAULT_BG_TIMEOUT_MAX_MS
+  if (opts?.isNonInteractive !== false) {
+    const base = Math.max(
+      NON_INTERACTIVE_BG_TIMEOUT_CAP_MS,
+      opts?.minFloorMs ?? 0,
+    )
+    return Math.min(base, maxMs)
+  }
+  return Math.min(opts?.configuredDefaultMs ?? DEFAULT_BG_TIMEOUT_MAX_MS, maxMs)
+}
+
+export function formatNonInteractiveBgTimeoutToolDescription(opts?: {
+  isNonInteractive?: boolean
+  defaultMs?: number
+  maxMs?: number
+}): string {
+  const defaultMs =
+    opts?.defaultMs ??
+    resolveNonInteractiveBgTimeoutMs({
+      isNonInteractive: opts?.isNonInteractive ?? true,
+      configuredMaxMs: opts?.maxMs,
+    })
+  const maxMs = opts?.maxMs ?? DEFAULT_BG_TIMEOUT_MAX_MS
+  return `Set to true to run this command in the background. With it, \`timeout\` limits how long the command may run in the background before it is stopped (default ${defaultMs} ms, max ${maxMs} ms).`
+}
+
+export function formatNonInteractiveBgTimeoutGuidance(opts?: {
+  isNonInteractive?: boolean
+  defaultMs?: number
+  maxMs?: number
+}): string {
+  const defaultMs =
+    opts?.defaultMs ??
+    resolveNonInteractiveBgTimeoutMs({
+      isNonInteractive: opts?.isNonInteractive ?? true,
+      configuredMaxMs: opts?.maxMs,
+    })
+  const maxMs = opts?.maxMs ?? DEFAULT_BG_TIMEOUT_MAX_MS
+  const maxLabel =
+    maxMs < 3_600_000
+      ? `${Math.round(maxMs / 60_000)} minutes`
+      : `${Math.round(maxMs / 3_600_000)} hours`
+  return ` With \`run_in_background\` the timeout is instead how long the command may run in the background (default ${defaultMs}ms / ${Math.round(defaultMs / 60_000)} minutes, max ${maxMs}ms / ${maxLabel}); at that limit it is stopped.`
+}
+
 export type QueryEngineConfig = {
   cwd: string
   tools: Tools
@@ -632,6 +724,10 @@ export type QueryEngineConfig = {
   orphanedPermission?: OrphanedPermission
   /** Official JNs `F` — `$2l` attachment from resume, not a message scan. */
   deferredToolUse?: HookDeferredToolAttachment
+  /** #1733 / official `keptDeferredToolNotice` — error notice returned when a deferred tool's MCP server is missing and the call is preserved. */
+  keptDeferredToolNotice?: string
+  /** #1733 / official `dropsUnavailableDeferredTool` — when false (default), preserve the deferred tool call in the transcript instead of dropping it. */
+  dropsUnavailableDeferredTool?: boolean
   /** Official toolAliases — SDK-renamed tools for leftover Ld resume. */
   toolAliases?: Record<string, string>
   /**
@@ -792,6 +888,8 @@ export class QueryEngine {
       setSDKStatus,
       orphanedPermission,
       deferredToolUse: configDeferredToolUse,
+      keptDeferredToolNotice,
+      dropsUnavailableDeferredTool = false,
       toolAliases,
       refreshTools,
       refreshMcpClients,
@@ -1021,13 +1119,53 @@ export class QueryEngine {
         './utils/turnAttribution.js'
       )
       clearTurnAttributionKey()
-      const resumeOutcome = yield* handleDeferredToolUse(
-        deferredToolUse,
-        tools,
-        this.mutableMessages,
-        wrappedCanUseTool,
-        processUserInputContext,
-      )
+      const deferredToolAvailable =
+        findToolByName(tools, deferredToolUse.toolName) !== undefined ||
+        (toolAliases !== undefined &&
+          Object.entries(toolAliases).some(
+            ([alias, canonical]) =>
+              (alias === deferredToolUse.toolName ||
+                canonical === deferredToolUse.toolName) &&
+              findToolByName(tools, canonical) !== undefined,
+          ))
+      let resumeOutcome: HookDeferredToolAttachment | 'unavailable' | undefined
+      if (!deferredToolAvailable && !dropsUnavailableDeferredTool) {
+        // #1733: Keep the deferred tool call intact when its MCP server is missing
+        // (do NOT drop it via handleDeferredToolUse). Re-persist the deferred
+        // attachment if a notice is set, yield is_error: true with
+        // stop_reason/terminal_reason: 'tool_deferred_unavailable' and exit 1.
+        logForDebugging(
+          `Deferred tool resume: tool '${deferredToolUse.toolName}' is no longer available (MCP server disconnected or tool removed)`,
+          { level: 'warn' },
+        )
+        if (keptDeferredToolNotice !== undefined && persistSession) {
+          try {
+            await recordTranscript([
+              ...this.mutableMessages,
+              {
+                type: 'attachment',
+                attachment: deferredToolUse,
+                uuid: randomUUID(),
+                timestamp: new Date().toISOString(),
+              } as unknown as Message,
+            ])
+          } catch (err) {
+            logForDebugging(
+              `Deferred tool resume: not recorded: ${err instanceof Error ? err.message : String(err)}`,
+              { level: 'error' },
+            )
+          }
+        }
+        resumeOutcome = 'unavailable'
+      } else {
+        resumeOutcome = yield* handleDeferredToolUse(
+          deferredToolUse,
+          tools,
+          this.mutableMessages,
+          wrappedCanUseTool,
+          processUserInputContext,
+        )
+      }
       if (resumeOutcome) {
         const unavailable = resumeOutcome === 'unavailable'
         const attachment =
@@ -1039,7 +1177,7 @@ export class QueryEngine {
           duration_ms: Date.now() - startTime,
           duration_api_ms: 0,
           num_turns: this.mutableMessages.length,
-          result: '',
+          result: unavailable ? (keptDeferredToolNotice ?? '') : '',
           stop_reason: unavailable
             ? 'tool_deferred_unavailable'
             : 'tool_deferred',
@@ -2179,6 +2317,26 @@ export class QueryEngine {
                 uuid: msg.uuid,
               }
             }
+            // #1734: Normalize `informational` system messages for SDK clients
+            // while preserving `content` text verbatim.
+            if (msg.subtype === 'informational') {
+              const infoMsg = msg as Message & {
+                subtype: 'informational'
+                content?: unknown
+                level?: string
+              }
+              const contentText = normalizeInformationalContent(infoMsg.content)
+              yield {
+                type: 'system' as const,
+                subtype: 'informational' as const,
+                content: contentText,
+                ...(infoMsg.level !== undefined
+                  ? { level: infoMsg.level }
+                  : {}),
+                session_id: getSessionId(),
+                uuid: msg.uuid,
+              } as unknown as SDKMessage
+            }
             // Don't yield other system messages in headless mode
             break
           }
@@ -2609,6 +2767,8 @@ export async function* ask({
   setSDKStatus,
   orphanedPermission,
   deferredToolUse,
+  keptDeferredToolNotice,
+  dropsUnavailableDeferredTool,
 }: {
   commands: Command[]
   prompt: string | Array<ContentBlockParam>
@@ -2684,6 +2844,8 @@ export async function* ask({
   setSDKStatus?: (status: SDKStatus) => void
   orphanedPermission?: OrphanedPermission
   deferredToolUse?: HookDeferredToolAttachment
+  keptDeferredToolNotice?: string
+  dropsUnavailableDeferredTool?: boolean
 }): AsyncGenerator<SDKMessage, void, unknown> {
   const engine = new QueryEngine({
     cwd,
@@ -2719,6 +2881,8 @@ export async function* ask({
     abortController,
     orphanedPermission,
     deferredToolUse,
+    keptDeferredToolNotice,
+    dropsUnavailableDeferredTool,
     toolState,
     taskRegistry,
     credentials,

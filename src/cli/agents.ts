@@ -155,13 +155,18 @@ const PASSTHROUGH_FLAGS = [
   '--fallback-model',
   '--strict-mcp-config',
   '--restricted',
+  '--ax-screen-reader',
 ]
 
 function extractPassthroughArgs(args: string[]): string[] {
   const result: string[] = []
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!
-    if (arg === '--strict-mcp-config' || arg === '--restricted') {
+    if (
+      arg === '--strict-mcp-config' ||
+      arg === '--restricted' ||
+      arg === '--ax-screen-reader'
+    ) {
       result.push(arg)
       continue
     }

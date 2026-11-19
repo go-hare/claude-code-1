@@ -21,7 +21,7 @@ export function SandboxConfigTab(): React.ReactNode {
   if (!isEnabled) {
     return (
       <Box flexDirection="column" paddingY={1}>
-        <Text color="subtle">Sandbox is not enabled</Text>
+        <Text dimColor>Sandbox is not enabled</Text>
         {warningsNote}
       </Box>
     );

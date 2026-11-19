@@ -4,16 +4,16 @@ import { BRIDGE_ONLY_BROWSER_TOOLS, BROWSER_TOOLS } from '../browserTools.js'
 import { prepareToolArgsForChrome, sanitizeArgsForLog } from '../toolCalls.js'
 
 describe('BRIDGE_ONLY_BROWSER_TOOLS', () => {
-  test('three multi-browser tools and BROWSER_TOOLS is 23', () => {
+  test('three multi-browser tools and BROWSER_TOOLS is 21 (shortcuts_list/execute removed in #1820)', () => {
     expect([...BRIDGE_ONLY_BROWSER_TOOLS].sort()).toEqual([
       'list_connected_browsers',
       'select_browser',
       'switch_browser',
     ])
-    expect(BROWSER_TOOLS).toHaveLength(23)
+    expect(BROWSER_TOOLS).toHaveLength(21)
     expect(
       BROWSER_TOOLS.filter(t => !BRIDGE_ONLY_BROWSER_TOOLS.has(t.name)),
-    ).toHaveLength(20)
+    ).toHaveLength(18)
   })
 })
 

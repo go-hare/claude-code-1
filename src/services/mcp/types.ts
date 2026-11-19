@@ -354,6 +354,8 @@ export type McpTransportErrorState = {
   activeCallWatchdogs: Set<McpCallWatchdog>
   pendingElicitations: number
   lastElicitationClosedAt: number
+  /** Official 325 #1910: transport close reason (e.g. 'stdout overflow' / 'http body overflow'). */
+  closeReason?: string
 }
 
 export type ConnectedMCPServer = {

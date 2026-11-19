@@ -1,6 +1,7 @@
 import { spawnSync } from 'child_process'
 import { execFileNoThrow } from '../../../utils/execFileNoThrow.js'
 import { buildCliLaunch, quoteCliLaunch } from '../../../utils/cliLaunch.js'
+import { getScreenReaderChildEnv } from '../../../utils/screenReaderGate.js'
 import type {
   BgAttachResult,
   BgEngine,
@@ -21,6 +22,7 @@ export class TmuxEngine implements BgEngine {
   async start(opts: BgStartOptions): Promise<BgStartResult> {
     const launch = buildCliLaunch(opts.args, {
       env: {
+        ...getScreenReaderChildEnv(),
         ...opts.env,
         CLAUDE_CODE_SESSION_KIND: 'bg',
         CLAUDE_CODE_SESSION_NAME: opts.sessionName,
@@ -59,7 +61,10 @@ export class TmuxEngine implements BgEngine {
     const result = spawnSync(
       'tmux',
       ['attach-session', '-t', session.tmuxSessionName],
-      { stdio: 'inherit' },
+      {
+        stdio: 'inherit',
+        env: { ...process.env, ...getScreenReaderChildEnv() },
+      },
     )
 
     if (result.status !== 0) {

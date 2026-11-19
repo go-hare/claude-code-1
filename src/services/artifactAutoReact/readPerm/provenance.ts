@@ -164,14 +164,17 @@ const COWORK_REMOTE_ENTRYPOINTS = new Set([
   'remote_cowork_trigger',
 ])
 
-/** densable xFe */
+/** Official 325 `sst` (#1928) */
 const OTHER_ORG_ARTIFACT =
-  "this Artifact is in another of the user's organizations, not the one this session is signed in to"
-/** densable PFe */
+  "this Artifact is in another of the user's organizations, or one they are no longer part of, not the one this session is signed in to"
+/** Official 325 `sce` (#1928) */
 const OTHER_ORG_REMEDY =
-  'the user runs /login and signs in to that organization'
+  'the user runs /login and signs in to that organization, if they still can'
+/** Official 325 `LKe` (#1928) */
+const OTHER_ORG_ACCOUNT_MOVE_NOTE =
+  'If it is in a personal account whose data the user has since moved, they can look for a copy among their Artifacts in the organization the data went to, which may be this one'
 /** densable Mlt */
-const OTHER_ORG_UNREACHABLE = `${OTHER_ORG_ARTIFACT} — nothing in this session can reach it until ${OTHER_ORG_REMEDY}`
+const OTHER_ORG_UNREACHABLE = `${OTHER_ORG_ARTIFACT} — nothing in this session can reach it until ${OTHER_ORG_REMEDY}. ${OTHER_ORG_ACCOUNT_MOVE_NOTE}`
 /** densable BRr */
 const OTHER_ORG_REASON = "Artifact is in another of the user's organizations"
 

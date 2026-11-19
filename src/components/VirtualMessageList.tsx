@@ -419,6 +419,23 @@ function VirtualItem({
   );
 }
 
+/**
+ * Official 2.1.321 (#1908): when a mounted item (e.g. a collapsed/shortened
+ * tool result) shrinks by more than one viewport height, trigger a compensating
+ * re-render so spacer heights and scroll clamp bounds update before the item
+ * scrolls off the top of the screen.
+ */
+export function shouldCompensateHeightShrinkage(
+  prevHeight: number | undefined,
+  nextHeight: number,
+  viewportHeight: number,
+): boolean {
+  if (prevHeight === undefined || prevHeight <= 0 || viewportHeight <= 0) {
+    return false;
+  }
+  return prevHeight - nextHeight > viewportHeight;
+}
+
 export function VirtualMessageList({
   messages,
   scrollRef,
@@ -446,6 +463,8 @@ export function VirtualMessageList({
   // compaction, /clear, or itemKey change. Duplicate sibling keys (upstream
   // uuid-dup) get `#1`, `#2`, … so React/virtual scroll never mounts two
   // rows under the same key (2.1.229 #6 long-stream double-print/disappear).
+  const [shrinkEpoch, setShrinkEpoch] = useState(0);
+  const prevMeasuredHeightsRef = useRef<Map<string, number>>(new Map());
   const keysCacheRef = useRef(createVirtualItemKeyCache());
   const keys = useMemo(
     () => buildVirtualItemKeys(messages, itemKey, keysCacheRef.current, shortMsgType),
@@ -463,7 +482,7 @@ export function VirtualMessageList({
     getItemHeight,
     onLayout: onVirtualLayout,
     scrollToIndex,
-  } = useVirtualScroll(scrollRef, keys, columns, layoutEpoch);
+  } = useVirtualScroll(scrollRef, keys, columns, layoutEpoch + shrinkEpoch);
   const [rawStart, rawEnd] = range;
   const end = Math.min(rawEnd, messages.length);
   const start = Math.min(rawStart, end);
@@ -664,11 +683,37 @@ export function VirtualMessageList({
     [scrollRef, indexByRevealRequestId],
   );
 
-  // densable `Wt` — layout-pass listener: reveal tick then `wb` `ut`.
+  // densable `Wt` + 2.1.321 #1908 — layout-pass listener: reveal tick, `wb` `ut`,
+  // and height-shrinkage boundary re-render compensation when a tool result shrinks
+  // by more than one viewport height before scrolling off-top.
+  const rangeBoundsRef = useRef({ start, end, keys });
+  rangeBoundsRef.current = { start, end, keys };
   const onLayout = useCallback(() => {
     tickReveal(false);
     onVirtualLayout();
-  }, [tickReveal, onVirtualLayout]);
+    const viewportHeight = scrollRef.current?.getViewportHeight() ?? 0;
+    if (viewportHeight <= 0) return;
+    const { start: s, end: e, keys: ks } = rangeBoundsRef.current;
+    let needsCompensate = false;
+    const prevMap = prevMeasuredHeightsRef.current;
+    for (let i = s; i < e; i++) {
+      const k = ks[i];
+      if (!k) continue;
+      const el = getItemElement(i);
+      const h = el?.yogaNode?.getComputedHeight();
+      if (h === undefined || h < 0) continue;
+      const prev = prevMap.get(k);
+      if (shouldCompensateHeightShrinkage(prev, h, viewportHeight)) {
+        needsCompensate = true;
+      }
+      if (h > 0 || prev !== undefined) {
+        prevMap.set(k, h);
+      }
+    }
+    if (needsCompensate) {
+      setShrinkEpoch(n => n + 1);
+    }
+  }, [tickReveal, onVirtualLayout, scrollRef, getItemElement]);
 
   useEffect(() => {
     setTranscriptRevealHost({

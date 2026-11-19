@@ -4,9 +4,14 @@ import {
 } from '../../services/analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import { isPolicyAllowed } from '../../services/policyLimits/index.js'
+import { getOauthAccountInfo } from '../auth.js'
+import { isFeedbackRefusedByServer } from '../config.js'
 import { getAuthHeaders } from '../http.js'
 import { isEnvTruthy } from '../envUtils.js'
-import { getAPIProvider } from '../model/providers.js'
+import {
+  getAPIProvider,
+  isFirstPartyAnthropicBaseUrl,
+} from '../model/providers.js'
 import { isEssentialTrafficOnly } from '../privacyLevel.js'
 import { isHoverRestOn } from '../storageV5/hoverRestPin.js'
 import {
@@ -72,14 +77,53 @@ function isSendFeedbackEnvDisabled(): boolean {
   return value === false || value === '0' || value === 'false'
 }
 
-/** densable leftover Ufs / `uln` — `if(TG()!==null)return!1`. */
+/** Official 2.1.319 `BNa` (#1729): Anthropic API key format check. */
+const ANTHROPIC_API_KEY_RE = /^(sk-ant-|sk-[\w-]{86}$)/
+
+function isLikelyAnthropicApiKey(key: string): boolean {
+  return ANTHROPIC_API_KEY_RE.test(key.trim())
+}
+
+/**
+ * Official 2.1.319 `Jyr()` (#1729): detect whether auth/endpoint indicates a
+ * third-party LLM gateway where feedback cannot be sent directly to Anthropic.
+ */
+export function detectFeedbackGatewayState(): 'gateway' | 'no_creds' | null {
+  const isCustomBaseUrl = !isFirstPartyAnthropicBaseUrl()
+  let auth: ReturnType<typeof getAuthHeaders>
+  try {
+    auth = getAuthHeaders()
+  } catch {
+    return isCustomBaseUrl ? 'gateway' : 'no_creds'
+  }
+  if (auth.error) {
+    return isCustomBaseUrl ? 'gateway' : 'no_creds'
+  }
+  const apiKey = auth.headers['x-api-key']
+  if (apiKey && isCustomBaseUrl && !isLikelyAnthropicApiKey(apiKey)) {
+    return 'gateway'
+  }
+  return null
+}
+
+export function getFeedbackRefusalPrincipal(): string | null {
+  const oauth = getOauthAccountInfo()
+  if (oauth?.organizationUuid) return `org:${oauth.organizationUuid}`
+  if (oauth?.accountUuid) return `acct:${oauth.accountUuid}`
+  return null
+}
+
+/** densable leftover Ufs / `uln` / `yps` (#1728, #1729) */
 export function isSendFeedbackSessionEnabled(): boolean {
   if (getFeedbackCommandDisabledReason() !== null) return false
   if (isAntUserType()) return false
   if (vgr()) return false
   if (getAPIProvider() !== 'firstParty') return false
   if (isSendFeedbackEnvDisabled()) return false
-  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_juniper_relay', false)
+  return (
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_juniper_relay', false) &&
+    detectFeedbackGatewayState() !== 'gateway'
+  )
 }
 
 /** densable leftover aLt */
@@ -154,7 +198,11 @@ export function getFeedbackCommandDisabledReason(
   if (isEssentialTrafficOnly()) {
     return `${command} has been disabled via the CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC environment variable`
   }
-  if (!isPolicyAllowed('allow_product_feedback')) {
+  if (
+    !isPolicyAllowed('allow_product_feedback') ||
+    (getAPIProvider() === 'firstParty' &&
+      isFeedbackRefusedByServer(getFeedbackRefusalPrincipal()))
+  ) {
     return formatFeedbackWithIssueFallback(
       `${command} is disabled by your organization's policy.`,
     )

@@ -2878,9 +2878,42 @@ export function prependCyberVerificationNotice(
 }
 
 /**
- * Official `@297784953` — cyber safeguard note for subagent/main refusal:
- * no longer asks people to apply to the Cyber Verification Program.
+ * Official 2.1.321 `HHi` (#1852): plan a same-model retry after a refusal.
+ * When `producedNothing` is true (the refused model was blocked before replying
+ * with any kept messages or streamed content), mark the synthetic retry nudge
+ * as `isVirtual: true` (`nudgeSent: false`) so the fallback/retried model does
+ * not see a stale "stopped response" nudge and mistakenly decline the request.
  */
+export function planSameModelRefusalRetryNudge(input: {
+  producedNothing: boolean
+  interruptedToolCount: number
+  refusedMessageId?: string
+}): {
+  nudgeContent: string
+  isVirtual: boolean | undefined
+  nudgeSent: boolean
+  refusedMessageId?: string
+} {
+  const nudgeContent =
+    input.interruptedToolCount > 0
+      ? 'Your previous response was stopped by safeguards while running a tool. Continue the task carefully.'
+      : 'Your previous response was stopped by safeguards. Continue the task carefully.'
+  return {
+    nudgeContent,
+    isVirtual: input.producedNothing ? true : undefined,
+    nudgeSent: !input.producedNothing,
+    ...(input.refusedMessageId !== undefined && {
+      refusedMessageId: input.refusedMessageId,
+    }),
+  }
+}
+
+/**
+ * Official `@297784953` + 2.1.321 (#1953) — Cyber Verification Program sentence
+ * aligned with claude.ai wording on cyber safeguard blocks.
+ */
+export const CYBER_VERIFICATION_NOTICE = `Defense Access in the Cyber Verification Program covers defensive cybersecurity work and reduces these interruptions: ${CYBER_SAFEGUARDS_LEARN_MORE_URL}`
+
 export function formatCyberSafeguardDefenseAccessNote(
   stopDetails: { category?: unknown } | null | undefined,
 ): string {
@@ -2889,7 +2922,7 @@ export function formatCyberSafeguardDefenseAccessNote(
     getAPIProvider() === 'firstParty' &&
     !hasCyberVerificationStatus(stopDetails)
   ) {
-    return ` Defense Access in the Cyber Verification Program reduces these interruptions: ${CYBER_SAFEGUARDS_LEARN_MORE_URL}`
+    return ` ${CYBER_VERIFICATION_NOTICE}`
   }
   return ''
 }

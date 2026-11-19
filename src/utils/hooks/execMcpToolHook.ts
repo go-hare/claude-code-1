@@ -242,15 +242,50 @@ export async function execMcpToolHook(
           .map(part => (part.type === 'text' ? part.text : `[${part.type}]`))
           .join('\n')
       : ''
+    // Official #1910: 16 MiB cap on returned MCP hook answer.
+    if (Buffer.byteLength(body, 'utf8') > 16 * 1024 * 1024) {
+      const error = `MCP tool "${hook.tool}" on server "${hook.server}" gave no answer that could be read, because a message from the server was too large, so this hook gave no verdict. If this keeps happening, the tool must send a smaller answer.`
+      logForDebugging(`Hooks: mcp_tool hook refused — ${error}`, {
+        level: 'warn',
+      })
+      return { ok: false, body: '', error, withheld: true }
+    }
     return result.isError
       ? { ok: false, body, error: body || 'MCP tool returned an error' }
       : { ok: true, body }
   } catch (error) {
-    if (combined.signal.aborted) return { ok: false, body: '', aborted: true }
+    const closeReason = (
+      client as ConnectedMCPServer & {
+        transportErrorState?: { closeReason?: string }
+      }
+    )?.transportErrorState?.closeReason
+    const overflowReason =
+      error instanceof Error &&
+      (error.name === 'HttpBodyOverflowError' ||
+        error.name === 'StdoutOverflowError' ||
+        /exceeded.*16\s*m(?:i?b)?|larger than 16MB|stdout overflow|http body overflow/i.test(
+          error.message,
+        ))
+        ? 'gave no answer that could be read, because a message from the server was too large'
+        : closeReason === 'stdout overflow' ||
+            closeReason === 'http body overflow'
+          ? 'gave no answer that could be read, because a message from the server was too large'
+          : undefined
+    if (combined.signal.aborted && overflowReason === undefined) {
+      return { ok: false, body: '', aborted: true }
+    }
     const message = errorMessage(error)
     logForDebugging(`Hooks: mcp_tool hook error: ${message}`, {
       level: 'error',
     })
+    if (overflowReason !== undefined) {
+      return {
+        ok: false,
+        body: '',
+        error: `MCP tool "${hook.tool}" on server "${hook.server}" ${overflowReason}, so this hook gave no verdict. If this keeps happening, the tool must send a smaller answer.`,
+        withheld: true,
+      }
+    }
     return { ok: false, body: '', error: message }
   } finally {
     combined.cleanup()

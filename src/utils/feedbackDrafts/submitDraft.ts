@@ -5,6 +5,7 @@ import {
 } from '../../services/analytics/index.js'
 import { getSessionId } from '../../bootstrap/state.js'
 import { checkAndRefreshOAuthTokenIfNeeded } from '../auth.js'
+import { recordFeedbackRefusedByServer } from '../config.js'
 import { getAuthHeaders, getUserAgent } from '../http.js'
 import { logForDebugging } from '../debug.js'
 import {
@@ -22,6 +23,7 @@ import {
   type FeedbackDraftSubmitSurface,
 } from './draftedBylines.js'
 import { fitFeedbackPayloadToBudget } from './fitFeedbackPayloadToBudget.js'
+import { getFeedbackRefusalPrincipal } from './gates.js'
 import {
   parseDraftTranscriptMessages,
   sessionMessagesToDraftTranscript,
@@ -134,6 +136,7 @@ async function postFeedbackPayload(
         return { success: false, payloadTooLarge: true, statusCode }
       }
       if (statusCode === 403 && isZdrRetentionError(error.response?.data)) {
+        recordFeedbackRefusedByServer(getFeedbackRefusalPrincipal())
         return { success: false, isZdrOrg: true, statusCode }
       }
       if (error.code === 'ECONNABORTED') {

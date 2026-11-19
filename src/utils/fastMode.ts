@@ -135,11 +135,21 @@ export function getFastModeUnavailableReason(): string | null {
     }
   }
 
-  // Only available for 1P (not Bedrock/Vertex/Foundry)
-  if (getAPIProvider() !== 'firstParty') {
-    const reason = 'Fast mode is not available on Bedrock, Vertex, or Foundry'
+  // Only available for 1P and Vertex (#1963: Vertex fast mode in global/us/eu)
+  const provider = getAPIProvider()
+  if (provider !== 'firstParty' && provider !== 'vertex') {
+    const reason = 'Fast mode is not available on this provider'
     logForDebugging(`Fast mode unavailable: ${reason}`)
     return reason
+  }
+
+  if (provider === 'vertex') {
+    const vertexRegionIssue = getVertexFastModeRegionUnavailableReason()
+    if (vertexRegionIssue !== null) {
+      logForDebugging(`Fast mode unavailable: ${vertexRegionIssue}`)
+      return vertexRegionIssue
+    }
+    return null
   }
 
   if (orgStatus.status === 'disabled') {
@@ -169,11 +179,71 @@ export function getFastModeUnavailableReason(): string | null {
   return null
 }
 
+/**
+ * Official 2.1.322 `jG` (#1963): Vertex regions where fast mode is supported.
+ */
+export const VERTEX_FAST_MODE_REGIONS = new Set(['global', 'us', 'eu'])
+
+/**
+ * Official 2.1.322 `Lfe` / `$Ua` (#1963): resolve the configured Vertex region
+ * and its controlling env var for a model.
+ */
+export function resolveVertexRegionForModel(
+  model: string,
+  env: NodeJS.ProcessEnv = process.env,
+): { region: string | undefined; envVar: string } {
+  const lower = model.toLowerCase()
+  const perModelEnvVars: Array<[string, string]> = [
+    ['claude-fable-5-2', 'VERTEX_REGION_CLAUDE_FABLE_5_2'],
+    ['claude-fable-5-1', 'VERTEX_REGION_CLAUDE_FABLE_5_1'],
+    ['claude-fable-5', 'VERTEX_REGION_CLAUDE_FABLE_5'],
+    ['claude-opus-5-5', 'VERTEX_REGION_CLAUDE_5_5_OPUS'],
+    ['claude-opus-5', 'VERTEX_REGION_CLAUDE_5_OPUS'],
+    ['claude-opus-4-8', 'VERTEX_REGION_CLAUDE_4_8_OPUS'],
+    ['claude-opus-4-7', 'VERTEX_REGION_CLAUDE_4_7_OPUS'],
+    ['claude-opus-4-6', 'VERTEX_REGION_CLAUDE_4_6_OPUS'],
+  ]
+  for (const [prefix, envVar] of perModelEnvVars) {
+    if (lower.includes(prefix)) {
+      const val = env[envVar]?.trim()
+      if (val) return { region: val, envVar }
+      return { region: env.CLOUD_ML_REGION?.trim() || undefined, envVar }
+    }
+  }
+  return {
+    region: env.CLOUD_ML_REGION?.trim() || undefined,
+    envVar: 'CLOUD_ML_REGION',
+  }
+}
+
+/**
+ * Official 2.1.322 `zG` (#1963): check whether Vertex region blocks fast mode.
+ */
+export function getVertexFastModeRegionUnavailableReason(
+  modelSetting?: ModelSetting,
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  if (getAPIProvider() !== 'vertex') return null
+  const candidate =
+    modelSetting !== undefined
+      ? (modelSetting ?? getDefaultMainLoopModelSetting())
+      : getFastModeModel()
+  const parsed = parseUserSpecifiedModel(candidate)
+  const { region, envVar } = resolveVertexRegionForModel(parsed, env)
+  if (region && VERTEX_FAST_MODE_REGIONS.has(region.toLowerCase())) {
+    return null
+  }
+  return `Fast mode needs Vertex region global, us or eu · set ${envVar} to one of them and restart`
+}
+
 // @[MODEL LAUNCH]: Update supported Fast Mode models.
 // densable 2.1.219 m5() — display name for /fast + model-switch copy.
 export const FAST_MODE_MODEL_DISPLAY = 'Opus 5'
 
 export function getFastModeModel(): string {
+  if (getAPIProvider() === 'vertex') {
+    return 'claude-fable-5-2'
+  }
   return 'opus' + (isOpus1mMergeEnabled() ? '[1m]' : '')
 }
 
@@ -197,6 +267,11 @@ function settingsWantFastModeOn(): boolean {
   const settings = getInitialSettings()
   if (settings.fastMode !== true) {
     return false
+  }
+  // Official 2.1.322 (#1963): on Vertex, saved fastMode in user settings is
+  // ignored — users opt in per session via /fast (or flagSettings).
+  if (getAPIProvider() === 'vertex') {
+    return getSettingsForSource('flagSettings')?.fastMode === true
   }
   // Per-session opt-in: each session starts off unless flagSettings forces on.
   if (settings.fastModePerSessionOptIn) {
@@ -238,8 +313,20 @@ export function isFastModeSupportedByModel(
   if (!isFastModeEnabled()) {
     return false
   }
+  const provider = getAPIProvider()
+  if (provider !== 'firstParty' && provider !== 'vertex') {
+    return false
+  }
   const model = modelSetting ?? getDefaultMainLoopModelSetting()
   const parsedModel = parseUserSpecifiedModel(model)
+  if (isModelFastModeRejectedForSession(parsedModel)) {
+    return false
+  }
+  // Official 2.1.322 (#1963): Vertex requires the `vertex_fast_mode` capability
+  // (e.g. claude-fable-5-2) and does not fall back to first-party Opus strings.
+  if (provider === 'vertex') {
+    return modelHasCatalogCapability(parsedModel, 'vertex_fast_mode') === true
+  }
   // densable ON(lo(r), "fast_mode") short-circuit — only adds positives
   if (modelHasCatalogCapability(parsedModel, 'fast_mode') === true) {
     return true
@@ -415,7 +502,54 @@ export type FastModeRuntimeState =
   | { status: 'cooldown'; resetAt: number; reason: CooldownReason }
 
 // --- Cooldown event listeners ---
-export type CooldownReason = 'rate_limit' | 'overloaded'
+export type CooldownReason =
+  | 'rate_limit'
+  | 'overloaded'
+  | 'server_error'
+  | 'timeout'
+  | 'refused'
+
+/**
+ * Official 2.1.321/322 `YVr` / `d7n` / `l4t` (#1880, #1963):
+ * Models for which fast mode was refused (e.g. 400 on Vertex or API) fall back
+ * to standard speed on the same model for the rest of the session.
+ */
+const fastRejectedSessionModels = new Set<string>()
+
+export function markModelFastModeRejectedForSession(model: string): void {
+  const key = model.replace(/\[1m\]$/i, '').toLowerCase()
+  if (fastRejectedSessionModels.has(key)) return
+  fastRejectedSessionModels.add(key)
+  logForDebugging(
+    `Fast mode rejected for ${model}; using standard speed for it this session`,
+  )
+}
+
+export function isModelFastModeRejectedForSession(model: string): boolean {
+  const key = model.replace(/\[1m\]$/i, '').toLowerCase()
+  return fastRejectedSessionModels.has(key)
+}
+
+export function clearSessionFastModeRejections(): void {
+  fastRejectedSessionModels.clear()
+}
+
+/**
+ * Official 2.1.322 `nht(err)` (#1963): detect Vertex or API refusal of fast
+ * mode (speed: 'fast') so the request immediately retries at standard speed.
+ */
+export function isFastModeRefusalError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const status = (error as { status?: unknown }).status
+  if (status !== 400 && status !== 403 && status !== 404) return false
+  const message =
+    typeof (error as { message?: unknown }).message === 'string'
+      ? (error as { message: string }).message
+      : ''
+  return /fast[_\s-]?mode|speed.*fast|fast.*speed|fast_mode_not_supported|service_tier/i.test(
+    message,
+  )
+}
 
 export function onCooldownTriggered(
   listener: (resetAt: number, reason: CooldownReason) => void,
@@ -452,7 +586,13 @@ export function triggerFastModeCooldown(
     return
   }
   const slot = getSessionOnceLatches().fastModeCooldown
-  slot.runtimeState = { status: 'cooldown', resetAt: resetTimestamp, reason }
+  const latchReason: 'rate_limit' | 'overloaded' =
+    reason === 'rate_limit' ? 'rate_limit' : 'overloaded'
+  slot.runtimeState = {
+    status: 'cooldown',
+    resetAt: resetTimestamp,
+    reason: latchReason,
+  }
   slot.hasLoggedCooldownExpiry = false
   const cooldownDurationMs = resetTimestamp - Date.now()
   logForDebugging(
@@ -463,7 +603,7 @@ export function triggerFastModeCooldown(
     cooldown_reason:
       reason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   })
-  slot.cooldownTriggered.emit(resetTimestamp, reason)
+  slot.cooldownTriggered.emit(resetTimestamp, latchReason)
 }
 
 export function clearFastModeCooldown(): void {

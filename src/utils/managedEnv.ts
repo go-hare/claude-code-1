@@ -3,8 +3,10 @@ import { getGlobalConfig } from './config.js'
 import { isEnvTruthy } from './envUtils.js'
 import { logForDebugging } from './debug.js'
 import {
+  isCoworkCloudBlockedEnvVar,
   isHostProxyEnvVar,
   isHostTransportSensitiveEnvVar,
+  isPolicyTransportEnvVar,
   isProviderManagedEnvVar,
   isSafeManagedEnv,
   stripProjectScopeBlockedEnv,
@@ -115,13 +117,26 @@ export function stripHostManagedSettingsEnv(
     managedByHost: boolean
     managedByHostFlag: boolean
     desktopHost?: boolean
+    coworkCloud?: boolean
+    policyTransportEnv?: boolean
     source?: string
     onStrip?: (key: string, source: string) => void
   },
 ): Record<string, string> {
   if (!env) return {}
-  const { managedByHost, managedByHostFlag, desktopHost = false } = opts
-  if (!managedByHost && !managedByHostFlag) {
+  const {
+    managedByHost,
+    managedByHostFlag,
+    desktopHost = false,
+    coworkCloud = false,
+    policyTransportEnv = false,
+  } = opts
+  if (
+    !managedByHost &&
+    !managedByHostFlag &&
+    !coworkCloud &&
+    !policyTransportEnv
+  ) {
     return env
   }
   const source = opts.source ?? 'settings'
@@ -132,6 +147,23 @@ export function stripHostManagedSettingsEnv(
   const onStrip = opts.onStrip ?? warnHostManagedSettingsEnvIgnored
   const out: Record<string, string> = {}
   for (const [key, value] of Object.entries(env)) {
+    // Official 2.1.319 (#1808): coworkCloud blocks all proxy/transport vars
+    // (including CLAUDE_CODE_PROXY_RESOLVES_HOSTS) from any settings file.
+    if (coworkCloud && isCoworkCloudBlockedEnvVar(key)) {
+      onStrip(key, source)
+      continue
+    }
+    // Official 2.1.319 (#1808): policyTransportEnv blocks V7r transport vars
+    // (including CLAUDE_CODE_PROXY_RESOLVES_HOSTS) from settings files where
+    // the host manages the network.
+    if (policyTransportEnv && isPolicyTransportEnvVar(key)) {
+      onStrip(key, source)
+      continue
+    }
+    if (!managedByHost && !managedByHostFlag) {
+      out[key] = value
+      continue
+    }
     // densable PLn provider routing — strip when managedByHost
     if (isProviderManagedEnvVar(key) && managedByHost) {
       onStrip(key, source)
@@ -157,6 +189,20 @@ export function stripHostManagedSettingsEnv(
   return out
 }
 
+function isCoworkCloudSession(): boolean {
+  return (
+    isEnvTruthy(process.env.CLAUDE_CODE_IS_COWORK) ||
+    process.env.CLAUDE_CODE_ENTRYPOINT === 'cowork-cloud'
+  )
+}
+
+function isPolicyTransportManagedByHost(): boolean {
+  return (
+    isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) ||
+    Boolean(process.env.ANTHROPIC_UNIX_SOCKET)
+  )
+}
+
 function withoutHostManagedProviderVars(
   env: Record<string, string> | undefined,
   source = 'settings',
@@ -165,6 +211,8 @@ function withoutHostManagedProviderVars(
     managedByHost: isManagedByHostSession(),
     managedByHostFlag: isProviderManagedByHostFlag(),
     desktopHost: process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop',
+    coworkCloud: isCoworkCloudSession(),
+    policyTransportEnv: isPolicyTransportManagedByHost(),
     source,
   })
 }

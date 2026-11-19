@@ -27,6 +27,7 @@ import {
   isJavaMcpFormUrlElicitationReject,
   JAVA_MCP_BARE_ELICITATION_HINT,
 } from './mcpV2Client.js'
+import { isChromeBrowserMcpToolBlockedByOrgPolicy } from '../../utils/claudeInChrome/chromeMcpReadOnly.js'
 import type {
   ElicitRequestURLParams,
   ElicitResult,
@@ -2829,9 +2830,22 @@ export const fetchToolsForClient = memoizeWithLRU(
           isAccountMemoryServerTool(serverRefForMemory, t.name),
         )
 
+      // Official 325 #1949: host-provided Claude in Chrome / Browser / Preview /
+      // remote-devices MCP tools follow the organization's `allow_claude_browser_extension` policy.
+      const listedAfterBrowserPolicy = listedAfterSchema.filter(tool => {
+        const fq = buildMcpToolName(client.name, tool.name)
+        if (isChromeBrowserMcpToolBlockedByOrgPolicy(fq)) {
+          logForDebugging(
+            `[mcp] ${client.name}: hiding ${fq} — disallowed by organization allow_claude_browser_extension policy`,
+          )
+          return false
+        }
+        return true
+      })
+
       // Convert MCP tools to our Tool format
       return filterMcpToolsByNameLength(
-        listedAfterSchema
+        listedAfterBrowserPolicy
           .map((tool): Tool => {
             const fullyQualifiedName = buildMcpToolName(client.name, tool.name)
             const requiresUserInteraction = isMcpRequiresUserInteraction(
@@ -3034,6 +3048,8 @@ export const fetchToolsForClient = memoizeWithLRU(
                     const {
                       resolveMcpAutoBackgroundMs,
                       callMcpToolWithAutoBackground,
+                      extractSep2663ServerTask,
+                      handleSep2663ServerTask,
                     } =
                       require('../../utils/mcpAutoBackground.js') as typeof import('../../utils/mcpAutoBackground.js')
                     const transportType =
@@ -3081,7 +3097,7 @@ export const fetchToolsForClient = memoizeWithLRU(
                         toolUseContext: context,
                       })
 
-                    const mcpResult =
+                    let mcpResult =
                       autoBgMs > 0
                         ? await callMcpToolWithAutoBackground({
                             run: runMcp,
@@ -3122,6 +3138,69 @@ export const fetchToolsForClient = memoizeWithLRU(
                             },
                           })
                         : await runMcp(context.abortController.signal)
+
+                    // Official 325 #1701 & #1702: when an MCP server runs a tool
+                    // call as a SEP-2663 task, immediately background it (unless
+                    // CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND is set).
+                    const sep2663Task = extractSep2663ServerTask(mcpResult)
+                    if (sep2663Task) {
+                      mcpResult = (await handleSep2663ServerTask({
+                        serverName: client.name,
+                        toolName: tool.name,
+                        toolLabel: fullyQualifiedName,
+                        toolUseId,
+                        taskRef: sep2663Task,
+                        setAppState:
+                          context.setAppStateForTasks ?? context.setAppState,
+                        parentAbortSignal: context.abortController.signal,
+                        isNonInteractiveSession:
+                          context.options.isNonInteractiveSession,
+                        pollToCompletion: async pollSignal => {
+                          const rawClient =
+                            connectedClient.client as unknown as {
+                              request: (
+                                req: {
+                                  method: string
+                                  params: Record<string, unknown>
+                                },
+                                opts?: { signal?: AbortSignal },
+                              ) => Promise<Record<string, unknown>>
+                            }
+                          const interval = sep2663Task.pollIntervalMs ?? 2000
+                          while (!pollSignal.aborted) {
+                            const statusRes = await rawClient.request(
+                              {
+                                method: 'tasks/get',
+                                params: { taskId: sep2663Task.mcpTaskId },
+                              },
+                              { signal: pollSignal },
+                            )
+                            const st = String(statusRes?.status ?? '')
+                            if (st === 'completed') {
+                              return await rawClient.request(
+                                {
+                                  method: 'tasks/result',
+                                  params: { taskId: sep2663Task.mcpTaskId },
+                                },
+                                { signal: pollSignal },
+                              )
+                            }
+                            if (st === 'failed' || st === 'cancelled') {
+                              throw new Error(
+                                String(
+                                  statusRes?.statusMessage ??
+                                    `MCP task ${sep2663Task.mcpTaskId} ${st}`,
+                                ),
+                              )
+                            }
+                            await new Promise(resolve =>
+                              setTimeout(resolve, interval),
+                            )
+                          }
+                          throw new Error('MCP task polling aborted')
+                        },
+                      })) as typeof mcpResult
+                    }
 
                     // densable 2.1.246 #10: `if(Ae.interrupted)throw new Rn(Q6)`
                     // before completed progress — abort must not become empty

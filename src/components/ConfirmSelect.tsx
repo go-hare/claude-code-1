@@ -9,6 +9,48 @@ import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 
 /** densable z — ATt default and qn window when windowMs is omitted. */
 export const CONFIRM_SELECT_ARM_MS = 500;
+/** Inter-keystroke gap (ms) to consider a stray pre-prompt typing burst finished (#1891). */
+export const CONFIRM_STREAM_QUIET_GAP_MS = 350;
+
+export type ConfirmStreamGuard = {
+  /**
+   * Decide whether an incoming keystroke should be dropped as part of a
+   * continuous stray typing stream that started while input was refused (#1891).
+   */
+  shouldDropKey(key: string, refused: boolean, now: number): boolean;
+  reset(): void;
+};
+
+export function createConfirmStreamGuard(gapMs = CONFIRM_STREAM_QUIET_GAP_MS): ConfirmStreamGuard {
+  let droppingStream = false;
+  let lastKeyAt = -Infinity;
+
+  return {
+    shouldDropKey(key: string, refused: boolean, now: number): boolean {
+      if (refused) {
+        droppingStream = true;
+        lastKeyAt = now;
+        return true;
+      }
+      if (droppingStream) {
+        const elapsed = now - lastKeyAt;
+        if (elapsed >= 0 && elapsed < gapMs) {
+          lastKeyAt = now;
+          if (key === 'return') {
+            droppingStream = false;
+          }
+          return true;
+        }
+        droppingStream = false;
+      }
+      return false;
+    },
+    reset(): void {
+      droppingStream = false;
+      lastKeyAt = -Infinity;
+    },
+  };
+}
 
 export type ConfirmChoice = 'confirm' | 'cancel';
 
@@ -75,6 +117,10 @@ function ScreenReaderConfirm({
   const [typed, setTyped] = useState('');
   const [error, setError] = useState<string | null>(null);
   const boxRef = useRef<HTMLElement | null>(null);
+  const streamGuardRef = useRef<ConfirmStreamGuard | null>(null);
+  if (streamGuardRef.current === null) {
+    streamGuardRef.current = createConfirmStreamGuard();
+  }
   const refuse = (): boolean => (refuseInput?.() ?? false) || confirmSelectRefused(openedAt, windowMs, Date.now());
   const submit = (raw: string): void => {
     const answer = raw.trim().toLowerCase();
@@ -94,25 +140,41 @@ function ScreenReaderConfirm({
     setTyped('');
   };
   const onKeyDown = (event: KeyboardEvent): void => {
+    const now = Date.now();
+    const isRefused = refuse();
     if (event.key === 'escape') {
       event.preventDefault();
-      if (refuse()) return;
+      if (streamGuardRef.current!.shouldDropKey('escape', isRefused, now)) {
+        setTyped('');
+        return;
+      }
       onCancel();
       return;
     }
     if (event.key === 'return') {
       event.preventDefault();
+      if (streamGuardRef.current!.shouldDropKey('return', isRefused, now)) {
+        setTyped('');
+        return;
+      }
       submit(typed);
       return;
     }
     if (event.key === 'backspace' || event.key === 'delete') {
       event.preventDefault();
+      if (streamGuardRef.current!.shouldDropKey(event.key, isRefused, now)) {
+        setTyped('');
+        return;
+      }
       setTyped(prev => prev.slice(0, -1));
       return;
     }
     if (event.key.length === 1 && !event.ctrl && !event.meta) {
       event.preventDefault();
-      if (refuse()) return;
+      if (streamGuardRef.current!.shouldDropKey(event.key, isRefused, now)) {
+        setTyped('');
+        return;
+      }
       setError(null);
       setTyped(prev => prev + event.key);
     }

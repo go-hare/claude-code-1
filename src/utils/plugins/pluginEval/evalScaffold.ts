@@ -96,7 +96,7 @@ function neededTraceTools(grader: Grader): string[] {
 
 function withheldToolHint(tool: string): string {
   if (NEVER_IN_EVAL.has(tool)) {
-    return `${tool} is never available inside an eval run — drop the grader, or invert it (max: 0) if absence is the point`
+    return `${tool} is never available inside an eval run, so drop the grader`
   }
   if (tool === OFFICIAL_ARTIFACT_TOOL_NAME) {
     return `${tool} comes only with the artifact-publishing opt-in this run does not have (not --allow-tools) — opt the case in, or drop the grader`

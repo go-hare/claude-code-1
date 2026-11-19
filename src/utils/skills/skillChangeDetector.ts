@@ -29,6 +29,10 @@ import { getFsImplementation } from '../fsOperations.js'
 import { executeConfigChangeHooks, hasBlockingResult } from '../hooks.js'
 import { createSignal } from '../signal.js'
 import { sleep } from '../sleep.js'
+import {
+  filterWatchedModDirs,
+  isPluginDirWatchDisabledByEnv,
+} from '../plugins/pluginDevMods.js'
 
 /**
  * Time in milliseconds to wait for file writes to stabilize before processing.
@@ -89,14 +93,20 @@ type SkillChangeDetectorDeps = {
   pollInterval?: number
   reloadDebounce?: number
   chokidarInterval?: number
+  idleChokidarInterval?: number
   getFingerprint?: () => Promise<Fingerprint>
   now?: () => number
   lastInteractionTime?: () => number
+  dirExists?: (dirPath: string) => Promise<boolean>
 }
 
 let watcher: FSWatcher | null = null
 let reloadTimer: ReturnType<typeof setTimeout> | null = null
 let idleCheckTimer: ReturnType<typeof setInterval> | null = null
+/** #1863: Directories observed removed via `unlinkDir`, mapped to whether they were seen present on the prior poll. */
+const missingDirs = new Map<string, boolean>()
+let missingDirTimer: ReturnType<typeof setTimeout> | null = null
+let watcherHealthy = false
 const pendingChangedPaths = new Set<string>()
 let initialized = false
 let disposed = false
@@ -153,14 +163,19 @@ export async function initialize(): Promise<void> {
   }
 
   const paths = await getWatchablePaths()
-  watchedPaths = paths
-  if (paths.length === 0) return
+  // #1952: In headless sessions, `.claude/skills` mod folders watch by default;
+  // setting `CLAUDE_CODE_PLUGIN_DIR_WATCH=0` disables mod-dir watching.
+  const filteredPaths = isPluginDirWatchDisabledByEnv()
+    ? paths.filter(p => !p.endsWith(`${platformPath.sep}skills`))
+    : filterWatchedModDirs(paths, { skillModDirs: paths })
+  watchedPaths = filteredPaths
+  if (filteredPaths.length === 0) return
 
   const getFingerprint = testOverrides?.getFingerprint ?? defaultGetFingerprint
   lastFingerprint = await getFingerprint().catch(() => null)
 
   logForDebugging(
-    `Watching for changes in skill/command directories: ${paths.join(', ')}...`,
+    `Watching for changes in skill/command directories: ${filteredPaths.join(', ')}...`,
   )
 
   const chokidarInterval =
@@ -208,7 +223,101 @@ export function shouldIgnoreSkillWatchPath(
   return false
 }
 
+async function defaultDirExists(dirPath: string): Promise<boolean> {
+  try {
+    const stat = await getFsImplementation().stat(dirPath)
+    return stat.isDirectory()
+  } catch {
+    return false
+  }
+}
+
+function getActivePollInterval(): number {
+  return isIdle
+    ? (testOverrides?.idleChokidarInterval ?? IDLE_POLLING_INTERVAL_MS)
+    : (testOverrides?.chokidarInterval ?? POLLING_INTERVAL_MS)
+}
+
+function markRecoveredDir(dirPath: string): void {
+  missingDirs.delete(dirPath)
+  handleChange(dirPath)
+}
+
+/**
+ * #1863 (2.1.321): Record a watched directory that was unlinked (e.g. during
+ * `git stash` or worktree switch) and poll until it reappears, rebuilding the
+ * watcher and triggering a skill/command/agent reload when it comes back.
+ */
+function handleWatchedDirUnlinked(dirPath: string): boolean {
+  const matched = watchedPaths.find(
+    p => platformPath.resolve(p) === platformPath.resolve(dirPath),
+  )
+  if (matched === undefined) {
+    return false
+  }
+  watcherHealthy = false
+  missingDirs.set(matched, false)
+  scheduleMissingDirPoll()
+  return true
+}
+
+function scheduleMissingDirPoll(): void {
+  if (missingDirTimer) {
+    clearTimeout(missingDirTimer)
+    missingDirTimer = null
+  }
+  if (disposed || missingDirs.size === 0) {
+    return
+  }
+  const interval = getActivePollInterval()
+  const dirExists = testOverrides?.dirExists ?? defaultDirExists
+  const timer = setTimeout(async () => {
+    if (missingDirTimer !== timer || disposed) {
+      return
+    }
+    const present = new Set<string>()
+    for (const dir of missingDirs.keys()) {
+      if (await dirExists(dir)) {
+        present.add(dir)
+      }
+    }
+    if (missingDirTimer !== timer || disposed) {
+      return
+    }
+    const watched = watcher?.getWatched() ?? {}
+    let needsRebuild = false
+    for (const [dir, wasPresent] of [...missingDirs.entries()]) {
+      const existsNow = present.has(dir)
+      if (existsNow && !(wasPresent && platformPath.resolve(dir) in watched)) {
+        needsRebuild = true
+      }
+      if (wasPresent && existsNow) {
+        markRecoveredDir(dir)
+      } else {
+        missingDirs.set(dir, existsNow)
+      }
+    }
+    if (needsRebuild) {
+      if (watcher) {
+        void watcher.close().catch(err => {
+          logForDebugging(
+            `skillChangeDetector: could not close a watcher; went on without closing it: ${errorMessage(err)}`,
+            { level: 'warn' },
+          )
+        })
+      }
+      watcher = createWatcher(interval)
+    } else {
+      scheduleMissingDirPoll()
+    }
+  }, interval)
+  timer.unref?.()
+  missingDirTimer = timer
+}
+
 function createWatcher(interval: number): FSWatcher {
+  watcherHealthy = false
+  scheduleMissingDirPoll()
   const stabilityThreshold =
     testOverrides?.stabilityThreshold ?? FILE_STABILITY_THRESHOLD_MS
   const pollInterval =
@@ -236,6 +345,27 @@ function createWatcher(interval: number): FSWatcher {
   w.on('add', handleChange)
   w.on('change', handleChange)
   w.on('unlink', handleChange)
+  let sawUnlinkDir = false
+  w.on('unlinkDir', (dirPath: string) => {
+    if (handleWatchedDirUnlinked(dirPath)) {
+      sawUnlinkDir = true
+    }
+  })
+  w.once('ready', () => {
+    const watched = w.getWatched()
+    watcherHealthy =
+      !sawUnlinkDir &&
+      watchedPaths.every(p => platformPath.resolve(p) in watched)
+    if (watcherHealthy) {
+      for (const dir of [...missingDirs.keys()]) {
+        markRecoveredDir(dir)
+      }
+      if (missingDirTimer) {
+        clearTimeout(missingDirTimer)
+        missingDirTimer = null
+      }
+    }
+  })
   w.on('error', (err: unknown) => {
     logForDebugging(`[skills] watcher error: ${errorMessage(err)}`, {
       level: 'warn',
@@ -334,6 +464,12 @@ export function dispose(): Promise<void> {
     clearInterval(idleCheckTimer)
     idleCheckTimer = null
   }
+  if (missingDirTimer) {
+    clearTimeout(missingDirTimer)
+    missingDirTimer = null
+  }
+  missingDirs.clear()
+  watcherHealthy = false
   let closePromise: Promise<void> = Promise.resolve()
   if (watcher) {
     closePromise = watcher.close()
@@ -503,6 +639,20 @@ export function _checkIdleTransitionForTest(): void {
 }
 
 /**
+ * #1863 test helper: simulate an `unlinkDir` event on a watched directory.
+ */
+export function _simulateUnlinkDirForTest(dirPath: string): boolean {
+  return handleWatchedDirUnlinked(dirPath)
+}
+
+/**
+ * #1863 test helper: inspect missingDirs state.
+ */
+export function _getMissingDirsForTest(): Map<string, boolean> {
+  return new Map(missingDirs)
+}
+
+/**
  * Reset internal state for testing purposes only.
  */
 export async function resetForTesting(
@@ -520,6 +670,12 @@ export async function resetForTesting(
     clearInterval(idleCheckTimer)
     idleCheckTimer = null
   }
+  if (missingDirTimer) {
+    clearTimeout(missingDirTimer)
+    missingDirTimer = null
+  }
+  missingDirs.clear()
+  watcherHealthy = false
   pendingChangedPaths.clear()
   skillsChanged.clear()
   lastFingerprint = null
@@ -538,5 +694,7 @@ export const skillChangeDetector = {
   subscribe,
   resetForTesting,
   _checkIdleTransitionForTest,
+  _simulateUnlinkDirForTest,
+  _getMissingDirsForTest,
   notifySkillsInvalidated,
 }

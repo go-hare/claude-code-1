@@ -32,7 +32,11 @@ import {
 } from '../../utils/plugins/installedPluginsManager.js'
 import {
   createPluginId,
+  listSetAsidePluginData,
+  listSetAsidePluginIds,
   loadMarketplacesWithGracefulDegradation,
+  restoreSetAsidePluginOptionsAndSecrets,
+  type SetAsideRestoreResult,
 } from '../../utils/plugins/marketplaceHelpers.js'
 import {
   addMarketplaceSource,
@@ -695,6 +699,29 @@ export async function pluginListHandler(options: {
         `  ${figures.pointer} ${e.source}: ${figures.cross} ${getPluginErrorMessage(e)}\n`,
       )
     }
+  }
+
+  // #1960: Show notes when a managed extraKnownMarketplaces takeover has set aside
+  // saved data folders, options, or secrets.
+  const setAsideData = await listSetAsidePluginData()
+  if (setAsideData.holders.length > 0 || setAsideData.leftBehind.length > 0) {
+    if (setAsideData.holders.length > 0) {
+      printCli(
+        `Note: your organization replaced a plugin marketplace with one of the same name, so data saved by the old source's plugins was set aside in ${setAsideData.holders.join(', ')}. To keep it, move it somewhere else.`,
+      )
+    }
+    if (setAsideData.leftBehind.length > 0) {
+      printCli(
+        `Note: your organization replaced a plugin marketplace with one of the same name, and some data saved by the old source's plugins couldn't be moved. It's still in ${setAsideData.leftBehind.join(', ')}, where a plugin installed under that id can read it.`,
+      )
+    }
+    printCli('')
+  }
+  const setAsideOptionIds = await listSetAsidePluginIds()
+  if (setAsideOptionIds.length > 0) {
+    printCli(
+      `Note: your organization replaced a plugin marketplace with one of the same name, so options and secrets were set aside for: ${setAsideOptionIds.join(', ')}. Run \`claude plugin restore-set-aside <plugin>\` to restore them, or pass \`--discard\` to delete them.\n`,
+    )
   }
 
   cliOk()
@@ -1501,6 +1528,67 @@ export async function pluginDetailsHandler(
   if (found.manifest.description) {
     printCli(found.manifest.description)
   }
+  await drainAndExit(0)
+}
+
+/**
+ * #1960 (official `S3a`): Format human-facing message for
+ * `claude plugin restore-set-aside <plugin> [--discard]`.
+ */
+export function formatRestoreSetAsideResultMessage(
+  plugin: string,
+  result: SetAsideRestoreResult,
+  discard: boolean,
+): { ok: boolean; message: string } {
+  if (result.failed !== undefined) {
+    return {
+      ok: false,
+      message:
+        result.failed === 'settings'
+          ? 'Your user settings file could not be changed, so nothing was restored or discarded. Try again once it can be.'
+          : 'Secure storage could not be fully read or changed, so some stored secrets may not have been restored or discarded. Try again where it can be, such as on the machine itself if your keychain is locked over SSH.',
+    }
+  }
+  if (result.options + result.secrets === 0) {
+    return {
+      ok: true,
+      message: `No options or secrets are set aside for ${plugin}.`,
+    }
+  }
+  if (discard) {
+    return {
+      ok: true,
+      message: `Discarded the options and secrets set aside for ${plugin}.`,
+    }
+  }
+  return {
+    ok: true,
+    message: `Restored the options and secrets set aside for ${plugin}. Any plugin installed under that id can read them. What it saved in its data folder is not moved: \`claude plugin list\` says where that is.`,
+  }
+}
+
+/**
+ * #1960 (official `S3a`): `claude plugin restore-set-aside <plugin> [--discard]`.
+ * Restores (or discards) plugin options and secrets set aside when a managed
+ * `extraKnownMarketplaces` declaration replaced an undeclared source.
+ */
+export async function pluginRestoreSetAsideHandler(
+  plugin: string,
+  options: { discard?: boolean; cowork?: boolean } = {},
+): Promise<void> {
+  if (options.cowork) setUseCoworkPlugins(true)
+  const discard = options.discard === true
+  logEvent('tengu_plugin_restore_set_aside_command', { discard })
+  const result = await restoreSetAsidePluginOptionsAndSecrets(plugin, {
+    discard,
+  })
+  const formatted = formatRestoreSetAsideResultMessage(plugin, result, discard)
+  if (!formatted.ok) {
+    console.error(re(formatted.message))
+    await drainAndExit(1)
+    return
+  }
+  printCli(re(formatted.message))
   await drainAndExit(0)
 }
 

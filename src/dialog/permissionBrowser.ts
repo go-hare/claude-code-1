@@ -55,7 +55,6 @@ export const BROWSER_TOOL_VERBS: Record<string, string> = {
   file_upload: 'upload a file',
   select_browser: 'select a browser',
   gif_creator: 'record a GIF of the page',
-  shortcuts_execute: 'run a saved browser shortcut',
   tabs_create_mcp: 'open a new browser tab',
 }
 
@@ -116,8 +115,18 @@ export function isClaudeInChromeInProductPermissions(): boolean {
   )
 }
 
+const HOST_BROWSER_MCP_PREFIXES = [
+  CHROME_MCP_PREFIX,
+  'mcp__Claude_in_Chrome__',
+  'mcp__Claude_Browser__',
+  'mcp__Claude_Preview__',
+  'mcp__remote-devices__claude-in-chrome__',
+  'mcp__remote-devices__Claude_in_Chrome__',
+  'mcp__remote-devices__Claude_Browser__',
+] as const
+
 export function isClaudeInChromeToolName(name: string): boolean {
-  return name.startsWith(CHROME_MCP_PREFIX)
+  return HOST_BROWSER_MCP_PREFIXES.some(prefix => name.startsWith(prefix))
 }
 
 /** densable wXn — browser_batch has no BLS/ULS here; gold fallback. */

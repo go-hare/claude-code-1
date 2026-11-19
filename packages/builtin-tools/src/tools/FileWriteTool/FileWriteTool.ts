@@ -40,6 +40,7 @@ import {
   noteApprovedFileToolPath,
   openApprovedRead,
   openApprovedWrite,
+  SymlinkResolutionChangedError,
   takeApprovedFileToolPath,
   type ApprovedRead,
 } from 'src/utils/fileToolApprovedOpen.js'
@@ -644,8 +645,21 @@ export const FileWriteTool = buildTool({
       } catch (e) {
         if (isENOENT(e)) {
           meta = null
-        } else {
+        } else if (e instanceof SymlinkResolutionChangedError) {
           throw e
+        } else {
+          // Official 2.1.319 #1740: non-ENOENT read failure on an existing file
+          // is a recoverable tool error, NOT a turn-aborting refusal.
+          const rawMsg = e instanceof Error ? e.message : String(e)
+          const cleanMsg =
+            openedWrite.ioPath !== fullFilePath
+              ? rawMsg.split(openedWrite.ioPath).join(fullFilePath)
+              : rawMsg
+          const err = new Error(
+            `Could not read existing file ${file_path} before overwriting: ${cleanMsg}`,
+          )
+          err.name = 'ToolExecutionError'
+          throw err
         }
       }
 

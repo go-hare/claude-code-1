@@ -235,7 +235,7 @@ export const CLAUDE_FABLE_5_CONFIG = {
   grok: 'claude-fable-5',
 } as const satisfies ModelConfig
 
-// densable 2.1.283: Claude Fable 5.1 (live default Fable; native 1M)
+// densable 2.1.283: Claude Fable 5.1 (native 1M)
 export const CLAUDE_FABLE_5_1_CONFIG = {
   firstParty: 'claude-fable-5-1',
   bedrock: 'us.anthropic.claude-fable-5-1',
@@ -248,6 +248,21 @@ export const CLAUDE_FABLE_5_1_CONFIG = {
   openai: 'claude-fable-5-1',
   gemini: 'claude-fable-5-1',
   grok: 'claude-fable-5-1',
+} as const satisfies ModelConfig
+
+// Official 2.1.321 (#1845): Claude Fable 5.2 (default Fable model; 1M context, $8/$40, $0.20 cache read)
+export const CLAUDE_FABLE_5_2_CONFIG = {
+  firstParty: 'claude-fable-5-2',
+  bedrock: 'us.anthropic.claude-fable-5-2',
+  vertex: 'claude-fable-5-2',
+  foundry: 'claude-fable-5-2',
+  anthropicAws: 'claude-fable-5-2',
+  anthropicGoogleCloud: 'claude-fable-5-2',
+  mantle: 'anthropic.claude-fable-5-2',
+  gateway: 'claude-fable-5-2',
+  openai: 'claude-fable-5-2',
+  gemini: 'claude-fable-5-2',
+  grok: 'claude-fable-5-2',
 } as const satisfies ModelConfig
 
 export const CLAUDE_SONNET_4_6_CONFIG = {
@@ -319,8 +334,10 @@ export const ALL_MODEL_CONFIGS = {
   opus55: CLAUDE_OPUS_5_5_CONFIG,
   // Official 2.1.239 qNn
   fable5: CLAUDE_FABLE_5_CONFIG,
-  // densable 2.1.283 live Fable (gateway fable/best still fable5 per catalog aliases)
+  // densable 2.1.283 Fable 5.1
   fable51: CLAUDE_FABLE_5_1_CONFIG,
+  // Official 2.1.321 (#1845) live default Fable (gateway fable still fable5 per catalog aliases)
+  fable52: CLAUDE_FABLE_5_2_CONFIG,
 } as const satisfies Record<string, ModelConfig>
 
 export type ModelKey = keyof typeof ALL_MODEL_CONFIGS

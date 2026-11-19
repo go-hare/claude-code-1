@@ -24,6 +24,7 @@ import {
   rename as fsRename,
   rm as fsRm,
   stat,
+  statfs as fsStatfs,
   unlink,
   utimes as fsUtimes,
   writeFile,
@@ -989,6 +990,211 @@ const leftoverAppendSerial = leftoverSerialByPath()
 // in long-running daemon / swarm sessions that spawn many sub-agents.
 const MAX_CACHED_SESSION_FILES = 200
 
+// ---------------------------------------------------------------------------
+// #1912 — Linux NFS statfs (0x6969) append sync() & fullDiskCode propagation
+// Official `H5e` + `VYt` + `z5e.fullDiskCode` / `fullDiskPaths`
+// ---------------------------------------------------------------------------
+
+/** Linux NFS_SUPER_MAGIC (`0x6969` = 26985). */
+export const NFS_SUPER_MAGIC = 0x6969
+const NFS_STATFS_UNSUPPORTED_CODES = new Set([
+  'ENOSYS',
+  'ENOTSUP',
+  'EOPNOTSUPP',
+])
+const NFS_STATFS_TIMEOUT_MS = 1_000
+const FULL_DISK_ERRNO_CODES = new Set(['ENOSPC', 'EDQUOT'])
+
+export type TranscriptFullDiskCode = 'ENOSPC' | 'EDQUOT'
+
+export type TranscriptFullDiskState = {
+  fullDiskCode: TranscriptFullDiskCode | undefined
+  fullDiskPaths: Set<string>
+}
+
+const transcriptFullDiskState: TranscriptFullDiskState = {
+  fullDiskCode: undefined,
+  fullDiskPaths: new Set<string>(),
+}
+
+export function isFullDiskError(
+  err: unknown,
+): TranscriptFullDiskCode | undefined {
+  const code = getErrnoCode(err)
+  if (code === 'ENOSPC' || code === 'EDQUOT') {
+    return code
+  }
+  return undefined
+}
+
+export function recordTranscriptFullDiskError(
+  err: unknown,
+  filePath?: string,
+): TranscriptFullDiskCode | undefined {
+  const code = isFullDiskError(err)
+  if (code === undefined) return undefined
+  if (transcriptFullDiskState.fullDiskCode === undefined || code === 'EDQUOT') {
+    transcriptFullDiskState.fullDiskCode = code
+  }
+  if (filePath) {
+    transcriptFullDiskState.fullDiskPaths.add(filePath)
+  }
+  return code
+}
+
+export function getTranscriptFullDiskState(): TranscriptFullDiskState {
+  return transcriptFullDiskState
+}
+
+export function resetTranscriptFullDiskState(): void {
+  transcriptFullDiskState.fullDiskCode = undefined
+  transcriptFullDiskState.fullDiskPaths.clear()
+}
+
+export type StatfsFn = (dir: string) => Promise<{ type: number | bigint }>
+
+/**
+ * #1912 / official `H5e` — detects whether a transcript directory is mounted on
+ * Linux NFS (`statfs.type === 0x6969`) so appends call `handle.sync()` and
+ * surface delayed ENOSPC/EDQUOT quota errors instead of exiting 0 silently.
+ */
+export class NfsAppendFlusher {
+  private answers = new Map<string, Promise<boolean>>()
+  private pending = 0
+  private isWary = false
+  private readonly statfsImpl: StatfsFn
+  private readonly platform: NodeJS.Platform
+  private readonly timeoutMs: number
+
+  constructor(opts?: {
+    statfsImpl?: StatfsFn
+    platform?: NodeJS.Platform
+    timeoutMs?: number
+  }) {
+    this.statfsImpl = opts?.statfsImpl ?? fsStatfs
+    this.platform = opts?.platform ?? process.platform
+    this.timeoutMs = opts?.timeoutMs ?? NFS_STATFS_TIMEOUT_MS
+  }
+
+  flushesAppendsIn(dir: string): Promise<boolean> {
+    if (this.platform !== 'linux') {
+      return Promise.resolve(false)
+    }
+    const cached = this.answers.get(dir)
+    if (cached !== undefined) return cached
+    if (this.isWary && this.pending > 0) {
+      return Promise.resolve(false)
+    }
+    this.pending++
+    let timedOut = false
+    const probe = this.statfsImpl(dir)
+      .finally(() => {
+        this.pending--
+      })
+      .then(
+        res => {
+          if (!timedOut && this.pending === 0) {
+            this.isWary = false
+          }
+          const isNfs = Number(res.type) >>> 0 === NFS_SUPER_MAGIC
+          if (isNfs) {
+            logForDebugging(`transcript appends in ${dir} are flushed: NFS`)
+          }
+          this.answers.set(dir, Promise.resolve(isNfs))
+          return isNfs
+        },
+        err => {
+          const code = getErrnoCode(err)
+          if (code === 'ENOENT' || code === 'ENOTDIR') {
+            this.answers.delete(dir)
+            logForDebugging(
+              `transcript appends in ${dir} that waited for this answer are flushed: the folder is not there yet`,
+            )
+            return true
+          }
+          if (code !== undefined && NFS_STATFS_UNSUPPORTED_CODES.has(code)) {
+            this.answers.set(dir, Promise.resolve(false))
+          } else {
+            this.answers.delete(dir)
+          }
+          logForDebugging(
+            `transcript appends in ${dir} are not flushed: statfs failed (${code ?? 'error'})`,
+          )
+          return false
+        },
+      )
+
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<undefined>(resolve => {
+      timer = setTimeout(() => resolve(undefined), this.timeoutMs)
+      timer.unref?.()
+    })
+    const settled = Promise.race([probe, timeout]).then(res => {
+      if (timer !== undefined) clearTimeout(timer)
+      if (res === undefined) {
+        timedOut = true
+        this.isWary = true
+        logForDebugging(
+          `transcript appends in ${dir} are not flushed: statfs timed out`,
+        )
+        return false
+      }
+      return res
+    })
+    this.answers.set(dir, settled)
+    return settled
+  }
+
+  clear(): void {
+    this.answers.clear()
+    this.pending = 0
+    this.isWary = false
+  }
+}
+
+const defaultNfsAppendFlusher = new NfsAppendFlusher()
+
+/**
+ * #1912 / official `VYt` — append with `handle.sync()` when on Linux NFS so
+ * delayed NFS quota/full-disk errors (`ENOSPC`/`EDQUOT`) are surfaced.
+ */
+export async function appendAndSyncOnNfs(
+  filePath: string,
+  data: string,
+  flusher: NfsAppendFlusher = defaultNfsAppendFlusher,
+): Promise<boolean> {
+  const shouldFlush = await flusher.flushesAppendsIn(dirname(filePath))
+  if (!shouldFlush) {
+    return false
+  }
+  await mkdir(dirname(filePath), { recursive: true, mode: 0o700 }).catch(
+    () => {},
+  )
+  const handle = await fsOpen(
+    filePath,
+    fsConstants.O_WRONLY | fsConstants.O_APPEND | fsConstants.O_CREAT,
+    0o600,
+  )
+  try {
+    await handle.writeFile(data, 'utf8')
+    try {
+      await handle.sync()
+    } catch (syncErr) {
+      if (FULL_DISK_ERRNO_CODES.has(getErrnoCode(syncErr) ?? '')) {
+        logForDebugging(
+          `Transcript flush failed (${getErrnoCode(syncErr)}): ${syncErr instanceof Error ? syncErr.message : String(syncErr)}`,
+          { level: 'error' },
+        )
+        recordTranscriptFullDiskError(syncErr, filePath)
+        throw syncErr
+      }
+    }
+  } finally {
+    await handle.close().catch(() => {})
+  }
+  return true
+}
+
 class Project {
   // Minimal cache for current session only (not all sessions)
   currentSessionTag: string | undefined
@@ -1006,7 +1212,10 @@ class Project {
   // Tri-state: undefined = never touched (don't write), null = exited worktree,
   // object = currently in worktree. reAppendSessionMetadata writes null so
   // --resume knows the session exited (vs. crashed while inside).
-  currentSessionWorktree: PersistedWorktreeSession | null | undefined
+  currentSessionWorktree:
+    | (PersistedWorktreeSession & { extensionRoot?: string })
+    | null
+    | undefined
   currentSessionPrNumber: number | undefined
   currentSessionPrUrl: string | undefined
   currentSessionPrRepository: string | undefined
@@ -1188,13 +1397,18 @@ class Project {
     try {
       // densable drain pye third arg is storageV5 (hover-rest backend).
       await leftoverAppendSerial.run(filePath, async () => {
-        await leftoverPye(filePath, data, getPinnedStorageV5())
+        const pinnedV5 = getPinnedStorageV5()
+        if (!pinnedV5 && (await appendAndSyncOnNfs(filePath, data))) {
+          return
+        }
+        await leftoverPye(filePath, data, pinnedV5)
       })
       if (filePath === this.sessionFile) {
         this.bytesSinceCompact += Buffer.byteLength(data, 'utf8')
       }
       recordTranscriptWriteSuccess(filePath)
     } catch (err) {
+      recordTranscriptFullDiskError(err, filePath)
       recordTranscriptWriteFailure('drain', err, filePath)
       throw err
     }
@@ -4361,6 +4575,7 @@ function appendEntryToFile(
       recordTranscriptWriteSuccess(fullPath)
     } catch (secondErr) {
       // densable iNt — materialize/metadata path
+      recordTranscriptFullDiskError(secondErr ?? firstErr, fullPath)
       recordTranscriptWriteFailure(
         'materialize',
         secondErr ?? firstErr,
@@ -4406,6 +4621,9 @@ function appendEntryToExistingFileSync(
       written += n
     }
     recordTranscriptWriteSuccess(fullPath)
+  } catch (err) {
+    recordTranscriptFullDiskError(err, fullPath)
+    throw err
   } finally {
     closeSync(fd)
   }
@@ -4953,7 +5171,9 @@ export function restoreSessionMetadata(meta: {
   agentSetting?: string
   mode?: 'coordinator' | 'normal'
   sessionModel?: string
-  worktreeSession?: PersistedWorktreeSession | null
+  worktreeSession?:
+    | (PersistedWorktreeSession & { extensionRoot?: string })
+    | null
   prNumber?: number
   prUrl?: string
   prRepository?: string
@@ -5944,12 +6164,16 @@ export function getCurrentSessionDevModsFolder(): string | undefined {
 }
 
 export function saveWorktreeState(
-  worktreeSession: PersistedWorktreeSession | null,
+  worktreeSession:
+    | (PersistedWorktreeSession & { extensionRoot?: string })
+    | null,
 ): void {
   // Strip ephemeral fields (creationDurationMs, usedSparsePaths) that callers
   // may pass via full WorktreeSession objects — TypeScript structural typing
   // allows this, but we don't want them serialized to the transcript.
-  const stripped: PersistedWorktreeSession | null = worktreeSession
+  const stripped:
+    | (PersistedWorktreeSession & { extensionRoot?: string })
+    | null = worktreeSession
     ? {
         originalCwd: worktreeSession.originalCwd,
         worktreePath: worktreeSession.worktreePath,
@@ -5960,6 +6184,9 @@ export function saveWorktreeState(
         sessionId: worktreeSession.sessionId,
         tmuxSessionName: worktreeSession.tmuxSessionName,
         hookBased: worktreeSession.hookBased,
+        ...(worktreeSession.extensionRoot !== undefined
+          ? { extensionRoot: worktreeSession.extensionRoot }
+          : {}),
       }
     : null
   const project = getProject()
@@ -7431,10 +7658,22 @@ export async function getSessionMessages(sessionId: UUID): Promise<Set<UUID>> {
       sessionMessagesCache.delete(oldestKey)
     }
   }
-  const promise = (async () => {
-    const { messages } = await loadSessionFile(sessionId)
-    return new Set(messages.keys())
-  })()
+  const promise: Promise<Set<UUID>> = loadSessionFile(sessionId).then(
+    ({ messages }) => new Set(messages.keys()),
+    err => {
+      // #1896: On OOM / RangeError / ERR_STRING_TOO_LONG / read failure, evict
+      // the failed promise from the cache and degrade gracefully to an empty
+      // Set so transcript appends never hang or stay stuck on a rejected entry.
+      if (sessionMessagesCache.get(sessionId) === promise) {
+        sessionMessagesCache.delete(sessionId)
+      }
+      logForDebugging(
+        `getSessionMessages: loadSessionFile failed: ${err instanceof Error ? err.message : String(err)}`,
+        { level: 'error' },
+      )
+      return new Set<UUID>()
+    },
+  )
   sessionMessagesCache.set(sessionId, promise)
   return promise
 }

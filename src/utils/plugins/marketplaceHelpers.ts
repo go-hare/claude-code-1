@@ -1,15 +1,31 @@
+import { randomBytes } from 'crypto'
+import {
+  lstat,
+  mkdir,
+  readdir,
+  rename,
+  rm,
+  rmdir,
+  writeFile,
+} from 'fs/promises'
+import { basename, join } from 'path'
 import isEqual from 'lodash-es/isEqual.js'
 import { logForDebugging } from '../debug.js'
-import { toError } from '../errors.js'
+import { isENOENT, toError } from '../errors.js'
 import { execFileNoThrow, execFileNoThrowWithCwd } from '../execFileNoThrow.js'
 import { logError } from '../log.js'
 import { getPlatform } from '../platform.js'
-import { getSettingsForSource } from '../settings/settings.js'
+import { getSecureStorage } from '../secureStorage/index.js'
+import {
+  getSettingsForSource,
+  persistSettingsForSource,
+} from '../settings/settings.js'
 import { plural } from '../stringUtils.js'
 import { which } from '../which.js'
 import { re } from './escapeSafeText.js'
 import { checkGitAvailable } from './gitAvailability.js'
 import { getMarketplace } from './marketplaceManager.js'
+import { getPluginsDirectory } from './pluginDirectories.js'
 import type {
   KnownMarketplace,
   MarketplaceSource,
@@ -1351,4 +1367,679 @@ export async function shouldUseHttpsInsteadOfSsh(
     `ssh -G does not show git@github.com going straight to github.com (code=${sshGRes.code}): staying on SSH`,
   )
   return false
+}
+
+// ============================================================================
+// #1948 & #1960 (2.1.321): Managed extraKnownMarketplaces takeover & set-aside
+// ============================================================================
+
+export const SET_ASIDE_KEY_PREFIX = '.set-aside/'
+const LEFT_BEHIND_MARKER_RE = /^left-behind\.([a-zA-Z0-9_-]+)\.txt$/
+const SET_ASIDE_HOLDER_RE =
+  /^(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})Z\.[0-9a-f]{12}$/
+
+/**
+ * #1948: Read `extraKnownMarketplaces` declared in managed (`policySettings`)
+ * settings.
+ */
+export function getManagedExtraKnownMarketplaces(): Record<
+  string,
+  { source: MarketplaceSource }
+> {
+  const policy = getSettingsForSource('policySettings')
+  const extras = policy?.extraKnownMarketplaces
+  if (!extras || typeof extras !== 'object') {
+    return {}
+  }
+  const out: Record<string, { source: MarketplaceSource }> = {}
+  for (const [name, entry] of Object.entries(extras)) {
+    if (
+      entry &&
+      typeof entry === 'object' &&
+      'source' in entry &&
+      entry.source
+    ) {
+      out[name] = { source: entry.source as MarketplaceSource }
+    }
+  }
+  return out
+}
+
+/**
+ * #1948: Look up a managed `extraKnownMarketplaces` declaration by marketplace
+ * name (case-insensitive).
+ */
+export function getManagedExtraKnownMarketplaceSource(
+  marketplaceName: string,
+): MarketplaceSource | undefined {
+  const managed = getManagedExtraKnownMarketplaces()
+  const lower = marketplaceName.toLowerCase()
+  for (const [name, entry] of Object.entries(managed)) {
+    if (name.toLowerCase() === lower) {
+      return entry.source
+    }
+  }
+  return undefined
+}
+
+/**
+ * #1948: Returns true when `marketplaceName` is declared in managed
+ * `extraKnownMarketplaces` with a DIFFERENT source than `candidateSource`.
+ * A declared name cannot be added from another source.
+ */
+export function isMarketplaceNameBlockedByManagedDeclaration(
+  marketplaceName: string,
+  candidateSource: MarketplaceSource,
+): boolean {
+  const managedSource = getManagedExtraKnownMarketplaceSource(marketplaceName)
+  if (managedSource === undefined) {
+    return false
+  }
+  return !areSourcesEquivalentForBlocklist(candidateSource, managedSource)
+}
+
+/**
+ * #1948: Filter a `known_marketplaces.json` map so entries whose name is
+ * declared in managed `extraKnownMarketplaces` from a different source are
+ * hidden rather than served to plugin discovery/loading.
+ */
+export function filterKnownMarketplacesForManagedTakeover<
+  T extends { source: MarketplaceSource },
+>(
+  known: Record<string, T>,
+): { visible: Record<string, T>; hidden: Record<string, T> } {
+  const visible: Record<string, T> = {}
+  const hidden: Record<string, T> = {}
+  for (const [name, entry] of Object.entries(known)) {
+    if (isMarketplaceNameBlockedByManagedDeclaration(name, entry.source)) {
+      hidden[name] = entry
+      logForDebugging(
+        `Hiding marketplace "${name}" from undeclared source (${formatSourceForDisplay(entry.source)}): managed extraKnownMarketplaces declares this name from another source`,
+      )
+    } else {
+      visible[name] = entry
+    }
+  }
+  return { visible, hidden }
+}
+
+/**
+ * #1960: Root folder holding set-aside plugin data directories
+ * (`<pluginsDir>/data/.set-aside`).
+ */
+export function getPluginSetAsideRootDir(
+  pluginsDir: string = getPluginsDirectory(),
+): string {
+  return join(pluginsDir, 'data', '.set-aside')
+}
+
+/**
+ * #1960: Generate a timestamped holder token (`YYYY-MM-DDTHH-MM-SSZ.<hex12>`).
+ */
+export function makeSetAsideToken(now: Date = new Date()): string {
+  return `${now
+    .toISOString()
+    .replace(/\.\d{3}Z$/, 'Z')
+    .replace(/:/g, '-')}.${randomBytes(6).toString('hex')}`
+}
+
+/**
+ * #1960: Parse a holder directory name back to epoch ms (undefined if invalid).
+ */
+export function parseSetAsideHolderTimestamp(name: string): number | undefined {
+  const match = SET_ASIDE_HOLDER_RE.exec(name)
+  if (!match) return undefined
+  const ts = Date.parse(`${match[1]}T${match[2]}:${match[3]}:${match[4]}Z`)
+  return Number.isNaN(ts) ? undefined : ts
+}
+
+/**
+ * #1960: Build a `.set-aside/<token>/<key>` storage key for options/secrets.
+ */
+export function makeSetAsideStorageKey(token: string, key: string): string {
+  return `${SET_ASIDE_KEY_PREFIX}${token}/${key}`
+}
+
+/**
+ * #1960: Parse a `.set-aside/<token>/<rest>` key into `{ token, innerKey }`.
+ */
+export function parseSetAsideStorageKey(
+  storageKey: string,
+): { token: string; innerKey: string } | undefined {
+  if (!storageKey.startsWith(SET_ASIDE_KEY_PREFIX)) return undefined
+  const slash = storageKey.indexOf('/', SET_ASIDE_KEY_PREFIX.length)
+  if (slash === -1) return undefined
+  return {
+    token: storageKey.slice(SET_ASIDE_KEY_PREFIX.length, slash),
+    innerKey: storageKey.slice(slash + 1),
+  }
+}
+
+async function moveDirectoryEntryByEntry(
+  srcDir: string,
+  destDir: string,
+): Promise<boolean> {
+  let entries: string[]
+  try {
+    entries = await readdir(srcDir)
+    await mkdir(destDir, { recursive: true })
+  } catch (err) {
+    logForDebugging(
+      `Plugin data folder ${srcDir} could not be set aside entry by entry: ${toError(err).message}`,
+      { level: 'warn' },
+    )
+    return false
+  }
+  let allMoved = true
+  for (const entry of entries) {
+    const srcPath = join(srcDir, entry)
+    const destPath = join(destDir, entry)
+    try {
+      await rename(srcPath, destPath)
+    } catch (err) {
+      if (!isENOENT(err)) {
+        const st = await lstat(srcPath).catch(() => undefined)
+        if (st?.isDirectory() && !st.isSymbolicLink()) {
+          allMoved =
+            (await moveDirectoryEntryByEntry(srcPath, destPath)) && allMoved
+        } else {
+          allMoved = false
+        }
+      }
+    }
+  }
+  if (!allMoved) {
+    await rmdir(destDir).catch(() => {})
+    return false
+  }
+  try {
+    await rmdir(srcDir)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * #1960: Move a plugin's saved data folder into `<pluginsDir>/data/.set-aside/<token>/<name>`
+ * so a managed-marketplace takeover does not expose old saved data to the replacement plugin
+ * while still preserving it for `cleanupPeriodDays`.
+ */
+export async function setAsidePluginDataDir(
+  dataDir: string,
+  opts?: { pluginsDir?: string; token?: string },
+): Promise<'moved' | 'absent' | 'failed'> {
+  const st = await lstat(dataDir).catch(() => undefined)
+  if (!st) {
+    return 'absent'
+  }
+  if (st.isDirectory() && !st.isSymbolicLink()) {
+    const entries = await readdir(dataDir).catch(() => [])
+    if (entries.length === 0) {
+      await rmdir(dataDir).catch(() => {})
+      return 'absent'
+    }
+  }
+  const token = opts?.token ?? makeSetAsideToken()
+  const holderDir = join(getPluginSetAsideRootDir(opts?.pluginsDir), token)
+  const targetDir = join(holderDir, basename(dataDir))
+  try {
+    await mkdir(holderDir, { recursive: true })
+  } catch (err) {
+    logForDebugging(
+      `Plugin data folder ${dataDir} stays: ${holderDir} could not be made: ${toError(err).message}`,
+      { level: 'warn' },
+    )
+    return 'failed'
+  }
+  try {
+    await rename(dataDir, targetDir)
+    return 'moved'
+  } catch (err) {
+    logForDebugging(
+      `Plugin data folder ${dataDir} did not move to ${targetDir} as a whole: ${toError(err).message}`,
+      { level: 'warn' },
+    )
+  }
+  const stillThere = await lstat(dataDir).catch(() => undefined)
+  if (!stillThere) {
+    await rmdir(holderDir).catch(() => {})
+    return 'absent'
+  }
+  if (
+    stillThere.isDirectory() &&
+    !stillThere.isSymbolicLink() &&
+    (await moveDirectoryEntryByEntry(dataDir, targetDir))
+  ) {
+    return 'moved'
+  }
+  await writeFile(
+    join(holderDir, `left-behind.${basename(dataDir)}.txt`),
+    '',
+  ).catch(() => {})
+  return 'failed'
+}
+
+/**
+ * #1960: List set-aside data holder directories and any `left-behind` data dirs.
+ */
+export async function listSetAsidePluginData(opts?: {
+  pluginsDir?: string
+}): Promise<{ holders: string[]; leftBehind: string[] }> {
+  const pluginsDir = opts?.pluginsDir ?? getPluginsDirectory()
+  const root = getPluginSetAsideRootDir(pluginsDir)
+  let entries: string[]
+  try {
+    entries = await readdir(root)
+  } catch {
+    return { holders: [], leftBehind: [] }
+  }
+  const holders: string[] = []
+  const leftBehind = new Set<string>()
+  for (const name of entries.sort()) {
+    if (parseSetAsideHolderTimestamp(name) === undefined) continue
+    const holderDir = join(root, name)
+    const children = await readdir(holderDir).catch(() => [])
+    if (children.some(c => !LEFT_BEHIND_MARKER_RE.test(c))) {
+      holders.push(holderDir)
+    }
+    for (const c of children) {
+      const m = LEFT_BEHIND_MARKER_RE.exec(c)
+      if (m?.[1]) {
+        const origDir = join(pluginsDir, 'data', m[1])
+        const origChildren = await readdir(origDir).catch(() => [])
+        if (origChildren.length > 0) {
+          leftBehind.add(origDir)
+        }
+      }
+    }
+  }
+  return { holders, leftBehind: [...leftBehind] }
+}
+
+/**
+ * #1960: Remove set-aside data folders older than `cleanupPeriodDays`.
+ */
+export async function pruneExpiredSetAsideData(
+  cleanupPeriodDays: number,
+  opts?: { pluginsDir?: string; nowMs?: number },
+): Promise<string[]> {
+  if (!Number.isFinite(cleanupPeriodDays) || cleanupPeriodDays <= 0) {
+    return []
+  }
+  const root = getPluginSetAsideRootDir(opts?.pluginsDir)
+  let entries: string[]
+  try {
+    entries = await readdir(root)
+  } catch {
+    return []
+  }
+  const cutoffMs =
+    (opts?.nowMs ?? Date.now()) - cleanupPeriodDays * 24 * 60 * 60 * 1000
+  const removed: string[] = []
+  for (const name of entries) {
+    const ts = parseSetAsideHolderTimestamp(name)
+    if (ts === undefined || ts >= cutoffMs) continue
+    const holderDir = join(root, name)
+    try {
+      await rm(holderDir, { recursive: true, force: true })
+      removed.push(holderDir)
+    } catch {
+      // best-effort cleanup
+    }
+  }
+  return removed
+}
+
+export type SetAsideRestoreResult = {
+  options: number
+  secrets: number
+  failed?: 'settings' | 'secrets'
+}
+
+type SetAsideStorageSeams = {
+  readUserPluginConfigs?: () => Record<string, unknown> | undefined
+  writeUserPluginConfigs?: (
+    patch: Record<string, unknown>,
+  ) => Promise<{ error?: Error | null }>
+  readSecrets?: () => Promise<Record<string, unknown> | undefined>
+  writeSecrets?: (
+    nextPluginSecrets: Record<string, unknown>,
+  ) => Promise<boolean>
+}
+
+function defaultReadUserPluginConfigs(): Record<string, unknown> | undefined {
+  return getSettingsForSource('userSettings')?.pluginConfigs as
+    | Record<string, unknown>
+    | undefined
+}
+
+async function defaultWriteUserPluginConfigs(
+  patch: Record<string, unknown>,
+): Promise<{ error?: Error | null }> {
+  type UserPluginConfigs = NonNullable<
+    NonNullable<ReturnType<typeof getSettingsForSource>>['pluginConfigs']
+  >
+  return persistSettingsForSource('userSettings', {
+    pluginConfigs: patch as UserPluginConfigs,
+  })
+}
+
+/**
+ * #1960: Set aside a plugin's options (`userSettings.pluginConfigs[pluginId]`)
+ * and secrets (`secureStorage.pluginSecrets[pluginId*]`) under `.set-aside/<token>/...`.
+ */
+export async function setAsidePluginOptionsAndSecrets(
+  pluginId: string,
+  opts?: { token?: string; seams?: SetAsideStorageSeams },
+): Promise<{ optionsMoved: number; secretsMoved: number }> {
+  const token = opts?.token ?? makeSetAsideToken()
+  let optionsMoved = 0
+  let secretsMoved = 0
+
+  const readConfigs =
+    opts?.seams?.readUserPluginConfigs ?? defaultReadUserPluginConfigs
+  const writeConfigs =
+    opts?.seams?.writeUserPluginConfigs ?? defaultWriteUserPluginConfigs
+
+  const configs = readConfigs()
+  if (
+    configs &&
+    Object.hasOwn(configs, pluginId) &&
+    configs[pluginId] !== undefined
+  ) {
+    const patch: Record<string, unknown> = {
+      [pluginId]: undefined,
+      [makeSetAsideStorageKey(token, pluginId)]: configs[pluginId],
+    }
+    const { error } = await writeConfigs(patch)
+    if (!error) {
+      optionsMoved = 1
+    } else {
+      logForDebugging(
+        `setAsidePluginOptionsAndSecrets: failed to move pluginConfigs[${pluginId}]: ${error.message}`,
+        { level: 'warn' },
+      )
+    }
+  }
+
+  try {
+    if (opts?.seams?.readSecrets && opts?.seams?.writeSecrets) {
+      const secrets = (await opts.seams.readSecrets()) ?? {}
+      const prefix = `${pluginId}/`
+      const next: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(secrets)) {
+        if (k === pluginId || k.startsWith(prefix)) {
+          next[makeSetAsideStorageKey(token, k)] = v
+          secretsMoved++
+        } else {
+          next[k] = v
+        }
+      }
+      if (secretsMoved > 0) {
+        const ok = await opts.seams.writeSecrets(next)
+        if (!ok) secretsMoved = 0
+      }
+    } else {
+      const storage = getSecureStorage()
+      const current = (await storage.readAsync?.()) ?? storage.read()
+      const existingSecrets = (current?.pluginSecrets ?? {}) as Record<
+        string,
+        unknown
+      >
+      const prefix = `${pluginId}/`
+      const matchingKeys = Object.keys(existingSecrets).filter(
+        k => k === pluginId || k.startsWith(prefix),
+      )
+      if (matchingKeys.length > 0 && current) {
+        const nextSecrets: Record<string, unknown> = {}
+        for (const [k, v] of Object.entries(existingSecrets)) {
+          if (k === pluginId || k.startsWith(prefix)) {
+            nextSecrets[makeSetAsideStorageKey(token, k)] = v
+            secretsMoved++
+          } else {
+            nextSecrets[k] = v
+          }
+        }
+        storage.update({
+          ...current,
+          pluginSecrets: nextSecrets as typeof current.pluginSecrets,
+        })
+      }
+    }
+  } catch (err) {
+    logForDebugging(
+      `setAsidePluginOptionsAndSecrets: failed to move secrets for ${pluginId}: ${toError(err).message}`,
+      { level: 'warn' },
+    )
+    secretsMoved = 0
+  }
+
+  return { optionsMoved, secretsMoved }
+}
+
+/**
+ * #1960: List plugin IDs that currently have set-aside options or secrets.
+ */
+export async function listSetAsidePluginIds(
+  seams?: SetAsideStorageSeams,
+): Promise<string[]> {
+  const ids = new Set<string>()
+  const configs = (
+    seams?.readUserPluginConfigs ?? defaultReadUserPluginConfigs
+  )()
+  for (const key of Object.keys(configs ?? {})) {
+    const parsed = parseSetAsideStorageKey(key)
+    if (parsed) {
+      ids.add(parsed.innerKey)
+    }
+  }
+  try {
+    let secrets: Record<string, unknown> | undefined
+    if (seams?.readSecrets) {
+      secrets = await seams.readSecrets()
+    } else {
+      const storage = getSecureStorage()
+      const current = (await storage.readAsync?.()) ?? storage.read()
+      secrets = current?.pluginSecrets as Record<string, unknown> | undefined
+    }
+    for (const key of Object.keys(secrets ?? {})) {
+      const parsed = parseSetAsideStorageKey(key)
+      if (parsed) {
+        const slash = parsed.innerKey.indexOf('/')
+        ids.add(
+          slash === -1 ? parsed.innerKey : parsed.innerKey.slice(0, slash),
+        )
+      }
+    }
+  } catch {
+    // best-effort listing
+  }
+  return [...ids].sort()
+}
+
+/**
+ * #1960: Restore (or `--discard`) options and secrets set aside for `pluginId`.
+ */
+export async function restoreSetAsidePluginOptionsAndSecrets(
+  pluginId: string,
+  opts?: { discard?: boolean; seams?: SetAsideStorageSeams },
+): Promise<SetAsideRestoreResult> {
+  const discard = opts?.discard === true
+  const readConfigs =
+    opts?.seams?.readUserPluginConfigs ?? defaultReadUserPluginConfigs
+  const writeConfigs =
+    opts?.seams?.writeUserPluginConfigs ?? defaultWriteUserPluginConfigs
+
+  let optionsCount = 0
+  let secretsCount = 0
+
+  // 1. Options in userSettings.pluginConfigs
+  const configs = readConfigs() ?? {}
+  const matchingOptionKeys = Object.keys(configs)
+    .filter(k => parseSetAsideStorageKey(k)?.innerKey === pluginId)
+    .sort()
+  if (matchingOptionKeys.length > 0) {
+    const patch: Record<string, unknown> = {}
+    for (const k of matchingOptionKeys) {
+      patch[k] = undefined
+    }
+    if (!discard) {
+      const latestKey = matchingOptionKeys[matchingOptionKeys.length - 1]!
+      patch[pluginId] = configs[latestKey]
+    }
+    const { error } = await writeConfigs(patch)
+    if (error) {
+      return { options: 0, secrets: 0, failed: 'settings' }
+    }
+    optionsCount = matchingOptionKeys.length
+  }
+
+  // 2. Secrets in secureStorage.pluginSecrets
+  const prefix = `${pluginId}/`
+  const matchesSecretInner = (inner: string): boolean =>
+    inner === pluginId || inner.startsWith(prefix)
+
+  try {
+    if (opts?.seams?.readSecrets && opts?.seams?.writeSecrets) {
+      const secrets = (await opts.seams.readSecrets()) ?? {}
+      const matchingKeys = Object.keys(secrets)
+        .filter(k => {
+          const parsed = parseSetAsideStorageKey(k)
+          return parsed !== undefined && matchesSecretInner(parsed.innerKey)
+        })
+        .sort()
+      if (matchingKeys.length > 0) {
+        const next: Record<string, unknown> = {}
+        const matchSet = new Set(matchingKeys)
+        for (const [k, v] of Object.entries(secrets)) {
+          if (!matchSet.has(k)) {
+            next[k] = v
+          }
+        }
+        if (!discard) {
+          for (const k of matchingKeys) {
+            const parsed = parseSetAsideStorageKey(k)!
+            next[parsed.innerKey] = secrets[k]
+          }
+        }
+        const ok = await opts.seams.writeSecrets(next)
+        if (!ok) {
+          return { options: optionsCount, secrets: 0, failed: 'secrets' }
+        }
+        secretsCount = matchingKeys.length
+      }
+    } else {
+      const storage = getSecureStorage()
+      const current = (await storage.readAsync?.()) ?? storage.read()
+      const secrets = (current?.pluginSecrets ?? {}) as Record<string, unknown>
+      const matchingKeys = Object.keys(secrets)
+        .filter(k => {
+          const parsed = parseSetAsideStorageKey(k)
+          return parsed !== undefined && matchesSecretInner(parsed.innerKey)
+        })
+        .sort()
+      if (matchingKeys.length > 0 && current) {
+        const next: Record<string, unknown> = {}
+        const matchSet = new Set(matchingKeys)
+        for (const [k, v] of Object.entries(secrets)) {
+          if (!matchSet.has(k)) {
+            next[k] = v
+          }
+        }
+        if (!discard) {
+          for (const k of matchingKeys) {
+            const parsed = parseSetAsideStorageKey(k)!
+            next[parsed.innerKey] = secrets[k]
+          }
+        }
+        const writeRes = storage.update({
+          ...current,
+          pluginSecrets: next as typeof current.pluginSecrets,
+        })
+        if (!writeRes.success) {
+          return { options: optionsCount, secrets: 0, failed: 'secrets' }
+        }
+        secretsCount = matchingKeys.length
+      }
+    }
+  } catch {
+    return { options: optionsCount, secrets: 0, failed: 'secrets' }
+  }
+
+  return { options: optionsCount, secrets: secretsCount }
+}
+
+/**
+ * #1948 & #1960: Reconcile a managed `extraKnownMarketplaces` takeover of a
+ * marketplace previously registered from an undeclared source:
+ * 1. Sets aside each previously installed plugin's data dir, options, and secrets.
+ * 2. Reinstalls plugins that the newly declared managed marketplace lists.
+ */
+export async function reconcileManagedMarketplaceTakeover(opts: {
+  marketplaceName: string
+  previousSource: MarketplaceSource
+  managedSource: MarketplaceSource
+  installedPluginIds: readonly string[]
+  declaredMarketplacePluginNames: readonly string[]
+  getDataDir: (pluginId: string) => string
+  reinstallPlugin?: (pluginId: string) => Promise<boolean>
+  pluginsDir?: string
+  seams?: SetAsideStorageSeams
+}): Promise<{
+  takenOver: boolean
+  setAsidePluginIds: string[]
+  reinstalledPluginIds: string[]
+}> {
+  if (
+    areSourcesEquivalentForBlocklist(opts.previousSource, opts.managedSource)
+  ) {
+    return {
+      takenOver: false,
+      setAsidePluginIds: [],
+      reinstalledPluginIds: [],
+    }
+  }
+
+  const suffix = `@${opts.marketplaceName.toLowerCase()}`
+  const affected = opts.installedPluginIds.filter(id =>
+    id.toLowerCase().endsWith(suffix),
+  )
+  const token = makeSetAsideToken()
+  const setAsidePluginIds: string[] = []
+  for (const pluginId of affected) {
+    await setAsidePluginDataDir(opts.getDataDir(pluginId), {
+      pluginsDir: opts.pluginsDir,
+      token,
+    })
+    await setAsidePluginOptionsAndSecrets(pluginId, {
+      token,
+      seams: opts.seams,
+    })
+    setAsidePluginIds.push(pluginId)
+  }
+
+  const declaredNamesLower = new Set(
+    opts.declaredMarketplacePluginNames.map(n => n.toLowerCase()),
+  )
+  const reinstalledPluginIds: string[] = []
+  for (const pluginId of affected) {
+    const atIdx = pluginId.lastIndexOf('@')
+    const pluginName = atIdx === -1 ? pluginId : pluginId.slice(0, atIdx)
+    if (!declaredNamesLower.has(pluginName.toLowerCase())) {
+      continue
+    }
+    if (opts.reinstallPlugin) {
+      const ok = await opts.reinstallPlugin(pluginId)
+      if (ok) reinstalledPluginIds.push(pluginId)
+    } else {
+      reinstalledPluginIds.push(pluginId)
+    }
+  }
+
+  return {
+    takenOver: true,
+    setAsidePluginIds,
+    reinstalledPluginIds,
+  }
 }

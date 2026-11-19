@@ -38,6 +38,43 @@ import { generateSessionName } from './generateSessionName.js'
 /**
  * densable yos — meta message informing the model of a user-initiated /rename.
  */
+/**
+ * Official 2.1.319 (#1787): format /rename completion message with warnings
+ * when transcriptUpdated or registryUpdated is false.
+ */
+export function formatRenameResultMessage(opts: {
+  newName: string
+  requestedName: string
+  yieldedFrom?: string
+  transcriptUpdated: boolean
+  registryUpdated: boolean
+}): string {
+  const {
+    newName,
+    requestedName,
+    yieldedFrom,
+    transcriptUpdated,
+    registryUpdated,
+  } = opts
+  const base = formatSessionRenamedMessage(newName, yieldedFrom, true)
+  const warnings: string[] = []
+  if (!transcriptUpdated) {
+    warnings.push(
+      'The new name may not last: the session transcript could not be updated',
+    )
+  }
+  if (!registryUpdated) {
+    warnings.push(
+      'Other sessions may still show the old name: the session registry could not be updated',
+    )
+  }
+  if (warnings.length === 0) return base
+  const retry = transcriptUpdated
+    ? ''
+    : `. Run /rename ${registryUpdated ? requestedName : newName} to try again`
+  return `${base}. ${warnings.join('. ')}${retry} (run with --debug for the cause)`
+}
+
 export function buildRenameMetaMessage(
   newName: string,
   requestedName: string = newName,
@@ -126,8 +163,19 @@ export async function call(
   const sessionId = getSessionId() as UUID
   const fullPath = getTranscriptPath()
 
-  // Always save the custom title (session name)
-  await saveCustomTitle(sessionId, newName, fullPath)
+  // Always save the custom title (session name) and track transcriptUpdated (#1787)
+  let transcriptUpdated = true
+  try {
+    const saved = await saveCustomTitle(sessionId, newName, fullPath)
+    if ((saved as unknown) === false) {
+      transcriptUpdated = false
+    }
+  } catch (err) {
+    transcriptUpdated = false
+    logForDebugging(
+      `[rename] failed to persist custom title to transcript: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
 
   // Sync title to bridge session on claude.ai/code (best-effort, non-blocking).
   // v2 env-less bridge stores cse_* in replBridgeSessionId —
@@ -190,11 +238,20 @@ export async function call(
     },
   })
 
-  onDone(formatSessionRenamedMessage(newName, yieldedFrom, registryUpdated), {
-    display: 'system',
-    metaMessages: !isGenerated
-      ? [buildRenameMetaMessage(newName, yieldedFrom ?? newName)]
-      : undefined,
-  })
+  onDone(
+    formatRenameResultMessage({
+      newName,
+      requestedName,
+      yieldedFrom,
+      transcriptUpdated,
+      registryUpdated,
+    }),
+    {
+      display: 'system',
+      metaMessages: !isGenerated
+        ? [buildRenameMetaMessage(newName, yieldedFrom ?? newName)]
+        : undefined,
+    },
+  )
   return null
 }

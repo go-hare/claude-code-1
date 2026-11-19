@@ -50,7 +50,8 @@ import { isEligibleBridgeMessage } from '../bridge/bridgeMessaging.js';
 import { forwardAgentProgressSdkFrames } from '../bridge/subagentSdkFrames.js';
 import { extractInboundMessageFields } from '../bridge/inboundMessages.js';
 import type { BridgeState, ReplBridgeHandle } from '../bridge/replBridge.js';
-import { setReplBridgeHandle } from '../bridge/replBridgeHandle.js';
+import { setReplBridgeHandle, syncBridgeRateLimitInfo } from '../bridge/replBridgeHandle.js';
+import { type ClaudeAILimits, currentLimits, statusListeners } from '../services/claudeAiLimits.js';
 import type { Command } from '../commands.js';
 import { getSlashCommandToolSkills, isBridgeSafeCommand } from '../commands.js';
 import { getRemoteSessionUrl } from '../constants/product.js';
@@ -1009,10 +1010,12 @@ export function useReplBridge(
           const leftoverDt = suppressLatchSidRef.current === historySid;
           persistSuppressedRef.current = leftoverEt || leftoverDt || (leftoverGt && leftoverPn);
           const leftoverMo = leftoverGt && leftoverPn;
-          const rawHandle = await initReplBridge({
+          const initOptions: Parameters<typeof initReplBridge>[0] = {
             host: getReplDiffHost(),
             workspaceDiffComputeBudget: REPL_WORKSPACE_DIFF_COMPUTE_BUDGET,
             getToolPermissionContext: () => store.getState().toolPermissionContext,
+            // Official 2.1.320 (#1860): report deduplicated slash commands on bridge `initialize`.
+            getInitializeCommands: () => commandsRef.current,
             outboundOnly,
             reattachSessionId: leftoverPn ? undefined : lastBridgeSessionIdRef.current,
             reattachOrFail: leftoverPn
@@ -1269,7 +1272,8 @@ export function useReplBridge(
               persistSuppressedRef.current = true;
               suppressLatchSidRef.current = historySid;
             },
-          });
+          };
+          const rawHandle = await initReplBridge(initOptions);
           const handle = rawHandle
             ? {
                 ...rawHandle,
@@ -1799,6 +1803,53 @@ export function useReplBridge(
     authChangeGeneration,
     setAppState,
   ]);
+
+  // Official 2.1.319 (#1767): mirror rate-limit status to Remote Control bridge
+  // metadata, sending `rate_limit_info: null` when the limit is lifted or its
+  // reset window passes so remote devices clear "Limit reached".
+  useEffect(() => {
+    if (feature('BRIDGE_MODE')) {
+      if (!replBridgeConnected) return;
+      let resetTimer: ReturnType<typeof setTimeout> | undefined;
+
+      const scheduleResetClear = (limits: ClaudeAILimits): void => {
+        if (resetTimer !== undefined) {
+          clearTimeout(resetTimer);
+          resetTimer = undefined;
+        }
+        if (limits.status !== 'allowed' && typeof limits.resetsAt === 'number' && limits.resetsAt > 0) {
+          const delayMs = limits.resetsAt * 1000 - Date.now();
+          if (delayMs > 0 && delayMs <= 2_147_483_647) {
+            resetTimer = setTimeout(() => {
+              resetTimer = undefined;
+              const liveHandle = handleRef.current;
+              if (liveHandle) {
+                syncBridgeRateLimitInfo(currentLimits, liveHandle);
+              }
+            }, delayMs + 250);
+            resetTimer.unref?.();
+          }
+        }
+      };
+
+      const handleLimitsUpdate = (limits: ClaudeAILimits): void => {
+        const liveHandle = handleRef.current;
+        if (!liveHandle) return;
+        syncBridgeRateLimitInfo(limits, liveHandle);
+        scheduleResetClear(limits);
+      };
+
+      handleLimitsUpdate(currentLimits);
+      statusListeners.add(handleLimitsUpdate);
+      return () => {
+        statusListeners.delete(handleLimitsUpdate);
+        if (resetTimer !== undefined) {
+          clearTimeout(resetTimer);
+          resetTimer = undefined;
+        }
+      };
+    }
+  }, [replBridgeConnected]);
 
   // Write new messages as they appear.
   // Also re-runs when replBridgeConnected changes (bridge finishes init),

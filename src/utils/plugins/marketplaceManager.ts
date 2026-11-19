@@ -81,16 +81,24 @@ import {
   inheritedMarketplaceHeaderNames,
   MARKETPLACE_CATALOG_MAX_BYTES,
 } from './pluginArchive.js'
-import { removeAllPluginsForMarketplace } from './installedPluginsManager.js'
 import {
+  loadInstalledPluginsV2,
+  removeAllPluginsForMarketplace,
+} from './installedPluginsManager.js'
+import {
+  areSourcesEquivalentForBlocklist,
   createSshProbe,
   extractHostFromSource,
+  filterKnownMarketplacesForManagedTakeover,
   formatSourceForDisplay,
   getHostPatternsFromAllowlist,
+  getManagedExtraKnownMarketplaceSource,
   getStrictKnownMarketplaces,
+  isMarketplaceNameBlockedByManagedDeclaration,
   isSourceAllowedByPolicy,
   isSourceInBlocklist,
   isSshAuthError,
+  reconcileManagedMarketplaceTakeover,
   shouldUseHttpsInsteadOfSsh,
 } from './marketplaceHelpers.js'
 import {
@@ -102,6 +110,7 @@ import {
   deletePluginDataDir,
   getPluginSeedDirs,
   getPluginsDirectory,
+  pluginDataDirPath,
 } from './pluginDirectories.js'
 import { parsePluginIdentifier } from './pluginIdentifier.js'
 import { deletePluginOptions } from './pluginOptionsStorage.js'
@@ -437,7 +446,7 @@ export function saveMarketplaceToSettings(
  *
  * @returns Configuration object mapping marketplace names to their metadata
  */
-export async function loadKnownMarketplacesConfig(
+async function loadKnownMarketplacesConfigRaw(
   storageV5?: unknown,
 ): Promise<KnownMarketplacesConfig> {
   const backend = asKnownMarketplacesStorage(storageV5)
@@ -512,6 +521,14 @@ export async function loadKnownMarketplacesConfig(
     })
     throw new Error(errorMsg)
   }
+}
+
+export async function loadKnownMarketplacesConfig(
+  storageV5?: unknown,
+): Promise<KnownMarketplacesConfig> {
+  const raw = await loadKnownMarketplacesConfigRaw(storageV5)
+  // #1948: Hide known_marketplaces entries displaced by a managed extraKnownMarketplaces declaration
+  return filterKnownMarketplacesForManagedTakeover(raw).visible
 }
 
 /**
@@ -3697,6 +3714,19 @@ export async function addMarketplaceSource(
     throw new Error(sourceValidationError)
   }
 
+  // #1948: A marketplace name declared in managed extraKnownMarketplaces cannot
+  // be added from a different source.
+  if (
+    isMarketplaceNameBlockedByManagedDeclaration(
+      marketplace.name,
+      resolvedSource,
+    )
+  ) {
+    throw new Error(
+      `Marketplace "${marketplace.name}" is declared in managed settings from another source and cannot be added from '${formatSourceForDisplay(resolvedSource)}'.`,
+    )
+  }
+
   // #367: refuse marketplace names that cannot form a valid plugin@marketplace id
   assertMarketplaceNameCanRecordPluginIds(marketplace.name, existingConfig)
 
@@ -3705,6 +3735,27 @@ export async function addMarketplaceSource(
     marketplace.name,
     existingConfig,
   )
+
+  // #1960: Detect when a managed extraKnownMarketplaces declaration takes over
+  // an existing user-registered marketplace with the same name from a different
+  // source. Read the unfiltered config before overwriting because
+  // loadKnownMarketplacesConfig hides displaced entries (#1948).
+  const managedSource = getManagedExtraKnownMarketplaceSource(marketplace.name)
+  let displacedUserSource: MarketplaceSource | undefined
+  if (managedSource !== undefined) {
+    try {
+      const rawConfig = await loadKnownMarketplacesConfigRaw(storageV5)
+      const rawEntry = getOwnMarketplaceEntry(rawConfig, marketplace.name)
+      if (
+        rawEntry &&
+        !areSourcesEquivalentForBlocklist(rawEntry.source, managedSource)
+      ) {
+        displacedUserSource = rawEntry.source
+      }
+    } catch {
+      // Non-fatal: continue updating known_marketplaces.json
+    }
+  }
 
   // Name collision with different source: overwrite (settings intent wins).
   // Seed-managed entries are admin-controlled and cannot be overwritten.
@@ -3803,6 +3854,27 @@ export async function addMarketplaceSource(
     }
     return config
   }, storageV5)
+
+  if (displacedUserSource !== undefined && managedSource !== undefined) {
+    // #1960: Set aside displaced plugin data/options/secrets when a managed
+    // extraKnownMarketplaces declaration takes over an existing user marketplace.
+    try {
+      const installed = loadInstalledPluginsV2()
+      await reconcileManagedMarketplaceTakeover({
+        marketplaceName: marketplace.name,
+        previousSource: displacedUserSource,
+        managedSource,
+        installedPluginIds: Object.keys(installed.plugins),
+        declaredMarketplacePluginNames: marketplace.plugins.map(p => p.name),
+        getDataDir: pluginDataDirPath,
+      })
+    } catch (err) {
+      logForDebugging(
+        `Failed to reconcile managed marketplace takeover for "${marketplace.name}": ${errorMessage(err)}`,
+        { level: 'warn' },
+      )
+    }
+  }
 
   logForDebugging(`Added marketplace source: ${marketplace.name}`)
 

@@ -41,6 +41,10 @@ import {
   type PreToolUseHookContext,
 } from './quickstartRules.js'
 import { getArtifactsToken, getUploadUrl } from './config.js'
+import {
+  clearDbUndeclared,
+  executeArtifactDbAction,
+} from 'src/services/artifactAutoReact/artifactDb.js'
 import { uploadArtifact } from './client.js'
 import { markdownToHtml } from './markdown.js'
 import { formatArtifactWatchStatus } from 'src/services/artifactAutoReact/watchActions.js'
@@ -660,6 +664,10 @@ export const ArtifactTool = buildTool({
           return 'Read runtime diagnostics for a published artifact.'
         case 'read_page_data':
           return 'Read structured page-data islands from a published artifact.'
+        case 'read_db':
+          return 'Read documents from a published artifact database.'
+        case 'write_db':
+          return 'Write documents to a published artifact database.'
         case 'delete':
           return 'Permanently delete a published artifact the user owns (irreversible); every delete asks the user.'
         case 'room_send':
@@ -882,6 +890,10 @@ export const ArtifactTool = buildTool({
           return `Verify ${'url' in input && input.url ? input.url : 'last publish'}`
         case 'read_page_data':
           return `Read page data on ${'url' in input ? input.url : '…'}`
+        case 'read_db':
+          return `Read database on ${'url' in input ? input.url : '…'}`
+        case 'write_db':
+          return `Write database on ${'url' in input ? input.url : '…'}`
         case 'delete':
           return `Delete ${'url' in input ? input.url : '…'}`
         case 'room_send':
@@ -1240,6 +1252,34 @@ export const ArtifactTool = buildTool({
           return callVerify(input, signal)
         case 'read_page_data':
           return callReadPageData(input, signal)
+        case 'read_db':
+        case 'write_db': {
+          const url = typeof input.url === 'string' ? input.url : ''
+          if (!url) {
+            return {
+              data: {
+                id: '',
+                url: '',
+                expiresAt: '',
+                error: `action "${input.action}" requires \`url\`.`,
+              },
+            }
+          }
+          const dbResult = await executeArtifactDbAction({
+            action: input.action,
+            url,
+            db_op: input.db_op,
+            collection: input.collection,
+            doc_id: input.doc_id,
+            query: input.query,
+            data: input.data,
+            writes: input.writes,
+            if_version: input.if_version,
+            out_dir: input.out_dir,
+            signal,
+          })
+          return { data: dbResult }
+        }
         case 'delete':
           return callDelete(input, signal)
         case 'room_send':
@@ -3484,6 +3524,7 @@ async function callUpload(
     let droppedDbAccessRules: ArtifactDbAccessRule[] | undefined
     if (publishedSlug) {
       artifactStore.refusedPublishBodies.delete(publishedSlug)
+      clearDbUndeclared(publishedSlug)
       recordPublishedPathPins(publishedSlug, result.expiresAt || '1', {
         written: [{ path: targetPath, sha256: bodySha256 }],
         removed: [],

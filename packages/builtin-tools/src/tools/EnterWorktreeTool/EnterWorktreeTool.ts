@@ -1,6 +1,10 @@
 import { resolve } from 'path'
 import { z } from 'zod/v4'
-import { getSessionId, setOriginalCwd } from 'src/bootstrap/state.js'
+import {
+  getOriginalCwd,
+  getSessionId,
+  setOriginalCwd,
+} from 'src/bootstrap/state.js'
 import { clearSystemPromptSections } from 'src/constants/systemPromptSections.js'
 import { logEvent } from 'src/services/analytics/index.js'
 import type { Tool } from 'src/Tool.js'
@@ -135,16 +139,37 @@ export const EnterWorktreeTool: Tool<InputSchema, Output> = buildTool({
   renderToolUseMessage,
   renderToolResultMessage,
   async call(input) {
+    const preEnterCwd = getCwd()
+    const launchProjectRoot = getOriginalCwd()
+    const priorWorktree = getCurrentWorktreeSession() as
+      | (ReturnType<typeof getCurrentWorktreeSession> & {
+          extensionRoot?: string
+        })
+      | null
+    const preservedExtensionRoot =
+      priorWorktree?.extensionRoot ??
+      (preEnterCwd === launchProjectRoot ? launchProjectRoot : undefined)
+
     if (input.path) {
       const classified = await classifyManagedClaudeWorktree(input.path)
       const target = classified.managed
         ? classified.targetReal
-        : resolve(getCwd(), input.path)
+        : resolve(preEnterCwd, input.path)
 
       const worktreeSession = await enterExistingWorktreeSession(
         target,
         getSessionId(),
       )
+      // Official 325 #1871: preserve original extensionRoot so project skills,
+      // commands, and agents stay visible in SDK / Desktop menus after entering a worktree.
+      if (
+        preservedExtensionRoot !== undefined &&
+        !(worktreeSession as { nestedRepoRoot?: string }).nestedRepoRoot
+      ) {
+        ;(
+          worktreeSession as typeof worktreeSession & { extensionRoot?: string }
+        ).extensionRoot = preservedExtensionRoot
+      }
 
       process.chdir(worktreeSession.worktreePath)
       setCwd(worktreeSession.worktreePath)
@@ -180,6 +205,12 @@ export const EnterWorktreeTool: Tool<InputSchema, Output> = buildTool({
             `This agent's working directory and write access now point at the worktree; ` +
             `the previous directory was left untouched.`,
         },
+        contextLayers: [
+          {
+            kind: 'working_directory',
+            directory: worktreeSession.worktreePath,
+          },
+        ],
       }
     }
 
@@ -189,7 +220,10 @@ export const EnterWorktreeTool: Tool<InputSchema, Output> = buildTool({
     }
 
     // Resolve to main repo root so worktree creation works from within a worktree
-    const mainRepoRoot = findCanonicalGitRoot(getCwd())
+    const mainRepoRoot = findCanonicalGitRoot(preEnterCwd)
+    const sameRepoRoot =
+      mainRepoRoot !== null &&
+      mainRepoRoot === findCanonicalGitRoot(launchProjectRoot)
     if (mainRepoRoot && mainRepoRoot !== getCwd()) {
       process.chdir(mainRepoRoot)
       setCwd(mainRepoRoot)
@@ -198,6 +232,12 @@ export const EnterWorktreeTool: Tool<InputSchema, Output> = buildTool({
     const slug = input.name ?? getPlanSlug()
 
     const worktreeSession = await createWorktreeForSession(getSessionId(), slug)
+    // Official 325 #1871: record extensionRoot when entering from the launch project root.
+    if (preservedExtensionRoot !== undefined && sameRepoRoot) {
+      ;(
+        worktreeSession as typeof worktreeSession & { extensionRoot?: string }
+      ).extensionRoot = preservedExtensionRoot
+    }
 
     process.chdir(worktreeSession.worktreePath)
     setCwd(worktreeSession.worktreePath)
@@ -232,6 +272,9 @@ export const EnterWorktreeTool: Tool<InputSchema, Output> = buildTool({
         worktreeBranch: worktreeSession.worktreeBranch,
         message: `Created worktree at ${worktreeSession.worktreePath}${branchInfo}. The session is now working in the worktree. Use ExitWorktree to leave mid-session, or exit the session to be prompted.`,
       },
+      contextLayers: [
+        { kind: 'working_directory', directory: worktreeSession.worktreePath },
+      ],
     }
   },
   mapToolResultToToolResultBlockParam({ message }, toolUseID) {

@@ -377,6 +377,8 @@ export type Setting =
       canWithdraw?: () => boolean;
       lock?: ConfigSettingLock;
       provided?: SettingProvidedMeta;
+      /** Official 2.1.321 (#1856): value is derived default (not explicitly persisted in settings). */
+      isDefaultValue?: boolean;
     })
   | (SettingBase & {
       // For enums that are set by a custom component, we don't need to pass options,
@@ -391,6 +393,8 @@ export type Setting =
       canWithdraw?: () => boolean;
       lock?: ConfigSettingLock;
       provided?: SettingProvidedMeta;
+      /** Official 2.1.321 (#1856): value is derived default (not explicitly persisted in settings). */
+      isDefaultValue?: boolean;
     });
 
 /** densable IRn `je` — plugin /config rows cannot be written over Remote Control. */
@@ -1006,7 +1010,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
         ? [
             {
               id: 'fast',
-              label: `Fast mode (${FAST_MODE_MODEL_DISPLAY} only)`,
+              label: `Fast mode (${mainLoopModel ? modelDisplayString(mainLoopModel) : FAST_MODE_MODEL_DISPLAY})`,
               value: !!isFastMode,
               type: 'boolean' as const,
               onChange(enabled: boolean) {
@@ -1358,6 +1362,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
         id: 'permissionMode',
         label: 'Default permission mode',
         value: currentDefaultPermissionMode,
+        isDefaultValue: !settingsData?.permissions?.defaultMode,
         options: (() => {
           const priorityOrder: PermissionMode[] = ['default', 'plan'];
           return [...priorityOrder, ...PERMISSION_MODES.filter(m => !priorityOrder.includes(m))];
@@ -2386,13 +2391,19 @@ export function Config({
   const promptSuggestionEnabled = useAppState(s => s.promptSuggestionEnabled);
   const enabledPlugins = useAppState(s => s.plugins.enabled);
   const [pluginConfigEpoch, setPluginConfigEpoch] = useState(0);
-  const currentDefaultPermissionMode = permissionModeFromString(settingsData?.permissions?.defaultMode ?? 'default');
   // Show auto in the default-mode dropdown when the user has opted in OR the
   // config is fully 'enabled' — even if currently circuit-broken ('disabled'),
   // an opted-in user should still see it in settings (it's a temporary state).
   const showAutoInDefaultModePicker = feature('TRANSCRIPT_CLASSIFIER')
     ? hasAutoModeOptInAnySource() || getAutoModeEnabledState() === 'enabled'
     : false;
+  const explicitDefaultPermissionMode = settingsData?.permissions?.defaultMode;
+  const derivedDefaultPermissionIsAuto = feature('TRANSCRIPT_CLASSIFIER')
+    ? !explicitDefaultPermissionMode && getAutoModeEnabledState() === 'enabled'
+    : false;
+  const currentDefaultPermissionMode = permissionModeFromString(
+    explicitDefaultPermissionMode ?? (derivedDefaultPermissionIsAuto ? 'auto' : 'default'),
+  );
   // Chat/Transcript view picker is visible to entitled users (pass the GB
   // gate) even if they haven't opted in this session — it IS the persistent
   // opt-in. 'chat' written here is read at next startup by main.tsx which
@@ -3888,6 +3899,7 @@ export function Config({
                           ) : setting.id === 'permissionMode' ? (
                             <Text color={isSelected ? 'suggestion' : undefined} wrap="truncate-end">
                               {permissionModeShortTitle(setting.value as PermissionMode)}
+                              {(setting as { isDefaultValue?: boolean }).isDefaultValue ? ' (default)' : ''}
                             </Text>
                           ) : setting.id === 'autoUpdatesChannel' && autoUpdaterDisabledReason ? (
                             <Box flexDirection="column" minWidth={0}>

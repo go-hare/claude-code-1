@@ -88,6 +88,22 @@ export function filterWatchableFileChangedPaths(paths: string[]): string[] {
   return filtered
 }
 
+/**
+ * Official #1857 — normalize Windows drive-letter case so a lowercase drive
+ * letter (`c:\proj` vs `C:\proj`) does not trigger a spurious CwdChanged pass
+ * that clears `dynamicWatchPaths`.
+ */
+export function normalizeWatchCwdPath(
+  path: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform !== 'win32') return path
+  if (/^[a-z]:/i.test(path)) {
+    return path[0]!.toLowerCase() + path.slice(1)
+  }
+  return path
+}
+
 export function initializeFileChangedWatcher(cwd: string): void {
   if (initialized) return
   initialized = true
@@ -239,7 +255,7 @@ export async function onCwdChangedForHooks(
   oldCwd: string,
   newCwd: string,
 ): Promise<void> {
-  if (oldCwd === newCwd) return
+  if (normalizeWatchCwdPath(oldCwd) === normalizeWatchCwdPath(newCwd)) return
 
   // Re-evaluate from the current snapshot so mid-session hook changes are picked up
   const config = getHooksConfigFromSnapshot()

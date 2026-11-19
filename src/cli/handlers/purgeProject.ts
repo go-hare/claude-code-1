@@ -11,6 +11,7 @@ import {
   logEvent,
 } from '../../services/analytics/index.js'
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js'
+import { removeDirectoryTreeWithRetry } from '../../utils/cleanup.js'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import { getProjectsDir, getProjectDir } from '../../utils/sessionPaths.js'
 import { getTasksDir } from '../../utils/tasks.js'
@@ -275,7 +276,11 @@ async function deleteItem(
 ): Promise<PurgeFailure | null> {
   if (item.kind === 'dir' || item.kind === 'file') {
     try {
-      await rm(item.path, { recursive: true, force: true })
+      if (item.kind === 'dir') {
+        await removeDirectoryTreeWithRetry(item.path)
+      } else {
+        await rm(item.path, { recursive: true, force: true })
+      }
       return null
     } catch (err) {
       const code =

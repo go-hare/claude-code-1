@@ -90,6 +90,8 @@ export type LogOption = {
   bridgeOwnerOrganizationUuid?: string
   /** densable sessionHistorySuppressed — history-suppression last-wins / taint. */
   sessionHistorySuppressed?: boolean
+  /** Official 2.1.319 (#1752): parent session ID when branched via /branch for file-history copy. */
+  forkedFromSessionId?: string
 }
 
 export type SummaryMessage = {

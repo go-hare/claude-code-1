@@ -347,6 +347,10 @@ export type HookResult = {
   updatedMCPToolOutput?: unknown
   permissionRequestResult?: PermissionRequestResult
   retry?: boolean
+  /** Official #1868: ask originated from host's own hook (lowest ask tie-break priority). */
+  hostsOwnAsk?: boolean
+  /** Official #1868: ask originated from session server hook (highest ask tie-break priority). */
+  serversOwnAsk?: boolean
 }
 
 export type AggregatedHookResult = {
@@ -365,4 +369,8 @@ export type AggregatedHookResult = {
   updatedMCPToolOutput?: unknown
   permissionRequestResult?: PermissionRequestResult
   retry?: boolean
+  /** Official #1868: ask originated from host's own hook (lowest ask tie-break priority). */
+  hostsOwnAsk?: boolean
+  /** Official #1868: ask originated from session server hook (highest ask tie-break priority). */
+  serversOwnAsk?: boolean
 }

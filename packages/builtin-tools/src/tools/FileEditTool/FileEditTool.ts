@@ -603,6 +603,22 @@ export const FileEditTool = buildTool({
       }
 
       if (fileExists) {
+        // Official 2.1.321 #1855 (`BPs` + `jPs`): network paths (UNC shares,
+        // WSL folders, `/net` mounts) skip disk checks in validateInput(), so
+        // call() MUST re-check empty old_string overwrite, `.ipynb` refusal,
+        // and unique match when replace_all is false.
+        if (old_string === '' && originalFileContents.trim() !== '') {
+          const err = new Error('Cannot create new file - file already exists.')
+          err.name = 'ToolExecutionError'
+          throw err
+        }
+        if (old_string !== '' && absoluteFilePath.endsWith('.ipynb')) {
+          const err = new Error(
+            'File is a Jupyter Notebook. Use the NotebookEdit to edit this file.',
+          )
+          err.name = 'ToolExecutionError'
+          throw err
+        }
         const lastWriteTime = getFileModificationTime(absoluteFilePath)
         const lastRead = readFileState.get(absoluteFilePath)
         const normalizedContent = stripBom(originalFileContents)
@@ -638,6 +654,27 @@ export const FileEditTool = buildTool({
 
       actualOldString =
         findActualString(originalFileContents, old_string) || old_string
+
+      // Official 2.1.321 #1855 (`jPs`): enforce unique match in call() too
+      // (network paths skip validateInput disk read).
+      if (fileExists && !replace_all && actualOldString !== '') {
+        const firstIdx = originalFileContents.indexOf(actualOldString)
+        if (
+          firstIdx !== -1 &&
+          originalFileContents.indexOf(
+            actualOldString,
+            firstIdx + actualOldString.length,
+          ) !== -1
+        ) {
+          const matchCount =
+            originalFileContents.split(actualOldString).length - 1
+          const err = new Error(
+            `Found ${matchCount} matches of the string to replace, but replace_all is false. To replace all occurrences, set replace_all to true. To replace only one occurrence, please provide more context to uniquely identify the instance.\nString: ${old_string}`,
+          )
+          err.name = 'ToolExecutionError'
+          throw err
+        }
+      }
 
       const { patch, updatedFile: editedFile } = getPatchForEdit({
         filePath: absoluteFilePath,

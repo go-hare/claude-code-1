@@ -43,6 +43,17 @@ import { formatFileSize } from './format.js'
 
 const FAST_PATH_MAX_SIZE = 10 * 1024 * 1024 // 10 MB
 
+/**
+ * Official 2.1.321 #1879 (`QWe`):
+ * Copy a single-line slice out of a large parent string so V8/JSC sliced-string
+ * internals do not pin the entire multi-MB file buffer in memory for the rest
+ * of the session.
+ */
+export function decoupleSlicedString(text: string): string {
+  if (text.length === 0) return ''
+  return Buffer.from(text, 'utf16le').toString('utf16le')
+}
+
 export type ReadFileRangeResult = {
   content: string
   lineCount: number
@@ -195,7 +206,9 @@ function readFileInRangeFast(
   }
   lineIndex++
 
-  const content = selectedLines.join('\n')
+  const rawContent = selectedLines.join('\n')
+  const content =
+    selectedLines.length === 1 ? decoupleSlicedString(rawContent) : rawContent
   return {
     content,
     lineCount: selectedLines.length,
@@ -340,7 +353,11 @@ function streamOnEnd(this: StreamState): void {
   }
   this.currentLineIndex++
 
-  const content = this.selectedLines.join('\n')
+  const rawContent = this.selectedLines.join('\n')
+  const content =
+    this.selectedLines.length === 1
+      ? decoupleSlicedString(rawContent)
+      : rawContent
   const truncated = this.truncatedByBytes
   this.mtimeReady.then(mtimeMs => {
     this.resolve({

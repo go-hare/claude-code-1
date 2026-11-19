@@ -1328,9 +1328,18 @@ export async function compactConversation(
       .filter(Boolean)
       .join('\n')
 
+    // Official 2.1.321 (#1862): preserve trailing unanswered background subagent
+    // `<task-notification>` user messages when compacting before Claude answers
+    // them (e.g. in auto mode when a background subagent report started a turn).
+    const preservedTaskNotifications =
+      extractUnansweredTaskNotifications(messages)
+
     return {
       boundaryMarker,
       summaryMessages,
+      ...(preservedTaskNotifications.length > 0
+        ? { messagesToKeep: preservedTaskNotifications }
+        : {}),
       attachments: postCompactFileAttachments,
       hookResults: hookMessages,
       userDisplayMessage: combinedUserDisplayMessage || undefined,
@@ -2416,6 +2425,73 @@ export async function createPlanModeAttachmentIfNeeded(
 }
 
 /**
+ * Official 2.1.321 (#1862): detect whether a message is a background subagent
+ * `<task-notification>` report.
+ */
+export function isTaskNotificationMessage(msg: Message): boolean {
+  if (msg.type !== 'user') return false
+  const content = msg.message?.content
+  if (typeof content === 'string') {
+    return content.includes('<task-notification>')
+  }
+  if (Array.isArray(content)) {
+    return content.some(
+      block =>
+        typeof block === 'object' &&
+        block !== null &&
+        block.type === 'text' &&
+        typeof block.text === 'string' &&
+        block.text.includes('<task-notification>'),
+    )
+  }
+  return false
+}
+
+/**
+ * Official 2.1.321 (#1862): extract background subagent `<task-notification>`
+ * messages from an unanswered trailing turn (after the last assistant message)
+ * so compaction before Claude answers them does not drop the report.
+ */
+export function extractUnansweredTaskNotifications(
+  messages: readonly Message[],
+): Message[] {
+  let lastAssistantIdx = -1
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.type === 'assistant') {
+      lastAssistantIdx = i
+      break
+    }
+  }
+  const trailing = messages.slice(lastAssistantIdx + 1)
+  return trailing.filter(isTaskNotificationMessage)
+}
+
+/**
+ * Official 2.1.319 (#1790): decide whether a background `local_agent` task
+ * belongs to the compacting agent (`contextAgentId`), matching `ownerAgentId`
+ * (or `parentAgentId` when `ownerAgentId` is absent). Prevents subagents from
+ * being told after compaction to expect completion notices for background
+ * agents they neither started nor took over.
+ */
+export function isAsyncAgentOwnedByContext(
+  agent: Pick<
+    LocalAgentTaskState,
+    'agentId' | 'ownerAgentId' | 'parentAgentId'
+  >,
+  contextAgentId: string | undefined,
+): boolean {
+  if (contextAgentId !== undefined && agent.agentId === contextAgentId) {
+    return false
+  }
+  const effectiveOwner = agent.ownerAgentId ?? agent.parentAgentId
+  if (contextAgentId === undefined) {
+    // Main thread owns agents with no explicit owner/parent (or explicit 'main')
+    return effectiveOwner === undefined || effectiveOwner === 'main'
+  }
+  return effectiveOwner === contextAgentId
+}
+
+/**
  * Creates attachments for async agents so the model knows about them after
  * compaction. Covers both agents still running in the background (so the model
  * doesn't spawn a duplicate) and agents that have finished but whose results
@@ -2433,7 +2509,7 @@ export async function createAsyncAgentAttachmentsIfNeeded(
     if (
       agent.retrieved ||
       agent.status === 'pending' ||
-      agent.agentId === context.agentId
+      !isAsyncAgentOwnedByContext(agent, context.agentId)
     ) {
       return []
     }

@@ -229,12 +229,33 @@ function consumeRawReadResult(raw: RawReadResult): {
   mdm: MdmResult
   hkcu: MdmResult
 } {
-  // macOS: plist result (first source wins — already filtered in mdmRawRead)
+  // macOS: plist result (first readable source wins; unread timeout/error reported with unreadCause #1903)
   if (raw.plistStdouts && raw.plistStdouts.length > 0) {
-    const { stdout, label } = raw.plistStdouts[0]!
-    const result = parseCommandOutputAsSettings(stdout, label)
-    if (Object.keys(result.settings).length > 0) {
-      return { mdm: result, hkcu: EMPTY_RESULT }
+    const unreadErrors: ValidationError[] = []
+    for (const entry of raw.plistStdouts) {
+      if (entry.stdout === null) {
+        unreadErrors.push({
+          file: entry.label,
+          path: '',
+          message:
+            entry.unreadReason ?? 'Unable to read managed policy settings',
+          ...(entry.unreadCause !== undefined
+            ? { unreadCause: entry.unreadCause }
+            : {}),
+        })
+        continue
+      }
+      if (!entry.stdout) continue
+      const result = parseCommandOutputAsSettings(entry.stdout, entry.label)
+      if (Object.keys(result.settings).length > 0 || result.errors.length > 0) {
+        return { mdm: result, hkcu: EMPTY_RESULT }
+      }
+    }
+    if (unreadErrors.length > 0) {
+      return {
+        mdm: { settings: {}, errors: unreadErrors },
+        hkcu: EMPTY_RESULT,
+      }
     }
   }
 

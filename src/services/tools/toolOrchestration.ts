@@ -10,6 +10,7 @@ import {
   runToolUse,
   type ToolBridgeEvent,
 } from './toolExecution.js'
+import { applyContextLayersToToolUseContext } from './StreamingToolExecutor.js'
 import { createToolBatchSpan, endToolBatchSpan } from '../langfuse/index.js'
 
 function getMaxToolUseConcurrency(): number {
@@ -49,6 +50,10 @@ export async function* runTools(
         string,
         ((context: ToolUseContext) => ToolUseContext)[]
       > = {}
+      const queuedContextLayers: Record<
+        string,
+        NonNullable<ToolUseContext['permissionLayers']>
+      > = {}
       // Run read-only batch concurrently
       for await (const update of runToolsConcurrently(
         blocks,
@@ -67,6 +72,13 @@ export async function* runTools(
           }
           queuedContextModifiers[toolUseID].push(modifyContext)
         }
+        if (update.contextLayers && update.contextLayers.layers.length > 0) {
+          const { toolUseID, layers } = update.contextLayers
+          if (!queuedContextLayers[toolUseID]) {
+            queuedContextLayers[toolUseID] = []
+          }
+          queuedContextLayers[toolUseID].push(...layers)
+        }
         yield {
           message: update.message,
           newContext: currentContext,
@@ -74,11 +86,17 @@ export async function* runTools(
       }
       for (const block of blocks) {
         const modifiers = queuedContextModifiers[block.id]
-        if (!modifiers) {
-          continue
+        if (modifiers) {
+          for (const modifier of modifiers) {
+            currentContext = modifier(currentContext)
+          }
         }
-        for (const modifier of modifiers) {
-          currentContext = modifier(currentContext)
+        const layers = queuedContextLayers[block.id]
+        if (layers && layers.length > 0) {
+          currentContext = applyContextLayersToToolUseContext(
+            currentContext,
+            layers,
+          )
         }
       }
       yield { newContext: currentContext }
@@ -190,6 +208,12 @@ async function* runToolsSerially(
       }
       if (update.contextModifier) {
         currentContext = update.contextModifier.modifyContext(currentContext)
+      }
+      if (update.contextLayers && update.contextLayers.layers.length > 0) {
+        currentContext = applyContextLayersToToolUseContext(
+          currentContext,
+          update.contextLayers.layers,
+        )
       }
       yield {
         message: update.message,

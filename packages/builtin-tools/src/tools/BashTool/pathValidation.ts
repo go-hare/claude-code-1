@@ -1,5 +1,5 @@
 import { homedir } from 'os'
-import { isAbsolute, normalize, resolve } from 'path'
+import { isAbsolute, normalize, posix, resolve } from 'path'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 import type { z } from 'zod/v4'
 import type { ToolPermissionContext } from 'src/Tool.js'
@@ -745,6 +745,160 @@ const COMMAND_VALIDATOR: Partial<
   },
 }
 
+/**
+ * Official 2.1.321 #1955 (`IO`): normalize path-qualified `cp`/`mv`/`rm`/`rmdir`/`tee`
+ * (e.g. `/bin/cp`, `/usr/bin/mv`, `C:\...\cp.exe`) to their canonical command name.
+ */
+const BASENAME_NORMALIZED_PATH_COMMANDS = new Set([
+  'rm',
+  'rmdir',
+  'tee',
+  'cp',
+  'mv',
+])
+
+export function normalizePathCommandName(cmd: string): string {
+  if (!cmd) return cmd
+  const base = cmd.replace(/^.*[\\/]/, '')
+  if (BASENAME_NORMALIZED_PATH_COMMANDS.has(base)) return base
+  const lower = base.toLowerCase().replace(/\.exe$/, '')
+  return BASENAME_NORMALIZED_PATH_COMMANDS.has(lower) ? lower : cmd
+}
+
+/**
+ * Official 2.1.321 #1850 (`hfn`, `Tfn`, `bfn`, `Efn`):
+ * Expand `cp`/`mv` destination-directory targets so deny rules and protected-file
+ * prompts apply to `<destDir>/<basename(src)>` (and `-t`/`--target-directory`,
+ * `--parents`, and `-b`/`-S` backup targets).
+ */
+function parseCpMvOptions(args: readonly string[]): Array<{
+  name: string
+  value?: string
+  afterOperand: boolean
+}> {
+  const opts: Array<{ name: string; value?: string; afterOperand: boolean }> =
+    []
+  let afterOperand = false
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] ?? ''
+    if (arg === '--') break
+    if (arg.startsWith('--')) {
+      const eqIdx = arg.indexOf('=')
+      const rawName = eqIdx === -1 ? arg.slice(2) : arg.slice(2, eqIdx)
+      const val = eqIdx === -1 ? undefined : arg.slice(eqIdx + 1)
+      const name =
+        rawName.length >= 2 && 'suffix'.startsWith(rawName)
+          ? 'S'
+          : rawName !== '' && 'target-directory'.startsWith(rawName)
+            ? 't'
+            : rawName !== '' && 'backup'.startsWith(rawName)
+              ? 'b'
+              : rawName
+      opts.push({
+        name,
+        value: val ?? (name === 'S' || name === 't' ? args[++i] : undefined),
+        afterOperand,
+      })
+    } else if (arg.startsWith('-') && arg.length > 1) {
+      for (let j = 1; j < arg.length; j++) {
+        const ch = arg[j] ?? ''
+        if (ch === 't' || ch === 'S') {
+          const rest = arg.slice(j + 1)
+          opts.push({
+            name: ch,
+            value: rest !== '' ? rest : args[++i],
+            afterOperand,
+          })
+          if (rest.startsWith('=')) {
+            opts.push({ name: ch, value: rest.slice(1), afterOperand })
+          }
+          break
+        }
+        opts.push({ name: ch, afterOperand })
+      }
+    } else {
+      afterOperand = true
+    }
+  }
+  return opts
+}
+
+export function expandCpMvDestinationPaths(
+  args: readonly string[],
+  extractedPaths: readonly string[],
+): string[] {
+  const opts = parseCpMvOptions(args)
+  const attachedDestinations: string[] = []
+  for (const arg of args) {
+    if (arg.startsWith('--')) {
+      const eqIdx = arg.indexOf('=')
+      const key = eqIdx === -1 ? arg.slice(2) : arg.slice(2, eqIdx)
+      if (key !== '' && 'target-directory'.startsWith(key) && eqIdx !== -1) {
+        attachedDestinations.push(arg.slice(eqIdx + 1))
+      }
+    } else if (arg.startsWith('-') && arg.indexOf('t') > 0) {
+      const tIdx = arg.indexOf('t')
+      if (tIdx < arg.length - 1) {
+        const rest = arg.slice(tIdx + 1)
+        attachedDestinations.push(rest)
+        if (rest.startsWith('=')) {
+          attachedDestinations.push(rest.slice(1))
+        }
+      }
+    }
+  }
+  const destSet = new Set<string>(
+    [
+      ...opts.flatMap(o => (o.name === 't' && o.value ? [o.value] : [])),
+      ...attachedDestinations,
+      ...extractedPaths.filter(
+        (p, idx) =>
+          !p.startsWith('-') && extractedPaths[idx + 1]?.startsWith('-'),
+      ),
+      ...extractedPaths.slice(-1),
+    ].filter(Boolean),
+  )
+  const destinations = Array.from(destSet)
+  const expanded: string[] = []
+  for (const dest of destinations) {
+    const cleanDest = dest.replace(/[\\/]+$/, '')
+    for (const src of extractedPaths) {
+      if (src === dest) continue
+      const base = posix.basename(src.replace(/\\/g, '/'))
+      if (base && base !== '.' && base !== '..') {
+        expanded.push(`${cleanDest}/${base}`)
+      }
+    }
+  }
+  if (args.some(a => /^--pa/.test(a))) {
+    for (const dest of destinations) {
+      const cleanDest = dest.replace(/[\\/]+$/, '')
+      for (const src of extractedPaths) {
+        if (src === dest) continue
+        expanded.push(`${cleanDest}/${src.replace(/^[\\/]+/, '')}`)
+      }
+    }
+  }
+  const hasBackup = opts.some(o => o.name === 'b' || o.name === 'S')
+  const suffixes = hasBackup
+    ? Array.from(
+        new Set([
+          '~',
+          ...opts.filter(o => o.name === 'S' && o.value).map(o => o.value!),
+        ]),
+      )
+    : []
+  const backupExpanded =
+    suffixes.length > 0
+      ? [...destinations, ...expanded].flatMap(target =>
+          suffixes.map(suffix => `${target.replace(/[\\/]+$/, '')}${suffix}`),
+        )
+      : []
+  return Array.from(
+    new Set([...attachedDestinations, ...expanded, ...backupExpanded]),
+  )
+}
+
 function validateCommandPaths(
   command: PathCommand,
   args: string[],
@@ -756,6 +910,30 @@ function validateCommandPaths(
   const extractor = PATH_EXTRACTORS[command]
   const paths = extractor(args)
   const operationType = operationTypeOverride ?? COMMAND_OPERATION_TYPE[command]
+  const extraCpMvTargets =
+    command === 'cp' || command === 'mv'
+      ? expandCpMvDestinationPaths(args, paths)
+      : []
+  const allWritePaths =
+    extraCpMvTargets.length > 0
+      ? Array.from(new Set([...paths, ...extraCpMvTargets]))
+      : paths
+
+  // Official #1850: explicit deny rules on any cp/mv destination target
+  // (including `<destDir>/<basename(src)>` and `-t DIR`) must still deny
+  // even when flags would otherwise trigger a generic flag-validation ask.
+  if (command === 'cp' || command === 'mv') {
+    for (const p of allWritePaths) {
+      const check = validatePath(p, cwd, toolPermissionContext, operationType)
+      if (!check.allowed && check.decisionReason?.type === 'rule') {
+        return {
+          behavior: 'deny',
+          message: `${command} in '${check.resolvedPath}' was blocked by a deny rule`,
+          decisionReason: check.decisionReason,
+        }
+      }
+    }
+  }
 
   // SECURITY: Check command-specific validators (e.g., to block flags that could bypass path validation)
   // Some commands like mv/cp have flags (--target-directory=PATH) that can bypass path extraction,
@@ -814,7 +992,7 @@ function validateCommandPaths(
     }
   }
 
-  for (const path of paths) {
+  for (const path of allWritePaths) {
     const { allowed, resolvedPath, decisionReason } = validatePath(
       path,
       cwd,
@@ -1027,7 +1205,8 @@ function validateSinglePathCommand(
   }
 
   // Check if this is a path command we need to validate
-  const [baseCmd, ...args] = extractedArgs
+  const [rawBaseCmd, ...args] = extractedArgs
+  const baseCmd = rawBaseCmd ? normalizePathCommandName(rawBaseCmd) : undefined
   if (!baseCmd || !SUPPORTED_PATH_COMMANDS.includes(baseCmd as PathCommand)) {
     return {
       behavior: 'passthrough',
@@ -1071,7 +1250,8 @@ function validateSinglePathCommandArgv(
       message: 'Empty command - no paths to validate',
     }
   }
-  const [baseCmd, ...args] = argv
+  const [rawBaseCmd, ...args] = argv
+  const baseCmd = rawBaseCmd ? normalizePathCommandName(rawBaseCmd) : undefined
   if (!baseCmd || !SUPPORTED_PATH_COMMANDS.includes(baseCmd as PathCommand)) {
     return {
       behavior: 'passthrough',

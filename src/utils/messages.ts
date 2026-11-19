@@ -38,6 +38,10 @@ import {
 } from '../services/api/errors.js'
 import type { AnyObject, Progress } from '../Tool.js'
 import { isConnectorTextBlock } from '../types/connectorText.js'
+import {
+  formatServerUnavailableInputTooLongDetail,
+  SERVER_CALL_UNAVAILABLE_INPUT_TOO_LONG,
+} from './permissions/autoModeUnavailable.js'
 import type {
   AssistantMessage,
   AttachmentMessage,
@@ -500,8 +504,10 @@ export function formatClassifierWaitDetail(
   if (errorKind === 'server_call_unavailable_refused') {
     return ' (a safeguard refused to let the check read this conversation)'
   }
-  if (errorKind === 'server_call_unavailable_input_too_long') {
-    return ' (the conversation is too long for the check)'
+  const inputTooLongDetail =
+    formatServerUnavailableInputTooLongDetail(errorKind)
+  if (inputTooLongDetail !== undefined) {
+    return inputTooLongDetail
   }
   for (const prefix of ['server_unavailable_', 'server_call_unavailable_']) {
     if (errorKind?.startsWith(prefix)) {
@@ -570,6 +576,17 @@ export function buildClassifierUnavailableMessage(
       retryAfterMs,
       httpStatus,
       errorKind,
+    )
+  }
+  // Official 2.1.325 `vyt` (#1730): `server_call_unavailable_input_too_long`
+  // is a hard failure — retrying will get the same answer.
+  if (errorKind === SERVER_CALL_UNAVAILABLE_INPUT_TOO_LONG) {
+    const detail = formatServerUnavailableInputTooLongDetail(errorKind) ?? ''
+    return (
+      `${classifierModel} gave no verdict${detail}, so auto mode cannot determine the safety of ${toolName}. ` +
+      `This is a hard failure, not a transient one: the check cannot or does not judge this request, so retrying this action will get the same answer. ` +
+      `Don't retry it. Continue with other tasks that don't require it; if it is essential, stop and tell the user that auto mode could not evaluate it. ` +
+      CLASSIFIER_WAIT_NOTE
     )
   }
   const detail = formatClassifierUnavailableDetail(httpStatus, errorKind)

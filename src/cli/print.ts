@@ -2,8 +2,8 @@
 import { feature } from 'bun:bundle'
 import { pruneDetachedToolCalls } from '../utils/detachedToolCallStore.js'
 import stripAnsi from 'strip-ansi'
-import { readFile, stat } from 'fs/promises'
-import { dirname } from 'path'
+import { readdir, readFile, stat } from 'fs/promises'
+import { dirname, join } from 'path'
 import { homedir } from 'os'
 import {
   downloadUserSettings,
@@ -98,6 +98,7 @@ import {
   dequeue,
   dequeueAllMatching,
   enqueue,
+  enqueuePendingNotification,
   getCommandQueue,
   hasCommandsInQueue,
   peek,
@@ -219,6 +220,7 @@ import { EMPTY_USAGE } from '@ant/model-provider'
 import {
   loadConversationForResume,
   type OverdueSessionStartHooks,
+  rerunWouldLeavePlanMode,
   type TurnInterruptionState,
 } from 'src/utils/conversationRecovery.js'
 import type { HookDeferredToolAttachment } from 'src/utils/attachments.js'
@@ -241,7 +243,36 @@ import {
 } from 'src/services/mcp/channelAllowlist.js'
 import { parsePluginIdentifier } from 'src/utils/plugins/pluginIdentifier.js'
 import { fromArray } from 'src/utils/generators.js'
-import { ask } from 'src/QueryEngine.js'
+import {
+  ask,
+  formatNonInteractiveBgTimeoutGuidance,
+  formatNonInteractiveBgTimeoutToolDescription,
+  normalizeInformationalContent,
+  resolveNonInteractiveBgTimeoutMs,
+} from 'src/QueryEngine.js'
+import { personWrote } from 'src/utils/crossSessionInbound.js'
+import { getFullDiskSaveCode } from 'src/utils/config.js'
+import {
+  evaluateCcrKeepsSessionRules,
+  restoreCcrSessionRules,
+} from 'src/state/onChangeAppState.js'
+import { writeExitCause, writeExitDetail } from 'src/daemon/bgWorker.js'
+import { classifyProxyConnectError } from 'src/bridge/remoteControlEndpointReason.js'
+import { getTranscriptFullDiskState } from 'src/utils/sessionStorage.js'
+import {
+  readPersistedSep2663TaskMetas,
+  restoreSep2663Tasks,
+  type RestoredMcpTaskBinding,
+  type Sep2663TaskSidecarMeta,
+} from 'src/tasks/McpTask/McpTask.js'
+
+export {
+  classifyProxyConnectError,
+  formatNonInteractiveBgTimeoutGuidance,
+  formatNonInteractiveBgTimeoutToolDescription,
+  readPersistedSep2663TaskMetas,
+  resolveNonInteractiveBgTimeoutMs,
+}
 import { pollEventDeclaredFromCommands } from 'src/utils/processUserInput/artStamps.js'
 import type { PermissionPromptTool } from 'src/utils/queryHelpers.js'
 import {
@@ -427,6 +458,7 @@ import {
   restoreSessionMetadata,
   addTranscriptMirror,
   cacheSessionTitle,
+  getProjectDir,
   getTranscriptWriterDegraded,
 } from 'src/utils/sessionStorage.js'
 import { getReplBridgeHandle } from 'src/bridge/replBridgeHandle.js'
@@ -936,6 +968,441 @@ function isBlankTextResult(
     typeof msg.result === 'string' &&
     msg.result.trim() === ''
   )
+}
+
+// ---------------------------------------------------------------------------
+// Wave 319-321 print/headless production helpers:
+//   #1724 auto_mode no-check exit 1
+//   #1734 informational SDK content normalization
+//   #1735 & #1912 full-disk stderr warning + stream-json session_writes_lost
+//   #1774 cloud session hidden command filter
+//   #1918 sendsLeftToReRun subagent recovery tracker
+//   #1927 CLAUDE_JOB_DIR/exit-detail on fatal startup exit
+//   #1947 AskUserQuestion afkTimeoutMs host denial
+//   #1959 set_cwd remote_origin rejection
+// ---------------------------------------------------------------------------
+
+/** #1724: Classifier refusal codes that must cause exitCode = 1 in text and JSON. */
+export const AUTO_MODE_NO_CHECK_EXIT_CODES = new Set([
+  'auto_mode_no_check_in_session',
+  'auto_mode_stop_no_check_in_session',
+  'auto_mode_stop_no_result_for_calls',
+  'auto_mode_stop_no_verdict',
+])
+
+export function hasAutoModeNoCheckDenial(message: unknown): boolean {
+  if (!message || typeof message !== 'object') return false
+  const m = message as {
+    type?: unknown
+    permission_denials?: unknown
+    decision_reason_code?: unknown
+  }
+  if (
+    typeof m.decision_reason_code === 'string' &&
+    AUTO_MODE_NO_CHECK_EXIT_CODES.has(m.decision_reason_code)
+  ) {
+    return true
+  }
+  if (!Array.isArray(m.permission_denials)) return false
+  for (const denial of m.permission_denials) {
+    if (!denial || typeof denial !== 'object') continue
+    const d = denial as {
+      decision_reason_code?: unknown
+      decisionReason?: { hostCode?: unknown; reason?: unknown }
+      reason?: unknown
+    }
+    if (
+      typeof d.decision_reason_code === 'string' &&
+      (AUTO_MODE_NO_CHECK_EXIT_CODES.has(d.decision_reason_code) ||
+        d.decision_reason_code.startsWith('auto_mode_stop_'))
+    ) {
+      return true
+    }
+    if (
+      typeof d.decisionReason?.hostCode === 'string' &&
+      (AUTO_MODE_NO_CHECK_EXIT_CODES.has(d.decisionReason.hostCode) ||
+        d.decisionReason.hostCode.startsWith('auto_mode_stop_'))
+    ) {
+      return true
+    }
+    if (
+      typeof d.reason === 'string' &&
+      (AUTO_MODE_NO_CHECK_EXIT_CODES.has(d.reason) ||
+        d.reason.startsWith('auto_mode_stop_'))
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+/** #1734: Ensure SDK informational messages always preserve `content` text. */
+export function normalizeInformationalSdkMessage<
+  T extends Record<string, unknown>,
+>(message: T): T {
+  if (
+    message.type === 'system' &&
+    message.subtype === 'informational' &&
+    typeof message.content !== 'string'
+  ) {
+    return {
+      ...message,
+      content: normalizeInformationalContent(message.content),
+    }
+  }
+  return message
+}
+
+/** #1774: Filter hidden commands out of cloud session slash command menus. */
+export function filterCloudSlashCommands<
+  T extends { isHidden?: boolean; userInvocable?: boolean },
+>(commands: readonly T[]): T[] {
+  return commands.filter(cmd => cmd.userInvocable !== false && !cmd.isHidden)
+}
+
+/**
+ * #1735 & #1912 / official `NT(e)` — check transcript (including Linux NFS
+ * `0x6969` `sync()`) and global config full-disk errors on print exit.
+ * - Always writes the stderr error message (text, json, AND stream-json).
+ * - Sets exitCode = 1 for text and json.
+ * - Emits `session_writes_lost` ONLY when `outputFormat === 'stream-json'` and
+ *   `exitCode === 0` (never overwriting `lastErrorResultText`).
+ */
+export async function handlePrintFullDiskExit(opts: {
+  exitCode: number
+  outputFormat: string | undefined
+  sdkUrl?: string
+  writeStreamMessage?: (msg: Record<string, unknown>) => Promise<void> | void
+  writeStderr?: (text: string) => void
+  transcriptFullDiskCode?: 'ENOSPC' | 'EDQUOT' | undefined
+  transcriptFullDiskPaths?: ReadonlySet<string>
+  configFullDiskCode?: string | undefined
+  sessionId?: string
+}): Promise<{
+  exitCode: number
+  emittedSessionWritesLost: boolean
+  stderrWritten: boolean
+}> {
+  const originalExitCode = opts.exitCode
+  let nextExitCode = originalExitCode
+  if (opts.sdkUrl) {
+    return {
+      exitCode: nextExitCode,
+      emittedSessionWritesLost: false,
+      stderrWritten: false,
+    }
+  }
+  const fullDiskState = getTranscriptFullDiskState()
+  const degraded = getTranscriptWriterDegraded()
+  const degradedFullDisk: 'ENOSPC' | 'EDQUOT' | undefined =
+    degraded?.code === 'ENOSPC' || degraded?.code === 'EDQUOT'
+      ? degraded.code
+      : undefined
+  const transcriptCode =
+    opts.transcriptFullDiskCode ??
+    fullDiskState.fullDiskCode ??
+    degradedFullDisk
+  const configCode = opts.configFullDiskCode ?? getFullDiskSaveCode()
+  const effectiveCode = transcriptCode ?? configCode
+  if (effectiveCode === undefined) {
+    return {
+      exitCode: nextExitCode,
+      emittedSessionWritesLost: false,
+      stderrWritten: false,
+    }
+  }
+  const format =
+    opts.outputFormat === 'stream-json' || opts.outputFormat === 'json'
+      ? opts.outputFormat
+      : 'text'
+  if (format !== 'stream-json') {
+    nextExitCode = 1
+  }
+  const sessionId = opts.sessionId ?? getSessionId()
+  const paths = opts.transcriptFullDiskPaths ?? fullDiskState.fullDiskPaths
+  const affectedSessionIds = new Set<string>()
+  for (const p of paths) {
+    const base = p
+      .split(/[\\/]/)
+      .at(-1)
+      ?.replace(/\.jsonl$/, '')
+    if (base) affectedSessionIds.add(base)
+  }
+  if (transcriptCode !== undefined && affectedSessionIds.size === 0) {
+    affectedSessionIds.add(sessionId)
+  }
+  const what =
+    transcriptCode !== undefined && configCode !== undefined
+      ? "all of this session's transcript and changes this run made to Claude config"
+      : transcriptCode !== undefined
+        ? "all of this session's transcript"
+        : 'changes this run made to Claude config'
+  const reason =
+    effectiveCode === 'EDQUOT'
+      ? 'your disk quota is used up (EDQUOT)'
+      : `the disk is full (${effectiveCode})`
+  const parts = [`Error: Claude Code could not save ${what} because ${reason}.`]
+  if (transcriptCode !== undefined) {
+    parts.push(
+      'If you resume this session, part of the conversation may be missing.',
+    )
+  }
+  parts.push(
+    effectiveCode === 'EDQUOT'
+      ? 'Free up space, or ask for a larger quota, before the next run.'
+      : 'Free up space on that disk before the next run.',
+  )
+  const writeStderr = opts.writeStderr ?? (t => process.stderr.write(t))
+  writeStderr(`${parts.join(' ')}\n`)
+
+  let emittedSessionWritesLost = false
+  if (format === 'stream-json' && originalExitCode === 0) {
+    const lost: string[] = []
+    if (transcriptCode !== undefined) lost.push('transcript')
+    if (configCode !== undefined) lost.push('global_config')
+    await opts.writeStreamMessage?.({
+      type: 'system',
+      subtype: 'session_writes_lost',
+      error_code: effectiveCode === 'EDQUOT' ? 'EDQUOT' : 'ENOSPC',
+      lost,
+      ...(affectedSessionIds.size > 0
+        ? { transcript_session_ids: Array.from(affectedSessionIds) }
+        : {}),
+      uuid: randomUUID(),
+      session_id: sessionId,
+    })
+    emittedSessionWritesLost = true
+  }
+  return {
+    exitCode: nextExitCode,
+    emittedSessionWritesLost,
+    stderrWritten: true,
+  }
+}
+
+/**
+ * #1918 / official `sendsLeftToReRun` — tracks subagent/peer messages that an
+ * interrupted-turn re-run is responsible for answering so a restarted cloud
+ * session preserves and answers them instead of dropping or withdrawing them.
+ */
+export class PendingReRunSendsTracker {
+  private sendsLeftToReRun = new Set<string>()
+  private sendsTheRescueWouldAnswer = new Set<string>()
+  private reRunToEnd:
+    | {
+        uuid: string
+        started: boolean
+        listedByAStop: boolean
+        namedBy: (aim: string) => boolean
+      }
+    | undefined
+
+  noteRescueWillAnswer(sendIds: Iterable<string>): void {
+    for (const id of sendIds) {
+      if (id) this.sendsTheRescueWouldAnswer.add(id)
+    }
+  }
+
+  leaveItsSendsTo(cmd: {
+    uuid?: string
+    isMeta?: boolean
+    resumedTurnUserMessageUuid?: string
+    sendsOfItsCompactedTurn?: string[]
+    alsoLeftToThisReRun?: string[]
+  }): string[] {
+    if (cmd.uuid === undefined) return []
+    if (
+      cmd.isMeta === true &&
+      cmd.resumedTurnUserMessageUuid === undefined &&
+      cmd.sendsOfItsCompactedTurn === undefined
+    ) {
+      return []
+    }
+    this.sendsLeftToReRun = new Set(this.sendsTheRescueWouldAnswer)
+    const left = [...this.sendsLeftToReRun]
+    if (left.length > 0) {
+      cmd.alsoLeftToThisReRun = left
+    }
+    this.reRunToEnd = {
+      uuid: cmd.uuid,
+      started: false,
+      listedByAStop: false,
+      namedBy: aim => aim === cmd.uuid,
+    }
+    return left
+  }
+
+  markReRunStarted(uuid: string): void {
+    if (this.reRunToEnd?.uuid === uuid) {
+      this.reRunToEnd = { ...this.reRunToEnd, started: true }
+    }
+  }
+
+  reRunAnswers(sendId: string): boolean {
+    return this.sendsLeftToReRun.has(sendId)
+  }
+
+  reRunHasStillToEnd(
+    isUuidQueuedOrPending: (uuid: string) => boolean = () => false,
+  ): boolean {
+    const r = this.reRunToEnd
+    return r !== undefined && (r.started || isUuidQueuedOrPending(r.uuid))
+  }
+
+  waitsForItsReRun(
+    sendId: string,
+    isUuidQueuedOrPending?: (uuid: string) => boolean,
+  ): boolean {
+    return (
+      this.sendsLeftToReRun.has(sendId) &&
+      this.reRunHasStillToEnd(isUuidQueuedOrPending)
+    )
+  }
+
+  declinesWithdrawalOf(
+    uuid: string,
+    isUuidQueuedOrPending?: (uuid: string) => boolean,
+  ): boolean {
+    const r = this.reRunToEnd
+    return (
+      r?.uuid === uuid &&
+      !r.listedByAStop &&
+      this.sendsLeftToReRun.size > 0 &&
+      this.reRunHasStillToEnd(isUuidQueuedOrPending)
+    )
+  }
+
+  noteAStopsReceipt(
+    receipt: { still_queued?: string[]; cancelled?: string[] },
+    opts?: { aim?: string; lateBind?: boolean },
+  ): string[] {
+    const r = this.reRunToEnd
+    if (
+      r !== undefined &&
+      !opts?.lateBind &&
+      receipt.still_queued?.includes(r.uuid) &&
+      (opts?.aim === undefined || r.namedBy(opts.aim))
+    ) {
+      this.reRunToEnd = { ...r, listedByAStop: true }
+    }
+    return this.takeWhatWasLeftToTheReRun(receipt.cancelled ?? [])
+  }
+
+  takeWhatWasLeftToTheReRun(cancelledUuids: readonly string[]): string[] {
+    const r = this.reRunToEnd
+    if (r === undefined || !cancelledUuids.includes(r.uuid)) return []
+    const left = [...this.sendsLeftToReRun]
+    this.reRunToEnd = undefined
+    this.sendsLeftToReRun = new Set()
+    return left
+  }
+
+  clearAfterReRunEnded(uuid: string): void {
+    if (this.reRunToEnd?.uuid === uuid) {
+      this.reRunToEnd = undefined
+      this.sendsLeftToReRun = new Set()
+    }
+  }
+}
+
+/**
+ * #1947 / official `F_r` + `Q0n` + `KQt` — deny a host permission answer on
+ * `AskUserQuestion` in `claude -p` / SDK sessions that attempts to set the
+ * undocumented `afkTimeoutMs` input field.
+ */
+export const ASK_USER_QUESTION_AFK_TIMEOUT_DENY_MESSAGE =
+  'Claude Code did not accept a report that nobody answered'
+
+export function validateAskUserQuestionPermissionAnswer<
+  T extends {
+    behavior: string
+    updatedInput?: Record<string, unknown>
+    message?: string
+    decisionReason?: unknown
+  },
+>(
+  tool: { name: string; isMcp?: boolean },
+  result: T,
+  toolUseId?: string,
+):
+  | T
+  | import('src/utils/permissions/PermissionResult.js').PermissionDenyDecision {
+  if (
+    result.behavior === 'allow' &&
+    tool.name === 'AskUserQuestion' &&
+    tool.isMcp !== true &&
+    result.updatedInput !== undefined &&
+    result.updatedInput !== null &&
+    typeof result.updatedInput === 'object' &&
+    'afkTimeoutMs' in result.updatedInput &&
+    (result.updatedInput as { afkTimeoutMs?: unknown }).afkTimeoutMs !==
+      undefined
+  ) {
+    logForDiagnosticsNoPII('warn', 'ask_user_question_no_answer_offer', {
+      reason: 'not_offered',
+    })
+    return {
+      behavior: 'deny',
+      message: ASK_USER_QUESTION_AFK_TIMEOUT_DENY_MESSAGE,
+      ...(toolUseId !== undefined ? { toolUseID: toolUseId } : {}),
+      decisionReason: {
+        type: 'other',
+        reason: ASK_USER_QUESTION_AFK_TIMEOUT_DENY_MESSAGE,
+      },
+    }
+  }
+  return result
+}
+
+export function guardAskUserQuestionAfkTimeout(
+  baseCanUseTool: CanUseToolFn,
+): CanUseToolFn {
+  return async (
+    tool,
+    input,
+    toolUseContext,
+    assistantMessage,
+    toolUseId,
+    forceDecision,
+  ) => {
+    const res = await baseCanUseTool(
+      tool,
+      input,
+      toolUseContext,
+      assistantMessage,
+      toolUseId,
+      forceDecision,
+    )
+    return validateAskUserQuestionPermissionAnswer(
+      tool,
+      res as Parameters<typeof validateAskUserQuestionPermissionAnswer>[1],
+      toolUseId,
+    ) as typeof res
+  }
+}
+
+/** #1959: True when this headless process serves a Remote Control client. */
+export function isRemoteControlOriginForSetCwd(
+  opts: { sdkUrl?: string; hasBridgeHandle?: boolean },
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return Boolean(
+    opts.hasBridgeHandle ||
+      env.CLAUDE_CODE_BRIDGE_SESSION_ID ||
+      env.CLAUDE_CODE_REMOTE_CONTROL ||
+      (opts.sdkUrl &&
+        env.CLAUDE_CODE_REMOTE_SESSION_ORIGIN === 'remote_control'),
+  )
+}
+
+/** #1927: Record fatal startup/worktree error in CLAUDE_JOB_DIR/exit-detail. */
+export function reportPrintStartupFatalToJobDir(
+  cause: string,
+  detail: string,
+  jobDir?: string,
+): void {
+  writeExitCause(cause, jobDir)
+  writeExitDetail(cause, detail, jobDir)
 }
 
 /**
@@ -2038,6 +2505,25 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
     m.setSandboxNetworkHeadlessTools(filteredTools)
   })
 
+  // Official 2.1.325 #1717: on headless `--resume` / `--continue`, read
+  // persisted SEP-2663 MCP task sidecar metadata and re-attach pollers via
+  // `restoreSep2663Tasks(...)`.
+  if (
+    hasResumeOrContinue &&
+    !options.forkSession &&
+    !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_MCP_TASKS)
+  ) {
+    void restoreHeadlessSep2663Tasks({
+      sessionId: getSessionId(),
+      setAppState,
+      getMcpClients: () => getAppState().mcp.clients,
+    }).catch(err => {
+      logForDebugging(
+        `[print.ts] restoreHeadlessSep2663Tasks failed: ${errorMessage(err)}`,
+      )
+    })
+  }
+
   // Install errors handlers to gracefully handle broken pipes (e.g., when parent process dies)
   registerProcessOutputErrorHandlers()
 
@@ -2048,6 +2534,33 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
   const restoredWorker = await structuredIO.restoredWorkerState
   restoreMemoryToggleFromWorkerState(restoredWorker)
   restoreCostStateFromWorker(restoredWorker)
+
+  // #1771 & #1816 (`ccr_kept_session_rules`): Restore session-scoped deny/ask
+  // (and allow only when deny & ask are whole) from worker internal metadata
+  // and latch keepsSessionRules before future AppState updates persist rules.
+  if (restoredWorker?.internal) {
+    const applyRules = restoreCcrSessionRules(
+      restoredWorker.internal as Partial<
+        import('src/state/onChangeAppState.js').CcrSessionRulesRecord
+      >,
+    )
+    setAppState(prev => {
+      const nextCtx = applyRules(prev.toolPermissionContext)
+      return nextCtx === prev.toolPermissionContext
+        ? prev
+        : { ...prev, toolPermissionContext: nextCtx }
+    })
+  }
+  evaluateCcrKeepsSessionRules(
+    restoredWorker
+      ? {
+          internal: restoredWorker.internal as Partial<
+            import('src/state/onChangeAppState.js').CcrSessionRulesRecord
+          >,
+        }
+      : null,
+    getAppState().toolPermissionContext,
+  )
 
   // Official XWy — enable worker_permission_mode record; skip when this is a
   // restarted worker with no restored CCR metadata.
@@ -2310,27 +2823,20 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
     }
   }
 
-  let exitCode = lastMessage?.type === 'result' && lastMessage?.is_error ? 1 : 0
-  if (options.outputFormat !== 'stream-json') {
-    const degraded = getTranscriptWriterDegraded()
-    if (
-      degraded &&
-      (degraded.code === 'ENOSPC' || degraded.code === 'EDQUOT')
-    ) {
-      exitCode = 1
-      const reason =
-        degraded.code === 'EDQUOT'
-          ? 'your disk quota is used up (EDQUOT)'
-          : `the disk is full (${degraded.code})`
-      const hint =
-        degraded.code === 'EDQUOT'
-          ? 'Free up space, or ask for a larger quota, before the next run.'
-          : 'Free up space on that disk before the next run.'
-      process.stderr.write(
-        `Error: Claude Code could not save this session's transcript because ${reason}. If you resume this session, part of the conversation may be missing. ${hint}\n`,
-      )
-    }
-  }
+  let exitCode =
+    lastMessage?.type === 'result' &&
+    (lastMessage?.is_error || hasAutoModeNoCheckDenial(lastMessage))
+      ? 1
+      : 0
+  const fullDiskResult = await handlePrintFullDiskExit({
+    exitCode,
+    outputFormat: options.outputFormat,
+    sdkUrl: options.sdkUrl,
+    writeStreamMessage: async msg => {
+      await structuredIO.write(msg as unknown as StdoutMessage)
+    },
+  })
+  exitCode = fullDiskResult.exitCode
 
   gracefulShutdownSync(exitCode)
 }
@@ -2417,6 +2923,11 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
   // Official QueryEngine latches F once. Local print builds a new ask()
   // engine per queued command — consume Q on the first ask only.
   let pendingDeferredToolUse = options.deferredToolUse
+  // #1733: Once a resumed deferred tool's MCP server is missing and the call is
+  // preserved, refuse later user inputs in this run.
+  let deferredCallRefusesTurns = false
+  // #1918: Preserve subagent messages left to an interrupted-turn re-run.
+  const pendingReRunSends = new PendingReRunSendsTracker()
   const takePendingDeferredToolUse = ():
     | HookDeferredToolAttachment
     | undefined => {
@@ -2788,10 +3299,11 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
         seeded_summon?: boolean
         queueSkipSlashCommands?: boolean
       }
-    enqueue({
-      mode: 'prompt',
+    const reRunUuid = randomUUID()
+    const reRunCmd = {
+      mode: 'prompt' as const,
       value: interruptedMsg.message!.content as string | ContentBlockParam[],
-      uuid: randomUUID(),
+      uuid: reRunUuid,
       ...(interruptedMsg.client_composed === true ||
       interruptedMsg.queueSkipSlashCommands === true
         ? { skipSlashCommands: true }
@@ -2800,7 +3312,13 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
       interruptedMsg.seeded_summon === true
         ? { skipAttachments: true }
         : {}),
+    }
+    pendingReRunSends.leaveItsSendsTo({
+      uuid: reRunUuid,
+      isMeta: interruptedMsg.isMeta === true,
+      resumedTurnUserMessageUuid: interruptedMsg.uuid,
     })
+    enqueue(reRunCmd)
   }
 
   // Official Evf + Svf parked-permission resume densable — when
@@ -4902,6 +5420,9 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                     agents: currentAgents,
                     orphanedPermission: cmd.orphanedPermission,
                     deferredToolUse: takePendingDeferredToolUse(),
+                    keptDeferredToolNotice:
+                      'A deferred tool call could not run because its MCP server is unavailable; the call was kept in the conversation.',
+                    dropsUnavailableDeferredTool: false,
                     setSDKStatus: status => {
                       output.enqueue({
                         type: 'system',
@@ -4919,6 +5440,16 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
 
                     if (message.type === 'result') {
                       const resultMsg = message as Record<string, unknown>
+                      if (
+                        resultMsg.stop_reason === 'tool_deferred_unavailable' ||
+                        resultMsg.terminal_reason ===
+                          'tool_deferred_unavailable'
+                      ) {
+                        deferredCallRefusesTurns = true
+                      }
+                      if (cmd.uuid) {
+                        pendingReRunSends.clearAfterReRunEnded(cmd.uuid)
+                      }
                       lastResultIsError = !!resultMsg.is_error
                       lastResultNumTurns =
                         typeof resultMsg.num_turns === 'number'
@@ -4944,7 +5475,11 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                         heldBackResult = message as StdoutMessage
                       } else {
                         heldBackResult = null
-                        output.enqueue(message as StdoutMessage)
+                        output.enqueue(
+                          normalizeInformationalSdkMessage(
+                            message as unknown as Record<string, unknown>,
+                          ) as unknown as StdoutMessage,
+                        )
                       }
                     } else {
                       // Flush SDK events (task_started, task_progress) so background
@@ -4961,7 +5496,11 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                           message?: { content?: unknown }
                         },
                       )
-                      output.enqueue(message as StdoutMessage)
+                      output.enqueue(
+                        normalizeInformationalSdkMessage(
+                          message as unknown as Record<string, unknown>,
+                        ) as unknown as StdoutMessage,
+                      )
                     }
                   }
                 }), // end runWithWorkload
@@ -6431,16 +6970,29 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               void run()
             }
           } else if (msg.request.subtype === 'set_permission_mode') {
+            // #1726: Serialize set_permission_mode behind pendingSetModelPromise
+            // so a back-to-back set_model + set_permission_mode('auto') sees the
+            // newly selected model instead of refusing auto mode on the old one.
             const m = msg.request // for typescript (TODO: use readonly types to avoid this)
-            setAppState(prev => ({
-              ...prev,
-              toolPermissionContext: handleSetPermissionMode(
-                m,
-                msg.request_id,
-                prev.toolPermissionContext,
-                output,
-              ),
-            }))
+            const reqId = msg.request_id
+            deferControlLifecycleUntilDone(() => {
+              const runSetPermissionMode = () => {
+                setAppState(prev => ({
+                  ...prev,
+                  toolPermissionContext: handleSetPermissionMode(
+                    m,
+                    reqId,
+                    prev.toolPermissionContext,
+                    output,
+                  ),
+                }))
+              }
+              pendingSetModelPromise = pendingSetModelPromise.then(
+                runSetPermissionMode,
+                runSetPermissionMode,
+              )
+              return pendingSetModelPromise
+            })
             // handleSetPermissionMode sends the control_response; the
             // notifySessionMetadataChanged that used to follow here is
             // now fired by onChangeAppState (with externalized mode name).
@@ -6888,6 +7440,22 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               }
             }
           } else if (msg.request.subtype === 'set_cwd') {
+            // #1959: Remote Control sessions stay in the folder they were started in.
+            if (
+              isRemoteControlOriginForSetCwd({
+                sdkUrl: options.sdkUrl,
+                hasBridgeHandle: Boolean(bridgeHandle),
+              })
+            ) {
+              logEvent('tengu_set_cwd_remote_refused', {})
+              sendControlResponseSuccess(msg, {
+                status: 'rejected',
+                reason: 'remote_origin',
+                message:
+                  'This Remote Control session stays in the folder it was started in. To work in another folder, start a new session there.',
+              })
+              continue
+            }
             // densable 2.1.218 fCb — headless /cd twin for SDK hosts.
             // Busy = running && runPhase !== waiting_for_agents || mainThreadQueue > 0
             // (densable oSm). Trust delegated via needs_trust; move notice enqueued meta.
@@ -7177,13 +7745,13 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               }
 
               sendControlResponseSuccess(msg, {
-                commands: currentCommands
-                  .filter(cmd => cmd.userInvocable !== false)
-                  .map(cmd => ({
+                commands: filterCloudSlashCommands(currentCommands).map(
+                  cmd => ({
                     name: getCommandName(cmd),
                     description: formatDescriptionWithSource(cmd),
                     argumentHint: cmd.argumentHint || '',
-                  })),
+                  }),
+                ),
                 agents: currentAgents.map(a => ({
                   name: a.agentType,
                   description: a.whenToUse,
@@ -7211,13 +7779,13 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                 ...reloaded,
               ]
               sendControlResponseSuccess(msg, {
-                commands: currentCommands
-                  .filter(cmd => cmd.userInvocable !== false)
-                  .map(cmd => ({
+                commands: filterCloudSlashCommands(currentCommands).map(
+                  cmd => ({
                     name: getCommandName(cmd),
                     description: formatDescriptionWithSource(cmd),
                     argumentHint: cmd.argumentHint || '',
-                  })),
+                  }),
+                ),
               })
             } catch (err) {
               sendControlResponseError(msg, errorMessage(err))
@@ -9278,6 +9846,22 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
         trackReceivedMessageUuid(userMsg.uuid as UUID)
       }
 
+      // #1733: Refuse later user input once an unavailable deferred tool call
+      // has been preserved so the transcript cannot diverge past the unresolved call.
+      if (deferredCallRefusesTurns) {
+        logForDebugging(
+          '[print.ts] Refusing later user input because an unavailable deferred tool call is preserved',
+        )
+        if (userMsg.uuid) {
+          notifyCommandLifecycle(userMsg.uuid as string, 'completed')
+        }
+        continue
+      }
+
+      // #1882: Human user wrote a message (even while Claude is still working) —
+      // reset cross-session rate-limit / loop-pause counters immediately.
+      personWrote()
+
       enqueue({
         mode: 'prompt' as const,
         // file_attachments rides the protobuf catchall from the web composer.
@@ -9531,7 +10115,9 @@ export function getCanUseToolFn(
   onPermissionPrompt?: (details: RequiresActionDetails) => void,
 ): CanUseToolFn {
   if (permissionPromptToolName === 'stdio') {
-    return structuredIO.createCanUseTool(onPermissionPrompt)
+    return guardAskUserQuestionAfkTimeout(
+      structuredIO.createCanUseTool(onPermissionPrompt),
+    )
   }
   if (!permissionPromptToolName) {
     return async (
@@ -9580,7 +10166,9 @@ export function getCanUseToolFn(
         gracefulShutdownSync(1)
         throw new Error(error)
       }
-      resolved = createCanUseToolWithPermissionPrompt(permissionPromptTool)
+      resolved = guardAskUserQuestionAfkTimeout(
+        createCanUseToolWithPermissionPrompt(permissionPromptTool),
+      )
     }
     return resolved(
       tool,
@@ -9601,6 +10189,9 @@ function emitLoadError(
   message: string,
   outputFormat: string | undefined,
 ): void {
+  // #1927: Record fatal startup/resume error in CLAUDE_JOB_DIR/exit-detail so
+  // `claude --bg` agent view shows the error from its beginning.
+  reportPrintStartupFatalToJobDir('startup_error', message)
   if (outputFormat === 'stream-json') {
     const errorResult = {
       type: 'result',
@@ -9719,6 +10310,22 @@ async function loadInitialMessages<TState extends HeadlessAppState = AppState>(
         {
           forkSession: !!options.forkSession,
           supportOverdueSessionStartHooks: true,
+          ...(!options.sdkUrl
+            ? {
+                rerunWouldLeaveMode: msgs => {
+                  let wouldLeave = false
+                  setAppState(prev => {
+                    wouldLeave = rerunWouldLeavePlanMode(
+                      msgs,
+                      prev.toolPermissionContext.mode,
+                      false,
+                    )
+                    return prev
+                  })
+                  return wouldLeave
+                },
+              }
+            : {}),
         },
       )
       if (result) {
@@ -10000,6 +10607,22 @@ async function loadInitialMessages<TState extends HeadlessAppState = AppState>(
         {
           forkSession: !!options.forkSession,
           supportOverdueSessionStartHooks: true,
+          ...(!options.sdkUrl
+            ? {
+                rerunWouldLeaveMode: msgs => {
+                  let wouldLeave = false
+                  setAppState(prev => {
+                    wouldLeave = rerunWouldLeavePlanMode(
+                      msgs,
+                      prev.toolPermissionContext.mode,
+                      false,
+                    )
+                    return prev
+                  })
+                  return wouldLeave
+                },
+              }
+            : {}),
         },
       )
 
@@ -10204,6 +10827,170 @@ async function loadInitialMessages<TState extends HeadlessAppState = AppState>(
   return {
     messages: await (options.sessionStartHooksPromise ??
       processSessionStartHooks('startup')),
+  }
+}
+
+function createHeadlessSep2663Binding(
+  meta: Sep2663TaskSidecarMeta,
+  getMcpClients: () => readonly MCPServerConnection[],
+): RestoredMcpTaskBinding | undefined {
+  const server = getMcpClients().find(
+    c => c.type === 'connected' && c.name === meta.serverName,
+  )
+  if (!server || server.type !== 'connected') {
+    return undefined
+  }
+  const rawClient = server.client as unknown as {
+    request: (
+      req: { method: string; params?: Record<string, unknown> },
+      opts?: { signal?: AbortSignal },
+    ) => Promise<Record<string, unknown>>
+  }
+  const intervalMs = Math.max(50, meta.pollIntervalMs ?? 2000)
+  return {
+    async pollToCompletion(signal: AbortSignal) {
+      while (!signal.aborted) {
+        if (
+          meta.ttlExpiresAt !== undefined &&
+          Date.now() >= meta.ttlExpiresAt
+        ) {
+          return {
+            status: 'failed' as const,
+            statusMessage: `MCP task ${meta.mcpTaskId} expired before completion`,
+          }
+        }
+        const statusRes = await rawClient.request(
+          {
+            method: 'tasks/get',
+            params: { taskId: meta.mcpTaskId },
+          },
+          { signal },
+        )
+        const st = String(statusRes?.status ?? '')
+        if (st === 'completed') {
+          const resultRes = await rawClient.request(
+            {
+              method: 'tasks/result',
+              params: { taskId: meta.mcpTaskId },
+            },
+            { signal },
+          )
+          const content = Array.isArray(resultRes?.content)
+            ? (resultRes.content as Array<{ type?: string; text?: string }>)
+            : []
+          const textParts = content
+            .filter(
+              (b): b is { type: 'text'; text: string } =>
+                b?.type === 'text' && typeof b.text === 'string',
+            )
+            .map(b => b.text)
+          return {
+            status: 'completed' as const,
+            resultText: textParts.length > 0 ? textParts.join('\n') : undefined,
+            statusMessage:
+              typeof statusRes?.statusMessage === 'string'
+                ? statusRes.statusMessage
+                : undefined,
+          }
+        }
+        if (st === 'failed' || st === 'cancelled') {
+          return {
+            status: 'failed' as const,
+            statusMessage:
+              typeof statusRes?.statusMessage === 'string'
+                ? statusRes.statusMessage
+                : `MCP task ${meta.mcpTaskId} ${st}`,
+          }
+        }
+        await new Promise<void>(resolve => {
+          if (signal.aborted) {
+            resolve()
+            return
+          }
+          const onAbort = () => {
+            clearTimeout(timer)
+            resolve()
+          }
+          const timer = setTimeout(() => {
+            signal.removeEventListener('abort', onAbort)
+            resolve()
+          }, intervalMs)
+          timer.unref?.()
+          signal.addEventListener('abort', onAbort, { once: true })
+        })
+      }
+      return {
+        status: 'failed' as const,
+        statusMessage: 'MCP task polling aborted',
+      }
+    },
+  }
+}
+
+/**
+ * Official 2.1.325 #1717: headless `--resume` / `--continue` restoration for
+ * persisted SEP-2663 MCP task sidecars.
+ */
+export async function restoreHeadlessSep2663Tasks(params: {
+  sessionId: string
+  projectDir?: string
+  setAppState: (f: (prevState: AppState) => AppState) => void
+  getMcpClients: () => readonly MCPServerConnection[]
+  bindingFactory?: (
+    meta: Sep2663TaskSidecarMeta,
+  ) =>
+    | RestoredMcpTaskBinding
+    | Promise<RestoredMcpTaskBinding | undefined>
+    | undefined
+  onNotify?: (notification: {
+    taskId: string
+    serverName: string
+    toolName: string
+    status: 'completed' | 'failed'
+    resultText?: string
+    statusMessage?: string
+  }) => void
+}): Promise<{ restoredTaskIds: string[]; skippedTaskIds: string[] }> {
+  const metas = await readPersistedSep2663TaskMetas(
+    params.sessionId,
+    params.projectDir,
+  )
+  if (metas.length === 0) {
+    return { restoredTaskIds: [], skippedTaskIds: [] }
+  }
+  const sep2663Metas = metas.filter(m => m.protocol === 'sep2663')
+  const skippedLegacy = metas
+    .filter(m => m.protocol !== 'sep2663')
+    .map(m => m.taskId)
+  if (sep2663Metas.length === 0) {
+    return { restoredTaskIds: [], skippedTaskIds: skippedLegacy }
+  }
+  const res = await restoreSep2663Tasks({
+    metas: sep2663Metas,
+    setAppState: params.setAppState,
+    sidecarSessionId: params.sessionId,
+    sidecarProjectDir: params.projectDir,
+    bindingFactory:
+      params.bindingFactory ??
+      (meta => createHeadlessSep2663Binding(meta, params.getMcpClients)),
+    onNotify:
+      params.onNotify ??
+      (n => {
+        const summary =
+          n.status === 'completed'
+            ? `MCP task ${n.serverName}/${n.toolName} completed`
+            : `MCP task ${n.serverName}/${n.toolName} failed`
+        const body = n.resultText ?? n.statusMessage ?? ''
+        const xml = `<task-notification>\n<task-id>${n.taskId}</task-id>\n<status>${n.status}</status>\n<summary>${summary}</summary>${body ? `\n<result>${body}</result>` : ''}\n</task-notification>`
+        enqueuePendingNotification({
+          value: xml,
+          mode: 'task-notification',
+        })
+      }),
+  })
+  return {
+    restoredTaskIds: res.restoredTaskIds,
+    skippedTaskIds: [...skippedLegacy, ...res.skippedTaskIds],
   }
 }
 

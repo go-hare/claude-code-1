@@ -194,8 +194,9 @@ async function fetchDiffAgainstRef(
       '-c',
       'diff.relative=false',
       'diff',
-      ref,
       '--shortstat',
+      ref,
+      '--',
     ],
     gitOpts(abort),
   )
@@ -215,8 +216,9 @@ async function fetchDiffAgainstRef(
       'diff.relative=false',
       'diff',
       ...RAW_GIT_DIFF_FLAGS,
-      ref,
       '--numstat',
+      ref,
+      '--',
     ],
     gitOpts(abort),
   )
@@ -515,8 +517,9 @@ export async function fetchGitDiffHunks(
       '-c',
       'diff.relative=false',
       'diff',
-      ref,
       '--shortstat',
+      ref,
+      '--',
     ],
     gitOpts(abort),
   )
@@ -536,6 +539,7 @@ export async function fetchGitDiffHunks(
       'diff',
       ...RAW_GIT_DIFF_FLAGS,
       ref,
+      '--',
     ],
     gitOpts(abort),
   )

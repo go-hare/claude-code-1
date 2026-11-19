@@ -55,13 +55,13 @@ describe('getDefaultFableModel', () => {
     resetProviderState()
   })
 
-  test('returns claude-fable-5-1 on firstParty (densable 2.1.283)', () => {
-    expect(getDefaultFableModel()).toBe(ALL_MODEL_CONFIGS.fable51.firstParty)
+  test('returns claude-fable-5-2 on firstParty (densable 2.1.321 #1845)', () => {
+    expect(getDefaultFableModel()).toBe(ALL_MODEL_CONFIGS.fable52.firstParty)
   })
 
-  test('returns bedrock fable51 id on 3P (Fu e.fable51)', () => {
+  test('returns bedrock fable52 id on 3P (Fu e.fable52)', () => {
     process.env.CLAUDE_CODE_USE_BEDROCK = '1'
-    expect(getDefaultFableModel()).toBe(ALL_MODEL_CONFIGS.fable51.bedrock)
+    expect(getDefaultFableModel()).toBe(ALL_MODEL_CONFIGS.fable52.bedrock)
   })
 
   test('honors ANTHROPIC_DEFAULT_FABLE_MODEL', () => {
@@ -102,17 +102,17 @@ describe('parseUserSpecifiedModel fable', () => {
   })
 
   test('fable resolves to default fable model', () => {
-    expect(parseUserSpecifiedModel('fable')).toBe('claude-fable-5-1')
+    expect(parseUserSpecifiedModel('fable')).toBe('claude-fable-5-2')
   })
 
   test('fable[1m] does not append [1m] on firstParty official API', () => {
-    expect(parseUserSpecifiedModel('fable[1m]')).toBe('claude-fable-5-1')
+    expect(parseUserSpecifiedModel('fable[1m]')).toBe('claude-fable-5-2')
   })
 
   test('fable[1m] appends [1m] on 3P', () => {
     process.env.CLAUDE_CODE_USE_BEDROCK = '1'
     expect(parseUserSpecifiedModel('fable[1m]')).toBe(
-      `${ALL_MODEL_CONFIGS.fable51.bedrock}[1m]`,
+      `${ALL_MODEL_CONFIGS.fable52.bedrock}[1m]`,
     )
   })
 })

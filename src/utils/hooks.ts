@@ -150,7 +150,11 @@ import type {
   AsyncHookJSONOutput,
 } from 'src/entrypoints/agentSdkTypes.js'
 import type { StatusLineCommandInput } from '../types/statusLine.js'
-import type { ElicitResult } from 'src/services/mcp/types.js'
+import type {
+  ElicitResult,
+  MCPServerConnection,
+} from 'src/services/mcp/types.js'
+import { getConnectorAliasesForMcpTool } from 'src/services/mcp/utils.js'
 import type { FileSuggestionCommandInput } from '../types/fileSuggestion.js'
 import type { HookResultMessage } from 'src/types/message.js'
 import chalk from 'chalk'
@@ -2451,10 +2455,16 @@ function getToolInputForHook(hookInput: HookInput): unknown {
 export function getHookFamilyNames(
   toolName: string,
   toolInput: unknown,
+  mcpClients?: readonly MCPServerConnection[],
 ): string[] {
   const standIn = getMonitorBashStandIn(toolName, toolInput)
   const legacy = getLegacyToolNames(toolName)
-  return standIn === undefined ? legacy : [...legacy, standIn]
+  // Official 325 #1779: expand Desktop / terminal claude.ai connector aliases
+  // for hook matchers (matched via throughFamilyOnly: deny/ask only, never allow).
+  const connectorAliases = getConnectorAliasesForMcpTool(toolName, mcpClients)
+  const out = [...legacy, ...connectorAliases]
+  if (standIn !== undefined) out.push(standIn)
+  return out
 }
 
 export function remapHookInputForMonitorAsBash(
@@ -2612,6 +2622,26 @@ type MatchedHook = {
   matcherMetThroughOtherName?: string
   /** Official #1386 — hook should receive the remapped family stand-in input. */
   throughFamilyOnly?: boolean
+  /** Official #1868 — SDK host callback metadata for ask-reason precedence. */
+  sdkHost?: boolean
+  hostOwnsStdin?: boolean
+  deviceForwarded?: boolean
+  sessionServer?: boolean
+}
+
+function isSdkHostOwnAskCallback(
+  hook: HookCommand | HookCallback | FunctionHook,
+  matched: MatchedHook | undefined,
+): boolean {
+  return (
+    hook.type === 'callback' &&
+    matched?.sdkHost === true &&
+    matched.hostOwnsStdin === true &&
+    matched.deviceForwarded !== true &&
+    matched.pluginId === undefined &&
+    matched.pluginRoot === undefined &&
+    matched.skillRoot === undefined
+  )
 }
 
 /**
@@ -2973,7 +3003,7 @@ export async function getMatchingHooks(
     const hookToolInput = getToolInputForHook(hookInput)
     const familyNames =
       matchQuery !== undefined
-        ? getHookFamilyNames(matchQuery, hookToolInput)
+        ? getHookFamilyNames(matchQuery, hookToolInput, appState?.mcp?.clients)
         : []
     const matchedHooks: MatchedHook[] = hookMatchers.flatMap(matcher => {
       const asOwnTool = ownToolMatchers.has(matcher)
@@ -3025,6 +3055,22 @@ export async function getMatchingHooks(
           matcherMetThroughOtherName: familyHit,
           throughFamilyOnly: true,
         }),
+        ...('sdkHost' in matcher &&
+        (matcher as { sdkHost?: boolean }).sdkHost === true
+          ? { sdkHost: true }
+          : {}),
+        ...('hostOwnsStdin' in matcher &&
+        (matcher as { hostOwnsStdin?: boolean }).hostOwnsStdin === true
+          ? { hostOwnsStdin: true }
+          : {}),
+        ...('deviceForwarded' in matcher &&
+        (matcher as { deviceForwarded?: boolean }).deviceForwarded === true
+          ? { deviceForwarded: true }
+          : {}),
+        ...('sessionServer' in matcher &&
+        (matcher as { sessionServer?: boolean }).sessionServer === true
+          ? { sessionServer: true }
+          : {}),
       }))
     })
 
@@ -4324,15 +4370,75 @@ async function* executeHooks({
     // can skip span/progress/abortSignal/processHookJSONOutput/resultLoop.
     // Measured: 6.01µs → ~1.8µs per PostToolUse hit (-70%).
     const batchStartTime = Date.now()
+    let blockingCount = 0
     const context = toolUseContext
       ? {
           getAppState: toolUseContext.getAppState,
           updateAttributionState: toolUseContext.updateAttributionState,
         }
       : undefined
-    for (const [i, { hook }] of matchingHooks.entries()) {
-      if (hook.type === 'callback') {
-        await hook.callback(hookInput, toolUseID, signal, i, context)
+    for (const [i, matchedEntry] of matchingHooks.entries()) {
+      const { hook } = matchedEntry
+      if (hook.type !== 'callback') continue
+      const cbOut = await hook.callback(
+        hookInput,
+        toolUseID,
+        signal,
+        i,
+        context,
+      )
+      if (
+        !cbOut ||
+        typeof cbOut !== 'object' ||
+        Object.keys(cbOut).length === 0 ||
+        isAsyncHookJSONOutput(cbOut)
+      ) {
+        continue
+      }
+      const parsed = processHookJSONOutput({
+        json: cbOut,
+        command: 'callback',
+        hookName: `${hookEvent}:Callback`,
+        toolUseID,
+        hookEvent,
+        expectedHookEvent: hookEvent,
+        stdout: undefined,
+        stderr: undefined,
+        exitCode: undefined,
+      })
+      if (parsed.permissionBehavior === 'deny') {
+        blockingCount++
+        yield {
+          permissionBehavior: 'deny',
+          hookPermissionDecisionReason: parsed.hookPermissionDecisionReason,
+          hookSource: matchedEntry.hookSource,
+        }
+      }
+      if (parsed.additionalContext) {
+        yield {
+          additionalContexts: [
+            await persistHookOutput(
+              parsed.additionalContext,
+              `${toolUseID}-${i}`,
+              'additionalContext',
+            ),
+          ],
+        }
+      }
+      if (parsed.systemMessage) {
+        yield {
+          message: createAttachmentMessage({
+            type: 'hook_system_message',
+            content: await persistHookOutput(
+              parsed.systemMessage,
+              `${toolUseID}-${i}`,
+              'systemMessage',
+            ),
+            hookName,
+            toolUseID,
+            hookEvent,
+          }),
+        }
       }
     }
     const totalDurationMs = Date.now() - batchStartTime
@@ -4342,8 +4448,8 @@ async function* executeHooks({
       hookName:
         hookName as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       numCommands: matchingHooks.length,
-      numSuccess: matchingHooks.length,
-      numBlocking: 0,
+      numSuccess: matchingHooks.length - blockingCount,
+      numBlocking: blockingCount,
       numNonBlockingError: 0,
       numCancelled: 0,
       totalDurationMs,
@@ -4351,9 +4457,15 @@ async function* executeHooks({
     return
   }
 
+  // Official #1945: in non-interactive sessions, exclude internal built-in
+  // callback hooks from OpenTelemetry `num_hooks` and `num_success`.
+  const excludeInternalFromOtel =
+    toolUseContext?.options?.isNonInteractiveSession === true
+  const otelTrackedHooks = excludeInternalFromOtel ? userHooks : matchingHooks
+
   // Collect hook definitions for beta tracing telemetry
   const hookDefinitionsJson = isBetaTracingEnabled()
-    ? jsonStringify(getHookDefinitionsForTelemetry(matchingHooks))
+    ? jsonStringify(getHookDefinitionsForTelemetry(otelTrackedHooks))
     : '[]'
 
   // Log hook execution start to OTEL (only for beta tracing)
@@ -4361,7 +4473,7 @@ async function* executeHooks({
     void logOTelEvent('hook_execution_start', {
       hook_event: hookEvent,
       hook_name: hookName,
-      num_hooks: String(matchingHooks.length),
+      num_hooks: String(otelTrackedHooks.length),
       managed_only: String(shouldAllowManagedHooksOnly()),
       hook_definitions: hookDefinitionsJson,
       hook_source: shouldAllowManagedHooksOnly() ? 'policySettings' : 'merged',
@@ -4372,7 +4484,7 @@ async function* executeHooks({
   const hookSpan = startHookSpan(
     hookEvent,
     hookName,
-    matchingHooks.length,
+    otelTrackedHooks.length,
     hookDefinitionsJson,
   )
 
@@ -5365,6 +5477,15 @@ async function* executeHooks({
     non_blocking_error: 0,
     cancelled: 0,
   }
+  const otelOutcomes = {
+    success: 0,
+    blocking: 0,
+    non_blocking_error: 0,
+    cancelled: 0,
+  }
+  const internalHookSet = new Set(
+    matchingHooks.filter(m => isInternalHook(m)).map(m => m.hook),
+  )
 
   let permissionBehavior: PermissionResult['behavior'] | 'defer' | undefined
   let resultIndex = 0
@@ -5425,6 +5546,9 @@ async function* executeHooks({
         progress?.settle(progressIndex)
       }
       outcomes[result.outcome]++
+      if (!excludeInternalFromOtel || !internalHookSet.has(result.hook)) {
+        otelOutcomes[result.outcome]++
+      }
 
       // Check for preventContinuation early
       if (result.preventContinuation) {
@@ -5675,10 +5799,17 @@ async function* executeHooks({
         }
       }
 
-      // Official: only yield when this hook currently holds Y.
+      // Official #1868 & #1869: yield when this hook holds Y, OR when Y is
+      // 'defer' and this hook returned 'ask' (so an unhonored defer never
+      // swallows an ask). Also attach hostsOwnAsk / serversOwnAsk metadata.
+      const isHostOwnAsk =
+        result.permissionBehavior === 'ask' &&
+        isSdkHostOwnAskCallback(result.hook, matchedEntry)
       if (
         result.permissionBehavior &&
-        permissionBehavior === result.permissionBehavior
+        (permissionBehavior === result.permissionBehavior ||
+          (permissionBehavior === 'defer' &&
+            result.permissionBehavior === 'ask'))
       ) {
         const updatedInput =
           result.updatedInput &&
@@ -5692,12 +5823,14 @@ async function* executeHooks({
           )
         }
         yield {
-          permissionBehavior,
+          permissionBehavior: result.permissionBehavior,
           hookPermissionDecisionReason: result.hookPermissionDecisionReason,
-          hookSource: matchingHooks.find(m => m.hook === result.hook)
-            ?.hookSource,
+          hookSource: matchedEntry?.hookSource,
           updatedInput,
-        }
+          ...(isHostOwnAsk && { hostsOwnAsk: true }),
+          ...(result.permissionBehavior === 'ask' &&
+            matchedEntry?.sessionServer && { serversOwnAsk: true }),
+        } as AggregatedHookResult
       }
 
       // Yield updatedInput separately for passthrough case (no permission decision)
@@ -5782,16 +5915,16 @@ async function* executeHooks({
   // Log hook execution completion to OTEL (only for beta tracing)
   if (isBetaTracingEnabled()) {
     const hookDefinitionsComplete =
-      getHookDefinitionsForTelemetry(matchingHooks)
+      getHookDefinitionsForTelemetry(otelTrackedHooks)
 
     void logOTelEvent('hook_execution_complete', {
       hook_event: hookEvent,
       hook_name: hookName,
-      num_hooks: String(matchingHooks.length),
-      num_success: String(outcomes.success),
-      num_blocking: String(outcomes.blocking),
-      num_non_blocking_error: String(outcomes.non_blocking_error),
-      num_cancelled: String(outcomes.cancelled),
+      num_hooks: String(otelTrackedHooks.length),
+      num_success: String(otelOutcomes.success),
+      num_blocking: String(otelOutcomes.blocking),
+      num_non_blocking_error: String(otelOutcomes.non_blocking_error),
+      num_cancelled: String(otelOutcomes.cancelled),
       managed_only: String(shouldAllowManagedHooksOnly()),
       hook_definitions: jsonStringify(hookDefinitionsComplete),
       hook_source: shouldAllowManagedHooksOnly() ? 'policySettings' : 'merged',
@@ -5800,10 +5933,10 @@ async function* executeHooks({
 
   // End hook span for beta tracing
   endHookSpan(hookSpan, {
-    numSuccess: outcomes.success,
-    numBlocking: outcomes.blocking,
-    numNonBlockingError: outcomes.non_blocking_error,
-    numCancelled: outcomes.cancelled,
+    numSuccess: otelOutcomes.success,
+    numBlocking: otelOutcomes.blocking,
+    numNonBlockingError: otelOutcomes.non_blocking_error,
+    numCancelled: otelOutcomes.cancelled,
   })
 }
 
@@ -6807,12 +6940,29 @@ export async function* executePreToolHooks<ToolInput>(
       toolInputSummary,
       managedHooksExcluded: true,
     })) {
-      if (rank(item.permissionBehavior) > rank(decision.permissionBehavior)) {
+      const itemMeta = item as AggregatedHookResult & {
+        hostsOwnAsk?: boolean
+        serversOwnAsk?: boolean
+      }
+      const decisionMeta = decision as AggregatedHookResult & {
+        hostsOwnAsk?: boolean
+        serversOwnAsk?: boolean
+      }
+      const itemRank = rank(item.permissionBehavior)
+      const decisionRank = rank(decision.permissionBehavior)
+      const askTieBreakWins =
+        item.permissionBehavior === 'ask' &&
+        decision.permissionBehavior === 'ask' &&
+        (itemMeta.serversOwnAsk === true ||
+          (decisionMeta.hostsOwnAsk === true && !itemMeta.hostsOwnAsk))
+      if (itemRank > decisionRank || askTieBreakWins) {
         decision = {
           permissionBehavior: item.permissionBehavior,
           hookPermissionDecisionReason: item.hookPermissionDecisionReason,
           hookSource: item.hookSource,
-        }
+          ...(itemMeta.hostsOwnAsk && { hostsOwnAsk: true }),
+          ...(itemMeta.serversOwnAsk && { serversOwnAsk: true }),
+        } as AggregatedHookResult
       }
       // Defer has its own latch in the core consumer; diagnostics and input
       // rewrites must also retain their original ordering.

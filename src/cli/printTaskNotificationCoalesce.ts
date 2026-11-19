@@ -45,12 +45,35 @@ export function isPrintTaskNotificationCoalesceEnabled(): boolean {
 }
 
 /**
- * densable vh — can this queue entry participate in print task-notification
- * coalesce (hold shouldQuery for a follower notification turn)?
+ * #1926 / official `il(cmd)` — background subagent handback peer prompt that
+ * waits together with other background subagent reports so they can be
+ * answered in one model call in headless/SDK/Desktop/VSCode sessions.
+ */
+export function isCoalescableHandbackPeerPrompt(cmd: QueuedCommand): boolean {
+  if (cmd.mode !== 'prompt') return false
+  if (cmd.shouldQuery === false) return false
+  if (cmd.isMeta !== true) return false
+  if (cmd.uuid !== undefined) return false
+  if (cmd.stopHookActive === true) return false
+  if (typeof cmd.value !== 'string') return false
+  const origin = cmd.origin as
+    | { kind?: string; senderTaskId?: string; handback?: boolean }
+    | undefined
+  return (
+    origin?.kind === 'peer' &&
+    origin.senderTaskId !== undefined &&
+    origin.handback === true
+  )
+}
+
+/**
+ * densable vh + #1926 `il` — can this queue entry participate in print
+ * notification/handback coalesce (hold shouldQuery for a follower)?
  */
 export function isCoalescableTaskNotificationCommand(
   cmd: QueuedCommand,
 ): boolean {
+  if (isCoalescableHandbackPeerPrompt(cmd)) return true
   if (cmd.mode !== 'task-notification') return false
   if (cmd.taskId === undefined) return false
   // densable HP(origin): undefined / human-like origins only.
@@ -215,7 +238,8 @@ export function createPrintTaskNotificationCoalesceState(): PrintTaskNotificatio
       { endSessionRequested, coalesceEnabled, holdsFollower },
     ) {
       if (
-        cmd.mode === 'task-notification' &&
+        (cmd.mode === 'task-notification' ||
+          isCoalescableHandbackPeerPrompt(cmd)) &&
         typeof cmd.value === 'string' &&
         !endSessionRequested &&
         heldCompletionChars + cmd.value.length <=

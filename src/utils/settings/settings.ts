@@ -1,3 +1,4 @@
+import { readFileSync as readFileBufferSync } from 'fs'
 import { feature } from 'bun:bundle'
 import mergeWith from 'lodash-es/mergeWith.js'
 import { dirname, join, normalize, resolve } from 'path'
@@ -667,6 +668,17 @@ export function parseSettingsFileContent(
   }
 }
 
+/**
+ * #1846: Thrown when `--settings` file content does not match
+ * `CLAUDE_CODE_BRIDGE_SETTINGS_BINDING` in a Remote Control child process.
+ */
+export class BridgeSettingsBindingError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'BridgeSettingsBindingError'
+  }
+}
+
 function parseSettingsFileUncached(path: string): {
   settings: SettingsJson | null
   errors: ValidationError[]
@@ -686,12 +698,41 @@ function parseSettingsFileUncached(path: string): {
     } catch {
       // Stat may fail for ENOENT/unreadable; readFileSync below handles error classification.
     }
-    const content = readFileSync(resolvedPath)
+    const bindingEnv = process.env.CLAUDE_CODE_BRIDGE_SETTINGS_BINDING
+    const flagPath = getFlagSettingsPath()
+    const isBoundFlagSettings =
+      bindingEnv !== undefined &&
+      flagPath !== undefined &&
+      (path === flagPath || resolve(path) === resolve(flagPath))
+    let content: string
+    if (isBoundFlagSettings) {
+      // #1846: Read raw bytes once and verify against CLAUDE_CODE_BRIDGE_SETTINGS_BINDING
+      // in the child process to eliminate the spawner-to-child TOCTOU window.
+      const rawBuf = readFileBufferSync(resolvedPath)
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { verifyBridgeSettingsBinding } =
+        require('../../bridge/sessionRunner.js') as typeof import('../../bridge/sessionRunner.js')
+      const check = verifyBridgeSettingsBinding(
+        flagPath,
+        resolvedPath,
+        rawBuf,
+        bindingEnv,
+      )
+      if (!check.ok) {
+        throw new BridgeSettingsBindingError(check.error)
+      }
+      content = rawBuf.toString('utf8')
+    } else {
+      content = readFileSync(resolvedPath)
+    }
     if (firstReadStat !== undefined) {
       recordFirstReadStat(normalize(path), firstReadStat)
     }
     return parseSettingsFileContent(content, path)
   } catch (error) {
+    if (error instanceof BridgeSettingsBindingError) {
+      throw error
+    }
     handleFileSystemError(error, path)
     if (isENOENT(error)) {
       recordFirstReadStat(normalize(path), null)

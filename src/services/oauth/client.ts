@@ -1,5 +1,5 @@
 // OAuth client for handling authentication flows with Claude services
-import axios from 'axios'
+import axios, { AxiosError } from 'axios'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -104,6 +104,43 @@ export function buildAuthUrl({
   return authUrl.toString()
 }
 
+export const OAUTH_TOKEN_REQUEST_TIMEOUT_MS = 30_000
+export const OAUTH_ROLES_REQUEST_TIMEOUT_MS = 10_000
+
+/**
+ * Official 2.1.321 `EY(timeoutMs, fn, callerSignal)` (#1897):
+ * Enforce a wall-clock `AbortSignal` deadline on OAuth HTTP requests (login,
+ * token refresh, logout/revoke, roles, API key mint) so a server that accepts
+ * TCP but stalls during TLS handshake cannot hang indefinitely.
+ */
+export async function withOAuthWallClockTimeout<T>(
+  timeoutMs: number,
+  fn: (opts: { timeout: number; signal: AbortSignal }) => Promise<T>,
+  callerSignal?: AbortSignal,
+): Promise<T> {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs)
+  const signal = callerSignal
+    ? AbortSignal.any([callerSignal, timeoutSignal])
+    : timeoutSignal
+  try {
+    return await fn({ timeout: timeoutMs, signal })
+  } catch (err) {
+    if (
+      timeoutSignal.aborted &&
+      callerSignal?.aborted !== true &&
+      (axios.isCancel(err) ||
+        (err instanceof Error &&
+          (err.name === 'AbortError' || err.name === 'TimeoutError')))
+    ) {
+      throw new AxiosError(
+        `timeout of ${timeoutMs}ms exceeded`,
+        AxiosError.ECONNABORTED,
+      )
+    }
+    throw err
+  }
+}
+
 export async function exchangeCodeForTokens(
   authorizationCode: string,
   state: string,
@@ -111,6 +148,7 @@ export async function exchangeCodeForTokens(
   port: number,
   useManualRedirect: boolean = false,
   expiresIn?: number,
+  signal?: AbortSignal,
 ): Promise<OAuthTokenExchangeResponse> {
   const requestBody: Record<string, string | number> = {
     grant_type: 'authorization_code',
@@ -127,10 +165,16 @@ export async function exchangeCodeForTokens(
     requestBody.expires_in = expiresIn
   }
 
-  const response = await axios.post(getOauthConfig().TOKEN_URL, requestBody, {
-    headers: { 'Content-Type': 'application/json' },
-    timeout: 15000,
-  })
+  const response = await withOAuthWallClockTimeout(
+    OAUTH_TOKEN_REQUEST_TIMEOUT_MS,
+    ({ timeout, signal: reqSignal }) =>
+      axios.post(getOauthConfig().TOKEN_URL, requestBody, {
+        headers: { 'Content-Type': 'application/json' },
+        timeout,
+        signal: reqSignal,
+      }),
+    signal,
+  )
 
   if (response.status !== 200) {
     throw new Error(
@@ -145,7 +189,10 @@ export async function exchangeCodeForTokens(
 
 export async function refreshOAuthToken(
   refreshToken: string,
-  { scopes: requestedScopes }: { scopes?: string[] } = {},
+  {
+    scopes: requestedScopes,
+    signal,
+  }: { scopes?: string[]; signal?: AbortSignal } = {},
 ): Promise<OAuthTokens> {
   const requestBody = {
     grant_type: 'refresh_token',
@@ -163,10 +210,16 @@ export async function refreshOAuthToken(
   }
 
   try {
-    const response = await axios.post(getOauthConfig().TOKEN_URL, requestBody, {
-      headers: { 'Content-Type': 'application/json' },
-      timeout: 15000,
-    })
+    const response = await withOAuthWallClockTimeout(
+      OAUTH_TOKEN_REQUEST_TIMEOUT_MS,
+      ({ timeout, signal: reqSignal }) =>
+        axios.post(getOauthConfig().TOKEN_URL, requestBody, {
+          headers: { 'Content-Type': 'application/json' },
+          timeout,
+          signal: reqSignal,
+        }),
+      signal,
+    )
 
     if (response.status !== 200) {
       throw new Error(`Token refresh failed: ${response.statusText}`)
@@ -292,10 +345,18 @@ export async function refreshOAuthToken(
 
 export async function fetchAndStoreUserRoles(
   accessToken: string,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const response = await axios.get(getOauthConfig().ROLES_URL, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  })
+  const response = await withOAuthWallClockTimeout(
+    OAUTH_ROLES_REQUEST_TIMEOUT_MS,
+    ({ timeout, signal: reqSignal }) =>
+      axios.get(getOauthConfig().ROLES_URL, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        timeout,
+        signal: reqSignal,
+      }),
+    signal,
+  )
 
   if (response.status !== 200) {
     throw new Error(`Failed to fetch user roles: ${response.statusText}`)
@@ -327,11 +388,19 @@ export async function fetchAndStoreUserRoles(
 
 export async function createAndStoreApiKey(
   accessToken: string,
+  signal?: AbortSignal,
 ): Promise<string | null> {
   try {
-    const response = await axios.post(getOauthConfig().API_KEY_URL, null, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    })
+    const response = await withOAuthWallClockTimeout(
+      OAUTH_TOKEN_REQUEST_TIMEOUT_MS,
+      ({ timeout, signal: reqSignal }) =>
+        axios.post(getOauthConfig().API_KEY_URL, null, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          timeout,
+          signal: reqSignal,
+        }),
+      signal,
+    )
 
     const apiKey = response.data?.raw_key
     if (apiKey) {

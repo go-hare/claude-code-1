@@ -7,6 +7,11 @@ import {
   mcpInfoFromString,
 } from '../../services/mcp/mcpStringUtils.js'
 import { normalizeNameForMCP } from '../../services/mcp/normalization.js'
+import type { MCPServerConnection } from '../../services/mcp/types.js'
+import {
+  expandConnectorToolAliases,
+  toolMatchesWithConnectorAliases,
+} from '../../services/mcp/utils.js'
 import {
   isChromeMcpReadOnlyTool,
   isChromeMcpSafeForAutoMode,
@@ -107,9 +112,15 @@ import { promptAutoModeServerFallbackNotice } from '../../services/api/autoModeS
 import { isAutoModeServerEnabled } from '../../services/api/autoModeClassifierTransport.js'
 import {
   denyAutoModeUnavailableStop,
+  formatAutoModeNoServerCheckNotice,
+  formatServerUnavailableInputTooLongDetail,
   holdOnAutoModeUnavailable,
   isConsecutiveUnavailableErrorKind,
+  SERVER_CALL_UNAVAILABLE_INPUT_TOO_LONG,
 } from './autoModeUnavailable.js'
+import { checkAccountEmailUserAgent } from './accountEmailUserAgentCheck.js'
+import { getSettingsForSource } from '../settings/settings.js'
+import type { SettingSource } from '../settings/constants.js'
 import { getToolPermissionContextFromLayers } from '../../engine/permissionLayerReaders.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -301,6 +312,106 @@ export function findSafetyCheckDecision(
  * `plan && servedCall!==true && Jf() && !isBypassPermissionsModeAvailable`.
  * Do not substitute prePlanMode inherit (that's plan+bypass class, not BTe).
  */
+/**
+ * Official 2.1.319 #1703 (`Ave` / `u$r` / `sI`):
+ * `permissions.denyInsteadOfPrompting` is read from trusted settings sources
+ * (`userSettings`, `flagSettings`, `policySettings`; project/local settings are
+ * ignored, and `true` in any trusted source wins).
+ */
+export type ToolPermissionContextWithDenyInsteadOfPrompting =
+  ToolPermissionContext
+
+const TRUSTED_DENY_INSTEAD_OF_PROMPTING_SOURCES: readonly SettingSource[] = [
+  'userSettings',
+  'flagSettings',
+  'policySettings',
+]
+
+export function isDenyInsteadOfPromptingEnabled(): boolean {
+  if (isEvalConfined()) return false
+  return TRUSTED_DENY_INSTEAD_OF_PROMPTING_SOURCES.some(source => {
+    const perms = getSettingsForSource(source)?.permissions as
+      | { denyInsteadOfPrompting?: boolean }
+      | undefined
+    return perms?.denyInsteadOfPrompting === true
+  })
+}
+
+export function applyDenyInsteadOfPrompting(
+  context: ToolPermissionContext,
+): ToolPermissionContext {
+  const enabled = isDenyInsteadOfPromptingEnabled()
+  if (enabled === (context.denyInsteadOfPrompting === true)) {
+    return context
+  }
+  const avoidsByNature =
+    context.avoidsPromptsByNature === true ||
+    (context.shouldAvoidPermissionPrompts === true &&
+      context.denyInsteadOfPrompting !== true)
+  return {
+    ...context,
+    denyInsteadOfPrompting: enabled,
+    ...(avoidsByNature ? { avoidsPromptsByNature: true } : {}),
+    shouldAvoidPermissionPrompts: enabled || avoidsByNature,
+  }
+}
+
+/**
+ * Official `sI(e)`: returns true when prompts are avoided by nature (headless /
+ * background / subagent), rather than solely because `permissions.denyInsteadOfPrompting`
+ * is set in an interactive session.
+ */
+export function avoidsPromptsByNature(context: ToolPermissionContext): boolean {
+  return (
+    context.shouldAvoidPermissionPrompts === true &&
+    (context.denyInsteadOfPrompting !== true ||
+      context.avoidsPromptsByNature === true)
+  )
+}
+
+function getEffectiveToolPermissionContext(
+  context: ToolUseContext,
+): ToolPermissionContext {
+  return applyDenyInsteadOfPrompting(
+    getToolPermissionContextFromLayers(context),
+  )
+}
+
+/**
+ * Official 2.1.319 #1807 (`t1t` + `ev`):
+ * Returns true when a permission result carries an explicit `ask` rule,
+ * either directly in `decisionReason`, nested inside `subcommandResults`,
+ * or via `matchedAskRule` (e.g. Monitor `ws` under a Bash ask rule).
+ */
+export function hasAskRuleInDecisionReason(
+  reason: PermissionDecisionReason | undefined,
+): boolean {
+  if (reason?.type === 'rule' && reason.rule.ruleBehavior === 'ask') {
+    return true
+  }
+  if (reason?.type === 'subcommandResults') {
+    for (const sub of reason.reasons.values()) {
+      if (
+        sub.behavior === 'ask' &&
+        hasAskRuleInDecisionReason(sub.decisionReason)
+      ) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+export function hasMatchedAskRule(
+  result: PermissionResult | undefined,
+): boolean {
+  if (!result || result.behavior !== 'ask') return false
+  return (
+    hasAskRuleInDecisionReason(result.decisionReason) ||
+    result.matchedAskRule?.ruleBehavior === 'ask'
+  )
+}
+
 export function isPermissionContextAutoMode(
   context: ToolPermissionContext,
 ): boolean {
@@ -518,6 +629,51 @@ function coversMcpTool(
 }
 
 /**
+ * #1779: Match claude.ai connector terminal/Desktop alias spellings for deny,
+ * ask, and `disallowedTools` rules ONLY. Callers MUST NEVER invoke this for
+ * `allow` rules.
+ */
+function matchesConnectorAliasForDenyOrAsk(
+  toolName: string,
+  ruleToolName: string,
+  mcpClients?: readonly MCPServerConnection[],
+): boolean {
+  if (
+    !toolName.startsWith(MCP_PREFIX) ||
+    !ruleToolName.startsWith(MCP_PREFIX)
+  ) {
+    return false
+  }
+  if (toolMatchesWithConnectorAliases(toolName, ruleToolName, mcpClients)) {
+    return true
+  }
+  const toolInfo = mcpInfoFromString(toolName)
+  const ruleInfo = mcpInfoFromString(ruleToolName)
+  if (!toolInfo || !ruleInfo) {
+    return false
+  }
+  const ruleAliases = expandConnectorToolAliases(ruleToolName)
+  const ruleIsServerOnly = ruleInfo.toolName === undefined
+  for (const alias of ruleAliases) {
+    const aliasInfo = mcpInfoFromString(alias)
+    if (!aliasInfo) continue
+    if (ruleIsServerOnly) {
+      // Server-level rule (e.g. `mcp__claude_ai_Slack`): only match server-level
+      // aliases (e.g. `mcp__Slack`), ignoring synthetic `mcp__Slack__undefined`.
+      if (aliasInfo.toolName !== undefined) continue
+      if (coversMcpTool(alias, toolInfo)) return true
+    } else {
+      // Tool-level or wildcard rule (e.g. `mcp__claude_ai_Slack__post` or
+      // `mcp__claude_ai_Slack__*`): require tool-level alias so a single-tool
+      // deny rule never widens to the whole server.
+      if (aliasInfo.toolName === undefined) continue
+      if (alias === toolName || coversMcpTool(alias, toolInfo)) return true
+    }
+  }
+  return false
+}
+
+/**
  * Check if the entire tool matches a rule
  * For example, this matches "Bash" but not "Bash(prefix:*)" for BashTool
  * This also matches MCP tools with a server name, e.g. the rule "mcp__server1"
@@ -525,6 +681,7 @@ function coversMcpTool(
 export function toolMatchesRule(
   tool: Pick<Tool, 'name' | 'mcpInfo'>,
   rule: PermissionRule,
+  mcpClients?: readonly MCPServerConnection[],
 ): boolean {
   // Rule must not have content to match the entire tool
   if (rule.ruleValue.ruleContent !== undefined) {
@@ -554,8 +711,9 @@ export function toolMatchesRule(
   // - For allow rules (#722): require exact server prefix match (zii) so
   //   `mcp__a` does not allow `a__b` or `a_`; callers must use `mcp__<server>__*`
   //   when the server name contains `__`.
-  // - For deny/ask rules (#629): also match any `mcp__<server>` prefix in
-  //   getMcpServerRuleNames(tool) so deny/ask `mcp__my__server` works.
+  //   STRICT (#1779): Never expand claude.ai connector aliases for `allow`.
+  // - For deny/ask rules (#629, #1779): also match any `mcp__<server>` prefix in
+  //   getMcpServerRuleNames(tool) and claude.ai connector terminal/Desktop aliases.
   const toolInfo = mcpInfoFromString(nameForRuleMatch)
   const coversMcp = coversMcpTool(rule.ruleValue.toolName, toolInfo)
   if (rule.ruleBehavior === 'allow') {
@@ -569,7 +727,13 @@ export function toolMatchesRule(
     coversMcp ||
     (rule.source !== 'mcpServerPolicy' &&
       rule.ruleValue.toolName.startsWith(MCP_PREFIX) &&
-      getMcpServerRuleNames(tool).includes(rule.ruleValue.toolName))
+      getMcpServerRuleNames(tool).includes(rule.ruleValue.toolName)) ||
+    (rule.source !== 'mcpServerPolicy' &&
+      matchesConnectorAliasForDenyOrAsk(
+        nameForRuleMatch,
+        rule.ruleValue.toolName,
+        mcpClients,
+      ))
   )
 }
 
@@ -771,13 +935,14 @@ export function getDenyRuleForTool(
     enablesCodeExecution?: boolean
     underlyingV1ToolName?: string
   },
+  mcpClients?: readonly MCPServerConnection[],
 ): PermissionRule | null {
   const rules = getDenyRules(context)
-  const direct = rules.find(rule => toolMatchesRule(tool, rule))
+  const direct = rules.find(rule => toolMatchesRule(tool, rule, mcpClients))
   if (direct) return direct
   if (tool.underlyingV1ToolName) {
     const v1Rule = rules.find(rule =>
-      toolMatchesRule({ name: tool.underlyingV1ToolName! }, rule),
+      toolMatchesRule({ name: tool.underlyingV1ToolName! }, rule, mcpClients),
     )
     if (v1Rule) return v1Rule
   }
@@ -801,8 +966,13 @@ export function getDenyRuleForTool(
 export function getAskRuleForTool(
   context: ToolPermissionContext,
   tool: Pick<Tool, 'name' | 'mcpInfo'>,
+  mcpClients?: readonly MCPServerConnection[],
 ): PermissionRule | null {
-  return getAskRules(context).find(rule => toolMatchesRule(tool, rule)) || null
+  return (
+    getAskRules(context).find(rule =>
+      toolMatchesRule(tool, rule, mcpClients),
+    ) || null
+  )
 }
 
 /**
@@ -887,9 +1057,11 @@ export function getRuleByContentsForToolName(
   }
   for (const rule of rules) {
     if (
-      rule.ruleValue.toolName === toolName &&
       rule.ruleValue.ruleContent !== undefined &&
-      rule.ruleBehavior === behavior
+      rule.ruleBehavior === behavior &&
+      (rule.ruleValue.toolName === toolName ||
+        (behavior !== 'allow' &&
+          matchesConnectorAliasForDenyOrAsk(toolName, rule.ruleValue.toolName)))
     ) {
       ruleByContents.set(rule.ruleValue.ruleContent, rule)
     }
@@ -1773,8 +1945,8 @@ const evaluateToolPermission: CanUseToolFn = async (
   // This is done at the end so it can't be bypassed by early returns
   if (result.behavior === 'ask') {
     const appState = context.getAppState()
-    // densable bn: sticky permission layers overlay mode/rules for this turn
-    const layeredPermissionContext = getToolPermissionContextFromLayers(context)
+    // densable bn + #1703 u$r: sticky permission layers + denyInsteadOfPrompting
+    const layeredPermissionContext = getEffectiveToolPermissionContext(context)
 
     // gold NHo @185579131: xe=XH(e,Ee) once; dontAsk uses xe not session mode.
     // Official snt(): chrome classifier floor / per-server overrides demote
@@ -1884,6 +2056,35 @@ const evaluateToolPermission: CanUseToolFn = async (
         })
         return result
       }
+      // Official 2.1.319 #1807 (`Pn = ev(xe)`, `To`): explicit ask rules
+      // (including `matchedAskRule`, e.g. Monitor `ws` under a Bash ask rule)
+      // must fall back to interactive prompt even in auto mode (except
+      // non-destructive mcpServerPolicy asks).
+      const isMcpPolicyAsk =
+        isMcpServerPolicyAskReason(result.decisionReason) ||
+        result.matchedAskRule?.source === 'mcpServerPolicy'
+      const askRuleFallback =
+        hasMatchedAskRule(result) &&
+        !(isMcpPolicyAsk && !(tool.isDestructive?.(input as never) ?? false))
+      if (askRuleFallback) {
+        if (layeredPermissionContext.shouldAvoidPermissionPrompts) {
+          return {
+            behavior: 'deny',
+            message: result.message,
+            decisionReason: {
+              type: 'asyncAgent',
+              reason:
+                'Ask rule requires interactive approval and permission prompts are not available in this context',
+            },
+          }
+        }
+        logEvent('tengu_auto_mode_fallback_to_ask', {
+          reason:
+            'ask_rule' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          toolName: sanitizeToolNameForAnalytics(tool.name),
+        })
+        return result
+      }
       // Official org_ask_ceiling: MCP tools capped to ask by org policy cannot
       // be auto-approved by the classifier (mirrors plan_mode_floor handling).
       if (tool.mcpInfo?.effectiveMaxPermission === 'ask') {
@@ -1936,6 +2137,9 @@ const evaluateToolPermission: CanUseToolFn = async (
           forRemoteExecution: context.forRemoteExecution === true,
         })
       ) {
+        if (layeredPermissionContext.denyInsteadOfPrompting === true) {
+          return result
+        }
         getOutsideReadPrompt().open(toolUseID)
         logEvent('tengu_auto_mode_fallback_to_ask', {
           reason:
@@ -2236,6 +2440,10 @@ const evaluateToolPermission: CanUseToolFn = async (
           layeredPermissionContext,
           context.abortController.signal,
           context.langfuseRootTrace ?? context.langfuseTrace,
+          {
+            handoffReview: tool.classifierOnly?.()?.onBlock === 'flag',
+            outsideAutoMode: layeredPermissionContext.mode !== 'auto',
+          },
         )
       } finally {
         clearClassifierChecking(toolUseID)
@@ -2418,9 +2626,11 @@ const evaluateToolPermission: CanUseToolFn = async (
       }
 
       if (classifierResult.shouldBlock) {
-        // densable transcriptTooLong. Xr (merry_popcorn + canCompact) is
-        // absent here, so the compacting message stays off. Agent (ht) allows.
+        // densable transcriptTooLong + #1730 (`s1s` server_call_unavailable_input_too_long).
         if (classifierResult.transcriptTooLong) {
+          const isServerInputTooLong =
+            classifierResult.errorKind ===
+            SERVER_CALL_UNAVAILABLE_INPUT_TOO_LONG
           const classifierOnlyInteractive =
             classifierOnly !== undefined &&
             !layeredPermissionContext.shouldAvoidPermissionPrompts
@@ -2435,73 +2645,137 @@ const evaluateToolPermission: CanUseToolFn = async (
                 mode: layeredPermissionContext.mode,
               },
             ) !== undefined
-          if (classifierOnlyInteractive) {
+          if (!isServerInputTooLong || willCompact) {
+            if (classifierOnlyInteractive) {
+              logForDebugging(
+                `Auto mode classifier transcript too long for ${tool.name}, denying (classifierOnly: no prompt fallback)`,
+                { level: 'warn' },
+              )
+              return {
+                behavior: 'deny',
+                decisionReason: {
+                  type: 'classifier',
+                  classifier: 'auto-mode',
+                  reason: TRANSCRIPT_TOO_LONG_REASON,
+                  noVerdict: true,
+                },
+                message: willCompact
+                  ? `${tool.name} was not reviewed and did not run: the conversation is too long for auto mode's classifier, and no permission prompt is raised for this tool. This is not a judgment that the action is unsafe. Claude Code will try to compact the conversation before the next request; if this action is still needed after that, issue it again.`
+                  : `${tool.name} was not reviewed: the auto mode classifier transcript exceeded its context window, and no permission prompt is raised for this tool. This is not a judgment that the action is unsafe; the same call will hit the same limit until the conversation is shorter.`,
+              }
+            }
+            if (!isServerInputTooLong) {
+              if (tool.name === AGENT_TOOL_NAME) {
+                return {
+                  behavior: 'allow',
+                  updatedInput: result.updatedInput ?? input,
+                  decisionReason: { type: 'mode', mode: 'auto' },
+                }
+              }
+            }
+            if (willCompact) {
+              logForDebugging(
+                `Auto mode classifier transcript too long for ${tool.name}, denying and compacting before the next request`,
+                { level: 'warn' },
+              )
+              return {
+                behavior: 'deny',
+                decisionReason: {
+                  type: 'classifier',
+                  classifier: 'auto-mode',
+                  reason: TRANSCRIPT_TOO_LONG_COMPACT_REASON,
+                  noVerdict: true,
+                },
+                message: `${tool.name} was not reviewed and did not run: the conversation is too long for auto mode's classifier. Claude Code will try to compact the conversation before the next request; if this action is still needed after that, issue it again and it will be reviewed normally.`,
+              }
+            }
+            if (avoidsPromptsByNature(layeredPermissionContext)) {
+              throw new AbortError(
+                'Agent aborted: auto mode classifier transcript exceeded context window in headless mode',
+              )
+            }
             logForDebugging(
-              `Auto mode classifier transcript too long for ${tool.name}, denying (classifierOnly: no prompt fallback)`,
+              'Auto mode classifier transcript too long, falling back to normal permission handling',
               { level: 'warn' },
             )
+            if (effectiveModeForAuto === 'dontAsk') {
+              return {
+                behavior: 'deny',
+                decisionReason: { type: 'mode', mode: 'dontAsk' },
+                message: DONT_ASK_REJECT_MESSAGE(tool.name),
+              }
+            }
+            if (layeredPermissionContext.shouldAvoidPermissionPrompts) {
+              return {
+                behavior: 'deny',
+                decisionReason: {
+                  type: 'asyncAgent',
+                  reason:
+                    'Permission prompts are not available in this context',
+                },
+                message: AUTO_REJECT_MESSAGE(tool.name),
+              }
+            }
             return {
-              behavior: 'deny',
+              ...result,
               decisionReason: {
-                type: 'classifier',
-                classifier: 'auto-mode',
+                type: 'other',
                 reason: TRANSCRIPT_TOO_LONG_REASON,
-                noVerdict: true,
               },
-              message: willCompact
-                ? `${tool.name} was not reviewed and did not run: the conversation is too long for auto mode's classifier, and no permission prompt is raised for this tool. This is not a judgment that the action is unsafe. Claude Code will try to compact the conversation before the next request; if this action is still needed after that, issue it again.`
-                : `${tool.name} was not reviewed: the auto mode classifier transcript exceeded its context window, and no permission prompt is raised for this tool. This is not a judgment that the action is unsafe; the same call will hit the same limit until the conversation is shorter.`,
             }
-          }
-          if (tool.name === AGENT_TOOL_NAME) {
-            return {
-              behavior: 'allow',
-              updatedInput: result.updatedInput ?? input,
-              decisionReason: { type: 'mode', mode: 'auto' },
-            }
-          }
-          if (willCompact) {
-            logForDebugging(
-              `Auto mode classifier transcript too long for ${tool.name}, denying and compacting before the next request`,
-              { level: 'warn' },
-            )
-            return {
-              behavior: 'deny',
-              decisionReason: {
-                type: 'classifier',
-                classifier: 'auto-mode',
-                reason: TRANSCRIPT_TOO_LONG_COMPACT_REASON,
-                noVerdict: true,
-              },
-              message: `${tool.name} was not reviewed and did not run: the conversation is too long for auto mode's classifier. Claude Code will try to compact the conversation before the next request; if this action is still needed after that, issue it again and it will be reviewed normally.`,
-            }
-          }
-          if (layeredPermissionContext.shouldAvoidPermissionPrompts) {
-            throw new AbortError(
-              'Agent aborted: auto mode classifier transcript exceeded context window in headless mode',
-            )
-          }
-          logForDebugging(
-            'Auto mode classifier transcript too long, falling back to normal permission handling',
-            { level: 'warn' },
-          )
-          if (effectiveModeForAuto === 'dontAsk') {
-            return {
-              behavior: 'deny',
-              decisionReason: { type: 'mode', mode: 'dontAsk' },
-              message: DONT_ASK_REJECT_MESSAGE(tool.name),
-            }
-          }
-          return {
-            ...result,
-            decisionReason: {
-              type: 'other',
-              reason: TRANSCRIPT_TOO_LONG_REASON,
-            },
           }
         }
-        // densable: unavailable always denies. Y7o+X7o when lut + key + TPt.
+        // densable: unavailable always denies — except #1730 (`server_call_unavailable_input_too_long`
+        // / `context_too_large`) when no `autoMode` deny rules exist and an interactive terminal can ask.
         if (classifierResult.unavailable) {
+          const isInputTooLong =
+            classifierResult.errorKind ===
+              SERVER_CALL_UNAVAILABLE_INPUT_TOO_LONG ||
+            classifierResult.errorKind === 'context_too_large'
+          if (isInputTooLong) {
+            const heldByDenyRules = autoModeHasDenyRules()
+            const canAskInTerminal =
+              !heldByDenyRules &&
+              effectiveModeForAuto !== 'dontAsk' &&
+              classifierOnly === undefined &&
+              !layeredPermissionContext.shouldAvoidPermissionPrompts &&
+              !context.options?.isNonInteractiveSession
+            if (canAskInTerminal) {
+              const reason = formatAutoModeNoServerCheckNotice({
+                why: 'context_too_large',
+                asks: true,
+              })
+              logEvent('tengu_auto_mode_fallback_to_ask', {
+                reason:
+                  'no_classifier_for_call' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                toolName: sanitizeToolNameForAnalytics(tool.name),
+              })
+              return {
+                ...result,
+                suggestions: undefined,
+                decisionReason: {
+                  type: 'other',
+                  reason,
+                },
+              }
+            }
+            if (heldByDenyRules) {
+              const notice = formatAutoModeNoServerCheckNotice({
+                why: 'context_too_large',
+                asks: false,
+                heldByDenyRules: true,
+              })
+              return {
+                behavior: 'deny',
+                decisionReason: {
+                  type: 'classifier',
+                  classifier: 'auto-mode',
+                  reason: 'Classifier unavailable',
+                },
+                message: `${tool.name} was not run: ${notice}`,
+              }
+            }
+          }
           const serverClassifierRequest = (
             assistantMessage as { serverClassifierRequest?: unknown }
           ).serverClassifierRequest
@@ -2528,6 +2802,22 @@ const evaluateToolPermission: CanUseToolFn = async (
               : 'Auto mode classifier told to wait by the API, denying (fail closed)',
             { level: 'warn' },
           )
+          let unavailableMessage = buildClassifierUnavailableMessage(
+            tool.name,
+            classifierResult.model,
+            classifierResult.httpStatus,
+            classifierResult.errorKind,
+            classifierResult.retryAfterMs,
+          )
+          const inputTooLongDetail = formatServerUnavailableInputTooLongDetail(
+            classifierResult.errorKind,
+          )
+          if (
+            inputTooLongDetail !== undefined &&
+            !unavailableMessage.includes(inputTooLongDetail)
+          ) {
+            unavailableMessage = `${unavailableMessage} ${inputTooLongDetail.trim()}`
+          }
           return {
             behavior: 'deny',
             decisionReason: {
@@ -2535,19 +2825,13 @@ const evaluateToolPermission: CanUseToolFn = async (
               classifier: 'auto-mode',
               reason: 'Classifier unavailable',
             },
-            message: buildClassifierUnavailableMessage(
-              tool.name,
-              classifierResult.model,
-              classifierResult.httpStatus,
-              classifierResult.errorKind,
-              classifierResult.retryAfterMs,
-            ),
+            message: unavailableMessage,
           }
         }
 
         // densable 2.1.225: stop_reason==="refusal" → refuse without denial counter.
         if (classifierResult.refusedBySafeguard) {
-          if (layeredPermissionContext.shouldAvoidPermissionPrompts) {
+          if (avoidsPromptsByNature(layeredPermissionContext)) {
             throw new AbortError(
               'Agent aborted: auto mode classifier request refused by the safety safeguard in headless mode',
             )
@@ -2771,7 +3055,10 @@ function handleDenialLimitExceeded(
   }
 
   const hitTotalLimit = denialState.totalDenials >= DENIAL_LIMITS.maxTotal
-  const isHeadless = appState.toolPermissionContext.shouldAvoidPermissionPrompts
+  const effectivePermCtx = getEffectiveToolPermissionContext(context)
+  const isHeadless =
+    appState.toolPermissionContext.shouldAvoidPermissionPrompts ||
+    effectivePermCtx.shouldAvoidPermissionPrompts
   // Capture counts before persistDenialState, which may mutate denialState
   // in-place via Object.assign for subagents with localDenialTracking.
   const totalCount = denialState.totalDenials
@@ -2875,7 +3162,11 @@ export async function checkRuleBasedPermissions(
   const toolPermissionContext = getToolPermissionContextFromLayers(context)
 
   // 1a. Entire tool is denied by rule
-  const denyRule = getDenyRuleForTool(toolPermissionContext, tool)
+  const denyRule = getDenyRuleForTool(
+    toolPermissionContext,
+    tool,
+    context.options.mcpClients,
+  )
   if (denyRule) {
     return {
       behavior: 'deny',
@@ -2888,7 +3179,11 @@ export async function checkRuleBasedPermissions(
   }
 
   // 1b. Entire tool has an ask rule
-  const askRule = getAskRuleForTool(toolPermissionContext, tool)
+  const askRule = getAskRuleForTool(
+    toolPermissionContext,
+    tool,
+    context.options.mcpClients,
+  )
   if (askRule) {
     const canSandboxAutoAllow =
       tool.name === BASH_TOOL_NAME &&
@@ -2948,12 +3243,19 @@ export async function checkRuleBasedPermissions(
     return toolPermissionResult
   }
 
+  // 1d2. Official 2.1.321 #1958 (`tengu_wise_newt`): refuse calls that hold
+  // the signed-in account's email address beside a User-Agent / client identity.
+  const wiseNewtDeny = await checkAccountEmailUserAgent(tool.name, input)
+  if (wiseNewtDeny) {
+    return wiseNewtDeny
+  }
+
   // 1f. Content-specific ask rules from tool.checkPermissions
-  // (e.g. Bash(npm publish:*) → {ask, type:'rule', ruleBehavior:'ask'})
+  // (e.g. Bash(npm publish:*) → {ask, type:'rule', ruleBehavior:'ask'},
+  // or Monitor ws under a Bash ask rule → matchedAskRule)
   if (
     toolPermissionResult?.behavior === 'ask' &&
-    toolPermissionResult.decisionReason?.type === 'rule' &&
-    toolPermissionResult.decisionReason.rule.ruleBehavior === 'ask'
+    hasMatchedAskRule(toolPermissionResult)
   ) {
     return toolPermissionResult
   }
@@ -3029,7 +3331,11 @@ async function hasPermissionsToUseToolInner(
 
   // 1. Check if the tool is denied
   // 1a. Entire tool is denied
-  const denyRule = getDenyRuleForTool(toolPermissionContext, tool)
+  const denyRule = getDenyRuleForTool(
+    toolPermissionContext,
+    tool,
+    context.options.mcpClients,
+  )
   if (denyRule) {
     return {
       behavior: 'deny',
@@ -3042,7 +3348,11 @@ async function hasPermissionsToUseToolInner(
   }
 
   // 1b. Check if the entire tool should always ask for permission
-  const askRule = getAskRuleForTool(toolPermissionContext, tool)
+  const askRule = getAskRuleForTool(
+    toolPermissionContext,
+    tool,
+    context.options.mcpClients,
+  )
   if (askRule) {
     // When autoAllowBashIfSandboxed is on, sandboxed commands skip the ask rule and
     // auto-allow via Bash's checkPermissions. Commands that won't be sandboxed (excluded
@@ -3115,6 +3425,13 @@ async function hasPermissionsToUseToolInner(
     return toolPermissionResult
   }
 
+  // 1d2. Official 2.1.321 #1958 (`tengu_wise_newt`): directly refuse calls
+  // that hold the signed-in account's email address beside a User-Agent.
+  const wiseNewtDeny = await checkAccountEmailUserAgent(tool.name, input)
+  if (wiseNewtDeny) {
+    return wiseNewtDeny
+  }
+
   // 1e. Tool requires user interaction even in bypass mode
   if (
     tool.requiresUserInteraction?.() &&
@@ -3124,15 +3441,11 @@ async function hasPermissionsToUseToolInner(
   }
 
   // 1f. Content-specific ask rules from tool.checkPermissions take precedence
-  // over bypassPermissions mode. When a user explicitly configures a
-  // content-specific ask rule (e.g. Bash(npm publish:*)), the tool's
-  // checkPermissions returns {behavior:'ask', decisionReason:{type:'rule',
-  // rule:{ruleBehavior:'ask'}}}. This must be respected even in bypass mode,
-  // just as deny rules are respected at step 1d.
+  // over bypassPermissions mode and whole-tool allow rules (including
+  // matchedAskRule on Monitor ws calls, #1807).
   if (
     toolPermissionResult?.behavior === 'ask' &&
-    toolPermissionResult.decisionReason?.type === 'rule' &&
-    toolPermissionResult.decisionReason.rule.ruleBehavior === 'ask'
+    hasMatchedAskRule(toolPermissionResult)
   ) {
     return toolPermissionResult
   }

@@ -5,6 +5,11 @@
  */
 
 import { logForDebugging } from '../debug.js'
+import {
+  getGatewayAuth,
+  isGatewayAuthExpired,
+  isGatewayAuthPinned,
+} from '../gatewayEnv.js'
 import { createSignal } from '../signal.js'
 import type { SettingsJson } from './types.js'
 
@@ -649,4 +654,35 @@ export function resetRemoteSettingsStateForTesting(): void {
   state.loadBackstopReleased = false
   state.eligibilityMemo = undefined
   state.loadEpoch = 0
+}
+
+/**
+ * Official 2.1.319 (#1761, `Qe` @19204739):
+ * Before polling remote managed settings in the background, refresh/check
+ * whether the pinned Claude apps gateway sign-in has expired. If expired,
+ * skip the request so the terminal does not send requests that the gateway
+ * refuses and logs as `invalid_token`.
+ */
+export async function shouldSkipRemoteManagedSettingsPollForExpiredGateway(
+  refreshGatewayAuth?: () => Promise<unknown>,
+): Promise<boolean> {
+  const gatewayAuth = getGatewayAuth()
+  if (!isGatewayAuthPinned(gatewayAuth)) {
+    return false
+  }
+  if (isGatewayAuthExpired(gatewayAuth) && refreshGatewayAuth) {
+    try {
+      await refreshGatewayAuth()
+    } catch {
+      // Refresh failed; fall through to re-check expiry below.
+    }
+  }
+  const latest = getGatewayAuth()
+  if (isGatewayAuthPinned(latest) && isGatewayAuthExpired(latest)) {
+    logForDebugging(
+      'Remote settings: Background poll skipped because the gateway sign-in has expired',
+    )
+    return true
+  }
+  return false
 }

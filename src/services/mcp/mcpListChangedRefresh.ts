@@ -78,3 +78,50 @@ export function formatListChangedRefreshFailed(
   }
   return `[mcp] ${serverName}: resources/list_changed refresh failed (${err}); keeping previous for failed fields`
 }
+
+/**
+ * Official 325 `toolRefreshSequences` (#1893) — per-connection monotonic
+ * refresh counter so an older in-flight `tools/list` response that resolves
+ * after a newer refresh (or reconnect/cwd change) is discarded instead of
+ * overwriting/emptying the server's tools.
+ */
+export type ToolRefreshSequenceState = {
+  started: number
+  applied: number
+}
+
+const toolRefreshSequences = new WeakMap<object, ToolRefreshSequenceState>()
+
+export function beginMcpToolRefreshSequence(connection: object): number {
+  let state = toolRefreshSequences.get(connection)
+  if (!state) {
+    state = { started: 0, applied: 0 }
+    toolRefreshSequences.set(connection, state)
+  }
+  state.started += 1
+  return state.started
+}
+
+export function isMcpToolRefreshSuperseded(
+  connection: object,
+  seq: number,
+): boolean {
+  const state = toolRefreshSequences.get(connection)
+  return state !== undefined && state.applied > seq
+}
+
+export function commitMcpToolRefreshSequence(
+  connection: object,
+  seq: number,
+): boolean {
+  let state = toolRefreshSequences.get(connection)
+  if (!state) {
+    state = { started: seq, applied: 0 }
+    toolRefreshSequences.set(connection, state)
+  }
+  if (state.applied > seq) {
+    return false
+  }
+  state.applied = seq
+  return true
+}

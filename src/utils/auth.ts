@@ -1731,12 +1731,20 @@ class WeakOwnerCache<T> {
  * lastOwnSavedAccessToken, credentialsChangedOnDisk,
  * pendingOptedInRefreshChecks.
  */
+type OAuth401ForcedRefreshOutcome = 'refreshed' | 'unchanged' | 'failed'
+
+type Pending401HandlerEntry = {
+  promise: Promise<boolean>
+  callbacks: Array<(outcome: OAuth401ForcedRefreshOutcome) => void>
+  outcome?: OAuth401ForcedRefreshOutcome
+}
+
 class ClaudeAiOauthHostCache {
   value: OAuthTokens | null | undefined = undefined
   promise: Promise<OAuthTokens | null> | null = null
   lastCredentialsMtimeMs = 0
   /** Same-token 401 dedup. Per host, matching gold `Yk`. */
-  pending401Handlers = new Map<string, Promise<boolean>>()
+  pending401Handlers = new Map<string, Pending401HandlerEntry>()
   /** Non-retry, non-force refresh dedup. Per host, matching gold `Yk`. */
   pendingRefreshCheck: Promise<boolean> | null = null
   clear(): void {
@@ -1970,22 +1978,69 @@ export function _resetRemoteAuthFailExitStateForTesting(): void {
  * @param failedAccessToken - The access token that was rejected with 401
  * @returns true if we now have a valid token, false otherwise
  */
+export type HandleOAuth401Options = {
+  /**
+   * Official 2.1.319 (#1722): when true, only adopt a fresher token already
+   * stored on disk/keychain/host — do NOT issue another forced refresh_token
+   * request (prevents repeated 401 retries from rotating tokens and causing
+   * 401s in sibling sessions).
+   */
+  adoptOnly?: boolean
+  onForcedRefreshOutcome?: (
+    outcome: 'refreshed' | 'unchanged' | 'failed',
+  ) => void
+}
+
 export function handleOAuth401Error(
   failedAccessToken: string,
+  options?: HandleOAuth401Options,
 ): Promise<boolean> {
+  if (options?.adoptOnly) {
+    return handleOAuth401ErrorImpl(failedAccessToken, options)
+  }
   const handlers = claudeAiOauthHostCache().pending401Handlers
   const pending = handlers.get(failedAccessToken)
-  if (pending) return pending
+  if (pending) {
+    if (options?.onForcedRefreshOutcome) {
+      if (pending.outcome !== undefined) {
+        options.onForcedRefreshOutcome(pending.outcome)
+      } else {
+        pending.callbacks.push(options.onForcedRefreshOutcome)
+      }
+    }
+    return pending.promise
+  }
 
-  const promise = handleOAuth401ErrorImpl(failedAccessToken).finally(() => {
+  const entry: Pending401HandlerEntry = {
+    promise: undefined as unknown as Promise<boolean>,
+    callbacks: options?.onForcedRefreshOutcome
+      ? [options.onForcedRefreshOutcome]
+      : [],
+  }
+  const notifyOutcome = (outcome: OAuth401ForcedRefreshOutcome): void => {
+    entry.outcome = outcome
+    const cbs = entry.callbacks.splice(0)
+    for (const cb of cbs) {
+      try {
+        cb(outcome)
+      } catch {
+        // ignore listener errors
+      }
+    }
+  }
+  entry.promise = handleOAuth401ErrorImpl(failedAccessToken, {
+    ...options,
+    onForcedRefreshOutcome: notifyOutcome,
+  }).finally(() => {
     handlers.delete(failedAccessToken)
   })
-  handlers.set(failedAccessToken, promise)
-  return promise
+  handlers.set(failedAccessToken, entry)
+  return entry.promise
 }
 
 async function handleOAuth401ErrorImpl(
   failedAccessToken: string,
+  options?: HandleOAuth401Options,
 ): Promise<boolean> {
   // Clear caches and re-read from keychain (async — sync read blocks ~100ms/call)
   clearOAuthTokenCache()
@@ -2138,8 +2193,104 @@ async function handleOAuth401ErrorImpl(
     return true
   }
 
+  // Official 2.1.319 (#1722): when adoptOnly is true, do not issue another
+  // forced refresh request on repeated 401 retries.
+  if (options?.adoptOnly) {
+    logForDebugging(
+      'OAuth 401: adoptOnly active — skipping repeat forced token refresh',
+    )
+    options.onForcedRefreshOutcome?.('unchanged')
+    return false
+  }
+
   // Same token that failed - force refresh, bypassing local expiration check
-  return checkAndRefreshOAuthTokenIfNeeded(0, true)
+  const refreshed = await checkAndRefreshOAuthTokenIfNeeded(0, true)
+  options?.onForcedRefreshOutcome?.(refreshed ? 'refreshed' : 'failed')
+  return refreshed
+}
+
+/**
+ * Official 2.1.319 `GEs(profile)` (#1712 / #1713):
+ * Format the organization name from an `ant auth login` profile as
+ * `<org> (Claude Console)` (or `"your Claude Console organization"` if absent
+ * or lacking alphanumeric characters).
+ */
+export function formatAntProfileOrganizationLabel(
+  profile: { organizationName?: string | null } | null | undefined,
+): string {
+  const raw =
+    typeof profile?.organizationName === 'string'
+      ? profile.organizationName
+          .replace(/[\u00B7\u26A0]|:\/\//g, ' ')
+          .trim()
+          .slice(0, 60)
+          .replace(/[\u00B7\u26A0]|:\/\//g, ' ')
+          .trim()
+      : ''
+  return /[\p{L}\p{N}]/u.test(raw)
+    ? `${raw} (Claude Console)`
+    : 'your Claude Console organization'
+}
+
+export type ActiveConsoleFallbackCredential =
+  | { kind: 'login_key' }
+  | { kind: 'ant_profile'; organization: string }
+  | null
+
+/**
+ * Official 2.1.319 (#1712 / #1713): detect whether Claude Code is currently
+ * using a saved `/login` managed key or an `ant auth login` Console profile
+ * (e.g. after a `claude.ai` subscription sign-in ended or at startup).
+ */
+export function detectActiveConsoleFallbackCredential(): ActiveConsoleFallbackCredential {
+  try {
+    const { source } = getAnthropicApiKeyWithSource({
+      skipRetrievingKeyFromApiKeyHelper: true,
+    })
+    if (source !== 'none') {
+      return source === '/login managed key' ? { kind: 'login_key' } : null
+    }
+    const { getActiveAnthropicProfileMetadata, isProfileAuthActive } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./anthropicProfile.js') as typeof import('./anthropicProfile.js') & {
+        getActiveAnthropicProfileMetadata?: () => {
+          createdBy?: string
+          organizationName?: string
+        } | null
+      }
+    if (
+      !isProfileAuthActive({
+        storedClaudeAiLogin: Boolean(getClaudeAIOAuthTokens()?.accessToken),
+      })
+    ) {
+      return null
+    }
+    const meta = getActiveAnthropicProfileMetadata?.()
+    if (meta?.createdBy === 'claude-code') {
+      return null
+    }
+    return {
+      kind: 'ant_profile',
+      organization: formatAntProfileOrganizationLabel(meta),
+    }
+  } catch (err) {
+    logForDebugging(
+      `Could not tell which saved credential is in use: ${err instanceof Error ? err.message : String(err)}`,
+      { level: 'error' },
+    )
+    return null
+  }
+}
+
+/**
+ * Official 2.1.319 (#1712): warning text when a `claude.ai` login ends and
+ * Claude Code continues on the sign-in from `ant auth login`, billing usage
+ * to the Claude Console organization.
+ */
+export function formatAntProfileFallbackWarning(
+  organizationLabel: string,
+): string {
+  return `Your claude.ai login ended; continuing on the sign-in from \`ant auth login\`, which bills usage to ${organizationLabel}. Run /login to sign back in to claude.ai.`
 }
 
 type BgAuthHandoff = {

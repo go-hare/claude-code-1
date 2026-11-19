@@ -912,6 +912,42 @@ const COMMAND_ALLOWLIST: Record<string, CommandConfig> = {
     // Use regex to ensure no positional args after flags
     regex: /^hostname(?:\s+(?:-[a-zA-Z]|--[a-zA-Z-]+))*\s*$/,
   },
+  // Official 2.1.319 #1810: which moved from READONLY_COMMANDS to safeFlags allowlist
+  which: {
+    safeFlags: {
+      '-a': 'none',
+      '--all': 'none',
+      '-s': 'none',
+      '-p': 'none',
+      '-w': 'none',
+      '--skip-dot': 'none',
+      '--skip-tilde': 'none',
+      '--show-dot': 'none',
+      '--show-tilde': 'none',
+      '--skip-alias': 'none',
+      '--skip-functions': 'none',
+      '-v': 'none',
+      '-V': 'none',
+      '--version': 'none',
+      '--help': 'none',
+    },
+    additionalCommandIsDangerousCallback: (_cmd, args) => {
+      let afterDoubleDash = false
+      for (const arg of args) {
+        if (/[`$(){}|;&<>!*?[\]~\\'"\n\r]/.test(arg)) return true
+        if (afterDoubleDash) continue
+        if (arg === '--') {
+          afterDoubleDash = true
+        } else if (
+          arg.startsWith('-') &&
+          !/^(?:-[A-Za-z]+|--[a-z-]+)$/.test(arg)
+        ) {
+          return true
+        }
+      }
+      return false
+    },
+  },
   // info command - moved from READONLY_COMMANDS because -o/--output writes to files
   // Also --dribble writes keystrokes to file, --init-file loads custom config
   // We only allow safe display/navigation options
@@ -1660,7 +1696,6 @@ const READONLY_COMMANDS = [
 
   // Misc. safe commands
   'sleep',
-  'which',
   'type',
   'expr', // Evaluate expressions (arithmetic, string matching)
   'test', // Conditional evaluation (file checks, comparisons)
@@ -1890,11 +1925,84 @@ export function containsUnquotedExpansion(
  * @param command The command string to check
  * @returns true if the command is read-only
  */
+/**
+ * Official 2.1.319 #1754 (`pnt` / `Ffn`): strip plain `timeout DURATION` prefix
+ * from read-only commands (e.g. `timeout 30 rg foo`), skipping shell builtins
+ * (`[[`, `alias`, `cd`, `help`, `history`, `type`) and option-bearing `timeout`.
+ */
+const TIMEOUT_DURATION_RE = /^\d+(?:\.\d+)?[smhd]?$/
+const TIMEOUT_EXCLUDED_BUILTINS = new Set([
+  '[[',
+  'alias',
+  'cd',
+  'help',
+  'history',
+  'type',
+])
+const PLAIN_TIMEOUT_PREFIX_RE =
+  /^timeout[ \t]+(\d+(?:\.\d+)?[smhd]?)[ \t]+([\s\S]+)$/
+
+export function stripPlainTimeoutPrefix(command: string): string {
+  let current = command.trim()
+  for (;;) {
+    const match = PLAIN_TIMEOUT_PREFIX_RE.exec(current)
+    if (!match) break
+    const rest = match[2]!.trimStart()
+    const nextToken = rest.split(/\s+/)[0] ?? ''
+    if (
+      !nextToken ||
+      nextToken.startsWith('-') ||
+      TIMEOUT_EXCLUDED_BUILTINS.has(nextToken)
+    ) {
+      break
+    }
+    current = rest
+  }
+  return current
+}
+
+export function stripPlainTimeoutArgv(argv: readonly string[]): string[] {
+  let current = [...argv]
+  while (
+    current[0] === 'timeout' &&
+    TIMEOUT_DURATION_RE.test(current[1] ?? '') &&
+    current[2] !== undefined &&
+    !current[2].startsWith('-') &&
+    !TIMEOUT_EXCLUDED_BUILTINS.has(current[2])
+  ) {
+    current = current.slice(2)
+  }
+  return current
+}
+
+/**
+ * Official 2.1.321 #1900 (`Cpn` / `EDo`):
+ * Expand double-quoted `"$PWD"` or `"$PWD/<safe_subpath>"` to the current
+ * working directory for read-only / path validation when no `cd` precedes it
+ * and `PWD` is not otherwise referenced in the command.
+ */
+const SAFE_DOUBLE_QUOTED_PWD_RE = /"\$PWD((?:\/[^"$`\\\r\n]*)?)"/g
+const SAFE_PWD_CWD_CHARS_RE = /^[^"$`\\\r\n]+$/
+
+export function expandSafeDoubleQuotedPwd(
+  command: string,
+  cwd: string,
+): string {
+  if (!command.includes('"$PWD')) return command
+  if (!SAFE_PWD_CWD_CHARS_RE.test(cwd)) return command
+  const withoutSafePwd = command.replace(SAFE_DOUBLE_QUOTED_PWD_RE, '')
+  if (withoutSafePwd.includes('PWD')) return command
+  return command.replace(
+    SAFE_DOUBLE_QUOTED_PWD_RE,
+    (_m, suffix: string) => `"${cwd}${suffix}"`,
+  )
+}
+
 function isCommandReadOnly(command: string): boolean {
   // Handle common stderr-to-stdout redirection pattern
   // This handles both "command 2>&1" at the end of a full command
   // and "command 2>&1" as part of a pipeline component
-  let testCommand = command.trim()
+  let testCommand = stripPlainTimeoutPrefix(command.trim())
   if (testCommand.endsWith(' 2>&1')) {
     // Remove the stderr redirection for pattern matching
     testCommand = testCommand.slice(0, -5).trim()
@@ -2104,7 +2212,11 @@ export function checkReadOnlyConstraints(
   input: z.infer<typeof BashTool.inputSchema>,
   compoundCommandHasCd: boolean,
 ): PermissionResult {
-  const { command } = input
+  // Official 2.1.321 #1900: expand safe `"$PWD"` / `"$PWD/..."` to current cwd
+  // when there is no `cd` in the compound command.
+  const command = compoundCommandHasCd
+    ? input.command
+    : expandSafeDoubleQuotedPwd(input.command, getCwd())
 
   // densable F7u / 2.1.214 #4: over-length cannot be auto-allowed as read-only
   if (command.length > READ_ONLY_ANALYSIS_MAX_LENGTH) {

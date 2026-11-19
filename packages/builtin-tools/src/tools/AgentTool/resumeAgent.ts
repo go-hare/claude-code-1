@@ -82,6 +82,7 @@ import { FORK_AGENT, isForkSubagentProductEnabled } from './forkSubagent.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
 import { isBuiltInAgent } from './loadAgentsDir.js'
 import { runAgent } from './runAgent.js'
+import { isAgentStoppedByPerson } from 'src/utils/sessionHost.js'
 import { SubagentHandbackTool } from '../SubagentHandbackTool/SubagentHandbackTool.js'
 
 export type ResumeAgentResult = {
@@ -509,8 +510,11 @@ async function resumeAgentBackgroundAfterClaim({
   }
 
   // stoppedByUser (except observer-activity): refuse unless userInitiated,
-  // else clear disk marker and proceed.
-  if (meta?.stoppedByUser && promptOriginKind !== 'observer-activity') {
+  // else clear disk marker and proceed. Official #1913 consults stoppedByPerson.
+  if (
+    isAgentStoppedByPerson(agentId, meta?.stoppedByUser) &&
+    promptOriginKind !== 'observer-activity'
+  ) {
     if (!userInitiated) {
       clearResuming()
       throw new AgentStoppedByUserError(
@@ -1222,7 +1226,10 @@ async function resumeAgentBackgroundAfterClaim({
       typeof live?.parentAgentId === 'string' ? live.parentAgentId : undefined
     spawnDepthFromTask =
       typeof live?.spawnDepth === 'number' ? live.spawnDepth : undefined
-    if (!userInitiated && live?.stoppedByUser === true) {
+    if (
+      !userInitiated &&
+      isAgentStoppedByPerson(agentId, live?.stoppedByUser)
+    ) {
       clearResuming()
       throw new AgentStoppedByUserError(
         `Agent ${agentId} was stopped by the user and won't be resumed. Treat its work as cancelled; only launch a new agent if the user explicitly asks.`,

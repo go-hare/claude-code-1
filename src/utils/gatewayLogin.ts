@@ -85,7 +85,7 @@ export const gatewayOAuthMetadataSchema = z.object({
   token_endpoint: z.string().optional(),
 })
 
-/** densable fl_ */
+/** densable fl_ — Official 2.1.319 (#1708): optional operator login_notice */
 export const gatewayDeviceAuthorizationResponseSchema = z.object({
   device_code: z.string(),
   user_code: z.string(),
@@ -93,7 +93,22 @@ export const gatewayDeviceAuthorizationResponseSchema = z.object({
   verification_uri_complete: z.string().optional(),
   expires_in: z.number(),
   interval: z.number().optional(),
+  login_notice: z.string().optional().catch(undefined),
 })
+
+/**
+ * Official 2.1.321 `ELt(url)` (#1932): strip `username:password` credentials
+ * (and query/hash/trailing slash) from a gateway URL before showing it in
+ * error messages.
+ */
+export function stripGatewayUrlCredentials(rawUrl: string): string {
+  try {
+    const { origin, pathname } = new URL(rawUrl)
+    return `${origin}${pathname.replace(/\/$/, '')}`
+  } catch {
+    return rawUrl.replace(/(\/\/)[^/@\s]+@/, '$1')
+  }
+}
 
 /** densable Tki */
 export const gatewayTokenResponseSchema = z.object({
@@ -125,7 +140,7 @@ export function resolveSameOriginOAuthEndpoint(
       // fall through
     }
     logForDebugging(
-      `[gateway-login] ignoring advertised endpoint ${advertised} (not same-origin with ${gatewayBaseUrl}); using ${fallbackPath}`,
+      `[gateway-login] ignoring advertised endpoint ${stripGatewayUrlCredentials(advertised)} (not same-origin with ${stripGatewayUrlCredentials(gatewayBaseUrl)}); using ${fallbackPath}`,
     )
   }
   return `${gatewayBaseUrl}${fallbackPath}`

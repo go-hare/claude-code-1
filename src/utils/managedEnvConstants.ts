@@ -84,6 +84,8 @@ const PROVIDER_MANAGED_ENV_VARS = new Set([
   'ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION',
   'CLAUDE_CODE_SUBAGENT_MODEL',
   'CLAUDE_CODE_SUBAGENT_MODEL_FORCE',
+  'CLAUDE_CODE_DISABLE_FEATURE_FLAGS',
+  'DISABLE_GROWTHBOOK',
   'GEMINI_MODEL',
   'GEMINI_SMALL_FAST_MODEL',
   // Gemini provider specific - separate from Anthropic/OpenAI
@@ -183,6 +185,52 @@ export const HOST_PROXY_ENV_VARS = new Set([
 /** densable LLn(key) */
 export function isHostProxyEnvVar(key: string): boolean {
   return HOST_PROXY_ENV_VARS.has(key.toUpperCase())
+}
+
+/**
+ * Official 2.1.319 `p` + `V7r` (#1808): transport env vars that settings files
+ * cannot set where the host/policy manages the network (coworkCloud / policyTransportEnv).
+ * Includes CLAUDE_CODE_PROXY_RESOLVES_HOSTS.
+ */
+export const POLICY_TRANSPORT_ENV_VARS = new Set([
+  'HTTPS_PROXY',
+  'HTTP_PROXY',
+  'NO_PROXY',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'ALL_PROXY',
+  'NPM_CONFIG_HTTPS_PROXY',
+  'NPM_CONFIG_HTTP_PROXY',
+  'NPM_CONFIG_PROXY',
+  'NODE_EXTRA_CA_CERTS',
+  'CLAUDE_CODE_CERT_STORE',
+  'CLAUDE_CODE_DISABLE_LOOPED_CROSS_CERT_DROP',
+  'CLAUDE_CODE_DISABLE_SELF_NAMED_CERT_DROP',
+  'CLAUDE_CODE_CLIENT_CERT',
+  'CLAUDE_CODE_CLIENT_KEY',
+  'CLAUDE_CODE_CLIENT_KEY_PASSPHRASE',
+  'NODE_TLS_REJECT_UNAUTHORIZED',
+  'CLAUDE_CODE_PROXY_RESOLVES_HOSTS',
+  'CLAUDE_CODE_ENABLE_PROXY_AUTH_HELPER',
+  'CLAUDE_CODE_PROXY_AUTH_HELPER_TTL_MS',
+  'API_FORCE_IDLE_TIMEOUT',
+  'ANTHROPIC_UNIX_SOCKET',
+  'CLAUDE_CODE_DISABLE_HTTPS_AGENT_KEEPING',
+  'NODE_OPTIONS',
+])
+
+/** Official 2.1.319 `Udi(key)` (#1808): blocked under coworkCloud. */
+export function isCoworkCloudBlockedEnvVar(key: string): boolean {
+  return (
+    isHostProxyEnvVar(key) ||
+    isHostTransportSensitiveEnvVar(key) ||
+    POLICY_TRANSPORT_ENV_VARS.has(key.toUpperCase())
+  )
+}
+
+/** Official 2.1.319 `V7r` predicate (#1808): blocked under policyTransportEnv. */
+export function isPolicyTransportEnvVar(key: string): boolean {
+  return POLICY_TRANSPORT_ENV_VARS.has(key.toUpperCase())
 }
 
 /**
@@ -336,6 +384,7 @@ export const SAFE_ENV_VARS = new Set([
   'OTEL_METRICS_EXPORTER',
   'OTEL_METRICS_INCLUDE_ACCOUNT_UUID',
   'OTEL_METRICS_INCLUDE_ENTRYPOINT',
+  'OTEL_METRICS_INCLUDE_REPOSITORY',
   'OTEL_METRICS_INCLUDE_RESOURCE_ATTRIBUTES',
   'OTEL_METRICS_INCLUDE_SESSION_ID',
   'OTEL_METRICS_INCLUDE_VERSION',

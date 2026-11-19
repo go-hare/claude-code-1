@@ -42,6 +42,7 @@ import { logForDebugging } from './debug.js'
 import { errorMessage, getErrnoCode, isENOENT } from './errors.js'
 import { filterCompilableIgnorePatterns } from './ignorePatterns.js'
 import { execFileNoThrow, execFileNoThrowWithCwd } from './execFileNoThrow.js'
+import { SandboxManager } from './sandbox/sandbox-adapter.js'
 import {
   registerWorktreeSessionProvider,
   scrubGitEnvForWorktree,
@@ -310,12 +311,25 @@ export type WorktreeSession = {
   creationDurationMs?: number
   /** True if git sparse-checkout was applied via settings.worktree.sparsePaths. */
   usedSparsePaths?: boolean
+  /**
+   * Official 2.1.325 #1871 — original launch project root preserved across
+   * worktree entry so project skills, commands, and agents remain discoverable.
+   */
+  extensionRoot?: string
 }
 
 let currentWorktreeSession: WorktreeSession | null = null
 
 export function getCurrentWorktreeSession(): WorktreeSession | null {
   return currentWorktreeSession
+}
+
+/**
+ * Official 2.1.325 #1871 — return the active worktree session's preserved
+ * `extensionRoot` when inside a worktree entered from the launch project root.
+ */
+export function getWorktreeExtensionRoot(): string | undefined {
+  return currentWorktreeSession?.extensionRoot
 }
 
 /**
@@ -470,6 +484,9 @@ export async function enterExistingWorktreeSession(
     originalHeadCommit: headOut.trim() || undefined,
     sessionId,
     enteredExisting: true,
+    ...(extraRoot === undefined && prev?.extensionRoot !== undefined
+      ? { extensionRoot: prev.extensionRoot }
+      : {}),
   }
 
   saveCurrentProjectConfig(current => ({
@@ -923,6 +940,153 @@ export async function assertWorktreeNotForeignRepo(
 }
 
 /**
+ * Official 2.1.319 #1780 (`JZs` / `W3t` / `ref_target_not_plain`):
+ * Reject non-regular/symlink git ref targets before creating or resetting a
+ * worktree, and skip fast-resume reset when the Bash sandbox is enabled.
+ */
+export type WorktreeResumeSkipReason =
+  | 'sandbox_confines_writes'
+  | 'sandbox_set_for_checkout'
+  | 'ref_target_not_plain'
+
+export function formatWorktreeResumeSkipNotice(
+  name: string,
+  reason: WorktreeResumeSkipReason,
+): string {
+  const why =
+    reason === 'sandbox_confines_writes'
+      ? 'moving it to the current base would run outside the Bash sandbox, which is restricting file writes'
+      : reason === 'sandbox_set_for_checkout'
+        ? "the worktree's or the repository's own settings files enable the Bash sandbox (or could not be read), and moving it to the current base would run outside that sandbox"
+        : 'git could write outside this repository through an entry in its git folder'
+  const suffix =
+    reason === 'ref_target_not_plain'
+      ? 'a different worktree name may be refused for the same reason, and that refusal names the entry'
+      : 'a different worktree name gives a fresh one from the current base'
+  return `Resumed worktree "${name}" on its earlier base instead of updating it, because ${why}; ${suffix}.`
+}
+
+/**
+ * Verify that git's ref file (and every intermediate component inside `gitDir`)
+ * is either absent or a plain regular file / real directory — never a symlink,
+ * FIFO, socket, or device (`ref_target_not_plain`).
+ */
+export async function assertGitRefTargetPlain(
+  gitDir: string,
+  branchName: string,
+): Promise<
+  { ok: true } | { ok: false; reason: 'ref_target_not_plain'; entry: string }
+> {
+  // #1780: Detect reftable backend (`<gitDir>/reftable`). In reftable repos
+  // `.git/refs/heads` is a plain placeholder file rather than a directory, so
+  // walking `refs/heads/...` would falsely trigger `ref_target_not_plain`.
+  const reftableDir = join(gitDir, 'reftable')
+  let isReftable = false
+  try {
+    const rtStat = await lstat(reftableDir)
+    if (rtStat.isSymbolicLink() || !rtStat.isDirectory()) {
+      return { ok: false, reason: 'ref_target_not_plain', entry: reftableDir }
+    }
+    isReftable = true
+  } catch (e: unknown) {
+    if (!isENOENT(e)) {
+      return { ok: false, reason: 'ref_target_not_plain', entry: reftableDir }
+    }
+  }
+
+  if (isReftable) {
+    for (const fixedFile of [join('reftable', 'tables.list'), 'HEAD']) {
+      const p = join(gitDir, fixedFile)
+      try {
+        const st = await lstat(p)
+        if (st.isSymbolicLink() || !st.isFile()) {
+          return { ok: false, reason: 'ref_target_not_plain', entry: p }
+        }
+      } catch (e: unknown) {
+        if (!isENOENT(e)) {
+          return { ok: false, reason: 'ref_target_not_plain', entry: p }
+        }
+      }
+    }
+    return { ok: true }
+  }
+
+  const refParts = ['refs', 'heads', ...branchName.split('/').filter(Boolean)]
+  let cur = gitDir
+  for (let i = 0; i < refParts.length; i++) {
+    cur = join(cur, refParts[i]!)
+    const isLeaf = i === refParts.length - 1
+    try {
+      const st = await lstat(cur)
+      if (st.isSymbolicLink()) {
+        return { ok: false, reason: 'ref_target_not_plain', entry: cur }
+      }
+      if (isLeaf ? !st.isFile() : !st.isDirectory()) {
+        return { ok: false, reason: 'ref_target_not_plain', entry: cur }
+      }
+    } catch (e: unknown) {
+      if (isENOENT(e)) break
+      return { ok: false, reason: 'ref_target_not_plain', entry: cur }
+    }
+  }
+  for (const fixedFile of ['HEAD', 'packed-refs']) {
+    const p = join(gitDir, fixedFile)
+    try {
+      const st = await lstat(p)
+      if (st.isSymbolicLink() || !st.isFile()) {
+        return { ok: false, reason: 'ref_target_not_plain', entry: p }
+      }
+    } catch (e: unknown) {
+      if (!isENOENT(e)) {
+        return { ok: false, reason: 'ref_target_not_plain', entry: p }
+      }
+    }
+  }
+  return { ok: true }
+}
+
+export async function resolveCommonGitDirForRefCheck(
+  repoRoot: string,
+): Promise<string | null> {
+  const res = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['rev-parse', '--git-common-dir'],
+    { cwd: repoRoot, env: gitWorktreeEnv() },
+  )
+  const raw = res.stdout.trim()
+  if (res.code === 0 && raw) {
+    return resolve(repoRoot, raw)
+  }
+  return join(repoRoot, '.git')
+}
+
+async function checkoutSettingsEnableSandbox(
+  checkoutDirs: readonly string[],
+): Promise<boolean> {
+  for (const dir of checkoutDirs) {
+    for (const rel of [
+      join('.claude', 'settings.json'),
+      join('.claude', 'settings.local.json'),
+    ]) {
+      const p = join(dir, rel)
+      try {
+        const raw = await readFile(p, 'utf-8')
+        const parsed = JSON.parse(raw) as {
+          sandbox?: { enabled?: boolean }
+        }
+        if (parsed?.sandbox?.enabled === true) return true
+      } catch (e: unknown) {
+        if (!isENOENT(e)) {
+          // Unreadable settings file in checkout: fail closed (#1780)
+          return true
+        }
+      }
+    }
+  }
+  return false
+}
+
+/**
  * Creates a new git worktree for the given slug, or resumes it if it already exists.
  * Named worktrees reuse the same path across invocations, so the existence check
  * prevents unconditionally running `git fetch` (which can hang waiting for credentials)
@@ -950,25 +1114,53 @@ export async function getOrCreateWorktree(
       [],
       liveLaunchDirs(getCwd(), repoRoot),
     )
+
     // densable zHt: s = fromHead ?? (!prNumber && baseRef==="head")
     const fromHead =
       !options?.prNumber && getInitialSettings().worktree?.baseRef === 'head'
     const baseline = await readWorktreeBaseline(worktreePath)
     if (!fromHead && !options?.prNumber) {
-      const resetTo = await resetResumedWorktreeIfFullyUpstream(
-        repoRoot,
-        worktreePath,
-        worktreeBranch,
-        existingHead,
-        baseline,
-      )
-      if (resetTo) {
-        return {
+      // Official 2.1.319 #1780: skip fast-resume reset when sandbox is enabled
+      // (either active in this session or set in repo/worktree settings) or
+      // when git ref target is not a plain file (`ref_target_not_plain`).
+      const gitCommonDir = await resolveCommonGitDirForRefCheck(repoRoot)
+      const refCheck = gitCommonDir
+        ? await assertGitRefTargetPlain(gitCommonDir, worktreeBranch)
+        : ({ ok: true } as const)
+      const sandboxBlocksReset =
+        SandboxManager.isSandboxingEnabled() ||
+        (await checkoutSettingsEnableSandbox([worktreePath, repoRoot]))
+      if (!refCheck.ok) {
+        logForDebugging(
+          formatWorktreeResumeSkipNotice(slug, 'ref_target_not_plain'),
+          { level: 'warn' },
+        )
+      } else if (sandboxBlocksReset) {
+        logForDebugging(
+          formatWorktreeResumeSkipNotice(
+            slug,
+            SandboxManager.isSandboxingEnabled()
+              ? 'sandbox_confines_writes'
+              : 'sandbox_set_for_checkout',
+          ),
+          { level: 'warn' },
+        )
+      } else {
+        const resetTo = await resetResumedWorktreeIfFullyUpstream(
+          repoRoot,
           worktreePath,
           worktreeBranch,
-          headCommit: resetTo,
-          existed: true,
-          refreshed: true,
+          existingHead,
+          baseline,
+        )
+        if (resetTo) {
+          return {
+            worktreePath,
+            worktreeBranch,
+            headCommit: resetTo,
+            existed: true,
+            refreshed: true,
+          }
         }
       }
     }
@@ -1104,6 +1296,22 @@ export async function getOrCreateWorktree(
   // -B (not -b): reset any orphan branch left behind by a removed worktree dir.
   // Saves a `git branch -D` subprocess (~15ms spawn overhead) on every create.
   addArgs.push('-B', worktreeBranch, worktreePath, baseSha)
+
+  // Official 2.1.319 #1780 (`ref_target_not_plain`): before creating a worktree
+  // with `git worktree add -B`, verify the branch ref path is not a symlink or
+  // non-regular file (preventing sandbox escape via symlinked `.git/refs/...`).
+  const gitCommonDirForCreate = await resolveCommonGitDirForRefCheck(repoRoot)
+  if (gitCommonDirForCreate) {
+    const createRefCheck = await assertGitRefTargetPlain(
+      gitCommonDirForCreate,
+      worktreeBranch,
+    )
+    if (!createRefCheck.ok) {
+      throw new Error(
+        `Refusing to create worktree "${slug}": git ref target ${createRefCheck.entry} is not a plain file (ref_target_not_plain).`,
+      )
+    }
+  }
 
   const { code: createCode, stderr: createStderr } =
     await execFileNoThrowWithCwd(gitExe(), addArgs, {

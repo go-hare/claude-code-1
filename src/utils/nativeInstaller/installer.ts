@@ -236,13 +236,14 @@ async function isPossibleClaudeBinary(filePath: string): Promise<boolean> {
 async function getVersionPaths(version: string) {
   const dirs = getBaseDirectories()
 
-  // Create directories, but not the executable path (which is a file)
-  const dirsToCreate = [dirs.versions, dirs.staging, dirs.locks]
+  // Official 2.1.321 (#1923): create all required directories in one parallel batch.
+  const dirsToCreate = [
+    dirs.versions,
+    dirs.staging,
+    dirs.locks,
+    dirname(dirs.executable),
+  ]
   await Promise.all(dirsToCreate.map(dir => mkdir(dir, { recursive: true })))
-
-  // Ensure parent directory of executable exists
-  const executableParentDir = dirname(dirs.executable)
-  await mkdir(executableParentDir, { recursive: true })
 
   const installPath = join(dirs.versions, version)
 
@@ -567,9 +568,60 @@ async function performVersionUpdate(
   return needsInstall
 }
 
+/**
+ * Official 2.1.321 (#1923, `Yr` @16697040):
+ * In-process cache of verified version binary paths & sizes so repeated install
+ * / update checks within a single process skip redundant verification work.
+ */
+const verifiedVersionsCache = new Map<
+  string,
+  { installPath: string; size: number; mtimeMs: number }
+>()
+
+export function clearVerifiedVersionsCacheForTesting(): void {
+  verifiedVersionsCache.clear()
+}
+
+export async function isVersionBinaryVerifiedCached(
+  version: string,
+  installPath: string,
+): Promise<boolean> {
+  const cached = verifiedVersionsCache.get(version)
+  if (cached && cached.installPath === installPath) {
+    try {
+      const st = await stat(installPath)
+      if (
+        st.isFile() &&
+        st.size === cached.size &&
+        st.mtimeMs === cached.mtimeMs
+      ) {
+        return true
+      }
+    } catch {
+      // Fall through and clear stale entry
+    }
+    verifiedVersionsCache.delete(version)
+  }
+  if (!(await isPossibleClaudeBinary(installPath))) {
+    return false
+  }
+  try {
+    const st = await stat(installPath)
+    verifiedVersionsCache.set(version, {
+      installPath,
+      size: st.size,
+      mtimeMs: st.mtimeMs,
+    })
+  } catch {
+    // Non-fatal
+  }
+  return true
+}
+
 async function versionIsAvailable(version: string): Promise<boolean> {
-  const { installPath } = await getVersionPaths(version)
-  return isPossibleClaudeBinary(installPath)
+  // Official 2.1.321 (#1923): check directly without mkdir/writeFile side effects.
+  const installPath = join(getBaseDirectories().versions, version)
+  return isVersionBinaryVerifiedCached(version, installPath)
 }
 
 async function updateLatest(
@@ -578,6 +630,7 @@ async function updateLatest(
 ): Promise<{
   success: boolean
   latestVersion: string
+  wasSkipped?: boolean
   lockFailed?: boolean
   lockHolderPid?: number
 }> {
@@ -606,7 +659,7 @@ async function updateLatest(
           available_version:
             version as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         })
-        return { success: true, latestVersion: version }
+        return { success: true, wasSkipped: true, latestVersion: version }
       }
       version = maxVersion
     }
@@ -628,7 +681,7 @@ async function updateLatest(
       was_force_reinstall: false,
       was_already_running: true,
     })
-    return { success: true, latestVersion: version }
+    return { success: true, wasSkipped: true, latestVersion: version }
   }
 
   // Check if this version should be skipped due to minimumVersion setting
@@ -638,7 +691,7 @@ async function updateLatest(
       target_version:
         version as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
-    return { success: true, latestVersion: version }
+    return { success: true, wasSkipped: true, latestVersion: version }
   }
 
   // Track if we're actually installing or just symlinking
@@ -716,7 +769,7 @@ export async function removeDirectoryIfEmpty(path: string): Promise<void> {
   }
 }
 
-async function updateSymlink(
+export async function updateSymlink(
   symlinkPath: string,
   targetPath: string,
 ): Promise<boolean> {
@@ -802,8 +855,8 @@ async function updateSymlink(
     }
   }
 
-  // For non-Windows platforms, use symlinks as before
-  // Ensure parent directory exists (same as Windows path above)
+  // For non-Windows platforms, use symlinks as before.
+  // Ensure parent directory exists (same as Windows path above).
   const parentDir = dirname(symlinkPath)
   try {
     await mkdir(parentDir, { recursive: true })
@@ -815,54 +868,49 @@ async function updateSymlink(
     return false
   }
 
-  // Check if symlink already exists and points to the correct target
+  // Official 2.1.321 (#1923, `ni` @16708500): fast-path direct symlink creation
+  // first on Unix so fresh installs avoid stat + temp symlink + rename.
   try {
-    let symlinkExists = false
-    try {
-      await stat(symlinkPath)
-      symlinkExists = true
-    } catch {
-      // symlinkPath doesn't exist
+    await symlink(targetPath, symlinkPath)
+    logForDebugging(`Created symlink ${symlinkPath} -> ${targetPath}`)
+    return true
+  } catch (directError) {
+    if (getErrnoCode(directError) !== 'EEXIST') {
+      logError(
+        new Error(
+          `Failed to create symlink from ${symlinkPath} to ${targetPath}: ${directError}`,
+        ),
+      )
+      return false
     }
-
-    if (symlinkExists) {
-      try {
-        const currentTarget = await readlink(symlinkPath)
-        const resolvedCurrentTarget = resolve(
-          dirname(symlinkPath),
-          currentTarget,
-        )
-        const resolvedTargetPath = resolve(targetPath)
-
-        if (resolvedCurrentTarget === resolvedTargetPath) {
-          return false
-        }
-      } catch {
-        // Path exists but is not a symlink - may be a custom launcher
-      }
-
-      // Official 2.1.207: do not overwrite a custom launcher script/symlink
-      // that was not created by the native installer and is not an npm shim.
-      // New versions still install under versions/; user must remove the path
-      // and re-run update to let the installer manage the launcher again.
-      if (!(await isInstallerOwnedLauncher(symlinkPath))) {
-        logForDebugging(
-          `Not replacing ${symlinkPath}: it was not created by the native installer (not a symlink into a claude/versions/ directory) and is not an npm shim, so this update will not overwrite it. New versions still install under the versions/ directory; remove ${symlinkPath} and re-run the update to let the installer manage the launcher again.`,
-          { level: 'warn' },
-        )
-        return false
-      }
-
-      // Remove existing file/symlink before creating new one
-      await unlink(symlinkPath)
-    }
-  } catch (error) {
-    logError(new Error(`Failed to check/remove existing symlink: ${error}`))
   }
 
-  // Use atomic rename to avoid race conditions. Create symlink with temporary name
-  // then atomically rename to final name. This ensures the symlink always exists
-  // and is always valid, even with concurrent updates.
+  // EEXIST: check if symlink already points to the desired target (fast noop)
+  try {
+    const currentTarget = await readlink(symlinkPath)
+    const resolvedCurrentTarget = resolve(dirname(symlinkPath), currentTarget)
+    const resolvedTargetPath = resolve(targetPath)
+    if (resolvedCurrentTarget === resolvedTargetPath) {
+      return false
+    }
+  } catch {
+    // Path exists but is not a symlink - may be a custom launcher
+  }
+
+  // Official 2.1.207: do not overwrite a custom launcher script/symlink
+  // that was not created by the native installer and is not an npm shim.
+  // New versions still install under versions/; user must remove the path
+  // and re-run update to let the installer manage the launcher again.
+  if (!(await isInstallerOwnedLauncher(symlinkPath))) {
+    logForDebugging(
+      `Not replacing ${symlinkPath}: it was not created by the native installer (not a symlink into a claude/versions/ directory) and is not an npm shim, so this update will not overwrite it. New versions still install under the versions/ directory; remove ${symlinkPath} and re-run the update to let the installer manage the launcher again.`,
+      { level: 'warn' },
+    )
+    return false
+  }
+
+  // Use atomic rename to avoid race conditions (without unlinking first so
+  // concurrent invocations always see a valid launcher).
   const tempSymlink = `${symlinkPath}.tmp.${process.pid}.${Date.now()}`
   try {
     await symlink(targetPath, tempSymlink)
@@ -1048,6 +1096,7 @@ export async function checkInstall(
 type InstallLatestResult = {
   latestVersion: string | null
   wasUpdated: boolean
+  wasSkipped?: boolean
   lockFailed?: boolean
   lockHolderPid?: number
 }
@@ -1116,7 +1165,8 @@ async function installLatestImpl(
 
   return {
     latestVersion: updateResult.latestVersion,
-    wasUpdated: updateResult.success,
+    wasUpdated: updateResult.success && !updateResult.wasSkipped,
+    wasSkipped: updateResult.wasSkipped,
     lockFailed: false,
   }
 }

@@ -3,6 +3,7 @@ import { execa } from 'execa'
 import { mkdir, stat } from 'fs/promises'
 import * as os from 'os'
 import { join } from 'path'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { logEvent } from 'src/services/analytics/index.js'
 import { registerCleanup } from '../cleanupRegistry.js'
 import { getCwd } from '../cwd.js'
@@ -11,7 +12,7 @@ import {
   embeddedSearchToolsBinaryPath,
   hasEmbeddedSearchTools,
 } from '../embeddedTools.js'
-import { getClaudeConfigHomeDir } from '../envUtils.js'
+import { getClaudeConfigHomeDir, isEnvTruthy } from '../envUtils.js'
 import { pathExists } from '../file.js'
 import { getFsImplementation } from '../fsOperations.js'
 import { logError } from '../log.js'
@@ -532,7 +533,7 @@ FIND_GREP_FUNC_END
     `
   }
 
-  // densable K2g: refuse pkill patterns that match the Claude CLI process
+  // densable K2g + #1865: refuse pkill patterns matching CLI & inject --ignore-ancestors in cloud
   const pkillGuard = createPkillSelfGuardShellIntegration()
   content += `
       echo "# Shadow pkill to refuse patterns matching the CLI process" >> "$SNAPSHOT_FILE"
@@ -540,6 +541,18 @@ FIND_GREP_FUNC_END
 ${pkillGuard}
 PKILL_FUNC_END
     `
+
+  // Official 2.1.321 #1865 (`rls`): in cloud sessions (CLAUDE_CODE_REMOTE),
+  // wrap pgrep and pidwait with --ignore-ancestors when supported.
+  const pgrepPidwaitGuard = createPgrepPidwaitIgnoreAncestorsShellIntegration()
+  if (pgrepPidwaitGuard !== null) {
+    content += `
+      echo "# Shadow pgrep/pidwait with --ignore-ancestors in cloud sessions" >> "$SNAPSHOT_FILE"
+      cat >> "$SNAPSHOT_FILE" << 'PGREP_PIDWAIT_FUNC_END'
+${pgrepPidwaitGuard}
+PGREP_PIDWAIT_FUNC_END
+    `
+  }
 
   const effectivePluginBinPaths =
     getPlatform() === 'windows'
@@ -579,8 +592,47 @@ PKILL_FUNC_END
 }
 
 /**
- * densable `K2g` — shadow `pkill` so patterns matching the Claude CLI process
- * (CLAUDE_PID) are refused. Prevents `pkill -f` self-kill on Linux (#16).
+ * Official 2.1.321 #1865 (`m4n` / `h4n` / `rls`):
+ * In cloud sessions (`CLAUDE_CODE_REMOTE`), inject `--ignore-ancestors` into
+ * `pkill`, `pgrep`, and `pidwait` wrappers (when supported by `--help`) so
+ * they never match the session's own parent processes.
+ */
+function isIgnoreAncestorsEnabled(): boolean {
+  return (
+    isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) &&
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_dreamy_sunbeam', true) !== false
+  )
+}
+
+function buildIgnoreAncestorsLines(cmd: string, indent: string): string[] {
+  return [
+    `${indent}case "$(command ${cmd} --help 2>&1)" in`,
+    `${indent}  *--ignore-ancestors*) set -- --ignore-ancestors \${1+"$@"} ;;`,
+    `${indent}esac`,
+  ]
+}
+
+export function createPgrepPidwaitIgnoreAncestorsShellIntegration():
+  | string
+  | null {
+  if (!isIgnoreAncestorsEnabled()) return null
+  return ['pgrep', 'pidwait']
+    .flatMap(cmd => [
+      `unalias ${cmd} 2>/dev/null || true`,
+      `if command -v ${cmd} >/dev/null 2>&1; then`,
+      `  function ${cmd} {`,
+      ...buildIgnoreAncestorsLines(cmd, '    '),
+      `    command ${cmd} \${1+"$@"}`,
+      '  }',
+      'fi',
+    ])
+    .join('\n')
+}
+
+/**
+ * densable `K2g` + #1865 — shadow `pkill` so patterns matching the Claude CLI
+ * process (CLAUDE_PID) are refused, and in cloud sessions inject
+ * `--ignore-ancestors` when supported.
  */
 export function createPkillSelfGuardShellIntegration(): string {
   return [
@@ -604,6 +656,9 @@ export function createPkillSelfGuardShellIntegration(): string {
     '      printf \'pkill: refusing to run — this pattern matches the Claude CLI process (PID %s). Narrow the pattern, or target your own children with `pkill -P $$ ...`.\\n\' "${CLAUDE_PID}" >&2',
     '      return 1',
     '    fi',
+    ...(isIgnoreAncestorsEnabled()
+      ? buildIgnoreAncestorsLines('pkill', '    ')
+      : []),
     '  fi',
     '  command pkill ${1+"$@"}',
     '}',

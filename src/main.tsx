@@ -2865,7 +2865,39 @@ async function run(): Promise<CommanderCommand> {
         messagingSocketPath,
       );
       const preloadedCommandAssembly = preloadCommandAssembly(preSetupCwd, worktreeEnabled);
-      await setupPromise;
+      try {
+        await setupPromise;
+      } catch (err) {
+        // #1927 (official RT + Zqo): write exit-cause and exit-detail on fatal
+        // worktree chdir failure so daemon/bg callers see the exact cause.
+        if (
+          worktreeEnabled &&
+          err &&
+          typeof err === 'object' &&
+          'syscall' in err &&
+          (err as NodeJS.ErrnoException).syscall === 'chdir'
+        ) {
+          const errnoCode = (err as NodeJS.ErrnoException).code ?? 'unknown';
+          const targetPath = (err as NodeJS.ErrnoException).path ?? '';
+          const reason =
+            errnoCode === 'ENOENT' || errnoCode === 'ENOTDIR'
+              ? 'does not exist or is not a directory. It may have been removed out from under this session; retrying will recreate it.'
+              : errnoCode === 'EACCES' || errnoCode === 'EPERM'
+                ? `is not accessible (${errnoCode}). Check the directory's permissions.`
+                : `cannot be entered (${errorMessage(err)}).`;
+          const detail = targetPath
+            ? `Error: worktree directory ${targetPath} ${reason}`
+            : `Error: worktree directory ${reason}`;
+          process.stderr.write(chalk.red(`${detail}\n`));
+          logError(err instanceof Error ? err : new Error(String(err)));
+          const { writeExitCause, writeExitDetail } = await import('./daemon/bgWorker.js');
+          writeExitCause(`worktree_chdir:${errnoCode}`);
+          writeExitDetail(`worktree_chdir:${errnoCode}`, detail);
+          // eslint-disable-next-line custom-rules/no-process-exit
+          process.exit(1);
+        }
+        throw err;
+      }
       logForDebugging(`[STARTUP] setup() completed in ${Date.now() - setupStart}ms`);
       profileCheckpoint('action_after_setup');
 
@@ -5407,6 +5439,33 @@ async function run(): Promise<CommanderCommand> {
           maybeActivateProactive(options);
           maybeActivateBrief(options);
 
+          const resumedSessionId = getSessionId();
+          // #1717: Defer SEP-2663 MCP task restoration until REPL mounts with
+          // live AppState (`setAppState`), instead of updating the dead local
+          // `resumeData.initialState` snapshot before `launchRepl`.
+          const resumeSep2663Tasks =
+            !options.forkSession && !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_MCP_TASKS)
+              ? {
+                  sessionId: resumedSessionId,
+                  restore: ({
+                    setAppState: liveSetAppState,
+                    getMcpClients: getLiveClients,
+                  }: {
+                    setAppState: (updater: (prev: AppState) => AppState) => void;
+                    getMcpClients: () => readonly import('./services/mcp/types.js').MCPServerConnection[];
+                  }) =>
+                    restorePersistedSep2663TasksOnResume({
+                      sessionId: resumedSessionId,
+                      setAppState: liveSetAppState,
+                      getMcpClients: () => {
+                        const live = getLiveClients();
+                        return live.length > 0 ? live : mcpClients;
+                      },
+                      mcpPromise,
+                    }),
+                }
+              : undefined;
+
           await launchRepl(
             root,
             {
@@ -5422,6 +5481,7 @@ async function run(): Promise<CommanderCommand> {
               initialContentReplacements: resumeData.contentReplacements,
               initialAgentName: resumeData.agentName,
               initialAgentColor: resumeData.agentColor,
+              resumeSep2663Tasks,
             },
             renderAndRun,
           );
@@ -6289,6 +6349,19 @@ async function run(): Promise<CommanderCommand> {
       const { pluginUpdateHandler } = await import('./cli/handlers/plugins.js');
       await pluginUpdateHandler(plugin, options);
     });
+
+  // Plugin restore-set-aside command (#1960)
+  pluginCmd
+    .command('restore-set-aside <plugin>')
+    .description(
+      'Give a plugin id back the options and secrets set aside when a marketplace your organization declares replaced another source',
+    )
+    .option('--discard', 'Delete what is set aside instead of restoring it')
+    .addOption(coworkOption())
+    .action(async (plugin: string, options: { discard?: boolean; cowork?: boolean }) => {
+      const { pluginRestoreSetAsideHandler } = await import('./cli/handlers/plugins.js');
+      await pluginRestoreSetAsideHandler(plugin, options);
+    });
   // END ANT-ONLY
 
   // Setup token command — densable 2.1.234 #44 allowExcessArguments(false)
@@ -6314,12 +6387,14 @@ async function run(): Promise<CommanderCommand> {
     .description('Manage background agents')
     .option('--cwd <path>', 'Scope session list to a directory')
     .option('--json', 'Output session list as JSON and exit')
+    .option('--all', 'With --json: also include completed background sessions')
     .option('--add-dir <path>', 'Additional directories to allow tool access for (repeatable)')
     .option('--settings <file>', 'Path to a settings JSON file')
     .option('--mcp-config <path>', 'MCP config to forward to dispatched sessions')
     .option('--plugin-dir <path>', 'Plugin directory to forward to dispatched sessions')
     .option('--permission-mode <mode>', 'Permission mode for dispatched sessions')
     .option('--model <model>', 'Model for dispatched sessions')
+    .option('--agent <agent>', 'Default agent for dispatched sessions')
     .addOption(
       // densable agents --effort: same YBn soft-parse as main CLI.
       new Option('--effort <level>', 'Effort level for dispatched sessions').argParser((rawValue: string) => {
@@ -6337,9 +6412,12 @@ async function run(): Promise<CommanderCommand> {
     .option('--strict-mcp-config', 'Strict MCP config for dispatched sessions')
     .option('--restricted', RESTRICTED_DISPATCH_OPTION_HELP)
     .allowUnknownOption(true)
-    .action(async () => {
-      const agentsIdx = process.argv.indexOf('agents');
-      const rawArgs = agentsIdx >= 0 ? process.argv.slice(agentsIdx + 1) : [];
+    .action(async (_options, cmd: CommanderCommand) => {
+      // #1883: Forward leading global flags via cmd.optsWithGlobals() so the
+      // Commander fallback preserves options placed before `agents` just like
+      // the cli.tsx fast-path.
+      const mergedOpts = cmd.optsWithGlobals() as Record<string, unknown>;
+      const rawArgs = buildAgentsArgsFromOptsWithGlobals(mergedOpts, process.argv);
       const { agentsMain } = await import('./cli/agents.js');
       await agentsMain(rawArgs);
       // process.exit — mountFleetView's Ink TUI can leave event-loop handles
@@ -6807,4 +6885,256 @@ export function splitBlockingAndNonBlockingMcpConfigs(
     }
   }
   return { blocking, nonBlocking };
+}
+
+const AGENTS_SERIALIZED_VALUE_FLAGS = new Map<string, string>([
+  ['cwd', '--cwd'],
+  ['settings', '--settings'],
+  ['permissionMode', '--permission-mode'],
+  ['model', '--model'],
+  ['effort', '--effort'],
+  ['agent', '--agent'],
+  ['fallbackModel', '--fallback-model'],
+  ['appendSystemPrompt', '--append-system-prompt'],
+  ['jsonSchema', '--json-schema'],
+]);
+
+const AGENTS_SERIALIZED_MULTI_FLAGS = new Map<string, string>([
+  ['addDir', '--add-dir'],
+  ['mcpConfig', '--mcp-config'],
+  ['pluginDir', '--plugin-dir'],
+]);
+
+const AGENTS_SERIALIZED_BOOL_FLAGS = new Map<string, string>([
+  ['json', '--json'],
+  ['all', '--all'],
+  ['dangerouslySkipPermissions', '--dangerously-skip-permissions'],
+  ['allowDangerouslySkipPermissions', '--allow-dangerously-skip-permissions'],
+  ['strictMcpConfig', '--strict-mcp-config'],
+  ['restricted', '--restricted'],
+]);
+
+const AGENTS_KNOWN_CLI_VALUE_FLAGS = new Set([
+  ...AGENTS_SERIALIZED_VALUE_FLAGS.values(),
+  ...AGENTS_SERIALIZED_MULTI_FLAGS.values(),
+]);
+const AGENTS_KNOWN_CLI_BOOL_FLAGS = new Set([...AGENTS_SERIALIZED_BOOL_FLAGS.values()]);
+
+/**
+ * #1883: Build the `agentsMain(args)` argv array from Commander's
+ * `cmd.optsWithGlobals()` merged with any unknown trailing args after `agents`,
+ * so leading global flags before `agents` (e.g. `claude --model opus agents`)
+ * are preserved on the Commander fallback path as well as the fast-path.
+ */
+export function buildAgentsArgsFromOptsWithGlobals(
+  mergedOpts: Record<string, unknown>,
+  argv: readonly string[],
+): string[] {
+  const out: string[] = [];
+
+  for (const [key, flag] of AGENTS_SERIALIZED_VALUE_FLAGS) {
+    const val = mergedOpts[key];
+    if (typeof val === 'string' && val.length > 0) {
+      out.push(flag, val);
+    }
+  }
+
+  for (const [key, flag] of AGENTS_SERIALIZED_MULTI_FLAGS) {
+    const val = mergedOpts[key];
+    if (typeof val === 'string' && val.length > 0) {
+      out.push(flag, val);
+    } else if (Array.isArray(val)) {
+      for (const item of val) {
+        if (typeof item === 'string' && item.length > 0) {
+          out.push(flag, item);
+        }
+      }
+    }
+  }
+
+  for (const [key, flag] of AGENTS_SERIALIZED_BOOL_FLAGS) {
+    if (mergedOpts[key] === true) {
+      out.push(flag);
+    }
+  }
+
+  // Preserve any unknown trailing flags after `agents` (since `.allowUnknownOption(true)`).
+  const agentsIdx = argv.indexOf('agents');
+  if (agentsIdx >= 0) {
+    const trailing = argv.slice(agentsIdx + 1);
+    for (let i = 0; i < trailing.length; i++) {
+      const token = trailing[i]!;
+      const eq = token.indexOf('=');
+      const flag = eq > 0 ? token.slice(0, eq) : token;
+      if (AGENTS_KNOWN_CLI_BOOL_FLAGS.has(flag)) {
+        continue;
+      }
+      if (AGENTS_KNOWN_CLI_VALUE_FLAGS.has(flag)) {
+        if (eq < 0 && i + 1 < trailing.length && !trailing[i + 1]!.startsWith('-')) {
+          i++;
+        }
+        continue;
+      }
+      out.push(token);
+    }
+  }
+
+  return out;
+}
+
+/**
+ * #1717: Read persisted SEP-2663 MCP task sidecar metadata files from
+ * `<projectDir>/<sessionId>/mcp-tasks/mcp-task-*.meta.json` and re-register
+ * them via `restoreSep2663Tasks(...)` on `--resume`.
+ */
+export async function restorePersistedSep2663TasksOnResume(params: {
+  sessionId: string;
+  setAppState?: (updater: (prev: AppState) => AppState) => void;
+  getInitialState?: () => AppState;
+  setInitialState?: (next: AppState) => void;
+  getMcpClients: () => readonly import('./services/mcp/types.js').MCPServerConnection[];
+  mcpPromise?: Promise<{ clients: import('./services/mcp/types.js').MCPServerConnection[] }>;
+  projectDir?: string;
+  sidecarDirOverride?: string;
+}): Promise<{ restoredTaskIds: string[]; skippedTaskIds: string[] }> {
+  const [
+    { readPersistedSep2663TaskMetas, restoreSep2663Tasks },
+    { buildMcpTaskNotification },
+    { enqueuePendingNotification },
+  ] = await Promise.all([
+    import('./tasks/McpTask/McpTask.js'),
+    import('./utils/mcpAutoBackground.js'),
+    import('./utils/messageQueueManager.js'),
+  ]);
+
+  const allMetas = await readPersistedSep2663TaskMetas(params.sessionId, params.projectDir, params.sidecarDirOverride);
+  const metas = allMetas.filter(m => m.protocol === 'sep2663');
+  if (metas.length === 0) {
+    return { restoredTaskIds: [], skippedTaskIds: [] };
+  }
+
+  const liveSetAppState: (updater: (prev: AppState) => AppState) => void =
+    params.setAppState ??
+    (updater => {
+      if (params.getInitialState && params.setInitialState) {
+        params.setInitialState(updater(params.getInitialState()));
+      }
+    });
+
+  let resolvedClients: readonly import('./services/mcp/types.js').MCPServerConnection[] | undefined;
+  const getLiveClients = async (): Promise<readonly import('./services/mcp/types.js').MCPServerConnection[]> => {
+    const current = params.getMcpClients();
+    if (current.length > 0) return current;
+    if (resolvedClients !== undefined) return resolvedClients;
+    if (params.mcpPromise) {
+      try {
+        const res = await params.mcpPromise;
+        resolvedClients = res.clients;
+        return resolvedClients;
+      } catch {
+        resolvedClients = [];
+        return [];
+      }
+    }
+    return [];
+  };
+
+  return restoreSep2663Tasks({
+    metas,
+    setAppState: liveSetAppState,
+    sidecarSessionId: params.sessionId,
+    sidecarProjectDir: params.projectDir,
+    bindingFactory: async meta => {
+      const clients = await getLiveClients();
+      const matched = clients.find(c => c.type === 'connected' && c.name === meta.serverName);
+      if (!matched || matched.type !== 'connected') {
+        return undefined;
+      }
+      const rawClient = matched.client as unknown as {
+        request?: (
+          req: { method: string; params: Record<string, unknown> },
+          opts?: { signal?: AbortSignal },
+        ) => Promise<Record<string, unknown>>;
+      };
+      if (typeof rawClient?.request !== 'function') {
+        return undefined;
+      }
+      const request = rawClient.request.bind(rawClient);
+      return {
+        pollToCompletion: async signal => {
+          const interval = meta.pollIntervalMs ?? 2000;
+          while (!signal.aborted) {
+            if (meta.ttlExpiresAt !== undefined && Date.now() >= meta.ttlExpiresAt) {
+              return { status: 'failed' as const, statusMessage: `MCP task ${meta.mcpTaskId} expired` };
+            }
+            const statusRes = await request({ method: 'tasks/get', params: { taskId: meta.mcpTaskId } }, { signal });
+            const st = String(statusRes?.status ?? '');
+            if (st === 'completed') {
+              const resultRes = await request(
+                { method: 'tasks/result', params: { taskId: meta.mcpTaskId } },
+                { signal },
+              );
+              const content = Array.isArray(resultRes?.content) ? resultRes.content : [];
+              const textParts = content
+                .filter((b): b is { type: string; text: string } =>
+                  Boolean(
+                    b &&
+                      typeof b === 'object' &&
+                      (b as { type?: unknown }).type === 'text' &&
+                      typeof (b as { text?: unknown }).text === 'string',
+                  ),
+                )
+                .map(b => b.text);
+              const resourceLinks = content.filter(b =>
+                Boolean(b && typeof b === 'object' && (b as { type?: unknown }).type === 'resource_link'),
+              );
+              return {
+                status: 'completed' as const,
+                resultText: textParts.length > 0 ? textParts.join('\n') : undefined,
+                statusMessage: typeof statusRes?.statusMessage === 'string' ? statusRes.statusMessage : undefined,
+                resourceLinks: resourceLinks.length > 0 ? resourceLinks : undefined,
+              };
+            }
+            if (st === 'failed' || st === 'cancelled') {
+              return {
+                status: 'failed' as const,
+                statusMessage: String(statusRes?.statusMessage ?? `MCP task ${meta.mcpTaskId} ${st}`),
+              };
+            }
+            await new Promise<void>(resolveDelay => {
+              if (signal.aborted) {
+                resolveDelay();
+                return;
+              }
+              const onAbort = () => {
+                clearTimeout(timer);
+                resolveDelay();
+              };
+              const timer = setTimeout(() => {
+                signal.removeEventListener('abort', onAbort);
+                resolveDelay();
+              }, interval);
+              timer.unref?.();
+              signal.addEventListener('abort', onAbort, { once: true });
+            });
+          }
+          return { status: 'failed' as const, statusMessage: 'MCP task polling aborted' };
+        },
+      };
+    },
+    onNotify: notification => {
+      const xml = buildMcpTaskNotification({
+        taskId: notification.taskId,
+        serverName: notification.serverName,
+        toolName: notification.toolName,
+        status: notification.status,
+        resultText: notification.resultText,
+        statusMessage: notification.statusMessage,
+      });
+      enqueuePendingNotification({
+        value: xml,
+        mode: 'task-notification',
+      });
+    },
+  });
 }

@@ -19,7 +19,7 @@ let quietEnded = false
 
 /** densable Yqc — mark quiet start once (idempotent). */
 export function markScreenReaderStartupQuietStart(
-  nowMs: number = Date.now(),
+  nowMs: number = performance.now(),
 ): void {
   if (quietStartedAtMs === null) {
     quietStartedAtMs = nowMs
@@ -36,7 +36,7 @@ export function endScreenReaderStartupQuiet(): void {
  * Pure relative to process-level state + env.
  */
 export function getScreenReaderStartupQuietRemainingMs(
-  nowMs: number = Date.now(),
+  nowMs: number = performance.now(),
   env: NodeJS.ProcessEnv = process.env,
 ): number {
   if (quietStartedAtMs === null || quietEnded) {

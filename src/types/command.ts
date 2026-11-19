@@ -214,13 +214,13 @@ export type ResumeEntrypoint =
   | 'slash_command_title'
   | 'fork'
 
-export type CommandResultDisplay = 'skip' | 'system' | 'user'
+export type CommandResultDisplay = 'skip' | 'system' | 'user' | 'displayOnly'
 
 /**
  * Callback when a command completes.
  * @param result - Optional user-visible message to display
  * @param options - Optional configuration for command completion
- * @param options.display - How to display the result: 'skip' | 'system' | 'user' (default)
+ * @param options.display - How to display the result: 'skip' | 'system' | 'user' | 'displayOnly' (default: 'user')
  * @param options.shouldQuery - If true, send messages to the model after command completes
  * @param options.metaMessages - Additional messages to insert as isMeta (model-visible but hidden)
  */

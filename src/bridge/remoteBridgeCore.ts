@@ -47,6 +47,7 @@ import {
   disposeTransportClose,
   evaluateEpochStaleRecoveryBudget,
   evaluateRecoverableCloseBudgets,
+  classifyProactiveRemintResult,
   formatCloseCause,
   formatOAuthAdoptRetryStatus,
   formatRemintExhaustedMessage,
@@ -88,6 +89,9 @@ import {
   type EnvLessBridgeConfig,
 } from './envLessBridgeConfig.js'
 import {
+  type BridgeSlashCommand,
+  type BridgeSlashCommandInput,
+  getBridgeInitializeCommands,
   handleIngressMessage,
   handleServerControlRequest,
   makeResultMessage,
@@ -324,6 +328,8 @@ export type EnvLessBridgeParams = {
   ) => { ok: true } | { ok: false; error: string }
   /** densable 2.1.247 `onGetWorkspaceDiff` — RC working-tree diff pull. */
   onGetWorkspaceDiff?: (signal: AbortSignal) => Promise<unknown>
+  /** #1860: Provide slash commands to deduplicate and advertise on `initialize`. */
+  getInitializeCommands?: () => readonly BridgeSlashCommandInput[]
   onStateChange?: (state: BridgeState, detail?: string) => void
   /**
    * When true, skip opening the SSE read stream — only the CCRClient write
@@ -839,6 +845,26 @@ export async function initEnvLessBridgeCore(
 
   let initialFlushDone = false
   let tornDown = false
+  // #1889: Set when transport closes permanently so in-flight history backfill
+  // never calls drainFlushGate() or onStateChange('connected') after permanent close.
+  let permanentlyClosed = false
+  // #1767: Deduplicated mirror of remote rate_limit_info (supports clearing via null).
+  let lastMirroredRateLimitJson: string | undefined
+
+  function markFailedState(detail: string): void {
+    permanentlyClosed = true
+    if (!tornDown) {
+      onStateChange?.('failed', detail)
+    }
+  }
+
+  function mirrorRateLimitMetadata(info: Record<string, unknown> | null): void {
+    if (tornDown || permanentlyClosed) return
+    const serialized = JSON.stringify(info)
+    if (lastMirroredRateLimitJson === serialized) return
+    lastMirroredRateLimitJson = serialized
+    transport.reportMetadata({ rate_limit_info: info })
+  }
   // densable Tr / Fi / Xn / To / Vo — recovery ownership (not bare bool).
   const recoveryFlight = createRecoveryFlight()
   const authRecoveryInFlight = () => recoveryFlight.state.inFlight
@@ -968,10 +994,26 @@ export async function initEnvLessBridgeCore(
             cfg,
           )
           if (tornDown) return
-          // densable: WNe(mdt) skip; null/soe → yr (timer may still retry)
-          if (isTerminalBridgeFailure(result)) return
+          // #1884: Distinguish transient token handover failure (`null`) from
+          // permanent login expiry / terminal refusal. A transient `null` leaves
+          // the live connection up instead of marking Remote Control "login expired".
+          const outcome = classifyProactiveRemintResult(result)
+          if (outcome === 'transient_null') {
+            logForDebugging(
+              '[remote-bridge] Proactive /bridge re-mint failed (transient); fallback refresh will retry',
+            )
+            logForDiagnosticsNoPII(
+              'warn',
+              'bridge_repl_v2_proactive_remint_null',
+            )
+            return
+          }
+          if (outcome === 'terminal_other') return
+          if (outcome === 'terminal_relogin' || outcome === 'oauth_rejected') {
+            markFailedState(CLAUDE_AI_LOGIN_EXPIRED_RESTORE_DETAIL)
+            return
+          }
           if (!isRemoteCredentials(result)) {
-            onStateChange?.('failed', CLAUDE_AI_LOGIN_EXPIRED_RESTORE_DETAIL)
             return
           }
           const rebuilt = await rebuildTransport(result, 'proactive_refresh')
@@ -1081,6 +1123,7 @@ export async function initEnvLessBridgeCore(
             if (
               transport !== flushTransport ||
               tornDown ||
+              permanentlyClosed ||
               authRecoveryInFlight()
             ) {
               return
@@ -1088,7 +1131,7 @@ export async function initEnvLessBridgeCore(
             drainFlushGate()
             onStateChange?.('connected')
           })
-      } else if (!flushGate.active) {
+      } else if (!flushGate.active && !permanentlyClosed) {
         onStateChange?.('connected')
       }
     })
@@ -1123,6 +1166,10 @@ export async function initEnvLessBridgeCore(
             onRenameSession,
             onGetWorkspaceDiff,
             getPendingPrompts: () => pendingForwards.getPendingPrompts(),
+            getInitializeCommands: params.getInitializeCommands
+              ? () =>
+                  getBridgeInitializeCommands(params.getInitializeCommands!())
+              : undefined,
             outboundOnly,
           }),
       )
@@ -1222,7 +1269,7 @@ export async function initEnvLessBridgeCore(
           budget.event as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           budget.eventMeta ?? {},
         )
-        if (!tornDown) onStateChange?.('failed', budget.message)
+        markFailedState(budget.message)
         return false
       }
       recoveryBudgets = budget.counters
@@ -1246,7 +1293,7 @@ export async function initEnvLessBridgeCore(
           budget.event as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           budget.eventMeta ?? {},
         )
-        if (!tornDown) onStateChange?.('failed', budget.message)
+        markFailedState(budget.message)
         return false
       }
       recoveryBudgets = budget.counters
@@ -1255,8 +1302,7 @@ export async function initEnvLessBridgeCore(
     }
 
     // densable fail path
-    onStateChange?.(
-      'failed',
+    markFailedState(
       `Transport closed (code ${code}${cause ? `, ${cause}` : ''})`,
     )
     return false
@@ -1836,6 +1882,7 @@ export async function initEnvLessBridgeCore(
       transport.reportState('running')
     }
     logForDebugging(`[remote-bridge] Flushing ${events.length} history events`)
+    if (tornDown || permanentlyClosed) return
     await transport.writeBatch(events as StdoutMessage[])
   }
 
@@ -2058,6 +2105,16 @@ export async function initEnvLessBridgeCore(
     },
     flush() {
       return transport.flush?.() ?? Promise.resolve()
+    },
+    reportMetadata(metadata: Record<string, unknown>) {
+      if (tornDown || permanentlyClosed) return
+      transport.reportMetadata(metadata)
+    },
+    reportRateLimitInfo(info: Record<string, unknown> | null) {
+      mirrorRateLimitMetadata(info)
+    },
+    clearRateLimitInfo() {
+      mirrorRateLimitMetadata(null)
     },
     writeMessages(messages) {
       const filtered = messages.filter(

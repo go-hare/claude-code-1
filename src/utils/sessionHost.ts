@@ -737,3 +737,50 @@ export function getHostTeleportedSessionIds(): Set<string> {
   }
   return set
 }
+
+/**
+ * Official 325 `T1o.installStoppedByPerson` / `Pzi` (#1913) — host-injected
+ * predicate distinguishing whether a stopped background agent was explicitly
+ * stopped by a person vs interrupted by a cloud service disconnect.
+ */
+type StoppedByPersonPredicate = (agentId: string) => boolean
+const stoppedByPersonByHost = new WeakMap<object, StoppedByPersonPredicate>()
+
+export function installStoppedByPerson(
+  predicate: StoppedByPersonPredicate,
+): void {
+  const host = bootstrapHost()
+  if (stoppedByPersonByHost.has(host)) {
+    throw new Error('A stoppedByPerson question is already installed')
+  }
+  stoppedByPersonByHost.set(host, predicate)
+}
+
+export function getStoppedByPerson(): StoppedByPersonPredicate | undefined {
+  return stoppedByPersonByHost.get(bootstrapHost())
+}
+
+/**
+ * Determine if `agentId` was explicitly stopped by a person (`#1913`).
+ * When a host installs a `stoppedByPerson` predicate (e.g. cloud session host),
+ * delegate to it so service interruptions are not misclassified as user stops;
+ * otherwise fall back to the local `taskStoppedByUser` flag.
+ */
+export function isAgentStoppedByPerson(
+  agentId: string,
+  taskStoppedByUser: boolean | undefined,
+): boolean {
+  const predicate = getStoppedByPerson()
+  if (predicate !== undefined) {
+    try {
+      return predicate(agentId)
+    } catch {
+      return Boolean(taskStoppedByUser)
+    }
+  }
+  return taskStoppedByUser === true
+}
+
+export function resetStoppedByPersonForTests(): void {
+  stoppedByPersonByHost.delete(bootstrapHost())
+}

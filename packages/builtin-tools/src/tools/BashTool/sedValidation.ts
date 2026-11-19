@@ -644,6 +644,115 @@ function containsDangerousOperations(expression: string): boolean {
  * - 'ask' if any sed command contains dangerous operations
  * - 'passthrough' if no sed commands or all are safe
  */
+/**
+ * Official 2.1.319 #1776 (`Ncn` / `A5` / `DT`):
+ * Normalize a subcommand by stripping leading comments, env-var assignments,
+ * safe wrappers (`timeout`, `time`, `nice`, `stdbuf`, `nohup`, `command`,
+ * `builtin`, `noglob`), leading redirections, and shell quoting / path prefix
+ * on the command name so wrapped/env-prefixed/quoted `sed` invocations cannot
+ * skip `checkSedConstraints`.
+ */
+const SED_SAFE_WRAPPERS: readonly RegExp[] = [
+  /^timeout[ \t]+(?:(?:--(?:foreground|preserve-status|verbose)|--(?:kill-after|signal)=[A-Za-z0-9_.+-]+|--(?:kill-after|signal)[ \t]+[A-Za-z0-9_.+-]+|-v|-[ks][ \t]+[A-Za-z0-9_.+-]+|-[ks][A-Za-z0-9_.+-]+)[ \t]+)*(?:--[ \t]+)?\d+(?:\.\d+)?[smhd]?[ \t]+/,
+  /^time[ \t]+(?:--[ \t]+)?/,
+  /^nice(?:[ \t]+-n[ \t]+-?\d+|[ \t]+-\d+)?[ \t]+(?:--[ \t]+)?/,
+  /^stdbuf(?:[ \t]+-[ioe][LN0-9]+)+[ \t]+(?:--[ \t]+)?/,
+  /^nohup[ \t]+(?:--[ \t]+)?/,
+  /^command(?:[ \t]+-p+)*(?:[ \t]+--)?[ \t]+(?!-)/,
+  /^builtin(?:[ \t]+--)?[ \t]+(?!-)/,
+  /^noglob[ \t]+(?!-)/,
+]
+
+const SED_LEADING_ENV_RE =
+  /^[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=(?:'[^'\n\r]*'|"(?:\\.|[^"$`\\\n\r])*"|\\.|[^ \t\n\r$`;|&()<>\\'"])*[ \t]+/
+
+const SED_LEADING_REDIR_RE =
+  /^(?:\d*|&)(?:<<<|>>|>\|?>|>&|<&|<>|<)[ \t]*(?:'[^']*'|"[^"]*"|[^\s"'<>|&;]+)[ \t]+/
+
+function unquoteFirstToken(cmd: string): string {
+  const m = cmd.match(/^([^\s]+)([\s\S]*)$/)
+  if (!m) return cmd
+  const tok = m[1]!
+  const rest = m[2]!
+  let quote: "'" | '"' | null = null
+  let dangling = false
+  let out = ''
+  for (let i = 0; i < tok.length; i++) {
+    const ch = tok[i]!
+    dangling = false
+    if (quote === "'") {
+      if (ch === "'") quote = null
+      else out += ch
+    } else if (quote === '"') {
+      if (ch === '\\') {
+        const next = tok[i + 1]
+        if (next === '$' || next === '`' || next === '"' || next === '\\') {
+          out += next
+          i++
+        } else if (next === undefined) {
+          dangling = true
+        } else {
+          out += ch
+        }
+      } else if (ch === '"') {
+        quote = null
+      } else {
+        out += ch
+      }
+    } else if (ch === '\\') {
+      const next = tok[i + 1]
+      if (next === undefined) dangling = true
+      else {
+        out += next
+        i++
+      }
+    } else if (ch === '"' || ch === "'") {
+      quote = ch
+    } else {
+      out += ch
+    }
+  }
+  if (quote !== null || dangling) return cmd
+  return out + rest
+}
+
+export function normalizeSedSubcommand(cmd: string): string | null {
+  let cur = cmd
+    .split('\n')
+    .filter(line => !line.trim().startsWith('#'))
+    .join('\n')
+    .trim()
+  if (!cur) return null
+
+  let prev = ''
+  while (cur !== prev) {
+    prev = cur
+    cur = cur.trimStart()
+    // Strip env assignments
+    while (SED_LEADING_ENV_RE.test(cur)) {
+      cur = cur.replace(SED_LEADING_ENV_RE, '')
+    }
+    // Strip leading redirections (e.g. `< in.txt sed ...`)
+    while (SED_LEADING_REDIR_RE.test(cur)) {
+      cur = cur.replace(SED_LEADING_REDIR_RE, '')
+    }
+    cur = unquoteFirstToken(cur)
+    for (const wrapperRe of SED_SAFE_WRAPPERS) {
+      if (wrapperRe.test(cur)) {
+        cur = cur.replace(wrapperRe, '')
+        cur = unquoteFirstToken(cur)
+      }
+    }
+  }
+  cur = unquoteFirstToken(cur.trim())
+  const firstMatch = cur.match(/^([^\s]+)([\s\S]*)$/)
+  if (!firstMatch) return null
+  const firstTok = firstMatch[1]!
+  const baseName = firstTok.replace(/^.*[\\/]/, '')
+  if (baseName !== 'sed') return null
+  return `sed${firstMatch[2]!}`
+}
+
 export function checkSedConstraints(
   input: { command: string },
   toolPermissionContext: ToolPermissionContext,
@@ -668,17 +777,16 @@ export function checkSedConstraints(
   const commands = splitCommand_DEPRECATED(input.command)
 
   for (const cmd of commands) {
-    // Skip non-sed commands
-    const trimmed = cmd.trim()
-    const baseCmd = trimmed.split(/\s+/)[0]
-    if (baseCmd !== 'sed') {
+    // Official 2.1.319 #1776: normalize wrapper/env-prefix/quoted sed commands
+    const normalized = normalizeSedSubcommand(cmd)
+    if (normalized === null) {
       continue
     }
 
     // In acceptEdits mode, allow file writes (-i flag) but still block dangerous operations
     const allowFileWrites = toolPermissionContext.mode === 'acceptEdits'
 
-    const isAllowed = sedCommandIsAllowedByAllowlist(trimmed, {
+    const isAllowed = sedCommandIsAllowedByAllowlist(normalized, {
       allowFileWrites,
     })
 

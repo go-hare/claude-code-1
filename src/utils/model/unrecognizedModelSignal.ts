@@ -20,7 +20,7 @@ import {
 import { resolveAutoCompactWindow } from '../autoCompactWindow.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage } from '../errors.js'
-import { recognizePrintModel } from './printSetModel.js'
+import { recognizePrintModel, suggestClosestModelId } from './printSetModel.js'
 
 export const MODEL_CONFIG_DOCS_URL =
   'https://code.claude.com/docs/en/model-config'
@@ -64,13 +64,13 @@ export function buildUnrecognizedModelNotice(
       return null
     }
     const recognition = recognizePrintModel(model)
-    const suggestion = !recognition.recognized
-      ? recognition.suggestion
-      : undefined
+    const suggestion =
+      (!recognition.recognized ? recognition.suggestion : undefined) ??
+      suggestClosestModelId(model).suggestion
     return {
       model,
       window: resolved.window,
-      ...(suggestion !== undefined && { suggestion }),
+      ...(suggestion !== undefined && suggestion !== model && { suggestion }),
     }
   } catch {
     return null

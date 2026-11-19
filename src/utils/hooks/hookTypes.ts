@@ -81,6 +81,10 @@ export type AggregatedHookResult = {
   hook?: HookCommand | HookCallback | FunctionHook
   /** densable ae.timedOut — prompt Stop timeout (parent abort is not a timeout). */
   timedOut?: boolean
+  /** Official #1868: ask originated from host's own hook (lowest ask tie-break priority). */
+  hostsOwnAsk?: boolean
+  /** Official #1868: ask originated from session server hook (highest ask tie-break priority). */
+  serversOwnAsk?: boolean
 }
 
 export type HookOutsideReplResult = {

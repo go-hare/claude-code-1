@@ -23,10 +23,17 @@ import {
 } from '../../utils/anthropicProfile.js'
 import { getOAuthTokenFromFileDescriptor } from '../../utils/authFileDescriptor.js'
 import {
+  detectActiveConsoleFallbackCredential,
   getAnthropicApiKeyWithSource,
   getClaudeAIOAuthTokens,
   getConfiguredApiKeyHelper,
 } from '../../utils/auth.js'
+import {
+  isOAuthRefreshTokenDead,
+  isStoredOAuthRefreshTokenCleared,
+} from '../../utils/accountOnHold.js'
+import { getSecureStorage } from '../../utils/secureStorage/index.js'
+import { getExpiredClaudeAiAntProfileWarning } from '../../services/api/errors.js'
 import { getGlobalConfig } from '../../utils/config.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { isBareMode } from '../../utils/envUtils.js'
@@ -639,4 +646,118 @@ export function noteKeylessConsoleFallback(error: ConsoleProfileLoginError): {
     level: 'warn',
   })
   return reason
+}
+
+/**
+ * Official `GEs` (2.1.319 #1713): format the billed Claude Console organization
+ * name for `ant auth login` profiles.
+ */
+export function formatAntConsoleOrganization(
+  organizationName?: string | null,
+): string {
+  const cleaned =
+    typeof organizationName === 'string'
+      ? sanitizeDisplayText(
+          organizationName
+            .replace(/[\u00B7\u26A0]|:\/\//g, ' ')
+            .slice(0, 60)
+            .replace(/[\u00B7\u26A0]|:\/\//g, ' '),
+        ).trim()
+      : ''
+  return /[\p{L}\p{N}]/u.test(cleaned)
+    ? `${cleaned} (Claude Console)`
+    : 'your Claude Console organization'
+}
+
+/**
+ * Official 2.1.319 (#1712): true when a previously stored `claude.ai` OAuth
+ * login has ended (refresh token dead or cleared from secure storage).
+ */
+export function hasEndedClaudeAiLogin(): boolean {
+  const dead = isOAuthRefreshTokenDead(getClaudeAIOAuthTokens())
+  if (dead !== undefined) return dead
+  try {
+    return isStoredOAuthRefreshTokenCleared(getSecureStorage().read())
+  } catch {
+    return false
+  }
+}
+
+export type AntAuthFallbackNotice =
+  | { reason: 'login_ended'; organization: string; text: string }
+  | { reason: 'no_login'; organization: string; text: string }
+  | null
+
+/**
+ * Official 2.1.319 (#1712 & #1713): inspect active `ant auth login` Console
+ * fallback state via `detectActiveConsoleFallbackCredential()`. When a
+ * `claude.ai` login ended, returns the warning copy from
+ * `getExpiredClaudeAiAntProfileWarning()`; otherwise returns the startup
+ * `<org> (Claude Console)` billing notice.
+ */
+export function getAntAuthFallbackNotice(opts?: {
+  organizationName?: string | null
+  forceActive?: boolean
+  loginEnded?: boolean
+}): AntAuthFallbackNotice {
+  try {
+    if (opts?.forceActive) {
+      const org = formatAntConsoleOrganization(opts.organizationName)
+      if (opts.loginEnded) {
+        return {
+          reason: 'login_ended',
+          organization: org,
+          text: `Your claude.ai login ended; continuing on the sign-in from \`ant auth login\`, which bills usage to ${org}. Run /login to sign back in to claude.ai.`,
+        }
+      }
+      return {
+        reason: 'no_login',
+        organization: org,
+        text: `Signed in with ant auth login · usage billed to ${org} · /login to use a Claude subscription`,
+      }
+    }
+    if (getAPIProvider() !== 'firstParty') return null
+    const active = detectActiveConsoleFallbackCredential()
+    if (active?.kind !== 'ant_profile') return null
+    const org =
+      opts?.organizationName != null
+        ? formatAntConsoleOrganization(opts.organizationName)
+        : active.organization
+    const loginEnded = opts?.loginEnded ?? hasEndedClaudeAiLogin()
+    if (loginEnded) {
+      const warning =
+        opts?.organizationName != null
+          ? `Your claude.ai login ended; continuing on the sign-in from \`ant auth login\`, which bills usage to ${org}. Run /login to sign back in to claude.ai.`
+          : (getExpiredClaudeAiAntProfileWarning() ??
+            `Your claude.ai login ended; continuing on the sign-in from \`ant auth login\`, which bills usage to ${org}. Run /login to sign back in to claude.ai.`)
+      return {
+        reason: 'login_ended',
+        organization: org,
+        text: warning,
+      }
+    }
+    return {
+      reason: 'no_login',
+      organization: org,
+      text: `Signed in with ant auth login · usage billed to ${org} · /login to use a Claude subscription`,
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Official 2.1.319 (#1713): detect when Claude Code is using a profile saved
+ * by `ant auth login` (not a claude.ai subscription or explicit API key) and
+ * return the `<org> (Claude Console)` billing line for startup display.
+ */
+export function getAntAuthLoginStartupLine(opts?: {
+  organizationName?: string | null
+  forceActive?: boolean
+}): string | null {
+  const notice = getAntAuthFallbackNotice({
+    ...opts,
+    loginEnded: false,
+  })
+  return notice ? notice.text : null
 }

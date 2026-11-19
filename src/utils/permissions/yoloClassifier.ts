@@ -20,6 +20,7 @@ import {
 } from '../../bootstrap/state.js'
 import { logEvent } from '../../services/analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/metadata.js'
+import { isLocalAutoModeClassifierSwitchedOff } from '../../services/api/autoModeClassifierTransport.js'
 import { getCacheControl } from '../../services/api/claude.js'
 import { parsePromptTooLongTokenCounts } from '../../services/api/errors.js'
 import { getDefaultMaxRetries } from '../../services/api/withRetry.js'
@@ -1491,6 +1492,10 @@ export async function classifyYoloAction(
   context: ToolPermissionContext,
   signal: AbortSignal,
   parentSpan?: LangfuseSpan | null,
+  options?: {
+    handoffReview?: boolean
+    outsideAutoMode?: boolean
+  },
 ): Promise<YoloClassifierResult> {
   const lookup = buildToolLookup(tools)
   const actionCompact = toCompact(action, lookup)
@@ -1503,6 +1508,31 @@ export async function classifyYoloAction(
       reason: 'Tool declares no classifier-relevant input',
       model: getClassifierModel(),
       classifierRan: false,
+    })
+  }
+
+  // #1699 (official PFe / A2n): When the built-in local auto mode classifier is
+  // switched off (e.g., telemetry/feature flags off on firstParty), refuse to
+  // fall back to the local classifier and return an unavailable result so
+  // callers ask or deny instead.
+  if (
+    isLocalAutoModeClassifierSwitchedOff({
+      handoffReview: options?.handoffReview,
+      outsideAutoMode: options?.outsideAutoMode,
+    })
+  ) {
+    logEvent('tengu_auto_mode_local_classifier_switched_off', {
+      classifierSite: (options?.handoffReview
+        ? 'handoff'
+        : 'unnamed') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    return withOutcomeCode({
+      shouldBlock: true,
+      unavailable: true,
+      errorKind: 'classifier_switched_off',
+      reason: 'Claude Code no longer checks actions itself',
+      model: '',
+      durationMs: 0,
     })
   }
 

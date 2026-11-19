@@ -64,7 +64,7 @@ describe('printSetModel 239 fable leftover', () => {
   test('stepFamilyAliasToAllowed(fable) uses XNn, not haiku', () => {
     expect(stepFamilyAliasToAllowed('fable')).toBe(getDefaultFableModel())
     expect(stepFamilyAliasToAllowed('fable')).toBe(
-      ALL_MODEL_CONFIGS.fable51.firstParty,
+      ALL_MODEL_CONFIGS.fable52.firstParty,
     )
     expect(stepFamilyAliasToAllowed('fable')?.includes('haiku')).toBe(false)
   })

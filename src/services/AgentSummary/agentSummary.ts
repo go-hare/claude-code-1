@@ -224,6 +224,30 @@ export function startAgentSummarization(
         canUseTool,
         querySource: 'agent_summary',
         forkLabel: 'agent_summary',
+        // Official 2.1.321 (#1899): cap at 1 turn and abort immediately if the
+        // model attempts a tool_use block so summaries never run extra API turns.
+        maxTurns: 1,
+        onMessage: msg => {
+          if (
+            msg.type === 'assistant' &&
+            Array.isArray(msg.message?.content) &&
+            msg.message.content.some(b => b.type === 'tool_use')
+          ) {
+            summaryAbortController?.abort()
+            return
+          }
+          const rawMsg = msg as unknown as {
+            type?: string
+            event?: { type?: string; content_block?: { type?: string } }
+          }
+          if (
+            rawMsg.type === 'stream_event' &&
+            rawMsg.event?.type === 'content_block_start' &&
+            rawMsg.event.content_block?.type === 'tool_use'
+          ) {
+            summaryAbortController?.abort()
+          }
+        },
         overrides: { abortController: summaryAbortController },
         skipTranscript: true,
       })

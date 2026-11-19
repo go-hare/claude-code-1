@@ -34,6 +34,7 @@ import {
   isFirstPartyAnthropicBaseUrl,
 } from '../../utils/model/providers.js'
 import { markInternalWrite } from '../../utils/settings/internalWrites.js'
+import { shouldSkipRemoteManagedSettingsPollForExpiredGateway } from '../../utils/settings/remoteSettingsState.js'
 import { getSettingsFilePathForSource } from '../../utils/settings/settings.js'
 import { resetSettingsCache } from '../../utils/settings/settingsCache.js'
 import { sleep } from '../../utils/sleep.js'
@@ -66,7 +67,8 @@ export async function uploadUserSettingsInBackground(): Promise<void> {
         false,
       ) ||
       !getIsInteractive() ||
-      !isUsingOAuth()
+      !isUsingOAuth() ||
+      (await shouldSkipRemoteManagedSettingsPollForExpiredGateway())
     ) {
       logForDiagnosticsNoPII('info', 'settings_sync_upload_skipped')
       logEvent('tengu_settings_sync_upload_skipped_ineligible', {})
@@ -514,8 +516,8 @@ async function applyRemoteEntriesToLocal(
       userSettingsPath &&
       !exceedsSizeLimit(userSettingsContent, userSettingsPath)
     ) {
-      // Mark as internal write to prevent spurious change detection
-      markInternalWrite(userSettingsPath)
+      // Mark as internal write with content hash (#1737) to prevent spurious change detection
+      markInternalWrite(userSettingsPath, userSettingsContent)
       if (await writeFileForSync(userSettingsPath, userSettingsContent)) {
         appliedCount++
         settingsWritten = true
@@ -545,8 +547,8 @@ async function applyRemoteEntriesToLocal(
         localSettingsPath &&
         !exceedsSizeLimit(projectSettingsContent, localSettingsPath)
       ) {
-        // Mark as internal write to prevent spurious change detection
-        markInternalWrite(localSettingsPath)
+        // Mark as internal write with content hash (#1737) to prevent spurious change detection
+        markInternalWrite(localSettingsPath, projectSettingsContent)
         if (await writeFileForSync(localSettingsPath, projectSettingsContent)) {
           appliedCount++
           settingsWritten = true

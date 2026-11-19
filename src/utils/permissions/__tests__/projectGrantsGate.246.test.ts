@@ -20,6 +20,7 @@ import { resetSettingsCache } from '../../settings/settingsCache.js'
 import {
   filterGatedAllowRules,
   hasGatedProjectOrLocalGrants,
+  isCurrentProjectTrustLatched,
   resetProjectGrantsGateWarningsForTests,
   shouldGateAdditionalDirectories,
 } from '../projectGrantsGate.js'
@@ -123,5 +124,32 @@ describe('densable 2.1.246 #52 ky / $d', () => {
     getProjectPathForConfig.cache?.clear?.()
     const rules = [rule('projectSettings', 'allow', 'Bash', 'echo *')]
     expect(filterGatedAllowRules(rules)).toEqual([])
+  })
+
+  test('#1781 CLAUDE_CODE_IGNORE_PERSISTED_TRUST ignores persisted trust and follows session trust', () => {
+    const prev = process.env.CLAUDE_CODE_IGNORE_PERSISTED_TRUST
+    try {
+      const dir = isolate('ky-ignore-persisted-')
+      acceptTrustForDirectory(dir)
+      getProjectPathForConfig.cache?.clear?.()
+      expect(isCurrentProjectTrustLatched()).toBe(true)
+
+      process.env.CLAUDE_CODE_IGNORE_PERSISTED_TRUST = '1'
+      setSessionTrustAccepted(false)
+      expect(isCurrentProjectTrustLatched()).toBe(false)
+      const rules = [rule('projectSettings', 'allow', 'Bash', 'echo *')]
+      expect(filterGatedAllowRules(rules)).toEqual([])
+
+      // Mid-session trust acceptance latches session trust
+      setSessionTrustAccepted(true)
+      expect(isCurrentProjectTrustLatched()).toBe(true)
+      expect(filterGatedAllowRules(rules)).toEqual(rules)
+    } finally {
+      if (prev === undefined) {
+        delete process.env.CLAUDE_CODE_IGNORE_PERSISTED_TRUST
+      } else {
+        process.env.CLAUDE_CODE_IGNORE_PERSISTED_TRUST = prev
+      }
+    }
   })
 })

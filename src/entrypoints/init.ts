@@ -26,6 +26,7 @@ import {
   recordFirstStartTime,
   refreshGlobalConfigFromStorage,
   reloadThroughStorageOnce,
+  warnIfTwoConfigFilesExist,
 } from '../utils/config.js'
 import { getGlobalClaudeFile } from '../utils/env.js'
 import { logForDebugging } from '../utils/debug.js'
@@ -55,7 +56,13 @@ import {
 // gRPC exporters (~700KB via @grpc/grpc-js) are further lazy-loaded within instrumentation.ts.
 import { configureGlobalAgents } from '../utils/proxy.js'
 import { isBetaTracingEnabled } from '../utils/telemetry/betaSessionTracing.js'
+import {
+  getVcsRepositoryTelemetryAttributes,
+  resolveVcsRepositoryAttributesForCwd,
+  shouldIncludeRepositoryMetrics,
+} from '../utils/telemetry/vcsRepositoryAttributes.js'
 import { getTelemetryAttributes } from '../utils/telemetryAttributes.js'
+import { isSpareParked } from '../cli/spareClaim.js'
 import { setShellIfWindows } from '../utils/windowsPaths.js'
 import { initSentry } from '../utils/sentry.js'
 import { initUser } from '../utils/user.js'
@@ -81,6 +88,30 @@ subscribeSystemTheme(setCachedSystemTheme)
 
 // Track if telemetry has been initialized to prevent double initialization
 let telemetryInitialized = false
+let sessionCountRecorded = false
+
+/**
+ * Official 2.1.319 (#1759): record `claude_code.session.count` at most once per
+ * process. Parked `--await-claim` / `prewarm()` processes defer this until
+ * `claim_session` binds the spare to a real session.
+ */
+export function recordSessionCountMetricOnce(): boolean {
+  if (sessionCountRecorded) {
+    return false
+  }
+  const counter = getSessionCounter()
+  if (!counter) {
+    return false
+  }
+  sessionCountRecorded = true
+  counter.add(1)
+  return true
+}
+
+/** Test-only helper for `#1759` session counter idempotence tests. */
+export function resetSessionCountMetricForTesting(): void {
+  sessionCountRecorded = false
+}
 
 export const init = memoize(async (): Promise<void> => {
   const initStartTime = Date.now()
@@ -91,6 +122,9 @@ export const init = memoize(async (): Promise<void> => {
   try {
     const configsStart = Date.now()
     enableConfigs()
+    // Official 2.1.319 (#1738): warn on stderr when both legacy .config.json
+    // and primary .claude.json exist so the legacy file doesn't silently hide config.
+    warnIfTwoConfigFilesExist({ version: MACRO.VERSION })
     try {
       const { leftoverQrrInstallClientData } = await import(
         '../utils/collapseReadSearch.js'
@@ -180,6 +214,16 @@ export const init = memoize(async (): Promise<void> => {
     // Full environment variables are applied after trust is established
     const envVarsStart = Date.now()
     applySafeConfigEnvironmentVariables()
+
+    // Official 2.1.321 (#1940): migrate saved `claude-fable-5-1` user pick to `fable`.
+    try {
+      const { migrateFable51ToFable } = await import(
+        '../migrations/migrateFable51ToFable.js'
+      )
+      migrateFable51ToFable()
+    } catch {
+      // migration is best-effort
+    }
 
     // Official mLp: host-managed desktop creds file → process.env before TLS.
     await applyHostCredsFromFileIfManaged()
@@ -479,6 +523,12 @@ async function setMeterState(): Promise<void> {
   // Initialize customer OTLP telemetry (metrics, logs, traces)
   const meter = await initializeTelemetry()
   if (meter) {
+    // Official 2.1.321 (#1873): kick off async vcs.* repository attribute resolution
+    // when OTEL_METRICS_INCLUDE_REPOSITORY is enabled.
+    if (shouldIncludeRepositoryMetrics()) {
+      void resolveVcsRepositoryAttributesForCwd()
+    }
+
     // Create factory function for attributed counters
     const createAttributedCounter = (
       name: string,
@@ -490,8 +540,10 @@ async function setMeterState(): Promise<void> {
         add(value: number, additionalAttributes: Attributes = {}) {
           // Always fetch fresh telemetry attributes to ensure they're up to date
           const currentAttributes = getTelemetryAttributes()
+          const vcsAttributes = getVcsRepositoryTelemetryAttributes()
           const mergedAttributes = {
             ...currentAttributes,
+            ...vcsAttributes,
             ...additionalAttributes,
           }
           counter?.add(value, mergedAttributes)
@@ -501,9 +553,12 @@ async function setMeterState(): Promise<void> {
 
     setMeter(meter, createAttributedCounter)
 
-    // Increment session counter here because the startup telemetry path
-    // runs before this async initialization completes, so the counter
-    // would be null there.
-    getSessionCounter()?.add(1)
+    // Official 2.1.319 (#1759): Do not count parked `--await-claim` / Agent SDK
+    // `prewarm()` spares until they are actually claimed in `claimSession.ts`.
+    const isParkedPrewarmProcess =
+      isSpareParked() || process.argv.includes('--await-claim')
+    if (!isParkedPrewarmProcess) {
+      recordSessionCountMetricOnce()
+    }
   }
 }

@@ -611,3 +611,122 @@ export function isPeerInboundBypassDefaultHold(): boolean {
   if (self === null || !KNOWN_MODES.has(self.mode)) return false
   return isBypassPermissionModeClass(self)
 }
+
+// ---------------------------------------------------------------------------
+// #1882 — Cross-session outbound loop / send counter reset on personWrote()
+// Official `vt` + `S` (forwardsSincePrompt) + `m` (localSends / bridgeSends)
+// ---------------------------------------------------------------------------
+
+/**
+ * Official `vt` (2.1.321 #1882) — tracks outbound cross-session sends since the
+ * last time a human wrote a message (even if typed while Claude was still working).
+ */
+export class CrossSessionSendLimiter {
+  #limit: number | undefined
+  #taken = 0
+  #seeded = 0
+  #toldOfFinishedTask = false
+  #tookAny = false
+  #exhaustedFired = false
+  #onExhausted: () => void = () => {}
+
+  set(limit: number, onExhausted: () => void, seeded = 0): void {
+    this.#limit = limit
+    this.#taken = 0
+    this.#seeded = Math.min(seeded, limit)
+    this.#toldOfFinishedTask = false
+    this.#tookAny = false
+    this.#exhaustedFired = false
+    this.#onExhausted = onExhausted
+  }
+
+  sinceAPersonWrote(): number {
+    return Math.min(
+      this.#taken +
+        (this.#toldOfFinishedTask || !this.#tookAny ? this.#seeded : 0),
+      this.#limit ?? 0,
+    )
+  }
+
+  personWrote(): void {
+    this.#taken = 0
+    this.#seeded = 0
+    this.#exhaustedFired = false
+  }
+
+  toldOfAFinishedTask(): void {
+    this.#toldOfFinishedTask = true
+  }
+
+  take(): number | undefined {
+    if (this.#limit === undefined) return undefined
+    this.#tookAny = true
+    if (this.usedUpAt() === undefined) {
+      this.#taken++
+      return undefined
+    }
+    this.#fireExhausted()
+    return this.#limit
+  }
+
+  mayOffer(): boolean {
+    if (this.usedUpAt() === undefined) return true
+    this.#fireExhausted()
+    return false
+  }
+
+  usedUpAt(): number | undefined {
+    return this.#limit !== undefined &&
+      this.#taken + (this.#toldOfFinishedTask ? this.#seeded : 0) >= this.#limit
+      ? this.#limit
+      : undefined
+  }
+
+  #fireExhausted(): void {
+    if (!this.#exhaustedFired) {
+      this.#exhaustedFired = true
+      this.#onExhausted()
+    }
+  }
+}
+
+export type CrossSessionRelayCounters = {
+  forwardsSincePrompt: number
+  localSends: number
+  bridgeSends: number
+}
+
+const sessionSendLimiter = new CrossSessionSendLimiter()
+const sessionRelayCounters: CrossSessionRelayCounters = {
+  forwardsSincePrompt: 0,
+  localSends: 0,
+  bridgeSends: 0,
+}
+
+export function getCrossSessionSendLimiter(): CrossSessionSendLimiter {
+  return sessionSendLimiter
+}
+
+export function getCrossSessionRelayCounters(): CrossSessionRelayCounters {
+  return sessionRelayCounters
+}
+
+/**
+ * #1882: Called whenever a human user submits or queues input — including while
+ * Claude is still working — to reset cross-session rate-limit / loop-pause
+ * counters so outbound cross-session sends do not remain paused.
+ */
+export function personWrote(): void {
+  sessionSendLimiter.personWrote()
+  sessionRelayCounters.forwardsSincePrompt = 0
+  sessionRelayCounters.localSends = 0
+  sessionRelayCounters.bridgeSends = 0
+}
+
+/** Reset cross-session send limiter and relay counters (for tests). */
+export function resetCrossSessionRateLimitStateForTests(): void {
+  sessionSendLimiter.personWrote()
+  sessionRelayCounters.forwardsSincePrompt = 0
+  sessionRelayCounters.localSends = 0
+  sessionRelayCounters.bridgeSends = 0
+}

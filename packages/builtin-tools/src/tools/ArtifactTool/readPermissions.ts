@@ -6,7 +6,8 @@
  * readers in the 2.1.289 binary, so refusals, live-copy pins and notes do
  * not apply. Do not assign those hosts.
  */
-import { dirname } from 'path'
+import { dirname, resolve } from 'path'
+import { getCwd } from 'src/utils/cwd.js'
 import {
   allPathsProtectedMessage,
   ARTIFACT_ASSET_TARGET_PIN,
@@ -103,7 +104,12 @@ import type {
 import { parseArtifactUrlAnyCase } from 'src/utils/artifactUrl.js'
 import { isStrictHumanTurnTail } from 'src/utils/turnTail.js'
 
-type ReadAction = 'list_assets' | 'read_asset' | 'list_files' | 'read_file'
+type ReadAction =
+  | 'list_assets'
+  | 'read_asset'
+  | 'list_files'
+  | 'read_file'
+  | 'read_db'
 type ReadInput = Record<string, unknown> & { action: ReadAction }
 type ReadInputFields = {
   url?: string
@@ -140,7 +146,8 @@ export function isArtifactReadAction(action: unknown): action is ReadAction {
     action === 'list_assets' ||
     action === 'read_asset' ||
     action === 'list_files' ||
-    action === 'read_file'
+    action === 'read_file' ||
+    action === 'read_db'
   )
 }
 
@@ -247,6 +254,25 @@ export async function checkArtifactReadPermissions(
     }
     lt = res.base
     St = res.defaultDir === true
+  } else if (h.action === 'read_db' && typeof fields.out_dir === 'string') {
+    // Official 325 #1757: allow read_db saving to a valid local out_dir without
+    // refusing it as an unknown/unresolvable target.
+    const trimmed = fields.out_dir.trim()
+    if (trimmed.length === 0 || isNetworkOrDevicePath(trimmed)) {
+      return {
+        behavior: 'deny',
+        message:
+          'read_db saves only to local directories — out_dir names a network path or cannot be resolved',
+        decisionReason: {
+          type: 'other',
+          reason: 'Artifact reads write only local, non-network paths',
+        },
+      }
+    }
+    const resolvedOut = resolve(getCwd(), trimmed)
+    Ke = resolvedOut
+    lt = resolvedOut
+    St = isInArtifactScratchpad(resolvedOut)
   }
 
   const Xt =

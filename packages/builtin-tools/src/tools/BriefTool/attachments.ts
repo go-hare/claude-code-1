@@ -7,6 +7,7 @@
 
 import { feature } from 'bun:bundle'
 import { stat } from 'fs/promises'
+import { basename } from 'path'
 
 import type { ValidationResult } from 'src/Tool.js'
 
@@ -15,6 +16,25 @@ import { getErrnoCode } from 'src/utils/errors.js'
 import { IMAGE_EXTENSION_REGEX } from 'src/utils/imagePaste.js'
 import { expandPath } from 'src/utils/path.js'
 import { shouldUploadBriefAttachments } from 'src/utils/residualFinalEnvGates.js'
+
+/**
+ * Official 2.1.321 #1898:
+ * Reject filenames containing Unicode bidirectional-formatting characters
+ * (RLO/LRO/LRE/RLE/PDF/LRI/RLI/FSI/PDI/LRM/RLM/ALM) or ASCII/C1 control
+ * characters so a sent file cannot spoof its displayed name/extension.
+ */
+export const UNSAFE_FILENAME_BIDI_OR_CONTROL_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally rejects control/bidi characters in filenames
+  /[\u0000-\u001F\u007F-\u009F\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/
+
+export function hasUnsafeFilenameCharacters(filePath: string): boolean {
+  const name = basename(filePath.replace(/\\/g, '/'))
+  return UNSAFE_FILENAME_BIDI_OR_CONTROL_RE.test(name)
+}
+
+export function unsafeFilenameRefusalMessage(filePath: string): string {
+  return `Refusing to send "${filePath}": filename contains bidirectional-formatting or control characters. Rename the file to a plain filename first.`
+}
 
 export type ResolvedAttachment = {
   path: string
@@ -28,6 +48,13 @@ export async function validateAttachmentPaths(
 ): Promise<ValidationResult> {
   const cwd = getCwd()
   for (const rawPath of rawPaths) {
+    if (hasUnsafeFilenameCharacters(rawPath)) {
+      return {
+        result: false,
+        message: unsafeFilenameRefusalMessage(rawPath),
+        errorCode: 1,
+      }
+    }
     const fullPath = expandPath(rawPath)
     try {
       const stats = await stat(fullPath)
@@ -69,6 +96,9 @@ export async function resolveAttachments(
   // attachment still carries {path, size, isImage} for local renderers.
   const stated: ResolvedAttachment[] = []
   for (const rawPath of rawPaths) {
+    if (hasUnsafeFilenameCharacters(rawPath)) {
+      throw new Error(unsafeFilenameRefusalMessage(rawPath))
+    }
     const fullPath = expandPath(rawPath)
     // Single stat — we need size, so this is the operation, not a guard.
     // validateInput ran before us, but the file could have moved since

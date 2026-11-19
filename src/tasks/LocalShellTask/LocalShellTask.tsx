@@ -75,6 +75,39 @@ import {
 export const BACKGROUND_BASH_SUMMARY_PREFIX = 'Background command ';
 
 /**
+ * Official `E7` / `SU(text, 500, 300, JYn)` (2.1.321 #1956):
+ * Truncate notification summaries over 1,000 characters by keeping the first
+ * 500 chars and last 300 chars (preserving UTF-16 surrogate pairs).
+ */
+export const NOTIFICATION_SUMMARY_MAX_CHARS = 1000;
+const NOTIFICATION_SUMMARY_HEAD_CHARS = 500;
+const NOTIFICATION_SUMMARY_TAIL_CHARS = 300;
+
+function sliceHeadSurrogateSafe(text: string, maxLen: number): string {
+  if (maxLen <= 0) return '';
+  if (text.length <= maxLen) return text;
+  const slice = text.slice(0, maxLen);
+  const lastCode = slice.charCodeAt(maxLen - 1);
+  return lastCode >= 0xd800 && lastCode <= 0xdbff ? slice.slice(0, -1) : slice;
+}
+
+function sliceTailSurrogateSafe(text: string, maxLen: number): string {
+  if (maxLen <= 0) return '';
+  if (text.length <= maxLen) return text;
+  const slice = text.slice(-maxLen);
+  const firstCode = slice.charCodeAt(0);
+  return firstCode >= 0xdc00 && firstCode <= 0xdfff ? slice.slice(1) : slice;
+}
+
+export function truncateNotificationSummary(text: string): string {
+  if (text.length <= NOTIFICATION_SUMMARY_MAX_CHARS) return text;
+  const head = sliceHeadSurrogateSafe(text, NOTIFICATION_SUMMARY_HEAD_CHARS);
+  const tail = sliceTailSurrogateSafe(text, NOTIFICATION_SUMMARY_TAIL_CHARS);
+  const omitted = text.length - head.length - tail.length;
+  return `${head}\n\n... [${omitted} characters truncated] ...\n\n${tail}`;
+}
+
+/**
  * densable ZV_ — default wall-clock cap for agent-scoped background shells (1h).
  * Main-session shells (agentId undefined) get no cap.
  */
@@ -171,7 +204,9 @@ function startStallWatchdog(
             cancelled = true;
             clearInterval(timer);
             const toolUseIdLine = toolUseId ? `\n<${TOOL_USE_ID_TAG}>${escapeXml(toolUseId)}</${TOOL_USE_ID_TAG}>` : '';
-            const summary = `${BACKGROUND_BASH_SUMMARY_PREFIX}"${description}" appears to be waiting for interactive input`;
+            const summary = truncateNotificationSummary(
+              `${BACKGROUND_BASH_SUMMARY_PREFIX}"${description}" appears to be waiting for interactive input`,
+            );
             const cleanedTail = stripAnsi(content).trimEnd();
             // No <status> tag — print.ts treats <status> as a terminal
             // signal and an unknown value falls through to 'completed',
@@ -536,7 +571,7 @@ export async function enqueueShellNotification(
 <${TASK_ID_TAG}>${escapeXml(taskId)}</${TASK_ID_TAG}>${toolUseIdLine}
 <${OUTPUT_FILE_TAG}>${escapeXml(outputPath)}</${OUTPUT_FILE_TAG}>
 <${STATUS_TAG}>${status}</${STATUS_TAG}>
-<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>${stopNoteLine}
+<${SUMMARY_TAG}>${escapeXml(truncateNotificationSummary(summary))}</${SUMMARY_TAG}>${stopNoteLine}
 </${TASK_NOTIFICATION_TAG}>`;
 
   let snapshot: ReturnType<typeof buildBashTaskDeliverySnapshot> | undefined;
@@ -1125,8 +1160,25 @@ export function unregisterForeground(taskId: string, setAppState: SetAppState): 
   cleanupFn?.();
 }
 
+const OUTPUT_ENDED_WAIT_MS = 250;
+
 async function flushAndCleanup(shellCommand: ShellCommand): Promise<void> {
   try {
+    // Official 2.1.319 (#1741): await pipe outputEnded before flushing to disk
+    // and emitting the completion notification so fast-exiting commands do not
+    // drop output. Guarded with a bounded timer so stuck pipes or test mocks
+    // whose outputEnded never resolves cannot hang settlement.
+    if (shellCommand.outputEnded !== undefined) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        Promise.resolve(shellCommand.outputEnded).catch(() => {}),
+        new Promise<void>(resolve => {
+          timer = setTimeout(resolve, OUTPUT_ENDED_WAIT_MS);
+          timer.unref?.();
+        }),
+      ]);
+      if (timer !== undefined) clearTimeout(timer);
+    }
     await shellCommand.taskOutput.flush();
     shellCommand.cleanup();
   } catch (error) {

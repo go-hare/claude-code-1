@@ -10,10 +10,13 @@ import { join } from 'path'
 import { RewindFilesResultSchema } from '../../entrypoints/sdk/coreSchemas.js'
 import {
   assertRewindDestinationSafe,
+  fileHistoryRewind,
   formatRewindSkippedLinksCliWarning,
   formatRewindSkippedLinksMessage,
   REWIND_SKIPPED_LINKS_REASON,
   restoreBackupNoFollow,
+  safeUnlinkTrackedFile,
+  type FileHistoryState,
 } from '../fileHistory.js'
 
 /** Windows without Developer Mode refuses symlink creation (EPERM). */
@@ -216,5 +219,100 @@ describe('TYn MessageSelector / CLI copy (densable #36 residual)', () => {
     expect(formatRewindSkippedLinksCliWarning(2)).toBe(
       `Warning: 2 tracked paths were skipped: ${REWIND_SKIPPED_LINKS_REASON}. Run with --debug for the paths.`,
     )
+  })
+})
+
+describe('#1775 safeUnlinkTrackedFile and first-version realParentDir on rewind delete', () => {
+  const dirs: string[] = []
+
+  afterEach(async () => {
+    for (const d of dirs.splice(0)) {
+      await rm(d, { recursive: true, force: true })
+    }
+  })
+
+  async function tmp(): Promise<string> {
+    const d = await mkdtemp(join(tmpdir(), 'rewind-1775-'))
+    dirs.push(d)
+    return d
+  }
+
+  test('safeUnlinkTrackedFile refuses to unlink a symlink even when expectedRealParentDir matches', async () => {
+    const { realpath } = await import('fs/promises')
+    const d = await tmp()
+    const realD = await realpath(d)
+    const target = join(d, 'victim.txt')
+    const linkPath = join(d, 'link.txt')
+    await writeFile(target, 'keep')
+    if (!(await trySymlink(target, linkPath, 'file'))) return
+
+    const res = await safeUnlinkTrackedFile(linkPath, realD)
+    expect(typeof res === 'object' && 'refused' in res).toBe(true)
+    // Both symlink and target remain untouched
+    expect(await readFile(target, 'utf-8')).toBe('keep')
+  })
+
+  test('fileHistoryRewind preserves expectedParent from version 1 when deleting a newly created file', async () => {
+    const { realpath } = await import('fs/promises')
+    const origDisable = process.env.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING
+    const origSdk = process.env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING
+    delete process.env.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING
+    process.env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING = '1'
+    try {
+      const d = await tmp()
+      const subA = join(d, 'sub')
+      const subB = join(d, 'other')
+      await mkdir(subA)
+      await mkdir(subB)
+      const realSubB = await realpath(subB)
+      const newFile = join(subA, 'created.txt')
+      await writeFile(newFile, 'created after snap1')
+
+      // Snap1 predates `newFile` (so targetSnapshot.trackedFileBackups has no entry for it);
+      // Snap2 recorded version 1 with backupFileName: null and realParentDir pointing to realSubB
+      // (simulating the directory having been swapped/moved since creation).
+      const snap1Id = '11111111-1111-4111-8111-111111111111' as const
+      const snap2Id = '22222222-2222-4222-8222-222222222222' as const
+      const state: FileHistoryState = {
+        trackedFiles: new Set([newFile]),
+        snapshotSequence: 2,
+        snapshots: [
+          {
+            messageId: snap1Id,
+            trackedFileBackups: {},
+            timestamp: new Date(),
+          },
+          {
+            messageId: snap2Id,
+            trackedFileBackups: {
+              [newFile]: {
+                backupFileName: null,
+                version: 1,
+                backupTime: new Date(),
+                realParentDir: realSubB,
+              },
+            },
+            timestamp: new Date(),
+          },
+        ],
+      }
+
+      const rewindRes = await fileHistoryRewind(updater => {
+        updater(state)
+      }, snap1Id)
+      expect(rewindRes.skippedLinks).toBe(1)
+      expect(rewindRes.filesChanged).toEqual([])
+      // File must NOT have been deleted because parent dir != realParentDir from v1
+      expect(await readFile(newFile, 'utf-8')).toBe('created after snap1')
+    } finally {
+      if (origDisable !== undefined) {
+        process.env.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING = origDisable
+      }
+      if (origSdk !== undefined) {
+        process.env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING = origSdk
+      } else {
+        delete process.env.CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING
+      }
+    }
   })
 })

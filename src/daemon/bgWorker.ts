@@ -22,6 +22,8 @@ import {
   writeFileSync,
   accessSync,
   unlinkSync,
+  lstatSync,
+  rmSync,
 } from 'fs'
 import {
   mkdir,
@@ -72,7 +74,11 @@ import {
   applyHostManagedWorkerEnv,
   applyWorkerProviderStrips,
   applyWorkerSessionStrips,
+  isBgGatewayMarkEnabled,
+  isShellExportedGatewayEnv,
 } from './bgHostManagedEnv.js'
+import { isEnvTruthy } from '../utils/envUtils.js'
+import { getSettingsForSource } from '../utils/settings/settings.js'
 
 function isNewerCliVersion(workerVer: string, hostVer: string): boolean {
   try {
@@ -1013,15 +1019,161 @@ export function getProcessStartTimeSync(pid: number): string | undefined {
   }
 }
 
-/** Read exit cause file from job dir — official pp6 */
-function readExitCause(jobDir: string): string | undefined {
-  const causePath = join(jobDir, 'exit-cause')
+const EXIT_CAUSE_FILE = 'exit-cause'
+const EXIT_DETAIL_FILE = 'exit-detail'
+const EXIT_DETAIL_MAX_CHARS = 20_000
+const EXIT_FILE_MAX_BYTES = 65_536
+const EXIT_DETAIL_EDGE_CHARS = 300
+const GATEWAY_MARK_FILE = 'gateway-routed'
+
+function writeExclusiveExitFile(filePath: string, content: string): void {
+  rmSync(filePath, { force: true })
+  writeFileSync(filePath, content, { mode: 0o600, flag: 'wx' })
+}
+
+function consumeSmallExitFile(filePath: string): string | undefined {
   try {
-    const cause = readFileSync(causePath, 'utf8')
-    unlinkSync(causePath)
-    return cause
+    const st = lstatSync(filePath)
+    if (!st.isFile() || st.size > EXIT_FILE_MAX_BYTES) {
+      try {
+        rmSync(filePath, { recursive: true, force: true })
+      } catch {}
+      return undefined
+    }
+    const content = readFileSync(filePath, 'utf8')
+    unlinkSync(filePath)
+    return content
   } catch {
     return undefined
+  }
+}
+
+/** #1927 / official `RT(cause, jobDir)` — record exit-cause in CLAUDE_JOB_DIR. */
+export function writeExitCause(cause: string, jobDir?: string): void {
+  const dir = jobDir ?? process.env.CLAUDE_JOB_DIR
+  if (!dir) return
+  try {
+    writeExclusiveExitFile(join(dir, EXIT_CAUSE_FILE), cause)
+  } catch {}
+}
+
+/** #1927 / official `Zqo(cause, detail, jobDir)` — record exit-detail tagged by cause. */
+export function writeExitDetail(
+  cause: string,
+  detail: string,
+  jobDir?: string,
+): void {
+  const dir = jobDir ?? process.env.CLAUDE_JOB_DIR
+  const trimmed = detail.trim()
+  if (!dir || !trimmed || trimmed.length > EXIT_DETAIL_MAX_CHARS) return
+  try {
+    writeExclusiveExitFile(join(dir, EXIT_DETAIL_FILE), `${cause}\n${trimmed}`)
+  } catch {}
+}
+
+/** #1927 / official `qvn(jobDir)` — remove stale exit-cause and exit-detail before spawn. */
+export function clearExitFiles(jobDir: string): void {
+  consumeSmallExitFile(join(jobDir, EXIT_CAUSE_FILE))
+  consumeSmallExitFile(join(jobDir, EXIT_DETAIL_FILE))
+}
+
+/** Read exit cause file from job dir — official aui */
+export function readExitCause(jobDir: string): string | undefined {
+  return consumeSmallExitFile(join(jobDir, EXIT_CAUSE_FILE))
+}
+
+/** #1927 / official `lui(jobDir, cause)` — read exit-detail matching exit-cause. */
+export function readExitDetail(
+  jobDir: string,
+  cause: string,
+): string | undefined {
+  const raw = consumeSmallExitFile(join(jobDir, EXIT_DETAIL_FILE))
+  if (!raw) return undefined
+  const nl = raw.indexOf('\n')
+  return nl !== -1 && raw.slice(0, nl) === cause ? raw.slice(nl + 1) : undefined
+}
+
+/**
+ * #1927 / official `SU(_t(detail), 300, 300, () => ' … ')` — strip ANSI and
+ * middle-truncate so the beginning of the error message is preserved instead of
+ * showing only the last 200 chars or an internal tag.
+ */
+export function formatExitDetail(
+  detail: string,
+  edgeChars = EXIT_DETAIL_EDGE_CHARS,
+): string | undefined {
+  const clean = stripAnsi(detail).replace(/\s+/g, ' ').trim()
+  if (!clean) return undefined
+  if (clean.length <= edgeChars * 2) return clean
+  return `${clean.slice(0, edgeChars)} … ${clean.slice(-edgeChars)}`
+}
+
+/** #1782 / official `Oe(dispatch)` — true when merged worker+settings env still uses a gateway. */
+export function hasGatewayInMergedWorkerEnv(
+  dispatch: DispatchRequest,
+  parentEnv: NodeJS.ProcessEnv = process.env,
+): boolean {
+  let merged: Record<string, string | undefined> = {}
+  try {
+    merged = buildWorkerEnv(dispatch, '', undefined, '')
+    const userSettingsEnv = getSettingsForSource('userSettings')?.env ?? {}
+    const policySettingsEnv = getSettingsForSource('policySettings')?.env ?? {}
+    return isShellExportedGatewayEnv({
+      ...merged,
+      ...userSettingsEnv,
+      ...policySettingsEnv,
+    })
+  } catch {
+    return isShellExportedGatewayEnv({ ...parentEnv, ...(dispatch.env ?? {}) })
+  }
+}
+
+/** #1782 / official `Bgi(dispatch)` — mark non-exec, non-host-managed shell gateway dispatches. */
+export function shouldMarkGatewayRouted(dispatch: DispatchRequest): boolean {
+  return (
+    dispatch.launch.mode !== 'exec' &&
+    !isEnvTruthy(dispatch.env?.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST) &&
+    isShellExportedGatewayEnv(dispatch.env) &&
+    hasGatewayInMergedWorkerEnv(dispatch)
+  )
+}
+
+export function getGatewayMarkPath(short: string): string {
+  return join(getJobDirPath(short), GATEWAY_MARK_FILE)
+}
+
+export async function writeGatewayMark(short: string): Promise<void> {
+  const dir = getJobDirPath(short)
+  await mkdir(dir, { recursive: true }).catch(() => {})
+  await writeFile(getGatewayMarkPath(short), '', { flag: 'wx' }).catch(
+    (err: unknown) => {
+      if ((err as NodeJS.ErrnoException)?.code !== 'EEXIST') {
+        logForDebugging(
+          `[bg] gateway mark write failed for ${short}: ${err instanceof Error ? err.message : String(err)}`,
+          { level: 'warn' },
+        )
+      }
+    },
+  )
+}
+
+export async function clearGatewayMark(short: string): Promise<void> {
+  await unlink(getGatewayMarkPath(short)).catch(() => {})
+}
+
+export async function hydrateGatewayMark(
+  dispatch: DispatchRequest,
+): Promise<void> {
+  if (!isBgGatewayMarkEnabled()) return
+  try {
+    await access(getGatewayMarkPath(dispatch.short))
+    dispatch.gatewayRouted = true
+    delete dispatch.gatewayMarkUnreadable
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException)?.code
+    if (code === 'ENOENT') return
+    dispatch.gatewayRouted = true
+    dispatch.gatewayMarkUnreadable = code ?? 'error'
   }
 }
 
@@ -1090,6 +1242,10 @@ export interface DispatchRequest {
   isolation?: 'worktree' | 'none'
   worktree?: { path: string }
   attachStallRespawns?: number
+  /** #1782: true when started via a shell-exported LLM gateway. */
+  gatewayRouted?: boolean
+  /** #1782: error code if gateway mark could not be read on adopt. */
+  gatewayMarkUnreadable?: string
   seed?: { intent?: string; name?: string }
   reattachEnv?: Record<string, string>
   /**
@@ -1526,6 +1682,7 @@ export class BgWorker {
   adoptedAt: number | undefined
   private lastRvHeartbeat: number | undefined
   private stalledLogged = false
+  private heldOnGatewayLogged = false
   private lastCheckPidAt = Date.now()
   private replyChain = Promise.resolve()
   private killOutcome: string = 'killed'
@@ -1550,6 +1707,28 @@ export class BgWorker {
         typeof MACRO !== 'undefined' &&
         this.record.cliVersion !== MACRO.VERSION,
     )
+  }
+  /** #1782 / official `heldOnGateway` — hold stale idle workers that would leave their shell-exported gateway on upgrade. */
+  get heldOnGateway(): boolean {
+    return (
+      this.dispatch.gatewayRouted === true &&
+      isBgGatewayMarkEnabled() &&
+      !hasGatewayInMergedWorkerEnv(this.dispatch)
+    )
+  }
+  /** #1782 / official `noteHeldOnGateway(trigger)` — log once when upgrade respawn is deferred to preserve gateway routing. */
+  noteHeldOnGateway(trigger: string): void {
+    if (this.heldOnGatewayLogged || !this.isVersionStale) return
+    this.heldOnGatewayLogged = true
+    logEvent('tengu_bg_respawn_held_on_gateway', {
+      short: this.dispatch.short,
+      trigger,
+      worker_cli_version: this.record.cliVersion,
+      reason:
+        this.dispatch.gatewayMarkUnreadable === undefined
+          ? 'marked'
+          : 'mark_unreadable',
+    })
   }
   getPhase(): WorkerPhase {
     return this.phase
@@ -1766,13 +1945,15 @@ export class BgWorker {
     if (entry.decModes) w.decModes.seed(entry.decModes)
     w.connectRv()
 
+    await hydrateGatewayMark(entry.dispatch)
     if (
       entry.pendingRespawn === 'upgrade' &&
       !(
         entry.cliVersion &&
         typeof MACRO !== 'undefined' &&
         isNewerCliVersion(entry.cliVersion, MACRO.VERSION)
-      )
+      ) &&
+      !w.heldOnGateway
     ) {
       w.transitionTo({ kind: 'upgrading' })
       setTimeout(
@@ -1993,7 +2174,12 @@ export class BgWorker {
   cappedDispatch(): DispatchRequest {
     return JSON.parse(
       JSON.stringify(this.dispatch, (key, value) => {
-        if (key === 'reattachEnv' || key === 'attachStallRespawns')
+        if (
+          key === 'reattachEnv' ||
+          key === 'attachStallRespawns' ||
+          key === 'gatewayRouted' ||
+          key === 'gatewayMarkUnreadable'
+        )
           return undefined
         if (
           typeof value === 'string' &&
@@ -2155,11 +2341,16 @@ export class BgWorker {
 
   async respawnIfIdleStale(
     pinned?: Set<string>,
+    trigger = 'sweep',
   ): Promise<{ respawned: boolean; reason?: string }> {
     if (this.dispatch.launch.mode === 'exec')
       return { respawned: false, reason: 'not-stale' }
     if (this.isTransitioning) return { respawned: false, reason: 'in-progress' }
     if (this.record.outcome) return { respawned: false, reason: 'no-state' }
+    if (this.heldOnGateway) {
+      this.noteHeldOnGateway(trigger)
+      return { respawned: false, reason: 'not-stale' }
+    }
     if (this.attachers.size > 0) return { respawned: false, reason: 'attached' }
 
     const state = readBgJobState(this.dispatch.short)
@@ -2349,6 +2540,15 @@ export class BgWorker {
     const dispatch = this.dispatch
     const jobDir = getJobDirPath(dispatch.short)
     await mkdir(jobDir, { recursive: true }).catch(() => {})
+    clearExitFiles(jobDir)
+    if (
+      !isBgGatewayMarkEnabled() ||
+      (dispatch.gatewayRouted && !hasGatewayInMergedWorkerEnv(dispatch))
+    ) {
+      delete dispatch.gatewayRouted
+      delete dispatch.gatewayMarkUnreadable
+      void clearGatewayMark(dispatch.short)
+    }
 
     // Write auth snapshot for the worker
     const authPath =
@@ -2620,17 +2820,27 @@ export class BgWorker {
     else this.fastCrashStreak = 0
 
     const tooManyFastCrashes = this.fastCrashStreak >= 3
+    const jobDir = getJobDirPath(this.dispatch.short)
     const preInitError = this.workerReady ? undefined : this.preInitErrorTail()
-    const exitCause =
-      code !== 0 ? readExitCause(getJobDirPath(this.dispatch.short)) : undefined
+    const exitCause = code !== 0 ? readExitCause(jobDir) : undefined
+    const exitDetailRaw = exitCause
+      ? readExitDetail(jobDir, exitCause)
+      : undefined
+    const exitDetail = exitDetailRaw
+      ? formatExitDetail(exitDetailRaw)
+      : undefined
     const sameExitCause =
       isFastCrash && !!exitCause && exitCause === this.lastExitCause
     this.lastExitCause = isFastCrash ? exitCause : undefined
 
+    const shortCause = exitCause
+      ? stripAnsi(exitCause).replace(/\s+/g, ' ').trim().slice(0, 80) ||
+        undefined
+      : undefined
     const detail = preInitError
-      ? ` — ${preInitError}`
-      : exitCause
-        ? ` — ${exitCause}`
+      ? ` — ${exitDetail ?? preInitError}`
+      : (exitDetail ?? shortCause)
+        ? ` — ${exitDetail ?? shortCause}`
         : ''
     const isExecInterrupt =
       this.dispatch.launch.mode === 'exec' &&
@@ -3009,6 +3219,7 @@ export class BgWorker {
 
 export interface AttacherCaps {
   hyperlinks?: boolean
+  isGhosttyXtv?: boolean
   [key: string]: unknown
 }
 

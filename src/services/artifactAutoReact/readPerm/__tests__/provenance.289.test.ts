@@ -296,7 +296,7 @@ describe('densable 2.1.289 AE', () => {
     setStatus({ probeFailed: true, probeErrorCode: 'boot_org_mismatch' })
     expect(AE(PARSED, 'Nothing was read or changed')).toEqual({
       behavior: 'deny',
-      message: `https://claude.ai/code/artifact/${SLUG}: this Artifact is in another of the user's organizations, not the one this session is signed in to — nothing in this session can reach it until the user runs /login and signs in to that organization. Nothing was read or changed; tell the user.`,
+      message: `https://claude.ai/code/artifact/${SLUG}: this Artifact is in another of the user's organizations, or one they are no longer part of, not the one this session is signed in to — nothing in this session can reach it until the user runs /login and signs in to that organization, if they still can. If it is in a personal account whose data the user has since moved, they can look for a copy among their Artifacts in the organization the data went to, which may be this one. Nothing was read or changed; tell the user.`,
       decisionReason: {
         type: 'other',
         reason: "Artifact is in another of the user's organizations",

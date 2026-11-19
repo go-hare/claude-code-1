@@ -396,7 +396,7 @@ function OverviewTab({
         <Box flexDirection="column" width={28}>
           <Text wrap="truncate">
             Active days: <Text color="claude">{stats.activeDays}</Text>
-            <Text color="subtle">/{rangeDays}</Text>
+            <Text dimColor>/{rangeDays}</Text>
           </Text>
         </Box>
         <Box flexDirection="column" width={28}>
@@ -432,7 +432,7 @@ function OverviewTab({
 
       {/* Input · Output · Cache read · Cache write */}
       {totalTokens > 0 && (
-        <Text color="subtle" wrap="truncate">
+        <Text dimColor wrap="truncate">
           {formatTokenBreakdownLine(modelEntries.map(([, usage]) => usage))}
         </Text>
       )}
@@ -458,13 +458,13 @@ function OverviewTab({
             <Box flexDirection="column" width={28}>
               <Text wrap="truncate">
                 {shotStatsData.buckets[0]!.label}: <Text color="claude">{shotStatsData.buckets[0]!.count}</Text>
-                <Text color="subtle"> ({shotStatsData.buckets[0]!.pct}%)</Text>
+                <Text dimColor> ({shotStatsData.buckets[0]!.pct}%)</Text>
               </Text>
             </Box>
             <Box flexDirection="column" width={28}>
               <Text wrap="truncate">
                 {shotStatsData.buckets[1]!.label}: <Text color="claude">{shotStatsData.buckets[1]!.count}</Text>
-                <Text color="subtle"> ({shotStatsData.buckets[1]!.pct}%)</Text>
+                <Text dimColor> ({shotStatsData.buckets[1]!.pct}%)</Text>
               </Text>
             </Box>
           </Box>
@@ -472,13 +472,13 @@ function OverviewTab({
             <Box flexDirection="column" width={28}>
               <Text wrap="truncate">
                 {shotStatsData.buckets[2]!.label}: <Text color="claude">{shotStatsData.buckets[2]!.count}</Text>
-                <Text color="subtle"> ({shotStatsData.buckets[2]!.pct}%)</Text>
+                <Text dimColor> ({shotStatsData.buckets[2]!.pct}%)</Text>
               </Text>
             </Box>
             <Box flexDirection="column" width={28}>
               <Text wrap="truncate">
                 {shotStatsData.buckets[3]!.label}: <Text color="claude">{shotStatsData.buckets[3]!.count}</Text>
-                <Text color="subtle"> ({shotStatsData.buckets[3]!.pct}%)</Text>
+                <Text dimColor> ({shotStatsData.buckets[3]!.pct}%)</Text>
               </Text>
             </Box>
           </Box>
@@ -616,7 +616,7 @@ function ModelsTab({
   if (modelEntries.length === 0) {
     return (
       <Box>
-        <Text color="subtle">No model usage data available</Text>
+        <Text dimColor>No model usage data available</Text>
       </Box>
     );
   }
@@ -647,7 +647,7 @@ function ModelsTab({
         <Box flexDirection="column" marginBottom={1}>
           <Text bold>Tokens per Day</Text>
           <Ansi>{chartOutput.chart}</Ansi>
-          <Text color="subtle">{chartOutput.xAxisLabels}</Text>
+          <Text dimColor>{chartOutput.xAxisLabels}</Text>
           <Box>
             {chartOutput.legend.map((item, i) => (
               <Text key={item.model}>
@@ -679,7 +679,7 @@ function ModelsTab({
       {/* Scroll hint */}
       {showScrollHint && (
         <Box marginTop={1}>
-          <Text color="subtle">
+          <Text dimColor>
             {canScrollUp ? figures.arrowUp : ' '} {canScrollDown ? figures.arrowDown : ' '} {scrollOffset + 1}-
             {Math.min(scrollOffset + VISIBLE_MODELS, modelEntries.length)} of {modelEntries.length} models{' '}
             <KeyboardShortcutHint shortcut="↑/↓" action="scroll" parens />
@@ -741,12 +741,12 @@ function ModelEntry({ model, usage, totalTokens }: ModelEntryProps): React.React
   return (
     <Box flexDirection="column">
       <Text>
-        {figures.bullet} <Text bold>{renderModelName(model)}</Text> <Text color="subtle">({percentage}%)</Text>
+        {figures.bullet} <Text bold>{renderModelName(model)}</Text> <Text dimColor>({percentage}%)</Text>
       </Text>
-      <Text color="subtle" wrap="truncate">
+      <Text dimColor wrap="truncate">
         {'  '}In: {formatNumber(usage.inputTokens)} · Out: {formatNumber(usage.outputTokens)}
       </Text>
-      <Text color="subtle" wrap="truncate">
+      <Text dimColor wrap="truncate">
         {'  '}
         {formatModelCacheLine(usage)}
       </Text>

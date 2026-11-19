@@ -115,7 +115,10 @@ describe('stripStoredMediaForRequestLimit (HWT)', () => {
     const messages = [msg([img('ONLY')])]
     const next = stripStoredMediaForRequestLimit(messages, 0)
     expect(next[0]!.message.content).toEqual([
-      { type: 'text', text: '[media removed: request limit]' },
+      {
+        type: 'text',
+        text: "[media removed: request limit. You have not seen this: it did not fit in the request. If you need it, get it again once, by itself. If it is dropped again, go on without it and say so. Re-reading pushes out others and re-sends everything, so don't re-read them all.]",
+      },
     ])
   })
 

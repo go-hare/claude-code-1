@@ -35,6 +35,7 @@ import {
 } from '../../utils/sessionStorage.js'
 import { asSessionId } from '../../types/ids.js'
 import { getCurrentWorktreeSession } from '../../utils/worktree.js'
+import { getScreenReaderChildEnv } from '../../utils/screenReaderGate.js'
 import {
   clearBridgeSessionMeta,
   getPersistedBridgeSession,
@@ -1007,6 +1008,7 @@ export async function openAgentsViaLeftArrow(
         reattachEnv: {
           ...reattachEnv,
           ...restrictedSpawnEnv(),
+          ...getScreenReaderChildEnv(),
         },
         // densable yNo: ...c?.replyOnResume?["--reply-on-resume"]:[]
         // official G9: ...Yk()&&{dispatchExtraArgs:["--restricted"]}

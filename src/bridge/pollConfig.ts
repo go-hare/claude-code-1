@@ -25,6 +25,16 @@ import {
 const zeroOrAtLeast100 = {
   message: 'must be 0 (disabled) or ≥100ms',
 }
+const forcedStopsPerHourSchema = lazySchema(() =>
+  z
+    .number()
+    .int()
+    .min(0)
+    .max(60)
+    .default(DEFAULT_POLL_CONFIG.forced_stops_per_hour)
+    .catch(0),
+)
+
 const pollIntervalConfigSchema = lazySchema(() =>
   z
     .object({
@@ -70,6 +80,7 @@ const pollIntervalConfigSchema = lazySchema(() =>
         .int()
         .min(0)
         .default(120_000),
+      forced_stops_per_hour: forcedStopsPerHourSchema(),
     })
     .refine(
       cfg =>
@@ -106,5 +117,13 @@ export function getPollIntervalConfig(): PollIntervalConfig {
     5 * 60 * 1000,
   )
   const parsed = pollIntervalConfigSchema().safeParse(raw)
-  return parsed.success ? parsed.data : DEFAULT_POLL_CONFIG
+  if (parsed.success) return parsed.data
+  return {
+    ...DEFAULT_POLL_CONFIG,
+    forced_stops_per_hour: forcedStopsPerHourSchema().parse(
+      typeof raw === 'object' && raw !== null && 'forced_stops_per_hour' in raw
+        ? (raw as { forced_stops_per_hour?: unknown }).forced_stops_per_hour
+        : undefined,
+    ),
+  }
 }

@@ -761,7 +761,7 @@ function BriefSpinner({ mode, overrideMessage }: BriefSpinnerProps): React.React
       {rightText ? (
         <>
           <Text>{' '.repeat(pad)}</Text>
-          <Text color="subtle">{rightText}</Text>
+          <Text dimColor>{rightText}</Text>
         </>
       ) : null}
     </Box>
@@ -790,7 +790,7 @@ export function BriefIdleStatus(): React.ReactNode {
         {rightText ? (
           <>
             <Text>{' '.repeat(pad)}</Text>
-            <Text color="subtle">{rightText}</Text>
+            <Text dimColor>{rightText}</Text>
           </>
         ) : null}
       </Text>

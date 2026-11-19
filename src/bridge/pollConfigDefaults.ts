@@ -50,6 +50,8 @@ export type PollIntervalConfig = {
   multisession_poll_interval_ms_at_capacity: number
   reclaim_older_than_ms: number
   session_keepalive_interval_v2_ms: number
+  /** #1924: max forced stopWork calls per session per hour on crash. */
+  forced_stops_per_hour: number
 }
 
 export const DEFAULT_POLL_CONFIG: PollIntervalConfig = {
@@ -79,4 +81,7 @@ export const DEFAULT_POLL_CONFIG: PollIntervalConfig = {
   // remote-control session. 2 min is the default. _v2: bridge-only gate
   // (pre-v2 clients read the old key, new clients ignore it).
   session_keepalive_interval_v2_ms: 120_000,
+  // #1924 / official `s.forced_stops_per_hour`: allow up to 3 forced stops/hr
+  // on unexpected child crashes so the server re-dispatches new messages quickly.
+  forced_stops_per_hour: 3,
 }

@@ -55,7 +55,11 @@ import { isEnvTruthy } from './envUtils.js'
 import { errorMessage, toError } from './errors.js'
 import { logError } from './log.js'
 import { normalizeMessagesForAPI } from './messages.js'
-import { getRuntimeMainLoopModel } from './model/model.js'
+import {
+  firstPartyNameToCanonical,
+  getRuntimeMainLoopModel,
+  parseUserSpecifiedModel,
+} from './model/model.js'
 import type { SettingSource } from './settings/constants.js'
 import { jsonStringify } from './slowOperations.js'
 import { buildEffectiveSystemPrompt } from './systemPrompt.js'
@@ -74,9 +78,72 @@ const MANUAL_COMPACT_BUFFER_NAME = 'Compact buffer'
  */
 export const TOOL_TOKEN_COUNT_OVERHEAD = 500
 
+/**
+ * Official 2.1.321 `Xj` (#1859): legacy 3.x/4.0-4.6 models estimate at 4 bytes/token;
+ * newer models (4.7/4.8/5/5.5/Fable) estimate at 3 bytes/token (`Yy(model)`).
+ */
+const LEGACY_4B_PER_TOKEN_MODELS = new Set([
+  'claude-3-5-haiku',
+  'claude-3-5-sonnet',
+  'claude-3-7-sonnet',
+  'claude-opus-4-0',
+  'claude-opus-4-1',
+  'claude-opus-4-5',
+  'claude-opus-4-6',
+  'claude-sonnet-4-0',
+  'claude-sonnet-4-5',
+  'claude-sonnet-4-6',
+  'claude-haiku-4-5',
+])
+
+/** Official 2.1.321 `Yy(model)` (#1859): bytes-per-token heuristic by model. */
+export function bytesPerTokenForModel(model?: string): number {
+  if (!model) return 4
+  try {
+    const resolved = parseUserSpecifiedModel(model)
+    const canonical = firstPartyNameToCanonical(resolved)
+      .replace(/\[1m\]$/i, '')
+      .replace(/[._]/g, '-')
+    return LEGACY_4B_PER_TOKEN_MODELS.has(canonical) ? 4 : 3
+  } catch {
+    return 4
+  }
+}
+
+/**
+ * Official 2.1.321 `wQr` local fallback estimator (#1859):
+ * Uses `Yy(model)` bytes-per-token for messages and serialized tools, and adds
+ * `TOOL_TOKEN_COUNT_OVERHEAD` (`B9 = 500`) once when tools are non-empty so
+ * callers that subtract `TOOL_TOKEN_COUNT_OVERHEAD` get accurate tool sizes
+ * instead of overcounting or underflowing.
+ */
+export function estimateContextTokensLocally(
+  messages: Anthropic.Beta.Messages.BetaMessageParam[],
+  tools: Anthropic.Beta.Messages.BetaToolUnion[],
+  model?: string,
+): number {
+  const bpt = bytesPerTokenForModel(model)
+  let total = 0
+  for (const msg of messages) {
+    const content = msg.content
+    if (typeof content === 'string') {
+      total += roughTokenCountEstimation(content, bpt)
+    } else if (Array.isArray(content)) {
+      total += roughTokenCountEstimation(jsonStringify(content), bpt)
+    }
+  }
+  if (tools.length > 0) {
+    total +=
+      roughTokenCountEstimation(jsonStringify(tools), bpt) +
+      TOOL_TOKEN_COUNT_OVERHEAD
+  }
+  return total
+}
+
 async function countTokensWithFallback(
   messages: Anthropic.Beta.Messages.BetaMessageParam[],
   tools: Anthropic.Beta.Messages.BetaToolUnion[],
+  model?: string,
 ): Promise<number | null> {
   try {
     const result = await countMessagesTokensWithAPI(messages, tools)
@@ -93,19 +160,22 @@ async function countTokensWithFallback(
 
   try {
     const fallbackResult = await countTokensViaHaikuFallback(messages, tools)
-    if (fallbackResult === null) {
-      logForDebugging(
-        `countTokensWithFallback: haiku fallback also returned null (${tools.length} tools)`,
-      )
+    if (fallbackResult !== null) {
+      return fallbackResult
     }
-    return fallbackResult
+    logForDebugging(
+      `countTokensWithFallback: haiku fallback also returned null (${tools.length} tools), estimating locally`,
+    )
   } catch (err) {
     logForDebugging(
-      `countTokensWithFallback: haiku fallback failed: ${errorMessage(err)}`,
+      `countTokensWithFallback: haiku fallback failed: ${errorMessage(err)}, estimating locally`,
     )
     logError(err)
-    return null
   }
+
+  // Official 2.1.321 (#1859): local fallback using Yy(model) + B9 when exact
+  // token counts are unavailable.
+  return estimateContextTokensLocally(messages, tools, model)
 }
 
 interface ContextCategory {
@@ -262,7 +332,7 @@ export async function countToolDefinitionTokens(
       }),
     ),
   )
-  const result = await countTokensWithFallback([], toolSchemas)
+  const result = await countTokensWithFallback([], toolSchemas, model)
   if (result === null || result === 0) {
     const toolNames = tools.map(t => t.name).join(', ')
     logForDebugging(

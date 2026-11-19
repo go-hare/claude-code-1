@@ -153,3 +153,62 @@ export function isRemoteControlBlockedByEndpoint(
 ): boolean {
   return !isRemoteControlApiEndpointOk(env, provider)
 }
+
+// ---------------------------------------------------------------------------
+// #1892 — Distinguish proxy connect_rejected vs connect_unreachable
+// Official proxy error map @288936225 & HTTP CONNECT status check @311043922
+// ---------------------------------------------------------------------------
+
+export type ProxyConnectErrorKind = 'connect_rejected' | 'connect_unreachable'
+
+export const PROXY_CONNECT_ERROR_DESCRIPTIONS: Readonly<
+  Record<ProxyConnectErrorKind, string>
+> = {
+  connect_rejected:
+    'the egress proxy refused the connection; a refusal most often means that the host is not allowed for this session',
+  connect_unreachable:
+    'the host is allowed for this session, but the egress proxy could not connect to it, for example because the name has no public DNS record or the host is down or on a private network; changing the allowed domains does not help',
+}
+
+/**
+ * #1892: Classify an HTTP CONNECT proxy error response (`HTTP/1.x 4xx/5xx` or
+ * numeric status code): `502` means the host was allowed but unreachable
+ * (`connect_unreachable`), whereas policy denials (e.g. `403`, `407`, other
+ * `4xx`/`5xx`) are `connect_rejected`.
+ */
+export function classifyProxyConnectError(
+  statusOrResponseLine: number | string | Uint8Array,
+): {
+  kind: ProxyConnectErrorKind
+  statusCode: number
+  detail: string
+  description: string
+} | null {
+  let statusCode: number | undefined
+  if (typeof statusOrResponseLine === 'number') {
+    if (statusOrResponseLine >= 400 && statusOrResponseLine <= 599) {
+      statusCode = statusOrResponseLine
+    }
+  } else {
+    const head =
+      typeof statusOrResponseLine === 'string'
+        ? statusOrResponseLine.slice(0, 32)
+        : Buffer.from(statusOrResponseLine.subarray(0, 32)).toString('utf8')
+    const match = head.match(/^HTTP\/1\.[01] ([45]\d\d)/)
+    if (match) {
+      statusCode = Number(match[1])
+    }
+  }
+  if (statusCode === undefined) return null
+  const isUnreachable = statusCode === 502
+  const kind: ProxyConnectErrorKind = isUnreachable
+    ? 'connect_unreachable'
+    : 'connect_rejected'
+  const detail = `gateway answered ${statusCode} to CONNECT (${isUnreachable ? 'host allowed, but the gateway could not connect to it' : 'policy denial or other refusal'})`
+  return {
+    kind,
+    statusCode,
+    detail,
+    description: PROXY_CONNECT_ERROR_DESCRIPTIONS[kind],
+  }
+}

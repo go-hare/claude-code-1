@@ -697,23 +697,48 @@ export async function attachToSession(
 // Terminal capabilities — official QAO
 // ---------------------------------------------------------------------------
 
-function getTerminalCaps(): Record<string, unknown> {
+/**
+ * #1750 / official `Shr()` — detect Ghostty terminal via attacherCaps, XTVERSION,
+ * or TERM_PROGRAM so background sessions attached through tmux in Ghostty keep
+ * Cmd+click hyperlink support.
+ */
+export function isGhosttyXtvTerminal(
+  env: NodeJS.ProcessEnv = process.env,
+  xtversionName?: string,
+): boolean {
+  const xtv = xtversionName?.toLowerCase()
+  if (xtv !== undefined && xtv.startsWith('ghostty')) {
+    return true
+  }
+  const termProgram = env.TERM_PROGRAM?.toLowerCase()
+  if (termProgram === 'ghostty') {
+    return true
+  }
+  const term = env.TERM?.toLowerCase()
+  return term === 'xterm-ghostty'
+}
+
+export function getTerminalCaps(
+  env: NodeJS.ProcessEnv = process.env,
+  xtversionName?: string,
+): Record<string, unknown> {
   return {
-    terminal: process.env.TERM ?? null,
-    mux: process.env.TMUX
+    terminal: env.TERM ?? null,
+    mux: env.TMUX
       ? 'tmux'
-      : process.env.ZELLIJ != null
+      : env.ZELLIJ != null
         ? 'zellij'
-        : process.env.STY
+        : env.STY
           ? 'screen'
           : null,
-    tmuxSocket: process.env.TMUX?.split(',')[0] || null,
-    ssh: !!process.env.SSH_CONNECTION || !!process.env.SSH_CLIENT,
-    wtSession: !!process.env.WT_SESSION,
-    isVscodeTerm: process.env.TERM_PROGRAM === 'vscode',
+    tmuxSocket: env.TMUX?.split(',')[0] || null,
+    ssh: !!env.SSH_CONNECTION || !!env.SSH_CLIENT,
+    wtSession: !!env.WT_SESSION,
+    isVscodeTerm: env.TERM_PROGRAM === 'vscode',
+    isGhosttyXtv: isGhosttyXtvTerminal(env, xtversionName),
     hyperlinks: supportsHyperlinks(),
-    browser: process.env.BROWSER ?? null,
-    editor: process.env.VISUAL?.trim() || process.env.EDITOR?.trim() || null,
+    browser: env.BROWSER ?? null,
+    editor: env.VISUAL?.trim() || env.EDITOR?.trim() || null,
   }
 }
 

@@ -82,6 +82,12 @@ export const PermissionsSchema = lazySchema(() =>
         .describe(
           'Refuse file-tool writes (Write, Edit, NotebookEdit) outside the working directories in every permission mode; true in any settings source wins.',
         ),
+      denyInsteadOfPrompting: z
+        .boolean()
+        .optional()
+        .describe(
+          "Never wait for a person to answer a tool permission prompt: a call that would prompt is denied at once, the model is told, and the turn carries on. This is what --permission-prompts none does for -p, in every kind of session, subagents and agent teams included. Allow rules, the permission mode, auto mode's classifier and PermissionRequest hooks decide first, as they do without it; it only ever denies, and allows nothing.",
+        ),
       additionalDirectories: z
         .array(z.string())
         .transform(dirs => dirs.filter(dir => !dir.includes('\0')))
@@ -1007,7 +1013,7 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .catch(undefined)
         .describe(
-          'Force a specific login method: "claudeai" for Claude Pro/Max, "console" for Console billing, "gateway" for the Cloud gateway OIDC device flow',
+          'Force a specific login method: "claudeai" for a Claude subscription (individual, Team, or Enterprise plans), "console" for Console billing, "gateway" for the Cloud gateway OIDC device flow',
         ),
       // densable forceLoginGatewayUrl — pre-fill / auto-connect URL with forceLoginMethod:"gateway"
       forceLoginGatewayUrl: z
@@ -1064,7 +1070,7 @@ export const SettingsSchema = lazySchema(() =>
             .catch(undefined),
         )
         .describe(
-          'Managed settings only. The API providers Claude Code may use on this machine.',
+          'Managed settings only (managed-settings.json, MDM, or server-managed). The API providers Claude Code may use on this machine: "anthropic", "bedrock", "vertex", "foundry", "anthropicAws", "anthropicGoogleCloud", "mantle", "customEndpoint", or "gateway". Server-managed settings from the admin console do not apply to Pro/Max/Ultra logins, cloud providers, or non-Anthropic ANTHROPIC_BASE_URL endpoints.',
         ),
       forceRemoteSettingsRefresh: z
         .boolean()

@@ -1,19 +1,12 @@
 import { execa } from 'execa'
 import { execSync_DEPRECATED } from './execSyncWrapper.js'
+import { resolveWindowsExecutableOnPath } from './windowsPaths.js'
 
 async function whichNodeAsync(command: string): Promise<string | null> {
   if (process.platform === 'win32') {
-    // On Windows, use where.exe and return the first result
-    const result = await execa(`where.exe ${command}`, {
-      shell: true,
-      stderr: 'ignore',
-      reject: false,
-    })
-    if (result.exitCode !== 0 || !result.stdout) {
-      return null
-    }
-    // where.exe returns multiple paths separated by newlines, return the first
-    return result.stdout.trim().split(/\r?\n/)[0] || null
+    // Official 2.1.321 #1925 & #1944: in-process PATH+PATHEXT lookup skipping
+    // relative/UNC entries and network-share links, picking up settings PATH.
+    return resolveWindowsExecutableOnPath(command)
   }
 
   // On POSIX systems (macOS, Linux, WSL), use which
@@ -32,16 +25,9 @@ async function whichNodeAsync(command: string): Promise<string | null> {
 
 function whichNodeSync(command: string): string | null {
   if (process.platform === 'win32') {
-    try {
-      const result = execSync_DEPRECATED(`where.exe ${command}`, {
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      })
-      const output = result.toString().trim()
-      return output.split(/\r?\n/)[0] || null
-    } catch {
-      return null
-    }
+    // Official 2.1.321 #1925 & #1944: in-process PATH+PATHEXT lookup without
+    // spawning where.exe.
+    return resolveWindowsExecutableOnPath(command)
   }
 
   try {
@@ -62,21 +48,28 @@ const bunWhich =
 
 /**
  * Finds the full path to a command executable.
- * Uses Bun.which when running in Bun (fast, no process spawn),
- * otherwise spawns the platform-appropriate command.
- *
- * @param command - The command name to look up
- * @returns The full path to the command, or null if not found
+ * On Windows (#1925 / #1944), uses in-process PATH+PATHEXT cache lookup that
+ * skips relative/UNC/network-share links and honors settings PATH.
+ * On POSIX, uses Bun.which when running in Bun (fast, no process spawn),
+ * otherwise spawns `which`.
  */
-export const which: (command: string) => Promise<string | null> = bunWhich
-  ? async command => bunWhich(command)
-  : whichNodeAsync
+export const which: (command: string) => Promise<string | null> = async (
+  command: string,
+) => {
+  if (process.platform === 'win32') {
+    return resolveWindowsExecutableOnPath(command)
+  }
+  return bunWhich ? bunWhich(command) : whichNodeAsync(command)
+}
 
 /**
  * Synchronous version of `which`.
- *
- * @param command - The command name to look up
- * @returns The full path to the command, or null if not found
  */
-export const whichSync: (command: string) => string | null =
-  bunWhich ?? whichNodeSync
+export const whichSync: (command: string) => string | null = (
+  command: string,
+) => {
+  if (process.platform === 'win32') {
+    return resolveWindowsExecutableOnPath(command)
+  }
+  return bunWhich ? bunWhich(command) : whichNodeSync(command)
+}

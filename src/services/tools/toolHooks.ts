@@ -18,6 +18,11 @@ import { createAttachmentMessage } from '../../utils/attachments.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { isAbortError } from '../../utils/errors.js'
 import {
+  createAbortController,
+  getAbortReasonMessage,
+} from '../../utils/abortController.js'
+import { isDeepStrictEqual } from 'node:util'
+import {
   executePostToolHooks,
   executePostToolUseFailureHooks,
   executePreToolHooks,
@@ -50,6 +55,156 @@ import {
 import { isMcpTool } from '../mcp/utils.js'
 import type { McpServerType, MessageUpdateLazy } from './toolExecution.js'
 
+export const POST_TOOL_USE_INTERRUPT_GRACE_MS = 10_000
+
+const POST_TOOL_USE_INTERRUPT_GRACE_FLAG = 'tengu_agile_sunbeam'
+const COWORK_REWRITE_DROP_FLAG = 'tengu_ancient_thompson'
+
+export const ASK_USER_QUESTION_REWRITE_DROPPED_MESSAGE =
+  "A hook tried to change the answer to Claude's question, which it may not do in this session. Claude read the answer without the hook's change."
+
+export const EXIT_PLAN_MODE_REWRITE_DROPPED_MESSAGE =
+  "A hook tried to change the plan, which it may not do in this session. Claude read the plan without the hook's change."
+
+function isInterruptOrPermissionStopAbort(signal: AbortSignal): boolean {
+  if (!signal.aborted) return false
+  const reason = getAbortReasonMessage(signal.reason)
+  return reason === 'interrupt' || reason === 'permission-stop'
+}
+
+/**
+ * Official 325 `lje` (#1814) — when a turn is interrupted by a new message
+ * (`interrupt`) or permission check (`permission-stop`), give in-flight
+ * PostToolUse hooks up to 10s (`POST_TOOL_USE_INTERRUPT_GRACE_MS`) to finish
+ * under `tengu_agile_sunbeam`.
+ */
+export function holdPostToolUseAbortGrace(
+  context: ToolUseContext,
+  dropsResultOnAbort = false,
+  graceMs = POST_TOOL_USE_INTERRUPT_GRACE_MS,
+): {
+  context: ToolUseContext
+  readonly heldAbortBack: boolean
+  hooksEnded: () => void
+  dispose: () => void
+} {
+  if (
+    dropsResultOnAbort ||
+    !getFeatureValue_CACHED_MAY_BE_STALE(
+      POST_TOOL_USE_INTERRUPT_GRACE_FLAG,
+      true,
+    )
+  ) {
+    return {
+      context,
+      heldAbortBack: false,
+      hooksEnded: () => {},
+      dispose: () => {},
+    }
+  }
+  const parentSignal = context.abortController.signal
+  const hookController = createAbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let ended = false
+  let disposed = false
+
+  const onParentAbort = () => {
+    if (isInterruptOrPermissionStopAbort(parentSignal)) {
+      timer = setTimeout(() => {
+        hookController.abort(parentSignal.reason)
+      }, graceMs)
+      if (disposed) timer.unref?.()
+    } else {
+      hookController.abort(parentSignal.reason)
+    }
+  }
+  if (parentSignal.aborted) {
+    onParentAbort()
+  } else {
+    parentSignal.addEventListener('abort', onParentAbort, { once: true })
+  }
+
+  const onHookAbort = () => {
+    if (!parentSignal.aborted) {
+      context.abortController.abort(hookController.signal.reason)
+    }
+  }
+  hookController.signal.addEventListener('abort', onHookAbort, { once: true })
+
+  return {
+    context: { ...context, abortController: hookController },
+    get heldAbortBack() {
+      return isInterruptOrPermissionStopAbort(parentSignal)
+    },
+    hooksEnded: () => {
+      ended = true
+    },
+    dispose: () => {
+      if (ended) {
+        parentSignal.removeEventListener('abort', onParentAbort)
+        hookController.signal.removeEventListener('abort', onHookAbort)
+        if (timer !== undefined) clearTimeout(timer)
+        return
+      }
+      disposed = true
+      timer?.unref?.()
+    },
+  }
+}
+
+function isCoworkCloudSession(): boolean {
+  const ep = process.env.CLAUDE_CODE_ENTRYPOINT
+  return ep === 'remote_cowork' || ep === 'remote_cowork_trigger'
+}
+
+/**
+ * Official 325 `cje` / `fje` (#1954) — in Cowork cloud sessions, PostToolUse
+ * hooks may not replace AskUserQuestion or ExitPlanMode outputs.
+ */
+export function isPostToolUseOutputRewriteProtected(tool: Tool): boolean {
+  if (tool.mcpInfo?.accountMemory === true) return true
+  if (
+    isCoworkCloudSession() &&
+    (tool.name === 'AskUserQuestion' || tool.name === 'ExitPlanMode') &&
+    getFeatureValue_CACHED_MAY_BE_STALE(COWORK_REWRITE_DROP_FLAG, true)
+  ) {
+    return true
+  }
+  return false
+}
+
+export function buildDroppedOutputRewriteNotice(
+  tool: Tool,
+  proposedOutput: unknown,
+  originalOutput: unknown,
+  toolUseID: string,
+): AttachmentMessage | undefined {
+  if (
+    (tool.name !== 'AskUserQuestion' && tool.name !== 'ExitPlanMode') ||
+    proposedOutput === undefined
+  ) {
+    return undefined
+  }
+  try {
+    if (isDeepStrictEqual(proposedOutput, originalOutput)) return undefined
+  } catch (err) {
+    logForDebugging(
+      `PostToolUse hook's replacement for ${tool.name} could not be compared with the output: ${formatError(err)}`,
+      { level: 'warn' },
+    )
+  }
+  return createAttachmentMessage({
+    type: 'hook_system_message',
+    content:
+      tool.name === 'AskUserQuestion'
+        ? ASK_USER_QUESTION_REWRITE_DROPPED_MESSAGE
+        : EXIT_PLAN_MODE_REWRITE_DROPPED_MESSAGE,
+    hookName: 'Claude Code',
+    toolUseID,
+    hookEvent: 'PostToolUse',
+  })
+}
+
 export type PostToolUseHooksResult<Output> =
   | MessageUpdateLazy<AttachmentMessage | ProgressMessage<HookProgress>>
   | { updatedToolOutput: Output }
@@ -77,9 +232,13 @@ export async function* runPostToolUseHooks<Input extends AnyObject, Output>(
   if (toolUseContext.options.settingsHooksOff === true) return
   if (toolUseContext.options.bareFork === true) return
   const postToolStartTime = Date.now()
+  const abortGrace = holdPostToolUseAbortGrace(toolUseContext)
+  const effectiveContext = abortGrace.context
   try {
-    const appState = toolUseContext.getAppState()
+    const appState = effectiveContext.getAppState()
     const permissionMode = appState.toolPermissionContext.mode
+    const rewriteProtected = isPostToolUseOutputRewriteProtected(tool)
+    let rewriteNoticeYielded = false
 
     const toolOutput = toolResponse
     for await (const result of executePostToolHooks(
@@ -87,16 +246,16 @@ export async function* runPostToolUseHooks<Input extends AnyObject, Output>(
       toolUseID,
       toolInput,
       toolOutput,
-      toolUseContext,
+      effectiveContext,
       permissionMode,
-      toolUseContext.abortController.signal,
+      effectiveContext.abortController.signal,
       undefined,
       durationMs,
       {
         // densable vVn: managedHooksExcluded: s.managedPass?.toolUseId===n && I$(s,e)
         managedHooksExcluded:
           toolUseContext.managedPass?.toolUseId === toolUseID &&
-          (shouldPreserveManagedToolHookPass(toolUseContext, tool) ||
+          (shouldPreserveManagedToolHookPass(effectiveContext, tool) ||
             tool.preserveToolUseResultInSubagents === true),
       },
     )) {
@@ -107,12 +266,21 @@ export async function* runPostToolUseHooks<Input extends AnyObject, Output>(
           result.message?.type === 'attachment' &&
           result.message.attachment!.type === 'hook_cancelled'
         ) {
+          if (
+            abortGrace.heldAbortBack &&
+            effectiveContext.abortController.signal.aborted
+          ) {
+            logForDebugging(
+              `PostToolUse hook for ${tool.name} stopped at the ${POST_TOOL_USE_INTERRUPT_GRACE_MS / 1000} s limit for hooks on a turn that a new message or a permission check ended. The result was kept without this hook's answer.`,
+              { level: 'error' },
+            )
+          }
           logEvent('tengu_post_tool_hooks_cancelled', {
             toolName: sanitizeToolNameForAnalytics(tool.name),
 
-            queryChainId: toolUseContext.queryTracking
+            queryChainId: effectiveContext.queryTracking
               ?.chainId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-            queryDepth: toolUseContext.queryTracking?.depth,
+            queryDepth: effectiveContext.queryTracking?.depth,
           })
           yield {
             message: createAttachmentMessage({
@@ -156,26 +324,33 @@ export async function* runPostToolUseHooks<Input extends AnyObject, Output>(
           }
         }
 
-        const accountMemory = tool.mcpInfo?.accountMemory === true
-        if (
-          accountMemory &&
-          (result.updatedToolOutput !== undefined ||
-            result.updatedMCPToolOutput !== undefined)
-        ) {
-          logForDebugging(
-            `PostToolUse hook for ${tool.name} tried to rewrite an account memory server answer; the rewrite was dropped`,
-            { level: 'warn' },
-          )
-        }
-        if (result.updatedToolOutput !== undefined && !accountMemory) {
-          yield { updatedToolOutput: result.updatedToolOutput as Output }
-        }
-        if (
-          result.updatedMCPToolOutput !== undefined &&
-          isMcpTool(tool) &&
-          !accountMemory
-        ) {
-          yield { updatedToolOutput: result.updatedMCPToolOutput as Output }
+        const proposedOutput =
+          result.updatedToolOutput !== undefined || !isMcpTool(tool)
+            ? result.updatedToolOutput
+            : result.updatedMCPToolOutput
+        if (proposedOutput !== undefined) {
+          if (rewriteProtected) {
+            logForDebugging(
+              tool.mcpInfo?.accountMemory === true
+                ? `PostToolUse hook for ${tool.name} tried to rewrite an account memory server answer; the rewrite was dropped`
+                : `PostToolUse hook for ${tool.name} tried to rewrite an output that hooks may not replace; the rewrite was dropped`,
+              { level: 'warn' },
+            )
+            if (!rewriteNoticeYielded) {
+              const notice = buildDroppedOutputRewriteNotice(
+                tool,
+                proposedOutput,
+                toolOutput,
+                toolUseID,
+              )
+              if (notice) {
+                rewriteNoticeYielded = true
+                yield { message: notice }
+              }
+            }
+          } else {
+            yield { updatedToolOutput: proposedOutput as Output }
+          }
         }
 
         // If hook indicated to prevent continuation, yield a stop reason message
@@ -254,8 +429,11 @@ export async function* runPostToolUseHooks<Input extends AnyObject, Output>(
         }
       }
     }
+    abortGrace.hooksEnded()
   } catch (error) {
     logError(error)
+  } finally {
+    abortGrace.dispose()
   }
 }
 
@@ -832,6 +1010,42 @@ export async function resolveHookPermissionDecision(
   }
 }
 
+/**
+ * Official #1868: priority bucket for PreToolUse `ask` decisions
+ * (`serversOwnAsk` > non-host `ask` > `hostsOwnAsk`), keeping `updatedInput`
+ * per-candidate so a lower-priority `hostsOwnAsk` cannot overwrite a
+ * higher-priority `updatedInput` with `undefined` (or a lower-priority value).
+ */
+export type AskHookCandidate = {
+  message: string
+  decisionReason: PermissionDecisionReason
+  updatedInput?: Record<string, unknown>
+}
+
+export function mergeAskHookCandidates(state: {
+  serverAskCandidate?: AskHookCandidate
+  nonHostAskCandidate?: AskHookCandidate
+  hostAskCandidate?: AskHookCandidate
+  fallbackCandidate: AskHookCandidate
+}): PermissionResult {
+  const winner =
+    state.serverAskCandidate ??
+    state.nonHostAskCandidate ??
+    state.hostAskCandidate ??
+    state.fallbackCandidate
+  const updatedInput =
+    winner.updatedInput ??
+    state.serverAskCandidate?.updatedInput ??
+    state.nonHostAskCandidate?.updatedInput ??
+    state.hostAskCandidate?.updatedInput
+  return {
+    behavior: 'ask',
+    message: winner.message,
+    decisionReason: winner.decisionReason,
+    updatedInput,
+  }
+}
+
 export async function* runPreToolUseHooks(
   toolUseContext: ToolUseContext,
   tool: Tool,
@@ -866,6 +1080,11 @@ export async function* runPreToolUseHooks(
   const hookStartTime = Date.now()
   // Official `u` — deny only. Allow/ask do not suppress a latched defer.
   let deniedPermissionResult: PermissionResult | undefined
+  // Official #1868: serversOwnAsk > non-host ask > hostsOwnAsk
+  let askPermissionResult: PermissionResult | undefined
+  let serverAskCandidate: AskHookCandidate | undefined
+  let nonHostAskCandidate: AskHookCandidate | undefined
+  let hostAskCandidate: AskHookCandidate | undefined
   // Official `c` — latch defer until the stream ends.
   let deferredHookName: string | undefined
   // densable `d`: last stopReason from preventContinuation
@@ -1033,17 +1252,34 @@ export async function* runPreToolUseHooks(
               hookPermissionResult: permissionResult,
             }
           } else if (result.permissionBehavior === 'ask') {
-            const permissionResult: PermissionResult = {
-              behavior: 'ask',
-              updatedInput: result.updatedInput,
+            const askMeta = result as typeof result & {
+              hostsOwnAsk?: boolean
+              serversOwnAsk?: boolean
+            }
+            const candidate: AskHookCandidate = {
               message:
                 result.hookPermissionDecisionReason ||
                 `Hook PreToolUse:${tool.name} ${getRuleBehaviorDescription(result.permissionBehavior)} this tool`,
               decisionReason,
+              updatedInput: result.updatedInput,
             }
+            if (askMeta.serversOwnAsk) {
+              serverAskCandidate = candidate
+            } else if (!askMeta.hostsOwnAsk) {
+              nonHostAskCandidate = candidate
+            } else {
+              hostAskCandidate = candidate
+            }
+            askPermissionResult = mergeAskHookCandidates({
+              serverAskCandidate,
+              nonHostAskCandidate,
+              hostAskCandidate,
+              fallbackCandidate: candidate,
+            })
             yield {
               type: 'hookPermissionResult',
-              hookPermissionResult: permissionResult,
+              hookPermissionResult:
+                deniedPermissionResult ?? askPermissionResult,
             }
           } else {
             // Official u — deny only.

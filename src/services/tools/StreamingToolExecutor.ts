@@ -27,6 +27,7 @@ import {
 } from '../../utils/hooks/hooksConfigSnapshot.js'
 import { hasMatchingFunctionHook } from '../../utils/plugins/functionHooksModules.js'
 import { isUserPromptWaiting } from '../../utils/sessionHost.js'
+import { getCwd } from '../../utils/cwd.js'
 import { ToolPermissionPromptsUp } from '../../utils/toolState.js'
 import { escapeXml } from '../../utils/xml.js'
 import { isToolBridgeEvent, runToolUse } from './toolExecution.js'
@@ -291,6 +292,62 @@ type MessageUpdate = {
 
 type ToolStatus = 'queued' | 'executing' | 'completed' | 'yielded'
 
+type ContextLayer = NonNullable<ToolUseContext['permissionLayers']>[number]
+
+/**
+ * Official 325 `YIe` (#1894) — append tool-emitted `contextLayers` (including
+ * `working_directory`) onto `ToolUseContext.permissionLayers` and mirror model
+ * / max_thinking_tokens updates onto `options`.
+ */
+export function applyContextLayersToToolUseContext(
+  context: ToolUseContext,
+  layers: readonly ContextLayer[],
+): ToolUseContext {
+  if (layers.length === 0) return context
+  const nextLayers = context.permissionLayers
+    ? [...context.permissionLayers, ...layers]
+    : [...layers]
+  let mainLoopModel: string | undefined
+  for (let i = layers.length - 1; i >= 0; i--) {
+    const layer = layers[i]
+    if (
+      layer &&
+      layer.kind === 'model' &&
+      typeof layer.mainLoopModel === 'string'
+    ) {
+      mainLoopModel = layer.mainLoopModel
+      break
+    }
+  }
+  let thinkingConfig: ToolUseContext['options']['thinkingConfig'] | undefined
+  for (let i = layers.length - 1; i >= 0; i--) {
+    const layer = layers[i]
+    if (layer && layer.kind === 'max_thinking_tokens') {
+      const tokens = layer.maxThinkingTokens
+      if (typeof tokens === 'number') {
+        thinkingConfig =
+          tokens === 0
+            ? { type: 'disabled' }
+            : { type: 'enabled', budgetTokens: tokens }
+      }
+      break
+    }
+  }
+  return {
+    ...context,
+    permissionLayers: nextLayers,
+    ...(mainLoopModel !== undefined || thinkingConfig !== undefined
+      ? {
+          options: {
+            ...context.options,
+            ...(mainLoopModel !== undefined ? { mainLoopModel } : {}),
+            ...(thinkingConfig !== undefined ? { thinkingConfig } : {}),
+          },
+        }
+      : {}),
+  }
+}
+
 type TrackedTool = {
   id: string
   block: ToolUseBlock
@@ -305,6 +362,8 @@ type TrackedTool = {
   pendingBridgeEvents: ToolBridgeEvent[]
   contextModifiers?: Array<(context: ToolUseContext) => ToolUseContext>
   contextModifiersApplied?: boolean
+  contextLayers?: ContextLayer[]
+  contextLayersApplied?: boolean
 }
 
 export type ExclusiveCallQueuedBehindEntry = {
@@ -693,6 +752,8 @@ export class StreamingToolExecutor {
     const messages: Message[] = []
     const contextModifiers: Array<(context: ToolUseContext) => ToolUseContext> =
       []
+    const contextLayers: ContextLayer[] = []
+    const cwdBeforeExclusive = !tool.isConcurrencySafe ? getCwd() : undefined
 
     const collectResults = async () => {
       // If already aborted (by error or user), generate synthetic error block instead of running the tool
@@ -915,6 +976,14 @@ export class StreamingToolExecutor {
             }
             if (update.contextModifier) {
               contextModifiers.push(update.contextModifier.modifyContext)
+            }
+            const updateLayers = (
+              update as {
+                contextLayers?: { toolUseID: string; layers: ContextLayer[] }
+              }
+            ).contextLayers
+            if (updateLayers && updateLayers.layers.length > 0) {
+              contextLayers.push(...updateLayers.layers)
             }
           }
         } finally {
@@ -1152,17 +1221,42 @@ export class StreamingToolExecutor {
           if (!runnerHandlesDetach) detachedToolCallEnded(tool.id, session)
         }
       }
+      if (cwdBeforeExclusive !== undefined) {
+        const cwdAfterExclusive = getCwd()
+        if (
+          cwdAfterExclusive !== cwdBeforeExclusive &&
+          !contextLayers.some(l => l.kind === 'working_directory')
+        ) {
+          contextLayers.push({
+            kind: 'working_directory',
+            directory: cwdAfterExclusive,
+          })
+        }
+      }
       tool.results = messages
       tool.contextModifiers = contextModifiers
+      tool.contextLayers = contextLayers
       tool.status = 'completed'
       this.wakeWaiters()
       this.updateInterruptibleState()
 
       // Exclusive calls apply immediately; concurrent calls merge in queue
       // order after the entire run settles (densable ds.applyEndedRunLayers).
-      if (!tool.isConcurrencySafe && contextModifiers.length > 0) {
-        for (const modifier of contextModifiers) {
-          this.toolUseContext = modifier(this.toolUseContext)
+      if (!tool.isConcurrencySafe) {
+        if (contextModifiers.length > 0) {
+          for (const modifier of contextModifiers) {
+            this.toolUseContext = modifier(this.toolUseContext)
+          }
+          tool.contextModifiersApplied = true
+          this.appliedConcurrentContextModifiers = true
+        }
+        if (contextLayers.length > 0) {
+          this.toolUseContext = applyContextLayersToToolUseContext(
+            this.toolUseContext,
+            contextLayers,
+          )
+          tool.contextLayersApplied = true
+          this.appliedConcurrentContextModifiers = true
         }
       }
     }
@@ -1288,6 +1382,19 @@ export class StreamingToolExecutor {
           this.toolUseContext = modifier(this.toolUseContext)
         }
         tool.contextModifiersApplied = true
+        this.appliedConcurrentContextModifiers = true
+      }
+      if (
+        tool.isConcurrencySafe &&
+        !tool.contextLayersApplied &&
+        tool.contextLayers &&
+        tool.contextLayers.length > 0
+      ) {
+        this.toolUseContext = applyContextLayersToToolUseContext(
+          this.toolUseContext,
+          tool.contextLayers,
+        )
+        tool.contextLayersApplied = true
         this.appliedConcurrentContextModifiers = true
       }
     }

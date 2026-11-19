@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import figures from 'figures';
 import * as React from 'react';
-import { color, Text } from '@anthropic/ink';
+import { color, Link, Text } from '@anthropic/ink';
 import type { MCPServerConnection } from '../services/mcp/types.js';
 import { isOAuthRefreshTokenDead, isStoredOAuthRefreshTokenCleared } from './accountOnHold.js';
 import { describeAnthropicProfile, isProfileAuthActive, isUsableStoredClaudeAiLogin } from './anthropicProfile.js';
@@ -25,7 +25,8 @@ import { describeLoadedClientDataStatus } from '../cli/clientDataUrl.js';
 import { getClaudeAiUserDefaultModelDescription, modelDisplayString } from './model/model.js';
 import { getAPIProvider, getBedrockMantleOverrideProvider, isFirstPartyAnthropicBaseUrl } from './model/providers.js';
 import { leftoverPolicyLimitsHost } from '../cli/leftoverTulip.js';
-import { isAutoModeServerEnabled } from '../services/api/autoModeClassifierTransport.js';
+import { isAutoModeServerEnabled, isFirstPartyBehindLlmGateway } from '../services/api/autoModeClassifierTransport.js';
+import { serverCheckDeclined } from '../services/api/autoModeServerFallbackNotice.js';
 import type { PermissionMode } from '../types/permissions.js';
 import { getMTLSConfig } from './mtls.js';
 import { checkInstall } from './nativeInstaller/index.js';
@@ -43,7 +44,34 @@ import { getUdsStartFailureReason } from './udsMessaging.js';
 export type Property = {
   label?: string;
   value: React.ReactNode | Array<string>;
+  /** Official 2.1.319 (#1783): render inline URLs via OSC-8 <Link> so wrapped links open intact. */
+  linkify?: boolean;
 };
+
+export const AUTO_MODE_SERVER_DOCS_URL =
+  'https://code.claude.com/docs/en/permission-modes#server-side-classifier-review';
+
+const URL_IN_TEXT_RE = /(https?:\/\/[^\s)]+)/g;
+
+/**
+ * Official 2.1.319 (#1783): split a plain status string into Text + OSC-8 <Link>
+ * segments so wrapped help links open as one URL.
+ */
+export function linkifyStatusText(text: string): React.ReactNode {
+  const parts = text.split(URL_IN_TEXT_RE);
+  if (parts.length <= 1) {
+    return text;
+  }
+  return parts.map((part, idx) =>
+    idx % 2 === 1 ? (
+      <Link key={idx} url={part}>
+        {part}
+      </Link>
+    ) : (
+      part
+    ),
+  );
+}
 
 export type Diagnostic = React.ReactNode;
 
@@ -237,13 +265,27 @@ export function buildSettingSourcesProperties(): Property[] {
 }
 
 /**
- * densable Dfo — always-on Auto mode server row (`dcn(permissionMode)`).
+ * densable `rvi` / `Dfo` (2.1.319 #1727 & #1783) — Auto mode server row.
+ * When enabled locally but server-side review isn't reaching this session (e.g.
+ * behind an LLM gateway or declined by server), show `Not reaching this session: <url>`
+ * with OSC-8 linkification.
  */
-export function buildAutoModeServerProperties(permissionMode: PermissionMode): Property[] {
+export function buildAutoModeServerProperties(
+  permissionMode: PermissionMode,
+  opts?: { serverCheckDeclined?: boolean },
+): Property[] {
+  const enabled = isAutoModeServerEnabled(permissionMode);
+  const declined = opts?.serverCheckDeclined ?? serverCheckDeclined();
+  const notReaching = enabled && (declined || isFirstPartyBehindLlmGateway());
   return [
     {
       label: 'Auto mode server',
-      value: isAutoModeServerEnabled(permissionMode) ? 'Enabled' : 'Disabled',
+      value: !enabled
+        ? 'Disabled'
+        : notReaching
+          ? `Not reaching this session: ${AUTO_MODE_SERVER_DOCS_URL}`
+          : 'Enabled',
+      linkify: true,
     },
   ];
 }

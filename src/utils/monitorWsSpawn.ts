@@ -16,6 +16,8 @@ import type { MonitorWsFrameLive } from '../tasks/MonitorWsTask/MonitorWsTask.js
 import type { AgentId } from '../types/ids.js'
 import { registerCleanup } from './cleanupRegistry.js'
 import { logForDebugging } from './debug.js'
+import { isEnvTruthy } from './envUtils.js'
+import { getErrnoCode } from './errors.js'
 import { isBlockedAddress } from './hooks/ssrfGuard.js'
 import {
   createMonitorStreamPump,
@@ -91,10 +93,54 @@ export type ResolveMonitorWsOptions = {
   tls?: ConnectionOptions
 }
 
+const BLOCKED_MONITOR_HOSTNAMES = new Set([
+  'localhost',
+  'localhost.localdomain',
+  'ip6-localhost',
+  'ip6-loopback',
+  'metadata.google.internal',
+  'metadata.goog',
+  'metadata',
+  'instance-data',
+  'metadata.azure.com',
+])
+
 /**
- * densable `ue(e, n)` @194294560 — SSRF check + Host-header IP pin only for
- * direct unproxied `ws:`. When `proxy` is configured or `parsed.protocol === 'wss:'`,
- * dial the original URL directly without IP-rewriting or local CONNECT tunneling.
+ * Official 2.1.319 #1747 (`G3`): refuse delegating loopback, cloud-metadata,
+ * or empty-label hostnames to an outbound proxy when local DNS fails.
+ */
+export function isBlockedMonitorHostname(host: string): boolean {
+  const normalized = host
+    .trim()
+    .replace(/^\[|\]$/g, '')
+    .toLowerCase()
+    .replace(/\.+$/, '')
+  if (
+    normalized === '' ||
+    BLOCKED_MONITOR_HOSTNAMES.has(normalized) ||
+    normalized.endsWith('.localhost') ||
+    normalized.endsWith('.metadata.google.internal') ||
+    (normalized.startsWith('instance-data.') &&
+      normalized.endsWith('.compute.internal'))
+  ) {
+    return true
+  }
+  const ipVer = isIP(normalized)
+  if (ipVer === 4) {
+    return normalized.startsWith('127.') || isBlockedAddress(normalized)
+  }
+  if (ipVer === 6) {
+    return normalized === '::1' || isBlockedAddress(normalized)
+  }
+  return false
+}
+
+/**
+ * densable `ue(e, n)` + 2.1.319 #1747 (`he`) — SSRF check + Host-header IP pin
+ * for direct unproxied `ws:`. Always tries local DNS lookup first; only
+ * delegates DNS resolution to the proxy when `opts.proxy` is set,
+ * `CLAUDE_CODE_PROXY_RESOLVES_HOSTS` is truthy, local lookup fails with
+ * `EAI_AGAIN` or `ENOTFOUND`, and the hostname is not loopback/metadata/empty-label.
  */
 export async function resolveMonitorWsUrl(
   url: string,
@@ -120,13 +166,26 @@ export async function resolveMonitorWsUrl(
     }
     return { url, ...(opts.tls !== undefined ? { tls: opts.tls } : {}) }
   }
-  if (opts.proxy) {
-    return { url, ...(opts.tls !== undefined ? { tls: opts.tls } : {}) }
-  }
   let records: Array<{ address: string; family: number }>
   try {
     records = await lookup(host, { all: true })
   } catch (err) {
+    const code = getErrnoCode(err)
+    if (
+      opts.proxy &&
+      isEnvTruthy(process.env.CLAUDE_CODE_PROXY_RESOLVES_HOSTS) &&
+      (code === 'EAI_AGAIN' || code === 'ENOTFOUND')
+    ) {
+      if (
+        isBlockedMonitorHostname(host) ||
+        host.replace(/\.$/, '').split('.').includes('')
+      ) {
+        throw new MonitorWsPreconditionError(
+          `${host} did not resolve here and is not left to the proxy: the name means loopback or cloud metadata, or has an empty label`,
+        )
+      }
+      return { url, ...(opts.tls !== undefined ? { tls: opts.tls } : {}) }
+    }
     throw new MonitorWsPreconditionError(
       `could not resolve ${host}: ${err instanceof Error ? err.message : String(err)}`,
     )
@@ -141,7 +200,7 @@ export async function resolveMonitorWsUrl(
       )
     }
   }
-  if (parsed.protocol === 'wss:') {
+  if (opts.proxy || parsed.protocol === 'wss:') {
     return { url, ...(opts.tls !== undefined ? { tls: opts.tls } : {}) }
   }
   const v4 = records.find(r => r.family === 4) ?? records[0]!

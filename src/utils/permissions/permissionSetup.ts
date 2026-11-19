@@ -38,7 +38,10 @@ import {
 import { isAutoDefaultLaunchEnabled } from '../../services/mcp/vscodeIdeBridgeCallbacks.js'
 import { planHarborWillowAutoFallback } from './autoModeHarborWillow.js'
 import { isBridgeChildAutoDefaultEnabled } from '../residualFinalEnvGates.js'
-import { applyPermissionRulesToPermissionContext } from './permissions.js'
+import {
+  applyDenyInsteadOfPrompting,
+  applyPermissionRulesToPermissionContext,
+} from './permissions.js'
 import { settingsHaveBlockReadsOutsideWorkingDirectories } from './outsideReads.js'
 import { emitPermissionRecheck } from './permissionRecheck.js'
 import { loadAllPermissionRulesFromDisk } from './permissionsLoader.js'
@@ -1357,7 +1360,10 @@ export async function initializeToolPermissionContext({
         ? { blockReadsOutsideWorkingDirectories: true }
         : {}),
       ...(shouldAvoidPermissionPrompts
-        ? { shouldAvoidPermissionPrompts: true }
+        ? {
+            shouldAvoidPermissionPrompts: true,
+            avoidsPromptsByNature: true,
+          }
         : {}),
       mcpPermissionModeOverrides: {},
       chromeClassifierFloorEnabled,
@@ -1373,6 +1379,7 @@ export async function initializeToolPermissionContext({
     },
     rulesFromDisk,
   )
+  toolPermissionContext = applyDenyInsteadOfPrompting(toolPermissionContext)
 
   // densable `xy` — skip gated project/local additionalDirectories
   const allAdditionalDirectories = [

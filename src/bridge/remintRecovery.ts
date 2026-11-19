@@ -68,6 +68,36 @@ export const EPOCH_STALE_RECOVERY_JITTER_MS = 5_000
 /** densable work-bridge cMS — connection error give-up (ms). */
 export const BRIDGE_CONN_GIVE_UP_MS = 600_000 // 10 minutes
 
+/**
+ * #1884: Distinguish transient token handover failure (`null`) from permanent
+ * login expiry or terminal refusal during proactive bridge credential refresh.
+ * A transient `null` must NOT mark the live connection as "login expired".
+ */
+export type ProactiveRemintOutcome =
+  | 'credentials'
+  | 'transient_null'
+  | 'oauth_rejected'
+  | 'terminal_relogin'
+  | 'terminal_other'
+
+export function classifyProactiveRemintResult(
+  result: unknown,
+): ProactiveRemintOutcome {
+  if (result === null || result === undefined) {
+    return 'transient_null'
+  }
+  if (typeof result === 'object' && 'terminal' in result) {
+    const fail = result as { terminal: boolean; reason?: string }
+    if (fail.terminal) {
+      return fail.reason === 'session_stale_relogin'
+        ? 'terminal_relogin'
+        : 'terminal_other'
+    }
+    return 'oauth_rejected'
+  }
+  return 'credentials'
+}
+
 export type RemintCap = {
   attempts: number
   exhaustedDetail: string

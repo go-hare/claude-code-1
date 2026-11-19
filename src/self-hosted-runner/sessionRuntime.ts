@@ -376,23 +376,25 @@ export function createIngressFenceBgController(opts: {
 }
 
 /**
- * densable rBh finally after Fjv:
- *   if (re === "completed") unlink(debug)
+ * densable rBh finally:
+ *   if (re === "completed" || removeSessionState) unlink(debug)
  *   else status preserve message
  *   if (de) unlink(mcp-config) always
  *   for (Xt of [...Pe?[Pe]:[], ..._e]) unlink launcher settings + scripts
  */
 export async function cleanupSessionSideFiles(opts: {
   sessionId: string
-  /** densable `re` — only `"completed"` deletes the debug log */
+  /** densable `re` — `"completed"` deletes the debug log; failed/interrupted preserves it unless `removeSessionState` is true (#1826) */
   exitResult?: string
   debugFile: string
   mcpConfigPath?: string
   /** densable Pe + _e — launcher-settings.json + staged hook scripts */
   launcherCleanupPaths?: string[]
+  /** #1826: When true (`--remove-session-state`), remove even failed session debug logs. */
+  removeSessionState?: boolean
   onStatus: (msg: string) => void
 }): Promise<void> {
-  if (opts.exitResult === 'completed') {
+  if (opts.exitResult === 'completed' || opts.removeSessionState === true) {
     await unlink(opts.debugFile).catch(() => {})
   } else if (opts.exitResult !== undefined) {
     opts.onStatus(
@@ -407,26 +409,86 @@ export async function cleanupSessionSideFiles(opts: {
   }
 }
 
-export type IntervalRefreshLoop = { cancel: () => void }
+export type IntervalRefreshLoop = {
+  cancel: () => void
+  refreshNow?: (opts?: {
+    force?: boolean
+  }) => 'fired' | 'in_flight' | 'debounced' | 'cancelled'
+}
+
+export type RefreshLoopErrorInfo = {
+  delayMs: number
+  transient: boolean
+  expired: boolean
+  dead: boolean
+  definiteSinceSuccess: number
+}
+
+export type RefreshLoopResult =
+  | number
+  | { intervalMs?: number; ttlMs?: number; nextInMs?: number }
+  | undefined
 
 /**
- * densable `z2h` — setTimeout loop: refresh() may return next intervalMs;
- * on error short-retry min(errorRetryMs, interval) up to maxShortRetries.
+ * #1769 (official `Op`): Shortened retry schedule for consecutive definite
+ * `inference_token` renewal refusals (refusals 1..4 use 1/24, 1/12, 1/6, 1/6
+ * of `intervalMs` with ±20% jitter, clamped to `[30_000, intervalMs]`).
+ */
+const REFUSAL_RETRY_FRACTIONS = [1 / 24, 1 / 12, 1 / 6, 1 / 6] as const
+
+export function computeRefusalRetryDelayMs(opts: {
+  refusals: number
+  intervalMs: number
+  random?: () => number
+}): number {
+  const frac = REFUSAL_RETRY_FRACTIONS[opts.refusals - 1]
+  if (frac === undefined) {
+    return opts.intervalMs
+  }
+  const rand = opts.random ? opts.random() : Math.random()
+  const scaled = Math.round(opts.intervalMs * frac * (0.8 + 0.4 * rand))
+  return Math.min(Math.max(scaled, 30_000), opts.intervalMs)
+}
+
+/**
+ * densable `z2h` — setTimeout loop: refresh() may return next intervalMs or
+ * `{ intervalMs, ttlMs, nextInMs }`.
+ * #1769: Tracks token expiry (`dead`/`expired`) and consecutive definite
+ * refusals (`definiteSinceSuccess`) and shortens the retry delay on refusal.
  */
 export function startIntervalRefreshLoop(opts: {
   intervalMs: number
-  refresh: () => Promise<number | undefined>
-  onError: (err: unknown) => void
+  ttlMs?: number
+  refresh: () => Promise<RefreshLoopResult>
+  onError: (err: unknown, info: RefreshLoopErrorInfo) => void
+  onSuccess?: () => void
+  isDefiniteRefusal?: (err: unknown) => boolean
+  isTransient?: (err: unknown) => boolean
   signal: AbortSignal
   errorRetryMs?: number
   maxShortRetries?: number
+  expiryMarginMs?: number
+  minRefreshGapMs?: number
+  now?: () => number
+  random?: () => number
 }): IntervalRefreshLoop {
   const errorRetryMs = opts.errorRetryMs ?? REFRESH_LOOP_ERROR_RETRY_MS
   const maxShortRetries = opts.maxShortRetries ?? REFRESH_LOOP_MAX_SHORT_RETRIES
+  const expiryMarginMs = opts.expiryMarginMs ?? 60_000
+  const minRefreshGapMs = opts.minRefreshGapMs ?? 30_000
+  const now = opts.now ?? Date.now
+  const rand = opts.random ?? Math.random
   let timer: ReturnType<typeof setTimeout> | undefined
   let cancelled = false
+  let inFlight = false
+  let pendingForce = false
+  let lastStartedAt: number | undefined
   let intervalMs = opts.intervalMs
+  let ttlMs = opts.ttlMs
+  let expiresAtMs: number | undefined =
+    ttlMs !== undefined && ttlMs > 0 ? now() + ttlMs : undefined
   let shortFails = 0
+  let definiteSinceSuccess = 0
   const onAbort = (): void => cancel()
   opts.signal.addEventListener('abort', onAbort, { once: true })
 
@@ -436,28 +498,131 @@ export function startIntervalRefreshLoop(opts: {
     opts.signal.removeEventListener('abort', onAbort)
   }
 
+  function computeErrorInfo(
+    transient: boolean,
+    isDefinite: boolean,
+  ): RefreshLoopErrorInfo {
+    const remainingMs =
+      expiresAtMs === undefined ? undefined : expiresAtMs - now()
+    const expired = remainingMs !== undefined && remainingMs <= expiryMarginMs
+    const dead = remainingMs !== undefined && remainingMs <= 0
+    if (isDefinite) {
+      const refusalDelay = computeRefusalRetryDelayMs({
+        refusals: definiteSinceSuccess,
+        intervalMs,
+        random: rand,
+      })
+      return {
+        expired,
+        transient,
+        dead,
+        definiteSinceSuccess,
+        delayMs:
+          remainingMs !== undefined && remainingMs > 0
+            ? Math.min(refusalDelay, remainingMs)
+            : refusalDelay,
+      }
+    }
+    const delayMs =
+      transient && shortFails <= maxShortRetries
+        ? Math.min(errorRetryMs, intervalMs)
+        : intervalMs
+    return {
+      expired,
+      transient,
+      dead,
+      definiteSinceSuccess,
+      delayMs,
+    }
+  }
+
   function tick(): void {
-    if (cancelled || opts.signal.aborted) return
+    if (cancelled || opts.signal.aborted || inFlight) return
+    inFlight = true
+    const startedAt = now()
+    lastStartedAt = startedAt
+    let errorInfo: RefreshLoopErrorInfo | undefined
+    let nextInMs: number | undefined
+    let succeeded = false
     opts
       .refresh()
-      .then(next => {
+      .then(result => {
+        succeeded = true
         shortFails = 0
-        if (next !== undefined && next > 0) intervalMs = next
+        definiteSinceSuccess = 0
+        const normalized =
+          typeof result === 'number' ? { intervalMs: result } : (result ?? {})
+        if (normalized.intervalMs !== undefined && normalized.intervalMs > 0) {
+          intervalMs = normalized.intervalMs
+        }
+        if (normalized.ttlMs !== undefined && normalized.ttlMs > 0) {
+          ttlMs = normalized.ttlMs
+        }
+        if (ttlMs !== undefined && ttlMs > 0) {
+          expiresAtMs = startedAt + ttlMs
+        }
+        if (normalized.nextInMs !== undefined && normalized.nextInMs > 0) {
+          nextInMs = normalized.nextInMs
+        }
       })
       .catch(err => {
+        if (cancelled || opts.signal.aborted) return
+        const isDefinite = opts.isDefiniteRefusal?.(err) ?? false
+        if (isDefinite) {
+          definiteSinceSuccess++
+        }
         shortFails++
-        opts.onError(err)
+        const transient = !isDefinite && (opts.isTransient?.(err) ?? true)
+        errorInfo = computeErrorInfo(transient, isDefinite)
+        if (pendingForce) {
+          errorInfo = { ...errorInfo, delayMs: 0 }
+        }
+        opts.onError(err, errorInfo)
       })
       .finally(() => {
+        inFlight = false
         if (cancelled || opts.signal.aborted) return
-        const delay =
-          shortFails > 0 && shortFails <= maxShortRetries
-            ? Math.min(errorRetryMs, intervalMs)
-            : intervalMs
+        if (succeeded) {
+          try {
+            opts.onSuccess?.()
+          } catch {
+            // best-effort callback
+          }
+        }
+        if (pendingForce) {
+          pendingForce = false
+          tick()
+          return
+        }
+        const delay = errorInfo?.delayMs ?? nextInMs ?? intervalMs
         timer = setTimeout(tick, delay)
       })
   }
 
+  function refreshNow(refreshOpts?: {
+    force?: boolean
+  }): 'fired' | 'in_flight' | 'debounced' | 'cancelled' {
+    const force = refreshOpts?.force ?? false
+    if (cancelled || opts.signal.aborted) return 'cancelled'
+    if (inFlight) {
+      pendingForce ||= force
+      return 'in_flight'
+    }
+    if (
+      !force &&
+      lastStartedAt !== undefined &&
+      now() - lastStartedAt < minRefreshGapMs
+    ) {
+      return 'debounced'
+    }
+    if (timer) {
+      clearTimeout(timer)
+      timer = undefined
+    }
+    tick()
+    return 'fired'
+  }
+
   timer = setTimeout(tick, intervalMs)
-  return { cancel }
+  return { cancel, refreshNow }
 }

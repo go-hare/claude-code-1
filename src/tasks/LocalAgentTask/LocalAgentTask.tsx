@@ -33,6 +33,7 @@ import {
   type SpawnedSubagentHandle,
   type WebFetchSavedFiles,
 } from '../../utils/subagentSpawnLedger.js';
+import { resetImageRereadState } from '../../utils/subagentCacheEvict.js';
 import type { ActiveTaskExecutionContext } from '../../utils/tasks.js';
 import { registerCleanup } from '../../utils/cleanupRegistry.js';
 import { getToolSearchOrReadInfo } from '../../utils/collapseReadSearch.js';
@@ -1741,6 +1742,7 @@ export function killAsyncAgent(
   });
   if (killed) {
     clearDeferredAgentProgressRebuild(taskId);
+    resetImageRereadState(taskId);
     // Running kill: detach owner KA (local residual; densable pre-steps only
     // cover YC). Parked paths already handled tB/BRt above — avoid double tB.
     if (!wasParked) {
@@ -2135,6 +2137,7 @@ export function completeAgentTask(result: AgentToolResult, registry: TaskRegistr
   });
   if (completed) {
     clearDeferredAgentProgressRebuild(taskId);
+    resetImageRereadState(taskId);
     evictAgentTaskOutputIfPersistent(taskId);
     // Official DSu: if (o && !i) ... Zeo(n,t) — registry required, never skip.
     if (!parkedInteractive) {
@@ -2189,6 +2192,7 @@ export function failAgentTask(taskId: string, error: string, registry: TaskRegis
   });
   if (failed) {
     clearDeferredAgentProgressRebuild(taskId);
+    resetImageRereadState(taskId);
     evictAgentTaskOutputIfPersistent(taskId);
     // Official eto: always Zeo after fail (no YC park)
     rewireOrphanedOwnerNotifications(taskId, registry);

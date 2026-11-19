@@ -63,6 +63,15 @@ export type ValidationError = {
    * Alias both-keys-set warnings carry `"warning"`.
    */
   severity?: 'warning' | 'fatal' | string
+  /** Official 2.1.321 (#1903): cause when managed settings (e.g. MDM) could not be read */
+  unreadCause?:
+    | 'timeout'
+    | 'killed'
+    | 'spawn_busy'
+    | 'spawn_error'
+    | 'oversize'
+    | 'unconvertible'
+    | 'lint_unfinished'
   /** Suggestion for fixing the error */
   suggestion?: string
   /** Link to relevant documentation */

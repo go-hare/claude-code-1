@@ -9,9 +9,12 @@ import {
   getSdkSupportedDialogKinds,
   isReplBridgeActive,
   isSdkDialogHostActive,
+  isThirdPartyServerClassifierRefused,
   setServerClassifierFallbackChoice,
   clearServerClassifierFallbackChoice,
 } from '../../bootstrap/state.js'
+import { getBootstrapSessionHost } from '../../utils/sessionRoot.js'
+import { createHyperlink } from '../../utils/hyperlink.js'
 import type { ToolUseContext } from '../../Tool.js'
 import {
   AUTO_MODE_SERVER_FALLBACK_KIND,
@@ -33,6 +36,37 @@ import {
 /** densable `YUe` */
 export const AUTO_MODE_CLASSIFIER_BILLING_DOCS_URL =
   'https://code.claude.com/docs/en/auto-mode-classifier-billing'
+
+let runtimeServerCheckDeclined = false
+
+/** Official 2.1.319 `v5o` (#1727): mark whether the server-side auto mode check declined this session. */
+export function setServerCheckDeclined(declined: boolean): void {
+  runtimeServerCheckDeclined = declined
+}
+
+/**
+ * Official 2.1.319 `Dhi` (#1727): true when server-side auto mode review has
+ * declined / fallen back to local billing in this session.
+ */
+export function serverCheckDeclined(): boolean {
+  if (runtimeServerCheckDeclined) return true
+  if (isThirdPartyServerClassifierRefused()) return true
+  if (getServerClassifierFallbackChoice() !== undefined) return true
+  const latches = getBootstrapSessionHost().requestLatches as {
+    serverCheckDeclined?: () => boolean
+  }
+  return latches.serverCheckDeclined?.() === true
+}
+
+/**
+ * Official 2.1.319 (#1727 & #1783): render the classifier billing docs URL as
+ * an OSC-8 terminal hyperlink when supported.
+ */
+export function linkifyClassifierBillingUrl(
+  url: string = AUTO_MODE_CLASSIFIER_BILLING_DOCS_URL,
+): string {
+  return createHyperlink(url, url)
+}
 
 /** densable `S8o` */
 const NOTICE_ACK_TTL_MS = 86_400_000

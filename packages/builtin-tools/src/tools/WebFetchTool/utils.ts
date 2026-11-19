@@ -836,16 +836,15 @@ export async function applyPromptToMarkdown(
     )
   }
 
-  const { content } = assistantMessage.message!
-  if (content!.length > 0) {
-    const contentBlock = content![0]
-    if (
-      contentBlock &&
-      typeof contentBlock === 'object' &&
-      'text' in contentBlock
-    ) {
-      return (contentBlock as { text: string }).text
-    }
+  // Official 325 #1874: extract all text blocks; never return a synthetic
+  // "No response from model" string as page content — fail clearly instead.
+  const responseText =
+    getContentText(assistantMessage.message?.content as never) ?? ''
+  if (responseText.trim() === '') {
+    throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+      'The small, fast model that reads the content gave no answer. Trying again may work.',
+      'web-fetch-apply-no-answer',
+    )
   }
-  return 'No response from model'
+  return responseText
 }

@@ -70,6 +70,8 @@ import {
   markSpareClaimFailed,
   markSpareClaiming,
 } from './spareClaim.js'
+import { recordSessionCountMetricOnce } from '../entrypoints/init.js'
+import { resolveVcsRepositoryAttributesForCwd } from '../utils/telemetry/vcsRepositoryAttributes.js'
 
 /** densable O @chunk-4gtdkap5 — keys accepted on claim env. */
 export const CLAIM_ENV_ALLOWLIST = new Set([
@@ -585,6 +587,9 @@ export async function handleClaimSessionRequest(
       'claim_session',
       { freshSession: true },
     )
+    // Official 2.1.321 (#1873): re-resolve OTel vcs.* repository attributes for
+    // the claimed cwd (e.g., pre-started Claude Desktop / SDK spare processes).
+    void resolveVcsRepositoryAttributesForCwd(n)
     headlessProfilerCheckpoint('claim_relocated')
     try {
       host.retireDepartedAdditionalDirectories?.(departedAdditionalDirectories)
@@ -646,6 +651,9 @@ export async function handleClaimSessionRequest(
     host.startSessionStartHooks()
     host.announceStartingChange?.()
     markSpareClaimed()
+    // Official 2.1.319 (#1759): count pre-started `--await-claim` / `prewarm()`
+    // processes once at the moment they are claimed into a real session.
+    recordSessionCountMetricOnce()
     profileCheckpointOnce('spare_claimed')
     headlessProfilerCheckpoint('spare_claimed')
 

@@ -12,7 +12,11 @@ import figures from 'figures'
 import { getShortcutDisplay } from '../../keybindings/shortcutFormat.js'
 import { getBindingDisplayText } from '../../keybindings/resolver.js'
 import { loadKeybindingsSync } from '../../keybindings/loadUserBindings.js'
-import { formatDuration } from '../../utils/format.js'
+import {
+  formatDuration,
+  truncateToWidth,
+  wrapText,
+} from '../../utils/format.js'
 import { formatHostDeadAttachError } from '../../daemon/hostDeath.js'
 import { isRestrictedSession } from '../../utils/restricted.js'
 import { fleetJobChildren } from './prStatuses.js'
@@ -2401,4 +2405,140 @@ export function decideOriginEscAction(input: {
 /** densable stderr after FleetView done when resumeHintRequested */
 export function formatLeftArrowResumeHint(forkSessionId: string): string {
   return `Your conversation was backgrounded — resume it with: claude --resume ${forkSessionId}.`
+}
+
+// ---------------------------------------------------------------------------
+// Official #1762 & #1765 — Peek permission-waiting guard + truncation with
+// ellipsis & raw approval command preservation
+// ---------------------------------------------------------------------------
+
+export const PEEK_WAITING_PERMISSION_HINT = 'esc then enter to open and answer'
+
+/** Official `IAr` — detects permission approval prompts (`approve ...` or `... · approve ...`). */
+export function isApprovalPromptText(text: string | undefined): boolean {
+  return text !== undefined && /(?:^| \u00B7 )approve /.test(text)
+}
+
+/**
+ * Official `Mi` / `MAr` — live local session waiting on a permission approval
+ * prompt (blocked without structured questions, with an `approve ...` needs line).
+ */
+export function isSessionWaitingOnPermission(input: {
+  status?: string
+  backend?: string
+  tempo?: string
+  daemonState?: string
+  needs?: string
+  hasQuestions?: boolean
+}): boolean {
+  if (input.backend === 'remote') return false
+  if (
+    input.status === 'completed' ||
+    input.status === 'done' ||
+    input.status === 'failed' ||
+    input.status === 'killed' ||
+    input.status === 'stopped'
+  ) {
+    return false
+  }
+  if (input.hasQuestions) return false
+  const isBlocked =
+    input.tempo === 'blocked' ||
+    input.status === 'waiting' ||
+    Boolean(input.needs)
+  if (!isBlocked) return false
+  if (input.daemonState === 'blocked') return false
+  return isApprovalPromptText(input.needs)
+}
+
+/**
+ * Official #1762 (`lu` `$t`): compute peek reply hint/error when waiting on a
+ * permission prompt. Typing `/stop` in prompt mode is allowed through; any
+ * other typed reply shows `"esc then enter to open and answer"` and stays in
+ * the input box on Enter.
+ */
+export function shouldBlockPeekReplyForPermission(input: {
+  waitingOnPermission: boolean
+  replyInput: string
+  peekMode: 'prompt' | 'bash'
+}): boolean {
+  if (!input.waitingOnPermission) return false
+  const trimmed = input.replyInput.trim()
+  if (!trimmed) return false
+  if (input.peekMode === 'prompt' && trimmed === '/stop') return false
+  return true
+}
+
+export function getPeekReplyErrorOrHint(input: {
+  waitingOnPermission: boolean
+  replyInput: string
+  peekMode: 'prompt' | 'bash'
+  replyError: string | null
+}): string | null {
+  const isStopCmd =
+    input.peekMode === 'prompt' && input.replyInput.trim() === '/stop'
+  if (input.waitingOnPermission && !isStopCmd) {
+    return input.replyInput.trim() ? PEEK_WAITING_PERMISSION_HINT : null
+  }
+  return input.replyError
+}
+
+const PEEK_INLINE_MARKUP_RE = /(\*\*[^*]+\*\*|\+\+[^+]+\+\+|`[^`]+`)/g
+const PEEK_INLINE_TOKEN_RE = /^(?:\*\*|\+\+|`)(.+?)(?:\*\*|\+\+|`)$/
+const PEEK_XML_TAG_RE = /<\/?[\w-]+>/g
+
+/**
+ * Official #1765 (`Eo` / `Wne` vs `rn` + `qp`):
+ * - For commands waiting for approval (`preserveRawMarkup: true`), keep `**`,
+ *   backticks, and `<tags>` verbatim — only normalize control characters and
+ *   collapse whitespace.
+ * - For ordinary peek text (`preserveRawMarkup: false`), strip XML-like tags
+ *   and inline markdown wrappers before width measurement / truncation.
+ */
+export function formatPeekDisplayText(
+  text: string,
+  options?: { preserveRawMarkup?: boolean },
+): string {
+  if (options?.preserveRawMarkup) {
+    return (
+      text
+        // biome-ignore lint/suspicious/noControlCharactersInRegex: normalize control chars in preview
+        .replace(/[\x00-\x1f\x7f]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+    )
+  }
+  const stripped = text
+    .replace(PEEK_XML_TAG_RE, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return stripped
+    .split(PEEK_INLINE_MARKUP_RE)
+    .map(part => PEEK_INLINE_TOKEN_RE.exec(part)?.[1] ?? part)
+    .join('')
+}
+
+/**
+ * Official #1765 (`VTe`) — wrap text to `maxWidth` and cap at `maxLines`.
+ * When lines exceed `maxLines`, append an ellipsis (`…`) on the final visible
+ * line (fitting within `maxWidth`) instead of silently clipping overflow.
+ */
+export function truncateLinesWithEllipsis(
+  text: string,
+  maxWidth: number,
+  maxLines: number,
+): string {
+  if (maxLines <= 0 || maxWidth <= 0) return ''
+  const lines = wrapText(text, maxWidth)
+  if (lines.length <= maxLines) {
+    return lines.join('\n')
+  }
+  const kept = lines.slice(0, maxLines)
+  const last = (kept[maxLines - 1] ?? '').trimEnd()
+  if (last.endsWith('\u2026')) {
+    kept[maxLines - 1] = truncateToWidth(last, maxWidth)
+  } else {
+    kept[maxLines - 1] = truncateToWidth(`${last}\u2026`, maxWidth)
+  }
+  return kept.join('\n')
 }

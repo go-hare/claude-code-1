@@ -1110,6 +1110,11 @@ export type MessageUpdateLazy<M extends Message = Message> = {
     toolUseID: string
     modifyContext: (context: ToolUseContext) => ToolUseContext
   }
+  /** #1894: Context/permission layers emitted by tools (consumed by StreamingToolExecutor). */
+  contextLayers?: {
+    toolUseID: string
+    layers: NonNullable<ToolUseContext['permissionLayers']>
+  }
   toolDuration?: {
     toolName: string
     durationMs: number
@@ -2768,6 +2773,10 @@ function rebuildMessagesWithReplacedToolResult(
     existingIdx !== -1
       ? priorRun.messages[existingIdx]?.contextModifier
       : undefined
+  const existingContextLayers =
+    existingIdx !== -1
+      ? priorRun.messages[existingIdx]?.contextLayers
+      : undefined
   const contentBlocks: ContentBlockParam[] =
     existingUserMsg !== undefined &&
     Array.isArray(existingUserMsg.message.content)
@@ -2788,6 +2797,9 @@ function rebuildMessagesWithReplacedToolResult(
     }),
     ...(existingContextModifier !== undefined && {
       contextModifier: existingContextModifier,
+    }),
+    ...(existingContextLayers !== undefined && {
+      contextLayers: existingContextLayers,
     }),
   }
   const remaining = priorRun.messages.filter((_, idx) => idx !== existingIdx)
@@ -5239,6 +5251,7 @@ async function checkPermissionsAndCallTool(
       })
     }
     const toolContextModifier = result.contextModifier
+    const toolContextLayers = result.contextLayers
     const mcpMeta = result.mcpMeta
     // densable 2.1.283 `mr=oo.endsTurn` @ 184495149 → createUserMessage.toolEndsTurn
     const endsTurn = result.endsTurn
@@ -5326,6 +5339,13 @@ async function checkPermissionsAndCallTool(
               modifyContext: toolContextModifier,
             }
           : undefined,
+        contextLayers:
+          toolContextLayers && toolContextLayers.length > 0
+            ? {
+                toolUseID: toolUseID,
+                layers: toolContextLayers,
+              }
+            : undefined,
       })
     }
 

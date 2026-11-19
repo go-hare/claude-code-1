@@ -49,7 +49,11 @@ const LEGACY_CATALOG_IDS = [
   'claude-fable-5-1',
   'claude-mythos-5',
 ]
-const CURRENT_CATALOG_IDS = [...LEGACY_CATALOG_IDS, 'claude-sonnet-5-5'].sort()
+const CURRENT_CATALOG_IDS = [
+  ...LEGACY_CATALOG_IDS,
+  'claude-fable-5-2',
+  'claude-sonnet-5-5',
+].sort()
 
 describe('densable 2.1.219 catalog contracts with 2.1.289 model additions', () => {
   test('SQ: schema_version 1, legacy entries plus Sonnet 5.5, 8 pricing tiers', () => {
@@ -66,11 +70,12 @@ describe('densable 2.1.219 catalog contracts with 2.1.289 model additions', () =
         'tier_3_15',
         'tier_4_20_cache_read_0_20',
         'tier_5_25',
+        'tier_8_40_cache_read_0_20',
       ].sort(),
     )
     expect(sq.best).toBe('fable')
     expect(sq.latest_per_family).toEqual({
-      fable: 'claude-fable-5-1',
+      fable: 'claude-fable-5-2',
       opus: 'claude-opus-5-5',
       sonnet: 'claude-sonnet-5-5',
       haiku: 'claude-haiku-4-5',
@@ -108,6 +113,7 @@ describe('densable 2.1.219 catalog contracts with 2.1.289 model additions', () =
       .map(m => m.id)
       .sort()
     expect(withFast).toEqual([
+      'claude-fable-5-2',
       'claude-opus-4-7',
       'claude-opus-4-8',
       'claude-opus-5',
@@ -160,7 +166,7 @@ describe('densable 2.1.219 catalog contracts with 2.1.289 model additions', () =
     )
     expect(resolveCatalogAlias('sonnet', 'gateway')).toBe('claude-sonnet-4-6')
     expect(resolveCatalogAlias('haiku')).toBe('claude-haiku-4-5')
-    expect(resolveCatalogAlias('fable')).toBe('claude-fable-5-1')
+    expect(resolveCatalogAlias('fable')).toBe('claude-fable-5-2')
     expect(resolveCatalogAlias('fable', 'gateway')).toBe('claude-fable-5')
     expect(resolveCatalogAlias('opus', 'foundry')).toBe('claude-opus-4-6')
     expect(resolveCatalogAlias('sonnet', 'bedrock')).toBe('claude-sonnet-4-5')

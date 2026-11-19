@@ -47,6 +47,36 @@ import {
 const DEFAULT_INTERVAL = '10m'
 /** densable Monitor wire name (Va). */
 const MONITOR_TOOL_NAME = 'Monitor'
+const SEARCH_TOOLS_NAME = 'ToolSearch'
+const REMOTE_MCP_SERVER = 'claude-code-remote'
+const SEND_LATER_TOOL = 'send_later'
+const DELETE_TRIGGER_TOOL = 'delete_trigger'
+
+/**
+ * Official 2.1.319 (#1715): cloud session container lifetime note + optional
+ * surviving-loop offer via `send_later` from `claude-code-remote`.
+ */
+export function buildCloudSessionLoopNote(options: {
+  isRemoteSession: boolean
+  isSystem?: boolean
+  includeSurvivingLoopOffer?: boolean
+  routinesAllowed?: boolean
+}): string {
+  if (!options.isRemoteSession || options.isSystem) return ''
+  const baseNote = `
+## This is a cloud session
+
+A timer set here lives in this session's container. It fires only while that container is up: the container can be released while the session is idle or replaced at any time, and a new container does not re-arm the timer.
+
+In your confirmation, tell the user this in one sentence.
+`
+  if (!options.includeSurvivingLoopOffer || !options.routinesAllowed) {
+    return baseNote
+  }
+  return `${baseNote}
+If a \`${SEND_LATER_TOOL}\` tool from the \`${REMOTE_MCP_SERVER}\` server is available (load it with ${SEARCH_TOOLS_NAME} if it is deferred), also say they can ask for a loop that survives this. Build that loop only when they ask for it: in place of a timer, keep exactly one pending \`${SEND_LATER_TOOL}\` call, with a message that says what to run next, the cadence and the date to stop, in plain words and never as a \`/loop\` command. It is held outside the container and wakes the session on a new one. If anything wakes you while one is pending, cancel it with \`${DELETE_TRIGGER_TOOL}\` before you arm another. Once the first one is accepted, cancel any timer you set for this loop (${CRON_DELETE_TOOL_NAME}, or ${SCHEDULE_WAKEUP_TOOL_NAME} with \`stop: true\`). That only hands the loop over, so report the hand-over and skip the steps for a finished loop, whatever the tool's result says. Re-arm it only while the work is unfinished, stop after at most ${DEFAULT_MAX_AGE_DAYS} days, and if the user says stop, cancel the pending one with \`${DELETE_TRIGGER_TOOL}\`. If \`${SEND_LATER_TOOL}\` is refused, tell the user why and keep a timer running.
+`
+}
 
 const LEADING_INTERVAL = /^\d+[smhd]$/
 const EVERY_INTERVAL_ONLY =
@@ -141,7 +171,7 @@ Examples:
 }
 
 /** densable `R` — dynamic self-pace when no interval (always on). */
-function buildDynamicPrompt(args: string): string {
+function buildDynamicPrompt(args: string, cloudSessionNote = ''): string {
   const dynamicBody = `The user wants you to self-pace. Decide what makes the next iteration worth running — a passage of time, or an observable event.
 
 1. **Run the parsed prompt now.** If it's a slash command, invoke it via the Skill tool; otherwise act on it directly.
@@ -175,7 +205,7 @@ Examples:
 - \`check the deploy\` → no interval → dynamic mode, prompt \`check the deploy\` (rule 3)
 - \`check every PR\` → no interval → dynamic mode, prompt \`check every PR\` (rule 3 — "every" not followed by time)
 - \`5m\` → empty prompt → show usage
-${buildOfferCloudFirstSection()}
+${buildOfferCloudFirstSection()}${cloudSessionNote}
 ## Fixed-interval mode (rules 1 and 2)
 
 Convert the interval to a cron expression:
@@ -203,6 +233,7 @@ function buildAutonomousDefaultPrompt(
   loopFile: LoopFile | null,
   dynamic: boolean,
   intervalToken: string,
+  cloudSessionNote = '',
 ): string {
   const sectionTitle = loopFile
     ? `## Loop tasks (from ${loopFile.path})`
@@ -246,7 +277,7 @@ The user invoked \`/loop\` with no prompt and no interval. Run the autonomous ch
 ## Action
 
 ${actions}
-
+${cloudSessionNote}
 ${sectionTitle}
 
 ${body}`
@@ -277,7 +308,7 @@ The user invoked \`/loop\` with no prompt (input was empty or just the interval 
    - \`recurring\`: \`true\`
 3. Briefly confirm: ${confirm}
 4. **Then immediately run ${workLabel} now**, following the instructions inlined below. Don't wait for the first cron fire.
-
+${cloudSessionNote}
 ${sectionTitle}
 
 ${body}`
@@ -320,6 +351,20 @@ export function registerLoopSkill(): void {
       }
 
       // gold: empty or interval-only → autonomous / loop.md (no qAs gate)
+      const isRemoteSession = Boolean(process.env.CLAUDE_CODE_REMOTE)
+      const routinesAllowed = isPolicyLimitsAllowed('allow_routines')
+      const cloudNoteAutonomous = buildCloudSessionLoopNote({
+        isRemoteSession,
+        isSystem,
+        includeSurvivingLoopOffer: false,
+        routinesAllowed,
+      })
+      const cloudNoteDynamic = buildCloudSessionLoopNote({
+        isRemoteSession,
+        isSystem,
+        includeSurvivingLoopOffer: true,
+        routinesAllowed,
+      })
       const everyOnly = trimmed.match(EVERY_INTERVAL_ONLY)
       const empty = !trimmed
       const intervalOnly = LEADING_INTERVAL.test(trimmed) || everyOnly !== null
@@ -333,14 +378,24 @@ export function registerLoopSkill(): void {
           return [
             {
               type: 'text',
-              text: buildAutonomousDefaultPrompt(loopFile, true, intervalToken),
+              text: buildAutonomousDefaultPrompt(
+                loopFile,
+                true,
+                intervalToken,
+                cloudNoteAutonomous,
+              ),
             },
           ]
         }
         return [
           {
             type: 'text',
-            text: buildAutonomousDefaultPrompt(loopFile, false, intervalToken),
+            text: buildAutonomousDefaultPrompt(
+              loopFile,
+              false,
+              intervalToken,
+              cloudNoteAutonomous,
+            ),
           },
         ]
       }
@@ -350,7 +405,9 @@ export function registerLoopSkill(): void {
         return [{ type: 'text', text: dynamicUsage() }]
       }
       if (!isSystem) clearLoopEndedOnLoopStart()
-      return [{ type: 'text', text: buildDynamicPrompt(trimmed) }]
+      return [
+        { type: 'text', text: buildDynamicPrompt(trimmed, cloudNoteDynamic) },
+      ]
     },
   } as BundledSkillDefinition & { argsMayContainSlashCommands?: boolean })
 

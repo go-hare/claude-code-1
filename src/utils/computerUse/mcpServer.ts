@@ -89,11 +89,23 @@ export async function runComputerUseMcpServer(): Promise<void> {
   const server = await createComputerUseMcpServerForCli()
   const transport = new StdioServerTransport()
 
+  // Official #1866: cap shutdown telemetry flush at 2000ms so a stalled proxy
+  // connection never keeps the subprocess alive after its parent exits.
   let exiting = false
+  const SHUTDOWN_FLUSH_TIMEOUT_MS = 2000
   const shutdownAndExit = async (): Promise<void> => {
     if (exiting) return
     exiting = true
-    await Promise.all([shutdown1PEventLogging(), shutdownDatadog()])
+    let timer: ReturnType<typeof setTimeout> | undefined
+    await Promise.race([
+      Promise.allSettled([shutdown1PEventLogging(), shutdownDatadog()]),
+      new Promise<void>(resolve => {
+        timer = setTimeout(resolve, SHUTDOWN_FLUSH_TIMEOUT_MS)
+        timer.unref?.()
+      }),
+    ]).finally(() => {
+      if (timer !== undefined) clearTimeout(timer)
+    })
     // eslint-disable-next-line custom-rules/no-process-exit
     process.exit(0)
   }

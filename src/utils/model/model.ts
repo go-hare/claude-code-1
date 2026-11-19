@@ -355,7 +355,7 @@ export function getDefaultFableModel(): ModelName {
     : resolved
 }
 
-/** Official Fu — SZo("fable") ?? modelStrings.fable51; UV strips `[1m]`. */
+/** Official Fu — SZo("fable") ?? modelStrings.fable52 (#1845); UV strips `[1m]`. */
 function getBuiltinDefaultFableModel(): ModelName {
   const strings = getModelStrings()
   const fromCatalog = resolveCatalogFamilyModelString(
@@ -363,7 +363,7 @@ function getBuiltinDefaultFableModel(): ModelName {
     strings,
     getAPIProvider(),
   )
-  const builtin = fromCatalog ?? strings.fable51
+  const builtin = fromCatalog ?? strings.fable52
   return isFirstPartyProviderWithFirstPartyBase()
     ? builtin.replace(/\[1m\]/gi, '')
     : builtin
@@ -489,12 +489,18 @@ export function normalizeDotVersionedModelName(name: string): string {
 
 export function firstPartyNameToCanonical(name: ModelName): ModelShortName {
   name = normalizeDotVersionedModelName(name.toLowerCase())
-  // densable ix(e): more-specific 5-1/5-5 before unsuffixed family
+  // densable ix(e): more-specific 5-2/5-1/5-5 before unsuffixed family (#1845)
+  if (name.includes('claude-fable-5-2')) {
+    return 'claude-fable-5-2'
+  }
   if (name.includes('claude-fable-5-1')) {
     return 'claude-fable-5-1'
   }
   if (name.includes('claude-fable-5')) {
     return 'claude-fable-5'
+  }
+  if (name.includes('claude-mythos-5-2')) {
+    return 'claude-mythos-5-2'
   }
   if (name.includes('claude-mythos-5-1')) {
     return 'claude-mythos-5-1'
@@ -746,6 +752,12 @@ export function getPublicModelDisplayName(model: ModelName): string | null {
       return 'Haiku 4.5'
     case getModelStrings().haiku35:
       return 'Haiku 3.5'
+    case getModelStrings().fable52:
+    case getModelStrings().fable52 + '[1m]':
+      return 'Fable 5.2'
+    case getModelStrings().fable51:
+    case getModelStrings().fable51 + '[1m]':
+      return 'Fable 5.1'
     case getModelStrings().fable5:
     case getModelStrings().fable5 + '[1m]':
       return 'Fable 5'
@@ -1091,6 +1103,9 @@ export function getMarketingNameForModel(modelId: string): string | undefined {
   }
   if (canonical.includes('claude-3-5-haiku')) {
     return 'Claude 3.5 Haiku'
+  }
+  if (canonical.includes('claude-fable-5-2')) {
+    return has1m ? 'Fable 5.2 (with 1M context)' : 'Fable 5.2'
   }
   if (canonical.includes('claude-fable-5-1')) {
     return has1m ? 'Fable 5.1 (with 1M context)' : 'Fable 5.1'

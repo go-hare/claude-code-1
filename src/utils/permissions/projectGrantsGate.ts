@@ -3,7 +3,10 @@
  * Gate project/local allow rules until this directory is explicitly trusted.
  */
 import { homedir } from 'os'
-import { getOriginalCwd } from '../../bootstrap/state.js'
+import {
+  getOriginalCwd,
+  getSessionTrustAccepted,
+} from '../../bootstrap/state.js'
 import { getProjectPathForConfig, getGlobalConfig } from '../config.js'
 import { isEnvTruthy } from '../envUtils.js'
 import { logForDebugging } from '../debug.js'
@@ -30,6 +33,11 @@ function firstTimeFor(key: string): boolean {
 
 /** densable `se` — this project key only (not ancestor walk). */
 export function isCurrentProjectTrustLatched(): boolean {
+  // #1781: When CLAUDE_CODE_IGNORE_PERSISTED_TRUST is truthy, ignore persisted
+  // hasTrustDialogAccepted and consult only session trust state.
+  if (isEnvTruthy(process.env.CLAUDE_CODE_IGNORE_PERSISTED_TRUST)) {
+    return getSessionTrustAccepted()
+  }
   return (
     getGlobalConfig().projects?.[getProjectPathForConfig()]
       ?.hasTrustDialogAccepted === true

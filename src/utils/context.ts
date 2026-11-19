@@ -521,3 +521,23 @@ export function getModelMaxOutputTokens(model: string): {
 export function getMaxThinkingTokensForModel(model: string): number {
   return getModelMaxOutputTokens(model).upperLimit - 1
 }
+
+/**
+ * Official 2.1.319 (#1743): build an `unknownModelWindowWarning` object with
+ * near-match spelling `suggestion` (e.g. `opus-5-5` -> `claude-opus-5-5`)
+ * instead of telling the user to update Claude Code.
+ */
+export function getUnknownModelWindowWarning(model: string): {
+  model: string
+  window: number
+  suggestion?: string
+} | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { buildUnrecognizedModelNotice } =
+      require('./model/unrecognizedModelSignal.js') as typeof import('./model/unrecognizedModelSignal.js')
+    return buildUnrecognizedModelNotice(model)
+  } catch {
+    return null
+  }
+}

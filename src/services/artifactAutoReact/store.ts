@@ -510,6 +510,9 @@ export type ArtifactAutoReactStore = {
   conversationEpoch: number
   /** densable ownPublishedSlugs — F7e clears unless continuesConversation. */
   ownPublishedSlugs: Map<string, unknown>
+  /** Official 325 #1756 — 1h cache of artifacts known to have no database. */
+  dbUndeclaredAt: Map<string, number>
+  dbUndeclaredDroppedAt: Map<string, number>
   /** densable ownCreatedSlugs */
   ownCreatedSlugs: Map<string, unknown>
   /** densable strandedMints */
@@ -837,6 +840,8 @@ export function createArtifactAutoReactStore(): ArtifactAutoReactStore {
     conversationEpoch: 0,
     ownPublishedSlugs: new Map(),
     ownCreatedSlugs: new Map(),
+    dbUndeclaredAt: new Map(),
+    dbUndeclaredDroppedAt: new Map(),
     strandedMints: new Map(),
     reservedMints: new Set(),
     roomJoinArming: new Set(),

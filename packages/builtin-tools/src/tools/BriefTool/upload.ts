@@ -94,6 +94,11 @@ export type BriefUploadOutcome =
 /** SEA `uHr` = 30 MiB floor for suspected-limit reporting on unnamed failures. */
 export const SUSPECTED_UPLOAD_LIMIT_BYTES = 31_457_280
 const SUSPECTED_LIMIT_HTTP_STATUSES = new Set([502, 503, 504, 507, 520, 524])
+/** Official 2.1.321 #1895 (`Pe`): HTTP statuses eligible for upload retry (includes 507). */
+export const RETRYABLE_UPLOAD_HTTP_STATUSES = new Set([
+  429, 500, 502, 503, 504, 507, 520, 521, 522, 523, 524, 529,
+])
+const UPLOAD_RETRY_DELAY_MS = 500
 const UPLOAD_TIMEOUT_RE =
   /^upload failed: (?:network error \(|the connection closed before the server answered$|the server did not answer within \d|the transfer stalled \()/
 const UPLOAD_INVALID_URL_OR_CERT_RE = /\bInvalid URL\b|certificate/i
@@ -134,6 +139,108 @@ export function formatLargeFileUploadFailure(opts: {
     return `${opts.uploadError} — the cause is unknown and may pass. If the same file fails like this again, it may be over the upload limit that applies to this session, which was not named and is never under ${formatMiB(SUSPECTED_UPLOAD_LIMIT_BYTES)}. Report this failure to the user instead of shrinking the file.`
   }
   return opts.uploadError
+}
+
+/**
+ * Official 2.1.321 #1895: execute a Brief attachment upload request, retrying
+ * once on retryable HTTP statuses (including HTTP 507 Insufficient Storage) or
+ * transient network errors.
+ */
+export async function postBriefUploadWithRetry(opts: {
+  url: string
+  body: Buffer
+  token: string
+  boundary: string
+  fullPath: string
+  size: number
+  signal?: AbortSignal
+  postFn?: typeof axios.post
+  retryDelayMs?: number
+}): Promise<BriefUploadOutcome> {
+  const {
+    url,
+    body,
+    token,
+    boundary,
+    fullPath,
+    size,
+    signal,
+    postFn = axios.post,
+    retryDelayMs = UPLOAD_RETRY_DELAY_MS,
+  } = opts
+  const maxAttempts = 2
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const response = await postFn(url, body, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': body.length.toString(),
+        },
+        timeout: UPLOAD_TIMEOUT_MS,
+        signal,
+        validateStatus: () => true,
+      })
+
+      if (response.status !== 201) {
+        if (
+          attempt < maxAttempts &&
+          RETRYABLE_UPLOAD_HTTP_STATUSES.has(response.status) &&
+          !signal?.aborted
+        ) {
+          debug(
+            `upload got retryable HTTP ${response.status} for ${fullPath}; retrying (attempt ${attempt + 1}/${maxAttempts})`,
+          )
+          if (retryDelayMs > 0) {
+            await new Promise(resolve => setTimeout(resolve, retryDelayMs))
+          }
+          continue
+        }
+        debug(
+          `upload failed for ${fullPath}: status=${response.status} body=${jsonStringify(response.data).slice(0, 200)}`,
+        )
+        const error = `upload failed: server returned ${response.status}`
+        if (
+          SUSPECTED_LIMIT_HTTP_STATUSES.has(response.status) &&
+          size > SUSPECTED_UPLOAD_LIMIT_BYTES
+        ) {
+          return { error, suspectedLimitBytes: SUSPECTED_UPLOAD_LIMIT_BYTES }
+        }
+        return { error }
+      }
+
+      const parsed = uploadResponseSchema().safeParse(response.data)
+      if (!parsed.success) {
+        debug(
+          `unexpected response shape for ${fullPath}: ${parsed.error.message}`,
+        )
+        return { error: 'upload failed: unexpected server response' }
+      }
+
+      debug(`uploaded ${fullPath} → ${parsed.data.file_uuid} (${size} bytes)`)
+      return { fileUuid: parsed.data.file_uuid }
+    } catch (e) {
+      const aborted = signal?.aborted === true
+      if (attempt < maxAttempts && !aborted) {
+        debug(
+          `upload threw for ${fullPath} (${e}); retrying (attempt ${attempt + 1}/${maxAttempts})`,
+        )
+        if (retryDelayMs > 0) {
+          await new Promise(resolve => setTimeout(resolve, retryDelayMs))
+        }
+        continue
+      }
+      debug(`upload threw for ${fullPath}: ${e}`)
+      const error = aborted
+        ? 'upload aborted'
+        : `upload failed: network error (${e instanceof Error ? e.message : String(e)})`
+      if (!aborted && size > SUSPECTED_UPLOAD_LIMIT_BYTES) {
+        return { error, suspectedLimitBytes: SUSPECTED_UPLOAD_LIMIT_BYTES }
+      }
+      return { error }
+    }
+  }
+  return { error: 'upload failed: exhausted retry attempts' }
 }
 
 /**
@@ -206,53 +313,15 @@ export async function uploadBriefAttachmentWithStatus(
       Buffer.from(`\r\n--${boundary}--\r\n`),
     ])
 
-    try {
-      const response = await axios.post(url, body, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': `multipart/form-data; boundary=${boundary}`,
-          'Content-Length': body.length.toString(),
-        },
-        timeout: UPLOAD_TIMEOUT_MS,
-        signal: ctx.signal,
-        validateStatus: () => true,
-      })
-
-      if (response.status !== 201) {
-        debug(
-          `upload failed for ${fullPath}: status=${response.status} body=${jsonStringify(response.data).slice(0, 200)}`,
-        )
-        const error = `upload failed: server returned ${response.status}`
-        if (
-          SUSPECTED_LIMIT_HTTP_STATUSES.has(response.status) &&
-          size > SUSPECTED_UPLOAD_LIMIT_BYTES
-        ) {
-          return { error, suspectedLimitBytes: SUSPECTED_UPLOAD_LIMIT_BYTES }
-        }
-        return { error }
-      }
-
-      const parsed = uploadResponseSchema().safeParse(response.data)
-      if (!parsed.success) {
-        debug(
-          `unexpected response shape for ${fullPath}: ${parsed.error.message}`,
-        )
-        return { error: 'upload failed: unexpected server response' }
-      }
-
-      debug(`uploaded ${fullPath} → ${parsed.data.file_uuid} (${size} bytes)`)
-      return { fileUuid: parsed.data.file_uuid }
-    } catch (e) {
-      debug(`upload threw for ${fullPath}: ${e}`)
-      const aborted = ctx.signal?.aborted === true
-      const error = aborted
-        ? 'upload aborted'
-        : `upload failed: network error (${e instanceof Error ? e.message : String(e)})`
-      if (!aborted && size > SUSPECTED_UPLOAD_LIMIT_BYTES) {
-        return { error, suspectedLimitBytes: SUSPECTED_UPLOAD_LIMIT_BYTES }
-      }
-      return { error }
-    }
+    return postBriefUploadWithRetry({
+      url,
+      body,
+      token,
+      boundary,
+      fullPath,
+      size,
+      signal: ctx.signal,
+    })
   }
   return { error: 'upload failed: bridge mode disabled' }
 }

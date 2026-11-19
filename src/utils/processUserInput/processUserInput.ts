@@ -520,7 +520,8 @@ export async function processUserInput({
   // Immediately show the user input prompt while we are still processing the input.
   // Skip for isMeta (system-generated prompts like scheduled tasks) and slash
   // commands (they produce their own system message echo via createCommandInputMessage).
-  const isSlashInput = inputString?.startsWith('/') && !skipSlashCommands
+  const isSlashInput =
+    inputString?.trimStart().startsWith('/') && !skipSlashCommands
   if (mode === 'prompt' && inputString !== null && !isMeta && !isSlashInput) {
     setUserInputOnProcessing?.(inputString)
   }
@@ -1185,7 +1186,11 @@ async function processUserInputBase(
   // known-but-unsafe command (local-jsx UI or terminal-only), short-circuit
   // with a helpful message rather than letting the model see raw "/config".
   let effectiveSkipSlash = skipSlashCommands
-  if (bridgeOrigin && inputString !== null && inputString.startsWith('/')) {
+  if (
+    bridgeOrigin &&
+    inputString !== null &&
+    inputString.trimStart().startsWith('/')
+  ) {
     const parsed = parseSlashCommand(inputString)
     const cmd = parsed
       ? findCommand(parsed.commandName, context.options.commands)
@@ -1228,7 +1233,7 @@ async function processUserInputBase(
     )
     const slashCandidate =
       extractModelScheduledSlashInput(inputString) ??
-      (inputString.startsWith('/') ? inputString : null)
+      (inputString.trimStart().startsWith('/') ? inputString.trimStart() : null)
     if (slashCandidate) {
       const parsed = parseSlashCommand(slashCandidate)
       let cmd = parsed
@@ -1255,8 +1260,8 @@ async function processUserInputBase(
   // Use slashInputForProcess so prepared RZn/authority wrappers that re-open
   // `/loop…` still skip attachment extraction (same as bare leading `/`).
   const slashLooksLikeCommand =
-    (slashInputForProcess?.startsWith('/') ?? false) ||
-    (inputString?.startsWith('/') ?? false)
+    (slashInputForProcess?.trimStart().startsWith('/') ?? false) ||
+    (inputString?.trimStart().startsWith('/') ?? false)
   // densable yn Le/Pe: L!=="all" && (skipSlash || !startsWith("/")); Pe=L===void 0
   const skipMode: 'all' | 'mentions' | undefined =
     skipAttachments === true || skipAttachments === 'all'
@@ -1356,7 +1361,7 @@ async function processUserInputBase(
     !context.options.isNonInteractiveSession &&
     inputString !== null &&
     !effectiveSkipSlash &&
-    !inputString.startsWith('/') &&
+    !inputString.trimStart().startsWith('/') &&
     !context.getAppState().ultraplanSessionUrl &&
     !context.getAppState().ultraplanLaunching &&
     hasUltraplanKeyword(preExpansionInput ?? inputString)
@@ -1387,10 +1392,11 @@ async function processUserInputBase(
   // Slash commands
   // Skip for remote bridge messages — input from CCR clients is plain text
   const slashBody =
-    slashInputForProcess !== null && slashInputForProcess.startsWith('/')
-      ? slashInputForProcess
-      : inputString !== null && inputString.startsWith('/')
-        ? inputString
+    slashInputForProcess !== null &&
+    slashInputForProcess.trimStart().startsWith('/')
+      ? slashInputForProcess.trimStart()
+      : inputString !== null && inputString.trimStart().startsWith('/')
+        ? inputString.trimStart()
         : null
   if (slashBody !== null && !effectiveSkipSlash) {
     const { processSlashCommand } = await import('./processSlashCommand.js')

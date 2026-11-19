@@ -22,6 +22,8 @@ import {
 } from '@modelcontextprotocol/client'
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/client/validators/ajv'
 import { PRODUCT_URL } from '../../constants/product.js'
+import { isEnvTruthy } from '../../utils/envUtils.js'
+import { isDisklessLaunch } from '../../utils/sessionHost.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import {
   isMcpCcrProxyServerConfig,
@@ -31,7 +33,82 @@ import {
 
 export type DensableClientCapabilities = NonNullable<
   ClientOptions['capabilities']
->
+> & {
+  extensions?: Record<string, Record<string, unknown>>
+}
+
+/** Official 325 `eot` — SEP-2663 MCP tasks extension identifier. */
+export const MCP_TASKS_EXTENSION_KEY = 'io.modelcontextprotocol/tasks'
+
+/**
+ * Official 325 `VT` (#1701, #1805) — enable MCP tasks in the terminal without
+ * requiring GrowthBook feature-flag fetching (works on Bedrock, Vertex,
+ * Foundry, LLM gateways, and `DISABLE_TELEMETRY`); set
+ * `CLAUDE_CODE_DISABLE_MCP_TASKS=1` to disable.
+ */
+export function isMcpTasksEnabled(
+  env: NodeJS.ProcessEnv = process.env,
+  readFeature: (key: string, def: boolean) => boolean = (key, def) =>
+    getFeatureValue_CACHED_MAY_BE_STALE(key, def),
+): boolean {
+  if (isEnvTruthy(env.CLAUDE_CODE_DISABLE_MCP_TASKS)) {
+    return false
+  }
+  const entrypoint = env.CLAUDE_CODE_ENTRYPOINT
+  const isTerminalEntrypoint = entrypoint === undefined || entrypoint === 'cli'
+  const terminalDefault =
+    isTerminalEntrypoint &&
+    !isEnvTruthy(env.CLAUDE_CODE_REMOTE) &&
+    !isDisklessLaunch()
+  return readFeature('tengu_glowing_lark', terminalDefault)
+}
+
+/**
+ * Official 325 #1716 — determine whether a negotiated/requested MCP handshake
+ * protocol version is an older pre-v2 handshake that does not understand
+ * `capabilities.extensions['io.modelcontextprotocol/tasks']`.
+ */
+export function isOlderMcpHandshakeVersion(protocolVersion: unknown): boolean {
+  if (typeof protocolVersion !== 'string') return false
+  return (
+    protocolVersion === '2024-11-05' ||
+    protocolVersion === '2025-03-26' ||
+    protocolVersion === '2025-06-18' ||
+    protocolVersion === '2025-11-25'
+  )
+}
+
+/**
+ * Official 325 #1716 — strip the `io.modelcontextprotocol/tasks` extension
+ * from `capabilities.extensions` on older MCP handshakes so servers on older
+ * handshakes do not fail to connect or return empty results.
+ */
+export function stripTasksExtensionForOlderHandshake(
+  capabilities: DensableClientCapabilities,
+  protocolVersion?: unknown,
+): DensableClientCapabilities {
+  if (
+    protocolVersion !== undefined &&
+    !isOlderMcpHandshakeVersion(protocolVersion)
+  ) {
+    return capabilities
+  }
+  if (
+    !capabilities.extensions ||
+    !(MCP_TASKS_EXTENSION_KEY in capabilities.extensions)
+  ) {
+    return capabilities
+  }
+  const { [MCP_TASKS_EXTENSION_KEY]: _dropped, ...restExtensions } =
+    capabilities.extensions
+  const next: DensableClientCapabilities = { ...capabilities }
+  if (Object.keys(restExtensions).length === 0) {
+    delete next.extensions
+  } else {
+    next.extensions = restExtensions
+  }
+  return next
+}
 
 /** Server config slice read by Idt/bn/Lr (gold only checks type + bare flag + url CCR). */
 export type DensableElicitationCapabilityServerConfig = {
@@ -277,19 +354,38 @@ export function patchMcpInitializeCapabilities(
     ) {
       const msg = message as {
         method: string
-        params: { capabilities?: unknown } & Record<string, unknown>
+        params: {
+          capabilities?: unknown
+          protocolVersion?: unknown
+        } & Record<string, unknown>
+      }
+      let nextCaps = densableClientCapabilitiesForServer(serverConfig, {
+        denylisted:
+          opts.denylisted ??
+          isMcpLegacyUrlElicitationServerDenylisted(serverConfig),
+        readFeature: opts.readFeature,
+      })
+      const protoVersion = msg.params.protocolVersion
+      if (isOlderMcpHandshakeVersion(protoVersion)) {
+        nextCaps = stripTasksExtensionForOlderHandshake(nextCaps, protoVersion)
+      } else if (
+        protoVersion !== undefined &&
+        isMcpTasksEnabled(process.env, opts.readFeature)
+      ) {
+        nextCaps = {
+          ...nextCaps,
+          extensions: {
+            ...nextCaps.extensions,
+            [MCP_TASKS_EXTENSION_KEY]: {},
+          },
+        }
       }
       return originalSend(
         {
           ...msg,
           params: {
             ...msg.params,
-            capabilities: densableClientCapabilitiesForServer(serverConfig, {
-              denylisted:
-                opts.denylisted ??
-                isMcpLegacyUrlElicitationServerDenylisted(serverConfig),
-              readFeature: opts.readFeature,
-            }),
+            capabilities: nextCaps,
           },
         },
         options,

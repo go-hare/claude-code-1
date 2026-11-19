@@ -330,11 +330,21 @@ export function handleIngressMessage(
 
     if (parsed.type === 'user') {
       if (uuid) recentInboundUUIDs.add(uuid)
+      // #1885: Preserve inbound priority: 'later' ("Queue for later") so remote
+      // messages queued for later do not interrupt the currently running turn.
+      const inboundPriority = extractInboundBridgePriority(parsed)
+      const messageToDeliver: SDKMessage =
+        inboundPriority === 'later'
+          ? ({ ...parsed, priority: 'later' } as SDKMessage)
+          : parsed
+      if (inboundPriority === 'later') {
+        logForDiagnosticsNoPII('info', 'bridge_queue_later')
+      }
       logEvent('tengu_bridge_message_received', {
         is_repl: true,
       })
       // Fire-and-forget — handler may be async (attachment resolution).
-      void onInboundMessage?.(parsed)
+      void onInboundMessage?.(messageToDeliver)
     } else {
       logForDebugging(
         `[bridge:repl] Ignoring non-user inbound message: type=${parsed.type}`,
@@ -423,9 +433,96 @@ export async function resolveAsyncSetModelVerdict(opts: {
   })
 }
 
+/**
+ * #1885 / official `tir(msg, ...)` — extract inbound bridge queue priority.
+ * Preserves `'later'` ("Queue for later") so it reaches Claude after the
+ * current turn completes rather than mid-turn.
+ */
+export function extractInboundBridgePriority(
+  msg: unknown,
+): 'later' | 'next' | undefined {
+  if (!msg || typeof msg !== 'object') return undefined
+  const raw = (msg as { priority?: unknown }).priority
+  if (raw === 'later' || raw === 'next') return raw
+  return undefined
+}
+
+export type BridgeSlashCommandInput = {
+  name: string
+  description?: string
+  menuDescription?: string | null
+  argumentHint?: string
+  aliases?: string[]
+  isHidden?: boolean
+  loadedFrom?: string
+  userFacingName?: () => string
+}
+
+export type BridgeSlashCommand = {
+  name: string
+  description: string
+  argumentHint?: string
+  aliases?: string[]
+  builtin?: boolean
+}
+
+/**
+ * #1860 / official `LTs` (`toBridgeSlashCommands`) — build a deduplicated,
+ * hidden-filtered slash command list for Remote Control `initialize` responses
+ * so commands like `/compact` never appear twice on web/mobile.
+ */
+export function toBridgeSlashCommands(
+  commands: readonly BridgeSlashCommandInput[],
+): BridgeSlashCommand[] {
+  const seenNames = new Set<string>()
+  const result: BridgeSlashCommand[] = []
+  for (const cmd of commands) {
+    if (cmd.isHidden) continue
+    const displayName = cmd.userFacingName?.() ?? cmd.name
+    if (!displayName || seenNames.has(displayName)) continue
+    seenNames.add(displayName)
+    const description =
+      cmd.menuDescription != null && cmd.menuDescription !== ''
+        ? cmd.menuDescription
+        : (cmd.description ?? '')
+    const aliases = (cmd.aliases ?? []).filter(
+      alias => alias !== displayName && !seenNames.has(alias),
+    )
+    const entry: BridgeSlashCommand = {
+      name: displayName,
+      description,
+      ...(cmd.argumentHint ? { argumentHint: cmd.argumentHint } : {}),
+      ...(aliases.length > 0 ? { aliases } : {}),
+      ...(cmd.loadedFrom === 'builtin' ? { builtin: true } : {}),
+    }
+    result.push(entry)
+  }
+  return result
+}
+
+/**
+ * #1860 / official `nir` (`bridge_initialize_commands`) — build and record the
+ * deduplicated slash commands reported in `initialize` responses.
+ */
+export function getBridgeInitializeCommands(
+  commands: readonly BridgeSlashCommandInput[],
+): BridgeSlashCommand[] {
+  const list = toBridgeSlashCommands(commands)
+  if (list.length > 0) {
+    logForDiagnosticsNoPII('info', 'bridge_initialize_commands', {
+      count: list.length,
+    })
+  }
+  return list
+}
+
 export type ServerControlRequestHandlers = {
   transport: ReplBridgeTransport | null
   sessionId: string
+  /**
+   * #1860: Provide deduplicated slash commands for Remote Control `initialize`.
+   */
+  getInitializeCommands?: () => BridgeSlashCommand[]
   /**
    * When true, all mutable requests (interrupt, set_model, set_permission_mode,
    * set_max_thinking_tokens, set_mcp_permission_mode_override) reply with an
@@ -651,6 +748,7 @@ export function handleServerControlRequest(
     onRenameSession,
     onGetWorkspaceDiff,
     getPendingPrompts,
+    getInitializeCommands,
     onSideQuestion,
     sideQuestionDeadlineMs,
     cancellableRequests,
@@ -709,7 +807,7 @@ export function handleServerControlRequest(
           subtype: 'success',
           request_id: request.request_id,
           response: {
-            commands: [],
+            commands: getInitializeCommands?.() ?? [],
             output_style: 'normal',
             available_output_styles: ['normal'],
             models: [],

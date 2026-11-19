@@ -88,7 +88,11 @@ import {
   checkPathConstraints,
   validateOutputRedirections,
 } from './pathValidation.js'
-import { commandWritesToGitInternalPaths } from './readOnlyValidation.js'
+import { checkAccountEmailUserAgent } from 'src/utils/permissions/accountEmailUserAgentCheck.js'
+import {
+  commandWritesToGitInternalPaths,
+  expandSafeDoubleQuotedPwd,
+} from './readOnlyValidation.js'
 import { checkSedConstraints } from './sedValidation.js'
 import { shouldUseSandbox } from './shouldUseSandbox.js'
 
@@ -532,6 +536,82 @@ function stripCommentLines(command: string): string {
   return nonCommentLines.join('\n')
 }
 
+const LOCALE_ENV_VARS = new Set(['LANG', 'LC_ALL', 'LC_CTYPE'])
+const SAFE_LOCALE_VALUE_RE =
+  /^(['"]?)(C|POSIX|UTF-?8|[\w-]+\.UTF-?8(@\w+)?)\1$/i
+const UNSAFE_ENV_PATH_RE =
+  /^[.~]*[/\\]|[/\\][/\\]|:[/\\.]|(?:^|[/\\])\.\.(?:[/\\]|$)/
+
+/**
+ * Official 2.1.319 #1778 (`aN` / `$Ae`):
+ * Validate an env-var assignment value before stripping it for permission
+ * matching: reject path-like values, shell metacharacters, and non-locale
+ * values for `LANG`/`LC_ALL`/`LC_CTYPE`.
+ */
+export function isSafeEnvVarValue(varName: string, rawValue: string): boolean {
+  if (/[`$(){}|;&<>!*?[\]\n\r]/.test(rawValue)) return false
+  if (
+    LOCALE_ENV_VARS.has(varName) &&
+    !SAFE_LOCALE_VALUE_RE.test(rawValue) &&
+    !(
+      varName === 'LANG' &&
+      (rawValue === '' || rawValue === '""' || rawValue === "''")
+    )
+  ) {
+    return false
+  }
+  const unquoted = rawValue.replaceAll('"', '').replaceAll("'", '')
+  if (UNSAFE_ENV_PATH_RE.test(unquoted)) return false
+  return true
+}
+
+function unquoteFirstShellWord(cmd: string): string {
+  const m = cmd.match(/^([^\s]+)([\s\S]*)$/)
+  if (!m) return cmd
+  const tok = m[1]!
+  const rest = m[2]!
+  let quote: "'" | '"' | null = null
+  let dangling = false
+  let out = ''
+  for (let i = 0; i < tok.length; i++) {
+    const ch = tok[i]!
+    dangling = false
+    if (quote === "'") {
+      if (ch === "'") quote = null
+      else out += ch
+    } else if (quote === '"') {
+      if (ch === '\\') {
+        const next = tok[i + 1]
+        if (next === '$' || next === '`' || next === '"' || next === '\\') {
+          out += next
+          i++
+        } else if (next === undefined) {
+          dangling = true
+        } else {
+          out += ch
+        }
+      } else if (ch === '"') {
+        quote = null
+      } else {
+        out += ch
+      }
+    } else if (ch === '\\') {
+      const next = tok[i + 1]
+      if (next === undefined) dangling = true
+      else {
+        out += next
+        i++
+      }
+    } else if (ch === '"' || ch === "'") {
+      quote = ch
+    } else {
+      out += ch
+    }
+  }
+  if (quote !== null || dangling) return cmd
+  return out + rest
+}
+
 export function stripSafeWrappers(command: string): string {
   // SECURITY: Use [ \t]+ not \s+ — \s matches \n/\r which are command
   // separators in bash. Matching across a newline would strip the wrapper from
@@ -598,8 +678,12 @@ export function stripSafeWrappers(command: string): string {
     const envVarMatch = stripped.match(ENV_VAR_PATTERN)
     if (envVarMatch) {
       const varName = envVarMatch[1]!
+      const varVal = envVarMatch[2]!
       const isAntOnlySafe = ANT_ONLY_SAFE_ENV_VARS.has(varName)
-      if (SAFE_ENV_VARS.has(varName) || isAntOnlySafe) {
+      if (
+        (SAFE_ENV_VARS.has(varName) || isAntOnlySafe) &&
+        isSafeEnvVarValue(varName, varVal)
+      ) {
         stripped = stripped.replace(ENV_VAR_PATTERN, '')
       }
     }
@@ -611,6 +695,7 @@ export function stripSafeWrappers(command: string): string {
   // not as an env var assignment. Stripping env vars here would create a
   // mismatch between what the parser sees and what actually executes.
   // (HackerOne #3543050)
+  stripped = unquoteFirstShellWord(stripCommentLines(stripped))
   previousStripped = ''
   while (stripped !== previousStripped) {
     previousStripped = stripped
@@ -618,6 +703,9 @@ export function stripSafeWrappers(command: string): string {
 
     for (const pattern of SAFE_WRAPPER_PATTERNS) {
       stripped = stripped.replace(pattern, '')
+    }
+    if (stripped !== previousStripped) {
+      stripped = unquoteFirstShellWord(stripCommentLines(stripped))
     }
   }
 
@@ -784,32 +872,12 @@ export const BINARY_HIJACK_VARS = /^(LD_|DYLD_|PATH$)/
  */
 export function stripAllLeadingEnvVars(
   command: string,
-  blocklist?: RegExp,
+  blocklist?: RegExp | ((varName: string, value: string) => boolean),
 ): string {
-  // Broader value pattern for deny-rule stripping. Handles:
-  //
-  // - Standard assignment (FOO=bar), append (FOO+=bar), array (FOO[0]=bar)
-  // - Single-quoted values: '[^'\n\r]*' — bash suppresses all expansion
-  // - Double-quoted values with backslash escapes: "(?:\\.|[^"$`\\\n\r])*"
-  //   In bash double quotes, only \$, \`, \", \\, and \newline are special.
-  //   Other \x sequences are harmless, so we allow \. inside double quotes.
-  //   We still exclude raw $ and ` (without backslash) to block expansion.
-  // - Unquoted values: excludes shell metacharacters, allows backslash escapes
-  // - Concatenated segments: FOO='x'y"z" — bash concatenates adjacent segments
-  //
-  // SECURITY: Trailing whitespace MUST be [ \t]+ (horizontal only), NOT \s+.
-  //
-  // The outer * matches one atomic unit per iteration: a complete quoted
-  // string, a backslash-escape pair, or a single unquoted safe character.
-  // The inner double-quote alternation (?:...|...)* is bounded by the
-  // closing ", so it cannot interact with the outer * for backtracking.
-  //
-  // Note: $ is excluded from unquoted/double-quoted value classes to block
-  // dangerous forms like $(cmd), ${var}, and $((expr)). This means
-  // FOO=$VAR is not stripped — adding $VAR matching creates ReDoS risk
-  // (CodeQL #671) and $VAR bypasses are low-priority.
+  // Official 2.1.319 #1778: strict array subscript `[A-Za-z0-9_@*+-]+` prevents
+  // `A[$(evil)]=1 cmd` from being stripped as a benign env var prefix.
   const ENV_VAR_PATTERN =
-    /^([A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?)\+?=(?:'[^'\n\r]*'|"(?:\\.|[^"$`\\\n\r])*"|\\.|[^ \t\n\r$`;|&()<>\\\\'"])*[ \t]+/
+    /^([A-Za-z_][A-Za-z0-9_]*(?:\[[A-Za-z0-9_@*+-]+\])?)\+?=((?:'[^'\n\r]*'|"(?:\\.|[^"$`\\\n\r])*"|\\.|[^ \t\n\r$`;|&()<>\\\\'"])*)[ \t]+/
 
   let stripped = command
   let previousStripped = ''
@@ -820,11 +888,51 @@ export function stripAllLeadingEnvVars(
 
     const m = stripped.match(ENV_VAR_PATTERN)
     if (!m) continue
-    if (blocklist?.test(m[1]!)) break
+    const varName = m[1]!
+    const varVal = m[2] ?? ''
+    if (
+      typeof blocklist === 'function'
+        ? blocklist(varName, varVal)
+        : blocklist?.test(varName)
+    ) {
+      break
+    }
     stripped = stripped.slice(m[0].length)
   }
 
   return stripped.trim()
+}
+
+function expandSafePwdInAstCommand(
+  astCommand: SimpleCommand,
+  rawCommand: string,
+  expandedCmd: string,
+  effectiveCwd: string,
+): SimpleCommand {
+  const pwdMatches = [...rawCommand.matchAll(/"\$PWD((?:\/[^"$`\\\r\n]*)?)"/g)]
+  const allowedSuffixes = new Set(pwdMatches.map(m => m[1] ?? ''))
+  const canMapTrackedVarPlaceholder =
+    !rawCommand.includes('__TRACKED_VAR__') &&
+    !rawCommand.replace(/"\$PWD(?:\/[^"$`\\\r\n]*)?"/g, '').includes('$')
+
+  const expandedArgv = astCommand.argv.map(arg => {
+    const direct = arg.match(/^(?:"?)\$PWD((?:\/[^"$`\\\r\n]*)?)(?:"?)$/)
+    if (direct && arg.startsWith('"') === arg.endsWith('"')) {
+      return `${effectiveCwd}${direct[1] ?? ''}`
+    }
+    if (canMapTrackedVarPlaceholder) {
+      const placeholder = arg.match(/^__TRACKED_VAR__((?:\/[^"$`\\\r\n]*)?)$/)
+      if (placeholder && allowedSuffixes.has(placeholder[1] ?? '')) {
+        return `${effectiveCwd}${placeholder[1] ?? ''}`
+      }
+    }
+    return arg
+  })
+  return {
+    ...astCommand,
+    argv: expandedArgv,
+    text: expandedCmd,
+  }
 }
 
 function filterRulesByContentsMatchingInput(
@@ -834,7 +942,14 @@ function filterRulesByContentsMatchingInput(
   {
     stripAllEnvVars = false,
     skipCompoundCheck = false,
-  }: { stripAllEnvVars?: boolean; skipCompoundCheck?: boolean } = {},
+    astCommand,
+    ruleBehavior,
+  }: {
+    stripAllEnvVars?: boolean
+    skipCompoundCheck?: boolean
+    astCommand?: SimpleCommand
+    ruleBehavior?: 'deny' | 'ask' | 'allow'
+  } = {},
 ): PermissionRule[] {
   const command = input.command.trim()
 
@@ -860,36 +975,44 @@ function filterRulesByContentsMatchingInput(
     return strippedCommand !== cmd ? [cmd, strippedCommand] : [cmd]
   })
 
-  // SECURITY: For deny/ask rules, also try matching after stripping ALL leading
-  // env var prefixes. This prevents bypass via `FOO=bar denied_command` where
-  // FOO is not in the safe-list. The safe-list restriction in stripSafeWrappers
-  // is intentional for allow rules (see HackerOne #3543050), but deny rules
-  // must be harder to circumvent — a denied command should stay denied
-  // regardless of env var prefixes.
-  //
-  // We iteratively apply both stripping operations to all candidates until no
-  // new candidates are produced (fixed-point). This handles interleaved patterns
-  // like `nohup FOO=bar timeout 5 claude` where:
-  //   1. stripSafeWrappers strips `nohup` → `FOO=bar timeout 5 claude`
-  //   2. stripAllLeadingEnvVars strips `FOO=bar` → `timeout 5 claude`
-  //   3. stripSafeWrappers strips `timeout 5` → `claude` (deny match)
-  //
-  // Without iteration, single-pass compositions miss multi-layer interleaving.
+  // SECURITY: For deny/ask rules (#1731 `z5`), dequote and reconstruct argv
+  // (using AST argv when available, or shell-quote tokens) so commands with
+  // quoted words like `"git" "push"`, `r'm' -rf /`, or `curl "-X" POST` cannot
+  // bypass deny or ask rules, and iteratively strip env vars + wrappers.
   if (stripAllEnvVars) {
     const seen = new Set(commandsToTry)
-    // densable T4 `eut(h?.argv??pu(B))` — argv peel of TZ="$HOME" / TZ=$HOME
-    // that Eue's string regex will not strip (raw `$` in the value).
-    const argv = argvTokensForDeny(commandWithoutRedirections)
-    const peeled = eutPeelArgv(argv)
+    const addCandidate = (candidate: string): void => {
+      if (candidate && !seen.has(candidate)) {
+        commandsToTry.push(candidate)
+        seen.add(candidate)
+      }
+    }
+    const rawArgv =
+      astCommand?.argv ?? argvTokensForDeny(commandWithoutRedirections)
+    const peeled = eutPeelArgv(rawArgv)
     if (
       peeled.length > 0 &&
-      (peeled[0] !== argv[0] || argv.some(t => ENV_VAR_ASSIGN_RE.test(t)))
+      (astCommand !== undefined ||
+        peeled[0] !== rawArgv[0] ||
+        splitCommand(commandWithoutRedirections).length === 1)
     ) {
-      const joined = peeled.join(' ')
-      if (!seen.has(joined)) {
-        commandsToTry.push(joined)
-        seen.add(joined)
+      addCandidate(peeled.join(' '))
+      if (peeled[0] !== rawArgv[0]) {
+        addCandidate(rawArgv.join(' '))
       }
+      const firstBase = peeled[0]?.replace(/^.*[\\/]/, '')
+      if (firstBase && firstBase !== peeled[0]) {
+        addCandidate([firstBase, ...peeled.slice(1)].join(' '))
+      }
+    }
+    // Also unquote space-separated tokens when ruleBehavior is deny/ask and
+    // raw command had quotes/escapes inside words (e.g. `git "push" --force`).
+    if (
+      (ruleBehavior === 'deny' || ruleBehavior === 'ask') &&
+      /['"\\]/.test(commandWithoutRedirections) &&
+      rawArgv.length > 0
+    ) {
+      addCandidate(rawArgv.join(' '))
     }
     let startIdx = 0
 
@@ -902,17 +1025,9 @@ function filterRulesByContentsMatchingInput(
           continue
         }
         // Try stripping env vars
-        const envStripped = stripAllLeadingEnvVars(cmd)
-        if (!seen.has(envStripped)) {
-          commandsToTry.push(envStripped)
-          seen.add(envStripped)
-        }
+        addCandidate(stripAllLeadingEnvVars(cmd))
         // Try stripping safe wrappers
-        const wrapperStripped = stripSafeWrappers(cmd)
-        if (!seen.has(wrapperStripped)) {
-          commandsToTry.push(wrapperStripped)
-          seen.add(wrapperStripped)
-        }
+        addCandidate(stripSafeWrappers(cmd))
       }
       startIdx = endIdx
     }
@@ -1004,20 +1119,28 @@ function matchingRulesForInput(
   input: z.infer<typeof BashTool.inputSchema>,
   toolPermissionContext: ToolPermissionContext,
   matchMode: 'exact' | 'prefix',
-  { skipCompoundCheck = false }: { skipCompoundCheck?: boolean } = {},
+  {
+    skipCompoundCheck = false,
+    astCommand,
+  }: { skipCompoundCheck?: boolean; astCommand?: SimpleCommand } = {},
 ) {
   const denyRuleByContents = getRuleByContentsForTool(
     toolPermissionContext,
     BashTool,
     'deny',
   )
-  // SECURITY: Deny/ask rules use aggressive env var stripping so that
-  // `FOO=bar denied_command` still matches a deny rule for `denied_command`.
+  // SECURITY: Deny/ask rules use aggressive env var stripping & argv dequoting (#1731)
+  // so that `FOO=bar denied_command` or `"git" "push"` still matches rules.
   const matchingDenyRules = filterRulesByContentsMatchingInput(
     input,
     denyRuleByContents,
     matchMode,
-    { stripAllEnvVars: true, skipCompoundCheck: true },
+    {
+      stripAllEnvVars: true,
+      skipCompoundCheck: true,
+      astCommand,
+      ruleBehavior: 'deny',
+    },
   )
 
   const askRuleByContents = getRuleByContentsForTool(
@@ -1029,7 +1152,12 @@ function matchingRulesForInput(
     input,
     askRuleByContents,
     matchMode,
-    { stripAllEnvVars: true, skipCompoundCheck: true },
+    {
+      stripAllEnvVars: true,
+      skipCompoundCheck: true,
+      astCommand,
+      ruleBehavior: 'ask',
+    },
   )
 
   const allowRuleByContents = getRuleByContentsForTool(
@@ -1041,7 +1169,7 @@ function matchingRulesForInput(
     input,
     allowRuleByContents,
     matchMode,
-    { skipCompoundCheck },
+    { skipCompoundCheck, astCommand, ruleBehavior: 'allow' },
   )
 
   return {
@@ -1057,10 +1185,11 @@ function matchingRulesForInput(
 export const bashToolCheckExactMatchPermission = (
   input: z.infer<typeof BashTool.inputSchema>,
   toolPermissionContext: ToolPermissionContext,
+  astCommand?: SimpleCommand,
 ): PermissionResult => {
   const command = input.command.trim()
   const { matchingDenyRules, matchingAskRules, matchingAllowRules } =
-    matchingRulesForInput(input, toolPermissionContext, 'exact')
+    matchingRulesForInput(input, toolPermissionContext, 'exact', { astCommand })
 
   // 1. Deny if exact command was denied
   if (matchingDenyRules[0] !== undefined) {
@@ -1119,6 +1248,7 @@ export const bashToolCheckPermission = (
   toolPermissionContext: ToolPermissionContext,
   compoundCommandHasCd?: boolean,
   astCommand?: SimpleCommand,
+  cwdOverride?: string,
 ): PermissionResult => {
   const command = input.command.trim()
 
@@ -1129,13 +1259,14 @@ export const bashToolCheckPermission = (
   const exactMatchResult = bashToolCheckExactMatchPermission(
     input,
     toolPermissionContext,
+    astCommand,
   )
 
-  // 1a. Deny/ask if exact command has a rule
-  if (
-    exactMatchResult.behavior === 'deny' ||
-    exactMatchResult.behavior === 'ask'
-  ) {
+  // 1a. Deny immediately if exact command has a deny rule.
+  // #1809 (`K4n`): defer ALL exact ask rules (regardless of source) until
+  // after step 2a `matchingDenyRules` so a projectSettings/userSettings/session
+  // exact ask rule cannot downgrade a broader prefix/wildcard deny rule.
+  if (exactMatchResult.behavior === 'deny') {
     return exactMatchResult
   }
 
@@ -1147,6 +1278,7 @@ export const bashToolCheckPermission = (
   const { matchingDenyRules, matchingAskRules, matchingAllowRules } =
     matchingRulesForInput(input, toolPermissionContext, 'prefix', {
       skipCompoundCheck: astCommand !== undefined,
+      astCommand,
     })
 
   // 2a. Deny if command has a deny rule
@@ -1159,6 +1291,11 @@ export const bashToolCheckPermission = (
         rule: matchingDenyRules[0],
       },
     }
+  }
+
+  // 2a2. Deferred exact ask rule (no prefix/wildcard deny matched).
+  if (exactMatchResult.behavior === 'ask') {
+    return exactMatchResult
   }
 
   // 2b. Ask if command has an ask rule
@@ -1175,17 +1312,36 @@ export const bashToolCheckPermission = (
 
   // 3. Check path constraints
   // This check comes after deny/ask rules so explicit rules take precedence.
-  // SECURITY: When AST-derived argv is available for this subcommand, pass
-  // it through so checkPathConstraints uses it directly instead of re-parsing
-  // with shell-quote (which has a single-quote backslash bug that causes
-  // parseCommandArguments to return [] and silently skip path validation).
+  // Official 2.1.321 #1900: expand safe `"$PWD"` / `"$PWD/..."` to current cwd
+  // when there is no `cd` in the compound command so read-only path checks
+  // like `grep -r foo "$PWD/src"` don't spuriously prompt.
+  // SECURITY: When `astCommand` exists, NEVER drop it to `undefined` (which
+  // would fall back to shell-quote); clone and expand `$PWD` in `argv`.
+  const effectiveCwd = cwdOverride ?? getCwd()
+  const expandedCmd = !compoundCommandHasCd
+    ? expandSafeDoubleQuotedPwd(input.command, effectiveCwd)
+    : input.command
+  const pathInput =
+    expandedCmd !== input.command ? { ...input, command: expandedCmd } : input
+  const pathAstCommands = astCommand
+    ? [
+        expandedCmd !== input.command
+          ? expandSafePwdInAstCommand(
+              astCommand,
+              input.command,
+              expandedCmd,
+              effectiveCwd,
+            )
+          : astCommand,
+      ]
+    : undefined
   const pathResult = checkPathConstraints(
-    input,
-    getCwd(),
+    pathInput,
+    effectiveCwd,
     toolPermissionContext,
     compoundCommandHasCd,
     astCommand?.redirects,
-    astCommand ? [astCommand] : undefined,
+    pathAstCommands,
   )
   if (pathResult.behavior !== 'passthrough') {
     return pathResult
@@ -1258,12 +1414,12 @@ export async function checkCommandAndSuggestRules(
   compoundCommandHasCd?: boolean,
   astParseSucceeded?: boolean,
 ): Promise<PermissionResult> {
-  // 1. Check exact match first
+  // 1. Check exact match first (#1809: defer ALL exact ask rules so broader deny rules win)
   const exactMatchResult = bashToolCheckExactMatchPermission(
     input,
     toolPermissionContext,
   )
-  if (exactMatchResult.behavior !== 'passthrough') {
+  if (exactMatchResult.behavior === 'deny') {
     return exactMatchResult
   }
 
@@ -1273,7 +1429,8 @@ export async function checkCommandAndSuggestRules(
     toolPermissionContext,
     compoundCommandHasCd,
   )
-  // 2a. Deny/ask if command was explictly denied/asked
+  // 2a. Deny/ask from prefix & exact-rule resolution (do not bypass step 3
+  // injection check for 'allow' — step 4 returns allow after step 3 passes)
   if (
     permissionResult.behavior === 'deny' ||
     permissionResult.behavior === 'ask'
@@ -1464,7 +1621,7 @@ function checkEarlyExitDeny(
     input,
     toolPermissionContext,
   )
-  if (exactMatchResult.behavior !== 'passthrough') {
+  if (exactMatchResult.behavior === 'deny') {
     return exactMatchResult
   }
   const denyMatch = matchingRulesForInput(
@@ -1478,6 +1635,9 @@ function checkEarlyExitDeny(
       message: `Permission to use ${BashTool.name} with command ${input.command} has been denied.`,
       decisionReason: { type: 'rule', rule: denyMatch },
     }
+  }
+  if (exactMatchResult.behavior !== 'passthrough') {
+    return exactMatchResult
   }
   return null
 }
@@ -2978,11 +3138,167 @@ export function applyAssignedVariableGate(
 /**
  * The main implementation to check if we need to ask for user permission to call BashTool with a given input
  */
+/**
+ * Official 2.1.321 #1848 (`ANo`):
+ * When `dangerouslyDisableSandbox: true` is set and the command would
+ * otherwise run inside the sandbox, never auto-allow a read-only (or
+ * passthrough) command outside the sandbox — always force an interactive ask
+ * with `decisionReason: { type: 'sandboxOverride', reason: 'dangerouslyDisableSandbox' }`.
+ */
+export function enforceDangerouslyDisableSandboxAsk(
+  input: z.infer<typeof BashTool.inputSchema>,
+  result: PermissionResult,
+): PermissionResult {
+  if (
+    !input.dangerouslyDisableSandbox ||
+    result.behavior === 'deny' ||
+    result.decisionReason?.type === 'sandboxOverride' ||
+    shouldUseSandbox(input) ||
+    !shouldUseSandbox({ ...input, dangerouslyDisableSandbox: false })
+  ) {
+    return result
+  }
+  if (result.behavior === 'allow' || result.behavior === 'passthrough') {
+    return {
+      behavior: 'ask',
+      decisionReason: {
+        type: 'sandboxOverride',
+        reason: 'dangerouslyDisableSandbox',
+      },
+      message: 'Run outside of the sandbox',
+    }
+  }
+  return result
+}
+
+/**
+ * Official 2.1.321 #1849 (`Dnt`):
+ * Walk subcommands in a compound command tracking candidate working directories
+ * across `cd`, `chdir`, `pushd`, and `popd` (including `cd -`, `pushd -n`,
+ * `popd -n`, directory stack) and validate subsequent subcommands against every
+ * candidate directory so file writes or deny-ruled paths relative to a changed
+ * folder cannot slip through unprompted.
+ */
+export function checkCompoundDirectoryChangesPathConstraints(
+  subcommands: readonly string[],
+  astCommandsByIdx: readonly (SimpleCommand | undefined)[],
+  initialCwd: string,
+  toolPermissionContext: ToolPermissionContext,
+): PermissionResult | null {
+  const candidateDirs = new Set<string>([initialCwd])
+  let currentCwd: string | undefined = initialCwd
+  let prevCwd: string | undefined
+  const dirStack: Array<string | undefined> = []
+  let firstAsk: PermissionResult | null = null
+
+  for (let i = 0; i < subcommands.length; i++) {
+    const subText = subcommands[i]!
+    const astCmd = astCommandsByIdx[i]
+    const rawArgv = astCmd?.argv ?? argvTokensForDeny(subText)
+    const argv = stripWrappersFromArgv(rawArgv)
+    const cmdName = argv[0]?.replace(/^.*[\\/]/, '')
+
+    if (
+      cmdName === 'cd' ||
+      cmdName === 'chdir' ||
+      cmdName === 'pushd' ||
+      cmdName === 'popd'
+    ) {
+      const args = argv.slice(1)
+      const positionals = args.filter(
+        a => a !== '--' && (a === '-' || !a.startsWith('-')),
+      )
+      const target =
+        positionals.length === 1
+          ? positionals[0]
+          : positionals.length === 0 &&
+              (cmdName === 'cd' || cmdName === 'chdir')
+            ? '~'
+            : undefined
+      const nonStdFlags = args.filter(
+        a =>
+          a !== '--' && a !== '-' && a.startsWith('-') && !/^-[PLe@]+$/.test(a),
+      )
+      if (
+        (cmdName === 'pushd' || cmdName === 'popd') &&
+        nonStdFlags.length === 1 &&
+        nonStdFlags[0] === '-n'
+      ) {
+        continue
+      }
+      const isStaticTarget =
+        cmdName !== 'popd' &&
+        nonStdFlags.length === 0 &&
+        target !== undefined &&
+        target !== '-' &&
+        !/^[+-]\d+$/.test(target) &&
+        !/[*?[\]$`(){}|;&<>]/.test(target) &&
+        !(target.startsWith('~') && target !== '~' && !target.startsWith('~/'))
+      const stackSwap =
+        nonStdFlags.length === 0
+          ? cmdName === 'popd'
+            ? positionals.length === 0 && dirStack.length > 0
+              ? { dir: dirStack.pop() }
+              : undefined
+            : target === '-' && prevCwd !== undefined
+              ? { dir: prevCwd }
+              : undefined
+          : undefined
+
+      if (stackSwap !== undefined) {
+        const old = currentCwd
+        currentCwd = stackSwap.dir
+        prevCwd = old
+      } else if (isStaticTarget && target !== undefined) {
+        if (cmdName === 'pushd') dirStack.push(currentCwd)
+        prevCwd = currentCwd
+        const expanded = expandTilde(target)
+        candidateDirs.add(resolvePath(initialCwd, expanded))
+        if (currentCwd !== undefined) {
+          currentCwd = resolvePath(currentCwd, expanded)
+          candidateDirs.add(currentCwd)
+        }
+      } else {
+        if (cmdName === 'pushd') dirStack.push(currentCwd)
+        prevCwd = currentCwd
+        currentCwd = undefined
+      }
+      continue
+    }
+
+    if (candidateDirs.size > 1) {
+      for (const candidateCwd of candidateDirs) {
+        if (candidateCwd === initialCwd) continue
+        const res = checkPathConstraints(
+          { command: subText },
+          candidateCwd,
+          toolPermissionContext,
+          false,
+          astCmd?.redirects,
+          astCmd ? [astCmd] : undefined,
+        )
+        if (res.behavior === 'deny') return res
+        if (res.behavior === 'ask' && firstAsk === null) {
+          firstAsk = res
+        }
+      }
+    }
+  }
+  return firstAsk
+}
+
 export async function bashToolHasPermission(
   input: z.infer<typeof BashTool.inputSchema>,
   context: ToolUseContext,
   getCommandSubcommandPrefixFn = getCommandSubcommandPrefix,
 ): Promise<PermissionResult> {
+  // Official 2.1.321 #1958 (`tengu_wise_newt`): refuse shell commands holding
+  // the signed-in account's email beside a User-Agent directly without asking.
+  const wiseNewtDeny = await checkAccountEmailUserAgent('Bash', input)
+  if (wiseNewtDeny) {
+    return wiseNewtDeny
+  }
+
   // densable DDs early gate — possibly-empty `$VAR/*` on rm/rmdir.
   const emptyVarRm = detectPossiblyEmptyVariableRm(input.command)
   if (emptyVarRm) {
@@ -3023,7 +3339,10 @@ export async function bashToolHasPermission(
     innerResult,
     astCapture.astResult,
   )
-  return applyBackgroundOperatorCircuitBreaker(input, result)
+  return enforceDangerouslyDisableSandboxAsk(
+    input,
+    await applyBackgroundOperatorCircuitBreaker(input, result),
+  )
 }
 
 async function bashToolHasPermissionInner(
@@ -3596,6 +3915,19 @@ async function bashToolHasPermissionInner(
     isNormalizedCdCommand(subCommand),
   )
   if (cdCommands.length > 1) {
+    // Official 2.1.321 #1849: check compound directory-change path constraints
+    // before returning the multi-cd 'ask' so an explicit deny rule along the
+    // chain (e.g. `pushd /etc && rm passwd && popd`) is never downgraded to 'ask'.
+    appState = context.getAppState()
+    const multiCdDeny = checkCompoundDirectoryChangesPathConstraints(
+      subcommands,
+      astCommandsByIdx,
+      cwd,
+      appState.toolPermissionContext,
+    )
+    if (multiCdDeny?.behavior === 'deny') {
+      return multiCdDeny
+    }
     const decisionReason = {
       type: 'other' as const,
       reason:
@@ -3696,6 +4028,24 @@ async function bashToolHasPermissionInner(
     }
   }
 
+  // Official 2.1.321 #1849 (`Dnt`): when a compound command includes
+  // `cd`/`chdir`/`pushd`/`popd`, validate subsequent subcommands against every
+  // candidate working directory tracked across the chain.
+  // Only short-circuit on 'deny' here; defer 'ask' until after `pathResult`
+  // (so output-redirection 'deny' like `> /etc/secret` is never masked) and
+  // apply the GH#28784 guard against silently approving sibling subcommands.
+  const trackedCwdDecision = compoundCommandHasCd
+    ? checkCompoundDirectoryChangesPathConstraints(
+        subcommands,
+        astCommandsByIdx,
+        getCwd(),
+        appState.toolPermissionContext,
+      )
+    : null
+  if (trackedCwdDecision?.behavior === 'deny') {
+    return trackedCwdDecision
+  }
+
   // Validate output redirections on the ORIGINAL command (before splitCommand stripped them)
   // This must happen AFTER checking deny rules but BEFORE returning results.
   // Output redirections like "> /etc/passwd" are stripped by splitCommand, so the per-subcommand
@@ -3723,6 +4073,17 @@ async function bashToolHasPermissionInner(
     subcommandPermissionDecisions,
     _ => _.behavior !== 'allow',
   )
+
+  // Official #1849 + GH#28784 guard: after confirming neither compound-cwd nor
+  // original-command pathResult denied, surface a tracked-cwd 'ask'. When any
+  // subcommand also needs approval (nonAllowCount > 0), strip path-only
+  // suggestions so approving a Read/Edit rule cannot silently approve sibling
+  // commands (e.g. `cd /outside && touch x && python3 evil.py`).
+  if (trackedCwdDecision?.behavior === 'ask') {
+    return nonAllowCount > 0
+      ? { ...trackedCwdDecision, suggestions: undefined }
+      : trackedCwdDecision
+  }
 
   // SECURITY (GH#28784): Only short-circuit on a path-constraint 'ask' when no
   // subcommand independently produced an 'ask'. checkPathConstraints re-runs the

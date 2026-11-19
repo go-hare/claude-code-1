@@ -131,6 +131,10 @@ export type ToolPermissionContext = DeepImmutable<{
   strippedDangerousRules?: ToolPermissionRulesBySource
   /** When true, permission prompts are auto-denied (e.g., background agents that can't show UI) */
   shouldAvoidPermissionPrompts?: boolean
+  /** #1703: When true, `permissions.denyInsteadOfPrompting` auto-denies instead of prompting */
+  denyInsteadOfPrompting?: boolean
+  /** #1703: When true, prompts are avoided by nature (headless / background / subagent / avoid_prompts layer) */
+  avoidsPromptsByNature?: boolean
   /** When true, automated checks (classifier, hooks) are awaited before showing the permission dialog (coordinator workers) */
   awaitAutomatedChecksBeforeDialog?: boolean
   /** Stores the permission mode before model-initiated plan mode entry, so it can be restored on exit */
@@ -723,6 +727,8 @@ export type ToolResult<T> = {
   )[]
   // contextModifier is only honored for tools that aren't concurrency safe.
   contextModifier?: (context: ToolUseContext) => ToolUseContext
+  /** #1894: Context/permission layers emitted by tools (e.g. working_directory from EnterWorktreeTool). */
+  contextLayers?: NonNullable<ToolUseContext['permissionLayers']>
   /** MCP protocol metadata (structuredContent, _meta) to pass through to SDK consumers */
   mcpMeta?: {
     _meta?: Record<string, unknown>

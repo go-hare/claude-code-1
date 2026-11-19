@@ -7,7 +7,7 @@
 import { createHash } from 'crypto'
 import { mkdirSync, readdirSync, statSync } from 'fs'
 import chokidar from 'chokidar'
-import { mkdir, readFile, stat, utimes } from 'fs/promises'
+import { mkdir, readFile, stat, utimes, writeFile } from 'fs/promises'
 import {
   basename,
   dirname,
@@ -20,10 +20,14 @@ import {
 import { pathToFileURL } from 'url'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import type { ToolUseContext } from '../../Tool.js'
+import type { LoadedPlugin } from '../../types/plugin.js'
 import type { ConfirmWithUserResult } from '../permissions/confirmWithUser.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/index.js'
 import { registerCleanup } from '../cleanupRegistry.js'
+import { isEnvDefinedFalsy, isEnvTruthy } from '../envUtils.js'
 import { errorMessage, isENOENT } from '../errors.js'
+import { isPersistedTrustIgnored } from './addDirPluginSettings.js'
+import { evaluateClaudeAuthoredModLoadPolicy } from './functionHooksModules.js'
 import {
   bindMainThreadTurn,
   getMainThreadTurn,
@@ -832,6 +836,7 @@ function leftoverPluginDevModsRefusalProbe(): string | undefined {
     {
       refusal: 'untrusted',
       isRefused: () => {
+        if (isPersistedTrustIgnored()) return true
         try {
           const { checkHasTrustDialogAccepted } =
             // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -876,28 +881,208 @@ export function canAskPluginDevMods(): boolean {
   }
 }
 
-/** 325 `C` — auto-enable in bypassPermissions or non-circuit-broken auto mode. */
+/**
+ * 325 `C` (#1938) — auto-enable Claude-authored mods in `bypassPermissions` or
+ * non-circuit-broken `auto` mode, even when managed `allowUnsandboxedCommands: false`
+ * or `allowManagedDomainsOnly` is active; never in `dontAsk`.
+ */
 export function canAutoEnablePluginDevMods(): boolean {
   const mode = binding?.permissionMode?.()
-  if (mode === 'bypassPermissions') return true
-  if (mode !== 'auto') return false
-  try {
-    const { getPlatform } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('../platform.js') as typeof import('../platform.js')
-    const plat = getPlatform()
-    if (plat === 'windows' || plat === 'wsl') return false
-  } catch {
-    return false
+  let isAutoCircuitBroken = false
+  if (mode === 'auto') {
+    try {
+      const { getPlatform } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../platform.js') as typeof import('../platform.js')
+      const plat = getPlatform()
+      if (plat === 'windows' || plat === 'wsl') return false
+    } catch {
+      return false
+    }
+    try {
+      const { isAutoModeCircuitBroken } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../permissions/autoModeState.js') as typeof import('../permissions/autoModeState.js')
+      isAutoCircuitBroken = isAutoModeCircuitBroken()
+    } catch {
+      isAutoCircuitBroken = false
+    }
+  }
+  return (
+    evaluateClaudeAuthoredModLoadPolicy(mode, { isAutoCircuitBroken }) ===
+    'auto-enable'
+  )
+}
+
+/**
+ * #1952 (2.1.321): Returns true when `CLAUDE_CODE_PLUGIN_DIR_WATCH=0` / `false`
+ * explicitly turns off mod file watching (including headless `.claude/skills` mods).
+ */
+export function isPluginDirWatchDisabledByEnv(): boolean {
+  return isEnvDefinedFalsy(process.env.CLAUDE_CODE_PLUGIN_DIR_WATCH)
+}
+
+/**
+ * #1952 (official `TDs`): General plugin-dir watch default — explicit env var
+ * if set, otherwise on in interactive sessions and off in headless sessions.
+ */
+export function isPluginDirWatchEnabledByDefault(
+  isNonInteractive?: boolean,
+): boolean {
+  const raw = process.env.CLAUDE_CODE_PLUGIN_DIR_WATCH
+  if (raw !== undefined && raw.trim() !== '') {
+    return isEnvTruthy(raw)
+  }
+  if (isNonInteractive !== undefined) {
+    return !isNonInteractive
   }
   try {
-    const { isAutoModeCircuitBroken } =
+    const { getIsNonInteractiveSession } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('../permissions/autoModeState.js') as typeof import('../permissions/autoModeState.js')
-    return !isAutoModeCircuitBroken()
+      require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js')
+    return !getIsNonInteractiveSession()
   } catch {
     return true
   }
+}
+
+/**
+ * #1952 (official `HAo` / `LAo`): Select which mod directories should be
+ * watched. Even in headless sessions, `.claude/skills` mod folders (`skillModDirs`)
+ * are watched by default unless `CLAUDE_CODE_PLUGIN_DIR_WATCH=0` is set.
+ */
+export function filterWatchedModDirs(
+  dirs: readonly string[],
+  opts?: {
+    skillModDirs?: readonly string[]
+    excludedDirs?: readonly string[]
+    isNonInteractive?: boolean
+  },
+): string[] {
+  if (isPluginDirWatchDisabledByEnv()) {
+    return []
+  }
+  const skillSet = new Set((opts?.skillModDirs ?? []).map(d => resolve(d)))
+  if (isPluginDirWatchEnabledByDefault(opts?.isNonInteractive)) {
+    const excludedSet = new Set((opts?.excludedDirs ?? []).map(d => resolve(d)))
+    return dirs.filter(d => {
+      const r = resolve(d)
+      return skillSet.has(r) || !excludedSet.has(r)
+    })
+  }
+  return dirs.filter(d => skillSet.has(resolve(d)))
+}
+
+/**
+ * #1858 (2.1.321): Select plugins eligible for `.claude-plugin/types/`
+ * generation under `--plugin-dir`. Built-in plugins (`isBuiltin === true`) are
+ * always excluded so `--plugin-dir .` / `--plugin-dir ./builtin` never writes
+ * generated type files into a `builtin` directory.
+ */
+export function selectPluginDirTypeTargets(
+  plugins: readonly LoadedPlugin[],
+  pluginDirs: readonly string[],
+): LoadedPlugin[] {
+  const resolvedDirs = pluginDirs.map(d => resolve(d))
+  return plugins.filter(plugin => {
+    if (plugin.isBuiltin === true) {
+      return false
+    }
+    const pluginPath = resolve(plugin.path)
+    return resolvedDirs.some(dir => {
+      const rel = relative(dir, pluginPath)
+      if (rel === '') return true
+      return !isAbsolute(rel) && !rel.startsWith('..') && !rel.includes(sep)
+    })
+  })
+}
+
+/**
+ * #1858: Lay `.claude-plugin/types/` for a non-builtin `--plugin-dir` plugin.
+ * Filters out built-in plugins (`!isBuiltin`) unless they explicitly declare
+ * `manifest.types`, preventing writes into a `builtin` folder.
+ */
+export async function layPluginDirTypes(
+  plugin: LoadedPlugin,
+  allLoaded: readonly LoadedPlugin[],
+  opts?: { version?: string },
+): Promise<{ typeRoot: string; written: string[] } | undefined> {
+  if (plugin.isBuiltin === true) {
+    return undefined
+  }
+  const pluginRoot = resolve(plugin.path)
+  const typeRoot = join(pluginRoot, WATCH_TYPES_DIR)
+  if (!leftoverPathInside(pluginRoot, typeRoot)) {
+    return undefined
+  }
+
+  const peerNames = allLoaded
+    .filter(
+      peer =>
+        peer.name !== plugin.name &&
+        peer.isBuiltin !== true &&
+        peer.name !== '' &&
+        peer.name !== '.' &&
+        peer.name !== '..' &&
+        !peer.name.includes('/') &&
+        !peer.name.includes('\\'),
+    )
+    .map(peer => peer.name)
+
+  const entries = ['claude-code', ...new Set(peerNames)]
+  const written: string[] = []
+  await mkdir(join(typeRoot, 'claude-code'), { recursive: true })
+
+  const gitignorePath = join(typeRoot, '.gitignore')
+  await writeFile(gitignorePath, '*\n', 'utf8')
+  written.push('.claude-plugin/types/.gitignore')
+
+  const version = opts?.version ?? '0.0.0'
+  const coreDtsPath = join(typeRoot, 'claude-code', 'index.d.ts')
+  await writeFile(
+    coreDtsPath,
+    `// Generated by Claude Code ${version} for --plugin-dir type resolution\nexport {}\n`,
+    'utf8',
+  )
+  written.push('.claude-plugin/types/claude-code/index.d.ts')
+
+  const tsconfigPath = join(typeRoot, 'tsconfig.json')
+  const tsconfig = {
+    compilerOptions: {
+      noEmit: true,
+      types: entries,
+      typeRoots: ['.'],
+    },
+  }
+  await writeFile(
+    tsconfigPath,
+    `${JSON.stringify(tsconfig, null, 2)}\n`,
+    'utf8',
+  )
+  written.push('.claude-plugin/types/tsconfig.json')
+
+  return { typeRoot, written }
+}
+
+/**
+ * #1858: Production entry point called from `pluginLoader.ts` to lay
+ * `.claude-plugin/types/` for `--plugin-dir` plugins (excluding built-in plugins).
+ */
+export async function layPluginDirTypesForLoadedPlugins(
+  plugins: readonly LoadedPlugin[],
+  pluginDirs: readonly string[],
+): Promise<void> {
+  const targets = selectPluginDirTypeTargets(plugins, pluginDirs)
+  await Promise.all(
+    targets.map(plugin =>
+      layPluginDirTypes(plugin, plugins).catch(err => {
+        leftoverDebug(
+          `type root of ${plugin.name} not laid: ${errorMessage(err)}`,
+          'warn',
+        )
+      }),
+    ),
+  )
 }
 
 const DEV_MODS_DECLINED_UI_TEXT = 'Not turned on.'
@@ -1336,12 +1521,15 @@ export function classifyFileStampChange(
 
 export function createDevModStampTracker(now: () => number = Date.now) {
   const files = new Map<string, DevModStampState>()
+  const forgotten = new Set<string>()
   let readAtMs = 0
 
   return {
     shouldReload(filePath: string, next: DevModTrackedStamp): boolean {
+      const wasForgotten = forgotten.delete(filePath)
       const state = files.get(filePath) ?? {}
-      const skip = classifyFileStampChange(next, state, readAtMs)
+      const effectiveReadAtMs = wasForgotten ? 0 : readAtMs
+      const skip = classifyFileStampChange(next, state, effectiveReadAtMs)
       if (skip !== undefined) {
         return false
       }
@@ -1367,6 +1555,10 @@ export function createDevModStampTracker(now: () => number = Date.now) {
           })
         }
       }
+    },
+    forget(filePath: string): void {
+      files.delete(filePath)
+      forgotten.add(filePath)
     },
     getState(filePath: string): DevModStampState | undefined {
       return files.get(filePath)
@@ -1712,6 +1904,64 @@ function leftoverTick(
   })
 }
 
+/**
+ * #1751 (2.1.319): Event handlers for dev-mod watching.
+ * - `onUnlink` clears the cached stamp in `tracker` and bumps the per-path
+ *   sequence number so any in-flight `readStamp` from an earlier `add`/`change`
+ *   cannot write back a stale stamp or suppress a subsequent re-creation.
+ * - `onFileChange` checks sequence staleness and treats a transient missing
+ *   file (`tracked === undefined`) by forgetting any cached stamp and firing
+ *   `onChange`.
+ */
+export function createDevModWatchHandlers(
+  tracker: ReturnType<typeof createDevModStampTracker>,
+  onChange: () => void,
+  readStamp: (
+    filePath: string,
+  ) => Promise<DevModTrackedStamp | undefined> = readDevModTrackedStamp,
+): {
+  onFileChange: (filePath: string) => Promise<void>
+  onUnlink: (filePath: string) => void
+  onDirEvent: () => void
+} {
+  const seqByPath = new Map<string, number>()
+  const bump = (filePath: string): number => {
+    const next = (seqByPath.get(filePath) ?? 0) + 1
+    seqByPath.set(filePath, next)
+    return next
+  }
+
+  return {
+    async onFileChange(filePath: string): Promise<void> {
+      const seq = bump(filePath)
+      const tracked = await readStamp(filePath)
+      // If an unlink or newer file event arrived while stat/readFile was in flight,
+      // discard this stale result so it cannot poison the stamp tracker.
+      if (seqByPath.get(filePath) !== seq) {
+        return
+      }
+      if (tracked === undefined) {
+        // File vanished between add/change and stat/readFile — forget stale stamp
+        // and still trigger reload so deletion + return are never missed.
+        tracker.forget(filePath)
+        onChange()
+        return
+      }
+      if (tracker.shouldReload(filePath, tracked)) {
+        onChange()
+      }
+    },
+    onUnlink(filePath: string): void {
+      bump(filePath)
+      tracker.forget(filePath)
+      onChange()
+    },
+    onDirEvent(): void {
+      onChange()
+    },
+  }
+}
+
 /** densable Ro — chokidar persistent, ignoreInitial, followSymlinks:!1, 400ms. */
 function leftoverWatchRoot(
   folder: string,
@@ -1736,22 +1986,19 @@ function leftoverWatchRoot(
     interval: 400,
     binaryInterval: 400,
   })
-  const fire = () => onChange()
+  const handlers = createDevModWatchHandlers(
+    activeDevModStampTracker,
+    onChange,
+    readDevModTrackedStamp,
+  )
   const fireIfChanged = (filePath: string) => {
-    void readDevModTrackedStamp(filePath).then(tracked => {
-      if (
-        tracked === undefined ||
-        activeDevModStampTracker.shouldReload(filePath, tracked)
-      ) {
-        onChange()
-      }
-    })
+    void handlers.onFileChange(filePath)
   }
   watcher.on('add', fireIfChanged)
-  watcher.on('addDir', fire)
+  watcher.on('addDir', handlers.onDirEvent)
   watcher.on('change', fireIfChanged)
-  watcher.on('unlink', fire)
-  watcher.on('unlinkDir', fire)
+  watcher.on('unlink', handlers.onUnlink)
+  watcher.on('unlinkDir', handlers.onDirEvent)
   watcher.on('error', (error: unknown) => {
     leftoverDebug(
       `dev mods: the watch on ${folder}: ${errorMessage(error)}`,
@@ -1793,8 +2040,10 @@ function leftoverWatchDevModsFolder(
   const offBegin = deps.turn.onBegin(() => {
     turnGen += 1
     askedByPersonTurn = deps.turn.isPersonTurn()
+    // #1772: Roll back unpicked count when the user sends a real message turn
+    // instead of answering the hot-reload prompt, preventing premature 3-turn shutoff.
     if (lastWasUnpicked && askedByPersonTurn) {
-      unpickedCount -= 1
+      unpickedCount = Math.max(0, unpickedCount - 1)
     }
     lastWasUnpicked = false
     // Upstream v2.1.304 (#1014): the prompt stays up when a new turn starts.
@@ -1991,6 +2240,8 @@ function leftoverWatchDevModsFolder(
   }
 }
 
+export const createDevModsWatchForTesting = leftoverWatchDevModsFolder
+
 const DEFERRED_ENABLE_LINE =
   "Mod hot-reloading is on; this session's mods load when this turn ends."
 const WITHDRAWN_LINE =
@@ -2001,6 +2252,8 @@ async function leftoverStartWatch(): Promise<void> {
   try {
     const current = leftoverDevModsStage.get()
     if (current?.stage !== 'wanted') return
+    // #1952: Respect CLAUDE_CODE_PLUGIN_DIR_WATCH=0 to disable mod hot-reload watching.
+    if (isPluginDirWatchDisabledByEnv()) return
     // densable M: if(g()!==void 0)return — silent. S/dot is the watch refusal callback.
     if (leftoverPluginDevModsRefusalProbe() !== undefined) return
     if (!canAskPluginDevMods() && !canAutoEnablePluginDevMods()) {

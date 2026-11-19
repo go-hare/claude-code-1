@@ -21,12 +21,12 @@ describe('resolveCatalogFamilyModelString (official SZo)', () => {
     resetModelStringsForTestingOnly()
   })
 
-  test('fable maps to modelStrings.fable51 (densable 2.1.283)', () => {
+  test('fable maps to modelStrings.fable52 (densable 2.1.321 #1845)', () => {
     const strings = getModelStrings()
     expect(
       resolveCatalogFamilyModelString('fable', strings, 'firstParty'),
-    ).toBe(strings.fable51)
-    expect(strings.fable51).toBe(ALL_MODEL_CONFIGS.fable51.firstParty)
+    ).toBe(strings.fable52)
+    expect(strings.fable52).toBe(ALL_MODEL_CONFIGS.fable52.firstParty)
   })
 
   test('fable on gateway uses fable5 (283 aliases.per_provider)', () => {

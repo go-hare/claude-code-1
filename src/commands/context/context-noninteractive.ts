@@ -88,7 +88,51 @@ export async function call(
   }
 }
 
-function formatContextAsMarkdownTable(data: ContextData): string {
+const CONTEXT_TABLE_ROW_CAP = 10
+
+function boundContextRows<T extends { tokens: number }>(
+  items: readonly T[],
+  isBounded: boolean,
+  format: (tokens: number) => string = formatTokens,
+): { kept: readonly T[]; moreRow: string } {
+  if (!isBounded || items.length <= CONTEXT_TABLE_ROW_CAP) {
+    return { kept: items, moreRow: '' }
+  }
+  const sorted = [...items].sort((a, b) => b.tokens - a.tokens)
+  const rest = sorted.slice(CONTEXT_TABLE_ROW_CAP)
+  const restTokens = rest.reduce((sum, item) => sum + item.tokens, 0)
+  return {
+    kept: sorted.slice(0, CONTEXT_TABLE_ROW_CAP),
+    moreRow: `| and ${rest.length} more |  | ${format(restTokens)} |\n`,
+  }
+}
+
+function summarizeUnloadedMcpToolsByServer(
+  mcpTools: ContextData['mcpTools'],
+): Array<{ serverName: string; count: number; tokens: number }> {
+  const byServer = new Map<string, { count: number; tokens: number }>()
+  for (const tool of mcpTools) {
+    if (tool.isLoaded === false) {
+      const prev = byServer.get(tool.serverName)
+      byServer.set(tool.serverName, {
+        count: (prev?.count ?? 0) + 1,
+        tokens: (prev?.tokens ?? 0) + tool.tokens,
+      })
+    }
+  }
+  return Array.from(byServer, ([serverName, info]) => ({
+    serverName,
+    count: info.count,
+    tokens: info.tokens,
+  }))
+}
+
+export function formatContextAsMarkdownTable(
+  data: ContextData,
+  options?: { isBounded?: boolean; isTotalEstimated?: boolean },
+): string {
+  const isBounded = options?.isBounded ?? false
+  const isTotalEstimated = options?.isTotalEstimated ?? false
   const {
     categories,
     totalTokens,
@@ -156,6 +200,9 @@ function formatContextAsMarkdownTable(data: ContextData): string {
     }
   }
   output += '\n'
+  if (isTotalEstimated) {
+    output += 'This token count is an estimate.\n\n'
+  }
 
   // Main categories table
   const visibleCategories = categories.filter(
@@ -198,15 +245,38 @@ function formatContextAsMarkdownTable(data: ContextData): string {
     output += `\n`
   }
 
-  // MCP tools
-  if (mcpTools.length > 0) {
+  // MCP tools (official Dyr #1802: top-10 bounded + unloaded grouped by server)
+  const hasDeferredMcp =
+    isBounded &&
+    categories.some(cat => cat.isDeferred && cat.name.includes('MCP'))
+  const loadedMcpTools = hasDeferredMcp
+    ? mcpTools.filter(tool => tool.isLoaded !== false)
+    : mcpTools
+  if (loadedMcpTools.length > 0) {
+    const { kept, moreRow } = boundContextRows(loadedMcpTools, isBounded)
     output += `### MCP Tools\n\n`
     output += `| Tool | Server | Tokens |\n`
     output += `|------|--------|--------|\n`
-    for (const tool of mcpTools) {
+    for (const tool of kept) {
       output += `| ${tool.name} | ${tool.serverName} | ${formatTokens(tool.tokens)} |\n`
     }
+    output += moreRow
     output += `\n`
+  }
+
+  if (hasDeferredMcp) {
+    const byServer = summarizeUnloadedMcpToolsByServer(mcpTools)
+    if (byServer.length > 0) {
+      const { kept, moreRow } = boundContextRows(byServer, isBounded)
+      output += `### Other MCP tools, by server\n\n`
+      output += `| Server | Tools | Tokens if all were loaded |\n`
+      output += `|--------|-------|---------------------------|\n`
+      for (const row of kept) {
+        output += `| ${row.serverName} | ${row.count} | ${formatTokens(row.tokens)} |\n`
+      }
+      output += moreRow
+      output += `\n`
+    }
   }
 
   // System tools (ant-only)
@@ -241,10 +311,11 @@ function formatContextAsMarkdownTable(data: ContextData): string {
 
   // Custom agents
   if (agents.length > 0) {
+    const { kept, moreRow } = boundContextRows(agents, isBounded)
     output += `### Custom Agents\n\n`
     output += `| Agent Type | Source | Tokens |\n`
     output += `|------------|--------|--------|\n`
-    for (const agent of agents) {
+    for (const agent of kept) {
       let sourceDisplay: string
       switch (agent.source) {
         case 'projectSettings':
@@ -273,28 +344,36 @@ function formatContextAsMarkdownTable(data: ContextData): string {
       }
       output += `| ${agent.agentType} | ${sourceDisplay} | ${formatTokens(agent.tokens)} |\n`
     }
+    output += moreRow
     output += `\n`
   }
 
   // Memory files
   if (memoryFiles.length > 0) {
+    const { kept, moreRow } = boundContextRows(memoryFiles, isBounded)
     output += `### Memory Files\n\n`
     output += `| Type | Path | Tokens |\n`
     output += `|------|------|--------|\n`
-    for (const file of memoryFiles) {
+    for (const file of kept) {
       output += `| ${file.type} | ${file.path} | ${formatTokens(file.tokens)} |\n`
     }
+    output += moreRow
     output += `\n`
   }
 
   // Skills
   if (skills && skills.tokens > 0 && skills.skillFrontmatter.length > 0) {
+    const { kept, moreRow } = boundContextRows(
+      skills.skillFrontmatter,
+      isBounded,
+    )
     output += `### Skills\n\n`
     output += `| Skill | Source | Tokens |\n`
     output += `|-------|--------|--------|\n`
-    for (const skill of skills.skillFrontmatter) {
+    for (const skill of kept) {
       output += `| ${skill.name} | ${getSourceDisplayName(skill.source)} | ${formatTokens(skill.tokens)} |\n`
     }
+    output += moreRow
     output += `\n`
   }
 

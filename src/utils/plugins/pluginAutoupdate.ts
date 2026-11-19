@@ -102,6 +102,25 @@ async function getAutoUpdateEnabledMarketplaces(): Promise<Set<string>> {
 }
 
 /**
+ * #1861 (2.1.321): Deduplicate plugin installations by scope while preserving
+ * first-seen order so multiple worktrees or sub-folders of the same repository
+ * do not trigger duplicate downloads/updates in a single auto-update pass.
+ */
+export function dedupeInstallationsByScope(
+  installations: ReadonlyArray<{ scope: PluginScope; projectPath?: string }>,
+): PluginScope[] {
+  const seen = new Set<PluginScope>()
+  const scopes: PluginScope[] = []
+  for (const { scope } of installations) {
+    if (!seen.has(scope)) {
+      seen.add(scope)
+      scopes.push(scope)
+    }
+  }
+  return scopes
+}
+
+/**
  * Update a single plugin's installations.
  * Returns the plugin ID if any installation was updated, null otherwise.
  */
@@ -111,21 +130,36 @@ async function updatePlugin(
 ): Promise<string | null> {
   let wasUpdated = false
 
-  for (const { scope } of installations) {
+  // #1861: Deduplicate by scope so multiple worktrees of a repo update once per scope
+  for (const scope of dedupeInstallationsByScope(installations)) {
     try {
-      // densable: background marketplace update never re-runs command sources
+      // densable: background marketplace update never re-runs command sources;
+      // #1749: updatePluginOp resolves and installs any newly added plugin dependencies.
       const result = await updatePluginOp(pluginId, scope, {
         skipCommandSources: true,
       })
 
       if (result.success && !result.alreadyUpToDate) {
         wasUpdated = true
+        const depsSuffix =
+          result.installedDependencies &&
+          result.installedDependencies.length > 0
+            ? ` (installed dependencies: ${result.installedDependencies.join(', ')})`
+            : ''
         logForDebugging(
-          `Plugin autoupdate: updated ${pluginId} from ${result.oldVersion} to ${result.newVersion}`,
+          `Plugin autoupdate: updated ${pluginId} from ${result.oldVersion} to ${result.newVersion}${depsSuffix}`,
         )
       } else if (result.skipReason === 'entry_helper_deferred') {
         logForDebugging(
           `Plugin autoupdate: skipped ${pluginId}: ${result.message}`,
+        )
+      } else if (
+        result.failureCode === 'dependencies_not_installed' ||
+        result.failureCode === 'dependencies_not_screened'
+      ) {
+        logForDebugging(
+          `Plugin autoupdate: dependency step failed for ${pluginId} (${result.failureCode}): ${result.message}`,
+          { level: 'warn' },
         )
       } else if (!result.alreadyUpToDate) {
         logForDebugging(

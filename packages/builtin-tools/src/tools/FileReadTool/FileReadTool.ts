@@ -34,6 +34,10 @@ import {
 } from 'src/skills/loadSkillsDir.js'
 import type { ToolUseContext } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
+import {
+  checkUnchangedImageRereadLimit,
+  UnchangedImageRereadLimitError,
+} from 'src/utils/subagentCacheEvict.js'
 import { getCwd } from 'src/utils/cwd.js'
 import { remoteHostForwardRefusal } from 'src/services/tools/remoteToolHost.js'
 import { getClaudeConfigHomeDir, isBareMode } from 'src/utils/envUtils.js'
@@ -597,6 +601,16 @@ type OutputSchema = ReturnType<typeof outputSchema>
 
 export type Output = z.infer<OutputSchema>
 
+export {
+  checkUnchangedImageRereadLimit,
+  noteImageMediaStripped,
+  resetImageRereadState,
+  UNCHANGED_IMAGE_REREAD_LIMIT,
+  UNCHANGED_IMAGE_REREAD_LIMIT_MESSAGE,
+  UNCHANGED_IMAGE_REREAD_REFUSAL_REASON,
+  UnchangedImageRereadLimitError,
+} from 'src/utils/subagentCacheEvict.js'
+
 export const FileReadTool = buildTool({
   name: FILE_READ_TOOL_NAME,
   searchHint: 'read files, images, PDFs, notebooks',
@@ -926,7 +940,7 @@ export const FileReadTool = buildTool({
         if (!isENOENT(error)) throw error
       }
       try {
-        return await callInner(
+        const readResult = await callInner(
           file_path,
           fullFilePath,
           opened?.ioPath ?? fullFilePath,
@@ -943,6 +957,22 @@ export const FileReadTool = buildTool({
           room,
           allowLargeRoom,
         )
+        // Official 2.1.321 #1929 (`O_o`): refuse unchanged image re-reads past limit
+        if (
+          readResult.data.type === 'image' &&
+          parentMessage !== undefined &&
+          !(parentMessage as { isVirtual?: boolean }).isVirtual
+        ) {
+          const limitMessage = checkUnchangedImageRereadLimit(
+            context.agentId,
+            fullFilePath,
+            readResult.data.file.base64,
+          )
+          if (limitMessage !== undefined) {
+            throw new UnchangedImageRereadLimitError(limitMessage)
+          }
+        }
+        return readResult
       } finally {
         await opened?.close()
       }

@@ -7,6 +7,7 @@
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/metadata.js'
 import { spawnCliRelaunch } from '../../utils/cliRelaunch.js'
 import { AGENT_VIEW_RELAUNCH_ENV_KEY } from '../../utils/residualFinalEnvGates.js'
+import { getScreenReaderChildEnv } from '../../utils/screenReaderGate.js'
 import { flagArgPair } from '../../utils/tuiRelaunchCarry.js'
 
 export type FleetDispatchDefaults = {
@@ -267,6 +268,28 @@ function writeSwitchingPreSpawnMessage(): void {
 }
 
 /**
+ * Build child env for `claude agents` update relaunch.
+ * Official #1890 (`lp` `...Gz()`): preserve `CLAUDE_AX_SCREEN_READER=1` when
+ * screen-reader mode is active so accessibility mode survives relaunch/attach.
+ */
+export function buildAgentViewRelaunchEnv(input: {
+  mode: 'manual' | 'auto'
+  baseEnv?: NodeJS.ProcessEnv
+  screenReaderEnv?: Readonly<Record<string, string>>
+  nowMs?: number
+}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...(input.baseEnv ?? process.env),
+    [AGENT_VIEW_RELAUNCH_ENV_KEY]: '1',
+    ...(input.screenReaderEnv ?? getScreenReaderChildEnv()),
+  }
+  if (input.mode === 'auto') {
+    env[AGENTS_AUTO_RELAUNCHED_AT_ENV] = String(input.nowMs ?? Date.now())
+  }
+  return env
+}
+
+/**
  * densable sf — relaunch `claude agents` with cleared dispatch defaults.
  */
 export async function relaunchAgentsView(input: {
@@ -275,9 +298,19 @@ export async function relaunchAgentsView(input: {
   defaults?: FleetDispatchDefaults
   typedAgent?: string
   extraArgs?: string[]
+  /** Official #1764 + #1904 (`onShutdownClaimed: handOverDraft`). */
+  handOverDraft?: () => Promise<void> | undefined | void
   onError?: (msg: string) => void
 }): Promise<void> {
-  const { mode, cwdFilter, defaults, typedAgent, extraArgs, onError } = input
+  const {
+    mode,
+    cwdFilter,
+    defaults,
+    typedAgent,
+    extraArgs,
+    handOverDraft,
+    onError,
+  } = input
 
   if (getActiveProjectConfigRoot() !== null) {
     if (mode === 'manual') {
@@ -327,13 +360,11 @@ export async function relaunchAgentsView(input: {
     ...serializeFleetDispatchDefaults(cleared),
   ]
 
-  const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    [AGENT_VIEW_RELAUNCH_ENV_KEY]: '1',
-  }
-  if (mode === 'auto') {
-    env[AGENTS_AUTO_RELAUNCHED_AT_ENV] = String(Date.now())
-  }
+  const env = buildAgentViewRelaunchEnv({ mode })
+
+  // Official #1764 + #1904: hand over dirty/non-empty draft right before spawn;
+  // an untouched empty view does not erase another view's saved draft.
+  await handOverDraft?.()
 
   writeSwitchingPreSpawnMessage()
   const result = spawnCliRelaunch({ args, env })

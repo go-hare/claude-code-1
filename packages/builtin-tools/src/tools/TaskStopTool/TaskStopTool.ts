@@ -44,6 +44,26 @@ type OutputSchema = ReturnType<typeof outputSchema>
 
 export type Output = z.infer<OutputSchema>
 
+/**
+ * Official 2.1.321 #1956:
+ * Truncate commands over 1,000 characters in TaskStop results / notifications
+ * to head (500 chars) + tail (300 chars) to save model context.
+ */
+export const TASK_STOP_COMMAND_MAX_CHARS = 1000
+export const TASK_STOP_COMMAND_HEAD_CHARS = 500
+export const TASK_STOP_COMMAND_TAIL_CHARS = 300
+
+export function truncateTaskCommandForDisplay(
+  command: string | undefined,
+): string | undefined {
+  if (command === undefined || command.length <= TASK_STOP_COMMAND_MAX_CHARS) {
+    return command
+  }
+  const omitted =
+    command.length - TASK_STOP_COMMAND_HEAD_CHARS - TASK_STOP_COMMAND_TAIL_CHARS
+  return `${command.slice(0, TASK_STOP_COMMAND_HEAD_CHARS)}…[${omitted} chars omitted]…${command.slice(-TASK_STOP_COMMAND_TAIL_CHARS)}`
+}
+
 export const TaskStopTool = buildTool({
   name: TASK_STOP_TOOL_NAME,
   searchHint: 'kill a running background task',
@@ -179,14 +199,15 @@ export const TaskStopTool = buildTool({
       note?: string
     }
 
+    const displayCommand = truncateTaskCommandForDisplay(result.command)
     return {
       data: {
         message: result.note
           ? `Task ${result.taskId} ${result.note}`
-          : `Successfully stopped task: ${result.taskId} (${result.command})`,
+          : `Successfully stopped task: ${result.taskId} (${displayCommand})`,
         task_id: result.taskId,
         task_type: result.taskType,
-        command: result.command,
+        command: displayCommand,
       },
     }
   },

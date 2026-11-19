@@ -19,6 +19,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../services/analytics/index.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { roughTokenCountEstimation } from '../services/tokenEstimation.js'
 import type { Command, PromptCommand } from '../types/command.js'
 import {
@@ -34,6 +35,7 @@ import {
   parseEffortValue,
 } from '../utils/effort.js'
 import { getCwd } from '../utils/cwd.js'
+import { getCurrentWorktreeSession } from '../utils/worktree.js'
 import {
   getClaudeConfigHomeDir,
   isBareMode,
@@ -63,6 +65,7 @@ import {
 } from '../utils/markdownConfigLoader.js'
 import { parseUserSpecifiedModel } from '../utils/model/model.js'
 import { executeShellCommandsInPrompt } from '../utils/promptShellExecution.js'
+import { SandboxManager } from '../utils/sandbox/sandbox-adapter.js'
 import type { SettingSource } from '../utils/settings/constants.js'
 import { isSettingSourceEnabled } from '../utils/settings/constants.js'
 import { getManagedFilePath } from '../utils/settings/managedPath.js'
@@ -419,6 +422,20 @@ export function createSkillCommand({
       finalShell = undefined
       finalPaths = undefined
     }
+  }
+
+  // #1781: When CLAUDE_CODE_IGNORE_PERSISTED_TRUST is set (e.g. self-hosted
+  // runner with `--trust-workspace false`), do not register frontmatter hooks
+  // from workspace/project skills.
+  if (
+    finalHooks !== undefined &&
+    isEnvTruthy(process.env.CLAUDE_CODE_IGNORE_PERSISTED_TRUST) &&
+    (source === 'projectSettings' || source === 'localSettings')
+  ) {
+    logForDebugging(
+      `[skills] Skipping frontmatter hooks for skill '${skillName}': CLAUDE_CODE_IGNORE_PERSISTED_TRUST is set`,
+    )
+    finalHooks = undefined
   }
 
   return {
@@ -821,7 +838,24 @@ export const getSkillDirCommands = memoize(
   async (cwd: string): Promise<Command[]> => {
     const userSkillsDir = join(getClaudeConfigHomeDir(), 'skills')
     const managedSkillsDir = join(getManagedFilePath(), '.claude', 'skills')
-    const projectSkillsDirs = getProjectDirsUpToHome('skills', cwd)
+    const extensionRoot = getCurrentWorktreeSession()?.extensionRoot
+    const hasDistinctExtensionRoot =
+      extensionRoot !== undefined && resolve(extensionRoot) !== resolve(cwd)
+    const rawProjectSkillsDirs = hasDistinctExtensionRoot
+      ? [
+          ...getProjectDirsUpToHome('skills', cwd),
+          ...getProjectDirsUpToHome('skills', extensionRoot),
+        ]
+      : getProjectDirsUpToHome('skills', cwd)
+    const seenProjectDirs = new Set<string>()
+    const projectSkillsDirs: string[] = []
+    for (const dir of rawProjectSkillsDirs) {
+      const normalized = resolve(dir)
+      if (!seenProjectDirs.has(normalized)) {
+        seenProjectDirs.add(normalized)
+        projectSkillsDirs.push(dir)
+      }
+    }
 
     logForDebugging(
       `Loading skills from: managed=${managedSkillsDir}, user=${userSkillsDir}, project=[${projectSkillsDirs.join(', ')}]`,
@@ -870,6 +904,7 @@ export const getSkillDirCommands = memoize(
       projectSkillsNested,
       additionalSkillsNested,
       legacyCommands,
+      extensionRootLegacyCommands,
     ] = await Promise.all([
       (() => {
         try {
@@ -911,6 +946,9 @@ export const getSkillDirCommands = memoize(
       // here when skills are locked — these ARE skills, regardless of the
       // directory they load from.
       skillsLocked ? Promise.resolve([]) : loadSkillsFromCommandsDir(cwd),
+      !skillsLocked && hasDistinctExtensionRoot
+        ? loadSkillsFromCommandsDir(extensionRoot)
+        : Promise.resolve([]),
     ])
 
     // Flatten and combine all skills
@@ -920,6 +958,7 @@ export const getSkillDirCommands = memoize(
       ...projectSkillsNested.flat(),
       ...additionalSkillsNested.flat(),
       ...legacyCommands,
+      ...extensionRootLegacyCommands,
       ...getInMemorySyncedSkills().map(skill => ({
         skill,
         filePath: '',
@@ -1024,6 +1063,8 @@ export const getSkillDirCommands = memoize(
 
     return unconditionalSkills
   },
+  (cwd: string) =>
+    `${cwd}\0${getCurrentWorktreeSession()?.extensionRoot ?? ''}`,
 )
 
 export const HOST_SKILL_CATALOG_DIR = '/mnt/skills/public'
@@ -1199,6 +1240,88 @@ const dynamicSkillDirs = new Set<string>()
 const deferredSkillDirs = new Map<string, string>()
 const dynamicSkills = new Map<string, Command>()
 
+// #1812 (2.1.319): Withhold nested `.claude/skills` discovery for the rest of
+// the session once the Bash sandbox has been enabled (gated on
+// `tengu_iridescent_feather`).
+const IRIDESCENT_FEATHER_FLAG = 'tengu_iridescent_feather'
+let nestedDiscoveryWithheld = false
+
+/**
+ * #1812: Returns true when nested `.claude/skills` discovery has been latched
+ * as withheld in this session because Bash sandboxing was enabled.
+ */
+export function isNestedSkillDiscoveryWithheld(): boolean {
+  return (
+    nestedDiscoveryWithheld &&
+    getFeatureValue_CACHED_MAY_BE_STALE(IRIDESCENT_FEATHER_FLAG, true)
+  )
+}
+
+/**
+ * #1812: Checks whether nested `.claude/skills` auto-loading should be
+ * suppressed. Latches `nestedDiscoveryWithheld = true` for the session once
+ * `SandboxManager.isSandboxingEnabled()` is observed true, so turning the
+ * sandbox off mid-session still cannot load skills written while sandboxed.
+ */
+export function shouldWithholdNestedSkillDiscovery(): boolean {
+  if (
+    !(nestedDiscoveryWithheld || SandboxManager.isSandboxingEnabled()) ||
+    !getFeatureValue_CACHED_MAY_BE_STALE(IRIDESCENT_FEATHER_FLAG, true)
+  ) {
+    return false
+  }
+  if (!nestedDiscoveryWithheld) {
+    nestedDiscoveryWithheld = true
+    logForDebugging(
+      '[skills] Skills in .claude/skills folders below the folder Claude Code started in or was moved to with /cd will not load until Claude Code restarts, even if the Bash sandbox is turned off, because sandboxed commands can write to those folders. To use such a skill, start Claude Code in its folder or /cd there.',
+    )
+  }
+  return true
+}
+
+/** Test-only reset for `#1812` latched nested-discovery state. */
+export function resetNestedDiscoveryWithheldForTesting(): void {
+  nestedDiscoveryWithheld = false
+}
+
+function foldPathForPrefixMatch(p: string): string {
+  const normalized = resolve(p)
+  const folded =
+    process.platform === 'win32' || process.platform === 'darwin'
+      ? normalized.toLowerCase()
+      : normalized
+  return folded.endsWith(pathSep) ? folded : folded + pathSep
+}
+
+/**
+ * #1942 (2.1.321): Build normalized prefixes for `~/.claude/plugins` (both raw
+ * and realpath) so nested `.claude/skills` discovery never walks into or loads
+ * skills from installed/cached plugin trees.
+ */
+async function getPluginOwnedPrefixes(): Promise<string[]> {
+  const configHome = getClaudeConfigHomeDir()
+  const rawPluginsDir = join(configHome, 'plugins')
+  const prefixes = new Set<string>([foldPathForPrefixMatch(rawPluginsDir)])
+  try {
+    const resolvedConfigHome = await realpath(configHome)
+    prefixes.add(foldPathForPrefixMatch(join(resolvedConfigHome, 'plugins')))
+  } catch {
+    // config dir may not exist yet
+  }
+  try {
+    const resolvedPlugins = await realpath(rawPluginsDir)
+    prefixes.add(foldPathForPrefixMatch(resolvedPlugins))
+  } catch {
+    // plugins dir may not exist yet
+  }
+  return [...prefixes]
+}
+
+function isUnderPrefixes(dirPath: string, prefixes: string[]): boolean {
+  const folded = foldPathForPrefixMatch(dirPath)
+  return prefixes.some(prefix => folded.startsWith(prefix))
+}
+
 // --- Conditional skills (path-filtered) ---
 
 // Skills with paths frontmatter that haven't been activated yet
@@ -1267,18 +1390,39 @@ export async function discoverSkillDirsForPaths(
   cwd: string,
   trustedCwdInfo?: { cwd: string; workTree: string },
 ): Promise<string[]> {
+  // #1812: Suppress nested `.claude/skills` auto-loading when Bash sandbox is on.
+  if (shouldWithholdNestedSkillDiscovery()) {
+    return []
+  }
+
   const fs = getFsImplementation()
   const resolvedCwd = cwd.endsWith(pathSep) ? cwd.slice(0, -1) : cwd
   const newDirs: string[] = []
+  // #1942: Exclude `~/.claude/plugins` from nested `.claude/skills` discovery.
+  const pluginOwnedPrefixes = await getPluginOwnedPrefixes()
 
   for (const filePath of filePaths) {
     // Start from the file's parent directory
     let currentDir = dirname(filePath)
 
+    if (isUnderPrefixes(currentDir, pluginOwnedPrefixes)) {
+      logForDebugging(
+        '[skills] Skipped the nested skills search for a file in a sync-owned or plugin folder',
+      )
+      continue
+    }
+
     // Walk up to cwd but NOT including cwd itself
     // CWD-level skills are already loaded at startup, so we only discover nested ones
     // Use prefix+separator check to avoid matching /project-backup when cwd is /project
     while (currentDir.startsWith(resolvedCwd + pathSep)) {
+      if (isUnderPrefixes(currentDir, pluginOwnedPrefixes)) {
+        const parent = dirname(currentDir)
+        if (parent === currentDir) break
+        currentDir = parent
+        continue
+      }
+
       const skillDir = join(currentDir, '.claude', 'skills')
       const deferredAt = deferredSkillDirs.get(skillDir)
       if (deferredAt !== undefined && deferredAt !== resolvedCwd) {
@@ -1293,6 +1437,21 @@ export async function discoverSkillDirsForPaths(
         dynamicSkillDirs.add(skillDir)
         try {
           await fs.stat(skillDir)
+          // #1942: Also verify the resolved symlink target isn't inside ~/.claude/plugins
+          let resolvedSkillDir: string | undefined
+          try {
+            resolvedSkillDir = await realpath(skillDir)
+          } catch {
+            // Keep raw path if realpath fails
+          }
+          if (
+            isUnderPrefixes(resolvedSkillDir ?? skillDir, pluginOwnedPrefixes)
+          ) {
+            logForDebugging(
+              `[skills] Skipped sync-owned skills dir (resolved): ${skillDir}`,
+            )
+            continue
+          }
           // Skills dir exists. Before loading, check if the containing dir
           // is gitignored — blocks e.g. node_modules/pkg/.claude/skills from
           // loading silently.

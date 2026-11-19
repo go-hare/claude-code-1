@@ -227,44 +227,57 @@ describe('verified WebSocket destination (densable ue @194294560)', () => {
     expect(resolved.tls).toEqual({ ca: 'trusted-ca' })
   })
 
-  test('configured proxy skips local DNS lookup and dials hostname directly via CONNECT', async () => {
-    const failingLookup = (async () => {
-      throw new Error('local DNS unavailable in proxy-only sandbox')
-    }) as unknown as Parameters<typeof resolveMonitorWsUrl>[2]
-    const resolved = await resolveMonitorWsUrl(
-      'wss://watch.example:8443/events',
-      { proxy: 'http://127.0.0.1:3128', tls: { ca: 'corp-ca' } },
-      failingLookup,
-    )
-    expect(resolved.url).toBe('wss://watch.example:8443/events')
-    expect(resolved.headers).toBeUndefined()
-    expect(resolved.tls).toEqual({ ca: 'corp-ca' })
-
-    // Verify end-to-end proxy CONNECT sends hostname:port (never raw IP)
-    const connectAuthorities: string[] = []
-    const proxy = createServer((_req, res) => {
-      res.writeHead(502).end()
-    })
-    proxy.on('connect', (req, downstream) => {
-      connectAuthorities.push(req.url ?? '')
-      downstream.write('HTTP/1.1 403 Forbidden\r\n\r\n')
-      downstream.destroy()
-    })
-    await new Promise<void>(resolve => proxy.listen(0, '127.0.0.1', resolve))
-    const proxyPort = (proxy.address() as { port: number }).port
-    const client = new WebSocket(resolved.url, undefined, {
-      proxy: `http://127.0.0.1:${proxyPort}`,
-    } as WebSocket.ClientOptions)
-    client.on('error', () => {})
+  test('configured proxy delegates DNS only when CLAUDE_CODE_PROXY_RESOLVES_HOSTS is set and local DNS returns ENOTFOUND/EAI_AGAIN (#1747)', async () => {
+    const prev = process.env.CLAUDE_CODE_PROXY_RESOLVES_HOSTS
+    process.env.CLAUDE_CODE_PROXY_RESOLVES_HOSTS = '1'
     try {
-      await new Promise<void>(resolve => {
-        client.once('open', () => resolve())
-        client.once('close', () => resolve())
+      const failingLookup = (async () => {
+        throw Object.assign(
+          new Error('local DNS unavailable in proxy-only sandbox'),
+          {
+            code: 'ENOTFOUND',
+          },
+        )
+      }) as unknown as Parameters<typeof resolveMonitorWsUrl>[2]
+      const resolved = await resolveMonitorWsUrl(
+        'wss://watch.example:8443/events',
+        { proxy: 'http://127.0.0.1:3128', tls: { ca: 'corp-ca' } },
+        failingLookup,
+      )
+      expect(resolved.url).toBe('wss://watch.example:8443/events')
+      expect(resolved.headers).toBeUndefined()
+      expect(resolved.tls).toEqual({ ca: 'corp-ca' })
+
+      // Verify end-to-end proxy CONNECT sends hostname:port (never raw IP)
+      const connectAuthorities: string[] = []
+      const proxy = createServer((_req, res) => {
+        res.writeHead(502).end()
       })
-      expect(connectAuthorities).toEqual(['watch.example:8443'])
+      proxy.on('connect', (req, downstream) => {
+        connectAuthorities.push(req.url ?? '')
+        downstream.write('HTTP/1.1 403 Forbidden\r\n\r\n')
+        downstream.destroy()
+      })
+      await new Promise<void>(resolve => proxy.listen(0, '127.0.0.1', resolve))
+      const proxyPort = (proxy.address() as { port: number }).port
+      const client = new WebSocket(resolved.url, undefined, {
+        proxy: `http://127.0.0.1:${proxyPort}`,
+      } as WebSocket.ClientOptions)
+      client.on('error', () => {})
+      try {
+        await new Promise<void>(resolve => {
+          client.once('open', () => resolve())
+          client.once('close', () => resolve())
+        })
+        expect(connectAuthorities).toEqual(['watch.example:8443'])
+      } finally {
+        client.terminate()
+        proxy.close()
+      }
     } finally {
-      client.terminate()
-      proxy.close()
+      if (prev === undefined)
+        delete process.env.CLAUDE_CODE_PROXY_RESOLVES_HOSTS
+      else process.env.CLAUDE_CODE_PROXY_RESOLVES_HOSTS = prev
     }
   })
 

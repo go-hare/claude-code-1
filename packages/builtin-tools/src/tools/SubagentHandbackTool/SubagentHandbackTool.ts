@@ -17,8 +17,13 @@ import {
   frameHandbackReport,
   indentHandbackReport,
   sanitizeCrossSessionDisplayName,
+  SUBAGENT_HANDBACK_REPORT_MARKER,
   wrapAgentMessageEnvelope,
 } from 'src/utils/crossSessionMessage.js'
+import {
+  markHandbackLaterReportRefused,
+  parseHandbackBodyParts,
+} from '../AgentTool/agentToolUtils.js'
 import { getAgentContext } from 'src/utils/agentContext.js'
 import {
   formatHandbackClassifierNote,
@@ -79,6 +84,37 @@ function resolveHandbackFrom(
     // task registry optional in tests
   }
   return { from: senderTaskId, displayName: senderTaskId }
+}
+
+function extractHandbackOriginParts(escapedBody: string): {
+  note?: string
+  report: string
+} {
+  const lines = escapedBody.split('\n')
+  const markerIdx = lines.indexOf(SUBAGENT_HANDBACK_REPORT_MARKER)
+  if (
+    markerIdx !== -1 &&
+    lines.every((line, idx) => idx === markerIdx || line.startsWith('  '))
+  ) {
+    const normalized = lines
+      .map((line, idx) =>
+        idx === markerIdx ? '--- subagent report ---' : line,
+      )
+      .join('\n')
+    const parsed = parseHandbackBodyParts(normalized)
+    const unindentedNote =
+      markerIdx > 0
+        ? lines
+            .slice(0, markerIdx)
+            .map(line => (line.startsWith('  ') ? line.slice(2) : line))
+            .join('\n')
+        : undefined
+    return {
+      ...(unindentedNote !== undefined ? { note: unindentedNote } : {}),
+      report: parsed.report,
+    }
+  }
+  return parseHandbackBodyParts(escapedBody)
 }
 
 export const SubagentHandbackTool = buildTool({
@@ -192,6 +228,8 @@ export const SubagentHandbackTool = buildTool({
     const alreadyDelivered =
       getHandbackDelivery(senderTaskId, recipient) !== undefined
     if (alreadyDelivered) {
+      // #1791 (official `tr` -> `Mba`): record refused repeat handback report
+      markHandbackLaterReportRefused(senderTaskId)
       return {
         data: {
           success: false,
@@ -212,6 +250,11 @@ export const SubagentHandbackTool = buildTool({
     const envelope = wrapAgentMessageEnvelope(from, bodyText)
     const flagged =
       g || getHandbackSessionContract(senderTaskId)?.flagged === true
+    // #1732 (official `pqr(Be)`): attach parsed handbackNote & handbackReportText
+    // onto peer origin so display surfaces render note and report separately.
+    const bodyParts = extractHandbackOriginParts(
+      escapeAgentMessageBody(bodyText),
+    )
     // densable T: peer origin has no lineage field. Framing still treats
     // senderTaskId as the descendant lane.
     const origin = {
@@ -222,6 +265,8 @@ export const SubagentHandbackTool = buildTool({
       body: escapeAgentMessageBody(bodyText),
       handback: true as const,
       ...(flagged ? { flagged: true as const } : {}),
+      ...(bodyParts.note !== undefined ? { handbackNote: bodyParts.note } : {}),
+      handbackReportText: bodyParts.report,
     }
     const mainId = getMainThreadAgentId()
     const getTask = (id: string) => {
@@ -252,6 +297,8 @@ export const SubagentHandbackTool = buildTool({
       }
     }
     if (getHandbackDelivery(senderTaskId, deliverTo) !== undefined) {
+      // #1791 (official `tr` -> `Mba`): record refused repeat handback report
+      markHandbackLaterReportRefused(senderTaskId)
       return {
         data: {
           success: false,

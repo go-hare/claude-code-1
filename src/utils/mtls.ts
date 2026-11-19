@@ -1,13 +1,15 @@
-import { createPrivateKey, X509Certificate } from 'crypto'
+import { createHash, createPrivateKey, X509Certificate } from 'crypto'
 import type * as https from 'https'
 import { Agent as HttpsAgent } from 'https'
 import memoize from 'lodash-es/memoize.js'
+import * as net from 'net'
 import * as tls from 'tls'
 import type * as undici from 'undici'
-import { getCACertificates } from './caCerts.js'
+import { clearCACertsCache, getCACertificates } from './caCerts.js'
 import { logForDebugging } from './debug.js'
 import { getFsImplementation } from './fsOperations.js'
 import { isEnvTruthy } from './envUtils.js'
+import { isEssentialTrafficOnly } from './privacyLevel.js'
 
 export type MTLSConfig = {
   cert?: string
@@ -895,4 +897,502 @@ export function probeCrossSignedRootPairs(
     }
   }
   return pairs
+}
+
+// ---------------------------------------------------------------------------
+// Official 2.1.321 (#1931): precomputed root cert SHA-256 table (`knownHashes` / `knownRootOf`)
+// Skips per-cert X509Certificate parsing for known bundled/system root PEMs.
+// ---------------------------------------------------------------------------
+
+const PEM_CERT_BODY_RE =
+  /^-----BEGIN CERTIFICATE-----\r?\n([\s\S]+?)\r?\n-----END CERTIFICATE-----\r?\n?$/
+
+export type KnownRootCertEntry = {
+  hashes: {
+    certificate: string
+    key: string
+    keyReadThrew: boolean
+  }
+  expires: number
+}
+
+export class KnownRootCertTable {
+  readonly ofBlock = new Map<string, KnownRootCertEntry | undefined>()
+  readonly ofBundledRoot = new Map<string, string>()
+  private readonly byPem = new Map<string, KnownRootCertEntry | undefined>()
+  private readonly knownBySha256 = new Map<
+    string,
+    { key: string; expires: number }
+  >()
+
+  registerKnownRoots(pems: readonly string[]): void {
+    for (const pem of pems) {
+      if (this.byPem.has(pem)) continue
+      this.byPem.set(pem, undefined)
+      if (pem.length > 65536) continue
+      const b64 = PEM_CERT_BODY_RE.exec(pem)?.[1]?.replace(/[\r\n]/g, '')
+      if (!b64) continue
+      const der = Buffer.from(b64, 'base64')
+      if (der.toString('base64') !== b64) continue
+      try {
+        const certHash = createHash('sha256').update(der).digest('hex')
+        let known = this.knownBySha256.get(certHash)
+        if (!known) {
+          const parsed = new X509Certificate(der)
+          const keyDer = parsed.publicKey.export({
+            type: 'spki',
+            format: 'der',
+          })
+          const keyHash = createHash('sha256').update(keyDer).digest('hex')
+          const expires = new Date(parsed.validTo).getTime()
+          known = {
+            key: keyHash,
+            expires: Number.isNaN(expires) ? Number.POSITIVE_INFINITY : expires,
+          }
+          this.knownBySha256.set(certHash, known)
+        }
+        this.byPem.set(pem, {
+          hashes: {
+            certificate: certHash,
+            key: known.key,
+            keyReadThrew: false,
+          },
+          expires: known.expires,
+        })
+      } catch {
+        // Leave undefined so caller falls back to direct X509Certificate parsing
+      }
+    }
+  }
+
+  /**
+   * Look up a PEM certificate in the precomputed SHA-256 table.
+   * For certificates not yet indexed by exact PEM string, hashes raw DER
+   * bytes directly without constructing `X509Certificate`.
+   */
+  knownRootOf(pem: string): KnownRootCertEntry | undefined {
+    if (this.byPem.has(pem)) {
+      return this.byPem.get(pem)
+    }
+    if (pem.length > 65536) {
+      this.byPem.set(pem, undefined)
+      return undefined
+    }
+    const b64 = PEM_CERT_BODY_RE.exec(pem)?.[1]?.replace(/[\r\n]/g, '')
+    if (!b64) {
+      this.byPem.set(pem, undefined)
+      return undefined
+    }
+    const der = Buffer.from(b64, 'base64')
+    if (der.toString('base64') !== b64) {
+      this.byPem.set(pem, undefined)
+      return undefined
+    }
+    const certHash = createHash('sha256').update(der).digest('hex')
+    const known = this.knownBySha256.get(certHash)
+    if (!known) {
+      this.byPem.set(pem, undefined)
+      return undefined
+    }
+    const entry: KnownRootCertEntry = {
+      hashes: { certificate: certHash, key: known.key, keyReadThrew: false },
+      expires: known.expires,
+    }
+    this.byPem.set(pem, entry)
+    return entry
+  }
+
+  readBundledRoots(): readonly string[] {
+    const roots = tls.rootCertificates
+    this.registerKnownRoots(roots)
+    return roots
+  }
+
+  readSystemStore(): string[] | undefined {
+    const getCACerts = (
+      tls as typeof tls & { getCACertificates?: (type: string) => string[] }
+    ).getCACertificates
+    const system = getCACerts?.('system')
+    if (system) {
+      for (const pem of system) {
+        this.knownRootOf(pem)
+      }
+    }
+    return system
+  }
+
+  clear(): void {
+    this.byPem.clear()
+    this.ofBlock.clear()
+    this.ofBundledRoot.clear()
+    this.knownBySha256.clear()
+  }
+}
+
+export const knownHashes = new KnownRootCertTable()
+
+export function knownRootOf(pem: string): KnownRootCertEntry | undefined {
+  return knownHashes.knownRootOf(pem)
+}
+
+// ---------------------------------------------------------------------------
+// Official 2.1.319 (#1784 & #1817): `api_served_chain_read` TLS handshake
+// automatic certificate repair (even when CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+// is set after a model request failure; skips when only ALL_PROXY is set).
+// ---------------------------------------------------------------------------
+
+export type ApiServedChainReadOutcome =
+  | 'restored'
+  | 'nothing'
+  | 'unread'
+  | 'proxy_variable_unusable'
+  | 'proxy_not_supported'
+  | 'skipped'
+
+const API_SERVED_CHAIN_READ_TIMEOUT_MS = 5_000
+const TLS_CERT_ERROR_CODES = new Set([
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'UNABLE_TO_GET_ISSUER_CERT',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'CERT_UNTRUSTED',
+])
+
+export function isTlsCertificateVerificationError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const err = error as {
+    code?: unknown
+    cause?: { code?: unknown }
+    message?: unknown
+  }
+  const code =
+    typeof err.code === 'string'
+      ? err.code
+      : typeof err.cause?.code === 'string'
+        ? err.cause.code
+        : undefined
+  if (code && TLS_CERT_ERROR_CODES.has(code)) return true
+  const msg = typeof err.message === 'string' ? err.message : ''
+  return /UNABLE_TO_VERIFY_LEAF_SIGNATURE|UNABLE_TO_GET_ISSUER_CERT|SELF_SIGNED_CERT_IN_CHAIN|CERT_UNTRUSTED|unable to verify the first certificate|unable to get local issuer certificate/i.test(
+    msg,
+  )
+}
+
+/**
+ * Official 2.1.319 (#1817): check proxy env vars for `api_served_chain_read`.
+ * Only `HTTPS_PROXY` / `https_proxy` is usable for automatic cert repair;
+ * when `ALL_PROXY` / `all_proxy` (or `HTTP_PROXY` only) is the only proxy var
+ * set, skip auto-repair and instruct the user to set `HTTPS_PROXY`.
+ */
+export function resolveCertRepairProxyUrl(
+  targetUrl: string,
+  env: NodeJS.ProcessEnv = process.env,
+):
+  | { kind: 'direct' }
+  | { kind: 'proxy'; url: URL }
+  | { kind: 'unusable' }
+  | { kind: 'unsupported' } {
+  const httpsProxy = env.https_proxy || env.HTTPS_PROXY
+  const anyOtherProxy = Boolean(
+    env.http_proxy || env.HTTP_PROXY || env.ALL_PROXY || env.all_proxy,
+  )
+  if (!httpsProxy) {
+    if (anyOtherProxy) {
+      return { kind: 'unusable' }
+    }
+    return { kind: 'direct' }
+  }
+  try {
+    // Respect NO_PROXY if set
+    const { shouldBypassProxy } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./proxy.js') as typeof import('./proxy.js')
+    if (shouldBypassProxy(targetUrl)) {
+      return { kind: 'direct' }
+    }
+  } catch {
+    // ignore proxy bypass lookup errors
+  }
+  let parsed: URL
+  try {
+    parsed = new URL(httpsProxy)
+  } catch {
+    return { kind: 'unusable' }
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { kind: 'unsupported' }
+  }
+  return { kind: 'proxy', url: parsed }
+}
+
+const MAX_PROXY_CONNECT_HEADER_BYTES = 16_384
+
+function safeDecodeUriComponent(value: string): string {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+function openProxyConnectTunnel(
+  proxyUrl: URL,
+  targetHost: string,
+  targetPort: number,
+  signal: AbortSignal,
+): Promise<net.Socket | null> {
+  return new Promise(resolve => {
+    if (signal.aborted) {
+      resolve(null)
+      return
+    }
+    const proxyHost = proxyUrl.hostname.replace(/^\[|\]$/g, '')
+    const isHttpsProxy = proxyUrl.protocol === 'https:'
+    const proxyPort = Number(proxyUrl.port) || (isHttpsProxy ? 443 : 80)
+    const authority = targetHost.includes(':')
+      ? `[${targetHost}]:${targetPort}`
+      : `${targetHost}:${targetPort}`
+
+    const socket: net.Socket = isHttpsProxy
+      ? tls.connect({
+          host: proxyHost,
+          port: proxyPort,
+          servername: proxyHost,
+        })
+      : net.connect({ host: proxyHost, port: proxyPort })
+
+    let settled = false
+    let buffered = Buffer.alloc(0)
+
+    const detachListeners = () => {
+      signal.removeEventListener('abort', onAbort)
+      socket.removeListener('connect', onConnect)
+      socket.removeListener('secureConnect', onConnect)
+      socket.removeListener('data', onData)
+      socket.removeListener('error', onError)
+      socket.removeListener('close', onClose)
+      socket.removeListener('end', onClose)
+    }
+
+    const fail = () => {
+      if (settled) return
+      settled = true
+      detachListeners()
+      try {
+        socket.destroy()
+      } catch {
+        // ignore
+      }
+      resolve(null)
+    }
+
+    const onAbort = () => fail()
+    const onError = () => fail()
+    const onClose = () => fail()
+
+    const onConnect = () => {
+      const headers = [`CONNECT ${authority} HTTP/1.1`, `Host: ${authority}`]
+      if (proxyUrl.username || proxyUrl.password) {
+        const user = safeDecodeUriComponent(proxyUrl.username)
+        const pass = safeDecodeUriComponent(proxyUrl.password)
+        const token = Buffer.from(`${user}:${pass}`, 'utf8').toString('base64')
+        headers.push(`Proxy-Authorization: Basic ${token}`)
+      }
+      headers.push('', '')
+      socket.write(headers.join('\r\n'))
+    }
+
+    const onData = (chunk: Buffer | string) => {
+      const buf = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk
+      buffered = Buffer.concat([buffered, buf])
+      const headerEnd = buffered.indexOf('\r\n\r\n')
+      if (headerEnd === -1) {
+        if (buffered.length > MAX_PROXY_CONNECT_HEADER_BYTES) {
+          fail()
+        }
+        return
+      }
+      const headerText = buffered.subarray(0, headerEnd).toString('latin1')
+      const statusLine = headerText.split('\r\n', 1)[0] ?? ''
+      if (!/^HTTP\/1\.[01]\s+200(?:\s|$)/i.test(statusLine)) {
+        fail()
+        return
+      }
+      if (settled) return
+      settled = true
+      detachListeners()
+      const remainder = buffered.subarray(headerEnd + 4)
+      if (remainder.length > 0) {
+        socket.unshift(remainder)
+      }
+      resolve(socket)
+    }
+
+    signal.addEventListener('abort', onAbort, { once: true })
+    if (isHttpsProxy) {
+      socket.once('secureConnect', onConnect)
+    } else {
+      socket.once('connect', onConnect)
+    }
+    socket.on('data', onData)
+    socket.once('error', onError)
+    socket.once('close', onClose)
+    socket.once('end', onClose)
+  })
+}
+
+export async function readPeerChainViaTlsHandshake(
+  host: string,
+  port: number,
+  signal: AbortSignal,
+  proxyUrl?: URL,
+): Promise<X509Certificate[] | null> {
+  if (signal.aborted) {
+    return null
+  }
+  let tunnelSocket: net.Socket | undefined
+  if (proxyUrl) {
+    const opened = await openProxyConnectTunnel(proxyUrl, host, port, signal)
+    if (!opened || signal.aborted) {
+      try {
+        opened?.destroy()
+      } catch {
+        // ignore
+      }
+      return null
+    }
+    tunnelSocket = opened
+  }
+
+  return new Promise(resolve => {
+    if (signal.aborted) {
+      try {
+        tunnelSocket?.destroy()
+      } catch {
+        // ignore
+      }
+      resolve(null)
+      return
+    }
+    let settled = false
+    const socket = tunnelSocket
+      ? tls.connect({
+          socket: tunnelSocket,
+          servername: host,
+          rejectUnauthorized: false,
+        })
+      : tls.connect({
+          host,
+          port,
+          servername: host,
+          rejectUnauthorized: false,
+        })
+
+    const finish = (val: X509Certificate[] | null) => {
+      if (settled) return
+      settled = true
+      signal.removeEventListener('abort', onAbort)
+      try {
+        socket.destroy()
+      } catch {
+        // ignore
+      }
+      try {
+        tunnelSocket?.destroy()
+      } catch {
+        // ignore
+      }
+      resolve(val)
+    }
+
+    const onAbort = () => finish(null)
+    signal.addEventListener('abort', onAbort, { once: true })
+    socket.once('secureConnect', () => {
+      finish(extractPeerCertificateChain(socket))
+    })
+    socket.once('error', () => finish(null))
+    socket.once('close', () => finish(null))
+    tunnelSocket?.once('error', () => finish(null))
+  })
+}
+
+/**
+ * Official 2.1.319 `DBo` / `QL` (#1784 & #1817):
+ * Perform a TLS handshake (no HTTP/API request) to the configured API host
+ * after a certificate error to capture the server-presented chain and restore
+ * any dropped cross-certificate. Runs even when
+ * `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is set if `afterModelRequest`
+ * is true; skips when only `ALL_PROXY` is set.
+ */
+export async function readApiServedCertificateChain(
+  targetUrl: string | undefined,
+  opts: {
+    signal?: AbortSignal
+    afterModelRequest?: boolean
+    env?: NodeJS.ProcessEnv
+    handshakeFn?: (
+      host: string,
+      port: number,
+      signal: AbortSignal,
+      proxyUrl?: URL,
+    ) => Promise<X509Certificate[] | null>
+  } = {},
+): Promise<ApiServedChainReadOutcome> {
+  const env = opts.env ?? process.env
+  if (
+    !targetUrl ||
+    opts.signal?.aborted ||
+    (isEssentialTrafficOnly() && !opts.afterModelRequest) ||
+    env.ANTHROPIC_UNIX_SOCKET
+  ) {
+    return 'skipped'
+  }
+  let parsed: URL
+  try {
+    parsed = new URL(targetUrl)
+  } catch {
+    return 'skipped'
+  }
+  if (parsed.protocol !== 'https:') {
+    return 'skipped'
+  }
+
+  const proxyCheck = resolveCertRepairProxyUrl(targetUrl, env)
+  if (proxyCheck.kind === 'unusable') {
+    logForDebugging(
+      "CA certs: Not reading the server's certificates: a proxy variable is set, but none that the read can use. Set https_proxy, which is read first, to a complete http:// or https:// URL, or try adding the cross-certificate to the NODE_EXTRA_CA_CERTS file",
+    )
+    return 'proxy_variable_unusable'
+  }
+  if (proxyCheck.kind === 'unsupported') {
+    logForDebugging(
+      "CA certs: Not reading the server's certificates through a proxy that is neither http:// nor https://. Try adding the cross-certificate to the NODE_EXTRA_CA_CERTS file",
+    )
+    return 'proxy_not_supported'
+  }
+
+  const timeoutSignal = AbortSignal.timeout(API_SERVED_CHAIN_READ_TIMEOUT_MS)
+  const signal = opts.signal
+    ? AbortSignal.any([opts.signal, timeoutSignal])
+    : timeoutSignal
+  const host = parsed.hostname.replace(/^\[|\]$/g, '')
+  const port = Number(parsed.port) || 443
+  const proxyUrl = proxyCheck.kind === 'proxy' ? proxyCheck.url : undefined
+  const handshake = opts.handshakeFn ?? readPeerChainViaTlsHandshake
+  const certs = await handshake(host, port, signal, proxyUrl)
+  if (!certs || signal.aborted) {
+    return 'unread'
+  }
+  if (certs.length === 0) {
+    return 'nothing'
+  }
+  const noted = noteServerServedCertificates(certs)
+  if (!noted) {
+    return 'nothing'
+  }
+  clearCACertsCache()
+  clearMTLSCache()
+  syncDefaultCACertificates()
+  return 'restored'
 }

@@ -233,6 +233,9 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
         ...current,
         hasTrustDialogAccepted: true,
       }));
+      // #1781: Also latch session trust so mid-session accept works when
+      // CLAUDE_CODE_IGNORE_PERSISTED_TRUST ignores persisted trust records.
+      setSessionTrustAccepted(true);
     }
 
     // Mid-session accept must re-apply gated project grants now, not on restart.

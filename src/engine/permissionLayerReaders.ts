@@ -115,8 +115,19 @@ export function getToolPermissionContextFromLayers(
         break
       }
       case 'avoid_prompts': {
-        if (!t.shouldAvoidPermissionPrompts) {
-          t = { ...t, shouldAvoidPermissionPrompts: true }
+        // #1703 (official `sI(o)`): latch both shouldAvoidPermissionPrompts and
+        // avoidsPromptsByNature so an avoid_prompts layer is distinguished from
+        // interactive `permissions.denyInsteadOfPrompting`.
+        const alreadyAvoidsByNature =
+          t.shouldAvoidPermissionPrompts === true &&
+          (t.denyInsteadOfPrompting !== true ||
+            t.avoidsPromptsByNature === true)
+        if (!alreadyAvoidsByNature) {
+          t = {
+            ...t,
+            shouldAvoidPermissionPrompts: true,
+            avoidsPromptsByNature: true,
+          }
         }
         break
       }

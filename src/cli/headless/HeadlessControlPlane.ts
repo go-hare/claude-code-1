@@ -1126,7 +1126,7 @@ export async function buildSdkInitializeResponse(
   const accountInfo = getAccountInformation()
   const initResponse: SDKControlInitializeResponse = {
     commands: commands
-      .filter(cmd => cmd.userInvocable !== false)
+      .filter(cmd => cmd.userInvocable !== false && !cmd.isHidden)
       .map(cmd => ({
         name: getCommandName(cmd),
         description: formatDescriptionWithSource(cmd),
@@ -1671,11 +1671,15 @@ export async function handleOrphanedPermissionResponse<
   setAppState: _setAppState,
   onEnqueued,
   handledToolUseIds,
+  findUnresolvedToolUseFn = findUnresolvedToolUse,
+  enqueueFn = enqueue,
 }: {
   message: SDKControlResponse
   setAppState: HeadlessSetAppState<TState>
   onEnqueued?: () => void
   handledToolUseIds: Set<string>
+  findUnresolvedToolUseFn?: typeof findUnresolvedToolUse
+  enqueueFn?: typeof enqueue
 }): Promise<boolean> {
   const responseInner = message.response as
     | {
@@ -1708,7 +1712,7 @@ export async function handleOrphanedPermissionResponse<
       return false
     }
 
-    const assistantMessage = await findUnresolvedToolUse(toolUseID)
+    const assistantMessage = await findUnresolvedToolUseFn(toolUseID)
     if (!assistantMessage) {
       logForDebugging(
         `handleOrphanedPermissionResponse: no unresolved tool_use found for toolUseID=${toolUseID} (already resolved in transcript)`,
@@ -1727,9 +1731,10 @@ export async function handleOrphanedPermissionResponse<
     logForDebugging(
       `handleOrphanedPermissionResponse: enqueuing orphaned permission for toolUseID=${toolUseID} messageID=${assistantMessage.message.id}`,
     )
-    enqueue({
+    enqueueFn({
       mode: 'orphaned-permission' as const,
       value: [],
+      skipSubmissionHooks: true,
       orphanedPermission: {
         permissionResult,
         assistantMessage,
@@ -2129,9 +2134,26 @@ export async function reconcileMcpServers<
       ...Object.keys(newConfigs),
     ])
 
+    // #1877: Preserve non-dynamic (project / local / user / enterprise) MCP
+    // servers and their tools even when `mcp_set_servers` registers or removes
+    // a dynamic server/extension with the same name.
+    const isNonDynamicClient = (client: MCPServerConnection): boolean => {
+      const scope =
+        client.config && 'scope' in client.config
+          ? (client.config as { scope?: string }).scope
+          : undefined
+      return scope !== undefined && scope !== 'dynamic'
+    }
+    const preservedNonDynamicNames = new Set(
+      prev.mcp.clients.filter(isNonDynamicClient).map(c => c.name),
+    )
+
     const nonDynamicTools = prev.mcp.tools.filter(t => {
       for (const serverName of allDynamicServerNames) {
-        if (t.name.startsWith(`mcp__${serverName}__`)) {
+        if (
+          !preservedNonDynamicNames.has(serverName) &&
+          t.name.startsWith(`mcp__${serverName}__`)
+        ) {
           return false
         }
       }
@@ -2139,7 +2161,20 @@ export async function reconcileMcpServers<
     })
 
     const nonDynamicClients = prev.mcp.clients.filter(c => {
+      if (isNonDynamicClient(c)) return true
       return !allDynamicServerNames.has(c.name)
+    })
+
+    const mergedDynamicClients = newClients.filter(
+      c => !preservedNonDynamicNames.has(c.name),
+    )
+    const mergedDynamicTools = newTools.filter(t => {
+      for (const keptName of preservedNonDynamicNames) {
+        if (t.name.startsWith(`mcp__${keptName}__`)) {
+          return false
+        }
+      }
+      return true
     })
 
     const toolPermissionContext = withMcpServerPolicyRules(
@@ -2151,8 +2186,8 @@ export async function reconcileMcpServers<
       ...prev,
       mcp: {
         ...prev.mcp,
-        tools: [...nonDynamicTools, ...newTools],
-        clients: [...nonDynamicClients, ...newClients],
+        tools: [...nonDynamicTools, ...mergedDynamicTools],
+        clients: [...nonDynamicClients, ...mergedDynamicClients],
       },
       toolPermissionContext,
     }

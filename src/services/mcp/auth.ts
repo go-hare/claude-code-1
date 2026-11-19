@@ -430,6 +430,135 @@ export async function normalizeOAuthErrorBody(
 /* eslint-enable eslint-plugin-n/no-unsupported-features/node-builtins */
 
 const MAX_AUTH_HEADER_REDIRECTS = 5
+const OAUTH_REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308])
+const OAUTH_POST_TO_GET_STRIP_HEADERS = [
+  'content-type',
+  'content-length',
+  'content-encoding',
+  'content-language',
+  'content-location',
+] as const
+
+function formatGuardOrigin(url: URL | null): string {
+  if (url === null || url.origin === 'null') return 'an unusable address'
+  return url.origin.replace(/\/$/, '')
+}
+
+/**
+ * Official 325 `mcp_oauth_redirect_guard` (#1847) — prevent OAuth requests
+ * that carry secrets (refresh tokens, client secrets, authorization codes)
+ * from silently following cross-origin redirects to another host.
+ */
+export function wrapFetchWithOAuthRedirectGuard(
+  baseFetch: FetchLike,
+  options?: { maxRedirects?: number },
+): FetchLike {
+  const maxRedirects = options?.maxRedirects ?? MAX_AUTH_HEADER_REDIRECTS
+  return async (input: string | URL, init?: RequestInit) => {
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (
+      init === undefined ||
+      method === 'GET' ||
+      method === 'HEAD' ||
+      (init.redirect ?? 'follow') !== 'follow'
+    ) {
+      return baseFetch(input, init)
+    }
+    let currentUrl = new URL(String(input))
+    let currentInit: RequestInit = { ...init, redirect: 'manual' }
+    for (let hop = 0; ; hop++) {
+      const response = await baseFetch(currentUrl, currentInit)
+      const location = OAUTH_REDIRECT_STATUSES.has(response.status)
+        ? response.headers.get('location')
+        : null
+      if (!location) {
+        return response
+      }
+      void response.body?.cancel().catch(() => {})
+      let nextUrl: URL | null = null
+      try {
+        nextUrl = new URL(location, currentUrl)
+      } catch {
+        nextUrl = null
+      }
+      if (nextUrl === null || !isSameOriginUrl(nextUrl.href, currentUrl.href)) {
+        logEvent('tengu_feature_bad', {
+          feature_name:
+            'mcp_oauth_redirect_guard' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          error_code: (nextUrl === null
+            ? 'unreadable_location'
+            : 'not_same_origin') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        throw new Error(
+          `Stopped an OAuth request, which can hold secrets: ${formatGuardOrigin(currentUrl)} redirected it to ${formatGuardOrigin(nextUrl)}. Ask the owner of ${formatGuardOrigin(currentUrl)} to remove that redirect.`,
+        )
+      }
+      if (hop === maxRedirects) {
+        logEvent('tengu_feature_bad', {
+          feature_name:
+            'mcp_oauth_redirect_guard' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          error_code:
+            'too_many_redirects' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        throw new Error(
+          `Stopped an OAuth request: ${formatGuardOrigin(currentUrl)} redirected it more than ${maxRedirects} times. Ask the owner of ${formatGuardOrigin(currentUrl)} to fix those redirects.`,
+        )
+      }
+      if (
+        response.status === 303 ||
+        (response.status < 303 && method === 'POST')
+      ) {
+        // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
+        const headers = new Headers(init.headers)
+        for (const h of OAUTH_POST_TO_GET_STRIP_HEADERS) {
+          headers.delete(h)
+        }
+        currentInit = {
+          ...init,
+          redirect: 'manual',
+          method: 'GET',
+          body: undefined,
+          headers,
+        }
+      }
+      currentUrl = nextUrl
+    }
+  }
+}
+
+/**
+ * Official 325 `Ac` / `Xc` (#1853) — SEP-2352 issuer comparison and stamp
+ * validation. Suppresses the missing-issuer warning when `canPersistStamp` is
+ * false (providers that cannot persist a stamp).
+ */
+export function issuersMatchSep2352(a: string, b: string): boolean {
+  return (
+    a === b ||
+    (a.endsWith('/') && a.slice(0, -1) === b) ||
+    (b.endsWith('/') && b.slice(0, -1) === a)
+  )
+}
+
+export function validateSep2352Issuer<T extends { issuer?: string }>(
+  stored: T | undefined,
+  expectedIssuer: string,
+  options?: { canPersistStamp?: boolean; warn?: (msg: string) => void },
+): T | undefined {
+  if (stored === undefined) return undefined
+  if (stored.issuer === undefined) {
+    if (options?.canPersistStamp !== false) {
+      const msg =
+        "[mcp-sdk] SEP-2352: stored OAuth credential has no 'issuer' stamp (pre-upgrade storage or provider not round-tripping the value). SEP-2352 isolation is inactive for this read; ensure your provider round-trips the issuer field."
+      if (options?.warn) {
+        options.warn(msg)
+      } else {
+        logMCPDebug('oauth', msg)
+      }
+    }
+    return stored
+  }
+  return issuersMatchSep2352(stored.issuer, expectedIssuer) ? stored : undefined
+}
 
 function isSameOriginUrl(a: string | URL, b: string | URL): boolean {
   try {
@@ -532,7 +661,7 @@ export function wrapAuthFetchWithHeaders(
  * Prevents stale timeout signals from affecting auth operations.
  */
 function createAuthFetch(): FetchLike {
-  return async (url: string | URL, init?: RequestInit) => {
+  const rawFetch: FetchLike = async (url: string | URL, init?: RequestInit) => {
     const timeoutSignal = AbortSignal.timeout(AUTH_REQUEST_TIMEOUT_MS)
     const isPost = init?.method?.toUpperCase() === 'POST'
 
@@ -570,6 +699,7 @@ function createAuthFetch(): FetchLike {
       throw error
     }
   }
+  return wrapFetchWithOAuthRedirectGuard(rawFetch)
 }
 
 /**
@@ -695,7 +825,8 @@ export function hasMcpDiscoveryButNoToken(
   }
   const serverKey = getServerKey(serverName, serverConfig)
   const entry = getSecureStorage().read()?.mcpOAuth?.[serverKey]
-  return entry !== undefined && !entry.accessToken && !entry.refreshToken
+  // Official 325 #1915: guard against stored `null` entries (`!!entry` instead of `entry !== undefined`).
+  return !!entry && !entry.accessToken && !entry.refreshToken
 }
 
 /**
@@ -2279,13 +2410,21 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
     const serverKey = getServerKey(this.serverName, this.serverConfig)
 
     // Check session credentials first (from DCR or previous auth)
-    const storedInfo = data?.mcpOAuth?.[serverKey]
+    const storedInfo = data?.mcpOAuth?.[serverKey] as
+      | (NonNullable<SecureStorageData['mcpOAuth']>[string] & {
+          issuer?: string
+        })
+      | null
+      | undefined
     if (storedInfo?.clientId) {
       logMCPDebug(this.serverName, `Found client info`)
       return {
         client_id: storedInfo.clientId,
         client_secret: storedInfo.clientSecret,
-      }
+        ...(storedInfo.issuer !== undefined
+          ? { issuer: storedInfo.issuer }
+          : {}),
+      } as OAuthClientInformation
     }
 
     // Fallback: pre-configured client ID from server config
@@ -2305,27 +2444,37 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
   }
 
   async saveClientInformation(
-    clientInformation: OAuthClientInformationFull,
+    clientInformation: OAuthClientInformationFull & { issuer?: string },
   ): Promise<void> {
     const storage = getSecureStorage()
     const existingData = storage.read() || {}
     const serverKey = getServerKey(this.serverName, this.serverConfig)
+    const prevEntry = existingData.mcpOAuth?.[serverKey] as
+      | (NonNullable<SecureStorageData['mcpOAuth']>[string] & {
+          issuer?: string
+        })
+      | null
+      | undefined
+    const persistedIssuer = clientInformation.issuer ?? prevEntry?.issuer
 
     const updatedData: SecureStorageData = {
       ...existingData,
       mcpOAuth: {
         ...existingData.mcpOAuth,
         [serverKey]: {
-          ...existingData.mcpOAuth?.[serverKey],
+          ...(prevEntry ?? {}),
           serverName: this.serverName,
           serverUrl: this.serverConfig.url,
           clientId: clientInformation.client_id,
           clientSecret: clientInformation.client_secret,
+          // Official 325 #1853: round-trip SEP-2352 issuer stamp so re-login
+          // does not emit a spurious missing-issuer warning.
+          ...(persistedIssuer !== undefined ? { issuer: persistedIssuer } : {}),
           // densable: persist redirect used for this registration (port reuse)
           redirectUri: this.redirectUri,
           // Provide default values for required fields if not present
-          accessToken: existingData.mcpOAuth?.[serverKey]?.accessToken || '',
-          expiresAt: existingData.mcpOAuth?.[serverKey]?.expiresAt || 0,
+          accessToken: prevEntry?.accessToken || '',
+          expiresAt: prevEntry?.expiresAt || 0,
         },
       },
     }

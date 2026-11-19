@@ -9,6 +9,7 @@ import { analyzeContextUsage } from '../../utils/analyzeContext.js';
 import { getMessagesAfterCompactBoundary } from '../../utils/messages.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
 import { renderToAnsiString } from '../../utils/staticRender.js';
+import { formatContextAsMarkdownTable } from './context-noninteractive.js';
 
 /**
  * Apply the same context transforms query.ts does before the API call, so
@@ -67,10 +68,13 @@ export async function call(
     apiView, // Original messages for API usage extraction
   );
 
-  // Render to ANSI string to preserve colors and pass to onDone like local commands do
+  // Render to ANSI string for user display; send only bounded markdown table to Claude (#1723 / #1802)
   const output = await renderToAnsiString(
     <ContextVisualization data={data} collapseDetailSections={collapseDetailSections} />,
   );
-  onDone(output, { display: 'system' });
+  onDone(output, {
+    display: 'displayOnly',
+    metaMessages: [formatContextAsMarkdownTable(data, { isBounded: true })],
+  });
   return null;
 }

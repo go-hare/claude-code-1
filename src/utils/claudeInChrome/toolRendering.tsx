@@ -28,9 +28,7 @@ export type ChromeToolName =
   | 'tabs_create_mcp'
   | 'update_plan'
   | 'read_console_messages'
-  | 'read_network_requests'
-  | 'shortcuts_list'
-  | 'shortcuts_execute';
+  | 'read_network_requests';
 
 const CHROME_EXTENSION_FOCUS_TAB_URL_BASE = 'https://clau.de/chrome/tab/';
 
@@ -124,12 +122,6 @@ function renderChromeToolUseMessage(
       }
       break;
 
-    case 'shortcuts_execute':
-      if (typeof input.shortcutId === 'string') {
-        secondaryInfo.push(`shortcut_id: ${input.shortcutId}`);
-      }
-      break;
-
     case 'javascript_tool':
       // In verbose mode, show the full code
       if (verbose && typeof input.text === 'string') {
@@ -141,7 +133,6 @@ function renderChromeToolUseMessage(
     case 'tabs_create_mcp':
     case 'tabs_context_mcp':
     case 'form_input':
-    case 'shortcuts_list':
     case 'read_page':
     case 'upload_image':
     case 'get_page_text':
@@ -229,12 +220,6 @@ export function renderChromeToolResultMessage(
       break;
     case 'read_network_requests':
       summary = 'Network requests retrieved';
-      break;
-    case 'shortcuts_list':
-      summary = 'Shortcuts retrieved';
-      break;
-    case 'shortcuts_execute':
-      summary = 'Shortcut executed';
       break;
     case 'javascript_tool':
       summary = 'Script executed';

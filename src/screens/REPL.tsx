@@ -12,6 +12,7 @@ import {
   getCurrentTurnTokenBudget,
   getTurnOutputTokens,
   getBudgetContinuationCount,
+  getIsNonInteractiveSession,
   getIsRemoteMode,
   getPromptRenderEpoch,
 } from '../bootstrap/state.js';
@@ -129,7 +130,7 @@ import {
   sendSandboxPermissionResponseViaMailbox,
 } from '../utils/swarm/permissionSync.js';
 import { registerSandboxPermissionCallback } from '../hooks/useSwarmPermissionPoller.js';
-import { getTeamName, getAgentName } from '../utils/teammate.js';
+import { getAgentId, getAgentName, getTeamName } from '../utils/teammate.js';
 import { WorkerPendingPermission } from '../components/permissions/WorkerPendingPermission.js';
 import {
   injectUserMessageToTeammate,
@@ -552,6 +553,46 @@ import { useInboxPoller } from '../hooks/useInboxPoller.js';
 // Dead code elimination: conditional import for loop mode
 /* eslint-disable @typescript-eslint/no-require-imports */
 const proactiveModule = feature('PROACTIVE') || feature('KAIROS') ? require('../proactive/index.js') : null;
+/**
+ * Official `RewindBackupsStillCopyingError` (2.1.319 #1752): thrown when /rewind
+ * attempts to restore code before `copyFileHistoryForResume` finishes copying
+ * backups from the parent/branched session.
+ */
+export class RewindBackupsStillCopyingError extends Error {
+  constructor(message = 'File backups from the branched session are still copying — try /rewind again in a moment.') {
+    super(message);
+    this.name = 'RewindBackupsStillCopyingError';
+  }
+}
+
+const REWIND_COPY_WAIT_MS = 2000;
+
+/**
+ * Official `FDe` (2.1.321 #1876): panel / dialog overlay layout state so that
+ * when a dialog mounted over a command's panel closes (`dialogHostUnmounted` /
+ * `dialogOverPanel`), the panel restores immediately without waiting for a redraw.
+ */
+const IN_PANE_BLOCKING_DIALOG_KINDS: readonly string[] = ['permission', 'elicitation', 'sandbox-permission'];
+
+export function computeDialogPanelVisibility(opts: {
+  onScreenBlockingKind: string | null;
+  modalSlotActive: boolean;
+  panelHidesPrompt: boolean;
+  pinnedConsentShowing: boolean;
+  dialogOverPanel: boolean;
+  fullscreen: boolean;
+}): { inPane: boolean; abovePrompt: boolean; drawn: boolean } {
+  const inPane =
+    opts.onScreenBlockingKind !== null &&
+    IN_PANE_BLOCKING_DIALOG_KINDS.includes(opts.onScreenBlockingKind) &&
+    opts.modalSlotActive;
+  const abovePrompt =
+    !inPane &&
+    (opts.panelHidesPrompt || opts.pinnedConsentShowing || opts.onScreenBlockingKind !== null || opts.dialogOverPanel);
+  const drawn = inPane || (abovePrompt && !(opts.fullscreen && opts.modalSlotActive));
+  return { inPane, abovePrompt, drawn };
+}
+
 const PROACTIVE_NO_OP_SUBSCRIBE = (_cb: () => void) => () => {};
 const PROACTIVE_FALSE = () => false;
 const PROACTIVE_NULL = (): number | null => null;
@@ -622,7 +663,11 @@ import {
   type LeftArrowVia,
 } from '../utils/leftArrowVia.js';
 import { getCurrentWorktreeSession } from '../utils/worktree.js';
-import { type SetAppState, isPoppableEditableCommand } from '../utils/messageQueueManager.js';
+import {
+  type SetAppState,
+  collapseBacklogTaskNotifications,
+  isPoppableEditableCommand,
+} from '../utils/messageQueueManager.js';
 import { isVimModeEnabled } from '../components/PromptInput/utils.js';
 import {
   trySendQueuedNowKey,
@@ -712,6 +757,7 @@ import { useQuotaAutoResume } from 'src/hooks/notifs/useQuotaAutoResume.js';
 import { useDeprecationWarningNotification } from 'src/hooks/notifs/useDeprecationWarningNotification.js';
 import { useNpmDeprecationNotification } from 'src/hooks/notifs/useNpmDeprecationNotification.js';
 import { useOauthExpiryNotification } from 'src/hooks/notifs/useOauthExpiryNotification.js';
+import { getAntAuthFallbackNotice } from 'src/commands/login/getAuthStatus.js';
 import { usePersistenceSuppressedNotification } from 'src/hooks/notifs/usePersistenceSuppressedNotification.js';
 import { useTranscriptWriterDegradedNotification } from 'src/hooks/notifs/useTranscriptWriterDegradedNotification.js';
 import { useIDEStatusIndicator } from 'src/hooks/notifs/useIDEStatusIndicator.js';
@@ -1200,6 +1246,14 @@ export type Props = {
   onCommandsChange?: (commands: Command[]) => void;
   /** densable onQueryParamsChange — observe prepared turn params (ji). */
   onQueryParamsChange?: (params: QueryParams) => void;
+  /** #1717: Restore persisted SEP-2663 MCP task sidecars once REPL has live setAppState. */
+  resumeSep2663Tasks?: {
+    sessionId: string;
+    restore: (params: {
+      setAppState: SetAppState;
+      getMcpClients: () => readonly MCPServerConnection[];
+    }) => Promise<unknown>;
+  };
 };
 
 export type Screen = 'prompt' | 'transcript';
@@ -1252,6 +1306,7 @@ export function REPL({
   engine: externalHostEngine,
   onCommandsChange,
   onQueryParamsChange,
+  resumeSep2663Tasks,
 }: Props): React.ReactNode {
   wireClipboardAttacherCaps();
   const { storageV5, credentials } = useSessionServices();
@@ -1441,6 +1496,26 @@ export function REPL({
   const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
   const queueEditIndex = useAppState(s => s.queueEditIndex);
   const setAppState = useSetAppState();
+  // #1717: Restore persisted SEP-2663 MCP tasks on --resume after REPL mounts
+  // so pollers update the live AppState store rather than a dead pre-launch snapshot.
+  const mcpClientsForResumeRef = useRef(mcp.clients);
+  mcpClientsForResumeRef.current = mcp.clients;
+  const sep2663RestoredSessionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!resumeSep2663Tasks) return;
+    if (sep2663RestoredSessionRef.current === resumeSep2663Tasks.sessionId) return;
+    sep2663RestoredSessionRef.current = resumeSep2663Tasks.sessionId;
+    void resumeSep2663Tasks
+      .restore({
+        setAppState,
+        getMcpClients: () => mcpClientsForResumeRef.current,
+      })
+      .catch(err => {
+        logForDebugging(
+          `restorePersistedSep2663TasksOnResume failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
+  }, [resumeSep2663Tasks, setAppState]);
   // densable NDr / TZt / H$y — willow crate diff tab baseline
   const willowCrateEnabled = isDiffPanelEnabled();
   const replTab = useAppState(s => s.replTab);
@@ -1681,6 +1756,28 @@ export function REPL({
   useDeprecationWarningNotification(mainLoopModel);
   useNpmDeprecationNotification();
   useOauthExpiryNotification();
+  // Official 2.1.319 (#1712 & #1713): surface pinned Console billing warning when
+  // claude.ai login ends and Claude Code falls back to an `ant auth login` profile.
+  const authChangeGenerationForAntProfile = useAppState(s => s.authChangeGeneration);
+  useEffect(() => {
+    if (isRemoteSession || getIsNonInteractiveSession() || getAgentId() !== undefined) {
+      return;
+    }
+    const notice = getAntAuthFallbackNotice();
+    if (notice?.reason === 'login_ended') {
+      addNotification({
+        key: 'auth-profile-billing-notice',
+        kind: 'warning',
+        priority: 'high',
+        pinned: true,
+        wrap: true,
+        color: 'warning',
+        text: notice.text,
+      });
+    } else {
+      removeNotification('auth-profile-billing-notice');
+    }
+  }, [authChangeGenerationForAntProfile, isRemoteSession, addNotification, removeNotification]);
   // densable 2.1.217 #2 — transcript saving off / write fail warnings
   usePersistenceSuppressedNotification();
   useTranscriptWriterDegradedNotification();
@@ -2255,6 +2352,8 @@ export function REPL({
   // on resume (initialMessages present) so we don't re-title a resumed
   // session from mid-conversation context.
   const haikuTitleAttemptedRef = useRef((initialMessages?.length ?? 0) > 0);
+  const fileHistoryCopyPromiseRef = useRef<Promise<void> | null>(null);
+  const [dialogHostUnmounted, setDialogHostUnmounted] = useState(false);
   const titleFallbackRef = useRef<TitleFallback | undefined>(undefined);
   const agentTitle = mainThreadAgentDefinition?.agentType;
   const terminalTitle = sessionTitle ?? sessionAiTitle ?? agentTitle ?? haikuTitle ?? 'Claude Code';
@@ -4072,12 +4171,6 @@ export function REPL({
           void copyPlanForResume(log, asSessionId(sessionId));
         }
 
-        // Copy file-history snapshots before the session switch. AppState
-        // restore (densable OMo) waits until after S1 so Vt() is the target id.
-        if (log.fileHistorySnapshots) {
-          void copyFileHistoryForResume(log);
-        }
-
         // Restore agent setting from the resumed conversation
         // Always reset to the new session's values (or clear if none),
         // matching the standaloneAgentContext pattern below
@@ -4127,6 +4220,18 @@ export function REPL({
           log.fullPath ? dirname(log.fullPath) : null,
           entrypoint === 'fork' ? 'fork' : 'resume',
         );
+        // Copy file-history snapshots AFTER switchSession so getSessionId() is
+        // already switched to the target/forked sessionId (and != log.forkedFromSessionId),
+        // then track the in-flight promise so /rewind awaits completion (#1752).
+        if (log.fileHistorySnapshots) {
+          const copyPromise = copyFileHistoryForResume(log).finally(() => {
+            if (fileHistoryCopyPromiseRef.current === copyPromise) {
+              fileHistoryCopyPromiseRef.current = null;
+            }
+          });
+          fileHistoryCopyPromiseRef.current = copyPromise;
+          void copyPromise;
+        }
         // Rename asciicast recording to match the resumed session ID
         const { renameRecordingForSession } = await import('../utils/asciicast.js');
         await renameRecordingForSession();
@@ -5515,7 +5620,9 @@ export function REPL({
     // Aborting subagents may produce task-completed notifications.
     // Clear task notifications so the queue processor doesn't immediately
     // start a new foreground query; forward them to the background session.
-    const removedNotifications = messageQueue.removeByFilter(cmd => cmd.mode === 'task-notification');
+    const removedNotifications = collapseBacklogTaskNotifications(
+      messageQueue.removeByFilter(cmd => cmd.mode === 'task-notification'),
+    );
 
     void (async () => {
       const toolUseContext = getToolUseContext(messagesRef.current, [], new AbortController(), mainLoopModel);
@@ -7523,6 +7630,30 @@ export function REPL({
   // (immediate: /model, /mcp, /btw, ...) and scrollable (non-immediate:
   // /config, /theme, /diff, ...) both go here now.
   const toolJsxCentered = isFullscreenEnvEnabled() && toolJSX?.isLocalJSXCommand === true;
+  const topDialogIsModal = isTopDialogModalLayout(topDialogKind);
+  const dialogOverPanel = topDialogIsModal && toolJsxCentered;
+  const prevDialogOverPanelRef = useRef(false);
+  useEffect(() => {
+    if (prevDialogOverPanelRef.current && !dialogOverPanel) {
+      // Official 2.1.321 (#1876): when a dialog over a command panel unmounts,
+      // flip dialogHostUnmounted so the underlying command panel immediately re-mounts/restores.
+      setDialogHostUnmounted(true);
+      queueMicrotask(() => setDialogHostUnmounted(false));
+    }
+    prevDialogOverPanelRef.current = dialogOverPanel;
+  }, [dialogOverPanel]);
+  const dialogPanelVis = computeDialogPanelVisibility({
+    onScreenBlockingKind: topDialogKind ?? null,
+    modalSlotActive: isFullscreenModalChromeActive({
+      toolJsxCentered,
+      topDialogKind,
+      modalChrome,
+    }),
+    panelHidesPrompt: Boolean(toolJSX?.shouldHidePromptInput),
+    pinnedConsentShowing: false,
+    dialogOverPanel,
+    fullscreen: isFullscreenEnvEnabled(),
+  });
   // densable ozs: KA ? {content:NMs(modal), visible:wi==="visible"}
   //            : PCn ? {content:PCn, visible:true} : undefined
   // densable kZt = KA&&wi==="visible"||PCn — not bare occupy (KA||PCn)
@@ -7531,12 +7662,12 @@ export function REPL({
     topDialogKind,
     modalChrome,
   });
-  const ozs = isTopDialogModalLayout(topDialogKind)
+  const ozs = topDialogIsModal
     ? {
         content: <DialogHost variant="modal" suppressReason={dialogSuppressReason} />,
         visible: modalChrome === 'visible',
       }
-    : toolJsxCentered
+    : toolJsxCentered && (!dialogHostUnmounted || dialogPanelVis.drawn)
       ? { content: toolJSX!.jsx, visible: true }
       : undefined;
   const promptOwnsEscape =
@@ -8878,6 +9009,26 @@ export function REPL({
                           preselectedMessage={messageSelectorPreselect}
                           onPreRestore={onCancel}
                           onRestoreCode={async (message: UserMessage) => {
+                            // Official 2.1.319 (#1752): wait for branched/resumed file-history copy
+                            // before rewinding; throw RewindBackupsStillCopyingError if still copying.
+                            const pendingCopy = fileHistoryCopyPromiseRef.current;
+                            if (pendingCopy !== null) {
+                              let settled = false;
+                              await Promise.race([
+                                pendingCopy.then(
+                                  () => {
+                                    settled = true;
+                                  },
+                                  () => {
+                                    settled = true;
+                                  },
+                                ),
+                                new Promise<void>(resolve => setTimeout(resolve, REWIND_COPY_WAIT_MS)),
+                              ]);
+                              if (!settled && fileHistoryCopyPromiseRef.current === pendingCopy) {
+                                throw new RewindBackupsStillCopyingError();
+                              }
+                            }
                             // densable: return skippedLinks so MessageSelector can show TYn
                             const { skippedLinks } = await fileHistoryRewind(
                               (updater: (prev: FileHistoryState) => FileHistoryState) => {

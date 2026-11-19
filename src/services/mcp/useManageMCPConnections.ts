@@ -24,6 +24,8 @@ import {
   mcpConfigDependsOnAccountIdentity,
 } from './mcpIdentity.js'
 import {
+  beginMcpToolRefreshSequence,
+  commitMcpToolRefreshSequence,
   formatListChangedRefreshFailed,
   resolvePromptsListChangedRefresh,
   resolveResourcesListChangedRefresh,
@@ -887,6 +889,7 @@ export function useManageMCPConnections(
                 client.name,
                 `Received tools/list_changed notification, refreshing tools`,
               )
+              const refreshSeq = beginMcpToolRefreshSequence(client)
               try {
                 // Grab cached promise before invalidating to log previous count
                 const previousToolsPromise = fetchToolsForClient.cache.get(
@@ -894,6 +897,28 @@ export function useManageMCPConnections(
                 )
                 fetchToolsForClient.cache.delete(client.name)
                 const newTools = await fetchToolsForClient(client)
+                // Official 325 #1893: discard stale/failed refreshes so tools are never wiped.
+                if (client.toolsListError) {
+                  logMCPDebug(
+                    client.name,
+                    `Keeping previous tools after refresh error: ${client.toolsListError}`,
+                  )
+                  return
+                }
+                if (client.discoveryAuthFailure && newTools.length === 0) {
+                  logMCPDebug(
+                    client.name,
+                    `Keeping previous tools: server rejected tool discovery as unauthorized`,
+                  )
+                  return
+                }
+                if (!commitMcpToolRefreshSequence(client, refreshSeq)) {
+                  logMCPDebug(
+                    client.name,
+                    `Discarding superseded tools/list refresh (seq ${refreshSeq})`,
+                  )
+                  return
+                }
                 const newCount = newTools.length
                 if (previousToolsPromise) {
                   previousToolsPromise.then(

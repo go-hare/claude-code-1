@@ -1,4 +1,5 @@
 import { readdir } from 'fs/promises'
+import { homedir } from 'os'
 import { join } from 'path'
 import { coerce as semverCoerce } from 'semver'
 import { getSessionId } from '../bootstrap/state.js'
@@ -9,6 +10,45 @@ import { pathExists } from './file.js'
 import { gte as semverGte } from './semver.js'
 
 const MIN_DESKTOP_VERSION = '1.1.2396'
+const CLAUDE_DESKTOP_BUNDLE_ID = 'com.anthropic.claudefordesktop'
+const SYSTEM_CLAUDE_APP_PATH = '/Applications/Claude.app'
+
+async function readDarwinPlistKey(
+  appPath: string,
+  key: string,
+  opts?: { timeout?: number },
+): Promise<string | null> {
+  const { code, stdout } = await execFileNoThrow(
+    'defaults',
+    ['read', `${appPath}/Contents/Info.plist`, key],
+    opts,
+  )
+  if (code !== 0) {
+    return null
+  }
+  const value = stdout.trim()
+  return value.length > 0 ? value : null
+}
+
+/**
+ * Official 2.1.321 (#1872): also check ~/Applications/Claude.app and verify
+ * CFBundleIdentifier === 'com.anthropic.claudefordesktop'.
+ */
+export async function resolveDarwinClaudeAppPath(): Promise<string | null> {
+  if (await pathExists(SYSTEM_CLAUDE_APP_PATH)) {
+    return SYSTEM_CLAUDE_APP_PATH
+  }
+  const userAppPath = join(homedir(), 'Applications', 'Claude.app')
+  if (
+    (await pathExists(userAppPath)) &&
+    (await readDarwinPlistKey(userAppPath, 'CFBundleIdentifier', {
+      timeout: 5000,
+    })) === CLAUDE_DESKTOP_BUNDLE_ID
+  ) {
+    return userAppPath
+  }
+  return null
+}
 
 function isDevMode(): boolean {
   if ((process.env.NODE_ENV as string) === 'development') {
@@ -56,8 +96,8 @@ async function isDesktopInstalled(): Promise<boolean> {
   const platform = process.platform
 
   if (platform === 'darwin') {
-    // Check for Claude.app in /Applications
-    return pathExists('/Applications/Claude.app')
+    // Check for Claude.app in /Applications, then ~/Applications (verifying CFBundleIdentifier)
+    return (await resolveDarwinClaudeAppPath()) !== null
   } else if (platform === 'linux') {
     // Check if xdg-mime can find a handler for claude://
     // Note: xdg-mime returns exit code 0 even with no handler, so check stdout too
@@ -90,16 +130,11 @@ async function getDesktopVersion(): Promise<string | null> {
   const platform = process.platform
 
   if (platform === 'darwin') {
-    const { code, stdout } = await execFileNoThrow('defaults', [
-      'read',
-      '/Applications/Claude.app/Contents/Info.plist',
-      'CFBundleShortVersionString',
-    ])
-    if (code !== 0) {
+    const appPath = await resolveDarwinClaudeAppPath()
+    if (!appPath) {
       return null
     }
-    const version = stdout.trim()
-    return version.length > 0 ? version : null
+    return readDarwinPlistKey(appPath, 'CFBundleShortVersionString')
   } else if (platform === 'win32') {
     const localAppData = process.env.LOCALAPPDATA
     if (!localAppData) {

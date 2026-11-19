@@ -159,8 +159,14 @@ export function PermissionPrompt<T extends string>({
   const [acceptFeedbackModeEntered, setAcceptFeedbackModeEntered] = useState(false);
   const [rejectFeedbackModeEntered, setRejectFeedbackModeEntered] = useState(false);
 
+  // Official 2.1.321 (#1870): guard against rare undefined/null options array or entries
+  const safeOptions = useMemo(
+    () => (Array.isArray(options) ? options.filter((opt): opt is PermissionPromptOption<T> => Boolean(opt)) : []),
+    [options],
+  );
+
   // Find which option is focused and whether it has feedback config
-  const focusedOption = options.find(opt => opt.value === focusedValue);
+  const focusedOption = safeOptions.find(opt => opt.value === focusedValue);
   const focusedFeedbackType = focusedOption?.feedbackConfig?.type;
 
   // Show Tab hint when focused on a feedback-enabled option that's not already in input mode
@@ -173,7 +179,7 @@ export function PermissionPrompt<T extends string>({
 
   // Transform options to Select-compatible format
   const selectOptions = useMemo((): OptionWithDescription<T>[] => {
-    return options.map(opt => {
+    return safeOptions.map(opt => {
       const { value, label, description, feedbackConfig, inputConfig } = opt;
 
       if (inputConfig) {
@@ -223,12 +229,12 @@ export function PermissionPrompt<T extends string>({
         value,
       };
     });
-  }, [options, acceptInputMode, rejectInputMode]);
+  }, [safeOptions, acceptInputMode, rejectInputMode]);
 
   // Handle Tab key to toggle input mode
   const handleInputModeToggle = useCallback(
     (value: T) => {
-      const option = options.find(opt => opt.value === value);
+      const option = safeOptions.find(opt => opt.value === value);
       if (!option?.feedbackConfig) return;
 
       const { type } = option.feedbackConfig;
@@ -264,7 +270,7 @@ export function PermissionPrompt<T extends string>({
   const handleSelect = useCallback(
     (value: T) => {
       if (isDisabled || isWithinPermissionKeyGuard(mountedAtRef.current)) return;
-      const option = options.find(opt => opt.value === value);
+      const option = safeOptions.find(opt => opt.value === value);
       if (!option) return;
 
       // Get feedback if applicable

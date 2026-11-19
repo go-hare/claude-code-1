@@ -100,19 +100,35 @@ export function isKSlCreditsExemptPlan(): boolean {
 }
 
 /**
- * densable `amt() || BXe()`.
+ * Official 2.1.321 `cEt` / `XFr` (#1851): Enterprise seats whose plan includes
+ * Fable (`included_in_plan`) do NOT draw from usage credits.
+ *
  * `amt` = `KLe()` (`tengu_saffron_lattice`) || `tEn()`/`MHs` host latch.
- * `BXe` = enterprise (KKb, zpt false) or subscriptionType ∈ GB
- * `tengu_saffron_credits_only_tiers` default `["enterprise"]`.
+ * `BXe` = subscriptionType ∈ GB `tengu_saffron_credits_only_tiers` (default `["enterprise"]`),
+ * EXCEPT when `planStatus === 'included_in_plan'` (or the enterprise tier is not
+ * listed in `tengu_saffron_credits_only_tiers` / `fableIncludedInPlan` is set).
  */
-export function isKSlFableCreditsRequired(): boolean {
+export function isKSlFableCreditsRequired(opts?: {
+  planStatus?:
+    | 'included_in_plan'
+    | 'pay_per_request'
+    | 'admin_billed'
+    | 'needs_consent'
+    | 'needs_credits'
+    | 'out_of_credits'
+    | 'consented'
+}): boolean {
+  if (opts?.planStatus === 'included_in_plan') {
+    return false
+  }
   if (getBootstrapSessionHost().accountCreditLatches.fableCreditsRequired()) {
     return true
   }
   if (isOverageConsentRequiredGate()) return true
   const sub = getSubscriptionType()
-  if (sub === 'enterprise') return true
   if (sub === null) return false
+  // Enterprise seats whose plan includes Fable have `tengu_saffron_credits_only_tiers`
+  // exclude `"enterprise"` (or explicitly return included_in_plan via GrowthBook/profile).
   const raw = getFeatureValue_CACHED_MAY_BE_STALE<unknown>(
     'tengu_saffron_credits_only_tiers',
     ['enterprise'],
@@ -120,6 +136,15 @@ export function isKSlFableCreditsRequired(): boolean {
   const tiers = Array.isArray(raw)
     ? raw.filter((x): x is string => typeof x === 'string')
     : ['enterprise']
+  if (
+    sub === 'enterprise' &&
+    getFeatureValue_CACHED_MAY_BE_STALE<unknown>(
+      'tengu_fable_included_in_plan',
+      false,
+    ) === true
+  ) {
+    return false
+  }
   return tiers.includes(sub)
 }
 

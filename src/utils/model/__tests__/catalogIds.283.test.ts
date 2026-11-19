@@ -80,15 +80,15 @@ describe('densable 2.1.283 catalog ids', () => {
     expect(firstPartyNameToCanonical('claude-sonnet-5')).toBe('claude-sonnet-5')
   })
 
-  test('firstParty live defaults are fable51 / opus55 / sonnet55', () => {
-    expect(getDefaultFableModel()).toBe('claude-fable-5-1')
+  test('firstParty live defaults are fable52 / opus55 / sonnet55', () => {
+    expect(getDefaultFableModel()).toBe('claude-fable-5-2')
     expect(getDefaultOpusModel()).toBe('claude-opus-5-5')
     expect(getDefaultSonnetModel()).toBe('claude-sonnet-5-5')
   })
 
-  test('gateway fable/best still Fable 5 per 283 aliases; sonnet default 5.5', () => {
+  test('gateway fable still Fable 5 per aliases; default fable is 5.2; sonnet default 5.5', () => {
     expect(resolveCatalogAlias('fable', 'gateway')).toBe('claude-fable-5')
-    expect(resolveCatalogAlias('fable')).toBe('claude-fable-5-1')
+    expect(resolveCatalogAlias('fable')).toBe('claude-fable-5-2')
     expect(resolveCatalogAlias('opus')).toBe('claude-opus-5-5')
     expect(resolveCatalogAlias('opus', 'gateway')).toBe('claude-opus-4-7')
     expect(resolveCatalogAlias('sonnet')).toBe('claude-sonnet-5-5')
@@ -96,7 +96,7 @@ describe('densable 2.1.283 catalog ids', () => {
   })
 
   test('best alias is Fable (catalog best:"fable")', () => {
-    expect(getBestModel()).toBe('claude-fable-5-1')
+    expect(getBestModel()).toBe('claude-fable-5-2')
   })
 
   test('effort catalog rows: opus-5-5 default medium, fable-5-1 high', () => {

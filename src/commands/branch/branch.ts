@@ -7,10 +7,12 @@ import type { LocalJSXCommandOnDone } from '../../types/command.js'
 import type {
   ContentReplacementEntry,
   Entry,
+  FileHistorySnapshotMessage,
   LogOption,
   SerializedMessage,
   TranscriptMessage,
 } from '../../types/logs.js'
+import type { FileHistorySnapshot } from '../../utils/fileHistory.js'
 import { parseJSONL } from '../../utils/json.js'
 import {
   getProjectDir,
@@ -68,6 +70,7 @@ async function createFork(customTitle?: string): Promise<{
   forkPath: string
   serializedMessages: SerializedMessage[]
   contentReplacementRecords: ContentReplacementEntry['replacements']
+  fileHistorySnapshots: FileHistorySnapshot[]
 }> {
   const forkSessionId = randomUUID() as UUID
   const originalSessionId = getSessionId()
@@ -196,6 +199,27 @@ async function createFork(customTitle?: string): Promise<{
     lines.push(jsonStringify(forkedEntry))
   }
 
+  // Append remapped file-history-snapshot entries (#1752) so /rewind can restore
+  // files across a branched session once copyFileHistoryForResume finishes.
+  const fileHistorySnapshots: FileHistorySnapshot[] = []
+  for (const entry of entries) {
+    if (entry.type !== 'file-history-snapshot') continue
+    const snapEntry = entry as FileHistorySnapshotMessage
+    const remappedMsgId = uuidMap.get(snapEntry.messageId)
+    if (!remappedMsgId) continue
+    const remappedSnapshot: FileHistorySnapshot = {
+      ...snapEntry.snapshot,
+      messageId: remappedMsgId,
+    }
+    fileHistorySnapshots.push(remappedSnapshot)
+    const forkedSnapEntry: FileHistorySnapshotMessage = {
+      ...snapEntry,
+      messageId: remappedMsgId,
+      snapshot: remappedSnapshot,
+    }
+    lines.push(jsonStringify(forkedSnapEntry))
+  }
+
   // Append content-replacement entry (if any) with the fork's sessionId.
   // Written as a SINGLE entry (same shape as insertContentReplacement) so
   // loadTranscriptFile's content-replacement branch picks it up.
@@ -221,6 +245,7 @@ async function createFork(customTitle?: string): Promise<{
     forkPath: forkSessionPath,
     serializedMessages,
     contentReplacementRecords,
+    fileHistorySnapshots,
   }
 }
 
@@ -280,6 +305,7 @@ export async function call(
       forkPath,
       serializedMessages,
       contentReplacementRecords,
+      fileHistorySnapshots,
     } = await createFork(customTitle)
 
     // Build LogOption for resume
@@ -301,7 +327,7 @@ export async function call(
       has_custom_title: !!title,
     })
 
-    const forkLog: LogOption = {
+    const forkLog: LogOption & { forkedFromSessionId?: string } = {
       date: now.toISOString().split('T')[0]!,
       messages: serializedMessages,
       fullPath: forkPath,
@@ -314,6 +340,8 @@ export async function call(
       sessionId,
       customTitle: effectiveTitle,
       contentReplacements: contentReplacementRecords,
+      ...(fileHistorySnapshots.length > 0 ? { fileHistorySnapshots } : {}),
+      forkedFromSessionId: originalSessionId,
     }
 
     // Resume into the fork

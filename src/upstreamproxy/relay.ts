@@ -17,6 +17,10 @@
  */
 
 import { createServer, type Socket as NodeSocket } from 'node:net'
+import {
+  classifyProxyConnectError,
+  type ProxyConnectErrorKind,
+} from '../bridge/remoteControlEndpointReason.js'
 import { logForDebugging } from '../utils/debug.js'
 import { getWebSocketTLSOptions } from '../utils/mtls.js'
 import { getWebSocketProxyAgent, getWebSocketProxyUrl } from '../utils/proxy.js'
@@ -107,18 +111,28 @@ export type UpstreamProxyRelay = {
   stop: () => void
 }
 
-/** densable 2.1.251 #48 — status recentRelayFailures entries. */
+/** densable 2.1.251 #48 / official 2.1.325 #1892 — status recentRelayFailures entries. */
 export type RelayFailureRecord = {
   host?: string
   reason: string
+  kind?: ProxyConnectErrorKind
   at: number
 }
 
 const recentRelayFailures: RelayFailureRecord[] = []
 const MAX_RELAY_FAILURES = 32
 
-function recordRelayFailure(reason: string, host?: string): void {
-  recentRelayFailures.push({ host, reason, at: Date.now() })
+function recordRelayFailure(
+  reason: string,
+  host?: string,
+  kind?: ProxyConnectErrorKind,
+): void {
+  recentRelayFailures.push({
+    host,
+    reason,
+    ...(kind !== undefined ? { kind } : {}),
+    at: Date.now(),
+  })
   while (recentRelayFailures.length > MAX_RELAY_FAILURES) {
     recentRelayFailures.shift()
   }
@@ -164,6 +178,8 @@ type ConnState = {
   // the tunnel is carrying TLS. After that, writing a plaintext 502 would
   // corrupt the client's TLS stream — just close instead.
   established: boolean
+  // Official 2.1.325 #1892: gateway answered HTTP 4xx/5xx to CONNECT.
+  connectRejected?: boolean
   // WS onerror is always followed by onclose; without a guard the second
   // handler would sock.end() an already-ended socket. First caller wins.
   closed: boolean
@@ -463,7 +479,27 @@ function openTunnel(
         : new Uint8Array(Buffer.from(ev.data))
     const payload = decodeChunk(raw)
     if (payload && payload.length > 0) {
-      st.established = true
+      if (!st.established) {
+        // Official 2.1.325 #1892: inspect the first chunk's HTTP status line to
+        // distinguish HTTP 502 (connect_unreachable) from other 4xx/5xx refusals
+        // (connect_rejected).
+        const statusPrefix = Buffer.from(payload.subarray(0, 16)).toString(
+          'utf8',
+        )
+        const classified = classifyProxyConnectError(statusPrefix)
+        if (classified) {
+          st.connectRejected = true
+          recordRelayFailure(
+            classified.detail,
+            st.connectTarget,
+            classified.kind,
+          )
+          logForDebugging(
+            `[upstreamproxy] ${classified.kind}: ${classified.detail} (${st.connectTarget ?? 'unknown'})`,
+          )
+        }
+        st.established = true
+      }
       sock.write(payload)
     }
   }
@@ -472,7 +508,7 @@ function openTunnel(
     const msg = 'message' in ev ? String(ev.message) : 'websocket error'
     logForDebugging(`[upstreamproxy] ws error: ${msg}`)
     // densable #48: mid-tunnel drop → bare reset at tool; status names host/reason.
-    if (st.established) {
+    if (st.established && !st.connectRejected) {
       recordRelayFailure(msg, st.connectTarget)
     }
     if (st.closed) return
@@ -487,7 +523,7 @@ function openTunnel(
   ws.onclose = () => {
     if (st.closed) return
     st.closed = true
-    if (st.established) {
+    if (st.established && !st.connectRejected) {
       recordRelayFailure('connection reset', st.connectTarget)
     }
     sock.end()

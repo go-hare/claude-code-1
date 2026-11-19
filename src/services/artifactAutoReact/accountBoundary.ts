@@ -51,6 +51,8 @@ export function noteArtifactAccountChanged(
 ): void {
   if (reason === 'same_account') return
   un().accountEpoch++
+  un().dbUndeclaredAt.clear()
+  un().dbUndeclaredDroppedAt.clear()
   noteShareAccountBoundary()
   scrubShareStatusIdentityFields()
 }

@@ -101,6 +101,57 @@ type OutputSchema = ReturnType<typeof outputSchema>
 
 export type Output = z.infer<OutputSchema>
 
+/**
+ * Official 2.1.321 #1914 (`uT` / ToolExecutionError): thrown on all
+ * NotebookEditTool failures so hooks & telemetry accurately see a failed call.
+ */
+export class NotebookEditExecutionError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ToolExecutionError'
+  }
+}
+
+/**
+ * Official 2.1.321 #1854 (`Crn`):
+ * Validate and resolve target cell index for `NotebookEdit`.
+ * Never defaults to index 0 when `cell_id` is omitted for `delete` or `replace`
+ * (preventing network-path calls from deleting/overwriting cell 0).
+ */
+export function resolveNotebookCellIndex(
+  cells: readonly NotebookCell[],
+  cell_id: string | undefined,
+  edit_mode: 'replace' | 'insert' | 'delete' = 'replace',
+): number | { message: string; errorCode: number } {
+  const isInsert = edit_mode === 'insert'
+  if (!cell_id) {
+    return isInsert
+      ? 0
+      : {
+          message: 'Cell ID must be specified when not inserting a new cell.',
+          errorCode: 7,
+        }
+  }
+  let idx = cells.findIndex(cell => cell.id === cell_id)
+  if (idx === -1) {
+    const parsedCellIndex = parseCellId(cell_id)
+    if (parsedCellIndex === undefined) {
+      return {
+        message: `Cell with ID "${cell_id}" not found in notebook.`,
+        errorCode: 8,
+      }
+    }
+    if (!cells[parsedCellIndex]) {
+      return {
+        message: `Cell with index ${parsedCellIndex} does not exist in notebook.`,
+        errorCode: 7,
+      }
+    }
+    idx = parsedCellIndex
+  }
+  return isInsert ? idx + 1 : idx
+}
+
 export const NotebookEditTool = buildTool({
   name: NOTEBOOK_EDIT_TOOL_NAME,
   searchHint: 'edit Jupyter notebook cells (.ipynb)',
@@ -394,73 +445,69 @@ export const NotebookEditTool = buildTool({
 
       // readFileSyncWithMetadata gives content + encoding + line endings in
       // one safeResolvePath + readFileSync pass, replacing the previous
-      // detectFileEncoding + readFile + detectLineEndings chain (each of
-      // which redid safeResolvePath and/or a 4KB readSync).
-      const rawBytes = readFileSync(openedWrite.ioPath)
+      // detectFileEncoding + readFile + detectLineEndings chain.
+      let rawBytes: Buffer
+      try {
+        rawBytes = readFileSync(openedWrite.ioPath)
+      } catch (readErr) {
+        const msg = readErr instanceof Error ? readErr.message : String(readErr)
+        if ((readErr as NodeJS.ErrnoException)?.code === 'ENOENT') {
+          throw new NotebookEditExecutionError('Notebook file does not exist.')
+        }
+        throw new NotebookEditExecutionError(msg)
+      }
       const detected = detectBufferTextEncoding(rawBytes)
       if (detected.notText) {
-        throw new Error(formatNonTextFileRefusal(detected.notText))
+        throw new NotebookEditExecutionError(
+          formatNonTextFileRefusal(detected.notText),
+        )
       }
       const { content, encoding, lineEndings } = readFileSyncWithMetadata(
         openedWrite.ioPath,
       )
+      const currentMtime = getFileModificationTime(openedWrite.ioPath)
+
       // Must use non-memoized jsonParse here: safeParseJSON caches by content
       // string and returns a shared object reference, but we mutate the
       // notebook in place below (cells.splice, targetCell.source = ...).
-      // Using the memoized version poisons the cache for validateInput() and
-      // any subsequent call() with the same file content.
       let notebook: NotebookContent
       try {
         notebook = jsonParse(content) as NotebookContent
       } catch {
-        return {
-          data: {
-            new_source,
-            cell_type: cell_type ?? 'code',
-            language: 'python',
-            edit_mode: 'replace',
-            error: 'Notebook is not valid JSON.',
-            cell_id,
-            notebook_path: fullPath,
-            original_file: '',
-            updated_file: '',
-          },
-        }
+        throw new NotebookEditExecutionError('Notebook is not valid JSON.')
       }
-
-      let cellIndex
-      if (!cell_id) {
-        cellIndex = 0 // Default to inserting at the beginning if no cell_id is provided
-      } else {
-        // First try to find the cell by its actual ID
-        cellIndex = notebook.cells.findIndex(
-          (cell: NotebookCell) => cell.id === cell_id,
+      if (!notebook || !Array.isArray(notebook.cells)) {
+        throw new NotebookEditExecutionError(
+          'Notebook file is not a valid Jupyter notebook (top-level "cells" must be an array of cell objects, each with a string or string-array "source").',
         )
-
-        // If not found, try to parse as a numeric index (cell-N format)
-        if (cellIndex === -1) {
-          const parsedCellIndex = parseCellId(cell_id)
-          if (parsedCellIndex !== undefined) {
-            cellIndex = parsedCellIndex
-          }
-        }
-
-        if (originalEditMode === 'insert') {
-          cellIndex += 1 // Insert after the cell with this ID
-        }
       }
 
-      // Convert replace to insert if trying to replace one past the end
-      let edit_mode = originalEditMode
-      if (edit_mode === 'replace' && cellIndex === notebook.cells.length) {
-        edit_mode = 'insert'
-        if (!cell_type) {
-          cell_type = 'code' // Default to code if no cell_type specified
-        }
+      // Official 2.1.319 #1744: re-check mtime in call() after any permission
+      // prompt so a concurrent edit while the prompt was open cannot target
+      // the wrong cell.
+      const lastRead = readFileState.get(fullPath)
+      if (lastRead !== undefined && currentMtime > lastRead.timestamp) {
+        throw new NotebookEditExecutionError(
+          'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
+        )
       }
 
-      const language = notebook.metadata.language_info?.name ?? 'python'
-      let new_cell_id
+      // Official 2.1.321 #1854 (`Crn`): validate cell_id in call() as well as
+      // validateInput() so network-path calls never default to cell 0 on
+      // delete/replace when cell_id is omitted or invalid.
+      const resolvedIndex = resolveNotebookCellIndex(
+        notebook.cells,
+        cell_id,
+        originalEditMode ?? 'replace',
+      )
+      if (typeof resolvedIndex !== 'number') {
+        throw new NotebookEditExecutionError(resolvedIndex.message)
+      }
+      const cellIndex = resolvedIndex
+      const edit_mode = originalEditMode ?? 'replace'
+
+      const language = notebook.metadata?.language_info?.name ?? 'python'
+      let new_cell_id: string | undefined
       if (
         (notebook.nbformat ?? 4) > 4 ||
         ((notebook.nbformat ?? 4) === 4 && (notebook.nbformat_minor ?? 0) >= 5)
@@ -473,7 +520,6 @@ export const NotebookEditTool = buildTool({
       }
 
       if (edit_mode === 'delete') {
-        // Delete the specified cell
         notebook.cells.splice(cellIndex, 1)
       } else if (edit_mode === 'insert') {
         let new_cell: NotebookCell
@@ -494,14 +540,16 @@ export const NotebookEditTool = buildTool({
             outputs: [],
           }
         }
-        // Insert the new cell
         notebook.cells.splice(cellIndex, 0, new_cell)
       } else {
-        // Find the specified cell
-        const targetCell = notebook.cells[cellIndex]! // validateInput ensures cell_number is in bounds
+        const targetCell = notebook.cells[cellIndex]
+        if (!targetCell) {
+          throw new NotebookEditExecutionError(
+            `Cell with index ${cellIndex} does not exist in notebook.`,
+          )
+        }
         targetCell.source = new_source
         if (targetCell.cell_type === 'code') {
-          // Reset execution count and clear outputs since cell was modified
           targetCell.execution_count = null
           targetCell.outputs = []
         }
@@ -519,10 +567,6 @@ export const NotebookEditTool = buildTool({
         encoding,
         lineEndings,
       )
-      // Update readFileState with post-write mtime (matches FileEditTool/
-      // FileWriteTool). offset:undefined breaks FileReadTool's dedup match —
-      // without this, Read→NotebookEdit→Read in the same millisecond would
-      // return the file_unchanged stub against stale in-context content.
       readFileState.set(fullPath, {
         content: updatedContent,
         timestamp: getFileModificationTime(fullPath),
@@ -533,7 +577,7 @@ export const NotebookEditTool = buildTool({
         new_source,
         cell_type: cell_type ?? 'code',
         language,
-        edit_mode: edit_mode ?? 'replace',
+        edit_mode,
         cell_id: new_cell_id || undefined,
         error: '',
         notebook_path: fullPath,
@@ -544,36 +588,21 @@ export const NotebookEditTool = buildTool({
         data,
       }
     } catch (error) {
+      // Official 2.1.321 #1914: throw ToolExecutionError on all failures rather
+      // than returning a success payload with `error` set.
+      if (error instanceof NotebookEditExecutionError) {
+        throw error
+      }
       if (error instanceof Error) {
-        const data = {
-          new_source,
-          cell_type: cell_type ?? 'code',
-          language: 'python',
-          edit_mode: 'replace',
-          error: error.message,
-          cell_id,
-          notebook_path: fullPath,
-          original_file: '',
-          updated_file: '',
-        }
-        return {
-          data,
-        }
+        const msg =
+          openedWrite.ioPath !== fullPath
+            ? error.message.split(openedWrite.ioPath).join(fullPath)
+            : error.message
+        throw new NotebookEditExecutionError(msg)
       }
-      const data = {
-        new_source,
-        cell_type: cell_type ?? 'code',
-        language: 'python',
-        edit_mode: 'replace',
-        error: 'Unknown error occurred while editing notebook',
-        cell_id,
-        notebook_path: fullPath,
-        original_file: '',
-        updated_file: '',
-      }
-      return {
-        data,
-      }
+      throw new NotebookEditExecutionError(
+        'Unknown error occurred while editing notebook',
+      )
     } finally {
       await openedWrite.close()
     }

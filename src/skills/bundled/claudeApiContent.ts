@@ -73,10 +73,61 @@ import sharedCostOptimization from './claude-api/shared/cost-optimization.md' wi
 import sharedErrorCodes from './claude-api/shared/error-codes.md' with {
   type: 'text',
 }
+import sharedLatencyOptimization from './claude-api/shared/latency-optimization.md' with {
+  type: 'text',
+}
+import sharedLatencyOptimizationProbe from './claude-api/shared/latency-optimization/latency_probe.py.txt' with {
+  type: 'text',
+}
+import sharedLatencyOptimizationLevers from './claude-api/shared/latency-optimization/levers.md' with {
+  type: 'text',
+}
+import sharedLatencyOptimizationMeasuring from './claude-api/shared/latency-optimization/measuring.md' with {
+  type: 'text',
+}
+import sharedLatencyOptimizationSearch from './claude-api/shared/latency-optimization/search.md' with {
+  type: 'text',
+}
 import sharedLiveSources from './claude-api/shared/live-sources.md' with {
   type: 'text',
 }
 import sharedManagedAgentsMultiagent from './claude-api/shared/managed-agents-multiagent.md' with {
+  type: 'text',
+}
+import sharedQuickstartBugHunter from './claude-api/shared/managed-agents-quickstarts/bug-hunter.md' with {
+  type: 'text',
+}
+import sharedQuickstartContractTracker from './claude-api/shared/managed-agents-quickstarts/contract-tracker.md' with {
+  type: 'text',
+}
+import sharedQuickstartDataAnalyst from './claude-api/shared/managed-agents-quickstarts/data-analyst.md' with {
+  type: 'text',
+}
+import sharedQuickstartDeepResearcher from './claude-api/shared/managed-agents-quickstarts/deep-researcher.md' with {
+  type: 'text',
+}
+import sharedQuickstartFieldMonitor from './claude-api/shared/managed-agents-quickstarts/field-monitor.md' with {
+  type: 'text',
+}
+import sharedQuickstartIncidentCommander from './claude-api/shared/managed-agents-quickstarts/incident-commander.md' with {
+  type: 'text',
+}
+import sharedQuickstartSprintRetroFacilitator from './claude-api/shared/managed-agents-quickstarts/sprint-retro-facilitator.md' with {
+  type: 'text',
+}
+import sharedQuickstartStockWatchlistScanner from './claude-api/shared/managed-agents-quickstarts/stock-watchlist-scanner.md' with {
+  type: 'text',
+}
+import sharedQuickstartStructuredExtractor from './claude-api/shared/managed-agents-quickstarts/structured-extractor.md' with {
+  type: 'text',
+}
+import sharedQuickstartSupportAgent from './claude-api/shared/managed-agents-quickstarts/support-agent.md' with {
+  type: 'text',
+}
+import sharedQuickstartSupportToEngEscalator from './claude-api/shared/managed-agents-quickstarts/support-to-eng-escalator.md' with {
+  type: 'text',
+}
+import sharedQuickstartVideoExplainerMaker from './claude-api/shared/managed-agents-quickstarts/video-explainer-maker.md' with {
   type: 'text',
 }
 import sharedManagedAgentsSecure from './claude-api/shared/managed-agents-secure.md' with {
@@ -183,8 +234,38 @@ export const SKILL_FILES: Record<string, string> = {
   'shared/claude-platform-on-aws.md': sharedClaudePlatformOnAws,
   'shared/cost-optimization.md': sharedCostOptimization,
   'shared/error-codes.md': sharedErrorCodes,
+  'shared/latency-optimization.md': sharedLatencyOptimization,
+  'shared/latency-optimization/latency_probe.py':
+    sharedLatencyOptimizationProbe,
+  'shared/latency-optimization/levers.md': sharedLatencyOptimizationLevers,
+  'shared/latency-optimization/measuring.md':
+    sharedLatencyOptimizationMeasuring,
+  'shared/latency-optimization/search.md': sharedLatencyOptimizationSearch,
   'shared/live-sources.md': sharedLiveSources,
   'shared/managed-agents-multiagent.md': sharedManagedAgentsMultiagent,
+  'shared/managed-agents-quickstarts/bug-hunter.md': sharedQuickstartBugHunter,
+  'shared/managed-agents-quickstarts/contract-tracker.md':
+    sharedQuickstartContractTracker,
+  'shared/managed-agents-quickstarts/data-analyst.md':
+    sharedQuickstartDataAnalyst,
+  'shared/managed-agents-quickstarts/deep-researcher.md':
+    sharedQuickstartDeepResearcher,
+  'shared/managed-agents-quickstarts/field-monitor.md':
+    sharedQuickstartFieldMonitor,
+  'shared/managed-agents-quickstarts/incident-commander.md':
+    sharedQuickstartIncidentCommander,
+  'shared/managed-agents-quickstarts/sprint-retro-facilitator.md':
+    sharedQuickstartSprintRetroFacilitator,
+  'shared/managed-agents-quickstarts/stock-watchlist-scanner.md':
+    sharedQuickstartStockWatchlistScanner,
+  'shared/managed-agents-quickstarts/structured-extractor.md':
+    sharedQuickstartStructuredExtractor,
+  'shared/managed-agents-quickstarts/support-agent.md':
+    sharedQuickstartSupportAgent,
+  'shared/managed-agents-quickstarts/support-to-eng-escalator.md':
+    sharedQuickstartSupportToEngEscalator,
+  'shared/managed-agents-quickstarts/video-explainer-maker.md':
+    sharedQuickstartVideoExplainerMaker,
   'shared/managed-agents-secure.md': sharedManagedAgentsSecure,
   'shared/managed-agents-self-hosted-sandboxes.md':
     sharedManagedAgentsSelfHosted,

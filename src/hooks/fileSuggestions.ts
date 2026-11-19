@@ -18,6 +18,7 @@ import { getCwd } from '../utils/cwd.js'
 import { logForDebugging } from '../utils/debug.js'
 import { errorMessage } from '../utils/errors.js'
 import { execFileNoThrowWithCwd } from '../utils/execFileNoThrow.js'
+import { shouldSkipStartupFileIndexing } from '../utils/fileIndexing.js'
 import { getFsImplementation } from '../utils/fsOperations.js'
 import { findGitRoot, gitExe } from '../utils/git.js'
 import {
@@ -659,6 +660,14 @@ export async function getPathsForSuggestions(): Promise<FileIndex> {
       projectSettings.respectGitignore ?? globalConfig.respectGitignore ?? true
 
     const cwd = getCwd()
+    // Official 2.1.319 (#1725): skip full project file indexing on network
+    // filesystems (NFS, SMB/CIFS, Lustre, GPFS, etc.) on Linux/WSL.
+    if (await shouldSkipStartupFileIndexing(cwd)) {
+      logForDebugging(
+        `[FileIndex] skipping full project file indexing on network filesystem: ${cwd}`,
+      )
+      return index
+    }
     const [projectFiles, configFiles] = await Promise.all([
       getProjectFiles(signal, respectGitignore),
       getClaudeConfigFiles(cwd),

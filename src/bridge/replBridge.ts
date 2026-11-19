@@ -111,6 +111,12 @@ export type ReplBridgeHandle = {
   sendControlResponse(response: SDKControlResponse): void
   sendControlCancelRequest(requestId: string): void
   sendResult(): void
+  /** #1767: Forward session metadata (including `rate_limit_info: null` to clear remote banner). */
+  reportMetadata?(metadata: Record<string, unknown>): void
+  /** #1767: Clear remote `rate_limit_info` via `reportMetadata({ rate_limit_info: null })`. */
+  clearRateLimitInfo?(): void
+  /** #1767: Report or clear remote `rate_limit_info` metadata (deduped). */
+  reportRateLimitInfo?(info: Record<string, unknown> | null): void
   /**
    * Official getLastSequenceNum / getSSESequenceNum — high-water for
    * CLAUDE_BRIDGE_REATTACH_SEQ on left-arrow adopt (rit). Optional until

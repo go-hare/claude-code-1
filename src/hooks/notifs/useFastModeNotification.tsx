@@ -145,8 +145,12 @@ export function useFastModeNotification(mainLoopModel?: string): void {
 function getCooldownMessage(reason: CooldownReason, resetIn: string): string {
   switch (reason) {
     case 'overloaded':
+    case 'server_error':
+    case 'timeout':
       return `Fast mode overloaded and is temporarily unavailable · resets in ${resetIn}`;
     case 'rate_limit':
       return `Fast limit reached and temporarily disabled · resets in ${resetIn}`;
+    case 'refused':
+      return `Fast mode paused: your cloud provider refused a fast request · trying again in ${resetIn}`;
   }
 }

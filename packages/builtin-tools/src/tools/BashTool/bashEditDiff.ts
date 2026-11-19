@@ -172,14 +172,22 @@ export function commandHasGitStateSwitch(command: string): boolean {
 
 function runGit(
   args: string[],
-  opts: { cwd: string; env?: NodeJS.ProcessEnv; timeout?: number },
+  opts: {
+    cwd: string
+    env?: NodeJS.ProcessEnv
+    timeout?: number
+    input?: string
+  },
 ): Promise<{ stdout: string; code: number }> {
   return new Promise(resolve => {
     const child = spawn('git', args, {
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env, GIT_OPTIONAL_LOCKS: '1' },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [opts.input !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'],
     })
+    if (opts.input !== undefined && child.stdin) {
+      child.stdin.end(opts.input)
+    }
     let stdout = ''
     child.stdout?.on('data', (chunk: Buffer) => {
       stdout += chunk.toString('utf8')
@@ -273,6 +281,138 @@ function unescapeGitPath(raw: string): string {
 }
 
 /**
+ * Official 2.1.319 #1742 (`Tmi` + `_mi`):
+ * Parse `git status --porcelain=v2 -z` output to collect changed, deleted, and
+ * untracked-directory paths, then explicitly re-index via
+ * `git update-index --add --remove -z --stdin` / `--force-remove -z --stdin`.
+ * This prevents git's racy-clean optimization from missing files written in
+ * the same second as the prior index update.
+ */
+export function parsePorcelainV2Status(stdout: string): {
+  changed: string[]
+  deleted: string[]
+  untrackedDirectories: string[]
+} {
+  const changed: string[] = []
+  const deleted: string[] = []
+  const untrackedDirectories: string[] = []
+  for (const entry of stdout.split('\0')) {
+    if (!entry) continue
+    if (entry.startsWith('? ')) {
+      const p = entry.slice(2)
+      if (!p) continue
+      if (p.endsWith('/')) {
+        untrackedDirectories.push(p)
+      } else {
+        changed.push(p)
+      }
+    } else if (entry.startsWith('1 ')) {
+      // 1 XY sub mH mI mW hH hI path
+      const xy = entry.slice(2, 4)
+      const parts = entry.split(' ')
+      const p = parts.slice(8).join(' ')
+      if (!p) continue
+      if (xy[1] === 'D') {
+        deleted.push(p)
+      } else {
+        changed.push(p)
+      }
+    } else if (entry.startsWith('u ')) {
+      // u XY sub m1 m2 m3 mW h1 h2 h3 path
+      const xy = entry.slice(2, 4)
+      const parts = entry.split(' ')
+      const p = parts.slice(10).join(' ')
+      if (!p) continue
+      if (xy[1] === 'D') {
+        deleted.push(p)
+      } else {
+        changed.push(p)
+      }
+    }
+  }
+  return { changed, deleted, untrackedDirectories }
+}
+
+async function syncPrivateIndexAndWriteTree(
+  repoRoot: string,
+  env: NodeJS.ProcessEnv,
+): Promise<string | null> {
+  const statusRes = await runGit(
+    [
+      'status',
+      '--porcelain=v2',
+      '-z',
+      '--untracked-files=normal',
+      '--ignored=no',
+      '--no-renames',
+      '--ignore-submodules=all',
+    ],
+    { cwd: repoRoot, env, timeout: 10_000 },
+  )
+  if (statusRes.code !== 0) {
+    return null
+  }
+  const { changed, deleted, untrackedDirectories } = parsePorcelainV2Status(
+    statusRes.stdout,
+  )
+  if (untrackedDirectories.length > 0) {
+    const lsRes = await runGit(
+      [
+        'ls-files',
+        '-z',
+        '--others',
+        '--exclude-standard',
+        '--',
+        ...untrackedDirectories,
+      ],
+      { cwd: repoRoot, env, timeout: 10_000 },
+    )
+    if (lsRes.code !== 0) {
+      return null
+    }
+    for (const f of lsRes.stdout.split('\0')) {
+      if (f && !f.endsWith('/')) {
+        changed.push(f)
+      }
+    }
+  }
+  if (deleted.length > 0) {
+    const rmRes = await runGit(
+      ['update-index', '--force-remove', '-z', '--stdin'],
+      {
+        cwd: repoRoot,
+        env,
+        timeout: 10_000,
+        input: `${deleted.join('\0')}\0`,
+      },
+    )
+    if (rmRes.code !== 0) return null
+  }
+  if (changed.length > 0) {
+    const addRes = await runGit(
+      ['update-index', '--add', '--remove', '-z', '--stdin'],
+      {
+        cwd: repoRoot,
+        env,
+        timeout: 10_000,
+        input: `${changed.join('\0')}\0`,
+      },
+    )
+    if (addRes.code !== 0) return null
+  }
+  const tree = await runGit(['write-tree'], {
+    cwd: repoRoot,
+    env,
+    timeout: 10_000,
+  })
+  const sha = tree.stdout.trim()
+  if (tree.code !== 0 || !/^[0-9a-f]{40,64}$/.test(sha)) {
+    return null
+  }
+  return sha
+}
+
+/**
  * densable j2 — snapshot worktree as a tree via a private GIT_DIR + alternates.
  */
 export async function takeBashEditDiffSnapshot(
@@ -310,26 +450,12 @@ export async function takeBashEditDiffSnapshot(
       // empty index is fine
     }
     const env = { GIT_DIR: privateDir, GIT_WORK_TREE: repoRoot }
-    await runGit(['update-index', '--refresh'], {
-      cwd: repoRoot,
-      env,
-      timeout: 10_000,
-    })
-    await runGit(['add', '-A', '--ignore-errors'], {
-      cwd: repoRoot,
-      env,
-      timeout: 10_000,
-    })
-    const tree = await runGit(['write-tree'], {
-      cwd: repoRoot,
-      env,
-      timeout: 10_000,
-    })
-    if (tree.code !== 0 || !/^[0-9a-f]{40,64}$/.test(tree.stdout.trim())) {
+    const treeSha = await syncPrivateIndexAndWriteTree(repoRoot, env)
+    if (!treeSha) {
       await rm(privateDir, { recursive: true, force: true }).catch(() => {})
       return 'unavailable'
     }
-    return { repoRoot, gitDirectory: privateDir, tree: tree.stdout.trim() }
+    return { repoRoot, gitDirectory: privateDir, tree: treeSha }
   } catch (e) {
     logForDebugging(`bashEditDiff: snapshot failed: ${String(e)}`)
     return 'unavailable'
@@ -345,25 +471,10 @@ export async function diffBashEditDiffSnapshot(
   const { repoRoot, gitDirectory, tree } = snapshot
   const env = { GIT_DIR: gitDirectory, GIT_WORK_TREE: repoRoot }
   try {
-    await runGit(['update-index', '--refresh'], {
-      cwd: repoRoot,
-      env,
-      timeout: 10_000,
-    })
-    await runGit(['add', '-A', '--ignore-errors'], {
-      cwd: repoRoot,
-      env,
-      timeout: 10_000,
-    })
-    const next = await runGit(['write-tree'], {
-      cwd: repoRoot,
-      env,
-      timeout: 10_000,
-    })
-    if (next.code !== 0) {
+    const nextTree = await syncPrivateIndexAndWriteTree(repoRoot, env)
+    if (!nextTree) {
       return { files: [], moreFiles: 0, unavailable: true }
     }
-    const nextTree = next.stdout.trim()
     if (nextTree === tree) {
       return { files: [], moreFiles: 0 }
     }

@@ -1533,6 +1533,72 @@ export function pathInOutsideReadFenceWorkingPath(
 }
 
 /**
+ * Official 2.1.319 #1796 (`Ic` / `LYe` / `EIe`):
+ * On macOS and Windows, when a requested path is rejected as outside the
+ * working directories (and did not land outside through a symlink), detect if
+ * only its letter case differs from a path inside the working directories so
+ * the refusal message can name that spelling: `(letter case counts: <H> is inside)`.
+ */
+export function findCaseOnlyWorkingDirMatch(
+  requestedPath: string,
+  directories: ReadonlySet<string>,
+  opts?: {
+    landingOutside?: boolean
+    platform?: string
+  },
+): string | undefined {
+  const platform = opts?.platform ?? getPlatform()
+  if (
+    opts?.landingOutside ||
+    (platform !== 'macos' && platform !== 'windows')
+  ) {
+    return undefined
+  }
+  const normalizeForCaseMatch = (p: string): string => {
+    if (platform === 'windows' && /^[A-Za-z]:[\\/]/.test(p)) {
+      return p.replace(/\\/g, '/').replace(/\/+$/, '')
+    }
+    return expandPath(p).replace(/\\/g, '/')
+  }
+  const normalizedRequested = normalizeForCaseMatch(requestedPath)
+  const requestedParts = normalizedRequested.split(/\/+/).filter(Boolean)
+  const requestedLower = normalizedRequested.toLowerCase()
+  for (const dir of directories) {
+    for (const dirSpelling of workingDirPathsForPermission(dir)) {
+      const normalizedDir = normalizeForCaseMatch(dirSpelling)
+      const dirParts = normalizedDir.split(/\/+/).filter(Boolean)
+      const tail = requestedParts.slice(dirParts.length)
+      const candidate =
+        tail.length === 0
+          ? normalizedDir
+          : `${normalizedDir.replace(/\/+$/, '')}/${tail.join('/')}`
+      if (
+        candidate !== normalizedRequested &&
+        candidate.toLowerCase() === requestedLower
+      ) {
+        return platform === 'windows'
+          ? candidate.replace(/\//g, '\\')
+          : candidate
+      }
+    }
+  }
+  return undefined
+}
+
+function formatCaseOnlyHint(
+  requestedPath: string,
+  directories: ReadonlySet<string>,
+  carry: SymlinkCarry | null,
+): string {
+  const caseMatch = findCaseOnlyWorkingDirMatch(requestedPath, directories, {
+    landingOutside: carry?.landingOutside,
+  })
+  return caseMatch === undefined
+    ? ''
+    : ` (letter case counts: ${caseMatch} is inside)`
+}
+
+/**
  * official vi @181746129:
  * `if(!r.restricted)return null;if(mb(e,r,t)||o().behavior==="allow")return null;
  *  return{behavior:"deny",message:`${e} is outside ${u}; --restricted confines the file tools to the working directory.`}`
@@ -1548,21 +1614,26 @@ export function denyRestrictedFileToolOutsideCwd(
     return null
   }
   if (internalAllow?.().behavior === 'allow') return null
+  const dirs = allWorkingDirectories(context)
+  const carry = symlinkCarryForWorkingDirectorySet(
+    path,
+    dirs,
+    precomputedPathsToCheck,
+  )
+  const caseHint = formatCaseOnlyHint(path, dirs, carry)
+  const baseMessage = restrictedFileToolOutsideMessage(path, dirs)
+  const message =
+    caseHint && baseMessage.includes('; ')
+      ? baseMessage.replace('; ', `${caseHint}; `)
+      : `${baseMessage}${caseHint}`
   return {
     behavior: 'deny',
-    message: restrictedFileToolOutsideMessage(
-      path,
-      allWorkingDirectories(context),
-    ),
+    message,
     decisionReason: {
       type: 'other',
       reason: '--restricted confines the file tools to the working directory.',
     },
-    blockedPath: blockedPathForWorkingDirectorySet(
-      path,
-      allWorkingDirectories(context),
-      precomputedPathsToCheck,
-    ),
+    blockedPath: carry?.carriedOut ? carry.landing : path,
   }
 }
 
@@ -1635,14 +1706,15 @@ export function checkBlockWritesOutsideWorkingDirectories(
     }
   }
   if (!contextBlocksOutsideWrites(context)) return undefined
-  if (
-    !pathInWorkingDirectorySet(
+  const writeFenceDirs = workingDirectoriesForOutsideReadFence(context)
+  if (!pathInWorkingDirectorySet(path, writeFenceDirs, paths)) {
+    const carry = symlinkCarryForWorkingDirectorySet(
       path,
-      workingDirectoriesForOutsideReadFence(context),
+      writeFenceDirs,
       paths,
     )
-  ) {
-    return `${path}: ${BLOCK_WRITES_OUTSIDE_MESSAGE}`
+    const caseHint = formatCaseOnlyHint(path, writeFenceDirs, carry)
+    return `${path}${caseHint}: ${BLOCK_WRITES_OUTSIDE_MESSAGE}`
   }
   if (isJsonOrSettingsPathForWriteBlock(paths)) {
     return `${path}: ${BLOCK_WRITES_SETTINGS_MESSAGE}`
@@ -1661,21 +1733,22 @@ export function denyBlockedOutsideWritesForFileTool(
 ): PermissionDenyDecision | null {
   if (!contextBlocksOutsideWrites(context)) return null
   const paths = precomputedPathsToCheck ?? [expandPath(path)]
-  if (
-    !pathInWorkingDirectorySet(
+  const writeFenceDirs = workingDirectoriesForOutsideReadFence(context)
+  if (!pathInWorkingDirectorySet(path, writeFenceDirs, paths)) {
+    const carry = symlinkCarryForWorkingDirectorySet(
       path,
-      workingDirectoriesForOutsideReadFence(context),
+      writeFenceDirs,
       paths,
     )
-  ) {
+    const caseHint = formatCaseOnlyHint(path, writeFenceDirs, carry)
     return {
       behavior: 'deny',
-      message: `${path}: ${BLOCK_WRITES_OUTSIDE_WHY}`,
+      message: `${path}${caseHint}: ${BLOCK_WRITES_OUTSIDE_WHY}`,
       decisionReason: {
         type: 'other',
         reason: BLOCK_WRITES_OUTSIDE_MESSAGE,
       },
-      blockedPath: path,
+      blockedPath: carry?.carriedOut ? carry.landing : path,
     }
   }
   if (isJsonOrSettingsPathForWriteBlock(paths)) {
@@ -1706,19 +1779,27 @@ export function denyBlockedOutsideReadsForFileTool(
     return null
   }
   if (internalAllow?.().behavior === 'allow') return null
+  const readFenceDirs = workingDirectoriesForOutsideReadFence(context)
+  const carry = symlinkCarryForWorkingDirectorySet(
+    path,
+    readFenceDirs,
+    precomputedPathsToCheck,
+  )
+  const caseHint = formatCaseOnlyHint(path, readFenceDirs, carry)
+  const baseReadMsg = blockedOutsideReadFileToolMessage(path)
+  const readMessage =
+    caseHint && baseReadMsg.includes('; ')
+      ? baseReadMsg.replace('; ', `${caseHint}; `)
+      : `${baseReadMsg}${caseHint}`
   const deny: PermissionDenyDecision = {
     behavior: 'deny',
-    message: blockedOutsideReadFileToolMessage(path),
+    message: readMessage,
     decisionReason: {
       type: 'safetyCheck',
       reason: OUTSIDE_READS_BLOCKED_REASON,
       classifierApprovable: false,
     },
-    blockedPath: blockedPathForWorkingDirectorySet(
-      path,
-      workingDirectoriesForOutsideReadFence(context),
-      precomputedPathsToCheck,
-    ),
+    blockedPath: carry?.carriedOut ? carry.landing : path,
   }
   // densable @179659900: served && !restricted && deny && !qWn() → ask +
   // circuitBreaker:"outsideReadsBlocked". Gold qWn = fu().some(permissions

@@ -474,11 +474,11 @@ export function powershellToolCheckPermission(
     toolPermissionContext,
   )
 
-  // 1a. Deny/ask if exact command has a rule
-  if (
-    exactMatchResult.behavior === 'deny' ||
-    exactMatchResult.behavior === 'ask'
-  ) {
+  // 1a. Deny immediately if exact command has a deny rule.
+  // #1809 (`K4n`): defer ALL exact ask rules (regardless of source) until
+  // after step 2a `matchingDenyRules` so a projectSettings/userSettings/session
+  // exact ask rule cannot downgrade a broader prefix/wildcard deny rule.
+  if (exactMatchResult.behavior === 'deny') {
     return exactMatchResult
   }
 
@@ -496,6 +496,11 @@ export function powershellToolCheckPermission(
         rule: matchingDenyRules[0],
       },
     }
+  }
+
+  // 2a2. Return deferred exact ask rule now that no broader deny rule matched.
+  if (exactMatchResult.behavior === 'ask') {
+    return exactMatchResult
   }
 
   // 2b. Ask if command has an ask rule

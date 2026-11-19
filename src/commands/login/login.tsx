@@ -27,6 +27,71 @@ import { removeWorkspaceKey } from '../../services/auth/saveWorkspaceKey.js';
 /** densable lnr */
 export const LOGIN_HANDOFF_SIGNED_IN = "Signed in. Review your organization's managed settings to continue.";
 
+/**
+ * #1745: Coordinate `/login` dialog dismissal with `validateForceLoginOrg()`.
+ * - When `willAutoQuery` is true or a managed `forceLoginOrgUUID`/`forceLoginMethod`
+ *   pin is active, await `validateOrg()` BEFORE calling `onDone` so an unauthorized
+ *   org is rolled back and can never trigger `shouldQuery: true`.
+ * - Otherwise dismiss immediately on Enter and finish validation + non-security
+ *   refresh in the background.
+ */
+export async function finalizeLoginDone(opts: {
+  success: boolean;
+  willAutoQuery: boolean;
+  hasForceLoginPin: boolean;
+  doneMessage: string;
+  onDone: LocalJSXCommandOnDone;
+  validateOrg: () => Promise<{ valid: boolean; message?: string }>;
+  rollbackSignIn: () => Promise<unknown>;
+  onOrgRefusedBeforeDismiss: () => void;
+  onOrgRefusedAfterDismiss: (message?: string) => void;
+  runBackgroundRefresh: () => void;
+}): Promise<void> {
+  const mustAwaitOrgValidation = opts.willAutoQuery || opts.hasForceLoginPin;
+  if (mustAwaitOrgValidation) {
+    try {
+      const orgValidation = await opts.validateOrg();
+      if (!orgValidation.valid) {
+        await opts.rollbackSignIn();
+        opts.onOrgRefusedBeforeDismiss();
+        opts.onDone(orgValidation.message ?? 'Login refused by organization policy', {
+          display: 'system',
+        });
+        return;
+      }
+      opts.onDone(opts.doneMessage, opts.willAutoQuery ? { display: 'system', shouldQuery: true } : undefined);
+      opts.runBackgroundRefresh();
+    } catch (err) {
+      logForDebugging(`[login] force-login org validation failed: ${err instanceof Error ? err.message : String(err)}`);
+      await opts.rollbackSignIn().catch(rollbackErr => {
+        logForDebugging(
+          `[login] rollbackRefusedSignIn failed: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)}`,
+        );
+      });
+      opts.onOrgRefusedBeforeDismiss();
+      opts.onDone('Login refused: failed to validate organization policy', {
+        display: 'system',
+      });
+    }
+    return;
+  }
+
+  opts.onDone(opts.doneMessage, undefined);
+  try {
+    const orgValidation = await opts.validateOrg();
+    if (!orgValidation.valid) {
+      await opts.rollbackSignIn();
+      opts.onOrgRefusedAfterDismiss(orgValidation.message);
+      return;
+    }
+    opts.runBackgroundRefresh();
+  } catch (err) {
+    logForDebugging(
+      `[login] background post-login validation failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
 export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXCommandContext): Promise<React.ReactNode> {
   // Snapshot auth state once at call time (pure, no network)
   const authStatus = getAuthStatus();
@@ -50,99 +115,27 @@ export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXComma
     <Login
       authStatus={authStatus}
       startingMessage={startingMessage}
-      onDone={async success => {
+      onDone={success => {
         context.onChangeAPIKey();
         // Signature-bearing blocks (thinking, connector_text) are bound to the API key —
         // strip them so the new key doesn't reject stale signatures.
         context.setMessages(stripSignatureBlocks);
-        const orgValidation = await validateForceLoginOrg();
-        if (!orgValidation.valid) {
-          await rollbackRefusedSignIn();
-          context.setAppState(prev => ({
-            ...prev,
-            authChangeGeneration: prev.authChangeGeneration + 1,
-            authVersion: prev.authVersion + 1,
-          }));
-          onDone(orgValidation.message);
-          return;
-        }
-        let consentNeeded = false;
-        if (success) {
-          // Post-login refresh logic. Keep in sync with onboarding in src/interactiveHelpers.tsx
-          // Reset cost state when switching accounts
-          resetCostState();
-          let gatewayActive = false;
-          try {
-            const { getClientType } = await import('../../bootstrap/state.js');
-            gatewayActive = getClientType() === 'gateway';
-          } catch {
-            gatewayActive = false;
-          }
-          // Clear user data cache BEFORE GrowthBook refresh so it picks up fresh credentials
-          resetUserCache();
-          // Refresh GrowthBook after login to get updated feature flags (e.g., for claude.ai MCPs)
-          refreshGrowthBookAfterAuthChange();
-          // Clear any stale trusted device token from a previous account before
-          // re-enrolling — prevents sending the old token on bridge calls while
-          // the async enrollTrustedDevice() is in-flight.
-          clearTrustedDeviceToken();
-          // Enroll as a trusted device for Remote Control (10-min fresh-session window)
-          void enrollTrustedDevice();
-          // Reset killswitch gate checks and re-run with new org
-          resetAutoModeGateCheck();
-          const appState = context.getAppState();
-          void checkAndDisableAutoModeIfNeeded(appState.toolPermissionContext, context.setAppState, appState.fastMode);
-          const currentAccount = getOauthAccountInfoFromDisk();
-          const sameAccount =
-            previousAccount?.accountUuid === currentAccount?.accountUuid &&
-            previousAccount?.organizationUuid === currentAccount?.organizationUuid;
-          const accountSwitched = previousAccount?.accountUuid !== undefined && !sameAccount;
-          // densable: disconnect updater is gated on live RC; s() / authVersion
-          // always run. Do not fold +1 into the early-return arm.
-          if (accountSwitched) {
-            context.setAppState(prev => {
-              if (!(prev.replBridgeEnabled || prev.replBridgeError !== undefined)) {
-                return prev;
-              }
-              logForDebugging('[bridge:repl] Account changed via /login — disconnecting Remote Control session');
-              return {
-                ...prev,
-                replBridgeEnabled: false,
-                replBridgeExplicit: false,
-                replBridgeOutboundOnly: false,
-                replBridgeError: undefined,
-                replBridgeErrorKind: undefined,
-              };
-            });
-            context.setAppState(prev => ({
-              ...prev,
-              replBridgeSessionGroupingId: undefined,
-              replBridgeInitialName: undefined,
-              showRemoteCallout: false,
-              ultrareviewOverageConfirmed: false,
-            }));
-          }
-          context.setAppState(prev => ({
-            ...prev,
-            authChangeGeneration: prev.authChangeGeneration + 1,
-            authVersion: prev.authVersion + 1,
-          }));
-        }
-        // densable s9m — repeat OAUTH_TOKEN override warning after success
-        // densable gatewayActive (Jn()==="gateway"): suppress post-note on gateway client
-        let gatewayActive = false;
-        try {
-          const { getClientType } = await import('../../bootstrap/state.js');
-          gatewayActive = getClientType() === 'gateway';
-        } catch {
-          gatewayActive = false;
-        }
+
         let messages: Message[] = [];
         context.setMessages(prev => {
           messages = prev;
           return prev;
         });
         const willAutoQuery = Boolean(success && lastMessageRequestsAuthRetry(messages));
+        const gatewayActive = (() => {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { getClientType } = require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js');
+            return getClientType() === 'gateway';
+          } catch {
+            return false;
+          }
+        })();
         const placement = resolveOauthTokenEnvWarningPlacement({
           envTokenWasSet,
           gatewayActive,
@@ -158,14 +151,121 @@ export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXComma
           gatewayActive,
           includeEnvTokenWarning: placement === 'inline',
         });
-        // densable Smr if(b): lnr already closed login; append Hke notice only
-        if (consentNeeded) {
-          if (doneMessage) {
-            context.setMessages(prev => [...prev, createSystemMessage(doneMessage, 'info')]);
+
+        // Official 2.1.319 (#1745): dismiss the dialog immediately on Enter
+        // when no org/method pin is configured and no auto-query will fire;
+        // otherwise await validateForceLoginOrg() first so a refused org can
+        // never trigger shouldQuery: true before rollback.
+        const hasForceLoginPin = (() => {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { getSettingsForSource } =
+              require('../../utils/settings/settings.js') as typeof import('../../utils/settings/settings.js');
+            const policy = getSettingsForSource('policySettings');
+            return policy?.forceLoginOrgUUID !== undefined || policy?.forceLoginMethod !== undefined;
+          } catch {
+            return false;
           }
-          return;
-        }
-        onDone(doneMessage, willAutoQuery ? { display: 'system', shouldQuery: true } : undefined);
+        })();
+
+        const runPostLoginBackgroundRefresh = (): void => {
+          if (!success) return;
+          void (async () => {
+            // Post-login refresh logic. Keep in sync with onboarding in src/interactiveHelpers.tsx
+            // Reset cost state when switching accounts
+            resetCostState();
+            // Clear user data cache BEFORE GrowthBook refresh so it picks up fresh credentials
+            resetUserCache();
+            // Refresh GrowthBook after login to get updated feature flags (e.g., for claude.ai MCPs)
+            refreshGrowthBookAfterAuthChange();
+            // Clear any stale trusted device token from a previous account before
+            // re-enrolling — prevents sending the old token on bridge calls while
+            // the async enrollTrustedDevice() is in-flight.
+            clearTrustedDeviceToken();
+            // Enroll as a trusted device for Remote Control (10-min fresh-session window)
+            const enrollPromise = Promise.resolve(enrollTrustedDevice()).catch(err => {
+              logForDebugging(
+                `[login] enrollTrustedDevice failed: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            });
+            // Reset killswitch gate checks and re-run with new org
+            resetAutoModeGateCheck();
+            const appState = context.getAppState();
+            const autoModePromise = Promise.resolve(
+              checkAndDisableAutoModeIfNeeded(appState.toolPermissionContext, context.setAppState, appState.fastMode),
+            ).catch(err => {
+              logForDebugging(
+                `[login] checkAndDisableAutoModeIfNeeded failed: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            });
+            const currentAccount = getOauthAccountInfoFromDisk();
+            const sameAccount =
+              previousAccount?.accountUuid === currentAccount?.accountUuid &&
+              previousAccount?.organizationUuid === currentAccount?.organizationUuid;
+            const accountSwitched = previousAccount?.accountUuid !== undefined && !sameAccount;
+            if (accountSwitched) {
+              context.setAppState(prev => {
+                if (!(prev.replBridgeEnabled || prev.replBridgeError !== undefined)) {
+                  return prev;
+                }
+                logForDebugging('[bridge:repl] Account changed via /login — disconnecting Remote Control session');
+                return {
+                  ...prev,
+                  replBridgeEnabled: false,
+                  replBridgeExplicit: false,
+                  replBridgeOutboundOnly: false,
+                  replBridgeError: undefined,
+                  replBridgeErrorKind: undefined,
+                };
+              });
+              context.setAppState(prev => ({
+                ...prev,
+                replBridgeSessionGroupingId: undefined,
+                replBridgeInitialName: undefined,
+                showRemoteCallout: false,
+                ultrareviewOverageConfirmed: false,
+              }));
+            }
+            context.setAppState(prev => ({
+              ...prev,
+              authChangeGeneration: prev.authChangeGeneration + 1,
+              authVersion: prev.authVersion + 1,
+            }));
+            await Promise.all([enrollPromise, autoModePromise]);
+          })().catch(err => {
+            logForDebugging(
+              `[login] background post-login refresh failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          });
+        };
+
+        void finalizeLoginDone({
+          success,
+          willAutoQuery,
+          hasForceLoginPin,
+          doneMessage,
+          onDone,
+          validateOrg: validateForceLoginOrg,
+          rollbackSignIn: rollbackRefusedSignIn,
+          onOrgRefusedAfterDismiss: message => {
+            context.setAppState(prev => ({
+              ...prev,
+              authChangeGeneration: prev.authChangeGeneration + 1,
+              authVersion: prev.authVersion + 1,
+            }));
+            if (message) {
+              context.setMessages(prev => [...prev, createSystemMessage(message, 'warning')]);
+            }
+          },
+          onOrgRefusedBeforeDismiss: () => {
+            context.setAppState(prev => ({
+              ...prev,
+              authChangeGeneration: prev.authChangeGeneration + 1,
+              authVersion: prev.authVersion + 1,
+            }));
+          },
+          runBackgroundRefresh: runPostLoginBackgroundRefresh,
+        });
       }}
     />
   );

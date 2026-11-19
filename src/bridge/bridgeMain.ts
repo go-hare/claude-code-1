@@ -1,5 +1,6 @@
 import { feature } from 'bun:bundle'
 import { randomUUID } from 'crypto'
+import { readFileSync } from 'fs'
 import { homedir, hostname, tmpdir } from 'os'
 import { basename, join, resolve } from 'path'
 import { getRemoteSessionUrl } from '../constants/product.js'
@@ -44,7 +45,11 @@ import { createTokenRefreshScheduler } from './jwtUtils.js'
 import { getPollIntervalConfig } from './pollConfig.js'
 import { toCompatSessionId, toInfraSessionId } from './sessionIdCompat.js'
 import { createTitleWriteScheduler } from './titleWriteScheduler.js'
-import { createSessionSpawner, safeFilenameId } from './sessionRunner.js'
+import {
+  computeBridgeSettingsBinding,
+  createSessionSpawner,
+  safeFilenameId,
+} from './sessionRunner.js'
 import { deriveBridgeChildGrantRoles } from './bridgeChildGrants.js'
 import {
   parseSessionOriginRoles,
@@ -566,6 +571,19 @@ export async function runBridgeLoop(
         wasTimedOut && rawStatus === 'interrupted' ? 'failed' : rawStatus
       const durationMs = Date.now() - startTime
 
+      // Official `f` / `X` / `N` / `G` — crash keeps the worktree so an
+      // offline env-gone fatal can tell the user where the files are.
+      const crashedOffline =
+        status === 'failed' && !loopSignal.aborted && !wasTimedOut
+      // #1924 / official `Er(h)` + `forced_stops_per_hour`: when a child
+      // crashes unexpectedly, call stopWork(..., force=true) within the hourly
+      // crash budget so the server re-dispatches new messages promptly.
+      const crashCountInLastHour =
+        crashedOffline && workId ? forcedStopTracker.record(sessionId) : 0
+      const forcedStopsLimit = getPollIntervalConfig().forced_stops_per_hour
+      const shouldForceStop =
+        crashCountInLastHour > 0 && crashCountInLastHour <= forcedStopsLimit
+
       logForDebugging(
         `[bridge:session] sessionId=${sessionId} workId=${workId ?? 'unknown'} exited status=${status} duration=${formatDuration(durationMs)}`,
       )
@@ -573,6 +591,8 @@ export async function runBridgeLoop(
         status:
           status as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         duration_ms: durationMs,
+        count: crashCountInLastHour,
+        limit: forcedStopsLimit,
       })
       logForDiagnosticsNoPII('info', 'bridge_session_done', {
         status,
@@ -600,6 +620,14 @@ export async function runBridgeLoop(
           if (!wasTimedOut && !loopSignal.aborted) {
             failureMessage = stderrSummary ?? 'Process exited with error'
             logger.logSessionFailed(sessionId, failureMessage)
+            if (
+              crashCountInLastHour > forcedStopsLimit &&
+              forcedStopsLimit > 0
+            ) {
+              logger.logStatus(
+                `session failed ${crashCountInLastHour} times in the last hour \u00B7 a new message may take up to 10 minutes to restart it`,
+              )
+            }
             logError(new Error(`Bridge session failed: ${failureMessage}`))
           }
           break
@@ -619,15 +647,12 @@ export async function runBridgeLoop(
             workId,
             logger,
             backoffConfig.stopWorkBaseDelayMs,
+            shouldForceStop,
           ),
         )
         completedWorkIds.add(workId)
       }
 
-      // Official `f` / `X` / `N` / `G` — crash keeps the worktree so an
-      // offline env-gone fatal can tell the user where the files are.
-      const crashedOffline =
-        status === 'failed' && !loopSignal.aborted && !wasTimedOut
       if (crashedOffline) {
         crashedSessionIds.add(sessionId)
         sessionCrashed = true
@@ -1975,6 +2000,42 @@ function formatDelay(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${Math.round(ms)}ms`
 }
 
+const FORCED_STOP_WINDOW_MS = 3_600_000
+const FORCED_STOP_MAX_TRACKED_SESSIONS = 256
+
+/**
+ * #1924 / official `Er(h)` — sliding 1-hour crash counter per session ID
+ * (bounded to 256 entries) to gate `stopWork(..., force=true)`.
+ */
+export class ForcedStopRateTracker {
+  private readonly crashesBySession = new Map<string, number[]>()
+  private readonly nowFn: () => number
+  private readonly windowMs: number
+
+  constructor(opts?: { nowFn?: () => number; windowMs?: number }) {
+    this.nowFn = opts?.nowFn ?? Date.now
+    this.windowMs = opts?.windowMs ?? FORCED_STOP_WINDOW_MS
+  }
+
+  record(sessionId: string): number {
+    const now = this.nowFn()
+    const key = toInfraSessionId(sessionId)
+    const kept = (this.crashesBySession.get(key) ?? []).filter(
+      ts => now - ts < this.windowMs,
+    )
+    kept.push(now)
+    this.crashesBySession.delete(key)
+    this.crashesBySession.set(key, kept)
+    for (const oldKey of this.crashesBySession.keys()) {
+      if (this.crashesBySession.size <= FORCED_STOP_MAX_TRACKED_SESSIONS) break
+      this.crashesBySession.delete(oldKey)
+    }
+    return kept.length
+  }
+}
+
+const forcedStopTracker = new ForcedStopRateTracker()
+
 /**
  * Retry stopWork with exponential backoff (3 attempts, 1s/2s/4s).
  * Ensures the server learns the work item ended, preventing server-side zombies.
@@ -1985,12 +2046,13 @@ async function stopWorkWithRetry(
   workId: string,
   logger: BridgeLogger,
   baseDelayMs = 1000,
+  force = false,
 ): Promise<void> {
   const MAX_ATTEMPTS = 3
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      await api.stopWork(environmentId, workId, false)
+      await api.stopWork(environmentId, workId, force)
       logForDebugging(
         `[bridge:work] stopWork succeeded for workId=${workId} on attempt ${attempt}/${MAX_ATTEMPTS}`,
       )
@@ -2085,10 +2147,121 @@ export type ParsedArgs = {
   createSessionInDir: boolean | undefined
   /** Resume an existing session instead of creating a new one. */
   sessionId?: string
+  /** #1846: Settings file passed via `claude remote-control --settings <file>`. */
+  settings?: string
   /** Resume the last session in this directory (reads bridge-pointer.json). */
   continueSession: boolean
   help: boolean
   error?: string
+}
+
+/**
+ * #1785 / #1786 / #1906 / #1930 — Custom input reader for `claude remote-control`
+ * first-run questions:
+ * - On non-TTY (piped input, e.g. `printf y | claude remote-control`), EOF
+ *   without a trailing newline counts as the typed answer (#1786).
+ * - On TTY, EOF without Enter (Ctrl+D after typing `y`) or Ctrl+C resolves
+ *   `undefined` so unanswered prompts do not silently accept (#1906, #1785).
+ * - Empty EOF (scripts/services/batch jobs) resolves `undefined` (#1785).
+ */
+export async function askRemoteControlQuestion(
+  question: string,
+  opts?: {
+    input?: NodeJS.ReadableStream & { isTTY?: boolean }
+    output?: NodeJS.WritableStream
+    isTTY?: boolean
+  },
+): Promise<string | undefined> {
+  const rawInput = opts?.input ?? process.stdin
+  const input: NodeJS.ReadableStream = rawInput
+  const output: NodeJS.WritableStream = opts?.output ?? process.stdout
+  const isTTY = opts?.isTTY ?? Boolean((rawInput as { isTTY?: boolean }).isTTY)
+
+  output.write(question)
+
+  return new Promise<string | undefined>(resolve => {
+    let settled = false
+    let buffer = ''
+
+    const cleanup = () => {
+      input.removeListener('data', onData)
+      input.removeListener('end', onEnd)
+      input.removeListener('close', onClose)
+      input.removeListener('error', onError)
+      if (input === process.stdin) {
+        process.removeListener('SIGINT', onSigint)
+      }
+      if (typeof (input as { pause?: () => void }).pause === 'function') {
+        ;(input as { pause: () => void }).pause()
+      }
+    }
+
+    const finish = (value: string | undefined) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      resolve(value)
+    }
+
+    const onData = (chunk: string | Buffer) => {
+      const str = typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+      if (str.includes('\x03')) {
+        finish(undefined)
+        return
+      }
+      buffer += str
+      const nlIdx = buffer.search(/[\r\n]/)
+      if (nlIdx !== -1) {
+        finish(buffer.slice(0, nlIdx))
+      }
+    }
+
+    const onEnd = () => {
+      if (!isTTY && buffer.length > 0) {
+        finish(buffer)
+      } else {
+        finish(undefined)
+      }
+    }
+
+    const onClose = () => {
+      if (!isTTY && buffer.length > 0) {
+        finish(buffer)
+      } else {
+        finish(undefined)
+      }
+    }
+
+    const onError = () => {
+      finish(undefined)
+    }
+
+    const onSigint = () => {
+      finish(undefined)
+    }
+
+    input.on('data', onData)
+    input.once('end', onEnd)
+    input.once('close', onClose)
+    input.once('error', onError)
+    if (input === process.stdin) {
+      process.once('SIGINT', onSigint)
+    }
+    if (typeof (input as { resume?: () => void }).resume === 'function') {
+      ;(input as { resume: () => void }).resume()
+    }
+  })
+}
+
+/**
+ * #1785 / #1930 / official `fs(question, nextStep)` — actionable error message
+ * when a `claude remote-control` first-run question gets no answer.
+ */
+export function formatUnansweredRemoteControlQuestion(
+  question: string,
+  nextStep: string,
+): string {
+  return `\nRemote Control did not start: "${question}" got no answer. ${nextStep}`
 }
 
 const SPAWN_FLAG_VALUES = ['session', 'same-dir', 'worktree'] as const
@@ -2121,6 +2294,7 @@ export function parseArgs(args: string[]): ParsedArgs {
   let capacity: number | undefined
   let createSessionInDir: boolean | undefined
   let sessionId: string | undefined
+  let settings: string | undefined
   let continueSession = false
 
   for (let i = 0; i < args.length; i++) {
@@ -2197,6 +2371,14 @@ export function parseArgs(args: string[]): ParsedArgs {
       createSessionInDir = true
     } else if (arg === '--no-create-session-in-dir') {
       createSessionInDir = false
+    } else if (arg === '--settings' || arg.startsWith('--settings=')) {
+      const raw = arg.startsWith('--settings=')
+        ? arg.slice('--settings='.length)
+        : args[++i]
+      if (!raw) {
+        return makeError('--settings requires a file path')
+      }
+      settings = raw
     } else {
       return makeError(
         `Unknown argument: ${arg}\nRun 'claude remote-control --help' for usage.`,
@@ -2243,6 +2425,7 @@ export function parseArgs(args: string[]): ParsedArgs {
     capacity,
     createSessionInDir,
     sessionId,
+    settings,
     continueSession,
     help,
   }
@@ -2260,6 +2443,7 @@ export function parseArgs(args: string[]): ParsedArgs {
       capacity,
       createSessionInDir,
       sessionId,
+      settings,
       continueSession,
       help,
       error,
@@ -2318,6 +2502,7 @@ ${
     : ''
 }  --permission-mode <mode>         Permission mode for spawned sessions
                                    (${modes})
+  --settings <file>                Settings file to apply to every session started
   --[no-]chrome                    Claude in Chrome for spawned sessions
                                    (default: off; a session started from a
                                    project follows this machine's /chrome
@@ -2395,8 +2580,36 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
     capacity: parsedCapacity,
     createSessionInDir: parsedCreateSessionInDir,
     sessionId: parsedSessionId,
+    settings: parsedSettings,
     continueSession,
   } = parsed
+
+  // #1846: Validate --settings <file> and pin its SHA-256 binding so any later
+  // modification prevents new sessions from starting until restart.
+  let pinnedSettingsFile: string | undefined
+  let pinnedSettingsBinding: string | undefined
+  if (parsedSettings !== undefined) {
+    const resolvedSettings = resolve(parsedSettings)
+    try {
+      const content = readFileSync(resolvedSettings, 'utf8')
+      JSON.parse(content)
+      pinnedSettingsFile = resolvedSettings
+      pinnedSettingsBinding = computeBridgeSettingsBinding(
+        resolvedSettings,
+        content,
+      )
+      logForDiagnosticsNoPII('info', 'bridge_verb_settings')
+    } catch (err) {
+      logForDiagnosticsNoPII('error', 'bridge_verb_settings', {
+        outcome: 'invalid_settings',
+      })
+      console.error(
+        `Error: Remote Control did not start, because sessions would skip part or all of the --settings file ${parsedSettings}: ${errorMessage(err)}`,
+      )
+      // eslint-disable-next-line custom-rules/no-process-exit
+      process.exit(1)
+    }
+  }
   // Mutable so --continue can set it from the pointer file. The #20460
   // resume flow below then treats it the same as an explicit --session-id.
   let resumeSessionId = parsedSessionId
@@ -2510,26 +2723,32 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
     saveCurrentProjectConfig,
   } = await import('../utils/config.js')
   if (!getGlobalConfig().remoteDialogSeen) {
-    const readline = await import('readline')
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    })
     console.log(
-      '\nRemote Control lets you access this CLI session from the web (claude.ai/code)\nor the Claude app, so you can pick up where you left off on any device.\n\nYou can disconnect remote access anytime by running /remote-control again.\n',
+      '\nTake this session with you and pick up right where you left off on any device.\nOpen the Code tab in the Claude mobile app, or visit claude.ai/code in a browser.\n\nThe session keeps running on this machine. Use your other devices as a remote\ncontrol. Press Ctrl+C to stop.\n',
     )
-    const answer = await new Promise<string>(resolve => {
-      rl.question('Enable Remote Control? (y/n) ', resolve)
-    })
-    rl.close()
+    const answer = await askRemoteControlQuestion(
+      'Enable Remote Control? (y/n) ',
+    )
+    if (answer === undefined) {
+      const where = process.stdin.isTTY ? '' : ' at a terminal'
+      console.error(
+        formatUnansweredRemoteControlQuestion(
+          'Enable Remote Control?',
+          `Run \`claude remote-control\`${where} and answer y once; it won't ask again.`,
+        ),
+      )
+      // eslint-disable-next-line custom-rules/no-process-exit
+      process.exit(1)
+    }
+    const normalized = answer.trim().toLowerCase()
+    if (normalized !== 'y' && normalized !== 'yes') {
+      // eslint-disable-next-line custom-rules/no-process-exit
+      process.exit(0)
+    }
     saveGlobalConfig(current => {
       if (current.remoteDialogSeen) return current
       return { ...current, remoteDialogSeen: true }
     })
-    if (answer.toLowerCase() !== 'y' && answer.toLowerCase() !== 'yes') {
-      // eslint-disable-next-line custom-rules/no-process-exit
-      process.exit(0)
-    }
   }
 
   // --continue: resolve the most recent session from the crash-recovery
@@ -2633,11 +2852,6 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
     !resumeSessionId &&
     process.stdin.isTTY
   ) {
-    const readline = await import('readline')
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    })
     // densable 2.1.218 first-run spawn dialog (SEA strings exact)
     console.log(
       `\nRemote Control is launching in spawn mode, which lets you start new sessions in this project from claude.ai/code or the Claude mobile app. Learn more: https://code.claude.com/docs/en/remote-control\n\n` +
@@ -2646,10 +2860,17 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
         `  [2] worktree \u2014 each session gets an isolated git worktree\n\n` +
         `This can be changed later or explicitly set with --spawn=same-dir or --spawn=worktree.\n`,
     )
-    const answer = await new Promise<string>(resolve => {
-      rl.question('Choose [1/2] (default: 1): ', resolve)
-    })
-    rl.close()
+    const answer = await askRemoteControlQuestion('Choose [1/2] (default: 1): ')
+    if (answer === undefined) {
+      console.error(
+        formatUnansweredRemoteControlQuestion(
+          'Choose [1/2] (default: 1):',
+          'Run `claude remote-control` again or pass `--spawn=same-dir` or `--spawn=worktree`.',
+        ),
+      )
+      // eslint-disable-next-line custom-rules/no-process-exit
+      process.exit(1)
+    }
     const chosen: 'same-dir' | 'worktree' =
       answer.trim() === '2' ? 'worktree' : 'same-dir'
     savedSpawnMode = chosen
@@ -3125,6 +3346,8 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
     debugFile,
     permissionMode,
     chrome,
+    settingsFile: pinnedSettingsFile,
+    settingsBinding: pinnedSettingsBinding,
     onDebug: logForDebugging,
     onActivity: (sessionId, activity) => {
       logForDebugging(

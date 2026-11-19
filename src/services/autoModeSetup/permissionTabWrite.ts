@@ -156,11 +156,9 @@ function writeUserSettingsSnapshot(
   settings: SettingsJson,
 ): void {
   getFsImplementation().mkdirSync(dirname(filePath))
-  markInternalWrite(filePath)
-  writeFileSyncAndFlush_DEPRECATED(
-    filePath,
-    jsonStringify(settings, null, 2) + '\n',
-  )
+  const serialized = jsonStringify(settings, null, 2) + '\n'
+  markInternalWrite(filePath, serialized)
+  writeFileSyncAndFlush_DEPRECATED(filePath, serialized)
   resetSettingsCache()
 }
 

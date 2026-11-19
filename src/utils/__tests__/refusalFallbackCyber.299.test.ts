@@ -10,7 +10,7 @@ describe('#735 cyber safeguard notice', () => {
   test('subagent/main cyber note mentions Defense Access and does not ask user to apply', () => {
     const note = formatCyberSafeguardDefenseAccessNote({ category: 'cyber' })
     expect(note).toContain(
-      'Defense Access in the Cyber Verification Program reduces these interruptions',
+      'Defense Access in the Cyber Verification Program covers defensive cybersecurity work and reduces these interruptions',
     )
     expect(note).toContain(CYBER_SAFEGUARDS_LEARN_MORE_URL)
     expect(note).not.toContain('apply to the Cyber Verification Program')

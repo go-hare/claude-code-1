@@ -1,6 +1,7 @@
 import { feature } from 'bun:bundle'
 import { randomBytes } from 'crypto'
 import { unwatchFile, watchFile, writeFileSync } from 'fs'
+import { homedir } from 'os'
 import memoize from 'lodash-es/memoize.js'
 import pickBy from 'lodash-es/pickBy.js'
 import { basename, dirname, join, resolve } from 'path'
@@ -764,6 +765,23 @@ export type GlobalConfig = {
   cachedExtraUsageDisabledReason?: string | null
 
   /**
+   * Official 2.1.319 (#1728): persists server refusal of product feedback for a
+   * principal so Claude-drafted feedback, surveys, and /feedback stay hidden
+   * across restarts (7-day TTL).
+   */
+  feedbackRefusedByServer?: {
+    principal: string
+    at: number
+  }
+
+  /**
+   * Official 2.1.321 (#1940): tracks saved `claude-fable-5-1` -> `fable`
+   * model pick migration on Team/Enterprise plans.
+   */
+  fable51OrgPickMoveDone?: boolean
+  fable51OrgPickMoveWaitingSince?: number
+
+  /**
    * Official `cachedUsageUtilization` (`V0a` / `K0a` / `I`).
    * Last-known `/api/oauth/usage` snapshot for `/usage` seed when headers
    * are empty. Write debounce 5m; read TTL 1h; account mismatch clears.
@@ -1088,6 +1106,12 @@ function computeTrustDialogAccepted(): boolean {
     return true
   }
 
+  // #1781: When CLAUDE_CODE_IGNORE_PERSISTED_TRUST is truthy, persisted
+  // project trust records do not count in this process (official `yd()`).
+  if (isEnvTruthy(process.env.CLAUDE_CODE_IGNORE_PERSISTED_TRUST)) {
+    return false
+  }
+
   const config = getGlobalConfig()
 
   // Always check where trust would be saved (git root or original cwd)
@@ -1180,6 +1204,10 @@ export function isPathTrusted(
   dir: string,
   options?: { advisoryNoFsProbe?: boolean },
 ): boolean {
+  // #1781: Ignore persisted trust records when CLAUDE_CODE_IGNORE_PERSISTED_TRUST is set
+  if (isEnvTruthy(process.env.CLAUDE_CODE_IGNORE_PERSISTED_TRUST)) {
+    return false
+  }
   const config = getGlobalConfig()
   // densable aKe/W9/RYt: exact project key via I8e (uncached), then wgd
   if (!options?.advisoryNoFsProbe) {
@@ -3157,6 +3185,132 @@ export function _resetGlobalConfigFreshnessWatchForTesting(): void {
 }
 
 const MAX_SEEN_SECURITY_WARNINGS = 256
+
+/** Official 2.1.319 (#1728): 7-day TTL for persisted server feedback refusal. */
+export const FEEDBACK_REFUSAL_MEMORY_TTL_MS = 7 * 24 * 60 * 60 * 1000
+
+/**
+ * Official 2.1.319 `upr` (#1728): persist that the server refused feedback for
+ * `principal` so drafted feedback, surveys, and /feedback stay suppressed.
+ */
+export function recordFeedbackRefusedByServer(
+  principal: string | null | undefined,
+  nowMs: number = Date.now(),
+): { principal: string; at: number } | null {
+  if (!principal) return null
+  const record = { principal, at: nowMs }
+  saveGlobalConfig(current => ({
+    ...current,
+    feedbackRefusedByServer: record,
+  }))
+  return record
+}
+
+/**
+ * Official 2.1.319 `ee("allow_product_feedback")` (#1728): returns true when
+ * the server previously refused feedback for the active `principal` within TTL.
+ */
+export function isFeedbackRefusedByServer(
+  principal: string | null | undefined,
+  nowMs: number = Date.now(),
+): boolean {
+  if (!principal) return false
+  const stored = getGlobalConfig().feedbackRefusedByServer
+  if (
+    !stored ||
+    typeof stored.principal !== 'string' ||
+    typeof stored.at !== 'number'
+  ) {
+    return false
+  }
+  const age = nowMs - stored.at
+  return (
+    age >= 0 &&
+    age < FEEDBACK_REFUSAL_MEMORY_TTL_MS &&
+    stored.principal === principal
+  )
+}
+
+/**
+ * Official 2.1.319 `z_()` / `d$a()` (#1738): detect when both a legacy
+ * `<configDir>/.config.json` and the primary `.claude.json` exist as distinct
+ * non-empty regular files so the active legacy file doesn't silently shadow
+ * the primary config.
+ */
+export function detectTwoConfigFiles(opts?: {
+  legacyPath?: string
+  primaryPath?: string
+}): { active: string; unused: string } | null {
+  const fs = getFsImplementation()
+  const legacyPath =
+    opts?.legacyPath ?? join(getClaudeConfigHomeDir(), '.config.json')
+  const primaryPath =
+    opts?.primaryPath ??
+    join(process.env.CLAUDE_CONFIG_DIR || homedir(), '.claude.json')
+  if (legacyPath === primaryPath) return null
+  try {
+    const legacyStats = fs.statSync(legacyPath)
+    if (!legacyStats.isFile() || legacyStats.size <= 0) return null
+    const primaryStats = fs.statSync(primaryPath)
+    if (!primaryStats.isFile() || primaryStats.size <= 0) return null
+    if (
+      process.platform !== 'win32' &&
+      primaryStats.dev === legacyStats.dev &&
+      primaryStats.ino === legacyStats.ino
+    ) {
+      return null
+    }
+    return { active: legacyPath, unused: primaryPath }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Official 2.1.319 `B()` (#1738): build the `config-two-files` stderr warning
+ * text naming which config file is active and which is unused.
+ */
+export function formatTwoConfigFilesWarning(
+  active: string,
+  unused: string,
+  version?: string,
+): string {
+  const hint =
+    process.platform === 'win32'
+      ? 'The one with hasCompletedOnboarding or mcpServers in it is usually yours.'
+      : `The file with the higher count here is usually yours, and this prints nothing else from them: grep -c -E '"(hasCompletedOnboarding|mcpServers)"' "${active}" "${unused}".`
+  const ver = version ? `version ${version}` : 'this version'
+  return `Two Claude Code config files exist: this run uses ${active}, not ${unused}. ${hint} To end this: if several hosts share this home, first get every host to ${ver} or later, since an older one can write a moved .config.json back. Then stop your Claude processes on every host, move aside the one you do not want, and start none until no host lists it.`
+}
+
+/**
+ * Official 2.1.319 `B()` (#1738): warn on stderr (key: `config-two-files`)
+ * when a home directory holds both legacy and primary config files.
+ */
+export function warnIfTwoConfigFilesExist(opts?: {
+  legacyPath?: string
+  primaryPath?: string
+  writeStderr?: (text: string) => void
+  version?: string
+}): string | null {
+  if (process.env.CLAUDE_CODE_SESSION_KIND === 'bg') return null
+  const found = detectTwoConfigFiles(opts)
+  if (!found) return null
+  const msg = formatTwoConfigFilesWarning(
+    found.active,
+    found.unused,
+    opts?.version,
+  )
+  logForDebugging(msg, { level: 'warn' })
+  const write =
+    opts?.writeStderr ?? ((text: string) => process.stderr.write(text))
+  try {
+    write(`\n${msg}\n`)
+  } catch {
+    // best-effort stderr write
+  }
+  return msg
+}
 
 /**
  * Gold `qCi` @299967319 — filter security warnings to those whose `seenKey`

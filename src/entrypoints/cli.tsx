@@ -85,6 +85,69 @@ if (feature('ABLATION_BASELINE') && process.env.CLAUDE_CODE_ABLATION_BASELINE) {
   }
 }
 
+const AGENTS_PRE_VALUE_FLAGS = new Set([
+  '--permission-mode',
+  '--inherit-permission-mode',
+  '--model',
+  '--effort',
+  '--agent',
+  '--cwd',
+  '--settings',
+  '--managed-settings',
+  '--setting-sources',
+  '--add-dir',
+  '--plugin-dir',
+  '--plugin-dir-no-mcp',
+  '--mcp-config',
+  '--fallback-model',
+  '--debug-file',
+]);
+
+const AGENTS_PRE_BOOL_FLAGS = new Set([
+  '--dangerously-skip-permissions',
+  '--allow-dangerously-skip-permissions',
+  '--verbose',
+  '--debug',
+  '-d',
+  '--debug-to-stderr',
+  '-d2e',
+  '--strict-mcp-config',
+  '--restricted',
+]);
+
+/**
+ * #1883: Peel leading flags (e.g. --permission-mode, --dangerously-skip-permissions,
+ * --model, --effort, --agent, --verbose, --debug, --cwd, ...) before the `agents`
+ * subcommand positional so `claude --permission-mode plan --verbose agents` routes
+ * to the agents fast path with all leading flags preserved.
+ */
+export function extractAgentsFastPathArgs(args: string[]): string[] | null {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === '--') return null;
+    if (arg === 'agents') {
+      return [...args.slice(0, i), ...args.slice(i + 1)];
+    }
+    const eqIdx = arg.indexOf('=');
+    const flagName = eqIdx > 0 ? arg.slice(0, eqIdx) : arg;
+    if (AGENTS_PRE_BOOL_FLAGS.has(flagName)) {
+      continue;
+    }
+    if (AGENTS_PRE_VALUE_FLAGS.has(flagName)) {
+      if (eqIdx > 0) {
+        continue;
+      }
+      if (i + 1 < args.length) {
+        i++;
+        continue;
+      }
+      return null;
+    }
+    return null;
+  }
+  return null;
+}
+
 /**
  * Bootstrap entrypoint - checks for special flags before loading the full CLI.
  * All imports are dynamic to minimize module evaluation for fast paths.
@@ -291,8 +354,9 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Fast-path for `claude agents` — agent view dashboard
-  if (feature('BG_SESSIONS') && args[0] === 'agents') {
+  // Fast-path for `claude [leading-flags...] agents` — agent view dashboard (#1883)
+  const agentsFastPathArgs = feature('BG_SESSIONS') ? extractAgentsFastPathArgs(args) : null;
+  if (agentsFastPathArgs !== null) {
     const { getAgentViewDisabledReason } = await import('../utils/residualUiEnvGates.js');
     let settingsDisableAgentView = false;
     try {
@@ -326,7 +390,7 @@ async function main(): Promise<void> {
       // already enabled or unavailable
     }
     const { agentsMain } = await import('../cli/agents.js');
-    await agentsMain(args.slice(1));
+    await agentsMain(agentsFastPathArgs);
     // process.exit (not return) — FleetView/Ink can leave event-loop handles
     // that prevent natural exit (blank TTY hang after Esc).
     // eslint-disable-next-line custom-rules/no-process-exit
@@ -590,4 +654,6 @@ async function main(): Promise<void> {
 }
 
 // eslint-disable-next-line custom-rules/no-top-level-side-effects
-await main();
+if (process.env.CLAUDE_CODE_CLI_SKIP_MAIN !== '1') {
+  await main();
+}

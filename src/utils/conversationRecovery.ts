@@ -232,6 +232,161 @@ export type TurnInterruptionState =
 export type DeserializeResult = {
   messages: Message[]
   turnInterruptionState: TurnInterruptionState
+  /** #1736: true when auto-resume was held because re-running would leave plan mode. */
+  rerunHeldForPlan?: boolean
+}
+
+export type PlanSegmentState = 'open' | 'exited' | 'none'
+
+function getDuplicateToolUseIds(messages: Message[]): Set<string> {
+  const seen = new Set<string>()
+  const dupes = new Set<string>()
+  for (const m of messages) {
+    if (m.type !== 'assistant' || !Array.isArray(m.message?.content)) continue
+    for (const block of m.message.content) {
+      if (block.type !== 'tool_use') continue
+      if (seen.has(block.id)) dupes.add(block.id)
+      else seen.add(block.id)
+    }
+  }
+  return dupes
+}
+
+function isPlanSubmittedToTeamLead(msg: Message, content: unknown): boolean {
+  const tur = (msg as { toolUseResult?: unknown }).toolUseResult
+  if (
+    tur !== null &&
+    typeof tur === 'object' &&
+    (tur as { awaitingLeaderApproval?: unknown }).awaitingLeaderApproval ===
+      true
+  ) {
+    return true
+  }
+  return (
+    typeof content === 'string' &&
+    content.startsWith('Your plan has been submitted to the team lead')
+  )
+}
+
+/**
+ * #1736 / official `Bfr(messages)` — determine whether the transcript ends
+ * inside an open plan-mode segment, an exited plan-mode segment, or none.
+ */
+export function planSegmentState(messages: Message[]): PlanSegmentState {
+  const planCmdPrefix = '<command-name>/plan</command-name>'
+  const erroredToolIds = new Set<string>()
+  const succeededToolIds = new Set<string>()
+  const duplicateToolIds = getDuplicateToolUseIds(messages)
+  let sawLaterNonPlanUser = false
+  const openOrNone = (): PlanSegmentState =>
+    sawLaterNonPlanUser ? 'none' : 'open'
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!
+    if (m.type === 'attachment') {
+      const attType = (m as { attachment?: { type?: string } }).attachment?.type
+      if (attType === 'plan_mode' || attType === 'plan_mode_reentry') {
+        return openOrNone()
+      }
+      if (attType === 'plan_mode_exit') {
+        return 'exited'
+      }
+      continue
+    }
+    if (m.type === 'assistant' && Array.isArray(m.message?.content)) {
+      const blocks = m.message.content
+      for (let j = blocks.length - 1; j >= 0; j--) {
+        const block = blocks[j]!
+        if (block.type !== 'tool_use') continue
+        if (
+          block.name === 'ExitPlanMode' &&
+          succeededToolIds.has(block.id) &&
+          !erroredToolIds.has(block.id) &&
+          !duplicateToolIds.has(block.id)
+        ) {
+          return 'exited'
+        }
+        if (
+          block.name === 'EnterPlanMode' &&
+          succeededToolIds.has(block.id) &&
+          (!erroredToolIds.has(block.id) || duplicateToolIds.has(block.id))
+        ) {
+          return openOrNone()
+        }
+      }
+      continue
+    }
+    if (m.type === 'user') {
+      const content = m.message?.content
+      if (
+        Array.isArray(content) &&
+        content.some(b => b.type === 'tool_result')
+      ) {
+        for (const block of content) {
+          if (block.type === 'tool_result') {
+            if (block.is_error || isPlanSubmittedToTeamLead(m, block.content)) {
+              erroredToolIds.add(block.tool_use_id)
+            } else {
+              succeededToolIds.add(block.tool_use_id)
+            }
+          }
+        }
+        continue
+      }
+      const text =
+        typeof content === 'string'
+          ? content
+          : Array.isArray(content)
+            ? content
+                .filter(
+                  (b): b is { type: 'text'; text: string } =>
+                    b.type === 'text' && typeof b.text === 'string',
+                )
+                .map(b => b.text)
+                .join('\n')
+            : undefined
+      if (text?.trimStart().startsWith(planCmdPrefix)) {
+        return openOrNone()
+      }
+      if (m.permissionMode === 'plan') {
+        return openOrNone()
+      }
+      if (m.permissionMode !== undefined && !m.isMeta) {
+        sawLaterNonPlanUser = true
+      }
+    }
+  }
+  return 'none'
+}
+
+/**
+ * #1736 / official `brs(messages, currentMode, willRestorePlanMode)` —
+ * returns true when re-running an interrupted turn would leave an open plan
+ * mode segment (resumed in another permission mode).
+ */
+export function rerunWouldLeavePlanMode(
+  messages: Message[],
+  currentMode: string | undefined,
+  willRestorePlanMode = false,
+): boolean {
+  if (currentMode === 'plan' || planSegmentState(messages) !== 'open') {
+    return false
+  }
+  return !willRestorePlanMode
+}
+
+function invokeRerunWouldLeaveMode(
+  messages: Message[],
+  check: (messages: Message[]) => boolean,
+): boolean {
+  try {
+    return check(messages)
+  } catch (err) {
+    logError(
+      err instanceof Error ? err : new Error('rerunWouldLeaveMode failed'),
+    )
+    return true
+  }
 }
 
 const RESUME_INTERRUPTED_TURN_FLAG = 'tengu_steady_scroll'
@@ -460,6 +615,11 @@ export function deserializeMessagesWithInterruptDetection(
    * skips interrupt classification (`t?.size || r` → kind none).
    */
   preserveUnresolvedToolUseIds?: Set<string>,
+  /**
+   * #1736 / official `rerunWouldLeaveMode` — returns true when auto-resuming
+   * an interrupted turn would leave plan mode (resumed in another mode).
+   */
+  rerunWouldLeaveMode?: (messages: Message[]) => boolean,
 ): DeserializeResult {
   try {
     // densable dQr before Hgy — drop malformed attachments so resume never
@@ -532,13 +692,23 @@ export function deserializeMessagesWithInterruptDetection(
     // replyOnResume skips interrupt classification (REPL uses {replay:true}).
     // Official M2l: preserve-set size also forces none (deferred resume).
     // densable Szu: age-out → force none (+ tengu_resume_stale_turn_suppressed).
+    // #1736: rerunWouldLeaveMode → force none and mark rerunHeldForPlan so a
+    // turn interrupted in plan mode is not re-run under a different mode.
     let turnInterruptionState: TurnInterruptionState
+    let rerunHeldForPlan = false
     if (replyOnResume || (preserveUnresolvedToolUseIds?.size ?? 0) > 0) {
       turnInterruptionState = { kind: 'none' }
     } else {
       const internalState = detectTurnInterruption(filteredMessages)
 
       if (
+        internalState.kind !== 'none' &&
+        rerunWouldLeaveMode &&
+        invokeRerunWouldLeaveMode(filteredMessages, rerunWouldLeaveMode)
+      ) {
+        rerunHeldForPlan = true
+        turnInterruptionState = { kind: 'none' }
+      } else if (
         internalState.kind !== 'none' &&
         isResumeInterruptedTurnStale(filteredMessages)
       ) {
@@ -592,7 +762,11 @@ export function deserializeMessagesWithInterruptDetection(
       }
     }
 
-    return { messages: filteredMessages, turnInterruptionState }
+    return {
+      messages: filteredMessages,
+      turnInterruptionState,
+      ...(rerunHeldForPlan ? { rerunHeldForPlan: true } : {}),
+    }
   } catch (error) {
     logError(error as Error)
     throw error
@@ -1114,10 +1288,13 @@ export async function loadConversationForResume(
       sessionId: string
       transcriptPath?: string
     }) => Promise<(() => void) | undefined> | (() => void) | void
+    /** #1736: suppress auto-resume when re-running would leave plan mode. */
+    rerunWouldLeaveMode?: (messages: Message[]) => boolean
   },
 ): Promise<{
   messages: Message[]
   turnInterruptionState: TurnInterruptionState
+  rerunHeldForPlan?: boolean
   fileHistorySnapshots?: FileHistorySnapshot[]
   attributionSnapshots?: AttributionSnapshotMessage[]
   contentReplacements?: ContentReplacementRecord[]
@@ -1294,6 +1471,7 @@ export async function loadConversationForResume(
       messages!,
       Boolean(opts?.replyOnResume),
       deferredToolUse ? new Set([deferredToolUse.toolUseID]) : undefined,
+      opts?.rerunWouldLeaveMode,
     )
     messages = deserialized.messages
     populateResumedCompactBoundarySavedIn(messages, transcriptPath)
@@ -1350,6 +1528,7 @@ export async function loadConversationForResume(
     return {
       messages,
       turnInterruptionState: deserialized.turnInterruptionState,
+      ...(deserialized.rerunHeldForPlan ? { rerunHeldForPlan: true } : {}),
       fileHistorySnapshots: log?.fileHistorySnapshots,
       attributionSnapshots: log?.attributionSnapshots,
       contentReplacements: log?.contentReplacements,

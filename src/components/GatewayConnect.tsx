@@ -69,6 +69,7 @@ type GatewayConnectState =
       url: string;
       userCode: string;
       verificationUri: string;
+      loginNotice?: string;
     }
   | { state: 'error'; message: string; detail?: string };
 
@@ -205,12 +206,18 @@ export function GatewayConnect({
         throw new Error('gateway device authorization endpoint returned malformed response');
       }
       const body = parsed.data;
+      const rawNotice =
+        typeof (data as { login_notice?: unknown })?.login_notice === 'string'
+          ? (data as { login_notice: string }).login_notice.trim()
+          : '';
+      const loginNotice = rawNotice.length > 0 ? rawNotice.slice(0, 500) : undefined;
       void openBrowser(body.verification_uri_complete ?? body.verification_uri);
       setStatus({
         state: 'polling',
         url: base,
         userCode: body.user_code,
         verificationUri: body.verification_uri,
+        ...(loginNotice !== undefined ? { loginNotice } : {}),
       });
       await pollToken(base, endpoints.tokenEndpoint, body.device_code, body.interval ?? 5, y);
     } catch (err) {
@@ -358,10 +365,23 @@ export function GatewayConnect({
         </Box>
       );
 
-    case 'polling':
+    case 'polling': {
+      let hostname = status.url;
+      try {
+        hostname = new URL(status.url).hostname;
+      } catch {
+        // fallback to raw url
+      }
       return (
-        <GatewayPollingView userCode={status.userCode} verificationUri={status.verificationUri} onCancel={bumpCancel} />
+        <GatewayPollingView
+          userCode={status.userCode}
+          verificationUri={status.verificationUri}
+          hostname={hostname}
+          loginNotice={status.loginNotice}
+          onCancel={bumpCancel}
+        />
       );
+    }
 
     case 'connecting':
       return <GatewayConnectingView label="Connecting to gateway…" onCancel={bumpCancel} />;
@@ -394,13 +414,17 @@ export function GatewayConnect({
   }
 }
 
-function GatewayPollingView({
+export function GatewayPollingView({
   userCode,
   verificationUri,
+  hostname,
+  loginNotice,
   onCancel,
 }: {
   userCode: string;
   verificationUri: string;
+  hostname?: string;
+  loginNotice?: string;
   onCancel: () => void;
 }): React.ReactNode {
   useKeybinding('confirm:no', onCancel, {
@@ -425,6 +449,12 @@ function GatewayPollingView({
           {verificationUri}
         </Text>
       </Box>
+      {loginNotice && (
+        <Box flexDirection="column">
+          <Text dimColor>Notice from {hostname ?? 'gateway'}:</Text>
+          <Text>{loginNotice}</Text>
+        </Box>
+      )}
       <Box gap={1}>
         <Text color="suggestion">{figures.ellipsis}</Text>
         <Text dimColor>Waiting for sign-in to complete in your browser…</Text>

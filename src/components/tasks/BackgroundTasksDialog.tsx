@@ -246,7 +246,43 @@ type ListItem =
       status: 'running';
       size: number;
       firstTaskId: string;
+    }
+  | {
+      id: string;
+      type: 'subagent_history';
+      label: string;
+      status: 'running';
+      size: number;
+      firstAgentId: string;
+    }
+  | {
+      id: string;
+      type: 'recorded_agent';
+      label: string;
+      status: 'completed';
+      task: DeepImmutable<LocalAgentTaskState>;
     };
+
+/** Official 2.1.319 (#1714): collapsible "Earlier in this session" finished subagents group. */
+export const EARLIER_IN_SESSION_LABEL = 'Earlier in this session';
+export const SUBAGENT_HISTORY_ID = '__subagent_history__';
+
+export function collectEarlierSessionSubagents(
+  tasks: Record<string, TaskState> | undefined,
+  activeIds: ReadonlySet<string>,
+): LocalAgentTaskState[] {
+  if (!tasks) return [];
+  const results: LocalAgentTaskState[] = [];
+  for (const task of Object.values(tasks)) {
+    if (!task || typeof task !== 'object') continue;
+    if (task.type !== 'local_agent') continue;
+    if (activeIds.has(task.id)) continue;
+    if (task.status === 'completed' || task.status === 'failed' || task.status === 'killed') {
+      results.push(task as LocalAgentTaskState);
+    }
+  }
+  return results.sort((a, b) => (b.endTime ?? b.startTime ?? 0) - (a.endTime ?? a.startTime ?? 0));
+}
 
 // WORKFLOW_SCRIPTS is ant-only (build_flags.yaml). Static imports would leak
 // ~1.3K lines into external builds. Gate with feature() + require so the
@@ -385,6 +421,7 @@ export function BackgroundTasksDialog({
   });
 
   const [showSystemTasks, setShowSystemTasks] = useState(false);
+  const [showEarlierSubagents, setShowEarlierSubagents] = useState(false);
 
   // densable 247: live index ref so same-tick focus + select/keydown reads latest item.
   const [selectedIndex, setSelectedIndexState] = useState<number>(0);
@@ -414,11 +451,15 @@ export function BackgroundTasksDialog({
     dreamTasks,
     autoModeScanTasks,
     selfManagedTasks,
+    earlierSubagentTasks,
     rows,
     allSelectableItems,
   } = useMemo(() => {
     // densable r5c — running/pending bO plus parked-idle completed local_agent
-    const backgroundTasks = Object.values(typedTasks ?? {}).filter(isBackgroundTasksDialogRow);
+    const backgroundTasks = Object.values(typedTasks ?? {}).filter(
+      (task): task is TaskState => Boolean(task) && isBackgroundTasksDialogRow(task),
+    );
+    const activeIds = new Set(backgroundTasks.map(t => t.id));
     const selfManagedIds = new Set(backgroundTasks.filter(isSelfManagedBackgroundTask).map(t => t.id));
     const allItems = backgroundTasks.map(toListItem);
     const sorted = allItems.sort((a, b) => {
@@ -426,8 +467,8 @@ export function BackgroundTasksDialog({
       const bStatus = b.status;
       if (aStatus === 'running' && bStatus !== 'running') return -1;
       if (aStatus !== 'running' && bStatus === 'running') return 1;
-      const aTime = 'task' in a ? a.task.startTime : 0;
-      const bTime = 'task' in b ? b.task.startTime : 0;
+      const aTime = 'task' in a && a.task ? (a.task.startTime ?? 0) : 0;
+      const bTime = 'task' in b && b.task ? (b.task.startTime ?? 0) : 0;
       return bTime - aTime;
     });
     const visibleItems = sorted.filter(item => !selfManagedIds.has(item.id));
@@ -447,6 +488,30 @@ export function BackgroundTasksDialog({
             },
           ];
 
+    // Official 2.1.319 (#1714): "Earlier in this session" finished subagents
+    const earlierRaw = collectEarlierSessionSubagents(typedTasks, activeIds);
+    const earlierItems: ListItem[] =
+      earlierRaw.length === 0
+        ? []
+        : showEarlierSubagents
+          ? earlierRaw.map(task => ({
+              id: task.id,
+              type: 'recorded_agent' as const,
+              label: task.description || task.agentType || task.id,
+              status: 'completed' as const,
+              task,
+            }))
+          : [
+              {
+                id: SUBAGENT_HISTORY_ID,
+                type: 'subagent_history' as const,
+                label: EARLIER_IN_SESSION_LABEL,
+                status: 'running' as const,
+                size: earlierRaw.length,
+                firstAgentId: earlierRaw[0]!.id,
+              },
+            ];
+
     const bash = visibleItems.filter(item => item.type === 'local_bash');
     const remote = visibleItems.filter(item => item.type === 'remote_agent');
     const agents = visibleItems.filter(item => item.type === 'local_agent');
@@ -460,7 +525,7 @@ export function BackgroundTasksDialog({
 
     const teamMap = new Map<string, Extract<ListItem, { type: 'in_process_teammate' }>[]>();
     for (const item of visibleItems) {
-      if (item.type !== 'in_process_teammate') continue;
+      if (item.type !== 'in_process_teammate' || !item.task?.identity?.teamName) continue;
       const group = teamMap.get(item.task.identity.teamName);
       if (group) group.push(item);
       else teamMap.set(item.task.identity.teamName, [item]);
@@ -486,6 +551,7 @@ export function BackgroundTasksDialog({
       ...remote,
       ...agent,
       ...completed,
+      ...earlierItems,
       ...workflows,
       ...dream,
       ...autoModeScan,
@@ -500,6 +566,7 @@ export function BackgroundTasksDialog({
       ...remote,
       ...agent,
       ...completed,
+      ...earlierItems,
       ...workflows,
       ...dream,
       ...autoModeScan,
@@ -510,6 +577,7 @@ export function BackgroundTasksDialog({
       remoteSessions: remote,
       agentTasks: agent,
       completedAgentTasks: completed,
+      earlierSubagentTasks: earlierItems,
       workflowTasks: workflows,
       mcpMonitors: monitorMcp,
       mcpTasks: mcp,
@@ -521,7 +589,7 @@ export function BackgroundTasksDialog({
       rows: listRows,
       allSelectableItems: selectableItems,
     };
-  }, [typedTasks, showSystemTasks]);
+  }, [typedTasks, showSystemTasks, showEarlierSubagents]);
 
   const currentSelection =
     (selectedIdRef.current ? allSelectableItems.find(i => i.id === selectedIdRef.current) : undefined) ??
@@ -578,6 +646,12 @@ export function BackgroundTasksDialog({
     if (current.type === 'self_managed_tasks') {
       selectedIdRef.current = current.firstTaskId;
       setShowSystemTasks(true);
+    } else if (current.type === 'subagent_history') {
+      selectedIdRef.current = current.firstAgentId;
+      setShowEarlierSubagents(true);
+    } else if (current.type === 'recorded_agent') {
+      enterTeammateView(current.id, setAppState);
+      onDone('Viewing agent', { display: 'system' });
     } else if (current.type === 'leader') {
       exitTeammateView(setAppState);
       onDone('Viewing leader', { display: 'system' });
@@ -1206,6 +1280,19 @@ export function BackgroundTasksDialog({
           ),
         },
         {
+          key: 'earlier-in-session',
+          items: earlierSubagentTasks,
+          heading: showEarlierSubagents ? (
+            <Text dimColor>
+              <Text bold>
+                {'  '}
+                {EARLIER_IN_SESSION_LABEL}
+              </Text>{' '}
+              ({earlierSubagentTasks.length})
+            </Text>
+          ) : null,
+        },
+        {
           key: 'workflows',
           items: workflowTasks,
           heading: (
@@ -1238,6 +1325,8 @@ export function BackgroundTasksDialog({
       remoteSessions,
       agentTasks,
       completedAgentTasks,
+      earlierSubagentTasks,
+      showEarlierSubagents,
       workflowTasks,
       dreamTasks,
       autoModeScanTasks,
@@ -1403,10 +1492,10 @@ export function getActionsForItem(item: ListItem): TaskAction[] {
 }
 
 function getItemActionLabel(item: ListItem): string {
-  if (item.type === 'leader' || item.type === 'self_managed_tasks') {
+  if (item.type === 'leader' || item.type === 'self_managed_tasks' || item.type === 'subagent_history') {
     return item.label;
   }
-  return getBackgroundTaskItemPresentation(item.task)?.label ?? item.label;
+  return (item.task ? getBackgroundTaskItemPresentation(item.task)?.label : undefined) ?? item.label;
 }
 
 function buildItemListOption(
@@ -1429,13 +1518,35 @@ function buildItemListOption(
       ),
     };
   }
+  if (item.type === 'subagent_history') {
+    return {
+      value: valueKey,
+      label: (
+        <Text>
+          {item.label}
+          <Text dimColor>{` · ${item.size} finished`}</Text>
+        </Text>
+      ),
+    };
+  }
+  if (item.type === 'recorded_agent') {
+    return {
+      value: valueKey,
+      label: (
+        <Text>
+          {item.label}
+          <Text dimColor> · reopen to message</Text>
+        </Text>
+      ),
+    };
+  }
   if (item.type === 'leader') {
     return {
       value: valueKey,
       label: `@${TEAM_LEAD_NAME}`,
     };
   }
-  const presentation = getBackgroundTaskItemPresentation(item.task);
+  const presentation = item.task ? getBackgroundTaskItemPresentation(item.task) : null;
   if (presentation) {
     return {
       value: valueKey,

@@ -3,7 +3,18 @@
 // dialog. Follows the DreamTask pattern: lifecycle + UI surfacing via
 // the existing task registry.
 
-import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
+import {
+  getIsNonInteractiveSession,
+  getMainThreadAgentId,
+} from '../../bootstrap/state.js'
+import {
+  NOTE_TAG,
+  STATUS_TAG,
+  SUMMARY_TAG,
+  TASK_ID_TAG,
+  TASK_NOTIFICATION_TAG,
+  TOOL_USE_ID_TAG,
+} from '../../constants/xml.js'
 import type { AppState } from '../../state/AppState.js'
 import type { SetAppState, Task, TaskStateBase } from '../../Task.js'
 import { createTaskStateBase, generateTaskId } from '../../Task.js'
@@ -11,6 +22,7 @@ import type { AgentId } from '../../types/ids.js'
 import type { SdkWorkflowProgress } from '../../types/workflowProgress.js'
 import { logEvent } from '../../services/analytics/index.js'
 import { logForDebugging } from '../../utils/debug.js'
+import { enqueuePendingNotification } from '../../utils/messageQueueManager.js'
 import { emitTaskTerminatedSdk } from '../../utils/sdkEventQueue.js'
 import { evictTaskOutput } from '../../utils/task/diskOutput.js'
 import {
@@ -24,6 +36,8 @@ import {
   createTaskRegistry,
   type TaskRegistry,
 } from '../../utils/taskRegistry.js'
+import { escapeXml } from '../../utils/xml.js'
+import { truncateNotificationSummary } from '../LocalShellTask/LocalShellTask.js'
 
 /** densable NqK=500 — keep at most this many workflow_log entries after trim. */
 export const WORKFLOW_PROGRESS_LOG_CAP = 500
@@ -392,15 +406,109 @@ export function failWorkflowTask(
  * Called from bgCheckpoint.checkpointAgents after abort-for-background.
  * Returns true when the task was running and updated.
  */
+/**
+ * Official `vrs` / `dgr` / `krs` / `Ov` (2.1.321 #1919):
+ * Enqueue a `<task-notification>` when the user pauses or stops a running workflow
+ * so Claude knows it is no longer running.
+ */
+function resolveWorkflowNoticeRecipient(
+  task: LocalWorkflowTaskState,
+  registry: TaskRegistry,
+): AgentId | undefined {
+  if (task.type !== 'local_workflow' || task.toolUseId === undefined) {
+    return undefined
+  }
+  const owner =
+    task.agentId === undefined ? undefined : registry.get(task.agentId)
+  if (
+    owner !== undefined &&
+    owner.type === 'local_agent' &&
+    owner.status === 'running' &&
+    task.agentId !== undefined
+  ) {
+    return task.agentId
+  }
+  return getMainThreadAgentId()
+}
+
+function formatWorkflowRecoveryBlock(task: LocalWorkflowTaskState): string {
+  if (!task.workflowFile || !task.workflowRunId) return ''
+  const resumeCall = `Workflow({scriptPath: '${task.workflowFile}', resumeFromRunId: '${task.workflowRunId}'})`
+  return `\n<recovery>${escapeXml(`Its finished agent calls are saved. Only if the user asks you to resume it, call: ${resumeCall}`)}</recovery>`
+}
+
+export function enqueueWorkflowPausedNotice(
+  task: LocalWorkflowTaskState,
+  registry: TaskRegistry,
+): boolean {
+  const recipient = resolveWorkflowNoticeRecipient(task, registry)
+  if (recipient === undefined) return false
+  const summary = truncateNotificationSummary(
+    `Task "${task.description}" was paused by the user`,
+  )
+  const recovery = formatWorkflowRecoveryBlock(task)
+  const message = `<${TASK_NOTIFICATION_TAG}>
+<${TASK_ID_TAG}>${escapeXml(task.id)}</${TASK_ID_TAG}>
+<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
+<${NOTE_TAG}>It is not running, and no result follows until it is resumed. The user can resume it from /workflows.</${NOTE_TAG}>${recovery}
+</${TASK_NOTIFICATION_TAG}>`
+  enqueuePendingNotification({
+    value: message,
+    mode: 'task-notification',
+    skipAttachments: true,
+    priority: 'next',
+    agentId: recipient,
+    taskId: task.id,
+  })
+  return true
+}
+
+export function enqueueWorkflowStoppedNotice(
+  task: LocalWorkflowTaskState,
+  registry: TaskRegistry,
+  source: 'user' | 'client' = 'user',
+): boolean {
+  const recipient = resolveWorkflowNoticeRecipient(task, registry)
+  if (recipient === undefined) return false
+  const base =
+    source === 'client'
+      ? `Task "${task.description}" was stopped by the user or by the app connected to this session`
+      : `Task "${task.description}" was stopped by the user`
+  const summary = truncateNotificationSummary(
+    `${base}. No result will follow unless the user has it resumed.`,
+  )
+  const toolUseIdLine = task.toolUseId
+    ? `\n<${TOOL_USE_ID_TAG}>${escapeXml(task.toolUseId)}</${TOOL_USE_ID_TAG}>`
+    : ''
+  const recovery = formatWorkflowRecoveryBlock(task)
+  const message = `<${TASK_NOTIFICATION_TAG}>
+<${TASK_ID_TAG}>${escapeXml(task.id)}</${TASK_ID_TAG}>${toolUseIdLine}
+<${STATUS_TAG}>killed</${STATUS_TAG}>
+<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>${recovery}
+</${TASK_NOTIFICATION_TAG}>`
+  enqueuePendingNotification({
+    value: message,
+    mode: 'task-notification',
+    skipAttachments: true,
+    priority: 'next',
+    agentId: recipient,
+    taskId: task.id,
+  })
+  return true
+}
+
 export function pauseWorkflowTask(
   taskId: string,
   registry: TaskRegistry,
+  opts?: { notify?: boolean },
 ): boolean {
   let paused = false
+  let pausedTask: LocalWorkflowTaskState | undefined
   let agentId: AgentId | undefined
   registry.update<LocalWorkflowTaskState>(taskId, task => {
     if (task.status !== 'running') return task
     paused = true
+    pausedTask = task
     agentId = task.agentId
     try {
       task.abortController?.abort()
@@ -419,6 +527,9 @@ export function pauseWorkflowTask(
   // densable zit: if (r) tB(r.ownerAgentId, `workflow:${e}`)
   if (paused) {
     detachWorkflowKeepalive(taskId, agentId, registry)
+    if (opts?.notify !== false && pausedTask !== undefined) {
+      enqueueWorkflowPausedNotice(pausedTask, registry)
+    }
   }
   return paused
 }
@@ -428,16 +539,22 @@ export function pauseWorkflowTask(
  * via the feature-gated `killWorkflowTask` binding.
  * densable bye: tB(owner, workflow:id) after terminal.
  */
-export function killWorkflowTask(taskId: string, registry: TaskRegistry): void {
+export function killWorkflowTask(
+  taskId: string,
+  registry: TaskRegistry,
+  opts?: { notify?: boolean; source?: 'user' | 'client' },
+): void {
   let agentId: AgentId | undefined
   let toolUseId: string | undefined
   let description: string | undefined
+  let stoppedTask: LocalWorkflowTaskState | undefined
   let detached = false
   registry.update<LocalWorkflowTaskState>(taskId, task => {
     if (task.status !== 'running' && task.status !== 'paused') return task
     agentId = task.agentId
     toolUseId = task.toolUseId
     description = task.description
+    stoppedTask = task
     detached = true
     task.abortController?.abort()
     const now = Date.now()
@@ -457,6 +574,13 @@ export function killWorkflowTask(taskId: string, registry: TaskRegistry): void {
       toolUseId,
       summary: description,
     })
+    if (opts?.notify !== false && stoppedTask !== undefined) {
+      enqueueWorkflowStoppedNotice(
+        stoppedTask,
+        registry,
+        opts?.source ?? 'user',
+      )
+    }
   }
 }
 
@@ -531,7 +655,9 @@ export function killWorkflowTasksForAgent(
       logForDebugging(
         `killWorkflowTasksForAgent: killing orphaned workflow task ${taskId} (agent ${agentId} exiting)`,
       )
-      killWorkflowTask(taskId, createTaskRegistry(getAppState, setAppState))
+      killWorkflowTask(taskId, createTaskRegistry(getAppState, setAppState), {
+        notify: false,
+      })
     }
   }
 }

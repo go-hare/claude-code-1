@@ -19,6 +19,10 @@ export type ClipboardAttacherCaps = {
   syncOutput?: boolean
   /** densable `nu()?.isVscodeTerm` — zm extra arm. */
   isVscodeTerm?: boolean
+  /** densable `op()?.isGhosttyXtv` — Ghostty XTVERSION (SSH-safe). */
+  isGhosttyXtv?: boolean
+  /** densable `op()?.hyperlinks` — outer terminal OSC-8 hyperlink support. */
+  hyperlinks?: boolean
   /** densable `nu()?.keyDialect` — `Wy()` / `gst(TERM)` `'st' | 'rxvt' | null`. */
   keyDialect?: 'st' | 'rxvt' | null
   /** densable `op()?.terminal` — outer terminal type for VTE OSC 52 guard. */

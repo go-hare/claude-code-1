@@ -18,6 +18,9 @@ export const BROWSER_TOOLS = [
     name: 'javascript_tool',
     description:
       "Execute JavaScript code in the context of the current page. The code runs in the page's context and can interact with the DOM, window object, and page variables. Returns the result of the last expression or any thrown errors. If you don't have a valid tab ID, use tabs_context_mcp first to get available tabs.",
+    _meta: {
+      'anthropic/maxResultSizeChars': 60000,
+    },
     inputSchema: {
       type: 'object',
       properties: {
@@ -553,47 +556,6 @@ export const BROWSER_TOOLS = [
           type: 'number',
           description:
             'Maximum number of requests to return. Defaults to 100. Increase only if you need more results.',
-        },
-      },
-      required: ['tabId'],
-    },
-  },
-  {
-    name: 'shortcuts_list',
-    description:
-      'List all available shortcuts and workflows (shortcuts and workflows are interchangeable). Returns shortcuts with their commands, descriptions, and whether they are workflows. Use shortcuts_execute to run a shortcut or workflow.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        tabId: {
-          type: 'number',
-          description:
-            "Tab ID to list shortcuts from. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID.",
-        },
-      },
-      required: ['tabId'],
-    },
-  },
-  {
-    name: 'shortcuts_execute',
-    description:
-      'Execute a shortcut or workflow by running it in a new sidepanel window using the current tab (shortcuts and workflows are interchangeable). Use shortcuts_list first to see available shortcuts. This starts the execution and returns immediately - it does not wait for completion.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        tabId: {
-          type: 'number',
-          description:
-            "Tab ID to execute the shortcut on. Must be a tab in the current group. Use tabs_context_mcp first if you don't have a valid tab ID.",
-        },
-        shortcutId: {
-          type: 'string',
-          description: 'The ID of the shortcut to execute',
-        },
-        command: {
-          type: 'string',
-          description:
-            "The command name of the shortcut to execute (e.g., 'debug', 'summarize'). Do not include the leading slash.",
         },
       },
       required: ['tabId'],

@@ -289,6 +289,8 @@ export type BuildSessionChildEnvOpts = {
   governedGhPathShim?: boolean
   agentProxyUrlFromEnv?: string
   mcpConfigPath?: string
+  /** #1781: When false (`--trust-workspace false`), inject `CLAUDE_CODE_IGNORE_PERSISTED_TRUST: '1'`. */
+  trustWorkspace?: boolean
 }
 
 /**
@@ -343,6 +345,8 @@ export function buildSessionChildEnv(
     // densable 2.1.236 BYOC scrub clears both pin and session-start default
     ANTHROPIC_DEFAULT_MODEL: undefined,
     CLAUDE_CODE_ENVIRONMENT_KIND: 'byoc',
+    CLAUDE_CODE_IGNORE_PERSISTED_TRUST:
+      opts.trustWorkspace === false ? '1' : undefined,
     CLAUDE_CODE_BYOC_ENABLE_DATADOG:
       process.env.CLAUDE_CODE_BYOC_ENABLE_DATADOG,
     DISABLE_TELEMETRY: process.env.DISABLE_TELEMETRY,

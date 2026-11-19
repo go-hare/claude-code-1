@@ -34,6 +34,54 @@ type ViewMode = 'list' | 'detail';
 
 type DiffSource = { type: 'current' } | { type: 'turn'; turn: TurnDiff };
 
+/**
+ * Official `Cr` (2.1.319 #1720): when 64 or more turns edited files, render a
+ * sliding window of turns so the source tab selector never overflows/blanks.
+ */
+export const DIFF_TURN_WINDOW_SIZE = 63;
+
+export function computeTurnDiffWindow<T extends { turnIndex: number }>(
+  turns: readonly T[],
+  selectedTurnIndex: number | null,
+  windowSize: number = DIFF_TURN_WINDOW_SIZE,
+): {
+  visibleTurns: readonly T[];
+  offset: number;
+  hasNewer: boolean;
+  hasOlder: boolean;
+  labelFor: (turn: T, indexInWindow: number) => string;
+} {
+  if (turns.length <= windowSize) {
+    return {
+      visibleTurns: turns,
+      offset: 0,
+      hasNewer: false,
+      hasOlder: false,
+      labelFor: turn => `T${turn.turnIndex}`,
+    };
+  }
+  const selectedPos = selectedTurnIndex === null ? -1 : turns.findIndex(t => t.turnIndex === selectedTurnIndex);
+  const stride = Math.max(1, windowSize - 2);
+  const maxPage = Math.ceil((turns.length - windowSize) / stride);
+  const page = Math.min(Math.floor((selectedPos - 1) / stride), maxPage);
+  const offset = stride * Math.max(0, page);
+  const visibleTurns = turns.slice(offset, offset + windowSize);
+  const hasNewer = offset > 0;
+  const hasOlder = offset + visibleTurns.length < turns.length;
+  return {
+    visibleTurns,
+    offset,
+    hasNewer,
+    hasOlder,
+    labelFor: (turn, idx) =>
+      hasNewer && idx === 0
+        ? `T${turn.turnIndex} (pick for newer)`
+        : hasOlder && idx === visibleTurns.length - 1
+          ? `T${turn.turnIndex} (pick for older)`
+          : `T${turn.turnIndex}`,
+  };
+}
+
 function turnDiffToDiffData(turn: TurnDiff): DiffData {
   const files = Array.from(turn.files.values())
     .map(f => ({
@@ -100,6 +148,23 @@ export function DiffDialog({ messages, onDone }: Props): React.ReactNode {
 
   const currentSource = sources[sourceIndex];
   const currentTurn = currentSource?.type === 'turn' ? currentSource.turn : null;
+
+  const turnWindow = useMemo(
+    () => computeTurnDiffWindow(turnDiffs, currentTurn?.turnIndex ?? null),
+    [turnDiffs, currentTurn?.turnIndex],
+  );
+
+  const windowedTabs = useMemo(() => {
+    const items: Array<{ sourceIndex: number; title: string }> = [{ sourceIndex: 0, title: 'Current' }];
+    for (let i = 0; i < turnWindow.visibleTurns.length; i++) {
+      const turn = turnWindow.visibleTurns[i]!;
+      items.push({
+        sourceIndex: turnWindow.offset + i + 1,
+        title: turnWindow.labelFor(turn, i),
+      });
+    }
+    return items;
+  }, [turnWindow]);
 
   const diffData = useMemo((): DiffData => {
     return currentTurn ? turnDiffToDiffData(currentTurn) : gitDiffData;
@@ -342,12 +407,8 @@ export function DiffDialog({ messages, onDone }: Props): React.ReactNode {
         onTabChange={tabId => setSourceIndex(Number(tabId))}
         disableNavigation={viewMode === 'detail'}
       >
-        {sources.map((source, index) => (
-          <Tab
-            key={index}
-            id={String(index)}
-            title={source.type === 'current' ? 'Current' : `T${source.turn.turnIndex}`}
-          >
+        {windowedTabs.map(tab => (
+          <Tab key={tab.sourceIndex} id={String(tab.sourceIndex)} title={tab.title}>
             {tabBody}
           </Tab>
         ))}

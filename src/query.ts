@@ -2532,16 +2532,33 @@ async function* queryLoop(
                           // densable DRd: wr = zr({content:DRd(Gi), isMeta:!0})
                           try {
                             // eslint-disable-next-line @typescript-eslint/no-require-imports
-                            const { buildPartialResponseSalvageMetaContent } =
+                            const {
+                              buildPartialResponseSalvageMetaContent,
+                              planSameModelRefusalRetryNudge,
+                            } =
                               require('./utils/refusalFallback.js') as typeof import('./utils/refusalFallback.js')
                             // eslint-disable-next-line @typescript-eslint/no-require-imports
                             const { createUserMessage } =
                               require('./utils/messages.js') as typeof import('./utils/messages.js')
+                            // Official 2.1.321 (#1852): when the refused model
+                            // produced nothing before blocking, mark the retry
+                            // nudge virtual so the fallback model does not see
+                            // a spurious stopped-response note.
+                            const producedNothing =
+                              salvage.partialTextChars === 0 &&
+                              salvage.toolUseCount === 0
+                            const nudgePlan = planSameModelRefusalRetryNudge({
+                              producedNothing,
+                              interruptedToolCount: salvage.toolUseCount,
+                            })
                             partialResponseMetaMessage = createUserMessage({
-                              content: buildPartialResponseSalvageMetaContent(
-                                beginPlan.event.salvageText,
-                              ),
+                              content: producedNothing
+                                ? nudgePlan.nudgeContent
+                                : buildPartialResponseSalvageMetaContent(
+                                    beginPlan.event.salvageText,
+                                  ),
                               isMeta: true,
+                              ...(nudgePlan.isVirtual && { isVirtual: true }),
                             })
                           } catch {
                             // densable optional

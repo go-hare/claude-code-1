@@ -17,6 +17,7 @@ import {
   isObserverAgentTask,
   queuePendingMessage,
 } from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
+import { isAgentStoppedByPerson } from 'src/utils/sessionHost.js'
 import { isAutoModeActive } from 'src/utils/permissions/autoModeState.js'
 import { isInProcessTeammateTask } from 'src/tasks/InProcessTeammateTask/types.js'
 import { isMainSessionTask } from 'src/tasks/LocalMainSessionTask.js'
@@ -1576,7 +1577,7 @@ async function tryDeliverToLocalAgent(
   if (isLocalAgentTask(task) && !isMainSessionTask(task)) {
     const observerRefuse = await refuseIfObserverRecipient(agentId, task)
     if (observerRefuse) return observerRefuse
-    if (task.stoppedByUser) {
+    if (isAgentStoppedByPerson(agentId, task.stoppedByUser)) {
       return {
         data: {
           success: false,

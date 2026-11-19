@@ -63,6 +63,112 @@ function getMcpToolPrefix(serverName: string): string {
   return `mcp__${normalizeNameForMCP(serverName)}__`
 }
 
+const CLAUDE_AI_TERMINAL_PREFIX = 'claude_ai_'
+
+/**
+ * Official 325 #1779 — expand a claude.ai connector's Desktop / terminal MCP
+ * tool name into its alternate spellings (e.g. Desktop `mcp__Slack__post` or
+ * `connectorId`-backed server <-> terminal `mcp__claude_ai_Slack__post`) so
+ * deny/ask permission rules, hook matchers, and `disallowedTools` written in
+ * terminal form still match in Claude Desktop.
+ *
+ * Callers MUST ONLY use these expanded names for deny/ask/disallowed/hook-family
+ * matching (never for `allow` grants).
+ */
+export function expandConnectorToolAliases(
+  toolName: string,
+  options?: {
+    connectorId?: string
+    connectorDisplayName?: string
+    serverName?: string
+  },
+): string[] {
+  const parsed = mcpInfoFromString(toolName)
+  if (!parsed) return []
+  const aliases = new Set<string>()
+  const normalizedServer = normalizeNameForMCP(parsed.serverName)
+  const bareTool = parsed.toolName
+
+  if (normalizedServer.startsWith(CLAUDE_AI_TERMINAL_PREFIX)) {
+    const stripped = normalizedServer.slice(CLAUDE_AI_TERMINAL_PREFIX.length)
+    if (stripped) {
+      aliases.add(`mcp__${stripped}__${bareTool}`)
+      aliases.add(`mcp__${stripped}`)
+    }
+  } else if (options?.connectorId) {
+    const terminalFromServer = `${CLAUDE_AI_TERMINAL_PREFIX}${normalizedServer}`
+    aliases.add(`mcp__${terminalFromServer}__${bareTool}`)
+    aliases.add(`mcp__${terminalFromServer}`)
+    if (options.connectorDisplayName) {
+      const normalizedDisplay = normalizeNameForMCP(
+        options.connectorDisplayName,
+      )
+      if (normalizedDisplay) {
+        aliases.add(
+          `mcp__${CLAUDE_AI_TERMINAL_PREFIX}${normalizedDisplay}__${bareTool}`,
+        )
+        aliases.add(`mcp__${CLAUDE_AI_TERMINAL_PREFIX}${normalizedDisplay}`)
+      }
+    }
+  }
+  if (options?.connectorId) {
+    const normConnector = normalizeNameForMCP(options.connectorId)
+    if (normConnector) {
+      aliases.add(`mcp__${normConnector}__${bareTool}`)
+      aliases.add(
+        `mcp__${CLAUDE_AI_TERMINAL_PREFIX}${normConnector}__${bareTool}`,
+      )
+    }
+  }
+  aliases.delete(toolName)
+  return [...aliases]
+}
+
+/**
+ * Resolve connector alias names for `toolName` given the live MCP clients list.
+ * Used by hook matchers (`getHookFamilyNames`, which sets `throughFamilyOnly`
+ * so alias matches can deny/ask but never allow) and `disallowedTools` checks.
+ */
+export function getConnectorAliasesForMcpTool(
+  toolName: string,
+  mcpClients?: readonly MCPServerConnection[],
+): string[] {
+  const parsed = mcpInfoFromString(toolName)
+  if (!parsed) return []
+  const matchedClient = mcpClients?.find(
+    c =>
+      c.name === parsed.serverName ||
+      normalizeNameForMCP(c.name) === normalizeNameForMCP(parsed.serverName),
+  )
+  const config = matchedClient?.config as
+    | (McpServerConfig & { connectorId?: string; id?: string })
+    | undefined
+  const connectorId =
+    config?.connectorId ??
+    (config?.type === 'claudeai-proxy' ? config.id : undefined)
+  return expandConnectorToolAliases(toolName, {
+    connectorId,
+    connectorDisplayName: matchedClient?.name,
+    serverName: parsed.serverName,
+  })
+}
+
+export function toolMatchesWithConnectorAliases(
+  toolName: string,
+  ruleOrDisallowedName: string,
+  mcpClients?: readonly MCPServerConnection[],
+): boolean {
+  if (toolName === ruleOrDisallowedName) return true
+  const aliases = getConnectorAliasesForMcpTool(toolName, mcpClients)
+  return aliases.some(
+    alias =>
+      alias === ruleOrDisallowedName ||
+      (ruleOrDisallowedName.startsWith('mcp__') &&
+        !ruleOrDisallowedName.slice(5).includes('__') &&
+        alias.startsWith(`${ruleOrDisallowedName}__`)),
+  )
+}
+
 /**
  * densable `jn` — drop one name or a list of names from an MCP per-server map
  * (`resources` / `resourceTemplates`).

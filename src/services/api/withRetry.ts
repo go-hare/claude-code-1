@@ -2,6 +2,7 @@ import { feature } from 'bun:bundle'
 import type Anthropic from '@anthropic-ai/sdk'
 import {
   APIConnectionError,
+  APIConnectionTimeoutError,
   APIError,
   APIUserAbortError,
 } from '@anthropic-ai/sdk'
@@ -60,8 +61,15 @@ import {
   handleFastModeRejectedByAPI,
   isFastModeCooldown,
   isFastModeEnabled,
+  isFastModeRefusalError,
+  isModelFastModeRejectedForSession,
+  markModelFastModeRejectedForSession,
   triggerFastModeCooldown,
 } from '../../utils/fastMode.js'
+import {
+  isTlsCertificateVerificationError,
+  readApiServedCertificateChain,
+} from '../../utils/mtls.js'
 import { handleFoundryCapabilityError } from '../../utils/foundryCapabilities.js'
 import { isNonCustomOpusModel } from '../../utils/model/model.js'
 import { disableKeepAlive } from '../../utils/proxy.js'
@@ -203,10 +211,17 @@ const STALE_CONNECTION_CODES = new Set([
   'ECONNABORTED',
   'ERR_SOCKET_CLOSED',
   'StreamSuspended',
+  'StreamTruncated',
 ])
 
-/** densable EYy / 2.1.214 #18+#46 */
-function isStaleConnectionError(error: unknown): boolean {
+/** densable EYy / 2.1.214 #18+#46 + 2.1.321 #1878 StreamTruncated */
+export function isStaleConnectionError(error: unknown): boolean {
+  if (
+    error instanceof Error &&
+    (error as { code?: unknown }).code === 'StreamTruncated'
+  ) {
+    return true
+  }
   if (!(error instanceof APIConnectionError)) {
     return false
   }
@@ -457,6 +472,10 @@ export async function* withRetry<T>(
   let streamNoResponseRetryCount = 0
   // densable y3b `h` — report mTLS material failure analytics at most once
   let mtlsReloadFailureReported = false
+  // Official 2.1.319 (#1722): force-refresh OAuth at most once per request loop
+  let oauth401ForcedRefreshDone = false
+  // Official 2.1.319 (#1784): attempt TLS served-chain cert repair at most once
+  let tlsCertRepairAttempted = false
   // densable `Fe=new Set` @184899103 — each onError retry token fires once.
   const consumedOnErrorRetryTokens = new Set<string>()
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
@@ -467,7 +486,11 @@ export async function* withRetry<T>(
     // Capture whether fast mode is active before this attempt
     // (fallback may change the state mid-loop)
     const wasFastModeActive = isFastModeEnabled()
-      ? retryContext.fastMode && !isFastModeCooldown()
+      ? Boolean(
+          retryContext.fastMode &&
+            !isFastModeCooldown() &&
+            !isModelFastModeRejectedForSession(retryContext.model),
+        )
       : false
 
     try {
@@ -566,7 +589,23 @@ export async function* withRetry<T>(
           if (!handledProfileWif) {
             const failedAccessToken = getClaudeAIOAuthTokens()?.accessToken
             if (failedAccessToken) {
-              await handleOAuth401Error(failedAccessToken)
+              // Official 2.1.319 (#1722): on repeated 401s within the same
+              // request, adopt a token refreshed by another session instead of
+              // forcing another refresh_token call every retry.
+              let forcedOutcome:
+                | 'refreshed'
+                | 'unchanged'
+                | 'failed'
+                | undefined
+              await handleOAuth401Error(failedAccessToken, {
+                adoptOnly: oauth401ForcedRefreshDone,
+                onForcedRefreshOutcome: outcome => {
+                  forcedOutcome = outcome
+                },
+              })
+              if (forcedOutcome === 'refreshed' || forcedOutcome === 'failed') {
+                oauth401ForcedRefreshDone = true
+              }
               // densable `let z = f$e(); if (z) throw re(...), new nd(new yz(z.url), o)`
               const hold = getOAuthAccountOnHold()
               if (hold) {
@@ -576,6 +615,23 @@ export async function* withRetry<T>(
                 })
                 throw new CannotRetryError(
                   new OAuthAccountOnHoldError(hold.url),
+                  retryContext,
+                )
+              }
+              const latestAccessToken = getClaudeAIOAuthTokens()?.accessToken
+              if (
+                oauth401ForcedRefreshDone &&
+                (latestAccessToken === failedAccessToken ||
+                  latestAccessToken === undefined)
+              ) {
+                logEvent('api_request', {
+                  status:
+                    'api_request_oauth_refresh_exhausted' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                })
+                throw new CannotRetryError(
+                  lastError instanceof Error
+                    ? lastError
+                    : new Error('OAuth 401 refresh exhausted'),
                   retryContext,
                 )
               }
@@ -682,50 +738,103 @@ export async function* withRetry<T>(
         )
       }
 
-      // Fast mode fallback: on 429/529, either wait and retry (short delays)
-      // or fall back to standard speed (long delays) to avoid cache thrashing.
-      // Skip in persistent mode: the short-retry path below loops with fast
-      // mode still active, so its `continue` never reaches the attempt clamp
-      // and the for-loop terminates. Persistent sessions want the chunked
-      // keep-alive path instead of fast-mode cache-preservation anyway.
+      // Official 2.1.319 (#1784 & #1817): after a TLS certificate error,
+      // perform a single TLS handshake to the configured API host (even when
+      // CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC is set; skipped if only
+      // ALL_PROXY is set) to restore a dropped cross-certificate and retry.
+      if (!tlsCertRepairAttempted && isTlsCertificateVerificationError(error)) {
+        tlsCertRepairAttempted = true
+        const apiUrl =
+          process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com'
+        const repairOutcome = await readApiServedCertificateChain(apiUrl, {
+          signal: options.signal,
+          afterModelRequest: true,
+        })
+        if (repairOutcome === 'restored') {
+          client = null
+          attempt--
+          continue
+        }
+      }
+
+      // Official 2.1.321/322 (#1880 & #1963): Fast mode fallback on 429, 529,
+      // 5xx server errors, timeouts (including when watchdog is active), or
+      // fast-mode refusal (e.g. Vertex) — try standard speed on the SAME model
+      // first, and refund the retry attempt (`attempt--`).
       if (
         wasFastModeActive &&
         !isPersistentRetryEnabled() &&
-        !isRetryWatchdogActive() &&
-        error instanceof APIError &&
-        (error.status === 429 || is529Error(error))
+        ((error instanceof APIError &&
+          (error.status === 429 ||
+            is529Error(error) ||
+            (error.status !== undefined && error.status >= 500))) ||
+          error instanceof APIConnectionTimeoutError)
       ) {
-        // If the 429 is specifically because extra usage (overage) is not
-        // available, permanently disable fast mode with a specific message.
-        const overageReason = error.headers?.get(
-          'anthropic-ratelimit-unified-overage-disabled-reason',
-        )
-        if (overageReason !== null && overageReason !== undefined) {
-          handleFastModeOverageRejection(overageReason)
-          retryContext.fastMode = false
-          continue
+        if (error instanceof APIError && error.status === 429) {
+          // If the 429 is specifically because extra usage (overage) is not
+          // available, permanently disable fast mode with a specific message.
+          const overageReason = error.headers?.get(
+            'anthropic-ratelimit-unified-overage-disabled-reason',
+          )
+          if (overageReason !== null && overageReason !== undefined) {
+            handleFastModeOverageRejection(overageReason)
+            retryContext.fastMode = false
+            attempt--
+            continue
+          }
         }
 
-        const retryAfterMs = getRetryAfterMs(error)
-        if (retryAfterMs !== null && retryAfterMs < SHORT_RETRY_THRESHOLD_MS) {
+        const retryAfterMs =
+          error instanceof APIError ? getRetryAfterMs(error) : null
+        if (
+          error instanceof APIError &&
+          (error.status === 429 || is529Error(error)) &&
+          !isRetryWatchdogActive() &&
+          retryAfterMs !== null &&
+          retryAfterMs < SHORT_RETRY_THRESHOLD_MS
+        ) {
           // Short retry-after: wait and retry with fast mode still active
           // to preserve prompt cache (same model name on retry).
           await sleep(retryAfterMs, options.signal, { abortError })
           continue
         }
-        // Long or unknown retry-after: enter cooldown (switches to standard
-        // speed model), with a minimum floor to avoid flip-flopping.
+        // Long/unknown retry-after, 5xx, timeout, or watchdog active: fall back
+        // to standard speed on the same model and refund the retry slot.
         const cooldownMs = Math.max(
           retryAfterMs ?? DEFAULT_FAST_MODE_FALLBACK_HOLD_MS,
           MIN_COOLDOWN_MS,
         )
-        const cooldownReason: CooldownReason = is529Error(error)
-          ? 'overloaded'
-          : 'rate_limit'
+        const cooldownReason: CooldownReason =
+          error instanceof APIConnectionTimeoutError
+            ? 'timeout'
+            : is529Error(error)
+              ? 'overloaded'
+              : error instanceof APIError &&
+                  error.status !== undefined &&
+                  error.status >= 500
+                ? 'server_error'
+                : 'rate_limit'
         triggerFastModeCooldown(Date.now() + cooldownMs, cooldownReason)
         if (isFastModeEnabled()) {
           retryContext.fastMode = false
         }
+        attempt--
+        continue
+      }
+
+      // Official 2.1.322 (#1963): Vertex / API fast-mode refusal falls back to
+      // standard speed on the same model for this session and refunds attempt.
+      if (wasFastModeActive && isFastModeRefusalError(error)) {
+        if (error instanceof APIError && error.status === 400) {
+          markModelFastModeRejectedForSession(retryContext.model)
+        } else {
+          triggerFastModeCooldown(
+            Date.now() + DEFAULT_FAST_MODE_FALLBACK_HOLD_MS,
+            'refused',
+          )
+        }
+        retryContext.fastMode = false
+        attempt--
         continue
       }
 
@@ -742,6 +851,7 @@ export async function* withRetry<T>(
       ) {
         handleFastModeRejectedByAPI()
         retryContext.fastMode = false
+        attempt--
         continue
       }
 
@@ -755,8 +865,10 @@ export async function* withRetry<T>(
         throw new CannotRetryError(error, retryContext)
       }
 
-      // Track consecutive 529 errors
+      // Track consecutive 529 errors (Official #1880: only fall back to another
+      // model when `!wasFastModeActive` — fast mode tries standard speed first).
       if (
+        !wasFastModeActive &&
         is529Error(error) &&
         // If FALLBACK_FOR_ALL_PRIMARY_MODELS is not set, fall through only if the primary model is a non-custom Opus model.
         // TODO: Revisit if the isNonCustomOpusModel check should still exist, or if isNonCustomOpusModel is a stale artifact of when Claude Code was hardcoded on Opus.
@@ -837,6 +949,7 @@ export async function* withRetry<T>(
       if (
         !handledCloudAuthError &&
         !handledWifAuthError &&
+        !isStaleConnectionError(error) &&
         (!(error instanceof APIError) || !shouldRetry(error))
       ) {
         // densable `re("api_request", x instanceof yz || Upe(x) !== null ? "api_request_account_on_hold" : "api_request_non_retryable")`

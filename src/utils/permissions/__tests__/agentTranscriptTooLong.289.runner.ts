@@ -47,6 +47,13 @@ mock.module('src/utils/permissions/classifierWallClock.ts', wallClockMock)
 const { getEmptyToolPermissionContext } = await import('../../../Tool.js')
 const { hasPermissionsToUseTool } = await import('../permissions.js')
 const { AbortError } = await import('../../errors.js')
+const { getFlagSettingsPath, setFlagSettingsPath } = await import(
+  '../../../bootstrap/state.js'
+)
+const { resetSettingsCache } = await import('../../settings/settingsCache.js')
+const { mkdtempSync, rmSync, writeFileSync } = await import('fs')
+const { tmpdir } = await import('os')
+const { join } = await import('path')
 
 afterAll(() => {
   popFeature()
@@ -152,6 +159,33 @@ describe('hasPermissionsToUseTool transcriptTooLong (densable ht)', () => {
       expect(result.message).toContain(
         'no permission prompt is raised for this tool',
       )
+    }
+  })
+
+  test('#1703 denyInsteadOfPrompting denies instead of asking on transcriptTooLong (no AbortError)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'deny-prompt-1703-'))
+    const flagFile = join(dir, 'flag.json')
+    writeFileSync(
+      flagFile,
+      JSON.stringify({ permissions: { denyInsteadOfPrompting: true } }),
+    )
+    const prevFlag = getFlagSettingsPath()
+    setFlagSettingsPath(flagFile)
+    resetSettingsCache()
+    try {
+      const tool = makeTool('Bash')
+      const result = await hasPermissionsToUseTool(
+        tool as never,
+        { prompt: 'rm' },
+        makeContext({ shouldAvoidPermissionPrompts: false }, [tool]) as never,
+        dummyMsg as never,
+        'tu_bash_deny_instead',
+      )
+      expect(result.behavior).toBe('deny')
+    } finally {
+      setFlagSettingsPath(prevFlag)
+      resetSettingsCache()
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 })

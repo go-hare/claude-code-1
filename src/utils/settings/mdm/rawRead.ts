@@ -21,66 +21,234 @@ import {
   WINDOWS_REGISTRY_VALUE_NAME,
 } from './constants.js'
 
+export type MdmUnreadCause =
+  | 'timeout'
+  | 'killed'
+  | 'spawn_busy'
+  | 'spawn_error'
+  | 'oversize'
+  | 'unconvertible'
+  | 'lint_unfinished'
+
+export type RawPlistEntry = {
+  stdout: string | null
+  label: string
+  unreadReason?: string
+  unreadCause?: MdmUnreadCause
+}
+
 export type RawReadResult = {
-  plistStdouts: Array<{ stdout: string; label: string }> | null
+  plistStdouts: RawPlistEntry[] | null
   hklmStdout: string | null
   hkcuStdout: string | null
 }
 
+type ExecOutcome = {
+  stdout: string
+  stderr: string
+  status: 'ok' | 'timeout' | 'killed' | 'spawn_error' | 'exited'
+  code: number | null
+  errno: string | null
+  signal: string | null
+}
+
+const SPAWN_BUSY_ERRNOS = new Set(['EAGAIN', 'EMFILE', 'ENFILE', 'ENOMEM'])
+
 let rawReadPromise: Promise<RawReadResult> | null = null
 
-function execFilePromise(
-  cmd: string,
-  args: string[],
-): Promise<{ stdout: string; code: number | null }> {
+function classifyExecError(
+  err: NodeJS.ErrnoException & { killed?: boolean; signal?: string | null },
+): Pick<ExecOutcome, 'status' | 'code' | 'errno' | 'signal'> {
+  const signal =
+    typeof err.signal === 'string' && err.signal ? err.signal : null
+  if (typeof err.code === 'string') {
+    return { status: 'spawn_error', code: null, errno: err.code, signal: null }
+  }
+  if (err.killed === true) {
+    return { status: 'timeout', code: null, errno: null, signal }
+  }
+  if (signal) {
+    return { status: 'killed', code: null, errno: null, signal }
+  }
+  return {
+    status: 'exited',
+    code: typeof err.code === 'number' ? err.code : 1,
+    errno: null,
+    signal: null,
+  }
+}
+
+export function classifyPlutilUnreadCause(outcome: ExecOutcome): {
+  unreadReason: string
+  unreadCause?: MdmUnreadCause
+} {
+  if (
+    outcome.status === 'spawn_error' &&
+    outcome.errno === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER'
+  ) {
+    return {
+      unreadReason: "plutil's output exceeded the size limit",
+      unreadCause: 'oversize',
+    }
+  }
+  switch (outcome.status) {
+    case 'timeout':
+      return {
+        unreadReason: `plutil timed out after ${MDM_SUBPROCESS_TIMEOUT_MS / 1000} seconds`,
+        unreadCause: 'timeout',
+      }
+    case 'killed':
+      return {
+        unreadReason: 'plutil was stopped by a signal',
+        unreadCause: 'killed',
+      }
+    case 'spawn_error':
+      return {
+        unreadReason: 'plutil could not be run',
+        unreadCause:
+          outcome.errno !== null && SPAWN_BUSY_ERRNOS.has(outcome.errno)
+            ? 'spawn_busy'
+            : 'spawn_error',
+      }
+    case 'ok':
+    case 'exited':
+      return { unreadReason: 'plutil did not finish' }
+  }
+}
+
+export function isRetryableMdmUnreadCause(
+  cause: MdmUnreadCause | undefined,
+): boolean {
+  return (
+    cause === 'timeout' ||
+    cause === 'killed' ||
+    cause === 'spawn_busy' ||
+    cause === 'lint_unfinished'
+  )
+}
+
+function execFilePromise(cmd: string, args: string[]): Promise<ExecOutcome> {
   return new Promise(resolve => {
-    execFile(
-      cmd,
-      args,
-      { encoding: 'utf-8', timeout: MDM_SUBPROCESS_TIMEOUT_MS },
-      (err, stdout) => {
-        resolve({ stdout: stdout ?? '', code: err ? 1 : 0 })
-      },
-    )
+    try {
+      execFile(
+        cmd,
+        args,
+        { encoding: 'utf-8', timeout: MDM_SUBPROCESS_TIMEOUT_MS },
+        (err, stdout, stderr) => {
+          if (!err) {
+            resolve({
+              stdout: stdout ?? '',
+              stderr: stderr ?? '',
+              status: 'ok',
+              code: 0,
+              errno: null,
+              signal: null,
+            })
+            return
+          }
+          resolve({
+            stdout: stdout ?? '',
+            stderr: stderr ?? '',
+            ...classifyExecError(
+              err as NodeJS.ErrnoException & {
+                killed?: boolean
+                signal?: string | null
+              },
+            ),
+          })
+        },
+      )
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code
+      resolve({
+        stdout: '',
+        stderr: '',
+        status: 'spawn_error',
+        code: null,
+        errno: typeof code === 'string' ? code : null,
+        signal: null,
+      })
+    }
   })
 }
 
 /**
+ * Official 2.1.321 (#1903): run plutil on a single plist path; if it times out
+ * or is interrupted transiently, retry once before reporting `unreadCause`.
+ */
+async function readMacOSPlistWithRetry(
+  path: string,
+  label: string,
+  execFn: (
+    cmd: string,
+    args: string[],
+  ) => Promise<ExecOutcome> = execFilePromise,
+): Promise<RawPlistEntry | null> {
+  if (!existsSync(path)) {
+    return null
+  }
+  const args = [...PLUTIL_ARGS_PREFIX, path]
+  let outcome = await execFn(PLUTIL_PATH, args)
+  if (outcome.status === 'ok' && outcome.stdout) {
+    return { stdout: outcome.stdout, label }
+  }
+  const firstFailure = classifyPlutilUnreadCause(outcome)
+  if (isRetryableMdmUnreadCause(firstFailure.unreadCause)) {
+    // Retry once on slow MDM read timeout / transient interruption (#1903)
+    outcome = await execFn(PLUTIL_PATH, args)
+    if (outcome.status === 'ok' && outcome.stdout) {
+      return { stdout: outcome.stdout, label }
+    }
+  }
+  if (outcome.status === 'ok') {
+    return { stdout: outcome.stdout, label }
+  }
+  if (outcome.status !== 'exited') {
+    const failure = classifyPlutilUnreadCause(outcome)
+    return {
+      stdout: null,
+      label,
+      unreadReason: failure.unreadReason,
+      unreadCause: failure.unreadCause,
+    }
+  }
+  return { stdout: '', label }
+}
+
+/**
  * Fire fresh subprocess reads for MDM settings and return raw stdout.
- * On macOS: spawns plutil for each plist path in parallel, picks first winner.
+ * On macOS: spawns plutil for each plist path in parallel (retrying once on
+ * timeout), picks first winner or preserves unread failure entries.
  * On Windows: spawns reg query for HKLM and HKCU in parallel.
  * On Linux: returns empty (no MDM equivalent).
  */
-export function fireRawRead(): Promise<RawReadResult> {
+export function fireRawRead(
+  execFn: (
+    cmd: string,
+    args: string[],
+  ) => Promise<ExecOutcome> = execFilePromise,
+): Promise<RawReadResult> {
   return (async (): Promise<RawReadResult> => {
     if (process.platform === 'darwin') {
       const plistPaths = getMacOSPlistPaths()
 
-      const allResults = await Promise.all(
-        plistPaths.map(async ({ path, label }) => {
-          // Fast-path: skip the plutil subprocess if the plist file does not
-          // exist. Spawning plutil takes ~5ms even for an immediate ENOENT,
-          // and non-MDM machines never have these files.
-          // Uses synchronous existsSync to preserve the spawn-during-imports
-          // invariant: execFilePromise must be the first await so plutil
-          // spawns before the event loop polls (see main.tsx:3-4).
-          if (!existsSync(path)) {
-            return { stdout: '', label, ok: false }
-          }
-          const { stdout, code } = await execFilePromise(PLUTIL_PATH, [
-            ...PLUTIL_ARGS_PREFIX,
-            path,
-          ])
-          return { stdout, label, ok: code === 0 && !!stdout }
-        }),
-      )
+      const entries = (
+        await Promise.all(
+          plistPaths.map(({ path, label }) =>
+            readMacOSPlistWithRetry(path, label, execFn),
+          ),
+        )
+      ).filter((entry): entry is RawPlistEntry => entry !== null)
 
-      // First source wins (array is in priority order)
-      const winner = allResults.find(r => r.ok)
+      // First readable source wins; keep leading unread failures if none succeeded
+      const firstReadableIdx = entries.findIndex(
+        e => e.stdout !== null && e.stdout.length > 0,
+      )
       return {
-        plistStdouts: winner
-          ? [{ stdout: winner.stdout, label: winner.label }]
-          : [],
+        plistStdouts:
+          firstReadableIdx === -1
+            ? entries
+            : entries.slice(0, firstReadableIdx + 1),
         hklmStdout: null,
         hkcuStdout: null,
       }
@@ -88,13 +256,13 @@ export function fireRawRead(): Promise<RawReadResult> {
 
     if (process.platform === 'win32') {
       const [hklm, hkcu] = await Promise.all([
-        execFilePromise('reg', [
+        execFn('reg', [
           'query',
           WINDOWS_REGISTRY_KEY_PATH_HKLM,
           '/v',
           WINDOWS_REGISTRY_VALUE_NAME,
         ]),
-        execFilePromise('reg', [
+        execFn('reg', [
           'query',
           WINDOWS_REGISTRY_KEY_PATH_HKCU,
           '/v',

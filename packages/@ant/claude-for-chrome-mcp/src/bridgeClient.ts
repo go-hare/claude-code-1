@@ -18,6 +18,20 @@ import {
 } from './types.js'
 
 /** Thrown when discovery finished with no Chrome extension connected. */
+/** Official 325 `tji` (#1793): wait up to 6s for previously selected browser to return. */
+export const PREVIOUS_BROWSER_RETURN_WAIT_MS = 6000
+
+/**
+ * Official 325 `dVe` (#1766): thrown when the bridge connection closes or
+ * errors while a tool call is already in flight.
+ */
+export class ToolCallLostError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ToolCallLostError'
+  }
+}
+
 export class NoExtensionConnectedError extends Error {
   constructor(message: string) {
     super(message)
@@ -76,6 +90,8 @@ export class BridgeClient implements SocketClient {
   } | null = null
   /** The device_id we had selected before a peer_disconnected — for auto-reselect. */
   private previousSelectedDeviceId: string | undefined
+  /** Timestamp when previousSelectedDeviceId left — for 6s return wait (#1793). */
+  private previousSelectedLeftAt: number | undefined
   /** Callbacks waiting for the next peer_connected event. Receives `true` on peer arrival, `false` on abort. */
   private peerConnectedWaiters: Array<(arrived: boolean) => void> = []
   /** The request_id of the current pending pairing broadcast. */
@@ -163,6 +179,12 @@ export class BridgeClient implements SocketClient {
         },
       )
       await this.discoveryPromise
+    }
+
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      throw new SocketConnectionError(
+        `[${serverName}] Bridge disconnected during discovery`,
+      )
     }
 
     if (
@@ -270,10 +292,30 @@ export class BridgeClient implements SocketClient {
         message.handle_permission_prompts = true
       }
 
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        clearTimeout(timer)
+        this.pendingCalls.delete(toolUseId)
+        reject(
+          new SocketConnectionError(`[${serverName}] Bridge not connected`),
+        )
+        return
+      }
       logger.debug(
         `[${serverName}] Sending tool_call: ${name} (${toolUseId.slice(0, 8)})`,
       )
-      this.ws!.send(JSON.stringify(message))
+      try {
+        this.ws.send(JSON.stringify(message))
+      } catch (err) {
+        clearTimeout(timer)
+        this.pendingCalls.delete(toolUseId)
+        reject(
+          err instanceof Error
+            ? err
+            : new SocketConnectionError(
+                `[${serverName}] Failed to send tool_call: ${String(err)}`,
+              ),
+        )
+      }
     })
   }
 
@@ -311,6 +353,50 @@ export class BridgeClient implements SocketClient {
   // ===========================================================================
 
   /**
+   * Official 325 `awaitPreviousBrowser` (#1793) — after a brief disconnect, wait
+   * up to 6s for the session's previously selected extension to reconnect before
+   * falling back to picking another browser.
+   */
+  public async awaitPreviousBrowser(): Promise<boolean> {
+    const { logger, serverName } = this.context
+    if (!this.previousSelectedDeviceId || this.pendingSwitchResolve) {
+      return false
+    }
+    let logged = false
+    while (
+      !this.selectedDeviceId &&
+      this.previousSelectedDeviceId &&
+      !this.pendingSwitchResolve
+    ) {
+      if (!this.connected) {
+        throw new SocketConnectionError(
+          `[${serverName}] Bridge disconnected while waiting for the selected browser`,
+        )
+      }
+      const remainingMs =
+        (this.previousSelectedLeftAt ?? -Infinity) +
+        PREVIOUS_BROWSER_RETURN_WAIT_MS -
+        Date.now()
+      if (remainingMs <= 0) {
+        return false
+      }
+      if (!logged) {
+        logged = true
+        logger.info(
+          `[${serverName}] Waiting up to ${remainingMs}ms for the previously selected extension to return`,
+        )
+      }
+      await this.waitForPeerConnected(remainingMs)
+      if (!this.connected) {
+        throw new SocketConnectionError(
+          `[${serverName}] Bridge disconnected while waiting for the selected browser`,
+        )
+      }
+    }
+    return Boolean(this.selectedDeviceId)
+  }
+
+  /**
    * Discover connected extensions and auto-select one, or broadcast a pairing request.
    * Called lazily on the first tool call.
    */
@@ -318,6 +404,16 @@ export class BridgeClient implements SocketClient {
     const { logger, serverName } = this.context
 
     this.persistedDeviceId ??= this.context.getPersistedDeviceId?.()
+
+    // Official #1793: wait up to 6s for the session's own browser to return
+    // before picking another browser from the roster.
+    if (this.previousSelectedDeviceId && !this.selectedDeviceId) {
+      await this.awaitPreviousBrowser()
+      if (this.selectedDeviceId) {
+        this.discoveryComplete = true
+        return
+      }
+    }
 
     let extensions = await this.queryBridgeExtensions()
 
@@ -401,6 +497,7 @@ export class BridgeClient implements SocketClient {
     const { logger, serverName } = this.context
     this.selectedDeviceId = deviceId
     this.previousSelectedDeviceId = undefined
+    this.previousSelectedLeftAt = undefined
     logger.info(
       `[${serverName}] Selected Chrome extension: ${deviceId.slice(0, 8)}...`,
     )
@@ -446,6 +543,16 @@ export class BridgeClient implements SocketClient {
   private isLocalExtension(ext: ChromeExtensionInfo): boolean {
     if (!ext.osPlatform) return false
     return ext.osPlatform === localPlatformLabel()
+  }
+
+  private flushPeerConnectedWaiters(arrived: boolean): void {
+    if (this.peerConnectedWaiters.length > 0) {
+      const waiters = this.peerConnectedWaiters
+      this.peerConnectedWaiters = []
+      for (const waiter of waiters) {
+        waiter(arrived)
+      }
+    }
   }
 
   /**
@@ -690,6 +797,12 @@ export class BridgeClient implements SocketClient {
       this.authenticated = false
       this.connecting = false
       this.connectionEstablishedTime = null
+      if (this.selectedDeviceId) {
+        this.previousSelectedDeviceId = this.selectedDeviceId
+        this.previousSelectedLeftAt = Date.now()
+      }
+      this.losePendingCalls('Bridge connection closed mid-call')
+      this.flushPeerConnectedWaiters(false)
       this.scheduleReconnect()
     })
 
@@ -708,6 +821,8 @@ export class BridgeClient implements SocketClient {
       this.connected = false
       this.authenticated = false
       this.connecting = false
+      this.losePendingCalls(`Bridge connection error: ${error.message}`)
+      this.flushPeerConnectedWaiters(false)
     })
   }
 
@@ -771,14 +886,9 @@ export class BridgeClient implements SocketClient {
           )
           this.selectExtension(this.previousSelectedDeviceId)
           this.previousSelectedDeviceId = undefined
+          this.previousSelectedLeftAt = undefined
         }
-        if (this.peerConnectedWaiters.length > 0) {
-          const waiters = this.peerConnectedWaiters
-          this.peerConnectedWaiters = []
-          for (const waiter of waiters) {
-            waiter(true)
-          }
-        }
+        this.flushPeerConnectedWaiters(true)
         break
 
       case 'peer_disconnected':
@@ -790,6 +900,7 @@ export class BridgeClient implements SocketClient {
             `[${serverName}] Selected extension disconnected, clearing selection`,
           )
           this.previousSelectedDeviceId = this.selectedDeviceId
+          this.previousSelectedLeftAt = Date.now()
           this.selectedDeviceId = undefined
           this.discoveryComplete = false
         }
@@ -1125,6 +1236,10 @@ export class BridgeClient implements SocketClient {
     }
     this.connected = false
     this.authenticated = false
+    if (this.selectedDeviceId) {
+      this.previousSelectedDeviceId = this.selectedDeviceId
+      this.previousSelectedLeftAt ??= Date.now()
+    }
     // Clear extension selection state so reconnections start fresh
     this.selectedDeviceId = undefined
     this.discoveryComplete = false
@@ -1140,12 +1255,24 @@ export class BridgeClient implements SocketClient {
       this.pendingDiscovery = null
     }
     // Unblock any in-progress waitForPeerConnected so it doesn't hang until its timeout
-    if (this.peerConnectedWaiters.length > 0) {
-      const waiters = this.peerConnectedWaiters
-      this.peerConnectedWaiters = []
-      for (const waiter of waiters) {
-        waiter(false)
-      }
+    this.flushPeerConnectedWaiters(false)
+  }
+
+  /**
+   * Official 325 `losePendingCalls` (#1766): fail all in-flight calls with
+   * `ToolCallLostError` instead of `SocketConnectionError` so Claude checks
+   * page state before repeating an action that may have already run.
+   */
+  public losePendingCalls(reason: string): void {
+    for (const [id, pending] of this.pendingCalls) {
+      this.context.trackEvent?.('chrome_bridge_tool_call_lost', {
+        tool_name: `browser:${pending.toolName}`,
+        tool_use_id: id,
+        duration_ms: Date.now() - pending.startTime,
+      })
+      clearTimeout(pending.timer)
+      this.pendingCalls.delete(id)
+      pending.reject(new ToolCallLostError(reason))
     }
   }
 
@@ -1155,12 +1282,7 @@ export class BridgeClient implements SocketClient {
       this.reconnectTimer = null
     }
 
-    // Reject all pending calls
-    for (const [id, pending] of this.pendingCalls) {
-      clearTimeout(pending.timer)
-      pending.reject(new SocketConnectionError('Bridge client disconnected'))
-      this.pendingCalls.delete(id)
-    }
+    this.losePendingCalls('Bridge client disconnected')
 
     this.closeSocket()
     this.reconnectAttempts = 0

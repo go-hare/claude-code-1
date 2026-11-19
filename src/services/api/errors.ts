@@ -21,12 +21,19 @@ import type {
   UserMessage,
 } from 'src/types/message.js'
 import {
+  detectActiveConsoleFallbackCredential,
+  formatAntProfileFallbackWarning,
   getAnthropicApiKeyWithSource,
   getClaudeAIOAuthTokens,
   getOauthAccountInfo,
   getSubscriptionType,
   isClaudeAISubscriber,
 } from 'src/utils/auth.js'
+import { stripGatewayUrlCredentials } from 'src/utils/gatewayLogin.js'
+import {
+  formatCyberSafeguardDefenseAccessNote,
+  prependCyberVerificationNotice,
+} from 'src/utils/refusalFallback.js'
 import {
   createAssistantAPIErrorMessage,
   NO_RESPONSE_REQUESTED,
@@ -659,7 +666,7 @@ function formatVertexAuthErrorMessage(error: APIError): string {
     ? ''
     : ' · if credentials are current, check GCP IAM permissions and workspace access'
 
-  return `${prefix}${hint}${iamHint} · ${API_ERROR_MESSAGE_PREFIX}: ${error.message}`
+  return `${prefix}${hint}${iamHint} · ${API_ERROR_MESSAGE_PREFIX}: ${sanitizeGatewayErrorText(error.message)}`
 }
 
 /**
@@ -748,7 +755,7 @@ function formatBedrockAuthErrorMessage(error: Error): string {
     ? ''
     : ' · if credentials are current, check AWS IAM permissions and Bedrock model access'
 
-  return `${prefix}${hint}${iamHint} · ${API_ERROR_MESSAGE_PREFIX}: ${msg}`
+  return `${prefix}${hint}${iamHint} · ${API_ERROR_MESSAGE_PREFIX}: ${sanitizeGatewayErrorText(msg)}`
 }
 
 /**
@@ -1709,11 +1716,12 @@ function buildAssistantMessageFromError(
       })
     }
 
+    const safeAuthMessage = sanitizeGatewayErrorText(error.message)
     return createAssistantAPIErrorMessage({
       error: 'authentication_failed',
       content: getIsNonInteractiveSession()
-        ? `Failed to authenticate. ${API_ERROR_MESSAGE_PREFIX}: ${error.message}`
-        : `Please run /login · ${API_ERROR_MESSAGE_PREFIX}: ${error.message}`,
+        ? `Failed to authenticate. ${API_ERROR_MESSAGE_PREFIX}: ${safeAuthMessage}`
+        : `Please run /login · ${API_ERROR_MESSAGE_PREFIX}: ${safeAuthMessage}`,
     })
   }
 
@@ -1794,12 +1802,13 @@ function buildAssistantMessageFromError(
 
   // Connection errors (non-timeout) — use formatAPIError for detailed messages
   if (error instanceof APIConnectionError) {
-    const formatted = formatAPIError(error)
+    const rawFormatted = formatAPIError(error)
+    const formatted = sanitizeGatewayErrorText(rawFormatted)
     const code = extractConnectionErrorDetails(error)?.code
     let hint = ''
     if (
       code !== undefined &&
-      formatted === `Connection dropped (${code})` &&
+      rawFormatted === `Connection dropped (${code})` &&
       !isCCRMode() &&
       getAPIProvider() === 'firstParty' &&
       process.env.ANTHROPIC_UNIX_SOCKET === undefined
@@ -1833,8 +1842,16 @@ function buildAssistantMessageFromError(
   }
 
   if (error instanceof Error) {
+    const gatewayUrl =
+      'gatewayUrl' in error &&
+      typeof (error as { gatewayUrl?: unknown }).gatewayUrl === 'string'
+        ? (error as { gatewayUrl: string }).gatewayUrl
+        : undefined
+    const detail = gatewayUrl
+      ? formatGatewayErrorMessage(gatewayUrl, error.message)
+      : sanitizeGatewayErrorText(error.message)
     return createAssistantAPIErrorMessage({
-      content: `${API_ERROR_MESSAGE_PREFIX}: ${error.message}`,
+      content: `${API_ERROR_MESSAGE_PREFIX}: ${detail}`,
       error: 'unknown',
     })
   }
@@ -2208,6 +2225,7 @@ export function categorizeRetryableAPIError(
 export function getErrorMessageIfRefusal(
   stopReason: BetaStopReason | null,
   model: string,
+  stopDetails?: { category?: unknown; cyber_verification?: unknown } | null,
 ): AssistantMessage | undefined {
   if (stopReason !== 'refusal') {
     return
@@ -2224,10 +2242,58 @@ export function getErrorMessageIfRefusal(
       ? ' If you are seeing this refusal repeatedly, try running /model claude-sonnet-4-20250514 to switch models.'
       : ''
 
+  // Official 2.1.321 (#1953): wire CYBER_VERIFICATION_NOTICE / Defense Access
+  // copy into production refusal formatting when stop_details is cyber.
+  const defenseAccessNote = formatCyberSafeguardDefenseAccessNote(stopDetails)
+  const content = prependCyberVerificationNotice(
+    baseMessage + modelSuggestion + defenseAccessNote,
+    stopDetails,
+  )
+
   return createAssistantAPIErrorMessage({
-    content: baseMessage + modelSuggestion,
+    content,
     error: 'invalid_request',
   })
+}
+
+const CREDENTIALED_URL_RE = /(?:https?|wss?):\/\/[^/\s"'<>()@]+@[^\s"'<>()]+/gi
+
+/**
+ * Official 2.1.321 #1932: strip embedded `username:password` credentials from
+ * any gateway/proxy URL appearing inside error text.
+ */
+export function sanitizeGatewayErrorText(text: string): string {
+  return text.replace(CREDENTIALED_URL_RE, match => {
+    const trailingMatch = /[.,;:!?]+$/.exec(match)
+    const trailing = trailingMatch ? trailingMatch[0] : ''
+    const urlPart = trailing ? match.slice(0, -trailing.length) : match
+    return `${stripGatewayUrlCredentials(urlPart)}${trailing}`
+  })
+}
+
+/**
+ * Official 2.1.321 `ELt` (#1932): format a gateway error referencing `rawUrl`
+ * with any embedded `username:password` stripped.
+ */
+export function formatGatewayErrorMessage(
+  rawUrl: string,
+  detail: string,
+): string {
+  const safeUrl = stripGatewayUrlCredentials(rawUrl)
+  return `Gateway error (${safeUrl}): ${sanitizeGatewayErrorText(detail)}`
+}
+
+/**
+ * Official 2.1.319 (#1712 & #1713): when a `claude.ai` session ends and falls
+ * back to an `ant auth login` profile, return a warning naming the billed
+ * `<org> (Claude Console)` organization, or null if not in that state.
+ */
+export function getExpiredClaudeAiAntProfileWarning(): string | null {
+  const active = detectActiveConsoleFallbackCredential()
+  if (active?.kind !== 'ant_profile') {
+    return null
+  }
+  return formatAntProfileFallbackWarning(active.organization)
 }
 
 /** Official sjr / VO(e) — output blocked by content filtering policy (#14). */

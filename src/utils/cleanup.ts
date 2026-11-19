@@ -7,7 +7,8 @@ import {
   getJobsBaseDir,
   isBhSettled,
 } from '../daemon/jobState.js'
-import { errorMessage, isENOENT } from './errors.js'
+import { errorMessage, getErrnoCode, isENOENT } from './errors.js'
+import { sleep } from './sleep.js'
 import {
   isProcessRunning,
   processLstartMatches,
@@ -42,6 +43,63 @@ import {
 } from './worktree.js'
 
 const DEFAULT_CLEANUP_PERIOD_DAYS = 30
+
+const REMOVE_TREE_BASE_RETRY_DELAY_MS = 50
+const REMOVE_TREE_MAX_ATTEMPTS = 3
+
+/**
+ * Official 2.1.320 (#1795, `Cct` @496490):
+ * Recursively remove a directory tree with `ENOTEMPTY` retry (`50ms * attempt`,
+ * up to 3 attempts) and an `lstat` post-check to ensure the directory is
+ * actually gone. Throws an `ENOTEMPTY`-coded error if the target is still on
+ * disk after 3 tries.
+ */
+export async function removeDirectoryTreeWithRetry(
+  targetPath: string,
+  opts?: {
+    maxAttempts?: number
+    retryDelayMs?: number
+    rmFn?: (
+      path: string,
+      options: { recursive: true; force: true },
+    ) => Promise<void>
+    lstatFn?: (path: string) => Promise<unknown>
+    sleepFn?: (ms: number) => Promise<void>
+  },
+): Promise<void> {
+  const maxAttempts = opts?.maxAttempts ?? REMOVE_TREE_MAX_ATTEMPTS
+  const retryDelayMs = opts?.retryDelayMs ?? REMOVE_TREE_BASE_RETRY_DELAY_MS
+  const rmFn = opts?.rmFn ?? fs.rm
+  const lstatFn = opts?.lstatFn ?? fs.lstat
+  const sleepFn = opts?.sleepFn ?? sleep
+
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rmFn(targetPath, { recursive: true, force: true })
+    } catch (err) {
+      if (getErrnoCode(err) !== 'ENOTEMPTY') {
+        throw err
+      }
+    }
+    try {
+      await lstatFn(targetPath)
+    } catch (err) {
+      if (isENOENT(err)) {
+        return
+      }
+      throw err
+    }
+    if (attempt >= maxAttempts) {
+      throw Object.assign(
+        new Error(
+          `'${targetPath}' is still on disk after three tries to delete it. A program may be writing to it, such as a running Claude Code session, or you may not have permission to change it. Stop that program or fix the permissions, then delete it yourself.`,
+        ),
+        { code: 'ENOTEMPTY' },
+      )
+    }
+    await sleepFn(attempt * retryDelayMs)
+  }
+}
 
 /**
  * densable `$te` — keys that block the retention sweep when settings
@@ -788,7 +846,7 @@ export async function cleanupJobsRetentionSweep(
             cutoff,
           }).catch(() => {})
         }
-        await fs.rm(jobDir, { recursive: true, force: true })
+        await removeDirectoryTreeWithRetry(jobDir)
         result.messages++
       } catch {
         result.errors++
@@ -1225,9 +1283,8 @@ export async function cleanupOldFileHistoryBackups(): Promise<CleanupResult> {
         try {
           const stats = await fsImpl.stat(fileHistorySessionDir)
           if (stats.mtime < cutoffDate) {
-            await fsImpl.rm(fileHistorySessionDir, {
-              recursive: true,
-              force: true,
+            await removeDirectoryTreeWithRetry(fileHistorySessionDir, {
+              rmFn: (p, options) => fsImpl.rm(p, options),
             })
             result.messages++
           }
@@ -1270,7 +1327,9 @@ export async function cleanupOldSessionEnvDirs(): Promise<CleanupResult> {
       try {
         const stats = await fsImpl.stat(sessionEnvDir)
         if (stats.mtime < cutoffDate) {
-          await fsImpl.rm(sessionEnvDir, { recursive: true, force: true })
+          await removeDirectoryTreeWithRetry(sessionEnvDir, {
+            rmFn: (p, options) => fsImpl.rm(p, options),
+          })
           result.messages++
         }
       } catch {
@@ -1590,6 +1649,20 @@ export async function cleanupOldMessageFilesInBackground(): Promise<void> {
     './teleport/seedGitAdmin.js'
   )
   await sweepSeedAdminFromCleanup()
+  // #1960: Prune expired plugin set-aside data folders older than cleanupPeriodDays.
+  try {
+    const settings = getSettings_DEPRECATED() || {}
+    const cleanupPeriodDays =
+      settings.cleanupPeriodDays ?? DEFAULT_CLEANUP_PERIOD_DAYS
+    const { pruneExpiredSetAsideData } = await import(
+      './plugins/marketplaceHelpers.js'
+    )
+    await pruneExpiredSetAsideData(cleanupPeriodDays)
+  } catch (err) {
+    logForDebugging(
+      `Failed to prune expired plugin set-aside data: ${errorMessage(err)}`,
+    )
+  }
   if (process.env.USER_TYPE === 'ant') {
     await cleanupNpmCacheForAnthropicPackages()
   }

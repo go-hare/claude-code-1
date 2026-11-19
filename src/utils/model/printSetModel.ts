@@ -6,6 +6,7 @@
  */
 import { has1mContext } from '../context.js'
 import { isModelAlias, isModelFamilyAlias } from './aliases.js'
+import { CANONICAL_MODEL_IDS } from './configs.js'
 import {
   getDefaultFableModel,
   getDefaultHaikuModel,
@@ -133,7 +134,7 @@ function classifyUnrecognizedShape(
   return { shape: 'other', ...suggestClosestModelId(raw) }
 }
 
-function suggestClosestModelId(input: string): { suggestion?: string } {
+export function suggestClosestModelId(input: string): { suggestion?: string } {
   const candidates = new Set<string>()
   for (const opt of getModelOptions()) {
     if (typeof opt.value === 'string' && opt.value.length > 0) {
@@ -151,7 +152,39 @@ function suggestClosestModelId(input: string): { suggestion?: string } {
   ] as const) {
     candidates.add(alias)
   }
-  const needle = input.toLowerCase()
+  // Official 2.1.319 (#1743): include canonical model IDs so mistyped IDs like
+  // `opus-5-5` or `fable-5-2` suggest `claude-opus-5-5` / `claude-fable-5-2`
+  // instead of telling the user to update Claude Code.
+  for (const canonical of CANONICAL_MODEL_IDS) {
+    candidates.add(canonical)
+  }
+  const needle = input.toLowerCase().replace(/\[1m\]$/i, '')
+  const withClaudePrefix = needle.startsWith('claude-')
+    ? needle
+    : `claude-${needle}`
+  if (candidates.has(withClaudePrefix)) {
+    return { suggestion: withClaudePrefix }
+  }
+  // Prefer smallest Levenshtein distance (<= 3) across candidates (comparing
+  // both raw needle and `claude-${needle}` so missing `claude-` prefix matches).
+  let bestEdit: string | undefined
+  let bestEditDist = Number.POSITIVE_INFINITY
+  for (const c of candidates) {
+    const lower = c.toLowerCase()
+    const d1 = levenshteinDistance(needle, lower)
+    const d2 = lower.startsWith('claude-')
+      ? levenshteinDistance(withClaudePrefix, lower)
+      : d1
+    const dist = Math.min(d1, d2)
+    if (dist < bestEditDist) {
+      bestEditDist = dist
+      bestEdit = c
+    }
+  }
+  const maxAllowedDist = needle.length <= 5 ? 2 : 3
+  if (bestEdit && bestEditDist <= maxAllowedDist) {
+    return { suggestion: bestEdit }
+  }
   let best: string | undefined
   let bestScore = 0
   for (const c of candidates) {
@@ -166,6 +199,27 @@ function suggestClosestModelId(input: string): { suggestion?: string } {
     return { suggestion: best }
   }
   return {}
+}
+
+function levenshteinDistance(a: string, b: string): number {
+  const m = a.length
+  const n = b.length
+  if (m === 0) return n
+  if (n === 0) return m
+  let prev = Array.from({ length: n + 1 }, (_, i) => i)
+  for (let i = 1; i <= m; i++) {
+    const curr = [i]
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      curr[j] = Math.min(
+        (prev[j] ?? 0) + 1,
+        (curr[j - 1] ?? 0) + 1,
+        (prev[j - 1] ?? 0) + cost,
+      )
+    }
+    prev = curr
+  }
+  return prev[n] ?? 0
 }
 
 function sharedPrefixScore(a: string, b: string): number {

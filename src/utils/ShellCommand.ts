@@ -126,6 +126,8 @@ export type ShellCommand = {
     options?: ShellBackgroundOptions,
   ) => boolean
   result: Promise<ExecResult>
+  /** Official 2.1.319 #1741 (`outputEnded`): resolves once pipe stdout/stderr streams have ended. */
+  outputEnded?: Promise<void>
   kill: () => void
   status: 'running' | 'backgrounded' | 'completed' | 'killed'
   /**
@@ -170,14 +172,31 @@ class StreamWrapper {
   #taskOutput: TaskOutput | null
   #isStderr: boolean
   #onData = this.#dataHandler.bind(this)
+  #onEnd = this.#endHandler.bind(this)
+  #resolveEnded: (() => void) | null = null
+  readonly ended: Promise<void>
 
   constructor(stream: Readable, taskOutput: TaskOutput, isStderr: boolean) {
     this.#stream = stream
     this.#taskOutput = taskOutput
     this.#isStderr = isStderr
+    this.ended = new Promise<void>(resolve => {
+      this.#resolveEnded = resolve
+    })
     // Emit strings instead of Buffers - avoids repeated .toString() calls
     stream.setEncoding('utf-8')
     stream.on('data', this.#onData)
+    stream.once('end', this.#onEnd)
+    stream.once('close', this.#onEnd)
+    stream.once('error', this.#onEnd)
+  }
+
+  #endHandler(): void {
+    const resolve = this.#resolveEnded
+    if (resolve) {
+      this.#resolveEnded = null
+      resolve()
+    }
   }
 
   #dataHandler(data: Buffer | string): void {
@@ -196,11 +215,16 @@ class StreamWrapper {
     }
     this.#isCleanedUp = true
     this.#stream!.removeListener('data', this.#onData)
+    this.#stream!.removeListener('end', this.#onEnd)
+    this.#stream!.removeListener('close', this.#onEnd)
+    this.#stream!.removeListener('error', this.#onEnd)
+    this.#endHandler()
     // Release references so the stream, its StringDecoder, and
     // the TaskOutput can be GC'd independently of this wrapper.
     this.#stream = null
     this.#taskOutput = null
     this.#onData = () => {}
+    this.#onEnd = () => {}
   }
 }
 
@@ -251,6 +275,7 @@ class ShellCommandImpl implements ShellCommand {
   }
 
   readonly result: Promise<ExecResult>
+  readonly outputEnded?: Promise<void>
   readonly onTimeout?: (
     callback: (
       backgroundFn: (
@@ -284,6 +309,13 @@ class ShellCommandImpl implements ShellCommand {
     this.#stdoutWrapper = childProcess.stdout
       ? new StreamWrapper(childProcess.stdout, taskOutput, false)
       : null
+    this.outputEnded =
+      this.#stdoutWrapper || this.#stderrWrapper
+        ? Promise.all([
+            this.#stdoutWrapper?.ended,
+            this.#stderrWrapper?.ended,
+          ]).then(() => {})
+        : undefined
 
     if (shouldAutoBackground) {
       this.onTimeout = (callback): void => {
@@ -435,8 +467,27 @@ class ShellCommandImpl implements ShellCommand {
     this.#cleanupListeners()
     // densable #w: capture killed BEFORE flipping running/backgrounded → completed
     const wasKilled = this.#status === 'killed'
+    const wasBackgrounded = this.#status === 'backgrounded'
     if (this.#status === 'running' || this.#status === 'backgrounded') {
       this.#status = 'completed'
+    }
+
+    // Official 2.1.319 #1741: wait briefly for pipe stdout/stderr streams to
+    // drain before reading/flushing taskOutput so fast-exiting commands do not
+    // lose output between child 'exit' and stream 'end'.
+    if (this.outputEnded !== undefined && !wasKilled) {
+      let drainTimer: NodeJS.Timeout | undefined
+      await Promise.race([
+        this.outputEnded,
+        new Promise<void>(resolve => {
+          drainTimer = setTimeout(resolve, 250)
+          drainTimer.unref?.()
+        }),
+      ])
+      if (drainTimer !== undefined) clearTimeout(drainTimer)
+    }
+    if (wasBackgrounded || this.#backgroundTaskId !== undefined) {
+      await this.taskOutput.flush()
     }
 
     const stdout = await this.taskOutput.getStdout()
@@ -604,6 +655,19 @@ class ShellCommandImpl implements ShellCommand {
         this.#bgCapTimeout.unref?.()
       }
       return true
+    }
+    // Official 2.1.319 #1741: if a backgrounded command finished almost
+    // instantly before background() was called, still spill & flush its
+    // captured pipe output to disk so the completion notification has output.
+    if (
+      this.#status === 'completed' &&
+      this.#backgroundTaskId === undefined &&
+      !this.taskOutput.stdoutToFile &&
+      !options?.skipSpill
+    ) {
+      this.#backgroundTaskId = taskId
+      this.taskOutput.spillToDisk()
+      void this.taskOutput.flush()
     }
     return false
   }

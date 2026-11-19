@@ -800,7 +800,10 @@ export async function exec(
             encoding: 'utf8',
           }).trim()
           if (getPlatform() === 'windows') {
-            newCwd = posixPathToWindowsPath(newCwd)
+            newCwd = preserveWindowsDriveLetterCase(
+              posixPathToWindowsPath(newCwd),
+              cwd,
+            )
           }
           // densable lMp: reject unsafe shell cwd read-back before setCwd
           if (!isSafeShellCwdReadBack(newCwd, cwd)) {
@@ -887,6 +890,31 @@ export function formatPreSpawnDiskFullError(
  * densable also checks foreign automount (`Q8`) and network symlink (`C2`);
  * local `bu`/`wwo` stubs make those no-ops — skip inventing them.
  */
+/**
+ * Official 2.1.321 #1857:
+ * On Windows, Git Bash `pwd -P` returns `/c/...` which `posixPathToWindowsPath`
+ * turns into `C:\...`. If the session's original `cwd` had a lowercase drive
+ * letter (e.g. `c:\repo`), preserve that drive-letter case so `setCwd` doesn't
+ * treat the first shell command as a cwd change and tear down `FileChanged`
+ * watchPaths hooks.
+ */
+export function preserveWindowsDriveLetterCase(
+  newCwd: string,
+  prevCwd: string,
+): string {
+  if (
+    newCwd.length >= 2 &&
+    prevCwd.length >= 2 &&
+    newCwd[1] === ':' &&
+    prevCwd[1] === ':' &&
+    /[A-Za-z]/.test(newCwd[0]!) &&
+    newCwd[0]!.toLowerCase() === prevCwd[0]!.toLowerCase()
+  ) {
+    return `${prevCwd[0]!}${newCwd.slice(1)}`
+  }
+  return newCwd
+}
+
 export function isSafeShellCwdReadBack(
   readBack: string,
   previousCwd: string,

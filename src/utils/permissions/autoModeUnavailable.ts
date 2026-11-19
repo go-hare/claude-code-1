@@ -27,6 +27,96 @@ import type { Tool } from '../../Tool.js'
 /** densable `Ib`. */
 export const AUTO_MODE_UNAVAILABLE_STREAK_LIMIT = 10
 
+/** Official 2.1.319 `s1s` (#1730). */
+export const SERVER_CALL_UNAVAILABLE_INPUT_TOO_LONG =
+  'server_call_unavailable_input_too_long'
+
+/**
+ * Official 2.1.319 `jFo` detail suffix for `server_call_unavailable_input_too_long` (#1730).
+ */
+export function formatServerUnavailableInputTooLongDetail(
+  errorKind: string | undefined,
+): string | undefined {
+  if (errorKind === SERVER_CALL_UNAVAILABLE_INPUT_TOO_LONG) {
+    return ' (the conversation is too long for the check)'
+  }
+  return undefined
+}
+
+export type AutoModeNoServerCheckReason =
+  | 'context_too_large'
+  | 'not_requested'
+  | 'not_served'
+  | 'no_allowed_model'
+  | 'betas_off'
+  | 'own_switch_off'
+  | 'not_offered'
+
+/**
+ * Official 2.1.319 `FEr` (#1730): user-facing explanation when auto mode's
+ * server-side safety check cannot run (including `context_too_large` when
+ * permission rules / `autoMode` settings exceed ~1 MB).
+ */
+export function formatAutoModeNoServerCheckNotice({
+  why,
+  asks,
+  heldByDenyRules = false,
+  gatewayName,
+}: {
+  why: AutoModeNoServerCheckReason
+  asks: boolean
+  heldByDenyRules?: boolean
+  gatewayName?: string
+}): string {
+  const defaultGuidance = 'Switch to another permission mode to continue.'
+  let reasonSentence: string
+  let actionSentence: string
+  switch (why) {
+    case 'context_too_large':
+      reasonSentence =
+        "Its safety check runs on the server, and this session's permission rules and auto mode settings are too large to send to it."
+      actionSentence =
+        'To use auto mode, shorten the deny and ask rules under permissions and the lists under autoMode in your settings to under about 1 MB in all. If your organization or the app that runs this session sets them, only its admin can change them.'
+      break
+    case 'no_allowed_model':
+      reasonSentence =
+        "None of the models allowed to check this session's actions can be used here."
+      actionSentence =
+        'Ask whoever runs this machine which models its provider offers, or ask your admin whether its model settings block them.'
+      break
+    case 'not_requested':
+      reasonSentence = `Its safety check runs on the server, and Claude Code's requests in this conversation don't ask for it${gatewayName !== undefined ? `, which can happen after ${gatewayName} rejects one that does` : ''}.`
+      actionSentence = `A new conversation may bring the check back. ${gatewayName !== undefined ? `If it doesn't, ask whoever runs ${gatewayName} to pass Claude Code's server-side safety check through.` : defaultGuidance}`
+      break
+    case 'not_served':
+      reasonSentence =
+        gatewayName !== undefined
+          ? `Its safety check runs on the server, and your requests go through ${gatewayName}, which doesn't pass it through.`
+          : "Its safety check runs on the server, and the server isn't running it for this session."
+      actionSentence =
+        gatewayName !== undefined
+          ? `To use auto mode, ask whoever runs ${gatewayName} to pass Claude Code's server-side safety check through.`
+          : defaultGuidance
+      break
+    default:
+      reasonSentence =
+        "Its safety check runs on the server, and the server isn't running it for this session."
+      actionSentence = defaultGuidance
+      break
+  }
+  const fallbackSentence = asks
+    ? 'Actions that need the check now ask for your approval. To work without these prompts, switch permission mode with Shift+Tab.'
+    : heldByDenyRules
+      ? 'The settings here hold auto mode deny rules, which only the automatic check applies, so every action that needs the check is refused and you are not asked. To run these actions, use another permission mode.'
+      : 'Nobody can be asked to approve actions in this session, so every action that needs the check is refused. To run these actions, use another permission mode.'
+  return [
+    "Auto mode can't check actions in this session.",
+    reasonSentence,
+    fallbackSentence,
+    actionSentence,
+  ].join(' ')
+}
+
 /**
  * densable `zTn` — `decisionReason.reason` on the X7o stop denial, not the
  * user-facing copy.

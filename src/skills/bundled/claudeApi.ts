@@ -112,6 +112,7 @@ export function processSkillFiles(
  */
 export const CLAUDE_API_SUBCOMMANDS = [
   'cost-optimize',
+  'latency-optimize',
   'migrate',
   'managed-agents-onboard',
   'managed-agents-secure',

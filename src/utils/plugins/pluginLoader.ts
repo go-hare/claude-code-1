@@ -124,6 +124,7 @@ import type { HookMatcher } from '../../schemas/hooks.js'
 import { SettingsSchema } from '../settings/types.js'
 import { stripBOM } from '../jsonRead.js'
 import { jsonParse, jsonStringify } from '../slowOperations.js'
+import { substitutePluginSubagentStatusLine } from '../subagentStatusLine.js'
 import { getAddDirEnabledPlugins } from './addDirPluginSettings.js'
 import { verifyAndDemote } from './dependencyResolver.js'
 import { classifyFetchError, logPluginFetch } from './fetchTelemetry.js'
@@ -2102,8 +2103,8 @@ export async function createPluginFromPath(
 
   // Step 6: Load plugin settings
   // Settings can come from settings.json in the plugin directory or from manifest.settings
-  // Only allowlisted keys are kept (currently: agent)
-  const pluginSettings = await loadPluginSettings(pluginPath, manifest)
+  // Only allowlisted keys are kept (agent, subagentStatusLine)
+  const pluginSettings = await loadPluginSettings(pluginPath, manifest, source)
   if (pluginSettings) {
     plugin.settings = pluginSettings
   }
@@ -2181,6 +2182,7 @@ const PluginSettingsSchema = lazySchema(() =>
   SettingsSchema()
     .pick({
       agent: true,
+      subagentStatusLine: true,
     })
     .strip(),
 )
@@ -2211,6 +2213,7 @@ function parsePluginSettings(
 async function loadPluginSettings(
   pluginPath: string,
   manifest: PluginManifest,
+  source?: string,
 ): Promise<Record<string, unknown> | undefined> {
   // Try loading settings.json from the plugin directory
   const settingsJsonPath = join(pluginPath, 'settings.json')
@@ -2223,7 +2226,10 @@ async function loadPluginSettings(
         logForDebugging(
           `Loaded settings from settings.json for plugin ${manifest.name}`,
         )
-        return filtered
+        return substitutePluginSubagentStatusLine(filtered, {
+          path: pluginPath,
+          source,
+        })
       }
     }
   } catch (e: unknown) {
@@ -2245,7 +2251,10 @@ async function loadPluginSettings(
       logForDebugging(
         `Loaded settings from manifest for plugin ${manifest.name}`,
       )
-      return filtered
+      return substitutePluginSubagentStatusLine(filtered, {
+        path: pluginPath,
+        source,
+      })
     }
   }
 
@@ -4031,6 +4040,16 @@ async function assemblePluginLoadResult(
 
   // 3. Cache plugin settings for synchronous access by the settings cascade
   cachePluginSettings(enabledPlugins)
+
+  // #1858 (2.1.321): Lay `.claude-plugin/types/` for non-builtin `--plugin-dir` plugins
+  const pluginDirsForTypes = [...inlinePlugins, ...inlinePluginsNoMcp]
+  if (pluginDirsForTypes.length > 0) {
+    void import('./pluginDevMods.js')
+      .then(({ layPluginDirTypesForLoadedPlugins }) =>
+        layPluginDirTypesForLoadedPlugins(allPlugins, pluginDirsForTypes),
+      )
+      .catch(e => logError(e))
+  }
 
   // densable Nq_ — write `.in_use` pid markers for cache-resident enabled
   // plugins + daily dead-marker sweep (2.1.229 #16). Fire-and-forget so load

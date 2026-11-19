@@ -291,15 +291,25 @@ export async function runClaudeInChromeMcpServer(): Promise<void> {
   const transport = new StdioServerTransport()
 
   // Exit when parent process dies (stdin pipe closes).
-  // Flush analytics before exiting so final-batch events (e.g. disconnect) aren't lost.
+  // Official #1866: cap shutdown telemetry flush at 2000ms so a stalled proxy
+  // connection never keeps the subprocess alive after its parent exits.
   let exiting = false
+  const SHUTDOWN_FLUSH_TIMEOUT_MS = 2000
   const shutdownAndExit = async (): Promise<void> => {
     if (exiting) {
       return
     }
     exiting = true
-    await shutdown1PEventLogging()
-    await shutdownDatadog()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    await Promise.race([
+      Promise.allSettled([shutdown1PEventLogging(), shutdownDatadog()]),
+      new Promise<void>(resolve => {
+        timer = setTimeout(resolve, SHUTDOWN_FLUSH_TIMEOUT_MS)
+        timer.unref?.()
+      }),
+    ]).finally(() => {
+      if (timer !== undefined) clearTimeout(timer)
+    })
     // eslint-disable-next-line custom-rules/no-process-exit
     process.exit(0)
   }

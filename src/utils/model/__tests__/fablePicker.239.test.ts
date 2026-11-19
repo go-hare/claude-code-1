@@ -73,18 +73,20 @@ describe('fablePicker 239', () => {
       const row = getFable5Option('firstParty')
       expect(row.value).toBe('fable')
       expect(row.label).toBe('Fable')
-      expect(row.description.startsWith(`Fable 5 · ${FABLE_SLOGAN}`)).toBe(true)
+      expect(row.description.startsWith(`Fable 5.2 · ${FABLE_SLOGAN}`)).toBe(
+        true,
+      )
       expect(row.descriptionForModel).toBe(FABLE_DESCRIPTION_FOR_MODEL)
       expect(getFable5Option('anthropicAws').value).toBe('fable')
       expect(getFable5Option('gateway').value).toBe('fable')
     })
 
-    test('true 3P uses catalog fable5 id', () => {
+    test('true 3P uses catalog fable52 id', () => {
       expect(getFable5Option('bedrock').value).toBe(
-        ALL_MODEL_CONFIGS.fable5.bedrock,
+        ALL_MODEL_CONFIGS.fable52.bedrock,
       )
       expect(getFable5Option('openai').value).toBe(
-        ALL_MODEL_CONFIGS.fable5.openai,
+        ALL_MODEL_CONFIGS.fable52.openai,
       )
     })
 
@@ -184,7 +186,7 @@ describe('fablePicker 239', () => {
       expect(rows.map(r => r.value)).toEqual([
         null,
         ALL_MODEL_CONFIGS.sonnet5.bedrock,
-        ALL_MODEL_CONFIGS.fable5.bedrock,
+        ALL_MODEL_CONFIGS.fable52.bedrock,
         ALL_MODEL_CONFIGS.opus5.bedrock,
         'haiku',
       ])
@@ -249,9 +251,9 @@ describe('fablePicker 239', () => {
         provider: 'bedrock',
         insertDeps,
       })
-      expect(rows.some(r => r.value === ALL_MODEL_CONFIGS.fable5.bedrock)).toBe(
-        true,
-      )
+      expect(
+        rows.some(r => r.value === ALL_MODEL_CONFIGS.fable52.bedrock),
+      ).toBe(true)
     })
 
     test('3P custom env wins over URa', () => {
@@ -264,9 +266,9 @@ describe('fablePicker 239', () => {
       })
       const fable = rows.find(r => r.value === 'fable')
       expect(fable?.description).toBe('Custom Fable model')
-      expect(rows.some(r => r.value === ALL_MODEL_CONFIGS.fable5.bedrock)).toBe(
-        false,
-      )
+      expect(
+        rows.some(r => r.value === ALL_MODEL_CONFIGS.fable52.bedrock),
+      ).toBe(false)
     })
   })
 
@@ -303,7 +305,7 @@ describe('fablePicker 239', () => {
       })
       const fable = rows.find(r => r.value === 'claude-fable-5')
       expect(fable?.label).toBe('Fable')
-      expect(fable?.description.startsWith(`Fable 5 · ${FABLE_SLOGAN}`)).toBe(
+      expect(fable?.description.startsWith(`Fable 5.2 · ${FABLE_SLOGAN}`)).toBe(
         true,
       )
       expect(rows.map(r => r.value)).toEqual([

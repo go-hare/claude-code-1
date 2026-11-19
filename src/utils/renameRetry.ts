@@ -34,6 +34,35 @@ export const RENAME_MAX_ATTEMPTS = 4
 /** densable clu — sleep between retries (ms) */
 export const RENAME_RETRY_SLEEP_MS = 50
 
+/** Official 2.1.319 #1792 (`ie`): extended backoff [100, 200, 400] ms */
+export const RENAME_EXTENDED_RETRY_DELAYS_MS: readonly number[] = [
+  100, 200, 400,
+]
+
+/** Official 2.1.319 #1792 (`S3o`): long backoff [100, 500, 2000] ms */
+export const RENAME_LONG_RETRY_DELAYS_MS: readonly number[] = [100, 500, 2000]
+
+/** Short fallback backoff (`Re`) when target already timed out previously */
+const RENAME_FALLBACK_RETRY_DELAYS_MS: readonly number[] = [50, 50]
+
+/** Official `V`: paths where extended rename retry previously timed out */
+const timedOutRenameTargets = new Set<string>()
+
+export function clearTimedOutRenameTargetsForTesting(): void {
+  timedOutRenameTargets.clear()
+}
+
+export function hasTimedOutRenameTarget(targetPath: string): boolean {
+  return timedOutRenameTargets.has(targetPath)
+}
+
+function recordTimedOutRenameTarget(err: unknown, targetPath: string): void {
+  const code = getErrnoCode(err)
+  if (code !== undefined && RENAME_TRANSIENT_CODES.has(code)) {
+    timedOutRenameTargets.add(targetPath)
+  }
+}
+
 /** densable dlu — S_IWUSR owner-write bit */
 export const OWNER_WRITE_BIT = 0o200 // 128
 
@@ -57,13 +86,17 @@ function sleepMs(ms: number): Promise<void> {
   })
 }
 
-/** densable ulu */
-export function isRenameRetryable(err: unknown, attempt: number): boolean {
+/** densable ulu / W(err, attempt, maxRetries) */
+export function isRenameRetryable(
+  err: unknown,
+  attempt: number,
+  maxRetries = RENAME_MAX_ATTEMPTS - 1,
+): boolean {
   const code = getErrnoCode(err)
   return (
     code !== undefined &&
     RENAME_TRANSIENT_CODES.has(code) &&
-    attempt < RENAME_MAX_ATTEMPTS - 1
+    attempt < maxRetries
   )
 }
 
@@ -125,6 +158,11 @@ export async function renameWithRetry(
   from: string,
   to: string,
   renameFn: RenameAsyncFn = rename,
+  delays: readonly number[] = [
+    RENAME_RETRY_SLEEP_MS,
+    RENAME_RETRY_SLEEP_MS,
+    RENAME_RETRY_SLEEP_MS,
+  ],
 ): Promise<boolean> {
   let retried = false
   for (let attempt = 0; ; attempt++) {
@@ -132,15 +170,108 @@ export async function renameWithRetry(
       await renameFn(from, to)
       return retried
     } catch (err) {
-      if (isRenameRetryable(err, attempt)) {
+      if (isRenameRetryable(err, attempt, delays.length)) {
         if (attempt === 0 && (await isOwnerWriteCleared(to))) {
           throw err
         }
         retried = true
-        await sleepMs(RENAME_RETRY_SLEEP_MS)
+        await sleepMs(delays[attempt] ?? RENAME_RETRY_SLEEP_MS)
         continue
       }
       throw err
+    }
+  }
+}
+
+/** Official 2.1.319 #1792 (`dfe`): async rename with [100, 500, 2000] ms backoff. */
+export async function renameWithLongRetry(
+  from: string,
+  to: string,
+  renameFn: RenameAsyncFn = rename,
+): Promise<boolean> {
+  return renameWithRetry(from, to, renameFn, RENAME_LONG_RETRY_DELAYS_MS)
+}
+
+/**
+ * Official 2.1.319 #1792 (`_li`): async rename with adaptive extended backoff
+ * (50ms initial, then [100, 200, 400] ms unless target previously timed out,
+ * in which case falls back to [50, 50] ms).
+ */
+export async function renameWithAdaptiveRetry(
+  from: string,
+  to: string,
+  renameFn: RenameAsyncFn = rename,
+  skipExtended = false,
+  sleepFn: (ms: number) => Promise<void> = sleepMs,
+): Promise<void> {
+  let useExtended = !skipExtended && !timedOutRenameTargets.has(to)
+  try {
+    await renameFn(from, to)
+    return
+  } catch (err) {
+    if (!isRenameRetryable(err, 0, 1)) throw err
+    try {
+      if (((await lstat(to)).mode & OWNER_WRITE_BIT) === 0) throw err
+    } catch (statErr) {
+      if (statErr === err) throw err
+      useExtended = useExtended && getErrnoCode(statErr) !== 'ENOENT'
+    }
+  }
+  await sleepFn(RENAME_RETRY_SLEEP_MS)
+  const delays = useExtended
+    ? RENAME_EXTENDED_RETRY_DELAYS_MS
+    : RENAME_FALLBACK_RETRY_DELAYS_MS
+  for (let i = 0; ; i++) {
+    try {
+      await renameFn(from, to)
+      return
+    } catch (err) {
+      if (!isRenameRetryable(err, i, delays.length)) {
+        if (useExtended) recordTimedOutRenameTarget(err, to)
+        throw err
+      }
+      await sleepFn(delays[i]!)
+    }
+  }
+}
+
+/**
+ * Official 2.1.319 #1792 (`yli`): sync rename with adaptive extended backoff
+ * (50ms initial, then [100, 200, 400] ms unless target previously timed out).
+ */
+export function renameSyncWithAdaptiveRetry(
+  from: string,
+  to: string,
+  renameFn: RenameFn = renameSync,
+  sleepFn: (ms: number) => void = sleepSyncMs,
+): void {
+  let useExtended = !timedOutRenameTargets.has(to)
+  try {
+    renameFn(from, to)
+    return
+  } catch (err) {
+    if (!isRenameRetryable(err, 0, 1)) throw err
+    try {
+      if ((lstatSync(to).mode & OWNER_WRITE_BIT) === 0) throw err
+    } catch (statErr) {
+      if (statErr === err) throw err
+      useExtended = useExtended && getErrnoCode(statErr) !== 'ENOENT'
+    }
+  }
+  sleepFn(RENAME_RETRY_SLEEP_MS)
+  const delays = useExtended
+    ? RENAME_EXTENDED_RETRY_DELAYS_MS
+    : RENAME_FALLBACK_RETRY_DELAYS_MS
+  for (let i = 0; ; i++) {
+    try {
+      renameFn(from, to)
+      return
+    } catch (err) {
+      if (!isRenameRetryable(err, i, delays.length)) {
+        if (useExtended) recordTimedOutRenameTarget(err, to)
+        throw err
+      }
+      sleepFn(delays[i]!)
     }
   }
 }

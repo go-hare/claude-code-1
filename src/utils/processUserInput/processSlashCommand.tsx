@@ -1485,7 +1485,7 @@ async function getMessagesForSlashCommand(
           const onDone = (
             result?: string,
             options?: {
-              display?: CommandResultDisplay;
+              display?: CommandResultDisplay | 'displayOnly';
               shouldQuery?: boolean;
               metaMessages?: string[];
               nextInput?: string;
@@ -1528,7 +1528,7 @@ async function getMessagesForSlashCommand(
 
             void resolve({
               messages:
-                options?.display === 'system'
+                options?.display === 'system' || options?.display === 'displayOnly'
                   ? skipTranscript
                     ? metaMessages
                     : [

@@ -536,6 +536,21 @@ export function renderToolResultMessage(
   }
 
   const { totalDurationMs, totalToolUseCount, totalTokens, usage, content, prompt } = data;
+  // Official 325 #1732: outside verbose mode (unless flagged), render only the
+  // clean handbackReportText without internal markers or provenance notes.
+  const handbackReportText =
+    'handbackReportText' in data && typeof data.handbackReportText === 'string' ? data.handbackReportText : undefined;
+  const handbackNote = 'handbackNote' in data && typeof data.handbackNote === 'string' ? data.handbackNote : undefined;
+  const handbackFlagged = 'handbackFlagged' in data && data.handbackFlagged === true;
+  const displayContent =
+    handbackReportText !== undefined
+      ? verbose || handbackFlagged
+        ? [
+            ...(handbackNote ? [{ type: 'text' as const, text: handbackNote }] : []),
+            { type: 'text' as const, text: handbackReportText },
+          ]
+        : [{ type: 'text' as const, text: handbackReportText }]
+      : content;
   const result = [
     totalToolUseCount === 1 ? '1 tool use' : `${totalToolUseCount} tool uses`,
     formatNumber(totalTokens) + ' tokens',
@@ -561,9 +576,9 @@ export function renderToolResultMessage(
           <VerboseAgentTranscript progressMessages={progressMessagesForMessage} tools={tools} verbose={verbose} />
         </SubAgentProvider>
       ) : null}
-      {isTranscriptMode && content && content.length > 0 && (
+      {isTranscriptMode && displayContent && displayContent.length > 0 && (
         <MessageResponse>
-          <AgentResponseDisplay content={content} theme={theme} />
+          <AgentResponseDisplay content={displayContent} theme={theme} />
         </MessageResponse>
       )}
       <MessageResponse height={1}>

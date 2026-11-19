@@ -132,9 +132,9 @@ function isEditorFromBoot(boot: FrameBootOk): boolean {
 /**
  * densable Zem — GET /api/frame/${slug}?via=model_read via DL.get / getRelayOnly.
  */
-/** densable Ft */
+/** Official 325 `Kt` + `LKe` (#1928) */
 const BOOT_OTHER_ORG_MESSAGE =
-  "this Artifact is in another of the user's organizations, not the one this session is signed in to \u2014 it opens here only after the user runs /login and signs in to that organization"
+  "this Artifact is in another of the user's organizations, or one they are no longer part of, not the one this session is signed in to \u2014 it opens here only after the user runs /login and signs in to that organization, if they still can. If it is in a personal account whose data the user has since moved, they can look for a copy among their Artifacts in the organization the data went to, which may be this one"
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i

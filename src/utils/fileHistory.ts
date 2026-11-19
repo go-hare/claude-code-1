@@ -9,11 +9,12 @@ import {
   mkdir,
   open,
   readFile,
+  readlink,
   realpath,
   stat,
   unlink,
 } from 'fs/promises'
-import { dirname, isAbsolute, join, relative } from 'path'
+import { basename, dirname, isAbsolute, join, relative } from 'path'
 import {
   getIsNonInteractiveSession,
   getOriginalCwd,
@@ -613,6 +614,181 @@ export async function fileHistoryHasAnyChanges(
  * ENOENT is safe (restore may create). Optional expectedRealParentDir refuses
  * when the parent realpath drifted since the checkpoint. Exported for tests.
  */
+/**
+ * Official 2.1.319 #1775 (`H3`):
+ * Resolve the canonical parent directory of `filePath`, walking up ancestors
+ * when intermediate directories do not exist yet, and refusing if the parent
+ * or any ancestor is a dangling symlink.
+ */
+export async function resolveRealParentDir(filePath: string): Promise<string> {
+  const parent = dirname(filePath)
+  try {
+    return await realpath(parent)
+  } catch (e: unknown) {
+    if (!isENOENT(e)) throw e
+  }
+  // Parent does not exist (or is a dangling symlink). Walk upward checking
+  // every component so a dangling symlink anywhere in the chain is refused.
+  let walk = parent
+  for (;;) {
+    let st
+    try {
+      st = await lstat(walk)
+    } catch (e: unknown) {
+      if (!isENOENT(e)) throw e
+      const up = dirname(walk)
+      if (up === walk) return parent
+      walk = up
+      continue
+    }
+    if (st.isSymbolicLink()) {
+      try {
+        const resolved = await realpath(walk)
+        return join(resolved, relative(walk, parent))
+      } catch (e: unknown) {
+        if (isENOENT(e)) {
+          throw new Error(
+            'FileHistory: parent directory of the tracked path is a dangling symlink',
+          )
+        }
+        throw e
+      }
+    }
+    const resolved = await realpath(walk)
+    return walk === parent ? resolved : join(resolved, relative(walk, parent))
+  }
+}
+
+/**
+ * Official 2.1.319 #1775 (`jkn`):
+ * Verify that the parent directory at `filePath` matches `expectedRealParentDir`
+ * by `(dev, ino, isDirectory)` identity (using `bigint` stats).
+ */
+export async function verifyParentDirectoryIdentity(
+  filePath: string,
+  expectedRealParentDir: string | undefined,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  if (expectedRealParentDir === undefined) return { ok: true }
+  const parent = dirname(filePath)
+  let parentLstat
+  try {
+    parentLstat = await lstat(parent, { bigint: true })
+  } catch (e: unknown) {
+    if (isENOENT(e)) return { ok: true }
+    throw e
+  }
+  if (parentLstat.ino === 0n) return { ok: true }
+  let resolvedParentStat = parentLstat
+  try {
+    if (parentLstat.isSymbolicLink()) {
+      resolvedParentStat = await lstat(await realpath(parent), { bigint: true })
+    }
+    const expectedStat = await lstat(expectedRealParentDir, { bigint: true })
+    if (
+      expectedStat.dev !== resolvedParentStat.dev ||
+      expectedStat.ino !== resolvedParentStat.ino ||
+      expectedStat.isDirectory() !== resolvedParentStat.isDirectory()
+    ) {
+      logEvent('tengu_file_history_first_backup_parent_changed', {})
+      return {
+        ok: false,
+        reason:
+          'the captured parent directory is not the one at the tracked path',
+      }
+    }
+  } catch (e: unknown) {
+    if (!isENOENT(e)) throw e
+    return {
+      ok: false,
+      reason: 'parent directory identity could not be verified',
+    }
+  }
+  return { ok: true }
+}
+
+/**
+ * Official 2.1.319 #1775 (`GIr`):
+ * Safely unlink `filePath` only after anchoring its parent directory with
+ * `O_DIRECTORY | O_NOFOLLOW` and verifying `realpath` + `(dev, ino)` identity,
+ * preventing `/rewind` from unlinking a file through a directory symlink.
+ */
+export async function safeUnlinkTrackedFile(
+  filePath: string,
+  expectedRealParentDir?: string,
+): Promise<'deleted' | 'absent' | { refused: string }> {
+  const parent = dirname(filePath)
+  const dirFlags =
+    fsConstants.O_RDONLY |
+    (fsConstants.O_DIRECTORY ?? 0) |
+    (fsConstants.O_NOFOLLOW ?? 0)
+  let dirHandle
+  try {
+    dirHandle = await open(parent, dirFlags)
+  } catch (e: unknown) {
+    const code = getErrnoCode(e)
+    if (code === 'ENOENT') return 'absent'
+    if (code === 'ELOOP' || code === 'ENOTDIR') {
+      return {
+        refused: `its directory was replaced by a link or a non-directory since the checkpoint (${code})`,
+      }
+    }
+    throw e
+  }
+  try {
+    if (expectedRealParentDir !== undefined) {
+      if (process.platform === 'linux') {
+        const fdPath = await readlink(`/proc/self/fd/${dirHandle.fd}`).catch(
+          e => (isENOENT(e) ? null : Promise.reject(e)),
+        )
+        if (fdPath !== null && fdPath !== expectedRealParentDir) {
+          if (fdPath.endsWith(' (deleted)')) return 'absent'
+          return {
+            refused: `its directory moved since the checkpoint (now ${fdPath}, was ${expectedRealParentDir})`,
+          }
+        }
+        if (fdPath !== null) {
+          const procTarget = `/proc/self/fd/${dirHandle.fd}/${basename(filePath)}`
+          try {
+            const procTargetStat = await lstat(procTarget)
+            if (procTargetStat.isSymbolicLink() || !procTargetStat.isFile()) {
+              return { refused: 'destination is not a regular file' }
+            }
+            await unlink(procTarget)
+            return 'deleted'
+          } catch (e: unknown) {
+            if (isENOENT(e)) return 'absent'
+            // Fall through if procfs lstat/unlink is unsupported on this kernel
+          }
+        }
+      }
+      const fdStat = await dirHandle.stat({ bigint: true })
+      const expectedStat = await lstat(expectedRealParentDir, {
+        bigint: true,
+      }).catch(e => (isENOENT(e) ? null : Promise.reject(e)))
+      if (
+        expectedStat === null ||
+        (fdStat.ino !== 0n &&
+          (fdStat.dev !== expectedStat.dev || fdStat.ino !== expectedStat.ino))
+      ) {
+        return {
+          refused: `its directory moved since the checkpoint (expected ${expectedRealParentDir})`,
+        }
+      }
+    }
+    const targetStat = await lstat(filePath).catch(e =>
+      isENOENT(e) ? null : Promise.reject(e),
+    )
+    if (targetStat === null) return 'absent'
+    if (targetStat.isSymbolicLink() || !targetStat.isFile()) {
+      return { refused: 'destination is not a regular file' }
+    }
+    await unlink(filePath)
+    return 'deleted'
+  } finally {
+    await dirHandle.close().catch(() => {})
+  }
+}
+
 export async function assertRewindDestinationSafe(
   destPath: string,
   expectedRealParentDir?: string,
@@ -658,7 +834,7 @@ export async function assertRewindDestinationSafe(
         }
       }
       if (!isENOENT(e)) throw e
-      // densable: dangling parent symlink / walk up for realpath reconstruction
+      // densable + #1775: dangling parent symlink / walk up for realpath reconstruction
       try {
         const parentLstat = await lstat(parent)
         if (parentLstat.isSymbolicLink()) {
@@ -672,11 +848,27 @@ export async function assertRewindDestinationSafe(
         const up = dirname(walk)
         if (up === walk) break
         walk = up
+        let walkLstat
         try {
-          await lstat(walk)
+          walkLstat = await lstat(walk)
         } catch (inner: unknown) {
           if (!isENOENT(inner)) throw inner
           continue
+        }
+        if (walkLstat.isSymbolicLink()) {
+          try {
+            const walkReal = await realpath(walk)
+            parentReal = join(walkReal, relative(walk, parent))
+          } catch (inner: unknown) {
+            if (isENOENT(inner)) {
+              return {
+                ok: false,
+                reason: 'parent directory is a dangling symlink',
+              }
+            }
+            throw inner
+          }
+          break
         }
         try {
           const walkReal = await realpath(walk)
@@ -691,11 +883,18 @@ export async function assertRewindDestinationSafe(
         break
       }
     }
-    if (parentReal !== undefined && parentReal !== expectedRealParentDir) {
+    if (parentReal !== expectedRealParentDir) {
       return {
         ok: false,
         reason: `parent directory moved (${parentReal} != ${expectedRealParentDir})`,
       }
+    }
+    const parentIdCheck = await verifyParentDirectoryIdentity(
+      destPath,
+      expectedRealParentDir,
+    )
+    if (!parentIdCheck.ok) {
+      return parentIdCheck
     }
     try {
       const parentStat = await stat(parent)
@@ -723,10 +922,11 @@ async function applySnapshot(
     try {
       const filePath = maybeExpandFilePath(trackingPath)
       const targetBackup = targetSnapshot.trackedFileBackups[trackingPath]
+      const resolvedBackup =
+        targetBackup ?? getFirstVersionBackup(trackingPath, state)
 
-      const backupFileName: BackupFileName | undefined = targetBackup
-        ? targetBackup.backupFileName
-        : getBackupFileNameFirstVersion(trackingPath, state)
+      const backupFileName: BackupFileName | undefined =
+        resolvedBackup?.backupFileName
 
       if (backupFileName === undefined) {
         // Error resolving the backup, so don't touch the file
@@ -740,7 +940,7 @@ async function applySnapshot(
       }
 
       // densable Q3g before any unlink/restore (optional realParentDir from backup)
-      const expectedParent = targetBackup?.realParentDir
+      const expectedParent = resolvedBackup?.realParentDir
       const safety = await assertRewindDestinationSafe(filePath, expectedParent)
       if (!safety.ok) {
         skippedLinks++
@@ -755,11 +955,28 @@ async function applySnapshot(
       }
 
       if (backupFileName === null) {
-        // File did not exist at the target version; delete it if present.
+        // File did not exist at the target version; delete it safely via
+        // O_DIRECTORY | O_NOFOLLOW parent anchor (#1775).
         try {
-          await unlink(filePath)
-          logForDebugging(`FileHistory: [Rewind] Deleted ${filePath}`)
-          filesChanged.push(filePath)
+          const unlinkResult = await safeUnlinkTrackedFile(
+            filePath,
+            expectedParent,
+          )
+          if (typeof unlinkResult === 'object' && 'refused' in unlinkResult) {
+            skippedLinks++
+            logEvent('tengu_file_history_rewind_restore_file_failed', {
+              dryRun: false,
+            })
+            logForDebugging(
+              `FileHistory: [Rewind] Refusing to delete ${filePath}: ${unlinkResult.refused}`,
+              { level: 'error' },
+            )
+            continue
+          }
+          if (unlinkResult === 'deleted') {
+            logForDebugging(`FileHistory: [Rewind] Deleted ${filePath}`)
+            filesChanged.push(filePath)
+          }
         } catch (e: unknown) {
           const code = getErrnoCode(e)
           if (code === 'ENOTDIR' || code === 'ELOOP' || code === 'EISDIR') {
@@ -996,7 +1213,13 @@ async function createBackup(
     srcStats = await stat(filePath)
   } catch (e: unknown) {
     if (isENOENT(e)) {
-      return { backupFileName: null, version, backupTime: new Date() }
+      const realParentDir = await resolveRealParentDir(filePath)
+      return {
+        backupFileName: null,
+        version,
+        backupTime: new Date(),
+        realParentDir,
+      }
     }
     throw e
   }
@@ -1021,19 +1244,14 @@ async function createBackup(
     fileSize: srcStats.size,
   })
 
-  // densable realParentDir — realpath of parent at checkpoint time for Q3g/Z3g
-  let realParentDir: string | undefined
-  try {
-    realParentDir = await realpath(dirname(filePath))
-  } catch {
-    realParentDir = undefined
-  }
+  // densable + #1775 realParentDir — canonical ancestor-resolved parent dir
+  const realParentDir = await resolveRealParentDir(filePath)
 
   return {
     backupFileName,
     version,
     backupTime: new Date(),
-    ...(realParentDir !== undefined ? { realParentDir } : {}),
+    realParentDir,
   }
 }
 
@@ -1229,6 +1447,24 @@ export async function restoreBackupNoFollow(
 }
 
 /**
+ * Gets the full first (earliest) backup record for a file (including
+ * `realParentDir`), used when rewinding to a target snapshot where the file
+ * was not yet tracked (#1775).
+ */
+function getFirstVersionBackup(
+  trackingPath: string,
+  state: FileHistoryState,
+): FileHistoryBackup | undefined {
+  for (const snapshot of state.snapshots) {
+    const backup = snapshot.trackedFileBackups[trackingPath]
+    if (backup !== undefined && backup.version === 1) {
+      return backup
+    }
+  }
+  return undefined
+}
+
+/**
  * Gets the first (earliest) backup version for a file, used when rewinding
  * to a target backup point where the file has not been tracked yet.
  *
@@ -1240,17 +1476,10 @@ function getBackupFileNameFirstVersion(
   trackingPath: string,
   state: FileHistoryState,
 ): BackupFileName | undefined {
-  for (const snapshot of state.snapshots) {
-    const backup = snapshot.trackedFileBackups[trackingPath]
-    if (backup !== undefined && backup.version === 1) {
-      // This can be either a file name or null, with null meaning the file
-      // did not exist in the first version.
-      return backup.backupFileName
-    }
-  }
-
-  // The undefined means there was an error resolving the first version.
-  return undefined
+  // This can be either a file name or null, with null meaning the file
+  // did not exist in the first version, or undefined if we cannot find a
+  // first version at all.
+  return getFirstVersionBackup(trackingPath, state)?.backupFileName
 }
 
 /**
@@ -1321,7 +1550,7 @@ export async function copyFileHistoryForResume(log: LogOption): Promise<void> {
     return
   }
   const lastMessage = log.messages[log.messages.length - 1]
-  const previousSessionId = lastMessage?.sessionId
+  const previousSessionId = log.forkedFromSessionId ?? lastMessage?.sessionId
   if (!previousSessionId) {
     logError(
       new Error(

@@ -1,6 +1,7 @@
 import { closeSync, mkdirSync, openSync } from 'fs'
 import { dirname } from 'path'
 import { buildCliLaunch, spawnCli } from '../../../utils/cliLaunch.js'
+import { getScreenReaderChildEnv } from '../../../utils/screenReaderGate.js'
 import type {
   BgAttachResult,
   BgEngine,
@@ -25,6 +26,7 @@ export class DetachedEngine implements BgEngine {
 
     const launch = buildCliLaunch(opts.args, {
       env: {
+        ...getScreenReaderChildEnv(),
         ...opts.env,
         CLAUDE_CODE_SESSION_KIND: 'bg',
         CLAUDE_CODE_SESSION_NAME: opts.sessionName,

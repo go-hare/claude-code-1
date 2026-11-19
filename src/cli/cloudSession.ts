@@ -249,6 +249,16 @@ export {
   headlessCloudWatchdogMs,
 } from './cloudWatchdog.js'
 export {
+  buildCcrSessionRulesRecord,
+  CCR_SESSION_RULE_MAX_LEN,
+  CCR_SESSION_RULES_MAX_BYTES,
+  type CcrSessionRulesRecord,
+  evaluateCcrKeepsSessionRules,
+  getCcrKeepsSessionRules,
+  restoreCcrSessionRules,
+  setCcrKeepsSessionRules,
+} from '../state/onChangeAppState.js'
+export {
   SERVED_ASK_DEFAULT_MAX_MS,
   SERVED_ASK_INFLIGHT_CAP,
   SERVED_ASK_RECENT_CAP,

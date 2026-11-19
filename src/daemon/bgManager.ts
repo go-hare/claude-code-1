@@ -54,7 +54,11 @@ import {
   RETIRE_GRACE_MS,
   RETIRE_GRACE_LONG_MS,
   TICK_INTERVAL_MS,
+  shouldMarkGatewayRouted,
+  writeGatewayMark,
+  clearGatewayMark,
 } from './bgWorker.js'
+import { isBgGatewayMarkEnabled } from './bgHostManagedEnv.js'
 import {
   type BgJobState,
   readBgJobState,
@@ -642,6 +646,15 @@ export async function startBgManager(opts?: {
     if (closed) return
     hasDispatched = true
 
+    if (retryCount === 0) {
+      delete req.gatewayRouted
+      delete req.gatewayMarkUnreadable
+      if (isBgGatewayMarkEnabled() && shouldMarkGatewayRouted(req)) {
+        req.gatewayRouted = true
+        void writeGatewayMark(req.short)
+      }
+    }
+
     const existingHandle = handles.get(req.short)
     if (existingHandle) {
       if (
@@ -659,6 +672,9 @@ export async function startBgManager(opts?: {
         setTimeout(handleDispatch, 100, req, retryCount + 1, afterUpgrade)
         return
       }
+      if (req.gatewayRouted && !existingHandle.dispatch.gatewayRouted) {
+        void clearGatewayMark(req.short)
+      }
       const isDying =
         existingHandle.isKilling ||
         existingHandle.isRetiring ||
@@ -669,6 +685,9 @@ export async function startBgManager(opts?: {
           : `bg: dup dispatch ${req.short} dropped (existing handle still live)`,
       )
       return
+    }
+    if (!req.gatewayRouted) {
+      void clearGatewayMark(req.short)
     }
     // Claim in flight (no handle yet) — retry like settling, never cold-parallel.
     if (claimingShorts.has(req.short)) {
@@ -1492,7 +1511,7 @@ async function handleControlRequest(
           code: 'ENOJOB',
         }
       }
-      const result = await worker.respawnIfIdleStale()
+      const result = await worker.respawnIfIdleStale(undefined, 'attach')
       return { ok: true, op: 'respawn-stale', ...result }
     }
 

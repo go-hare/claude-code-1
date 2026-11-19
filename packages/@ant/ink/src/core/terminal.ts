@@ -375,8 +375,11 @@ export function isNativeCursorEnabled(): boolean {
   return host.nativeCursorEnabled
 }
 
-/** densable `ME` / `Ln` — XTVERSION ghostty (SSH-safe; not TERM_PROGRAM). */
+/** densable `Shr` / `ME` — XTVERSION ghostty (SSH-safe; honors attacherCaps().isGhosttyXtv). */
 export function isGhosttyXtversion(): boolean {
+  if ((attacherCaps() as { isGhosttyXtv?: boolean } | null)?.isGhosttyXtv) {
+    return true
+  }
   return Jk().xtversionName?.toLowerCase().startsWith('ghostty') ?? false
 }
 

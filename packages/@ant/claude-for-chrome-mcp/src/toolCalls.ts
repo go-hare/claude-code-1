@@ -7,7 +7,7 @@ import {
 import { basename, extname, resolve as pathResolve } from 'path'
 
 import type { CallToolResult } from '@modelcontextprotocol/server'
-import { NoExtensionConnectedError } from './bridgeClient.js'
+import { NoExtensionConnectedError, ToolCallLostError } from './bridgeClient.js'
 import { BRIDGE_ONLY_BROWSER_TOOLS } from './browserTools.js'
 import { SocketConnectionError } from './mcpSocketClient.js'
 import type {
@@ -125,6 +125,19 @@ export const handleToolCall = async (
       `[${context.serverName}] Error calling tool:`,
       toLoggerDetail(error),
     )
+
+    if (error instanceof ToolCallLostError) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `The "${name}" tool call was sent, but the connection was lost before its result came back. The action may have happened, may still be in progress or waiting for the user in Chrome, or may not have happened. If the call only reads the page, call it again. Otherwise do not repeat it yet: first check the page state (e.g. with screenshot, read_page, or get_page_text) to see whether it took effect.`,
+          },
+        ],
+        isError: true,
+        _meta: { toolCallFailureCause: 'connection_lost_mid_call' },
+      }
+    }
 
     if (
       error instanceof SocketConnectionError ||

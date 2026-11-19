@@ -9,12 +9,72 @@
  * - browser_batch when every nested {name,input} action is RO
  */
 
+import { isPolicyAllowed } from '../../services/policyLimits/index.js'
+
 const BROWSER_MCP_PREFIXES = [
   'mcp__claude-in-chrome__',
   'mcp__Claude_in_Chrome__',
   'mcp__Claude_Preview__',
   'mcp__Claude_Browser__',
+  'mcp__remote-devices__claude-in-chrome__',
+  'mcp__remote-devices__Claude_in_Chrome__',
+  'mcp__remote-devices__Claude_Browser__',
 ] as const
+
+/**
+ * Official 325 #1949: host-provided Claude in Chrome / Browser / Preview /
+ * remote-devices MCP tools follow the organization's `allow_claude_browser_extension`
+ * policy just like the built-in extension server.
+ */
+export function isHostProvidedBrowserMcpToolName(
+  fullyQualifiedName: string,
+): boolean {
+  return BROWSER_MCP_PREFIXES.some(prefix =>
+    fullyQualifiedName.startsWith(prefix),
+  )
+}
+
+const HOST_BROWSER_MCP_SERVER_NAMES = new Set([
+  'claude-in-chrome',
+  'Claude in Chrome',
+  'Claude_in_Chrome',
+  'Claude Browser',
+  'Claude_Browser',
+  'Claude Preview',
+  'Claude_Preview',
+])
+
+const REMOTE_DEVICES_BROWSER_TOOL_PREFIXES = [
+  'claude-in-chrome__',
+  'Claude_in_Chrome__',
+  'Claude_Browser__',
+] as const
+
+export function isHostProvidedBrowserMcpServerOrTool(
+  serverName: string,
+  bareToolName?: string,
+): boolean {
+  if (HOST_BROWSER_MCP_SERVER_NAMES.has(serverName)) return true
+  if (serverName === 'remote-devices' && typeof bareToolName === 'string') {
+    return REMOTE_DEVICES_BROWSER_TOOL_PREFIXES.some(prefix =>
+      bareToolName.startsWith(prefix),
+    )
+  }
+  return false
+}
+
+export function isChromeBrowserExtensionPolicyAllowed(): boolean {
+  return isPolicyAllowed('allow_claude_browser_extension')
+}
+
+export function isChromeBrowserMcpToolBlockedByOrgPolicy(
+  fullyQualifiedName: string,
+): boolean {
+  return (
+    isHostProvidedBrowserMcpToolName(fullyQualifiedName) &&
+    !isChromeBrowserExtensionPolicyAllowed()
+  )
+}
 
 /** Always read-only bare tool names (official FDu / $Du). */
 const ALWAYS_READONLY_TOOLS = [
@@ -22,7 +82,6 @@ const ALWAYS_READONLY_TOOLS = [
   'get_page_text',
   'list_connected_browsers',
   'read_page',
-  'shortcuts_list',
 ] as const
 
 /**
@@ -35,7 +94,6 @@ const ALWAYS_SAFE_TOOLS = [
   'list_connected_browsers',
   'read_page',
   'resize_window',
-  'shortcuts_list',
   'switch_browser',
   'tabs_close_mcp',
 ] as const

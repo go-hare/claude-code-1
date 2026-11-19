@@ -21,7 +21,10 @@ import {
   getSettingsForSource,
 } from '../settings/settings.js'
 import { jsonParse } from '../slowOperations.js'
-import { getAddDirExtraMarketplaces } from './addDirPluginSettings.js'
+import {
+  getAddDirExtraMarketplaces,
+  isPersistedTrustIgnored,
+} from './addDirPluginSettings.js'
 import { areCommandPluginSourcesDisabledByPolicy } from './pluginCommandSource.js'
 import {
   EntryHelperPolicyError,
@@ -500,7 +503,7 @@ export function lookupTrustedMarketplaceAuth(
       return hit
     }
   }
-  if (!checkHasTrustDialogAccepted()) {
+  if (isPersistedTrustIgnored() || !checkHasTrustDialogAccepted()) {
     return undefined
   }
   return scanExtraKnownMarketplaces(
@@ -624,7 +627,7 @@ export function lookupTrustedSettingsEntryAuth(
       )
     }
   }
-  if (!checkHasTrustDialogAccepted()) {
+  if (isPersistedTrustIgnored() || !checkHasTrustDialogAccepted()) {
     return undefined
   }
   const repoNamed = extraKnownNamed(

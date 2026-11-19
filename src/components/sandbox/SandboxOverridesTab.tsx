@@ -18,7 +18,7 @@ export function SandboxOverridesTab({ onComplete }: Props): React.ReactNode {
   if (!isEnabled) {
     return (
       <Box flexDirection="column" paddingY={1}>
-        <Text color="subtle">Sandbox is not enabled. Enable sandbox to configure override settings.</Text>
+        <Text dimColor>Sandbox is not enabled. Enable sandbox to configure override settings.</Text>
       </Box>
     );
   }
@@ -26,7 +26,7 @@ export function SandboxOverridesTab({ onComplete }: Props): React.ReactNode {
   if (isLocked) {
     return (
       <Box flexDirection="column" paddingY={1}>
-        <Text color="subtle">
+        <Text dimColor>
           Override settings are managed by a higher-priority configuration and cannot be changed locally.
         </Text>
         <Box marginTop={1}>

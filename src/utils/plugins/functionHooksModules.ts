@@ -7749,6 +7749,142 @@ type FunctionHooksToolUseContext = {
 let functionHooksToolUseContext: FunctionHooksToolUseContext | undefined
 
 /**
+ * #1938 (2.1.321): Permission-mode policy for Claude-authored dev mods.
+ * - `dontAsk`: never load mods (`block-dont-ask`).
+ * - `bypassPermissions` or non-circuit-broken `auto`: turn on without asking
+ *   (`auto-enable`), even when managed `sandbox.allowUnsandboxedCommands: false`
+ *   or `sandbox.network.allowManagedDomainsOnly: true` is active.
+ * - all other modes (`default`, `acceptEdits`, `plan`, etc.): prompt (`ask`).
+ */
+export function evaluateClaudeAuthoredModLoadPolicy(
+  mode: string | undefined,
+  opts?: { isAutoCircuitBroken?: boolean },
+): 'auto-enable' | 'ask' | 'block-dont-ask' {
+  if (mode === 'dontAsk') {
+    return 'block-dont-ask'
+  }
+  if (mode === 'bypassPermissions') {
+    return 'auto-enable'
+  }
+  if (mode === 'auto' && opts?.isAutoCircuitBroken !== true) {
+    return 'auto-enable'
+  }
+  return 'ask'
+}
+
+type PluginModCanUseToolDecision = {
+  behavior: 'allow' | 'deny' | 'ask' | 'passthrough'
+  updatedInput?: Record<string, unknown>
+  decisionReason?: { type?: string; mode?: string; [key: string]: unknown }
+  [key: string]: unknown
+}
+
+function isDontAskModeDenial(
+  decision: PluginModCanUseToolDecision | undefined,
+): boolean {
+  return (
+    decision?.behavior === 'deny' &&
+    decision.decisionReason?.type === 'mode' &&
+    decision.decisionReason?.mode === 'dontAsk'
+  )
+}
+
+function isInteractiveAskTool(tool: { name?: string } | undefined): boolean {
+  return tool?.name === 'AskUserQuestion'
+}
+
+/**
+ * #1939 (2.1.321, official `CFs`): Wrap `canUseTool` for a mod's own
+ * `$.tool.call` and `$.mcp.call` invocations so they never raise a permission
+ * prompt — even under user `ask` rules or in `dontAsk` / `-p` runs — while
+ * `deny` rules and organization policy still apply unchanged.
+ */
+export function wrapCanUseToolForPluginModCall<
+  TFn extends (...args: never[]) => Promise<unknown>,
+>(baseCanUseTool: TFn): TFn {
+  const callBase = baseCanUseTool as unknown as (
+    ...args: unknown[]
+  ) => Promise<unknown>
+  const wrapped = async (
+    tool: { name?: string },
+    input: Record<string, unknown>,
+    toolUseContext: {
+      hookCaller?: string
+      hookServesModel?: boolean
+      [key: string]: unknown
+    },
+    assistantMessage: unknown,
+    toolUseID: string,
+    forceDecision?: PluginModCanUseToolDecision,
+  ): Promise<unknown> => {
+    const isPluginModCall =
+      toolUseContext?.hookCaller !== undefined &&
+      toolUseContext.hookServesModel !== true &&
+      !isInteractiveAskTool(tool)
+
+    if (!isPluginModCall) {
+      return await callBase(
+        tool,
+        input,
+        toolUseContext,
+        assistantMessage,
+        toolUseID,
+        forceDecision,
+      )
+    }
+
+    const promoteToAllow = (
+      source: PluginModCanUseToolDecision | undefined,
+    ): PluginModCanUseToolDecision => ({
+      behavior: 'allow',
+      updatedInput: source?.updatedInput ?? input,
+      decisionReason: { type: 'other', reason: 'Plugin mod tool call' },
+    })
+
+    // Official CFs: when pre-evaluated decision is 'ask' (or a 'dontAsk'
+    // mode conversion of an ask), promote to 'allow' without prompting while
+    // leaving explicit 'deny' (deny rules / org policy / hooks) intact.
+    if (
+      forceDecision?.behavior === 'ask' ||
+      isDontAskModeDenial(forceDecision)
+    ) {
+      const allowed = promoteToAllow(forceDecision)
+      await callBase(tool, input, toolUseContext, assistantMessage, toolUseID, {
+        ...allowed,
+        decideLocation: 'pre-ask',
+      })
+      return allowed
+    }
+
+    if (forceDecision?.behavior === 'deny') {
+      return await callBase(
+        tool,
+        input,
+        toolUseContext,
+        assistantMessage,
+        toolUseID,
+        forceDecision,
+      )
+    }
+
+    const decision = (await callBase(
+      tool,
+      input,
+      toolUseContext,
+      assistantMessage,
+      toolUseID,
+      forceDecision,
+    )) as PluginModCanUseToolDecision | undefined
+
+    if (decision?.behavior === 'ask' || isDontAskModeDenial(decision)) {
+      return promoteToAllow(decision)
+    }
+    return decision
+  }
+  return wrapped as unknown as TFn
+}
+
+/**
  * densable `XL` — shared host tool.call path for `$.tool.call` and `$.mcp.call`.
  * Prefer `toolCallHandler` (tests / REPL), else stream `runToolUse` when a
  * tool-use context is bound; else a minimal fallback.
@@ -7859,7 +7995,7 @@ async function runHostToolCallXL(
       for await (const update of runToolUse(
         toolUse,
         parent as never,
-        ctxHost.canUseTool as never,
+        wrapCanUseToolForPluginModCall(ctxHost.canUseTool as never) as never,
         toolUseContext as never,
       )) {
         const message = (update as { message?: unknown }).message

@@ -154,7 +154,14 @@ import {
   type FleetStateGroup,
   type StatusBand,
   fleetHomeIdx,
+  isApprovalPromptText,
+  isSessionWaitingOnPermission,
+  shouldBlockPeekReplyForPermission,
+  getPeekReplyErrorOrHint,
+  formatPeekDisplayText,
+  truncateLinesWithEllipsis,
 } from './fleetView/helpers.js';
+import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
 import { resolveFleetCanonicalLauncherCwd, sweepExpiredFleetLauncherDrafts } from './fleetView/launcherDraft.js';
 import {
   relaunchAgentsView,
@@ -897,6 +904,21 @@ function FleetPeekPanel({
   }, [jobState?.budget]);
 
   const isBash = peekMode === 'bash';
+  const waitingOnPermission = isSessionWaitingOnPermission({
+    status: session.status,
+    backend: session.backend,
+    tempo: jobState?.tempo ?? session.tempo,
+    daemonState: session.daemonState,
+    needs: rawNeeds,
+    hasQuestions: Boolean(questions),
+  });
+  const preserveRawApproval = isApprovalPromptText(rawNeeds);
+  const effectiveReplyError = getPeekReplyErrorOrHint({
+    waitingOnPermission,
+    replyInput,
+    peekMode,
+    replyError,
+  });
   const suggestedReply =
     (jobState?.tempo === 'blocked' || band === 'blocked') && !questions && jobState?.suggestedReply
       ? jobState.suggestedReply.replace(/\s+/g, ' ').trim() || undefined
@@ -916,7 +938,7 @@ function FleetPeekPanel({
       questionRows -
       statusMetaRows -
       replyNewlines -
-      (replyError ? 1 : 0) -
+      (effectiveReplyError ? 1 : 0) -
       1,
   );
   const usedRows =
@@ -927,21 +949,41 @@ function FleetPeekPanel({
         : Math.min(5, bodyMaxHeight)) +
     statusMetaRows +
     replyNewlines +
-    (replyError ? 1 : 0) +
+    (effectiveReplyError ? 1 : 0) +
     1;
   const childCap = Math.max(8, termRows - 8 - usedRows);
   const visibleChildren = children.slice(0, childCap);
   const hiddenChildren = children.length - visibleChildren.length;
   const outputKeyWidth = Math.max(0, ...outputEntries.map(([k]) => stringWidth(k)));
+  const contentWidth = Math.max(
+    1,
+    termWidth - 4 - (contentKind === 'output' && outputEntries.length > 1 ? outputKeyWidth + 2 : 0),
+  );
 
   const detailText = (jobState?.detail ?? session.lastMessage ?? '').trim();
+  const displayNeeds = rawNeeds
+    ? truncateLinesWithEllipsis(
+        formatPeekDisplayText(rawNeeds, { preserveRawMarkup: preserveRawApproval }),
+        contentWidth,
+        bodyMaxHeight,
+      )
+    : '';
+  const displayDetail = detailText
+    ? truncateLinesWithEllipsis(
+        formatPeekDisplayText(detailText, { preserveRawMarkup: preserveRawApproval }),
+        contentWidth,
+        bodyMaxHeight,
+      )
+    : '';
   const isSettled = isFleetBhSettled({ state: session.daemonState, tempo: session.tempo });
 
   const placeholder = questions
     ? `press 1-${questions[0]?.options.length ?? 2} or type your answer`
     : suggestedReply && !isBash
       ? suggestedReply
-      : 'reply';
+      : waitingOnPermission && !isBash
+        ? 'enter to open and answer'
+        : 'reply';
 
   return (
     <Box position="absolute" bottom={0} left={0} right={0} flexDirection="column" opaque>
@@ -984,7 +1026,7 @@ function FleetPeekPanel({
           </Box>
         ) : contentKind === 'needs' ? (
           <Box maxHeight={bodyMaxHeight} overflowY="hidden">
-            <Text wrap="wrap">{rawNeeds}</Text>
+            <Text wrap="wrap">{displayNeeds}</Text>
           </Box>
         ) : contentKind === 'output' ? (
           <Box flexDirection="column">
@@ -996,15 +1038,21 @@ function FleetPeekPanel({
                   </Box>
                 )}
                 <Box flexGrow={1} width={0} maxHeight={bodyMaxHeight} overflowY="hidden">
-                  <Text wrap="wrap">{val}</Text>
+                  <Text wrap="wrap">
+                    {truncateLinesWithEllipsis(
+                      formatPeekDisplayText(val, { preserveRawMarkup: preserveRawApproval }),
+                      contentWidth,
+                      bodyMaxHeight,
+                    )}
+                  </Text>
                 </Box>
               </Box>
             ))}
           </Box>
         ) : (
           <Box maxHeight={bodyMaxHeight} overflowY="hidden">
-            <Text wrap="wrap" dimColor={!detailText}>
-              {detailText || jobLabel(session)}
+            <Text wrap="wrap" dimColor={!displayDetail}>
+              {displayDetail || jobLabel(session)}
             </Text>
           </Box>
         )}
@@ -1118,9 +1166,9 @@ function FleetPeekPanel({
             borderless
           />
         </Box>
-        {replyError && (
+        {effectiveReplyError && (
           <Text color="error" dimColor wrap="truncate">
-            {replyError}
+            {effectiveReplyError}
           </Text>
         )}
       </Box>
@@ -1294,7 +1342,7 @@ function AgentViewApp({
       setFoldedGroups(new Set(draft.collapsed));
     }
   }, []);
-  useFleetComposerDraftPersistence({
+  const handOverDraft = useFleetComposerDraftPersistence({
     canonicalLauncherCwd,
     snapshot: {
       query: dispatchInput,
@@ -2874,6 +2922,7 @@ function AgentViewApp({
                       cwdFilter,
                       defaults: dispatchDefaults,
                       extraArgs: fleetUpExtraArgs(dispatchExtraArgs),
+                      handOverDraft,
                       onError: msg => setError(msg),
                     });
                   },
@@ -3972,6 +4021,32 @@ function AgentViewApp({
       }
       if (key.return && selectedSession) {
         const trimmed = peekReplyInput.trim();
+        const selectedJobState = jobStatesBySessionId.get(selectedSession.sessionId);
+        const selectedNeeds = (selectedJobState?.needs ?? selectedSession.waitingFor ?? '').trim() || undefined;
+        const selectedHasQuestions = Boolean(
+          (selectedJobState?.tempo === 'blocked' || deriveBand(selectedSession) === 'blocked') &&
+            selectedJobState?.block?.questions?.length,
+        );
+        const waitingOnPermission = isSessionWaitingOnPermission({
+          status: selectedSession.status,
+          backend: selectedSession.backend,
+          tempo: selectedJobState?.tempo ?? selectedSession.tempo,
+          daemonState: selectedSession.daemonState,
+          needs: selectedNeeds,
+          hasQuestions: selectedHasQuestions,
+        });
+        // Official #1762: keep typed reply in the box when waiting on a permission
+        // prompt (unless sending /stop in prompt mode); FleetPeekPanel shows
+        // "esc then enter to open and answer".
+        if (
+          shouldBlockPeekReplyForPermission({
+            waitingOnPermission,
+            replyInput: peekReplyInput,
+            peekMode,
+          })
+        ) {
+          return;
+        }
         if (!trimmed && peekMode === 'prompt') {
           setPreviewOpen(false);
           const short = selectedSession.short ?? selectedSession.sessionId?.slice(0, 8) ?? '';
@@ -5696,7 +5771,12 @@ export async function renderAgentView(options?: {
 
   // Create a Root instance (sync render, no race condition)
   // Official uses a persistent Root that survives across attach/detach cycles
-  let root: Root = await createRoot({ exitOnCtrlC: false });
+  // Official #1890: preserve screen reader mode across AgentView mount/remount.
+  const rootOptions = () => ({
+    exitOnCtrlC: false,
+    isScreenReaderEnabled: isScreenReaderModeEnabled(),
+  });
+  let root: Root = await createRoot(rootOptions());
 
   // Official 2.1.295 (#384): if claude agents and the background daemon are
   // both stopped (e.g. SIGTERM/SIGHUP at shutdown/reboot) while a session is
@@ -5779,7 +5859,7 @@ export async function renderAgentView(options?: {
         const { Login } = await import('../commands/login/login.js');
         const { getOauthTokenEnvStartingMessage } = await import('../commands/login/oauthTokenEnvWarning.js');
         const { getClientType } = await import('../bootstrap/state.js');
-        root = await createRoot({ exitOnCtrlC: false });
+        root = await createRoot(rootOptions());
         const loginResult = await Promise.race([
           new Promise<boolean>(resolve => {
             root.render(
@@ -5798,7 +5878,7 @@ export async function renderAgentView(options?: {
         if (loginResult === 'exited') break;
         if (loginResult && getClientType() === 'gateway') break;
         if (shutdownSignalReceived) break;
-        root = await createRoot({ exitOnCtrlC: false });
+        root = await createRoot(rootOptions());
         continue;
       }
 
@@ -5822,7 +5902,7 @@ export async function renderAgentView(options?: {
       }
 
       // Re-create root for next iteration (official: cj_ / createRoot after detach)
-      root = await createRoot({ exitOnCtrlC: false });
+      root = await createRoot(rootOptions());
     }
   } finally {
     for (const sig of shutdownSignals) {

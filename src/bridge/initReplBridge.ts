@@ -227,6 +227,10 @@ export type InitBridgeOptions = {
    * densable 2.1.247 `workspaceDiffComputeBudget`.
    */
   workspaceDiffComputeBudget?: import('./workspaceDiffBudget.js').WorkspaceDiffComputeBudget
+  /**
+   * #1860: Provide slash commands to deduplicate and advertise on `initialize`.
+   */
+  getInitializeCommands?: () => readonly import('./bridgeMessaging.js').BridgeSlashCommandInput[]
 }
 
 export type LocalBridgeSessionHolder = {
@@ -341,6 +345,7 @@ export async function initReplBridge(
     host,
     getToolPermissionContext,
     workspaceDiffComputeBudget,
+    getInitializeCommands,
   } = options ?? {}
   const onGetWorkspaceDiff = createOnGetWorkspaceDiff(
     host,
@@ -1375,6 +1380,7 @@ export async function initReplBridge(
         onSetMcpPermissionModeOverride,
         onRenameSession,
         onGetWorkspaceDiff,
+        getInitializeCommands,
         onStateChange,
         outboundOnly,
         tags,

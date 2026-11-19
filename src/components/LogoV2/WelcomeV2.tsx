@@ -1,5 +1,6 @@
 import React, { useContext } from 'react';
 import { AccessibilityContext, Box, Link, Text, useTheme } from '@anthropic/ink';
+import { getAntAuthFallbackNotice } from '../../commands/login/getAuthStatus.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { resolveAutoCompactWindow } from '../../utils/autoCompactWindow.js';
 import { env } from '../../utils/env.js';
@@ -61,14 +62,18 @@ const DOTTED_DIVIDER = '........................................................
 
 export function WelcomeV2({
   unknownModelNotice = null,
+  antAuthNotice,
 }: {
   unknownModelNotice?: UnrecognizedModelNotice | null;
+  antAuthNotice?: ReturnType<typeof getAntAuthFallbackNotice>;
 } = {}): React.ReactNode {
   const [theme] = useTheme();
   const srContext = useContext(AccessibilityContext);
   const screenReader = srContext || isScreenReaderModeEnabled();
   const { rows } = useTerminalSize();
   const welcomeMessage = 'Welcome to Claude Code';
+  const resolvedAntAuthNotice =
+    antAuthNotice !== undefined ? antAuthNotice : process.env.DEMO_VERSION ? null : getAntAuthFallbackNotice();
 
   const banner = (() => {
     if (screenReader || rows < WELCOME_V2_MIN_ROWS) {
@@ -187,14 +192,16 @@ export function WelcomeV2({
     );
   })();
 
-  if (unknownModelNotice === null) {
+  if (unknownModelNotice === null && resolvedAntAuthNotice === null) {
     return banner;
   }
 
   return (
     <Box flexDirection="column">
       {banner}
-      <UnrecognizedModelWarningLine notice={unknownModelNotice} />
+      {unknownModelNotice !== null && <UnrecognizedModelWarningLine notice={unknownModelNotice} />}
+      {resolvedAntAuthNotice?.reason === 'login_ended' && <Text color="warning">⚠ {resolvedAntAuthNotice.text}</Text>}
+      {resolvedAntAuthNotice?.reason === 'no_login' && <Text dimColor>{resolvedAntAuthNotice.text}</Text>}
     </Box>
   );
 }

@@ -1,9 +1,12 @@
+import axios from 'axios';
 import * as React from 'react';
 import { useEffect, useState } from 'react';
 import stripAnsi from 'strip-ansi';
 import { z } from 'zod';
 import { usageCredits as usageCreditsCommand } from 'src/commands/extra-usage/index.js';
 import { getSubscriptionType, hasProfileScope, isClaudeAISubscriber } from 'src/utils/auth.js';
+import { getGatewayAuth } from '../../utils/gatewayEnv.js';
+import { getClaudeCodeUserAgent } from '../../utils/userAgent.js';
 import { formatTotalCost } from '../../cost-tracker.js';
 import { useSessionServices } from '../../context/sessionServices.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
@@ -409,11 +412,25 @@ function PluginSkillListingFootprint({ maxWidth }: { maxWidth?: number }): React
   );
 }
 
-/** densable Js/Ws — gateway spend only, not the subscriber plan-limit bars. */
+/** densable Js/Ws / 2.1.319 #1706 — gateway spend only, not the subscriber plan-limit bars. */
 function GatewayUsageSection({ maxWidth }: { maxWidth: number }): React.ReactNode {
+  const [spend, setSpend] = useState<GatewaySpendReading | null>(() => getCachedGatewaySpendReading());
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchGatewaySpendReading().then(reading => {
+      if (!cancelled) {
+        setSpend(reading);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <Box flexDirection="column" gap={1} flexShrink={0}>
-      <SpendLimitSection maxWidth={maxWidth} />
+      <SpendLimitSection maxWidth={maxWidth} spend={spend} />
       <EscCancelHint />
     </Box>
   );
@@ -1212,8 +1229,180 @@ function UsagePane({ children }: { children: React.ReactNode }): React.ReactNode
   );
 }
 
-/** densable 2.1.251 Dl — Spend limit bar / HPe empty arm from jL().overage. */
-function SpendLimitSection({ maxWidth }: { maxWidth: number }): React.ReactNode {
+/**
+ * Official `t$n` / `oo` (2.1.319 #1706): format unlimited gateway spend
+ * (`spend.limit === null`) as `$X today · $Y this week · $Z this month`.
+ */
+export type GatewaySpendReading =
+  | {
+      limit: null;
+      currency?: string;
+      used: { daily: number; weekly: number; monthly: number };
+    }
+  | {
+      limit: number;
+      used: number;
+      utilization: number;
+      resetsAt: string | null;
+      currency?: string;
+      period?: 'daily' | 'weekly' | 'monthly';
+    };
+
+const GATEWAY_SPEND_PERIOD_LABELS = {
+  daily: 'today',
+  weekly: 'this week',
+  monthly: 'this month',
+} as const;
+
+export function formatGatewayUnlimitedSpend(spend: Extract<GatewaySpendReading, { limit: null }>): string {
+  const currency = spend.currency ?? 'USD';
+  const periods = ['daily', 'weekly', 'monthly'] as const;
+  return periods
+    .map(period => `${formatUsageCreditsAmount(spend.used[period], currency)} ${GATEWAY_SPEND_PERIOD_LABELS[period]}`)
+    .join(' · ');
+}
+
+const GATEWAY_SPEND_PERIODS = ['daily', 'weekly', 'monthly'] as const;
+
+let cachedGatewaySpend: { key: string; value: GatewaySpendReading | null } | null = null;
+let inFlightGatewaySpend: Promise<GatewaySpendReading | null> | null = null;
+
+function gatewaySpendCacheKey(auth: { url: string; jwt: string } | null): string | null {
+  return auth ? `${auth.url}\0${auth.jwt}` : null;
+}
+
+export function getCachedGatewaySpendReading(): GatewaySpendReading | null {
+  const key = gatewaySpendCacheKey(getGatewayAuth());
+  if (!key || cachedGatewaySpend?.key !== key) return null;
+  return cachedGatewaySpend.value;
+}
+
+/**
+ * Official `Yur` (2.1.319 #1706): parse gateway `/api/oauth/usage` response
+ * into a capped or unlimited (`limit: null`) `GatewaySpendReading`.
+ */
+export function parseGatewaySpendReading(data: unknown): GatewaySpendReading | null {
+  if (!data || typeof data !== 'object') return null;
+  const record = data as Record<string, unknown>;
+  const extra = (record.extra_usage && typeof record.extra_usage === 'object' ? record.extra_usage : record) as Record<
+    string,
+    unknown
+  >;
+  const currency = typeof extra.currency === 'string' && extra.currency ? extra.currency.toUpperCase() : 'USD';
+  const monthlyLimit = extra.monthly_limit;
+  const usedCredits = extra.used_credits;
+
+  if (
+    monthlyLimit === null &&
+    typeof usedCredits === 'number' &&
+    extra.daily &&
+    typeof extra.daily === 'object' &&
+    typeof (extra.daily as Record<string, unknown>).used_credits === 'number' &&
+    extra.weekly &&
+    typeof extra.weekly === 'object' &&
+    typeof (extra.weekly as Record<string, unknown>).used_credits === 'number'
+  ) {
+    return {
+      limit: null,
+      currency,
+      used: {
+        daily: (extra.daily as { used_credits: number }).used_credits,
+        weekly: (extra.weekly as { used_credits: number }).used_credits,
+        monthly: usedCredits,
+      },
+    };
+  }
+
+  if (typeof monthlyLimit !== 'number' || typeof usedCredits !== 'number') {
+    return null;
+  }
+  const rawUtil = extra.utilization;
+  const utilization =
+    typeof rawUtil === 'number'
+      ? rawUtil
+      : resolveExtraUsageUtilization({
+          utilization: null,
+          monthly_limit: monthlyLimit,
+          used_credits: usedCredits,
+        });
+  const limits = Array.isArray(record.limits) ? (record.limits as UsagePlanLimit[]) : undefined;
+  const activeLimit = limits?.find(entry => entry && entry.is_active === true);
+  const resetsAt =
+    activeLimit?.resets_at && Number.isFinite(Date.parse(activeLimit.resets_at)) ? activeLimit.resets_at : null;
+  const period = GATEWAY_SPEND_PERIODS.find(p => p === activeLimit?.group);
+  return {
+    limit: monthlyLimit,
+    used: usedCredits,
+    utilization,
+    resetsAt,
+    currency,
+    ...(period !== undefined ? { period } : {}),
+  };
+}
+
+/** Official `Qrn` (2.1.319 #1706): fetch gateway spend reading from `${gateway.url}/api/oauth/usage`. */
+export async function fetchGatewaySpendReading(): Promise<GatewaySpendReading | null> {
+  const gateway = getGatewayAuth();
+  const key = gatewaySpendCacheKey(gateway);
+  if (!gateway || !key) {
+    cachedGatewaySpend = null;
+    return null;
+  }
+  if (inFlightGatewaySpend) {
+    return inFlightGatewaySpend;
+  }
+  const url = `${gateway.url.replace(/\/+$/, '')}/api/oauth/usage`;
+  inFlightGatewaySpend = axios
+    .get<unknown>(url, {
+      headers: {
+        Authorization: `Bearer ${gateway.jwt}`,
+        'User-Agent': getClaudeCodeUserAgent(),
+      },
+      timeout: 5000,
+      maxRedirects: 0,
+      validateStatus: status => status === 200 || status === 404,
+    })
+    .then(res => {
+      const parsed = res.status === 200 ? parseGatewaySpendReading(res.data) : null;
+      cachedGatewaySpend = { key, value: parsed };
+      return parsed;
+    })
+    .catch(() => (cachedGatewaySpend?.key === key ? cachedGatewaySpend.value : null))
+    .finally(() => {
+      inFlightGatewaySpend = null;
+    });
+  return inFlightGatewaySpend;
+}
+
+/** densable 2.1.251 Dl / 2.1.319 #1706 — Spend limit bar / unlimited Spend (UTC) / HPe empty arm. */
+export function SpendLimitSection({
+  maxWidth,
+  spend,
+}: {
+  maxWidth: number;
+  spend?: GatewaySpendReading | null;
+}): React.ReactNode {
+  if (spend?.limit === null) {
+    return (
+      <Box flexDirection="column" flexShrink={0}>
+        <Text bold>Spend (UTC)</Text>
+        <Text dimColor>{formatGatewayUnlimitedSpend(spend)}</Text>
+      </Box>
+    );
+  }
+  if (spend) {
+    const currency = spend.currency ?? 'USD';
+    const extraSubtext = `${formatUsageCreditsAmount(spend.used, currency)} / ${formatUsageCreditsAmount(spend.limit, currency)} spent${spend.period ? ` ${GATEWAY_SPEND_PERIOD_LABELS[spend.period]}` : ''}`;
+    return (
+      <LimitBar
+        title="Spend limit"
+        limit={{ utilization: Math.round(spend.utilization), resets_at: spend.resetsAt ?? null }}
+        maxWidth={maxWidth}
+        alwaysShowDateInReset
+        extraSubtext={extraSubtext}
+      />
+    );
+  }
   const model = spendLimitBarProps(getRawUtilization().overage);
   if (!model) {
     return null;

@@ -62,3 +62,54 @@ export function getSelfBridgeCompatId(): string | undefined {
   const h = getReplBridgeHandle()
   return h ? toCompatSessionId(h.bridgeSessionId) : undefined
 }
+
+export type BridgeRateLimitStatusSnapshot = {
+  status?: string
+  resetsAt?: number | null
+  rateLimitType?: string | null
+  isUsingOverage?: boolean
+}
+
+/**
+ * #1767 / official `Jsr()` + `uo(e)` — mirror rate limit state to the active
+ * Remote Control bridge handle. When a usage limit has been lifted (status is
+ * `'allowed'` or `null`/expired), sends `reportMetadata({ rate_limit_info: null })`
+ * so other devices clear "Limit reached".
+ */
+export function syncBridgeRateLimitInfo(
+  snapshot: BridgeRateLimitStatusSnapshot | null | undefined,
+  bridgeHandle: ReplBridgeHandle | null = getReplBridgeHandle(),
+  nowMs: number = Date.now(),
+): boolean {
+  if (!bridgeHandle) return false
+  const isLifted =
+    !snapshot ||
+    snapshot.status === 'allowed' ||
+    (typeof snapshot.resetsAt === 'number' &&
+      snapshot.resetsAt > 0 &&
+      snapshot.resetsAt * 1000 <= nowMs)
+  if (isLifted) {
+    if (bridgeHandle.clearRateLimitInfo) {
+      bridgeHandle.clearRateLimitInfo()
+    } else if (bridgeHandle.reportMetadata) {
+      bridgeHandle.reportMetadata({ rate_limit_info: null })
+    } else {
+      return false
+    }
+    return true
+  }
+  const normalized = {
+    status: snapshot.status,
+    resetsAt: snapshot.resetsAt ?? null,
+    rateLimitType: snapshot.rateLimitType ?? null,
+    isUsingOverage: snapshot.isUsingOverage ?? false,
+  }
+  if (bridgeHandle.reportRateLimitInfo) {
+    bridgeHandle.reportRateLimitInfo(normalized)
+  } else if (bridgeHandle.reportMetadata) {
+    bridgeHandle.reportMetadata({ rate_limit_info: normalized })
+  } else {
+    return false
+  }
+  return true
+}

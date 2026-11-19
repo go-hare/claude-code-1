@@ -18,6 +18,10 @@
 
 import { isEnvTruthy } from '../utils/envUtils.js'
 import { getConfiguredHostAuthEnvVarName } from '../utils/hostCredsFile.js'
+import {
+  AX_SCREEN_READER_ENV_KEY,
+  isScreenReaderModeEnabled,
+} from '../utils/screenReaderGate.js'
 
 /** densable R_ / Me — auth tokens dropped on a host-managed / ssh child. */
 export const BG_CHILD_AUTH_TOKEN_KEYS = [
@@ -449,8 +453,37 @@ function deleteUnlessDispatch(
   dispatchEnv?: Record<string, string>,
 ): void {
   for (const key of keys) {
+    if (key === AX_SCREEN_READER_ENV_KEY) {
+      // Official 2.1.325 #1890 (`rJe`): only forward CLAUDE_AX_SCREEN_READER
+      // into bg workers when dispatch explicitly requests '1'.
+      if (dispatchEnv?.[key] !== '1') {
+        delete env[key]
+      }
+      continue
+    }
     if (!dispatchEnv?.[key]) delete env[key]
   }
+}
+
+/**
+ * Official 2.1.325 #1890 (`rJe`): filter a dispatch env map against an
+ * allowlist, accepting `CLAUDE_AX_SCREEN_READER` only when its value is `'1'`.
+ */
+export function filterDispatchAllowedEnv(
+  env: Record<string, string | undefined>,
+  allowedKeys: ReadonlySet<string>,
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(env)) {
+    if (
+      value !== undefined &&
+      allowedKeys.has(key) &&
+      (key !== AX_SCREEN_READER_ENV_KEY || value === '1')
+    ) {
+      out[key] = value
+    }
+  }
+  return out
 }
 
 function deletePrefixesUnlessDispatch(
@@ -647,6 +680,14 @@ export function buildDispatchProviderEnv(opts: {
   if (parent.ANTHROPIC_UNIX_SOCKET) {
     out.ANTHROPIC_UNIX_SOCKET = parent.ANTHROPIC_UNIX_SOCKET
   }
+  // Official 2.1.325 #1890 (`Mn` `...Un() ? {} : Gz()`): propagate
+  // CLAUDE_AX_SCREEN_READER=1 into dispatched bg sessions when active.
+  if (
+    parent[AX_SCREEN_READER_ENV_KEY] === '1' ||
+    (opts.parentEnv === undefined && isScreenReaderModeEnabled())
+  ) {
+    out[AX_SCREEN_READER_ENV_KEY] = '1'
+  }
   if (shouldInheritParentEndpointEnv(opts)) {
     Object.assign(out, inheritParentEndpointEnv(parent))
     Object.assign(out, copyProviderGatewayEnv(out, parent))
@@ -689,4 +730,44 @@ export function applySpareProviderStrips(
 ): void {
   for (const key of BG_CHILD_UNLESS_DISPATCH_KEYS) delete env[key]
   deletePrefixesUnlessDispatch(env, BG_CHILD_PREFIX_STRIP)
+}
+
+const FIRST_PARTY_API_HOSTS = new Set(['api.anthropic.com'])
+
+function isFirstPartyAnthropicBaseUrl(urlStr: string): boolean {
+  try {
+    const parsed = new URL(urlStr)
+    return FIRST_PARTY_API_HOSTS.has(parsed.hostname.toLowerCase())
+  } catch {
+    return false
+  }
+}
+
+/**
+ * #1782 / official `ce(env)` — returns true when an environment specifies a
+ * non-first-party LLM gateway via provider selection+endpoint pairs or a custom
+ * `ANTHROPIC_BASE_URL`.
+ */
+export function isShellExportedGatewayEnv(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined> | undefined,
+): boolean {
+  if (!env) return false
+  const selectedPairs = BG_ENDPOINT_GATEWAY_PAIRS.filter(
+    pair => pair.selection !== undefined && isEnvTruthy(env[pair.selection]),
+  )
+  if (selectedPairs.length > 0) {
+    return selectedPairs.every(pair => Boolean(env[pair.endpoint]))
+  }
+  const baseUrl = env.ANTHROPIC_BASE_URL
+  return Boolean(baseUrl) && !isFirstPartyAnthropicBaseUrl(baseUrl!)
+}
+
+/**
+ * #1782 / official `qkn()` — feature toggle for holding gateway-routed idle
+ * background sessions during CLI updates (defaults to true).
+ */
+export function isBgGatewayMarkEnabled(): boolean {
+  const raw = process.env.CLAUDE_CODE_DISABLE_BG_GATEWAY_MARK
+  if (raw && isEnvTruthy(raw)) return false
+  return true
 }

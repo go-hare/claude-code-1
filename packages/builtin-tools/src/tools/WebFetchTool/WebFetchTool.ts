@@ -166,6 +166,35 @@ export function extractCcrSiteAnswerErrorType(
   return undefined
 }
 
+const CLAUDE_AI_SHARE_HOSTS = new Set([
+  'claude.ai',
+  'www.claude.ai',
+  'preview.claude.ai',
+])
+const CLAUDE_AI_SHARE_PATH_RE =
+  /^\/share\/([0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12})\/?$/
+
+/**
+ * Official 325 `sDn` (#1755) — detect `https://claude.ai/share/<uuid>` links
+ * whose content is client-rendered in the browser and cannot be plain-fetched.
+ */
+export function parseClaudeAiShareUrl(
+  rawUrl: string,
+): { snapshotId: string } | null {
+  let parsed: URL
+  try {
+    parsed = new URL(rawUrl)
+  } catch {
+    return null
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null
+  if (!CLAUDE_AI_SHARE_HOSTS.has(parsed.hostname.replace(/\.$/, ''))) {
+    return null
+  }
+  const match = CLAUDE_AI_SHARE_PATH_RE.exec(parsed.pathname)?.[1]
+  return match === undefined ? null : { snapshotId: match.toLowerCase() }
+}
+
 export const WebFetchTool = Object.assign(
   buildTool({
     name: WEB_FETCH_TOOL_NAME,
@@ -343,6 +372,23 @@ export const WebFetchTool = Object.assign(
         }) !== null,
       )
       if (artifactFail) return artifactFail
+
+      // Official 325 #1755: claude.ai shared-chat URLs render in the browser;
+      // plain fetch only returns the app shell. Return Not Fetched guidance.
+      const sharedChat = parseClaudeAiShareUrl(url)
+      if (sharedChat !== null) {
+        const shareMessage = `https://claude.ai/share/${sharedChat.snapshotId} is a shared claude.ai chat. Its content is rendered in the browser, so it is not fetchable from here — a plain fetch returns only the claude.ai app shell. The user can paste or export the conversation instead.`
+        return {
+          data: {
+            bytes: Buffer.byteLength(shareMessage),
+            code: 0,
+            codeText: 'Not Fetched',
+            result: shareMessage,
+            durationMs: Date.now() - start,
+            url,
+          },
+        }
+      }
 
       // Select backend: settings.webFetchAdapter → default 'tavily'
       const settings = getSettings_DEPRECATED()

@@ -383,6 +383,30 @@ export async function generateSuggestion(
     canUseTool,
     querySource: 'prompt_suggestion',
     forkLabel: 'prompt_suggestion',
+    // Official 2.1.321 (#1909): cap at 1 turn and abort immediately when the
+    // model attempts a tool_use block so prompt suggestions never make extra API requests.
+    maxTurns: 1,
+    onMessage: msg => {
+      if (
+        msg.type === 'assistant' &&
+        Array.isArray(msg.message?.content) &&
+        msg.message.content.some(b => b.type === 'tool_use')
+      ) {
+        abortController.abort()
+        return
+      }
+      const rawMsg = msg as unknown as {
+        type?: string
+        event?: { type?: string; content_block?: { type?: string } }
+      }
+      if (
+        rawMsg.type === 'stream_event' &&
+        rawMsg.event?.type === 'content_block_start' &&
+        rawMsg.event.content_block?.type === 'tool_use'
+      ) {
+        abortController.abort()
+      }
+    },
     overrides: {
       abortController,
     },

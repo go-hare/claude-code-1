@@ -30,6 +30,7 @@ import {
 } from './settings/settings.js'
 import { jsonStringify } from './slowOperations.js'
 import { subprocessEnv } from './subprocessEnv.js'
+import { substitutePluginVariables } from './plugins/pluginOptionsStorage.js'
 
 /** densable cRb — command timeout (ms). */
 export const SUBAGENT_STATUS_LINE_TIMEOUT_MS = 5000
@@ -81,14 +82,70 @@ export type SubagentStatusLineInput = {
 }
 
 /**
+ * #1788: Substitute `${CLAUDE_PLUGIN_ROOT}` (and `${CLAUDE_PLUGIN_DATA}` when
+ * `pluginSource` is provided) in a plugin-provided `subagentStatusLine.command`.
+ */
+export function substituteSubagentStatusLineCommand(
+  command: string,
+  pluginRoot: string,
+  pluginSource?: string,
+): string {
+  return substitutePluginVariables(command, {
+    path: pluginRoot,
+    source: pluginSource,
+  })
+}
+
+/**
+ * #1788: Return plugin settings with `${CLAUDE_PLUGIN_ROOT}` substituted in
+ * `subagentStatusLine.command` when present.
+ */
+export function substitutePluginSubagentStatusLine(
+  settings: Record<string, unknown>,
+  plugin: { path: string; source?: string },
+): Record<string, unknown> {
+  const cfg = settings.subagentStatusLine
+  if (
+    cfg &&
+    typeof cfg === 'object' &&
+    (cfg as { type?: unknown }).type === 'command' &&
+    typeof (cfg as { command?: unknown }).command === 'string'
+  ) {
+    const record = cfg as { type: 'command'; command: string }
+    const substituted = substituteSubagentStatusLineCommand(
+      record.command,
+      plugin.path,
+      plugin.source,
+    )
+    if (substituted !== record.command) {
+      return {
+        ...settings,
+        subagentStatusLine: {
+          ...record,
+          command: substituted,
+        },
+      }
+    }
+  }
+  return settings
+}
+
+/**
  * densable vHa — resolve command string.
  * Managed-only mode reads policySettings; otherwise merged settings.
  */
-export function getSubagentStatusLineCommand(): string | undefined {
+export function getSubagentStatusLineCommand(
+  pluginRoot?: string,
+): string | undefined {
   const cfg = shouldAllowManagedHooksOnly()
     ? getSettingsForSource('policySettings')?.subagentStatusLine
     : getSettings_DEPRECATED()?.subagentStatusLine
-  return cfg?.type === 'command' ? cfg.command : undefined
+  if (cfg?.type !== 'command') {
+    return undefined
+  }
+  return pluginRoot
+    ? substituteSubagentStatusLineCommand(cfg.command, pluginRoot)
+    : cfg.command
 }
 
 /**

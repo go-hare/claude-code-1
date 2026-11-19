@@ -259,7 +259,8 @@ export function joinHandedBackPrompt(current: string, next: string): string {
  * densable mSe — slash name is the token before the first whitespace.
  */
 function slashCommandName(value: string): string {
-  const without = value.startsWith('/') ? value.slice(1) : value
+  const trimmed = value.trimStart()
+  const without = trimmed.startsWith('/') ? trimmed.slice(1) : trimmed
   const space = without.search(/\s/)
   return space === -1 ? without : without.slice(0, space)
 }
@@ -642,9 +643,9 @@ export async function handlePromptSubmit(
 
   // Handle local-jsx immediate commands (e.g., /config, /doctor)
   // Skip for remote bridge messages — slash commands from CCR clients are plain text
-  if (!skipSlashCommands && finalInput.trim().startsWith('/')) {
-    const trimmedInput = finalInput.trim()
-    const spaceIndex = trimmedInput.indexOf(' ')
+  if (!skipSlashCommands && finalInput.trimStart().startsWith('/')) {
+    const trimmedInput = finalInput.trimStart()
+    const spaceIndex = trimmedInput.search(/\s/)
     const commandName =
       spaceIndex === -1
         ? trimmedInput.slice(1)
@@ -767,7 +768,8 @@ export async function handlePromptSubmit(
 
     // densable Qo: prompt-mode and not a real slash.
     // kn=Qo&&jj()&&C$t(...) → drainOnly. bn=Qo&&!kn&&xt.isRunning&&turnId.
-    const isRealSlash = !skipSlashCommands && finalInput.trim().startsWith('/')
+    const isRealSlash =
+      !skipSlashCommands && finalInput.trimStart().startsWith('/')
     const promptMode = mode === 'prompt' && !isRealSlash
     const knPasted =
       pastedContents === undefined

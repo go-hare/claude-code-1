@@ -617,12 +617,30 @@ function isGrowthBookBlockedByProviderOrPrivacy(): boolean {
 }
 
 /**
+ * Official 2.1.319 `Ete()` (#1705): returns the env var disabling feature flags
+ * without turning off telemetry (`CLAUDE_CODE_DISABLE_FEATURE_FLAGS` or
+ * `DISABLE_GROWTHBOOK`), or `null` when feature flags are allowed.
+ */
+export function getFeatureFlagsDisabledEnvVar(
+  env: NodeJS.ProcessEnv = process.env,
+): 'CLAUDE_CODE_DISABLE_FEATURE_FLAGS' | 'DISABLE_GROWTHBOOK' | null {
+  if (isEnvTruthy(env.CLAUDE_CODE_DISABLE_FEATURE_FLAGS)) {
+    return 'CLAUDE_CODE_DISABLE_FEATURE_FLAGS'
+  }
+  if (isEnvTruthy(env.DISABLE_GROWTHBOOK)) {
+    return 'DISABLE_GROWTHBOOK'
+  }
+  return null
+}
+
+/**
  * densable KIt / __e — GrowthBook live evaluation gate.
- * `!DISABLE_GROWTHBOOK && !KJ()` (plus tip NODE_ENV=test via 1P logger).
- * Adapter URL must NOT bypass 3P / telemetry-off / DISABLE_GROWTHBOOK.
+ * `Ete() === null && !KJ()` (plus tip NODE_ENV=test via 1P logger).
+ * Adapter URL must NOT bypass 3P / telemetry-off / DISABLE_GROWTHBOOK /
+ * CLAUDE_CODE_DISABLE_FEATURE_FLAGS.
  */
 export function isGrowthBookEnabled(): boolean {
-  if (isEnvTruthy(process.env.DISABLE_GROWTHBOOK)) {
+  if (getFeatureFlagsDisabledEnvVar() !== null) {
     return false
   }
   // densable __e = !KJ

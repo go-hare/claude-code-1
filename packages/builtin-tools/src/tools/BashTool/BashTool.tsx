@@ -6,7 +6,12 @@ import { validateCoordinatorWriteAccess } from 'src/coordinator/writeGuard.js';
 import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js';
 import type { AppState } from 'src/state/AppState.js';
 import { z } from 'zod/v4';
-import { getKairosActive } from 'src/bootstrap/state.js';
+import { getIsNonInteractiveSession, getKairosActive } from 'src/bootstrap/state.js';
+import {
+  DEFAULT_BG_TIMEOUT_MAX_MS,
+  formatNonInteractiveBgTimeoutToolDescription,
+  resolveNonInteractiveBgTimeoutMs,
+} from 'src/QueryEngine.js';
 import { getCwd } from 'src/utils/cwd.js';
 import { TOOL_SUMMARY_MAX_LENGTH } from 'src/constants/toolLimits.js';
 import {
@@ -362,7 +367,9 @@ For commands that are harder to parse at a glance (piped commands, obscure flags
 - git reset --hard origin/main → "Discard all local changes and match remote main"
 - curl -s url | jq '.data[]' → "Fetch JSON from URL and extract data array elements"`),
     run_in_background: semanticBoolean(z.boolean().optional()).describe(
-      `Set to true to run this command in the background. Use Read to read the output later.`,
+      getIsNonInteractiveSession()
+        ? formatNonInteractiveBgTimeoutToolDescription({ isNonInteractive: true })
+        : 'Set to true to run this command in the background. Use Read to read the output later.',
     ),
     dangerouslyDisableSandbox: semanticBoolean(z.boolean().optional()).describe(
       'Set this to true to dangerously override sandbox mode and run commands without sandboxing.',
@@ -1697,20 +1704,34 @@ async function* runShellCommand({
 > {
   const { command, description, timeout, run_in_background } = input;
   // Official IDr + pSo (#1672): main agent clamps via env; async subagents cap at 180s across all providers.
+  // Official zln / URo (#1864): in non-interactive `-p` mode, explicit `run_in_background` defaults to
+  // 10 min (600,000 ms) bounded by DEFAULT_BG_TIMEOUT_MAX_MS (30 min).
   const shouldAutoBackground = !isBackgroundTasksDisabled && isAutobackgroundingAllowed(command);
-  const baseTimeoutMs = Math.min(timeout || getDefaultTimeoutMs(), getMaxTimeoutMs());
+  const isExplicitNonInteractiveBg =
+    run_in_background === true && !isBackgroundTasksDisabled && getIsNonInteractiveSession();
+  const bgTimeoutMs = isExplicitNonInteractiveBg
+    ? Math.min(
+        timeout ??
+          resolveNonInteractiveBgTimeoutMs({
+            isNonInteractive: true,
+          }),
+        DEFAULT_BG_TIMEOUT_MAX_MS,
+      )
+    : undefined;
+  const baseTimeoutMs = bgTimeoutMs ?? Math.min(timeout || getDefaultTimeoutMs(), getMaxTimeoutMs());
   const subagentCapMs = resolveSubagentAutoBackgroundCapMs({
     agentId,
     agentContext,
     innerCall,
   });
-  const timeoutMs =
-    clampTimeoutForAutoBackground({
-      requestedTimeoutMs: baseTimeoutMs,
-      isMainAgent: isMainThread === true,
-      canAutoBackground: shouldAutoBackground,
-      subagentCapMs,
-    }) ?? baseTimeoutMs;
+  const timeoutMs = isExplicitNonInteractiveBg
+    ? baseTimeoutMs
+    : (clampTimeoutForAutoBackground({
+        requestedTimeoutMs: baseTimeoutMs,
+        isMainAgent: isMainThread === true,
+        canAutoBackground: shouldAutoBackground,
+        subagentCapMs,
+      }) ?? baseTimeoutMs);
 
   let fullOutput = '';
   let lastProgressOutput = '';

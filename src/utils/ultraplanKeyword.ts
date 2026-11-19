@@ -8,7 +8,10 @@ import {
   REQUIRE_TRUSTED_DEVICES,
 } from '../cli/leftoverTulip.js'
 import { parseReferences } from '../history.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import {
+  getFeatureFlagsDisabledEnvVar,
+  getFeatureValue_CACHED_MAY_BE_STALE,
+} from '../services/analytics/growthbook.js'
 import {
   getClaudeAIOAuthTokens,
   getOauthAccountInfo,
@@ -339,11 +342,16 @@ function isGrowthBookEvalIneligible(): boolean {
 }
 
 /**
- * densable `th` — `!DISABLE_GROWTHBOOK && Kz()`; `Kz=!Ih`.
- * JS-truthy `DISABLE_GROWTHBOOK` (including `"0"`).
+ * densable `th` — `Ete() === null && Kz()`; `Kz=!Ih`.
+ * Honors both `CLAUDE_CODE_DISABLE_FEATURE_FLAGS` (#1705) and `DISABLE_GROWTHBOOK`.
  */
 function isGrowthBookLive(): boolean {
-  if (process.env.DISABLE_GROWTHBOOK) return false
+  if (
+    getFeatureFlagsDisabledEnvVar() !== null ||
+    process.env.DISABLE_GROWTHBOOK
+  ) {
+    return false
+  }
   return !isGrowthBookEvalIneligible()
 }
 
@@ -379,7 +387,13 @@ function isRequireTrustedDevicesBlocking(): boolean {
  * `JXo`, `!S2`, `!p()`, missing `organizationUuid`, `z()`.
  */
 function isCcrSubscriptionRollout(): boolean {
-  if (isGrowthBookLive() || process.env.DISABLE_GROWTHBOOK) return false
+  if (
+    isGrowthBookLive() ||
+    getFeatureFlagsDisabledEnvVar() !== null ||
+    process.env.DISABLE_GROWTHBOOK
+  ) {
+    return false
+  }
   if (getPrivacyLevel() !== 'no-telemetry') return false
   if (isNonFirstPartyOrCustomOauthSurface()) return false
   if (!isFirstPartyCcrSurface()) return false

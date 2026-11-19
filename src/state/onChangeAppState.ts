@@ -1,4 +1,7 @@
+import { isDeepStrictEqual } from 'util'
 import { setMainLoopModelOverride } from '../bootstrap/state.js'
+import { logForDiagnosticsNoPII } from '../utils/diagLogs.js'
+import type { ToolPermissionContext } from '../Tool.js'
 import {
   clearApiKeyHelperCache,
   clearAwsCredentialsCache,
@@ -171,6 +174,238 @@ function backgroundTasksMembershipChanged(
   return next.some((t, i) => t.task_id !== prev[i]?.task_id)
 }
 
+// ---------------------------------------------------------------------------
+// #1771 & #1816 — `ccr_kept_session_rules`
+// Persist session-scoped deny/ask/allow rules in CCR internal metadata;
+// drop allow rules whenever deny/ask rules cannot all be kept whole.
+// Official `B` / `D` / `ARi` / `F` / `M` / `P` / `O` (X=32768, Q=512).
+// ---------------------------------------------------------------------------
+
+export const CCR_SESSION_RULES_MAX_BYTES = 32_768
+export const CCR_SESSION_RULE_MAX_LEN = 512
+
+export type CcrSessionRulesRecord = {
+  session_allow_rules: string[] | null
+  session_deny_rules: string[] | null
+  session_ask_rules: string[] | null
+}
+
+let ccrKeepsSessionRules: boolean | undefined
+
+export function setCcrKeepsSessionRules(value: boolean | undefined): void {
+  ccrKeepsSessionRules = value
+}
+
+export function getCcrKeepsSessionRules(): boolean | undefined {
+  return ccrKeepsSessionRules
+}
+
+function isValidSessionRuleString(rule: unknown): rule is string {
+  if (
+    typeof rule !== 'string' ||
+    rule.length === 0 ||
+    rule.length > CCR_SESSION_RULE_MAX_LEN ||
+    /[\p{C}\p{Zl}\p{Zp}`]/u.test(rule)
+  ) {
+    return false
+  }
+  const parenIdx = rule.indexOf('(')
+  const toolName = parenIdx === -1 ? rule : rule.slice(0, parenIdx)
+  return /^[\w.*-]+$/.test(toolName)
+}
+
+function dedupKeepLast(rules: readonly string[]): string[] {
+  const seen = new Set<string>()
+  const reversed: string[] = []
+  for (let i = rules.length - 1; i >= 0; i--) {
+    const r = rules[i]!
+    if (!seen.has(r)) {
+      seen.add(r)
+      reversed.push(r)
+    }
+  }
+  return reversed.reverse()
+}
+
+function capRulesToByteBudget(
+  rules: readonly string[],
+  maxBytes = CCR_SESSION_RULES_MAX_BYTES,
+): string[] {
+  let bytes = 1
+  const out: string[] = []
+  for (const r of rules) {
+    bytes += Buffer.byteLength(JSON.stringify(r)) + 1
+    if (bytes > maxBytes) break
+    out.push(r)
+  }
+  return out
+}
+
+function sanitizeDenyOrAskSessionRules(raw: unknown): {
+  rules: string[]
+  whole: boolean
+} {
+  const arr = Array.isArray(raw) ? raw : []
+  const valid = arr.filter(isValidSessionRuleString)
+  const deduped = dedupKeepLast(valid)
+  const capped = capRulesToByteBudget(deduped)
+  const whole =
+    (Array.isArray(raw) || raw === undefined || raw === null) &&
+    valid.length === arr.length &&
+    capped.length === deduped.length
+  return { rules: capped, whole }
+}
+
+function sanitizeAllowSessionRules(
+  raw: unknown,
+  denyAndAskWhole: boolean,
+): { rules: string[]; whole: boolean } {
+  const arr = Array.isArray(raw) ? raw : []
+  const filtered = dedupKeepLast(
+    arr.filter(
+      (r): r is string =>
+        typeof r === 'string' && r.length > 0 && !r.startsWith('mcp__'),
+    ),
+  )
+  const capped = capRulesToByteBudget(filtered)
+  if (denyAndAskWhole && capped.length === filtered.length) {
+    return { rules: capped, whole: true }
+  }
+  // #1816: Drop session allow rules when deny/ask cannot all be kept whole
+  // (or allow list itself overflows the byte cap).
+  return { rules: [], whole: false }
+}
+
+/**
+ * #1771 & #1816 / official `O(toolPermissionContext)` — serialize session-scoped
+ * allow/deny/ask rules into a CCR internal-metadata record.
+ */
+export function buildCcrSessionRulesRecord(
+  ctx: Pick<
+    ToolPermissionContext,
+    'alwaysAllowRules' | 'alwaysDenyRules' | 'alwaysAskRules'
+  >,
+  excludeAllowRules: ReadonlySet<string> = new Set(),
+): { record: CcrSessionRulesRecord; whole: boolean } {
+  const deny = sanitizeDenyOrAskSessionRules(ctx.alwaysDenyRules.session)
+  const ask = sanitizeDenyOrAskSessionRules(ctx.alwaysAskRules.session)
+  const rawAllow = (ctx.alwaysAllowRules.session ?? []).filter(
+    r => !excludeAllowRules.has(r),
+  )
+  const allow = sanitizeAllowSessionRules(rawAllow, deny.whole && ask.whole)
+  return {
+    record: {
+      session_allow_rules: allow.rules.length > 0 ? allow.rules : null,
+      session_deny_rules: deny.rules.length > 0 ? deny.rules : null,
+      session_ask_rules: ask.rules.length > 0 ? ask.rules : null,
+    },
+    whole: allow.whole,
+  }
+}
+
+/**
+ * #1771 & #1816 / official `D(internalRecord)` — restore persisted session-scoped
+ * deny/ask/allow rules onto a `ToolPermissionContext`. Drops `session_allow_rules`
+ * whenever `session_deny_rules` or `session_ask_rules` cannot all be kept whole.
+ */
+export function restoreCcrSessionRules(
+  internal: Partial<CcrSessionRulesRecord> | null | undefined,
+): (ctx: ToolPermissionContext) => ToolPermissionContext {
+  if (!internal) return ctx => ctx
+  const deny = sanitizeDenyOrAskSessionRules(internal.session_deny_rules)
+  const ask = sanitizeDenyOrAskSessionRules(internal.session_ask_rules)
+  const allow = sanitizeAllowSessionRules(
+    internal.session_allow_rules,
+    deny.whole && ask.whole,
+  )
+  if (!allow.whole) {
+    logForDiagnosticsNoPII('warn', 'ccr_kept_session_rules', {
+      reason: 'lists_not_restored_whole',
+    })
+  }
+  if (allow.rules.length + deny.rules.length + ask.rules.length === 0) {
+    return ctx => ctx
+  }
+  if (deny.rules.length + ask.rules.length > 0) {
+    logForDiagnosticsNoPII('info', 'ccr_kept_session_rules', {
+      count: deny.rules.length + ask.rules.length,
+    })
+  }
+  return ctx => ({
+    ...ctx,
+    ...(allow.rules.length > 0
+      ? {
+          alwaysAllowRules: {
+            ...ctx.alwaysAllowRules,
+            session: dedupKeepLast([
+              ...allow.rules,
+              ...(ctx.alwaysAllowRules.session ?? []),
+            ]),
+          },
+        }
+      : {}),
+    ...(deny.rules.length > 0
+      ? {
+          alwaysDenyRules: {
+            ...ctx.alwaysDenyRules,
+            session: dedupKeepLast([
+              ...deny.rules,
+              ...(ctx.alwaysDenyRules.session ?? []),
+            ]),
+          },
+        }
+      : {}),
+    ...(ask.rules.length > 0
+      ? {
+          alwaysAskRules: {
+            ...ctx.alwaysAskRules,
+            session: dedupKeepLast([
+              ...ask.rules,
+              ...(ctx.alwaysAskRules.session ?? []),
+            ]),
+          },
+        }
+      : {}),
+  })
+}
+
+/**
+ * #1771 & #1816 / official `ARi` — verify restored worker state matches the
+ * restored session rules and latch `keepsSessionRules` before allowing writes.
+ */
+export function evaluateCcrKeepsSessionRules(
+  restored: {
+    readFailed?: boolean
+    internal?: Partial<CcrSessionRulesRecord>
+  } | null,
+  ctx: Pick<
+    ToolPermissionContext,
+    'alwaysAllowRules' | 'alwaysDenyRules' | 'alwaysAskRules'
+  >,
+): boolean {
+  const allowSet = new Set(ctx.alwaysAllowRules.session ?? [])
+  const denySet = new Set(ctx.alwaysDenyRules.session ?? [])
+  const askSet = new Set(ctx.alwaysAskRules.session ?? [])
+  const deny = sanitizeDenyOrAskSessionRules(
+    restored?.internal?.session_deny_rules,
+  )
+  const ask = sanitizeDenyOrAskSessionRules(
+    restored?.internal?.session_ask_rules,
+  )
+  const allow = sanitizeAllowSessionRules(
+    restored?.internal?.session_allow_rules,
+    deny.whole && ask.whole,
+  )
+  const keeps =
+    restored !== null &&
+    restored.readFailed !== true &&
+    deny.rules.every(r => denySet.has(r)) &&
+    ask.rules.every(r => askSet.has(r)) &&
+    allow.rules.every(r => allowSet.has(r))
+  setCcrKeepsSessionRules(keeps)
+  return keeps
+}
+
 // Inverse of the push below — restore on worker restart.
 export function externalMetadataToAppState(
   metadata: SessionExternalMetadata,
@@ -246,6 +481,38 @@ export function onChangeAppState({
       }
     }
     notifyPermissionModeChanged(newMode)
+  }
+
+  // #1771 & #1816 / official `B(oldCtx, newCtx)` — sync session-scoped
+  // deny/ask/allow rules to CCR internal metadata when they change.
+  const oldCtx = oldState.toolPermissionContext
+  const newCtx = newState.toolPermissionContext
+  if (
+    oldCtx.alwaysAllowRules.session !== newCtx.alwaysAllowRules.session ||
+    oldCtx.alwaysDenyRules.session !== newCtx.alwaysDenyRules.session ||
+    oldCtx.alwaysAskRules.session !== newCtx.alwaysAskRules.session
+  ) {
+    const { record, whole } = buildCcrSessionRulesRecord(newCtx)
+    const unchanged = isDeepStrictEqual(
+      record,
+      buildCcrSessionRulesRecord(oldCtx).record,
+    )
+    if (ccrKeepsSessionRules !== true) {
+      if (ccrKeepsSessionRules === false && !unchanged) {
+        logForDiagnosticsNoPII('warn', 'ccr_kept_session_rules', {
+          reason: 'write_held_record_not_restored',
+        })
+      }
+    } else {
+      if (!whole) {
+        logForDiagnosticsNoPII('warn', 'ccr_kept_session_rules', {
+          reason: 'lists_not_written_whole',
+        })
+      }
+      if (!unchanged) {
+        notifyInternalMetadataChanged(record)
+      }
+    }
   }
 
   // densable 2.1.211 JNe / 2.1.289: e.tasks!==t.tasks →

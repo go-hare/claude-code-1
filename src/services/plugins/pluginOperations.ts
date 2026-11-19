@@ -11,7 +11,8 @@
  * - Return result objects indicating success/failure with messages
  * - Can throw errors for unexpected failures
  */
-import { dirname, join } from 'path'
+import { dirname, isAbsolute, join, relative, sep } from 'path'
+import { lstat, readdir, realpath } from 'fs/promises'
 import { getOriginalCwd } from '../../bootstrap/state.js'
 import { isBuiltinPluginId } from '../../plugins/builtinPlugins.js'
 import type { LoadedPlugin, PluginManifest } from '../../types/plugin.js'
@@ -25,6 +26,8 @@ import {
 import {
   findReverseDependents,
   formatReverseDependentsSuffix,
+  qualifyDependency,
+  resolveDependencyClosure,
 } from '../../utils/plugins/dependencyResolver.js'
 import { denyCommandProducerDir } from '../../utils/plugins/commandProducerDirs.js'
 import { re } from '../../utils/plugins/escapeSafeText.js'
@@ -213,10 +216,16 @@ export type PluginUpdateResult = {
   scope?: PluginScope
   /** SEA `ggw` — autoupdate treats this as skip, not fail. */
   skipReason?: 'entry_helper_deferred'
-  /** densable vun — cwe.failureCode or command_source_refused. */
+  /** densable vun — cwe.failureCode or command_source_refused, or #1749/#1789 dependency failure codes. */
   failureCode?: string
   /** Official `folderNote` — note for folder-sourced plugins on update. */
   folderNote?: string
+  /** #1749/#1789: Newly added dependencies installed during update. */
+  installedDependencies?: string[]
+  /** #1749/#1789: Human-readable note appended for post-update dependency resolution. */
+  dependencyNote?: string
+  /** #1749/#1789: True if any post-update dependency could not be resolved/installed. */
+  dependenciesUnresolved?: boolean
 }
 
 // ============================================================================
@@ -1302,6 +1311,244 @@ export async function updatePluginOp(
 }
 
 /**
+ * #1749/#1789: Verify no symlink inside an installed plugin/dependency root
+ * resolves outside that root.
+ */
+export async function screenPluginDirectorySymlinks(
+  rootDir: string,
+): Promise<void> {
+  const canonicalRoot = await realpath(rootDir)
+  const queue = [canonicalRoot]
+  while (queue.length > 0) {
+    const dir = queue.pop()!
+    let entries
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      const fullPath = join(dir, entry.name)
+      const st = await lstat(fullPath)
+      if (st.isSymbolicLink()) {
+        const target = await realpath(fullPath)
+        const rel = relative(canonicalRoot, target)
+        if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+          throw new Error(
+            `Symlink "${entry.name}" points outside plugin root "${canonicalRoot}"`,
+          )
+        }
+      } else if (st.isDirectory()) {
+        queue.push(fullPath)
+      }
+    }
+  }
+}
+
+export type PostUpdateDependencyInstallResult =
+  | {
+      ok: true
+      installedDependencies: string[]
+      suffix: string
+    }
+  | {
+      ok: false
+      failureCode: 'dependencies_not_installed' | 'dependencies_not_screened'
+      message: string
+      installedDependencies: string[]
+    }
+
+function extractManifestDependencyNames(
+  manifest: PluginManifest | undefined,
+  entry: PluginMarketplaceEntry | undefined,
+): string[] {
+  const raw = [
+    ...((manifest as { dependencies?: unknown } | undefined)?.dependencies &&
+    Array.isArray((manifest as { dependencies?: unknown }).dependencies)
+      ? ((manifest as { dependencies: unknown[] }).dependencies ?? [])
+      : []),
+    ...((entry as { dependencies?: unknown } | undefined)?.dependencies &&
+    Array.isArray((entry as { dependencies?: unknown }).dependencies)
+      ? ((entry as { dependencies: unknown[] }).dependencies ?? [])
+      : []),
+  ]
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    const name =
+      typeof item === 'string'
+        ? item
+        : typeof item === 'object' &&
+            item !== null &&
+            typeof (item as { name?: unknown }).name === 'string'
+          ? (item as { name: string }).name
+          : undefined
+    if (name && !seen.has(name)) {
+      seen.add(name)
+      out.push(name)
+    }
+  }
+  return out
+}
+
+/**
+ * #1749 & #1789: After updating a plugin, resolve any `dependencies` declared
+ * by the updated plugin version and install any that are not yet installed at
+ * the target scope. Returns typed `dependencies_not_installed` or
+ * `dependencies_not_screened` failure codes on install or screening errors.
+ */
+export async function resolveAndInstallUpdatedPluginDependencies(opts: {
+  pluginId: string
+  pluginName: string
+  versionedPath: string
+  scope: PluginScope
+  projectPath: string | undefined
+  entry?: PluginMarketplaceEntry
+  manifest?: PluginManifest
+  /** Injectable test seams */
+  lookupDependency?: (
+    depId: string,
+  ) => Promise<{ dependencies?: string[] } | null>
+  isInstalledAtScope?: (depId: string) => boolean
+  installDependency?: (
+    depId: string,
+    scope: InstallableScope,
+  ) => Promise<{ success: boolean; message: string; installPath?: string }>
+  screenDependency?: (installPath: string, depId: string) => Promise<void>
+}): Promise<PostUpdateDependencyInstallResult> {
+  let manifest = opts.manifest
+  if (!manifest) {
+    try {
+      manifest = await loadPluginManifest(
+        join(opts.versionedPath, '.claude-plugin', 'plugin.json'),
+        opts.pluginName,
+        opts.pluginId,
+      )
+    } catch {
+      // Manifest is optional for directory/legacy plugins
+    }
+  }
+
+  const directDeps = extractManifestDependencyNames(manifest, opts.entry)
+  if (directDeps.length === 0) {
+    return { ok: true, installedDependencies: [], suffix: '' }
+  }
+
+  const lookup =
+    opts.lookupDependency ??
+    (async (depId: string) => {
+      if (depId === opts.pluginId) {
+        return { dependencies: directDeps }
+      }
+      const info = await getPluginById(depId).catch(() => null)
+      if (!info) return null
+      return {
+        dependencies: extractManifestDependencyNames(undefined, info.entry),
+      }
+    })
+
+  const resolution = await resolveDependencyClosure(
+    opts.pluginId,
+    lookup,
+    new Set(),
+  )
+  const orderedDeps = resolution.ok
+    ? resolution.closure.filter(id => id !== opts.pluginId)
+    : directDeps
+        .map(dep => qualifyDependency(dep, opts.pluginId))
+        .filter(id => id !== opts.pluginId)
+
+  const diskData = loadInstalledPluginsFromDisk()
+  const isInstalled =
+    opts.isInstalledAtScope ??
+    ((depId: string) => {
+      const records = diskData.plugins[depId]
+      if (!records || records.length === 0) return false
+      return records.some(
+        r =>
+          r.scope === 'user' ||
+          r.scope === 'managed' ||
+          (r.scope === opts.scope && r.projectPath === opts.projectPath),
+      )
+    })
+
+  const missingDeps = orderedDeps.filter(depId => !isInstalled(depId))
+  if (missingDeps.length === 0) {
+    return { ok: true, installedDependencies: [], suffix: '' }
+  }
+
+  const targetScope: InstallableScope = isInstallableScope(opts.scope)
+    ? opts.scope
+    : 'user'
+  const scopeDesc = opts.projectPath
+    ? `${opts.scope} (${opts.projectPath})`
+    : opts.scope
+  const installDep =
+    opts.installDependency ??
+    (async (depId: string, scope: InstallableScope) => {
+      const res = await installPluginOp(depId, scope)
+      const refreshed = loadInstalledPluginsFromDisk()
+      const inst = refreshed.plugins[depId]?.find(
+        r => r.scope === scope && r.projectPath === opts.projectPath,
+      )
+      return {
+        success: res.success,
+        message: res.message,
+        installPath: inst?.installPath,
+      }
+    })
+  const screenDep =
+    opts.screenDependency ??
+    (async (installPath: string) => {
+      await screenPluginDirectorySymlinks(installPath)
+    })
+
+  const installed: string[] = []
+  for (const depId of missingDeps) {
+    let installRes: { success: boolean; message: string; installPath?: string }
+    try {
+      installRes = await installDep(depId, targetScope)
+    } catch (err) {
+      const cause = err instanceof Error ? err.message : String(err)
+      return {
+        ok: false,
+        failureCode: 'dependencies_not_installed',
+        message: `Could not install the packages that "${opts.pluginName}" lists for scope ${scopeDesc}, so parts of it may not work. Updating it again retries the install. Cause: ${cause}`,
+        installedDependencies: installed,
+      }
+    }
+    if (!installRes.success) {
+      return {
+        ok: false,
+        failureCode: 'dependencies_not_installed',
+        message: `Could not install the packages that "${opts.pluginName}" lists for scope ${scopeDesc}, so parts of it may not work. Updating it again retries the install.${installRes.message ? ` Cause: ${installRes.message}` : ''}`,
+        installedDependencies: installed,
+      }
+    }
+    if (installRes.installPath) {
+      try {
+        await screenDep(installRes.installPath, depId)
+      } catch (err) {
+        const cause = err instanceof Error ? err.message : String(err)
+        return {
+          ok: false,
+          failureCode: 'dependencies_not_screened',
+          message: `Installed the packages that "${opts.pluginName}" lists for scope ${scopeDesc}, but could not finish checking them for links that lead outside the plugin. Cause: ${cause}`,
+          installedDependencies: installed,
+        }
+      }
+    }
+    installed.push(depId)
+  }
+
+  const suffix =
+    installed.length > 0
+      ? ` Also installed ${installed.length === 1 ? 'dependency' : 'dependencies'}: ${installed.join(', ')}.`
+      : ''
+  return { ok: true, installedDependencies: installed, suffix }
+}
+
+/**
  * Perform the actual plugin update: fetch source, calculate version, copy to cache, update disk.
  * This is the core update execution extracted from updatePluginOp.
  * densable R0v: command sources get announce/ptm → shown consent, else recorded sourceCommand.
@@ -1623,6 +1870,46 @@ async function performPluginUpdate({
       installation.installPath === zipPath
     if (isUpToDate) {
       const isFolderSource = typeof entry.source === 'string'
+      const depCheck =
+        options?.explicit === true
+          ? await resolveAndInstallUpdatedPluginDependencies({
+              pluginId,
+              pluginName,
+              versionedPath: installation.installPath,
+              scope,
+              projectPath,
+              entry,
+            })
+          : {
+              ok: true as const,
+              installedDependencies: [] as string[],
+              suffix: '',
+            }
+      if (!depCheck.ok) {
+        return {
+          success: false,
+          message: depCheck.message,
+          pluginId,
+          newVersion,
+          oldVersion,
+          scope,
+          failureCode: depCheck.failureCode,
+          installedDependencies: depCheck.installedDependencies,
+          dependenciesUnresolved: true,
+        }
+      }
+      if (depCheck.installedDependencies.length > 0) {
+        return {
+          success: true,
+          message: `Installed the packages that "${pluginName}" lists for scope ${projectPath ? `${scope} (${projectPath})` : scope}. Restart to apply changes.${depCheck.suffix}`,
+          pluginId,
+          newVersion,
+          oldVersion,
+          scope,
+          installedDependencies: depCheck.installedDependencies,
+          dependencyNote: depCheck.suffix,
+        }
+      }
       return {
         success: true,
         message: `${pluginName} is already at the latest version (${newVersion}).`,
@@ -1706,8 +1993,31 @@ async function performPluginUpdate({
       }
     }
 
+    // #1749 & #1789: Resolve and install any dependencies added by the new version
+    const depResult = await resolveAndInstallUpdatedPluginDependencies({
+      pluginId,
+      pluginName,
+      versionedPath,
+      scope,
+      projectPath,
+      entry,
+    })
+    if (!depResult.ok) {
+      return {
+        success: false,
+        message: depResult.message,
+        pluginId,
+        newVersion,
+        oldVersion,
+        scope,
+        failureCode: depResult.failureCode,
+        installedDependencies: depResult.installedDependencies,
+        dependenciesUnresolved: true,
+      }
+    }
+
     const scopeDesc = projectPath ? `${scope} (${projectPath})` : scope
-    const message = `Plugin "${pluginName}" updated from ${oldVersion || 'unknown'} to ${newVersion} for scope ${scopeDesc}. Restart to apply changes.`
+    const message = `Plugin "${pluginName}" updated from ${oldVersion || 'unknown'} to ${newVersion} for scope ${scopeDesc}. Restart to apply changes.${depResult.suffix}`
 
     return {
       success: true,
@@ -1716,6 +2026,10 @@ async function performPluginUpdate({
       newVersion,
       oldVersion,
       scope,
+      ...(depResult.installedDependencies.length > 0 && {
+        installedDependencies: depResult.installedDependencies,
+        dependencyNote: depResult.suffix,
+      }),
     }
   } finally {
     // Clean up temp source if it was a remote download

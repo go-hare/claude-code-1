@@ -37,8 +37,6 @@ const UNOFFICIAL_HOSTED_INVENTIONS = [
   'list_types',
   'describe_type',
   'copy_from',
-  'read_db',
-  'write_db',
   'type_url',
   'capabilities',
 ] as const

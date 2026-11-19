@@ -850,8 +850,8 @@ export async function preserveGitStateForIssue(): Promise<PreservedGitState | nu
     if (await isShallowClone()) {
       logForDebugging('Shallow clone detected, using HEAD-only mode for issue')
       const [{ stdout: patch }, untrackedFiles] = await Promise.all([
-        // densable rqi: diff ...gnr HEAD
-        execGit(['diff', ...RAW_GIT_DIFF_FLAGS, 'HEAD']),
+        // densable rqi: diff ...gnr HEAD --
+        execGit(['diff', ...RAW_GIT_DIFF_FLAGS, 'HEAD', '--']),
         captureUntrackedFiles(),
       ])
       return {
@@ -872,8 +872,8 @@ export async function preserveGitStateForIssue(): Promise<PreservedGitState | nu
       // No remote found - use HEAD-only mode
       logForDebugging('No remote found, using HEAD-only mode for issue')
       const [{ stdout: patch }, untrackedFiles] = await Promise.all([
-        // densable rqi: diff ...gnr HEAD
-        execGit(['diff', ...RAW_GIT_DIFF_FLAGS, 'HEAD']),
+        // densable rqi: diff ...gnr HEAD --
+        execGit(['diff', ...RAW_GIT_DIFF_FLAGS, 'HEAD', '--']),
         captureUntrackedFiles(),
       ])
       return {
@@ -898,8 +898,8 @@ export async function preserveGitStateForIssue(): Promise<PreservedGitState | nu
       // Merge-base failed - fall back to HEAD-only
       logForDebugging('Merge-base failed, using HEAD-only mode for issue')
       const [{ stdout: patch }, untrackedFiles] = await Promise.all([
-        // densable rqi: diff ...gnr HEAD
-        execGit(['diff', ...RAW_GIT_DIFF_FLAGS, 'HEAD']),
+        // densable rqi: diff ...gnr HEAD --
+        execGit(['diff', ...RAW_GIT_DIFF_FLAGS, 'HEAD', '--']),
         captureUntrackedFiles(),
       ])
       return {

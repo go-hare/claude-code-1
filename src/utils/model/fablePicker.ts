@@ -43,7 +43,7 @@ export const FABLE_SLOGAN =
 
 /** Official URa descriptionForModel. */
 export const FABLE_DESCRIPTION_FOR_MODEL =
-  'Fable 5 - most capable for your hardest and longest-running tasks'
+  'Fable 5.2 - most capable for your hardest and longest-running tasks'
 
 /** Minimal option shape — avoid a cycle with modelOptions.ts. */
 export type FablePickerOption = {
@@ -66,7 +66,7 @@ export function isFablePickerRowValue(value: string): boolean {
   if (value === 'fable' || value === 'fable[1m]') {
     return true
   }
-  return /(?:^|[./])claude-fable-5(?:[-@]\d{8})?(?:-v\d+(?::\d+)?)?(?:\[[12]m\])?$/i.test(
+  return /(?:^|[./])claude-fable-5(?:-[12])?(?:[-@]\d{8})?(?:-v\d+(?::\d+)?)?(?:\[[12]m\])?$/i.test(
     value,
   )
 }
@@ -138,11 +138,11 @@ export function isAnthropicAwsFamilyProvider(
   return provider === 'anthropicAws' || provider === 'anthropicGoogleCloud'
 }
 
-/** Official A1e("fable5"). */
+/** Official A1e("fable52") (#1845). */
 export function isFable5AvailableOnProvider(
   provider: APIProvider = getAPIProvider(),
 ): boolean {
-  const config = ALL_MODEL_CONFIGS.fable5
+  const config = ALL_MODEL_CONFIGS.fable52
   if (config[provider] != null) {
     return true
   }
@@ -155,12 +155,12 @@ export function isFable5AvailableOnProvider(
 
 function fable5IdFor(provider: APIProvider): string {
   if (provider === getAPIProvider()) {
-    return getModelStrings().fable5
+    return getModelStrings().fable52
   }
-  return ALL_MODEL_CONFIGS.fable5[provider]
+  return ALL_MODEL_CONFIGS.fable52[provider]
 }
 
-/** Official URa. */
+/** Official URa (#1845: Fable 5.2 default). */
 export function getFable5Option(
   provider: APIProvider = getAPIProvider(),
 ): FablePickerOption {
@@ -168,8 +168,9 @@ export function getFable5Option(
   return {
     value: useConcreteId ? fable5IdFor(provider) : 'fable',
     label: 'Fable',
-    description: `Fable 5 · ${FABLE_SLOGAN}${getFableCreditsSuffix()}`,
-    descriptionForModel: FABLE_DESCRIPTION_FOR_MODEL,
+    description: `Fable 5.2 · ${FABLE_SLOGAN}${getFableCreditsSuffix()}`,
+    descriptionForModel:
+      'Fable 5.2 - most capable for your hardest and longest-running tasks',
   }
 }
 
@@ -302,7 +303,7 @@ export function maybeInsertFablePickerRow<T extends FablePickerOption>(
   }
   const provider = deps.provider ?? getAPIProvider()
   const custom = getCustomFableOption(provider)
-  if (isAnthropicStyleApiProvider(provider) && provider !== 'gateway') {
+  if (isAnthropicStyleApiProvider(provider)) {
     if (custom) {
       insertFablePickerOption(options, custom as T, deps.insertDeps)
     } else if (

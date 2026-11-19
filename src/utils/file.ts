@@ -1,4 +1,12 @@
-import { chmodSync, writeFileSync as fsWriteFileSync } from 'fs'
+import {
+  chmodSync,
+  closeSync,
+  constants as fsConstants,
+  fstatSync,
+  writeFileSync as fsWriteFileSync,
+  openSync,
+  readFileSync,
+} from 'fs'
 import { realpath, stat } from 'fs/promises'
 import { homedir } from 'os'
 import {
@@ -15,7 +23,7 @@ import {
 import { logEvent } from 'src/services/analytics/index.js'
 import { getCwd } from '../utils/cwd.js'
 import { logForDebugging } from './debug.js'
-import { isENOENT, isFsInaccessible } from './errors.js'
+import { getErrnoCode, isENOENT, isFsInaccessible } from './errors.js'
 import {
   detectEncodingForResolvedPath,
   detectLineEndingsForString,
@@ -26,7 +34,7 @@ import { getFsImplementation, safeResolvePath } from './fsOperations.js'
 import { logError } from './log.js'
 import { expandPath } from './path.js'
 import { getPlatform } from './platform.js'
-import { renameSyncWithRetry } from './renameRetry.js'
+import { renameSyncWithAdaptiveRetry } from './renameRetry.js'
 
 export type File = {
   filename: string
@@ -408,6 +416,65 @@ export function readFileSyncCached(filePath: string): string {
  * @deprecated Use `fs.promises.writeFile` with flush option instead for non-blocking writes.
  * Sync file writes block the event loop and cause performance issues.
  */
+/**
+ * Official 2.1.319 #1739 (`Sli` / `Ie` / `ut`):
+ * Snapshot an existing regular file (<= 64 MiB) before falling back to an
+ * in-place write, and restore it if the write fails with a disk-full or I/O
+ * error (`ENOSPC`, `EIO`, `EDQUOT`, `EFBIG`) so `~/.claude.json`, settings,
+ * and edited files are never left empty or truncated.
+ */
+export const DISK_FULL_ROLLBACK_CODES = new Set([
+  'ENOSPC',
+  'EIO',
+  'EDQUOT',
+  'EFBIG',
+])
+const INPLACE_SNAPSHOT_MAX_BYTES = 64 * 1024 * 1024 // 64 MiB (`Qer`)
+
+function snapshotRegularFileForRollback(
+  targetPath: string,
+): { bytes: Buffer; mode: number } | null {
+  let fd: number | undefined
+  try {
+    const flags =
+      fsConstants.O_RDONLY |
+      (fsConstants.O_NONBLOCK ?? 0) |
+      (fsConstants.O_NOFOLLOW ?? 0)
+    fd = openSync(targetPath, flags)
+    const st = fstatSync(fd)
+    if (!st.isFile() || st.size > INPLACE_SNAPSHOT_MAX_BYTES) return null
+    const bytes = readFileSync(fd)
+    return { bytes, mode: st.mode & 0o7777 }
+  } catch {
+    return null
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd)
+      } catch {
+        // ignore close errors
+      }
+    }
+  }
+}
+
+function restoreRollbackSnapshot(
+  targetPath: string,
+  snapshot: { bytes: Buffer; mode: number },
+): boolean {
+  try {
+    fsWriteFileSync(targetPath, snapshot.bytes, { flush: true })
+    try {
+      chmodSync(targetPath, snapshot.mode)
+    } catch {
+      // ignore chmod errors during rollback
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function writeFileSyncAndFlush_DEPRECATED(
   filePath: string,
   content: string,
@@ -480,10 +547,9 @@ export function writeFileSyncAndFlush_DEPRECATED(
       logForDebugging(`Applied original permissions to temp file`)
     }
 
-    // densable 2.1.234 #51 / fIs — rename with transient retry + RO fail-fast
-    // (Windows RO ~/.claude.json must not stall on infinite EPERM retries)
+    // densable 2.1.234 #51 + 2.1.319 #1792 (`yli`) — adaptive rename retry
     logForDebugging(`Renaming ${tempPath} to ${targetPath}`)
-    renameSyncWithRetry(tempPath, targetPath, (from, to) =>
+    renameSyncWithAdaptiveRetry(tempPath, targetPath, (from, to) =>
       fs.renameSync(from, to),
     )
     logForDebugging(`File ${targetPath} written atomically`)
@@ -501,7 +567,12 @@ export function writeFileSyncAndFlush_DEPRECATED(
       logForDebugging(`Failed to clean up temp file: ${cleanupError}`)
     }
 
-    // Fallback to non-atomic write
+    // Fallback to non-atomic in-place write.
+    // Official 2.1.319 #1739: snapshot existing regular file before truncating
+    // in-place, and roll back if the write fails with ENOSPC/EIO/EDQUOT/EFBIG.
+    const rollbackSnapshot = targetExists
+      ? snapshotRegularFileForRollback(targetPath)
+      : null
     logForDebugging(`Falling back to non-atomic write for ${targetPath}`)
     try {
       const fallbackOptions: {
@@ -522,6 +593,18 @@ export function writeFileSyncAndFlush_DEPRECATED(
         `File ${targetPath} written successfully with non-atomic fallback`,
       )
     } catch (fallbackError) {
+      const code = getErrnoCode(fallbackError)
+      if (
+        rollbackSnapshot !== null &&
+        code !== undefined &&
+        DISK_FULL_ROLLBACK_CODES.has(code)
+      ) {
+        const restored = restoreRollbackSnapshot(targetPath, rollbackSnapshot)
+        logForDebugging(
+          `In-place write failed (${code}); rollback ${restored ? 'restored previous contents' : 'failed'} for ${targetPath}`,
+          { level: 'warn' },
+        )
+      }
       logForDebugging(`Non-atomic write also failed: ${fallbackError}`)
       throw fallbackError
     }

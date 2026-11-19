@@ -920,6 +920,8 @@ type BaseOption<T> = {
   /** densable leftover chrome Un `icon` / `meta`. */
   icon?: ReactNode;
   meta?: Array<string | number | boolean>;
+  /** Official 2.1.321 (#1920): unnumbered collapsible row marker (e.g. More models). */
+  marker?: string;
 };
 
 export type OptionWithDescription<T = string> =
@@ -2096,7 +2098,11 @@ export function Select<T>({
               factsWidth={leftoverNn?.factsWidth}
             >
               <>
-                {!hideIndexes && <Text dimColor>{`${i}.`.padEnd(maxIndexWidth + 1)}</Text>}
+                {!hideIndexes && (
+                  <Text dimColor>
+                    {(option.marker !== undefined ? option.marker : `${i}.`).padEnd(maxIndexWidth + 1)}
+                  </Text>
+                )}
                 <Text
                   dimColor={isOptionDisabled}
                   color={isOptionDisabled ? undefined : isSelected ? 'success' : isFocused ? 'suggestion' : undefined}
@@ -2253,7 +2259,13 @@ export function Select<T>({
                         : undefined
                 }
               >
-                {!hideIndexes && <Text dimColor>{`${data.index}.`.padEnd(maxIndexWidth + 2)}</Text>}
+                {!hideIndexes && (
+                  <Text dimColor>
+                    {(data.option.marker !== undefined ? data.option.marker : `${data.index}.`).padEnd(
+                      maxIndexWidth + 2,
+                    )}
+                  </Text>
+                )}
                 {data.label}
               </Text>
               {data.isSelected && (
@@ -2432,7 +2444,9 @@ export function Select<T>({
           factsWidth={leftoverNn?.factsWidth}
         >
           <Box flexDirection="row" flexShrink={0}>
-            {!hideIndexes && <Text dimColor>{`${i}.`.padEnd(maxIndexWidth + 2)}</Text>}
+            {!hideIndexes && (
+              <Text dimColor>{(option.marker !== undefined ? option.marker : `${i}.`).padEnd(maxIndexWidth + 2)}</Text>
+            )}
             <Text
               dimColor={isOptionDisabled}
               color={isOptionDisabled ? undefined : isSelected ? 'success' : isFocused ? 'suggestion' : undefined}

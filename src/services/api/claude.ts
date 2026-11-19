@@ -238,6 +238,7 @@ const autoModeStateModule = feature('TRANSCRIPT_CLASSIFIER')
 import { feature } from 'bun:bundle'
 import type { ClientOptions } from '@anthropic-ai/sdk'
 import {
+  APIConnectionError,
   APIConnectionTimeoutError,
   APIError,
   APIUserAbortError,
@@ -381,10 +382,13 @@ import {
   MID_CONVERSATION_SYSTEM_BETA_HEADER,
 } from '../../constants/betas.js'
 import {
+  countStrippedImageBlocks,
   getRequestLimitMediaByteCap,
   getRequestLimitMediaKeepCount,
   HWT_BYTE_PADDING,
   HWT_KEEP_PADDING,
+  noteImageMediaStripped,
+  shouldTrackImageMediaStripped,
   stripStoredMediaForRequestLimit,
 } from '../../utils/subagentCacheEvict.js'
 import {
@@ -528,6 +532,49 @@ export {
   should1hCacheTTL,
   updateUsage,
   userMessageToMessageParam,
+}
+
+/**
+ * Official 2.1.321 `t7n` (#1878): wraps a mid-stream `EPROTO` / `ERR_SSL_*`
+ * error after an SSE event has already arrived so callers treat it as a
+ * truncated stream (keeping partial reply or retrying) rather than surfacing
+ * "API Error: EPROTO: The TLS handshake failed".
+ */
+export class StreamTruncatedError extends APIConnectionError {
+  readonly code = 'StreamTruncated'
+  override readonly cause: unknown
+
+  constructor(cause: unknown) {
+    super({
+      message: 'Stream truncated due to mid-stream TLS error',
+      cause: cause instanceof Error ? cause : undefined,
+    })
+    this.name = 'StreamTruncatedError'
+    this.cause = cause
+  }
+}
+
+/**
+ * Official 2.1.321 `Mjn(error, receivedAnyEvent)` (#1878).
+ */
+export function wrapMidStreamTlsErrorAsTruncated(
+  error: unknown,
+  receivedAnyEvent: boolean,
+): unknown {
+  if (!receivedAnyEvent) return error
+  try {
+    const code = extractConnectionErrorDetails(error)?.code
+    if (code === 'EPROTO' || code?.startsWith('ERR_SSL_')) {
+      logForDebugging(
+        `Stream failed with a TLS error after an event had arrived (${code}) — reading it as a truncated stream`,
+        { level: 'error' },
+      )
+      return new StreamTruncatedError(error)
+    }
+  } catch (err) {
+    logError(err)
+  }
+  return error
 }
 
 export async function verifyApiKey(
@@ -1597,17 +1644,40 @@ async function* queryModel(
     activeMediaCap?.limit ?? Infinity,
   )
   const hwtByteCap = getRequestLimitMediaByteCap()
+  // Official 2.1.325 #1929 (`La` / `zbn`): track stripped media blocks for main
+  // conversation and named subagents so FileReadTool's unchanged-image re-read
+  // limiter (`Wit=3`) engages when images are evicted from the request.
+  const trackImageMediaStripped = shouldTrackImageMediaStripped(
+    options.querySource,
+    options.agentId,
+  )
+  const mediaTakenOut: Array<{ type: string }> | undefined =
+    trackImageMediaStripped ? [] : undefined
   const applyHwt = (
     msgs: (UserMessage | AssistantMessage | ApiSystemMessage)[],
-  ): (UserMessage | AssistantMessage | ApiSystemMessage)[] =>
-    stripStoredMediaForRequestLimit(
+    recordStripped = false,
+  ): (UserMessage | AssistantMessage | ApiSystemMessage)[] => {
+    const collector = recordStripped ? mediaTakenOut : undefined
+    if (collector) {
+      collector.splice(0)
+    }
+    const next = stripStoredMediaForRequestLimit(
       msgs,
       hwtKeep,
       HWT_KEEP_PADDING,
       hwtByteCap,
       HWT_BYTE_PADDING,
+      collector,
     )
-  messagesForAPI = applyHwt(messagesForAPI)
+    if (collector && collector.length > 0) {
+      const strippedImages = countStrippedImageBlocks(collector)
+      if (strippedImages > 0) {
+        noteImageMediaStripped(options.agentId, strippedImages)
+      }
+    }
+    return next
+  }
+  messagesForAPI = applyHwt(messagesForAPI, true)
 
   // densable qWT midConvFallback: `!midConvLatchedOff && (e8 || fZ)` where
   // e8 = mid-conversation-system beta and fZ = effort beta. Do not invent
@@ -2001,6 +2071,14 @@ async function* queryModel(
 
   const recordMediaItemCapSuccess = (): void => {
     try {
+      // Official 2.1.325 #1929 (`zbn(agentId, count(La, image))`): report final
+      // stripped image count after a successful API response (0 clears state).
+      if (mediaTakenOut !== undefined) {
+        noteImageMediaStripped(
+          options.agentId,
+          countStrippedImageBlocks(mediaTakenOut),
+        )
+      }
       const existing = getSessionMediaItemCap(
         sessionIdForMediaCap,
         resolvedModel,
@@ -2208,8 +2286,26 @@ async function* queryModel(
       }
       const stripToLimit = (
         msgs: (UserMessage | AssistantMessage | ApiSystemMessage)[],
-      ) => stripStoredMediaForRequestLimit(msgs, nextLimit, HWT_KEEP_PADDING)
-      messagesForAPI = stripToLimit(messagesForAPI)
+        recordStripped = false,
+      ) => {
+        const collector = recordStripped ? mediaTakenOut : undefined
+        const next = stripStoredMediaForRequestLimit(
+          msgs,
+          nextLimit,
+          HWT_KEEP_PADDING,
+          Number.POSITIVE_INFINITY,
+          0,
+          collector,
+        )
+        if (collector && collector.length > 0) {
+          const strippedImages = countStrippedImageBlocks(collector)
+          if (strippedImages > 0) {
+            noteImageMediaStripped(options.agentId, strippedImages)
+          }
+        }
+        return next
+      }
+      messagesForAPI = stripToLimit(messagesForAPI, true)
       if (midConvFallback) {
         const prevFallback = midConvFallback
         midConvFallback = () => stripToLimit(prevFallback())
@@ -4047,9 +4143,19 @@ async function* queryModel(
                   }
                 }
 
+                const stopDetailsForRefusal = (
+                  part.delta as {
+                    stop_details?: {
+                      category?: string | null
+                      explanation?: string | null
+                      cyber_verification?: unknown
+                    }
+                  }
+                ).stop_details
                 const refusalMessage = getErrorMessageIfRefusal(
                   part.delta.stop_reason,
                   options.model,
+                  stopDetailsForRefusal,
                 )
                 if (refusalMessage) {
                   // Official FXl + silent-arm densable consumer: when refusal
@@ -4554,7 +4660,7 @@ async function* queryModel(
           clearStreamIdleTimers()
           // Official zC (#89) — substitute StreamSuspendedError when idle timer
           // aborted the stream across sleep/suspend (not a user abort).
-          const streamingError =
+          let streamingError: unknown =
             streamSuspendedError !== undefined &&
             !streamIdleAborted &&
             !signal.aborted &&
@@ -4621,6 +4727,19 @@ async function* queryModel(
             }
           }
 
+          // Official 2.1.321 `Mjn` (#1878): mid-stream EPROTO / ERR_SSL_* after
+          // an event has arrived is wrapped as a truncated stream so partial
+          // output is kept or the request is retried cleanly instead of crashing
+          // with "API Error: EPROTO: The TLS handshake failed".
+          {
+            const hadStreamEvent =
+              streamMessageEnvelopeOpen || newMessages.length > 0
+            streamingError = wrapMidStreamTlsErrorAsTruncated(
+              streamingError,
+              hadStreamEvent,
+            )
+          }
+
           // densable 2.1.219 #7 — mid-stream partial finalize:
           // When assistant content was already yielded and the stream dies via
           // watchdog / stale-or-network connection / server api_error, keep the
@@ -4630,8 +4749,9 @@ async function* queryModel(
             const connDetails = extractConnectionErrorDetails(streamingError)
             const connCode = connDetails?.code
             const isStaleConn =
-              connCode !== undefined &&
-              STREAM_STALE_CONNECTION_CODES.has(connCode)
+              streamingError instanceof StreamTruncatedError ||
+              (connCode !== undefined &&
+                STREAM_STALE_CONNECTION_CODES.has(connCode))
             const isNetworkDown =
               connCode !== undefined && STREAM_NETWORK_DOWN_CODES.has(connCode)
             const isStaleOrNetwork = isStaleConn || isNetworkDown

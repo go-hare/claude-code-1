@@ -2,6 +2,8 @@ export {
   BridgeClient,
   createBridgeClient,
   NoExtensionConnectedError,
+  PREVIOUS_BROWSER_RETURN_WAIT_MS,
+  ToolCallLostError,
 } from './bridgeClient.js'
 export {
   BRIDGE_ONLY_BROWSER_TOOL_NAMES,

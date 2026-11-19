@@ -1,5 +1,7 @@
 import { feature } from 'bun:bundle'
+import { getIsNonInteractiveSession } from 'src/bootstrap/state.js'
 import { prependBullets } from 'src/constants/prompts.js'
+import { formatNonInteractiveBgTimeoutGuidance } from 'src/QueryEngine.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import * as attributionMod from 'src/utils/attribution.js'
 import { hasEmbeddedSearchTools } from 'src/utils/embeddedTools.js'
@@ -47,7 +49,12 @@ function getBackgroundUsageNote(): string | null {
   if (isBackgroundTasksDisabled()) {
     return null
   }
-  return "You can use the `run_in_background` parameter to run the command in the background. Only use this if you don't need the result immediately and are OK being notified when the command completes later. You do not need to check the output right away - you'll be notified when it finishes. You do not need to use '&' at the end of the command when using this parameter."
+  // #1864 (official `VDr()`): document the 10-min default / 30-min max
+  // background timeout in non-interactive `-p` mode.
+  const nonInteractiveGuidance = getIsNonInteractiveSession()
+    ? formatNonInteractiveBgTimeoutGuidance({ isNonInteractive: true })
+    : ''
+  return `You can use the \`run_in_background\` parameter to run the command in the background. Only use this if you don't need the result immediately and are OK being notified when the command completes later. You do not need to check the output right away - you'll be notified when it finishes. You do not need to use '&' at the end of the command when using this parameter.${nonInteractiveGuidance}`
 }
 
 /**
@@ -460,6 +467,11 @@ async function getLeanBashPrompt(): Promise<string> {
   if (hasBg) {
     let bgLine =
       '- `run_in_background` runs the command detached: it keeps running across turns and re-invokes you when it exits. No `&` needed.'
+    if (getIsNonInteractiveSession()) {
+      bgLine += formatNonInteractiveBgTimeoutGuidance({
+        isNonInteractive: true,
+      })
+    }
     if (feature('MONITOR_TOOL')) {
       bgLine +=
         ' Foreground `sleep` is blocked; use Monitor with an until-loop to wait on a condition.'

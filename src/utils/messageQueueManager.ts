@@ -1310,6 +1310,58 @@ export function capTaskNotificationValue(value: string): string {
   return truncateWithHysteresis(value, TASK_NOTIFICATION_CHAR_CAP)
 }
 
+/**
+ * Official 2.1.321 (#1881): cap how many queued `task-notification` items are
+ * delivered in one turn/request when a backlog builds up (e.g. while Claude was
+ * stopped and multiple background agents finished). Keeps the first
+ * `maxCount - 1` notifications verbatim and folds the rest into one summary
+ * `<task-notification>` so a single request never carries an unbounded flood.
+ */
+export const DEFAULT_TASK_NOTIFICATION_BATCH_CAP = 10
+
+function extractNotificationSummaryLine(cmd: QueuedCommand): string {
+  const raw = typeof cmd.value === 'string' ? cmd.value : ''
+  const match = raw.match(/<summary>([\s\S]*?)<\/summary>/)
+  if (match?.[1]) {
+    return match[1].trim().slice(0, 160)
+  }
+  return raw.replace(/\s+/g, ' ').trim().slice(0, 160) || 'background task'
+}
+
+export function collapseBacklogTaskNotifications(
+  commands: readonly QueuedCommand[],
+  maxCount: number = DEFAULT_TASK_NOTIFICATION_BATCH_CAP,
+): QueuedCommand[] {
+  const cap = Math.max(2, maxCount)
+  const notifications = commands.filter(cmd => cmd.mode === 'task-notification')
+  if (notifications.length <= cap) {
+    return [...commands]
+  }
+  const nonNotifications = commands.filter(
+    cmd => cmd.mode !== 'task-notification',
+  )
+  const kept = notifications.slice(0, cap - 1)
+  const folded = notifications.slice(cap - 1)
+  const summaryLines = folded
+    .slice(0, 20)
+    .map(cmd => `- ${extractNotificationSummaryLine(cmd)}`)
+    .join('\n')
+  const omittedTail =
+    folded.length > 20 ? `\n- ... and ${folded.length - 20} more` : ''
+  const collapsed: QueuedCommand = {
+    value: `<task-notification>
+<summary>+${folded.length} more background task notifications folded (backlog cap ${cap})</summary>
+<status>completed</status>
+${summaryLines}${omittedTail}
+</task-notification>`,
+    mode: 'task-notification',
+    skipAttachments: true,
+    priority: 'later',
+    agentId: folded[0]?.agentId ?? getMainThreadAgentId(),
+  }
+  return [...nonNotifications, ...kept, collapsed]
+}
+
 export type ReportingAdmissionResult =
   | { admitted: true }
   | { admitted: false; reason: string }

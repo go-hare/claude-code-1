@@ -2,6 +2,7 @@ import { performBackgroundPluginInstallations } from '../../services/plugins/Plu
 import type { AppState } from '../../state/AppState.js';
 import { checkHasTrustDialogAccepted } from '../config.js';
 import { logForDebugging } from '../debug.js';
+import { isPersistedTrustIgnored } from './addDirPluginSettings.js';
 import { clearMarketplacesCache, registerSeedMarketplaces } from './marketplaceManager.js';
 import { clearPluginCache } from './pluginLoader.js';
 
@@ -25,8 +26,8 @@ type SetAppState = (f: (prevState: AppState) => AppState) => void;
 export async function performStartupChecks(setAppState: SetAppState): Promise<void> {
   logForDebugging('performStartupChecks called');
 
-  // Check if the current directory has been trusted
-  if (!checkHasTrustDialogAccepted()) {
+  // Check if the current directory has been trusted (#1781: honor CLAUDE_CODE_IGNORE_PERSISTED_TRUST)
+  if (isPersistedTrustIgnored() || !checkHasTrustDialogAccepted()) {
     logForDebugging('Trust not accepted for current directory - skipping plugin installations');
     return;
   }

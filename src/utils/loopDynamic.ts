@@ -96,7 +96,7 @@ export function isLoopKeepaliveGateEnabled(): boolean {
   }
   return getFeatureValue_CACHED_MAY_BE_STALE(
     'tengu_kairos_loop_keepalive',
-    true,
+    false,
   )
 }
 

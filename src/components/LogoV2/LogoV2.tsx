@@ -5,6 +5,7 @@ import { getIsNonInteractiveSession } from '../../bootstrap/state.js';
 import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 import { useAppState } from '../../state/AppState.js';
 import type { ToolPermissionContext } from '../../Tool.js';
+import { getAntAuthFallbackNotice, getAntAuthLoginStartupLine } from '../../commands/login/getAuthStatus.js';
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
 import { formatTokens } from '../../utils/format.js';
 import {
@@ -108,6 +109,16 @@ export function LogoV2(): React.ReactNode {
     [suppressed, toolPermissionContext],
   );
   const unknownModelNotice = suppressed || process.env.DEMO_VERSION ? null : buildUnrecognizedModelNotice(model);
+  const [antAuthNotice] = useState(() => (suppressed || process.env.DEMO_VERSION ? null : getAntAuthFallbackNotice()));
+  const antAuthBillingLine =
+    antAuthNotice?.reason === 'no_login'
+      ? antAuthNotice.text
+      : suppressed || process.env.DEMO_VERSION
+        ? null
+        : antAuthNotice === null
+          ? getAntAuthLoginStartupLine()
+          : null;
+  const expiredClaudeAiWarning = antAuthNotice?.reason === 'login_ended' ? antAuthNotice.text : null;
 
   useEffect(() => {
     if (suppressed || !hasUnseenReleaseVersion(getGlobalConfig().lastReleaseNotesSeen)) {
@@ -133,6 +144,16 @@ export function LogoV2(): React.ReactNode {
       {unknownModelNotice && (
         <Box paddingLeft={2} flexDirection="column">
           <LogoUnrecognizedModelWarning notice={unknownModelNotice} />
+        </Box>
+      )}
+      {expiredClaudeAiWarning && (
+        <Box paddingLeft={2} flexDirection="column">
+          <Text color="warning">⚠ {expiredClaudeAiWarning}</Text>
+        </Box>
+      )}
+      {antAuthBillingLine && (
+        <Box paddingLeft={2} flexDirection="column">
+          <Text dimColor>{antAuthBillingLine}</Text>
         </Box>
       )}
       {permissionWarnings.length > 0 && (

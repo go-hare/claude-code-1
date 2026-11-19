@@ -1,7 +1,7 @@
 /**
  * densable qd @192241903 — Vk(AIt) + debounced qJt + exit fallback.
  */
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useSessionServices } from '../../context/sessionServices.js'
 import { registerPreExitFlush } from '../../utils/cleanupRegistry.js'
 import { isHoverRestOn } from '../../utils/storageV5/hoverRestPin.js'
@@ -46,11 +46,49 @@ export function flushFleetComposerDraft(
   return clearFleetLauncherDraft(canonicalLauncherCwd, storage)
 }
 
+/**
+ * Official #1763 — exit / pre-exit persistence must NEVER delete an existing
+ * draft saved by another agent view in the same directory when this view is
+ * exiting with nothing typed and no collapsed sections.
+ */
+export async function flushFleetComposerDraftOnExit(
+  canonicalLauncherCwd: string,
+  snapshot: FleetComposerDraftSnapshot,
+  storage?: StorageV5,
+): Promise<boolean> {
+  const q = fleetComposerDraftForDisk(snapshot.query, snapshot.mode)
+  const body = { q, collapsed: [...snapshot.collapsed] }
+  if (q || body.collapsed.length > 0) {
+    return persistFleetLauncherDraftAsync(canonicalLauncherCwd, body, storage)
+  }
+  return true
+}
+
+/**
+ * Official #1764 + #1904 (ku `Wt`) — draft handover before an update relaunch:
+ * - Only flush when this view actually typed text (`query` non-empty) OR
+ *   actively edited/dirtied its draft (`wasDirty`).
+ * - When nothing was typed and this view was never dirtied, leave disk alone
+ *   so another agent view's saved draft in the same directory is not erased.
+ */
+export function handOverFleetComposerDraft(
+  canonicalLauncherCwd: string,
+  snapshot: FleetComposerDraftSnapshot,
+  wasDirty: boolean,
+  storage?: StorageV5,
+): Promise<void> | undefined {
+  const q = fleetComposerDraftForDisk(snapshot.query, snapshot.mode)
+  if (!wasDirty && !q) {
+    return undefined
+  }
+  return flushFleetComposerDraft(canonicalLauncherCwd, snapshot, storage)
+}
+
 export function useFleetComposerDraftPersistence(input: {
   canonicalLauncherCwd: string
   snapshot: FleetComposerDraftSnapshot
   onRestore: (draft: FleetComposerDraftRestore) => void
-}): void {
+}): () => Promise<void> | undefined {
   const { storageV5 } = useSessionServices()
   const storage = storageV5 as StorageV5 | undefined
   const preExitFlushedRef = useRef(false)
@@ -142,32 +180,30 @@ export function useFleetComposerDraftPersistence(input: {
     const unregister =
       isHoverRestOn() && storage !== undefined
         ? registerPreExitFlush(async () => {
-            const { query, mode, collapsed } = snapshotRef.current
-            const q = fleetComposerDraftForDisk(query, mode)
-            const body = { q, collapsed: [...collapsed] }
-            if (q || body.collapsed.length) {
-              await persistFleetLauncherDraftAsync(
-                input.canonicalLauncherCwd,
-                body,
-                storage,
-              )
-              preExitFlushedRef.current = true
-            } else {
-              await clearFleetLauncherDraft(input.canonicalLauncherCwd, storage)
-              preExitFlushedRef.current = true
-            }
+            // Official #1763: when exiting with empty draft + no collapsed sections,
+            // do NOT call clearFleetLauncherDraft so another agent view's draft stays intact.
+            const persisted = await flushFleetComposerDraftOnExit(
+              input.canonicalLauncherCwd,
+              snapshotRef.current,
+              storage,
+            )
+            preExitFlushedRef.current = persisted
             asyncDone = true
           })
         : undefined
 
     const flush = () => {
-      if (asyncDone) return
+      if (asyncDone || preExitFlushedRef.current) return
       dirtyRef.current = false
-      void flushFleetComposerDraft(
-        input.canonicalLauncherCwd,
-        snapshotRef.current,
-        storage,
-      )
+      const { query, mode, collapsed } = snapshotRef.current
+      const q = fleetComposerDraftForDisk(query, mode)
+      if (q || collapsed.length > 0) {
+        void persistFleetLauncherDraft(
+          input.canonicalLauncherCwd,
+          { q, collapsed: [...collapsed] },
+          storage,
+        )
+      }
     }
     process.on('exit', flush)
     return () => {
@@ -175,6 +211,26 @@ export function useFleetComposerDraftPersistence(input: {
       process.off('exit', flush)
     }
   }, [input.canonicalLauncherCwd, storage])
+
+  return useCallback(() => {
+    try {
+      const wasDirty = dirtyRef.current
+      dirtyRef.current = false
+      const pending = handOverFleetComposerDraft(
+        cwdRef.current,
+        snapshotRef.current,
+        wasDirty,
+        storageRef.current,
+      )
+      if (pending) {
+        preExitFlushedRef.current = true
+        registerPreExitFlush(() => pending)
+      }
+      return pending
+    } catch {
+      return undefined
+    }
+  }, [])
 }
 
 function onRestoreSafe(

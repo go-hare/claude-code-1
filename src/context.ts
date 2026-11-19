@@ -83,7 +83,7 @@ export const getGitStatus = memoize(
           {
             preserveOutputOnError: false,
           },
-        ).then(({ stdout }) => stdout.trim()),
+        ).then(({ stdout, code }) => (code === 0 ? stdout.trimEnd() : null)),
         execFileNoThrow(
           gitExe(),
           ['--no-optional-locks', 'log', '--oneline', '-n', '5'],
@@ -98,7 +98,7 @@ export const getGitStatus = memoize(
 
       logForDiagnosticsNoPII('info', 'git_commands_completed', {
         duration_ms: Date.now() - gitCmdsStart,
-        status_length: status.length,
+        status_length: status?.length ?? 0,
       })
 
       // Check if status exceeds character limit
@@ -106,14 +106,16 @@ export const getGitStatus = memoize(
         ? POWERSHELL_TOOL_NAME
         : BASH_TOOL_NAME
       const truncatedStatus =
-        status.length > MAX_STATUS_CHARS
-          ? status.substring(0, MAX_STATUS_CHARS) +
-            `\n... (truncated because it exceeds 2k characters. If you need more information, run "git status" using ${shellTool})`
-          : status
+        status === null
+          ? null
+          : status.length > MAX_STATUS_CHARS
+            ? status.substring(0, MAX_STATUS_CHARS) +
+              `\n... (truncated because it exceeds 2k characters. If you need more information, run "git status" using ${shellTool})`
+            : status
 
       logForDiagnosticsNoPII('info', 'git_status_completed', {
         duration_ms: Date.now() - startTime,
-        truncated: status.length > MAX_STATUS_CHARS,
+        truncated: status !== null && status.length > MAX_STATUS_CHARS,
       })
 
       return [
@@ -121,7 +123,7 @@ export const getGitStatus = memoize(
         `Current branch: ${branch}`,
         `Main branch (you will usually use this for PRs): ${mainBranch}`,
         ...(userName ? [`Git user: ${userName}`] : []),
-        `Status:\n${truncatedStatus || '(clean)'}`,
+        `Status:\n${truncatedStatus === null ? '(unavailable)' : truncatedStatus || '(clean)'}`,
         `Recent commits:\n${log}`,
       ].join('\n\n')
     } catch (error) {

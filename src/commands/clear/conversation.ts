@@ -27,6 +27,7 @@ import {
   type LocalAgentTaskState,
 } from '../../tasks/LocalAgentTask/LocalAgentTask.js'
 import { isLocalShellTask } from '../../tasks/LocalShellTask/guards.js'
+import { isLocalWorkflowTask } from '../../tasks/LocalWorkflowTask/LocalWorkflowTask.js'
 import { asAgentId } from '../../types/ids.js'
 import type { Message } from '../../types/message.js'
 import { createEmptyAttributionState } from '../../utils/commitAttribution.js'
@@ -53,27 +54,132 @@ import {
   evictTaskOutput,
   initTaskOutputAsSymlink,
 } from '../../utils/task/diskOutput.js'
+import { resetImageRereadState } from '../../utils/subagentCacheEvict.js'
 import { getCurrentWorktreeSession } from '../../utils/worktree.js'
 import { clearSessionCaches } from './caches.js'
 
 let activeClearSessionStartController: AbortController | null = null
 
-function notifyRemoteConversationCleared(): void {
+/**
+ * Official 2.1.319 (#1760): compute which tasks survive /clear vs get killed.
+ * Preserves background agents, teammates, workflows, AND any subtasks (running
+ * shells or foreground subagents) owned by a surviving background agent,
+ * teammate, or workflow (transitively).
+ */
+export function computeSurvivingTaskIdsOnClear(
+  tasks: AppState['tasks'],
+): Set<string> {
+  const survivingTaskIds = new Set<string>()
+  const survivingOwnerIds = new Set<string>()
+  const entries = Object.entries(tasks)
+
+  // Seed pass: surviving roots are background agents, teammates, workflows,
+  // and backgrounded shells/tasks (anything that is NOT an explicit foreground
+  // agent or non-background local shell).
+  for (const [taskId, task] of entries) {
+    const isExplicitForeground =
+      'isBackgrounded' in task && task.isBackgrounded === false
+    const isNonBackgroundShell =
+      isLocalShellTask(task) &&
+      !('isBackgrounded' in task && task.isBackgrounded === true)
+    if (!isExplicitForeground && !isNonBackgroundShell) {
+      survivingTaskIds.add(taskId)
+      if (isLocalAgentTask(task)) {
+        if (task.agentId) survivingOwnerIds.add(task.agentId)
+        survivingOwnerIds.add(task.id)
+      } else if (isInProcessTeammateTask(task)) {
+        if (task.identity?.agentId) {
+          survivingOwnerIds.add(task.identity.agentId)
+        }
+        survivingOwnerIds.add(task.id)
+      } else if (isLocalWorkflowTask(task)) {
+        survivingOwnerIds.add(task.id)
+        if (task.agentId) survivingOwnerIds.add(task.agentId)
+      }
+    }
+  }
+
+  // Fixed-point pass: keep any subtask (shell or foreground subagent) whose
+  // owner/parent is a surviving background agent, teammate, or workflow.
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const [taskId, task] of entries) {
+      if (survivingTaskIds.has(taskId)) continue
+      const ownerCandidate =
+        ('parentAgentId' in task && typeof task.parentAgentId === 'string'
+          ? task.parentAgentId
+          : undefined) ??
+        ('ownerAgentId' in task && typeof task.ownerAgentId === 'string'
+          ? task.ownerAgentId
+          : undefined) ??
+        (isLocalShellTask(task) && typeof task.agentId === 'string'
+          ? task.agentId
+          : undefined)
+      if (ownerCandidate && survivingOwnerIds.has(ownerCandidate)) {
+        survivingTaskIds.add(taskId)
+        if (isLocalAgentTask(task)) {
+          survivingOwnerIds.add(task.agentId)
+          survivingOwnerIds.add(task.id)
+        }
+        changed = true
+      }
+    }
+  }
+
+  return survivingTaskIds
+}
+
+function buildBackgroundTasksChangedPayload(tasks: AppState['tasks']) {
+  return Object.values(tasks)
+    .filter(task => task.status === 'running')
+    .map(task => ({
+      task_id: task.id,
+      task_type: task.type,
+      description: task.description,
+      ...('selectedAgent' in task &&
+      task.selectedAgent &&
+      typeof task.selectedAgent === 'object' &&
+      'agentType' in task.selectedAgent
+        ? {
+            subagent_type: (task.selectedAgent as { agentType?: string })
+              .agentType,
+          }
+        : {}),
+    }))
+}
+
+function notifyRemoteConversationCleared(
+  survivingTasks?: AppState['tasks'],
+): void {
   // densable 2.1.224 #21 — /clear → conversation_reset to attached RC clients
   // (WS({type:"conversation_reset",new_conversation_id}) when bridge/CCR live).
-  // Local pre-224 used a non-wire `type:'status'` conversation_cleared shape.
+  // Official 2.1.319 (#1773): re-emit full `background_tasks_changed` immediately
+  // after `conversation_reset` so tasks surviving /clear stay visible on web/RC.
   const handle = getReplBridgeHandle()
   if (!handle) return
   handle.markTranscriptReset?.()
 
   const newConversationId = getSessionId()
-  const message = {
+  const resetMessage = {
     type: 'conversation_reset' as const,
     new_conversation_id: newConversationId,
     uuid: randomUUID(),
     session_id: newConversationId,
   }
-  handle.writeSdkMessages([message as unknown as SDKStatusMessage])
+  const tasksChangedMessage = {
+    type: 'system' as const,
+    subtype: 'background_tasks_changed' as const,
+    tasks: survivingTasks
+      ? buildBackgroundTasksChangedPayload(survivingTasks)
+      : [],
+    uuid: randomUUID(),
+    session_id: newConversationId,
+  }
+  handle.writeSdkMessages([
+    resetMessage as unknown as SDKStatusMessage,
+    tasksChangedMessage as unknown as SDKStatusMessage,
+  ])
 }
 
 export async function clearConversation({
@@ -130,11 +236,20 @@ export async function clearConversation({
   // LocalMainSessionTask.ts startBackgroundSession.
   const preservedAgentIds = new Set<string>()
   const preservedLocalAgents: LocalAgentTaskState[] = []
-  const shouldKillTask = (task: AppState['tasks'][string]): boolean =>
-    'isBackgrounded' in task && task.isBackgrounded === false
+  const initialSurvivingIds = getAppState
+    ? computeSurvivingTaskIdsOnClear(getAppState().tasks)
+    : new Set<string>()
+  const shouldKillTask = (
+    taskId: string,
+    task: AppState['tasks'][string],
+    survivingIds: Set<string>,
+  ): boolean =>
+    !survivingIds.has(taskId) &&
+    'isBackgrounded' in task &&
+    task.isBackgrounded === false
   if (getAppState) {
-    for (const task of Object.values(getAppState().tasks)) {
-      if (shouldKillTask(task)) continue
+    for (const [taskId, task] of Object.entries(getAppState().tasks)) {
+      if (shouldKillTask(taskId, task, initialSurvivingIds)) continue
       if (isLocalAgentTask(task)) {
         preservedAgentIds.add(task.agentId)
         preservedLocalAgents.push(task)
@@ -165,6 +280,8 @@ export async function clearConversation({
   // tasks (invoked skills, pending permission callbacks, dump state, cache-break
   // tracking) is retained so those agents keep functioning.
   clearSessionCaches(preservedAgentIds)
+  // Official 2.1.325 #1929: reset unchanged-image re-read tracking on /clear.
+  resetImageRereadState()
 
   const { getBashTaskDeliveryBag } = await import(
     '../../utils/bashTaskDeliveryOutcomes.js'
@@ -210,13 +327,15 @@ export async function clearConversation({
     'mcp_task',
   ])
   let survivingAgentTaskCount = 0
+  let survivingTasksSnapshot: AppState['tasks'] | undefined
   if (setAppState) {
     setAppState(prev => {
-      // Partition tasks using the same predicate computed above:
-      // kill+remove foreground tasks, preserve everything else.
+      // Partition tasks using the same transitive survival predicate (#1760):
+      // kill+remove unowned foreground tasks, preserve background tasks and their subtasks.
+      const survivingIds = computeSurvivingTaskIdsOnClear(prev.tasks)
       const nextTasks: AppState['tasks'] = {}
       for (const [taskId, task] of Object.entries(prev.tasks)) {
-        if (!shouldKillTask(task)) {
+        if (!shouldKillTask(taskId, task, survivingIds)) {
           nextTasks[taskId] = task
           continue
         }
@@ -243,6 +362,7 @@ export async function clearConversation({
         void evictTaskOutput(taskId)
       }
 
+      survivingTasksSnapshot = nextTasks
       survivingAgentTaskCount = Object.values(nextTasks).filter(
         t => !NON_AGENT_SURVIVING_TASK_TYPES.has(t.type),
       ).length
@@ -302,8 +422,15 @@ export async function clearConversation({
       }
     })
   } else if (getAppState) {
-    survivingAgentTaskCount = Object.values(getAppState().tasks).filter(
-      t => !shouldKillTask(t) && !NON_AGENT_SURVIVING_TASK_TYPES.has(t.type),
+    const prevTasks = getAppState().tasks
+    const survivingIds = computeSurvivingTaskIdsOnClear(prevTasks)
+    survivingTasksSnapshot = Object.fromEntries(
+      Object.entries(prevTasks).filter(
+        ([taskId, t]) => !shouldKillTask(taskId, t, survivingIds),
+      ),
+    )
+    survivingAgentTaskCount = Object.values(survivingTasksSnapshot).filter(
+      t => !NON_AGENT_SURVIVING_TASK_TYPES.has(t.type),
     ).length
   }
 
@@ -325,8 +452,11 @@ export async function clearConversation({
   // Generate new session ID to provide fresh state
   // Set the old session as parent for analytics lineage tracking
   regenerateSessionId({ setCurrentAsParent: true })
-  // densable #21 — after new id is live, notify RC clients of conversation_reset
-  notifyRemoteConversationCleared()
+  // densable #21 & #1773 — after new id is live, notify RC clients of
+  // conversation_reset and re-emit full background_tasks_changed
+  notifyRemoteConversationCleared(
+    survivingTasksSnapshot ?? getAppState?.().tasks,
+  )
   // Update the environment variable so subprocesses use the new session ID
   if (process.env.USER_TYPE === 'ant' && process.env.CLAUDE_CODE_SESSION_ID) {
     process.env.CLAUDE_CODE_SESSION_ID = getSessionId()

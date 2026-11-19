@@ -82,6 +82,10 @@ import {
 import { emitTaskProgress as emitTaskProgressEvent } from 'src/utils/task/sdkProgress.js'
 import { createTaskRegistry } from 'src/utils/taskRegistry.js'
 import { isInProcessTeammate } from 'src/utils/teammateContext.js'
+import {
+  formatCyberSafeguardDefenseAccessNote,
+  isRefusalFallbackEnabled,
+} from 'src/utils/refusalFallback.js'
 import { getTokenCountFromUsage } from 'src/utils/tokens.js'
 import { WORKFLOW_TOOL_NAME } from '@claude-code/workflow-engine'
 import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '../ExitPlanModeTool/constants.js'
@@ -427,6 +431,10 @@ export const agentToolResultSchema = lazySchema(() =>
     harnessNoteCount: z.number().optional(),
     harnessTailCount: z.number().optional(),
     harnessSectionHash: z.string().optional(),
+    // Official 325 #1732 — separate clean report text and harness provenance note.
+    handbackReportText: z.string().optional(),
+    handbackNote: z.string().optional(),
+    handbackFlagged: z.boolean().optional(),
     // toolStats — focus transcript folds these into brief summary
     toolStats: z
       .object({
@@ -615,6 +623,110 @@ export function findModelFallbackNotice(
   return undefined
 }
 
+/**
+ * Official 325 `pqr` (#1732) — separate a hand-back body into clean
+ * `handbackReportText` (without internal frame markers or indent) and optional
+ * `handbackNote` (provenance/security note above the frame line).
+ */
+export function parseHandbackBodyParts(body: string): {
+  note?: string
+  report: string
+} {
+  const frameRe = /(?:^|\n)--- subagent report ---\n?/
+  const match = frameRe.exec(body)
+  if (!match) {
+    return { report: body }
+  }
+  const before = body.slice(0, match.index).trim()
+  const after = body.slice(match.index + match[0].length)
+  const unindented = after
+    .split('\n')
+    .map(line => (line.startsWith('  ') ? line.slice(2) : line))
+    .join('\n')
+  return {
+    ...(before.length > 0 ? { note: before } : {}),
+    report: unindented,
+  }
+}
+
+/**
+ * Official 325 `Mba` / `Vba` / `UWr` / `BWr` (#1791) — track background agents
+ * whose repeat SubagentHandback call was refused so the completion notification
+ * informs the caller and tells it how to ask via SendMessage.
+ */
+const laterReportRefusedAgents = new Set<string>()
+
+export function markHandbackLaterReportRefused(agentId: string): void {
+  laterReportRefusedAgents.add(agentId)
+}
+
+export function wasHandbackLaterReportRefused(agentId: string): boolean {
+  return laterReportRefusedAgents.has(agentId)
+}
+
+export function clearHandbackLaterReportRefused(agentId: string): void {
+  laterReportRefusedAgents.delete(agentId)
+}
+
+export function formatLaterReportRefusedNotice(
+  canSendMessage: boolean,
+): string {
+  const base = `This agent called ${SUBAGENT_HANDBACK_TOOL_NAME} again after that report and was refused (one report per result), so anything new in that call has not reached you through it.`
+  const suffix = canSendMessage
+    ? ` If it has not messaged you since, send it a message (${SEND_MESSAGE_TOOL_NAME}) to ask for it.`
+    : ''
+  return `${base}${suffix}\n`
+}
+
+/**
+ * Official 325 `jQt` (#1815) — parent-model guidance when safeguards stop a
+ * subagent: retry with a narrower prompt or pass the message to the user,
+ * instead of doing the agent's work in the main conversation.
+ */
+export function isSubagentSafeguardsRefusal(
+  message: MessageType | undefined,
+): boolean {
+  if (!message || message.type !== 'assistant') return false
+  const raw = message as MessageType & {
+    error?: unknown
+    refusingModel?: string
+    message?: {
+      stop_reason?: unknown
+      stop_details?: { category?: unknown } | null
+    }
+  }
+  return (
+    raw.message?.stop_reason === 'refusal' ||
+    raw.error === 'refusal' ||
+    raw.refusingModel !== undefined
+  )
+}
+
+export function formatSubagentSafeguardsGuidance(
+  message: MessageType,
+  canSpawnNewAgent: boolean,
+): string {
+  const raw = message as MessageType & {
+    refusingModel?: string
+    message?: {
+      stop_details?: { category?: unknown } | null
+    }
+  }
+  const hasRefusingModel = raw.refusingModel !== undefined
+  const lead =
+    !isRefusalFallbackEnabled() && hasRefusingModel
+      ? 'Safeguards stopped this agent, and automatic model switching is off.'
+      : 'Safeguards stopped this agent.'
+  const stopDetails = raw.message?.stop_details
+  const isCyber = stopDetails?.category === 'cyber'
+  const middle =
+    isCyber && canSpawnNewAgent
+      ? 'For a legitimate task you can start a new agent with a clearer prompt that asks for no more than it needs. The safeguards judge the content, so the same content reworded is likely to be stopped too. Otherwise pass the message above on to the user.'
+      : 'Pass the message above on to the user.'
+  const cyberNote = formatCyberSafeguardDefenseAccessNote(stopDetails)
+  return `${lead} ${middle} Don't do the agent's work yourself: safeguards cover this conversation too.${cyberNote}`
+}
+
 export function finalizeAgentTool(
   agentMessages: MessageType[],
   agentId: string,
@@ -634,7 +746,13 @@ export function finalizeAgentTool(
    * skip tengu_agent_tool_completed / cache_eviction_hint (parent is parked
    * for live children — completion telemetry would double-count).
    */
-  opts?: { suppressTelemetry?: boolean },
+  opts?: {
+    suppressTelemetry?: boolean
+    handbackBody?: string
+    handbackFlagged?: boolean
+    laterReportRefused?: boolean
+    canSendMessage?: boolean
+  },
 ): AgentToolResult {
   const {
     prompt,
@@ -774,6 +892,28 @@ export function finalizeAgentTool(
     }
   }
 
+  // Official 325 #1791: surface refused later SubagentHandback report to caller.
+  const hadLaterReportRefused =
+    opts?.laterReportRefused === true || wasHandbackLaterReportRefused(agentId)
+  if (hadLaterReportRefused) {
+    clearHandbackLaterReportRefused(agentId)
+    const canSend =
+      opts?.canSendMessage !== false &&
+      !ONE_SHOT_BUILTIN_AGENT_TYPES.has(agentType) &&
+      opts?.handbackFlagged !== true
+    notes.push({
+      type: 'text',
+      text: formatLaterReportRefusedNotice(canSend),
+    })
+  }
+
+  // Official 325 #1732: split hand-back report body into clean report text and
+  // separate harness provenance note for non-verbose expanded UI rendering.
+  const handbackParts =
+    opts?.handbackBody !== undefined
+      ? parseHandbackBodyParts(opts.handbackBody)
+      : undefined
+
   // densable W$n: persistedToolResultFiles?al(B, files, on(Z)):{report:B,harnessTail:[]}
   const notesChars = notes.reduce((sum, block) => sum + block.text.length, 0)
   const { report, harnessTail } = persistedToolResultFiles
@@ -792,6 +932,13 @@ export function finalizeAgentTool(
     harnessNoteCount: notes.length,
     harnessTailCount: harnessTail.length,
     harnessSectionHash: hashHarnessSectionBlocks(content),
+    ...(handbackParts !== undefined && {
+      handbackReportText: handbackParts.report,
+      ...(handbackParts.note !== undefined && {
+        handbackNote: handbackParts.note,
+      }),
+    }),
+    ...(opts?.handbackFlagged === true && { handbackFlagged: true }),
     resolvedModel: resolvedAgentModel,
     ...(modelsUsed.length > 1 && { modelsUsed }),
     totalDurationMs: Date.now() - startTime,
@@ -1383,8 +1530,19 @@ export async function runAsyncAgentLifecycle({
           is_built_in_agent: metadata.isBuiltInAgent,
         })
       }
+      const formattedError = formatApiErrorForParent(lastAssistant, model)
+      const safeguardsGuidance = isSubagentSafeguardsRefusal(lastAssistant)
+        ? formatSubagentSafeguardsGuidance(
+            lastAssistant,
+            toolUseContext.options.tools.some(t =>
+              toolMatchesName(t, AGENT_TOOL_NAME),
+            ),
+          )
+        : undefined
       throw new AgentApiErrorTerminationError(
-        formatApiErrorForParent(lastAssistant, model),
+        safeguardsGuidance
+          ? `${formattedError}\n\n${safeguardsGuidance}`
+          : formattedError,
         typeof lastAssistant.error === 'string'
           ? lastAssistant.error
           : undefined,

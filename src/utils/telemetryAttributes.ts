@@ -10,12 +10,68 @@ import { envDynamic } from './envDynamic.js'
 import { isEnvTruthy } from './envUtils.js'
 import { type APIProvider, getAPIProvider } from './model/providers.js'
 import { toTaggedId } from './taggedId.js'
+import {
+  getVcsRepositoryTelemetryAttributes,
+  VCS_REPOSITORY_ATTRIBUTE_KEYS,
+  VCS_REPOSITORY_URL_FULL,
+} from './telemetry/vcsRepositoryAttributes.js'
 
 // Default configuration for metrics cardinality
 const METRICS_CARDINALITY_DEFAULTS = {
   OTEL_METRICS_INCLUDE_SESSION_ID: true,
   OTEL_METRICS_INCLUDE_VERSION: false,
   OTEL_METRICS_INCLUDE_ACCOUNT_UUID: true,
+  OTEL_METRICS_INCLUDE_REPOSITORY: false,
+}
+
+const OTEL_ATTR_MAX_LEN = 255
+
+function isValidOtelResourceAttrToken(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i)
+    if (code < 33 || code === 44 || code === 59 || code === 92 || code > 126) {
+      return false
+    }
+  }
+  return true
+}
+
+/**
+ * Official 2.1.325 `y5n` (#1873): parse comma-separated `OTEL_RESOURCE_ATTRIBUTES`
+ * `key=value` pairs so explicit `vcs.*` overrides take precedence over git discovery.
+ */
+function parseOtelResourceAttributes(
+  raw: string | undefined,
+): Record<string, string> {
+  if (!raw) return {}
+  const parsed: Record<string, string> = {}
+  try {
+    for (const pair of raw.split(',')) {
+      const [rawKey, rawVal, ...rest] = pair.split('=')
+      if (rawKey === undefined || rawVal === undefined || rest.length > 0) {
+        continue
+      }
+      const key = rawKey.trim()
+      const val = rawVal.trim().split(/^"|"$/).join('')
+      if (
+        key.length === 0 ||
+        key.length > OTEL_ATTR_MAX_LEN ||
+        !isValidOtelResourceAttrToken(key)
+      ) {
+        throw new Error('invalid resource attribute key')
+      }
+      if (
+        val.length > OTEL_ATTR_MAX_LEN ||
+        !isValidOtelResourceAttrToken(val)
+      ) {
+        throw new Error('invalid resource attribute value')
+      }
+      parsed[key] = decodeURIComponent(val)
+    }
+  } catch {
+    return {}
+  }
+  return parsed
 }
 
 function shouldIncludeAttribute(
@@ -184,6 +240,26 @@ export function getTelemetryAttributes(): Attributes {
   }
   if (shouldIncludeAttribute('OTEL_METRICS_INCLUDE_VERSION')) {
     attributes['app.version'] = MACRO.VERSION
+  }
+
+  // Official 2.1.325 `X()` / `bhn()` (#1873): include the 4 low-cardinality
+  // `vcs.*` repository attributes across metrics, logs, and spans when
+  // `OTEL_METRICS_INCLUDE_REPOSITORY` is truthy, honoring explicit
+  // `OTEL_RESOURCE_ATTRIBUTES` overrides over git discovery.
+  if (shouldIncludeAttribute('OTEL_METRICS_INCLUDE_REPOSITORY')) {
+    const resourceAttrs = parseOtelResourceAttributes(
+      process.env.OTEL_RESOURCE_ATTRIBUTES,
+    )
+    const vcsAttrs =
+      resourceAttrs[VCS_REPOSITORY_URL_FULL] === undefined
+        ? getVcsRepositoryTelemetryAttributes()
+        : undefined
+    for (const key of VCS_REPOSITORY_ATTRIBUTE_KEYS) {
+      const value = resourceAttrs[key] ?? vcsAttrs?.[key]
+      if (typeof value === 'string' && value.length > 0) {
+        attributes[key] = value
+      }
+    }
   }
 
   // Only include OAuth account data when actively using OAuth authentication

@@ -122,6 +122,8 @@ import {
   emitTaskProgress,
   extractPartialResult,
   finalizeAgentTool,
+  formatSubagentSafeguardsGuidance,
+  isSubagentSafeguardsRefusal,
   getLastToolUseName,
   readMaxTurnsReached,
   parkAgentOnKeepaliveDeferNotify,
@@ -2549,6 +2551,18 @@ export const AgentTool = buildTool({
             }
 
             const agentResult = finalizeAgentTool(agentMessages, syncAgentId, metadata);
+            // Official 325 #1815: when safeguards stop a sync subagent, append
+            // explicit parent-model guidance instead of letting main redo the work.
+            const lastSyncAssistant = [...agentMessages].reverse().find(m => m.type === 'assistant');
+            if (isSubagentSafeguardsRefusal(lastSyncAssistant)) {
+              const guidance = formatSubagentSafeguardsGuidance(
+                lastSyncAssistant!,
+                toolUseContext.options.tools.some(t => toolMatchesName(t, AGENT_TOOL_NAME)),
+              );
+              agentResult.content = [...agentResult.content, { type: 'text' as const, text: guidance }];
+              agentResult.harnessTailCount = (agentResult.harnessTailCount ?? 0) + 1;
+              agentResult.harnessSectionHash = hashHarnessSectionBlocks(agentResult.content);
+            }
 
             if (feature('TRANSCRIPT_CLASSIFIER')) {
               const currentAppState = toolUseContext.getAppState();

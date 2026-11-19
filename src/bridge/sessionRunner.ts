@@ -1,8 +1,9 @@
 import { type ChildProcess, spawn } from 'child_process'
-import { createWriteStream, type WriteStream } from 'fs'
+import { createHash } from 'crypto'
+import { createWriteStream, readFileSync, type WriteStream } from 'fs'
 import { stat } from 'fs/promises'
 import { tmpdir } from 'os'
-import { dirname, join } from 'path'
+import { basename, dirname, isAbsolute, join } from 'path'
 import { createInterface } from 'readline'
 import { jsonParse, jsonStringify } from '../utils/slowOperations.js'
 import { debugTruncate } from './debugUtils.js'
@@ -44,6 +45,60 @@ export type PermissionRequest = {
   }
 }
 
+export const BRIDGE_SETTINGS_BINDING_ENV = 'CLAUDE_CODE_BRIDGE_SETTINGS_BINDING'
+
+/**
+ * #1846 / official `KFo(resolvedPath, content)` — compute the SHA-256 binding
+ * string `${sha256Hex}:${resolvedPath}` for `claude remote-control --settings`.
+ */
+export function computeBridgeSettingsBinding(
+  resolvedPath: string,
+  content: string | Buffer,
+): string {
+  const hash = createHash('sha256').update(content).digest('hex')
+  return `${hash}:${resolvedPath}`
+}
+
+/**
+ * #1846 / official verification @295194845 — verify that a `--settings` file
+ * matches `CLAUDE_CODE_BRIDGE_SETTINGS_BINDING` (both format and SHA-256 hash)
+ * so no new session starts if the file changed after `claude remote-control`
+ * launched.
+ */
+export function verifyBridgeSettingsBinding(
+  settingsArg: string,
+  resolvedPath: string,
+  content: string | Buffer,
+  bindingEnv: string | undefined = process.env[BRIDGE_SETTINGS_BINDING_ENV],
+  env: NodeJS.ProcessEnv = process.env,
+): { ok: true } | { ok: false; error: string } {
+  if (bindingEnv === undefined) return { ok: true }
+  const colonIdx = bindingEnv.indexOf(':')
+  const boundPath = colonIdx >= 0 ? bindingEnv.slice(colonIdx + 1) : ''
+  const jobShort = basename(env.CLAUDE_JOB_DIR ?? '')
+  const restartHint =
+    env.CLAUDE_CODE_SESSION_KIND === 'bg' && /^[0-9a-f]{8}$/.test(jobShort)
+      ? `Run \`claude respawn ${jobShort}\` in a terminal`
+      : 'Restart `claude remote-control`'
+  if (!(/^[0-9a-f]{64}:/.test(bindingEnv) && isAbsolute(boundPath))) {
+    return {
+      ok: false,
+      error: `Error: The settings file ${settingsArg} can't be checked, because what Remote Control recorded of it is damaged, so this session did not start. ${restartHint} to use it as it is now.`,
+    }
+  }
+  if (
+    (settingsArg === boundPath || resolvedPath === boundPath) &&
+    createHash('sha256').update(content).digest('hex') !==
+      bindingEnv.slice(0, colonIdx)
+  ) {
+    return {
+      ok: false,
+      error: `Error: The settings file ${settingsArg} has changed since Remote Control started, so this session did not start. ${restartHint} to use it as it is now.`,
+    }
+  }
+  return { ok: true }
+}
+
 type SessionSpawnerDeps = {
   execPath: string
   /**
@@ -60,6 +115,10 @@ type SessionSpawnerDeps = {
   debugFile?: string
   permissionMode?: string
   chrome?: boolean
+  /** #1846: resolved path passed via `claude remote-control --settings <file>`. */
+  settingsFile?: string
+  /** #1846: `${sha256}:${resolvedPath}` computed at `claude remote-control` startup. */
+  settingsBinding?: string
   onDebug: (msg: string) => void
   onActivity?: (sessionId: string, activity: SessionActivity) => void
   onPermissionRequest?: (
@@ -287,6 +346,29 @@ export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
         deps.onDebug(`[bridge:session] Transcript log: ${transcriptPath}`)
       }
 
+      // #1846: If `claude remote-control --settings <file>` was supplied, verify
+      // the file has not changed since remote-control started before spawning.
+      if (deps.settingsFile && deps.settingsBinding) {
+        let currentContent: Buffer
+        try {
+          currentContent = readFileSync(deps.settingsFile)
+        } catch (err) {
+          throw new Error(
+            `Error: Settings file not found or unreadable: ${deps.settingsFile} (${err instanceof Error ? err.message : String(err)})`,
+          )
+        }
+        const check = verifyBridgeSettingsBinding(
+          deps.settingsFile,
+          deps.settingsFile,
+          currentContent,
+          deps.settingsBinding,
+          deps.env,
+        )
+        if (!check.ok) {
+          throw new Error(check.error)
+        }
+      }
+
       const args = [
         ...deps.scriptArgs,
         '--print',
@@ -307,6 +389,7 @@ export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
         ...(deps.chrome === undefined
           ? []
           : [deps.chrome ? '--chrome' : '--no-chrome']),
+        ...(deps.settingsFile ? ['--settings', deps.settingsFile] : []),
       ]
 
       // densable 2.1.238 #21 NDl: Vso/MDl/Eot/wot. Do not apply mrn.
@@ -320,6 +403,9 @@ export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
           sandbox: deps.sandbox,
         }),
         CLAUDE_CODE_POST_FOR_SESSION_INGRESS_V2: '1',
+        ...(deps.settingsBinding
+          ? { [BRIDGE_SETTINGS_BINDING_ENV]: deps.settingsBinding }
+          : {}),
         ...(opts.useCcrV2 && {
           CLAUDE_CODE_USE_CCR_V2: '1',
           CLAUDE_CODE_WORKER_EPOCH: String(opts.workerEpoch),

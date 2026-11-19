@@ -115,7 +115,9 @@ To enable only specific tools, flip the default off and opt-in per tool:
 
 ### Web search & web fetch settings (domain filters)
 
-`web_search` and `web_fetch` run on Anthropic's servers regardless of environment type, so an environment's `networking` policy **does not** govern them (see `shared/managed-agents-environments.md` → Networking). To control what they can reach, set `allowed_domains` (only these hosts) **or** `blocked_domains` (never these hosts) — never both on one entry — on the tool's `configs` entry. Each tool carries its own list. Organization-level web search/fetch settings in the Console apply to the Messages API only, not to Managed Agents sessions.
+`web_search` and `web_fetch` run on Anthropic's servers regardless of environment type. With `limited` networking, `allowed_hosts` also applies to them: `web_fetch` returns an error result for a URL on a host that `allowed_hosts` does not match, `web_search` omits results from such hosts, and when `allowed_hosts` lists no hosts neither returns a page or a search result. A host added to `allowed_hosts` for these tools is also open to the sandbox. `unrestricted` networking and self-hosted environments do not limit them (see `shared/managed-agents-environments.md` → Networking). To control what they can reach whatever the environment, set `allowed_domains` (only these hosts) **or** `blocked_domains` (never these hosts) — never both on one entry — on the tool's `configs` entry. Each tool carries its own list.
+
+The organization's web search and web fetch settings on the Console's **Capabilities** page (`https://platform.claude.com/settings/capabilities`) also apply in sessions: if an admin turns a tool off, its calls return an error result to the agent and the session continues. With organization domain restrictions set, `web_search` returns only results that both the organization's list and the tool's own list allow, and `web_fetch` returns an error result for a URL, or any URL a redirect leads to, that either list excludes. The Web Search & Fetch Restrictions page in `shared/live-sources.md` has the full rules.
 
 ```json
 {

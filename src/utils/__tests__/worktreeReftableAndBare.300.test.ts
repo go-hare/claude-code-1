@@ -1,11 +1,21 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { execFileSync } from 'child_process'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
+  assertGitRefTargetPlain,
   cleanupWorktreeReftableAdminDir,
   getOrCreateWorktree,
+  resolveCommonGitDirForRefCheck,
 } from '../worktree.js'
 
 const tempDirs: string[] = []
@@ -97,5 +107,69 @@ describe('worktree reftable & bare repo fallback (#677, #787)', () => {
     })
     expect(result.headCommit).toBe(expectedHead)
     expect(existsSync(result.worktreePath)).toBe(true)
+  })
+
+  test('#1780 resolveCommonGitDirForRefCheck works in linked worktrees without --path-format=absolute', async () => {
+    const repo = makeTempDir('wt-common-resolve-')
+    execFileSync('git', ['init', '-b', 'main'], { cwd: repo, stdio: 'ignore' })
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], {
+      cwd: repo,
+      stdio: 'ignore',
+    })
+    execFileSync('git', ['config', 'user.name', 'Test'], {
+      cwd: repo,
+      stdio: 'ignore',
+    })
+    writeFileSync(join(repo, 'a.txt'), 'a\n')
+    execFileSync('git', ['add', 'a.txt'], { cwd: repo, stdio: 'ignore' })
+    execFileSync('git', ['commit', '-m', 'init'], {
+      cwd: repo,
+      stdio: 'ignore',
+    })
+
+    const linked = makeTempDir('wt-linked-')
+    rmSync(linked, { recursive: true, force: true })
+    execFileSync('git', ['worktree', 'add', '-b', 'feat', linked, 'HEAD'], {
+      cwd: repo,
+      stdio: 'ignore',
+    })
+    tempDirs.push(linked)
+
+    const commonFromMain = await resolveCommonGitDirForRefCheck(repo)
+    const commonFromLinked = await resolveCommonGitDirForRefCheck(linked)
+    expect(commonFromMain).not.toBeNull()
+    expect(commonFromLinked).not.toBeNull()
+    expect(realpathSync(commonFromLinked!)).toBe(
+      realpathSync(join(repo, '.git')),
+    )
+    expect(realpathSync(commonFromMain!)).toBe(realpathSync(join(repo, '.git')))
+  })
+
+  test('#1780 assertGitRefTargetPlain accepts reftable .git/refs/heads placeholder and refuses symlinked reftable', async () => {
+    const gitDir = makeTempDir('wt-reftable-refcheck-')
+    mkdirSync(join(gitDir, 'reftable'), { recursive: true })
+    mkdirSync(join(gitDir, 'refs'), { recursive: true })
+    writeFileSync(join(gitDir, 'HEAD'), 'ref: refs/heads/.invalid\n')
+    writeFileSync(
+      join(gitDir, 'refs', 'heads'),
+      'this repository uses the reftable format\n',
+    )
+    writeFileSync(join(gitDir, 'reftable', 'tables.list'), '')
+
+    // In a reftable repo `.git/refs/heads` is a regular placeholder file — must be ok
+    const okRes = await assertGitRefTargetPlain(gitDir, 'worktree-foo')
+    expect(okRes).toEqual({ ok: true })
+
+    // Replacing reftable/tables.list with a symlink must be refused
+    const outside = makeTempDir('wt-outside-')
+    const target = join(outside, 'tables.list')
+    writeFileSync(target, '')
+    rmSync(join(gitDir, 'reftable', 'tables.list'))
+    symlinkSync(target, join(gitDir, 'reftable', 'tables.list'))
+    const badRes = await assertGitRefTargetPlain(gitDir, 'worktree-foo')
+    expect(badRes.ok).toBe(false)
+    if (!badRes.ok) {
+      expect(badRes.reason).toBe('ref_target_not_plain')
+    }
   })
 })

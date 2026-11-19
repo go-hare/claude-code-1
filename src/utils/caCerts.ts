@@ -111,6 +111,7 @@ export function filterSelfNamedCertificates(
   bundledRoots: readonly string[],
   extraContent: string | undefined,
   env: NodeJS.ProcessEnv = process.env,
+  knownRootLookup?: (pem: string) => { expires: number } | undefined,
 ): string[] {
   if (isEnvTruthy(env.CLAUDE_CODE_DISABLE_SELF_NAMED_CERT_DROP)) {
     logForDebugging(
@@ -122,6 +123,12 @@ export function filterSelfNamedCertificates(
   const bundledSet = new Set(bundledRoots.map(stripPemHeaders))
   const kept: string[] = []
   for (const entry of certs) {
+    // Official 2.1.321 (#1931): fast-path known roots via precomputed SHA-256
+    // table without constructing X509Certificate.
+    if (knownRootLookup?.(entry) !== undefined) {
+      kept.push(entry)
+      continue
+    }
     const blocks = entry.match(PEM_BLOCK_RE)
     if (!blocks || blocks.length !== 1) {
       kept.push(entry)
@@ -343,11 +350,27 @@ export const getCACertificates = memoize((): string[] | undefined => {
     }
   }
 
+  // Official 2.1.321 (#1931): pre-index bundled roots by SHA-256 so known roots
+  // bypass per-certificate X509Certificate parsing during startup filtering.
+  let lookupKnownRoot:
+    | ((pem: string) => { expires: number } | undefined)
+    | undefined
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { knownHashes } = require('./mtls.js') as typeof import('./mtls.js')
+    knownHashes.registerKnownRoots(tls.rootCertificates)
+    lookupKnownRoot = pem => knownHashes.knownRootOf(pem)
+  } catch {
+    // optional in isolation
+  }
+
   const withoutLoopedCross = filterLoopedCrossCertificates(certs)
   const filtered = filterSelfNamedCertificates(
     withoutLoopedCross,
     tls.rootCertificates,
     parsedExtraCerts,
+    process.env,
+    lookupKnownRoot,
   )
 
   return filtered.length > 0 ? filtered : undefined

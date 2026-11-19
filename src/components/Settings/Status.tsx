@@ -13,6 +13,7 @@ import { useIsInsideModal } from '../../context/modalContext.js';
 import { Box, Text, useTheme } from '@anthropic/ink';
 import { type AppState, useAppState } from '../../state/AppState.js';
 import { getCwd } from '../../utils/cwd.js';
+import { serverCheckDeclined } from '../../services/api/autoModeServerFallbackNotice.js';
 import { getCurrentSessionTitle } from '../../utils/sessionStorage.js';
 import {
   buildAccountProperties,
@@ -30,6 +31,7 @@ import {
   buildCrossSessionPeerAddressProperties,
   type Diagnostic,
   getModelDisplayLabel,
+  linkifyStatusText,
   type Property,
 } from '../../utils/status.js';
 import type { ThemeName } from '../../utils/theme.js';
@@ -103,7 +105,9 @@ function buildSecondarySection({
           ...buildProcessWrapperProperties(),
         ]),
     ...buildSettingSourcesProperties(),
-    ...buildAutoModeServerProperties(permissionMode),
+    ...buildAutoModeServerProperties(permissionMode, {
+      serverCheckDeclined: serverCheckDeclined(),
+    }),
   ];
 }
 
@@ -115,14 +119,14 @@ export async function buildDiagnostics(): Promise<Diagnostic[]> {
   ];
 }
 
-function PropertyValue({ value }: { value: Property['value'] }): React.ReactNode {
+function PropertyValue({ value, linkify }: { value: Property['value']; linkify?: boolean }): React.ReactNode {
   if (Array.isArray(value)) {
     return (
       <Box flexWrap="wrap" columnGap={1} flexShrink={99}>
         {value.map((item, i) => {
           return (
             <Text key={i}>
-              {item}
+              {linkify ? linkifyStatusText(item) : item}
               {i < value.length - 1 ? ',' : ''}
             </Text>
           );
@@ -132,7 +136,7 @@ function PropertyValue({ value }: { value: Property['value'] }): React.ReactNode
   }
 
   if (typeof value === 'string') {
-    return <Text>{value}</Text>;
+    return <Text>{linkify ? linkifyStatusText(value) : value}</Text>;
   }
 
   return value;
@@ -190,10 +194,10 @@ export function Status({ context, diagnosticsPromise }: Props): React.ReactNode 
           (properties, i) =>
             properties.length > 0 && (
               <Box key={i} flexDirection="column">
-                {properties.map(({ label, value }, j) => (
+                {properties.map(({ label, value, linkify }, j) => (
                   <Box key={j} flexDirection="row" gap={1} flexShrink={0}>
                     {label !== undefined && <Text bold>{label}:</Text>}
-                    <PropertyValue value={value} />
+                    <PropertyValue value={value} linkify={linkify} />
                   </Box>
                 ))}
               </Box>

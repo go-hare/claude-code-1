@@ -205,6 +205,8 @@ export type RootRunnerArgs = {
   configureGit: boolean
   pushOutcomeOnRelease: boolean
   trustWorkspace: boolean
+  /** #1826: `--remove-session-state` / `SELF_HOSTED_RUNNER_REMOVE_SESSION_STATE` (default false). */
+  removeSessionState: boolean
   confineRepoSettings: ConfineRepoSettings
   /**
    * densable 2.1.238 — `--proxy-authorization-command` value (pre-resolve).
@@ -805,6 +807,9 @@ export function parseRootArgs(
     trustWorkspace: parseTrustWorkspaceEnv(
       process.env.SELF_HOSTED_RUNNER_TRUST_WORKSPACE,
     ),
+    removeSessionState: isEnvTruthy(
+      process.env.SELF_HOSTED_RUNNER_REMOVE_SESSION_STATE,
+    ),
     confineRepoSettings: parseConfineRepoSettingsEnv(
       process.env.SELF_HOSTED_RUNNER_CONFINE_REPO_SETTINGS,
     ),
@@ -918,6 +923,17 @@ export function parseRootArgs(
           n++
         } else {
           t.trustWorkspace = true
+        }
+        break
+      case '--remove-session-state':
+        if (i === 'false' || i === '0') {
+          t.removeSessionState = false
+          n++
+        } else if (i === 'true' || i === '1') {
+          t.removeSessionState = true
+          n++
+        } else {
+          t.removeSessionState = true
         }
         break
       case '--confine-repo-settings':
@@ -1453,6 +1469,7 @@ export type PollSkeletonOpts = {
   gitHostRewrites?: Array<[string, string]>
   pushOutcomeOnRelease?: boolean
   trustWorkspace?: boolean
+  removeSessionState?: boolean
   confineRepoSettings?: ConfineRepoSettings
   useAnthropicGitProxy?: boolean
   onStatus: (msg: string) => void
@@ -2735,6 +2752,7 @@ export async function runPollSkeleton(
                 canonicalLocks: opts.canonicalLocks,
                 confineRepoSettings: opts.confineRepoSettings,
                 trustWorkspace: opts.trustWorkspace,
+                removeSessionState: opts.removeSessionState,
               },
               childAc.signal,
             ),
@@ -3485,6 +3503,7 @@ export async function selfHostedRunnerMain(
         gitHostRewrites: args.gitHostRewrites,
         pushOutcomeOnRelease: args.pushOutcomeOnRelease,
         trustWorkspace: args.trustWorkspace,
+        removeSessionState: args.removeSessionState,
         confineRepoSettings: args.confineRepoSettings,
         useAnthropicGitProxy: args.useAnthropicGitProxy,
         anthropicGitProxyBaseUrl: args.useAnthropicGitProxy

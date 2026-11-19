@@ -29,6 +29,7 @@ import {
   mcpTaskLabel,
   registerMcpTask,
 } from '../tasks/McpTask/McpTask.js'
+import { isMcpTasksEnabled } from '../services/mcp/mcpV2Client.js'
 import type { AppState } from '../state/AppState.js'
 import { logForDebugging } from './debug.js'
 import {
@@ -91,6 +92,221 @@ export function isMcpAutoBackgroundEnabled(
   opts?: Parameters<typeof resolveMcpAutoBackgroundMs>[1],
 ): boolean {
   return resolveMcpAutoBackgroundMs(env, opts) > 0
+}
+
+/**
+ * Official 325 `zFs` (#1702) — when `CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND`
+ * is set, Claude Code waits for a SEP-2663 MCP server task inside its tool
+ * call instead of moving it to the background right away.
+ */
+export function isMcpTaskBackgroundDisabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return isTruthyEnv(env.CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND)
+}
+
+/**
+ * Official 325 `Lia` (#1701, #1702, #1805) — whether SEP-2663 server-initiated
+ * MCP tasks should be moved to the background immediately.
+ */
+export function shouldAutoBackgroundMcpTasks(
+  env: NodeJS.ProcessEnv = process.env,
+  opts?: {
+    isNonInteractiveSession?: boolean
+    readFeature?: (key: string, def: boolean) => boolean
+  },
+): boolean {
+  if (!isMcpTasksEnabled(env, opts?.readFeature)) return false
+  if (isMcpTaskBackgroundDisabled(env)) return false
+  if (isBackgroundTasksDisabled(env)) return false
+  const rawMs = env.CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS
+  if (rawMs !== undefined && Number(rawMs) === 0) return false
+  const nonInteractive =
+    opts?.isNonInteractiveSession ?? getIsNonInteractiveSession()
+  if (nonInteractive && !isTruthyEnv(env.CLAUDE_AUTO_BACKGROUND_TASKS)) {
+    return false
+  }
+  return true
+}
+
+export type Sep2663ServerTaskRef = {
+  mcpTaskId: string
+  status: string
+  statusMessage?: string
+  pollIntervalMs?: number
+  ttlExpiresAt?: number
+}
+
+/**
+ * Official 325 (#1701) — detect a SEP-2663 server task response returned by an
+ * MCP server (`{ task: { taskId, status, ... } }` or
+ * `_meta['io.modelcontextprotocol/related-task']`).
+ */
+export function extractSep2663ServerTask(
+  result: unknown,
+): Sep2663ServerTaskRef | undefined {
+  if (!result || typeof result !== 'object') return undefined
+  const rec = result as Record<string, unknown>
+  const taskObj =
+    rec.task && typeof rec.task === 'object'
+      ? (rec.task as Record<string, unknown>)
+      : rec._meta &&
+          typeof rec._meta === 'object' &&
+          'io.modelcontextprotocol/related-task' in
+            (rec._meta as Record<string, unknown>)
+        ? ((rec._meta as Record<string, unknown>)[
+            'io.modelcontextprotocol/related-task'
+          ] as Record<string, unknown> | undefined)
+        : undefined
+  if (!taskObj || typeof taskObj !== 'object') return undefined
+  const mcpTaskId =
+    typeof taskObj.taskId === 'string' && taskObj.taskId.length > 0
+      ? taskObj.taskId
+      : undefined
+  if (!mcpTaskId) return undefined
+  const status = typeof taskObj.status === 'string' ? taskObj.status : 'working'
+  if (status === 'completed' || status === 'failed' || status === 'cancelled') {
+    return undefined
+  }
+  const pollIntervalMs =
+    typeof taskObj.pollInterval === 'number' && taskObj.pollInterval > 0
+      ? taskObj.pollInterval
+      : undefined
+  const ttlMs =
+    typeof taskObj.ttl === 'number' && taskObj.ttl > 0
+      ? Date.now() + taskObj.ttl
+      : undefined
+  return {
+    mcpTaskId,
+    status,
+    statusMessage:
+      typeof taskObj.statusMessage === 'string'
+        ? taskObj.statusMessage
+        : undefined,
+    pollIntervalMs,
+    ttlExpiresAt: ttlMs,
+  }
+}
+
+/**
+ * Official 325 (#1701, #1702) — handle a SEP-2663 server-initiated MCP task:
+ * - When `shouldAutoBackgroundMcpTasks()` is true, immediately register an
+ *   `mcp_task` (`protocol: 'sep2663'`), start background polling via
+ *   `pollToCompletion`, and return the backgrounded tool result right away.
+ * - When `CLAUDE_CODE_DISABLE_MCP_TASK_BACKGROUND` is set, wait inline for
+ *   `pollToCompletion` inside the tool call instead of backgrounding.
+ */
+export async function handleSep2663ServerTask<T>(params: {
+  serverName: string
+  toolName: string
+  toolLabel: string
+  toolUseId?: string
+  taskRef: Sep2663ServerTaskRef
+  setAppState: (updater: (prev: AppState) => AppState) => void
+  pollToCompletion: (signal: AbortSignal) => Promise<T>
+  parentAbortSignal?: AbortSignal
+  isNonInteractiveSession?: boolean
+  env?: NodeJS.ProcessEnv
+  sidecarSessionId?: string
+  sidecarProjectDir?: string
+}): Promise<
+  | T
+  | {
+      content: Array<{ type: 'text'; text: string }>
+      autoBackgrounded: true
+      taskId: string
+    }
+> {
+  if (
+    !shouldAutoBackgroundMcpTasks(params.env ?? process.env, {
+      isNonInteractiveSession: params.isNonInteractiveSession,
+    })
+  ) {
+    const controller = new AbortController()
+    const onAbort = () => controller.abort(params.parentAbortSignal?.reason)
+    if (params.parentAbortSignal?.aborted) {
+      controller.abort(params.parentAbortSignal.reason)
+    } else {
+      params.parentAbortSignal?.addEventListener('abort', onAbort, {
+        once: true,
+      })
+    }
+    try {
+      return await params.pollToCompletion(controller.signal)
+    } finally {
+      params.parentAbortSignal?.removeEventListener('abort', onAbort)
+    }
+  }
+
+  const driveController = new AbortController()
+  const taskId = registerMcpTask(params.setAppState, {
+    serverName: params.serverName,
+    toolName: params.toolName,
+    mcpTaskId: params.taskRef.mcpTaskId,
+    toolUseId: params.toolUseId,
+    pollIntervalMs: params.taskRef.pollIntervalMs,
+    ttlExpiresAt: params.taskRef.ttlExpiresAt,
+    protocol: 'sep2663',
+    driveAbortController: driveController,
+    sidecarSessionId: params.sidecarSessionId,
+    sidecarProjectDir: params.sidecarProjectDir,
+  })
+
+  void params
+    .pollToCompletion(driveController.signal)
+    .then(settled => {
+      const content =
+        settled && typeof settled === 'object' && 'content' in settled
+          ? (settled as { content?: unknown }).content
+          : settled
+      const resultText = mcpContentToNotificationText(content)
+      const resourceLinks = collectMcpResourceLinks(content)
+      const transitioned = completeMcpTask(
+        taskId,
+        params.setAppState,
+        undefined,
+        resourceLinks,
+      )
+      if (!transitioned) return
+      const xml = buildMcpTaskNotification({
+        taskId,
+        serverName: params.serverName,
+        toolName: params.toolName,
+        status: 'completed',
+        resultText,
+      })
+      enqueuePendingNotification({
+        value: xml,
+        mode: 'task-notification',
+        priority: 'later',
+        agentId: getMainThreadAgentId(),
+      })
+    })
+    .catch(err => {
+      const msg = err instanceof Error ? err.message : String(err)
+      const transitioned = failMcpTask(taskId, params.setAppState, msg)
+      if (!transitioned) return
+      const xml = buildMcpTaskNotification({
+        taskId,
+        serverName: params.serverName,
+        toolName: params.toolName,
+        status: 'failed',
+        statusMessage: msg,
+      })
+      enqueuePendingNotification({
+        value: xml,
+        mode: 'task-notification',
+        priority: 'later',
+        agentId: getMainThreadAgentId(),
+      })
+    })
+
+  const movedText = `MCP tool "${params.toolLabel}" started as a server task and was moved to the background as task ${taskId}; you'll receive a notification with the result when it completes. You can keep working in the meantime. To stop it, use TaskStop with task_id "${taskId}".`
+  return {
+    content: [{ type: 'text', text: movedText }],
+    autoBackgrounded: true,
+    taskId,
+  }
 }
 
 function isTruthyEnv(v: string | undefined): boolean {

@@ -1,4 +1,4 @@
-import { existsSync, statSync } from 'fs'
+import { existsSync, lstatSync, readdirSync, realpathSync, statSync } from 'fs'
 import memoize from 'lodash-es/memoize.js'
 import * as path from 'path'
 import * as pathWin32 from 'path/win32'
@@ -9,6 +9,7 @@ import { execSync_DEPRECATED } from './execSyncWrapper.js'
 import { memoizeWithLRU } from './memoize.js'
 import { getPlatform } from './platform.js'
 import { isTestNoGitBash } from './residualFinalEnvGates.js'
+import { getInitialSettings } from './settings/settings.js'
 
 /**
  * If Windows, set the SHELL environment variable to git-bash path.
@@ -288,6 +289,185 @@ export function resolveGitForWindowsDirectExe(
   return launcherPath
 }
 
+/**
+ * Official 2.1.321 #1925 & #1944:
+ * In-process Windows PATH + PATHEXT lookup cache (avoids spawning `where.exe`
+ * on startup and first command), skipping relative PATH entries, UNC / network
+ * share PATH entries, and symlinks resolving onto a network share, while
+ * picking up PATH changes from settings (`settings.env.PATH`).
+ */
+const WINDOWS_DRIVE_ABS_RE = /^[A-Za-z]:[\\/]/
+const WINDOWS_UNC_OR_NET_RE = /^(?:\\\\|\/\/|\\\?\\UNC\\|\/\/\?\/UNC\/)/i
+
+export function isUnsafeWindowsPathEntry(entry: string): boolean {
+  const trimmed = entry.trim().replace(/^"|"$/g, '')
+  if (!trimmed) return true
+  if (WINDOWS_UNC_OR_NET_RE.test(trimmed)) return true
+  if (!WINDOWS_DRIVE_ABS_RE.test(trimmed)) return true
+  return false
+}
+
+export type WindowsPathLookupOptions = {
+  pathEnv?: string
+  pathExtEnv?: string
+  settingsPathEnv?: string
+  cwd?: string
+  readdirFn?: (dir: string) => string[]
+  lstatFn?: (p: string) => {
+    isSymbolicLink: () => boolean
+    isDirectory: () => boolean
+  }
+  realpathFn?: (p: string) => string
+}
+
+type WindowsPathCache = {
+  key: string
+  /** lowercased dir -> lowercased file name -> actual file name */
+  dirEntries: Map<string, Map<string, string>>
+  dirs: string[]
+  exts: string[]
+}
+
+let windowsPathCache: WindowsPathCache | null = null
+
+export function clearWindowsPathCacheForTesting(): void {
+  windowsPathCache = null
+}
+
+function getEffectiveWindowsPathAndExt(opts?: WindowsPathLookupOptions): {
+  rawPath: string
+  rawPathExt: string
+} {
+  let settingsPath = opts?.settingsPathEnv
+  if (settingsPath === undefined) {
+    try {
+      const env = getInitialSettings()?.env
+      settingsPath = env?.PATH ?? env?.Path
+    } catch {
+      settingsPath = undefined
+    }
+  }
+  const procPath = opts?.pathEnv ?? process.env.PATH ?? process.env.Path ?? ''
+  const rawPath =
+    settingsPath && settingsPath !== procPath
+      ? `${settingsPath};${procPath}`
+      : procPath
+  const rawPathExt =
+    opts?.pathExtEnv ?? process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD'
+  return { rawPath, rawPathExt }
+}
+
+function parseWindowsPathDirs(rawPath: string): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const part of rawPath.split(';')) {
+    const cleaned = part.trim().replace(/^"|"$/g, '')
+    if (isUnsafeWindowsPathEntry(cleaned)) continue
+    const norm = pathWin32.normalize(cleaned).replace(/[\\/]+$/, '')
+    const key = norm.toLowerCase()
+    if (!seen.has(key)) {
+      seen.add(key)
+      out.push(norm)
+    }
+  }
+  return out
+}
+
+function parseWindowsPathExts(rawPathExt: string): string[] {
+  const exts = rawPathExt
+    .split(';')
+    .map(e => e.trim().toLowerCase())
+    .filter(e => e.startsWith('.'))
+  return exts.length > 0 ? exts : ['.com', '.exe', '.bat', '.cmd']
+}
+
+export function resolveWindowsExecutableOnPath(
+  command: string,
+  opts?: WindowsPathLookupOptions,
+): string | null {
+  const trimmedCmd = command.trim()
+  if (!trimmedCmd || /[\\/]/.test(trimmedCmd)) return null
+
+  const { rawPath, rawPathExt } = getEffectiveWindowsPathAndExt(opts)
+  const cacheKey = `${rawPath}\0${rawPathExt}`
+  const isCustomFs =
+    opts?.readdirFn !== undefined ||
+    opts?.lstatFn !== undefined ||
+    opts?.realpathFn !== undefined
+
+  let cache: WindowsPathCache
+  if (!isCustomFs && windowsPathCache?.key === cacheKey) {
+    cache = windowsPathCache
+  } else {
+    cache = {
+      key: cacheKey,
+      dirEntries: new Map(),
+      dirs: parseWindowsPathDirs(rawPath),
+      exts: parseWindowsPathExts(rawPathExt),
+    }
+    if (!isCustomFs) {
+      windowsPathCache = cache
+    }
+  }
+
+  const readdirImpl = opts?.readdirFn ?? ((d: string) => readdirSync(d))
+  const lstatImpl = opts?.lstatFn ?? ((p: string) => lstatSync(p))
+  const realpathImpl = opts?.realpathFn ?? ((p: string) => realpathSync(p))
+  const cwd = opts?.cwd ?? getCwd()
+
+  const lowerCmd = trimmedCmd.toLowerCase()
+  const hasKnownExt = cache.exts.some(ext => lowerCmd.endsWith(ext))
+  const candidateNames = hasKnownExt
+    ? [lowerCmd]
+    : cache.exts.map(ext => `${lowerCmd}${ext}`)
+
+  for (const dir of cache.dirs) {
+    const dirKey = dir.toLowerCase()
+    let entries = cache.dirEntries.get(dirKey)
+    if (entries === undefined) {
+      entries = new Map()
+      try {
+        for (const name of readdirImpl(dir)) {
+          const lower = name.toLowerCase()
+          if (!entries.has(lower)) {
+            entries.set(lower, name)
+          }
+        }
+      } catch {
+        // Unreadable or absent PATH directory — cache as empty
+      }
+      cache.dirEntries.set(dirKey, entries)
+    }
+
+    for (const candidateLower of candidateNames) {
+      const actualName = entries.get(candidateLower)
+      if (!actualName) continue
+      const fullCandidate = pathWin32.join(dir, actualName)
+      if (shouldSkipWhereCandidateAsCwdShadow(fullCandidate, cwd)) {
+        continue
+      }
+      try {
+        const st = lstatImpl(fullCandidate)
+        if (st.isDirectory()) continue
+        if (st.isSymbolicLink()) {
+          const resolved = realpathImpl(fullCandidate)
+          if (WINDOWS_UNC_OR_NET_RE.test(resolved)) {
+            logForDebugging(
+              `Skipping Windows PATH link pointing to network share: ${fullCandidate} -> ${resolved}`,
+            )
+            continue
+          }
+        }
+      } catch {
+        continue
+      }
+      return fullCandidate
+    }
+  }
+
+  return null
+}
+
 function findExecutableWithDeps(
   executable: string,
   deps: GitBashDiscoveryDeps,
@@ -304,6 +484,19 @@ function findExecutableWithDeps(
       if (deps.checkExists(location)) {
         return resolveGitForWindowsDirectExe(location, deps)
       }
+    }
+  }
+
+  // Official #1925 & #1944: try in-process PATH+PATHEXT lookup when using
+  // default deps (no spawned where.exe helper process).
+  if (deps === DEFAULT_DEPS) {
+    const fastHit = resolveWindowsExecutableOnPath(executable, {
+      cwd: deps.cwdFn(),
+    })
+    if (fastHit) {
+      return executable === 'git'
+        ? resolveGitForWindowsDirectExe(fastHit, deps)
+        : fastHit
     }
   }
 
@@ -387,6 +580,19 @@ export function findGitBashPathOrNullWithDeps(
       }; falling back to auto-detection`,
       { level: 'warn' },
     )
+  }
+
+  // 1b. Official 2.1.321 #1934: prioritize standard Git for Windows install
+  //     (`C:\Program Files\Git\bin\bash.exe`) directly before probing PATH or
+  //     spawning `where.exe` / `git.exe`, improving startup time.
+  const standardGitBashCandidates = [
+    'C:\\Program Files\\Git\\bin\\bash.exe',
+    'C:\\Program Files (x86)\\Git\\bin\\bash.exe',
+  ]
+  for (const candidate of standardGitBashCandidates) {
+    if (deps.checkExists(candidate)) {
+      return candidate
+    }
   }
 
   // 2. Look up bash.exe directly via PATH. Ignore Windows' WSL launchers;

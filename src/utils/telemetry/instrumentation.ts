@@ -57,6 +57,7 @@ import { registerCleanup } from '../cleanupRegistry.js'
 import { getHasFormattedOutput, logForDebugging } from '../debug.js'
 import { isEnvTruthy } from '../envUtils.js'
 import { errorMessage } from '../errors.js'
+import { getMTLSConfig } from '../mtls.js'
 import { getSettings_DEPRECATED } from '../settings/settings.js'
 import { jsonStringify } from '../slowOperations.js'
 import { profileCheckpoint } from '../startupProfiler.js'
@@ -443,12 +444,35 @@ async function initializeBetaTracing(
     import('@opentelemetry/exporter-logs-otlp-http'),
   ])
 
-  const httpConfig = {
+  // Official 2.1.319 (#1758): detailed beta tracing must present
+  // CLAUDE_CODE_CLIENT_CERT (mTLS) to collectors that require a client cert.
+  const hasMtlsClientCert = Boolean(getMTLSConfig()?.cert)
+  const hasOtelTlsOverride = (signal: 'traces' | 'logs'): boolean => {
+    const upper = signal.toUpperCase()
+    const keys = [
+      'OTEL_EXPORTER_OTLP_CERTIFICATE',
+      'OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE',
+      'OTEL_EXPORTER_OTLP_CLIENT_KEY',
+      `OTEL_EXPORTER_OTLP_${upper}_CERTIFICATE`,
+      `OTEL_EXPORTER_OTLP_${upper}_CLIENT_CERTIFICATE`,
+      `OTEL_EXPORTER_OTLP_${upper}_CLIENT_KEY`,
+    ]
+    return keys.some(k => Boolean(process.env[k]))
+  }
+  const betaAgentFactory = createOtlpHttpAgentFactory(endpoint)
+
+  const httpConfig: Record<string, unknown> = {
     url: `${endpoint}/v1/traces`,
+    ...(hasMtlsClientCert || !hasOtelTlsOverride('traces')
+      ? { httpAgentOptions: betaAgentFactory }
+      : {}),
   }
 
-  const logHttpConfig = {
+  const logHttpConfig: Record<string, unknown> = {
     url: `${endpoint}/v1/logs`,
+    ...(hasMtlsClientCert || !hasOtelTlsOverride('logs')
+      ? { httpAgentOptions: betaAgentFactory }
+      : {}),
   }
 
   // Initialize trace exporter
@@ -889,9 +913,29 @@ export function getOTLPExporterConfig(
       ...(signal ? { url: `${baseUrl}/v1/${signal}` } : {}),
       onlyConfigHeaders: true,
       headers: async (): Promise<Record<string, string>> => {
-        const current = getGatewayAuth()
+        // Official 2.1.319 (#1761): refresh/re-verify gateway token expiry
+        // BEFORE sending telemetry so expired terminals do not fire requests
+        // the gateway refuses and logs as `invalid_token`.
+        let current = getGatewayAuth()
         if (!current || current.url !== baseUrl) return {}
         if (isGatewayAuthExpired(current)) {
+          try {
+            const { refreshGatewayTokenIfNeeded } =
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              require('../gatewayEnv.js') as {
+                refreshGatewayTokenIfNeeded?: () => Promise<unknown>
+              }
+            await refreshGatewayTokenIfNeeded?.()
+            current = getGatewayAuth()
+          } catch {
+            // refresh failed — re-check below and abort send
+          }
+        }
+        if (
+          !current ||
+          current.url !== baseUrl ||
+          isGatewayAuthExpired(current)
+        ) {
           throw new Error(formatGatewaySessionExpiredError())
         }
         return { Authorization: `Bearer ${current.jwt}` }

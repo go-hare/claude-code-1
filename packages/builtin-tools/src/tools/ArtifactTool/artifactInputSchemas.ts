@@ -33,6 +33,8 @@ const HOSTED_ARTIFACT_ACTIONS = [
   'read_asset',
   'verify',
   'read_page_data',
+  'read_db',
+  'write_db',
   'delete',
   'room_send',
   'quickstart',
@@ -117,6 +119,12 @@ export const inputSchema = lazySchema(() =>
     schema: z.string().optional(),
     topic: z.string().optional(),
     data: z.unknown().optional(),
+    db_op: z.string().optional(),
+    collection: z.string().optional(),
+    doc_id: z.string().optional(),
+    query: z.record(z.string(), z.unknown()).optional(),
+    writes: z.array(z.unknown()).optional(),
+    if_version: z.union([z.string(), z.number()]).optional(),
     intent: z
       .enum(['document', 'slides', 'design', 'other'])
       .optional()

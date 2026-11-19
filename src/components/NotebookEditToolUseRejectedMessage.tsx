@@ -28,11 +28,11 @@ export function NotebookEditToolUseRejectedMessage({
     <MessageResponse>
       <Box flexDirection="column">
         <Box flexDirection="row">
-          <Text color="subtle">User rejected {operation} </Text>
-          <Text bold color="subtle">
+          <Text dimColor>User rejected {operation} </Text>
+          <Text bold dimColor>
             {verbose ? notebook_path : relative(getCwd(), notebook_path)}
           </Text>
-          <Text color="subtle"> at cell {cell_id}</Text>
+          <Text dimColor> at cell {cell_id}</Text>
         </Box>
         {edit_mode !== 'delete' && (
           <Box marginTop={1} flexDirection="column">
