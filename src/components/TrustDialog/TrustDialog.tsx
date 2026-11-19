@@ -7,7 +7,7 @@ import {
 import { setSessionTrustAccepted } from '../../bootstrap/state.js';
 import type { Command } from '../../commands.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { Box, Link, StatusIcon, Text } from '@anthropic/ink';
+import { CLEAR_PROGRAM_STATUS, Box, Link, programStatus, StatusIcon, tD, Text } from '@anthropic/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import { getMcpConfigsByScope } from '../../services/mcp/config.js';
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js';
@@ -16,7 +16,7 @@ import { getCwd } from '../../utils/cwd.js';
 import { probeProjectGrantsGated } from '../../utils/permissions/projectGrantsGate.js';
 import { settingsChangeDetector } from '../../utils/settings/changeDetector.js';
 import { getSettingsForSource } from '../../utils/settings/settings.js';
-import { gracefulShutdownSync } from '../../utils/gracefulShutdown.js';
+import { gracefulShutdown, gracefulShutdownSync } from '../../utils/gracefulShutdown.js';
 import { plural } from '../../utils/stringUtils.js';
 import { CONFIRM_SELECT_ARM_MS, ConfirmSelect, ConfirmSelectHint, confirmSelectRefused } from '../ConfirmSelect.js';
 import { PermissionDialog } from '../permissions/PermissionDialog.js';
@@ -31,8 +31,10 @@ import {
 } from './trustDialogCopy.js';
 import {
   formatEnglishSourceList,
+  formatTrustSettingsFilesDisclosure,
   getProjectAddDirsDisclosure,
   getProjectAllowDisclosure,
+  getProjectSettingsFiles,
   getApiKeyHelperSources,
   getAwsCommandsSources,
   getBashPermissionSources,
@@ -43,6 +45,10 @@ import {
   getOtelHeadersHelperSources,
   getRepoHeadersHelperSources,
 } from './utils.js';
+
+/** Official 2.1.326 #252: exit message when refusing to trust a folder at startup. */
+export const TRUST_DIALOG_DECLINE_EXIT_MESSAGE =
+  "Claude Code didn't start because this folder isn't trusted.\nRun claude again and choose Yes, or run it in another folder.";
 
 type Props = {
   onDone(): void;
@@ -138,9 +144,84 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
   const hasAnyBashExecution = bashSettingSources.length > 0 || hasSlashCommandBash || hasSkillsBash;
 
   const hasTrustDialogAccepted = checkHasTrustDialogAccepted();
+  const autoSkip = hasTrustDialogAccepted && !offerBackstop;
   const [openedAt] = React.useState(() => Date.now());
   const isInputRefused = () => confirmSelectRefused(openedAt, CONFIRM_SELECT_ARM_MS, Date.now());
   const exitingRef = React.useRef(false);
+
+  // Official 2.1.326 #251: disclose all project settings files that will load when trusting.
+  const projectSettingsFiles = getProjectSettingsFiles();
+  const commandRunningFiles = new Set([
+    ...hooksSettingSources,
+    ...apiKeyHelperSources,
+    ...awsCommandsSources,
+    ...gcpCommandsSources,
+    ...otelHeadersHelperSources,
+    ...proxyAuthHelperSources,
+    ...marketplaceHelperSources,
+  ]);
+  const trustSettingsDisclosure = formatTrustSettingsFilesDisclosure({
+    settingsFiles: projectSettingsFiles,
+    commandRunningFiles,
+    envVarFiles: dangerousEnvVarsSources,
+    hasMcpServers,
+    isBackstop: hasTrustDialogAccepted,
+  });
+
+  // Official 2.1.326 #189: emit OSC 7501 blocked status while waiting on folder trust prompt.
+  React.useEffect(() => {
+    if (autoSkip) {
+      return;
+    }
+    let emitted = false;
+    const emitBlocked = () => {
+      if (emitted) return;
+      emitted = true;
+      try {
+        process.stdout.write(
+          programStatus({
+            state: 'blocked',
+            kind: 'permission',
+            msg: 'trust this folder',
+          }),
+        );
+      } catch {
+        // Ignore broken pipe / non-writable stdout
+      }
+    };
+    const caps = tD();
+    const cancelSettle = caps.onSettle('programStatus', supported => {
+      if (supported) {
+        emitBlocked();
+      }
+    });
+    return () => {
+      cancelSettle();
+      if (emitted) {
+        try {
+          process.stdout.write(CLEAR_PROGRAM_STATUS);
+        } catch {
+          // Ignore broken pipe / non-writable stdout
+        }
+      }
+    };
+  }, [autoSkip]);
+
+  // Official 2.1.326 #252: print why Claude Code exited after EXIT_ALT_SCREEN
+  // via gracefulShutdown's finalMessage so fullscreen does not wipe the explanation.
+  const exitUntrusted = React.useCallback(
+    (exitCode: number) => {
+      if (hasTrustDialogAccepted) {
+        gracefulShutdownSync(exitCode);
+        return;
+      }
+      process.exitCode = exitCode;
+      void gracefulShutdown(exitCode, 'other', {
+        finalMessage: `\n${TRUST_DIALOG_DECLINE_EXIT_MESSAGE}`,
+      });
+    },
+    [hasTrustDialogAccepted],
+  );
 
   React.useEffect(() => {
     const isHomeDir = homedir() === getCwd();
@@ -199,7 +280,7 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
         feature_name: 'onboarding_trust_dialog' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         error_code: 'onboarding_trust_denied' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       });
-      gracefulShutdownSync(1);
+      exitUntrusted(1);
       return;
     }
 
@@ -257,7 +338,11 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
   // event loop alive and the process freezes. Explicitly exit 1 like "No".
   const exitState = useExitOnCtrlCDWithKeybindings(() => {
     exitingRef.current = true;
-    gracefulShutdownSync(1);
+    if (hasTrustDialogAccepted) {
+      gracefulShutdownSync(1);
+    } else {
+      exitUntrusted(1);
+    }
   });
 
   // Use configurable keybinding for ESC to cancel/exit
@@ -271,13 +356,13 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
       if (isInputRefused()) return;
       if (exitingRef.current) return;
       exitingRef.current = true;
-      gracefulShutdownSync(0);
+      exitUntrusted(0);
     },
     { context: 'Confirmation' },
   );
 
   // densable: already trusted and no backstop → queueMicrotask(onDone), not setTimeout.
-  if (hasTrustDialogAccepted && !offerBackstop) {
+  if (autoSkip) {
     queueMicrotask(onDone);
     return null;
   }
@@ -291,6 +376,10 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
 
         <Text>{ACCESSING_QUICK_SAFETY_CHECK}</Text>
         <Text>{ACCESSING_CAPABILITY}</Text>
+
+        {trustSettingsDisclosure.length > 0 ? (
+          <Text>Trusting this folder loads {formatEnglishSourceList(trustSettingsDisclosure)}.</Text>
+        ) : null}
 
         {allowDisclosure.rawCount > 0 || addDirsDisclosure.rawCount > 0 || hasRepoHeadersHelpers ? (
           <Box flexDirection="column">
@@ -347,6 +436,8 @@ export function TrustDialog({ onDone, commands }: Props): React.ReactNode {
           hideIndexes
           cancelFirst
           focus="cancel"
+          disablePrintableKeybindings
+          onUpFromFirstItem={hasTrustDialogAccepted ? () => {} : undefined}
           confirmLabel={ACCESSING_CONFIRM_LABEL}
           cancelLabel={hasTrustDialogAccepted ? 'No, continue without these permissions' : ACCESSING_CANCEL_LABEL}
           onConfirm={() => onChange('enable_all')}

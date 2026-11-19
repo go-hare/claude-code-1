@@ -13,7 +13,7 @@ import {
   realpathSync,
   type BigIntStats,
 } from 'fs'
-import { dirname, extname, relative, sep } from 'path'
+import { dirname, extname, join, relative, sep } from 'path'
 import type { Tool, ToolPermissionContext } from '../../../Tool.js'
 import type {
   PermissionDecision,
@@ -65,6 +65,53 @@ export type GqeRefused = { refused: PermissionResult }
 
 const CHAT_ATTACHMENT_ALLOW =
   "The file is one of this session's chat attachments, which count as inside the working directories"
+
+const BG_SESSION_TMP_ALLOW =
+  "The file is in this background session's temporary folder, which counts as inside the working directories"
+
+/**
+ * Official 2.1.326 #103 (`acceptsOwnJobTmp` @294147584): Collect the temporary
+ * directory roots belonging to the current background session (`CLAUDE_JOB_DIR/tmp`,
+ * `CLAUDE_JOB_TMPDIR`, `CLAUDE_CODE_BG_TMPDIR`) so artifact publishing allows
+ * files staged there.
+ */
+export function getBackgroundSessionTmpRoots(
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  const candidates: string[] = []
+  if (env.CLAUDE_JOB_DIR && env.CLAUDE_JOB_DIR.trim() !== '') {
+    candidates.push(join(env.CLAUDE_JOB_DIR.trim(), 'tmp'))
+  }
+  if (env.CLAUDE_JOB_TMPDIR && env.CLAUDE_JOB_TMPDIR.trim() !== '') {
+    candidates.push(env.CLAUDE_JOB_TMPDIR.trim())
+  }
+  if (env.CLAUDE_CODE_BG_TMPDIR && env.CLAUDE_CODE_BG_TMPDIR.trim() !== '') {
+    candidates.push(env.CLAUDE_CODE_BG_TMPDIR.trim())
+  }
+  const roots: string[] = []
+  for (const candidate of candidates) {
+    roots.push(candidate)
+    try {
+      const real = realpathSync(candidate)
+      if (real !== candidate) roots.push(real)
+    } catch {
+      // Directory may not exist yet — keep the spelled root too
+    }
+  }
+  return roots
+}
+
+export function isPathInBackgroundSessionTmp(
+  realPath: string,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  for (const root of getBackgroundSessionTmpRoots(env)) {
+    if (pathUnderRoot(realPath, root)) {
+      return true
+    }
+  }
+  return false
+}
 
 function pathUnderRoot(path: string, root: string): boolean {
   const rel = relative(root, path)
@@ -198,12 +245,24 @@ export function hn(
   ) {
     return { read, pin }
   }
+  // Official 2.1.326 #103: Allow files in the current background session's
+  // temporary folder (`acceptsOwnJobTmp`) without refusing them as outside cwd.
+  const sourcePin = pin ?? xKe(source.real)
+  if (sourcePin.linked !== true && isPathInBackgroundSessionTmp(source.real)) {
+    return {
+      read: {
+        behavior: 'allow',
+        decisionReason: { type: 'other', reason: BG_SESSION_TMP_ALLOW },
+      },
+      pin: sourcePin,
+    }
+  }
   const {
     inside,
     pin: next,
     byDirectory,
-  } = tn(spelled, source.real, perms, pin)
-  if (!inside) return { read, pin: next ?? pin }
+  } = tn(spelled, source.real, perms, sourcePin)
+  if (!inside) return { read, pin: next ?? sourcePin }
   return {
     ...(byDirectory ? { stagedByDirectory: true } : {}),
     read: {

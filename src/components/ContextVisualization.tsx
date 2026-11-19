@@ -169,7 +169,7 @@ export function ContextVisualization({ data, collapseDetailSections = false }: P
           {overLimitWarning}
         </Text>
       ) : null}
-      <Box flexDirection="row" gap={2}>
+      <Box flexDirection="row" columnGap={2} flexWrap="wrap">
         {/* Fixed size grid */}
         <Box flexDirection="column" flexShrink={0}>
           {gridRows.map((row, rowIndex) => (
@@ -199,8 +199,8 @@ export function ContextVisualization({ data, collapseDetailSections = false }: P
           ))}
         </Box>
 
-        {/* Legend to the right */}
-        <Box flexDirection="column" gap={0} flexShrink={0}>
+        {/* Legend to the right (wraps below grid on narrow terminals — #216) */}
+        <Box flexDirection="column" gap={0} flexBasis={23} flexGrow={1}>
           {modelTitle && <Text>{modelTitle}</Text>}
           <Text dimColor>{model}</Text>
           <Text dimColor>
@@ -222,34 +222,46 @@ export function ContextVisualization({ data, collapseDetailSections = false }: P
 
             return (
               <Box key={index}>
-                <Text color={cat.color}>{symbol}</Text>
-                <Text> {displayName}: </Text>
-                <Text dimColor>
-                  {tokenDisplay} tokens ({percentDisplay})
-                </Text>
+                <Box flexShrink={0} marginRight={1}>
+                  <Text color={cat.color}>{symbol}</Text>
+                </Box>
+                <Box flexWrap="wrap">
+                  <Text>{displayName}: </Text>
+                  <Text dimColor>
+                    {tokenDisplay} tokens ({percentDisplay})
+                  </Text>
+                </Box>
               </Box>
             );
           })}
           {(categories.find(c => c.name === 'Free space')?.tokens ?? 0) > 0 && (
             <Box>
-              <Text dimColor>⛶</Text>
-              <Text> Free space: </Text>
-              <Text dimColor>
-                {formatTokens(categories.find(c => c.name === 'Free space')?.tokens || 0)} (
-                {(((categories.find(c => c.name === 'Free space')?.tokens || 0) / rawMaxTokens) * 100).toFixed(1)}
-                %)
-              </Text>
+              <Box flexShrink={0} marginRight={1}>
+                <Text dimColor>⛶</Text>
+              </Box>
+              <Box flexWrap="wrap">
+                <Text>Free space: </Text>
+                <Text dimColor>
+                  {formatTokens(categories.find(c => c.name === 'Free space')?.tokens || 0)} (
+                  {(((categories.find(c => c.name === 'Free space')?.tokens || 0) / rawMaxTokens) * 100).toFixed(1)}
+                  %)
+                </Text>
+              </Box>
             </Box>
           )}
           {autocompactCategory && autocompactCategory.tokens > 0 && (
             <Box>
-              <Text color={autocompactCategory.color}>⛝</Text>
-              <Text dimColor> {autocompactCategory.name}: </Text>
-              <Text dimColor>
-                {formatTokens(autocompactCategory.tokens)} tokens (
-                {((autocompactCategory.tokens / rawMaxTokens) * 100).toFixed(1)}
-                %)
-              </Text>
+              <Box flexShrink={0} marginRight={1}>
+                <Text color={autocompactCategory.color}>⛝</Text>
+              </Box>
+              <Box flexWrap="wrap">
+                <Text dimColor>{autocompactCategory.name}: </Text>
+                <Text dimColor>
+                  {formatTokens(autocompactCategory.tokens)} tokens (
+                  {((autocompactCategory.tokens / rawMaxTokens) * 100).toFixed(1)}
+                  %)
+                </Text>
+              </Box>
             </Box>
           )}
         </Box>

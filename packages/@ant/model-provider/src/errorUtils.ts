@@ -110,6 +110,46 @@ export function extractConnectionErrorDetails(
 }
 
 /**
+ * Official 2.1.326 (#174 & #263) `p0n`: returns true when an error is an
+ * OpenSSL/TLS `CERT_SIGNATURE_FAILURE` (code or message match).
+ */
+export function isCertSignatureFailureError(error: unknown): boolean {
+  const details = extractConnectionErrorDetails(error)
+  if (
+    details &&
+    (details.code === 'CERT_SIGNATURE_FAILURE' ||
+      /certificate signature failure/i.test(details.message))
+  ) {
+    return true
+  }
+  if (error instanceof Error) {
+    const code = (error as { code?: unknown }).code
+    if (
+      code === 'CERT_SIGNATURE_FAILURE' ||
+      /certificate signature failure/i.test(error.message)
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Official 2.1.326 (#263) `ptn`: clear explanation of `CERT_SIGNATURE_FAILURE`
+ * after a CA renewal (two CAs with the same subject name and different keys
+ * without authority key identifiers), with Desktop vs CLI IT guidance.
+ */
+export function formatCertSignatureFailureCause(
+  isDesktop = process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop' ||
+    process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop-3p',
+): string {
+  const action = isDesktop
+    ? "Ask your IT team to re-issue the certificates with authority key identifiers, or, if only one of the two CAs still signs your servers' certificates, to trust only that one in this computer's certificate store and the CA file that your organization configured."
+    : "Have the certificates re-issued with authority key identifiers, or, if only one of the two CAs still signs your servers' certificates, trust only that one in the system certificate store and the NODE_EXTRA_CA_CERTS file."
+  return `After a CA renewal, this can mean that this computer trusts two CA certificates with the same name but different keys, and the server's certificates don't say which key signed them. ${action} If no CA was renewed, don't work around this error, because it can also mean that something on the network changed the connection.`
+}
+
+/**
  * Returns an actionable hint for SSL/TLS errors, intended for contexts outside
  * the main API client (OAuth token exchange, preflight connectivity checks)
  * where `formatAPIError` doesn't apply.
@@ -118,6 +158,12 @@ export function getSSLErrorHint(error: unknown): string | null {
   const details = extractConnectionErrorDetails(error)
   if (!details?.isSSLError) {
     return null
+  }
+  if (
+    details.code === 'CERT_SIGNATURE_FAILURE' ||
+    /certificate signature failure/i.test(details.message)
+  ) {
+    return `SSL certificate verification failed (CERT_SIGNATURE_FAILURE). ${formatCertSignatureFailureCause()}`
   }
   return `SSL certificate error (${details.code}). If you are behind a corporate proxy or TLS-intercepting firewall, set NODE_EXTRA_CA_CERTS to your CA bundle path, or ask IT to allowlist *.anthropic.com. Run /doctor for details.`
 }
@@ -317,6 +363,8 @@ export function formatAPIError(error: APIError): string {
           return 'Unable to connect to API: SSL certificate hostname mismatch'
         case 'CERT_NOT_YET_VALID':
           return 'Unable to connect to API: SSL certificate is not yet valid'
+        case 'CERT_SIGNATURE_FAILURE':
+          return `Unable to connect to API: SSL certificate verification failed (CERT_SIGNATURE_FAILURE). ${formatCertSignatureFailureCause()}`
         case 'PERMITTED_VIOLATION':
         case 'EXCLUDED_VIOLATION':
         case 'NAME_CONSTRAINTS_WITHOUT_SANS':

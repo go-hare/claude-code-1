@@ -62,8 +62,11 @@ export async function processBashCommand(
   });
 
   try {
-    const bashModeContext: ProcessUserInputContext = {
+    const bashModeContext: ProcessUserInputContext & { immediateProgress?: boolean } = {
       ...context,
+      // Official 2.1.326 #195: start progress polling immediately for `!`
+      // user shell commands instead of waiting PROGRESS_THRESHOLD_MS (2s) + 1s.
+      immediateProgress: true,
       // TODO: Clean up this hack
       setToolJSX: _ => {
         jsx = _?.jsx;

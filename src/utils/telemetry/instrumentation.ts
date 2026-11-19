@@ -27,6 +27,8 @@ import {
   ATTR_SERVICE_NAME,
   ATTR_SERVICE_VERSION,
   SEMRESATTRS_HOST_ARCH,
+  SEMRESATTRS_HOST_ID,
+  SEMRESATTRS_HOST_NAME,
 } from '@opentelemetry/semantic-conventions'
 import {
   getLoggerProvider,
@@ -596,6 +598,89 @@ async function initializeBetaTracing(
   })
 }
 
+/**
+ * Official 2.1.326 (#9, `Rt()` @41658100):
+ * Opt-in gate for including `host.name` and `host.id` in OpenTelemetry
+ * resource attributes (off by default). Requires `OTEL_RESOURCE_INCLUDE_HOST`
+ * to be truthy, telemetry or beta tracing enabled, non-remote environment
+ * (unless explicitly allowed), and no `console` exporter configured.
+ */
+export function shouldIncludeOtelHostResource(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (!isEnvTruthy(env.OTEL_RESOURCE_INCLUDE_HOST)) {
+    return false
+  }
+  const enabled =
+    isEnvTruthy(env.CLAUDE_CODE_ENABLE_TELEMETRY) || isBetaTracingEnabled()
+  if (!enabled) {
+    return false
+  }
+  if (isEnvTruthy(env.CLAUDE_CODE_REMOTE)) {
+    return false
+  }
+  for (const exporterEnv of [
+    env.OTEL_METRICS_EXPORTER,
+    env.OTEL_LOGS_EXPORTER,
+    env.OTEL_TRACES_EXPORTER,
+  ]) {
+    if (parseExporterTypes(exporterEnv).includes('console')) {
+      return false
+    }
+  }
+  return true
+}
+
+/**
+ * Official 2.1.326 (#9, `wt()` @41658250):
+ * Build optional OpenTelemetry resource carrying `host.name` and `host.id`
+ * when `OTEL_RESOURCE_INCLUDE_HOST` is enabled. Bounds async `host.id`
+ * resolution to `min(1000, shutdownTimeoutMs / 2)` so startup never hangs.
+ */
+export async function buildOptionalHostIdentityResource(
+  detectedAttributes:
+    | Record<string, unknown>
+    | undefined = hostDetector.detect().attributes,
+  env: NodeJS.ProcessEnv = process.env,
+) {
+  if (!shouldIncludeOtelHostResource(env) || !detectedAttributes) {
+    return resourceFromAttributes({})
+  }
+  const shutdownTimeoutMs = parseInt(
+    env.CLAUDE_CODE_OTEL_SHUTDOWN_TIMEOUT_MS || '2000',
+    10,
+  )
+  const hostIdBudgetMs = Math.min(
+    1000,
+    Math.max(
+      100,
+      (Number.isFinite(shutdownTimeoutMs) ? shutdownTimeoutMs : 2000) / 2,
+    ),
+  )
+  const rawHostName = detectedAttributes[SEMRESATTRS_HOST_NAME]
+  const rawHostId = detectedAttributes[SEMRESATTRS_HOST_ID]
+  const attrs: Record<string, string> = {}
+  if (typeof rawHostName === 'string' && rawHostName.length > 0) {
+    attrs[SEMRESATTRS_HOST_NAME] = rawHostName
+  }
+  if (rawHostId !== undefined && rawHostId !== null) {
+    try {
+      const resolvedHostId = await Promise.race([
+        Promise.resolve(rawHostId),
+        new Promise<undefined>(resolve => {
+          setTimeout(() => resolve(undefined), hostIdBudgetMs).unref()
+        }),
+      ])
+      if (typeof resolvedHostId === 'string' && resolvedHostId.length > 0) {
+        attrs[SEMRESATTRS_HOST_ID] = resolvedHostId
+      }
+    } catch {
+      // ignore host.id resolution failures
+    }
+  }
+  return resourceFromAttributes(attrs)
+}
+
 export async function initializeTelemetry() {
   profileCheckpoint('telemetry_init_start')
   bootstrapTelemetry()
@@ -668,7 +753,8 @@ export async function initializeTelemetry() {
     osDetector.detect().attributes || {},
   )
 
-  // Extract only host.arch from hostDetector
+  // Extract host.arch from hostDetector; opt-in host.name and host.id when
+  // OTEL_RESOURCE_INCLUDE_HOST is enabled (off by default, official 2.1.326 #9 `Rt()`/`wt()`).
   const hostDetected = hostDetector.detect()
   const hostArchAttributes = hostDetected.attributes?.[SEMRESATTRS_HOST_ARCH]
     ? {
@@ -676,6 +762,9 @@ export async function initializeTelemetry() {
       }
     : {}
   const hostArchResource = resourceFromAttributes(hostArchAttributes)
+  const hostIdentityResource = await buildOptionalHostIdentityResource(
+    hostDetected.attributes,
+  )
 
   // Official 2.1.323 (#2123, `Lt` @311251300): parse OTEL_RESOURCE_ATTRIBUTES
   // entry-by-entry so one malformed entry does not drop the valid ones.
@@ -702,6 +791,7 @@ export async function initializeTelemetry() {
   const resource = baseResource
     .merge(osResource)
     .merge(hostArchResource)
+    .merge(hostIdentityResource)
     .merge(envResource)
 
   // Check if beta tracing is enabled - this is a separate code path

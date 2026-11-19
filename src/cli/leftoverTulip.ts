@@ -264,6 +264,8 @@ export type PolicyLimitsCatalogEntry = {
   serverPopulated?: true
   transcriptScan?: true
   hardBlockUnder?: readonly string[]
+  /** Official 2.1.326 #154: omit admin-remedy hint when org policy disables the feature. */
+  denialNamesNoRemedy?: true
 }
 
 /**
@@ -337,6 +339,7 @@ export const POLICY_LIMITS_CATALOG: Record<string, PolicyLimitsCatalogEntry> = {
     onCacheMiss: 'allow',
     label: 'Claude in Chrome',
     verb: 'is',
+    denialNamesNoRemedy: true,
     requirementId: 'HIPAA-R34',
   },
   allow_remote_sessions: {
@@ -1737,8 +1740,17 @@ export function leftoverPolicyLimitsDp(
       return leftoverEee(n, i)
     case 'org_denied':
     case null:
-    default:
-      return leftoverPwt(n, i, leftoverOie(), r)
+    default: {
+      // Official 2.1.326 #154 (`dp` @288273456): when the catalog entry sets
+      // `denialNamesNoRemedy: true` (e.g. `allow_claude_browser_extension`),
+      // omit "Contact your organization admin to enable it."
+      const noRemedyOverride =
+        r ??
+        (POLICY_LIMITS_CATALOG[e]?.denialNamesNoRemedy
+          ? `${n} ${i} disabled by your organization's policy.`
+          : undefined)
+      return leftoverPwt(n, i, leftoverOie(), noRemedyOverride)
+    }
   }
 }
 

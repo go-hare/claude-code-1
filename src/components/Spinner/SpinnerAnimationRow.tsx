@@ -483,6 +483,17 @@ export function SpinnerAnimationRow({
     );
   }
 
+  // Official 2.1.326 #132 (`b2t`): tick retry/stall countdown every 1s
+  // independently of useAnimationFrame so countdowns never freeze when a reply
+  // stalls or prefersReducedMotion is enabled.
+  const [, setRetryNowTick] = React.useState(0);
+  const hasRetryStatus = retryStatus != null;
+  React.useEffect(() => {
+    if (!hasRetryStatus) return;
+    const id = setInterval(() => setRetryNowTick(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [hasRetryStatus]);
+
   // gold mn: outer column width 100%; inner row wrap marginTop 1 width 100%;
   // children N?zXt:Fragment[Rte,RTt,ht]. DualInk DA is gold DA.
   if (retryStatus) {

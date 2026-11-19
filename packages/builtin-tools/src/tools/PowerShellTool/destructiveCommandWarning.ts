@@ -20,22 +20,22 @@ const DESTRUCTIVE_PATTERNS: DestructivePattern[] = [
   // `Remove-Item (Join-Path $r "tmp") -Recurse -Force` must still warn.
   {
     pattern:
-      /(?:^|[|;&\n({])\s*(Remove-Item|rm|del|rd|rmdir|ri)\b[^|;&\n}]*-Recurse\b[^|;&\n}]*-Force\b/i,
+      /(?:^|[|;&\n({])[ \t]*(Remove-Item|rm|del|rd|rmdir|ri)\b[^|;&\n}]*-Recurse\b[^|;&\n}]*-Force\b/i,
     warning: 'Note: may recursively force-remove files',
   },
   {
     pattern:
-      /(?:^|[|;&\n({])\s*(Remove-Item|rm|del|rd|rmdir|ri)\b[^|;&\n}]*-Force\b[^|;&\n}]*-Recurse\b/i,
+      /(?:^|[|;&\n({])[ \t]*(Remove-Item|rm|del|rd|rmdir|ri)\b[^|;&\n}]*-Force\b[^|;&\n}]*-Recurse\b/i,
     warning: 'Note: may recursively force-remove files',
   },
   {
     pattern:
-      /(?:^|[|;&\n({])\s*(Remove-Item|rm|del|rd|rmdir|ri)\b[^|;&\n}]*-Recurse\b/i,
+      /(?:^|[|;&\n({])[ \t]*(Remove-Item|rm|del|rd|rmdir|ri)\b[^|;&\n}]*-Recurse\b/i,
     warning: 'Note: may recursively remove files',
   },
   {
     pattern:
-      /(?:^|[|;&\n({])\s*(Remove-Item|rm|del|rd|rmdir|ri)\b[^|;&\n}]*-Force\b/i,
+      /(?:^|[|;&\n({])[ \t]*(Remove-Item|rm|del|rd|rmdir|ri)\b[^|;&\n}]*-Force\b/i,
     warning: 'Note: may force-remove files',
   },
 
@@ -95,13 +95,21 @@ const DESTRUCTIVE_PATTERNS: DestructivePattern[] = [
   },
 ]
 
+const MAX_DESTRUCTIVE_SCAN_LEN = 10_000
+
 /**
  * Checks if a PowerShell command matches known destructive patterns.
  * Returns a human-readable warning string, or null if no destructive pattern is detected.
  */
 export function getDestructiveCommandWarning(command: string): string | null {
+  // Official 2.1.326 #142 (`yDn`): cap scanned length to 10,000 chars so
+  // huge commands never freeze the session during regex matching.
+  const scanned =
+    command.length > MAX_DESTRUCTIVE_SCAN_LEN
+      ? command.slice(0, MAX_DESTRUCTIVE_SCAN_LEN)
+      : command
   for (const { pattern, warning } of DESTRUCTIVE_PATTERNS) {
-    if (pattern.test(command)) {
+    if (pattern.test(scanned)) {
       return warning
     }
   }

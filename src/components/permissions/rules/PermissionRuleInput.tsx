@@ -50,7 +50,7 @@ export function PermissionRuleInput({ onCancel, onSubmit, ruleBehavior }: Permis
       inputGuide={
         <Byline>
           <KeyboardShortcutHint shortcut="Enter" action="submit" />
-          <KeyboardShortcutHint shortcut="Esc" action="cancel" />
+          <KeyboardShortcutHint shortcut="Esc" action="go back" />
         </Byline>
       }
     >

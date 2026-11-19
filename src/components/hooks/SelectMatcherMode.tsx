@@ -3,7 +3,7 @@
  */
 import * as React from 'react';
 import type { HookEvent } from 'src/entrypoints/agentSdkTypes.js';
-import { Box, Dialog, KeyboardShortcutHint, Text } from '@anthropic/ink';
+import { Box, Byline, Dialog, KeyboardShortcutHint, Text } from '@anthropic/ink';
 import {
   type HookSource,
   hookSourceInlineDisplayString,
@@ -66,7 +66,17 @@ export function SelectMatcherMode({
   }
 
   return (
-    <Dialog title={title} subtitle={eventDescription} onCancel={onCancel}>
+    <Dialog
+      title={title}
+      subtitle={eventDescription}
+      onCancel={onCancel}
+      inputGuide={
+        <Byline>
+          <KeyboardShortcutHint shortcut="Enter" action="select" />
+          <KeyboardShortcutHint shortcut="Esc" action="go back" />
+        </Byline>
+      }
+    >
       <ItemList
         options={matchersWithSources.map(item => ({
           icon: <Text dimColor>[{item.sources.map(hookSourceInlineDisplayString).join(', ')}]</Text>,

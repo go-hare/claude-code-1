@@ -4,6 +4,8 @@
  */
 import React, { useMemo } from 'react';
 import { Box, Dialog, Text, useIsInsideModal, useModalOrTerminalSize } from '@anthropic/ink';
+import { markSessionExiting } from '../dialog/useDialogMailboxBridge.js';
+import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { logEvent } from '../services/analytics/index.js';
 import type { ExitBackgroundWorkItem } from '../utils/exitBackgroundItems.js';
@@ -61,13 +63,23 @@ export function ExitBackgroundWorkDialog({ items, onExit, onCancel, onBackground
     });
   }
 
+  // Official 2.1.326 #108: mark session exiting on double Ctrl+C/Ctrl+D before Ink unmounts
+  // so pending background-agent permission dialogs are not resolved as user refusal.
+  useExitOnCtrlCDWithKeybindings(() => {
+    markSessionExiting();
+    track('exit');
+    onExit();
+  });
+
   function handleChange(choice: Choice): void {
     track(choice);
     switch (choice) {
       case 'exit':
+        markSessionExiting();
         onExit();
         return;
       case 'background':
+        markSessionExiting();
         onBackground?.();
         return;
       case 'stay':
@@ -80,7 +92,6 @@ export function ExitBackgroundWorkDialog({ items, onExit, onCancel, onBackground
     <Dialog
       title="Background work is running"
       subtitle="The following will stop when you exit:"
-      exitOnCtrlCD
       onCancel={() => {
         track('stay');
         onCancel();

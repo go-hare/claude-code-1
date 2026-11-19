@@ -3,8 +3,14 @@ import type { AppState } from '../../state/AppState.js';
 import { checkHasTrustDialogAccepted } from '../config.js';
 import { logForDebugging } from '../debug.js';
 import { isPersistedTrustIgnored } from './addDirPluginSettings.js';
-import { clearMarketplacesCache, registerSeedMarketplaces } from './marketplaceManager.js';
+import {
+  clearMarketplacesCache,
+  getDeclaredMarketplaces,
+  loadKnownMarketplacesConfig,
+  registerSeedMarketplaces,
+} from './marketplaceManager.js';
 import { clearPluginCache } from './pluginLoader.js';
+import { getSkippedWorktreeMarketplacesNotice } from './worktreePluginSettings.js';
 
 type SetAppState = (f: (prevState: AppState) => AppState) => void;
 
@@ -57,6 +63,46 @@ export async function performStartupChecks(setAppState: SetAppState): Promise<vo
           plugins: { ...prev.plugins, needsRefresh: true },
         };
       });
+    }
+
+    // Official 2.1.326 #330 (`BBt` / `xMr`): show a notice when a worktree
+    // session skipped repository plugin settings / marketplaces.
+    try {
+      const [declared, known] = await Promise.all([
+        Promise.resolve(getDeclaredMarketplaces()),
+        loadKnownMarketplacesConfig(),
+      ]);
+      const skippedNotice = getSkippedWorktreeMarketplacesNotice({
+        declaredMarketplaces: declared,
+        knownMarketplaces: known,
+      });
+      if (skippedNotice !== null) {
+        logForDebugging(`performStartupChecks: ${skippedNotice}`, { level: 'warn' });
+        setAppState(prev => {
+          const alreadyQueued =
+            prev.notifications.current?.key === 'repo-marketplaces-set-aside' ||
+            prev.notifications.queue.some(n => n.key === 'repo-marketplaces-set-aside');
+          if (alreadyQueued) return prev;
+          return {
+            ...prev,
+            notifications: {
+              ...prev.notifications,
+              queue: [
+                ...prev.notifications.queue,
+                {
+                  key: 'repo-marketplaces-set-aside',
+                  text: skippedNotice,
+                  color: 'warning',
+                  priority: 'medium',
+                  timeoutMs: 15_000,
+                },
+              ],
+            },
+          };
+        });
+      }
+    } catch {
+      // Non-fatal notice probe
     }
 
     // Start background installations without waiting

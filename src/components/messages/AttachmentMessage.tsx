@@ -34,6 +34,7 @@ import {
   withheldShown,
   type WithheldMemoryAttachmentEntry,
 } from '../../utils/claudemd.js';
+import { formatHookErrorOutput, HOOK_EXIT_127_PRETOOL_MESSAGE } from '../../utils/hooks/hookErrorDisplay.js';
 import { useSelectedMessageBg } from '../messageActions.js';
 
 type Props = {
@@ -384,13 +385,10 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
       if (attachment.hookEvent === 'Stop' || attachment.hookEvent === 'SubagentStop') {
         return null;
       }
-      // Show stderr to the user so they can understand why the hook blocked
+      // Official 2.1.326 #250 (`wo`): red headline + dimmed reason below
       const stderr = attachment.blockingError.blockingError.trim();
       return (
-        <>
-          <Line color="error">{attachment.hookName} hook returned blocking error</Line>
-          {stderr ? <Line color="error">{stderr}</Line> : null}
-        </>
+        <HookStatusLine headline={`${attachment.hookName} hook reported a problem`} color="error" reason={stderr} />
       );
     }
     case 'hook_non_blocking_error': {
@@ -398,14 +396,18 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
       if (attachment.hookEvent === 'Stop' || attachment.hookEvent === 'SubagentStop') {
         return null;
       }
-      const reason = firstHookErrorLine(attachment.stderr, attachment.stdout);
-      // Full hook output is logged to debug log via hookEvents.ts
-      return (
-        <>
-          <Line color="error">{attachment.hookName} hook error</Line>
-          {reason ? <Line color="error">{reason}</Line> : null}
-        </>
-      );
+      // Official 2.1.326 #53 & #250 (`Wm` + `wx` + `wo`): prefer real error line over
+      // Node/Python stack-trace header, expand up to 10,000 chars on Ctrl+O, and
+      // note exit 127 on PreToolUse.
+      const expanded = verbose || isTranscriptMode === true;
+      const formatted = formatHookErrorOutput(attachment.stderr, attachment.stdout, expanded);
+      const exitCode =
+        'exitCode' in attachment && typeof attachment.exitCode === 'number' ? attachment.exitCode : undefined;
+      const reason =
+        exitCode === 127 && attachment.hookEvent === 'PreToolUse'
+          ? `${formatted}\n${HOOK_EXIT_127_PRETOOL_MESSAGE}`.trim()
+          : formatted;
+      return <HookStatusLine headline={`${attachment.hookName} hook failed`} color="error" reason={reason} />;
     }
     case 'hook_cancelled': {
       const cancelled = attachment as typeof attachment & {
@@ -423,19 +425,22 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
       const commandSuffix = cancelled.command ? ` [${cancelled.command}]` : '';
       const afterSuffix = timeoutStr !== undefined ? ` after ${timeoutStr}` : '';
       return (
-        <Line color="error" dimColor={false}>
-          {cancelled.hookName} hook{commandSuffix} timed out{afterSuffix}
-          {' — output discarded. Raise the hook\'s "timeout" to allow more time.'}
-        </Line>
+        <HookStatusLine
+          headline={`${cancelled.hookName} hook${commandSuffix} timed out${afterSuffix}`}
+          color="error"
+          reason={'Its output was discarded. Raise the hook\'s "timeout" to allow more time.'}
+        />
       );
     }
-    case 'hook_error_during_execution':
+    case 'hook_error_during_execution': {
       // Stop hooks are rendered as a summary in SystemStopHookSummaryMessage
       if (attachment.hookEvent === 'Stop' || attachment.hookEvent === 'SubagentStop') {
         return null;
       }
-      // Full hook output is logged to debug log via hookEvents.ts
-      return <Line>{attachment.hookName} hook warning</Line>;
+      const expanded = verbose || isTranscriptMode === true;
+      const reason = formatHookErrorOutput(attachment.content, undefined, expanded);
+      return <HookStatusLine headline={`${attachment.hookName} hook failed`} color="error" reason={reason} />;
+    }
     case 'hook_success':
       // Full hook output is logged to debug log via hookEvents.ts
       return null;
@@ -445,15 +450,19 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
         return null;
       }
       return (
-        <Line color="warning">
-          {attachment.hookName} hook stopped continuation: {attachment.message}
-        </Line>
+        <HookStatusLine
+          headline={`${attachment.hookName} hook stopped Claude`}
+          color="warning"
+          reason={attachment.message}
+        />
       );
     case 'hook_deferred_tool':
       return (
-        <Line color="warning">
-          {attachment.hookName} deferred {attachment.toolName} · resume with -p --resume to continue
-        </Line>
+        <HookStatusLine
+          headline={`${attachment.hookName} hook deferred ${attachment.toolName}`}
+          color="warning"
+          reason="Resume with -p --resume to continue."
+        />
       );
     case 'hook_system_message':
       return (
@@ -673,21 +682,39 @@ function TeammateTaskStatus({
   );
 }
 
-function firstHookErrorLine(stderr?: string, stdout?: string): string {
-  const raw = stderr?.trim() ? stderr : stdout?.trim() ? stdout : '';
-  if (!raw) return '';
-  const beforeSchema = raw.split('\n\nExpected schema:')[0]!.trim();
-  let start = 0;
-  let nl = beforeSchema.indexOf('\n');
-  while (nl !== -1) {
-    const line = beforeSchema.slice(start, nl).trim();
-    if (line) return line.length > 200 ? `${line.slice(0, 200)}…` : line;
-    start = nl + 1;
-    nl = beforeSchema.indexOf('\n', start);
-  }
-  const last = beforeSchema.slice(start).trim();
-  return last.length > 200 ? `${last.slice(0, 200)}…` : last;
+/**
+ * Official 2.1.326 #250 (`wo`): non-dimmed colored headline (red for error,
+ * yellow for warning) with dimmed reason shown underneath.
+ */
+function HookStatusLine({
+  headline,
+  color,
+  reason,
+}: {
+  headline: string;
+  color: keyof Theme;
+  reason?: string;
+}): React.ReactNode {
+  const bg = useSelectedMessageBg();
+  const trimmed = reason?.trim() ?? '';
+  return (
+    <Box backgroundColor={bg}>
+      <MessageResponse>
+        <Box flexDirection="column">
+          <Text color={color} wrap="wrap">
+            {headline}
+          </Text>
+          {trimmed !== '' ? (
+            <Text dimColor wrap="wrap">
+              <Ansi>{trimmed}</Ansi>
+            </Text>
+          ) : null}
+        </Box>
+      </MessageResponse>
+    </Box>
+  );
 }
+
 // We allow setting dimColor to false here to help work around the dim-bold bug.
 // https://github.com/chalk/chalk/issues/290
 function Line({

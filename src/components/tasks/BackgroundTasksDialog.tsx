@@ -53,7 +53,7 @@ import { Select } from '../CustomSelect/select.js';
 import { ItemList } from '../ItemList.js';
 import { AsyncAgentDetailDialog } from './AsyncAgentDetailDialog.js';
 import { AutoModeScanDetailDialog } from './AutoModeScanDetailDialog.js';
-import { getBackgroundTaskItemPresentation } from './BackgroundTask.js';
+import { formatOwnerSubagentLabel, getBackgroundTaskItemPresentation } from './BackgroundTask.js';
 import { DreamDetailDialog } from './DreamDetailDialog.js';
 import { InProcessTeammateDetailDialog } from './InProcessTeammateDetailDialog.js';
 import { McpTaskDetailDialog } from './McpTaskDetailDialog.js';
@@ -388,6 +388,7 @@ export function BackgroundTasksDialog({
   promptVisibleBelow = false,
 }: Props): React.ReactNode {
   const tasks = useAppState(s => s.tasks);
+  const agentNameRegistry = useAppState(s => s.agentNameRegistry);
   const setAppState = useSetAppState();
   const messageQueue = useMessageQueue();
   const registry = createTaskRegistry(toolUseContext.getAppState, setAppState);
@@ -1375,14 +1376,14 @@ export function BackgroundTasksDialog({
             optToRow.set(optIdx, rowIdx);
             rowToOpt.set(rowIdx, optIdx);
             rowIdx++;
-            options.push(buildItemListOption(leader, `${leader.id}-${teamName}`));
+            options.push(buildItemListOption(leader, `${leader.id}-${teamName}`, tasks, agentNameRegistry));
           }
           for (const member of members) {
             const optIdx = options.length;
             optToRow.set(optIdx, rowIdx);
             rowToOpt.set(rowIdx, optIdx);
             rowIdx++;
-            options.push(buildItemListOption(member, member.id));
+            options.push(buildItemListOption(member, member.id, tasks, agentNameRegistry));
           }
         }
       } else {
@@ -1391,13 +1392,13 @@ export function BackgroundTasksDialog({
           optToRow.set(optIdx, rowIdx);
           rowToOpt.set(rowIdx, optIdx);
           rowIdx++;
-          options.push(buildItemListOption(item, item.id));
+          options.push(buildItemListOption(item, item.id, tasks, agentNameRegistry));
         }
       }
     });
 
     return { itemListOptions: options, optionToRowIndex: optToRow, rowToOptionIndex: rowToOpt };
-  }, [sections, teammateTasks, teams]);
+  }, [sections, teammateTasks, teams, tasks, agentNameRegistry]);
 
   optionToRowIndexRef.current = optionToRowIndex;
 
@@ -1501,6 +1502,8 @@ function getItemActionLabel(item: ListItem): string {
 function buildItemListOption(
   item: ListItem,
   valueKey: string,
+  tasks: Record<string, DeepImmutable<TaskState>>,
+  agentNameRegistry: ReadonlyMap<string, string>,
 ): {
   label: ReactNode;
   value: string;
@@ -1546,7 +1549,11 @@ function buildItemListOption(
       label: `@${TEAM_LEAD_NAME}`,
     };
   }
-  const presentation = item.task ? getBackgroundTaskItemPresentation(item.task) : null;
+  const ownerLabel =
+    item.type === 'local_bash' || item.type === 'monitor_mcp' || item.type === 'monitor_ws'
+      ? formatOwnerSubagentLabel(item.task, tasks, agentNameRegistry)
+      : undefined;
+  const presentation = item.task ? getBackgroundTaskItemPresentation(item.task, ownerLabel) : null;
   if (presentation) {
     return {
       value: valueKey,

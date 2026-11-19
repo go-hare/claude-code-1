@@ -55,7 +55,8 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
   useEffect(() => {
     async function loadChanges() {
       let changeLines: string[] = [];
-      const gitStatus = await execFileNoThrow('git', ['status', '--porcelain']);
+      // Official 2.1.326 #120: pass -uall so untracked files inside new directories are each counted.
+      const gitStatus = await execFileNoThrow('git', ['status', '--porcelain', '-uall']);
       if (gitStatus.stdout) {
         changeLines = gitStatus.stdout.split('\n').filter(_ => _.trim() !== '');
         setChanges(changeLines);

@@ -353,6 +353,14 @@ export function ToolSelector({ tools, initialTools, onComplete, onCancel }: Prop
   useKeybinding('confirm:no', handleCancel, { context: 'Confirmation' });
 
   const handleKeyDown = (e: KeyboardEvent) => {
+    const findLastSelectable = () => {
+      let idx = navigableItems.length - 1;
+      while (idx > 0 && navigableItems[idx]?.isHeader) {
+        idx--;
+      }
+      return Math.max(0, idx);
+    };
+    const PAGE_STEP = 10;
     if (e.key === 'return') {
       e.preventDefault();
       const item = navigableItems[focusIndex];
@@ -361,20 +369,40 @@ export function ToolSelector({ tools, initialTools, onComplete, onCancel }: Prop
       }
     } else if (e.key === 'up') {
       e.preventDefault();
+      // Official 2.1.326 #280: wrap at both ends.
       let newIndex = focusIndex - 1;
-      // Skip headers when navigating up
+      while (newIndex >= 0 && navigableItems[newIndex]?.isHeader) {
+        newIndex--;
+      }
+      setFocusIndex(newIndex < 0 ? findLastSelectable() : newIndex);
+    } else if (e.key === 'down') {
+      e.preventDefault();
+      let newIndex = focusIndex + 1;
+      while (newIndex < navigableItems.length && navigableItems[newIndex]?.isHeader) {
+        newIndex++;
+      }
+      setFocusIndex(newIndex >= navigableItems.length ? 0 : newIndex);
+    } else if (e.key === 'home') {
+      // Official 2.1.326 #281: Home/End/PageUp/PageDown support in agent pickers.
+      e.preventDefault();
+      setFocusIndex(0);
+    } else if (e.key === 'end') {
+      e.preventDefault();
+      setFocusIndex(findLastSelectable());
+    } else if (e.key === 'pageup') {
+      e.preventDefault();
+      let newIndex = Math.max(0, focusIndex - PAGE_STEP);
       while (newIndex > 0 && navigableItems[newIndex]?.isHeader) {
         newIndex--;
       }
       setFocusIndex(Math.max(0, newIndex));
-    } else if (e.key === 'down') {
+    } else if (e.key === 'pagedown') {
       e.preventDefault();
-      let newIndex = focusIndex + 1;
-      // Skip headers when navigating down
+      let newIndex = Math.min(navigableItems.length - 1, focusIndex + PAGE_STEP);
       while (newIndex < navigableItems.length - 1 && navigableItems[newIndex]?.isHeader) {
         newIndex++;
       }
-      setFocusIndex(Math.min(navigableItems.length - 1, newIndex));
+      setFocusIndex(navigableItems[newIndex]?.isHeader ? findLastSelectable() : newIndex);
     }
   };
 

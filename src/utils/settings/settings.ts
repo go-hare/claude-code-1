@@ -73,9 +73,12 @@ import {
 } from './hostModelOverlay.js'
 import { applySettingsKeyAliases } from './settingsAliases.js'
 import {
+  buildDeepNestingWarnings,
   filterAndWithholdSandboxRestrictions,
   filterInvalidPermissionRules,
+  findJsonSyntaxErrorLocation,
   formatZodError,
+  pruneDeepSettings,
   type SettingsWithErrors,
   type ValidationError,
 } from './validation.js'
@@ -159,6 +162,32 @@ function finishPolicySettingsForHost(
  * Higher-priority sources win on the same key; lower sources fill missing keys.
  * Other fields still use first-source-wins (remote > MDM > file > hkcu).
  */
+const PROTOTYPE_DANGEROUS_KEYS = new Set([
+  '__proto__',
+  'constructor',
+  'prototype',
+])
+
+function stripPrototypePoisoningKeysDeep(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') return value
+  if (Array.isArray(value)) {
+    return value.map(item => stripPrototypePoisoningKeysDeep(item))
+  }
+  const out: Record<string, unknown> = {}
+  for (const key of Object.keys(value as Record<string, unknown>)) {
+    if (PROTOTYPE_DANGEROUS_KEYS.has(key)) continue
+    Object.defineProperty(out, key, {
+      value: stripPrototypePoisoningKeysDeep(
+        (value as Record<string, unknown>)[key],
+      ),
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    })
+  }
+  return out
+}
+
 export function mergeManagedEnvPerKey(
   winner: SettingsJson | null,
   lowerSources: Array<SettingsJson | null | undefined>,
@@ -171,12 +200,26 @@ export function mergeManagedEnvPerKey(
   for (const src of lowerSources) {
     if (!src?.env) continue
     for (const [k, v] of Object.entries(src.env)) {
-      if (typeof v === 'string') env[k] = v
+      if (typeof v === 'string' && !PROTOTYPE_DANGEROUS_KEYS.has(k)) {
+        Object.defineProperty(env, k, {
+          value: v,
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        })
+      }
     }
   }
   if (winner?.env) {
     for (const [k, v] of Object.entries(winner.env)) {
-      if (typeof v === 'string') env[k] = v
+      if (typeof v === 'string' && !PROTOTYPE_DANGEROUS_KEYS.has(k)) {
+        Object.defineProperty(env, k, {
+          value: v,
+          enumerable: true,
+          writable: true,
+          configurable: true,
+        })
+      }
     }
   }
   if (!winner) {
@@ -487,26 +530,42 @@ export function loadManagedFileSettings(): {
   const managedDir = getManagedFilePath()
 
   const basePath = getManagedSettingsFilePath()
-  const { settings, errors: baseErrors } = parseSettingsFile(basePath)
-  errors.push(...baseErrors)
-  const baseLink = inspectManagedDocumentLink(managedDir, [
-    'managed-settings.json',
-  ])
-  if (baseLink) {
-    const msg = formatManagedDocumentLinkWarning(baseLink, settings !== null)
-    if (msg) {
-      errors.push({
-        file: basePath,
-        path: '',
-        message: msg[0],
-        suggestion: msg[1],
-        severity: 'warning',
-      })
+  // Official 2.1.326 (#18) Is(): isolate each managed document parse+merge with
+  // a snapshot rollback so prototype-key or corrupt files never crash startup
+  // or corrupt other drop-in files.
+  const baseSnapshot = clone(merged)
+  try {
+    const { settings, errors: baseErrors } = parseSettingsFile(basePath)
+    errors.push(...baseErrors)
+    const baseLink = inspectManagedDocumentLink(managedDir, [
+      'managed-settings.json',
+    ])
+    if (baseLink) {
+      const msg = formatManagedDocumentLinkWarning(baseLink, settings !== null)
+      if (msg) {
+        errors.push({
+          file: basePath,
+          path: '',
+          message: msg[0],
+          suggestion: msg[1],
+          severity: 'warning',
+        })
+      }
     }
-  }
-  if (settings && Object.keys(settings).length > 0) {
-    merged = mergeWith(merged, settings, settingsMergeCustomizer)
-    found = true
+    if (settings && Object.keys(settings).length > 0) {
+      const safeBase = stripPrototypePoisoningKeysDeep(settings) as SettingsJson
+      merged = mergeWith(merged, safeBase, settingsMergeCustomizer)
+      found = true
+    }
+  } catch (err) {
+    merged = baseSnapshot
+    logError(err)
+    errors.push({
+      file: basePath,
+      path: '',
+      message: `${basePath} could not be merged safely: ${err instanceof Error ? err.message : String(err)}`,
+      severity: 'fatal',
+    })
   }
 
   const dropInDir = getManagedSettingsDropInDir()
@@ -523,44 +582,59 @@ export function loadManagedFileSettings(): {
       .sort()
     for (const name of entries) {
       const dropPath = join(dropInDir, name)
-      const { settings: dropSettings, errors: fileErrors } =
-        parseSettingsFile(dropPath)
-      errors.push(...fileErrors)
-      const dropLink = inspectManagedDocumentLink(managedDir, [
-        'managed-settings.d',
-        name,
-      ])
-      if (dropLink) {
-        const msg = formatManagedDocumentLinkWarning(
-          dropLink,
-          dropSettings !== null,
-        )
-        if (msg) {
-          errors.push({
-            file: dropPath,
-            path: '',
-            message: msg[0],
-            suggestion: msg[1],
-            severity: 'warning',
-          })
-        }
-      }
-      if (dropSettings && Object.keys(dropSettings).length > 0) {
-        merged = mergeWith(merged, dropSettings, settingsMergeCustomizer)
-        // Official 2.1.325 #2354: when a higher-ranking managed source turns
-        // the sandbox on without explicitly setting `autoAllowBashIfSandboxed: true`,
-        // do not inherit `autoAllowBashIfSandboxed: true` from a lower-ranking managed file.
-        if (
-          dropSettings.sandbox?.enabled === true &&
-          dropSettings.sandbox.autoAllowBashIfSandboxed !== true &&
-          merged.sandbox
-        ) {
-          merged.sandbox = {
-            ...merged.sandbox,
-            autoAllowBashIfSandboxed: false,
+      const dropSnapshot = clone(merged)
+      try {
+        const { settings: dropSettings, errors: fileErrors } =
+          parseSettingsFile(dropPath)
+        errors.push(...fileErrors)
+        const dropLink = inspectManagedDocumentLink(managedDir, [
+          'managed-settings.d',
+          name,
+        ])
+        if (dropLink) {
+          const msg = formatManagedDocumentLinkWarning(
+            dropLink,
+            dropSettings !== null,
+          )
+          if (msg) {
+            errors.push({
+              file: dropPath,
+              path: '',
+              message: msg[0],
+              suggestion: msg[1],
+              severity: 'warning',
+            })
           }
         }
-        found = true
+        if (dropSettings && Object.keys(dropSettings).length > 0) {
+          const safeDrop = stripPrototypePoisoningKeysDeep(
+            dropSettings,
+          ) as SettingsJson
+          merged = mergeWith(merged, safeDrop, settingsMergeCustomizer)
+          // Official 2.1.325 #2354: when a higher-ranking managed source turns
+          // the sandbox on without explicitly setting `autoAllowBashIfSandboxed: true`,
+          // do not inherit `autoAllowBashIfSandboxed: true` from a lower-ranking managed file.
+          if (
+            safeDrop.sandbox?.enabled === true &&
+            safeDrop.sandbox.autoAllowBashIfSandboxed !== true &&
+            merged.sandbox
+          ) {
+            merged.sandbox = {
+              ...merged.sandbox,
+              autoAllowBashIfSandboxed: false,
+            }
+          }
+          found = true
+        }
+      } catch (err) {
+        merged = dropSnapshot
+        logError(err)
+        errors.push({
+          file: dropPath,
+          path: '',
+          message: `${dropPath} could not be merged safely: ${err instanceof Error ? err.message : String(err)}`,
+          severity: 'fatal',
+        })
       }
     }
   } catch (e) {
@@ -638,7 +712,50 @@ export function parseSettingsFileContent(
     return { settings: {}, errors: [] }
   }
 
-  const data = safeParseJSON(content, false)
+  const rawParsed = safeParseJSON(content, false)
+
+  // Official 2.1.326 (#261): attach 1-based line and column when JSON syntax fails
+  if (rawParsed === null) {
+    const loc = findJsonSyntaxErrorLocation(content)
+    const locSuffix = loc ? ` (line ${loc.line}, column ${loc.column})` : ''
+    return {
+      settings: null,
+      errors: [
+        {
+          file: path,
+          path: '',
+          message: `Invalid or malformed JSON${locSuffix}`,
+          line: loc?.line,
+          column: loc?.column,
+          severity: 'fatal',
+        },
+      ],
+    }
+  }
+
+  // Official 2.1.326 (#18 & #19) c0e + Vt: iteratively prune >64-level nesting
+  // and copy keys safely with Object.defineProperty (no __proto__ pollution).
+  const {
+    value: prunedData,
+    dropped: deepDropped,
+    tooManyNodes,
+  } = pruneDeepSettings(rawParsed)
+  if (tooManyNodes) {
+    return {
+      settings: null,
+      errors: [
+        {
+          file: path,
+          path: '',
+          message:
+            'Settings file contains too many nested objects or arrays and could not be loaded.',
+          severity: 'fatal',
+        },
+      ],
+    }
+  }
+  const deepWarnings = buildDeepNestingWarnings(deepDropped, path)
+  const data = stripPrototypePoisoningKeysDeep(prunedData)
 
   // densable 2.1.232 #8 sRe — alias keys → canonical before schema parse
   const aliasWarnings: ValidationError[] = applySettingsKeyAliases(
@@ -676,6 +793,7 @@ export function parseSettingsFileContent(
     return {
       settings: null,
       errors: [
+        ...deepWarnings,
         ...aliasWarnings,
         ...ruleWarnings,
         ...sandboxWarnings,
@@ -689,6 +807,7 @@ export function parseSettingsFileContent(
   return {
     settings: result.data,
     errors: [
+      ...deepWarnings,
       ...aliasWarnings,
       ...ruleWarnings,
       ...sandboxWarnings,
@@ -1093,17 +1212,182 @@ export const UNTRUSTED_WORKSPACE_STRIP_KEYS = [
   'enabledMcpjsonServers',
 ] as const
 
+/**
+ * Official 2.1.326 (#324) `ksn`: credential helper keys stripped from repo
+ * settings (`projectSettings` / `localSettings`) when workspace is untrusted.
+ */
+export const CREDENTIAL_HELPER_SETTING_KEYS = [
+  'apiKeyHelper',
+  'awsAuthRefresh',
+  'awsCredentialExport',
+  'gcpAuthRefresh',
+  'otelHeadersHelper',
+  'proxyAuthHelper',
+] as const
+
+/**
+ * Official 2.1.326 (#324) `U8`: settings that a repo settings file in an
+ * untrusted folder may only set to their stricter ("restrictive") value,
+ * never a looser one.
+ */
+const RESTRICTIVE_REPO_SETTING_SPECS: ReadonlyArray<{
+  path: readonly string[]
+  restrictive: boolean | string
+}> = [
+  { path: ['allowManagedPermissionRulesOnly'], restrictive: true },
+  { path: ['allowManagedHooksOnly'], restrictive: true },
+  { path: ['allowManagedMcpServersOnly'], restrictive: true },
+  { path: ['enforceAvailableModels'], restrictive: true },
+  { path: ['disableAllHooks'], restrictive: true },
+  { path: ['disableClaudeAiConnectors'], restrictive: true },
+  { path: ['disableCommandPluginSources'], restrictive: true },
+  { path: ['disableSideloadFlags'], restrictive: true },
+  { path: ['disableSkillShellExecution'], restrictive: true },
+  { path: ['disableWindowsBashCommandSplit'], restrictive: true },
+  { path: ['disableRemoteControl'], restrictive: true },
+  { path: ['disableAgentView'], restrictive: true },
+  { path: ['disableWorkflows'], restrictive: true },
+  { path: ['disableArtifact'], restrictive: true },
+  { path: ['disableBundledSkills'], restrictive: true },
+  { path: ['fastModePerSessionOptIn'], restrictive: true },
+  { path: ['isolatePeerMachines'], restrictive: true },
+  { path: ['strictPluginOnlyCustomization'], restrictive: true },
+  { path: ['disableAutoMode'], restrictive: 'disable' },
+  { path: ['disableDeepLinkRegistration'], restrictive: 'disable' },
+  {
+    path: ['permissions', 'disableBypassPermissionsMode'],
+    restrictive: 'disable',
+  },
+  { path: ['permissions', 'disableAutoMode'], restrictive: 'disable' },
+  {
+    path: ['permissions', 'blockReadsOutsideWorkingDirectories'],
+    restrictive: true,
+  },
+  {
+    path: ['permissions', 'blockWritesOutsideWorkingDirectories'],
+    restrictive: true,
+  },
+  { path: ['permissions', 'denyInsteadOfPrompting'], restrictive: true },
+  { path: ['autoMode', 'classifyAllShell'], restrictive: true },
+  { path: ['worktree', 'bgIsolation'], restrictive: 'worktree' },
+  { path: ['enableArtifact'], restrictive: false },
+  { path: ['enableWorkflows'], restrictive: false },
+  { path: ['syncClaudeAiSkills'], restrictive: false },
+  { path: ['syncClaudeAiPlugins'], restrictive: false },
+  { path: ['useAutoModeDuringPlan'], restrictive: false },
+  { path: ['skipDangerousModePermissionPrompt'], restrictive: false },
+  { path: ['skipAutoPermissionPrompt'], restrictive: false },
+  { path: ['enableAllProjectMcpServers'], restrictive: false },
+]
+
+function getPathValue(
+  obj: Record<string, unknown>,
+  path: readonly string[],
+): unknown {
+  let cursor: unknown = obj
+  for (const seg of path) {
+    if (
+      cursor === null ||
+      typeof cursor !== 'object' ||
+      Array.isArray(cursor)
+    ) {
+      return undefined
+    }
+    cursor = (cursor as Record<string, unknown>)[seg]
+  }
+  return cursor
+}
+
+function deletePathValue(
+  obj: Record<string, unknown>,
+  path: readonly string[],
+): void {
+  if (path.length === 1) {
+    delete obj[path[0]!]
+    return
+  }
+  const head = path[0]!
+  const child = obj[head]
+  if (child && typeof child === 'object' && !Array.isArray(child)) {
+    const clonedChild = { ...(child as Record<string, unknown>) }
+    deletePathValue(clonedChild, path.slice(1))
+    obj[head] = clonedChild
+  }
+}
+
+function hasTrustWorkspaceFalseArg(argv: readonly string[]): boolean {
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+    if (arg === '--trust-workspace=false' || arg === '--trust-workspace=0') {
+      return true
+    }
+    if (arg === '--trust-workspace') {
+      const next = argv[i + 1]
+      if (next === 'false' || next === '0') return true
+    }
+  }
+  return false
+}
+
 export function isUntrustedWorkspaceRepoSettingsRestricted(
   source: 'projectSettings' | 'localSettings',
 ): boolean {
   const ignorePersistedTrust =
     isEnvTruthy(process.env.CLAUDE_CODE_IGNORE_PERSISTED_TRUST) ||
-    process.argv.includes('--ignore-persisted-trust')
+    process.argv.includes('--ignore-persisted-trust') ||
+    hasTrustWorkspaceFalseArg(process.argv)
   if (!ignorePersistedTrust) return false
   if (source === 'projectSettings' && projectSettingsAliasesUserSettings()) {
     return false
   }
   return true
+}
+
+export function filterUntrustedRepoSettings(
+  settings: SettingsJson,
+  source: 'projectSettings' | 'localSettings',
+): SettingsJson {
+  const root = settings as Record<string, unknown>
+  const strippedZvl = UNTRUSTED_WORKSPACE_STRIP_KEYS.filter(
+    k => root[k] !== undefined,
+  )
+  const strippedHelpers = CREDENTIAL_HELPER_SETTING_KEYS.filter(
+    k => root[k] !== undefined,
+  )
+  const strippedNonRestrictive: Array<readonly string[]> = []
+  for (const spec of RESTRICTIVE_REPO_SETTING_SPECS) {
+    const val = getPathValue(root, spec.path)
+    if (val !== undefined && val !== spec.restrictive) {
+      strippedNonRestrictive.push(spec.path)
+    }
+  }
+
+  if (
+    strippedZvl.length === 0 &&
+    strippedHelpers.length === 0 &&
+    strippedNonRestrictive.length === 0
+  ) {
+    return settings
+  }
+
+  const next: Record<string, unknown> = { ...root }
+  for (const k of strippedZvl) delete next[k]
+  for (const k of strippedHelpers) delete next[k]
+  for (const path of strippedNonRestrictive) deletePathValue(next, path)
+
+  if (strippedNonRestrictive.length > 0) {
+    const fileName =
+      source === 'localSettings'
+        ? '.claude/settings.local.json'
+        : '.claude/settings.json'
+    const names = strippedNonRestrictive.map(p => p.join('.'))
+    logForDebugging(
+      `Ignoring ${names.join(', ')} in ${fileName}: this session's host does not trust the folder, so that file can make these settings stricter, not looser. To use such a value, set it in user or managed settings.`,
+      { level: 'warn' },
+    )
+  }
+
+  return next as SettingsJson
 }
 
 function stripProjectScopedSettings(
@@ -1112,16 +1396,7 @@ function stripProjectScopedSettings(
 ): SettingsJson {
   let current = stripProjectScopedTracingSettings(settings, source)
   if (isUntrustedWorkspaceRepoSettingsRestricted(source)) {
-    const hasRestricted = UNTRUSTED_WORKSPACE_STRIP_KEYS.some(
-      k => (current as Record<string, unknown>)[k] !== undefined,
-    )
-    if (hasRestricted) {
-      const stripped = { ...(current as Record<string, unknown>) }
-      for (const k of UNTRUSTED_WORKSPACE_STRIP_KEYS) {
-        delete stripped[k]
-      }
-      current = stripped as SettingsJson
-    }
+    current = filterUntrustedRepoSettings(current, source)
   }
   if (!current.env) return current
   const filteredEnv = stripProjectScopeBlockedEnv(current.env, source)
@@ -1380,8 +1655,12 @@ function loadExistingSettingsForWrite(
 
   const rawData = safeParseJSON(content, false)
   if (rawData === null) {
+    const loc = findJsonSyntaxErrorLocation(content)
+    const locSuffix = loc ? ` (line ${loc.line}, column ${loc.column})` : ''
     return {
-      error: new Error(`Invalid JSON syntax in settings file at ${filePath}`),
+      error: new Error(
+        `Invalid JSON syntax in settings file at ${filePath}${locSuffix}`,
+      ),
     }
   }
   if (rawData && typeof rawData === 'object' && !Array.isArray(rawData)) {
@@ -1625,6 +1904,10 @@ export function settingsMergeCustomizer(
   srcValue: unknown,
   key?: string | number | symbol,
 ): unknown {
+  // Official 2.1.326 (#18): never merge prototype-pollution keys
+  if (typeof key === 'string' && PROTOTYPE_DANGEROUS_KEYS.has(key)) {
+    return objValue
+  }
   if (Array.isArray(objValue) && Array.isArray(srcValue)) {
     // densable tRe: if(r==="fallbackModel")return t
     if (key === 'fallbackModel') {
@@ -2403,15 +2686,42 @@ export function getCrossSessionInbound(): CrossSessionInbound | undefined {
   return resolveCrossSessionInbound()
 }
 
+const AUTO_MODE_DEFAULTS_SENTINEL = '$defaults'
+
+/**
+ * Official 2.1.326 `lho` (#322):
+ * When managed `policySettings.autoMode.environment` (or `.allow`) is configured
+ * WITHOUT `"$defaults"`, strip `"$defaults"` from `flagSettings` (used by Claude
+ * Desktop and Agent SDK apps) so the managed list replaces every built-in entry
+ * everywhere (`getAutoModeConfig`, classifier prompts, server context, and
+ * `claude auto-mode config/critique`).
+ */
+export function stripDefaultsFromFlagAutoModeSection(
+  _section: 'allow' | 'environment',
+  flagEntries: readonly string[],
+  policyEntries: readonly string[] | undefined,
+): string[] {
+  if (
+    flagEntries.includes(AUTO_MODE_DEFAULTS_SENTINEL) &&
+    Boolean(policyEntries?.length) &&
+    !policyEntries!.includes(AUTO_MODE_DEFAULTS_SENTINEL)
+  ) {
+    return flagEntries.filter(entry => entry !== AUTO_MODE_DEFAULTS_SENTINEL)
+  }
+  return [...flagEntries]
+}
+
 /**
  * Returns the merged autoMode config from trusted settings sources.
  * Only available when TRANSCRIPT_CLASSIFIER is active; returns undefined otherwise.
  *
- * Source policy (official Claude Code 2.1.207):
+ * Source policy (official Claude Code 2.1.207 + 2.1.326 `yM()`/`Ci()`/`lho()`):
  * - projectSettings excluded — malicious project could inject classifier rules
  * - localSettings (`.claude/settings.local.json`) also excluded since 2.1.207 —
  *   repo-resident autoMode is ignored; use `~/.claude/settings.json` instead
  * - userSettings / flagSettings / policySettings are honored
+ * - When policySettings.autoMode.allow or .environment omits "$defaults",
+ *   "$defaults" is stripped from flagSettings before merging.
  */
 export function getAutoModeConfig():
   | {
@@ -2430,34 +2740,55 @@ export function getAutoModeConfig():
       environment: z.array(z.string()).optional(),
     })
 
-    const allow: string[] = []
-    const soft_deny: string[] = []
-    const hard_deny: string[] = []
-    const environment: string[] = []
-
-    for (const source of [
+    const sources = [
       'userSettings',
       // localSettings intentionally omitted — official 2.1.207 no longer reads
       // autoMode from `.claude/settings.local.json` (repo-resident).
       'flagSettings',
       'policySettings',
-    ] as const) {
+    ] as const
+    type AutoModeTrustedSource = (typeof sources)[number]
+
+    const allowBySource: Partial<Record<AutoModeTrustedSource, string[]>> = {}
+    const envBySource: Partial<Record<AutoModeTrustedSource, string[]>> = {}
+    const soft_deny: string[] = []
+    const hard_deny: string[] = []
+
+    for (const source of sources) {
       const settings = getSettingsForSource(source)
       if (!settings) continue
       const result = schema.safeParse(
         (settings as Record<string, unknown>).autoMode,
       )
       if (result.success) {
-        if (result.data.allow) allow.push(...result.data.allow)
+        if (result.data.allow) allowBySource[source] = result.data.allow
         if (result.data.soft_deny) soft_deny.push(...result.data.soft_deny)
         if (result.data.hard_deny) hard_deny.push(...result.data.hard_deny)
         if (process.env.USER_TYPE === 'ant') {
           if (result.data.deny) soft_deny.push(...result.data.deny)
         }
         if (result.data.environment)
-          environment.push(...result.data.environment)
+          envBySource[source] = result.data.environment
       }
     }
+
+    if (allowBySource.flagSettings) {
+      allowBySource.flagSettings = stripDefaultsFromFlagAutoModeSection(
+        'allow',
+        allowBySource.flagSettings,
+        allowBySource.policySettings,
+      )
+    }
+    if (envBySource.flagSettings) {
+      envBySource.flagSettings = stripDefaultsFromFlagAutoModeSection(
+        'environment',
+        envBySource.flagSettings,
+        envBySource.policySettings,
+      )
+    }
+
+    const allow = sources.flatMap(source => allowBySource[source] ?? [])
+    const environment = sources.flatMap(source => envBySource[source] ?? [])
 
     if (
       allow.length > 0 ||

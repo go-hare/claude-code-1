@@ -51,13 +51,22 @@ export function renderToolResultMessage(
   }
   if (content.published === true) {
     return (
-      <Box>
-        <Text color="success">✓</Text>
-        <Text>
-          {' '}
-          Live-edit published
-          {content.ver ? ` (ver ${content.ver})` : ''}
-        </Text>
+      <Box flexDirection="column">
+        <Box>
+          <Text color="success">✓</Text>
+          <Text>
+            {' '}
+            Live-edit published
+            {content.ver ? ` (ver ${content.ver})` : ''}
+            {content.url ? ': ' : ''}
+          </Text>
+          {/* Official 2.1.326 #106: Show the artifact's clickable link in the terminal after publish/update. */}
+          {content.url ? (
+            <Link url={content.url}>
+              <Text color="warning">{content.url}</Text>
+            </Link>
+          ) : null}
+        </Box>
       </Box>
     );
   }

@@ -116,7 +116,11 @@ export function HighlightedThinkingText({
       body = (
         <>
           <Text color={bodyColor}>{text.head}</Text>
-          <HiddenLinesDivider hiddenLines={text.hiddenLines} indent={paddingLeft} />
+          <HiddenLinesDivider
+            hiddenLines={text.hiddenLines}
+            hiddenChars={text.hiddenLines === 0 ? text.hiddenChars : undefined}
+            indent={paddingLeft}
+          />
           <Text color={bodyColor}>{text.tail}</Text>
         </>
       );
@@ -156,7 +160,11 @@ export function HighlightedThinkingText({
     body = (
       <Box flexDirection="column">
         <RainbowOrPlainText text={text.head} color={bodyColor} />
-        <HiddenLinesDivider hiddenLines={text.hiddenLines} indent={dividerIndent} />
+        <HiddenLinesDivider
+          hiddenLines={text.hiddenLines}
+          hiddenChars={text.hiddenLines === 0 ? text.hiddenChars : undefined}
+          indent={dividerIndent}
+        />
         <RainbowOrPlainText text={text.tail} color={bodyColor} />
       </Box>
     );

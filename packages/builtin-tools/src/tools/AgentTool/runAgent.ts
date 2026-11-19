@@ -17,6 +17,7 @@ import {
   resolveSubagentDefaultEffort,
 } from 'src/utils/effort.js'
 import {
+  getIsNonInteractiveSession,
   getMainThreadAgentId,
   getProjectRoot,
   getSessionId,
@@ -117,6 +118,7 @@ import {
   wrapInSystemReminder,
 } from 'src/utils/messages.js'
 import { isLocalAgentTask } from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
+import { leftoverIhrBind } from 'src/utils/collapseReadSearch.js'
 import { updateTaskState } from 'src/utils/task/framework.js'
 import {
   buildHandbackContractFields,
@@ -1391,9 +1393,17 @@ export async function* runAgent({
     contentReplacementState,
   })
 
-  // Gold: if (override?.onRetryStatus) child.onRetryStatus = override.onRetryStatus.
+  // Gold: if (override?.onRetryStatus) child.onRetryStatus = override.onRetryStatus;
+  // else if (!Se() && Tn(g.taskRegistry.get(ge))) child.onRetryStatus = Cct(ge).setRetryStatus.
+  // Official 2.1.326 #112: bind subagent retry status into the per-agent spinner
+  // store so viewing a local_agent task surfaces API retry status.
   if (override?.setRetryStatus) {
     agentToolUseContext.setRetryStatus = override.setRetryStatus
+  } else if (
+    !getIsNonInteractiveSession() &&
+    isLocalAgentTask(agentGetAppState().tasks?.[agentId])
+  ) {
+    agentToolUseContext.setRetryStatus = leftoverIhrBind(agentId).setRetryStatus
   }
   // #1592: propagate pickedEffortModel from override or parent context onto subagent context
   const resolvedPickedEffortModel =

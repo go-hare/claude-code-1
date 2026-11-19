@@ -166,6 +166,13 @@ export type ReplBridgeHandle = {
     details?: import('../utils/sessionState.js').RequiresActionDetails,
   ): void
   /**
+   * Official 2.1.326 #94 (`reportBlockingDialog`): ref-counted blocking-dialog
+   * tracker for terminal-only prompts so Remote Control reports
+   * `requires_action` while waiting on a prompt that can only be answered in
+   * the terminal, and restores `'running'`/`'idle'` once closed.
+   */
+  reportBlockingDialog?(kind: string, open: boolean): void
+  /**
    * Official 2.1.323 #2101: notify remote host when an inbound peer message
    * is dropped (duplicate / rate-limited / queue-full) so Desktop does not
    * stay stuck as busy.

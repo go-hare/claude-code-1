@@ -1,4 +1,4 @@
-import { Box, Dialog, Text } from '@anthropic/ink';
+import { Box, Byline, Dialog, KeyboardShortcutHint, Text } from '@anthropic/ink';
 import * as React from 'react';
 import { useState } from 'react';
 import { Select } from '../../components/CustomSelect/index.js';
@@ -104,8 +104,25 @@ export function CacheMissConfirmDialog({
 }): React.ReactNode {
   const title = kind === 'model' ? 'Switch model?' : 'Change effort level?';
   const confirmLabel = `Yes, switch to ${targetLabel}`;
+  // Official 2.1.326 #228: show key hints on "Switch model?" and "Change effort level?" dialogs.
   return (
-    <Dialog title={title} subtitle={CACHE_MISS_SUBTITLE} color="warning" onCancel={onCancel} hideInputGuide>
+    <Dialog
+      title={title}
+      subtitle={CACHE_MISS_SUBTITLE}
+      color="warning"
+      onCancel={onCancel}
+      inputGuide={exitState =>
+        exitState.pending ? (
+          <Text>Press {exitState.keyName} again to exit</Text>
+        ) : (
+          <Byline>
+            <KeyboardShortcutHint shortcut="↑/↓" action="select" />
+            <KeyboardShortcutHint shortcut="Enter" action="confirm" />
+            <KeyboardShortcutHint shortcut="Esc" action="go back" />
+          </Byline>
+        )
+      }
+    >
       <Box flexDirection="column" gap={1} marginBottom={1}>
         <Text>{formatCacheSwitchBody(kind, targetLabel)}</Text>
         <Select
@@ -585,25 +602,171 @@ function ShowModelAndClose({ onDone }: { onDone: (result?: string) => void }): R
   return null;
 }
 
-export const call: LocalJSXCommandCall = async (onDone, _context, args) => {
+async function executeDirectModelArg(
+  args: string,
+  onDone: (result?: string, options?: { display?: CommandResultDisplay }) => void,
+  context: {
+    getAppState: () => { fastMode?: boolean };
+    setAppState: ReturnType<typeof useSetAppState>;
+  },
+): Promise<void> {
+  const model = args === 'default' ? null : args;
+  const isFastMode = Boolean((context.getAppState() as { fastMode?: boolean }).fastMode);
+
+  if (model && !isModelAllowed(model)) {
+    onDone(formatModelRestrictionOrCheckError(model).message, { display: 'system' });
+    return;
+  }
+
+  if (model && isModelDenied(model)) {
+    const probe = await validateModel(model);
+    if (!probe.valid) {
+      onDone(formatModelRestrictionOrCheckError(model, probe).message, { display: 'system' });
+      return;
+    }
+  }
+
+  if (model && isOpus1mUnavailable(model)) {
+    onDone(
+      `Opus 4.7 with 1M context is not available for your account. Learn more: https://code.claude.com/docs/en/model-config#extended-context-with-1m`,
+      { display: 'system' },
+    );
+    return;
+  }
+
+  if (model && isSonnet1mUnavailable(model)) {
+    onDone(
+      `Sonnet 5 with 1M context is not available for your account. Learn more: https://code.claude.com/docs/en/model-config#extended-context-with-1m`,
+      { display: 'system' },
+    );
+    return;
+  }
+
+  let validatedModel: string | null = model;
+  if (model && !isKnownAlias(model)) {
+    try {
+      const { valid, error } = await validateModel(model);
+      if (!valid) {
+        onDone(error || `Model '${model}' not found`, { display: 'system' });
+        return;
+      }
+      validatedModel = model;
+    } catch (error) {
+      onDone(`Failed to validate model: ${(error as Error).message}`, { display: 'system' });
+      return;
+    }
+  }
+
+  if (validatedModel === null) {
+    const blocked = formatDeniedModelsBlockMessage(getDefaultMainLoopModelSetting(), 'switch');
+    if (blocked !== null) {
+      logEvent('tengu_feature_bad', {
+        feature_name: 'model_switch' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        error_code: 'denied_by_managed_settings' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      });
+      onDone(blocked, { display: 'system' });
+      return;
+    }
+  }
+
+  const fromModel = getMainLoopModel();
+  const toModel = validatedModel ? parseUserSpecifiedModel(validatedModel) : getDefaultMainLoopModel();
+  const pre = await executePreModelSwitchHooks({
+    fromModel,
+    toModel,
+    requestedModel: validatedModel,
+    source: 'command',
+  });
+  if (pre.decision === 'block' || pre.decision === 'ask') {
+    const extra = pre.messages.length > 0 ? `\n${pre.messages.join('\n')}` : '';
+    onDone(`${pre.reason ?? 'PreModelSwitch hooks blocked the switch'}${extra}`, { display: 'system' });
+    return;
+  }
+  if (isFastModeEnabled()) {
+    clearFastModeCooldown();
+  }
+  const nextFast = resolveFastModeAfterModelSwitch(validatedModel, isFastMode);
+  const billed = isBilledAsExtraUsage(validatedModel, nextFast, isOpus1mMergeEnabled());
+  const applied = applyFastModeOnModelSwitch(validatedModel, isFastMode, {
+    billedAsExtraUsage: billed,
+  });
+  context.setAppState(prev => ({
+    ...prev,
+    mainLoopModel: validatedModel,
+    mainLoopModelForSession: null,
+    ...(applied.changed ? { fastMode: applied.nextFastMode } : null),
+  }));
+  let message = `Set model to ${em(renderModelLabel(validatedModel))}`;
+  message += applied.suffix;
+  if (!getIsRemoteMode()) {
+    const notice = buildUnrecognizedModelNotice(validatedModel ?? getDefaultMainLoopModel());
+    if (notice !== null) {
+      message += `\n${formatModelCommandUnrecognizedWarning(notice)}`;
+    }
+  }
+  if (pre.messages.length > 0) {
+    message += `\n${pre.messages.join('\n')}`;
+  }
+  executePostModelSwitchHooks({
+    fromModel,
+    toModel,
+    requestedModel: validatedModel,
+    source: 'command',
+  });
+  onDone(message);
+}
+
+export const call: LocalJSXCommandCall = async (onDone, context, args) => {
   args = args?.trim() || '';
+  const hasStateAccess = typeof context?.getAppState === 'function' && typeof context?.setAppState === 'function';
+
   if (COMMON_INFO_ARGS.includes(args)) {
     logEvent('tengu_model_command_inline_help', {
       args: args as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     });
+    // Official 2.1.326 #139: settle inline without mounting a null JSX panel so
+    // the prompt never hides or drops typed characters.
+    if (hasStateAccess) {
+      const appState = context.getAppState();
+      const pdEffort = pdSessionEffort(appState);
+      const activeModel = parseUserSpecifiedModel(
+        appState.mainLoopModelForSession ?? appState.mainLoopModel ?? getDefaultMainLoopModel(),
+      );
+      const effectiveEffort = getDisplayedEffortLevel(activeModel, pdEffort);
+      const displayModel = em(renderModelLabel(appState.mainLoopModel));
+      const effortInfo = effectiveEffort !== undefined ? ` (effort: ${effectiveEffort})` : '';
+      if (
+        appState.mainLoopModelForSession !== null &&
+        appState.mainLoopModelForSession !== undefined &&
+        appState.mainLoopModelForSession !== appState.mainLoopModel
+      ) {
+        onDone(
+          `Current model: ${em(renderModelLabel(appState.mainLoopModelForSession))} (this session only)${effortInfo}\nBase model: ${displayModel}`,
+        );
+      } else {
+        onDone(`Current model: ${displayModel}${effortInfo}`);
+      }
+      return null;
+    }
     return <ShowModelAndClose onDone={onDone} />;
   }
   if (COMMON_HELP_ARGS.includes(args)) {
     onDone('Run /model to open the model selection menu, or /model [modelName] to set the model.', {
       display: 'system',
     });
-    return;
+    return null;
   }
 
   if (args) {
     logEvent('tengu_model_command_inline', {
       args: args as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     });
+    // Official 2.1.326 #139: execute `/model <alias>` directly and return null
+    // so REPL doesn't flash-hide the prompt and drop letters typed right after.
+    if (hasStateAccess) {
+      await executeDirectModelArg(args, onDone, context);
+      return null;
+    }
     return <SetModelAndClose args={args} onDone={onDone} />;
   }
 

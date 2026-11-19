@@ -170,11 +170,14 @@ export function useFilePermissionDialog<T extends ToolInput>({
     })
     if (action === 'collapse-yes') {
       setYesInputMode(false)
+      // Official 2.1.326 #27: clear note when collapsing input mode.
+      setAcceptFeedback('')
       setFocusedOption('yes')
       return
     }
     if (action === 'collapse-no') {
       setNoInputMode(false)
+      setRejectFeedback('')
       setFocusedOption('no')
       return
     }
@@ -226,6 +229,7 @@ export function useFilePermissionDialog<T extends ToolInput>({
       if (value === 'yes') {
         if (yesInputMode) {
           setYesInputMode(false)
+          setAcceptFeedback('')
           logEvent('tengu_accept_feedback_mode_collapsed', analyticsProps)
         } else {
           setYesInputMode(true)
@@ -235,6 +239,7 @@ export function useFilePermissionDialog<T extends ToolInput>({
       } else if (value === 'no') {
         if (noInputMode) {
           setNoInputMode(false)
+          setRejectFeedback('')
           logEvent('tengu_reject_feedback_mode_collapsed', analyticsProps)
         } else {
           setNoInputMode(true)

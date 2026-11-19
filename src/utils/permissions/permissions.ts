@@ -24,7 +24,11 @@ import {
 } from './mcpPermissionMode.js'
 import {
   autoModeHasDenyRules,
+  buildUnfinishedCheckAsk,
+  formatNonInteractiveAskCauseMessage,
   hasClassifierRoutedSafetyCheck,
+  hasUnwaivableBypassImmuneSafetyCheck,
+  isClassifierRoutedSafetyCheck,
   isDesktopForwardSkipClassifier,
   isServerHeldClassifierAsk,
   pluginOriginCaller,
@@ -270,34 +274,19 @@ export function getAllowRules(
   )
 }
 
+type SafetyCheckDecisionReason = Extract<
+  PermissionDecisionReason,
+  { type: 'safetyCheck' }
+>
+
 /**
  * densable W9 — walk decisionReason (including nested subcommandResults) for a
  * safetyCheck matching the optional predicate.
  */
 export function findSafetyCheckDecision(
   decisionReason: PermissionDecisionReason | undefined,
-  predicate: (check: {
-    type: 'safetyCheck'
-    reason: string
-    classifierApprovable: boolean
-    circuitBreaker?:
-      | 'dangerousRemoval'
-      | 'backgroundOperator'
-      | 'suspiciousWindowsPath'
-      | 'outsideReadsBlocked'
-  }) => boolean = () => true,
-):
-  | {
-      type: 'safetyCheck'
-      reason: string
-      classifierApprovable: boolean
-      circuitBreaker?:
-        | 'dangerousRemoval'
-        | 'backgroundOperator'
-        | 'suspiciousWindowsPath'
-        | 'outsideReadsBlocked'
-    }
-  | undefined {
+  predicate: (check: SafetyCheckDecisionReason) => boolean = () => true,
+): SafetyCheckDecisionReason | undefined {
   if (!decisionReason) return undefined
   if (decisionReason.type === 'safetyCheck') {
     return predicate(decisionReason) ? decisionReason : undefined
@@ -2180,13 +2169,13 @@ const evaluateToolPermission: CanUseToolFn = async (
         result.decisionReason,
         check =>
           !check.classifierApprovable &&
-          !(check.circuitBreaker !== undefined && autoContext),
+          !(isClassifierRoutedSafetyCheck(check) && autoContext),
       )
       if (forcedSafetyCheck) {
         if (layeredPermissionContext.shouldAvoidPermissionPrompts) {
           return {
             behavior: 'deny',
-            message: result.message,
+            message: formatNonInteractiveAskCauseMessage(result),
             decisionReason: {
               type: 'asyncAgent',
               reason:
@@ -3169,13 +3158,20 @@ const evaluateToolPermission: CanUseToolFn = async (
       if (hookDecision) {
         return hookDecision
       }
+      const hasExplicitCause =
+        result.decisionReason !== undefined &&
+        (result.decisionReason.type === 'safetyCheck' ||
+          (result.decisionReason.type === 'other' &&
+            result.decisionReason.reason.length > 0))
       return {
         behavior: 'deny',
         decisionReason: {
           type: 'asyncAgent',
           reason: 'Permission prompts are not available in this context',
         },
-        message: AUTO_REJECT_MESSAGE(tool.name),
+        message: hasExplicitCause
+          ? formatNonInteractiveAskCauseMessage(result)
+          : AUTO_REJECT_MESSAGE(tool.name),
       }
     }
   }
@@ -3419,15 +3415,22 @@ export async function checkRuleBasedPermissions(
     if (failureDecision && failureDecision.behavior !== 'allow') {
       return failureDecision
     }
+    // Official 2.1.326 #311 / #253 (`LIn` / `bts` / `unfinishedCheck`):
+    // when tool.checkPermissions throws a non-abort error, do NOT fall through
+    // to bypassPermissions or generic passthrough — emit a bypass-immune
+    // `unfinishedCheck` safetyCheck naming the error cause.
+    const errDetail =
+      e instanceof Error && e.message.trim().length > 0
+        ? ` (${e.message.trim()})`
+        : ''
+    const unfinishedReason = `The permission check for ${tool.name} did not finish${errDetail}, so its safety checks did not run.`
+    const unfinishedAsk = buildUnfinishedCheckAsk(unfinishedReason, {
+      blockReadsOutsideWorkingDirectories:
+        toolPermissionContext.blockReadsOutsideWorkingDirectories,
+    }) as unknown as PermissionAskDecision
+    toolPermissionResult = unfinishedAsk
     if (options?.crashIsObjection) {
-      return {
-        behavior: 'ask',
-        decisionReason: {
-          type: 'other',
-          reason: 'permission check failed',
-        },
-        message: createPermissionRequestMessage(tool.name),
-      }
+      return unfinishedAsk
     }
   }
 
@@ -3455,13 +3458,18 @@ export async function checkRuleBasedPermissions(
   }
 
   // 1g. Non-classifier-approvable safety checks stay immune even when a
-  // PreToolUse hook returned allow. classifierApprovable safetyChecks
-  // (sensitive-file paths under .claude/, .git/, etc.) are not hard-blocks
-  // here — callers that apply mode (bypassPermissions) may still allow them.
+  // PreToolUse hook returned allow (including nested subcommandResults safety
+  // checks and unwaivable bypass-immune breakers like unfinishedCheck).
+  // classifierApprovable safetyChecks (sensitive-file paths under .claude/,
+  // .git/, etc.) are not hard-blocks here — callers that apply mode
+  // (bypassPermissions) may still allow them.
   if (
     toolPermissionResult?.behavior === 'ask' &&
-    toolPermissionResult.decisionReason?.type === 'safetyCheck' &&
-    !toolPermissionResult.decisionReason.classifierApprovable
+    (findSafetyCheckDecision(
+      toolPermissionResult.decisionReason,
+      check => !check.classifierApprovable,
+    ) !== undefined ||
+      hasUnwaivableBypassImmuneSafetyCheck(toolPermissionResult.decisionReason))
   ) {
     return toolPermissionResult
   }
@@ -3616,6 +3624,19 @@ async function hasPermissionsToUseToolInner(
     if (failureDecision && failureDecision.behavior !== 'allow') {
       return failureDecision
     }
+    // Official 2.1.326 #311 / #253 (`LIn` / `bts` / `unfinishedCheck`):
+    // when tool.checkPermissions throws a non-abort error, do NOT fall through
+    // to bypassPermissions or generic passthrough — emit a bypass-immune
+    // `unfinishedCheck` safetyCheck naming the error cause.
+    const errDetail =
+      e instanceof Error && e.message.trim().length > 0
+        ? ` (${e.message.trim()})`
+        : ''
+    const unfinishedReason = `The permission check for ${tool.name} did not finish${errDetail}, so its safety checks did not run.`
+    toolPermissionResult = buildUnfinishedCheckAsk(unfinishedReason, {
+      blockReadsOutsideWorkingDirectories:
+        toolPermissionContext.blockReadsOutsideWorkingDirectories,
+    }) as unknown as PermissionResult
   }
 
   // 1d. Tool implementation denied permission
@@ -3692,16 +3713,40 @@ async function hasPermissionsToUseToolInner(
   // deny dangerousRemoval at once with a rewrite hint instead of prompting.
   if (
     toolPermissionResult?.behavior === 'ask' &&
-    findSafetyCheckDecision(
+    (findSafetyCheckDecision(
       toolPermissionResult.decisionReason,
       check => !check.classifierApprovable,
-    ) !== undefined
+    ) !== undefined ||
+      hasUnwaivableBypassImmuneSafetyCheck(toolPermissionResult.decisionReason))
   ) {
-    const modeNow = getEffectivePermissionMode(
-      tool,
-      getToolPermissionContextFromLayers(context),
+    const layeredNow = getToolPermissionContextFromLayers(context)
+    const modeNow = getEffectivePermissionMode(tool, layeredNow)
+    const splendid = applySplendidHorizonBypassDeny(
+      toolPermissionResult,
+      modeNow,
     )
-    return applySplendidHorizonBypassDeny(toolPermissionResult, modeNow)
+    // Official 2.1.326 #311 / #253: unwaivable bypass-immune checks
+    // (`waivableInBypass: false`, e.g. `unfinishedCheck`, `outsideReadsBlocked`,
+    // `isolatePeerMachines`, `restrictedMode`, `connectorFileSend`) ask in
+    // bypassPermissions mode, and are denied with cause where no one can answer.
+    if (
+      splendid.behavior === 'ask' &&
+      modeNow === 'bypassPermissions' &&
+      (layeredNow.shouldAvoidPermissionPrompts ||
+        context.options?.isNonInteractiveSession) &&
+      hasUnwaivableBypassImmuneSafetyCheck(splendid.decisionReason)
+    ) {
+      return {
+        behavior: 'deny',
+        message: formatNonInteractiveAskCauseMessage(splendid),
+        decisionReason: {
+          type: 'asyncAgent',
+          reason:
+            'Safety check requires approval even in bypassPermissions mode and no approval surface is available',
+        },
+      }
+    }
+    return splendid
   }
 
   // 2a. Check if mode allows the tool to run

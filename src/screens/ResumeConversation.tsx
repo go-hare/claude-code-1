@@ -110,6 +110,7 @@ export function ResumeConversation({
   const agentDefinitions = useAppState(s => s.agentDefinitions);
   const setAppState = useSetAppState();
   const [logs, setLogs] = React.useState<LogOption[]>([]);
+  const [hasMore, setHasMore] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [resuming, setResuming] = React.useState(false);
   /** densable IQf: sticky fail state so picker does not hang on load/onSelect errors */
@@ -162,21 +163,28 @@ export function ResumeConversation({
         logCountRef.current = result.logs.length;
         hasListRef.current = true;
         setLogs(result.logs);
+        setHasMore(result.nextIndex < result.allStatLogs.length);
         setLoading(false);
       })
       .catch(error => {
         logError(error);
         hasListRef.current = true;
+        setHasMore(false);
         setLoading(false);
       });
   }, [worktreePaths]);
 
   const loadMoreLogs = React.useCallback((count: number) => {
     const ref = sessionLogResultRef.current;
-    if (!ref || ref.nextIndex >= ref.allStatLogs.length) return;
+    if (!ref || ref.nextIndex >= ref.allStatLogs.length) {
+      setHasMore(false);
+      return;
+    }
 
     void enrichLogs(ref.allStatLogs, ref.nextIndex, count).then(result => {
       ref.nextIndex = result.nextIndex;
+      const more = ref.nextIndex < ref.allStatLogs.length;
+      setHasMore(more);
       if (result.logs.length > 0) {
         // enrichLogs returns fresh unshared objects — safe to mutate in place.
         // Offset comes from logCountRef so the setLogs updater stays pure.
@@ -186,7 +194,7 @@ export function ResumeConversation({
         });
         setLogs(prev => prev.concat(result.logs));
         logCountRef.current += result.logs.length;
-      } else if (ref.nextIndex < ref.allStatLogs.length) {
+      } else if (more) {
         loadMoreLogs(count);
       }
     });
@@ -210,9 +218,11 @@ export function ResumeConversation({
           sessionLogResultRef.current = result;
           logCountRef.current = result.logs.length;
           setLogs(result.logs);
+          setHasMore(result.nextIndex < result.allStatLogs.length);
         })
         .catch(error => {
           logError(error);
+          setHasMore(false);
         })
         .finally(() => {
           setLoading(false);
@@ -467,6 +477,7 @@ export function ResumeConversation({
         onSelect={onSelect}
         onLogsChanged={isResumeWithRenameEnabled ? () => loadLogs(showAllProjects) : undefined}
         onLoadMore={loadMoreLogs}
+        hasMore={hasMore}
         initialSearchQuery={initialSearchQuery}
         isLoading={loading}
         showAllProjects={showAllProjects}

@@ -38,6 +38,7 @@ import {
   expandTilde,
   isDangerousRemovalPath,
 } from 'src/utils/permissions/pathValidation.js'
+import { buildUnfinishedCheckAsk } from 'src/utils/permissions/nhoGates.js'
 import type {
   ClassifierBehavior,
   ClassifierResult,
@@ -1799,7 +1800,18 @@ export const bashToolCheckPermission = (
   }
 
   // 7. Check read-only rules
-  if (BashTool.isReadOnly(input)) {
+  // Official 2.1.326 #306/#231 (`Pjo` @295801680): never auto-allow as
+  // read-only when the command carries an unsafe env-var prefix, `+=` append,
+  // or non-allowlisted bare env assignment.
+  const bareAssignNames = extractBareEnvAssignmentNames(command)
+  if (
+    BashTool.isReadOnly(input) &&
+    !hasUnsafeEnvVarPrefix(command) &&
+    !hasUnsafeBareEnvAssignment(
+      bareAssignNames,
+      SandboxManager.isSandboxingEnabled() || shouldUseSandbox(input),
+    )
+  ) {
     return {
       behavior: 'allow',
       updatedInput: input,
@@ -1823,6 +1835,178 @@ export const bashToolCheckPermission = (
     // Suggest exact match rule to user
     // this may be overridden by prefix suggestions in `checkCommandAndSuggestRules()`
     suggestions: suggestionForExactCommand(command),
+  }
+}
+
+/**
+ * Official 2.1.326 #306/#231 (`OOn`/`dIn`/`iJ`/`XLe` @295781474–295784536):
+ * Detect unsafe env-var prefixes, `+=` appends, or bare env assignments that
+ * must not be silently auto-allowed by read-only or sandbox paths.
+ */
+const DANGEROUS_SANDBOX_ENV_VAR_RE =
+  /^(?:SRT_SSH_PROXY_COMMAND|GIT_(?:SSH_COMMAND|CONFIG_(?:GLOBAL|COUNT|(?:KEY|VALUE)_\d+)))$/
+
+export function hasUnsafeEnvVarPrefix(
+  command: string,
+  astCmd?: SimpleCommand,
+): boolean {
+  if (astCmd) {
+    return astCmd.envVars.some(
+      ev =>
+        (ev as { name: string; value: string; isAppend?: boolean }).isAppend ===
+          true ||
+        (!SAFE_ENV_VARS.has(ev.name) && !ANT_ONLY_SAFE_ENV_VARS.has(ev.name)) ||
+        !isSafeEnvVarValue(ev.name, ev.value),
+    )
+  }
+  const assignRe = /^([A-Za-z_][A-Za-z0-9_]*)(\+?)=/
+  const prefixRe =
+    /^[A-Za-z_][A-Za-z0-9_]*\+?=("[^"$`\\]*"|'[^']*'|[A-Za-z0-9_./:+-]*)[ \t]+/
+  let rest = command.trimStart()
+  for (;;) {
+    const m = rest.match(assignRe)
+    if (!m) return false
+    const varName = m[1]!
+    const isAppend = m[2] === '+'
+    if (
+      isAppend ||
+      (!SAFE_ENV_VARS.has(varName) && !ANT_ONLY_SAFE_ENV_VARS.has(varName))
+    ) {
+      return true
+    }
+    const pm = rest.match(prefixRe)
+    if (!pm || !isSafeEnvVarValue(varName, pm[1]!)) {
+      return true
+    }
+    rest = rest.slice(pm[0].length)
+  }
+}
+
+export function extractBareEnvAssignmentNames(command: string): string[] {
+  const names: string[] = []
+  for (const part of splitCommand(command)) {
+    const trimmed = part.trim()
+    const m = /^([A-Za-z_][A-Za-z0-9_]*)\+?=/.exec(trimmed)
+    if (!m) continue
+    // A bare assignment has no subsequent command word (e.g. `FOO=bar`)
+    const afterVal = trimmed.replace(
+      /^[A-Za-z_][A-Za-z0-9_]*\+?=((?:'[^']*'|"(?:\\.|[^"\\])*"|\\.|[^\s])*)/,
+      '',
+    )
+    if (afterVal.trim() === '') {
+      names.push(m[1]!)
+    }
+  }
+  return names
+}
+
+export function hasUnsafeBareEnvAssignment(
+  bareAssignmentNames: readonly string[],
+  isSandboxed: boolean,
+): boolean {
+  return bareAssignmentNames.some(
+    name =>
+      name === 'PWD' ||
+      name === 'OLDPWD' ||
+      (isSandboxed && DANGEROUS_SANDBOX_ENV_VAR_RE.test(name)) ||
+      (!SAFE_ENV_VARS.has(name) && !ANT_ONLY_SAFE_ENV_VARS.has(name)),
+  )
+}
+
+/**
+ * Official 2.1.326 #312 (`Ojo` / `Bpt` @295854500):
+ * Message and decision helper when a Bash command's variables or substitutions
+ * expand to more text than the permission check reads.
+ */
+export const BASH_TOO_LONG_TO_JUDGE_MESSAGE =
+  "This command's variables and substitutions expand to more text than the permission check reads, so it was not run. Use fewer or shorter ones, or put the long text in a file."
+
+const BASH_EXPANSION_CHECK_CAP = 32_768
+const BASH_HAS_EXPANSION_SYNTAX_RE = /\$(?:\{|\(|[A-Za-z_@*#?!0-9])|`/
+
+export function evaluateBashTooLongExpansion(
+  command: string,
+  toolPermissionContext: ToolPermissionContext,
+  options?: {
+    forceTooLong?: boolean
+    hasNoInteractivePrompt?: boolean
+  },
+): PermissionResult | null {
+  const isTooLong =
+    options?.forceTooLong === true ||
+    (command.length > BASH_EXPANSION_CHECK_CAP &&
+      BASH_HAS_EXPANSION_SYNTAX_RE.test(command))
+  if (!isTooLong) return null
+
+  const hasAnyDenyRules = Object.values(
+    toolPermissionContext.alwaysDenyRules,
+  ).some(rules => Array.isArray(rules) && rules.length > 0)
+  const cannotAsk =
+    options?.hasNoInteractivePrompt === true ||
+    toolPermissionContext.shouldAvoidPermissionPrompts === true
+
+  try {
+    logEvent('tengu_bash_too_long_to_judge', {})
+  } catch {
+    // non-fatal telemetry
+  }
+
+  if (hasAnyDenyRules || cannotAsk) {
+    return {
+      behavior: 'deny',
+      message: BASH_TOO_LONG_TO_JUDGE_MESSAGE,
+      decisionReason: {
+        type: 'other',
+        reason: BASH_TOO_LONG_TO_JUDGE_MESSAGE,
+        standsForDenyRules: true,
+      } as PermissionDecisionReason,
+    }
+  }
+
+  return buildUnfinishedCheckAsk({
+    message: BASH_TOO_LONG_TO_JUDGE_MESSAGE,
+    reason:
+      'command variables and substitutions expand past the permission check limit',
+  }) as unknown as PermissionResult
+}
+
+/**
+ * Official 2.1.326 #306: When sandbox is enabled and auto-allow is OFF,
+ * lines setting environment variables (unsafe prefixes, bare assignments,
+ * or `+=` appends) ask before running (and unattended runs refuse them).
+ */
+export function checkSandboxEnvAssignmentWhenAutoAllowOff(
+  input: z.infer<typeof BashTool.inputSchema>,
+  astResult?: ParseForSecurityResult,
+): PermissionResult | null {
+  if (
+    !SandboxManager.isSandboxingEnabled() ||
+    SandboxManager.isAutoAllowBashIfSandboxedEnabled() ||
+    !shouldUseSandbox(input)
+  ) {
+    return null
+  }
+  const bareNames =
+    astResult?.kind === 'simple'
+      ? astResult.bareAssignmentNames
+      : extractBareEnvAssignmentNames(input.command)
+  const hasUnsafePrefix =
+    astResult?.kind === 'simple'
+      ? astResult.commands.some(c => hasUnsafeEnvVarPrefix(c.text, c))
+      : splitCommand(input.command).some(sub => hasUnsafeEnvVarPrefix(sub))
+  if (!hasUnsafePrefix && !hasUnsafeBareEnvAssignment(bareNames, true)) {
+    return null
+  }
+  const decisionReason: PermissionDecisionReason = {
+    type: 'other',
+    reason:
+      'Setting environment variables in a sandboxed command requires approval when sandbox auto-allow is off',
+  }
+  return {
+    behavior: 'ask',
+    decisionReason,
+    message: createPermissionRequestMessage(BashTool.name, decisionReason),
+    suggestions: [],
   }
 }
 
@@ -1993,6 +2177,22 @@ function checkSandboxAutoAllow(
       },
     }
   }
+  // Official 2.1.326 #306/#231 (`Lpt` @295803007): never sandbox-auto-allow
+  // commands with unsafe env-var prefixes, `+=` appends, non-allowlisted bare
+  // env assignments, or `/dev/tcp`/`/dev/udp` redirects.
+  const sandboxBareAssignNames = extractBareEnvAssignmentNames(command)
+  if (
+    hasUnsafeBareEnvAssignment(sandboxBareAssignNames, true) ||
+    subcommands.some(sub => hasUnsafeEnvVarPrefix(sub)) ||
+    /\/dev\/(?:tcp|udp)\//.test(command)
+  ) {
+    return {
+      behavior: 'passthrough',
+      message:
+        'Command sets environment variables or opens a network device and cannot be sandbox auto-allowed',
+    }
+  }
+
   // No explicit rules, so auto-allow with sandbox
 
   return {
@@ -3381,11 +3581,18 @@ export function checkDangerousRmInShellDashC(
   if (!hadShellDashC) return null
 
   if (unreadable && shouldPromptUnreadableShellDashC(command)) {
-    return dangerousRemovalAsk(
-      'rm',
-      'This command passes a shell -c script that runs rm, and Claude Code could not check the script for dangerous removals. Approve only if you have read the script.',
-      'in a shell -c script that could not be checked',
-    )
+    // Official 2.1.326 #13 / 2.1.328 `zOn`: only emit "Dangerous rm operation" /
+    // "runs rm" when the command actually may contain an `rm` invocation;
+    // commands with no `rm` return null so normal permission/classifier checks
+    // evaluate them (never emitting an unwaivable `unfinishedCheck` harsher than `rm`).
+    if (mayContainRmInvocation(command)) {
+      return dangerousRemovalAsk(
+        'rm',
+        'This command passes a shell -c script that runs rm, and Claude Code could not check the script for dangerous removals. Approve only if you have read the script.',
+        'in a shell -c script that could not be checked',
+      )
+    }
+    return null
   }
 
   for (const script of scripts) {
@@ -3401,11 +3608,14 @@ export function checkDangerousRmInShellDashC(
         nested.unreadable &&
         shouldPromptUnreadableShellDashC(command, unit)
       ) {
-        return dangerousRemovalAsk(
-          'rm',
-          'This command passes a shell -c script that runs rm, and Claude Code could not check the script for dangerous removals. Approve only if you have read the script.',
-          'in a shell -c script that could not be checked',
-        )
+        if (mayContainRmInvocation(command) || mayContainRmInvocation(unit)) {
+          return dangerousRemovalAsk(
+            'rm',
+            'This command passes a shell -c script that runs rm, and Claude Code could not check the script for dangerous removals. Approve only if you have read the script.',
+            'in a shell -c script that could not be checked',
+          )
+        }
+        continue
       }
       const emptyVar = detectPossiblyEmptyVariableRm(unit)
       if (emptyVar) {
@@ -3843,6 +4053,17 @@ export async function bashToolHasPermission(
     return awkDanger
   }
 
+  // Official 2.1.326 #312 (`Ojo` / `Bpt`): check if variables/substitutions
+  // exceed the permission check's read cap before running inner checks.
+  const preTooLongResult = evaluateBashTooLongExpansion(
+    input.command,
+    context.getAppState().toolPermissionContext,
+    { hasNoInteractivePrompt: context.options?.isNonInteractiveSession },
+  )
+  if (preTooLongResult) {
+    return preTooLongResult
+  }
+
   const astCapture: { astResult?: ParseForSecurityResult } = {}
   const innerResult = await bashToolHasPermissionInner(
     input,
@@ -3850,6 +4071,24 @@ export async function bashToolHasPermission(
     getCommandSubcommandPrefixFn,
     astCapture,
   )
+  if (
+    astCapture.astResult?.kind === 'too-complex' &&
+    astCapture.astResult.nodeType === 'PARSE_ABORT' &&
+    BASH_HAS_EXPANSION_SYNTAX_RE.test(input.command) &&
+    innerResult.behavior !== 'deny'
+  ) {
+    const abortTooLong = evaluateBashTooLongExpansion(
+      input.command,
+      context.getAppState().toolPermissionContext,
+      {
+        forceTooLong: true,
+        hasNoInteractivePrompt: context.options?.isNonInteractiveSession,
+      },
+    )
+    if (abortTooLong) {
+      return abortTooLong
+    }
+  }
   const result = applyAssignedVariableGate(
     input.command,
     innerResult,
@@ -4103,6 +4342,17 @@ async function bashToolHasPermissionInner(
     return exactMatchResult
   }
 
+  // Official 2.1.326 #306: helper to downgrade non-exact 'allow' decisions to
+  // 'ask' when sandbox is enabled, auto-allow is OFF, and the command sets
+  // environment variables. Applied ONLY after all deny, path-validation, and
+  // safety checks have run so deny rules and safetyChecks are never masked.
+  const maybeDowngradeSandboxEnvAllow = (
+    res: PermissionResult,
+  ): PermissionResult => {
+    if (res.behavior !== 'allow') return res
+    return checkSandboxEnvAssignmentWhenAutoAllowOff(input, astResult) ?? res
+  }
+
   // Check Bash prompt deny and ask rules in parallel (both use Haiku).
   // Deny takes precedence over ask, and both take precedence over allow rules.
   // Skip when in auto mode - auto mode classifier handles all permission decisions
@@ -4323,7 +4573,7 @@ async function bashToolHasPermissionInner(
       }
     }
 
-    return commandOperatorResult
+    return maybeDowngradeSandboxEnvAllow(commandOperatorResult)
   }
 
   // SECURITY: Legacy misparsing gate. Only runs when the tree-sitter module
@@ -4674,7 +4924,7 @@ async function bashToolHasPermissionInner(
     subcommandPermissionDecisions.every(_ => _.behavior === 'allow') &&
     !hasPossibleCommandInjection
   ) {
-    return {
+    return maybeDowngradeSandboxEnvAllow({
       behavior: 'allow',
       updatedInput: input,
       decisionReason: {
@@ -4686,7 +4936,7 @@ async function bashToolHasPermissionInner(
           ]),
         ),
       },
-    }
+    })
   }
 
   // Query Haiku for command prefixes
@@ -4733,7 +4983,7 @@ async function bashToolHasPermissionInner(
           : {}),
       }
     }
-    return result
+    return maybeDowngradeSandboxEnvAllow(result)
   }
 
   // Check subcommand permission results
@@ -4764,14 +5014,14 @@ async function bashToolHasPermissionInner(
     })
   ) {
     // Keep subcommandResults as PermissionResult for decisionReason
-    return {
+    return maybeDowngradeSandboxEnvAllow({
       behavior: 'allow',
       updatedInput: input,
       decisionReason: {
         type: 'subcommandResults',
         reasons: subcommandResults,
       },
-    }
+    })
   }
 
   // Otherwise, ask for permission

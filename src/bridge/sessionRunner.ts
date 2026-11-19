@@ -6,6 +6,7 @@ import { tmpdir } from 'os'
 import { basename, dirname, isAbsolute, join } from 'path'
 import { createInterface } from 'readline'
 import { jsonParse, jsonStringify } from '../utils/slowOperations.js'
+import { resolveChildLogsDirSync } from './childLogsDir.js'
 import { debugTruncate } from './debugUtils.js'
 import { buildSessionChildEnv } from './sessionChildEnv.js'
 import type {
@@ -344,7 +345,14 @@ export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
           debugFile = `${deps.debugFile}-${safeId}`
         }
       } else if (deps.verbose || process.env.USER_TYPE === 'ant') {
-        debugFile = join(tmpdir(), 'claude', `bridge-session-${safeId}.log`)
+        // Official 2.1.326 #338: write `--verbose` child session debug logs to
+        // `~/.claude/child-logs/` (mode 0700, owner-verified).
+        const childLogsDir = resolveChildLogsDirSync(msg =>
+          deps.onDebug(`[bridge:session] ${msg}`),
+        )
+        if (childLogsDir) {
+          debugFile = join(childLogsDir, `bridge-session-${safeId}.log`)
+        }
       }
 
       // Transcript file: write raw NDJSON lines for post-hoc analysis.

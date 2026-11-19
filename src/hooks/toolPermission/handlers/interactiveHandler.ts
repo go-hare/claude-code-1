@@ -9,7 +9,13 @@ import {
 import { startDesignProjectGrantWatch } from '../serverApprovalWatch.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { getAllowedChannels } from '../../../bootstrap/state.js'
-import type { BridgePermissionCallbacks } from '../../../bridge/bridgePermissionCallbacks.js'
+import {
+  type BridgePermissionCallbacks,
+  filterBridgeAlwaysAllowUpdates,
+  isBridgePermissionToolNameMismatch,
+  shouldSuppressAlwaysAllowRule,
+} from '../../../bridge/bridgePermissionCallbacks.js'
+import { resolveChromeSiteForPermissionPrompt } from '../../../utils/claudeInChrome/chromeCallPermission.js'
 import type { ToolUseConfirm } from '../../../components/permissions/PermissionRequest.js'
 import { getTerminalFocused } from '@anthropic/ink'
 import {
@@ -42,12 +48,16 @@ import {
   tryRelayPipePermissionRequest,
 } from '../../../utils/pipePermissionRelay.js'
 import { SUBAGENT_REJECT_MESSAGE } from '../../../utils/messages.js'
-import type { PermissionDecision } from '../../../utils/permissions/PermissionResult.js'
+import type {
+  PermissionDecision,
+  PermissionDecisionReason,
+} from '../../../utils/permissions/PermissionResult.js'
 import type { PermissionUpdate } from '../../../utils/permissions/PermissionUpdateSchema.js'
 import {
   hasPermissionsToUseTool,
   stripWholeToolGrantsForAsk,
 } from '../../../utils/permissions/permissions.js'
+import { hasHostPersonOnlySafetyCheck } from '../../../utils/permissions/nhoGates.js'
 import { popQueuedCommandsOnPermissionDeny } from '../../../dialog/permissionDenyQueuePop.js'
 import { shouldQueuePermissionBehind } from '../../../dialog/permissionQueueBehind.js'
 import type {
@@ -151,6 +161,26 @@ export function getLatestChannelContextHint(
   return null
 }
 
+function hasNonClassifierApprovableSafetyCheckReason(
+  reason: PermissionDecisionReason | undefined,
+): boolean {
+  if (!reason) return false
+  if (reason.type === 'safetyCheck') {
+    return reason.classifierApprovable === false
+  }
+  if (reason.type === 'subcommandResults') {
+    for (const sub of reason.reasons.values()) {
+      if (
+        'decisionReason' in sub &&
+        hasNonClassifierApprovableSafetyCheckReason(sub.decisionReason)
+      ) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
 /**
  * Handles the interactive (main-agent) permission flow.
  *
@@ -178,12 +208,27 @@ function handleInteractivePermission(
     channelCallbacks,
   } = params
 
+  // Official 2.1.326 #94 / #325: release handle when a terminal-only ask
+  // (e.g. outside-reads prompt or hook reprompt after cancelling bridge request)
+  // reported `requires_action` via bridgeCallbacks.reportTerminalOnlyAsk().
+  let releaseTerminalOnlyAsk: (() => void) | undefined
+  function clearTerminalOnlyAsk(): void {
+    releaseTerminalOnlyAsk?.()
+    releaseTerminalOnlyAsk = undefined
+  }
+  function markTerminalOnlyAsk(): void {
+    if (!releaseTerminalOnlyAsk && !isResolved()) {
+      releaseTerminalOnlyAsk = bridgeCallbacks?.reportTerminalOnlyAsk?.()
+    }
+  }
+
   // gold USt: every winning resolve closeFor's the yBt latch (not DualInk-only).
   const {
     resolve: resolveOnce,
     isResolved,
     claim,
   } = createResolveOnce((decision: PermissionDecision) => {
+    clearTerminalOnlyAsk()
     getOutsideReadPrompt().closeFor(ctx.toolUseID)
     resolve(decision)
   })
@@ -192,7 +237,19 @@ function handleInteractivePermission(
   // Hoisted so onDismissCheckmark (Esc during checkmark window) can also
   // remove the abort listener — not just the timer callback.
   let checkmarkAbortHandler: (() => void) | undefined
-  const bridgeRequestId = bridgeCallbacks ? randomUUID() : undefined
+  const isTerminalOnlyAsk =
+    result.offersBlockOutsideReads === true ||
+    hasHostPersonOnlySafetyCheck(result.decisionReason)
+  const bridgeRequestId =
+    bridgeCallbacks && !isTerminalOnlyAsk ? randomUUID() : undefined
+  if (bridgeCallbacks && isTerminalOnlyAsk) {
+    markTerminalOnlyAsk()
+    ctx.toolUseContext.abortController.signal.addEventListener(
+      'abort',
+      clearTerminalOnlyAsk,
+      { once: true },
+    )
+  }
   // Hoisted so local/hook/classifier wins can remove the pending channel
   // entry. No "tell remote to dismiss" equivalent — the text sits in your
   // phone, and a stale "yes abc123" after local-resolve falls through
@@ -744,6 +801,16 @@ function handleInteractivePermission(
   // `selected`, AskUserQuestion `answers`) tolerate the field being missing
   // so generic remote approval degrades gracefully instead of throwing.
   if (bridgeCallbacks && bridgeRequestId) {
+    // Official 2.1.326 #254 & #325: include resolved Chrome site name on
+    // Claude-in-Chrome asks and forward suppressAlwaysAllowRule.
+    const suppressAlwaysAllow = shouldSuppressAlwaysAllowRule(
+      ctx.toolUseContext,
+      result.suppressAlwaysAllowRule === true ||
+        ctx.tool.suppressesAlwaysAllowRule?.(displayInput) === true,
+    )
+    const chromeSite = ctx.tool.name.startsWith('mcp__claude-in-chrome__')
+      ? resolveChromeSiteForPermissionPrompt(ctx.toolUseID, displayInput)
+      : undefined
     // densable: bridge summary uses full-strength `pp` (redactSecrets).
     bridgeCallbacks.sendRequest(
       bridgeRequestId,
@@ -753,12 +820,23 @@ function handleInteractivePermission(
       redactSecrets(description),
       result.suggestions,
       result.blockedPath,
+      suppressAlwaysAllow || undefined,
+      chromeSite,
     )
 
     const signal = ctx.toolUseContext.abortController.signal
     const unsubscribe = bridgeCallbacks.onResponse(
       bridgeRequestId,
       response => {
+        if (
+          isBridgePermissionToolNameMismatch(
+            response.toolName,
+            ctx.tool.name,
+            bridgeRequestId,
+          )
+        ) {
+          return
+        }
         if (!claim()) return // Local user/hook/classifier already responded
         forgetPipePermission(
           'Permission request was resolved by bridge before pipe response.',
@@ -771,27 +849,45 @@ function handleInteractivePermission(
         channelUnsubscribe?.()
 
         if (response.behavior === 'allow') {
+          let appliedUpdatesCount = 0
           if (response.updatedPermissions?.length) {
-            // densable 2.1.235 #12 — strip bare whole-tool allows on bridge accept.
+            // Official 2.1.326 #325 & densable 2.1.235 #12: filter bridge
+            // "always allow" permission updates and strip bare whole-tool grants.
             const finalInput = response.updatedInput ?? displayInput
-            const shouldStrip =
+            const shouldStrip = shouldSuppressAlwaysAllowRule(
+              ctx.toolUseContext,
               ctx.tool.suppressesAlwaysAllowRule?.(finalInput) === true ||
-              result.suppressAlwaysAllowRule === true
+                result.suppressAlwaysAllowRule === true,
+            )
+            const filtered = filterBridgeAlwaysAllowUpdates(
+              response.updatedPermissions,
+              {
+                suppressAlwaysAllowRule: shouldStrip,
+                hasNonClassifierApprovableSafetyCheck:
+                  hasNonClassifierApprovableSafetyCheckReason(
+                    result.decisionReason,
+                  ),
+                allowedSuggestions: result.suggestions,
+              },
+            )
             const updates = shouldStrip
               ? stripWholeToolGrantsForAsk(
-                  response.updatedPermissions,
+                  filtered,
                   ctx.tool,
                   ctx.toolUseContext.getAppState().toolPermissionContext,
                 )
-              : response.updatedPermissions
-            void ctx.persistPermissions(updates)
+              : filtered
+            appliedUpdatesCount = updates.length
+            if (updates.length > 0) {
+              void ctx.persistPermissions(updates)
+            }
           }
           ctx.logDecision(
             {
               decision: 'accept',
               source: {
                 type: 'user',
-                permanent: !!response.updatedPermissions?.length,
+                permanent: appliedUpdatesCount > 0,
               },
             },
             { permissionPromptStartTimeMs },
@@ -811,6 +907,7 @@ function handleInteractivePermission(
           resolveOnce(ctx.cancelAndAbort(response.message))
         }
       },
+      ctx.tool.name,
     )
 
     signal.addEventListener('abort', unsubscribe, { once: true })
@@ -971,6 +1068,16 @@ function handleInteractivePermission(
         )
         if (bridgeCallbacks && bridgeRequestId) {
           bridgeCallbacks.cancelRequest(bridgeRequestId)
+        }
+        // Official 2.1.326 #94 / #325: once the bridge request is cancelled for
+        // a hook reprompt, the prompt can only be answered in the terminal.
+        if (bridgeCallbacks) {
+          markTerminalOnlyAsk()
+          ctx.toolUseContext.abortController.signal.addEventListener(
+            'abort',
+            clearTerminalOnlyAsk,
+            { once: true },
+          )
         }
         channelUnsubscribe?.()
         clearClassifierChecking(ctx.toolUseID)

@@ -52,6 +52,8 @@ export type CdDisclosures = {
   additionalDirectories: CdAdditionalDirectoriesDisclosure
   hookSources: string[]
   commandHelperSources: string[]
+  /** Official 2.1.326 #251: project settings files that will load on trust. */
+  settingsFiles: string[]
 }
 
 type SettingsBag = {
@@ -170,11 +172,19 @@ export function readCdDisclosures(directory: string): CdDisclosures {
   if (localFiles.some(hasCommandHelpers)) {
     commandHelperSources.push('.claude/settings.local.json')
   }
+  const settingsFiles: string[] = []
+  if (projectSettings !== null) {
+    settingsFiles.push('.claude/settings.json')
+  }
+  if (localFiles.length > 0) {
+    settingsFiles.push('.claude/settings.local.json')
+  }
   return {
     allowRules: pe(bag),
     additionalDirectories: ge(bag),
     hookSources,
     commandHelperSources,
+    settingsFiles,
   }
 }
 
@@ -199,7 +209,8 @@ export function shouldShowCdDisclosures(
     disclosures.additionalDirectories.sources.length > 0 ||
     (!backstop &&
       (disclosures.hookSources.length > 0 ||
-        disclosures.commandHelperSources.length > 0))
+        disclosures.commandHelperSources.length > 0 ||
+        disclosures.settingsFiles.length > 0))
   )
 }
 

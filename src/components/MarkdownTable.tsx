@@ -27,7 +27,51 @@ export const MAX_TABLE_ROWS = 200;
 const ANSI_BOLD_START = '\x1b[1m';
 const ANSI_BOLD_END = '\x1b[22m';
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional ASCII range check
+const NON_ASCII_RE = /[^\x00-\x7f]/;
+const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
 const SENTENCE_END_RE = /[.!?…]["')\]]*$/;
+
+/**
+ * Official 2.1.326 (#217) water-filling column width allocation:
+ * When totalMin exceeds availableWidth, cap only the widest columns so short
+ * words beside a long cell are never cut in half.
+ */
+export function computeTableColumnWidths(
+  minWidths: number[],
+  idealWidths: number[],
+  availableWidth: number,
+): { columnWidths: number[]; needsHardWrap: boolean } {
+  const numCols = minWidths.length;
+  const totalMin = minWidths.reduce((sum, w) => sum + w, 0);
+  const totalIdeal = idealWidths.reduce((sum, w) => sum + w, 0);
+
+  if (totalIdeal <= availableWidth) {
+    return { columnWidths: idealWidths, needsHardWrap: false };
+  }
+  if (totalMin <= availableWidth) {
+    const extraSpace = availableWidth - totalMin;
+    const overflows = idealWidths.map((ideal, i) => ideal - minWidths[i]!);
+    const totalOverflow = overflows.reduce((sum, o) => sum + o, 0);
+    return {
+      columnWidths: minWidths.map((min, i) => {
+        if (totalOverflow === 0) return min;
+        return min + Math.floor((overflows[i]! / totalOverflow) * extraSpace);
+      }),
+      needsHardWrap: false,
+    };
+  }
+  let cap = availableWidth - (numCols - 1) * MIN_COLUMN_WIDTH;
+  while (cap > MIN_COLUMN_WIDTH && minWidths.reduce((sum, w) => sum + Math.min(w, cap), 0) > availableWidth) {
+    cap--;
+  }
+  const effectiveCap = Math.max(MIN_COLUMN_WIDTH, cap);
+  return {
+    columnWidths: minWidths.map(w => Math.min(w, effectiveCap)),
+    needsHardWrap: true,
+  };
+}
 
 type Props = {
   token: Tokens.Table;
@@ -76,7 +120,7 @@ export function formatScreenReaderTable(headers: string[], rows: string[][]): st
  * @param hard - If true, break words that exceed width (needed when columns
  *               are narrower than the longest word). Default false.
  */
-function wrapText(text: string, width: number, options?: { hard?: boolean }): string[] {
+function wrapText(text: string, width: number, options?: { hard?: boolean; trim?: boolean }): string[] {
   if (width <= 0) return [text];
   // Strip trailing whitespace/newlines before wrapping.
   // formatToken() adds EOL to paragraphs and other token types,
@@ -84,7 +128,7 @@ function wrapText(text: string, width: number, options?: { hard?: boolean }): st
   const trimmedText = text.trimEnd();
   const wrapped = wrapAnsi(trimmedText, width, {
     hard: options?.hard ?? false,
-    trim: false,
+    trim: options?.trim ?? false,
     wordWrap: true,
   });
   // Filter out empty lines that result from trailing newlines or
@@ -156,7 +200,17 @@ export const MarkdownTable = React.memo(function MarkdownTable({
   // Get the longest word width in a cell (minimum width to avoid breaking words)
   function getMinWidth(tokens: Token[] | undefined): number {
     const text = getPlainText(tokens);
-    const words = text.split(/\s+/).filter(w => w.length > 0);
+    let words: string[];
+    if (NON_ASCII_RE.test(text)) {
+      words = [''];
+      for (const { segment } of GRAPHEME_SEGMENTER.segment(text)) {
+        if (segment.trim() === '') words.push('');
+        else words[words.length - 1] += segment;
+      }
+      words = words.filter(w => w.length > 0);
+    } else {
+      words = text.split(/\s+/).filter(w => w.length > 0);
+    }
     if (words.length === 0) return MIN_COLUMN_WIDTH;
     return Math.max(...words.map(w => stringWidth(w)), MIN_COLUMN_WIDTH);
   }
@@ -191,35 +245,8 @@ export const MarkdownTable = React.memo(function MarkdownTable({
   // Account for SAFETY_MARGIN to avoid triggering the fallback safety check
   const availableWidth = Math.max(terminalWidth - borderOverhead - SAFETY_MARGIN, numCols * MIN_COLUMN_WIDTH);
 
-  // Step 3: Calculate column widths that fit available space
-  const totalMin = minWidths.reduce((sum, w) => sum + w, 0);
-  const totalIdeal = idealWidths.reduce((sum, w) => sum + w, 0);
-
-  // Track whether columns are narrower than longest words (needs hard wrap)
-  let needsHardWrap = false;
-
-  let columnWidths: number[];
-  if (totalIdeal <= availableWidth) {
-    // Everything fits - use ideal widths
-    columnWidths = idealWidths;
-  } else if (totalMin <= availableWidth) {
-    // Need to shrink - give each column its min, distribute remaining space
-    const extraSpace = availableWidth - totalMin;
-    const overflows = idealWidths.map((ideal, i) => ideal - minWidths[i]!);
-    const totalOverflow = overflows.reduce((sum, o) => sum + o, 0);
-
-    columnWidths = minWidths.map((min, i) => {
-      if (totalOverflow === 0) return min;
-      const extra = Math.floor((overflows[i]! / totalOverflow) * extraSpace);
-      return min + extra;
-    });
-  } else {
-    // Table wider than terminal at minimum widths
-    // Shrink columns proportionally to fit, allowing word breaks
-    needsHardWrap = true;
-    const scaleFactor = availableWidth / totalMin;
-    columnWidths = minWidths.map(w => Math.max(Math.floor(w * scaleFactor), MIN_COLUMN_WIDTH));
-  }
+  // Step 3: Calculate column widths that fit available space (Official 2.1.326 #217 water-filling)
+  const { columnWidths, needsHardWrap } = computeTableColumnWidths(minWidths, idealWidths, availableWidth);
 
   // Step 4: Single-pass cell preparation — wraps each cell once, caches results
   // for reuse by both row-line counting and rendering.
@@ -299,19 +326,19 @@ export const MarkdownTable = React.memo(function MarkdownTable({
     return line;
   }
 
-  // densable 2.1.289 `ct` — vertical (key-value) format for extra-narrow /
-  // tall-wrap tables. Gold HAS this; CJK unspaced cells trip Ao=4 easily.
+  // densable 2.1.289 / 2.1.326 (#217) `Dt` — vertical (key-value) format for
+  // extra-narrow / tall-wrap tables. Uses SAFETY_MARGIN width + trim:true so
+  // plans & subagent prompts never show stray words or blank rows.
   function renderVerticalFormat(): string {
     const lines: string[] = [];
     const headerOnly = rows.length === 0;
     const headers = headerOnly ? [] : token.header.map(h => getPlainText(h.tokens).trim());
     const effectiveRows = headerOnly ? [token.header] : rows;
-    // densable 2.1.229 #8: terminalWidth 0/1 → Math.min(width-1,40) is negative and
-    // '─'.repeat throws RangeError (also on --continue/--resume at startup).
-    const separatorWidth = Math.max(0, Math.min(terminalWidth - 1, 40));
+    const contentWidth = Math.max(1, terminalWidth - SAFETY_MARGIN);
+    const separatorWidth = Math.max(0, Math.min(contentWidth, 40));
     const separator = '─'.repeat(separatorWidth);
 
-    effectiveRows.forEach((row, rowIndex) => {
+    effectiveRows.forEach(row => {
       const rowLines: string[] = [];
       row.forEach((cell, colIndex) => {
         const label = headers[colIndex] || '';
@@ -320,38 +347,34 @@ export const MarkdownTable = React.memo(function MarkdownTable({
         const value = rawValue.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
         if (!label && !value) return;
 
-        // Wrap value to fit terminal, accounting for label on first line
-        const firstLineWidth = label ? terminalWidth - stringWidth(label) - 3 : terminalWidth - 1;
-        const subsequentLineWidth = terminalWidth - 3;
+        // Wrap value to fit contentWidth, accounting for label on first line
+        const firstLineWidth = label ? contentWidth - stringWidth(`${label}: `) : contentWidth;
+        const subsequentLineWidth = Math.max(1, contentWidth - 2);
 
-        // Two-pass wrap: first line is narrower (label takes space),
-        // continuation lines get the full width minus indent.
-        const firstPassLines = wrapText(value, Math.max(firstLineWidth, 10));
+        // Two-pass wrap with trim:true so continuation lines don't leave stray spaces or blank rows.
+        const firstPassLines = wrapText(value, Math.max(firstLineWidth, 10), { trim: true });
         const firstLine = firstPassLines[0] || '';
 
         let wrappedValue: string[];
         if (firstPassLines.length <= 1) {
           wrappedValue = firstPassLines;
         } else {
-          // Re-join remaining text and re-wrap to the wider continuation width
           const remainingText = firstPassLines
             .slice(1)
             .map(l => l.trim())
             .join(' ');
-          const rewrapped = wrapText(remainingText, subsequentLineWidth);
+          const rewrapped = wrapText(remainingText, subsequentLineWidth, { trim: true });
           wrappedValue = [firstLine, ...rewrapped];
         }
 
-        // First line: bold label + value (gold omits "Column N" fallback)
         rowLines.push(
           label ? `${ANSI_BOLD_START}${label}:${ANSI_BOLD_END} ${wrappedValue[0] || ''}` : wrappedValue[0] || '',
         );
 
-        // Subsequent lines (gold ct: no wrap indent)
         for (let i = 1; i < wrappedValue.length; i++) {
           const line = wrappedValue[i]!;
           if (!line.trim()) continue;
-          rowLines.push(line);
+          rowLines.push(`  ${line}`);
         }
       });
       if (rowLines.length === 0) return;

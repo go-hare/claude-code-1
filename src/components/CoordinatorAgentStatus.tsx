@@ -35,7 +35,8 @@ import {
   type PanelListItem,
   viewingPanelAncestorIds,
 } from '../utils/panelIdleSummary.js';
-import { evictTerminalTask, isParkedKeepaliveAgent } from '../utils/task/framework.js';
+import { evictTerminalTask, IDLE_WINDOW_KEEPALIVE_REASON, isParkedKeepaliveAgent } from '../utils/task/framework.js';
+import { plural } from '../utils/stringUtils.js';
 import { isTerminalStatus } from './tasks/taskStatusUtils.js';
 
 const PANEL_WINDOW_SIZE = 5;
@@ -405,7 +406,7 @@ export function CoordinatorTaskPanel({ showWorkflows = false }: { showWorkflows?
     ),
   );
   const statusPartsList = visibleTasks.map(row =>
-    isIdleSummaryRow(row) ? undefined : getAgentStatusParts(row, now, nameByAgentId.has(row.id)),
+    isIdleSummaryRow(row) ? undefined : getAgentStatusParts(row, now, nameByAgentId.has(row.id), tasks),
   );
   const statusWidth = Math.max(
     0,
@@ -564,15 +565,89 @@ function panelAgentName(task: PanelAgentTask, nameByAgentId: Map<string, string>
   return panelOneLine(nameByAgentId.get(task.id) ?? task.agentType) || undefined;
 }
 
+const TERMINAL_STATUS_LABELS: Partial<Record<string, 'failed' | 'stopped'>> = {
+  failed: 'failed',
+  killed: 'stopped',
+};
+
+type AgentWaitingInfo = {
+  label: string;
+  since?: number;
+};
+
+/**
+ * #110 (2.1.326, official O3e/_Rr): true when a local_agent has finished its own
+ * turn (`status === 'completed'`) but is still waiting on background commands,
+ * monitors, workflows, or child subagents.
+ */
+export function isAgentWaitingOnBackgroundWork(task: AppState['tasks'][string] | undefined): boolean {
+  if (!task || !isLocalAgentTask(task) || task.status !== 'completed') return false;
+  const reasons = task.keepaliveReasons;
+  if (!reasons || reasons.size === 0) return false;
+  for (const r of reasons) {
+    if (r !== IDLE_WINDOW_KEEPALIVE_REASON) return true;
+  }
+  return false;
+}
+
+/**
+ * #110 (2.1.326, official N3e): describe what a completed local_agent is waiting on
+ * (background commands, monitors, subagents, or generic background work).
+ */
+export function describeAgentWaitingOn(
+  task: PanelAgentTask,
+  allTasks: AppState['tasks'],
+): AgentWaitingInfo | undefined {
+  if (!isLocalAgentTask(task) || !isAgentWaitingOnBackgroundWork(task) || task.quietlyParked === true) {
+    return undefined;
+  }
+  const bgOps = Object.values(allTasks).filter(
+    t =>
+      ((t.type === 'local_bash' && t.isBackgrounded) || t.type === 'monitor_mcp' || t.type === 'monitor_ws') &&
+      t.status === 'running' &&
+      (t as { agentId?: string }).agentId === task.id,
+  );
+  const childAgents = Object.values(allTasks).filter(
+    t =>
+      isLocalAgentTask(t) &&
+      t.ownerAgentId === task.id &&
+      (t.status === 'running' || isAgentWaitingOnBackgroundWork(t)),
+  );
+  const monitorCount = bgOps.filter(t => t.type !== 'local_bash').length;
+  const commandCount = bgOps.length - monitorCount;
+  const parts: string[] = [];
+  if (commandCount > 0) parts.push(`${commandCount} ${plural(commandCount, 'command')}`);
+  if (monitorCount > 0) parts.push(`${monitorCount} ${plural(monitorCount, 'monitor')}`);
+  if (childAgents.length > 0) parts.push(`${childAgents.length} ${plural(childAgents.length, 'subagent')}`);
+  const reasons = [...(task.keepaliveReasons ?? [])];
+  const fallback = reasons.some(r => r.startsWith('workflow:') || r.startsWith('mcp:') || r.startsWith('shell:'))
+    ? 'waiting on background work'
+    : 'waiting';
+  const startTimes = [...bgOps, ...childAgents].map(t => t.startTime);
+  return {
+    label: parts.length > 0 ? `waiting on ${parts.join(', ')}` : fallback,
+    since: startTimes.length > 0 ? Math.min(...startTimes) : undefined,
+  };
+}
+
 type AgentStatusParts = {
   elapsed: string;
   tokenText: string;
   queuedText: string;
   queuedCount: number;
+  /** #111 (2.1.326, official iSe): explicit 'failed' or 'stopped' label for terminal error/killed rows. */
+  terminalLabel?: 'failed' | 'stopped';
+  /** #110 (2.1.326, official N3e): waiting-on summary after the agent's turn ended. */
+  held?: AgentWaitingInfo;
 };
 
 /** densable $Ae / yZ Pe — elapsed + tokens, no pause/play glyph. */
-export function getAgentStatusParts(task: PanelAgentTask, now: number, hasName = false): AgentStatusParts {
+export function getAgentStatusParts(
+  task: PanelAgentTask,
+  now: number,
+  hasName = false,
+  allTasks?: AppState['tasks'],
+): AgentStatusParts {
   const isTeammate = isInProcessTeammateTask(task);
   const queuedCount = isTeammate
     ? task.pendingUserMessages.length
@@ -582,13 +657,20 @@ export function getAgentStatusParts(task: PanelAgentTask, now: number, hasName =
   const lastActivity = task.progress?.lastActivity;
   const arrow = lastActivity ? figures.arrowDown : figures.arrowUp;
   const tokenText = tokenCount !== undefined && tokenCount > 0 ? `${arrow} ${formatNumber(tokenCount)} tokens` : '';
+  const terminalLabel = TERMINAL_STATUS_LABELS[task.status];
 
   if (isTeammate) {
     if (task.status === 'running' && task.awaitingPlanApproval) {
       return { elapsed: 'awaiting approval', tokenText: '', queuedText, queuedCount };
     }
     if (task.isIdle) {
-      return { elapsed: 'idle', tokenText: '', queuedText, queuedCount };
+      return {
+        elapsed: terminalLabel === undefined ? 'idle' : '',
+        tokenText: '',
+        queuedText,
+        queuedCount,
+        terminalLabel,
+      };
     }
     if (isTerminalStatus(task.status)) {
       const endTime = task.endTime ?? now;
@@ -597,6 +679,7 @@ export function getAgentStatusParts(task: PanelAgentTask, now: number, hasName =
         tokenText,
         queuedText,
         queuedCount,
+        terminalLabel,
       };
     }
     return {
@@ -612,6 +695,10 @@ export function getAgentStatusParts(task: PanelAgentTask, now: number, hasName =
   if (isAdopting) {
     return { elapsed: 'resuming', tokenText, queuedText, queuedCount };
   }
+  const held = allTasks ? describeAgentWaitingOn(task, allTasks) : undefined;
+  if (held !== undefined) {
+    return { elapsed: '', tokenText: '', queuedText, queuedCount, held };
+  }
   const isRunning = !isTerminalStatus(task.status);
   if (isRunning && Boolean(localAgent?.isIdle)) {
     return { elapsed: 'waiting', tokenText: '', queuedText, queuedCount };
@@ -624,11 +711,15 @@ export function getAgentStatusParts(task: PanelAgentTask, now: number, hasName =
     0,
     isRunning ? now - task.startTime - pausedMs : (task.endTime ?? task.startTime) - task.startTime - pausedMs,
   );
-  return { elapsed: formatDuration(elapsedMs), tokenText, queuedText, queuedCount };
+  return { elapsed: formatDuration(elapsedMs), tokenText, queuedText, queuedCount, terminalLabel };
 }
 
 function statusPartsWidth(parts: AgentStatusParts): number {
-  return stringWidth([parts.elapsed, parts.tokenText, parts.queuedText].filter(Boolean).join(' · '));
+  return stringWidth(
+    [parts.held?.label, parts.terminalLabel, parts.elapsed, parts.tokenText, parts.queuedText]
+      .filter(Boolean)
+      .join(' · '),
+  );
 }
 
 function MainLine({
@@ -696,15 +787,20 @@ function AgentLine({
   onClick,
 }: AgentLineProps): React.ReactNode {
   const [hover, setHover] = React.useState(false);
-  const { elapsed, tokenText, queuedText, queuedCount } =
+  const { elapsed, tokenText, queuedText, queuedCount, terminalLabel, held } =
     statusParts ?? getAgentStatusParts(task, Date.now(), name !== undefined);
   // densable yZ: Tr(v.progress?.summary??"")||Tr(v.description)
-  const displayDescription = panelOneLine(task.progress?.summary ?? '') || panelOneLine(task.description);
+  // #110 (2.1.326): when waiting on background work after turn ended, show what it's waiting on.
+  const displayDescription =
+    held?.label ?? (panelOneLine(task.progress?.summary ?? '') || panelOneLine(task.description));
   const highlighted = isSelected || hover;
   const prefix = highlighted ? figures.pointer + ' ' : '  ';
   const bullet = isViewed ? BLACK_CIRCLE : figures.circle;
-  const isPanelActive = isInProcessTeammateTask(task) ? !isTerminalStatus(task.status) : isLocalAgentPanelActive(task);
-  const bulletColor: 'success' | 'error' | undefined = isPanelActive ? undefined : getTerminalBulletColor(task.status);
+  // #111 (2.1.326): terminal failed/killed agents must NEVER appear active (running).
+  const isPanelActive =
+    !isTerminalStatus(task.status) && (isInProcessTeammateTask(task) ? true : isLocalAgentPanelActive(task));
+  const bulletColor: 'success' | 'error' | undefined =
+    held !== undefined ? undefined : isPanelActive ? undefined : getTerminalBulletColor(task.status);
   const dim = !highlighted && !isViewed;
   const displayName = name ?? (isLocalAgentTask(task) ? panelOneLine(task.agentType) : undefined);
   const statusText = [elapsed, tokenText].filter(Boolean).join(' · ');
@@ -776,10 +872,16 @@ function AgentLine({
   const statusBox = (
     <Box minWidth={statusWidth} flexShrink={0} marginLeft={1} justifyContent="flex-end">
       <Text dimColor={dim} bold={isViewed}>
+        {terminalLabel ? (
+          <Text color="error">
+            {terminalLabel}
+            {statusText ? ' · ' : ''}
+          </Text>
+        ) : null}
         {statusText}
         {queuedCount > 0 ? (
           <Text color="warning">
-            {statusText ? ' · ' : ''}
+            {terminalLabel || statusText ? ' · ' : ''}
             {queuedText}
           </Text>
         ) : null}

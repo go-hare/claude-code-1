@@ -1,7 +1,6 @@
 import { feature } from 'bun:bundle'
 import { chmod, open, rename, stat, unlink } from 'fs/promises'
 import mapValues from 'lodash-es/mapValues.js'
-import memoize from 'lodash-es/memoize.js'
 import { dirname, join, parse } from 'path'
 import { getPlatform } from 'src/utils/platform.js'
 import {
@@ -61,7 +60,10 @@ import {
   isMcpServerUrlEntry,
   type SettingsJson,
 } from '../../utils/settings/types.js'
-import type { ValidationError } from '../../utils/settings/validation.js'
+import {
+  findJsonSyntaxErrorLocation,
+  type ValidationError,
+} from '../../utils/settings/validation.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -1441,10 +1443,7 @@ export async function addMcpConfig(
   // Validate config first (needed for command-based policy checks)
   const result = McpServerConfigSchema().safeParse(config)
   if (!result.success) {
-    const formattedErrors = result.error.issues
-      .map(err => `${err.path.join('.')}: ${err.message}`)
-      .join(', ')
-    throw new Error(`Invalid configuration: ${formattedErrors}`)
+    throw new Error(formatMcpServerConfigValidationError(config, result.error))
   }
   const validatedConfig = result.data
 
@@ -2626,6 +2625,8 @@ export function parseMcpConfigFromFilePath(params: {
   const parsedJson = safeParseJSON(configContent)
 
   if (!parsedJson) {
+    const loc = findJsonSyntaxErrorLocation(configContent)
+    const locSuffix = loc ? ` (line ${loc.line}, column ${loc.column})` : ''
     logForDebugging(
       `MCP config is not valid JSON: ${filePath} (scope=${scope}, length=${configContent.length}, first100=${jsonStringify(configContent.slice(0, 100))})`,
       { level: 'error' },
@@ -2636,7 +2637,8 @@ export function parseMcpConfigFromFilePath(params: {
         {
           file: filePath,
           path: '',
-          message: `MCP config is not a valid JSON`,
+          message: `MCP config is not a valid JSON${locSuffix}`,
+          ...(loc ? { line: loc.line, column: loc.column } : {}),
           suggestion: 'Fix the JSON syntax errors in the file',
           mcpErrorMetadata: {
             scope,
@@ -2657,14 +2659,200 @@ export function parseMcpConfigFromFilePath(params: {
   })
 }
 
-export const doesEnterpriseMcpConfigExist = memoize((): boolean => {
-  const { config } = parseMcpConfigFromFilePath({
-    filePath: getEnterpriseMcpFilePath(),
+/**
+ * Official 2.1.326 #87: Produce actionable per-transport validation errors for
+ * `claude mcp add-json` instead of Zod's generic union `: Invalid input`.
+ */
+export function formatMcpServerConfigValidationError(
+  config: unknown,
+  unionError?: z.ZodError,
+): string {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    return 'Invalid configuration: not a JSON object. Pass a server object such as {"command": "..."} or {"type": "http", "url": "..."}.'
+  }
+  const rec = config as Record<string, unknown>
+  if (
+    'mcpServers' in rec &&
+    !('command' in rec) &&
+    !('url' in rec) &&
+    !('type' in rec)
+  ) {
+    return 'Invalid configuration: leave out the "mcpServers" wrapper and pass a single server object directly.'
+  }
+
+  const rawType = rec.type
+  if (rawType === undefined) {
+    if ('url' in rec && !('command' in rec)) {
+      return 'Invalid configuration: has a "url" but no "type". Set "type": "http" (or "sse" or "ws").'
+    }
+    if (!('command' in rec)) {
+      return 'Invalid configuration: needs a "command" (for stdio) or a "type" and "url" (for http, sse, or ws).'
+    }
+    const stdioResult = McpStdioServerConfigSchema().safeParse(config)
+    if (!stdioResult.success) {
+      return formatZodIssuesForMcpConfig(stdioResult.error)
+    }
+  } else if (typeof rawType !== 'string') {
+    return 'Invalid configuration: "type" must be a string (one of: stdio, http, sse, ws).'
+  } else {
+    const schemaByType: Record<string, () => z.ZodType> = {
+      stdio: McpStdioServerConfigSchema,
+      http: McpHTTPServerConfigSchema,
+      'streamable-http': McpHTTPServerConfigSchema,
+      sse: McpSSEServerConfigSchema,
+      ws: McpWebSocketServerConfigSchema,
+      sdk: McpSdkServerConfigSchema,
+      'sse-ide': McpSSEIDEServerConfigSchema,
+      'ws-ide': McpWebSocketIDEServerConfigSchema,
+      'claudeai-proxy': McpClaudeAIProxyServerConfigSchema,
+    }
+    const getSchema = schemaByType[rawType]
+    if (!getSchema) {
+      return `Invalid configuration: unknown "type" "${rawType}". Expected one of: stdio, http, sse, ws.`
+    }
+    const transportResult = getSchema().safeParse(config)
+    if (!transportResult.success) {
+      return formatZodIssuesForMcpConfig(transportResult.error)
+    }
+  }
+
+  if (unionError) {
+    return formatZodIssuesForMcpConfig(unionError)
+  }
+  return 'Invalid configuration: check the required fields for this MCP server transport.'
+}
+
+function formatZodIssuesForMcpConfig(error: z.ZodError): string {
+  const formattedErrors = error.issues
+    .map(err => {
+      const path = err.path.join('.')
+      return path ? `${path}: ${err.message}` : err.message
+    })
+    .join(', ')
+  return `Invalid configuration: ${formattedErrors}`
+}
+
+/**
+ * Official 2.1.326 #3 & #292: Mid-session `managed-mcp.json` arrival detection
+ * and user-facing explanation messages.
+ */
+export const MANAGED_MCP_ARRIVED_VALID_MESSAGE =
+  'Your organization now manages MCP servers on this computer, so only the servers it allows will load from now on. To use another server, ask your admin.'
+
+export const MANAGED_MCP_ARRIVED_UNREADABLE_MESSAGE =
+  "Your organization now manages MCP servers on this computer, but the file it sent can't be read, so your own servers won't load from now on. Ask your admin to fix the file."
+
+type EnterpriseMcpPresenceState = {
+  checked: boolean
+  present: boolean
+  valid: boolean
+  arrivedMidSession: boolean
+  arrivalNotice: string | null
+}
+
+const enterpriseMcpState: EnterpriseMcpPresenceState = {
+  checked: false,
+  present: false,
+  valid: false,
+  arrivedMidSession: false,
+  arrivalNotice: null,
+}
+
+const managedMcpArrivalListeners = new Set<(message: string) => void>()
+
+export function subscribeToManagedMcpArrival(
+  listener: (message: string) => void,
+): () => void {
+  managedMcpArrivalListeners.add(listener)
+  return () => {
+    managedMcpArrivalListeners.delete(listener)
+  }
+}
+
+export function getManagedMcpArrivalNotice(): string | null {
+  return enterpriseMcpState.arrivalNotice
+}
+
+export function consumeManagedMcpArrivalNotice(): string | null {
+  const notice = enterpriseMcpState.arrivalNotice
+  enterpriseMcpState.arrivalNotice = null
+  return notice
+}
+
+export function resetEnterpriseMcpConfigCache(): void {
+  enterpriseMcpState.checked = false
+  enterpriseMcpState.present = false
+  enterpriseMcpState.valid = false
+  enterpriseMcpState.arrivedMidSession = false
+  enterpriseMcpState.arrivalNotice = null
+}
+
+function evaluateEnterpriseMcpPresence(isRecheckAfterAbsent: boolean): boolean {
+  const filePath = getEnterpriseMcpFilePath()
+  const fs = getFsImplementation()
+  const fileExists = fs.existsSync(filePath)
+  if (!fileExists) {
+    enterpriseMcpState.checked = true
+    enterpriseMcpState.present = false
+    enterpriseMcpState.valid = false
+    return false
+  }
+  const { config, errors } = parseMcpConfigFromFilePath({
+    filePath,
     expandVars: true,
     scope: 'enterprise',
   })
-  return config !== null
-})
+  const hasFatalError =
+    config === null ||
+    errors.some(err => err.mcpErrorMetadata?.severity !== 'warning')
+  enterpriseMcpState.checked = true
+  enterpriseMcpState.present = true
+  enterpriseMcpState.valid = !hasFatalError
+  if (isRecheckAfterAbsent) {
+    enterpriseMcpState.arrivedMidSession = true
+    const message = hasFatalError
+      ? MANAGED_MCP_ARRIVED_UNREADABLE_MESSAGE
+      : MANAGED_MCP_ARRIVED_VALID_MESSAGE
+    enterpriseMcpState.arrivalNotice = message
+    logForDebugging(`[mcp] managed-mcp.json arrived mid-session: ${message}`, {
+      level: 'warn',
+    })
+    for (const listener of managedMcpArrivalListeners) {
+      try {
+        listener(message)
+      } catch {
+        // Ignore subscriber errors
+      }
+    }
+  }
+  return true
+}
+
+export const doesEnterpriseMcpConfigExist: (() => boolean) & {
+  cache: { clear: () => void }
+} = Object.assign(
+  (): boolean => {
+    if (!enterpriseMcpState.checked) {
+      return evaluateEnterpriseMcpPresence(false)
+    }
+    if (enterpriseMcpState.present) {
+      return true
+    }
+    // Official 2.1.326 #292 & #3: When `managed-mcp.json` was absent earlier in
+    // this session, re-check on disk at subsequent checks so a newly deployed
+    // managed-mcp.json applies immediately and surfaces an explanation notice.
+    const filePath = getEnterpriseMcpFilePath()
+    if (getFsImplementation().existsSync(filePath)) {
+      return evaluateEnterpriseMcpPresence(true)
+    }
+    return false
+  },
+  {
+    cache: {
+      clear: resetEnterpriseMcpConfigCache,
+    },
+  },
+)
 
 /**
  * Check if MCP allowlist policy should only come from managed settings.

@@ -94,6 +94,8 @@ export function MCPRemoteServerMenu({
   const setAppState = useSetAppState();
   const [authorizationUrl, setAuthorizationUrl] = React.useState<string | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
+  const [togglingAction, setTogglingAction] = useState<'enabling' | 'disabling' | null>(null);
+  const isTogglingRef = useRef(false);
   const authAbortControllerRef = useRef<AbortController | null>(null);
   const [isClaudeAIAuthenticating, setIsClaudeAIAuthenticating] = useState(false);
   const [claudeAIAuthUrl, setClaudeAIAuthUrl] = useState<string | null>(null);
@@ -257,7 +259,11 @@ export function MCPRemoteServerMenu({
         void openBrowser(connectorsUrl);
       }
     }
-    if (input === 'c') {
+    // Official 2.1.326 #89: When the manual callback paste TextInput is active,
+    // let its onChange handler intercept single-char 'c' to copy without leaving
+    // a stray 'c' in the paste field.
+    const isManualCallbackInputActive = isAuthenticating && Boolean(authorizationUrl) && Boolean(manualCallbackSubmit);
+    if (input === 'c' && !isManualCallbackInputActive) {
       if (copyUrl) {
         copyViaClipboard(copyUrl);
       }
@@ -300,7 +306,11 @@ export function MCPRemoteServerMenu({
   }, []);
 
   const handleToggleEnabled = React.useCallback(async () => {
+    // Official 2.1.326 #86: Ignore duplicate Enter while Enable/Disable is in flight.
+    if (isTogglingRef.current) return;
+    isTogglingRef.current = true;
     const wasEnabled = server.client.type !== 'disabled';
+    setTogglingAction(wasEnabled ? 'disabling' : 'enabling');
 
     try {
       await toggleMcpServer(server.name);
@@ -318,6 +328,9 @@ export function MCPRemoteServerMenu({
     } catch (err) {
       const action = wasEnabled ? 'disable' : 'enable';
       onComplete?.(`Failed to ${action} MCP server '${server.name}': ${errorMessage(err)}`);
+    } finally {
+      isTogglingRef.current = false;
+      setTogglingAction(null);
     }
   }, [server.client.type, server.config.type, server.name, toggleMcpServer, onCancel, onComplete]);
 
@@ -494,7 +507,17 @@ export function MCPRemoteServerMenu({
               <Text dimColor>URL {'>'} </Text>
               <TextInput
                 value={callbackUrlInput}
-                onChange={setCallbackUrlInput}
+                onChange={(nextValue: string) => {
+                  // Official 2.1.326 #89: Pressing 'c' when the paste field is
+                  // empty copies the sign-in URL and clears the stray 'c'.
+                  if (callbackUrlInput === '' && (nextValue === 'c' || nextValue === 'C') && copyUrl) {
+                    copyViaClipboard(copyUrl);
+                    setCallbackUrlInput('');
+                    setCallbackUrlCursorOffset(0);
+                    return;
+                  }
+                  setCallbackUrlInput(nextValue);
+                }}
                 onSubmit={(value: string) => {
                   manualCallbackSubmit(value.trim());
                   setCallbackUrlInput('');
@@ -598,15 +621,22 @@ export function MCPRemoteServerMenu({
     );
   }
 
-  if (isReconnecting) {
+  if (isReconnecting || togglingAction !== null) {
+    const heading = isReconnecting ? 'Connecting to ' : togglingAction === 'enabling' ? 'Enabling ' : 'Disabling ';
+    const detail = isReconnecting
+      ? ' Establishing connection to MCP server'
+      : togglingAction === 'enabling'
+        ? ' Enabling MCP server'
+        : ' Disabling MCP server';
     return (
       <Box flexDirection="column" gap={1} padding={1}>
         <Text color="text">
-          Connecting to <Text bold>{server.name}</Text>…
+          {heading}
+          <Text bold>{server.name}</Text>…
         </Text>
         <Box>
           <Spinner />
-          <Text> Establishing connection to MCP server</Text>
+          <Text>{detail}</Text>
         </Box>
         <Text dimColor>This may take a few moments.</Text>
       </Box>

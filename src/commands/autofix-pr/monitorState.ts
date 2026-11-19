@@ -5,6 +5,8 @@ type MonitorState = {
   prNumber: number
   abortController: AbortController
   startedAt: number
+  /** Official 2.1.326 #101: remote CCR session id so `/autofix-pr stop` can archive it. */
+  sessionId?: string
 }
 
 let active: MonitorState | null = null

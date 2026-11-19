@@ -490,6 +490,9 @@ export function formatRemoteSettingsFailureReason(
     case 'api_key_not_sent':
     case 'http_401':
       return 'authentication rejected (401)'
+    case 'network_edge_blocked':
+    case 'nonorigin_cf':
+      return 'blocked before reaching Anthropic (403) — signing in again will not help; check your VPN, proxy, or firewall'
     case 'http_403':
       return 'access denied (403)'
     case 'http_4xx':

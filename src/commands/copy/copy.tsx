@@ -7,6 +7,8 @@ import {
   AccessibilityContext,
   Box,
   Byline,
+  type ClipboardPath,
+  getClipboardPath,
   type KeyboardEvent,
   KeyboardShortcutHint,
   Pane,
@@ -143,18 +145,61 @@ async function writeToFile(text: string, filename: string): Promise<string> {
   return filePath;
 }
 
+export type ClipboardCopyOutcome = ClipboardPath | 'none';
+
+/** Official 2.1.326 #177 (`VWn`): honest clipboard status for SSH/OSC 52/tmux/native. */
+export const CLIPBOARD_COPY_STATUS: Record<ClipboardCopyOutcome, string> = {
+  native: 'copied to clipboard',
+  'tmux-buffer': 'copied to tmux buffer',
+  osc52: "sent to your terminal's clipboard",
+  none: 'not copied to clipboard',
+};
+
+const COPY_FILE_FALLBACK_PREFIX: Record<ClipboardCopyOutcome, string> = {
+  native: 'Also written to',
+  'tmux-buffer': 'Paste with prefix + ], or read',
+  osc52: 'If paste fails, read',
+  none: 'Written to',
+};
+
+export function formatCopyClipboardSummary(
+  outcome: ClipboardCopyOutcome,
+  charCount: number,
+  lineCount: number,
+): string {
+  const status = CLIPBOARD_COPY_STATUS[outcome];
+  const capitalized = status.charAt(0).toUpperCase() + status.slice(1);
+  return `${capitalized} (${charCount} ${charCount === 1 ? 'character' : 'characters'}, ${lineCount} ${lineCount === 1 ? 'line' : 'lines'})`;
+}
+
+export function resolveClipboardCopyOutcome(
+  rawSequence: string,
+  clipboardPath: ClipboardPath = getClipboardPath(),
+  env: NodeJS.ProcessEnv = process.env,
+): ClipboardCopyOutcome {
+  const isSsh = Boolean(env.SSH_CONNECTION || env.SSH_CLIENT || env.SSH_TTY);
+  if (clipboardPath === 'osc52') {
+    return rawSequence ? 'osc52' : 'none';
+  }
+  if (clipboardPath === 'native' && isSsh && rawSequence) {
+    return 'osc52';
+  }
+  return clipboardPath;
+}
+
 async function copyOrWriteToFile(text: string, filename: string): Promise<string> {
   const raw = await setClipboard(text);
   if (raw) process.stdout.write(raw);
+  const outcome = resolveClipboardCopyOutcome(raw);
   const lineCount = countCharInString(text, '\n') + 1;
-  const summary = `Copied to clipboard (${text.length} characters, ${lineCount} lines)`;
+  const summary = formatCopyClipboardSummary(outcome, text.length, lineCount);
   const warning = getOsc52ClipboardWarning(text);
   // Also write to a temp file — clipboard paths are best-effort (OSC 52 needs
   // terminal support), so the file provides a reliable fallback.
   try {
     const filePath = await writeToFile(text, filename);
     const warningLine = warning ? `\n\u26A0 ${warning}; the file below is unaffected` : '';
-    return `${summary}${warningLine}\nAlso written to ${filePath}`;
+    return `${summary}${warningLine}\n${COPY_FILE_FALLBACK_PREFIX[outcome]} ${filePath}`;
   } catch {
     const warningLine = warning ? `\n\u26A0 ${warning}` : '';
     return `${summary}${warningLine}`;

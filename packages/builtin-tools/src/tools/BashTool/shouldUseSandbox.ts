@@ -689,9 +689,119 @@ export class SandboxPolicyRefusalError extends Error {
 }
 
 /**
- * densable p3 — should this command run sandboxed?
+ * Official 2.1.326 #304 (`Sp().unsandboxedCommandsDisabled` @344406706):
+ * When `claude mcp serve` runs, unsandboxed commands (including
+ * `sandbox.excludedCommands` and `dangerouslyDisableSandbox`) are disabled.
  */
-export function shouldUseSandbox(input: Partial<SandboxInput>): boolean {
+let unsandboxedCommandsDisabledForSession = false
+
+export function disableUnsandboxedCommandsForMcpServe(): void {
+  unsandboxedCommandsDisabledForSession = true
+}
+
+export function isUnsandboxedCommandsDisabled(): boolean {
+  return unsandboxedCommandsDisabledForSession
+}
+
+export function _resetUnsandboxedCommandsDisabledForTesting(): void {
+  unsandboxedCommandsDisabledForSession = false
+}
+
+/**
+ * Official 2.1.326 #303 (`CSn` / `aut` / `lut` / `ASn` / `RSn` @298113584):
+ * Remember whether each toolUseId was checked as sandboxed so that when a
+ * permission hook or SDK host rewrites the command while approving, it stays
+ * in the sandbox unless the approver explicitly added
+ * `dangerouslyDisableSandbox: true`.
+ */
+export const SANDBOX_CHECK_NOTED_YES = 'counted as sandboxed'
+export const SANDBOX_CHECK_NOTED_NO = 'not counted as sandboxed'
+export const SANDBOX_GONE_SINCE_CHECK_MESSAGE =
+  'The command did not run. This run had to be in the sandbox, and no sandbox is available now. Running the command again will repeat the permission check.'
+export const KEPT_IN_SANDBOX_SINCE_CHECK_NOTE =
+  "This command started in the sandbox because its permission check relied on the sandbox, although the settings or this call's input exempt it. Sandbox limits may explain a failure here. Running it again repeats the permission check, which may keep it in the sandbox again."
+
+type SandboxCheckRecord = {
+  input: { command?: string; dangerouslyDisableSandbox?: boolean }
+  note: typeof SANDBOX_CHECK_NOTED_YES | typeof SANDBOX_CHECK_NOTED_NO
+}
+
+const sandboxCheckRecordsByToolUseId = new Map<string, SandboxCheckRecord>()
+const MAX_SANDBOX_CHECK_RECORDS = 512
+
+export function recordSandboxStateAtCheck(
+  toolUseId: string | undefined,
+  input: Partial<SandboxInput>,
+  wasSandboxed: boolean,
+): void {
+  if (!toolUseId) return
+  const existing = sandboxCheckRecordsByToolUseId.get(toolUseId)
+  // Official 2.1.326 #303: preserve an existing 'counted as sandboxed' initial
+  // record for the same toolUseId instead of overwriting it when a
+  // PermissionRequest hook re-runs checkPermissions with rewritten updatedInput.
+  if (existing?.note === SANDBOX_CHECK_NOTED_YES) {
+    return
+  }
+  if (
+    !existing &&
+    sandboxCheckRecordsByToolUseId.size >= MAX_SANDBOX_CHECK_RECORDS
+  ) {
+    const firstKey = sandboxCheckRecordsByToolUseId.keys().next().value
+    if (firstKey !== undefined) {
+      sandboxCheckRecordsByToolUseId.delete(firstKey)
+    }
+  }
+  sandboxCheckRecordsByToolUseId.set(toolUseId, {
+    input: {
+      command: input.command,
+      dangerouslyDisableSandbox: input.dangerouslyDisableSandbox === true,
+    },
+    note: wasSandboxed ? SANDBOX_CHECK_NOTED_YES : SANDBOX_CHECK_NOTED_NO,
+  })
+}
+
+/**
+ * Official 2.1.326 `aut` (#303):
+ * Returns `true` when the original command was checked as sandboxed AND the
+ * final (possibly hook/SDK-rewritten) input must stay in the sandbox.
+ * Returns `false` if the approver explicitly added `dangerouslyDisableSandbox: true`
+ * when the checked original did not have it.
+ */
+export function shouldKeepRewrittenCommandInSandbox(
+  toolUseId: string | undefined,
+  finalInput: Partial<SandboxInput>,
+): boolean {
+  if (!toolUseId) return false
+  const checked = sandboxCheckRecordsByToolUseId.get(toolUseId)
+  if (!checked) return false
+  return (
+    checked.note === SANDBOX_CHECK_NOTED_YES &&
+    (finalInput.dangerouslyDisableSandbox !== true ||
+      checked.input.dangerouslyDisableSandbox === true)
+  )
+}
+
+export function clearSandboxStateAtCheck(toolUseId: string | undefined): void {
+  if (toolUseId) sandboxCheckRecordsByToolUseId.delete(toolUseId)
+}
+
+export function _resetSandboxCheckRecordsForTesting(): void {
+  sandboxCheckRecordsByToolUseId.clear()
+}
+
+export type ShouldUseSandboxOptions = {
+  /** Official 2.1.326 `Jm(e, o)`: force sandbox (ignore excludedCommands & dangerouslyDisableSandbox). */
+  disableUnsandboxedCommands?: boolean
+  userTypedShellDispatch?: boolean
+}
+
+/**
+ * densable p3 / 2.1.326 `Jm(e, o)` (#303 / #304) — should this command run sandboxed?
+ */
+export function shouldUseSandbox(
+  input: Partial<SandboxInput>,
+  options?: ShouldUseSandboxOptions,
+): boolean {
   if (!SandboxManager.isSandboxingEnabled()) {
     return false
   }
@@ -705,20 +815,29 @@ export function shouldUseSandbox(input: Partial<SandboxInput>): boolean {
     }
   }
 
+  const disableUnsandboxed =
+    options?.disableUnsandboxedCommands === true ||
+    unsandboxedCommandsDisabledForSession ||
+    isEnvTruthy(process.env.CLAUDE_CODE_EVAL_CONFINED)
+
   // Don't sandbox if explicitly overridden AND unsandboxed commands are allowed by policy
   if (
     input.dangerouslyDisableSandbox &&
-    SandboxManager.areUnsandboxedCommandsAllowed()
+    !disableUnsandboxed &&
+    (options?.userTypedShellDispatch === true ||
+      SandboxManager.areUnsandboxedCommandsAllowed())
   ) {
     return false
   }
 
   if (!input.command) {
-    return false
+    return Boolean(disableUnsandboxed)
   }
 
-  // Don't sandbox if the command contains user-configured excluded commands (hxy)
-  if (containsExcludedCommand(input.command)) {
+  // Don't sandbox if the command contains user-configured excluded commands (hxy),
+  // UNLESS unsandboxed commands are disabled (e.g. `claude mcp serve` #304 or
+  // hook/SDK rewrite keeping sandbox #303).
+  if (!disableUnsandboxed && containsExcludedCommand(input.command)) {
     return false
   }
 

@@ -4,6 +4,7 @@ import { getTerminalFocusState, subscribeTerminalFocus } from '@anthropic/ink'
 import { countPendingTurnDurationWork } from '../components/messages/SystemTextMessage.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { generateAwaySummary } from '../services/awaySummary.js'
+import { currentLimits } from '../services/claudeAiLimits.js'
 import {
   useAppState,
   useAppStateStore,
@@ -112,8 +113,19 @@ export function shouldGenerateAwaySummary(opts: {
   hasPendingLoopWakeup?: boolean
   inFlight?: boolean
   consecutiveFailures?: number
+  force?: boolean
+  billedToUsageCredits?: boolean
 }): boolean {
   if (!isAwaySummaryLiveEnabled(opts)) return false
+  // Official 2.1.326 (#55): skip automatic session recaps after a reply billed
+  // to usage credits (overage); manual `/recap` passes `force: true`.
+  if (
+    !opts.force &&
+    (opts.billedToUsageCredits ?? currentLimits.overageInUse === true)
+  ) {
+    logForDebugging('[awaySummary] skipped: last reply billed to usage credits')
+    return false
+  }
   if (opts.draftInput && opts.draftInput !== '') {
     logForDebugging('[awaySummary] skipped: draft input present')
     return false

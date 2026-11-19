@@ -1,14 +1,14 @@
 import * as React from 'react';
 import { useCallback } from 'react';
 import { Select } from '../../../components/CustomSelect/select.js';
-import { Box, Dialog, Text } from '@anthropic/ink';
+import { Box, Byline, Dialog, KeyboardShortcutHint, Text } from '@anthropic/ink';
 import type { ToolPermissionContext } from '../../../Tool.js';
 import type {
   PermissionBehavior,
   PermissionRule,
   PermissionRuleValue,
 } from '../../../utils/permissions/PermissionRule.js';
-import { applyPermissionUpdate, persistPermissionUpdate } from '../../../utils/permissions/PermissionUpdate.js';
+import { applyPermissionUpdate, persistPermissionUpdates } from '../../../utils/permissions/PermissionUpdate.js';
 import { permissionRuleValueToString } from '../../../utils/permissions/permissionRuleParser.js';
 import { detectUnreachableRules, type UnreachableRule } from '../../../utils/permissions/shadowedRuleDetection.js';
 import { SandboxManager } from '../../../utils/sandbox/sandbox-adapter.js';
@@ -44,6 +44,8 @@ export function optionForPermissionSaveDestination(saveDestination: EditableSett
 type Props = {
   onAddRules: (rules: PermissionRule[], unreachable?: UnreachableRule[]) => void;
   onCancel: () => void;
+  /** Official 2.1.326 #16: surface settings persistence failures without dropping the session update. */
+  onNotSaved?: (warning: string) => void;
   ruleValues: PermissionRuleValue[];
   ruleBehavior: PermissionBehavior;
   initialContext: ToolPermissionContext;
@@ -53,6 +55,7 @@ type Props = {
 export function AddPermissionRules({
   onAddRules,
   onCancel,
+  onNotSaved,
   ruleValues,
   ruleBehavior,
   initialContext,
@@ -68,20 +71,16 @@ export function AddPermissionRules({
       } else if ((SOURCES as readonly string[]).includes(selectedValue)) {
         const destination = selectedValue as EditableSettingSource;
 
-        const updatedContext = applyPermissionUpdate(initialContext, {
-          type: 'addRules',
+        const update = {
+          type: 'addRules' as const,
           rules: ruleValues,
           behavior: ruleBehavior,
           destination,
-        });
+        };
+        const updatedContext = applyPermissionUpdate(initialContext, update);
 
-        // Persist to settings
-        persistPermissionUpdate({
-          type: 'addRules',
-          rules: ruleValues,
-          behavior: ruleBehavior,
-          destination,
-        });
+        // Persist to settings and report any persistence error (#16)
+        persistPermissionUpdates([update], { onPersistError: onNotSaved });
 
         setToolPermissionContext(updatedContext);
 
@@ -108,13 +107,23 @@ export function AddPermissionRules({
         onAddRules(rules, newUnreachable.length > 0 ? newUnreachable : undefined);
       }
     },
-    [onAddRules, onCancel, ruleValues, ruleBehavior, initialContext, setToolPermissionContext],
+    [onAddRules, onCancel, onNotSaved, ruleValues, ruleBehavior, initialContext, setToolPermissionContext],
   );
 
   const title = `Add ${ruleBehavior} permission ${plural(ruleValues.length, 'rule')}`;
 
   return (
-    <Dialog title={title} onCancel={onCancel} color="permission">
+    <Dialog
+      title={title}
+      onCancel={onCancel}
+      color="permission"
+      inputGuide={
+        <Byline>
+          <KeyboardShortcutHint shortcut="Enter" action="save" />
+          <KeyboardShortcutHint shortcut="Esc" action="go back" />
+        </Byline>
+      }
+    >
       <Box flexDirection="column" paddingX={2}>
         {ruleValues.map(ruleValue => (
           <Box flexDirection="column" key={permissionRuleValueToString(ruleValue)}>

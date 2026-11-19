@@ -2,7 +2,7 @@ import figures from 'figures';
 import * as React from 'react';
 import { useEffect, useState } from 'react';
 import { ConfigurableShortcutHint } from '../../components/ConfigurableShortcutHint.js';
-import { Box, Byline, Text } from '@anthropic/ink';
+import { Box, Byline, Text, useModalOrTerminalSize } from '@anthropic/ink';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
 import type { LoadedPlugin } from '../../types/plugin.js';
 import { count } from '../../utils/array.js';
@@ -52,6 +52,8 @@ import {
   useHeadersHelperPaneConsent,
 } from './pluginDetailsHelpers.js';
 import type { ViewState as ParentViewState } from './types.js';
+import { useTerminalSize } from '../../hooks/useTerminalSize.js';
+import { computePluginListMaxVisible, usePluginListExtendedKeys } from './pluginListHelpers.js';
 import { usePagination } from './usePagination.js';
 
 type Props = {
@@ -143,15 +145,44 @@ export function BrowseMarketplace({
   const [loading, setLoading] = useState(true);
   const [installCounts, setInstallCounts] = useState<Map<string, number> | null>(null);
 
+  const { rows: terminalRows } = useModalOrTerminalSize(useTerminalSize());
+
   // Selection state
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [selectedForInstall, setSelectedForInstall] = useState<Set<string>>(new Set());
   const [installingPlugins, setInstallingPlugins] = useState<Set<string>>(new Set());
 
+  // Official 2.1.326 #270: fit marketplace plugin list in short windows
+  const browseMaxVisible = computePluginListMaxVisible(terminalRows, 10, 3, 5, 1);
+
+  // Pagination for marketplace list in short windows (Official 2.1.326 #270)
+  const marketplacePagination = usePagination<MarketplaceInfo>({
+    totalItems: marketplaces.length,
+    selectedIndex,
+    maxVisible: browseMaxVisible,
+  });
+
   // Pagination for plugin list (continuous scrolling)
   const pagination = usePagination<InstallablePlugin>({
     totalItems: availablePlugins.length,
     selectedIndex,
+    maxVisible: browseMaxVisible,
+  });
+
+  usePluginListExtendedKeys({
+    isActive: viewState === 'plugin-list' && availablePlugins.length > 0,
+    totalItems: availablePlugins.length,
+    selectedIndex,
+    pageSize: pagination.pageSize,
+    onSelectIndex: nextIdx => pagination.handleSelectionChange(nextIdx, setSelectedIndex),
+  });
+
+  usePluginListExtendedKeys({
+    isActive: viewState === 'marketplace-list' && marketplaces.length > 0,
+    totalItems: marketplaces.length,
+    selectedIndex,
+    pageSize: browseMaxVisible,
+    onSelectIndex: nextIdx => setSelectedIndex(nextIdx),
   });
 
   // Details view state
@@ -785,22 +816,46 @@ export function BrowseMarketplace({
             </Text>
           </Box>
         )}
-        {marketplaces.map((marketplace, index) => (
-          <Box key={marketplace.name} flexDirection="column" marginBottom={index < marketplaces.length - 1 ? 1 : 0}>
-            <Box>
-              <Text color={selectedIndex === index ? 'suggestion' : undefined}>
-                {selectedIndex === index ? figures.pointer : ' '} {re(marketplace.name)}
-              </Text>
-            </Box>
-            <Box marginLeft={2}>
-              <Text dimColor>
-                {marketplace.totalPlugins} {plural(marketplace.totalPlugins, 'plugin')} available
-                {marketplace.installedCount > 0 && ` · ${marketplace.installedCount} already installed`}
-                {marketplace.source && ` · ${re(marketplace.source)}`}
-              </Text>
-            </Box>
+        {marketplacePagination.scrollPosition.canScrollUp && (
+          <Box>
+            <Text dimColor>
+              {' '}
+              {figures.arrowUp} {marketplacePagination.scrollPosition.hiddenAbove} more above
+            </Text>
           </Box>
-        ))}
+        )}
+        {marketplacePagination.getVisibleItems(marketplaces).map((marketplace, visibleIndex) => {
+          const index = marketplacePagination.toActualIndex(visibleIndex);
+          return (
+            <Box
+              key={marketplace.name}
+              flexDirection="column"
+              marginBottom={visibleIndex < marketplacePagination.getVisibleItems(marketplaces).length - 1 ? 1 : 0}
+              onClick={() => marketplacePagination.handleSelectionChange(index, setSelectedIndex)}
+            >
+              <Box>
+                <Text color={selectedIndex === index ? 'suggestion' : undefined}>
+                  {selectedIndex === index ? figures.pointer : ' '} {re(marketplace.name)}
+                </Text>
+              </Box>
+              <Box marginLeft={2}>
+                <Text dimColor>
+                  {marketplace.totalPlugins} {plural(marketplace.totalPlugins, 'plugin')} available
+                  {marketplace.installedCount > 0 && ` · ${marketplace.installedCount} already installed`}
+                  {marketplace.source && ` · ${re(marketplace.source)}`}
+                </Text>
+              </Box>
+            </Box>
+          );
+        })}
+        {marketplacePagination.scrollPosition.canScrollDown && (
+          <Box>
+            <Text dimColor>
+              {' '}
+              {figures.arrowDown} {marketplacePagination.scrollPosition.hiddenBelow} more below
+            </Text>
+          </Box>
+        )}
 
         <Box marginTop={1}>
           <Text dimColor italic>
@@ -1002,10 +1057,13 @@ export function BrowseMarketplace({
         <Text bold>Install Plugins</Text>
       </Box>
 
-      {/* Scroll up indicator */}
+      {/* Scroll up indicator (Official 2.1.326 #270) */}
       {pagination.scrollPosition.canScrollUp && (
         <Box>
-          <Text dimColor> {figures.arrowUp} more above</Text>
+          <Text dimColor>
+            {' '}
+            {figures.arrowUp} {pagination.scrollPosition.hiddenAbove} more above
+          </Text>
         </Box>
       )}
 
@@ -1018,7 +1076,12 @@ export function BrowseMarketplace({
         const isLast = visibleIndex === visiblePlugins.length - 1;
 
         return (
-          <Box key={plugin.pluginId} flexDirection="column" marginBottom={isLast && !error ? 0 : 1}>
+          <Box
+            key={plugin.pluginId}
+            flexDirection="column"
+            marginBottom={isLast && !error ? 0 : 1}
+            onClick={() => pagination.handleSelectionChange(actualIndex, setSelectedIndex)}
+          >
             <Box>
               <Text color={isSelected ? 'suggestion' : undefined}>{isSelected ? figures.pointer : ' '} </Text>
               <Text color={plugin.isInstalled ? 'success' : undefined}>
@@ -1051,10 +1114,13 @@ export function BrowseMarketplace({
         );
       })}
 
-      {/* Scroll down indicator */}
+      {/* Scroll down indicator (Official 2.1.326 #270) */}
       {pagination.scrollPosition.canScrollDown && (
         <Box>
-          <Text dimColor> {figures.arrowDown} more below</Text>
+          <Text dimColor>
+            {' '}
+            {figures.arrowDown} {pagination.scrollPosition.hiddenBelow} more below
+          </Text>
         </Box>
       )}
 

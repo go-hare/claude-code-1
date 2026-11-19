@@ -1,6 +1,6 @@
 import { isInputModeCharacter } from 'src/components/PromptInput/inputModes.js'
 import { useNotifications } from 'src/context/notifications.js'
-import { useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import stripAnsi from 'strip-ansi'
 import { markBackslashReturnUsed } from '../commands/terminalSetup/terminalSetup.js'
 import { addToHistory } from '../history.js'
@@ -72,8 +72,9 @@ export type UseTextInputProps = {
   onHistoryReset?: () => void
   onClearInput?: () => void
   /**
-   * densable 2.1.289 holdCleared — called immediately before Ctrl+C clears a
-   * non-empty value so the draft (incl. pastes) can be restored on Up.
+   * densable 2.1.289 holdCleared + 2.1.326 #41 — called immediately before
+   * Ctrl+C or Esc Esc clears a non-empty value so the draft (incl. pastes) can
+   * be restored on Up.
    */
   onHoldCleared?: () => void
   focus?: boolean
@@ -207,13 +208,25 @@ export function useTextInput({
     },
   )
 
+  // Official 2.1.326 #169: clear "Esc again to clear" as soon as a second Esc
+  // would no longer clear the prompt (input became empty or Esc double-press disabled).
+  useEffect(() => {
+    if (!originalValue || disableEscapeDoublePress) {
+      removeNotification('escape-again-to-clear')
+    }
+  }, [originalValue, disableEscapeDoublePress, removeNotification])
+
   // NOTE(keybindings): This escape handler is intentionally NOT migrated to the keybindings system.
   // It's a text-level double-press escape for clearing input, not an action-level keybinding.
   // Double-press Esc clears the input and saves to history - this is text editing behavior,
   // not dialog dismissal, and needs the double-press safety mechanism.
   const handleEscape = useDoublePress(
     (show: boolean) => {
-      if (!originalValue || !show) {
+      if (!show) {
+        removeNotification('escape-again-to-clear')
+        return
+      }
+      if (!originalValue) {
         return
       }
       addNotification({
@@ -228,6 +241,9 @@ export function useTextInput({
       removeNotification('escape-again-to-clear')
       onClearInput?.()
       if (originalValue) {
+        // Official 2.1.326 #41: hold draft (including pastedContents) before clearing
+        // so ↑ restores pasted text and images.
+        onHoldCleared?.()
         // densable cns + ELe: s && p==="" && trim — skip history for masked
         // fields, and prepend `!` when clearing a bash-mode draft.
         if (
@@ -678,6 +694,12 @@ export function useTextInput({
     // sequence recovery. Wheel/mouse names never insert text.
     if (key.wheelUp || key.wheelDown) {
       return
+    }
+
+    // #169 (2.1.326): any non-Esc key cancels the "Esc again to clear" window,
+    // so dismiss the stale notice immediately.
+    if (!key.escape) {
+      removeNotification('escape-again-to-clear')
     }
 
     // Rebuild from live refs so a multi-key stdin batch (typed chars + Enter)

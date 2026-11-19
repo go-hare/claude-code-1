@@ -55,6 +55,8 @@ import { checkBgIsolationWriteBlock } from 'src/utils/bgIsolationContainment.js'
 import {
   checkBlockWritesOutsideWorkingDirectories,
   checkWritePermissionForTool,
+  isBlockedDeviceOrProcessPath,
+  isClaudeSignInFilePath,
   matchingRuleForInput,
   matchesPathRule,
 } from 'src/utils/permissions/filesystem.js'
@@ -402,6 +404,23 @@ export const FileWriteTool = buildTool({
     if (hostRefusal) return { ...hostRefusal, errorCode: 14 }
     const fullFilePath = expandPath(file_path)
 
+    // Official 2.1.326 #307 / #309: refuse writes to Claude sign-in files or
+    // blocked device/process files even before permission prompts.
+    if (isClaudeSignInFilePath(fullFilePath)) {
+      return {
+        result: false,
+        message: `Cannot write to Claude Code sign-in file ${fullFilePath}. Sign-in files such as .credentials.json are protected from modification.`,
+        errorCode: 15,
+      }
+    }
+    if (isBlockedDeviceOrProcessPath(fullFilePath)) {
+      return {
+        result: false,
+        message: `Cannot write to device or process file ${fullFilePath}.`,
+        errorCode: 16,
+      }
+    }
+
     // densable 2.1.217 #5 hsr — bg / worktree isolation containment (errorCode 7)
     const isolationBlock = checkBgIsolationWriteBlock(fullFilePath, {
       agentId: toolUseContext.agentId,
@@ -591,6 +610,16 @@ export const FileWriteTool = buildTool({
       userModified,
     } = toolUseContext
     const fullFilePath = expandPath(file_path)
+
+    // Official 2.1.326 #307 / #309: defense-in-depth at call() time too.
+    if (isClaudeSignInFilePath(fullFilePath)) {
+      throw new Error(
+        `Cannot write to Claude Code sign-in file ${fullFilePath}. Sign-in files such as .credentials.json are protected from modification.`,
+      )
+    }
+    if (isBlockedDeviceOrProcessPath(fullFilePath)) {
+      throw new Error(`Cannot write to device or process file ${fullFilePath}.`)
+    }
 
     const outsideWriteBlock = checkBlockWritesOutsideWorkingDirectories(
       fullFilePath,

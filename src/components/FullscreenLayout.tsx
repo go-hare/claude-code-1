@@ -43,7 +43,7 @@ import type { Message } from '../types/message.js';
 import { getShortcutDisplay } from '../keybindings/shortcutFormat.js';
 import { openBrowser, openPath } from '../utils/browser.js';
 import { getAutoScrollEnabled } from '../utils/config.js';
-import { isFullscreenEnvEnabled, resolveMouseTrackingMode } from '../utils/fullscreen.js';
+import { isFullscreenEnvEnabled, latchSessionTuiSetting, resolveMouseTrackingMode } from '../utils/fullscreen.js';
 import { isAxcStickyMainEnabled } from '../utils/residualUiEnvGates.js';
 import { getPlatform } from '../utils/platform.js';
 import { useAppState } from '../state/AppState.js';
@@ -96,8 +96,31 @@ function ModalDividerTail(): React.ReactNode {
  * so HistorySearch / elicitation still fill the chrome.
  */
 const FULLSCREEN_BOTTOM_CHROME_ROWS = 2;
+/** 2.1.326 #198 / 2.1.328 `bf = 5`: minimum protected prompt chrome height in short fullscreen windows. */
+export const FULLSCREEN_MIN_PROMPT_ROWS = 5;
 const HISTORY_SEARCH_OVERLAY = 'history-search';
 const ELICITATION_OVERLAYS = new Set(['elicitation', 'elicitation-url']);
+
+/**
+ * 2.1.326 #198 / 2.1.328 `ut = Math.max(0, Rt - ke, Math.min(bf, Rt, Ue - s5 - ke))`:
+ * Protects the prompt input height in short fullscreen windows when an above-prompt
+ * banner/survey/notice (`abovePromptHeight`) is rendered.
+ */
+export function computeFullscreenPromptMaxHeight(
+  bottomMaxHeight: number,
+  abovePromptHeight: number,
+  terminalRows: number,
+): number {
+  return Math.max(
+    0,
+    bottomMaxHeight - abovePromptHeight,
+    Math.min(
+      FULLSCREEN_MIN_PROMPT_ROWS,
+      bottomMaxHeight,
+      terminalRows - FULLSCREEN_BOTTOM_CHROME_ROWS - abovePromptHeight,
+    ),
+  );
+}
 
 /** Context for scroll-derived chrome (sticky header, pill). StickyTracker
  *  in VirtualMessageList writes via this instead of threading a callback
@@ -1509,6 +1532,8 @@ export type FullscreenLayoutProps = {
   hideSticky?: boolean;
   /** Count for the pill text. 0 → "Jump to bottom", >0 → "N new messages". */
   newMessageCount?: number;
+  /** 2.1.326 #191: true when Claude is waiting for the user's answer below the scrolled viewport. */
+  askBelow?: boolean;
   /** Called when the user clicks the "N new" pill. */
   onPillClick?: () => void;
   /**
@@ -1753,6 +1778,7 @@ export function FullscreenLayout({
   hidePill = false,
   hideSticky = false,
   newMessageCount = 0,
+  askBelow = false,
   onPillClick,
   sidebar,
   sidebarWidth = 0,
@@ -1763,6 +1789,11 @@ export function FullscreenLayout({
   onLinkNotOpened,
 }: Props): React.ReactNode {
   const { rows: terminalRows, columns } = useTerminalSize();
+  // 2.1.326 #140: latch the active session's fullscreen renderer choice on mount
+  // so mid-session settings edits do not flip the running session's renderer.
+  useEffect(() => {
+    latchSessionTuiSetting();
+  }, []);
   // densable tot `Zot()||XMn()` — only history-search / elicitation take rows-2.
   const expandBottomChrome = useAppState(s => {
     for (const id of s.activeOverlays) {
@@ -1788,9 +1819,9 @@ export function FullscreenLayout({
     [terminalRows],
   );
   const abovePromptHeight = useYogaHeight(abovePromptRef);
-  // densable `gt=Math.max(0,Ne-pt)` — always, even when T is undefined.
-  // Gold always mounts `$e` (abovePrompt wrapper); pt is that box's yoga height.
-  const promptMaxHeight = Math.max(0, bottomMaxHeight - abovePromptHeight);
+  // 2.1.326 #198: protect prompt input height in short fullscreen windows when
+  // above-prompt content (survey/notice) is displayed.
+  const promptMaxHeight = computeFullscreenPromptMaxHeight(bottomMaxHeight, abovePromptHeight, terminalRows);
   const modalVisible = modal?.visible ?? false;
   const { clearSelection } = useSelection();
   useLayoutEffect(() => {
@@ -1813,26 +1844,38 @@ export function FullscreenLayout({
     setLeftoverClaims(prev => [...prev, claim]);
     return () => setLeftoverClaims(prev => prev.filter(row => row !== claim));
   }, []);
-  // Boolean-quantized scroll subscription. Snapshot is "is viewport bottom
-  // above the divider y?" — Object.is on a boolean → FullscreenLayout only
-  // re-renders when the pill should actually flip, not per-frame.
+  // 2.1.326 #197 / 2.1.328: subscribe to both ScrollBox and Ink frame paints
+  // (`subscribeFrames`) so streaming growth updates `scrollHeight` and keeps the
+  // jump-to-bottom pill visible whenever scrolled above the bottom of the transcript.
+  const { subscribeFrames } = useApp();
   const subscribe = useCallback(
-    (listener: () => void) => scrollRef?.current?.subscribe(listener) ?? (() => {}),
-    [scrollRef],
+    (listener: () => void) => {
+      const unsubScroll = scrollRef?.current?.subscribe(listener) ?? (() => {});
+      const unsubFrames = subscribeFrames?.(listener) ?? (() => {});
+      return () => {
+        unsubScroll();
+        unsubFrames();
+      };
+    },
+    [scrollRef, subscribeFrames],
   );
   const pillVisible = useSyncExternalStore(subscribe, () => {
-    // densable Wrn Ddw: sticky never shows the pill; dividerY is the unseen
-    // snapshot; without a divider, pill only when auto-scroll is off and the
-    // viewport is short of content (user scrolled up with followGrowth false).
+    // 2.1.326 #191 / #197 / 2.1.328 `Uo`: sticky never shows the pill;
+    // when scrolled up and content extends below viewportBottom, show pill if
+    // unread divider exists, auto-scroll is disabled, or Claude awaits an answer.
     const s = scrollRef?.current;
     if (!s) return false;
     if (s.isSticky()) return false;
     const viewportBottom = s.getScrollTop() + s.getPendingDelta() + s.getViewportHeight();
+    const hasDivider = dividerYRef?.current != null;
+    return (hasDivider || !getAutoScrollEnabled() || askBelow) && viewportBottom < s.getScrollHeight();
+  });
+  const showUnreadCount = useSyncExternalStore(subscribe, () => {
+    const s = scrollRef?.current;
     const dividerY = dividerYRef?.current;
-    if (dividerY != null) {
-      return viewportBottom < dividerY && viewportBottom < s.getScrollHeight();
-    }
-    return !getAutoScrollEnabled() && viewportBottom < s.getScrollHeight();
+    if (!s || dividerY == null) return false;
+    const viewportBottom = s.getScrollTop() + s.getPendingDelta() + s.getViewportHeight();
+    return viewportBottom < dividerY;
   });
   const onLinkNotOpenedRef = useRef(onLinkNotOpened);
   onLinkNotOpenedRef.current = onLinkNotOpened;
@@ -1894,7 +1937,8 @@ export function FullscreenLayout({
     const showPill = !hidePill && pillVisible;
     const pillNode = showPill ? (
       <NewMessagesPill
-        count={newMessageCount}
+        count={showUnreadCount ? newMessageCount : 0}
+        askBelow={askBelow}
         onClick={() => {
           // densable i8l: onClick={zxh} only — StickyTracker clears
           // when scrollToBottom repins isSticky.
@@ -2138,13 +2182,32 @@ export function FullscreenLayout({
   );
 }
 
+/**
+ * 2.1.326 #191 / 2.1.328 `Jc` base label helper for the bottom scroll pill.
+ */
+export function getJumpToBottomPillBaseLabel(count: number, askBelow = false): string {
+  if (askBelow) return 'Waiting for your answer';
+  return count > 0 ? `${count} new ${plural(count, 'message')}` : 'Jump to bottom';
+}
+
 // densable Ec / Bta — absolute overlay at bottom of the transcript column.
 // Gold: left=0 right=0 justifyContent=center. Tyn wraps this column in
 // TerminalSizeContext {columns: mainColumns}, so "center" is the left pane
 // (not the full terminal once /diff is open). Shows "Jump to bottom" when
-// count is 0 (scrolled away but no new messages yet).
-function NewMessagesPill({ count, onClick }: { count: number; onClick?: () => void }): React.ReactNode {
+// count is 0 (scrolled away but no new messages yet), or "Waiting for your answer"
+// when `askBelow` is true (2.1.326 #191).
+function NewMessagesPill({
+  count,
+  askBelow = false,
+  onClick,
+}: {
+  count: number;
+  askBelow?: boolean;
+  onClick?: () => void;
+}): React.ReactNode {
   const [hover, setHover] = useState(false);
+  const selection = useSelection();
+  const hasActiveSelection = useSyncExternalStore(selection.subscribe, selection.hasSelection);
   const { columns } = useTerminalSize();
   const terminalFocused = useTerminalFocus();
   // Official defaults (vRp/CRp densables via platform table).
@@ -2152,7 +2215,7 @@ function NewMessagesPill({ count, onClick }: { count: number; onClick?: () => vo
   const pageDownDefault = 'pagedown';
   const bottomShortcut = getShortcutDisplay('scroll:bottom', 'Scroll', bottomDefault);
   const pageDownShortcut = getShortcutDisplay('scroll:pageDown', 'Scroll', pageDownDefault);
-  const base = count > 0 ? `${count} new ${plural(count, 'message')}` : 'Jump to bottom';
+  const base = getJumpToBottomPillBaseLabel(count, askBelow);
   // Official: macOS + bottom binding is empty/default → prefer click or fn+↓
   // wording; otherwise show the resolved scroll:bottom chord.
   const isMacDefaultBottom = getPlatform() === 'macos' && (bottomShortcut === '' || bottomShortcut === bottomDefault);
@@ -2162,7 +2225,7 @@ function NewMessagesPill({ count, onClick }: { count: number; onClick?: () => vo
   if (isMacDefaultBottom && mouseClickable) {
     preferred = `${base} (click) ${figures.arrowDown}`;
   } else if (isMacDefaultBottom && pageDownHint) {
-    preferred = `${base}: ${pageDownHint} to scroll`;
+    preferred = `${base} · ${pageDownHint} to scroll`;
   } else if (bottomShortcut) {
     preferred = `${base} (${bottomShortcut}) ${figures.arrowDown}`;
   } else {
@@ -2172,6 +2235,11 @@ function NewMessagesPill({ count, onClick }: { count: number; onClick?: () => vo
   const maxWidth = Math.max(0, columns - 2);
   const bare = `${base} ${figures.arrowDown}`;
   const label = [preferred, bare, base].find(s => stringWidth(s) <= maxWidth) ?? base;
+  // 2.1.326 #191 / 2.1.328 `N = Q2t(!x && !_)`: hide ordinary jump pill during
+  // active text selection unless hovered or waiting for the user's answer.
+  if (hasActiveSelection && !askBelow && !hover) {
+    return null;
+  }
   // Badge (Ey densable): padded spaces + text color + truncate-end.
   const text = ` ${label} `;
   const bg = hover ? 'userMessageBackgroundHover' : 'userMessageBackground';
@@ -2215,7 +2283,9 @@ function StickyPromptHeader({
 }): React.ReactNode {
   const [hover, setHover] = useState(false);
   return (
-    <Box flexShrink={0} width="100%" height={1} flexDirection="row">
+    // 2.1.326 #138: mark StickyPromptHeader `noSelect` so dragging selection
+    // past the top of the transcript never captures the pinned prompt text.
+    <Box noSelect flexShrink={0} width="100%" height={1} flexDirection="row">
       {leftMargin > 0 && <NoSelect fromLeftEdge minWidth={leftMargin} />}
       <Box
         flexGrow={1}

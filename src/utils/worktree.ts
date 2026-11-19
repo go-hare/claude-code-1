@@ -64,6 +64,7 @@ import {
   resolveRef,
 } from './git/gitFilesystem.js'
 import {
+  buildStrictGitEnv,
   findCanonicalGitRoot,
   findGitRoot,
   getBranch,
@@ -594,11 +595,13 @@ export function formatNoLazyFetchObjectMissingHint(
  * env cannot retarget the shared checkout. Extra overrides apply last (XB).
  */
 function gitWorktreeEnv(extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  // 2.1.323 #2169: strip Claude Code sign-in tokens / API keys from internal
-  // worktree git subprocesses in addition to git repo isolation scrubbing.
-  return stripClaudeAuthEnvVars(
-    scrubGitEnvForWorktree({ ...GIT_NO_PROMPT_ENV, ...extra }),
-  )
+  // 2.1.323 #2169 + 2.1.326 #342 (`Cin`): strip Claude Code sign-in tokens /
+  // API keys, isolate worktree git env, and restrict PATH to absolute entries.
+  return buildStrictGitEnv(extra, {
+    base: stripClaudeAuthEnvVars(
+      scrubGitEnvForWorktree({ ...GIT_NO_PROMPT_ENV }),
+    ),
+  })
 }
 
 // Re-export densable XB for callers outside this module.

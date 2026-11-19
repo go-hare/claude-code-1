@@ -59,9 +59,13 @@ export const BG_OAUTH_TOKEN_BLOCKED_MESSAGE =
 export const BG_OLD_DAEMON_PROFILE_MESSAGE =
   "the background service that is running is an older version, which can't keep this session's profile. Run claude daemon stop --any, which stops background sessions, and try again. If it runs as a service, run claude daemon install instead. Continue a session that was stopped with claude --resume, as you started it"
 
-/** Official `Ofa` (#1995 & 2.1.325 #2351 — no longer suggests adding the key to settings). */
+/** Official `Ofa` / `qza` (#1995 & 2.1.325 #2351 & 2.1.326 #61/#335). */
 export const BG_SHELL_CREDENTIAL_MISMATCH_MESSAGE =
   "the background service doesn't have this session's API key, token or workload identity, so run it in this terminal. Or, unless the service was set up with claude daemon install, run claude daemon stop --any, which stops every project's background sessions, and try again from here; other background sessions may then use this key, token or identity instead of their own sign-in"
+
+/** Official 2.1.326 #335 (`Vza`): moving a `--bare` session on an unapproved API key to background. */
+export const BG_BARE_UNAPPROVED_KEY_MESSAGE =
+  "a background session started from here isn't --bare, so it can't use this session's API key, which nobody approved. Run it in this terminal. A new one started with claude --bare --bg gets the key only if the background service has it or isn't running yet"
 
 /** Official 2.1.325 #2291: refusal when a session's sign-in would be hijacked in the background. */
 export const BG_DAEMON_CREDENTIAL_CONFLICT_MESSAGE =
@@ -382,12 +386,84 @@ export type BgJobCredentialAnchorRecord = {
   ANTHROPIC_CONFIG_DIR?: string
 }
 
+/**
+ * Official 2.1.326 #335 (`Vza` / `qza`): check `--bare` sessions running on an
+ * unapproved `ANTHROPIC_API_KEY`:
+ * - Moving a `--bare` session to the background (where the background session
+ *   is NOT `--bare`) is refused with `BG_BARE_UNAPPROVED_KEY_MESSAGE` (`Vza`).
+ * - Starting `claude --bare --bg` when a background daemon IS already running
+ *   without the caller's API key is refused with
+ *   `BG_SHELL_CREDENTIAL_MISMATCH_MESSAGE` (`qza`).
+ * - Starting `claude --bare --bg` when the daemon is NOT running yet (so it
+ *   will be spawned with the shell's env) or already has the matching API key
+ *   is allowed.
+ */
+export function checkBareUnapprovedKeyForBg(opts: {
+  isBareSession: boolean
+  hasBareFlagInBgLaunch: boolean
+  callerEnv: NodeJS.ProcessEnv | Record<string, string | undefined>
+  isApiKeyApproved: boolean
+  daemonRunning: boolean
+  daemonHasMatchingKey?: boolean
+}): string | null {
+  if (!opts.isBareSession) return null
+  const apiKey = opts.callerEnv.ANTHROPIC_API_KEY?.trim()
+  if (!apiKey || opts.isApiKeyApproved) return null
+  if (!opts.hasBareFlagInBgLaunch) {
+    return BG_BARE_UNAPPROVED_KEY_MESSAGE
+  }
+  if (opts.daemonRunning && opts.daemonHasMatchingKey === false) {
+    return BG_SHELL_CREDENTIAL_MISMATCH_MESSAGE
+  }
+  return null
+}
+
+/**
+ * Official 2.1.326 #61 (`qza`): check resuming a past conversation from agent
+ * view (or interactive background handoff) when the terminal has a shell API
+ * key, auth token, or workload identity. If the running background daemon does
+ * not have that exact credential, refuse rather than silently sending the
+ * resumed conversation on the daemon's own sign-in.
+ */
+export function checkDaemonCredentialForBgLaunch(opts: {
+  callerEnv: NodeJS.ProcessEnv | Record<string, string | undefined>
+  daemonRunning: boolean
+  daemonCredentialMatches: boolean | undefined
+  isExec?: boolean
+}): string | null {
+  if (opts.isExec) return null
+  const caller = computeBgSessionCredentialAnchor(opts.callerEnv)
+  if (caller.isOauthTokenEnv) {
+    return BG_OAUTH_TOKEN_BLOCKED_MESSAGE
+  }
+  if (
+    caller.usesShellSecret &&
+    opts.daemonRunning &&
+    opts.daemonCredentialMatches === false
+  ) {
+    return BG_SHELL_CREDENTIAL_MISMATCH_MESSAGE
+  }
+  return null
+}
+
 function anchorDirPath(baseDir?: string): string {
   return join(baseDir ?? getClaudeConfigHomeDir(), 'jobs', '.anchors')
 }
 
 function anchorFilePath(short: string, baseDir?: string): string {
   return join(anchorDirPath(baseDir), `${short}.json`)
+}
+
+/**
+ * Official 2.1.326 #61 (`Qai` / `sJr`): daemon-side sign-in pin under
+ * `~/.claude/daemon/sign-in/<short>` so resumed background sessions cannot
+ * silently fall back to the daemon's own sign-in across restarts or folders.
+ */
+export function getDaemonSignInPinPath(
+  short: string,
+  baseDir?: string,
+): string {
+  return join(baseDir ?? getClaudeConfigHomeDir(), 'daemon', 'sign-in', short)
 }
 
 /** Official `KZr` — whether an env map carries a persisted credential anchor. */
@@ -408,13 +484,20 @@ export async function readBgJobCredentialAnchor(
   short: string,
   baseDir?: string,
 ): Promise<BgJobCredentialAnchorRecord | undefined> {
-  let raw: string
-  try {
-    raw = await readFile(anchorFilePath(short, baseDir), 'utf8')
-  } catch (err) {
-    if (getErrnoCode(err) === 'ENOENT') return undefined
-    throw err
+  let raw: string | undefined
+  for (const filePath of [
+    anchorFilePath(short, baseDir),
+    getDaemonSignInPinPath(short, baseDir),
+  ]) {
+    try {
+      raw = await readFile(filePath, 'utf8')
+      break
+    } catch (err) {
+      if (getErrnoCode(err) === 'ENOENT') continue
+      throw err
+    }
   }
+  if (raw === undefined) return undefined
   const parsed = JSON.parse(raw) as Record<string, unknown>
   const cred = parsed[BG_SESSION_CREDENTIAL_ENV]
   const profile = parsed.ANTHROPIC_PROFILE
@@ -462,21 +545,36 @@ export async function writeBgJobCredentialAnchor(
       ? { ANTHROPIC_CONFIG_DIR: env.ANTHROPIC_CONFIG_DIR }
       : {}),
   }
+  const serialized = JSON.stringify(record)
   await mkdir(anchorDirPath(baseDir), { recursive: true, mode: 0o700 })
-  await writeFile(anchorFilePath(short, baseDir), JSON.stringify(record), {
+  await writeFile(anchorFilePath(short, baseDir), serialized, {
     encoding: 'utf8',
     mode: 0o600,
   })
+  const daemonPinPath = getDaemonSignInPinPath(short, baseDir)
+  await mkdir(join(baseDir ?? getClaudeConfigHomeDir(), 'daemon', 'sign-in'), {
+    recursive: true,
+    mode: 0o700,
+  }).catch(() => {})
+  await writeFile(daemonPinPath, serialized, {
+    encoding: 'utf8',
+    mode: 0o600,
+  }).catch(() => {})
 }
 
 export async function deleteBgJobCredentialAnchor(
   short: string,
   baseDir?: string,
 ): Promise<void> {
-  try {
-    await unlink(anchorFilePath(short, baseDir))
-  } catch (err) {
-    if (getErrnoCode(err) !== 'ENOENT') throw err
+  for (const filePath of [
+    anchorFilePath(short, baseDir),
+    getDaemonSignInPinPath(short, baseDir),
+  ]) {
+    try {
+      await unlink(filePath)
+    } catch (err) {
+      if (getErrnoCode(err) !== 'ENOENT') throw err
+    }
   }
 }
 

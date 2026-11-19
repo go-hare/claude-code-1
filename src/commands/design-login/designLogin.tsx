@@ -3,7 +3,7 @@
  * `onManualCode` to the OAuth runner. Without that callback a remote
  * session refuses and tells the user to run this same command.
  */
-import { Box, Text, useInput } from '@anthropic/ink';
+import { Box, KeyboardShortcutHint, Link, Text, useInput } from '@anthropic/ink';
 import type * as React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
@@ -12,6 +12,11 @@ import { isDesignLoginAvailable, isDesignLoginRemote, runDesignOAuthFlow } from 
 const PASTE_PROMPT = 'Paste code here if prompted > ';
 
 const AUTHORIZED = 'Design-system access authorized. /design-sync can now reach your claude.ai/design projects.';
+
+/** Official 2.1.326 #268: mask pasted OAuth code values on screen. */
+export function maskPastedOAuthCode(value: string): string {
+  return '*'.repeat(value.length);
+}
 
 export const DESIGN_LOGIN_SUNSET_NOTICE =
   'This sign-in is only for standalone Claude Design (claude.ai/design). It goes away when standalone closes, by December 14, 2026. Until then it still works, so sign in if /design-sync or /design consent sent you here.';
@@ -89,14 +94,26 @@ function DesignLogin(props: { onDone: LocalJSXCommandOnDone }): React.ReactNode 
     }
   });
 
+  // Official 2.1.326 #268: align `/design-login` screen with `/login` and mask the pasted code.
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" gap={1}>
       <Text dimColor>{DESIGN_LOGIN_SUNSET_NOTICE}</Text>
-      <Text>Starting design login…</Text>
-      {url !== null ? <Text>{url}</Text> : null}
+      {url === null ? (
+        <Text>Opening browser to sign in…</Text>
+      ) : (
+        <Box flexDirection="column" gap={1}>
+          <Text dimColor>Browser didn&apos;t open? Use the URL below to sign in:</Text>
+          <Link url={url} assumeSupport>
+            <Text dimColor>{url}</Text>
+          </Link>
+        </Box>
+      )}
       <Text>
         {PASTE_PROMPT}
-        {draft}
+        {maskPastedOAuthCode(draft)}
+      </Text>
+      <Text dimColor>
+        <KeyboardShortcutHint shortcut="Esc" action="cancel" />
       </Text>
     </Box>
   );

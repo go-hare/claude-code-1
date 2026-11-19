@@ -59,20 +59,54 @@ async function getSandboxProxyConfig(): Promise<
 }
 
 /**
- * Read HTTP hook allowlist restrictions from merged settings (all sources).
- * Follows the allowedMcpServers precedent: arrays concatenate across sources.
- * When allowManagedHooksOnly is set in managed settings, only admin-defined
- * hooks run anyway, so no separate lock-down boolean is needed here.
+ * Official 2.1.326 #327: Read HTTP hook allowlist restrictions.
+ *
+ * For hooks defined in managed settings (`policySettings`, or a managed-enabled
+ * local folder plugin), only managed settings (`policySettings`) govern
+ * `allowedHttpHookUrls` and `httpHookAllowedEnvVars` — when managed settings do
+ * not set a list, a list in user/project/local settings does NOT apply to
+ * managed hooks.
+ * For non-managed hooks, merged settings across all sources apply.
  */
-function getHttpHookPolicy(): {
+export function isManagedHttpHookSource(hookSource?: string): boolean {
+  return hookSource === 'policySettings' || hookSource === 'managedPlugin'
+}
+
+export function getHttpHookPolicy(options?: {
+  hookSource?: string
+  isManagedHook?: boolean
+}): {
   allowedUrls: string[] | undefined
   allowedEnvVars: string[] | undefined
 } {
+  const managed =
+    options?.isManagedHook === true ||
+    isManagedHttpHookSource(options?.hookSource)
+  if (managed) {
+    const policySettings = settingsModule.getSettingsForSource('policySettings')
+    return {
+      allowedUrls: policySettings?.allowedHttpHookUrls,
+      allowedEnvVars: policySettings?.httpHookAllowedEnvVars,
+    }
+  }
   const settings = settingsModule.getInitialSettings()
   return {
     allowedUrls: settings.allowedHttpHookUrls,
     allowedEnvVars: settings.httpHookAllowedEnvVars,
   }
+}
+
+/**
+ * Official 2.1.326 #328: Headers ignored from HTTP hook `headers` settings
+ * because Claude Code computes framing / length from the serialized body.
+ */
+const IGNORED_HTTP_HOOK_HEADERS = new Set([
+  'content-length',
+  'transfer-encoding',
+])
+
+export function isIgnoredHttpHookHeader(name: string): boolean {
+  return IGNORED_HTTP_HOOK_HEADERS.has(name.trim().toLowerCase())
 }
 
 const URL_WILDCARD_TOKEN = `zzwildcard${randomBytes(8).toString('hex')}zz`
@@ -376,6 +410,7 @@ export async function execHttpHook(
   jsonInput: string,
   signal?: AbortSignal,
   defaultTimeoutMs = DEFAULT_HTTP_HOOK_TIMEOUT_MS,
+  options?: { hookSource?: string; isManagedHook?: boolean },
 ): Promise<{
   ok: boolean
   statusCode?: number
@@ -385,7 +420,8 @@ export async function execHttpHook(
 }> {
   // Enforce URL allowlist before any I/O. Follows allowedMcpServers semantics:
   // undefined → no restriction; [] → block all; non-empty → must match a pattern.
-  const policy = getHttpHookPolicy()
+  // Official 2.1.326 #327: Managed hooks only consult policySettings allowlists.
+  const policy = getHttpHookPolicy(options)
   if (policy.allowedUrls !== undefined) {
     const matched = policy.allowedUrls.some(p => urlMatchesPattern(hook.url, p))
     if (!matched) {
@@ -416,6 +452,15 @@ export async function execHttpHook(
           : hookVars
       const allowedEnvVars = new Set(effectiveVars)
       for (const [name, value] of Object.entries(hook.headers)) {
+        // Official 2.1.326 #328: Ignore Content-Length and Transfer-Encoding
+        // from hook headers; framing/length comes from the serialized body.
+        if (isIgnoredHttpHookHeader(name)) {
+          logForDebugging(
+            `Hooks: ignoring "${name}" header in HTTP hook config (length comes from request body)`,
+            { level: 'warn' },
+          )
+          continue
+        }
         headers[name] = interpolateEnvVars(value, allowedEnvVars)
       }
     }

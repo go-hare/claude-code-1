@@ -197,6 +197,49 @@ export function isRecoverableCloseCode(
   return false
 }
 
+const TRANSIENT_UNAVAILABLE_CODES = new Set([
+  500, 502, 503, 504, 520, 521, 522, 524, 1001, 1006, 1011, 1012, 1013, 1014,
+  4092,
+])
+
+const TRANSIENT_UNAVAILABLE_CAUSES = new Set([
+  'server_unavailable',
+  'service_unavailable',
+  'bad_gateway',
+  'gateway_timeout',
+  'network_error',
+  'transport_error',
+  'sse_error',
+  'upstream_unavailable',
+  'connection_reset',
+  'econnreset',
+  'etimedout',
+])
+
+/**
+ * Official 2.1.326 #91: when the Remote Control server is briefly unavailable
+ * mid-reply (transient 5xx, WS abnormal/service-restart close 1006/1011/1012/1013,
+ * or network disconnect while a turn is active), recover via reconnect/remint
+ * backoff instead of permanently disconnecting the session mid-reply.
+ */
+export function isTransientMidReplyUnavailableClose(
+  code: number | undefined,
+  cause: string | undefined,
+  isReplyActive: boolean,
+): boolean {
+  if (!isReplyActive) return false
+  if (code !== undefined && TRANSIENT_UNAVAILABLE_CODES.has(code)) {
+    return true
+  }
+  if (code === undefined && !cause) {
+    return true
+  }
+  if (cause && TRANSIENT_UNAVAILABLE_CAUSES.has(cause.toLowerCase())) {
+    return true
+  }
+  return false
+}
+
 /**
  * densable Ls epoch_stale branch gate (outside kd):
  * `$t===4090 && Jr==="epoch_stale" && Ot()`

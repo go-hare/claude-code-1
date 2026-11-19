@@ -9,6 +9,7 @@ import {
   isTeleportedSessionId,
 } from '../../bootstrap/state.js';
 import type { LocalJSXCommandContext } from '../../commands.js';
+import { ANTHROPIC_API_KEY_NOT_USED_HINT, isAnthropicApiKeyEnvUnused } from '../../commands/login/getAuthStatus.js';
 import { useIsInsideModal } from '../../context/modalContext.js';
 import { Box, Text, useTheme } from '@anthropic/ink';
 import { type AppState, useAppState } from '../../state/AppState.js';
@@ -18,6 +19,7 @@ import { getCurrentSessionTitle } from '../../utils/sessionStorage.js';
 import {
   buildAccountProperties,
   buildAPIProviderProperties,
+  buildDisabledFeaturesProperties,
   buildIDEProperties,
   buildInstallationDiagnostics,
   buildInstallationHealthDiagnostics,
@@ -30,6 +32,7 @@ import {
   buildTelemetryDiagnostics,
   buildAutoModeServerProperties,
   buildCrossSessionPeerAddressProperties,
+  deduplicateDiagnostics,
   type Diagnostic,
   getModelDisplayLabel,
   linkifyStatusText,
@@ -73,6 +76,14 @@ function buildPrimarySection(): Property[] {
     ...buildCrossSessionPeerAddressProperties(),
     { label: 'cwd', value: getCwd() },
     ...buildAccountProperties(),
+    ...(isAnthropicApiKeyEnvUnused()
+      ? [
+          {
+            label: 'Unused API key',
+            value: <Text dimColor>{ANTHROPIC_API_KEY_NOT_USED_HINT}</Text>,
+          },
+        ]
+      : []),
     ...buildAPIProviderProperties(),
   ];
 }
@@ -109,16 +120,19 @@ function buildSecondarySection({
     ...buildAutoModeServerProperties(permissionMode, {
       serverCheckDeclined: serverCheckDeclined(),
     }),
+    // Official 2.1.326 #4: show when provider or env var turns built-in features off.
+    ...buildDisabledFeaturesProperties(context.options.commands),
   ];
 }
 
 export async function buildDiagnostics(): Promise<Diagnostic[]> {
-  return [
+  // Official 2.1.326 #210: deduplicate repeated installation warnings.
+  return deduplicateDiagnostics([
     ...(await buildInstallationDiagnostics()),
     ...(await buildInstallationHealthDiagnostics()),
     ...(await buildMemoryDiagnostics()),
     ...buildTelemetryDiagnostics(),
-  ];
+  ]);
 }
 
 function PropertyValue({ value, linkify }: { value: Property['value']; linkify?: boolean }): React.ReactNode {

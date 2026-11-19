@@ -7,7 +7,7 @@ import { Byline } from '@anthropic/ink';
 import { useSearchInput } from '@anthropic/ink';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- useInput needed for raw search mode text input
-import { Box, Text, useInput, useTerminalFocus } from '@anthropic/ink';
+import { Box, Text, useInput, useModalOrTerminalSize, useTerminalFocus } from '@anthropic/ink';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
 import type { LoadedPlugin } from '../../types/plugin.js';
 import { count } from '../../utils/array.js';
@@ -58,6 +58,7 @@ import {
 } from './pluginDetailsHelpers.js';
 import type { ViewState as ParentViewState } from './types.js';
 import { usePagination } from './usePagination.js';
+import { computePluginListMaxVisible, usePluginListExtendedKeys } from './pluginListHelpers.js';
 
 type Props = {
   error: string | null;
@@ -171,7 +172,7 @@ export function DiscoverPlugins({
     }
   }, [initialSearchQuery, setSearchQuery, setIsSearchMode]);
   const isTerminalFocused = useTerminalFocus();
-  const { columns: terminalWidth } = useTerminalSize();
+  const { columns: terminalWidth, rows: terminalRows } = useModalOrTerminalSize(useTerminalSize());
 
   // Filter plugins based on search query
   const filteredPlugins = useMemo(() => {
@@ -193,10 +194,24 @@ export function DiscoverPlugins({
   const [selectedForInstall, setSelectedForInstall] = useState<Set<string>>(new Set());
   const [installingPlugins, setInstallingPlugins] = useState<Set<string>>(new Set());
 
+  // Official 2.1.326 #270: fit Discover list in short terminal windows while
+  // keeping cursor and key hints visible.
+  const discoverMaxVisible = computePluginListMaxVisible(terminalRows, 11, 3, 5, 1);
+
   // Pagination for plugin list (continuous scrolling)
   const pagination = usePagination<InstallablePlugin>({
     totalItems: filteredPlugins.length,
     selectedIndex,
+    maxVisible: discoverMaxVisible,
+  });
+
+  // Official 2.1.326 #270: Home, End, PgUp, PgDn navigation on Discover tab.
+  usePluginListExtendedKeys({
+    isActive: viewState === 'plugin-list' && !isSearchMode && filteredPlugins.length > 0,
+    totalItems: filteredPlugins.length,
+    selectedIndex,
+    pageSize: pagination.pageSize,
+    onSelectIndex: nextIdx => pagination.handleSelectionChange(nextIdx, setSelectedIndex),
   });
 
   // Reset selection when search query changes
@@ -529,13 +544,15 @@ export function DiscoverPlugins({
     (input, _key) => {
       const keyIsNotCtrlOrMeta = !_key.ctrl && !_key.meta;
       if (!isSearchMode) {
-        // Enter search mode with '/' or any printable character
+        // Enter search mode with '/' or any printable character (including multi-char IME/dictation input, #125)
         if (input === '/' && keyIsNotCtrlOrMeta) {
           setIsSearchMode(true);
           setSearchQuery('');
-        } else if (keyIsNotCtrlOrMeta && input.length === 1 && input !== ' ') {
+          setSearchCursorOffset(0);
+        } else if (keyIsNotCtrlOrMeta && input.length > 0 && !/^\s+$/.test(input) && input !== ' ') {
           setIsSearchMode(true);
           setSearchQuery(input);
+          setSearchCursorOffset(input.length);
         }
       }
     },
@@ -838,10 +855,13 @@ export function DiscoverPlugins({
         </Box>
       )}
 
-      {/* Scroll up indicator */}
+      {/* Scroll up indicator (Official 2.1.326 #270) */}
       {pagination.scrollPosition.canScrollUp && (
         <Box>
-          <Text dimColor> {figures.arrowUp} more above</Text>
+          <Text dimColor>
+            {' '}
+            {figures.arrowUp} {pagination.scrollPosition.hiddenAbove} more above
+          </Text>
         </Box>
       )}
 
@@ -858,6 +878,10 @@ export function DiscoverPlugins({
             key={`${pagination.startIndex}-${plugin.pluginId}`}
             flexDirection="column"
             marginBottom={isLast && !error ? 0 : 1}
+            onClick={() => {
+              if (isSearchMode) setIsSearchMode(false);
+              pagination.handleSelectionChange(actualIndex, setSelectedIndex);
+            }}
           >
             <Box>
               <Text color={isSelected && !isSearchMode ? 'suggestion' : undefined}>
@@ -885,10 +909,13 @@ export function DiscoverPlugins({
         );
       })}
 
-      {/* Scroll down indicator */}
+      {/* Scroll down indicator (Official 2.1.326 #270) */}
       {pagination.scrollPosition.canScrollDown && (
         <Box>
-          <Text dimColor> {figures.arrowDown} more below</Text>
+          <Text dimColor>
+            {' '}
+            {figures.arrowDown} {pagination.scrollPosition.hiddenBelow} more below
+          </Text>
         </Box>
       )}
 

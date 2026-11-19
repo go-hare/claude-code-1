@@ -455,6 +455,8 @@ import {
   isOutputBlockedByContentFilterError,
   isPromptTooLongErrorMessage,
   isUnprocessableMediaError,
+  parseMediaErrorLocation,
+  stripTargetedMediaBlock,
 } from './errors.js'
 import { extractConnectionErrorDetails } from './errorUtils.js'
 import { sanitizeLoneSurrogatesInPlace } from '../../utils/sanitization.js'
@@ -480,6 +482,7 @@ import {
 import {
   CannotRetryError,
   FallbackTriggeredError,
+  getCachedModelMaxTokensCeiling,
   is529Error,
   MidConvSystemRetryError,
   type RetryContext,
@@ -2114,6 +2117,11 @@ async function* queryModel(
     }
   }
 
+  // Official 2.1.326 (#47): track targeted nested media strips per (msg.content)
+  // so a batch PDF rejection removes ONLY the failing PDF (up to 3 individual
+  // nested strips before stripping the container content block).
+  const targetedMediaStripCounts = new Map<string, number>()
+
   /**
    * densable aggregator @184994549: zue → Kue → Vue → dY → dGe on unique
    * `r.onError` tokens. Yue `surface:resume-prefill` is not a retry token.
@@ -2323,6 +2331,52 @@ async function* queryModel(
       return `retry:media-item-limit:${nextLimit}`
     }
 
+    // Official 2.1.326 (#47) `F7s` / `qir` / `c9t`: when a 400 error points at
+    // a specific message/content(/tool_result.content) image or PDF block,
+    // remove ONLY that failing block and retry instead of dropping sibling PDFs
+    // or triggering the ToolSearchRefusalError catch-all (which drops deferred
+    // tools and busts the prompt cache).
+    if (error instanceof APIError && error.status === 400) {
+      const mediaLoc = parseMediaErrorLocation(error.message)
+      if (
+        mediaLoc &&
+        mediaLoc.messageIdx !== undefined &&
+        mediaLoc.contentIdx !== undefined
+      ) {
+        const pairKey = `${mediaLoc.messageIdx}.${mediaLoc.contentIdx}`
+        const priorNestedCount = targetedMediaStripCounts.get(pairKey) ?? 0
+        const effectiveNestedIdx =
+          mediaLoc.nestedContentIdx !== undefined && priorNestedCount < 3
+            ? mediaLoc.nestedContentIdx
+            : undefined
+        const stripped = stripTargetedMediaBlock(
+          messagesForAPI as Message[],
+          {
+            messageIdx: mediaLoc.messageIdx,
+            contentIdx: mediaLoc.contentIdx,
+            nestedContentIdx: effectiveNestedIdx,
+            kind: mediaLoc.kind,
+          },
+          error.message,
+        )
+        if (stripped.removed) {
+          messagesForAPI = stripped.messages as typeof messagesForAPI
+          if (effectiveNestedIdx !== undefined) {
+            targetedMediaStripCounts.set(pairKey, priorNestedCount + 1)
+          }
+          const locDesc =
+            effectiveNestedIdx !== undefined
+              ? `${pairKey}.tool_result.content.${effectiveNestedIdx}`
+              : pairKey
+          logForDebugging(
+            `[media-strip] Removed rejected ${mediaLoc.kind} at messages.${locDesc} and retrying`,
+            { level: 'warn' },
+          )
+          return `retry:targeted-media:${locDesc}`
+        }
+      }
+    }
+
     // Official jit.resolve (2.1.300 #790) — degrade refused MCP tool schema
     // to { type: 'object' } and retry.
     const toolSchemaRetry = toolSchemaResolver.resolve(
@@ -2492,11 +2546,19 @@ async function* queryModel(
       }
     }
 
-    // Retry context gets preference because it tries to course correct if we exceed the context window limit
-    const maxOutputTokens =
+    // Retry context gets preference because it tries to course correct if we exceed the context window limit.
+    // Official 2.1.326 (#51): apply any session-cached model output ceiling learned from API 400 rejections.
+    const cachedModelCeiling = getCachedModelMaxTokensCeiling(
+      retryContext.model,
+    )
+    const rawMaxOutputTokens =
       retryContext?.maxTokensOverride ||
       options.maxOutputTokensOverride ||
       getMaxOutputTokensForModel(options.model)
+    const maxOutputTokens =
+      cachedModelCeiling !== undefined
+        ? Math.min(rawMaxOutputTokens, cachedModelCeiling)
+        : rawMaxOutputTokens
 
     // Official DISABLE_THINKING / DISABLE_ADAPTIVE_THINKING densables.
     let thinkingDisabled = isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_THINKING)

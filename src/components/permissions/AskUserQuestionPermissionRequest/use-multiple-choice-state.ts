@@ -58,8 +58,36 @@ function reducer(state: State, action: Action): State {
           action.updates.textInputValue ?? existing?.textInputValue ?? '',
       }
 
+      // Official 2.1.326 #42: when editing typed "Other" text while "__other__"
+      // is already selected, immediately sync answers[questionText] so moving away
+      // (Tab/Next/Prev) without pressing Enter submits the edited text instead of
+      // the stale previous answer.
+      let nextAnswers = state.answers
+      if (action.updates.textInputValue !== undefined) {
+        if (!action.isMultiSelect && newState.selectedValue === '__other__') {
+          nextAnswers = {
+            ...state.answers,
+            [action.questionText]: newState.textInputValue,
+          }
+        } else if (
+          action.isMultiSelect &&
+          Array.isArray(newState.selectedValue) &&
+          newState.selectedValue.includes('__other__')
+        ) {
+          const synced = newState.selectedValue
+            .filter(v => v !== '__other__')
+            .concat(newState.textInputValue ? [newState.textInputValue] : [])
+            .join(', ')
+          nextAnswers = {
+            ...state.answers,
+            [action.questionText]: synced,
+          }
+        }
+      }
+
       return {
         ...state,
+        answers: nextAnswers,
         questionStates: {
           ...state.questionStates,
           [action.questionText]: newState,

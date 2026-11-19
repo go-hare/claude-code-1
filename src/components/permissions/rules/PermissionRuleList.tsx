@@ -3,7 +3,7 @@ import figures from 'figures';
 import * as React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAppState, useSetAppState } from 'src/state/AppState.js';
-import { applyPermissionUpdate, persistPermissionUpdate } from 'src/utils/permissions/PermissionUpdate.js';
+import { applyPermissionUpdate, persistPermissionUpdates } from 'src/utils/permissions/PermissionUpdate.js';
 import type { PermissionUpdateDestination } from 'src/utils/permissions/PermissionUpdateSchema.js';
 import type { CommandResultDisplay } from '../../../commands.js';
 import { ConfirmSelect } from '../../../components/ConfirmSelect.js';
@@ -143,7 +143,7 @@ function RuleDetails({
         title="Rule details"
         onCancel={onCancel}
         color="permission"
-        inputGuide={<KeyboardShortcutHint shortcut="Esc" action="cancel" />}
+        inputGuide={<KeyboardShortcutHint shortcut="Esc" action="go back" />}
       >
         {ruleDescription}
         <Text italic>
@@ -162,7 +162,7 @@ function RuleDetails({
         title="Rule details"
         onCancel={onCancel}
         color="permission"
-        inputGuide={<KeyboardShortcutHint shortcut="Esc" action="cancel" />}
+        inputGuide={<KeyboardShortcutHint shortcut="Esc" action="go back" />}
       >
         {ruleDescription}
         <Text italic>
@@ -180,7 +180,14 @@ function RuleDetails({
         </Text>
         {ruleDescription}
         <Text>Are you sure you want to delete this permission rule?</Text>
-        <ConfirmSelect hideIndexes focus="cancel" onConfirm={onDelete} onCancel={onCancel} />
+        {/* Official 2.1.326 #29: disable printable keybindings on delete confirmation. */}
+        <ConfirmSelect
+          hideIndexes
+          disablePrintableKeybindings
+          focus="cancel"
+          onConfirm={onDelete}
+          onCancel={onCancel}
+        />
       </Box>
       <Box marginLeft={3}>
         {exitState.pending ? (
@@ -189,7 +196,7 @@ function RuleDetails({
           <Text dimColor>
             <Byline>
               <KeyboardShortcutHint shortcut="Enter" action="confirm" />
-              <KeyboardShortcutHint shortcut="Esc" action="cancel" />
+              <KeyboardShortcutHint shortcut="Esc" action="go back" />
             </Byline>
           </Text>
         )}
@@ -244,23 +251,30 @@ function RulesTabContent(props: RulesTabContentProps): React.ReactNode {
           cursorOffset={cursorOffset}
         />
       </Box>
-      <Select
-        options={options}
-        onChange={value => {
-          if (headerFocused) {
-            blurHeader();
-            onHeaderFocusChange?.(false);
-          }
-          onSelect(value);
-        }}
-        onCancel={onCancel}
-        visibleOptionCount={Math.min(10, options.length)}
-        isDisabled={isSearchMode || headerFocused}
-        hidePromptWhileDisabled={true}
-        pointerWhileDisabled={!isSearchMode}
-        defaultFocusValue={lastFocusedRuleKey}
-        onUpFromFirstItem={focusHeader}
-      />
+      {searchQuery && options.length === 0 ? (
+        <Box marginY={1}>
+          <Text dimColor>No rules match &quot;{searchQuery}&quot;</Text>
+        </Box>
+      ) : (
+        <Select
+          options={options}
+          onChange={value => {
+            if (headerFocused) {
+              blurHeader();
+              onHeaderFocusChange?.(false);
+            }
+            onSelect(value);
+          }}
+          onCancel={onCancel}
+          visibleOptionCount={Math.min(10, options.length)}
+          overflowHint="count"
+          isDisabled={isSearchMode || headerFocused}
+          hidePromptWhileDisabled={true}
+          pointerWhileDisabled={!isSearchMode}
+          defaultFocusValue={lastFocusedRuleKey}
+          onUpFromFirstItem={focusHeader}
+        />
+      )}
     </Box>
   );
 }
@@ -454,6 +468,10 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
     isActive: isSearchModeActive && isSearchMode,
     onExit: () => {
       setIsSearchMode(false);
+      // Official 2.1.326 #230: clear stale screen-reader search hint cleanly on tall lists.
+      if (isScreenReader) {
+        announceForScreenReader('', false);
+      }
     },
   });
   const { query: searchQuery, setQuery: setSearchQuery, cursorOffset: searchCursorOffset } = searchInput;
@@ -470,18 +488,31 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
       }
       if (e.ctrl || e.meta) return;
 
-      // Enter search mode with '/' or any printable character.
-      // e.key.length === 1 filters out special keys (down, return, escape,
-      // etc.) — previously the raw escape sequence leaked through and
-      // triggered search mode with garbage on arrow-key press.
+      // Enter search mode with '/' or any printable character/IME string (#125).
+      // Reject named control/navigation keys so arrow/escape sequences never trigger search.
+      const isNamedNonPrintable =
+        e.name === 'up' ||
+        e.name === 'down' ||
+        e.name === 'left' ||
+        e.name === 'right' ||
+        e.name === 'return' ||
+        e.name === 'escape' ||
+        e.name === 'tab' ||
+        e.name === 'backspace' ||
+        e.name === 'delete' ||
+        e.name === 'home' ||
+        e.name === 'end' ||
+        e.name === 'pageup' ||
+        e.name === 'pagedown';
+      const isPrintableSearchInput = e.key.length > 0 && !isNamedNonPrintable && !/\p{Cc}/u.test(e.key);
       if (e.key === '/') {
         e.preventDefault();
         setIsSearchMode(true);
         setSearchQuery('');
       } else if (
         !e.defaultPrevented &&
-        e.key.length === 1 &&
-        // Don't enter search mode for vim-nav / space / retry key
+        isPrintableSearchInput &&
+        // Don't enter search mode for single-key vim-nav / space / retry key
         e.key !== 'j' &&
         e.key !== 'k' &&
         e.key !== 'm' &&
@@ -545,6 +576,12 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
 
   const handleAddRuleCancel = useCallback(() => {
     setValidatedRule(null);
+  }, []);
+
+  // Official 2.1.326 #16: record settings persistence warnings so /permissions never silently drops saves.
+  const handlePersistNotSaved = useCallback((warning: string) => {
+    const line = chalk.yellow(`${figures.warning} ${warning}`);
+    setChanges(prev => (prev.includes(line) ? prev : [...prev, line]));
   }, []);
 
   const handleRequestAddDirectory = useCallback(() => setIsAddingWorkspaceDirectory(true), []);
@@ -669,6 +706,7 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
       <AddPermissionRules
         onAddRules={handleAddRulesSuccess}
         onCancel={handleAddRuleCancel}
+        onNotSaved={handlePersistNotSaved}
         ruleValues={[validatedRule.ruleValue]}
         ruleBehavior={validatedRule.ruleBehavior}
         initialContext={toolPermissionContext}
@@ -701,9 +739,9 @@ export function PermissionRuleList({ onExit, initialTab, onRetryDenials }: Props
             toolPermissionContext: updatedContext,
           }));
 
-          // Persist if remember is true
+          // Persist if remember is true (#16: surface persist error via onPersistError)
           if (remember) {
-            persistPermissionUpdate(permissionUpdate);
+            persistPermissionUpdates([permissionUpdate], { onPersistError: handlePersistNotSaved });
           }
 
           setChanges(prev => [

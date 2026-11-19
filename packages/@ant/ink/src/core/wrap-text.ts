@@ -79,6 +79,14 @@ function truncate(
   return parts === null ? sanitized : parts.head + ELLIPSIS + parts.tail
 }
 
+/** Official 2.1.326 (#10): clip a line to `columns` without an ellipsis. */
+function clipLine(text: string, columns: number): string {
+  if (columns < 1) return ''
+  const sanitized = expandTabsForWrap(text)
+  if (stringWidth(sanitized) <= columns) return sanitized
+  return sliceFit(sanitized, 0, columns)
+}
+
 export default function wrapText(
   text: string,
   maxWidth: number,
@@ -99,6 +107,24 @@ export default function wrapText(
     })
   }
 
+  // Official 2.1.326 (#10): clip each line to maxWidth without adding an ellipsis.
+  if (wrapType === 'clip') {
+    if (text.includes('\n') || text.includes('\r')) {
+      return text
+        .split(/\r\n?|\n/)
+        .map(line => clipLine(line, maxWidth))
+        .join('\n')
+    }
+    return clipLine(text, maxWidth)
+  }
+
+  if (wrapType === 'truncate-rows') {
+    return text
+      .split(/\r\n?|\n/)
+      .map(line => truncate(line, maxWidth, 'end'))
+      .join('\n')
+  }
+
   // densable uy: end/middle are truncate aliases (same as truncate / truncate-middle).
   if (
     wrapType === 'end' ||
@@ -113,6 +139,16 @@ export default function wrapText(
 
     if (wrapType === 'truncate-start') {
       position = 'start'
+    }
+
+    // Official 2.1.326 (#127): when truncate-end/truncate/end holds line feeds,
+    // truncate each line independently so rows after `\n` are preserved instead
+    // of being lost.
+    if (position === 'end' && (text.includes('\n') || text.includes('\r'))) {
+      return text
+        .split(/\r\n?|\n/)
+        .map(line => truncate(line, maxWidth, 'end'))
+        .join('\n')
     }
 
     return truncate(text, maxWidth, position)

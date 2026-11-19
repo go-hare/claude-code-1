@@ -1,3 +1,4 @@
+import { isAbsolute, relative, resolve } from 'path'
 import { z } from 'zod/v4'
 import {
   getOriginalCwd,
@@ -10,6 +11,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
+import type { TaskStateBase } from 'src/Task.js'
 import type { Tool } from 'src/Tool.js'
 import { buildTool, type ToolDef } from 'src/Tool.js'
 import { count } from 'src/utils/array.js'
@@ -20,6 +22,7 @@ import { lazySchema } from 'src/utils/lazySchema.js'
 import { getPlansDirectory } from 'src/utils/plans.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { logError } from 'src/utils/log.js'
+import { captureSandboxRootMoveHold } from 'src/utils/sandbox/sandbox-adapter.js'
 import { setCwd } from 'src/utils/Shell.js'
 import {
   relocateSessionTranscript,
@@ -47,7 +50,7 @@ const inputSchema = lazySchema(() =>
       .boolean()
       .optional()
       .describe(
-        'Required true when action is "remove" and the worktree has uncommitted files or unmerged commits. The tool will refuse and list them otherwise.',
+        'Required true when action is "remove" and the worktree has uncommitted files or unmerged commits. The tool will refuse and list them otherwise. It also removes the worktree under any task still running there, so set it only after the user has confirmed.',
       ),
   }),
 )
@@ -163,6 +166,63 @@ async function restoreSessionToOriginalCwd(
   getPlansDirectory.cache.clear?.()
 }
 
+const WORKTREE_TASK_ACTIVE_STATUSES = new Set(['running', 'pending'])
+
+function isPathInsideOrEqual(candidate: string, root: string): boolean {
+  const rel = relative(resolve(root), resolve(candidate))
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
+/**
+ * Official 2.1.326 #314 (`ui` @303911500): Find active background subagents or
+ * shell commands that may still be running inside `worktreePath` so
+ * `ExitWorktree(action: "remove")` refuses deleting the worktree out from under
+ * them unless `discard_changes: true` is explicitly passed.
+ */
+export function findActiveWorktreeTasks(
+  tasks: Record<string, TaskStateBase> | undefined,
+  worktreePath: string,
+  excludeAgentId?: string,
+): TaskStateBase[] {
+  if (!tasks) return []
+  const matches: TaskStateBase[] = []
+  for (const task of Object.values(tasks)) {
+    if (!WORKTREE_TASK_ACTIVE_STATUSES.has(task.status)) continue
+    if (excludeAgentId && task.id === excludeAgentId) continue
+    const taskRecord = task as unknown as {
+      kind?: string
+      stopsOnExit?: boolean
+      cwd?: string
+      worktreePath?: string
+      startDir?: string
+      workingDirectory?: string
+    }
+    if (taskRecord.kind === 'monitor' && taskRecord.stopsOnExit) continue
+    if (
+      task.type !== 'local_agent' &&
+      task.type !== 'local_bash' &&
+      task.type !== 'in_process_teammate'
+    ) {
+      continue
+    }
+    const candidatePath =
+      taskRecord.worktreePath ??
+      taskRecord.cwd ??
+      taskRecord.workingDirectory ??
+      taskRecord.startDir
+    if (candidatePath !== undefined) {
+      if (isPathInsideOrEqual(candidatePath, worktreePath)) {
+        matches.push(task)
+      }
+      continue
+    }
+    // Fail-closed: active local subagent or shell command without an explicit
+    // path outside the worktree may still be running inside it.
+    matches.push(task)
+  }
+  return matches
+}
+
 export const ExitWorktreeTool: Tool<InputSchema, Output> = buildTool({
   name: EXIT_WORKTREE_TOOL_NAME,
   searchHint: 'exit a worktree session and return to the original directory',
@@ -189,7 +249,7 @@ export const ExitWorktreeTool: Tool<InputSchema, Output> = buildTool({
   toAutoClassifierInput(input) {
     return input.action
   },
-  async validateInput(input) {
+  async validateInput(input, context) {
     // Scope guard: getCurrentWorktreeSession() is null unless EnterWorktree
     // (specifically createWorktreeForSession) ran in THIS session. Worktrees
     // created by `git worktree add`, or by EnterWorktree in a previous
@@ -206,6 +266,28 @@ export const ExitWorktreeTool: Tool<InputSchema, Output> = buildTool({
     }
 
     if (input.action === 'remove' && !input.discard_changes) {
+      // Official 2.1.326 #314: Refuse removing the worktree while a background
+      // subagent or shell command may still be running in it unless
+      // `discard_changes: true` is passed.
+      const activeTasks = findActiveWorktreeTasks(
+        context?.getAppState().tasks,
+        session.worktreePath,
+        context?.agentId,
+      )
+      if (activeTasks.length > 0) {
+        const taskLabels = activeTasks
+          .slice(0, 3)
+          .map(t => t.description || t.id)
+          .join(', ')
+        const more =
+          activeTasks.length > 3 ? ` (+${activeTasks.length - 3} more)` : ''
+        return {
+          result: false,
+          message: `Cannot remove worktree at ${session.worktreePath} while ${activeTasks.length === 1 ? 'a background task' : `${activeTasks.length} background tasks`} (${taskLabels}${more}) may still be running in it. Wait for the task to finish, or ask the user before stopping it, then call this tool again — or use action: "keep" to preserve the worktree.`,
+          errorCode: 4,
+        }
+      }
+
       const summary = await countWorktreeChanges(
         session.worktreePath,
         session.originalHeadCommit,
@@ -285,6 +367,8 @@ export const ExitWorktreeTool: Tool<InputSchema, Output> = buildTool({
     )) ?? { changedFiles: 0, commits: 0 }
 
     if (input.action === 'keep') {
+      // Official 2.1.326 #299: hold sandbox across worktree exit root move.
+      captureSandboxRootMoveHold()
       await keepWorktree()
       await restoreSessionToOriginalCwd(originalCwd, projectRootIsWorktree)
 
@@ -313,6 +397,8 @@ export const ExitWorktreeTool: Tool<InputSchema, Output> = buildTool({
     if (tmuxSessionName) {
       await killTmuxSession(tmuxSessionName)
     }
+    // Official 2.1.326 #299: hold sandbox across worktree exit root move.
+    captureSandboxRootMoveHold()
     const removed = await cleanupWorktree({
       storageV5: context.storageV5,
       credentials: context.credentials,

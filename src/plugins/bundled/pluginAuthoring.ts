@@ -3,6 +3,7 @@
  * Skill BODY stays goldOfficialMissingSkills; this is the /plugin listing.
  * v2.1.300 #806: registers `scan_secrets` MCP tool (`mcp__plugin-authoring__scan_secrets`).
  */
+import { createHash } from 'crypto'
 import { constants as fsConstants } from 'fs'
 import { lstat, open, readdir, stat } from 'fs/promises'
 import { basename, isAbsolute, join, resolve } from 'path'
@@ -435,13 +436,24 @@ export type PluginHandoverRecorded = {
   count: number
 }
 
+export type PluginHandoverBasis = 'no_zip_start' | { digest: string }
+
 export type PluginHandoverInspectResult =
-  | { kind: 'other'; seen?: PluginHandoverFileIdentity }
-  | { kind: 'clean'; seen: PluginHandoverFileIdentity }
+  | {
+      kind: 'other'
+      seen?: PluginHandoverFileIdentity
+      basis?: PluginHandoverBasis
+    }
+  | {
+      kind: 'clean'
+      seen: PluginHandoverFileIdentity
+      basis?: PluginHandoverBasis
+    }
   | { kind: 'refused'; refusal: string }
   | {
       kind: 'ask'
       seen: PluginHandoverFileIdentity
+      basis?: PluginHandoverBasis
       isPlugin: boolean
       recorded: PluginHandoverRecorded
       found: string
@@ -690,38 +702,29 @@ async function inspectOversizedZipHandle(
   return { kind: 'other', seen }
 }
 
-async function inspectZipBuffer(
+type ZipScanBudget = {
+  bytes: number
+  entries: number
+}
+
+type ZipScanOutput = {
+  findings: SecretScanFinding[]
+  notScanned: SecretScanSkipped[]
+  capped: boolean
+  zipsInside: Map<string, Uint8Array>
+}
+
+function sha256Hex(buf: Buffer): string {
+  return createHash('sha256').update(buf).digest('hex')
+}
+
+async function scanZipEntries(
   buf: Buffer,
-  seen: PluginHandoverFileIdentity,
-  shown: string,
-  hasPluginExt: boolean,
-): Promise<PluginHandoverInspectResult> {
-  const eocd = parseZipEocd(buf, buf.length)
-  const entries =
-    eocd === undefined
-      ? undefined
-      : parseZipCentralDirectory(
-          buf.subarray(eocd.listStart, eocd.listStart + eocd.listBytes),
-          eocd.count,
-        )
-  if (eocd === undefined || entries === undefined) {
-    if (hasPluginExt) {
-      return { kind: 'refused', refusal: formatUnreadableZipRefusal(shown) }
-    }
-    return {
-      kind: 'ask',
-      seen,
-      isPlugin: false,
-      recorded: { case: 'unlistable', count: 0 },
-      found: `${shown} could not be checked for secret keys`,
-      question: `${shown} could not be checked for secret keys. Send it anyway?\n\nIt may be damaged.`,
-    }
-  }
-
-  if (!hasPluginExt && !entries.some(isPluginArchiveEntry)) {
-    return { kind: 'other', seen }
-  }
-
+  listStart: number,
+  entries: ZipCentralEntry[],
+  budget: ZipScanBudget,
+): Promise<ZipScanOutput | undefined> {
+  const maxEntries = budget.entries
   const filesToScan = new Map<string, number>()
   const dirs = new Set<string>()
   let valid = true
@@ -759,41 +762,42 @@ async function inspectZipBuffer(
     prevHasDataDesc = (localFlags & 8) !== 0
     if (isDir) {
       dirs.add(entry.name)
-    } else if (filesToScan.size + dirs.size < SCAN_SECRETS_MAX_ENTRIES) {
+    } else if (filesToScan.size + dirs.size < maxEntries) {
       filesToScan.set(entry.name, entry.size)
     }
   }
 
-  const tailGap = eocd.listStart - cursor
+  const tailGap = listStart - cursor
   valid =
     valid &&
     entries.length > 0 &&
     (tailGap === 0 || (prevHasDataDesc && (tailGap === 12 || tailGap === 16)))
 
   if (!valid) {
-    return { kind: 'refused', refusal: formatUnreadableZipRefusal(shown) }
+    return undefined
   }
+
+  budget.entries -= filesToScan.size + dirs.size
 
   const orderedFiles = [...filesToScan.entries()].sort(
     (a, b) => a[1] - b[1] || a[0].localeCompare(b[0]),
   )
   const extractList: string[] = []
   const notScanned: SecretScanSkipped[] = []
-  let totalBytes = 0
   for (const [name, size] of orderedFiles) {
     if (size > SCAN_SECRETS_MAX_FILE_BYTES) {
       notScanned.push({ path: name, reason: 'too large' })
       continue
     }
-    if (totalBytes + size > SCAN_SECRETS_MAX_TOTAL_BYTES) {
+    if (size > budget.bytes) {
       notScanned.push({ path: name, reason: 'total limit' })
       continue
     }
-    totalBytes += size
+    budget.bytes -= size
     extractList.push(name)
   }
 
-  const nestedZips: string[] = []
+  const zipsInside = new Map<string, Uint8Array>()
   const findings: SecretScanFinding[] = []
   try {
     const { unzipSync } = await import('fflate')
@@ -812,7 +816,7 @@ async function inspectZipBuffer(
         Buffer.from(data.subarray(0, 4)).toString('latin1') ===
           ZIP_LOCAL_FILE_MAGIC
       ) {
-        nestedZips.push(name)
+        zipsInside.set(name, data)
         continue
       }
       const text = Buffer.from(data).toString('utf8')
@@ -832,25 +836,134 @@ async function inspectZipBuffer(
       }
     }
   } catch {
+    return undefined
+  }
+
+  return {
+    findings,
+    notScanned,
+    capped: entries.length > maxEntries,
+    zipsInside,
+  }
+}
+
+async function inspectZipBuffer(
+  buf: Buffer,
+  seen: PluginHandoverFileIdentity,
+  shown: string,
+  hasPluginExt: boolean,
+): Promise<PluginHandoverInspectResult> {
+  const eocd = parseZipEocd(buf, buf.length)
+  const entries =
+    eocd === undefined
+      ? undefined
+      : parseZipCentralDirectory(
+          buf.subarray(eocd.listStart, eocd.listStart + eocd.listBytes),
+          eocd.count,
+        )
+  if (eocd === undefined || entries === undefined) {
+    if (hasPluginExt) {
+      return { kind: 'refused', refusal: formatUnreadableZipRefusal(shown) }
+    }
+    return {
+      kind: 'ask',
+      seen,
+      isPlugin: false,
+      recorded: { case: 'unlistable', count: 0 },
+      found: `${shown} could not be checked for secret keys`,
+      question: `${shown} could not be checked for secret keys. Send it anyway?\n\nIt may be damaged.`,
+    }
+  }
+
+  if (!hasPluginExt && !entries.some(isPluginArchiveEntry)) {
+    return { kind: 'other', seen }
+  }
+
+  // Official 2.1.326 #99: unpack and scan nested zip/OOXML (.docx, .xlsx, etc.)
+  // entries one level deep using the shared byte/entry budget before asking.
+  const budget: ZipScanBudget = {
+    bytes: SCAN_SECRETS_MAX_TOTAL_BYTES,
+    entries: SCAN_SECRETS_MAX_ENTRIES,
+  }
+  const outer = await scanZipEntries(buf, eocd.listStart, entries, budget)
+  if (outer === undefined) {
     return { kind: 'refused', refusal: formatUnreadableZipRefusal(shown) }
   }
 
-  const capped = entries.length > SCAN_SECRETS_MAX_ENTRIES
-  const findingLines = findings.map(
+  const findingLines = outer.findings.map(
     f =>
       `${truncateDisplayLabel(f.path, PLUGIN_HANDOVER_SHOWN_NAME_MAX)} (${f.kinds.join(', ')})`,
   )
+  const uncheckedLines = outer.notScanned.map(
+    item =>
+      `${truncateDisplayLabel(item.path, PLUGIN_HANDOVER_SHOWN_NAME_MAX)} (${SKIP_REASON_LABELS[item.reason] ?? 'could not be read'})`,
+  )
+  const uncheckedCodes = outer.notScanned.map(
+    item => SKIP_REASON_CODES[item.reason] ?? 'unreadable',
+  )
+  let capped = outer.capped
+
+  for (const [nestedName, nestedBytes] of outer.zipsInside) {
+    if (budget.entries <= 0) {
+      capped = true
+      continue
+    }
+    const nestedBuf = Buffer.from(
+      nestedBytes.buffer,
+      nestedBytes.byteOffset,
+      nestedBytes.byteLength,
+    )
+    const nestedEocd = parseZipEocd(nestedBuf, nestedBuf.length)
+    const nestedEntries =
+      nestedEocd === undefined
+        ? undefined
+        : parseZipCentralDirectory(
+            nestedBuf.subarray(
+              nestedEocd.listStart,
+              nestedEocd.listStart + nestedEocd.listBytes,
+            ),
+            nestedEocd.count,
+          )
+    const nestedResult =
+      nestedEocd === undefined || nestedEntries === undefined
+        ? undefined
+        : await scanZipEntries(
+            nestedBuf,
+            nestedEocd.listStart,
+            nestedEntries,
+            budget,
+          )
+    const shownNested = truncateDisplayLabel(
+      nestedName,
+      PLUGIN_HANDOVER_SHOWN_NAME_MAX,
+    )
+    if (nestedResult === undefined) {
+      uncheckedLines.push(`${shownNested} (could not be opened to check it)`)
+      uncheckedCodes.push('nested_zip')
+      continue
+    }
+    capped ||= nestedResult.capped
+    const suffix = ` in ${shownNested}`
+    for (const f of nestedResult.findings) {
+      findingLines.push(
+        `${truncateDisplayLabel(f.path, PLUGIN_HANDOVER_SHOWN_NAME_MAX)}${suffix} (${f.kinds.join(', ')})`,
+      )
+    }
+    for (const item of nestedResult.notScanned) {
+      uncheckedLines.push(
+        `${truncateDisplayLabel(item.path, PLUGIN_HANDOVER_SHOWN_NAME_MAX)}${suffix} (${SKIP_REASON_LABELS[item.reason] ?? 'could not be read'})`,
+      )
+      uncheckedCodes.push(SKIP_REASON_CODES[item.reason] ?? 'unreadable')
+    }
+    for (const deeperName of nestedResult.zipsInside.keys()) {
+      uncheckedLines.push(
+        `${truncateDisplayLabel(deeperName, PLUGIN_HANDOVER_SHOWN_NAME_MAX)}${suffix} (a zip inside a zip, not opened)`,
+      )
+      uncheckedCodes.push('nested_deeper')
+    }
+  }
+
   const commentKinds = detectSecretKinds(eocd.comment.toString('utf8'))
-  const uncheckedLines = [
-    ...notScanned.map(
-      item =>
-        `${truncateDisplayLabel(item.path, PLUGIN_HANDOVER_SHOWN_NAME_MAX)} (${SKIP_REASON_LABELS[item.reason] ?? 'could not be read'})`,
-    ),
-    ...nestedZips.map(
-      name =>
-        `${truncateDisplayLabel(name, PLUGIN_HANDOVER_SHOWN_NAME_MAX)} (a zip file, which is not opened)`,
-    ),
-  ]
 
   if (
     findingLines.length === 0 &&
@@ -862,10 +975,6 @@ async function inspectZipBuffer(
   }
 
   const hasPossibleSecret = findingLines.length > 0 || commentKinds.length > 0
-  const uncheckedCodes = notScanned.map(
-    item => SKIP_REASON_CODES[item.reason] ?? 'unreadable',
-  )
-  if (nestedZips.length > 0) uncheckedCodes.push('nested_zip')
   if (capped) uncheckedCodes.push('too_many_entries')
   const uniqueCodes = [...new Set(uncheckedCodes)]
   const [firstCode, ...restCodes] = uniqueCodes
@@ -914,7 +1023,9 @@ async function inspectZipBuffer(
     )
   }
   if (capped) {
-    questionLines.push('It has too many files to check them all.')
+    questionLines.push(
+      'It and any zip files inside it have too many files to check them all.',
+    )
   }
 
   return {
@@ -932,6 +1043,35 @@ async function inspectZipBuffer(
     },
     found: foundParts.join(', and '),
     question: questionLines.join('\n'),
+  }
+}
+
+async function verifyHandoverFileBasis(
+  filePath: string,
+  basis: PluginHandoverBasis,
+): Promise<boolean> {
+  const flags =
+    fsConstants.O_RDONLY |
+    (process.platform === 'win32' ? 0 : (fsConstants.O_NONBLOCK ?? 0))
+  const handle = await open(filePath, flags).catch(() => undefined)
+  if (handle === undefined) return false
+  try {
+    const st = await handle.stat()
+    if (!st.isFile()) return false
+    if (basis === 'no_zip_start') {
+      const magic = Buffer.alloc(4)
+      const { bytesRead } = await handle.read(magic, 0, 4, 0)
+      return (
+        magic.subarray(0, bytesRead).toString('latin1') !== ZIP_LOCAL_FILE_MAGIC
+      )
+    }
+    if (st.size > SCAN_SECRETS_MAX_TOTAL_BYTES) return false
+    const data = await handle.readFile()
+    return sha256Hex(data) === basis.digest
+  } catch {
+    return false
+  } finally {
+    await handle.close().catch(() => undefined)
   }
 }
 
@@ -993,7 +1133,7 @@ export async function inspectPluginHandoverArchive(
       const isZip =
         magic.subarray(0, bytesRead).toString('latin1') === ZIP_LOCAL_FILE_MAGIC
       if (!hasPluginExt && !isZip) {
-        return { kind: 'other', seen }
+        return { kind: 'other', seen, basis: 'no_zip_start' }
       }
       isArchiveCandidate = true
       if (!isZip) {
@@ -1008,7 +1148,10 @@ export async function inspectPluginHandoverArchive(
         )
       }
       const data = await handle.readFile()
-      return await inspectZipBuffer(data, seen, shown, hasPluginExt)
+      const zipResult = await inspectZipBuffer(data, seen, shown, hasPluginExt)
+      return zipResult.kind === 'refused'
+        ? zipResult
+        : { ...zipResult, basis: { digest: sha256Hex(data) } }
     } finally {
       await handle.close().catch(() => undefined)
     }
@@ -1032,6 +1175,7 @@ export async function checkPluginHandoverBeforeSend(
     path: string
     shown: string
     seen?: PluginHandoverFileIdentity
+    basis?: PluginHandoverBasis
   }> = []
   const asks: Array<
     Extract<PluginHandoverInspectResult, { kind: 'ask' }> & { shown: string }
@@ -1046,7 +1190,12 @@ export async function checkPluginHandoverBeforeSend(
     if (inspected.kind === 'refused') {
       return inspected.refusal
     }
-    checked.push({ path: filePath, shown, seen: inspected.seen })
+    checked.push({
+      path: filePath,
+      shown,
+      seen: inspected.seen,
+      basis: inspected.basis,
+    })
     if (inspected.kind === 'ask') {
       asks.push({ ...inspected, shown })
     }
@@ -1122,9 +1271,29 @@ export async function checkPluginHandoverBeforeSend(
       const currentIdentity = currentStat
         ? snapshotFileIdentity(currentStat)
         : undefined
-      if (compareFileIdentity(item.seen, currentIdentity) !== undefined) {
-        return `${PLUGIN_HANDOVER_REFUSAL_PREFIX}${item.shown} changed while the person was being asked. Send it again, and it is checked again.`
+      const diff = compareFileIdentity(item.seen, currentIdentity)
+      if (diff === undefined) {
+        continue
       }
+      // Official 2.1.326 #98: if timestamps or inode were restamped while the
+      // user answered "Send it" (e.g., Cowork / container overlay), verify the
+      // file's SHA-256 digest (or non-zip header) still matches before refusing.
+      const isRestampDiff =
+        diff === 'times' || diff === 'ino' || diff === 'ino_and_times'
+      if (
+        item.basis !== undefined &&
+        (item.basis !== 'no_zip_start' || isRestampDiff) &&
+        (await verifyHandoverFileBasis(item.path, item.basis))
+      ) {
+        const afterStat = await stat(item.path).catch(() => undefined)
+        const afterIdentity = afterStat
+          ? snapshotFileIdentity(afterStat)
+          : undefined
+        if (compareFileIdentity(currentIdentity, afterIdentity) === undefined) {
+          continue
+        }
+      }
+      return `${PLUGIN_HANDOVER_REFUSAL_PREFIX}${item.shown} changed while the person was being asked. Send it again, and it is checked again.`
     }
   }
 

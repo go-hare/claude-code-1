@@ -711,15 +711,21 @@ export function renderToolUseProgressMessage(
     terminalSize,
     inProgressToolCallCount,
     isTranscriptMode = false,
+    hasEnded = false,
   }: {
     tools: Tools;
     verbose: boolean;
     terminalSize?: { columns: number; rows: number };
     inProgressToolCallCount?: number;
     isTranscriptMode?: boolean;
+    hasEnded?: boolean;
   },
 ): React.ReactNode {
   if (!progressMessages.length) {
+    // Official 2.1.326 #160: Do not show "Initializing…" on failed or refused calls.
+    if (hasEnded) {
+      return null;
+    }
     return (
       <MessageResponse height={1}>
         <Text dimColor>{INITIALIZING_TEXT}</Text>
@@ -932,6 +938,7 @@ export function renderToolUseRejectedMessage(
         tools,
         verbose,
         isTranscriptMode,
+        hasEnded: true,
       })}
       <FallbackToolUseRejectedMessage />
     </>
@@ -971,6 +978,7 @@ export function renderToolUseErrorMessage(
         tools,
         verbose,
         isTranscriptMode,
+        hasEnded: true,
       })}
       <FallbackToolUseErrorMessage result={result} verbose={verbose} />
     </>
@@ -1096,6 +1104,10 @@ export function renderGroupedAgentToolUse(
   const anyUnresolved = toolUses.some(t => !t.isResolved);
   const anyError = toolUses.some(t => t.isError);
   const allComplete = !anyUnresolved;
+  // Official 2.1.326 #113 (@318426800): Compute exact launched/finished count
+  // across all parallel agents in the group (3+ included) without capping at 2.
+  const doneCount = count(toolUses, t => t.isResolved && !t.isError);
+  const countLabel = doneCount === toolUses.length ? doneCount : `${doneCount} of ${toolUses.length}`;
 
   // Check if all agents are the same type
   const allSameType = agentStats.length > 0 && agentStats.every(stat => stat.agentType === agentStats[0]?.agentType);
@@ -1112,14 +1124,14 @@ export function renderGroupedAgentToolUse(
           {allComplete ? (
             allAsync ? (
               <>
-                <Text bold>{toolUses.length}</Text> background agents launched{' '}
+                <Text bold>{countLabel}</Text> background agents launched{' '}
                 <Text dimColor>
                   <KeyboardShortcutHint shortcut="↓" action="manage" parens />
                 </Text>
               </>
             ) : (
               <>
-                <Text bold>{toolUses.length}</Text> {commonType ? `${commonType} agents` : 'agents'} finished
+                <Text bold>{countLabel}</Text> {commonType ? `${commonType} agents` : 'agents'} finished
               </>
             )
           ) : (

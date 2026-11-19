@@ -660,13 +660,29 @@ export function getCanonicalName(fullModelName: ModelName): ModelShortName {
 export function getClaudeAiUserDefaultModelDescription(
   fastMode = false,
 ): string {
-  if (isMaxSubscriber() || isTeamPremiumSubscriber()) {
+  // Official 2.1.326 (#128) `vls`: describe the user's plan default model
+  // (ignoring any saved user `settings.model` override) so "Default (recommended)"
+  // always names the actual default model for their subscription plan.
+  const planDefault = getDefaultMainLoopModelSetting()
+  const canonicalPlanDefault = getCanonicalName(
+    parseUserSpecifiedModel(planDefault),
+  )
+  const isOpusPlanDefault =
+    isMaxSubscriber() ||
+    isTeamPremiumSubscriber() ||
+    canonicalPlanDefault.includes('opus')
+
+  if (isOpusPlanDefault) {
     // densable o=bE() default opus; i=mb(Gu(o))??"Opus"; slogan always everyday.
-    const defaultOpus = getDefaultOpusModel()
+    const defaultOpus = canonicalPlanDefault.includes('opus')
+      ? parseUserSpecifiedModel(planDefault)
+      : getDefaultOpusModel()
     const marketing =
       getMarketingNameForModel(defaultOpus.replace(/\[1m\]/gi, '')) ?? 'Opus'
     const slogan = 'Best for everyday, complex tasks'
-    const base = isOpus1mMergeEnabled()
+    const has1m =
+      planDefault.toLowerCase().includes('[1m]') || isOpus1mMergeEnabled()
+    const base = has1m
       ? `${marketing} with 1M context · ${slogan}`
       : `${marketing} · ${slogan}`
     // densable s=e&&pv(o): only append GHt pricing when fastMode AND model supports fast

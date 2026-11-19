@@ -84,6 +84,7 @@ function ResumeCommand({
   const [worktreePaths, setWorktreePaths] = React.useState<string[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [resuming, setResuming] = React.useState(false);
+  const [hasMore, setHasMore] = React.useState(false);
   const [showAllProjects, setShowAllProjects] = React.useState(false);
   const currentSessionId = getSessionId();
   const cancelledRef = React.useRef(false);
@@ -102,6 +103,7 @@ function ResumeCommand({
       // densable ie() `j`: every load (first paint and Ctrl+A) sets loading
       // before the await, so the list unmounts and the two-line frame shows.
       setLoading(true);
+      setHasMore(false);
       sessionLogResultRef.current = null;
       try {
         const result = allProjects
@@ -109,6 +111,7 @@ function ResumeCommand({
           : await loadSameRepoMessageLogsProgressive(paths);
         if (cancelledRef.current) return;
         sessionLogResultRef.current = result;
+        setHasMore(result.nextIndex < result.allStatLogs.length);
         const resumable = filterResumableSessions(result.logs, getSessionId());
         logCountRef.current = resumable.length;
         setLogs(resumable);
@@ -135,6 +138,7 @@ function ResumeCommand({
       .then(batch => {
         if (sessionLogResultRef.current !== currentResult || cancelledRef.current) return;
         currentResult.nextIndex = batch.nextIndex;
+        setHasMore(currentResult.nextIndex < currentResult.allStatLogs.length);
         const resumable = filterResumableSessions(batch.logs, getSessionId());
         if (resumable.length > 0) {
           const offset = logCountRef.current;
@@ -259,6 +263,7 @@ function ResumeCommand({
       onSelect={handleSelect}
       onLogsChanged={() => loadLogs(showAllProjects, worktreePaths)}
       onLoadMore={handleLoadMore}
+      hasMore={hasMore}
       showAllProjects={showAllProjects}
       onToggleAllProjects={handleToggleAllProjects}
       onAgenticSearch={agenticSessionSearch}

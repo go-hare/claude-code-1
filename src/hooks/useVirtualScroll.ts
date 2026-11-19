@@ -9,7 +9,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react'
-import type { ScrollBoxHandle, DOMElement } from '@anthropic/ink'
+import { useApp, type DOMElement, type ScrollBoxHandle } from '@anthropic/ink'
 import { recordStickyState } from '../utils/scrollTelemetry.js'
 
 /**
@@ -64,6 +64,69 @@ const MAX_MOUNTED_ITEMS = 300
  * densable `As` — max NEW items to mount in a single commit.
  */
 const SLIDE_STEP = 25
+
+/**
+ * 2.1.326 #136 / 2.1.328 proportional anchor shift on width change:
+ * When the anchored item's width changes (terminal resize), scale the user's
+ * offset inside the item proportionally from oldHeight → newHeight so reading
+ * position inside long messages stays anchored across resizes.
+ */
+export function computeProportionalAnchorShift(
+  scrollTop: number,
+  anchorYogaTop: number,
+  oldWidth: number,
+  oldHeight: number,
+  newWidth: number,
+  newHeight: number,
+): number {
+  if (newWidth === oldWidth || oldHeight <= 0) return 0
+  const offsetInItem = Math.min(
+    Math.max(scrollTop - anchorYogaTop, 0),
+    oldHeight,
+  )
+  return Math.round((offsetInItem * newHeight) / oldHeight) - offsetInItem
+}
+
+/**
+ * 2.1.326 #137 / 2.1.328 far-jump slide-cap guard:
+ * Prevents a large backward jump (search/Home/jumpToIndex) from leaving the
+ * viewport blank when clamping `start` to `prevStart - SLIDE_STEP` would place
+ * all mounted items below the viewport bottom.
+ */
+export function computeSlideCapRange(params: {
+  start: number
+  end: number
+  prevStart: number
+  prevEnd: number
+  isSticky: boolean
+  offsets: ArrayLike<number>
+  scrollTop: number
+  listOrigin: number
+  viewportH: number
+  itemCount: number
+  step?: number
+}): [number, number] {
+  const {
+    prevStart,
+    prevEnd,
+    isSticky,
+    offsets,
+    scrollTop,
+    listOrigin,
+    viewportH,
+    itemCount,
+    step = SLIDE_STEP,
+  } = params
+  let { start, end } = params
+  const wouldBeBlank =
+    !isSticky &&
+    start < prevStart - step &&
+    (offsets[prevStart - step] ?? 0) >= scrollTop - listOrigin + viewportH
+  if (!wouldBeBlank && start < prevStart - step) start = prevStart - step
+  if (end > prevEnd + step) end = prevEnd + step
+  if (wouldBeBlank || start >= end) end = Math.min(start + step, itemCount)
+  return [start, end]
+}
 
 export type VirtualScrollResult = {
   /** [startIndex, endIndex) half-open slice of items to render. */
@@ -263,11 +326,18 @@ export function useVirtualScroll(
   // effLo inflated → black screen). One-frame lag like heightCache.
   const listOriginRef = useRef(0)
   const spacerRef = useRef<DOMElement | null>(null)
-  // Official 2.1.207: topmost fully-above-or-at scrollTop item used as scroll
-  // anchor. When its Yoga top shifts after remount/measure, compensate
-  // scrollTop with preserveHwm so HWM still covers the pre-shift position.
-  // Declared before layoutEpoch handling so expand/collapse can clear it.
-  const scrollAnchorRef = useRef<{ key: string; yogaTop: number } | null>(null)
+  // Official 2.1.326 #136 / 2.1.328: topmost fully-above-or-at scrollTop item
+  // used as scroll anchor, including width & height for proportional offset
+  // anchoring when terminal width changes.
+  const scrollAnchorRef = useRef<{
+    key: string
+    yogaTop: number
+    width: number
+    height: number
+  } | null>(null)
+  // 2.1.326 #137 / 2.1.328 `mt`: frozen-range bottom boundary in content coords.
+  const frozenTailBottomRef = useRef<number | null>(null)
+  const { subscribeFrames } = useApp()
   // Positive reanchor delta applied this commit — widen clampMax so the
   // render-time clamp does not fight the compensatory scrollTo.
   const reanchorDeltaRef = useRef(0)
@@ -364,6 +434,15 @@ export function useVirtualScroll(
   const isSticky = scrollRef.current?.isSticky() ?? true
   if (freezeRendersRef.current > 0) {
     const freezeAnchor = freezeAnchorRef.current
+    if (
+      freezeAnchor !== null &&
+      Math.floor(freezeAnchor.scrollTop / SCROLL_QUANTUM) ===
+        Math.floor((scrollTop + pendingDelta) / SCROLL_QUANTUM)
+    ) {
+      // 2.1.326 #136 / 2.1.328: keep freezeAnchor aligned on same-quantum
+      // reanchor shifts so resize freeze does not prematurely abort.
+      freezeAnchor.scrollTop = scrollTop
+    }
     if (freezeAnchor === null) {
       freezeAnchorRef.current = { sticky: isSticky, scrollTop }
     } else if (
@@ -619,13 +698,18 @@ export function useVirtualScroll(
       Math.abs(scrollTop - lastScrollTopRef.current) + Math.abs(pendingDelta)
     if (prev && scrollVelocity > viewportH * 2) {
       const [pS, pE] = prev
-      if (start < pS - SLIDE_STEP) start = pS - SLIDE_STEP
-      if (end > pE + SLIDE_STEP) end = pE + SLIDE_STEP
-      // A large forward jump can push start past the capped end (start
-      // advances via binary search while end is capped at pE + SLIDE_STEP).
-      // Mount SLIDE_STEP items from the new start so the viewport isn't
-      // blank during catch-up.
-      if (start > end) end = Math.min(start + SLIDE_STEP, n)
+      ;[start, end] = computeSlideCapRange({
+        start,
+        end,
+        prevStart: pS,
+        prevEnd: pE,
+        isSticky,
+        offsets,
+        scrollTop,
+        listOrigin: listOriginRef.current,
+        viewportH,
+        itemCount: n,
+      })
     }
     lastScrollTopRef.current = scrollTop
   }
@@ -742,8 +826,9 @@ export function useVirtualScroll(
   // render's clamp differs → scrollTop clamp-adjusts → content shifts.
   const effTopSpacer = offsets[effStart]!
 
-  // densable `yt` — if the previously-chosen anchor item's Yoga top moved
-  // (content above grew after measure), compensate scrollTop with preserveHwm.
+  // densable `yt` + 2.1.326 #136: if the previously-chosen anchor item's Yoga
+  // top moved or its width changed (terminal resize), compensate scrollTop
+  // proportionally with preserveHwm so reading position stays anchored.
   const applyReanchor = useCallback((): number => {
     const handle = scrollRef.current
     let nextScrollTop = handle?.getScrollTop() ?? 0
@@ -757,13 +842,26 @@ export function useVirtualScroll(
     if (!yoga || yoga.getComputedWidth() === 0) {
       return nextScrollTop
     }
-    const delta = yoga.getComputedTop() - prevAnchor.yogaTop
+    const nextWidth = yoga.getComputedWidth()
+    const nextHeight = yoga.getComputedHeight()
+    const nextTop = yoga.getComputedTop()
+    const proportionalShift = computeProportionalAnchorShift(
+      nextScrollTop,
+      prevAnchor.yogaTop,
+      prevAnchor.width,
+      prevAnchor.height,
+      nextWidth,
+      nextHeight,
+    )
+    const delta = nextTop - prevAnchor.yogaTop + proportionalShift
     if (delta === 0) {
       return nextScrollTop
     }
     nextScrollTop = nextScrollTop + delta
     reanchorDeltaRef.current += delta
-    prevAnchor.yogaTop += delta
+    prevAnchor.yogaTop = nextTop
+    prevAnchor.width = nextWidth
+    prevAnchor.height = nextHeight
     handle?.scrollTo(nextScrollTop, { preserveHwm: true })
     if (freezeRendersRef.current > 0) {
       const freezeAnchor = freezeAnchorRef.current
@@ -778,10 +876,13 @@ export function useVirtualScroll(
     return nextScrollTop
   }, [scrollRef])
 
-  // densable `Ke` — topmost mounted item whose Yoga top is at/above scrollY.
+  // densable `Ke` + 2.1.326 #136: topmost mounted item at/above scrollY,
+  // capturing width & height for resize-proportional scroll anchoring.
   const pickAnchor = useCallback((scrollY: number): void => {
     let bestKey: string | undefined
     let bestTop = -Infinity
+    let bestWidth = 0
+    let bestHeight = 0
     for (const [key, el] of itemRefs.current) {
       const yoga = el.yogaNode
       if (
@@ -795,10 +896,19 @@ export function useVirtualScroll(
       if (top <= scrollY && top > bestTop) {
         bestTop = top
         bestKey = key
+        bestWidth = yoga.getComputedWidth()
+        bestHeight = yoga.getComputedHeight()
       }
     }
     scrollAnchorRef.current =
-      bestKey !== undefined ? { key: bestKey, yogaTop: bestTop } : null
+      bestKey !== undefined
+        ? {
+            key: bestKey,
+            yogaTop: bestTop,
+            width: bestWidth,
+            height: bestHeight,
+          }
+        : null
   }, [])
 
   // densable `ut` / `onLayout`. Gold sticky / getViewportHeight()===0
@@ -843,18 +953,29 @@ export function useVirtualScroll(
       }
     }
     const origin = listOriginRef.current
+    frozenTailBottomRef.current = null
     if (isSticky) {
       clampBoundsRef.current = null
       scrollRef.current?.setClampBounds(undefined, undefined)
     } else {
       const reanchor = reanchorDeltaRef.current
       const min = effStart === 0 ? 0 : effTopSpacer + origin
-      const max =
+      let max =
         effEnd === n
           ? Infinity
           : Math.max(effTopSpacer, offsets[effEnd]! - viewportH) +
             origin +
             Math.max(0, reanchor)
+      const lastKey = effEnd > 0 ? itemKeys[effEnd - 1] : undefined
+      const lastYoga = lastKey
+        ? itemRefs.current.get(lastKey)?.yogaNode
+        : undefined
+      if (frozenRange && lastYoga && max !== Infinity) {
+        const lastBottom =
+          lastYoga.getComputedTop() + lastYoga.getComputedHeight()
+        frozenTailBottomRef.current = lastBottom
+        max = Math.max(min, lastBottom - viewportH)
+      }
       clampBoundsRef.current = { min, max }
       scrollRef.current?.setClampBounds(min, max)
     }
@@ -871,6 +992,7 @@ export function useVirtualScroll(
       return
     }
     let anyChanged = false
+    let largeShrink = false
     for (const [key, el] of itemRefs.current) {
       const yoga = el.yogaNode
       if (!yoga) continue
@@ -885,10 +1007,16 @@ export function useVirtualScroll(
       if (cacheable && prevH !== h) {
         heightCache.current.set(key, h)
         anyChanged = true
+        if (h > 0 && prevH !== undefined && prevH - h > viewportH) {
+          largeShrink = true
+        }
       }
     }
     if (anyChanged) {
       offsetVersionRef.current++
+    }
+    if (largeShrink) {
+      setRemeasureTick(t => t + 1)
     }
     // Intentional layoutEpoch path only (not streaming markdown freeze):
     // force a commit so offsets rebuild from freshly written heights, and
@@ -914,6 +1042,37 @@ export function useVirtualScroll(
       }
     }
   })
+
+  // 2.1.326 #137 / 2.1.328 frame-listener clamp recovery: if fast scroll hits
+  // the mounted clamp edge (or passes frozenTailBottom) without crossing a new
+  // SCROLL_QUANTUM bin, trigger a commit so scrolling never freezes.
+  useEffect(() => {
+    let lastTriggerSig: string | null = null
+    return subscribeFrames?.(() => {
+      const handle = scrollRef.current
+      const bounds = clampBoundsRef.current
+      const curTop = handle?.getScrollTop() ?? 0
+      const curTarget = curTop + (handle?.getPendingDelta() ?? 0)
+      const frozenTail = frozenTailBottomRef.current
+      if (
+        frozenTail !== null &&
+        curTop + (handle?.getViewportHeight() ?? 0) > frozenTail
+      ) {
+        frozenTailBottomRef.current = null
+        queueMicrotask(() => setRemeasureTick(t => t + 1))
+        return
+      }
+      if (!bounds || (curTarget >= bounds.min && curTarget <= bounds.max)) {
+        lastTriggerSig = null
+        return
+      }
+      const sig = `${Math.floor(curTop / SCROLL_QUANTUM)}:${bounds.min}:${bounds.max}`
+      if (sig !== lastTriggerSig) {
+        lastTriggerSig = sig
+        queueMicrotask(() => setRemeasureTick(t => t + 1))
+      }
+    })
+  }, [subscribeFrames, scrollRef])
 
   // Stable per-key callback refs. React's ref-swap dance (old(null) then
   // new(el)) is a no-op when the callback is identity-stable, avoiding

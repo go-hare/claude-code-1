@@ -145,6 +145,15 @@ function estimateSkillTokens(skill: Command, bytesPerToken?: number): number {
   return roughTokenCountEstimation(frontmatterText, bytesPerToken);
 }
 
+/**
+ * Official 2.1.326 #124: build a unique row key per skill/command so two entries
+ * sharing a name in the same source never collide in ItemList and lose the cursor.
+ */
+export function getUniqueSkillRowKey(skill: SkillCommand, index: number): string {
+  const discriminator = skill.skillRoot ?? skill.pluginInfo?.repository ?? skill.loadedFrom ?? '';
+  return `${skill.name}\0${skill.source}\0${discriminator}\0${index}`;
+}
+
 function sortAndFilterSkillCommands(
   commands: Command[],
   { sortByTokens = false }: { sortByTokens?: boolean } = {},
@@ -611,8 +620,6 @@ export function SkillsMenu({ onExit, commands, bytesPerToken }: Props): React.Re
     passthroughCtrlKeys: ['c', 'd'],
   });
 
-  useExitOnCtrlCDWithKeybindings();
-
   const filteredSkills = useMemo(() => {
     if (!query) return skills;
     const q = query.toLowerCase();
@@ -673,6 +680,12 @@ export function SkillsMenu({ onExit, commands, bytesPerToken }: Props): React.Re
       },
     );
   }, [skills, baseline, onExit]);
+
+  // Official 2.1.326 #39: pressing Ctrl+C or Ctrl+D twice in `/skills` saves
+  // pending changes and closes the panel instead of quitting Claude Code.
+  useExitOnCtrlCDWithKeybindings(() => {
+    void saveAndClose();
+  });
 
   const escShortcut = useShortcutDisplay('confirm:no', 'Settings', 'esc');
   const sortShortcut = useShortcutDisplay('settings:sortByTokens', 'Settings', 't');
@@ -829,7 +842,7 @@ export function SkillsMenu({ onExit, commands, bytesPerToken }: Props): React.Re
               focusedSkillRef.current = filteredSkills[idx];
               cycleFocusedSkill();
             }}
-            options={filteredSkills.map(skill => {
+            options={filteredSkills.map((skill, idx) => {
               const lock = locked.get(skill);
               const mode = (lock?.value ?? overrides[skill.name] ?? 'on') as
                 | 'on'
@@ -842,7 +855,7 @@ export function SkillsMenu({ onExit, commands, bytesPerToken }: Props): React.Re
               const tokens = estimateSkillTokens(skill, bytesPerToken);
               const meta = [lockedLabel, isScreenReader ? '' : modeWord, sourceLabel, `${formatNumber(tokens)} tok`];
               return {
-                value: `${skill.name}-${skill.source}`,
+                value: getUniqueSkillRowKey(skill, idx),
                 label: getSkillDisplayName(skill),
                 icon: (
                   <StatusIcon

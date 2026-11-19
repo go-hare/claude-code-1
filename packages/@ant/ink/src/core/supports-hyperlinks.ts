@@ -1,5 +1,5 @@
 import supportsHyperlinksLib from 'supports-hyperlinks'
-import { attacherCaps } from './termio/osc.js'
+import { attacherCaps, printsUnknownSequences } from './termio/osc.js'
 
 // Additional terminals that support OSC 8 hyperlinks but aren't detected by supports-hyperlinks.
 // Checked against both TERM_PROGRAM and LC_TERMINAL (the latter is preserved inside tmux).
@@ -10,6 +10,7 @@ export const ADDITIONAL_HYPERLINK_TERMINALS = [
   'alacritty',
   'iTerm.app',
   'iTerm2',
+  'rex',
   'WarpTerminal',
 ]
 
@@ -125,4 +126,60 @@ export function supportsHyperlinks(
   }
 
   return false
+}
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control char guard for OSC 8 URLs
+const OSC8_UNSAFE_URL_RE = /[\x00-\x1f\x7f-\x9f]/
+
+function isSafeHttpUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url) && !OSC8_UNSAFE_URL_RE.test(url)
+}
+
+function isBgOrAttachedSession(env: EnvLike): boolean {
+  return attacherCaps() !== null || env['CLAUDE_CODE_SESSION_KIND'] === 'bg'
+}
+
+/**
+ * Official 2.1.326 `Epn` (#213): whether stdout is a terminal capable of
+ * ignoring or honoring OSC 8 hyperlinks safely on raw URLs (so URLs that wrap
+ * across multiple lines remain clickable even in terminals Claude Code does
+ * not explicitly recognize).
+ */
+export function mayWriteHyperlinksToStdout(
+  options?: SupportsHyperlinksOptions & { isTTY?: boolean },
+): boolean {
+  const env = options?.env ?? process.env
+  if (isBgOrAttachedSession(env)) {
+    const caps = attacherCaps() as {
+      mayWriteHyperlinks?: boolean
+      hyperlinks?: boolean
+    } | null
+    return caps?.mayWriteHyperlinks ?? caps?.hyperlinks ?? false
+  }
+  const forced = getForcedHyperlinkSupport(options)
+  if (forced !== undefined) return forced
+  const term = env['TERM'] ?? ''
+  const isDumb =
+    term === 'dumb' || (term === '' && process.platform !== 'win32')
+  const isGnuScreen =
+    Boolean(env['STY']) || (term.startsWith('screen') && !env['TMUX'])
+  const isTTY = options?.isTTY ?? process.stdout.isTTY === true
+  return isTTY && !isDumb && !isGnuScreen && !printsUnknownSequences()
+}
+
+/**
+ * Official 2.1.326 `Fra` (#213): whether a bare http(s) URL may be wrapped in
+ * OSC 8 even when `supportsHyperlinks()` is false, so wrapped URLs stay
+ * clickable in unrecognized OSC 8 terminals.
+ */
+export function mayWriteRawUrlHyperlink(
+  url: string,
+  options?: SupportsHyperlinksOptions & { isTTY?: boolean },
+): boolean {
+  const env = options?.env ?? process.env
+  return (
+    isSafeHttpUrl(url) &&
+    !isBgOrAttachedSession(env) &&
+    mayWriteHyperlinksToStdout(options)
+  )
 }

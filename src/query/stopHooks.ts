@@ -386,7 +386,19 @@ export async function* handleStopHooks(
 
   // densable 2.1.236 Bqn: arm idle+parked check-in after Stop hooks (finally).
   // densable: y = removed goal Stop hook; finally{if(y) registry.add(...y)}
+  // Official 2.1.326 #54: snapshot goalMutationEpoch before async Stop hook work
+  // so concurrent `/goal clear` or `/goal <new>` can never be overwritten.
+  // Loaded dynamically to avoid a static circular-import TDZ with Tool.ts.
+  const {
+    applyGoalStateUpdateIfUnchanged,
+    getGoalMutationEpoch,
+    isSameActiveGoal,
+  } = await import('../commands/goal.js')
+  const goalEpoch = getGoalMutationEpoch()
   let goalToArm: GoalCheckinActiveGoal | undefined
+  let deferredGoalSnapshot:
+    | NonNullable<ReturnType<typeof toolUseContext.getAppState>['activeGoal']>
+    | undefined
   let removedGoalStopHook:
     | import('../utils/settings/types.js').HookCommand
     | undefined
@@ -411,6 +423,7 @@ export async function* handleStopHooks(
       cancelPendingGoalIdleCheckin()
     }
     if (appState.activeGoal && !toolUseContext.agentId) {
+      const snapshotGoal = appState.activeGoal
       const tasks = appState.tasks ?? {}
       const {
         listGoalDeferringTasks,
@@ -421,6 +434,7 @@ export async function* handleStopHooks(
       // densable: X=DMv(...); if(X.length>0) iYp else clear deferral.
       // Do not OR invent hasActiveBackgroundWork — empty DMv must not defer.
       if (deferring.length > 0) {
+        deferredGoalSnapshot = snapshotGoal
         logForDebugging(
           '[goal] evaluation deferred \u2014 background work still running',
         )
@@ -437,7 +451,7 @@ export async function* handleStopHooks(
             for (const hook of matcher.hooks) {
               if (
                 hook.type === 'prompt' &&
-                hook.prompt === appState.activeGoal.condition
+                hook.prompt === snapshotGoal.condition
               ) {
                 removedGoalStopHook = hook
                 removeSessionHook(
@@ -452,33 +466,30 @@ export async function* handleStopHooks(
           }
         }
         try {
-          const plan = planGoalCheckin(
-            appState.activeGoal,
-            deferring,
-            Date.now(),
-            {
-              onInjected: info => {
-                const shells = info.deferring.filter(
-                  t => t.type === 'local_bash' || t.type === 'local_shell',
-                ).length
-                logEvent('tengu_goal_checkin_injected', {
-                  deferredMs: info.deferredMs,
-                  activeShells: shells,
-                  activeAgents: info.deferring.length - shells,
-                  checkinCount: info.checkinCount,
-                })
-                logForDebugging(
-                  `[goal] check-in injected (turn_end) after ${Math.round(info.deferredMs / 1000)}s deferred`,
-                )
-              },
+          const plan = planGoalCheckin(snapshotGoal, deferring, Date.now(), {
+            onInjected: info => {
+              const shells = info.deferring.filter(
+                t => t.type === 'local_bash' || t.type === 'local_shell',
+              ).length
+              logEvent('tengu_goal_checkin_injected', {
+                deferredMs: info.deferredMs,
+                activeShells: shells,
+                activeAgents: info.deferring.length - shells,
+                checkinCount: info.checkinCount,
+              })
+              logForDebugging(
+                `[goal] check-in injected (turn_end) after ${Math.round(info.deferredMs / 1000)}s deferred`,
+              )
             },
-          )
+          })
           goalToArm = plan.nextGoal
-          if (plan.nextGoal !== appState.activeGoal) {
-            toolUseContext.setAppState(prev => {
-              if (!prev.activeGoal) return prev
-              return { ...prev, activeGoal: plan.nextGoal }
-            })
+          if (plan.nextGoal !== snapshotGoal) {
+            applyGoalStateUpdateIfUnchanged(
+              toolUseContext.setAppState,
+              snapshotGoal,
+              plan.nextGoal as typeof snapshotGoal,
+              goalEpoch,
+            )
           }
           if (plan.checkinText) {
             const checkinMsg = createUserMessage({
@@ -489,17 +500,19 @@ export async function* handleStopHooks(
             yield checkinMsg
           }
         } catch (err) {
-          goalToArm = appState.activeGoal
+          goalToArm = snapshotGoal
           logForDebugging(`[goal] check-in plan failed: ${errorMessage(err)}`, {
             level: 'error',
           })
         }
-      } else if (appState.activeGoal.deferredSince !== undefined) {
-        const cleared = clearGoalDeferralFields(appState.activeGoal)
-        toolUseContext.setAppState(prev => {
-          if (!prev.activeGoal) return prev
-          return { ...prev, activeGoal: cleared }
-        })
+      } else if (snapshotGoal.deferredSince !== undefined) {
+        const cleared = clearGoalDeferralFields(snapshotGoal)
+        applyGoalStateUpdateIfUnchanged(
+          toolUseContext.setAppState,
+          snapshotGoal,
+          cleared as typeof snapshotGoal,
+          goalEpoch,
+        )
       }
     }
 
@@ -588,10 +601,16 @@ export async function* handleStopHooks(
                 hasOutput = true
               }
               // densable: Ne then live $e. ht is not the met gate.
+              // Official 2.1.326 #54: verify goal epoch + identity unchanged before mutating goal state.
               const goalHook = result.hook
               const sessionId = getSessionId()
+              const preLiveGoal = toolUseContext.getAppState().activeGoal
+              const goalUnchanged =
+                getGoalMutationEpoch() === goalEpoch &&
+                isSameActiveGoal(preLiveGoal, goalAtStop)
               if (
                 attachment.hookEvent === 'Stop' &&
+                goalUnchanged &&
                 matchRegisteredStopHook(
                   toolUseContext.getAppState(),
                   sessionId,
@@ -601,37 +620,43 @@ export async function* handleStopHooks(
                 const { removeSessionHook } = await import(
                   '../utils/hooks/sessionHooks.js'
                 )
-                removeSessionHook(
-                  toolUseContext.setAppState,
-                  sessionId,
-                  'Stop',
-                  goalHook,
-                )
                 const liveGoal = toolUseContext.getAppState().activeGoal
-                if (liveGoal?.condition === goalHook.prompt) {
-                  goalPass = 'met'
-                  const iterations = (liveGoal.iterations ?? 0) + 1
-                  const durationMs = Date.now() - (liveGoal.setAt ?? Date.now())
-                  const tokens =
-                    getTotalOutputTokens() - (liveGoal.tokensAtStart ?? 0)
-                  yield { type: 'active_goal', value: undefined }
-                  yield createAttachmentMessage({
-                    type: 'goal_status',
-                    met: true,
-                    condition: goalHook.prompt,
-                    reason: result.stopReason,
-                    iterations,
-                    durationMs,
-                    tokens,
-                  })
-                  logEvent('tengu_goal_achieved', {
-                    promptLength: goalHook.prompt.length,
-                    iterations,
-                    durationMs,
-                    tokens,
-                    origin: (liveGoal.origin ??
-                      'user') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                  })
+                if (
+                  getGoalMutationEpoch() === goalEpoch &&
+                  isSameActiveGoal(liveGoal, goalAtStop)
+                ) {
+                  removeSessionHook(
+                    toolUseContext.setAppState,
+                    sessionId,
+                    'Stop',
+                    goalHook,
+                  )
+                  if (liveGoal?.condition === goalHook.prompt) {
+                    goalPass = 'met'
+                    const iterations = (liveGoal.iterations ?? 0) + 1
+                    const durationMs =
+                      Date.now() - (liveGoal.setAt ?? Date.now())
+                    const tokens =
+                      getTotalOutputTokens() - (liveGoal.tokensAtStart ?? 0)
+                    yield { type: 'active_goal', value: undefined }
+                    yield createAttachmentMessage({
+                      type: 'goal_status',
+                      met: true,
+                      condition: goalHook.prompt,
+                      reason: result.stopReason,
+                      iterations,
+                      durationMs,
+                      tokens,
+                    })
+                    logEvent('tengu_goal_achieved', {
+                      promptLength: goalHook.prompt.length,
+                      iterations,
+                      durationMs,
+                      tokens,
+                      origin: (liveGoal.origin ??
+                        'user') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                    })
+                  }
                 }
               }
             }
@@ -705,6 +730,8 @@ export async function* handleStopHooks(
             if (
               registered &&
               liveGoal &&
+              getGoalMutationEpoch() === goalEpoch &&
+              isSameActiveGoal(liveGoal, goalAtStop) &&
               isGoalPromptHook(result.hook, liveGoal.condition)
             ) {
               goalPass = 'not_met'
@@ -1027,7 +1054,15 @@ export async function* handleStopHooks(
   } finally {
     // densable: finally{if(y) sessionHooksRegistry.add(Vt(),"Stop","",y)}
     // DMv defer tip-removes Stop; must re-arm so later turns re-evaluate.
-    if (removedGoalStopHook !== undefined) {
+    // Official 2.1.326 #54: skip re-arming if the goal was cleared or replaced while Stop ran.
+    const deferredGoalStillLive =
+      deferredGoalSnapshot !== undefined &&
+      getGoalMutationEpoch() === goalEpoch &&
+      isSameActiveGoal(
+        toolUseContext.getAppState().activeGoal,
+        deferredGoalSnapshot,
+      )
+    if (removedGoalStopHook !== undefined && deferredGoalStillLive) {
       try {
         const { addSessionHook } = await import(
           '../utils/hooks/sessionHooks.js'
@@ -1052,6 +1087,7 @@ export async function* handleStopHooks(
     // densable Bqn: interactive + planned nextGoal only (not after clear).
     if (
       goalToArm !== undefined &&
+      deferredGoalStillLive &&
       !toolUseContext.options.isNonInteractiveSession
     ) {
       try {

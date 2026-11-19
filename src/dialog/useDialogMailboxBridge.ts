@@ -5,6 +5,27 @@ import { useEffect } from 'react'
 import type { DialogMailbox } from './dialogMailbox.js'
 import { useDialogStore } from './DialogStoreContext.js'
 
+/**
+ * Official 2.1.326 #108 (`Bee`): when Claude Code is exiting (e.g., double Ctrl+C
+ * at ExitBackgroundWorkDialog or an unrecoverable interface error in renderAndRun),
+ * unmounting the Ink tree must NOT resolve pending background/subagent permission
+ * dialogs as a user refusal.
+ */
+let sessionExiting = false
+
+export function markSessionExiting(): void {
+  sessionExiting = true
+}
+
+export function isSessionExiting(): boolean {
+  return sessionExiting
+}
+
+/** @internal test helper */
+export function resetSessionExitingForTest(): void {
+  sessionExiting = false
+}
+
 /** densable hLo(channel) */
 export function useDialogMailboxBridge(
   mailbox: DialogMailbox | undefined,
@@ -38,7 +59,9 @@ export function useDialogMailboxBridge(
       unsubClosed()
       for (const id of owned) {
         store.dismiss(id)
-        mailbox.reply({ id, cancelled: true })
+        if (!sessionExiting) {
+          mailbox.reply({ id, cancelled: true })
+        }
       }
       owned.clear()
     }

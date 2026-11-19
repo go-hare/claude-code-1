@@ -1,7 +1,10 @@
 import { feature } from 'bun:bundle'
 import type { QuerySource } from '../../constants/querySource.js'
 import { clearSystemPromptSections } from '../../constants/systemPromptSections.js'
-import { getUserContext } from '../../context.js'
+import {
+  getUserContext,
+  prefetchGitStatusForCompaction,
+} from '../../context.js'
 import { clearSpeculativeChecks } from '@claude-code/builtin-tools/tools/BashTool/bashPermissions.js'
 import { resetSentSkillNames } from '../../utils/attachments.js'
 import { clearClassifierApprovals } from '../../utils/classifierApprovals.js'
@@ -71,6 +74,10 @@ export function runPostCompactCleanup(querySource?: QuerySource): void {
     // clear so all compaction paths behave consistently.
     getUserContext.cache.clear?.()
     resetGetMemoryFilesCache('compact')
+    // Official 2.1.326 (#245): refresh git status asynchronously in the
+    // background so the first message after /compact does not block re-running
+    // `git status` cold.
+    prefetchGitStatusForCompaction()
   }
   clearSystemPromptSections()
   // densable: stickyBetas reset in clearBetaHeaderLatches — re-eval o3 memo.

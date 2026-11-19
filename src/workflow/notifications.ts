@@ -64,33 +64,63 @@ function summarizeTerminal(run: RunProgress): {
 } {
   // densable MP6 wording: completed without "successfully"; failed includes error.
   const name = run.workflowName || 'workflow'
+  const cacheSummary = formatWorkflowResumeCacheSummary(run)
+  const cacheSuffix = cacheSummary ? ` (${cacheSummary})` : ''
   switch (run.status) {
     case 'completed':
       return {
         status: 'completed',
-        summary: `Dynamic workflow "${name}" completed`,
+        summary: `Dynamic workflow "${name}" completed${cacheSuffix}`,
       }
     case 'failed':
       return {
         status: 'failed',
-        summary: `Dynamic workflow "${name}" failed: ${run.error || 'Unknown error'}`,
+        summary: `Dynamic workflow "${name}" failed: ${run.error || 'Unknown error'}${cacheSuffix}`,
       }
     case 'killed':
       return {
         status: 'stopped',
-        summary: `Dynamic workflow "${name}" was stopped`,
+        summary: `Dynamic workflow "${name}" was stopped${cacheSuffix}`,
       }
     default:
       return {
         status: 'stopped',
-        summary: `Dynamic workflow "${name}" ended`,
+        summary: `Dynamic workflow "${name}" ended${cacheSuffix}`,
       }
   }
 }
 
 /**
- * densable MP6 recovery block for failed/killed runs when scriptPath is known.
- * `To resume after editing the script, call: Workflow({scriptPath: '...', resumeFromRunId: '...'})`
+ * Official 2.1.326 #121 (@305225121): Summarize how many cached agent results
+ * were reused on workflow resume and where reuse stopped, instead of claiming
+ * every finished agent will be reused after a call failed.
+ */
+export function formatWorkflowResumeCacheSummary(
+  run: Pick<
+    RunProgress,
+    'resumeReusedCount' | 'resumeStoppedAt' | 'agents' | 'status'
+  >,
+): string | undefined {
+  const reused = run.resumeReusedCount
+  const stoppedAt = run.resumeStoppedAt
+  if (reused === undefined && stoppedAt === undefined) {
+    return undefined
+  }
+  const count = reused ?? 0
+  const noun = count === 1 ? 'cached agent result' : 'cached agent results'
+  if (stoppedAt) {
+    const target = stoppedAt.label ? `"${stoppedAt.label}"` : 'the next call'
+    const why = stoppedAt.reason ? ` (${stoppedAt.reason})` : ''
+    return `Resume cache: reused ${count} ${noun}; reuse stopped at ${target}${why} — that call and every later one run again.`
+  }
+  return `Resume cache: reused ${count} ${noun}.`
+}
+
+/**
+ * densable MP6 + Official 2.1.326 #121 (@305225121): Recovery block for
+ * failed/killed runs when scriptPath is known. Explains accurate cache-reuse
+ * boundaries (up to the first failed or changed call) rather than promising
+ * every finished agent will be reused.
  */
 export function buildRecoveryHint(run: RunProgress): string | undefined {
   if (run.status !== 'failed' && run.status !== 'killed') return undefined
@@ -103,7 +133,11 @@ export function buildRecoveryHint(run: RunProgress): string | undefined {
       argsPart = ''
     }
   }
-  return `To resume after editing the script, call: Workflow({scriptPath: '${run.scriptPath}', resumeFromRunId: '${run.runId}'${argsPart}})`
+  const cacheSummary = formatWorkflowResumeCacheSummary(run)
+  const reuseClause =
+    'agent() calls replay from cache up to the first one that failed or no longer matches (edited, added, removed, or in a different call order); that call and every later one run again. A call a usage limit refused usually runs again without ending reuse: finished calls after it still come from cache.'
+  const base = `To resume after editing the script, call: Workflow({scriptPath: '${run.scriptPath}', resumeFromRunId: '${run.runId}'${argsPart}}) — ${reuseClause}`
+  return cacheSummary ? `${cacheSummary}\n${base}` : base
 }
 
 function resultPreview(run: RunProgress): string | undefined {

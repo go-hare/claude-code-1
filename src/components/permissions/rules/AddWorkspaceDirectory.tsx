@@ -8,7 +8,8 @@ import {
   validateDirectoryForWorkspace,
 } from '../../../commands/add-dir/validation.js';
 import TextInput from '../../../components/TextInput.js';
-import { type KeyboardEvent, Box, Byline, Dialog, KeyboardShortcutHint, Text } from '@anthropic/ink';
+import { useTerminalSize } from '../../../hooks/useTerminalSize.js';
+import { type KeyboardEvent, Box, Byline, Dialog, KeyboardShortcutHint, StatusIcon, Text } from '@anthropic/ink';
 import { useKeybinding } from '../../../keybindings/useKeybinding.js';
 import type { ToolPermissionContext } from '../../../Tool.js';
 import { getDirectoryCompletions } from '../../../utils/suggestions/directoryCompletion.js';
@@ -84,6 +85,8 @@ function DirectoryInput({
   suggestions: SuggestionItem[];
   selectedSuggestion: number;
 }): React.ReactNode {
+  const { columns } = useTerminalSize();
+  const inputColumns = Math.max(20, columns - 6);
   return (
     <Box flexDirection="column">
       <Text>Enter the path to the directory:</Text>
@@ -95,7 +98,7 @@ function DirectoryInput({
           value={value}
           onChange={onChange}
           onSubmit={onSubmit}
-          columns={80}
+          columns={inputColumns}
           cursorOffset={cursorOffset}
           onChangeCursorOffset={onChangeCursorOffset}
           inputFilter={stripNewlines}
@@ -111,7 +114,12 @@ function DirectoryInput({
           />
         </Box>
       )}
-      {error && <Text color="error">{error}</Text>}
+      {error && (
+        <Text color="error">
+          <StatusIcon status="error" withSpace />
+          {error}
+        </Text>
+      )}
     </Box>
   );
 }
@@ -240,7 +248,7 @@ export function AddWorkspaceDirectory({
             <Byline>
               <KeyboardShortcutHint shortcut="Tab" action="complete" />
               <KeyboardShortcutHint shortcut="Enter" action="add" />
-              <ConfigurableShortcutHint action="confirm:no" context="Settings" fallback="Esc" description="cancel" />
+              <ConfigurableShortcutHint action="confirm:no" context="Settings" fallback="Esc" description="go back" />
             </Byline>
           )
         }

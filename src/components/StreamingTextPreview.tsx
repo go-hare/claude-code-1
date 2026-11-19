@@ -29,10 +29,26 @@ type Props = {
   store: StreamingDisplayStore;
 };
 
+/**
+ * 2.1.326 #133 / 2.1.328 `YR`: incomplete table header/separator/first-row prefix
+ * that produces no painted line yet while `hideTrailingLine` is active.
+ */
+const INCOMPLETE_TABLE_PREFIX_RE = /^\s*\|[^\n]*(\n[ |:\r-]*|\n[ |:\r-]+\n[^\n]*)?$/;
+
+/**
+ * 2.1.326 #133 / 2.1.328 `displayedPaintsLine`: returns true only once the
+ * streaming buffer contains at least one complete line that will actually paint
+ * (avoiding an empty `marginTop={1}` jump before the first streamed line lands).
+ */
+export function streamingDisplayedPaintsLine(displayed: string | null): boolean {
+  return displayed !== null && displayed.trimStart().includes('\n') && !INCOMPLETE_TABLE_PREFIX_RE.test(displayed);
+}
+
 /** gold Oa = jf(function). Prompt path: transcriptV2 undefined. */
 export const StreamingTextPreview = memo(function StreamingTextPreview({ store }: Props): React.ReactNode {
   const { displayed, hideTrailingLine } = useSyncExternalStore(store.subscribe, store.getDerived);
   if (!displayed) return null;
+  if (hideTrailingLine && !streamingDisplayedPaintsLine(displayed)) return null;
 
   // gold v / T / M — prompt is transcriptV2===undefined (REPL does not pass v2).
   const transcriptV2 = undefined as 'label' | 'column' | undefined;

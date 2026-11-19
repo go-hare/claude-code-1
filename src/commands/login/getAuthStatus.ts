@@ -36,7 +36,7 @@ import { getSecureStorage } from '../../utils/secureStorage/index.js'
 import { getExpiredClaudeAiAntProfileWarning } from '../../services/api/errors.js'
 import { getGlobalConfig } from '../../utils/config.js'
 import { logForDebugging } from '../../utils/debug.js'
-import { isBareMode } from '../../utils/envUtils.js'
+import { isBareMode, isRunningOnHomespace } from '../../utils/envUtils.js'
 import {
   TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   errorMessage,
@@ -84,6 +84,8 @@ export interface AuthStatus {
      *   null       — not set
      */
     source: 'env' | 'settings' | null
+    /** Official 2.1.326 #59: ANTHROPIC_API_KEY env var is set, but not currently used for requests. */
+    envKeyUnused?: boolean
   }
   /**
    * Local ~/.config/anthropic (or ANTHROPIC_CONFIG_DIR) stack.
@@ -105,6 +107,26 @@ export interface AuthStatus {
 // ---------------------------------------------------------------------------
 
 const WORKSPACE_KEY_PREFIX = 'sk-ant-api03-'
+
+/** Official 2.1.326 #59 (`rnn`): shown when ANTHROPIC_API_KEY is in env but ignored until opted in via /config. */
+export const ANTHROPIC_API_KEY_NOT_USED_HINT =
+  'ANTHROPIC_API_KEY not used here · turn on "Use custom API key" in /config'
+
+/** Official 2.1.326 #59 (`Ive`): true when ANTHROPIC_API_KEY is present in env but not active for requests. */
+export function isAnthropicApiKeyEnvUnused(): boolean {
+  const envKey = (process.env.ANTHROPIC_API_KEY ?? '').trim()
+  if (!envKey || isRunningOnHomespace()) {
+    return false
+  }
+  try {
+    const resolved = getAnthropicApiKeyWithSource({
+      skipRetrievingKeyFromApiKeyHelper: true,
+    })
+    return resolved.source !== 'ANTHROPIC_API_KEY'
+  } catch {
+    return false
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -192,6 +214,8 @@ export function getAuthStatus(): AuthStatus {
   const keySet = rawKey.length > 0
   const prefixValid = rawKey.startsWith(WORKSPACE_KEY_PREFIX)
   const keyPreview = keySet ? maskApiKey(rawKey) : null
+  const envKeyUnused =
+    keySource === 'env' ? isAnthropicApiKeyEnvUnused() : false
 
   return {
     subscription: {
@@ -204,6 +228,7 @@ export function getAuthStatus(): AuthStatus {
       prefixValid,
       keyPreview,
       source: keySource,
+      envKeyUnused,
     },
     profile: {
       source: getAnthropicProfileSource(),

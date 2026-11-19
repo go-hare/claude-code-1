@@ -74,6 +74,7 @@ type Props = {
   ideSelection: IDESelection | undefined;
   mcpClients?: MCPServerConnection[];
   isPasting?: boolean;
+  showExpandPasteHint?: boolean;
   isInputWrapped?: boolean;
   hasStash?: boolean;
   messages: Message[];
@@ -116,6 +117,7 @@ function PromptInputFooter({
   ideSelection,
   mcpClients,
   isPasting = false,
+  showExpandPasteHint = false,
   isInputWrapped = false,
   hasStash = false,
   messages,
@@ -141,7 +143,11 @@ function PromptInputFooter({
   const pillSelected = tasksSelected && (coordinatorTaskCount === 0 || coordinatorTaskIndex < 0);
 
   const hasStatusLine = statusLineShouldDisplay(settings);
+  // Official 2.1.326 #201: do not let hasStatusLine suppress "esc to interrupt" —
+  // pass hasStatusLine separately to PromptInputFooterLeftSide so idle hints stay
+  // suppressed while "esc to interrupt" still appears beside a custom status line.
   const suppressHint = suppressHintFromProps || hasStatusLine || isSearching;
+  const allowInterruptHintWithStatusLine = hasStatusLine && !suppressHintFromProps && !isSearching;
   const hideVimModeIndicator =
     (settings?.statusLine as StatusLineWithHideVim | undefined)?.hideVimModeIndicator ?? false;
   const hasSuggestionContent = suggestions.length > 0 || Boolean(suggestionsEmptyMessage);
@@ -202,7 +208,9 @@ function PromptInputFooter({
         columnGap={1}
       >
         <Box flexDirection="column" flexShrink={1}>
-          {mode === 'prompt' && !exitMessage.show && !isPasting && hasStatusLine && (
+          {/* Official 2.1.326 #199: keep StatusLine mounted on Ctrl+C, in `!` shell mode,
+              and while pasting an image so it never disappears or bounces layout. */}
+          {hasStatusLine && (
             <StatusLine messagesRef={messagesRef} lastAssistantMessageId={lastAssistantMessageId} vimMode={vimMode} />
           )}
           <PipeStatusInline />
@@ -215,12 +223,14 @@ function PromptInputFooter({
                 mode={mode}
                 toolPermissionContext={toolPermissionContext}
                 suppressHint={suppressHint}
+                allowInterruptHint={allowInterruptHintWithStatusLine}
                 isLoading={isLoading}
                 tasksSelected={pillSelected}
                 teamsSelected={teamsSelected}
                 teammateFooterIndex={teammateFooterIndex}
                 tmuxSelected={tmuxSelected}
                 isPasting={isPasting}
+                showExpandPasteHint={showExpandPasteHint}
                 isSearching={isSearching}
                 historyQuery={historyQuery}
                 setHistoryQuery={setHistoryQuery}

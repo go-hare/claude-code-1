@@ -564,12 +564,16 @@ export const PLUGIN_AGENT_SETTING_DEPRECATED_MESSAGE =
 export const PLUGIN_AGENT_SETTING_DEPRECATED_HINT =
   "To keep this plugin's agent as the default, set `agent` in your own settings or pass --agent."
 
+/** Official 2.1.326 #5: remediation hint when malformed display-only manifest fields are ignored. */
+export const MANIFEST_FIELD_IGNORED_HINT =
+  'If you did not expect this plugin to run, disable it from /plugin, unless your organization requires it. If you maintain it, run `claude plugin validate <path>` to see the fault'
+
 /** Official 2.1.323 #2211 (`bba`): startup notice when an enabled plugin sets `settings.agent`. */
 export function formatPluginAgentStartupNotice(pluginName: string): string {
   return `Plugin "${pluginName}" set this session's agent. That will stop working in a future release: set \`agent\` in your own settings or pass --agent.`
 }
 
-/** Official 2.1.323 (#2049, #1965, #2211): user-facing message for a PluginWarning. */
+/** Official 2.1.323 (#2049, #1965, #2211) + 2.1.326 (#5): user-facing message for a PluginWarning. */
 export function getPluginWarningMessage(warning: PluginWarning): string {
   if (warning.warning) return warning.warning
   switch (warning.type) {
@@ -585,12 +589,20 @@ export function getPluginWarningMessage(warning: PluginWarning): string {
         : "It loads anyway, because it's read from a local folder"
     case 'plugin-agent-setting-deprecated':
       return PLUGIN_AGENT_SETTING_DEPRECATED_MESSAGE
+    case 'manifest-field-ignored': {
+      const fields = warning.manifestFields ?? []
+      if (fields.length > 0) {
+        const quoted = fields.map(f => `"${f}"`).join(' and ')
+        return `${quoted} in plugin.json ${fields.length === 1 ? 'is' : 'are'} malformed and ignored. Earlier versions of Claude Code refused this plugin`
+      }
+      return warning.type
+    }
     default:
       return warning.type
   }
 }
 
-/** Official 2.1.323 (#2049, #1965, #2211): remediation hint for a PluginWarning. */
+/** Official 2.1.323 (#2049, #1965, #2211) + 2.1.326 (#5): remediation hint for a PluginWarning. */
 export function getPluginWarningHint(warning: PluginWarning): string {
   switch (warning.type) {
     case 'version-list-not-enabled':
@@ -601,6 +613,8 @@ export function getPluginWarningHint(warning: PluginWarning): string {
       return 'With this range, an installed copy would not load here'
     case 'plugin-agent-setting-deprecated':
       return PLUGIN_AGENT_SETTING_DEPRECATED_HINT
+    case 'manifest-field-ignored':
+      return MANIFEST_FIELD_IGNORED_HINT
     default:
       return ''
   }

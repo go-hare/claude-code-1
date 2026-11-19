@@ -39,6 +39,14 @@ import {
 } from 'node:path'
 import { isEnvDefinedFalsy, isEnvTruthy } from 'src/utils/envUtils.js'
 import { sanitizePermanentRefWording } from './gitPrepare.js'
+import {
+  type UseAnthropicGhSetting,
+  formatBuiltInGhStartupLines,
+  isFalsyFlagValue,
+  isThirdPartyProviderEnv,
+  isTruthyFlagValue,
+  parseUseAnthropicGhEnv,
+} from './ghStandin.js'
 import { DEFAULT_CHECKOUT_HOOK_TIMEOUT_MS } from './sessionHooks.js'
 import {
   captureGovernedGitConfigSeed,
@@ -202,6 +210,8 @@ export type RootRunnerArgs = {
   gitSshRewriteHosts: string[]
   gitHostRewrites: Array<[string, string]>
   useAnthropicGitProxy: boolean
+  /** Official 2.1.326 #339: `--use-anthropic-gh` / `SELF_HOSTED_RUNNER_USE_ANTHROPIC_GH` (default `'default'`, i.e. on). */
+  useAnthropicGh: UseAnthropicGhSetting
   configureGit: boolean
   pushOutcomeOnRelease: boolean
   trustWorkspace: boolean
@@ -800,6 +810,9 @@ export function parseRootArgs(
     gitSshRewriteHosts: [],
     gitHostRewrites: [],
     useAnthropicGitProxy: isEnvTruthy(process.env.CLAUDE_RUNNER_USE_GIT_PROXY),
+    useAnthropicGh: parseUseAnthropicGhEnv(
+      process.env.SELF_HOSTED_RUNNER_USE_ANTHROPIC_GH,
+    ),
     configureGit: isEnvTruthy(process.env.SELF_HOSTED_RUNNER_CONFIGURE_GIT),
     pushOutcomeOnRelease: isEnvTruthy(
       process.env.SELF_HOSTED_RUNNER_PUSH_OUTCOME_ON_RELEASE,
@@ -907,6 +920,17 @@ export function parseRootArgs(
       }
       case '--use-anthropic-git-proxy':
         t.useAnthropicGitProxy = true
+        break
+      case '--use-anthropic-gh':
+        if (isFalsyFlagValue(i)) {
+          t.useAnthropicGh = false
+          n++
+        } else if (isTruthyFlagValue(i)) {
+          t.useAnthropicGh = true
+          n++
+        } else {
+          t.useAnthropicGh = true
+        }
         break
       case '--configure-git':
         t.configureGit = true
@@ -1371,6 +1395,11 @@ Runtime:
   --git-host-rewrite <f>=<t>  Rewrite https://<f>/... to https://<t>/... (repeatable).
   --use-anthropic-git-proxy   Clone via Anthropic's git proxy.
                               [env: CLAUDE_RUNNER_USE_GIT_PROXY=1]
+  --use-anthropic-gh [bool]   Offer Claude Code's built-in \`gh api\` to sessions on this runner where
+                              no gh is installed (Linux and macOS). Requests go through Anthropic,
+                              which adds the session's GitHub sign-in if any. Default: on.
+                              false, 0, no or off turns it off.
+                              [env: SELF_HOSTED_RUNNER_USE_ANTHROPIC_GH=1]
   --configure-git             Set global git identity + commit signing via Anthropic signing service.
                               [env: SELF_HOSTED_RUNNER_CONFIGURE_GIT=1]
   --push-outcome-on-release   Push outcome branches on runner-initiated non-completed session end.
@@ -1480,6 +1509,7 @@ export type PollSkeletonOpts = {
   removeSessionState?: boolean
   confineRepoSettings?: ConfineRepoSettings
   useAnthropicGitProxy?: boolean
+  useAnthropicGh?: UseAnthropicGhSetting
   onStatus: (msg: string) => void
   onDebug: (msg: string) => void
   /**
@@ -2777,6 +2807,7 @@ export async function runPollSkeleton(
                 confineRepoSettings: opts.confineRepoSettings,
                 trustWorkspace: opts.trustWorkspace,
                 removeSessionState: opts.removeSessionState,
+                useAnthropicGh: opts.useAnthropicGh,
               },
               childAc.signal,
             ),
@@ -3510,6 +3541,24 @@ export async function selfHostedRunnerMain(
   const hostConfigSnapshot = await snapshotHostConfig(onStatus)
   const governedGitConfigSeed = await captureGovernedGitConfigSeed(onDebug)
 
+  for (const line of formatBuiltInGhStartupLines(
+    {
+      flag: args.useAnthropicGh !== false,
+      windows: process.platform === 'win32',
+      capacity: args.capacity,
+      standaloneProxy: Boolean(process.env.SELF_HOSTED_RUNNER_AGENT_PROXY_URL),
+      childIsOwnBinary: !args.execPath,
+      essentialTrafficOnly: isEnvTruthy(
+        process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC,
+      ),
+      thirdPartyProvider: isThirdPartyProviderEnv(process.env),
+      startedByClaudeCode: Boolean(process.env.CLAUDE_CODE_CHILD_SESSION),
+    },
+    args.useAnthropicGh === 'default',
+  )) {
+    onStatus(line)
+  }
+
   try {
     const result = await runPollSkeleton(
       {
@@ -3530,6 +3579,7 @@ export async function selfHostedRunnerMain(
         removeSessionState: args.removeSessionState,
         confineRepoSettings: args.confineRepoSettings,
         useAnthropicGitProxy: args.useAnthropicGitProxy,
+        useAnthropicGh: args.useAnthropicGh,
         anthropicGitProxyBaseUrl: args.useAnthropicGitProxy
           ? args.apiUrl
           : undefined,

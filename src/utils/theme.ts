@@ -251,7 +251,7 @@ const lightTheme: Theme = {
 
   memoryBackgroundColor: 'rgb(230, 245, 250)',
   rate_limit_fill: 'rgb(87,105,247)', // Medium blue
-  rate_limit_empty: 'rgb(39,47,111)', // Dark blue
+  rate_limit_empty: 'rgb(213,218,253)', // Light blue-lavender (#220)
   fastMode: 'rgb(255,106,0)', // Electric orange
   fastModeShimmer: 'rgb(255,150,50)', // Lighter orange for shimmer
   effortUltra: 'rgb(135,0,255)',
@@ -336,8 +336,8 @@ const lightAnsiTheme: Theme = {
   bashMessageBackgroundColor: 'ansi:whiteBright',
 
   memoryBackgroundColor: 'ansi:white',
-  rate_limit_fill: 'ansi:yellow',
-  rate_limit_empty: 'ansi:black',
+  rate_limit_fill: 'ansi:blue',
+  rate_limit_empty: 'ansi:white',
   fastMode: 'ansi:red',
   fastModeShimmer: 'ansi:redBright',
   effortUltra: 'ansi:magenta', // densable light-ansi effortUltra
@@ -424,11 +424,11 @@ const darkAnsiTheme: Theme = {
 
   memoryBackgroundColor: 'ansi:blackBright',
   rate_limit_fill: 'ansi:yellow',
-  rate_limit_empty: 'ansi:white',
+  rate_limit_empty: 'ansi:blackBright',
   fastMode: 'ansi:redBright',
   fastModeShimmer: 'ansi:redBright',
   effortUltra: 'ansi:magentaBright',
-  briefLabelYou: 'ansi:blueBright',
+  briefLabelYou: 'ansi:whiteBright',
   briefLabelClaude: 'ansi:redBright',
   rainbow_red: 'ansi:red',
   rainbow_orange: 'ansi:redBright',
@@ -509,7 +509,7 @@ const lightDaltonizedTheme: Theme = {
 
   memoryBackgroundColor: 'rgb(230, 245, 250)',
   rate_limit_fill: 'rgb(51,102,255)', // Bright blue
-  rate_limit_empty: 'rgb(23,46,114)', // Dark blue
+  rate_limit_empty: 'rgb(204,217,255)', // Light blue (#220)
   fastMode: 'rgb(255,106,0)', // Electric orange (color-blind safe)
   fastModeShimmer: 'rgb(255,150,50)', // Lighter orange for shimmer
   effortUltra: 'rgb(135,0,255)',

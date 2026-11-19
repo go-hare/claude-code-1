@@ -11,6 +11,8 @@ import { getReplPrimitiveTools } from '@claude-code/builtin-tools/tools/REPLTool
 import type { CollapsedReadSearchGroup, NormalizedAssistantMessage, ProgressMessage } from '../../types/message.js';
 import { uniq } from '../../utils/array.js';
 import {
+  commandAsHint,
+  getToolSearchOrReadInfo,
   getToolUseIdsFromCollapsedGroup,
   leftoverIhrSubscribe,
   leftoverHx,
@@ -19,10 +21,12 @@ import {
   LEFTOVER_HX_GUTTER,
   LEFTOVER_HX_MAX_LINES,
   LEFTOVER_SS_HOLD_MS,
+  MAX_HINT_LINES,
 } from '../../utils/collapseReadSearch.js';
 import { getDisplayPath } from '../../utils/file.js';
 import { formatDuration, formatSecondsShort } from '../../utils/format.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
+import { useAppState } from '../../state/AppState.js';
 import { leftoverIhrThinkingStartedAt, useLeftoverIhrStore } from '../../state/leftoverIhrStore.js';
 import { getMainThreadAgentId } from '../../bootstrap/state.js';
 import {
@@ -381,9 +385,27 @@ function VerboseToolUse({
           input: content.input,
         })
       : undefined;
+  // #196 (2.1.326): clicking open a collapsed running command row in fullscreen
+  // must render live output and timer via renderToolUseProgressMessage.
+  const { columns, rows } = useTerminalSize();
+  const liveProgressResult =
+    !isResolved && isInProgress && tool.renderToolUseProgressMessage
+      ? tool.renderToolUseProgressMessage(filterToolProgressMessages(progressMessages), {
+          tools,
+          verbose: true,
+          terminalSize: { columns, rows },
+          inProgressToolCallCount: 1,
+          isTranscriptMode: true,
+        })
+      : undefined;
   const showError = isResolved && isError;
-  // densable Xc: empty name + no success result + no error row → null
-  if (userFacingName === '' && successResult == null && !(showError && resultMsg !== undefined)) {
+  // densable Xc: empty name + no success result + no live progress + no error row → null
+  if (
+    userFacingName === '' &&
+    successResult == null &&
+    liveProgressResult == null &&
+    !(showError && resultMsg !== undefined)
+  ) {
     return null;
   }
 
@@ -404,6 +426,7 @@ function VerboseToolUse({
             })}
         </Box>
       )}
+      {liveProgressResult != null && <Box>{liveProgressResult}</Box>}
       {successResult != null && <Box>{successResult}</Box>}
       {showError && (
         <VerboseErroredToolResult
@@ -462,6 +485,74 @@ function CollapsedToolElapsed({
   return <Text dimColor> · {formatDuration(elapsed)}</Text>;
 }
 
+/**
+ * #157 & #111 (2.1.326, official mvs): determine whether a collapsed tool group
+ * should render in active present-tense ("Running…" / "Calling…") or finished
+ * past-tense ("Ran" / "Called").
+ */
+export function resolveCollapsedGroupActiveState({
+  toolUseIds,
+  inProgressToolUseIDs,
+  lookups,
+  isActiveGroupProp,
+  isViewedAgentTerminal,
+}: {
+  toolUseIds: readonly string[];
+  inProgressToolUseIDs: ReadonlySet<string>;
+  lookups: ReturnType<typeof buildMessageLookups>;
+  isActiveGroupProp: boolean;
+  isViewedAgentTerminal: boolean;
+}): boolean {
+  if (isViewedAgentTerminal) return false;
+  if (toolUseIds.some(id => inProgressToolUseIDs.has(id))) return true;
+  if (toolUseIds.length === 0) return isActiveGroupProp;
+  const hasWaitingCall = toolUseIds.some(
+    id =>
+      !lookups.resolvedToolUseIDs.has(id) &&
+      !lookups.erroredToolUseIDs.has(id) &&
+      !interruptedCall(lookups.toolResultByToolUseID.get(id)),
+  );
+  if (hasWaitingCall && isActiveGroupProp) return true;
+  if (!hasWaitingCall) return false;
+  return isActiveGroupProp;
+}
+
+/**
+ * #192 (2.1.326): select the tool call that should supply the active fullscreen
+ * tool group's display hint — preferring the currently running call over a
+ * finished or still-queued call.
+ */
+export function selectActiveDisplayCall(
+  uses: ReadonlyArray<{ id: string; name: string; input: unknown }>,
+  inProgressToolUseIDs: ReadonlySet<string>,
+  resolvedToolUseIDs: ReadonlySet<string>,
+): { id: string; name: string; input: unknown } | undefined {
+  if (uses.length === 0) return undefined;
+  for (let i = uses.length - 1; i >= 0; i--) {
+    if (inProgressToolUseIDs.has(uses[i]!.id)) return uses[i];
+  }
+  let lastResolvedIdx = -1;
+  for (let i = uses.length - 1; i >= 0; i--) {
+    if (resolvedToolUseIDs.has(uses[i]!.id)) {
+      lastResolvedIdx = i;
+      break;
+    }
+  }
+  if (lastResolvedIdx + 1 < uses.length) {
+    return uses[lastResolvedIdx + 1];
+  }
+  return uses.at(-1);
+}
+
+function formatCallDisplayHint(call: { name: string; input: unknown }): string | undefined {
+  const safe = extractSafeToolInputFields(call.input);
+  if (safe.command) return commandAsHint(safe.command);
+  if (safe.file_path) return getDisplayPath(safe.file_path);
+  if (safe.pattern) return `"${safe.pattern}"`;
+  if (safe.query) return `"${safe.query}"`;
+  return undefined;
+}
+
 export function CollapsedReadSearchContent({
   message,
   inProgressToolUseIDs,
@@ -469,7 +560,7 @@ export function CollapsedReadSearchContent({
   verbose: sourceVerbose,
   tools,
   lookups,
-  isActiveGroup,
+  isActiveGroup: isActiveGroupProp = false,
   addMargin = true,
 }: Props): React.ReactNode {
   const bg = useSelectedMessageBg();
@@ -493,7 +584,7 @@ export function CollapsedReadSearchContent({
           output: result?.type === 'user' ? result.toolUseResult : undefined,
         };
       }),
-      isActive: isActiveGroup === true,
+      isActive: isActiveGroupProp === true,
       isExpanded: sourceVerbose,
     },
     viewport: { columns: viewportColumns, rows },
@@ -547,6 +638,21 @@ export function CollapsedReadSearchContent({
   } = message;
   const [theme] = useTheme();
   const toolUseIds = getToolUseIdsFromCollapsedGroup(message);
+  // #111 (2.1.326): a stopped/failed/completed background agent's last command
+  // must never remain stuck showing "Running…".
+  const isViewedAgentTerminal = useAppState(s => {
+    const id = s.viewingAgentTaskId;
+    if (!id) return false;
+    const task = s.tasks[id];
+    return task !== undefined && (task.status === 'killed' || task.status === 'failed' || task.status === 'completed');
+  });
+  const isActiveGroup = resolveCollapsedGroupActiveState({
+    toolUseIds,
+    inProgressToolUseIDs,
+    lookups,
+    isActiveGroupProp,
+    isViewedAgentTerminal,
+  });
   const anyError = toolUseIds.some(id => lookups.erroredToolUseIDs.has(id));
   // densable V6 `fe` — Nvo/interruptedCall on any tool_result in the group.
   const anyInterrupted = toolUseIds.some(id => interruptedCall(lookups.toolResultByToolUseID.get(id)));
@@ -574,20 +680,44 @@ export function CollapsedReadSearchContent({
   // Subtract commands surfaced as "Committed …" / "Created PR …" so the
   // same command isn't counted twice. gitOpBashCount is read live (no max-ref
   // needed — it's 0 until results arrive, then only grows).
-  // #1384: Also deduct any non-run/errored/interrupted shell tool calls still
-  // inside groupMessages, and use live bashCount once finalized so popped-out
-  // calls are never overcounted by maxBashCountRef.
+  // #158 & #193 (2.1.326): Only deduct Bash calls that NEVER ran (interrupted /
+  // rejected / blocked) and are NOT classified as search/list/read; commands that
+  // actually ran and exited non-zero remain counted and get `· N failed`.
   const gitOpBashCount = message.gitOpBashCount ?? 0;
   let nonRunBashCount = 0;
   if (isFullscreenEnvEnabled()) {
     for (const gm of groupMessages) {
-      if (gm.type !== 'assistant' || !Array.isArray(gm.message.content)) continue;
-      for (const block of gm.message.content) {
-        if (typeof block !== 'object' || block === null || block.type !== 'tool_use') continue;
-        if (block.name !== 'Bash' && block.name !== 'PowerShell') continue;
-        const tr = lookups.toolResultByToolUseID.get(block.id);
-        if (lookups.erroredToolUseIDs.has(block.id) || interruptedCall(tr)) {
-          nonRunBashCount++;
+      const assistants = gm.type === 'grouped_tool_use' ? gm.messages : gm.type === 'assistant' ? [gm] : [];
+      for (const assistant of assistants) {
+        if (!Array.isArray(assistant.message.content)) continue;
+        for (const block of assistant.message.content) {
+          if (typeof block !== 'object' || block === null || block.type !== 'tool_use') continue;
+          if (block.name !== 'Bash' && block.name !== 'PowerShell') continue;
+          const info = getToolSearchOrReadInfo(block.name, block.input, tools);
+          if (info.isSearch || info.isList || info.isRead) continue;
+          const tr = lookups.toolResultByToolUseID.get(block.id);
+          const trBlock =
+            tr?.type === 'user' && Array.isArray(tr.message?.content)
+              ? (tr.message.content.find(
+                  (b): b is ToolResultBlockParam =>
+                    typeof b === 'object' &&
+                    b !== null &&
+                    'type' in b &&
+                    b.type === 'tool_result' &&
+                    b.tool_use_id === block.id,
+                ) ?? undefined)
+              : undefined;
+          const trContent = typeof trBlock?.content === 'string' ? trBlock.content : '';
+          const isDeniedOrRejected =
+            trBlock?.is_error === true &&
+            (trContent === REJECT_MESSAGE ||
+              trContent.startsWith(REJECT_MESSAGE_WITH_REASON_PREFIX) ||
+              trContent.includes('permission denied') ||
+              trContent.includes('not run') ||
+              (tr as { toolDenialKind?: string } | undefined)?.toolDenialKind !== undefined);
+          if (interruptedCall(tr) || isDeniedOrRejected) {
+            nonRunBashCount++;
+          }
         }
       }
     }
@@ -634,6 +764,18 @@ export function CollapsedReadSearchContent({
   const readPaths = message.readFilePaths;
   const searchArgs = message.searchArgs;
   let incomingHint = message.latestDisplayHint;
+  // #192 (2.1.326): in fullscreen mode while active, prefer the currently
+  // running call over a finished or queued call for the displayed hint.
+  if (isActiveGroup && isFullscreenEnvEnabled()) {
+    const uses = toolUsesFromCollapsedGroup(message);
+    const activeCall = selectActiveDisplayCall(uses, inProgressToolUseIDs, lookups.resolvedToolUseIDs);
+    if (activeCall) {
+      const activeHint = formatCallDisplayHint(activeCall);
+      if (activeHint !== undefined) {
+        incomingHint = activeHint;
+      }
+    }
+  }
   if (incomingHint === undefined) {
     const lastSearchRaw = searchArgs?.at(-1);
     const lastSearch = lastSearchRaw !== undefined ? `"${lastSearchRaw}"` : undefined;
@@ -823,17 +965,32 @@ export function CollapsedReadSearchContent({
     }
   }
 
+  // #193 (2.1.326): track when each tool ID actually enters inProgressToolUseIDs
+  // so the fullscreen tool timer excludes time spent waiting at a permission
+  // prompt or queued behind another command.
+  const toolRunStartedAtRef = useRef<Map<string, number>>(new Map());
   let activeToolAnchorMs = 0;
   if (isActiveGroup && isFullscreenEnvEnabled()) {
+    const nowMs = Date.now();
+    for (const id of toolUseIds) {
+      if (inProgressToolUseIDs.has(id) && !toolRunStartedAtRef.current.has(id)) {
+        toolRunStartedAtRef.current.set(id, nowMs);
+      }
+    }
     for (let i = groupMessages.length - 1; i >= 0 && !activeToolAnchorMs; i--) {
       const item = groupMessages[i];
       const assistants = item?.type === 'grouped_tool_use' ? item.messages : item?.type === 'assistant' ? [item] : [];
       for (const assistant of assistants) {
         const blocks = assistant.message.content as Array<{ type: string; id?: string }>;
-        if (blocks.some(b => b.type === 'tool_use' && b.id !== undefined && inProgressToolUseIDs.has(b.id))) {
+        const runningBlock = blocks.find(
+          b => b.type === 'tool_use' && b.id !== undefined && inProgressToolUseIDs.has(b.id),
+        );
+        if (runningBlock?.id) {
           const ts = typeof assistant.timestamp === 'string' ? Date.parse(assistant.timestamp) : Number.NaN;
-          if (Number.isFinite(ts)) {
-            activeToolAnchorMs = ts;
+          const runStart = toolRunStartedAtRef.current.get(runningBlock.id) ?? 0;
+          const base = Number.isFinite(ts) ? Math.max(ts, runStart) : runStart;
+          if (base > 0) {
+            activeToolAnchorMs = base;
             break;
           }
         }
@@ -1029,11 +1186,13 @@ export function CollapsedReadSearchContent({
   // shell calls (no result recorded) and user-rejected calls (rejected with
   // reason) inside this collapsed tool group.
   const isFullscreen = isFullscreenEnvEnabled();
-  type CutToolInfo = { id: string; name: string; isBash: boolean; input: unknown };
+  type CutToolInfo = { id: string; name: string; isBash: boolean; input: unknown; didNotRun: boolean };
   const cutCalls: CutToolInfo[] = [];
   let cutMcpCount = 0;
   let cutBashCount = 0;
   let rejectedWithReasonCount = 0;
+  let blockedCount = 0;
+  let failedCount = 0;
   for (const item of groupMessages) {
     const assistants = item.type === 'grouped_tool_use' ? item.messages : item.type === 'assistant' ? [item] : [];
     for (const assistant of assistants) {
@@ -1061,18 +1220,42 @@ export function CollapsedReadSearchContent({
             resultContent.startsWith('[Tool call skipped:') ||
             resultContent.startsWith('[Tool call interrupted:') ||
             resultContent.startsWith('[Tool call not completed:'));
-        const isBashTool = block.name === 'Bash' || block.name === 'PowerShell';
+        const isRejected =
+          resultBlock?.is_error === true &&
+          (resultContent.startsWith(REJECT_MESSAGE_WITH_REASON_PREFIX) || resultContent === REJECT_MESSAGE);
+        const denialKind = (resultMsg as { toolDenialKind?: string } | undefined)?.toolDenialKind;
+        const isBlocked =
+          resultBlock?.is_error === true &&
+          !isRejected &&
+          (denialKind === 'automode-blocked' ||
+            denialKind === 'blocked' ||
+            resultContent.toLowerCase().includes('permission denied') ||
+            resultContent.toLowerCase().includes('blocked by'));
+        const isSkipped = resultContent.startsWith('[Tool call skipped:');
+        const isBashTool =
+          (block.name === 'Bash' || block.name === 'PowerShell') &&
+          !(() => {
+            const info = getToolSearchOrReadInfo(block.name, block.input, tools);
+            return info.isSearch || info.isList || info.isRead;
+          })();
         const isMcpTool = block.name.startsWith('mcp__');
         if (isCutResult && (isMcpTool || (isFullscreen && isBashTool))) {
-          cutCalls.push({ id: block.id, name: block.name, isBash: isBashTool, input: block.input });
+          cutCalls.push({
+            id: block.id,
+            name: block.name,
+            isBash: isBashTool,
+            input: block.input,
+            didNotRun: isSkipped,
+          });
           if (isMcpTool) cutMcpCount++;
           if (isBashTool) cutBashCount++;
-        }
-        if (
-          resultBlock?.is_error === true &&
-          (resultContent.startsWith(REJECT_MESSAGE_WITH_REASON_PREFIX) || resultContent === REJECT_MESSAGE)
-        ) {
+        } else if (isRejected) {
           rejectedWithReasonCount++;
+        } else if (isBlocked) {
+          blockedCount++;
+        } else if (!isActiveGroup && resultBlock?.is_error === true && !isCutResult) {
+          // #158 (2.1.326): commands/tools that ran and failed show `· N failed`.
+          failedCount++;
         }
       }
     }
@@ -1169,14 +1352,39 @@ export function CollapsedReadSearchContent({
     );
   }
 
-  if (cutCalls.length > 0) {
+  const didNotRunCount = cutCalls.filter(c => c.didNotRun).length;
+  const noResultRecordedCount = cutCalls.length - didNotRunCount;
+  if (noResultRecordedCount > 0) {
     const hadOtherParts = nonMemParts.length > 0;
     pushPart(
       'cut',
       'no result recorded for',
       <Text>
-        <Text bold>{cutCalls.length}</Text> {hadOtherParts ? 'other ' : ''}
-        {cutCalls.length === 1 ? 'call' : 'calls'}
+        <Text bold>{noResultRecordedCount}</Text> {hadOtherParts ? 'other ' : ''}
+        {noResultRecordedCount === 1 ? 'call' : 'calls'}
+      </Text>,
+    );
+  }
+  if (didNotRunCount > 0) {
+    const hadOtherParts = nonMemParts.length > 0;
+    pushPart(
+      'did-not-run',
+      'did not run',
+      <Text>
+        <Text bold>{didNotRunCount}</Text> {hadOtherParts ? 'other ' : ''}
+        {didNotRunCount === 1 ? 'call' : 'calls'}
+      </Text>,
+    );
+  }
+  // #158 (2.1.326): if all calls in the group were blocked or rejected and nothing else ran,
+  // say clearly that they did not run rather than leaving an empty or passing summary.
+  if (!isActiveGroup && nonMemParts.length === 0 && (blockedCount > 0 || rejectedWithReasonCount > 0)) {
+    const totalNotRun = blockedCount + rejectedWithReasonCount;
+    pushPart(
+      'not-run-summary',
+      'did not run',
+      <Text>
+        <Text bold>{totalNotRun}</Text> {totalNotRun === 1 ? 'call' : 'calls'}
       </Text>,
     );
   }
@@ -1248,6 +1456,12 @@ export function CollapsedReadSearchContent({
                 hasPrecedingParts: nonMemParts.length > 0 || memParts.length > 0,
               })
             : null}
+          {!isActiveGroup && failedCount > 0 && (
+            <Text key="failed-count" color="error">
+              {' · '}
+              {failedCount} failed
+            </Text>
+          )}
           {activeToolAnchorMs > 0 && message.isLiveBriefTurn !== true && (
             <CollapsedToolElapsed key="tool-elapsed" anchorMs={activeToolAnchorMs} shouldAnimate={shouldAnimate} />
           )}
@@ -1262,6 +1476,16 @@ export function CollapsedReadSearchContent({
         </MessageResponse>
       )}
       {anyInterrupted && <FallbackToolUseRejectedMessage />}
+      {blockedCount > 0 && !isActiveGroup && (
+        <MessageResponse>
+          <Text dimColor wrap="wrap">
+            {toolUseIds.length === 1
+              ? 'Not run'
+              : `${blockedCount} ${blockedCount === 1 ? 'action' : 'actions'} not run`}{' '}
+            · permission denied
+          </Text>
+        </MessageResponse>
+      )}
       {rejectedWithReasonCount > 0 && !isActiveGroup && (
         <MessageResponse>
           <Text dimColor wrap="wrap">
@@ -1274,8 +1498,8 @@ export function CollapsedReadSearchContent({
       )}
       {isActiveGroup && effectiveHint !== undefined && (
         // Row layout: 5-wide gutter for ⎿, then a flex column for the text.
-        // Ink's wrap stays inside the right column so continuation lines
-        // indent under ⎿. MAX_HINT_CHARS in commandAsHint caps total at ~5 lines.
+        // #194 (2.1.326): clamp displayed hint lines to MAX_HINT_LINES so a
+        // multi-line shell command never fills the fullscreen viewport while running.
         <Box flexDirection="row">
           <Box width={5} flexShrink={0}>
             <Text aria-hidden dimColor>
@@ -1288,12 +1512,18 @@ export function CollapsedReadSearchContent({
                 {leftoverHx(effectiveHint, columns - LEFTOVER_HX_GUTTER, LEFTOVER_HX_MAX_LINES)}
               </Markdown>
             ) : (
-              effectiveHint.split('\n').map((line, i, arr) => (
-                <Text key={`hint-${i}`} dimColor>
-                  {line}
-                  {i === arr.length - 1 && shellProgressSuffix}
-                </Text>
-              ))
+              (() => {
+                const rawLines = effectiveHint.split('\n');
+                const truncated = rawLines.length > MAX_HINT_LINES;
+                const displayLines = truncated ? rawLines.slice(0, MAX_HINT_LINES) : rawLines;
+                return displayLines.map((line, i, arr) => (
+                  <Text key={`hint-${i}`} dimColor>
+                    {line}
+                    {truncated && i === arr.length - 1 && !line.endsWith('…') ? '…' : null}
+                    {i === arr.length - 1 && shellProgressSuffix}
+                  </Text>
+                ));
+              })()
             )}
           </Box>
         </Box>

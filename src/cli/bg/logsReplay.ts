@@ -85,15 +85,38 @@ export function cursorAddress(row: number, col: number): string {
 /**
  * Gold Pmr TTY suffix: `"\\x1B[0m"+(d?SI(u,1)+\\n:"")`
  * Non-TTY: empty. rows default 9999 matches `process.stdout.rows||9999`.
+ *
+ * Official 2.1.326 #204: when `preserveScrollback` is true and the stream used
+ * cursor addressing (`cursorAddressed`) on a TTY with known `rows > 0`,
+ * prepend `(rows - 1)` newlines + `CUP(1, 1)` so replaying cursor-addressed
+ * output scrolls the existing terminal contents into scrollback instead of
+ * painting over and mixing with them.
  */
+export function buildClaudeLogsCursorPrefix(
+  cursorAddressed: boolean,
+  isTTY: boolean,
+  rows: number | undefined,
+): string {
+  if (!isTTY || !cursorAddressed || !rows || rows <= 0) return ''
+  return '\n'.repeat(rows - 1) + cursorAddress(1, 1)
+}
+
 export function formatClaudeLogsReplay(
   streamTail: readonly string[],
   isTTY: boolean,
   rows: number,
+  options?: { preserveScrollback?: boolean; rawRows?: number },
 ): string {
   const { replay, cursorAddressed } = replayBgLogsStream(streamTail.join(''))
-  const suffix = isTTY
-    ? `\x1B[0m${cursorAddressed ? `${cursorAddress(rows, 1)}\n` : ''}`
+  const prefix = options?.preserveScrollback
+    ? buildClaudeLogsCursorPrefix(
+        cursorAddressed,
+        isTTY,
+        options.rawRows ?? rows,
+      )
     : ''
-  return replay + suffix
+  const suffix = isTTY
+    ? `\x1B[0m${cursorAddressed ? `${cursorAddress(rows || 9999, 1)}\n` : ''}`
+    : ''
+  return prefix + replay + suffix
 }

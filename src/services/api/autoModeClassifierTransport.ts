@@ -17,6 +17,8 @@ import {
 import {
   getFeatureFlagsDisabledEnvVar,
   getFeatureValue_CACHED_MAY_BE_STALE,
+  getFeatureValueWithSource,
+  isDiskCacheReadableWhileDisabled,
 } from '../analytics/growthbook.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { getFrozenStartupEnv } from '../../utils/managedEnv.js'
@@ -177,7 +179,13 @@ export function serverClassifierBetasEligible(opts?: {
 }): boolean {
   switch (classifyClassifierProviderKind()) {
     case 'firstParty':
-      return experimentalCapabilityBetasForClassifier()
+      // Official 2.1.326 #298 (`q4t`): for HIPAA Cowork orgs on a direct
+      // Anthropic API connection, enable the server-side classifier just like
+      // other orgs unless CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS is set.
+      return (
+        experimentalCapabilityBetasForClassifier() ||
+        (leftoverHipaa() && !process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS)
+      )
     case 'thirdParty': {
       const provider = getAPIProvider()
       const externalRaw = readExternalAutoModeServerRaw()
@@ -308,7 +316,7 @@ export function isLocalAutoModeClassifierSwitchedOff(
     iridescentCrystalOff() ||
     (userSwitch === null &&
       isFirstPartyAnthropicBaseUrl() &&
-      !autoModeContextOn())
+      !peekAutoModeContextOn())
   ) {
     return false
   }
@@ -347,12 +355,52 @@ function spoAutoModeContextOverride(): boolean | undefined {
   return undefined
 }
 
-/** densable `kPt` — spo() ?? tengu_smooth_chipmunk default true. */
+/**
+ * Official 2.1.326 #56 (`rxn`): a stale `false` for `tengu_smooth_chipmunk`
+ * read only from the on-disk GrowthBook cache (when disk-cache-while-disabled
+ * is not active) must not latch auto mode onto the local classifier before the
+ * fresh remote-eval config arrives.
+ */
+export function isStaleDiskAutoModeContextOff(): boolean {
+  if (
+    spoAutoModeContextOverride() !== undefined ||
+    isDiskCacheReadableWhileDisabled()
+  ) {
+    return false
+  }
+  const { value, source } = getFeatureValueWithSource(
+    'tengu_smooth_chipmunk',
+    true,
+  )
+  return value === false && source === 'disk'
+}
+
+/** Official 2.1.326 #56 (`sxn`): evaluate `tengu_smooth_chipmunk` ignoring stale disk-off. */
+function readAutoModeContextFlag(): boolean {
+  return (
+    isStaleDiskAutoModeContextOff() ||
+    (spoAutoModeContextOverride() ?? featureBool('tengu_smooth_chipmunk', true))
+  )
+}
+
+/**
+ * densable `kPt` / Official 2.1.326 #56 (`ldt`):
+ * Do not latch `autoModeContextEnabled` when the only negative reading is a
+ * stale on-disk cache entry; wait until a live payload / override / fallback is
+ * observed so config changes unstick auto mode from the local classifier.
+ */
 export function autoModeContextOn(): boolean {
+  if (autoModeContextEnabled === undefined && isStaleDiskAutoModeContextOff()) {
+    return true
+  }
   if (autoModeContextEnabled !== undefined) return autoModeContextEnabled
-  autoModeContextEnabled =
-    spoAutoModeContextOverride() ?? featureBool('tengu_smooth_chipmunk', true)
+  autoModeContextEnabled = readAutoModeContextFlag()
   return autoModeContextEnabled
+}
+
+/** Official 2.1.326 #56 (`qAn`): peek without latching `autoModeContextEnabled`. */
+export function peekAutoModeContextOn(): boolean {
+  return autoModeContextEnabled ?? readAutoModeContextFlag()
 }
 
 /** densable `HOe` — tengu_iridescent_crystal default false. */

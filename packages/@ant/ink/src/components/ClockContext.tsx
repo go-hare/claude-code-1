@@ -26,7 +26,9 @@ export function snapClockIntervalMs(intervalMs: number): number {
 
 export function createClock(tickIntervalMs: number): Clock {
   const subscribers = new Map<() => void, boolean>();
+  let keepAliveCount = 0;
   let interval: ReturnType<typeof setInterval> | null = null;
+  let activeTickIntervalMs = tickIntervalMs;
   let currentTickIntervalMs = tickIntervalMs;
   // densable `l` — stamped at construction (`performance.now()`).
   const origin = performance.now();
@@ -40,16 +42,21 @@ export function createClock(tickIntervalMs: number): Clock {
     }
   }
 
+  // 2.1.326 #242: O(1) keepAlive tracking & avoid restarting an unchanged interval
+  // so idle sessions have zero active timers and active sessions avoid timer churn.
   function updateInterval(): void {
-    const anyKeepAlive = [...subscribers.values()].some(Boolean);
-
-    if (anyKeepAlive) {
+    if (keepAliveCount > 0) {
+      if (interval !== null && activeTickIntervalMs === currentTickIntervalMs) {
+        return;
+      }
       if (interval !== null) {
         clearInterval(interval);
       } else {
         tickTime = performance.now() - origin;
       }
+      activeTickIntervalMs = currentTickIntervalMs;
       interval = setInterval(tick, currentTickIntervalMs);
+      interval.unref?.();
     } else if (interval !== null) {
       clearInterval(interval);
       interval = null;
@@ -58,11 +65,20 @@ export function createClock(tickIntervalMs: number): Clock {
 
   // densable `f` — gold Clock inner helper (not a public bind).
   function f(onChange: () => void, keepAlive: boolean): () => void {
+    const prev = subscribers.get(onChange);
+    if (prev !== undefined) {
+      if (prev) keepAliveCount--;
+    }
     subscribers.set(onChange, keepAlive);
+    if (keepAlive) keepAliveCount++;
     updateInterval();
     return () => {
-      subscribers.delete(onChange);
-      updateInterval();
+      const wasKeepAlive = subscribers.get(onChange);
+      if (wasKeepAlive !== undefined) {
+        if (wasKeepAlive) keepAliveCount--;
+        subscribers.delete(onChange);
+        updateInterval();
+      }
     };
   }
 

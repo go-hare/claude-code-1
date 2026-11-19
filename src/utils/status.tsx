@@ -41,6 +41,249 @@ import type { ThemeName } from './theme.js';
 import { isHarborKiteEnabled } from './teleport/cloudPeerAccess.js';
 import { getOtelResourceAttributeStatus } from './telemetryAttributes.js';
 import { getUdsStartFailureReason } from './udsMessaging.js';
+import type { Command } from '../commands.js';
+import { getIsRemoteMode } from '../bootstrap/state.js';
+import { getAuthTokenSource, getAnthropicApiKeyWithSource } from './auth.js';
+
+const FEATURE_DOCS_BASE_URL = 'https://code.claude.com/docs/en';
+
+type DisabledFeatureGate = 'anthropicApi' | 'subscription' | 'nonessentialTraffic' | 'featureFlags';
+
+type DisabledFeatureCause =
+  | { kind: 'provider'; label: string }
+  | { kind: 'variable'; name: string }
+  | { kind: 'signIn' }
+  | { kind: 'deniedAfterSignIn' };
+
+/**
+ * Official 2.1.326 #4 & #262 (`d` @319388200): built-in slash commands that are
+ * gated by API provider, subscription sign-in, nonessential traffic env vars,
+ * or feature-flag fetching env vars.
+ */
+const COMMAND_FEATURE_GATES: Record<string, readonly DisabledFeatureGate[]> = {
+  advisor: ['anthropicApi', 'featureFlags'],
+  'artifact-capabilities': ['subscription', 'nonessentialTraffic'],
+  'artifact-diagramming': ['anthropicApi', 'nonessentialTraffic'],
+  artifacts: ['subscription', 'nonessentialTraffic'],
+  'autofix-pr': ['subscription'],
+  chrome: ['subscription'],
+  'claude-in-chrome': ['subscription'],
+  design: ['anthropicApi', 'nonessentialTraffic'],
+  'design-login': ['anthropicApi', 'nonessentialTraffic'],
+  'design-sync': ['anthropicApi', 'nonessentialTraffic'],
+  desktop: ['subscription'],
+  import: ['featureFlags'],
+  'install-github-app': ['subscription'],
+  'install-slack-app': ['subscription'],
+  logout: ['anthropicApi'],
+  'privacy-settings': ['subscription'],
+  'rate-limit-options': ['subscription'],
+  'remote-control': ['subscription', 'nonessentialTraffic', 'featureFlags'],
+  'remote-env': ['subscription'],
+  schedule: ['subscription'],
+  'skill-doctor': ['featureFlags'],
+  slides: ['anthropicApi', 'nonessentialTraffic'],
+  teleport: ['subscription'],
+  ultrareview: ['subscription', 'featureFlags'],
+  upgrade: ['subscription'],
+  'usage-credits': ['subscription'],
+  voice: ['subscription'],
+  'web-setup': ['subscription', 'nonessentialTraffic'],
+};
+
+const API_PROVIDER_DISPLAY_LABELS: Record<string, string> = {
+  bedrock: 'AWS Bedrock',
+  vertex: 'Google Vertex AI',
+  foundry: 'Microsoft Foundry',
+  anthropicAws: 'Anthropic on AWS',
+  anthropicGoogleCloud: 'Claude Platform on Google Cloud',
+  mantle: 'Amazon Bedrock Mantle',
+  gateway: 'Cloud gateway',
+  gemini: 'Gemini API',
+  grok: 'Grok API',
+  openai: 'OpenAI API',
+};
+
+function getNonessentialTrafficEnvVar(): string | null {
+  if (process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC) {
+    return 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC';
+  }
+  return null;
+}
+
+function getFeatureFlagDisableEnvVar(): string | null {
+  if (process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC) {
+    return 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC';
+  }
+  if (process.env.DISABLE_TELEMETRY) {
+    return 'DISABLE_TELEMETRY';
+  }
+  if (isEnvTruthy(process.env.DO_NOT_TRACK)) {
+    return 'DO_NOT_TRACK';
+  }
+  if (isEnvTruthy(process.env.DISABLE_GROWTHBOOK)) {
+    return 'DISABLE_GROWTHBOOK';
+  }
+  return null;
+}
+
+function evaluateFeatureGate(gate: DisabledFeatureGate, matchingCommands: Command[]): DisabledFeatureCause | undefined {
+  const provider = getAPIProvider();
+  const providerCause: DisabledFeatureCause | undefined =
+    provider === 'firstParty'
+      ? undefined
+      : { kind: 'provider', label: API_PROVIDER_DISPLAY_LABELS[provider] ?? provider };
+
+  switch (gate) {
+    case 'anthropicApi':
+      return providerCause;
+    case 'subscription': {
+      if (isClaudeAISubscriber()) {
+        return undefined;
+      }
+      if (providerCause) {
+        return providerCause;
+      }
+      if (matchingCommands.some(c => c.availability?.includes('console'))) {
+        return { kind: 'variable', name: 'ANTHROPIC_BASE_URL' };
+      }
+      return { kind: 'signIn' };
+    }
+    case 'nonessentialTraffic': {
+      const envName = getNonessentialTrafficEnvVar();
+      return envName ? { kind: 'variable', name: envName } : undefined;
+    }
+    case 'featureFlags': {
+      const envName = getFeatureFlagDisableEnvVar();
+      return envName ? { kind: 'variable', name: envName } : undefined;
+    }
+  }
+}
+
+function getCommandDisabledCause(commandName: string, commands: Command[]): DisabledFeatureCause | undefined {
+  if (!Object.hasOwn(COMMAND_FEATURE_GATES, commandName) || getIsRemoteMode()) {
+    return undefined;
+  }
+  const matching = commands.filter(c => c.name === commandName);
+  const gates = COMMAND_FEATURE_GATES[commandName];
+  if (!gates) return undefined;
+  const cause = gates.map(g => evaluateFeatureGate(g, matching)).find(r => r !== undefined);
+  if (cause !== undefined && matching.some(c => c.isEnabled?.() ?? true)) {
+    return undefined;
+  }
+  return cause;
+}
+
+/**
+ * Official 2.1.326 #4 (`gFs`): `/status` row explaining when the API provider
+ * or an environment variable (e.g. `DISABLE_TELEMETRY`, `DO_NOT_TRACK`,
+ * `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`) turns built-in features off.
+ */
+export function buildDisabledFeaturesProperties(commands: Command[] = []): Property[] {
+  if (getIsRemoteMode()) {
+    return [];
+  }
+  const cause =
+    evaluateFeatureGate('anthropicApi', []) ??
+    evaluateFeatureGate('nonessentialTraffic', []) ??
+    evaluateFeatureGate('featureFlags', []);
+  if (!cause) {
+    return [];
+  }
+  if (cause.kind === 'provider') {
+    return [
+      {
+        label: 'Features',
+        value: `some aren't available with ${cause.label}: ${FEATURE_DOCS_BASE_URL}/feature-availability`,
+        linkify: true,
+      },
+    ];
+  }
+  if (cause.kind !== 'variable') {
+    return [];
+  }
+  const affected = Object.keys(COMMAND_FEATURE_GATES).filter(name => {
+    const c = getCommandDisabledCause(name, commands);
+    return c?.kind === 'variable' && c.name === cause.name;
+  });
+  const examples = affected.length > 0 ? `, such as /${affected.slice(0, 6).join(', /')}` : '';
+  const anchor = cause.name === getNonessentialTrafficEnvVar() ? '' : '#features-that-need-feature-flag-fetching';
+  return [
+    {
+      label: 'Features',
+      value: `some aren't available while ${cause.name} is set${examples}: ${FEATURE_DOCS_BASE_URL}/env-vars${anchor}`,
+      linkify: true,
+    },
+  ];
+}
+
+/**
+ * Official 2.1.326 #262 (`xsa`): explain why a built-in slash command is turned
+ * off for the current provider, sign-in, or environment variable instead of
+ * reporting `"Unknown command"`.
+ */
+export function getDisabledCommandReason(
+  commandName: string,
+  commands: Command[],
+): { command?: Command; reason: string } | undefined {
+  const normalized = commandName.trim().replace(/^\//, '');
+  const matched = commands.find(c => c.name === normalized || c.aliases?.includes(normalized));
+  const canonicalName = matched?.name ?? normalized;
+  const cause = getCommandDisabledCause(canonicalName, commands);
+  if (!cause || cause.kind === 'deniedAfterSignIn') {
+    return undefined;
+  }
+  switch (cause.kind) {
+    case 'provider':
+      return {
+        command: matched,
+        reason: `/${canonicalName} isn't available with ${cause.label}. See ${FEATURE_DOCS_BASE_URL}/feature-availability`,
+      };
+    case 'variable': {
+      const policyEnv = getSettingsForSource('policySettings')?.env;
+      const adminNote = policyEnv?.[cause.name] !== undefined ? ' Your admin set it.' : '';
+      return {
+        command: matched,
+        reason: `/${canonicalName} isn't available while ${cause.name} is set.${adminNote}`,
+      };
+    }
+    case 'signIn': {
+      const tokenSrc = getAuthTokenSource().source;
+      const apiKeySrc = getAnthropicApiKeyWithSource({ skipRetrievingKeyFromApiKeyHelper: true }).source;
+      const altAuth = [tokenSrc, apiKeySrc].find(
+        src => src === 'ANTHROPIC_AUTH_TOKEN' || src === 'ANTHROPIC_API_KEY' || src === 'apiKeyHelper',
+      );
+      const canLogin = tokenSrc === 'none' && !isEnvTruthy(process.env.DISABLE_LOGIN_COMMAND);
+      const tail = altAuth
+        ? ` This session uses ${altAuth} instead.`
+        : canLogin
+          ? ' Run /login to sign in with one.'
+          : ' Run /status to see how this session is signed in.';
+      return {
+        command: matched,
+        reason: `/${canonicalName} needs a Claude subscription.${tail}`,
+      };
+    }
+  }
+}
+
+/**
+ * Official 2.1.326 #210 (`xTs`): deduplicate identical string diagnostics so
+ * installation warnings from checkInstall + doctor don't appear twice in `/status`.
+ */
+export function deduplicateDiagnostics(diagnostics: Diagnostic[]): Diagnostic[] {
+  const seenStrings = new Set<string>();
+  const result: Diagnostic[] = [];
+  for (const item of diagnostics) {
+    if (typeof item === 'string') {
+      const key = item.trim();
+      if (seenStrings.has(key)) continue;
+      seenStrings.add(key);
+    }
+    result.push(item);
+  }
+  return result;
+}
 
 export type Property = {
   label?: string;

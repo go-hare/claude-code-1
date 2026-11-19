@@ -57,13 +57,16 @@ import {
   shouldMarkGatewayRouted,
   writeGatewayMark,
   clearGatewayMark,
+  hydrateGatewayMark,
 } from './bgWorker.js'
 import {
   applyWorkerCredentialSwitchCleanup,
   isBgGatewayMarkEnabled,
+  isShellExportedGatewayEnv,
 } from './bgHostManagedEnv.js'
 import {
   BG_PROFILE_MIN_DAEMON_CAP,
+  computeBgSessionCredentialAnchor,
   reconcileBgJobCredentialAnchor,
   verifyRuntimeBgCredentialAnchor,
 } from './bgSessionCredential.js'
@@ -655,11 +658,31 @@ export async function startBgManager(opts?: {
     hasDispatched = true
 
     if (retryCount === 0) {
-      delete req.gatewayRouted
-      delete req.gatewayMarkUnreadable
       if (isBgGatewayMarkEnabled() && shouldMarkGatewayRouted(req)) {
         req.gatewayRouted = true
         void writeGatewayMark(req.short)
+      }
+      // Official 2.1.326 #33: when a new background session resumes an older
+      // session's conversation ID, mark the older job `sessionIdTaken: true`
+      // so opening, stopping, or removing the older job never kills the new
+      // live background session.
+      if (req.launch.mode === 'resume') {
+        const resumedSid = req.launch.sessionId
+        const olderShort = resumedSid?.slice(0, 8)
+        if (olderShort && olderShort !== req.short) {
+          const olderWorker = handles.get(olderShort)
+          if (olderWorker) {
+            olderWorker.markSessionIdTaken()
+          }
+          const olderState = readBgJobState(olderShort)
+          if (olderState && !olderState.sessionIdTaken) {
+            writeBgJobState(olderShort, {
+              ...olderState,
+              sessionIdTaken: true,
+              updatedAt: new Date().toISOString(),
+            })
+          }
+        }
       }
     }
 
@@ -694,8 +717,11 @@ export async function startBgManager(opts?: {
       )
       return
     }
-    if (!req.gatewayRouted) {
-      void clearGatewayMark(req.short)
+    // Official 2.1.326 #14: do NOT wipe an existing `gateway-routed` marker
+    // on disk when re-dispatched without the gateway; `doSpawn` hydrates it
+    // and stops before sending any model request.
+    if (isBgGatewayMarkEnabled() && !req.gatewayRouted) {
+      void hydrateGatewayMark(req)
     }
     // Claim in flight (no handle yet) — retry like settling, never cold-parallel.
     if (claimingShorts.has(req.short)) {
@@ -1190,6 +1216,23 @@ async function handleControlRequest(
       version: MACRO.VERSION,
       proto: PROTO_VERSION,
       profileAnchorCap: BG_PROFILE_MIN_DAEMON_CAP,
+      hasGateway: isShellExportedGatewayEnv(process.env),
+    }
+  }
+  // Official 2.1.326 #61 & #335 & #14: allow clients (`xSeSpawn`, agent view
+  // resume, `claude --bare --bg`) to verify whether the running daemon carries
+  // the same shell credential fingerprint / LLM gateway without exposing secrets.
+  if (op === 'check-credential') {
+    const requestedCred =
+      typeof req.credential === 'string' ? req.credential : undefined
+    const daemonAnchor = computeBgSessionCredentialAnchor(process.env)
+    return {
+      ok: true,
+      op: 'check-credential',
+      matches:
+        requestedCred !== undefined &&
+        daemonAnchor.credential === requestedCred,
+      hasGateway: isShellExportedGatewayEnv(process.env),
     }
   }
   if (op === 'nudge') {
@@ -1617,6 +1660,18 @@ async function handleControlRequest(
       if (!worker) return { ok: false, error: 'job not found', code: 'ENOJOB' }
       worker.kill('SIGTERM')
       return { ok: true, op: 'stop' }
+    }
+
+    case 'retire-empty-quit': {
+      // Official 2.1.326 #340: immediately retire an empty conversation on
+      // Ctrl+C×2, Ctrl+D×2, or `/exit` after `←` instead of waiting 5 minutes.
+      const short = req.short as string
+      const worker = handles.get(short)
+      if (!worker) return { ok: false, error: 'job not found', code: 'ENOJOB' }
+      const res = await worker.retireIfSettled(0, undefined, 0, {
+        immediateOnEmptyQuit: true,
+      })
+      return { ok: true, op: 'retire-empty-quit', ...res }
     }
 
     case 'attach':

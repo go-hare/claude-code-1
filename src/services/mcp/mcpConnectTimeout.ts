@@ -24,16 +24,94 @@ export const DEFAULT_MCP_TIMEOUT_MS = 30_000
 /** #2054: Official `Bre` — minimum 2s prewait floor for required MCP servers. */
 export const MCP_REQUIRED_SERVER_STARTUP_FLOOR_MS = 2_000
 /**
- * #2054: Compute the effective startup prewait budget for an MCP server in SDK
- * sessions. When settings lower `CLAUDE_CODE_MCP_STARTUP_WAIT_MS` below 2000ms
- * after startup, servers required by `--allowedTools` or an `mcp_tool` hook
- * still receive at least `MCP_REQUIRED_SERVER_STARTUP_FLOOR_MS` (2000ms)
- * before the first turn.
+ * Official 2.1.326 #247 (`AM` @323407125): Identify pending local (stdio) MCP
+ * servers whose tools load on demand so the first turn does not wait up to
+ * 500ms for them (e.g. in Claude Desktop new sessions).
+ */
+export type McpPrewaitClientDescriptor = {
+  name: string
+  type: string
+  config?: {
+    type?: string
+    alwaysLoad?: boolean
+  }
+}
+
+const DESKTOP_ON_DEMAND_ENTRYPOINTS = new Set([
+  'claude-desktop',
+  'desktop',
+  'claude-desktop-code',
+])
+
+export function isLocalOnDemandMcpServer(
+  client: McpPrewaitClientDescriptor,
+  options?: {
+    entrypoint?: string
+    skipPluginMcpServers?: boolean
+    relayCarrierPresent?: boolean
+    toolSearchEnabled?: boolean
+  },
+): boolean {
+  if (client.type !== 'pending') return false
+  const cfgType = client.config?.type
+  if (cfgType !== undefined && cfgType !== 'stdio') return false
+  if (client.config?.alwaysLoad === true) return false
+  if (client.config?.alwaysLoad === false) return true
+  const toolSearch = options?.toolSearchEnabled ?? true
+  if (!toolSearch) return false
+  const entrypoint = options?.entrypoint ?? process.env.CLAUDE_CODE_ENTRYPOINT
+  const isDesktop =
+    entrypoint !== undefined && DESKTOP_ON_DEMAND_ENTRYPOINTS.has(entrypoint)
+  return (
+    isDesktop && !options?.skipPluginMcpServers && !options?.relayCarrierPresent
+  )
+}
+
+export function collectOnDemandLocalMcpPrewaitSkipServers(input: {
+  clients: readonly McpPrewaitClientDescriptor[]
+  requiredServerNames?: ReadonlySet<string>
+  referencedServerNames?: ReadonlySet<string>
+  entrypoint?: string
+  skipPluginMcpServers?: boolean
+  relayCarrierPresent?: boolean
+  toolSearchEnabled?: boolean
+}): Set<string> {
+  const skipped = new Set<string>()
+  const normalize = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, '_')
+  for (const client of input.clients) {
+    if (!isLocalOnDemandMcpServer(client, input)) continue
+    const norm = normalize(client.name)
+    if (
+      input.requiredServerNames?.has(client.name) ||
+      input.requiredServerNames?.has(norm) ||
+      input.referencedServerNames?.has(client.name) ||
+      input.referencedServerNames?.has(norm)
+    ) {
+      continue
+    }
+    skipped.add(client.name)
+  }
+  return skipped
+}
+
+/**
+ * #2054 & #247: Compute the effective startup prewait budget for an MCP server
+ * in SDK/Desktop sessions. When settings lower `CLAUDE_CODE_MCP_STARTUP_WAIT_MS`
+ * below 2000ms after startup, servers required by `--allowedTools` or an
+ * `mcp_tool` hook still receive at least `MCP_REQUIRED_SERVER_STARTUP_FLOOR_MS`
+ * (2000ms) before the first turn. Conversely (Official 2.1.326 #247), when all
+ * pending servers are local on-demand MCP servers that do not need upfront
+ * loading, return `0` so the first turn skips the up-to-500ms wait.
  */
 export function resolveMcpStartupPrewaitBudgetMs(options: {
   configuredWaitMs?: number
   hasPendingRequiredServers: boolean
   elapsedMs?: number
+  pendingClients?: readonly McpPrewaitClientDescriptor[]
+  requiredServerNames?: ReadonlySet<string>
+  referencedServerNames?: ReadonlySet<string>
+  entrypoint?: string
+  toolSearchEnabled?: boolean
 }): number {
   const configured = Math.max(0, options.configuredWaitMs ?? 0)
   const elapsed = Math.max(0, options.elapsedMs ?? 0)
@@ -42,6 +120,25 @@ export function resolveMcpStartupPrewaitBudgetMs(options: {
     configured < MCP_REQUIRED_SERVER_STARTUP_FLOOR_MS
   ) {
     return Math.max(0, MCP_REQUIRED_SERVER_STARTUP_FLOOR_MS - elapsed)
+  }
+  if (
+    !options.hasPendingRequiredServers &&
+    options.pendingClients &&
+    options.pendingClients.length > 0
+  ) {
+    const pending = options.pendingClients.filter(c => c.type === 'pending')
+    if (pending.length > 0) {
+      const skipped = collectOnDemandLocalMcpPrewaitSkipServers({
+        clients: pending,
+        requiredServerNames: options.requiredServerNames,
+        referencedServerNames: options.referencedServerNames,
+        entrypoint: options.entrypoint,
+        toolSearchEnabled: options.toolSearchEnabled,
+      })
+      if (skipped.size === pending.length) {
+        return 0
+      }
+    }
   }
   return Math.max(0, configured - elapsed)
 }

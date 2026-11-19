@@ -54,6 +54,7 @@ import {
   formatRemintRetryStatus,
   isEpochStaleRecoverableClose,
   isRecoverableCloseCode,
+  isTransientMidReplyUnavailableClose,
   noteHealthyAuthBeat,
   noteRecoverySuccess,
   CLAUDE_AI_LOGIN_EXPIRED_RESTORE_DETAIL,
@@ -70,6 +71,10 @@ import {
   SESSION_TELEPORTED_DETAIL,
 } from './remintRecovery.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import {
+  isValidChromeSiteName,
+  resolveChromeSiteForPermissionPrompt,
+} from '../utils/claudeInChrome/chromeCallPermission.js'
 import {
   getReplBridgeSessionId,
   isTeleportedSessionId,
@@ -340,6 +345,11 @@ export type EnvLessBridgeParams = {
   backgroundHold?: {
     holdsRunning: () => boolean
   }
+  /**
+   * Official 2.1.326 #94: initial worker state when Remote Control is turned on
+   * (e.g. `'running'` when a tool or turn is already in progress in the terminal).
+   */
+  initialWorkerState?: 'idle' | 'running'
   /** #1860: Provide slash commands to deduplicate and advertise on `initialize`. */
   getInitializeCommands?: () => readonly BridgeSlashCommandInput[]
   onStateChange?: (state: BridgeState, detail?: string) => void
@@ -416,6 +426,80 @@ export type EnvLessBridgeParams = {
 }
 
 /**
+ * Official 2.1.326 #239 (`uJi`): filter SDK messages for bridge streaming
+ * forwarding. Drops empty keepalive `ping` stream events while allowing partial
+ * `stream_event` text/thinking/tool deltas to stream to claude.ai / mobile.
+ */
+export function filterStreamEventForBridge(msg: SDKMessage): boolean {
+  if (msg.type !== 'stream_event') return true
+  const ev = (msg as { event?: { type?: unknown } }).event
+  if (ev && ev.type === 'ping') return false
+  return true
+}
+
+/**
+ * Official 2.1.326 #254: build `RequiresActionDetails` for a `can_use_tool`
+ * permission request, including `chrome_site` for Claude in Chrome tools even
+ * when the site is already allowed so claude.ai names the target site.
+ */
+export function buildCanUseToolDetailsPayload(
+  requestId: string,
+  inner: Record<string, unknown>,
+): RequiresActionDetails & { chrome_site?: string } {
+  const toolName =
+    typeof inner.tool_name === 'string' && inner.tool_name
+      ? inner.tool_name
+      : 'Tool'
+  const toolUseId =
+    typeof inner.tool_use_id === 'string' ? inner.tool_use_id : ''
+  const inputObj =
+    inner.input && typeof inner.input === 'object'
+      ? (inner.input as Record<string, unknown>)
+      : {}
+  const rawCommand =
+    typeof inputObj.command === 'string' ? inputObj.command : undefined
+
+  const explicitChromeSite =
+    typeof inner.chrome_site === 'string' &&
+    isValidChromeSiteName(inner.chrome_site)
+      ? inner.chrome_site
+      : undefined
+  const isChromeTool = toolName.startsWith('mcp__claude-in-chrome__')
+  const chromeSite =
+    explicitChromeSite ??
+    (isChromeTool
+      ? resolveChromeSiteForPermissionPrompt(toolUseId, inputObj)
+      : undefined)
+
+  const explicitDesc =
+    typeof inner.description === 'string' && inner.description
+      ? inner.description
+      : typeof inputObj.description === 'string' && inputObj.description
+        ? inputObj.description
+        : undefined
+  let actionDescription =
+    explicitDesc ??
+    (rawCommand
+      ? rawCommand.slice(0, 160)
+      : chromeSite
+        ? `Approve or deny ${toolName} on ${chromeSite}`
+        : `Approve or deny ${toolName}`)
+  if (chromeSite && !actionDescription.includes(chromeSite)) {
+    actionDescription = `${actionDescription} (${chromeSite})`
+  }
+  return {
+    tool_name: toolName,
+    display_tool_name: toolName,
+    action_description: actionDescription,
+    ...(rawCommand ? { raw_command: rawCommand } : {}),
+    ...(chromeSite ? { chrome_site: chromeSite } : {}),
+    tool_use_id: toolUseId,
+    request_id: requestId,
+    input: inputObj,
+  }
+}
+
+/**
  * Create a session, fetch a worker JWT, connect the v2 transport.
  *
  * Returns null on any pre-flight failure (session create failed, /bridge
@@ -460,7 +544,10 @@ export async function initEnvLessBridgeCore(
     neutralFallbackTitle,
     onTransportPersistenceReady,
     backgroundHold,
+    initialWorkerState,
   } = params
+
+  let replyTurnActive = initialWorkerState === 'running'
 
   const cfg = await getEnvLessBridgeConfig()
 
@@ -1264,10 +1351,27 @@ export async function initEnvLessBridgeCore(
       deferredClose = undefined
     }
 
+    // Official 2.1.326 #91: brief server unavailability mid-reply must recover
+    // via remint/reconnect instead of permanently disconnecting the session.
+    const transientMidReply = isTransientMidReplyUnavailableClose(
+      code,
+      cause,
+      replyTurnActive,
+    )
+    const effectiveRecoverCode = transientMidReply ? 4093 : code
+
     // densable: if(kd($t)) { budgets; _o++; nn($t) }
-    if (code !== undefined && isRecoverableCloseCode(code)) {
+    if (
+      effectiveRecoverCode !== undefined &&
+      isRecoverableCloseCode(effectiveRecoverCode)
+    ) {
+      if (transientMidReply) {
+        logForDebugging(
+          `[remote-bridge] Transient server unavailability mid-reply (code=${code}, cause=${cause ?? 'none'}) — recovering instead of disconnecting`,
+        )
+      }
       const budget = evaluateRecoverableCloseBudgets({
-        code,
+        code: effectiveRecoverCode,
         reentry: opts.reentry,
         counters: recoveryBudgets,
         heartbeatBudget,
@@ -1286,7 +1390,7 @@ export async function initEnvLessBridgeCore(
         return false
       }
       recoveryBudgets = budget.counters
-      void recoverFromCloseCode(code, budget.delayMs)
+      void recoverFromCloseCode(effectiveRecoverCode, budget.delayMs)
       return false
     }
 
@@ -2096,14 +2200,16 @@ export async function initEnvLessBridgeCore(
     },
   )
 
-  // Official 2.1.323 #2113 (`Jt` / `rs` / `Mo`): track terminal-only
-  // permission prompts / blocking dialogs so Remote Control reports
-  // `requires_action` instead of `running` while awaiting terminal input.
+  // Official 2.1.323 #2113 (`Jt` / `rs` / `Mo`) + 2.1.326 #94: track
+  // terminal-only permission prompts / blocking dialogs so Remote Control
+  // reports `requires_action` instead of `running` while awaiting terminal input.
   const terminalOnlyBlockingDialogs = new Map<
     string,
     RequiresActionDetails | undefined
   >()
-  let lastUnderlyingState: 'idle' | 'running' | 'requires_action' = 'idle'
+  const blockingDialogRefCounts = new Map<string, number>()
+  let lastUnderlyingState: 'idle' | 'running' | 'requires_action' =
+    initialWorkerState === 'running' ? 'running' : 'idle'
 
   function reportEffectiveState(
     state: 'idle' | 'running' | 'requires_action',
@@ -2111,6 +2217,7 @@ export async function initEnvLessBridgeCore(
   ): void {
     if (state !== 'requires_action') {
       lastUnderlyingState = state
+      replyTurnActive = state === 'running'
       if (terminalOnlyBlockingDialogs.size > 0) {
         const lastEntry = [...terminalOnlyBlockingDialogs.entries()].at(-1)
         const dialogDetails =
@@ -2137,40 +2244,18 @@ export async function initEnvLessBridgeCore(
     }
   }
 
+  // Official 2.1.326 #94: if Remote Control was turned on while a tool or turn
+  // was already running in the terminal, immediately report `'running'` instead
+  // of staying stuck on `'idle'` until the next user prompt.
+  if (initialWorkerState === 'running') {
+    reportEffectiveState('running')
+  }
+
   function buildCanUseToolDetails(
     requestId: string,
     inner: Record<string, unknown>,
   ): RequiresActionDetails {
-    const toolName =
-      typeof inner.tool_name === 'string' && inner.tool_name
-        ? inner.tool_name
-        : 'Tool'
-    const toolUseId =
-      typeof inner.tool_use_id === 'string' ? inner.tool_use_id : ''
-    const inputObj =
-      inner.input && typeof inner.input === 'object'
-        ? (inner.input as Record<string, unknown>)
-        : {}
-    const rawCommand =
-      typeof inputObj.command === 'string' ? inputObj.command : undefined
-    const explicitDesc =
-      typeof inner.description === 'string' && inner.description
-        ? inner.description
-        : typeof inputObj.description === 'string' && inputObj.description
-          ? inputObj.description
-          : undefined
-    const actionDescription =
-      explicitDesc ??
-      (rawCommand ? rawCommand.slice(0, 160) : `Approve or deny ${toolName}`)
-    return {
-      tool_name: toolName,
-      display_tool_name: toolName,
-      action_description: actionDescription,
-      ...(rawCommand ? { raw_command: rawCommand } : {}),
-      tool_use_id: toolUseId,
-      request_id: requestId,
-      input: inputObj,
-    }
+    return buildCanUseToolDetailsPayload(requestId, inner)
   }
 
   // densable Qt: sessionGroupingId:He, outboundOnly:B??!1,
@@ -2255,11 +2340,23 @@ export async function initEnvLessBridgeCore(
     },
     writeSdkMessages(messages: SDKMessage[]) {
       const filtered = messages.filter(
-        m => !m.uuid || !recentPostedUUIDs.has(m.uuid as string),
+        m =>
+          filterStreamEventForBridge(m) &&
+          (m.type === 'stream_event' ||
+            !m.uuid ||
+            !recentPostedUUIDs.has(m.uuid as string)),
       )
       if (filtered.length === 0) return
+      let hasStreamingDelta = false
       for (const msg of filtered) {
-        if (msg.uuid) recentPostedUUIDs.add(msg.uuid as string)
+        if (msg.type === 'stream_event') {
+          hasStreamingDelta = true
+        } else if (msg.uuid) {
+          recentPostedUUIDs.add(msg.uuid as string)
+        }
+      }
+      if (hasStreamingDelta && lastUnderlyingState !== 'running') {
+        reportEffectiveState('running')
       }
       const events = filtered.map(m => ({
         ...m,
@@ -2416,6 +2513,50 @@ export async function initEnvLessBridgeCore(
           reportEffectiveState('requires_action', effectiveDetails)
         } else {
           reportEffectiveState(lastUnderlyingState)
+        }
+      }
+    },
+    reportBlockingDialog(kind: string, open: boolean) {
+      if (tornDown) return
+      const prev = blockingDialogRefCounts.get(kind) ?? 0
+      if (open) {
+        blockingDialogRefCounts.set(kind, prev + 1)
+      } else if (prev > 1) {
+        blockingDialogRefCounts.set(kind, prev - 1)
+      } else {
+        blockingDialogRefCounts.delete(kind)
+      }
+      if (prev !== (open ? 0 : 1)) return
+      logForDebugging(
+        `[remote-bridge] Local blocking dialog ${kind} ${open ? 'opened → requires_action' : 'closed'}`,
+      )
+      if (open) {
+        terminalOnlyBlockingDialogs.delete(kind)
+        terminalOnlyBlockingDialogs.set(kind, undefined)
+        const effectiveDetails = getFeatureValue_CACHED_MAY_BE_STALE(
+          'tengu_bridge_requires_action_details',
+          true,
+        )
+          ? buildUserDialogRequiresActionDetails(kind, {}, '')
+          : undefined
+        reportEffectiveState('requires_action', effectiveDetails)
+      } else {
+        terminalOnlyBlockingDialogs.delete(kind)
+        if (terminalOnlyBlockingDialogs.size > 0) {
+          const lastEntry = [...terminalOnlyBlockingDialogs.entries()].at(-1)
+          const effectiveDetails =
+            lastEntry?.[1] ??
+            (lastEntry &&
+            getFeatureValue_CACHED_MAY_BE_STALE(
+              'tengu_bridge_requires_action_details',
+              true,
+            )
+              ? buildUserDialogRequiresActionDetails(lastEntry[0], {}, '')
+              : undefined)
+          reportEffectiveState('requires_action', effectiveDetails)
+        } else {
+          const holdsRunning = backgroundHold?.holdsRunning() === true
+          reportEffectiveState(holdsRunning ? 'running' : lastUnderlyingState)
         }
       }
     },

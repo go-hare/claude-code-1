@@ -206,6 +206,8 @@ type Props = {
   retryStatus?: import('../utils/advisorNetworkStall.js').RetryStatus | null;
   /** densable outputLimitRecovery — "picking the thought back up". */
   outputLimitRecovery?: import('./Spinner/statusKind.js').OutputLimitRecovery | null;
+  /** Official 2.1.326 #205: true once assistant reply text has streamed in this turn. */
+  afterReplyText?: boolean;
   /** densable Ye/Je agentId — stall reset when the viewed agent changes. */
   agentId?: string;
   /** densable xMn `word` / Cn `defaultVerb`. */
@@ -335,6 +337,7 @@ function SpinnerWithVerbInner({
   leaderIsIdle = false,
   retryStatus = null,
   outputLimitRecovery = null,
+  afterReplyText = false,
   agentId,
   defaultVerb: rewrittenDefaultVerb,
   verbSuffix = '…',
@@ -517,6 +520,16 @@ function SpinnerWithVerbInner({
   // props during a refactor, so skip this until it's re-threaded.
   const _ttftText: string | null = null;
 
+  // Official 2.1.326 #205 (`Me`/`We`/`Ot`): once reply text has streamed without active tools,
+  // suppress the tip line when transitioning out so it does not flash back and bounce layout.
+  // Must run unconditionally above the idle-teammate early return (Rules of Hooks).
+  const suppressTipAfterReply = afterReplyText && !hasActiveTools && (mode === 'responding' || mode === 'tool-use');
+  const [wasTipSuppressedAfterReply, setWasTipSuppressedAfterReply] = useState(suppressTipAfterReply);
+  if (wasTipSuppressedAfterReply && !suppressTipAfterReply) {
+    setWasTipSuppressedAfterReply(false);
+  }
+  const hideTipAfterReplyText = suppressTipAfterReply && (wasTipSuppressedAfterReply || mode === 'tool-use');
+
   // When viewing an idle teammate, show static idle display instead of animated spinner
   if (foregroundedTeammate?.isIdle) {
     const idleText = allIdle
@@ -541,24 +554,19 @@ function SpinnerWithVerbInner({
     );
   }
 
-  // Time-based tip overrides: coarse thresholds so a stale ref read (we're
-  // off the 50ms clock) is fine. Other triggers (mode change, setMessages)
-  // cause re-renders that refresh this in practice.
   // densable ohe: excludeDefault plus a tips file or tips list keeps the custom tip.
+  // Official 2.1.326 #350: removed the 30-minute `/clear` spinner tip.
   const tipsOverride = settings.spinnerTipsOverride;
   const customTipsActive =
     tipsOverride?.excludeDefault === true && (Boolean(tipsOverride.tipsFile) || (tipsOverride.tips?.length ?? 0) > 0);
   const tipsEnabled = settings.spinnerTipsEnabled !== false;
-  const showClearTip = tipsEnabled && elapsedSnapshot > 1_800_000;
   const showBtwTip = tipsEnabled && elapsedSnapshot > 30_000 && !getGlobalConfig().btwUseCount;
 
   const effectiveTip = customTipsActive
     ? spinnerTip
-    : showClearTip && !nextTask
-      ? 'Use /clear to start fresh when switching topics and free up context'
-      : showBtwTip && !nextTask
-        ? "Use /btw to ask a quick side question without interrupting Claude's current work"
-        : spinnerTip;
+    : showBtwTip && !nextTask
+      ? "Use /btw to ask a quick side question without interrupting Claude's current work"
+      : spinnerTip;
 
   // Budget text (ant-only) — shown above the tip line
   let budgetText: string | null = null;
@@ -647,7 +655,7 @@ function SpinnerWithVerbInner({
             </MessageResponse>
           </Box>
         ) : null
-      ) : tipLineText || budgetText ? (
+      ) : (tipLineText && !hideTipAfterReplyText) || budgetText ? (
         // IMPORTANT: we need this width="100%" to avoid an Ink bug where the
         // tip gets duplicated over and over while the spinner is running if
         // the terminal is very small. TODO: fix this in Ink.
@@ -659,7 +667,7 @@ function SpinnerWithVerbInner({
               <Text dimColor>{budgetText}</Text>
             </MessageResponse>
           )}
-          {tipLineText && (
+          {tipLineText && !hideTipAfterReplyText && (
             <MessageResponse>
               <Text dimColor wrap={nextTask ? 'truncate-end' : 'wrap'}>
                 {tipLineText}

@@ -120,6 +120,11 @@ export type InitBridgeOptions = {
     holdsRunning: () => boolean
   }
   /**
+   * Official 2.1.326 #94: initial worker state when Remote Control is turned on
+   * (e.g. `'running'` when a tool or turn is already in progress in the terminal).
+   */
+  initialWorkerState?: 'idle' | 'running'
+  /**
    * densable `onProjectsBindingHint` — fire when CCR worker state implies a
    * hearth binding change so headless `createServerConfigSession` can
    * `resyncProjectsReplyMount`.
@@ -1389,6 +1394,7 @@ export async function initReplBridge(
         outboundOnly,
         tags,
         backgroundHold: options?.backgroundHold,
+        initialWorkerState: options?.initialWorkerState,
         sessionGroupingId,
         reattachSessionId,
         reattachSequenceNum,

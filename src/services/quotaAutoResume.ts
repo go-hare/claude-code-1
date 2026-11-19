@@ -25,7 +25,11 @@ import {
 import { getAgentId } from '../utils/teammate.js'
 import { createSignal } from '../utils/signal.js'
 import { logError } from '../utils/log.js'
-import { isClaudeAISubscriber, getOauthAccountInfo } from '../utils/auth.js'
+import {
+  isClaudeAISubscriber,
+  getOauthAccountInfo,
+  subscribeAuthStateChanged,
+} from '../utils/auth.js'
 import {
   getSettingsForSource,
   getSettings_DEPRECATED,
@@ -93,6 +97,10 @@ export const CONTINUATION_PROMPT =
 export const AUTO_CONTINUE_CANCELLED_NOTICE =
   'Automatic continue cancelled · /rate-limit-options to re-arm'
 
+/** Official 2.1.326 (#336) `Ue`: notice emitted when login changes or ends while waiting */
+export const AUTO_CONTINUE_LOGIN_CHANGED_NOTICE =
+  'Automatic continue stopped · your login changed or ended · send a prompt to continue'
+
 /**
  * densable iOs for Kkr(autoContinueAtUsageLimit): policy → flag → user.
  * First defined value wins (high-priority managed sources first).
@@ -129,6 +137,7 @@ export type CancelReason =
   | 'kill_agents_chord'
   | 'dialog'
   | 'account_switch'
+  | 'login_changed'
   | 'setting_off'
   | 'manual_submit'
   | 'conversation_reset'
@@ -150,6 +159,7 @@ export type QuotaAutoResumeEvent =
   | 'armed'
   | 'auto-armed'
   | 'cancelled'
+  | 'login-changed'
   | 'fired-now'
   | 'stale'
   | 'disabled'
@@ -166,8 +176,14 @@ export type QuotaTurnClaim = {
   queried: boolean
 }
 
+export type ArmedAccountIdentity = {
+  accountUuid?: string
+  organizationUuid?: string
+}
+
 type Episode = {
   state: QuotaAutoResumeState
+  armedForAccount: ArmedAccountIdentity | null
   consecutiveRearms: number
   continuationsSinceHumanPrompt: number
   armedAtMs: number
@@ -208,6 +224,7 @@ function createEpisode(): Episode {
   // densable I0S
   return {
     state: { phase: 'idle' },
+    armedForAccount: null,
     consecutiveRearms: 0,
     continuationsSinceHumanPrompt: 0,
     armedAtMs: 0,
@@ -562,14 +579,71 @@ export function isQuotaRearmEligibleRateLimit(
   }
 }
 
+function captureCurrentAccountIdentity(): ArmedAccountIdentity | null {
+  if (!isClaudeAISubscriber()) return null
+  const info = getOauthAccountInfo()
+  if (!info?.accountUuid && !info?.organizationUuid) return null
+  return {
+    accountUuid: info.accountUuid,
+    organizationUuid: info.organizationUuid,
+  }
+}
+
+/**
+ * Official 2.1.326 (#336) `Oqn(armedFor)`: compare current login identity
+ * against the account that armed automatic continue.
+ */
+export function compareArmedAccountIdentity(
+  armedFor: ArmedAccountIdentity | null,
+  current: ArmedAccountIdentity | null = captureCurrentAccountIdentity(),
+): 'same' | 'other' | 'missing' {
+  if (!armedFor) return 'same'
+  if (!current) return 'missing'
+  if (
+    armedFor.accountUuid !== current.accountUuid ||
+    armedFor.organizationUuid !== current.organizationUuid
+  ) {
+    return 'other'
+  }
+  return 'same'
+}
+
+/**
+ * Official 2.1.326 (#336) `v(state, 'login_changed')`: if an automatic-continue
+ * wait is active and the user switched accounts or signed out, stop waiting,
+ * clear dedupe state, and emit `'login-changed'` so UI shows the stop notice.
+ */
+export function checkAndStopIfLoginChanged(
+  currentOverride?: ArmedAccountIdentity | null,
+): boolean {
+  if (episode.state.phase === 'idle' && !hasPendingQuotaContinuationInQueue()) {
+    return false
+  }
+  if (!episode.armedForAccount) return false
+  const verdict = compareArmedAccountIdentity(
+    episode.armedForAccount,
+    currentOverride,
+  )
+  if (verdict === 'same') return false
+  episode.armedForAccount = null
+  cancelQuotaAutoResume('login_changed')
+  episode.events.emit('login-changed')
+  return true
+}
+
 /** densable L4f / A4f */
 export function armQuotaAutoResume(
   resetsAtSeconds: number,
   nowMs: number = Date.now(),
   origin: EpisodeArmOrigin = 'dialog',
   rearm: number | null = null,
+  armedForOverride?: ArmedAccountIdentity | null,
 ): void {
   episode.episodeArmOrigin = origin
+  episode.armedForAccount =
+    armedForOverride !== undefined
+      ? armedForOverride
+      : captureCurrentAccountIdentity()
   episode.lastArmedResetsAtSeconds = resetsAtSeconds
   episode.autoArmDedupeResetKeys.add(resetsAtSeconds)
   episode.armedResetKeys.add(resetsAtSeconds)
@@ -844,6 +918,7 @@ function shouldClearAutoArmDedupe(reason: CancelReason): boolean {
   // densable z0S
   switch (reason) {
     case 'account_switch':
+    case 'login_changed':
     case 'conversation_reset':
     case 'background_handoff':
     case 'relaunch':
@@ -1181,6 +1256,8 @@ export function tickQuotaAutoResume(
   stillRejected = false,
 ): 'pending' | 'fired' | 'stale' | 'idle' {
   if (episode.state.phase !== 'armed') return 'idle'
+  // Official 2.1.326 (#336): stop immediately with notice if login changed or ended.
+  if (checkAndStopIfLoginChanged()) return 'idle'
   // densable qXa: phase!==armed || Jqn — dialog-armed wait survives setting_off
   if (isQuotaContinuationRevoked()) return 'idle'
   const armed = episode.state
@@ -1325,6 +1402,10 @@ export function ensureQuotaAutoResumeLimitsSubscription(): void {
   })
   // densable yYp → s0v (429 error path only; headers do not emit quotaRejected)
   quotaRejectedListeners.add(onQuotaRejectedForAutoResume)
+  // Official 2.1.326 (#336): cancel armed wait with notice if auth changes or ends
+  subscribeAuthStateChanged(() => {
+    checkAndStopIfLoginChanged()
+  })
   // leftover 239 eUm/oU: RDl → g6i('conversation_reset') + kHe
   onSessionSwitch((_id, reason) => {
     if (isQuotaAutoResumeSessionReset(reason)) {

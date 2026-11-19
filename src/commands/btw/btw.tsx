@@ -18,6 +18,7 @@ import {
   ScrollBox,
   setClipboard,
   Text,
+  type WheelEvent,
 } from '@anthropic/ink';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import type { Message } from '../../types/message.js';
@@ -160,7 +161,41 @@ function BtwSideQuestion({ question, initialResponse, context, onDone }: BtwComp
   const historyCursorRef = useRef<number | null>(null);
   historyCursorRef.current = historyCursor;
   const [copiedFlash, setCopiedFlash] = useState(0);
+  const [scrollMeta, setScrollMeta] = useState({ scrollable: false, atTop: true, atBottom: true });
   const { rows, columns } = useModalOrTerminalSize(useTerminalSize());
+
+  const visibleHistory = history.slice(-HISTORY_VISIBLE);
+  const earlierCount = history.length - visibleHistory.length;
+  const browsingEntry = historyCursor !== null ? history[historyCursor] : null;
+  const historyRows = visibleHistory.length + (earlierCount > 0 ? 1 : 0);
+  const maxContentHeight = Math.max(5, rows - CHROME_ROWS - OUTER_CHROME_ROWS - historyRows);
+  const maxContentHeightRef = useRef(maxContentHeight);
+  maxContentHeightRef.current = maxContentHeight;
+
+  const refreshScrollMeta = React.useCallback(() => {
+    const handle = scrollRef.current;
+    if (!handle) return;
+    const totalHeight = handle.getFreshScrollHeight();
+    const viewport = maxContentHeightRef.current;
+    const scrollable = totalHeight > viewport;
+    const top = handle.getScrollTop();
+    const atTop = top <= 0;
+    const atBottom = !scrollable || top + viewport >= totalHeight;
+    setScrollMeta(prev =>
+      prev.scrollable === scrollable && prev.atTop === atTop && prev.atBottom === atBottom
+        ? prev
+        : { scrollable, atTop, atBottom },
+    );
+  }, []);
+
+  useEffect(() => {
+    const handle = scrollRef.current;
+    refreshScrollMeta();
+    const unsub = handle?.subscribe?.(refreshScrollMeta);
+    return () => {
+      unsub?.();
+    };
+  }, [response, error, browsingEntry, maxContentHeight, refreshScrollMeta]);
 
   // Animate spinner while loading
   useInterval(() => setFrame(f => f + 1), response || error ? null : 80);
@@ -261,14 +296,48 @@ function BtwSideQuestion({ question, initialResponse, context, onDone }: BtwComp
       return;
     }
 
+    // Official 2.1.326 #162: support Up/Down, Ctrl+P/N, PgUp/PgDn, Home, End scrolling.
     if (e.key === 'up' || (e.ctrl && e.key === 'p')) {
       e.preventDefault();
       scrollRef.current?.scrollBy(-SCROLL_LINES);
+      refreshScrollMeta();
+      return;
     }
     if (e.key === 'down' || (e.ctrl && e.key === 'n')) {
       e.preventDefault();
       scrollRef.current?.scrollBy(SCROLL_LINES);
+      refreshScrollMeta();
+      return;
     }
+    if (!e.ctrl && !e.meta && !e.shift) {
+      if (e.name === 'pageup' || e.name === 'pagedown') {
+        e.preventDefault();
+        const page = Math.max(1, maxContentHeightRef.current);
+        scrollRef.current?.scrollBy(e.name === 'pageup' ? -page : page);
+        refreshScrollMeta();
+        return;
+      }
+      if (e.name === 'home') {
+        e.preventDefault();
+        scrollRef.current?.scrollTo(0);
+        refreshScrollMeta();
+        return;
+      }
+      if (e.name === 'end') {
+        e.preventDefault();
+        scrollRef.current?.scrollToBottom();
+        refreshScrollMeta();
+        return;
+      }
+    }
+  }
+
+  function handleWheel(e: WheelEvent): void {
+    // Official 2.1.326 #162: support mouse wheel scrolling on long /btw answers.
+    if (e.deltaY === 0) return;
+    e.stopImmediatePropagation();
+    scrollRef.current?.scrollBy(e.deltaY > 0 ? SCROLL_LINES : -SCROLL_LINES);
+    refreshScrollMeta();
   }
 
   useEffect(() => {
@@ -375,11 +444,6 @@ function BtwSideQuestion({ question, initialResponse, context, onDone }: BtwComp
     };
   }, [question, context, initialResponse]);
 
-  const visibleHistory = history.slice(-HISTORY_VISIBLE);
-  const earlierCount = history.length - visibleHistory.length;
-  const browsingEntry = historyCursor !== null ? history[historyCursor] : null;
-  const historyRows = visibleHistory.length + (earlierCount > 0 ? 1 : 0);
-  const maxContentHeight = Math.max(5, rows - CHROME_ROWS - OUTER_CHROME_ROWS - historyRows);
   const labelWidth = Math.max(20, columns - 7);
 
   const titleColor = browsingEntry ? undefined : 'warning';
@@ -387,7 +451,15 @@ function BtwSideQuestion({ question, initialResponse, context, onDone }: BtwComp
   const titleDim = !!browsingEntry;
 
   return (
-    <Box flexDirection="column" paddingLeft={2} marginTop={1} tabIndex={0} autoFocus onKeyDown={handleKeyDown}>
+    <Box
+      flexDirection="column"
+      paddingLeft={2}
+      marginTop={1}
+      tabIndex={0}
+      autoFocus
+      onKeyDown={handleKeyDown}
+      onWheel={handleWheel}
+    >
       {earlierCount > 0 && <Text dimColor>{`(+${earlierCount} earlier /btw)`}</Text>}
       {visibleHistory.map((entry, i) => {
         const absIndex = earlierCount + i;
@@ -417,17 +489,26 @@ function BtwSideQuestion({ question, initialResponse, context, onDone }: BtwComp
           )}
         </ScrollBox>
       </Box>
+      {/* Official 2.1.326 #162: scrollable indicator so long answers never look cut off/finished. */}
+      {scrollMeta.scrollable && (!scrollMeta.atBottom || !scrollMeta.atTop) && (
+        <Box marginLeft={2}>
+          <Text dimColor>
+            {!scrollMeta.atBottom && !scrollMeta.atTop
+              ? '↑/↓ more above and below'
+              : !scrollMeta.atBottom
+                ? '↓ more below (PgDn / End / wheel)'
+                : '↑ scrolled to bottom (PgUp / Home / wheel)'}
+          </Text>
+        </Box>
+      )}
       <Box marginTop={1}>
         {forking ? (
           <Text dimColor>Forking…</Text>
         ) : (
           <Text dimColor>
             <Byline>
-              {history.length > 0 ? (
-                <KeyboardShortcutHint shortcut="←/→" action="switch" />
-              ) : (
-                (browsingEntry || response || error) && <KeyboardShortcutHint shortcut="↑/↓" action="scroll" />
-              )}
+              {scrollMeta.scrollable && <KeyboardShortcutHint shortcut="↑/↓ · PgUp/PgDn" action="scroll" />}
+              {history.length > 0 && <KeyboardShortcutHint shortcut="←/→" action="browse" />}
               {(browsingEntry || response) &&
                 (copiedFlash > 0 ? (
                   <Text color="success">Copied to clipboard</Text>

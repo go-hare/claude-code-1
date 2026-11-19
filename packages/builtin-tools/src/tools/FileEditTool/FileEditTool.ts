@@ -65,6 +65,8 @@ import { checkBgIsolationWriteBlock } from 'src/utils/bgIsolationContainment.js'
 import {
   checkBlockWritesOutsideWorkingDirectories,
   checkWritePermissionForTool,
+  isBlockedDeviceOrProcessPath,
+  isClaudeSignInFilePath,
   matchingRuleForInput,
   matchesPathRule,
 } from 'src/utils/permissions/filesystem.js'
@@ -199,6 +201,23 @@ export const FileEditTool = buildTool({
     // Use expandPath for consistent path normalization (especially on Windows
     // where "/" vs "\" can cause readFileState lookup mismatches)
     const fullFilePath = expandPath(file_path)
+
+    // Official 2.1.326 #307 / #309: refuse edits to Claude sign-in files or
+    // blocked device/process files even before permission prompts.
+    if (isClaudeSignInFilePath(fullFilePath)) {
+      return {
+        result: false,
+        message: `Cannot edit Claude Code sign-in file ${fullFilePath}. Sign-in files such as .credentials.json are protected from modification.`,
+        errorCode: 15,
+      }
+    }
+    if (isBlockedDeviceOrProcessPath(fullFilePath)) {
+      return {
+        result: false,
+        message: `Cannot edit device or process file ${fullFilePath}.`,
+        errorCode: 16,
+      }
+    }
 
     // densable 2.1.217 #5 hsr — bg / worktree isolation containment (errorCode 12)
     const isolationBlock = checkBgIsolationWriteBlock(fullFilePath, {

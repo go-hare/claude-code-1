@@ -348,25 +348,30 @@ function leftoverA9eBlocks(tool: Tool, toolInput: unknown): boolean {
   return typeof host === 'string' && host.trim() !== ''
 }
 
-// ~5 lines × ~60 cols. Generous static cap — the renderer lets Ink wrap.
+// ~5 lines × ~60 cols. Cap both line count (#194) and character count so a
+// multi-line shell command never fills the fullscreen viewport while running.
 const MAX_HINT_CHARS = 300
+export const MAX_HINT_LINES = 5
 
 /**
  * Format a bash command for the ⎿ hint. Drops blank lines, collapses runs of
- * inline whitespace, then caps total length. Newlines are preserved so the
- * renderer can indent continuation lines under ⎿.
+ * inline whitespace, then caps both line count (#194) and total length.
+ * Newlines are preserved so the renderer can indent continuation lines under ⎿.
  */
-function commandAsHint(command: string): string {
-  const cleaned =
-    '$ ' +
-    command
-      .split('\n')
-      .map(l => l.replace(/\s+/g, ' ').trim())
-      .filter(l => l !== '')
-      .join('\n')
-  return cleaned.length > MAX_HINT_CHARS
-    ? cleaned.slice(0, MAX_HINT_CHARS - 1) + '…'
-    : cleaned
+export function commandAsHint(command: string): string {
+  const nonEmptyLines = command
+    .split('\n')
+    .map(l => l.replace(/\s+/g, ' ').trim())
+    .filter(l => l !== '')
+  const truncatedByLines = nonEmptyLines.length > MAX_HINT_LINES
+  const cappedLines = truncatedByLines
+    ? nonEmptyLines.slice(0, MAX_HINT_LINES)
+    : nonEmptyLines
+  const cleaned = '$ ' + cappedLines.join('\n')
+  if (cleaned.length > MAX_HINT_CHARS) {
+    return cleaned.slice(0, MAX_HINT_CHARS - 1) + '…'
+  }
+  return truncatedByLines ? cleaned + '…' : cleaned
 }
 
 /**
@@ -3542,23 +3547,67 @@ export function collapseReadSearchGroups(
         if (query) {
           currentGroup.latestDisplayHint = `"${query}"`
         }
-      } else if (isFullscreenEnvEnabled() && toolInfo.isBash) {
-        // Non-search/read Bash command — counted separately so the summary
-        // says "Ran N bash commands" instead of breaking the group.
-        const count = countToolUses(msg)
-        currentGroup.bashCount = (currentGroup.bashCount ?? 0) + count
-        const { command } = extractSafeToolInputFields(toolInfo.input)
-        if (command) {
-          // Prefer the stripped `# comment` if present (it's what Claude wrote
-          // for the human — same trigger as the comment-as-label tool-use render).
-          currentGroup.latestDisplayHint =
-            extractBashCommentLabel(command) ?? commandAsHint(command)
-          // Remember tool_use_id → command so the result (arriving next) can
-          // be scanned for commit SHA / PR URL.
-          for (const id of getToolUseIdsFromMessage(msg)) {
-            currentGroup.bashCommands?.set(id, command)
+      } else if (
+        isFullscreenEnvEnabled() &&
+        toolInfo.isBash &&
+        !toolInfo.isSearch &&
+        !toolInfo.isList &&
+        !toolInfo.isRead
+      ) {
+        // #193 (2.1.326): never double-count a search, listing, or read Bash call
+        // as a shell command — for grouped_tool_use batches, classify per inner call.
+        const innerMessages =
+          msg.type === 'grouped_tool_use' ? msg.messages : [msg]
+        let nonSearchBashCount = 0
+        for (const inner of innerMessages) {
+          const innerInfo =
+            msg.type === 'grouped_tool_use'
+              ? getCollapsibleToolInfo(inner, tools)
+              : toolInfo
+          if (innerInfo?.isList) {
+            currentGroup.listCount += countToolUses(inner)
+            const { command } = extractSafeToolInputFields(innerInfo.input)
+            if (command) currentGroup.latestDisplayHint = commandAsHint(command)
+            continue
+          }
+          if (innerInfo?.isSearch) {
+            currentGroup.searchCount += countToolUses(inner)
+            const { pattern } = extractSafeToolInputFields(innerInfo.input)
+            if (pattern) {
+              currentGroup.nonMemSearchArgs.push(pattern)
+              currentGroup.latestDisplayHint = `"${pattern}"`
+            }
+            continue
+          }
+          if (innerInfo?.isRead) {
+            const fps = getFilePathsFromReadMessage(inner)
+            for (const fp of fps) {
+              currentGroup.readFilePaths.add(fp)
+              currentGroup.latestDisplayHint = getDisplayPath(fp)
+            }
+            if (fps.length === 0) {
+              currentGroup.readOperationCount += countToolUses(inner)
+            }
+            continue
+          }
+          nonSearchBashCount += countToolUses(inner)
+          const { command } = extractSafeToolInputFields(
+            innerInfo?.input ?? toolInfo.input,
+          )
+          if (command) {
+            // Prefer the stripped `# comment` if present (it's what Claude wrote
+            // for the human — same trigger as the comment-as-label tool-use render).
+            currentGroup.latestDisplayHint =
+              extractBashCommentLabel(command) ?? commandAsHint(command)
+            // Remember tool_use_id → command so the result (arriving next) can
+            // be scanned for commit SHA / PR URL.
+            for (const id of getToolUseIdsFromMessage(inner)) {
+              currentGroup.bashCommands?.set(id, command)
+            }
           }
         }
+        currentGroup.bashCount =
+          (currentGroup.bashCount ?? 0) + nonSearchBashCount
       } else if (toolInfo.isList) {
         // Directory-listing bash commands (ls, tree, du) — counted separately
         // so the summary says "Listed N directories" instead of "Read N files".

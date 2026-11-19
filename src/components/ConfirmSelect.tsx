@@ -82,6 +82,12 @@ type Props = {
   /** Initial focus. Default "confirm". */
   focus?: ConfirmChoice;
   hideIndexes?: boolean;
+  /** Official 2.1.326 (#24): override Up from first item (e.g. prevent wrap to Yes). */
+  onUpFromFirstItem?: () => void;
+  /** Official 2.1.326: override Down from last item. */
+  onDownFromLastItem?: () => void;
+  /** Official 2.1.326 (#29): ignore printable key shortcuts like j/k. */
+  disablePrintableKeybindings?: boolean;
   /** Screen-reader path only. The list path does not see this. */
   refuseInput?: () => boolean;
   openedAt?: number;
@@ -198,6 +204,9 @@ export function ConfirmSelect({
   cancelFirst = false,
   focus = 'confirm',
   hideIndexes = false,
+  onUpFromFirstItem,
+  onDownFromLastItem,
+  disablePrintableKeybindings = false,
   refuseInput,
   openedAt,
   windowMs,
@@ -224,6 +233,9 @@ export function ConfirmSelect({
     <Select
       options={confirmSelectOrder(cancelFirst).map(choice => (choice === 'confirm' ? confirm : cancel))}
       hideIndexes={hideIndexes}
+      disablePrintableKeybindings={disablePrintableKeybindings}
+      onUpFromFirstItem={onUpFromFirstItem}
+      onDownFromLastItem={onDownFromLastItem}
       isDisabled={!armed}
       defaultFocusValue={focus}
       onChange={value => {

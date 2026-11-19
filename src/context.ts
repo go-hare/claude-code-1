@@ -48,91 +48,138 @@ export function setSystemPromptInjection(value: string | null): void {
   getSystemContext.cache.clear?.()
 }
 
-export const getGitStatus = memoize(
-  async (): Promise<string | null> => {
-    if (process.env.NODE_ENV === 'test') {
-      // Avoid cycles in tests
-      return null
-    }
+/**
+ * Official 2.1.326 (#245) `C$n` / `eJe` / `lAa`: non-blocking background
+ * prefetch for `git status` after `/compact` (5-minute TTL, same cwd) so the
+ * first message after compaction doesn't block waiting to re-run git status.
+ */
+export const GIT_STATUS_PREFETCH_TTL_MS = 300_000
 
-    const startTime = Date.now()
-    logForDiagnosticsNoPII('info', 'git_status_started')
+type GitStatusPrefetchEntry = {
+  promise: Promise<string | null>
+  at: number
+  cwd: string
+}
 
-    const isGitStart = Date.now()
-    const isGit = await getIsGit()
-    logForDiagnosticsNoPII('info', 'git_is_git_check_completed', {
-      duration_ms: Date.now() - isGitStart,
-      is_git: isGit,
+let pendingGitStatusPrefetch: GitStatusPrefetchEntry | null = null
+
+async function computeGitStatusUncached(): Promise<string | null> {
+  if (process.env.NODE_ENV === 'test') {
+    // Avoid cycles in tests
+    return null
+  }
+
+  const startTime = Date.now()
+  logForDiagnosticsNoPII('info', 'git_status_started')
+
+  const isGitStart = Date.now()
+  const isGit = await getIsGit()
+  logForDiagnosticsNoPII('info', 'git_is_git_check_completed', {
+    duration_ms: Date.now() - isGitStart,
+    is_git: isGit,
+  })
+
+  if (!isGit) {
+    logForDiagnosticsNoPII('info', 'git_status_skipped_not_git', {
+      duration_ms: Date.now() - startTime,
+    })
+    return null
+  }
+
+  try {
+    const gitCmdsStart = Date.now()
+    const [branch, mainBranch, status, log, userName] = await Promise.all([
+      getBranch(),
+      getDefaultBranch(),
+      execFileNoThrow(gitExe(), ['--no-optional-locks', 'status', '--short'], {
+        preserveOutputOnError: false,
+      }).then(({ stdout, code }) => (code === 0 ? stdout.trimEnd() : null)),
+      execFileNoThrow(
+        gitExe(),
+        ['--no-optional-locks', 'log', '--oneline', '-n', '5'],
+        {
+          preserveOutputOnError: false,
+        },
+      ).then(({ stdout }) => stdout.trim()),
+      execFileNoThrow(gitExe(), ['config', 'user.name'], {
+        preserveOutputOnError: false,
+      }).then(({ stdout }) => stdout.trim()),
+    ])
+
+    logForDiagnosticsNoPII('info', 'git_commands_completed', {
+      duration_ms: Date.now() - gitCmdsStart,
+      status_length: status?.length ?? 0,
     })
 
-    if (!isGit) {
-      logForDiagnosticsNoPII('info', 'git_status_skipped_not_git', {
-        duration_ms: Date.now() - startTime,
-      })
-      return null
+    // Check if status exceeds character limit
+    const shellTool = isPowerShellToolEnabled()
+      ? POWERSHELL_TOOL_NAME
+      : BASH_TOOL_NAME
+    const truncatedStatus =
+      status === null
+        ? null
+        : status.length > MAX_STATUS_CHARS
+          ? status.substring(0, MAX_STATUS_CHARS) +
+            `\n... (truncated because it exceeds 2k characters. If you need more information, run "git status" using ${shellTool})`
+          : status
+
+    logForDiagnosticsNoPII('info', 'git_status_completed', {
+      duration_ms: Date.now() - startTime,
+      truncated: status !== null && status.length > MAX_STATUS_CHARS,
+    })
+
+    return [
+      `This is the git status at the start of the conversation. Note that this status is a snapshot in time, and will not update during the conversation.`,
+      `Current branch: ${branch}`,
+      `Main branch (you will usually use this for PRs): ${mainBranch}`,
+      ...(userName ? [`Git user: ${userName}`] : []),
+      `Status:\n${truncatedStatus === null ? '(unavailable)' : truncatedStatus || '(clean)'}`,
+      `Recent commits:\n${log}`,
+    ].join('\n\n')
+  } catch (error) {
+    logForDiagnosticsNoPII('error', 'git_status_failed', {
+      duration_ms: Date.now() - startTime,
+    })
+    logError(error)
+    return null
+  }
+}
+
+export function prefetchGitStatusForCompaction(
+  fetcher: () => Promise<string | null> = computeGitStatusUncached,
+): void {
+  getGitStatus.cache.clear?.()
+  getSystemContext.cache.clear?.()
+  const cwd = getCwd()
+  const promise = fetcher().catch(() => null)
+  pendingGitStatusPrefetch = {
+    promise,
+    at: Date.now(),
+    cwd,
+  }
+}
+
+export function getPendingGitStatusPrefetchForTesting(): GitStatusPrefetchEntry | null {
+  return pendingGitStatusPrefetch
+}
+
+export function clearGitStatusPrefetchForTesting(): void {
+  pendingGitStatusPrefetch = null
+}
+
+export const getGitStatus = memoize(
+  async (): Promise<string | null> => {
+    const cwd = getCwd()
+    if (
+      pendingGitStatusPrefetch !== null &&
+      pendingGitStatusPrefetch.cwd === cwd &&
+      Date.now() - pendingGitStatusPrefetch.at <= GIT_STATUS_PREFETCH_TTL_MS
+    ) {
+      const entry = pendingGitStatusPrefetch
+      pendingGitStatusPrefetch = null
+      return entry.promise
     }
-
-    try {
-      const gitCmdsStart = Date.now()
-      const [branch, mainBranch, status, log, userName] = await Promise.all([
-        getBranch(),
-        getDefaultBranch(),
-        execFileNoThrow(
-          gitExe(),
-          ['--no-optional-locks', 'status', '--short'],
-          {
-            preserveOutputOnError: false,
-          },
-        ).then(({ stdout, code }) => (code === 0 ? stdout.trimEnd() : null)),
-        execFileNoThrow(
-          gitExe(),
-          ['--no-optional-locks', 'log', '--oneline', '-n', '5'],
-          {
-            preserveOutputOnError: false,
-          },
-        ).then(({ stdout }) => stdout.trim()),
-        execFileNoThrow(gitExe(), ['config', 'user.name'], {
-          preserveOutputOnError: false,
-        }).then(({ stdout }) => stdout.trim()),
-      ])
-
-      logForDiagnosticsNoPII('info', 'git_commands_completed', {
-        duration_ms: Date.now() - gitCmdsStart,
-        status_length: status?.length ?? 0,
-      })
-
-      // Check if status exceeds character limit
-      const shellTool = isPowerShellToolEnabled()
-        ? POWERSHELL_TOOL_NAME
-        : BASH_TOOL_NAME
-      const truncatedStatus =
-        status === null
-          ? null
-          : status.length > MAX_STATUS_CHARS
-            ? status.substring(0, MAX_STATUS_CHARS) +
-              `\n... (truncated because it exceeds 2k characters. If you need more information, run "git status" using ${shellTool})`
-            : status
-
-      logForDiagnosticsNoPII('info', 'git_status_completed', {
-        duration_ms: Date.now() - startTime,
-        truncated: status !== null && status.length > MAX_STATUS_CHARS,
-      })
-
-      return [
-        `This is the git status at the start of the conversation. Note that this status is a snapshot in time, and will not update during the conversation.`,
-        `Current branch: ${branch}`,
-        `Main branch (you will usually use this for PRs): ${mainBranch}`,
-        ...(userName ? [`Git user: ${userName}`] : []),
-        `Status:\n${truncatedStatus === null ? '(unavailable)' : truncatedStatus || '(clean)'}`,
-        `Recent commits:\n${log}`,
-      ].join('\n\n')
-    } catch (error) {
-      logForDiagnosticsNoPII('error', 'git_status_failed', {
-        duration_ms: Date.now() - startTime,
-      })
-      logError(error)
-      return null
-    }
+    return computeGitStatusUncached()
   },
   () => getCwd(),
 )

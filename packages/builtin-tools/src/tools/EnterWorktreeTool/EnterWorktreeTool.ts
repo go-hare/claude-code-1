@@ -14,6 +14,7 @@ import { getCwd } from 'src/utils/cwd.js'
 import { findCanonicalGitRoot } from 'src/utils/git.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { getPlanSlug, getPlansDirectory } from 'src/utils/plans.js'
+import { captureSandboxRootMoveHold } from 'src/utils/sandbox/sandbox-adapter.js'
 import { setCwd } from 'src/utils/Shell.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { logError } from 'src/utils/log.js'
@@ -171,6 +172,10 @@ export const EnterWorktreeTool: Tool<InputSchema, Output> = buildTool({
         ).extensionRoot = preservedExtensionRoot
       }
 
+      // Official 2.1.326 #299: hold sandbox across worktree root moves so
+      // entering a worktree whose repo settings lack sandbox.enabled cannot
+      // silently weaken or drop an active sandbox.
+      captureSandboxRootMoveHold()
       process.chdir(worktreeSession.worktreePath)
       setCwd(worktreeSession.worktreePath)
       setOriginalCwd(getCwd())
@@ -224,6 +229,8 @@ export const EnterWorktreeTool: Tool<InputSchema, Output> = buildTool({
     const sameRepoRoot =
       mainRepoRoot !== null &&
       mainRepoRoot === findCanonicalGitRoot(launchProjectRoot)
+    // Official 2.1.326 #299: capture sandbox hold before moving across root.
+    captureSandboxRootMoveHold()
     if (mainRepoRoot && mainRepoRoot !== getCwd()) {
       process.chdir(mainRepoRoot)
       setCwd(mainRepoRoot)
@@ -239,6 +246,7 @@ export const EnterWorktreeTool: Tool<InputSchema, Output> = buildTool({
       ).extensionRoot = preservedExtensionRoot
     }
 
+    captureSandboxRootMoveHold()
     process.chdir(worktreeSession.worktreePath)
     setCwd(worktreeSession.worktreePath)
     setOriginalCwd(getCwd())

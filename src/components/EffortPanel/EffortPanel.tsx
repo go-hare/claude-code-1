@@ -145,9 +145,48 @@ function EffortLevelLabel({ level, selected }: { level: SliderLevelSpec; selecte
   );
 }
 
-function UltracodeToggle({ on, chord, width }: { on: boolean; chord: string; width: number }): React.ReactNode {
+/**
+ * Official 2.1.326 #221: map a mouse click column relative to the slider box to
+ * the nearest effort stop index so `/effort` responds to clicks in fullscreen.
+ */
+export function findNearestSliderStopIndex(localCol: number, stopPositions: readonly number[]): number {
+  if (stopPositions.length === 0) return 0;
+  let bestIdx = 0;
+  let bestDist = Infinity;
+  for (let i = 0; i < stopPositions.length; i++) {
+    const dist = Math.abs(localCol - stopPositions[i]!);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
+
+function UltracodeToggle({
+  on,
+  chord,
+  width,
+  onToggle,
+}: {
+  on: boolean;
+  chord: string;
+  width: number;
+  onToggle?: () => void;
+}): React.ReactNode {
   return (
-    <Box flexDirection="column" width={width}>
+    <Box
+      flexDirection="column"
+      width={width}
+      onClick={
+        onToggle
+          ? e => {
+              e.stopImmediatePropagation();
+              onToggle();
+            }
+          : undefined
+      }
+    >
       <Box>
         {on ? (
           <ShimmerLabel text="Ultracode  on" color="effortUltra" />
@@ -361,7 +400,14 @@ function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
   const levelDescription = isEffortCostNoteEnabled(model) ? getEffortLevelDescription(model, selectedLevel) : null;
   const showMaxReminder = selectedLevel === 'max' && modelSupportsMaxEffort(model) && isMaxEffortReminderEnabled();
 
-  const toggleNode = <UltracodeToggle on={ultracodeOn} chord={toggleChord} width={toggleWidth} />;
+  const toggleNode = (
+    <UltracodeToggle
+      on={ultracodeOn}
+      chord={toggleChord}
+      width={toggleWidth}
+      onToggle={ultracodeOfferable ? () => setUltracodeOn(prev => !prev) : undefined}
+    />
+  );
 
   return (
     <Pane>
@@ -379,7 +425,13 @@ function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
                 <Text>{' '.repeat(headerGap)}</Text>
                 <Text>Smarter</Text>
               </Box>
-              <Box>
+              {/* Official 2.1.326 #221: handle mouse clicks on track & labels in fullscreen mode. */}
+              <Box
+                onClick={e => {
+                  e.stopImmediatePropagation();
+                  setCursorIdx(findNearestSliderStopIndex(e.localCol, geometry.trianglePositions));
+                }}
+              >
                 <Text dimColor>{trackBefore}</Text>
                 <Text bold>▲</Text>
                 <Text dimColor>{trackAfter}</Text>
@@ -388,7 +440,14 @@ function VisualEffortPanel({ appStateEffort, onDone }: Props): React.ReactNode {
                 {geometry.levels.map((lvl, idx) => (
                   <React.Fragment key={lvl.value}>
                     {idx > 0 && <Text>{' '.repeat(geometry.spacers[idx - 1]!)}</Text>}
-                    <EffortLevelLabel level={lvl} selected={selectedIdx === idx} />
+                    <Box
+                      onClick={e => {
+                        e.stopImmediatePropagation();
+                        setCursorIdx(idx);
+                      }}
+                    >
+                      <EffortLevelLabel level={lvl} selected={selectedIdx === idx} />
+                    </Box>
                   </React.Fragment>
                 ))}
                 {trailingCount > 0 ? <Text>{' '.repeat(trailingCount)}</Text> : null}

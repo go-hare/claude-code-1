@@ -1,6 +1,6 @@
 import chalk from 'chalk'
 import stripAnsi from 'strip-ansi'
-import { supportsHyperlinks } from '@anthropic/ink'
+import { mayWriteRawUrlHyperlink, supportsHyperlinks } from '@anthropic/ink'
 
 // OSC 8 hyperlink escape sequences
 // Format: \e]8;;URL\e\\TEXT\e]8;;\e\\
@@ -17,6 +17,7 @@ export const HYPERLINK_STYLE_RESET = '\x1b[28m\x1b[39m\x1b[49m'
 
 type HyperlinkOptions = {
   supportsHyperlinks?: boolean
+  mayWriteHyperlink?: boolean
   shownUrlStart?: string
 }
 
@@ -27,12 +28,15 @@ function isEquivalentUrl(url: string, text: string): boolean {
 /**
  * Create a clickable hyperlink using OSC 8 escape sequences.
  * Falls back to plain text if the terminal doesn't support hyperlinks.
+ * Official 2.1.326 #213 (`Bk` / `Fra`): even when `supportsHyperlinks()` is
+ * false, wrap the shown raw URL in OSC 8 if `mayWriteRawUrlHyperlink(url)` is
+ * true so wrapped URLs stay clickable in unrecognized OSC 8 terminals.
  *
  * @param url - The URL to link to
  * @param content - Optional content to display as the link text (only when hyperlinks are supported).
  *                  If provided and hyperlinks are supported, this text is shown as a clickable link.
  *                  If hyperlinks are not supported, content is ignored and only the URL is shown.
- * @param options - Optional overrides for testing (supportsHyperlinks, shownUrlStart)
+ * @param options - Optional overrides for testing (supportsHyperlinks, mayWriteHyperlink, shownUrlStart)
  */
 export function createHyperlink(
   url: string,
@@ -42,13 +46,17 @@ export function createHyperlink(
   const hasSupport = options?.supportsHyperlinks ?? supportsHyperlinks()
   const shownUrlStart = options?.shownUrlStart ?? ''
   if (!hasSupport) {
+    const shownUrl =
+      (options?.mayWriteHyperlink ?? mayWriteRawUrlHyperlink(url))
+        ? `${OSC8_START}${url}${OSC8_END}${url}${OSC8_START}${OSC8_END}`
+        : url
     if (content !== undefined) {
       const plain = stripAnsi(content)
       if (!isEquivalentUrl(url, plain)) {
-        return `${content}${shownUrlStart} (${url})`
+        return `${content}${shownUrlStart} (${shownUrl})`
       }
     }
-    return `${shownUrlStart}${url}`
+    return `${shownUrlStart}${shownUrl}`
   }
 
   // Apply basic ANSI blue color - wrap-ansi preserves this across line breaks

@@ -22,6 +22,8 @@ describe('createStreamMarkdownState', () => {
       stablePrefix: '',
       openFence: null,
       openTable: null,
+      typeBeforeTail: null,
+      isListCut: false,
     })
   })
 })

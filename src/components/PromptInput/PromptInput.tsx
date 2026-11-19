@@ -69,6 +69,7 @@ import { useHistorySearch } from '../../hooks/useHistorySearch.js';
 import { useIdeConnectionStatus } from '../../hooks/useIdeConnectionStatus.js';
 import type { IDESelection } from '../../hooks/useIdeSelection.js';
 import { useInputBuffer } from '../../hooks/useInputBuffer.js';
+import { subscribeImageReadStart } from '../../hooks/usePasteHandler.js';
 import { useMainLoopModel } from '../../hooks/useMainLoopModel.js';
 import { usePromptSuggestion } from '../../hooks/usePromptSuggestion.js';
 import { useTasksV2 } from '../../hooks/useTasksV2.js';
@@ -354,7 +355,10 @@ type Props = {
     input: string,
     task: InProcessTeammateTaskState | LocalAgentTaskState,
     helpers: PromptInputHelpers,
+    pastedContents?: Record<number, PastedContent>,
   ) => Promise<void>;
+  /** #7 (2.1.326): actionable hint shown in empty prompt after a failed request. */
+  nextStepHint?: string;
   isSearchingHistory: boolean;
   setIsSearchingHistory: (isSearching: boolean) => void;
   onDismissSideQuestion?: () => void;
@@ -487,6 +491,37 @@ export function applyPluginAutocompleteReplacement(
   };
 }
 
+// #181 (2.1.326): session-level latch so remounting PromptInput (e.g. after a
+// permission prompt or dialog) does not re-emit the identical effort notice.
+let lastShownEffortNotificationText: string | undefined;
+
+export function resetLastShownEffortNotificationForTests(): void {
+  lastShownEffortNotificationText = undefined;
+}
+
+/**
+ * #284 (2.1.326): compute out-of-view prompt line counts above and below the
+ * fullscreen viewport window so top/bottom borders can show `↑ N more` / `↓ N more`.
+ */
+export function computePromptViewportOverflow(
+  fullText: string,
+  columns: number,
+  cursorOffset: number,
+  maxVisibleLines: number | undefined,
+): { linesAbove: number; linesBelow: number } {
+  if (maxVisibleLines === undefined || fullText.length === 0 || columns <= 0) {
+    return { linesAbove: 0, linesBelow: 0 };
+  }
+  const c = Cursor.fromText(fullText, columns, cursorOffset);
+  const totalLines = c.measuredText.lineCount;
+  if (totalLines <= maxVisibleLines) {
+    return { linesAbove: 0, linesBelow: 0 };
+  }
+  const linesAbove = c.getViewportStartLine(maxVisibleLines);
+  const linesBelow = Math.max(0, totalLines - linesAbove - maxVisibleLines);
+  return { linesAbove, linesBelow };
+}
+
 function PromptInput({
   debug,
   ideSelection,
@@ -524,6 +559,7 @@ function PromptInput({
   getToolUseContext,
   onSubmit: onSubmitProp,
   onAgentSubmit,
+  nextStepHint,
   isSearchingHistory,
   setIsSearchingHistory,
   onDismissSideQuestion,
@@ -1481,6 +1517,7 @@ function PromptInput({
     submitCount,
     hasMessages: messages.length > 0,
     viewingAgentName,
+    nextStepHint,
   });
 
   const onChange = useCallback(
@@ -1584,8 +1621,9 @@ function PromptInput({
       return;
     }
 
-    // densable LI: lte() walks queueEditIndex; else Phe() popAll or block via cu()
-    const editableCount = queuedCommands.filter(isQueuedCommandEditable).length;
+    // #109 (2.1.326): never pop/walk the main conversation's queued messages
+    // into the prompt box of a viewed subagent or teammate.
+    const editableCount = viewingAgentTaskId ? 0 : queuedCommands.filter(isQueuedCommandEditable).length;
     if (isKbCohesionFixesEnabled()) {
       const next = queueEditIndexAfterHistoryUp(store.getState().queueEditIndex, editableCount);
       setQueueEditIndex(next.queueEditIndex);
@@ -1614,7 +1652,7 @@ function PromptInput({
       return;
     }
 
-    if (isKbCohesionFixesEnabled()) {
+    if (isKbCohesionFixesEnabled() && !viewingAgentTaskId) {
       const next = queueEditIndexAfterHistoryDown(
         store.getState().queueEditIndex,
         queuedCommands.filter(isQueuedCommandEditable).length,
@@ -1712,6 +1750,48 @@ function PromptInput({
     store,
     trackAndSetInput,
   ]);
+
+  // #147 (2.1.326): stash orphaned pastedContents so deleting `[Image #N]` and
+  // yanking it back with Ctrl+Y restores the image attachment.
+  const removedPastedContentsRef = useRef<Record<number, PastedContent>>({});
+  // Reset stashed pastes when conversation is cleared (e.g. `/clear`) so deleted
+  // base64 image blobs are not retained in memory across sessions.
+  const prevMessagesLengthRef = useRef(messages.length);
+  useEffect(() => {
+    if (prevMessagesLengthRef.current > 0 && messages.length === 0) {
+      removedPastedContentsRef.current = {};
+    }
+    prevMessagesLengthRef.current = messages.length;
+  }, [messages.length]);
+
+  // #171 (2.1.326): "paste again to expand" hint with auto-clear when the paste is
+  // sent, deleted, or cleared so it never hides mode and `esc to interrupt`.
+  const [showExpandPasteHint, setShowExpandPasteHint] = useState(false);
+  const lastCollapsedPasteIdRef = useRef<number | null>(null);
+  const expandPasteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearExpandPasteHint = useCallback(() => {
+    if (expandPasteTimerRef.current !== null) {
+      clearTimeout(expandPasteTimerRef.current);
+      expandPasteTimerRef.current = null;
+    }
+    lastCollapsedPasteIdRef.current = null;
+    setShowExpandPasteHint(false);
+  }, []);
+  useEffect(() => {
+    return () => {
+      if (expandPasteTimerRef.current !== null) {
+        clearTimeout(expandPasteTimerRef.current);
+        expandPasteTimerRef.current = null;
+      }
+    };
+  }, []);
+  useEffect(() => {
+    if (!showExpandPasteHint) return;
+    const targetId = lastCollapsedPasteIdRef.current;
+    if (targetId === null || !parseReferences(liveInputRef.current).some(r => r.id === targetId)) {
+      clearExpandPasteHint();
+    }
+  }, [input, showExpandPasteHint, clearExpandPasteHint]);
 
   const onSubmit = useCallback(
     async (
@@ -1814,6 +1894,7 @@ function PromptInput({
           // skipReset: resetSuggestion would abort the speculation before we accept it
           logOutcomeAtSubmission(suggestionText, { skipReset: true });
           recordPromptSubmitTime();
+          removedPastedContentsRef.current = {};
 
           void onSubmitProp(
             suggestionText,
@@ -1859,6 +1940,7 @@ function PromptInput({
             });
             trackAndSetInput('', undefined, { kind: 'clear' });
             setCursorOffset(0);
+            removedPastedContentsRef.current = {};
             clearBuffer();
             resetHistory();
             return;
@@ -1918,16 +2000,26 @@ function PromptInput({
 
       // Clear stash hint notification on submit
       removeNotification('stash-hint');
+      // #147 (2.1.326): release stashed deleted pastes (including base64 images) on submit.
+      removedPastedContentsRef.current = {};
+      clearExpandPasteHint();
 
       // Route input to viewed agent (in-process teammate or named local_agent).
+      // #117 (2.1.326): forward live pastedContents so images pasted while viewing
+      // a background agent arrive as image blocks instead of raw `[Image #1]` text.
       const activeAgent = getActiveAgentForInput(store.getState());
       if (activeAgent.type !== 'leader' && onAgentSubmit) {
         logEvent('tengu_transcript_input_to_teammate', {});
-        await onAgentSubmit(inputParam, activeAgent.task, {
-          setCursorOffset,
-          clearBuffer,
-          resetHistory,
-        });
+        await onAgentSubmit(
+          inputParam,
+          activeAgent.task,
+          {
+            setCursorOffset,
+            clearBuffer,
+            resetHistory,
+          },
+          activePastedContents,
+        );
         return;
       }
 
@@ -1968,6 +2060,7 @@ function PromptInput({
       markAccepted,
       removeNotification,
       popSelectedCommandFromQueue,
+      clearExpandPasteHint,
     ],
   );
 
@@ -2012,6 +2105,7 @@ function PromptInput({
     inlineGhostText,
     maxColumnWidth,
     handleKeyDown: typeaheadKeyDown,
+    submitOverSuggestions,
   } = useTypeahead({
     commands,
     onInputChange: trackAndSetInput,
@@ -2127,6 +2221,24 @@ function PromptInput({
     }));
   }
 
+  // #147 (2.1.326): capture cursor anchor synchronously when async image read starts
+  // so typing right after pasting doesn't split the word with `[Image #N]`.
+  const imagePasteAnchorRef = useRef<{ before: string; after: string; followsPill: boolean } | null>(null);
+  const captureImagePasteAnchor = useCallback(() => {
+    const live = liveInputRef.current;
+    const off = cursorOffsetRef.current;
+    imagePasteAnchorRef.current = {
+      before: live.slice(0, off),
+      after: live.slice(off),
+      followsPill: pendingSpaceAfterPillRef.current,
+    };
+  }, []);
+  useEffect(() => subscribeImageReadStart(captureImagePasteAnchor), [captureImagePasteAnchor]);
+
+  // #167 (2.1.326): timestamp of last Esc press while input was non-empty so
+  // holding Esc over typed text clears text without immediately opening Rewind.
+  const lastNonEmptyEscAtRef = useRef(0);
+
   function onImagePaste(
     image: string,
     mediaType?: string,
@@ -2135,6 +2247,7 @@ function PromptInput({
     sourcePath?: string,
   ) {
     logEvent('tengu_paste_image', {});
+    clearExpandPasteHint();
     onModeChange('prompt');
 
     const pasteId = nextPasteIdRef.current++;
@@ -2158,12 +2271,40 @@ function PromptInput({
       ...pastedContentsRef.current,
       [pasteId]: newContent,
     };
-    // Multi-image paste calls onImagePaste in a loop. If the ref is already
-    // armed, the previous pill's lazy space fires now (before this pill)
-    // rather than being lost. densable: pK=Cs.current?" ":""; N1(pK+Tmo(id))
-    const prefix = pendingSpaceAfterPillRef.current ? ' ' : '';
-    insertTextAtCursor(prefix + formatImageRef(pasteId));
-    pendingSpaceAfterPillRef.current = true;
+
+    // #147 (2.1.326, official Bje): if user typed while async image read ran,
+    // insert `[Image #N]` at the saved anchor (before the typed word) instead of
+    // splitting the middle of the word being typed.
+    const anchor = imagePasteAnchorRef.current;
+    imagePasteAnchorRef.current = null;
+    const liveVal = liveInputRef.current;
+    const refText = formatImageRef(pasteId);
+    if (
+      anchor &&
+      liveVal.length > anchor.before.length + anchor.after.length &&
+      liveVal.startsWith(anchor.before) &&
+      liveVal.endsWith(anchor.after)
+    ) {
+      const typedDuringRead = liveVal.slice(anchor.before.length, liveVal.length - anchor.after.length);
+      const prefix = anchor.followsPill ? ' ' : '';
+      const suffix = typedDuringRead.length > 0 && !/^\s/.test(typedDuringRead) ? ' ' : '';
+      const insertion = prefix + refText + suffix;
+      const nextValue = anchor.before + insertion + typedDuringRead + anchor.after;
+      const nextCursor = cursorOffsetRef.current + insertion.length;
+      pushToBuffer(liveVal, cursorOffsetRef.current, pastedContentsRef.current);
+      trackAndSetInput(nextValue, undefined, { kind: 'composer' });
+      liveInputRef.current = nextValue;
+      cursorOffsetRef.current = nextCursor;
+      setCursorOffset(nextCursor);
+      pendingSpaceAfterPillRef.current = false;
+    } else {
+      // Multi-image paste calls onImagePaste in a loop. If the ref is already
+      // armed, the previous pill's lazy space fires now (before this pill)
+      // rather than being lost. densable: pK=Cs.current?" ":""; N1(pK+Tmo(id))
+      const prefix = pendingSpaceAfterPillRef.current ? ' ' : '';
+      insertTextAtCursor(prefix + refText);
+      pendingSpaceAfterPillRef.current = true;
+    }
 
     // densable Cct/wct: stamp AppState.storedImagePaths so [Image #N] is clickable
     cacheImagePath(newContent, setAppState);
@@ -2172,23 +2313,31 @@ function PromptInput({
     void storeImage(newContent, setAppState);
   }
 
-  // densable 2.1.211 OSe: only run orphan prune when any image is attached
-  // (fork PastedContent has text|image only; densable also gates on audio).
-  // Covers pill backspace / Ctrl+U / char delete. Gating matches official
-  // early-return when !OSe.
-  //
-  // densable OSe updates only setState H — it does NOT write ht in the prune
-  // callback. Fork previously set pastedContentsRef.current = pruned {}, which
-  // wiped dual-write when prop `input` lagged behind liveInputRef after paste
-  // (paste map arrives one render before [Image #N] is in input prop) → submit
-  // saw empty map → swallow. Use liveInputRef for referenced ids; never clobber
-  // the dual-write ref here (merge + dual-write on paste keep submit path live).
+  // densable 2.1.211 OSe + #147 (2.1.326): prune orphaned pastes (stashing them
+  // in removedPastedContentsRef) and restore any stashed paste whose pill was
+  // yanked back into the buffer (e.g. Ctrl+Y after Ctrl+U/Ctrl+W).
   const hasTrackablePaste = useMemo(() => Object.values(pastedContents).some(isTrackablePaste), [pastedContents]);
   useEffect(() => {
-    if (!hasTrackablePaste) return;
-    // Prefer live text (N1 already wrote the pill) over render-prop input.
     const liveText = liveInputRef.current;
     const referencedIds = new Set(parseReferences(liveText).map(r => r.id));
+
+    // #147: restore any yanked-back placeholder from removedPastedContentsRef
+    const restoredEntries: Record<number, PastedContent> = {};
+    let hasRestored = false;
+    for (const id of referencedIds) {
+      if (!pastedContentsRef.current[id] && removedPastedContentsRef.current[id]) {
+        restoredEntries[id] = removedPastedContentsRef.current[id]!;
+        delete removedPastedContentsRef.current[id];
+        hasRestored = true;
+      }
+    }
+    if (hasRestored) {
+      pastedContentsRef.current = { ...pastedContentsRef.current, ...restoredEntries };
+      setPastedContents(prev => ({ ...prev, ...restoredEntries }));
+      return;
+    }
+
+    if (!hasTrackablePaste) return;
     setPastedContents(prev => {
       const orphaned = Object.values(prev).filter(c => {
         if (c.type === 'text' && c.inline) {
@@ -2201,12 +2350,19 @@ function PromptInput({
       });
       if (orphaned.length === 0) return prev;
       const next = { ...prev };
-      for (const item of orphaned) delete next[item.id];
+      for (const item of orphaned) {
+        removedPastedContentsRef.current[item.id] = item;
+        delete next[item.id];
+      }
       return next;
     });
   }, [input, hasTrackablePaste, setPastedContents]);
 
   function onTextPaste(rawText: string) {
+    const hadExpandPasteHint = lastCollapsedPasteIdRef.current !== null || showExpandPasteHint;
+    if (hadExpandPasteHint) {
+      clearExpandPasteHint();
+    }
     pendingSpaceAfterPillRef.current = false;
     // Clean up pasted text - strip ANSI escape codes and normalize line endings and tabs
     let text = stripAnsi(rawText)
@@ -2250,6 +2406,21 @@ function PromptInput({
       };
 
       insertTextAtCursor(formatPastedTextRef(pasteId, numLines));
+      // #171 (2.1.326): show "paste again to expand" for expandable pastes (<= 10k)
+      // only when idle (!isLoading) and not on a subsequent paste, with automatic
+      // cleanup on delete/send/timeout so it never hides mode or `esc to interrupt`.
+      if (!hadExpandPasteHint && !isLoading && text.length <= 10_000) {
+        lastCollapsedPasteIdRef.current = pasteId;
+        setShowExpandPasteHint(true);
+        if (expandPasteTimerRef.current !== null) {
+          clearTimeout(expandPasteTimerRef.current);
+        }
+        expandPasteTimerRef.current = setTimeout(() => {
+          expandPasteTimerRef.current = null;
+          lastCollapsedPasteIdRef.current = null;
+          setShowExpandPasteHint(false);
+        }, 8_000);
+      }
     } else {
       // For shorter pastes, just insert the text normally
       insertTextAtCursor(text);
@@ -2571,14 +2742,24 @@ function PromptInput({
     // If this is a teammate, update config.json so team lead sees the change
     syncTeammateMode(nextMode, teamContext?.teamName);
 
-    // Close help tips if they're open when mode is cycled
+    // Close help tips and expand-paste hint when mode is cycled (#171)
+    clearExpandPasteHint();
     if (helpOpen) {
       setHelpOpen(false);
     }
-  }, [toolPermissionContext, teamContext, viewedTeammate, setAppState, setToolPermissionContext, helpOpen]);
+  }, [
+    toolPermissionContext,
+    teamContext,
+    viewedTeammate,
+    setAppState,
+    setToolPermissionContext,
+    helpOpen,
+    clearExpandPasteHint,
+  ]);
 
   // Handler for chat:imagePaste - paste image from clipboard
   const handleImagePaste = useCallback(() => {
+    captureImagePasteAnchor();
     void getImageFromClipboard().then(imageData => {
       if (imageData) {
         onImagePaste(imageData.base64, imageData.mediaType);
@@ -2621,10 +2802,13 @@ function PromptInput({
       action: 'chat:submit',
       context: 'Chat',
       handler: () => {
+        // #166 (2.1.326): allow rebound chat:submit to accept/submit from the
+        // open slash command or @ file menu instead of doing nothing.
+        if (submitOverSuggestions()) return;
         void onSubmit(liveInputRef.current);
       },
     });
-  }, [keybindingContext, isModalOverlayActive, onSubmit]);
+  }, [keybindingContext, isModalOverlayActive, onSubmit, submitOverSuggestions]);
 
   const handleQueueSubmit = useCallback(() => {
     void onSubmit(liveInputRef.current, false, { queueSubmit: true });
@@ -2733,7 +2917,7 @@ function PromptInput({
     },
     {
       context: 'Global',
-      isActive: feature('HISTORY_PICKER') ? !isModalOverlayActive : false,
+      isActive: feature('HISTORY_PICKER') ? !isModalOverlayActive && !showHistoryPicker : false,
     },
   );
 
@@ -3055,8 +3239,9 @@ function PromptInput({
         return;
       }
 
-      // densable: if(!lte()){ if(Be.some(lJ)&&(Phe()||!cu())) return }
-      if (!isKbCohesionFixesEnabled()) {
+      // #109 (2.1.326): never pop main conversation's queued commands on Esc
+      // while viewing a subagent or teammate.
+      if (!isKbCohesionFixesEnabled() && !viewingAgentTaskId) {
         const hasEditable = queuedCommands.some(isQueuedCommandEditable);
         if (
           hasEditable &&
@@ -3067,7 +3252,9 @@ function PromptInput({
         }
       }
 
-      if (messages.length > 0 && !input && !isLoading) {
+      // #167 (2.1.326): do not open Rewind from key-repeat Esc right after
+      // holding Esc cleared typed text.
+      if (messages.length > 0 && !input && !isLoading && Date.now() - lastNonEmptyEscAtRef.current >= 800) {
         doublePressEscFromEmpty();
       }
     }
@@ -3123,14 +3310,22 @@ function PromptInput({
   }, [midTaskPending, effortPendingNotificationText, store, addNotification, removeNotification]);
   useEffect(() => {
     if (!effortNotificationText) {
+      lastShownEffortNotificationText = undefined;
       removeNotification('effort-level');
       return;
     }
+    const nextText = effortPendingNotificationText ?? effortNotificationText;
+    // #181 (2.1.326): skip re-emitting the identical effort notice when
+    // PromptInput remounts after a permission prompt or dialog closes.
+    if (nextText === lastShownEffortNotificationText) {
+      return;
+    }
+    lastShownEffortNotificationText = nextText;
     removeNotification('effort-level');
     addNotification({
       key: 'effort-level',
       kind: 'feedback',
-      text: effortPendingNotificationText ?? effortNotificationText,
+      text: nextText,
       priority: 'high',
       // densable y8 toast: 10s. Queue behind another high toast is why idle
       // first-paint can miss it until a later panel refresh.
@@ -3400,11 +3595,28 @@ function PromptInput({
   // "Rendered fewer hooks than expected".
   const onKeyDownBefore = React.useCallback(
     (event: KeyboardEvent) => {
+      // #167 (2.1.326): remember Esc pressed while input was non-empty so
+      // holding Esc to clear text does not immediately trigger Rewind.
+      if ((event.name === 'escape' || event.key === 'escape') && liveInputRef.current !== '') {
+        lastNonEmptyEscAtRef.current = Date.now();
+      }
+      // #145 (2.1.326): commit an immediate undo snapshot before line/word
+      // kill shortcuts so Ctrl+_ restores words typed right before deletion.
+      const isKillShortcut =
+        (event.ctrl && (event.key === 'k' || event.key === 'u' || event.key === 'w')) ||
+        (event.meta && !event.ctrl && event.key === 'd') ||
+        ((event.name === 'backspace' || event.key === 'backspace') && (event.meta || event.ctrl)) ||
+        ((event.name === 'delete' || event.key === 'delete') && event.meta);
+      if (isKillShortcut && liveInputRef.current !== '') {
+        pushToBuffer(liveInputRef.current, cursorOffsetRef.current, pastedContentsRef.current, {
+          immediate: true,
+        });
+      }
       historyKeyDown(event);
       if (event.defaultPrevented || event.didStopImmediatePropagation()) return;
       typeaheadKeyDown(event);
     },
-    [historyKeyDown, typeaheadKeyDown],
+    [historyKeyDown, typeaheadKeyDown, pushToBuffer],
   );
 
   // TextInput/useTextInput submits via its own liveValueRef, which only syncs from
@@ -3522,12 +3734,15 @@ function PromptInput({
     onHistoryDown: handleHistoryDown,
     onHistoryReset: resetHistory,
     onHoldCleared: () => {
+      // #167 (2.1.326): record clear time so held Esc does not roll into Rewind.
+      lastNonEmptyEscAtRef.current = Date.now();
       // densable: hold only the live line (index 0) or a history row the user edited.
       if (historyIndex !== 0 && !historyEdited) return;
       holdCleared({
         text: liveInputRef.current,
         mode,
-        pastedContents: pastedContentsRef.current,
+        // #41 (2.1.326): clone map so subsequent state pruning cannot mutate held pastes.
+        pastedContents: { ...pastedContentsRef.current },
       });
     },
     // densable outside-empty clear drops the Ctrl+C hold
@@ -3726,6 +3941,35 @@ function PromptInput({
     : undefined;
 
   const historyChip = formatHistoryBorderLabel(historyIndex, historyTotal, historyEdited);
+  // #284 (2.1.326): in fullscreen mode, show hidden line counts on prompt borders.
+  const { linesAbove, linesBelow } = useMemo(
+    () =>
+      computePromptViewportOverflow(
+        leadingPillText + input,
+        textInputColumns,
+        leadingPillText.length + cursorOffset,
+        maxVisibleLines,
+      ),
+    [leadingPillText, input, textInputColumns, cursorOffset, maxVisibleLines],
+  );
+  const topMoreBorderText: BorderTextOptions | undefined =
+    linesAbove > 0
+      ? {
+          content: ` ${chalk.dim(`↑ ${linesAbove} more`)} `,
+          position: 'top',
+          align: 'start',
+          offset: 2,
+        }
+      : undefined;
+  const bottomMoreBorderText: BorderTextOptions | undefined =
+    linesBelow > 0
+      ? {
+          content: ` ${chalk.dim(`↓ ${linesBelow} more`)} `,
+          position: 'bottom',
+          align: 'start',
+          offset: 2,
+        }
+      : undefined;
   const promptBorderText: BorderTextOptions | undefined = historyChip
     ? {
         content: ` ${chalk.dim(historyChip)} `,
@@ -3733,7 +3977,8 @@ function PromptInput({
         align: 'start',
         offset: 2,
       }
-    : buildBorderText(showFastIcon ?? false, showFastIconHint, fastModeCooldown, ultracodeActive);
+    : (topMoreBorderText ??
+      buildBorderText(showFastIcon ?? false, showFastIconHint, fastModeCooldown, ultracodeActive));
 
   const hasStash = stashedPrompt !== undefined;
   const aboveNotificationWidth = dockWidth > 0 ? Math.max(0, promptInputColumns - dockWidth) : '100%';
@@ -3847,33 +4092,65 @@ function PromptInput({
               {fastModeTag}
             </Text>
           ) : null}
-          <Box
-            flexDirection="row"
-            alignItems="flex-start"
-            justifyContent="flex-start"
-            {...(hostBlocksKeys || isScreenReader
-              ? {}
-              : {
-                  borderColor: getBorderColor(),
-                  borderStyle: 'round' as const,
-                  borderLeft: false,
-                  borderRight: false,
-                  borderBottom: true as const,
-                })}
-            width={promptInputColumns}
-            flexShrink={0}
-            borderText={hostBlocksKeys || isScreenReader ? undefined : promptBorderText}
-          >
-            <PromptInputModeIndicator
-              mode={mode}
-              isLoading={isLoading}
-              viewingAgentName={viewingAgentName}
-              viewingAgentColor={viewingAgentColor}
-            />
-            <Box flexGrow={1} flexShrink={1} tabIndex={-1} onClick={handleInputClick}>
-              {textInputElement}
+          {hostBlocksKeys || isScreenReader ? (
+            <Box
+              flexDirection="row"
+              alignItems="flex-start"
+              justifyContent="flex-start"
+              width={promptInputColumns}
+              flexShrink={0}
+            >
+              <PromptInputModeIndicator
+                mode={mode}
+                isLoading={isLoading}
+                viewingAgentName={viewingAgentName}
+                viewingAgentColor={viewingAgentColor}
+              />
+              <Box flexGrow={1} flexShrink={1} tabIndex={-1} onClick={handleInputClick}>
+                {textInputElement}
+              </Box>
             </Box>
-          </Box>
+          ) : (
+            // #284 (2.1.326): keep JSX tree depth stable across linesBelow === 0 vs > 0
+            // so `textInputElement` (`BaseTextInput`) never unmounts/remounts on scroll.
+            <Box
+              flexDirection="column"
+              borderColor={getBorderColor()}
+              borderStyle="round"
+              borderTop={true}
+              borderBottom={false}
+              borderLeft={false}
+              borderRight={false}
+              width={promptInputColumns}
+              flexShrink={0}
+              borderText={promptBorderText}
+            >
+              <Box
+                flexDirection="row"
+                alignItems="flex-start"
+                justifyContent="flex-start"
+                borderColor={getBorderColor()}
+                borderStyle="round"
+                borderTop={false}
+                borderBottom={true}
+                borderLeft={false}
+                borderRight={false}
+                width={promptInputColumns}
+                flexShrink={0}
+                borderText={bottomMoreBorderText}
+              >
+                <PromptInputModeIndicator
+                  mode={mode}
+                  isLoading={isLoading}
+                  viewingAgentName={viewingAgentName}
+                  viewingAgentColor={viewingAgentColor}
+                />
+                <Box flexGrow={1} flexShrink={1} tabIndex={-1} onClick={handleInputClick}>
+                  {textInputElement}
+                </Box>
+              </Box>
+            </Box>
+          )}
         </>
       )}
       <PinnedNotifications />
@@ -3906,6 +4183,7 @@ function PromptInput({
         ideSelection={activeIdeSelection}
         mcpClients={mcpClients}
         isPasting={isPasting}
+        showExpandPasteHint={showExpandPasteHint}
         isInputWrapped={isInputWrapped}
         hasStash={hasStash}
         messages={messages}

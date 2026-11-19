@@ -1,9 +1,17 @@
 /* eslint-disable custom-rules/no-process-exit -- CLI subcommand handler intentionally exits */
 
+import { createInterface, type Interface as ReadlineInterface } from 'readline'
 import {
   clearAuthRelatedCaches,
   performLogout,
 } from '../../commands/logout/logout.js'
+import {
+  formatCliActionSuccess,
+  formatCliError,
+  formatCliSuccess,
+  formatCliWarning,
+} from '../cliStatusMarkers.js'
+import { formatRevokeUnconfirmedMessage } from './designOauth.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -126,6 +134,76 @@ export async function installOAuthTokens(
   await clearAuthRelatedCaches()
 }
 
+/**
+ * Official 2.1.326 (#64) `V`: parse a manually pasted OAuth authorization code
+ * (either `<code>#<state>` or bare `<code>`) from the TTY readline prompt.
+ */
+export function parsePastedOAuthCode(
+  raw: string,
+): { authorizationCode: string; state: string } | null {
+  const cleaned = raw.trim()
+  if (!cleaned) return null
+  const hashIdx = cleaned.indexOf('#')
+  if (hashIdx !== -1) {
+    const authorizationCode = cleaned.slice(0, hashIdx).trim()
+    const state = cleaned.slice(hashIdx + 1).trim()
+    if (!authorizationCode) return null
+    return { authorizationCode, state }
+  }
+  return { authorizationCode: cleaned, state: '' }
+}
+
+/**
+ * Official 2.1.326 (#64) `V`: when `claude auth login` runs in an interactive
+ * TTY, attach a `readline` prompt (`Paste code here if prompted > `) so pasted
+ * authorization codes are echoed and editable before pressing Enter.
+ */
+export function attachOAuthManualCodePrompt(
+  oauthService: Pick<OAuthService, 'handleManualAuthCodeInput'>,
+  io: {
+    input?: NodeJS.ReadableStream & { isTTY?: boolean }
+    output?: NodeJS.WritableStream & { isTTY?: boolean }
+  } = {},
+): () => void {
+  const input = io.input ?? process.stdin
+  const output = io.output ?? process.stdout
+  if (!input.isTTY || !output.isTTY) {
+    return () => {}
+  }
+
+  let rl: ReadlineInterface | null = createInterface({
+    input,
+    output,
+    prompt: 'Paste code here if prompted > ',
+    terminal: true,
+  })
+  let closed = false
+
+  const close = (): void => {
+    if (closed) return
+    closed = true
+    rl?.close()
+    rl = null
+  }
+
+  rl.on('line', line => {
+    const parsed = parsePastedOAuthCode(line)
+    if (!parsed) {
+      rl?.prompt()
+      return
+    }
+    oauthService.handleManualAuthCodeInput(parsed)
+    close()
+  })
+
+  rl.on('SIGINT', () => {
+    close()
+  })
+
+  rl.prompt()
+  return close
+}
+
 export async function authLogin({
   email,
   sso,
@@ -139,7 +217,7 @@ export async function authLogin({
 }): Promise<void> {
   if (useConsole && claudeai) {
     process.stderr.write(
-      'Error: --console and --claudeai cannot be used together.\n',
+      `${formatCliError('--console and --claudeai cannot be used together.', 'Error: ')}\n`,
     )
     process.exit(1)
   }
@@ -216,7 +294,7 @@ export async function authLogin({
       logEvent('tengu_oauth_success', {
         loginWithClaudeAi: shouldUseClaudeAIAuth(tokens.scopes),
       })
-      process.stdout.write('Login successful.\n')
+      process.stdout.write(`${formatCliSuccess('Login successful.', '')}\n`)
       process.exit(0)
     } catch (err) {
       logOTelAuthEvent({
@@ -230,7 +308,7 @@ export async function authLogin({
       const nonOriginHint = getNonOrigin403HintFromError(err)
       const extraHint = nonOriginHint ?? sslHint
       process.stderr.write(
-        `Login failed: ${errorMessage(err)}\n${extraHint ? extraHint + '\n' : ''}`,
+        `${formatCliError(`Login failed: ${errorMessage(err)}`, '')}\n${extraHint ? extraHint + '\n' : ''}`,
       )
       await waitForHeldOAuthRefresh(getOAuthRefreshExitWaitMs(true))
       process.exit(1)
@@ -240,6 +318,7 @@ export async function authLogin({
   const resolvedLoginMethod = sso ? 'sso' : undefined
 
   const oauthService = new OAuthService()
+  let closeManualCodePrompt: (() => void) | undefined
 
   try {
     logEvent('tengu_oauth_flow_start', { loginWithClaudeAi })
@@ -248,6 +327,8 @@ export async function authLogin({
       async url => {
         process.stdout.write('Opening browser to sign in…\n')
         process.stdout.write(`If the browser didn't open, visit: ${url}\n`)
+        closeManualCodePrompt?.()
+        closeManualCodePrompt = attachOAuthManualCodePrompt(oauthService)
       },
       {
         loginWithClaudeAi,
@@ -256,6 +337,9 @@ export async function authLogin({
         orgUUID,
       },
     )
+
+    closeManualCodePrompt?.()
+    closeManualCodePrompt = undefined
 
     await installOAuthTokens(result)
 
@@ -269,7 +353,7 @@ export async function authLogin({
 
     logEvent('tengu_oauth_success', { loginWithClaudeAi })
 
-    process.stdout.write('Login successful.\n')
+    process.stdout.write(`${formatCliSuccess('Login successful.', '')}\n`)
     process.exit(0)
   } catch (err) {
     logOTelAuthEvent({
@@ -283,11 +367,12 @@ export async function authLogin({
     const nonOriginHint = getNonOrigin403HintFromError(err)
     const extraHint = nonOriginHint ?? sslHint
     process.stderr.write(
-      `Login failed: ${errorMessage(err)}\n${extraHint ? extraHint + '\n' : ''}`,
+      `${formatCliError(`Login failed: ${errorMessage(err)}`, '')}\n${extraHint ? extraHint + '\n' : ''}`,
     )
     await waitForHeldOAuthRefresh(getOAuthRefreshExitWaitMs(true))
     process.exit(1)
   } finally {
+    closeManualCodePrompt?.()
     oauthService.cleanup()
   }
 }
@@ -396,14 +481,28 @@ export async function authStatus(opts: {
 
 export async function authLogout(): Promise<void> {
   logOTelAuthEvent({ action: 'logout', success: true, authMethod: 'oauth' })
+  // Official 2.1.326 #238: performLogout revokes OAuth refresh tokens via
+  // revokeOAuthRefreshTokenWithRetry and returns 'revoke_unconfirmed' if server
+  // revocation could not be confirmed.
+  let outcome: Awaited<ReturnType<typeof performLogout>>
   try {
-    await performLogout({ clearOnboarding: false })
-  } catch {
-    process.stderr.write('Failed to log out.\n')
+    outcome = await performLogout({ clearOnboarding: false })
+  } catch (err) {
+    logError(err)
+    process.stderr.write(
+      `${formatCliError(`Couldn't log out: ${errorMessage(err)}`, '')}\n`,
+    )
     await releaseAllHeldWifLocks()
     process.exit(1)
   }
-  process.stdout.write('Successfully logged out from your Anthropic account.\n')
+  if (outcome === 'revoke_unconfirmed') {
+    const unconfirmedMessage = await formatRevokeUnconfirmedMessage()
+    process.stdout.write(`${formatCliWarning(unconfirmedMessage, '')}\n`)
+  } else {
+    process.stdout.write(
+      `${formatCliActionSuccess('Successfully logged out from your Anthropic account.', '')}\n`,
+    )
+  }
   await Promise.all([
     waitForHeldOAuthRefresh(getOAuthRefreshExitWaitMs(true)),
     releaseAllHeldWifLocks(),

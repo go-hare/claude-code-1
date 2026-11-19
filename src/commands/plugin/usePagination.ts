@@ -42,7 +42,12 @@ type UsePaginationResult<T> = {
     total: number
     canScrollUp: boolean
     canScrollDown: boolean
+    /** Official 2.1.326 #272: count of hidden rows above/below viewport. */
+    hiddenAbove: number
+    hiddenBelow: number
   }
+  /** Official 2.1.326 #126: explicitly reset scroll offset (e.g. on clearing search). */
+  resetScroll: () => void
 }
 
 export function usePagination<T>({
@@ -58,19 +63,23 @@ export function usePagination<T>({
   // Compute the scroll offset based on selectedIndex
   // This ensures the selected item is always visible
   const scrollOffset = useMemo(() => {
-    if (!needsPagination) return 0
+    if (!needsPagination || totalItems <= 0) {
+      scrollOffsetRef.current = 0
+      return 0
+    }
 
+    const clampedSelected = Math.max(0, Math.min(selectedIndex, totalItems - 1))
     const prevOffset = scrollOffsetRef.current
 
     // If selected item is above the visible window, scroll up
-    if (selectedIndex < prevOffset) {
-      scrollOffsetRef.current = selectedIndex
-      return selectedIndex
+    if (clampedSelected < prevOffset) {
+      scrollOffsetRef.current = clampedSelected
+      return clampedSelected
     }
 
     // If selected item is below the visible window, scroll down
-    if (selectedIndex >= prevOffset + maxVisible) {
-      const newOffset = selectedIndex - maxVisible + 1
+    if (clampedSelected >= prevOffset + maxVisible) {
+      const newOffset = clampedSelected - maxVisible + 1
       scrollOffsetRef.current = newOffset
       return newOffset
     }
@@ -82,6 +91,10 @@ export function usePagination<T>({
     scrollOffsetRef.current = clampedOffset
     return clampedOffset
   }, [selectedIndex, maxVisible, needsPagination, totalItems])
+
+  const resetScroll = useCallback(() => {
+    scrollOffsetRef.current = 0
+  }, [])
 
   const startIndex = scrollOffset
   const endIndex = Math.min(scrollOffset + maxVisible, totalItems)
@@ -166,6 +179,9 @@ export function usePagination<T>({
       total: totalItems,
       canScrollUp: scrollOffset > 0,
       canScrollDown: scrollOffset + maxVisible < totalItems,
+      hiddenAbove: scrollOffset,
+      hiddenBelow: Math.max(0, totalItems - endIndex),
     },
+    resetScroll,
   }
 }

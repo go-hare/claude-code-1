@@ -1,7 +1,9 @@
 import figures from 'figures';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
 import { Box, color, Text, useTheme } from '@anthropic/ink';
+import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
+import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import { useMcpReconnect } from '../../services/mcp/MCPConnectionManager.js';
 import { isMcpServerDisabled } from '../../services/mcp/config.js';
 import {
@@ -25,6 +27,23 @@ export function MCPReconnect({ serverName, onComplete }: Props): React.ReactNode
   const [isReconnecting, setIsReconnecting] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusLabel, setStatusLabel] = useState(serverName === 'all' ? 'all MCP servers' : serverName);
+  const dismissedRef = useRef(false);
+
+  // Official 2.1.326 #85: Esc, or Ctrl+C pressed twice, closes the wait view
+  // while letting the in-flight reconnect continue in the background.
+  const handleDismissToBackground = useCallback(() => {
+    if (dismissedRef.current) return;
+    dismissedRef.current = true;
+    setIsReconnecting(false);
+    onComplete(`Reconnecting to ${statusLabel} in the background…`);
+  }, [onComplete, statusLabel]);
+
+  const exitState = useExitOnCtrlCDWithKeybindings(handleDismissToBackground);
+
+  useKeybinding('confirm:no', handleDismissToBackground, {
+    context: 'Confirmation',
+    isActive: isReconnecting,
+  });
 
   useEffect(() => {
     async function attemptReconnect() {
@@ -37,11 +56,13 @@ export function MCPReconnect({ serverName, onComplete }: Props): React.ReactNode
         if (serverName === 'all') {
           const plan = planMcpReconnect(clients, 'all', isMcpServerDisabled);
           if (plan.kind === 'missing') {
+            if (dismissedRef.current) return;
             setIsReconnecting(false);
             onComplete(missingMcpReconnectTarget('all'));
             return;
           }
           if (plan.kind === 'text') {
+            if (dismissedRef.current) return;
             setIsReconnecting(false);
             onComplete(plan.text);
             return;
@@ -49,6 +70,7 @@ export function MCPReconnect({ serverName, onComplete }: Props): React.ReactNode
 
           setStatusLabel(plan.names.length === 1 ? plan.names[0]! : `${plan.names.length} MCP servers`);
           const settled = await Promise.allSettled(plan.names.map(name => reconnectMcpServer(name)));
+          if (dismissedRef.current) return;
           const results: Array<{ ok: true; type: string } | { ok: false }> = settled.map(entry =>
             entry.status === 'fulfilled' ? { ok: true, type: entry.value.client.type } : { ok: false },
           );
@@ -64,6 +86,7 @@ export function MCPReconnect({ serverName, onComplete }: Props): React.ReactNode
         // Check if server exists.
         const server = clients.find(c => c.name === serverName);
         if (!server) {
+          if (dismissedRef.current) return;
           setError(`MCP server "${serverName}" not found`);
           setIsReconnecting(false);
           onComplete(`MCP server "${serverName}" not found`);
@@ -82,6 +105,7 @@ export function MCPReconnect({ serverName, onComplete }: Props): React.ReactNode
           isMcpServerDisabled,
         );
         if (driftedRemedy !== null) {
+          if (dismissedRef.current) return;
           setError(driftedRemedy);
           setIsReconnecting(false);
           onComplete(driftedRemedy);
@@ -90,6 +114,7 @@ export function MCPReconnect({ serverName, onComplete }: Props): React.ReactNode
 
         // Attempt reconnection
         const result = await reconnectMcpServer(serverName);
+        if (dismissedRef.current) return;
 
         switch (result.client.type) {
           case 'connected':
@@ -100,6 +125,7 @@ export function MCPReconnect({ serverName, onComplete }: Props): React.ReactNode
             // densable 2.1.216: bg no-terminal parks needs-input in agent view
             const { formatMcpNeedsAuthMessage } = await import('../../utils/bgCommandNeedsPark.js');
             const msg = await formatMcpNeedsAuthMessage(serverName);
+            if (dismissedRef.current) return;
             setError(`${serverName} requires authentication`);
             setIsReconnecting(false);
             onComplete(msg);
@@ -114,6 +140,7 @@ export function MCPReconnect({ serverName, onComplete }: Props): React.ReactNode
             break;
         }
       } catch (err) {
+        if (dismissedRef.current) return;
         // Only catch actual errors (like server not found)
         const errorMessage = err instanceof Error ? err.message : String(err);
         setError(errorMessage);
@@ -135,6 +162,11 @@ export function MCPReconnect({ serverName, onComplete }: Props): React.ReactNode
           <Spinner />
           <Text> Establishing connection to MCP server</Text>
         </Box>
+        <Text dimColor>
+          {exitState.pending
+            ? `Press ${exitState.keyName} again to continue in the background`
+            : 'Press Esc to continue in the background'}
+        </Text>
       </Box>
     );
   }

@@ -3,10 +3,11 @@ import { randomBytes } from 'crypto';
 import { copyFile, mkdir, readFile, writeFile } from 'fs/promises';
 import { homedir, platform } from 'os';
 import { dirname, join } from 'path';
+import * as React from 'react';
 import type { ThemeName } from 'src/utils/theme.js';
 import { pathToFileURL } from 'url';
-import { supportsHyperlinks } from '@anthropic/ink';
-import { color } from '@anthropic/ink';
+import { Box, Byline, color, Dialog, KeyboardShortcutHint, supportsHyperlinks, Text } from '@anthropic/ink';
+import { Select } from '../../components/CustomSelect/index.js';
 import { maybeMarkProjectOnboardingComplete } from '../../projectOnboardingState.js';
 import type { ToolUseContext } from '../../Tool.js';
 import type { LocalJSXCommandContext, LocalJSXCommandOnDone } from '../../types/command.js';
@@ -37,7 +38,167 @@ const NATIVE_CSIU_TERMINALS: Record<string, string> = {
   'iTerm.app': 'iTerm2',
   WezTerm: 'WezTerm',
   WarpTerminal: 'Warp',
+  'windows-terminal-1.25': 'Windows Terminal 1.25 or later',
 };
+
+/**
+ * Official 2.1.326 #187: tmux settings needed for Shift+Enter to pass through.
+ */
+export function formatTmuxExtkeysNote(envVars: NodeJS.ProcessEnv = process.env): string | null {
+  if (envVars.TERM_PROGRAM !== 'tmux' && !envVars.TMUX) {
+    return null;
+  }
+  return `Inside tmux, Shift+Enter also needs these lines in ~/.tmux.conf:
+  ${chalk.bold('set -s extended-keys on')}
+  ${chalk.bold("set -as terminal-features 'xterm*:extkeys'")}
+Then run ${chalk.bold('tmux source-file ~/.tmux.conf')}, detach and reattach, and restart Claude Code.`;
+}
+
+/**
+ * Official 2.1.326 #187: detect Windows Terminal before 1.25, where Shift+Enter
+ * sends the prompt instead of inserting a newline.
+ */
+export function isWindowsTerminalBefore125(
+  envVars: NodeJS.ProcessEnv = process.env,
+  terminal: string | null = env.terminal,
+): boolean {
+  const isWT = Boolean(envVars.WT_SESSION) || terminal === 'windows-terminal';
+  if (!isWT) return false;
+  const ver = envVars.WT_VERSION ?? envVars.TERM_PROGRAM_VERSION;
+  if (!ver) return true;
+  const match = /^(\d+)\.(\d+)/.exec(ver);
+  if (!match) return true;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  return major < 1 || (major === 1 && minor < 25);
+}
+
+export const WINDOWS_TERMINAL_PRE_125_NOTICE = `Shift+Enter needs Windows Terminal 1.25 or later, and this looks like an older version.
+
+To add a newline here, press Ctrl+J, or type a backslash and press Enter. For Shift+Enter, update Windows Terminal, or install Windows Terminal Preview if no update reaches 1.25.`;
+
+/**
+ * Official 2.1.326 #288: list every file/setting change `/terminal-setup` will
+ * make before modifying the user's terminal configuration.
+ */
+export function describePlannedTerminalSetupChanges(terminal: string | null): string[] {
+  const home = homedir();
+  const os = platform();
+  const vscodeUserPath = (editorDir: string) =>
+    join(
+      home,
+      os === 'win32'
+        ? join('AppData', 'Roaming', editorDir, 'User', 'keybindings.json')
+        : os === 'darwin'
+          ? join('Library', 'Application Support', editorDir, 'User', 'keybindings.json')
+          : join('.config', editorDir, 'User', 'keybindings.json'),
+    );
+
+  switch (terminal) {
+    case 'Apple_Terminal':
+      return [
+        `Back up ${getTerminalPlistPath()}`,
+        'Enable "Use Option as Meta key" in your default macOS Terminal profile',
+        'Disable audible bell (Visual Bell) in the active macOS Terminal profile',
+        'Record terminal setup completion in ~/.claude.json',
+      ];
+    case 'vscode':
+      return [
+        `Add Shift+Enter keybinding (workbench.action.terminal.sendSequence "\\u001b\\r") to ${vscodeUserPath('Code')}`,
+        'Record Shift+Enter keybinding installation in ~/.claude.json',
+      ];
+    case 'cursor':
+      return [
+        `Add Shift+Enter keybinding (workbench.action.terminal.sendSequence "\\u001b\\r") to ${vscodeUserPath('Cursor')}`,
+        'Record Shift+Enter keybinding installation in ~/.claude.json',
+      ];
+    case 'windsurf':
+      return [
+        `Add Shift+Enter keybinding (workbench.action.terminal.sendSequence "\\u001b\\r") to ${vscodeUserPath('Windsurf')}`,
+        'Record Shift+Enter keybinding installation in ~/.claude.json',
+      ];
+    case 'alacritty':
+      return [
+        `Add Shift+Enter keyboard binding to ${join(home, '.config', 'alacritty', 'alacritty.toml')}`,
+        'Record Shift+Enter keybinding installation in ~/.claude.json',
+      ];
+    case 'zed':
+      return [
+        `Add Shift+Enter binding to ${join(home, '.config', 'zed', 'keymap.json')}`,
+        'Record Shift+Enter keybinding installation in ~/.claude.json',
+      ];
+    default:
+      return [];
+  }
+}
+
+function TerminalSetupConfirmDialog({
+  changes,
+  theme,
+  onDone,
+}: {
+  changes: string[];
+  theme: ThemeName;
+  onDone: LocalJSXCommandOnDone;
+}): React.ReactNode {
+  const [applying, setApplying] = React.useState(false);
+
+  const handleSelect = async (value: string) => {
+    if (value !== 'apply') {
+      onDone('Terminal setup cancelled. No changes were made.');
+      return;
+    }
+    setApplying(true);
+    try {
+      const result = await setupTerminal(theme);
+      onDone(result);
+    } catch (err) {
+      logError(err);
+      onDone(`Terminal setup failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  return (
+    <Dialog
+      title="Terminal setup"
+      subtitle="Review every change before applying"
+      onCancel={() => onDone('Terminal setup cancelled. No changes were made.')}
+      inputGuide={exitState =>
+        exitState.pending ? (
+          <Text>Press {exitState.keyName} again to exit</Text>
+        ) : (
+          <Byline>
+            <KeyboardShortcutHint shortcut="Enter" action="confirm" />
+            <KeyboardShortcutHint shortcut="Esc" action="cancel" />
+          </Byline>
+        )
+      }
+    >
+      <Box flexDirection="column" gap={1}>
+        <Text>Terminal setup will make the following changes:</Text>
+        <Box flexDirection="column" paddingLeft={1}>
+          {changes.map((change, idx) => (
+            <Text key={idx}>• {change}</Text>
+          ))}
+        </Box>
+        {applying ? (
+          <Text dimColor>Applying terminal setup…</Text>
+        ) : (
+          <Select
+            options={[
+              { label: 'Apply these changes', value: 'apply' },
+              { label: 'Cancel', value: 'cancel' },
+            ]}
+            onChange={value => {
+              void handleSelect(value);
+            }}
+            onCancel={() => onDone('Terminal setup cancelled. No changes were made.')}
+          />
+        )}
+      </Box>
+    </Dialog>
+  );
+}
 
 /**
  * Detect if we're running in a VSCode Remote SSH session.
@@ -170,11 +331,20 @@ export async function call(
   onDone: LocalJSXCommandOnDone,
   context: ToolUseContext & LocalJSXCommandContext,
   _args: string,
-): Promise<null> {
+): Promise<React.ReactNode> {
+  const tmuxNote = formatTmuxExtkeysNote();
+  const nativeFollowup = tmuxNote ?? 'No configuration needed. Just use Shift+Enter to add newlines.';
+
+  // Official 2.1.326 #187: do not promise Shift+Enter on Windows Terminal < 1.25.
+  if (isWindowsTerminalBefore125()) {
+    onDone(WINDOWS_TERMINAL_PRE_125_NOTICE);
+    return null;
+  }
+
   if (env.terminal && env.terminal in NATIVE_CSIU_TERMINALS) {
     const message = `Shift+Enter is natively supported in ${NATIVE_CSIU_TERMINALS[env.terminal]}.
 
-No configuration needed. Just use Shift+Enter to add newlines.`;
+${nativeFollowup}`;
     onDone(message);
     return null;
   }
@@ -189,15 +359,16 @@ No configuration needed. Just use Shift+Enter to add newlines.`;
     if (currentPlatform === 'macos') {
       platformTerminals = '   • macOS: Apple Terminal\n';
     } else if (currentPlatform === 'windows') {
-      platformTerminals = '   • Windows: Windows Terminal\n';
+      platformTerminals = '   • Windows: Windows Terminal 1.25 or later\n';
     }
     // For Linux and other platforms, we don't show native terminal options
     // since they're not currently supported
 
-    const message = `Terminal setup cannot be run from ${terminalName}.
+    const tmuxSection = tmuxNote ? `\n\n${tmuxNote}` : '';
+    const message = `Terminal setup can't run from ${terminalName}.
 
-This command configures a convenient Shift+Enter shortcut for multi-line prompts.
-${chalk.dim('Note: You can already use backslash (\\\\) + return to add newlines.')}
+This command sets up Shift+Enter for multi-line prompts.
+${chalk.dim('You can already use backslash (\\\\) + return to add newlines.')}
 
 To set up the shortcut (optional):
 1. Exit tmux/screen temporarily
@@ -206,9 +377,15 @@ ${platformTerminals}   • IDE: VSCode, Cursor, Windsurf, Zed
    • Other: Alacritty
 3. Return to tmux/screen - settings will persist
 
-${chalk.dim('Note: iTerm2, WezTerm, Ghostty, Kitty, and Warp support Shift+Enter natively.')}`;
+${chalk.dim('iTerm2, WezTerm, Ghostty, Kitty, Warp, and Windows Terminal 1.25 or later support Shift+Enter natively.')}${tmuxSection}`;
     onDone(message);
     return null;
+  }
+
+  // Official 2.1.326 #288: list every planned change before making it.
+  const plannedChanges = describePlannedTerminalSetupChanges(env.terminal);
+  if (plannedChanges.length > 0 && !isVSCodeRemoteSSH()) {
+    return <TerminalSetupConfirmDialog changes={plannedChanges} theme={context.options.theme} onDone={onDone} />;
   }
 
   const result = await setupTerminal(context.options.theme);

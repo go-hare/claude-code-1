@@ -30,7 +30,9 @@ describe('densable 2.1.289 tot Ne bottom chrome', () => {
     expect(src).not.toContain(
       'maxHeight={abovePrompt != null ? promptMaxHeight : bottomMaxHeight}',
     )
-    expect(src).toContain('gt=Math.max(0,Ne-pt)')
+    expect(src).toContain(
+      'computeFullscreenPromptMaxHeight(bottomMaxHeight, abovePromptHeight, terminalRows)',
+    )
     expect(src).toContain('AbovePromptLeftoverContext')
     expect(src).toContain('leftoverOf')
     expect(src).toContain('leftoverYe')
@@ -52,11 +54,11 @@ describe('densable 2.1.289 tot Ne bottom chrome', () => {
     )
   })
 
-  test('PromptInput maxVisibleLines can be 0 (gold leftover chrome)', async () => {
+  test('PromptInput maxVisibleLines uses promptChromeBudget + multi-row status line budget', async () => {
     const src = await Bun.file(PROMPT).text()
     expect(src).toContain('const PROMPT_FOOTER_LINES = 5')
     expect(src).toContain(
-      'Math.max(0, (promptChromeBudget ?? Math.floor(rows / 2)) - PROMPT_FOOTER_LINES)',
+      'Math.max(3, (promptChromeBudget ?? Math.floor(rows / 2)) - (PROMPT_FOOTER_LINES + extraStatusLineRows))',
     )
     expect(src).not.toContain('MIN_INPUT_VIEWPORT_LINES')
   })

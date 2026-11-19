@@ -47,6 +47,50 @@ type PushOutput = {
 const PUSH_DEDUP_WINDOW_MS = 60_000
 const recentPushByKey = new Map<string, number>()
 
+const PUSH_SECRET_PATTERNS: ReadonlyArray<RegExp> = [
+  // PEM private key blocks
+  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----/g,
+  // Anthropic API / OAuth / session keys
+  /\bsk-ant-[A-Za-z0-9_-]{12,}\b/g,
+  // Generic sk- keys (OpenAI, Stripe, etc.)
+  /\bsk-(?:live|test|proj|svcacct)?-?[A-Za-z0-9_-]{20,}\b/g,
+  // GitHub PATs / OAuth tokens
+  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b/g,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
+  // AWS access key IDs
+  /\b(?:AKIA|ASIA|AIDA|AROA)[0-9A-Z]{16}\b/g,
+  // Slack tokens
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g,
+  // JWTs (header.payload.signature)
+  /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+  // Bearer / Authorization tokens
+  /(\bBearer\s+)[A-Za-z0-9._~+/-]{16,}=*/gi,
+  // URL userinfo credentials (scheme://user:pass@host)
+  /(\bhttps?:\/\/[^/\s:@]+:)[^/\s@]+(@)/gi,
+  // Key/secret/token/password assignments
+  /(\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|auth[_-]?token|client[_-]?secret|secret[_-]?key|password|passwd|private[_-]?key)\s*[:=]\s*["']?)[^\s"',;]{8,}/gi,
+]
+
+/**
+ * Official 2.1.326 #237 — mask credentials and secrets in push notification
+ * text before delivering over Remote Control / cloud push channels.
+ */
+export function maskPushNotificationSecrets(text: string): string {
+  if (!text) return text
+  let masked = text
+  for (const pattern of PUSH_SECRET_PATTERNS) {
+    pattern.lastIndex = 0
+    if (pattern.source.startsWith('(\\bhttps?')) {
+      masked = masked.replace(pattern, '$1[REDACTED]$2')
+    } else if (pattern.source.startsWith('(')) {
+      masked = masked.replace(pattern, '$1[REDACTED]')
+    } else {
+      masked = masked.replace(pattern, '[REDACTED]')
+    }
+  }
+  return masked
+}
+
 export function _resetPushNotificationDedupForTesting(): void {
   recentPushByKey.clear()
 }
@@ -239,14 +283,16 @@ Requires Remote Control to be configured. Respects user notification settings (t
           if (token && sessionId) {
             const baseUrl = getBridgeBaseUrl()
             const axios = (await import('axios')).default
+            const maskedTitle = maskPushNotificationSecrets(input.title)
+            const maskedBody = maskPushNotificationSecrets(input.body)
             const response = await axios.post(
               `${baseUrl}/v1/sessions/${sessionId}/events`,
               {
                 events: [
                   {
                     type: 'push_notification',
-                    title: input.title,
-                    body: input.body,
+                    title: maskedTitle,
+                    body: maskedBody,
                     priority: input.priority ?? 'normal',
                     status: effectiveStatus,
                   },

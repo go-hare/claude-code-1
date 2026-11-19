@@ -44,7 +44,10 @@ import {
   parseUserSpecifiedModel,
 } from '../model/model.js'
 import { isModelAllowed } from '../model/modelAllowlist.js'
-import { getAutoModeConfig } from '../settings/settings.js'
+import {
+  getAutoModeConfig,
+  stripDefaultsFromFlagAutoModeSection,
+} from '../settings/settings.js'
 import { sideQuery } from '../sideQuery.js'
 import {
   CLASSIFIER_SIDE_QUERY_TIMEOUT_MS,
@@ -751,6 +754,77 @@ function buildClaudeMdMessage(): Anthropic.MessageParam | null {
  * Assembles the base prompt with the permissions template and substitutes
  * user allow/deny/environment values from settings.autoMode.
  */
+/** Official 2.1.326 `Vf` / `WSr` / `GSr` / `lho` (#322): `$defaults` sentinel and managed override semantics. */
+export const AUTO_MODE_DEFAULTS_SENTINEL = '$defaults'
+
+/** Official `WSr(entries)`: true when entries are non-empty and omit `"$defaults"`. */
+export function isAutoModeSectionReplacingDefaults(
+  entries: readonly string[] | undefined,
+): boolean {
+  return (
+    Boolean(entries?.length) && !entries!.includes(AUTO_MODE_DEFAULTS_SENTINEL)
+  )
+}
+
+/**
+ * Official `GSr(entries, defaultLines, formatEntry)` (#322):
+ * Expands `"$defaults"` in-place (at most once) with `defaultLines`.
+ * When `entries` is non-empty and omits `"$defaults"`, replaces all built-in entries.
+ */
+export function expandAutoModeEntriesWithDefaults(
+  entries: readonly string[] | undefined,
+  defaultLines: readonly string[],
+  formatEntry: (entry: string) => string = entry => `- ${entry}`,
+): string[] {
+  if (!entries?.length) {
+    return [...defaultLines]
+  }
+  let defaultsInserted = false
+  const out: string[] = []
+  for (const entry of entries) {
+    if (entry === AUTO_MODE_DEFAULTS_SENTINEL) {
+      if (!defaultsInserted) {
+        out.push(...defaultLines)
+        defaultsInserted = true
+      }
+      continue
+    }
+    out.push(formatEntry(entry))
+  }
+  return out
+}
+
+export { stripDefaultsFromFlagAutoModeSection }
+
+export function resolveEffectiveAutoModeConfig(
+  overrideConfig?: {
+    allow?: string[]
+    soft_deny?: string[]
+    hard_deny?: string[]
+    environment?: string[]
+  } | null,
+):
+  | {
+      allow?: string[]
+      soft_deny?: string[]
+      hard_deny?: string[]
+      environment?: string[]
+    }
+  | undefined {
+  if (overrideConfig !== undefined) {
+    return overrideConfig ?? undefined
+  }
+  return getAutoModeConfig()
+}
+
+function renderAutoModePromptSlot(
+  entries: readonly string[] | undefined,
+  defaultBlock: string,
+): string {
+  const defaultLines = defaultBlock.length > 0 ? [defaultBlock] : []
+  return expandAutoModeEntriesWithDefaults(entries, defaultLines).join('\n')
+}
+
 export async function buildYoloSystemPrompt(
   context: ToolPermissionContext,
 ): Promise<string> {
@@ -763,7 +837,7 @@ export async function buildYoloSystemPrompt(
     ),
   )
 
-  const autoMode = getAutoModeConfig()
+  const autoMode = resolveEffectiveAutoModeConfig()
   const includeBashPromptRules = feature('BASH_CLASSIFIER')
     ? !usingExternal
     : false
@@ -780,44 +854,34 @@ export async function buildYoloSystemPrompt(
     ...(autoMode?.soft_deny ?? []),
   ]
   const hardDenyDescriptions = [...(autoMode?.hard_deny ?? [])]
-
-  // Soft/hard deny + allow/environment use the same <foo_to_replace>…</>
-  // delimiter pattern. External template: user values REPLACE defaults.
-  // Anthropic template: defaults stay outside empty tags → user values ADD.
-  const userAllow = allowDescriptions.length
-    ? allowDescriptions.map(d => `- ${d}`).join('\n')
-    : undefined
-  const userSoftDeny = softDenyDescriptions.length
-    ? softDenyDescriptions.map(d => `- ${d}`).join('\n')
-    : undefined
-  const userHardDeny = hardDenyDescriptions.length
-    ? hardDenyDescriptions.map(d => `- ${d}`).join('\n')
-    : undefined
-  const userEnvironment = autoMode?.environment?.length
-    ? autoMode.environment.map(e => `- ${e}`).join('\n')
-    : undefined
+  const environmentDescriptions = autoMode?.environment
 
   return (systemPrompt + '\n' + HOST_CLASSIFIER_CONTEXT_GUIDANCE)
     .replace(
       /<user_allow_rules_to_replace>([\s\S]*?)<\/user_allow_rules_to_replace>/,
-      (_m, defaults: string) => userAllow ?? defaults,
+      (_m, defaults: string) =>
+        renderAutoModePromptSlot(allowDescriptions, defaults),
     )
     .replace(
       /<user_soft_deny_rules_to_replace>([\s\S]*?)<\/user_soft_deny_rules_to_replace>/,
-      (_m, defaults: string) => userSoftDeny ?? defaults,
+      (_m, defaults: string) =>
+        renderAutoModePromptSlot(softDenyDescriptions, defaults),
     )
     .replace(
       // Legacy alias for soft_deny (pre hard/soft split)
       /<user_deny_rules_to_replace>([\s\S]*?)<\/user_deny_rules_to_replace>/,
-      (_m, defaults: string) => userSoftDeny ?? defaults,
+      (_m, defaults: string) =>
+        renderAutoModePromptSlot(softDenyDescriptions, defaults),
     )
     .replace(
       /<user_hard_deny_rules_to_replace>([\s\S]*?)<\/user_hard_deny_rules_to_replace>/,
-      (_m, defaults: string) => userHardDeny ?? defaults,
+      (_m, defaults: string) =>
+        renderAutoModePromptSlot(hardDenyDescriptions, defaults),
     )
     .replace(
       /<user_environment_to_replace>([\s\S]*?)<\/user_environment_to_replace>/,
-      (_m, defaults: string) => userEnvironment ?? defaults,
+      (_m, defaults: string) =>
+        renderAutoModePromptSlot(environmentDescriptions, defaults),
     )
     .replace('<cross_session_messages_rule>', () => '')
 }

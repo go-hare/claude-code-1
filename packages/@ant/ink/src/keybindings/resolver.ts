@@ -1,5 +1,5 @@
 import type { Key } from '../core/events/input-event.js'
-import { getKeyName, matchesBinding } from './match.js'
+import { getKeyName, matchesBinding, normalizeMacOptionInput } from './match.js'
 import { chordToString } from './parser.js'
 import type {
   KeybindingContextName,
@@ -80,13 +80,14 @@ export function getBindingDisplayText(
  * Build a ParsedKeystroke from Ink's input/key.
  */
 function buildKeystroke(input: string, key: Key): ParsedKeystroke | null {
-  const keyName = getKeyName(input, key)
+  const normalized = normalizeMacOptionInput(input, key)
+  const keyName = getKeyName(normalized.input, key)
   if (!keyName) return null
 
   // QUIRK: Ink sets key.meta=true when escape is pressed (see input-event.ts).
   // This is legacy terminal behavior - we should NOT record this as a modifier
   // for the escape key itself, otherwise chord matching will fail.
-  const effectiveMeta = key.escape ? false : key.meta
+  const effectiveMeta = key.escape ? false : normalized.meta
 
   return {
     key: keyName,

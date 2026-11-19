@@ -13,23 +13,34 @@ export type UseInputBufferProps = {
   debounceMs: number
 }
 
+export type PushToBufferOptions = {
+  /** Official 2.1.326 #145 (`w_e`): bypass debounce before destructive deletes so Ctrl+_ restores last typed words. */
+  immediate?: boolean
+}
+
 export type UseInputBufferResult = {
   pushToBuffer: (
     text: string,
     cursorOffset: number,
     pastedContents?: Record<number, PastedContent>,
+    options?: PushToBufferOptions,
   ) => void
   undo: () => BufferEntry | undefined
   canUndo: boolean
   clearBuffer: () => void
 }
 
+type BufferState = {
+  entries: BufferEntry[]
+  index: number
+}
+
 export function useInputBuffer({
   maxBufferSize,
   debounceMs,
 }: UseInputBufferProps): UseInputBufferResult {
-  const [buffer, setBuffer] = useState<BufferEntry[]>([])
-  const [currentIndex, setCurrentIndex] = useState(-1)
+  const stateRef = useRef<BufferState>({ entries: [], index: -1 })
+  const [state, setState] = useState<BufferState>(stateRef.current)
   const lastPushTime = useRef<number>(0)
   const pendingPush = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -38,6 +49,7 @@ export function useInputBuffer({
       text: string,
       cursorOffset: number,
       pastedContents: Record<number, PastedContent> = {},
+      options: PushToBufferOptions = {},
     ) => {
       const now = Date.now()
 
@@ -47,8 +59,8 @@ export function useInputBuffer({
         pendingPush.current = null
       }
 
-      // Debounce rapid changes
-      if (now - lastPushTime.current < debounceMs) {
+      // Debounce rapid changes unless `immediate` is requested (e.g. before line/word delete)
+      if (!options.immediate && now - lastPushTime.current < debounceMs) {
         pendingPush.current = setTimeout(
           pushToBuffer,
           debounceMs,
@@ -60,68 +72,50 @@ export function useInputBuffer({
       }
 
       lastPushTime.current = now
-
-      setBuffer(prevBuffer => {
-        // If we're not at the end of the buffer, truncate everything after current position
-        const newBuffer =
-          currentIndex >= 0 ? prevBuffer.slice(0, currentIndex + 1) : prevBuffer
-
-        // Don't add if it's the same as the last entry
-        const lastEntry = newBuffer[newBuffer.length - 1]
-        if (lastEntry && lastEntry.text === text) {
-          return newBuffer
-        }
-
-        // Add new entry
-        const updatedBuffer = [
-          ...newBuffer,
-          { text, cursorOffset, pastedContents, timestamp: now },
-        ]
-
-        // Limit buffer size
-        if (updatedBuffer.length > maxBufferSize) {
-          return updatedBuffer.slice(-maxBufferSize)
-        }
-
-        return updatedBuffer
-      })
-
-      // Update current index to point to the new entry
-      setCurrentIndex(prev => {
-        const newIndex = prev >= 0 ? prev + 1 : buffer.length
-        return Math.min(newIndex, maxBufferSize - 1)
-      })
+      const cur = stateRef.current
+      if (cur.entries[cur.index]?.text === text) {
+        return
+      }
+      const nextEntries = [
+        ...cur.entries.slice(0, cur.index + 1),
+        { text, cursorOffset, pastedContents, timestamp: now },
+      ]
+      const trimmed =
+        nextEntries.length > maxBufferSize
+          ? nextEntries.slice(-maxBufferSize)
+          : nextEntries
+      stateRef.current = { entries: trimmed, index: trimmed.length - 1 }
+      setState(stateRef.current)
     },
-    [debounceMs, maxBufferSize, currentIndex, buffer.length],
+    [debounceMs, maxBufferSize],
   )
 
   const undo = useCallback((): BufferEntry | undefined => {
-    if (currentIndex < 0 || buffer.length === 0) {
+    if (pendingPush.current) {
+      clearTimeout(pendingPush.current)
+      pendingPush.current = null
+    }
+    const cur = stateRef.current
+    const entry = cur.entries[cur.index]
+    if (!entry) {
       return undefined
     }
-
-    const targetIndex = Math.max(0, currentIndex - 1)
-    const entry = buffer[targetIndex]
-
-    if (entry) {
-      setCurrentIndex(targetIndex)
-      return entry
-    }
-
-    return undefined
-  }, [buffer, currentIndex])
+    stateRef.current = { entries: cur.entries, index: cur.index - 1 }
+    setState(stateRef.current)
+    return entry
+  }, [])
 
   const clearBuffer = useCallback(() => {
-    setBuffer([])
-    setCurrentIndex(-1)
+    stateRef.current = { entries: [], index: -1 }
+    setState(stateRef.current)
     lastPushTime.current = 0
     if (pendingPush.current) {
       clearTimeout(pendingPush.current)
       pendingPush.current = null
     }
-  }, [lastPushTime, pendingPush])
+  }, [])
 
-  const canUndo = currentIndex > 0 && buffer.length > 1
+  const canUndo = state.index >= 0 && state.entries[state.index] !== undefined
 
   return {
     pushToBuffer,

@@ -1,5 +1,6 @@
 import { join } from 'path';
 import React from 'react';
+import { getClipboardPath } from '@anthropic/ink';
 import { ExportDialog } from '../../components/ExportDialog.js';
 import type { ToolUseContext } from '../../Tool.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
@@ -7,6 +8,28 @@ import type { Message } from '../../types/message.js';
 import { getCwd } from '../../utils/cwd.js';
 import { renderMessagesToPlainText } from '../../utils/exportRenderer.js';
 import { writeFileSync_DEPRECATED } from '../../utils/slowOperations.js';
+import { CLIPBOARD_COPY_STATUS, type ClipboardCopyOutcome } from '../copy/copy.js';
+
+const EXPORT_CLIPBOARD_HINT: Record<ClipboardCopyOutcome, string> = {
+  native: '',
+  'tmux-buffer': ' · paste with prefix + ]',
+  osc52: ' · if paste fails, /export to a file',
+  none: ' · /export to a file instead',
+};
+
+/**
+ * Official 2.1.326 #177 (`T` @338828500): format `/export` clipboard completion
+ * message honestly over SSH / OSC 52 / tmux instead of always claiming
+ * `"Conversation copied to clipboard"`.
+ */
+export function formatExportClipboardMessage(
+  clipboardPath: ClipboardCopyOutcome = getClipboardPath(),
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const isSsh = Boolean(env.SSH_CONNECTION || env.SSH_CLIENT || env.SSH_TTY);
+  const outcome: ClipboardCopyOutcome = clipboardPath === 'native' && isSsh ? 'osc52' : clipboardPath;
+  return `Conversation ${CLIPBOARD_COPY_STATUS[outcome]}${EXPORT_CLIPBOARD_HINT[outcome]}`;
+}
 
 function formatTimestamp(date: Date): string {
   const year = date.getFullYear();
@@ -106,6 +129,12 @@ export async function call(
       content={content}
       defaultFilename={defaultFilename}
       onDone={result => {
+        // Official 2.1.326 #177: over SSH / OSC 52 / tmux, replace optimistic
+        // "Conversation copied to clipboard" with honest terminal-clipboard wording.
+        if (result.success && result.message === 'Conversation copied to clipboard') {
+          onDone(formatExportClipboardMessage());
+          return;
+        }
         onDone(result.message);
       }}
     />

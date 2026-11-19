@@ -184,7 +184,16 @@ function createPermissionContext(
     },
     persistPermissions(updates: PermissionUpdate[]) {
       if (updates.length === 0) return false
-      persistPermissionUpdates(updates)
+      const persistResult = persistPermissionUpdates(updates, {
+        onPersistError: warning => {
+          toolUseContext.addNotification?.({
+            key: 'permission-persist-failed',
+            text: warning,
+            priority: 'immediate',
+            color: 'warning',
+          })
+        },
+      })
       if (permissionContextSetter !== undefined) {
         const appState = toolUseContext.getAppState()
         permissionContextSetter(
@@ -202,7 +211,10 @@ function createPermissionContext(
           emitPermissionRecheck()
         })
       }
-      return updates.some(update => supportsPersistence(update.destination))
+      return (
+        persistResult.persisted &&
+        updates.some(update => supportsPersistence(update.destination))
+      )
     },
     resolveIfAborted(resolve: (decision: PermissionDecision) => void) {
       const letGoDeny = detachedLetGoPermissionDeny(toolUseID)
@@ -365,11 +377,13 @@ function createPermissionContext(
                 const mode =
                   permissionMode ??
                   toolUseContext.getAppState().toolPermissionContext.mode
+                const errDetail =
+                  err instanceof Error && err.message ? `: ${err.message}` : ''
                 const failReason = {
                   type: 'other' as const,
-                  reason: 'permission_check_crashed',
+                  reason: `permission_check_crashed${errDetail}`,
                 }
-                const failMessage = `Permission check failed for ${tool.name} on input rewritten by PermissionRequest hook.`
+                const failMessage = `Permission check failed for ${tool.name} on input rewritten by PermissionRequest hook${errDetail}.`
                 if (
                   mode === 'dontAsk' ||
                   toolUseContext.options.isNonInteractiveSession

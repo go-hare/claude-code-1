@@ -6,6 +6,8 @@ export type AutoModeState = {
   flagCli: boolean
   circuitBroken: boolean
   fromFallback: boolean
+  /** Official 2.1.326 #297 (`HLn`/`xOi`): startup defaulted to auto while awaiting server-managed settings. */
+  autoDefaultAwaitsServedSettings: boolean
 }
 
 export function createAutoModeState(): AutoModeState {
@@ -14,6 +16,7 @@ export function createAutoModeState(): AutoModeState {
     flagCli: false,
     circuitBroken: false,
     fromFallback: false,
+    autoDefaultAwaitsServedSettings: false,
   }
 }
 
@@ -54,6 +57,16 @@ export function setAutoModeFromFallback(fromFallback: boolean): void {
 
 export function isAutoModeFromFallback(): boolean {
   return autoModeState.fromFallback
+}
+
+/** Official 2.1.326 #297 (`HLn`): record whether startup auto default awaits served policy settings. */
+export function setAutoDefaultAwaitsServedSettings(awaits: boolean): void {
+  autoModeState.autoDefaultAwaitsServedSettings = awaits
+}
+
+/** Official 2.1.326 #297 (`xOi`): true while startup auto default awaits served policy settings. */
+export function isAutoDefaultAwaitsServedSettings(): boolean {
+  return autoModeState.autoDefaultAwaitsServedSettings
 }
 
 export function _setGlobalAutoModeStateForTesting(state: AutoModeState): void {

@@ -1618,15 +1618,12 @@ export function Select<T>({
     const isInputFocused = focusedOpt?.type === 'input';
     const isNonKeyName = event.key.length > 1 && event.name !== event.key;
     const isPrintable = isNonKeyName || (!event.ctrl && !event.meta && !event.superKey && [...event.key].length === 1);
-    if (disablePrintableKeybindings && declineValue !== undefined && !isInputFocused && isPrintable) {
+    if (disablePrintableKeybindings && !isInputFocused && isPrintable) {
       event.preventDefault();
       event.stopImmediatePropagation();
-      state.focusOption(declineValue);
-      return;
-    }
-    if (disablePrintableKeybindings && isNonKeyName) {
-      event.preventDefault();
-      event.stopImmediatePropagation();
+      if (declineValue !== undefined) {
+        state.focusOption(declineValue);
+      }
       return;
     }
     if (leftoverSrRadio) {
@@ -1744,6 +1741,8 @@ export function Select<T>({
   useSelectInput({
     isDisabled,
     disableSelection: disableSelection || (hideIndexes || disablePrintableKeybindings ? 'numeric' : false),
+    disablePrintableKeybindings,
+    declineValue,
     state,
     options,
     isMultiSelect: false, // Select is always single-choice

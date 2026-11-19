@@ -14,7 +14,10 @@ import {
   endTrace,
   isLangfuseEnabled,
 } from 'src/services/langfuse/index.js'
-import { getSessionId } from 'src/bootstrap/state.js'
+import {
+  getIsNonInteractiveSession,
+  getSessionId,
+} from 'src/bootstrap/state.js'
 import { getAPIProvider } from 'src/utils/model/providers.js'
 import { createUserMessage, getContentText } from 'src/utils/messages.js'
 import { TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 'src/utils/errors.js'
@@ -93,6 +96,19 @@ export class ApiSearchAdapter implements WebSearchAdapter {
           agentId: undefined,
           effortValue: undefined,
           langfuseTrace,
+          // Official 2.1.326 (#175): surface API retry progress during web search
+          // in interactive sessions (skipping stalled-stream notices).
+          onRetryStatus:
+            onProgress && !getIsNonInteractiveSession()
+              ? status => {
+                  if (status?.kind === 'stalled') return
+                  onProgress({
+                    type: 'search_retry',
+                    query,
+                    status,
+                  })
+                }
+              : undefined,
         },
       })
 

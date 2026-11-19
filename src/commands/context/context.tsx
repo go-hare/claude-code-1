@@ -68,9 +68,13 @@ export async function call(
     apiView, // Original messages for API usage extraction
   );
 
+  // Official 2.1.326 #216: pass actual narrow terminal width to Ink renderer
+  // instead of defaulting to 80 columns so the /context grid isn't cut off or jumbled.
+  const renderColumns = Math.max(1, terminalWidth - 2);
   // Render to ANSI string for user display; send only bounded markdown table to Claude (#1723 / #1802)
   const output = await renderToAnsiString(
     <ContextVisualization data={data} collapseDetailSections={collapseDetailSections} />,
+    renderColumns,
   );
   onDone(output, {
     display: 'displayOnly',

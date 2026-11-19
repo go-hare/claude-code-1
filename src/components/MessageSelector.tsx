@@ -2,7 +2,7 @@ import type { ContentBlockParam, TextBlockParam } from '@anthropic-ai/sdk/resour
 import { randomUUID, type UUID } from 'crypto';
 import figures from 'figures';
 import * as React from 'react';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -79,7 +79,12 @@ type Props = {
    * surface TYn copy without treating the restore as a hard failure.
    */
   onRestoreCode: (message: UserMessage) => Promise<{ skippedLinks?: number } | undefined>;
-  onSummarize?: (message: UserMessage, feedback?: string, direction?: PartialCompactDirection) => Promise<void>;
+  onSummarize?: (
+    message: UserMessage,
+    feedback?: string,
+    direction?: PartialCompactDirection,
+    signal?: AbortSignal,
+  ) => Promise<void>;
   onClose: () => void;
   /** Skip pick-list, land on confirm. Caller ran skip-check first. Esc closes fully (no back-to-list). */
   preselectedMessage?: UserMessage;
@@ -115,11 +120,13 @@ export function MessageSelector({
   const availableRows = insideModal
     ? modalOrTermRows
     : isFullscreenEnvEnabled()
-      ? Math.floor(terminalSize.rows / 2)
+      ? Math.max(Math.floor(terminalSize.rows * 0.65), Math.min(terminalSize.rows - 4, 18))
       : terminalSize.rows;
   const itemRows = isFileHistoryEnabled ? 3 : 2;
-  const extraHeaderRows = 12 + (pickListNote ? 3 : 0) + (error ? 4 : 0);
-  const visibleMessages = Math.max(2, Math.floor((availableRows - extraHeaderRows) / itemRows));
+  // Official 2.1.326 #38: accurate header budget so fullscreen /rewind shows >1 past prompt.
+  const extraHeaderRows = 8 + (pickListNote ? 2 : 0) + (error ? 3 : 0);
+  const visibleMessages = Math.max(3, Math.floor((availableRows - extraHeaderRows) / itemRows));
+  const maxConfirmPreviewLines = Math.max(1, Math.min(3, availableRows - 16));
 
   // Add current prompt (and optional pre-clear session entry / extraEntry) as virtual messages
   const currentUUID = useMemo(randomUUID, []);
@@ -183,6 +190,7 @@ export function MessageSelector({
 
   const [isRestoring, setIsRestoring] = useState(false);
   const [restoringOption, setRestoringOption] = useState<RestoreOption | null>(null);
+  const summarizeAbortRef = useRef<AbortController | null>(null);
   const [selectedRestoreOption, setSelectedRestoreOption] = useState<RestoreOption>('both');
   // Per-option feedback state; Select's internal inputValues Map persists
   // per-option text independently, so sharing one variable would desync.
@@ -313,20 +321,32 @@ export function MessageSelector({
       setIsRestoring(true);
       setRestoringOption(option);
       setError(undefined);
+      const controller = new AbortController();
+      summarizeAbortRef.current = controller;
       try {
         const direction = option === 'summarize_up_to' ? 'up_to' : 'from';
         const feedback = (direction === 'up_to' ? summarizeUpToFeedback : summarizeFromFeedback).trim() || undefined;
-        await onSummarize(messageToRestore, feedback, direction);
+        await onSummarize(messageToRestore, feedback, direction, controller.signal);
+        if (controller.signal.aborted) {
+          return;
+        }
         setIsRestoring(false);
         setRestoringOption(null);
         setMessageToRestore(undefined);
         onClose();
       } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
         logError(error as Error);
         setIsRestoring(false);
         setRestoringOption(null);
         setMessageToRestore(undefined);
         setError(`Failed to summarize:\n${error}`);
+      } finally {
+        if (summarizeAbortRef.current === controller) {
+          summarizeAbortRef.current = null;
+        }
       }
       return;
     }
@@ -385,7 +405,20 @@ export function MessageSelector({
     }
   }
 
+  const isSummarizing = isRestoring && isSummarizeOption(restoringOption);
+
   const handleEscape = useCallback(() => {
+    // Official 2.1.326 #38: pressing Esc while summarizing aborts and exits cleanly.
+    if (isSummarizing) {
+      summarizeAbortRef.current?.abort();
+      summarizeAbortRef.current = null;
+      setIsRestoring(false);
+      setRestoringOption(null);
+      setMessageToRestore(undefined);
+      logEvent('tengu_message_selector_cancelled', {});
+      onClose();
+      return;
+    }
     if (messageToRestore && !preselectedMessage) {
       // Go back to message list instead of closing entirely
       setMessageToRestore(undefined);
@@ -393,7 +426,7 @@ export function MessageSelector({
     }
     logEvent('tengu_message_selector_cancelled', {});
     onClose();
-  }, [onClose, messageToRestore, preselectedMessage]);
+  }, [isSummarizing, onClose, messageToRestore, preselectedMessage]);
 
   const moveSelectionTo = useCallback(
     (nextIndex: number) => {
@@ -507,8 +540,8 @@ export function MessageSelector({
       title="Rewind"
       color="suggestion"
       onCancel={handleEscape}
-      isCancelActive={!messageToRestore || !hasMessagesToSelect}
-      hideInputGuide={!!messageToRestore && hasMessagesToSelect}
+      isCancelActive={!messageToRestore || !hasMessagesToSelect || isSummarizing}
+      hideInputGuide={!!messageToRestore && hasMessagesToSelect && !isSummarizing}
       inputGuide={
         <Byline>
           {!error && hasMessagesToSelect && <KeyboardShortcutHint shortcut="enter" action="continue" />}
@@ -539,7 +572,12 @@ export function MessageSelector({
             borderLeft={true}
             borderLeftDimColor
           >
-            <UserMessageOption userMessage={messageToRestore} color="text" isCurrent={false} />
+            <UserMessageOption
+              userMessage={messageToRestore}
+              color="text"
+              isCurrent={false}
+              maxLines={maxConfirmPreviewLines}
+            />
             <Text dimColor>
               (
               {formatRelativeTimeAgo(new Date(messageToRestore.timestamp as string | number | Date), {
@@ -564,7 +602,9 @@ export function MessageSelector({
           {isRestoring && isSummarizeOption(restoringOption) ? (
             <Box flexDirection="row" gap={1}>
               <Spinner />
-              <Text>Summarizing…</Text>
+              <Text>
+                Summarizing… <Text dimColor>(Esc to cancel)</Text>
+              </Text>
             </Box>
           ) : isRestoring && restoreWait !== undefined ? (
             <Box flexDirection="row" gap={1}>
@@ -746,6 +786,9 @@ function RestoreCodeConfirmation({
     return undefined;
   }
   if (!diffStatsForRestore.filesChanged || !diffStatsForRestore.filesChanged[0]) {
+    if (diffStatsForRestore.hasUncheckedFiles) {
+      return <Text dimColor>Code changes unknown — files changed by shell commands cannot be restored.</Text>;
+    }
     return <Text dimColor>The code has not changed (nothing will be restored).</Text>;
   }
 
@@ -795,12 +838,14 @@ const UserMessageOption = memo(function UserMessageOption({
   dimColor,
   isCurrent,
   paddingRight,
+  maxLines,
 }: {
   userMessage: UserMessage;
   color?: keyof Theme;
   dimColor?: boolean;
   isCurrent: boolean;
   paddingRight?: number;
+  maxLines?: number;
 }): React.ReactNode {
   const { columns } = useTerminalSize();
   // Strip display-unfriendly tags (like <ide_opened_file>) before showing in the list, memoized per userMessage
@@ -816,13 +861,20 @@ const UserMessageOption = memo(function UserMessageOption({
     return stripDisplayTags(rawMessageText);
   }, [userMessage]);
 
-  const renderedPromptText = useMemo(
-    () =>
-      paddingRight
-        ? truncate(messageText, columns - paddingRight, true)
-        : messageText.slice(0, 500).split('\n').slice(0, 4).join('\n'),
-    [messageText, columns, paddingRight],
-  );
+  // Official 2.1.326 #38: cap confirm preview lines & width so long prompts never push the warning off-screen.
+  const renderedPromptText = useMemo(() => {
+    if (paddingRight) {
+      return truncate(messageText, columns - paddingRight, true);
+    }
+    const lineLimit = maxLines ?? 3;
+    const lineWidth = Math.max(20, columns - 10);
+    const rawLines = messageText.slice(0, 500).split('\n');
+    const clipped = rawLines.slice(0, lineLimit).map(line => truncate(line, lineWidth, true));
+    if (rawLines.length > lineLimit && clipped.length > 0) {
+      clipped[clipped.length - 1] = truncate(`${clipped[clipped.length - 1]}…`, lineWidth, true);
+    }
+    return clipped.join('\n');
+  }, [messageText, columns, paddingRight, maxLines]);
 
   if (isCurrent) {
     return (
@@ -901,8 +953,11 @@ const UserMessageOption = memo(function UserMessageOption({
 
 /**
  * Computes the diff stats for all the file edits in-between two messages.
+ * Official 2.1.326 #37: marks `hasUncheckedFiles: true` when any shell command
+ * ran during the turn so `/rewind` shows "Code changes unknown" instead of
+ * falsely claiming "No code changes".
  */
-function computeDiffStatsBetweenMessages(
+export function computeDiffStatsBetweenMessages(
   messages: Message[],
   fromMessageId: UUID,
   toMessageId: UUID | undefined,
@@ -920,15 +975,58 @@ function computeDiffStatsBetweenMessages(
   const filesChanged: string[] = [];
   let insertions = 0;
   let deletions = 0;
+  let hasUncheckedFiles = false;
 
   for (let i = startIndex + 1; i < endIndex; i++) {
     const msg = messages[i];
-    if (!msg || !isToolUseResultMessage(msg)) {
+    if (!msg) {
       continue;
     }
 
-    const result = msg.toolUseResult as FileEditOutput | FileWriteToolOutput;
+    // Detect shell tool calls (Bash / PowerShell) whose side effects are untracked by FileHistory.
+    if (msg.type === 'assistant') {
+      const content = msg.message?.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (
+            block &&
+            typeof block === 'object' &&
+            block.type === 'tool_use' &&
+            'name' in block &&
+            (block.name === 'Bash' || block.name === 'PowerShell')
+          ) {
+            hasUncheckedFiles = true;
+          }
+        }
+      }
+      continue;
+    }
+
+    if (msg.type === 'user' && !isToolUseResultMessage(msg)) {
+      const content = msg.message?.content;
+      if (typeof content === 'string' && content.includes('<bash-input>')) {
+        hasUncheckedFiles = true;
+      }
+      continue;
+    }
+
+    if (!isToolUseResultMessage(msg)) {
+      continue;
+    }
+
+    const result = msg.toolUseResult as (FileEditOutput | FileWriteToolOutput) & {
+      stdout?: unknown;
+      stderr?: unknown;
+      interrupted?: unknown;
+    };
     if (!result || !result.filePath || !result.structuredPatch) {
+      if (
+        result &&
+        typeof result === 'object' &&
+        ('stdout' in result || 'stderr' in result || 'interrupted' in result)
+      ) {
+        hasUncheckedFiles = true;
+      }
       continue;
     }
 
@@ -955,6 +1053,7 @@ function computeDiffStatsBetweenMessages(
     filesChanged,
     insertions,
     deletions,
+    ...(hasUncheckedFiles ? { hasUncheckedFiles: true } : {}),
   };
 }
 

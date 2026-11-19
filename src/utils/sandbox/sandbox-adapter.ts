@@ -23,15 +23,20 @@ import {
 import { spawnSync } from 'child_process'
 import {
   closeSync,
+  constants as fsConstants,
   existsSync,
   lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
+  readSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
+  unlinkSync,
 } from 'fs'
 import { memoize } from 'lodash-es'
 import { isIP } from 'node:net'
@@ -45,6 +50,7 @@ import {
   relative,
   resolve,
 } from 'path'
+import { getCwd } from '../cwd.js'
 import { URL as NodeURL } from 'node:url'
 import {
   getAdditionalDirectoriesForClaudeMd,
@@ -53,6 +59,7 @@ import {
   getInlinePluginsNoMcp,
   getOriginalCwd,
 } from '../../bootstrap/state.js'
+import { registerCleanup } from '../cleanupRegistry.js'
 import { logForDebugging } from '../debug.js'
 import { getErrnoCode } from '../errors.js'
 import { getClaudeConfigHomeDir, isEnvTruthy } from '../envUtils.js'
@@ -187,9 +194,60 @@ export const DENY_READ_SOCKET_PATHS = [
 export const DENY_READ_ENV_GLOBS = ['**/.env', '**/.env*'] as const
 
 /**
- * densable 2.1.239 G — on linux/wsl, create a missing `.git/config.worktree`
- * (`openSync(..., "wx")`) so denyWrite binds a real empty file. A missing
- * path otherwise becomes an unreadable stub (changelog #36).
+ * Official 2.1.326 #23: track 0-byte placeholder files created by the sandbox
+ * on Linux/WSL (including `.git/config.lock`, `.git/config.worktree`,
+ * `.git/config.worktree.lock`) so they are removed on cleanup AND if Claude
+ * Code is stopped mid-command (SIGINT/SIGTERM/exit).
+ */
+const createdLinuxPlaceholderFiles = new Set<string>()
+let placeholderExitHookInstalled = false
+
+function installLinuxPlaceholderExitHook(): void {
+  if (placeholderExitHookInstalled) return
+  placeholderExitHookInstalled = true
+  const onExit = (): void => {
+    cleanupLinuxSandboxPlaceholderFiles()
+  }
+  process.once('exit', onExit)
+  registerCleanup(() => {
+    cleanupLinuxSandboxPlaceholderFiles()
+  })
+}
+
+/**
+ * Official 2.1.326 #23: remove tracked 0-byte placeholder files (such as
+ * `.git/config.lock` or `.git/config.worktree`) left by Linux bwrap when a
+ * command ends or Claude Code is stopped. Never deletes non-empty user files.
+ */
+export function cleanupLinuxSandboxPlaceholderFiles(
+  extraPaths?: readonly string[],
+): string[] {
+  const candidates = extraPaths
+    ? new Set([...createdLinuxPlaceholderFiles, ...extraPaths])
+    : new Set(createdLinuxPlaceholderFiles)
+  const removed: string[] = []
+  for (const p of candidates) {
+    try {
+      // eslint-disable-next-line custom-rules/no-sync-fs -- cleanupAfterCommand/exit must be sync
+      const st = lstatSync(p)
+      if (st.isFile() && st.size === 0) {
+        // eslint-disable-next-line custom-rules/no-sync-fs -- cleanupAfterCommand/exit must be sync
+        unlinkSync(p)
+        removed.push(p)
+      }
+      createdLinuxPlaceholderFiles.delete(p)
+    } catch {
+      createdLinuxPlaceholderFiles.delete(p)
+    }
+  }
+  return removed
+}
+
+/**
+ * densable 2.1.239 G + 2.1.326 #23 — on linux/wsl, create a missing
+ * `.git/config.worktree` / `.git/config.lock` (`openSync(..., "wx")`) so
+ * denyWrite binds a real empty file, and record it for cleanup on command end
+ * or process stop.
  */
 export function ensureLinuxGitWorktreeConfigPlaceholder(path: string): void {
   const plat = getPlatform()
@@ -199,9 +257,418 @@ export function ensureLinuxGitWorktreeConfigPlaceholder(path: string): void {
     if (!lstatSync(dirname(path)).isDirectory()) return
     // eslint-disable-next-line custom-rules/no-sync-fs -- refreshConfig() must be sync
     closeSync(openSync(path, 'wx'))
+    createdLinuxPlaceholderFiles.add(path)
+    installLinuxPlaceholderExitHook()
   } catch {
     // exists, or parent is gone — official G() swallows
   }
+}
+
+/**
+ * Official 2.1.326 #22 (`ivr` / `Phl` / `X3`):
+ * Detect Linux `/net/...` autofs paths. When the home or config directory is
+ * reached through a symlink into `/net` and sandbox settings deny reads of it,
+ * bwrap fails to start if `/net` or the symlink target is blindly ro-bound/denied.
+ */
+export function isLinuxNetAutofsPath(
+  p: string,
+  platform: Platform = getPlatform(),
+): boolean {
+  if (platform !== 'linux' && platform !== 'wsl') return false
+  const normalized = p.replace(/\/+$/, '')
+  return normalized === '/net' || normalized.startsWith('/net/')
+}
+
+/**
+ * Official 2.1.326 #22: filter/adjust Linux `denyRead` entries when `home` or
+ * `configDir` is reached via a symlink into `/net` so bwrap does not fail on
+ * autofs mounts while keeping literal home/config deny protection intact.
+ */
+export function filterLinuxNetSymlinkDenyRead(
+  denyRead: readonly string[],
+  home: string,
+  configDir: string,
+  platform: Platform = getPlatform(),
+): string[] {
+  if (platform !== 'linux' && platform !== 'wsl') return [...denyRead]
+  const resolvedNetRoots = new Set<string>()
+  for (const base of [home, configDir]) {
+    try {
+      // eslint-disable-next-line custom-rules/no-sync-fs -- refreshConfig() must be sync
+      const real = realpathSync(base)
+      if (real !== base && isLinuxNetAutofsPath(real, platform)) {
+        resolvedNetRoots.add(real)
+      }
+    } catch {
+      // ignore unresolvable home/configDir
+    }
+  }
+  if (resolvedNetRoots.size === 0) return [...denyRead]
+  return denyRead.filter(entry => {
+    if (!isLinuxNetAutofsPath(entry, platform)) return true
+    for (const root of resolvedNetRoots) {
+      if (entry === '/net' || root === entry || root.startsWith(`${entry}/`)) {
+        logForDebugging(
+          `[Sandbox] Skipping Linux /net autofs denyRead ancestor "${entry}" for symlinked home/config root "${root}"`,
+        )
+        return false
+      }
+    }
+    return true
+  })
+}
+
+/**
+ * Official 2.1.326 #300 (`Tii` / `Cii` @291479784):
+ * Sensitive home directories/files write-protected by default on macOS, Linux,
+ * and WSL. Entries in `USER_OVERRIDABLE_SENSITIVE_HOME_DENY_WRITE` can be
+ * allowed via `sandbox.filesystem.allowWrite` in user, flag, or managed settings
+ * (NOT project/local settings).
+ */
+export const DEFAULT_SENSITIVE_HOME_DENY_WRITE_PATHS: readonly (readonly string[])[] =
+  [
+    ['.ssh'],
+    ['.aws'],
+    ['.azure'],
+    ['.gnupg'],
+    ['.kube'],
+    ['.docker'],
+    ['.config', 'gh'],
+    ['.config', 'glab-cli'],
+    ['.config', 'gcloud'],
+    ['.cargo', 'credentials'],
+    ['.cargo', 'credentials.toml'],
+    ['.gem', 'credentials'],
+    ['.m2', 'settings.xml'],
+    ['.gradle', 'gradle.properties'],
+    ['.config', 'powershell', 'profile.ps1'],
+    ['.claude', 'state'],
+    ['Library', 'Keychains'],
+    ['.netrc'],
+    ['.git-credentials'],
+    ['.pypirc'],
+    ['.pgpass'],
+    ['.my.cnf'],
+    ['.mylogin.cnf'],
+    ['.terraform.d', 'credentials.tfrc.json'],
+    ['.boto'],
+    ['.s3cfg'],
+  ] as const
+
+export function collectSensitiveHomeDenyWritePaths(
+  home: string,
+  trustedAllowWrite: readonly string[],
+): string[] {
+  const normalizedTrusted = trustedAllowWrite.map(p =>
+    resolve(p.startsWith('~/') ? join(home, p.slice(2)) : p).replace(
+      /\/+$/,
+      '',
+    ),
+  )
+  const out: string[] = []
+  for (const segments of DEFAULT_SENSITIVE_HOME_DENY_WRITE_PATHS) {
+    const full = resolve(home, ...segments)
+    // Never allow project/local settings to override; only trusted user/flag/policy
+    // allowWrite entries matching this path or a parent folder exempt non-Claude paths.
+    const isClaudeState = segments[0] === '.claude'
+    const explicitlyAllowed =
+      !isClaudeState &&
+      normalizedTrusted.some(
+        allowed =>
+          allowed === full ||
+          (allowed.startsWith(`${home}/`) && full.startsWith(`${allowed}/`)),
+      )
+    if (!explicitlyAllowed) {
+      out.push(full)
+    }
+  }
+  return out
+}
+
+/**
+ * Official 2.1.326 #301 (`nme()` / `tme()` / `vA()` @291369661):
+ * Snapshot `.git` entries before a sandboxed command and ONLY unlink/quarantine
+ * newly appearing symlinks, FIFOs, Windows junctions, and `ref:` symref files
+ * whose target escapes `refs/`. Never touch regular git metadata files or
+ * directories (`.git/worktrees`, `.git/REBASE_HEAD`, `.git/BISECT_*`,
+ * `.git/modules`, `.git/lfs`, etc.), and ref-count/clean up each snapshot entry
+ * on command completion.
+ */
+type GitDirSnapshotEntry = {
+  baseline: Set<string>
+  refCount: number
+}
+
+const gitDirSnapshotsBeforeWrap = new Map<string, GitDirSnapshotEntry>()
+const GIT_SYMREF_SCAN_BYTES = 4096
+const GIT_DIR_SCAN_MAX_DEPTH = 8
+const GIT_DIR_SCAN_SKIP_DIRS = new Set(['objects'])
+
+function isSafeGitSymrefTarget(target: string): boolean {
+  const trimmed = target.trimEnd()
+  if (trimmed === 'refs/heads/.invalid') return true
+  const normalized = trimmed.replace(/\/+$/, '')
+  return normalized.startsWith('refs/') && !/\/\.|[\\:~\uFFFD]/.test(normalized)
+}
+
+/**
+ * Official `vA()` (@291366123): returns true iff `fullPath` is a regular file
+ * starting with `ref:` whose symref target escapes `refs/` (or exceeds scan
+ * buffer without a valid `refs/` target). Opens non-blocking & no-follow.
+ */
+function isEscapingGitRefFile(fullPath: string): boolean {
+  const flags =
+    fsConstants.O_RDONLY |
+    (fsConstants.O_NONBLOCK ?? 0) |
+    (fsConstants.O_NOFOLLOW ?? 0)
+  let fd: number | undefined
+  try {
+    // eslint-disable-next-line custom-rules/no-sync-fs -- cleanupAfterCommand is sync
+    fd = openSync(fullPath, flags)
+    const buf = Buffer.alloc(GIT_SYMREF_SCAN_BYTES)
+    // eslint-disable-next-line custom-rules/no-sync-fs -- cleanupAfterCommand is sync
+    const bytesRead = readSync(fd, buf, 0, buf.length, 0)
+    const text = buf.toString('utf8', 0, bytesRead)
+    if (!text.startsWith('ref:')) return false
+    if (bytesRead === buf.length) return true
+    const target = text.replace(/^ref:[ \t\r\n]*/, '')
+    return !isSafeGitSymrefTarget(target)
+  } catch {
+    return false
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd)
+      } catch {
+        // ignore close errors
+      }
+    }
+  }
+}
+
+function collectGitDirRelativeEntries(
+  rootGitDir: string,
+  relPrefix = '',
+  depth = 0,
+  out: Set<string> = new Set(),
+): Set<string> {
+  if (depth > GIT_DIR_SCAN_MAX_DEPTH) return out
+  const dir = relPrefix ? join(rootGitDir, relPrefix) : rootGitDir
+  let entries: string[]
+  try {
+    // eslint-disable-next-line custom-rules/no-sync-fs -- pre-wrap snapshot / sync cleanup
+    entries = readdirSync(dir)
+  } catch {
+    return out
+  }
+  for (const name of entries) {
+    if (name.startsWith('.claude-quarantine-')) continue
+    if (depth === 0 && GIT_DIR_SCAN_SKIP_DIRS.has(name)) continue
+    const rel = relPrefix ? join(relPrefix, name) : name
+    out.add(rel)
+    const fullPath = join(rootGitDir, rel)
+    try {
+      // eslint-disable-next-line custom-rules/no-sync-fs -- pre-wrap snapshot / sync cleanup
+      const st = lstatSync(fullPath)
+      if (st.isDirectory() && !st.isSymbolicLink()) {
+        collectGitDirRelativeEntries(rootGitDir, rel, depth + 1, out)
+      }
+    } catch {
+      // ignore vanished entries
+    }
+  }
+  return out
+}
+
+export function snapshotGitDirBeforeSandboxWrap(cwd: string): void {
+  const gitDir = join(cwd, '.git')
+  const existing = gitDirSnapshotsBeforeWrap.get(gitDir)
+  if (existing) {
+    existing.refCount += 1
+    return
+  }
+  try {
+    // eslint-disable-next-line custom-rules/no-sync-fs -- pre-wrap snapshot
+    const st = lstatSync(gitDir)
+    if (!st.isDirectory()) return
+    const baseline = collectGitDirRelativeEntries(gitDir)
+    gitDirSnapshotsBeforeWrap.set(gitDir, { baseline, refCount: 1 })
+  } catch {
+    // No .git directory at cwd
+  }
+}
+
+export function getActiveGitDirSnapshotCountForTesting(): number {
+  return gitDirSnapshotsBeforeWrap.size
+}
+
+export function quarantineUnexpectedGitDirEntries(cwd?: string): {
+  quarantined: string[]
+  removedSymlinks: string[]
+} {
+  const quarantined: string[] = []
+  const removedSymlinks: string[] = []
+  const targets = cwd
+    ? [join(cwd, '.git')]
+    : Array.from(gitDirSnapshotsBeforeWrap.keys())
+  for (const gitDir of targets) {
+    const snapshot = gitDirSnapshotsBeforeWrap.get(gitDir)
+    if (!snapshot) continue
+    try {
+      // eslint-disable-next-line custom-rules/no-sync-fs -- cleanupAfterCommand is sync
+      if (lstatSync(gitDir).isDirectory()) {
+        const current = collectGitDirRelativeEntries(gitDir)
+        for (const rel of current) {
+          const isNew = !snapshot.baseline.has(rel)
+          const isTrackedRefPath =
+            rel === 'HEAD' ||
+            rel.startsWith('refs/') ||
+            rel.startsWith('refs\\')
+          if (!isNew && !isTrackedRefPath) continue
+          const fullPath = join(gitDir, rel)
+          try {
+            // eslint-disable-next-line custom-rules/no-sync-fs -- cleanupAfterCommand is sync
+            const st = lstatSync(fullPath)
+            // Official `tme`: ONLY handle newly appearing symlinks (incl. Windows
+            // junctions), FIFOs, and `ref:` symref files escaping `refs/`.
+            // Never touch regular git metadata files or directories.
+            if (isNew && st.isSymbolicLink()) {
+              // eslint-disable-next-line custom-rules/no-sync-fs -- cleanupAfterCommand is sync
+              unlinkSync(fullPath)
+              removedSymlinks.push(fullPath)
+              logForDebugging(
+                `[Sandbox] Removed unexpected symlink planted in .git: ${fullPath}`,
+                { level: 'warn' },
+              )
+              continue
+            }
+            const isFifo = isNew && st.isFIFO()
+            const isUnsafeRef =
+              !isFifo && st.isFile() && isEscapingGitRefFile(fullPath)
+            if (isFifo || isUnsafeRef) {
+              const quarantineDir = join(
+                gitDir,
+                '.claude-quarantine-unexpected',
+              )
+              try {
+                // eslint-disable-next-line custom-rules/no-sync-fs -- cleanupAfterCommand is sync
+                mkdirSync(quarantineDir, { recursive: true, mode: 0o700 })
+                const safeName = rel.replace(/[\\/]/g, '_')
+                const dest = join(quarantineDir, `${Date.now()}-${safeName}`)
+                // eslint-disable-next-line custom-rules/no-sync-fs -- cleanupAfterCommand is sync
+                renameSync(fullPath, dest)
+                quarantined.push(fullPath)
+                logForDebugging(
+                  `[Sandbox] Set aside planted ${isFifo ? 'FIFO' : 'escaping ref file'} ${fullPath} -> ${dest}`,
+                  { level: 'warn' },
+                )
+              } catch {
+                // Fallback unlink if rename into quarantine fails (matches official `tme`)
+                // eslint-disable-next-line custom-rules/no-sync-fs -- cleanupAfterCommand is sync
+                unlinkSync(fullPath)
+                quarantined.push(fullPath)
+              }
+            }
+          } catch {
+            // Best-effort quarantine
+          }
+        }
+      }
+    } catch {
+      // Ignore vanished .git dir
+    } finally {
+      snapshot.refCount -= 1
+      if (snapshot.refCount <= 0) {
+        gitDirSnapshotsBeforeWrap.delete(gitDir)
+      }
+    }
+  }
+  return { quarantined, removedSymlinks }
+}
+
+/**
+ * Official 2.1.326 #302: on Linux and WSL, pre-create missing `--add-dir`
+ * folders before each sandboxed command so bwrap bind-mounts work cleanly.
+ * Skips paths whose existing ancestor is a symlink/network mount or unreadable.
+ */
+export function precreateMissingLinuxAddDirs(
+  additionalDirs: readonly string[],
+  platform: Platform = getPlatform(),
+): string[] {
+  if (platform !== 'linux' && platform !== 'wsl') return []
+  const created: string[] = []
+  for (const rawDir of additionalDirs) {
+    if (!rawDir || !isAbsolute(rawDir)) continue
+    const dir = resolve(rawDir)
+    if (isLinuxNetAutofsPath(dir, platform) || dir === '/') continue
+    try {
+      // eslint-disable-next-line custom-rules/no-sync-fs -- pre-wrap setup
+      lstatSync(dir)
+      continue // already exists (file, dir, or symlink)
+    } catch (err) {
+      if (getErrnoCode(err) !== 'ENOENT') continue
+    }
+    // Verify nearest existing ancestor is a real directory (not a symlink)
+    let ancestor = dirname(dir)
+    let ancestorSafe = false
+    while (ancestor && ancestor !== dirname(ancestor)) {
+      try {
+        // eslint-disable-next-line custom-rules/no-sync-fs -- pre-wrap setup
+        const st = lstatSync(ancestor)
+        ancestorSafe = st.isDirectory() && !st.isSymbolicLink()
+        break
+      } catch (err) {
+        if (getErrnoCode(err) !== 'ENOENT') break
+        ancestor = dirname(ancestor)
+      }
+    }
+    if (!ancestorSafe) continue
+    try {
+      // eslint-disable-next-line custom-rules/no-sync-fs -- pre-wrap setup
+      mkdirSync(dir, { recursive: true })
+      created.push(dir)
+    } catch {
+      // Best-effort pre-create
+    }
+  }
+  return created
+}
+
+/**
+ * Official 2.1.326 #235: check whether a folder contains any symlink pointing
+ * to an unreadable or network path (`/net`, UNC `//...`, dangling/ELOOP).
+ * Used to tighten sandbox write grants and mods-folder edit permissions.
+ */
+export function directoryHasUnreadableOrNetworkSymlink(dir: string): boolean {
+  try {
+    // eslint-disable-next-line custom-rules/no-sync-fs -- sync check
+    const entries = readdirSync(dir, { withFileTypes: true })
+    for (const ent of entries) {
+      if (!ent.isSymbolicLink()) continue
+      const full = join(dir, ent.name)
+      try {
+        // eslint-disable-next-line custom-rules/no-sync-fs -- sync check
+        const target = readlinkSync(full)
+        if (
+          target.startsWith('/net/') ||
+          target === '/net' ||
+          target.startsWith('//') ||
+          target.startsWith('\\\\') ||
+          target.startsWith('/Network/')
+        ) {
+          return true
+        }
+        // Verify target is readable/stat-able
+        // eslint-disable-next-line custom-rules/no-sync-fs -- sync check
+        statSync(full)
+      } catch {
+        return true
+      }
+    }
+  } catch {
+    return false
+  }
+  return false
 }
 
 /**
@@ -1563,13 +2030,19 @@ export function convertToSandboxRuntimeConfig(
     denyWrite.push(githubEventPath)
   }
 
-  // Credential directories — SSH keys, GitHub/GitLab CLI tokens, netrc passwords.
-  // densable 2.1.232 #6: glab-cli is peer to gh (SEA denyWrite list).
+  // Credential & sensitive home directories — Official 2.1.326 #300 (`Tii` / `Cii`):
+  // Write-protect sensitive home folders on macOS, Linux, and WSL by default;
+  // trusted user/flag/managed `sandbox.filesystem.allowWrite` can explicitly allow them.
+  const trustedAllowWriteForHome = [
+    ...(getSettingsForSource('userSettings')?.sandbox?.filesystem?.allowWrite ??
+      []),
+    ...(getSettingsForSource('flagSettings')?.sandbox?.filesystem?.allowWrite ??
+      []),
+    ...(getSettingsForSource('policySettings')?.sandbox?.filesystem
+      ?.allowWrite ?? []),
+  ]
   denyWrite.push(
-    join(home, '.config', 'gh'),
-    join(home, '.config', 'glab-cli'),
-    join(home, '.netrc'),
-    join(home, '.ssh'),
+    ...collectSensitiveHomeDenyWritePaths(home, trustedAllowWriteForHome),
   )
 
   // Git internals in project directory — hooks, config, modules, exclude.
@@ -1632,6 +2105,17 @@ export function convertToSandboxRuntimeConfig(
   // the sandbox by spawning privileged containers on the host
   denyRead.push(...DENY_READ_SOCKET_PATHS)
   denyRead.push(...DENY_READ_ENV_GLOBS)
+
+  // Official 2.1.326 #22: when home or config directory resolves through a
+  // symlink into `/net` on Linux/WSL, avoid failing bwrap startup on `/net`
+  // autofs denyRead ancestors while preserving literal path protection.
+  const filteredDenyRead = filterLinuxNetSymlinkDenyRead(
+    denyRead,
+    home,
+    claudeConfigDir,
+  )
+  denyRead.length = 0
+  denyRead.push(...filteredDenyRead)
 
   // #200 SEA CXq: ~/.claude/seed-admin holds private git directories of
   // cloud-session /ultrareview uploads — materialize and block both reads and writes.
@@ -2569,8 +3053,104 @@ function getSandboxEnabledSetting(): boolean {
  *   only applies if the highest-ranking managed source explicitly sets
  *   `autoAllowBashIfSandboxed: true`.
  */
+/**
+ * Official 2.1.326 #299 (`Ro` / `kme` / `Ime` / `Dme` / `Nme` @291403274):
+ * Keep sandbox state during a session across directory/root moves until the
+ * user explicitly runs `/sandbox` or `/cd` (which calls `clearSandboxRootMoveHold`).
+ */
+export type SandboxRootMoveHold = {
+  isStrict: boolean
+  isStrictByFailedRead: boolean
+  isRequired: boolean
+  isAutoAllowOff: boolean
+}
+
+const RELAUNCH_SANDBOX_HOLD_ENV = 'CLAUDE_CODE_RELAUNCH_SANDBOX_HOLD'
+
+function readInitialSandboxRootMoveHold(): SandboxRootMoveHold | undefined {
+  const raw = process.env[RELAUNCH_SANDBOX_HOLD_ENV]
+  if (!raw) return undefined
+  delete process.env[RELAUNCH_SANDBOX_HOLD_ENV]
+  const parts = raw.split(',')
+  return {
+    isStrict: parts.includes('isStrict'),
+    isStrictByFailedRead: parts.includes('isStrictByFailedRead'),
+    isRequired: parts.includes('isRequired'),
+    isAutoAllowOff: parts.includes('isAutoAllowOff'),
+  }
+}
+
+let sandboxRootMoveHold: SandboxRootMoveHold | undefined =
+  readInitialSandboxRootMoveHold()
+
+export function getSandboxRootMoveHold(): SandboxRootMoveHold | undefined {
+  return sandboxRootMoveHold
+}
+
+export function isSandboxHeldOnByRootMove(): boolean {
+  return (
+    sandboxRootMoveHold !== undefined &&
+    getSettings_DEPRECATED()?.sandbox?.enabled !== true
+  )
+}
+
+export function captureSandboxRootMoveHold(): void {
+  if (!getSandboxEnabledSetting() && sandboxRootMoveHold === undefined) {
+    return
+  }
+  try {
+    sandboxRootMoveHold = {
+      isStrict: !areUnsandboxedCommandsAllowed(),
+      isStrictByFailedRead:
+        isSandboxHeldOnByFailedSettingsRead() ||
+        sandboxRootMoveHold?.isStrictByFailedRead === true,
+      isRequired: isSandboxRequiredBySettings(),
+      isAutoAllowOff: !isAutoAllowBashIfSandboxedEnabled(),
+    }
+  } catch (err) {
+    logForDebugging(
+      `Could not read the sandbox settings before a move, so keeping the sandbox at its strictest: ${err}`,
+      { level: 'error' },
+    )
+    sandboxRootMoveHold = {
+      isStrict: true,
+      isStrictByFailedRead: true,
+      isRequired: true,
+      isAutoAllowOff: true,
+    }
+  }
+}
+
+export function clearSandboxRootMoveHold(): void {
+  sandboxRootMoveHold = undefined
+}
+
+export function serializeSandboxRootMoveHoldEnv(): Record<string, string> {
+  if (!sandboxRootMoveHold) return {}
+  const flags = [
+    'on',
+    ...Object.entries(sandboxRootMoveHold)
+      .filter(([, v]) => v)
+      .map(([k]) => k),
+  ]
+  return { [RELAUNCH_SANDBOX_HOLD_ENV]: flags.join(',') }
+}
+
+/**
+ * Official 2.1.325 #2353 & #2354 (`_pe`) + 2.1.326 #299 (`rootMoveHold`):
+ * - `autoAllowBashIfSandboxed` defaults to `false` (sandboxed Bash commands
+ *   follow the normal permission flow unless explicitly set to `true`).
+ * - When managed settings (`policySettings`) turn the sandbox on, auto-allow
+ *   only applies if the highest-ranking managed source explicitly sets
+ *   `autoAllowBashIfSandboxed: true`.
+ * - When `rootMoveHold` is active with `isAutoAllowOff` or holding sandbox on,
+ *   auto-allow stays off so Bash asks first.
+ */
 function isAutoAllowBashIfSandboxedEnabled(): boolean {
   if (isSandboxHeldOnByFailedSettingsRead()) {
+    return false
+  }
+  if (sandboxRootMoveHold?.isAutoAllowOff || isSandboxHeldOnByRootMove()) {
     return false
   }
   const policySandbox = getSettingsForSource('policySettings')?.sandbox
@@ -2585,7 +3165,7 @@ function isAutoAllowBashIfSandboxedEnabled(): boolean {
 }
 
 function areUnsandboxedCommandsAllowed(): boolean {
-  if (isSandboxHeldOnByFailedSettingsRead()) {
+  if (isSandboxHeldOnByFailedSettingsRead() || sandboxRootMoveHold?.isStrict) {
     return false
   }
   const settings = getSettings_DEPRECATED()
@@ -2593,6 +3173,9 @@ function areUnsandboxedCommandsAllowed(): boolean {
 }
 
 function isSandboxRequiredBySettings(): boolean {
+  if (sandboxRootMoveHold?.isRequired) {
+    return true
+  }
   const settings = getSettings_DEPRECATED()
   return (
     getSandboxEnabledSetting() &&
@@ -2694,7 +3277,7 @@ function isSandboxingEnabled(): boolean {
     return false
   }
 
-  return getSandboxEnabledSetting()
+  return getSandboxEnabledSetting() || sandboxRootMoveHold !== undefined
 }
 
 /**
@@ -3023,9 +3606,22 @@ async function setSandboxSettings(options: {
       }),
     },
   })
-  if (!result.error && options.enabled === false) {
-    sandboxWasEnabled = false
-    setSandboxHeldOnByFailedRead(false)
+  if (!result.error) {
+    if (options.enabled === false) {
+      sandboxWasEnabled = false
+      setSandboxHeldOnByFailedRead(false)
+      sandboxRootMoveHold = undefined
+    } else if (sandboxRootMoveHold !== undefined) {
+      sandboxRootMoveHold = {
+        ...sandboxRootMoveHold,
+        isStrict:
+          sandboxRootMoveHold.isStrict &&
+          options.allowUnsandboxedCommands !== true,
+        isAutoAllowOff:
+          sandboxRootMoveHold.isAutoAllowOff &&
+          options.autoAllowBashIfSandboxed !== true,
+      }
+    }
   }
   return result
 }
@@ -3059,6 +3655,23 @@ async function wrapWithSandbox(
     ensureAtomicWriteStagingDirs()
     if (!resolveSandboxFilesystemDisabled()) {
       ensureUpdaterStagingDir()
+    }
+    // Official 2.1.326 #301: snapshot .git before sandboxed command so
+    // unexpected entries planted inside .git/ are set aside after the command.
+    snapshotGitDirBeforeSandboxWrap(getOriginalCwd())
+    if (getCwd() !== getOriginalCwd()) {
+      snapshotGitDirBeforeSandboxWrap(getCwd())
+    }
+    // Official 2.1.326 #302: on Linux/WSL, pre-create missing `--add-dir`
+    // folders before each sandboxed command so bwrap can bind-mount them.
+    const configuredAddDirs = Array.from(
+      new Set([
+        ...(getSettings_DEPRECATED()?.permissions?.additionalDirectories ?? []),
+        ...getAdditionalDirectoriesForClaudeMd(),
+      ]),
+    )
+    if (configuredAddDirs.length > 0) {
+      precreateMissingLinuxAddDirs(configuredAddDirs)
     }
     promoteDenyLiteralSymlinkTargets({
       getConfig: () => BaseSandboxManager.getConfig?.(),
@@ -3583,6 +4196,10 @@ export const SandboxManager: ISandboxManager = {
   cleanupAfterCommand: (): void => {
     BaseSandboxManager.cleanupAfterCommand()
     scrubBareGitRepoFiles()
+    // Official 2.1.326 #23: remove 0-byte Linux placeholders (e.g. .git/config.lock)
+    cleanupLinuxSandboxPlaceholderFiles()
+    // Official 2.1.326 #301: set aside unexpected entries planted in .git/
+    quarantineUnexpectedGitDirEntries()
     // densable LZ — spare settings.json symlink hops outside write roots
     scrubSymlinkedDenyPaths({
       getConfig: () => BaseSandboxManager.getConfig?.(),

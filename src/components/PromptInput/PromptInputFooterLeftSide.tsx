@@ -16,7 +16,7 @@ import {
 import { BackgroundTaskStatus } from '../tasks/BackgroundTaskStatus.js';
 import { isBackgroundTask } from '../../tasks/types.js';
 import { isPanelAgentTask } from '../../tasks/LocalAgentTask/LocalAgentTask.js';
-import { getVisibleAgentTasks } from '../CoordinatorAgentStatus.js';
+import { getPanelVisibleAgentTasks, getVisibleAgentTasks } from '../CoordinatorAgentStatus.js';
 import { hasParkedSubagentsForFooter } from '../../utils/panelIdleSummary.js';
 import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
 import { count } from '../../utils/array.js';
@@ -276,6 +276,8 @@ type Props = {
   mode: PromptInputMode;
   toolPermissionContext: ToolPermissionContext;
   suppressHint: boolean;
+  /** #201 (2.1.326): allow `esc to interrupt` beside a custom status line when Esc interrupts. */
+  allowInterruptHint?: boolean;
   isLoading: boolean;
   showMemoryTypeSelector?: boolean;
   tasksSelected: boolean;
@@ -333,6 +335,7 @@ export function PromptInputFooterLeftSide({
   mode,
   toolPermissionContext,
   suppressHint,
+  allowInterruptHint = false,
   isLoading,
   tasksSelected,
   teamsSelected,
@@ -369,7 +372,7 @@ export function PromptInputFooterLeftSide({
       </Text>
     );
   }
-  if (showExpandPasteHint && !isSearching) {
+  if (showExpandPasteHint && !isSearching && !isLoading) {
     return (
       <Text dimColor key="expand-paste-hint">
         paste again to expand
@@ -394,6 +397,7 @@ export function PromptInputFooterLeftSide({
         mode={mode}
         toolPermissionContext={toolPermissionContext}
         showHint={!suppressHint && !showVim}
+        allowInterruptHint={allowInterruptHint && !showVim}
         isLoading={isLoading}
         tasksSelected={tasksSelected}
         teamsSelected={teamsSelected}
@@ -439,6 +443,7 @@ type ModeIndicatorProps = {
   mode: PromptInputMode;
   toolPermissionContext: ToolPermissionContext;
   showHint: boolean;
+  allowInterruptHint?: boolean;
   isLoading: boolean;
   tasksSelected: boolean;
   teamsSelected: boolean;
@@ -448,10 +453,47 @@ type ModeIndicatorProps = {
   leftArrowAgain?: boolean;
 };
 
+/**
+ * #283 (2.1.326, official pwo/ort/nrt): a stopped subagent row visible under the
+ * prompt that can be resumed via ↓.
+ */
+export function hasResumableStoppedSubagentInFooter(
+  tasks: Record<string, import('../../tasks/types.js').TaskState>,
+  taskDecorations: Record<string, { content: string }> | undefined,
+  viewingAgentTaskId: string | undefined,
+): boolean {
+  const isResumable = (t: import('../../tasks/types.js').TaskState | undefined): boolean =>
+    t !== undefined &&
+    t.id !== viewingAgentTaskId &&
+    t.type === 'local_agent' &&
+    t.stoppedByUser === true &&
+    t.status === 'killed' &&
+    t.endTime !== undefined;
+  if (!Object.values(tasks).some(isResumable)) return false;
+  return getPanelVisibleAgentTasks(tasks, taskDecorations, viewingAgentTaskId).some(isResumable);
+}
+
+/**
+ * #8 (2.1.326, official rrt): true when viewing a running local subagent where
+ * pressing Esc stops that subagent.
+ */
+export function isViewingStoppableSubagent(
+  viewSelectionMode: string,
+  viewingAgentTaskId: string | undefined,
+  tasks: Record<string, import('../../tasks/types.js').TaskState>,
+): boolean {
+  if (viewSelectionMode !== 'viewing-agent' || viewingAgentTaskId === undefined) {
+    return false;
+  }
+  const viewed = tasks[viewingAgentTaskId];
+  return viewed?.type === 'local_agent' && viewed.status === 'running';
+}
+
 function ModeIndicator({
   mode,
   toolPermissionContext,
   showHint,
+  allowInterruptHint = false,
   isLoading,
   tasksSelected,
   teamsSelected,
@@ -464,6 +506,8 @@ function ModeIndicator({
   const feedbackDraftCount = useSessionDraftCount();
   const modeCycleShortcut = useShortcutDisplay('chat:cycleMode', 'Chat', 'shift+tab');
   const tasks = useAppState(s => s.tasks);
+  const taskDecorations = useAppState(s => s.taskDecorations);
+  const footerSelection = useAppState(s => s.footerSelection);
   const teamContext = useAppState(s => s.teamContext);
   const viewSelectionMode = useAppState(s => s.viewSelectionMode);
   const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
@@ -620,10 +664,20 @@ function ModeIndicator({
   );
   const hasRunningAgentTasks = Object.values(tasks).some(t => t.type === 'local_agent' && t.status === 'running');
 
-  // Get hint parts separately for potential second-line rendering
+  const isFooterSelected = footerSelection !== null || tasksSelected || teamsSelected || tmuxSelected;
+  const showEscToStopSubagent =
+    isViewingStoppableSubagent(viewSelectionMode, viewingAgentTaskId, tasks) && !isFooterSelected;
+  const hasResumableStoppedSubagent = hasResumableStoppedSubagentInFooter(tasks, taskDecorations, viewingAgentTaskId);
+
+  // Get hint parts separately for potential second-line rendering.
+  // #201 (2.1.326): suppress `esc to interrupt` when Esc would go to a footer
+  // item or panel; allow `esc to interrupt` beside a custom status line via
+  // `allowInterruptHint`. #8 (2.1.326): show `esc to stop` in a running
+  // subagent view where Esc stops it.
+  const canShowEscInterrupt = isLoading && !isFooterSelected && !showEscToStopSubagent;
   const hintParts = showHint
     ? getSpinnerHintParts(
-        isLoading,
+        canShowEscInterrupt,
         escShortcut,
         todosShortcut,
         killAgentsShortcut,
@@ -633,7 +687,13 @@ function ModeIndicator({
         hasRunningAgentTasks,
         isKillAgentsConfirmShowing,
       )
-    : [];
+    : allowInterruptHint && canShowEscInterrupt
+      ? [
+          <Text dimColor key="esc">
+            <KeyboardShortcutHint shortcut={escShortcut} action="interrupt" />
+          </Text>,
+        ]
+      : [];
 
   // Official lfb: BG_SESSIONS fleet entry (not remote, not viewing teammate).
   // feature() must be a direct if/ternary condition (bun:bundle restriction).
@@ -647,12 +707,21 @@ function ModeIndicator({
         <KeyboardShortcutHint shortcut={escShortcut} action="return to team lead" />
       </Text>,
     );
+  } else if (showEscToStopSubagent && (showHint || allowInterruptHint)) {
+    parts.push(
+      <Text dimColor key="esc-stop">
+        <KeyboardShortcutHint shortcut={escShortcut} action="stop" />
+      </Text>,
+    );
+    if (showHint && !hasTeammatePills) {
+      parts.push(...hintParts);
+    }
   } else if ((feature('PROACTIVE') || feature('KAIROS')) && hasNextTick) {
     parts.push(<ProactiveCountdown key="proactive" />);
-  } else if (!hasTeammatePills && showHint) {
+  } else if (!hasTeammatePills && (showHint || allowInterruptHint)) {
     parts.push(...hintParts);
     // Official interrupt_agents: loading + fleet → esc · FFe
-    if (isLoading && agentsEntryEnabled) {
+    if (isLoading && showHint && agentsEntryEnabled) {
       parts.push(<AgentsFooterHint key="agents-hint" leftArrowAgain={leftArrowAgain} />);
     }
   }
@@ -833,13 +902,13 @@ function ModeIndicator({
     parts.push(<FeedbackDraftFooter key="feedback-drafts" count={feedbackDraftCount} />);
   }
 
-  if ((tasksPart || hasCoordinatorTasks) && showHint && !hasTeams) {
+  if ((tasksPart || hasCoordinatorTasks || hasResumableStoppedSubagent) && showHint && !hasTeams) {
     parts.push(
       <Text dimColor key="manage-tasks">
         {tasksSelected ? (
           <KeyboardShortcutHint shortcut="Enter" action="view tasks" />
         ) : (
-          <KeyboardShortcutHint shortcut="↓" action="manage" />
+          <KeyboardShortcutHint shortcut="↓" action={hasResumableStoppedSubagent ? 'resume subagent' : 'manage'} />
         )}
       </Text>,
     );

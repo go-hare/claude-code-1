@@ -40,7 +40,11 @@ import {
   refreshMdmSettings,
   setMdmSettingsCache,
 } from './mdm/settings.js'
-import { getSettingsFilePathForSource } from './settings.js'
+import {
+  getSettingsFilePathForSource,
+  getSettingsWithErrors,
+} from './settings.js'
+import type { ValidationError } from './validation.js'
 import { resetSettingsCache } from './settingsCache.js'
 
 const FILE_STABILITY_THRESHOLD_MS = 1000
@@ -83,6 +87,104 @@ export type SettingsChangeExtra = {
 }
 const settingsChanged =
   createSignal<[source: SettingSource, extra?: SettingsChangeExtra]>()
+
+/**
+ * Official 2.1.326 (#20) `jin`: mid-session settings file error notice emitted
+ * when a settings file is saved with an error during a running session.
+ */
+export type SettingsFileErrorNotice = {
+  key: string
+  source: SettingSource
+  file: string
+  fileName: string
+  message: string
+  cleared?: boolean
+}
+
+const settingsFileErrorNotices =
+  createSignal<[notice: SettingsFileErrorNotice]>()
+const activeMidSessionSettingsErrors = new Map<
+  string,
+  SettingsFileErrorNotice
+>()
+
+function isBlockingSettingsLoadError(err: ValidationError): boolean {
+  if (err.severity === 'warning') return false
+  if (err.message.includes('could not be read')) return false
+  return true
+}
+
+function displayNameForSettingsFile(filePath: string): string {
+  const base = platformPath.basename(filePath)
+  const parent = platformPath.basename(platformPath.dirname(filePath))
+  if (parent === '.claude' || parent === 'managed-settings.d') {
+    return `${parent}/${base}`
+  }
+  return base || filePath
+}
+
+/**
+ * Official 2.1.326 (#20): inspect current settings errors after a mid-session
+ * reload for `source`. Emits a warning naming each file that newly failed to
+ * load, and clears notices for files that recovered.
+ */
+export function checkMidSessionSettingsFileErrors(
+  source: SettingSource,
+  errors?: ValidationError[],
+): SettingsFileErrorNotice[] {
+  const currentErrors = errors ?? getSettingsWithErrors().errors
+  const blockingFiles = new Set<string>()
+  for (const err of currentErrors) {
+    if (!isBlockingSettingsLoadError(err)) continue
+    if (!err.file) continue
+    const errSource = getSourceForPath(err.file)
+    if (errSource && errSource !== source) continue
+    blockingFiles.add(err.file)
+  }
+
+  const emitted: SettingsFileErrorNotice[] = []
+
+  // Clear previously active notices for this source that are now fixed
+  for (const [key, prev] of [...activeMidSessionSettingsErrors.entries()]) {
+    if (prev.source !== source) continue
+    if (!blockingFiles.has(prev.file)) {
+      activeMidSessionSettingsErrors.delete(key)
+      const clearedNotice: SettingsFileErrorNotice = { ...prev, cleared: true }
+      emitted.push(clearedNotice)
+      settingsFileErrorNotices.emit(clearedNotice)
+    }
+  }
+
+  // Emit notices for newly errored files
+  for (const file of blockingFiles) {
+    const fileName = displayNameForSettingsFile(file)
+    const key = `settings-file-skipped-${source}:${file}`
+    if (activeMidSessionSettingsErrors.has(key)) continue
+    const notice: SettingsFileErrorNotice = {
+      key,
+      source,
+      file,
+      fileName,
+      message: `${fileName} has an error and didn't load · run claude doctor`,
+    }
+    activeMidSessionSettingsErrors.set(key, notice)
+    logForDebugging(`[settings] ${notice.message}`, { level: 'warn' })
+    emitted.push(notice)
+    settingsFileErrorNotices.emit(notice)
+  }
+
+  return emitted
+}
+
+export function subscribeSettingsFileErrorNotices(
+  listener: (notice: SettingsFileErrorNotice) => void,
+): () => void {
+  return settingsFileErrorNotices.subscribe(listener)
+}
+
+export function getActiveSettingsFileErrorNotices(): SettingsFileErrorNotice[] {
+  return [...activeMidSessionSettingsErrors.values()]
+}
 
 type TimingOverrides = {
   stabilityThreshold?: number
@@ -859,6 +961,16 @@ function fanOut(source: SettingSource, extra?: SettingsChangeExtra): void {
   // Official 2.1.325 #2332: clear cached skills/agents when managed
   // strictPluginOnlyCustomization changes in a running session.
   notifyStrictPluginOnlyPolicyIfChanged()
+  // Official 2.1.326 (#20): warn naming the file if a mid-session edit broke
+  // a settings file so it failed to load, and clear once fixed.
+  try {
+    checkMidSessionSettingsFileErrors(source)
+  } catch (err) {
+    logForDebugging(
+      `[settings] mid-session error check failed: ${errorMessage(err)}`,
+      { level: 'warn' },
+    )
+  }
   try {
     settingsChanged.emit(source, extra)
   } catch (err) {
@@ -886,6 +998,7 @@ export async function resetForTesting(
   watchStartedAt = undefined
   catchUpSince = undefined
   mdmRefreshing = false
+  activeMidSessionSettingsErrors.clear()
   testOverrides = overrides ?? null
 }
 export const settingsChangeDetector = {

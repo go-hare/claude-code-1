@@ -19,6 +19,7 @@ import {
   hasUnresolvedHooksFromLookup,
 } from '../utils/messages.js';
 import { hasThinkingContent, Message } from './Message.js';
+import { resolveCollapsedGroupActiveState } from './messages/CollapsedReadSearchContent.js';
 
 // Narrow the first element of MessageContent to a block with known shape.
 type ContentBlock = {
@@ -181,12 +182,18 @@ function MessageRowImpl({
     );
   }
 
-  // A collapsed group is "active" (grey dot, present tense "Reading…") when its tools
-  // are still executing OR when the overall query is still running with nothing after it.
-  // hasAnyToolInProgress takes priority: if tools are running, always show active regardless
-  // of what else is in the message list (avoids false finalization during parallel execution).
+  // Official 2.1.326 #157: synchronize isActiveCollapsedGroup with
+  // resolveCollapsedGroupActiveState so finished/resolved tool groups do not
+  // revert to active "Running…" state while still loading or viewing panels.
   const isActiveCollapsedGroup =
-    isCollapsed && (hasAnyToolInProgress(msg, inProgressToolUseIDs) || (isLoading && !hasContentAfter));
+    isCollapsed &&
+    resolveCollapsedGroupActiveState({
+      toolUseIds: getToolUseIdsFromCollapsedGroup(msg),
+      inProgressToolUseIDs,
+      lookups,
+      isActiveGroupProp: hasAnyToolInProgress(msg, inProgressToolUseIDs) || (isLoading && !hasContentAfter),
+      isViewedAgentTerminal: false,
+    });
 
   const displayMsg = isGrouped ? msg.displayMessage : isCollapsed ? getDisplayMessageFromCollapsed(msg) : msg;
 

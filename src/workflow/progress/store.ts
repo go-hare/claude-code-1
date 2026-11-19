@@ -41,6 +41,15 @@ export type RunProgress = {
   scriptPath?: string
   /** Launch args (JSON-serializable); included in recovery when present. */
   args?: unknown
+  /**
+   * Official 2.1.326 #121: Resume cache-reuse telemetry — how many cached agent
+   * results were reused and where reuse stopped (first mismatch or failed call).
+   */
+  resumeReusedCount?: number
+  resumeStoppedAt?: {
+    label?: string
+    reason?: string
+  }
   updatedAt: number
 }
 
@@ -141,6 +150,29 @@ export function createProgressStoreFromBus(bus: ProgressBus): ProgressStore {
         break
       }
       case 'agent_done': {
+        const resultRec = event.result as {
+          kind: string
+          reused?: boolean
+          fromCache?: boolean
+          error?: string
+          reason?: string
+        }
+        if (resultRec.reused === true || resultRec.fromCache === true) {
+          p.resumeReusedCount = (p.resumeReusedCount ?? 0) + 1
+        } else if (
+          p.resumeStoppedAt === undefined &&
+          (p.resumeReusedCount !== undefined || resultRec.kind !== 'ok')
+        ) {
+          p.resumeStoppedAt = {
+            label: event.label ?? `agent #${event.agentId}`,
+            reason:
+              resultRec.kind !== 'ok'
+                ? resultRec.error ||
+                  resultRec.reason ||
+                  `call ${resultRec.kind}`
+                : 'call no longer matched cache',
+          }
+        }
         let a = p.agents.find(x => x.id === event.agentId)
         if (!a) {
           a = {

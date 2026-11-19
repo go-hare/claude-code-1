@@ -161,26 +161,71 @@ function formatFlattenNote(
   return `Input constraint: ${verb}: ${joined}.`
 }
 
+function canonicalSchemaKey(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value)
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalSchemaKey).join(',')}]`
+  }
+  const obj = value as Record<string, unknown>
+  const keys = Object.keys(obj).sort()
+  return `{${keys.map(k => `${JSON.stringify(k)}:${canonicalSchemaKey(obj[k])}`).join(',')}}`
+}
+
+function dedupeBranchSchemas(
+  schemas: Record<string, unknown>[],
+): Record<string, unknown>[] {
+  if (schemas.length <= 1) return schemas
+  const seen = new Set<string>()
+  const unique: Record<string, unknown>[] = []
+  for (const s of schemas) {
+    const key = canonicalSchemaKey(s)
+    if (!seen.has(key)) {
+      seen.add(key)
+      unique.push(s)
+    }
+  }
+  return unique
+}
+
 /**
- * densable vxi — flatten top-level anyOf/oneOf/allOf, or drop.
+ * Official 2.1.326 #82 (`_5a` @288167400): flatten top-level anyOf/oneOf/allOf,
+ * merging distinct per-property schemas across all `anyOf`/`oneOf` branches into
+ * `{ anyOf: [...stringBranches, ...nonStringBranches] }`, intersecting `required`
+ * across `anyOf`/`oneOf` branches, and defaulting `additionalProperties: true`.
  */
 export function normalizeMcpRootCombinators(
   schema: unknown,
+  options: { everyBranch?: boolean } = {},
 ): McpNormalizeOutcome {
   if (!isPlainObject(schema)) return { outcome: 'unchanged' }
   const combinators = ROOT_COMBINATORS.filter(key => key in schema)
   if (combinators.length === 0) return { outcome: 'unchanged' }
+  const everyBranch = options.everyBranch ?? true
   try {
     const properties = Object.create(null) as Record<string, unknown>
-    const takeProperties = (bag: unknown) => {
+    const branchSchemasByKey = new Map<string, Record<string, unknown>[]>()
+    const takeProperties = (bag: unknown, collectBranches = false) => {
       if (!isPlainObject(bag)) return
       for (const [key, value] of Object.entries(bag)) {
-        if (
-          PROPERTY_KEY.test(key) &&
-          !(key in properties) &&
-          isPlainObject(value)
-        ) {
+        if (!PROPERTY_KEY.test(key) || !isPlainObject(value)) continue
+        if (!(key in properties)) {
           properties[key] = value
+          if (collectBranches) {
+            branchSchemasByKey.set(key, [value])
+          }
+        } else if (collectBranches) {
+          const existing = branchSchemasByKey.get(key)
+          if (existing) {
+            existing.push(value)
+          } else {
+            const current = properties[key]
+            branchSchemasByKey.set(
+              key,
+              isPlainObject(current) ? [current, value] : [value],
+            )
+          }
         }
       }
     }
@@ -195,7 +240,21 @@ export function normalizeMcpRootCombinators(
       }
       for (const branch of branches) {
         if (isPlainObject(branch)) {
-          takeProperties(resolveLocalRef(branch, schema).properties)
+          takeProperties(
+            resolveLocalRef(branch, schema).properties,
+            everyBranch && key !== 'allOf',
+          )
+        }
+      }
+    }
+    for (const [key, branchSchemas] of branchSchemasByKey) {
+      const unique = dedupeBranchSchemas(branchSchemas)
+      if (unique.length > 1) {
+        properties[key] = {
+          anyOf: [
+            ...unique.filter(s => s.type === 'string'),
+            ...unique.filter(s => s.type !== 'string'),
+          ],
         }
       }
     }
@@ -220,6 +279,28 @@ export function normalizeMcpRootCombinators(
         }
       }
     }
+    if (everyBranch) {
+      for (const key of ['anyOf', 'oneOf'] as const) {
+        const rawBranches = schema[key]
+        if (!Array.isArray(rawBranches) || rawBranches.length === 0) continue
+        const resolved = rawBranches.map(b =>
+          isPlainObject(b) ? resolveLocalRef(b, schema) : b,
+        )
+        const counts = new Map<string, number>()
+        for (const [idx, br] of resolved.entries()) {
+          const reqList =
+            isPlainObject(br) && Array.isArray(br.required) ? br.required : []
+          for (const item of reqList) {
+            if (typeof item === 'string' && (counts.get(item) ?? 0) === idx) {
+              counts.set(item, idx + 1)
+            }
+          }
+        }
+        takeRequired(
+          [...counts.keys()].filter(k => counts.get(k) === resolved.length),
+        )
+      }
+    }
     const hasAnyOrOne =
       combinators.includes('anyOf') || combinators.includes('oneOf')
     const flattened: Record<string, unknown> = {
@@ -229,6 +310,9 @@ export function normalizeMcpRootCombinators(
     }
     for (const key of PRESERVE_KEYS) {
       if (key in schema) flattened[key] = schema[key]
+    }
+    if (!('additionalProperties' in schema)) {
+      flattened.additionalProperties = true
     }
     return {
       outcome: 'normalized',
@@ -242,6 +326,98 @@ export function normalizeMcpRootCombinators(
       reason: `input schema uses top-level ${combinators.join('/')} and could not be normalized`,
     }
   }
+}
+
+const NUMERIC_LITERAL_RE = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/
+
+function propertyAllowsNumericBranch(
+  propSchema: unknown,
+): 'integer' | 'number' | null {
+  if (!isPlainObject(propSchema)) return null
+  const branches: unknown[] = []
+  if (Array.isArray(propSchema.anyOf)) branches.push(...propSchema.anyOf)
+  if (Array.isArray(propSchema.oneOf)) branches.push(...propSchema.oneOf)
+  if (branches.length === 0) {
+    if (propSchema.type === 'integer') return 'integer'
+    if (propSchema.type === 'number') return 'number'
+    if (Array.isArray(propSchema.type)) {
+      if (propSchema.type.includes('number')) return 'number'
+      if (propSchema.type.includes('integer')) return 'integer'
+    }
+    return null
+  }
+  let numericKind: 'integer' | 'number' | null = null
+  for (const br of branches) {
+    if (!isPlainObject(br)) continue
+    if (br.type === 'number') return 'number'
+    if (br.type === 'integer') numericKind = 'integer'
+  }
+  return numericKind
+}
+
+function stringBranchAcceptsValue(propSchema: unknown, value: string): boolean {
+  if (!isPlainObject(propSchema)) return false
+  const branches: unknown[] = []
+  if (Array.isArray(propSchema.anyOf)) branches.push(...propSchema.anyOf)
+  if (Array.isArray(propSchema.oneOf)) branches.push(...propSchema.oneOf)
+  if (branches.length === 0) {
+    return propSchema.type === 'string'
+  }
+  for (const br of branches) {
+    if (!isPlainObject(br) || br.type !== 'string') continue
+    if (Array.isArray(br.enum)) {
+      if (br.enum.includes(value)) return true
+      continue
+    }
+    if (typeof br.const === 'string') {
+      if (br.const === value) return true
+      continue
+    }
+    if (typeof br.pattern === 'string') {
+      try {
+        if (new RegExp(br.pattern).test(value)) return true
+      } catch {
+        // Invalid regex pattern — do not match
+      }
+      continue
+    }
+    // Unconstrained string branch: check if another branch is numeric
+    return false
+  }
+  return false
+}
+
+/**
+ * Official 2.1.326 #82: Coerce numeric text arguments (e.g. `"42"`) to numbers
+ * when the flattened MCP tool input schema exposes a `number` or `integer`
+ * branch (e.g. via merged `anyOf`/`oneOf`) and no constrained string branch
+ * claims the value.
+ */
+export function coerceMcpToolInputForSchema(
+  args: Record<string, unknown>,
+  schema: unknown,
+): Record<string, unknown> {
+  if (!isPlainObject(schema) || !isPlainObject(schema.properties)) {
+    return args
+  }
+  let changed = false
+  const next: Record<string, unknown> = { ...args }
+  for (const [key, value] of Object.entries(args)) {
+    if (typeof value !== 'string') continue
+    const propSchema = schema.properties[key]
+    if (!isPlainObject(propSchema)) continue
+    const numericKind = propertyAllowsNumericBranch(propSchema)
+    if (!numericKind) continue
+    if (stringBranchAcceptsValue(propSchema, value)) continue
+    const trimmed = value.trim()
+    if (!NUMERIC_LITERAL_RE.test(trimmed)) continue
+    const parsed = Number(trimmed)
+    if (!Number.isFinite(parsed)) continue
+    if (numericKind === 'integer' && !Number.isInteger(parsed)) continue
+    next[key] = parsed
+    changed = true
+  }
+  return changed ? next : args
 }
 
 let metaValidator: ValidateFunction | null | undefined

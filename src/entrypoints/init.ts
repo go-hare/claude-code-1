@@ -89,6 +89,64 @@ subscribeSystemTheme(setCachedSystemTheme)
 // Track if telemetry has been initialized to prevent double initialization
 let telemetryInitialized = false
 let sessionCountRecorded = false
+// Official 2.1.326 (#333): Cowork cloud sessions hold org OTel export
+// (and `claude_code.session.count`) until the first turn arrives.
+let deferredTelemetryPending = false
+let firstTurnTelemetryReleased = false
+
+const COWORK_CLOUD_ENTRYPOINTS = new Set([
+  'remote_cowork',
+  'remote_cowork_trigger',
+])
+
+/** Official 2.1.326 (#333, `fNn`/`nkr`): true for Cowork cloud sessions. */
+export function isCoworkCloudEntrypoint(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const ep = env.CLAUDE_CODE_ENTRYPOINT
+  return ep !== undefined && COWORK_CLOUD_ENTRYPOINTS.has(ep)
+}
+
+/**
+ * Official 2.1.326 (#333): Cowork cloud sessions defer OpenTelemetry export
+ * initialization (and `claude_code.session.count`) until the first user turn
+ * unless `CLAUDE_CODE_DISABLE_STARTUP_WORK_GATE` or beta tracing is enabled.
+ */
+export function shouldDeferTelemetryUntilFirstTurn(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (firstTurnTelemetryReleased) return false
+  if (isEnvTruthy(env.CLAUDE_CODE_DISABLE_STARTUP_WORK_GATE)) return false
+  if (isBetaTracingEnabled()) return false
+  return isCoworkCloudEntrypoint(env)
+}
+
+/**
+ * Official 2.1.326 (#333): Release deferred Cowork cloud OpenTelemetry
+ * initialization when the first turn starts. Sessions that exit without
+ * ever receiving a turn never initialize OTel or emit `claude_code.session.count`.
+ */
+export function releaseDeferredTelemetryForFirstTurn(): boolean {
+  firstTurnTelemetryReleased = true
+  if (!deferredTelemetryPending) {
+    return false
+  }
+  deferredTelemetryPending = false
+  logForDebugging(
+    '[3P telemetry] First turn started — releasing deferred Cowork cloud telemetry init',
+  )
+  void doInitializeTelemetry().catch(error => {
+    logForDebugging(
+      `[3P telemetry] Deferred telemetry init failed: ${errorMessage(error)}`,
+      { level: 'error' },
+    )
+  })
+  return true
+}
+
+export function isTelemetryDeferredForFirstTurn(): boolean {
+  return deferredTelemetryPending
+}
 
 /**
  * Official 2.1.319 (#1759): record `claude_code.session.count` at most once per
@@ -108,9 +166,12 @@ export function recordSessionCountMetricOnce(): boolean {
   return true
 }
 
-/** Test-only helper for `#1759` session counter idempotence tests. */
+/** Test-only helper for `#1759` and `#333` telemetry init/deferral tests. */
 export function resetSessionCountMetricForTesting(): void {
   sessionCountRecorded = false
+  deferredTelemetryPending = false
+  firstTurnTelemetryReleased = false
+  telemetryInitialized = false
 }
 
 export const init = memoize(async (): Promise<void> => {
@@ -468,6 +529,15 @@ export const init = memoize(async (): Promise<void> => {
  * This should only be called once, after the trust dialog has been accepted.
  */
 export function initializeTelemetryAfterTrust(): void {
+  // Official 2.1.326 (#333): Cowork cloud sessions hold OTel export until the
+  // first turn so idle/unused sessions send nothing (including session.count).
+  if (shouldDeferTelemetryUntilFirstTurn()) {
+    deferredTelemetryPending = true
+    logForDebugging(
+      '[3P telemetry] Deferring OpenTelemetry init in Cowork cloud session until first turn',
+    )
+    return
+  }
   void doInitializeTelemetry().catch(error => {
     logForDebugging(
       `[3P telemetry] Telemetry init failed: ${errorMessage(error)}`,

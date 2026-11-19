@@ -762,6 +762,8 @@ export default class Ink {
    * active. handleResume clears it on the main-screen arm.
    */
   private mainScreenBehindAlt: { viewport: { width: number; height: number }; erase: string } | undefined;
+  private isFinishingWrites = false;
+  private renderAllocFailures = 0;
   private readonly logger: Logger;
 
   constructor(private readonly options: Options) {
@@ -1371,11 +1373,13 @@ export default class Ink {
     if (episode.droppedBytes > 0) {
       const probe = episode.endedBy === 'drain';
       this.appRef.current?.querier?.resync({ probe });
-      if (probe) {
-        this.reassertTerminalModes();
-        this.forceRedraw();
-      } else {
-        this.repaint();
+      if (!this.isFinishingWrites) {
+        if (probe) {
+          this.reassertTerminalModes();
+          this.forceRedraw();
+        } else {
+          this.repaint();
+        }
       }
     }
     if (this.frameHeldForBacklog && episode.endedBy === 'drain') {
@@ -1543,16 +1547,30 @@ export default class Ink {
     // biome-ignore lint/complexity/noCommaOperator: gold imagesStale consume is comma-operator
     if (this.imagesStale) (this.imagesStale = false), this.terminalImages.retransmitAll();
 
-    const frame = this.renderer({
-      frontFrame: this.frontFrame,
-      backFrame: this.backFrame,
-      isTTY: this.options.stdout.isTTY,
-      terminalWidth,
-      terminalRows,
-      altScreen: this.altScreenActive,
-      prevFrameContaminated: leftoverGsContaminated,
-      overlayActive: leftoverGsOverlay,
-    });
+    // 2.1.326 #48: degrade gracefully on memory allocation failure (RangeError)
+    // during screen allocation or rendering instead of crashing the session.
+    const frame = (() => {
+      try {
+        const frame = this.renderer({
+          frontFrame: this.frontFrame,
+          backFrame: this.backFrame,
+          isTTY: this.options.stdout.isTTY,
+          terminalWidth,
+          terminalRows,
+          altScreen: this.altScreenActive,
+          prevFrameContaminated: leftoverGsContaminated,
+          overlayActive: leftoverGsOverlay,
+        });
+        return frame;
+      } catch (err) {
+        if (err instanceof RangeError) {
+          this.handleRenderAllocationFailure('renderer', err);
+          return undefined;
+        }
+        throw err;
+      }
+    })();
+    if (frame === undefined) return;
     const rendererMs = performance.now() - renderStart;
 
     // densable Z2t.onRender frameSink (xxc / AxcStickyHost). Gold:
@@ -1794,7 +1812,16 @@ export default class Ink {
     // still receives the frame. (Local empty-skips after external 2J remount
     // left the physical alt buffer black until a later content frame.)
     const tDiff = performance.now();
-    const diff = this.log.render(prevFrame, frame, this.altScreenActive, this.decstbmSafe());
+    let diff: Diff;
+    try {
+      diff = this.log.render(prevFrame, frame, this.altScreenActive, this.decstbmSafe());
+    } catch (err) {
+      if (err instanceof RangeError) {
+        this.handleRenderAllocationFailure('diff', err);
+        return;
+      }
+      throw err;
+    }
     const diffMs = performance.now() - tDiff;
     // Swap buffers
     this.backFrame = this.frontFrame;
@@ -3107,15 +3134,75 @@ export default class Ink {
    * main screen AFTER printResumeHint(), which tmux (at least) interprets
    * as restoring the saved cursor position — clobbering the resume hint.
    */
+  /**
+   * 2.1.326 #48: Recover from RangeError memory allocation failure during
+   * rendering/screen creation by recycling pools, marking the previous frame
+   * contaminated, and dropping the current frame instead of crashing.
+   */
+  private handleRenderAllocationFailure(stage: string, err: RangeError): void {
+    this.fullRepaintSentinelScreen = undefined;
+    this.prevFrameContaminated = true;
+    this.imagesStale = true;
+    try {
+      this.resetPools();
+    } catch {
+      // Ignore secondary allocation failure while recovering.
+    }
+    if (++this.renderAllocFailures <= 5) {
+      this.logger.debug(
+        `ink ${stage} allocation failed (${err.name}: ${err.message}); frame dropped to keep session alive`,
+        { level: 'warn' },
+      );
+    }
+  }
+
+  /**
+   * 2.1.326 #203 / 2.1.328 `finishWrites`: flush non-blocking stdout and any
+   * queued DEC prefix before suspend/unmount.
+   */
+  finishWrites(): void {
+    if (this.isHandedOff) return;
+    this.isFinishingWrites = true;
+    try {
+      this.nonBlockingStdout?.flush();
+    } finally {
+      this.isFinishingWrites = false;
+    }
+    this.writeKeptForNextFrame();
+  }
+
+  /**
+   * 2.1.326 #203 / 2.1.328 `moveCursorBelowFrame`: move physical cursor from
+   * the declared caret position down to content bottom before Ctrl+Z / exit.
+   */
+  moveCursorBelowFrame = (): string => {
+    const prev = this.displayCursor;
+    if (prev === null || this.altScreenActive || !this.options.stdout.isTTY) {
+      return '';
+    }
+    this.displayCursor = null;
+    const dx = this.frontFrame.cursor.x - prev.x;
+    const dy = this.frontFrame.cursor.y - prev.y;
+    return dx !== 0 || dy !== 0 ? cursorMove(dx, dy) : '';
+  };
+
+  /**
+   * 2.1.326 #203 / 2.1.328 `prepareToSuspend`: flush pending writes and return
+   * cursor-below-frame sequence so the shell prompt after Ctrl+Z lands cleanly.
+   */
+  prepareToSuspend = (): string => {
+    this.finishWrites();
+    return this.moveCursorBelowFrame();
+  };
+
   detachForShutdown(): void {
+    const wasMouseTracking = this.altScreenMouseTracking !== 'off';
     this.nonBlockingStdout?.flush();
-    if (!this.isUnmounted && !this.altScreenActive && this.displayCursor !== null && this.options.stdout.isTTY) {
-      const dx = this.frontFrame.cursor.x - this.displayCursor.x;
-      const dy = this.frontFrame.cursor.y - this.displayCursor.y;
-      if (dx !== 0 || dy !== 0) {
-        this.writeBeforeExit(cursorMove(dx, dy));
+    if (!this.isUnmounted) {
+      const moveSeq = this.moveCursorBelowFrame();
+      if (moveSeq !== '') {
+        this.writeBeforeExit(moveSeq);
       }
-      this.displayCursor = null;
     }
     this.isUnmounted = true;
     this.altScreenActive = false;
@@ -3128,7 +3215,7 @@ export default class Ink {
       isRaw?: boolean;
       setRawMode?: (m: boolean) => void;
     };
-    this.drainStdin();
+    this.drainStdin(wasMouseTracking ? MOUSE_EXIT_DRAIN_MS : 0);
     if (stdin.isTTY && stdin.isRaw && !this._handoffRawMode) {
       safeSetRawMode(stdin, false, this.logger);
     }
@@ -3145,9 +3232,9 @@ export default class Ink {
   /**
    * densable `aqe` + `resync({probe:!1})` when a query reply is still owed.
    */
-  drainStdin(): Buffer | undefined {
+  drainStdin(quietDrainMs = 0): Buffer | undefined {
     const querier = this.appRef.current?.querier;
-    const drained = drainStdin(this.options.stdin, querier?.owed() ?? 0);
+    const drained = drainStdin(this.options.stdin, querier?.owed() ?? 0, quietDrainMs);
     if (querier && querier.owed() > 0) querier.resync({ probe: false });
     return drained;
   }
@@ -3194,8 +3281,16 @@ export default class Ink {
       cursor: { x: 0, y: 0, visible: true },
     });
     this.mainScreenBehindAlt = undefined;
-    this.frontFrame = blank();
-    this.backFrame = blank();
+    try {
+      this.frontFrame = blank();
+      this.backFrame = blank();
+    } catch (err) {
+      if (err instanceof RangeError) {
+        this.handleRenderAllocationFailure('resetFramesForAltScreen', err);
+        return;
+      }
+      throw err;
+    }
     this.log.reset();
     // Defense-in-depth: alt-screen skips the cursor preamble anyway (CSI H
     // resets), but a stale displayCursor would be misleading if we later
@@ -3911,6 +4006,7 @@ export default class Ink {
         onCursorDeclaration={this.setCursorDeclaration}
         dispatchKeyboardEvent={this.dispatchKeyboardEvent}
         onInputPriorityFrame={this.requestInputPriorityFrame}
+        prepareToSuspend={this.prepareToSuspend}
         dispatchPasteEvent={this.dispatchPasteEvent}
         dispatchWheelEvent={this.dispatchWheelEvent}
         focusManager={this.focusManager}
@@ -3958,7 +4054,7 @@ export default class Ink {
       this.srAnnouncementHoldTimer = null;
     }
 
-    this.writeKeptForNextFrame();
+    this.finishWrites();
     this.onRender();
     this.unsubscribeExit();
     this.restoreConsolePatches();
@@ -3974,10 +4070,18 @@ export default class Ink {
 
     this.nonBlockingStdout?.flush();
     if (this.options.stdout.isTTY) {
+      const wasMouseTracking = this.altScreenMouseTracking !== 'off';
       try {
+        if (wasMouseTracking) {
+          const mouseOff = this.modes.reset('mousePixels') + this.modes.reset('mouse');
+          if (mouseOff !== '') {
+            this.writeBeforeExit(mouseOff);
+          }
+        }
         restoreTerminalModes(this.modes, this.writeBeforeExit);
         this.altScreenActive = false;
-        this.drainStdin();
+        this.altScreenMouseTracking = 'off';
+        this.drainStdin(wasMouseTracking ? MOUSE_EXIT_DRAIN_MS : 0);
       } catch (err) {
         if (err && typeof err === 'object' && 'code' in err) {
           this.logger.debug(`unmount terminal cleanup writeSync failed: ${err}`, { level: 'error' });
@@ -4169,12 +4273,18 @@ function readTtyNonblock(fd: number, buf: Buffer): number {
   }
 }
 
+/** 2.1.326 #202: brief window to drain in-flight SGR mouse sequences on fullscreen exit. */
+const MOUSE_EXIT_DRAIN_MS = 25;
+const MOUSE_EXIT_QUIET_MS = 4;
+
 /**
  * densable `aqe(n=process.stdin,u=0)`. `owed` is `querier.owed()`: wait up
  * to `Gd` for that many DA1 replies on `/dev/tty`.
+ * 2.1.326 #202: optional `quietDrainMs` drains late mouse tracking escape
+ * sequences after disabling mouse tracking so they do not leak to the shell.
  */
 /* eslint-disable custom-rules/no-sync-fs -- must be sync; called from signal handler / unmount */
-export function drainStdin(stdin: NodeJS.ReadStream = process.stdin, owed = 0): Buffer | undefined {
+export function drainStdin(stdin: NodeJS.ReadStream = process.stdin, owed = 0, quietDrainMs = 0): Buffer | undefined {
   if (!stdin.isTTY) return;
   const chunks: Buffer[] = [];
   try {
@@ -4195,18 +4305,28 @@ export function drainStdin(stdin: NodeJS.ReadStream = process.stdin, owed = 0): 
     if (!wasRaw) tty.setRawMode?.(true);
     fd = openSync('/dev/tty', fsConstants.O_RDONLY | fsConstants.O_NONBLOCK);
     const buf = Buffer.alloc(1024);
-    const deadline = owed > 0 ? performance.now() + OWED_REPLY_HOLD_MS : 0;
+    const now = performance.now();
+    const deadline = owed > 0 ? now + OWED_REPLY_HOLD_MS : quietDrainMs > 0 ? now + quietDrainMs : 0;
     let remaining = owed - countDa1Replies(Buffer.concat(chunks));
+    let lastMouseChunkAt = chunks.length > 0 ? now : 0;
     for (let reads = 0; reads < 64; ) {
       const n = readTtyNonblock(fd, buf);
       if (n > 0) {
         const piece = Buffer.from(buf.subarray(0, n));
         chunks.push(piece);
         remaining -= countDa1Replies(piece);
+        lastMouseChunkAt = performance.now();
         reads++;
         continue;
       }
-      if (n < 0 || remaining <= 0 || performance.now() >= deadline) break;
+      const t = performance.now();
+      const waitingForReplies = remaining > 0;
+      const waitingForQuietMouse =
+        owed <= 0 &&
+        quietDrainMs > 0 &&
+        t < deadline &&
+        (lastMouseChunkAt === 0 || t - lastMouseChunkAt < MOUSE_EXIT_QUIET_MS);
+      if (n < 0 || (!waitingForReplies && !waitingForQuietMouse) || t >= deadline) break;
       Bun.sleepSync(2);
     }
   } catch {

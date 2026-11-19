@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useRef } from 'react';
 import { Text, Dialog } from '@anthropic/ink';
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js';
 import { isSupportedTerminal } from '../utils/ide.js';
@@ -8,12 +8,22 @@ import { Select } from './CustomSelect/index.js';
 
 type IdeAutoConnectDialogProps = {
   onComplete: () => void;
+  /** Official 2.1.326 #208: default false so `/ide` does not quit Claude Code on double Ctrl+C. */
+  exitOnCtrlCD?: boolean;
 };
 
-export function IdeAutoConnectDialog({ onComplete }: IdeAutoConnectDialogProps): React.ReactNode {
+export function IdeAutoConnectDialog({ onComplete, exitOnCtrlCD = false }: IdeAutoConnectDialogProps): React.ReactNode {
   const refuseInput = useIsWithinWindow();
+  const doneRef = useRef(false);
+  const finishOnce = useCallback(() => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    onComplete();
+  }, [onComplete]);
+
   const handleSelect = useCallback(
-    async (value: string) => {
+    (value: string) => {
+      if (refuseInput() || doneRef.current) return;
       const autoConnect = value === 'yes';
 
       // Save the preference and mark dialog as shown
@@ -23,19 +33,33 @@ export function IdeAutoConnectDialog({ onComplete }: IdeAutoConnectDialogProps):
         hasIdeAutoConnectDialogBeenShown: true,
       }));
 
-      onComplete();
+      finishOnce();
     },
-    [onComplete],
+    [refuseInput, finishOnce],
   );
 
+  const handleCancel = useCallback(() => {
+    if (refuseInput() || doneRef.current) return;
+    finishOnce();
+  }, [refuseInput, finishOnce]);
+
   const options = [
-    { label: 'Yes', value: 'yes' },
-    { label: 'No', value: 'no' },
+    { label: 'Yes, connect automatically', value: 'yes' },
+    { label: 'No, connect with /ide', value: 'no' },
   ];
 
   return (
-    <Dialog title="Do you wish to enable auto-connect to IDE?" color="ide" onCancel={onComplete} exitOnCtrlCD>
-      <Select options={options} hideIndexes defaultFocusValue="no" refuseInput={refuseInput} onChange={handleSelect} />
+    <Dialog title="Connect to your IDE automatically?" color="ide" onCancel={handleCancel} exitOnCtrlCD={exitOnCtrlCD}>
+      <Select
+        options={options}
+        hideIndexes
+        disablePrintableKeybindings
+        declineValue="no"
+        defaultFocusValue="no"
+        refuseInput={refuseInput}
+        onChange={handleSelect}
+        onCancel={handleCancel}
+      />
       <Text dimColor>You can also configure this in /config or with the --ide flag</Text>
     </Dialog>
   );

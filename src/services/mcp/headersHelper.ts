@@ -291,17 +291,23 @@ export async function getMcpHeadersFromHelper(
 
 /**
  * Get combined headers for an MCP server (static + dynamic).
+ *
+ * Official 2.1.326 #17: accepts `options.onHelperFailed` so callers know when a
+ * configured `headersHelper` failed or was skipped in an untrusted workspace.
  */
 export async function getMcpServerHeaders(
   serverName: string,
   config: McpRemoteHeadersConfig,
+  options?: { onHelperFailed?: () => void },
 ): Promise<Record<string, string>> {
   const staticHeaders = config.headers || {}
-  const dynamicHeaders =
-    (await getMcpHeadersFromHelper(serverName, config)) || {}
+  const dynamicHeaders = await getMcpHeadersFromHelper(serverName, config)
+  if (config.headersHelper && dynamicHeaders === null) {
+    options?.onHelperFailed?.()
+  }
 
   return {
     ...staticHeaders,
-    ...dynamicHeaders,
+    ...(dynamicHeaders ?? {}),
   }
 }

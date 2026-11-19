@@ -106,8 +106,17 @@ export function ThemePicker({
     },
     { context: 'ThemePicker' },
   );
-  // Always call the hook to follow React rules, but conditionally assign the exit handler
-  const exitState = useExitOnCtrlCDWithKeybindings(skipExitHandling ? () => {} : undefined);
+  // Always call the hook to follow React rules, but deactivate when parent handles exit (#69)
+  const exitState = useExitOnCtrlCDWithKeybindings(
+    skipExitHandling
+      ? undefined
+      : () => {
+          cancelPreview();
+          void gracefulShutdown(0);
+        },
+    undefined,
+    !skipExitHandling,
+  );
 
   const NEW_CUSTOM_THEME = '__new_custom_theme__';
   const customThemes = getCachedCustomThemes();

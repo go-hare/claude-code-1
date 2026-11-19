@@ -169,20 +169,90 @@ function shouldBypassNoProxy(
 }
 
 /**
- * Official 2.1.325 #2379: resolve axios proxy options for plugin marketplace
- * and plugin downloads. When `ALL_PROXY` / `all_proxy` is the ONLY proxy
- * environment variable set (no `HTTP_PROXY`/`HTTPS_PROXY`), route through an
- * HTTP CONNECT tunnel via `HttpsProxyAgent` (`proxy: false` disables axios's
- * direct non-CONNECT proxy path so a proxy refusing CONNECT fails the request).
+ * Official 2.1.326 #123: connect/response timeout (ms) applied to the
+ * `HttpsProxyAgent` created when `ALL_PROXY` is the only proxy env var set,
+ * so a silent/unresponsive proxy fails after 25 seconds instead of hanging.
+ */
+export const PLUGIN_PROXY_CONNECT_TIMEOUT_MS = 25_000
+
+const PROXY_TIMEOUT_ERROR_MESSAGE =
+  'Timed out connecting through the proxy set in HTTPS_PROXY or ALL_PROXY. Check that the proxy is running and can reach the destination server. You can also add that server to NO_PROXY.'
+
+/**
+ * Wrap `agent.connect` with an AbortController timeout (default 25s) so a
+ * proxy that accepts TCP or drops packets without answering CONNECT fails
+ * cleanly with `ETIMEDOUT`. Matches official 2.1.326 `Cm()`.
+ */
+export function applyPluginProxyConnectTimeout(
+  agent: HttpsProxyAgent<string>,
+  timeoutMs: number = PLUGIN_PROXY_CONNECT_TIMEOUT_MS,
+): HttpsProxyAgent<string> {
+  const originalConnect = agent.connect.bind(agent)
+  agent.connect = async (req, opts) => {
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      controller.abort()
+    }, timeoutMs)
+    timer.unref?.()
+    const agentWithOpts = agent as unknown as {
+      connectOpts?: Record<string, unknown>
+    }
+    const callOpts = {
+      ...opts,
+      signal: controller.signal,
+    } as typeof opts
+    try {
+      const prevConnectOpts = agentWithOpts.connectOpts
+      let connectPromise: ReturnType<typeof originalConnect>
+      try {
+        // HttpsProxyAgent reads `this.connectOpts` synchronously before its first
+        // `await` when opening the proxy socket; restore immediately before
+        // awaiting so concurrent requests never clobber each other's signal.
+        if (prevConnectOpts !== undefined) {
+          agentWithOpts.connectOpts = {
+            ...prevConnectOpts,
+            signal: controller.signal,
+          }
+        }
+        connectPromise = originalConnect(req, callOpts)
+      } finally {
+        if (prevConnectOpts !== undefined) {
+          agentWithOpts.connectOpts = prevConnectOpts
+        }
+      }
+      return await connectPromise
+    } catch (err) {
+      if (controller.signal.aborted) {
+        throw Object.assign(new Error(PROXY_TIMEOUT_ERROR_MESSAGE), {
+          code: 'ETIMEDOUT',
+        })
+      }
+      throw err
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  return agent
+}
+
+/**
+ * Official 2.1.325 #2379 + 2.1.326 #123: resolve axios proxy options for
+ * plugin marketplace and plugin downloads. When `ALL_PROXY` / `all_proxy` is
+ * the ONLY proxy environment variable set (no `HTTP_PROXY`/`HTTPS_PROXY`),
+ * route through an HTTP CONNECT tunnel via `HttpsProxyAgent` with a 25-second
+ * connect/response timeout (`proxy: false` disables axios's direct
+ * non-CONNECT proxy path so a proxy refusing or ignoring CONNECT fails).
  */
 export function getPluginDownloadProxyOptions(
   targetUrl: string,
   env: Record<string, string | undefined> = process.env,
+  timeoutMs: number = PLUGIN_PROXY_CONNECT_TIMEOUT_MS,
 ): {
   httpsAgent?: HttpsProxyAgent<string>
   httpAgent?: HttpsProxyAgent<string>
   proxy?: false
   allProxyUrl?: string
+  proxyTimeoutMs?: number
 } {
   const hasSpecificProxy = Boolean(
     env.https_proxy || env.HTTPS_PROXY || env.http_proxy || env.HTTP_PROXY,
@@ -203,14 +273,29 @@ export function getPluginDownloadProxyOptions(
   try {
     const parsed = new URL(normalizedProxy)
     if (!parsed.host) return {}
-  } catch {
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error(
+        'The proxy setting (HTTPS_PROXY or ALL_PROXY) is not an http or https URL, so this request was not sent.',
+      )
+    }
+  } catch (err) {
+    if (
+      err instanceof Error &&
+      err.message.includes('not an http or https URL')
+    ) {
+      throw err
+    }
     return {}
   }
-  const agent = new HttpsProxyAgent(normalizedProxy)
+  const agent = applyPluginProxyConnectTimeout(
+    new HttpsProxyAgent(normalizedProxy, { timeout: timeoutMs }),
+    timeoutMs,
+  )
   return {
     httpsAgent: agent,
     httpAgent: agent,
     proxy: false,
     allProxyUrl: normalizedProxy,
+    proxyTimeoutMs: timeoutMs,
   }
 }

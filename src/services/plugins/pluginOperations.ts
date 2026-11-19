@@ -47,6 +47,7 @@ import {
   logScopedInstallRefreshOutcome,
   tryRefreshMarketplaceBeforeScopedInstall,
 } from '../../utils/plugins/marketplaceManager.js'
+import { removePluginMcpbCache } from '../../utils/plugins/mcpbHandler.js'
 import { deletePluginDataDir } from '../../utils/plugins/pluginDirectories.js'
 import type { CommandSourceConsent } from '../../utils/plugins/pluginCommandSource.js'
 import {
@@ -814,6 +815,10 @@ export async function uninstallPluginOp(
     await deletePluginOptions(pluginId)
     if (deleteDataDir) {
       await deletePluginDataDir(pluginId)
+    } else {
+      // Official 2.1.326 #329 (`JLa`): even with --keep-data, remove extracted
+      // MCPB bundle cache referenced only by this plugin.
+      await removePluginMcpbCache(pluginId)
     }
   }
 

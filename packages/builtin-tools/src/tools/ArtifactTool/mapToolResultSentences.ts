@@ -1002,6 +1002,51 @@ export function formatDbAccessRulesSummary(
  * Refusal echo when a republish re-sends `capabilities.db` without `rules`
  * while the artifact already stores access rules.
  */
+/**
+ * Official 2.1.326 #105 (`eo` / `tOo` @327131502): Format post-publish
+ * visibility guidance for Claude. When `audience === 'owner'` and the artifact
+ * sits in a shared folder (`folderAudience === 'others' | 'unknown'`), do NOT
+ * call the artifact private — state that people with access to its folder can
+ * open the link too.
+ */
+export type ArtifactFolderAudience = 'owner' | 'others' | 'unknown'
+
+const CANNOT_CHANGE_SHARING =
+  "You cannot change sharing; that is done from the page's Share menu."
+const SHARING_CAN_CHANGE =
+  'Sharing can change without you being told: read the artifact before you later say who can open it.'
+
+export function isFolderInheritedAudience(
+  folderAudience: ArtifactFolderAudience | undefined,
+): boolean {
+  return folderAudience === 'others' || folderAudience === 'unknown'
+}
+
+export function formatArtifactPublishVisibilityNote(
+  audience?: string,
+  folderAudience?: ArtifactFolderAudience,
+): string {
+  if (audience === 'owner' && isFolderInheritedAudience(folderAudience)) {
+    return `This artifact's owner, the people the owner has given access, and people with access to the folder it's in can open the link. ${CANNOT_CHANGE_SHARING} If the page is meant for someone without access to that folder, tell the user when you present the page that they cannot open it until it is shared with them. ${SHARING_CAN_CHANGE}`
+  }
+  if (audience === 'owner') {
+    return `This artifact is private: only its owner and the people the owner has given access can open the link. ${CANNOT_CHANGE_SHARING} If the page is meant for someone else, tell the user when you present the page that those people cannot open it until it is shared with them. ${SHARING_CAN_CHANGE}`
+  }
+  if (audience === 'org') {
+    return `This artifact is shared with everyone in the user's organization; people outside it cannot open the link unless the owner invites them by email or picks "Anyone with the link" where offered. ${CANNOT_CHANGE_SHARING} ${SHARING_CAN_CHANGE}`
+  }
+  if (audience === 'public') {
+    return `This artifact is shared as "Anyone with the link". ${CANNOT_CHANGE_SHARING} ${SHARING_CAN_CHANGE}`
+  }
+  if (audience === 'other_org') {
+    return 'This artifact belongs to another organization and is not shared as "Anyone with the link". This result does not say who else can open it, so do not call it private.'
+  }
+  if (isFolderInheritedAudience(folderAudience)) {
+    return `This artifact's owner, the people the owner has given access, and people with access to the folder it's in can open the link. ${CANNOT_CHANGE_SHARING} If the page is meant for someone without access to that folder, tell the user when you present the page that they cannot open it until it is shared with them. ${SHARING_CAN_CHANGE}`
+  }
+  return ''
+}
+
 export function formatDbRulesResetRefusal(
   storedRules: readonly ArtifactDbAccessRule[],
 ): string {

@@ -74,10 +74,32 @@ function isNewCommandContext(
   return prevToken !== undefined && isCommandOperator(prevToken)
 }
 
+const SHELL_PATH_NEEDS_QUOTING_RE = /[\s'"\\$&|;<>()*?[\]{}#!`]/
+
+/**
+ * Official 2.1.326 #165: Quote completed file/directory paths that contain
+ * spaces or shell metacharacters, preserving the trailing `/` (directory) or
+ * trailing ` ` (file completion suffix).
+ */
+export function shellQuoteCompletionPath(completion: string): string {
+  const hasTrailingSpace = completion.endsWith(' ')
+  const raw = hasTrailingSpace ? completion.slice(0, -1) : completion
+  const isDir = raw.endsWith('/')
+  const body = isDir ? raw.slice(0, -1) : raw
+  if (!body || !SHELL_PATH_NEEDS_QUOTING_RE.test(body)) {
+    return completion
+  }
+  const quoted = quote([isDir ? `${body}/` : body])
+  return hasTrailingSpace ? `${quoted} ` : quoted
+}
+
 /**
  * Parse input to extract completion context
  */
-function parseInputContext(input: string, cursorOffset: number): InputContext {
+export function parseShellCompletionInputContext(
+  input: string,
+  cursorOffset: number,
+): InputContext {
   const beforeCursor = input.slice(0, cursorOffset)
 
   // Check if it's a variable prefix, before expanding with shell-quote
@@ -93,9 +115,13 @@ function parseInputContext(input: string, cursorOffset: number): InputContext {
     const tokens = beforeCursor.split(/\s+/)
     const prefix = tokens[tokens.length - 1] || ''
     const isFirstToken = tokens.length === 1 && !beforeCursor.includes(' ')
+    // Official 2.1.326 #165: in argument position (not the first token),
+    // treat non-variable prefixes as file completions even without a slash.
     const completionType = isFirstToken
       ? 'command'
-      : getCompletionTypeFromPrefix(prefix)
+      : prefix.startsWith('$')
+        ? 'variable'
+        : 'file'
     return { prefix, completionType }
   }
 
@@ -131,7 +157,7 @@ function parseInputContext(input: string, cursorOffset: number): InputContext {
     lastToken.index,
   )
     ? 'command'
-    : 'file' // Not after operator = file argument
+    : 'file' // Not after operator = file argument (even without a slash)
 
   return { prefix: lastToken.token, completionType }
 }
@@ -206,9 +232,9 @@ async function getCompletionsForShell(
     .split('\n')
     .filter((line: string) => line.trim())
     .slice(0, MAX_SHELL_COMPLETIONS)
-    .map((text: string) => ({
-      id: text,
-      displayText: text,
+    .map((rawLine: string) => ({
+      id: rawLine,
+      displayText: rawLine,
       description: undefined,
       metadata: { completionType },
     }))
@@ -231,7 +257,10 @@ export async function getShellCompletions(
   }
 
   try {
-    const { prefix, completionType } = parseInputContext(input, cursorOffset)
+    const { prefix, completionType } = parseShellCompletionInputContext(
+      input,
+      cursorOffset,
+    )
 
     if (!prefix) {
       return []

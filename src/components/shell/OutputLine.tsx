@@ -11,6 +11,11 @@ import { InVirtualListContext } from '../messageActions.js';
 import { useExpandShellOutput } from './ExpandShellOutputContext.js';
 
 export function tryFormatJson(line: string): string {
+  // Official 2.1.326 #224: preserve leading indentation (e.g. last item of a
+  // JSON array or right-aligned numbers) — JSON.parse would strip it.
+  if (/^\s/.test(line)) {
+    return line;
+  }
   try {
     const parsed = jsonParse(line);
     const stringified = jsonStringify(parsed);

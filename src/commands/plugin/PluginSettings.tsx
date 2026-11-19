@@ -12,7 +12,7 @@ import { getBootstrapSession } from '../../utils/sessionRoot.js';
 import { ConfigurableShortcutHint } from '../../components/ConfigurableShortcutHint.js';
 import { Byline, Pane, StatusIcon, Tab, Tabs } from '@anthropic/ink';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Text, useModalOrTerminalSize } from '@anthropic/ink';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
 import { useActivePlugins, useAppState } from '../../state/AppState.js';
 import type { PluginError, PluginWarning } from '../../types/plugin.js';
@@ -44,7 +44,14 @@ import { BrowseMarketplace } from './BrowseMarketplace.js';
 import { DiscoverPlugins } from './DiscoverPlugins.js';
 import { ManageMarketplaces } from './ManageMarketplaces.js';
 import { ManagePlugins } from './ManagePlugins.js';
-import { formatErrorMessage, getErrorGuidance, type PluginErrorExtended } from './PluginErrors.js';
+import { useTerminalSize } from '../../hooks/useTerminalSize.js';
+import {
+  formatErrorMessage,
+  formatPluginWarningForDisplay,
+  getErrorGuidance,
+  type PluginErrorExtended,
+} from './PluginErrors.js';
+import { clampMultilineError, PluginConfirmList, truncateStatsColumn } from './pluginListHelpers.js';
 import { type ParsedCommand, parsePluginArgs } from './parseArgs.js';
 import type { PluginSettingsProps, ViewState } from './types.js';
 import { PluginEval } from './PluginEval.js';
@@ -477,7 +484,10 @@ function ErrorsTabContent({
   const warnings = useAppState(s => (s.plugins as { warnings?: PluginWarning[] }).warnings);
   const installationStatus = useAppState(s => s.plugins.installationStatus);
   const activePlugins = useActivePlugins();
+  const { columns: terminalWidth } = useModalOrTerminalSize(useTerminalSize());
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+  const [pendingConfirmRow, setPendingConfirmRow] = useState<ErrorRow | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [marketplaceLoadFailures, setMarketplaceLoadFailures] = useState<Array<{ name: string; error: string }>>([]);
 
@@ -548,9 +558,11 @@ function ErrorsTabContent({
   );
   const warningRows: ErrorRow[] = (warnings ?? []).map(w => {
     const targetPlugin = w.plugin ?? (w.source?.includes('@') ? w.source.split('@')[0] : w.source);
+    const formatted = formatPluginWarningForDisplay(w);
     return {
       label: w.plugin ?? w.source ?? w.type,
-      message: w.warning ?? `Advisory warning: ${w.type}`,
+      message: formatted.message,
+      guidance: formatted.guidance ?? undefined,
       action:
         w.type === 'mcpb-needs-config' && targetPlugin
           ? {
@@ -568,18 +580,16 @@ function ErrorsTabContent({
   });
   const rows = [...baseRows, ...warningRows];
 
-  // Handle escape to exit the plugin menu
+  // Handle escape to exit the plugin menu (disabled while confirmation list is active)
   useKeybinding(
     'confirm:no',
     () => {
       setViewState({ type: 'menu' });
     },
-    { context: 'Confirmation' },
+    { context: 'Confirmation', isActive: pendingConfirmRow === null },
   );
 
-  const handleSelect = () => {
-    const row = rows[selectedIndex];
-    if (!row) return;
+  const executeRowAction = (row: ErrorRow) => {
     const { action } = row;
     switch (action.kind) {
       case 'navigate':
@@ -590,10 +600,6 @@ function ErrorsTabContent({
         const scopes = action.sources.map(s => s.scope).join(', ');
         removeExtraMarketplace(action.name, action.sources);
         clearAllCaches();
-        // Synchronously clear all stale state for this marketplace so the UI
-        // updates glitch-free. markPluginsChanged only sets needsRefresh —
-        // it does not refresh plugins.errors, so this is the authoritative
-        // cleanup until the user runs /reload-plugins.
         activePlugins.clearMarketplaceState(action.name);
         setActionMessage(`${figures.tick} Removed "${action.name}" from ${scopes} settings`);
         markPluginsChanged();
@@ -614,11 +620,29 @@ function ErrorsTabContent({
         break;
       }
       case 'managed-only':
-        // No action available — guidance text already shown
         break;
       case 'none':
         break;
     }
+  };
+
+  // Official 2.1.326 #273 & #331: uninstalling/removing from an error asks first
+  // via an arrow-key + Enter / Esc confirmation list.
+  const handleSelect = () => {
+    const row = rows[selectedIndex];
+    if (!row) return;
+    const { action } = row;
+    const isDestructive =
+      action.kind === 'remove-extra-marketplace' ||
+      action.kind === 'remove-installed-marketplace' ||
+      (action.kind === 'navigate' &&
+        action.viewState.type === 'manage-plugins' &&
+        action.viewState.action === 'uninstall');
+    if (isDestructive) {
+      setPendingConfirmRow(row);
+      return;
+    }
+    executeRowAction(row);
   };
 
   useKeybindings(
@@ -626,8 +650,11 @@ function ErrorsTabContent({
       'select:previous': () => setSelectedIndex(prev => Math.max(0, prev - 1)),
       'select:next': () => setSelectedIndex(prev => Math.min(rows.length - 1, prev + 1)),
       'select:accept': handleSelect,
+      'app:toggleTranscript': () => {
+        setExpandedIndex(prev => (prev === clampedIndex ? null : clampedIndex));
+      },
     },
-    { context: 'Select', isActive: rows.length > 0 },
+    { context: 'Select', isActive: rows.length > 0 && pendingConfirmRow === null },
   );
 
   // Clamp selectedIndex when rows shrink (e.g. after removal)
@@ -659,21 +686,63 @@ function ErrorsTabContent({
     );
   }
 
+  if (pendingConfirmRow) {
+    const confirmLabel =
+      pendingConfirmRow.action.kind === 'navigate'
+        ? `Uninstall ${pendingConfirmRow.label}`
+        : `Remove ${pendingConfirmRow.label}`;
+    return (
+      <Box flexDirection="column" marginLeft={1}>
+        <Text bold color="warning">
+          {confirmLabel}?
+        </Text>
+        <Box marginTop={1}>
+          <Text dimColor>
+            {clampMultilineError(pendingConfirmRow.message, 2, Math.max(40, terminalWidth - 8)).preview}
+          </Text>
+        </Box>
+        <Box marginTop={1}>
+          <PluginConfirmList
+            options={[
+              { value: 'cancel', label: 'Cancel' },
+              { value: 'confirm', label: confirmLabel, destructive: true },
+            ]}
+            onSelect={choice => {
+              const target = pendingConfirmRow;
+              setPendingConfirmRow(null);
+              if (choice === 'confirm') {
+                executeRowAction(target);
+              }
+            }}
+            onCancel={() => setPendingConfirmRow(null)}
+          />
+        </Box>
+      </Box>
+    );
+  }
+
+  const maxErrLineWidth = Math.max(40, terminalWidth - 8);
+
   return (
     <Box flexDirection="column">
       {rows.map((row, idx) => {
         const isSelected = idx === clampedIndex;
         const tone = row.isAdvisory ? 'warning' : 'error';
         const icon = isSelected ? figures.pointer : row.isAdvisory ? figures.triangleUpOutline : figures.cross;
+        const isExpanded = expandedIndex === idx;
+        const clamped = isExpanded
+          ? { preview: row.message, truncated: false, hiddenLines: 0 }
+          : clampMultilineError(row.message, 3, maxErrLineWidth);
         return (
-          <Box key={idx} marginLeft={1} flexDirection="column" marginBottom={1}>
+          <Box key={idx} marginLeft={1} flexDirection="column" marginBottom={1} onClick={() => setSelectedIndex(idx)}>
             <Text>
               <Text color={isSelected ? 'suggestion' : tone}>{icon} </Text>
               <Text bold={isSelected}>{row.label}</Text>
               {row.scope && <Text dimColor> ({row.scope})</Text>}
             </Text>
-            <Box marginLeft={3}>
-              <Text color={tone}>{row.message}</Text>
+            <Box marginLeft={3} flexDirection="column">
+              <Text color={tone}>{clamped.preview}</Text>
+              {clamped.truncated && <Text dimColor>… ({clamped.hiddenLines} more lines — Ctrl+O to expand)</Text>}
             </Box>
             {row.guidance && (
               <Box marginLeft={3}>
@@ -723,6 +792,8 @@ function padLeft(value: string, width: number): string {
 }
 
 function SkillUsageTable({ rows }: { rows: SkillDoctorRow[] }): React.ReactNode {
+  const { columns: terminalWidth } = useModalOrTerminalSize(useTerminalSize());
+
   if (rows.length === 0) {
     return <Text dimColor>{'  '}(no skills loaded)</Text>;
   }
@@ -733,12 +804,25 @@ function SkillUsageTable({ rows }: { rows: SkillDoctorRow[] }): React.ReactNode 
     lastUsed: r.daysSinceUse === null ? 'never' : r.daysSinceUse === 0 ? 'today' : `${r.daysSinceUse}d`,
   }));
 
+  // Official 2.1.326 #273: cap skill name and source column widths to fit the
+  // terminal so long skill names never break or wrap the Stats table.
+  const contextW = Math.max(7, ...cells.map(c => c.context.length));
+  const weekW = Math.max(9, ...cells.map(c => c.week.length));
+  const usesW = Math.max(4, ...rows.map(r => String(r.usageCount).length));
+  const lastUsedW = Math.max(9, ...cells.map(c => c.lastUsed.length));
+  const fixedCols = 2 + 2 + 2 + contextW + 2 + weekW + 2 + (usesW + 1) + 2 + lastUsedW;
+  const availableForText = Math.max(20, terminalWidth - fixedCols);
+  const rawSourceW = Math.max(6, ...rows.map(r => r.source.length));
+  const maxSourceW = Math.min(rawSourceW, Math.max(10, Math.floor(availableForText * 0.35)));
+  const rawNameW = Math.max(5, ...rows.map(r => r.name.length));
+  const maxNameW = Math.min(rawNameW, Math.max(10, availableForText - maxSourceW));
+
   const widths = {
-    name: Math.max(5, ...rows.map(r => r.name.length)),
-    source: Math.max(6, ...rows.map(r => r.source.length)),
-    context: Math.max(7, ...cells.map(c => c.context.length)),
-    week: Math.max(9, ...cells.map(c => c.week.length)),
-    uses: Math.max(4, ...rows.map(r => String(r.usageCount).length)),
+    name: maxNameW,
+    source: maxSourceW,
+    context: contextW,
+    week: weekW,
+    uses: usesW,
   };
 
   const headerLine = `  ${padRight('skill', widths.name)}  ${padRight('source', widths.source)}  ${padLeft('context', widths.context)}  ${padLeft('7d tokens', widths.week)}  ${padLeft('uses', widths.uses + 1)}  last used`;
@@ -748,10 +832,12 @@ function SkillUsageTable({ rows }: { rows: SkillDoctorRow[] }): React.ReactNode 
       <Text dimColor>{headerLine}</Text>
       {rows.map((row, idx) => {
         const cell = cells[idx]!;
+        const displayName = truncateStatsColumn(row.name, widths.name);
+        const displaySource = truncateStatsColumn(row.source, widths.source);
         return (
           <Text key={`${idx}:${row.name}`} color={row.usageCount === 0 ? 'warning' : undefined}>
-            {`  ${padRight(row.name, widths.name)}  `}
-            <Text dimColor>{padRight(row.source, widths.source)}</Text>
+            {`  ${padRight(displayName, widths.name)}  `}
+            <Text dimColor>{padRight(displaySource, widths.source)}</Text>
             {`  ${padLeft(cell.context, widths.context)}  ${padLeft(cell.week, widths.week)}  ${padLeft(String(row.usageCount), widths.uses)}×  ${cell.lastUsed}`}
           </Text>
         );

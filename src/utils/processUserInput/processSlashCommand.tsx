@@ -119,6 +119,60 @@ import type {
   SlashLineCheckResult,
 } from './processUserInput.js';
 import { parseStackedSlashCommands, shouldParseStackedSlash, STACKED_SLASH_LIMIT } from './stackedSlashExpansion.js';
+import { getDisabledCommandReason } from '../status.js';
+
+const COMMANDS_ANSWERING_OWN_HELP = new Set([
+  'model',
+  'effort',
+  'config',
+  'settings',
+  'mcp',
+  'advisor',
+  'output-style',
+]);
+
+/**
+ * Official 2.1.326 #130 (`QBe`): intercept `--help`/`-h` on built-in slash
+ * commands so `/clear --help` shows usage instead of running `/clear`, and
+ * route `/help <cmd>` to `/<cmd> --help` for commands that answer their own help.
+ */
+export function rewriteSlashHelpInvocation(inputString: string, commands: Command[]): string {
+  if (!inputString.trimStart().startsWith('/')) {
+    return inputString;
+  }
+  const parsed = parseSlashCommand(inputString.trim());
+  if (!parsed) {
+    return inputString;
+  }
+  const { commandName, args } = parsed;
+  const trimmedArgs = args.trim();
+  const findEnabled = (name: string): Command | undefined => {
+    const cmd = findCommand(name, commands);
+    return cmd && isCommandEnabled(cmd) ? cmd : undefined;
+  };
+  const isBuiltinCommand = (cmd: Command): boolean =>
+    cmd.type !== 'prompt' || cmd.source === 'builtin' || cmd.source === 'bundled';
+  const answersOwnHelp = (cmd: Command): boolean =>
+    COMMANDS_ANSWERING_OWN_HELP.has(cmd.name) || Boolean((cmd as { answersHelp?: boolean }).answersHelp);
+
+  if (trimmedArgs === '--help' || trimmedArgs === '-h') {
+    const target = findEnabled(commandName);
+    if (!target || !isBuiltinCommand(target) || answersOwnHelp(target) || !findEnabled('help')) {
+      return inputString;
+    }
+    return target.name === 'help' ? '/help' : `/help ${commandName}`;
+  }
+
+  if (commandName === 'help' && trimmedArgs && findEnabled('help')) {
+    const subName = trimmedArgs.replace(/^\//, '');
+    const subTarget = findEnabled(subName);
+    if (subTarget && answersOwnHelp(subTarget)) {
+      return `/${subName} --help`;
+    }
+  }
+
+  return inputString;
+}
 
 type SlashCommandResult = ProcessUserInputBaseResult & {
   command: Command;
@@ -854,7 +908,10 @@ async function processSlashCommandBody(
   hostInitiator?: unknown,
   checkLine?: SlashLineCheckFn,
 ): Promise<ProcessUserInputBaseResult> {
-  const parsed = parseSlashCommand(inputString);
+  // Official 2.1.326 #130: rewrite `/<builtin> --help` -> `/help <builtin>` and
+  // `/help <answersHelp>` -> `/<cmd> --help` before dispatching the command.
+  const effectiveInput = rewriteSlashHelpInvocation(inputString, context.options.commands);
+  const parsed = parseSlashCommand(effectiveInput);
   if (!parsed) {
     logEvent('tengu_input_slash_missing', {});
     if (!context.options.isNonInteractiveSession) {
@@ -896,6 +953,30 @@ async function processSlashCommandBody(
     }
     const isMcpTemplateUnmatched = commandName.includes('://');
     if ((looksLikeCommand(commandName) || isMcpTemplateUnmatched) && !isFilePath) {
+      // Official 2.1.326 #262 (`xsa`): explain when a built-in command is off
+      // due to API provider, sign-in, or an env var like DISABLE_TELEMETRY
+      // instead of reporting "Unknown command".
+      if (!context.options.isNonInteractiveSession) {
+        const disabled = getDisabledCommandReason(commandName, context.options.commands);
+        if (disabled) {
+          logEvent('tengu_input_slash_invalid', {
+            input_length: commandName.length,
+            had_suggestion: false,
+          });
+          const echoArgs = !parsedArgs ? '' : disabled.command?.isSensitive ? '***' : parsedArgs;
+          return {
+            messages: [
+              ...attachmentMessages,
+              createSystemMessage(disabled.reason, 'warning'),
+              ...(echoArgs && echoArgs !== '***'
+                ? [createSystemMessage(`Args from /${commandName}: ${echoArgs}`, 'warning')]
+                : []),
+            ],
+            shouldQuery: false,
+            resultText: disabled.reason,
+          };
+        }
+      }
       // densable print + shipped builtin name: report unavailable, do not fuzzy-run.
       if (context.options.isNonInteractiveSession && builtInCommandNames().has(commandName)) {
         const unavailable = `/${commandName} isn't available in this environment.`;

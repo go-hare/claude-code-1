@@ -1,7 +1,16 @@
 import figures from 'figures';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useTerminalSize } from '../../../hooks/useTerminalSize.js';
-import { type KeyboardEvent, Box, Byline, Divider, KeyboardShortcutHint, stringWidth, Text } from '@anthropic/ink';
+import {
+  type KeyboardEvent,
+  Box,
+  Byline,
+  Divider,
+  KeyboardShortcutHint,
+  stringWidth,
+  Text,
+  useModalOrTerminalSize,
+} from '@anthropic/ink';
 import { useKeybinding, useKeybindings } from '../../../keybindings/useKeybinding.js';
 import type { Question } from '@claude-code/builtin-tools/tools/AskUserQuestionTool/AskUserQuestionTool.js';
 import { type AskPreview, mapOfyPreview } from '../../../dialog/permissionAsk.js';
@@ -90,6 +99,8 @@ export function PreviewQuestionView({
     const idx = selected ? allOptions.findIndex(opt => opt.label === selected) : -1;
     setFocusedIndex(idx >= 0 ? idx : 0);
     setHasNavigated(false);
+    // Official 2.1.326 #170: position notes cursor at end of text when switching questions.
+    setCursorOffset((questionState?.textInputValue || '').length);
   }
 
   const focusedOption = allOptions[focusedIndex];
@@ -141,6 +152,8 @@ export function PreviewQuestionView({
         const result = editPromptInEditor(currentValue);
         if (result.content !== null && result.content !== currentValue) {
           onUpdateQuestionState(questionText, { textInputValue: result.content }, false);
+          // Official 2.1.326 #170: move cursor to end of text after returning from external editor.
+          setCursorOffset(result.content.length);
         }
       } finally {
         updateLastInteractionTime(true);
@@ -245,8 +258,9 @@ export function PreviewQuestionView({
         e.preventDefault();
         handleSelectOption(focusedIndex);
       } else if (e.key === 'n' && !e.ctrl && !e.meta) {
-        // Press 'n' to focus the notes input
+        // Press 'n' to focus the notes input (#170: place cursor at end of existing notes)
         e.preventDefault();
+        setCursorOffset(notesValue.length);
         setIsInNotesInput(true);
         onTextInputFocus(true);
       } else if (e.key === 'escape') {
@@ -273,6 +287,7 @@ export function PreviewQuestionView({
       onRespondToClaude,
       onCancel,
       onTextInputFocus,
+      notesValue,
     ],
   );
 
@@ -285,25 +300,20 @@ export function PreviewQuestionView({
         : '(preview cannot be shown in full — compare the option labels and descriptions instead)';
 
   // The right panel's available width is terminal minus the left panel and gap.
+  // Official 2.1.326 #215: use modal size budget in short fullscreen windows.
   const LEFT_PANEL_WIDTH = 30;
-  const { columns, rows } = useTerminalSize();
-  const previewMaxWidth = columns - LEFT_PANEL_WIDTH - 4;
+  const terminalSize = useTerminalSize();
+  const { columns, rows } = useModalOrTerminalSize(terminalSize);
+  const previewMaxWidth = Math.max(10, columns - LEFT_PANEL_WIDTH - 4);
   const notesColumns = computePreviewNotesColumns(columns);
 
-  // Lines used within the content area that aren't preview content:
-  // 1: marginTop on side-by-side box
-  // 2: PreviewBox borders (top + bottom)
-  // 2: notes section (marginTop=1 + text)
-  // 2: footer section (marginTop=1 + divider)
-  // 1: "Chat about this" line
-  // 1: plan mode line (may or may not show)
-  // 2: help text (marginTop=1 + text)
   const PREVIEW_OVERHEAD = 11;
 
   // Cap preview lines from the parent height budget. densable MT4/XT4 do not
   // pin minHeight on this column — only truncate preview content.
   const maxPreviewLines = useMemo(() => {
-    return minContentHeight ? Math.max(1, minContentHeight - PREVIEW_OVERHEAD) : Math.max(1, rows - 26);
+    const budget = minContentHeight ? minContentHeight - PREVIEW_OVERHEAD : rows - 22;
+    return Math.max(1, budget);
   }, [minContentHeight, rows]);
 
   const needsGutter = question.question.includes('\n') || stringWidth(question.question) > 80;

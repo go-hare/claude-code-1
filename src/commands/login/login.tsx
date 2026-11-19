@@ -16,7 +16,12 @@ import {
   checkAndDisableAutoModeIfNeeded,
   resetAutoModeGateCheck,
 } from '../../utils/permissions/bypassPermissionsKillswitch.js';
-import { getOauthAccountInfoFromDisk, rollbackRefusedSignIn, validateForceLoginOrg } from '../../utils/auth.js';
+import {
+  getAnthropicApiKeyWithSource,
+  getOauthAccountInfoFromDisk,
+  rollbackRefusedSignIn,
+  validateForceLoginOrg,
+} from '../../utils/auth.js';
 import { logForDebugging } from '../../utils/debug.js';
 import { resetUserCache } from '../../utils/user.js';
 import { AuthPlaneSummary } from './AuthPlaneSummary.js';
@@ -146,10 +151,25 @@ export async function call(onDone: LocalJSXCommandOnDone, context: LocalJSXComma
           const notice = createSystemMessage(getOauthTokenEnvSuccessNote(), 'info');
           context.setMessages(prev => [...prev, notice]);
         }
+        // Official 2.1.326 #58: warn when ANTHROPIC_API_KEY is still active after /login.
+        const apiKeyStillUsed =
+          success &&
+          !gatewayActive &&
+          Boolean(process.env.ANTHROPIC_API_KEY) &&
+          (() => {
+            try {
+              return (
+                getAnthropicApiKeyWithSource({ skipRetrievingKeyFromApiKeyHelper: true }).source === 'ANTHROPIC_API_KEY'
+              );
+            } catch {
+              return false;
+            }
+          })();
         const doneMessage = formatLoginDoneMessage(success, {
           envTokenWasSet,
           gatewayActive,
           includeEnvTokenWarning: placement === 'inline',
+          apiKeyStillUsed,
         });
 
         // Official 2.1.319 (#1745): dismiss the dialog immediately on Enter

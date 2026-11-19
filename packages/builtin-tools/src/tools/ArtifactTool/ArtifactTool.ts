@@ -59,7 +59,9 @@ import {
   ARTIFACT_DB_ACCESS_TIERS,
   ARTIFACT_DB_RULE_PATH_RE,
   type ArtifactDbAccessRule,
+  type ArtifactFolderAudience,
   areValidArtifactDbAccessRules,
+  formatArtifactPublishVisibilityNote,
   formatAssetReadResult,
   formatAssetUploadResult,
   formatDbAccessRulesSummary,
@@ -1244,10 +1246,19 @@ export const ArtifactTool = buildTool({
         ? `\n\n${formatPublishEditsWritebackNote(content.editsApplied, 'page', content.editsNotWritten)}`
         : ''
     const dbRulesNote = formatArtifactOutputDbRulesNote(content)
+    const contentMeta = content as ArtifactOutput & {
+      audience?: string
+      folder_audience?: ArtifactFolderAudience
+    }
+    const visibilityNote = formatArtifactPublishVisibilityNote(
+      contentMeta.audience,
+      contentMeta.folder_audience,
+    )
+    const visibilitySuffix = visibilityNote ? `\n\n${visibilityNote}` : ''
     return {
       tool_use_id: toolUseID,
       type: 'tool_result',
-      content: `Artifact uploaded: ${content.url} (id: ${content.id}, expires: ${content.expiresAt})${dbRulesNote}${editsNote}`,
+      content: `Artifact uploaded: ${content.url} (id: ${content.id}, expires: ${content.expiresAt})${dbRulesNote}${editsNote}${visibilitySuffix}`,
     }
   },
   renderToolResultMessage,

@@ -267,13 +267,16 @@ describe('callAutofixPr', () => {
     expect(firstArg).toMatch(/Already monitoring/)
   })
 
-  test('stop sub-command clears monitor and calls onDone', async () => {
+  test('stop sub-command clears monitor and links cloud session when stop fails (#101)', async () => {
     await callAutofixPr(onDone, makeContext(), '42')
     onDone.mockClear()
     await callAutofixPr(onDone, makeContext(), 'stop')
     expect(getActiveMonitor()).toBeNull()
     const firstArg = onDone.mock.calls[0]?.[0] as string
-    expect(firstArg).toMatch(/Stopped local monitoring/)
+    expect(firstArg).toContain("Claude Code couldn't stop it")
+    expect(firstArg).toContain(
+      'Stop it here: https://claude.ai/session/session-123',
+    )
   })
 
   test('stop with no active monitor reports no active monitor', async () => {

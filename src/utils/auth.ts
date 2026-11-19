@@ -2076,6 +2076,27 @@ export const getClaudeAIOAuthTokens = Object.assign(readClaudeAIOAuthTokens, {
  * This handles the case where the local expiration check disagrees with the
  * server (e.g., due to clock corrections after token was issued).
  */
+// Official 2.1.326 (#336): auth state change listeners notified when OAuth
+// credentials/account change or clear (login, logout, account switch).
+const authStateChangeListeners = new Set<() => void>()
+
+export function subscribeAuthStateChanged(listener: () => void): () => void {
+  authStateChangeListeners.add(listener)
+  return () => {
+    authStateChangeListeners.delete(listener)
+  }
+}
+
+export function notifyAuthStateChanged(): void {
+  for (const listener of [...authStateChangeListeners]) {
+    try {
+      listener()
+    } catch {
+      // Never let a listener failure break auth transitions
+    }
+  }
+}
+
 export function clearOAuthTokenCache(): void {
   // Slot clear is `O0e`. Do not go through the export: a bun mock of
   // `getClaudeAIOAuthTokens` drops `.cache` and would leave `jfe` populated.
@@ -2087,6 +2108,7 @@ export function clearOAuthTokenCache(): void {
   const { clearAnthropicProfileCaches } =
     require('./anthropicProfile.js') as typeof import('./anthropicProfile.js')
   clearAnthropicProfileCaches()
+  notifyAuthStateChanged()
 }
 
 // Cross-process staleness: another CC instance may write fresh tokens to
@@ -3050,7 +3072,18 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
     if (isDiskFullError(err)) {
       throw new OAuthRefreshDiskFullError()
     }
-    return false
+    // Official 2.1.326 (#60) `$Ye`: on drives that reject folder timestamp
+    // updates or advisory lock files, proceed without the lock rather than
+    // breaking token refresh.
+    if (lockfile.isTimestampRejectionError(err)) {
+      logForDebugging(
+        `OAuth refresh lock unsupported on filesystem (${getErrnoCode(err) ?? errorMessage(err)}); proceeding unlocked`,
+        { level: 'warn' },
+      )
+      release = async () => {}
+    } else {
+      return false
+    }
   }
   let refreshToken: string | undefined
   try {
@@ -4136,7 +4169,21 @@ export async function validateForceLoginOrg(): Promise<OrgValidationResult> {
     source === 'CLAUDE_CODE_OAUTH_TOKEN' ||
     source === 'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR'
 
-  const tokenOrgUuid = await getOauthOrgUuidFromToken(tokens.accessToken)
+  const orgLookup = await getOauthOrgUuidFromTokenDetailed(tokens.accessToken)
+  if (orgLookup.networkEdgeBlocked) {
+    // Official 2.1.326 (#63): HTTP 403 from a network edge/CDN (e.g. Cloudflare)
+    // before reaching Anthropic must not tell the user to sign in again.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { NETWORK_EDGE_BLOCKED_MESSAGE } =
+      require('../services/api/errors.js') as typeof import('../services/api/errors.js')
+    return {
+      valid: false,
+      message:
+        `Unable to verify organization for the current authentication token.\n` +
+        `${NETWORK_EDGE_BLOCKED_MESSAGE}`,
+    }
+  }
+  const tokenOrgUuid = orgLookup.orgUuid
   if (!tokenOrgUuid) {
     // Fail closed — we can't verify the org
     return {
@@ -4304,9 +4351,10 @@ export function validateAllowedProvider(
 
 class GcpCredentialsTimeoutError extends Error {}
 
-export async function getOauthOrgUuidFromToken(
+export async function getOauthOrgUuidFromTokenDetailed(
   accessToken: string,
-): Promise<string | undefined> {
+): Promise<{ orgUuid: string | undefined; networkEdgeBlocked: boolean }> {
+  let networkEdgeBlocked = false
   try {
     const url = `${getOauthConfig().BASE_API_URL}/api/oauth/org`
     const response = await axios.post<{ organization_uuid?: string }>(
@@ -4323,16 +4371,41 @@ export async function getOauthOrgUuidFromToken(
     )
     const orgUuid = response.data?.organization_uuid
     if (typeof orgUuid === 'string' && orgUuid !== '') {
-      return orgUuid
+      return { orgUuid, networkEdgeBlocked: false }
     }
   } catch (err) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isNonOriginCloudflare403Error } =
+      require('../services/api/errors.js') as typeof import('../services/api/errors.js')
+    if (isNonOriginCloudflare403Error(err)) {
+      networkEdgeBlocked = true
+    }
     logForDebugging(
       `Failed to look up the token's organization via /api/oauth/org: ${errorMessage(err)}`,
       { level: 'error' },
     )
   }
-  const profile = await getOauthProfileFromOauthToken(accessToken)
-  return profile?.organization?.uuid
+  try {
+    const profile = await getOauthProfileFromOauthToken(accessToken)
+    if (profile?.organization?.uuid) {
+      return { orgUuid: profile.organization.uuid, networkEdgeBlocked: false }
+    }
+  } catch (err) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { isNonOriginCloudflare403Error } =
+      require('../services/api/errors.js') as typeof import('../services/api/errors.js')
+    if (isNonOriginCloudflare403Error(err)) {
+      networkEdgeBlocked = true
+    }
+  }
+  return { orgUuid: undefined, networkEdgeBlocked }
+}
+
+export async function getOauthOrgUuidFromToken(
+  accessToken: string,
+): Promise<string | undefined> {
+  const { orgUuid } = await getOauthOrgUuidFromTokenDetailed(accessToken)
+  return orgUuid
 }
 
 /**

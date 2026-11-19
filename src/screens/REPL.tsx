@@ -60,7 +60,17 @@ import {
 import { useNotifications } from '../context/notifications.js';
 import { sendNotification } from '../services/notifier.js';
 import { startPreventSleep, stopPreventSleep } from '../services/preventSleep.js';
-import { useTerminalNotification } from '@anthropic/ink';
+import {
+  Jk,
+  PROGRAM_STATUS_KEEP_ALL,
+  type ProgramStatusOptions,
+  programStatus,
+  sanitizeProgramStatusId,
+  tD,
+  TerminalWriteContext,
+  useTerminalNotification,
+  wrapForMultiplexer,
+} from '@anthropic/ink';
 import {
   createFileStateCacheWithSizeLimit,
   mergeFileStateCaches,
@@ -117,6 +127,7 @@ import {
 } from '../utils/idleReturnController.js';
 import { hasPendingLoopWakeups } from '../utils/loopDynamic.js';
 import {
+  AUTO_CONTINUE_LOGIN_CHANGED_NOTICE,
   cancelQuotaAutoResume,
   getQuotaAutoResumeState,
   isQuotaAutoResumeArmed,
@@ -151,7 +162,19 @@ import {
   McpTaskQuestionNoticeTracker,
   setMcpTaskQuestionState,
 } from '../tasks/McpTask/McpTask.js';
-import { applyPollEventDeliveryGuard } from '../utils/permissions/permissionSetup.js';
+import {
+  applyPollEventDeliveryGuard,
+  resolveAutoDefaultOnPolicySettingsLoad,
+} from '../utils/permissions/permissionSetup.js';
+import {
+  getActiveSettingsFileErrorNotices,
+  settingsChangeDetector,
+  subscribeSettingsFileErrorNotices,
+} from '../utils/settings/changeDetector.js';
+import {
+  classifyFailedTurnAction,
+  getFailedRequestPlaceholder,
+} from '../components/PromptInput/usePromptInputPlaceholder.js';
 import { markPersonActivityForPromptSuggestion } from '../services/PromptSuggestion/promptSuggestion.js';
 import { setCwd } from '../utils/Shell.js';
 import { resetTeamLeadVerificationOnSessionBoundary } from '../utils/teammateMailbox.js';
@@ -280,6 +303,7 @@ import {
 import { wireClipboardAttacherCaps } from '../utils/clipboardAttacher.js';
 import { applyMessageStoreAction } from '../utils/messageStore.js';
 import {
+  AUTO_DEFAULT_NUDGE_KIND,
   COST_THRESHOLD_KIND,
   createDialogMailbox,
   createRequestDialog,
@@ -304,6 +328,7 @@ import {
   useTopDialogKind,
 } from '../dialog/index.js';
 import { openColdResumeQuotaIfNeeded } from '../components/ColdResumeQuotaDialog.js';
+import { consumePendingAutoDefaultNudgeDraft } from '../dialog/dialogs/AutoDefaultNudgeDialog.js';
 import { resolveHostWaitingFor, resolveSessionPromptStatus } from '../dialog/permissionWaiting.js';
 import { legacyFocusForUqc, setLegacyDialogFocus } from '../dialog/legacyDialogFocus.js';
 import {
@@ -510,7 +535,7 @@ import type { MCPServerConnection } from '../services/mcp/types.js';
 import type { ScopedMcpServerConfig } from '../services/mcp/types.js';
 import { randomUUID, type UUID } from 'crypto';
 import { processSessionStartHooks, takeInitialUserMessage } from '../utils/sessionStart.js';
-import { LeftoverMhrRetryRow } from '../state/leftoverIhrStore.js';
+import { LeftoverMhrRetryRow, leftoverIhrSlice, leftoverIhrSubscribe } from '../state/leftoverIhrStore.js';
 import { executeSessionEndHooks, getSessionEndHookTimeoutMs, getSessionEndHooksBoundMs } from '../utils/hooks.js';
 import { type IDESelection, useIdeSelection } from '../hooks/useIdeSelection.js';
 import { getTools, assembleToolPool } from '../tools.js';
@@ -848,7 +873,16 @@ import {
   useReplDiffAutoOpenBaseline,
 } from '../utils/replDiffTab.js';
 import { isDiffPanelEnabled } from '../utils/willowCrate.js';
-import { isFullscreenEnvEnabled, maybeGetTmuxMouseHint, mouseTrackingProp } from '../utils/fullscreen.js';
+import {
+  consumeTuiAsked,
+  explainTuiKeptRenderer,
+  formatRendererLabel,
+  fullscreenModeForGateReason,
+  getFullscreenGateReason,
+  isFullscreenEnvEnabled,
+  mouseTrackingProp,
+  resolveTuiJustSwitchedBanner,
+} from '../utils/fullscreen.js';
 import { isCommandImmediate } from '../utils/immediateCommand.js';
 import { AlternateScreen, MainScreenShell } from '@anthropic/ink';
 import { isAxcStickyMainEnabled } from '../utils/residualUiEnvGates.js';
@@ -887,6 +921,198 @@ function median(values: number[]): number {
 }
 
 /**
+ * #117 (2.1.326): convert pasted image references inside a prompt submitted to
+ * a viewed background agent into Anthropic image content blocks instead of raw
+ * `[Image #N]` text.
+ */
+export function buildAgentMessageContentWithImages(
+  input: string,
+  pastedContents?: Record<number, PastedContent>,
+): string | ContentBlockParam[] {
+  if (!pastedContents || Object.keys(pastedContents).length === 0) {
+    return input;
+  }
+  const refs = parseReferences(input);
+  const imageBlocks: ContentBlockParam[] = [];
+  const seenImageIds = new Set<number>();
+  for (const ref of refs) {
+    const item = pastedContents[ref.id];
+    if (item?.type === 'image' && !seenImageIds.has(ref.id)) {
+      seenImageIds.add(ref.id);
+      imageBlocks.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: (item.mediaType || 'image/png') as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp',
+          data: item.content,
+        },
+      });
+    }
+  }
+  const expanded = expandPastedTextRefs(input, pastedContents);
+  if (imageBlocks.length === 0) {
+    return expanded;
+  }
+  // Strip `[Image #N]` placeholders from the accompanying text block if images are attached.
+  const cleanedText = expanded.replace(/\[Image #\d+\]/g, '').trim();
+  return [...imageBlocks, ...(cleanedText ? [{ type: 'text' as const, text: cleanedText }] : [])];
+}
+
+// #257 (2.1.326, official $Fe/VFe/GFe): Program Status Protocol (OSC 7501)
+export type ProgramStatusChild = {
+  id: string;
+  title?: string;
+  state: 'working' | 'blocked';
+  kind?: 'question' | 'permission';
+};
+
+export type ProgramStatusPayload = {
+  state: 'working' | 'done' | 'blocked' | 'idle' | 'error';
+  kind?: 'permission' | 'question' | 'auth';
+  progress?: number;
+  title?: string;
+  msg?: string;
+};
+
+const PROGRAM_STATUS_MAX_CHILDREN = 32;
+
+function sanitizeOsc7501Field(value: string | undefined, maxLen = 80): string | undefined {
+  if (!value) return undefined;
+  let stripped = '';
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f || code === 0x3a || code === 0x3b) {
+      stripped += ' ';
+    } else {
+      stripped += value[i]!;
+    }
+  }
+  const cleaned = stripped.replace(/\s+/g, ' ').trim();
+  if (!cleaned) return undefined;
+  return cleaned.length > maxLen ? `${cleaned.slice(0, maxLen - 1)}…` : cleaned;
+}
+
+function isRunningProgramStatusBgOp(task: TaskState): boolean {
+  if (task.status !== 'running') return false;
+  if (task.type === 'local_bash') {
+    return task.isBackgrounded === true;
+  }
+  return task.type === 'monitor_mcp' || task.type === 'monitor_ws' || task.type === 'mcp_task';
+}
+
+/**
+ * #257 (2.1.326, official GFe): collect running agents, background commands,
+ * monitors, and MCP tasks as OSC 7501 children (capped at 32).
+ */
+export function collectProgramStatusChildren(tasks: Record<string, TaskState>): ProgramStatusChild[] {
+  const agents: ProgramStatusChild[] = [];
+  const bgOps: ProgramStatusChild[] = [];
+  for (const task of Object.values(tasks)) {
+    const id = sanitizeOsc7501Field(task.id, 48);
+    if (!id) continue;
+    if (
+      (task.type === 'local_agent' && task.agentType !== 'main-session') ||
+      task.type === 'in_process_teammate' ||
+      task.type === 'remote_agent' ||
+      task.type === 'local_workflow'
+    ) {
+      if (task.status === 'running' || task.status === 'paused') {
+        agents.push({
+          id,
+          title: sanitizeOsc7501Field(task.description),
+          state: task.status === 'paused' ? 'blocked' : 'working',
+        });
+      }
+    } else if (isRunningProgramStatusBgOp(task)) {
+      bgOps.push({
+        id,
+        title: sanitizeOsc7501Field(task.description),
+        state: 'working',
+      });
+    }
+  }
+  const byId = (a: ProgramStatusChild, b: ProgramStatusChild) => a.id.localeCompare(b.id);
+  return [...agents.sort(byId), ...bgOps.sort(byId)].slice(0, PROGRAM_STATUS_MAX_CHILDREN);
+}
+
+/**
+ * #257 (2.1.326, official VFe): format the awaited background-work summary when
+ * background commands, monitors, or MCP tasks are still running after a turn.
+ */
+export function collectProgramStatusAwaited(tasks: Record<string, TaskState>): string | undefined {
+  let commands = 0;
+  let monitors = 0;
+  let mcpTasks = 0;
+  for (const task of Object.values(tasks)) {
+    if (!isRunningProgramStatusBgOp(task)) continue;
+    if (task.type === 'local_bash') {
+      if (task.kind === 'monitor') monitors++;
+      else commands++;
+    } else if (task.type === 'monitor_mcp' || task.type === 'monitor_ws') {
+      monitors++;
+    } else if (task.type === 'mcp_task') {
+      mcpTasks++;
+    }
+  }
+  const parts: string[] = [];
+  if (commands > 0) parts.push(`${commands} ${commands === 1 ? 'command' : 'commands'}`);
+  if (monitors > 0) parts.push(`${monitors} ${monitors === 1 ? 'monitor' : 'monitors'}`);
+  if (mcpTasks > 0) parts.push(`${mcpTasks} ${mcpTasks === 1 ? 'MCP task' : 'MCP tasks'}`);
+  return parts.length > 0 ? `${parts.join(', ')} still running` : undefined;
+}
+
+/**
+ * #257 (2.1.326, official $Fe): resolve top-level OSC 7501 state — reporting
+ * `working` (with `awaited`) instead of `done` while awaiting background work.
+ */
+export function buildProgramStatusState(input: {
+  status: TabStatusKind;
+  hasQueued?: boolean;
+  awaited?: string;
+  hasCompletedTurn?: boolean;
+  lastTurnError?: string;
+  blockedKind?: 'permission' | 'question';
+  blockedMsg?: string;
+}): ProgramStatusPayload {
+  if (input.status === 'busy' || (input.status === 'idle' && input.hasQueued)) {
+    return { state: 'working' };
+  }
+  if (input.status === 'waiting') {
+    return { state: 'blocked', kind: input.blockedKind, msg: sanitizeOsc7501Field(input.blockedMsg) };
+  }
+  if (input.lastTurnError) {
+    return { state: 'error', msg: sanitizeOsc7501Field(input.lastTurnError) };
+  }
+  if (input.hasCompletedTurn) {
+    return input.awaited !== undefined
+      ? { state: 'working', msg: sanitizeOsc7501Field(input.awaited) }
+      : { state: 'done' };
+  }
+  return input.awaited !== undefined
+    ? { state: 'working', msg: sanitizeOsc7501Field(input.awaited) }
+    : { state: 'idle' };
+}
+
+/** Encode an OSC 7501 Program Status Protocol escape sequence via spec-compliant `programStatus()`. */
+export function encodeOsc7501Status(payload: ProgramStatusPayload & { id?: string }): string {
+  const state: ProgramStatusOptions['state'] =
+    payload.state === 'working' || payload.state === 'blocked' || payload.state === 'done'
+      ? payload.state
+      : payload.state === 'error'
+        ? 'done'
+        : 'clear';
+  const id = payload.id ? (sanitizeProgramStatusId(payload.id) ?? payload.id) : undefined;
+  return programStatus({
+    state,
+    id,
+    kind: payload.kind,
+    progress: payload.progress,
+    title: payload.title,
+    msg: payload.msg,
+  });
+}
+
+/**
  * Small component to display transcript mode footer with dynamic keybinding.
  * Must be rendered inside KeybindingSetup to access keybinding context.
  */
@@ -896,6 +1122,8 @@ function TranscriptModeFooter({
   searchBadge,
   suppressShowAll = false,
   status,
+  isWorking = false,
+  hasDialogWaiting = false,
 }: {
   showAllInTranscript: boolean;
   virtualScroll: boolean;
@@ -912,6 +1140,10 @@ function TranscriptModeFooter({
    *  PromptInput which isn't mounted in transcript — addNotification queues
    *  but nothing draws it. */
   status?: string;
+  /** #214 (2.1.326): show that Claude is still working while viewing transcript. */
+  isWorking?: boolean;
+  /** #214 (2.1.326): show when a permission/dialog prompt is waiting for user input. */
+  hasDialogWaiting?: boolean;
 }): React.ReactNode {
   const toggleShortcut = useShortcutDisplay('app:toggleTranscript', 'Global', 'ctrl+o');
   const showAllShortcut = useShortcutDisplay('transcript:toggleShowAll', 'Transcript', 'ctrl+e');
@@ -955,9 +1187,14 @@ function TranscriptModeFooter({
       paddingLeft={2}
       width="100%"
     >
-      {/* densable CZa: sticky left + truncate-end so <104 cols never wrap the footer. */}
+      {/* densable CZa + #214 (2.1.326): show working/dialog-waiting indicator before transcript label. */}
       <Text dimColor wrap="truncate-end">
         <Byline>
+          {hasDialogWaiting ? (
+            <Text color="permission">dialog waiting</Text>
+          ) : isWorking ? (
+            <Text color="claude">working</Text>
+          ) : null}
           <Text>Showing detailed transcript</Text>
           <Text>{toggleShortcut} to toggle</Text>
           {midHint ? <Text>{midHint}</Text> : null}
@@ -1692,7 +1929,7 @@ export function REPL({
     mainLoopModel?: string;
     resumeAgentBackground?: (opts: {
       agentId: string;
-      prompt: string;
+      prompt: string | ContentBlockParam[];
       toolUseContext: unknown;
       canUseTool: unknown;
       /** Official Aye continueInterruptedTurn — orphan auto-resume EAf gate. */
@@ -2235,23 +2472,32 @@ export function REPL({
     }
   }, [autoUpdaterResult, addNotification]);
 
-  // tmux + fullscreen + `mouse off`: one-time hint that wheel won't scroll.
-  // We no longer mutate tmux's session-scoped mouse option (it poisoned
-  // sibling panes); tmux users already know this tradeoff from vim/less.
+  // Official 2.1.326 #182 (replaces removed tmux-mouse-hint #349): after a
+  // /tui relaunch, verify the requested renderer took effect; if an override
+  // kept the previous renderer, show a pinned warning explaining why, and
+  // clear any stale CLAUDE_CODE_TUI_JUST_SWITCHED env that disagrees with
+  // resolveTuiJustSwitchedBanner().
   useEffect(() => {
-    if (isFullscreenEnvEnabled()) {
-      void maybeGetTmuxMouseHint().then(hint => {
-        if (hint) {
-          addNotification({
-            key: 'tmux-mouse-hint',
-            text: hint,
-            priority: 'low',
-          });
-        }
-      });
+    if (process.env.CLAUDE_CODE_TUI_JUST_SWITCHED !== undefined && resolveTuiJustSwitchedBanner() === undefined) {
+      delete process.env.CLAUDE_CODE_TUI_JUST_SWITCHED;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const asked = consumeTuiAsked();
+    if (asked === undefined) return;
+    const reason = getFullscreenGateReason();
+    if (reason === 'bg_forced_on') return;
+    const active = fullscreenModeForGateReason(reason);
+    if (active === asked) return;
+    addNotification({
+      key: 'tui-switch-not-taken',
+      kind: 'warning',
+      priority: 'medium',
+      pinned: true,
+      wrap: true,
+      color: 'warning',
+      text: `Still the ${formatRendererLabel(active)} renderer · ${explainTuiKeptRenderer(reason, asked)}`,
+    });
+    return () => removeNotification('tui-switch-not-taken');
+  }, [addNotification, removeNotification]);
 
   const [showUndercoverCallout, setShowUndercoverCallout] = useState(false);
   useEffect(() => {
@@ -2670,6 +2916,116 @@ export function REPL({
   const tabStatusGateEnabled = getFeatureValue_CACHED_MAY_BE_STALE('tengu_terminal_sidebar', false);
   const showStatusInTerminalTab = tabStatusGateEnabled && (getGlobalConfig().showStatusInTerminalTab ?? false);
   useTabStatus(titleDisabled || !showStatusInTerminalTab ? null : sessionStatus);
+
+  // #188 / #257 (2.1.326): Program Status Protocol (OSC 7501) reporting — gated on
+  // terminal capability (`tD().now('programStatus')` / `onSettle`), routed through
+  // `Jk().programStatus.show` + `.update` so spec-compliant base64 `title`/`msg` and
+  // `app=claude-code` are emitted and children are cleared cleanly.
+  const writeRawOsc7501 = React.useContext(TerminalWriteContext);
+  const [programStatusSupported, setProgramStatusSupported] = useState(() => tD().now('programStatus'));
+  useEffect(() => {
+    return tD().onSettle('programStatus', supported => {
+      setProgramStatusSupported(supported);
+    });
+  }, []);
+  useEffect(() => {
+    if (titleDisabled || !programStatusSupported || !writeRawOsc7501) return;
+    const awaited = sessionStatus !== 'busy' ? collectProgramStatusAwaited(tasks) : undefined;
+    const rootPayload = buildProgramStatusState({
+      status: sessionStatus,
+      hasQueued: messageQueue.getMainThreadLength() > 0,
+      awaited,
+      hasCompletedTurn: transcriptProjection.getCurrent().some(m => m.type === 'assistant'),
+      blockedKind: waitingFor === 'input needed' ? 'question' : waitingFor ? 'permission' : undefined,
+      blockedMsg: waitingFor ?? undefined,
+    });
+    const rootState: ProgramStatusOptions['state'] =
+      rootPayload.state === 'working' || rootPayload.state === 'blocked' || rootPayload.state === 'done'
+        ? rootPayload.state
+        : rootPayload.state === 'error'
+          ? 'done'
+          : 'clear';
+    const root: ProgramStatusOptions = {
+      state: rootState,
+      kind: rootPayload.kind,
+      progress: rootPayload.progress,
+      title: rootPayload.title,
+      msg: rootPayload.msg,
+    };
+    const children: ProgramStatusOptions[] = collectProgramStatusChildren(tasks).map(child => ({
+      id: sanitizeProgramStatusId(child.id) ?? child.id,
+      state: child.state,
+      kind: child.kind,
+      title: child.title,
+    }));
+    const controller = Jk().programStatus;
+    const unsub = controller.show({
+      root,
+      main: { drops: 0, children },
+    });
+    const seq = controller.update(PROGRAM_STATUS_KEEP_ALL);
+    if (seq) {
+      writeRawOsc7501(wrapForMultiplexer(seq));
+    }
+    return () => {
+      unsub();
+    };
+  }, [
+    titleDisabled,
+    programStatusSupported,
+    writeRawOsc7501,
+    sessionStatus,
+    tasks,
+    transcriptProjection,
+    waitingFor,
+    messageQueue,
+  ]);
+  useEffect(() => {
+    return () => {
+      if (!writeRawOsc7501) return;
+      const clearSeq = Jk().programStatus.leave(tD().now('programStatus'));
+      if (clearSeq) {
+        writeRawOsc7501(wrapForMultiplexer(clearSeq));
+      }
+    };
+  }, [writeRawOsc7501]);
+
+  // #20 (Sub-Wave 326-I wire): subscribe to mid-session settings file error notices
+  // so malformed settings saved during a session warn immediately and clear on fix.
+  useEffect(() => {
+    const handleNotice = (notice: { key: string; message: string; cleared?: boolean }) => {
+      if (notice.cleared) {
+        removeNotification(notice.key);
+        return;
+      }
+      addNotification({
+        key: notice.key,
+        kind: 'warning',
+        text: notice.message,
+        priority: 'high',
+        timeoutMs: 12_000,
+      });
+    };
+    for (const existing of getActiveSettingsFileErrorNotices()) {
+      handleNotice(existing);
+    }
+    return subscribeSettingsFileErrorNotices(handleNotice);
+  }, [addNotification, removeNotification]);
+
+  // #297 (Sub-Wave 326-I wire): when policySettings finishes loading asynchronously,
+  // re-resolve built-in auto mode default against the managed policy defaultMode.
+  useEffect(() => {
+    return settingsChangeDetector.subscribe(source => {
+      if (source !== 'policySettings') return;
+      const currentCtx = store.getState().toolPermissionContext;
+      const { context: nextCtx, exitedAutoMode } = resolveAutoDefaultOnPolicySettingsLoad(currentCtx, {
+        source,
+      });
+      if (exitedAutoMode) {
+        store.setState(prev => ({ ...prev, toolPermissionContext: nextCtx }));
+      }
+    });
+  }, [store]);
 
   // Register the leader's setToolUseConfirmQueue for in-process teammates
   useEffect(() => {
@@ -3342,6 +3698,17 @@ export function REPL({
       inputValueRef.current = draftController.value;
     });
   }, [draftController]);
+
+  // #26 (2.1.326): deliver any stray typing captured while AutoDefaultNudgeDialog
+  // was open into `draftController` as soon as the dialog closes.
+  useEffect(() => {
+    if (topDialogKind === AUTO_DEFAULT_NUDGE_KIND) return;
+    const strayDraft = consumePendingAutoDefaultNudgeDraft();
+    if (strayDraft.length > 0) {
+      const current = draftController.value;
+      draftController.setValueRaw(current ? `${current}${strayDraft}` : strayDraft);
+    }
+  }, [topDialogKind, draftController]);
 
   // Emptiness latch only — flips on empty↔nonempty so promptEmpty/hasDraft
   // stay reactive without per-keystroke REPL re-renders.
@@ -4162,21 +4529,31 @@ export function REPL({
         tasks: store.getState().tasks,
         queuedCommands: messageQueue.getCommands(),
       });
-      setMessages(prev => [
-        ...prev,
-        createTurnDurationMessage(
-          totalMs,
-          deferredBudget,
-          // Count only what recordTranscript will persist — ephemeral
-          // progress ticks and non-ant attachments are filtered by
-          // isLoggableMessage and never reach disk. Using raw prev.length
-          // would make checkResumeConsistency report false delta<0 for
-          // every turn that ran a progress-emitting tool.
-          count(prev, isLoggableMessage),
-          pendingWork.pendingAgents > 0 ? pendingWork.pendingAgents : undefined,
-          pendingWork.pendingWorkflows > 0 ? pendingWork.pendingWorkflows : undefined,
-        ),
-      ]);
+      setMessages(prev => {
+        // #159 (2.1.326): do not emit "done" turn_duration after a failed turn.
+        const lastNonSystem = [...prev].reverse().find(m => m.type !== 'system' && m.type !== 'progress');
+        if (
+          lastNonSystem?.type === 'assistant' &&
+          (lastNonSystem as { isApiErrorMessage?: boolean }).isApiErrorMessage === true
+        ) {
+          return prev;
+        }
+        return [
+          ...prev,
+          createTurnDurationMessage(
+            totalMs,
+            deferredBudget,
+            // Count only what recordTranscript will persist — ephemeral
+            // progress ticks and non-ant attachments are filtered by
+            // isLoggableMessage and never reach disk. Using raw prev.length
+            // would make checkResumeConsistency report false delta<0 for
+            // every turn that ran a progress-emitting tool.
+            count(prev, isLoggableMessage),
+            pendingWork.pendingAgents > 0 ? pendingWork.pendingAgents : undefined,
+            pendingWork.pendingWorkflows > 0 ? pendingWork.pendingWorkflows : undefined,
+          ),
+        ];
+      });
     }
   }, [hasRunningTeammates, setMessages]);
 
@@ -4325,6 +4702,16 @@ export function REPL({
     setToolJSX,
   });
 
+  // #112 & #131 (2.1.326): read active retry status for either the viewed
+  // background agent or the main thread so mid-response retries keep the
+  // spinner visible instead of freezing without a spinner.
+  const viewedAgentRetryStatus = useSyncExternalStore(
+    leftoverIhrSubscribe,
+    () => (viewingAgentTaskId ? leftoverIhrSlice(viewingAgentTaskId).retryStatus : null),
+    () => null,
+  );
+  const activeRetryStatus = viewingAgentTaskId ? viewedAgentRetryStatus : retryStatus;
+
   const showSpinner =
     (!toolJSX || toolJSX.showSpinner === true) &&
     !hasBlockingOpenDialogs &&
@@ -4346,12 +4733,36 @@ export function REPL({
     // Hide spinner when waiting for leader to approve permission request
     !pendingWorkerRequest &&
     !onlySleepToolActive &&
-    // gold zht: (!hasDisplayed || tailBlank || brief || yu). tailBlank = displayed
-    // with hideTrailingLine and no source `\n` (va). yu = Skt.focusFoldHoldsPreview.
-    // wrap-stream pops the last visual row; a long first paragraph still paints
-    // the wrapped prefix. Spinner stays until a source newline (or transformed
-    // hook text), and while focus-fold holds Oa.
-    (!hasStreamingText || (streamingFlags & STREAM_FLAG_HIDE_TRAILING) !== 0 || isBriefOnly || focusFoldHoldsPreview);
+    // gold zht + #131 (2.1.326): keep spinner visible during mid-response API
+    // retry (activeRetryStatus !== null) even when partial reply text streamed.
+    (!hasStreamingText ||
+      activeRetryStatus !== null ||
+      (streamingFlags & STREAM_FLAG_HIDE_TRAILING) !== 0 ||
+      isBriefOnly ||
+      focusFoldHoldsPreview);
+
+  // #205 (2.1.326): true once reply text has been emitted in the active turn so
+  // SpinnerWithVerb suppresses tip flash/bounce as the reply finishes.
+  const afterReplyText = useMemo(() => {
+    if (hasStreamingText) return true;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (!m) continue;
+      if (m.type === 'user') return false;
+      if (m.type === 'assistant' && Array.isArray(m.message?.content)) {
+        if (m.message.content.some(b => b.type === 'text' && b.text.trim().length > 0)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }, [hasStreamingText, messages]);
+
+  // #7 (2.1.326): actionable placeholder hint in empty prompt after a request fails.
+  const failedRequestNextStepHint = useMemo(() => {
+    if (isLoading || viewingAgentTaskId) return undefined;
+    return getFailedRequestPlaceholder(classifyFailedTurnAction(messages), getIsRemoteMode());
+  }, [isLoading, viewingAgentTaskId, messages]);
 
   // Host / gold _Zt overlays waiting for user — suppress surveys
   const hasActivePrompt =
@@ -6316,6 +6727,16 @@ export function REPL({
         if (usageLimitMenuWaitRef.current.choseWaitInMenu) {
           usageLimitMenuWaitRef.current.fired = true;
         }
+      } else if (event === 'login-changed') {
+        // #336 (Sub-Wave 326-I wire): notify user when login changes or ends while waiting.
+        usageLimitMenuWaitRef.current = { choseWaitInMenu: false, fired: false };
+        addNotification({
+          key: 'quota-auto-resume-login-changed',
+          kind: 'warning',
+          text: AUTO_CONTINUE_LOGIN_CHANGED_NOTICE,
+          priority: 'immediate',
+          timeoutMs: 8_000,
+        });
       } else if (
         event === 'cancelled' ||
         event === 'disabled' ||
@@ -6361,7 +6782,7 @@ export function REPL({
       unsubChanged();
       quotaRejectedListeners.delete(onQuotaRejected);
     };
-  }, []);
+  }, [addNotification]);
 
   const onQuery = useCallback(
     (
@@ -6864,19 +7285,29 @@ export function REPL({
   );
   // Callback for when user submits input while viewing a teammate's transcript
   const onAgentSubmit = useCallback(
-    async (input: string, task: InProcessTeammateTaskState | LocalAgentTaskState, helpers: PromptInputHelpers) => {
+    async (
+      input: string,
+      task: InProcessTeammateTaskState | LocalAgentTaskState,
+      helpers: PromptInputHelpers,
+      submittedPastedContents?: Record<number, PastedContent>,
+    ) => {
+      // #117 (2.1.326): convert pasted `[Image #N]` placeholders into image content blocks
+      // so images pasted while viewing a background agent do not arrive as literal `[Image #1]` text.
+      const effectivePasted = submittedPastedContents ?? pastedContents;
+      const agentMessageContent = buildAgentMessageContentWithImages(input, effectivePasted);
+      const expandedPromptText = expandPastedTextRefs(input, effectivePasted);
       if (isLocalAgentTask(task)) {
-        appendMessageToLocalAgent(task.id, createUserMessage({ content: input }), setAppState);
+        appendMessageToLocalAgent(task.id, createUserMessage({ content: agentMessageContent }), setAppState);
         if (task.status === 'running') {
           // densable panel human queue: sqe(…,{isMeta:!0, origin:{kind:"human"}})
-          queuePendingMessage(task.id, input, setAppState, {
+          queuePendingMessage(task.id, agentMessageContent, setAppState, {
             isMeta: true,
             origin: { kind: 'human' },
           });
         } else {
           void resumeAgentBackground({
             agentId: task.id,
-            prompt: input,
+            prompt: agentMessageContent,
             toolUseContext: getToolUseContext(messagesRef.current, [], new AbortController(), mainLoopModel),
             canUseTool,
             // densable Aye userInitiated — panel user resume clears stoppedByUser
@@ -6894,14 +7325,24 @@ export function REPL({
           });
         }
       } else {
-        injectUserMessageToTeammate(task.id, input, undefined, setAppState);
+        injectUserMessageToTeammate(task.id, expandedPromptText, undefined, setAppState);
       }
       setInputValue('');
+      setPastedContents({});
       helpers.setCursorOffset(0);
       helpers.clearBuffer();
       clearHeldClearedDraft();
     },
-    [setAppState, setInputValue, getToolUseContext, canUseTool, mainLoopModel, addNotification],
+    [
+      setAppState,
+      setInputValue,
+      setPastedContents,
+      pastedContents,
+      getToolUseContext,
+      canUseTool,
+      mainLoopModel,
+      addNotification,
+    ],
   );
 
   // Claim-path deferred resume adapters — keep refs current for BSe after MCP settle.
@@ -6998,13 +7439,19 @@ export function REPL({
     offerResumeReturnIfNeeded(initialMessages ?? []);
   }, [initialMessages, initialMessage, offerResumeReturnIfNeeded]);
 
+  // #40 (2.1.326): do not auto-open the usage limit menu while the user is
+  // typing a draft so an existing draft/pastedContents is never erased.
   const handleOpenRateLimitOptions = useCallback(() => {
+    const savedDraft = draftController.value;
+    if (savedDraft.length > 0) {
+      return;
+    }
     void onSubmitRef.current('/rate-limit-options', {
       setCursorOffset: () => {},
       clearBuffer: () => {},
       resetHistory: () => {},
     });
-  }, []);
+  }, [draftController]);
   handleOpenRateLimitOptionsRef.current = handleOpenRateLimitOptions;
 
   const handleExit = useCallback(async () => {
@@ -7013,30 +7460,63 @@ export function REPL({
     // active. Without this guard, the worktree branch below short-circuits into
     // ExitFlow (which calls gracefulShutdown) before exit.tsx is ever loaded.
     if (feature('BG_SESSIONS') && isBgSession()) {
-      // Update job state to stopped (official: Ny6)
+      const hasConversationTurns = messagesRef.current.some(m => m.type === 'user' || m.type === 'assistant');
+      const hasQueuedMessages = messageQueue.getMainThreadLength() > 0;
+      const hasWorktree = getCurrentWorktreeSession() !== null;
+      const hasBgItems =
+        listExitBackgroundItems((store.getState().tasks ?? {}) as Record<string, TaskState>).length > 0;
+      let isEmptyBgQuit = !hasConversationTurns && !hasQueuedMessages && !hasWorktree && !hasBgItems;
+      // Update job state to stopped (official: Ny6) or mark empty-quit (#340)
       const jobDir = process.env.CLAUDE_JOB_DIR;
       if (jobDir) {
         try {
           const { readBgJobState, writeBgJobState, isTerminalState } = await import('../daemon/jobState.js');
           const short = jobDir.split('/').pop()!;
           const state = readBgJobState(short);
+          if (state) {
+            isEmptyBgQuit =
+              isEmptyBgQuit &&
+              !state.name &&
+              !state.intent &&
+              !state.worktreePath &&
+              state.template === 'bg' &&
+              !state.bridgeSessionId &&
+              (state.inFlight?.tasks ?? 0) === 0 &&
+              (state.inFlight?.queued ?? 0) === 0;
+          }
           if (state && !isTerminalState(state)) {
             const now = new Date().toISOString();
-            writeBgJobState(short, {
-              ...state,
-              state: 'stopped',
-              detail: 'stopped from session',
-              tempo: 'idle',
-              inFlight: undefined,
-              needs: undefined,
-              updatedAt: now,
-              firstTerminalAt: state.firstTerminalAt ?? now,
-            });
+            if (isEmptyBgQuit) {
+              writeBgJobState(short, {
+                ...state,
+                state: 'stopped',
+                detail: 'empty-quit',
+                tempo: 'idle',
+                inFlight: undefined,
+                needs: undefined,
+                updatedAt: now,
+                firstTerminalAt: state.firstTerminalAt ?? now,
+              });
+            } else {
+              writeBgJobState(short, {
+                ...state,
+                state: 'stopped',
+                detail: 'stopped from session',
+                tempo: 'idle',
+                inFlight: undefined,
+                needs: undefined,
+                updatedAt: now,
+                firstTerminalAt: state.firstTerminalAt ?? now,
+              });
+            }
           }
         } catch {}
       }
-      // Send detach sequence via stdout — daemon relays to attacher
-      process.stdout.write('\x1B_cc-detach-msg;Session stopped.\x1B\\\x1B_cc-daemon-detach\x1B\\');
+      // Send detach sequence via stdout — daemon relays to attacher.
+      // Official 2.1.326 #340: emit `empty-quit` for empty bg conversations so
+      // clientAttach immediately retires them via `retireIfSettled`.
+      const detachMsg = isEmptyBgQuit ? 'empty-quit' : 'Session stopped.';
+      process.stdout.write(`\x1B_cc-detach-msg;${detachMsg}\x1B\\\x1B_cc-daemon-detach\x1B\\`);
       setPke({ kind: 'none' });
       return;
     }
@@ -7072,7 +7552,7 @@ export function REPL({
       messages: messagesRef.current,
       responseStreaming: queryGuard.isRunning,
     });
-  }, [store, queryGuard]);
+  }, [store, queryGuard, messageQueue]);
 
   const handleShowMessageSelector = useCallback(() => {
     setIsMessageSelectorVisible(prev => !prev);
@@ -8341,6 +8821,8 @@ export function REPL({
                   showAllInTranscript={showAllInTranscript}
                   virtualScroll={true}
                   status={editorStatus || undefined}
+                  isWorking={isLoading}
+                  hasDialogWaiting={hasActivePrompt}
                   searchBadge={
                     searchQuery && searchCount > 0 ? { current: searchCurrent, count: searchCount } : undefined
                   }
@@ -8363,6 +8845,8 @@ export function REPL({
               virtualScroll={false}
               suppressShowAll={dumpMode}
               status={editorStatus || undefined}
+              isWorking={isLoading}
+              hasDialogWaiting={hasActivePrompt}
             />
           </>
         )}
@@ -8575,6 +9059,7 @@ export function REPL({
               modalScrollRef={modalScrollRef}
               dividerYRef={dividerYRef}
               hidePill={!!viewedAgentTask}
+              askBelow={Boolean(isWaitingForApproval || hostPermissionOpen || toolUseConfirmQueue.length > 0)}
               hideSticky={!!viewedTeammateTask}
               newMessageCount={unseenDivider?.count ?? 0}
               sidebarWidth={replDiffSidebarWidth}
@@ -8710,7 +9195,8 @@ export function REPL({
                       overrideShimmerColor={spinnerShimmerColor}
                       hasActiveTools={inProgressToolUseIDs.size > 0}
                       leaderIsIdle={!isLoading}
-                      retryStatus={retryStatus}
+                      retryStatus={viewingAgentTaskId ? null : retryStatus}
+                      afterReplyText={afterReplyText}
                       outputLimitRecovery={outputLimitRecovery}
                       agentId={viewingAgentTaskId ?? undefined}
                     />
@@ -9369,6 +9855,7 @@ export function REPL({
                             setShowBashesDialog={setShowBashesDialog}
                             onSubmit={onSubmit}
                             onAgentSubmit={onAgentSubmit}
+                            nextStepHint={failedRequestNextStepHint}
                             isSearchingHistory={isSearchingHistory}
                             setIsSearchingHistory={setIsSearchingHistory}
                             helpOpen={isHelpOpen}
@@ -9892,7 +10379,11 @@ export function REPL({
                             insertTextRef={feature('VOICE_MODE') ? insertTextRef : undefined}
                             voiceInterimRange={voice.interimRange}
                           />
-                          <SessionBackgroundHint onBackgroundSession={handleBackgroundSession} isLoading={isLoading} />
+                          <SessionBackgroundHint
+                            onBackgroundSession={handleBackgroundSession}
+                            isLoading={isLoading}
+                            isTranscriptMode={inTranscript}
+                          />
                         </>
                       )}
                       {cursor && (
@@ -9945,7 +10436,11 @@ export function REPL({
                                   message: UserMessage,
                                   feedback?: string,
                                   direction: PartialCompactDirection = 'from',
+                                  signal?: AbortSignal,
                                 ) => {
+                                  if (signal?.aborted) {
+                                    return;
+                                  }
                                   // Project snipped messages so the compact model
                                   // doesn't summarize content that was intentionally removed.
                                   const compactMessages = getMessagesAfterCompactBoundary(messages);
@@ -9967,94 +10462,115 @@ export function REPL({
                                   }
 
                                   const newAbortController = createAbortController();
-                                  const context = getToolUseContext(
-                                    compactMessages,
-                                    [],
-                                    newAbortController,
-                                    mainLoopModel,
-                                  );
-
-                                  const appState = context.getAppState();
-                                  const defaultSysPrompt = await getSystemPrompt(
-                                    context.options.tools,
-                                    context.options.mainLoopModel,
-                                    Array.from(appState.toolPermissionContext.additionalWorkingDirectories.keys()),
-                                    context.options.mcpClients,
-                                  );
-                                  const systemPrompt = buildEffectiveSystemPrompt({
-                                    mainThreadAgentDefinition,
-                                    toolUseContext: context,
-                                    customSystemPrompt: context.options.customSystemPrompt,
-                                    defaultSystemPrompt: defaultSysPrompt,
-                                    appendSystemPrompt: context.options.appendSystemPrompt,
-                                  });
-                                  const [userContext, systemContext] = await Promise.all([
-                                    getUserContext(),
-                                    getSystemContext(),
-                                  ]);
-
-                                  const result = await partialCompactConversation(
-                                    compactMessages,
-                                    messageIndex,
-                                    context,
-                                    {
-                                      systemPrompt,
-                                      userContext,
-                                      systemContext,
-                                      toolUseContext: context,
-                                      forkContextMessages: compactMessages,
-                                    },
-                                    feedback,
-                                    direction,
-                                  );
-
-                                  // densable Pid: zero kept-assistant usage (Edt) so
-                                  // /context + status line do not report stale pre-compact
-                                  // API usage after message-picker compact (#6 / 2.1.218).
-                                  const postCompact = buildPartialPostCompactMessages(result, direction);
-                                  // Fullscreen 'from' keeps scrollback; 'up_to' must not
-                                  // (old[0] unchanged + grown array means incremental
-                                  // useLogMessages path, so boundary never persisted).
-                                  // Find by uuid since old is raw REPL history and snipped
-                                  // entries can shift the projected messageIndex.
-                                  if (isFullscreenEnvEnabled() && direction === 'from') {
-                                    setMessages(old => {
-                                      const rawIdx = old.findIndex(m => m.uuid === message.uuid);
-                                      return [...old.slice(0, rawIdx === -1 ? 0 : rawIdx), ...postCompact];
-                                    });
-                                  } else {
-                                    setMessages(postCompact);
-                                  }
-                                  // Partial compact bypasses handleMessageFromStream — clear
-                                  // the context-blocked flag so proactive ticks resume.
-                                  if (feature('PROACTIVE') || feature('KAIROS')) {
-                                    proactiveModule?.setContextBlocked(false);
-                                  }
-                                  setConversationId(randomUUID());
-                                  // densable z$l after message-picker summarize (Sd.current)
-                                  setAppState(prev => pruneDisplayedMessageContent(prev, messagesRef.current));
-                                  runPostCompactCleanup(context.options.querySource);
-
-                                  if (direction === 'from') {
-                                    const r = textForResubmit(message);
-                                    if (r) {
-                                      setInputValue(r.text);
-                                      setInputMode(r.mode);
+                                  const onSignalAbort = () => {
+                                    newAbortController.abort();
+                                  };
+                                  if (signal) {
+                                    if (signal.aborted) {
+                                      return;
                                     }
+                                    signal.addEventListener('abort', onSignalAbort, { once: true });
                                   }
+                                  try {
+                                    const context = getToolUseContext(
+                                      compactMessages,
+                                      [],
+                                      newAbortController,
+                                      mainLoopModel,
+                                    );
 
-                                  // Show notification with ctrl+o hint
-                                  const historyShortcut = getShortcutDisplay(
-                                    'app:toggleTranscript',
-                                    'Global',
-                                    'ctrl+o',
-                                  );
-                                  addNotification({
-                                    key: 'summarize-ctrl-o-hint',
-                                    text: `Conversation summarized (${historyShortcut} for history)`,
-                                    priority: 'medium',
-                                    timeoutMs: 8000,
-                                  });
+                                    const appState = context.getAppState();
+                                    const defaultSysPrompt = await getSystemPrompt(
+                                      context.options.tools,
+                                      context.options.mainLoopModel,
+                                      Array.from(appState.toolPermissionContext.additionalWorkingDirectories.keys()),
+                                      context.options.mcpClients,
+                                    );
+                                    const systemPrompt = buildEffectiveSystemPrompt({
+                                      mainThreadAgentDefinition,
+                                      toolUseContext: context,
+                                      customSystemPrompt: context.options.customSystemPrompt,
+                                      defaultSystemPrompt: defaultSysPrompt,
+                                      appendSystemPrompt: context.options.appendSystemPrompt,
+                                    });
+                                    const [userContext, systemContext] = await Promise.all([
+                                      getUserContext(),
+                                      getSystemContext(),
+                                    ]);
+
+                                    if (signal?.aborted) {
+                                      return;
+                                    }
+
+                                    const result = await partialCompactConversation(
+                                      compactMessages,
+                                      messageIndex,
+                                      context,
+                                      {
+                                        systemPrompt,
+                                        userContext,
+                                        systemContext,
+                                        toolUseContext: context,
+                                        forkContextMessages: compactMessages,
+                                      },
+                                      feedback,
+                                      direction,
+                                    );
+
+                                    if (signal?.aborted) {
+                                      return;
+                                    }
+
+                                    // densable Pid: zero kept-assistant usage (Edt) so
+                                    // /context + status line do not report stale pre-compact
+                                    // API usage after message-picker compact (#6 / 2.1.218).
+                                    const postCompact = buildPartialPostCompactMessages(result, direction);
+                                    // Fullscreen 'from' keeps scrollback; 'up_to' must not
+                                    // (old[0] unchanged + grown array means incremental
+                                    // useLogMessages path, so boundary never persisted).
+                                    // Find by uuid since old is raw REPL history and snipped
+                                    // entries can shift the projected messageIndex.
+                                    if (isFullscreenEnvEnabled() && direction === 'from') {
+                                      setMessages(old => {
+                                        const rawIdx = old.findIndex(m => m.uuid === message.uuid);
+                                        return [...old.slice(0, rawIdx === -1 ? 0 : rawIdx), ...postCompact];
+                                      });
+                                    } else {
+                                      setMessages(postCompact);
+                                    }
+                                    // Partial compact bypasses handleMessageFromStream — clear
+                                    // the context-blocked flag so proactive ticks resume.
+                                    if (feature('PROACTIVE') || feature('KAIROS')) {
+                                      proactiveModule?.setContextBlocked(false);
+                                    }
+                                    setConversationId(randomUUID());
+                                    // densable z$l after message-picker summarize (Sd.current)
+                                    setAppState(prev => pruneDisplayedMessageContent(prev, messagesRef.current));
+                                    runPostCompactCleanup(context.options.querySource);
+
+                                    if (direction === 'from') {
+                                      const r = textForResubmit(message);
+                                      if (r) {
+                                        setInputValue(r.text);
+                                        setInputMode(r.mode);
+                                      }
+                                    }
+
+                                    // Show notification with ctrl+o hint
+                                    const historyShortcut = getShortcutDisplay(
+                                      'app:toggleTranscript',
+                                      'Global',
+                                      'ctrl+o',
+                                    );
+                                    addNotification({
+                                      key: 'summarize-ctrl-o-hint',
+                                      text: `Conversation summarized (${historyShortcut} for history)`,
+                                      priority: 'medium',
+                                      timeoutMs: 8000,
+                                    });
+                                  } finally {
+                                    signal?.removeEventListener('abort', onSignalAbort);
+                                  }
                                 }
                           }
                           onRestoreMessage={handleRestoreMessage}

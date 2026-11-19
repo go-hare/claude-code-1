@@ -9,7 +9,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import type { z } from 'zod';
-import { Box, Text } from '@anthropic/ink';
+import {
+  Box,
+  Byline,
+  type ClipboardPath,
+  getClipboardPath,
+  KeyboardShortcutHint,
+  Link,
+  probeLinuxClipboardTool,
+  setClipboard,
+  Text,
+  useInput,
+} from '@anthropic/ink';
 import figures from 'figures';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { openBrowser } from '../utils/browser.js';
@@ -427,10 +438,44 @@ export function GatewayPollingView({
   loginNotice?: string;
   onCancel: () => void;
 }): React.ReactNode {
+  // Official 2.1.326 #269: clickable <Link> + `c` to copy verification URL.
+  const [copyPath, setCopyPath] = useState<ClipboardPath | null>(null);
+  const [copyDebounced, setCopyDebounced] = useState(false);
+  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    void probeLinuxClipboardTool();
+    return () => {
+      if (copyResetTimerRef.current !== null) {
+        clearTimeout(copyResetTimerRef.current);
+      }
+    };
+  }, []);
+
   useKeybinding('confirm:no', onCancel, {
     context: 'Confirmation',
     isActive: true,
   });
+
+  useInput((input, key) => {
+    if (key.ctrl || key.meta || input !== 'c' || copyDebounced) {
+      return;
+    }
+    setCopyDebounced(true);
+    setTimeout(() => setCopyDebounced(false), 2000);
+    const path = getClipboardPath();
+    void setClipboard(verificationUri).then(raw => {
+      if (raw) process.stdout.write(raw);
+      setCopyPath(path);
+      if (path === 'native') {
+        if (copyResetTimerRef.current !== null) {
+          clearTimeout(copyResetTimerRef.current);
+        }
+        copyResetTimerRef.current = setTimeout(() => setCopyPath(null), 2000);
+      }
+    });
+  });
+
   return (
     <Box flexDirection="column" gap={1}>
       <Text bold>Cloud gateway · sign in</Text>
@@ -444,10 +489,25 @@ export function GatewayPollingView({
         </Text>
       </Box>
       <Box flexDirection="column">
-        <Text dimColor>Browser didn&apos;t open? Visit:</Text>
-        <Text dimColor wrap="wrap">
-          {verificationUri}
-        </Text>
+        <Box>
+          <Text dimColor>Browser didn&apos;t open? Visit </Text>
+          {copyPath === 'native' ? (
+            <Text color="success">(Copied!)</Text>
+          ) : copyPath === null ? (
+            <Text dimColor>
+              <KeyboardShortcutHint shortcut="c" action="copy url" parens />
+            </Text>
+          ) : null}
+        </Box>
+        {copyPath === 'tmux-buffer' && (
+          <Text dimColor>(Copied to tmux buffer · select the URL manually if paste fails)</Text>
+        )}
+        {copyPath === 'osc52' && <Text dimColor>(Sent via OSC 52 · select the URL manually if paste fails)</Text>}
+        <Link url={verificationUri} assumeSupport>
+          <Text dimColor wrap="wrap">
+            {verificationUri}
+          </Text>
+        </Link>
       </Box>
       {loginNotice && (
         <Box flexDirection="column">
@@ -459,7 +519,12 @@ export function GatewayPollingView({
         <Text color="suggestion">{figures.ellipsis}</Text>
         <Text dimColor>Waiting for sign-in to complete in your browser…</Text>
       </Box>
-      <Text dimColor>Press Esc to cancel</Text>
+      <Text dimColor>
+        <Byline>
+          <KeyboardShortcutHint shortcut="c" action="copy url" />
+          <KeyboardShortcutHint shortcut="Esc" action="cancel" />
+        </Byline>
+      </Text>
     </Box>
   );
 }

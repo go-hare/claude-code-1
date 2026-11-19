@@ -1,15 +1,88 @@
 import chalk from 'chalk'
+import { realpathSync } from 'fs'
 import { stat } from 'fs/promises'
+import { homedir } from 'os'
 import { dirname, resolve } from 'path'
-import { getOriginalCwd } from '../../bootstrap/state.js'
+import {
+  getIsNonInteractiveSession,
+  getOriginalCwd,
+} from '../../bootstrap/state.js'
 import type { ToolPermissionContext } from '../../Tool.js'
+import { isPathTrusted } from '../../utils/config.js'
+import { isEnvTruthy } from '../../utils/envUtils.js'
 import { getErrnoCode, isENOENT } from '../../utils/errors.js'
+import { findGitRootUncached } from '../../utils/git.js'
 import { logError } from '../../utils/log.js'
 import { expandPath } from '../../utils/path.js'
 import {
   allWorkingDirectories,
   pathInWorkingPath,
 } from '../../utils/permissions/filesystem.js'
+
+export type UntrustedAddedFolder = {
+  path: string
+  repository?: string
+}
+
+function isInsideTrustedOriginalCwd(targetPath: string): boolean {
+  const originalCwd = getOriginalCwd()
+  const home = homedir()
+  if (
+    pathInWorkingPath(originalCwd, home) &&
+    resolve(originalCwd) === resolve(home)
+  ) {
+    return false
+  }
+  if (!pathInWorkingPath(targetPath, originalCwd)) {
+    return false
+  }
+  const repoRoot = findGitRootUncached(targetPath)
+  return repoRoot === null || pathInWorkingPath(originalCwd, repoRoot)
+}
+
+/**
+ * Official 2.1.326 #323 (`iyl` / `untrustedAddedFolder`): returns folder metadata
+ * when `dirPath` has not been trusted yet in local terminal sessions.
+ */
+export function untrustedAddedFolder(
+  dirPath: string,
+  checkPersistedTrust = true,
+): UntrustedAddedFolder | undefined {
+  if (isEnvTruthy(process.env.CLAUDE_CODE_SANDBOXED)) {
+    return undefined
+  }
+  let resolvedPath = dirPath
+  try {
+    resolvedPath = realpathSync(dirPath)
+  } catch {
+    resolvedPath = resolve(dirPath)
+  }
+  if (!checkPersistedTrust) {
+    return { path: resolvedPath }
+  }
+  if (isPathTrusted(resolvedPath) || isInsideTrustedOriginalCwd(resolvedPath)) {
+    return undefined
+  }
+  const gitRoot = findGitRootUncached(resolvedPath)
+  return {
+    path: resolvedPath,
+    repository: gitRoot && gitRoot !== resolvedPath ? gitRoot : undefined,
+  }
+}
+
+/**
+ * Official 2.1.326 #323 (`NHo` / `folderToTrustBeforeAdding`): skip trust prompt
+ * in non-interactive/print sessions; otherwise check `untrustedAddedFolder`.
+ */
+export function folderToTrustBeforeAdding(
+  dirPath: string,
+  checkPersistedTrust = true,
+): UntrustedAddedFolder | undefined {
+  if (getIsNonInteractiveSession()) {
+    return undefined
+  }
+  return untrustedAddedFolder(dirPath, checkPersistedTrust)
+}
 
 export type AddDirectoryResult =
   | {

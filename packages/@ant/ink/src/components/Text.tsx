@@ -131,6 +131,18 @@ const memoizedStylesForWrap: Record<NonNullable<Styles['textWrap']>, Styles> = {
     flexDirection: 'row',
     textWrap: 'truncate-start',
   },
+  'truncate-rows': {
+    flexGrow: 0,
+    flexShrink: 1,
+    flexDirection: 'row',
+    textWrap: 'truncate-rows',
+  },
+  clip: {
+    flexGrow: 0,
+    flexShrink: 1,
+    flexDirection: 'row',
+    textWrap: 'clip',
+  },
 } as const;
 
 /**

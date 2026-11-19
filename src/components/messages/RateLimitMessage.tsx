@@ -79,6 +79,24 @@ type RateLimitMessageProps = {
   onOpenRateLimitOptions?: () => void;
 };
 
+/**
+ * #180 (2.1.326): true only while the usage limit is currently active (rejected,
+ * not using overage, and `resetsAt` has not yet passed). Prevents old usage
+ * limit messages in scrollback from showing an upgrade hint after reset.
+ */
+export function isRateLimitStillActive(
+  status: { status: string; resetsAt?: number; isUsingOverage?: boolean },
+  nowMs = Date.now(),
+): boolean {
+  if (status.status !== 'rejected' || status.isUsingOverage) {
+    return false;
+  }
+  if (status.resetsAt !== undefined && status.resetsAt * 1000 <= nowMs) {
+    return false;
+  }
+  return true;
+}
+
 export function RateLimitMessage({ text, onOpenRateLimitOptions }: RateLimitMessageProps): React.ReactNode {
   const subscriptionType = getSubscriptionType();
   const rateLimitTier = getRateLimitTier();
@@ -101,8 +119,8 @@ export function RateLimitMessage({ text, onOpenRateLimitOptions }: RateLimitMess
     rateLimitType?: string;
     errorCode?: string;
   } = useClaudeAiLimits();
-  const isCurrentlyRateLimited =
-    status.status === 'rejected' && status.resetsAt !== undefined && !status.isUsingOverage;
+  const isLimitActive = isRateLimitStillActive(status);
+  const isCurrentlyRateLimited = isLimitActive && status.resetsAt !== undefined;
   const isCreditsRequired = isCreditsRequiredRateLimit(status);
   const isUpsellSuppressed = status?.rateLimitType === 'seven_day_overage_included';
   const isExtraUsageEnabled = extraUsage.isEnabled();
@@ -126,6 +144,8 @@ export function RateLimitMessage({ text, onOpenRateLimitOptions }: RateLimitMess
 
   const upsell = useMemo(() => {
     if (isUpsellSuppressed) return null;
+    // #180 (2.1.326): hide upgrade/usage-credits hint once the limit has reset.
+    if (!isLimitActive && !isCreditsRequired) return null;
     if (isCreditsRequired) {
       if (!shouldShowUpsell || !isExtraUsageEnabled || !hasClaudeAiBillingAccess() || text.includes('/usage-credits')) {
         return null;
@@ -144,6 +164,7 @@ export function RateLimitMessage({ text, onOpenRateLimitOptions }: RateLimitMess
     return <Text dimColor>{message}</Text>;
   }, [
     isUpsellSuppressed,
+    isLimitActive,
     isCreditsRequired,
     shouldShowUpsell,
     isExtraUsageEnabled,

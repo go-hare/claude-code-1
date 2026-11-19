@@ -442,9 +442,14 @@ export async function deleteJob(
     const jobPids = new Set<number>()
     for (const session of live) {
       const jobId = session.jobId
+      // Official 2.1.326 #33: do not claim a live background session whose own
+      // `jobId` differs from `short` just because its resumed `sessionId`
+      // starts with `short` (the older session's id).
       if (
         session.kind === 'bg' &&
-        (jobId === short || session.sessionId?.startsWith(short))
+        (jobId !== undefined
+          ? jobId === short
+          : session.sessionId?.startsWith(short))
       ) {
         jobPids.add(session.pid)
       }

@@ -1523,6 +1523,8 @@ export type PrStatusPollerDeps = {
   now: () => number
   getLastInteractionTime: () => number
   fetchPrStatus: () => Promise<PollerFetchResult>
+  /** Official 2.1.326 #211 (`kCe.checkBranch`): detects branch switches to clear/refresh stale PR badge. */
+  getBranch?: () => Promise<string>
   isDirectApiEnabled: () => boolean
   shared: PrStatusShared
 }
@@ -1551,10 +1553,37 @@ export class PrStatusPoller {
   #u = 0
   #p = -1
   #c = 0
+  #lastBranch: string | undefined = undefined
 
   constructor(deps: PrStatusPollerDeps, inputs: PrStatusPollerInputs) {
     this.#e = deps
     this.#t = inputs
+  }
+
+  /**
+   * Official 2.1.326 #211 (`kCe.checkBranch`): detect branch switches and
+   * either clear the stale PR badge (when poller is disabled) or bump the
+   * poller to re-fetch for the new branch immediately.
+   */
+  checkBranch = (): void => {
+    const getBranchFn = this.#e.getBranch
+    if (!getBranchFn) return
+    void getBranchFn()
+      .then(branch => {
+        const { pollerDisabled } = this.#e.shared
+        if (branch === 'HEAD' && pollerDisabled) return
+        const prev = this.#lastBranch
+        this.#lastBranch = branch
+        if (prev === undefined || prev === branch || branch === 'HEAD') return
+        if (pollerDisabled) {
+          this.#_(null, this.#o.needsAuth)
+        } else {
+          this.#e.shared.bump.emit()
+        }
+      })
+      .catch(err => {
+        logForDebugging(String(err), { level: 'error' })
+      })
   }
 
   getSnapshot = (): PrStatusSnapshot => this.#o
@@ -1580,6 +1609,9 @@ export class PrStatusPoller {
     if (next.enabled && !prev.enabled) {
       this.#u = 0
       this.#e.shared.pollerNotModifiedStreak = 0
+    }
+    if (next.focused && !prev.focused && next.enabled) {
+      this.checkBranch()
     }
     if (
       (next.focused !== prev.focused && this.#b()) ||
@@ -1644,6 +1676,7 @@ export class PrStatusPoller {
   #y(): void {
     this.#k()
     if (!this.#t.enabled) return
+    this.checkBranch()
     if (this.#e.shared.pollerDisabled) return
     const gen = this.#a
     this.#p = -1

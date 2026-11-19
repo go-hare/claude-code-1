@@ -310,13 +310,19 @@ export function QuestionView({
                 key={question.question}
                 options={options}
                 defaultValue={questionStates[question.question]?.selectedValue as string | undefined}
+                defaultFocusValue={questionStates[question.question]?.selectedValue as string | undefined}
                 onChange={(value: string) => {
                   if (value === '__chat__') {
                     onRespondToClaude();
                     return;
                   }
                   onUpdateQuestionState(questionText, { selectedValue: value }, false);
-                  const textInput = value === '__other__' ? questionStates[questionText]?.textInputValue : undefined;
+                  const textInput =
+                    value === '__other__'
+                      ? latestOtherInputRef.current?.question === questionText
+                        ? latestOtherInputRef.current.value
+                        : questionStates[questionText]?.textInputValue
+                      : undefined;
                   onAnswer(questionText, value, textInput);
                 }}
                 onFocus={handleFocus}

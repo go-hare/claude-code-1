@@ -4,9 +4,10 @@ import { SentryErrorBoundary } from './SentryErrorBoundary.js';
 import { randomUUID, type UUID } from 'crypto';
 import type { RefObject } from 'react';
 import * as React from 'react';
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { every } from 'src/utils/set.js';
 import { getIsRemoteMode } from '../bootstrap/state.js';
+import { getBootstrapSession, getUserPromptWaitingFor, subscribeUserPromptWaiting } from '../utils/sessionHost.js';
 import type { Command } from '../commands.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import type { ScrollBoxHandle } from '@anthropic/ink';
@@ -58,11 +59,14 @@ import {
   getToolUseID,
   getToolUseIDs,
   hasUnresolvedHooksFromLookup,
+  interruptedCall,
   isHumanLikeOrigin,
   isMetaVisibleOrigin,
   isUserTextExpandClickable,
   isNotEmptyMessage,
   normalizeMessages,
+  REJECT_MESSAGE,
+  REJECT_MESSAGE_WITH_REASON_PREFIX,
   reorderMessagesInUI,
   type StreamingToolUse,
   shouldShowUserMessage,
@@ -87,6 +91,7 @@ import {
   type MessageActionsState,
 } from './messageActions.js';
 import { isNullRenderingAttachment } from './messages/nullRenderingAttachments.js';
+import { LatestTurnDurationContext } from './messages/SystemTextMessage.js';
 import { OffscreenFreeze } from './OffscreenFreeze.js';
 import { StatusNotices } from './StatusNotices.js';
 import type { JumpHandle } from './VirtualMessageList.js';
@@ -101,18 +106,23 @@ import type { JumpHandle } from './VirtualMessageList.js';
 // subscribe to useAppState/useSettings for their own updates.
 const LogoHeader = React.memo(function LogoHeader({
   agentDefinitions,
+  showAllNotices,
 }: {
   agentDefinitions: AgentDefinitionsResult | undefined;
+  showAllNotices?: boolean;
 }): React.ReactNode {
+  // Official 2.1.326 #116: key OffscreenFreeze by viewingAgentTaskId so switching
+  // to a subagent/teammate outside fullscreen refreshes the welcome header model.
+  const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
   // LogoV2 has its own internal OffscreenFreeze (catches its useAppState
   // re-renders). This outer freeze catches agentDefinitions changes and any
   // future StatusNotices subscriptions while the header is in scrollback.
   return (
-    <OffscreenFreeze>
+    <OffscreenFreeze key={`${viewingAgentTaskId ?? 'main'}:${showAllNotices ? '1' : '0'}`}>
       <Box flexDirection="column" gap={1}>
         <LogoV2 />
         <React.Suspense fallback={null}>
-          <StatusNotices agentDefinitions={agentDefinitions} />
+          <StatusNotices agentDefinitions={agentDefinitions} showAllNotices={showAllNotices} />
         </React.Suspense>
       </Box>
     </OffscreenFreeze>
@@ -1037,6 +1047,70 @@ function parseBashOutputBlock(
   return parsed;
 }
 
+/**
+ * #159 (2.1.326): suppress the "done" (`turn_duration`) line when the turn
+ * ended in an API error or permission refusal / interruption without any
+ * pending background agents or workflows.
+ */
+export function shouldSuppressTurnDurationForFailedOrRefusedTurn(
+  messages: readonly (RenderableMessage | MessageType)[],
+  turnDurationIndex: number,
+): boolean {
+  const td = messages[turnDurationIndex];
+  if (!td || td.type !== 'system' || td.subtype !== 'turn_duration') return false;
+  const pendingAgents = (td as { pendingBackgroundAgentCount?: number }).pendingBackgroundAgentCount ?? 0;
+  const pendingWorkflows = (td as { pendingWorkflowCount?: number }).pendingWorkflowCount ?? 0;
+  if (pendingAgents > 0 || pendingWorkflows > 0) {
+    return false;
+  }
+  for (let i = turnDurationIndex - 1; i >= 0; i--) {
+    const prev = messages[i];
+    if (!prev) continue;
+    if (prev.type === 'system' || prev.type === 'attachment' || prev.type === 'progress') continue;
+    if (prev.type === 'assistant') {
+      if ((prev as { isApiErrorMessage?: boolean }).isApiErrorMessage === true) {
+        return true;
+      }
+      return false;
+    }
+    if (prev.type === 'user') {
+      const content = prev.message?.content;
+      if (Array.isArray(content)) {
+        const hasToolResult = content.some(
+          b => typeof b === 'object' && b !== null && 'type' in b && b.type === 'tool_result',
+        );
+        if (hasToolResult) {
+          if (interruptedCall(prev as never)) return true;
+          const allRefused = content.every(b => {
+            if (typeof b !== 'object' || b === null || !('type' in b) || b.type !== 'tool_result') return true;
+            const rb = b as { is_error?: boolean; content?: unknown };
+            if (rb.is_error !== true) return false;
+            const txt = typeof rb.content === 'string' ? rb.content : '';
+            return (
+              txt === REJECT_MESSAGE ||
+              txt.startsWith(REJECT_MESSAGE_WITH_REASON_PREFIX) ||
+              txt.toLowerCase().includes('permission denied')
+            );
+          });
+          if (allRefused) return true;
+          return false;
+        }
+      }
+      return false;
+    }
+    if (prev.type === 'collapsed_read_search') {
+      const innerMessages = Array.isArray(prev.messages) ? prev.messages : [];
+      const lastInner = innerMessages.at(-1);
+      if (lastInner?.type === 'user' && interruptedCall(lastInner as never)) {
+        return true;
+      }
+      return false;
+    }
+    return false;
+  }
+  return false;
+}
+
 /** Check whether a tool_result error has >3 lines. */
 function isToolResultErrorTruncated(content: unknown): boolean {
   if (typeof content === 'string') {
@@ -1182,8 +1256,8 @@ const MessagesImpl = ({
   }, []);
 
   const streamingToolUsesWithoutInProgress = useMemo(
-    () => streamingToolUseFilter.next(streamingToolUses, inProgressToolUseIDs, normalizedToolUseIDs),
-    [streamingToolUseFilter, streamingToolUses, inProgressToolUseIDs, normalizedToolUseIDs],
+    () => streamingToolUseFilter.next(streamingToolUses, inProgressToolUseIDs, normalizedToolUseIDs, isLoading),
+    [streamingToolUseFilter, streamingToolUses, inProgressToolUseIDs, normalizedToolUseIDs, isLoading],
   );
 
   const syntheticStreamingToolUseMessages = useMemo(
@@ -1411,6 +1485,10 @@ const MessagesImpl = ({
 
   // Cheap slice — only runs when scroll range or slice config changes.
   const renderableMessages = useMemo(() => {
+    // #159 (2.1.326): suppress "done" turn_duration rows after failed or refused turns.
+    const filteredCollapsed = collapsed.some(m => m.type === 'system' && m.subtype === 'turn_duration')
+      ? collapsed.filter((m, idx, arr) => !shouldSuppressTurnDurationForFailedOrRefusedTurn(arr, idx))
+      : collapsed;
     // Safety cap for the non-virtualized render path. Applied here (not at
     // the JSX site) so renderMessageRow's index-based lookups and
     // dividerBeforeIndex compute on the same array. VirtualMessageList
@@ -1420,12 +1498,12 @@ const MessagesImpl = ({
     // post-grouping array so each chunk gets correct tool-call grouping.
     const capApplies = !virtualScrollRuntimeGate && !disableRenderCap;
     const nonVirtualizedCap = getNonVirtualizedMessageCap(rows, isFullscreen);
-    const sliceStart = capApplies ? computeSliceStart(collapsed, sliceAnchorRef, nonVirtualizedCap) : 0;
+    const sliceStart = capApplies ? computeSliceStart(filteredCollapsed, sliceAnchorRef, nonVirtualizedCap) : 0;
     return renderRange
-      ? collapsed.slice(renderRange[0], renderRange[1])
+      ? filteredCollapsed.slice(renderRange[0], renderRange[1])
       : sliceStart > 0
-        ? collapsed.slice(sliceStart)
-        : collapsed;
+        ? filteredCollapsed.slice(sliceStart)
+        : filteredCollapsed;
   }, [collapsed, renderRange, virtualScrollRuntimeGate, disableRenderCap, rows, isFullscreen, conversationId, verbose]);
 
   const collapsedRowCount = collapsed.length;
@@ -1591,6 +1669,17 @@ const MessagesImpl = ({
     (!toolJSX || !!toolJSX.shouldContinueAnimation) && !suppressMessageAnimation && !isMessageSelectorVisible;
 
   const hasToolsInProgress = inProgressToolUseIDs.size > 0;
+  // Official 2.1.326 #190: clear/suppress the indeterminate OSC 9;4 progress bar
+  // while waiting for a user input / permission prompt answer.
+  const subscribeWaitingForUser = useCallback(
+    (onStoreChange: () => void) => subscribeUserPromptWaiting(getBootstrapSession(), onStoreChange),
+    [],
+  );
+  const isWaitingForUserInput = useSyncExternalStore(
+    subscribeWaitingForUser,
+    () => getUserPromptWaitingFor(getBootstrapSession()) !== undefined,
+    () => getUserPromptWaitingFor(getBootstrapSession()) !== undefined,
+  );
 
   // Report progress to terminal (for terminals that support OSC 9;4)
   const { progress } = useTerminalNotification();
@@ -1598,7 +1687,8 @@ const MessagesImpl = ({
   const progressEnabled =
     getGlobalConfig().terminalProgressBarEnabled &&
     !getIsRemoteMode() &&
-    !(proactiveModule?.isProactiveActive() ?? false);
+    !(proactiveModule?.isProactiveActive() ?? false) &&
+    !isWaitingForUserInput;
   useEffect(() => {
     const state = progressEnabled ? (hasToolsInProgress ? 'indeterminate' : 'completed') : null;
     if (prevProgressState.current === state) return;
@@ -1755,34 +1845,50 @@ const MessagesImpl = ({
     [tools, lookups],
   );
 
+  // Official 2.1.326 #114 (`hasLaterTurn`): only the latest turn_duration (when
+  // idle) may show "N shell still running"; earlier turns always suppress it.
+  const latestTurnDurationUuid = useMemo<string | null>(() => {
+    if (isLoading) return null;
+    for (let i = renderableMessages.length - 1; i >= 0; i--) {
+      const m = renderableMessages[i];
+      if (m && m.type === 'system' && m.subtype === 'turn_duration' && 'uuid' in m && typeof m.uuid === 'string') {
+        return m.uuid;
+      }
+    }
+    return null;
+  }, [renderableMessages, isLoading]);
+
   return (
     <SentryErrorBoundary name="MessagesBoundary">
-      {/* Logo */}
-      {!hideLogo && !(renderRange && renderRange[0] > 0) && <LogoHeader agentDefinitions={agentDefinitions} />}
+      <LatestTurnDurationContext.Provider value={latestTurnDurationUuid}>
+        {/* Logo */}
+        {!hideLogo && !(renderRange && renderRange[0] > 0) && (
+          <LogoHeader agentDefinitions={agentDefinitions} showAllNotices={isTranscriptMode || verbose} />
+        )}
 
-      {/* Truncation indicator */}
-      {hasTruncatedMessages && (
-        <Divider
-          title={`${toggleShowAllShortcut} to show ${chalk.bold(hiddenMessageCount)} previous messages`}
-          width={columns}
-        />
-      )}
-
-      {/* Show all indicator */}
-      {isTranscriptMode &&
-        showAllInTranscript &&
-        hiddenMessageCount > 0 &&
-        // disableRenderCap (e.g. [ dump-to-scrollback) means we're uncapped
-        // as a one-shot escape hatch, not a toggle — ctrl+e is dead and
-        // nothing is actually "hidden" to restore.
-        !disableRenderCap && (
+        {/* Truncation indicator */}
+        {hasTruncatedMessages && (
           <Divider
-            title={`${toggleShowAllShortcut} to hide ${chalk.bold(hiddenMessageCount)} previous messages`}
+            title={`${toggleShowAllShortcut} to show ${chalk.bold(hiddenMessageCount)} previous messages`}
             width={columns}
           />
         )}
 
-      {/* Messages - rendered as memoized MessageRow components.
+        {/* Show all indicator */}
+        {isTranscriptMode &&
+          showAllInTranscript &&
+          hiddenMessageCount > 0 &&
+          // disableRenderCap (e.g. [ dump-to-scrollback) means we're uncapped
+          // as a one-shot escape hatch, not a toggle — ctrl+e is dead and
+          // nothing is actually "hidden" to restore.
+          !disableRenderCap && (
+            <Divider
+              title={`${toggleShowAllShortcut} to hide ${chalk.bold(hiddenMessageCount)} previous messages`}
+              width={columns}
+            />
+          )}
+
+        {/* Messages - rendered as memoized MessageRow components.
           flatMap inserts the unseen-divider as a separate keyed sibling so
           (a) non-fullscreen renders pay no per-message Fragment wrap, and
           (b) divider toggle in fullscreen preserves all MessageRows by key.
@@ -1790,37 +1896,38 @@ const MessagesImpl = ({
           each row - React Compiler pins props in the fiber's memoCache, so
           passing the array would accumulate every historical version
           (~1-2MB over a 7-turn session). */}
-      {virtualScrollRuntimeGate ? (
-        <InVirtualListContext.Provider value={true}>
-          <VirtualMessageList
-            messages={renderableMessages}
-            scrollRef={scrollRef}
-            columns={columns}
-            itemKey={messageKey}
-            renderItem={renderMessageRow}
-            onItemClick={onItemClick}
-            isItemClickable={isItemClickable}
-            isItemExpanded={isItemExpanded}
-            layoutEpoch={layoutEpoch}
-            trackStickyPrompt={trackStickyPrompt}
-            selectedIndex={selectedIdx >= 0 ? selectedIdx : undefined}
-            cursorNavRef={cursorNavRef}
-            setCursor={setCursor}
-            jumpRef={jumpRef}
-            onSearchMatchesChange={onSearchMatchesChange}
-            scanElement={scanElement}
-            setPositions={setPositions}
-            extractSearchText={extractSearchText}
-          />
-        </InVirtualListContext.Provider>
-      ) : (
-        renderableMessages.flatMap(renderMessageRow)
-      )}
+        {virtualScrollRuntimeGate ? (
+          <InVirtualListContext.Provider value={true}>
+            <VirtualMessageList
+              messages={renderableMessages}
+              scrollRef={scrollRef}
+              columns={columns}
+              itemKey={messageKey}
+              renderItem={renderMessageRow}
+              onItemClick={onItemClick}
+              isItemClickable={isItemClickable}
+              isItemExpanded={isItemExpanded}
+              layoutEpoch={layoutEpoch}
+              trackStickyPrompt={trackStickyPrompt}
+              selectedIndex={selectedIdx >= 0 ? selectedIdx : undefined}
+              cursorNavRef={cursorNavRef}
+              setCursor={setCursor}
+              jumpRef={jumpRef}
+              onSearchMatchesChange={onSearchMatchesChange}
+              scanElement={scanElement}
+              setPositions={setPositions}
+              extractSearchText={extractSearchText}
+            />
+          </InVirtualListContext.Provider>
+        ) : (
+          renderableMessages.flatMap(renderMessageRow)
+        )}
 
-      {/* gold bw: L&&!Me&&M ? e(Oa,{store}) : null */}
-      {hasStreamingText && !isBriefOnly && streamingDisplayStore ? (
-        <StreamingTextPreview store={streamingDisplayStore} />
-      ) : null}
+        {/* gold bw: L&&!Me&&M ? e(Oa,{store}) : null */}
+        {hasStreamingText && !isBriefOnly && streamingDisplayStore ? (
+          <StreamingTextPreview store={streamingDisplayStore} />
+        ) : null}
+      </LatestTurnDurationContext.Provider>
     </SentryErrorBoundary>
   );
 };
@@ -1859,14 +1966,46 @@ const EMPTY_STREAMING_TOOL_USES: StreamingToolUse[] = [];
  */
 class StreamingToolUseFilter {
   previous: StreamingToolUse[] = EMPTY_STREAMING_TOOL_USES;
+  /**
+   * #206 (2.1.326): hold recently streamed tool_use blocks across the 1–2 frame
+   * handoff between content_block_stop (when streamingToolUses clears) and the
+   * finalized assistant message arriving in transcript, so "Reading 1 file…"
+   * never blinks out and shifts the prompt.
+   */
+  private pendingHandoff = new Map<string, StreamingToolUse>();
 
   next(
     streamingToolUses: StreamingToolUse[],
     inProgressToolUseIDs: Set<string>,
     normalizedToolUseIDs: Set<string>,
+    isLoading = true,
   ): StreamingToolUse[] {
+    if (!isLoading) {
+      this.pendingHandoff.clear();
+    } else {
+      for (const stu of streamingToolUses) {
+        const id = stu.contentBlock.id;
+        if (hasNonEmptyStreamingToolUseId(id)) {
+          this.pendingHandoff.set(id, stu);
+        }
+      }
+      for (const id of [...this.pendingHandoff.keys()]) {
+        if (inProgressToolUseIDs.has(id) || normalizedToolUseIDs.has(id)) {
+          this.pendingHandoff.delete(id);
+        }
+      }
+    }
+    const merged =
+      this.pendingHandoff.size > 0
+        ? [
+            ...streamingToolUses,
+            ...[...this.pendingHandoff.values()].filter(
+              h => !streamingToolUses.some(s => s.contentBlock.id === h.contentBlock.id),
+            ),
+          ]
+        : streamingToolUses;
     this.previous = filterStreamingToolUsesWithoutInProgress(
-      streamingToolUses,
+      merged,
       inProgressToolUseIDs,
       normalizedToolUseIDs,
       this.previous,

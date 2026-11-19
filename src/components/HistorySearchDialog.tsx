@@ -1,10 +1,10 @@
 import * as React from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getProjectRoot, getSessionId } from '../bootstrap/state.js';
 import { useRegisterOverlay } from '../context/overlayContext.js';
 import { getTimestampedHistory, type TimestampedHistoryEntry } from '../history.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { Box, FuzzyPicker, Text, stringWidth, wrapAnsi } from '@anthropic/ink';
+import { Box, FuzzyPicker, type FuzzyPickerHandle, Text, stringWidth, wrapAnsi } from '@anthropic/ink';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
 import { isVimModeEnabled } from './PromptInput/utils.js';
 import { useRegisterKeybindingContext } from '../keybindings/KeybindingContext.js';
@@ -113,6 +113,10 @@ export function HistorySearchDialog({ initialQuery, onSelect, onCancel }: Props)
 
   useKeybinding('historySearch:cycleScope', cycleScope, { context: 'HistorySearch' });
 
+  // Official 2.1.326 #164: Ctrl+R (`historySearch:next`) cycles to the next match.
+  const pickerRef = useRef<FuzzyPickerHandle>(null);
+  useKeybinding('historySearch:next', () => pickerRef.current?.focusNext(), { context: 'HistorySearch' });
+
   const filtered = useMemo(() => {
     if (!scan) return [];
     const scoped = scan.items.filter(item => matchesScope(item, scope));
@@ -146,6 +150,7 @@ export function HistorySearchDialog({ initialQuery, onSelect, onCancel }: Props)
 
   return (
     <FuzzyPicker
+      ref={pickerRef}
       title={title}
       placeholder="Filter history…"
       initialQuery={initialQuery}

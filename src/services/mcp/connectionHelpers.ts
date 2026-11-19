@@ -25,6 +25,7 @@ import {
   dialedWithoutOAuth,
   getServerKey,
   hasRecentTransientMcpRefreshFailure,
+  serverHasStoredRefreshToken,
   wrapFetchWithStepUpDetection,
 } from './auth.js'
 import {
@@ -359,10 +360,48 @@ export async function resolveRemoteConnectAuth(
   return { flags, authProvider, useFirstPartyAuth }
 }
 
+/**
+ * Official 2.1.326 #17 (`L3n` / `di` @334979413): When a configured
+ * `headersHelper` failed or was skipped in an untrusted workspace, do NOT
+ * persist a cross-session `needs-auth` cache entry for HTTP/SSE servers that
+ * have no stored OAuth refresh token (and are not XAA), so other sessions do
+ * not start without that server.
+ */
+export function shouldSkipPersistingMcpNeedsAuthCache(options: {
+  name: string
+  serverRef: ScopedMcpServerConfig
+  transportType: 'sse' | 'http' | 'claudeai-proxy'
+  lacksHelperHeaders?: boolean
+  hasStoredRefreshToken?: boolean
+}): boolean {
+  if (!options.lacksHelperHeaders) {
+    return false
+  }
+  if (options.transportType !== 'http' && options.transportType !== 'sse') {
+    return false
+  }
+  const hasXaa =
+    (options.serverRef.type === 'http' || options.serverRef.type === 'sse') &&
+    Boolean(options.serverRef.oauth?.xaa)
+  if (hasXaa) {
+    return false
+  }
+  const hasRefresh =
+    options.hasStoredRefreshToken ??
+    (options.serverRef.type === 'http' || options.serverRef.type === 'sse'
+      ? serverHasStoredRefreshToken(options.name, options.serverRef)
+      : false)
+  return !hasRefresh
+}
+
 export function handleRemoteAuthFailure(
   name: string,
   serverRef: ScopedMcpServerConfig,
   transportType: 'sse' | 'http' | 'claudeai-proxy',
+  options?: {
+    lacksHelperHeaders?: boolean
+    hasStoredRefreshToken?: boolean
+  },
 ): MCPServerConnection {
   // Official 2.1.325 #2304: if OAuth token refresh only suffered a brief
   // transient refusal (5xx / timeout / non-permanent OAuth error), do NOT
@@ -398,7 +437,22 @@ export function handleRemoteAuthFailure(
     name,
     `Authentication required for ${label[transportType]} server`,
   )
-  setMcpAuthCacheEntry(name)
+  if (
+    shouldSkipPersistingMcpNeedsAuthCache({
+      name,
+      serverRef,
+      transportType,
+      lacksHelperHeaders: options?.lacksHelperHeaders,
+      hasStoredRefreshToken: options?.hasStoredRefreshToken,
+    })
+  ) {
+    logMCPDebug(
+      name,
+      `headersHelper did not supply headers and no OAuth refresh token is stored — skipping cross-session needs-auth cache`,
+    )
+  } else {
+    setMcpAuthCacheEntry(name)
+  }
   return { name, type: 'needs-auth', config: serverRef }
 }
 

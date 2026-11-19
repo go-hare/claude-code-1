@@ -4,7 +4,7 @@
 import * as React from 'react';
 import type { HookEvent } from 'src/entrypoints/agentSdkTypes.js';
 import type { HookEventMetadata } from 'src/utils/hooks/hooksConfigManager.js';
-import { Box, Dialog, KeyboardShortcutHint, Text } from '@anthropic/ink';
+import { Box, Byline, Dialog, KeyboardShortcutHint, Text } from '@anthropic/ink';
 import {
   getHookDisplayText,
   hookSourceHeaderDisplayString,
@@ -51,7 +51,17 @@ export function SelectHookMode({
   }
 
   return (
-    <Dialog title={title} subtitle={hookEventMetadata.description} onCancel={onCancel}>
+    <Dialog
+      title={title}
+      subtitle={hookEventMetadata.description}
+      onCancel={onCancel}
+      inputGuide={
+        <Byline>
+          <KeyboardShortcutHint shortcut="Enter" action="select" />
+          <KeyboardShortcutHint shortcut="Esc" action="go back" />
+        </Byline>
+      }
+    >
       <ItemList
         options={hooksForSelectedMatcher.map((hook, index) => ({
           label: getHookDisplayText(hook.config),

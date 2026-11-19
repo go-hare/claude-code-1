@@ -1,8 +1,8 @@
 import type { McpbManifestAny as McpbManifest } from '@anthropic-ai/mcpb'
 import axios from 'axios'
 import { createHash } from 'crypto'
-import { chmod, writeFile } from 'fs/promises'
-import { dirname, join } from 'path'
+import { chmod, lstat, readdir, rename, rm, writeFile } from 'fs/promises'
+import { dirname, join, resolve } from 'path'
 import type { McpServerConfig } from '../../services/mcp/types.js'
 import { logForDebugging } from '../debug.js'
 import { parseAndValidateManifestFromBytes } from '../dxt/helpers.js'
@@ -89,6 +89,8 @@ export type McpbCacheMetadata = {
   extractedPath: string
   cachedAt: string
   lastChecked: string
+  /** Official 2.1.326 #329: plugins currently referencing this cached bundle. */
+  pluginIds?: string[]
 }
 
 /**
@@ -122,12 +124,16 @@ function generateContentHash(data: Uint8Array): string {
  * the plugins cache directory (`<pluginsDir>/mcpb-cache/<hash>`) instead of
  * `<pluginPath>/.mcpb-cache`, so read-only plugin folders load cleanly.
  */
+export function getMcpbCacheRootDir(): string {
+  return join(getPluginsDirectory(), 'mcpb-cache')
+}
+
 export function getMcpbCacheDir(pluginPath: string): string {
   const pluginHash = createHash('sha256')
     .update(pluginPath)
     .digest('hex')
     .substring(0, 16)
-  return join(getPluginsDirectory(), 'mcpb-cache', pluginHash)
+  return join(getMcpbCacheRootDir(), pluginHash)
 }
 
 /**
@@ -473,19 +479,41 @@ async function generateMcpConfig(
   return mcpConfig as McpServerConfig
 }
 
+function withPluginIdRecorded(
+  metadata: McpbCacheMetadata,
+  pluginId: string,
+): McpbCacheMetadata {
+  const existing = metadata.pluginIds ?? []
+  if (existing.includes(pluginId)) return metadata
+  return { ...metadata, pluginIds: [...existing, pluginId] }
+}
+
 /**
  * Load cache metadata for an MCPB source
  */
 async function loadCacheMetadata(
   cacheDir: string,
   source: string,
+  pluginId?: string,
 ): Promise<McpbCacheMetadata | null> {
   const fs = getFsImplementation()
   const metadataPath = getMetadataPath(cacheDir, source)
 
   try {
     const content = await fs.readFile(metadataPath, { encoding: 'utf-8' })
-    return jsonParse(content) as McpbCacheMetadata
+    const parsed = jsonParse(content) as McpbCacheMetadata
+    if (pluginId) {
+      const updated = withPluginIdRecorded(parsed, pluginId)
+      if (updated !== parsed) {
+        await saveCacheMetadata(cacheDir, source, updated).catch(err => {
+          logForDebugging(
+            `Failed to note ${pluginId} in MCPB cache metadata: ${errorMessage(err)}`,
+          )
+        })
+        return updated
+      }
+    }
+    return parsed
   } catch (error) {
     const code = getErrnoCode(error)
     if (code === 'ENOENT') return null
@@ -509,7 +537,182 @@ async function saveCacheMetadata(
   const metadataPath = getMetadataPath(cacheDir, source)
 
   await getFsImplementation().mkdir(cacheDir)
-  await writeFile(metadataPath, jsonStringify(metadata, null, 2), 'utf-8')
+  let toWrite = metadata
+  if (metadata.pluginIds && metadata.pluginIds.length > 0) {
+    try {
+      const existingRaw = await getFsImplementation().readFile(metadataPath, {
+        encoding: 'utf-8',
+      })
+      const existing = jsonParse(existingRaw) as McpbCacheMetadata
+      const merged = Array.from(
+        new Set([...(existing.pluginIds ?? []), ...metadata.pluginIds]),
+      )
+      toWrite = { ...metadata, pluginIds: merged }
+    } catch {
+      // No existing metadata or unreadable — write fresh
+    }
+  }
+  await writeFile(metadataPath, jsonStringify(toWrite, null, 2), 'utf-8')
+}
+
+export type McpbCacheCleanupResult = {
+  removedDirs: string[]
+  removedMetadata: string[]
+  keptSharedDirs: string[]
+}
+
+/**
+ * Official 2.1.326 #329 (`JLa`): when uninstalling `pluginId`, remove extracted
+ * MCPB/DXT bundle directories and metadata files that were referenced only by
+ * `pluginId`, while preserving any bundle still referenced by another plugin.
+ */
+export async function removePluginMcpbCache(
+  pluginId: string,
+  cacheRootDir: string = getMcpbCacheRootDir(),
+): Promise<McpbCacheCleanupResult> {
+  const result: McpbCacheCleanupResult = {
+    removedDirs: [],
+    removedMetadata: [],
+    keptSharedDirs: [],
+  }
+  try {
+    const rootStat = await lstat(cacheRootDir).catch(() => null)
+    if (!rootStat?.isDirectory()) return result
+
+    // Collect metadata files both directly under cacheRootDir (flat layout)
+    // and one directory down under per-plugin hash buckets.
+    const metadataFiles: string[] = []
+    const rootEntries = await readdir(cacheRootDir, { withFileTypes: true })
+    for (const entry of rootEntries) {
+      const fullPath = join(cacheRootDir, entry.name)
+      if (entry.isFile() && entry.name.endsWith('.metadata.json')) {
+        metadataFiles.push(fullPath)
+      } else if (entry.isDirectory()) {
+        const subEntries = await readdir(fullPath, {
+          withFileTypes: true,
+        }).catch(() => [])
+        for (const sub of subEntries) {
+          if (sub.isFile() && sub.name.endsWith('.metadata.json')) {
+            metadataFiles.push(join(fullPath, sub.name))
+          }
+        }
+      }
+    }
+
+    const fs = getFsImplementation()
+    const metadataToDelete: string[] = []
+    const metadataToRewrite: Array<{
+      path: string
+      metadata: McpbCacheMetadata
+    }> = []
+    const candidateDirs = new Set<string>()
+    const stillReferencedDirs = new Set<string>()
+
+    for (const metaPath of metadataFiles) {
+      const st = await lstat(metaPath).catch(() => null)
+      if (!st?.isFile()) {
+        logForDebugging(
+          `Not removing the extracted MCPB files of ${pluginId}: ${metaPath} is not a regular file`,
+          { level: 'error' },
+        )
+        return result
+      }
+      let meta: McpbCacheMetadata | null = null
+      try {
+        const raw = await fs.readFile(metaPath, { encoding: 'utf-8' })
+        meta = jsonParse(raw) as McpbCacheMetadata
+      } catch {
+        continue
+      }
+      if (!meta || typeof meta.extractedPath !== 'string') continue
+      const normalizedExtracted = resolve(meta.extractedPath)
+      const prevIds = Array.isArray(meta.pluginIds) ? meta.pluginIds : []
+      const remainingIds = prevIds.filter(id => id !== pluginId)
+
+      if (prevIds.length > 0 && remainingIds.length === 0) {
+        metadataToDelete.push(metaPath)
+        candidateDirs.add(normalizedExtracted)
+        continue
+      }
+
+      stillReferencedDirs.add(normalizedExtracted)
+      if (remainingIds.length < prevIds.length) {
+        metadataToRewrite.push({
+          path: metaPath,
+          metadata: { ...meta, pluginIds: remainingIds },
+        })
+      }
+    }
+
+    for (const item of metadataToRewrite) {
+      await writeFile(item.path, jsonStringify(item.metadata, null, 2), 'utf-8')
+    }
+
+    const normalizedRoot = resolve(cacheRootDir)
+    for (const dir of candidateDirs) {
+      if (stillReferencedDirs.has(dir)) {
+        result.keptSharedDirs.push(dir)
+        continue
+      }
+      // Safety: only remove directories inside the MCPB cache root
+      if (
+        !dir.startsWith(`${normalizedRoot}/`) &&
+        !dir.startsWith(`${normalizedRoot}\\`)
+      ) {
+        continue
+      }
+      const trashPath = `${dir}.removing-${Date.now()}`
+      try {
+        await rename(dir, trashPath).catch(() => undefined)
+        await rm(trashPath, { recursive: true, force: true }).catch(
+          () => undefined,
+        )
+        await rm(dir, { recursive: true, force: true })
+        result.removedDirs.push(dir)
+      } catch (err) {
+        if (!isENOENT(err)) {
+          logForDebugging(
+            `Failed to remove extracted MCPB ${dir}: ${errorMessage(err)}`,
+            { level: 'error' },
+          )
+        }
+      }
+    }
+
+    for (const metaPath of metadataToDelete) {
+      try {
+        await rm(metaPath, { force: true })
+        result.removedMetadata.push(metaPath)
+      } catch (err) {
+        if (!isENOENT(err)) {
+          logForDebugging(
+            `Failed to remove MCPB metadata ${metaPath}: ${errorMessage(err)}`,
+            { level: 'warn' },
+          )
+        }
+      }
+    }
+
+    // Best-effort cleanup of empty per-plugin bucket directories under cacheRootDir
+    for (const entry of rootEntries) {
+      if (!entry.isDirectory()) continue
+      const bucketDir = join(cacheRootDir, entry.name)
+      const leftover = await readdir(bucketDir).catch(() => null)
+      if (leftover && leftover.length === 0) {
+        await rm(bucketDir, { recursive: true, force: true }).catch(
+          () => undefined,
+        )
+      }
+    }
+  } catch (err) {
+    if (!isENOENT(err)) {
+      logForDebugging(
+        `Failed to remove the extracted MCPB files of ${pluginId}: ${errorMessage(err)}`,
+        { level: 'error' },
+      )
+    }
+  }
+  return result
 }
 
 /**
@@ -754,7 +957,7 @@ export async function loadMcpbFile(
   logForDebugging(`Loading MCPB from source: ${source}`)
 
   // Check cache first
-  const metadata = await loadCacheMetadata(cacheDir, source)
+  const metadata = await loadCacheMetadata(cacheDir, source, pluginId)
   if (metadata && !(await checkMcpbChanged(source, pluginPath))) {
     logForDebugging(
       `Using cached MCPB from ${metadata.extractedPath} (hash: ${metadata.contentHash})`,
@@ -932,6 +1135,7 @@ export async function loadMcpbFile(
         extractedPath: extractPath,
         cachedAt: new Date().toISOString(),
         lastChecked: new Date().toISOString(),
+        pluginIds: [pluginId],
       }
       await saveCacheMetadata(cacheDir, source, newMetadata)
 
@@ -971,6 +1175,7 @@ export async function loadMcpbFile(
       extractedPath: extractPath,
       cachedAt: new Date().toISOString(),
       lastChecked: new Date().toISOString(),
+      pluginIds: [pluginId],
     }
     await saveCacheMetadata(cacheDir, source, newMetadata)
 
@@ -996,6 +1201,7 @@ export async function loadMcpbFile(
     extractedPath: extractPath,
     cachedAt: new Date().toISOString(),
     lastChecked: new Date().toISOString(),
+    pluginIds: [pluginId],
   }
   await saveCacheMetadata(cacheDir, source, newMetadata)
 

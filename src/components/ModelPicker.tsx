@@ -2,7 +2,17 @@ import figures from 'figures';
 import capitalize from 'lodash-es/capitalize.js';
 import * as React from 'react';
 import { useCallback, useMemo, useState } from 'react';
-import { Box, Byline, color, KeyboardShortcutHint, Pane, Ratchet, Text, useTheme } from '@anthropic/ink';
+import {
+  Box,
+  Byline,
+  color,
+  KeyboardShortcutHint,
+  Pane,
+  Ratchet,
+  Text,
+  useModalOrTerminalSize,
+  useTheme,
+} from '@anthropic/ink';
 import { useExitOnCtrlCDWithKeybindings } from 'src/hooks/useExitOnCtrlCDWithKeybindings.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -274,7 +284,8 @@ export function ModelPicker({
   const setAppState = useSetAppState();
   const [theme] = useTheme();
   const exitState = useExitOnCtrlCDWithKeybindings(onCancel, undefined, isStandaloneCommand === true);
-  const { rows } = useTerminalSize();
+  // Official 2.1.326 #215: respect modal row budget in short fullscreen windows.
+  const { rows } = useModalOrTerminalSize(useTerminalSize());
   const isFastMode = useAppState(s => (isFastModeEnabled() ? s.fastMode : false));
   // Memoize all derived values to prevent re-renders
   const modelOptions = useMemo(() => getModelOptions(isFastMode ?? false), [isFastMode]);
@@ -558,6 +569,7 @@ export function ModelPicker({
               onFocus={handleFocus}
               onCancel={() => onCancel?.()}
               visibleOptionCount={visibleCount}
+              overflowHint="count"
               hiddenBelowUnit="model"
             />
           </Ratchet>

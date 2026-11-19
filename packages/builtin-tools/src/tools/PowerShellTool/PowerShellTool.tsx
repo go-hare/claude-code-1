@@ -64,7 +64,16 @@ import {
   PREVIEW_SIZE_BYTES,
 } from 'src/utils/toolResultStorage.js';
 import { createOutputFileCleanup, persistLargeOutputFile } from '../BashTool/outputFileCleanup.js';
-import { getSandboxPolicyRefusal, SandboxPolicyRefusalError, shouldUseSandbox } from '../BashTool/shouldUseSandbox.js';
+import {
+  clearSandboxStateAtCheck,
+  getSandboxPolicyRefusal,
+  KEPT_IN_SANDBOX_SINCE_CHECK_NOTE,
+  recordSandboxStateAtCheck,
+  SANDBOX_GONE_SINCE_CHECK_MESSAGE,
+  SandboxPolicyRefusalError,
+  shouldKeepRewrittenCommandInSandbox,
+  shouldUseSandbox,
+} from '../BashTool/shouldUseSandbox.js';
 import { BackgroundHint } from '../BashTool/UI.js';
 import {
   buildImageToolResult,
@@ -505,7 +514,25 @@ export const PowerShellTool = buildTool({
     input: PowerShellToolInput,
     context: Parameters<Tool['checkPermissions']>[1],
   ): Promise<PermissionResult> {
-    return await powershellToolHasPermission(input, context);
+    const sandboxAtStart = shouldUseSandbox({
+      command: input.command,
+      dangerouslyDisableSandbox: input.dangerouslyDisableSandbox,
+      shellType: 'powershell',
+    });
+    try {
+      return await powershellToolHasPermission(input, context);
+    } finally {
+      recordSandboxStateAtCheck(
+        context.toolUseId,
+        input,
+        sandboxAtStart ||
+          shouldUseSandbox({
+            command: input.command,
+            dangerouslyDisableSandbox: input.dangerouslyDisableSandbox,
+            shellType: 'powershell',
+          }),
+      );
+    }
   },
 
   renderToolUseMessage,
@@ -617,13 +644,34 @@ export const PowerShellTool = buildTool({
     _parentMessage?: AssistantMessage,
     onProgress?: ToolCallProgress<PowerShellProgress>,
   ): Promise<{ data: Out }> {
+    const keepInSandboxSinceCheck = shouldKeepRewrittenCommandInSandbox(toolUseContext.toolUseId, input);
+    clearSandboxStateAtCheck(toolUseContext.toolUseId);
+    let keptInSandboxNote: string | undefined;
     // densable I0d — load-bearing for direct call() callers
     {
-      const useSandbox = shouldUseSandbox({
-        command: input.command,
-        dangerouslyDisableSandbox: input.dangerouslyDisableSandbox,
-        shellType: 'powershell',
-      });
+      const useSandbox = shouldUseSandbox(
+        {
+          command: input.command,
+          dangerouslyDisableSandbox: input.dangerouslyDisableSandbox,
+          shellType: 'powershell',
+        },
+        { disableUnsandboxedCommands: keepInSandboxSinceCheck },
+      );
+      if (keepInSandboxSinceCheck && !useSandbox) {
+        throw new SandboxPolicyRefusalError(SANDBOX_GONE_SINCE_CHECK_MESSAGE);
+      }
+      if (
+        keepInSandboxSinceCheck &&
+        useSandbox &&
+        !shouldUseSandbox({
+          command: input.command,
+          dangerouslyDisableSandbox: input.dangerouslyDisableSandbox,
+          shellType: 'powershell',
+        }) &&
+        toolUseContext.innerCall !== true
+      ) {
+        keptInSandboxNote = KEPT_IN_SANDBOX_SINCE_CHECK_NOTE;
+      }
       const policyRefusal = getSandboxPolicyRefusal(useSandbox, input.command, false, 'powershell');
       if (policyRefusal !== null) {
         throw new SandboxPolicyRefusalError(policyRefusal);
@@ -653,6 +701,8 @@ export const PowerShellTool = buildTool({
         innerCall: toolUseContext.innerCall,
         // densable 2.1.217 VRu — pin isolation worktree into shell gates
         agentWorktree: toolUseContext.agentWorktree,
+        keepInSandboxSinceCheck,
+        immediateProgress: (toolUseContext as { immediateProgress?: boolean }).immediateProgress === true,
       });
 
       let generatorResult;
@@ -716,6 +766,9 @@ export const PowerShellTool = buildTool({
           stderrForShellReset = stdErrAppendShellResetMessage('');
         }
       }
+      stderrForShellReset = [isPreFlightSentinel ? undefined : keptInSandboxNote, stderrForShellReset]
+        .filter(Boolean)
+        .join('\n');
 
       // If backgrounded, return immediately with task ID. Strip hints first
       // so interrupt-backgrounded fullOutput doesn't leak the tag to the
@@ -793,7 +846,10 @@ export const PowerShellTool = buildTool({
         throw new Error(result.preSpawnError);
       }
       if (interpretation.isError && !isInterrupt) {
-        throw new ShellError(stdout, result.stderr || '', result.code, result.interrupted);
+        const errStderr = [result.stderr || '', isPreFlightSentinel ? undefined : keptInSandboxNote]
+          .filter(Boolean)
+          .join('\n');
+        throw new ShellError(stdout, errStderr, result.code, result.interrupted);
       }
 
       // Large output: file on disk has more than getMaxOutputLength() bytes.
@@ -868,6 +924,8 @@ async function* runPowerShellCommand({
   agentId,
   innerCall,
   agentWorktree,
+  keepInSandboxSinceCheck,
+  immediateProgress,
 }: {
   input: PowerShellToolInput;
   abortController: AbortController;
@@ -881,6 +939,9 @@ async function* runPowerShellCommand({
   innerCall?: boolean;
   /** densable agentWorktree for VRu shell isolation gate. */
   agentWorktree?: string;
+  keepInSandboxSinceCheck?: boolean;
+  /** Official 2.1.326 #195: skip the 2s initial delay for `!` shell mode. */
+  immediateProgress?: boolean;
 }): AsyncGenerator<
   {
     type: 'progress';
@@ -950,11 +1011,14 @@ async function* runPowerShellCommand({
       },
       preventCwdChanges,
       // densable vxo/p3 — shellType powershell; Windows may sandbox when SRT active
-      shouldUseSandbox: shouldUseSandbox({
-        command,
-        dangerouslyDisableSandbox,
-        shellType: 'powershell',
-      }),
+      shouldUseSandbox: shouldUseSandbox(
+        {
+          command,
+          dangerouslyDisableSandbox,
+          shellType: 'powershell',
+        },
+        { disableUnsandboxedCommands: keepInSandboxSinceCheck },
+      ),
       shouldAutoBackground,
       // densable VRu — block shell when cwd is outside agent isolation worktree
       agentWorktree,
@@ -1098,7 +1162,8 @@ async function* runPowerShellCommand({
 
   // Set up progress yielding with periodic checks
   const startTime = Date.now();
-  let nextProgressTime = startTime + PROGRESS_THRESHOLD_MS;
+  // Official 2.1.326 #195: start reporting immediately for `!` shell mode.
+  let nextProgressTime = immediateProgress ? startTime : startTime + PROGRESS_THRESHOLD_MS;
   let foregroundTaskId: string | undefined;
 
   // Progress loop: wrap in try/finally so stopPolling is called on every exit

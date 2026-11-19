@@ -28,6 +28,7 @@ import {
   messagesAfterAreOnlySynthetic,
   selectableUserMessagesFilter,
 } from '../../components/MessageSelector.js'
+import { shouldSuppressTurnDurationForFailedOrRefusedTurn } from '../../components/Messages.js'
 import { resolveTurnDurationWithBackgroundWait } from '../../components/messages/SystemTextMessage.js'
 import type { SpinnerMode } from '../../components/Spinner.js'
 import { getSystemPrompt } from '../../constants/prompts.js'
@@ -1452,16 +1453,28 @@ export async function runReplTurn(
           })
           backgroundWaitStartTimeRef.current =
             resolvedDuration.backgroundWaitStartTime
-          setMessages(prev => [
-            ...prev,
-            createTurnDurationMessage(
+          setMessages(prev => {
+            const turnDurationMsg = createTurnDurationMessage(
               resolvedDuration.durationMs,
               budgetInfo,
               count(prev, isLoggableMessage),
               resolvedDuration.pendingBackgroundAgentCount,
               resolvedDuration.pendingWorkflowCount,
-            ),
-          ])
+            )
+            // Official 2.1.326 #159: suppress the "done" (`turn_duration`) line
+            // when the turn ended in an API error or permission refusal /
+            // interruption and no background wait is pending.
+            if (
+              resolvedDuration.backgroundWaitStartTime === null &&
+              shouldSuppressTurnDurationForFailedOrRefusedTurn(
+                [...prev, turnDurationMsg],
+                prev.length,
+              )
+            ) {
+              return prev
+            }
+            return [...prev, turnDurationMsg]
+          })
         }
       }
       setAbortController(null)

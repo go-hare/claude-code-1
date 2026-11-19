@@ -29,6 +29,13 @@ export function ColorPicker({ agentName, currentColor = 'automatic', onConfirm }
     } else if (e.key === 'down') {
       e.preventDefault();
       setSelectedIndex(prev => (prev < COLOR_OPTIONS.length - 1 ? prev + 1 : 0));
+    } else if (e.key === 'home' || e.key === 'pageup') {
+      // Official 2.1.326 #281: Home/End/PageUp/PageDown support in agent pickers.
+      e.preventDefault();
+      setSelectedIndex(0);
+    } else if (e.key === 'end' || e.key === 'pagedown') {
+      e.preventDefault();
+      setSelectedIndex(COLOR_OPTIONS.length - 1);
     } else if (e.key === 'return') {
       e.preventDefault();
       const selected = COLOR_OPTIONS[selectedIndex];
@@ -49,13 +56,17 @@ export function ColorPicker({ agentName, currentColor = 'automatic', onConfirm }
               <Text color={isSelected ? 'suggestion' : undefined}>{isSelected ? figures.pointer : ' '}</Text>
 
               {option === 'automatic' ? (
-                <Text bold={isSelected}>Automatic color</Text>
+                <Text color={isSelected ? 'suggestion' : undefined} bold={isSelected}>
+                  Automatic color
+                </Text>
               ) : (
                 <Box gap={1}>
                   <Text backgroundColor={AGENT_COLOR_TO_THEME_COLOR[option]} color="inverseText">
                     {' '}
                   </Text>
-                  <Text bold={isSelected}>{capitalize(option)}</Text>
+                  <Text color={isSelected ? 'suggestion' : undefined} bold={isSelected}>
+                    {capitalize(option)}
+                  </Text>
                 </Box>
               )}
             </Box>

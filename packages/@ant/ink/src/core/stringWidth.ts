@@ -217,6 +217,142 @@ const bunStringWidth =
 
 const BUN_STRING_WIDTH_OPTS = { ambiguousIsNarrow: true } as const
 
-export const stringWidth: (str: string) => number = bunStringWidth
-  ? str => bunStringWidth(str, BUN_STRING_WIDTH_OPTS)
-  : stringWidthJavaScript
+// Official 2.1.326 (#222/#223): Indic spacing vowel signs, wide-drawn symbols
+// (✌ U+270C, ☝ U+261D, ⛹ U+26F9, ✍ U+270D, etc.), skin-tone modifiers, ZWJ,
+// and GNU screen joined-emoji width calibration (328 `m`, `sbr`, `x`, `nFi`, `Ucl`).
+const INDIC_WIDE_VOWEL_RE =
+  /[\u093b\u093e-\u0940\u0949-\u094c\u0982\u09be-\u09c0\u09c7\u09c8\u09cb\u09cc\u09d7\u0a3e-\u0a40\u0abe-\u0ac0\u0ac9\u0acb\u0acc\u0b02\u0b3e\u0b40\u0b47\u0b48\u0b4b\u0b4c\u0b57\u0bbe\u0bbf\u0bc1\u0bc2\u0bc6-\u0bc8\u0bca-\u0bcc\u0bd7\u0c01\u0c02\u0c41-\u0c44\u0c82\u0cbe\u0cc0-\u0cc4\u0cc7\u0cc8\u0cca\u0ccb\u0cd5\u0cd6\u0d02\u0d3e-\u0d40\u0d46-\u0d48\u0d4a-\u0d4c]/
+export const WIDE_SYMBOL_CALIBRATION_RE =
+  /[\u17a4\u17d8\u261d\u26f9\u270c\u270d\u2e3a\u2e3b\u3248-\u324f\u{1f1e6}-\u{1f1ff}\u{1f3cb}\u{1f3cc}\u{1f574}\u{1f575}\u{1f590}\u{1f93b}\u{1f946}]/u
+const CALIBRATION_NEEDED_RE = new RegExp(
+  INDIC_WIDE_VOWEL_RE.source.slice(0, -1) +
+    WIDE_SYMBOL_CALIBRATION_RE.source.slice(1),
+  'u',
+)
+const JOINED_OR_MODIFIER_EMOJI_RE =
+  /[\u200d\u{1f3fb}-\u{1f3ff}\u{e0020}-\u{e007f}]/u
+const MAX_INDIC_VOWEL_EXTRA = 8
+
+export type EmojiWidthCalibrator = (grapheme: string) => number | undefined
+
+let customEmojiWidthCalibrator: EmojiWidthCalibrator | undefined
+
+/** Official 2.1.326 `Ucl` (#222/#223): register a terminal-specific emoji width calibrator. */
+export function setTerminalEmojiWidthCalibrator(
+  calibrator: EmojiWidthCalibrator | undefined,
+): void {
+  customEmojiWidthCalibrator = calibrator
+}
+
+/**
+ * Official 2.1.326 (#223): GNU screen does not collapse ZWJ / skin-tone /
+ * tag-sequence emoji into a single 2-cell glyph; each visible base component
+ * advances the cursor independently.
+ */
+export function isGnuScreenEnv(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  if (env['TMUX']) return false
+  if (env['STY']) return true
+  return (env['TERM'] ?? '').startsWith('screen')
+}
+
+function gnuScreenJoinedEmojiWidth(grapheme: string): number {
+  let total = 0
+  for (const ch of grapheme) {
+    const cp = ch.codePointAt(0)!
+    if (
+      cp === 0x200d ||
+      (cp >= 0xfe00 && cp <= 0xfe0f) ||
+      (cp >= 0xe0020 && cp <= 0xe007f)
+    ) {
+      continue
+    }
+    if (cp >= 0x1f3fb && cp <= 0x1f3ff) {
+      total += 2
+      continue
+    }
+    total += rawBaseWidth(ch)
+  }
+  return Math.max(total, 2)
+}
+
+function getActiveEmojiCalibrator(): EmojiWidthCalibrator | undefined {
+  if (customEmojiWidthCalibrator !== undefined) {
+    return customEmojiWidthCalibrator
+  }
+  return isGnuScreenEnv() ? gnuScreenJoinedEmojiWidth : undefined
+}
+
+/** Official 2.1.326 `Lsn`: fast check before paying grapheme segmentation cost. */
+export function needsWidthCalibration(str: string): boolean {
+  return (
+    CALIBRATION_NEEDED_RE.test(str) ||
+    (getActiveEmojiCalibrator() !== undefined &&
+      JOINED_OR_MODIFIER_EMOJI_RE.test(str))
+  )
+}
+
+/** Official 2.1.326 `nFi`: extra cell columns for a single grapheme cluster. */
+export function computeGraphemeExtraWidth(
+  grapheme: string,
+  baseWidth: number,
+  calibrator: EmojiWidthCalibrator | undefined = getActiveEmojiCalibrator(),
+): number {
+  const indicExtra = Math.min(
+    grapheme.split(INDIC_WIDE_VOWEL_RE).length - 1,
+    MAX_INDIC_VOWEL_EXTRA,
+  )
+  const symbolExtra =
+    baseWidth === 1 && WIDE_SYMBOL_CALIBRATION_RE.test(grapheme) ? 1 : 0
+  const emojiExtra =
+    calibrator && JOINED_OR_MODIFIER_EMOJI_RE.test(grapheme)
+      ? (calibrator(grapheme) ?? 0) - baseWidth
+      : 0
+  return Math.max(indicExtra + symbolExtra, emojiExtra, 0)
+}
+
+function rawBaseWidth(str: string): number {
+  return bunStringWidth
+    ? bunStringWidth(str, BUN_STRING_WIDTH_OPTS)
+    : stringWidthJavaScript(str)
+}
+
+function computeCalibrationExtra(str: string): number {
+  const calibrator = getActiveEmojiCalibrator()
+  if (
+    !CALIBRATION_NEEDED_RE.test(str) &&
+    !(calibrator !== undefined && JOINED_OR_MODIFIER_EMOJI_RE.test(str))
+  ) {
+    return 0
+  }
+  const plain = str.includes('\x1b') ? stripAnsi(str) : str
+  let extra = 0
+  for (const { segment } of getGraphemeSegmenter().segment(plain)) {
+    const base = rawBaseWidth(segment)
+    extra += computeGraphemeExtraWidth(segment, base, calibrator)
+  }
+  return extra
+}
+
+export function stringWidth(str: string): number {
+  if (typeof str !== 'string' || str.length === 0) {
+    return 0
+  }
+  // Fast path (#240): pure printable ASCII — no regex, no ANSI strip, no segmentation.
+  let asciiWidth = 0
+  let pureAscii = true
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i)
+    if (code >= 0x20 && code < 0x7f) {
+      asciiWidth++
+    } else {
+      pureAscii = false
+      break
+    }
+  }
+  if (pureAscii) {
+    return asciiWidth
+  }
+  return rawBaseWidth(str) + computeCalibrationExtra(str)
+}

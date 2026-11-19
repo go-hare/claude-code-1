@@ -246,6 +246,8 @@ export function PermissionPrompt<T extends string>({
       if (type === 'accept') {
         if (acceptInputMode) {
           setAcceptInputMode(false);
+          // Official 2.1.326 #27: clear note when Tab hides the input box.
+          setAcceptFeedback('');
           logEvent('tengu_accept_feedback_mode_collapsed', analyticsProps);
         } else {
           setAcceptInputMode(true);
@@ -255,6 +257,7 @@ export function PermissionPrompt<T extends string>({
       } else if (type === 'reject') {
         if (rejectInputMode) {
           setRejectInputMode(false);
+          setRejectFeedback('');
           logEvent('tengu_reject_feedback_mode_collapsed', analyticsProps);
         } else {
           setRejectInputMode(true);
@@ -273,10 +276,15 @@ export function PermissionPrompt<T extends string>({
       const option = safeOptions.find(opt => opt.value === value);
       if (!option) return;
 
-      // Get feedback if applicable
+      // Get feedback if applicable (Official 2.1.326 #27: ignore hidden feedback if input mode is collapsed)
       let feedback: string | undefined;
       if (option.feedbackConfig) {
-        const rawFeedback = option.feedbackConfig.type === 'accept' ? acceptFeedback : rejectFeedback;
+        const isInputVisible = option.feedbackConfig.type === 'accept' ? acceptInputMode : rejectInputMode;
+        const rawFeedback = !isInputVisible
+          ? ''
+          : option.feedbackConfig.type === 'accept'
+            ? acceptFeedback
+            : rejectFeedback;
         const trimmedFeedback = rawFeedback.trim();
 
         if (trimmedFeedback) {
@@ -322,12 +330,14 @@ export function PermissionPrompt<T extends string>({
     });
     if (action === 'collapse-yes') {
       setAcceptInputMode(false);
+      setAcceptFeedback('');
       const acceptOpt = options.find(opt => opt.feedbackConfig?.type === 'accept');
       if (acceptOpt) setFocusedValue(acceptOpt.value);
       return;
     }
     if (action === 'collapse-no') {
       setRejectInputMode(false);
+      setRejectFeedback('');
       const rejectOpt = options.find(opt => opt.feedbackConfig?.type === 'reject');
       if (rejectOpt) setFocusedValue(rejectOpt.value);
       return;

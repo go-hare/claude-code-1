@@ -522,6 +522,42 @@ export function writeContentToTerminal(
   recordSlowestWrite(terminal, startedMs, bytes)
 }
 
+const TMUX_SYNC_SKIP_MAX_BYTES = 1024
+
+/**
+ * 2.1.326 #185 / 2.1.328 `syncRedrawsEverything`:
+ * tmux 3.7 repaints the entire pane when wrapped in BSU/ESU (DEC 2026),
+ * causing full-pane redraws on ordinary typing and spinner frames.
+ */
+export function isTmuxSyncRedrawsEverything(): boolean {
+  if (process.env.TMUX) return true
+  const name = Jk().xtversionName?.toLowerCase()
+  return name !== undefined && name.startsWith('tmux ')
+}
+
+/**
+ * Return true when `diff` is a small incremental update in tmux that should
+ * omit BSU/ESU so tmux 3.7 does not force a full-pane redraw.
+ * Full clears (`clearTerminal`) and large writes (> 1024 bytes) still wrap.
+ */
+export function shouldSkipTmuxSyncForDiff(diff: Diff): boolean {
+  if (!isTmuxSyncRedrawsEverything()) return false
+  let estimatedBytes = 0
+  for (const patch of diff) {
+    if (patch.type === 'clearTerminal') return false
+    if (patch.type === 'stdout') {
+      estimatedBytes += Buffer.byteLength(patch.content)
+      if (estimatedBytes > TMUX_SYNC_SKIP_MAX_BYTES) return false
+    } else if (patch.type === 'clear') {
+      estimatedBytes += patch.count * 8
+      if (estimatedBytes > TMUX_SYNC_SKIP_MAX_BYTES) return false
+    } else {
+      estimatedBytes += 12
+    }
+  }
+  return true
+}
+
 export function writeDiffToTerminal(
   terminal: Terminal,
   diff: Diff,
@@ -537,8 +573,9 @@ export function writeDiffToTerminal(
 
   // BSU/ESU wrapping is opt-out to keep main-screen behavior unchanged.
   // Callers pass skipSyncMarkers=true when the terminal doesn't support
-  // DEC 2026 (e.g. tmux) AND the cost matters (high-frequency alt-screen).
-  const useSync = !skipSyncMarkers
+  // DEC 2026, and in tmux 3.7 we skip BSU/ESU on small incremental diffs
+  // so typing/spinners don't trigger full-pane redraws (#185).
+  const useSync = !skipSyncMarkers && !shouldSkipTmuxSyncForDiff(diff)
   const clampY =
     viewportRows !== undefined && viewportRows > 1
       ? viewportRows - 1

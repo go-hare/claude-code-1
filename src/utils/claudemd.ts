@@ -89,6 +89,7 @@ import { expandPath, isUnsafeNetworkOrNtIncludePath } from './path.js'
 import { pathInWorkingPath } from './permissions/filesystem.js'
 import { isSettingSourceEnabled } from './settings/constants.js'
 import { getInitialSettings } from './settings/settings.js'
+import { isSafeGlobPattern } from './settings/validation.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const teamMemPaths = feature('TEAMMEM')
@@ -619,6 +620,13 @@ const MAX_INCLUDE_DEPTH = 5
  * Matches both the original path and the realpath-resolved path to handle symlinks
  * (e.g., /tmp -> /private/tmp on macOS).
  */
+function normalizeWindowsDriveLetter(p: string): string {
+  if (/^[A-Za-z]:\//.test(p)) {
+    return p[0]!.toLowerCase() + p.slice(1)
+  }
+  return p
+}
+
 function isClaudeMdExcluded(filePath: string, type: MemoryType): boolean {
   if (type !== 'User' && type !== 'Project' && type !== 'Local') {
     return false
@@ -630,21 +638,48 @@ function isClaudeMdExcluded(filePath: string, type: MemoryType): boolean {
   }
 
   const matchOpts = { dot: true }
-  const normalizedPath = filePath.replaceAll('\\', '/')
+  const normalizedPath = normalizeWindowsDriveLetter(
+    filePath.replaceAll('\\', '/'),
+  )
 
   // Build an expanded pattern list that includes realpath-resolved versions of
   // absolute patterns. This handles symlinks like /tmp -> /private/tmp on macOS:
   // the user writes "/tmp/project/CLAUDE.md" in their exclude, but the system
   // resolves the CWD to "/private/tmp/project/...", so the file path uses the
   // real path. By resolving the patterns too, both sides match.
-  const expandedPatterns = resolveExcludePatterns(patterns).filter(
-    p => p.length > 0,
-  )
+  // Official 2.1.326 (#122): guard against malformed/catastrophic globs so
+  // picomatch never hangs or throws on a single bad pattern.
+  const expandedPatterns = resolveExcludePatterns(patterns)
+    .map(normalizeWindowsDriveLetter)
+    .filter(p => {
+      if (p.length === 0) return false
+      const check = isSafeGlobPattern(p)
+      if (!check.safe) {
+        logForDebugging(
+          `Ignoring unsafe claudeMdExcludes glob pattern "${p.slice(0, 120)}": ${check.reason}`,
+          { level: 'warn' },
+        )
+        return false
+      }
+      return true
+    })
   if (expandedPatterns.length === 0) {
     return false
   }
 
-  return picomatch.isMatch(normalizedPath, expandedPatterns, matchOpts)
+  for (const pat of expandedPatterns) {
+    try {
+      if (picomatch.isMatch(normalizedPath, pat, matchOpts)) {
+        return true
+      }
+    } catch (err) {
+      logForDebugging(
+        `Ignoring invalid claudeMdExcludes glob pattern "${pat.slice(0, 120)}": ${err instanceof Error ? err.message : String(err)}`,
+        { level: 'warn' },
+      )
+    }
+  }
+  return false
 }
 
 /** official T3 — symlink whose target could not be canonicalized (broken/loop/unresolvable). */

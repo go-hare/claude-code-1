@@ -17,7 +17,11 @@ import type { AgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool
 import type { InlineGhostText, PromptInputMode } from '../types/textInputTypes.js';
 import { isAgentSwarmsEnabled } from '../utils/agentSwarmsEnabled.js';
 import { generateProgressiveArgumentHint, parseArguments } from '../utils/argumentSubstitution.js';
-import { getShellCompletions, type ShellCompletionType } from '../utils/bash/shellCompletion.js';
+import {
+  getShellCompletions,
+  shellQuoteCompletionPath,
+  type ShellCompletionType,
+} from '../utils/bash/shellCompletion.js';
 import { formatLogMetadata } from '../utils/format.js';
 import { getSessionIdFromLog, searchSessionsByCustomTitle } from '../utils/sessionStorage.js';
 import {
@@ -154,6 +158,31 @@ type Props = {
   onModeChange?: (mode: PromptInputMode) => void;
 };
 
+/**
+ * Official 2.1.326 #165 (`Meo` / `vXe` / `Ihe`): bash argument-position path
+ * completion without requiring a `/`, with shell quoting for paths containing
+ * spaces or metacharacters.
+ */
+const BASH_NEW_COMMAND_BEFORE_RE = /(?:^|(?<![\\<>])[;&|]|(?<!\\)\()\s*$/;
+const BASH_UNQUOTED_BEFORE_RE = /^(?:[^'"`\\]|\\.|'[^']*'|"[^"\\]*(?:\\.[^"\\]*)*"|`[^`]*`)*$/s;
+
+export function applyBashPathSuggestion(
+  suggestion: SuggestionItem,
+  input: string,
+  cursorOffset: number,
+): { value: string; cursorOffset: number } {
+  const wordStart = input.slice(0, cursorOffset).lastIndexOf(' ') + 1;
+  const isDir = isPathMetadata(suggestion.metadata) && suggestion.metadata.type === 'directory';
+  const tildePrefix = suggestion.displayText.startsWith('~/') ? '~/' : '';
+  const rest = suggestion.displayText.slice(tildePrefix.length);
+  const quotedRest = shellQuoteCompletionPath(rest + (isDir ? '' : ' '));
+  const insert = tildePrefix + quotedRest;
+  return {
+    value: input.slice(0, wordStart) + insert + input.slice(cursorOffset),
+    cursorOffset: wordStart + insert.length,
+  };
+}
+
 type UseTypeaheadResult = {
   suggestions: SuggestionItem[];
   selectedSuggestion: number;
@@ -162,6 +191,7 @@ type UseTypeaheadResult = {
   commandArgumentHint?: string;
   inlineGhostText?: InlineGhostText;
   handleKeyDown: (e: KeyboardEvent) => void;
+  submitOverSuggestions: () => boolean;
 };
 
 /**
@@ -234,7 +264,7 @@ export function applyShellSuggestion(
   } else if (completionType === 'command') {
     replacementText = suggestion.displayText + ' ';
   } else {
-    replacementText = suggestion.displayText;
+    replacementText = shellQuoteCompletionPath(suggestion.displayText);
   }
 
   const newInput = input.slice(0, wordStart) + replacementText + input.slice(cursorOffset);
@@ -518,6 +548,9 @@ export function useTypeahead({
   // densable ie.current — bash-path bare Enter double-submit guard (reset each render)
   const bashPathSubmitGuardRef = useRef(false);
   bashPathSubmitGuardRef.current = false;
+  // Official 2.1.326 #165 (`xr.current`): remembers bash input when Tab triggered
+  // argument-position path completion without a `/`.
+  const bashPathNoSlashInputRef = useRef<string | null>(null);
   // densable GtS previous-input snapshot for inline :name: completion
   const previousInputForEmojiRef = useRef<string | undefined>(undefined);
 
@@ -828,11 +861,17 @@ export function useTypeahead({
         value.length > 0 &&
         value[effectiveCursorOffset - 1] === ' ';
 
-      // densable bash-path: path-like token under !bash → directory suggestions
+      // densable bash-path + 2.1.326 #165: path-like token (or Tab-triggered
+      // argument-position token without `/`) under !bash → directory suggestions
       if (mode === 'bash' && value.trim()) {
         const wordStart = value.slice(0, effectiveCursorOffset).lastIndexOf(' ') + 1;
         const word = value.slice(wordStart, effectiveCursorOffset);
-        if (word && isPathLikeToken(word)) {
+        const beforeWord = value.slice(0, wordStart);
+        if (
+          word &&
+          (isPathLikeToken(word) || word.includes('/') || bashPathNoSlashInputRef.current === value) &&
+          BASH_UNQUOTED_BEFORE_RE.test(beforeWord)
+        ) {
           latestPathTokenRef.current = word;
           const pathSuggestions = await getPathCompletions(word, { maxResults: 10, keepDotPrefix: true });
           if (latestPathTokenRef.current !== word) {
@@ -1202,15 +1241,13 @@ export function useTypeahead({
           // densable Be directory: bash-path / command-arg / at-path
           let newInput: string;
           if (directorySourceRef.current === 'bash-path') {
-            const wordStart = input.slice(0, cursorOffset).lastIndexOf(' ') + 1;
+            const applied = applyBashPathSuggestion(suggestion, input, cursorOffset);
             const isDir = isPathMetadata(suggestion.metadata) && suggestion.metadata.type === 'directory';
-            const insert = suggestion.displayText + (isDir ? '' : ' ');
-            newInput = input.slice(0, wordStart) + insert + input.slice(cursorOffset);
-            const newCursor = wordStart + insert.length;
+            newInput = applied.value;
             onInputChange(newInput);
-            setCursorOffset(newCursor);
+            setCursorOffset(applied.cursorOffset);
             if (isDir) {
-              void updateSuggestions(newInput, newCursor);
+              void updateSuggestions(newInput, applied.cursorOffset);
             } else {
               clearSuggestions();
             }
@@ -1676,6 +1713,16 @@ export function useTypeahead({
     }
   }
 
+  // Official 2.1.326 #166 (`ji`): allow rebound `chat:submit` keys (not just bare
+  // Enter) to accept/execute the currently highlighted suggestion when a menu is open.
+  const submitOverSuggestions = useCallback((): boolean => {
+    if (suggestionsRef.current.length === 0) {
+      return false;
+    }
+    handleEnter();
+    return true;
+  }, [handleEnter]);
+
   // Handle keyboard input for behaviors not covered by keybindings
   const handleKeyDown = (e: KeyboardEvent): void => {
     // Handle right arrow to accept prompt suggestion ghost text
@@ -1695,6 +1742,36 @@ export function useTypeahead({
     if (e.key === 'tab' && !e.shift) {
       // Skip if autocomplete is handling this (suggestions or ghost text exist)
       if (suggestions.length > 0 || effectiveGhostText) {
+        return;
+      }
+      // Official 2.1.326 #165: Tab in bash mode argument position completes paths
+      // even when the token contains no `/` yet.
+      const wordStart = input.slice(0, cursorOffset).lastIndexOf(' ') + 1;
+      const beforeWord = input.slice(0, wordStart);
+      if (
+        mode === 'bash' &&
+        !suppressSuggestions &&
+        wordStart < cursorOffset &&
+        input[wordStart] !== '-' &&
+        !BASH_NEW_COMMAND_BEFORE_RE.test(beforeWord) &&
+        BASH_UNQUOTED_BEFORE_RE.test(beforeWord)
+      ) {
+        e.preventDefault();
+        const word = input.slice(wordStart, cursorOffset);
+        const snapInput = input;
+        const snapOffset = cursorOffset;
+        void getPathCompletions(word, { keepDotPrefix: true })
+          .then(matches => {
+            if (matches.length === 1 && matches[0]) {
+              const applied = applyBashPathSuggestion(matches[0], snapInput, snapOffset);
+              onInputChange(applied.value);
+              setCursorOffset(applied.cursorOffset);
+            } else if (matches.length > 1) {
+              bashPathNoSlashInputRef.current = snapInput;
+              void updateSuggestions(snapInput, snapOffset);
+            }
+          })
+          .catch(() => {});
         return;
       }
       // Accept prompt suggestion if it exists in AppState
@@ -1737,20 +1814,55 @@ export function useTypeahead({
       return;
     }
 
-    // Handle selection and execution via return/enter.
+    // Handle selection and execution via return/enter or rebound `chat:submit`.
     // densable Me key path: Et.name==="return" (also accept key for fork KeyboardEvent).
     // Shift+Enter / Meta+Enter insert newlines in base TextInput — do not intercept.
     // densable bash-path: if cursor after `\` or Apple_Terminal+shift (GLs), do not
     // preventDefault — let useTextInput insert newline (path popup stays open).
-    if ((e.name === 'return' || e.key === 'return') && !e.shift && !e.meta) {
-      if (suggestionType === 'directory' && directorySourceRef.current === 'bash-path') {
+    const isBareReturn = (e.name === 'return' || e.key === 'return') && !e.shift && !e.meta;
+    const resolvedChatAction =
+      !isBareReturn && !hasPendingChord
+        ? keybindingContext?.resolve(
+            e.key,
+            {
+              ctrl: e.ctrl,
+              meta: e.meta,
+              shift: e.shift,
+              return: e.name === 'return' || e.key === 'return',
+              escape: e.name === 'escape' || e.key === 'escape',
+              tab: e.name === 'tab' || e.key === 'tab',
+              backspace: e.name === 'backspace' || e.key === 'backspace',
+              delete: e.name === 'delete' || e.key === 'delete',
+              upArrow: e.name === 'up' || e.key === 'up',
+              downArrow: e.name === 'down' || e.key === 'down',
+              leftArrow: e.name === 'left' || e.key === 'left',
+              rightArrow: e.name === 'right' || e.key === 'right',
+              pageUp: e.name === 'pageup' || e.key === 'pageup',
+              pageDown: e.name === 'pagedown' || e.key === 'pagedown',
+              home: e.name === 'home' || e.key === 'home',
+              end: e.name === 'end' || e.key === 'end',
+              wheelUp: false,
+              wheelDown: false,
+              fn: false,
+              super: false,
+            },
+            ['Chat'],
+          )
+        : undefined;
+    const isReboundSubmit = resolvedChatAction?.type === 'match' && resolvedChatAction.action === 'chat:submit';
+    if (isBareReturn || isReboundSubmit) {
+      if (isBareReturn && suggestionType === 'directory' && directorySourceRef.current === 'bash-path') {
         const ch = input[cursorOffset - 1];
         if (ch === '\\' || (env.terminal === 'Apple_Terminal' && isModifierPressed('shift'))) {
           return;
         }
       }
-      e.preventDefault();
-      handleEnter();
+      if (submitOverSuggestions()) {
+        e.preventDefault();
+        if (isReboundSubmit) {
+          e.stopImmediatePropagation();
+        }
+      }
     }
   };
 
@@ -1765,5 +1877,6 @@ export function useTypeahead({
     commandArgumentHint,
     inlineGhostText: effectiveGhostText,
     handleKeyDown,
+    submitOverSuggestions,
   };
 }

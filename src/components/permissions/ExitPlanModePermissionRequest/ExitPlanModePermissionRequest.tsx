@@ -225,6 +225,12 @@ export function ExitPlanModePermissionRequest({
       }),
     [isBypassPermissionsModeAvailable, isAutoModeAvailable, autoGateOn],
   );
+  // Official 2.1.326 #343: subagent plan approval uses a 2-option card with default mode + No.
+  const isSubagentPlan =
+    Boolean(workerBadge) ||
+    resolvedRequestSource?.type === 'subagent' ||
+    resolvedRequestSource?.type === 'workflow-agent';
+
   const options = useMemo(
     () =>
       buildPlanApprovalOptions({
@@ -239,9 +245,19 @@ export function ExitPlanModePermissionRequest({
         isBypassPermissionsModeAvailable,
         keepContext,
         showUltraplan,
+        isSubagentPlan,
         onFeedbackChange: setPlanFeedback,
       }),
-    [showClearContext, usage, mode, isAutoModeAvailable, isBypassPermissionsModeAvailable, keepContext, showUltraplan],
+    [
+      showClearContext,
+      usage,
+      mode,
+      isAutoModeAvailable,
+      isBypassPermissionsModeAvailable,
+      keepContext,
+      showUltraplan,
+      isSubagentPlan,
+    ],
   );
 
   function onImagePaste(
@@ -632,7 +648,7 @@ export function ExitPlanModePermissionRequest({
 
     // Handle 'no' - stay in plan mode
     if (value === 'no') {
-      if (!trimmedFeedback && !hasImages) {
+      if (!isSubagentPlan && !trimmedFeedback && !hasImages) {
         // No feedback yet - user is still on the input field
         return;
       }
@@ -725,8 +741,8 @@ export function ExitPlanModePermissionRequest({
     return () => setStickyFooter?.(null);
   }, [setStickyFooter]);
   const planScrollHeight = claimed
-    ? Math.max(1, modalRows - selectHeight)
-    : Math.max(1, terminalSize.rows - selectHeight - 4);
+    ? Math.max(1, modalRows - selectHeight - 2)
+    : Math.max(1, modalRows - selectHeight - 4);
 
   // Simplified UI for empty plans
   if (isEmpty) {
@@ -856,6 +872,9 @@ export function ExitPlanModePermissionRequest({
         <Box marginTop={1}>
           <Select
             options={options}
+            hideIndexes={isSubagentPlan}
+            disablePrintableKeybindings={isSubagentPlan}
+            declineValue={isSubagentPlan ? 'no' : undefined}
             onChange={handleResponse}
             onCancel={() => handleCancelRef.current?.()}
             onImagePaste={onImagePaste}
@@ -895,6 +914,7 @@ export function buildPlanApprovalOptions({
   isBypassPermissionsModeAvailable,
   keepContext,
   showUltraplan,
+  isSubagentPlan = false,
   onFeedbackChange,
 }: {
   showClearContext: boolean;
@@ -903,8 +923,22 @@ export function buildPlanApprovalOptions({
   isBypassPermissionsModeAvailable: boolean | undefined;
   keepContext?: ExitPlanKeepContext;
   showUltraplan?: boolean;
+  /** Official 2.1.326 #343: 2-option approval card for subagent plans. */
+  isSubagentPlan?: boolean;
   onFeedbackChange: (v: string) => void;
 }): OptionWithDescription<ResponseValue>[] {
+  if (isSubagentPlan) {
+    return [
+      {
+        label: 'Yes, and switch to default (ask each time) for this session',
+        value: 'yes-default-keep-context',
+      },
+      {
+        label: 'No',
+        value: 'no',
+      },
+    ];
+  }
   const options: OptionWithDescription<ResponseValue>[] = [];
   const usedLabel = usedPercent !== null ? ` (${usedPercent}% used)` : '';
 

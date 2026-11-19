@@ -34,6 +34,12 @@ export type HarborWillowPlanInput = {
   bridgeChildAutoDefault?: boolean
   /** Official 325 `Pe(r.CLAUDE_CODE_REMOTE)` — disables harborPath in CCR. */
   isRemote?: boolean
+  /**
+   * Official 2.1.326 #290 / #291 (`Md()`): VS Code IDE session. Allows default
+   * auto startup even when `isNonInteractiveSession` is set (and when org policy
+   * hasn't loaded yet or org has HIPAA Cowork configuration).
+   */
+  isIdeSession?: boolean
 }
 
 export type HarborWillowPlan = {
@@ -42,8 +48,8 @@ export type HarborWillowPlan = {
 }
 
 /**
- * Official gJl / 2.1.289 silent-auto tail: plan auto when no mode was ordered.
- * Caller only applies this when `!hasResolvedMode`.
+ * Official gJl / 2.1.289 / 2.1.326 (#290 / #291) silent-auto tail: plan auto
+ * when no mode was ordered. Caller only applies this when `!hasResolvedMode`.
  */
 export function planHarborWillowAutoFallback(
   input: HarborWillowPlanInput,
@@ -57,7 +63,9 @@ export function planHarborWillowAutoFallback(
   const harborPath =
     !input.isRemote &&
     input.harborWillow &&
-    (!input.isNonInteractiveSession || input.mossAnchor)
+    (!input.isNonInteractiveSession ||
+      input.isIdeSession === true ||
+      input.mossAnchor)
   if (harborPath || input.bridgeChildAutoDefault === true) {
     return { mode: 'auto', fromAutoFallback: true }
   }

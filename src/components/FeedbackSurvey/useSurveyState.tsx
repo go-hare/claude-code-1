@@ -37,6 +37,7 @@ export function useSurveyState({
   state: SurveyState;
   lastResponse: FeedbackSurveyResponse | null;
   open: () => void;
+  closeTranscriptPrompt: () => void;
   handleSelect: (selected: FeedbackSurveyResponse) => boolean;
   handleTranscriptSelect: (selected: TranscriptShareResponse) => void;
 } {
@@ -129,5 +130,12 @@ export function useSurveyState({
     [showThanksThenClose, showSubmittedThenClose, showShareFailedThenClose, onTranscriptSelect],
   );
 
-  return { state, lastResponse, open, handleSelect, handleTranscriptSelect };
+  // Official 2.1.326 #179: close an unanswered transcript share prompt when
+  // the user moves on (sends another message, runs /clear, or switches session).
+  const closeTranscriptPrompt = useCallback(() => {
+    setState(prev => (prev === 'transcript_prompt' ? 'closed' : prev));
+    setLastResponse(null);
+  }, []);
+
+  return { state, lastResponse, open, closeTranscriptPrompt, handleSelect, handleTranscriptSelect };
 }

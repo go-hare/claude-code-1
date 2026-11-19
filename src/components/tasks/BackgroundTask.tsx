@@ -3,7 +3,8 @@ import stripAnsi from 'strip-ansi';
 import { StatusIcon, Text } from '@anthropic/ink';
 import type { TaskStatus } from 'src/Task.js';
 import { isArtifactCommentMonitor } from 'src/tasks/pillLabel.js';
-import type { BackgroundTaskState } from 'src/tasks/types.js';
+import type { BackgroundTaskState, TaskState } from 'src/tasks/types.js';
+import { IDLE_WINDOW_KEEPALIVE_REASON } from 'src/utils/task/framework.js';
 import type { DeepImmutable } from 'src/types/utils.js';
 import { count } from 'src/utils/array.js';
 import { EFFORT_LEVELS } from 'src/utils/effort.js';
@@ -116,8 +117,32 @@ export type BackgroundTaskItemPresentation = {
   facts: string[];
 };
 
+/**
+ * #110 (2.1.326, official Mdn): format the owning subagent's display label for a
+ * background shell command or monitor in `/tasks`.
+ */
+export function formatOwnerSubagentLabel(
+  task: { agentId?: string },
+  tasks: Record<string, DeepImmutable<TaskState>>,
+  agentNameRegistry: ReadonlyMap<string, string>,
+): string | undefined {
+  if (task.agentId === undefined) return undefined;
+  const owner = tasks[String(task.agentId)];
+  if (!owner || owner.type !== 'local_agent') return undefined;
+  let registeredName: string | undefined;
+  for (const [name, id] of agentNameRegistry) {
+    if (id === owner.id) {
+      registeredName = name;
+      break;
+    }
+  }
+  const raw = registeredName !== undefined ? `@${registeredName}` : `${owner.agentType} subagent`;
+  return sanitizeMcpTaskText(raw);
+}
+
 export function getBackgroundTaskItemPresentation(
   task: DeepImmutable<BackgroundTaskState>,
+  ownerLabel?: string,
 ): BackgroundTaskItemPresentation | null {
   const unread = task.status === 'completed' && !task.notified ? ', unread' : '';
   switch (task.type) {
@@ -125,7 +150,7 @@ export function getBackgroundTaskItemPresentation(
       return {
         label: task.kind === 'monitor' ? task.description : task.command,
         icon: renderBackgroundTaskStatusIcon(task.status),
-        facts: [formatShellStatusFact(task.status)],
+        facts: [formatShellStatusFact(task.status), ...(ownerLabel ? [ownerLabel] : [])],
       };
     case 'remote_agent':
       if (task.isRemoteReview) return null;
@@ -138,16 +163,24 @@ export function getBackgroundTaskItemPresentation(
       };
     case 'local_agent': {
       const isParked = task.status === 'completed' && 'quietlyParked' in task && task.quietlyParked === true;
+      const isWaiting =
+        task.status === 'completed' &&
+        !isParked &&
+        'keepaliveReasons' in task &&
+        task.keepaliveReasons !== undefined &&
+        [...task.keepaliveReasons].some(r => r !== IDLE_WINDOW_KEEPALIVE_REASON);
       const modelEffort = formatTaskModelEffort(task.model, task.effort);
       return {
         label: task.description,
-        icon: isParked ? (
+        icon: isWaiting ? (
+          <StatusIcon status="pending" aria-label="waiting:" />
+        ) : isParked ? (
           <StatusIcon status="pending" aria-label="parked:" />
         ) : (
           renderBackgroundTaskStatusIcon(task.status)
         ),
         facts: [
-          `${task.status === 'completed' ? (isParked ? 'parked' : 'done') : task.status}${unread}`,
+          `${task.status === 'completed' ? (isParked ? 'parked' : isWaiting ? 'waiting' : 'done') : task.status}${unread}`,
           ...(modelEffort ? [truncate(modelEffort, 28, true)] : []),
         ],
       };
@@ -191,6 +224,7 @@ export function getBackgroundTaskItemPresentation(
                 ? COMMENT_AUTO_REPLY_LABEL
                 : task.status
           }${unread}`,
+          ...(ownerLabel ? [ownerLabel] : []),
         ],
       };
     case 'dream': {

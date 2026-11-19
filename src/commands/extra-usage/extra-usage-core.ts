@@ -13,6 +13,7 @@ import { getSubscriptionType } from '../../utils/auth.js'
 import { hasClaudeAiBillingAccess } from '../../utils/billing.js'
 import { openBrowser } from '../../utils/browser.js'
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js'
+import { formatResetTime } from '../../utils/format.js'
 import { logError } from '../../utils/log.js'
 
 /**
@@ -46,6 +47,32 @@ export function hasBlockingPendingAdminRequest(
  * den / Gj / wb progressSavedSuffix) live in rateLimitMessages
  * `getLimitReachedText`. Do not invent BTr arms gold doesn't have.
  */
+/**
+ * Official 2.1.326 (#264) `Z7s`: format the reset-time suffix for a pooled
+ * group budget (`overageScope === 'group_pool'`) when `overageResetsAt` is in
+ * the future and the rate limit is overage/unset.
+ */
+export function formatGroupPoolBudgetResetSuffix(
+  info: {
+    overageScope?: string
+    rateLimitType?: string
+    overageResetsAt?: number
+  },
+  nowMs: number = Date.now(),
+): string {
+  if (info.overageScope !== 'group_pool') return ''
+  if (info.rateLimitType && info.rateLimitType !== 'overage') return ''
+  if (
+    typeof info.overageResetsAt !== 'number' ||
+    !Number.isFinite(info.overageResetsAt) ||
+    info.overageResetsAt * 1000 <= nowMs
+  ) {
+    return ''
+  }
+  const formatted = formatResetTime(info.overageResetsAt, false)
+  return formatted ? ` · resets ${formatted}` : ''
+}
+
 export function getUsageCreditsZeroLimitCopy(
   reason: string | null | undefined,
 ): string | null {
@@ -61,17 +88,92 @@ export function getUsageCreditsZeroLimitCopy(
   return null
 }
 
+const USAGE_SETTINGS_ADMIN_URL = 'https://claude.ai/admin-settings/usage'
+
+function extractAdminRequestErrorInfo(error: unknown): {
+  status?: number
+  code?: string
+  message?: string
+} {
+  if (!error || typeof error !== 'object') return {}
+  const ax = error as {
+    status?: number
+    response?: { status?: number; data?: unknown }
+  }
+  const status = ax.response?.status ?? ax.status
+  const data = ax.response?.data
+  if (!data || typeof data !== 'object') {
+    return { status }
+  }
+  const rec = data as Record<string, unknown>
+  const errObj =
+    rec.error && typeof rec.error === 'object'
+      ? (rec.error as Record<string, unknown>)
+      : undefined
+  const code =
+    (typeof errObj?.code === 'string' ? errObj.code : undefined) ??
+    (typeof errObj?.type === 'string' ? errObj.type : undefined) ??
+    (typeof rec.code === 'string' ? rec.code : undefined)
+  let message: string | undefined
+  if (typeof errObj?.message === 'string' && errObj.message.length > 0) {
+    message = errObj.message
+  } else {
+    for (const key of ['message', 'detail'] as const) {
+      const v = rec[key]
+      if (typeof v === 'string' && v.length > 0) {
+        message = v
+        break
+      }
+    }
+  }
+  return { status, code, message }
+}
+
 /**
- * densable iea — create limit_increase after user confirms.
+ * Official 2.1.326 (#178) `dLe`: format an admin usage-credit request refusal,
+ * explicitly guiding admins who already have billing access to the usage
+ * settings page rather than saying "Request sent to your admin".
+ */
+export function formatAdminUsageCreditRequestError(
+  error: unknown,
+  isDesktop = process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop' ||
+    process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop-3p',
+): string {
+  const { status, code, message } = extractAdminRequestErrorInfo(error)
+  if (code === 'admin_request_admin_can_act') {
+    return isDesktop || isCloudOrRemoteControlSession()
+      ? 'No request sent, because you have billing access. Manage usage credits in admin settings on the web.'
+      : `No request sent, because you have billing access. Visit ${USAGE_SETTINGS_ADMIN_URL} to manage usage credits for your organization.`
+  }
+  if ((status === undefined || status < 500) && message) {
+    return message
+  }
+  return "Couldn't send your request. Try again later."
+}
+
+/**
+ * densable iea + Official 2.1.326 (#178) `dLe`: create limit_increase after user confirms.
  */
 export async function submitAdminUsageCreditRequest(
   extraUsage: ExtraUsage | null | undefined,
 ): Promise<ExtraUsageResult> {
   try {
-    await createAdminRequest({
+    const created = await createAdminRequest({
       request_type: 'limit_increase',
       details: null,
     })
+    // Guard against non-2xx or empty responses that didn't throw
+    const maybeStatus = (created as unknown as { status?: unknown })?.status
+    if (
+      !created ||
+      (typeof maybeStatus === 'number' &&
+        (maybeStatus < 200 || maybeStatus >= 300))
+    ) {
+      return {
+        type: 'message',
+        value: formatAdminUsageCreditRequestError(created),
+      }
+    }
     if (extraUsage == null) {
       return {
         type: 'message',
@@ -90,42 +192,19 @@ export async function submitAdminUsageCreditRequest(
       value: 'Request sent to your admin to turn on usage credits.',
     }
   } catch (error) {
-    const apiMessage = extractAdminRequestErrorMessage(error)
-    if (apiMessage) {
-      logError(error as Error)
-      return { type: 'message', value: apiMessage }
-    }
     logError(error as Error)
     return {
       type: 'message',
-      value: 'Contact your admin to manage usage credit settings.',
+      value: formatAdminUsageCreditRequestError(error),
     }
   }
 }
 
 /** densable pyp — surface 4xx API message when present. */
 export function extractAdminRequestErrorMessage(error: unknown): string | null {
-  if (!error || typeof error !== 'object') return null
-  const ax = error as {
-    isAxiosError?: boolean
-    response?: { status?: number; data?: unknown }
-  }
-  // axios errors expose isAxiosError; also accept response-shaped errors in tests
-  const status = ax.response?.status
+  const { status, message } = extractAdminRequestErrorInfo(error)
   if (typeof status === 'number' && status >= 500) return null
-  const data = ax.response?.data
-  if (!data || typeof data !== 'object') return null
-  const rec = data as Record<string, unknown>
-  const errObj = rec.error
-  if (errObj && typeof errObj === 'object') {
-    const msg = (errObj as { message?: unknown }).message
-    if (typeof msg === 'string' && msg.length > 0) return msg
-  }
-  for (const key of ['message', 'detail'] as const) {
-    const v = rec[key]
-    if (typeof v === 'string' && v.length > 0) return v
-  }
-  return null
+  return message ?? null
 }
 
 /**

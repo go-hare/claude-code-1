@@ -1463,6 +1463,54 @@ function VirtualListLayoutPass({ onLayout }: { onLayout: () => void }): null {
  * scrollBy only sets pendingDelta, committed scrollTop lags). Walk backward
  * from the mount-range end; break when an item's top is above target.
  */
+/**
+ * 2.1.326 #138 / 2.1.328 `StickyTracker` scan helper:
+ * Initializes `firstVisible = end` (not `start`!), walks backwards through
+ * `[start, end)` breaking when `top < target`, then picks the nearest
+ * scrolled-past user prompt above `firstVisible` (suppressed when `isSticky`
+ * is true or when the prompt's `❯` row at `top + 1` is still visible).
+ */
+export function computeStickyPromptScan(params: {
+  start: number;
+  end: number;
+  target: number;
+  isSticky: boolean;
+  getItemTop: (index: number) => number;
+  getPromptText: (index: number) => string | null;
+}): { firstVisible: number; firstVisibleTop: number; idx: number; text: string | null } {
+  const { start, end, target, isSticky, getItemTop, getPromptText } = params;
+  let firstVisible = end;
+  let firstVisibleTop = -1;
+  for (let i = end - 1; i >= start; i--) {
+    const top = getItemTop(i);
+    if (top >= 0) {
+      if (top < target) break;
+      firstVisibleTop = top;
+    }
+    firstVisible = i;
+  }
+
+  let idx = -1;
+  let text: string | null = null;
+  if (firstVisible > 0 && !isSticky) {
+    for (let i = firstVisible - 1; i >= 0; i--) {
+      const t = getPromptText(i);
+      if (t === null) continue;
+      // The prompt's wrapping Box top is above target (that's why it's in
+      // the [0, firstVisible) range), but its ❯ is at top+1 (marginTop=1).
+      // If the ❯ is at-or-below target, it's VISIBLE at viewport top —
+      // showing the same text in the header would duplicate it. Skip to the
+      // next-older prompt (its ❯ is definitely above).
+      const top = getItemTop(i);
+      if (top >= 0 && top + 1 >= target) continue;
+      idx = i;
+      text = t;
+      break;
+    }
+  }
+  return { firstVisible, firstVisibleTop, idx, text };
+}
+
 function StickyTracker({
   messages,
   start,
@@ -1502,42 +1550,17 @@ function StickyTracker({
   const isSticky = scrollRef.current?.isSticky() ?? true;
   const target = Math.max(0, (scrollRef.current?.getScrollTop() ?? 0) + (scrollRef.current?.getPendingDelta() ?? 0));
 
-  // Walk the mounted range to find the first item at-or-below the viewport
-  // top. `range` is from the parent's coarse-quantum render (may be slightly
-  // stale) but overscan guarantees it spans well past the viewport in both
-  // directions. Items without a Yoga layout yet (newly mounted this frame)
-  // are treated as at-or-below — they're somewhere in view, and assuming
-  // otherwise would show a sticky for a prompt that's actually on screen.
-  let firstVisible = start;
-  let firstVisibleTop = -1;
-  for (let i = end - 1; i >= start; i--) {
-    const top = getItemTop(i);
-    if (top >= 0) {
-      if (top < target) break;
-      firstVisibleTop = top;
-    }
-    firstVisible = i;
-  }
-
-  let idx = -1;
-  let text: string | null = null;
-  if (firstVisible > 0 && !isSticky) {
-    for (let i = firstVisible - 1; i >= 0; i--) {
-      const t = stickyPromptText(messages[i]!);
-      if (t === null) continue;
-      // The prompt's wrapping Box top is above target (that's why it's in
-      // the [0, firstVisible) range), but its ❯ is at top+1 (marginTop=1).
-      // If the ❯ is at-or-below target, it's VISIBLE at viewport top —
-      // showing the same text in the header would duplicate it. Happens
-      // in the 1-row gap between Box top scrolling past and ❯ scrolling
-      // past. Skip to the next-older prompt (its ❯ is definitely above).
-      const top = getItemTop(i);
-      if (top >= 0 && top + 1 >= target) continue;
-      idx = i;
-      text = t;
-      break;
-    }
-  }
+  const { firstVisible, firstVisibleTop, idx, text } = computeStickyPromptScan({
+    start,
+    end,
+    target,
+    isSticky,
+    getItemTop,
+    getPromptText: i => {
+      const msg = messages[i];
+      return msg !== undefined ? stickyPromptText(msg) : null;
+    },
+  });
 
   const baseOffset = firstVisibleTop >= 0 ? firstVisibleTop - offsets[firstVisible]! : 0;
   const estimate = idx >= 0 ? Math.max(0, baseOffset + offsets[idx]!) : -1;

@@ -87,7 +87,12 @@ import {
 } from '../claudeAiLimits.js'
 import { isCloudOrRemoteControlSession } from '../rateLimitMessages.js'
 import { shouldProcessRateLimits } from '../rateLimitMocking.js' // Used for /mock-limits command
-import { extractConnectionErrorDetails, formatAPIError } from './errorUtils.js'
+import {
+  extractConnectionErrorDetails,
+  formatAPIError,
+  formatCertSignatureFailureCause,
+  isCertSignatureFailureError,
+} from './errorUtils.js'
 
 export const API_ERROR_MESSAGE_PREFIX = 'API Error'
 
@@ -357,6 +362,311 @@ export function isBedrockInputTooLongMessage(raw: string): boolean {
     )
   }
   return /^input is too long\.?$/i.test(trimmed)
+}
+
+/**
+ * Official 2.1.326 (#50) `F4r` / `M7s` / `yBe`: Vertex AI 30MB HTTP 400 size
+ * limit errors ("The request size (X bytes) exceeds 30MB limit." — plain,
+ * JSON-wrapped, or double-escaped Vertex FAILED_PRECONDITION JSON).
+ */
+const VERTEX_REQUEST_SIZE_LIMIT_BODY =
+  'the (?:request|message) size \\(\\d+ bytes\\) exceeds [\\d.]+ ?MB limit\\.?'
+const VERTEX_REQUEST_SIZE_LIMIT_PLAIN_OR_JSON_RE = new RegExp(
+  `^(?:400\\s+)?(?:${VERTEX_REQUEST_SIZE_LIMIT_BODY}\\s*$|\\[?\\{[^{}]*"error":\\{[^{}]*"message":"${VERTEX_REQUEST_SIZE_LIMIT_BODY})`,
+  'i',
+)
+const VERTEX_REQUEST_SIZE_LIMIT_ESCAPED_RE = new RegExp(
+  `"status"\\s*:\\s*"FAILED_PRECONDITION"[\\s\\S]*?${VERTEX_REQUEST_SIZE_LIMIT_BODY}|${VERTEX_REQUEST_SIZE_LIMIT_BODY}[\\s\\S]*?"status"\\s*:\\s*"FAILED_PRECONDITION"`,
+  'i',
+)
+
+export function isVertexRequestSizeLimitMessage(raw: string): boolean {
+  if (raw.includes('policy_blocked') || raw.includes('dlp_request_denied')) {
+    return false
+  }
+  const trimmed = raw.trim()
+  if (VERTEX_REQUEST_SIZE_LIMIT_PLAIN_OR_JSON_RE.test(trimmed)) {
+    return true
+  }
+  const unescaped = trimmed.replace(/\\"/g, '"')
+  if (
+    VERTEX_REQUEST_SIZE_LIMIT_PLAIN_OR_JSON_RE.test(unescaped) ||
+    VERTEX_REQUEST_SIZE_LIMIT_ESCAPED_RE.test(unescaped)
+  ) {
+    return true
+  }
+  return false
+}
+
+export function isVertexRequestSizeLimitError(error: unknown): boolean {
+  if (!(error instanceof APIError)) return false
+  if (error.status !== 400) return false
+  return isVertexRequestSizeLimitMessage(error.message)
+}
+
+function messagesContainMediaBlocks(
+  messages?: readonly { type: string; message?: unknown }[],
+): boolean {
+  if (!messages) return false
+  for (const msg of messages) {
+    if (msg.type !== 'user') continue
+    const content = (msg.message as { content?: unknown } | undefined)?.content
+    if (!Array.isArray(content)) continue
+    for (const block of content as Array<{
+      type?: unknown
+      content?: unknown
+    }>) {
+      if (block.type === 'image' || block.type === 'document') return true
+      if (block.type === 'tool_result' && Array.isArray(block.content)) {
+        for (const sub of block.content as Array<{ type?: unknown }>) {
+          if (sub.type === 'image' || sub.type === 'document') return true
+        }
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * Official 2.1.326 (#47) `F7s` / `qir` / `c9t`: parse exact message, content,
+ * and nested tool_result content index from a 400 media/PDF rejection so batch
+ * PDF calls drop ONLY the failing PDF rather than every PDF in the batch.
+ */
+export type MediaErrorLocation = {
+  messageIdx?: number
+  contentIdx?: number
+  nestedContentIdx?: number
+  kind: 'image' | 'document'
+}
+
+const IMAGE_REJECTION_HINTS = [
+  'could not process image',
+  'image exceeds',
+  'image dimensions exceed',
+]
+
+const DOCUMENT_REJECTION_HINTS = [
+  'could not process pdf',
+  'the pdf specified was not valid',
+  'pdf is password protected',
+  'pdf pages',
+  'maximum of',
+]
+
+export function parseMediaErrorLocation(
+  errorMessage: string,
+): MediaErrorLocation | undefined {
+  const match = errorMessage.match(
+    /messages[.[](\d+)[\].]+content[.[](\d+)[\].]+(?:tool_result[.[]content[.[](\d+)[\].]+)?(image|document|pdf)/i,
+  )
+  if (match) {
+    return {
+      messageIdx: Number(match[1]),
+      contentIdx: Number(match[2]),
+      ...(match[3] !== undefined && { nestedContentIdx: Number(match[3]) }),
+      kind: match[4]!.toLowerCase() === 'image' ? 'image' : 'document',
+    }
+  }
+  const lower = errorMessage.toLowerCase()
+  if (IMAGE_REJECTION_HINTS.some(h => lower.includes(h))) {
+    return { kind: 'image' }
+  }
+  if (DOCUMENT_REJECTION_HINTS.some(h => lower.includes(h))) {
+    return { kind: 'document' }
+  }
+  return undefined
+}
+
+export function stripTargetedMediaBlock<T extends Message>(
+  messages: readonly T[],
+  loc: Required<Pick<MediaErrorLocation, 'messageIdx' | 'contentIdx'>> &
+    Pick<MediaErrorLocation, 'nestedContentIdx' | 'kind'>,
+  reasonText?: string,
+): { messages: T[]; removed: boolean; toolUseId?: string } {
+  const targetMsg = messages[loc.messageIdx]
+  if (!targetMsg || targetMsg.type !== 'user' || !targetMsg.message) {
+    return { messages: [...messages], removed: false }
+  }
+  const targetMessageBody = targetMsg.message
+  const contentArr = targetMessageBody.content
+  if (!Array.isArray(contentArr)) {
+    return { messages: [...messages], removed: false }
+  }
+  const block = contentArr[loc.contentIdx]
+  if (!block || typeof block !== 'object') {
+    return { messages: [...messages], removed: false }
+  }
+
+  const label = loc.kind === 'document' ? 'PDF document' : 'image'
+  const replacementText = reasonText
+    ? `[${label} removed because the API rejected it: ${reasonText}]`
+    : `[${label} removed because the API rejected it]`
+  const replacement = { type: 'text' as const, text: replacementText }
+
+  let nextBlock: unknown = block
+  let removed = false
+  let toolUseId: string | undefined
+
+  if (block.type === loc.kind) {
+    nextBlock = replacement
+    removed = true
+  } else if (block.type === 'tool_result' && Array.isArray(block.content)) {
+    if (loc.nestedContentIdx !== undefined) {
+      const nested = block.content[loc.nestedContentIdx]
+      if (nested && typeof nested === 'object' && nested.type === loc.kind) {
+        const nextNested = block.content.map((item, idx) =>
+          idx === loc.nestedContentIdx ? replacement : item,
+        )
+        nextBlock = { ...block, content: nextNested }
+        removed = true
+        const docCount = block.content.filter(
+          i => typeof i === 'object' && i !== null && i.type === loc.kind,
+        ).length
+        if (docCount === 1) {
+          toolUseId = block.tool_use_id
+        }
+      }
+    } else {
+      let changed = false
+      const nextNested = block.content.map(item => {
+        if (
+          typeof item === 'object' &&
+          item !== null &&
+          item.type === loc.kind
+        ) {
+          changed = true
+          return replacement
+        }
+        return item
+      })
+      if (changed) {
+        nextBlock = { ...block, content: nextNested }
+        removed = true
+        toolUseId = block.tool_use_id
+      }
+    }
+  }
+
+  if (!removed) {
+    return { messages: [...messages], removed: false }
+  }
+
+  const nextMsg = {
+    ...targetMsg,
+    message: {
+      ...targetMessageBody,
+      content: contentArr.map((b, idx) =>
+        idx === loc.contentIdx ? nextBlock : b,
+      ),
+    },
+  } as T
+
+  return {
+    messages: messages.map((m, idx) => (idx === loc.messageIdx ? nextMsg : m)),
+    removed: true,
+    toolUseId,
+  }
+}
+
+/**
+ * Official 2.1.326 (#63) `tye` / `vas`: detect non-origin Cloudflare HTTP 403
+ * block pages (no valid Anthropic `request-id`, with `cf-ray` or Cloudflare
+ * `server` header, and non-JSON `{ type: "error" }` body) so startup / API
+ * paths do not falsely tell users to sign in again.
+ */
+export const NETWORK_EDGE_BLOCKED_MESSAGE =
+  "Request was blocked before it reached Anthropic's API, so signing in to Claude again won't help. A VPN, proxy or firewall, a network or region limit, or a problem at Anthropic may be the cause. Check your VPN or network, try again in a few minutes, or contact your administrator."
+
+export function classifyNonOriginBlockHeaders(
+  getHeader: (name: string) => string | null | undefined,
+): 'nonorigin_cf' | null {
+  const reqId = (
+    getHeader('request-id') ??
+    getHeader('x-request-id') ??
+    ''
+  ).trim()
+  if (reqId.length > 0 && /^req_[A-Za-z0-9]+/.test(reqId)) {
+    return null
+  }
+  const cfRay = (getHeader('cf-ray') ?? '').trim()
+  const server = (getHeader('server') ?? '').trim()
+  if (cfRay.length > 0 || /cloudflare/i.test(server)) {
+    return 'nonorigin_cf'
+  }
+  return null
+}
+
+export function isNonOriginCloudflare403Error(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const status =
+    error instanceof APIError
+      ? error.status
+      : ((error as { status?: number; response?: { status?: number } })
+          .status ??
+        (error as { response?: { status?: number } }).response?.status)
+  if (status !== 403) return false
+
+  const body =
+    error instanceof APIError
+      ? error.error
+      : (error as { response?: { data?: unknown } }).response?.data
+  if (
+    body &&
+    typeof body === 'object' &&
+    (body as { type?: unknown }).type === 'error'
+  ) {
+    return false
+  }
+
+  const headers =
+    error instanceof APIError
+      ? error.headers
+      : ((error as { headers?: unknown; response?: { headers?: unknown } })
+          .headers ??
+        (error as { response?: { headers?: unknown } }).response?.headers)
+  if (!headers || typeof headers !== 'object') {
+    return false
+  }
+  const getHeader = (name: string): string | null | undefined => {
+    if (
+      'get' in headers &&
+      typeof (headers as { get?: unknown }).get === 'function'
+    ) {
+      return (headers as { get(k: string): string | null }).get(name)
+    }
+    const rec = headers as Record<string, unknown>
+    const direct = rec[name] ?? rec[name.toLowerCase()]
+    return typeof direct === 'string' ? direct : undefined
+  }
+  return classifyNonOriginBlockHeaders(getHeader) === 'nonorigin_cf'
+}
+
+/**
+ * Official 2.1.326 (#265) `gds` / `hds`: Console sign-in refused because the
+ * org disabled API key authentication. Tell the user to run `/login` (CLI)
+ * or sign in again with claude.ai (Desktop), not an admin setting.
+ */
+export function isApiKeyAuthDisabledManagedKeyError(error: unknown): boolean {
+  if (!(error instanceof APIError) || error.status !== 403) return false
+  if (
+    !error.message.toLowerCase().includes('api key authentication is disabled')
+  ) {
+    return false
+  }
+  try {
+    return getAnthropicApiKeyWithSource().source === '/login managed key'
+  } catch {
+    return false
+  }
+}
+
+export function getApiKeyAuthDisabledMessage(
+  isDesktop = process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop' ||
+    process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop-3p',
+): string {
+  return isDesktop
+    ? 'Your organization has disabled API key authentication · Sign in again with your claude.ai account'
+    : 'Your organization has disabled API key authentication · Run /login to sign in with your claude.ai account'
 }
 
 export function isPromptTooLongErrorMessage(raw: string): boolean {
@@ -1540,6 +1850,24 @@ function buildAssistantMessageFromError(
     })
   }
 
+  // Official 2.1.326 (#50) `yBe` / `F4r` / `M7s`: Vertex AI 30MB HTTP 400 size
+  // limit error -> route to reactive compaction (`PROMPT_TOO_LONG_ERROR_MESSAGE`
+  // when no media is present, or `request_too_large` when media is present).
+  if (isVertexRequestSizeLimitError(error) && error instanceof APIError) {
+    if (!messagesContainMediaBlocks(options?.messagesForAPI)) {
+      return createAssistantAPIErrorMessage({
+        content: PROMPT_TOO_LONG_ERROR_MESSAGE,
+        error: 'invalid_request',
+        errorDetails: error.message,
+      })
+    }
+    return createAssistantAPIErrorMessage({
+      content: getRequestTooLargeErrorMessage(),
+      error: 'invalid_request',
+      errorDetails: `request_too_large: ${error.message}`,
+    })
+  }
+
   // densable 413: context-window phrasing → prompt_too_long (W3); else X8i
   // request_too_large with errorDetails for Gvg/isMediaSizeError (#33).
   // densable 2.1.229 #20: when messages alone exceed the body limit, fail once
@@ -1885,6 +2213,27 @@ function buildAssistantMessageFromError(
     })
   }
 
+  // Official 2.1.326 (#63) `vas` / `tye`: non-origin Cloudflare 403 block page
+  // must precede generic 401/403 auth handling so Claude does not falsely tell
+  // users to sign in again when a proxy/VPN/firewall/CDN blocked the request.
+  if (isNonOriginCloudflare403Error(error)) {
+    return createAssistantAPIErrorMessage({
+      content: NETWORK_EDGE_BLOCKED_MESSAGE,
+      error: 'unknown',
+      apiError: 'network_edge_blocked',
+    })
+  }
+
+  // Official 2.1.326 (#265) `gds` / `hds`: Console sign-in refused because the
+  // organization disabled API key authentication -> guide user to `/login`.
+  if (isApiKeyAuthDisabledManagedKeyError(error)) {
+    return createAssistantAPIErrorMessage({
+      error: 'authentication_failed',
+      apiError: 'api_key_auth_disabled',
+      content: getApiKeyAuthDisabledMessage(),
+    })
+  }
+
   // Check for OAuth token revocation error
   if (
     error instanceof APIError &&
@@ -2051,6 +2400,16 @@ function buildAssistantMessageFromError(
     const rawFormatted = formatAPIError(error)
     const formatted = sanitizeGatewayErrorText(rawFormatted)
     const code = extractConnectionErrorDetails(error)?.code
+    // Official 2.1.326 (#174 & #263) `p0n` / `ptn`: classify
+    // CERT_SIGNATURE_FAILURE as `tls_cert_signature_failure` (never
+    // `connection_failed`) with the CA-renewal explanation and IT guidance.
+    if (isCertSignatureFailureError(error)) {
+      return createAssistantAPIErrorMessage({
+        content: `${API_ERROR_MESSAGE_PREFIX}: SSL certificate verification failed (CERT_SIGNATURE_FAILURE). ${formatCertSignatureFailureCause()}`,
+        error: 'unknown',
+        apiError: 'tls_cert_signature_failure',
+      })
+    }
     // Official 2.1.323 (#2072) `Xw` / `ek`: certificate name-constraint errors
     // fail fast with an actionable explanation of how to fix the certificate.
     if (code !== undefined && NAME_CONSTRAINT_CERT_ERROR_CODES.has(code)) {
@@ -2331,6 +2690,18 @@ export function classifyAPIError(error: unknown): string {
     return 'invalid_api_key'
   }
 
+  if (isNonOriginCloudflare403Error(error)) {
+    return 'network_edge_blocked'
+  }
+
+  if (isApiKeyAuthDisabledManagedKeyError(error)) {
+    return 'api_key_auth_disabled'
+  }
+
+  if (isVertexRequestSizeLimitError(error)) {
+    return 'request_too_large'
+  }
+
   if (
     error instanceof APIError &&
     error.status === 403 &&
@@ -2410,6 +2781,9 @@ export function classifyAPIError(error: unknown): string {
 
   // Connection errors - check for SSL/TLS issues first
   if (error instanceof APIConnectionError) {
+    if (isCertSignatureFailureError(error)) {
+      return 'tls_cert_signature_failure'
+    }
     const connectionDetails = extractConnectionErrorDetails(error)
     if (connectionDetails?.isSSLError) {
       return 'ssl_cert_error'

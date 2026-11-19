@@ -17,6 +17,89 @@ import { isEnvTruthy } from '../envUtils.js'
 import type { SettingsJson } from './types.js'
 
 /**
+ * Official 2.1.326 (#21) `Spl`: subagent model env keys that managed settings
+ * may set for Claude Desktop Code tab sessions unless the same settings `env`
+ * also selects a third-party provider or gateway.
+ */
+export const MANAGED_SUBAGENT_MODEL_ENV_KEYS = new Set<string>([
+  'CLAUDE_CODE_SUBAGENT_MODEL',
+  'CLAUDE_CODE_SUBAGENT_MODEL_FORCE',
+  'CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL',
+])
+
+const PROVIDER_OR_GATEWAY_BOOL_ENV_KEYS = [
+  'CLAUDE_CODE_USE_BEDROCK',
+  'CLAUDE_CODE_USE_VERTEX',
+  'CLAUDE_CODE_USE_FOUNDRY',
+  'CLAUDE_CODE_USE_ANTHROPIC_AWS',
+  'CLAUDE_CODE_USE_MANTLE',
+  'CLAUDE_CODE_USE_OPENAI',
+  'CLAUDE_CODE_USE_GEMINI',
+  'CLAUDE_CODE_USE_GROK',
+  'CLAUDE_CODE_USE_GATEWAY',
+] as const
+
+const PROVIDER_ENDPOINT_ENV_KEYS = [
+  'ANTHROPIC_BEDROCK_BASE_URL',
+  'ANTHROPIC_VERTEX_BASE_URL',
+  'ANTHROPIC_FOUNDRY_BASE_URL',
+  'ANTHROPIC_FOUNDRY_RESOURCE',
+  'CLOUD_ML_REGION',
+  'ANTHROPIC_VERTEX_PROJECT_ID',
+  'CLAUDE_CODE_GATEWAY_URL',
+] as const
+
+/**
+ * Official 2.1.326 (#21) `Jns(env)`: returns true when a settings `env` block
+ * selects a third-party provider, custom gateway, or non-Anthropic base URL.
+ */
+export function envSelectsProviderOrGateway(
+  env: Record<string, string> | undefined,
+): boolean {
+  if (!env) return false
+  for (const [rawKey, rawVal] of Object.entries(env)) {
+    const key = rawKey.toUpperCase()
+    if (
+      (PROVIDER_OR_GATEWAY_BOOL_ENV_KEYS as readonly string[]).includes(key) &&
+      isEnvTruthy(rawVal)
+    ) {
+      return true
+    }
+    if (
+      (PROVIDER_ENDPOINT_ENV_KEYS as readonly string[]).includes(key) &&
+      rawVal.trim().length > 0
+    ) {
+      return true
+    }
+    if (key === 'ANTHROPIC_BASE_URL' && rawVal.trim().length > 0) {
+      try {
+        const host = new URL(rawVal.trim()).hostname.toLowerCase()
+        if (host !== 'api.anthropic.com' && !host.endsWith('.anthropic.com')) {
+          return true
+        }
+      } catch {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * Official 2.1.326 (#21) `Le`: true for Claude Desktop Code tab sessions where
+ * managed `CLAUDE_CODE_SUBAGENT_MODEL*` should be preserved unless the same
+ * managed settings `env` selects a provider or gateway.
+ */
+export function isDesktopCodeTabSession(): boolean {
+  const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT
+  return (
+    !isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) &&
+    !isEnvTruthy(process.env.CLAUDE_CODE_IS_COWORK) &&
+    (entrypoint === 'claude-desktop' || entrypoint === 'claude-desktop-3p')
+  )
+}
+
+/**
  * Official 2.1.323 (#1968) `Z7r`: true for Claude Desktop sessions on
  * third-party providers (host-managed provider, local, non-cowork,
  * `claude-desktop-3p` or `local-agent` without desktop app version).
@@ -97,6 +180,7 @@ const HOST_MODEL_POLICY_ENV_P9R = [
   // densable Wfg intentionally excludes ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION
   'CLAUDE_CODE_SUBAGENT_MODEL',
   'CLAUDE_CODE_SUBAGENT_MODEL_FORCE',
+  'CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL',
   'CLAUDE_CODE_3P_PROBE_WROTE_SONNET_DEFAULT',
   'CLAUDE_CODE_3P_PROBE_WROTE_OPUS_DEFAULT',
 ] as const
@@ -159,21 +243,28 @@ export function buildHostModelOverlay(
  * modelOverrides, and filter settings.env against Wfg.
  * Official 2.1.323 (#1968): when `keepAutoModeModel` is true (Claude Desktop
  * sessions on third-party providers), `CLAUDE_CODE_AUTO_MODE_MODEL` is kept.
+ * Official 2.1.326 (#21): when `keepSubagentModel` is true (Claude Desktop
+ * Code tab) and `settings.env` does NOT choose a provider or gateway,
+ * `CLAUDE_CODE_SUBAGENT_MODEL*` keys are preserved.
  */
 export function stripHostManagedPolicyModelKeys(
   settings: SettingsJson,
   keepAutoModeModel = false,
+  keepSubagentModel = false,
 ): SettingsJson {
   delete settings.model
   delete settings.fallbackModel
   delete settings.modelOverrides
   if (settings.env) {
+    const preserveSubagent =
+      keepSubagentModel && !envSelectsProviderOrGateway(settings.env)
     const kept: Record<string, string> = {}
     for (const [key, value] of Object.entries(settings.env)) {
       const upper = key.toUpperCase()
       if (
         !HOST_MODEL_POLICY_STRIP_ENV_KEYS.has(upper) ||
-        (keepAutoModeModel && upper === 'CLAUDE_CODE_AUTO_MODE_MODEL')
+        (keepAutoModeModel && upper === 'CLAUDE_CODE_AUTO_MODE_MODEL') ||
+        (preserveSubagent && MANAGED_SUBAGENT_MODEL_ENV_KEYS.has(upper))
       ) {
         kept[key] = value
       }
@@ -192,6 +283,7 @@ export function applyHostManagedPolicyModelPrecedence(
   hostModelOverlay: HostModelOverlay | null,
   hostManagedProvider: boolean,
   keepAutoModeModel = isLocalThirdPartyDesktopManagedSession(),
+  keepSubagentModel = isDesktopCodeTabSession(),
 ): SettingsJson | null {
   if (!hostManagedProvider) {
     return policySettings
@@ -205,7 +297,7 @@ export function applyHostManagedPolicyModelPrecedence(
   if (policySettings?.env) {
     next.env = { ...policySettings.env }
   }
-  stripHostManagedPolicyModelKeys(next, keepAutoModeModel)
+  stripHostManagedPolicyModelKeys(next, keepAutoModeModel, keepSubagentModel)
   if (hostModelOverlay) {
     Object.assign(next, hostModelOverlay)
   }

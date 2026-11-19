@@ -101,6 +101,9 @@ type SkillChangeDetectorDeps = {
 }
 
 let watcher: FSWatcher | null = null
+/** Official 2.1.326 #129: parent-directory watcher for not-yet-created `.claude/{skills,commands,agents}` folders. */
+let parentWatcher: FSWatcher | null = null
+let watchedParentDirs: string[] = []
 let reloadTimer: ReturnType<typeof setTimeout> | null = null
 let idleCheckTimer: ReturnType<typeof setInterval> | null = null
 /** #1863: Directories observed removed via `unlinkDir`, mapped to whether they were seen present on the prior poll. */
@@ -169,21 +172,30 @@ export async function initialize(): Promise<void> {
     ? paths.filter(p => !p.endsWith(`${platformPath.sep}skills`))
     : filterWatchedModDirs(paths, { skillModDirs: paths })
   watchedPaths = filteredPaths
-  if (filteredPaths.length === 0) return
 
   const getFingerprint = testOverrides?.getFingerprint ?? defaultGetFingerprint
   lastFingerprint = await getFingerprint().catch(() => null)
 
-  logForDebugging(
-    `Watching for changes in skill/command directories: ${filteredPaths.join(', ')}...`,
-  )
-
   const chokidarInterval =
     testOverrides?.chokidarInterval ?? POLLING_INTERVAL_MS
-  watcher = createWatcher(chokidarInterval)
+
+  if (filteredPaths.length > 0) {
+    logForDebugging(
+      `Watching for changes in skill/command directories: ${filteredPaths.join(', ')}...`,
+    )
+    watcher = createWatcher(chokidarInterval)
+  }
+
+  // Official 2.1.326 #129: watch parent directories of any candidate
+  // `.claude/{skills,commands,agents}` folders that do not exist yet, so the
+  // first skill, command, or agent created during a session is discovered right away.
+  await refreshParentWatcher(chokidarInterval)
 
   // densable: if (fOf) p = setInterval(I, YoS)
-  idleCheckTimer = setInterval(checkIdleTransition, IDLE_CHECK_INTERVAL_MS)
+  idleCheckTimer = setInterval(() => {
+    checkIdleTransition()
+    void discoverNewlyCreatedSkillDirs()
+  }, IDLE_CHECK_INTERVAL_MS)
   idleCheckTimer.unref?.()
 
   unregisterCleanup = registerCleanup(async () => {
@@ -421,6 +433,8 @@ export async function rehome(): Promise<void> {
   const next = await getWatchablePaths()
   if (disposed) return
   const merged = uniqueWatchPaths([...watchedPaths, ...next])
+  const interval = getActivePollInterval()
+  await refreshParentWatcher(interval)
   if (merged.length === watchedPaths.length) return
   const generation = ++watchGeneration
   watchedPaths = merged
@@ -428,9 +442,7 @@ export async function rehome(): Promise<void> {
     `[skills] session moved — watching skill/command directories: ${watchedPaths.join(', ')}`,
   )
   if (watcher) void watcher.close()
-  watcher = createWatcher(
-    isIdle ? IDLE_POLLING_INTERVAL_MS : POLLING_INTERVAL_MS,
-  )
+  watcher = createWatcher(interval)
   const attached = watcher
   const ready = new Promise<void>(resolve => {
     attached.once('ready', () => resolve())
@@ -475,6 +487,14 @@ export function dispose(): Promise<void> {
     closePromise = watcher.close()
     watcher = null
   }
+  if (parentWatcher) {
+    const parentClose = parentWatcher.close().catch(() => undefined)
+    parentWatcher = null
+    watchedParentDirs = []
+    closePromise = Promise.all([closePromise, parentClose]).then(
+      () => undefined,
+    )
+  }
   if (reloadTimer) {
     clearTimeout(reloadTimer)
     reloadTimer = null
@@ -487,6 +507,209 @@ export function dispose(): Promise<void> {
 }
 
 export const subscribe = skillsChanged.subscribe
+
+/**
+ * Official 2.1.326 #129: return all candidate skill/command/agent directories
+ * (whether or not they currently exist on disk).
+ */
+export function getCandidateSkillDirs(): string[] {
+  const candidates: string[] = []
+  const pushResolved = (p: string | undefined, shouldResolve = false) => {
+    if (!p) return
+    candidates.push(shouldResolve ? platformPath.resolve(p) : p)
+  }
+
+  pushResolved(getSkillsPath('userSettings', 'skills'))
+  pushResolved(getSkillsPath('userSettings', 'commands'))
+  pushResolved(platformPath.join(getClaudeConfigHomeDir(), 'agents'))
+
+  pushResolved(getSkillsPath('projectSettings', 'skills'), true)
+  pushResolved(getSkillsPath('projectSettings', 'commands'), true)
+  pushResolved('.claude/agents', true)
+
+  for (const dir of getAdditionalDirectoriesForClaudeMd()) {
+    pushResolved(platformPath.join(dir, '.claude', 'skills'), true)
+  }
+
+  const unique = uniqueWatchPaths(candidates)
+  return isPluginDirWatchDisabledByEnv()
+    ? unique.filter(p => !p.endsWith(`${platformPath.sep}skills`))
+    : unique
+}
+
+/**
+ * Official 2.1.326 #129: compute the nearest existing parent directories for
+ * candidate `.claude/{skills,commands,agents}` folders that do not exist yet.
+ */
+export async function getWatchableParentDirs(
+  candidates: readonly string[] = getCandidateSkillDirs(),
+  existingWatched: readonly string[] = watchedPaths,
+): Promise<{ missingTargets: string[]; parentDirs: string[] }> {
+  const dirExists = testOverrides?.dirExists ?? defaultDirExists
+  const watchedSet = new Set(existingWatched.map(p => platformPath.resolve(p)))
+  const missingTargets: string[] = []
+  const parentDirs: string[] = []
+
+  for (const target of candidates) {
+    const resolvedTarget = platformPath.resolve(target)
+    if (watchedSet.has(resolvedTarget)) continue
+    if (await dirExists(resolvedTarget)) continue
+    missingTargets.push(resolvedTarget)
+
+    // Walk up at most 2 levels (.claude/skills -> .claude -> project root)
+    let parent = platformPath.dirname(resolvedTarget)
+    for (let depth = 0; depth < 2; depth++) {
+      if (await dirExists(parent)) {
+        parentDirs.push(parent)
+        break
+      }
+      const nextParent = platformPath.dirname(parent)
+      if (nextParent === parent) break
+      parent = nextParent
+    }
+  }
+
+  return {
+    missingTargets,
+    parentDirs: uniqueWatchPaths(parentDirs),
+  }
+}
+
+async function refreshParentWatcher(interval: number): Promise<void> {
+  if (disposed) return
+  const { missingTargets, parentDirs } = await getWatchableParentDirs()
+  if (disposed) return
+
+  const sameParents =
+    parentDirs.length === watchedParentDirs.length &&
+    parentDirs.every((d, idx) => d === watchedParentDirs[idx])
+  if (sameParents && (parentDirs.length === 0 || parentWatcher !== null)) {
+    return
+  }
+
+  if (parentWatcher) {
+    const old = parentWatcher
+    parentWatcher = null
+    void old.close().catch(() => undefined)
+  }
+  watchedParentDirs = parentDirs
+  if (parentDirs.length === 0 || missingTargets.length === 0) {
+    return
+  }
+
+  const targetPrefixes = missingTargets.map(t => ({
+    target: t,
+    claudeDir: platformPath.dirname(t),
+  }))
+
+  const isRelevantParentEvent = (changedPath: string): boolean => {
+    const resolved = platformPath.resolve(changedPath)
+    return targetPrefixes.some(
+      ({ target, claudeDir }) =>
+        resolved === claudeDir ||
+        resolved === target ||
+        resolved.startsWith(`${target}${platformPath.sep}`),
+    )
+  }
+
+  const pw = chokidar.watch(parentDirs, {
+    persistent: true,
+    ignoreInitial: true,
+    depth: 2,
+    ignored: (filePath, stats) => {
+      if (
+        stats &&
+        !stats.isFile() &&
+        !stats.isDirectory() &&
+        !stats.isSymbolicLink()
+      ) {
+        return true
+      }
+      if (filePath.split(/[/\\]/).some(dir => dir === '.git')) return true
+      const resolved = platformPath.resolve(filePath)
+      if (parentDirs.includes(resolved)) return false
+      // Only descend into `.claude` and its skills/commands/agents children
+      const matches = targetPrefixes.some(
+        ({ target, claudeDir }) =>
+          resolved === claudeDir ||
+          resolved === target ||
+          resolved.startsWith(`${target}${platformPath.sep}`),
+      )
+      if (!matches) return true
+      if (stats?.isFile()) return !filePath.endsWith('.md')
+      return false
+    },
+    ignorePermissionErrors: true,
+    usePolling: USE_POLLING,
+    interval,
+    binaryInterval: interval,
+    atomic: true,
+  })
+
+  const onParentActivity = (changedPath: string) => {
+    if (!isRelevantParentEvent(changedPath)) return
+    void discoverNewlyCreatedSkillDirs(changedPath)
+  }
+  pw.on('addDir', onParentActivity)
+  pw.on('add', onParentActivity)
+  pw.on('error', (err: unknown) => {
+    logForDebugging(`[skills] parent watcher error: ${errorMessage(err)}`, {
+      level: 'warn',
+    })
+  })
+  parentWatcher = pw
+}
+
+/**
+ * Official 2.1.326 #129 (`De`): check for newly created skill/command/agent
+ * directories, attach the main watcher to them, and immediately trigger a
+ * reload so the first skill/command/agent created in a session is found right away.
+ */
+export async function discoverNewlyCreatedSkillDirs(
+  triggerPath?: string,
+): Promise<string[]> {
+  if (!initialized || disposed) return []
+  const nextRaw = await getWatchablePaths()
+  if (disposed) return []
+  const nextFiltered = isPluginDirWatchDisabledByEnv()
+    ? nextRaw.filter(p => !p.endsWith(`${platformPath.sep}skills`))
+    : filterWatchedModDirs(nextRaw, { skillModDirs: nextRaw })
+  const existingSet = new Set(watchedPaths.map(p => platformPath.resolve(p)))
+  const newlyFound = nextFiltered.filter(
+    p => !existingSet.has(platformPath.resolve(p)),
+  )
+  if (newlyFound.length === 0) {
+    // Still refresh parent watcher in case `.claude/` itself was just created
+    if (triggerPath) {
+      await refreshParentWatcher(getActivePollInterval())
+    }
+    return []
+  }
+
+  const generation = ++watchGeneration
+  watchedPaths = uniqueWatchPaths([...watchedPaths, ...newlyFound])
+  logForDebugging(
+    `[skills] now watching newly created skill/command directories: ${newlyFound.join(', ')}`,
+  )
+  if (watcher) {
+    const old = watcher
+    void old.close().catch(() => undefined)
+  }
+  const interval = getActivePollInterval()
+  watcher = createWatcher(interval)
+  const attached = watcher
+  const ready = new Promise<void>(resolve => {
+    attached.once('ready', () => resolve())
+  })
+  await Promise.race([ready, sleep(2000, undefined, { unref: true })])
+  if (disposed || generation !== watchGeneration) return newlyFound
+
+  await refreshParentWatcher(interval)
+  for (const dir of newlyFound) {
+    handleChange(triggerPath ?? dir)
+  }
+  return newlyFound
+}
 
 /**
  * densable QoS — watchable paths including agents dirs.
@@ -662,6 +885,11 @@ export async function resetForTesting(
     await watcher.close()
     watcher = null
   }
+  if (parentWatcher) {
+    await parentWatcher.close()
+    parentWatcher = null
+  }
+  watchedParentDirs = []
   if (reloadTimer) {
     clearTimeout(reloadTimer)
     reloadTimer = null

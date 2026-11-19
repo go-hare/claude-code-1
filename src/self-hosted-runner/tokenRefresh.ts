@@ -34,6 +34,25 @@ export type CreateTokenRefreshOpts = {
   onLog?: (msg: string, meta?: { level?: string }) => void
 }
 
+/** densable `hB` — decode JWT payload (strips optional `sk-ant-<kind>-` prefix) */
+export function decodeJwtPayload(
+  token: string,
+): Record<string, unknown> | null {
+  const raw = token.replace(/^sk-ant-[a-z]+-/, '')
+  const parts = raw.split('.')
+  if (parts.length !== 3 || !parts[1]) return null
+  try {
+    const parsed = JSON.parse(
+      Buffer.from(parts[1], 'base64url').toString('utf8'),
+    ) as unknown
+    return parsed !== null && typeof parsed === 'object'
+      ? (parsed as Record<string, unknown>)
+      : null
+  } catch {
+    return null
+  }
+}
+
 /** densable `xUe` — JWT exp (seconds) after optional sk-ant strip is caller's job for jJl */
 export function decodeJwtExpirySeconds(token: string): number | null {
   const parts = token.split('.')
@@ -128,7 +147,7 @@ export function createTokenRefreshScheduler(
     )
     opts.onRefresh(sessionId, token)
     if (rescheduleFromNewToken && decodeExpiry(token)) {
-      schedule(sessionId, token)
+      schedule(sessionId, token, 0, true)
       return
     }
     const t = setTimeout(doRefresh, FALLBACK_REFRESH_MS, sessionId, gen)
@@ -140,7 +159,12 @@ export function createTokenRefreshScheduler(
     )
   }
 
-  function schedule(sessionId: string, token: string): void {
+  function schedule(
+    sessionId: string,
+    token: string,
+    elapsedMs = 0,
+    isReschedule = false,
+  ): void {
     const exp = decodeExpiry(token)
     if (!exp) {
       log(
@@ -152,24 +176,41 @@ export function createTokenRefreshScheduler(
     if (prev) clearTimeout(prev)
     const gen = bumpGen(sessionId)
     const expiresIso = new Date(exp * 1000).toISOString()
-    const untilMs = exp * 1000 - Date.now()
+    // 2.1.326 #100: guard against tight refresh loops when the local clock
+    // runs ahead and a newly refreshed token is already past or within buffer.
+    const payload = decodeJwtPayload(token)
+    const lifetimeMs =
+      payload !== null && typeof payload.iat === 'number' && payload.iat < exp
+        ? (exp - payload.iat) * 1000
+        : Number.POSITIVE_INFINITY
+    const untilMs = Math.min(exp * 1000 - Date.now(), lifetimeMs - elapsedMs)
     const buffer = adaptiveBuffer
       ? Math.min(refreshBufferMs, Math.max(1000, Math.floor(untilMs * 0.2)))
       : refreshBufferMs
-    const delay = untilMs - buffer
-    if (delay <= 0) {
+    const rawDelay = untilMs - buffer
+    let delay = Math.max(rawDelay, 0)
+    if (isReschedule && lifetimeMs < Number.POSITIVE_INFINITY) {
+      const minPause = rawDelay > 0 ? NO_OAUTH_RETRY_MS : refreshBufferMs
+      delay = Math.max(rawDelay, Math.min(minPause, lifetimeMs * 0.2))
+    } else if (isReschedule && rawDelay <= 0) {
+      delay = NO_OAUTH_RETRY_MS
+    }
+    if (rawDelay <= 0) {
       log(
-        `[${opts.label}:token] Token for sessionId=${sessionId} expires=${expiresIso} (past or within buffer), refreshing immediately`,
+        `[${opts.label}:token] Token for sessionId=${sessionId} expires=${expiresIso} (past or within buffer), ${delay > 0 ? `refreshing in ${formatDelay(delay)} (new token already due; pausing to avoid a loop)` : 'refreshing immediately'}`,
       )
+    } else {
+      const bufferLog = adaptiveBuffer
+        ? Math.round(buffer / 1000)
+        : refreshBufferMs / 1000
+      log(
+        `[${opts.label}:token] Scheduled token refresh for sessionId=${sessionId} in ${formatDelay(delay)} (expires=${expiresIso}, buffer=${bufferLog}s)`,
+      )
+    }
+    if (delay <= 0) {
       void doRefresh(sessionId, gen)
       return
     }
-    const bufferLog = adaptiveBuffer
-      ? Math.round(buffer / 1000)
-      : refreshBufferMs / 1000
-    log(
-      `[${opts.label}:token] Scheduled token refresh for sessionId=${sessionId} in ${formatDelay(delay)} (expires=${expiresIso}, buffer=${bufferLog}s)`,
-    )
     const t = setTimeout(doRefresh, delay, sessionId, gen)
     timers.set(sessionId, t)
   }

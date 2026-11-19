@@ -11,6 +11,7 @@ import {
   getClipboardPath,
   probeLinuxClipboardTool,
   setClipboard,
+  StatusIcon,
   useTerminalNotification,
   Box,
   Link,
@@ -125,6 +126,61 @@ type OAuthStatus =
 export const AUTH_CODE_REFUSED_MESSAGE =
   "That code wasn't accepted. It may be incomplete, expired, already used, or from an earlier sign-in attempt. Sign in again to get a new code.";
 
+/** Official 2.1.326 #57: refusal when signing into Anthropic Console with a non-Console (subscription) account. */
+export const NOT_CONSOLE_ACCOUNT_MESSAGE =
+  "This sign-in isn't for an Anthropic Console account, so Claude Code can't use it. Nothing on this computer changed. Choose Claude subscription to sign in with that account, or sign in with an Anthropic Console account instead.";
+
+/** Official 2.1.326 #57: check if an OAuth profile organization_type is a non-Console account. */
+export function isNonConsoleOrganizationType(orgType: string | undefined | null): boolean {
+  if (!orgType) return false;
+  return orgType !== 'api_individual' && orgType !== 'api_team';
+}
+
+export type ManualAuthCodeValidation =
+  | { ok: true; authorizationCode: string; state: string }
+  | { ok: false; problem: string };
+
+/**
+ * Official 2.1.326 #266 (`NEe`): validate manual auth code pasted into the OAuth
+ * flow and return targeted guidance for localhost URLs, web/magic-link URLs,
+ * short OTP verification codes, or incomplete codes missing `#state`.
+ */
+export function validateManualAuthCodeInput(raw: string): ManualAuthCodeValidation {
+  const trimmed = raw.trim();
+  if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])[:/]/i.test(trimmed)) {
+    return {
+      ok: false,
+      problem:
+        'That address only works in a browser on this machine. Open the sign-in address shown above instead, and paste the code its last page shows.',
+    };
+  }
+  if (/^https?:\/\//i.test(trimmed) || trimmed.includes('/magic-link#')) {
+    return {
+      ok: false,
+      problem:
+        "That's a web address, not the code. If it's a sign-in link, open it in your browser. If the last page shows a code, paste it here.",
+    };
+  }
+  const compact = trimmed.replace(/[\s-]/g, '');
+  if (/^\d{4,10}$/.test(compact)) {
+    return {
+      ok: false,
+      problem:
+        'That looks like a verification code. Enter it in your browser, on the page that asks for it. If a page then shows a longer code, paste it here.',
+    };
+  }
+  const hashIdx = trimmed.indexOf('#');
+  const authorizationCode = hashIdx === -1 ? '' : trimmed.slice(0, hashIdx);
+  const state = hashIdx === -1 ? '' : trimmed.slice(hashIdx + 1);
+  if (!authorizationCode || !state) {
+    return {
+      ok: false,
+      problem: "That doesn't look like the full code. Copy all of it, including the # in the middle.",
+    };
+  }
+  return { ok: true, authorizationCode, state };
+}
+
 /**
  * Official 2.1.325 #2287: guard before committing OAuth credentials / settings
  * so pressing Esc right after the browser step cancels cleanly without
@@ -222,6 +278,10 @@ export function ConsoleOAuthFlow({
 
   const [pastedCode, setPastedCode] = useState('');
   const [cursorOffset, setCursorOffset] = useState(0);
+  // Official 2.1.326 #266/#267: inline validation guidance under paste field.
+  const [pasteProblem, setPasteProblem] = useState<string | null>(null);
+  // Official 2.1.326 #65: show "Finishing sign-in…" spinner once code is submitted.
+  const [isFinishingSignIn, setIsFinishingSignIn] = useState(false);
   const [oauthService] = useState(() => new OAuthService());
   const [loginWithClaudeAi, setLoginWithClaudeAi] = useState(() => {
     // Use Claude AI auth for setup-token mode to support user:inference scope
@@ -319,6 +379,33 @@ export function ConsoleOAuthFlow({
     },
   );
 
+  // Official 2.1.326 #66: Esc while waiting for browser/code clears input or goes back one screen.
+  const canEscGoBack =
+    oauthStatus.state === 'waiting_for_login' && !isFinishingSignIn && mode !== 'setup-token' && !forceLoginMethod;
+  useKeybinding(
+    'confirm:no',
+    () => {
+      if (pastedCode.length > 0) {
+        setPastedCode('');
+        setCursorOffset(0);
+        setPasteProblem(null);
+        return;
+      }
+      oauthAttemptAbortRef.current?.abort();
+      oauthService.cleanup();
+      setShowPastePrompt(false);
+      setPasteProblem(null);
+      setIsFinishingSignIn(false);
+      setOAuthStatus(
+        !loginWithClaudeAi && consoleProfileLoginAllowed ? { state: 'console_method' } : { state: 'idle' },
+      );
+    },
+    {
+      context: 'Confirmation',
+      isActive: canEscGoBack,
+    },
+  );
+
   // densable Vo / YZb — kick linux clipboard probe while the URL is visible.
   useEffect(() => {
     if (oauthStatus.state === 'waiting_for_login' && showPastePrompt) {
@@ -347,26 +434,24 @@ export function ConsoleOAuthFlow({
   async function handleSubmitCode(value: string, url: string) {
     if (!value.trim()) return;
     try {
-      // Expecting format "authorizationCode#state" from the authorization callback URL
-      const [authorizationCode, state] = value.split('#');
-
-      if (!authorizationCode || !state) {
-        setOAuthStatus({
-          state: 'error',
-          message: 'Invalid code. Please make sure the full code was copied',
-          toRetry: { state: 'waiting_for_login', url },
-        });
+      // Official 2.1.326 #266: validate pasted value inline and keep prompt open on mistake.
+      const validation = validateManualAuthCodeInput(value);
+      if (!validation.ok) {
+        setPasteProblem(validation.problem);
         return;
       }
 
+      setPasteProblem(null);
+      setIsFinishingSignIn(true);
       // Track which path the user is taking (manual code entry)
       usedManualCodeRef.current = true;
       logEvent('tengu_oauth_manual_entry', {});
       oauthService.handleManualAuthCodeInput({
-        authorizationCode,
-        state,
+        authorizationCode: validation.authorizationCode,
+        state: validation.state,
       });
     } catch (err: unknown) {
+      setIsFinishingSignIn(false);
       logError(err);
       setOAuthStatus({
         state: 'error',
@@ -395,6 +480,8 @@ export function ConsoleOAuthFlow({
     // densable st(null) at the start of each attempt
     usedManualCodeRef.current = false;
     setKeyMintFallbackReason(null);
+    setPasteProblem(null);
+    setIsFinishingSignIn(false);
     let fellBackToApiKey = false;
     oauthAttemptAbortRef.current?.abort();
     const attemptController = new AbortController();
@@ -479,8 +566,32 @@ export function ConsoleOAuthFlow({
       if (mode === 'setup-token') {
         // For setup-token mode, return the OAuth access token directly (it can be used as an API key)
         // Don't save to keychain - the token is displayed for manual use with CLAUDE_CODE_OAUTH_TOKEN
+        setIsFinishingSignIn(false);
         setOAuthStatus({ state: 'success', token: result.accessToken });
       } else {
+        // Official 2.1.326 #57: refuse non-Console (subscription) accounts during Console sign-in
+        // before touching stored credentials so an existing Claude login is never replaced.
+        if (!loginWithClaudeAi) {
+          const resultObj = result as {
+            subscriptionType?: string | null;
+            profile?: { organization?: { organization_type?: string | null } };
+          };
+          const orgType = resultObj.profile?.organization?.organization_type;
+          const isSubAccount =
+            isNonConsoleOrganizationType(orgType) ||
+            (resultObj.subscriptionType !== null && resultObj.subscriptionType !== undefined);
+          if (isSubAccount) {
+            setIsFinishingSignIn(false);
+            setOAuthStatus({
+              state: 'error',
+              message: NOT_CONSOLE_ACCOUNT_MESSAGE,
+              verbatim: true,
+              toRetry: { state: 'idle' },
+            });
+            return;
+          }
+        }
+
         await installOAuthTokens(result, {
           skipApiKey: !loginWithClaudeAi && preferConsoleToken && !fellBackToApiKey,
         });
@@ -511,6 +622,7 @@ export function ConsoleOAuthFlow({
         delete process.env.CLAUDE_CODE_USE_GEMINI;
         delete process.env.CLAUDE_CODE_USE_GROK;
 
+        setIsFinishingSignIn(false);
         setOAuthStatus({ state: 'success' });
         void sendNotification(
           {
@@ -521,6 +633,10 @@ export function ConsoleOAuthFlow({
         );
       }
     } catch (err) {
+      setIsFinishingSignIn(false);
+      if (!shouldCommitOAuthResult(attemptController.signal)) {
+        return;
+      }
       if (mode !== 'setup-token') {
         logOTelAuthEvent({ action: 'login', success: false, authMethod: 'oauth', error: err });
       }
@@ -589,7 +705,7 @@ export function ConsoleOAuthFlow({
 
   return (
     <Box flexDirection="column" gap={1}>
-      {oauthStatus.state === 'waiting_for_login' && showPastePrompt && (
+      {oauthStatus.state === 'waiting_for_login' && showPastePrompt && !isFinishingSignIn && (
         <Box
           flexDirection="column"
           key="urlToCopy"
@@ -650,7 +766,13 @@ export function ConsoleOAuthFlow({
           keyMintFallbackReason={keyMintFallbackReason}
           showPastePrompt={showPastePrompt}
           pastedCode={pastedCode}
-          setPastedCode={setPastedCode}
+          setPastedCode={value => {
+            setPastedCode(value);
+            if (pasteProblem !== null) setPasteProblem(null);
+          }}
+          pasteProblem={pasteProblem}
+          isFinishingSignIn={isFinishingSignIn}
+          canEscGoBack={canEscGoBack}
           cursorOffset={cursorOffset}
           setCursorOffset={setCursorOffset}
           textInputColumns={textInputColumns}
@@ -679,6 +801,9 @@ type OAuthStatusMessageProps = {
   showPastePrompt: boolean;
   pastedCode: string;
   setPastedCode: (value: string) => void;
+  pasteProblem: string | null;
+  isFinishingSignIn: boolean;
+  canEscGoBack: boolean;
   cursorOffset: number;
   onDone: () => void;
   setCursorOffset: (offset: number) => void;
@@ -702,6 +827,9 @@ function OAuthStatusMessage({
   showPastePrompt,
   pastedCode,
   setPastedCode,
+  pasteProblem,
+  isFinishingSignIn,
+  canEscGoBack,
   cursorOffset,
   setCursorOffset,
   textInputColumns,
@@ -1993,26 +2121,47 @@ function OAuthStatusMessage({
             </Box>
           )}
 
-          {!showPastePrompt && (
+          {isFinishingSignIn ? (
             <Box>
               <Spinner />
-              <Text>Opening browser to sign in…</Text>
+              <Text>Finishing sign-in…</Text>
             </Box>
-          )}
+          ) : (
+            <>
+              {!showPastePrompt && (
+                <Box>
+                  <Spinner />
+                  <Text>Opening browser to sign in…</Text>
+                </Box>
+              )}
 
-          {showPastePrompt && (
-            <Box>
-              <Text>{PASTE_HERE_MSG}</Text>
-              <TextInput
-                value={pastedCode}
-                onChange={setPastedCode}
-                onSubmit={(value: string) => handleSubmitCode(value, oauthStatus.url)}
-                cursorOffset={cursorOffset}
-                onChangeCursorOffset={setCursorOffset}
-                columns={textInputColumns}
-                mask="*"
-              />
-            </Box>
+              {showPastePrompt && (
+                <Box flexDirection="column">
+                  <Box borderStyle="round" borderDimColor paddingX={1}>
+                    <Text>{PASTE_HERE_MSG}</Text>
+                    <TextInput
+                      value={pastedCode}
+                      onChange={setPastedCode}
+                      onSubmit={(value: string) => handleSubmitCode(value, oauthStatus.url)}
+                      cursorOffset={cursorOffset}
+                      onChangeCursorOffset={setCursorOffset}
+                      columns={Math.max(10, textInputColumns - 4)}
+                      mask="*"
+                    />
+                  </Box>
+                  {pasteProblem ? (
+                    <Box marginTop={1}>
+                      <Text color="error">
+                        <StatusIcon status="error" withSpace />
+                        {pasteProblem}
+                      </Text>
+                    </Box>
+                  ) : null}
+                </Box>
+              )}
+
+              {canEscGoBack ? <Text dimColor>{pastedCode.length > 0 ? 'Esc to clear' : 'Esc to go back'}</Text> : null}
+            </>
           )}
         </Box>
       );

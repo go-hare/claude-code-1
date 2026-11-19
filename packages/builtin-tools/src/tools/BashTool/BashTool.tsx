@@ -133,7 +133,16 @@ import { validateCoordinatorBashWriteAccess } from './coordinatorWriteValidation
 import { parseSedEditCommand } from './sedEditParser.js';
 import { extractSandboxViolationSuffix, mergeBashStderr } from './sandboxViolationResult.js';
 import { createOutputFileCleanup, persistLargeOutputFile } from './outputFileCleanup.js';
-import { getSandboxPolicyRefusal, SandboxPolicyRefusalError, shouldUseSandbox } from './shouldUseSandbox.js';
+import {
+  clearSandboxStateAtCheck,
+  getSandboxPolicyRefusal,
+  KEPT_IN_SANDBOX_SINCE_CHECK_NOTE,
+  recordSandboxStateAtCheck,
+  SANDBOX_GONE_SINCE_CHECK_MESSAGE,
+  SandboxPolicyRefusalError,
+  shouldKeepRewrittenCommandInSandbox,
+  shouldUseSandbox,
+} from './shouldUseSandbox.js';
 import { BASH_TOOL_NAME } from './toolName.js';
 import {
   extractHookIfFallbackCommands,
@@ -212,6 +221,31 @@ const BASH_SEMANTIC_NEUTRAL_COMMANDS = new Set([
   'false',
   ':', // bash no-op
 ]);
+
+// Official 2.1.326 #12 (`h1i` / `wr` / `k1i` @300060423):
+// Flags that make `sort` or `find` write or delete files so they are never
+// summarized in the transcript as a read/search command.
+const SORT_OUTPUT_FLAG_RE = /^(?:-[a-zA-Z]*o|--output)/;
+const FIND_MUTATING_OR_EXEC_ACTIONS = new Set([
+  '-exec',
+  '-execdir',
+  '-ok',
+  '-okdir',
+  '-delete',
+  '-rm',
+  '-fprint',
+  '-fprint0',
+  '-fprintf',
+  '-fls',
+  '-files0-from',
+]);
+const BASH_COLLAPSIBLE_COMMANDS = new Set([
+  ...BASH_SEARCH_COMMANDS,
+  ...BASH_READ_COMMANDS,
+  ...BASH_LIST_COMMANDS,
+  ...BASH_SEMANTIC_NEUTRAL_COMMANDS,
+]);
+const CAT_NO_FILE_ARG_RE = /^cat(?:\s+-\S*)*\s*(?:$|[<>])/;
 
 // Commands that typically produce no stdout on success
 const BASH_SILENT_COMMANDS = new Set([
@@ -299,13 +333,32 @@ export function isSearchOrReadBashCommand(command: string): {
       return { isSearch: false, isRead: false, isList: false };
     }
 
-    const baseCommand = part.trim().split(/\s+/)[0];
+    const tokens = part.trim().split(/\s+/);
+    const baseCommand = tokens[0];
     if (!baseCommand) {
       continue;
     }
 
     if (BASH_SEMANTIC_NEUTRAL_COMMANDS.has(baseCommand)) {
       continue;
+    }
+
+    // Official 2.1.326 #12 (`k1i`): `cat <<EOF`, `sort -o`/`--output`, and
+    // mutating `find` actions (`-delete`, `-rm`, `-fprint*`, `-fls`, or
+    // `-exec`/`-ok` running a non-read/search command) are NOT search/read.
+    if (CAT_NO_FILE_ARG_RE.test(part.trim()) && command.includes('<<')) {
+      return { isSearch: false, isRead: false, isList: false };
+    }
+    if (
+      tokens.some((tok, idx) =>
+        baseCommand === 'sort'
+          ? SORT_OUTPUT_FLAG_RE.test(tok)
+          : baseCommand === 'find' &&
+            FIND_MUTATING_OR_EXEC_ACTIONS.has(tok) &&
+            !(/^-(?:exec|ok)/.test(tok) && BASH_COLLAPSIBLE_COMMANDS.has(tokens[idx + 1] ?? '')),
+      )
+    ) {
+      return { isSearch: false, isRead: false, isList: false };
     }
 
     hasNonNeutralCommand = true;
@@ -1308,7 +1361,15 @@ export const BashTool = buildTool({
     return { result: true };
   },
   async checkPermissions(input, context): Promise<PermissionResult> {
-    return bashToolHasPermission(input, context);
+    const sandboxAtStart = shouldUseSandbox(input);
+    try {
+      return await bashToolHasPermission(input, context);
+    } finally {
+      // Official 2.1.326 #303 (`CSn`): record whether this call was checked as
+      // sandboxed so hook/SDK rewrites stay in the sandbox unless the approver
+      // explicitly sets `dangerouslyDisableSandbox: true`.
+      recordSandboxStateAtCheck(context.toolUseId, input, sandboxAtStart || shouldUseSandbox(input));
+    }
   },
   renderToolUseMessage,
   renderToolUseProgressMessage,
@@ -1439,7 +1500,22 @@ export const BashTool = buildTool({
     _parentMessage?: AssistantMessage,
     onProgress?: ToolCallProgress<BashProgress>,
   ) {
-    const policyRefusal = getSandboxPolicyRefusal(shouldUseSandbox(input), input.command, false, 'bash');
+    // Official 2.1.326 #303 (`aut` / `lut`): if the original command was
+    // checked as sandboxed and a hook/SDK host rewrote it without explicitly
+    // adding `dangerouslyDisableSandbox: true`, keep it in the sandbox.
+    const keepInSandboxSinceCheck = shouldKeepRewrittenCommandInSandbox(toolUseContext.toolUseId, input);
+    clearSandboxStateAtCheck(toolUseContext.toolUseId);
+    const effectiveUseSandbox = shouldUseSandbox(input, {
+      disableUnsandboxedCommands: keepInSandboxSinceCheck,
+    });
+    if (keepInSandboxSinceCheck && !effectiveUseSandbox) {
+      throw new SandboxPolicyRefusalError(SANDBOX_GONE_SINCE_CHECK_MESSAGE);
+    }
+    const keptInSandboxNote =
+      keepInSandboxSinceCheck && effectiveUseSandbox && !shouldUseSandbox(input) && toolUseContext.innerCall !== true
+        ? KEPT_IN_SANDBOX_SINCE_CHECK_NOTE
+        : undefined;
+    const policyRefusal = getSandboxPolicyRefusal(effectiveUseSandbox, input.command, false, 'bash');
     if (policyRefusal !== null) {
       throw new SandboxPolicyRefusalError(policyRefusal);
     }
@@ -1507,6 +1583,8 @@ export const BashTool = buildTool({
           innerCall: toolUseContext.innerCall,
           // densable 2.1.217 VRu/ZRu — pin isolation worktree into shell gates
           agentWorktree: toolUseContext.agentWorktree,
+          keepInSandboxSinceCheck,
+          immediateProgress: (toolUseContext as { immediateProgress?: boolean }).immediateProgress === true,
         });
 
         // Consume the generator and capture the return value
@@ -1577,8 +1655,9 @@ export const BashTool = buildTool({
           shouldUseSandbox(input) && SandboxManager.isSandboxingEnabled()
             ? getSandboxedGitProtectedFileNote(originalStdout, result.code)
             : undefined;
-        const outputWithSbFailures = sandboxGitNote
-          ? `${baseOutputWithSbFailures}${baseOutputWithSbFailures.endsWith('\n') ? '' : '\n'}${sandboxGitNote}`
+        const extraSandboxNotes = [sandboxGitNote, keptInSandboxNote].filter(Boolean).join('\n');
+        const outputWithSbFailures = extraSandboxNotes
+          ? `${baseOutputWithSbFailures}${baseOutputWithSbFailures && !baseOutputWithSbFailures.endsWith('\n') ? '\n' : ''}${extraSandboxNotes}`
           : baseOutputWithSbFailures;
         // densable 2.1.243 #35: keep the appended <sandbox_violations> (and
         // #2261 sandbox git note) on success (exit 0) — error path already throws with the full annotate.
@@ -1742,6 +1821,8 @@ async function* runShellCommand({
   agentContext,
   innerCall,
   agentWorktree,
+  keepInSandboxSinceCheck,
+  immediateProgress,
 }: {
   input: BashToolInput;
   abortController: AbortController;
@@ -1760,6 +1841,9 @@ async function* runShellCommand({
   innerCall?: boolean;
   /** densable agentWorktree for VRu/ZRu shell isolation gates. */
   agentWorktree?: string;
+  keepInSandboxSinceCheck?: boolean;
+  /** Official 2.1.326 #195: skip the 2s initial delay for `!` shell mode. */
+  immediateProgress?: boolean;
 }): AsyncGenerator<
   {
     type: 'progress';
@@ -1837,7 +1921,9 @@ async function* runShellCommand({
       }
     },
     preventCwdChanges,
-    shouldUseSandbox: shouldUseSandbox(input),
+    shouldUseSandbox: shouldUseSandbox(input, {
+      disableUnsandboxedCommands: keepInSandboxSinceCheck,
+    }),
     shouldAutoBackground,
     // densable VRu — block shell when cwd is outside agent isolation worktree
     agentWorktree,
@@ -1992,7 +2078,13 @@ async function* runShellCommand({
       const initialResult = await Promise.race([
         resultPromise,
         new Promise<null>(resolve => {
-          const t = setTimeout((r: (v: null) => void) => r(null), PROGRESS_THRESHOLD_MS, resolve);
+          // Official 2.1.326 #195 (`r ? 0 : EYo` @300096529): `!` user shell
+          // commands start progress polling immediately (0ms instead of 2000ms).
+          const t = setTimeout(
+            (r: (v: null) => void) => r(null),
+            immediateProgress ? 0 : PROGRESS_THRESHOLD_MS,
+            resolve,
+          );
           t.unref();
         }),
         new Promise<null>(resolve => {

@@ -18,8 +18,10 @@ import { logError } from '../log.js'
 import {
   clearMarketplacesCache,
   getDeclaredMarketplaces,
+  loadKnownMarketplacesConfig,
   registerSeedMarketplaces,
 } from './marketplaceManager.js'
+import { getSkippedWorktreeMarketplacesNotice } from './worktreePluginSettings.js'
 import { detectAndUninstallDelistedPlugins } from './pluginBlocklist.js'
 import { clearPluginCache } from './pluginLoader.js'
 import { reconcileMarketplaces } from './reconciler.js'
@@ -72,7 +74,26 @@ export async function installPluginsForHeadless(): Promise<boolean> {
   // the official marketplace through the same reconciler path as any other —
   // which composes correctly with CLAUDE_CODE_PLUGIN_SEED_DIR: seed registers
   // it in known_marketplaces.json, reconciler diff sees it as upToDate, no clone.
-  const declaredCount = Object.keys(getDeclaredMarketplaces()).length
+  const declared = getDeclaredMarketplaces()
+  const declaredCount = Object.keys(declared).length
+
+  // Official 2.1.326 #330 (`xMr`): notify when a worktree session skipped
+  // repo-declared plugin settings / marketplaces.
+  try {
+    const known = await loadKnownMarketplacesConfig()
+    const skippedNotice = getSkippedWorktreeMarketplacesNotice({
+      declaredMarketplaces: declared,
+      knownMarketplaces: known,
+    })
+    if (skippedNotice !== null) {
+      logForDebugging(`installPluginsForHeadless: ${skippedNotice}`, {
+        level: 'warn',
+      })
+      process.stderr.write(`${skippedNotice}\n`)
+    }
+  } catch {
+    // Non-fatal notice probe
+  }
 
   const metrics = {
     marketplaces_installed: 0,

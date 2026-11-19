@@ -156,7 +156,7 @@ const CHORD_EXAMPLE: KeybindingsSchemaType['bindings'][number] = {
 const SECTION_INTRO = [
   '# Keybindings Skill',
   '',
-  'Create or modify `~/.claude/keybindings.json` to customize keyboard shortcuts.',
+  'Create or modify `~/.claude/keybindings.json` to customize keyboard shortcuts (for Claude Code in a terminal).',
   '',
   '## CRITICAL: Read Before Write',
   '',
@@ -165,6 +165,24 @@ const SECTION_INTRO = [
   '- Use **Edit** tool for modifications to existing files',
   '- Use **Write** tool only if the file does not exist yet',
 ].join('\n')
+
+/** Official 2.1.326 #153 (`ea`): warn when running inside Claude Desktop. */
+export const SECTION_DESKTOP_APP_NOTICE = [
+  '## This Session Runs in the Claude Desktop App',
+  '',
+  "The desktop app does not read `~/.claude/keybindings.json`: the file is for Claude Code in a terminal. Edit it only when the user names the file or means Claude Code in a terminal. Otherwise tell them that the file would not change the app. Help > Keyboard Shortcuts lists the app's shortcuts (on Windows and Linux, Help is in the menu at the top left), and Settings can change some of them.",
+].join('\n')
+
+export function isClaudeDesktopKeybindingsSession(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const entry = env.CLAUDE_CODE_ENTRYPOINT
+  return (
+    entry === 'claude-desktop' ||
+    entry === 'remote_desktop' ||
+    env.CLAUDE_DESKTOP === '1'
+  )
+}
 
 const SECTION_FILE_FORMAT = [
   '## File Format',
@@ -312,6 +330,9 @@ export function registerKeybindingsSkill(): void {
 
       const sections = [
         SECTION_INTRO,
+        ...(isClaudeDesktopKeybindingsSession()
+          ? [SECTION_DESKTOP_APP_NOTICE]
+          : []),
         SECTION_FILE_FORMAT,
         SECTION_KEYSTROKE_SYNTAX,
         SECTION_UNBINDING,

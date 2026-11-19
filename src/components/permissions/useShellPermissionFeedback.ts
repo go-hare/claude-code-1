@@ -61,6 +61,8 @@ export function useShellPermissionFeedback({
     if (option === 'yes') {
       if (yesInputMode) {
         setYesInputMode(false)
+        // Official 2.1.326 #27: hiding the note box via Tab clears the note so it is never sent invisibly.
+        setAcceptFeedback('')
         logEvent('tengu_accept_feedback_mode_collapsed', analyticsProps)
       } else {
         setYesInputMode(true)
@@ -70,6 +72,7 @@ export function useShellPermissionFeedback({
     } else if (option === 'no') {
       if (noInputMode) {
         setNoInputMode(false)
+        setRejectFeedback('')
         logEvent('tengu_reject_feedback_mode_collapsed', analyticsProps)
       } else {
         setNoInputMode(true)

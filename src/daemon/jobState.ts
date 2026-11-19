@@ -180,6 +180,12 @@ export interface BgJobState {
   reapedMidWorkAt?: string
   /** densable uae — wake-only roster-gap reap timestamp. */
   reapedUnsettledAt?: string
+  /**
+   * Official 2.1.326 #33: true when a newer background session has resumed
+   * this job's conversation `sessionId`, so opening, stopping, or removing this
+   * older job must not kill the newer live background session.
+   */
+  sessionIdTaken?: boolean
 }
 
 // ---------------------------------------------------------------------------

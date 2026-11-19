@@ -406,8 +406,18 @@ function getSimpleSandboxSection(): string {
           'If a command fails due to sandbox restrictions, work with the user to adjust sandbox settings instead.',
         ]
 
+  const linuxServerSandboxInstructions: string[] =
+    getPlatform() === 'linux' || getPlatform() === 'wsl'
+      ? [
+          allowUnsandboxedCommands
+            ? "On Linux, each sandboxed command has its own private network: a server it starts binds without error, but no later command and not the user's browser can reach it (a server is reachable only from the command that started it), and a direct connection to a server outside the sandbox, on this machine or at a private address, fails too. The error is ECONNREFUSED, or ENETUNREACH for a private address (curl says \"Failed to connect\"), with no `<sandbox_violations>` block, so it says nothing about the server. To test a server, start it in the background, wait until it listens and check it, all in one command. If a server must stay up for the user's browser or later commands, retry the server as described above for a sandbox-caused failure, and tell the user in the same message that it runs without the sandbox's protection."
+            : 'On Linux, each sandboxed command has its own private network: a server it starts binds without error, but no later command and not the user\'s browser can reach it (a server is reachable only from the command that started it), and a direct connection to a server outside the sandbox, on this machine or at a private address, fails too. The error is ECONNREFUSED, or ENETUNREACH for a private address (curl says "Failed to connect"), with no `<sandbox_violations>` block, so it says nothing about the server. To test a server, start it in the background, wait until it listens and check it, all in one command. If a server must stay up for the user\'s browser or later commands, tell the user it must run outside the sandbox, without its protection; leaving the sandbox is their decision, not yours.',
+        ]
+      : []
+
   const items: Array<string | string[]> = [
     ...sandboxOverrideItems,
+    ...linuxServerSandboxInstructions,
     'For temporary files, always use the `$TMPDIR` environment variable. TMPDIR is automatically set to the correct sandbox-writable directory in sandbox mode. Do NOT use `/tmp` directly - use `$TMPDIR` instead.',
   ]
 

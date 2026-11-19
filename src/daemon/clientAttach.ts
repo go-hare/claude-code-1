@@ -437,7 +437,25 @@ export async function attachToSession(
     detachMachine.dispose()
 
     socket?.destroy()
+    // Official 2.1.326 #340: if the user explicitly quit an empty conversation
+    // (Ctrl+C×2, Ctrl+D×2, or `/exit`), ask the daemon to retire it immediately
+    // with `empty-quit` instead of leaving it alive for the 5-minute idle grace.
+    if (
+      (outcome === 'detached' && msg === 'empty-quit') ||
+      (outcome === 'disconnected' && emptyQuitTracker.sawSignal())
+    ) {
+      void notifyEmptyConversationQuit(short).finally(() => {
+        resolveResult({ outcome, msg })
+      })
+      return
+    }
     resolveResult({ outcome, msg })
+  }
+
+  const emptyQuitTracker = createEmptyQuitInputTracker()
+
+  function noteQuitShortcutInput(chunk: Buffer): void {
+    emptyQuitTracker.feed(chunk)
   }
 
   // --- Detach key state machine (Official 2.1.323 #2130: 800ms Ctrl+B window) ---
@@ -463,6 +481,7 @@ export async function attachToSession(
 
   function processInput(data: Buffer): void {
     if (done || data.length === 0) return
+    noteQuitShortcutInput(data)
     detachMachine.feed(data)
   }
 
@@ -869,6 +888,119 @@ export type SendBgReplyResult = null | {
  * Official Nr — notice printed when `claude agents` exits while background
  * sessions are still running without a persistent service.
  */
+/**
+ * Official 2.1.326 #340: notify the background daemon to immediately retire an
+ * empty conversation when the user quits via Ctrl+C×2, Ctrl+D×2, or `/exit`
+ * after pressing `←` in agent view, instead of leaving it running for 5 minutes.
+ */
+/**
+ * Official 2.1.326 #340: Track user quit shortcuts (Ctrl+C×2, Ctrl+D×2, `/exit`+Enter)
+ * in both legacy control bytes and Kitty keyboard protocol CSI u sequences.
+ */
+export function createEmptyQuitInputTracker(nowFn: () => number = Date.now): {
+  feed: (chunk: Buffer) => void
+  sawSignal: () => boolean
+} {
+  let lastCtrlCAt = 0
+  let lastCtrlDAt = 0
+  let recentTypedTail = ''
+  let sawEmptyQuitSignal = false
+  const DOUBLE_QUIT_WINDOW_MS = 2000
+
+  function recordCtrlC(now: number): void {
+    if (now - lastCtrlCAt <= DOUBLE_QUIT_WINDOW_MS) {
+      sawEmptyQuitSignal = true
+    }
+    lastCtrlCAt = now
+  }
+
+  function recordCtrlD(now: number): void {
+    if (now - lastCtrlDAt <= DOUBLE_QUIT_WINDOW_MS) {
+      sawEmptyQuitSignal = true
+    }
+    lastCtrlDAt = now
+  }
+
+  function recordEnter(): void {
+    if (/\/exit\s*$/.test(recentTypedTail.trim())) {
+      sawEmptyQuitSignal = true
+    }
+    recentTypedTail = ''
+  }
+
+  return {
+    feed(chunk: Buffer): void {
+      const now = nowFn()
+      let i = 0
+      while (i < chunk.length) {
+        const byte = chunk[i]!
+        // Kitty CSI u sequences: ESC [ <params> u (e.g. \x1b[99;5u, \x1b[100;5u, \x1b[13u)
+        if (byte === 0x1b && i + 1 < chunk.length && chunk[i + 1] === 0x5b) {
+          let j = i + 2
+          while (j < chunk.length && chunk[j]! >= 0x20 && chunk[j]! <= 0x3f) {
+            j++
+          }
+          if (j < chunk.length && chunk[j]! >= 0x40 && chunk[j]! <= 0x7e) {
+            const finalByte = chunk[j]!
+            if (finalByte === 0x75) {
+              // 'u' terminator — Kitty keyboard protocol
+              const params = chunk.subarray(i + 2, j).toString('ascii')
+              if (/^99;5(?::1)?$/.test(params)) {
+                recordCtrlC(now)
+              } else if (/^100;5(?::1)?$/.test(params)) {
+                recordCtrlD(now)
+              } else if (/^13(?:;1(?::1)?)?$/.test(params)) {
+                recordEnter()
+              }
+            }
+            i = j + 1
+            continue
+          }
+        }
+        if (byte === 0x03) {
+          recordCtrlC(now)
+        } else if (byte === 0x04) {
+          recordCtrlD(now)
+        } else if (byte === 0x0d || byte === 0x0a) {
+          recordEnter()
+        } else if (byte >= 0x20 && byte <= 0x7e) {
+          recentTypedTail = (recentTypedTail + String.fromCharCode(byte)).slice(
+            -16,
+          )
+        }
+        i++
+      }
+    },
+    sawSignal(): boolean {
+      return sawEmptyQuitSignal
+    },
+  }
+}
+
+export async function notifyEmptyConversationQuit(
+  short: string,
+): Promise<{ retired: boolean; cause?: string; reason?: string }> {
+  try {
+    const { sendControlRequest } = await import('./controlSocketClient.js')
+    const res = await sendControlRequest(
+      { op: 'retire-empty-quit', proto: PROTO_VERSION, short },
+      { timeoutMs: 2_000 },
+    )
+    if (res.ok && res.retired === true) {
+      return {
+        retired: true,
+        cause: typeof res.cause === 'string' ? res.cause : 'empty-quit',
+      }
+    }
+    return {
+      retired: false,
+      reason: typeof res.reason === 'string' ? res.reason : 'not-retired',
+    }
+  } catch {
+    return { retired: false, reason: 'ipc-error' }
+  }
+}
+
 export const BG_ATTACH_HELD_EXIT_NOTICE =
   "Background sessions still running will stop in about a minute. Run 'claude agents' to keep them."
 

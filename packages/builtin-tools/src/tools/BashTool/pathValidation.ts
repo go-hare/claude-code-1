@@ -10,7 +10,12 @@ import {
 } from 'src/utils/bash/commands.js'
 import { tryParseShellCommand } from 'src/utils/bash/shellQuote.js'
 import { getDirectoryForPath } from 'src/utils/path.js'
-import { allWorkingDirectories } from 'src/utils/permissions/filesystem.js'
+import {
+  allWorkingDirectories,
+  getClaudeSignInFilePaths,
+  isClaudeSignInFilePath,
+  resolvePathWithExistingAncestorRealpath,
+} from 'src/utils/permissions/filesystem.js'
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js'
 import { createReadRuleSuggestion } from 'src/utils/permissions/PermissionUpdate.js'
 import type { PermissionUpdate } from 'src/utils/permissions/PermissionUpdateSchema.js'
@@ -870,7 +875,8 @@ export function expandCpMvDestinationPaths(
       }
     }
   }
-  if (args.some(a => /^--pa/.test(a))) {
+  const hasBackupOrParents = hasCpMvBackupOrParentsFlag(args)
+  if (hasBackupOrParents && args.some(a => /^--pa/.test(a))) {
     for (const dest of destinations) {
       const cleanDest = dest.replace(/[\\/]+$/, '')
       for (const src of extractedPaths) {
@@ -879,7 +885,8 @@ export function expandCpMvDestinationPaths(
       }
     }
   }
-  const hasBackup = opts.some(o => o.name === 'b' || o.name === 'S')
+  const hasBackup =
+    hasBackupOrParents && opts.some(o => o.name === 'b' || o.name === 'S')
   const suffixes = hasBackup
     ? Array.from(
         new Set([
@@ -899,6 +906,204 @@ export function expandCpMvDestinationPaths(
   )
 }
 
+/**
+ * Official 2.1.326 #295/#310 (`fMn` @295721932):
+ * Detect `cp` source forms that write source directory contents directly into
+ * the destination directory (`.` / `..` basename, macOS trailing slash `src/`,
+ * or `-T`/`--no-target-directory`).
+ */
+export function cpSourceTargetsDestContents(
+  args: readonly string[],
+  sources: readonly string[],
+): boolean {
+  const hasContentsSource = sources.some(src => {
+    const clean = src.replace(/[\\/]+$/, '')
+    const base = posix.basename(clean.replace(/\\/g, '/'))
+    return (
+      base === '.' ||
+      base === '..' ||
+      (getPlatform() === 'macos' && /[\\/]$/.test(src))
+    )
+  })
+  if (hasContentsSource) return true
+  return args.some(a => a.startsWith('--no-t') || /^-[^-]*T/.test(a))
+}
+
+/**
+ * Official 2.1.326 #310 (`pMn` @295722078):
+ * Detect `--parents`, `--backup`, `--suffix`, `-b`, `-S` flags on `cp`/`mv`.
+ */
+export function hasCpMvBackupOrParentsFlag(args: readonly string[]): boolean {
+  return args.some(a => /^--(?:pa|b|su)/.test(a) || /^-[^-]*[bS]/.test(a))
+}
+
+/**
+ * Official 2.1.326 #310 (`Ut` @295711300):
+ * `cp`/`mv` with `-b`/`--backup` and no explicit `-S` suffix before operands
+ * creates a backup file whose name depends on the environment (`SIMPLE_BACKUP_SUFFIX`
+ * / `VERSION_CONTROL`) and must ask.
+ */
+export function isCpMvBackupSuffixEnvDependent(
+  args: readonly string[],
+): boolean {
+  if (!hasCpMvBackupOrParentsFlag(args)) return false
+  const opts = parseCpMvOptions(args)
+  const hasExplicitSuffix = opts.some(
+    o => o.name === 'S' && !o.afterOperand && Boolean(o.value),
+  )
+  if (hasExplicitSuffix) return false
+  const hasEnvDependentBackup = opts.some(
+    o =>
+      o.name === 'b' &&
+      !(
+        o.value === 't' ||
+        (o.value !== undefined &&
+          o.value.length > 1 &&
+          ['none', 'off', 'numbered'].some(k => k.startsWith(o.value ?? '')))
+      ),
+  )
+  if (!hasEnvDependentBackup) return false
+  return Boolean(
+    process.env.SIMPLE_BACKUP_SUFFIX || process.env.VERSION_CONTROL,
+  )
+}
+
+/**
+ * Official 2.1.326 #308 (`sMn` @295708400):
+ * Check if any target path resolves directly to, or is an ancestor directory of,
+ * one of Claude Code's sign-in files (`.credentials.json`, `.device-keys.json`).
+ */
+export function findSignInFilesReachedByPaths(
+  paths: readonly string[],
+  cwd: string,
+): { named: string[]; below: string[] } {
+  if (paths.length === 0) return { named: [], below: [] }
+  const caseFold = getPlatform() === 'macos' || getPlatform() === 'windows'
+  const normForCompare = (p: string): string => {
+    const n = normalize(p).normalize('NFC')
+    return caseFold ? n.toLowerCase() : n
+  }
+  const expandVariants = (p: string): string[] => {
+    const literal = normForCompare(p)
+    const real = normForCompare(resolvePathWithExistingAncestorRealpath(p))
+    return real !== literal ? [literal, real] : [literal]
+  }
+  const signInEntries = getClaudeSignInFilePaths().map(p => ({
+    canonical: normalize(p),
+    variants: expandVariants(p),
+  }))
+  const resolvedTargetVariants = paths.map(raw => {
+    const clean = expandTilde(raw.replace(/^['"]|['"]$/g, ''))
+    const norm =
+      getPlatform() === 'windows' && /^\/(?:cygdrive\/)?[A-Za-z]\//.test(clean)
+        ? posixPathToWindowsPath(clean)
+        : clean
+    const abs = normalize(isAbsolute(norm) ? norm : resolve(cwd, norm))
+    return expandVariants(abs)
+  })
+  const named: string[] = []
+  const below: string[] = []
+  for (const { canonical, variants: signInVariants } of signInEntries) {
+    let matchedDirect = false
+    let matchedBelow = false
+    for (const targetVariants of resolvedTargetVariants) {
+      for (const target of targetVariants) {
+        const prefix =
+          target.endsWith('/') || target.endsWith('\\')
+            ? target
+            : `${target}${target.includes('\\') ? '\\' : '/'}`
+        for (const signInVar of signInVariants) {
+          if (target === signInVar) {
+            matchedDirect = true
+            break
+          }
+          if (signInVar.startsWith(prefix)) {
+            matchedBelow = true
+          }
+        }
+        if (matchedDirect) break
+      }
+      if (matchedDirect) break
+    }
+    if (matchedDirect) named.push(canonical)
+    else if (matchedBelow) below.push(canonical)
+  }
+  return { named, below }
+}
+
+/**
+ * Official 2.1.326 #308 (`lMn` @295709000):
+ * Check `ln` / `link` commands that link to or overwrite a protected file or
+ * Claude sign-in file.
+ */
+function checkLinkCommandProtectedPaths(
+  rawCmd: string,
+  args: readonly string[],
+  cwd: string,
+  toolPermissionContext: ToolPermissionContext,
+): PermissionResult | null {
+  const base = rawCmd
+    .replace(/^.*[\\/]/, '')
+    .toLowerCase()
+    .replace(/\.exe$/, '')
+  if (base !== 'ln' && base !== 'link') return null
+  const positional = filterOutFlags([...args])
+  const extraTargets = expandCpMvDestinationPaths(args, positional)
+  const targets = Array.from(
+    new Set([
+      ...positional,
+      ...extraTargets,
+      ...(positional.length === 1 ? ['.'] : []),
+    ]),
+  )
+  const signInHits = findSignInFilesReachedByPaths(targets, cwd)
+  const ctxNoDeny: ToolPermissionContext = {
+    ...toolPermissionContext,
+    alwaysDenyRules: {},
+  }
+  for (const target of [...targets, ...signInHits.named, ...signInHits.below]) {
+    if (isClaudeSignInFilePath(target) || signInHits.below.includes(target)) {
+      const reason = signInHits.below.includes(target)
+        ? `This command reaches ${target}, which Claude Code’s tools cannot write`
+        : `Linking to or overwriting Claude Code's sign-in file '${target}' requires explicit approval. A link gives the file a second name, and later writes to that name change it.`
+      return {
+        behavior: 'ask',
+        message: reason,
+        blockedPath: target,
+        decisionReason: {
+          type: 'safetyCheck',
+          reason,
+          classifierApprovable: false,
+          circuitBreaker: 'claudeSettingsFile',
+        } as unknown as PermissionResult['decisionReason'],
+        suggestions: [],
+        suppressAlwaysAllowRule: true,
+      }
+    }
+    const { decisionReason, resolvedPath } = validatePath(
+      target,
+      cwd,
+      ctxNoDeny,
+      'write',
+    )
+    if (
+      decisionReason?.type === 'safetyCheck' &&
+      !decisionReason.classifierApprovable
+    ) {
+      const reason = `${decisionReason.reason.replace(/\.$/, '')}. A link gives the file a second name, and later writes to that name change it.`
+      return {
+        behavior: 'ask',
+        message: reason,
+        blockedPath: resolvedPath,
+        decisionReason: { ...decisionReason, reason },
+        suggestions: [],
+        suppressAlwaysAllowRule: true,
+      }
+    }
+  }
+  return null
+}
+
 function validateCommandPaths(
   command: PathCommand,
   args: string[],
@@ -906,6 +1111,7 @@ function validateCommandPaths(
   toolPermissionContext: ToolPermissionContext,
   compoundCommandHasCd?: boolean,
   operationTypeOverride?: FileOperationType,
+  astCmd?: SimpleCommand,
 ): PermissionResult {
   const extractor = PATH_EXTRACTORS[command]
   const paths = extractor(args)
@@ -919,12 +1125,97 @@ function validateCommandPaths(
       ? Array.from(new Set([...paths, ...extraCpMvTargets]))
       : paths
 
-  // Official #1850: explicit deny rules on any cp/mv destination target
-  // (including `<destDir>/<basename(src)>` and `-t DIR`) must still deny
-  // even when flags would otherwise trigger a generic flag-validation ask.
+  const cpMvOpts =
+    command === 'cp' || command === 'mv' ? parseCpMvOptions(args) : []
+  const targetDirectoryGiven = cpMvOpts.some(o => o.name === 't')
+  const cpSources =
+    command === 'cp'
+      ? targetDirectoryGiven
+        ? paths
+        : paths.length >= 2
+          ? paths.slice(0, -1)
+          : []
+      : []
+  const cpDestSet =
+    command === 'cp'
+      ? new Set(
+          targetDirectoryGiven
+            ? extraCpMvTargets
+            : [...paths.slice(-1), ...extraCpMvTargets],
+        )
+      : null
+
+  // Official 2.1.326 #11 (`dn` / `gn` @295712100):
+  // Simple literal `cp` whose source path is covered ONLY by an `Edit` deny
+  // rule (and not a `Read` deny rule) must NOT be refused because `cp` only
+  // reads its source.
+  const isSimpleLiteralCp =
+    command === 'cp' &&
+    !compoundCommandHasCd &&
+    !targetDirectoryGiven &&
+    (astCmd === undefined ||
+      (normalizePathCommandName(astCmd.argv[0] ?? '') === 'cp' &&
+        astCmd.envVars.length === 0)) &&
+    args
+      .slice(0, Math.max(0, args.length - paths.length))
+      .every(f => /^(?:-[pfinv]+|--)$/.test(f)) &&
+    paths.every(p => /^(?!\d+$)[\w./][^*?[#^=]*$/.test(p))
+
+  const validateSingleTarget = (
+    p: string,
+    isCpSource: boolean,
+  ): ReturnType<typeof validatePath> => {
+    const writeCheck = validatePath(
+      p,
+      cwd,
+      toolPermissionContext,
+      operationType,
+    )
+    if (
+      !isSimpleLiteralCp ||
+      !isCpSource ||
+      writeCheck.allowed ||
+      writeCheck.decisionReason?.type !== 'rule'
+    ) {
+      return writeCheck
+    }
+    // Check if the path passes write validation once deny rules are cleared;
+    // if so, the deny was an Edit deny rule — evaluate as a read instead so
+    // Read deny rules still block while Edit deny rules do not block cp source.
+    const withoutDeny = validatePath(
+      p,
+      cwd,
+      { ...toolPermissionContext, alwaysDenyRules: {} },
+      operationType,
+    )
+    return withoutDeny.allowed
+      ? validatePath(p, cwd, toolPermissionContext, 'read')
+      : withoutDeny
+  }
+
+  // Official #1850 + #11: explicit deny rules on any cp/mv destination target
+  // (including `<destDir>/<basename(src)>` and `-t DIR`) AND Read deny rules on
+  // any cp/mv source (`Zt` in official `I1r`) must still deny even when flags
+  // would otherwise trigger a generic flag-validation ask.
   if (command === 'cp' || command === 'mv') {
+    const readSources = targetDirectoryGiven
+      ? paths
+      : paths.length >= 2
+        ? paths.slice(0, -1)
+        : []
+    for (const src of readSources) {
+      const readCheck = validatePath(src, cwd, toolPermissionContext, 'read')
+      if (!readCheck.allowed && readCheck.decisionReason?.type === 'rule') {
+        return {
+          behavior: 'deny',
+          message: `${command} from '${readCheck.resolvedPath}' was blocked by a deny rule`,
+          decisionReason: readCheck.decisionReason,
+        }
+      }
+    }
     for (const p of allWritePaths) {
-      const check = validatePath(p, cwd, toolPermissionContext, operationType)
+      const isSource = command === 'cp' && !cpDestSet!.has(p)
+      const check = validateSingleTarget(p, isSource)
       if (!check.allowed && check.decisionReason?.type === 'rule') {
         return {
           behavior: 'deny',
@@ -932,6 +1223,74 @@ function validateCommandPaths(
           decisionReason: check.decisionReason,
         }
       }
+    }
+  }
+
+  // Official 2.1.326 #308: ask before write/remove/move/copy commands reach
+  // Claude Code's sign-in files (directly or via an ancestor directory).
+  if (operationType !== 'read') {
+    const pathsToCheckForSignIn =
+      command === 'cp' && cpSourceTargetsDestContents(args, cpSources)
+        ? [...allWritePaths, ...paths.slice(-1)]
+        : allWritePaths
+    const signInHits = findSignInFilesReachedByPaths(pathsToCheckForSignIn, cwd)
+    const firstSignIn = signInHits.named[0] ?? signInHits.below[0]
+    if (firstSignIn !== undefined) {
+      const reason = signInHits.below.includes(firstSignIn)
+        ? `This command reaches ${firstSignIn}, which Claude Code’s tools cannot write`
+        : `Modifying Claude Code's sign-in file '${firstSignIn}' requires explicit approval`
+      return {
+        behavior: 'ask',
+        message: reason,
+        blockedPath: firstSignIn,
+        decisionReason: {
+          type: 'safetyCheck',
+          reason,
+          classifierApprovable: false,
+          circuitBreaker: 'claudeSettingsFile',
+        } as unknown as PermissionResult['decisionReason'],
+        suggestions: [],
+        suppressAlwaysAllowRule: true,
+      }
+    }
+  }
+
+  // Official 2.1.326 #310: `cp`/`mv` with `-b`/`--backup` and no `-S` suffix
+  // when backup env vars (`SIMPLE_BACKUP_SUFFIX`/`VERSION_CONTROL`) are set.
+  if (
+    (command === 'cp' || command === 'mv') &&
+    isCpMvBackupSuffixEnvDependent(args)
+  ) {
+    const reason = `${command} makes a backup whose name depends on the environment (no -S suffix on the line)`
+    return {
+      behavior: 'ask',
+      message: reason,
+      decisionReason: {
+        type: 'safetyCheck',
+        reason,
+        classifierApprovable: false,
+      },
+      suggestions: [],
+      suppressAlwaysAllowRule: true,
+    }
+  }
+
+  // Official 2.1.326 #295 & #310: `cp` with `.` / `..` / macOS trailing slash
+  // (`src/`) or `-T`/`--no-target-directory` copies directory contents into the
+  // destination and must ask before running.
+  if (command === 'cp' && cpSourceTargetsDestContents(args, cpSources)) {
+    const reason =
+      getPlatform() === 'macos' && cpSources.some(s => /[\\/]$/.test(s))
+        ? 'cp with a trailing slash on macOS copies directory contents directly into the destination and requires manual approval'
+        : 'cp with directory-contents source or -T/--no-target-directory requires manual approval'
+    return {
+      behavior: 'ask',
+      message: reason,
+      decisionReason: {
+        type: 'other',
+        reason,
+        bashMissKind: 'flag-validation',
+      },
     }
   }
 
@@ -993,11 +1352,10 @@ function validateCommandPaths(
   }
 
   for (const path of allWritePaths) {
-    const { allowed, resolvedPath, decisionReason } = validatePath(
+    const isSource = command === 'cp' && !cpDestSet!.has(path)
+    const { allowed, resolvedPath, decisionReason } = validateSingleTarget(
       path,
-      cwd,
-      toolPermissionContext,
-      operationType,
+      isSource,
     )
 
     if (!allowed) {
@@ -1047,6 +1405,7 @@ export function createPathChecker(
     cwd: string,
     context: ToolPermissionContext,
     compoundCommandHasCd?: boolean,
+    astCmd?: SimpleCommand,
   ): PermissionResult => {
     // First check normal path validation (which includes explicit deny rules)
     const result = validateCommandPaths(
@@ -1056,6 +1415,7 @@ export function createPathChecker(
       context,
       compoundCommandHasCd,
       operationTypeOverride,
+      astCmd,
     )
 
     // If explicitly denied, respect that (don't override with dangerous path message)
@@ -1218,6 +1578,15 @@ function validateSinglePathCommand(
 
   // Check if this is a path command we need to validate
   const [rawBaseCmd, ...args] = extractedArgs
+  if (rawBaseCmd) {
+    const linkCheck = checkLinkCommandProtectedPaths(
+      rawBaseCmd,
+      args,
+      cwd,
+      toolPermissionContext,
+    )
+    if (linkCheck !== null) return linkCheck
+  }
   const baseCmd = rawBaseCmd ? normalizePathCommandName(rawBaseCmd) : undefined
   if (!baseCmd || !SUPPORTED_PATH_COMMANDS.includes(baseCmd as PathCommand)) {
     return {
@@ -1263,6 +1632,15 @@ function validateSinglePathCommandArgv(
     }
   }
   const [rawBaseCmd, ...args] = argv
+  if (rawBaseCmd) {
+    const linkCheck = checkLinkCommandProtectedPaths(
+      rawBaseCmd,
+      args,
+      cwd,
+      toolPermissionContext,
+    )
+    if (linkCheck !== null) return linkCheck
+  }
   const baseCmd = rawBaseCmd ? normalizePathCommandName(rawBaseCmd) : undefined
   if (!baseCmd || !SUPPORTED_PATH_COMMANDS.includes(baseCmd as PathCommand)) {
     return {
@@ -1283,7 +1661,13 @@ function validateSinglePathCommandArgv(
     baseCmd as PathCommand,
     operationTypeOverride,
   )
-  return pathChecker(args, cwd, toolPermissionContext, compoundCommandHasCd)
+  return pathChecker(
+    args,
+    cwd,
+    toolPermissionContext,
+    compoundCommandHasCd,
+    cmd,
+  )
 }
 
 /**

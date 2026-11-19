@@ -1,4 +1,10 @@
-import type { TerminalNotification } from '@anthropic/ink'
+import {
+  attacherCaps,
+  getXtversionName,
+  isGhosttyXtversion,
+  Jk,
+  type TerminalNotification,
+} from '@anthropic/ink'
 import { getGlobalConfig } from '../utils/config.js'
 import { env } from '../utils/env.js'
 import { execFileNoThrow } from '../utils/execFileNoThrow.js'
@@ -74,13 +80,41 @@ async function sendToChannel(
   }
 }
 
+/**
+ * Official 2.1.326 (#176) fallback auto-notification detection via XTVERSION
+ * and tmux passthrough probe: enables desktop notifications inside tmux (when
+ * allow-passthrough is not off) and to iTerm2/kitty/Ghostty over SSH when
+ * TERM_PROGRAM is not forwarded.
+ */
+export function detectProbedNotificationChannel():
+  | 'ghostty'
+  | 'iterm2'
+  | 'kitty'
+  | undefined {
+  if (process.env.CLAUDE_CODE_SESSION_KIND === 'bg' && !attacherCaps()) {
+    return undefined
+  }
+  if (Jk().tmuxPane?.passthrough === 'off') {
+    return undefined
+  }
+  if (isGhosttyXtversion()) {
+    return 'ghostty'
+  }
+  const xtversion = getXtversionName()?.toLowerCase()
+  if (xtversion?.startsWith('iterm2')) {
+    return 'iterm2'
+  }
+  return xtversion?.startsWith('kitty') ? 'kitty' : undefined
+}
+
 async function sendAuto(
   opts: NotificationOptions,
   terminal: TerminalNotification,
 ): Promise<string> {
   const title = opts.title || DEFAULT_TITLE
+  const detectedTerminal = attacherCaps()?.terminal ?? env.terminal
 
-  switch (env.terminal) {
+  switch (detectedTerminal) {
     case 'Apple_Terminal': {
       const bellDisabled = await isAppleTerminalBellDisabled()
       if (bellDisabled) {
@@ -98,8 +132,22 @@ async function sendAuto(
     case 'ghostty':
       terminal.notifyGhostty({ ...opts, title })
       return 'ghostty'
-    default:
+    default: {
+      const fallback = detectProbedNotificationChannel()
+      if (fallback === 'iterm2') {
+        terminal.notifyITerm2(opts)
+        return 'iterm2'
+      }
+      if (fallback === 'kitty') {
+        terminal.notifyKitty({ ...opts, title, id: generateKittyId() })
+        return 'kitty'
+      }
+      if (fallback === 'ghostty') {
+        terminal.notifyGhostty({ ...opts, title })
+        return 'ghostty'
+      }
       return 'no_method_available'
+    }
   }
 }
 

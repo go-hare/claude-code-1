@@ -74,6 +74,7 @@ import {
 } from '../AgentTool/resumeAgent.js'
 import { LIST_AGENTS_TOOL_NAME } from '../ListPeersTool/constants.js'
 import {
+  checkCrossMachineCredentialIsolation,
   CROSS_MACHINE_MESSAGING_UNAVAILABLE,
   isCrossMachineMessagingAvailable,
 } from './cloudHop.js'
@@ -2169,6 +2170,17 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             errorCode: 9,
           }
         }
+        // Official 2.1.326 #334 (`gxi` / `_xi`): refuse sending messages to a
+        // session on another machine when this session uses an API key, auth
+        // token, profile, or workload identity beside a saved claude.ai login.
+        const credMismatchError = checkCrossMachineCredentialIsolation()
+        if (credMismatchError) {
+          return {
+            result: false,
+            message: credMismatchError,
+            errorCode: 9,
+          }
+        }
         // densable 2.1.238 #27 Aom — live handle OR CLAUDE_CODE_REMOTE with
         // a reply address is OK; only local non-RC without live handle is
         // rc-disconnected. Do not invent Desktop handoff.
@@ -2560,6 +2572,17 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               data: {
                 success: false,
                 message: CROSS_MACHINE_MESSAGING_UNAVAILABLE,
+              },
+            }
+          }
+          // Official 2.1.326 #334: refuse cross-machine send when this session
+          // authenticates via an alternate credential beside a saved claude.ai login.
+          const credIsolationErr = checkCrossMachineCredentialIsolation()
+          if (credIsolationErr) {
+            return {
+              data: {
+                success: false,
+                message: credIsolationErr,
               },
             }
           }
@@ -3034,6 +3057,18 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                 data: {
                   success: false,
                   message: CROSS_MACHINE_MESSAGING_UNAVAILABLE,
+                },
+              }
+            }
+            // Official 2.1.326 #334: refuse cross-machine send when this session
+            // uses an API key, token, profile, or workload identity beside a
+            // saved claude.ai login.
+            const credIsolationErr = checkCrossMachineCredentialIsolation()
+            if (credIsolationErr) {
+              return {
+                data: {
+                  success: false,
+                  message: credIsolationErr,
                 },
               }
             }

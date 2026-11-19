@@ -144,7 +144,7 @@ export function getDefaultOptionForUser(fastMode = false): ModelOption {
   const is3P = getAPIProvider() !== 'firstParty'
   return {
     value: null,
-    label: 'Default (recommended)',
+    label: is3P ? 'Default' : 'Default (recommended)',
     description: `Use the default model (currently ${renderDefaultModelSetting(getDefaultMainLoopModelSetting())})${is3P ? '' : ` · ${formatModelPricing(COST_TIER_3_15)}`}${attributionBadge}`,
   }
 }

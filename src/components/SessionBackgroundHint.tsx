@@ -11,12 +11,15 @@ import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js';
 import { isBgSession } from '../utils/concurrentSessions.js';
 import { env } from '../utils/env.js';
 import { isEnvTruthy } from '../utils/envUtils.js';
+import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
 import { isBackgroundTasksDisabled } from '../utils/residualFinalEnvGates.js';
 import { KeyboardShortcutHint } from '@anthropic/ink';
 
 type Props = {
   onBackgroundSession: () => void;
   isLoading: boolean;
+  /** #214 (2.1.326): suppress Ctrl+B backgrounding & hint in fullscreen transcript (Ctrl+B pages up). */
+  isTranscriptMode?: boolean;
 };
 
 /**
@@ -27,7 +30,12 @@ type Props = {
  * 1. isLoading is true (a query is in progress)
  * 2. No foreground tasks (bash/agent) are running (those take priority for Ctrl+B)
  */
-export function SessionBackgroundHint({ onBackgroundSession, isLoading }: Props): React.ReactElement | null {
+export function SessionBackgroundHint({
+  onBackgroundSession,
+  isLoading,
+  isTranscriptMode = false,
+}: Props): React.ReactElement | null {
+  const suppressInFullscreenTranscript = isTranscriptMode && isFullscreenEnvEnabled();
   const setAppState = useSetAppState();
   const appStateStore = useAppStateStore();
 
@@ -68,10 +76,12 @@ export function SessionBackgroundHint({ onBackgroundSession, isLoading }: Props)
 
   // Only eat ctrl+b when there's something to background. Without this gate
   // the binding double-fires with readline backward-char at an idle prompt.
+  // #214 (2.1.326): in fullscreen transcript mode, Ctrl+B pages up so do not
+  // intercept it or show a Ctrl+B background hint.
   const hasForeground = useAppState(hasForegroundTasks);
   useKeybinding('task:background', handleBackground, {
     context: 'Task',
-    isActive: hasForeground || (sessionBgEnabled && isLoading),
+    isActive: !suppressInFullscreenTranscript && (hasForeground || (sessionBgEnabled && isLoading)),
   });
 
   // Get the configured shortcut for task:background
@@ -79,7 +89,7 @@ export function SessionBackgroundHint({ onBackgroundSession, isLoading }: Props)
   // In tmux, ctrl+b is the prefix key, so users need to press it twice to send ctrl+b
   const shortcut = env.terminal === 'tmux' && baseShortcut === 'ctrl+b' ? 'ctrl+b ctrl+b' : baseShortcut;
 
-  if (!isLoading || !showSessionHint) {
+  if (!isLoading || !showSessionHint || suppressInFullscreenTranscript) {
     return null;
   }
 

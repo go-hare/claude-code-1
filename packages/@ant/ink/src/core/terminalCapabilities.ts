@@ -8,6 +8,12 @@ import { promisify } from 'node:util'
 import { coerce, gte } from 'semver'
 import { inkSessionHost } from './instances.js'
 import { isJediTermEnv } from './jediTermInput.js'
+import {
+  CLEAR_PROGRAM_STATUS,
+  clearProgramStatusForId,
+  programStatus,
+  type ProgramStatusOptions,
+} from './termio/osc.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -544,6 +550,96 @@ export class TerminalImageFilesReading {
   }
 }
 
+export type ProgramStatusPolicy = { keep: 'all' | 'none' }
+
+export const PROGRAM_STATUS_KEEP_ALL: ProgramStatusPolicy = { keep: 'all' }
+
+export type ProgramStatusEntry = {
+  root: ProgramStatusOptions
+  main?: {
+    drops: number
+    children?: ProgramStatusOptions[]
+  }
+}
+
+/**
+ * Official 2.1.326 `class h` (#188): OSC 7501 Program Status Protocol
+ * controller tracking active reporters, child task entries, deduplication,
+ * and clean leave/clear semantics (including after idle compaction and
+ * attached background sessions).
+ */
+export class ProgramStatusController {
+  #entries = new Set<ProgramStatusEntry>()
+  #emitted = new Map<string, string>()
+  #policy: ProgramStatusPolicy | undefined
+  #drops = 0
+  #hasReported = false
+
+  get hasReported(): boolean {
+    return this.#hasReported
+  }
+
+  show(entry: ProgramStatusEntry): () => void {
+    this.#entries.add(entry)
+    return () => {
+      this.#entries.delete(entry)
+    }
+  }
+
+  update(policy: ProgramStatusPolicy, emitClearWhenNone = false): string {
+    const policyChanged = this.#policy !== policy
+    this.#policy = policy
+    if (policy.keep === 'none') {
+      const clearSeq = this.#clearEmitted()
+      return emitClearWhenNone ? clearSeq : ''
+    }
+    const sorted = [...this.#entries].sort(
+      (a, b) => Number(b.main !== undefined) - Number(a.main !== undefined),
+    )
+    const primary =
+      sorted.find(entry => entry.root.state === 'blocked') ?? sorted[0]
+    if (primary === undefined) {
+      return this.#clearEmitted()
+    }
+    const main = sorted[0]?.main
+    if (main !== undefined && main.drops !== this.#drops) {
+      this.#drops = main.drops
+      this.#emitted.clear()
+    }
+    const next = new Map<string, string>()
+    for (const item of [primary.root, ...(main?.children ?? [])]) {
+      next.set(item.id ?? '', programStatus(item))
+    }
+    let out = ''
+    for (const [id, seq] of next) {
+      if (policyChanged || this.#emitted.get(id) !== seq) {
+        this.#emitted.set(id, seq)
+        out += seq
+      }
+    }
+    for (const id of [...this.#emitted.keys()]) {
+      if (!next.has(id)) {
+        this.#emitted.delete(id)
+        out += id ? clearProgramStatusForId(id) : CLEAR_PROGRAM_STATUS
+      }
+    }
+    if (out === '' || this.#hasReported) return out
+    this.#hasReported = true
+    return policy === PROGRAM_STATUS_KEEP_ALL ? out : CLEAR_PROGRAM_STATUS + out
+  }
+
+  leave(supported: boolean): string {
+    const clearSeq = this.#clearEmitted()
+    return supported ? CLEAR_PROGRAM_STATUS : clearSeq
+  }
+
+  #clearEmitted(): string {
+    const out = this.#emitted.size > 0 ? CLEAR_PROGRAM_STATUS : ''
+    this.#emitted.clear()
+    return out
+  }
+}
+
 /**
  * densable `class f` — host-keyed terminal identity + capability bag.
  * Do not export minify `f`.
@@ -559,6 +655,7 @@ export class TerminalHostState {
   tmuxPane: TmuxPaneState | undefined = undefined
   isTmuxPaneAsked = false
   tmuxPaneAnsweredAt: number | undefined = undefined
+  programStatus = new ProgramStatusController()
 
   get capabilities(): TerminalCapabilityStore {
     return (this.#capabilities ??= new TerminalCapabilityStore(

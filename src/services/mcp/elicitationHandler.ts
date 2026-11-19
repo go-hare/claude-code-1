@@ -233,6 +233,9 @@ function leftoverBindMcpElicitationHost(
               hookResponse.action as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
             byHook: true,
           })
+          if (hookResponse.action === 'decline') {
+            recordMcpElicitationDeclinedForServer(serverName)
+          }
           return hookResponse
         }
         const rawElicitationId = (params as { elicitationId?: unknown })
@@ -762,6 +765,37 @@ export async function runElicitationHooks(
 }
 
 /**
+ * Official 2.1.326 #81: Track when an MCP elicitation question for a server
+ * was declined so that if the server subsequently fails the in-flight tool
+ * call, Claude is explicitly informed that the failure followed a declined
+ * question and the decline still stands.
+ */
+const lastElicitationDeclinedAtByServer = new Map<string, number>()
+
+export function recordMcpElicitationDeclinedForServer(
+  serverName: string,
+  atMs: number = Date.now(),
+): void {
+  lastElicitationDeclinedAtByServer.set(serverName, atMs)
+}
+
+export function consumeMcpElicitationDeclinedDuringCall(
+  serverName: string,
+  callStartMs: number,
+): boolean {
+  const declinedAt = lastElicitationDeclinedAtByServer.get(serverName)
+  if (declinedAt === undefined || declinedAt < callStartMs) {
+    return false
+  }
+  lastElicitationDeclinedAtByServer.delete(serverName)
+  return true
+}
+
+export function clearMcpElicitationDeclinedState(): void {
+  lastElicitationDeclinedAtByServer.clear()
+}
+
+/**
  * Run ElicitationResult hooks after the user has responded, then fire a
  * `elicitation_response` notification. Returns a (potentially modified)
  * ElicitResult — hooks may override the action/content or block the response.
@@ -785,6 +819,7 @@ export async function runElicitationResultHooks(
       })
 
     if (blockingError) {
+      recordMcpElicitationDeclinedForServer(serverName)
       void executeNotificationHooks({
         message: `Elicitation response for server "${serverName}": decline`,
         notificationType: 'elicitation_response',
@@ -799,6 +834,10 @@ export async function runElicitationResultHooks(
         }
       : result
 
+    if (finalResult.action === 'decline') {
+      recordMcpElicitationDeclinedForServer(serverName)
+    }
+
     // Fire a notification for observability
     void executeNotificationHooks({
       message: `Elicitation response for server "${serverName}": ${finalResult.action}`,
@@ -808,6 +847,9 @@ export async function runElicitationResultHooks(
     return finalResult
   } catch (error) {
     logMCPError(serverName, `ElicitationResult hook error: ${error}`)
+    if (result.action === 'decline') {
+      recordMcpElicitationDeclinedForServer(serverName)
+    }
     // Fire notification even on error
     void executeNotificationHooks({
       message: `Elicitation response for server "${serverName}": ${result.action}`,

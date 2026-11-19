@@ -129,6 +129,7 @@ import {
   roughTokenCountEstimationForMessages,
 } from '../tokenEstimation.js'
 import { groupMessagesByApiRound } from './grouping.js'
+import { getRuntimeMainLoopModel } from '../../utils/model/model.js'
 import {
   collectToolNamesUsedBeforeCompact,
   COMPACT_REPLY_INSTRUCTIONS_TRAILER,
@@ -136,8 +137,10 @@ import {
   appendKeptMessagesCompactNote,
   getCompactUserSummaryMessage,
   getPartialCompactPrompt,
+  hasCompactSummaryBlock,
   hasCompactSummaryTag,
   hasUnclosedCompactSummaryTag,
+  SUMMARY_DO_NOT_ANSWER_REMINDER,
 } from './prompt.js'
 import { isLongContextCreditsRequiredMessage } from './reactiveCompact.js'
 
@@ -1096,7 +1099,7 @@ export async function compactConversation(
     let preCompactReadFileState = cacheToObject(context.readFileState)
 
     // Clear the cache
-    context.readFileState.clear()
+    context.readFileState.clearForCompaction()
     context.loadedNestedMemoryPaths?.clear()
 
     // Intentionally NOT resetting sentSkillNames: re-injecting the full
@@ -1726,7 +1729,7 @@ export async function partialCompactConversation(
 
     // Store the current file state before clearing
     let preCompactReadFileState = cacheToObject(context.readFileState)
-    context.readFileState.clear()
+    context.readFileState.clearForCompaction()
     context.loadedNestedMemoryPaths?.clear()
     // Intentionally NOT resetting sentSkillNames — see compactConversation()
     // for rationale (~4K tokens saved per compact event).
@@ -1987,6 +1990,14 @@ async function streamCompactSummary({
   thinkingStripPlan?: import('../../utils/thinking.js').ThinkingStripPlan
   advisorStripPlan?: import('../../utils/messages.js').AdvisorStripPlan
 }): Promise<{ response: AssistantMessage; mediaStripped: boolean }> {
+  // Official 2.1.326 (#332): always resolve runtime model (e.g. `opusplan` in
+  // plan mode -> Opus) for compaction requests.
+  const compactModel = getRuntimeMainLoopModel({
+    permissionMode: appState.toolPermissionContext.mode,
+    mainLoopModel: context.options.mainLoopModel,
+    isSubagent: Boolean(context.agentId),
+  })
+
   // When prompt cache sharing is enabled, use forked agent to reuse the
   // main conversation's cached prefix (system prompt, tools, context messages).
   // Falls back to regular streaming path on failure.
@@ -2057,25 +2068,33 @@ async function streamCompactSummary({
         // "Request was aborted." as the summary — the text doesn't start with
         // "API Error" so the caller's startsWithApiErrorPrefix guard misses it.
         if (assistantMsg && assistantText && !assistantMsg.isApiErrorMessage) {
-          // Skip success logging for PTL error text — it's returned so the
-          // caller's retry loop catches it, but it's not a successful summary.
-          if (!assistantText.startsWith(PROMPT_TOO_LONG_ERROR_MESSAGE)) {
-            logEvent('tengu_compact_cache_sharing_success', {
-              preCompactTokenCount,
-              outputTokens: result.totalUsage.output_tokens,
-              cacheReadInputTokens: result.totalUsage.cache_read_input_tokens,
-              cacheCreationInputTokens:
-                result.totalUsage.cache_creation_input_tokens,
-              cacheHitRate:
-                result.totalUsage.cache_read_input_tokens > 0
-                  ? result.totalUsage.cache_read_input_tokens /
-                    (result.totalUsage.cache_read_input_tokens +
-                      result.totalUsage.cache_creation_input_tokens +
-                      result.totalUsage.input_tokens)
-                  : 0,
-            })
+          const isPtl = assistantText.startsWith(PROMPT_TOO_LONG_ERROR_MESSAGE)
+          // Official 2.1.326 (#49): on Bedrock/Vertex/Foundry or telemetry-off
+          // paths, verify the model actually produced a `<summary>` block rather
+          // than replying conversationally to the user's last turn.
+          if (isPtl || hasCompactSummaryBlock(assistantText)) {
+            if (!isPtl) {
+              logEvent('tengu_compact_cache_sharing_success', {
+                preCompactTokenCount,
+                outputTokens: result.totalUsage.output_tokens,
+                cacheReadInputTokens: result.totalUsage.cache_read_input_tokens,
+                cacheCreationInputTokens:
+                  result.totalUsage.cache_creation_input_tokens,
+                cacheHitRate:
+                  result.totalUsage.cache_read_input_tokens > 0
+                    ? result.totalUsage.cache_read_input_tokens /
+                      (result.totalUsage.cache_read_input_tokens +
+                        result.totalUsage.cache_creation_input_tokens +
+                        result.totalUsage.input_tokens)
+                    : 0,
+              })
+            }
+            return { response: assistantMsg, mediaStripped: false }
           }
-          return { response: assistantMsg, mediaStripped: false }
+          logForDebugging(
+            'Compact cache sharing: reply omitted <summary> block, falling back to streaming summarizer',
+            { level: 'warn' },
+          )
         }
         logForDebugging(
           `Compact cache sharing: no text in response, falling back. Response: ${jsonStringify(assistantMsg)}`,
@@ -2102,6 +2121,7 @@ async function streamCompactSummary({
       false,
     )
     const maxAttempts = retryEnabled ? MAX_COMPACT_STREAMING_RETRIES : 1
+    let reinforcedNoSummaryRetry = false
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       // Reset state for retry
@@ -2114,7 +2134,7 @@ async function streamCompactSummary({
       const useSearchExtraTools =
         !stripNonEssential &&
         (await isSearchExtraToolsEnabled(
-          context.options.mainLoopModel,
+          compactModel,
           context.options.tools,
           async () => appState.toolPermissionContext,
           context.options.agentDefinitions.activeAgents,
@@ -2136,9 +2156,23 @@ async function streamCompactSummary({
       // densable qjt: stripNonEssential → tools []. Else SearchExtraTools + MCP
       // when enabled (defer_loading), else FileReadTool only.
 
+      // Official 2.1.326 (#49): ensure the summary request carries the
+      // do-not-answer reminder and keep the full conversation including
+      // Claude's last assistant reply before appending `effectiveSummaryRequest`.
+      const effectiveSummaryRequest: UserMessage =
+        typeof summaryRequest.message.content === 'string' &&
+        !summaryRequest.message.content.includes(
+          'Every message before those instructions',
+        )
+          ? createUserMessage({
+              content:
+                summaryRequest.message.content + SUMMARY_DO_NOT_ANSWER_REMINDER,
+            })
+          : summaryRequest
+
       const baseSummaryMessages = stripReinjectedAttachments([
         ...getMessagesAfterCompactBoundary(summarizerMessages),
-        summaryRequest,
+        effectiveSummaryRequest,
       ])
       const normalizedSummaryMessages = normalizeMessagesForAPI(
         stripImagesFromMessages(baseSummaryMessages),
@@ -2162,13 +2196,13 @@ async function streamCompactSummary({
             const appState = context.getAppState()
             return appState.toolPermissionContext
           },
-          model: context.options.mainLoopModel,
+          model: compactModel,
           toolChoice: undefined,
           isNonInteractiveSession: context.options.isNonInteractiveSession,
           hasAppendSystemPrompt: !!context.options.appendSystemPrompt,
           maxOutputTokensOverride: Math.min(
             COMPACT_MAX_OUTPUT_TOKENS,
-            getMaxOutputTokensForModel(context.options.mainLoopModel),
+            getMaxOutputTokensForModel(compactModel),
           ),
           querySource: 'compact',
           agents: context.options.agentDefinitions.activeAgents,
@@ -2223,6 +2257,22 @@ async function streamCompactSummary({
       }
 
       if (response) {
+        const replyText = getAssistantMessageText(response)
+        if (
+          !reinforcedNoSummaryRetry &&
+          !response.isApiErrorMessage &&
+          replyText &&
+          !replyText.startsWith(PROMPT_TOO_LONG_ERROR_MESSAGE) &&
+          !hasCompactSummaryBlock(replyText)
+        ) {
+          reinforcedNoSummaryRetry = true
+          logForDebugging(
+            'Compact streaming fallback replied without a <summary> block; retrying once with explicit summary reminder',
+            { level: 'warn' },
+          )
+          attempt--
+          continue
+        }
         return { response, mediaStripped: true }
       }
 

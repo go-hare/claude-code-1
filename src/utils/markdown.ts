@@ -3,8 +3,17 @@ import { marked, Tokenizer, type Token, type Tokens } from 'marked'
 import stripAnsi from 'strip-ansi'
 import { color } from '@anthropic/ink'
 import { BLOCKQUOTE_BAR } from '../constants/figures.js'
-import { stringWidth, supportsHyperlinks } from '@anthropic/ink'
-import { createHyperlink, HYPERLINK_STYLE_RESET } from '../utils/hyperlink.js'
+import {
+  mayWriteRawUrlHyperlink,
+  stringWidth,
+  supportsHyperlinks,
+} from '@anthropic/ink'
+import {
+  createHyperlink,
+  HYPERLINK_STYLE_RESET,
+  OSC8_END,
+  OSC8_START,
+} from '../utils/hyperlink.js'
 import { sanitizeMarkdownHref } from './markdownFileUrl.js'
 import type { CliHighlight } from './cliHighlight.js'
 import { logForDebugging } from './debug.js'
@@ -79,9 +88,7 @@ export function stripMarkdownHrefInvisibles(href: string): string {
 const RAW_OSC8_RE =
   // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional OSC 8 match
   /\x1b\]8;[^;\x07\x1b]*;[^\x07\x1b]*(?:\x07|\x1b\\)/g
-const STRAY_OSC_C1_RE =
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional C1 OSC introducer match
-  /\x9d/g
+const STRAY_OSC_C1_RE = /\x9d/g
 const NON_CSI_ESC_RE =
   // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional non-CSI ESC match
   /\x1b(?!\[)/g
@@ -264,6 +271,129 @@ const WRAPPED_BACKSLASH_PAIRS: Record<string, string> = {
 const WRAPPED_BACKSLASH_CONTINUES_RE = /^\\.[\p{L}\p{N}\\*_`~]/u
 const WRAPPED_BACKSLASH_WORD_BEFORE_RE = /[\p{L}\p{N}].$/u
 
+// Official 2.1.326 (#150): preserve Windows path backslashes before folders
+// like `.claude` or `_build` so marked's escape tokenizer doesn't eat `\`.
+const WIN_PATH_SEG_RE = /^\\[._\-[({$@#~!%+*]+(?=[\p{L}\p{N}\\])/u
+const WIN_PATH_PREV_RE = /\\[^\s\\]+(?: [^\s\\]+){0,2}$/
+const WIN_PATH_CONT_RE = /^\\[^\s\\]+\\[\p{L}\p{N}]/u
+const WIN_PATH_ALNUM_END_RE = /[\p{L}\p{N}]$/u
+const WIN_PATH_ROOT_RE =
+  /[\s("'[](?:[a-z]:|\.\.?|~|%\w+%|\$env:\w+|\$HOME)\\[._]$/i
+
+// Official 2.1.326 (#151): CJK bold text starting or ending with punctuation
+// (e.g. 日本語**「重要」**です, **（注意）**してください).
+const CJK_CHAR_CLASS = String.raw`[\p{sc=Han}\p{sc=Hangul}\u3001-\u31ff\uff01-\uffe6]`
+export const CJK_BOLD_OPEN_RE = new RegExp(
+  `^(?:${CJK_CHAR_CLASS}\\*{2,3}[^\\s*]|[^\\s*]\\*{2,3}${CJK_CHAR_CLASS})`,
+  'u',
+)
+const CJK_TERM_RE = String.raw`(?![.:!?][!-~])[\p{Term}\p{Pe}\p{Pf}\u30FB]`
+const CJK_OPEN_PAREN_RE = String.raw`[(（](?![^*]*[)）]\*)`
+const CJK_NOT_BOLD_OPEN_RE = new RegExp(
+  String.raw`^\*+(?:["']?(?:\s|$|${CJK_TERM_RE})|${CJK_OPEN_PAREN_RE})`,
+  'u',
+)
+const CJK_CHAR_RE = new RegExp(CJK_CHAR_CLASS, 'u')
+const OPEN_PUNCT_RE = /\p{Ps}/u
+
+function canCloseCjkBold(
+  prevChar: string,
+  delimLen: number,
+  nextChar: string,
+): boolean {
+  if (delimLen !== 2 && delimLen !== 3) return false
+  if (!prevChar || /\s/.test(prevChar) || OPEN_PUNCT_RE.test(prevChar)) {
+    return false
+  }
+  return CJK_CHAR_RE.test(prevChar + nextChar)
+}
+
+export function tokenizeCjkEmStrong(
+  tokenizer: Tokenizer,
+  src: string,
+  maskedSrc: string,
+  prevChar = '',
+): Tokens.Em | Tokens.Strong | undefined {
+  const isCjkOpen =
+    CJK_BOLD_OPEN_RE.test(prevChar + src.slice(0, 5)) &&
+    !CJK_NOT_BOLD_OPEN_RE.test(src)
+  const stock = stockMarkdownEmStrong.call(
+    tokenizer,
+    src,
+    maskedSrc,
+    isCjkOpen ? '' : prevChar,
+  )
+  const openMatch = /^(\*{2,3})(?!\*)/.exec(src)
+  if (!openMatch) return stock
+  const delim = openMatch[1]!
+  const delimLen = delim.length
+  const firstInner = src[delimLen]
+  if (!firstInner || /\s/.test(firstInner) || CJK_NOT_BOLD_OPEN_RE.test(src)) {
+    return stock
+  }
+
+  // Scan aligned maskedSrc (`maskedSrc` is the full paragraph; its tail of
+  // length `src.length` aligns 1:1 with `src`, matching marked's own
+  // `t.slice(-1 * e.length)` indexing) for the earliest matching closing
+  // ** / *** with a CJK punctuation boundary. Prefer an earlier CJK close over
+  // a greedier stock match that skipped a CJK-punctuation-adjacent closer
+  // (e.g. `请看**中文（测试）**和**重点！**继续`).
+  const alignedMasked =
+    maskedSrc.length >= src.length ? maskedSrc.slice(-src.length) : src
+  const maxEnd = stock ? stock.raw.length : Number.POSITIVE_INFINITY
+  let idx = delimLen
+  while (idx < alignedMasked.length) {
+    const closeAt = alignedMasked.indexOf(delim, idx)
+    if (closeAt === -1) break
+    const candidateEnd = closeAt + delimLen
+    if (candidateEnd >= maxEnd) break
+    // Skip longer runs like ****
+    if (
+      alignedMasked[closeAt - 1] === '*' ||
+      alignedMasked[closeAt + delimLen] === '*'
+    ) {
+      idx = closeAt + 1
+      continue
+    }
+    const beforeClose = src[closeAt - 1] ?? ''
+    const afterClose = src[closeAt + delimLen] ?? ''
+    if (
+      closeAt > delimLen &&
+      (canCloseCjkBold(beforeClose, delimLen, afterClose) ||
+        (isCjkOpen &&
+          !stock &&
+          !/\s/.test(beforeClose) &&
+          !OPEN_PUNCT_RE.test(beforeClose)))
+    ) {
+      const inner = src.slice(delimLen, closeAt)
+      if (inner.includes('\n\n')) break
+      const raw = src.slice(0, candidateEnd)
+      if (delimLen === 3) {
+        const emToken: Tokens.Em = {
+          type: 'em',
+          raw: `*${inner}*`,
+          text: inner,
+          tokens: tokenizer.lexer.inlineTokens(inner),
+        }
+        return {
+          type: 'strong',
+          raw,
+          text: `*${inner}*`,
+          tokens: [emToken],
+        } as Tokens.Strong
+      }
+      return {
+        type: 'strong',
+        raw,
+        text: inner,
+        tokens: tokenizer.lexer.inlineTokens(inner),
+      } as Tokens.Strong
+    }
+    idx = closeAt + delimLen
+  }
+  return stock
+}
+
 export function configureMarked(): void {
   if (markedConfigured) return
   markedConfigured = true
@@ -304,7 +434,7 @@ export function configureMarked(): void {
       ) {
         return this.rules.inline.emStrongLDelim.test(src)
           ? lexAtLevel(this.lexer, () =>
-              stockMarkdownEmStrong.call(this, src, maskedSrc, prevChar ?? ''),
+              tokenizeCjkEmStrong(this, src, maskedSrc, prevChar ?? ''),
             )
           : undefined
       },
@@ -377,6 +507,37 @@ export function configureMarked(): void {
           }
           const literal = `\\${next}`
           return { type: 'escape', raw: literal, text: literal }
+        },
+      },
+      {
+        name: 'windowsPath',
+        level: 'inline',
+        tokenizer(src, tokens) {
+          const match = WIN_PATH_SEG_RE.exec(src)?.[0]
+          const prev = tokens.at(-1)
+          if (
+            match === undefined ||
+            prev?.type !== 'text' ||
+            this.lexer.state.inLink
+          ) {
+            return undefined
+          }
+          const lead = tokens.length === 1 ? ' ' : ''
+          if (
+            !WIN_PATH_PREV_RE.test(prev.raw) &&
+            !(
+              WIN_PATH_CONT_RE.test(src) && WIN_PATH_ALNUM_END_RE.test(prev.raw)
+            ) &&
+            !WIN_PATH_ROOT_RE.test(lead + prev.raw + match.slice(0, 2))
+          ) {
+            return undefined
+          }
+          return {
+            type: 'text',
+            raw: match,
+            text: match,
+            escaped: this.lexer.state.inRawBlock,
+          }
         },
       },
     ],
@@ -630,10 +791,10 @@ export function formatToken(
         ('defanged' in token && token.defanged === true) ||
         ('afterStyle' in token && token.afterStyle === true)
       if (
-        linkCap &&
         !skipHyperlink &&
         HTTP_URL_RE.test(token.text) &&
-        URL.canParse(token.text)
+        URL.canParse(token.text) &&
+        (linkCap || (!windowed && mayWriteRawUrlHyperlink(token.text)))
       ) {
         return createHyperlink(token.text, styled, {
           supportsHyperlinks: true,
@@ -724,17 +885,32 @@ export function formatToken(
       // If the link has meaningful display text (different from the URL),
       // show it as a clickable hyperlink. In terminals that support OSC 8,
       // users see the text and can hover/click to see the URL.
+      // Official 2.1.326 (#213): in unrecognized terminals that can still
+      // honor OSC 8 on raw URLs, wrap the shown URL in OSC 8 so wrapped URLs
+      // stay clickable.
+      const wrapFallbackUrl = (u: string): string =>
+        !linkCap && !windowed && mayWriteRawUrlHyperlink(u)
+          ? `${OSC8_START}${u}${OSC8_END}${u}${OSC8_START}${OSC8_END}`
+          : u
       if (
         plainLinkText &&
         plainLinkText !== token.href &&
         plainLinkText !== href
       ) {
+        if (!linkCap && !windowed && mayWriteRawUrlHyperlink(href)) {
+          return `${stripRawOsc8Sequences(linkText)}${HYPERLINK_STYLE_RESET} (${wrapFallbackUrl(href)})`
+        }
         return createHyperlink(href, stripRawOsc8Sequences(linkText), {
+          supportsHyperlinks: linkCap,
           shownUrlStart: HYPERLINK_STYLE_RESET,
         })
       }
       // When the display text matches the URL (or is empty), just show the URL
+      if (!linkCap && !windowed && mayWriteRawUrlHyperlink(href)) {
+        return `${HYPERLINK_STYLE_RESET}${wrapFallbackUrl(href)}`
+      }
       return createHyperlink(href, undefined, {
+        supportsHyperlinks: linkCap,
         shownUrlStart: HYPERLINK_STYLE_RESET,
       })
     }

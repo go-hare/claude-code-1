@@ -1123,12 +1123,23 @@ export function initialPermissionModeFromCLI({
   if (!result) {
     let mode: PermissionMode = 'default'
     if (feature('TRANSCRIPT_CLASSIFIER')) {
+      const isIdeSession =
+        process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-vscode'
+      // Official 2.1.326 #290 / #291 (`goo()`): harbor_willow defaults ON so
+      // terminal and VS Code sessions (including HIPAA Cowork orgs and sessions
+      // whose org policy hasn't loaded yet) start in auto mode unless
+      // disableAutoMode or circuit breaker turns it off.
+      const harborWillow =
+        isAutoDefaultLaunchEnabled() ||
+        getFeatureValue_CACHED_MAY_BE_STALE('tengu_harbor_willow', true) ===
+          true
       const planned = planHarborWillowAutoFallback({
         hasResolvedMode: false,
         circuitBroken: autoModeCircuitBrokenSync,
         disableAutoMode: isAutoModeDisabledBySettings(),
-        harborWillow: isAutoDefaultLaunchEnabled(),
+        harborWillow,
         isNonInteractiveSession: getIsNonInteractiveSession(),
+        isIdeSession,
         mossAnchor:
           checkStatsigFeatureGate_CACHED_MAY_BE_STALE('tengu_moss_anchor'),
         bridgeChildAutoDefault: isBridgeChildAutoDefaultEnabled(),
@@ -1142,6 +1153,7 @@ export function initialPermissionModeFromCLI({
 
   if (feature('TRANSCRIPT_CLASSIFIER')) {
     autoModeStateModule?.setAutoModeFromFallback(fromAutoFallback)
+    autoModeStateModule?.setAutoDefaultAwaitsServedSettings(fromAutoFallback)
     if (result.mode === 'auto') {
       autoModeStateModule?.setAutoModeActive(true)
     }
@@ -2264,4 +2276,78 @@ export function applyInheritedPermissionMode(
       }
     })
   })
+}
+
+/**
+ * Official 2.1.326 #297 (`B()` + `h2n` @306338500):
+ * Once server-managed policy settings load (or fail with no stored copy),
+ * resolve a session that started in `auto` by default:
+ * - If managed `policySettings.permissions.defaultMode` specifies a valid mode
+ *   other than `auto` / `bypassPermissions`, adopt that server-managed mode
+ *   (setting `prePlanMode: 'default'` when transitioning to `plan`).
+ * - Else if served settings failed with no stored copy AND org policy failed
+ *   or requires HIPAA/policy enforcement, fall back to `'default'` (Manual).
+ */
+export function resolveAutoDefaultOnPolicySettingsLoad(
+  context: ToolPermissionContext,
+  opts: {
+    source: SettingSource
+    remoteSettingsFailed?: boolean
+    policyRequiresDefault?: boolean
+    bridgeChildAutoDefault?: boolean
+    policyDefaultModeOverride?: string
+  },
+): { context: ToolPermissionContext; exitedAutoMode: boolean } {
+  if (opts.source !== 'policySettings' || context.mode !== 'auto') {
+    return { context, exitedAutoMode: false }
+  }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const stateMod =
+    autoModeStateModule ??
+    (require('./autoModeState.js') as typeof import('./autoModeState.js'))
+  if (!stateMod.isAutoDefaultAwaitsServedSettings()) {
+    return { context, exitedAutoMode: false }
+  }
+
+  stateMod.setAutoDefaultAwaitsServedSettings(false)
+  if (opts.bridgeChildAutoDefault ?? isBridgeChildAutoDefaultEnabled()) {
+    return { context, exitedAutoMode: false }
+  }
+
+  const rawPolicyDefault =
+    opts.policyDefaultModeOverride ??
+    getSettingsForSource('policySettings')?.permissions?.defaultMode
+  let targetMode: PermissionMode | undefined
+  if (
+    rawPolicyDefault !== undefined &&
+    rawPolicyDefault !== 'auto' &&
+    rawPolicyDefault !== 'bypassPermissions'
+  ) {
+    const parsed = permissionModeFromString(rawPolicyDefault)
+    if (isExternalPermissionMode(parsed)) {
+      targetMode = parsed
+    }
+  } else if (opts.remoteSettingsFailed && opts.policyRequiresDefault) {
+    targetMode = 'default'
+  }
+
+  if (targetMode === undefined) {
+    return { context, exitedAutoMode: false }
+  }
+
+  logForDebugging(
+    `[auto-mode] the built-in auto default gave way to ${targetMode}; served settings failed: ${Boolean(opts.remoteSettingsFailed)}`,
+  )
+  stateMod.setAutoModeFromFallback(false)
+  const nextContext: ToolPermissionContext = {
+    ...transitionPermissionMode(
+      'auto',
+      targetMode,
+      context,
+      'startup_reresolve',
+    ),
+    mode: targetMode,
+    ...(targetMode === 'plan' ? { prePlanMode: 'default' as const } : {}),
+  }
+  return { context: nextContext, exitedAutoMode: true }
 }

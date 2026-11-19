@@ -12,8 +12,10 @@ import {
 import {
   type BridgePermissionCallbacks,
   type BridgePermissionResponse,
+  isBridgePermissionToolNameMismatch,
   parseBridgePermissionResponse,
 } from '../bridge/bridgePermissionCallbacks.js';
+import { resolveChromeSiteForPermissionPrompt } from '../utils/claudeInChrome/chromeCallPermission.js';
 import { handleRemoteInterrupt } from '../bridge/remoteInterruptHandling.js';
 import { isTranscriptResetResultReady, shouldDeferBridgeResult } from '../bridge/bridgeResultScheduling.js';
 import {
@@ -190,6 +192,40 @@ const AUTH_FAIL_TOKEN_LOADING = Symbol('authFailTokenLoading');
  *
  * Inbound messages from claude.ai are injected into the REPL via queuedCommands.
  */
+/**
+ * Official 2.1.326 #93: returns true when any background subagent task
+ * (`local_agent` / `remote_agent`) is currently running so Remote Control
+ * keeps the terminal session in `'running'` state instead of `'idle'`.
+ */
+export function hasRunningBackgroundSubagents(
+  tasks: Record<string, { type?: string; status?: string }> | undefined,
+): boolean {
+  if (!tasks) return false;
+  for (const task of Object.values(tasks)) {
+    if (task && task.status === 'running' && (task.type === 'local_agent' || task.type === 'remote_agent')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Official 2.1.326 #93: list task IDs of currently running background subagents
+ * so a remote Stop ends them together with the active turn.
+ */
+export function getRunningBackgroundSubagentIds(
+  tasks: Record<string, { type?: string; status?: string }> | undefined,
+): string[] {
+  if (!tasks) return [];
+  const ids: string[] = [];
+  for (const [id, task] of Object.entries(tasks)) {
+    if (task && task.status === 'running' && (task.type === 'local_agent' || task.type === 'remote_agent')) {
+      ids.push(id);
+    }
+  }
+  return ids;
+}
+
 export function useReplBridge(
   messages: Message[],
   setMessages: (action: React.SetStateAction<Message[]>) => void,
@@ -882,14 +918,20 @@ export function useReplBridge(
 
           // Map of pending bridge permission response handlers, keyed by request_id.
           // Each entry is an onResponse handler waiting for CCR to reply.
-          const pendingPermissionHandlers = new Map<string, (response: BridgePermissionResponse) => void>();
+          const pendingPermissionHandlers = new Map<
+            string,
+            {
+              handler: (response: BridgePermissionResponse) => void;
+              expectedToolName?: string;
+            }
+          >();
 
           // Dispatch incoming control_response messages to registered handlers
           function handlePermissionResponse(msg: SDKControlResponse): void {
             const requestId = msg.response?.request_id;
             if (!requestId) return;
-            const handler = pendingPermissionHandlers.get(requestId);
-            if (!handler) {
+            const entry = pendingPermissionHandlers.get(requestId);
+            if (!entry) {
               logForDebugging(`[bridge:repl] No handler for control_response request_id=${requestId}`);
               return;
             }
@@ -898,8 +940,12 @@ export function useReplBridge(
               logForDebugging(`[bridge:repl] Ignoring unrecognized control_response request_id=${requestId}`);
               return;
             }
+            // Official 2.1.326 #325 (`Eut`): reject response when toolName disagrees.
+            if (isBridgePermissionToolNameMismatch(parsed.toolName, entry.expectedToolName, requestId)) {
+              return;
+            }
             pendingPermissionHandlers.delete(requestId);
-            handler(parsed);
+            entry.handler(parsed);
           }
 
           let declinedHolder: LocalBridgeSessionHolder | undefined;
@@ -1035,6 +1081,17 @@ export function useReplBridge(
                 : { mode: 'observe' },
             onInboundMessage: handleInboundMessage,
             onPermissionResponse: handlePermissionResponse,
+            // Official 2.1.326 #93: hold Remote Control at `'running'` while
+            // background subagents are still running.
+            backgroundHold: {
+              holdsRunning: () => hasRunningBackgroundSubagents(store.getState().tasks),
+            },
+            // Official 2.1.326 #94: turning RC on while a tool/turn or background
+            // subagent is already running must start in `'running'`, not `'idle'`.
+            initialWorkerState:
+              abortControllerRef.current !== null || hasRunningBackgroundSubagents(store.getState().tasks)
+                ? 'running'
+                : 'idle',
             onInterrupt() {
               // densable Vwo — remote interrupt cancels pending dynamic /loop wakeups
               // (same cancel path as Esc, but reason=remote_cancel like SIGTERM).
@@ -1046,6 +1103,24 @@ export function useReplBridge(
                 // loopDynamic may be unavailable in partial test mocks
               }
               handleRemoteInterrupt(abortControllerRef.current);
+              // Official 2.1.326 #93: remote Stop also ends running background
+              // subagents together with the active turn.
+              const runningBgSubagents = getRunningBackgroundSubagentIds(store.getState().tasks);
+              if (runningBgSubagents.length > 0) {
+                void import('../tasks/stopTask.js')
+                  .then(({ stopTask }) =>
+                    Promise.all(
+                      runningBgSubagents.map(taskId =>
+                        stopTask(taskId, {
+                          getAppState: store.getState,
+                          setAppState,
+                          source: 'user',
+                        }).catch(() => undefined),
+                      ),
+                    ),
+                  )
+                  .catch(() => undefined);
+              }
             },
             async onStopTask(taskId) {
               // densable 2.1.238 #19 — RC panel stop_task → stopTask source:"user".
@@ -1452,7 +1527,22 @@ export function useReplBridge(
             // Build bridge permission callbacks so the interactive permission
             // handler can race bridge responses against local user interaction.
             const permissionCallbacks: BridgePermissionCallbacks = {
-              sendRequest(requestId, toolName, input, toolUseId, description, permissionSuggestions, blockedPath) {
+              sendRequest(
+                requestId,
+                toolName,
+                input,
+                toolUseId,
+                description,
+                permissionSuggestions,
+                blockedPath,
+                suppressAlwaysAllowRule,
+                chromeSite,
+              ) {
+                const resolvedChromeSite =
+                  chromeSite ??
+                  (toolName.startsWith('mcp__claude-in-chrome__')
+                    ? resolveChromeSiteForPermissionPrompt(toolUseId, input)
+                    : undefined);
                 handle.sendControlRequest({
                   type: 'control_request',
                   request_id: requestId,
@@ -1464,6 +1554,8 @@ export function useReplBridge(
                     description,
                     ...(permissionSuggestions ? { permission_suggestions: permissionSuggestions } : {}),
                     ...(blockedPath ? { blocked_path: blockedPath } : {}),
+                    ...(suppressAlwaysAllowRule ? { suppress_always_allow_rule: true } : {}),
+                    ...(resolvedChromeSite ? { chrome_site: resolvedChromeSite } : {}),
                   },
                 });
               },
@@ -1480,11 +1572,21 @@ export function useReplBridge(
               },
               cancelRequest(requestId) {
                 handle.sendControlCancelRequest(requestId);
+                pendingPermissionHandlers.delete(requestId);
               },
-              onResponse(requestId, handler) {
-                pendingPermissionHandlers.set(requestId, handler);
+              onResponse(requestId, handler, expectedToolName) {
+                pendingPermissionHandlers.set(requestId, { handler, expectedToolName });
                 return () => {
                   pendingPermissionHandlers.delete(requestId);
+                };
+              },
+              reportTerminalOnlyAsk() {
+                handle.reportBlockingDialog?.('terminal_only_ask', true);
+                let released = false;
+                return () => {
+                  if (released) return;
+                  released = true;
+                  handle.reportBlockingDialog?.('terminal_only_ask', false);
                 };
               },
             };
@@ -2070,6 +2172,22 @@ export function useReplBridge(
       };
     }
   }, [replBridgeSessionActive, replBridgeOutboundOnly]);
+
+  // Official 2.1.326 #93: when background subagents finish running after the
+  // main turn has already ended, notify the bridge so remote state transitions
+  // from `'running'` back to `'idle'`.
+  useEffect(() => {
+    if (!feature('BRIDGE_MODE')) return;
+    if (!replBridgeConnected) return;
+    let prevRunning = hasRunningBackgroundSubagents(store.getState().tasks);
+    return store.subscribe(() => {
+      const nowRunning = hasRunningBackgroundSubagents(store.getState().tasks);
+      if (prevRunning && !nowRunning && abortControllerRef.current === null) {
+        handleRef.current?.sendResult();
+      }
+      prevRunning = nowRunning;
+    });
+  }, [replBridgeConnected, store, abortControllerRef]);
 
   const sendBridgeResult = useCallback(() => {
     if (feature('BRIDGE_MODE')) {

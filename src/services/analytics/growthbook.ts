@@ -653,6 +653,32 @@ export function isGrowthBookEnabled(): boolean {
 }
 
 /**
+ * Official 2.1.326 #56 (`Qve`): whether the on-disk GrowthBook cache may be
+ * read while live GrowthBook evaluation is disabled due to telemetry-off.
+ */
+export function isDiskCacheReadableWhileDisabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (!isEnvTruthy(env.CLAUDE_CODE_GB_DISK_CACHE_WHEN_TELEMETRY_OFF)) {
+    return false
+  }
+  if (getFeatureFlagsDisabledEnvVar(env) !== null) {
+    return false
+  }
+  if (!isTelemetryDisabled()) {
+    return false
+  }
+  try {
+    const { getAPIProvider } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/model/providers.js') as typeof import('../../utils/model/providers.js')
+    return getAPIProvider() === 'firstParty'
+  } catch {
+    return false
+  }
+}
+
+/**
  * Hostname of ANTHROPIC_BASE_URL when it points at a non-Anthropic proxy.
  *
  * Enterprise-proxy deployments (Epic, Marble, etc.) typically use
@@ -1125,7 +1151,7 @@ export function getFeatureValueWithSource<T>(
     return { value: configOverrides[feature] as T, source: 'override' }
   }
 
-  if (!isGrowthBookEnabled()) {
+  if (!isGrowthBookEnabled() && !isDiskCacheReadableWhileDisabled()) {
     return { value: defaultValue, source: 'disabled' }
   }
 
@@ -1141,6 +1167,13 @@ export function getFeatureValueWithSource<T>(
       ),
       source: 'payload',
     }
+  }
+
+  // Official 2.1.326 #56 (`holdsAnswer()`): once a live remote-eval payload is
+  // held, a flag absent from that payload falls back to `defaultValue` instead
+  // of reading a stale value left behind in the on-disk cache.
+  if (remoteEvalFeatureValues.size > 0) {
+    return { value: defaultValue, source: 'fallback' }
   }
 
   try {
@@ -1250,7 +1283,7 @@ export function getFeatureValue_CACHED_MAY_BE_STALE<T>(
     return configOverrides[feature] as T
   }
 
-  if (!isGrowthBookEnabled()) {
+  if (!isGrowthBookEnabled() && !isDiskCacheReadableWhileDisabled()) {
     const localDefault = getLocalGateDefault(feature)
     return localDefault !== undefined ? (localDefault as T) : defaultValue
   }
@@ -1279,6 +1312,12 @@ export function getFeatureValue_CACHED_MAY_BE_STALE<T>(
       remoteEvalFeatureValues.get(feature),
       defaultValue,
     )
+  }
+
+  // Official 2.1.326 #56 (`holdsAnswer()`): once a live payload has arrived,
+  // do not fall back to stale on-disk cache entries for flags removed from it.
+  if (remoteEvalFeatureValues.size > 0) {
+    return defaultValue
   }
 
   // Fall back to disk cache (survives across process restarts)

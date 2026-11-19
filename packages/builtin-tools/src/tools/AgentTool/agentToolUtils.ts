@@ -268,11 +268,17 @@ export function resolveAgentTools(
       return toolName
     }) ?? [],
   )
+  const disallowsArtifactFamily = disallowedToolSet.has('Artifact')
 
   // Filter available tools based on disallowed list
-  const allowedAvailableTools = filteredAvailableTools.filter(
-    tool => !disallowedToolSet.has(tool.name),
-  )
+  // Official 2.1.326 #104: When `disallowedTools` lists `Artifact`, also omit
+  // cloud MCP artifact tools (server `artifacts` / `publishesArtifact` /
+  // `familyParentToolName === 'Artifact'`) so subagents are not offered them.
+  const allowedAvailableTools = filteredAvailableTools.filter(tool => {
+    if (disallowedToolSet.has(tool.name)) return false
+    if (disallowsArtifactFamily && isCloudArtifactMcpTool(tool)) return false
+    return true
+  })
 
   // If tools is undefined or ['*'], allow all tools (after filtering disallowed)
   const hasWildcard =
@@ -474,13 +480,53 @@ export const agentToolResultSchema = lazySchema(() =>
 
 export type AgentToolResult = z.input<ReturnType<typeof agentToolResultSchema>>
 
+/**
+ * Official 2.1.326 #104: Identify cloud MCP artifact tools that replace or
+ * mirror the built-in `Artifact` tool so subagents with
+ * `disallowedTools: ['Artifact']` are not offered them.
+ */
+const CLOUD_ARTIFACT_MCP_SERVER_NAMES = new Set([
+  'artifacts',
+  'artifact',
+  'claude_ai_artifacts',
+  'claude-ai-artifacts',
+])
+
+export function isCloudArtifactMcpTool(tool: Tool): boolean {
+  const familyParent = (tool as { familyParentToolName?: string })
+    .familyParentToolName
+  if (familyParent === 'Artifact') return true
+  const mcpInfo = tool.mcpInfo as
+    | { serverName?: string; publishesArtifact?: boolean }
+    | undefined
+  if (mcpInfo?.publishesArtifact === true) return true
+  if (
+    mcpInfo?.serverName &&
+    CLOUD_ARTIFACT_MCP_SERVER_NAMES.has(mcpInfo.serverName.toLowerCase())
+  ) {
+    return true
+  }
+  if (
+    tool.isMcp === true &&
+    /^mcp__(?:claude_ai_)?artifacts?__/i.test(tool.name)
+  ) {
+    return true
+  }
+  return false
+}
+
 export function countToolUses(messages: MessageType[]): number {
   let count = 0
   for (const m of messages) {
     if (m.type === 'assistant') {
       const content = m.message?.content as ContentItem[] | undefined
       for (const block of content ?? []) {
-        if (block.type === 'tool_use') {
+        // Official 2.1.326 #115: Exclude SubagentHandback (the final report
+        // delivery call) from subagent tool counts.
+        if (
+          block.type === 'tool_use' &&
+          (block as { name?: string }).name !== SUBAGENT_HANDBACK_TOOL_NAME
+        ) {
           count++
         }
       }

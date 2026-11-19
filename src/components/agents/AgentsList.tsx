@@ -124,7 +124,14 @@ export function AgentsList({ source, agents, onBack, onSelect, onCreateNew, chan
       return;
     }
 
-    if (e.key !== 'up' && e.key !== 'down') return;
+    const isNavKey =
+      e.key === 'up' ||
+      e.key === 'down' ||
+      e.key === 'home' ||
+      e.key === 'end' ||
+      e.key === 'pageup' ||
+      e.key === 'pagedown';
+    if (!isNavKey) return;
     e.preventDefault();
 
     // Handle navigation with "Create New Agent" option
@@ -144,15 +151,22 @@ export function AgentsList({ source, agents, onBack, onSelect, onCreateNew, chan
       }
     }
 
-    // Calculate new position with wrap-around
-    const newPosition =
-      e.key === 'up'
-        ? currentPosition === 0
-          ? totalItems - 1
-          : currentPosition - 1
-        : currentPosition === totalItems - 1
-          ? 0
-          : currentPosition + 1;
+    // Official 2.1.326 #281: support Home/End/PageUp/PageDown in addition to wrap-around Up/Down.
+    const PAGE_STEP = 10;
+    let newPosition: number;
+    if (e.key === 'home') {
+      newPosition = 0;
+    } else if (e.key === 'end') {
+      newPosition = totalItems - 1;
+    } else if (e.key === 'pageup') {
+      newPosition = Math.max(0, currentPosition - PAGE_STEP);
+    } else if (e.key === 'pagedown') {
+      newPosition = Math.min(totalItems - 1, currentPosition + PAGE_STEP);
+    } else if (e.key === 'up') {
+      newPosition = currentPosition === 0 ? totalItems - 1 : currentPosition - 1;
+    } else {
+      newPosition = currentPosition === totalItems - 1 ? 0 : currentPosition + 1;
+    }
 
     // Update selection based on new position
     if (hasCreateOption && newPosition === 0) {

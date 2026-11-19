@@ -71,6 +71,11 @@ import {
   writeFileSync_DEPRECATED,
 } from '../slowOperations.js'
 import {
+  getNonRepoEnabledPlugins,
+  getNonRepoExtraKnownMarketplaces,
+  shouldSkipWorktreeRepoPluginSettings,
+} from './worktreePluginSettings.js'
+import {
   getAddDirEnabledPlugins,
   getAddDirExtraMarketplaces,
 } from './addDirPluginSettings.js'
@@ -349,13 +354,18 @@ export type DeclaredMarketplace = {
  */
 export function getDeclaredMarketplaces(): Record<string, DeclaredMarketplace> {
   const implicit: Record<string, DeclaredMarketplace> = {}
+  const skipRepoSettings = shouldSkipWorktreeRepoPluginSettings()
 
   // Only the official marketplace can be implicitly declared — it's the one
   // built-in source we know. Other marketplaces have no default source to inject.
   // Explicitly-disabled entries (value: false) don't count.
+  // Official 2.1.326 #330: in isolated worktree sessions, skip repo-level
+  // enabledPlugins and extraKnownMarketplaces from project/local settings.
   const enabledPlugins = {
     ...getAddDirEnabledPlugins(),
-    ...(getInitialSettings().enabledPlugins ?? {}),
+    ...(skipRepoSettings
+      ? getNonRepoEnabledPlugins()
+      : (getInitialSettings().enabledPlugins ?? {})),
   }
   for (const [pluginId, value] of Object.entries(enabledPlugins)) {
     if (
@@ -376,7 +386,9 @@ export function getDeclaredMarketplaces(): Record<string, DeclaredMarketplace> {
   return {
     ...implicit,
     ...getAddDirExtraMarketplaces(),
-    ...(getInitialSettings().extraKnownMarketplaces ?? {}),
+    ...(skipRepoSettings
+      ? getNonRepoExtraKnownMarketplaces()
+      : (getInitialSettings().extraKnownMarketplaces ?? {})),
   } as any
 }
 

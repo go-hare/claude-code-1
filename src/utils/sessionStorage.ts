@@ -39,6 +39,7 @@ import {
   resolve,
   sep,
 } from 'path'
+import { StringDecoder } from 'string_decoder'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -4567,6 +4568,96 @@ function findLatestMessage<T extends { timestamp: string }>(
 /**
  * Builds a conversation chain from a leaf message to root
  * @param messages Map of all messages
+/**
+ * Official 2.1.326 #30 (`r_r` / `s_r` / `i_r`): maximum number of dangling
+ * `parentUuid` gaps bridged while reconstructing a resumed conversation chain
+ * (e.g. after a crash when a previous turn ended with an empty reply).
+ */
+export const MAX_CHAIN_GAP_BRIDGES = 16
+
+function isCompactBoundaryTranscriptMessage(
+  entry: TranscriptMessage | undefined,
+): boolean {
+  return (
+    entry !== undefined &&
+    entry.type === 'system' &&
+    'subtype' in entry &&
+    entry.subtype === 'compact_boundary'
+  )
+}
+
+function findNearestPrecedingLeaf(
+  messages: Map<UUID, TranscriptMessage>,
+  orphan: TranscriptMessage,
+  seen: Set<UUID>,
+): TranscriptMessage | undefined {
+  const candidates: TranscriptMessage[] = []
+  for (const entry of messages.values()) {
+    if (entry.uuid === orphan.uuid) break
+    if (isCompactBoundaryTranscriptMessage(entry)) {
+      // Do not bridge an orphan back across a compact_boundary.
+      candidates.length = 0
+      continue
+    }
+    if (!entry.isSidechain && entry.timestamp <= orphan.timestamp) {
+      candidates.push(entry)
+    }
+  }
+  const referencedParents = new Set(candidates.map(c => c.parentUuid))
+  let best: TranscriptMessage | undefined
+  for (const cand of candidates) {
+    if (
+      !seen.has(cand.uuid) &&
+      !referencedParents.has(cand.uuid) &&
+      !(cand.type === 'system' && !cand.parentUuid) &&
+      (!best || cand.timestamp >= best.timestamp)
+    ) {
+      best = cand
+    }
+  }
+  return best
+}
+
+/**
+ * Official 2.1.326 #30 (`s_r` / `i_r`): repair broken `parentUuid` chains when
+ * a message points at a missing parent UUID (for example, after a crash where
+ * the previous turn ended with an empty reply that was never persisted).
+ * Mutates `messages` entries in place with repaired `parentUuid` and returns
+ * the number of gaps bridged.
+ */
+export function bridgeBrokenParentChain(
+  messages: Map<UUID, TranscriptMessage>,
+  leafUuid: UUID | undefined,
+  maxBridges: number = MAX_CHAIN_GAP_BRIDGES,
+): number {
+  if (!leafUuid) return 0
+  const seen = new Set<UUID>()
+  let bridges = 0
+  let current = messages.get(leafUuid)
+  while (current?.parentUuid && !seen.has(current.uuid)) {
+    if (isCompactBoundaryTranscriptMessage(current)) break
+    seen.add(current.uuid)
+    let parent = messages.get(current.parentUuid)
+    if (!parent && bridges < maxBridges) {
+      parent = findNearestPrecedingLeaf(messages, current, seen)
+      if (parent) {
+        messages.set(current.uuid, {
+          ...current,
+          parentUuid: parent.uuid,
+        })
+        bridges++
+      }
+    }
+    current = parent
+  }
+  return bridges
+}
+
+/**
+ * Reconstructs the full conversation chain from a leaf message by following parentUuid links.
+ * Returns messages in chronological order (root to leaf).
+ *
+ * @param messages Map of all loaded messages keyed by UUID
  * @param leafMessage The leaf message to start from
  * @returns Array of messages from root to leaf
  */
@@ -4574,9 +4665,13 @@ export function buildConversationChain(
   messages: Map<UUID, TranscriptMessage>,
   leafMessage: TranscriptMessage,
 ): TranscriptMessage[] {
+  // Official 2.1.326 #30: bridge any dangling parentUuid gaps (such as after
+  // a crash when the previous turn ended with an empty reply) before walking.
+  bridgeBrokenParentChain(messages, leafMessage.uuid)
   const transcript: TranscriptMessage[] = []
   const seen = new Set<UUID>()
-  let currentMsg: TranscriptMessage | undefined = leafMessage
+  let currentMsg: TranscriptMessage | undefined =
+    messages.get(leafMessage.uuid) ?? leafMessage
   while (currentMsg) {
     if (seen.has(currentMsg.uuid)) {
       logError(
@@ -7480,13 +7575,134 @@ function applyBridgeSessionEntry(
   }
 }
 
+const LOW_MEMORY_CHUNK_BYTES = 256 * 1024
+const LOW_MEMORY_MAX_LINE_BYTES = 16 * 1024 * 1024
+
 /**
- * Loads all messages, summaries, and file history snapshots from a transcript file.
+ * Official 2.1.326 #31: detect memory-pressure / allocation failures thrown
+ * when attempting to read or stringify an entire transcript in one buffer.
+ */
+export function isLowMemoryReadError(err: unknown): boolean {
+  if (err instanceof RangeError) return true
+  if (err && typeof err === 'object') {
+    const code = (err as { code?: unknown }).code
+    if (
+      code === 'ENOMEM' ||
+      code === 'EFBIG' ||
+      code === 'ERR_STRING_TOO_LONG' ||
+      code === 'ERR_OUT_OF_MEMORY' ||
+      code === 'ERR_FILE_TOO_LARGE'
+    ) {
+      return true
+    }
+    const msg = (err as { message?: unknown }).message
+    if (
+      typeof msg === 'string' &&
+      /out of memory|allocation failed|cannot create a string longer|string length|enomem/i.test(
+        msg,
+      )
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Official 2.1.326 #31: streaming low-memory transcript reader. Reads fixed
+ * small chunks from disk and parses line-by-line (skipping `attribution-snapshot`
+ * rows and oversized corrupt lines) so resumed sessions retain earlier
+ * conversation history even when Claude Code runs low on memory.
+ */
+export async function streamTranscriptFileLowMemory(
+  filePath: string,
+  onEntries: (entries: Entry[]) => void,
+  opts?: { chunkBytes?: number; maxLineBytes?: number },
+): Promise<{ linesParsed: number; linesSkipped: number }> {
+  const chunkBytes = Math.max(4096, opts?.chunkBytes ?? LOW_MEMORY_CHUNK_BYTES)
+  const maxLineBytes = opts?.maxLineBytes ?? LOW_MEMORY_MAX_LINE_BYTES
+  const chunkBuf = Buffer.allocUnsafe(chunkBytes)
+  const fh = await fsOpen(filePath, 'r')
+  let carry = ''
+  let droppingOversizedLine = false
+  let linesParsed = 0
+  let linesSkipped = 0
+
+  const flushLine = (rawLine: string): void => {
+    const trimmed = rawLine.trim()
+    if (!trimmed) return
+    if (trimmed.includes('"type":"attribution-snapshot"')) return
+    try {
+      const parsed = jsonParse(trimmed) as Entry
+      if (parsed && typeof parsed === 'object') {
+        onEntries([parsed])
+        linesParsed++
+      }
+    } catch {
+      linesSkipped++
+    }
+  }
+
+  const decoder = new StringDecoder('utf8')
+
+  const processDecodedChunk = (sliceText: string): void => {
+    let start = 0
+    for (;;) {
+      const nl = sliceText.indexOf('\n', start)
+      if (nl === -1) {
+        const tail = sliceText.slice(start)
+        if (!droppingOversizedLine) {
+          if (carry.length + tail.length > maxLineBytes) {
+            carry = ''
+            droppingOversizedLine = true
+            linesSkipped++
+          } else {
+            carry += tail
+          }
+        }
+        break
+      }
+      const piece = sliceText.slice(start, nl)
+      start = nl + 1
+      if (droppingOversizedLine) {
+        droppingOversizedLine = false
+        carry = ''
+        continue
+      }
+      const fullLine = carry ? carry + piece : piece
+      carry = ''
+      flushLine(fullLine)
+    }
+  }
+
+  try {
+    let offset = 0
+    for (;;) {
+      const { bytesRead } = await fh.read(chunkBuf, 0, chunkBytes, offset)
+      if (bytesRead === 0) break
+      offset += bytesRead
+      processDecodedChunk(decoder.write(chunkBuf.subarray(0, bytesRead)))
+    }
+    const trailing = decoder.end()
+    if (trailing) {
+      processDecodedChunk(trailing)
+    }
+    if (!droppingOversizedLine && carry) {
+      flushLine(carry)
+    }
+  } finally {
+    await fh.close()
+  }
+  return { linesParsed, linesSkipped }
+}
+
+/**
+ * Loads and parses a JSONL transcript file.
  * Returns the messages, summaries, custom titles, tags, file history snapshots, and attribution snapshots.
  */
 export async function loadTranscriptFile(
   filePath: string,
-  opts?: { keepAllLeaves?: boolean },
+  opts?: { keepAllLeaves?: boolean; lowMemoryMode?: boolean },
 ): Promise<{
   messages: Map<UUID, TranscriptMessage>
   summaries: Map<UUID, string>
@@ -7666,49 +7882,59 @@ export async function loadTranscriptFile(
     let metadataLines: string[] | null = null
     let hasPreservedSegment = false
     let tailTorn: boolean | undefined
+    let useStreamingLowMemory = opts?.lowMemoryMode === true
     // Official DISABLE_PRECOMPACT_SKIP densable.
     const precompactSkipDisabled = isPrecompactSkipDisabled()
-    if (!precompactSkipDisabled) {
-      const { size } = await stat(filePath)
-      if (size > SKIP_PRECOMPACT_THRESHOLD) {
-        const fastHead = !opts?.keepAllLeaves
-          ? await tryLoadResumeHeadRows(filePath, size).catch(() => null)
-          : null
-        if (fastHead) {
-          buf = fastHead.postBoundaryBuf
-          hasPreservedSegment = fastHead.hasPreservedSegment
-          tailTorn = !(await fileEndsWithNewline(filePath, size))
-          const preLines: string[] = []
-          fastHead.preservedRows.scan((rowBuf, start, length) => {
-            preLines.push(rowBuf.toString('utf8', start, start + length))
-          })
-          metadataLines = preLines
-        } else {
-          const scan = await readTranscriptForLoad(filePath, size)
-          buf = scan.postBoundaryBuf
-          hasPreservedSegment = scan.hasPreservedSegment
-          tailTorn = !(await fileEndsWithNewline(filePath, size))
-          // >0 means we truncated pre-boundary bytes and must recover
-          // session-scoped metadata from that range. A preservedSegment
-          // boundary does not truncate (preserved messages are physically
-          // pre-boundary), so offset stays 0 unless an EARLIER non-preserved
-          // boundary already truncated — in which case the preserved messages
-          // for the later boundary are post-that-earlier-boundary and were
-          // kept, and we still want the metadata scan.
-          if (scan.boundaryStartOffset > 0) {
-            metadataLines = await scanPreBoundaryMetadata(
-              filePath,
-              scan.boundaryStartOffset,
-            )
+    if (!useStreamingLowMemory) {
+      try {
+        if (!precompactSkipDisabled) {
+          const { size } = await stat(filePath)
+          if (size > SKIP_PRECOMPACT_THRESHOLD) {
+            const fastHead = !opts?.keepAllLeaves
+              ? await tryLoadResumeHeadRows(filePath, size).catch(() => null)
+              : null
+            if (fastHead) {
+              buf = fastHead.postBoundaryBuf
+              hasPreservedSegment = fastHead.hasPreservedSegment
+              tailTorn = !(await fileEndsWithNewline(filePath, size))
+              const preLines: string[] = []
+              fastHead.preservedRows.scan((rowBuf, start, length) => {
+                preLines.push(rowBuf.toString('utf8', start, start + length))
+              })
+              metadataLines = preLines
+            } else {
+              const scan = await readTranscriptForLoad(filePath, size)
+              buf = scan.postBoundaryBuf
+              hasPreservedSegment = scan.hasPreservedSegment
+              tailTorn = !(await fileEndsWithNewline(filePath, size))
+              if (scan.boundaryStartOffset > 0) {
+                metadataLines = await scanPreBoundaryMetadata(
+                  filePath,
+                  scan.boundaryStartOffset,
+                )
+              }
+            }
           }
+        }
+        if (buf === null) {
+          buf = await readFile(filePath)
+          tailTorn = buf.length > 0 && buf[buf.length - 1] !== 0x0a
+        }
+      } catch (readErr) {
+        if (isLowMemoryReadError(readErr)) {
+          logForDebugging(
+            `loadTranscriptFile: low memory reading ${filePath}, falling back to chunked streaming reader`,
+            { level: 'warn' },
+          )
+          buf = null
+          useStreamingLowMemory = true
+        } else {
+          throw readErr
         }
       }
     }
-    if (buf === null) {
-      buf = await readFile(filePath)
-      tailTorn = buf.length > 0 && buf[buf.length - 1] !== 0x0a
-    }
     if (
+      buf !== null &&
       tailTorn &&
       !opts?.keepAllLeaves &&
       (filePath === getProject().sessionFile ||
@@ -7716,27 +7942,25 @@ export async function loadTranscriptFile(
     ) {
       leftoverWdr(filePath)
     }
-    // For large buffers (which here means readTranscriptForLoad output with
-    // attr-snaps already stripped at the fd level — the <5MB readFile path
-    // falls through the size gate below), the dominant cost is parsing dead
-    // fork branches that buildConversationChain would discard anyway. Skip
-    // when the caller needs all
-    // leaves (loadAllLogsFromSessionFile for /insights picks the branch with
-    // most user messages, not the latest), when the boundary has a
-    // preservedSegment (those messages keep their pre-compact parentUuid on
-    // disk -- applyPreservedSegmentRelinks splices them in-memory AFTER
-    // parse, so a pre-parse chain walk would drop them as orphans), and when
-    // CLAUDE_CODE_DISABLE_PRECOMPACT_SKIP is set (that kill switch means
-    // "load everything, skip nothing"; this is another skip-before-parse
-    // optimization and the scan it depends on for hasPreservedSegment did
-    // not run).
     if (
+      buf !== null &&
       !opts?.keepAllLeaves &&
       !hasPreservedSegment &&
       !precompactSkipDisabled &&
       buf.length > SKIP_PRECOMPACT_THRESHOLD
     ) {
-      buf = walkChainBeforeParse(buf)
+      try {
+        buf = walkChainBeforeParse(buf)
+      } catch (walkErr) {
+        if (isLowMemoryReadError(walkErr)) {
+          logForDebugging(
+            `loadTranscriptFile: low memory in walkChainBeforeParse for ${filePath}, keeping full buffer for chunked parse`,
+            { level: 'warn' },
+          )
+        } else {
+          throw walkErr
+        }
+      }
     }
 
     // First pass: process metadata-only lines collected during the boundary scan.
@@ -7972,12 +8196,23 @@ export async function loadTranscriptFile(
       }
     }
 
-    // #139: parse & process large transcripts in chunks with setImmediate yields
-    // so timers, input, and rendering are not blocked on the event loop.
+    // #139 + #31: parse & process large transcripts in chunks with setImmediate
+    // yields, or stream directly from disk when low on memory so earlier
+    // conversation history is preserved.
     const TRANSCRIPT_PARSE_CHUNK_BYTES = 256 * 1024
-    if (buf.length <= TRANSCRIPT_PARSE_CHUNK_BYTES) {
-      processEntries(parseJSONL<Entry>(buf))
-    } else {
+    if (useStreamingLowMemory) {
+      await streamTranscriptFileLowMemory(filePath, processEntries)
+    } else if (buf !== null && buf.length <= TRANSCRIPT_PARSE_CHUNK_BYTES) {
+      try {
+        processEntries(parseJSONL<Entry>(buf))
+      } catch (parseErr) {
+        if (isLowMemoryReadError(parseErr)) {
+          await streamTranscriptFileLowMemory(filePath, processEntries)
+        } else {
+          throw parseErr
+        }
+      }
+    } else if (buf !== null) {
       let offset = 0
       while (offset < buf.length) {
         let end = Math.min(offset + TRANSCRIPT_PARSE_CHUNK_BYTES, buf.length)
@@ -7998,6 +8233,13 @@ export async function loadTranscriptFile(
 
   applyPreservedSegmentRelinks(messages)
   applySnipRemovals(messages)
+
+  // Official 2.1.326 #30: bridge any dangling parentUuid gaps left after a crash
+  // when a previous turn ended with an empty reply. Must run after preserved
+  // segment relinks and snip removals so intentional relinks/snips are respected.
+  if (lastNonSidechainUuid) {
+    bridgeBrokenParentChain(messages, lastNonSidechainUuid)
+  }
 
   // Compute leaf UUIDs once at load time
   // Only user/assistant messages should be considered as leaves for anchoring resume.

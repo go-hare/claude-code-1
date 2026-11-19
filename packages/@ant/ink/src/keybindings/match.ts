@@ -1,5 +1,46 @@
 import type { Key } from '../core/events/input-event.js'
+import { attacherCaps } from '../core/termio/osc.js'
 import type { ParsedBinding, ParsedKeystroke } from './types.js'
+
+/**
+ * Official 2.1.326 (#186, 328 `J`/`un`/`jH`): macOS Option+T sends `†`
+ * (U+2020) when Option is not configured as Meta — including over SSH from
+ * iTerm2 to a Linux host (where LC_TERMINAL=iTerm2 or TERM_PROGRAM=iTerm.app).
+ */
+const MAC_OPTION_CHAR_MAP: Record<string, string> = {
+  '\u2020': 't',
+}
+
+export function isMacLikeKeybindingPlatform(
+  env: Record<string, string | undefined> = process.env,
+  platform: string = process.platform,
+): boolean {
+  if (platform === 'darwin') return true
+  if (
+    env['LC_TERMINAL'] === 'iTerm2' ||
+    env['TERM_PROGRAM'] === 'Apple_Terminal' ||
+    env['TERM_PROGRAM'] === 'iTerm.app' ||
+    attacherCaps() !== null
+  ) {
+    return true
+  }
+  return false
+}
+
+export function normalizeMacOptionInput(
+  input: string,
+  key: Key,
+): { input: string; meta: boolean } {
+  if (
+    !key.meta &&
+    !key.ctrl &&
+    Object.hasOwn(MAC_OPTION_CHAR_MAP, input) &&
+    isMacLikeKeybindingPlatform()
+  ) {
+    return { input: MAC_OPTION_CHAR_MAP[input]!, meta: true }
+  }
+  return { input, meta: key.meta }
+}
 
 /**
  * Modifier keys from Ink's Key type that we care about for matching.
@@ -88,10 +129,11 @@ export function matchesKeystroke(
   key: Key,
   target: ParsedKeystroke,
 ): boolean {
-  const keyName = getKeyName(input, key)
+  const normalized = normalizeMacOptionInput(input, key)
+  const keyName = getKeyName(normalized.input, key)
   if (keyName !== target.key) return false
 
-  const inkMods = getInkModifiers(key)
+  const inkMods = { ...getInkModifiers(key), meta: normalized.meta }
 
   // QUIRK: Ink sets key.meta=true when escape is pressed (see input-event.ts).
   // This is a legacy behavior from how escape sequences work in terminals.

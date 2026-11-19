@@ -26,6 +26,7 @@ import { ripGrep, RipgrepTimeoutError } from 'src/utils/ripgrep.js'
 import { semanticBoolean } from 'src/utils/semanticBoolean.js'
 import { semanticNumber } from 'src/utils/semanticNumber.js'
 import { plural } from 'src/utils/stringUtils.js'
+import { isSafeGlobPattern } from 'src/utils/settings/validation.js'
 import { GREP_TOOL_NAME, getDescription } from './prompt.js'
 import {
   getToolUseSummary,
@@ -281,6 +282,18 @@ export const GrepTool = buildTool({
     // densable BT() && xd(n) — named host is not forwarded (errorCode 3)
     const hostRefusal = remoteHostForwardRefusal(input, GREP_TOOL_NAME)
     if (hostRefusal) return { ...hostRefusal, errorCode: 3 }
+    // Official 2.1.326 (#122): reject malformed/pathological glob patterns
+    // upfront so Grep never hangs on catastrophic backtracking or unbalanced braces.
+    if (input.glob) {
+      const globCheck = isSafeGlobPattern(input.glob)
+      if (!globCheck.safe) {
+        return {
+          result: false,
+          message: `Invalid glob pattern: ${globCheck.reason}`,
+          errorCode: 2,
+        }
+      }
+    }
     const { path } = input
     // If path is provided, validate that it exists
     if (path) {

@@ -16,9 +16,11 @@ type Props = {
   onClose: (result?: string, options?: { display?: CommandResultDisplay }) => void;
   context: LocalJSXCommandContext;
   defaultTab: 'Status' | 'Config' | 'Usage' | 'Stats';
+  /** Official 2.1.326 #345: true when invoked via `/cost` so session cost stays first. */
+  openedForCost?: boolean;
 };
 
-export function Settings({ onClose, context, defaultTab }: Props): React.ReactNode {
+export function Settings({ onClose, context, defaultTab, openedForCost = false }: Props): React.ReactNode {
   const [selectedTab, setSelectedTab] = useState<string>(defaultTab);
   const [tabsHidden, setTabsHidden] = useState(false);
   // True while Config content is focused (header unfocused). Settings cedes
@@ -77,7 +79,7 @@ export function Settings({ onClose, context, defaultTab }: Props): React.ReactNo
       </Suspense>
     </Tab>,
     <Tab key="usage" title="Usage">
-      <Usage />
+      <Usage openedForCost={openedForCost} />
     </Tab>,
     <Tab key="stats" title="Stats">
       <Stats onClose={onClose} />

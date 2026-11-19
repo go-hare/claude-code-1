@@ -76,6 +76,19 @@ function computeGutterWidth(patch: StructuredPatchHunk): number {
   return maxLineNumber.toString().length + 3; // marker + 2 padding spaces
 }
 
+/**
+ * Official 2.1.326 (#219): on transparent-background rows (`\x1b[49m`), replace
+ * ColorDiff/ColorFile's hardcoded theme-default foreground (Monokai `#f8f8f2`
+ * or GitHub `#333333`) with terminal default foreground (`\x1b[39m`) so code
+ * remains visible when the theme and terminal background differ.
+ */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional ANSI SGR match
+const DEFAULT_FG_WITH_TRANSPARENT_BG_RE = /\x1b\[(?:38;2;248;248;242|38;2;51;51;51)m(?=\x1b\[49m)/g;
+
+export function normalizeTransparentDiffForeground(line: string): string {
+  return line.replace(DEFAULT_FG_WITH_TRANSPARENT_BG_RE, '\x1b[39m');
+}
+
 function renderColorDiff(
   patch: StructuredPatchHunk,
   firstLine: string | null,
@@ -86,6 +99,12 @@ function renderColorDiff(
   dim: boolean,
   splitGutter: boolean,
 ): CachedRender | null {
+  // Official 2.1.326 (#225): hunks containing "\ No newline at end of file"
+  // delegate to StructuredDiffFallback so the note line is never numbered as
+  // a line of code or allowed to shift subsequent line numbers.
+  if (patch.lines.some(line => line.startsWith('\\'))) {
+    return null;
+  }
   const ColorDiff = expectColorDiff();
   if (!ColorDiff) return null;
   const palette = getTheme(theme as ThemeName);
@@ -104,8 +123,9 @@ function renderColorDiff(
   const hit = perHunk?.get(key);
   if (hit) return hit;
 
-  const lines = new ColorDiff(patch, firstLine, filePath, fileContent).render(theme, width, dim, palette);
-  if (lines === null) return null;
+  const rawLines = new ColorDiff(patch, firstLine, filePath, fileContent).render(theme, width, dim, palette);
+  if (rawLines === null) return null;
+  const lines = rawLines.map(normalizeTransparentDiffForeground);
 
   // Pre-split the gutter column once (cold-cache). sliceAnsi preserves
   // styles across the cut; the Rust module already pads the gutter to

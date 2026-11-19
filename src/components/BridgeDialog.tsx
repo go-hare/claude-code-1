@@ -22,6 +22,24 @@ type Props = {
   onDone: () => void;
 };
 
+/**
+ * Official 2.1.326 #92 — determine whether the terminal is short (e.g. 80x24)
+ * and compute compact layout parameters so the QR code in `/remote-control`
+ * is never clipped vertically.
+ */
+export function computeBridgeQrLayout(
+  qrLineCount: number,
+  terminalRows: number = process.stdout.rows || 24,
+): { compact: boolean; qrMargin: number; showSecondaryMeta: boolean } {
+  const chromeRows = 9;
+  const compact = terminalRows <= 24 || qrLineCount + chromeRows > terminalRows;
+  return {
+    compact,
+    qrMargin: compact ? 1 : 2,
+    showSecondaryMeta: !compact,
+  };
+}
+
 export function BridgeDialog({ onDone }: Props): React.ReactNode {
   useRegisterOverlay('bridge-dialog');
 
@@ -53,6 +71,9 @@ export function BridgeDialog({ onDone }: Props): React.ReactNode {
 
   const displayUrl = sessionActive ? sessionUrl : connectUrl;
 
+  const terminalRows = process.stdout.rows || 24;
+  const initialQrCompact = terminalRows <= 24;
+
   useEffect(() => {
     if (!showQR || !displayUrl) {
       setQrText('');
@@ -62,10 +83,11 @@ export function BridgeDialog({ onDone }: Props): React.ReactNode {
       type: 'utf8',
       errorCorrectionLevel: 'L',
       small: true,
+      margin: initialQrCompact ? 1 : 2,
     } as Parameters<typeof qrToString>[1])
       .then(setQrText)
       .catch(() => setQrText(''));
-  }, [showQR, displayUrl]);
+  }, [showQR, displayUrl, initialQrCompact]);
 
   useKeybindings(
     {
@@ -119,6 +141,8 @@ export function BridgeDialog({ onDone }: Props): React.ReactNode {
   });
   const indicator = error ? BRIDGE_FAILED_INDICATOR : BRIDGE_READY_INDICATOR;
   const qrLines = qrText ? qrText.split('\n').filter(l => l.length > 0) : [];
+  const qrLayout = computeBridgeQrLayout(qrLines.length, terminalRows);
+  const compactForQr = showQR && qrLayout.compact;
 
   const contextParts: string[] = [];
   if (repoName) contextParts.push(repoName);
@@ -138,7 +162,7 @@ export function BridgeDialog({ onDone }: Props): React.ReactNode {
 
   return (
     <Dialog title="Remote Control" onCancel={onDone} hideInputGuide>
-      <Box flexDirection="column" gap={1}>
+      <Box flexDirection="column" gap={compactForQr ? 0 : 1}>
         <Box flexDirection="column">
           <Text>
             <Text color={statusColor}>
@@ -147,8 +171,8 @@ export function BridgeDialog({ onDone }: Props): React.ReactNode {
             <Text dimColor>{contextSuffix}</Text>
           </Text>
           {error && <Text color="error">{error}</Text>}
-          {verbose && environmentId && <Text dimColor>Environment: {environmentId}</Text>}
-          {verbose && sessionId && <Text dimColor>Session: {sessionId}</Text>}
+          {!compactForQr && verbose && environmentId && <Text dimColor>Environment: {environmentId}</Text>}
+          {!compactForQr && verbose && sessionId && <Text dimColor>Session: {sessionId}</Text>}
         </Box>
         {showQR && qrLines.length > 0 && (
           <Box flexDirection="column">
@@ -157,7 +181,7 @@ export function BridgeDialog({ onDone }: Props): React.ReactNode {
             ))}
           </Box>
         )}
-        {footerText && <Text dimColor>{footerText}</Text>}
+        {!compactForQr && footerText && <Text dimColor>{footerText}</Text>}
         <Text dimColor>
           <Byline>
             <KeyboardShortcutHint shortcut="d" action={error !== undefined ? 'dismiss' : 'disconnect'} />

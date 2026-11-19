@@ -54,12 +54,13 @@ import {
   getCellPixels,
   getMousePixelsSupported,
   isGhosttyXtversion,
+  isProgressReportingAvailable,
   isXtermJs,
   supportsExtendedKeys,
 } from '../core/terminal.js';
 import { Jk, tD } from '../core/terminalCapabilities.js';
 import { probeTerminalIdentity, reprobeCellPixels as queryCellPixels } from '../core/terminalProbe.js';
-import { _getClipboardHostPlatform, readNativeClipboard } from '../core/termio/osc.js';
+import { _getClipboardHostPlatform, CLEAR_ITERM2_PROGRESS, readNativeClipboard } from '../core/termio/osc.js';
 import type { MouseClickResult } from '../core/events/click-event.js';
 import {
   getTerminalFocusGainedAt,
@@ -248,6 +249,8 @@ type Props = {
   readonly dispatchKeyboardEvent: (parsedKey: ParsedKey, extras?: { soloKeypress?: boolean }) => void;
   /** densable `onInputPriorityFrame` — `Kd` paste/key (not wheel/mouse name). */
   readonly onInputPriorityFrame: () => void;
+  /** 2.1.326 #203: flush pending writes & park cursor below frame before Ctrl+Z SIGTSTP. */
+  readonly prepareToSuspend?: () => string;
   // Official densable lag: bracketed paste → PasteEvent on focused node.
   readonly dispatchPasteEvent: (text: string) => void;
   /**
@@ -882,7 +885,13 @@ export default class App extends PureComponent<Props, State> {
     const rawModeCountBeforeSuspend = this.rawModeEnabledCount;
     const modes = this.props.modes;
     if (this.props.stdout.isTTY) {
-      this.props.stdout.write(SHOW_CURSOR + DISABLE_MOUSE_TRACKING + modes.suspend());
+      this.props.stdout.write(
+        (this.props.prepareToSuspend?.() ?? '') +
+          (isProgressReportingAvailable() ? CLEAR_ITERM2_PROGRESS : '') +
+          SHOW_CURSOR +
+          DISABLE_MOUSE_TRACKING +
+          modes.suspend(),
+      );
     }
     while (this.rawModeEnabledCount > 0) {
       this.handleSetRawMode(false);

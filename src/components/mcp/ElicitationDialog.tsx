@@ -451,8 +451,12 @@ function ElicitationFormDialog({
     }
 
     if (trimmedValue === '') {
-      // Empty plain string — keep or unset depending on whether it was set
-      if (formValues[fieldName] !== undefined) {
+      // Official 2.1.326 #90: Emptying a required string field must unset it so
+      // it no longer keeps its ✓ tick as if a valid value were provided.
+      const isFieldRequired = schemaFields.some(f => f.name === fieldName && f.isRequired);
+      if (isFieldRequired) {
+        unsetField(fieldName);
+      } else if (formValues[fieldName] !== undefined) {
         setField(fieldName, '');
       }
       return;
@@ -587,8 +591,9 @@ function ElicitationFormDialog({
   useInput(
     (_input, key) => {
       // Text fields handle their own character input; we only intercept
-      // navigation keys and backspace-on-empty here.
-      if (isEditingTextField && !key.upArrow && !key.downArrow && !key.return && !key.backspace) {
+      // navigation keys (including Tab/Shift+Tab — Official 2.1.326 #90) and
+      // backspace-on-empty here.
+      if (isEditingTextField && !key.upArrow && !key.downArrow && !key.tab && !key.return && !key.backspace) {
         return;
       }
 
@@ -743,8 +748,8 @@ function ElicitationFormDialog({
         return;
       }
 
-      // Up/Down navigation
-      if (key.upArrow || key.downArrow) {
+      // Up/Down and Tab/Shift+Tab navigation (Official 2.1.326 #90)
+      if (key.upArrow || key.downArrow || key.tab) {
         // Reset enum typeahead when leaving a field
         const ta = enumTypeaheadRef.current;
         ta.buffer = '';
@@ -752,7 +757,8 @@ function ElicitationFormDialog({
           clearTimeout(ta.timer);
           ta.timer = undefined;
         }
-        handleNavigation(key.upArrow ? 'up' : 'down');
+        const direction = key.upArrow || (key.tab && key.shift) ? 'up' : 'down';
+        handleNavigation(direction);
         return;
       }
 
@@ -909,7 +915,10 @@ function ElicitationFormDialog({
           const { name, schema, isRequired } = field;
           const isActive = index === currentFieldIndex && !focusedButton;
           const value = formValues[name];
-          const hasValue = value !== undefined && (!Array.isArray(value) || value.length > 0);
+          const hasValue =
+            value !== undefined &&
+            (!Array.isArray(value) || value.length > 0) &&
+            !(isRequired && typeof value === 'string' && value.trim() === '');
           const error = validationErrors[name];
 
           // Checkbox: spinner → ⚠ error → ✔ set → * required → space
@@ -1201,7 +1210,9 @@ function ElicitationFormDialog({
       isCancelActive={(!currentField || !!focusedButton) && !expandedAccordion}
       inputGuide={exitState =>
         exitState.pending ? (
-          <Text>Press {exitState.keyName} again to exit</Text>
+          <Text>
+            Press {exitState.keyName} again to {escapeAction === 'answer later' ? 'answer later' : 'exit'}
+          </Text>
         ) : (
           <Byline>
             <ConfigurableShortcutHint
@@ -1533,7 +1544,9 @@ function ElicitationURLDialog({
       isCancelActive
       inputGuide={exitState =>
         exitState.pending ? (
-          <Text>Press {exitState.keyName} again to exit</Text>
+          <Text>
+            Press {exitState.keyName} again to {escapeAction === 'answer later' ? 'answer later' : 'exit'}
+          </Text>
         ) : (
           <Byline>
             <ConfigurableShortcutHint

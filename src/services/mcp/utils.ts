@@ -195,6 +195,15 @@ export function commandBelongsToServer(
   command: Command,
   serverName: string,
 ): boolean {
+  // Official 2.1.326 #79 (`Gk`): prefer exact stamped `mcpInfo.serverName` so
+  // two servers with nearly identical normalized names (e.g. `my-app` vs
+  // `my_app`) never collide and wipe each other's prompts.
+  const stampedServer = (
+    command as Command & { mcpInfo?: { serverName?: string } }
+  ).mcpInfo?.serverName
+  if (stampedServer !== undefined) {
+    return stampedServer === serverName
+  }
   const normalized = normalizeNameForMCP(serverName)
   const name = command.name
   if (!name) return false

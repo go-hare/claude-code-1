@@ -1,4 +1,5 @@
 import { randomUUID } from 'crypto';
+import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs';
 import type { BetaUsage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs';
 import { getIsNonInteractiveSession, getSdkAgentProgressSummariesEnabled } from '../../bootstrap/state.js';
 import {
@@ -21,6 +22,7 @@ import { findToolByName } from '../../Tool.js';
 import type { AgentToolResult } from '@claude-code/builtin-tools/tools/AgentTool/agentToolUtils.js';
 import { VERIFICATION_AGENT_TYPE } from '@claude-code/builtin-tools/tools/AgentTool/constants.js';
 import { SEND_MESSAGE_TOOL_NAME } from '@claude-code/builtin-tools/tools/SendMessageTool/constants.js';
+import { SUBAGENT_HANDBACK_TOOL_NAME } from '@claude-code/builtin-tools/tools/SubagentHandbackTool/constants.js';
 import { type AgentDefinition, isBuiltInAgent } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js';
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js';
 import { asAgentId } from '../../types/ids.js';
@@ -110,8 +112,14 @@ export type PendingAgentMessageOrigin = {
   [key: string]: unknown;
 };
 
+/**
+ * Official 2.1.326 #117: pending agent message payload accepts plain text or
+ * multimodal ContentBlockParam[] (e.g. pasted images alongside text).
+ */
+export type PendingAgentMessageContent = string | ContentBlockParam[];
+
 export type PendingAgentMessage = {
-  text: string;
+  text: PendingAgentMessageContent;
   origin?: PendingAgentMessageOrigin;
   isMeta: boolean;
   /** densable `shownAs` — bdt send-now uuid. */
@@ -225,9 +233,13 @@ export function updateProgressFromMessage(
     input?: unknown;
   }>) {
     if (content.type === 'tool_use') {
-      tracker.toolUseCount++;
-      // Omit StructuredOutput from preview - it's an internal tool
-      if (content.name !== SYNTHETIC_OUTPUT_TOOL_NAME) {
+      // Official 2.1.326 #115: Exclude SubagentHandback (the final report call)
+      // from subagent tool counts.
+      if (content.name !== SUBAGENT_HANDBACK_TOOL_NAME) {
+        tracker.toolUseCount++;
+      }
+      // Omit StructuredOutput and SubagentHandback from preview - internal tools
+      if (content.name !== SYNTHETIC_OUTPUT_TOOL_NAME && content.name !== SUBAGENT_HANDBACK_TOOL_NAME) {
         if (typeof content.id === 'string') {
           if (tracker.seenToolUseIds.has(content.id)) continue;
           tracker.seenToolUseIds.add(content.id);
@@ -1069,27 +1081,26 @@ export function forfeitAllChatPins(setAppState: SetAppState, now: number = Date.
  */
 export function queuePendingMessage(
   taskId: string,
-  msg: string | PendingAgentMessage,
+  msg: PendingAgentMessageContent | PendingAgentMessage,
   setAppState: (f: (prev: AppState) => AppState) => void,
   opts?: QueuePendingMessageOpts,
 ): void {
-  const origin = typeof msg === 'string' ? opts?.origin : msg.origin;
-  const shownAs =
-    (typeof msg === 'string' ? opts?.shownAs : msg.shownAs) ?? (origin?.kind === 'human' ? randomUUID() : undefined);
-  const entry: PendingAgentMessage =
-    typeof msg === 'string'
-      ? {
-          text: msg,
-          ...(origin !== undefined ? { origin } : {}),
-          isMeta: opts?.isMeta ?? false,
-          ...(shownAs !== undefined ? { shownAs } : {}),
-        }
-      : {
-          text: msg.text,
-          ...(origin !== undefined ? { origin } : {}),
-          isMeta: msg.isMeta ?? false,
-          ...(shownAs !== undefined ? { shownAs } : {}),
-        };
+  const isRawContent = typeof msg === 'string' || Array.isArray(msg);
+  const origin = isRawContent ? opts?.origin : msg.origin;
+  const shownAs = (isRawContent ? opts?.shownAs : msg.shownAs) ?? (origin?.kind === 'human' ? randomUUID() : undefined);
+  const entry: PendingAgentMessage = isRawContent
+    ? {
+        text: msg,
+        ...(origin !== undefined ? { origin } : {}),
+        isMeta: opts?.isMeta ?? false,
+        ...(shownAs !== undefined ? { shownAs } : {}),
+      }
+    : {
+        text: msg.text,
+        ...(origin !== undefined ? { origin } : {}),
+        isMeta: msg.isMeta ?? false,
+        ...(shownAs !== undefined ? { shownAs } : {}),
+      };
   let isRunningBackgrounded = false;
   updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => {
     isRunningBackgrounded = task.status === 'running' && task.isBackgrounded === true;
@@ -1811,14 +1822,82 @@ export function markAgentsNotified(taskId: string, setAppState: SetAppState): vo
 }
 
 /**
+ * Official 2.1.326 #243: When more than 20 subagents are running, throttle
+ * token-count-only progress updates to once every 5 seconds for background
+ * agents whose transcript isn't currently open.
+ */
+export const SUBAGENT_TOKEN_THROTTLE_RUNNING_THRESHOLD = 20;
+export const SUBAGENT_TOKEN_THROTTLE_INTERVAL_MS = 5_000;
+
+const lastSubagentTokenFlushMs = new Map<string, number>();
+
+export function resetSubagentTokenThrottleState(): void {
+  lastSubagentTokenFlushMs.clear();
+}
+
+export function shouldThrottleSubagentTokenUpdate(options: {
+  taskId: string;
+  runningSubagentCount: number;
+  viewingAgentTaskId?: string;
+  tokenOnlyChange: boolean;
+  nowMs?: number;
+}): boolean {
+  if (!options.tokenOnlyChange) return false;
+  if (options.runningSubagentCount <= SUBAGENT_TOKEN_THROTTLE_RUNNING_THRESHOLD) return false;
+  if (options.viewingAgentTaskId === options.taskId) return false;
+  const now = options.nowMs ?? Date.now();
+  const last = lastSubagentTokenFlushMs.get(options.taskId);
+  if (last !== undefined && now - last < SUBAGENT_TOKEN_THROTTLE_INTERVAL_MS) {
+    return true;
+  }
+  lastSubagentTokenFlushMs.set(options.taskId, now);
+  return false;
+}
+
+/**
+ * Official 2.1.326 #107 (@303483211): Notify the main conversation when a
+ * background subagent originally owned by main is resumed/messaged by another
+ * subagent, so main knows which agent it now reports to instead of waiting in
+ * silence.
+ */
+export function formatSubagentTakeoverNotice(description: string, newOwnerLabel: string): string {
+  return `Agent "${description}", which was waiting on its own background work, was resumed by another agent (${newOwnerLabel}) and now reports to that agent. Do not treat its work as cancelled or relaunch it, and do not count on a notification from it here, even after messaging it.`;
+}
+
+export function enqueueMainAgentTakeoverNotice(options: {
+  taskId: string;
+  description: string;
+  newOwnerLabel: string;
+}): string {
+  const summary = formatSubagentTakeoverNotice(options.description, options.newOwnerLabel);
+  const xml = `<${TASK_NOTIFICATION_TAG}>
+<${TASK_ID_TAG}>${escapeXml(options.taskId)}</${TASK_ID_TAG}>
+<${STATUS_TAG}>running</${STATUS_TAG}>
+<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
+</${TASK_NOTIFICATION_TAG}>`;
+  enqueuePendingNotification(
+    {
+      value: xml,
+      mode: 'task-notification',
+      priority: 'next',
+      skipAttachments: true,
+      taskId: options.taskId,
+    },
+    { turnAttribution: 'inherit' },
+  );
+  return xml;
+}
+
+/**
  * Update progress for an agent task.
  * Preserves the existing summary field so that background summarization
  * results are not clobbered by progress updates from assistant messages.
  */
 export function updateAgentProgress(taskId: string, progress: AgentProgress, setAppState: SetAppState): void {
-  updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => {
-    if (task.status !== 'running') {
-      return task;
+  setAppState(prev => {
+    const task = prev.tasks[taskId] as LocalAgentTaskState | undefined;
+    if (!task || task.status !== 'running') {
+      return prev;
     }
 
     const existingSummary = task.progress?.summary;
@@ -1832,17 +1911,43 @@ export function updateAgentProgress(taskId: string, progress: AgentProgress, set
       toolUseCount,
       ...(existingSummary !== undefined ? { summary: existingSummary } : {}),
     };
-    if (
-      task.progress?.tokenCount === next.tokenCount &&
-      task.progress?.toolUseCount === next.toolUseCount &&
-      task.progress?.summary === next.summary &&
-      task.progress?.lastActivity === next.lastActivity
-    ) {
-      return task;
+    const tokenChanged = task.progress?.tokenCount !== next.tokenCount;
+    const nonTokenChanged =
+      task.progress?.toolUseCount !== next.toolUseCount ||
+      task.progress?.summary !== next.summary ||
+      task.progress?.lastActivity !== next.lastActivity;
+    if (!tokenChanged && !nonTokenChanged) {
+      return prev;
+    }
+    if (tokenChanged && !nonTokenChanged) {
+      let runningSubagentCount = 0;
+      for (const t of Object.values(prev.tasks)) {
+        if (t.status === 'running' && (t.type === 'local_agent' || t.type === 'in_process_teammate')) {
+          runningSubagentCount++;
+        }
+      }
+      if (
+        shouldThrottleSubagentTokenUpdate({
+          taskId,
+          runningSubagentCount,
+          viewingAgentTaskId: prev.viewingAgentTaskId,
+          tokenOnlyChange: true,
+        })
+      ) {
+        return prev;
+      }
+    } else if (tokenChanged) {
+      lastSubagentTokenFlushMs.set(taskId, Date.now());
     }
     return {
-      ...task,
-      progress: next,
+      ...prev,
+      tasks: {
+        ...prev.tasks,
+        [taskId]: {
+          ...task,
+          progress: next,
+        },
+      },
     };
   });
 }

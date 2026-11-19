@@ -533,9 +533,12 @@ export async function processMCPResult(
     return await truncateMcpContentIfNeeded(content, model)
   }
 
-  // Generate a unique ID for the persisted file (server__tool-timestamp)
+  // Generate a unique ID for the persisted file (server-tool-timestamp-suffix)
+  // Official 2.1.326 #77 (anthropics/claude-code#105138): append a random
+  // suffix so parallel MCP tool calls finishing in the same millisecond never
+  // collide on EEXIST or read each other's saved output file.
   const timestamp = Date.now()
-  const persistId = `mcp-${normalizeNameForMCP(name)}-${normalizeNameForMCP(tool)}-${timestamp}`
+  const persistId = `mcp-${normalizeNameForMCP(name)}-${normalizeNameForMCP(tool)}-${timestamp}-${Math.random().toString(36).slice(2, 8)}`
   // When the large-string format gate is on, unwrap a single bare text block
   // (no annotations, no _meta) into raw text so the model gets plain text in
   // the persisted file instead of a JSON-wrapped block. The `_meta` check is

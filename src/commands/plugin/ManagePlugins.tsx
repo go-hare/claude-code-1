@@ -15,7 +15,7 @@ import { SearchBox } from '../../components/SearchBox.js';
 import { useSearchInput } from '@anthropic/ink';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- useInput needed for raw search mode text input
-import { Box, Text, useInput, useTerminalFocus } from '@anthropic/ink';
+import { Box, Text, useInput, useModalOrTerminalSize, useTerminalFocus } from '@anthropic/ink';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
 import { getBuiltinPluginDefinition } from '../../plugins/builtinPlugins.js';
 import { useMcpToggleEnabled } from '../../services/mcp/MCPConnectionManager.js';
@@ -88,6 +88,7 @@ import type { ViewState as ParentViewState } from './types.js';
 import { UnifiedInstalledCell } from './UnifiedInstalledCell.js';
 import type { UnifiedInstalledItem, UnifiedInstalledScope } from './unifiedTypes.js';
 import { usePagination } from './usePagination.js';
+import { computePluginListMaxVisible, PluginConfirmList, usePluginListExtendedKeys } from './pluginListHelpers.js';
 
 type Props = {
   setViewState: (state: ParentViewState) => void;
@@ -567,7 +568,7 @@ export function ManagePlugins({
     setIsSearchMode(true);
   }, [setIsSearchMode]);
   const isTerminalFocused = useTerminalFocus();
-  const { columns: terminalWidth } = useTerminalSize();
+  const { columns: terminalWidth, rows: terminalRows } = useModalOrTerminalSize(useTerminalSize());
 
   // View state
   const [viewState, setViewState] = useState<ViewState>('plugin-list');
@@ -954,12 +955,39 @@ export function ManagePlugins({
   // Selection state
   const [selectedIndex, setSelectedIndex] = useState(0);
 
+  // Official 2.1.326 #272: adapt visible Installed rows to terminal height so
+  // cursor and key hints remain visible in short windows.
+  const installedMaxVisible = computePluginListMaxVisible(terminalRows, 11, 2, 8, 2);
+
   // Pagination for unified list (continuous scrolling)
   const pagination = usePagination<UnifiedInstalledItem>({
     totalItems: filteredItems.length,
     selectedIndex,
-    maxVisible: 8,
+    maxVisible: installedMaxVisible,
   });
+
+  // Official 2.1.326 #272: Home / End / PgUp / PgDn navigation on Installed tab.
+  usePluginListExtendedKeys({
+    isActive: viewState === 'plugin-list' && !isSearchMode && filteredItems.length > 0,
+    totalItems: filteredItems.length,
+    selectedIndex,
+    pageSize: pagination.pageSize,
+    onSelectIndex: nextIdx => pagination.handleSelectionChange(nextIdx, setSelectedIndex),
+  });
+
+  // Official 2.1.326 #126: when clearing a search on the Installed tab, restore
+  // list cursor focus (exit search mode if query just became empty) and reset
+  // pagination scroll offset so the cursor never disappears.
+  const prevSearchQueryRef = useRef(searchQuery);
+  useEffect(() => {
+    const prev = prevSearchQueryRef.current;
+    prevSearchQueryRef.current = searchQuery;
+    pagination.resetScroll();
+    setSelectedIndex(0);
+    if (prev !== '' && searchQuery === '' && isSearchMode) {
+      setIsSearchMode(false);
+    }
+  }, [searchQuery, isSearchMode, setIsSearchMode, pagination.resetScroll]);
 
   // Details view state
   const [detailsMenuIndex, setDetailsMenuIndex] = useState(0);
@@ -1770,97 +1798,56 @@ export function ManagePlugins({
     },
   );
 
-  // Confirm-project-uninstall: y/enter disables in settings.local.json, n/escape cancels
-  useKeybindings(
-    {
-      'confirm:yes': () => {
-        if (!selectedPlugin) return;
-        setIsProcessing(true);
-        setProcessError(null);
-        const pluginId = `${selectedPlugin.plugin.name}@${selectedPlugin.marketplace}`;
-        // Write `false` directly — disablePluginOp's cross-scope guard would
-        // reject this (plugin isn't in localSettings yet; the override IS the
-        // point).
-        const { error } = updateSettingsForSource('localSettings', {
-          enabledPlugins: {
-            ...getSettingsForSource('localSettings')?.enabledPlugins,
-            [pluginId]: false,
-          },
-        });
-        if (error) {
-          setIsProcessing(false);
-          setProcessError(`Failed to write settings: ${error.message}`);
-          return;
-        }
-        clearAllCaches();
-        setResult(
-          `✓ Disabled ${re(selectedPlugin.plugin.name)} in .claude/settings.local.json. Run /reload-plugins to apply.`,
-        );
-        if (onManageComplete) void onManageComplete();
-        setParentViewState({ type: 'menu' });
+  // Official 2.1.326 #331: confirm-project-uninstall and confirm-data-cleanup
+  // now use arrow-key + Enter / Esc lists (PluginConfirmList); y/n/u no longer
+  // answer them.
+  const handleConfirmProjectDisable = useCallback(() => {
+    if (!selectedPlugin) return;
+    setIsProcessing(true);
+    setProcessError(null);
+    const pluginId = `${selectedPlugin.plugin.name}@${selectedPlugin.marketplace}`;
+    const { error } = updateSettingsForSource('localSettings', {
+      enabledPlugins: {
+        ...getSettingsForSource('localSettings')?.enabledPlugins,
+        [pluginId]: false,
       },
-      'confirm:no': () => {
-        setViewState('plugin-details');
-        setProcessError(null);
-      },
-    },
-    {
-      context: 'Confirmation',
-      isActive: viewState === 'confirm-project-uninstall' && !!selectedPlugin && !isProcessing,
-    },
-  );
+    });
+    if (error) {
+      setIsProcessing(false);
+      setProcessError(`Failed to write settings: ${error.message}`);
+      return;
+    }
+    clearAllCaches();
+    setResult(
+      `✓ Disabled ${re(selectedPlugin.plugin.name)} in .claude/settings.local.json. Run /reload-plugins to apply.`,
+    );
+    if (onManageComplete) void onManageComplete();
+    setParentViewState({ type: 'menu' });
+  }, [selectedPlugin, setResult, onManageComplete, setParentViewState]);
 
-  // Confirm-data-cleanup: y uninstalls + deletes data dir, n uninstalls + keeps,
-  // esc cancels. Raw useInput because: (1) the Confirmation context maps
-  // enter→confirm:yes, which would make Enter delete the data directory — a
-  // destructive default the UI text ("y to delete · n to keep") doesn't
-  // advertise; (2) unlike confirm-project-uninstall (which uses useKeybindings
-  // where n and escape both map to confirm:no), here n and escape are DIFFERENT
-  // actions (keep-data vs cancel), so this deliberately stays on raw useInput.
-  // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw y/n/esc; Enter must not trigger destructive delete
-  useInput(
-    (input, key) => {
+  const handleConfirmDataCleanupUninstall = useCallback(
+    async (deleteDataDir: boolean) => {
       if (!selectedPlugin) return;
       const pluginId = `${selectedPlugin.plugin.name}@${selectedPlugin.marketplace}`;
       const pluginScope = selectedPlugin.scope;
-      // Dialog is only reachable from the uninstall case (which guards on
-      // isBuiltin), but TS can't track that across viewState transitions.
       if (!pluginScope || pluginScope === 'builtin' || !isInstallableScope(pluginScope)) return;
-      const doUninstall = async (deleteDataDir: boolean) => {
-        setIsProcessing(true);
-        setProcessError(null);
-        try {
-          const result = await uninstallPluginOp(pluginId, pluginScope, deleteDataDir);
-          if (!result.success) throw new Error(result.message);
-          clearAllCaches();
-          const suffix = deleteDataDir ? '' : ' · data preserved';
-          setResult(re(`${figures.tick} ${result.message}${suffix}`));
-          if (onManageComplete) void onManageComplete();
-          setParentViewState({ type: 'menu' });
-        } catch (e) {
-          setIsProcessing(false);
-          setProcessError(e instanceof Error ? e.message : String(e));
-        }
-      };
-      if (input === 'y' || input === 'Y') {
-        void doUninstall(true);
-      } else if (input === 'n' || input === 'N') {
-        void doUninstall(false);
-      } else if (key.escape) {
-        setViewState('plugin-details');
-        setProcessError(null);
+      setIsProcessing(true);
+      setProcessError(null);
+      try {
+        const result = await uninstallPluginOp(pluginId, pluginScope, deleteDataDir);
+        if (!result.success) throw new Error(result.message);
+        clearAllCaches();
+        const suffix = deleteDataDir ? '' : ' · data preserved';
+        setResult(re(`${figures.tick} ${result.message}${suffix}`));
+        if (onManageComplete) void onManageComplete();
+        setParentViewState({ type: 'menu' });
+      } catch (e) {
+        setIsProcessing(false);
+        setProcessError(e instanceof Error ? e.message : String(e));
       }
     },
-    {
-      isActive:
-        typeof viewState === 'object' && viewState.type === 'confirm-data-cleanup' && !!selectedPlugin && !isProcessing,
-    },
+    [selectedPlugin, setResult, onManageComplete, setParentViewState],
   );
-
-  // Reset selection when search query changes
-  React.useEffect(() => {
-    setSelectedIndex(0);
-  }, [searchQuery]);
 
   // Handle input for entering search mode (text input handled by useSearchInput hook)
   // eslint-disable-next-line custom-rules/prefer-use-keybindings -- useInput needed for raw search mode text input
@@ -1876,6 +1863,7 @@ export function ManagePlugins({
       if (input === '/' && keyIsNotCtrlOrMeta) {
         setIsSearchMode(true);
         setSearchQuery('');
+        setSearchCursorOffset(0);
         setSelectedIndex(0);
       } else if (
         keyIsNotCtrlOrMeta &&
@@ -1887,6 +1875,7 @@ export function ManagePlugins({
       ) {
         setIsSearchMode(true);
         setSearchQuery(input);
+        setSearchCursorOffset(input.length);
         setSelectedIndex(0);
       }
     },
@@ -2070,8 +2059,7 @@ export function ManagePlugins({
     );
   }
 
-  // Confirm-project-uninstall: warn about shared .claude/settings.json,
-  // offer to disable in settings.local.json instead.
+  // Confirm-project-uninstall: Official 2.1.326 #331 arrow-key + Enter / Esc list
   if (viewState === 'confirm-project-uninstall' && selectedPlugin) {
     return (
       <Box flexDirection="column">
@@ -2091,27 +2079,31 @@ export function ManagePlugins({
           {isProcessing ? (
             <Text dimColor>Disabling…</Text>
           ) : (
-            <Byline>
-              <ConfigurableShortcutHint
-                action="confirm:yes"
-                context="Confirmation"
-                fallback="y"
-                description="disable"
-              />
-              <ConfigurableShortcutHint
-                action="confirm:no"
-                context="Confirmation"
-                fallback="Esc"
-                description="cancel"
-              />
-            </Byline>
+            <PluginConfirmList
+              options={[
+                { value: 'disable', label: 'Disable in .claude/settings.local.json' },
+                { value: 'cancel', label: 'Cancel' },
+              ]}
+              onSelect={choice => {
+                if (choice === 'disable') {
+                  handleConfirmProjectDisable();
+                } else {
+                  setViewState('plugin-details');
+                  setProcessError(null);
+                }
+              }}
+              onCancel={() => {
+                setViewState('plugin-details');
+                setProcessError(null);
+              }}
+            />
           )}
         </Box>
       </Box>
     );
   }
 
-  // Confirm-data-cleanup: prompt before deleting ${CLAUDE_PLUGIN_DATA} dir
+  // Confirm-data-cleanup: Official 2.1.326 #331 arrow-key + Enter / Esc list
   if (typeof viewState === 'object' && viewState.type === 'confirm-data-cleanup' && selectedPlugin) {
     return (
       <Box flexDirection="column">
@@ -2131,9 +2123,27 @@ export function ManagePlugins({
           {isProcessing ? (
             <Text dimColor>Uninstalling…</Text>
           ) : (
-            <Text>
-              <Text bold>y</Text> to delete · <Text bold>n</Text> to keep · <Text bold>esc</Text> to cancel
-            </Text>
+            <PluginConfirmList
+              options={[
+                { value: 'keep', label: 'Uninstall and keep data' },
+                { value: 'delete', label: 'Uninstall and delete data', destructive: true },
+                { value: 'cancel', label: 'Cancel' },
+              ]}
+              onSelect={choice => {
+                if (choice === 'delete') {
+                  void handleConfirmDataCleanupUninstall(true);
+                } else if (choice === 'keep') {
+                  void handleConfirmDataCleanupUninstall(false);
+                } else {
+                  setViewState('plugin-details');
+                  setProcessError(null);
+                }
+              }}
+              onCancel={() => {
+                setViewState('plugin-details');
+                setProcessError(null);
+              }}
+            />
           )}
         </Box>
       </Box>
@@ -2584,10 +2594,13 @@ export function ManagePlugins({
         </Box>
       )}
 
-      {/* Scroll up indicator */}
+      {/* Scroll up indicator (Official 2.1.326 #272: count hidden rows) */}
       {pagination.scrollPosition.canScrollUp && (
         <Box>
-          <Text dimColor> {figures.arrowUp} more above</Text>
+          <Text dimColor>
+            {' '}
+            {figures.arrowUp} {pagination.scrollPosition.hiddenAbove} more above
+          </Text>
         </Box>
       )}
 
@@ -2637,15 +2650,25 @@ export function ManagePlugins({
                 </Text>
               </Box>
             )}
-            <UnifiedInstalledCell item={item} isSelected={isSelected} />
+            <Box
+              onClick={() => {
+                if (isSearchMode) setIsSearchMode(false);
+                pagination.handleSelectionChange(actualIndex, setSelectedIndex);
+              }}
+            >
+              <UnifiedInstalledCell item={item} isSelected={isSelected} />
+            </Box>
           </React.Fragment>
         );
       })}
 
-      {/* Scroll down indicator */}
+      {/* Scroll down indicator (Official 2.1.326 #272: count hidden rows) */}
       {pagination.scrollPosition.canScrollDown && (
         <Box>
-          <Text dimColor> {figures.arrowDown} more below</Text>
+          <Text dimColor>
+            {' '}
+            {figures.arrowDown} {pagination.scrollPosition.hiddenBelow} more below
+          </Text>
         </Box>
       )}
 

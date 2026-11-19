@@ -45,9 +45,19 @@ export type FileState = {
  */
 export const MAX_INLINE_FILE_STATE_BYTES = 4096
 
+/**
+ * Official 2.1.326 (#241) `Qno`: normalize CRLF/CR line endings to LF before
+ * hashing/comparing so Windows CRLF files match cached reads cleanly without
+ * triggering redundant re-reads or expensive diffs.
+ */
+export function normalizeLineEndingsForHash(content: string): string {
+  if (!content.includes('\r')) return content
+  return content.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+}
+
 /** densable DAu — content fingerprint for xOe. */
 export function fileStateContentHash(content: string): string {
-  return Bun.hash(content).toString(36)
+  return Bun.hash(normalizeLineEndingsForHash(content)).toString(36)
 }
 
 /**
@@ -88,7 +98,10 @@ export function fileStateContentMatches(
   if (state.contentHash !== undefined) {
     return state.contentHash === fileStateContentHash(diskContent)
   }
-  return state.content === diskContent
+  return (
+    normalizeLineEndingsForHash(state.content) ===
+    normalizeLineEndingsForHash(diskContent)
+  )
 }
 
 // Default max entries for read file state caches
@@ -104,8 +117,26 @@ const DEFAULT_MAX_CACHE_SIZE_BYTES = 25 * 1024 * 1024
  * relative vs absolute paths with redundant segments (e.g. /foo/../bar)
  * or mixed path separators on Windows (/ vs \).
  */
+function normalizeCacheKey(key: string): string {
+  const normalized = normalize(key)
+  // Official 2.1.326 (#241): lowercase Windows drive letter so `C:\foo` and
+  // `c:\foo` hit the same cache slot without extra stat/realpath round-trips.
+  if (
+    normalized.length >= 2 &&
+    normalized.charCodeAt(1) === 58 &&
+    normalized.charCodeAt(0) >= 65 &&
+    normalized.charCodeAt(0) <= 90
+  ) {
+    return normalized[0]!.toLowerCase() + normalized.slice(1)
+  }
+  return normalized
+}
+
 export class FileStateCache {
   private cache: LRUCache<string, FileState>
+  private readsBeforeCompaction: LRUCache<string, FileState> | undefined
+  private everHeld = new Set<string>()
+  private startOnly = new Set<string>()
 
   constructor(maxEntries: number, maxSizeBytes: number) {
     this.cache = new LRUCache<string, FileState>({
@@ -127,14 +158,31 @@ export class FileStateCache {
   }
 
   get(key: string): FileState | undefined {
-    return this.cache.get(normalize(key))
+    return this.cache.get(normalizeCacheKey(key))
+  }
+
+  markStartOnly(key: string): void {
+    this.startOnly.add(normalizeCacheKey(key))
+  }
+
+  startOnlyPaths(): string[] {
+    return [...this.startOnly]
+  }
+
+  holdsOnlyStartOf(key: string): boolean {
+    const normalized = normalizeCacheKey(key)
+    const entry = this.cache.get(normalized)
+    return (
+      this.startOnly.has(normalized) && !(entry && isFullEnoughFileRead(entry))
+    )
   }
 
   set(key: string, value: FileState): this {
-    const normalized = normalize(key)
+    const normalized = normalizeCacheKey(key)
     const prev = this.cache.get(normalized)
     if (typeof value.content !== 'string') {
       this.cache.set(normalized, value)
+      this.remember(normalized)
       return this
     }
     const keepContent = value.keepContent ?? prev?.keepContent
@@ -152,26 +200,92 @@ export class FileStateCache {
       Buffer.byteLength(effectiveContent, 'utf8') <= MAX_INLINE_FILE_STATE_BYTES
         ? effectiveContent
         : ''
-    this.cache.set(normalized, {
+    const nextEntry: FileState = {
       ...value,
       ...(keepContent !== undefined ? { keepContent } : {}),
       contentHash,
       contentLength,
       content: storedContent,
-    })
+    }
+    this.cache.set(normalized, nextEntry)
+    if (isFullEnoughFileRead(nextEntry)) {
+      this.readsBeforeCompaction?.delete(normalized)
+    }
+    this.remember(normalized)
     return this
   }
 
+  private remember(normalizedKey: string): void {
+    this.everHeld.delete(normalizedKey)
+    this.everHeld.add(normalizedKey)
+    if (this.everHeld.size > this.cache.max) {
+      for (const oldest of this.everHeld) {
+        this.everHeld.delete(oldest)
+        break
+      }
+    }
+  }
+
   has(key: string): boolean {
-    return this.cache.has(normalize(key))
+    return this.cache.has(normalizeCacheKey(key))
   }
 
   delete(key: string): boolean {
-    return this.cache.delete(normalize(key))
+    const normalized = normalizeCacheKey(key)
+    this.readsBeforeCompaction?.delete(normalized)
+    return this.cache.delete(normalized)
   }
 
   clear(): void {
     this.cache.clear()
+    this.readsBeforeCompaction = undefined
+  }
+
+  /**
+   * Official 2.1.326 (#241): preserve hash-only metadata for previously read
+   * files across compaction so post-compact reads/edits avoid slow full diffs.
+   */
+  clearForCompaction(): void {
+    const retained =
+      this.readsBeforeCompaction ??
+      new LRUCache<string, FileState>({ max: this.cache.max })
+    for (const [k, entry] of this.cache.dump()) {
+      const val = entry.value
+      if (!val.isPartialView && !retained.has(k)) {
+        retained.set(k, { ...val, content: '' })
+      }
+    }
+    this.clear()
+    this.readsBeforeCompaction = retained
+  }
+
+  readBeforeCompaction(key: string): FileState | undefined {
+    return this.readsBeforeCompaction?.peek(normalizeCacheKey(key))
+  }
+
+  renewReadBeforeCompaction(key: string): void {
+    const normalized = normalizeCacheKey(key)
+    const entry = this.cache.peek(normalized)
+    if (entry !== undefined) {
+      this.readsBeforeCompaction?.set(normalized, { ...entry, content: '' })
+    }
+  }
+
+  forgetReadsBeforeCompaction(): void {
+    this.readsBeforeCompaction = undefined
+  }
+
+  copyReadsBeforeCompactionFrom(other: FileStateCache): void {
+    if (other.readsBeforeCompaction !== undefined) {
+      this.readsBeforeCompaction = new LRUCache<string, FileState>({
+        max: this.cache.max,
+      })
+      this.readsBeforeCompaction.load(other.readsBeforeCompaction.dump())
+    }
+  }
+
+  everHeldPaths(): Set<string> {
+    return new Set([...this.everHeld, ...this.cache.keys()])
   }
 
   get size(): number {

@@ -625,5 +625,7 @@ export function CondensedLogo({ oneShotsAllowed = true }: Props = {}): ReactNode
     </Box>
   );
 
-  return fullscreen ? body : <OffscreenFreeze>{body}</OffscreenFreeze>;
+  // Official 2.1.326 #116 (`BWt`): key OffscreenFreeze by viewed agent task id
+  // so switching to a subagent/teammate outside fullscreen mode refreshes the header model.
+  return fullscreen ? body : <OffscreenFreeze key={viewingAgentTaskId ?? 'main'}>{body}</OffscreenFreeze>;
 }

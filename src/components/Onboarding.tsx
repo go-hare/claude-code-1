@@ -5,7 +5,8 @@ import {
 } from 'src/services/analytics/index.js';
 import { setupTerminal, shouldOfferTerminalSetup } from '../commands/terminalSetup/terminalSetup.js';
 import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { Box, Byline, KeyboardShortcutHint, Link, Newline, Text, useTheme } from '@anthropic/ink';
+import { Box, Byline, KeyboardShortcutHint, Link, Newline, Text, useApp, useTheme } from '@anthropic/ink';
+import { gracefulShutdownSync } from '../utils/gracefulShutdown.js';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
 import {
   getAnthropicApiKeyWithSource,
@@ -99,6 +100,10 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
   const completedRef = useRef(false);
   const [theme, setTheme] = useTheme();
   const [themeError, setThemeError] = useState<string | undefined>(undefined);
+  // Official 2.1.326 #209: show setupTerminal outcome/error before advancing.
+  const [terminalSetupResult, setTerminalSetupResult] = useState<string | undefined>(undefined);
+  const [terminalSetupRunning, setTerminalSetupRunning] = useState(false);
+  const { exit } = useApp();
 
   useEffect(() => {
     logEvent('tengu_began_setup', {
@@ -154,7 +159,17 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
       });
   }
 
-  const exitState = useExitOnCtrlCDWithKeybindings();
+  // Official 2.1.326 #68/#69: unmount cleanly & terminate process on Ctrl+C/Ctrl+D
+  // so setup never hangs awaiting onDone() or draws the shell prompt over the screen.
+  const exitState = useExitOnCtrlCDWithKeybindings(() => {
+    exit();
+    try {
+      process.stdout.write('\n');
+    } catch {
+      // ignore stdout write errors during exit
+    }
+    gracefulShutdownSync(1);
+  });
 
   // Define all onboarding steps
   const themeStep = (
@@ -249,61 +264,78 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
   if (shouldOfferTerminalSetup()) {
     steps.push({
       id: 'terminal-setup',
-      component: (
-        <Box flexDirection="column" gap={1} paddingLeft={1}>
-          <Text bold>Use Claude Code&apos;s terminal setup?</Text>
-          <Box flexDirection="column" maxWidth={70} gap={1}>
-            <Text>
-              For the optimal coding experience, enable the recommended settings
-              <Newline />
-              for your terminal:{' '}
-              {env.terminal === 'Apple_Terminal'
-                ? isScreenReaderModeEnabled()
-                  ? 'Option+Enter for newlines'
-                  : 'Option+Enter for newlines and no audible bell'
-                : 'Shift+Enter for newlines'}
-            </Text>
-            {env.terminal === 'Apple_Terminal' && (
-              <>
-                <Text>
-                  For Option+Enter, this turns on Terminal.app&apos;s &quot;Use Option as Meta key&quot; setting. With
-                  it on, the Option key no longer types characters such as é, or on some keyboard layouts @, |, [, ],
-                  {' {'}, {'}'} and backslash. To undo it, uncheck &quot;Use Option as Meta key&quot; in Terminal →
-                  Settings → Profiles → Keyboard, for your default and startup profiles.
-                </Text>
-                <Text>If you say yes, restart Terminal.app for the changes to take effect.</Text>
-              </>
-            )}
-            <ConfirmSelect
-              confirmLabel="Yes, use recommended settings"
-              cancelLabel="No, maybe later with /terminal-setup"
-              onConfirm={() => {
-                // Errors already logged in setupTerminal, just swallow and proceed
-                void setupTerminal(theme)
-                  .catch(() => {})
-                  .finally(goToNextStep);
-              }}
-              onCancel={goToNextStep}
-            />
-            <Text dimColor>
-              {exitState.pending ? (
-                <>Press {exitState.keyName} again to exit</>
-              ) : (
-                <Byline>
-                  <KeyboardShortcutHint shortcut="enter" action="confirm" />
-                  <KeyboardShortcutHint shortcut="escape" action="skip" />
-                </Byline>
-              )}
-            </Text>
+      component:
+        terminalSetupResult !== undefined ? (
+          <Box flexDirection="column" gap={1} paddingLeft={1}>
+            <Text bold>Terminal setup</Text>
+            <Box flexDirection="column" maxWidth={70} gap={1}>
+              <Text>{terminalSetupResult}</Text>
+              <PressEnterToContinue />
+            </Box>
           </Box>
-        </Box>
-      ),
+        ) : (
+          <Box flexDirection="column" gap={1} paddingLeft={1}>
+            <Text bold>Use Claude Code&apos;s terminal setup?</Text>
+            <Box flexDirection="column" maxWidth={70} gap={1}>
+              <Text>
+                For the optimal coding experience, enable the recommended settings
+                <Newline />
+                for your terminal:{' '}
+                {env.terminal === 'Apple_Terminal'
+                  ? isScreenReaderModeEnabled()
+                    ? 'Option+Enter for newlines'
+                    : 'Option+Enter for newlines and no audible bell'
+                  : 'Shift+Enter for newlines'}
+              </Text>
+              {env.terminal === 'Apple_Terminal' && (
+                <>
+                  <Text>
+                    For Option+Enter, this turns on Terminal.app&apos;s &quot;Use Option as Meta key&quot; setting. With
+                    it on, the Option key no longer types characters such as é, or on some keyboard layouts @, |, [, ],
+                    {' {'}, {'}'} and backslash. To undo it, uncheck &quot;Use Option as Meta key&quot; in Terminal →
+                    Settings → Profiles → Keyboard, for your default and startup profiles.
+                  </Text>
+                  <Text>If you say yes, restart Terminal.app for the changes to take effect.</Text>
+                </>
+              )}
+              <ConfirmSelect
+                confirmLabel="Yes, use recommended settings"
+                cancelLabel="No, maybe later with /terminal-setup"
+                onConfirm={() => {
+                  if (terminalSetupRunning) return;
+                  setTerminalSetupRunning(true);
+                  void setupTerminal(theme)
+                    .then(result => {
+                      setTerminalSetupResult(result || 'Terminal setup complete.');
+                    })
+                    .catch(err => {
+                      setTerminalSetupResult(`${errorMessage(err)}\n\nTo try again, run /terminal-setup`);
+                    })
+                    .finally(() => {
+                      setTerminalSetupRunning(false);
+                    });
+                }}
+                onCancel={goToNextStep}
+              />
+              <Text dimColor>
+                {exitState.pending ? (
+                  <>Press {exitState.keyName} again to exit</>
+                ) : (
+                  <Byline>
+                    <KeyboardShortcutHint shortcut="enter" action="confirm" />
+                    <KeyboardShortcutHint shortcut="escape" action="skip" />
+                  </Byline>
+                )}
+              </Text>
+            </Box>
+          </Box>
+        ),
     });
   }
 
   const currentStep = steps[currentStepIndex];
 
-  // Handle Enter on security step and Escape on terminal-setup step
+  // Handle Enter on security step and terminal-setup summary, and Escape on terminal-setup prompt
   // Dependencies match what goToNextStep uses internally
   const handleSecurityContinue = useCallback(() => {
     goToNextStep();
@@ -319,7 +351,8 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
     },
     {
       context: 'Confirmation',
-      isActive: currentStep?.id === 'security',
+      isActive:
+        currentStep?.id === 'security' || (currentStep?.id === 'terminal-setup' && terminalSetupResult !== undefined),
     },
   );
 
@@ -329,7 +362,7 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
     },
     {
       context: 'Confirmation',
-      isActive: currentStep?.id === 'terminal-setup',
+      isActive: currentStep?.id === 'terminal-setup' && terminalSetupResult === undefined,
     },
   );
 

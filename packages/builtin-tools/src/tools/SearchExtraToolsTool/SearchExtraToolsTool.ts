@@ -235,6 +235,15 @@ async function searchToolsWithKeywords(
     if (prefixMatches.length > 0) {
       return prefixMatches
     }
+    // Official 2.1.326 #78: when asked for a specific MCP tool by its exact
+    // fully-qualified name (`mcp__<server>__<tool>` with no whitespace) and
+    // neither exact nor prefix match succeeded, do NOT fall back to fuzzy
+    // keyword/TF-IDF matching that could load another MCP server's tool.
+    const rest = queryLower.slice(5)
+    const sepIdx = rest.indexOf('__')
+    if (!/\s/.test(queryLower) && sepIdx > 0 && sepIdx + 2 < rest.length) {
+      return []
+    }
   }
 
   const queryTerms = queryLower.split(/\s+/).filter(term => term.length > 0)

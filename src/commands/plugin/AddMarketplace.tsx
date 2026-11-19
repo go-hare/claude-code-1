@@ -15,6 +15,7 @@ import { clearAllCaches } from '../../utils/plugins/cacheUtils.js';
 import { addMarketplaceSource, saveMarketplaceToSettings } from '../../utils/plugins/marketplaceManager.js';
 import { parseMarketplaceInput } from '../../utils/plugins/parseMarketplaceInput.js';
 import { re } from '../../utils/plugins/escapeSafeText.js';
+import { clampMultilineError } from './pluginListHelpers.js';
 import type { ViewState } from './types.js';
 
 type Props = {
@@ -126,6 +127,8 @@ export function AddMarketplace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Only run once on mount
 
+  const clampedError = error ? clampMultilineError(error, 3, 120) : null;
+
   return (
     <Box flexDirection="column">
       <Box flexDirection="column" paddingX={1} borderStyle="round">
@@ -133,40 +136,43 @@ export function AddMarketplace({
           <Text bold>Add Marketplace</Text>
         </Box>
         <Box flexDirection="column">
-          <Text>Enter marketplace source:</Text>
-          <Text dimColor>Examples:</Text>
-          <Text dimColor> · owner/repo (GitHub)</Text>
-          <Text dimColor> · git@github.com:owner/repo.git (SSH)</Text>
-          <Text dimColor> · https://example.com/marketplace.json</Text>
-          <Text dimColor> · ./path/to/marketplace</Text>
-          <Box marginTop={1}>
-            <Text dimColor>
-              Plugins from this marketplace can run code on your computer, with access to your files and shell. Only add
-              marketplaces you trust. You&apos;ll review its plugins before installing any.
-            </Text>
+          <Text dimColor>
+            Plugins from this marketplace can run code on your computer, with access to your files and shell. Only add
+            marketplaces you trust.
+          </Text>
+          <Box marginTop={1} flexDirection="column">
+            <Text bold>Marketplace source</Text>
+            <Box borderStyle="round" paddingX={1}>
+              <TextInput
+                value={inputValue}
+                onChange={setInputValue}
+                onSubmit={handleAdd}
+                placeholder="anthropics/claude-plugins-official"
+                columns={76}
+                cursorOffset={cursorOffset}
+                onChangeCursorOffset={setCursorOffset}
+                focus
+                showCursor
+              />
+            </Box>
           </Box>
-          <Box marginTop={1}>
-            <TextInput
-              value={inputValue}
-              onChange={setInputValue}
-              onSubmit={handleAdd}
-              columns={80}
-              cursorOffset={cursorOffset}
-              onChangeCursorOffset={setCursorOffset}
-              focus
-              showCursor
-            />
-          </Box>
+          {!isLoading && !error?.includes('\n') && (
+            <Box marginTop={1} flexDirection="column">
+              <Text dimColor>GitHub: owner/repo · SSH: git@github.com:owner/repo.git</Text>
+              <Text dimColor>URL: https://example.com/marketplace.json · Folder: ./path/to/marketplace</Text>
+            </Box>
+          )}
         </Box>
         {isLoading && (
           <Box marginTop={1}>
             <Spinner />
-            <Text>{progressMessage || 'Adding marketplace to configuration…'}</Text>
+            <Text>{progressMessage || 'Adding marketplace…'}</Text>
           </Box>
         )}
-        {error && (
-          <Box marginTop={1}>
-            <Text color="error">{error}</Text>
+        {clampedError && (
+          <Box marginTop={1} flexDirection="column">
+            <Text color="error">{clampedError.preview}</Text>
+            {clampedError.truncated && <Text dimColor>… ({clampedError.hiddenLines} more error lines hidden)</Text>}
           </Box>
         )}
         {result && (

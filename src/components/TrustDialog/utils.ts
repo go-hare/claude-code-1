@@ -61,6 +61,51 @@ export function getHooksSources(): string[] {
   return sources
 }
 
+/**
+ * Official 2.1.326 #251 (`OGn`): all project settings files present that
+ * Claude Code will load when trusting this folder.
+ */
+export function getProjectSettingsFiles(): string[] {
+  const files: string[] = []
+  for (const [source, label] of [
+    ['projectSettings', '.claude/settings.json'],
+    ['localSettings', '.claude/settings.local.json'],
+  ] as const) {
+    if (getSettingsForSource(source) !== null) {
+      files.push(label)
+    }
+  }
+  for (const hookSource of getHooksSources()) {
+    if (!files.includes(hookSource)) {
+      files.push(hookSource)
+    }
+  }
+  return files
+}
+
+/**
+ * Official 2.1.326 #251 (`TrustDialog` `_t`/`Bt`): annotate project settings
+ * files with `(runs commands)` and/or `(sets environment variables)` at launch.
+ */
+export function formatTrustSettingsFilesDisclosure(opts: {
+  settingsFiles: readonly string[]
+  commandRunningFiles: ReadonlySet<string>
+  envVarFiles: readonly string[]
+  hasMcpServers: boolean
+  isBackstop: boolean
+}): string[] {
+  const annotated = (opts.isBackstop ? [] : opts.settingsFiles).map(file => {
+    const tags: string[] = []
+    if (opts.commandRunningFiles.has(file)) tags.push('runs commands')
+    if (opts.envVarFiles.includes(file)) tags.push('sets environment variables')
+    return tags.length > 0 ? `${file} (${formatEnglishSourceList(tags)})` : file
+  })
+  const mcpEntries = opts.hasMcpServers
+    ? ['.mcp.json here or above (MCP servers)']
+    : []
+  return [...annotated, ...mcpEntries]
+}
+
 function hasBashPermission(rules: PermissionRule[]): boolean {
   return rules.some(
     rule =>

@@ -445,6 +445,70 @@ async function getShellConfigImpl(): Promise<ShellConfig> {
 // Memoize the entire shell config so it only happens once per session
 export const getShellConfig = memoize(getShellConfigImpl)
 
+/**
+ * Official 2.1.326 #244 (`Aqs` / `l0s` @298076800):
+ * Head-start Bash shell snapshot creation before the first Bash command runs
+ * (saving ~1s on Windows and Unix). If more than 20s elapse before the first
+ * Bash command consumes it, invalidate the stale snapshot and rebuild fresh.
+ */
+export const SNAPSHOT_HEAD_START_MAX_AGE_MS = 20_000
+let snapshotStartedAheadAt: number | null = null
+let snapshotSettled = false
+let snapshotHeadStartSkipReason: string | null = null
+
+export function startBashSnapshotHeadStart(now: () => number = Date.now): void {
+  if (snapshotSettled) return
+  snapshotStartedAheadAt = now()
+  snapshotHeadStartSkipReason = null
+  void getShellConfig()
+    .then(() => {
+      snapshotSettled = true
+    })
+    .catch(() => {
+      // Non-fatal: clear memoized rejected promise and head-start timestamp so
+      // next exec() retries fresh instead of reusing a poisoned promise.
+      getShellConfig.cache.clear?.()
+      snapshotStartedAheadAt = null
+    })
+}
+
+export function consumeBashSnapshotHeadStart(now: () => number = Date.now): {
+  startedAhead: boolean
+  discardedStale: boolean
+} {
+  const startedAt = snapshotStartedAheadAt
+  if (startedAt === null) {
+    return { startedAhead: false, discardedStale: false }
+  }
+  snapshotStartedAheadAt = null
+  if (now() - startedAt > SNAPSHOT_HEAD_START_MAX_AGE_MS) {
+    snapshotHeadStartSkipReason = 'too_old'
+    snapshotSettled = false
+    getShellConfig.cache.clear?.()
+    return { startedAhead: true, discardedStale: true }
+  }
+  return { startedAhead: true, discardedStale: false }
+}
+
+export function getBashSnapshotHeadStartState(): {
+  snapshotStartedAheadAt: number | null
+  snapshotSettled: boolean
+  skipReason: string | null
+} {
+  return {
+    snapshotStartedAheadAt,
+    snapshotSettled,
+    skipReason: snapshotHeadStartSkipReason,
+  }
+}
+
+export function resetBashSnapshotHeadStartForTesting(): void {
+  snapshotStartedAheadAt = null
+  snapshotSettled = false
+  snapshotHeadStartSkipReason = null
+  getShellConfig.cache.clear?.()
+}
+
 export const getPsProvider = memoize(async (): Promise<ShellProvider> => {
   const psPath = await getCachedPowerShellPath()
   if (!psPath) {
@@ -515,7 +579,16 @@ export async function exec(
   } = options ?? {}
   const commandTimeout = timeout || DEFAULT_TIMEOUT
 
+  // Official 2.1.326 #244 (`PXe` @298077500): if a head-started snapshot is
+  // older than SNAPSHOT_HEAD_START_MAX_AGE_MS (20s), discard it and rebuild.
+  if (shellType === 'bash') {
+    consumeBashSnapshotHeadStart()
+  }
+
   const provider = await resolveProvider[shellType]()
+  if (shellType === 'bash') {
+    snapshotSettled = true
+  }
 
   const id = Math.floor(Math.random() * 0x10000)
     .toString(16)

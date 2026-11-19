@@ -33,6 +33,8 @@ export function HelpV2({ onClose, commands }: Props): React.ReactNode {
   // densable QA() — show /feedback line when the command is not disabled.
   const showFeedbackFooter =
     terminalSize.rows >= HELP_FEEDBACK_FOOTER_MIN_ROWS && getFeedbackCommandDisabledReason() === null;
+  // Official 2.1.326 #289: tighter footer spacing in short terminals.
+  const footerMarginTop = rows < 24 ? 0 : 1;
 
   let builtinCommands = commands.filter(cmd => isDefaultHelpCommand(cmd) && !cmd.isHidden);
   let antOnlyCommands: Command[] = [];
@@ -71,7 +73,7 @@ export function HelpV2({ onClose, commands }: Props): React.ReactNode {
         maxHeight={rows}
         columns={columns}
         title="Browse custom commands"
-        emptyMessage="No custom commands found"
+        emptyMessage="No custom commands yet"
         onCancel={close}
       />
     </Tab>,
@@ -97,7 +99,7 @@ export function HelpV2({ onClose, commands }: Props): React.ReactNode {
         <Tabs title="Help" color="professionalBlue" defaultTab="general" navFromContent>
           {tabs}
         </Tabs>
-        <Box marginTop={1} flexShrink={0}>
+        <Box marginTop={footerMarginTop} flexShrink={0}>
           <Text>
             For more help: <Link url="https://code.claude.com/docs/en/overview" />
           </Text>
@@ -107,10 +109,10 @@ export function HelpV2({ onClose, commands }: Props): React.ReactNode {
             <Text dimColor>Something else? Use /feedback to report bugs or request features.</Text>
           </Box>
         )}
-        <Box marginTop={1} flexShrink={0}>
+        <Box marginTop={footerMarginTop} flexShrink={0}>
           <Text dimColor>
             {exitState.pending ? (
-              <>Press {exitState.keyName} again to exit</>
+              <>Press {exitState.keyName} again to close</>
             ) : (
               <Text italic>{dismissShortcut} to cancel</Text>
             )}

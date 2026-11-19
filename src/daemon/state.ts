@@ -1,7 +1,11 @@
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs'
 import { join, dirname } from 'path'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
-import { isProcessRunning } from '../utils/genericProcessUtils.js'
+import {
+  getProcessStartTime,
+  isProcessRunning,
+  processStartIdentityEquals,
+} from '../utils/genericProcessUtils.js'
 
 /**
  * Daemon state persisted to disk so that `status` / `stop` can work
@@ -13,6 +17,8 @@ export interface DaemonStateData {
   startedAt: string
   workerKinds: string[]
   lastStatus: 'running' | 'stopped' | 'error'
+  /** Official 2.1.326 #15: process start identity for PID-reuse protection before kill. */
+  procStart?: string
 }
 
 export type DaemonStatus = 'running' | 'stopped' | 'stale'
@@ -33,7 +39,11 @@ export function writeDaemonState(
 ): void {
   const filePath = getDaemonStateFilePath(name)
   mkdirSync(dirname(filePath), { recursive: true })
-  writeFileSync(filePath, JSON.stringify(state, null, 2), 'utf-8')
+  const withStart: DaemonStateData =
+    state.procStart !== undefined
+      ? state
+      : { ...state, procStart: getProcessStartTime(state.pid) }
+  writeFileSync(filePath, JSON.stringify(withStart, null, 2), 'utf-8')
 }
 
 /**
@@ -112,11 +122,24 @@ export async function stopDaemonByPid(
     return false
   }
 
-  const { pid } = state
+  const { pid, procStart } = state
 
   if (!isProcessAlive(pid)) {
     removeDaemonState(name)
     return false
+  }
+
+  // Official 2.1.326 #15: verify process start identity before signaling so a
+  // reused PID (e.g. an SSH login) is never terminated by the daemon.
+  if (procStart) {
+    const currentStart = getProcessStartTime(pid)
+    if (
+      currentStart !== undefined &&
+      !processStartIdentityEquals(procStart, currentStart)
+    ) {
+      removeDaemonState(name)
+      return false
+    }
   }
 
   // Send SIGTERM

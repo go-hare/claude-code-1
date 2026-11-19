@@ -123,38 +123,13 @@ import {
   userFacingName,
 } from './UI.js'
 
-// Device files that would hang the process: infinite output or blocking input.
-// Checked by path only (no I/O). Safe devices like /dev/null are intentionally omitted.
-const BLOCKED_DEVICE_PATHS = new Set([
-  // Infinite output — never reach EOF
-  '/dev/zero',
-  '/dev/random',
-  '/dev/urandom',
-  '/dev/full',
-  // Blocks waiting for input
-  '/dev/stdin',
-  '/dev/tty',
-  '/dev/console',
-  // Nonsensical to read
-  '/dev/stdout',
-  '/dev/stderr',
-  // fd aliases for stdin/stdout/stderr
-  '/dev/fd/0',
-  '/dev/fd/1',
-  '/dev/fd/2',
-])
+import { isBlockedDeviceOrProcessPath } from 'src/utils/permissions/filesystem.js'
 
+// Official 2.1.326 #309: delegate to shared device & process path blocker
+// (`rO` in filesystem.ts) covering /dev/* infinite/stdio/tty/pty devices and
+// /proc/* process/fd/map_files/mem/environ/root/task paths.
 function isBlockedDevicePath(filePath: string): boolean {
-  if (BLOCKED_DEVICE_PATHS.has(filePath)) return true
-  // /proc/self/fd/0-2 and /proc/<pid>/fd/0-2 are Linux aliases for stdio
-  if (
-    filePath.startsWith('/proc/') &&
-    (filePath.endsWith('/fd/0') ||
-      filePath.endsWith('/fd/1') ||
-      filePath.endsWith('/fd/2'))
-  )
-    return true
-  return false
+  return isBlockedDeviceOrProcessPath(filePath)
 }
 
 // Narrow no-break space (U+202F) used by some macOS versions in screenshot filenames

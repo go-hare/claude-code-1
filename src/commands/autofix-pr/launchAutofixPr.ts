@@ -22,7 +22,7 @@ import {
 } from '../../tasks/RemoteAgentTask/RemoteAgentTask.js'
 import type { LocalJSXCommandCall } from '../../types/command.js'
 import { detectCurrentRepositoryWithHost } from '../../utils/detectRepository.js'
-import { teleportToRemote } from '../../utils/teleport.js'
+import { archiveRemoteSession, teleportToRemote } from '../../utils/teleport.js'
 import { AutofixProgress } from './AutofixProgress.js'
 import { createAutofixTeammate } from './inProcessAgent.js'
 import {
@@ -116,14 +116,35 @@ export const callAutofixPr: LocalJSXCommandCall = async (
         return null
       }
       clearActiveMonitor()
-      // Honest message: the local lock is released and any in-flight
-      // teleport request is aborted, but a CCR session that has already
-      // started running on the cloud will continue until it completes or is
-      // cancelled from claude.ai/code.
-      onDone(
-        `Stopped local monitoring of ${m.repo}#${m.prNumber}. Any already-running remote session continues until it finishes or is cancelled from claude.ai/code.`,
-        { display: 'system' },
-      )
+      // Official 2.1.326 #101: try to stop the remote cloud session before
+      // claiming cancellation; if stopping fails, link the session so the user
+      // can stop it themselves.
+      if (m.sessionId) {
+        let stopped = false
+        try {
+          stopped = await archiveRemoteSession(m.sessionId)
+        } catch {
+          stopped = false
+        }
+        if (stopped) {
+          onDone(
+            `Stopped autofix monitor and cloud session for ${m.repo}#${m.prNumber}.`,
+            {
+              display: 'system',
+            },
+          )
+          return null
+        }
+        const sessionUrl = getRemoteTaskSessionUrl(m.sessionId)
+        onDone(
+          `A cloud session had already started and Claude Code couldn't stop it, so it may still work on the PR. Stop it here: ${sessionUrl}`,
+          { display: 'system' },
+        )
+        return null
+      }
+      onDone(`Stopped local monitoring of ${m.repo}#${m.prNumber}.`, {
+        display: 'system',
+      })
       return null
     }
 
@@ -378,13 +399,22 @@ If no fix was needed, omit <commits-pushed> and <files-changed> and explain in <
         isLongRunning: true,
         remoteTaskMetadata: { owner, repo, prNumber, initialHeadSha },
       })
-      updateActiveMonitor({ taskId: frameworkTaskId })
+      updateActiveMonitor({ taskId: frameworkTaskId, sessionId: session.id })
     } catch (regErr: unknown) {
       clearActiveMonitor(teammate.taskId)
       const regMsg = regErr instanceof Error ? regErr.message : String(regErr)
+      let stopFailureNote = ''
+      try {
+        const stopped = await archiveRemoteSession(session.id)
+        if (!stopped) {
+          stopFailureNote = ` A cloud session had already started and Claude Code couldn't stop it, so it may still work on the PR. Stop it here: ${getRemoteTaskSessionUrl(session.id)}`
+        }
+      } catch {
+        stopFailureNote = ` A cloud session had already started and Claude Code couldn't stop it, so it may still work on the PR. Stop it here: ${getRemoteTaskSessionUrl(session.id)}`
+      }
       onDone(
         makeErrorText(
-          `task registration failed: ${regMsg}`,
+          `task registration failed: ${regMsg}.${stopFailureNote}`,
           'registration_failed',
         ),
         { display: 'system' },

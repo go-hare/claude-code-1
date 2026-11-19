@@ -583,6 +583,8 @@ export async function buildClassifierContextJson(
   isRemote = false,
 ): Promise<ClassifierContextJson> {
   const { mcpServerPolicy: _mcpAsk, ...askWithoutMcp } = context.alwaysAskRules
+  // Official 2.1.326 #322 (`yM()`/`lho()`): getAutoModeConfig() already strips
+  // "$defaults" from flagSettings when policySettings omits "$defaults".
   const autoMode = getAutoModeConfig()
   const sessionId = getSessionId()
   const lastUrl =

@@ -14,7 +14,15 @@ import {
   stat,
   unlink,
 } from 'fs/promises'
-import { basename, dirname, isAbsolute, join, relative } from 'path'
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from 'path'
 import {
   getIsNonInteractiveSession,
   getOriginalCwd,
@@ -380,7 +388,102 @@ export async function fileHistoryMakeSnapshot(
  * Do not invent alternate wording; changelog #36 surface copy is fixed in SEA.
  */
 export const REWIND_SKIPPED_LINKS_REASON =
-  'the tracked path is (or became) a link or other non-regular file, its directory changed since the checkpoint, or its backup could not be safely read' as const
+  'the tracked path is (or became) a link or other non-regular file, its directory changed since the checkpoint, it is behind a link in a folder that sandboxed commands can write, or its backup could not be safely read' as const
+
+/**
+ * Official 2.1.326 #36: per-session serialization of in-flight backup copies so
+ * back-to-back `/branch` calls and `/rewind` wait for copies into a session before
+ * reading or restoring from it.
+ */
+const inFlightBackupCopiesBySession = new Map<string, Promise<void>>()
+
+export async function awaitInFlightFileHistoryCopy(
+  sessionId: string,
+): Promise<void> {
+  const pending = inFlightBackupCopiesBySession.get(sessionId)
+  if (pending) {
+    await pending
+  }
+}
+
+/**
+ * Official 2.1.326 #305 (`a0n`): on macOS/Linux/WSL when sandboxing is enabled,
+ * check if any ancestor component of `filePath` is a symlink located inside a
+ * sandbox-writable directory. If so, `/rewind` must leave the file untouched.
+ */
+export async function isPathBehindSymlinkInSandboxWritableRoot(
+  filePath: string,
+  writableRoots?: readonly string[],
+): Promise<boolean> {
+  if (process.platform === 'win32') {
+    return false
+  }
+  let roots = writableRoots
+  if (roots === undefined) {
+    try {
+      const { SandboxManager } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./sandbox/sandbox-adapter.js') as typeof import('./sandbox/sandbox-adapter.js')
+      if (!SandboxManager.isSandboxingEnabled()) {
+        return false
+      }
+      roots = SandboxManager.getFsWriteConfig()?.allowOnly ?? []
+    } catch {
+      return false
+    }
+  }
+  if (!roots || roots.length === 0) {
+    return false
+  }
+  const normalizedRoots: string[] = []
+  for (const r of roots) {
+    if (!r) continue
+    const abs = resolve(r)
+    normalizedRoots.push(abs)
+    const real = await realpath(abs).catch(() => undefined)
+    if (real && real !== abs) {
+      normalizedRoots.push(real)
+    }
+  }
+  const isInsideWritableRoot = async (dir: string): Promise<boolean> => {
+    const norm = resolve(dir)
+    const real = await realpath(norm).catch(() => undefined)
+    const candidates = real && real !== norm ? [norm, real] : [norm]
+    return candidates.some(cand =>
+      normalizedRoots.some(
+        root =>
+          cand === root ||
+          cand.startsWith(root.endsWith(sep) ? root : `${root}${sep}`),
+      ),
+    )
+  }
+
+  const parentDir = resolve(dirname(filePath))
+  const parts = parentDir.split(sep).filter(Boolean)
+  let current = parentDir.startsWith(sep) ? sep : ''
+  for (const part of parts) {
+    const parentOfCurrent = current || sep
+    current =
+      current === sep
+        ? `${sep}${part}`
+        : current
+          ? `${current}${sep}${part}`
+          : part
+    try {
+      const st = await lstat(current)
+      if (
+        st.isSymbolicLink() &&
+        (await isInsideWritableRoot(parentOfCurrent))
+      ) {
+        return true
+      }
+    } catch (e: unknown) {
+      if (isENOENT(e)) break
+      return true
+    }
+  }
+  return false
+}
 
 /**
  * densable MessageSelector partial-restore UX when skippedLinks > 0.
@@ -438,6 +541,9 @@ export async function fileHistoryRewind(
   }
 
   try {
+    // Official 2.1.326 #36: wait for any in-flight backup copy into this session before restoring.
+    await awaitInFlightFileHistoryCopy(getSessionId())
+
     logForDebugging(
       `FileHistory: [Rewind] Rewinding to snapshot for ${messageId}`,
     )
@@ -1016,6 +1122,19 @@ async function applySnapshot(
         logEvent('tengu_file_history_rewind_restore_file_failed', {
           dryRun: false,
         })
+        continue
+      }
+
+      // Official 2.1.326 #305: skip tracked paths behind a symlink in a sandbox-writable folder.
+      if (await isPathBehindSymlinkInSandboxWritableRoot(filePath)) {
+        skippedLinks++
+        logEvent('tengu_file_history_rewind_restore_file_failed', {
+          dryRun: false,
+        })
+        logForDebugging(
+          `FileHistory: [Rewind] Refusing to touch ${filePath}: path is behind a symlink in a sandbox-writable directory`,
+          { level: 'error' },
+        )
         continue
       }
 
@@ -1688,101 +1807,121 @@ export async function copyFileHistoryForResume(log: LogOption): Promise<void> {
     return
   }
 
-  try {
-    // All backups share the same directory: {configDir}/file-history/{sessionId}/
-    // Create it once upfront instead of once per backup file
-    const newBackupDir = join(
-      getClaudeConfigHomeDir(),
-      'file-history',
-      sessionId,
-    )
-    await mkdir(newBackupDir, { recursive: true })
-
-    // Migrate all backup files from the previous session to current session.
-    // Process all snapshots in parallel; within each snapshot, links also run in parallel.
-    let failedSnapshots = 0
-    await Promise.allSettled(
-      fileHistorySnapshots.map(async snapshot => {
-        const backupEntries = Object.values(snapshot.trackedFileBackups).filter(
-          (backup): backup is typeof backup & { backupFileName: string } =>
-            backup.backupFileName !== null,
-        )
-
-        const results = await Promise.allSettled(
-          backupEntries.map(async ({ backupFileName }) => {
-            const oldBackupPath = resolveBackupPath(
-              backupFileName,
-              previousSessionId,
-            )
-            const newBackupPath = join(newBackupDir, backupFileName)
-
-            try {
-              await link(oldBackupPath, newBackupPath)
-            } catch (e: unknown) {
-              const code = getErrnoCode(e)
-              if (code === 'EEXIST') {
-                // Already migrated, skip
-                return
-              }
-              if (code === 'ENOENT') {
-                logError(
-                  new Error(
-                    `FileHistory: Failed to copy backup ${backupFileName} on restore (backup file does not exist in ${previousSessionId})`,
-                  ),
-                )
-                throw e
-              }
-              logError(
-                new Error(
-                  `FileHistory: Error hard linking backup file from previous session`,
-                ),
-              )
-              // Fallback to copy if hard link fails
-              try {
-                await copyFile(oldBackupPath, newBackupPath)
-              } catch (copyErr) {
-                logError(
-                  new Error(
-                    `FileHistory: Error copying over backup from previous session`,
-                  ),
-                )
-                throw copyErr
-              }
-            }
-
-            logForDebugging(
-              `FileHistory: Copied backup ${backupFileName} from session ${previousSessionId} to ${sessionId}`,
-            )
-          }),
-        )
-
-        const copyFailed = results.some(r => r.status === 'rejected')
-
-        // Record the snapshot only if we have successfully migrated the backup files
-        if (!copyFailed) {
-          void recordFileHistorySnapshot(
-            snapshot.messageId,
-            snapshot,
-            false, // isSnapshotUpdate
-          ).catch(_ => {
-            logError(
-              new Error(`FileHistory: Failed to record copy backup snapshot`),
-            )
-          })
-        } else {
-          failedSnapshots++
-        }
-      }),
-    )
-
-    if (failedSnapshots > 0) {
-      logEvent('tengu_file_history_resume_copy_failed', {
-        numSnapshots: fileHistorySnapshots.length,
-        failedSnapshots,
-      })
+  // Official 2.1.326 #36: serialize backup copies per sessionId so back-to-back
+  // /branch copies wait for the source session's in-flight copy before reading it.
+  const priorForTarget = inFlightBackupCopiesBySession.get(sessionId)
+  const copyTask = (async () => {
+    if (priorForTarget) {
+      await priorForTarget
     }
-  } catch (error) {
-    logError(error)
+    await awaitInFlightFileHistoryCopy(previousSessionId)
+    try {
+      // All backups share the same directory: {configDir}/file-history/{sessionId}/
+      // Create it once upfront instead of once per backup file
+      const newBackupDir = join(
+        getClaudeConfigHomeDir(),
+        'file-history',
+        sessionId,
+      )
+      await mkdir(newBackupDir, { recursive: true })
+
+      // Migrate all backup files from the previous session to current session.
+      // Process all snapshots in parallel; within each snapshot, links also run in parallel.
+      let failedSnapshots = 0
+      await Promise.allSettled(
+        fileHistorySnapshots.map(async snapshot => {
+          const backupEntries = Object.values(
+            snapshot.trackedFileBackups,
+          ).filter(
+            (backup): backup is typeof backup & { backupFileName: string } =>
+              backup.backupFileName !== null,
+          )
+
+          const results = await Promise.allSettled(
+            backupEntries.map(async ({ backupFileName }) => {
+              const oldBackupPath = resolveBackupPath(
+                backupFileName,
+                previousSessionId,
+              )
+              const newBackupPath = join(newBackupDir, backupFileName)
+
+              try {
+                await link(oldBackupPath, newBackupPath)
+              } catch (e: unknown) {
+                const code = getErrnoCode(e)
+                if (code === 'EEXIST') {
+                  // Already migrated, skip
+                  return
+                }
+                if (code === 'ENOENT') {
+                  logError(
+                    new Error(
+                      `FileHistory: Failed to copy backup ${backupFileName} on restore (backup file does not exist in ${previousSessionId})`,
+                    ),
+                  )
+                  throw e
+                }
+                logError(
+                  new Error(
+                    `FileHistory: Error hard linking backup file from previous session`,
+                  ),
+                )
+                // Fallback to copy if hard link fails
+                try {
+                  await copyFile(oldBackupPath, newBackupPath)
+                } catch (copyErr) {
+                  logError(
+                    new Error(
+                      `FileHistory: Error copying over backup from previous session`,
+                    ),
+                  )
+                  throw copyErr
+                }
+              }
+
+              logForDebugging(
+                `FileHistory: Copied backup ${backupFileName} from session ${previousSessionId} to ${sessionId}`,
+              )
+            }),
+          )
+
+          const copyFailed = results.some(r => r.status === 'rejected')
+
+          // Record the snapshot only if we have successfully migrated the backup files
+          if (!copyFailed) {
+            void recordFileHistorySnapshot(
+              snapshot.messageId,
+              snapshot,
+              false, // isSnapshotUpdate
+            ).catch(_ => {
+              logError(
+                new Error(`FileHistory: Failed to record copy backup snapshot`),
+              )
+            })
+          } else {
+            failedSnapshots++
+          }
+        }),
+      )
+
+      if (failedSnapshots > 0) {
+        logEvent('tengu_file_history_resume_copy_failed', {
+          numSnapshots: fileHistorySnapshots.length,
+          failedSnapshots,
+        })
+      }
+    } catch (error) {
+      logError(error)
+    }
+  })()
+
+  inFlightBackupCopiesBySession.set(sessionId, copyTask)
+  try {
+    await copyTask
+  } finally {
+    if (inFlightBackupCopiesBySession.get(sessionId) === copyTask) {
+      inFlightBackupCopiesBySession.delete(sessionId)
+    }
   }
 }
 

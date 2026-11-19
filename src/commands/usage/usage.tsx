@@ -51,5 +51,5 @@ export async function call(
       return null;
     }
   }
-  return <Settings onClose={onDone} context={context} defaultTab={defaultTab} />;
+  return <Settings onClose={onDone} context={context} defaultTab={defaultTab} openedForCost={invokedName === 'cost'} />;
 }

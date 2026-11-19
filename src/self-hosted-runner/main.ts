@@ -6,6 +6,11 @@
  */
 import { selfHostedRunnerCodeSignMain } from './codeSign.js'
 import { selfHostedRunnerDecodeTokenMain } from './decodeToken.js'
+import {
+  GH_STANDIN_FLAG,
+  ghStandinMain,
+  parseGhStandinArgv,
+} from './ghStandin.js'
 import { selfHostedRunnerOrchestratorMain } from './orchestrator.js'
 import { selfHostedRunnerMain } from './rootRunner.js'
 import {
@@ -15,6 +20,15 @@ import {
 
 export async function selfHostedRunnerCliMain(args: string[]): Promise<void> {
   const sub = args[0]
+  if (sub === GH_STANDIN_FLAG) {
+    const parsed = parseGhStandinArgv(args)
+    if (parsed === 'refused' || parsed === undefined) {
+      process.exitCode = 1
+      return
+    }
+    process.exitCode = await ghStandinMain(parsed)
+    return
+  }
   if (sub === 'decode-token') {
     await selfHostedRunnerDecodeTokenMain(args.slice(1))
     return

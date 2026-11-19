@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { clearTrustedDeviceTokenCache } from '../../bridge/trustedDevice.js';
-import { Text } from '@anthropic/ink';
+import { formatRevokeUnconfirmedMessage, revokeOAuthRefreshTokenWithRetry } from '../../cli/handlers/designOauth.js';
+import { instances, Text } from '@anthropic/ink';
 import { refreshGrowthBookAfterAuthChange } from '../../services/analytics/growthbook.js';
 import { getGroveNoticeConfig, getGroveSettings } from '../../services/api/grove.js';
 // flushTelemetry is loaded lazily to avoid pulling in ~1.1MB of OpenTelemetry at startup
@@ -8,17 +9,46 @@ import { removeChatGPTAuth } from '../../services/api/openai/chatgptAuth.js';
 import { getClaudeAIOAuthTokens, removeApiKey } from '../../utils/auth.js';
 import { clearBetasCaches } from '../../utils/betas.js';
 import { saveGlobalConfig } from '../../utils/config.js';
-import { gracefulShutdownSync } from '../../utils/gracefulShutdown.js';
+import { gracefulShutdown } from '../../utils/gracefulShutdown.js';
+import { getAPIProvider } from '../../utils/model/providers.js';
 import { getSecureStorage } from '../../utils/secureStorage/index.js';
 import { getSettingsForSource, updateSettingsForSource } from '../../utils/settings/settings.js';
 import { logOTelAuthEvent } from '../../utils/sessionSlots.js';
 import { clearToolSchemaCache } from '../../utils/toolSchemaCache.js';
 import { resetUserCache } from '../../utils/user.js';
 
-export async function performLogout({ clearOnboarding = false }): Promise<void> {
+export type PerformLogoutOutcome = 'revoke_unconfirmed' | undefined;
+
+const LOGOUT_SUCCESS_MESSAGE = 'Successfully logged out from your Anthropic account.';
+
+export async function performLogout({ clearOnboarding = false }): Promise<PerformLogoutOutcome> {
   // Flush telemetry BEFORE clearing credentials to prevent org data leakage
   const { flushTelemetry } = await import('../../utils/telemetry/instrumentation.js');
   await flushTelemetry();
+
+  // Official 2.1.326 #238 (`$Ye`): revoke OAuth refresh tokens on firstParty before
+  // wiping local secure storage, retrying once on transient failures.
+  const secureStorage = getSecureStorage();
+  let revokeUnconfirmed = false;
+  if (getAPIProvider() === 'firstParty') {
+    secureStorage.invalidateCache?.();
+    const stored = await secureStorage.readAsync();
+    const mainOauth = stored?.claudeAiOauth as { refreshToken?: string; clientId?: string } | undefined;
+    if (mainOauth?.refreshToken) {
+      const outcome = await revokeOAuthRefreshTokenWithRetry(mainOauth.refreshToken, mainOauth.clientId);
+      if (outcome !== 'acknowledged') {
+        revokeUnconfirmed = true;
+      }
+    }
+    const designOauth = stored?.designOauth as { refreshToken?: string; clientId?: string } | undefined;
+    if (designOauth?.refreshToken) {
+      await revokeOAuthRefreshTokenWithRetry(designOauth.refreshToken, designOauth.clientId);
+    }
+    const cloudSessionsOauth = stored?.cloudSessionsOauth as { refreshToken?: string; clientId?: string } | undefined;
+    if (cloudSessionsOauth?.refreshToken) {
+      await revokeOAuthRefreshTokenWithRetry(cloudSessionsOauth.refreshToken, cloudSessionsOauth.clientId);
+    }
+  }
 
   // Official 2.1.323 Tze (#2206): clear in-process OAuth token env var and
   // wipe secure storage (including stored MCP OAuth logins and plugin secrets)
@@ -37,7 +67,6 @@ export async function performLogout({ clearOnboarding = false }): Promise<void> 
   }
 
   // Wipe all secure storage data on logout (OAuth, MCP logins, plugin secrets)
-  const secureStorage = getSecureStorage();
   secureStorage.delete();
 
   // Drop in-memory gateway session + secure-storage restore negative cache.
@@ -88,6 +117,7 @@ export async function performLogout({ clearOnboarding = false }): Promise<void> 
   } catch {
     // artifactAutoReact optional in isolation
   }
+  return revokeUnconfirmed ? 'revoke_unconfirmed' : undefined;
 }
 
 function clearChatGPTSettingsAuthMode(): void {
@@ -156,13 +186,22 @@ export async function fleetHostLogout({ exit, setError, setInfo }: FleetHostLogo
 
 export async function call(): Promise<React.ReactNode> {
   logOTelAuthEvent({ action: 'logout', success: true, authMethod: 'oauth' });
-  await performLogout({ clearOnboarding: true });
+  const outcome = await performLogout({ clearOnboarding: true });
+  const isAltScreen = instances.get(process.stdout)?.isAltScreenActive === true;
 
-  const message = <Text>Successfully logged out.</Text>;
+  // Official 2.1.326 #238 & #67: surface revoke-unconfirmed notice and pass
+  // `finalMessage` to gracefulShutdown so fullscreen exits leave the message on screen.
+  if (outcome === 'revoke_unconfirmed') {
+    const unconfirmedMessage = await formatRevokeUnconfirmedMessage();
+    setTimeout(() => {
+      void gracefulShutdown(0, 'logout', { finalMessage: unconfirmedMessage });
+    }, 200);
+    return <Text>{isAltScreen ? '' : unconfirmedMessage}</Text>;
+  }
 
   setTimeout(() => {
-    gracefulShutdownSync(0, 'logout');
+    void gracefulShutdown(0, 'logout', isAltScreen ? { finalMessage: LOGOUT_SUCCESS_MESSAGE } : undefined);
   }, 200);
 
-  return message;
+  return <Text>{LOGOUT_SUCCESS_MESSAGE}</Text>;
 }

@@ -22,6 +22,113 @@ type Props = {
   /** densable qle `hasMessages`. Gold `v<1&&!M&&he` — skip Try after resume. */
   hasMessages?: boolean
   viewingAgentName?: string
+  /** #7 (2.1.326, official yTe/Kge): actionable hint after a failed request. */
+  nextStepHint?: string
+}
+
+export type FailedRequestAction =
+  | 'try_again'
+  | 'fix_setup'
+  | 'switch_model'
+  | 'make_room'
+  | 'edit_message'
+  | 'wait'
+  | 'blocked'
+
+const ONCE_FIXED_HINT = 'Once fixed, resend your message'
+
+const FAILED_REQUEST_HINTS: Record<FailedRequestAction, string | undefined> = {
+  try_again: 'Resend your message to try again',
+  fix_setup: ONCE_FIXED_HINT,
+  switch_model: ONCE_FIXED_HINT,
+  make_room: ONCE_FIXED_HINT,
+  edit_message: 'Run /rewind to go back',
+  wait: undefined,
+  blocked: undefined,
+}
+
+/**
+ * #7 (2.1.326, official Kge/sZt): map a classified failed-request recovery
+ * action to the placeholder shown in the empty prompt.
+ */
+export function getFailedRequestPlaceholder(
+  action: FailedRequestAction | null | undefined,
+  isRemoteMode = false,
+): string | undefined {
+  if (!action || (action === 'edit_message' && isRemoteMode)) {
+    return undefined
+  }
+  return FAILED_REQUEST_HINTS[action]
+}
+
+/**
+ * #7 (2.1.326, official uJe/sZt): classify the most recent failed assistant turn
+ * into an actionable recovery hint for the empty prompt placeholder.
+ */
+export function classifyFailedTurnAction(
+  messages: ReadonlyArray<{
+    type: string
+    isApiErrorMessage?: boolean
+    error?: string
+    apiErrorStatus?: number
+    message?: { content?: unknown }
+  }>,
+): FailedRequestAction | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (!msg) continue
+    if (
+      msg.type === 'system' ||
+      msg.type === 'attachment' ||
+      msg.type === 'progress'
+    ) {
+      continue
+    }
+    if (msg.type !== 'assistant') return null
+    if (msg.isApiErrorMessage !== true) return null
+    const err = msg.error
+    const status = msg.apiErrorStatus
+    const content = msg.message?.content
+    const text = Array.isArray(content)
+      ? content
+          .map(b =>
+            typeof b === 'object' &&
+            b !== null &&
+            'text' in b &&
+            typeof (b as { text?: unknown }).text === 'string'
+              ? (b as { text: string }).text
+              : '',
+          )
+          .join(' ')
+          .toLowerCase()
+      : ''
+    if (err === 'rate_limit' || status === 429) return 'wait'
+    if (
+      err === 'authentication_failed' ||
+      err === 'billing_error' ||
+      status === 401 ||
+      status === 403
+    ) {
+      return 'fix_setup'
+    }
+    if (
+      err === 'max_output_tokens' ||
+      text.includes('prompt is too long') ||
+      text.includes('context limit')
+    ) {
+      return 'make_room'
+    }
+    if (status === 413 || text.includes('too large')) return 'edit_message'
+    if (
+      text.includes('model') &&
+      (text.includes('not found') || text.includes('unavailable'))
+    ) {
+      return 'switch_model'
+    }
+    if (status === 400 || err === 'invalid_request') return 'blocked'
+    return 'try_again'
+  }
+  return null
 }
 
 const NUM_TIMES_QUEUE_HINT_SHOWN = 3
@@ -43,6 +150,7 @@ export function usePromptInputPlaceholder({
   submitCount,
   hasMessages = false,
   viewingAgentName,
+  nextStepHint,
 }: Props): string | undefined {
   const queuedCommands = useCommandQueue()
   const promptSuggestionEnabled = useAppState(s => s.promptSuggestionEnabled)
@@ -87,6 +195,11 @@ export function usePromptInputPlaceholder({
       }
     }
 
+    // #7 (2.1.326, official yTe): actionable next-step hint after a failed request
+    if (nextStepHint) {
+      return nextStepHint
+    }
+
     // densable qle: `if(v<1&&!M&&he)return Slo(q())`. Proactive skip is analog extra KEEP.
     if (
       submitCount < 1 &&
@@ -100,6 +213,7 @@ export function usePromptInputPlaceholder({
     input,
     queuedCommands,
     queueEditIndex,
+    nextStepHint,
     submitCount,
     hasMessages,
     promptSuggestionEnabled,

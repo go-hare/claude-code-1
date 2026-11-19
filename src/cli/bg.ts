@@ -682,9 +682,13 @@ export async function logsHandler(
     return await exitAfterAnalyticsFlush(1)
   }
 
-  const rows = process.stdout.rows || 9999
+  const rawRows = process.stdout.rows
+  const rows = rawRows || 9999
   await writeStdoutFlushed(
-    formatClaudeLogsReplay(streamTail, process.stdout.isTTY === true, rows),
+    formatClaudeLogsReplay(streamTail, process.stdout.isTTY === true, rows, {
+      preserveScrollback: true,
+      rawRows: rawRows ?? 0,
+    }),
   )
   await logEventAsync('tengu_feature_ok', { feature_name: CLI_BG_LOGS })
   return await exitAfterAnalyticsFlush(0)
@@ -928,6 +932,62 @@ export function gP(_model: unknown, requestDialog: unknown): boolean {
 }
 
 /**
+ * Official 2.1.326 #323 (`Gt`): extract all `--add-dir` directory values
+ * appearing before `--` (supporting both `--add-dir=path` and variadic
+ * `--add-dir path1 path2`).
+ */
+export function extractAddDirValues(argv: readonly string[]): string[] {
+  const values: string[] = []
+  for (let i = 0; i < argv.length; i++) {
+    const token = argv[i]!
+    if (token === '--') break
+    if (token.startsWith('--add-dir=')) {
+      const val = token.slice('--add-dir='.length)
+      if (val) values.push(val)
+      continue
+    }
+    if (token === '--add-dir') {
+      let end = i + 1
+      while (
+        end < argv.length &&
+        argv[end] !== '--' &&
+        !looksLikeOption(argv[end]!)
+      ) {
+        values.push(argv[end]!)
+        end++
+      }
+      i = end - 1
+      continue
+    }
+    i = lastValueSlot(argv, i)
+  }
+  return values
+}
+
+/**
+ * Official 2.1.326 #323 (`jn`): return the formatted description of the first
+ * untrusted `--add-dir` folder in `argv`, or `undefined` if all are trusted.
+ */
+export async function findUntrustedBgAddDir(
+  argv: readonly string[],
+): Promise<string | undefined> {
+  const dirs = extractAddDirValues(argv)
+  if (dirs.length === 0) return undefined
+  const { untrustedAddedFolder } = await import(
+    '../commands/add-dir/validation.js'
+  )
+  for (const dir of dirs) {
+    const untrusted = untrustedAddedFolder(dir)
+    if (untrusted !== undefined) {
+      return untrusted.repository === undefined
+        ? untrusted.path
+        : `${untrusted.path} (part of the repository at ${untrusted.repository})`
+    }
+  }
+  return undefined
+}
+
+/**
  * `claude daemon bg [args]` / `claude --bg …` — start a background session.
  *
  * densable path: e6_ gate → xSe/Uq_ (daemon dispatch) when BG_SESSIONS + daemon.
@@ -945,6 +1005,37 @@ export async function handleBgStart(args: string[]): Promise<void> {
   // f6e(undefined) is false → no fable_overage_consent_prompt, no abort.
   void gP(undefined, undefined)
 
+  // Official 2.1.326 #323 (`jn`): refuse `claude --bg` when any `--add-dir`
+  // folder has not been trusted yet, since background sessions cannot prompt.
+  const untrustedAddDir = await findUntrustedBgAddDir(filteredArgs)
+  if (untrustedAddDir !== undefined) {
+    await logEventAsync('tengu_bg_dispatch_blocked', {
+      reason:
+        'added_folder_untrusted' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    }).catch(() => {})
+    process.stderr.write(
+      `Added folder not trusted: ${untrustedAddDir}. Leave out its --add-dir or, if you trust it and everything in its repository or below it, start \`claude\` there once and accept the trust prompt.\n`,
+    )
+    process.exitCode = 1
+    return
+  }
+
+  // Official 2.1.326 #45 (`oTt`): warn when a prompt typed after `--add-dir`,
+  // `--allowedTools` or another variadic list option was absorbed as a value.
+  try {
+    const { detectPromptReadAsOptionValue } = await import(
+      './promptAfterListOption.js'
+    )
+    const swallowed = detectPromptReadAsOptionValue(filteredArgs)
+    if (swallowed !== undefined) {
+      process.stderr.write(
+        `${swallowed.problem}, so the session starts with no prompt: ${swallowed.fix}\n`,
+      )
+    }
+  } catch {
+    // non-fatal diagnostic
+  }
+
   // densable e6_ + xSe shell (gate before any spawn). Use full argv so
   // `--print`/`bypass`/`auto` flags densable blocks are visible.
   try {
@@ -960,6 +1051,18 @@ export async function handleBgStart(args: string[]): Promise<void> {
     // Full Uq_ peel happens inside xSeSpawn from argv (agent/name/resume/intent).
     const { peelUqArgv } = await import('../daemon/uqArgvPeel.js')
     const peeled = peelUqArgv(filteredArgs)
+    const isBareLaunch = hasRootFlag('--bare', filteredArgs)
+    let isApiKeyApprovedForBare: boolean | undefined
+    if (isBareLaunch && process.env.ANTHROPIC_API_KEY) {
+      try {
+        const { isCustomApiKeyApproved } = await import('../utils/auth.js')
+        isApiKeyApprovedForBare = isCustomApiKeyApproved(
+          process.env.ANTHROPIC_API_KEY,
+        )
+      } catch {
+        isApiKeyApprovedForBare = false
+      }
+    }
     const xse = await xSeSpawn({
       intent: peeled.intent ?? '',
       name: peeled.name,
@@ -969,6 +1072,12 @@ export async function handleBgStart(args: string[]): Promise<void> {
       argv: filteredArgs,
       source: 'shell',
       extraArgs: peeled.allowlistedRespawnFlags,
+      ...(isBareLaunch
+        ? {
+            isBareSession: true,
+            isApiKeyApproved: isApiKeyApprovedForBare,
+          }
+        : {}),
     })
     if (xse.ok) {
       // densable xmt(short, idle?, name)

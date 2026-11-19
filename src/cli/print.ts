@@ -92,7 +92,9 @@ import {
   parseAgentsFromJson,
 } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import type { Message, NormalizedUserMessage } from 'src/types/message.js'
+import chalk from 'chalk'
 import { createUserMessage } from 'src/utils/messages.js'
+import { CutOffReRunStopTracker } from './rapidFollowupPreempt.js'
 import type { QueuedCommand } from 'src/types/textInputTypes.js'
 import {
   dequeue,
@@ -887,6 +889,8 @@ const HEADLESS_LAST_MESSAGE_SKIP_SYSTEM_SUBTYPES: ReadonlySet<string> = new Set(
     'turn_preempted',
     'per_turn_effort_changed',
     'instruction_size_warning',
+    'api_retry',
+    'file_attachments_missing',
   ],
 )
 
@@ -1563,8 +1567,107 @@ export async function waitForCachedAccountDataBeforePrint(deps?: {
 }
 
 /**
- * densable `Sk` — prints each turn's text result immediately when the turn ends
- * so later background-triggered turns cannot drop earlier responses.
+ * Official 2.1.326 #149 (`qWn`) — human-readable label for API retry status.
+ */
+export function formatApiRetryStatusLabel(status: number | undefined): string {
+  switch (status) {
+    case 429:
+      return 'Rate limited'
+    case 529:
+      return 'API overloaded'
+    case 401:
+    case 403:
+      return 'Authentication failed'
+    default:
+      return 'API error'
+  }
+}
+
+function formatRetrySeconds(ms: number): string {
+  const secs = Math.max(1, Math.ceil(ms / 1000))
+  return `${secs}s`
+}
+
+/**
+ * Official 2.1.326 #149 (`class uv`) — writes API retry progress lines to
+ * stderr in `claude -p` when retrying an overloaded or failing request on a
+ * terminal (after `PRINT_WAIT_NOTICE_DELAY_MS`, non-stream-json only).
+ */
+export class PrintRetryNoticeWriter {
+  private readonly isShown: boolean
+  private waitingSince: number
+  private lastShownAttempt: number | undefined
+
+  constructor(
+    outputFormat?: string,
+    private readonly deps: {
+      writeStderr?: (text: string) => void
+      now?: () => number
+      stderrIsTerminal?: boolean
+      stdoutIsTerminal?: boolean
+      delayMs?: number
+    } = {},
+  ) {
+    this.waitingSince = (deps.now ?? Date.now)()
+    this.isShown =
+      outputFormat !== 'stream-json' &&
+      shouldWriteWaitNoticeOnStderr({
+        outputFormat,
+        stderrIsTerminal:
+          deps.stderrIsTerminal ?? process.stderr.isTTY === true,
+        stdoutIsTerminal:
+          deps.stdoutIsTerminal ?? process.stdout.isTTY === true,
+      })
+  }
+
+  observe(msg: {
+    type?: string
+    subtype?: string
+    attempt?: number
+    max_retries?: number
+    retry_delay_ms?: number
+    error_status?: number | null
+    error?: string
+    no_response?: { waited_ms: number; retry_wait_ms: number }
+  }): void {
+    const now = (this.deps.now ?? Date.now)()
+    if (msg.type !== 'system' || msg.subtype !== 'api_retry') {
+      this.waitingSince = now
+      this.lastShownAttempt = undefined
+      return
+    }
+    const retryDelayMs = msg.retry_delay_ms ?? 0
+    const elapsedPlusDelay = now - this.waitingSince + retryDelayMs
+    const threshold = this.deps.delayMs ?? PRINT_WAIT_NOTICE_DELAY_MS
+    if (
+      !this.isShown ||
+      elapsedPlusDelay < threshold ||
+      msg.attempt === undefined ||
+      msg.attempt === this.lastShownAttempt
+    ) {
+      return
+    }
+    this.lastShownAttempt = msg.attempt
+    const statusCode =
+      msg.error === 'overloaded' ? 529 : (msg.error_status ?? undefined)
+    const label = formatApiRetryStatusLabel(statusCode)
+    const body = msg.no_response
+      ? `No response from the API after ${formatRetrySeconds(msg.no_response.waited_ms)} \u00b7 retrying, waiting up to ${formatRetrySeconds(msg.no_response.retry_wait_ms)}`
+      : `${label} \u00b7 retrying in ${formatRetrySeconds(retryDelayMs)}`
+    const ofMax =
+      msg.max_retries !== undefined && msg.attempt <= msg.max_retries
+        ? ` of ${msg.max_retries}`
+        : ''
+    const write =
+      this.deps.writeStderr ?? ((text: string) => process.stderr.write(text))
+    write(`${chalk.dim(`${body} \u00b7 attempt ${msg.attempt}${ofMax}`)}\n`)
+  }
+}
+
+/**
+ * densable `Sk` / Official 2.1.326 `class cv` — prints each turn's text result
+ * immediately when the turn ends, and mirrors error results to stderr when
+ * stdout is redirected/captured while stderr is a terminal (#149).
  */
 export class PrintTextResults {
   private lastPrinted: PrintTextResultMessage | undefined
@@ -1579,6 +1682,11 @@ export class PrintTextResults {
     private readonly write: (text: string) => void = writeToStdout,
     private readonly isStdoutTty: () => boolean = () =>
       process.stdout.isTTY === true,
+    private readonly writeStderr: (text: string) => void = text => {
+      process.stderr.write(text)
+    },
+    private readonly isStderrTty: () => boolean = () =>
+      process.stderr.isTTY === true,
   ) {}
 
   printAtTurnEnd(msg: PrintTextResultMessage, extra?: string): void {
@@ -1633,9 +1741,20 @@ export class PrintTextResults {
         break
       }
     }
-    const output = this.isStdoutTty() ? sanitizePrintTextForTty(text) : text
+    const stdoutTty = this.isStdoutTty()
+    const output = stdoutTty ? sanitizePrintTextForTty(text) : text
     const prefix =
       this.printedCount === 0 ? '' : this.endsWithNewline ? '\n' : '\n\n'
+    // Official 2.1.326 #149: when stdout is redirected/captured and stderr is
+    // a terminal, mirror error results to stderr so failures are never silent.
+    const isErrorResult =
+      (msg as { is_error?: boolean }).is_error === true ||
+      msg.subtype !== 'success'
+    if (isErrorResult && this.isStderrTty() && !stdoutTty) {
+      const errBody =
+        msg.subtype === 'success' ? String(msg.result ?? '') : text
+      this.writeStderr(`${sanitizePrintTextForTty(errBody).trimEnd()}\n`)
+    }
     this.write(prefix + output)
     this.lastPrinted = msg
     this.printedCount++
@@ -2932,6 +3051,7 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
     maxTurns: options.maxTurns,
     maxBudgetUsd: options.maxBudgetUsd,
   })
+  const retryNoticeWriter = new PrintRetryNoticeWriter(options.outputFormat)
   const messages: SDKMessage[] = []
   let lastMessage: SDKMessage | undefined
   // Streamlined mode transforms messages when CLAUDE_CODE_STREAMLINED_OUTPUT=true and using stream-json
@@ -2978,6 +3098,19 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
     turnInterruptionState,
     printRequestDialog,
   )) {
+    // Official 2.1.326 #149: surface API retry status on stderr during long retries.
+    retryNoticeWriter.observe(
+      message as {
+        type?: string
+        subtype?: string
+        attempt?: number
+        max_retries?: number
+        retry_delay_ms?: number
+        error_status?: number | null
+        error?: string
+        no_response?: { waited_ms: number; retry_wait_ms: number }
+      },
+    )
     // Official 2.1.323 #2038: in `-p` text mode, write plugin load errors
     // (`plugin-not-installed` / `engine-range-unsatisfied`) to stderr once.
     if (
@@ -3203,6 +3336,9 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
   let deferredCallRefusesTurns = false
   // #1918: Preserve subagent messages left to an interrupted-turn re-run.
   const pendingReRunSends = new PendingReRunSendsTracker()
+  // Official 2.1.326 #95: track cut-off turn re-run so Stop arriving during
+  // restart cancels it and persists an interruption marker over it.
+  const cutOffReRunStopTracker = new CutOffReRunStopTracker()
   const takePendingDeferredToolUse = ():
     | HookDeferredToolAttachment
     | undefined => {
@@ -3616,6 +3752,10 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
       isMeta: interruptedMsg.isMeta === true,
       resumedTurnUserMessageUuid: interruptedMsg.uuid,
     })
+    cutOffReRunStopTracker.arm(
+      reRunUuid,
+      interruptedMsg as unknown as Record<string, unknown>,
+    )
     enqueue(reRunCmd)
   } else if (turnInterruptionState && turnInterruptionState.kind !== 'none') {
     // Official 2.1.323 #1981 & #2142: when an interrupted message is NOT
@@ -4865,6 +5005,44 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
         }
       : undefined
 
+  // Official 2.1.326 #96: allow `interrupt` / `end_session` arriving while
+  // waiting on slow MCP server connections to break out of the pre-turn wait.
+  const mcpStartupAbortRef: { current: AbortController | null } = {
+    current: null,
+  }
+
+  // Official 2.1.326 #246 (`UPs`): rapid follow-up preemption controller for
+  // SDK hosts that declared `rapidFollowupPreempt: true` in `initialize`.
+  const {
+    RapidFollowupPreemptController,
+    declareSdkRapidFollowupPreempt,
+    isRapidFollowupPreemptEnabled,
+  } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('./rapidFollowupPreempt.js') as typeof import('./rapidFollowupPreempt.js')
+  const rapidFollowupDrain = {
+    get abortController() {
+      return abortController ?? undefined
+    },
+    endSessionRequested: false,
+  }
+  const rapidFollowupPreempt = new RapidFollowupPreemptController({
+    messageQueue: {
+      getCommandQueueSnapshot,
+      subscribe: subscribeToCommandQueue,
+    },
+    drain: rapidFollowupDrain,
+    enabled: isRapidFollowupPreemptEnabled,
+    emit: frame => {
+      output.enqueue({
+        ...frame,
+        uuid: randomUUID(),
+        session_id: getSessionId(),
+      } as unknown as StdoutMessage)
+    },
+  })
+  rapidFollowupPreempt.install()
+
   // Abort the current operation when a 'now' priority message arrives.
   subscribeToCommandQueue(() => {
     if (abortController && getCommandsByMaxPriority('now').length > 0) {
@@ -4950,10 +5128,37 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
           ? resolveMcpStartupPrewaitBudgetMs({
               configuredWaitMs: configuredMcpStartupWaitMs,
               hasPendingRequiredServers: hasPendingRequiredSdk,
+              pendingClients: sdkClients,
+              requiredServerNames: requiredServers,
             })
           : getMcpConnectTimeoutMs()
       const sdkMcpUpdatePromise = updateSdkMcp('skip')
-      const raced = await raceWithTimeoutMs(sdkMcpUpdatePromise, budgetMs)
+      mcpStartupAbortRef.current = createAbortController()
+      const mcpAbortSignal = mcpStartupAbortRef.current.signal
+      const mcpAbortPromise = new Promise<'aborted'>(resolve => {
+        if (mcpAbortSignal.aborted) {
+          resolve('aborted')
+          return
+        }
+        mcpAbortSignal.addEventListener('abort', () => resolve('aborted'), {
+          once: true,
+        })
+      })
+      const raced = await Promise.race([
+        raceWithTimeoutMs(sdkMcpUpdatePromise, budgetMs),
+        mcpAbortPromise.then(() => ({ status: 'aborted' as const })),
+      ])
+      mcpStartupAbortRef.current = null
+      if (raced.status === 'aborted') {
+        sdkMcpUpdatePromise.catch(logError)
+        logForDebugging(
+          '[print.ts] sdk_mcp_update_wait aborted by stop/interrupt',
+          { level: 'info' },
+        )
+        running = false
+        notifySessionStateChanged('idle')
+        return
+      }
       if (raced.status === 'timeout') {
         sdkMcpUpdatePromise.catch(logError)
         logEvent('tengu_sdk_mcp_update_wait_timeout', {
@@ -5667,7 +5872,10 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
             const waitForRequiredMcp = async () => {
               if (!hasPendingRequiredMcp()) return
               const waitStarted = Date.now()
-              while (hasPendingRequiredMcp()) {
+              while (
+                hasPendingRequiredMcp() &&
+                !abortController?.signal.aborted
+              ) {
                 const remainingMs = resolveMcpStartupPrewaitBudgetMs({
                   configuredWaitMs: configuredMcpStartupWaitMs,
                   hasPendingRequiredServers: true,
@@ -5699,6 +5907,10 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
           let lastResultIsError = false
           let lastResultNumTurns = 0
           let lastResultBody = ''
+          rapidFollowupPreempt.noteTurnStart({
+            command: cmd,
+            members: [cmd],
+          })
           try {
             await runWithTurnAttribution(
               resolveCommandTurnAttributionKey(cmd),
@@ -5850,6 +6062,25 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                     // claude.ai sees progress and the connection stays alive
                     // while blocked on permission requests.
                     forwardMessagesToBridge()
+                    rapidFollowupPreempt.noteFrame(
+                      message as unknown as Record<string, unknown>,
+                    )
+                    // Official 2.1.326 #239: stream partial text/thinking deltas
+                    // to Remote Control viewers as they are written.
+                    if (
+                      bridgeHandle &&
+                      message.type === 'stream_event' &&
+                      (message as { parent_tool_use_id?: string | null })
+                        .parent_tool_use_id === null
+                    ) {
+                      const ev = (message as { event?: { type?: string } })
+                        .event
+                      if (ev?.type !== 'ping') {
+                        bridgeHandle.writeSdkMessages?.([
+                          message as unknown as SDKMessage,
+                        ])
+                      }
+                    }
 
                     if (message.type === 'result') {
                       // Official 2.1.323 #1970: suppress hook heartbeats past result.
@@ -5863,6 +6094,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                         deferredCallRefusesTurns = true
                       }
                       if (cmd.uuid) {
+                        cutOffReRunStopTracker.markStarted(cmd.uuid)
                         pendingReRunSends.clearAfterReRunEnded(cmd.uuid)
                       }
                       lastResultIsError = !!resultMsg.is_error
@@ -5960,10 +6192,12 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
             lastDispatchAborted = abortedAtResult
             // densable Dm.dropParkedBatch + Tl.clearAhead after turn settles.
             stopAllHookHeartbeatsForSession()
+            rapidFollowupPreempt.noteTurnEnd()
             prewait.dropParkedBatch()
             startGate.clearAhead()
           } catch (error) {
             stopAllHookHeartbeatsForSession()
+            rapidFollowupPreempt.noteTurnEnd()
             await finalizeAutonomyCommandsForTurn({
               commands: claimedAutonomyCommands,
               outcome: { type: 'failed', error },
@@ -7300,10 +7534,46 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                 },
               }))
             }
+            if (
+              mcpStartupAbortRef.current &&
+              !mcpStartupAbortRef.current.signal.aborted
+            ) {
+              mcpStartupAbortRef.current.abort()
+            }
             if (abortController) {
               markSessionStoppedForPluginInput()
               abortController.abort()
             } else {
+              // Official 2.1.326 #95: if Stop arrived while restarting and the
+              // auto-resumed cut-off turn is still queued, cancel it and persist
+              // an interruption marker so a later restart will not re-run it.
+              if (cutOffReRunStopTracker.hasPendingCutOffReRun()) {
+                const { createUserInterruptionMessage } =
+                  require('../utils/messages.js') as typeof import('../utils/messages.js')
+                const { recordTranscript } =
+                  require('../utils/sessionStorage.js') as typeof import('../utils/sessionStorage.js')
+                cutOffReRunStopTracker.handleInterruptBeforeStart({
+                  removeFromQueue: uuid =>
+                    dequeueAllMatching(c => c.uuid === uuid).length > 0,
+                  currentMessages: mutableMessages as unknown as Record<
+                    string,
+                    unknown
+                  >[],
+                  buildInterruptionMessage: () =>
+                    createUserInterruptionMessage({
+                      toolUse: false,
+                    }) as unknown as Record<string, unknown>,
+                  persistTranscript: async msgs => {
+                    await recordTranscript(msgs as unknown as Message[])
+                  },
+                  onError: err => {
+                    logForDebugging(
+                      `[print.ts] storing a Stop over the cut-off turn failed: ${errorMessage(err)}`,
+                      { level: 'warn' },
+                    )
+                  },
+                })
+              }
               // #1634: interrupt arriving while a turn is queued/waiting (e.g.
               // right after set_model) must cancel the pending queued message.
               printPrewait?.interruptBeforeArm(getCommandQueue())
@@ -7314,6 +7584,13 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
             suggestionState.pendingSuggestion = null
             sendControlResponseSuccess(msg)
           } else if (req.subtype === 'end_session') {
+            rapidFollowupDrain.endSessionRequested = true
+            if (
+              mcpStartupAbortRef.current &&
+              !mcpStartupAbortRef.current.signal.aborted
+            ) {
+              mcpStartupAbortRef.current.abort()
+            }
             logForDebugging(
               `[print.ts] end_session received, reason=${req.reason ?? 'unspecified'}`,
             )
@@ -7321,6 +7598,36 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               markSessionStoppedForPluginInput()
               abortController.abort()
             } else {
+              // Official 2.1.326 #95: if Stop arrived while restarting and the
+              // auto-resumed cut-off turn is still queued, cancel it and persist
+              // an interruption marker so a later restart will not re-run it.
+              if (cutOffReRunStopTracker.hasPendingCutOffReRun()) {
+                const { createUserInterruptionMessage } =
+                  require('../utils/messages.js') as typeof import('../utils/messages.js')
+                const { recordTranscript } =
+                  require('../utils/sessionStorage.js') as typeof import('../utils/sessionStorage.js')
+                cutOffReRunStopTracker.handleInterruptBeforeStart({
+                  removeFromQueue: uuid =>
+                    dequeueAllMatching(c => c.uuid === uuid).length > 0,
+                  currentMessages: mutableMessages as unknown as Record<
+                    string,
+                    unknown
+                  >[],
+                  buildInterruptionMessage: () =>
+                    createUserInterruptionMessage({
+                      toolUse: false,
+                    }) as unknown as Record<string, unknown>,
+                  persistTranscript: async msgs => {
+                    await recordTranscript(msgs as unknown as Message[])
+                  },
+                  onError: err => {
+                    logForDebugging(
+                      `[print.ts] storing a Stop over the cut-off turn failed: ${errorMessage(err)}`,
+                      { level: 'warn' },
+                    )
+                  },
+                })
+              }
               // #1634: interrupt arriving while a turn is queued/waiting (e.g.
               // right after set_model) must cancel the pending queued message.
               printPrewait?.interruptBeforeArm(getCommandQueue())
@@ -7384,6 +7691,14 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               getFeatureValue_CACHED_MAY_BE_STALE('tengu_slate_prism', true)
             ) {
               setSdkAgentProgressSummariesEnabled(true)
+            }
+
+            // Official 2.1.326 #246: first-attached-client-wins rapid follow-up preempt
+            const rapidFollowupFlag = (
+              msg.request as unknown as { rapidFollowupPreempt?: unknown }
+            ).rapidFollowupPreempt
+            if (typeof rapidFollowupFlag === 'boolean') {
+              declareSdkRapidFollowupPreempt(rapidFollowupFlag)
             }
 
             initialized = true

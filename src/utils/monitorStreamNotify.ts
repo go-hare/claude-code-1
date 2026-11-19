@@ -309,16 +309,30 @@ export function monitorSuppressedEvent(count: number): string {
 /** densable unbounded `s` when `!RQ()`. */
 export const MONITOR_TIMEOUT_SHORT = '[Monitor timed out — re-arm if needed.]'
 
-/** densable `nXn` */
+/**
+ * densable `nXn` / Official 2.1.326 #258 (`I5o` @293457017):
+ * When a watch expires with 0 events and its command wrote to stderr, tell
+ * Claude so and name the file holding the output.
+ */
 export function monitorExpiredEvent(
   timeoutMs: number,
   eventCount: number,
   bounded: boolean = isMonitorTimeoutBounded(),
+  stderrOutputFile?: string,
 ): string {
-  if (!bounded) return MONITOR_TIMEOUT_SHORT
+  const stderrHint =
+    eventCount === 0 && stderrOutputFile
+      ? `Its command wrote to stderr, which isn't delivered as events and may mean it failed: see \`${stderrOutputFile}\`. `
+      : ''
+  if (!bounded) {
+    if (stderrHint) {
+      return `[Monitor timed out with no events delivered. ${stderrHint}Re-arm if needed.]`
+    }
+    return MONITOR_TIMEOUT_SHORT
+  }
   const dur = formatDuration(timeoutMs, { hideTrailingZeros: true })
   if (eventCount === 0) {
-    return `[Monitor expired after ${dur} with no events delivered. Re-arm it if you still need the watch — and widen the filter if silence was unexpected.]`
+    return `[Monitor expired after ${dur} with no events delivered. ${stderrHint}Re-arm it if you still need the watch — and widen the filter if silence was unexpected.]`
   }
   return `[Monitor expired after ${dur} with ${eventCount} ${plural(eventCount, 'event')} delivered. Re-arm it if you still need the watch.]`
 }

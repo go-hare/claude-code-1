@@ -123,14 +123,17 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
         streamMode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     }
 
-    // densable Vwo — cancel pending dynamic /loop wakeups on user abort.
-    // Official: if(Vwo()>0) bump cancel-count; still proceed with tengu_cancel.
-    try {
-      const { cancelLoopWakeupsOnUserAbort } =
-        require('../utils/loopDynamic.js') as typeof import('../utils/loopDynamic.js')
-      cancelLoopWakeupsOnUserAbort()
-    } catch {
-      // loopDynamic may be unavailable in partial test mocks
+    // densable Vwo + 2.1.326 #168: cancel pending dynamic /loop wakeups on user
+    // abort only when interrupting a running turn or pressing Esc on empty input
+    // (never when pressing Esc over typed text).
+    if (!inputValue || (abortSignal !== undefined && !abortSignal.aborted)) {
+      try {
+        const { cancelLoopWakeupsOnUserAbort } =
+          require('../utils/loopDynamic.js') as typeof import('../utils/loopDynamic.js')
+        cancelLoopWakeupsOnUserAbort()
+      } catch {
+        // loopDynamic may be unavailable in partial test mocks
+      }
     }
 
     // densable $l / #20: Esc while selecting a queued message clears selection
@@ -252,15 +255,15 @@ export function CancelRequestHandler(props: CancelRequestHandlerProps): null {
   // Escape (chat:cancel) defers to mode-exit when in special mode with empty
   // input, and to useBackgroundTaskNavigation when viewing a teammate.
   // densable `Z=RPs()==="visible"` → `!Z` so Select owns Esc while chrome shows.
-  // Official 2.1.295 (#456): Esc at idle prompt cancels pending /loop wakeups,
-  // while Ctrl+C at idle prompt leaves them alone so double Ctrl+C detaches.
+  // Official 2.1.295 (#456) + 2.1.326 (#168): Esc at EMPTY idle prompt cancels
+  // pending /loop wakeups, but Esc over typed text must NOT cancel a pending /loop.
   const isEscapeActive =
     isContextActive &&
     !isDialogChromeVisible &&
     (canCancelRunningTask ||
       hasEditableQueuedCommands ||
       isQuotaAutoResumeEscTarget ||
-      hasPendingLoopWakeup) &&
+      (hasPendingLoopWakeup && !inputValue)) &&
     !isInSpecialModeWithEmptyInput &&
     !isViewingTeammate
 

@@ -15,6 +15,8 @@ type Props = {
   isLast: boolean;
   isResolved: boolean;
   isError: boolean;
+  /** #111 (2.1.326): distinguish stopped ('killed') from failed vs completed. */
+  status?: 'completed' | 'failed' | 'killed';
   isAsync?: boolean;
   shouldAnimate: boolean;
   lastToolInfo?: string | null;
@@ -32,7 +34,8 @@ export function AgentProgressLine({
   color,
   isLast,
   isResolved,
-  isError: _isError,
+  isError,
+  status,
   isAsync = false,
   shouldAnimate: _shouldAnimate,
   lastToolInfo,
@@ -40,14 +43,21 @@ export function AgentProgressLine({
 }: Props): React.ReactNode {
   const treeChar = isLast ? '└─' : '├─';
   const isBackgrounded = isAsync && isResolved;
+  const isStoppedOrFailed = isResolved && !isBackgrounded && (isError || status === 'failed' || status === 'killed');
 
-  // Determine the status text
+  // Determine the status text (#111: stopped/failed parallel agents never show "Done")
   const getStatusText = (): string => {
     if (!isResolved) {
       return lastToolInfo || 'Initializing…';
     }
     if (isBackgrounded) {
       return taskDescription ?? 'Running in the background';
+    }
+    if (status === 'killed') {
+      return 'Stopped';
+    }
+    if (isError || status === 'failed') {
+      return 'Failed';
     }
     return 'Done';
   };
@@ -90,7 +100,9 @@ export function AgentProgressLine({
       {!isBackgrounded && (
         <Box paddingLeft={3} flexDirection="row">
           <Text dimColor>{isLast ? '   ⎿  ' : '│  ⎿  '}</Text>
-          <Text dimColor>{getStatusText()}</Text>
+          <Text color={isStoppedOrFailed ? 'error' : undefined} dimColor={!isStoppedOrFailed}>
+            {getStatusText()}
+          </Text>
         </Box>
       )}
     </Box>

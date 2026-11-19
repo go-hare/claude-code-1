@@ -53,10 +53,12 @@ export {
 // Error utilities
 export {
   formatAPIError,
+  formatCertSignatureFailureCause,
   extractConnectionErrorDetails,
   SOCKET_CONNECTION_CLOSED_PREFIX,
   sanitizeAPIError,
   getSSLErrorHint,
+  isCertSignatureFailureError,
   type ConnectionErrorDetails,
 } from './errorUtils.js'
 

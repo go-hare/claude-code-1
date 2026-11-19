@@ -225,6 +225,16 @@ import type {
 } from '../types/message.js'
 import { execAgentHook } from './hooks/execAgentHook.js'
 import { execHttpHook } from './hooks/execHttpHook.js'
+import {
+  formatHookErrorOutput,
+  HOOK_EXIT_127_PRETOOL_MESSAGE,
+} from './hooks/hookErrorDisplay.js'
+export {
+  formatHookErrorOutput,
+  HOOK_ERROR_COLLAPSED_MAX_CHARS,
+  HOOK_ERROR_EXPANDED_MAX_CHARS,
+  HOOK_EXIT_127_PRETOOL_MESSAGE,
+} from './hooks/hookErrorDisplay.js'
 import { execMcpToolHook } from './hooks/execMcpToolHook.js'
 import { ownerOfPluginToolServerKey } from './plugins/pluginToolRegistry.js'
 import type { ShellCommand } from './ShellCommand.js'
@@ -1991,7 +2001,10 @@ export function processHookJSONOutput({
         result.permissionBehavior = 'allow'
         break
       case 'block':
+        // Official 2.1.326 #296: `"decision": "block"` sets deny + reason +
+        // blockingError and cannot be downgraded by a weaker permissionDecision.
         result.permissionBehavior = 'deny'
+        result.hookPermissionDecisionReason = json.reason || 'Blocked by hook'
         result.blockingError = {
           blockingError: json.reason || 'Blocked by hook',
           command,
@@ -2024,22 +2037,34 @@ export function processHookJSONOutput({
     json.hookSpecificOutput?.hookEventName === 'PreToolUse' &&
     json.hookSpecificOutput.permissionDecision
   ) {
+    // Official 2.1.326 #296: If top-level `"decision": "block"` was already
+    // emitted, keep the block rather than downgrading to allow/ask/defer.
+    const alreadyBlocked = json.decision === 'block'
     switch (json.hookSpecificOutput.permissionDecision) {
       case 'allow':
-        result.permissionBehavior = 'allow'
+        if (!alreadyBlocked) {
+          result.permissionBehavior = 'allow'
+        }
         break
       case 'deny':
         result.permissionBehavior = 'deny'
         result.blockingError = {
-          blockingError: json.reason || 'Blocked by hook',
+          blockingError:
+            json.hookSpecificOutput.permissionDecisionReason ||
+            json.reason ||
+            'Blocked by hook',
           command,
         }
         break
       case 'ask':
-        result.permissionBehavior = 'ask'
+        if (!alreadyBlocked) {
+          result.permissionBehavior = 'ask'
+        }
         break
       case 'defer':
-        result.permissionBehavior = 'defer'
+        if (!alreadyBlocked) {
+          result.permissionBehavior = 'defer'
+        }
         break
       default:
         // Handle unknown decision types as errors
@@ -4819,6 +4844,7 @@ async function* executeHooks({
                   jsonInput,
                   signal,
                   timeoutMs,
+                  { hookSource: matchedHook.hookSource },
                 )
               : await execMcpToolHook(
                   hook,
@@ -5463,13 +5489,28 @@ async function* executeHooks({
           exitCode: result.status,
           outcome: 'error',
         })
+        // Official 2.1.326 #249 (`wx` @318308740): When a PreToolUse hook exits
+        // 127 (command/program not found), surface an error noting that its
+        // check may not have run.
+        const rawNonBlockingStderr = result.stderr.trim()
+        const summarizedError = formatHookErrorOutput(
+          result.stderr,
+          result.stdout,
+          false,
+        )
+        const nonBlockingStderr =
+          hookEvent === 'PreToolUse' && result.status === 127
+            ? rawNonBlockingStderr
+              ? `${HOOK_EXIT_127_PRETOOL_MESSAGE}\n${rawNonBlockingStderr}`
+              : HOOK_EXIT_127_PRETOOL_MESSAGE
+            : `Failed with non-blocking status code: ${summarizedError || rawNonBlockingStderr || 'No stderr output'}`
         yield {
           message: createAttachmentMessage({
             type: 'hook_non_blocking_error',
             hookName,
             toolUseID,
             hookEvent,
-            stderr: `Failed with non-blocking status code: ${result.stderr.trim() || 'No stderr output'}`,
+            stderr: nonBlockingStderr,
             stdout: result.stdout,
             exitCode: result.status,
             command: hookCommand,
@@ -5867,6 +5908,7 @@ async function* executeHooks({
       const isHostOwnAsk =
         result.permissionBehavior === 'ask' &&
         isSdkHostOwnAskCallback(result.hook, matchedEntry)
+      let yieldedUpdatedInput = false
       if (
         result.permissionBehavior &&
         (permissionBehavior === result.permissionBehavior ||
@@ -5880,6 +5922,7 @@ async function* executeHooks({
             ? result.updatedInput
             : undefined
         if (updatedInput) {
+          yieldedUpdatedInput = true
           logForDebugging(
             `Hook ${hookEvent} (${getHookDisplayText(result.hook)}) modified tool input keys: [${Object.keys(updatedInput).join(', ')}]`,
           )
@@ -5895,15 +5938,23 @@ async function* executeHooks({
         } as AggregatedHookResult
       }
 
-      // Yield updatedInput separately for passthrough case (no permission decision)
-      // This allows hooks to modify input without making a permission decision
-      // Note: Check result.permissionBehavior (this hook's behavior), not the aggregated permissionBehavior
-      if (result.updatedInput && result.permissionBehavior === undefined) {
+      // Official 2.1.326 #248: Preserve a hook's `updatedInput` when multiple
+      // hooks answer a tool call — including when one hook returns `allow` (or
+      // passthrough) with `updatedInput` and another hook returns `ask`/`defer`
+      // so the winning `permissionBehavior` differs from this hook's own behavior
+      // (only skip when the winning decision is `deny`).
+      if (
+        result.updatedInput &&
+        !yieldedUpdatedInput &&
+        permissionBehavior !== 'deny' &&
+        result.permissionBehavior !== 'deny'
+      ) {
         logForDebugging(
           `Hook ${hookEvent} (${getHookDisplayText(result.hook)}) modified tool input keys: [${Object.keys(result.updatedInput).join(', ')}]`,
         )
         yield {
           updatedInput: result.updatedInput,
+          hookSource: matchedEntry?.hookSource,
         }
       }
       // Yield permission request result if provided (from PermissionRequest hooks)
@@ -6387,7 +6438,7 @@ async function executeHooksOutsideREPL({
   // Run all hooks in parallel with individual timeouts
   const hookPromises = matchingHooks.map(
     async (
-      { hook, pluginRoot, pluginId, skillRoot, projectRoot },
+      { hook, pluginRoot, pluginId, skillRoot, projectRoot, hookSource },
       hookIndex,
     ) => {
       // Gold289 SKo/_Ko are fixed false/null in this build: no usable
@@ -6555,6 +6606,7 @@ async function executeHooksOutsideREPL({
                   jsonInput,
                   signal,
                   timeoutMs,
+                  { hookSource },
                 )
               : await execMcpToolHook(
                   hook,

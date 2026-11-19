@@ -137,6 +137,59 @@ export function chromeSessionScope(): { sessionId: string } {
 }
 
 /**
+ * Official 2.1.326 #254 (`ipa` / `spa` / `Sgn`) — resolve the Chrome site name
+ * (host or host:port) to include as `chrome_site` on Remote Control permission
+ * requests, including when the site is already allowed in permission rules.
+ */
+const CHROME_SITE_HOST_RE = /^[a-z0-9._-]+$/
+const CHROME_SITE_IPV6_RE = /^\[[0-9a-f:.]+\]$/
+const CHROME_SITE_MAX_LEN = 253
+
+export function isValidChromeSiteName(site: string): boolean {
+  if (!site || site.length > CHROME_SITE_MAX_LEN) return false
+  const colonIdx = site.lastIndexOf(':')
+  const host =
+    colonIdx > 0 && !site.endsWith(']') ? site.slice(0, colonIdx) : site
+  const port =
+    colonIdx > 0 && !site.endsWith(']') ? site.slice(colonIdx + 1) : undefined
+  if (
+    port !== undefined &&
+    (!/^\d{1,5}$/.test(port) || Number(port) < 1 || Number(port) > 65535)
+  ) {
+    return false
+  }
+  return CHROME_SITE_HOST_RE.test(host) || CHROME_SITE_IPV6_RE.test(host)
+}
+
+export function resolveChromeSiteForPermissionPrompt(
+  toolUseId: string | undefined,
+  input?: Record<string, unknown>,
+): string | undefined {
+  const state = getChromeInstallSessionState()
+  const resolvedHost = toolUseId
+    ? state.resolvedHostByToolUseId.get(toolUseId)?.host
+    : undefined
+  if (resolvedHost) {
+    const normalized = normalizeChromeHost(resolvedHost)
+    if (isValidChromeSiteName(normalized)) return normalized
+  }
+  const urlCandidate =
+    (toolUseId ? state.resolvedUrlByToolUseId.get(toolUseId) : undefined) ??
+    (typeof input?.url === 'string' ? input.url : undefined) ??
+    state.lastExecutedTabUrlByScope.get(getSessionId())
+  if (urlCandidate) {
+    try {
+      const parsed = new URL(urlCandidate)
+      const host = normalizeChromeHost(parsed.host)
+      if (isValidChromeSiteName(host)) return host
+    } catch {
+      // fall through
+    }
+  }
+  return undefined
+}
+
+/**
  * densable VQt call arm — build PermissionOverrides for this tool use.
  */
 export function resolveChromeCallPermissionOverrides(

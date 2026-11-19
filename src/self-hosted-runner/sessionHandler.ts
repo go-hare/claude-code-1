@@ -14,7 +14,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdir, rm } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -62,6 +62,13 @@ import {
   DEFAULT_MAX_LIFETIME_GRACE_MS,
   SessionChildSupervisor,
 } from './sessionChildSupervisor.js'
+import {
+  BUILT_IN_GH_REASON_TEXT,
+  GH_STANDIN_STANDALONE_PROXY,
+  evaluateSessionBuiltInGhDecision,
+  isThirdPartyProviderEnv,
+  writeGhStandinShimIfMissing,
+} from './ghStandin.js'
 import type { HostConfigSnapshot } from './hostConfig.js'
 import {
   assertConfigDirOutsideGlobalTemp,
@@ -249,6 +256,8 @@ export type HandleSessionOpts = {
    * Default densable rBh: `"enforce"`. Root CLI default is `"warn"`.
    */
   confineRepoSettings?: ConfineRepoSettings
+  /** Official 2.1.326 #339: `--use-anthropic-gh` setting (default `'default'`). */
+  useAnthropicGh?: import('./ghStandin.js').UseAnthropicGhSetting
 }
 
 export { truncateSessionErrorText } from './sessionText.js'
@@ -953,6 +962,8 @@ export async function handleSession(
   const outcomeTracksLive: OutcomeTrack[] = []
   /** densable `Ue` — checkout-hook paths rm -rf in finally */
   const hookCheckoutPathsLive: string[] = []
+  /** Official 2.1.326 #339 — per-session built-in `gh` stand-in root dir (`<sessionId>.gh`) */
+  let ghStandinRootDirLive: string | undefined
   /**
    * densable `Ge` — epoch-stale / AKn fence trip: skip push-on-release
    * (another runner owns the session).
@@ -2241,6 +2252,73 @@ export async function handleSession(
     prepHeartbeat = undefined
 
     const spawnFn = opts.spawnChild ?? spawnSessionChild
+    // Official 2.1.326 #339: evaluate built-in `gh api` stand-in eligibility
+    // for this session; when on and no `gh` is on PATH (Linux/macOS), write
+    // the per-session stand-in shim and expose it on child PATH.
+    let ghStandinShimDir: string | undefined
+    const useAnthropicGhOpt = opts.useAnthropicGh ?? 'default'
+    if (useAnthropicGhOpt !== false) {
+      const ghDecision = evaluateSessionBuiltInGhDecision({
+        flag: true,
+        windows: process.platform === 'win32',
+        capacity,
+        standaloneProxy: Boolean(
+          process.env.SELF_HOSTED_RUNNER_AGENT_PROXY_URL,
+        ),
+        childIsOwnBinary: !process.env.SELF_HOSTED_RUNNER_EXEC_PATH,
+        essentialTrafficOnly:
+          process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC === '1' ||
+          process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC === 'true',
+        thirdPartyProvider: isThirdPartyProviderEnv(process.env),
+        startedByClaudeCode: Boolean(process.env.CLAUDE_CODE_CHILD_SESSION),
+        managedGit: Boolean(governed?.toolConfig.gitConfig),
+        olderGitProxy: Boolean(opts.anthropicGitProxyBaseUrl),
+        childKind: 'agent-loop',
+        review: false,
+      })
+      if (ghDecision === 'on') {
+        const ghStandinRootDir = join(baseDir, '_sessions', `${sessionId}.gh`)
+        const ghShimTargetDir = join(ghStandinRootDir, 'bin')
+        const shim = await writeGhStandinShimIfMissing({
+          shimDir: ghShimTargetDir,
+          command: [execPath, ...execArgs, 'self-hosted-runner'],
+          port: GH_STANDIN_STANDALONE_PROXY,
+          caBundlePath: join(
+            baseDir,
+            '_sessions',
+            `${sessionId}.git-ca-bundle.child.pem`,
+          ),
+        }).catch(err => {
+          onDebug(
+            `[runner:session] built-in gh: ${sessionId}: shim write failed: ${errMsg(err)}`,
+          )
+          return undefined
+        })
+        if (shim) {
+          ghStandinShimDir = shim.shimDir
+          ghStandinRootDirLive = ghStandinRootDir
+          const logFn = useAnthropicGhOpt === 'default' ? onDebug : onStatus
+          logFn(
+            `[runner:session] built-in gh: ${sessionId}: offered (shim at ${shim.shimPath}). Requests go to github.com through Anthropic; git is untouched.${useAnthropicGhOpt === 'default' ? ' (--use-anthropic-gh false turns it off)' : ''}`,
+          )
+        }
+      } else if (ghDecision !== 'flag_off') {
+        const logFn =
+          ghDecision === 'windows' ||
+          ghDecision === 'capacity' ||
+          ghDecision === 'not_own_binary' ||
+          ghDecision === 'essential_traffic_only' ||
+          ghDecision === 'third_party_provider' ||
+          ghDecision === 'started_by_claude_code' ||
+          useAnthropicGhOpt === 'default'
+            ? onDebug
+            : onStatus
+        logFn(
+          `[runner:session] built-in gh: ${sessionId}: not offered: ${BUILT_IN_GH_REASON_TEXT[ghDecision]}`,
+        )
+      }
+    }
+
     opts.onChildLifecycle?.('spawned')
     let childResult: SessionChildResult
     try {
@@ -2259,7 +2337,15 @@ export async function handleSession(
         capacity,
         healthPort: opts.healthPort,
         clientPlatform: opts.clientPlatform,
-        environmentVariables: envVars,
+        environmentVariables: ghStandinShimDir
+          ? {
+              ...envVars,
+              CLAUDE_CODE_USE_ANTHROPIC_GH: '1',
+              PATH: [ghStandinShimDir, envVars.PATH ?? process.env.PATH ?? '']
+                .filter(Boolean)
+                .join(delimiter),
+            }
+          : envVars,
         inferenceAccessToken: accessTokenLive,
         claudeCodeArgs,
         mcpConfigPath,
@@ -2546,6 +2632,7 @@ export async function handleSession(
         stageFileRoot,
         sessionDir,
         gitconfigPath,
+        ...(ghStandinRootDirLive ? [ghStandinRootDirLive] : []),
       ]) {
         await rm(statePath, { recursive: true, force: true }).catch(err => {
           onDebug(

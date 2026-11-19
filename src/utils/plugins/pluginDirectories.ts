@@ -167,6 +167,16 @@ export async function getPluginDataDirSize(
  * deletePluginOptions (pluginOptionsStorage.ts).
  */
 export async function deletePluginDataDir(pluginId: string): Promise<void> {
+  // Official 2.1.326 #329: also remove unreferenced extracted MCPB/DXT files.
+  try {
+    const { removePluginMcpbCache } = await import('./mcpbHandler.js')
+    await removePluginMcpbCache(pluginId)
+  } catch (e) {
+    logForDebugging(
+      `Failed to clean MCPB cache for ${pluginId}: ${errorMessage(e)}`,
+      { level: 'warn' },
+    )
+  }
   const dir = pluginDataDirPath(pluginId)
   try {
     await rm(dir, { recursive: true, force: true })

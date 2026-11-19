@@ -5292,6 +5292,19 @@ export async function* query(
   | { type: 'spinner_mode'; mode: SpinnerMode },
   Terminal
 > {
+  // Official 2.1.326 (#333): release deferred Cowork cloud OpenTelemetry export
+  // on the first turn (idle sessions that never run a turn emit nothing).
+  if (!params.toolUseContext.agentId) {
+    try {
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      const { releaseDeferredTelemetryForFirstTurn } =
+        require('./entrypoints/init.js') as typeof import('./entrypoints/init.js')
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      releaseDeferredTelemetryForFirstTurn()
+    } catch {
+      // isolation — optional in unit tests
+    }
+  }
   // densable `cxr()` — flush pending $.ui.invalidate(...) before turn context loads.
   applyPendingUiInvalidations({
     'prompt.section': clearSystemPromptSections,

@@ -38,6 +38,7 @@ import { PERMISSION_MODES } from '../../types/permissions.js'
 import type { AppState } from '../../state/AppStateStore.js'
 import { getClipboardPath, instances, stringWidth } from '@anthropic/ink'
 import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
+import { findCodeModePrimitiveTool } from '../../services/codeMode/optIn.js'
 import {
   applyPluginToolListDenyRules,
   applyPluginToolListFilter,
@@ -8157,10 +8158,34 @@ async function runHostToolCallXL(
     ? (baseCtx.options.tools as Array<{ name?: string }>)
     : []
   const foundFromCtx = ctxTools.find(tool => tool.name === toolName)
-  const found =
+  const foundDirectly =
     foundFromCtx ??
     listed.find(tool => tool.name === toolName) ??
     listed.find(tool => tool.name === resolveSessionToolName(toolName))
+  const permissionContext =
+    (
+      baseCtx as
+        | { getAppState?: () => { toolPermissionContext?: unknown } }
+        | undefined
+    )?.getAppState?.()?.toolPermissionContext ?? app?.toolPermissionContext
+  const primitiveToolGrant = (
+    baseCtx as { primitiveToolGrant?: ReadonlySet<string> } | undefined
+  )?.primitiveToolGrant
+  const codeModeLookupPool = (ctxTools.length > 0 ? ctxTools : listed).filter(
+    (t): t is { name: string } =>
+      typeof t.name === 'string' && t.name.length > 0,
+  )
+  // Official 2.1.326 #76 (`pke` / `gAa`): fall back to hidden Code Mode
+  // primitive tools when a mod invokes `$.tool.call` while Code Mode is active.
+  const codeModeFallback = foundDirectly
+    ? undefined
+    : findCodeModePrimitiveTool(
+        toolName,
+        codeModeLookupPool,
+        permissionContext,
+        primitiveToolGrant,
+      )
+  const found = foundDirectly ?? codeModeFallback
 
   if (found && ctxHost && ctxTools.length > 0) {
     const { randomUUID } = await import('crypto')
@@ -8189,8 +8214,18 @@ async function runHostToolCallXL(
       })
     }
     // gold gyt: `{...toolContext, hookCaller: plugin}` so tqn can skip classifier.
+    // Official 2.1.326 #76: when resolved via `findCodeModePrimitiveTool`,
+    // include the primitive tool in `options.tools` so `runToolUse` can invoke it.
     const toolUseContext = {
       ...baseCtx,
+      ...(codeModeFallback !== undefined
+        ? {
+            options: {
+              ...baseCtx?.options,
+              tools: [...ctxTools, codeModeFallback],
+            },
+          }
+        : {}),
       abortController: localAbort,
       ...(plugin !== '' ? { hookCaller: plugin } : {}),
     }
@@ -11376,6 +11411,11 @@ export async function evaluateUiRender(
   if (hoverReason !== undefined) {
     logUiRenderRefused(component, hoverReason)
     throw new Error(hoverReason)
+  }
+  const modPropsReason = uiRenderModPropsCheck(tree)
+  if (modPropsReason !== undefined) {
+    logUiRenderRefused(component, modPropsReason)
+    throw new Error(modPropsReason)
   }
   const rowsReason = uiRenderDialogRowsCheck(tree, component, surface)
   if (rowsReason !== undefined) {
@@ -14713,6 +14753,190 @@ export const UI_TEXT_WEIGHTS = new Set([
   'bold',
 ])
 export const UI_TEXT_DIRS = new Set(['ltr', 'rtl'])
+/** Official 2.1.326 #10: mod Box `overflowX` allowed values. */
+export const UI_BOX_OVERFLOW_X_VALUES = new Set(['visible', 'hidden', 'scroll'])
+/** Official 2.1.326 #10: mod Text `wrap` allowed values (including `'clip'`). */
+export const UI_TEXT_WRAP_VALUES = new Set([
+  'wrap',
+  'end',
+  'middle',
+  'truncate',
+  'truncate-end',
+  'truncate-middle',
+  'truncate-start',
+  'clip',
+])
+/** Official 2.1.326 #10: upper bound for mod Text `maxLines` (`W4e = 10_000`). */
+export const UI_TEXT_MAX_LINES_LIMIT = 10_000
+
+export function validateModBoxOverflowX(value: unknown): string | undefined {
+  return typeof value === 'string' && UI_BOX_OVERFLOW_X_VALUES.has(value)
+    ? undefined
+    : `must be one of ${[...UI_BOX_OVERFLOW_X_VALUES].join(', ')}`
+}
+
+export function validateModTextWrap(value: unknown): string | undefined {
+  return typeof value === 'string' && UI_TEXT_WRAP_VALUES.has(value)
+    ? undefined
+    : `must be one of ${[...UI_TEXT_WRAP_VALUES].join(', ')}`
+}
+
+export function validateModTextMaxLines(value: unknown): string | undefined {
+  return typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= 1 &&
+    value <= UI_TEXT_MAX_LINES_LIMIT
+    ? undefined
+    : `must be a whole number from 1 to ${UI_TEXT_MAX_LINES_LIMIT}`
+}
+
+/**
+ * Official 2.1.326 #10: validate mod UI `Box.overflowX`, `Text.wrap`, and
+ * `Text.maxLines` props across a rendered drawing tree.
+ */
+export function uiRenderModPropsCheck(tree: unknown): string | undefined {
+  const walk = (node: unknown): string | undefined => {
+    if (Array.isArray(node)) {
+      for (const child of node) {
+        const reason = walk(child)
+        if (reason !== undefined) return reason
+      }
+      return undefined
+    }
+    if (!isEventRecord(node)) return undefined
+    const type = typeof node.type === 'string' ? node.type : undefined
+    const drawn = isEventRecord(node.props) ? node.props : node
+    if (type === 'Box' && drawn.overflowX !== undefined) {
+      const err = validateModBoxOverflowX(drawn.overflowX)
+      if (err !== undefined) {
+        return `Box prop "overflowX" ${err}`
+      }
+    }
+    if (type === 'Text') {
+      if (drawn.wrap !== undefined) {
+        const err = validateModTextWrap(drawn.wrap)
+        if (err !== undefined) {
+          return `Text prop "wrap" ${err}`
+        }
+      }
+      if (drawn.maxLines !== undefined) {
+        const err = validateModTextMaxLines(drawn.maxLines)
+        if (err !== undefined) {
+          return `Text prop "maxLines" ${err}`
+        }
+      }
+    }
+    if (node.children !== undefined) {
+      const reason = walk(node.children)
+      if (reason !== undefined) return reason
+    }
+    const props = isEventRecord(node.props) ? node.props : undefined
+    if (props?.children !== undefined) {
+      const reason = walk(props.children)
+      if (reason !== undefined) return reason
+    }
+    return undefined
+  }
+  return walk(tree)
+}
+
+/**
+ * Official 2.1.326 #10 (`uMn`): resolve precedence when both `maxLines` and
+ * `wrap` are present on a mod `Text` element.
+ */
+export function normalizeModTextWrapAndMaxLines(
+  props: Record<string, unknown>,
+): Record<string, unknown> {
+  if (props.maxLines === undefined || props.wrap === undefined) return props
+  const { maxLines, wrap, ...rest } = props
+  switch (wrap) {
+    case 'wrap':
+    case 'end':
+    case 'truncate':
+    case 'truncate-end':
+      return { ...rest, maxLines }
+    default:
+      return { ...rest, wrap }
+  }
+}
+
+/**
+ * Official 2.1.326 #10 (`Den`): normalize a mod UI tree for `Box`
+ * `overflowX="scroll"` containers (`flexWrap: "nowrap"`, `minWidth: 0`, and
+ * single-line `truncate-end` fallback for nested `Text` children).
+ */
+export function normalizeModScrollXTree<T>(node: T, inScrollX = false): T {
+  if (Array.isArray(node)) {
+    return node.map(child => {
+      if (
+        inScrollX &&
+        (typeof child === 'string' ||
+          (isEventRecord(child) && child.type === 'Link'))
+      ) {
+        return {
+          type: 'Text',
+          props: { wrap: 'truncate-end' },
+          children: [child],
+        }
+      }
+      return normalizeModScrollXTree(child, inScrollX)
+    }) as T
+  }
+  if (!isEventRecord(node)) return node
+  if (node.type === 'Text' && inScrollX) {
+    const rawProps = isEventRecord(node.props) ? node.props : {}
+    const { maxLines: _dropMaxLines, ...restProps } = rawProps
+    const shouldTruncate =
+      restProps.wrap === undefined || restProps.wrap === 'wrap'
+    return {
+      ...node,
+      props: shouldTruncate
+        ? { ...restProps, wrap: 'truncate-end' }
+        : restProps,
+    } as T
+  }
+  if (node.type !== 'Box') return node
+  const rawProps = isEventRecord(node.props) ? node.props : {}
+  const { overflowX, ...restProps } = rawProps
+  const nextInScrollX =
+    overflowX === 'scroll' || (inScrollX && restProps.width === undefined)
+  const mapChildren = (list: unknown[]): unknown[] =>
+    list.map(child => {
+      if (
+        typeof child === 'string' ||
+        (isEventRecord(child) && child.type === 'Link')
+      ) {
+        return nextInScrollX
+          ? {
+              type: 'Text',
+              props: { wrap: 'truncate-end' },
+              children: [child],
+            }
+          : child
+      }
+      return normalizeModScrollXTree(child, nextInScrollX)
+    })
+  const baseNextProps = nextInScrollX
+    ? {
+        flexWrap: 'nowrap',
+        minWidth: 0,
+        ...restProps,
+        ...(overflowX !== undefined ? { overflowX } : {}),
+      }
+    : rawProps
+  const nextProps =
+    !Array.isArray(node.children) && Array.isArray(baseNextProps.children)
+      ? { ...baseNextProps, children: mapChildren(baseNextProps.children) }
+      : baseNextProps
+  const children = Array.isArray(node.children)
+    ? mapChildren(node.children)
+    : node.children
+  return {
+    ...node,
+    props: nextProps,
+    ...(children !== undefined ? { children } : {}),
+  } as T
+}
 export const UI_BOX_NAMED_SPACING = {
   xs: { across: 1, down: 0 },
   sm: { across: 1, down: 0 },
@@ -15884,7 +16108,32 @@ async function runToolCheck(
     name: string
     requiresUserInteraction?: () => boolean
   }>
-  const matchedTool = tools.find(tool => tool.name === toolName)
+  const baseCtx = functionHooksToolUseContext?.getToolUseContext?.()
+  const app = functionHooksAppStateReader?.()
+  const permissionContext =
+    (
+      baseCtx as
+        | { getAppState?: () => { toolPermissionContext?: unknown } }
+        | undefined
+    )?.getAppState?.()?.toolPermissionContext ?? app?.toolPermissionContext
+  const primitiveToolGrant = (
+    baseCtx as { primitiveToolGrant?: ReadonlySet<string> } | undefined
+  )?.primitiveToolGrant
+  // Official 2.1.326 #76 (`pke` / `gAa`): fall back to hidden Code Mode
+  // primitive tools when a mod invokes `$.tool.check` while Code Mode is active.
+  const matchedTool =
+    tools.find(tool => tool.name === toolName) ??
+    (findCodeModePrimitiveTool(
+      toolName,
+      tools,
+      permissionContext,
+      primitiveToolGrant,
+    ) as
+      | {
+          name: string
+          requiresUserInteraction?: () => boolean
+        }
+      | undefined)
   if (!toolCheckHandler && tools.length > 0 && !matchedTool) {
     const prefix = plugin !== undefined && plugin !== '' ? `${plugin}: ` : ''
     throw new Error(

@@ -1,3 +1,12 @@
+export type SearchRetryStatus = {
+  kind: 'retrying' | 'stalled' | 'error' | 'auto_mode_unavailable'
+  deadline?: number
+  attempt?: number
+  maxRetries?: number
+  retryInMs?: number
+  error?: unknown
+}
+
 export interface SearchResult {
   title: string
   url: string
@@ -20,9 +29,11 @@ export interface SearchOptions {
 }
 
 export interface SearchProgress {
-  type: 'query_update' | 'search_results_received'
+  type: 'query_update' | 'search_results_received' | 'search_retry'
   query?: string
   resultCount?: number
+  /** Official 2.1.326 (#175): retry status emitted while WebSearch retries */
+  status?: SearchRetryStatus | null
 }
 
 export interface WebSearchAdapter {

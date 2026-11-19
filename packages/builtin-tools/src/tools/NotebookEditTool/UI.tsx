@@ -26,22 +26,28 @@ export function renderToolUseMessage(
   { notebook_path, cell_id, new_source, cell_type, edit_mode }: Partial<z.infer<ReturnType<typeof inputSchema>>>,
   { verbose }: { verbose: boolean },
 ): React.ReactNode {
-  if (!notebook_path || !new_source || !cell_type) {
+  // Official 2.1.326 #227 (`ee`): only require notebook_path so delete edits or
+  // edits omitting cell_type still render a tool row, and omit `@cell_id` when
+  // inserting at the top without a cell_id.
+  if (!notebook_path) {
     return null;
   }
   const displayPath = verbose ? notebook_path : getDisplayPath(notebook_path);
+  const cellSuffix = cell_id ? `@${cell_id}` : '';
   if (verbose) {
+    const contentPart = new_source ? `, content: ${new_source.slice(0, 30)}…` : '';
+    const cellTypePart = cell_type ? `, cell_type: ${cell_type}` : '';
     return (
       <>
         <FilePathLink filePath={notebook_path}>{displayPath}</FilePathLink>
-        {`@${cell_id}, content: ${new_source.slice(0, 30)}…, cell_type: ${cell_type}, edit_mode: ${edit_mode ?? 'replace'}`}
+        {`${cellSuffix}${contentPart}${cellTypePart}, edit_mode: ${edit_mode ?? 'replace'}`}
       </>
     );
   }
   return (
     <>
       <FilePathLink filePath={notebook_path}>{displayPath}</FilePathLink>
-      {`@${cell_id}`}
+      {cellSuffix}
     </>
   );
 }

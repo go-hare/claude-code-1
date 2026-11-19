@@ -602,8 +602,18 @@ export const MonitorTool = buildTool({
       });
     }
 
+    // Official 2.1.326 #258: track piped stdout byte count so on 0-event
+    // expiry we can tell whether the monitor command wrote to stderr.
+    let pipedStdoutBytes = 0;
+    const onMonitorStdout = feature('MONITOR_TOOL')
+      ? (chunk: string) => {
+          pipedStdoutBytes += Buffer.byteLength(chunk, 'utf8');
+          pump?.onData(chunk);
+        }
+      : undefined;
+
     const shellCommand = await exec(command, abortController.signal, 'bash', {
-      onStdout: feature('MONITOR_TOOL') ? pump?.onData : undefined,
+      onStdout: onMonitorStdout,
       preventCwdChanges: true,
       shouldUseSandbox: shouldUseSandbox({ command }),
       agentWorktree: context.agentWorktree,
@@ -667,9 +677,16 @@ export const MonitorTool = buildTool({
               if (stream.isClosed()) return;
               stream.flush();
               if (stream.isClosed()) return;
+              // Official 2.1.326 #258 (`I5o` @305453842): if the command wrote
+              // to stderr (totalBytes > pipedStdoutBytes or non-empty stderr),
+              // include the output file path in the 0-event expiry notice.
+              const stderrOutputFile =
+                shellCommand.taskOutput.totalBytes > pipedStdoutBytes || shellCommand.taskOutput.getStderr().length > 0
+                  ? shellCommand.taskOutput.path
+                  : undefined;
               notifyMonitorStreamEvent(
                 description,
-                monitorExpiredEvent(S.timeout_ms, stream.eventCount(), bounded),
+                monitorExpiredEvent(S.timeout_ms, stream.eventCount(), bounded, stderrOutputFile),
                 handle.taskId,
                 {
                   isHousekeeping: true,

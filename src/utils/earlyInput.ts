@@ -11,6 +11,7 @@
  * 3. stopCapturingEarlyInput() is called automatically when input is consumed
  */
 
+import { shouldSkipEarlyInputForPipedHelp } from '../cli/promptAfterListOption.js'
 import { lastGrapheme } from './intl.js'
 
 // Buffer for early input characters
@@ -36,7 +37,8 @@ export function startCapturingEarlyInput(): void {
     !process.stdin.isTTY ||
     isCapturing ||
     process.argv.includes('-p') ||
-    process.argv.includes('--print')
+    process.argv.includes('--print') ||
+    shouldSkipEarlyInputForPipedHelp(process.argv.slice(2))
   ) {
     return
   }

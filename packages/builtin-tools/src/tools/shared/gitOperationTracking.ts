@@ -376,23 +376,79 @@ export function parseGitCommitId(stdout: string): string | undefined {
   return match?.[1]
 }
 
+const GIT_PUSH_BRANCH_RE =
+  /^\s*[+\-*!= ]?\s*(?:\[new branch\]|[0-9a-f]+\.\.+[0-9a-f]+)\s+(\S+)\s*->\s*(\S+)/m
+
 /**
- * densable 2.1.223 #15 — parse branch name from git push output.
- * Push writes progress to stderr but the ref update line
- * ("abc..def  branch -> branch", "* [new branch] branch -> branch", or
- * " + abc...def  branch -> branch (forced update)") is the signal.
- * Works on either stdout or stderr. Git prefixes each ref line with a status
- * flag (space, +, -, *, !, =); the char class tolerates any.
- *
- * SEA gold (no catastrophic backtrack on long non-hex `\S+..\S+` runs):
- * `/^\s*[+\-*!= ]?\s*(?:\[new branch\]|[0-9a-f]+\.\.+[0-9a-f]+)\s+\S+\s*->\s*(\S+)/m`
- * Local previously used `\S+\.\.+\S+` which can hang on pathological output.
+ * Official 2.1.326 #212 (`mk`): strip ANSI carriage/erase sequences so line-based
+ * push/fetch parsing sees real line boundaries.
+ */
+function normalizeGitOutputLines(output: string): string {
+  return (
+    output
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: strip ANSI CSI erase-line sequences from git output
+      .replace(/\x1b\[[0-9;]*K/g, '')
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: convert ANSI CSI cursor-horizontal-absolute into newlines
+      .replace(/\x1b\[[0-9]*G/g, '\n')
+      .replace(/\r/g, '\n')
+  )
+}
+
+/**
+ * Official 2.1.326 #212 (`_k`): collect destination branches appearing directly
+ * under `To <remote>` headers (git push output), ignoring `From <remote>` blocks
+ * produced by an earlier `git fetch` or `git pull` in the same command.
+ */
+export function parseGitPushBranchesUnderTo(output: string): string[] {
+  const lines = normalizeGitOutputLines(output)
+    .split('\n')
+    .filter(line => line !== '')
+  const branches = new Set<string>()
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i]!.startsWith('To ')) continue
+    for (let j = i + 1; j < lines.length && /^\s/.test(lines[j]!); j++) {
+      const target = lines[j]!.match(GIT_PUSH_BRANCH_RE)?.[2]
+      if (target) branches.add(target)
+    }
+  }
+  return [...branches]
+}
+
+/**
+ * Official 2.1.326 #212 (`Bf`): `gh` prints `X Pull request ...` when it refuses
+ * a merge/close/ready/reopen action even if the shell pipeline hid the exit code.
+ */
+const GH_PR_REFUSED_RE = /\bX Pull request /
+export function isGhPrActionRefused(action: PrAction, output = ''): boolean {
+  return (
+    action !== 'created' &&
+    action !== 'edited' &&
+    action !== 'commented' &&
+    GH_PR_REFUSED_RE.test(output)
+  )
+}
+
+/**
+ * densable 2.1.223 #15 + 2.1.326 #212 — parse branch name from git push output.
+ * Push writes progress to stderr under `To <remote>`. When a command fetched or
+ * pulled first (`From <remote>\n  abc..def main -> origin/main`), prefer ref
+ * updates under `To ` and otherwise skip remote-tracking fetch targets whose
+ * destination ends with `/<src>`.
  */
 export function parseGitPushBranch(output: string): string | undefined {
-  const match = output.match(
-    /^\s*[+\-*!= ]?\s*(?:\[new branch\]|[0-9a-f]+\.\.+[0-9a-f]+)\s+\S+\s*->\s*(\S+)/m,
-  )
-  return match?.[1]
+  const underTo = parseGitPushBranchesUnderTo(output)[0]
+  if (underTo) return underTo
+  const normalized = normalizeGitOutputLines(output)
+  for (const match of normalized.matchAll(
+    new RegExp(GIT_PUSH_BRANCH_RE.source, 'gm'),
+  )) {
+    const src = match[1]
+    const dst = match[2]
+    if (dst && (!src || !dst.endsWith(`/${src}`))) {
+      return dst
+    }
+  }
+  return undefined
 }
 
 /**
@@ -447,8 +503,11 @@ export function detectGitOperation(
     }
   }
   if (GIT_PUSH_RE.test(command)) {
-    const branch = parseGitPushBranch(output)
-    if (branch) result.push = { branch }
+    const pushSeg = pushArgsSegment(command)
+    if (!GIT_PUSH_DRY_RUN_RE.test(pushSeg)) {
+      const branch = parseGitPushBranch(output)
+      if (branch) result.push = { branch }
+    }
   }
   if (
     GIT_MERGE_RE.test(command) &&
@@ -462,7 +521,7 @@ export function detectGitOperation(
     if (ref) result.branch = { ref, action: 'rebased' }
   }
   const prAction = GH_PR_ACTIONS.find(a => a.re.test(command))?.action
-  if (prAction) {
+  if (prAction && !isGhPrActionRefused(prAction, output)) {
     const pr = findPrInStdout(output)
     if (pr) {
       result.pr = { number: pr.prNumber, url: pr.prUrl, action: prAction }

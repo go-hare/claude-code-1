@@ -416,14 +416,22 @@ export function UserAgentNotificationMessage({
       />
     ) : (
       <Box flexDirection="column" marginTop={addMargin ? 1 : 0}>
-        <Text>
-          <Text aria-hidden color={color}>
-            {BLACK_CIRCLE}
-          </Text>{' '}
-          {shownSummary}
-          {durationSuffix ? <Text dimColor>{durationSuffix}</Text> : null}
-          {deliverySuffix ? <Text dimColor>{deliverySuffix}</Text> : null}
-        </Text>
+        {/* Official 2.1.326 #118 (`nh` -> `ui`): 2-column bullet row so wrapped
+            background agent / command results align with their text, not under the bullet. */}
+        <Box flexDirection="row">
+          <Box minWidth={2}>
+            <Text aria-hidden color={color}>
+              {BLACK_CIRCLE}
+            </Text>
+          </Box>
+          <Box flexDirection="column" flexGrow={1}>
+            <Text>
+              {shownSummary}
+              {durationSuffix ? <Text dimColor>{durationSuffix}</Text> : null}
+              {deliverySuffix ? <Text dimColor>{deliverySuffix}</Text> : null}
+            </Text>
+          </Box>
+        </Box>
         {verbose && deliveryOutput ? (
           <Box paddingLeft={2}>
             <Text dimColor>{deliveryOutput}</Text>

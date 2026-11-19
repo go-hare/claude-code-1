@@ -12,6 +12,7 @@ import {
   getContextWindowForModel,
   isRecognizedModelForWindowEnforcement,
 } from '../../utils/context.js'
+import { getRuntimeMainLoopModel } from '../../utils/model/model.js'
 import { isFableModel } from '../../utils/fableConsent.js'
 import { isFableCreditsSuffixExempt } from '../../utils/model/fableCreditsLabel.js'
 import { logForDebugging } from '../../utils/debug.js'
@@ -586,7 +587,15 @@ export async function autoCompactIfNeeded(
     return { wasCompacted: false }
   }
 
-  const model = toolUseContext.options.mainLoopModel
+  // Official 2.1.326 (#332): resolve runtime model for current permission mode
+  // so plan mode with `opusplan` compacts using Opus (the active runtime model)
+  // rather than the raw alias/non-plan model.
+  const appStateForModel = toolUseContext.getAppState()
+  const model = getRuntimeMainLoopModel({
+    permissionMode: appStateForModel.toolPermissionContext.mode,
+    mainLoopModel: toolUseContext.options.mainLoopModel,
+    isSubagent: Boolean(toolUseContext.agentId),
+  })
   const shouldCompact = await shouldAutoCompact(
     messages,
     model,
@@ -691,22 +700,27 @@ export async function autoCompactIfNeeded(
       (tracking?.consecutiveFailures ?? 0) === 0
         ? findLargerPreviousModelForCompact(messages, model, snipTokensFreed)
         : undefined
+    const effectiveCompactModel = largerPrevModel ?? model
     const compactContext =
-      largerPrevModel !== undefined
+      effectiveCompactModel !== toolUseContext.options.mainLoopModel
         ? {
             ...toolUseContext,
             options: {
               ...toolUseContext.options,
-              mainLoopModel: largerPrevModel,
+              mainLoopModel: effectiveCompactModel,
             },
           }
         : toolUseContext
+    const resolvedCacheSafeParams: CacheSafeParams =
+      compactContext !== toolUseContext
+        ? { ...cacheSafeParams, toolUseContext: compactContext }
+        : cacheSafeParams
 
     const compactionResult = await runWithSubagentCompactContext(() =>
       compactConversation(
         messages,
         compactContext,
-        cacheSafeParams,
+        resolvedCacheSafeParams,
         true, // Suppress user questions for autocompact
         undefined, // No custom instructions for autocompact
         true, // isAutoCompact

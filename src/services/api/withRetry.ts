@@ -88,7 +88,10 @@ import {
   NAME_CONSTRAINT_CERT_ERROR_CODES,
   REPEATED_529_ERROR_MESSAGE,
 } from './errors.js'
-import { extractConnectionErrorDetails } from './errorUtils.js'
+import {
+  extractConnectionErrorDetails,
+  isCertSignatureFailureError,
+} from './errorUtils.js'
 import { STREAM_NO_RESPONSE_RETRY_CAP } from '../../utils/firstByteWatchdog.js'
 
 const abortError = () => new APIUserAbortError()
@@ -219,6 +222,98 @@ const STALE_CONNECTION_CODES = new Set([
 ])
 
 /** densable EYy / 2.1.214 #18+#46 + 2.1.321 #1878 StreamTruncated */
+/**
+ * Official 2.1.326 (#51) `gxs` / `hxs` / `xCt` / `y9e`:
+ * When the API rejects a request with HTTP 400
+ * `max_tokens: X > Y, which is the maximum allowed number of output tokens for ...`
+ * lower `max_tokens` to the API-reported maximum `Y` (>= 4096), retry once,
+ * and remember that ceiling per normalized model until `/clear`.
+ */
+const API_MAX_TOKENS_CEILING_RE =
+  /max_tokens:\s*(\d+)\s*>\s*(\d+),\s*which is the maximum allowed number of output tokens for\b/i
+export const MIN_API_MAX_TOKENS_CEILING = 4096
+const modelMaxTokensCeilingCache = new Map<string, number>()
+
+function normalizeModelKeyForCeiling(model: string): string {
+  return model.trim().toLowerCase()
+}
+
+export function getCachedModelMaxTokensCeiling(
+  model: string,
+): number | undefined {
+  return modelMaxTokensCeilingCache.get(normalizeModelKeyForCeiling(model))
+}
+
+export function setCachedModelMaxTokensCeiling(
+  model: string,
+  maxTokens: number,
+): void {
+  if (maxTokens >= MIN_API_MAX_TOKENS_CEILING) {
+    modelMaxTokensCeilingCache.set(
+      normalizeModelKeyForCeiling(model),
+      maxTokens,
+    )
+  }
+}
+
+export function clearCachedModelMaxTokensCeilings(): void {
+  modelMaxTokensCeilingCache.clear()
+}
+
+export function parseApiMaxTokensCeilingError(
+  error: unknown,
+): { requested: number; maximum: number } | null {
+  if (!(error instanceof APIError) || error.status !== 400) return null
+  const match = API_MAX_TOKENS_CEILING_RE.exec(error.message)
+  if (!match) return null
+  const requested = Number(match[1])
+  const maximum = Number(match[2])
+  if (
+    !Number.isFinite(requested) ||
+    !Number.isFinite(maximum) ||
+    maximum < MIN_API_MAX_TOKENS_CEILING ||
+    maximum >= requested
+  ) {
+    return null
+  }
+  return { requested, maximum }
+}
+
+/**
+ * Official 2.1.326 (#62) `J1e` / `S_e`: in Claude Desktop's Code tab, a
+ * one-off 401 that is not explicitly an expired token retries once more after
+ * 1500ms before asking the Desktop host for a token refresh.
+ */
+export const DESKTOP_CODE_TAB_ONE_OFF_401_RETRY_DELAY_MS = 1500
+
+export function isDesktopCodeTabOneOff401Eligible(error: unknown): boolean {
+  if (!(error instanceof APIError) || error.status !== 401) return false
+  const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT
+  if (entrypoint !== 'claude-desktop' && entrypoint !== 'claude-desktop-3p') {
+    return false
+  }
+  if (
+    isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_IS_COWORK)
+  ) {
+    return false
+  }
+  if (
+    process.env.CLAUDE_CODE_OAUTH_401_WAIT_MS !== undefined &&
+    process.env.CLAUDE_CODE_OAUTH_401_WAIT_MS !== ''
+  ) {
+    return false
+  }
+  const lower = error.message.toLowerCase()
+  if (
+    lower.includes('token_expired') ||
+    lower.includes('oauth token has expired')
+  ) {
+    return false
+  }
+  return true
+}
+
 export function isStaleConnectionError(error: unknown): boolean {
   if (
     error instanceof Error &&
@@ -255,6 +350,21 @@ export interface RetryContext {
   thinkingConfig: ThinkingConfig
   fastMode?: boolean
 }
+
+export type ApiRetryStatus =
+  | {
+      kind: 'retrying'
+      deadline: number
+      attempt: number
+      maxRetries: number
+      error: { status?: number; formatted: string }
+    }
+  | {
+      kind: 'stalled'
+      elapsedMs?: number
+      attempt?: number
+      maxRetries?: number
+    }
 
 interface RetryOptions {
   maxRetries?: number
@@ -514,6 +624,12 @@ export async function* withRetry<T>(
   // Official 2.1.323 (#2005): allow at most one Desktop host credential renewal
   // on 403 (expired gateway token) per request.
   let hostAuth403Retried = false
+  // Official 2.1.326 (#62): allow one direct 1500ms retry in Desktop Code tab
+  // on a non-expired 401 before escalating to host credential refresh.
+  let desktopOneOff401State: 'unused' | 'retried' = 'unused'
+  // Official 2.1.326 (#51): allow lowering max_tokens to API-reported ceiling once
+  let maxTokensCeilingAdjusted = false
+  let pendingModelMaxTokensCeiling: { model: string; limit: number } | undefined
   // densable `Fe=new Set` @184899103 — each onError retry token fires once.
   const consumedOnErrorRetryTokens = new Set<string>()
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
@@ -686,28 +802,46 @@ export async function* withRetry<T>(
               (lastError.status === 401 || lastError.status === 403) &&
               isHostAuthTokenRefreshAvailable()
             ) {
-              // Official lfa / host_auth_401_recovery + 2.1.323 (#2005) + 2.1.325 (#2341):
-              // On 401 or 403 (organization gateway answering expired token
-              // with 403 in Claude Desktop), ask Desktop for a fresh token and retry.
-              // Race against options.signal so stopping claude-desktop-3p aborts
-              // an in-flight token renewal immediately instead of hanging on "Stopping".
-              const is403 = lastError.status === 403
-              if (is403) {
-                hostAuth403Retried = true
-              }
-              if (options.signal?.aborted) {
-                throw new APIUserAbortError()
-              }
-              const hostResult = await raceHostAuthRefreshWithSignal(
-                tryHostAuth401Recovery(options.signal),
-                options.signal,
-              )
+              // Official 2.1.326 (#62) `J1e`: in Claude Desktop's Code tab,
+              // retry a one-off non-expired 401 once after 1500ms before asking
+              // the Desktop host for a token refresh.
               if (
-                hostResult === 'failed' ||
-                hostResult === 'exhausted' ||
-                (is403 && hostResult !== 'updated')
+                desktopOneOff401State === 'unused' &&
+                isDesktopCodeTabOneOff401Eligible(lastError)
               ) {
-                throw new CannotRetryError(lastError, retryContext)
+                desktopOneOff401State = 'retried'
+                logForDebugging(
+                  `[auth] Desktop Code tab one-off 401 — retrying once after ${DESKTOP_CODE_TAB_ONE_OFF_401_RETRY_DELAY_MS}ms before requesting host token refresh`,
+                )
+                await sleep(
+                  DESKTOP_CODE_TAB_ONE_OFF_401_RETRY_DELAY_MS,
+                  options.signal,
+                  { abortError: () => new APIUserAbortError() },
+                )
+              } else {
+                // Official lfa / host_auth_401_recovery + 2.1.323 (#2005) + 2.1.325 (#2341):
+                // On 401 or 403 (organization gateway answering expired token
+                // with 403 in Claude Desktop), ask Desktop for a fresh token and retry.
+                // Race against options.signal so stopping claude-desktop-3p aborts
+                // an in-flight token renewal immediately instead of hanging on "Stopping".
+                const is403 = lastError.status === 403
+                if (is403) {
+                  hostAuth403Retried = true
+                }
+                if (options.signal?.aborted) {
+                  throw new APIUserAbortError()
+                }
+                const hostResult = await raceHostAuthRefreshWithSignal(
+                  tryHostAuth401Recovery(options.signal),
+                  options.signal,
+                )
+                if (
+                  hostResult === 'failed' ||
+                  hostResult === 'exhausted' ||
+                  (is403 && hostResult !== 'updated')
+                ) {
+                  throw new CannotRetryError(lastError, retryContext)
+                }
               }
             }
           }
@@ -716,7 +850,15 @@ export async function* withRetry<T>(
       }
 
       options.onRetryStatus?.(null)
-      return await operation(client, attempt, retryContext)
+      const result = await operation(client, attempt, retryContext)
+      if (pendingModelMaxTokensCeiling) {
+        setCachedModelMaxTokensCeiling(
+          pendingModelMaxTokensCeiling.model,
+          pendingModelMaxTokensCeiling.limit,
+        )
+        pendingModelMaxTokensCeiling = undefined
+      }
+      return result
     } catch (error) {
       // densable `if (x instanceof nd) throw x`
       if (error instanceof CannotRetryError) throw error
@@ -1046,6 +1188,30 @@ export async function* withRetry<T>(
       // densable 2.1.218 RFo: clamp to availableContext ONLY (no thinking inflate)
       // and abort when the adjustment makes no progress (doomed identical re-send).
       if (error instanceof APIError) {
+        // Official 2.1.326 (#51) `xCt`: if API says `max_tokens: X > Y, which is
+        // the maximum allowed number of output tokens for ...`, lower max_tokens
+        // to Y (>= 4096), retry once, and cache on success until /clear.
+        const ceilingData = !maxTokensCeilingAdjusted
+          ? parseApiMaxTokensCeilingError(error)
+          : null
+        if (
+          ceilingData &&
+          (retryContext.maxTokensOverride === undefined ||
+            ceilingData.maximum < retryContext.maxTokensOverride)
+        ) {
+          maxTokensCeilingAdjusted = true
+          retryContext.maxTokensOverride = ceilingData.maximum
+          pendingModelMaxTokensCeiling = {
+            model: retryContext.model,
+            limit: ceilingData.maximum,
+          }
+          logForDebugging(
+            `[max_tokens] API reported ceiling ${ceilingData.maximum} (< requested ${ceilingData.requested}) for ${retryContext.model}; retrying with lowered max_tokens`,
+            { level: 'warn' },
+          )
+          continue
+        }
+
         const overflowData = parseMaxTokensContextOverflowError(error)
         if (overflowData) {
           const { inputTokens, contextLimit } = overflowData
@@ -1875,6 +2041,11 @@ export function shouldRetry(error: APIError): boolean {
     return true
   }
 
+  // Official 2.1.326 (#51): allow retry when API reports max_tokens > model max
+  if (parseApiMaxTokensCeilingError(error) !== null) {
+    return true
+  }
+
   // Note this is not a standard header.
   const shouldRetryHeader = error.headers?.get('x-should-retry')
 
@@ -1904,11 +2075,12 @@ export function shouldRetry(error: APIError): boolean {
     if (connCode === 'BedrockUnexpectedContentType') {
       return false
     }
-    // Official 2.1.323 (#2072): certificate name-constraint errors never succeed
-    // on retry — fail fast instead of retrying for minutes.
+    // Official 2.1.323 (#2072) & 2.1.326 (#174): certificate name-constraint
+    // and CERT_SIGNATURE_FAILURE errors never succeed on retry — fail fast.
     if (
-      connCode !== undefined &&
-      NAME_CONSTRAINT_CERT_ERROR_CODES.has(connCode)
+      (connCode !== undefined &&
+        NAME_CONSTRAINT_CERT_ERROR_CODES.has(connCode)) ||
+      isCertSignatureFailureError(error)
     ) {
       return false
     }

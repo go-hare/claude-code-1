@@ -139,12 +139,23 @@ function createArgv0ShellFunction(
   argv0: string,
   binaryPath: string,
   prependArgs: string[] = [],
+  fallbackArgs: string[] = [],
 ): string {
   const quotedPath = quote([binaryPath])
   const argSuffix =
-    prependArgs.length > 0 ? `${prependArgs.join(' ')} "$@"` : '"$@"'
+    prependArgs.length > 0 ? `${prependArgs.join(' ')} \${1+"$@"}` : '${1+"$@"}'
+  const fallbackBlock =
+    fallbackArgs.length > 0
+      ? [
+          '  local _cc_a',
+          '  for _cc_a in ${1+"$@"}; do',
+          `    case "$_cc_a" in ${fallbackArgs.join('|')}) command ${funcName} \${1+"$@"}; return ;; esac`,
+          '  done',
+        ]
+      : []
   return [
     `function ${funcName} {`,
+    ...fallbackBlock,
     '  if [[ -n $ZSH_VERSION ]]; then',
     `    ARGV0=${argv0} ${quotedPath} ${argSuffix}`,
     '  elif [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]] || [[ "$OSTYPE" == "win32" ]]; then',
@@ -252,6 +263,25 @@ const VCS_DIRECTORIES_TO_EXCLUDE = [
  *
  * Returns null if embedded search tools are not available in this build.
  */
+/**
+ * Official 2.1.326 #52 (`DFs` / `OOt` @298039700):
+ * Arguments that trigger fallback to the system `grep` instead of embedded `ugrep`.
+ */
+export const UGREP_SYSTEM_GREP_FALLBACK_PATTERNS = [
+  '-*-filter*',
+  '-*-pager*',
+  '-*-view*',
+  '-*-format-open*',
+  '-*-config*',
+  '---*',
+  '-@*',
+  '-*-save-config*',
+  '-[Zz]*',
+  '-[!-]*[Zz]*',
+  '--null',
+  '--null-data',
+] as const
+
 export function createFindGrepShellIntegration(): string | null {
   if (!hasEmbeddedSearchTools()) {
     return null
@@ -267,16 +297,28 @@ export function createFindGrepShellIntegration(): string | null {
     'unalias find 2>/dev/null || true',
     'unalias grep 2>/dev/null || true',
     createArgv0ShellFunction('find', 'bfs', binaryPath, [
+      '-S',
+      'dfs',
       '-regextype',
       'findutils-default',
     ]),
-    createArgv0ShellFunction('grep', 'ugrep', binaryPath, [
-      '-G',
-      '--ignore-files',
-      '--hidden',
-      '-I',
-      ...VCS_DIRECTORIES_TO_EXCLUDE.map(d => `--exclude-dir=${d}`),
-    ]),
+    // Official 2.1.326 #52: pass `--encoding=UTF-8` so ugrep does not silently
+    // skip valid UTF-8 / non-ASCII text files, and fall back to system `grep`
+    // for ugrep-incompatible flags.
+    createArgv0ShellFunction(
+      'grep',
+      'ugrep',
+      binaryPath,
+      [
+        '-G',
+        '--ignore-files',
+        '--hidden',
+        '-I',
+        '--encoding=UTF-8',
+        ...VCS_DIRECTORIES_TO_EXCLUDE.map(d => `--exclude-dir=${d}`),
+      ],
+      [...UGREP_SYSTEM_GREP_FALLBACK_PATTERNS],
+    ),
   ].join('\n')
 }
 

@@ -9,6 +9,7 @@ import { getSubscriptionType, hasProfileScope, isClaudeAISubscriber } from 'src/
 import { getGatewayAuth } from '../../utils/gatewayEnv.js';
 import { getClaudeCodeUserAgent } from '../../utils/userAgent.js';
 import { formatTotalCost } from '../../cost-tracker.js';
+import { useIsInsideModal } from '../../context/modalContext.js';
 import { useSessionServices } from '../../context/sessionServices.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { Box, Byline, ProgressBar, Text, type Theme, useInput } from '@anthropic/ink';
@@ -238,13 +239,30 @@ function getRateLimitPromoNotices(): Array<{
 }
 
 /**
+ * Official 2.1.326 #345 (`ds` @336748779): in fullscreen mode (`/usage` inside
+ * a modal), show plan limit bars before session cost for subscribers unless
+ * opened via `/cost` (`openedForCost === true`).
+ */
+export function shouldShowPlanLimitsFirst(opts: {
+  insideModal: boolean;
+  isSubscriber: boolean;
+  apiProvider: string;
+  openedForCost: boolean;
+}): boolean {
+  return opts.insideModal && opts.isSubscriber && opts.apiProvider !== 'gateway' && !opts.openedForCost;
+}
+
+/**
  * densable Ln/$n — Usage tab shell: session cost, optional plugin footprint,
- * then gateway spend OR subscriber plan limits OR Esc.
+ * then gateway spend OR subscriber plan limits OR Esc (with plan limits first
+ * in fullscreen `/usage` for subscribers, #345).
  */
 export function Usage({
   onClose,
+  openedForCost = false,
 }: {
   onClose?: (result?: string, opts?: { display?: 'skip' | 'system' }) => void;
+  openedForCost?: boolean;
 } = {}): React.ReactNode {
   const { columns } = useTerminalSize();
   const maxWidth = Math.min(columns - 2, 80);
@@ -253,14 +271,29 @@ export function Usage({
   // session and weekly limit bars and explain why the rest are missing.
   const subscriber = isClaudeAISubscriber();
   const isThinClient = getSurfaceRemoteHandle() !== null;
-  return (
-    <UsagePane>
+  const insideModal = useIsInsideModal();
+  const apiProvider = getAPIProvider();
+  const planLimitsFirst = shouldShowPlanLimitsFirst({
+    insideModal,
+    isSubscriber: subscriber,
+    apiProvider,
+    openedForCost,
+  });
+  const sessionBlock = (
+    <>
       <SessionCostSection isThinClient={isThinClient} />
       {isPluginSkillListingFootprintEnabled() && <PluginSkillListingFootprint maxWidth={maxWidth} />}
+    </>
+  );
+  return (
+    <UsagePane>
+      {!planLimitsFirst && sessionBlock}
       {getAPIProvider() === 'gateway' ? (
         <GatewayUsageSection maxWidth={maxWidth} />
       ) : subscriber ? (
-        <PlanLimitsUsage maxWidth={maxWidth} onClose={onClose} />
+        <PlanLimitsUsage maxWidth={maxWidth} onClose={onClose}>
+          {planLimitsFirst ? sessionBlock : null}
+        </PlanLimitsUsage>
       ) : (
         <EscCancelHint />
       )}
@@ -459,9 +492,11 @@ export function formatLimitedSignInUsageNotice(hasAnyVisibleLimitBar: boolean): 
 function PlanLimitsUsage({
   maxWidth,
   onClose,
+  children,
 }: {
   maxWidth: number;
   onClose?: (result?: string, opts?: { display?: 'skip' | 'system' }) => void;
+  children?: React.ReactNode;
 }): React.ReactNode {
   const [utilization, setUtilization] = useState<Utilization | null>(
     () => seedUtilizationFromOpenHeaders()?.utilization ?? null,
@@ -543,6 +578,7 @@ function PlanLimitsUsage({
     return (
       <Box flexDirection="column" gap={1} flexShrink={0}>
         <Text color="error">Error: {error}</Text>
+        {children}
         <Text dimColor>
           <Byline>
             <ConfigurableShortcutHint action="settings:retry" context="Settings" fallback="r" description="retry" />
@@ -557,6 +593,7 @@ function PlanLimitsUsage({
     return (
       <Box flexDirection="column" gap={1} flexShrink={0}>
         <Text dimColor>Loading usage data…</Text>
+        {children}
         <EscCancelHint />
       </Box>
     );
@@ -645,6 +682,8 @@ function PlanLimitsUsage({
       <ContributingUsageSection maxWidth={maxWidth} onClose={onClose} />
 
       {utilization.extra_usage && <ExtraUsageSection extraUsage={utilization.extra_usage} maxWidth={maxWidth} />}
+
+      {children}
 
       {enrichError && <Text dimColor>{enrichError}</Text>}
       {isLoading && !enrichError && <Text dimColor>Refreshing…</Text>}

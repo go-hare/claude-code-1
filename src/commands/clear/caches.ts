@@ -154,4 +154,9 @@ export function clearSessionCaches(
   void import('@claude-code/builtin-tools/tools/SkillTool/prompt.js').then(
     ({ clearPromptCache }) => clearPromptCache(),
   )
+  // Official 2.1.326 #51: clear cached model max_tokens ceilings on session cache reset.
+  void import('../../services/api/withRetry.js').then(
+    ({ clearCachedModelMaxTokensCeilings }) =>
+      clearCachedModelMaxTokensCeilings(),
+  )
 }

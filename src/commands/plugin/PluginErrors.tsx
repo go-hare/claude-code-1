@@ -2,8 +2,12 @@ import {
   formatSyncedPluginShadowedMessage,
   formatSyncedPluginShadowedStatus,
   getPluginErrorMessage,
+  getPluginWarningHint,
+  getPluginWarningMessage,
   type PluginError,
+  type PluginWarning,
 } from '../../types/plugin.js';
+import { formatManifestFieldIgnoredMessage, MANIFEST_FIELD_IGNORED_HINT } from '../../utils/plugins/pluginLoader.js';
 
 export type PluginErrorExtended =
   | PluginError
@@ -50,6 +54,12 @@ export type PluginErrorExtended =
       heldAt?: string;
       blockedBy: string[];
       disabledPinners: string[];
+    }
+  | {
+      type: 'manifest-field-ignored';
+      source: string;
+      plugin?: string;
+      fields: string[];
     };
 
 export function formatErrorMessage(error: PluginErrorExtended): string {
@@ -144,6 +154,8 @@ export function formatErrorMessage(error: PluginErrorExtended): string {
       return `Its hooks.json hooks do not run. "${error.heldBy}" holds the same plugin name and comes first`;
     case 'hooks-module-left-out-by-name':
       return `Its hooks module does not load. "${error.heldBy}" holds the same plugin name and comes first`;
+    case 'manifest-field-ignored':
+      return formatManifestFieldIgnoredMessage(error.fields);
   }
   const _exhaustive: never = error;
   return getPluginErrorMessage(_exhaustive);
@@ -251,7 +263,36 @@ export function getErrorGuidance(error: PluginErrorExtended): string | null {
       return `One plugin per name runs hooks.json hooks, so this copy's run only while "${error.heldBy}" is disabled. Disable or uninstall the copy you don't need`;
     case 'hooks-module-left-out-by-name':
       return `One plugin per name loads a hooks module, so this copy's loads only while "${error.heldBy}" is disabled. Disable or uninstall the copy you don't need`;
+    case 'manifest-field-ignored':
+      return MANIFEST_FIELD_IGNORED_HINT;
   }
   const _exhaustive: never = error;
   return null;
+}
+
+/**
+ * Official 2.1.326 #5: format a PluginWarning (including `manifest-field-ignored`)
+ * into display message + advisory guidance for `/plugin` Errors tab and CLI.
+ */
+export function formatPluginWarningForDisplay(warning: PluginWarning): {
+  message: string;
+  guidance: string | null;
+} {
+  if (warning.type === 'manifest-field-ignored') {
+    const fields = warning.manifestFields ?? [];
+    const message =
+      warning.warning ??
+      (fields.length > 0
+        ? formatManifestFieldIgnoredMessage(fields)
+        : 'Malformed display field in plugin.json was ignored');
+    return {
+      message,
+      guidance: MANIFEST_FIELD_IGNORED_HINT,
+    };
+  }
+  const hint = getPluginWarningHint(warning);
+  return {
+    message: getPluginWarningMessage(warning),
+    guidance: hint || null,
+  };
 }

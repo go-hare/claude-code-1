@@ -83,6 +83,14 @@ export function countPendingTurnDurationWork({
 }
 
 /**
+ * Official 2.1.326 #114 (`Vy`/`zy` `hasLaterTurn`): UUID of the latest
+ * `turn_duration` message in the transcript (or `null` while a turn is loading).
+ * `undefined` when outside `<Messages>` (e.g. standalone unit tests), in which
+ * case `hasLaterTurn` defaults to `false`.
+ */
+export const LatestTurnDurationContext = React.createContext<string | null | undefined>(undefined);
+
+/**
  * densable 2.1.289 Umr (@207712030): resolve turn_duration fields and
  * backgroundWaitStartTime across background agent/workflow waits.
  */
@@ -530,8 +538,14 @@ function TurnDurationMessage({
         } hidden (/focus to show)`
       : '';
 
+  // Official 2.1.326 #114 (`Vy`/`zy` `hasLaterTurn`): earlier turns must not show
+  // the running-shell pill while a later background task is active.
+  const latestTurnDurationUuid = React.useContext(LatestTurnDurationContext);
+  const hasLaterTurn = latestTurnDurationUuid !== undefined && uuid !== latestTurnDurationUuid;
+
   const pillLabel =
     useAppStateMaybeOutsideOfProvider(s => {
+      if (hasLaterTurn) return null;
       const running = Object.values(s.tasks).filter(isBackgroundTask);
       return running.length > 0 ? getPillLabel(running) : null;
     }) ?? null;

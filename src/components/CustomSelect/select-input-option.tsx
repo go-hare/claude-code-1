@@ -136,12 +136,16 @@ export function SelectInputOption<T>({
   // so we can skip resetting cursor to end on user-initiated changes.
   const isUserEditing = useRef(false);
 
-  // Reset cursor to end of line when:
-  // 1. Option becomes focused (user navigates to it)
-  // 2. Input value changes externally (e.g., async classifier description updates)
-  // Skip reset when the change was from user typing (which sets isUserEditing ref)
-  // Only enabled when resetCursorOnUpdate prop is true
+  // Official 2.1.326 (#170): always place cursor at end when option becomes focused
+  // (e.g. going back to a question's note) or after external editor replaces the text.
+  const wasFocusedRef = useRef(isFocused);
   useEffect(() => {
+    const justFocused = isFocused && !wasFocusedRef.current;
+    wasFocusedRef.current = isFocused;
+    if (justFocused) {
+      setCursorOffset(inputValue.length);
+      return;
+    }
     if (resetCursorOnUpdate && isFocused) {
       if (isUserEditing.current) {
         isUserEditing.current = false;
@@ -155,7 +159,10 @@ export function SelectInputOption<T>({
   useKeybinding(
     'chat:externalEditor',
     () => {
-      onOpenEditor?.(inputValue, onInputChange);
+      onOpenEditor?.(inputValue, nextValue => {
+        onInputChange(nextValue);
+        setCursorOffset(nextValue.length);
+      });
     },
     { context: 'Chat', isActive: isFocused && !!onOpenEditor },
   );

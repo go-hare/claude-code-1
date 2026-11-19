@@ -218,6 +218,7 @@ import {
   CODE_MODE_ONLY_TOOLS,
   hideCodeModeOnlyTools,
   isCodeModeEnabled,
+  registerCodeModePrimitiveToolsResolver,
   wrapReplToolForCodeMode,
 } from './services/codeMode/index.js'
 import {
@@ -592,3 +593,35 @@ export function getMergedTools(
   const builtInTools = getTools(effectivePermissionContext)
   return applyPluginToolListFilter([...builtInTools, ...mcpTools])
 }
+
+// Official 2.1.326 #74 / #75 / #76 (`Q3a(jTt)` / `gAa`):
+// Register the primitive tool resolver so Code Mode inline `!` handoffs,
+// background subagents, and mod `$.tool.call` / `$.tool.check` can resolve
+// built-in tools hidden behind `REPL` while honoring deny rules and grants.
+registerCodeModePrimitiveToolsResolver<Tool>(
+  (currentTools, permissionContext, primitiveToolGrant) => {
+    const base = getAllBaseTools()
+    const allowed = permissionContext
+      ? filterToolsByDenyRules(base, permissionContext as ToolPermissionContext)
+      : base
+    const granted =
+      primitiveToolGrant === undefined
+        ? allowed
+        : allowed.filter(t => primitiveToolGrant.has(t.name))
+    const seen = new Set<string>()
+    const merged: Tool[] = []
+    for (const t of currentTools) {
+      if (!toolMatchesName(t, REPL_TOOL_NAME)) {
+        seen.add(t.name)
+        merged.push(t)
+      }
+    }
+    for (const t of granted) {
+      if (t.isEnabled() && !seen.has(t.name)) {
+        seen.add(t.name)
+        merged.push(t)
+      }
+    }
+    return merged
+  },
+)

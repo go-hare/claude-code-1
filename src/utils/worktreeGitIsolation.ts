@@ -13,6 +13,7 @@
 import { basename, dirname, isAbsolute, normalize, resolve } from 'path'
 import { homedir } from 'os'
 import { getOriginalCwd } from '../bootstrap/state.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { parseForSecurityFromAst, type SimpleCommand } from './bash/ast.js'
 import { ensureParserInitialized, getParserModule } from './bash/bashParser.js'
 import { getCwd, getCwdOverride } from './cwd.js'
@@ -257,6 +258,291 @@ function checkWorktreeGitSubcommand(
     return checkGitMaintenanceOrScalarIsolation('git maintenance', rest)
   }
 
+  return null
+}
+
+/**
+ * Official 2.1.326 #313 (`tengu_level_meadow` / SEA `me` + `pe` + `ne` @312881304):
+ * In subagents isolated in a worktree (NOT main sessions), refuse git commands
+ * in ANY repository that can rewrite or delete shared branches/refs with the
+ * user's own checkout.
+ */
+type SharedBranchArg = { text: string; isRuntime: boolean }
+type SharedBranchRefusal = { detail: string; remedy: string }
+
+const SHARED_BRANCH_DEFAULT_REFUSAL: SharedBranchRefusal = {
+  detail:
+    ", which can move or delete what the user's own checkout shares, the branch it is on among them",
+  remedy:
+    "To change this worktree's own branch use git commit, git reset or git rebase; to make another, or to keep a commit, git branch <new-branch> <commit>. Finished work can stay on this worktree's branch. Leave the user's branches as they are, even to undo a mistake.",
+}
+
+function checkSharedBranchSubVerb(
+  args: readonly SharedBranchArg[],
+  spec: { safe: RegExp; changes: string; remedy: string },
+): SharedBranchRefusal | undefined {
+  const verb = args.find(a => a.isRuntime || !a.text.startsWith('-'))
+  if (verb !== undefined && (verb.isRuntime || !spec.safe.test(verb.text))) {
+    return {
+      detail: ` ${verb.isRuntime ? 'with a verb filled in only as the command runs' : verb.text}, which can change ${spec.changes}`,
+      remedy: spec.remedy,
+    }
+  }
+  return undefined
+}
+
+function countMatching<T>(
+  items: readonly T[],
+  pred: (item: T) => boolean,
+): number {
+  let n = 0
+  for (const item of items) {
+    if (pred(item)) n++
+  }
+  return n
+}
+
+const SHARED_BRANCH_GIT_COMMANDS = new Map<
+  string,
+  (args: readonly SharedBranchArg[]) => SharedBranchRefusal | undefined
+>([
+  [
+    'for-each-repo',
+    args =>
+      args.length > 0
+        ? {
+            detail: ', which runs git in whatever repositories a setting lists',
+            remedy: 'Run the git command itself, in this worktree.',
+          }
+        : undefined,
+  ],
+  [
+    'worktree',
+    args =>
+      checkSharedBranchSubVerb(args, {
+        safe: /^(?:add|list|lock|prune|remove|unlock)$/,
+        changes: "where the repository's worktrees are",
+        remedy:
+          'git worktree add works here, for a path under this worktree or in a scratch directory.',
+      }),
+  ],
+  ['fast-import', () => SHARED_BRANCH_DEFAULT_REFUSAL],
+  [
+    'filter-branch',
+    args => (args.length > 0 ? SHARED_BRANCH_DEFAULT_REFUSAL : undefined),
+  ],
+  [
+    'filter-repo',
+    args =>
+      args.some(a => a.isRuntime || /^-(?!-(?:analyze|version)$)/.test(a.text))
+        ? SHARED_BRANCH_DEFAULT_REFUSAL
+        : undefined,
+  ],
+  [
+    'history',
+    args =>
+      args.some(a =>
+        /^(?:drop|fixup|reword|split)$/.test(a.isRuntime ? 'split' : a.text),
+      )
+        ? SHARED_BRANCH_DEFAULT_REFUSAL
+        : undefined,
+  ],
+  [
+    'replay',
+    args => (args.length > 0 ? SHARED_BRANCH_DEFAULT_REFUSAL : undefined),
+  ],
+  [
+    'update-ref',
+    args => {
+      let idx = 0
+      while (
+        /^(?:-[dm]|--(?:no-)?deref|--create-reflog)$/.test(
+          args[idx]?.text ?? '',
+        )
+      ) {
+        idx += args[idx]?.text === '-m' ? 2 : 1
+      }
+      const target = args[idx]
+      const isSafe =
+        args.length === 0 ||
+        (target !== undefined &&
+          !args.slice(0, idx).some(a => a.isRuntime) &&
+          (/^refs\/(?:bisect|rewritten|worktree)\/[^*?[{]+$/.test(
+            target.text,
+          ) ||
+            (!target.isRuntime && /^[A-Z_]*HEAD$/.test(target.text))))
+      return isSafe ? undefined : SHARED_BRANCH_DEFAULT_REFUSAL
+    },
+  ],
+  [
+    'refs',
+    args =>
+      checkSharedBranchSubVerb(args, {
+        safe: /^(?:exists|list|optimize|verify)$/,
+        changes: "the branch the user's own checkout is on",
+        remedy: SHARED_BRANCH_DEFAULT_REFUSAL.remedy,
+      }),
+  ],
+  [
+    'symbolic-ref',
+    args =>
+      args.some(a => a.isRuntime) ||
+      countMatching(args, a => !a.text.startsWith('-')) > 1 ||
+      !args.every(a =>
+        /^(?:[^-].*|-q|--quiet|--short|--no-recurse)?$/s.test(a.text),
+      )
+        ? {
+            detail:
+              " in a form that can make the user's branch follow another, or put this worktree on it",
+            remedy:
+              'To read a ref, name it and pass no option but --short or -q. To change branch, use git switch.',
+          }
+        : undefined,
+  ],
+  [
+    'replace',
+    args =>
+      args.some(a => a.isRuntime) ||
+      countMatching(args, a => !a.text.startsWith('-')) >
+        countMatching(args, a => /^(?:-l|--list)$/.test(a.text)) ||
+      !args.every(a => /^(?:[^-].*|-l|--list|--format=.*)?$/s.test(a.text))
+        ? {
+            detail:
+              ', which swaps one commit or file for another in every checkout of the repository',
+            remedy: 'git replace --list works here.',
+          }
+        : undefined,
+  ],
+  [
+    'reflog',
+    args =>
+      checkSharedBranchSubVerb(args.slice(0, 1), {
+        safe: /^(?!(?:delete|drop|expire|write)$)/,
+        changes:
+          "the branch the user's own checkout is on, or drop the record of its commits and its stashes",
+        remedy: 'git reflog works here, to read.',
+      }),
+  ],
+])
+
+const SHARED_BRANCH_NON_EXEC_UTILS_RE =
+  /^(?:cat|chmod|cmp|cp|curl|cut|diff|du|egrep|fgrep|file|grep|head|ln|ls|mkdir|mv|pgrep|pkill|rm|stat|tail|tee|test|touch|type|wc|which)$/
+const SHARED_BRANCH_BIN_PREFIX_RE =
+  /^(?:\/(?:opt|usr)(?:\/[\w.-]+)?)?\/bin\/|\.exe$/gi
+const SHARED_BRANCH_TRANSPARENT_WRAPPERS = new Set([
+  'command',
+  'builtin',
+  'time',
+  'noglob',
+  'nocorrect',
+  'env',
+  'nice',
+  'nohup',
+  'timeout',
+  'stdbuf',
+  'exec',
+])
+
+export function checkWorktreeSharedBranchGitCommand(
+  argv: string[],
+  gitIdx: number,
+  isRuntimeArg: (index: number) => boolean = idx =>
+    isDynamicMaintenanceWord(argv[idx] ?? ''),
+): SharedBranchRefusal | null {
+  if (gitIdx < 0 || gitIdx >= argv.length) return null
+  if (!getFeatureValue_CACHED_MAY_BE_STALE('tengu_level_meadow', true)) {
+    return null
+  }
+  const dashedSub = /^git-(.+)$/i.exec(basename(argv[gitIdx] ?? ''))?.[1]
+  // Find the git subcommand token index past global git flags
+  let subIdx = gitIdx + 1
+  if (dashedSub === undefined) {
+    while (subIdx < argv.length) {
+      const tok = argv[subIdx]!
+      if (tok === '--') {
+        subIdx++
+        break
+      }
+      if (
+        tok === '-C' ||
+        tok === '-c' ||
+        tok === '--git-dir' ||
+        tok === '--work-tree' ||
+        tok === '--config-env' ||
+        WORKTREE_GIT_OPAQUE_FLAGS.has(tok)
+      ) {
+        subIdx += 2
+        continue
+      }
+      if (tok.startsWith('-')) {
+        subIdx++
+        continue
+      }
+      break
+    }
+  }
+  const normalizedArgv = argv.map(m =>
+    m.replace(SHARED_BRANCH_BIN_PREFIX_RE, ''),
+  )
+  const hasArgv0Flag =
+    dashedSub !== undefined &&
+    normalizedArgv.slice(0, gitIdx).some(m => /^-(?:$|c*[al]|-a)/.test(m))
+  const candidates = [
+    {
+      name: dashedSub ?? argv[subIdx] ?? '',
+      from: dashedSub !== undefined ? gitIdx + 1 : subIdx + 1,
+    },
+    ...argv
+      .slice(hasArgv0Flag ? gitIdx + 1 : argv.length)
+      .map((m, i) => ({ name: m, from: gitIdx + i + 2 })),
+  ]
+    .map(({ name, from }) => ({
+      name: /^([a-z-]+?)(?:\.exe)*[. ]*$/.exec(name.toLowerCase())?.[1] ?? '',
+      from,
+    }))
+    .filter(({ name }) => SHARED_BRANCH_GIT_COMMANDS.has(name))
+  const first = candidates[0]
+  if (first === undefined) return null
+
+  const outerIdx = normalizedArgv.findIndex(
+    m =>
+      !SHARED_BRANCH_TRANSPARENT_WRAPPERS.has(m) &&
+      !/^(?:\d+(?:\.\d+)?[smhd]?|[A-Za-z_]\w*=.*)$/s.test(m),
+  )
+  const outerCmd = normalizedArgv[outerIdx] ?? ''
+  if (
+    SHARED_BRANCH_NON_EXEC_UTILS_RE.test(outerCmd) ||
+    (outerIdx === gitIdx &&
+      [argv[gitIdx + 1], argv[first.from]].some(m =>
+        /^(?:-h|--help)$/.test(m ?? ''),
+      ))
+  ) {
+    return null
+  }
+  for (const { name, from } of candidates) {
+    const check = SHARED_BRANCH_GIT_COMMANDS.get(name)
+    const refusal = check?.(
+      argv.slice(from).map((text, offset) => ({
+        text,
+        isRuntime: isRuntimeArg(from + offset),
+      })),
+    )
+    if (refusal !== undefined) {
+      if (outerIdx === gitIdx) {
+        return {
+          ...refusal,
+          detail: `runs git ${name}${refusal.detail}`,
+        }
+      }
+      const wrapperLabel = outerCmd.startsWith('-')
+        ? (normalizedArgv[0] ?? '')
+        : outerCmd
+      return {
+        detail: `has git ${name}${refusal.detail}, behind ${wrapperLabel}`,
+        remedy: `${refusal.remedy} Whether ${wrapperLabel} runs it is not known here.`,
+      }
+    }
+  }
   return null
 }
 
@@ -1037,6 +1323,19 @@ export function checkZRuGitRedirect(
     const subcommandViolation = checkWorktreeGitSubcommand(m.argv, E)
     if (subcommandViolation !== null) {
       return `${noun} is isolated in the worktree ${agentWorktree}, but this command ${subcommandViolation.detail}. Refusing to run it. ${subcommandViolation.remedy}`
+    }
+
+    // Official 2.1.326 #313 (`tengu_level_meadow`): in subagent worktrees (NOT
+    // main worktree sessions), refuse git commands that can rewrite shared
+    // branches/refs in any repository.
+    if (noun !== 'This session' && E !== -1) {
+      const sharedBranchViolation = checkWorktreeSharedBranchGitCommand(
+        m.argv,
+        E,
+      )
+      if (sharedBranchViolation !== null) {
+        return `${noun} is isolated in the worktree ${agentWorktree}, but this command ${sharedBranchViolation.detail}. Refusing to run it — ${possessive} git commands must not rewrite what its worktree shares with the user's own checkout, so this one is refused in every repository. ${sharedBranchViolation.remedy}`
+      }
     }
 
     const Sraw = E === -1 ? null : JRu(m.argv, E)

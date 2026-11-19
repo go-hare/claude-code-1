@@ -76,6 +76,8 @@ import {
   heldByKeyOf,
   nearestScrollOffset,
   nextFocusedPaneId,
+  normalizeModScrollXTree,
+  normalizeModTextWrapAndMaxLines,
   cycleShownPaneId,
   showPane,
   recordPress,
@@ -2919,6 +2921,7 @@ type BoxLayout = {
     | 'maxWidth'
     | 'maxHeight'
     | 'overflow'
+    | 'overflowX'
     | 'gap'
     | 'columnGap'
     | 'rowGap'
@@ -3027,8 +3030,28 @@ function usePluginHoverScope(
   };
 }
 
+function modTextMaxLinesFrom(props: Record<string, unknown> | undefined): number | undefined {
+  if (props === undefined) return undefined;
+  const normalized = normalizeModTextWrapAndMaxLines(props);
+  const maxLines = normalized.maxLines;
+  if (typeof maxLines !== 'number' || !Number.isInteger(maxLines) || maxLines < 1 || maxLines > 10_000) {
+    return undefined;
+  }
+  return maxLines;
+}
+
+function clampModTextLines(text: string, maxLines: number): string {
+  const lines = text.split('\n');
+  if (lines.length <= maxLines) return text;
+  const kept = lines.slice(0, maxLines);
+  const lastIdx = kept.length - 1;
+  kept[lastIdx] = `${kept[lastIdx] ?? ''}…`;
+  return kept.join('\n');
+}
+
 function textStyleFrom(props: Record<string, unknown> | undefined): Partial<ComponentProps<typeof Text>> {
   if (props === undefined) return {};
+  const isClip = props.wrap === 'clip';
   return {
     ...(boolProp(props, 'bold') !== undefined && { bold: boolProp(props, 'bold') }),
     ...(boolProp(props, 'dimColor') !== undefined && { dimColor: boolProp(props, 'dimColor') }),
@@ -3043,10 +3066,14 @@ function textStyleFrom(props: Record<string, unknown> | undefined): Partial<Comp
       backgroundColor: resolvePluginColor(props.backgroundColor) as ComponentProps<typeof Text>['backgroundColor'],
     }),
     ...((props.wrap === 'wrap' ||
+      props.wrap === 'end' ||
+      props.wrap === 'middle' ||
       props.wrap === 'truncate' ||
       props.wrap === 'truncate-start' ||
       props.wrap === 'truncate-middle' ||
       props.wrap === 'truncate-end') && { wrap: props.wrap }),
+    // Official 2.1.326 #10: `wrap="clip"` keeps single-line clipping without wrapping.
+    ...(isClip && { wrap: 'truncate-end' as ComponentProps<typeof Text>['wrap'] }),
   };
 }
 
@@ -3115,6 +3142,13 @@ function layoutFrom(props: Record<string, unknown> | undefined): BoxLayout {
   if (typeof props.maxWidth === 'number') out.maxWidth = props.maxWidth;
   if (typeof props.maxHeight === 'number') out.maxHeight = props.maxHeight;
   if (props.overflow === 'visible' || props.overflow === 'hidden') out.overflow = props.overflow;
+  if (props.overflowX === 'visible' || props.overflowX === 'hidden' || props.overflowX === 'scroll') {
+    out.overflowX = props.overflowX;
+    if (props.overflowX === 'scroll') {
+      out.flexWrap ??= 'nowrap';
+      out.minWidth ??= 0;
+    }
+  }
   if (typeof props.gap === 'number') out.gap = props.gap;
   if (typeof props.columnGap === 'number') out.columnGap = props.columnGap;
   if (typeof props.rowGap === 'number') out.rowGap = props.rowGap;
@@ -4335,13 +4369,14 @@ function childList(node: Record<string, unknown>, props: Record<string, unknown>
  * Stamps plugin onto Raster like gold `Te`.
  */
 export function DrawingNode({
-  node,
+  node: rawNode,
   plugin: fallbackPlugin,
   requestId,
   index,
   engine,
   seenKeys,
   component = 'AbovePrompt',
+  scrollXNormalized = false,
 }: {
   node: unknown;
   plugin: string;
@@ -4352,7 +4387,10 @@ export function DrawingNode({
   seenKeys?: Set<unknown>;
   /** densable `Z` / Client `L1t` component. */
   component?: string;
+  /** Internal flag so `normalizeModScrollXTree` runs once per root drawing tree. */
+  scrollXNormalized?: boolean;
 }): ReactNode {
+  const node = scrollXNormalized ? rawNode : normalizeModScrollXTree(rawNode);
   if (typeof node === 'string') return <Text>{node}</Text>;
   if (Array.isArray(node)) {
     return flattenDrawingChildren(node).map((child, i) => (
@@ -4364,6 +4402,7 @@ export function DrawingNode({
         index={i}
         engine={engine}
         component={component}
+        scrollXNormalized
       />
     ));
   }
@@ -4536,6 +4575,7 @@ export function DrawingNode({
         engine={engine}
         seenKeys={siblingKeys}
         component={component}
+        scrollXNormalized
       />
     ),
   );
@@ -4595,23 +4635,42 @@ export function DrawingNode({
     );
   }
   if (type === 'Text') {
-    const text =
-      typeof props.text === 'string'
-        ? props.text
+    const normalizedTextProps = normalizeModTextWrapAndMaxLines(props);
+    const rawText =
+      typeof normalizedTextProps.text === 'string'
+        ? normalizedTextProps.text
         : typeof node.text === 'string'
           ? node.text
           : mapped.length === 0
             ? null
             : undefined;
-    const textProps = textStyleFrom(props);
-    if (hover !== undefined) {
-      return (
-        <HoverBox isInline props={props} hover={hover} plugin={groupPlugin}>
+    const maxLines = modTextMaxLinesFrom(normalizedTextProps);
+    const text = typeof rawText === 'string' && maxLines !== undefined ? clampModTextLines(rawText, maxLines) : rawText;
+    const textProps = textStyleFrom(normalizedTextProps);
+    const isClip = normalizedTextProps.wrap === 'clip';
+    const content =
+      hover !== undefined ? (
+        <HoverBox isInline props={normalizedTextProps} hover={hover} plugin={groupPlugin}>
           {text !== undefined ? text : mapped}
         </HoverBox>
+      ) : (
+        <Text {...textProps}>{text !== undefined ? text : mapped}</Text>
+      );
+    if (maxLines !== undefined) {
+      return (
+        <Box flexDirection="column" maxHeight={maxLines} overflow="hidden" flexShrink={1}>
+          {content}
+        </Box>
       );
     }
-    return <Text {...textProps}>{text !== undefined ? text : mapped}</Text>;
+    if (isClip) {
+      return (
+        <Box overflowX="hidden" flexShrink={1}>
+          {content}
+        </Box>
+      );
+    }
+    return content;
   }
   if (hover !== undefined) {
     return (

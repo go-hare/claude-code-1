@@ -8,7 +8,7 @@ import {
 import { ConfigurableShortcutHint } from '../../components/ConfigurableShortcutHint.js';
 import { Byline, KeyboardShortcutHint } from '@anthropic/ink';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- useInput needed for marketplace-specific u/r shortcuts and y/n confirmation not in keybinding schema
-import { Box, Text, useInput } from '@anthropic/ink';
+import { Box, Text, useInput, useModalOrTerminalSize } from '@anthropic/ink';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
 import type { LoadedPlugin } from '../../types/plugin.js';
 import { count } from '../../utils/array.js';
@@ -36,7 +36,10 @@ import { isMarketplaceAutoUpdate } from '../../utils/plugins/schemas.js';
 import { getSettingsForSource, updateSettingsForSource } from '../../utils/settings/settings.js';
 import { Io, re } from '../../utils/plugins/escapeSafeText.js';
 import { plural } from '../../utils/stringUtils.js';
+import { useTerminalSize } from '../../hooks/useTerminalSize.js';
+import { computePluginListMaxVisible, PluginConfirmList, usePluginListExtendedKeys } from './pluginListHelpers.js';
 import type { ViewState } from './types.js';
+import { usePagination } from './usePagination.js';
 
 type Props = {
   setViewState: (state: ViewState) => void;
@@ -554,18 +557,24 @@ export function ManageMarketplaces({
     },
   );
 
-  // Confirm-remove view — y/n input
-  useInput(
-    input => {
-      if (input === 'y' || input === 'Y') {
-        void confirmRemove();
-      } else if (input === 'n' || input === 'N') {
-        setInternalView('list');
-        setSelectedMarketplace(null);
-      }
-    },
-    { isActive: !isProcessing && internalView === 'confirm-remove' },
-  );
+  // Official 2.1.326 #271 / #331: confirm-remove now uses PluginConfirmList
+  // (arrow keys + Enter / Esc) instead of y/n single-letter confirmation.
+  const { rows: terminalRows } = useModalOrTerminalSize(useTerminalSize());
+  const totalListItems = marketplaceStates.length + 1; // +1 for Add Marketplace
+  const listMaxVisible = computePluginListMaxVisible(terminalRows, 9, 2, 10, 2);
+  const marketplacePagination = usePagination<MarketplaceState | 'add'>({
+    totalItems: totalListItems,
+    selectedIndex,
+    maxVisible: listMaxVisible,
+  });
+
+  usePluginListExtendedKeys({
+    isActive: !isProcessing && internalView === 'list' && totalListItems > 0,
+    totalItems: totalListItems,
+    selectedIndex,
+    pageSize: marketplacePagination.pageSize,
+    onSelectIndex: nextIdx => setSelectedIndex(nextIdx),
+  });
 
   if (loading) {
     return <Text>Loading marketplaces…</Text>;
@@ -612,7 +621,8 @@ export function ManageMarketplaces({
     );
   }
 
-  // Show confirmation dialog
+  // Show confirmation dialog (Official 2.1.326 #271 & #331: clearer remove
+  // confirmation answered with arrow keys + Enter, or Esc to cancel)
   if (internalView === 'confirm-remove' && selectedMarketplace) {
     const pluginCount = selectedMarketplace.installedPlugins?.length || 0;
     return (
@@ -621,26 +631,52 @@ export function ManageMarketplaces({
           Remove marketplace <Text italic>{re(selectedMarketplace.name)}</Text>?
         </Text>
         <Box flexDirection="column">
-          {pluginCount > 0 && (
+          {pluginCount > 0 ? (
             <Box marginTop={1}>
               <Text color="warning">
-                This will also uninstall {pluginCount} {plural(pluginCount, 'plugin')} from this marketplace:
+                This also uninstalls {pluginCount} {plural(pluginCount, 'plugin')} and deletes their saved data, options
+                and secrets:
               </Text>
+            </Box>
+          ) : (
+            <Box marginTop={1}>
+              <Text dimColor>No installed plugins from this marketplace will be affected.</Text>
             </Box>
           )}
           {selectedMarketplace.installedPlugins && selectedMarketplace.installedPlugins.length > 0 && (
             <Box flexDirection="column" marginTop={1} marginLeft={2}>
-              {selectedMarketplace.installedPlugins.map(plugin => (
+              {selectedMarketplace.installedPlugins.slice(0, 6).map(plugin => (
                 <Text key={plugin.name} dimColor>
                   • {re(plugin.name)}
                 </Text>
               ))}
+              {selectedMarketplace.installedPlugins.length > 6 && (
+                <Text dimColor>… and {selectedMarketplace.installedPlugins.length - 6} more</Text>
+              )}
             </Box>
           )}
           <Box marginTop={1}>
-            <Text>
-              Press <Text bold>y</Text> to confirm or <Text bold>n</Text> to cancel
-            </Text>
+            <PluginConfirmList
+              options={[
+                { value: 'cancel', label: 'Cancel' },
+                {
+                  value: 'remove',
+                  label: `Remove ${re(selectedMarketplace.name)}`,
+                  destructive: true,
+                },
+              ]}
+              onSelect={choice => {
+                if (choice === 'remove') {
+                  void confirmRemove();
+                } else {
+                  setInternalView('details');
+                }
+              }}
+              onCancel={() => {
+                setInternalView('details');
+              }}
+              isDisabled={isProcessing}
+            />
           </Box>
         </Box>
       </Box>
@@ -761,8 +797,10 @@ export function ManageMarketplaces({
     );
   }
 
-  // Show marketplace list
+  // Show compact marketplace list (Official 2.1.326 #271: compact rows + pagination + clicks)
   const { updateCount, removeCount } = getPendingCounts();
+  const listRows: Array<MarketplaceState | 'add'> = ['add', ...marketplaceStates];
+  const visibleRows = marketplacePagination.getVisibleItems(listRows);
 
   return (
     <Box flexDirection="column">
@@ -770,28 +808,54 @@ export function ManageMarketplaces({
         <Text bold>Manage marketplaces</Text>
       </Box>
 
-      {/* Add Marketplace option */}
-      <Box flexDirection="row" gap={1} marginBottom={1}>
-        <Text color={selectedIndex === 0 ? 'suggestion' : undefined}>
-          {selectedIndex === 0 ? figures.pointer : ' '} +
-        </Text>
-        <Text bold color={selectedIndex === 0 ? 'suggestion' : undefined}>
-          Add Marketplace
-        </Text>
-      </Box>
+      {marketplacePagination.scrollPosition.canScrollUp && (
+        <Box>
+          <Text dimColor>
+            {' '}
+            {figures.arrowUp} {marketplacePagination.scrollPosition.hiddenAbove} more above
+          </Text>
+        </Box>
+      )}
 
-      {/* Marketplace list */}
+      {/* Compact Marketplace list */}
       <Box flexDirection="column">
-        {marketplaceStates.map((state, idx) => {
-          const isSelected = idx + 1 === selectedIndex; // +1 because Add Marketplace is at index 0
+        {visibleRows.map((row, visibleIdx) => {
+          const actualIdx = marketplacePagination.toActualIndex(visibleIdx);
+          const isSelected = actualIdx === selectedIndex;
 
-          // Build status indicators
+          if (row === 'add') {
+            return (
+              <Box
+                key="__add__"
+                flexDirection="row"
+                gap={1}
+                onClick={() => {
+                  setSelectedIndex(0);
+                  setViewState({ type: 'add-marketplace' });
+                }}
+              >
+                <Text color={isSelected ? 'suggestion' : undefined}>{isSelected ? figures.pointer : ' '} +</Text>
+                <Text bold color={isSelected ? 'suggestion' : undefined}>
+                  Add Marketplace
+                </Text>
+              </Box>
+            );
+          }
+
+          const state = row;
           const indicators: string[] = [];
           if (state.pendingUpdate) indicators.push('UPDATE');
           if (state.pendingRemove) indicators.push('REMOVE');
 
           return (
-            <Box key={state.name} flexDirection="row" gap={1} marginBottom={1}>
+            <Box
+              key={state.name}
+              flexDirection="row"
+              gap={1}
+              onClick={() => {
+                setSelectedIndex(actualIdx);
+              }}
+            >
               <Text color={isSelected ? 'suggestion' : undefined}>
                 {isSelected ? figures.pointer : ' '} {state.pendingRemove ? figures.cross : figures.bullet}
               </Text>
@@ -802,22 +866,33 @@ export function ManageMarketplaces({
                     {re(state.name)}
                     {state.name === 'claude-plugins-official' && <Text color="claude"> ✻</Text>}
                   </Text>
+                  <Text dimColor>
+                    {state.pluginCount !== undefined && `${state.pluginCount} avail`}
+                    {state.installedPlugins &&
+                      state.installedPlugins.length > 0 &&
+                      ` · ${state.installedPlugins.length} inst`}
+                  </Text>
                   {indicators.length > 0 && <Text color="warning">[{indicators.join(', ')}]</Text>}
                 </Box>
-                <Text dimColor>{re(state.source)}</Text>
-                {state.note && <Text color="warning">{re(state.note)}</Text>}
-                <Text dimColor>
-                  {state.pluginCount !== undefined && <>{state.pluginCount} available</>}
-                  {state.installedPlugins && state.installedPlugins.length > 0 && (
-                    <> • {state.installedPlugins.length} installed</>
-                  )}
-                  {state.lastUpdated && <> • Updated {new Date(state.lastUpdated).toLocaleDateString()}</>}
+                <Text dimColor wrap="truncate-end">
+                  {re(state.source)}
+                  {state.lastUpdated ? ` · Updated ${new Date(state.lastUpdated).toLocaleDateString()}` : ''}
                 </Text>
+                {state.note && <Text color="warning">{re(state.note)}</Text>}
               </Box>
             </Box>
           );
         })}
       </Box>
+
+      {marketplacePagination.scrollPosition.canScrollDown && (
+        <Box>
+          <Text dimColor>
+            {' '}
+            {figures.arrowDown} {marketplacePagination.scrollPosition.hiddenBelow} more below
+          </Text>
+        </Box>
+      )}
 
       {/* Pending changes summary */}
       {hasPendingChanges() && (

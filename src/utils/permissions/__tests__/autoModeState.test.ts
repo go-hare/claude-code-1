@@ -40,6 +40,7 @@ describe('autoModeState fromAutoFallback', () => {
       flagCli: false,
       circuitBroken: false,
       fromFallback: false,
+      autoDefaultAwaitsServedSettings: false,
     })
   })
 

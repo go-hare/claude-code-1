@@ -5,6 +5,7 @@ const help = {
   type: 'local-jsx',
   name: 'help',
   description: 'Show help and available commands',
+  argumentHint: '[command]',
   // densable 2.1.234: get immediate(){return Ns()} — fullscreen feature gate
   get immediate() {
     return shouldFullscreenCommandBeImmediate()

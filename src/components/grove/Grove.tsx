@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js';
-import { Box, Link, Text, useInput } from '@anthropic/ink';
+import { Box, Link, StatusIcon, Text, useInput } from '@anthropic/ink';
 import {
   type AccountSettings,
   calculateShouldShowGrove,
@@ -116,6 +116,12 @@ function PostGracePeriodContentBody(): React.ReactNode {
 export function GroveDialog({ showIfAlreadyViewed, location, onDone }: Props): React.ReactNode {
   const [shouldShowDialog, setShouldShowDialog] = useState<boolean | null>(null);
   const [groveConfig, setGroveConfig] = useState<GroveConfig | null>(null);
+  // Official 2.1.326 #70: lock selection while saving so keys pressed in flight
+  // cannot overwrite an OFF answer with ON.
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const savingRef = useRef(false);
+  const offPickedRef = useRef(false);
 
   useEffect(() => {
     async function checkGroveSettings() {
@@ -157,36 +163,54 @@ export function GroveDialog({ showIfAlreadyViewed, location, onDone }: Props): R
   }
 
   async function onChange(value: 'accept_opt_in' | 'accept_opt_out' | 'defer' | 'escape') {
-    switch (value) {
-      case 'accept_opt_in': {
-        await updateGroveSettings(true);
-        logEvent('tengu_grove_policy_submitted', {
-          state: true,
-          dismissable:
-            groveConfig?.notice_is_grace_period as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        });
-        break;
-      }
-      case 'accept_opt_out': {
-        await updateGroveSettings(false);
-        logEvent('tengu_grove_policy_submitted', {
-          state: false,
-          dismissable:
-            groveConfig?.notice_is_grace_period as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-        });
-        break;
-      }
-      case 'defer':
-        logEvent('tengu_grove_policy_dismissed', {
-          state: true,
-        });
-        break;
-      case 'escape':
-        logEvent('tengu_grove_policy_escaped', {});
-        break;
+    if (savingRef.current) {
+      return;
     }
+    if (value === 'accept_opt_in' && offPickedRef.current) {
+      return;
+    }
+    savingRef.current = true;
+    setSaving(true);
+    setSaveError(null);
+    if (value === 'accept_opt_out') {
+      offPickedRef.current = true;
+    }
+    try {
+      switch (value) {
+        case 'accept_opt_in': {
+          await updateGroveSettings(true);
+          logEvent('tengu_grove_policy_submitted', {
+            state: true,
+            dismissable:
+              groveConfig?.notice_is_grace_period as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          });
+          break;
+        }
+        case 'accept_opt_out': {
+          await updateGroveSettings(false);
+          logEvent('tengu_grove_policy_submitted', {
+            state: false,
+            dismissable:
+              groveConfig?.notice_is_grace_period as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          });
+          break;
+        }
+        case 'defer':
+          logEvent('tengu_grove_policy_dismissed', {
+            state: true,
+          });
+          break;
+        case 'escape':
+          logEvent('tengu_grove_policy_escaped', {});
+          break;
+      }
 
-    onDone(value);
+      onDone(value);
+    } catch (err) {
+      savingRef.current = false;
+      setSaving(false);
+      setSaveError(err instanceof Error ? err.message : 'Failed to save privacy preference.');
+    }
   }
 
   const acceptOptions = groveConfig?.domain_excluded
@@ -200,6 +224,7 @@ export function GroveDialog({ showIfAlreadyViewed, location, onDone }: Props): R
         {
           label: 'Accept terms · Help improve our AI models: ON',
           value: 'accept_opt_in',
+          disabled: saving || offPickedRef.current,
         },
         {
           label: 'Accept terms · Help improve our AI models: OFF',
@@ -208,6 +233,9 @@ export function GroveDialog({ showIfAlreadyViewed, location, onDone }: Props): R
       ];
 
   function handleCancel(): void {
+    if (savingRef.current) {
+      return;
+    }
     if (groveConfig?.notice_is_grace_period) {
       void onChange('defer');
       return;
@@ -252,9 +280,18 @@ export function GroveDialog({ showIfAlreadyViewed, location, onDone }: Props): R
             // Only show "Not now" if in grace period
             ...(groveConfig?.notice_is_grace_period ? [{ label: 'Not now', value: 'defer' }] : []),
           ]}
+          isDisabled={saving}
+          disablePrintableKeybindings
           onChange={value => onChange(value as 'accept_opt_in' | 'accept_opt_out' | 'defer')}
           onCancel={handleCancel}
         />
+        {saving ? <Text dimColor>Saving…</Text> : null}
+        {saveError ? (
+          <Text color="error">
+            <StatusIcon status="error" withSpace />
+            {saveError}
+          </Text>
+        ) : null}
       </Box>
     </Dialog>
   );
@@ -274,18 +311,51 @@ export function PrivacySettingsDialog({
   onDone,
 }: PrivacySettingsDialogProps): React.ReactNode {
   const [groveEnabled, setGroveEnabled] = useState(settings.grove_enabled);
+  // Official 2.1.326 #70: serialize privacy-settings toggles & ignore keys after Esc.
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const savingRef = useRef(false);
+  const closedRef = useRef(false);
   const locked = domainExcluded || lockedByClaudeScience;
 
   React.useEffect(() => {
     logEvent('tengu_grove_privacy_settings_viewed', {});
+    return () => {
+      closedRef.current = true;
+    };
   }, []);
 
-  useInput(async (input, key) => {
+  const handleClose = () => {
+    if (closedRef.current) return;
+    closedRef.current = true;
+    onDone();
+  };
+
+  useInput((input, key) => {
+    if (locked || savingRef.current || closedRef.current) {
+      return;
+    }
     // Toggle the setting when enter/tab/space is pressed
-    if (!locked && (key.tab || key.return || input === ' ')) {
-      const newValue = !groveEnabled;
+    if (key.tab || key.return || input === ' ') {
+      const previousValue = groveEnabled;
+      const newValue = !previousValue;
+      savingRef.current = true;
+      setSaving(true);
+      setSaveError(null);
       setGroveEnabled(newValue);
-      await updateGroveSettings(newValue);
+      void updateGroveSettings(newValue)
+        .catch(err => {
+          if (!closedRef.current) {
+            setGroveEnabled(previousValue);
+            setSaveError(err instanceof Error ? err.message : 'Failed to update privacy setting.');
+          }
+        })
+        .finally(() => {
+          savingRef.current = false;
+          if (!closedRef.current) {
+            setSaving(false);
+          }
+        });
     }
   });
 
@@ -302,7 +372,7 @@ export function PrivacySettingsDialog({
     <Dialog
       title="Data privacy"
       color="professionalBlue"
-      onCancel={onDone}
+      onCancel={handleClose}
       inputGuide={exitState =>
         exitState.pending ? (
           <Text>Press {exitState.keyName} again to exit</Text>
@@ -327,7 +397,14 @@ export function PrivacySettingsDialog({
             <Text bold>Help improve our AI models</Text>
           </Box>
           <Box minWidth={5}>{valueComponent}</Box>
+          {saving ? <Text dimColor>(saving…)</Text> : null}
         </Box>
+        {saveError ? (
+          <Text color="error">
+            <StatusIcon status="error" withSpace />
+            {saveError}
+          </Text>
+        ) : null}
         {lockedByClaudeScience && <Text dimColor>Not available for this account.</Text>}
       </Box>
     </Dialog>

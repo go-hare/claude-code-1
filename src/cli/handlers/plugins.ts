@@ -60,7 +60,10 @@ import {
   scopeToSettingSource,
   SYNCED_MARKETPLACE_NAME,
 } from '../../utils/plugins/pluginIdentifier.js'
-import { loadAllPlugins } from '../../utils/plugins/pluginLoader.js'
+import {
+  loadAllPlugins,
+  MANIFEST_FIELD_IGNORED_HINT,
+} from '../../utils/plugins/pluginLoader.js'
 import type { PluginSource } from '../../utils/plugins/schemas.js'
 import {
   type ValidationResult,
@@ -86,6 +89,14 @@ import {
 } from '../../utils/settings/settings.js'
 import { waitForHeldOAuthRefresh } from '../../utils/gracefulShutdown.js'
 import { cliError, cliOk } from '../exit.js'
+import {
+  formatCliActionSuccess,
+  formatCliDetail,
+  formatCliError,
+  formatCliInactive,
+  formatCliSuccess,
+  formatCliWarning,
+} from '../cliStatusMarkers.js'
 
 /** #902 / #1626: await queued settings writes and held OAuth refresh before exiting. */
 async function drainAndExit(code: number): Promise<never> {
@@ -172,9 +183,7 @@ export function appendSettingsLoadWarning(
   scope: string | undefined,
 ): string {
   const warning = getSettingsFileLoadWarning(scope)
-  return warning === null
-    ? message
-    : `${message}\n${figures.warning} ${warning}`
+  return warning === null ? message : `${message}\n${formatCliWarning(warning)}`
 }
 
 /**
@@ -182,25 +191,25 @@ export function appendSettingsLoadWarning(
  */
 export function handleMarketplaceError(error: unknown, action: string): never {
   logError(error)
-  cliError(Io(`${figures.cross} Failed to ${action}: ${errorMessage(error)}`))
+  cliError(Io(formatCliError(`Failed to ${action}: ${errorMessage(error)}`)))
 }
 
 function printValidationResult(result: ValidationResult): void {
   if (result.errors.length > 0) {
     printCli(
-      `${figures.cross} Found ${result.errors.length} ${plural(result.errors.length, 'error')}:\n`,
+      `${formatCliError(`Found ${result.errors.length} ${plural(result.errors.length, 'error')}:`)}\n`,
     )
     result.errors.forEach(error => {
-      printCli(`  ${figures.pointer} ${error.path}: ${error.message}`)
+      printCli(formatCliDetail(`${error.path}: ${error.message}`))
     })
     printCli('')
   }
   if (result.warnings.length > 0) {
     printCli(
-      `${figures.warning} Found ${result.warnings.length} ${plural(result.warnings.length, 'warning')}:\n`,
+      `${formatCliWarning(`Found ${result.warnings.length} ${plural(result.warnings.length, 'warning')}:`)}\n`,
     )
     result.warnings.forEach(warning => {
-      printCli(`  ${figures.pointer} ${warning.path}: ${warning.message}`)
+      printCli(formatCliDetail(`${warning.path}: ${warning.message}`))
     })
     printCli('')
   }
@@ -302,14 +311,16 @@ export async function pluginValidateHandler(
     if (outcome.allSuccess) {
       await cliOkDrained(
         outcome.hasWarnings
-          ? `${figures.tick} Validation passed with warnings`
-          : `${figures.tick} Validation passed`,
+          ? formatCliSuccess('Validation passed with warnings')
+          : formatCliSuccess('Validation passed'),
       )
     } else {
       printCli(
         strict
-          ? `${figures.cross} Validation failed (--strict treats warnings as errors)`
-          : `${figures.cross} Validation failed`,
+          ? formatCliError(
+              'Validation failed (--strict treats warnings as errors)',
+            )
+          : formatCliError('Validation failed'),
       )
       await drainAndExit(1)
     }
@@ -317,7 +328,9 @@ export async function pluginValidateHandler(
     logError(error)
     console.error(
       Io(
-        `${figures.cross} Unexpected error during validation: ${errorMessage(error)}`,
+        formatCliError(
+          `Unexpected error during validation: ${errorMessage(error)}`,
+        ),
       ),
     )
     await drainAndExit(2)
@@ -600,10 +613,10 @@ export async function pluginListHandler(options: {
       const isEnabled = enabledPlugins.has(pluginId)
       const status =
         pluginErrors.length > 0
-          ? `${figures.cross} failed to load`
+          ? formatCliError('failed to load')
           : isEnabled
-            ? `${figures.tick} enabled`
-            : `${figures.cross} disabled`
+            ? formatCliSuccess('enabled')
+            : formatCliInactive('disabled')
       const scope = installation.scope
 
       printCli(`  ${figures.pointer} ${pluginId}`)
@@ -647,12 +660,16 @@ export async function pluginListHandler(options: {
       for (const error of pluginErrors) {
         printCli(`    Error: ${getPluginErrorMessage(error)}`)
       }
-      // Official 2.1.323 (#2049, #2211, #1965): display plugin warnings (version-list-not-enabled, deprecated agent setting, engine range).
+      // Official 2.1.323 (#2049, #2211, #1965) & 2.1.326 (#5): display plugin warnings
+      // (version-list-not-enabled, deprecated agent setting, engine range, manifest-field-ignored).
       const pluginWarnings = loadWarnings.filter(
         w => w.source === pluginId || (w.plugin && w.plugin === pluginName),
       )
       for (const warning of pluginWarnings) {
-        const hint = getPluginWarningHint(warning)
+        const hint =
+          warning.type === 'manifest-field-ignored'
+            ? MANIFEST_FIELD_IGNORED_HINT
+            : getPluginWarningHint(warning)
         printCli(
           `    Warning: ${getPluginWarningMessage(warning)}${hint ? ` ${hint}` : ''}`,
         )
@@ -671,8 +688,8 @@ export async function pluginListHandler(options: {
       )
       const status =
         pErrors.length > 0
-          ? `${figures.cross} loaded with errors`
-          : `${figures.tick} loaded`
+          ? formatCliError('loaded with errors')
+          : formatCliSuccess('loaded')
       printCli(`  ${figures.pointer} ${p.source}`)
       printCli(`    Version: ${p.manifest.version ?? 'unknown'}`)
       printCli(`    Path: ${p.path}`)
@@ -684,7 +701,10 @@ export async function pluginListHandler(options: {
         w => w.source === p.source || (w.plugin && w.plugin === p.name),
       )
       for (const w of pWarnings) {
-        const hint = getPluginWarningHint(w)
+        const hint =
+          w.type === 'manifest-field-ignored'
+            ? MANIFEST_FIELD_IGNORED_HINT
+            : getPluginWarningHint(w)
         printCli(
           `    Warning: ${getPluginWarningMessage(w)}${hint ? ` ${hint}` : ''}`,
         )
@@ -710,10 +730,10 @@ export async function pluginListHandler(options: {
       )
       const status =
         pErrors.length > 0
-          ? `${figures.cross} loaded with errors`
+          ? formatCliError('loaded with errors')
           : p.enabled !== false
-            ? `${figures.tick} enabled`
-            : `${figures.cross} disabled`
+            ? formatCliSuccess('enabled')
+            : formatCliInactive('disabled')
       printCli(`  ${figures.pointer} ${p.source}`)
       printCli(`    Version: ${p.manifest.version ?? 'unknown'}`)
       printCli(`    Path: ${p.path}`)
@@ -725,7 +745,10 @@ export async function pluginListHandler(options: {
         w => w.source === p.source || (w.plugin && w.plugin === p.name),
       )
       for (const w of pWarnings) {
-        const hint = getPluginWarningHint(w)
+        const hint =
+          w.type === 'manifest-field-ignored'
+            ? MANIFEST_FIELD_IGNORED_HINT
+            : getPluginWarningHint(w)
         printCli(
           `    Warning: ${getPluginWarningMessage(w)}${hint ? ` ${hint}` : ''}`,
         )
@@ -778,19 +801,23 @@ export async function marketplaceAddHandler(
 
     if (!parsed) {
       cliError(
-        `${figures.cross} Invalid marketplace source format. Try: owner/repo, https://..., or ./path`,
+        formatCliError(
+          'Invalid marketplace source format. Try: owner/repo, https://..., or ./path',
+        ),
       )
     }
 
     if ('error' in parsed) {
-      cliError(`${figures.cross} ${parsed.error}`)
+      cliError(formatCliError(parsed.error))
     }
 
     // Validate scope
     const scope = options.scope ?? 'user'
     if (scope !== 'user' && scope !== 'project' && scope !== 'local') {
       cliError(
-        `${figures.cross} Invalid scope '${scope}'. Use: user, project, or local`,
+        formatCliError(
+          `Invalid scope '${scope}'. Use: user, project, or local`,
+        ),
       )
     }
     const settingSource = scopeToSettingSource(scope)
@@ -808,7 +835,9 @@ export async function marketplaceAddHandler(
         }
       } else {
         cliError(
-          `${figures.cross} --sparse is only supported for github and git marketplace sources (got: ${marketplaceSource.source})`,
+          formatCliError(
+            `--sparse is only supported for github and git marketplace sources (got: ${marketplaceSource.source})`,
+          ),
         )
       }
     }
@@ -837,10 +866,14 @@ export async function marketplaceAddHandler(
 
     const successLine = alreadyMaterialized
       ? re(
-          `${figures.tick} Marketplace '${name}' already on disk — declared in ${scope} settings`,
+          formatCliSuccess(
+            `Marketplace '${name}' already on disk — declared in ${scope} settings`,
+          ),
         )
       : re(
-          `${figures.tick} Successfully added marketplace: ${name} (declared in ${scope} settings)`,
+          formatCliActionSuccess(
+            `Successfully added marketplace: ${name} (declared in ${scope} settings)`,
+          ),
         )
     cliOk(appendSettingsLoadWarning(successLine, scope))
   } catch (error) {
@@ -919,7 +952,7 @@ export async function marketplaceRemoveHandler(
     const raw = options.scope
     if (raw !== 'user' && raw !== 'project' && raw !== 'local') {
       cliError(
-        `${figures.cross} Invalid scope '${raw}'. Use: user, project, or local`,
+        formatCliError(`Invalid scope '${raw}'. Use: user, project, or local`),
       )
     }
     scope = settingsSourceFromMarketplaceScope(raw)
@@ -935,7 +968,9 @@ export async function marketplaceRemoveHandler(
 
     cliOk(
       re(
-        `${figures.tick} Successfully removed marketplace: ${name}${options.scope ? ` (from ${options.scope} settings)` : ''}`,
+        formatCliActionSuccess(
+          `Successfully removed marketplace: ${name}${options.scope ? ` (from ${options.scope} settings)` : ''}`,
+        ),
       ),
     )
   } catch (error) {
@@ -969,7 +1004,9 @@ export async function marketplaceUpdateHandler(
           name as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
 
-      cliOk(re(`${figures.tick} Successfully updated marketplace: ${name}`))
+      cliOk(
+        re(formatCliActionSuccess(`Successfully updated marketplace: ${name}`)),
+      )
     } else {
       const config = await loadKnownMarketplacesConfig(getPinnedStorageV5())
       const marketplaceNames = Object.keys(config)
@@ -989,7 +1026,9 @@ export async function marketplaceUpdateHandler(
       })
 
       cliOk(
-        `${figures.tick} Successfully updated ${marketplaceNames.length} marketplace(s)`,
+        formatCliActionSuccess(
+          `Successfully updated ${marketplaceNames.length} marketplace(s)`,
+        ),
       )
     }
   } catch (error) {
@@ -1023,7 +1062,9 @@ export async function pluginInstallFromSourceHandler(
     parsePluginIdentifier(plugin)
   if (!bareName || inlineMarketplace) {
     cliError(
-      `${figures.cross} --marketplace needs the plugin's bare name. (a marketplace already added is named after the plugin instead: <plugin>@<marketplace>) Usage: ${INSTALL_MARKETPLACE_CLI_USAGE}`,
+      formatCliError(
+        `--marketplace needs the plugin's bare name. (a marketplace already added is named after the plugin instead: <plugin>@<marketplace>) Usage: ${INSTALL_MARKETPLACE_CLI_USAGE}`,
+      ),
     )
   }
 
@@ -1033,11 +1074,13 @@ export async function pluginInstallFromSourceHandler(
     const parsed = await parseMarketplaceInput(marketplaceSourceInput)
     if (!parsed) {
       cliError(
-        `${figures.cross} Invalid marketplace source format. Try: owner/repo, https://..., or ./path`,
+        formatCliError(
+          'Invalid marketplace source format. Try: owner/repo, https://..., or ./path',
+        ),
       )
     }
     if ('error' in parsed) {
-      cliError(`${figures.cross} ${parsed.error}`)
+      cliError(formatCliError(parsed.error))
     }
 
     const known = await loadKnownMarketplacesConfig()
@@ -1075,7 +1118,9 @@ export async function pluginInstallFromSourceHandler(
       addedNow = true
       if (!options.json) {
         const line = appendSettingsLoadWarning(
-          `${figures.tick} Successfully added marketplace: ${name} (declared in user settings)`,
+          formatCliActionSuccess(
+            `Successfully added marketplace: ${name} (declared in user settings)`,
+          ),
           'user',
         )
         printCli(line)
@@ -1087,7 +1132,9 @@ export async function pluginInstallFromSourceHandler(
         ? ' The marketplace itself was added, and is declared in user settings.'
         : ''
       cliError(
-        `${figures.cross} Marketplace '${marketplaceName}' can't be named after a plugin as <plugin>@<marketplace>, so nothing was installed from it.${suffix}`,
+        formatCliError(
+          `Marketplace '${marketplaceName}' can't be named after a plugin as <plugin>@<marketplace>, so nothing was installed from it.${suffix}`,
+        ),
       )
     }
   } catch (error) {
@@ -1139,12 +1186,16 @@ export async function pluginInstallFromSourceFromCliArgs(
 
   if (!marketplaceSource) {
     cliError(
-      `${figures.cross} --marketplace needs a marketplace source (owner/repo or a URL). Usage: ${INSTALL_MARKETPLACE_CLI_USAGE}`,
+      formatCliError(
+        `--marketplace needs a marketplace source (owner/repo or a URL). Usage: ${INSTALL_MARKETPLACE_CLI_USAGE}`,
+      ),
     )
   }
   if (positional.length !== 1) {
     cliError(
-      `${figures.cross} --marketplace needs exactly one plugin name. Usage: ${INSTALL_MARKETPLACE_CLI_USAGE}`,
+      formatCliError(
+        `--marketplace needs exactly one plugin name. Usage: ${INSTALL_MARKETPLACE_CLI_USAGE}`,
+      ),
     )
   }
 

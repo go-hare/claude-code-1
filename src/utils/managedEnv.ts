@@ -15,7 +15,12 @@ import { clearMTLSCache } from './mtls.js'
 import { clearProxyCache, configureGlobalAgents } from './proxy.js'
 import { stripProjectScopedTracingEnv } from './projectScopedTracingStrip.js'
 import { isSettingSourceEnabled } from './settings/constants.js'
-import { isLocalThirdPartyDesktopManagedSession } from './settings/hostModelOverlay.js'
+import {
+  envSelectsProviderOrGateway,
+  isDesktopCodeTabSession,
+  isLocalThirdPartyDesktopManagedSession,
+  MANAGED_SUBAGENT_MODEL_ENV_KEYS,
+} from './settings/hostModelOverlay.js'
 import {
   getSettings_DEPRECATED,
   getSettingsForSource,
@@ -118,6 +123,7 @@ export function stripHostManagedSettingsEnv(
     managedByHost: boolean
     managedByHostFlag: boolean
     desktopHost?: boolean
+    desktopCodeTab?: boolean
     localThirdPartyDesktop?: boolean
     coworkCloud?: boolean
     policyTransportEnv?: boolean
@@ -130,6 +136,7 @@ export function stripHostManagedSettingsEnv(
     managedByHost,
     managedByHostFlag,
     desktopHost = false,
+    desktopCodeTab = false,
     localThirdPartyDesktop = false,
     coworkCloud = false,
     policyTransportEnv = false,
@@ -148,6 +155,10 @@ export function stripHostManagedSettingsEnv(
   const stripTransportAndProxy =
     managedByHostFlag && (!desktopHost || isProjectOrLocal)
   const onStrip = opts.onStrip ?? warnHostManagedSettingsEnvIgnored
+  const selectsProviderOrGateway =
+    desktopCodeTab && source === 'policySettings'
+      ? envSelectsProviderOrGateway(env)
+      : false
   const out: Record<string, string> = {}
   for (const [key, value] of Object.entries(env)) {
     // Official 2.1.319 (#1808): coworkCloud blocks all proxy/transport vars
@@ -167,14 +178,30 @@ export function stripHostManagedSettingsEnv(
       out[key] = value
       continue
     }
+    const upper = key.toUpperCase()
     // Official 2.1.323 (#1968) `le`: preserve CLAUDE_CODE_AUTO_MODE_MODEL in
     // managed settings for local Claude Desktop sessions on third-party providers.
     if (
       localThirdPartyDesktop &&
       source === 'policySettings' &&
-      key.toUpperCase() === 'CLAUDE_CODE_AUTO_MODE_MODEL'
+      upper === 'CLAUDE_CODE_AUTO_MODE_MODEL'
     ) {
       out[key] = value
+      continue
+    }
+    // Official 2.1.326 (#21) `Le` + `Jns`: preserve managed subagent model env
+    // vars in Claude Desktop Code tab sessions unless the same managed settings
+    // env also selects a third-party provider or gateway.
+    if (
+      desktopCodeTab &&
+      source === 'policySettings' &&
+      MANAGED_SUBAGENT_MODEL_ENV_KEYS.has(upper)
+    ) {
+      if (selectsProviderOrGateway) {
+        onStrip(key, source)
+      } else {
+        out[key] = value
+      }
       continue
     }
     // densable PLn provider routing — strip when managedByHost
@@ -183,7 +210,7 @@ export function stripHostManagedSettingsEnv(
       continue
     }
     // densable ANTHROPIC_CUSTOM_HEADERS under managedByHost
-    if (managedByHost && key.toUpperCase() === 'ANTHROPIC_CUSTOM_HEADERS') {
+    if (managedByHost && upper === 'ANTHROPIC_CUSTOM_HEADERS') {
       onStrip(key, source)
       continue
     }
@@ -224,6 +251,7 @@ function withoutHostManagedProviderVars(
     managedByHost: isManagedByHostSession(),
     managedByHostFlag: isProviderManagedByHostFlag(),
     desktopHost: process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop',
+    desktopCodeTab: isDesktopCodeTabSession(),
     localThirdPartyDesktop: isLocalThirdPartyDesktopManagedSession(),
     coworkCloud: isCoworkCloudSession(),
     policyTransportEnv: isPolicyTransportManagedByHost(),
@@ -641,11 +669,23 @@ export function clearManagedOtelDropWarnsForTests(): void {
 /** densable `I` — strip keys present in host spawn (case-insensitive). */
 function withoutCcdSpawnEnvKeys(
   env: Record<string, string> | undefined,
+  source = 'settings',
 ): Record<string, string> {
   if (!env || !ccdSpawnEnvKeys) return env || {}
+  const allowManagedSubagent =
+    source === 'policySettings' && isDesktopCodeTabSession()
+  const allowManagedAutoMode =
+    source === 'policySettings' && isLocalThirdPartyDesktopManagedSession()
   const out: Record<string, string> = {}
   for (const [key, value] of Object.entries(env)) {
-    if (!hostSpawnHasKey(key)) out[key] = value
+    const upper = key.toUpperCase()
+    if (
+      !hostSpawnHasKey(key) ||
+      (allowManagedSubagent && MANAGED_SUBAGENT_MODEL_ENV_KEYS.has(upper)) ||
+      (allowManagedAutoMode && upper === 'CLAUDE_CODE_AUTO_MODE_MODEL')
+    ) {
+      out[key] = value
+    }
   }
   return out
 }
@@ -669,6 +709,7 @@ function filterSettingsEnv(
       ),
       source,
     ),
+    source,
   )
 }
 

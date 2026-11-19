@@ -1,4 +1,5 @@
 import { promises as fsp } from 'fs'
+import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import {
   getMainThreadAgentId,
   getSdkAgentProgressSummariesEnabled,
@@ -8,7 +9,10 @@ import { isCoordinatorMode } from 'src/coordinator/coordinatorMode.js'
 import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js'
 import type { ToolUseContext } from 'src/Tool.js'
 import type { InternalPermissionMode } from 'src/types/permissions.js'
-import { registerAsyncAgent } from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
+import {
+  enqueueMainAgentTakeoverNotice,
+  registerAsyncAgent,
+} from 'src/tasks/LocalAgentTask/LocalAgentTask.js'
 import { assembleToolPool } from 'src/tools.js'
 import { filterParentToolsForFork } from 'src/utils/agentToolFilter.js'
 import { asAgentId, toAgentId } from 'src/types/ids.js'
@@ -235,6 +239,34 @@ export function resolveWorkerPermissionMode(
   return undefined
 }
 
+export type ResumePromptContent = string | ContentBlockParam[]
+
+function resumePromptToPlainText(prompt: ResumePromptContent): string {
+  if (typeof prompt === 'string') return prompt
+  return prompt
+    .filter(
+      (b): b is Extract<ContentBlockParam, { type: 'text' }> =>
+        b.type === 'text',
+    )
+    .map(b => b.text)
+    .join('\n')
+}
+
+function wrapResumePromptContent(
+  prompt: ResumePromptContent,
+  origin: ResumePromptOrigin | undefined,
+): ResumePromptContent {
+  if (typeof prompt === 'string') {
+    return wrapResumePromptOrigin(prompt, origin)
+  }
+  const textPart = resumePromptToPlainText(prompt)
+  const nonTextBlocks = prompt.filter(b => b.type !== 'text')
+  return [
+    { type: 'text', text: wrapResumePromptOrigin(textPart, origin) },
+    ...nonTextBlocks,
+  ]
+}
+
 export async function resumeAgentBackground({
   agentId,
   prompt,
@@ -252,7 +284,7 @@ export async function resumeAgentBackground({
   resumeSurface,
 }: {
   agentId: string
-  prompt: string
+  prompt: ResumePromptContent
   toolUseContext: ToolUseContext
   canUseTool: CanUseToolFn
   invokingRequestId?: string
@@ -415,7 +447,7 @@ async function resumeAgentBackgroundAfterClaim({
   clearResuming,
 }: {
   agentId: string
-  prompt: string
+  prompt: ResumePromptContent
   toolUseContext: ToolUseContext
   canUseTool: CanUseToolFn
   invokingRequestId?: string
@@ -920,12 +952,14 @@ async function resumeAgentBackgroundAfterClaim({
     mode: resolvedWorkerMode,
   }
 
+  const promptText = resumePromptToPlainText(prompt)
+
   // #683 (SEA `Sdo` / `bdo`): dispatch `agent.spawn` with `resume: { agentId }`
   // so mod hooks can observe or refuse a resumed agent's run (rewrites ignored).
   if (hasMatchingFunctionHook('agent.spawn') && !isInsideAgentSpawnLaunch()) {
     const spawn = {
       subagentType: selectedAgent.agentType,
-      prompt,
+      prompt: promptText,
       description: uiDescription,
       model: resumeModelAlias ?? resolvedAgentModel,
       permissionMode: resolvedWorkerMode,
@@ -994,7 +1028,7 @@ async function resumeAgentBackgroundAfterClaim({
   const resumeUserMessage =
     promptOrigin !== undefined
       ? createUserMessage({
-          content: wrapResumePromptOrigin(prompt, promptOrigin),
+          content: wrapResumePromptContent(prompt, promptOrigin),
           origin:
             promptOrigin as unknown as import('src/types/message.js').MessageOrigin,
           isMeta: true,
@@ -1235,6 +1269,27 @@ async function resumeAgentBackgroundAfterClaim({
         `Agent ${agentId} was stopped by the user and won't be resumed. Treat its work as cancelled; only launch a new agent if the user explicitly asks.`,
       )
     }
+    // Official 2.1.326 #107 (@303483211): When another subagent resumes a
+    // background subagent that originally reported to the main conversation,
+    // notify main which agent it now reports to instead of leaving main waiting
+    // in silence.
+    const resumerAgentId = toolUseContext.agentId
+    if (
+      resumerAgentId !== undefined &&
+      resumerAgentId !== agentId &&
+      parentFromTask === undefined &&
+      !awaitCompletion
+    ) {
+      const resumerTask = toolUseContext.getAppState().tasks?.[
+        resumerAgentId
+      ] as { description?: string } | undefined
+      const newOwnerLabel = resumerTask?.description || resumerAgentId
+      enqueueMainAgentTakeoverNotice({
+        taskId: agentId,
+        description: uiDescription,
+        newOwnerLabel,
+      })
+    }
   } catch (err) {
     if (err instanceof AgentStoppedByUserError) throw err
     parentFromTask = undefined
@@ -1250,7 +1305,7 @@ async function resumeAgentBackgroundAfterClaim({
   const agentBackgroundTask = registerAsyncAgent({
     agentId,
     description: uiDescription,
-    prompt,
+    prompt: promptText,
     selectedAgent,
     setAppState: rootSetAppState,
     toolUseId: toolUseContext.toolUseId,
@@ -1318,7 +1373,7 @@ async function resumeAgentBackgroundAfterClaim({
   }
 
   const metadata = {
-    prompt,
+    prompt: promptText,
     resolvedAgentModel,
     isBuiltInAgent: isBuiltInAgent(selectedAgent),
     startTime,

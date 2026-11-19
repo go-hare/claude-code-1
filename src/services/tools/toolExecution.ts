@@ -1434,6 +1434,66 @@ function getMcpServerBaseUrlFromToolName(
   return getLoggingSafeMcpBaseUrl(serverConnection.config)
 }
 
+const MCP_RESOURCE_TOOL_NAMES = new Set([
+  'ListMcpResourcesTool',
+  'ListMcpResources',
+  'ReadMcpResourceTool',
+  'ReadMcpResource',
+  'ReadMcpResourceDirTool',
+  'ReadMcpResourceDir',
+])
+
+/**
+ * Official 2.1.326 #83 (`MYe`/`wdi` @299078597): Explain why an approved MCP
+ * resource tool or MCP server tool is unavailable (for example after a cloud
+ * session's worker was replaced).
+ */
+export function formatUnavailableMcpOrResourceToolHint(
+  toolName: string,
+  mcpClients: readonly MCPServerConnection[],
+  agentId?: string,
+): string {
+  if (MCP_RESOURCE_TOOL_NAMES.has(toolName)) {
+    const hasPending = mcpClients.some(c => c.type === 'pending')
+    if (hasPending) {
+      return agentId
+        ? `. ${toolName} is not available in this context. Continue without this tool.`
+        : `. ${toolName} is unavailable right now while MCP servers are still connecting; try again shortly.`
+    }
+    return `. ${toolName} is not among the tools available here. Continue with the tools you have.`
+  }
+  if (!toolName.startsWith('mcp__')) {
+    return ''
+  }
+  const conn = findMcpServerConnection(
+    toolName,
+    mcpClients as MCPServerConnection[],
+  )
+  if (!conn) {
+    return '. No MCP server in this session provides it; continue without this tool.'
+  }
+  switch (conn.type) {
+    case 'pending':
+      return agentId
+        ? `. Its MCP server '${conn.name}' is not connected in this context. Continue without this tool.`
+        : `. Its MCP server '${conn.name}' is still connecting; try again shortly.`
+    case 'needs-auth':
+      return agentId
+        ? `. Its MCP server '${conn.name}' is not available in this context. Continue without this tool.`
+        : `. Its MCP server '${conn.name}' needs the user to re-authorize it before its tools work again. Continue without this tool and tell the user if the task depends on it.`
+    case 'disabled':
+      return `. Its MCP server '${conn.name}' was disabled by the user. Continue without this tool.`
+    case 'failed':
+      return agentId
+        ? `. Its MCP server '${conn.name}' is not available in this context. Continue without this tool.`
+        : `. Its MCP server '${conn.name}' has disconnected. Continue without this tool; it becomes callable again only if the server reconnects.`
+    case 'connected':
+      return `. Its MCP server '${conn.name}' is connected but does not offer this tool here. Continue without it.`
+    default:
+      return '. No MCP server in this session provides it; continue without this tool.'
+  }
+}
+
 export async function* runToolUse(
   toolUse: ToolUseBlock,
   assistantMessage: AssistantMessage,
@@ -1489,12 +1549,18 @@ export async function* runToolUse(
       return
     }
     const sanitizedToolName = sanitizeToolNameForAnalytics(toolName)
-    const mistypedHint = suggestMistypedHostConnectorTool(
-      toolName,
-      toolUseContext.options.tools,
-      toolUseContext.options.mcpClients,
-      toolUse.input,
-    )
+    const mistypedHint =
+      suggestMistypedHostConnectorTool(
+        toolName,
+        toolUseContext.options.tools,
+        toolUseContext.options.mcpClients,
+        toolUse.input,
+      ) ||
+      formatUnavailableMcpOrResourceToolHint(
+        toolName,
+        toolUseContext.options.mcpClients,
+        toolUseContext.agentId,
+      )
     logForDebugging(`Unknown tool ${toolName}: ${toolUse.id}`)
     logEvent('tengu_tool_use_error', {
       error:
@@ -3443,6 +3509,83 @@ async function dispatchCheckPermissionsAndCallTool(
             .message
         : undefined
   if (earlyDenyReason !== undefined) {
+    // Official 2.1.326 #28 (@299097904): When a PreToolUse hook in managed
+    // settings refuses a direct tool call, still emit the OTel `tool_decision`
+    // event, code-edit decision counter, analytics rejection event, and
+    // `permission_denials` / `onPermissionDenial` entry.
+    if (!toolUseContext.abortController.signal.aborted) {
+      const managedDecisionReason = {
+        type: 'hook' as const,
+        hookName: `PreToolUse:${tool.name}`,
+        hookSource: 'policySettings' as const,
+        reason: earlyDenyReason,
+      }
+      const source = decisionReasonToOTelSource(managedDecisionReason, 'deny')
+      if (!toolUseContext.toolDecisions?.has(toolUseID)) {
+        toolUseContext.toolDecisions?.set(toolUseID, {
+          source,
+          decision: 'reject',
+          timestamp: Date.now(),
+        })
+        void logOTelEvent('tool_decision', {
+          decision: 'reject',
+          source,
+          tool_name: sanitizeToolNameForAnalytics(tool.name),
+          tool_use_id: toolUseID,
+          ...toolSourceAttributes(
+            tool.mcpInfo ? { serverType: mcpServerType } : undefined,
+          ),
+        })
+        if (isCodeEditingTool(tool.name)) {
+          void buildCodeEditToolAttributes(tool, input, 'reject', source).then(
+            attributes => getCodeEditToolDecisionCounter()?.add(1, attributes),
+          )
+        }
+      }
+      const ctxWithDenials = toolUseContext as ToolUseContext & {
+        onPermissionDenial?: (
+          deniedTool: Tool,
+          deniedToolUseId: string,
+          deniedToolInput: Record<string, unknown>,
+        ) => void
+        permissionDenials?: Array<{
+          tool_name: string
+          tool_use_id: string
+          tool_input: Record<string, unknown>
+        }>
+      }
+      ctxWithDenials.onPermissionDenial?.(tool, toolUseID, input)
+      ctxWithDenials.permissionDenials?.push({
+        tool_name: tool.name,
+        tool_use_id: toolUseID,
+        tool_input: input,
+      })
+      logEvent('tengu_tool_use_can_use_tool_rejected', {
+        messageID:
+          messageId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        toolName: sanitizeToolNameForAnalytics(tool.name),
+        queryChainId: toolUseContext.queryTracking
+          ?.chainId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        queryDepth: toolUseContext.queryTracking?.depth,
+        ...(mcpServerType && {
+          mcpServerType:
+            mcpServerType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        }),
+        ...(mcpServerBaseUrl && {
+          mcpServerBaseUrl:
+            mcpServerBaseUrl as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        }),
+        ...(requestId && {
+          requestId:
+            requestId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        }),
+        ...mcpToolDetailsForAnalytics(
+          tool.name,
+          mcpServerType,
+          mcpServerBaseUrl,
+        ),
+      })
+    }
     const messages = buildToolCallDenyMessages(
       toolUseID,
       earlyDenyReason,

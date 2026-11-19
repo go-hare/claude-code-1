@@ -624,10 +624,14 @@ export function Notifications({
     }
   }, [shouldShowExternalEditorHint, editor, addNotification, removeNotification]);
 
-  // densable `Fo` — queue token-warning as an exempt medium notification so it
-  // rotates with current notifications instead of permanently occupying the 1-row slot.
+  // densable `Fo` + Official 2.1.326 #181: queue token-warning as an exempt medium
+  // notification, and yield it whenever another notification is waiting in the queue
+  // (e.g. usage limit warning) so the 5h context warning never blocks other notices.
+  const hasQueuedOtherNotice = notifications.queue.some(n => n.key !== 'token-warning');
+  const shouldShowTokenWarning =
+    isShowingCompactMessage && !suppressCompactWarning && !isBriefOnly && !hasQueuedOtherNotice;
   useEffect(() => {
-    if (isShowingCompactMessage && !suppressCompactWarning && !isBriefOnly) {
+    if (shouldShowTokenWarning) {
       addNotification({
         key: 'token-warning',
         jsx: <TokenWarning tokenUsage={tokenUsage} model={mainLoopModel} />,
@@ -639,15 +643,7 @@ export function Notifications({
     } else {
       removeNotification('token-warning');
     }
-  }, [
-    isShowingCompactMessage,
-    suppressCompactWarning,
-    isBriefOnly,
-    tokenUsage,
-    mainLoopModel,
-    addNotification,
-    removeNotification,
-  ]);
+  }, [shouldShowTokenWarning, tokenUsage, mainLoopModel, addNotification, removeNotification]);
 
   const showLoginNotice = apiKeyStatus === 'invalid' || apiKeyStatus === 'missing';
   const showVerboseTokens = verbose && !showLoginNotice;

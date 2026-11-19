@@ -15,6 +15,11 @@ import { distRoot } from '../utils/distRoot.js'
 import { execFileNoThrowWithCwd } from '../utils/execFileNoThrow.js'
 import { gracefulShutdown } from '../utils/gracefulShutdown.js'
 import { writeToStdout } from '../utils/process.js'
+import {
+  formatCliActionSuccess,
+  formatCliError,
+  formatCliSuccess,
+} from './cliStatusMarkers.js'
 
 /** Published npm package name (fork: @go-hare/claude-code via MACRO). */
 const PACKAGE_NAME = MACRO.PACKAGE_URL
@@ -109,7 +114,9 @@ export async function updateCCB(): Promise<void> {
   // Get latest version
   const latestVersion = await getLatestVersion()
   if (!latestVersion) {
-    process.stderr.write(chalk.red('Failed to check for updates') + '\n')
+    process.stderr.write(
+      chalk.red(formatCliError('Failed to check for updates', '')) + '\n',
+    )
     process.stderr.write('Unable to fetch latest version from npm registry.\n')
     await gracefulShutdown(1)
     return
@@ -118,7 +125,9 @@ export async function updateCCB(): Promise<void> {
   // Already up to date?
   if (latestVersion === currentVersion || gte(currentVersion, latestVersion)) {
     writeToStdout(
-      chalk.green(`claude is up to date (${currentVersion})`) + '\n',
+      chalk.green(
+        formatCliSuccess(`claude is up to date (${currentVersion})`, ''),
+      ) + '\n',
     )
     await gracefulShutdown(0)
     return
@@ -146,11 +155,14 @@ export async function updateCCB(): Promise<void> {
 
     writeToStdout(
       chalk.green(
-        `Successfully updated from ${currentVersion} to ${latestVersion}`,
+        formatCliActionSuccess(
+          `Successfully updated from ${currentVersion} to ${latestVersion}`,
+          '',
+        ),
       ) + '\n',
     )
   } catch (error) {
-    process.stderr.write(chalk.red('Update failed') + '\n')
+    process.stderr.write(chalk.red(formatCliError('Update failed', '')) + '\n')
     process.stderr.write(`${error}\n`)
     process.stderr.write('\n')
     process.stderr.write('Try manually updating with:\n')

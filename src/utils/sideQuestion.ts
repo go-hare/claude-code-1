@@ -150,6 +150,7 @@ IMPORTANT CONTEXT:
 
 CRITICAL CONSTRAINTS:
 - You have NO tools available - you cannot read files, run commands, search, or take any actions
+- Do NOT write tool calls or tool output as text (for example invoke or function_calls XML blocks) - nothing you write here is executed; if answering would need reading files, running commands, or searching, say that can't be checked from a side question and suggest asking in the main conversation
 - This is a one-off response - there will be no follow-up turns
 - You can ONLY provide information based on what you already know from the conversation context
 - NEVER say things like "Let me try...", "I'll now...", "Let me check...", or promise to take any action
@@ -304,6 +305,20 @@ export function filterNewSideQuestionMessages(
   return messages.filter(m => !inputMessageUuids.has(m.uuid))
 }
 
+const INLINE_TOOL_CALL_MARKUP_RE = /<(?:antml:)?(?:function_calls|invoke)\b/i
+
+/**
+ * Official 2.1.326 #161 (`EPs`): detect fake tool-call XML written as plain text
+ * when the model tries to invoke tools in a toolless `/btw` side question.
+ */
+export function hasInlineToolCallMarkup(text: string): boolean {
+  return INLINE_TOOL_CALL_MARKUP_RE.test(text)
+}
+
+function formatToolAttemptNotice(toolName: string): string {
+  return `(The model tried to call ${toolName} instead of answering directly. Try rephrasing or ask in the main conversation.)`
+}
+
 export function extractSideQuestionResponse(messages: Message[]): {
   response: string | null
   synthetic: boolean
@@ -317,21 +332,46 @@ export function extractSideQuestionResponse(messages: Message[]): {
         }>)
       : [],
   )
+  const apiErrAssistant = messages.find(
+    m => m.type === 'assistant' && m.isApiErrorMessage === true,
+  )
 
   if (assistantBlocks.length > 0) {
     // Concatenate all text blocks (there's normally at most one, but be safe).
     const text = extractTextContent(assistantBlocks, '\n\n').trim()
-    if (text) return { response: text, synthetic: false }
+    const toolUse = assistantBlocks.find(b => b.type === 'tool_use')
+    const toolName =
+      toolUse && 'name' in toolUse && typeof toolUse.name === 'string'
+        ? toolUse.name
+        : 'a tool'
+
+    // Official 2.1.326 #161 (anthropics/claude-code#90314): when the model emits
+    // a lead-in like "Let me check that file." AND a tool_use block (or inline
+    // tool-call markup), append a notice so the user isn't left with a dangling
+    // lead-in.
+    if (text) {
+      const notices: string[] = []
+      if (hasInlineToolCallMarkup(text)) {
+        notices.push(
+          '(Side questions cannot run tools. Ask in the main conversation if checking files or running commands is needed.)',
+        )
+      }
+      if (toolUse) {
+        notices.push(formatToolAttemptNotice(toolName))
+      }
+      if (apiErrAssistant) {
+        notices.push('(The reply was cut short by an API error.)')
+      }
+      return {
+        response: [text, ...notices].join('\n\n'),
+        synthetic: false,
+      }
+    }
 
     // No text — check if the model tried to call a tool despite instructions.
-    const toolUse = assistantBlocks.find(b => b.type === 'tool_use')
     if (toolUse) {
-      const toolName =
-        'name' in toolUse
-          ? (toolUse as unknown as { name: string }).name
-          : 'a tool'
       return {
-        response: `(The model tried to call ${toolName} instead of answering directly. Try rephrasing or ask in the main conversation.)`,
+        response: formatToolAttemptNotice(toolName),
         synthetic: true,
       }
     }

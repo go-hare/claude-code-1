@@ -143,8 +143,55 @@ function checkGates(): { message: string; code: string } | null {
 }
 
 /**
- * densable vJe — tear down the Stop hook + activeGoal. Returns the cleared
- * condition, or null when nothing was set.
+ * Official 2.1.326 #54: Monotonic mutation epoch + goal-identity helpers so
+ * an in-flight Stop hook evaluation running while background work is in
+ * progress cannot overwrite a concurrent `/goal clear` or new `/goal`.
+ */
+let goalMutationEpoch = 0
+
+export function getGoalMutationEpoch(): number {
+  return goalMutationEpoch
+}
+
+export function bumpGoalMutationEpoch(): number {
+  goalMutationEpoch += 1
+  return goalMutationEpoch
+}
+
+export function isSameActiveGoal(
+  live: AppState['activeGoal'],
+  snapshot: AppState['activeGoal'],
+): boolean {
+  if (live === undefined || snapshot === undefined) {
+    return live === snapshot
+  }
+  return live.setAt === snapshot.setAt && live.condition === snapshot.condition
+}
+
+export function applyGoalStateUpdateIfUnchanged(
+  setAppState: (updater: (prev: AppState) => AppState) => void,
+  snapshot: NonNullable<AppState['activeGoal']>,
+  nextGoal: AppState['activeGoal'],
+  snapshotEpoch?: number,
+): boolean {
+  if (snapshotEpoch !== undefined && snapshotEpoch !== goalMutationEpoch) {
+    return false
+  }
+  let applied = false
+  setAppState(prev => {
+    if (!isSameActiveGoal(prev.activeGoal, snapshot)) {
+      return prev
+    }
+    applied = true
+    return { ...prev, activeGoal: nextGoal }
+  })
+  return applied
+}
+
+/**
+ * densable vJe / Official `YQt` (#54) — tear down the Stop hook + activeGoal.
+ * Clears whenever EITHER `activeGoal` OR Stop prompt hooks exist, and bumps
+ * `goalMutationEpoch` so concurrent Stop hooks cannot restore the cleared goal.
  */
 export async function applyGoalClear(
   context: LocalJSXCommandContext,
@@ -153,16 +200,15 @@ export async function applyGoalClear(
   const sessionId = getSessionId()
   const appState = context.getAppState()
   const hooks = listGoalStopHooks(appState, sessionId)
-  // densable vJe: SIe empty → null. Idle cancel is not in vJe (Wsv no-ops
-  // once activeGoal is gone). Analog cancel-on-clear was extra.
-  if (hooks.length === 0) return null
-  const first = hooks[0]!
-  const condition = 'prompt' in first ? first.prompt : null
-  if (condition === null) return null
+  const activeGoal = appState.activeGoal
+  const firstHookPrompt =
+    hooks.length > 0 && 'prompt' in hooks[0]! ? hooks[0]!.prompt : undefined
+  const condition = activeGoal?.condition ?? firstHookPrompt
+  if (condition === undefined) return null
+  bumpGoalMutationEpoch()
   for (const hook of hooks) {
     removeSessionHook(context.setAppState, sessionId, 'Stop', hook)
   }
-  const activeGoal = context.getAppState().activeGoal
   if (activeGoal !== undefined) logGoalCleared(activeGoal, 'user_clear')
   context.setAppState(prev =>
     prev.activeGoal === undefined ? prev : { ...prev, activeGoal: undefined },
@@ -196,6 +242,7 @@ export async function applyGoalSet(
   if (gate) {
     return gate.message
   }
+  bumpGoalMutationEpoch()
   const appState = context.getAppState()
   if (appState.activeGoal !== undefined) {
     logGoalCleared(appState.activeGoal, 'superseded')

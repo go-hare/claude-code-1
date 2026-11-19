@@ -7,6 +7,7 @@ import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
 import { isFastModeAvailable, isFastModeEnabled } from '../../utils/fastMode.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
+import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { getNewlineInstructions } from './utils.js';
 
 /** densable LK / em: keyCase lower, modSep " + ". */
@@ -32,6 +33,14 @@ type Props = {
 
 export function PromptInputHelpMenu(props: Props): React.ReactNode {
   const { dimColor, fixedWidth, gap, paddingX } = props;
+  const { columns, rows } = useTerminalSize();
+  // Official 2.1.326 #229 (`gln`): keep explicit horizontal separation between
+  // shortcut columns so narrow terminals never run columns together, and stack
+  // or tighten height in short fullscreen windows so bottom rows aren't clipped.
+  const isNarrow = columns < 80;
+  const isShortFullscreen = isFullscreenEnvEnabled() && rows < 24;
+  const colGap = gap ?? (isNarrow ? 2 : 3);
+  const colPaddingRight = isNarrow ? 2 : 3;
 
   const transcriptShortcut = formatHelpShortcut(useShortcutDisplay('app:toggleTranscript', 'Global', 'ctrl+o'));
   const todosShortcut = formatHelpShortcut(useShortcutDisplay('app:toggleTodos', 'Global', 'ctrl+t'));
@@ -45,7 +54,7 @@ export function PromptInputHelpMenu(props: Props): React.ReactNode {
   const imagePasteShortcut = formatHelpShortcut(useShortcutDisplay('chat:imagePaste', 'Chat', 'ctrl+v'));
   const focusPanelShortcut = formatHelpShortcut(useShortcutDisplay('abovePrompt:focus', 'Chat', 'ctrl+x tab'));
   const closePanelShortcut = formatHelpShortcut(useShortcutDisplay('pane:close', 'Pane', 'ctrl+x x'));
-  const showPanelShortcuts = isFullscreenEnvEnabled();
+  const showPanelShortcuts = isFullscreenEnvEnabled() && !isShortFullscreen;
 
   const terminalShortcutElement = feature('TERMINAL_PANEL') ? (
     getFeatureValue_CACHED_MAY_BE_STALE('tengu_terminal_panel', false) ? (
@@ -57,8 +66,12 @@ export function PromptInputHelpMenu(props: Props): React.ReactNode {
 
   return (
     <Box paddingX={paddingX} flexDirection="column">
-      <Box flexDirection="row" gap={gap}>
-        <Box flexDirection="column" width={fixedWidth ? 24 : undefined}>
+      <Box flexDirection={isNarrow ? 'column' : 'row'} gap={isNarrow ? 0 : colGap}>
+        <Box
+          flexDirection="column"
+          width={fixedWidth && !isNarrow ? 24 : undefined}
+          paddingRight={isNarrow ? 0 : colPaddingRight}
+        >
           <Box>
             <Text dimColor={dimColor}>! for shell mode</Text>
           </Box>
@@ -72,7 +85,11 @@ export function PromptInputHelpMenu(props: Props): React.ReactNode {
             <Text dimColor={dimColor}>/btw for side question</Text>
           </Box>
         </Box>
-        <Box flexDirection="column" width={fixedWidth ? 35 : undefined}>
+        <Box
+          flexDirection="column"
+          width={fixedWidth && !isNarrow ? 35 : undefined}
+          paddingRight={isNarrow ? 0 : colPaddingRight}
+        >
           <Box>
             <Text dimColor={dimColor}>double tap esc to clear input</Text>
           </Box>

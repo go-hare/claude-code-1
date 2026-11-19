@@ -270,6 +270,7 @@ export function OAuthFlowStep({ onSuccess, onCancel }: OAuthFlowStepProps): Reac
             {showPastePrompt && (
               <Box>
                 <Text>{PASTE_HERE_MSG}</Text>
+                {/* Official 2.1.326 #268: mask pasted OAuth authorization code to match /login. */}
                 <TextInput
                   value={pastedCode}
                   onChange={setPastedCode}
@@ -277,6 +278,7 @@ export function OAuthFlowStep({ onSuccess, onCancel }: OAuthFlowStepProps): Reac
                   cursorOffset={cursorOffset}
                   onChangeCursorOffset={setCursorOffset}
                   columns={textInputColumns}
+                  mask="*"
                 />
               </Box>
             )}

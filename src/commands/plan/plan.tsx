@@ -50,6 +50,7 @@ export async function call(
   const currentMode = appState.toolPermissionContext.mode;
 
   // If not in plan mode, enable it
+  const description = args.trim();
   if (currentMode !== 'plan') {
     handlePlanModeTransition(currentMode, 'plan');
     setAppState(prev => ({
@@ -60,12 +61,17 @@ export async function call(
         destination: 'session',
       }),
     }));
-    const description = args.trim();
-    if (description && description !== 'open') {
+    if (description && description !== 'open' && description !== 'share') {
       onDone('Enabled plan mode', { shouldQuery: true });
     } else {
       onDone('Enabled plan mode');
     }
+    return null;
+  }
+
+  // Official 2.1.326 #46: preserve `/plan <description>` when plan mode is already on.
+  if (description && description !== 'open' && description !== 'share') {
+    onDone('Already in plan mode.', { shouldQuery: true });
     return null;
   }
 

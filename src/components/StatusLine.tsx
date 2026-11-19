@@ -1,9 +1,10 @@
 import { feature } from 'bun:bundle';
 import * as React from 'react';
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { logEvent } from 'src/services/analytics/index.js';
 import { useAppState, useSetAppState } from 'src/state/AppState.js';
 import type { PermissionMode } from 'src/utils/permissions/PermissionMode.js';
+import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import {
   getIsRemoteMode,
   getKairosActive,
@@ -49,7 +50,7 @@ import { isFullscreenEnvEnabled } from '../utils/fullscreen.js';
 import { createBaseHookInput, executeStatusLineCommand } from '../utils/hooks.js';
 import { getLastAssistantMessage } from '../utils/messages.js';
 import { getRuntimeMainLoopModel, type ModelName, renderModelName } from '../utils/model/model.js';
-import { getCurrentSessionTitle } from '../utils/sessionStorage.js';
+import { getCurrentSessionTitle, subscribeSessionTitleChanged } from '../utils/sessionStorage.js';
 import { modelRejectsDisabledThinking } from '../utils/thinking.js';
 import { doesMostRecentAssistantMessageExceed200k, getCurrentUsage } from '../utils/tokens.js';
 import { getCurrentWorktreeSession } from '../utils/worktree.js';
@@ -381,6 +382,14 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
   const settingsEffortTable = useAppState(s => s.settingsEffortTable);
   const thinkingEnabled = useAppState(s => s.thinkingEnabled);
   const prStatus = useAppState(s => (s as { prStatus?: StatusLinePrStatus | null }).prStatus ?? null);
+  // Official 2.1.326 #200: refresh custom status line on terminal resize, /cd, and /rename.
+  const { columns } = useTerminalSize();
+  const currentCwd = getCwd();
+  const sessionTitle = useSyncExternalStore(
+    subscribeSessionTitleChanged,
+    () => getCurrentSessionTitle(getSessionId()),
+    () => undefined,
+  );
   const setAppState = useSetAppState();
   const settings = useSettings();
   // AppState-sourced model — same source as API requests. getMainLoopModel()
@@ -422,6 +431,9 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
     settingsEffortTable: SettingsEffortTable | undefined;
     thinkingEnabled: boolean | undefined;
     prStatus: StatusLinePrStatus | null;
+    columns: number;
+    cwd: string;
+    sessionTitle: string | undefined;
   }>({
     messageId: null,
     exceeds200kTokens: false,
@@ -433,6 +445,9 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
     settingsEffortTable,
     thinkingEnabled,
     prStatus,
+    columns,
+    cwd: currentCwd,
+    sessionTitle,
   });
 
   // Debounce timer ref
@@ -534,7 +549,10 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
       sessionEffort !== previousStateRef.current.sessionEffort ||
       settingsEffortTable !== previousStateRef.current.settingsEffortTable ||
       thinkingEnabled !== previousStateRef.current.thinkingEnabled ||
-      prStatus !== previousStateRef.current.prStatus
+      prStatus !== previousStateRef.current.prStatus ||
+      columns !== previousStateRef.current.columns ||
+      currentCwd !== previousStateRef.current.cwd ||
+      sessionTitle !== previousStateRef.current.sessionTitle
     ) {
       // Don't update messageId here — let doUpdate handle it so
       // exceeds200kTokens is recalculated with the latest messages
@@ -546,6 +564,9 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
       previousStateRef.current.settingsEffortTable = settingsEffortTable;
       previousStateRef.current.thinkingEnabled = thinkingEnabled;
       previousStateRef.current.prStatus = prStatus;
+      previousStateRef.current.columns = columns;
+      previousStateRef.current.cwd = currentCwd;
+      previousStateRef.current.sessionTitle = sessionTitle;
       scheduleUpdate();
     }
   }, [
@@ -558,6 +579,9 @@ function StatusLineInner({ messagesRef, lastAssistantMessageId, vimMode }: Props
     settingsEffortTable,
     thinkingEnabled,
     prStatus,
+    columns,
+    currentCwd,
+    sessionTitle,
     scheduleUpdate,
   ]);
 

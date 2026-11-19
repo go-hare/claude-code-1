@@ -4,7 +4,13 @@ import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
 import { pdSessionEffort } from '../../utils/effort.js'
 import type { Command, LocalCommandResult } from '../../types/command.js'
-import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js'
+import {
+  explainTuiKeptRenderer,
+  formatRendererLabel,
+  fullscreenModeForGateReason,
+  getFullscreenGateReason,
+  isFullscreenEnvEnabled,
+} from '../../utils/fullscreen.js'
 import { isTuiJustSwitchedFromFullscreen } from '../../utils/residualFinalEnvGates.js'
 import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js'
 import {
@@ -122,7 +128,29 @@ const USAGE_TEXT = [
 export function buildTuiJustSwitchedEnv(
   target: 'fullscreen' | 'default',
 ): Record<string, string> {
-  return { CLAUDE_CODE_TUI_JUST_SWITCHED: target }
+  return {
+    CLAUDE_CODE_TUI_JUST_SWITCHED: target,
+    CLAUDE_CODE_TUI_ASKED: target,
+  }
+}
+
+/**
+ * Official 2.1.326 (#182): when `/tui` saved `target` but an override (env var,
+ * managed/project/local/--settings tui, tmux -CC, Windows SSH, crash canary)
+ * still forces the other renderer, explain what keeps the renderer.
+ */
+function getKeptRendererWarning(
+  target: 'fullscreen' | 'default',
+): string | null {
+  try {
+    const reason = getFullscreenGateReason({ ignoreSessionLatch: true })
+    if (reason === 'bg_forced_on') return null
+    const effective = fullscreenModeForGateReason(reason)
+    if (effective === target) return null
+    return `Still the ${formatRendererLabel(effective)} renderer · ${explainTuiKeptRenderer(reason, target)}`
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -382,6 +410,7 @@ async function enableTui(
   if (relaunchFail) {
     return { type: 'text', value: relaunchFail }
   }
+  const keptWarning = getKeptRendererWarning('fullscreen')
   return {
     type: 'text',
     value: [
@@ -392,6 +421,7 @@ async function enableTui(
       settingsResult.error
         ? `Warning: could not persist settings.tui (${settingsResult.error.message})`
         : '',
+      keptWarning ?? '',
       '',
       'Flicker-free alternate-screen rendering will be active on the next',
       'session start.  Add this to your shell profile to make it permanent:',
@@ -438,6 +468,7 @@ async function disableTui(
   if (relaunchFail) {
     return { type: 'text', value: relaunchFail }
   }
+  const keptWarning = getKeptRendererWarning('default')
   return {
     type: 'text',
     value: [
@@ -450,6 +481,7 @@ async function disableTui(
       settingsResult.error
         ? `Warning: could not persist settings.tui (${settingsResult.error.message})`
         : '',
+      keptWarning ?? '',
       '',
       'Standard (non-alternate-screen) rendering will be used on the next',
       'session start (unless CLAUDE_CODE_NO_FLICKER=1 forces on).',
@@ -468,7 +500,8 @@ export async function callTui(
   args: string,
   carry?: TuiRelaunchCarryInput,
 ): Promise<LocalCommandResult> {
-  const sub = args.trim().toLowerCase()
+  const rawSub = args.trim().toLowerCase()
+  const sub = rawSub === 'classic' ? 'default' : rawSub
 
   // ── status ──────────────────────────────────────────────────────────
   if (sub === 'status') {

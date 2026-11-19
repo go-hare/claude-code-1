@@ -190,6 +190,7 @@ export { default as wrapText } from './core/wrap-text.js'
 export { default as measureElement } from './core/measure-element.js'
 export { supportsTabStatus } from './core/termio/osc.js'
 export {
+  attacherCaps,
   setClipboard,
   getClipboardPath,
   probeLinuxClipboardTool,
@@ -243,10 +244,20 @@ export {
   type BorderTextOptions,
 } from './core/render-border.js'
 export {
+  PROGRAM_STATUS_KEEP_ALL,
+  ProgramStatusController,
+  type ProgramStatusPolicy,
+  type ProgramStatusEntry,
+} from './core/terminalCapabilities.js'
+export {
+  Jk,
+  tD,
   isSynchronizedOutputSupported,
   isNativeCursorEnabled,
   isXtermJs,
   isGhosttyXtversion,
+  isTmuxSyncRedrawsEverything,
+  shouldSkipTmuxSyncForDiff,
   getXtversionName,
   setXtversionName,
   setSynchronizedOutputSupported,
@@ -292,7 +303,12 @@ export {
   getTerminalFocused,
   subscribeTerminalFocus,
 } from './core/terminal-focus-state.js'
-export { supportsHyperlinks } from './core/supports-hyperlinks.js'
+export {
+  getForcedHyperlinkSupport,
+  mayWriteHyperlinksToStdout,
+  mayWriteRawUrlHyperlink,
+  supportsHyperlinks,
+} from './core/supports-hyperlinks.js'
 
 // ============================================================
 // Components (Layer 2)
@@ -418,6 +434,7 @@ export { useTerminalViewport } from './hooks/use-terminal-viewport.js'
 export { useSearchHighlight } from './hooks/use-search-highlight.js'
 export { useDeclaredCursor } from './hooks/use-declared-cursor.js'
 export {
+  TerminalWriteContext,
   TerminalWriteProvider,
   useTerminalNotification,
   type TerminalNotification,
@@ -445,7 +462,7 @@ export { subscribeSystemTheme } from './theme/systemTheme.js'
 export { SearchBox } from './theme/SearchBox.js'
 export { Dialog } from './theme/Dialog.js'
 export { Divider } from './theme/Divider.js'
-export { FuzzyPicker } from './theme/FuzzyPicker.js'
+export { FuzzyPicker, type FuzzyPickerHandle } from './theme/FuzzyPicker.js'
 export { ListItem } from './theme/ListItem.js'
 export { LoadingState } from './theme/LoadingState.js'
 export { setSpinnerReducedMotionGetter } from './theme/Spinner.js'

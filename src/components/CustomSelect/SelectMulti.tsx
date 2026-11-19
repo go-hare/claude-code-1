@@ -80,6 +80,8 @@ export type SelectMultiProps<T> = {
   ) => void;
   readonly pastedContents?: Record<number, PastedContent>;
   readonly onRemoveImage?: (id: number) => void;
+  readonly disablePrintableKeybindings?: boolean;
+  readonly takesHomeEnd?: boolean;
 };
 
 export function SelectMulti<T>({
@@ -103,6 +105,8 @@ export function SelectMulti<T>({
   onImagePaste,
   pastedContents,
   onRemoveImage,
+  disablePrintableKeybindings = false,
+  takesHomeEnd = true,
 }: SelectMultiProps<T>): React.ReactNode {
   const state = useMultiSelectState<T>({
     isDisabled,
@@ -121,6 +125,8 @@ export function SelectMulti<T>({
     hideIndexes,
     refuseInput,
     arrowNav,
+    disablePrintableKeybindings,
+    takesHomeEnd,
   });
 
   const leftoverHostRef = useRef<DOMElement | null>(null);

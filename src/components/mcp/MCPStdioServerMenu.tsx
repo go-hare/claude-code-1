@@ -1,9 +1,10 @@
 import figures from 'figures';
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
 import { Box, Byline, color, Dialog, KeyboardShortcutHint, Text, useTheme } from '@anthropic/ink';
 import { getMcpConfigByName } from '../../services/mcp/config.js';
 import { useMcpReconnect, useMcpToggleEnabled } from '../../services/mcp/MCPConnectionManager.js';
+import { formatFailedMcpIssue } from '../../services/mcp/mcpConnectionIssue.js';
 import { describeMcpConfigFilePath, filterMcpPromptsByServer } from '../../services/mcp/utils.js';
 import { useAppState } from '../../state/AppState.js';
 import { errorMessage } from '../../utils/errors.js';
@@ -37,9 +38,15 @@ export function MCPStdioServerMenu({
   const reconnectMcpServer = useMcpReconnect();
   const toggleMcpServer = useMcpToggleEnabled();
   const [isReconnecting, setIsReconnecting] = useState(false);
+  const [togglingAction, setTogglingAction] = useState<'enabling' | 'disabling' | null>(null);
+  const isTogglingRef = useRef(false);
 
   const handleToggleEnabled = React.useCallback(async () => {
+    // Official 2.1.326 #86: Ignore duplicate Enter while Enable/Disable is in flight.
+    if (isTogglingRef.current) return;
+    isTogglingRef.current = true;
     const wasEnabled = server.client.type !== 'disabled';
+    setTogglingAction(wasEnabled ? 'disabling' : 'enabling');
 
     try {
       await toggleMcpServer(server.name);
@@ -48,6 +55,9 @@ export function MCPStdioServerMenu({
     } catch (err) {
       const action = wasEnabled ? 'disable' : 'enable';
       onComplete(`Failed to ${action} MCP server '${server.name}': ${errorMessage(err)}`);
+    } finally {
+      isTogglingRef.current = false;
+      setTogglingAction(null);
     }
   }, [server.client.type, server.name, toggleMcpServer, onCancel, onComplete]);
 
@@ -87,15 +97,22 @@ export function MCPStdioServerMenu({
     });
   }
 
-  if (isReconnecting) {
+  if (isReconnecting || togglingAction !== null) {
+    const heading = isReconnecting ? 'Reconnecting to ' : togglingAction === 'enabling' ? 'Enabling ' : 'Disabling ';
+    const detail = isReconnecting
+      ? ' Restarting MCP server process'
+      : togglingAction === 'enabling'
+        ? ' Starting MCP server process'
+        : ' Stopping MCP server process';
     return (
       <Dialog title={`${capitalizedServerName} MCP Server`} onCancel={() => {}} hideBorder={borderless} hideInputGuide>
         <Text color="text">
-          Reconnecting to <Text bold>{server.name}</Text>
+          {heading}
+          <Text bold>{server.name}</Text>
         </Text>
         <Box>
           <Spinner />
-          <Text> Restarting MCP server process</Text>
+          <Text>{detail}</Text>
         </Box>
         <Text dimColor>This may take a few moments.</Text>
       </Dialog>
@@ -187,6 +204,13 @@ export function MCPStdioServerMenu({
           <Box>
             <Text bold>Tools: </Text>
             <Text dimColor>{serverToolsCount} tools</Text>
+          </Box>
+        )}
+
+        {server.client.type === 'failed' && (
+          <Box flexDirection="column">
+            <Text bold>Error: </Text>
+            <Text dimColor>{formatFailedMcpIssue(server.client)}</Text>
           </Box>
         )}
 

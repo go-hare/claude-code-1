@@ -54,8 +54,30 @@ import { isSafeModeEnabled } from './utils/safeMode.js';
 import { releaseEarlyInputCapture } from './utils/earlyInput.js';
 import { isFullscreenEnvEnabled, mouseTrackingProp } from './utils/fullscreen.js';
 import { getPlatform } from './utils/platform.js';
-import { hasSkipDangerousModePermissionPrompt } from './utils/settings/settings.js';
+import { markSessionExiting } from './dialog/useDialogMailboxBridge.js';
+import { getInitialSettings, hasSkipDangerousModePermissionPrompt } from './utils/settings/settings.js';
+import type { ThemeSetting } from './utils/theme.js';
 import { getThemeSetting, saveThemeSetting } from './utils/themeSetting.js';
+
+/**
+ * Official 2.1.326 #347 (`rPr`): new users who have never completed onboarding
+ * and have no explicit theme configured default to `'auto'` (match terminal)
+ * instead of `'dark'`.
+ */
+export function getFirstRunThemeSetting(): ThemeSetting {
+  const initialTheme = getInitialSettings().theme;
+  if (typeof initialTheme === 'string' && initialTheme.length > 0) {
+    return getThemeSetting();
+  }
+  const config = getGlobalConfig();
+  if (config.theme !== undefined && config.theme !== 'dark') {
+    return getThemeSetting();
+  }
+  if (!config.hasCompletedOnboarding && config.lastOnboardingVersion === undefined) {
+    return 'auto';
+  }
+  return getThemeSetting();
+}
 
 export function completeOnboarding(): void {
   saveGlobalConfig(current => ({
@@ -117,15 +139,44 @@ export function showSetupDialog<T = void>(
   renderer: (done: (result: T) => void) => React.ReactNode,
   options?: { onChangeAppState?: typeof onChangeAppState },
 ): Promise<T> {
-  return showDialog<T>(root, done =>
-    setupScreenHost(
-      <ThemeProvider initialState={getThemeSetting()} onThemeSave={saveThemeSetting}>
-        <AppStateProvider onChangeAppState={options?.onChangeAppState}>
-          <KeybindingSetup>{renderer(done)}</KeybindingSetup>
-        </AppStateProvider>
-      </ThemeProvider>,
-    ),
-  );
+  return new Promise<T>(resolve => {
+    let settled = false;
+    const done = (result: T): void => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    root.render(
+      setupScreenHost(
+        <ThemeProvider initialState={getFirstRunThemeSetting()} onThemeSave={saveThemeSetting}>
+          <AppStateProvider onChangeAppState={options?.onChangeAppState}>
+            <KeybindingSetup>{renderer(done)}</KeybindingSetup>
+          </AppStateProvider>
+        </ThemeProvider>,
+      ),
+    );
+    // Official 2.1.326 #68/#69: if Ink unmounts early (e.g., Ctrl+C/Ctrl+D),
+    // avoid hanging forever awaiting `done` and flush a clean newline before exit.
+    void root.waitUntilExit().then(
+      () => {
+        if (!settled) {
+          settled = true;
+          try {
+            process.stdout.write('\n');
+          } catch {
+            // ignore
+          }
+          gracefulShutdownSync(1);
+        }
+      },
+      () => {
+        if (!settled) {
+          settled = true;
+          gracefulShutdownSync(1);
+        }
+      },
+    );
+  });
 }
 
 /**
@@ -138,6 +189,9 @@ export async function renderAndRun(root: Root, element: React.ReactNode): Promis
   try {
     await root.waitUntilExit();
   } catch (err) {
+    // Official 2.1.326 #108: mark session exiting before teardown/shutdown so pending
+    // background-agent permission prompts are not treated as user refusals.
+    markSessionExiting();
     // densable A0r/$Ji — unrecoverable render while canary armed → died:render_error
     let canaryNote = '';
     try {
@@ -157,6 +211,7 @@ export async function renderAndRun(root: Root, element: React.ReactNode): Promis
     await gracefulShutdown(1);
     return;
   }
+  markSessionExiting();
   await gracefulShutdown(0);
 }
 

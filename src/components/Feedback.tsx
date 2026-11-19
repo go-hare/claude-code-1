@@ -3,7 +3,7 @@ import { readdir, readFile, stat } from 'fs/promises';
 import { basename, dirname, join } from 'path';
 import * as React from 'react';
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
-import { getIsRemoteMode, getLastAPIRequest } from 'src/bootstrap/state.js';
+import { getIsRemoteMode, getLastAPIRequest, getSessionId } from 'src/bootstrap/state.js';
 import { logEventTo1P } from 'src/services/analytics/firstPartyEventLogger.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js';
 import {
@@ -473,6 +473,28 @@ async function loadRawTranscriptJsonl(): Promise<string | null> {
   }
 }
 
+/**
+ * Official 2.1.326 #44: preserve typed `/feedback` draft across Ctrl+O/Ctrl+Z
+ * remounts, cleared on submit or explicit cancel.
+ */
+const feedbackDraftBySession = new Map<string, string>();
+
+export function getFeedbackDraft(sessionId: string): string {
+  return feedbackDraftBySession.get(sessionId) ?? '';
+}
+
+export function setFeedbackDraft(sessionId: string, draft: string): void {
+  if (draft.length === 0) {
+    feedbackDraftBySession.delete(sessionId);
+  } else {
+    feedbackDraftBySession.set(sessionId, draft);
+  }
+}
+
+export function clearFeedbackDraft(sessionId: string): void {
+  feedbackDraftBySession.delete(sessionId);
+}
+
 export function Feedback({
   abortSignal,
   messages,
@@ -482,9 +504,11 @@ export function Feedback({
   mode = 'post',
   send,
 }: Props): React.ReactNode {
+  const sessionId = getSessionId();
   const [localStep, setStep] = useState<Step>('userInput');
-  const [cursorOffset, setCursorOffset] = useState(0);
-  const [description, setDescription] = useState(initialDescription ?? '');
+  const initialDraft = initialDescription || getFeedbackDraft(sessionId);
+  const [cursorOffset, setCursorOffset] = useState(initialDraft.length);
+  const [description, setDescription] = useState(initialDraft);
   const [localFeedbackId, setFeedbackId] = useState<string | null>(null);
   const [localBundlePath] = useState<string | null>(null);
   const [localError, setError] = useState<string | null>(null);
@@ -599,6 +623,7 @@ export function Feedback({
         } else {
           sendStore.deliver('');
         }
+        clearFeedbackDraft(sessionId);
         setStep('done');
       } else {
         const failureReason = formatFeedbackFailureMessage(result);
@@ -610,9 +635,21 @@ export function Feedback({
     } finally {
       sendStore.abandon();
     }
-  }, [abortSignal, backgroundTasks, description, envInfo.isGit, hideGitHubIssue, isRemote, messages, scope, sendStore]);
+  }, [
+    abortSignal,
+    backgroundTasks,
+    description,
+    envInfo.isGit,
+    hideGitHubIssue,
+    isRemote,
+    messages,
+    scope,
+    sendStore,
+    sessionId,
+  ]);
 
   const handleCancel = useCallback(() => {
+    clearFeedbackDraft(sessionId);
     if (step === 'done') {
       onDone(undefined, { display: 'skip' });
       return;
@@ -622,7 +659,7 @@ export function Feedback({
       setFrozenSnapshot(prev => prev ?? snap);
     }
     onDone('Feedback / bug report cancelled', { display: 'system' });
-  }, [step, followSendStore, sendStore, onDone]);
+  }, [step, followSendStore, sendStore, onDone, sessionId]);
 
   // During text input, use Settings context where only Escape (not 'n') triggers confirm:no.
   // This allows typing 'n' in the text field while still supporting Escape to cancel.
@@ -669,7 +706,8 @@ export function Feedback({
         setStep(mode === 'share' || isRemote ? 'userInput' : 'scope');
         return;
       }
-      if (key.return || input === ' ') {
+      // Official 2.1.326 #44: only Enter submits on consent — Space no longer submits accidentally.
+      if (key.return) {
         void submitReport();
       }
     }
@@ -715,6 +753,7 @@ export function Feedback({
             value={description}
             onChange={value => {
               setDescription(value);
+              setFeedbackDraft(sessionId, value);
               setUserEdited(true);
               // Clear error when user starts editing to allow retry
               if (error) {

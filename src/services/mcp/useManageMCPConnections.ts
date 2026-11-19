@@ -16,9 +16,11 @@ import {
   fetchResourcesForClient,
   fetchToolsForClient,
   getMcpToolsCommandsAndResources,
+  markMcpServerRemovedFromSession,
   reconnectMcpServerImpl,
   registerMcpToolsSwapper,
   shouldApplyMcpClientUpdate,
+  unmarkMcpServerRemovedFromSession,
 } from './client.js'
 import { subscribeMcpAuthRecovered } from './auth.js'
 import {
@@ -59,6 +61,7 @@ import {
   logEvent,
 } from 'src/services/analytics/index.js'
 import {
+  consumeManagedMcpArrivalNotice,
   dedupClaudeAiMcpServers,
   doesEnterpriseMcpConfigExist,
   filterMcpServersByPolicy,
@@ -69,6 +72,7 @@ import {
   mergeFolderOwnedMcpConfigs,
   saveDisabledMcpServers,
   setMcpServerEnabled,
+  subscribeToManagedMcpArrival,
 } from 'src/services/mcp/config.js'
 import { notifyInternalMetadataChanged } from '../../utils/sessionState.js'
 import {
@@ -374,6 +378,25 @@ export function useManageMCPConnections(
     })
   }, [store, addNotification])
 
+  // Official 2.1.326 #3 & #292: Surface an explanation when an administrator
+  // deploys `managed-mcp.json` mid-session.
+  useEffect(() => {
+    const showNotice = (message: string) => {
+      addNotification({
+        key: 'managed-mcp-arrived',
+        priority: 'high',
+        text: message,
+        color: 'warning',
+        timeoutMs: 15000,
+      })
+    }
+    const existing = consumeManagedMcpArrivalNotice()
+    if (existing) {
+      showNotice(existing)
+    }
+    return subscribeToManagedMcpArrival(showNotice)
+  }, [addNotification])
+
   // Batched MCP state updates: queue individual server updates and flush them
   // in a single setAppState call via setTimeout. Using a time-based window
   // (instead of queueMicrotask) ensures updates are batched even when
@@ -576,6 +599,7 @@ export function useManageMCPConnections(
         }
         return
       }
+      unmarkMcpServerRemovedFromSession(client.name, client.config)
       updateServer({ ...client, tools, commands, resources })
 
       // Handle side effects based on client state
@@ -1276,6 +1300,9 @@ export function useManageMCPConnections(
             if (s.type === 'connected') {
               s.client.onclose = undefined
             }
+            // Official 2.1.326 #80: Mark removed server so any concurrent or
+            // stale tool call never reconnects to it or reports needs-auth.
+            markMcpServerRemovedFromSession(s.name, s.config)
             // Official 2.1.325 #2303: also evict in-flight ('pending') connects
             // from the memo cache so removed plugin servers don't stay listed.
             if (s.type === 'connected' || s.type === 'pending') {

@@ -279,6 +279,11 @@ export type PermissionAskDecision<
    * not answer this ask.
    */
   personOnly?: true
+  /**
+   * Official 2.1.326 #311/#312 (`unfinishedCheck` / `bts`): true when the
+   * permission check could not finish and its safety checks did not run.
+   */
+  checkIncomplete?: boolean
 }
 
 /**
@@ -397,6 +402,17 @@ export type PermissionDecisionReason =
         | 'backgroundOperator'
         | 'suspiciousWindowsPath'
         | 'outsideReadsBlocked'
+        | 'unfinishedCheck'
+        | 'claudeSettingsFile'
+        | 'internalHardDeny'
+        | 'isolatePeerMachines'
+        | 'restrictedMode'
+        | 'connectorFileSend'
+      /**
+       * Official 2.1.326 #311/#312: secondary circuit-breaker tags attached
+       * alongside `circuitBreaker` (e.g. `also: ['unfinishedCheck']`).
+       */
+      also?: readonly string[]
     }
   | {
       type: 'other'
@@ -407,6 +423,12 @@ export type PermissionDecisionReason =
        * Human-readable text stays in `reason`; this is the stable short token.
        */
       bashMissKind?: string
+      /**
+       * Official 2.1.326 #312/#318 (`vzr`): true when a deny decision stands
+       * in for deny rules (e.g. unparseable/too-long command when deny rules
+       * exist, or null byte in PowerShell path).
+       */
+      standsForDenyRules?: boolean
     }
 
 // ============================================================================

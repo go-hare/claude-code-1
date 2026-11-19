@@ -326,9 +326,12 @@ export const WebSearchTool = buildTool({
           signal: effectiveSignal,
           onProgress(progress) {
             if (onProgress) {
-              const progressCounter = Date.now()
+              const toolUseID =
+                progress.type === 'search_retry'
+                  ? 'search-retry'
+                  : `search-progress-${Date.now()}`
               onProgress({
-                toolUseID: `search-progress-${progressCounter}`,
+                toolUseID,
                 data: progress,
               })
             }

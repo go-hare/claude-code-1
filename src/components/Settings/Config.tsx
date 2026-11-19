@@ -611,6 +611,20 @@ export function pluginConfigSettings(plugins: readonly LoadedPlugin[], opts: Plu
   return rows;
 }
 
+/**
+ * Official 2.1.326 #286 (`Za`): format boolean / `'true'`/`'false'` values as
+ * `on` / `off` in `/config` (preserving non-boolean plugin-provided strings).
+ */
+export function formatConfigOnOffValue(value: string | boolean, isPluginProvidedNonBoolean = false): string {
+  if (typeof value === 'boolean') {
+    return value ? 'on' : 'off';
+  }
+  if (isPluginProvidedNonBoolean) {
+    return value;
+  }
+  return value === 'true' ? 'on' : value === 'false' ? 'off' : value;
+}
+
 /** densable o0t — normalize single-line display value for plugin text/number settings. */
 function formatSettingDisplayValue(setting: Setting): string {
   const s = String(setting.value);
@@ -914,7 +928,9 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
         value: settingsData?.spinnerTipsEnabled ?? true,
         type: 'boolean' as const,
         onChange(spinnerTipsEnabled: boolean) {
-          updateSettingsForSource('localSettings', {
+          // Official 2.1.326 #184: persist Show tips to userSettings (not localSettings)
+          // so the setting applies across folders rather than only the current folder.
+          F({
             spinnerTipsEnabled,
           });
           // Update local state to reflect the change immediately
@@ -975,7 +991,9 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
         value: settingsData?.prefersReducedMotion ?? false,
         type: 'boolean' as const,
         onChange(prefersReducedMotion: boolean) {
-          updateSettingsForSource('localSettings', {
+          // Official 2.1.326 #184: persist Reduce motion to userSettings (not localSettings)
+          // so the setting applies across folders rather than only the current folder.
+          F({
             prefersReducedMotion,
           });
           setSettingsData(prev => ({
@@ -2978,13 +2996,13 @@ export function Config({
     // deletes the key (updateSettingsForSource customizer at settings.ts:368).
     const il = initialLocalSettings;
     updateSettingsForSource('localSettings', {
-      spinnerTipsEnabled: il?.spinnerTipsEnabled,
-      prefersReducedMotion: il?.prefersReducedMotion,
       defaultView: il?.defaultView,
       outputStyle: il?.outputStyle,
     });
     const iu = initialUserSettings;
     F({
+      spinnerTipsEnabled: iu?.spinnerTipsEnabled,
+      prefersReducedMotion: iu?.prefersReducedMotion,
       alwaysThinkingEnabled: iu?.alwaysThinkingEnabled,
       autoCompactEnabled: iu?.autoCompactEnabled,
       fastMode: iu?.fastMode,
@@ -3340,10 +3358,26 @@ export function Config({
         toggleSetting();
         return;
       }
-      // densable: printable chars enter search; `/` opens empty search.
+      // Official 2.1.326 #125: printable chars or multi-char IME / dictation input enter search; `/` opens empty search.
       if (e.ctrl || e.meta) return;
       if (e.key === 'j' || e.key === 'k') return;
-      if (e.key.length === 1 && e.key !== ' ') {
+      const isNamedNonPrintable =
+        e.name === 'up' ||
+        e.name === 'down' ||
+        e.name === 'left' ||
+        e.name === 'right' ||
+        e.name === 'return' ||
+        e.name === 'escape' ||
+        e.name === 'tab' ||
+        e.name === 'backspace' ||
+        e.name === 'delete' ||
+        e.name === 'home' ||
+        e.name === 'end' ||
+        e.name === 'pageup' ||
+        e.name === 'pagedown';
+      const isPrintableSearchInput =
+        e.key.length > 0 && e.key !== ' ' && !isNamedNonPrintable && !/\p{Cc}/u.test(e.key);
+      if (isPrintableSearchInput) {
         e.preventDefault();
         setIsSearchMode(true);
         setSearchQuery(e.key === '/' ? '' : e.key);
@@ -3874,7 +3908,7 @@ export function Config({
                           {setting.type === 'boolean' ? (
                             <>
                               <Text color={isSelected ? 'suggestion' : undefined} wrap="truncate-end">
-                                {setting.value.toString()}
+                                {formatConfigOnOffValue(setting.value)}
                               </Text>
                               {showThinkingWarning && setting.id === 'thinking' && (
                                 <Text color="warning" wrap="truncate-end">
@@ -3910,7 +3944,7 @@ export function Config({
                             </Box>
                           ) : (
                             <Text color={isSelected ? 'suggestion' : undefined} wrap="truncate-end">
-                              {setting.value.toString()}
+                              {formatConfigOnOffValue(setting.value.toString(), setting.provided !== undefined)}
                             </Text>
                           )}
                           {mapleSundial &&

@@ -45,7 +45,11 @@ import {
 } from '../../utils/claudemd.js';
 import { isEnvTruthy } from '../../utils/envUtils.js';
 import { wrapInSystemReminder } from '../../utils/messages.js';
-import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js';
+import {
+  captureSandboxRootMoveHold,
+  clearSandboxRootMoveHold,
+  SandboxManager,
+} from '../../utils/sandbox/sandbox-adapter.js';
 import { updateHooksConfigSnapshot } from '../../utils/hooks/hooksConfigSnapshot.js';
 import { getProjectDirsUpToHome } from '../../utils/markdownConfigLoader.js';
 import { settingsChangeDetector } from '../../utils/settings/changeDetector.js';
@@ -236,6 +240,10 @@ export async function relocateSessionCwd(
   const previous = getCwd();
   const previousOriginal = getOriginalCwd();
   const departedAdditionalDirectories = collectDepartedAdditionalDirectories(previousOriginal, previous);
+  // Official 2.1.326 #299: hold sandbox across cross-root moves unless explicitly released by user /cd.
+  if (projectTrustConfigKey(previousOriginal) !== projectTrustConfigKey(directory)) {
+    captureSandboxRootMoveHold();
+  }
   process.chdir(directory);
   setCwdState(directory);
   setOriginalCwd(directory);
@@ -331,6 +339,10 @@ export async function relocateSessionCwd(
   clearPluginCache('directory move: dest plugin discovery');
 
   // densable Fo.refreshConfig() — official runs this after watcher rehome
+  // Official 2.1.326 #299 (`_un`): explicit /cd releases any root-move sandbox hold before refreshing.
+  if (source === 'cd_command') {
+    clearSandboxRootMoveHold();
+  }
   try {
     SandboxManager.refreshConfig();
   } catch (e) {

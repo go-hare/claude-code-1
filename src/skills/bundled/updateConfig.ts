@@ -1,3 +1,4 @@
+import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import { SettingsSchema } from '../../utils/settings/types.js'
 import {
   stripInternalJsonSchema,
@@ -6,16 +7,20 @@ import {
 import { jsonStringify } from '../../utils/slowOperations.js'
 import { registerBundledSkill } from '../bundledSkills.js'
 
+type SettingsJsonSchemaObject = {
+  properties?: Record<string, Record<string, unknown>>
+}
+
+const ALL_SETTINGS_DESC_MAX_LEN = 80
+
 /**
- * densable `JOe(Eir(), {io:"input"})` then attribution flatten then `PRn(o,!1)`.
+ * densable `In()`: `COt(ago(), {io:"input"})` then attribution flatten then `$2r(e,!1)`.
  */
-function generateSettingsSchema(): string {
+export function generateSettingsSchemaObject(): SettingsJsonSchemaObject {
   const jsonSchema = toJSONSchemaClaude(SettingsSchema(), {
     io: 'input',
     unrepresentable: 'any',
-  }) as {
-    properties?: Record<string, unknown>
-  }
+  }) as SettingsJsonSchemaObject
   const attribution = jsonSchema.properties?.attribution as
     | { description?: string; anyOf?: Array<{ type?: string }> }
     | undefined
@@ -38,7 +43,49 @@ function generateSettingsSchema(): string {
     }
   }
   stripInternalJsonSchema(jsonSchema, false)
-  return jsonStringify(jsonSchema, null, 2)
+  return jsonSchema
+}
+
+/**
+ * Official 2.1.326 #256 (`wa()`): split top-level settings schema keys into
+ * on-demand `schema/<key>.json` files in the skill base directory.
+ */
+export function buildSettingsSchemaFiles(
+  schema: SettingsJsonSchemaObject = generateSettingsSchemaObject(),
+): Record<string, string> {
+  const files: Record<string, string> = {}
+  for (const [key, propSchema] of Object.entries(schema.properties ?? {})) {
+    files[`schema/${key}.json`] = jsonStringify(propSchema, null, 2)
+  }
+  return files
+}
+
+function truncateDescription(text: string, maxLen: number): string {
+  const singleLine = text.replace(/\s+/g, ' ').trim()
+  if (singleLine.length <= maxLen) return singleLine
+  return `${singleLine.slice(0, Math.max(1, maxLen - 1))}…`
+}
+
+/**
+ * Official 2.1.326 #256 (`ba()`): compact index of every top-level settings.json
+ * key (~13k tokens instead of ~93k), instructing Claude to Read `schema/<key>.json`
+ * on demand for any key whose shape is not already shown above.
+ */
+export function formatAllSettingsIndex(
+  schema: SettingsJsonSchemaObject = generateSettingsSchemaObject(),
+): string {
+  const lines = Object.entries(schema.properties ?? {}).map(([key, prop]) => {
+    const rawDesc =
+      typeof prop === 'object' && prop !== null
+        ? typeof prop.description === 'string'
+          ? prop.description
+          : typeof prop.properties === 'object' && prop.properties !== null
+            ? Object.keys(prop.properties as Record<string, unknown>).join(', ')
+            : ''
+        : ''
+    return `- ${key}: ${truncateDescription(rawDesc, ALL_SETTINGS_DESC_MAX_LEN)}`
+  })
+  return `\n\n## All Settings\n\nEvery top-level key of settings.json, with the start of its description. Before you write a key whose exact shape is not shown above, Read \`schema/<key>.json\` in this skill's base directory (for example \`schema/sandbox.json\`): it holds the key's full description and JSON schema, nested keys included. Read only the keys you need. The directory does not survive a resume: if a Read fails, load this skill again for a new one.\n\n${lines.join('\n')}`
 }
 
 const SETTINGS_EXAMPLES_DOCS = `## Settings File Locations
@@ -483,7 +530,11 @@ export function registerUpdateConfigSkill(): void {
       'Use this skill to configure the Claude Code harness via settings.json. Automated behaviors ("from now on when X", "each time X", "whenever X", "before/after X") require hooks configured in settings.json - the harness executes these, not Claude, so memory/preferences cannot fulfill them. Also use for: permissions ("allow X", "add permission", "move permission to"), env vars ("set X=Y"), hook troubleshooting, or any changes to settings.json/settings.local.json files. Examples: "allow npm commands", "add bq permission to global settings", "move permission to user settings", "set DEBUG=true", "when claude stops show X". For simple settings like theme/model, suggest the /config command.',
     allowedTools: ['Read'],
     userInvocable: true,
-    async getPromptForCommand(args) {
+    files: async () =>
+      getIsNonInteractiveSession()
+        ? {}
+        : buildSettingsSchemaFiles(generateSettingsSchemaObject()),
+    async getPromptForCommand(args, _ctx, extractedDir) {
       if (args.startsWith('[hooks-only]')) {
         const req = args.slice('[hooks-only]'.length).trim()
         let prompt = HOOKS_DOCS + '\n\n' + HOOK_VERIFICATION_FLOW
@@ -493,11 +544,16 @@ export function registerUpdateConfigSkill(): void {
         return [{ type: 'text', text: prompt }]
       }
 
-      // Generate schema dynamically to stay in sync with types
-      const jsonSchema = generateSettingsSchema()
+      // Official 2.1.326 #256: in terminal/interactive sessions where schema
+      // files are extracted to disk, emit the compact ~13k-token key index
+      // instead of the ~93k-token full inline JSON schema.
+      const schemaObj = generateSettingsSchemaObject()
 
       let prompt = UPDATE_CONFIG_PROMPT
-      prompt += `\n\n## Full Settings JSON Schema\n\n\`\`\`json\n${jsonSchema}\n\`\`\``
+      prompt +=
+        typeof extractedDir === 'string'
+          ? formatAllSettingsIndex(schemaObj)
+          : `\n\n## Full Settings JSON Schema\n\n\`\`\`json\n${jsonStringify(schemaObj, null, 2)}\n\`\`\``
 
       if (args) {
         prompt += `\n\n## User Request\n\n${args}`

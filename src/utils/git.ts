@@ -31,6 +31,79 @@ import {
 const GIT_ROOT_NOT_FOUND = Symbol('git-root-not-found')
 
 /**
+ * Official 2.1.326 (#342) `Cin` `a(env)`: filter `PATH` to only absolute
+ * directory entries so relative entries (`.` / `..` / empty segments) in user
+ * `PATH` cannot hijack git subcommands, credential helpers, or hooks during
+ * worktree creation, `/teleport`, or IDE checkouts.
+ */
+export function sanitizeStrictGitPath(
+  rawPath: string | undefined,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const delimiter = platform === 'win32' ? ';' : ':'
+  const entries = (rawPath ?? '').split(delimiter).filter(entry => {
+    const trimmed = entry.trim()
+    if (!trimmed) return false
+    if (platform === 'win32') {
+      return /^[A-Za-z]:[\\/]/.test(trimmed)
+    }
+    return trimmed.startsWith('/')
+  })
+  if (entries.length === 0) {
+    return platform === 'win32' ? '' : '/dev/null'
+  }
+  return entries.join(delimiter)
+}
+
+/**
+ * Official 2.1.326 (#342) `Cin(extraEnv, { base, keepUserPath })`: build a
+ * hardened environment for git subprocesses in worktree creation, `/teleport`,
+ * and IDE checkouts. Strips non-absolute `PATH` entries unless `keepUserPath`
+ * is true, sets `GIT_NO_REPLACE_OBJECTS=1`, strips Claude auth env vars, and
+ * clears inherited `GIT_LFS_SKIP_SMUDGE` / `GIT_NO_LAZY_FETCH` unless
+ * explicitly provided in `extraEnv`.
+ */
+export function buildStrictGitEnv(
+  extraEnv?: NodeJS.ProcessEnv,
+  options?: {
+    base?: NodeJS.ProcessEnv
+    keepUserPath?: boolean
+    platform?: NodeJS.Platform
+  },
+): NodeJS.ProcessEnv {
+  const platform = options?.platform ?? process.platform
+  const baseEnv: NodeJS.ProcessEnv = options?.base
+    ? { ...options.base }
+    : gitSubprocessEnv()
+
+  if (!extraEnv || !Object.hasOwn(extraEnv, 'GIT_LFS_SKIP_SMUDGE')) {
+    delete baseEnv.GIT_LFS_SKIP_SMUDGE
+  }
+  if (!extraEnv || !Object.hasOwn(extraEnv, 'GIT_NO_LAZY_FETCH')) {
+    delete baseEnv.GIT_NO_LAZY_FETCH
+  }
+
+  const merged: NodeJS.ProcessEnv = {
+    ...baseEnv,
+    LC_ALL: 'C',
+    LANGUAGE: 'C',
+    GIT_NO_REPLACE_OBJECTS: '1',
+    ...extraEnv,
+  }
+
+  if (options?.keepUserPath !== true) {
+    const rawPath = merged.PATH ?? merged.Path
+    const strictPath = sanitizeStrictGitPath(rawPath, platform)
+    merged.PATH = strictPath
+    if (platform === 'win32' && 'Path' in merged) {
+      merged.Path = strictPath
+    }
+  }
+
+  return merged
+}
+
+/**
  * 2.1.309 #1127 & #1161 (SEA V / Es / j5t) + 2.1.323 #2169:
  * Force English git messages (`LC_ALL=C`, `LANGUAGE=C`), ignore replace
  * refs (`GIT_NO_REPLACE_OBJECTS=1`), and strip Claude Code's own sign-in

@@ -17,8 +17,10 @@ import type { PermissionRule } from 'src/utils/permissions/PermissionRule.js'
 import type { PermissionUpdate } from 'src/utils/permissions/PermissionUpdateSchema.js'
 import {
   createPermissionRequestMessage,
+  getDenyRules,
   getRuleByContentsForToolName,
 } from 'src/utils/permissions/permissions.js'
+import { buildUnfinishedCheckAsk } from 'src/utils/permissions/nhoGates.js'
 import {
   matchWildcardPattern,
   parsePermissionRule,
@@ -33,6 +35,7 @@ import {
   type ParsedCommandElement,
   type ParsedPowerShellCommand,
   PS_TOKENIZER_DASH_CHARS,
+  PS_UNSAFE_PARSE_TIME_CODE_LOAD_ERROR_ID,
   parsePowerShellCommand,
   stripModulePrefix,
 } from 'src/utils/powershell/parser.js'
@@ -58,6 +61,56 @@ import {
   resolveToCanonical,
 } from './readOnlyValidation.js'
 import { POWERSHELL_TOOL_NAME } from './toolName.js'
+
+// Official 2.1.326 `ms` / `hs` / `en` (#319): refuse PowerShell commands that
+// define a function whose name is an alias of a dangerous built-in cmdlet,
+// because PowerShell resolves aliases before functions.
+const DANGEROUS_ALIAS_SHADOW_TARGET_RE =
+  /^(?:(?:Remove|Clear|Set|Move|Rename|Copy)-(?:Item|Content|Wmi)|Stop-(?:Process|Service)|Add-Content|New-Item|Invoke-Expression|Tee-Object|Export-(?:Csv|Alias))/i
+
+const TOLERATED_ALIAS_SHADOW_PARSE_ERRORS = new Set([
+  'CustomAttributeTypeNotFound',
+  'DscResourceInvalidKeyProperty',
+  'IncompleteString',
+  'ParameterAttributeArgumentNeedsToBeConstant',
+  'ParameterAttributeArgumentNeedsToBeConstantOrScriptBlock',
+  'TypeNotAllowedInDataSection',
+  'TypeNotFound',
+])
+
+export function checkPowerShellAliasShadows(
+  parsed: ParsedPowerShellCommand,
+): PermissionResult | undefined {
+  const shadows = parsed.aliasShadows
+  if (
+    (!parsed.valid &&
+      !parsed.errors.every(err =>
+        TOLERATED_ALIAS_SHADOW_PARSE_ERRORS.has(err.errorId),
+      )) ||
+    !shadows?.some(s => DANGEROUS_ALIAS_SHADOW_TARGET_RE.test(s.target))
+  ) {
+    return undefined
+  }
+  const summary = shadows
+    .map(s => `\`${s.name}\` is an alias of \`${s.target}\``)
+    .join(', and ')
+  return {
+    behavior: 'deny',
+    message: `The command was not run. ${summary}. PowerShell runs an alias before a function, so a call by such a name runs what the alias names, not the function defined here. Rename the function, for example with a Verb-Noun name, and change every call to the new name. Keeping the name is not safe: after Set-Alias, with an [Alias()] attribute, in a script file or after removing the alias, the built-in can still run. Any command that defines this name is refused.`,
+    decisionReason: {
+      type: 'safetyCheck',
+      reason: `${summary}, so a call by such a name runs the alias, not the function defined here.`,
+      classifierApprovable: false,
+    },
+  }
+}
+
+const DENY_CHECKED_TOOL_NAMES = new Set([
+  POWERSHELL_TOOL_NAME,
+  'Read',
+  'Edit',
+  'Write',
+])
 
 // Matches `$var = `, `$var += `, `$env:X = `, `$x ??= ` etc. Used to strip
 // nested assignment prefixes in the parse-failed fallback path.
@@ -726,6 +779,63 @@ export async function powershellToolHasPermission(
     }
   }
 
+  // Official 2.1.326 #319 (`en`): refuse commands that define a function
+  // shadowed by a dangerous built-in alias so Claude can rename it.
+  const aliasShadowDeny = checkPowerShellAliasShadows(parsed)
+  if (aliasShadowDeny !== undefined) {
+    return aliasShadowDeny
+  }
+
+  // Official 2.1.326 #318 (`o2r`): when parsing was refused due to parse-time
+  // code-loading tokens (`using module`/`using assembly`/`#requires`/`Import-DscResource`),
+  // deny outright (`standsForDenyRules: true`) if obfuscation is present,
+  // `remove-item`/`cmd` appears, or any PowerShell/Read/Edit/Write deny rule is set.
+  if (parsed.errors[0]?.errorId === PS_UNSAFE_PARSE_TIME_CODE_LOAD_ERROR_ID) {
+    const cleaned = command.replace(/[`^]/g, '').replace(/[*\d]?>&[12]/g, ' ')
+    const unquoted = `${cleaned.replace(/['"\u2018-\u201f]/g, '')} ${cleaned.replace(/['"\u2018-\u201f]/g, ' ')}`
+    const expanded = [
+      unquoted,
+      ...(unquoted.match(/[\w-]+/g) ?? []).map(tok => resolveToCanonical(tok)),
+    ].join(' ')
+    const hasRelevantDenyRule = getDenyRules(toolPermissionContext).some(
+      rule =>
+        rule.ruleValue.ruleContent !== undefined &&
+        DENY_CHECKED_TOOL_NAMES.has(rule.ruleValue.toolName),
+    )
+    if (
+      /`u\{|[`^][\r\n]/i.test(command) ||
+      /\b(?:remove-item|cmd)\b/i.test(expanded) ||
+      hasRelevantDenyRule
+    ) {
+      const msg = `${parsed.errors[0].message} It was not run, because a deny rule is set, or it may remove something or hide what it runs. To run it, reword it without those words.`
+      return {
+        behavior: 'deny',
+        message: msg,
+        decisionReason: {
+          type: 'other',
+          reason: msg,
+          standsForDenyRules: true,
+        } as unknown as PermissionDecisionReason,
+      }
+    }
+  }
+
+  // Official 2.1.326 #318 (`ds` null-byte path guard): deny commands containing
+  // null characters (`\0`), which file names cannot contain (`standsForDenyRules: true`).
+  if (command.includes('\x00')) {
+    const msg =
+      'This command was not run: a path in it contains a null character, which file names cannot contain. Remove it, or, if the value is not a path, pass it as a named parameter such as -Value or -Pattern.'
+    return {
+      behavior: 'deny',
+      message: msg,
+      decisionReason: {
+        type: 'other',
+        reason: msg,
+        standsForDenyRules: true,
+      } as unknown as PermissionDecisionReason,
+    }
+  }
+
   // 2b. Ask if command has an ask rule — DEFERRED into decisions[].
   // Previously this early-returned before sub-command deny checks ran, so
   // `Get-Process; Invoke-Expression evil` with ask(Get-Process:*) +
@@ -789,6 +899,7 @@ export async function powershellToolHasPermission(
   if (
     exactMatchResult.behavior === 'allow' &&
     !parsed.valid &&
+    parsed.errors[0]?.errorId !== PS_UNSAFE_PARSE_TIME_CODE_LOAD_ERROR_ID &&
     preParseAskDecision === null &&
     classifyCommandName(command.split(/\s+/)[0] ?? '') !== 'application'
   ) {
@@ -889,6 +1000,16 @@ export async function powershellToolHasPermission(
           decisionReason: { type: 'rule', rule: fragDenyRules[0] },
         }
       }
+    }
+    // Official 2.1.326 #317 (`o2r`): parse-time code-loading directives
+    // (`using module`, `using assembly`, `#requires`, `Import-DscResource`)
+    // emit a bypass-immune `unfinishedCheck` safetyCheck ask (even in bypassPermissions).
+    if (parsed.errors[0]?.errorId === PS_UNSAFE_PARSE_TIME_CODE_LOAD_ERROR_ID) {
+      const msg = `${parsed.errors[0].message} Allow it only if you trust it.`
+      return buildUnfinishedCheckAsk(msg, {
+        blockReadsOutsideWorkingDirectories:
+          toolPermissionContext.blockReadsOutsideWorkingDirectories,
+      }) as unknown as PermissionResult
     }
     // Preserve pre-parse ask messaging when parse fails. The deferred ask
     // (2b prefix rule or UNC) carries a better decisionReason than the
@@ -997,6 +1118,22 @@ export async function powershellToolHasPermission(
       type: 'other' as const,
       reason:
         'Command contains a `#Requires` directive that may trigger module loading',
+    }
+    decisions.push({
+      behavior: 'ask',
+      message: createPermissionRequestMessage(
+        POWERSHELL_TOOL_NAME,
+        decisionReason,
+      ),
+      decisionReason,
+      suggestions: suggestionForExactCommand(command),
+    })
+  }
+  if (parsed.hasBackgroundJob) {
+    const decisionReason: PermissionDecisionReason = {
+      type: 'other' as const,
+      reason:
+        'Command uses the background job operator (`&`) which spawns a child PowerShell process',
     }
     decisions.push({
       behavior: 'ask',

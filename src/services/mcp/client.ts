@@ -178,6 +178,7 @@ import {
   logEvent,
 } from '../analytics/index.js'
 import {
+  consumeMcpElicitationDeclinedDuringCall,
   runElicitationHooks,
   runElicitationResultHooks,
 } from './elicitationHandler.js'
@@ -193,6 +194,7 @@ import {
 } from './mcpToolInteraction.js'
 import { buildMcpToolName } from './mcpStringUtils.js'
 import {
+  coerceMcpToolInputForSchema,
   type DroppedMcpToolRecord,
   filterListedMcpToolsBySchema,
 } from './mcpToolSchema.js'
@@ -451,6 +453,7 @@ const connectToServerMemo = memoize(
     let inProcessServer:
       | { connect(t: Transport): Promise<void>; close(): Promise<void> }
       | undefined
+    let capturedStartupStderr = ''
     try {
       let transport: Transport
       let legacySseFallback:
@@ -463,6 +466,7 @@ const connectToServerMemo = memoize(
       let connectAuthFlags: ConnectAuthFlags | undefined
       let connectAuthProvider: ClaudeAuthProvider | undefined
       let useFirstPartyAuth = false
+      let lacksHelperHeaders = false
       const firstPartyBearerBag: FirstPartyBearerBag = { last: 'none' }
 
       // If we have the session ingress JWT, we will connect via the session ingress rather than
@@ -471,7 +475,11 @@ const connectToServerMemo = memoize(
 
       if (serverRef.type === 'sse') {
         // Get combined headers (static + dynamic) before deciding on OAuth.
-        const combinedHeaders = await getMcpServerHeaders(name, serverRef)
+        const combinedHeaders = await getMcpServerHeaders(name, serverRef, {
+          onHelperFailed: () => {
+            lacksHelperHeaders = true
+          },
+        })
         const remoteAuth = await resolveRemoteConnectAuth(
           name,
           serverRef,
@@ -667,7 +675,11 @@ const connectToServerMemo = memoize(
         )
 
         // Get combined headers (static + dynamic) before deciding on OAuth.
-        const combinedHeaders = await getMcpServerHeaders(name, serverRef)
+        const combinedHeaders = await getMcpServerHeaders(name, serverRef, {
+          onHelperFailed: () => {
+            lacksHelperHeaders = true
+          },
+        })
         const remoteAuth = await resolveRemoteConnectAuth(
           name,
           serverRef,
@@ -1115,7 +1127,11 @@ const connectToServerMemo = memoize(
       const recreateTransportForPinnedLegacy = async (): Promise<Transport> => {
         // densable `l=u()` / `l=new por(c)` — rebuild same transport kind for legacy.
         if (serverRef.type === 'http') {
-          const combinedHeaders = await getMcpServerHeaders(name, serverRef)
+          const combinedHeaders = await getMcpServerHeaders(name, serverRef, {
+            onHelperFailed: () => {
+              lacksHelperHeaders = true
+            },
+          })
           const remoteAuth = await resolveRemoteConnectAuth(
             name,
             serverRef,
@@ -1654,7 +1670,9 @@ const connectToServerMemo = memoize(
           }
           if (error instanceof UnauthorizedError) {
             return markStoredTokenRejectedForRedial(name, serverRef, () =>
-              handleRemoteAuthFailure(name, serverRef, 'sse'),
+              handleRemoteAuthFailure(name, serverRef, 'sse', {
+                lacksHelperHeaders,
+              }),
             )
           }
         } else if (serverRef.type === 'http' && error instanceof Error) {
@@ -1700,7 +1718,9 @@ const connectToServerMemo = memoize(
           }
           if (error instanceof UnauthorizedError) {
             return markStoredTokenRejectedForRedial(name, serverRef, () =>
-              handleRemoteAuthFailure(name, serverRef, 'http'),
+              handleRemoteAuthFailure(name, serverRef, 'http', {
+                lacksHelperHeaders,
+              }),
             )
           }
         } else if (
@@ -1749,6 +1769,9 @@ const connectToServerMemo = memoize(
         transport.close().catch(() => {})
         if (stderrOutput) {
           logMCPError(name, `Server stderr: ${stderrOutput}`)
+          // Official 2.1.326 #84: retain startup stderr snippet so `/mcp` can
+          // explain why a local (stdio) MCP server failed to start.
+          capturedStartupStderr = stderrOutput.trim().slice(-2000)
         }
         throw error
       }
@@ -2327,6 +2350,15 @@ const connectToServerMemo = memoize(
         const origin = getMcpServerUrlOrigin(serverRef) ?? '(unparseable url)'
         errorText = `MCP endpoint not found at ${origin}. Check the URL in your MCP config.`
       }
+      if (
+        (serverRef.type === undefined || serverRef.type === 'stdio') &&
+        capturedStartupStderr &&
+        !errorText.includes(capturedStartupStderr)
+      ) {
+        errorText = errorText
+          ? `${errorText}\n${capturedStartupStderr}`
+          : capturedStartupStderr
+      }
       return {
         name,
         type: 'failed' as const,
@@ -2889,10 +2921,118 @@ export function mcpClientModule(): {
  * @returns Connected MCP server client (same or reconnected)
  * @throws Error if server cannot be connected
  */
+/**
+ * Official 2.1.326 #80 (`mi`/`Ai`/`Jo` @335339656): Track MCP servers removed
+ * from the active session (e.g. via SDK `mcp_set_servers`) so in-flight or
+ * subsequent tool calls never reconnect to them or report `needs-auth`.
+ */
+const removedMcpServerNames = new Set<string>()
+const removedMcpServerConfigs = new WeakSet<object>()
+
+export function markMcpServerRemovedFromSession(
+  name: string,
+  config?: object,
+): void {
+  removedMcpServerNames.add(name)
+  if (config) {
+    removedMcpServerConfigs.add(config)
+  }
+}
+
+export function unmarkMcpServerRemovedFromSession(
+  name: string,
+  config?: object,
+): void {
+  if (config && removedMcpServerConfigs.has(config)) {
+    return
+  }
+  removedMcpServerNames.delete(name)
+}
+
+export function isMcpServerRemovedFromSession(
+  name: string,
+  config?: object,
+): boolean {
+  if (config && removedMcpServerConfigs.has(config)) {
+    return true
+  }
+  return removedMcpServerNames.has(name)
+}
+
+export function clearRemovedMcpServersTracking(): void {
+  removedMcpServerNames.clear()
+}
+
+export function formatMcpServerRemovedError(name: string): string {
+  return `MCP server "${name}" was not called: it was removed from this session. Continue without it.`
+}
+
+/**
+ * Official 2.1.326 #81 (`q9a` @288151558): Explain to Claude when a server's
+ * tool call failure followed a declined elicitation question.
+ */
+export function formatMcpElicitationDeclinedError(
+  replyMessage: string,
+): string {
+  const trimmed = replyMessage.trim()
+  return `${trimmed === '' ? 'This call failed. That' : `The server replied: "${trimmed}". That reply`} came after a question that the server asked about this call was declined, and the decline still stands. Another call for this action repeats the request that the question was about.`
+}
+
+/**
+ * Official 2.1.326 #255 (`HHt` @288150814): Outcome-unknown guidance when a
+ * `claudeai-proxy` MCP call is cut off after being sent.
+ */
+export const MCP_CALL_OUTCOME_UNKNOWN_NOTE =
+  'The outcome is unknown: the call may have finished, may still be running, or may never have started. Check what it did before you repeat it.'
+
+export function isClaudeAiProxyCutOffAfterSend(
+  error: unknown,
+  configType: string | undefined,
+  signalAborted: boolean,
+): boolean {
+  if (configType !== 'claudeai-proxy' || signalAborted) {
+    return false
+  }
+  if (!(error instanceof Error)) {
+    return false
+  }
+  if (
+    error.name === 'AbortError' ||
+    error instanceof McpAuthError ||
+    error instanceof
+      McpToolCallError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS ||
+    error instanceof TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+  ) {
+    return false
+  }
+  if (isMcpConnectionClosedError(error)) {
+    return true
+  }
+  const status =
+    error instanceof SdkHttpError
+      ? error.status
+      : typeof (error as unknown as { code?: unknown }).code === 'number'
+        ? (error as unknown as { code: number }).code
+        : undefined
+  if (status === undefined || error.name === 'TimeoutError') {
+    return !(error instanceof SdkError) || error.name === 'TimeoutError'
+  }
+  return status >= 500
+}
+
 export async function ensureConnectedClient(
   client: ConnectedMCPServer,
   opts?: EnsureConnectedClientOpts,
 ): Promise<ConnectedMCPServer> {
+  // Official 2.1.326 #80: Never reconnect or report needs-auth for a server
+  // that the SDK host / session just removed.
+  if (isMcpServerRemovedFromSession(client.name, client.config)) {
+    throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+      formatMcpServerRemovedError(client.name),
+      'MCP server removed from session',
+    )
+  }
+
   // SDK MCP servers run in-process and are handled separately via setupSdkMcpClients
   if (client.config.type === 'sdk') {
     return client
@@ -3318,7 +3458,12 @@ export const fetchToolsForClient = memoizeWithLRU(
                 const startTime = Date.now()
                 // densable Biy: Host-side file_upload path policy (Uiy/Ned) with live
                 // ToolPermissionContext before forwarding to Claude in Chrome MCP.
-                let callArgs = args
+                // Official 2.1.326 #82: Coerce numeric text args (e.g. "42") to
+                // numbers when a merged anyOf/oneOf branch accepts a number.
+                let callArgs = coerceMcpToolInputForSchema(
+                  args,
+                  tool.inputSchema,
+                )
                 if (
                   isClaudeInChromeMCPServer(client.name) &&
                   isChromeFileUploadToolName(tool.name)
@@ -3993,46 +4138,57 @@ export const fetchCommandsForClient = memoizeWithLRU(
       // Convert MCP prompts to our Command format
       return promptsToProcess.map(prompt => {
         const argNames = Object.values(prompt.arguments ?? {}).map(k => k.name)
-        return {
-          type: 'prompt' as const,
-          name: 'mcp__' + normalizeNameForMCP(client.name) + '__' + prompt.name,
-          description: prompt.description ?? '',
-          hasUserSpecifiedDescription: !!prompt.description,
-          contentLength: 0, // Dynamic MCP content
-          isEnabled: () => true,
-          isHidden: false,
-          isMcp: true,
-          progressMessage: 'running',
-          userFacingName() {
-            // Use prompt.name (programmatic identifier) not prompt.title (display name)
-            // to avoid spaces breaking slash command parsing
-            return `${client.name}:${prompt.name} (MCP)`
+        return Object.assign(
+          {
+            type: 'prompt' as const,
+            name:
+              'mcp__' + normalizeNameForMCP(client.name) + '__' + prompt.name,
+            description: prompt.description ?? '',
+            hasUserSpecifiedDescription: !!prompt.description,
+            contentLength: 0, // Dynamic MCP content
+            isEnabled: () => true,
+            isHidden: false,
+            isMcp: true,
+            progressMessage: 'running',
+            userFacingName() {
+              // Use prompt.name (programmatic identifier) not prompt.title (display name)
+              // to avoid spaces breaking slash command parsing
+              return `${client.name}:${prompt.name} (MCP)`
+            },
+            argNames,
+            source: 'mcp' as const,
+            async getPromptForCommand(args: string) {
+              const argsArray = args.split(' ')
+              try {
+                const connectedClient = await ensureConnectedClient(client)
+                const result = await connectedClient.client.getPrompt({
+                  name: prompt.name,
+                  arguments: zipObject(argNames, argsArray),
+                })
+                const transformed = await Promise.all(
+                  result.messages.map(message =>
+                    transformResultContent(
+                      message.content,
+                      connectedClient.name,
+                    ),
+                  ),
+                )
+                return transformed.flat()
+              } catch (error) {
+                logMCPError(
+                  client.name,
+                  `Error running command '${prompt.name}': ${errorMessage(error)}`,
+                )
+                throw error
+              }
+            },
           },
-          argNames,
-          source: 'mcp',
-          async getPromptForCommand(args: string) {
-            const argsArray = args.split(' ')
-            try {
-              const connectedClient = await ensureConnectedClient(client)
-              const result = await connectedClient.client.getPrompt({
-                name: prompt.name,
-                arguments: zipObject(argNames, argsArray),
-              })
-              const transformed = await Promise.all(
-                result.messages.map(message =>
-                  transformResultContent(message.content, connectedClient.name),
-                ),
-              )
-              return transformed.flat()
-            } catch (error) {
-              logMCPError(
-                client.name,
-                `Error running command '${prompt.name}': ${errorMessage(error)}`,
-              )
-              throw error
-            }
+          {
+            // Official 2.1.326 #79: Stamp exact server name so `commandBelongsToServer`
+            // does not drop prompts when two servers share a normalized prefix.
+            mcpInfo: { serverName: client.name },
           },
-        }
+        )
       })
     } catch (error) {
       logMCPError(
@@ -4584,6 +4740,19 @@ export async function callMCPToolWithUrlElicitationRetry({
   toolUseContext?: import('../../Tool.js').ToolUseContext
   model?: string
 }): Promise<MCPToolCallResult> {
+  // Official 2.1.326 #80: Refuse calls to a server removed from the session
+  // (e.g. by SDK `mcp_set_servers`) instead of reconnecting or asking for auth.
+  if (
+    isMcpServerRemovedFromSession(
+      clientConnection.name,
+      clientConnection.config,
+    )
+  ) {
+    throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+      formatMcpServerRemovedError(clientConnection.name),
+      'MCP server removed from session',
+    )
+  }
   // Official 2.1.323 #2188 (`tLs`): refuse MCP tool call if a `tool.list`
   // plugin hook removed this tool from the current session.
   const pluginRemovedMessage =
@@ -4854,6 +5023,14 @@ async function callMCPTool({
   hasResultSizeAnnotation?: boolean
   model?: string
 }): Promise<MCPToolCallResult> {
+  // Official 2.1.326 #80: Refuse calls to a server removed from the session
+  // (e.g. by SDK `mcp_set_servers`) instead of reconnecting or asking for auth.
+  if (isMcpServerRemovedFromSession(name, config)) {
+    throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+      formatMcpServerRemovedError(name),
+      'MCP server removed from session',
+    )
+  }
   // Official 2.1.323 #2188 (`tLs`): refuse MCP tool call if a `tool.list`
   // plugin hook removed this tool from the current session.
   const pluginRemovedMessage =
@@ -5025,6 +5202,14 @@ async function callMCPTool({
         errorDetails = String(result.error)
       }
       logMCPError(name, errorDetails)
+      // Official 2.1.326 #81 (`q9a`): If a remote elicitation question for this
+      // server was declined during this call, tell Claude the decline still stands.
+      if (consumeMcpElicitationDeclinedDuringCall(name, toolStartTime)) {
+        throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+          formatMcpElicitationDeclinedError(errorDetails),
+          'MCP tool failed after declined elicitation',
+        )
+      }
       throw new McpToolCallError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
         errorDetails,
         'MCP tool returned error',
@@ -5126,6 +5311,38 @@ async function callMCPTool({
             scope,
           )
         }
+      }
+
+      // Official 2.1.326 #81: If a remote MCP server's elicitation question was
+      // declined during this call and the server then failed the call with a
+      // JSON-RPC error (other than -32003 needs_approval / -32042 url_elicitation),
+      // tell Claude the decline still stands.
+      if (
+        errorCode !== -32003 &&
+        errorCode !== ProtocolErrorCode.UrlElicitationRequired &&
+        consumeMcpElicitationDeclinedDuringCall(name, toolStartTime)
+      ) {
+        throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+          formatMcpElicitationDeclinedError(e.message),
+          'MCP tool failed after declined elicitation',
+        )
+      }
+
+      // Official 2.1.326 #255 (`HHt` @335430481): When a `claudeai-proxy` call
+      // is cut off after it was sent (connection closed, timeout, network drop,
+      // or 5xx), explicitly tell Claude that the call's outcome is unknown.
+      if (isClaudeAiProxyCutOffAfterSend(e, config.type, signal.aborted)) {
+        logMCPDebug(
+          name,
+          `Tool '${tool}' failed: its POST through the proxy does not show whether the server got the call`,
+        )
+        if (isMcpConnectionClosedError(e)) {
+          await clearServerCache(name, config)
+        }
+        throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
+          `${e.message.trimEnd()}\n${MCP_CALL_OUTCOME_UNKNOWN_NOTE}`,
+          'MCP call went out and got no answer',
+        )
       }
 
       // Official WZe expired arm:

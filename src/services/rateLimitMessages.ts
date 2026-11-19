@@ -321,10 +321,15 @@ function getLimitReachedText(
     }
   }
 
-  // densable 2.1.289 Qwn + Official 2.1.323 (#2204) + 2.1.325 (#2382):
-  // group_pool shared budget — omit "ask your admin to raise it" in cloud / RC.
+  // densable 2.1.289 Qwn + Official 2.1.323 (#2204) + 2.1.325 (#2382) + 2.1.326 (#264):
+  // group_pool shared budget — include pooled budget reset time when known;
+  // omit "ask your admin to raise it" in cloud / RC.
   if (!usageBased && limits.overageScope === 'group_pool') {
     const sessionWeeklyHint = formatSessionOrWeeklyResetHint(limits)
+    const { formatGroupPoolBudgetResetSuffix } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../commands/extra-usage/extra-usage-core.js') as typeof import('../commands/extra-usage/extra-usage-core.js')
+    const resetSuffix = formatGroupPoolBudgetResetSuffix(limits)
     const suffix = isCloudOrRemoteControlSession()
       ? ''
       : hasBillingAccess
@@ -332,7 +337,7 @@ function getLimitReachedText(
         : ' · ask your admin to raise it at claude.ai/admin-settings/usage'
     return formatLimitReachedText(
       "team's shared budget",
-      `${suffix}${sessionWeeklyHint}`,
+      `${resetSuffix}${suffix}${sessionWeeklyHint}`,
       model,
     )
   }

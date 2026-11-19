@@ -168,29 +168,73 @@ export async function writeDesignOauth(
   }
 }
 
-/**
- * densable `Fv` @178724750 — POST TOKEN_URL/revoke, continue on failure.
- */
-export async function revokeOAuthRefreshToken(
-  token: string,
-  clientId: string,
-): Promise<void> {
+const ANTHROPIC_REQUEST_ID_RE = /^req_[A-Za-z0-9_-]{1,36}$/
+
+export type OAuthRevokeOutcome = 'acknowledged' | 'retryable' | 'not_retryable'
+
+/** Official `Ux(header)` — verify an Anthropic `request-id` response header. */
+export function isAnthropicRequestId(value: unknown): boolean {
+  return typeof value === 'string' && ANTHROPIC_REQUEST_ID_RE.test(value)
+}
+
+/** Official `ikr()` — URL where the user can manually revoke active logins. */
+export async function getManualRevokeSettingsUrl(): Promise<string> {
   try {
     const { getOauthConfig } = await import('../../constants/oauth.js')
+    return `${getOauthConfig().CLAUDE_AI_ORIGIN}/settings/claude-code`
+  } catch {
+    return 'https://claude.ai/settings/claude-code'
+  }
+}
+
+/** Official `$mn()` — user-facing notice when server revoke wasn't confirmed. */
+export async function formatRevokeUnconfirmedMessage(): Promise<string> {
+  const url = await getManualRevokeSettingsUrl()
+  return `Logged out on this computer, but Anthropic didn't confirm the login was revoked. It may still work until you revoke it at ${url}`
+}
+
+/**
+ * Official 2.1.326 #238 (`Fdo`) — POST TOKEN_URL/revoke, verify Anthropic
+ * `request-id` header, and classify outcome as `acknowledged`, `retryable`
+ * (network error / 5xx), or `not_retryable` (4xx / unstamped 2xx).
+ */
+export async function revokeOAuthRefreshTokenWithStatus(
+  token: string,
+  clientId?: string,
+  tokenTypeHint = 'refresh_token',
+): Promise<OAuthRevokeOutcome> {
+  try {
+    const { getOauthConfig } = await import('../../constants/oauth.js')
+    const cfg = getOauthConfig()
     const axios = (await import('axios')).default
-    await axios.post(
-      `${getOauthConfig().TOKEN_URL}/revoke`,
+    const resp = await axios.post(
+      `${cfg.TOKEN_URL}/revoke`,
       {
         token,
-        token_type_hint: 'refresh_token',
-        client_id: clientId,
+        token_type_hint: tokenTypeHint,
+        client_id: clientId ?? cfg.CLIENT_ID,
       },
       { headers: { 'Content-Type': 'application/json' }, timeout: 5000 },
     )
+    const headers = (resp?.headers as Record<string, unknown> | undefined) ?? {}
+    if (!isAnthropicRequestId(headers['request-id'])) {
+      logForDebugging(
+        'OAuth token revoke answered 2xx without an Anthropic request id; not counted as acknowledged.',
+        { level: 'warn' },
+      )
+      logEvent('tengu_feature_sad', {
+        feature_name:
+          'oauth_token_revoke' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        error_code:
+          'unstamped_2xx' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      return 'not_retryable'
+    }
     logEvent('tengu_feature_ok', {
       feature_name:
         'oauth_token_revoke' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
+    return 'acknowledged'
   } catch (err) {
     const status =
       err !== null &&
@@ -211,7 +255,38 @@ export async function revokeOAuthRefreshToken(
       error_code:
         `http_${status ?? 'network'}` as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
+    return status === undefined || status >= 500 ? 'retryable' : 'not_retryable'
   }
+}
+
+/**
+ * Official 2.1.326 #238 — retry once when the first revoke attempt failed with
+ * a retryable error (network / 5xx), matching `$Ye` before+after-wipe retry.
+ */
+export async function revokeOAuthRefreshTokenWithRetry(
+  token: string,
+  clientId?: string,
+  tokenTypeHint = 'refresh_token',
+  attemptFn: (
+    tok: string,
+    cid?: string,
+    hint?: string,
+  ) => Promise<OAuthRevokeOutcome> = revokeOAuthRefreshTokenWithStatus,
+): Promise<OAuthRevokeOutcome> {
+  const first = await attemptFn(token, clientId, tokenTypeHint)
+  if (first !== 'retryable') return first
+  return attemptFn(token, clientId, tokenTypeHint)
+}
+
+/**
+ * densable `Fv` / `TT` — POST TOKEN_URL/revoke (with retry on transient failure),
+ * continue on failure.
+ */
+export async function revokeOAuthRefreshToken(
+  token: string,
+  clientId: string,
+): Promise<void> {
+  await revokeOAuthRefreshTokenWithRetry(token, clientId)
 }
 
 /** densable `gkn` @195244450 — require H_e scopes. */

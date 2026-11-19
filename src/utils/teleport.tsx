@@ -44,7 +44,7 @@ import { errorMessage, isAbortError, TeleportOperationError, toError } from './e
 import { execFileNoThrow, execFileNoThrowWithCwd } from './execFileNoThrow.js';
 import { getSessionBriefTranscript, isFocusViewActive } from './focusView.js';
 import { truncateToWidth } from './format.js';
-import { findGitRoot, getDefaultBranch, getIsClean, gitExe } from './git.js';
+import { buildStrictGitEnv, findGitRoot, getDefaultBranch, getIsClean, gitExe } from './git.js';
 import { logError } from './log.js';
 import { createSystemMessage, createUserMessage, isCompactBoundaryMessage } from './messages.js';
 import { getMainLoopModel } from './model/model.js';
@@ -368,18 +368,19 @@ export async function validateGitState(): Promise<void> {
  */
 async function fetchFromOrigin(branch?: string): Promise<void> {
   const fetchArgs = branch ? ['fetch', 'origin', `${branch}:${branch}`] : ['fetch', 'origin'];
+  const strictEnv = buildStrictGitEnv();
 
-  const { code: fetchCode, stderr: fetchStderr } = await execFileNoThrow(gitExe(), fetchArgs);
+  const { code: fetchCode, stderr: fetchStderr } = await execFileNoThrow(gitExe(), fetchArgs, { env: strictEnv });
   if (fetchCode !== 0) {
     // If fetching a specific branch fails, it might not exist locally yet
     // Try fetching just the ref without mapping to local branch
     if (branch && fetchStderr.includes('refspec')) {
       logForDebugging(`Specific branch fetch failed, trying to fetch ref: ${branch}`);
-      const { code: refFetchCode, stderr: refFetchStderr } = await execFileNoThrow(gitExe(), [
-        'fetch',
-        'origin',
-        branch,
-      ]);
+      const { code: refFetchCode, stderr: refFetchStderr } = await execFileNoThrow(
+        gitExe(),
+        ['fetch', 'origin', branch],
+        { env: strictEnv },
+      );
       if (refFetchCode !== 0) {
         logError(new Error(`Failed to fetch from remote origin: ${refFetchStderr}`));
       }
@@ -394,12 +395,13 @@ async function fetchFromOrigin(branch?: string): Promise<void> {
  * If not, sets it to origin/<branchName> if that remote branch exists
  */
 async function ensureUpstreamIsSet(branchName: string): Promise<void> {
+  const strictEnv = buildStrictGitEnv();
   // Check if upstream is already set
-  const { code: upstreamCheckCode } = await execFileNoThrow(gitExe(), [
-    'rev-parse',
-    '--abbrev-ref',
-    `${branchName}@{upstream}`,
-  ]);
+  const { code: upstreamCheckCode } = await execFileNoThrow(
+    gitExe(),
+    ['rev-parse', '--abbrev-ref', `${branchName}@{upstream}`],
+    { env: strictEnv },
+  );
 
   if (upstreamCheckCode === 0) {
     // Upstream is already set
@@ -408,17 +410,18 @@ async function ensureUpstreamIsSet(branchName: string): Promise<void> {
   }
 
   // Check if origin/<branchName> exists
-  const { code: remoteCheckCode } = await execFileNoThrow(gitExe(), ['rev-parse', '--verify', `origin/${branchName}`]);
+  const { code: remoteCheckCode } = await execFileNoThrow(gitExe(), ['rev-parse', '--verify', `origin/${branchName}`], {
+    env: strictEnv,
+  });
 
   if (remoteCheckCode === 0) {
     // Remote branch exists, set upstream
     logForDebugging(`Setting upstream for '${branchName}' to 'origin/${branchName}'`);
-    const { code: setUpstreamCode, stderr: setUpstreamStderr } = await execFileNoThrow(gitExe(), [
-      'branch',
-      '--set-upstream-to',
-      `origin/${branchName}`,
-      branchName,
-    ]);
+    const { code: setUpstreamCode, stderr: setUpstreamStderr } = await execFileNoThrow(
+      gitExe(),
+      ['branch', '--set-upstream-to', `origin/${branchName}`, branchName],
+      { env: strictEnv },
+    );
 
     if (setUpstreamCode !== 0) {
       logForDebugging(`Failed to set upstream for '${branchName}': ${setUpstreamStderr}`);
@@ -435,15 +438,20 @@ async function ensureUpstreamIsSet(branchName: string): Promise<void> {
  * Checks out a specific branch
  */
 async function checkoutBranch(branchName: string): Promise<void> {
+  const strictEnv = buildStrictGitEnv();
   // First try to checkout the branch as-is (might be local)
-  let { code: checkoutCode, stderr: checkoutStderr } = await execFileNoThrow(gitExe(), ['checkout', branchName]);
+  let { code: checkoutCode, stderr: checkoutStderr } = await execFileNoThrow(gitExe(), ['checkout', branchName], {
+    env: strictEnv,
+  });
 
   // If that fails, try to checkout from origin
   if (checkoutCode !== 0) {
     logForDebugging(`Local checkout failed, trying to checkout from origin: ${checkoutStderr}`);
 
     // Try to checkout the remote branch and create a local tracking branch
-    const result = await execFileNoThrow(gitExe(), ['checkout', '-b', branchName, '--track', `origin/${branchName}`]);
+    const result = await execFileNoThrow(gitExe(), ['checkout', '-b', branchName, '--track', `origin/${branchName}`], {
+      env: strictEnv,
+    });
 
     checkoutCode = result.code;
     checkoutStderr = result.stderr;
@@ -451,7 +459,9 @@ async function checkoutBranch(branchName: string): Promise<void> {
     // If that also fails, try without -b in case the branch exists but isn't checked out
     if (checkoutCode !== 0) {
       logForDebugging(`Remote checkout with -b failed, trying without -b: ${checkoutStderr}`);
-      const finalResult = await execFileNoThrow(gitExe(), ['checkout', '--track', `origin/${branchName}`]);
+      const finalResult = await execFileNoThrow(gitExe(), ['checkout', '--track', `origin/${branchName}`], {
+        env: strictEnv,
+      });
       checkoutCode = finalResult.code;
       checkoutStderr = finalResult.stderr;
     }
@@ -473,7 +483,9 @@ async function checkoutBranch(branchName: string): Promise<void> {
  * Gets the current branch name
  */
 async function getCurrentBranch(): Promise<string> {
-  const { stdout: currentBranch } = await execFileNoThrow(gitExe(), ['branch', '--show-current']);
+  const { stdout: currentBranch } = await execFileNoThrow(gitExe(), ['branch', '--show-current'], {
+    env: buildStrictGitEnv(),
+  });
   return currentBranch.trim();
 }
 
@@ -1054,9 +1066,11 @@ async function getDefaultBranchAt(cwd: string): Promise<string | null> {
       return null;
     }
   }
+  const strictEnv = buildStrictGitEnv();
   // symbolic-ref refs/remotes/origin/HEAD → refs/remotes/origin/<branch>
   const sym = await execFileNoThrowWithCwd(gitExe(), ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD'], {
     cwd,
+    env: strictEnv,
     preserveOutputOnError: false,
   });
   if (sym.code === 0) {
@@ -1065,6 +1079,7 @@ async function getDefaultBranchAt(cwd: string): Promise<string | null> {
   }
   const show = await execFileNoThrowWithCwd(gitExe(), ['remote', 'show', 'origin'], {
     cwd,
+    env: strictEnv,
     preserveOutputOnError: false,
   });
   if (show.code === 0) {

@@ -3,14 +3,19 @@ import React from 'react';
 import { getCwdState } from '../../bootstrap/state.js';
 import { SandboxSettings } from '../../components/sandbox/SandboxSettings.js';
 import { color } from '@anthropic/ink';
+import type { CommandResultDisplay } from '../../types/command.js';
 import { getPlatform } from '../../utils/platform.js';
-import { addToExcludedCommandsWithResult, SandboxManager } from '../../utils/sandbox/sandbox-adapter.js';
+import {
+  addToExcludedCommandsWithResult,
+  clearSandboxRootMoveHold,
+  SandboxManager,
+} from '../../utils/sandbox/sandbox-adapter.js';
 import { formatSandboxSaveResult } from '../../components/sandbox/SandboxSettings.js';
 import { getSettings_DEPRECATED, getSettingsFilePathForSource } from '../../utils/settings/settings.js';
 import type { ThemeName } from '../../utils/theme.js';
 
 export async function call(
-  onDone: (result?: string) => void,
+  onDone: (result?: string, options?: { display?: CommandResultDisplay }) => void,
   _context: unknown,
   args?: string,
 ): Promise<React.ReactNode | null> {
@@ -58,7 +63,15 @@ export async function call(
 
   // If no args, show the interactive menu
   if (!trimmedArgs) {
-    return <SandboxSettings onComplete={onDone} depCheck={depCheck} />;
+    const handleComplete = (result?: string, options?: { display?: CommandResultDisplay }) => {
+      // Official 2.1.326 #299: release root-move sandbox hold once the user
+      // explicitly updates sandbox settings via `/sandbox`.
+      if (result && (result.startsWith('✓ ') || result.startsWith('○ '))) {
+        clearSandboxRootMoveHold();
+      }
+      onDone(result, options);
+    };
+    return <SandboxSettings onComplete={handleComplete} depCheck={depCheck} />;
   }
 
   // Handle subcommands

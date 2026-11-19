@@ -19,6 +19,11 @@ import { isAutomountMapRoot } from './fsOperations.js'
 import { createAssistantMessage } from './messages.js'
 import { hasPermissionsToUseTool } from './permissions/permissions.js'
 import { processToolResultBlock } from './toolResultStorage.js'
+import {
+  resolveCodeModePrimitiveTools,
+  willHideCodeModeOnlyTools,
+} from '../services/codeMode/optIn.js'
+import { isSkillInlineCommandHandoffEnabled } from './skills/skillInlineCommandHandoff.js'
 
 // Narrow structural slice both BashTool and PowerShellTool satisfy. We can't
 // use the base Tool type: it marks call()'s canUseTool/parentMessage as
@@ -321,6 +326,59 @@ export async function shouldWithholdSkillInlineGitGrants(
   return true
 }
 
+/** Official `ZOt`: placeholder marker for an inline `!` command handed off to Claude. */
+function handOffPlaceholder(index: number): string {
+  return `\x00promptShellHandOff:${index}\x00`
+}
+
+/** Official `blo`: single inline `!` command handoff instruction. */
+function formatSingleHandoff(entry: { command: string; tool: string }): string {
+  const prefix =
+    entry.tool === BASH_TOOL_NAME
+      ? 'run this first, exactly as written, and use its output:'
+      : `run this first, exactly as written, with the ${entry.tool} tool and use its output:`
+  if (/[`\n]/.test(entry.command)) {
+    return `[${prefix}]\n\`\`\`\n${entry.command}\n\`\`\``
+  }
+  return `[${prefix} \`${entry.command}\`]`
+}
+
+/** Official `Tlo`: header listing multiple inline `!` commands handed off to Claude. */
+function formatMultiHandoffHeader(
+  entries: Array<{ command: string; tool: string }>,
+): string {
+  const firstTool = entries[0]?.tool
+  const sameTool =
+    firstTool !== undefined && entries.every(e => e.tool === firstTool)
+  const withTool =
+    sameTool && firstTool !== BASH_TOOL_NAME
+      ? ` with the ${firstTool} tool`
+      : ''
+  const joinHint = sameTool
+    ? `, or all in one ${firstTool} call joined with ${firstTool === BASH_TOOL_NAME ? '&&' : ';'}`
+    : ''
+  const header = `[Run these ${entries.length} commands first, exactly as written${withTool}, and use their output where each is named below. Run them one per call${joinHint}.]`
+  const lines = entries.map(({ command, tool }, idx) => {
+    const suffix = sameTool ? '' : ` (${tool} tool)`
+    if (/[`\n]/.test(command)) {
+      return `${idx + 1}.${suffix}\n\`\`\`\n${command}\n\`\`\``
+    }
+    return `${idx + 1}. \`${command}\`${suffix}`
+  })
+  return [header, ...lines].join('\n')
+}
+
+/** Official `Rlo`: inline slot reference when multiple `!` commands are handed off. */
+function formatMultiHandoffSlot(
+  entry: { command: string },
+  oneBasedIndex: number,
+): string {
+  if (/[`\n]/.test(entry.command)) {
+    return `[output of command ${oneBasedIndex}]`
+  }
+  return `[output of command ${oneBasedIndex}, \`${entry.command}\`]`
+}
+
 /**
  * Parses prompt text and executes any embedded shell commands.
  * Supports two syntaxes:
@@ -391,8 +449,42 @@ export async function executeShellCommandsInPrompt(
     slashCommandName,
   )
 
+  // Official 2.1.326 #74 & #75 (SEA @298127626):
+  // In Code Mode, `Bash`/`PowerShell` is hidden behind `REPL`, so check both
+  // direct presence in `context.options.tools` and Code Mode primitive tools.
+  // Inject `shellTool` into permissionCheckContext.options.tools when hidden
+  // so background subagents preloading skills with inline `!` succeed (#75),
+  // and allow auto-mode inline `!` handoff to Claude when approval is needed (#74).
+  const appStateForMode = context.getAppState()
+  const currentTools = context.options.tools ?? []
+  const hasDirectShellTool = currentTools.some(t => t.name === shellTool.name)
+  const primitiveGrant = (
+    context as ToolUseContext & { primitiveToolGrant?: ReadonlySet<string> }
+  ).primitiveToolGrant
+  const hasCodeModeShellTool = willHideCodeModeOnlyTools(currentTools)
+    ? resolveCodeModePrimitiveTools(
+        currentTools,
+        appStateForMode.toolPermissionContext,
+        primitiveGrant,
+      ).some(t => t.name === shellTool.name)
+    : false
+  const handOffTarget =
+    isSkillInlineCommandHandoffEnabled() &&
+    appStateForMode.toolPermissionContext.mode === 'auto' &&
+    (hasDirectShellTool || hasCodeModeShellTool)
+      ? context.promptShellHandOff
+      : undefined
+  const effectiveOptions = hasDirectShellTool
+    ? context.options
+    : { ...context.options, tools: [...currentTools, shellTool] }
+  const handedOff: Array<{
+    index: number
+    at: number
+    entry: { command: string; tool: string }
+  }> = []
+
   await Promise.all(
-    commands.map(async ({ raw, command }) => {
+    commands.map(async ({ raw, command, at }, index) => {
       try {
         // 2.1.323 #2163 (SEA @292290881): In bare-repository worktrees and
         // similar folders, withhold skill-supplied `command` allow rules and
@@ -405,31 +497,35 @@ export async function executeShellCommandsInPrompt(
           currentMode !== 'bypassPermissions' &&
           (await shouldWithholdSkillInlineGitGrants(command))
 
-        const permissionCheckContext: ToolUseContext = withholdBareGitGrants
-          ? {
-              ...context,
-              getAppState() {
-                const appState = context.getAppState()
-                return {
-                  ...appState,
-                  toolPermissionContext: {
-                    ...appState.toolPermissionContext,
-                    alwaysAllowRules: {
-                      ...appState.toolPermissionContext.alwaysAllowRules,
-                      command: [],
+        const permissionCheckContext: ToolUseContext = {
+          ...context,
+          options: effectiveOptions,
+          promptShellHandOff: undefined,
+          ...(withholdBareGitGrants
+            ? {
+                getAppState() {
+                  const appState = context.getAppState()
+                  return {
+                    ...appState,
+                    toolPermissionContext: {
+                      ...appState.toolPermissionContext,
+                      alwaysAllowRules: {
+                        ...appState.toolPermissionContext.alwaysAllowRules,
+                        command: [],
+                      },
                     },
-                  },
-                }
-              },
-              ...(context.permissionLayers
-                ? {
-                    permissionLayers: context.permissionLayers.filter(
-                      layer => layer.kind !== 'allowed_tools',
-                    ),
                   }
-                : {}),
-            }
-          : context
+                },
+                ...(context.permissionLayers
+                  ? {
+                      permissionLayers: context.permissionLayers.filter(
+                        layer => layer.kind !== 'allowed_tools',
+                      ),
+                    }
+                  : {}),
+              }
+            : {}),
+        }
 
         // Check permissions before executing
         const permissionResult = await hasPermissionsToUseTool(
@@ -439,6 +535,17 @@ export async function executeShellCommandsInPrompt(
           createAssistantMessage({ content: [] }),
           '',
         )
+
+        const needsApproval =
+          permissionResult.behavior === 'ask' ||
+          (permissionResult.behavior === 'deny' &&
+            permissionResult.decisionReason?.type === 'asyncAgent')
+        if (handOffTarget !== undefined && needsApproval) {
+          const entry = { command: command.trim(), tool: shellTool.name }
+          handedOff.push({ index, at: at ?? index, entry })
+          result = result.replace(raw, () => handOffPlaceholder(index))
+          return
+        }
 
         if (permissionResult.behavior !== 'allow') {
           logForDebugging(
@@ -457,12 +564,12 @@ export async function executeShellCommandsInPrompt(
         // densable 2.1.289 Ct — nested skill-shell tool.call stamps innerCall.
         // Gold promptShellHandOff collector when skill has no dedicated agent.
         context.promptShellHandOff?.push({
-          tool: BASH_TOOL_NAME,
+          tool: shellTool.name,
           command,
         })
         const { data } = await shellTool.call(
           { command },
-          { ...context, innerCall: true },
+          { ...context, options: effectiveOptions, innerCall: true },
         )
         // Reuse the same persistence flow as regular Bash tool calls
         const toolResultBlock = await processToolResultBlock(
@@ -488,6 +595,24 @@ export async function executeShellCommandsInPrompt(
       }
     }),
   )
+
+  if (handOffTarget !== undefined && handedOff.length > 0) {
+    handedOff.sort((a, b) => a.at - b.at)
+    const entries = handedOff.map(item => item.entry)
+    if (handedOff.length === 1) {
+      result = result.replace(handOffPlaceholder(handedOff[0]!.index), () =>
+        formatSingleHandoff(handedOff[0]!.entry),
+      )
+    } else {
+      handedOff.forEach(({ index, entry }, pos) => {
+        result = result.replace(handOffPlaceholder(index), () =>
+          formatMultiHandoffSlot(entry, pos + 1),
+        )
+      })
+      result = `${formatMultiHandoffHeader(entries)}\n\n${result}`
+    }
+    handOffTarget.push(...entries)
+  }
 
   return result
 }

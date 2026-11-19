@@ -18,19 +18,18 @@ const LAYOUT = join(
  *   inner bottom flexShrink:0
  */
 describe('FullscreenLayout Wrn 2.1.234 (empty-transcript chrome)', () => {
-  test('source: pill snapshot matches gold Ddw', async () => {
+  test('source: pill snapshot matches gold Ddw / 2.1.326 #197', async () => {
     const src = await Bun.file(LAYOUT).text()
     const idx = src.indexOf('const pillVisible = useSyncExternalStore')
     expect(idx).toBeGreaterThan(0)
     const slice = src.slice(idx, idx + 1200)
     expect(slice).toMatch(/if \(s\.isSticky\(\)\) return false/)
-    expect(slice).toMatch(/dividerY/)
+    expect(slice).toMatch(/dividerYRef/)
     expect(slice).toMatch(
-      /viewportBottom < dividerY && viewportBottom < s\.getScrollHeight\(\)/,
+      /\(hasDivider \|\| !getAutoScrollEnabled\(\) \|\| askBelow\) && viewportBottom < s\.getScrollHeight\(\)/,
     )
-    expect(slice).toMatch(
-      /!getAutoScrollEnabled\(\) && viewportBottom < s\.getScrollHeight\(\)/,
-    )
+    expect(slice).toMatch(/const showUnreadCount = useSyncExternalStore/)
+    expect(slice).toMatch(/return viewportBottom < dividerY/)
   })
 
   test('source: ScrollBox followGrowth from getAutoScrollEnabled', async () => {

@@ -72,12 +72,18 @@ export function renderToolUseProgressMessage(
   {
     tools,
     verbose,
+    hasEnded = false,
   }: {
     tools: Tools;
     verbose: boolean;
+    hasEnded?: boolean;
   },
 ): React.ReactNode {
   if (!progressMessages.length) {
+    // Official 2.1.326 #160: Do not show "Initializing…" on failed or refused calls.
+    if (hasEnded) {
+      return null;
+    }
     return (
       <MessageResponse height={1}>
         <Text dimColor>{INITIALIZING_TEXT}</Text>
@@ -142,6 +148,7 @@ export function renderToolUseRejectedMessage(
       {renderToolUseProgressMessage(progressMessagesForMessage, {
         tools,
         verbose,
+        hasEnded: true,
       })}
       <FallbackToolUseRejectedMessage />
     </>
@@ -165,6 +172,7 @@ export function renderToolUseErrorMessage(
       {renderToolUseProgressMessage(progressMessagesForMessage, {
         tools,
         verbose,
+        hasEnded: true,
       })}
       <FallbackToolUseErrorMessage result={result} verbose={verbose} />
     </>

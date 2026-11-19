@@ -36,7 +36,7 @@ import {
 import { openBrowser } from '../utils/browser.js';
 import { errorMessage } from '../utils/errors.js';
 import { logError } from '../utils/log.js';
-import { ConfirmSelect } from './ConfirmSelect.js';
+import { CONFIRM_SELECT_ARM_MS, ConfirmSelect, confirmSelectRefused } from './ConfirmSelect.js';
 import { Select } from './CustomSelect/index.js';
 import TextInput from './TextInput.js';
 
@@ -57,7 +57,7 @@ type Step =
     }
   | { s: 'buy_working' }
   | { s: 'limit_input' }
-  | { s: 'limit_confirm'; cents: number | null }
+  | { s: 'limit_confirm'; cents: number | null; openedAt: number }
   | { s: 'auto_reload' }
   | { s: 'message'; text: string }
   | { s: 'error'; text: string };
@@ -415,7 +415,7 @@ function ExtraUsageDialogInner({ onDone, renamedFromExtraUsage = false }: Props)
             onSubmit={val => {
               const trimmed = val.trim();
               if (trimmed === '' || trimmed.toLowerCase() === 'unlimited') {
-                setStep({ s: 'limit_confirm', cents: null });
+                setStep({ s: 'limit_confirm', cents: null, openedAt: Date.now() });
                 return;
               }
               const parsed = parseUsageCreditAmount(trimmed);
@@ -423,7 +423,7 @@ function ExtraUsageDialogInner({ onDone, renamedFromExtraUsage = false }: Props)
                 setStep({ s: 'error', text: parsed.error });
                 return;
               }
-              setStep({ s: 'limit_confirm', cents: parsed.cents });
+              setStep({ s: 'limit_confirm', cents: parsed.cents, openedAt: Date.now() });
             }}
             focus
             showCursor
@@ -437,7 +437,55 @@ function ExtraUsageDialogInner({ onDone, renamedFromExtraUsage = false }: Props)
   }
 
   if (step.s === 'limit_confirm') {
+    const isRemovingLimit = step.cents === null;
     const label = step.cents === null ? 'unlimited' : formatCents(step.cents, currency);
+    const isRefused = () => confirmSelectRefused(step.openedAt, CONFIRM_SELECT_ARM_MS, Date.now());
+    const commitLimit = () => {
+      if (isRefused()) {
+        return;
+      }
+      void (async () => {
+        // densable HWr + dialog: show server user_facing reason on reject (#34)
+        const result = await updateSpendLimit(step.cents, currency);
+        if (!result.ok) {
+          setStep({
+            s: 'error',
+            text: formatSpendLimitUpdateFailedMessage(result.reason),
+          });
+          return;
+        }
+        setStep({
+          s: 'message',
+          text: isRemovingLimit ? 'Monthly limit removed (unlimited)' : `Monthly limit updated to ${label}`,
+        });
+      })();
+    };
+    // Official 2.1.326 #35: clearing the monthly spend limit requires explicit confirmation
+    // defaulting to "No, keep the limit" with arm guard + no Up wrap so accidental
+    // Backspace+Enter cannot silently remove the spend cap.
+    if (isRemovingLimit) {
+      return (
+        <Dialog title="Remove the monthly spend limit?" color="warning" onCancel={() => setStep({ s: 'limit_input' })}>
+          <Box flexDirection="column" gap={1}>
+            <Text>Nothing will cap what you spend on usage credits in a month.</Text>
+            <ConfirmSelect
+              confirmLabel="Yes, remove the limit"
+              cancelLabel="No, keep the limit"
+              cancelFirst
+              focus="cancel"
+              hideIndexes
+              disablePrintableKeybindings
+              onUpFromFirstItem={() => {}}
+              openedAt={step.openedAt}
+              windowMs={CONFIRM_SELECT_ARM_MS}
+              refuseInput={isRefused}
+              onConfirm={commitLimit}
+              onCancel={() => setStep({ s: 'limit_input' })}
+            />
+          </Box>
+        </Dialog>
+      );
+    }
     return (
       <Dialog title="Confirm amount" color="suggestion" onCancel={() => setStep({ s: 'limit_input' })}>
         <Box flexDirection="column" gap={1}>
@@ -445,23 +493,10 @@ function ExtraUsageDialogInner({ onDone, renamedFromExtraUsage = false }: Props)
           <ConfirmSelect
             confirmLabel="Confirm"
             cancelLabel="Cancel"
-            onConfirm={() => {
-              void (async () => {
-                // densable HWr + dialog: show server user_facing reason on reject (#34)
-                const result = await updateSpendLimit(step.cents, currency);
-                if (!result.ok) {
-                  setStep({
-                    s: 'error',
-                    text: formatSpendLimitUpdateFailedMessage(result.reason),
-                  });
-                  return;
-                }
-                setStep({
-                  s: 'message',
-                  text: step.cents === null ? 'Monthly limit set to unlimited' : `Monthly limit updated to ${label}`,
-                });
-              })();
-            }}
+            openedAt={step.openedAt}
+            windowMs={CONFIRM_SELECT_ARM_MS}
+            refuseInput={isRefused}
+            onConfirm={commitLimit}
             onCancel={() => setStep({ s: 'limit_input' })}
           />
         </Box>
@@ -581,10 +616,10 @@ function ExtraUsageDialogInner({ onDone, renamedFromExtraUsage = false }: Props)
                 });
                 return;
               }
-              setLimitAmount(
-                typeof extraUsage.monthly_limit === 'number' ? String(Math.round(extraUsage.monthly_limit / 100)) : '',
-              );
-              setLimitCursor(0);
+              const initialLimitText =
+                typeof extraUsage.monthly_limit === 'number' ? String(Math.round(extraUsage.monthly_limit / 100)) : '';
+              setLimitAmount(initialLimitText);
+              setLimitCursor(initialLimitText.length);
               setStep({ s: 'limit_input' });
             } else if (v === 'auto') setStep({ s: 'auto_reload' });
           }}

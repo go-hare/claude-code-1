@@ -4,7 +4,7 @@ import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithK
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import type { CommandResultDisplay } from '../../types/command.js';
 import type { SandboxDependencyCheck } from '../../utils/sandbox/sandbox-adapter.js';
-import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js';
+import { clearSandboxRootMoveHold, SandboxManager } from '../../utils/sandbox/sandbox-adapter.js';
 import { getSettings_DEPRECATED, getSettingsFilePathForSource } from '../../utils/settings/settings.js';
 import { getErrnoCode } from '../../utils/errors.js';
 import { Select } from '../CustomSelect/select.js';
@@ -89,6 +89,8 @@ export function SandboxSettings({ onComplete, depCheck }: Props): React.ReactNod
         break;
       }
       case 'disabled': {
+        // Official 2.1.326 #299: explicit /sandbox change clears any root-move sandbox hold.
+        clearSandboxRootMoveHold();
         const res = await SandboxManager.setSandboxSettings({
           enabled: false,
           autoAllowBashIfSandboxed: false,
@@ -197,10 +199,12 @@ function SandboxModeTab({
       <Box marginBottom={1}>
         <Text bold>Configure mode</Text>
       </Box>
+      {/* Official 2.1.326 #29: disable printable keybindings in /sandbox mode selector. */}
       <Select
         options={options}
         defaultValue={currentMode}
         defaultFocusValue={currentMode}
+        disablePrintableKeybindings
         onChange={onSelect}
         onCancel={() => onComplete(undefined, { display: 'skip' })}
         onUpFromFirstItem={focusHeader}

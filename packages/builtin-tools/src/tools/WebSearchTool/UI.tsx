@@ -85,6 +85,31 @@ export function renderToolUseProgressMessage(progressMessages: ProgressMessage<W
           </Text>
         </MessageResponse>
       );
+    case 'search_retry': {
+      const status = data.status;
+      if (status && status.kind === 'retrying') {
+        const remainingMs = typeof status.deadline === 'number' ? status.deadline - Date.now() : undefined;
+        const delaySeconds = remainingMs !== undefined ? Math.max(1, Math.round(remainingMs / 1000)) : undefined;
+        const attemptPart =
+          typeof status.attempt === 'number' && typeof status.maxRetries === 'number'
+            ? ` (attempt ${status.attempt}/${status.maxRetries})`
+            : '';
+        const waitPart = delaySeconds !== undefined ? ` in ${delaySeconds}s` : '';
+        return (
+          <MessageResponse>
+            <Text dimColor>
+              Retrying search{attemptPart}
+              {waitPart}: {data.query}
+            </Text>
+          </MessageResponse>
+        );
+      }
+      return (
+        <MessageResponse>
+          <Text dimColor>Searching: {data.query}</Text>
+        </MessageResponse>
+      );
+    }
     default:
       return null;
   }

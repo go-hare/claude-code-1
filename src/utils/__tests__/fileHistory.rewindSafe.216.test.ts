@@ -199,7 +199,7 @@ describe('RewindFilesResultSchema densable skippedLinks', () => {
 describe('TYn MessageSelector / CLI copy (densable #36 residual)', () => {
   test('REWIND_SKIPPED_LINKS_REASON is densable TYn verbatim', () => {
     expect(REWIND_SKIPPED_LINKS_REASON).toBe(
-      'the tracked path is (or became) a link or other non-regular file, its directory changed since the checkpoint, or its backup could not be safely read',
+      'the tracked path is (or became) a link or other non-regular file, its directory changed since the checkpoint, it is behind a link in a folder that sandboxed commands can write, or its backup could not be safely read',
     )
   })
 

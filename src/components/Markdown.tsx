@@ -9,11 +9,13 @@ import { logForDebugging } from '../utils/debug.js';
 import { hashContent } from '../utils/hash.js';
 import { logError } from '../utils/log.js';
 import {
+  CJK_BOLD_OPEN_RE,
   configureMarked,
   endsWithBlankLine,
   formatToken,
   stripLeadingBlankTokensBeforeCode,
   stripRawOsc8Sequences,
+  tokenizeCjkEmStrong,
 } from '../utils/markdown.js';
 import { stripPromptXMLTags } from '../utils/messages.js';
 import { isScreenReaderModeEnabled } from '../utils/screenReaderGate.js';
@@ -193,16 +195,49 @@ function applyAnsiTextOverrides(text: string, italic?: boolean, monochrome?: boo
   return out;
 }
 
+// Official 2.1.326 (#146 / #148): user-prompt markdown tokenizer guards (328 `pn`, `fn`, `Ve`, `Je`, `dn`, `gn`, `hn`, `n9i`).
+const PROMPT_LIST_SUPPRESS_RE = /^(?: {0,3}(?:\+|- +\*[\s/]|-(?! \S| {3}\S))| \*)/;
+const PROMPT_INDENTED_LIST_SUPPRESS_RE = /^ +[-*](?![\s\S]*\n {4,}(?:```|~~~))/;
+const PROMPT_STAR_QUOTE_RE = String.raw`(?<=")(?=\*+")|(?<=')(?=\*+')`;
+const PROMPT_STAR_NOT_OPEN_RE = String.raw`(?<=[\w/\\.)\]*])|(?=\*+(?:[\s/\\.,;:)\]}|]|$))|${PROMPT_STAR_QUOTE_RE}`;
+const PROMPT_STAR_NOT_CLOSE_RE = String.raw`(?<=^|[\s/\\([{])|(?=\*+(?:[\w/\\]|\.\w))|${PROMPT_STAR_QUOTE_RE}`;
+const PROMPT_EM_REJECT_OPEN_RE = new RegExp(`^[\\s\\S](?:${PROMPT_STAR_NOT_OPEN_RE})`);
+const PROMPT_EM_MASK_STARS_RE = new RegExp(
+  `(?<!\\*)(?:${PROMPT_STAR_NOT_OPEN_RE})(?:${PROMPT_STAR_NOT_CLOSE_RE})\\*+`,
+  'g',
+);
+
 /**
- * densable z6m — lean Marked for user-prompt mode: keep code/lists/emphasis,
- * disable tables/blockquotes/hr/links/autolinks (and related) so prompts don't
- * grow reply-style chrome.
+ * densable z6m / 2.1.326 `n9i` — lean Marked for user-prompt mode:
+ * - #146: suppress `+` / indented diff-like list markers & preserve 4-space
+ *   indentation on indented code blocks (`text: raw`) so pasted code/diffs do
+ *   not lose indentation or turn `+` lines into `-` bullets.
+ * - #148: keep `*` in globs/math (like `src/a/*.ts`, `2*3*4`) and `_` literal.
+ * - Disable tables/blockquotes/hr/links/autolinks/escape/br.
  */
-const promptModeMarked = new Marked({
+export const promptModeMarked = new Marked({
   tokenizer: {
-    // densable: only allow underscore emStrong; `*...*` stays literal-ish.
-    emStrong(src) {
-      return src.startsWith('_') ? undefined : false;
+    emStrong(src, maskedSrc, prevChar = '') {
+      if (
+        !src.startsWith('*') ||
+        (PROMPT_EM_REJECT_OPEN_RE.test((prevChar || ' ') + src) && !CJK_BOLD_OPEN_RE.test(prevChar + src.slice(0, 5)))
+      ) {
+        return undefined;
+      }
+      const masked = maskedSrc.replace(PROMPT_EM_MASK_STARS_RE, m => '+'.repeat(m.length));
+      return tokenizeCjkEmStrong(this, src, masked, prevChar);
+    },
+    code(src) {
+      const match = this.rules.block.code.exec(src)?.[0];
+      if (match === undefined) return undefined;
+      const nlAfter = match.indexOf('\n', match.trimEnd().length);
+      const raw = nlAfter === -1 ? match : match.slice(0, nlAfter);
+      return { type: 'code', raw, text: raw, codeBlockStyle: 'indented' as const };
+    },
+    list(src) {
+      return PROMPT_LIST_SUPPRESS_RE.test(src) || (this.lexer.state.top && PROMPT_INDENTED_LIST_SUPPRESS_RE.test(src))
+        ? undefined
+        : false;
     },
     // densable j6m.def — disable reference definitions
     def() {
@@ -637,8 +672,23 @@ export const STREAM_MD_FENCE_RE = /^ {0,3}(`{3,}|~{3,})([^\n]*)$/gm;
 /** #1377 (official Ps / vs / ito): streaming table header + row detection. */
 export const STREAM_MD_INCOMPLETE_TABLE_HEADER_RE = /^ {0,3}\|[^\n]*\n[ |:\r-]*$/;
 export const STREAM_MD_TABLE_LINE_RE = /^ {0,3}\|/;
+/** Official 2.1.326 `As` (#133/#134): incomplete ordered-list number prefix at tail. */
+export const STREAM_MD_ORDERED_PREFIX_RE = /^ {0,3}\d{1,9}$/;
 const STREAM_MD_TABLE_HEADER_MAX_BYTES = 1024;
 const STREAM_MD_TABLE_MAX_COLS = 64;
+
+/** Official 2.1.326 `fo` (#133/#134): whether a blank-line gap belongs between blocks. */
+export function needsStreamChunkGap(prevType: string | null, nextType: string | undefined): boolean {
+  return (
+    prevType !== null &&
+    (prevType === 'space' ||
+      prevType === 'heading' ||
+      prevType === 'table' ||
+      prevType === 'blockquote' ||
+      nextType === 'table' ||
+      nextType === 'blockquote')
+  );
+}
 
 export function extractTableHeaderPrefix(raw: string): string {
   return raw.slice(0, raw.indexOf('\n', raw.indexOf('\n') + 1) + 1);
@@ -648,6 +698,8 @@ export type StreamMarkdownState = {
   chunks: ReactNode[];
   frozenSource: string;
   gapAfterChunks: boolean;
+  typeBeforeTail: string | null;
+  isListCut: boolean;
   stablePrefix: string;
   openFence: string | null;
   openTable: string | null;
@@ -658,6 +710,8 @@ export function createStreamMarkdownState(): StreamMarkdownState {
     chunks: [],
     frozenSource: '',
     gapAfterChunks: false,
+    typeBeforeTail: null,
+    isListCut: false,
     stablePrefix: '',
     openFence: null,
     openTable: null,
@@ -686,15 +740,16 @@ export function updateOpenFence(openFence: string | null, source: string): strin
 }
 
 /**
- * Official Ouy: index just past a closing fence line for `openFence`, or -1.
+ * Official 2.1.326 `Ms` (#134): index just past a closing fence line for
+ * `openFence`, or -1. Requires a terminating newline (`source[end] === '\n'`)
+ * so a streaming closing fence is not finalized mid-line.
  */
 export function findClosingFenceEnd(source: string, openFence: string): number {
   for (const match of source.matchAll(STREAM_MD_FENCE_RE)) {
     const end = (match.index ?? 0) + match[0].length;
-    // Fence must be a full line (newline or EOF after).
-    if (source[end] !== undefined && source[end] !== '\n') continue;
+    if (source[end] !== '\n') continue;
     if (isClosingFenceLine(openFence, match[1] ?? '', match[2] ?? '')) {
-      return end + (source[end] === '\n' ? 1 : 0);
+      return end + 1;
     }
   }
   return -1;
@@ -754,24 +809,28 @@ export function StreamingMarkdown({ children, hideTrailingLine = false }: Stream
   let live = stripped.substring(state.frozenSource.length);
   if (!live.startsWith(state.stablePrefix)) {
     state.stablePrefix = '';
+    state.typeBeforeTail = state.gapAfterChunks ? 'space' : null;
   }
 
   const freezeUpTo = (source: string, end: number, gapAfter: boolean): string => {
     const frozenSlice = source.substring(0, end);
     const markdownSource = (state.openFence !== null ? `${state.openFence}\n` : (state.openTable ?? '')) + frozenSlice;
     const skipHighlight = state.openFence !== null || !gapAfter;
-    state.chunks.push(
+    state.chunks = [
+      ...state.chunks,
       <Box key={state.chunks.length} marginTop={state.chunks.length > 0 && state.gapAfterChunks ? 1 : 0}>
         <Markdown skipTokenCache skipHighlightCache={skipHighlight} capProseWidth>
           {markdownSource}
         </Markdown>
       </Box>,
-    );
+    ];
     state.openFence = updateOpenFence(state.openFence, frozenSlice);
     state.frozenSource += frozenSlice;
     state.gapAfterChunks = gapAfter;
+    state.isListCut = false;
     state.stablePrefix = '';
     if (gapAfter) state.openTable = null;
+    else state.typeBeforeTail = null;
     return source.substring(end);
   };
 
@@ -779,6 +838,7 @@ export function StreamingMarkdown({ children, hideTrailingLine = false }: Stream
     const closeAt = findClosingFenceEnd(live, state.openFence);
     if (closeAt >= 0) {
       live = freezeUpTo(live, closeAt, true);
+      state.typeBeforeTail = 'code';
     } else if (live.length > STREAM_MD_FREEZE_CHARS) {
       live = freezeUpTo(live, softSplitIndex(live), false);
     }
@@ -786,13 +846,17 @@ export function StreamingMarkdown({ children, hideTrailingLine = false }: Stream
 
   let hasIncompleteTable = false;
   let hasStableContent = false;
+  let hasIncompleteOrderedPrefix = false;
+  let tailGap = false;
   if (state.openFence === null) {
     const boundary = state.stablePrefix.length;
     const openTable = state.openTable ?? '';
     const combined = openTable + live.substring(boundary);
     const lastNl = combined.lastIndexOf('\n') + 1;
+    const tailLine = combined.substring(lastNl);
+    hasIncompleteOrderedPrefix = STREAM_MD_ORDERED_PREFIX_RE.test(tailLine);
     const lexSource =
-      openTable !== '' || STREAM_MD_TABLE_LINE_RE.test(combined.substring(lastNl))
+      openTable !== '' || hasIncompleteOrderedPrefix || STREAM_MD_TABLE_LINE_RE.test(tailLine)
         ? combined.substring(0, lastNl)
         : combined;
     const tokens = marked.lexer(lexSource);
@@ -816,21 +880,34 @@ export function StreamingMarkdown({ children, hideTrailingLine = false }: Stream
       (lastToken?.type === 'paragraph' &&
         STREAM_MD_INCOMPLETE_TABLE_HEADER_RE.test(lastToken.raw + combined.substring(lexSource.length)));
     hasStableContent = advance > 0 || lastContentIdx === 0;
-    if (tokens[0]?.type !== 'table') {
+    const firstToken = tokens[0];
+    if (firstToken?.type !== 'table') {
       state.openTable = null;
     }
+    const firstNonSpace = tokens.find(t => t.type !== 'space');
+    if (state.stablePrefix.trim() === '' && state.isListCut) {
+      state.gapAfterChunks = !(firstNonSpace?.type === 'list');
+    }
+    const lastFrozenToken = closedTable ? lastToken : tokens[lastContentIdx - 1];
+    if (advance > 0 && lastFrozenToken !== undefined) {
+      state.typeBeforeTail =
+        lastFrozenToken.type === 'html' && endsWithBlankLine(lastFrozenToken.raw) ? 'space' : lastFrozenToken.type;
+    }
+    tailGap = needsStreamChunkGap(state.typeBeforeTail, (advance > 0 ? tokens[lastContentIdx] : firstNonSpace)?.type);
     if (openTable !== '' && advance >= openTable.length) {
-      if (tokens[0]?.type === 'table' && (tokens[0] as Tokens.Table).rows.length === 0) {
+      if (firstToken?.type === 'table' && (firstToken as Tokens.Table).rows.length === 0) {
         state.openTable = null;
         state.gapAfterChunks = true;
       } else {
         live = freezeUpTo(live, advance - openTable.length, true);
+        state.gapAfterChunks = tailGap;
       }
     } else if (openTable === '' && advance > 0) {
       state.stablePrefix = live.substring(0, boundary + advance);
     }
     if (state.stablePrefix.length > STREAM_MD_FREEZE_CHARS) {
       live = freezeUpTo(live, state.stablePrefix.length, true);
+      state.gapAfterChunks = tailGap;
     }
     if (live.length - state.stablePrefix.length > STREAM_MD_FREEZE_CHARS) {
       const start = state.stablePrefix.length;
@@ -842,6 +919,7 @@ export function StreamingMarkdown({ children, hideTrailingLine = false }: Stream
           ? extractTableHeaderPrefix(openTableToken.raw)
           : '';
       live = freezeUpTo(live, start + split, false);
+      state.isListCut = tokens[lastContentIdx]?.type === 'list';
       state.openTable =
         nextOpenTable !== '' && nextOpenTable.length <= STREAM_MD_TABLE_HEADER_MAX_BYTES ? nextOpenTable : null;
     }
@@ -852,9 +930,9 @@ export function StreamingMarkdown({ children, hideTrailingLine = false }: Stream
   const hasStable = stablePrefix.trim() !== '';
   const tableOrFencePrefix = state.openFence !== null ? `${state.openFence}\n` : (state.openTable ?? '');
   let unstableForRender = unstableSuffix ? tableOrFencePrefix + unstableSuffix : '';
-  if (hideTrailingLine && hasIncompleteTable) {
+  if (hideTrailingLine && (hasIncompleteTable || hasIncompleteOrderedPrefix)) {
     unstableForRender = unstableForRender.substring(0, unstableForRender.lastIndexOf('\n') + 1);
-    if (hasStableContent && countCharInString(unstableForRender.trim(), '\n') < 2) {
+    if (hasIncompleteTable && hasStableContent && countCharInString(unstableForRender.trim(), '\n') < 2) {
       unstableForRender = '';
     }
   }
@@ -865,12 +943,16 @@ export function StreamingMarkdown({ children, hideTrailingLine = false }: Stream
     <Markdown skipTokenCache skipHighlightCache tailWrap={tailWrap} capProseWidth>
       {unstableForRender}
     </Markdown>
+  ) : unstableSuffix ? (
+    <Box />
   ) : null;
 
-  // gold Ehr: r(s,{flexDirection:"column",gap:1,children:[y&&e(oa,...),R]})
+  // Official 2.1.326 (#133/#134): gap only when block types require separation
+  // so streaming lists/code/prose don't jump a row on freeze or first line.
+  const tailMargin = tailGap ? 1 : 0;
   if (state.chunks.length === 0) {
     return (
-      <Box flexDirection="column" gap={1}>
+      <Box flexDirection="column" gap={tailMargin}>
         {hasStable && (
           <Markdown skipTokenCache capProseWidth>
             {stablePrefix}
@@ -892,7 +974,7 @@ export function StreamingMarkdown({ children, hideTrailingLine = false }: Stream
           </Markdown>
         </Box>
       )}
-      {unstableEl && <Box marginTop={hasStable ? 1 : gap}>{unstableEl}</Box>}
+      {unstableEl && <Box marginTop={hasStable ? tailMargin : gap}>{unstableEl}</Box>}
     </Box>
   );
 }

@@ -589,8 +589,12 @@ export function shouldFilterSuggestion(
     ],
     [
       'meta_wrapped',
-      // Model wraps meta-reasoning in parens/brackets: (silence — ...), [no suggestion]
-      () => /^\(.*\)$|^\[.*\]$/.test(suggestion),
+      // Model wraps meta-reasoning in parens/brackets or emits bare/backtick-wrapped
+      // XML tags like `<signal type="empty" />` (Official 2.1.326 #155).
+      () =>
+        /^(\(.*\)|\[.*\]|（.*）|［.*］|【.*】|〔.*〕|`*<[^<>]*>(<\/[^<>]*>)?`*)$/.test(
+          suggestion.trim(),
+        ),
     ],
     [
       'error_message',

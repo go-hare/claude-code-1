@@ -42,14 +42,76 @@ const O_T8 = [
   'lua',
   'npx',
   'bunx',
+  'pnpx',
   'npm run',
   'yarn run',
   'pnpm run',
   'bun run',
+  'npm exec',
+  'npm x',
+  'pnpm exec',
+  'pnpm dlx',
+  'yarn exec',
+  'yarn dlx',
+  'bun exec',
+  'bun x',
   'bash',
   'sh',
   'ssh',
 ] as const
+
+/**
+ * Official 2.1.326 `vPn` — shells, wrappers, and launchers used by `he()`
+ * to recognize wildcard allow rules that can wrap arbitrary execution.
+ */
+const SHELL_WRAPPERS_VPN = new Set<string>([
+  'sh',
+  'bash',
+  'zsh',
+  'fish',
+  'csh',
+  'tcsh',
+  'ksh',
+  'mksh',
+  'dash',
+  'ash',
+  'hush',
+  'rbash',
+  'rsh',
+  'busybox',
+  'toybox',
+  'wsl',
+  'cmd',
+  'powershell',
+  'pwsh',
+  'env',
+  'xargs',
+  'command',
+  'builtin',
+  'noglob',
+  'nice',
+  'stdbuf',
+  'nohup',
+  'timeout',
+  'time',
+  'watch',
+  'ionice',
+  'chrt',
+  'setsid',
+  'taskset',
+  'strace',
+  'ltrace',
+  'script',
+  'flock',
+  'unshare',
+  'nsenter',
+  'sandbox-exec',
+  'sudo',
+  'doas',
+  'pkexec',
+  'su',
+  'runuser',
+])
 
 /**
  * Extended dangerous list (official `dgq`). Adds shells and wrappers that
@@ -147,6 +209,11 @@ const POWERSHELL_BROAD_PATTERNS: readonly string[] = [
   'start-job',
   'sajb',
   'start-threadjob',
+  'invoke-wmimethod',
+  'iwmi',
+  'invoke-cimmethod',
+  'icim',
+  'wmic',
   'register-objectevent',
   'register-engineevent',
   'register-wmievent',
@@ -158,6 +225,92 @@ const POWERSHELL_BROAD_PATTERNS: readonly string[] = [
   'add-type',
   'new-object',
 ]
+
+const POWERSHELL_EXTRA_EXACT_PATTERNS: readonly string[] = [
+  'get-module',
+  'gmo',
+  'module',
+]
+
+// Official 2.1.326 `Ke` / `pe` / `ze` / `qe` / `Q` / `Z` / `he` (#320 / #321)
+const LEADING_TOKEN_RE =
+  /\s*((?:\\.|'[^']*'|"(?:\\.|[^"\\])*"|[^\s\\'"])+)(?=\s)/gsy
+const NON_PROGRAM_TOKEN_RE =
+  /^(?:\w+\+?=|-|\/+\w$|\d[\d.]*[smhd]?$|[^a-z0-9]*$)|[^\w .+@%,:~/-]/i
+const INLINE_CMD_FLAG_RE = /^(?:-\w*c|\/c)$/i
+const RELATIVE_WIN_DOT_SLASH_PREFIX_RE =
+  /^\.(?:\\[\w.+@-]*[\w+@-])+(?=[ \t]|:\*$)/
+
+/** Official `Q(e)`: basename, lowercase, strip trailing version digits and `.exe`. */
+function normalizeBroadRuleProg(token: string): string {
+  return token
+    .replace(/^.*[\\/]/s, '')
+    .toLowerCase()
+    .replace(/^(.*?[^\d.])?[\d.]*(?:\.exe)?$/s, '$1')
+}
+
+/** Official `Z(e)`: normalize whitespace, collapse `* *`, normalize leading command. */
+function normalizeBroadRuleContent(ruleContent: string): string {
+  return ruleContent
+    .trim()
+    .toLowerCase()
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\*[ *]*\*/g, '*')
+    .replace(/^(?:"[^"*]*"|'[^'*]*'|[^ *='"])+?(?= |:\*$|$)/, match =>
+      normalizeBroadRuleProg(match.replace(/['"]/g, '')),
+    )
+    .replace(/['"]/g, '')
+}
+
+/**
+ * Official 2.1.326 `he(ruleContent, patterns)` (#320 / #321):
+ * Inspect the prefix before the first unescaped `*` in a wildcard shell rule.
+ * Exact rules (no wildcard) return `false` so exact rules keep their allow.
+ * Wildcard rules that name no program, start with `$HOME`/env/flags/shell chars,
+ * start with a Windows backslash path or path traversal, or prefix a shell
+ * wrapper / dangerous interpreter return `true` (treated as broad so auto mode's
+ * safety classifier evaluates them).
+ */
+export function matchesWildcardBroadPrefix(
+  ruleContent: string,
+  patterns: readonly string[] = [],
+): boolean {
+  const normalizedSuffix = ruleContent.replace(/:\*$/, ' *')
+  const prefix = /^(?:\\[*\\]|[^*])*/.exec(normalizedSuffix)?.[0] ?? ''
+  if (prefix === normalizedSuffix) return false
+
+  const words = normalizeBroadRuleContent(prefix).split(' ')
+  const lastNonFlagIdx = words.findLastIndex(
+    w => !/^(?:-|[^a-z0-9:]*$)/.test(w),
+  )
+  if (patterns.includes(words.slice(0, lastNonFlagIdx + 1).join(' '))) {
+    return true
+  }
+
+  const allTargets = [...SHELL_WRAPPERS_VPN, ...patterns]
+  let consumed = 0
+  LEADING_TOKEN_RE.lastIndex = 0
+  for (const match of prefix.matchAll(LEADING_TOKEN_RE)) {
+    const raw = (match[1] ?? '').replace(/['"]/g, '')
+    if (INLINE_CMD_FLAG_RE.test(raw)) return true
+    if (
+      !NON_PROGRAM_TOKEN_RE.test(raw) &&
+      !allTargets.includes(normalizeBroadRuleProg(raw))
+    ) {
+      return false
+    }
+    consumed += match[0].length
+  }
+
+  const tail = prefix.slice(consumed).trim().replace(/['"]/g, '')
+  const tailProg = normalizeBroadRuleProg(tail)
+  return (
+    NON_PROGRAM_TOKEN_RE.test(tail) ||
+    /^(?:[/~\\]|[a-z]:)|(?:^|[\\/])\.\.(?:[\\/]|$)/i.test(tail) ||
+    (tailProg !== '' &&
+      allTargets.some(t => !t.includes(' ') && t.startsWith(tailProg)))
+  )
+}
 
 /**
  * Cache mirroring official `_L4`. Keyed by `${toolName}\x00${ruleContent ?? ''}`.
@@ -227,11 +380,14 @@ function isBashBroadRule(
   if (toolName !== BASH_TOOL_NAME) return false
   if (ruleContent === undefined || ruleContent === '') return true
   if (/^[\s*]+$/.test(ruleContent)) return true
-  return matchBashBroadRule(ruleContent, Y_W_4)
+  return (
+    matchesWildcardBroadPrefix(ruleContent, D_G_Q) ||
+    matchBashBroadRule(ruleContent, Y_W_4)
+  )
 }
 
 /**
- * Official `ov8`. Walks the broad-pattern list and returns true if `ruleContent`
+ * Official `ov8` / `cro`. Walks the broad-pattern list and returns true if `ruleContent`
  * matches any pattern as one of: exact, `:*`, trailing `*`, ` *`, ` -…*`.
  *
  * For commands in `E_W_4` (curl/wget/kubectl/aws/gcloud/gsutil), the matcher
@@ -246,7 +402,7 @@ function matchBashBroadRule(
   ruleContent: string,
   patterns: readonly string[],
 ): boolean {
-  const k = ruleContent.trim().toLowerCase()
+  const k = normalizeBroadRuleContent(ruleContent)
   if (k === '*') return true
   for (const p of patterns) {
     const lp = p.toLowerCase()
@@ -326,9 +482,22 @@ function isPowerShellBroadRule(
   if (toolName !== POWERSHELL_TOOL_NAME) return false
   if (ruleContent === undefined || ruleContent === '') return true
   if (/^[\s*]+$/.test(ruleContent)) return true
-  const k = ruleContent.trim().toLowerCase()
+  const k = normalizeBroadRuleContent(ruleContent)
   if (k === '*') return true
-  for (const p of POWERSHELL_BROAD_PATTERNS) {
+  // Official 2.1.326 `zes` (#321): normalize leading `.\sub\cmd` backslashes
+  // for `he()` while keeping arbitrary Windows backslash paths (`C:\...`, `\...`)
+  // broad when wildcarded. Exact rules (no wildcard) skip `he()`.
+  const psForWildcard = ruleContent.replace(
+    RELATIVE_WIN_DOT_SLASH_PREFIX_RE,
+    m => m.replaceAll('\\', '/'),
+  )
+  if (matchesWildcardBroadPrefix(psForWildcard, POWERSHELL_BROAD_PATTERNS)) {
+    return true
+  }
+  for (const p of [
+    ...POWERSHELL_BROAD_PATTERNS,
+    ...POWERSHELL_EXTRA_EXACT_PATTERNS,
+  ]) {
     if (k === p) return true
     if (k === `${p}:*`) return true
     if (k === `${p}*`) return true

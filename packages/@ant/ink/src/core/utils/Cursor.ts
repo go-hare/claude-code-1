@@ -1507,81 +1507,96 @@ export class MeasuredText {
   }
 
   private measureWrappedText(): WrappedLine[] {
-    const wrappedText = wrapAnsi(this.text, this.columns, {
-      hard: true,
-      trim: false,
-    })
+    // Official 2.1.326 (#144, 328 `Or`/`Bn`/`Er`): sanitize control/escape
+    // chars to equal-length U+2060 before wrapAnsi, verify exact sequential
+    // slice alignment against `sanitized` at every row, and fall back to
+    // grapheme-exact wrapping whenever wrapAnsi shifts/drops any character.
+    // Prevents Up, Down, End, and mouse clicks from landing on the wrong row.
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional ESC/C1 control match
+    const CTRL_RE = /[\u001b\u0080-\u009f]/g
+    const WORD_JOINER = '\u2060'
+    const sanitized =
+      this.text.search(CTRL_RE) === -1
+        ? this.text
+        : this.text.replace(CTRL_RE, WORD_JOINER)
 
-    const wrappedLines: WrappedLine[] = []
-    let searchOffset = 0
-    let lastNewLinePos = -1
-
-    const lines = wrappedText.split('\n')
-    for (let i = 0; i < lines.length; i++) {
-      const text = lines[i]!
-      const isPrecededByNewline = (startOffset: number) =>
-        i === 0 || (startOffset > 0 && this.text[startOffset - 1] === '\n')
-
-      if (text.length === 0) {
-        // For blank lines, find the next newline character after the last one
-        lastNewLinePos = this.text.indexOf('\n', lastNewLinePos + 1)
-
-        if (lastNewLinePos !== -1) {
-          const startOffset = lastNewLinePos
-          const endsWithNewline = true
-
-          wrappedLines.push(
-            new WrappedLine(
-              text,
-              startOffset,
-              isPrecededByNewline(startOffset),
-              endsWithNewline,
-            ),
-          )
-        } else {
-          // If we can't find another newline, this must be the end of text
-          const startOffset = this.text.length
-          wrappedLines.push(
-            new WrappedLine(
-              text,
-              startOffset,
-              isPrecededByNewline(startOffset),
-              false,
-            ),
-          )
+    const wrapByGraphemes = (): WrappedLine[] => {
+      const rows: WrappedLine[] = []
+      const cols = Math.max(1, this.columns)
+      let baseOffset = 0
+      const logicalLines = this.text.split(/\r\n|[\n\r]/)
+      for (const logical of logicalLines) {
+        let segStart = 0
+        let colWidth = 0
+        for (const { segment, index } of getGraphemeSegmenter().segment(
+          logical,
+        )) {
+          const w = stringWidth(segment)
+          if (colWidth + w > cols && index > segStart) {
+            rows.push(
+              new WrappedLine(
+                logical.slice(segStart, index),
+                baseOffset + segStart,
+                segStart === 0,
+                false,
+              ),
+            )
+            segStart = index
+            colWidth = 0
+          }
+          colWidth += w
         }
-      } else {
-        // For non-blank lines, find the text in this.text
-        const startOffset = this.text.indexOf(text, searchOffset)
-
-        if (startOffset === -1) {
-          throw new Error('Failed to find wrapped line in text')
-        }
-
-        searchOffset = startOffset + text.length
-
-        // Check if this line ends with a newline in this.text
-        const potentialNewlinePos = startOffset + text.length
-        const endsWithNewline =
-          potentialNewlinePos < this.text.length &&
-          this.text[potentialNewlinePos] === '\n'
-
-        if (endsWithNewline) {
-          lastNewLinePos = potentialNewlinePos
-        }
-
-        wrappedLines.push(
+        const lineEnd = baseOffset + logical.length
+        const nlLen = this.text.startsWith('\r\n', lineEnd)
+          ? 2
+          : lineEnd < this.text.length
+            ? 1
+            : 0
+        rows.push(
           new WrappedLine(
-            text,
-            startOffset,
-            isPrecededByNewline(startOffset),
-            endsWithNewline,
+            logical.slice(segStart),
+            baseOffset + segStart,
+            segStart === 0,
+            nlLen > 0,
           ),
         )
+        baseOffset = lineEnd + nlLen
       }
+      return rows
     }
 
-    return wrappedLines
+    const wrappedParts = wrapAnsi(sanitized, this.columns, {
+      hard: true,
+      trim: false,
+    }).split('\n')
+
+    const wrappedLines: WrappedLine[] = []
+    let cursor = 0
+    let precededByNewline = true
+
+    for (const part of wrappedParts) {
+      if (!sanitized.startsWith(part, cursor)) {
+        return wrapByGraphemes()
+      }
+      const next = cursor + part.length
+      const nlLen = sanitized.startsWith('\r\n', next)
+        ? 2
+        : sanitized[next] === '\n' || sanitized[next] === '\r'
+          ? 1
+          : 0
+      wrappedLines.push(
+        new WrappedLine(
+          this.text.slice(cursor, next),
+          cursor,
+          precededByNewline,
+          nlLen > 0,
+        ),
+      )
+      precededByNewline = nlLen > 0
+      cursor = next + nlLen
+    }
+
+    return cursor === this.text.length ? wrappedLines : wrapByGraphemes()
   }
 
   public getWrappedText(): WrappedText {

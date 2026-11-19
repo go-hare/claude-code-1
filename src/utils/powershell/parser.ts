@@ -195,6 +195,15 @@ export type ParsedPowerShellCommand = {
    * `#Requires -Modules <name>` triggers module loading from PSModulePath.
    */
   hasScriptRequirements?: boolean
+  /**
+   * Official 2.1.326 (#316): whether any pipeline uses the `&` background job operator.
+   */
+  hasBackgroundJob?: boolean
+  /**
+   * Official 2.1.326 (#319 `yhn`): functions defined in the command whose names
+   * collide with existing PowerShell aliases (which run before functions).
+   */
+  aliasShadows?: { name: string; target: string }[]
 }
 
 // ---------------------------------------------------------------------------
@@ -267,6 +276,8 @@ type RawParsedOutput = {
   typeLiterals?: string[]
   hasUsingStatements?: boolean
   hasScriptRequirements?: boolean
+  hasBackgroundJob?: boolean
+  aliasShadows?: { name: string; target: string }[]
 }
 
 // This is the canonical copy of the parse script. There is no separate .ps1 file.
@@ -543,6 +554,7 @@ if ($ast.ParamBlock) {
 
 $hasUsingStatements = $ast.UsingStatements -and $ast.UsingStatements.Count -gt 0
 $hasScriptRequirements = $ast.ScriptRequirements -ne $null
+$hasBackgroundJob = $ast.Find({param($n) $n -is [System.Management.Automation.Language.PipelineAst] -and $n.Background}, $true) -ne $null
 
 $output = @{
     valid = ($parseErrors.Count -eq 0)
@@ -559,7 +571,12 @@ $output = @{
     typeLiterals = @($typeLiterals)
     hasUsingStatements = [bool]$hasUsingStatements
     hasScriptRequirements = [bool]$hasScriptRequirements
+    hasBackgroundJob = [bool]$hasBackgroundJob
 }
+try {
+    $fn = $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Parent.GetType().Name -ne 'FunctionMemberAst'}, $true) | ForEach-Object { ($_.Name -split '[:\\/]')[-1].Trim() }
+    if ($fn) { $output.aliasShadows = @(Get-Alias | Where-Object { $fn -contains $_.Name } | ForEach-Object { @{ name = $_.Name; target = $_.Definition } }) }
+} catch {}
 
 $output | ConvertTo-Json -Depth 10 -Compress
 `
@@ -1107,7 +1124,101 @@ function transformRawOutput(raw: RawParsedOutput): ParsedPowerShellCommand {
   if (raw.hasScriptRequirements) {
     result.hasScriptRequirements = true
   }
+  if (raw.hasBackgroundJob) {
+    result.hasBackgroundJob = true
+  }
+  const aliasShadows = ensureArray(raw.aliasShadows).filter(
+    (item): item is { name: string; target: string } =>
+      typeof item?.name === 'string' && typeof item?.target === 'string',
+  )
+  if (aliasShadows.length > 0) {
+    result.aliasShadows = aliasShadows
+  }
   return result
+}
+
+/**
+ * Official 2.1.326 `o2r` (#317 / #318): errorId emitted when a command contains
+ * parse-time code-loading directives (`using module`, `using assembly`,
+ * `#requires`, `Import-DscResource`) so Claude Code refuses to pass it to pwsh.
+ */
+export const PS_UNSAFE_PARSE_TIME_CODE_LOAD_ERROR_ID = 'UnsafeParseTimeCodeLoad'
+
+const PS_PARSE_TIME_CODE_LOAD_MESSAGE =
+  'PowerShell can load code while reading `using module`, `using assembly`, `#requires` or `Import-DscResource`, so Claude Code did not let it read this command and could not fully check your permission rules. The words may be harmless, such as text in a string.'
+
+const PS_GAP_CLASS = String.raw`\x01\x02`
+const PS_CONTINUATION_SENTINEL = '\x02'
+const PS_STRIP_SENTINEL = '\x01'
+const PS_MAX_USING_SCAN_MATCHES = 32
+
+function buildBacktickTolerantWordPattern(word: string): string {
+  return [...word].join(`[${PS_GAP_CLASS}]*`)
+}
+
+const PS_USING_RE = new RegExp(
+  `(?<![A-Z])${buildBacktickTolerantWordPattern('USING')}(?![A-Z0-9_])`,
+  'g',
+)
+const PS_MODULE_OR_ASSEMBLY_SRC = `(?<![A-Z0-9_-])(?:${buildBacktickTolerantWordPattern('MODULE')}|${buildBacktickTolerantWordPattern('ASSEMBLY')})(?![A-Z0-9_])`
+const PS_MODULE_OR_ASSEMBLY_ANY_RE = new RegExp(PS_MODULE_OR_ASSEMBLY_SRC)
+const PS_MODULE_OR_ASSEMBLY_STICKY_RE = new RegExp(
+  PS_MODULE_OR_ASSEMBLY_SRC,
+  'y',
+)
+const PS_IMPORT_DSC_RE = new RegExp(
+  `${buildBacktickTolerantWordPattern('IMPORT')}[${PS_GAP_CLASS}\\-\\u2013-\\u2015]+${buildBacktickTolerantWordPattern('DSCRESOURCE')}(?![A-Z0-9_])`,
+)
+const PS_LINE_END_RE = /[\r\n]/g
+
+/**
+ * Official 2.1.326 `ANr(command)` (#317 / #318):
+ * Pre-parse scanner that detects `using module`, `using assembly`, `#requires`,
+ * and `Import-DscResource` (even through backtick escapes, line continuations,
+ * quotes, or interleaved comments) BEFORE spawning pwsh.
+ */
+export function hasPowerShellParseTimeCodeLoad(command: string): boolean {
+  const folded = command.toUpperCase().replace(
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: official PowerShell parse-time code load sentinel range
+    /``|`(?:[\r\n]+[\s\u0085\u180e]*)?|['"\u2018-\u201f\0-\x04]/g,
+    match =>
+      /^`[\r\n]/.test(match) ? PS_CONTINUATION_SENTINEL : PS_STRIP_SENTINEL,
+  )
+  if (PS_IMPORT_DSC_RE.test(folded) || folded.includes('#REQUIRES')) {
+    return true
+  }
+  if (!PS_MODULE_OR_ASSEMBLY_ANY_RE.test(folded)) {
+    return false
+  }
+  let matchCount = 0
+  for (const m of folded.matchAll(PS_USING_RE)) {
+    if (++matchCount > PS_MAX_USING_SCAN_MATCHES) return true
+    let pos = (m.index ?? 0) + m[0].length
+    while (pos < folded.length) {
+      const ch = folded[pos]!
+      if (
+        ch === PS_STRIP_SENTINEL ||
+        ch === PS_CONTINUATION_SENTINEL ||
+        /[\s\u0085\u180e]/.test(ch)
+      ) {
+        pos++
+      } else if (folded.startsWith('<#', pos)) {
+        const end = folded.indexOf('#>', pos + 2)
+        pos = end === -1 ? folded.length : end + 2
+      } else if (ch === '#') {
+        PS_LINE_END_RE.lastIndex = pos
+        const nl = PS_LINE_END_RE.exec(folded)
+        pos = nl ? nl.index : folded.length
+      } else {
+        break
+      }
+    }
+    PS_MODULE_OR_ASSEMBLY_STICKY_RE.lastIndex = pos
+    if (PS_MODULE_OR_ASSEMBLY_STICKY_RE.test(folded)) {
+      return true
+    }
+  }
+  return false
 }
 
 /**
@@ -1121,6 +1232,16 @@ function transformRawOutput(raw: RawParsedOutput): ParsedPowerShellCommand {
 async function parsePowerShellCommandImpl(
   command: string,
 ): Promise<ParsedPowerShellCommand> {
+  // Official 2.1.326 `Q7e` / `ANr` (#317 / #318): refuse to feed parse-time
+  // code-loading directives to pwsh so parsing itself cannot load external code.
+  if (hasPowerShellParseTimeCodeLoad(command)) {
+    return makeInvalidResult(
+      command,
+      PS_PARSE_TIME_CODE_LOAD_MESSAGE,
+      PS_UNSAFE_PARSE_TIME_CODE_LOAD_ERROR_ID,
+    )
+  }
+
   // SECURITY: MAX_COMMAND_LENGTH is a UTF-8 BYTE budget (see derivation at the
   // constant definition). command.length counts UTF-16 code units; a CJK
   // character is 1 code unit but 3 UTF-8 bytes, so .length under-reports by
@@ -1135,6 +1256,16 @@ async function parsePowerShellCommandImpl(
       command,
       `Command too long for parsing (${commandBytes} bytes). Maximum supported length is ${MAX_COMMAND_LENGTH} bytes.`,
       'CommandTooLong',
+    )
+  }
+
+  // Official 2.1.326 `ONr` (#318): reject PowerShell `u{HEX} codepoint escapes
+  // that can smuggle hidden command characters past string-based checks.
+  if (/`u\{[0-9A-Fa-f]/.test(command)) {
+    return makeInvalidResult(
+      command,
+      'PowerShell `u{HEX} codepoint escape is not supported for permission checking',
+      'CodepointEscape',
     )
   }
 

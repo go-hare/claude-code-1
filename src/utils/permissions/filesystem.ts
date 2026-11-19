@@ -123,7 +123,261 @@ export const DANGEROUS_FILES = [
   '.ripgreprc',
   '.mcp.json',
   '.claude.json',
+  '.credentials.json',
+  '.device-keys.json',
+  '.config.json',
 ] as const
+
+/**
+ * Official 2.1.326 #307 / #308 (`Qke` / `_Oe` / `aQt` @289043378):
+ * Claude Code's sign-in files that file tools must refuse to write and Bash
+ * must ask before reaching.
+ */
+export const CLAUDE_SIGN_IN_FILE_NAMES = [
+  '.credentials.json',
+  '.device-keys.json',
+] as const
+
+export function getClaudeSignInFilePaths(): string[] {
+  const home = homedir()
+  const dirs = new Set<string>([join(home, '.claude')])
+  try {
+    const configDir = getClaudeConfigHomeDir()
+    if (configDir) dirs.add(configDir)
+  } catch {
+    // ignore if unavailable
+  }
+  const paths = new Set<string>()
+  for (const dir of dirs) {
+    paths.add(resolve(dir, '.credentials.json').normalize('NFC'))
+  }
+  paths.add(resolve(home, '.claude', '.device-keys.json').normalize('NFC'))
+  return [...paths]
+}
+
+/**
+ * Resolve symlinks on `filePath` itself or, when the leaf does not exist yet,
+ * walk up to the nearest existing ancestor, resolve it via `realpathSync`, and
+ * re-attach the remaining trailing segments.
+ */
+export function resolvePathWithExistingAncestorRealpath(
+  filePath: string,
+): string {
+  const normalized = normalize(filePath)
+  try {
+    // eslint-disable-next-line custom-rules/no-sync-fs -- permission check is sync
+    return realpathSync(normalized)
+  } catch {
+    // Walk up until an existing ancestor resolves via realpathSync
+  }
+  const trailing: string[] = []
+  let current = normalized
+  for (;;) {
+    const parent = dirname(current)
+    if (parent === current) {
+      return normalized
+    }
+    trailing.unshift(basename(current))
+    current = parent
+    try {
+      // eslint-disable-next-line custom-rules/no-sync-fs -- permission check is sync
+      const realParent = realpathSync(current)
+      return normalize(join(realParent, ...trailing))
+    } catch {
+      // continue walking up
+    }
+  }
+}
+
+export function isClaudeSignInFilePath(filePath: string): boolean {
+  const expanded = expandPath(filePath).normalize('NFC')
+  const candidates = new Set<string>([
+    expanded,
+    resolvePathWithExistingAncestorRealpath(expanded).normalize('NFC'),
+  ])
+  const protectedPaths = new Set<string>()
+  for (const target of getClaudeSignInFilePaths()) {
+    const normTarget = target.normalize('NFC')
+    protectedPaths.add(normTarget)
+    protectedPaths.add(
+      resolvePathWithExistingAncestorRealpath(normTarget).normalize('NFC'),
+    )
+  }
+  const caseFold = getPlatform() === 'macos' || getPlatform() === 'windows'
+  for (const cand of candidates) {
+    const normCand = caseFold ? cand.toLowerCase() : cand
+    for (const target of protectedPaths) {
+      const normTarget = caseFold ? target.toLowerCase() : target
+      if (normCand === normTarget) return true
+    }
+  }
+  return false
+}
+
+/**
+ * Official 2.1.326 #309 (`rO` / `Jz` / `Qz` / `Zz` / `cd` / `eO` / `tO` / `sO` / `nO` @285420615):
+ * Classify device and `/proc` process files that file tools must refuse.
+ */
+const PROC_OR_DEV_ROOT_RE = /^\/(?:proc|dev)(?:\/|$)/
+const BLOCKED_DEVICE_AND_PROC_PATHS = new Set([
+  '/dev/zero',
+  '/dev/random',
+  '/dev/urandom',
+  '/dev/full',
+  '/dev/hwrng',
+  '/dev/stdin',
+  '/dev/tty',
+  '/dev/console',
+  '/proc/kmsg',
+  '/dev/kmsg',
+  '/proc/kcore',
+  '/proc/vmcore',
+  '/dev/core',
+  '/dev/mem',
+  '/dev/kmem',
+  '/dev/port',
+  '/dev/stdout',
+  '/dev/stderr',
+  '/dev/fd/0',
+  '/dev/fd/1',
+  '/dev/fd/2',
+])
+const PROC_ROOT_LINK_RE = /^\/proc\/[^/]+\/root(?=\/)/
+const PROC_TASK_RE = /^(\/proc\/[^/]+)\/task\/[^/]+(?=\/)/
+const PROC_SELF_CWD_RE = new RegExp(`^/proc/(?:self|${process.pid})/cwd(?=/)`)
+const PROC_OR_DEV_LINK_PREFIX_RE =
+  /^\/proc\/[^/]+\/cwd\/|^\/proc\/[^/]+\/fd\/\d+\/|^\/dev\/fd\/\d+\/|^\/dev\/(?:stdin|stdout|stderr)\//
+const PROC_MAP_FILES_RE = /^\/proc\/[^/]+\/map_files(\/|$)/
+const PROC_OTHER_PID_FD_RE = new RegExp(
+  `^/proc/(?!self/|${process.pid}/)[^/]+/fd/\\d+$`,
+)
+const DEV_PTY_OR_TTY_RE = /^\/dev\/(?:pts\/(?:\d+|ptmx)|ptmx|tty[^/]*)$/
+const PROC_SENSITIVE_LEAF_RE =
+  /^\/proc\/[^/]+\/(environ|cmdline|auxv|maps|smaps|smaps_rollup|numa_maps|pagemap|mem|stat|statm|status|syscall|stack)$/
+const MAX_PROC_UNWRAP_STEPS = 8
+
+export function classifyBlockedDeviceOrProcessPath(
+  filePath: string,
+): 'file' | 'links' | undefined {
+  if (filePath.startsWith('/') && filePath.includes('/..')) {
+    const stack: string[] = []
+    for (const seg of filePath.split('/')) {
+      if (seg === '..') {
+        const [first, second] = stack
+        if (
+          second !== undefined &&
+          (first === 'proc' || (first === 'dev' && second !== 'shm'))
+        ) {
+          return 'links'
+        }
+        stack.pop()
+      } else if (seg !== '' && seg !== '.') {
+        stack.push(seg)
+      }
+    }
+  }
+  let cur = posix.normalize(filePath)
+  for (let step = 0; ; step++) {
+    if (PROC_SELF_CWD_RE.test(cur)) {
+      cur = posix.normalize(cur.replace(PROC_SELF_CWD_RE, () => getCwd()))
+    }
+    if (!PROC_OR_DEV_ROOT_RE.test(cur)) return undefined
+    if (PROC_OR_DEV_LINK_PREFIX_RE.test(cur)) return 'links'
+    if (
+      BLOCKED_DEVICE_AND_PROC_PATHS.has(cur) ||
+      DEV_PTY_OR_TTY_RE.test(cur) ||
+      PROC_MAP_FILES_RE.test(cur) ||
+      PROC_OTHER_PID_FD_RE.test(cur) ||
+      (cur.startsWith('/proc/') &&
+        (cur.endsWith('/fd/0') ||
+          cur.endsWith('/fd/1') ||
+          cur.endsWith('/fd/2'))) ||
+      PROC_SENSITIVE_LEAF_RE.test(cur)
+    ) {
+      return 'file'
+    }
+    const unwrapped = cur
+      .replace(PROC_ROOT_LINK_RE, '')
+      .replace(PROC_TASK_RE, '$1')
+    if (unwrapped === cur) return undefined
+    if (step >= MAX_PROC_UNWRAP_STEPS) return 'links'
+    cur = unwrapped
+  }
+}
+
+export function isBlockedDeviceOrProcessPath(filePath: string): boolean {
+  return classifyBlockedDeviceOrProcessPath(filePath) !== undefined
+}
+
+/**
+ * Official 2.1.326 #235: check if `filePath` is inside Claude's config/session
+ * `mods` or registered `dev-mods` root (NOT arbitrary user project directories
+ * named `mods` or `dev-mods`) that contains a symlink to an unreadable or
+ * network path.
+ */
+export function isModsFolderWithUnsafeSymlink(filePath: string): boolean {
+  const expanded = expandPath(filePath)
+  const resolvedCandidate = resolvePathWithExistingAncestorRealpath(expanded)
+  const caseFold = getPlatform() === 'macos' || getPlatform() === 'windows'
+  const normPath = (p: string): string => {
+    const n = normalize(p).normalize('NFC')
+    return caseFold ? n.toLowerCase() : n
+  }
+  const candidateVariants = new Set<string>([
+    normPath(expanded),
+    normPath(resolvedCandidate),
+  ])
+
+  const roots = new Set<string>()
+  try {
+    const configHome = getClaudeConfigHomeDir()
+    if (configHome) {
+      roots.add(join(configHome, 'mods'))
+      roots.add(join(configHome, 'dev-mods'))
+    }
+  } catch {
+    // ignore if config home unavailable
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getCurrentSessionDevModsFolder } =
+      require('../sessionStorage.js') as typeof import('../sessionStorage.js')
+    const sessionDevMods = getCurrentSessionDevModsFolder()
+    if (sessionDevMods) {
+      roots.add(sessionDevMods)
+    }
+  } catch {
+    // ignore if sessionStorage unavailable
+  }
+
+  let matchedModsRoot: string | null = null
+  for (const root of roots) {
+    const rootVariants = [
+      normPath(root),
+      normPath(resolvePathWithExistingAncestorRealpath(root)),
+    ]
+    const isUnder = [...candidateVariants].some(cand =>
+      rootVariants.some(rv => {
+        const prefix = rv.endsWith(sep) ? rv : `${rv}${sep}`
+        return cand === rv || cand.startsWith(prefix)
+      }),
+    )
+    if (isUnder) {
+      matchedModsRoot = root
+      break
+    }
+  }
+  if (!matchedModsRoot) return false
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { directoryHasUnreadableOrNetworkSymlink } =
+      require('../sandbox/sandbox-adapter.js') as typeof import('../sandbox/sandbox-adapter.js')
+    return directoryHasUnreadableOrNetworkSymlink(matchedModsRoot)
+  } catch {
+    return false
+  }
+}
 
 /**
  * Dangerous directories that should be protected from auto-editing.
@@ -2793,6 +3047,47 @@ export function checkWritePermissionForTool<Input extends AnyObject>(
   toolPermissionContext: ToolPermissionContext,
   precomputedPathsToCheck?: readonly string[],
 ): PermissionDecision {
+  // Official 2.1.326 #307 / #309: refuse file-tool writes to Claude Code's
+  // sign-in files (e.g. `.credentials.json`, `.device-keys.json`) and blocked
+  // device/process files (`/dev/*`, `/proc/*`).
+  if (typeof tool.getPath === 'function') {
+    const rawTarget = tool.getPath(input)
+    if (rawTarget) {
+      if (isClaudeSignInFilePath(rawTarget)) {
+        const msg = `Cannot write to Claude Code sign-in file ${rawTarget}. Sign-in files such as .credentials.json are protected from modification by file tools.`
+        return {
+          behavior: 'deny',
+          message: msg,
+          decisionReason: { type: 'other', reason: msg },
+          blockedPath: rawTarget,
+        }
+      }
+      if (isBlockedDeviceOrProcessPath(rawTarget)) {
+        const msg = `Cannot write to device or process file ${rawTarget}.`
+        return {
+          behavior: 'deny',
+          message: msg,
+          decisionReason: { type: 'other', reason: msg },
+          blockedPath: rawTarget,
+        }
+      }
+      // Official 2.1.326 #235: edits in a session's mods folder ask when any
+      // link there points to an unreadable or network path.
+      if (isModsFolderWithUnsafeSymlink(rawTarget)) {
+        const msg = `Editing inside mods folder requires confirmation because it contains a symlink to an unreadable or network path: ${rawTarget}`
+        return {
+          behavior: 'ask',
+          message: msg,
+          decisionReason: {
+            type: 'safetyCheck',
+            reason: msg,
+            classifierApprovable: false,
+          },
+          blockedPath: rawTarget,
+        }
+      }
+    }
+  }
   const ns = nsWritePermissionForTool(
     tool,
     input,

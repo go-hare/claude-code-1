@@ -211,6 +211,7 @@ import {
   exitWithMessage,
   getRenderContext,
   renderAndRun,
+  showSetupDialog,
   showSetupScreens,
 } from './interactiveHelpers.js';
 /* eslint-enable @typescript-eslint/no-require-imports */
@@ -1492,6 +1493,16 @@ async function run(): Promise<CommanderCommand> {
         prompt = undefined;
       }
 
+      // Official 2.1.326 #45 (`oTt`): warn when a prompt typed after `--add-dir`,
+      // `--allowedTools`, or another variadic list option was absorbed as a value.
+      {
+        const { detectPromptReadAsOptionValue } = await import('./cli/promptAfterListOption.js');
+        const swallowedPrompt = detectPromptReadAsOptionValue(process.argv.slice(2));
+        if (swallowedPrompt !== undefined && !prompt) {
+          console.error(chalk.yellow(`Warning: ${swallowedPrompt.problem} · ${swallowedPrompt.fix}`));
+        }
+      }
+
       // Log event for any single-word prompt
       if (prompt && typeof prompt === 'string' && !/\s/.test(prompt) && prompt.length > 0) {
         logEvent('tengu_single_word_prompt', { length: prompt.length });
@@ -2649,6 +2660,20 @@ async function run(): Promise<CommanderCommand> {
         console.error(warning);
       });
 
+      // Official 2.1.326 #2 (`Wl`): warn when `--allowedTools`, `--disallowedTools`
+      // or `--tools` has an entry that doesn't look like a complete rule.
+      {
+        const { detectIncompleteCliToolListWarnings } = await import('./cli/toolListWarnings.js');
+        const toolListWarnings = detectIncompleteCliToolListWarnings({
+          allowedTools,
+          disallowedTools,
+          tools: baseTools,
+        });
+        for (const warning of toolListWarnings) {
+          console.error(chalk.yellow(`Warning: ${warning}`));
+        }
+      }
+
       // claude.ai config fetch: -p mode only (interactive uses useManageMCPConnections
       // two-phase loading). Kicked off here to overlap with setup(); awaited
       // before runHeadless so single-turn -p sees connectors. Skipped under
@@ -2860,6 +2885,16 @@ async function run(): Promise<CommanderCommand> {
       // commands/agents need the post-chdir cwd.
       const preSetupCwd = getCwd();
       primeBundledCommandSources(process.env.CLAUDE_CODE_ENTRYPOINT);
+      // Official 2.1.326 #119: when `--worktree` setup takes longer than 1s on
+      // an interactive TTY, print a dimmed progress line to stderr.
+      const worktreeProgressLabel =
+        worktreePRNumber !== undefined ? `pr-${worktreePRNumber}` : (worktreeName ?? 'session');
+      const worktreeProgressTimer =
+        worktreeEnabled && !getIsNonInteractiveSession() && process.stderr.isTTY
+          ? setTimeout(() => {
+              process.stderr.write(`${chalk.dim(`Setting up worktree ${worktreeProgressLabel}\u2026`)}\n`);
+            }, 1000)
+          : undefined;
       const setupPromise = setup(
         preSetupCwd,
         permissionMode,
@@ -2904,6 +2939,10 @@ async function run(): Promise<CommanderCommand> {
           process.exit(1);
         }
         throw err;
+      } finally {
+        if (worktreeProgressTimer !== undefined) {
+          clearTimeout(worktreeProgressTimer);
+        }
       }
       logForDebugging(`[STARTUP] setup() completed in ${Date.now() - setupStart}ms`);
       profileCheckpoint('action_after_setup');
@@ -3361,6 +3400,32 @@ async function run(): Promise<CommanderCommand> {
         const { onboardingShown } = setupScreens;
         mcpApprovalSkipWarning = setupScreens.mcpApprovalSkipWarning;
         logForDebugging(`[STARTUP] showSetupScreens() completed in ${Date.now() - setupScreensStart}ms`);
+
+        // Official 2.1.326 #323: prompt trust confirmation for any untrusted
+        // `--add-dir` folders before starting the interactive session.
+        if (addDir.length > 0) {
+          const [{ folderToTrustBeforeAdding }, { AddedFolderTrustPrompt }] = await Promise.all([
+            import('./commands/add-dir/validation.js'),
+            import('./commands/add-dir/add-dir.js'),
+          ]);
+          const seenTrustedPaths = new Set<string>();
+          for (const rawDir of addDir) {
+            const untrusted = folderToTrustBeforeAdding(rawDir);
+            if (!untrusted || seenTrustedPaths.has(untrusted.path)) {
+              continue;
+            }
+            const accepted = await showSetupDialog<boolean>(root, done => (
+              <AddedFolderTrustPrompt folder={untrusted} onAnswer={done} />
+            ));
+            if (!accepted) {
+              await gracefulShutdown(1, 'other', {
+                finalMessage: `To go on without it, start again with the same flags but without --add-dir ${rawDir}. Add --resume to pick up an earlier conversation.`,
+              });
+              return;
+            }
+            seenTrustedPaths.add(untrusted.path);
+          }
+        }
 
         // Now that trust is established and GrowthBook has auth headers,
         // resolve the --remote-control / --rc entitlement gate.

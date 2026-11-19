@@ -5,6 +5,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js';
+import { getSessionId } from '../../bootstrap/state.js';
 import { isPolicyAllowed } from '../../services/policyLimits/index.js';
 import type { Message } from '../../types/message.js';
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
@@ -236,7 +237,7 @@ export function useFeedbackSurvey(
     [surveyType],
   );
 
-  const { state, lastResponse, open, handleSelect, handleTranscriptSelect } = useSurveyState({
+  const { state, lastResponse, open, closeTranscriptPrompt, handleSelect, handleTranscriptSelect } = useSurveyState({
     hideThanksAfterMs: config.hideThanksAfterMs,
     onOpen,
     onSelect,
@@ -244,6 +245,29 @@ export function useFeedbackSurvey(
     onTranscriptPromptShown,
     onTranscriptSelect,
   });
+
+  // Official 2.1.326 #179: close the "share this conversation?" transcript_prompt
+  // immediately when the user sends another message, runs /clear, or switches session (/resume).
+  const transcriptPromptOpenedRef = useRef<{ submitCount: number; sessionId: string } | null>(null);
+  const currentSessionId = getSessionId();
+  useEffect(() => {
+    if (state === 'transcript_prompt') {
+      if (transcriptPromptOpenedRef.current === null) {
+        transcriptPromptOpenedRef.current = {
+          submitCount,
+          sessionId: currentSessionId,
+        };
+        return;
+      }
+      const opened = transcriptPromptOpenedRef.current;
+      if (submitCount > opened.submitCount || messages.length === 0 || currentSessionId !== opened.sessionId) {
+        transcriptPromptOpenedRef.current = null;
+        closeTranscriptPrompt();
+      }
+    } else {
+      transcriptPromptOpenedRef.current = null;
+    }
+  }, [state, submitCount, messages.length, currentSessionId, closeTranscriptPrompt]);
 
   const currentModel = getMainLoopModel();
   const isModelAllowed = useMemo(() => {

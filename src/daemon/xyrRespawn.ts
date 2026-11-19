@@ -107,7 +107,28 @@ export async function killJobYiaFallback(
       if (s.kind !== 'bg') continue
       const jobId = (s as { jobId?: string }).jobId
       const sid = s.sessionId ?? ''
-      if (jobId !== short && !sid.startsWith(short)) continue
+      // Official 2.1.326 #33: if a live background session has its own `jobId`
+      // different from `short`, NEVER kill it just because its resumed
+      // `sessionId` starts with `short` (the older session's id).
+      if (jobId !== undefined) {
+        if (jobId !== short) continue
+      } else if (!sid.startsWith(short)) {
+        continue
+      }
+      // Official 2.1.326 #15: if the live session record carries `procStart`,
+      // verify the PID has not been reused before sending SIGTERM.
+      const recordedProcStart = (s as { procStart?: string }).procStart
+      if (recordedProcStart) {
+        const { getProcessStartTime, processStartIdentityEquals } =
+          await import('../utils/genericProcessUtils.js')
+        const currentStart = getProcessStartTime(s.pid)
+        if (
+          currentStart !== undefined &&
+          !processStartIdentityEquals(recordedProcStart, currentStart)
+        ) {
+          continue
+        }
+      }
       anyMatch = true
       try {
         process.kill(s.pid, 'SIGTERM')

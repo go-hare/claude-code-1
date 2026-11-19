@@ -351,6 +351,9 @@ export function resolveCodeModeOptInRequest(
 
 /**
  * Official `F(e, n)`: evaluates environmental/runtime eligibility preconditions.
+ *
+ * Official 2.1.326 #1: Code Mode is now allowed when agent teams are enabled
+ * (`hasAgentTeams` no longer refuses with `agent_teams`).
  */
 export function evaluateCodeModeEligibility(
   input: CodeModeStartupCheckInput,
@@ -370,9 +373,6 @@ export function evaluateCodeModeEligibility(
   }
   if (runEngineCheck && !doesEngineCheckAllowCodeMode()) {
     return 'engine'
-  }
-  if (input.hasAgentTeams) {
-    return 'agent_teams'
   }
   if (input.isFirstPartyProvider === false) {
     return 'provider'
@@ -655,14 +655,74 @@ export function codeModeTelemetryFields(
 }
 
 /**
- * Official `F0o`: human-readable explanation for each Code Mode refusal reason.
+ * Official 2.1.326 #74 / #75 / #76 (`Q3a` / `Z3a` / `gAa` / `pke`):
+ * Registry for resolving primitive tools hidden by Code Mode (e.g. Bash, Read,
+ * Write, Edit) so inline `!` skill commands and mod `$.tool.call`/`$.tool.check`
+ * can locate them even when the model's wire tool pool only lists `REPL`.
+ */
+export type CodeModePrimitiveToolsResolver<
+  T extends CodeModeToolLike = CodeModeToolLike,
+> = (
+  currentTools: readonly T[],
+  permissionContext: unknown,
+  primitiveToolGrant?: ReadonlySet<string>,
+) => readonly T[]
+
+let primitiveToolsResolver: CodeModePrimitiveToolsResolver | undefined
+
+export function registerCodeModePrimitiveToolsResolver<
+  T extends CodeModeToolLike,
+>(resolver: CodeModePrimitiveToolsResolver<T>): () => void {
+  const prev = primitiveToolsResolver
+  primitiveToolsResolver = resolver as unknown as CodeModePrimitiveToolsResolver
+  return () => {
+    primitiveToolsResolver = prev
+  }
+}
+
+export function resolveCodeModePrimitiveTools<T extends CodeModeToolLike>(
+  currentTools: readonly T[],
+  permissionContext: unknown,
+  primitiveToolGrant?: ReadonlySet<string>,
+): readonly T[] {
+  if (!primitiveToolsResolver) return []
+  return primitiveToolsResolver(
+    currentTools,
+    permissionContext,
+    primitiveToolGrant,
+  ) as readonly T[]
+}
+
+/**
+ * Official 2.1.326 #76 (`gAa` / `pke`): Look up a primitive tool hidden by
+ * Code Mode for mod `$.tool.call` and `$.tool.check` handlers.
+ */
+export function findCodeModePrimitiveTool<T extends CodeModeToolLike>(
+  toolName: string,
+  currentTools: readonly T[],
+  permissionContext: unknown,
+  primitiveToolGrant?: ReadonlySet<string>,
+): T | undefined {
+  if (!isCodeModeEnabled() || !hasBuiltInEvalTool(currentTools)) {
+    return undefined
+  }
+  const primitives = resolveCodeModePrimitiveTools(
+    currentTools,
+    permissionContext,
+    primitiveToolGrant,
+  )
+  return primitives.find(t => t.name === toolName)
+}
+
+/**
+ * Official `F0o` / 2.1.326 `zXo`: human-readable explanation for each Code Mode refusal reason.
  */
 export function codeModeRefusalReasonText(why: CodeModeRefusalReason): string {
   switch (why) {
     case 'bad_value':
       return `${CODE_MODE_ENV_VAR} must be 1 to turn it on`
     case 'own_settings':
-      return 'it has to be turned on in ~/.claude/settings.json, because managed settings or ~/.claude.json also set the variable'
+      return `it has to be turned on in ~/.claude/settings.json (in its env block) or with --settings, because managed settings or ~/.claude.json also set ${CODE_MODE_ENV_VAR}`
     case 'admin':
       return "your organization's settings don't allow it"
     case 'admin_unread':
@@ -672,7 +732,7 @@ export function codeModeRefusalReasonText(why: CodeModeRefusalReason): string {
     case 'compliance':
       return "it isn't offered yet to organizations under HIPAA or zero data retention"
     case 'otel':
-      return `OpenTelemetry is on (CLAUDE_CODE_ENABLE_TELEMETRY or ENABLE_BETA_TRACING_DETAILED), and ${CODE_MODE_NAME} doesn't yet send it an event for each tool call`
+      return `OpenTelemetry is on (CLAUDE_CODE_ENABLE_TELEMETRY or ENABLE_BETA_TRACING_DETAILED, set by you or your organization), and ${CODE_MODE_NAME} doesn't yet send it an event for each tool call`
     case 'runtime':
       return "it needs Claude Code's native build (see code.claude.com/docs/en/setup)"
     case 'engine':
@@ -692,13 +752,13 @@ export function codeModeRefusalReasonText(why: CodeModeRefusalReason): string {
     case 'credentials':
       return "for now it doesn't work with an API key helper, ANTHROPIC_AUTH_TOKEN or custom auth headers"
     case 'provider':
-      return 'for now it only works with the Anthropic API'
+      return 'for now it only works directly with the Anthropic API (not through a cloud provider such as Bedrock, a gateway or another address in ANTHROPIC_BASE_URL)'
     case 'model':
       return 'for now it only works with Opus 5.5, Sonnet 5.5 and later models'
     case 'no_flags':
       return "it needs settings that Claude Code downloads from Anthropic, and this session doesn't download them (DISABLE_TELEMETRY, DO_NOT_TRACK, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC or CLAUDE_CODE_DISABLE_FEATURE_FLAGS turns that off)"
     case 'gate':
-      return "it isn't open to your account yet, or Claude Code couldn't check whether it is"
+      return "it isn't open to your account in this version of Claude Code, or Claude Code couldn't check whether it is (updating or restarting Claude Code may help)"
     case 'mods':
       return "it doesn't yet work with an installed mod (a plugin with JavaScript hooks) that checks tool calls"
     case 'declined':

@@ -35,10 +35,15 @@ import {
   restrictedDispatchExtraArgs,
   restrictedSpawnEnv,
 } from '../utils/restricted.js'
-import { buildDispatchProviderEnv } from './bgHostManagedEnv.js'
+import {
+  buildDispatchProviderEnv,
+  isShellExportedGatewayEnv,
+} from './bgHostManagedEnv.js'
 import {
   BG_PROFILE_MIN_DAEMON_CAP,
+  checkBareUnapprovedKeyForBg,
   checkBgSpawnCredentialCompatibility,
+  checkDaemonCredentialForBgLaunch,
   computeBgSessionCredentialAnchor,
 } from './bgSessionCredential.js'
 import {
@@ -99,6 +104,15 @@ export type XSeOpts = {
   bgIsolation?: 'none' | 'worktree' | 'default'
   /** densable timeout for isa / await-ack (ms). */
   ackTimeoutMs?: number
+  /**
+   * Official 2.1.326 #335: true when the calling session runs in `--bare` mode.
+   */
+  isBareSession?: boolean
+  /**
+   * Official 2.1.326 #335: whether the shell's `ANTHROPIC_API_KEY` has been
+   * approved by the user (`isCustomApiKeyApproved`).
+   */
+  isApiKeyApproved?: boolean
 }
 
 /**
@@ -484,34 +498,133 @@ export async function xSeSpawn(opts: XSeOpts): Promise<XSeResult> {
     }
   }
 
-  // Official 2.1.323 #1998: when spawning under a named Anthropic profile,
-  // verify the running daemon advertises profile anchoring support (>= 1).
+  // Official 2.1.323 #1998 + 2.1.326 #14/#61/#335: check running daemon
+  // capabilities, shell credentials (for agent-view resume / --bare --bg), and
+  // exported LLM gateway before dispatching.
   const callerAnchor = isExec
     ? null
     : computeBgSessionCredentialAnchor(effectiveCallerEnv)
-  if (callerAnchor?.profile) {
+  const hasBareFlagInBgLaunch =
+    argv.includes('--bare') || (opts.extraArgs?.includes('--bare') ?? false)
+  const isBareSession =
+    opts.isBareSession ??
+    (hasBareFlagInBgLaunch || process.env.CLAUDE_CODE_SIMPLE === '1')
+  const callerHasGateway =
+    !isExec && isShellExportedGatewayEnv(effectiveCallerEnv)
+  const needsDaemonProbe = Boolean(
+    callerAnchor?.profile ||
+      callerAnchor?.usesShellSecret ||
+      isBareSession ||
+      callerHasGateway,
+  )
+  let daemonRunning = false
+  let daemonCredentialMatches: boolean | undefined
+  let daemonHasGateway: boolean | undefined
+  if (needsDaemonProbe) {
     const { sendControlRequest } = await import('./controlSocketClient.js')
     const ping = await sendControlRequest(
       { op: 'ping', proto: PROTO_VERSION },
       { timeoutMs: 2_000 },
     )
     if (ping.ok) {
-      const cap =
-        typeof ping.profileAnchorCap === 'number'
-          ? ping.profileAnchorCap
-          : undefined
-      const oldDaemonErr = checkBgSpawnCredentialCompatibility({
-        callerEnv: effectiveCallerEnv,
-        daemonProfileAnchorCap: cap,
-        isExec: false,
-      })
-      if (oldDaemonErr) {
-        return {
-          ok: false,
-          error: oldDaemonErr,
-          reason: 'old_daemon_profile_unsupported',
+      daemonRunning = true
+      if (typeof ping.hasGateway === 'boolean') {
+        daemonHasGateway = ping.hasGateway
+      }
+      if (callerAnchor?.profile) {
+        const cap =
+          typeof ping.profileAnchorCap === 'number'
+            ? ping.profileAnchorCap
+            : undefined
+        const oldDaemonErr = checkBgSpawnCredentialCompatibility({
+          callerEnv: effectiveCallerEnv,
+          daemonProfileAnchorCap: cap,
+          isExec: false,
+        })
+        if (oldDaemonErr) {
+          return {
+            ok: false,
+            error: oldDaemonErr,
+            reason: 'old_daemon_profile_unsupported',
+          }
         }
       }
+      if (callerAnchor?.usesShellSecret) {
+        const credCheck = await sendControlRequest(
+          {
+            op: 'check-credential',
+            proto: PROTO_VERSION,
+            credential: callerAnchor.credential,
+          },
+          { timeoutMs: 2_000 },
+        )
+        if (credCheck.ok && typeof credCheck.matches === 'boolean') {
+          daemonCredentialMatches = credCheck.matches
+        }
+      }
+    }
+  }
+
+  // Official 2.1.326 #335: refuse moving a `--bare` session on an unapproved
+  // API key to background, and fail `claude --bare --bg` when a running daemon
+  // lacks the key.
+  if (!isExec && isBareSession) {
+    let isKeyApproved = opts.isApiKeyApproved
+    if (isKeyApproved === undefined && effectiveCallerEnv.ANTHROPIC_API_KEY) {
+      try {
+        const { isCustomApiKeyApproved } = await import('../utils/auth.js')
+        isKeyApproved = isCustomApiKeyApproved(
+          effectiveCallerEnv.ANTHROPIC_API_KEY,
+        )
+      } catch {
+        isKeyApproved = false
+      }
+    }
+    const bareErr = checkBareUnapprovedKeyForBg({
+      isBareSession: true,
+      hasBareFlagInBgLaunch,
+      callerEnv: effectiveCallerEnv,
+      isApiKeyApproved: isKeyApproved === true,
+      daemonRunning,
+      daemonHasMatchingKey: daemonCredentialMatches,
+    })
+    if (bareErr) {
+      return {
+        ok: false,
+        error: bareErr,
+        reason: 'bare_unapproved_key_blocked',
+      }
+    }
+  }
+
+  // Official 2.1.326 #61: refuse resuming/launching a background session when
+  // the terminal has a shell API key, auth token, or workload identity that the
+  // running background service lacks (never silently fall back to daemon sign-in).
+  if (!isExec && callerAnchor?.usesShellSecret) {
+    const resumeCredErr = checkDaemonCredentialForBgLaunch({
+      callerEnv: effectiveCallerEnv,
+      daemonRunning,
+      daemonCredentialMatches,
+      isExec: false,
+    })
+    if (resumeCredErr) {
+      return {
+        ok: false,
+        error: resumeCredErr,
+        reason: 'daemon_missing_shell_credential',
+      }
+    }
+  }
+
+  // Official 2.1.326 #14: if the shell exported an LLM gateway and the running
+  // daemon lacks it, stop before any model request can be sent to the wrong
+  // endpoint.
+  if (callerHasGateway && daemonRunning && daemonHasGateway === false) {
+    return {
+      ok: false,
+      error:
+        'Stopped before sending a model request: the background service does not have the LLM gateway exported in your shell. Run in this terminal, or stop and restart the background service from a shell with the gateway configured.',
+      reason: 'gateway_missing_in_daemon',
     }
   }
 

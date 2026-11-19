@@ -65,6 +65,8 @@ export type Styles = {
     | 'truncate'
     | 'truncate-middle'
     | 'truncate-start'
+    | 'truncate-rows'
+    | 'clip'
 
   readonly position?: 'absolute' | 'relative'
   readonly top?: number | `${number}%`

@@ -32,7 +32,7 @@ import { getAgentId } from '../../utils/teammate.js';
 import { hasClaudeAiMcpEverConnected, hasClaudeAiMcpSessionConnected } from '../../services/mcp/claudeai.js';
 import type { MCPServerConnection } from '../../services/mcp/types.js';
 import { countMcpNeedsAuth } from '../../services/mcp/utils.js';
-import { CondensedLogo } from './CondensedLogo.js';
+import { CondensedLogo, resolveWelcomeHeaderModel } from './CondensedLogo.js';
 
 /**
  * Official 2.1.325 `y7t` / `QD()` (#2273): indicates whether startup notices
@@ -231,7 +231,10 @@ export function LogoV2(): React.ReactNode {
   const noticeVisible = useStartupNoticeVisible();
   const [suppressed] = useState(() => !noticeVisible || getIsNonInteractiveSession() || getAgentId() !== undefined);
   const [updateSummary] = useState(() => (suppressed || process.env.DEMO_VERSION ? null : getStartupUpdateSummary()));
-  const model = useMainLoopModel();
+  const sessionModel = useMainLoopModel();
+  const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
+  const tasks = useAppState(s => s.tasks);
+  const model = resolveWelcomeHeaderModel({ sessionModel, viewingAgentTaskId, tasks });
   const toolPermissionContext = useAppState(s => s.toolPermissionContext);
   const mcpClients = useAppState(s => s.mcp.clients);
   const permissionWarningEntries = useMemo(() => {

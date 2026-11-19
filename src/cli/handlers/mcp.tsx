@@ -54,6 +54,7 @@ import { gracefulShutdown } from '../../utils/gracefulShutdown.js';
 import { safeParseJSON } from '../../utils/json.js';
 import { getPlatform } from '../../utils/platform.js';
 import { cliError, cliOk } from '../exit.js';
+import { formatCliError, formatCliInactive, formatCliSuccess, formatCliWarning } from '../cliStatusMarkers.js';
 import { createInterface } from 'readline';
 import { MCP_DISABLED_STATUS, mcpDisabledHealthResult } from './mcpDisabledStatus.js';
 
@@ -61,7 +62,9 @@ export { MCP_DISABLED_STATUS };
 
 // Official 2.1.196: never spawn unapproved project (.mcp.json) servers from list/get.
 const PENDING_APPROVAL_STATUS = '⏸ Pending approval (run `claude` to approve)';
-const REJECTED_STATUS = '✗ Rejected (see disabledMcpjsonServers in settings)';
+function getRejectedStatus(): string {
+  return formatCliInactive('Rejected (see disabledMcpjsonServers in settings)');
+}
 
 /** densable 2.1.219 `ivp` result — status line + optional issue (HTTP/error). */
 type McpHealthResult = { status: string; issue?: string };
@@ -82,7 +85,7 @@ async function checkMcpServerHealth(
     return { status: PENDING_APPROVAL_STATUS };
   }
   if (options?.projectStatus === 'rejected') {
-    return { status: REJECTED_STATUS };
+    return { status: getRejectedStatus() };
   }
   // densable 2.1.238: hm(name)?wah — disabled → glyph, never connect
   const disabled = mcpDisabledHealthResult(isMcpServerDisabled(name));
@@ -91,7 +94,7 @@ async function checkMcpServerHealth(
   }
   // #645: never start/connect a server blocked by managed policy.
   if (!isMcpServerAllowedByPolicy(name, server)) {
-    return { status: '✗ Blocked by enterprise managed policy' };
+    return { status: formatCliError('Blocked by enterprise managed policy') };
   }
   // Defense in depth: project-scope servers that are not settings-approved
   // must not be connected from CLI list/get (RCE via self-approved .mcp.json).
@@ -101,27 +104,27 @@ async function checkMcpServerHealth(
       return { status: PENDING_APPROVAL_STATUS };
     }
     if (projectStatus === 'rejected') {
-      return { status: REJECTED_STATUS };
+      return { status: getRejectedStatus() };
     }
   }
   try {
     const result = await connectToServer(name, server);
     if (result.type === 'connected') {
-      return { status: '✓ Connected' };
+      return { status: formatCliSuccess('Connected') };
     } else if (result.type === 'needs-auth') {
       return { status: '! Needs authentication' };
     } else if (result.type === 'failed') {
       // densable `ivp` + `mSp`
       const issue = formatFailedMcpIssue(result);
       return {
-        status: '✗ Failed to connect',
+        status: formatCliError('Failed to connect'),
         ...(issue !== '' ? { issue } : {}),
       };
     } else {
-      return { status: '✗ Failed to connect' };
+      return { status: formatCliError('Failed to connect') };
     }
   } catch (_error) {
-    return { status: '✗ Connection error' };
+    return { status: formatCliError('Connection error') };
   }
 }
 
@@ -167,7 +170,7 @@ export async function mcpServeHandler({ debug, verbose }: { debug?: boolean; ver
     await stat(providedCwd);
   } catch (error) {
     if (isFsInaccessible(error)) {
-      cliError(`Error: Directory ${providedCwd} does not exist`);
+      cliError(formatCliError(`Directory ${providedCwd} does not exist`, 'Error: '));
     }
     throw error;
   }
@@ -178,7 +181,7 @@ export async function mcpServeHandler({ debug, verbose }: { debug?: boolean; ver
     const { startMCPServer } = await import('../../entrypoints/mcp.js');
     await startMCPServer(providedCwd, debug ?? false, verbose ?? false, 'raw');
   } catch (error) {
-    cliError(`Error: Failed to start MCP server: ${error}`);
+    cliError(formatCliError(`Failed to start MCP server: ${error}`, 'Error: '));
   }
 }
 
@@ -204,7 +207,7 @@ export async function mcpRemoveHandler(name: string, options: { scope?: string }
 
       await removeMcpConfig(name, scope);
       cleanupSecureStorage();
-      process.stdout.write(`Removed MCP server ${name} from ${scope} config\n`);
+      process.stdout.write(`${formatCliSuccess(`Removed MCP server ${name} from ${scope} config`, '')}\n`);
       cliOk(`File modified: ${describeMcpConfigFilePath(scope)}`);
     }
 
@@ -223,7 +226,7 @@ export async function mcpRemoveHandler(name: string, options: { scope?: string }
     if (globalConfig.mcpServers?.[name]) scopes.push('user');
 
     if (scopes.length === 0) {
-      cliError(`No MCP server found with name: "${name}"`);
+      cliError(formatCliError(`No MCP server found with name: "${name}"`, ''));
     } else if (scopes.length === 1) {
       // Server exists in only one scope, remove it
       const scope = scopes[0]!;
@@ -234,7 +237,7 @@ export async function mcpRemoveHandler(name: string, options: { scope?: string }
 
       await removeMcpConfig(name, scope);
       cleanupSecureStorage();
-      process.stdout.write(`Removed MCP server "${name}" from ${scope} config\n`);
+      process.stdout.write(`${formatCliSuccess(`Removed MCP server "${name}" from ${scope} config`, '')}\n`);
       cliOk(`File modified: ${describeMcpConfigFilePath(scope)}`);
     } else {
       // Server exists in multiple scopes
@@ -323,7 +326,7 @@ export async function mcpGetHandler(name: string): Promise<void> {
     }
   }
   if (!server) {
-    cliError(`No MCP server found with name: ${name}`);
+    cliError(formatCliError(`No MCP server found with name: ${name}`, ''));
   }
 
   console.log(`${name}:`);
@@ -444,9 +447,9 @@ export async function mcpAddJsonHandler(
       type: transportType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     });
 
-    cliOk(`Added ${transportType} MCP server ${name} to ${scope} config`);
+    cliOk(formatCliSuccess(`Added ${transportType} MCP server ${name} to ${scope} config`, ''));
   } catch (error) {
-    cliError((error as Error).message);
+    cliError(formatCliError((error as Error).message, ''));
   }
 }
 
@@ -498,8 +501,11 @@ export async function mcpResetChoicesHandler(): Promise<void> {
     enableAllProjectMcpServers: false,
   }));
   cliOk(
-    'All project-scoped (.mcp.json) server approvals and rejections have been reset.\n' +
-      'You will be prompted for approval next time you start Claude Code.',
+    formatCliSuccess(
+      'All project-scoped (.mcp.json) server approvals and rejections have been reset.\n' +
+        'You will be prompted for approval next time you start Claude Code.',
+      '',
+    ),
   );
 }
 
@@ -646,9 +652,14 @@ export async function mcpLoginHandler(name: string, options: { browser?: boolean
       }
 
       if (isMcpServerDisabled(name)) {
-        cliOk(`Authenticated with "${name}", but it's currently disabled. Enable it in /mcp for its tools to load.`);
+        cliOk(
+          formatCliWarning(
+            `Authenticated with "${name}", but it's currently disabled. Enable it in /mcp for its tools to load.`,
+            '',
+          ),
+        );
       }
-      cliOk(`Authenticated with "${name}". Its tools are now available in Claude Code.`);
+      cliOk(formatCliSuccess(`Authenticated with "${name}". Its tools are now available in Claude Code.`, ''));
       break;
     }
   }
@@ -662,7 +673,7 @@ export async function mcpLogoutHandler(name: string): Promise<void> {
 
   switch (target.kind) {
     case 'missing':
-      cliError(`No MCP server found with name: ${name}`);
+      cliError(formatCliError(`No MCP server found with name: ${name}`, ''));
       break;
     case 'claudeai-proxy': {
       const url = 'url' in target.config ? String(target.config.url) : 'claude.ai';
@@ -673,7 +684,7 @@ export async function mcpLogoutHandler(name: string): Promise<void> {
       break;
     }
     case 'unsupported-transport':
-      cliError(`"${name}" doesn't use OAuth — there are no stored credentials to clear.`);
+      cliError(formatCliError(`"${name}" doesn't use OAuth — there are no stored credentials to clear.`, ''));
       break;
     case 'oauth': {
       const revokeResult = await revokeServerTokens(name, target.config);
@@ -682,9 +693,12 @@ export async function mcpLogoutHandler(name: string): Promise<void> {
           status: (revokeResult.reason ?? 'failed') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         });
         cliError(
-          revokeResult.reason === 'keychain_unreadable'
-            ? `Could not sign out of "${name}": the macOS keychain is locked or unreadable. Unlock the keychain and run \`claude mcp logout ${name}\` again.`
-            : `Could not sign out of "${name}": stored credentials could not be removed from the credential store. Run \`claude mcp logout ${name}\` again.`,
+          formatCliError(
+            revokeResult.reason === 'keychain_unreadable'
+              ? `Could not sign out of "${name}": the macOS keychain is locked or unreadable. Unlock the keychain and run \`claude mcp logout ${name}\` again.`
+              : `Could not sign out of "${name}": stored credentials could not be removed from the credential store. Run \`claude mcp logout ${name}\` again.`,
+            '',
+          ),
         );
         return;
       }
@@ -693,7 +707,7 @@ export async function mcpLogoutHandler(name: string): Promise<void> {
       const reauth = hasStaticAuthHeader(target.config)
         ? ''
         : ` Run \`claude mcp login ${name}\` to authenticate again.`;
-      cliOk(`Signed out of "${name}".${reauth}`);
+      cliOk(formatCliSuccess(`Signed out of "${name}".${reauth}`, ''));
       break;
     }
   }

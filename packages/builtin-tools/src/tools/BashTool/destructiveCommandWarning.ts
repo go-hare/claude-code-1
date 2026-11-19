@@ -53,17 +53,19 @@ const DESTRUCTIVE_PATTERNS: DestructivePattern[] = [
   },
 
   // File deletion (dangerous paths already handled by checkDangerousRemovalPaths)
+  // Official 2.1.326 #142 (`lAn`): use `[ \t]*` instead of `\s*` after
+  // `[;&|\n]` to prevent catastrophic backtracking on very long commands.
   {
     pattern:
-      /(^|[;&|\n]\s*)rm\s+-[a-zA-Z]*[rR][a-zA-Z]*f|(^|[;&|\n]\s*)rm\s+-[a-zA-Z]*f[a-zA-Z]*[rR]/,
+      /(^|[;&|\n][ \t]*)rm[ \t]+-[a-zA-Z]*[rR][a-zA-Z]*f|(^|[;&|\n][ \t]*)rm[ \t]+-[a-zA-Z]*f[a-zA-Z]*[rR]/,
     warning: 'Note: may recursively force-remove files',
   },
   {
-    pattern: /(^|[;&|\n]\s*)rm\s+-[a-zA-Z]*[rR]/,
+    pattern: /(^|[;&|\n][ \t]*)rm[ \t]+-[a-zA-Z]*[rR]/,
     warning: 'Note: may recursively remove files',
   },
   {
-    pattern: /(^|[;&|\n]\s*)rm\s+-[a-zA-Z]*f/,
+    pattern: /(^|[;&|\n][ \t]*)rm[ \t]+-[a-zA-Z]*f/,
     warning: 'Note: may force-remove files',
   },
 
@@ -88,13 +90,21 @@ const DESTRUCTIVE_PATTERNS: DestructivePattern[] = [
   },
 ]
 
+const MAX_DESTRUCTIVE_SCAN_LEN = 10_000
+
 /**
  * Checks if a bash command matches known destructive patterns.
  * Returns a human-readable warning string, or null if no destructive pattern is detected.
  */
 export function getDestructiveCommandWarning(command: string): string | null {
+  // Official 2.1.326 #142 (`lAn`): cap scanned length to 10,000 chars so
+  // huge commands never freeze the session during regex matching.
+  const scanned =
+    command.length > MAX_DESTRUCTIVE_SCAN_LEN
+      ? command.slice(0, MAX_DESTRUCTIVE_SCAN_LEN)
+      : command
   for (const { pattern, warning } of DESTRUCTIVE_PATTERNS) {
-    if (pattern.test(command)) {
+    if (pattern.test(scanned)) {
       return warning
     }
   }

@@ -9,9 +9,11 @@ import { logForDebugging } from '../debug.js'
 import type { EditableSettingSource } from '../settings/constants.js'
 import { isLocalSettingsGitTracked } from '../settings/localSettingsGitTracked.js'
 import {
+  getSettingsFilePathForSource,
   getSettingsForSource,
   updateSettingsForSource,
 } from '../settings/settings.js'
+import { getSettingSourceDisplayNameLowercase } from '../settings/constants.js'
 import { jsonStringify } from '../slowOperations.js'
 import { toPosixPath } from './filesystem.js'
 import type { PermissionRuleValue } from './PermissionRule.js'
@@ -23,7 +25,10 @@ import {
   permissionRuleValueFromString,
   permissionRuleValueToString,
 } from './permissionRuleParser.js'
-import { addPermissionRulesToSettings } from './permissionsLoader.js'
+import {
+  addPermissionRulesToSettings,
+  shouldAllowManagedPermissionRulesOnly,
+} from './permissionsLoader.js'
 
 // Re-export for backwards compatibility
 export type { AdditionalWorkingDirectory, WorkingDirectorySource }
@@ -471,30 +476,38 @@ export function supportsPersistence(
   )
 }
 
-/**
- * Persists a permission update to the appropriate settings source
- * @param update The permission update to persist
- */
-export function persistPermissionUpdate(update: PermissionUpdate): void {
-  const { updates, reason } = downgradePermissionUpdateForPersistence(update)
-  if (reason !== undefined) {
-    logForDebugging(
-      `Not persisting allow rule(s) to '${update.destination}' (${reason}): ${SESSION_ONLY_ALLOW_REASON_MESSAGES[reason]}`,
-    )
-  }
-  for (const u of updates) {
-    persistSinglePermissionUpdate(u)
-  }
+export type PersistPermissionUpdatesOptions = {
+  /** Official 2.1.326 #16 (`_W`): called with user-facing warning when a settings file couldn't be written. */
+  onPersistError?: (warning: string) => void
+  origin?: 'user' | 'hook'
 }
 
-function persistSinglePermissionUpdate(update: PermissionUpdate): void {
-  if (!supportsPersistence(update.destination)) return
+export type PersistPermissionUpdatesResult = {
+  persisted: boolean
+  warning?: string
+  failedFiles: string[]
+}
+
+/**
+ * Persists a permission update to the appropriate settings source.
+ * Official 2.1.326 #16 (`VKe` -> `_W`): returns persistence outcome and invokes
+ * `onPersistError` when the settings file cannot be written.
+ */
+export function persistPermissionUpdate(
+  update: PermissionUpdate,
+  options?: PersistPermissionUpdatesOptions,
+): PersistPermissionUpdatesResult {
+  return persistPermissionUpdates([update], options)
+}
+
+function persistSinglePermissionUpdate(update: PermissionUpdate): boolean {
+  if (!supportsPersistence(update.destination)) return true
   // official nf: setMode bypassPermissions is session-scoped
   if (update.type === 'setMode' && update.mode === 'bypassPermissions') {
     logForDebugging(
       `setMode:'bypassPermissions' is session-scoped; not persisting as defaultMode to ${update.destination}`,
     )
-    return
+    return true
   }
 
   logForDebugging(
@@ -506,14 +519,13 @@ function persistSinglePermissionUpdate(update: PermissionUpdate): void {
       logForDebugging(
         `Persisting ${update.rules.length} ${update.behavior} rule(s) to ${update.destination}`,
       )
-      addPermissionRulesToSettings(
+      return addPermissionRulesToSettings(
         {
           ruleValues: update.rules,
           ruleBehavior: update.behavior,
         },
         update.destination,
       )
-      break
     }
 
     case 'addDirectories': {
@@ -531,13 +543,14 @@ function persistSinglePermissionUpdate(update: PermissionUpdate): void {
 
       if (dirsToAdd.length > 0) {
         const updatedDirs = [...existingDirs, ...dirsToAdd]
-        updateSettingsForSource(update.destination, {
+        const { error } = updateSettingsForSource(update.destination, {
           permissions: {
             additionalDirectories: updatedDirs,
           },
         })
+        return error === null
       }
-      break
+      return true
     }
 
     case 'removeRules': {
@@ -561,12 +574,12 @@ function persistSinglePermissionUpdate(update: PermissionUpdate): void {
         return !rulesToRemove.has(normalized)
       })
 
-      updateSettingsForSource(update.destination, {
+      const { error } = updateSettingsForSource(update.destination, {
         permissions: {
           [update.behavior]: filteredRules,
         },
       })
-      break
+      return error === null
     }
 
     case 'removeDirectories': {
@@ -581,24 +594,24 @@ function persistSinglePermissionUpdate(update: PermissionUpdate): void {
       const dirsToRemove = new Set(update.directories)
       const filteredDirs = existingDirs.filter(dir => !dirsToRemove.has(dir))
 
-      updateSettingsForSource(update.destination, {
+      const { error } = updateSettingsForSource(update.destination, {
         permissions: {
           additionalDirectories: filteredDirs,
         },
       })
-      break
+      return error === null
     }
 
     case 'setMode': {
       logForDebugging(
         `Persisting mode '${update.mode}' to ${update.destination}`,
       )
-      updateSettingsForSource(update.destination, {
+      const { error } = updateSettingsForSource(update.destination, {
         permissions: {
           defaultMode: update.mode,
         },
       })
-      break
+      return error === null
     }
 
     case 'replaceRules': {
@@ -606,24 +619,86 @@ function persistSinglePermissionUpdate(update: PermissionUpdate): void {
         `Replacing all ${update.behavior} rules in ${update.destination} with ${update.rules.length} rule(s)`,
       )
       const ruleStrings = update.rules.map(permissionRuleValueToString)
-      updateSettingsForSource(update.destination, {
+      const { error } = updateSettingsForSource(update.destination, {
         permissions: {
           [update.behavior]: ruleStrings,
         },
       })
-      break
+      return error === null
     }
+
+    default:
+      return true
   }
 }
 
 /**
- * Persists multiple permission updates to the appropriate settings sources
- * Only persists updates with persistable sources
- * @param updates The permission updates to persist
+ * Official 2.1.326 #16 (`_W`): persists permission updates to settings files,
+ * tracks any write failures, and warns naming the unwritable settings file(s).
  */
-export function persistPermissionUpdates(updates: PermissionUpdate[]): void {
-  for (const update of updates) {
-    persistPermissionUpdate(update)
+export function persistPermissionUpdates(
+  updates: PermissionUpdate[],
+  options?: PersistPermissionUpdatesOptions,
+): PersistPermissionUpdatesResult {
+  const origin = options?.origin ?? 'user'
+  const failedTargets: string[] = []
+  let allTargetsNamedFile = true
+  let managedOnlyBlocked = false
+
+  for (const rawUpdate of updates) {
+    const { updates: downgraded, reason } =
+      downgradePermissionUpdateForPersistence(rawUpdate)
+    if (reason !== undefined) {
+      logForDebugging(
+        `Not persisting allow rule(s) to '${rawUpdate.destination}' (${reason}): ${SESSION_ONLY_ALLOW_REASON_MESSAGES[reason]}`,
+      )
+    }
+    for (const u of downgraded) {
+      const ok = persistSinglePermissionUpdate(u)
+      if (ok || !supportsPersistence(u.destination)) continue
+      if (u.type === 'addRules' && shouldAllowManagedPermissionRulesOnly()) {
+        logForDebugging('Rule not saved: managed rules only', { level: 'warn' })
+        if (origin !== 'hook' || u.behavior !== 'allow') {
+          managedOnlyBlocked = true
+        }
+        continue
+      }
+      const filePath = getSettingsFilePathForSource(u.destination)
+      if (filePath === undefined) {
+        allTargetsNamedFile = false
+        failedTargets.push(getSettingSourceDisplayNameLowercase(u.destination))
+      } else {
+        failedTargets.push(filePath)
+      }
+    }
+  }
+
+  const uniqueFailed = Array.from(new Set(failedTargets))
+  const parts: string[] = []
+  if (managedOnlyBlocked) {
+    parts.push(
+      "Your permission change wasn't saved: Your organization allows only its own managed permission rules. Ask an admin to add the rule to managed settings.",
+    )
+  }
+  if (uniqueFailed.length > 0) {
+    parts.push(
+      `Couldn't save this change to ${uniqueFailed.join(' and ')}, so it may stop applying when settings change or Claude Code restarts.`,
+    )
+    if (allTargetsNamedFile) {
+      parts.push(
+        `Check that ${uniqueFailed.length > 1 ? 'each file' : 'the file'} holds valid JSON and that you can write to it and its folder, then restart Claude Code and make the change again.`,
+      )
+    }
+  }
+  const warning = parts.length > 0 ? parts.join(' ') : undefined
+  if (warning !== undefined) {
+    logForDebugging(`[permissions] ${warning}`, { level: 'warn' })
+    options?.onPersistError?.(warning)
+  }
+  return {
+    persisted: uniqueFailed.length === 0 && !managedOnlyBlocked,
+    ...(warning !== undefined ? { warning } : {}),
+    failedFiles: uniqueFailed,
   }
 }
 

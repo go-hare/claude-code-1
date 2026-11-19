@@ -15,6 +15,10 @@ export const OAUTH_TOKEN_ENV_PROFILE_NOTE =
 /** densable MPe */
 export const REMOTE_CONTROL_DISCONNECTED_NOTE = 'Remote Control disconnected.'
 
+/** Official 2.1.326 #58 (`Fls`/`Ogl`): shown after /login when approved ANTHROPIC_API_KEY still takes precedence. */
+export const ANTHROPIC_API_KEY_STILL_USED_MESSAGE =
+  'Signed in, but requests still use ANTHROPIC_API_KEY. To use this login, turn off "Use custom API key" in /config'
+
 /**
  * densable o9m — pre-login banner when CLAUDE_CODE_OAUTH_TOKEN is in the env.
  * Returns undefined when the env var is unset (no startingMessage).
@@ -52,6 +56,8 @@ export type LoginDoneFlags = {
    * envTokenWasSet && !gatewayActive default (TRh "inline" vs "out-of-band").
    */
   includeEnvTokenWarning?: boolean
+  /** Official 2.1.326 #58: true when ANTHROPIC_API_KEY is still active after /login. */
+  apiKeyStillUsed?: boolean
 }
 
 /** densable TRh return */
@@ -98,9 +104,11 @@ export function formatLoginDoneMessage(
   flags: LoginDoneFlags = {},
 ): string {
   if (!success) return 'Login interrupted'
-  const base = flags.bridgeDisconnected
-    ? `Login successful. ${REMOTE_CONTROL_DISCONNECTED_NOTE}`
-    : 'Login successful'
+  const base = flags.apiKeyStillUsed
+    ? ANTHROPIC_API_KEY_STILL_USED_MESSAGE
+    : flags.bridgeDisconnected
+      ? `Login successful. ${REMOTE_CONTROL_DISCONNECTED_NOTE}`
+      : 'Login successful'
   const includeEnvTokenWarning =
     flags.includeEnvTokenWarning ??
     Boolean(flags.envTokenWasSet && !flags.gatewayActive)

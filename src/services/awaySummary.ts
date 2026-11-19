@@ -7,6 +7,7 @@ import { logForDebugging } from '../utils/debug.js'
 import { createUserMessage, extractTextContent } from '../utils/messages.js'
 import { getLastCacheSafeParams, runForkedAgent } from '../utils/forkedAgent.js'
 import { truncateAtWordBoundary } from '../utils/stringUtils.js'
+import { currentLimits } from './claudeAiLimits.js'
 
 /** densable f/Hbm=400 */
 export const AWAY_SUMMARY_RECAP_MAX_CHARS = 400
@@ -17,7 +18,18 @@ const PROMPT_EN =
 export async function generateAwaySummary(
   _messages: readonly unknown[],
   signal: AbortSignal,
+  options?: { force?: boolean; billedToUsageCredits?: boolean },
 ): Promise<string | null> {
+  // Official 2.1.326 (#55): skip automatic session recaps when the last reply
+  // was billed to usage credits (overage); explicit `/recap` (`force: true`)
+  // still runs.
+  if (
+    !options?.force &&
+    (options?.billedToUsageCredits ?? currentLimits.overageInUse === true)
+  ) {
+    logForDebugging('[awaySummary] skipped: last reply billed to usage credits')
+    return null
+  }
   const cacheSafeParams = getLastCacheSafeParams()
   if (!cacheSafeParams) {
     logForDebugging('[awaySummary] no CacheSafeParams saved, skipping')

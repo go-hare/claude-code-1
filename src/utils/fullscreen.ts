@@ -10,7 +10,6 @@ import {
   isEnvDefinedFalsy,
   isEnvTruthy,
 } from './envUtils.js'
-import { execFileNoThrow } from './execFileNoThrow.js'
 import { isProcessRunning } from './genericProcessUtils.js'
 import { getPlatform } from './platform.js'
 import { isAlternateScreenDisabled } from './residualUiEnvGates.js'
@@ -18,9 +17,23 @@ import type { GlobalConfig } from './config.js'
 
 let loggedTmuxCcDisable = false
 let loggedWinSshDisable = false
-let checkedTmuxMouseHint = false
 /** Test-only override for official yMi windows check (process.platform). */
 let windowsPlatformOverride: boolean | undefined
+
+/**
+ * Official 2.1.326 (#140 / #182 / #183) session TUI state (328 `class d` / `x9t`).
+ * - `sessionKeptTui` latches settings.tui for the live session so `/tui default`
+ *   or editing settings in another window cannot flip the active renderer mid-session.
+ * - `tuiEnvLatched` latches and clears CLAUDE_CODE_TUI_TRIAL and CLAUDE_CODE_TUI_ASKED.
+ * - `freshInstallCached` caches the new-account first-session renderer check.
+ */
+let sessionKeptTui: { tui: 'default' | 'fullscreen' | undefined } | undefined
+let tuiEnvLatched = false
+let tuiTrialMode: 'fullscreen' | undefined
+let tuiAsked: 'fullscreen' | 'default' | undefined
+let freshInstallCached: boolean | undefined
+
+export const FULLSCREEN_UPSELL_MAX_SESSIONS = 3
 
 /**
  * densable Rse.crashAutoOff — session latch set by iIh reconcile / sticky honour.
@@ -49,6 +62,7 @@ const FULLSCREEN_CANARY_ARM_REASON_LIST = [
   'settings_on',
   'upsell_trial_on',
   'ant_default',
+  'fresh_install_on',
   'downsell_on',
   'gb_on',
 ] as const
@@ -254,15 +268,245 @@ export function _setWindowsPlatformForTesting(
   windowsPlatformOverride = isWindows
 }
 
+function readLiveSettingsTui(): 'default' | 'fullscreen' | undefined {
+  try {
+    const { getInitialSettings } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    const tui = getInitialSettings()?.tui
+    if (tui === 'default' || tui === 'fullscreen') return tui
+  } catch {
+    // settings unavailable (early boot / tests)
+  }
+  return undefined
+}
+
+/** Official 2.1.326 `Z0a` — latch CLAUDE_CODE_TUI_TRIAL / CLAUDE_CODE_TUI_ASKED once. */
+export function latchTuiFromEnv(): void {
+  if (tuiEnvLatched) return
+  tuiEnvLatched = true
+  tuiTrialMode =
+    process.env.CLAUDE_CODE_TUI_TRIAL === 'fullscreen'
+      ? 'fullscreen'
+      : undefined
+  delete process.env.CLAUDE_CODE_TUI_TRIAL
+  const asked = process.env.CLAUDE_CODE_TUI_ASKED
+  tuiAsked = asked === 'fullscreen' || asked === 'default' ? asked : undefined
+  delete process.env.CLAUDE_CODE_TUI_ASKED
+}
+
+/** Official 2.1.326 `eDa` (#182) — consume one-shot asked renderer after relaunch. */
+export function consumeTuiAsked(): 'fullscreen' | 'default' | undefined {
+  latchTuiFromEnv()
+  const asked = tuiAsked
+  tuiAsked = undefined
+  return asked
+}
+
+/** Official 2.1.326 `IEn` — trial mode from latched CLAUDE_CODE_TUI_TRIAL. */
+export function getTuiTrialMode(): 'fullscreen' | undefined {
+  latchTuiFromEnv()
+  return tuiTrialMode
+}
+
+/**
+ * Official 2.1.326 `tDa` (#140) — latch settings.tui for the duration of the
+ * active session so `/tui default` or settings edits in another window cannot
+ * switch the live renderer and scramble the terminal.
+ */
+export function latchSessionTuiSetting(): void {
+  sessionKeptTui ??= { tui: readLiveSettingsTui() }
+}
+
+/** Official 2.1.326 `u()` — session-latched settings.tui, or live when unlatched. */
+export function getEffectiveTuiSetting(): 'default' | 'fullscreen' | undefined {
+  return sessionKeptTui !== undefined
+    ? sessionKeptTui.tui
+    : readLiveSettingsTui()
+}
+
+/** Official 2.1.326 `c()`/`S()` (#183) — new-account first-session consistency. */
+export function isFreshInstallFullscreen(): boolean {
+  if (freshInstallCached !== undefined) return freshInstallCached
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getGlobalConfig } =
+      require('./config.js') as typeof import('./config.js')
+    const cfg = getGlobalConfig() as GlobalConfig & {
+      firstStartVersion?: string
+      fullscreenUpsellSeenCount?: number
+    }
+    const result =
+      cfg.firstStartVersion !== undefined &&
+      (cfg.fullscreenUpsellSeenCount ?? 0) < FULLSCREEN_UPSELL_MAX_SESSIONS
+    freshInstallCached = result
+    return result
+  } catch {
+    return false
+  }
+}
+
+/** Official 2.1.326 `nDa` — clear cached fresh-install / GB gate readings. */
+export function resetFullscreenGateCache(): void {
+  freshInstallCached = undefined
+}
+
+/** Official 2.1.326 `Wft` — human label for renderer mode. */
+export function formatRendererLabel(mode: 'fullscreen' | 'default'): string {
+  return mode === 'default' ? 'classic' : mode
+}
+
+/**
+ * Official 2.1.326 `H()` (#182) — only show the "Switched back to the classic
+ * renderer" / "Using flicker-free rendering" banner when the active renderer
+ * actually matches CLAUDE_CODE_TUI_JUST_SWITCHED.
+ */
+export function resolveTuiJustSwitchedBanner():
+  | 'fullscreen'
+  | 'default'
+  | undefined {
+  switch (process.env.CLAUDE_CODE_TUI_JUST_SWITCHED) {
+    case 'fullscreen':
+      return isFullscreenEnvEnabled() ? 'fullscreen' : undefined
+    case 'default':
+      return isFullscreenEnvEnabled() ? undefined : 'default'
+    default:
+      return undefined
+  }
+}
+
+function formatPrioritySourceReason(
+  label: string,
+  source: string | null,
+  asked: 'fullscreen' | 'default',
+): string {
+  const retry = `start again and run /tui ${formatRendererLabel(asked)}`
+  const suffix = `takes priority · quit, change it, ${retry}`
+  switch (source) {
+    case 'policySettings':
+      return `${label} in managed settings takes priority · ask your admin to change it`
+    case 'projectSettings':
+      return `${label} in project settings takes priority · quit, override it in local settings, ${retry}`
+    case 'userSettings':
+      return `${label} in your settings ${suffix}`
+    case 'localSettings':
+      return `${label} in local settings ${suffix}`
+    case 'flagSettings':
+      return `${label} in --settings ${suffix}`
+    case 'globalConfig':
+      return `${label} in ~/.claude.json ${suffix}`
+    default:
+      return `${label} comes from outside your settings files · check what starts Claude Code`
+  }
+}
+
+function findSettingSourceForTui(): string | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getSettingsForSource } =
+      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    const order = [
+      'policySettings',
+      'flagSettings',
+      'localSettings',
+      'projectSettings',
+      'userSettings',
+    ] as const
+    for (const src of order) {
+      const s = getSettingsForSource(src) as { tui?: string } | null
+      if (s?.tui !== undefined) return src
+    }
+  } catch {
+    // settings unavailable
+  }
+  return null
+}
+
+function findEnvSourceForVar(varName: string): string | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getSettingsForSource } =
+      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    const order = [
+      'policySettings',
+      'flagSettings',
+      'localSettings',
+      'projectSettings',
+      'userSettings',
+    ] as const
+    for (const src of order) {
+      const s = getSettingsForSource(src) as {
+        env?: Record<string, string>
+      } | null
+      if (s?.env && Object.hasOwn(s.env, varName)) return src
+    }
+  } catch {
+    // settings unavailable
+  }
+  return null
+}
+
+/**
+ * Official 2.1.326 `Kin` + `HUt` (#182) — explain what keeps the renderer when
+ * `/tui` could not switch to `asked`.
+ */
+export function explainTuiKeptRenderer(
+  reason: FullscreenGateReason,
+  asked: 'fullscreen' | 'default',
+): string {
+  switch (reason) {
+    case 'crash_auto_off':
+      return isFullscreenStickyAutoDisabled()
+        ? 'fullscreen is off on this machine after repeated failed starts · /tui fullscreen retries'
+        : "a fullscreen launch on this machine didn't finish starting · your choice is saved"
+    case 'sr_auto_off':
+      return 'screen-reader mode always uses it'
+    case 'tmux_cc_auto_off':
+      return 'fullscreen is off under tmux -CC · your choice is saved'
+    case 'win_ssh_auto_off':
+      return 'fullscreen is off over SSH to Windows · your choice is saved'
+    case 'env_on':
+    case 'env_off': {
+      const varName =
+        reason === 'env_off' &&
+        !isEnvDefinedFalsy(process.env.CLAUDE_CODE_NO_FLICKER)
+          ? 'CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN'
+          : 'CLAUDE_CODE_NO_FLICKER'
+      return formatPrioritySourceReason(
+        varName,
+        findEnvSourceForVar(varName),
+        asked,
+      )
+    }
+    case 'settings_on':
+    case 'settings_off':
+      return formatPrioritySourceReason(
+        'the tui setting',
+        findSettingSourceForTui(),
+        asked,
+      )
+    case 'upsell_trial_on':
+    case 'ant_default':
+    case 'default_on':
+    case 'fresh_install_on':
+    case 'downsell_on':
+    case 'gb_on':
+    case 'gb_off':
+      return 'the choice saved in your user settings was overridden or not read'
+    case 'bg_forced_on':
+      return 'background sessions always use the fullscreen renderer while attached'
+  }
+}
+
 /**
  * Fullscreen / no-flicker alt-screen gate.
  *
- * Official P8t densable (2.1.210) + local bg-session force-on:
+ * Official P8t densable (2.1.210) + 2.1.326 (#140 latch / #183 fresh-install):
  *   1. DISABLE_ALTERNATE_SCREEN / NO_FLICKER=0 → off
  *   2. bg session / NO_FLICKER=1 → on
  *   3. Windows over SSH (yMi) → off
  *   4. tmux -CC → off (mouse/alt-screen unrecoverable)
- *   5. settings.tui "default"|"fullscreen" when set
+ *   5. latched settings.tui "default"|"fullscreen" (or trial) when set
  *   6. default → on
  */
 export function isFullscreenEnvEnabled(): boolean {
@@ -308,17 +552,11 @@ export function isFullscreenEnvEnabled(): boolean {
     }
     return false
   }
-  // Official settings.tui via merged settings (zn().tui densable).
-  try {
-    const { getInitialSettings } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('./settings/settings.js') as typeof import('./settings/settings.js')
-    const tui = getInitialSettings()?.tui
-    if (tui === 'default') return false
-    if (tui === 'fullscreen') return true
-  } catch {
-    // settings unavailable (early boot / tests) — fall through
-  }
+  // Official 2.1.326 (#140): read session-latched settings.tui (falling back
+  // to live settings / trial mode when not yet latched).
+  const tui = getEffectiveTuiSetting() ?? getTuiTrialMode()
+  if (tui === 'default') return false
+  if (tui === 'fullscreen') return true
   // Official default-on (PR #21439 / 2.1.210 external ships / P8t).
   return true
 }
@@ -329,6 +567,7 @@ export function isFullscreenEnvEnabled(): boolean {
  * AlternateScreen and defaults ON.
  *
  * After env/tmux/win-ssh/settings, falls through to:
+ *   fresh-install first-session consistency (#183) → true
  *   tengu_amber_creek downsell → true
  *   tengu_pewter_brook GB (default false) → true/false
  */
@@ -350,16 +589,10 @@ export function isFullscreenFeatureGateEnabled(): boolean {
   if (crashAutoOff || isFullscreenStickyAutoDisabled()) return false
   if (isTmuxControlMode()) return false
   if (isWindowsOverSSH()) return false
-  try {
-    const { getInitialSettings } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('./settings/settings.js') as typeof import('./settings/settings.js')
-    const tui = getInitialSettings()?.tui
-    if (tui === 'fullscreen') return true
-    if (tui === 'default') return false
-  } catch {
-    // fall through
-  }
+  const tui = getEffectiveTuiSetting() ?? getTuiTrialMode()
+  if (tui === 'fullscreen') return true
+  if (tui === 'default') return false
+  if (isFreshInstallFullscreen()) return true
   try {
     const { getFeatureValue_CACHED_MAY_BE_STALE } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -394,13 +627,16 @@ export type FullscreenGateReason =
   | 'settings_off'
   | 'upsell_trial_on'
   | 'ant_default'
+  | 'fresh_install_on'
   | 'downsell_on'
   | 'gb_on'
   | 'gb_off'
   /** @deprecated prefer ant_default (densable xse) */
   | 'default_on'
 
-export function getFullscreenGateReason(): FullscreenGateReason {
+export function getFullscreenGateReason(opts?: {
+  ignoreSessionLatch?: boolean
+}): FullscreenGateReason {
   if (process.env.CLAUDE_CODE_SESSION_KIND === 'bg') return 'bg_forced_on'
   if (isAlternateScreenDisabled()) return 'env_off'
   if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_NO_FLICKER)) return 'env_off'
@@ -416,18 +652,19 @@ export function getFullscreenGateReason(): FullscreenGateReason {
   if (crashAutoOff) return 'crash_auto_off'
   if (isTmuxControlMode()) return 'tmux_cc_auto_off'
   if (isWindowsOverSSH()) return 'win_ssh_auto_off'
-  try {
-    const { getInitialSettings } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('./settings/settings.js') as typeof import('./settings/settings.js')
-    const tui = getInitialSettings()?.tui
-    // densable: settings.tui unset + trial marker → upsell_trial_on (sNr residual).
-    if (tui === 'fullscreen') return 'settings_on'
-    if (tui === undefined && isTuiModeMarkerPresent()) return 'upsell_trial_on'
-    if (tui === 'default') return 'settings_off'
-  } catch {
-    // fall through
+  const tui = opts?.ignoreSessionLatch
+    ? readLiveSettingsTui()
+    : getEffectiveTuiSetting()
+  // densable: settings.tui unset + trial marker → upsell_trial_on (sNr residual).
+  if (tui === 'fullscreen') return 'settings_on'
+  if (
+    tui === undefined &&
+    (getTuiTrialMode() === 'fullscreen' || isTuiModeMarkerPresent())
+  ) {
+    return 'upsell_trial_on'
   }
+  if (tui === 'default') return 'settings_off'
+  if (isFreshInstallFullscreen()) return 'fresh_install_on'
   try {
     const { getFeatureValue_CACHED_MAY_BE_STALE } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -522,44 +759,25 @@ export function isFullscreenActive(): boolean {
 }
 
 /**
- * One-time hint for tmux users in fullscreen with `mouse off`.
- *
- * tmux's `mouse` option is session-scoped by design — there is no
- * pane-level equivalent. We used to `tmux set mouse on` when entering
- * alt-screen so wheel scrolling worked, but that changed mouse behavior
- * for every sibling pane (vim, less, shell) and leaked on kill-pane or
- * when multiple CC instances raced on restore. Now we leave tmux state
- * alone — same as vim/less/htop — and just tell the user their options.
- *
- * Fire-and-forget from REPL startup. Returns the hint text once per
- * session if TMUX is set, fullscreen is active, and tmux's current
- * `mouse` option is off; null otherwise.
+ * Official 2.1.326 (#349): removed the tmux notice that said the mouse wheel
+ * needs `set -g mouse on` in fullscreen; the wheel scrolls without it.
+ * Kept as a no-op stub returning null for existing callers (e.g. REPL.tsx).
  */
 export async function maybeGetTmuxMouseHint(): Promise<string | null> {
-  if (!process.env.TMUX) return null
-  // tmux -CC auto-disables fullscreen above, but belt-and-suspenders.
-  if (!isFullscreenActive() || isTmuxControlMode()) return null
-  if (checkedTmuxMouseHint) return null
-  checkedTmuxMouseHint = true
-  // -A includes inherited values: `show -v mouse` returns empty when the
-  // option is set globally (`set -g mouse on` in .tmux.conf) but not at
-  // session level — which is the common case. -A gives the effective value.
-  const { stdout, code } = await execFileNoThrow(
-    'tmux',
-    ['show', '-Av', 'mouse'],
-    { useCwd: false, timeout: 2000 },
-  )
-  if (code !== 0 || stdout.trim() === 'on') return null
-  return "tmux detected · scroll with PgUp/PgDn · or add 'set -g mouse on' to ~/.tmux.conf for wheel scroll"
+  return null
 }
 
 /** Test-only: reset module-level once-per-session flags. */
 export function _resetForTesting(): void {
   loggedTmuxCcDisable = false
   loggedWinSshDisable = false
-  checkedTmuxMouseHint = false
   windowsPlatformOverride = undefined
   crashAutoOff = false
+  sessionKeptTui = undefined
+  tuiEnvLatched = false
+  tuiTrialMode = undefined
+  tuiAsked = undefined
+  freshInstallCached = undefined
   if (canaryState.status === 'armed') {
     canaryState.cleanup()
     if (canaryState.timer !== undefined) clearTimeout(canaryState.timer)
@@ -741,6 +959,7 @@ export function fullscreenModeForGateReason(
     case 'upsell_trial_on':
     case 'ant_default':
     case 'default_on':
+    case 'fresh_install_on':
     case 'downsell_on':
     case 'gb_on':
       return 'fullscreen'
@@ -897,6 +1116,8 @@ export async function armFullscreenBootCanary(options?: {
   onHealthy?: () => void | Promise<void>
   healthyAfterMs?: number
 }): Promise<boolean> {
+  // Official 2.1.326 (#140): latch session TUI setting at interactive startup.
+  latchSessionTuiSetting()
   if (canaryState.status !== 'idle') {
     return canaryState.status === 'armed'
   }

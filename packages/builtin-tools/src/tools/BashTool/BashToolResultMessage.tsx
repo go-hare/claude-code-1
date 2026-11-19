@@ -10,6 +10,7 @@ import { Box, Text } from '@anthropic/ink';
 import { useTerminalSize } from 'src/hooks/useTerminalSize.js';
 import { count } from 'src/utils/array.js';
 import { getDisplayPath } from 'src/utils/file.js';
+import { formatFileSize } from 'src/utils/format.js';
 import { commandHasGitStateSwitch, type BashEditDiff, type BashEditDiffHunk } from './bashEditDiff.js';
 import type { Out as BashOut } from './BashTool.js';
 
@@ -208,6 +209,16 @@ function extractCwdResetWarning(stderr: string): {
   return { cleanedStderr, cwdResetWarning };
 }
 
+/**
+ * Official 2.1.326 #156 (`$dn` / `r2t` @318089117):
+ * Notice shown in the expanded (verbose) view when long Bash output was cut
+ * and persisted to disk, naming the saved file and total size.
+ */
+export function formatPersistedOutputTruncatedNotice(path: string, size?: number): string {
+  const sizePart = size ? ` (${formatFileSize(size)} in all)` : '';
+  return `… more output${sizePart} saved to ${getDisplayPath(path)}`;
+}
+
 export default function BashToolResultMessage({
   content: {
     stdout = '',
@@ -217,6 +228,8 @@ export default function BashToolResultMessage({
     noOutputExpected,
     backgroundTaskId,
     bashEditDiff,
+    persistedOutputPath,
+    persistedOutputSize,
   },
   verbose,
   timeoutMs,
@@ -244,6 +257,11 @@ export default function BashToolResultMessage({
   return (
     <Box flexDirection="column">
       {stdout !== '' ? <OutputLine content={stdout} verbose={verbose} /> : null}
+      {verbose && persistedOutputPath ? (
+        <MessageResponse>
+          <Text dimColor>{formatPersistedOutputTruncatedNotice(persistedOutputPath, persistedOutputSize)}</Text>
+        </MessageResponse>
+      ) : null}
       {stderr.trim() !== '' ? <OutputLine content={stderr} verbose={verbose} isError /> : null}
       {cwdResetWarning ? (
         <MessageResponse>

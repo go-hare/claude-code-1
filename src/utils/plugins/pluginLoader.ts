@@ -1457,15 +1457,13 @@ export async function cachePlugin(
     try {
       const content = await readFile(manifestPath, { encoding: 'utf-8' })
       const parsed = jsonParse(stripBOM(content))
-      const result = PluginManifestSchema().safeParse(parsed)
+      const result = parsePluginManifestLenient(parsed)
 
-      if (result.success) {
-        manifest = result.data
+      if (result.ok) {
+        manifest = result.manifest
       } else {
         // Manifest exists but is invalid - throw error
-        const errors = result.error.issues
-          .map(err => `${err.path.join('.')}: ${err.message}`)
-          .join(', ')
+        const errors = result.errors.join(', ')
 
         logForDebugging(`Invalid manifest at ${manifestPath}: ${errors}`, {
           level: 'error',
@@ -1503,15 +1501,13 @@ export async function cachePlugin(
         encoding: 'utf-8',
       })
       const parsed = jsonParse(stripBOM(content))
-      const result = PluginManifestSchema().safeParse(parsed)
+      const result = parsePluginManifestLenient(parsed)
 
-      if (result.success) {
-        manifest = result.data
+      if (result.ok) {
+        manifest = result.manifest
       } else {
         // Manifest exists but is invalid - throw error
-        const errors = result.error.issues
-          .map(err => `${err.path.join('.')}: ${err.message}`)
-          .join(', ')
+        const errors = result.errors.join(', ')
 
         logForDebugging(
           `Invalid legacy manifest at ${legacyManifestPath}: ${errors}`,
@@ -1619,42 +1615,165 @@ export async function cachePlugin(
  * @returns A valid PluginManifest object (either loaded or default)
  * @throws Error if manifest exists but is invalid (corrupt JSON or schema validation failure)
  */
-export async function loadPluginManifest(
+/**
+ * Official 2.1.326 #5 & #326 (`JEr`): display-only metadata fields in
+ * `plugin.json` that may be ignored when malformed so the plugin still loads
+ * (with its hooks and MCP servers) and surfaces a `manifest-field-ignored`
+ * diagnostic warning.
+ */
+export const IGNORABLE_MANIFEST_DISPLAY_FIELDS = new Set<string>([
+  '$schema',
+  'displayName',
+  'description',
+  'author',
+  'homepage',
+  'repository',
+  'license',
+  'keywords',
+])
+
+export const MANIFEST_FIELD_IGNORED_HINT =
+  'If you did not expect this plugin to run, disable it from /plugin, unless your organization requires it. If you maintain it, run `claude plugin validate <path>` to see the fault'
+
+export function formatManifestFieldIgnoredMessage(fields: string[]): string {
+  const quoted = fields.map(f => `"${f}"`).join(' and ')
+  return `${quoted} in plugin.json ${fields.length === 1 ? 'is' : 'are'} malformed and ignored. Earlier versions of Claude Code refused this plugin`
+}
+
+export type LenientManifestParseResult =
+  | {
+      ok: true
+      manifest: PluginManifest
+      ignoredFields: string[]
+      displayNotes: Array<{ path: string; message: string }>
+    }
+  | {
+      ok: false
+      errors: string[]
+    }
+
+/**
+ * Official 2.1.326 #326 (`vRe` display-field fallback): validates `plugin.json`
+ * and, unless `refusesDisplayFaults` is true, drops malformed display-only
+ * fields (`author`, `homepage`, `description`, `repository`, `license`,
+ * `keywords`, `displayName`, `$schema`) and retries validation so enabled
+ * plugins still load.
+ */
+export function parsePluginManifestLenient(
+  parsedJson: unknown,
+  opts: { refusesDisplayFaults?: boolean } = {},
+): LenientManifestParseResult {
+  if (
+    parsedJson === null ||
+    typeof parsedJson !== 'object' ||
+    Array.isArray(parsedJson)
+  ) {
+    return { ok: false, errors: ['manifest must be an object'] }
+  }
+  const initial = PluginManifestSchema().safeParse(parsedJson)
+  if (initial.success) {
+    return {
+      ok: true,
+      manifest: initial.data,
+      ignoredFields: [],
+      displayNotes: [],
+    }
+  }
+
+  const displayIssues = opts.refusesDisplayFaults
+    ? []
+    : initial.error.issues.filter(
+        issue =>
+          typeof issue.path[0] === 'string' &&
+          IGNORABLE_MANIFEST_DISPLAY_FIELDS.has(issue.path[0]),
+      )
+
+  if (displayIssues.length > 0) {
+    const candidate: Record<string, unknown> = {
+      ...(parsedJson as Record<string, unknown>),
+    }
+    const displayNotes = displayIssues.map(issue => ({
+      path: issue.path.join('.'),
+      message: issue.message,
+    }))
+    for (const issue of displayIssues) {
+      delete candidate[String(issue.path[0])]
+    }
+    const retried = PluginManifestSchema().safeParse(candidate)
+    if (retried.success) {
+      const ignoredFields = Array.from(
+        new Set(displayNotes.map(n => n.path.split('.')[0]!)),
+      )
+      return {
+        ok: true,
+        manifest: retried.data,
+        ignoredFields,
+        displayNotes,
+      }
+    }
+    return {
+      ok: false,
+      errors: [
+        ...retried.error.issues.map(err =>
+          err.path.length > 0
+            ? `${err.path.join('.')}: ${err.message}`
+            : err.message,
+        ),
+        ...displayNotes.map(n =>
+          n.path ? `${n.path}: ${n.message}` : n.message,
+        ),
+      ],
+    }
+  }
+
+  return {
+    ok: false,
+    errors: initial.error.issues.map(err =>
+      err.path.length > 0
+        ? `${err.path.join('.')}: ${err.message}`
+        : err.message,
+    ),
+  }
+}
+
+export async function loadPluginManifestWithDiagnostics(
   manifestPath: string,
   pluginName: string,
   source: string,
-): Promise<PluginManifest> {
-  // Check if manifest file exists
-  // If not, create a minimal manifest to allow plugin to function
+): Promise<{
+  manifest: PluginManifest
+  ignoredFields: string[]
+}> {
   if (!(await pathExists(manifestPath))) {
-    // Return default manifest with provided name and source
     return {
-      name: pluginName,
-      description: `Plugin from ${source}`,
+      manifest: {
+        name: pluginName,
+        description: `Plugin from ${source}`,
+      },
+      ignoredFields: [],
     }
   }
 
   try {
-    // Read and parse the manifest JSON file
     const content = await readFile(manifestPath, { encoding: 'utf-8' })
     const parsedJson = jsonParse(stripBOM(content))
+    const result = parsePluginManifestLenient(parsedJson)
 
-    // Validate against the PluginManifest schema
-    const result = PluginManifestSchema().safeParse(parsedJson)
-
-    if (result.success) {
-      // Valid manifest - return the validated data
-      return result.data
+    if (result.ok) {
+      for (const note of result.displayNotes) {
+        const topField = note.path.split('.')[0] ?? note.path
+        logForDebugging(
+          `Plugin ${pluginName}: ignored "${topField}" in plugin.json (${note.path}: ${note.message}); the plugin still loads`,
+          { level: 'warn' },
+        )
+      }
+      return {
+        manifest: result.manifest,
+        ignoredFields: result.ignoredFields,
+      }
     }
 
-    // Schema validation failed but JSON was valid
-    const errors = result.error.issues
-      .map(err =>
-        err.path.length > 0
-          ? `${err.path.join('.')}: ${err.message}`
-          : err.message,
-      )
-      .join(', ')
+    const errors = result.errors.join(', ')
 
     logForDebugging(
       `Plugin ${pluginName} has an invalid manifest file at ${manifestPath}. Validation errors: ${errors}`,
@@ -1665,7 +1784,6 @@ export async function loadPluginManifest(
       `Plugin ${pluginName} has an invalid manifest file at ${manifestPath}.\n\nValidation errors: ${errors}`,
     )
   } catch (error) {
-    // Check if this is the error we just threw (validation error)
     if (
       error instanceof Error &&
       error.message.includes('invalid manifest file')
@@ -1673,7 +1791,6 @@ export async function loadPluginManifest(
       throw error
     }
 
-    // JSON parsing failed or file read error
     const errorMsg = errorMessage(error)
 
     logForDebugging(
@@ -1685,6 +1802,19 @@ export async function loadPluginManifest(
       `Plugin ${pluginName} has a corrupt manifest file at ${manifestPath}.\n\nJSON parse error: ${errorMsg}`,
     )
   }
+}
+
+export async function loadPluginManifest(
+  manifestPath: string,
+  pluginName: string,
+  source: string,
+): Promise<PluginManifest> {
+  const { manifest } = await loadPluginManifestWithDiagnostics(
+    manifestPath,
+    pluginName,
+    source,
+  )
+  return manifest
 }
 
 /**
@@ -1844,7 +1974,20 @@ export async function createPluginFromPath(
   // Step 1: Load or create the plugin manifest
   // This provides metadata about the plugin (name, version, etc.)
   const manifestPath = join(pluginPath, '.claude-plugin', 'plugin.json')
-  const manifest = await loadPluginManifest(manifestPath, fallbackName, source)
+  const { manifest, ignoredFields } = await loadPluginManifestWithDiagnostics(
+    manifestPath,
+    fallbackName,
+    source,
+  )
+  if (ignoredFields.length > 0) {
+    warnings.push({
+      type: 'manifest-field-ignored',
+      source,
+      plugin: manifest.name,
+      manifestFields: ignoredFields,
+      warning: formatManifestFieldIgnoredMessage(ignoredFields),
+    })
+  }
 
   // Step 2: Create the base plugin object
   // Start with required fields from manifest and parameters

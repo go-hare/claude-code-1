@@ -1,6 +1,7 @@
 import { join } from 'path';
 import React, { useCallback, useState } from 'react';
 import { getOriginalCwd } from '../bootstrap/state.js';
+import { formatExportClipboardMessage } from '../commands/export/export.js';
 import type { ExitState } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import { setClipboard, Box, Text, Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
@@ -38,7 +39,7 @@ export function ExportDialog({ content, defaultFilename, onDone }: ExportDialogP
       // Copy to clipboard immediately
       const raw = await setClipboard(content);
       if (raw) process.stdout.write(raw);
-      onDone({ success: true, message: 'Conversation copied to clipboard' });
+      onDone({ success: true, message: formatExportClipboardMessage() });
     } else if (value === 'file') {
       setSelectedOption('file');
       setShowFilenameInput(true);

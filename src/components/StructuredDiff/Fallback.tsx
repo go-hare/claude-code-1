@@ -45,7 +45,7 @@ import { Box, NoSelect, Text, stringWidth, useTheme, wrapText } from '@anthropic
 // Define DiffLine interface to be used throughout the file
 interface DiffLine {
   code: string;
-  type: 'add' | 'remove' | 'nochange';
+  type: 'add' | 'remove' | 'nochange' | 'note';
   i: number;
   originalCode: string;
   wordDiff?: boolean; // Flag for word-level diffing
@@ -56,7 +56,7 @@ interface DiffLine {
 export interface LineObject {
   code: string;
   i: number;
-  type: 'add' | 'remove' | 'nochange';
+  type: 'add' | 'remove' | 'nochange' | 'note';
   originalCode: string;
   wordDiff?: boolean;
   matchedLine?: LineObject;
@@ -113,6 +113,16 @@ export function transformLinesToObjects(lines: string[]): LineObject[] {
         originalCode: code.slice(1),
       };
     }
+    // Official 2.1.326 (#225): "\ No newline at end of file" is a diff note,
+    // not a line of code — do not number it or advance the line counter.
+    if (code.startsWith('\\')) {
+      return {
+        code: code.slice(1),
+        i: 0,
+        type: 'note',
+        originalCode: code.slice(1),
+      };
+    }
     return {
       code: code.slice(1),
       i: 0,
@@ -148,6 +158,10 @@ export function processAdjacentLines(lineObjects: LineObject[]): LineObject[] {
         j++;
       }
 
+      // Official 2.1.326 (#225): skip an intervening "\ No newline at end of file"
+      // note between removed and added lines so word-diff pairing still works.
+      const noteBetween = lineObjects[j]?.type === 'note' ? lineObjects[j++] : undefined;
+
       // Check if there are add lines following the remove lines
       const addLines: LineObject[] = [];
       while (j < lineObjects.length && lineObjects[j]?.type === 'add') {
@@ -180,6 +194,9 @@ export function processAdjacentLines(lineObjects: LineObject[]): LineObject[] {
 
         // Add all remove lines (both paired and unpaired)
         processedLines.push(...removeLines.filter(Boolean));
+        if (noteBetween) {
+          processedLines.push(noteBetween);
+        }
 
         // Then add all add lines (both paired and unpaired)
         processedLines.push(...addLines.filter(Boolean));
@@ -358,7 +375,7 @@ function formatDiff(
   const maxWidth = Math.max(maxLineNumber.toString().length + 1, 0);
 
   // Step 4: Render formatting
-  return ls.flatMap((item): React.ReactNode[] => {
+  return ls.flatMap((item, itemIndex): React.ReactNode[] => {
     const { type, code, i, wordDiff, matchedLine } = item;
 
     // Handle word-level diffing for add/remove pairs
@@ -380,10 +397,10 @@ function formatDiff(
     const wrappedLines = wrappedText.split('\n');
 
     return wrappedLines.map((line, lineIndex) => {
-      const key = `${type}-${i}-${lineIndex}`;
-      const lineNum = lineIndex === 0 ? i : undefined;
+      const key = type === 'note' ? `note-${itemIndex}-${lineIndex}` : `${type}-${i}-${lineIndex}`;
+      const lineNum = lineIndex === 0 && type !== 'note' ? i : undefined;
       const lineNumStr = (lineNum !== undefined ? lineNum.toString().padStart(maxWidth) : ' '.repeat(maxWidth)) + ' ';
-      const sigil = type === 'add' ? '+' : type === 'remove' ? '-' : ' ';
+      const sigil = type === 'add' ? '+' : type === 'remove' ? '-' : type === 'note' ? '\\' : ' ';
       // Calculate padding to fill the entire terminal width
       const contentWidth = lineNumStr.length + 1 + stringWidth(line); // lineNum + sigil + code
       const padding = Math.max(0, safeWidth - contentWidth);
@@ -399,6 +416,12 @@ function formatDiff(
               : 'diffRemoved'
             : undefined;
 
+      // Official 2.1.326 (#219): only force theme `text` foreground when the row
+      // paints an explicit diff background; on transparent context/note rows,
+      // leave foreground undefined so the terminal's own contrasting fg is used
+      // even when the theme and terminal background differ.
+      const rowTextColor = bgColor && overrideTheme ? 'text' : undefined;
+
       // Gutter (line number + sigil) is wrapped in <NoSelect> so fullscreen
       // text selection yields clean code. bgColor carries across both boxes
       // so the visual continuity (solid red/green bar) is unchanged.
@@ -407,15 +430,15 @@ function formatDiff(
           {/* densable 2.1.212 #29: flexShrink:0 preserves line numbers + +/- markers */}
           <NoSelect fromLeftEdge flexShrink={0}>
             <Text
-              color={overrideTheme ? 'text' : undefined}
+              color={rowTextColor}
               backgroundColor={bgColor}
-              dimColor={dim || type === 'nochange'}
+              dimColor={dim || type === 'nochange' || type === 'note'}
             >
               {lineNumStr}
               {sigil}
             </Text>
           </NoSelect>
-          <Text color={overrideTheme ? 'text' : undefined} backgroundColor={bgColor} dimColor={dim}>
+          <Text color={rowTextColor} backgroundColor={bgColor} dimColor={dim || type === 'note'}>
             {line}
             {' '.repeat(padding)}
           </Text>
@@ -447,6 +470,10 @@ export function numberDiffLines(diff: LineObject[], startLine: number): DiffLine
       case 'nochange':
         i++;
         result.push(line);
+        break;
+      case 'note':
+        // Official 2.1.326 (#225): "\ No newline at end of file" does not take a line number.
+        result.push({ ...line, i: 0 });
         break;
       case 'add':
         i++;

@@ -7,7 +7,7 @@ import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { useShortcutDisplay } from '../keybindings/useShortcutDisplay.js';
 import { logForDebugging } from '../utils/debug.js';
 import { detectCurrentRepository } from '../utils/detectRepository.js';
-import { formatRelativeTime } from '../utils/format.js';
+import { formatRelativeTime, truncate } from '../utils/format.js';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
 import { Select } from './CustomSelect/index.js';
 import { Byline, KeyboardShortcutHint } from '@anthropic/ink';
@@ -26,7 +26,7 @@ const UPDATED_STRING = 'Updated';
 const SPACE_BETWEEN_TABLE_COLUMNS = '  ';
 
 export function ResumeTask({ onSelect, onCancel, isEmbedded = false }: Props): React.ReactNode {
-  const { rows } = useTerminalSize();
+  const { rows, columns } = useTerminalSize();
   const [sessions, setSessions] = useState<CodeSession[]>([]);
   const [currentRepo, setCurrentRepo] = useState<string | null>(null);
 
@@ -172,12 +172,13 @@ export function ResumeTask({ onSelect, onCancel, isEmbedded = false }: Props): R
   }));
   const maxTimeStringLength = Math.max(UPDATED_STRING.length, ...sessionMetadata.map(meta => meta.timeString.length));
 
+  const maxTitleWidth = Math.max(12, columns - maxTimeStringLength - 10);
   const options = sessionMetadata.map(({ timeString, title, id }) => {
     const paddedTime = timeString.padEnd(maxTimeStringLength, ' ');
 
-    // TODO: include branch name when API returns it
+    // Official 2.1.326 #102: truncate titles to fit column width so narrow terminals don't wrap and push sessions off-screen.
     return {
-      label: `${paddedTime}  ${title}`,
+      label: `${paddedTime}  ${truncate(title, maxTitleWidth, true)}`,
       value: id,
     };
   });
@@ -191,13 +192,12 @@ export function ResumeTask({ onSelect, onCancel, isEmbedded = false }: Props): R
       ? Math.min(sessions.length, 5, rows - 6 - layoutOverhead)
       : Math.min(sessions.length, rows - 1 - layoutOverhead),
   );
-  const maxHeight = maxVisibleOptions + layoutOverhead;
 
   // Show scroll position in title when list needs scrolling
   const showScrollPosition = sessions.length > maxVisibleOptions;
 
   return (
-    <Box flexDirection="column" padding={1} height={maxHeight}>
+    <Box flexDirection="column" padding={1}>
       <Text bold>
         Select a session to resume
         {showScrollPosition && (

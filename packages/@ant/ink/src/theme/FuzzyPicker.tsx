@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { type Ref, useCallback, useContext, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import AccessibilityContext from '../components/AccessibilityContext.js';
 import { ClockContext } from '../components/ClockContext.js';
 import { type ClickEvent, MOUNT_SETTLE_MS } from '../core/events/click-event.js';
@@ -37,7 +37,13 @@ type PickerAction<T> = {
   handler: (item: T) => void;
 };
 
+export type FuzzyPickerHandle = {
+  /** Advance focus to the next item (e.g. Ctrl+R `historySearch:next`). */
+  focusNext: () => void;
+};
+
 type Props<T> = {
+  ref?: Ref<FuzzyPickerHandle>;
   title: React.ReactNode;
   placeholder?: string;
   initialQuery?: string;
@@ -97,6 +103,7 @@ type PickerState = {
 };
 
 export function FuzzyPicker<T>({
+  ref,
   title,
   placeholder = 'Type to search…',
   initialQuery,
@@ -161,6 +168,12 @@ export function FuzzyPicker<T>({
       };
     });
   };
+
+  // Official 2.1.326 #164: expose focusNext() so HistorySearchDialog can bind
+  // `historySearch:next` (Ctrl+R) to advance focus to the next match.
+  useImperativeHandle(ref, () => ({
+    focusNext: () => step(1),
+  }));
 
   const scrollWindow = (delta: number) => {
     updatePickerState(prev => ({

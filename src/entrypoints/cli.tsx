@@ -156,6 +156,18 @@ export function extractAgentsFastPathArgs(args: string[]): string[] | null {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
+  // Official 2.1.326 #339: fast-path top-level `--gh-standin` argv validation.
+  let ghStandinParsed: import('../self-hosted-runner/ghStandin.js').ParsedGhStandinArgs | undefined;
+  if (args[0] === '--gh-standin') {
+    const { parseGhStandinArgv } = await import('../self-hosted-runner/ghStandin.js');
+    const parsed = parseGhStandinArgv(args);
+    if (parsed === 'refused') {
+      process.exitCode = 1;
+      return;
+    }
+    ghStandinParsed = parsed;
+  }
+
   // Official emO version path: --version/-v/-V, optional trailing --verbose → Commit SHA.
   // MACRO.VERSION / MACRO.GIT_SHA inlined at build time; zero module loading.
   if (
@@ -225,6 +237,20 @@ async function main(): Promise<void> {
     const { getSystemPrompt } = await import('../constants/prompts.js');
     const prompt = await getSystemPrompt([], model);
     console.log(prompt.join('\n'));
+    return;
+  }
+
+  // Official 2.1.326 #339: dispatch `--gh-standin` fast-path after policy check.
+  if (ghStandinParsed !== undefined) {
+    profileCheckpoint('cli_gh_standin_path');
+    const { loadFastPathPolicy } = await import('../utils/fastPathPolicy.js');
+    const policyErr = await loadFastPathPolicy();
+    if (policyErr) {
+      const { exitWithError } = await import('../utils/process.js');
+      exitWithError(policyErr);
+    }
+    const { ghStandinMain } = await import('../self-hosted-runner/ghStandin.js');
+    process.exitCode = await ghStandinMain(ghStandinParsed);
     return;
   }
 
@@ -479,6 +505,12 @@ async function main(): Promise<void> {
   // so `claude mcp add x -- cmd --background` or `claude -- --bg` is not hijacked.
   const hasBgCandidate = args.includes('--bg') || args.includes('--background');
   if (feature('BG_SESSIONS') && hasBgCandidate && (await import('../cli/bg.js')).hasBackgroundFlag(args)) {
+    const { formatInitializeConflictError } = await import('../cli/promptAfterListOption.js');
+    const initConflict = formatInitializeConflictError(args);
+    if (initConflict) {
+      console.error(initConflict);
+      process.exit(1);
+    }
     profileCheckpoint('cli_daemon_path');
     {
       const { getAgentViewDisabledReason } = await import('../utils/residualUiEnvGates.js');
@@ -525,6 +557,12 @@ async function main(): Promise<void> {
       args[0] === 'rm' ||
       args[0] === 'respawn')
   ) {
+    const { formatInitializeConflictError } = await import('../cli/promptAfterListOption.js');
+    const initConflict = formatInitializeConflictError(args);
+    if (initConflict) {
+      console.error(initConflict);
+      process.exit(1);
+    }
     const isRm = args[0] === 'rm';
     const isRespawn = args[0] === 'respawn';
     if (!isRm && !isRespawn) {
@@ -610,6 +648,12 @@ async function main(): Promise<void> {
     hasTmuxFlag &&
     (args.includes('-w') || args.includes('--worktree') || args.some(a => a.startsWith('--worktree=')))
   ) {
+    const { formatInitializeConflictError } = await import('../cli/promptAfterListOption.js');
+    const initConflict = formatInitializeConflictError(args);
+    if (initConflict) {
+      console.error(initConflict);
+      process.exit(1);
+    }
     profileCheckpoint('cli_tmux_worktree_fast_path');
     const { enableConfigs } = await import('../utils/config.js');
     enableConfigs();
@@ -642,10 +686,49 @@ async function main(): Promise<void> {
   // Official emO full path: earlyInput first, then fire MDM + keychain
   // prefetch *before* main import so subprocesses overlap module eval.
   // main.tsx still starts them at top-level (idempotent no-ops if already fired).
-  const { startCapturingEarlyInput } = await import('../utils/earlyInput.js');
-  startCapturingEarlyInput();
+  // Official 2.1.326 #173: skip raw-mode stdin capture for `claude --help | less`
+  // so arrow keys and `q` stay with the pager.
+  const { shouldSkipEarlyInputForPipedHelp } = await import('../cli/promptAfterListOption.js');
+  if (!shouldSkipEarlyInputForPipedHelp(args)) {
+    const { startCapturingEarlyInput } = await import('../utils/earlyInput.js');
+    startCapturingEarlyInput();
+  }
   const { startKeychainPrefetch } = await import('../utils/secureStorage/keychainPrefetch.js');
   startKeychainPrefetch();
+  // Official 2.1.326 #244: head-start Bash shell snapshot creation early at startup
+  // when shell snapshots are enabled and not running a one-shot CLI subcommand or help.
+  const NON_SESSION_SUBCOMMANDS = new Set([
+    'auth',
+    'mcp',
+    'plugin',
+    'plugins',
+    'doctor',
+    'update',
+    'upgrade',
+    'install',
+    'uninstall',
+    'setup-token',
+    'purge',
+    'migrate-installer',
+    'config',
+    'help',
+  ]);
+  if (
+    !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_SHELL_HEAD_START) &&
+    !isEnvTruthy(process.env.CLAUDE_CODE_NO_SHELL_SNAPSHOT) &&
+    !isEnvTruthy(process.env.CLAUDE_CODE_SIMPLE) &&
+    !args.includes('--help') &&
+    !args.includes('-h') &&
+    (args.length === 0 || !NON_SESSION_SUBCOMMANDS.has(args[0]!))
+  ) {
+    void import('../utils/Shell.js')
+      .then(({ startBashSnapshotHeadStart }) => {
+        startBashSnapshotHeadStart();
+      })
+      .catch(() => {
+        // Non-fatal head-start
+      });
+  }
   profileCheckpoint('cli_before_main_import');
   const { main: cliMain } = await import('../main.jsx');
   profileCheckpoint('cli_after_main_import');

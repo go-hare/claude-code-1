@@ -23,6 +23,7 @@ import { getInitialSettings } from '../../utils/settings/settings.js';
 import { BASH_MAX_OUTPUT_DEFAULT, BASH_MAX_OUTPUT_UPPER_LIMIT } from '../../utils/shell/outputLimits.js';
 import { plural } from '../../utils/stringUtils.js';
 import { type LastUpdateResult, loadLastUpdateResult } from '../../utils/updateResult.js';
+import { formatCliSuccess, formatCliWarning } from '../cliStatusMarkers.js';
 
 export async function setupTokenHandler(root: Root): Promise<void> {
   logEvent('tengu_setup_token_command', {});
@@ -158,13 +159,15 @@ export async function doctorHandler(root?: Root): Promise<void> {
   if (diagnostic.warnings.length > 0) {
     lines.push(
       '',
-      chalk.yellow(`${diagnostic.warnings.length} ${plural(diagnostic.warnings.length, 'warning')} found`),
+      chalk.yellow(
+        formatCliWarning(`${diagnostic.warnings.length} ${plural(diagnostic.warnings.length, 'warning')} found`, ''),
+      ),
     );
     for (const warning of diagnostic.warnings) {
       lines.push(`- ${sanitizeLineText(warning.issue)}`, `  Fix: ${sanitizeLineText(warning.fix)}`);
     }
   } else {
-    lines.push('', 'No installation issues found.');
+    lines.push('', formatCliSuccess('No installation issues found.', ''));
   }
 
   lines.push('', 'For a full setup checkup that can also fix issues, run /doctor in a Claude Code session.');

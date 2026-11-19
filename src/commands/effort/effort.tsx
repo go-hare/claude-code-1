@@ -34,6 +34,7 @@ import {
   toPersistableEffort,
   unpinAllEffortLaunchPins,
 } from '../../utils/effort.js';
+import { getDefaultMainLoopModel, parseUserSpecifiedModel } from '../../utils/model/model.js';
 import { updateSettingsForSource } from '../../utils/settings/settings.js';
 
 const COMMON_HELP_ARGS = ['help', '-h', '--help'];
@@ -417,19 +418,111 @@ function ApplyEffortAndClose({
   return null;
 }
 
-export async function call(onDone: LocalJSXCommandOnDone, _context: unknown, args?: string): Promise<React.ReactNode> {
+export async function call(
+  onDone: LocalJSXCommandOnDone,
+  context:
+    | {
+        getAppState?: () =>
+          | ReturnType<typeof useAppState.length extends never ? never : never>
+          | {
+              mainLoopModel?: string | null;
+              mainLoopModelForSession?: string | null;
+              sessionEffort?: unknown;
+              effortValue?: EffortValue | undefined;
+              settingsEffortTable?: unknown;
+              ultracode?: boolean;
+              toolPermissionContext?: { mode?: string };
+            };
+        setAppState?: ReturnType<typeof useSetAppState>;
+      }
+    | unknown,
+  args?: string,
+): Promise<React.ReactNode> {
   args = args?.trim() || '';
+  const ctx = context as {
+    getAppState?: () => {
+      mainLoopModel: string | null;
+      mainLoopModelForSession: string | null;
+      sessionEffort: Parameters<typeof pdSessionEffort>[0]['sessionEffort'];
+      effortValue: EffortValue | undefined;
+      settingsEffortTable: Parameters<typeof pdSessionEffort>[0]['settingsEffortTable'];
+      ultracode: boolean;
+      toolPermissionContext: { mode: string };
+    };
+    setAppState?: ReturnType<typeof useSetAppState>;
+  } | null;
+  const hasStateAccess = typeof ctx?.getAppState === 'function' && typeof ctx?.setAppState === 'function';
 
+  // Official 2.1.326 #139: settle `/effort --help`, `/effort status`, and
+  // `/effort <level>` directly (returning null) unless a cache-miss confirmation
+  // dialog is required, so REPL never flash-hides the prompt or drops letters.
   if (COMMON_HELP_ARGS.includes(args)) {
+    if (hasStateAccess) {
+      const appState = ctx.getAppState!();
+      const model = parseUserSpecifiedModel(
+        appState.mainLoopModelForSession ?? appState.mainLoopModel ?? getDefaultMainLoopModel(),
+      );
+      onDone(buildEffortHelpText(model));
+      return null;
+    }
     // densable gSi — model-filtered dash list (SEA help string shape).
     return <EffortHelpText onDone={onDone} />;
   }
 
   if (!args || args === 'current' || args === 'status') {
     if (args === 'current' || args === 'status') {
+      if (hasStateAccess) {
+        const appState = ctx.getAppState!();
+        const model = parseUserSpecifiedModel(
+          appState.mainLoopModelForSession ?? appState.mainLoopModel ?? getDefaultMainLoopModel(),
+        );
+        const effortValue = pdSessionEffort(appState, model);
+        const { message } = showCurrentEffort(effortValue, model, appState.ultracode);
+        onDone(message);
+        return null;
+      }
       return <ShowCurrentEffort onDone={onDone} />;
     }
     return <EffortPanelWrapper onDone={onDone} />;
+  }
+
+  if (hasStateAccess) {
+    const appState = ctx.getAppState!();
+    const model = parseUserSpecifiedModel(
+      appState.mainLoopModelForSession ?? appState.mainLoopModel ?? getDefaultMainLoopModel(),
+    );
+    const currentEffort = pdSessionEffort(appState, model);
+    const permissionMode = appState.toolPermissionContext?.mode;
+    const result = executeEffort(args, model, undefined, true, currentEffort);
+    const targetEffort = result.effortUpdate?.value;
+    const needsCacheConfirm =
+      result.effortUpdate !== undefined &&
+      permissionMode === 'plan' &&
+      shouldWarnEffortCacheMiss({
+        target: targetEffort,
+        current: currentEffort,
+        mainLoopModel: model,
+        permissionMode,
+        totalOutputTokens: getTotalOutputTokens(),
+        promptCacheMayBeWarm: getTotalOutputTokens() > 0,
+      });
+    if (!needsCacheConfirm) {
+      if (result.effortUpdate) {
+        const effortUpdate = result.effortUpdate;
+        ctx.setAppState!(prev => ({
+          ...prev,
+          ...(effortUpdate.ultracode === undefined
+            ? {
+                sessionEffort: explicitSessionEffort(effortUpdate.value),
+              }
+            : {}),
+          settingsEffortTable: teSettingsEffortTable(),
+          ...(effortUpdate.ultracode !== undefined ? { ultracode: effortUpdate.ultracode } : {}),
+        }));
+      }
+      onDone(result.message);
+      return null;
+    }
   }
 
   return <ExecuteEffortWithModel args={args} onDone={onDone} />;

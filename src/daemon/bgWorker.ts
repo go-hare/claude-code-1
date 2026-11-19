@@ -513,27 +513,33 @@ export function connectToPtyHost(
     },
     kill(sig: 'SIGTERM' | 'SIGKILL' | 'SIGQUIT') {
       const sent = writeFrame(encodeCtrlFrame({ t: 'kill', sig }))
-      try {
-        process.kill(-pid, sig)
-      } catch {
+      // Official 2.1.326 #15: verify process start identity before signaling
+      // so a reused PID (such as an SSH login) is never killed by the daemon.
+      const signalIfIdentityMatches = (
+        signalToSend: 'SIGTERM' | 'SIGKILL' | 'SIGQUIT',
+      ): void => {
+        const verdict = verifyProcessIdentityBeforeKill(pid, procStart)
+        if (verdict !== 'safe') {
+          if (verdict === 'recycled') {
+            handleDeath(-1)
+          }
+          return
+        }
         try {
-          process.kill(pid, sig)
+          process.kill(-pid, signalToSend)
         } catch {
-          handleDeath(-1)
+          try {
+            process.kill(pid, signalToSend)
+          } catch {
+            handleDeath(-1)
+          }
         }
       }
+      signalIfIdentityMatches(sig)
       if (sig === 'SIGTERM' && !exited) {
         setTimeout(() => {
           if (!exited) {
-            try {
-              process.kill(-pid, 'SIGKILL')
-            } catch {
-              try {
-                process.kill(pid, 'SIGKILL')
-              } catch {
-                handleDeath(-1)
-              }
-            }
+            signalIfIdentityMatches('SIGKILL')
           }
         }, 5000).unref()
       }
@@ -1143,6 +1149,47 @@ export function getGatewayMarkPath(short: string): string {
   return join(getJobDirPath(short), GATEWAY_MARK_FILE)
 }
 
+/**
+ * Official 2.1.326 #14 (`t5i` / `mTs`): daemon-level gateway-routed marker
+ * under `~/.claude/daemon/gateway-routed/<short>` so reopening from another
+ * folder or after a crash still detects that the session requires a gateway.
+ */
+export function getDaemonGatewayMarkPath(
+  short: string,
+  configDir: string = getClaudeConfigHomeDir(),
+): string {
+  return join(configDir, 'daemon', GATEWAY_MARK_FILE, short)
+}
+
+export const BG_GATEWAY_LOST_EXIT_CAUSE = 'gateway_lost'
+export const BG_GATEWAY_LOST_DETAIL =
+  'Stopped before sending a model request: the LLM gateway exported in your shell is no longer available in this environment.'
+
+/**
+ * Official 2.1.326 #15: verify a PID still belongs to the recorded `procStart`
+ * before sending a termination signal. Returns `'safe'` only when `procStart`
+ * is present and matches (or on Windows where `lstart` is absent), `'recycled'`
+ * when the PID was reused by a different process (such as an SSH login), or
+ * `'unverified'` when `procStart` is missing on POSIX so we refuse blind kills.
+ */
+export function verifyProcessIdentityBeforeKill(
+  pid: number,
+  expectedProcStart: string | undefined,
+  getStartSync: (p: number) => string | undefined = getProcessStartTimeSync,
+): 'safe' | 'recycled' | 'unverified' {
+  if (!Number.isInteger(pid) || pid <= 1) return 'recycled'
+  if (process.platform === 'win32' && !expectedProcStart) return 'safe'
+  if (!expectedProcStart) return 'unverified'
+  const current = getStartSync(pid)
+  if (current === undefined) return 'recycled'
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { processStartIdentityEquals } =
+    require('../utils/genericProcessUtils.js') as typeof import('../utils/genericProcessUtils.js')
+  return processStartIdentityEquals(expectedProcStart, current)
+    ? 'safe'
+    : 'recycled'
+}
+
 export async function writeGatewayMark(short: string): Promise<void> {
   const dir = getJobDirPath(short)
   await mkdir(dir, { recursive: true }).catch(() => {})
@@ -1156,25 +1203,48 @@ export async function writeGatewayMark(short: string): Promise<void> {
       }
     },
   )
+  const daemonMarkPath = getDaemonGatewayMarkPath(short)
+  await mkdir(dirname(daemonMarkPath), { recursive: true, mode: 0o700 }).catch(
+    () => {},
+  )
+  await writeFile(daemonMarkPath, '', { flag: 'wx', mode: 0o600 }).catch(
+    (err: unknown) => {
+      if ((err as NodeJS.ErrnoException)?.code !== 'EEXIST') {
+        logForDebugging(
+          `[bg] daemon gateway mark write failed for ${short}: ${err instanceof Error ? err.message : String(err)}`,
+          { level: 'warn' },
+        )
+      }
+    },
+  )
 }
 
 export async function clearGatewayMark(short: string): Promise<void> {
   await unlink(getGatewayMarkPath(short)).catch(() => {})
+  await unlink(getDaemonGatewayMarkPath(short)).catch(() => {})
 }
 
 export async function hydrateGatewayMark(
   dispatch: DispatchRequest,
 ): Promise<void> {
   if (!isBgGatewayMarkEnabled()) return
-  try {
-    await access(getGatewayMarkPath(dispatch.short))
-    dispatch.gatewayRouted = true
-    delete dispatch.gatewayMarkUnreadable
-  } catch (err: unknown) {
-    const code = (err as NodeJS.ErrnoException)?.code
-    if (code === 'ENOENT') return
-    dispatch.gatewayRouted = true
-    dispatch.gatewayMarkUnreadable = code ?? 'error'
+  const paths = [
+    getGatewayMarkPath(dispatch.short),
+    getDaemonGatewayMarkPath(dispatch.short),
+  ]
+  for (const markPath of paths) {
+    try {
+      await access(markPath)
+      dispatch.gatewayRouted = true
+      delete dispatch.gatewayMarkUnreadable
+      return
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException)?.code
+      if (code === 'ENOENT') continue
+      dispatch.gatewayRouted = true
+      dispatch.gatewayMarkUnreadable = code ?? 'error'
+      return
+    }
   }
 }
 
@@ -1684,6 +1754,8 @@ export class BgWorker {
   private lastRvHeartbeat: number | undefined
   private stalledLogged = false
   private heldOnGatewayLogged = false
+  private gatewayLostLatch = false
+  private sessionIdTakenLatch = false
   private lastCheckPidAt = Date.now()
   private replyChain = Promise.resolve()
   private killOutcome: string = 'killed'
@@ -1692,6 +1764,17 @@ export class BgWorker {
   // --- Getters (official) ---
   get shouldDeleteJobDir(): boolean {
     return this.deleteJobDirOnSettle
+  }
+  /** Official 2.1.326 #14 (`gatewayLostLatch`): true when stopped before a model request due to missing gateway. */
+  get gatewayLost(): boolean {
+    return this.gatewayLostLatch
+  }
+  /** Official 2.1.326 #33 (`sessionIdTakenLatch`): true when a newer bg session resumed this sessionId. */
+  get sessionIdTaken(): boolean {
+    return this.sessionIdTakenLatch
+  }
+  markSessionIdTaken(): void {
+    this.sessionIdTakenLatch = true
   }
   get isKilling(): boolean {
     return this.phase.kind === 'retiring' && this.phase.reason === 'reap'
@@ -2314,7 +2397,11 @@ export class BgWorker {
       try {
         this.pty.kill(sig)
       } catch {}
-    } else if (this.record.pid && !this.pidRecycled()) {
+    } else if (
+      this.record.pid &&
+      verifyProcessIdentityBeforeKill(this.record.pid, this.procStart) ===
+        'safe'
+    ) {
       try {
         process.kill(-this.record.pid, sig)
       } catch {
@@ -2399,8 +2486,19 @@ export class BgWorker {
     graceMs: number,
     pinned?: Set<string>,
     bridgeGraceMs: number = graceMs,
-    { shedMonitoringOnly = false }: { shedMonitoringOnly?: boolean } = {},
-  ): Promise<{ retired: boolean; reason?: string }> {
+    {
+      shedMonitoringOnly = false,
+      immediateOnEmptyQuit = false,
+    }: {
+      shedMonitoringOnly?: boolean
+      immediateOnEmptyQuit?: boolean
+    } = {},
+  ): Promise<{
+    retired: boolean
+    reason?: string
+    cause?: string
+    idleMs?: number
+  }> {
     // SEA zF.retireIfSettled — reclaim idle/blocked/stale non-exec workers (#155)
     if (this.isTransitioning) return { retired: false, reason: 'in-progress' }
     if (this.record.outcome) return { retired: false, reason: 'no-state' }
@@ -2409,12 +2507,20 @@ export class BgWorker {
     if (this.dispatch.env?.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST) {
       return { retired: false, reason: 'host-managed' }
     }
-    if (pinned?.has(this.dispatch.short))
+    if (!immediateOnEmptyQuit && pinned?.has(this.dispatch.short))
       return { retired: false, reason: 'pinned' }
-    if (this.adoptedAt && Date.now() - this.adoptedAt < RECENT_ADOPT_GRACE_MS) {
+    if (
+      !immediateOnEmptyQuit &&
+      this.adoptedAt &&
+      Date.now() - this.adoptedAt < RECENT_ADOPT_GRACE_MS
+    ) {
       return { retired: false, reason: 'recent-adopt' }
     }
-    if (this.lastInputAt && Date.now() - this.lastInputAt < graceMs) {
+    if (
+      !immediateOnEmptyQuit &&
+      this.lastInputAt &&
+      Date.now() - this.lastInputAt < graceMs
+    ) {
       return { retired: false, reason: 'recent-input' }
     }
 
@@ -2422,7 +2528,11 @@ export class BgWorker {
     if (this.isTransitioning || this.attachers.size > 0) {
       return { retired: false, reason: 'in-progress' }
     }
-    if (this.lastInputAt && Date.now() - this.lastInputAt < graceMs) {
+    if (
+      !immediateOnEmptyQuit &&
+      this.lastInputAt &&
+      Date.now() - this.lastInputAt < graceMs
+    ) {
       return { retired: false, reason: 'recent-input' }
     }
 
@@ -2441,29 +2551,55 @@ export class BgWorker {
       return { retired: false, reason: 'no-state' }
     }
 
-    // Empty idle session (no name, no intent, blocked) — SEA empty-idle
+    // Empty idle session (no name, no intent, blocked) — SEA empty-idle / #340 empty-quit
     if (
       this.dispatch.source !== 'shell' &&
       !state.name &&
       !state.intent &&
       !state.worktreePath &&
       state.template === 'bg' &&
-      state.state === 'working' &&
-      state.tempo === 'blocked' &&
+      ((state.state === 'working' && state.tempo === 'blocked') ||
+        (immediateOnEmptyQuit &&
+          state.state === 'stopped' &&
+          state.detail === 'empty-quit')) &&
       !((state.inFlight?.tasks ?? 0) > 0)
     ) {
       const createdAtMs = Date.parse(state.createdAt)
       const updatedAtMs = Date.parse(state.updatedAt)
       const age =
         Date.now() - (updatedAtMs > createdAtMs ? updatedAtMs : createdAtMs)
-      if (age < EMPTY_IDLE_GRACE_MS)
+      if (immediateOnEmptyQuit) {
+        // Official 2.1.326 #340: quitting with Ctrl+C×2, Ctrl+D×2, or `/exit`
+        // after pressing `←` in an empty conversation immediately retires the
+        // session (`empty-quit`) instead of leaving it running for 5 minutes.
+        if (state.bridgeSessionId) {
+          return { retired: false, reason: 'bridged' }
+        }
+        if (
+          (state.inFlight?.tasks ?? 0) !== 0 ||
+          (state.inFlight?.queued ?? 0) !== 0
+        ) {
+          return { retired: false, reason: 'inflight' }
+        }
+        if (
+          (state.needs !== undefined && state.needs !== 'input') ||
+          state.queuedPrompt
+        ) {
+          return { retired: false, reason: 'not-empty' }
+        }
+      } else if (age < EMPTY_IDLE_GRACE_MS) {
         return { retired: false, reason: 'empty-idle-grace' }
+      }
       if (!this.transitionTo({ kind: 'retiring', reason: 'grace' })) {
         return { retired: false, reason: 'in-progress' }
       }
       this.deleteJobDirOnSettle = true
+      const cause = immediateOnEmptyQuit ? 'empty-quit' : 'empty-idle'
       this.shutdownWorker()
-      return { retired: true }
+      return { retired: true, cause, idleMs: age }
+    }
+    if (immediateOnEmptyQuit) {
+      return { retired: false, reason: 'not-empty' }
     }
 
     const hostVersion = typeof MACRO !== 'undefined' ? MACRO.VERSION : undefined
@@ -2556,13 +2692,33 @@ export class BgWorker {
     const jobDir = getJobDirPath(dispatch.short)
     await mkdir(jobDir, { recursive: true }).catch(() => {})
     clearExitFiles(jobDir)
-    if (
-      !isBgGatewayMarkEnabled() ||
-      (dispatch.gatewayRouted && !hasGatewayInMergedWorkerEnv(dispatch))
-    ) {
+    await hydrateGatewayMark(dispatch)
+    if (!isBgGatewayMarkEnabled()) {
       delete dispatch.gatewayRouted
       delete dispatch.gatewayMarkUnreadable
       void clearGatewayMark(dispatch.short)
+    } else if (
+      dispatch.gatewayRouted &&
+      (dispatch.gatewayMarkUnreadable !== undefined ||
+        !hasGatewayInMergedWorkerEnv(dispatch))
+    ) {
+      // Official 2.1.326 #14: a background session marked `gateway-routed`
+      // whose exported LLM gateway is missing (after crash, reopen from
+      // another folder, or daemon lacking it) MUST stop before any model
+      // request instead of silently sending traffic to the default endpoint.
+      this.gatewayLostLatch = true
+      writeExitCause(BG_GATEWAY_LOST_EXIT_CAUSE, jobDir)
+      writeExitDetail(
+        BG_GATEWAY_LOST_EXIT_CAUSE,
+        BG_GATEWAY_LOST_DETAIL,
+        jobDir,
+      )
+      logForDebugging(
+        `[bg] stopping ${dispatch.short} before spawn: gateway-routed session lost its exported LLM gateway`,
+        { level: 'warn' },
+      )
+      this.settle('failed')
+      return
     }
 
     // Write auth snapshot for the worker
@@ -3109,16 +3265,6 @@ export class BgWorker {
       PID_POLL_INTERVAL_MS,
     )
     this.pidPoll.unref()
-  }
-
-  private pidRecycled(): boolean {
-    if (!this.procStart || !this.record.pid) return false
-    const current = getProcessStartTimeSync(this.record.pid)
-    // densable Yzc: undefined current (race) = still match; cross-format OK
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { processStartIdentityEquals } =
-      require('../utils/genericProcessUtils.js') as typeof import('../utils/genericProcessUtils.js')
-    return !processStartIdentityEquals(this.procStart, current)
   }
 
   private async pidRecycledAsync(): Promise<boolean> {

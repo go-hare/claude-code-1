@@ -104,7 +104,8 @@ function ComputerUseTccPanel({
           Grant the missing permissions in System Settings, then select &quot;Try again&quot;. macOS may require you to
           restart Claude Code after granting Screen Recording.
         </Text>
-        <Select options={options} onChange={onChange} onCancel={onDone} />
+        {/* Official 2.1.326 #315: disable printable keybindings so stray letters cannot navigate/select TCC actions. */}
+        <Select options={options} disablePrintableKeybindings onChange={onChange} onCancel={onDone} />
       </Box>
     </Dialog>
   );

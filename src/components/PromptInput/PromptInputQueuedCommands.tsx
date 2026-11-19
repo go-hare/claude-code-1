@@ -10,6 +10,7 @@ import { STATUS_TAG, SUMMARY_TAG, TASK_NOTIFICATION_TAG } from '../../constants/
 import { QueuedMessageProvider } from '../../context/QueuedMessageContext.js';
 import { useCommandQueue } from '../../hooks/useCommandQueue.js';
 import { useIdeConnectionStatus } from '../../hooks/useIdeConnectionStatus.js';
+import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { formatSendNowHint } from '../../keybindings/shortcutFormat.js';
 import type { MCPServerConnection } from '../../services/mcp/types.js';
 import type { QueuedCommand } from '../../types/textInputTypes.js';
@@ -167,6 +168,20 @@ export function buildSendNowHintLabel(sendNowChord: string): React.ReactNode {
   );
 }
 
+/** #135 (2.1.326, official sVe/Gt): minimum visible rows per capped queued message. */
+const MIN_QUEUED_PREVIEW_ROWS = 3;
+
+/**
+ * #135 (2.1.326): compute max height per queued message in the classic renderer
+ * so a long queued prompt cannot fill the terminal, hide Claude's streaming
+ * reply, or erase scrollback.
+ */
+export function computeClassicQueuedMaxRows(terminalRows: number, queuedCount: number): number {
+  const budget = Math.max(MIN_QUEUED_PREVIEW_ROWS, Math.floor(terminalRows / 3));
+  if (queuedCount <= 1) return budget;
+  return Math.max(MIN_QUEUED_PREVIEW_ROWS, Math.floor(budget / queuedCount));
+}
+
 function PromptInputQueuedCommandsImpl({
   abortController,
   mcpClients,
@@ -177,6 +192,7 @@ function PromptInputQueuedCommandsImpl({
   onSendNow?: () => boolean;
 }): React.ReactNode {
   const store = useAppStateStore();
+  const { rows: terminalRows, columns: terminalColumns } = useTerminalSize();
   const queuedCommands = useCommandQueue();
   const { status: ideStatus } = useIdeConnectionStatus(mcpClients);
   const queueEditIndex = useAppState(s => s.queueEditIndex);
@@ -244,10 +260,14 @@ function PromptInputQueuedCommandsImpl({
       },
     });
   }, [onSendNow, store, abortController]);
+  // Official 2.1.326 #287 (`wVe`): prefix with `  ⎿  Queued · ` so the send-now
+  // hint clearly reads as a queue status line rather than part of the user's message.
   const sendNowHint =
     canSendNow && (sendNowChord !== '' || isFullscreen) ? (
-      <Box paddingLeft={2}>
+      <Box height={1} overflow="hidden">
         <Text dimColor>
+          <Text aria-hidden>{'  ⎿  '}</Text>
+          {'Queued · '}
           {isFullscreen ? (
             <FePress onPress={handleSendNowClick}>
               {sendNowChord === '' ? 'click to send now' : `${sendNowChord} to send now`}
@@ -259,6 +279,10 @@ function PromptInputQueuedCommandsImpl({
       </Box>
     ) : null;
 
+  const classicMaxRows = !isFullscreen
+    ? computeClassicQueuedMaxRows(terminalRows, prepared.messages.length)
+    : undefined;
+
   return (
     <Box flexDirection="column">
       {prepared.messages.map((message, i) => {
@@ -268,6 +292,32 @@ function PromptInputQueuedCommandsImpl({
           cmd?.ideSelection !== undefined && !shouldHideQueuedIdeSelectionPreview(cmd) && nextCmd !== cmd
             ? formatQueuedIdeSelection(ideStatus, cmd.ideSelection)
             : null;
+        // #135 (2.1.326): in classic renderer, cap long queued prompt height so
+        // it never hides Claude's streaming reply or erases scrollback.
+        const rawText = typeof cmd?.value === 'string' ? cmd.value : '';
+        const estCols = Math.max(20, terminalColumns - 4);
+        const estLines =
+          classicMaxRows !== undefined && cmd?.mode === 'prompt' && rawText.length > 0
+            ? rawText.split('\n').reduce((acc, line) => acc + Math.max(1, Math.ceil(line.length / estCols)), 0)
+            : 0;
+        const hiddenQueuedLines =
+          classicMaxRows !== undefined && estLines > classicMaxRows ? estLines - (classicMaxRows - 1) : 0;
+        const msgEl = (
+          <Message
+            message={message}
+            lookups={EMPTY_LOOKUPS}
+            addMargin={i === 0 || (cmd !== undefined && isQueuedCommandEditable(cmd))}
+            tools={[]}
+            commands={[]}
+            verbose={false}
+            inProgressToolUseIDs={EMPTY_SET}
+            progressMessagesForMessage={[]}
+            shouldAnimate={false}
+            shouldShowDot={false}
+            isTranscriptMode={false}
+            isStatic={true}
+          />
+        );
         return (
           <QueuedMessageProvider
             key={i}
@@ -275,20 +325,26 @@ function PromptInputQueuedCommandsImpl({
             useBriefLayout={useBriefLayout}
             selectionHighlight={selecting ? (i === highlightRow ? 'on' : 'off') : undefined}
           >
-            <Message
-              message={message}
-              lookups={EMPTY_LOOKUPS}
-              addMargin={i === 0 || (cmd !== undefined && isQueuedCommandEditable(cmd))}
-              tools={[]}
-              commands={[]}
-              verbose={false}
-              inProgressToolUseIDs={EMPTY_SET}
-              progressMessagesForMessage={[]}
-              shouldAnimate={false}
-              shouldShowDot={false}
-              isTranscriptMode={false}
-              isStatic={true}
-            />
+            {classicMaxRows !== undefined && cmd?.mode === 'prompt' ? (
+              <>
+                <Box
+                  flexDirection="column"
+                  maxHeight={hiddenQueuedLines > 0 ? Math.max(1, classicMaxRows - 1) : classicMaxRows}
+                  overflowY="hidden"
+                >
+                  {msgEl}
+                </Box>
+                {hiddenQueuedLines > 0 ? (
+                  <Box paddingLeft={2}>
+                    <Text dimColor>
+                      … +{hiddenQueuedLines} {hiddenQueuedLines === 1 ? 'line' : 'lines'}
+                    </Text>
+                  </Box>
+                ) : null}
+              </>
+            ) : (
+              msgEl
+            )}
             {preview !== null ? (
               <Box paddingLeft={2}>
                 <Text dimColor wrap="truncate-end">

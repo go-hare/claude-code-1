@@ -206,6 +206,15 @@ export function buildRelaunchProcessEnv(input: {
   for (const key of RELAUNCH_ALWAYS_DROP_ENV) {
     delete env[key]
   }
+  // Official 2.1.326 #299: carry active sandbox root-move hold across relaunch
+  try {
+    const { serializeSandboxRootMoveHoldEnv } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./sandbox/sandbox-adapter.js') as typeof import('./sandbox/sandbox-adapter.js')
+    Object.assign(env, serializeSandboxRootMoveHoldEnv())
+  } catch {
+    // sandbox-adapter optional during early bootstrap
+  }
   if (input.injectEnv) {
     for (const [k, v] of Object.entries(input.injectEnv)) {
       if (v === undefined) delete env[k]
@@ -273,6 +282,15 @@ export function buildTuiRelaunchPlan(input: {
     Object.assign(injectEnv, buildRelaunchTerminalSizeEnv(input.terminalSize))
   } catch {
     // densable optional
+  }
+  // Official 2.1.326 #299: carry active sandbox root-move hold across relaunch
+  try {
+    const { serializeSandboxRootMoveHoldEnv } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./sandbox/sandbox-adapter.js') as typeof import('./sandbox/sandbox-adapter.js')
+    Object.assign(injectEnv, serializeSandboxRootMoveHoldEnv())
+  } catch {
+    // sandbox-adapter optional during early bootstrap
   }
   const dropEnv = input.injectTuiSwitch === false ? [] : TUI_RELAUNCH_DROP_ENV
   let extraArgs: string[]

@@ -81,6 +81,19 @@ export type UseSelectProps<T> = {
    * Returns true if image selection was entered (images exist), false otherwise.
    */
   onEnterImageSelection?: () => boolean
+
+  /**
+   * Official 2.1.326 (#29, #315, #343): when true, printable letter shortcuts
+   * such as j/k are ignored (arrows and Ctrl+P/Ctrl+N still navigate).
+   * If `declineValue` is also set, typing printable text moves focus to it.
+   */
+  disablePrintableKeybindings?: boolean
+
+  /**
+   * Option value to focus when printable text is typed while
+   * `disablePrintableKeybindings` is true.
+   */
+  declineValue?: T
 }
 
 export const useSelectInput = <T>({
@@ -95,6 +108,8 @@ export const useSelectInput = <T>({
   inputValues,
   imagesSelected = false,
   onEnterImageSelection,
+  disablePrintableKeybindings = false,
+  declineValue,
 }: UseSelectProps<T>) => {
   // Automatically register as an overlay when onCancel is provided.
   // This ensures CancelRequestHandler won't intercept Escape when the select is active.
@@ -107,32 +122,34 @@ export const useSelectInput = <T>({
   }, [options, state.focusedValue])
 
   // Core navigation via keybindings (up/down/enter/escape)
-  // When in input mode, exclude navigation/accept keybindings so that
-  // j/k/enter pass through to the TextInput instead of being intercepted.
+  // When in input mode or when disablePrintableKeybindings is true, exclude
+  // select:next/select:previous keybindings so j/k do not move selection.
   const keybindingHandlers = useMemo(() => {
     const handlers: Record<string, () => void> = {}
 
     if (!isInInput) {
-      handlers['select:next'] = () => {
-        if (onDownFromLastItem) {
-          const lastOption = options[options.length - 1]
-          // densable: edge wrap checks live-read getFocusedValue()
-          if (lastOption && state.getFocusedValue() === lastOption.value) {
-            onDownFromLastItem()
-            return
+      if (!disablePrintableKeybindings) {
+        handlers['select:next'] = () => {
+          if (onDownFromLastItem) {
+            const lastOption = options[options.length - 1]
+            // densable: edge wrap checks live-read getFocusedValue()
+            if (lastOption && state.getFocusedValue() === lastOption.value) {
+              onDownFromLastItem()
+              return
+            }
           }
+          state.focusNextOption()
         }
-        state.focusNextOption()
-      }
-      handlers['select:previous'] = () => {
-        if (onUpFromFirstItem && state.visibleFromIndex === 0) {
-          const firstOption = options[0]
-          if (firstOption && state.getFocusedValue() === firstOption.value) {
-            onUpFromFirstItem()
-            return
+        handlers['select:previous'] = () => {
+          if (onUpFromFirstItem && state.visibleFromIndex === 0) {
+            const firstOption = options[0]
+            if (firstOption && state.getFocusedValue() === firstOption.value) {
+              onUpFromFirstItem()
+              return
+            }
           }
+          state.focusPreviousOption()
         }
-        state.focusPreviousOption()
       }
       handlers['select:accept'] = () => {
         if (disableSelection === true) return
@@ -163,6 +180,7 @@ export const useSelectInput = <T>({
     onUpFromFirstItem,
     isInInput,
     disableSelection,
+    disablePrintableKeybindings,
   ])
 
   useKeybindings(keybindingHandlers, {
@@ -229,6 +247,56 @@ export const useSelectInput = <T>({
         // Digits should type literally into the input rather than select
         // options — the user has focused a text field and expects typing
         // to insert characters, not jump to a different option.
+        return
+      }
+
+      if (disablePrintableKeybindings) {
+        if (key.downArrow || (key.ctrl && input === 'n')) {
+          if (onDownFromLastItem) {
+            const lastOption = options[options.length - 1]
+            if (lastOption && state.getFocusedValue() === lastOption.value) {
+              onDownFromLastItem()
+              return
+            }
+          }
+          state.focusNextOption()
+          return
+        }
+        if (key.upArrow || (key.ctrl && input === 'p')) {
+          if (onUpFromFirstItem && state.visibleFromIndex === 0) {
+            const firstOption = options[0]
+            if (firstOption && state.getFocusedValue() === firstOption.value) {
+              onUpFromFirstItem()
+              return
+            }
+          }
+          state.focusPreviousOption()
+          return
+        }
+        // Ignore printable characters; move focus to declineValue if provided (#29, #315, #343)
+        if (
+          !key.ctrl &&
+          !key.meta &&
+          input.length > 0 &&
+          !/\p{Cc}/u.test(input)
+        ) {
+          if (declineValue !== undefined) {
+            state.focusOption(declineValue)
+          }
+          event.stopImmediatePropagation()
+          return
+        }
+      }
+
+      if (key.home) {
+        const firstOption = options[0]
+        if (firstOption) state.focusOption(firstOption.value)
+        return
+      }
+
+      if (key.end) {
+        const lastOption = options[options.length - 1]
+        if (lastOption) state.focusOption(lastOption.value)
         return
       }
 

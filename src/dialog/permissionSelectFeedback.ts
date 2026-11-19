@@ -65,6 +65,8 @@ export function usePermissionSelectFeedback({
     if (type === 'accept') {
       if (yesInputMode) {
         setYesInputMode(false)
+        // Official 2.1.326 #27: clear hidden note when collapsing input mode with Tab.
+        setAcceptFeedback('')
         logEvent('tengu_accept_feedback_mode_collapsed', analyticsProps)
       } else {
         setYesInputMode(true)
@@ -76,6 +78,7 @@ export function usePermissionSelectFeedback({
     if (type === 'reject') {
       if (noInputMode) {
         setNoInputMode(false)
+        setRejectFeedback('')
         logEvent('tengu_reject_feedback_mode_collapsed', analyticsProps)
       } else {
         setNoInputMode(true)

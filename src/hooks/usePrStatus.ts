@@ -2,6 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 import { getTerminalFocusState, subscribeTerminalFocus } from '@anthropic/ink'
 import { getLastInteractionTime } from '../bootstrap/state.js'
 import type { PrReviewState } from '../utils/ghPrStatus.js'
+import { getBranch } from '../utils/git.js'
 import {
   fetchPrStatusForPoller,
   getPrStatusShared,
@@ -71,6 +72,7 @@ export function usePrStatus(isLoading: boolean, enabled = true): PrStatusState {
           now: () => Date.now(),
           getLastInteractionTime,
           fetchPrStatus: fetchPrStatusForPoller,
+          getBranch,
           isDirectApiEnabled,
           shared: getPrStatusShared(),
         },

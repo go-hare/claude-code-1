@@ -60,6 +60,8 @@ export type LogSelectorProps = {
   onAgenticSearch?: (query: string, logs: LogOption[], signal?: AbortSignal) => Promise<LogOption[]>;
   /** densable iYt `F`. Empty copy is withheld while a reload is in flight. */
   isLoading?: boolean;
+  /** Official 2.1.326 #163: true while older session pages remain to be fetched during search. */
+  hasMore?: boolean;
   reloadGeneration?: number;
   currentSessionId?: string;
 };
@@ -165,6 +167,7 @@ export function LogSelector({
   showAllProjects = false,
   onToggleAllProjects,
   isLoading = false,
+  hasMore = false,
   reloadGeneration = 0,
   currentSessionId: currentSessionIdProp,
 }: LogSelectorProps): React.ReactNode {
@@ -727,8 +730,8 @@ export function LogSelector({
           logEvent('tengu_session_preview_opened', {
             messageCount: focusedLog.messageCount,
           });
-        } else if (keyIsNotCtrlOrMeta && input.length === 1 && input !== ' ') {
-          // Any printable character enters search mode and starts typing
+        } else if (keyIsNotCtrlOrMeta && input.length > 0 && input !== ' ' && !/\p{Cc}/u.test(input)) {
+          // Official 2.1.326 #125: accept multi-character printable input (IME / dictation / fast typing).
           setViewMode('search');
           setSearchQuery(input);
           logEvent('tengu_session_search_toggled', { enabled: true });
@@ -777,6 +780,25 @@ export function LogSelector({
       }
       const keyIsNotCtrlOrMeta = !event.ctrl && !event.meta;
       const lowerKey = event.key.toLowerCase();
+      const isPrintableMulti =
+        !event.defaultPrevented &&
+        keyIsNotCtrlOrMeta &&
+        event.key.length > 0 &&
+        event.key !== ' ' &&
+        !/\p{Cc}/u.test(event.key) &&
+        event.name !== 'up' &&
+        event.name !== 'down' &&
+        event.name !== 'left' &&
+        event.name !== 'right' &&
+        event.name !== 'return' &&
+        event.name !== 'escape' &&
+        event.name !== 'tab' &&
+        event.name !== 'backspace' &&
+        event.name !== 'delete' &&
+        event.name !== 'home' &&
+        event.name !== 'end' &&
+        event.name !== 'pageup' &&
+        event.name !== 'pagedown';
       if (
         (event.ctrl && lowerKey === 'a' && onToggleAllProjects) ||
         (event.ctrl && lowerKey === 'b') ||
@@ -784,7 +806,7 @@ export function LogSelector({
         (lowerKey === '/' && keyIsNotCtrlOrMeta) ||
         (event.ctrl && lowerKey === 'r' && focusedLog) ||
         (((event.key === ' ' && keyIsNotCtrlOrMeta) || (event.ctrl && lowerKey === 'v')) && focusedLog) ||
-        (!event.defaultPrevented && keyIsNotCtrlOrMeta && event.key.length === 1 && event.key !== ' ')
+        isPrintableMulti
       ) {
         event.preventDefault();
       }
@@ -821,18 +843,25 @@ export function LogSelector({
   const loadMoreTrackerRef = React.useRef({ focusedIndex: -1, visible: -1, empty: 0 });
 
   // Progressive loading: request more logs when user scrolls near the end
+  // Official 2.1.326 #163: while searching, keep fetching older history pages beyond the
+  // default empty-batch cap so older matching sessions are found instead of stopping early.
   React.useEffect(() => {
     if (!onLoadMore) return;
+    const isActivelySearching = Boolean(searchQuery.trim());
     const tracker = loadMoreTrackerRef.current;
     if (tracker.focusedIndex !== focusedIndex || tracker.visible !== displayedLogs.length) {
       loadMoreTrackerRef.current = { focusedIndex, visible: displayedLogs.length, empty: 0 };
     }
     const buffer = visibleCount * 2;
-    if (focusedIndex + buffer >= displayedLogs.length && loadMoreTrackerRef.current.empty < LOAD_MORE_EMPTY_CAP) {
+    const shouldFetchMore = isActivelySearching
+      ? (hasMore || loadMoreTrackerRef.current.empty < LOAD_MORE_EMPTY_CAP) &&
+        (displayedLogs.length < visibleCount || focusedIndex + buffer >= displayedLogs.length)
+      : focusedIndex + buffer >= displayedLogs.length && loadMoreTrackerRef.current.empty < LOAD_MORE_EMPTY_CAP;
+    if (shouldFetchMore && !isLoading) {
       loadMoreTrackerRef.current.empty++;
       onLoadMore(visibleCount * 3);
     }
-  }, [focusedIndex, visibleCount, displayedLogs.length, totalLogCount, onLoadMore]);
+  }, [focusedIndex, visibleCount, displayedLogs.length, totalLogCount, onLoadMore, searchQuery, hasMore, isLoading]);
 
   // Gold: no toggle and nothing loaded → nothing to draw. With a toggle
   // (ctrl+a) the frame stays so the empty copy and the hint can paint.
@@ -896,7 +925,8 @@ export function LogSelector({
         Boolean(searchQuery.trim()) &&
         displayedLogs.length === 0 &&
         !isSearching &&
-        !isLoading && (
+        !isLoading &&
+        !hasMore && (
           <Box paddingLeft={1} marginBottom={1} flexShrink={0}>
             <EmptyState>No sessions match &quot;{searchQuery}&quot;.</EmptyState>
           </Box>
@@ -948,7 +978,7 @@ export function LogSelector({
           layout="expanded"
           isDisabled={viewMode === 'search'}
           hidePromptWhileDisabled={true}
-          hideIndexes={false}
+          hideIndexes={true}
           isNodeExpanded={nodeId => {
             // Always expand if in search or branch filter mode
             if (viewMode === 'search' || branchFilterEnabled) {
@@ -980,6 +1010,8 @@ export function LogSelector({
       ) : (
         <Select
           options={flatOptions}
+          hideIndexes={true}
+          overflowHint="count"
           onChange={value => {
             // Old flat list mode - index directly maps to displayedLogs
             const itemIndex = parseInt(value, 10);

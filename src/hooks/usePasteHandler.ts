@@ -33,6 +33,8 @@ type PasteHandlerProps = {
     dimensions?: ImageDimensions,
     sourcePath?: string,
   ) => void
+  /** Official 2.1.326 #147 (`onImageReadStart`): invoked synchronously when an async image paste begins so the caller can anchor cursor position before user types. */
+  onImageReadStart?: () => void
 }
 
 /**
@@ -86,10 +88,32 @@ export function splitPastedLinesForImages(pastedText: string): {
   return { lines, imagePaths }
 }
 
+const imageReadStartListeners = new Set<() => void>()
+
+/**
+ * #147 (2.1.326): subscribe to synchronous notifications when an async image
+ * read (clipboard or pasted file path) begins, so PromptInput can snapshot the
+ * cursor anchor before subsequent keystrokes arrive.
+ */
+export function subscribeImageReadStart(listener: () => void): () => void {
+  imageReadStartListeners.add(listener)
+  return () => {
+    imageReadStartListeners.delete(listener)
+  }
+}
+
+function notifyImageReadStart(cb?: () => void): void {
+  cb?.()
+  for (const listener of imageReadStartListeners) {
+    listener()
+  }
+}
+
 export function usePasteHandler({
   onPaste,
   handleKeyDown: innerHandleKeyDown,
   onImagePaste,
+  onImageReadStart,
 }: PasteHandlerProps): {
   handleKeyDown: (event: KeyboardEvent) => void
   handlePaste: (event: { text: string; preventDefault: () => void }) => void
@@ -97,9 +121,19 @@ export function usePasteHandler({
 } {
   const [isPasting, setIsPasting] = React.useState(false)
   const isMountedRef = React.useRef(true)
-  // Official d7r: l.current = paste pending; c.current = deferred return
+  // Official d7r: l.current = paste pending; c.current = deferred return key modifiers
   const pastePendingRef = React.useRef(false)
-  const deferredReturnRef = React.useRef(false)
+  // Official 2.1.326 #143: preserve shift/meta/option/ctrl modifiers on a Return
+  // key that arrived while paste was settling so Shift+Enter / Option+Enter adds
+  // a newline instead of submitting the prompt.
+  const deferredReturnRef = React.useRef<{
+    ctrl: boolean
+    meta: boolean
+    shift: boolean
+    option: boolean
+    super: boolean
+    fn: boolean
+  } | null>(null)
   const pastePendingSinceRef = React.useRef(0)
   const safetyTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -136,7 +170,7 @@ export function usePasteHandler({
   /** Always clear pending refs (even if unmounted); setState only when mounted. */
   const finishPaste = React.useCallback(() => {
     pastePendingRef.current = false
-    deferredReturnRef.current = false
+    deferredReturnRef.current = null
     pastePendingSinceRef.current = 0
     clearSafetyTimer()
     if (isMountedRef.current) {
@@ -152,7 +186,7 @@ export function usePasteHandler({
     safetyTimerRef.current = setTimeout(() => {
       if (pastePendingRef.current) {
         pastePendingRef.current = false
-        deferredReturnRef.current = false
+        deferredReturnRef.current = null
         pastePendingSinceRef.current = 0
         if (isMountedRef.current) {
           setIsPasting(false)
@@ -236,26 +270,27 @@ export function usePasteHandler({
     }
     // Defer so React state for the pasted text commits first.
     setTimeout(() => {
-      // Official: l.current = !1 always; then if c.current → replay return
+      // Official: l.current = !1 always; then if c.current → replay return with preserved modifiers (#143)
       pastePendingRef.current = false
       pastePendingSinceRef.current = 0
       if (!isMountedRef.current) {
-        deferredReturnRef.current = false
+        deferredReturnRef.current = null
         return
       }
-      if (!deferredReturnRef.current) return
-      deferredReturnRef.current = false
+      const deferred = deferredReturnRef.current
+      if (!deferred) return
+      deferredReturnRef.current = null
       const returnKey: ParsedKey = {
         kind: 'key',
         name: 'return',
         sequence: '\r',
         raw: '\r',
-        ctrl: false,
-        meta: false,
-        shift: false,
-        option: false,
-        super: false,
-        fn: false,
+        ctrl: deferred.ctrl,
+        meta: deferred.meta,
+        shift: deferred.shift,
+        option: deferred.option,
+        super: deferred.super,
+        fn: deferred.fn,
       }
       innerKeyDownRef.current(new KeyboardEvent(returnKey))
     }, 0)
@@ -269,6 +304,7 @@ export function usePasteHandler({
 
         // Empty bracketed paste → clipboard image (macOS/WSL official; Windows LOCAL).
         if (pastedText.length === 0 && canClipboardImage && onImagePaste) {
+          notifyImageReadStart(onImageReadStart)
           checkClipboardForImage()
           return
         }
@@ -276,6 +312,7 @@ export function usePasteHandler({
         const { lines, imagePaths } = splitPastedLinesForImages(pastedText)
 
         if (onImagePaste && imagePaths.length > 0) {
+          notifyImageReadStart(onImageReadStart)
           const isTempScreenshot =
             /\/TemporaryItems\/.*screencaptureui.*\/Screenshot/i.test(
               pastedText,
@@ -361,6 +398,7 @@ export function usePasteHandler({
       markPastePending,
       maybeReplayReturn,
       onImagePaste,
+      onImageReadStart,
     ],
   )
 
@@ -393,9 +431,18 @@ export function usePasteHandler({
       }
 
       // Official densable uses event.key === "return" (KeyboardEvent.key from fag).
+      // 2.1.326 #143: capture modifier flags so Shift+Enter / Option+Enter right
+      // after a paste replays as a newline rather than submitting the prompt.
       if (pastePendingRef.current && event.key === 'return') {
         event.preventDefault()
-        deferredReturnRef.current = true
+        deferredReturnRef.current = {
+          ctrl: Boolean(event.ctrl),
+          meta: Boolean(event.meta),
+          shift: Boolean(event.shift),
+          option: Boolean(event.meta),
+          super: false,
+          fn: false,
+        }
         return
       }
       // Non-bracketed large payload → treat as paste (official pkt=800).

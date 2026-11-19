@@ -5,6 +5,7 @@ import {
 } from 'node:http'
 import { request as httpsRequest } from 'node:https'
 import axios from 'axios'
+import { HttpsProxyAgent } from 'https-proxy-agent'
 
 import { getAnthropicClientPlatform } from '../utils/teleport/api.js'
 import { debugBody, extractErrorDetail } from './debugUtils.js'
@@ -47,6 +48,140 @@ const BETA_HEADER = 'environments-2025-11-01'
 
 export const DEFAULT_TLS_HANDSHAKE_TIMEOUT_MS = 15_000
 export const ERR_TLS_HANDSHAKE_STALLED = 'ERR_TLS_HANDSHAKE_STALLED'
+export const BRIDGE_PROXY_CONNECT_TIMEOUT_MS = 25_000
+
+function isNoProxyMatch(targetUrl: string, noProxyRaw: string): boolean {
+  if (!noProxyRaw.trim()) return false
+  let host: string
+  let port: string
+  try {
+    const parsed = new URL(targetUrl)
+    host = parsed.hostname.toLowerCase()
+    port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80')
+  } catch {
+    return false
+  }
+  for (const rawEntry of noProxyRaw.split(',')) {
+    const entry = rawEntry.trim().toLowerCase()
+    if (!entry) continue
+    if (entry === '*') return true
+    const [entryHostRaw, entryPort] = entry.includes(':')
+      ? entry.split(':', 2)
+      : [entry, undefined]
+    if (entryPort && entryPort !== port) continue
+    const entryHost = (entryHostRaw ?? '').replace(/^\./, '')
+    if (!entryHost) continue
+    if (host === entryHost || host.endsWith(`.${entryHost}`)) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Official 2.1.326 #337 (`qf`): inspect proxy environment variables for an
+ * `https:` Remote Control request.
+ */
+export function resolveBridgeProxySetting(
+  targetUrl: string,
+  env: NodeJS.ProcessEnv = process.env,
+): { proxyUrl: string; isSkipped: boolean } | undefined {
+  let protocol: string | undefined
+  try {
+    protocol = new URL(targetUrl).protocol
+  } catch {
+    return undefined
+  }
+  if (protocol !== 'https:') return undefined
+  const rawProxy =
+    env.https_proxy || env.HTTPS_PROXY || env.all_proxy || env.ALL_PROXY
+  if (!rawProxy || !rawProxy.trim()) return undefined
+  const trimmed = rawProxy.trim()
+  return {
+    proxyUrl: trimmed.includes('://') ? trimmed : `https://${trimmed}`,
+    isSkipped: isNoProxyMatch(targetUrl, env.no_proxy || env.NO_PROXY || ''),
+  }
+}
+
+/**
+ * Official 2.1.326 #337 (`Cm`): wrap `HttpsProxyAgent.connect` with a 25s
+ * connect timeout so a proxy that stalls CONNECT fails with `ETIMEDOUT`.
+ */
+export function attachBridgeProxyConnectTimeout(
+  agent: HttpsProxyAgent<string>,
+  timeoutMs: number = BRIDGE_PROXY_CONNECT_TIMEOUT_MS,
+): HttpsProxyAgent<string> {
+  const origConnect = agent.connect.bind(agent)
+  agent.connect = async (req, opts) => {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    if (typeof timer === 'object' && 'unref' in timer) timer.unref()
+    const connectOpts = (
+      agent as unknown as { connectOpts?: Record<string, unknown> }
+    ).connectOpts
+    if (connectOpts) {
+      connectOpts.signal = controller.signal
+    }
+    try {
+      return await origConnect(req, opts)
+    } catch (err) {
+      if (controller.signal.aborted) {
+        throw Object.assign(
+          new Error(
+            'Timed out connecting through the proxy set in HTTPS_PROXY or ALL_PROXY. Check that the proxy is running and can reach the destination server. You can also add that server to NO_PROXY.',
+          ),
+          { code: 'ETIMEDOUT' },
+        )
+      }
+      throw err
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  return agent
+}
+
+export type BridgeProxyAxiosOptions = {
+  proxy?: false
+  httpsAgent?: HttpsProxyAgent<string>
+  httpAgent?: HttpsProxyAgent<string>
+}
+
+/**
+ * Official 2.1.326 #337 (`eBt`): force Remote Control HTTPS requests through
+ * an HTTP `CONNECT` tunnel (`HttpsProxyAgent` + `proxy: false`) when a proxy
+ * is configured, so a proxy that refuses `CONNECT` stops Remote Control with
+ * an error instead of falling back to plain HTTP proxying.
+ */
+export function buildBridgeProxyAxiosOptions(
+  targetUrl: string,
+  env: NodeJS.ProcessEnv = process.env,
+  timeoutMs: number = BRIDGE_PROXY_CONNECT_TIMEOUT_MS,
+): BridgeProxyAxiosOptions {
+  const setting = resolveBridgeProxySetting(targetUrl, env)
+  if (!setting) return {}
+  if (setting.isSkipped) return { proxy: false }
+  let proxyProtocol: string | undefined
+  try {
+    proxyProtocol = new URL(setting.proxyUrl).protocol
+  } catch {
+    proxyProtocol = undefined
+  }
+  if (proxyProtocol !== 'http:' && proxyProtocol !== 'https:') {
+    throw new Error(
+      'The proxy setting (HTTPS_PROXY or ALL_PROXY) is not an http or https URL, so this request was not sent.',
+    )
+  }
+  const agent = attachBridgeProxyConnectTimeout(
+    new HttpsProxyAgent(setting.proxyUrl),
+    timeoutMs,
+  )
+  return {
+    proxy: false,
+    httpsAgent: agent,
+    httpAgent: agent,
+  }
+}
 
 function failStalledTlsHandshake(req: ClientRequest): void {
   const err = Object.assign(
@@ -246,6 +381,10 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
     return response
   }
 
+  function proxyOpts(url: string): BridgeProxyAxiosOptions {
+    return buildBridgeProxyAxiosOptions(url)
+  }
+
   return {
     async registerBridgeEnvironment(
       config: BridgeConfig,
@@ -255,13 +394,14 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
         `[bridge:api] POST /v1/environments/bridge bridgeId=${config.bridgeId}`,
       )
 
+      const url = `${deps.baseUrl}/v1/environments/bridge`
       const response = await withOAuthRetry(
         (token: string) =>
           axios.post<{
             environment_id: string
             environment_secret: string
           }>(
-            `${deps.baseUrl}/v1/environments/bridge`,
+            url,
             {
               machine_name: config.machineName,
               directory: config.dir,
@@ -286,6 +426,7 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
               }),
             },
             {
+              ...proxyOpts(url),
               headers: getHeaders(token),
               timeout: 15_000,
               ...(deps.baseUrl.startsWith('https:') && {
@@ -322,19 +463,18 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
       const prevEmptyPolls = consecutiveEmptyPolls
       consecutiveEmptyPolls = 0
 
-      const response = await axios.get<WorkResponse | null>(
-        `${deps.baseUrl}/v1/environments/${environmentId}/work/poll`,
-        {
-          headers: getHeaders(environmentSecret),
-          params:
-            reclaimOlderThanMs !== undefined
-              ? { reclaim_older_than_ms: reclaimOlderThanMs }
-              : undefined,
-          timeout: 10_000,
-          signal,
-          validateStatus: status => status < 500,
-        },
-      )
+      const url = `${deps.baseUrl}/v1/environments/${environmentId}/work/poll`
+      const response = await axios.get<WorkResponse | null>(url, {
+        ...proxyOpts(url),
+        headers: getHeaders(environmentSecret),
+        params:
+          reclaimOlderThanMs !== undefined
+            ? { reclaim_older_than_ms: reclaimOlderThanMs }
+            : undefined,
+        timeout: 10_000,
+        signal,
+        validateStatus: status => status < 500,
+      })
 
       handleErrorStatus(response.status, response.data, 'Poll')
       rcLog(
@@ -372,10 +512,12 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
 
       debug(`[bridge:api] POST .../work/${workId}/ack`)
 
+      const url = `${deps.baseUrl}/v1/environments/${environmentId}/work/${workId}/ack`
       const response = await axios.post(
-        `${deps.baseUrl}/v1/environments/${environmentId}/work/${workId}/ack`,
+        url,
         {},
         {
+          ...proxyOpts(url),
           headers: getHeaders(sessionToken),
           timeout: 10_000,
           validateStatus: s => s < 500,
@@ -396,12 +538,14 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
 
       debug(`[bridge:api] POST .../work/${workId}/stop force=${force}`)
 
+      const url = `${deps.baseUrl}/v1/environments/${environmentId}/work/${workId}/stop`
       const response = await withOAuthRetry(
         (token: string) =>
           axios.post(
-            `${deps.baseUrl}/v1/environments/${environmentId}/work/${workId}/stop`,
+            url,
             { force },
             {
+              ...proxyOpts(url),
               headers: getHeaders(token),
               timeout: 10_000,
               validateStatus: s => s < 500,
@@ -419,16 +563,15 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
 
       debug(`[bridge:api] DELETE /v1/environments/bridge/${environmentId}`)
 
+      const url = `${deps.baseUrl}/v1/environments/bridge/${environmentId}`
       const response = await withOAuthRetry(
         (token: string) =>
-          axios.delete(
-            `${deps.baseUrl}/v1/environments/bridge/${environmentId}`,
-            {
-              headers: getHeaders(token),
-              timeout: 10_000,
-              validateStatus: s => s < 500,
-            },
-          ),
+          axios.delete(url, {
+            ...proxyOpts(url),
+            headers: getHeaders(token),
+            timeout: 10_000,
+            validateStatus: s => s < 500,
+          }),
         'Deregister',
       )
 
@@ -443,12 +586,14 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
 
       debug(`[bridge:api] POST /v1/sessions/${sessionId}/archive`)
 
+      const url = `${deps.baseUrl}/v1/sessions/${sessionId}/archive`
       const response = await withOAuthRetry(
         (token: string) =>
           axios.post(
-            `${deps.baseUrl}/v1/sessions/${sessionId}/archive`,
+            url,
             {},
             {
+              ...proxyOpts(url),
               headers: getHeaders(token),
               timeout: 10_000,
               validateStatus: s => s < 500,
@@ -483,12 +628,14 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
         `[bridge:api] POST /v1/environments/${environmentId}/bridge/reconnect session_id=${sessionId}`,
       )
 
+      const url = `${deps.baseUrl}/v1/environments/${environmentId}/bridge/reconnect`
       const response = await withOAuthRetry(
         (token: string) =>
           axios.post(
-            `${deps.baseUrl}/v1/environments/${environmentId}/bridge/reconnect`,
+            url,
             { session_id: sessionId },
             {
+              ...proxyOpts(url),
               headers: getHeaders(token),
               timeout: 10_000,
               validateStatus: s => s < 500,
@@ -512,15 +659,17 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
 
       debug(`[bridge:api] POST .../work/${workId}/heartbeat`)
 
+      const url = `${deps.baseUrl}/v1/environments/${environmentId}/work/${workId}/heartbeat`
       const response = await axios.post<{
         lease_extended: boolean
         state: string
         last_heartbeat: string
         ttl_seconds: number
       }>(
-        `${deps.baseUrl}/v1/environments/${environmentId}/work/${workId}/heartbeat`,
+        url,
         {},
         {
+          ...proxyOpts(url),
           headers: getHeaders(sessionToken),
           timeout: 10_000,
           validateStatus: s => s < 500,
@@ -545,10 +694,12 @@ export function createBridgeApiClient(deps: BridgeApiDeps): BridgeApiClient {
         `[bridge:api] POST /v1/sessions/${sessionId}/events type=${event.type}`,
       )
 
+      const url = `${deps.baseUrl}/v1/sessions/${sessionId}/events`
       const response = await axios.post(
-        `${deps.baseUrl}/v1/sessions/${sessionId}/events`,
+        url,
         { events: [event] },
         {
+          ...proxyOpts(url),
           headers: getHeaders(sessionToken),
           timeout: 10_000,
           validateStatus: s => s < 500,

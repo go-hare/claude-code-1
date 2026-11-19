@@ -1,7 +1,8 @@
 import * as React from 'react';
-import { useCallback, useRef, useState } from 'react';
-import { Box, Byline, Dialog, KeyboardShortcutHint, Text } from '@anthropic/ink';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { Box, Byline, Dialog, type KeyboardEvent, KeyboardShortcutHint, Text } from '@anthropic/ink';
 import { getSdkBetas } from '../../bootstrap/state.js';
+import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -22,12 +23,62 @@ import {
 import { getContextWindowForModel } from '../../utils/context.js';
 import { canonicalEffortModelKey } from '../../utils/effort.js';
 import { formatTokens } from '../../utils/format.js';
+import { getDefaultMainLoopModel, parseUserSpecifiedModel } from '../../utils/model/model.js';
 import { resolveAutoCompactWindowOverride } from '../../utils/residualFinalEnvGates.js';
 import { getInitialSettings, updateSettingsForSource } from '../../utils/settings/settings.js';
 import type { SettingsJson } from '../../utils/settings/types.js';
+import { findNearestSliderStopIndex } from '../../components/EffortPanel/EffortPanel.js';
 
 /** densable kSe sentinel for "auto" in the dialog cursor. */
 const AUTO_SENTINEL = 0;
+
+export type ValueSliderStop = {
+  value: number;
+  label: string;
+};
+
+/**
+ * Official 2.1.326 #285: build all discrete stops for the `/autocompact` slider
+ * (`auto`, `100k`, `200k`, ..., `1M`).
+ */
+export function buildAutoCompactSliderStops(): ValueSliderStop[] {
+  const stops: ValueSliderStop[] = [{ value: AUTO_SENTINEL, label: 'auto' }];
+  for (let v = AUTO_COMPACT_WINDOW_MIN; v <= AUTO_COMPACT_WINDOW_MAX; v += AUTO_COMPACT_WINDOW_STEP) {
+    stops.push({ value: v, label: formatTokens(v) });
+  }
+  return stops;
+}
+
+/**
+ * Official 2.1.326 #285: compute horizontal stop positions for a value slider
+ * that shows every value and adapts gap width to narrow terminals.
+ */
+export function computeValueSliderLayout(
+  stops: readonly ValueSliderStop[],
+  maxWidth: number,
+): {
+  width: number;
+  stopCols: number[];
+  gap: number;
+  trackChars: string;
+  compact: boolean;
+} {
+  const minSum = stops.reduce((sum, s) => sum + s.label.length, 0);
+  const count = stops.length;
+  const availableGap = count > 1 ? Math.floor((maxWidth - minSum) / (count - 1)) : 0;
+  const compact = availableGap < 1;
+  const gap = compact ? 1 : Math.min(2, availableGap);
+  const stopCols: number[] = [];
+  let col = 0;
+  for (let i = 0; i < count; i++) {
+    const labelLen = stops[i]!.label.length;
+    stopCols.push(col + Math.floor(labelLen / 2));
+    col += labelLen + (i < count - 1 ? gap : 0);
+  }
+  const width = Math.max(1, col);
+  const track = Array.from({ length: width }, (_, c) => (stopCols.includes(c) ? '●' : '─')).join('');
+  return { width, stopCols, gap, trackChars: track, compact };
+}
 
 /**
  * Official jSr — only warn about high token usage when the selected window
@@ -136,11 +187,13 @@ function ApplyAutoCompactArgs({ args, onDone }: { args: string; onDone: LocalJSX
 
 function AutoCompactWindowDialog({ onDone }: { onDone: LocalJSXCommandOnDone }): React.ReactNode {
   const model = useMainLoopModel();
+  const { columns } = useTerminalSize();
   const settingsWindow = resolvePerModelAutoCompactWindow(model, getInitialSettings());
   const resolved = resolveAutoCompactWindow(model, settingsWindow);
   const { window: effectiveWindow, configured, source } = resolved;
   const envLocked = source === 'env';
 
+  const stops = useMemo(() => buildAutoCompactSliderStops(), []);
   // densable juD: start cursor at auto for auto/experiment/… else snap to step
   const initialCursor =
     source === 'auto' || source === 'experiment' || source === 'clientdata' || source === 'unknown-model'
@@ -157,21 +210,35 @@ function AutoCompactWindowDialog({ onDone }: { onDone: LocalJSXCommandOnDone }):
   const [dirty, setDirty] = useState(false);
   const doneRef = useRef(false);
 
+  const selectedIndex = Math.max(
+    0,
+    stops.findIndex(s => s.value === cursor),
+  );
+
+  const selectIndex = useCallback(
+    (idx: number) => {
+      if (envLocked) return;
+      const clamped = Math.max(0, Math.min(stops.length - 1, idx));
+      setDirty(true);
+      setCursor(stops[clamped]!.value);
+    },
+    [envLocked, stops],
+  );
+
   const step = useCallback(
     (delta: number) => {
       if (envLocked) return;
       setDirty(true);
       setCursor(prev => {
-        if (prev === AUTO_SENTINEL) {
-          return delta > 0 ? AUTO_COMPACT_WINDOW_MIN : AUTO_COMPACT_WINDOW_MAX;
-        }
-        const next = prev + delta * AUTO_COMPACT_WINDOW_STEP;
-        if (next < AUTO_COMPACT_WINDOW_MIN) return AUTO_SENTINEL;
-        if (next > AUTO_COMPACT_WINDOW_MAX) return AUTO_SENTINEL;
-        return next;
+        const curIdx = Math.max(
+          0,
+          stops.findIndex(s => s.value === prev),
+        );
+        const nextIdx = Math.max(0, Math.min(stops.length - 1, curIdx + delta));
+        return stops[nextIdx]!.value;
       });
     },
-    [envLocked],
+    [envLocked, stops],
   );
 
   const currentLabel = describeAutoCompactWindowSource(resolved);
@@ -201,10 +268,25 @@ function AutoCompactWindowDialog({ onDone }: { onDone: LocalJSXCommandOnDone }):
     finish(`Auto-compact window unchanged: ${currentLabel}`);
   }, [currentLabel, finish]);
 
+  // Official 2.1.326 #285: support Home/End in addition to Left/Right/Up/Down.
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (envLocked) return;
+      if (e.name === 'home') {
+        e.preventDefault();
+        selectIndex(0);
+      } else if (e.name === 'end') {
+        e.preventDefault();
+        selectIndex(stops.length - 1);
+      }
+    },
+    [envLocked, selectIndex, stops.length],
+  );
+
   useKeybindings(
     {
-      'select:previous': () => step(1),
-      'select:next': () => step(-1),
+      'select:previous': () => step(-1),
+      'select:next': () => step(1),
       'select:accept': accept,
     },
     { context: 'Select' },
@@ -217,6 +299,12 @@ function AutoCompactWindowDialog({ onDone }: { onDone: LocalJSXCommandOnDone }):
     { context: 'Tabs' },
   );
 
+  const availableWidth = Math.max(20, columns - 6);
+  const layout = useMemo(() => computeValueSliderLayout(stops, availableWidth), [stops, availableWidth]);
+  const markerCol = layout.stopCols[selectedIndex] ?? 0;
+  const trackBefore = layout.trackChars.slice(0, markerCol);
+  const trackAfter = layout.trackChars.slice(markerCol + 1);
+
   return (
     <Dialog
       title="Auto-compact window"
@@ -224,13 +312,14 @@ function AutoCompactWindowDialog({ onDone }: { onDone: LocalJSXCommandOnDone }):
       onCancel={cancel}
       inputGuide={() => (
         <Byline>
-          <KeyboardShortcutHint shortcut="↑/↓" action="change" />
+          <KeyboardShortcutHint shortcut="←/→" action="adjust" />
+          <KeyboardShortcutHint shortcut="Home/End" action="min/max" />
           <KeyboardShortcutHint shortcut="Enter" action="apply" />
           <KeyboardShortcutHint shortcut="Esc" action="cancel" />
         </Byline>
       )}
     >
-      <Box flexDirection="column" gap={1}>
+      <Box flexDirection="column" gap={1} tabIndex={0} autoFocus onKeyDown={handleKeyDown}>
         <Text>
           This command configures when auto-compaction happens. The actual threshold is the minimum of this setting and
           your model&apos;s maximum context window.
@@ -250,14 +339,73 @@ function AutoCompactWindowDialog({ onDone }: { onDone: LocalJSXCommandOnDone }):
             CLAUDE_CODE_AUTO_COMPACT_WINDOW is set and takes precedence. Unset it to change this setting here.
           </Text>
         ) : (
-          <Box>
-            <Text>Select auto-compact window: </Text>
-            <Text bold color="suggestion">
-              {selectionLabel}
-            </Text>
-            {configured > effectiveWindow ? (
-              <Text dimColor> · capped to {formatTokens(effectiveWindow)} by model</Text>
-            ) : null}
+          <Box flexDirection="column" gap={0}>
+            <Box>
+              <Text>Window: </Text>
+              <Text bold color="suggestion">
+                {selectionLabel}
+              </Text>
+              {configured > effectiveWindow ? (
+                <Text dimColor> · capped to {formatTokens(effectiveWindow)} by model</Text>
+              ) : null}
+            </Box>
+            {layout.compact ? (
+              <Box flexWrap="wrap" columnGap={1}>
+                {stops.map((stop, idx) => (
+                  <Box
+                    key={stop.value}
+                    onClick={e => {
+                      e.stopImmediatePropagation();
+                      selectIndex(idx);
+                    }}
+                  >
+                    <Text
+                      bold={idx === selectedIndex}
+                      color={idx === selectedIndex ? 'suggestion' : undefined}
+                      dimColor={idx !== selectedIndex}
+                    >
+                      {idx === selectedIndex ? `[${stop.label}]` : stop.label}
+                    </Text>
+                  </Box>
+                ))}
+              </Box>
+            ) : (
+              <Box flexDirection="column" width={layout.width}>
+                <Box
+                  onClick={e => {
+                    e.stopImmediatePropagation();
+                    selectIndex(findNearestSliderStopIndex(e.localCol, layout.stopCols));
+                  }}
+                >
+                  <Text dimColor>{trackBefore}</Text>
+                  <Text bold color="suggestion">
+                    ▲
+                  </Text>
+                  <Text dimColor>{trackAfter}</Text>
+                </Box>
+                <Box>
+                  {stops.map((stop, idx) => (
+                    <React.Fragment key={stop.value}>
+                      {idx > 0 && <Text>{' '.repeat(layout.gap)}</Text>}
+                      <Box
+                        onClick={e => {
+                          e.stopImmediatePropagation();
+                          selectIndex(idx);
+                        }}
+                      >
+                        <Text
+                          bold={idx === selectedIndex}
+                          color={idx === selectedIndex ? 'suggestion' : undefined}
+                          dimColor={idx !== selectedIndex}
+                        >
+                          {stop.label}
+                        </Text>
+                      </Box>
+                    </React.Fragment>
+                  ))}
+                </Box>
+              </Box>
+            )}
           </Box>
         )}
       </Box>
@@ -270,9 +418,17 @@ export function formatStatusForModel(model: string): string {
   return formatAutoCompactWindowStatus(model);
 }
 
-export const call: LocalJSXCommandCall = async (onDone, _context, args) => {
+export const call: LocalJSXCommandCall = async (onDone, context, args) => {
   const n = args?.trim() || '';
   if (n) {
+    if (typeof context?.getAppState === 'function') {
+      const appState = context.getAppState();
+      const model = parseUserSpecifiedModel(
+        appState.mainLoopModelForSession ?? appState.mainLoopModel ?? getDefaultMainLoopModel(),
+      );
+      onDone(applyPerModelAutoCompactWindow(n, model));
+      return null;
+    }
     return <ApplyAutoCompactArgs args={n} onDone={onDone} />;
   }
 

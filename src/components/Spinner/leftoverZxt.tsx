@@ -187,7 +187,12 @@ export function leftoverZxt(input: { status: unknown; columns: number; now?: num
 
   const rateLimits = err.rateLimits;
   const resetsSuffix = leftoverZxtResetsAtSuffix(rateLimits?.resetsAt, now);
-  const suffix = ` · Retrying in ${countdown}${resetsSuffix} · attempt ${attempt}/${maxRetries}`;
+  // Official 2.1.326 #132 (`b2t`): show "retrying…" when countdown reaches 0s instead of "Retrying in 0s".
+  const remainMs = remainingRetryMs(Number(t.deadline) || 0, now);
+  const suffix =
+    remainMs === 0
+      ? ` · retrying… · attempt ${attempt}/${maxRetries}`
+      : ` · Retrying in ${countdown}${resetsSuffix} · attempt ${attempt}/${maxRetries}`;
   const title = leftoverZxtTruncate(
     leftoverZxtRetryTitle({
       attempt,

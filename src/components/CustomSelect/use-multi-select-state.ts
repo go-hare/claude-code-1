@@ -124,6 +124,17 @@ export type UseMultiSelectStateProps<T> = {
    * densable VMn `DZe` analog — SR radio arrow nav (default false).
    */
   arrowNav?: boolean
+
+  /**
+   * Official 2.1.326 (#29): ignore printable navigation keys (j/k).
+   */
+  disablePrintableKeybindings?: boolean
+
+  /**
+   * Official 2.1.326 (#280): allow Home and End keys to jump to first/last item.
+   * @default true
+   */
+  takesHomeEnd?: boolean
 }
 
 export type MultiSelectState<T> = {
@@ -226,6 +237,8 @@ export function useMultiSelectState<T>({
   hideIndexes = false,
   refuseInput,
   arrowNav = false,
+  disablePrintableKeybindings = false,
+  takesHomeEnd = true,
 }: UseMultiSelectStateProps<T>): MultiSelectState<T> {
   const leftoverScreenReader = useContext(AccessibilityContext)
   const leftoverSrRadio = leftoverScreenReaderRadio(
@@ -617,11 +630,14 @@ export function useMultiSelectState<T>({
         return
       }
 
-      // Handle arrow down / Ctrl+N / j
+      // Handle arrow down / Ctrl+N / j (unless disablePrintableKeybindings)
       if (
         key.downArrow ||
         (key.ctrl && input === 'n') ||
-        (!key.ctrl && !key.shift && input === 'j')
+        (!disablePrintableKeybindings &&
+          !key.ctrl &&
+          !key.shift &&
+          input === 'j')
       ) {
         if (leftoverG5Refuse(refuseInput)) return
         if (isSubmitFocused && onDownFromLastItem) {
@@ -646,11 +662,14 @@ export function useMultiSelectState<T>({
         return
       }
 
-      // Handle arrow up / Ctrl+P / k
+      // Handle arrow up / Ctrl+P / k (unless disablePrintableKeybindings)
       if (
         key.upArrow ||
         (key.ctrl && input === 'p') ||
-        (!key.ctrl && !key.shift && input === 'k')
+        (!disablePrintableKeybindings &&
+          !key.ctrl &&
+          !key.shift &&
+          input === 'k')
       ) {
         if (leftoverG5Refuse(refuseInput)) return
         if (submitButtonText && onSubmit && isSubmitFocused) {
@@ -663,6 +682,26 @@ export function useMultiSelectState<T>({
           onUpFromFirstItem()
         } else {
           navigation.focusPreviousOption()
+        }
+        return
+      }
+
+      // Official 2.1.326 (#280): checkbox lists in slash commands take Home and End
+      if (takesHomeEnd && key.home) {
+        if (leftoverG5Refuse(refuseInput)) return
+        setIsSubmitFocused(false)
+        const firstOptionValue = options[0]?.value
+        if (firstOptionValue !== undefined) {
+          navigation.focusOption(firstOptionValue)
+        }
+        return
+      }
+
+      if (takesHomeEnd && key.end) {
+        if (leftoverG5Refuse(refuseInput)) return
+        setIsSubmitFocused(false)
+        if (lastOptionValue !== undefined) {
+          navigation.focusOption(lastOptionValue)
         }
         return
       }

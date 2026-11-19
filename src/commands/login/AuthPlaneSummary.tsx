@@ -20,7 +20,7 @@
  */
 import * as React from 'react';
 import { Box, Text } from '@anthropic/ink';
-import type { AuthStatus } from './getAuthStatus.js';
+import { ANTHROPIC_API_KEY_NOT_USED_HINT, type AuthStatus } from './getAuthStatus.js';
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -70,10 +70,19 @@ function WorkspaceKeyRow({ workspaceKey }: { workspaceKey: AuthStatus['workspace
         : '';
 
   return (
-    <Box>
-      <Text color="success">{'☑ Workspace API key                '}</Text>
-      <Text>{workspaceKey.keyPreview}</Text>
-      {sourceLabel ? <Text dimColor>{sourceLabel}</Text> : null}
+    <Box flexDirection="column">
+      <Box>
+        <Text color={workspaceKey.envKeyUnused ? 'warning' : 'success'}>
+          {workspaceKey.envKeyUnused ? '⚠ Workspace API key                ' : '☑ Workspace API key                '}
+        </Text>
+        <Text>{workspaceKey.keyPreview}</Text>
+        {sourceLabel ? <Text dimColor>{sourceLabel}</Text> : null}
+      </Box>
+      {workspaceKey.envKeyUnused ? (
+        <Box marginLeft={2}>
+          <Text color="warning">{ANTHROPIC_API_KEY_NOT_USED_HINT}</Text>
+        </Box>
+      ) : null}
     </Box>
   );
 }

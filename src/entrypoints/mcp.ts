@@ -3,6 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
 import { listToolsResult } from 'src/services/mcp/listToolsResult.js'
 import type { CallToolResult } from 'src/services/mcp/types.js'
 import { disableForkSubagent } from 'src/utils/sessionBackgroundGates.js'
+import { disableUnsandboxedCommandsForMcpServe } from '@claude-code/builtin-tools/tools/BashTool/shouldUseSandbox.js'
 import { getDefaultAppState } from 'src/state/AppStateStore.js'
 import review from '../commands/review.js'
 import type { Command } from '../commands.js'
@@ -109,6 +110,8 @@ export async function startMCPServer(
   setCwd(cwd)
   // Official 2.1.302 #924: `claude mcp serve` never offers fork subagents.
   disableForkSubagent()
+  // Official 2.1.326 #304: `claude mcp serve` ignores `sandbox.excludedCommands`.
+  disableUnsandboxedCommandsForMcpServe()
   const server = new Server(
     {
       name: 'claude/tengu',
