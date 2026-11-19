@@ -1081,6 +1081,18 @@ export function createPathChecker(
 
     // If it's an ask decision, add suggestions based on the operation type
     if (result.behavior === 'ask') {
+      // Official 2.1.323 #2009: when a Bash command writes to a sensitive path
+      // (.git, .claude, .bashrc, settings files, etc.), a saved Bash allow rule
+      // or directory grant will NOT bypass the safetyCheck on the next prompt —
+      // suppress "don't ask again" and emit no suggestions.
+      if (result.decisionReason?.type === 'safetyCheck') {
+        return {
+          ...result,
+          suggestions: [],
+          suppressAlwaysAllowRule: true,
+        }
+      }
+
       const operationType =
         operationTypeOverride ?? COMMAND_OPERATION_TYPE[command]
       const suggestions: PermissionUpdate[] = []
@@ -1367,6 +1379,21 @@ export function validateOutputRedirections(
           behavior: 'deny',
           message,
           decisionReason,
+        }
+      }
+
+      // Official 2.1.323 #2009: output redirection to a sensitive path
+      // (.git, .claude, .bashrc, etc.) triggers a safetyCheck that cannot be
+      // bypassed by a saved allow rule — suppress "don't ask again" and
+      // omit suggestions.
+      if (decisionReason?.type === 'safetyCheck') {
+        return {
+          behavior: 'ask',
+          message,
+          blockedPath: resolvedPath,
+          decisionReason,
+          suggestions: [],
+          suppressAlwaysAllowRule: true,
         }
       }
 

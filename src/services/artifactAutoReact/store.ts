@@ -668,6 +668,13 @@ export type ArtifactShareStatus = {
   probeErrorCode?: string
   artifactKind?: string
   lastProbeToolUseId?: string
+  /**
+   * 2.1.325 #2312 (SEA `zBe` / `mFo` @286618701): concurrent/overlapping tool
+   * calls that shared the same ownership probe so parallel `read` + `read_db`
+   * calls on the user's own artifact all recognize confirmed ownership.
+   */
+  probeSharedWith?: string[]
+  outsideAudience?: boolean
   lastProbeAt?: number
   lastProbeLandedAt?: number
   lastProbeIssuedAt?: number

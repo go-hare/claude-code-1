@@ -481,3 +481,207 @@ export async function resolveTabUrlWithRetry(
   }
   return rescued
 }
+
+// ── 2.1.323 #2198: Browser tool call escaped / JSON-text input refusal ──────
+
+const BROWSER_ESCAPE_HINT =
+  'Permission checks may read that spelling differently from what would run.'
+
+const PRINTABLE_OR_LINE_SEP_UNICODE_ESCAPE =
+  /\\u(?:00[2-6][0-9a-fA-F]|007[0-9a-eA-E]|202[89])/
+const ANY_UNICODE_ESCAPE = /\\u[0-9a-fA-F]{4}/
+
+export type BrowserInputValidationError = {
+  errorCode: 'BROWSER_INPUT_JSON_TEXT' | 'BROWSER_INPUT_ESCAPE'
+  message: string
+}
+
+/**
+ * Matches Claude in Chrome and desktop browser pane MCP tools (official `rLo(name)` / `Claude_Browser`).
+ */
+export function isBrowserMcpToolName(name: string): boolean {
+  return (
+    name.startsWith('mcp__claude-in-chrome__') ||
+    name.startsWith('mcp__Claude_in_Chrome__') ||
+    name.startsWith('mcp__Claude_Browser__')
+  )
+}
+
+function canonicalizeJsonText(raw: string): string | undefined {
+  let out = ''
+  for (let i = 0; i < raw.length; ) {
+    const ch = raw[i]!
+    if (ch === ' ' || ch === '\n' || ch === '\r' || ch === '\t') {
+      i++
+      continue
+    }
+    if (ch !== '"') {
+      out += ch
+      i++
+      continue
+    }
+    let j = i + 1
+    while (j < raw.length && raw[j] !== '"') {
+      j += raw[j] === '\\' ? 2 : 1
+    }
+    if (j >= raw.length) return undefined
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw.slice(i, j + 1))
+    } catch {
+      return undefined
+    }
+    if (typeof parsed !== 'string') return undefined
+    out += JSON.stringify(parsed)
+    i = j + 1
+  }
+  return out
+}
+
+function findDisallowedEscape(
+  value: unknown,
+  namesHosts = false,
+): { escape: string; namesHosts: boolean } | undefined {
+  if (typeof value === 'string') {
+    const match = (
+      namesHosts ? ANY_UNICODE_ESCAPE : PRINTABLE_OR_LINE_SEP_UNICODE_ESCAPE
+    ).exec(value)?.[0]
+    return match === undefined ? undefined : { escape: match, namesHosts }
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findDisallowedEscape(item, namesHosts)
+      if (found !== undefined) return found
+    }
+    return undefined
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      const found = findDisallowedEscape(
+        v,
+        namesHosts || k === 'url' || k === 'domains',
+      )
+      if (found !== undefined) return found
+    }
+  }
+  return undefined
+}
+
+function expectsObjectOrArray(
+  schema:
+    | { properties?: Record<string, { type?: string | string[] }> }
+    | undefined,
+  key: string,
+): 'array' | 'object' | undefined {
+  const prop = schema?.properties?.[key]
+  if (!prop) return undefined
+  const types = Array.isArray(prop.type)
+    ? prop.type
+    : prop.type
+      ? [prop.type]
+      : []
+  if (types.includes('array')) return 'array'
+  if (types.includes('object')) return 'object'
+  return undefined
+}
+
+/**
+ * 2.1.323 #2198 (official `Wro` / `A5e` / `v5e`): refuses escaped `\uXXXX`
+ * sequences and JSON-encoded string values for structured browser tool inputs
+ * (Claude in Chrome and desktop browser pane) and tells Claude how to respell them.
+ */
+export function validateBrowserToolInput(
+  tool: {
+    name: string
+    inputJSONSchema?: Record<string, unknown>
+  },
+  input: unknown,
+): BrowserInputValidationError | null {
+  if (
+    !isBrowserMcpToolName(tool.name) ||
+    input === null ||
+    typeof input !== 'object' ||
+    Array.isArray(input)
+  ) {
+    return null
+  }
+  const obj = input as Record<string, unknown>
+
+  // 1. Detect JSON-text string sent where an object or array is expected
+  for (const [key, val] of Object.entries(obj)) {
+    if (typeof val !== 'string') continue
+    const trimmed = val.trim()
+    const looksLikeJsonArray = trimmed.startsWith('[') && trimmed.endsWith(']')
+    const looksLikeJsonObject = trimmed.startsWith('{') && trimmed.endsWith('}')
+    if (!looksLikeJsonArray && !looksLikeJsonObject) continue
+
+    const expected = expectsObjectOrArray(
+      tool.inputJSONSchema as
+        | { properties?: Record<string, { type?: string | string[] }> }
+        | undefined,
+      key,
+    )
+    const isKnownStructuredKey =
+      expected !== undefined ||
+      key === 'actions' ||
+      key === 'domains' ||
+      key === 'coordinate'
+    if (!isKnownStructuredKey) continue
+
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(trimmed)
+    } catch {
+      continue
+    }
+    if (parsed !== null && typeof parsed === 'object') {
+      const isList = Array.isArray(parsed)
+      const [kindLabel, exampleShape] = isList
+        ? ['a list', '[ ... ]']
+        : ['an object', '{ ... }']
+      if (
+        val.includes('\\') ||
+        canonicalizeJsonText(val) !== JSON.stringify(parsed) ||
+        isKnownStructuredKey
+      ) {
+        return {
+          errorCode: 'BROWSER_INPUT_JSON_TEXT',
+          message: `InputValidationError: ${tool.name} did not run: its "${key}" came in quotes, as a string of JSON text, and not as ${kindLabel}. ${BROWSER_ESCAPE_HINT} Send the same ${tool.name} call again with "${key}": ${exampleShape} in place of "${key}": "${exampleShape}".`,
+        }
+      }
+    }
+  }
+
+  // 2. Detect disallowed \uXXXX escapes in actions or top-level input
+  const actions = Array.isArray(obj.actions) ? obj.actions : []
+  let badActionIndex = -1
+  let badEscape: { escape: string; namesHosts: boolean } | undefined
+  for (let i = 0; i < actions.length; i++) {
+    const found = findDisallowedEscape(actions[i])
+    if (found !== undefined) {
+      badActionIndex = i
+      badEscape = found
+      break
+    }
+  }
+  if (badEscape === undefined) {
+    badEscape = findDisallowedEscape(obj)
+  }
+  if (badEscape === undefined) return null
+
+  const { escape: esc, namesHosts } = badEscape
+  const actionLabel =
+    badActionIndex === -1 ? 'its input' : `action ${badActionIndex + 1}`
+  const respellGuidance = namesHosts
+    ? 'Write the URL or the domain with no escape in it.'
+    : `${
+        esc.startsWith('\\u00')
+          ? `In a JavaScript string or regular expression write \\x${esc.slice(4)}`
+          : `In a JavaScript string write \\u{${esc.slice(2)}}, which a regular expression takes only with the u flag`
+      }; elsewhere write the character itself. To keep the escape as text, write its backslash as \\x5c in JavaScript or, where typing adds to what a field holds, type the backslash and the rest in two actions.`
+
+  return {
+    errorCode: 'BROWSER_INPUT_ESCAPE',
+    message: `InputValidationError: ${tool.name} did not run: ${actionLabel} holds the escape ${esc}. ${BROWSER_ESCAPE_HINT} ${respellGuidance} Check the rest of the input too: no \\uXXXX escape may stand in a URL or a domain, nor elsewhere one from \\u0020 to \\u007e, \\u2028 or \\u2029. Then make the call again.`,
+  }
+}

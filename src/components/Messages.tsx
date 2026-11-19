@@ -17,6 +17,7 @@ import { useShortcutDisplay } from '../keybindings/useShortcutDisplay.js';
 import type { Screen } from '../screens/REPL.js';
 import type { Tools } from '../Tool.js';
 import { findToolByName } from '../Tool.js';
+import { getDisplayOnlyMcpTool } from './messages/displayOnlyMcpTool.js';
 import type { AgentDefinitionsResult } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js';
 import type {
   AssistantMessage,
@@ -459,6 +460,8 @@ type Props = {
    *  (start === 0); later chunks are mid-stream continuations.
    *  Measured Mar 2026: 538-msg session, 20 slices → −55% plateau RSS. */
   renderRange?: readonly [start: number, end: number];
+  /** Official 2.1.323 (#2032): report total post-collapse row count so chunked export never stops early on an empty chunk. */
+  onRowCount?: (count: number) => void;
 };
 
 const MAX_MESSAGES_TO_SHOW_IN_TRANSCRIPT_MODE = 30;
@@ -1103,6 +1106,7 @@ const MessagesImpl = ({
   setCursor,
   cursorNavRef,
   renderRange,
+  onRowCount,
 }: Props): React.ReactNode => {
   const { columns, rows } = useTerminalSize();
   const isFullscreen = isFullscreenEnvEnabled();
@@ -1424,6 +1428,11 @@ const MessagesImpl = ({
         : collapsed;
   }, [collapsed, renderRange, virtualScrollRuntimeGate, disableRenderCap, rows, isFullscreen, conversationId, verbose]);
 
+  const collapsedRowCount = collapsed.length;
+  React.useLayoutEffect(() => {
+    onRowCount?.(collapsedRowCount);
+  }, [onRowCount, collapsedRowCount]);
+
   const streamingToolUseIDs = useMemo(
     () => new Set(streamingToolUses.map(stu => resolveStreamingToolUseId(stu).id)),
     [streamingToolUses, resolveStreamingToolUseId],
@@ -1572,7 +1581,7 @@ const MessagesImpl = ({
       }
       if (!msg.toolUseResult) return false;
       const name = lookupsRef.current.toolUseByToolUseID.get(b.tool_use_id ?? '')?.name;
-      const tool = name ? findToolByName(tools, name) : undefined;
+      const tool = name ? (findToolByName(tools, name) ?? getDisplayOnlyMcpTool(name)) : undefined;
       return tool?.isResultTruncated?.(msg.toolUseResult as never, { columns }) ?? false;
     },
     [columns, tools, verbose, isTranscriptMode, latestBashOutputUUID],

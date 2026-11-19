@@ -342,6 +342,15 @@ export type ToolUseContext = {
     bareFork?: boolean
   }
   /**
+   * Official 2.1.323 #2199: prompt provenance plumbed from host/SDK turn
+   * metadata so workflow agents can gate out non-human-typed prompts.
+   */
+  promptProvenance?: {
+    isHumanTypedPrompt?: boolean
+    suppressWorkflowKeyword?: boolean
+    origin?: { kind?: string }
+  }
+  /**
    * densable `s.managedPass` — AVt stashes the managed PreToolUse pass so
    * inner PreToolUse can replay it and PostToolUse can exclude policy hooks.
    */
@@ -906,6 +915,12 @@ export type Tool<
    * whole-tool allow grants (see stripWholeToolGrantsForAsk).
    */
   suppressesAlwaysAllowRule?(input: z.infer<Input>): boolean
+  /**
+   * Official 2.1.323 #2173: when true for this input, a whole-tool allow rule
+   * must not skip asking for permission (e.g., externally visible Artifact
+   * updates or unverified audience checks).
+   */
+  ignoresWholeToolAllowRule?(input: unknown): boolean
   isConcurrencySafe(input: z.infer<Input>): boolean
   isEnabled(): boolean
   isReadOnly(input: z.infer<Input>): boolean

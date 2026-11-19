@@ -464,7 +464,14 @@ import { isInBundledMode, isRunningWithBun } from './utils/bundledMode.js';
 import { logForDiagnosticsNoPII } from './utils/diagLogs.js';
 import { filterAllowedSdkBetas } from './utils/betas.js';
 import { filterExistingPaths, getKnownPathsForRepo } from './utils/githubRepoPathMapping.js';
-import { clearPluginCache, loadAllPluginsCacheOnly } from './utils/plugins/pluginLoader.js';
+import {
+  clearPluginCache,
+  getPluginAgentStartupNotice,
+  loadAllPluginsCacheOnly,
+} from './utils/plugins/pluginLoader.js';
+import { getAPIProvider } from './utils/model/providers.js';
+import { applyCodeModePlan, planCodeModeFromSession } from './services/codeMode/executor.js';
+import { codeModeWarningNotice, hasBuiltInEvalTool, settleCodeModeOptInAtStartup } from './services/codeMode/optIn.js';
 import { migrateChangelogFromConfig } from './utils/releaseNotes.js';
 import { SandboxManager } from './utils/sandbox/sandbox-adapter.js';
 import { fetchSession, prepareApiRequest } from './utils/teleport/api.js';
@@ -3455,6 +3462,10 @@ async function run(): Promise<CommanderCommand> {
             settingsErrors: nonMcpErrors,
             onExit: () => gracefulShutdownSync(1),
           });
+          // Blocking modal InvalidSettingsDialog was explicitly displayed and
+          // dismissed by the user above. Inline permission-rule startup warnings
+          // are NOT marked seen here — LogoV2.tsx marks them seen via
+          // PermissionRuleWarningsSeenObserver only once visible in the viewport (#2273).
           const seenKeys = unseen.map(u => u.seenKey).filter((k): k is string => k !== undefined);
           if (seenKeys.length > 0) {
             markSecurityWarningsSeen(seenKeys);
@@ -4164,6 +4175,13 @@ async function run(): Promise<CommanderCommand> {
           }
         }
 
+        // Official 2.1.323 #2211: surface plugin `settings.agent` deprecation notice in text mode.
+        if (outputFormat !== 'json' && outputFormat !== 'stream-json') {
+          const pluginAgentNotice = getPluginAgentStartupNotice();
+          if (pluginAgentNotice) {
+            process.stderr.write(`${pluginAgentNotice}\n`);
+          }
+        }
         logSessionTelemetry();
         profileCheckpoint('before_print_import');
         const { runHeadless } = await import('src/cli/print.js');
@@ -4253,6 +4271,44 @@ async function run(): Promise<CommanderCommand> {
         color?: 'warning';
         priority: 'high';
       }> = [];
+      // Official 2.1.323 #1964: settle Code Mode opt-in for interactive CLI startup.
+      const codeModeDecision = await settleCodeModeOptInAtStartup({
+        isNonInteractive: isNonInteractiveSession,
+        isRemote: remote !== null || teleport !== undefined,
+        isTeammate: Boolean(storedTeammateOpts?.agentId),
+        isRemoteControl: Boolean(remoteControl || getRemoteControlAtStartup()),
+        isBackground: process.env.CLAUDE_CODE_SESSION_KIND === 'bg',
+        isDemoOrCi: isEnvTruthy(process.env.CI) || isEnvTruthy(process.env.IS_DEMO),
+        hasAgentTeams: isAgentSwarmsEnabled(),
+        isFirstPartyProvider: getAPIProvider() === 'firstParty',
+        isOtelEnabled:
+          isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_TELEMETRY) ||
+          isEnvTruthy(process.env.ENABLE_BETA_TRACING_DETAILED),
+        toolsLeaveReplOut:
+          Boolean(
+            toolPermissionContext.restricted ||
+              options.tools !== undefined ||
+              (options.disallowedTools && options.disallowedTools.length > 0),
+          ) && !hasBuiltInEvalTool(tools),
+      });
+      if (codeModeDecision.state === 'refused') {
+        initialNotifications.push({
+          key: 'code-mode-refused-notice',
+          text: codeModeWarningNotice(codeModeDecision.why),
+          color: 'warning',
+          priority: 'high',
+        });
+      }
+      // Official 2.1.323 #2211: surface plugin `settings.agent` deprecation notice on startup.
+      const pluginAgentNotice = getPluginAgentStartupNotice();
+      if (pluginAgentNotice) {
+        initialNotifications.push({
+          key: 'plugin-agent-deprecation-notice',
+          text: pluginAgentNotice,
+          color: 'warning',
+          priority: 'high',
+        });
+      }
       // initialPermissionModeFromCLI runs before agents are loaded, so it cannot
       // see an --agent frontmatter permissionMode. Its scrub branch is an early
       // return, so when scrub is set this is the only other notification source
@@ -4633,16 +4689,51 @@ async function run(): Promise<CommanderCommand> {
             return await exitWithError(root, 'No conversation found to continue');
           }
 
+          // Official 2.1.323 #1964 & 2.1.325 #2316: reconcile Code Mode state
+          // with resumed session, and wait for the next user prompt if it ended mid-script.
+          const continueCodeModePlan = planCodeModeFromSession(
+            {
+              replMode: (result as { replMode?: boolean }).replMode,
+              sessionId: (result as { sessionId?: string }).sessionId ?? getSessionId(),
+              headless: isNonInteractiveSession,
+              withinSession: false,
+              messages: result.messages,
+            },
+            notice => {
+              initialNotifications.push({
+                key: 'code-mode-resume-notice',
+                text: notice,
+                color: 'warning',
+                priority: 'high',
+              });
+            },
+          );
+          if (continueCodeModePlan.refused) {
+            return await exitWithError(root, continueCodeModePlan.refused);
+          }
+          applyCodeModePlan(continueCodeModePlan);
+          const skipAutoResumeForCodeModeContinue = continueCodeModePlan.waitForNextPrompt === true;
+
           const loaded = await processResumedConversation(
             result,
             {
               forkSession: !!options.forkSession,
               includeAttribution: true,
               transcriptPath: result.fullPath,
-              replyOnResume: !!options.replyOnResume,
+              replyOnResume: skipAutoResumeForCodeModeContinue ? false : !!options.replyOnResume,
               continueRequested: true,
             },
-            resumeContext,
+            skipAutoResumeForCodeModeContinue &&
+              resumeContext.initialState.initialMessage &&
+              'replay' in resumeContext.initialState.initialMessage
+              ? {
+                  ...resumeContext,
+                  initialState: {
+                    ...resumeContext.initialState,
+                    initialMessage: null,
+                  },
+                }
+              : resumeContext,
           );
           if (!options.forkSession) {
             const { restoreSessionTaskListId } = await import('./utils/tasks.js');
@@ -4986,6 +5077,24 @@ async function run(): Promise<CommanderCommand> {
           }
         }
 
+        // Official 2.1.325 #2347: `--desktop` requires a Claude account sign-in;
+        // when `!isClaudeAISubscriber()`, name the blocking API key, provider, or setting.
+        if ((options as { desktop?: boolean }).desktop) {
+          if (!isClaudeAISubscriber()) {
+            const { formatDesktopSignInError } = await import('./components/DesktopHandoff.js');
+            return await exitWithError(root, formatDesktopSignInError(), () => gracefulShutdown(1));
+          }
+          const { openCurrentSessionInDesktop } = await import('./utils/desktopDeepLink.js');
+          const desktopResult = await openCurrentSessionInDesktop();
+          if (!desktopResult.success) {
+            return await exitWithError(root, desktopResult.error ?? 'Failed to open Claude Desktop', () =>
+              gracefulShutdown(1),
+            );
+          }
+          await gracefulShutdown(0, 'other');
+          return;
+        }
+
         // --remote and --teleport both create/resume Claude Code Web (CCR) sessions.
         // Remote Control (--rc) is a separate feature gated in initReplBridge.ts.
         if (remote !== null || teleport) {
@@ -5222,6 +5331,10 @@ async function run(): Promise<CommanderCommand> {
               process.exit(0);
             }
             const { branchError } = await checkOutTeleportedSessionBranch(teleportResult.branch);
+            if (!teleportResult.log || teleportResult.log.length === 0) {
+              process.stderr.write(chalk.red('Error: Could not find session history for the teleported session.\n'));
+              await gracefulShutdown(1);
+            }
             messages = processMessagesForTeleportResume(teleportResult.log, branchError);
           } else if (typeof teleport === 'string') {
             logEvent('tengu_teleport_resume_session', {
@@ -5278,6 +5391,14 @@ async function run(): Promise<CommanderCommand> {
               // Use progress UI for teleport
               const { teleportWithProgress } = await import('./components/TeleportProgress.js');
               const result = await teleportWithProgress(root, teleport);
+              // Official 2.1.323 #2073: do not open an empty session when the
+              // server could not find the session's history.
+              if (!result.messages || result.messages.length === 0) {
+                throw new TeleportOperationError(
+                  `Could not find session history for ${teleport}.`,
+                  chalk.red(`Error: Could not find session history for ${teleport}.\n`),
+                );
+              }
               // Track teleported session for reliability logging
               setTeleportedSessionInfo({ sessionId: teleport });
               messages = result.messages;
@@ -5310,13 +5431,49 @@ async function run(): Promise<CommanderCommand> {
                   forkSession: !!options.forkSession,
                 });
                 if (result) {
+                  // Official 2.1.323 #1964 & 2.1.325 #2316: reconcile Code Mode state
+                  // with file-resumed session, waiting for next prompt if ended mid-script.
+                  const fileResumeCodeModePlan = planCodeModeFromSession(
+                    {
+                      replMode: (result as { replMode?: boolean }).replMode,
+                      sessionId: (result as { sessionId?: string }).sessionId ?? getSessionId(),
+                      headless: isNonInteractiveSession,
+                      withinSession: false,
+                      messages: result.messages,
+                    },
+                    notice => {
+                      initialNotifications.push({
+                        key: 'code-mode-resume-notice',
+                        text: notice,
+                        color: 'warning',
+                        priority: 'high',
+                      });
+                    },
+                  );
+                  if (fileResumeCodeModePlan.refused) {
+                    return await exitWithError(root, fileResumeCodeModePlan.refused);
+                  }
+                  applyCodeModePlan(fileResumeCodeModePlan);
+                  const skipAutoResumeForFileCodeMode = fileResumeCodeModePlan.waitForNextPrompt === true;
+
                   processedResume = await processResumedConversation(
                     result,
                     {
                       forkSession: !!options.forkSession,
                       transcriptPath: result.fullPath,
+                      ...(skipAutoResumeForFileCodeMode ? { replyOnResume: false } : {}),
                     },
-                    resumeContext,
+                    skipAutoResumeForFileCodeMode &&
+                      resumeContext.initialState.initialMessage &&
+                      'replay' in resumeContext.initialState.initialMessage
+                      ? {
+                          ...resumeContext,
+                          initialState: {
+                            ...resumeContext.initialState,
+                            initialMessage: null,
+                          },
+                        }
+                      : resumeContext,
                   );
                   if (!options.forkSession) {
                     const { restoreSessionTaskListId } = await import('./utils/tasks.js');
@@ -5372,6 +5529,31 @@ async function run(): Promise<CommanderCommand> {
               return await exitWithError(root, `No conversation found with session ID: ${sessionId}`);
             }
 
+            // Official 2.1.323 #1964 & 2.1.325 #2316: reconcile Code Mode state
+            // with --resume session, waiting for next prompt if ended mid-script.
+            const resumeCodeModePlan = planCodeModeFromSession(
+              {
+                replMode: (result as { replMode?: boolean }).replMode,
+                sessionId,
+                headless: isNonInteractiveSession,
+                withinSession: false,
+                messages: result.messages,
+              },
+              notice => {
+                initialNotifications.push({
+                  key: 'code-mode-resume-notice',
+                  text: notice,
+                  color: 'warning',
+                  priority: 'high',
+                });
+              },
+            );
+            if (resumeCodeModePlan.refused) {
+              return await exitWithError(root, resumeCodeModePlan.refused);
+            }
+            applyCodeModePlan(resumeCodeModePlan);
+            const skipAutoResumeForCodeMode = resumeCodeModePlan.waitForNextPrompt === true;
+
             const fullPath = matchedLog?.fullPath ?? result.fullPath;
             processedResume = await processResumedConversation(
               result,
@@ -5379,9 +5561,19 @@ async function run(): Promise<CommanderCommand> {
                 forkSession: !!options.forkSession,
                 sessionIdOverride: sessionId,
                 transcriptPath: fullPath,
-                replyOnResume: !!options.replyOnResume,
+                replyOnResume: skipAutoResumeForCodeMode ? false : !!options.replyOnResume,
               },
-              resumeContext,
+              skipAutoResumeForCodeMode &&
+                resumeContext.initialState.initialMessage &&
+                'replay' in resumeContext.initialState.initialMessage
+                ? {
+                    ...resumeContext,
+                    initialState: {
+                      ...resumeContext.initialState,
+                      initialMessage: null,
+                    },
+                  }
+                : resumeContext,
             );
             if (!options.forkSession) {
               const { restoreSessionTaskListId } = await import('./utils/tasks.js');
@@ -5777,6 +5969,8 @@ async function run(): Promise<CommanderCommand> {
   );
   // Enable teleport/remote flags for all builds but keep them undocumented until GA
   program.addOption(new Option('--teleport [session]', 'Resume a teleport session, optionally specify session ID'));
+  // Official 2.1.325 #2347: `--desktop` handoff flag
+  program.addOption(new Option('--desktop', 'Continue this session in Claude Desktop'));
   // densable 2.1.283 `--cloud` public; `--remote` hidden alias @192115985
   registerCloudCliOptions(program);
   if (feature('BRIDGE_MODE')) {

@@ -72,6 +72,7 @@ import {
 import {
   applyExecEndpointStrip,
   applyHostManagedWorkerEnv,
+  applyWorkerCredentialSwitchCleanup,
   applyWorkerProviderStrips,
   applyWorkerSessionStrips,
   isBgGatewayMarkEnabled,
@@ -2209,6 +2210,20 @@ export class BgWorker {
         ...(nextTurn ? { nextTurn } : {}),
       })
     ) {
+      // Official 2.1.323 #2132: replying to a blocked session clears the
+      // "Needs input" state immediately so it transitions back to active.
+      if (blocked) {
+        this.record.tempo = 'active'
+        if (state && !isTerminalState(state)) {
+          writeBgJobState(this.dispatch.short, {
+            ...state,
+            tempo: 'active',
+            needs: undefined,
+            block: undefined,
+            updatedAt: new Date().toISOString(),
+          })
+        }
+      }
       return true
     }
     if (nextTurn || (blocked && this.dispatch.launch.mode !== 'exec')) {
@@ -3363,6 +3378,9 @@ export function buildWorkerEnv(
     env.ANTHROPIC_UNIX_SOCKET = process.env.ANTHROPIC_UNIX_SOCKET
   }
   applyHostManagedWorkerEnv(env, process.env, dispatch.env)
+  // Official 2.1.323 #1999: clear stale previous-account credential env vars
+  // whenever dispatch switches to a named Anthropic profile.
+  applyWorkerCredentialSwitchCleanup(env, process.env, dispatch.env)
 
   // If auth snapshot is provided, don't pass OAuth token directly
   if (authPath) delete env.CLAUDE_CODE_OAUTH_TOKEN

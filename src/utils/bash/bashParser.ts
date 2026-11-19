@@ -653,6 +653,26 @@ const QUOTED_OR_COMMENT_TYPES = new Set([
   'heredoc_body',
 ])
 
+/**
+ * Official 2.1.323 #2149 (`Oe.now`): measure parser budget in thread/process
+ * CPU milliseconds instead of wall-clock time so slow/busy machines give the
+ * same permission verdict for the same command.
+ */
+function getParserCpuTimeMs(): number {
+  const proc = process as NodeJS.Process & {
+    threadCpuUsage?: () => NodeJS.CpuUsage
+  }
+  if (typeof proc.threadCpuUsage === 'function') {
+    const { user, system } = proc.threadCpuUsage()
+    return (user + system) / 1000
+  }
+  if (typeof proc.cpuUsage === 'function') {
+    const { user, system } = proc.cpuUsage()
+    return (user + system) / 1000
+  }
+  return performance.now()
+}
+
 function parseSource(source: string, timeoutMs?: number): TsNode | null {
   const L = makeLexer(source)
   const srcBytes = byteLengthUtf8(source)
@@ -662,7 +682,7 @@ function parseSource(source: string, timeoutMs?: number): TsNode | null {
     srcBytes,
     isAscii: srcBytes === source.length,
     nodeCount: 0,
-    deadline: performance.now() + (timeoutMs ?? PARSE_TIMEOUT_MS),
+    deadline: getParserCpuTimeMs() + (timeoutMs ?? PARSE_TIMEOUT_MS),
     aborted: false,
     inBacktick: 0,
     stopToken: null,
@@ -747,7 +767,7 @@ function checkBudget(P: ParseState): void {
     P.aborted = true
     throw new Error('budget')
   }
-  if ((P.nodeCount & 0x7f) === 0 && performance.now() > P.deadline) {
+  if ((P.nodeCount & 0x7f) === 0 && getParserCpuTimeMs() > P.deadline) {
     P.aborted = true
     throw new Error('timeout')
   }

@@ -172,12 +172,22 @@ ${question}`
       ])
     : []
 
+  const promptMessages: Message[] = [
+    ...historyMessages,
+    createUserMessage({ content: wrappedQuestion }),
+  ]
+
+  // Official 2.1.323 (#2075): track UUIDs already in the parent conversation and
+  // prompt prefix so any preserved/replayed parent assistant replies are excluded
+  // from the side-question answer.
+  const inputMessageUuids = new Set<string>([
+    ...cacheSafeParams.forkContextMessages.map(m => m.uuid),
+    ...promptMessages.map(m => m.uuid),
+  ])
+
   try {
     const agentResult = await runForkedAgent({
-      promptMessages: [
-        ...historyMessages,
-        createUserMessage({ content: wrappedQuestion }),
-      ],
+      promptMessages,
       // Do NOT override thinkingConfig — thinking is part of the API cache key,
       // and diverging from the main thread's config busts the prompt cache.
       // Adaptive thinking on a quick Q&A has negligible overhead.
@@ -231,9 +241,11 @@ ${question}`
         : undefined,
     })
 
-    const { response, synthetic } = extractSideQuestionResponse(
+    const newMessages = filterNewSideQuestionMessages(
       agentResult.messages,
+      inputMessageUuids,
     )
+    const { response, synthetic } = extractSideQuestionResponse(newMessages)
     // densable: if (o && c && !u) Scn(e, c)
     if (threadHistory && response && !synthetic) {
       appendBtwHistory(question, response)
@@ -279,13 +291,26 @@ ${question}`
  *   - API error exhausts retries → query yields system api_error + user
  *     interruption, no assistant message at all.
  */
-function extractSideQuestionResponse(messages: Message[]): {
+/**
+ * Official 2.1.323 (#2075): drop any messages whose UUID already existed in the
+ * parent conversation or prompt prefix so earlier replies cannot leak into `/btw`
+ * answers (e.g. via preserved compaction messages).
+ */
+export function filterNewSideQuestionMessages(
+  messages: readonly Message[],
+  inputMessageUuids: ReadonlySet<string>,
+): Message[] {
+  if (inputMessageUuids.size === 0) return [...messages]
+  return messages.filter(m => !inputMessageUuids.has(m.uuid))
+}
+
+export function extractSideQuestionResponse(messages: Message[]): {
   response: string | null
   synthetic: boolean
 } {
-  // Flatten all assistant content blocks across the per-block messages.
+  // Official 2.1.323 Wl (#2075): flatten non-API-error assistant content blocks.
   const assistantBlocks = messages.flatMap(m =>
-    m.type === 'assistant'
+    m.type === 'assistant' && !m.isApiErrorMessage
       ? (m.message!.content as unknown as Array<{
           type: string
           [key: string]: unknown

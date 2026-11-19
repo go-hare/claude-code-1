@@ -1,5 +1,6 @@
 import axios from 'axios';
-import { readFile, stat } from 'fs/promises';
+import { readdir, readFile, stat } from 'fs/promises';
+import { basename, dirname, join } from 'path';
 import * as React from 'react';
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { getIsRemoteMode, getLastAPIRequest } from 'src/bootstrap/state.js';
@@ -17,7 +18,7 @@ import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { queryHaiku } from '../services/api/claude.js';
 import { startsWithApiErrorPrefix } from '../services/api/errors.js';
 import type { Message } from '../types/message.js';
-import { checkAndRefreshOAuthTokenIfNeeded } from '../utils/auth.js';
+import { checkAndRefreshOAuthTokenIfNeeded, getOauthAccountInfo, isAnthropicAuthEnabled } from '../utils/auth.js';
 import { openBrowser } from '../utils/browser.js';
 import { logForDebugging } from '../utils/debug.js';
 import { env } from '../utils/env.js';
@@ -60,6 +61,181 @@ const SCOPE_OPTIONS: Array<{ label: string; value: FeedbackScope }> = [
   { label: 'This session + the last 24 hours', value: 'day' },
   { label: 'This session + the last 7 days', value: 'week' },
 ];
+
+const RECENT_SESSION_SCOPE_MS: Record<Exclude<FeedbackScope, 'session'>, number> = {
+  day: 86_400_000,
+  week: 604_800_000,
+};
+const MAX_RECENT_SESSIONS_TOTAL_BYTES = 1_048_576;
+const SESSION_OWNER_MARKER = '"type":"session-owner"';
+const HISTORY_SUPPRESSION_MARKER = '"type":"history-suppression"';
+const CREDENTIAL_ORG_MARKER = '"type":"credential_org"';
+const ACCOUNT_UUID_RE = /"accountUuid":"([^"]*)"/;
+const ORG_UUID_RE = /"organizationUuid":"([^"]*)"/;
+
+export type TranscriptOwnershipAccount = {
+  accountUuid?: string;
+  organizationUuid?: string;
+};
+
+function safeParseJsonLine(line: string): Record<string, unknown> | undefined {
+  try {
+    const parsed = JSON.parse(line);
+    return parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function sessionOwnerMatchesAccount(
+  recorded: TranscriptOwnershipAccount,
+  current: TranscriptOwnershipAccount | undefined,
+): boolean {
+  if (!current) return false;
+  if (recorded.accountUuid && current.accountUuid) {
+    if (recorded.accountUuid.toLowerCase() !== current.accountUuid.toLowerCase()) return false;
+  } else if (recorded.accountUuid || current.accountUuid) {
+    return false;
+  }
+  if (recorded.organizationUuid && current.organizationUuid) {
+    return recorded.organizationUuid.toLowerCase() === current.organizationUuid.toLowerCase();
+  }
+  return recorded.organizationUuid === current.organizationUuid;
+}
+
+/**
+ * Official 2.1.325 `Mut` (#2320): classify whether a transcript's JSONL lines
+ * belong to the currently signed-in account, organization, another account/org,
+ * or unknown.
+ */
+export function classifyTranscriptOwnership(
+  lines: readonly string[],
+  currentAccount: TranscriptOwnershipAccount | undefined,
+  currentOrgUuid: string | undefined,
+): 'account' | 'organization' | 'other' | 'unknown' {
+  const normalizedOrg = currentOrgUuid?.toLowerCase();
+  if (
+    lines.some(
+      line =>
+        line.includes(HISTORY_SUPPRESSION_MARKER) ||
+        (line.includes(CREDENTIAL_ORG_MARKER) &&
+          (normalizedOrg === undefined || ORG_UUID_RE.exec(line)?.[1]?.toLowerCase() !== normalizedOrg)) ||
+        (line.includes(SESSION_OWNER_MARKER) &&
+          !sessionOwnerMatchesAccount(
+            {
+              accountUuid: ACCOUNT_UUID_RE.exec(line)?.[1],
+              organizationUuid: ORG_UUID_RE.exec(line)?.[1],
+            },
+            currentAccount,
+          )),
+    )
+  ) {
+    return 'other';
+  }
+  if (lines.some(line => line.includes(SESSION_OWNER_MARKER) && safeParseJsonLine(line)?.type === 'session-owner')) {
+    return 'account';
+  }
+  const hasMatchingOrg = lines.some(line => {
+    if (!line.includes(CREDENTIAL_ORG_MARKER)) return false;
+    const parsed = safeParseJsonLine(line);
+    const att = parsed?.attachment as { type?: unknown } | undefined;
+    return parsed?.type === 'attachment' && att?.type === 'credential_org';
+  });
+  return hasMatchingOrg ? 'organization' : 'unknown';
+}
+
+/**
+ * Official 2.1.325 `Z1n` (#2320): returns true only when another session's
+ * transcript was recorded by the signed-in account or organization.
+ */
+export function isTranscriptOwnedByCurrentAccountOrOrg(
+  lines: readonly string[],
+  currentAccount?: TranscriptOwnershipAccount,
+  currentOrgUuid?: string,
+): boolean {
+  const acct =
+    currentAccount ??
+    (() => {
+      const info = getOauthAccountInfo();
+      return info ? { accountUuid: info.accountUuid, organizationUuid: info.organizationUuid } : undefined;
+    })();
+  const org =
+    currentOrgUuid ??
+    (isAnthropicAuthEnabled()
+      ? (process.env.CLAUDE_CODE_OAUTH_TOKEN
+          ? process.env.CLAUDE_CODE_ORGANIZATION_UUID
+          : getOauthAccountInfo()?.organizationUuid
+        )?.toLowerCase()
+      : undefined);
+  const verdict = classifyTranscriptOwnership(lines, acct, org);
+  return verdict === 'account' || verdict === 'organization';
+}
+
+/**
+ * Official 2.1.325 `Hn` (#2320): collect recent project sessions within the
+ * chosen scope (`day` | `week`), withholding any session not recorded by the
+ * currently signed-in account or organization.
+ */
+export async function loadRecentSessionTranscripts(
+  currentTranscriptPath: string,
+  scope: FeedbackScope,
+  opts?: {
+    currentAccount?: TranscriptOwnershipAccount;
+    currentOrgUuid?: string;
+    nowMs?: number;
+  },
+): Promise<Record<string, string> | undefined> {
+  if (scope === 'session') return undefined;
+  const dir = dirname(currentTranscriptPath);
+  const currentName = basename(currentTranscriptPath);
+  const cutoff = (opts?.nowMs ?? Date.now()) - RECENT_SESSION_SCOPE_MS[scope];
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch {
+    return undefined;
+  }
+  const candidates: Array<{ path: string; sessionId: string; mtimeMs: number; size: number }> = [];
+  await Promise.all(
+    entries
+      .filter(name => name.endsWith('.jsonl') && name !== currentName)
+      .map(async name => {
+        const fullPath = join(dir, name);
+        try {
+          const st = await stat(fullPath);
+          if (st.isFile() && st.mtimeMs >= cutoff) {
+            candidates.push({
+              path: fullPath,
+              sessionId: name.slice(0, -6),
+              mtimeMs: st.mtimeMs,
+              size: st.size,
+            });
+          }
+        } catch {
+          // skip unreadable file
+        }
+      }),
+  );
+  candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const transcripts: Record<string, string> = {};
+  let totalBytes = 0;
+  for (const item of candidates) {
+    if (item.size === 0 || totalBytes + item.size > MAX_RECENT_SESSIONS_TOTAL_BYTES) continue;
+    try {
+      const content = await readFile(item.path, 'utf8');
+      if (!content) continue;
+      if (!isTranscriptOwnedByCurrentAccountOrOrg(content.split('\n'), opts?.currentAccount, opts?.currentOrgUuid)) {
+        logForDebugging(`recent session ${item.sessionId} withheld: not_recorded_by_current_account`);
+        continue;
+      }
+      transcripts[item.sessionId] = content;
+      totalBytes += item.size;
+    } catch {
+      // skip unreadable session
+    }
+  }
+  return Object.keys(transcripts).length > 0 ? transcripts : undefined;
+}
 
 const MODE_COPY: Record<
   FeedbackMode,
@@ -370,9 +546,10 @@ export function Feedback({
       const lastAssistantMessage = getLastAssistantMessage(messages);
       const lastAssistantMessageId = lastAssistantMessage?.requestId ?? null;
 
-      const [diskTranscripts, rawTranscriptJsonl] = await Promise.all([
+      const [diskTranscripts, rawTranscriptJsonl, recentSessionTranscripts] = await Promise.all([
         loadAllSubagentTranscriptsFromDisk(),
         loadRawTranscriptJsonl(),
+        isRemote ? Promise.resolve(undefined) : loadRecentSessionTranscripts(getTranscriptPath(), scope),
       ]);
       const teammateTranscripts = extractTeammateTranscriptsFromTasks(backgroundTasks);
       const subagentTranscripts = { ...diskTranscripts, ...teammateTranscripts };
@@ -393,6 +570,7 @@ export function Feedback({
           subagentTranscripts,
         }),
         ...(rawTranscriptJsonl && { rawTranscriptJsonl }),
+        ...(recentSessionTranscripts && { recentSessionTranscripts }),
       };
 
       const [result, t] = await Promise.all([
@@ -432,7 +610,7 @@ export function Feedback({
     } finally {
       sendStore.abandon();
     }
-  }, [abortSignal, backgroundTasks, description, envInfo.isGit, hideGitHubIssue, messages, sendStore]);
+  }, [abortSignal, backgroundTasks, description, envInfo.isGit, hideGitHubIssue, isRemote, messages, scope, sendStore]);
 
   const handleCancel = useCallback(() => {
     if (step === 'done') {
@@ -993,10 +1171,31 @@ export function formatFeedbackFailureMessage(result: FeedbackSubmitResult): stri
     formatServerStatusSuffix(result) ??
     (result.failureReason === 'timeout'
       ? ' (request timed out)'
-      : result.failureReason === 'network_error'
-        ? " (couldn't reach the service)"
-        : '');
+      : result.payloadTooLarge
+        ? ' (report was too large to send)'
+        : result.failureReason === 'network_error'
+          ? " (couldn't reach the service)"
+          : '');
   return `Couldn't send feedback${detail}. If it keeps failing, you can file at ${GITHUB_ISSUES_REPO_URL} instead.`;
+}
+
+/**
+ * Official 2.1.323 (#2087): classify axios/fetch timeout errors (`ECONNABORTED`,
+ * `ETIMEDOUT`, `TimeoutError`) as `'timeout'` so they are never misreported as
+ * payload-too-large.
+ */
+export function isFeedbackTimeoutError(err: unknown): boolean {
+  if (axios.isAxiosError(err)) {
+    return err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT';
+  }
+  if (err instanceof Error && err.name === 'TimeoutError') {
+    return true;
+  }
+  if (err !== null && typeof err === 'object' && 'code' in err) {
+    const code = (err as { code?: unknown }).code;
+    return code === 'ECONNABORTED' || code === 'ETIMEDOUT';
+  }
+  return false;
 }
 
 async function postFeedbackPayload(data: FeedbackData, signal?: AbortSignal): Promise<FeedbackSubmitResult> {
@@ -1065,16 +1264,26 @@ async function postFeedbackPayload(data: FeedbackData, signal?: AbortSignal): Pr
       return parsed;
     }
     sanitizeAndLogError(err);
+    if (isFeedbackTimeoutError(err)) {
+      return { success: false, failureReason: 'timeout' };
+    }
     if (axios.isAxiosError(err)) {
-      return { success: false, failureReason: err.code === 'ECONNABORTED' ? 'timeout' : 'network_error' };
+      return { success: false, failureReason: 'network_error' };
     }
     return { success: false };
   }
 }
 
+// Official 2.1.323 $s (#2087): only retry a timed-out send with stripped
+// transcript when the serialized payload is large (>1/8 of the 10MB ceiling),
+// and never convert a timeout into a payloadTooLarge error.
+const TIMEOUT_STRIP_THRESHOLD_BYTES = Math.floor((10 * 1024 * 1024) / 8);
+
 /**
- * Official 2.1.309 (#1143): if the initial submission fails because the payload
- * is too large (413 or RangeError), strip `transcript` and resend.
+ * Official 2.1.309 (#1143) & 2.1.323 (#2087): if the initial submission fails
+ * because the payload is too large (413 or RangeError), strip `transcript` and
+ * resend. If it times out on a large payload, retry stripped, but if the retry
+ * also times out report `'timeout'` — never misreporting timeout as too large.
  */
 export async function submitFeedback(
   data: FeedbackData,
@@ -1087,6 +1296,17 @@ export async function submitFeedback(
   const first = await sender(data, signal);
   if (!first.success && first.payloadTooLarge && data.transcript.length > 0) {
     return sender({ ...data, transcript: [] }, signal);
+  }
+  if (!first.success && first.failureReason === 'timeout' && data.transcript.length > 0) {
+    let serializedLen = 0;
+    try {
+      serializedLen = jsonStringify(data).length;
+    } catch {
+      serializedLen = TIMEOUT_STRIP_THRESHOLD_BYTES + 1;
+    }
+    if (serializedLen > TIMEOUT_STRIP_THRESHOLD_BYTES) {
+      return sender({ ...data, transcript: [] }, signal);
+    }
   }
   return first;
 }

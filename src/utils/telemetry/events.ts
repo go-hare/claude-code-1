@@ -96,14 +96,88 @@ export function getOTelContentMaxLength(
   )
 }
 
+export type OTelPromptOriginLike = {
+  kind?: string
+  producer?: string
+  senderTaskId?: string
+}
+
+/**
+ * Official 2.1.323 (#2124, `i3r` = `VW || T0` @282091146):
+ * True when a turn's prompt carries a background agent's reply rather than
+ * direct user text:
+ * - `kind === 'task-notification'` produced by a session task (or legacy unset producer)
+ * - `kind === 'peer'` with a `senderTaskId`
+ * - `kind === 'observer'`
+ */
+export function isBackgroundAgentReplyOrigin(
+  origin: OTelPromptOriginLike | undefined,
+): boolean {
+  if (!origin) return false
+  if (
+    origin.kind === 'task-notification' &&
+    (origin.producer === 'session-task' || origin.producer === undefined)
+  ) {
+    return true
+  }
+  if (origin.kind === 'peer' && origin.senderTaskId !== undefined) {
+    return true
+  }
+  return origin.kind === 'observer'
+}
+
 function isUserPromptLoggingEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   return isEnvTruthy(env.OTEL_LOG_USER_PROMPTS)
 }
 
-export function redactIfDisabled(content: string): string {
-  return isUserPromptLoggingEnabled() ? content : '<REDACTED>'
+export function redactIfDisabled(
+  content: string,
+  origin?: OTelPromptOriginLike,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  if (!isUserPromptLoggingEnabled(env)) {
+    return '<REDACTED>'
+  }
+  if (
+    isBackgroundAgentReplyOrigin(origin) &&
+    !isAssistantResponseLoggingEnabled(env)
+  ) {
+    return '<REDACTED>'
+  }
+  return content
+}
+
+/**
+ * Official 2.1.323 (#2124, `qwa` + `NKs` @283995138):
+ * Format `prompt` / `prompt_text` for `user_prompt` OTel events and
+ * interaction spans. When the prompt carries a background agent's reply and
+ * `OTEL_LOG_ASSISTANT_RESPONSES=0`, redact to `<REDACTED>` even when
+ * `OTEL_LOG_USER_PROMPTS=1`.
+ */
+export function formatUserPromptForOTel(
+  content: string | undefined,
+  origin?: OTelPromptOriginLike,
+  env: NodeJS.ProcessEnv = process.env,
+): { prompt: string; prompt_text: string } {
+  if (content === undefined) {
+    return { prompt: '<REDACTED>', prompt_text: '<REDACTED>' }
+  }
+  if (!isUserPromptLoggingEnabled(env)) {
+    return { prompt: '<REDACTED>', prompt_text: '<REDACTED>' }
+  }
+  if (
+    isBackgroundAgentReplyOrigin(origin) &&
+    !isAssistantResponseLoggingEnabled(env)
+  ) {
+    return { prompt: '<REDACTED>', prompt_text: '<REDACTED>' }
+  }
+  const formatted = truncateOTelContent(
+    content,
+    getOTelContentMaxLength(env),
+  ).content
+  return { prompt: formatted, prompt_text: formatted }
 }
 
 /**

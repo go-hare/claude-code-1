@@ -29,6 +29,7 @@ import {
   RESET_SCROLL_REGION,
   setScrollRegion,
 } from './termio/csi.js'
+import { stringWidth } from './stringWidth.js'
 import { LINK_END, link as oscLink } from './termio/osc.js'
 
 type State = {
@@ -784,16 +785,20 @@ function writeCellWithStyleStr(
   cell: Cell,
   styleStr: string,
 ): boolean {
-  const cellWidth = cell.width === CellWidth.Wide ? 2 : 1
+  // Official 2.1.323 (#1989) `Lb`: wide clusters with combining marks can
+  // occupy >= 3 columns; measure actual width and clear trailing cells so no
+  // stale copies remain on screen.
+  const cellWidth =
+    cell.width === CellWidth.Wide ? Math.max(2, stringWidth(cell.char)) : 1
   const px = screen.cursor.x
   const vw = screen.viewportWidth
 
   // Don't write wide chars that would cross the viewport edge.
   // Single-codepoint chars (CJK) at vw-2 are safe; multi-codepoint
   // graphemes (flags, ZWJ emoji) need stricter threshold.
-  if (cellWidth === 2 && px < vw) {
+  if (cellWidth >= 2 && px < vw) {
     const threshold = cell.char.length > 2 ? vw : vw + 1
-    if (px + 2 >= threshold) {
+    if (px + cellWidth >= threshold) {
       return false
     }
   }
@@ -803,17 +808,18 @@ function writeCellWithStyleStr(
     diff.push({ type: 'styleStr', str: styleStr })
   }
 
-  const needsCompensation = cellWidth === 2 && needsWidthCompensation(cell.char)
+  const needsCompensation =
+    cellWidth >= 3 || (cellWidth === 2 && needsWidthCompensation(cell.char))
 
   // On terminals with old wcwidth tables, a compensated emoji only advances
   // the cursor 1 column, so the CHA below skips column x+1 without painting
-  // it. Write a styled space there first — on correct terminals the emoji
-  // glyph (width 2) overwrites it harmlessly; on old terminals it fills the
-  // gap with the emoji's background. Also clears any stale content at x+1.
+  // it. Write styled spaces there first — on correct terminals the glyph
+  // overwrites them harmlessly; on old terminals it fills the gap with the
+  // glyph's background and clears any stale content in trailing cells.
   // CHA is 1-based, so column px+1 (0-based) is CHA target px+2.
   if (needsCompensation && px + 1 < vw) {
     diff.push({ type: 'cursorTo', col: px + 2 })
-    diff.push({ type: 'stdout', content: ' ' })
+    diff.push({ type: 'stdout', content: ' '.repeat(cellWidth - 1) })
     diff.push({ type: 'cursorTo', col: px + 1 })
   }
 

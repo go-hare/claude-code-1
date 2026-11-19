@@ -78,6 +78,27 @@ export function* yieldMissingToolResultBlocks(
 
 export const MAX_OUTPUT_TOKENS_RECOVERY_LIMIT = 3
 
+/** Main-thread max_output_tokens_recovery nudge copy. */
+export const MAIN_MAX_OUTPUT_TOKENS_RECOVERY_PROMPT =
+  `Output token limit hit. Resume directly — no apology, no recap of what you were doing. ` +
+  `Pick up mid-thought if that is where the cut happened. Break remaining work into smaller pieces.`
+
+/**
+ * Official 2.1.325 #2342 (`gGo`): subagent max_output_tokens_recovery asks for
+ * the WHOLE answer again, more briefly, because the caller only receives the
+ * final message rather than concatenated pieces.
+ */
+export const SUBAGENT_MAX_OUTPUT_TOKENS_RECOVERY_PROMPT =
+  `Output token limit hit. Your caller does not receive an answer in pieces. ` +
+  `If you were giving your final answer, give the whole answer again, more briefly — no apology, no mention of the cut-off. ` +
+  `Otherwise continue the work in smaller pieces.`
+
+export function getMaxOutputTokensRecoveryPrompt(isSubagent: boolean): string {
+  return isSubagent
+    ? SUBAGENT_MAX_OUTPUT_TOKENS_RECOVERY_PROMPT
+    : MAIN_MAX_OUTPUT_TOKENS_RECOVERY_PROMPT
+}
+
 /**
  * densable fl(e, o) — emit spinner recovering bag when the loop continues
  * for max_output_tokens_recovery. Gold skips when o (agentId) is set.

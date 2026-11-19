@@ -125,6 +125,15 @@ type OAuthStatus =
 export const AUTH_CODE_REFUSED_MESSAGE =
   "That code wasn't accepted. It may be incomplete, expired, already used, or from an earlier sign-in attempt. Sign in again to get a new code.";
 
+/**
+ * Official 2.1.325 #2287: guard before committing OAuth credentials / settings
+ * so pressing Esc right after the browser step cancels cleanly without
+ * overwriting the user's existing login.
+ */
+export function shouldCommitOAuthResult(signal: { aborted: boolean }): boolean {
+  return !signal.aborted;
+}
+
 export class AuthCodeRefusedError extends Error {
   constructor() {
     super(AUTH_CODE_REFUSED_MESSAGE);
@@ -238,6 +247,9 @@ export function ConsoleOAuthFlow({
   const [copyDebounced, setCopyDebounced] = useState(false);
   const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const usedManualCodeRef = useRef(false);
+  // Official 2.1.325 #2287: track active OAuth attempt cancellation (Esc/unmount)
+  // so an in-flight Console OAuth resolution never overwrites existing login.
+  const oauthAttemptAbortRef = useRef<AbortController | null>(null);
   // densable fr — fullscreen + mouse-on: tell the user how to native-select.
   const [showFullscreenCopyHint] = useState(() => isFullscreenActive() && resolveMouseTrackingMode() !== 'off');
 
@@ -384,6 +396,9 @@ export function ConsoleOAuthFlow({
     usedManualCodeRef.current = false;
     setKeyMintFallbackReason(null);
     let fellBackToApiKey = false;
+    oauthAttemptAbortRef.current?.abort();
+    const attemptController = new AbortController();
+    oauthAttemptAbortRef.current = attemptController;
     try {
       logEvent('tengu_oauth_flow_start', { loginWithClaudeAi });
 
@@ -454,6 +469,13 @@ export function ConsoleOAuthFlow({
           throw err;
         });
 
+      // Official 2.1.325 #2287: if the user pressed Esc right after the browser
+      // step, abort before installOAuthTokens / settings writes so we do not
+      // replace their existing login.
+      if (!shouldCommitOAuthResult(attemptController.signal)) {
+        return;
+      }
+
       if (mode === 'setup-token') {
         // For setup-token mode, return the OAuth access token directly (it can be used as an API key)
         // Don't save to keychain - the token is displayed for manual use with CLAUDE_CODE_OAUTH_TOKEN
@@ -463,7 +485,14 @@ export function ConsoleOAuthFlow({
           skipApiKey: !loginWithClaudeAi && preferConsoleToken && !fellBackToApiKey,
         });
 
+        if (!shouldCommitOAuthResult(attemptController.signal)) {
+          return;
+        }
+
         const orgResult = await validateForceLoginOrg();
+        if (!shouldCommitOAuthResult(attemptController.signal)) {
+          return;
+        }
         if (!orgResult.valid) {
           throw new Error((orgResult as { valid: false; message: string }).message);
         }
@@ -550,9 +579,10 @@ export function ConsoleOAuthFlow({
     }
   }, [mode, oauthStatus, loginWithClaudeAi, onDone]);
 
-  // Cleanup OAuth service when component unmounts
+  // Cleanup OAuth service when component unmounts (including Esc cancel)
   useEffect(() => {
     return () => {
+      oauthAttemptAbortRef.current?.abort();
       oauthService.cleanup();
     };
   }, [oauthService]);

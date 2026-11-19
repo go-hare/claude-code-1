@@ -552,6 +552,38 @@ export function parseHeaders(headerArray: string[]): Record<string, string> {
 }
 
 /**
+ * #2186: Exact name matcher for project (`.mcp.json`) MCP server approvals.
+ * Approval entries written in another spelling no longer silently match;
+ * they ask again.
+ */
+export function matchesProjectMcpApprovalName(
+  configuredEntry: string,
+  serverName: string,
+): boolean {
+  return configuredEntry === serverName
+}
+
+/**
+ * Sticky matcher for project `.mcp.json` denials (`disabledMcpjsonServers`):
+ * exact match, or normalized match for non-plugin servers.
+ */
+function matchesProjectMcpDenialName(
+  configuredEntry: string,
+  serverName: string,
+): boolean {
+  if (configuredEntry === serverName) return true
+  if (
+    configuredEntry.startsWith('plugin:') ||
+    serverName.startsWith('plugin:')
+  ) {
+    return false
+  }
+  return (
+    normalizeNameForMCP(configuredEntry) === normalizeNameForMCP(serverName)
+  )
+}
+
+/**
  * Strict project MCP approval status from settings only.
  * Official 2.1.196+: used by `claude mcp list` / `mcp get` so pending
  * project (.mcp.json) servers are shown without being spawned.
@@ -561,19 +593,19 @@ export function getProjectMcpServerStatusStrict(
   serverName: string,
 ): 'approved' | 'rejected' | 'pending' {
   const settings = getSettings_DEPRECATED()
-  const normalizedName = normalizeNameForMCP(serverName)
 
   if (
-    settings?.disabledMcpjsonServers?.some(
-      name => normalizeNameForMCP(name) === normalizedName,
+    settings?.disabledMcpjsonServers?.some(name =>
+      matchesProjectMcpDenialName(name, serverName),
     )
   ) {
     return 'rejected'
   }
 
+  // #2186: enabledMcpjsonServers approvals require an exact server name match.
   if (
-    settings?.enabledMcpjsonServers?.some(
-      name => normalizeNameForMCP(name) === normalizedName,
+    settings?.enabledMcpjsonServers?.some(name =>
+      matchesProjectMcpApprovalName(name, serverName),
     ) ||
     settings?.enableAllProjectMcpServers
   ) {

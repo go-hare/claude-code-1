@@ -16,6 +16,7 @@ import {
   handleOAuth401Error,
   hasProfileScope,
 } from './auth.js'
+import { isProfileAuthActive } from './anthropicProfile.js'
 import { isInBundledMode } from './bundledMode.js'
 import { getGlobalConfig, saveGlobalConfig } from './config.js'
 import { logForDebugging } from './debug.js'
@@ -796,18 +797,24 @@ export async function prefetchFastModeStatus(): Promise<void> {
   }
 
   // Service key OAuth sessions lack user:profile scope → endpoint 403s.
-  // Resolve orgStatus from cache and bail before burning the throttle window.
-  // API key auth is unaffected.
+  // Keyless Console sign-in (user_oauth profile) does not query this endpoint
+  // either; official 2.1.325 #2285 (`c9e`): never report reason 'preference'
+  // ("Fast mode has been disabled by your organization") when Claude Code has
+  // not asked the server under keyless Console sign-in — use 'unknown' instead.
   const apiKey = getAnthropicApiKey()
   const hasUsableOAuth =
     getClaudeAIOAuthTokens()?.accessToken && hasProfileScope()
   if (!hasUsableOAuth && !apiKey) {
     const isAnt = process.env.USER_TYPE === 'ant'
     const cachedEnabled = getGlobalConfig().penguinModeOrgEnabled === true
+    const isKeylessConsole = isProfileAuthActive()
     orgStatus =
       isAnt || cachedEnabled
         ? { status: 'enabled' }
-        : { status: 'disabled', reason: 'preference' }
+        : {
+            status: 'disabled',
+            reason: isKeylessConsole ? 'unknown' : 'preference',
+          }
     return
   }
 

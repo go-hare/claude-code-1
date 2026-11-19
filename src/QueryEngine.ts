@@ -96,6 +96,10 @@ import {
 import { resolveModelFacts } from './utils/model/modelFacts.js'
 import { loadAllPluginsCacheOnly } from './utils/plugins/pluginLoader.js'
 import {
+  applyPluginToolListDenyRules,
+  applyPluginToolListFilter,
+} from './utils/plugins/pluginToolList.js'
+import {
   type ProcessUserInputContext,
   processUserInput,
 } from './utils/processUserInput/processUserInput.js'
@@ -730,6 +734,8 @@ export type QueryEngineConfig = {
   dropsUnavailableDeferredTool?: boolean
   /** Official toolAliases — SDK-renamed tools for leftover Ld resume. */
   toolAliases?: Record<string, string>
+  /** Official 2.1.323 #2043: true on persisted/remote transports (e.g. sdkUrl). */
+  isPersistedTransport?: boolean
   /**
    * densable `wN`. Print passes one bag into every `ask()`; a missing
    * bag becomes one slot map for this engine.
@@ -835,6 +841,9 @@ export class QueryEngine {
       /** densable 2.1.221 wakeupSource fire stamp */
       wakeupSource?: string
       origin?: MessageOrigin
+      /** Official 2.1.323 #2199: host-provided prompt provenance for workflow gating. */
+      isHumanTypedPrompt?: boolean
+      suppressWorkflowKeyword?: boolean
       shouldQuery?: boolean
       /** densable 2.1.289 print task-notification coalesce hold stamp */
       queryHeldForNextTurn?: boolean
@@ -894,8 +903,25 @@ export class QueryEngine {
       refreshTools,
       refreshMcpClients,
     } = this.config
-    let tools = initialTools
+    let tools = applyPluginToolListFilter(initialTools)
     let mcpClients = initialMcpClients
+    // Official 2.1.323 #2199: forward host prompt provenance onto toolUseContext.
+    const promptProvenance =
+      options?.isHumanTypedPrompt !== undefined ||
+      options?.suppressWorkflowKeyword !== undefined ||
+      options?.origin !== undefined
+        ? {
+            ...(options?.isHumanTypedPrompt !== undefined
+              ? { isHumanTypedPrompt: options.isHumanTypedPrompt }
+              : {}),
+            ...(options?.suppressWorkflowKeyword !== undefined
+              ? { suppressWorkflowKeyword: options.suppressWorkflowKeyword }
+              : {}),
+            ...(options?.origin !== undefined
+              ? { origin: options.origin }
+              : {}),
+          }
+        : undefined
     const replayRequestingStatus =
       includePartialMessages && (replayAcksAtRequestDispatch?.() ?? false)
 
@@ -1091,6 +1117,9 @@ export class QueryEngine {
       setStreamMode: leftoverIhrSdkMode,
       setSDKStatus,
     })
+    if (promptProvenance) {
+      processUserInputContext.promptProvenance = promptProvenance
+    }
 
     // Handle orphaned permission (only once per engine lifetime)
     if (orphanedPermission && !this.hasHandledOrphanedPermission) {
@@ -1242,6 +1271,7 @@ export class QueryEngine {
       modelScheduledOrigin: options?.modelScheduledOrigin,
       wakeupSource: options?.wakeupSource,
       origin: options?.origin,
+      suppressWorkflowKeyword: options?.suppressWorkflowKeyword,
       shouldQuery: options?.shouldQuery,
       queryHeldForNextTurn: options?.queryHeldForNextTurn,
       querySource: 'sdk',
@@ -1365,7 +1395,7 @@ export class QueryEngine {
       const cleared = clearCommandScopedAllowRules(prev.toolPermissionContext)
       return {
         ...prev,
-        toolPermissionContext: {
+        toolPermissionContext: applyPluginToolListDenyRules({
           ...cleared,
           alwaysAllowRules: {
             ...cleared.alwaysAllowRules,
@@ -1376,7 +1406,7 @@ export class QueryEngine {
             command: nextDeny.length > 0 ? nextDeny : undefined,
           },
           pollEventDeliveryGuard: undefined,
-        },
+        }),
       }
     })
 
@@ -1386,7 +1416,7 @@ export class QueryEngine {
     // live tool-name list identity changes (Km analog).
     const toolsBeforeRefresh = tools
     try {
-      const refreshed = refreshTools?.() ?? tools
+      const refreshed = applyPluginToolListFilter(refreshTools?.() ?? tools)
       tools =
         refreshed.length === tools.length &&
         refreshed.every((tool, index) => tool.name === tools[index]?.name)
@@ -1472,6 +1502,9 @@ export class QueryEngine {
       setStreamMode: leftoverIhrSdkMode,
       setSDKStatus,
     })
+    if (promptProvenance) {
+      processUserInputContext.promptProvenance = promptProvenance
+    }
 
     headlessProfilerCheckpoint('before_skills_plugins')
     // Cache-only: headless/SDK/CCR startup must not block on network for
@@ -1484,23 +1517,6 @@ export class QueryEngine {
     ])
     headlessProfilerCheckpoint('after_skills_plugins')
     const { enabled: enabledPlugins, errors: pluginLoadErrors } = pluginLoad
-    const { getPluginErrorMessage, pluginErrorInitPath } = await import(
-      './types/plugin.js'
-    )
-    const pluginErrors = pluginLoadErrors.map(err => {
-      const rec = err as {
-        plugin?: string
-        source: string
-        type: string
-      }
-      const path = pluginErrorInitPath(err)
-      return {
-        plugin: rec.plugin ?? rec.source,
-        type: rec.type,
-        message: getPluginErrorMessage(err),
-        ...(path !== undefined ? { path } : {}),
-      }
-    })
 
     yield buildSystemInitMessage({
       tools,
@@ -1515,7 +1531,9 @@ export class QueryEngine {
       fastMode: initialAppState.fastMode,
       // densable 2.1.219 #4 — yEm() soft-skip store → mcp_server_errors
       mcpServerErrors: getMcpConfigServerErrors(),
-      pluginErrors,
+      // Official 2.1.323 #2043 — selectInitPluginErrors with policyEnabledPluginIds + persisted redaction
+      rawPluginErrors: pluginLoadErrors,
+      isPersistedTransport: this.config.isPersistedTransport,
     })
 
     // Record when system message is yielded for headless latency tracking
@@ -2464,15 +2482,19 @@ export class QueryEngine {
           )?.type ?? 'none')
         : 'n/a'
 
+    // Official 2.1.323 #2145: close any open partial stream blocks BEFORE
+    // flushing transcript writes so streamed replies never drop text from the
+    // middle when the container shuts down partway through a reply.
+    for (const ev of partialStreamCloser.closeAtTurnEnd(currentMessageUsage)) {
+      yield ev as unknown as SDKMessage
+    }
+
     // Flush buffered transcript writes before yielding result.
     // The desktop app kills the CLI process immediately after receiving the
     // result message, so any unflushed writes would be lost.
     if (persistSession) {
+      await recordTranscript(messages)
       await flushSessionStorage()
-    }
-
-    for (const ev of partialStreamCloser.closeAtTurnEnd(currentMessageUsage)) {
-      yield ev as unknown as SDKMessage
     }
 
     const autoModeStopNotice = getAutoModeUnavailableStopNotice()
@@ -2709,6 +2731,8 @@ export async function* ask({
   modelScheduledOrigin,
   wakeupSource,
   origin,
+  isHumanTypedPrompt,
+  suppressWorkflowKeyword,
   shouldQuery,
   queryHeldForNextTurn,
   localStdinOrigin,
@@ -2769,6 +2793,7 @@ export async function* ask({
   deferredToolUse,
   keptDeferredToolNotice,
   dropsUnavailableDeferredTool,
+  isPersistedTransport,
 }: {
   commands: Command[]
   prompt: string | Array<ContentBlockParam>
@@ -2783,6 +2808,8 @@ export async function* ask({
   modelScheduledOrigin?: boolean
   wakeupSource?: string
   origin?: MessageOrigin
+  isHumanTypedPrompt?: boolean
+  suppressWorkflowKeyword?: boolean
   /** densable 2.1.289 print task-notification coalesce */
   shouldQuery?: boolean
   queryHeldForNextTurn?: boolean
@@ -2846,6 +2873,7 @@ export async function* ask({
   deferredToolUse?: HookDeferredToolAttachment
   keptDeferredToolNotice?: string
   dropsUnavailableDeferredTool?: boolean
+  isPersistedTransport?: boolean
 }): AsyncGenerator<SDKMessage, void, unknown> {
   const engine = new QueryEngine({
     cwd,
@@ -2883,6 +2911,7 @@ export async function* ask({
     deferredToolUse,
     keptDeferredToolNotice,
     dropsUnavailableDeferredTool,
+    isPersistedTransport,
     toolState,
     taskRegistry,
     credentials,
@@ -2909,6 +2938,8 @@ export async function* ask({
       modelScheduledOrigin,
       wakeupSource,
       origin,
+      isHumanTypedPrompt,
+      suppressWorkflowKeyword,
       shouldQuery,
       queryHeldForNextTurn,
       localStdinOrigin,

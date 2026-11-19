@@ -37,6 +37,11 @@ import { isEnvDefinedFalsy, isEnvTruthy } from 'src/utils/envUtils.js'
 import { isAutoModeActive } from 'src/utils/permissions/autoModeState.js'
 import { getRuleByContentsForToolName } from 'src/utils/permissions/permissions.js'
 import { isStrictHumanTurnTail } from 'src/utils/turnTail.js'
+import {
+  getAgentContext,
+  isDelegatedObservation,
+} from 'src/utils/agentContext.js'
+import { hasSharedProbeToolUseId } from '../ownership.js'
 import { un } from '../store.js'
 
 /** densable Wu */
@@ -137,8 +142,12 @@ export type AskClassAsk = {
   answeredBy: 'person' | 'classifier'
   remember: 'this_call' | 'artifact'
   basis: 'known' | 'unattended' | 'facts_missing'
-  missing?: 'public' | 'owned' | 'networkOff'
-  about?: 'someone_else' | 'outside_org'
+  missing?: 'public' | 'owned' | 'networkOff' | 'outsideAudience'
+  about?:
+    | 'someone_else'
+    | 'outside_org'
+    | 'outside_audience'
+    | 'outside_comment'
   endpoint?: boolean
   informedOnly?: boolean
 }
@@ -164,6 +173,8 @@ export type ClassFacts = {
   owned?: boolean
   public?: boolean
   outsideOrg?: boolean
+  outsideAudience?: boolean
+  outsideCommentRead?: boolean
   invitedByOtherOrg?: boolean
   networkOff?: boolean
   turnStartedByHuman?: boolean
@@ -179,13 +190,16 @@ export type ShareStatusFacts = {
   mode?: string
   role?: string
   outsideOrgReader?: boolean
+  outsideAudience?: boolean
   lastProbeToolUseId?: string
+  probeSharedWith?: string[]
 }
 
 export type ShareClassFacts = {
   owned: boolean | undefined
   public: boolean | undefined
   outsideOrg: boolean | undefined
+  outsideAudience?: boolean | undefined
   invitedByOtherOrg: boolean
   canWrite?: true
 }
@@ -210,6 +224,11 @@ type PendingClassAsk = {
   title?: string
   reachable: boolean
   askedIn: string
+  /** 2.1.325 #2331 (SEA `onlyAPersonsYesLasts` @303929244): classifier yes covers this call alone. */
+  onlyAPersonsYesLasts?: true
+  about?: AskClassAsk['about']
+  missing?: AskClassAsk['missing']
+  consentKey?: string
 }
 
 type ClassAskCard = {
@@ -335,6 +354,48 @@ function ask(
 
 const NO_ASK: AskClassNoAsk = { ask: false, foreignRead: false }
 
+/**
+ * 2.1.323 #2173 (official `F(e, n)`): ask before updating an artifact when
+ * people outside the user's organization can see it or Claude cannot check
+ * who can.
+ */
+function outsideAudienceWriteRuling(
+  facts: Pick<ClassFacts, 'outsideAudience' | 'outsideCommentRead' | 'owned'>,
+  remember: 'artifact' | 'this_call',
+): AskClassRuling {
+  if (facts.outsideAudience === true) {
+    return {
+      ...ask('public_change', 'classifier', remember, 'known'),
+      about: 'outside_audience',
+    }
+  }
+  if (
+    facts.outsideAudience === undefined &&
+    facts.outsideCommentRead === true
+  ) {
+    return {
+      ...ask(
+        'public_change',
+        'classifier',
+        remember,
+        'facts_missing',
+        'outsideAudience',
+      ),
+      about: 'outside_comment',
+    }
+  }
+  if (facts.outsideAudience === undefined && facts.owned !== false) {
+    return ask(
+      'public_change',
+      'classifier',
+      remember,
+      'facts_missing',
+      'outsideAudience',
+    )
+  }
+  return { ...NO_ASK }
+}
+
 /** densable Sb — class ruling for one artifact operation. */
 export function Sb(facts: ClassFacts): AskClassRuling {
   switch (facts.operation) {
@@ -354,7 +415,7 @@ export function Sb(facts: ClassFacts): AskClassRuling {
           facts.canWrite === true &&
           facts.invitedByOtherOrg !== true
         )
-          return { ...NO_ASK }
+          return outsideAudienceWriteRuling(facts, 'artifact')
         return ask('public_change', 'classifier', 'this_call', 'unattended')
       }
       if (facts.public === true)
@@ -372,7 +433,7 @@ export function Sb(facts: ClassFacts): AskClassRuling {
           ...ask('public_change', 'classifier', 'artifact', 'known'),
           about: 'someone_else',
         }
-      return { ...NO_ASK }
+      return outsideAudienceWriteRuling(facts, 'artifact')
     }
     case 'read': {
       if (facts.owned === true) return { ...NO_ASK }
@@ -419,11 +480,36 @@ export function Sb(facts: ClassFacts): AskClassRuling {
  * `Q` is constant true in this build: private (`public===false`) does not ask;
  * public asks `public_change` this_call known; unknown public is facts_missing.
  */
-export function Izr(facts: Pick<ClassFacts, 'public'>): AskClassRuling {
-  if (!Q || facts.public === false) return { ask: false, foreignRead: false }
-  return facts.public === true
-    ? ask('public_change', 'classifier', 'this_call', 'known')
-    : ask('public_change', 'classifier', 'this_call', 'facts_missing', 'public')
+export function Izr(
+  facts: Pick<
+    ClassFacts,
+    | 'public'
+    | 'invitedByOtherOrg'
+    | 'outsideAudience'
+    | 'outsideCommentRead'
+    | 'owned'
+  >,
+): AskClassRuling {
+  if (!Q) return { ask: false, foreignRead: false }
+  if (facts.public === true) {
+    return ask('public_change', 'classifier', 'this_call', 'known')
+  }
+  if (facts.public === undefined) {
+    return ask(
+      'public_change',
+      'classifier',
+      'this_call',
+      'facts_missing',
+      'public',
+    )
+  }
+  if (facts.invitedByOtherOrg === true) {
+    return {
+      ...ask('public_change', 'classifier', 'this_call', 'known'),
+      about: 'someone_else',
+    }
+  }
+  return outsideAudienceWriteRuling(facts, 'this_call')
 }
 
 /** densable G0 — outside-org public artifact (only while Yw is on). */
@@ -438,11 +524,13 @@ function outsideOrgUnknown(): false | undefined {
 /** densable Iat — class facts from a share-status entry. */
 export function Iat(status: ShareStatusFacts | undefined): ShareClassFacts {
   const invitedByOtherOrg = status?.external === true
+  const outsideAudience = status?.outsideAudience
   if (status === undefined || status.probeFailed === true)
     return {
       owned: undefined,
       public: undefined,
       outsideOrg: G0(status) || outsideOrgUnknown(),
+      outsideAudience: outsideAudience === true ? true : undefined,
       invitedByOtherOrg,
     }
   const isPublic =
@@ -453,12 +541,14 @@ export function Iat(status: ShareStatusFacts | undefined): ShareClassFacts {
       owned: isPublic === true ? false : undefined,
       public: isPublic,
       outsideOrg,
+      outsideAudience,
       invitedByOtherOrg,
     }
   return {
     owned: status.role === 'unknown' ? undefined : status.role === 'owner',
     public: isPublic,
     outsideOrg,
+    outsideAudience,
     invitedByOtherOrg,
     ...((status.role === 'owner' || status.role === 'writer') && {
       canWrite: true as const,
@@ -481,22 +571,27 @@ export function $A(
   status: ShareStatusFacts | undefined,
   env: ClassFactsEnv,
 ): ClassFacts {
-  const share: ShareClassFacts =
-    context.toolUseId !== undefined &&
-    status?.lastProbeToolUseId === context.toolUseId
-      ? Iat(status)
-      : {
-          owned: undefined,
-          public: undefined,
-          outsideOrg: G0(status) || outsideOrgUnknown(),
-          invitedByOtherOrg: status?.external === true,
-        }
+  // 2.1.325 #2312 (SEA `zBe` @303918503): recognize shared parallel probe toolUseIds
+  // so concurrent `read` / `read_db` calls on the user's own artifact all see `owned: true`.
+  const share: ShareClassFacts = hasSharedProbeToolUseId(
+    status,
+    context.toolUseId,
+  )
+    ? Iat(status)
+    : {
+        owned: undefined,
+        public: undefined,
+        outsideOrg: G0(status) || outsideOrgUnknown(),
+        outsideAudience: status?.outsideAudience === true ? true : undefined,
+        invitedByOtherOrg: status?.external === true,
+      }
   return {
     operation,
     artifactId: parsed.slug,
     owned: share.owned,
     public: share.public,
     outsideOrg: share.outsideOrg,
+    outsideAudience: share.outsideAudience,
     invitedByOtherOrg: share.invitedByOtherOrg,
     networkOff: env.networkOff,
     turnStartedByHuman: env.turnStartedByHuman,
@@ -525,8 +620,34 @@ export function E7(
     : Sb(facts)
 }
 
-/** densable VBe */
-export function VBe(ruling: Pick<AskClassAsk, 'class' | 'endpoint'>): string {
+/**
+ * densable VBe / 2.1.325 SEA `Xge` (@286640600):
+ * Partition `public_change` consent keys by audience reason so an approval for
+ * one class (e.g. `audience_unknown` or `someone_else`) does not silently cover
+ * `outside_audience` changes.
+ */
+export function VBe(
+  ruling: Pick<AskClassAsk, 'class' | 'endpoint' | 'about' | 'missing'> & {
+    consentKey?: string
+  },
+): string {
+  if (ruling.consentKey !== undefined) return ruling.consentKey
+  if (ruling.about === 'outside_audience') {
+    return ruling.endpoint
+      ? 'public_change:outside_audience:endpoint'
+      : 'public_change:outside_audience'
+  }
+  if (ruling.about === 'outside_comment') {
+    return 'public_change:outside_comment'
+  }
+  if (ruling.missing === 'outsideAudience' && !ruling.endpoint) {
+    return 'public_change:audience_unknown'
+  }
+  if (ruling.class === 'public_change' && ruling.about === 'someone_else') {
+    return ruling.endpoint
+      ? 'public_change:someone_else:endpoint'
+      : 'public_change:someone_else'
+  }
   return ruling.endpoint ? `${ruling.class}:endpoint` : ruling.class
 }
 
@@ -720,7 +841,8 @@ function classifierDecides(mode: PermissionMode, ignorePlan = false): boolean {
 type ToolDecisionContext = Pick<
   ToolUseContext,
   'getAppState' | 'toolUseId' | 'toolDecisions'
->
+> &
+  Partial<Pick<ToolUseContext, 'agentId'>>
 
 function toolDecisionOf(context: ToolDecisionContext) {
   return context.toolUseId === undefined
@@ -781,8 +903,24 @@ export function PAr(context: ToolDecisionContext): void {
   }
   cne(state.askClassTaken, toolUseId, pending)
   if (byPerson) cne(state.askClassTakenByPerson, toolUseId, true)
+  // 2.1.325 #2329 (SEA `qVn` @303931208): delegated-observation subagents and
+  // non-person subagent approvals must never persist conversation-wide consent.
+  const agentCtx = getAgentContext()
+  if (isDelegatedObservation(agentCtx)) return
+  if (!byPerson && (context.agentId !== undefined || agentCtx !== undefined)) {
+    return
+  }
   for (const taken of pending) {
-    if (taken.remember !== 'artifact' || (!byUser && taken.endpoint)) continue
+    // 2.1.325 #2331 (SEA `qVn` @303931208): for `public_change` asks (e.g.
+    // outside-org / public artifacts), auto-mode classifier yes (`!byPerson`)
+    // covers that single change alone and is NOT persisted to `askClassConsent`.
+    if (
+      taken.remember !== 'artifact' ||
+      (!byUser && taken.endpoint) ||
+      (taken.onlyAPersonsYesLasts === true && !byPerson)
+    ) {
+      continue
+    }
     Ozr(VBe(taken), taken.slug, byPerson)
     if (
       !taken.endpoint &&
@@ -1434,16 +1572,46 @@ export function yNe<I extends Record<string, unknown>>(
 
   const reachable = canReachUser(context)
   const askedIn = KBe()
-  const pending: PendingClassAsk[] = asking.map(entry => ({
-    class: entry.ruling.class,
-    remember: entry.ruling.remember,
-    ...(entry.ruling.endpoint && { endpoint: true as const }),
-    slug: entry.slug,
-    url: entry.display.url,
-    ...(entry.display.title !== undefined && { title: entry.display.title }),
-    reachable,
-    askedIn,
-  }))
+  const pending: PendingClassAsk[] = asking.map(entry => {
+    const base: PendingClassAsk = {
+      class: entry.ruling.class,
+      remember: entry.ruling.remember,
+      ...(entry.ruling.endpoint && { endpoint: true as const }),
+      slug: entry.slug,
+      url: entry.display.url,
+      ...(entry.display.title !== undefined && { title: entry.display.title }),
+      reachable,
+      askedIn,
+      // 2.1.325 #2331 (SEA `PEt` @303929244): in auto mode, a classifier yes
+      // for `public_change` (including outside-org artifacts) covers that
+      // single change alone; only a person's yes lasts for the artifact.
+      ...(entry.ruling.class === 'public_change' && {
+        onlyAPersonsYesLasts: true as const,
+      }),
+    }
+    if (entry.ruling.about === 'outside_audience') {
+      return {
+        ...base,
+        about: 'outside_audience',
+        consentKey: VBe(entry.ruling),
+      }
+    }
+    if (entry.ruling.missing === 'outsideAudience') {
+      return {
+        ...base,
+        missing: 'outsideAudience',
+        consentKey: VBe(entry.ruling),
+      }
+    }
+    if (entry.ruling.about === 'someone_else') {
+      return {
+        ...base,
+        about: 'someone_else',
+        consentKey: VBe(entry.ruling),
+      }
+    }
+    return base
+  })
   NPe(
     context,
     asking

@@ -142,7 +142,7 @@ function renderChromeToolUseMessage(
       return '';
   }
 
-  return secondaryInfo.join(', ') || null;
+  return secondaryInfo.join(', ');
 }
 
 /**

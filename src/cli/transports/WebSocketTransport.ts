@@ -16,6 +16,7 @@ import {
   unregisterSessionActivityCallback,
 } from '../../utils/sessionActivity.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
+import { computeNetworkInterfacesFingerprint } from './SSETransport.js'
 import type { Transport } from './Transport.js'
 
 const KEEP_ALIVE_FRAME = '{"type":"keep_alive"}\n'
@@ -102,6 +103,9 @@ export class WebSocketTransport implements Transport {
 
   // Periodic keep_alive data frames to reset proxy idle timers
   private keepAliveInterval: NodeJS.Timeout | null = null
+  // Network-change fast recovery (#2111)
+  private networkCheckTimer: NodeJS.Timeout | null = null
+  private lastNetworkFingerprint: string | null = null
 
   // Message buffering for replay on reconnection
   private messageBuffer: CircularBuffer<StdoutMessage>
@@ -143,6 +147,7 @@ export class WebSocketTransport implements Transport {
       return
     }
     this.state = 'reconnecting'
+    this.startNetworkChangeMonitor()
 
     this.connectStartTime = Date.now()
     logForDebugging(`WebSocketTransport: Opening ${this.url.href}`)
@@ -513,6 +518,7 @@ export class WebSocketTransport implements Transport {
       }
 
       this.state = 'reconnecting'
+      this.startNetworkChangeMonitor()
       this.reconnectAttempts++
 
       const baseDelay = Math.min(
@@ -571,6 +577,7 @@ export class WebSocketTransport implements Transport {
     // Clear ping and keepalive intervals
     this.stopPingInterval()
     this.stopKeepaliveInterval()
+    this.stopNetworkChangeMonitor()
 
     // Unregister session activity callback
     unregisterSessionActivityCallback()
@@ -639,6 +646,56 @@ export class WebSocketTransport implements Transport {
     // the server confirms receipt on the next reconnection. This prevents
     // message loss if the connection drops after replay but before the server
     // processes the messages.
+  }
+
+  private startNetworkChangeMonitor(): void {
+    if (this.networkCheckTimer) return
+    this.lastNetworkFingerprint = computeNetworkInterfacesFingerprint()
+    this.networkCheckTimer = setInterval(() => {
+      if (this.state === 'closing' || this.state === 'closed') {
+        this.stopNetworkChangeMonitor()
+        return
+      }
+      const next = computeNetworkInterfacesFingerprint()
+      if (
+        this.lastNetworkFingerprint !== null &&
+        next !== this.lastNetworkFingerprint
+      ) {
+        this.lastNetworkFingerprint = next
+        this.onNetworkChange()
+      }
+    }, 3_000)
+    this.networkCheckTimer.unref?.()
+  }
+
+  private stopNetworkChangeMonitor(): void {
+    if (this.networkCheckTimer) {
+      clearInterval(this.networkCheckTimer)
+      this.networkCheckTimer = null
+    }
+  }
+
+  /** Official 2.1.323 #2111: redial immediately when Wi-Fi / VPN changes. */
+  public onNetworkChange(): void {
+    if (this.state === 'closing' || this.state === 'closed') return
+    if (!this.autoReconnect) return
+    logForDebugging(
+      'WebSocketTransport: Network interface change detected — reconnecting immediately',
+    )
+    this.reconnectAttempts = 0
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+      void this.connect()
+      return
+    }
+    if (this.state === 'connected') {
+      this.stopPingInterval()
+      this.stopKeepaliveInterval()
+      this.doDisconnect()
+      this.state = 'reconnecting'
+      void this.connect()
+    }
   }
 
   isConnectedStatus(): boolean {

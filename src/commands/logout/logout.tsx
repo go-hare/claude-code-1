@@ -20,11 +20,23 @@ export async function performLogout({ clearOnboarding = false }): Promise<void> 
   const { flushTelemetry } = await import('../../utils/telemetry/instrumentation.js');
   await flushTelemetry();
 
+  // Official 2.1.323 Tze (#2206): clear in-process OAuth token env var and
+  // wipe secure storage (including stored MCP OAuth logins and plugin secrets)
+  // so every session on the machine is signed out cleanly.
+  delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
   await removeApiKey();
   await removeChatGPTAuth();
   clearChatGPTSettingsAuthMode();
 
-  // Wipe all secure storage data on logout
+  // Clear in-memory MCP auth caches so stale tokens cannot survive logout.
+  try {
+    const { clearMcpAuthCache } = await import('../../services/mcp/connectionHelpers.js');
+    clearMcpAuthCache();
+  } catch {
+    // mcp connectionHelpers optional in isolation
+  }
+
+  // Wipe all secure storage data on logout (OAuth, MCP logins, plugin secrets)
   const secureStorage = getSecureStorage();
   secureStorage.delete();
 
@@ -117,6 +129,28 @@ export async function clearAuthRelatedCaches(): Promise<void> {
     clearClientDataFetches();
   } catch {
     // isolation — optional
+  }
+}
+
+export type FleetHostLogoutBag = {
+  exit: () => void;
+  setError: (msg: string) => void;
+  setInfo: (msg: string) => void;
+};
+
+/**
+ * Official 2.1.323 `i9a` (#2206): `/logout` handler for background / fleet host
+ * sessions — signs out every session on this computer, deletes stored MCP logins
+ * and plugin secrets via `performLogout`, and ends the session via `exit()`.
+ */
+export async function fleetHostLogout({ exit, setError, setInfo }: FleetHostLogoutBag): Promise<void> {
+  setInfo('Signing out…');
+  logOTelAuthEvent({ action: 'logout', success: true, authMethod: 'oauth' });
+  try {
+    await performLogout({ clearOnboarding: true });
+    exit();
+  } catch (err) {
+    setError(`Couldn't sign out — ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 

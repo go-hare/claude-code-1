@@ -22,7 +22,7 @@ import { errorMessage, isENOENT } from '../utils/errors.js'
 import { createSignal } from '../utils/signal.js'
 import { jsonParse } from '../utils/slowOperations.js'
 import { DEFAULT_BINDINGS } from './defaultBindings.js'
-import { parseBindings } from './parser.js'
+import { parseBindings, stripLostModifierBindings } from './parser.js'
 import type { KeybindingBlock, ParsedBinding } from './types.js'
 import {
   checkDuplicateKeysInJson,
@@ -201,7 +201,9 @@ export async function loadKeybindings(): Promise<KeybindingsLoadResult> {
       }
     }
 
-    const userParsed = keepResolvedUserBindings(parseBindings(userBlocks))
+    const userParsed = keepResolvedUserBindings(
+      parseBindings(stripLostModifierBindings(userBlocks)),
+    )
     logForDebugging(
       `[keybindings] Loaded ${userParsed.length} user bindings from ${userPath}`,
     )
@@ -324,7 +326,9 @@ export function loadKeybindingsSyncWithWarnings(): KeybindingsLoadResult {
       return { bindings: cachedBindings, warnings: cachedWarnings }
     }
 
-    const userParsed = keepResolvedUserBindings(parseBindings(userBlocks))
+    const userParsed = keepResolvedUserBindings(
+      parseBindings(stripLostModifierBindings(userBlocks)),
+    )
     logForDebugging(
       `[keybindings] Loaded ${userParsed.length} user bindings from ${userPath}`,
     )

@@ -28,6 +28,8 @@ export type SessionChildSupervisorOpts = {
   sigkillGraceMs: number
   onDebug: (msg: string) => void
   onStatus: (msg: string) => void
+  /** Official 2.1.323 #2172 — release session as paused at max-lifetime deadline instead of killing immediately. */
+  onMaxLifetimeDeadline?: () => void
   /** Test seam — production uses `ug` / killSessionProcessTree. */
   killProcessTree?: typeof killSessionProcessTree
 }
@@ -70,6 +72,21 @@ export class SessionChildSupervisor {
       const maxLifetimeMs = opts.maxLifetimeMs
       this.maxLifetimeTimer = setTimeout(() => {
         if (this.stopped || this.terminating) return
+        if (opts.onMaxLifetimeDeadline) {
+          // Official 2.1.323 #2172: request paused release at deadline (idle,
+          // parked at prompt / connector approval / sign-in, or starting up);
+          // only SIGTERM at the hard cap (maxLifetimeGraceMs past deadline) if
+          // a turn is still running or the server keeps declining release.
+          opts.onMaxLifetimeDeadline()
+          this.maxLifetimeGraceTimer = setTimeout(() => {
+            if (this.stopped || this.terminating) return
+            this.onDebug(
+              `[runner:stuck] Session ${this.sessionId} still running ${this.maxLifetimeGraceMs}ms after max lifetime of ${maxLifetimeMs}ms — aborting child pid=${this.child.pid}`,
+            )
+            this.terminate()
+          }, this.maxLifetimeGraceMs)
+          return
+        }
         if (!this.turnInFlight) {
           this.onDebug(
             `[runner:stuck] Session ${this.sessionId} exceeded max lifetime of ${maxLifetimeMs}ms — aborting child pid=${this.child.pid}`,

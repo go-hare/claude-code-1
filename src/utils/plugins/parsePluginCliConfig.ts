@@ -117,10 +117,20 @@ function findLoadedPlugin(
  * Returns a non-empty string to append under the install success line.
  * Throws when --config was given but cannot be applied (caller may soft-catch).
  */
-export async function applyPostInstallPluginUserConfig(
+export type PostInstallUserConfigResult = {
+  notice: string
+  /** Official 2.1.323 #1978 (`he`): count of userConfig options still unset (>0 only). */
+  unsetOptionCount?: number
+}
+
+/**
+ * densable $Jy + Official 2.1.323 #1978 — after successful install, apply
+ * `--config` values and return both the human notice and `unsetOptionCount`.
+ */
+export async function applyPostInstallPluginUserConfigDetailed(
   pluginId: string,
   configEntries: readonly string[] | undefined,
-): Promise<string> {
+): Promise<PostInstallUserConfigResult> {
   // densable qT() cache clear so just-installed plugin is visible
   clearPluginCache('post-install userConfig')
   const { enabled, disabled } = await loadAllPluginsCacheOnly()
@@ -131,7 +141,7 @@ export async function applyPostInstallPluginUserConfig(
         `--config was given but plugin "${pluginId}" failed to load after install — run \`claude plugin list\` to see why.`,
       )
     }
-    return ''
+    return { notice: '' }
   }
   const userConfig = plugin.manifest.userConfig
   if (!userConfig || Object.keys(userConfig).length === 0) {
@@ -140,7 +150,7 @@ export async function applyPostInstallPluginUserConfig(
         `--config was given but plugin "${pluginId}" declares no userConfig options.`,
       )
     }
-    return ''
+    return { notice: '' }
   }
   if (configEntries && configEntries.length > 0) {
     const values = parsePluginCliConfigFlags(configEntries, userConfig)
@@ -148,13 +158,50 @@ export async function applyPostInstallPluginUserConfig(
   }
   const unconfigured = await getUnconfiguredOptions(plugin)
   const keys = Object.keys(unconfigured)
-  if (keys.length === 0) return ''
+  if (keys.length === 0) return { notice: '' }
   const required = keys.filter(k => userConfig[k]?.required === true)
+  return {
+    notice:
+      `${keys.length} userConfig ${pluralOption(keys.length)} not yet set` +
+      (required.length > 0 ? ` (${required.length} required)` : '') +
+      ` — run /plugin configure ${pluginId} in Claude Code, or pass --config KEY=VALUE.`,
+    unsetOptionCount: keys.length,
+  }
+}
+
+export async function applyPostInstallPluginUserConfig(
+  pluginId: string,
+  configEntries: readonly string[] | undefined,
+): Promise<string> {
   return (
-    `${keys.length} userConfig ${pluralOption(keys.length)} not yet set` +
-    (required.length > 0 ? ` (${required.length} required)` : '') +
-    ` — run /plugin configure ${pluginId} in Claude Code, or pass --config KEY=VALUE.`
-  )
+    await applyPostInstallPluginUserConfigDetailed(pluginId, configEntries)
+  ).notice
+}
+
+/**
+ * Official 2.1.323 #1978: run post-install userConfig notice + capture unsetOptionCount.
+ */
+export async function formatPostInstallUserConfigResult(
+  pluginId: string,
+  configEntries: readonly string[] | undefined,
+): Promise<PostInstallUserConfigResult> {
+  try {
+    return await applyPostInstallPluginUserConfigDetailed(
+      pluginId,
+      configEntries,
+    )
+  } catch (e) {
+    const msg = errorMessage(e)
+    logForDebugging(`post-install userConfig step failed: ${msg}`, {
+      level: 'warn',
+    })
+    if (configEntries && configEntries.length > 0) {
+      return {
+        notice: `${figures.warning} Installed, but --config not applied: ${msg}`,
+      }
+    }
+    return { notice: '' }
+  }
 }
 
 /**
@@ -164,16 +211,6 @@ export async function formatPostInstallUserConfigNotice(
   pluginId: string,
   configEntries: readonly string[] | undefined,
 ): Promise<string> {
-  try {
-    return await applyPostInstallPluginUserConfig(pluginId, configEntries)
-  } catch (e) {
-    const msg = errorMessage(e)
-    logForDebugging(`post-install userConfig step failed: ${msg}`, {
-      level: 'warn',
-    })
-    if (configEntries && configEntries.length > 0) {
-      return `${figures.warning} Installed, but --config not applied: ${msg}`
-    }
-    return ''
-  }
+  return (await formatPostInstallUserConfigResult(pluginId, configEntries))
+    .notice
 }

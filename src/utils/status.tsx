@@ -39,6 +39,7 @@ import { getEnabledSettingSources, getSettingSourceDisplayNameCapitalized } from
 import { getPolicySettingsOrigin, getSettingsForSource } from './settings/settings.js';
 import type { ThemeName } from './theme.js';
 import { isHarborKiteEnabled } from './teleport/cloudPeerAccess.js';
+import { getOtelResourceAttributeStatus } from './telemetryAttributes.js';
 import { getUdsStartFailureReason } from './udsMessaging.js';
 
 export type Property = {
@@ -382,6 +383,14 @@ export async function buildInstallationHealthDiagnostics(): Promise<Diagnostic[]
   }
 
   return items;
+}
+
+/**
+ * Official 2.1.323 (#2123): surface malformed OTEL_RESOURCE_ATTRIBUTES notices
+ * on `/status` without emitting duplicate debug warnings on every render.
+ */
+export function buildTelemetryDiagnostics(): Diagnostic[] {
+  return getOtelResourceAttributeStatus(process.env, { logWarnings: false }).notices;
 }
 
 /**

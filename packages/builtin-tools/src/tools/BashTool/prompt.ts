@@ -12,6 +12,7 @@ import {
 import { isBackgroundTasksDisabled } from 'src/utils/residualFinalEnvGates.js'
 import { shouldIncludeGitInstructions } from 'src/utils/gitSettings.js'
 import { getClaudeTempDir } from 'src/utils/permissions/filesystem.js'
+import { getPlatform } from 'src/utils/platform.js'
 import {
   hasMatchingFunctionHook,
   runFunctionHookChain,
@@ -383,6 +384,11 @@ function getSimpleSandboxSection(): string {
             '"Operation not permitted" errors for file/network operations',
             'Access denied to specific paths outside allowed directories',
             'Network connection failures to non-whitelisted hosts',
+            ...(getPlatform() === 'macos'
+              ? [
+                  'On macOS, a sandboxed command can inspect and signal only the processes it started itself, not those of an earlier command or of the user. `lsof` leaves other processes out and prints no error, so an empty `lsof -i :3000` does not mean the port is free, and libraries that inspect other processes get `AccessDenied` / "Operation not permitted".',
+                ]
+              : []),
             'Unix socket connection errors',
           ],
           'When you see evidence of sandbox-caused failure:',

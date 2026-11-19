@@ -643,6 +643,28 @@ function applyToolStats(e: CollapsedReadSearchGroup, W: BriefToolStats): void {
 }
 
 /**
+ * Official 2.1.325 `ZMo` (#2270): assistant message with end_turn and visible text.
+ */
+function isEndTurnAssistantReply(msg: FocusTranscriptMessage): boolean {
+  return (
+    msg.type === 'assistant' &&
+    msg.message?.stop_reason === 'end_turn' &&
+    isRealAssistantText(msg)
+  )
+}
+
+/**
+ * Official 2.1.325 `eOo` (#2270): system boundary that marks the end of a turn
+ * or the start of a scheduled task firing after an assistant reply.
+ */
+function isTurnEndSystemBoundary(msg: FocusTranscriptMessage): boolean {
+  return (
+    msg.type === 'system' &&
+    (msg.subtype === 'turn_duration' || msg.subtype === 'scheduled_task_fire')
+  )
+}
+
+/**
  * Collapse one focus-transcript pass over messages.
  */
 export function collapseFocusTranscript<T extends FocusTranscriptMessage>(
@@ -659,9 +681,10 @@ export function collapseFocusTranscript<T extends FocusTranscriptMessage>(
   const keepAllText = options.keepAllText === true
   const out: T[] = []
   let a = 0
+  let continueFromSplit = false
   while (a < messages.length) {
     const l = messages[a]!
-    if (!isTurnBoundary(l)) {
+    if (!continueFromSplit && !isTurnBoundary(l)) {
       out.push(l)
       a++
       continue
@@ -674,7 +697,7 @@ export function collapseFocusTranscript<T extends FocusTranscriptMessage>(
     let agentAbsorb = 0
     let bashAbsorb = 0
     const p: T[] = []
-    if (!keepAllText) {
+    if (!keepAllText && !continueFromSplit) {
       // Start absorb at the current boundary user.
       while (a < messages.length) {
         const O = messages[a]!
@@ -687,13 +710,35 @@ export function collapseFocusTranscript<T extends FocusTranscriptMessage>(
         a++
       }
     }
-    if (p.length === 0) {
+    if (!continueFromSplit && p.length === 0) {
       out.push(l)
       a++
     }
     const bodyStart = a
     let f = a
-    while (f < messages.length && !isTurnBoundary(messages[f]!)) f++
+    let sawEndTurnReply = false
+    let splitAfterBoundary = false
+    // Official 2.1.325 (#2270): split when a scheduled task (or turn_duration)
+    // fires after an end_turn reply so the scheduled task's reply starts its
+    // own focus turn instead of hiding the reply to the user's prompt.
+    while (f < messages.length && !isTurnBoundary(messages[f]!)) {
+      const cur = messages[f]!
+      if (
+        cur.type === 'assistant' ||
+        cur.type === 'collapsed_read_search' ||
+        cur.type === 'grouped_tool_use'
+      ) {
+        if (splitAfterBoundary) break
+        sawEndTurnReply = !keepAllText && isEndTurnAssistantReply(cur)
+        splitAfterBoundary =
+          sawEndTurnReply &&
+          cur.type === 'assistant' &&
+          cur.endedRemoteTurn === true
+      } else if (sawEndTurnReply && isTurnEndSystemBoundary(cur)) {
+        splitAfterBoundary = true
+      }
+      f++
+    }
 
     // Open streaming tail
     let m = isLoading && f === messages.length
@@ -943,6 +988,7 @@ export function collapseFocusTranscript<T extends FocusTranscriptMessage>(
       }
     }
     a = f
+    continueFromSplit = a < messages.length && !isTurnBoundary(messages[a]!)
   }
   return out
 }

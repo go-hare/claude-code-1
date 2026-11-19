@@ -5,7 +5,10 @@ import {
 } from '../../services/api/adminRequests.js'
 import { invalidateOverageCreditGrantCache } from '../../services/api/overageCreditGrant.js'
 import { type ExtraUsage, fetchUtilization } from '../../services/api/usage.js'
-import { getUsageCreditsAskAdminHint } from '../../services/rateLimitMessages.js'
+import {
+  getUsageCreditsAskAdminHint,
+  isCloudOrRemoteControlSession,
+} from '../../services/rateLimitMessages.js'
 import { getSubscriptionType } from '../../utils/auth.js'
 import { hasClaudeAiBillingAccess } from '../../utils/billing.js'
 import { openBrowser } from '../../utils/browser.js'
@@ -227,6 +230,17 @@ export async function runExtraUsage(
 
     // densable: return confirm surface; do NOT auto-create here.
     return { type: 'confirm-admin-request', extraUsage }
+  }
+
+  // Official 2.1.323 (#2204): in cloud sessions and under Remote Control,
+  // `/usage-credits` no longer prints a web address.
+  if (isCloudOrRemoteControlSession()) {
+    return {
+      type: 'message',
+      value: isTeamOrEnterprise
+        ? 'Manage usage credits in your organization admin settings.'
+        : 'Manage usage credits in your Claude account settings.',
+    }
   }
 
   const url = isTeamOrEnterprise

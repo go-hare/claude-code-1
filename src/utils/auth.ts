@@ -2,8 +2,9 @@ import axios from 'axios'
 import chalk from 'chalk'
 import { exec } from 'child_process'
 import { execa } from 'execa'
-import { mkdir, rm, stat } from 'fs/promises'
+import { mkdir, readdir, rm, stat, unlink } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
+import { homedir } from 'os'
 import { join, resolve } from 'path'
 import { CLAUDE_AI_PROFILE_SCOPE, getOauthConfig } from 'src/constants/oauth.js'
 import {
@@ -40,6 +41,7 @@ import {
   readGatewayTokenFromDescriptor,
   readOAuthTokenFromFileDescriptor,
 } from './authFileDescriptor.js'
+import { getFsImplementation } from './fsOperations.js'
 import {
   evaluateRemoteAuthFailExit,
   resolveApiKeyHelperTtlMs,
@@ -842,6 +844,130 @@ let awsAuthRefreshLastFinishedAt: number | null = null
 let awsAuthRefreshCooldownEpoch = 0
 /** In-flight refresh promise — concurrent callers share one SSO spawn. */
 let awsAuthRefreshInflight: Promise<boolean> | null = null
+/** Official 2.1.323 (#2007): GCP auth refresh coalescing & cooldown (mirrors AWS). */
+let gcpAuthRefreshLastFinishedAt: number | null = null
+let gcpAuthRefreshInflight: Promise<boolean> | null = null
+
+const AUTH_REFRESH_LOCK_STALE_MS = 5 * 60 * 1000
+const AUTH_REFRESH_LOCK_POLL_MS = 150
+const AUTH_REFRESH_LOCK_MAX_WAIT_MS = 3 * 60 * 1000
+
+/**
+ * Official 2.1.323 (#2007): Cross-process file lock + completion timestamp
+ * marker for `awsAuthRefresh` and `gcpAuthRefresh`.
+ *
+ * When 3+ Claude Code sessions hit expired credentials simultaneously, every
+ * waiter records `waitStartedAt` BEFORE contending for the lock. When the lock
+ * is eventually acquired, if another session completed a refresh AFTER
+ * `waitStartedAt` (recorded in `<lock>.done`), this session skips spawning the
+ * refresh command a second time and returns `true`.
+ */
+export async function runWithCrossProcessAuthRefreshLock(
+  kind: 'aws' | 'gcp',
+  run: () => Promise<boolean>,
+  opts?: { lockDir?: string; pollMs?: number; maxWaitMs?: number },
+): Promise<boolean> {
+  const lockDir = opts?.lockDir ?? getClaudeConfigHomeDir()
+  const lockPath = join(lockDir, `.${kind}-auth-refresh.lock`)
+  const donePath = join(lockDir, `.${kind}-auth-refresh.done`)
+  const pollMs = opts?.pollMs ?? AUTH_REFRESH_LOCK_POLL_MS
+  const maxWaitMs = opts?.maxWaitMs ?? AUTH_REFRESH_LOCK_MAX_WAIT_MS
+  const waitStartedAt = Date.now()
+
+  const readDoneAt = (): number => {
+    try {
+      const raw = getFsImplementation()
+        .readFileSync(donePath, { encoding: 'utf8' })
+        .trim()
+      const parsed = Number(raw)
+      return Number.isFinite(parsed) ? parsed : 0
+    } catch {
+      return 0
+    }
+  }
+
+  let acquired = false
+  try {
+    getFsImplementation().mkdirSync(lockDir)
+  } catch {
+    // ignore mkdir errors — fall through to lock attempt / direct run
+  }
+
+  const deadline = waitStartedAt + maxWaitMs
+  while (Date.now() < deadline) {
+    try {
+      const { openSync, closeSync, writeSync } = await import('fs')
+      const fd = openSync(lockPath, 'wx', 0o600)
+      try {
+        writeSync(fd, `${process.pid}\n${Date.now()}\n`)
+      } finally {
+        closeSync(fd)
+      }
+      acquired = true
+      break
+    } catch (e) {
+      const code =
+        e && typeof e === 'object' && 'code' in e
+          ? String((e as { code?: unknown }).code)
+          : ''
+      if (code !== 'EEXIST') {
+        // Lock dir unwritable or unsupported FS — fall back to running directly.
+        break
+      }
+      // Check if lock file is stale (process crashed)
+      try {
+        const stat = getFsImplementation().statSync(lockPath)
+        if (Date.now() - stat.mtimeMs > AUTH_REFRESH_LOCK_STALE_MS) {
+          getFsImplementation().unlinkSync(lockPath)
+          continue
+        }
+      } catch (statErr) {
+        const statCode =
+          statErr && typeof statErr === 'object' && 'code' in statErr
+            ? String((statErr as { code?: unknown }).code)
+            : ''
+        if (statCode === 'ENOENT') {
+          continue
+        }
+        if (statCode === 'EACCES' || statCode === 'EPERM') {
+          // Permission denied inspecting/removing lock — fall back to running directly.
+          break
+        }
+        // Other non-ENOENT errors fall through to pollMs sleep instead of busy-spinning.
+      }
+      await new Promise(resolve => setTimeout(resolve, pollMs))
+    }
+  }
+
+  try {
+    // If another session completed a refresh after we started waiting, skip
+    // running the refresh command a second time!
+    if (readDoneAt() >= waitStartedAt) {
+      logForDebugging(
+        `Skipping duplicate ${kind}AuthRefresh — another session refreshed after we started waiting`,
+      )
+      return true
+    }
+    const ok = await run()
+    if (ok) {
+      try {
+        const { writeFileSync } = await import('fs')
+        writeFileSync(donePath, String(Date.now()), { mode: 0o600 })
+      } catch {
+        // best-effort marker
+      }
+    }
+    return ok
+  } finally {
+    if (acquired) {
+      try {
+        getFsImplementation().unlinkSync(lockPath)
+      } catch {
+        // ignore cleanup error
+      }
+    }
+  }
+}
 
 /** Cache key for default provider chain: AWS_PROFILE + region. */
 function defaultAwsProviderChainCacheKey(region: string): string {
@@ -902,7 +1028,9 @@ async function runAwsAuthRefresh(): Promise<boolean> {
     }
     awsAuthRefreshInflight = (async () => {
       try {
-        return await refreshAwsAuth(awsAuthRefresh)
+        return await runWithCrossProcessAuthRefreshLock('aws', () =>
+          refreshAwsAuth(awsAuthRefresh),
+        )
       } finally {
         if (cooldownEpoch === awsAuthRefreshCooldownEpoch) {
           awsAuthRefreshLastFinishedAt = Date.now()
@@ -1074,6 +1202,37 @@ export const refreshAndGetAwsCredentials = memoizeWithTTLAsync(
 )
 
 /**
+ * Official 2.1.325 #2294: AWS `credential_process` helpers and Google Cloud
+ * default credentials fail when Claude Code is started without a `HOME`
+ * environment variable. Fall back to `os.homedir()` (reads `/etc/passwd` on
+ * POSIX) and populate `process.env.HOME` when missing on non-Windows so child
+ * `credential_process` helpers and SDK ADC lookups succeed.
+ */
+export function ensureHomeEnvForCloudCredentials(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+  resolveHomedir: () => string = homedir,
+): string | undefined {
+  if (platform === 'win32') {
+    return env.HOME || env.USERPROFILE || undefined
+  }
+  const existing = env.HOME?.trim()
+  if (existing) {
+    return existing
+  }
+  try {
+    const resolved = resolveHomedir()?.trim()
+    if (resolved) {
+      env.HOME = resolved
+      return resolved
+    }
+  } catch {
+    // ignore homedir lookup failure
+  }
+  return undefined
+}
+
+/**
  * Memoized AWS default provider chain for Bedrock when awsCredentialExport
  * is not configured. Official 2.1.207 A4 + resolveWithStallGuard: cache
  * resolved credentials by profile+region and hard-timeout the resolve so
@@ -1083,6 +1242,7 @@ export const getDefaultAwsProviderChain = memoize(
   async (region: string): Promise<() => Promise<AwsResolvedCredentials>> => {
     const resolveOnce = memoizeWithTTLAsync(
       async (): Promise<AwsResolvedCredentials> => {
+        ensureHomeEnvForCloudCredentials()
         logForDebugging(
           `[API:auth] resolving default AWS provider chain (region: ${region})`,
         )
@@ -1217,6 +1377,7 @@ const GCP_CREDENTIALS_CHECK_TIMEOUT_MS = 5_000
  */
 export async function checkGcpCredentialsValid(): Promise<boolean> {
   try {
+    ensureHomeEnvForCloudCredentials()
     // Dynamically import to avoid loading google-auth-library unnecessarily
     const { GoogleAuth } = await import('google-auth-library')
     const auth = new GoogleAuth({
@@ -1265,6 +1426,10 @@ async function runGcpAuthRefresh(): Promise<boolean> {
     }
   }
 
+  if (gcpAuthRefreshInflight) {
+    return gcpAuthRefreshInflight
+  }
+
   try {
     logForDebugging('Checking GCP credentials validity for auth refresh')
     const isValid = await checkGcpCredentialsValid()
@@ -1278,7 +1443,27 @@ async function runGcpAuthRefresh(): Promise<boolean> {
     // Credentials check failed, proceed with refresh
   }
 
-  return refreshGcpAuth(gcpAuthRefresh)
+  if (gcpAuthRefreshInflight) {
+    return gcpAuthRefreshInflight
+  }
+  if (
+    gcpAuthRefreshLastFinishedAt !== null &&
+    Date.now() - gcpAuthRefreshLastFinishedAt < AWS_AUTH_REFRESH_COOLDOWN_MS
+  ) {
+    return false
+  }
+
+  gcpAuthRefreshInflight = (async () => {
+    try {
+      return await runWithCrossProcessAuthRefreshLock('gcp', () =>
+        refreshGcpAuth(gcpAuthRefresh),
+      )
+    } finally {
+      gcpAuthRefreshLastFinishedAt = Date.now()
+      gcpAuthRefreshInflight = null
+    }
+  })()
+  return gcpAuthRefreshInflight
 }
 
 // Timeout for GCP auth refresh command (3 minutes).
@@ -2244,6 +2429,20 @@ export type ActiveConsoleFallbackCredential =
  */
 export function detectActiveConsoleFallbackCredential(): ActiveConsoleFallbackCredential {
   try {
+    // Official 2.1.323 (#2003): custom X-Api-Key header in ANTHROPIC_CUSTOM_HEADERS
+    // supersedes ant auth login / Console fallback billing notices.
+    const rawCustomHeaders = process.env.ANTHROPIC_CUSTOM_HEADERS
+    if (rawCustomHeaders) {
+      for (const line of rawCustomHeaders.split(/\r?\n/)) {
+        const colon = line.indexOf(':')
+        if (colon <= 0) continue
+        const name = line.slice(0, colon).trim().toLowerCase()
+        const value = line.slice(colon + 1).trim()
+        if (name === 'x-api-key' && value.length > 0) {
+          return null
+        }
+      }
+    }
     const { source } = getAnthropicApiKeyWithSource({
       skipRetrievingKeyFromApiKeyHelper: true,
     })
@@ -2550,6 +2749,45 @@ export async function isOAuthRefreshDead(
 
 const ALIVE_HOLDER_WAIT_MS = 7500
 const OAUTH_REFRESH_LOCK_FILENAME = '.oauth_refresh.lock'
+const OAUTH_REFRESH_LOCK_OWNER_TMP_PREFIX = '.oauth_refresh.lock.owner.tmp.'
+
+/**
+ * Official 2.1.325 #2284 — sweep leftover `.oauth_refresh.lock.owner.tmp.*`
+ * files in the config directory so abandoned atomic-write temp files do not
+ * pile up over time. Removes matching temp files older than `minAgeMs`
+ * (default 60s, matching the lock stale window).
+ */
+export async function cleanupStaleOAuthRefreshLockTmpFiles(
+  claudeDir: string,
+  minAgeMs = 60_000,
+): Promise<number> {
+  let removed = 0
+  try {
+    const entries = await readdir(claudeDir)
+    const now = Date.now()
+    for (const entry of entries) {
+      if (!entry.startsWith(OAUTH_REFRESH_LOCK_OWNER_TMP_PREFIX)) {
+        continue
+      }
+      const fullPath = join(claudeDir, entry)
+      try {
+        if (minAgeMs > 0) {
+          const info = await stat(fullPath)
+          if (now - info.mtimeMs < minAgeMs) {
+            continue
+          }
+        }
+        await unlink(fullPath)
+        removed++
+      } catch {
+        // Ignore ENOENT / permission errors for individual tmp files
+      }
+    }
+  } catch {
+    // Config directory unreadable or absent
+  }
+  return removed
+}
 
 export type OAuthRefreshLockSnapshot = {
   contendedLock: 'current' | 'legacy'
@@ -2729,6 +2967,7 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
     logEvent('tengu_oauth_token_refresh_lock_acquiring', {})
     release = await lockfile.lock(claudeDir, lockOpts)
     logEvent('tengu_oauth_token_refresh_lock_acquired', {})
+    void cleanupStaleOAuthRefreshLockTmpFiles(claudeDir)
   } catch (err) {
     releaseHold()
     if ((err as { code?: string }).code === 'ELOCKED') {

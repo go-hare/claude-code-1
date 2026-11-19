@@ -21,47 +21,17 @@ import {
   getClaudeTmuxEnv,
   hasTmuxToolBeenUsed,
 } from '../tmuxSocket.js'
+import { getShellOptionHardeningCommand } from '../Shell.js'
 import { windowsPathToPosixPath } from '../windowsPaths.js'
 import type { ShellProvider } from './shellProvider.js'
 
 /**
- * Returns a shell command to disable extended glob patterns for security.
- * Extended globs (bash extglob, zsh EXTENDED_GLOB) can be exploited via
- * malicious filenames that expand after our security validation.
- *
- * When CLAUDE_CODE_SHELL_PREFIX is set, the actual executing shell may differ
- * from shellPath (e.g., shellPath is zsh but the wrapper runs bash). In this
- * case, we include commands for BOTH shells. We redirect both stdout and stderr
- * to /dev/null because zsh's command_not_found_handler writes to STDOUT.
- *
- * When no shell prefix is set, we use the appropriate command for the detected shell.
+ * Official 2.1.323 #2024: delegate shell option hardening (bash extglob + zsh
+ * EXTENDED_GLOB / BARE_GLOB_QUAL / BRACE_CCL / MAGIC_EQUAL_SUBST / EQUALS) to
+ * `getShellOptionHardeningCommand` in `src/utils/Shell.ts`.
  */
 function getDisableExtglobCommand(shellPath: string): string | null {
-  // Official SHELL_PREFIX densable — wrapper may use a different shell
-  // than shellPath, so we include both bash and zsh commands.
-  let shellPrefix: string | null = process.env.CLAUDE_CODE_SHELL_PREFIX || null
-  try {
-    const { resolveShellPrefix } =
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      require('../residualFinalEnvGates.js') as typeof import('../residualFinalEnvGates.js')
-    shellPrefix = resolveShellPrefix()
-  } catch {
-    // keep raw env fallback
-  }
-  if (shellPrefix) {
-    // Redirect both stdout and stderr because zsh's command_not_found_handler
-    // writes to stdout instead of stderr
-    return '{ shopt -u extglob || setopt NO_EXTENDED_GLOB; } >/dev/null 2>&1 || true'
-  }
-
-  // No shell prefix - use shell-specific command
-  if (shellPath.includes('bash')) {
-    return 'shopt -u extglob 2>/dev/null || true'
-  } else if (shellPath.includes('zsh')) {
-    return 'setopt NO_EXTENDED_GLOB 2>/dev/null || true'
-  }
-  // Unknown shell - do nothing, we don't know the right command
-  return null
+  return getShellOptionHardeningCommand(shellPath)
 }
 
 export async function createBashShellProvider(

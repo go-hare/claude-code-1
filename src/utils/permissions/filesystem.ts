@@ -766,6 +766,65 @@ export function getProjectTempDir(): string {
 }
 
 /**
+ * 2.1.323 #2015 (SEA `EVn` @284917200):
+ * Recognize files inside THIS session's own background command / agent task
+ * output directory (`<claudeTempDir>/<any-project-slug>/<currentSessionId>/tasks/<file>`)
+ * even after `EnterWorktree` changes `originalCwd` (which changes
+ * `getProjectTempDir()`). Prevents spurious permission prompts when Claude
+ * reads the output of a background command or agent started before entering a
+ * worktree, without opening access to other sessions' task outputs.
+ */
+export function isCurrentSessionTaskOutputPath(
+  filePath: string,
+  sessionId: string = getSessionId(),
+): boolean {
+  if (!sessionId) return false
+  const tempRoot = normalize(getClaudeTempDir()).replace(/[\\/]+$/, '')
+  const fs = getFsImplementation()
+  let canonicalTempRoot = tempRoot
+  try {
+    canonicalTempRoot = fs.realpathSync(tempRoot).replace(/[\\/]+$/, '')
+  } catch {
+    // If tempRoot does not exist yet (e.g. /tmp/claude-501 on macOS where /tmp -> /private/tmp),
+    // canonicalize its deepest existing ancestor so both spellings remain valid roots.
+    const tail: string[] = []
+    let cur = tempRoot
+    while (cur !== dirname(cur)) {
+      tail.unshift(basename(cur))
+      cur = dirname(cur)
+      try {
+        canonicalTempRoot = join(fs.realpathSync(cur), ...tail).replace(
+          /[\\/]+$/,
+          '',
+        )
+        break
+      } catch {
+        // continue walking up until an existing ancestor is found
+      }
+    }
+  }
+  const caseInsensitive =
+    getPlatform() === 'windows' || getPlatform() === 'macos'
+  const normCmp = (p: string): string => (caseInsensitive ? p.toLowerCase() : p)
+  const validRoots = new Set([normCmp(tempRoot), normCmp(canonicalTempRoot)])
+
+  // Require EVERY path spelling (original, intermediate symlink targets, and final realpath)
+  // to stay inside this session's own `tasks/` directory so a symlink inside `tasks/`
+  // cannot bypass Read permissions to access arbitrary files outside it.
+  const candidates = getPathsForPermissionCheck(filePath)
+  if (candidates.length === 0) return false
+  return candidates.every(candidate => {
+    const dir = dirname(normalize(candidate))
+    if (normCmp(basename(dir)) !== 'tasks') return false
+    const sessionDir = dirname(dir)
+    if (basename(sessionDir) !== sessionId) return false
+    const projectDir = dirname(sessionDir)
+    const rootDir = dirname(projectDir).replace(/[\\/]+$/, '')
+    return validRoots.has(normCmp(rootDir))
+  })
+}
+
+/**
  * Returns the scratchpad directory path for the current session.
  * Path format: /tmp/claude-{uid}/{sanitized-cwd}/{sessionId}/scratchpad/
  */
@@ -2213,6 +2272,43 @@ function getPatternsByRoot(
   return patternsByRoot
 }
 
+/**
+ * Official 2.1.325 #2321 (`Ffn` / `Cc` @284817729):
+ * Resolve base roots for relative path rules (e.g. `Read(./.env)`):
+ * - For `allow` rules: only current `cwd` (unchanged).
+ * - For `deny` and `ask` rules: `cwd`, `originalCwd` (project root even after
+ *   `cd`), and every directory in `additionalWorkingDirectories` (plus their
+ *   canonical symlink targets when distinct).
+ */
+export function getRelativeRuleCandidateRoots(
+  behavior: 'allow' | 'deny' | 'ask',
+  toolPermissionContext: ToolPermissionContext,
+): string[] {
+  const cwd = getCwd()
+  if (behavior === 'allow') {
+    return [cwd]
+  }
+  const roots = new Set<string>([cwd, getOriginalCwd()])
+  for (const addedDir of toolPermissionContext.additionalWorkingDirectories.keys()) {
+    if (addedDir && !addedDir.includes('\0')) {
+      roots.add(addedDir)
+      for (const resolved of workingDirPathsForPermission(addedDir)) {
+        if (resolved && !resolved.includes('\0')) {
+          roots.add(resolved)
+        }
+      }
+    }
+  }
+  for (const resolvedOriginal of workingDirPathsForPermission(
+    getOriginalCwd(),
+  )) {
+    if (resolvedOriginal && !resolvedOriginal.includes('\0')) {
+      roots.add(resolvedOriginal)
+    }
+  }
+  return Array.from(roots)
+}
+
 export function matchingRuleForInput(
   path: string,
   toolPermissionContext: ToolPermissionContext,
@@ -2232,6 +2328,10 @@ export function matchingRuleForInput(
     behavior,
   )
   const allowMode = behavior === 'allow'
+  const relativeRoots = getRelativeRuleCandidateRoots(
+    behavior,
+    toolPermissionContext,
+  )
 
   // Check each root for a matching pattern
   for (const [root, patternMap] of patternsByRoot.entries()) {
@@ -2241,44 +2341,47 @@ export function matchingRuleForInput(
     )
 
     const ig = ignore().add(patterns)
+    const candidateRoots = root !== null ? [root] : relativeRoots
 
-    // Use cross-platform relative path helper for POSIX-style patterns
-    const relativePathStr = relativePath(
-      root ?? getCwd(),
-      fileAbsolutePath ?? getCwd(),
-    )
+    for (const candidateRoot of candidateRoots) {
+      // Use cross-platform relative path helper for POSIX-style patterns
+      const relativePathStr = relativePath(
+        candidateRoot,
+        fileAbsolutePath ?? getCwd(),
+      )
 
-    if (relativePathStr.startsWith(`..${DIR_SEP}`)) {
-      // The path is outside the root, so ignore it
-      continue
-    }
-
-    // Important: ig.test throws if you give it an empty string
-    if (!relativePathStr) {
-      continue
-    }
-
-    const igResult = ig.test(relativePathStr)
-
-    if (igResult.ignored && igResult.rule) {
-      // densable zw reverse-map of ignore pattern → original rule
-      const matched = igResult.rule.pattern
-      const withWildcard = `${matched}/**`
-      // For allow + single-segment (`/src` from `src/**`), do NOT recover via
-      // bare `src/**` any-depth branch — only via leading-`/` reverse map.
-      if (
-        patternMap.has(withWildcard) &&
-        (matched.includes('/') || behavior !== 'allow')
-      ) {
-        return patternMap.get(withWildcard) ?? null
+      if (relativePathStr.startsWith(`..${DIR_SEP}`)) {
+        // The path is outside the root, so ignore it
+        continue
       }
-      if (matched.startsWith('/')) {
-        const singleSegmentOriginal = `${matched.slice(1)}/**`
-        if (patternMap.has(singleSegmentOriginal)) {
-          return patternMap.get(singleSegmentOriginal) ?? null
+
+      // Important: ig.test throws if you give it an empty string
+      if (!relativePathStr) {
+        continue
+      }
+
+      const igResult = ig.test(relativePathStr)
+
+      if (igResult.ignored && igResult.rule) {
+        // densable zw reverse-map of ignore pattern → original rule
+        const matched = igResult.rule.pattern
+        const withWildcard = `${matched}/**`
+        // For allow + single-segment (`/src` from `src/**`), do NOT recover via
+        // bare `src/**` any-depth branch — only via leading-`/` reverse map.
+        if (
+          patternMap.has(withWildcard) &&
+          (matched.includes('/') || behavior !== 'allow')
+        ) {
+          return patternMap.get(withWildcard) ?? null
         }
+        if (matched.startsWith('/')) {
+          const singleSegmentOriginal = `${matched.slice(1)}/**`
+          if (patternMap.has(singleSegmentOriginal)) {
+            return patternMap.get(singleSegmentOriginal) ?? null
+          }
+        }
+        return patternMap.get(matched) ?? null
       }
-      return patternMap.get(matched) ?? null
     }
   }
 
@@ -3383,8 +3486,13 @@ export function checkReadableInternalPath(
   // Project temp directory (/tmp/claude/{sanitized-cwd}/)
   // Intentionally allows reading files from all sessions in this project, not just the current session.
   // This enables cross-session file access within the same project's temp space.
+  // 2.1.323 #2015: Also allow this session's own task output files created
+  // before entering a worktree (when `originalCwd` / `getProjectTempDir()` changed).
   const projectTempDir = getProjectTempDir()
-  if (normalizedPath.startsWith(projectTempDir)) {
+  if (
+    normalizedPath.startsWith(projectTempDir) ||
+    isCurrentSessionTaskOutputPath(normalizedPath)
+  ) {
     return {
       behavior: 'allow',
       updatedInput: input,

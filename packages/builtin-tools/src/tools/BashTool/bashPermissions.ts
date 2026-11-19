@@ -648,6 +648,10 @@ export function stripSafeWrappers(command: string): string {
     // above so not over-stripping here is safe. Main need: `stdbuf -o0 cmd`.
     /^stdbuf(?:[ \t]+-[ioe][LN0-9]+)+[ \t]+(?:--[ \t]+)?/,
     /^nohup[ \t]+(?:--[ \t]+)?/,
+    // Official 2.1.325 #2325 (`DT` @290086000): peel `command`, `builtin`, `noglob`.
+    /^command(?:[ \t]+-p+)*(?:[ \t]+--)?[ \t]+(?!-)/,
+    /^builtin(?:[ \t]+--)?[ \t]+(?!-)/,
+    /^noglob[ \t]+(?!-)/,
   ] as const
 
   // Pattern for environment variables:
@@ -785,28 +789,398 @@ function argvTokensForDeny(command: string): string[] {
 }
 
 /**
- * densable `eut` leading-assign peel used by T4 deny/ask matching.
- * `TZ="$HOME" rm` stays one argv token; Eue's `$`-excluding regex will not
- * strip it, but this does.
+ * Official 2.1.323 `pSr` / `mSr` / `gSr` / `JVe` (#2020, #2021):
+ * Comprehensive wrapper-peeling tables for deny/ask rule matching and
+ * attached-wildcard allow checking. Handles `sudo`, `env`, `doas`, `pkexec`,
+ * `watch`, `ionice`, `setsid`, `taskset`, `chrt`, `strace`, `ltrace`, `flock`,
+ * `script`, `unshare`, `nsenter`, `exec`, `command`, `builtin`, `noglob`,
+ * `nocorrect` — including combined short flags (e.g. `sudo -nu root`) when
+ * `wide: true`, inline `-S`/`-c` subcommands, and `env`/`sudo` `VAR=val`.
  */
-export function eutPeelArgv(argv: string[]): string[] {
-  let tokens = argv.slice()
-  while (tokens.length > 0 && ENV_VAR_ASSIGN_RE.test(tokens[0]!)) {
-    tokens = tokens.slice(1)
+const WRAPPER_VALUE_FLAGS: Readonly<Record<string, ReadonlySet<string>>> = {
+  env: new Set(['-u', '-C', '--unset', '--chdir']),
+  sudo: new Set([
+    '-u',
+    '-g',
+    '-U',
+    '-C',
+    '-D',
+    '-h',
+    '-p',
+    '-r',
+    '-R',
+    '-t',
+    '-T',
+    '--user',
+    '--group',
+    '--other-user',
+    '--close-from',
+    '--chdir',
+    '--host',
+    '--prompt',
+    '--role',
+    '--chroot',
+    '--type',
+    '--command-timeout',
+    '-a',
+    '--auth-type',
+  ]),
+  doas: new Set(['-a', '-u', '-C']),
+  pkexec: new Set(['--user']),
+  watch: new Set(['-n', '--interval', '--equexit']),
+  ionice: new Set([
+    '-c',
+    '-n',
+    '-p',
+    '-P',
+    '-u',
+    '--class',
+    '--classdata',
+    '--pid',
+    '--pgid',
+    '--uid',
+  ]),
+  setsid: new Set([]),
+  taskset: new Set(['-c', '--cpu-list']),
+  chrt: new Set([
+    '-p',
+    '--pid',
+    '-T',
+    '-P',
+    '-D',
+    '--sched-runtime',
+    '--sched-period',
+    '--sched-deadline',
+  ]),
+  strace: new Set([
+    '-e',
+    '-o',
+    '-p',
+    '-s',
+    '-E',
+    '-P',
+    '-S',
+    '-a',
+    '-b',
+    '-I',
+    '-u',
+    '-X',
+    '-O',
+    '-U',
+    '--output',
+    '--trace',
+    '--expr',
+    '--attach',
+    '--string-limit',
+    '--env',
+    '--trace-path',
+    '--columns',
+    '--user',
+    '--interruptible',
+    '--detach-on',
+    '--const-print-style',
+    '--summary-sort-by',
+    '--summary-syscall-overhead',
+    '--summary-columns',
+  ]),
+  ltrace: new Set([
+    '-a',
+    '-A',
+    '-e',
+    '-l',
+    '-n',
+    '-o',
+    '-p',
+    '-s',
+    '-u',
+    '-x',
+    '-D',
+    '-F',
+    '--align',
+    '--config',
+    '--debug',
+    '--indent',
+    '--library',
+    '--output',
+    '--string-max',
+    '-w',
+    '--where',
+  ]),
+  flock: new Set(['-w', '-E', '--timeout', '--wait', '--conflict-exit-code']),
+  script: new Set([
+    '-E',
+    '-T',
+    '-m',
+    '-o',
+    '-O',
+    '-B',
+    '-I',
+    '--echo',
+    '--log-timing',
+    '--logging-format',
+    '--output-limit',
+    '--log-out',
+    '--log-io',
+    '--log-in',
+  ]),
+  unshare: new Set([
+    '-R',
+    '-w',
+    '-S',
+    '-G',
+    '--setuid',
+    '--setgid',
+    '--root',
+    '--wd',
+    '--propagation',
+    '--setgroups',
+    '--monotonic',
+    '--boottime',
+  ]),
+  nsenter: new Set(['-t', '-S', '-G', '--target', '--setuid', '--setgid']),
+  exec: new Set(['-a']),
+  command: new Set([]),
+  builtin: new Set([]),
+  noglob: new Set([]),
+  nocorrect: new Set([]),
+}
+
+const WRAPPER_INLINE_CMD_FLAGS: Readonly<Record<string, ReadonlySet<string>>> =
+  {
+    env: new Set(['-S', '--split-string']),
+    flock: new Set(['-c', '--command']),
+    script: new Set(['-c', '--command']),
   }
-  for (let round = 0; round < 8; round++) {
-    const peeled = peelPrivilegePrefixes(tokens)
-    const wrapperStripped = stripWrappersFromArgv(peeled)
-    if (
-      wrapperStripped.length === tokens.length &&
-      wrapperStripped.every((t, i) => t === tokens[i])
-    ) {
-      tokens = wrapperStripped
+
+const WRAPPER_POSITIONAL_PREAMBLE: Readonly<
+  Record<string, (tok: string) => boolean>
+> = {
+  chrt: tok => /^\d+$/.test(tok),
+  taskset: tok => /^(?:0x[\da-f]+|\d+)$/i.test(tok),
+  flock: () => true,
+  script: () => true,
+}
+
+const WRAPPER_ENV_ASSIGN_RE = /^[A-Za-z_][A-Za-z0-9_]*\+?=/
+
+/**
+ * Official 2.1.323 `JVe(argv, { wide })` (#2020, #2021):
+ * Peels leading env assignments, safe wrappers (`time`/`nohup`/`timeout`/`nice`/`stdbuf`),
+ * and privilege/process wrappers (`sudo`, `env`, `doas`, `pkexec`, `strace`, `unshare`, etc.).
+ * When `wide: true`, also recognizes combined short flags whose final char takes an
+ * argument (e.g. `sudo -nu root`) and `sudo VAR=val`.
+ */
+export function eutPeelArgv(
+  argv: string[],
+  options: { wide?: boolean } = {},
+): string[] {
+  const wide = options.wide === true
+  let cur = argv.slice()
+  for (let guard = 0; guard < 16; guard++) {
+    while (cur[0] !== undefined && WRAPPER_ENV_ASSIGN_RE.test(cur[0])) {
+      cur = cur.slice(1)
+    }
+    cur = stripWrappersFromArgv(cur)
+    if (cur[0] === undefined) return cur
+    const name = basenameCommand(cur[0])
+    const valueFlags = Object.hasOwn(WRAPPER_VALUE_FLAGS, name)
+      ? WRAPPER_VALUE_FLAGS[name]
+      : undefined
+    if (valueFlags === undefined) return cur
+    const inlineFlags = Object.hasOwn(WRAPPER_INLINE_CMD_FLAGS, name)
+      ? WRAPPER_INLINE_CMD_FLAGS[name]
+      : undefined
+    const positionalMatcher = Object.hasOwn(WRAPPER_POSITIONAL_PREAMBLE, name)
+      ? WRAPPER_POSITIONAL_PREAMBLE[name]
+      : undefined
+
+    let idx = 1
+    let inlineCmd: string | undefined
+    let consumedPositional = false
+    while (idx < cur.length) {
+      const tok = cur[idx]!
+      if (tok === '--') {
+        idx++
+        if (
+          !consumedPositional &&
+          positionalMatcher !== undefined &&
+          idx + 1 < cur.length &&
+          positionalMatcher(cur[idx]!)
+        ) {
+          consumedPositional = true
+          idx++
+          continue
+        }
+        break
+      }
+      if (inlineFlags !== undefined) {
+        if (inlineFlags.has(tok) && cur[idx + 1] !== undefined) {
+          const body = cur[idx + 1]!.trim()
+          if (body !== '') {
+            inlineCmd = body
+            break
+          }
+          idx += 2
+          continue
+        }
+        const eqIdx = tok.indexOf('=')
+        if (eqIdx > 0 && inlineFlags.has(tok.slice(0, eqIdx))) {
+          const body = tok.slice(eqIdx + 1).trim()
+          if (body !== '') {
+            inlineCmd = body
+            break
+          }
+          idx++
+          continue
+        }
+        if (
+          tok.length > 2 &&
+          tok[1] !== '-' &&
+          inlineFlags.has(tok.slice(0, 2))
+        ) {
+          const body = tok.slice(2).trim()
+          if (body !== '') {
+            inlineCmd = body
+            break
+          }
+          idx++
+          continue
+        }
+      }
+      if (
+        tok.startsWith('-') &&
+        (tok !== '-' || positionalMatcher === undefined)
+      ) {
+        if (name === 'command' && /^-[pvV]+$/.test(tok) && /[vV]/.test(tok)) {
+          return cur
+        }
+        const takesArg =
+          valueFlags.has(tok) ||
+          (wide &&
+            /^-[A-Za-z]+$/.test(tok) &&
+            tok
+              .slice(1)
+              .split('')
+              .findIndex(ch => valueFlags.has(`-${ch}`)) ===
+              tok.length - 2)
+        idx += takesArg && idx + 1 < cur.length ? 2 : 1
+        continue
+      }
+      if (
+        wide
+          ? (name === 'env' || (name === 'sudo' && !tok.startsWith('/'))) &&
+            tok.includes('=')
+          : name === 'env' && WRAPPER_ENV_ASSIGN_RE.test(tok)
+      ) {
+        idx++
+        continue
+      }
+      if (
+        !consumedPositional &&
+        positionalMatcher?.(tok) &&
+        idx + 1 < cur.length
+      ) {
+        consumedPositional = true
+        idx++
+        continue
+      }
       break
     }
-    tokens = wrapperStripped
+    if (inlineCmd !== undefined) {
+      const reparsed = inlineCmd.trim().split(/\s+/).filter(Boolean)
+      if (reparsed.length === 0) return argv.slice()
+      cur = reparsed
+      continue
+    }
+    if (idx >= cur.length) return cur
+    cur = cur.slice(idx)
   }
-  return tokens
+  return cur
+}
+
+// Official 2.1.323 `SSr` (#2018, #2021): block Bash allow rules with an
+// attached wildcard (no space before `*`, e.g. `Bash(ls*)`, `Bash(NODE_ENV*)`,
+// `Bash(sudo -nu foo ls*)`) when the matched token extends into an assignment,
+// shell syntax, or a different command/variable rather than a safe path suffix.
+const ATTACHED_WILDCARD_SAFE_CHARS = String.raw`\p{L}\p{M}\p{N}_.+\-:@%,~`
+const ATTACHED_WILDCARD_SAFE_TAIL_RE = new RegExp(
+  `^[${ATTACHED_WILDCARD_SAFE_CHARS}/]*$`,
+  'u',
+)
+const ATTACHED_WILDCARD_PATH_START_RE = new RegExp(
+  `^(?:['"]|(?!\\d+<)[${ATTACHED_WILDCARD_SAFE_CHARS}]*[</])`,
+  'u',
+)
+const SHELL_TOKEN_UNIT_RE_SRC = String.raw`(?:\\.|[^\\ '"]|'[^']*'|"(?:\\.|[^"\\])*")*`
+const SHELL_TOKEN_PREFIX_RE = new RegExp(
+  `^(?:${SHELL_TOKEN_UNIT_RE_SRC} )*`,
+  's',
+)
+const SHELL_SINGLE_TOKEN_RE = new RegExp(`^${SHELL_TOKEN_UNIT_RE_SRC}$`, 's')
+const SHELL_TOKEN_SCAN_RE = new RegExp(
+  SHELL_TOKEN_UNIT_RE_SRC.replace(/\*$/, '+'),
+  'gs',
+)
+
+export function isAttachedWildcardAllowBlocked(
+  pattern: string,
+  command: string,
+): boolean {
+  const literalPrefix = (/^(?:\\[*\\]|[^*])*/.exec(pattern.trim())?.[0] ?? '')
+    .replace(/\\([*\\])/g, '$1')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/^(?:xargs )+(?!-)/, '')
+  const normalizedCmd = command
+    .replace(/[ \t]+/g, ' ')
+    .replace(/^(?:xargs )+(?!-)/, '')
+  const attachedHead = literalPrefix.slice(
+    SHELL_TOKEN_PREFIX_RE.exec(literalPrefix)?.[0].length ?? 0,
+  )
+  if (
+    attachedHead === '' ||
+    attachedHead.includes('=') ||
+    !normalizedCmd.startsWith(literalPrefix)
+  ) {
+    return false
+  }
+  const rest = normalizedCmd.slice(literalPrefix.length)
+  const firstWordRest = SHELL_SINGLE_TOKEN_RE.test(attachedHead)
+    ? rest.replace(/ .*/s, '')
+    : rest
+  const combinedWord = attachedHead + firstWordRest
+  // Official 2.1.325 #2327 (`SSr`): if the literal prefix names a bare command
+  // (no `/` in `attachedHead`, e.g. `Bash(git*)`) and the matched extension
+  // introduces `/` or `<` (e.g. `git/evil` or `git<in`), do NOT exempt it as a
+  // path prefix — it runs a different program or attaches a redirect to argv[0].
+  const headIsAlreadyPath = attachedHead.includes('/')
+  if (firstWordRest === '') {
+    return false
+  }
+  const prefixTokens = argvTokensForDeny(literalPrefix)
+  const wrapperIdx = prefixTokens.findLastIndex(
+    (tok, idx) =>
+      idx < prefixTokens.length - 1 &&
+      /^(?:env|sudo)$/.test(basenameCommand(tok)),
+  )
+  if (
+    wrapperIdx < 0 &&
+    headIsAlreadyPath &&
+    ATTACHED_WILDCARD_PATH_START_RE.test(combinedWord) &&
+    ATTACHED_WILDCARD_SAFE_TAIL_RE.test(firstWordRest)
+  ) {
+    return false
+  }
+  return [false, true].some(wide => {
+    const peeled = eutPeelArgv(prefixTokens.slice(Math.max(wrapperIdx, 0)), {
+      wide,
+    })
+    return (
+      peeled.length <= 1 &&
+      literalPrefix
+        .replace(/['"\\]/g, '')
+        .endsWith((peeled[0] ?? '').replace(/['"\\]/g, ''))
+    )
+  })
 }
 
 export function stripWrappersFromArgv(argv: string[]): string[] {
@@ -989,21 +1363,45 @@ function filterRulesByContentsMatchingInput(
     }
     const rawArgv =
       astCommand?.argv ?? argvTokensForDeny(commandWithoutRedirections)
-    const peeled = eutPeelArgv(rawArgv)
-    if (
-      peeled.length > 0 &&
-      (astCommand !== undefined ||
-        peeled[0] !== rawArgv[0] ||
-        splitCommand(commandWithoutRedirections).length === 1)
-    ) {
-      addCandidate(peeled.join(' '))
-      if (peeled[0] !== rawArgv[0]) {
-        addCandidate(rawArgv.join(' '))
+    // Official 2.1.323 #2020: peel both narrow and wide (combined short flags
+    // like `sudo -nu root`, `sudo VAR=val`, `env`, `doas`, `strace`, `unshare`)
+    // so deny & ask rules catch wrapped commands.
+    const wideRawArgv =
+      matchMode === 'exact' ||
+      (astCommand === undefined &&
+        (/[`(){};|&<>#]|[^\S ]|\$['"]/.test(
+          command.replace(/\$\{\w+\}/g, '$V'),
+        ) ||
+          command.replace(SHELL_TOKEN_SCAN_RE, '').trim() !== ''))
+        ? []
+        : (astCommand?.argv ?? command.match(SHELL_TOKEN_SCAN_RE) ?? [])
+    const peeledNarrow = eutPeelArgv(rawArgv)
+    const peeledWide = eutPeelArgv(wideRawArgv, { wide: true })
+    const peelPairs: Array<[string[], string[]]> = [[rawArgv, peeledNarrow]]
+    if (peeledWide.join(' ') !== peeledNarrow.join(' ')) {
+      peelPairs.push([wideRawArgv, peeledWide])
+    }
+    for (const [origArgv, peeled] of peelPairs) {
+      if (
+        peeled.length > 0 &&
+        (astCommand !== undefined ||
+          peeled[0] !== origArgv[0] ||
+          splitCommand(commandWithoutRedirections).length === 1)
+      ) {
+        addCandidate(peeled.join(' '))
+        if (peeled[0] !== origArgv[0]) {
+          addCandidate(origArgv.join(' '))
+        }
       }
-      const firstBase = peeled[0]?.replace(/^.*[\\/]/, '')
+      const firstBase = peeled[0] ? basenameCommand(peeled[0]) : undefined
       if (firstBase && firstBase !== peeled[0]) {
         addCandidate([firstBase, ...peeled.slice(1)].join(' '))
       }
+    }
+    // Official 2.1.325 #2325 (`S6t` @290090000): unescape backslash-escaped
+    // horizontal whitespace (e.g. `rm\ -rf`) for deny/ask matching.
+    if (/\\[ \t]/.test(commandWithoutRedirections)) {
+      addCandidate(commandWithoutRedirections.replace(/\\([ \t])/g, '$1'))
     }
     // Also unquote space-separated tokens when ruleBehavior is deny/ask and
     // raw command had quotes/escapes inside words (e.g. `git "push" --force`).
@@ -1048,6 +1446,8 @@ function filterRulesByContentsMatchingInput(
     }
   }
 
+  const isDenyOrAsk = ruleBehavior === 'deny' || ruleBehavior === 'ask'
+
   return Array.from(rules.entries())
     .filter(([ruleContent]) => {
       const bashRule = bashPermissionRule(ruleContent)
@@ -1056,28 +1456,36 @@ function filterRulesByContentsMatchingInput(
         switch (bashRule.type) {
           case 'exact':
             return bashRule.command === cmdToMatch
-          case 'prefix':
+          case 'prefix': {
+            const normPrefix = bashRule.prefix.replace(/[ \t]+/g, ' ')
+            const normCmd = cmdToMatch.replace(/[ \t]+/g, ' ')
             switch (matchMode) {
               // In 'exact' mode, only return true if the command exactly matches the prefix rule
               case 'exact':
-                return bashRule.prefix === cmdToMatch
+                return normPrefix === normCmd
               case 'prefix': {
-                // SECURITY: Don't allow prefix rules to match compound commands.
-                // e.g., Bash(cd:*) must NOT match "cd /path && python3 evil.py".
-                // In the normal flow commands are split before reaching here, but
-                // shell escaping can defeat the first splitCommand pass — e.g.,
-                //   cd src\&\& python3 hello.py  →  splitCommand  →  ["cd src&& python3 hello.py"]
-                // which then looks like a single command that starts with "cd ".
-                // Re-splitting the candidate here catches those cases.
-                if (isCompoundCommand.get(cmdToMatch)) {
+                // SECURITY: Don't allow allow-prefix rules to match compound commands.
+                // Official 2.1.325 #2325: deny and ask rules MUST still match compound
+                // commands so wrapping a denied command cannot bypass deny/ask rules.
+                if (!isDenyOrAsk && isCompoundCommand.get(cmdToMatch)) {
+                  return false
+                }
+                // Official 2.1.325 #2327: an allow prefix rule `Bash(foo:*)` must NOT
+                // match when argv[0] ends with an escaped space (`foo\ bar`) or differs
+                // from the program named by the rule.
+                if (
+                  !isDenyOrAsk &&
+                  /^[^\s]*\\ /.test(normCmd) &&
+                  !normPrefix.includes('\\ ')
+                ) {
                   return false
                 }
                 // Ensure word boundary: prefix must be followed by space or end of string
                 // This prevents "ls:*" from matching "lsof" or "lsattr"
-                if (cmdToMatch === bashRule.prefix) {
+                if (normCmd === normPrefix) {
                   return true
                 }
-                if (cmdToMatch.startsWith(bashRule.prefix + ' ')) {
+                if (normCmd.startsWith(normPrefix + ' ')) {
                   return true
                 }
                 // Also match "xargs <prefix>" for bare xargs with no flags.
@@ -1085,14 +1493,14 @@ function filterRulesByContentsMatchingInput(
                 // and deny rules like Bash(rm:*) to block "xargs rm file".
                 // Natural word-boundary: "xargs -n1 grep" does NOT start with
                 // "xargs grep " so flagged xargs invocations are not matched.
-                const xargsPrefix = 'xargs ' + bashRule.prefix
-                if (cmdToMatch === xargsPrefix) {
+                const xargsPrefix = 'xargs ' + normPrefix
+                if (normCmd === xargsPrefix) {
                   return true
                 }
-                return cmdToMatch.startsWith(xargsPrefix + ' ')
+                return normCmd.startsWith(xargsPrefix + ' ')
               }
             }
-            break
+          }
           case 'wildcard':
             // SECURITY FIX: In exact match mode, wildcards must NOT match because we're
             // checking the full unparsed command. Wildcard matching on unparsed commands
@@ -1101,14 +1509,28 @@ function filterRulesByContentsMatchingInput(
             if (matchMode === 'exact') {
               return false
             }
-            // SECURITY: Same as for prefix rules, don't allow wildcard rules to match
-            // compound commands in prefix mode. e.g., Bash(cd *) must not match
-            // "cd /path && python3 evil.py" even though "cd *" pattern would match it.
-            if (isCompoundCommand.get(cmdToMatch)) {
+            // SECURITY: Same as for prefix rules, don't allow wildcard allow rules to match
+            // compound commands in prefix mode, while deny/ask rules still apply (#2325).
+            if (!isDenyOrAsk && isCompoundCommand.get(cmdToMatch)) {
               return false
             }
-            // In prefix mode (after splitting), wildcards can safely match subcommands
-            return matchWildcardPattern(bashRule.pattern, cmdToMatch)
+            // Official 2.1.323 #2018 & #2021 + 2.1.325 #2327 (`SSr`): block attached-wildcard
+            // allow rules when the wildcard extends the program name or runs a different program.
+            if (
+              !isDenyOrAsk &&
+              isAttachedWildcardAllowBlocked(bashRule.pattern, cmdToMatch)
+            ) {
+              return false
+            }
+            // In prefix mode (after splitting), wildcards can safely match subcommands.
+            // Official 2.1.325 #2325: for deny/ask wildcard rules, also match `xargs <pattern>`.
+            if (matchWildcardPattern(bashRule.pattern, cmdToMatch)) {
+              return true
+            }
+            return (
+              isDenyOrAsk &&
+              matchWildcardPattern(`xargs ${bashRule.pattern}`, cmdToMatch)
+            )
         }
       })
     })
@@ -2613,6 +3035,7 @@ function shellQuoteTokenText(token: unknown): string | null {
 
 function detectDangerousLiteralRmInCommand(
   command: string,
+  cwd: string = getCwd(),
 ): { command: 'rm' | 'rmdir'; path: string } | null {
   const stripped = stripSafeWrappers(command)
   const parsed = tryParseShellCommand(stripped)
@@ -2633,7 +3056,6 @@ function detectDangerousLiteralRmInCommand(
   const name = basenameCommand(tokens[i]!)
   if (name !== 'rm' && name !== 'rmdir') return null
   const cmd = name === 'rmdir' ? 'rmdir' : 'rm'
-  const cwd = getCwd()
   for (let j = i + 1; j < tokens.length; j++) {
     let token = tokens[j]!
     if (token === '--') {
@@ -2653,6 +3075,90 @@ function detectDangerousLiteralRmInCommand(
 }
 
 /**
+ * Official 2.1.323 #2012: track candidate working directories across `cd` /
+ * `chdir` / `pushd` / `popd` in a compound command so `rm` checks judge from
+ * every target directory (not only the initial cwd) even under bypass
+ * permissions or a Bash allow rule.
+ */
+function advanceTrackedDirsForUnit(
+  tokens: readonly string[],
+  initialCwd: string,
+  state: {
+    candidateDirs: Set<string>
+    currentCwd: string | undefined
+    prevCwd: string | undefined
+    dirStack: Array<string | undefined>
+  },
+): boolean {
+  const cmdName = tokens[0] ? basenameCommand(tokens[0]) : undefined
+  if (
+    cmdName !== 'cd' &&
+    cmdName !== 'chdir' &&
+    cmdName !== 'pushd' &&
+    cmdName !== 'popd'
+  ) {
+    return false
+  }
+  const args = tokens.slice(1)
+  const positionals = args.filter(
+    a => a !== '--' && (a === '-' || !a.startsWith('-')),
+  )
+  const target =
+    positionals.length === 1
+      ? positionals[0]
+      : positionals.length === 0 && (cmdName === 'cd' || cmdName === 'chdir')
+        ? '~'
+        : undefined
+  const nonStdFlags = args.filter(
+    a => a !== '--' && a !== '-' && a.startsWith('-') && !/^-[PLe@]+$/.test(a),
+  )
+  if (
+    (cmdName === 'pushd' || cmdName === 'popd') &&
+    nonStdFlags.length === 1 &&
+    nonStdFlags[0] === '-n'
+  ) {
+    return true
+  }
+  const isStaticTarget =
+    cmdName !== 'popd' &&
+    nonStdFlags.length === 0 &&
+    target !== undefined &&
+    target !== '-' &&
+    !/^[+-]\d+$/.test(target) &&
+    !/[*?[\]$`(){}|;&<>]/.test(target) &&
+    !(target.startsWith('~') && target !== '~' && !target.startsWith('~/'))
+  const stackSwap =
+    nonStdFlags.length === 0
+      ? cmdName === 'popd'
+        ? positionals.length === 0 && state.dirStack.length > 0
+          ? { dir: state.dirStack.pop() }
+          : undefined
+        : target === '-' && state.prevCwd !== undefined
+          ? { dir: state.prevCwd }
+          : undefined
+      : undefined
+  if (stackSwap !== undefined) {
+    const old = state.currentCwd
+    state.currentCwd = stackSwap.dir
+    state.prevCwd = old
+  } else if (isStaticTarget && target !== undefined) {
+    if (cmdName === 'pushd') state.dirStack.push(state.currentCwd)
+    state.prevCwd = state.currentCwd
+    const expanded = expandTilde(target)
+    state.candidateDirs.add(resolvePath(initialCwd, expanded))
+    if (state.currentCwd !== undefined) {
+      state.currentCwd = resolvePath(state.currentCwd, expanded)
+      state.candidateDirs.add(state.currentCwd)
+    }
+  } else {
+    if (cmdName === 'pushd') state.dirStack.push(state.currentCwd)
+    state.prevCwd = state.currentCwd
+    state.currentCwd = undefined
+  }
+  return true
+}
+
+/**
  * densable eut → RH: after A6o/P6o/M6o peel, if argv head is rm/rmdir, ask on
  * dangerous literal / empty-expansion targets. shellDashC only covers bodies
  * that still contain an inner shell -c; bare `flock -c "rm -rf /"` /
@@ -2660,33 +3166,29 @@ function detectDangerousLiteralRmInCommand(
  */
 export function checkDangerousRmAfterEutPeel(
   command: string,
+  initialCwd: string = getCwd(),
 ): PermissionResult | null {
   const parts = (() => {
     const split = splitCommand(command)
     return split.length > 0 ? split : [command]
   })()
+  const dirState = {
+    candidateDirs: new Set<string>([initialCwd]),
+    currentCwd: initialCwd as string | undefined,
+    prevCwd: undefined as string | undefined,
+    dirStack: [] as Array<string | undefined>,
+  }
   for (const unit of parts) {
     const stripped = stripSafeWrappers(unit)
     const parsed = tryParseShellCommand(stripped)
     if (!parsed.success) continue
-    let tokens = parsed.tokens.filter(
-      (t): t is string => typeof t === 'string' && t.length > 0,
-    )
-    while (tokens.length > 0 && ENV_VAR_ASSIGN_RE.test(tokens[0]!)) {
-      tokens = tokens.slice(1)
+    let tokens = parsed.tokens
+      .map(shellQuoteTokenText)
+      .filter((t): t is string => t !== null && t.length > 0)
+    if (advanceTrackedDirsForUnit(tokens, initialCwd, dirState)) {
+      continue
     }
-    for (let round = 0; round < 8; round++) {
-      const peeled = peelPrivilegePrefixes(tokens)
-      const wrapperStripped = stripWrappersFromArgv(peeled)
-      if (
-        wrapperStripped.length === tokens.length &&
-        wrapperStripped.every((t, i) => t === tokens[i])
-      ) {
-        tokens = wrapperStripped
-        break
-      }
-      tokens = wrapperStripped
-    }
+    tokens = eutPeelArgv(tokens, { wide: true })
     if (tokens.length === 0) continue
     {
       const applet = basenameCommand(tokens[0]!)
@@ -2711,13 +3213,18 @@ export function checkDangerousRmAfterEutPeel(
         `on possibly-empty variable path: ${emptyVar.target}`,
       )
     }
-    const literal = detectDangerousLiteralRmInCommand(peeledCommand)
-    if (literal) {
-      return dangerousRemovalAsk(
-        literal.command,
-        `Dangerous ${literal.command} operation detected: '${literal.path}'\n\nThis command would remove a critical system directory. This requires explicit approval and cannot be auto-allowed by permission rules.`,
-        `on critical path: ${literal.path}`,
+    for (const candidateCwd of dirState.candidateDirs) {
+      const literal = detectDangerousLiteralRmInCommand(
+        peeledCommand,
+        candidateCwd,
       )
+      if (literal) {
+        return dangerousRemovalAsk(
+          literal.command,
+          `Dangerous ${literal.command} operation detected: '${literal.path}'\n\nThis command would remove a critical system directory. This requires explicit approval and cannot be auto-allowed by permission rules.`,
+          `on critical path: ${literal.path}`,
+        )
+      }
     }
   }
   return null
@@ -2965,6 +3472,7 @@ function dangerousRemovalAsk(
       circuitBreaker: 'dangerousRemoval',
     },
     suggestions: [],
+    suppressAlwaysAllowRule: true,
   }
 }
 
@@ -3278,8 +3786,16 @@ export function checkCompoundDirectoryChangesPathConstraints(
           astCmd ? [astCmd] : undefined,
         )
         if (res.behavior === 'deny') return res
-        if (res.behavior === 'ask' && firstAsk === null) {
-          firstAsk = res
+        if (res.behavior === 'ask') {
+          const isDangerousRemoval =
+            res.decisionReason?.type === 'safetyCheck' &&
+            res.decisionReason.circuitBreaker === 'dangerousRemoval'
+          if (isDangerousRemoval) {
+            return res
+          }
+          if (firstAsk === null) {
+            firstAsk = res
+          }
         }
       }
     }

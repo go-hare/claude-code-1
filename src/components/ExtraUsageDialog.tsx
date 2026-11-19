@@ -568,7 +568,22 @@ function ExtraUsageDialogInner({ onDone, renamedFromExtraUsage = false }: Props)
               if (!requireChargeableCard()) return;
               setStep({ s: 'buy_select' });
             } else if (v === 'limit') {
-              setLimitAmount('');
+              // Official 2.1.323 (#2108): do not offer changing/lowering the spend
+              // limit when the current limit could not be loaded.
+              const currentLimitUnknown =
+                extraUsage === null ||
+                (extraUsage.monthly_limit === undefined && typeof extraUsage.used_credits !== 'number') ||
+                (extraUsage.monthly_limit === null && typeof extraUsage.used_credits !== 'number');
+              if (currentLimitUnknown) {
+                setStep({
+                  s: 'error',
+                  text: "Couldn't load your current spend limit, so it can't be changed right now. Try again later.",
+                });
+                return;
+              }
+              setLimitAmount(
+                typeof extraUsage.monthly_limit === 'number' ? String(Math.round(extraUsage.monthly_limit / 100)) : '',
+              );
               setLimitCursor(0);
               setStep({ s: 'limit_input' });
             } else if (v === 'auto') setStep({ s: 'auto_reload' });

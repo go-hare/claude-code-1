@@ -15,6 +15,7 @@ import { clearMTLSCache } from './mtls.js'
 import { clearProxyCache, configureGlobalAgents } from './proxy.js'
 import { stripProjectScopedTracingEnv } from './projectScopedTracingStrip.js'
 import { isSettingSourceEnabled } from './settings/constants.js'
+import { isLocalThirdPartyDesktopManagedSession } from './settings/hostModelOverlay.js'
 import {
   getSettings_DEPRECATED,
   getSettingsForSource,
@@ -117,6 +118,7 @@ export function stripHostManagedSettingsEnv(
     managedByHost: boolean
     managedByHostFlag: boolean
     desktopHost?: boolean
+    localThirdPartyDesktop?: boolean
     coworkCloud?: boolean
     policyTransportEnv?: boolean
     source?: string
@@ -128,6 +130,7 @@ export function stripHostManagedSettingsEnv(
     managedByHost,
     managedByHostFlag,
     desktopHost = false,
+    localThirdPartyDesktop = false,
     coworkCloud = false,
     policyTransportEnv = false,
   } = opts
@@ -161,6 +164,16 @@ export function stripHostManagedSettingsEnv(
       continue
     }
     if (!managedByHost && !managedByHostFlag) {
+      out[key] = value
+      continue
+    }
+    // Official 2.1.323 (#1968) `le`: preserve CLAUDE_CODE_AUTO_MODE_MODEL in
+    // managed settings for local Claude Desktop sessions on third-party providers.
+    if (
+      localThirdPartyDesktop &&
+      source === 'policySettings' &&
+      key.toUpperCase() === 'CLAUDE_CODE_AUTO_MODE_MODEL'
+    ) {
       out[key] = value
       continue
     }
@@ -211,6 +224,7 @@ function withoutHostManagedProviderVars(
     managedByHost: isManagedByHostSession(),
     managedByHostFlag: isProviderManagedByHostFlag(),
     desktopHost: process.env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop',
+    localThirdPartyDesktop: isLocalThirdPartyDesktopManagedSession(),
     coworkCloud: isCoworkCloudSession(),
     policyTransportEnv: isPolicyTransportManagedByHost(),
     source,
@@ -240,6 +254,36 @@ let frozenStartupEnv: Readonly<Record<string, string>> | undefined
 let appliedGlobalConfigEnv: Record<string, string> | undefined
 
 /**
+ * Official 2.1.323 (#2076): Retain organization's managed proxy and CA
+ * transport env vars (`V7r`) across startup reloads so a transient read failure
+ * of managed-settings.json does not switch startup requests to user-set proxy/CA.
+ */
+let latchedPolicyTransportEnv: Record<string, string> = {}
+
+function pickPolicyTransportEnv(
+  env: Record<string, string> | undefined,
+): Record<string, string> {
+  if (!env) return {}
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(env)) {
+    if (isPolicyTransportEnvVar(key)) {
+      out[key] = value
+    }
+  }
+  return out
+}
+
+/**
+ * Official 2.1.323 (#2193): Environment for managed settings `policyHelper`
+ * execution — constructed ONLY from the launching shell snapshot
+ * (`getFrozenStartupEnv()`) overlaid with managed `policySettings.env`
+ * (never taking env vars from user, project, local, or `--settings` files).
+ */
+export function getPolicyHelperEnv(): Record<string, string> {
+  return getMcpPolicyPrimaryEnv()
+}
+
+/**
  * densable VQr — capture and freeze process.env on first call.
  * Safe to call repeatedly; subsequent calls return the same snapshot.
  */
@@ -256,6 +300,7 @@ export function getFrozenStartupEnv(): Readonly<Record<string, string>> {
 export function clearFrozenStartupEnvForTests(): void {
   frozenStartupEnv = undefined
   appliedGlobalConfigEnv = undefined
+  latchedPolicyTransportEnv = {}
 }
 
 /** densable `rt` / `QYb` / `Tn` — latch written by applySafeConfigEnvironmentVariables. */
@@ -693,10 +738,14 @@ export function applySafeConfigEnvironmentVariables(): void {
     )
   }
 
+  const policySettings = getSettingsForSource('policySettings')
+  if (policySettings !== null) {
+    latchedPolicyTransportEnv = pickPolicyTransportEnv(policySettings.env)
+  }
   Object.assign(
     process.env,
     filterSettingsEnv(
-      getSettingsForSource('policySettings')?.env,
+      { ...policySettings?.env, ...latchedPolicyTransportEnv },
       'policySettings',
     ),
   )

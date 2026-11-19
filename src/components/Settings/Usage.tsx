@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import stripAnsi from 'strip-ansi';
 import { z } from 'zod';
 import { usageCredits as usageCreditsCommand } from 'src/commands/extra-usage/index.js';
+import { getOauthConfig } from 'src/constants/oauth.js';
 import { getSubscriptionType, hasProfileScope, isClaudeAISubscriber } from 'src/utils/auth.js';
 import { getGatewayAuth } from '../../utils/gatewayEnv.js';
 import { getClaudeCodeUserAgent } from '../../utils/userAgent.js';
@@ -247,7 +248,10 @@ export function Usage({
 } = {}): React.ReactNode {
   const { columns } = useTerminalSize();
   const maxWidth = Math.min(columns - 2, 80);
-  const subscriber = isClaudeAISubscriber() && hasProfileScope();
+  // Official 2.1.323 (#2109): do not gate PlanLimitsUsage on hasProfileScope();
+  // setup tokens and CLAUDE_CODE_OAUTH_TOKEN still keep the header-seeded
+  // session and weekly limit bars and explain why the rest are missing.
+  const subscriber = isClaudeAISubscriber();
   const isThinClient = getSurfaceRemoteHandle() !== null;
   return (
     <UsagePane>
@@ -436,6 +440,22 @@ function GatewayUsageSection({ maxWidth }: { maxWidth: number }): React.ReactNod
   );
 }
 
+/**
+ * Official 2.1.323 (#2109): format the sign-in limitation notice shown in `/usage`
+ * for setup tokens and `CLAUDE_CODE_OAUTH_TOKEN` (no `user:profile` scope).
+ */
+export function formatLimitedSignInUsageNotice(hasAnyVisibleLimitBar: boolean): {
+  headline: string;
+  linkLine: string;
+} {
+  return {
+    headline: hasAnyVisibleLimitBar
+      ? "Other limits and usage credits aren't shown for this sign-in."
+      : 'No usage limits to show for this sign-in.',
+    linkLine: `To see your usage, open ${getOauthConfig().CLAUDE_AI_ORIGIN}/settings/usage`,
+  };
+}
+
 function PlanLimitsUsage({
   maxWidth,
   onClose,
@@ -447,6 +467,7 @@ function PlanLimitsUsage({
     () => seedUtilizationFromOpenHeaders()?.utilization ?? null,
   );
   const [enrichError, setEnrichError] = useState<string | null>(null);
+  const [limitedBySignIn, setLimitedBySignIn] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -458,6 +479,17 @@ function PlanLimitsUsage({
     if (seed) {
       setUtilization(prev => (seed.source === 'headers' ? seed.utilization : (prev ?? seed.utilization)));
     }
+    // Official 2.1.323 (#2109): setup-token / CLAUDE_CODE_OAUTH_TOKEN lack
+    // `user:profile` scope; keep header-seeded session & weekly bars and show
+    // why other limits and usage credits are unavailable instead of hiding all bars.
+    if (!hasProfileScope()) {
+      setUtilization(seed?.utilization ?? {});
+      setLimitedBySignIn(true);
+      setEnrichError(null);
+      setIsLoading(false);
+      return;
+    }
+    setLimitedBySignIn(false);
     try {
       const data = await fetchUtilization();
       setUtilization(data);
@@ -599,6 +631,17 @@ function PlanLimitsUsage({
         />
       )}
 
+      {limitedBySignIn &&
+        (() => {
+          const notice = formatLimitedSignInUsageNotice(limits.some(item => item.limit != null));
+          return (
+            <Box flexDirection="column">
+              <Text dimColor>{notice.headline}</Text>
+              <Text dimColor>{notice.linkLine}</Text>
+            </Box>
+          );
+        })()}
+
       <ContributingUsageSection maxWidth={maxWidth} onClose={onClose} />
 
       {utilization.extra_usage && <ExtraUsageSection extraUsage={utilization.extra_usage} maxWidth={maxWidth} />}
@@ -675,7 +718,7 @@ export const BEHAVIOR_CARDS: Record<
     body: "All sessions share one limit. If you don't need them all at once, queueing uses it more evenly.",
   },
   cron: {
-    headline: pct => `${pct}% of your usage came from sessions active for 8+ hours`,
+    headline: pct => `${pct}% of your usage came from sessions with requests in 8+ separate hours`,
     body: 'These are often background/loop sessions. Continuous usage can add up quickly so make sure it is intentional.',
   },
   max_effort: {
@@ -926,7 +969,10 @@ export function buildUsageRecommendations(window: UsageScanWindow, live?: UsageL
   }
 
   const namedRecs: UsageRecommendation[] = [];
-  const topAgent = window.agents.find(a => a.pct >= BEHAVIOR_PCT_MIN && isFixableContributorName(a.name));
+  const hasWorkflow = behaviorRecs.some(r => r.key === 'workflow');
+  const topAgent = window.agents.find(
+    a => (!hasWorkflow || a.name !== 'workflow') && a.pct >= BEHAVIOR_PCT_MIN && isFixableContributorName(a.name),
+  );
   if (topAgent) {
     namedRecs.push({
       key: 'agent',

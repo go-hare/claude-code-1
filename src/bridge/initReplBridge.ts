@@ -115,6 +115,10 @@ import type { BridgeWorkerType } from './types.js'
 
 export type InitBridgeOptions = {
   onInboundMessage?: (msg: SDKMessage) => void | Promise<void>
+  /** Official 2.1.323 #2119: hold Remote Control state at `'running'` while background subagents run. */
+  backgroundHold?: {
+    holdsRunning: () => boolean
+  }
   /**
    * densable `onProjectsBindingHint` — fire when CCR worker state implies a
    * hearth binding change so headless `createServerConfigSession` can
@@ -1384,6 +1388,7 @@ export async function initReplBridge(
         onStateChange,
         outboundOnly,
         tags,
+        backgroundHold: options?.backgroundHold,
         sessionGroupingId,
         reattachSessionId,
         reattachSequenceNum,

@@ -27,7 +27,6 @@ import { migrateFennecToOpus } from '../migrations/migrateFennecToOpus.js'
 import { migrateLegacyOpusToCurrent } from '../migrations/migrateLegacyOpusToCurrent.js'
 import { migrateOpusToOpus1m } from '../migrations/migrateOpusToOpus1m.js'
 import { migrateReplBridgeEnabledToRemoteControlAtStartup } from '../migrations/migrateReplBridgeEnabledToRemoteControlAtStartup.js'
-import { migrateSonnet1mToSonnet45 } from '../migrations/migrateSonnet1mToSonnet45.js'
 import { migrateSonnet45ToSonnet46 } from '../migrations/migrateSonnet45ToSonnet46.js'
 import { resetAutoModeOptInForDefaultOffer } from '../migrations/resetAutoModeOptInForDefaultOffer.js'
 import { resetProToOpusDefault } from '../migrations/resetProToOpusDefault.js'
@@ -94,6 +93,7 @@ import {
   getSettingsForSource,
 } from '../utils/settings/settings.js'
 import { resetSettingsCache } from '../utils/settings/settingsCache.js'
+import { SettingsSchema } from '../utils/settings/types.js'
 import { skillChangeDetector } from '../utils/skills/skillChangeDetector.js'
 import { writeFileSync_DEPRECATED } from '../utils/slowOperations.js'
 import { profileCheckpoint } from '../utils/startupProfiler.js'
@@ -268,7 +268,6 @@ export function runMigrations(): void {
     migrateBypassPermissionsAcceptedToSettings()
     migrateEnableAllProjectMcpServersToSettings()
     resetProToOpusDefault()
-    migrateSonnet1mToSonnet45()
     migrateLegacyOpusToCurrent()
     migrateSonnet45ToSonnet46()
     migrateOpusToOpus1m()
@@ -410,6 +409,70 @@ export function startDeferredPrefetches(): void {
   }
 }
 
+const RAW_SANDBOX_KEY_RE = /"sandbox"\s*:/
+
+function rawJsonTextHasSandboxKey(raw: string): boolean {
+  if (RAW_SANDBOX_KEY_RE.test(raw)) return true
+  if (raw.includes('\\u')) {
+    const decoded = raw.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex: string) =>
+      String.fromCharCode(parseInt(hex, 16)),
+    )
+    if (RAW_SANDBOX_KEY_RE.test(decoded)) return true
+  }
+  return false
+}
+
+/**
+ * Official 2.1.323 #2031 & #2178:
+ * - #2178: stop at start-up when a `--settings` file is not valid JSON and
+ *   contains a `sandbox` key (even one that turns the sandbox off).
+ * - #2031: stop at start-up and name the invalid setting when `--settings` or
+ *   SDK settings that turn `sandbox.enabled` on fail schema validation, so
+ *   `claude -p` and the Agent SDK never run Bash unsandboxed.
+ *
+ * Returns a human-readable error message when start-up must abort, or `null`
+ * when start-up may continue.
+ */
+export function validateFlagSettingsSandboxOrError(
+  rawText: string,
+  sourceLabel: string,
+): string | null {
+  const stripped = rawText.startsWith('\uFEFF') ? rawText.slice(1) : rawText
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(stripped)
+  } catch (err) {
+    if (rawJsonTextHasSandboxKey(stripped)) {
+      return `Error: Invalid JSON in --settings (${sourceLabel}): ${errorMessage(err)}. Because this settings file has a "sandbox" key, Claude Code will not start until the JSON is fixed.`
+    }
+    return null
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return null
+  }
+  const sandbox = (parsed as Record<string, unknown>).sandbox
+  const turnsSandboxOn =
+    typeof sandbox === 'object' &&
+    sandbox !== null &&
+    !Array.isArray(sandbox) &&
+    (sandbox as Record<string, unknown>).enabled === true
+  if (!turnsSandboxOn) {
+    return null
+  }
+  const result = SettingsSchema().safeParse(parsed)
+  if (result.success) {
+    return null
+  }
+  const formattedIssues = result.error.issues
+    .slice(0, 5)
+    .map(issue => {
+      const path = issue.path.length > 0 ? issue.path.join('.') : '<root>'
+      return `${path}: ${issue.message}`
+    })
+    .join('; ')
+  return `Error: Invalid setting in --settings (${sourceLabel}) while sandbox.enabled is true — refusing to start unsandboxed: ${formattedIssues}`
+}
+
 function loadSettingsFromFlag(settingsFile: string): void {
   // densable 2.1.214 #17: path form uses bj(path, Jme=2MiB) — refuse device /
   // directory / oversize before init; inline JSON form is unchanged.
@@ -422,6 +485,14 @@ function loadSettingsFromFlag(settingsFile: string): void {
 
     if (looksLikeJson) {
       // It's a JSON string - validate and create temp file
+      const sandboxInlineErr = validateFlagSettingsSandboxOrError(
+        trimmedSettings,
+        'inline JSON',
+      )
+      if (sandboxInlineErr !== null) {
+        process.stderr.write(chalk.red(`${sandboxInlineErr}\n`))
+        process.exit(1)
+      }
       const parsedJson = safeParseJSON(trimmedSettings)
       if (!parsedJson) {
         process.stderr.write(
@@ -458,6 +529,7 @@ function loadSettingsFromFlag(settingsFile: string): void {
         fsImpl,
         settingsFile,
       )
+      let fileContent: string
       try {
         // densable qvl via assertRegularFileWithinMaxBytes (Jme = 2MiB)
         assertRegularFileWithinMaxBytes(
@@ -466,7 +538,7 @@ function loadSettingsFromFlag(settingsFile: string): void {
           FLAG_SETTINGS_MAX_BYTES,
         )
         // Still open to surface other IO errors (parity with prior full read)
-        readFileSync(resolvedSettingsPath, 'utf8')
+        fileContent = readFileSync(resolvedSettingsPath, 'utf8')
       } catch (e) {
         if (isENOENT(e)) {
           process.stderr.write(
@@ -494,6 +566,16 @@ function loadSettingsFromFlag(settingsFile: string): void {
           process.exit(1)
         }
         throw e
+      }
+      // Official 2.1.323 #2031 & #2178: abort start-up on invalid JSON with a
+      // `sandbox` key or invalid settings turning `sandbox.enabled` on.
+      const sandboxFileErr = validateFlagSettingsSandboxOrError(
+        fileContent,
+        resolvedSettingsPath,
+      )
+      if (sandboxFileErr !== null) {
+        process.stderr.write(chalk.red(`${sandboxFileErr}\n`))
+        process.exit(1)
       }
       settingsPath = resolvedSettingsPath
     }

@@ -12,19 +12,16 @@ type WrapAnsiOptions = {
 
 const sgrPattern = (sep: string): string => `\\x1b\\[[0-9${sep}]*m`
 
-// biome-ignore lint/suspicious/noControlCharactersInRegex: official SGR regex
 const SGR_GLOBAL_RE = new RegExp(sgrPattern(';:'), 'g')
 // biome-ignore lint/suspicious/noControlCharactersInRegex: official OSC 8 sticky regex
 const OSC8_STICKY_RE = /\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)/y
-// biome-ignore lint/suspicious/noControlCharactersInRegex: official CR+SGR+LF regex
 const CR_SGR_LF_RE = new RegExp(`\\r((?:${sgrPattern(';')})+)\\n`, 'g')
 // biome-ignore lint/suspicious/noControlCharactersInRegex: official control/escape gate
 const CONTROL_CHAR_RE = /[\x1b\x90\x98\x9b\x9d-\x9f]/
 const SAFE_ANSI_SEQ_RE =
   // biome-ignore lint/suspicious/noControlCharactersInRegex: official ANSI sequence matcher
   /^\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x00-\x1f\x7f-\x9f]*(?:\x07|\x1b\\))$/
-// biome-ignore lint/suspicious/noControlCharactersInRegex: official joinable SGR/OSC8 sequence
-const JOINABLE_SEQ_RE = new RegExp(`^(?:${sgrPattern(';')}$|\\x1b\\]8;)`)
+const JOINABLE_SEQ_RE = new RegExp(`^(?:${sgrPattern(';:')}$|\\x1b\\]8;)`)
 // biome-ignore lint/suspicious/noControlCharactersInRegex: official extended SGR matcher
 const EXTENDED_COLOR_SGR_RE = /^\x1b\[[34]8;(?:5;\d+|2;\d+;\d+;\d+)m$/
 

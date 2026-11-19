@@ -10,6 +10,7 @@
  * host densable (ensureCompletedClassifierLlmHost).
  */
 
+import { CLASSIFIER_HAND_OFF_ADDENDUM } from '../../daemon/jobState.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import { isEnvTruthy } from '../envUtils.js'
 import type { RequiresActionDetails } from '../sessionState.js'
@@ -284,13 +285,15 @@ export type CompletedClassifierLlmHost = {
 let completedClassifierLlmHost: CompletedClassifierLlmHost | null = null
 let defaultCompletedClassifierLlmHostInstalled = false
 
-const COMPLETED_CLASSIFIER_SYSTEM_PROMPT = `Write a short one-line status for a coding agent turn that just finished. It is shown in a sidebar / status bar.
+export const COMPLETED_CLASSIFIER_SYSTEM_PROMPT = `Write a short one-line status for a coding agent turn that just finished. It is shown in a sidebar / status bar.
 
 Rules:
 - Past tense, ≤ 120 characters
 - Lead with the outcome verb (Fixed, Added, Investigated, Failed, …)
 - No quotes, no trailing period unless needed
-- If the turn failed, say so plainly`
+- If the turn failed, say so plainly
+
+${CLASSIFIER_HAND_OFF_ADDENDUM}`
 
 /**
  * Official default completed-turn LLM densable host (Haiku).

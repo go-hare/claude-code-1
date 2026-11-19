@@ -3,6 +3,8 @@
  */
 
 import axios from 'axios'
+import { Transform } from 'stream'
+import { createZstdDecompress } from 'zlib'
 import { getOauthConfig, OAUTH_BETA_HEADER } from '../constants/oauth.js'
 import {
   getAnthropicApiKey,
@@ -238,4 +240,68 @@ export async function withOAuth401Retry<T>(
     await handleOAuth401Error(failedAccessToken)
     return await request()
   }
+}
+
+/**
+ * Official 2.1.325 #2258 — zstd / brotli Content-Encoding safety helpers.
+ *
+ * - `parseResponseContentEncodings` splits comma-separated Content-Encoding
+ *   headers and strips `identity`.
+ * - `hasDisallowedResponseEncoding` returns true when `br` or `zstd` appears
+ *   anywhere in the chain (prevents bypassing a primary-only check via
+ *   `Content-Encoding: gzip, zstd`).
+ * - `isZstdDecompressError` detects Node/Bun zlib `ZSTD_error_*` frame
+ *   rejection codes.
+ * - `createBoundedDecompressGuard` bounds decompressed output byte count so a
+ *   crafted zstd frame cannot cause unbounded memory/disk expansion.
+ */
+export const DISALLOWED_RESPONSE_ENCODINGS = new Set(['br', 'zstd'])
+
+export function parseResponseContentEncodings(
+  headerValue: string | null | undefined,
+): string[] {
+  if (!headerValue) return []
+  return headerValue
+    .toLowerCase()
+    .split(',')
+    .map(s => s.trim())
+    .filter(s => s !== '' && s !== 'identity')
+}
+
+export function hasDisallowedResponseEncoding(
+  headerValue: string | null | undefined,
+): boolean {
+  return parseResponseContentEncodings(headerValue).some(enc =>
+    DISALLOWED_RESPONSE_ENCODINGS.has(enc),
+  )
+}
+
+export function isZstdDecompressError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const code = (error as { code?: unknown }).code
+  return typeof code === 'string' && code.startsWith('ZSTD_error_')
+}
+
+export function createBoundedZstdDecompressStreams(
+  maxDecompressedBytes: number,
+  onChunk?: (chunk: Buffer) => void,
+): { decompress: ReturnType<typeof createZstdDecompress>; guard: Transform } {
+  let decompressedBytes = 0
+  const decompress = createZstdDecompress()
+  const guard = new Transform({
+    transform(chunk: Buffer, _encoding, callback) {
+      decompressedBytes += chunk.length
+      if (decompressedBytes > maxDecompressedBytes) {
+        callback(
+          new Error(
+            `Decompressed binary exceeds the manifest size of ${maxDecompressedBytes} bytes`,
+          ),
+        )
+        return
+      }
+      onChunk?.(chunk)
+      callback(null, chunk)
+    },
+  })
+  return { decompress, guard }
 }

@@ -3,8 +3,11 @@ import {
   logEvent,
 } from '../../services/analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
-import { isPolicyAllowed } from '../../services/policyLimits/index.js'
-import { getOauthAccountInfo } from '../auth.js'
+import {
+  isPolicyAllowed,
+  isPolicyEnforced,
+} from '../../services/policyLimits/index.js'
+import { getOauthAccountInfo, getSubscriptionType } from '../auth.js'
 import { isFeedbackRefusedByServer } from '../config.js'
 import { getAuthHeaders } from '../http.js'
 import { isEnvTruthy } from '../envUtils.js'
@@ -113,13 +116,30 @@ export function getFeedbackRefusalPrincipal(): string | null {
   return null
 }
 
-/** densable leftover Ufs / `uln` / `yps` (#1728, #1729) */
+/**
+ * Official 2.1.323 (#2069): Pro and Max accounts belonging to an organization
+ * whose `allow_product_feedback` policy has not been verified as allowed must
+ * not be offered feedback drafts that the organization would refuse.
+ */
+export function isProMaxUnverifiedOrgFeedbackBlocked(): boolean {
+  const sub = getSubscriptionType()
+  if (sub !== 'pro' && sub !== 'max') return false
+  const oauth = getOauthAccountInfo()
+  if (!oauth?.organizationUuid) return false
+  // If policy limits explicitly enforced allow_product_feedback=true, allow it;
+  // otherwise Pro/Max org accounts skip policy fetch at startup and fail closed
+  // for automatic feedback drafts so we don't offer drafts the org would refuse.
+  return !isPolicyEnforced('allow_product_feedback')
+}
+
+/** densable leftover Ufs / `uln` / `yps` (#1728, #1729, #2069) */
 export function isSendFeedbackSessionEnabled(): boolean {
   if (getFeedbackCommandDisabledReason() !== null) return false
   if (isAntUserType()) return false
   if (vgr()) return false
   if (getAPIProvider() !== 'firstParty') return false
   if (isSendFeedbackEnvDisabled()) return false
+  if (isProMaxUnverifiedOrgFeedbackBlocked()) return false
   return (
     getFeatureValue_CACHED_MAY_BE_STALE('tengu_juniper_relay', false) &&
     detectFeedbackGatewayState() !== 'gateway'

@@ -33,6 +33,7 @@ import { logForDebugging } from '../utils/debug.js'
 import { errorMessage, toError } from '../utils/errors.js'
 import { getSystemLocaleLanguage } from '../utils/intl.js'
 import { logError } from '../utils/log.js'
+import { getPlatform, type Platform } from '../utils/platform.js'
 import { getInitialSettings } from '../utils/settings/settings.js'
 import { sleep } from '../utils/sleep.js'
 
@@ -40,18 +41,30 @@ function isDoubaoProvider(): boolean {
   return getInitialSettings().voiceProvider === 'doubao'
 }
 
+const MICROPHONE_SETTINGS_PATH: Partial<Record<Platform, string>> = {
+  macos: 'System Settings → Sound → Input',
+  windows: 'Settings → System → Sound → Input',
+}
+
 /**
- * densable M5h — empty-transcript error taxonomy after finalize.
+ * densable M5h / official 2.1.325 (#2348) — empty-transcript error taxonomy after finalize.
  * Order: no audio signal → connection failed → no speech.
  */
-export function formatEmptyVoiceTranscriptError(input: {
-  hadAudioSignal: boolean
-  wsConnected: boolean
-}): { message: string; errorCode: string } {
+export function formatEmptyVoiceTranscriptError(
+  input: {
+    hadAudioSignal: boolean
+    wsConnected: boolean
+  },
+  platform: Platform = getPlatform(),
+): { message: string; errorCode: string } {
   if (!input.hadAudioSignal) {
+    const settingsPath = MICROPHONE_SETTINGS_PATH[platform]
     return {
-      message:
-        'No audio detected from microphone. Check that the correct input device is selected and that Claude Code has microphone access.',
+      message: `No audio detected from microphone. ${
+        settingsPath
+          ? `Open ${settingsPath} to pick your microphone, and check that Claude Code or your terminal app has microphone access.`
+          : 'Check that the correct input device is selected and that Claude Code has microphone access.'
+      }`,
       errorCode: 'voice_transcription_no_audio_signal',
     }
   }

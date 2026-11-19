@@ -6,8 +6,15 @@ import {
   writeFileSync as fsWriteFileSync,
   openSync,
   readFileSync,
+  readlinkSync,
+  type Stats,
 } from 'fs'
-import { realpath, stat } from 'fs/promises'
+import {
+  open as fsOpen,
+  readlink as fsReadlink,
+  realpath,
+  stat,
+} from 'fs/promises'
 import { homedir } from 'os'
 import {
   basename,
@@ -30,7 +37,12 @@ import {
   type LineEndingType,
 } from './fileRead.js'
 import { fileReadCache } from './fileReadCache.js'
-import { getFsImplementation, safeResolvePath } from './fsOperations.js'
+import {
+  getFsImplementation,
+  readBoundedFromFdSync,
+  readBoundedFromHandle,
+  safeResolvePath,
+} from './fsOperations.js'
 import { logError } from './log.js'
 import { expandPath } from './path.js'
 import { getPlatform } from './platform.js'
@@ -298,7 +310,8 @@ class FileGateSlot {
   }
 }
 
-const gateSlot = new FileGateSlot()
+// Hoisted var avoids TDZ when circular imports (growthbook.ts) register during module evaluation
+var _fileGateReader: FileGateReader | null = null
 
 /**
  * Swap the feature-gate reader; returns the previous. Mirrors
@@ -317,7 +330,9 @@ const gateSlot = new FileGateSlot()
 export function registerFileGateReader(
   reader: FileGateReader | null,
 ): FileGateReader | null {
-  return gateSlot.register(reader)
+  const prev = _fileGateReader
+  _fileGateReader = reader
+  return prev
 }
 
 /**
@@ -332,7 +347,7 @@ export function registerFileGateReader(
 export function isCompactLinePrefixEnabled(): boolean {
   // 3P default: killswitch off = compact format enabled. Client-side only —
   // no server support needed, safe for Bedrock/Vertex/Foundry.
-  const reader = gateSlot.reader
+  const reader = _fileGateReader
   if (!reader) return true
   try {
     return !reader(COMPACT_LINE_PREFIX_KILLSWITCH, false)
@@ -718,4 +733,287 @@ export function normalizePathForComparison(filePath: string): string {
  */
 export function pathsEqual(path1: string, path2: string): boolean {
   return normalizePathForComparison(path1) === normalizePathForComparison(path2)
+}
+
+/**
+ * 2.1.323 #1985 (SEA `x5t` / `btr` / `cdi` / `cfe` / `aP` / `C3t` @278754460 & @280432911):
+ * Guard Edit and Bash against OOM on 0-byte synthetic `/proc` files and
+ * hanging / OOM on device files, FIFOs, and sockets.
+ */
+export const MAX_UNSIZED_FILE_BYTES = 10 * 1024 * 1024 // 10 MiB (SEA `x5t`)
+
+const BLOCKED_DEVICE_OR_PROC_PATHS = new Set([
+  '/dev/zero',
+  '/dev/random',
+  '/dev/urandom',
+  '/dev/full',
+  '/dev/stdin',
+  '/dev/stdout',
+  '/dev/stderr',
+  '/dev/tty',
+  '/dev/console',
+  '/dev/fd/0',
+  '/dev/fd/1',
+  '/dev/fd/2',
+  '/proc/kmsg',
+  '/proc/kcore',
+  '/proc/vmcore',
+])
+const PROC_ROOT_RE = /^\/proc\/[^/]+\/root(?=\/)/
+const PROC_TASK_RE = /^(\/proc\/[^/]+)\/task\/[^/]+(?=\/)/
+const PROC_SELF_CWD_RE = new RegExp(`^/proc/(?:self|${process.pid})/cwd(?=/)`)
+const PROC_INDIRECT_RE =
+  /^\/proc\/[^/]+\/cwd\/|^\/proc\/[^/]+\/fd\/\d+\/|^\/dev\/fd\/\d+\/|^\/dev\/(?:stdin|stdout|stderr)\/|^\/proc\/[^/]+\/map_files(\/|$)/
+const PROC_OTHER_FD_RE = new RegExp(
+  `^/proc/(?!self/|${process.pid}/)[^/]+/fd/\\d+$`,
+)
+const DEV_TTY_RE = /^\/dev\/(?:pts\/(?:\d+|ptmx)|ptmx|tty[^/]*)$/
+const PROC_SYNTHETIC_LEAF_RE =
+  /^\/proc\/[^/]+\/(?:environ|cmdline|auxv|maps|smaps|smaps_rollup|numa_maps|pagemap|mem|stat|statm|status|syscall|stack)$/
+
+export function isDeviceOrProcPath(targetPath: string): boolean {
+  let s = normalize(targetPath).replace(/\\/g, '/')
+  for (let hop = 0; ; hop++) {
+    if (PROC_SELF_CWD_RE.test(s)) {
+      s = normalize(s.replace(PROC_SELF_CWD_RE, () => getCwd())).replace(
+        /\\/g,
+        '/',
+      )
+    }
+    if (
+      BLOCKED_DEVICE_OR_PROC_PATHS.has(s) ||
+      DEV_TTY_RE.test(s) ||
+      PROC_INDIRECT_RE.test(s) ||
+      PROC_OTHER_FD_RE.test(s) ||
+      (s.startsWith('/proc/') &&
+        (s.endsWith('/fd/0') || s.endsWith('/fd/1') || s.endsWith('/fd/2'))) ||
+      PROC_SYNTHETIC_LEAF_RE.test(s)
+    ) {
+      return true
+    }
+    const reduced = s.replace(PROC_ROOT_RE, '').replace(PROC_TASK_RE, '$1')
+    if (reduced === s) return false
+    if (hop >= 8) return true
+    s = reduced
+  }
+}
+
+export function checkDeviceOrProcPathRefusal(
+  displayPath: string,
+  resolvedPath: string | undefined,
+): string | undefined {
+  if (resolvedPath === undefined) {
+    return `Cannot resolve '${displayPath}', so it cannot be told apart from a device or process file that this tool does not read.`
+  }
+  if (isDeviceOrProcPath(resolvedPath)) {
+    return `Cannot read '${displayPath}': this path names a device or process file that this tool does not read.`
+  }
+  return undefined
+}
+
+function makeNotRegularFileError(filePath: string): Error {
+  return Object.assign(
+    new Error('Not a regular file (device, FIFO, or socket)'),
+    { code: 'ERR_NOT_REGULAR_FILE', path: filePath },
+  )
+}
+
+function makeFileTooLargeError(
+  filePath: string,
+  size: number,
+  maxBytes: number,
+): Error {
+  return Object.assign(new Error('File exceeds maxBytes limit'), {
+    code: 'ERR_FILE_TOO_LARGE',
+    path: filePath,
+    size,
+    maxBytes,
+  })
+}
+
+export function isNotRegularFileError(err: unknown): boolean {
+  return (
+    err != null &&
+    typeof err === 'object' &&
+    'code' in err &&
+    (err as { code?: unknown }).code === 'ERR_NOT_REGULAR_FILE'
+  )
+}
+
+export function isFileTooLargeError(err: unknown): err is Error & {
+  code: 'ERR_FILE_TOO_LARGE'
+  maxBytes?: number
+  size?: number
+} {
+  return (
+    err != null &&
+    typeof err === 'object' &&
+    'code' in err &&
+    (err as { code?: unknown }).code === 'ERR_FILE_TOO_LARGE'
+  )
+}
+
+export function assertRegularFileStat(
+  fileStat: Pick<Stats, 'isDirectory' | 'isFile' | 'size'>,
+  filePath: string,
+  maxBytes?: number,
+): void {
+  if (fileStat.isDirectory()) {
+    throw Object.assign(
+      new Error('EISDIR: illegal operation on a directory, read'),
+      { code: 'EISDIR', errno: -21, syscall: 'read', path: filePath },
+    )
+  }
+  if (!fileStat.isFile()) {
+    throw makeNotRegularFileError(filePath)
+  }
+  if (maxBytes !== undefined && fileStat.size > maxBytes) {
+    throw makeFileTooLargeError(filePath, fileStat.size, maxBytes)
+  }
+}
+
+function getNonBlockingReadOpenFlags(): number {
+  return fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0)
+}
+
+/**
+ * SEA `btr(filePath, opts)` @278754460:
+ * Open with `O_RDONLY | O_NONBLOCK`, reject directories/devices/FIFOs/sockets,
+ * and read at most `maxSizedBytes` (or `MAX_UNSIZED_FILE_BYTES` for 0-byte
+ * synthetic `/proc` files). Returns `null` when `opts` is omitted and the
+ * opened file has non-zero `stat.size` (caller may then read normally).
+ */
+export async function readUnsizedFileBytes(
+  filePath: string,
+  opts?: {
+    refusesName?: (path: string | undefined) => boolean
+    maxSizedBytes?: number
+  },
+): Promise<Buffer | null> {
+  if (opts?.refusesName?.(filePath)) {
+    throw makeNotRegularFileError(filePath)
+  }
+  const handle = await fsOpen(filePath, getNonBlockingReadOpenFlags()).catch(
+    (err: unknown) => {
+      if (getErrnoCode(err) !== 'EAGAIN') throw err
+      return fsOpen(filePath, 'r')
+    },
+  )
+  try {
+    const fileStat = await handle.stat().catch(() => null)
+    if (fileStat !== null) {
+      assertRegularFileStat(fileStat, filePath, opts?.maxSizedBytes)
+      if (fileStat.size !== 0) {
+        if (opts === undefined || opts.maxSizedBytes === undefined) {
+          return null
+        }
+        const bytes = await readBoundedFromHandle(
+          handle,
+          opts.maxSizedBytes + 1,
+          'file',
+        )
+        if (bytes.length > opts.maxSizedBytes) {
+          throw makeFileTooLargeError(
+            filePath,
+            bytes.length,
+            opts.maxSizedBytes,
+          )
+        }
+        return bytes
+      }
+    }
+    if (opts?.refusesName && getPlatform() === 'linux') {
+      const fdPath = await fsReadlink(`/proc/self/fd/${handle.fd}`).catch(
+        (err: unknown) => {
+          const { resolvedPath, isCanonical } = safeResolvePath(
+            getFsImplementation(),
+            filePath,
+          )
+          if (isCanonical) return resolvedPath
+          return isENOENT(err) ? filePath : undefined
+        },
+      )
+      if (opts.refusesName(fdPath)) {
+        throw makeNotRegularFileError(filePath)
+      }
+    }
+    const streamBytes = await readBoundedFromHandle(
+      handle,
+      MAX_UNSIZED_FILE_BYTES + 8,
+      'stream',
+    )
+    if (streamBytes.length > MAX_UNSIZED_FILE_BYTES) {
+      throw makeFileTooLargeError(
+        filePath,
+        streamBytes.length,
+        MAX_UNSIZED_FILE_BYTES,
+      )
+    }
+    return streamBytes
+  } finally {
+    await handle.close().catch(() => {})
+  }
+}
+
+/**
+ * SEA `cdi(filePath, refusesName)` @278754974:
+ * Sync bounded non-blocking read for 0-byte synthetic `/proc` files.
+ */
+export function readUnsizedFileBytesSync(
+  filePath: string,
+  refusesName?: (path: string | undefined) => boolean,
+): Buffer {
+  if (refusesName?.(filePath)) {
+    throw makeNotRegularFileError(filePath)
+  }
+  const fd = openSync(filePath, getNonBlockingReadOpenFlags())
+  try {
+    let fileStat: Stats | undefined
+    try {
+      fileStat = fstatSync(fd)
+    } catch {
+      // ignore fstat failures
+    }
+    if (fileStat !== undefined) {
+      assertRegularFileStat(fileStat, filePath, MAX_UNSIZED_FILE_BYTES)
+    }
+    if (refusesName && getPlatform() === 'linux') {
+      let fdPath: string | undefined
+      try {
+        fdPath = readlinkSync(`/proc/self/fd/${fd}`)
+      } catch (err) {
+        const { resolvedPath, isCanonical } = safeResolvePath(
+          getFsImplementation(),
+          filePath,
+        )
+        fdPath = isCanonical
+          ? resolvedPath
+          : isENOENT(err)
+            ? filePath
+            : undefined
+      }
+      if (refusesName(fdPath)) {
+        throw makeNotRegularFileError(filePath)
+      }
+    }
+    const bytes = readBoundedFromFdSync(
+      fd,
+      MAX_UNSIZED_FILE_BYTES + 8,
+      'stream',
+    )
+    if (bytes.length > MAX_UNSIZED_FILE_BYTES) {
+      throw makeFileTooLargeError(
+        filePath,
+        bytes.length,
+        MAX_UNSIZED_FILE_BYTES,
+      )
+    }
+    return bytes
+  } finally {
+    try {
+      closeSync(fd)
+    } catch {
+      // ignore close errors
+    }
+  }
 }

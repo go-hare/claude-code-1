@@ -39,7 +39,9 @@ import type { ThemeName } from '../../utils/theme.js';
 import { CtrlOToExpand } from '../CtrlOToExpand.js';
 import { FallbackToolUseRejectedMessage } from '../FallbackToolUseRejectedMessage.js';
 import { Markdown } from '../Markdown.js';
+import { MessageResponse } from '../MessageResponse.js';
 import { AssistantThinkingMessage } from './AssistantThinkingMessage.js';
+import { getDisplayOnlyMcpTool } from './displayOnlyMcpTool.js';
 import { useUiRenderHost } from '../hooks/useUiRenderHost.js';
 import { PluginRenderedTree } from '../PluginRasterPanes.js';
 import { useSelectedMessageBg } from '../messageActions.js';
@@ -332,7 +334,11 @@ function VerboseToolUse({
   // Same REPL-primitive fallback as getSearchExtraToolsOrReadInfo — REPL mode strips
   // these from the execution tools list, but virtual messages still need them
   // to render in verbose mode.
-  const tool = findToolByName(tools, content.name) ?? findToolByName(getReplPrimitiveTools(), content.name);
+  const isErrorLookup = lookups.erroredToolUseIDs.has(content.id);
+  const tool =
+    findToolByName(tools, content.name) ??
+    findToolByName(getReplPrimitiveTools(), content.name) ??
+    getDisplayOnlyMcpTool(content.name, { isErrored: isErrorLookup });
   // densable Xc: `if(!le||le.isTransparentWrapper?.()) return null`
   if (!tool || tool.isTransparentWrapper?.()) return null;
 
@@ -1019,7 +1025,82 @@ export function CollapsedReadSearchContent({
     );
   }
 
-  if (mcpCallCount > 0) {
+  // Official 2.1.323 (#2042 / #2063): detect stopped/cut MCP or fullscreen
+  // shell calls (no result recorded) and user-rejected calls (rejected with
+  // reason) inside this collapsed tool group.
+  const isFullscreen = isFullscreenEnvEnabled();
+  type CutToolInfo = { id: string; name: string; isBash: boolean; input: unknown };
+  const cutCalls: CutToolInfo[] = [];
+  let cutMcpCount = 0;
+  let cutBashCount = 0;
+  let rejectedWithReasonCount = 0;
+  for (const item of groupMessages) {
+    const assistants = item.type === 'grouped_tool_use' ? item.messages : item.type === 'assistant' ? [item] : [];
+    for (const assistant of assistants) {
+      const blocks = assistant.message.content as Array<{ type: string; id?: string; name?: string; input?: unknown }>;
+      for (const block of blocks) {
+        if (block.type !== 'tool_use' || !block.id || !block.name) continue;
+        const resultMsg = lookups.toolResultByToolUseID.get(block.id);
+        const resultBlock =
+          resultMsg?.type === 'user' && Array.isArray(resultMsg.message?.content)
+            ? (resultMsg.message.content.find(
+                (b): b is ToolResultBlockParam =>
+                  typeof b === 'object' &&
+                  b !== null &&
+                  'type' in b &&
+                  b.type === 'tool_result' &&
+                  b.tool_use_id === block.id,
+              ) ?? undefined)
+            : undefined;
+        const resultContent = typeof resultBlock?.content === 'string' ? resultBlock.content : '';
+        const isCutResult =
+          !isActiveGroup &&
+          (!resultBlock ||
+            resultContent === INTERRUPT_MESSAGE_FOR_TOOL_USE ||
+            resultContent === CANCEL_MESSAGE ||
+            resultContent.startsWith('[Tool call skipped:') ||
+            resultContent.startsWith('[Tool call interrupted:') ||
+            resultContent.startsWith('[Tool call not completed:'));
+        const isBashTool = block.name === 'Bash' || block.name === 'PowerShell';
+        const isMcpTool = block.name.startsWith('mcp__');
+        if (isCutResult && (isMcpTool || (isFullscreen && isBashTool))) {
+          cutCalls.push({ id: block.id, name: block.name, isBash: isBashTool, input: block.input });
+          if (isMcpTool) cutMcpCount++;
+          if (isBashTool) cutBashCount++;
+        }
+        if (
+          resultBlock?.is_error === true &&
+          (resultContent.startsWith(REJECT_MESSAGE_WITH_REASON_PREFIX) || resultContent === REJECT_MESSAGE)
+        ) {
+          rejectedWithReasonCount++;
+        }
+      }
+    }
+  }
+
+  let cutInputPreview: string | undefined;
+  if (cutCalls.length > 0) {
+    const firstCut = cutCalls[0]!;
+    if (firstCut.input && typeof firstCut.input === 'object' && !Array.isArray(firstCut.input)) {
+      const rec = firstCut.input as Record<string, unknown>;
+      if (firstCut.isBash && typeof rec.command === 'string' && rec.command.trim()) {
+        const lines = rec.command.trim().split('\n');
+        cutInputPreview = lines.length > 3 ? `${lines.slice(0, 3).join('\n')}…` : lines.join('\n');
+      } else {
+        const safeFields = extractSafeToolInputFields(rec);
+        const entries = Object.entries(safeFields);
+        if (entries.length > 0) {
+          cutInputPreview = entries
+            .slice(0, 3)
+            .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`)
+            .join(', ');
+        }
+      }
+    }
+  }
+
+  const effectiveMcpCallCount = Math.max(0, mcpCallCount - cutMcpCount);
+  if (effectiveMcpCallCount > 0) {
     const serverLabel = message.mcpServerNames?.map(n => n.replace(/^claude\.ai /, '')).join(', ') || 'MCP';
     const isFirst = nonMemParts.length === 0;
     // densable focus uses "calling/called"; local non-focus still "querying"
@@ -1030,10 +1111,10 @@ export function CollapsedReadSearchContent({
     nonMemParts.push(
       <Text key="mcp">
         {verb} {serverLabel}
-        {mcpCallCount > 1 && (
+        {effectiveMcpCallCount > 1 && (
           <>
             {' '}
-            <Text bold>{mcpCallCount}</Text> times
+            <Text bold>{effectiveMcpCallCount}</Text> times
           </>
         )}
       </Text>,
@@ -1074,7 +1155,8 @@ export function CollapsedReadSearchContent({
     );
   }
 
-  if (isFullscreenEnvEnabled() && bashCount > 0) {
+  const effectiveBashCount = Math.max(0, bashCount - cutBashCount);
+  if (isFullscreen && effectiveBashCount > 0) {
     const isFirst = nonMemParts.length === 0;
     const verb = isActiveGroup ? (isFirst ? 'Running' : 'running') : isFirst ? 'Ran' : 'ran';
     if (!isFirst) {
@@ -1082,7 +1164,19 @@ export function CollapsedReadSearchContent({
     }
     nonMemParts.push(
       <Text key="bash">
-        {verb} <Text bold>{bashCount}</Text> shell {bashCount === 1 ? 'command' : 'commands'}
+        {verb} <Text bold>{effectiveBashCount}</Text> shell {effectiveBashCount === 1 ? 'command' : 'commands'}
+      </Text>,
+    );
+  }
+
+  if (cutCalls.length > 0) {
+    const hadOtherParts = nonMemParts.length > 0;
+    pushPart(
+      'cut',
+      'no result recorded for',
+      <Text>
+        <Text bold>{cutCalls.length}</Text> {hadOtherParts ? 'other ' : ''}
+        {cutCalls.length === 1 ? 'call' : 'calls'}
       </Text>,
     );
   }
@@ -1160,7 +1254,24 @@ export function CollapsedReadSearchContent({
           {isActiveGroup && <Text key="ellipsis">…</Text>} <CtrlOToExpand />
         </Text>
       </Box>
+      {cutInputPreview !== undefined && (
+        <MessageResponse>
+          <Text dimColor wrap="wrap">
+            {cutInputPreview}
+          </Text>
+        </MessageResponse>
+      )}
       {anyInterrupted && <FallbackToolUseRejectedMessage />}
+      {rejectedWithReasonCount > 0 && !isActiveGroup && (
+        <MessageResponse>
+          <Text dimColor wrap="wrap">
+            {toolUseIds.length === 1
+              ? 'Not run'
+              : `${rejectedWithReasonCount} ${rejectedWithReasonCount === 1 ? 'action' : 'actions'} not run`}{' '}
+            · rejected
+          </Text>
+        </MessageResponse>
+      )}
       {isActiveGroup && effectiveHint !== undefined && (
         // Row layout: 5-wide gutter for ⎿, then a flex column for the text.
         // Ink's wrap stays inside the right column so continuation lines

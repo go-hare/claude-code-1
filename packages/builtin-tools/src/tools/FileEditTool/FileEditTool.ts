@@ -21,11 +21,17 @@ import { logForDebugging } from 'src/utils/debug.js'
 import { countLinesChanged, getPatchForDisplay } from 'src/utils/diff.js'
 import { isBareMode, isEnvTruthy } from 'src/utils/envUtils.js'
 import { remoteHostForwardRefusal } from 'src/services/tools/remoteToolHost.js'
-import { isENOENT } from 'src/utils/errors.js'
+import { getErrnoCode, isENOENT } from 'src/utils/errors.js'
 import {
+  assertRegularFileStat,
+  checkDeviceOrProcPathRefusal,
   FILE_NOT_FOUND_CWD_NOTE,
   findSimilarFile,
   getFileModificationTime,
+  isFileTooLargeError,
+  isNotRegularFileError,
+  MAX_UNSIZED_FILE_BYTES,
+  readUnsizedFileBytes,
   suggestPathUnderCwd,
   writeTextContent,
 } from 'src/utils/file.js'
@@ -257,10 +263,14 @@ export const FileEditTool = buildTool({
     }
 
     const fs = getFsImplementation()
+    const notRegularFileResult = {
+      result: false as const,
+      message: `${file_path} exists but is not a regular file (a device, FIFO or socket). Edit only changes regular files.`,
+      errorCode: 16,
+    }
 
-    // 预检：防止 OOM（超大文件）+ 防止编辑目录路径
-    // 目录路径预检避免 AI 模型传入目录时触发原始 EISDIR 错误，
-    // 确保模型拿到清晰、可操作的指引消息。
+    // 预检：防止 OOM（超大文件 / 0字节 /proc 文件）+ 防止编辑目录/设备/FIFO/socket
+    let isUnsizedOrMissing = false
     try {
       const fileStat = await fs.stat(fullFilePath)
       // 预检：如果路径已是一个存在的目录，及时拒绝并给出指引
@@ -281,25 +291,73 @@ export const FileEditTool = buildTool({
           errorCode: 10,
         }
       }
+      // 2.1.323 #1985 (SEA @293963177): refuse devices, FIFOs, and sockets
+      if (!fileStat.isFile()) {
+        return notRegularFileResult
+      }
+      assertRegularFileStat(fileStat, fullFilePath)
+      isUnsizedOrMissing = fileStat.size === 0
     } catch (e) {
       if (!isENOENT(e)) {
         throw e
       }
+      isUnsizedOrMissing = true
     }
 
     // Read the file as bytes first so we can detect encoding and invalid UTF-8
     // from the buffer instead of calling detectFileEncoding (which does its own
     // sync readSync and would fail with a wasted ENOENT when the file doesn't exist).
+    // 2.1.323 #1985: for 0-byte synthetic (/proc) or freshly-appearing files,
+    // use non-blocking bounded readUnsizedFileBytes (`btr`) so Edit never hangs
+    // on FIFOs/devices or OOMs on /proc files.
     let fileContent: string | null
     let notText: NonTextReason | undefined
+    let refusedByNameMessage: string | undefined
     try {
-      const fileBuffer = await fs.readFileBytes(fullFilePath)
+      const fileBuffer = isUnsizedOrMissing
+        ? ((await readUnsizedFileBytes(fullFilePath, {
+            refusesName: resolved => {
+              refusedByNameMessage = checkDeviceOrProcPathRefusal(
+                file_path,
+                resolved,
+              )
+              return refusedByNameMessage !== undefined
+            },
+            maxSizedBytes: MAX_EDIT_FILE_SIZE,
+          })) ?? Buffer.alloc(0))
+        : await fs.readFileBytes(fullFilePath)
       const detected = detectBufferTextEncoding(fileBuffer)
       notText = detected.notText
       fileContent = fileBuffer
         .toString(detected.encoding)
         .replaceAll('\r\n', '\n')
     } catch (e) {
+      if (isFileTooLargeError(e)) {
+        return {
+          result: false,
+          message:
+            e.maxBytes === MAX_UNSIZED_FILE_BYTES
+              ? `File is too large to edit: it reports a size of 0 bytes and holds more than ${formatFileSize(MAX_UNSIZED_FILE_BYTES)}.`
+              : `File is too large to edit. Maximum editable file size is ${formatFileSize(MAX_EDIT_FILE_SIZE)}.`,
+          errorCode: 10,
+        }
+      }
+      if (isNotRegularFileError(e)) {
+        return refusedByNameMessage === undefined
+          ? notRegularFileResult
+          : {
+              result: false,
+              message: refusedByNameMessage,
+              errorCode: 16,
+            }
+      }
+      if (isUnsizedOrMissing && getErrnoCode(e) === 'EAGAIN') {
+        return {
+          result: false,
+          message: `${file_path} has nothing more to read yet, so it may be a stream. Edit only changes regular files.`,
+          errorCode: 16,
+        }
+      }
       if (isENOENT(e)) {
         fileContent = null
       } else {
@@ -536,6 +594,17 @@ export const FileEditTool = buildTool({
       throw new Error(outsideWriteBlock)
     }
 
+    // 2.1.323 #2023 defense-in-depth: also enforce Read deny rules at call()
+    // time across all resolved path spellings (symlinks / realpath).
+    if (
+      isPathCoveredByReadDenyRule(
+        absoluteFilePath,
+        toolUseContext.getAppState().toolPermissionContext,
+      )
+    ) {
+      throw new Error(FILE_READ_DENY_CANNOT_EDIT)
+    }
+
     // Discover skills from this file's path (fire-and-forget, non-blocking)
     // Skip in simple mode - no skills available
     const cwd = getCwd()
@@ -588,16 +657,38 @@ export const FileEditTool = buildTool({
 
       try {
         openedRead = await openApprovedRead(absoluteFilePath, approved)
-        const rawBytes = await openedRead.handle.readFile()
-        const detected = detectBufferTextEncoding(rawBytes)
-        if (detected.notText) {
-          throw new Error(formatNonTextFileRefusal(detected.notText))
+        // 2.1.323 #1985: guard call() against non-regular files and 0-byte /proc OOM
+        const openedStat = await openedRead.handle.stat()
+        assertRegularFileStat(openedStat, absoluteFilePath, MAX_EDIT_FILE_SIZE)
+        if (openedStat.size === 0) {
+          const rawBytes =
+            (await readUnsizedFileBytes(openedRead.ioPath, {
+              refusesName: resolved =>
+                checkDeviceOrProcPathRefusal(file_path, resolved) !== undefined,
+              maxSizedBytes: MAX_EDIT_FILE_SIZE,
+            })) ?? Buffer.alloc(0)
+          const detected = detectBufferTextEncoding(rawBytes)
+          if (detected.notText) {
+            throw new Error(formatNonTextFileRefusal(detected.notText))
+          }
+          originalFileContents = rawBytes
+            .toString(detected.encoding)
+            .replaceAll('\r\n', '\n')
+          fileExists = true
+          encoding = detected.encoding
+          endings = 'LF'
+        } else {
+          const rawBytes = await openedRead.handle.readFile()
+          const detected = detectBufferTextEncoding(rawBytes)
+          if (detected.notText) {
+            throw new Error(formatNonTextFileRefusal(detected.notText))
+          }
+          const loaded = readFileForEdit(openedRead.ioPath)
+          originalFileContents = loaded.content
+          fileExists = loaded.fileExists
+          encoding = loaded.encoding
+          endings = loaded.lineEndings
         }
-        const loaded = readFileForEdit(openedRead.ioPath)
-        originalFileContents = loaded.content
-        fileExists = loaded.fileExists
-        encoding = loaded.encoding
-        endings = loaded.lineEndings
       } catch (e) {
         if (!isENOENT(e)) throw e
       }

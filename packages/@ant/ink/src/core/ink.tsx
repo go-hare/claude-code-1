@@ -2330,7 +2330,7 @@ export default class Ink {
     const Ce = cursorTo(q.col + 1) + (q.row !== W ? ZY(0, q.row - W) : '');
     this.writeContent(he + xe + Ce);
     if (N !== -1 && holdMs > 0 && !this.isExiting) {
-      startScreenReaderHold(Date.now() + holdMs);
+      startScreenReaderHold(performance.now() + holdMs);
       this.srAnnouncementHoldTimer = setTimeout(() => {
         this.srAnnouncementHoldTimer = null;
         this.onRender();

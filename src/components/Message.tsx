@@ -220,6 +220,7 @@ function MessageImpl({
               isFirstTextBlock={isFirstTextForMessage && index === firstTextBlockIndex}
               isApiError={message.isApiErrorMessage === true}
               apiErrorKind={(message as { error?: string }).error}
+              apiError={(message as { apiError?: string }).apiError}
             />
           ))}
         </Box>
@@ -502,6 +503,7 @@ function AssistantMessageBlock({
   isFirstTextBlock,
   isApiError,
   apiErrorKind,
+  apiError,
 }: {
   param:
     | BetaContentBlock
@@ -542,6 +544,8 @@ function AssistantMessageBlock({
   isApiError?: boolean;
   /** densable 2.1.289 `ff` `z` — pass through to AssistantTextMessage `apiErrorKind`. */
   apiErrorKind?: string;
+  /** Official 2.1.325 (#2260) — pass through `apiError` (e.g. `'dlp_request_denied'`). */
+  apiError?: string;
 }): React.ReactNode {
   // densable SFa = Uy(phH => text && bFa ? phH.displayedMessageContent[bFa] : void 0)
   // Guard: restored/partial AppState may omit displayedMessageContent.
@@ -560,6 +564,7 @@ function AssistantMessageBlock({
           onOpenRateLimitOptions={onOpenRateLimitOptions}
           isApiError={isApiError}
           apiErrorKind={apiErrorKind}
+          apiError={apiError}
           messageId={messageId}
         />
       );
@@ -600,6 +605,7 @@ function AssistantMessageBlock({
           onOpenRateLimitOptions={onOpenRateLimitOptions}
           isApiError={isApiError}
           apiErrorKind={apiErrorKind}
+          apiError={apiError}
           messageId={messageId}
         />
       );

@@ -296,27 +296,41 @@ export function getHostAuthRefreshTimeoutMs(
 }
 
 /**
- * Race a host-auth refresh promise against the configured timeout.
- * On timeout returns null (treated as same-token path under 401 budget).
+ * Race a host-auth refresh promise against the configured timeout (and optional
+ * AbortSignal for #2341 so Desktop shutdown does not hang on "Stopping").
+ * On timeout or abort returns null.
  */
 export async function withHostAuthRefreshTimeout<T>(
   work: Promise<T>,
   timeoutMs: number = getHostAuthRefreshTimeoutMs(),
+  signal?: AbortSignal,
 ): Promise<T | null> {
+  if (signal?.aborted) {
+    return null
+  }
   let timer: ReturnType<typeof setTimeout> | undefined
+  let onAbort: (() => void) | undefined
   try {
     return await Promise.race([
       work,
       new Promise<null>(resolve => {
         timer = setTimeout(() => resolve(null), timeoutMs)
+        timer.unref?.()
+        if (signal) {
+          onAbort = () => resolve(null)
+          signal.addEventListener('abort', onAbort, { once: true })
+        }
       }),
     ])
   } finally {
     if (timer !== undefined) clearTimeout(timer)
+    if (signal && onAbort) signal.removeEventListener('abort', onAbort)
   }
 }
 
-export type HostAuthTokenRefreshCallback = () => Promise<string | null>
+export type HostAuthTokenRefreshCallback = (
+  signal?: AbortSignal,
+) => Promise<string | null>
 
 // Module state for host-creds apply + 401 recovery (official afa / Gan / cLp).
 // densable 2.1.248: refresh callback lives on credentialSlots.
@@ -387,9 +401,10 @@ export async function refreshHostCredsToken(): Promise<string | null> {
  * - `unavailable` — no callback registered
  * - `failed` — callback threw
  */
-export async function tryHostAuth401Recovery(): Promise<
-  'updated' | 'same' | 'exhausted' | 'unavailable' | 'failed'
-> {
+export async function tryHostAuth401Recovery(
+  signal?: AbortSignal,
+): Promise<'updated' | 'same' | 'exhausted' | 'unavailable' | 'failed'> {
+  if (signal?.aborted) return 'failed'
   const cb = getHostAuthTokenRefreshCallback()
   if (!cb) return 'unavailable'
 
@@ -397,8 +412,16 @@ export async function tryHostAuth401Recovery(): Promise<
   const previous = process.env[envVar]
   let next: string | null = null
   try {
-    // Official: cap host refresh so a hung desktop callback cannot stall retries.
-    const timed = await withHostAuthRefreshTimeout(cb())
+    // Official: cap host refresh so a hung desktop callback cannot stall retries,
+    // and honor optional AbortSignal (#2341) so stopping cancels renewal promptly.
+    const timed = await withHostAuthRefreshTimeout(
+      cb(signal),
+      getHostAuthRefreshTimeoutMs(),
+      signal,
+    )
+    if (signal?.aborted) {
+      return 'failed'
+    }
     next = timed
   } catch (e) {
     logForDebugging(

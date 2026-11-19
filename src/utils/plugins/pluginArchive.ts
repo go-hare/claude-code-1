@@ -17,7 +17,11 @@ import { logForDebugging } from '../debug.js'
 import { isPathSafe, unzipFile } from '../dxt/zip.js'
 import { errorMessage } from '../errors.js'
 import { getFsImplementation } from '../fsOperations.js'
-import { classifyFetchError, logPluginFetch } from './fetchTelemetry.js'
+import {
+  classifyFetchError,
+  getPluginDownloadProxyOptions,
+  logPluginFetch,
+} from './fetchTelemetry.js'
 
 /** densable Mio */
 export const ARCHIVE_URL_POLICY_MESSAGE =
@@ -309,12 +313,20 @@ export async function downloadPluginArchive(
   const started = performance.now()
   let data: Buffer
   try {
+    const proxyOpts = getPluginDownloadProxyOptions(url)
     const response = await axios.get(url, {
       timeout: PLUGIN_ARCHIVE_TIMEOUT_MS,
       responseType: 'arraybuffer',
       maxRedirects: 5,
       maxContentLength: PLUGIN_ARCHIVE_MAX_BYTES,
       headers,
+      ...(proxyOpts.httpsAgent
+        ? {
+            httpsAgent: proxyOpts.httpsAgent,
+            httpAgent: proxyOpts.httpAgent,
+            proxy: proxyOpts.proxy,
+          }
+        : {}),
       beforeRedirect: createArchiveBeforeRedirect(url, inheritedNames),
     })
     logPluginFetch(

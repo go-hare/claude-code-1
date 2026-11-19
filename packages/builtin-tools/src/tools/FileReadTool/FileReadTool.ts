@@ -1114,6 +1114,7 @@ async function validateContentTokens(
   content: string,
   ext: string,
   maxTokens?: number,
+  model?: string,
 ): Promise<void> {
   const effectiveMaxTokens =
     maxTokens ?? getDefaultFileReadingLimits().maxTokens
@@ -1131,7 +1132,7 @@ async function validateContentTokens(
   const tokenEstimate = roughTokenCountEstimationForFileType(content, ext)
   if (!tokenEstimate || tokenEstimate <= effectiveMaxTokens / 4) return
 
-  const tokenCount = await countTokensWithAPI(content)
+  const tokenCount = await countTokensWithAPI(content, model)
   const effectiveCount = tokenCount ?? tokenEstimate
 
   if (effectiveCount > effectiveMaxTokens) {
@@ -1209,7 +1210,12 @@ async function callInner(
       )
     }
 
-    await validateContentTokens(cellsJson, ext, maxTokens)
+    await validateContentTokens(
+      cellsJson,
+      ext,
+      maxTokens,
+      context.options.mainLoopModel,
+    )
 
     // Get mtime via bound handle when available (no symlink swap TOCTOU)
     const stats = openedHandle
@@ -1468,7 +1474,12 @@ async function callInner(
     (offset ?? 1) <= 1 && limit === undefined && pages === undefined
 
   try {
-    await validateContentTokens(content, ext, effectiveMaxTokens)
+    await validateContentTokens(
+      content,
+      ext,
+      effectiveMaxTokens,
+      context.options.mainLoopModel,
+    )
   } catch (err) {
     if (!(err instanceof MaxFileReadTokenExceededError) || !isWholeFileRead) {
       throw wrapAllowLargeError(err, allowLargeOpts)

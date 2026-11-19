@@ -9,7 +9,8 @@ import {
   Agent as HttpsAgent,
   type AgentOptions as HttpsAgentOptions,
 } from 'https'
-import type { Socket } from 'net'
+import { isIP, type Socket } from 'net'
+import { checkServerIdentity } from 'tls'
 import { HttpsProxyAgent, type HttpsProxyAgentOptions } from 'https-proxy-agent'
 import memoize from 'lodash-es/memoize.js'
 import type * as undici from 'undici'
@@ -303,6 +304,54 @@ export function shouldBypassProxy(
 }
 
 /**
+ * Official 2.1.323 (#2166): Organization settings and policy requests no longer
+ * use a proxy configured solely via `ALL_PROXY`. Passing `proxy: false` disables
+ * axios's built-in `proxy-from-env` (which reads `ALL_PROXY`) while allowing
+ * our global request interceptor (configured from `HTTPS_PROXY`/`HTTP_PROXY`)
+ * to still route through `HTTPS_PROXY` when set.
+ */
+export function getOrgPolicyAxiosProxyConfig(): { proxy: false } {
+  return { proxy: false }
+}
+
+/**
+ * Official 2.1.323 (#2068) `ver extends HttpsProxyAgent`:
+ * Ensure TLS-inspecting proxies reached over `https://` receive the configured
+ * CA certs and preserve target `servername` / `checkServerIdentity`.
+ */
+class SecureHttpsProxyAgent extends HttpsProxyAgent<string> {
+  override async connect(
+    req: Parameters<HttpsProxyAgent<string>['connect']>[0],
+    opts: Parameters<HttpsProxyAgent<string>['connect']>[1],
+  ): ReturnType<HttpsProxyAgent<string>['connect']> {
+    if (!opts.secureEndpoint) {
+      return super.connect(req, opts)
+    }
+    const servername = opts.servername || opts.host || ''
+    const customCheck = opts.checkServerIdentity
+    return super.connect(req, {
+      ...opts,
+      ...(customCheck
+        ? {
+            checkServerIdentity: (
+              _host: string,
+              cert: Parameters<typeof checkServerIdentity>[1],
+            ) => customCheck(servername, cert),
+          }
+        : !servername || isIP(servername)
+          ? {
+              servername: '',
+              checkServerIdentity: (
+                _host: string,
+                cert: Parameters<typeof checkServerIdentity>[1],
+              ) => checkServerIdentity(servername, cert),
+            }
+          : { servername }),
+    })
+  }
+}
+
+/**
  * Create an HttpsProxyAgent with optional mTLS configuration
  * Skips local DNS resolution to let the proxy handle it
  */
@@ -345,7 +394,12 @@ function createHttpsProxyAgent(
     }
   }
 
-  return new HttpsProxyAgent(proxyUrl, { ...agentOptions, ...extra })
+  const mergedOpts = { ...agentOptions, ...extra }
+  const agent = new SecureHttpsProxyAgent(proxyUrl, mergedOpts)
+  // Official 2.1.323 (#2068) `G4o`: also merge CA / mTLS into `agent.options`
+  // so both the `https://` proxy connection and the tunneled target TLS use it.
+  agent.options = { ...agent.options, ...mergedOpts }
+  return agent
 }
 
 /**
@@ -429,6 +483,12 @@ export const getProxyAgent = memoize((uri: string): undici.Dispatcher => {
       passphrase?: string
       ca?: string | string[] | Buffer
     }
+    proxyTls?: {
+      cert?: string | Buffer
+      key?: string | Buffer
+      passphrase?: string
+      ca?: string | string[] | Buffer
+    }
   } = {
     // Override both HTTP and HTTPS proxy with the provided URI
     httpProxy: uri,
@@ -436,12 +496,14 @@ export const getProxyAgent = memoize((uri: string): undici.Dispatcher => {
     noProxy: getNoProxy(),
   }
 
-  // Set both connect and requestTls so TLS options apply to both paths:
-  // - requestTls: used by ProxyAgent for the TLS connection through CONNECT tunnels
-  // - connect: used by Agent for direct (no-proxy) connections
+  // Set connect, requestTls, and proxyTls (#2068) so TLS/CA options apply to:
+  // - requestTls: TLS connection through CONNECT tunnels
+  // - proxyTls: TLS connection to the proxy itself when proxy URL is https://
+  // - connect: direct (no-proxy) connections
   if (tlsOpts) {
     proxyOptions.connect = tlsOpts
     proxyOptions.requestTls = tlsOpts
+    proxyOptions.proxyTls = tlsOpts
   }
 
   return new undiciMod.EnvHttpProxyAgent(proxyOptions)

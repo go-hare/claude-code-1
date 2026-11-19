@@ -68,8 +68,8 @@ export function endScreenReaderHold(): void {
   holdRequested = false
 }
 
-/** densable `zXo`. */
-export function isScreenReaderHoldActive(nowMs = Date.now()): boolean {
+/** densable `zXo` + 2.1.323 (#2088) monotonic clock via `performance.now()`. */
+export function isScreenReaderHoldActive(nowMs = performance.now()): boolean {
   return nowMs < holdUntilMs
 }
 

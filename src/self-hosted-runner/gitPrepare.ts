@@ -894,16 +894,23 @@ export function hardCapSignal(
 export const KILL_PROCESS_TREE_ENUM_TIMEOUT_MS = 500
 
 /**
- * densable `KE_` — spawn `ps -A -o pid= -o ppid=` and return stdout.
+ * Official 2.1.323 #1991 (`HB`) — spawn `ps` with timeout + SIGKILL so slow
+ * process listings do not pile up, and drop any truncated trailing line when
+ * terminated by a signal.
  */
-function spawnPsPidPpid(): Promise<string> {
+export function spawnPsPidPpid(
+  timeoutMs: number = KILL_PROCESS_TREE_ENUM_TIMEOUT_MS,
+  spawnImpl: typeof spawn = spawn,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     let child: ChildProcess
     try {
-      child = spawn('ps', ['-A', '-o', 'pid=', '-o', 'ppid='], {
+      child = spawnImpl('ps', ['-A', '-o', 'pid=', '-o', 'ppid='], {
         cwd: '/',
         stdio: ['ignore', 'pipe', 'ignore'],
         windowsHide: true,
+        timeout: timeoutMs,
+        killSignal: 'SIGKILL',
       })
     } catch (err) {
       reject(err)
@@ -914,7 +921,9 @@ function spawnPsPidPpid(): Promise<string> {
       out += typeof chunk === 'string' ? chunk : chunk.toString()
     })
     child.once('error', reject)
-    child.once('close', () => resolve(out))
+    child.once('close', (_code, signal) =>
+      resolve(signal ? out.slice(0, out.lastIndexOf('\n') + 1) : out),
+    )
   })
 }
 

@@ -45,6 +45,10 @@ import { logError } from '../../utils/log.js'
 import { getAPIProvider } from '../../utils/model/providers.js'
 import { logOTelAuthEvent } from '../../utils/sessionSlots.js'
 import { getInitialSettings } from '../../utils/settings/settings.js'
+import {
+  declareNoWifTokenRenewal,
+  releaseAllHeldWifLocks,
+} from '../../utils/wifCredentialRace.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import {
   buildAccountProperties,
@@ -292,6 +296,9 @@ export async function authStatus(opts: {
   json?: boolean
   text?: boolean
 }): Promise<void> {
+  // Official 2.1.325 #2289 (`D9s`): short status commands read valid cached
+  // profile tokens without starting a refresh lock that could linger on exit.
+  declareNoWifTokenRenewal()
   const { source: authTokenSource, hasToken } = getAuthTokenSource()
   const { source: apiKeySource } = getAnthropicApiKeyWithSource()
   const hasApiKeyEnvVar =
@@ -380,7 +387,10 @@ export async function authStatus(opts: {
 
     process.stdout.write(jsonStringify(output, null, 2) + '\n')
   }
-  await waitForHeldOAuthRefresh(getOAuthRefreshExitWaitMs(true))
+  await Promise.all([
+    waitForHeldOAuthRefresh(getOAuthRefreshExitWaitMs(true)),
+    releaseAllHeldWifLocks(),
+  ])
   process.exit(loggedIn ? 0 : 1)
 }
 
@@ -390,9 +400,13 @@ export async function authLogout(): Promise<void> {
     await performLogout({ clearOnboarding: false })
   } catch {
     process.stderr.write('Failed to log out.\n')
+    await releaseAllHeldWifLocks()
     process.exit(1)
   }
   process.stdout.write('Successfully logged out from your Anthropic account.\n')
-  await waitForHeldOAuthRefresh(getOAuthRefreshExitWaitMs(true))
+  await Promise.all([
+    waitForHeldOAuthRefresh(getOAuthRefreshExitWaitMs(true)),
+    releaseAllHeldWifLocks(),
+  ])
   process.exit(0)
 }

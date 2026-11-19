@@ -8,7 +8,11 @@ import {
   WorkflowAbortedError,
 } from '@claude-code/workflow-engine'
 import { assembleToolPool } from '../../tools.js'
-import { finalizeAgentTool } from '@claude-code/builtin-tools/tools/AgentTool/agentToolUtils.js'
+import {
+  finalizeAgentTool,
+  formatSubagentSafeguardsGuidance,
+  isSubagentSafeguardsRefusal,
+} from '@claude-code/builtin-tools/tools/AgentTool/agentToolUtils.js'
 import {
   isRunAgentSpinnerMode,
   runAgent,
@@ -259,6 +263,154 @@ export function clearCompletedWorkflowAgentResults(runId?: string): void {
   }
 }
 
+// ── 2.1.323 #2199: Non-typed host prompt guard ─────────────────────────────
+
+export type WorkflowPromptProvenance = {
+  isHumanTypedPrompt?: boolean
+  suppressWorkflowKeyword?: boolean
+  origin?: { kind?: string }
+}
+
+/**
+ * 2.1.323 #2199: Returns false when the host app explicitly marks a prompt as
+ * not typed by the user, preventing it from reaching workflow agents as the
+ * user's request.
+ */
+export function isTypedUserPromptForWorkflow(
+  provenance: WorkflowPromptProvenance | undefined,
+): boolean {
+  if (!provenance) return true
+  if (provenance.isHumanTypedPrompt === false) return false
+  if (provenance.suppressWorkflowKeyword === true) return false
+  if (
+    provenance.origin?.kind !== undefined &&
+    provenance.origin.kind !== 'human' &&
+    provenance.origin.kind !== 'typed'
+  ) {
+    return false
+  }
+  return true
+}
+
+// ── 2.1.323 #2203: Desktop Code tab usage-limit pause & auto-continue ──────
+
+export type WorkflowUsageLimitInfo = {
+  resetsAtMs: number
+  reason?: string
+}
+
+/**
+ * True when running in the desktop app's Code tab (or when auto-continue at
+ * usage limit is enabled via env/settings).
+ */
+export function isDesktopCodeTabWorkflowSession(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return (
+    Boolean(env.CLAUDE_CODE_DESKTOP_APP_VERSION) ||
+    env.CLAUDE_CODE_HOSTED_DESKTOP === '1' ||
+    env.CLAUDE_CODE_ENTRYPOINT === 'sdk-ts'
+  )
+}
+
+const MAX_SETTIMEOUT_MS = 2_147_483_647
+export const MAX_USAGE_LIMIT_RETRIES = 3
+export const MIN_USAGE_LIMIT_RETRY_DELAY_MS = 1_000
+const USAGE_LIMIT_RETRY_COUNT = Symbol('usageLimitRetryCount')
+
+/**
+ * Extracts usage-limit pause details from a workflow subagent's messages/error.
+ */
+export function extractWorkflowUsageLimitInfo(
+  messages: readonly Message[],
+  err?: unknown,
+): WorkflowUsageLimitInfo | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i] as
+      | (Message & {
+          error?: string
+          isApiErrorMessage?: boolean
+          apiErrorParams?: {
+            rate_limit_info?: { resetsAt?: number; status?: string }
+          }
+          quotaLimits?: { resetsAt?: number }
+        })
+      | undefined
+    if (!m || m.type !== 'assistant') continue
+    if (
+      m.error === 'rate_limit' ||
+      m.error === 'usage_limit_reached' ||
+      m.apiErrorParams?.rate_limit_info?.status === 'rejected'
+    ) {
+      const resetsAt =
+        m.apiErrorParams?.rate_limit_info?.resetsAt ?? m.quotaLimits?.resetsAt
+      if (typeof resetsAt === 'number' && Number.isFinite(resetsAt)) {
+        return {
+          resetsAtMs: resetsAt > 1e12 ? resetsAt : resetsAt * 1000,
+          reason: m.error ?? 'usage_limit_reached',
+        }
+      }
+    }
+    if (!m.error && !m.isApiErrorMessage) {
+      // Latest assistant turn succeeded without an error; do not misclassify
+      // an earlier recovered rate-limit message as an active usage limit.
+      break
+    }
+  }
+  if (err && typeof err === 'object') {
+    const rec = err as {
+      code?: string
+      error?: string
+      resetsAt?: number
+      rateLimitInfo?: { resetsAt?: number }
+    }
+    if (
+      rec.code === 'usage_limit_reached' ||
+      rec.error === 'usage_limit_reached' ||
+      rec.error === 'rate_limit'
+    ) {
+      const raw = rec.resetsAt ?? rec.rateLimitInfo?.resetsAt
+      if (typeof raw === 'number' && Number.isFinite(raw)) {
+        return {
+          resetsAtMs: raw > 1e12 ? raw : raw * 1000,
+          reason: rec.code ?? rec.error,
+        }
+      }
+    }
+  }
+  return null
+}
+
+export async function waitUntilUsageLimitReset(
+  resetsAtMs: number,
+  signal: AbortSignal,
+  nowMs: () => number = Date.now,
+): Promise<boolean> {
+  if (signal.aborted) return false
+  let remainingMs = Math.max(0, resetsAtMs - nowMs())
+  if (remainingMs === 0) return !signal.aborted
+  while (remainingMs > 0) {
+    // Segment sleeps exceeding 32-bit signed int max to avoid setTimeout overflow.
+    const chunkMs = Math.min(remainingMs, MAX_SETTIMEOUT_MS)
+    const completed = await new Promise<boolean>(resolve => {
+      const onAbort = () => {
+        clearTimeout(timer)
+        resolve(false)
+      }
+      const timer = setTimeout(() => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(true)
+      }, chunkMs)
+      if (typeof timer.unref === 'function') timer.unref()
+      signal.addEventListener('abort', onAbort, { once: true })
+    })
+    if (!completed || signal.aborted) return false
+    const nextRemaining = Math.max(0, resetsAtMs - nowMs())
+    remainingMs = Math.min(remainingMs - chunkMs, nextRemaining)
+  }
+  return !signal.aborted
+}
+
 /** Deeply-integrated backend: parses agent/model/tools from the live session, delegates to the core runAgent. */
 export const claudeCodeBackend: AgentAdapter = {
   id: 'claude-code',
@@ -284,6 +436,24 @@ export const claudeCodeBackend: AgentAdapter = {
       }
     }
     const { toolUseContext, canUseTool } = readHostBundle(ctx.host)
+    // 2.1.323 #2199: refuse prompts that the host app explicitly marked as not typed
+    const promptProvenance = (
+      toolUseContext as ToolUseContext & {
+        promptProvenance?: WorkflowPromptProvenance
+      }
+    ).promptProvenance
+    if (!isTypedUserPromptForWorkflow(promptProvenance)) {
+      logForDebugging(
+        `workflow agent ${ctx.runId}:${ctx.agentId} skipped: prompt was marked not typed by host`,
+      )
+      return {
+        kind: 'dead',
+        reason: 'non-typed-prompt',
+        detail:
+          'Prompt was marked as not typed by the host application and was not forwarded to workflow agents.',
+      }
+    }
+
     const appState = toolUseContext.getAppState()
     const agentDef = resolveAgentDefinition(params.agentType, toolUseContext)
     const model = mapWorkflowModel(params.model)
@@ -540,6 +710,64 @@ export const claudeCodeBackend: AgentAdapter = {
         throw new Error('user-retry')
       }
       throw new WorkflowAbortedError()
+    }
+
+    // 2.1.323 #2197: when safeguards stop a workflow agent, tell Claude to retry
+    // with a narrower prompt or tell the user instead of doing the work itself.
+    const lastAssistant = [...messages]
+      .reverse()
+      .find(m => m.type === 'assistant')
+    if (lastAssistant && isSubagentSafeguardsRefusal(lastAssistant)) {
+      const guidance = formatSubagentSafeguardsGuidance(lastAssistant, true)
+      logEvent('tengu_workflow_agent', { ok: 0 })
+      return {
+        kind: 'dead',
+        reason: 'safeguards-refusal',
+        detail: guidance,
+      }
+    }
+
+    // 2.1.323 #2203: in desktop Code tab sessions, pause at a usage limit and
+    // automatically continue once the limit resets (bounded by max retries and
+    // a minimum retry delay to prevent infinite recursion when resetsAt is stale).
+    const usageLimit = extractWorkflowUsageLimitInfo(messages)
+    if (usageLimit && isDesktopCodeTabWorkflowSession()) {
+      const priorRetries =
+        (ctx as { [USAGE_LIMIT_RETRY_COUNT]?: number })[
+          USAGE_LIMIT_RETRY_COUNT
+        ] ?? 0
+      const retryAttempt = priorRetries + 1
+      if (retryAttempt > MAX_USAGE_LIMIT_RETRIES) {
+        logForDebugging(
+          `workflow agent ${ctx.runId}:${ctx.agentId} hit usage limit ${retryAttempt} times (max ${MAX_USAGE_LIMIT_RETRIES}); stopping retries`,
+        )
+        logEvent('tengu_workflow_agent', { ok: 0 })
+        return {
+          kind: 'dead',
+          reason: 'unknown',
+          detail: `Usage limit persisted after ${MAX_USAGE_LIMIT_RETRIES} retries`,
+        }
+      }
+      const minRetryDelayMs =
+        (ctx as { minUsageLimitRetryDelayMs?: number })
+          .minUsageLimitRetryDelayMs ?? MIN_USAGE_LIMIT_RETRY_DELAY_MS
+      const targetResetMs = Math.max(
+        usageLimit.resetsAtMs,
+        Date.now() + Math.max(0, minRetryDelayMs),
+      )
+      logForDebugging(
+        `workflow agent ${ctx.runId}:${ctx.agentId} hit usage limit (retry ${retryAttempt}/${MAX_USAGE_LIMIT_RETRIES}); pausing until ${new Date(targetResetMs).toISOString()}`,
+      )
+      markWorkflowUsageLimitRecovery(ctx.runId)
+      const resumed = await waitUntilUsageLimitReset(targetResetMs, ctx.signal)
+      if (!resumed) {
+        throw new WorkflowAbortedError()
+      }
+      const nextCtx = {
+        ...ctx,
+        [USAGE_LIMIT_RETRY_COUNT]: retryAttempt,
+      }
+      return await claudeCodeBackend.run(params, nextCtx)
     }
 
     const finalized = finalizeAgentTool(messages, coreAgentId, {

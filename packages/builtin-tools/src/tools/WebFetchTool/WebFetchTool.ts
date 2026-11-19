@@ -19,6 +19,7 @@ import {
 } from 'src/utils/permissions/permissions.js'
 import { getSettings_DEPRECATED } from 'src/utils/settings/settings.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
+import { isPolicyAllowed } from 'src/services/policyLimits/index.js'
 import {
   isWebFetchArtifactExceptionEnabled,
   OFFICIAL_ARTIFACT_TOOL_NAME,
@@ -195,6 +196,29 @@ export function parseClaudeAiShareUrl(
   return match === undefined ? null : { snapshotId: match.toLowerCase() }
 }
 
+/**
+ * 2.1.323 #2065 (SEA `GDn` / `$Dn` @291274910):
+ * Recheck CLAUDE_CODE_DISABLE_WEB_FETCH and organization policy
+ * (`allow_web_fetch`) on every WebFetch invocation — not only once when
+ * building the tool list at session start.
+ */
+export function getWebFetchDisabledReason(): string | null {
+  if (isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_WEB_FETCH)) {
+    return 'WebFetch is turned off by CLAUDE_CODE_DISABLE_WEB_FETCH.'
+  }
+  if (!isPolicyAllowed('allow_web_fetch')) {
+    return 'Web fetch is disabled by your organization policy.'
+  }
+  return null
+}
+
+function assertWebFetchAllowed(): void {
+  const reason = getWebFetchDisabledReason()
+  if (reason !== null) {
+    throw new Error(reason)
+  }
+}
+
 export const WebFetchTool = Object.assign(
   buildTool({
     name: WEB_FETCH_TOOL_NAME,
@@ -232,10 +256,9 @@ export const WebFetchTool = Object.assign(
     get outputSchema(): OutputSchema {
       return outputSchema()
     },
-    // densable 2.1.289: isEnabled(){return!a.CLAUDE_CODE_DISABLE_WEB_FETCH&&sn(mwe)}
-    // mwe = allow_web_fetch (policy/GB). Env alone is the product kill switch for forks.
+    // 2.1.323 #2065 (SEA `isEnabled(){return!i.CLAUDE_CODE_DISABLE_WEB_FETCH&&yn(fkt)}`)
     isEnabled() {
-      return !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_WEB_FETCH)
+      return getWebFetchDisabledReason() === null
     },
     isConcurrencySafe() {
       return true
@@ -340,6 +363,16 @@ export const WebFetchTool = Object.assign(
       )
     },
     async validateInput(input) {
+      // 2.1.323 #2065 (SEA `GDn` @291284600): recheck env & org policy per call
+      const disabledReason = getWebFetchDisabledReason()
+      if (disabledReason !== null) {
+        return {
+          result: false,
+          message: disabledReason,
+          meta: { reason: 'refused' },
+          errorCode: 2,
+        }
+      }
       const { url } = input
       try {
         new URL(url)
@@ -357,6 +390,8 @@ export const WebFetchTool = Object.assign(
     renderToolUseProgressMessage,
     renderToolResultMessage,
     async call({ url, prompt, offset = 0 }, context) {
+      // 2.1.323 #2065 (SEA `$Dn` @291284850): enforce env & org policy at call time
+      assertWebFetchAllowed()
       const {
         abortController,
         options: { isNonInteractiveSession, tools },

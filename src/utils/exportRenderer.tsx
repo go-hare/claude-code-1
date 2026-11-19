@@ -74,6 +74,10 @@ export async function streamRenderedMessages(
     onProgress?: (rendered: number) => void;
   } = {},
 ): Promise<void> {
+  // Official 2.1.323 (#2032): track exact post-collapse row count reported by
+  // Messages via onRowCount instead of breaking on the first empty chunk (which
+  // silently stopped /export after a long run of calls to an unloaded MCP tool).
+  let totalRows = 0;
   const renderChunk = (range: readonly [number, number]) =>
     renderToAnsiString(
       <AppStateProvider>
@@ -92,25 +96,24 @@ export async function streamRenderedMessages(
             showAllInTranscript={true}
             isLoading={false}
             renderRange={range}
+            onRowCount={count => {
+              totalRows = count;
+            }}
           />
         </StaticKeybindingProvider>
       </AppStateProvider>,
       columns,
     );
 
-  // renderRange indexes into the post-collapse array whose length we can't
-  // see from here — normalize splits each Message into one NormalizedMessage
-  // per content block (unbounded per message), collapse merges some back.
-  // Ceiling is the exact normalize output count + chunkSize so the loop
-  // always reaches the empty slice where break fires (collapse only shrinks).
-  let ceiling = chunkSize;
-  for (const m of messages) ceiling += normalizedUpperBound(m);
-  for (let offset = 0; offset < ceiling; offset += chunkSize) {
+  let offset = 0;
+  do {
     const ansi = await renderChunk([offset, offset + chunkSize]);
-    if (stripAnsi(ansi).trim() === '') break;
-    await sink(ansi);
-    onProgress?.(offset + chunkSize);
-  }
+    if (stripAnsi(ansi).trim() !== '') {
+      await sink(ansi);
+    }
+    offset += chunkSize;
+    onProgress?.(offset);
+  } while (offset < totalRows);
 }
 
 /**

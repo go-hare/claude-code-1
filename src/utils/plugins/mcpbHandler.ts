@@ -17,7 +17,12 @@ import {
 } from '../settings/settings.js'
 import { jsonParse, jsonStringify } from '../slowOperations.js'
 import { getSystemDirectories } from '../systemDirectories.js'
-import { classifyFetchError, logPluginFetch } from './fetchTelemetry.js'
+import {
+  classifyFetchError,
+  getPluginDownloadProxyOptions,
+  logPluginFetch,
+} from './fetchTelemetry.js'
+import { getPluginsDirectory } from './pluginDirectories.js'
 import {
   loadPluginConfigFromAllowedSources,
   pluginConfigIdAliases,
@@ -113,10 +118,16 @@ function generateContentHash(data: Uint8Array): string {
 }
 
 /**
- * Get cache directory for MCPB files
+ * Official 2.1.325 #2360: unpack plugin MCP bundles (`.mcpb`, `.dxt`) under
+ * the plugins cache directory (`<pluginsDir>/mcpb-cache/<hash>`) instead of
+ * `<pluginPath>/.mcpb-cache`, so read-only plugin folders load cleanly.
  */
-function getMcpbCacheDir(pluginPath: string): string {
-  return join(pluginPath, '.mcpb-cache')
+export function getMcpbCacheDir(pluginPath: string): string {
+  const pluginHash = createHash('sha256')
+    .update(pluginPath)
+    .digest('hex')
+    .substring(0, 16)
+  return join(getPluginsDirectory(), 'mcpb-cache', pluginHash)
 }
 
 /**
@@ -517,10 +528,18 @@ async function downloadMcpb(
   const started = performance.now()
   let fetchTelemetryFired = false
   try {
+    const proxyOpts = getPluginDownloadProxyOptions(url)
     const response = await axios.get(url, {
       timeout: 120000, // 2 minute timeout
       responseType: 'arraybuffer',
       maxRedirects: 5, // Follow redirects (like curl -L)
+      ...(proxyOpts.httpsAgent
+        ? {
+            httpsAgent: proxyOpts.httpsAgent,
+            httpAgent: proxyOpts.httpAgent,
+            proxy: proxyOpts.proxy,
+          }
+        : {}),
       onDownloadProgress: progressEvent => {
         if (progressEvent.total && onProgress) {
           const percent = Math.round(

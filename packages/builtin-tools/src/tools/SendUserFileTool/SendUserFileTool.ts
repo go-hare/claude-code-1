@@ -8,6 +8,11 @@ import { expandPath, isDeviceOrNtNamespacePath } from 'src/utils/path.js'
 import { pathInOutsideReadFenceWorkingPath } from 'src/utils/permissions/filesystem.js'
 import { isRestrictedSession } from 'src/utils/restricted.js'
 import {
+  formatUnsaveableSkillRefusal,
+  isSkillAttachmentPath,
+  validateSkillAttachmentForUpload,
+} from 'src/utils/plugins/skillUploadValidation.js'
+import {
   hasUnsafeFilenameCharacters,
   unsafeFilenameRefusalMessage,
 } from '../BriefTool/attachments.js'
@@ -55,6 +60,63 @@ export type SentFileEntry = {
   size?: number
   file_uuid?: string
   error?: string
+}
+
+/**
+ * 2.1.323 #2077 (SEA `te` / `fHr` @286955700):
+ * Distinguish turn interruption / AbortError from file-size or network errors
+ * so Claude gives the right reason when a new user message interrupts a file
+ * send.
+ */
+export const UPLOAD_ABORTED_ERROR = 'upload aborted'
+
+export function isUploadAbortError(
+  err: unknown,
+  signal?: AbortSignal,
+): boolean {
+  if (signal?.aborted) return true
+  if (typeof err === 'string') {
+    return (
+      err === UPLOAD_ABORTED_ERROR ||
+      err.toLowerCase().includes('abort') ||
+      err.toLowerCase().includes('canceled') ||
+      err.toLowerCase().includes('cancelled')
+    )
+  }
+  if (err && typeof err === 'object') {
+    const rec = err as { name?: unknown; code?: unknown; message?: unknown }
+    if (rec.name === 'AbortError' || rec.code === 'ERR_CANCELED') return true
+    if (typeof rec.message === 'string') {
+      const m = rec.message.toLowerCase()
+      if (
+        m === UPLOAD_ABORTED_ERROR ||
+        m.includes('aborted') ||
+        m.includes('canceled') ||
+        m.includes('cancelled')
+      ) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+export function formatSendUserFileUploadError(
+  uploadError: string,
+  opts?: {
+    signal?: AbortSignal
+    fallbackFormatter?: (err: string) => string
+  },
+): string {
+  if (
+    uploadError === UPLOAD_ABORTED_ERROR ||
+    isUploadAbortError(uploadError, opts?.signal)
+  ) {
+    return `${UPLOAD_ABORTED_ERROR} — the turn was stopped before the upload finished, which says nothing about the file or the network. Send the file again if the user still wants it`
+  }
+  return opts?.fallbackFormatter
+    ? opts.fallbackFormatter(uploadError)
+    : uploadError
 }
 
 type SendUserFileOutput = {
@@ -173,7 +235,7 @@ Guidelines:
       }
     }
 
-    const { stat } = await import('fs/promises')
+    const { readFile, stat } = await import('fs/promises')
     const appState = context.getAppState()
     const entries: SentFileEntry[] = []
 
@@ -242,6 +304,29 @@ Guidelines:
         continue
       }
 
+      // Official 2.1.323 #2146: validate SKILL.md and .skill archives before
+      // cloud/Cowork upload so unsaveable skill files are refused locally.
+      if (isSkillAttachmentPath(expanded)) {
+        try {
+          const bytes = await readFile(expanded)
+          const failure = validateSkillAttachmentForUpload(expanded, bytes)
+          if (failure) {
+            const refusal = formatUnsaveableSkillRefusal(expanded, bytes)
+            entries.push({
+              file_path,
+              sent: false,
+              size: fileSize,
+              error:
+                refusal?.message ??
+                `not sent: claude.ai would refuse to save it as a skill, because ${failure.why}.`,
+            })
+            continue
+          }
+        } catch {
+          // If reading fails here, fall through to upload error handling below.
+        }
+      }
+
       // Attempt bridge upload if available (so web/iOS viewers can download)
       let fileUuid: string | undefined
       let uploadError: string | undefined
@@ -265,18 +350,29 @@ Guidelines:
           if ('fileUuid' in outcome) {
             fileUuid = outcome.fileUuid
           } else {
-            uploadError = formatLargeFileUploadFailure({
-              size: fileSize,
-              uploadError: outcome.error,
-              suspectedLimitBytes:
-                outcome.suspectedLimitBytes ??
-                (fileSize > SUSPECTED_UPLOAD_LIMIT_BYTES
-                  ? SUSPECTED_UPLOAD_LIMIT_BYTES
-                  : undefined),
+            uploadError = formatSendUserFileUploadError(outcome.error, {
+              signal: context.abortController.signal,
+              fallbackFormatter: err =>
+                formatLargeFileUploadFailure({
+                  size: fileSize,
+                  uploadError: err,
+                  suspectedLimitBytes:
+                    outcome.suspectedLimitBytes ??
+                    (fileSize > SUSPECTED_UPLOAD_LIMIT_BYTES
+                      ? SUSPECTED_UPLOAD_LIMIT_BYTES
+                      : undefined),
+                }),
             })
           }
         } catch (e) {
-          uploadError = e instanceof Error ? e.message : String(e)
+          const rawMsg = isUploadAbortError(e, context.abortController.signal)
+            ? UPLOAD_ABORTED_ERROR
+            : e instanceof Error
+              ? e.message
+              : String(e)
+          uploadError = formatSendUserFileUploadError(rawMsg, {
+            signal: context.abortController.signal,
+          })
         }
       }
 

@@ -1,9 +1,10 @@
-import React, { useMemo, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { CommandResultDisplay, LocalJSXCommandContext } from '../../commands.js';
 import { type OptionWithDescription, Select } from '../../components/CustomSelect/select.js';
-import { Dialog } from '@anthropic/ink';
+import { Box, Dialog, Text } from '@anthropic/ink';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
 import { logEvent } from '../../services/analytics/index.js';
+import { fetchUtilization, formatUsageCreditsAmount } from '../../services/api/usage.js';
 import { useClaudeAiLimits } from '../../services/claudeAiLimitsHook.js';
 import {
   canOfferQuotaAutoResume,
@@ -23,6 +24,77 @@ import { call as extraUsageCall } from '../extra-usage/extra-usage.js';
 import { extraUsage } from '../extra-usage/index.js';
 import upgrade from '../upgrade/index.js';
 import { call as upgradeCall } from '../upgrade/upgrade.js';
+
+/**
+ * Official 2.1.323 `SPe` (#1969): detect a rate-limit rejection whose cause is
+ * `credits_required` (a model needs usage credits that are turned off or used up).
+ */
+export function isCreditsRequiredRateLimit(status: {
+  status?: string;
+  errorCode?: string;
+  rateLimitType?: string;
+}): boolean {
+  return (
+    status.status === 'rejected' &&
+    status.errorCode === 'credits_required' &&
+    (status.rateLimitType === undefined || status.rateLimitType === 'overage')
+  );
+}
+
+/**
+ * Official 2.1.323 `Bt` (#2108): resolve the loaded monthly spend limit from the
+ * usage endpoint. When both `monthly_limit` is null/missing and `used_credits` is
+ * not a number, treat the load as failed rather than inventing a lower limit.
+ */
+export function resolveLoadedSpendLimit(
+  extraUsageData:
+    | {
+        monthly_limit?: number | null;
+        used_credits?: number | null;
+      }
+    | null
+    | undefined,
+): { loadFailed: true } | { loadFailed: false; limitCents: number | null } {
+  const monthlyLimit = extraUsageData?.monthly_limit ?? null;
+  const usedCredits = extraUsageData?.used_credits;
+  if (monthlyLimit === null && typeof usedCredits !== 'number') {
+    return { loadFailed: true };
+  }
+  const effectiveLimit = monthlyLimit === null ? null : Math.max(monthlyLimit, usedCredits ?? 0);
+  return { loadFailed: false, limitCents: effectiveLimit };
+}
+
+/**
+ * Official 2.1.323 `Bt` (#2108): format the spend-limit adjustment row label & hint.
+ */
+export function formatSpendLimitAdjustRow(params: {
+  loadFailed: boolean;
+  draftLimitCents: number | null | undefined;
+  currentLimitCents: number | null | undefined;
+  currency: string;
+}): { label: string; hint: string } {
+  const { loadFailed, draftLimitCents, currentLimitCents, currency } = params;
+  const isLoaded = draftLimitCents !== undefined;
+  const valueText = loadFailed
+    ? 'unavailable'
+    : !isLoaded
+      ? '…'
+      : draftLimitCents === null
+        ? 'Unlimited'
+        : formatUsageCreditsAmount(draftLimitCents, currency);
+  const hint = loadFailed
+    ? ''
+    : currentLimitCents === null
+      ? '← or → to set a limit'
+      : '← or → to adjust · Del to remove limit';
+  return {
+    label: `Adjust monthly spend limit: ${valueText}`,
+    hint,
+  };
+}
+
+export const SPEND_LIMIT_LOAD_FAILED_MESSAGE =
+  "Couldn't load your current spend limit, so it can't be changed right now. Try /rate-limit-options again later.";
 
 type RateLimitOptionsMenuOptionType = 'upgrade' | 'extra-usage' | 'cancel' | 'auto-resume' | 'cancel-auto-resume';
 
@@ -49,6 +121,39 @@ function RateLimitOptionsMenu({ onDone, context }: RateLimitOptionsMenuProps): R
   const isMax20x = isMax && rateLimitTier === 'default_claude_max_20x';
   const isTeamOrEnterprise = subscriptionType === 'team' || subscriptionType === 'enterprise';
   const buyFirst = getFeatureValue_CACHED_MAY_BE_STALE('tengu_jade_anvil_4', false);
+  const [isCreditsRequired] = useState(() => isCreditsRequiredRateLimit(claudeAiLimits));
+  const [spendLimitState, setSpendLimitState] = useState<
+    | { loaded: false; loadFailed: false }
+    | { loaded: false; loadFailed: true }
+    | { loaded: true; loadFailed: false; limitCents: number | null }
+  >({ loaded: false, loadFailed: false });
+  const isSpendLimitNudge =
+    !isTeamOrEnterprise &&
+    claudeAiLimits.overageDisabledReason === 'org_level_disabled_until' &&
+    hasClaudeAiBillingAccess() &&
+    extraUsage.isEnabled();
+  useEffect(() => {
+    if (!isSpendLimitNudge) return;
+    let cancelled = false;
+    void fetchUtilization()
+      .then(data => {
+        if (cancelled) return;
+        const resolved = resolveLoadedSpendLimit(data?.extra_usage);
+        if (resolved.loadFailed) {
+          setSpendLimitState({ loaded: false, loadFailed: true });
+          return;
+        }
+        setSpendLimitState({ loaded: true, loadFailed: false, limitCents: resolved.limitCents });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSpendLimitState({ loaded: false, loadFailed: true });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSpendLimitNudge]);
   const quotaPhase = useSyncExternalStore(
     subscribeQuotaAutoResumeChanged,
     () => getQuotaAutoResumeState().phase,
@@ -80,12 +185,20 @@ function RateLimitOptionsMenu({ onDone, context }: RateLimitOptionsMenuProps): R
       } else {
         const isOverageState =
           claudeAiLimits.overageStatus === 'rejected' || claudeAiLimits.overageStatus === 'allowed_warning';
+        const creditsNoun = isUsageBased ? 'usage' : 'usage credits';
 
         let label: string;
         if (needsToRequestFromAdmin) {
-          label = isOverageState ? 'Request more' : 'Request extra usage';
+          label = isOverageState ? 'Ask your admin for more usage' : 'Ask your admin for more usage';
+        } else if (isSpendLimitNudge && spendLimitState.loadFailed) {
+          label = formatSpendLimitAdjustRow({
+            loadFailed: true,
+            draftLimitCents: undefined,
+            currentLimitCents: undefined,
+            currency: 'USD',
+          }).label;
         } else {
-          label = hasExtraUsageEnabled ? 'Add funds to continue with extra usage' : 'Switch to extra usage';
+          label = hasExtraUsageEnabled ? `Add funds to continue with ${creditsNoun}` : `Switch to ${creditsNoun}`;
         }
 
         actionOptions.push({
@@ -103,17 +216,18 @@ function RateLimitOptionsMenu({ onDone, context }: RateLimitOptionsMenuProps): R
     }
 
     const cancelOption: OptionWithDescription<RateLimitOptionsMenuOptionType> = {
-      label: isUsageBased ? 'Stop' : 'Stop and wait for limit to reset',
+      label: isUsageBased || isCreditsRequired ? 'Stop' : 'Stop and wait for limit to reset',
       value: 'cancel',
     };
 
     // densable: v3h ? Don't continue… : d$t ? Wait here… : undefined
+    // Official 2.1.323 (#1969): credits_required has no reset window to wait for.
     const autoResumeOption: OptionWithDescription<RateLimitOptionsMenuOptionType> | undefined = episodeActive
       ? {
           label: "Don't continue automatically",
           value: 'cancel-auto-resume',
         }
-      : canOfferQuotaAutoResume(claudeAiLimits)
+      : !isCreditsRequired && canOfferQuotaAutoResume(claudeAiLimits)
         ? {
             label: waitOption.label,
             value: 'auto-resume',
@@ -130,6 +244,9 @@ function RateLimitOptionsMenu({ onDone, context }: RateLimitOptionsMenuProps): R
     isTeamOrEnterprise,
     hasExtraUsageEnabled,
     isUsageBased,
+    isCreditsRequired,
+    isSpendLimitNudge,
+    spendLimitState.loadFailed,
     episodeActive,
     waitOption.label,
     claudeAiLimits,
@@ -203,6 +320,10 @@ function RateLimitOptionsMenu({ onDone, context }: RateLimitOptionsMenuProps): R
         }
       });
     } else if (value === 'extra-usage') {
+      if (isSpendLimitNudge && spendLimitState.loadFailed) {
+        onDone(SPEND_LIMIT_LOAD_FAILED_MESSAGE, { display: 'system' });
+        return;
+      }
       logEvent('tengu_rate_limit_options_menu_select_extra_usage', {});
       void extraUsageCall(onDone, context).then(jsx => {
         if (jsx) {

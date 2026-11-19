@@ -8,7 +8,10 @@
  */
 
 import { enableConfigs } from './config.js'
-import { applySafeConfigEnvironmentVariables } from './managedEnv.js'
+import {
+  applySafeConfigEnvironmentVariables,
+  getPolicyHelperEnv,
+} from './managedEnv.js'
 import {
   KEYCHAIN_PREFETCH_FASTPATH_BUDGET_MS,
   ensureKeychainPrefetchCompleted,
@@ -32,6 +35,15 @@ export async function ensureFastPathSettingsLoaded(): Promise<void> {
 }
 
 /**
+ * Official 2.1.323 (#2193): environment passed to a managed settings
+ * `policyHelper` process — launching shell env overlaid only with managed
+ * `policySettings.env` (never user or `--settings` env).
+ */
+export function getFastPathPolicyHelperEnv(): Record<string, string> {
+  return getPolicyHelperEnv()
+}
+
+/**
  * Official yh6 / aDO policy-helper step.
  * Official runs an external policyHelper binary when managed settings set one;
  * local reverse-build has no policyHelper path — always null (no error).
@@ -39,7 +51,7 @@ export async function ensureFastPathSettingsLoaded(): Promise<void> {
 async function runFastPathPolicyHelper(): Promise<string | null> {
   if (policyCached) return policyCached.error
   policyCached = { error: null }
-  // densable: o8_.error = await vF_(p3_(), RpH()) — omitted when no helper.
+  // densable: o8_.error = await vF_(p3_(), RpH()) with env = getFastPathPolicyHelperEnv() — omitted when no helper.
   return policyCached.error
 }
 

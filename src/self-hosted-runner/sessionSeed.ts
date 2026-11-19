@@ -4,8 +4,16 @@
  *   F2h debug token write, D trust seed, mcp_config write, sG/Kw/f2t EKn.
  */
 import { realpathSync } from 'node:fs'
-import { mkdir, realpath, unlink, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, join, normalize, resolve, sep } from 'node:path'
+import { lstat, mkdir, realpath, unlink, writeFile } from 'node:fs/promises'
+import {
+  dirname,
+  isAbsolute,
+  join,
+  normalize,
+  relative,
+  resolve,
+  sep,
+} from 'node:path'
 import type { HostConfigSnapshot } from './hostConfig.js'
 import { sanitizeDisabledMcpServers } from '../services/mcp/mcpSwitchedOffRecord.js'
 import {
@@ -211,7 +219,10 @@ export function resolveUnderSessionRoot(
 }
 
 /**
- * densable `G2h` — pick child cwd + --add-dir list from prepared repos.
+ * densable `G2h` + Official 2.1.325 #2311 (`Nl`) — pick child cwd + --add-dir
+ * list from prepared repos. In multi-repo sessions where checkouts live outside
+ * `sessionRoot` (canonical-direct), include `sessionRoot` in `addDirs` so any
+ * repository added mid-session under `sessionRoot` is accessible to the child.
  */
 export function resolveChildCwdAndAddDirs(
   sessionRoot: string,
@@ -234,10 +245,75 @@ export function resolveChildCwdAndAddDirs(
     const allUnder = preparedPaths.every(p => p.startsWith(sessionRoot + sep))
     return {
       childCwd: allUnder ? sessionRoot : preparedPaths[0]!,
-      addDirs: [...preparedPaths],
+      addDirs: allUnder ? [...preparedPaths] : [...preparedPaths, sessionRoot],
     }
   }
   return { childCwd: sessionRoot, addDirs: [] }
+}
+
+/**
+ * Official 2.1.325 #2381 (`Pl`): return every prefix path from `sessionRoot`
+ * down to `targetPath` when `targetPath` sits under `sessionRoot`, else `[targetPath]`.
+ */
+export function expandSessionSubpaths(
+  sessionRoot: string,
+  targetPath: string,
+): string[] {
+  const prefix = sessionRoot.endsWith(sep) ? sessionRoot : sessionRoot + sep
+  if (!targetPath.startsWith(prefix)) {
+    return [targetPath]
+  }
+  const segments = relative(sessionRoot, targetPath).split(sep).filter(Boolean)
+  return segments.map((_, idx) =>
+    join(sessionRoot, ...segments.slice(0, idx + 1)),
+  )
+}
+
+/**
+ * Official 2.1.325 #2381 (`Il`): true if `targetPath` exists and is a symlink
+ * (or non-directory), or if `lstat` fails for any reason other than ENOENT.
+ */
+export async function isRunnerPathSymlinkOrNonDir(
+  targetPath: string,
+): Promise<boolean> {
+  // Strip trailing slashes on non-root paths so POSIX lstat inspects the
+  // symlink itself instead of dereferencing it into its target directory.
+  const stripped =
+    targetPath.length > 1 ? targetPath.replace(/[\\/]+$/, '') : targetPath
+  const statTarget = stripped.length > 0 ? stripped : targetPath
+  try {
+    const st = await lstat(statTarget)
+    return st.isSymbolicLink() || !st.isDirectory()
+  } catch (err) {
+    const code =
+      err && typeof err === 'object' && 'code' in err
+        ? (err as { code?: string }).code
+        : undefined
+    return code !== 'ENOENT'
+  }
+}
+
+/**
+ * Official 2.1.325 #2381: refuse a self-hosted runner session when its session
+ * folder or a built-in repository path (or any segment below sessionDir) is a
+ * symbolic link. Explicitly does NOT apply to a `checkout` hook's checkout.
+ */
+export async function assertRunnerPathNotSymlink(
+  targetPath: string,
+  kind: 'session folder' | 'repository path',
+  sessionRoot?: string,
+): Promise<void> {
+  const candidates =
+    sessionRoot !== undefined
+      ? expandSessionSubpaths(sessionRoot, targetPath)
+      : [targetPath]
+  for (const candidate of candidates) {
+    if (await isRunnerPathSymlinkOrNonDir(candidate)) {
+      throw new Error(
+        `[runner:session] refusing session: ${kind} '${candidate}' is a symbolic link or not a regular directory`,
+      )
+    }
+  }
 }
 
 /**

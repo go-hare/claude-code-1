@@ -68,6 +68,8 @@ export type AgentRunResult =
         | 'no-structured-output'
         | 'runagent-threw'
         | 'worktree-failed'
+        | 'non-typed-prompt'
+        | 'safeguards-refusal'
         | 'unknown'
       /** Detail (error message / text preview) for logs; not shown to end users. */
       detail?: string

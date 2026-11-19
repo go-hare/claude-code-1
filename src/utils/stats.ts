@@ -579,11 +579,7 @@ function cacheToStats(
 
   const totalDays =
     firstSessionDate && lastSessionDate
-      ? Math.ceil(
-          (new Date(lastSessionDate).getTime() -
-            new Date(firstSessionDate).getTime()) /
-            (1000 * 60 * 60 * 24),
-        ) + 1
+      ? calculateTotalDaysSpan(firstSessionDate, lastSessionDate)
       : 0
 
   const totalSpeculationTimeSavedMs =
@@ -802,11 +798,7 @@ function processedStatsToClaudeCodeStats(
   // Total days in range
   const totalDays =
     firstSessionDate && lastSessionDate
-      ? Math.ceil(
-          (new Date(lastSessionDate).getTime() -
-            new Date(firstSessionDate).getTime()) /
-            (1000 * 60 * 60 * 24),
-        ) + 1
+      ? calculateTotalDaysSpan(firstSessionDate, lastSessionDate)
       : 0
 
   const result: ClaudeCodeStats = {
@@ -1033,6 +1025,22 @@ export async function readSessionStartDate(
   } catch {
     return null
   }
+}
+
+/**
+ * Official 2.1.325 `Zr` (#2276): calendar day span using UTC day floor difference + 1
+ * so same-day timestamps yield 1 (not 2 via Math.ceil).
+ */
+export function calculateTotalDaysSpan(
+  firstDate: string,
+  lastDate: string,
+): number {
+  return Math.max(
+    1,
+    Math.floor(new Date(lastDate).getTime() / 86_400_000) -
+      Math.floor(new Date(firstDate).getTime() / 86_400_000) +
+      1,
+  )
 }
 
 function getEmptyStats(): ClaudeCodeStats {

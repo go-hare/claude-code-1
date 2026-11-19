@@ -149,9 +149,12 @@ async function updatePlugin(
         logForDebugging(
           `Plugin autoupdate: updated ${pluginId} from ${result.oldVersion} to ${result.newVersion}${depsSuffix}`,
         )
-      } else if (result.skipReason === 'entry_helper_deferred') {
+      } else if (
+        result.skipReason === 'entry_helper_deferred' ||
+        result.skipReason === 'engine_range'
+      ) {
         logForDebugging(
-          `Plugin autoupdate: skipped ${pluginId}: ${result.message}`,
+          `Plugin autoupdate: skipped ${pluginId} (${result.skipReason}): ${result.message}`,
         )
       } else if (
         result.failureCode === 'dependencies_not_installed' ||

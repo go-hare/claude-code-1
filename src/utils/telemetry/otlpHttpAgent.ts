@@ -290,16 +290,25 @@ export class OtlpProxyAgent<Uri extends string> extends HttpsProxyAgent<Uri> {
   }
 }
 
+/** Official 2.1.323 (#2122, `ee` @311267200): default OTLP/HTTP endpoint. */
+export const DEFAULT_OTLP_ENDPOINT = 'http://localhost:4318'
+
 /**
  * densable Mvd — factory always returns YAo-wrapped agents (proxy or direct).
+ *
+ * Official 2.1.323 (#2122): When `otelEndpoint` is unset, OTel SDK defaults
+ * export to `http://localhost:4318`. Treat the effective endpoint as localhost
+ * so proxy env vars (`HTTP_PROXY`/`HTTPS_PROXY`) are bypassed for default
+ * local collectors.
  */
 export function createOtlpHttpAgentFactory(
   otelEndpoint?: string,
 ): OtlpHttpAgentFactory {
   const proxyUrl = getProxyUrl()
+  const effectiveEndpoint = otelEndpoint?.trim() || DEFAULT_OTLP_ENDPOINT
   const useProxy = !!(
     proxyUrl &&
-    !isLocalhostOtelEndpoint(otelEndpoint) &&
+    !isLocalhostOtelEndpoint(effectiveEndpoint) &&
     !(otelEndpoint && shouldBypassProxy(otelEndpoint))
   )
 

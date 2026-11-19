@@ -27,13 +27,16 @@ type Props = {
   onCancel: () => void;
   /** densable onBackground — only when Dbs(messages) / canBackgroundSession. */
   onBackground?: () => void;
+  /** Official 2.1.325 (#2292): error message when moving to background was refused. */
+  refusal?: string;
 };
 
-export function ExitBackgroundWorkDialog({ items, onExit, onCancel, onBackground }: Props): React.ReactNode {
+export function ExitBackgroundWorkDialog({ items, onExit, onCancel, onBackground, refusal }: Props): React.ReactNode {
   const terminal = useTerminalSize();
-  const { rows } = useModalOrTerminalSize(terminal);
+  const { rows, columns } = useModalOrTerminalSize(terminal);
   const budget = lbsVisibleRowBudget(rows, useIsInsideModal(), isFullscreenActive());
-  const maxVisible = Math.max(1, budget - (onBackground ? 13 : 12));
+  const refusalRows = refusal === undefined ? 0 : Math.ceil(refusal.length / Math.max(1, columns - 8)) + 1;
+  const maxVisible = Math.max(1, budget - (onBackground ? 13 : 12) - refusalRows);
   const visible = items.slice(0, maxVisible);
   const overflow = items.length - visible.length;
 
@@ -45,6 +48,10 @@ export function ExitBackgroundWorkDialog({ items, onExit, onCancel, onBackground
     opts.push({ label: 'Stay', value: 'stay' });
     return opts;
   }, [onBackground]);
+
+  // Official 2.1.325 (#2292): after a move to background is refused, focus
+  // "Stay" so a second Enter does not stop background work.
+  const defaultFocusValue: Choice | undefined = refusal === undefined ? undefined : 'stay';
 
   function track(choice: Choice): void {
     logEvent('tengu_exit_background_work_prompt', {
@@ -97,8 +104,14 @@ export function ExitBackgroundWorkDialog({ items, onExit, onCancel, onBackground
           </Text>
         ) : null}
       </Box>
+      {refusal !== undefined && <Text color="error">{refusal}</Text>}
       {/* densable Ln: Esc is Dialog onCancel only — no Select onCancel. */}
-      <Select options={options} onChange={handleChange} />
+      <Select
+        key={refusal === undefined ? 'default' : 'refused'}
+        options={options}
+        defaultFocusValue={defaultFocusValue}
+        onChange={handleChange}
+      />
     </Dialog>
   );
 }

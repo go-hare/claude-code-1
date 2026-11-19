@@ -196,6 +196,34 @@ export function MCPStdioServerMenu({
             <Text dimColor>{server.client.toolsListError}</Text>
           </Box>
         )}
+        {/* #2151: Show omitted tools count and per-tool schema reasons in /mcp */}
+        {server.client.type === 'connected' &&
+          !server.client.toolsListError &&
+          server.client.droppedTools &&
+          server.client.droppedTools.length > 0 && (
+            <Box flexDirection="column">
+              <Text>
+                <Text bold>Issue: </Text>
+                <Text dimColor>
+                  Claude wasn&apos;t given {server.client.droppedTools.length}{' '}
+                  {server.client.droppedTools.length === 1 ? 'tool' : 'tools'} because the Anthropic API would reject{' '}
+                  {server.client.droppedTools.length === 1 ? 'its input schema' : 'their input schemas'}. Once the
+                  server is fixed, choose Reconnect.
+                </Text>
+              </Text>
+              {server.client.droppedTools.slice(0, 3).map(dropped => (
+                <Text key={dropped.toolName} dimColor wrap="truncate-middle">
+                  {dropped.toolName || '(unnamed tool)'}: {dropped.reason}
+                </Text>
+              ))}
+              {server.client.droppedTools.length > 3 && (
+                <Text dimColor>
+                  … and {server.client.droppedTools.length - 3} more{' '}
+                  {server.client.droppedTools.length - 3 === 1 ? 'tool' : 'tools'}
+                </Text>
+              )}
+            </Box>
+          )}
       </Box>
 
       {menuOptions.length > 0 && (

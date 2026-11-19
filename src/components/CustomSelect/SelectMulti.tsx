@@ -169,7 +169,13 @@ export function SelectMulti<T>({
 
   if (state.leftoverSrRadio) {
     return (
-      <Box ref={leftoverHostRef} flexDirection="column" tabIndex={0} onKeyDown={state.leftoverBindKeyDown}>
+      <Box
+        ref={leftoverHostRef}
+        flexDirection="column"
+        tabIndex={0}
+        onKeyDown={state.leftoverBindKeyDown}
+        onPaste={state.leftoverBindPaste}
+      >
         {options.map((option, index) => {
           const selected = leftoverVmnPaintSelected(
             state.leftoverVmnToggle,

@@ -1,13 +1,105 @@
 import * as path from 'path'
 import { pathToFileURL } from 'url'
 import type { InitializeParams } from 'vscode-languageserver-protocol'
+import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import { getCwd } from '../../utils/cwd.js'
 import { logForDebugging } from '../../utils/debug.js'
-import { errorMessage } from '../../utils/errors.js'
+import { errorMessage, getErrnoCode } from '../../utils/errors.js'
 import { logError } from '../../utils/log.js'
 import { sleep } from '../../utils/sleep.js'
 import type { createLSPClient as createLSPClientType } from './LSPClient.js'
 import type { LspServerState, ScopedLspServerConfig } from './types.js'
+
+function sanitizeLspLabel(text: string): string {
+  // Strip control / bidi characters for safe terminal rendering
+  return text.replace(/[\p{Cc}\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, '')
+}
+
+/**
+ * Official 2.1.323 #1974 (`nMo`): format an actionable warning naming the
+ * language server and what to check when it cannot start.
+ */
+export function formatLspServerStartFailureWarning(
+  serverName: string,
+  command: string,
+  error: unknown,
+  opts?: { isNonInteractive?: boolean },
+): string {
+  const heading = `Language server "${sanitizeLspLabel(serverName)}" couldn't start`
+  const hasWhitespace = /\s/.test(command)
+  const programLabel = hasWhitespace
+    ? 'its program'
+    : `its program "${sanitizeLspLabel(path.basename(command))}"`
+  const isNonInteractive =
+    opts?.isNonInteractive ?? getIsNonInteractiveSession()
+  const disableHint =
+    "If you don't need it, disable the plugin that provides it."
+
+  switch (getErrnoCode(error)) {
+    case 'ENOENT':
+      if (hasWhitespace) {
+        return `${heading}: ${programLabel} wasn't found. Check that it's installed at the path the plugin gives, and that any arguments are in "args", not in "command". ${disableHint}`
+      }
+      if (path.basename(command) === command) {
+        return `${heading}: ${programLabel} wasn't found. Check that it's installed and on your PATH. ${disableHint}`
+      }
+      return `${heading}: ${programLabel} wasn't found. Check that it's installed at the path the plugin gives. ${disableHint}`
+    case 'EACCES':
+    case 'EPERM':
+      return `${heading}: ${programLabel} can't be run. Check that the file is executable and that you have permission to run it. ${disableHint}`
+    default:
+      return isNonInteractive
+        ? `${heading}. Start claude --debug in a terminal and have Claude work on a file that server handles. The debug log may have the reason.`
+        : `${heading}. The Errors tab in /plugin may have the reason.`
+  }
+}
+
+type LspStartFailureWarningListener = (
+  serverName: string,
+  warning: string,
+) => void
+
+const lspStartFailureWarningListeners =
+  new Set<LspStartFailureWarningListener>()
+
+/**
+ * Subscribe to immediate LSP server start failure warnings (#1974) so UI /
+ * notification hosts can display them right away.
+ */
+export function subscribeLspStartFailureWarnings(
+  listener: LspStartFailureWarningListener,
+): () => void {
+  lspStartFailureWarningListeners.add(listener)
+  return () => {
+    lspStartFailureWarningListeners.delete(listener)
+  }
+}
+
+function emitLspStartFailureWarning(
+  serverName: string,
+  command: string,
+  error: unknown,
+): string {
+  const warning = formatLspServerStartFailureWarning(serverName, command, error)
+  for (const listener of lspStartFailureWarningListeners) {
+    try {
+      listener(serverName, warning)
+    } catch {
+      /* listener isolation */
+    }
+  }
+  if (
+    getIsNonInteractiveSession() &&
+    process.env.CLAUDE_CODE_SESSION_KIND !== 'bg'
+  ) {
+    try {
+      process.stderr.write(`${warning}\n`)
+    } catch {
+      /* ignore broken pipe */
+    }
+  }
+  return warning
+}
 
 /**
  * LSP error code for "content modified" - indicates the server's state changed
@@ -41,6 +133,8 @@ export type LSPServerInstance = {
   readonly startTime: Date | undefined
   /** Last error encountered */
   readonly lastError: Error | undefined
+  /** Official 2.1.323 #1974: actionable startup failure warning emitted once per server */
+  readonly lastStartWarning?: string | undefined
   /** Number of times restart() has been called */
   readonly restartCount: number
   /** Start the server and initialize it */
@@ -113,6 +207,8 @@ export function createLSPServerInstance(
   let state: LspServerState = 'stopped'
   let startTime: Date | undefined
   let lastError: Error | undefined
+  let lastStartWarning: string | undefined
+  let warnedStartFailure = false
   let restartCount = 0
   let crashRecoveryCount = 0
   // Propagate crash state so ensureServerStarted can restart on next use.
@@ -258,6 +354,14 @@ export function createLSPServerInstance(
       initPromise?.catch(() => {})
       state = 'error'
       lastError = error as Error
+      if (!warnedStartFailure) {
+        warnedStartFailure = true
+        lastStartWarning = emitLspStartFailureWarning(
+          name,
+          config.command,
+          error,
+        )
+      }
       logError(error)
       throw error
     }
@@ -477,6 +581,9 @@ export function createLSPServerInstance(
     },
     get lastError() {
       return lastError
+    },
+    get lastStartWarning() {
+      return lastStartWarning
     },
     get restartCount() {
       return restartCount

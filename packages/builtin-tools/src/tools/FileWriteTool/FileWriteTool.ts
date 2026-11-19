@@ -600,6 +600,17 @@ export const FileWriteTool = buildTool({
       throw new Error(outsideWriteBlock)
     }
 
+    // 2.1.323 #2023 defense-in-depth: also enforce Read deny rules at call()
+    // time across all resolved path spellings (symlinks / realpath).
+    if (
+      isPathCoveredByReadDenyRule(
+        fullFilePath,
+        toolUseContext.getAppState().toolPermissionContext,
+      )
+    ) {
+      throw new Error(FILE_READ_DENY_CANNOT_WRITE)
+    }
+
     // Discover skills from this file's path (fire-and-forget, non-blocking)
     const cwd = getCwd()
     const newSkillDirs = await discoverSkillDirsForPaths([fullFilePath], cwd)

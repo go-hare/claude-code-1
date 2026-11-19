@@ -9,6 +9,7 @@ import {
   isOverageProvisioningAllowed,
 } from '../utils/auth.js'
 import { hasClaudeAiBillingAccess } from '../utils/billing.js'
+import { getIsNonInteractiveSession } from '../bootstrap/state.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
 import { formatResetTime } from '../utils/format.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from './analytics/growthbook.js'
@@ -181,6 +182,24 @@ const CONSUMER_USAGE_SETTINGS_URL =
   'https://claude.ai/settings/usage?from=cc_cli_limit_message'
 
 /**
+ * Official 2.1.323 (#2204) `Byt()`: true in Anthropic-hosted cloud sessions
+ * (`CLAUDE_CODE_REMOTE`) or under Remote Control (bridge mode). In these
+ * environments, spend limit / 1M context errors and `/usage-credits` no longer
+ * print external web addresses.
+ */
+export function isCloudOrRemoteControlSession(): boolean {
+  if (
+    isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_BRIDGE_MODE) ||
+    process.env.CLAUDE_CODE_ENTRYPOINT === 'remote' ||
+    process.env.CLAUDE_CODE_ENTRYPOINT === 'remote-control'
+  ) {
+    return true
+  }
+  return false
+}
+
+/**
  * densable 2.1.248 v_() — hint gate only. SEA kS() is `return null`;
  * else Zur() = isOverageProvisioningAllowed (DN = #6 allowlist).
  * DISABLE_EXTRA_USAGE_COMMAND must use isEnvTruthy (same as /usage-credits
@@ -194,25 +213,36 @@ export function isUsageCreditsHintEnabled(): boolean {
 }
 
 /**
- * densable 2.1.248 Nde() @184100558 sha=c8ad9d2a1a2d348e
+ * densable 2.1.248 Nde() + Official 2.1.325 #2382:
+ * In cloud sessions and under Remote Control (`isCloudOrRemoteControlSession()`),
+ * omit "ask your admin to raise it / for a higher limit" from spend-limit and
+ * shared-budget errors.
  */
 export function getUsageCreditsAskAdminHint(): string {
+  if (isCloudOrRemoteControlSession()) {
+    return ''
+  }
   return isUsageCreditsHintEnabled()
     ? ' · run /usage-credits to ask your admin for a higher limit'
     : ' · ask your admin for a higher limit'
 }
 
 function getUsageCreditsRaiseHint(): string {
+  if (isCloudOrRemoteControlSession()) {
+    return isUsageCreditsHintEnabled()
+      ? ' · run /usage-credits to raise it'
+      : ''
+  }
   return isUsageCreditsHintEnabled()
     ? ' · run /usage-credits to raise it, or visit claude.ai/admin-settings/usage'
     : ' · visit claude.ai/admin-settings/usage to raise it'
 }
 
 /**
- * densable 2.1.239 Kvi — when a monthly spend cap is hit, also say when the
- * current session/weekly (or Opus/Sonnet) window resets. Official returns
- * null for overage / missing resetsAt. seven_day_sonnet uses $Wa(): pro or
- * enterprise → weekly limit, else Sonnet limit.
+ * densable 2.1.239 Kvi + Official 2.1.323 (#2106) `kko`: when a monthly spend
+ * cap is hit, also say when the current session/weekly (or Opus/Sonnet/Fable)
+ * window resets. Official returns null for overage / missing resetsAt.
+ * seven_day_sonnet uses $Wa(): pro or enterprise → weekly limit, else Sonnet limit.
  */
 function formatSessionOrWeeklyResetHint(
   limits: RateLimitMessageLimits,
@@ -243,9 +273,10 @@ function formatSessionOrWeeklyResetHint(
       break
     }
     case 'seven_day_overage_included':
+      limitName = 'Fable limit'
+      break
     case 'overage':
     case undefined:
-      // seven_day_overage_included is not mapped to a reset hint in formatSessionOrWeeklyResetHint
       limitName = null
       break
   }
@@ -290,12 +321,15 @@ function getLimitReachedText(
     }
   }
 
-  // densable 2.1.289 Qwn: group_pool shared budget.
+  // densable 2.1.289 Qwn + Official 2.1.323 (#2204) + 2.1.325 (#2382):
+  // group_pool shared budget — omit "ask your admin to raise it" in cloud / RC.
   if (!usageBased && limits.overageScope === 'group_pool') {
     const sessionWeeklyHint = formatSessionOrWeeklyResetHint(limits)
-    const suffix = hasBillingAccess
-      ? ' · raise it at claude.ai/admin-settings/usage'
-      : ' · ask your admin to raise it at claude.ai/admin-settings/usage'
+    const suffix = isCloudOrRemoteControlSession()
+      ? ''
+      : hasBillingAccess
+        ? ' · raise it at claude.ai/admin-settings/usage'
+        : ' · ask your admin to raise it at claude.ai/admin-settings/usage'
     return formatLimitReachedText(
       "team's shared budget",
       `${suffix}${sessionWeeklyHint}`,
@@ -333,16 +367,19 @@ function getLimitReachedText(
         model,
       )
     }
-    // Consumer / other: billing access → monthly spend limit + settings URL;
+    // Consumer / other: billing access → monthly spend limit + settings URL
+    // (omitted in cloud / Remote Control per #2204);
     // otherwise individual (spend cap) vs org monthly (disabled_until).
     const limit = hasBillingAccess
       ? 'monthly spend limit'
       : isIndividualSpendCap
         ? 'individual spend limit'
         : "org's monthly spend limit"
-    const suffix = hasBillingAccess
-      ? ` · raise it at ${CONSUMER_USAGE_SETTINGS_URL}`
-      : ` · ask your admin to raise it at ${CONSUMER_USAGE_SETTINGS_URL}`
+    const suffix = isCloudOrRemoteControlSession()
+      ? ''
+      : hasBillingAccess
+        ? ` · raise it at ${CONSUMER_USAGE_SETTINGS_URL}`
+        : ` · ask your admin to raise it at ${CONSUMER_USAGE_SETTINGS_URL}`
     return formatLimitReachedText(limit, `${suffix}${sessionWeeklyHint}`, model)
   }
 
@@ -490,8 +527,19 @@ function getTypedLimitReachedText(
       return formatLimitReachedText('Opus limit', resetMessage, model, {
         progressSavedSuffix,
       })
-    case 'seven_day_overage_included':
-      return formatLimitReachedText('Fable limit', resetMessage, model)
+    case 'seven_day_overage_included': {
+      // Official 2.1.323 (#2106, #2162): include reset time and, in -p / SDK /
+      // IDE / cloud sessions, how to continue (switch models or buy usage credits).
+      const base = formatLimitReachedText('Fable limit', resetMessage, model)
+      if (getIsNonInteractiveSession() || isCloudOrRemoteControlSession()) {
+        const continuation =
+          isUsageCreditsHintEnabled() && hasClaudeAiBillingAccess()
+            ? 'Buy more usage credits to keep using Fable, or switch models to keep working.'
+            : 'Switch models to keep working.'
+        return `${base} · ${continuation}`
+      }
+      return base
+    }
     default:
       return null
   }

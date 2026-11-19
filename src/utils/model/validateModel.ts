@@ -14,12 +14,42 @@ import { getModelStrings } from './modelStrings.js'
 // Cache valid models to avoid repeated API calls
 const validModelCache = new Map<string, boolean>()
 
+export type ValidateModelResult = {
+  valid: boolean
+  error?: string
+  /** Official 2.1.325 #2286: true when model availability could not be checked due to network/offline failure. */
+  checkFailed?: boolean
+}
+
+/**
+ * Official 2.1.325 #2286: classify whether a `/model <name>` check failure is
+ * an inability to verify availability (e.g. offline/network error) vs an
+ * actual organization restriction.
+ */
+export function formatModelRestrictionOrCheckError(
+  model: string,
+  probeResult?: ValidateModelResult,
+): { code: 'check_failed' | 'restricted_by_org'; message: string } {
+  if (probeResult?.checkFailed) {
+    return {
+      code: 'check_failed',
+      message:
+        probeResult.error ||
+        `Could not check whether model '${model}' is available — check your network connection and try again.`,
+    }
+  }
+  return {
+    code: 'restricted_by_org',
+    message: `Model '${model}' is not available. Your organization restricts model selection.`,
+  }
+}
+
 /**
  * Validates a model by attempting an actual API call.
  */
 export async function validateModel(
   model: string,
-): Promise<{ valid: boolean; error?: string }> {
+): Promise<ValidateModelResult> {
   const normalizedModel = model.trim()
 
   // Empty model is invalid
@@ -83,7 +113,7 @@ export async function validateModel(
 function handleValidationError(
   error: unknown,
   modelName: string,
-): { valid: boolean; error: string } {
+): ValidateModelResult {
   // NotFoundError (404) means the model doesn't exist
   if (error instanceof NotFoundError) {
     const fallback = get3PFallbackSuggestion(modelName)
@@ -94,19 +124,22 @@ function handleValidationError(
     }
   }
 
+  // Official 2.1.325 #2286: distinguish connectivity failures (unable to check)
+  // from organization/account model restrictions.
+  if (error instanceof APIConnectionError) {
+    return {
+      valid: false,
+      checkFailed: true,
+      error: `Could not check whether model '${modelName}' is available — check your network connection and try again.`,
+    }
+  }
+
   // For other API errors, provide context-specific messages
   if (error instanceof APIError) {
     if (error instanceof AuthenticationError) {
       return {
         valid: false,
         error: 'Authentication failed. Please check your API credentials.',
-      }
-    }
-
-    if (error instanceof APIConnectionError) {
-      return {
-        valid: false,
-        error: 'Network error. Please check your internet connection.',
       }
     }
 

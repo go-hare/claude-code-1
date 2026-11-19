@@ -131,21 +131,15 @@ export function substitutePluginSubagentStatusLine(
 }
 
 /**
- * densable vHa — resolve command string.
- * Managed-only mode reads policySettings; otherwise merged settings.
+ * Official 2.1.323 (#2210): `subagentStatusLine` setting has been removed.
+ * Subagent rows always use the default look; settings files holding the key
+ * still load without validation errors.
  */
 export function getSubagentStatusLineCommand(
-  pluginRoot?: string,
+  _pluginRoot?: string,
 ): string | undefined {
-  const cfg = shouldAllowManagedHooksOnly()
-    ? getSettingsForSource('policySettings')?.subagentStatusLine
-    : getSettings_DEPRECATED()?.subagentStatusLine
-  if (cfg?.type !== 'command') {
-    return undefined
-  }
-  return pluginRoot
-    ? substituteSubagentStatusLineCommand(cfg.command, pluginRoot)
-    : cfg.command
+  void _pluginRoot
+  return undefined
 }
 
 /**

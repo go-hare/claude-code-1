@@ -121,6 +121,10 @@ export function formatErrorMessage(error: PluginErrorExtended): string {
         return `Plugin "${error.plugin}" is enabled in project settings, but whether it is installed could not be checked`;
       }
       return `Plugin "${error.plugin}" is enabled in project settings but isn't installed here`;
+    case 'engine-range-unsatisfied':
+      return `Plugin "${error.plugin}" needs Claude Code ${error.miss.range}, this is ${error.miss.claudeCodeVersion}`;
+    case 'autoupdate-blocked-by-engine-range':
+      return `${error.newVersion ? `Update to ${error.newVersion}` : 'Update'} for "${error.plugin}" needs Claude Code ${error.miss.range}, this is ${error.miss.claudeCodeVersion}`;
     case 'autoupdate-deferred-entry-helper':
     case 'autoupdate-disabled-by-policy':
       return error.message;
@@ -221,6 +225,9 @@ export function getErrorGuidance(error: PluginErrorExtended): string | null {
         ? `Run \`${safeSource}\` to install it for this project`
         : 'Install it at project scope to fix this';
     }
+    case 'engine-range-unsatisfied':
+    case 'autoupdate-blocked-by-engine-range':
+      return error.miss.newerClaudeCodeMayFit ? 'Run `claude update`' : 'A newer version of the plugin may fit';
     case 'autoupdate-deferred-entry-helper':
     case 'autoupdate-disabled-by-policy':
       return null;

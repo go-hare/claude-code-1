@@ -231,7 +231,10 @@ function commandHasDangerousGitFlags(command: string): boolean {
 // NOTE: excludedCommands is a user-facing convenience feature, not a security boundary.
 // It is not a security bug to be able to bypass excludedCommands — the sandbox permission
 // system (which prompts users) is the actual security control.
-function containsExcludedCommand(command: string): boolean {
+export function containsExcludedCommand(
+  command: string,
+  excludedCommandsOverride?: readonly string[],
+): boolean {
   // Check dynamic config for disabled commands and substrings (only for ants)
   if (process.env.USER_TYPE === 'ant') {
     const disabledCommands = getFeatureValue_CACHED_MAY_BE_STALE<{
@@ -263,26 +266,191 @@ function containsExcludedCommand(command: string): boolean {
   }
 
   // Check user-configured excluded commands from settings
-  const settings = getSettings_DEPRECATED()
-  const userExcludedCommands = settings.sandbox?.excludedCommands ?? []
+  const userExcludedCommands =
+    excludedCommandsOverride ??
+    getSettings_DEPRECATED().sandbox?.excludedCommands ??
+    []
 
   if (userExcludedCommands.length === 0) {
     return false
   }
 
-  // Split compound commands (e.g. "docker ps && curl evil.com") into individual
-  // subcommands and check each one against excluded patterns. This prevents a
-  // compound command from escaping the sandbox just because its first subcommand
-  // matches an excluded pattern.
+  // Official 2.1.323 #2022 (`Pbr` / `Mbr`):
+  // An entry in `sandbox.excludedCommands` takes a call out of the sandbox ONLY
+  // when EVERY subcommand in the call matches an entry. Keep the call sandboxed
+  // whenever it contains `cd`/`chdir`/`pushd`/`popd`, command/process
+  // substitution, redirects other than fd duplication like `2>&1` (including
+  // heredocs), or a variable assigned in one subcommand and expanded in another.
+  const hasCommandOrProcessSub = (cmd: string): boolean => {
+    let inSingle = false
+    let inDouble = false
+    for (let i = 0; i < cmd.length; i++) {
+      const ch = cmd[i]!
+      if (inSingle) {
+        if (ch === "'") inSingle = false
+        continue
+      }
+      if (inDouble) {
+        if (ch === '\\' && i + 1 < cmd.length) {
+          const next = cmd[i + 1]!
+          if (
+            next === '"' ||
+            next === '\\' ||
+            next === '$' ||
+            next === '`' ||
+            next === '\n'
+          ) {
+            i++
+            continue
+          }
+        }
+        if (ch === '"') {
+          inDouble = false
+          continue
+        }
+        if (ch === '`' || (ch === '$' && cmd[i + 1] === '(')) {
+          return true
+        }
+        continue
+      }
+      if (ch === '\\') {
+        i++
+        continue
+      }
+      if (ch === "'") {
+        inSingle = true
+        continue
+      }
+      if (ch === '"') {
+        inDouble = true
+        continue
+      }
+      if (ch === '`') return true
+      if ((ch === '$' || ch === '<' || ch === '>') && cmd[i + 1] === '(') {
+        return true
+      }
+    }
+    return false
+  }
+
+  const hasNonFdDupRedirect = (cmd: string): boolean => {
+    // Strip quoted and backslash-escaped spans with a proper POSIX quote state
+    // machine so quotes inside quotes (e.g. `echo "don't" > /tmp/pwn && echo "can't"`)
+    // cannot mask redirects outside quotes.
+    let unquoted = ''
+    let inSingle = false
+    let inDouble = false
+    for (let i = 0; i < cmd.length; i++) {
+      const ch = cmd[i]!
+      if (inSingle) {
+        if (ch === "'") inSingle = false
+        unquoted += ' '
+        continue
+      }
+      if (inDouble) {
+        if (ch === '\\' && i + 1 < cmd.length) {
+          const next = cmd[i + 1]!
+          if (
+            next === '"' ||
+            next === '\\' ||
+            next === '$' ||
+            next === '`' ||
+            next === '\n'
+          ) {
+            i++
+            unquoted += '  '
+            continue
+          }
+        }
+        if (ch === '"') {
+          inDouble = false
+        }
+        unquoted += ' '
+        continue
+      }
+      if (ch === '\\') {
+        i++
+        unquoted += '  '
+        continue
+      }
+      if (ch === "'") {
+        inSingle = true
+        unquoted += ' '
+        continue
+      }
+      if (ch === '"') {
+        inDouble = true
+        unquoted += ' '
+        continue
+      }
+      unquoted += ch
+    }
+    // Strip harmless fd duplications like `2>&1`, `1>&2`, `>&2`, `<&0`
+    const withoutFdDups = unquoted.replace(/\b\d*[<>]&\d+\b|[<>]&\d+\b/g, '')
+    return /[<>]/.test(withoutFdDups)
+  }
+
+  if (hasCommandOrProcessSub(command) || hasNonFdDupRedirect(command)) {
+    return false
+  }
+
   let subcommands: string[]
   try {
     subcommands = splitCommand_DEPRECATED(command)
   } catch {
-    subcommands = [command]
+    return false
   }
+
+  if (subcommands.length === 0) {
+    return false
+  }
+
+  // Official `Mbr`: reject cross-subcommand variable assignment & reference
+  const assignedInSub = new Map<string, Set<number>>()
+  for (let idx = 0; idx < subcommands.length; idx++) {
+    const trimmedSub = subcommands[idx]!.trim()
+    const assignMatch = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(trimmedSub)
+    if (assignMatch && !/\s/.test(trimmedSub)) {
+      const name = assignMatch[1]!
+      let set = assignedInSub.get(name)
+      if (!set) {
+        set = new Set<number>()
+        assignedInSub.set(name, set)
+      }
+      set.add(idx)
+    }
+    for (const m of trimmedSub.matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*):?=/g)) {
+      const name = m[1]!
+      let set = assignedInSub.get(name)
+      if (!set) {
+        set = new Set<number>()
+        assignedInSub.set(name, set)
+      }
+      set.add(idx)
+    }
+  }
+  if (assignedInSub.size > 0) {
+    for (let idx = 0; idx < subcommands.length; idx++) {
+      const sub = subcommands[idx]!
+      for (const [name, indices] of assignedInSub) {
+        if (indices.size === 1 && indices.has(idx)) continue
+        if (new RegExp(`\\$[=^~]*\\{?${name}\\b`).test(sub)) {
+          return false
+        }
+      }
+    }
+  }
+
+  const CD_LIKE_RE = /^(?:cd|chdir|pushd|popd)(?:\s|$)/
 
   for (const subcommand of subcommands) {
     const trimmed = subcommand.trim()
+    if (!trimmed) {
+      return false
+    }
+    if (CD_LIKE_RE.test(trimmed)) {
+      return false
+    }
     if (commandHasDangerousGitFlags(trimmed)) {
       return false
     }
@@ -316,31 +484,37 @@ function containsExcludedCommand(command: string): boolean {
       startIdx = endIdx
     }
 
+    let subcommandMatched = false
     for (const pattern of userExcludedCommands) {
       const rule = bashPermissionRule(pattern)
       for (const cand of candidates) {
         switch (rule.type) {
           case 'prefix':
             if (cand === rule.prefix || cand.startsWith(rule.prefix + ' ')) {
-              return true
+              subcommandMatched = true
             }
             break
           case 'exact':
             if (cand === rule.command) {
-              return true
+              subcommandMatched = true
             }
             break
           case 'wildcard':
             if (matchWildcardPattern(rule.pattern, cand)) {
-              return true
+              subcommandMatched = true
             }
             break
         }
+        if (subcommandMatched) break
       }
+      if (subcommandMatched) break
+    }
+    if (!subcommandMatched) {
+      return false
     }
   }
 
-  return false
+  return true
 }
 
 /**

@@ -2,7 +2,9 @@
  * densable 2.1.246 `Vr` / `ui` / `$d` / `ky`.
  * Gate project/local allow rules until this directory is explicitly trusted.
  */
+import { existsSync, lstatSync, readFileSync } from 'fs'
 import { homedir } from 'os'
+import { isAbsolute, join, resolve } from 'path'
 import {
   getOriginalCwd,
   getSessionTrustAccepted,
@@ -49,6 +51,32 @@ export function isCwdHome(): boolean {
   return getOriginalCwd() === homedir()
 }
 
+/**
+ * Official 2.1.325 #2380 (SEA @281507915):
+ * Detect a container-mounted git worktree or submodule whose `.git` file
+ * points to an unresolvable/missing host gitdir. Because `git ls-files` exits
+ * 128 (`fatal: not a git repository: /host/path/...`) without `(or any`, we
+ * must fail closed and treat `.claude/settings.local.json` as gated until the
+ * folder is explicitly trusted.
+ */
+export function hasUnverifiableDotGitPointer(dir: string): boolean {
+  const dotGit = join(dir, '.git')
+  try {
+    const st = lstatSync(dotGit)
+    if (!st.isFile()) return false
+    const raw = readFileSync(dotGit, 'utf8')
+    const match = /^gitdir:\s*(.+)$/m.exec(raw)
+    if (!match?.[1]) return true
+    const ptr = match[1].trim()
+    const target = isAbsolute(ptr) ? ptr : resolve(dir, ptr)
+    return !existsSync(target)
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code
+    if (code === 'ENOENT' || code === 'ENOTDIR') return false
+    return true
+  }
+}
+
 /** densable `Vr`. */
 export function getProjectGrantsGates(): {
   gateProject: boolean
@@ -56,7 +84,9 @@ export function getProjectGrantsGates(): {
 } {
   return {
     gateProject: !projectSettingsAliasesUserSettings(),
-    gateLocal: isLocalSettingsGitTracked({ onIndeterminate: 'untracked' }),
+    gateLocal:
+      isLocalSettingsGitTracked({ onIndeterminate: 'untracked' }) ||
+      hasUnverifiableDotGitPointer(getOriginalCwd()),
   }
 }
 

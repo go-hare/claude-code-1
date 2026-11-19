@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto'
-import { copyFile, writeFile } from 'fs/promises'
+import { constants as fsConstants } from 'fs'
+import { lstat, mkdir, open, readFile, realpath } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
 import { basename, dirname, join, resolve, sep } from 'path'
 import type { AgentId, SessionId } from 'src/types/ids.js'
@@ -19,7 +20,7 @@ import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '@claude-code/builtin-tools/tools/Ex
 import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
 import { getClaudeConfigHomeDir } from './envUtils.js'
-import { isENOENT } from './errors.js'
+import { errorMessage, isENOENT } from './errors.js'
 import { getEnvironmentKind } from './filePersistence/outputsScanner.js'
 import { getFsImplementation } from './fsOperations.js'
 import { logError } from './log.js'
@@ -75,46 +76,223 @@ export function clearPlanSlug(sessionId?: SessionId): void {
  */
 export function clearAllPlanSlugs(): void {
   getPlanSlugCache().clear()
+  slugsInDefault.clear()
+}
+
+/**
+ * 2.1.325 #2268 (SEA `kl.slugsInDefault` @284739188):
+ * Plan slugs that fell back to `~/.claude/plans` because a configured
+ * `plansDirectory` could not accept the approved plan edit.
+ */
+const slugsInDefault = new Set<string>()
+
+/**
+ * 2.1.323 #2014 (SEA `wl` / `Rl` / `Yo` / `El` / `Pl` @284739743):
+ * Refuse any plan write under a custom `plansDirectory` that cannot be
+ * proven to stay inside the project root (resolving symlinks on existing
+ * ancestors, rejecting dangling symlinks, rejecting target symlinks/hardlinks).
+ */
+export const PLANS_DIR_CONTAINMENT_ERROR_MESSAGE =
+  'Could not confirm the plansDirectory folder and plan file are inside this project. Check that the folder exists, that no link leads out of it, and that the plan file is not a link and has no hard link. If this system or drive cannot report that, remove plansDirectory from your settings to use the default plans folder.'
+
+type VettedPlansRoot = {
+  cwd: string
+  canonicalCwd: string
+  plansDir: string
+}
+
+let vettedCustomPlansRoot: VettedPlansRoot | undefined
+
+function isCanonicalPathWithin(
+  candidate: string,
+  canonicalRoot: string,
+): boolean {
+  return (
+    candidate === canonicalRoot || candidate.startsWith(canonicalRoot + sep)
+  )
+}
+
+function tryRealpathSync(targetPath: string): string | null {
+  try {
+    return getFsImplementation().realpathSync(targetPath)
+  } catch {
+    return null
+  }
+}
+
+function isDanglingSymlinkSync(targetPath: string): boolean {
+  try {
+    return getFsImplementation().lstatSync(targetPath).isSymbolicLink()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * SEA `wl(resolved, cwd, canonicalCwd)`: check lexical containment, reject
+ * backslashes off Windows, and verify the deepest existing ancestor's
+ * realpath stays inside `canonicalCwd` without traversing a dangling symlink.
+ */
+export function isPlansDirectoryContained(
+  resolvedPath: string,
+  cwd: string,
+  canonicalCwd: string,
+): boolean {
+  if (resolvedPath !== cwd && !resolvedPath.startsWith(cwd + sep)) {
+    return false
+  }
+  if (getPlatform() !== 'windows' && resolvedPath.includes('\\')) {
+    return false
+  }
+  let cursor = resolvedPath
+  for (;;) {
+    const real = tryRealpathSync(cursor)
+    if (real !== null) {
+      return isCanonicalPathWithin(real, canonicalCwd)
+    }
+    if (isDanglingSymlinkSync(cursor)) {
+      return false
+    }
+    const parent = dirname(cursor)
+    if (parent === cursor) {
+      return false
+    }
+    cursor = parent
+  }
+}
+
+/**
+ * Verify that writing a plan file at `filePath` is guaranteed to remain
+ * inside the vetted project root when `plansDirectory` is active.
+ * Returns the canonical target path if custom `plansDirectory` is active, or
+ * `null` when writing to the default `~/.claude/plans` directory.
+ * Throws if containment cannot be proven.
+ */
+export async function assertPlanWriteContained(
+  filePath: string,
+): Promise<string | null> {
+  const defaultDir = join(getClaudeConfigHomeDir(), 'plans')
+  const parentDir = dirname(filePath)
+  if (parentDir === defaultDir) {
+    return null
+  }
+  const vetted = vettedCustomPlansRoot
+  if (!vetted || parentDir !== vetted.plansDir) {
+    throw new Error(PLANS_DIR_CONTAINMENT_ERROR_MESSAGE)
+  }
+  if (!isPlansDirectoryContained(parentDir, vetted.cwd, vetted.canonicalCwd)) {
+    throw new Error(PLANS_DIR_CONTAINMENT_ERROR_MESSAGE)
+  }
+  let realParent: string
+  try {
+    realParent = await realpath(parentDir)
+  } catch {
+    throw new Error(PLANS_DIR_CONTAINMENT_ERROR_MESSAGE)
+  }
+  if (!isCanonicalPathWithin(realParent, vetted.canonicalCwd)) {
+    throw new Error(PLANS_DIR_CONTAINMENT_ERROR_MESSAGE)
+  }
+  const canonicalTarget = join(realParent, basename(filePath))
+  try {
+    const st = await lstat(canonicalTarget)
+    if (st.isSymbolicLink() || !st.isFile() || Number(st.nlink) > 1) {
+      throw new Error(PLANS_DIR_CONTAINMENT_ERROR_MESSAGE)
+    }
+  } catch (err) {
+    if (!isENOENT(err)) {
+      throw err instanceof Error &&
+        err.message === PLANS_DIR_CONTAINMENT_ERROR_MESSAGE
+        ? err
+        : new Error(PLANS_DIR_CONTAINMENT_ERROR_MESSAGE)
+    }
+  }
+  return canonicalTarget
+}
+
+/**
+ * Safely write a plan file while enforcing `plansDirectory` containment
+ * (2.1.323 #2014). Opens with `O_NOFOLLOW` when available and verifies fstat
+ * `isFile()` + `nlink <= 1` before truncating/writing.
+ */
+export async function writePlanFileContained(
+  filePath: string,
+  content: string,
+): Promise<void> {
+  const canonicalTarget = await assertPlanWriteContained(filePath)
+  const target = canonicalTarget ?? filePath
+  const flags =
+    fsConstants.O_WRONLY | fsConstants.O_CREAT | (fsConstants.O_NOFOLLOW ?? 0)
+  let handle: Awaited<ReturnType<typeof open>> | undefined
+  try {
+    handle = await open(target, flags, 0o600)
+    const st = await handle.stat()
+    if (!st.isFile() || (canonicalTarget !== null && Number(st.nlink) > 1)) {
+      throw new Error(PLANS_DIR_CONTAINMENT_ERROR_MESSAGE)
+    }
+    await handle.truncate(0)
+    await handle.writeFile(content, { encoding: 'utf-8' })
+  } catch (err) {
+    if (canonicalTarget !== null) {
+      throw new Error(PLANS_DIR_CONTAINMENT_ERROR_MESSAGE)
+    }
+    throw err
+  } finally {
+    await handle?.close().catch(() => {})
+  }
 }
 
 // Memoized: called from render bodies (FileReadTool/FileEditTool/FileWriteTool UI.tsx)
 // and permission checks. Inputs (initial settings + cwd) are fixed at startup, so the
 // mkdirSync result is stable for the session. Without memoization, each rendered tool
 // message triggers a mkdirSync syscall (regressed in #20005).
-export const getPlansDirectory = memoize(function getPlansDirectory(): string {
+const getPlansDirectoryMemoized = memoize(function getPlansDirectory(): string {
   const settings = getInitialSettings()
   const settingsDir = settings.plansDirectory
+  const defaultPlansPath = join(getClaudeConfigHomeDir(), 'plans')
   let plansPath: string
+  vettedCustomPlansRoot = undefined
 
   if (settingsDir) {
     // Settings.json (relative to project root)
     const cwd = getCwd()
     const resolved = resolve(cwd, settingsDir)
+    const canonicalCwd = tryRealpathSync(cwd)
 
-    // Validate path stays within project root to prevent path traversal,
-    // and reject backslashes off Windows (gold wl() / cu() check).
-    const hasDisallowedBackslash =
-      getPlatform() !== 'windows' && resolved.includes('\\')
+    // 2.1.323 #2014 (SEA `wl`): Validate both lexical and canonical realpath
+    // containment inside project root, rejecting symlinks escaping the project
+    // and backslashes off Windows.
     if (
-      (!resolved.startsWith(cwd + sep) && resolved !== cwd) ||
-      hasDisallowedBackslash
+      canonicalCwd !== null &&
+      isPlansDirectoryContained(resolved, cwd, canonicalCwd)
     ) {
+      vettedCustomPlansRoot = { cwd, canonicalCwd, plansDir: resolved }
+      plansPath = resolved
+    } else {
       logError(
         new Error(
           `plansDirectory must be within project root, with no backslash in its path off Windows: ${settingsDir}`,
         ),
       )
-      plansPath = join(getClaudeConfigHomeDir(), 'plans')
-    } else {
-      plansPath = resolved
+      plansPath = defaultPlansPath
     }
   } else {
     // Default
-    plansPath = join(getClaudeConfigHomeDir(), 'plans')
+    plansPath = defaultPlansPath
   }
 
-  // Ensure directory exists (mkdirSync with recursive: true is a no-op if it exists)
+  // Ensure directory exists (re-verify containment before creating custom dir)
   try {
+    if (
+      vettedCustomPlansRoot &&
+      plansPath === vettedCustomPlansRoot.plansDir &&
+      !isPlansDirectoryContained(
+        plansPath,
+        vettedCustomPlansRoot.cwd,
+        vettedCustomPlansRoot.canonicalCwd,
+      )
+    ) {
+      throw new Error(PLANS_DIR_CONTAINMENT_ERROR_MESSAGE)
+    }
     getFsImplementation().mkdirSync(plansPath)
   } catch (error) {
     logError(error)
@@ -122,6 +300,96 @@ export const getPlansDirectory = memoize(function getPlansDirectory(): string {
 
   return plansPath
 })
+
+export const getPlansDirectory = Object.assign(
+  function getPlansDirectory(slug?: string): string {
+    const activeSlug = slug ?? getPlanSlugCache().get(getSessionId())
+    if (activeSlug !== undefined && slugsInDefault.has(activeSlug)) {
+      return join(getClaudeConfigHomeDir(), 'plans')
+    }
+    return getPlansDirectoryMemoized()
+  },
+  {
+    cache: {
+      clear() {
+        vettedCustomPlansRoot = undefined
+        slugsInDefault.clear()
+        getPlansDirectoryMemoized.cache.clear?.()
+      },
+    },
+  },
+)
+
+/**
+ * 2.1.325 #2268 (SEA `N6s` @284740124):
+ * Persist an approved plan edit to `filePath`. When `filePath` is in a custom
+ * `plansDirectory` and cannot accept the write (e.g. containment check fails,
+ * symlink/hardlink, read-only or missing folder), fall back to saving under the
+ * default `~/.claude/plans` folder with a fresh slug, switch this session to
+ * that file, and return a warning notice describing where and why.
+ */
+export type PersistApprovedPlanEditResult = {
+  notice: string
+  savedTo?: string
+}
+
+export async function persistApprovedPlanEdit(
+  filePath: string,
+  content: string,
+): Promise<PersistApprovedPlanEditResult | undefined> {
+  try {
+    await writePlanFileContained(filePath, content)
+    notePlanFileWritten(filePath, content)
+    return undefined
+  } catch (err) {
+    const errText = errorMessage(err)
+    logError(err)
+
+    const defaultDir = join(getClaudeConfigHomeDir(), 'plans')
+    const currentSlug = getPlanSlugCache().get(getSessionId())
+    if (
+      dirname(filePath) === defaultDir ||
+      currentSlug === undefined ||
+      basename(filePath) !== `${currentSlug}.md`
+    ) {
+      return {
+        notice: `The approved plan could not be saved to ${filePath}: ${errText}`,
+      }
+    }
+
+    const fallbackSlug = generateWordSlug()
+    const fallbackPath = join(defaultDir, `${fallbackSlug}.md`)
+    try {
+      await mkdir(defaultDir, { recursive: true })
+      const flags =
+        fsConstants.O_WRONLY |
+        fsConstants.O_CREAT |
+        fsConstants.O_EXCL |
+        (fsConstants.O_NOFOLLOW ?? 0)
+      const handle = await open(fallbackPath, flags, 0o600)
+      try {
+        await handle.writeFile(content, { encoding: 'utf-8' })
+      } finally {
+        await handle.close().catch(() => {})
+      }
+    } catch (fallbackErr) {
+      const fallbackErrText = errorMessage(fallbackErr)
+      logError(fallbackErr)
+      setPlanSlug(getSessionId(), generateWordSlug())
+      return {
+        notice: `The approved plan could not be saved to ${fallbackPath}: ${fallbackErrText}. Claude has the approved text in this conversation. It could not be saved to ${filePath} either: ${errText}`,
+      }
+    }
+
+    slugsInDefault.add(fallbackSlug)
+    setPlanSlug(getSessionId(), fallbackSlug)
+    notePlanFileWritten(fallbackPath, content)
+    return {
+      notice: `The approved plan was saved to ${fallbackPath}, which this session uses from now on. It could not be saved to ${filePath}: ${errText}`,
+      savedTo: fallbackPath,
+    }
+  }
+}
 
 /**
  * Get the file path for a session's plan
@@ -300,7 +568,7 @@ export async function copyPlanForResume(
 
     if (recovered) {
       try {
-        await writeFile(planPath, recovered, { encoding: 'utf-8' })
+        await writePlanFileContained(planPath, recovered)
         return true
       } catch (writeError) {
         logError(writeError)
@@ -336,7 +604,8 @@ export async function copyPlanForFork(
   const newSlug = getPlanSlug(targetSessionId)
   const newPlanPath = join(plansDir, `${newSlug}.md`)
   try {
-    await copyFile(originalPlanPath, newPlanPath)
+    const content = await readFile(originalPlanPath, { encoding: 'utf-8' })
+    await writePlanFileContained(newPlanPath, content)
     return true
   } catch (error) {
     if (isENOENT(error)) {

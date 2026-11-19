@@ -7,4 +7,7 @@ export {
   keystrokeToDisplayString,
   chordToDisplayString,
   parseBindings,
+  splitKeystrokeParts,
+  hasLostKeystrokePart,
+  stripLostModifierBindings,
 } from '@anthropic/ink'

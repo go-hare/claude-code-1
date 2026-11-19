@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { Box, Link, Text } from '@anthropic/ink';
 import type { LocalJSXCommandContext } from '../../commands.js';
 import { getOauthProfileFromOauthToken } from '../../services/oauth/getOauthProfile.js';
 import { isUsageCreditsHintEnabled } from '../../services/rateLimitMessages.js';
@@ -63,16 +64,28 @@ export async function call(
       return null;
     }
 
-    await openBrowser(url);
+    const opened = await openBrowser(url);
 
     return (
-      <Login
-        startingMessage={'Starting new login following /upgrade. Exit with Ctrl-C to use existing account.'}
-        onDone={success => {
-          context.onChangeAPIKey();
-          onDone(success ? 'Login successful' : 'Login interrupted');
-        }}
-      />
+      <>
+        {!opened && (
+          <Box flexDirection="column">
+            <Box paddingX={2}>
+              <Text>Couldn&apos;t open your browser. Open this page to upgrade:</Text>
+            </Box>
+            <Box paddingX={2}>
+              <Link url={url} />
+            </Box>
+          </Box>
+        )}
+        <Login
+          startingMessage={'Starting new login following /upgrade. Exit with Ctrl-C to use existing account.'}
+          onDone={success => {
+            context.onChangeAPIKey();
+            onDone(success ? 'Login successful' : 'Login interrupted');
+          }}
+        />
+      </>
     );
   } catch (error) {
     logError(error as Error);

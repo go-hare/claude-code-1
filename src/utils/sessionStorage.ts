@@ -6,6 +6,7 @@ import { getSessionOnceLatches } from './sessionRoot.js'
 // imports above. Named (not wildcard) per CLAUDE.md style; no collisions
 // with the async-suffixed names.
 import {
+  appendFileSync as fsAppendFileSync,
   closeSync,
   constants as fsConstants,
   fstatSync,
@@ -331,12 +332,35 @@ export function getTranscriptWriterDegraded(): {
 }
 
 /**
- * Official XAs — synchronous exit re-stamp (called both from `process.on('exit')`
- * and from `flushSessionStorageAtExit` finally, guarded by one-shot `exitReStampRan`).
+ * Official 2.1.325 #2266: entries that represent turn progress/completion should
+ * trigger an immediate queue drain rather than sitting in the 100ms debounce
+ * timer where an unclean exit could drop them.
+ */
+export function isPromptFlushTranscriptEntry(entry: Entry): boolean {
+  if (entry.type === 'user' || entry.type === 'assistant') {
+    return true
+  }
+  if (entry.type === 'system') {
+    const subtype = (entry as { subtype?: unknown }).subtype
+    return subtype === 'turn_duration' || subtype === 'compact_boundary'
+  }
+  return false
+}
+
+/**
+ * Official XAs + 2.1.325 #2266 — synchronous exit drain + re-stamp (called both
+ * from `process.on('exit')` and from `flushSessionStorageAtExit` finally,
+ * guarded by one-shot `exitReStampRan`) so queued recent turns are flushed
+ * before process exit even when shutdown was not clean.
  */
 export function syncExitReStamp(): void {
   if (exitReStampRan) return
   exitReStampRan = true
+  try {
+    project?.flushQueuedWritesSync()
+  } catch {
+    // Best-effort — don't let sync drain crash process exit
+  }
   try {
     project?.reAppendSessionMetadata(false, true)
   } catch {
@@ -906,6 +930,112 @@ async function localTranscriptHasContentBearing(
   }
 }
 
+/**
+ * Official 2.1.323 #2064 / #2138 (`m3e`): fsync the parent directory after an
+ * atomic rename so rewritten cloud/local session transcripts survive sudden
+ * container stops or NFS/FUSE power loss. Best-effort on filesystems that do
+ * not support directory fsync (EINVAL/EBADF/EISDIR/EPERM/ENOTSUP/ENOSYS).
+ */
+async function fsyncDirBestEffort(filePath: string): Promise<void> {
+  const dir = dirname(filePath)
+  let dirHandle: Awaited<ReturnType<typeof fsOpen>> | undefined
+  try {
+    dirHandle = await fsOpen(dir, 'r')
+    await dirHandle.sync()
+  } catch {
+    // Directory fsync is unsupported on some platforms/filesystems (e.g. Windows, FUSE)
+  } finally {
+    if (dirHandle !== undefined) {
+      await dirHandle.close().catch(() => {})
+    }
+  }
+}
+
+/**
+ * Official 2.1.323 #2064 / #2138 (`W4t` + `m3e`): atomically write a file via
+ * exclusive temp file + fsync + rename + parent-dir fsync so sudden container
+ * stops or NFS/FUSE errors never leave a truncated or unreadable transcript.
+ */
+export async function writeFileAtomicDurably(
+  fullPath: string,
+  content: string,
+  mode = 0o600,
+): Promise<void> {
+  const tmpPath = `${fullPath}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`
+  let handle: Awaited<ReturnType<typeof fsOpen>> | undefined
+  let renamed = false
+  try {
+    handle = await fsOpen(tmpPath, 'wx', mode)
+    await handle.writeFile(content, 'utf8')
+    try {
+      await handle.sync()
+    } catch {
+      // Some FUSE/virtual filesystems reject fsync on regular files
+    }
+    await handle.close()
+    handle = undefined
+    await fsRename(tmpPath, fullPath)
+    renamed = true
+    await fsyncDirBestEffort(fullPath)
+  } finally {
+    if (handle !== undefined) {
+      await handle.close().catch(() => {})
+    }
+    if (!renamed) {
+      await unlink(tmpPath).catch(() => {})
+    }
+  }
+}
+
+/**
+ * Official 2.1.323 #2064 (`qma`): read exactly `length` bytes from `fh` at
+ * `position`, looping over short reads (common on NFS/FUSE). Returns `false`
+ * if EOF is hit before `length` bytes are read.
+ */
+export async function readExactFromHandle(
+  fh: Awaited<ReturnType<typeof fsOpen>>,
+  buf: Buffer,
+  length: number,
+  position: number,
+): Promise<boolean> {
+  let offset = 0
+  while (offset < length) {
+    const { bytesRead } = await fh.read(
+      buf,
+      offset,
+      length - offset,
+      position + offset,
+    )
+    if (bytesRead <= 0) return false
+    offset += bytesRead
+  }
+  return true
+}
+
+/**
+ * Official 2.1.323 #2064 (`sGs`): write all bytes of `buf` to `fh` at
+ * `position` (or current offset when `null`), looping over short writes.
+ */
+export async function writeExactToHandle(
+  fh: Awaited<ReturnType<typeof fsOpen>>,
+  buf: Buffer,
+  position: number | null,
+): Promise<void> {
+  let offset = 0
+  while (offset < buf.byteLength) {
+    const { bytesWritten } = await fh.write(
+      buf,
+      offset,
+      buf.byteLength - offset,
+      position === null ? null : position + offset,
+    )
+    if (bytesWritten <= 0) {
+      throw Object.assign(new Error('write made no progress'), { code: 'EIO' })
+    }
+    offset += bytesWritten
+  }
+}
+
 /** densable e4e / ves — write or append payload lines as jsonl. */
 async function writeTranscriptPayloads(
   fullPath: string,
@@ -914,7 +1044,9 @@ async function writeTranscriptPayloads(
 ): Promise<void> {
   if (mode === 'w') {
     const body = payloads.map(p => jsonStringify(p) + '\n').join('')
-    await writeFile(fullPath, body, { encoding: 'utf8', mode: 0o600 })
+    // Official 2.1.323 #2138: atomic temp + fsync + rename + dir fsync so a
+    // cloud container stopping right after rewrite never leaves unreadable history.
+    await writeFileAtomicDurably(fullPath, body, 0o600)
     return
   }
   if (payloads.length === 0) return
@@ -1373,8 +1505,71 @@ class Project {
         }
       }
       queue.push({ entry, resolve })
-      this.scheduleDrain()
+      if (isPromptFlushTranscriptEntry(entry)) {
+        this.scheduleImmediateDrain()
+      } else {
+        this.scheduleDrain()
+      }
     })
+  }
+
+  /**
+   * Official 2.1.325 #2266: flush turn entries promptly without waiting for
+   * the 100ms batching interval so an unclean exit does not lose recent turns.
+   */
+  private scheduleImmediateDrain(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer)
+      this.flushTimer = null
+    }
+    this.flushTimer = setTimeout(async () => {
+      this.flushTimer = null
+      this.activeDrain = this.drainWriteQueue()
+      await this.activeDrain
+      this.activeDrain = null
+      if (this.writeQueues.size > 0) {
+        this.scheduleDrain()
+      }
+    }, 0)
+  }
+
+  /**
+   * Official 2.1.325 #2266: synchronously write any entries still queued in
+   * `writeQueues` during `process.on('exit')` so an unclean exit (e.g.
+   * direct `process.exit()` without awaiting async flush) does not drop them.
+   */
+  flushQueuedWritesSync(): void {
+    if (this.shouldSkipPersistence() || this.writeQueues.size === 0) {
+      return
+    }
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer)
+      this.flushTimer = null
+    }
+    for (const [filePath, queue] of this.writeQueues) {
+      if (queue.length === 0) continue
+      const batch = queue.splice(0)
+      let content = ''
+      for (const { entry } of batch) {
+        content += jsonStringify(entry) + '\n'
+      }
+      if (content.length > 0) {
+        try {
+          fsAppendFileSync(filePath, content, { mode: 0o600 })
+          if (filePath === this.sessionFile) {
+            this.bytesSinceCompact += Buffer.byteLength(content, 'utf8')
+          }
+          recordTranscriptWriteSuccess(filePath)
+        } catch (err) {
+          recordTranscriptFullDiskError(err, filePath)
+          recordTranscriptWriteFailure('drain', err, filePath)
+        }
+      }
+      for (const { resolve } of batch) {
+        resolve()
+      }
+    }
+    this.writeQueues.clear()
   }
 
   private scheduleDrain(): void {
@@ -1498,6 +1693,11 @@ class Project {
         logEvent('tengu_transcript_compact', {
           bytesBefore: res.bytesBefore,
           bytesAfter: res.bytesAfter,
+        })
+      } else if (res.abortedReason) {
+        logEvent('tengu_transcript_compact_failed', {
+          reason:
+            res.abortedReason as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         })
       }
     } catch (err) {
@@ -1906,8 +2106,17 @@ class Project {
           const chunkLen = Math.min(size, LITE_READ_BUF_SIZE)
           const tailStart = size - chunkLen
           const buf = Buffer.allocUnsafe(chunkLen)
-          const { bytesRead } = await fh.read(buf, 0, chunkLen, tailStart)
-          const tail = buf.subarray(0, bytesRead)
+          // Official 2.1.323 #2064 (`qma`): loop over short reads (NFS/FUSE) so
+          // a partial read never truncates the tail of the session file.
+          const readOk = await readExactFromHandle(fh, buf, chunkLen, tailStart)
+          if (!readOk) {
+            logForDebugging(
+              'Skipping tombstone removal: the session file ended before its reported size, so it was left unchanged',
+              { level: 'warn' },
+            )
+            return
+          }
+          const tail = buf
 
           // Entries are serialized via JSON.stringify (no key-value
           // whitespace). Search for the full `"uuid":"..."` pattern, not
@@ -1928,16 +2137,20 @@ class Project {
             if (prevNl >= 0 || tailStart === 0) {
               const lineStart = prevNl + 1 // 0 when prevNl === -1
               const nextNl = tail.indexOf(0x0a, matchIdx + needle.length)
-              const lineEnd = nextNl >= 0 ? nextNl + 1 : bytesRead
+              const lineEnd = nextNl >= 0 ? nextNl + 1 : chunkLen
 
               const absLineStart = tailStart + lineStart
-              const afterLen = bytesRead - lineEnd
-              // Truncate first, then re-append the trailing lines. In the
-              // common case (target is the last entry) afterLen is 0 and
-              // this is a single ftruncate.
+              const afterLen = chunkLen - lineEnd
+              // Truncate first, then re-append the trailing lines using
+              // exact write loop (`sGs`) so short writes on NFS/FUSE never
+              // drop trailing messages.
               await fh.truncate(absLineStart)
               if (afterLen > 0) {
-                await fh.write(tail, lineEnd, afterLen, absLineStart)
+                await writeExactToHandle(
+                  fh,
+                  tail.subarray(lineEnd, chunkLen),
+                  absLineStart,
+                )
               }
               return
             }
@@ -1956,7 +2169,8 @@ class Project {
           return
         }
         const content = await readFile(this.sessionFile, { encoding: 'utf-8' })
-        const lines = content.split('\n').filter((line: string) => {
+        const rawLines = content.split('\n')
+        const lines = rawLines.filter((line: string) => {
           if (!line.trim()) return true
           try {
             const entry = jsonParse(line)
@@ -1965,9 +2179,10 @@ class Project {
             return true // Keep malformed lines
           }
         })
-        await writeFile(this.sessionFile, lines.join('\n'), {
-          encoding: 'utf8',
-        })
+        if (lines.length === rawLines.length) return
+        // Official 2.1.323 #2064 (`W4t` + `m3e`): atomic durable rewrite so
+        // NFS/FUSE crashes never truncate the saved session on slow path.
+        await writeFileAtomicDurably(this.sessionFile, lines.join('\n'), 0o600)
       } catch {
         // Silently ignore errors - the file might not exist yet
       }
@@ -2410,7 +2625,15 @@ class Project {
    */
   private ensureCurrentSessionFile(): string {
     if (this.sessionFile === null) {
-      this.setSessionFile(getTranscriptPath())
+      const path = getTranscriptPath()
+      this.setSessionFile(path)
+      // Official 2.1.323 #1992: pin sessionProjectDir when materializing so
+      // subagent transcripts and large tool results stay alongside this
+      // transcript even after entering a WorktreeCreate-hook or nested-repo
+      // worktree.
+      if (getSessionProjectDir() === null) {
+        switchSession(asSessionId(getSessionId()), dirname(path))
+      }
     }
 
     return this.sessionFile!
@@ -2596,6 +2819,229 @@ export type TeamInfo = {
 //  - Compaction (useLogMessages): new CB/summary appear FIRST, then recorded
 //    messagesToKeep → not a prefix → not tracked → CB gets parentUuid=null
 //    (correct: truncates --continue chain at compact boundary).
+/**
+ * Official 2.1.323 #1981 (`Otn` / `F1`, cap 4096): UUIDs that must NEVER be
+ * chosen as `parentUuid` for subsequent messages — e.g. old interrupted
+ * messages that were not resumed, or out-of-order reordered transcript rows.
+ */
+const MAX_NOT_CHAIN_PARENT_UUIDS = 4096
+const notChainParentUuids = new Set<string>()
+
+export function markNotChainParent(uuid: string): void {
+  if (!uuid) return
+  notChainParentUuids.delete(uuid)
+  notChainParentUuids.add(uuid)
+  if (notChainParentUuids.size > MAX_NOT_CHAIN_PARENT_UUIDS) {
+    const oldest = notChainParentUuids.values().next().value
+    if (oldest !== undefined) notChainParentUuids.delete(oldest)
+  }
+}
+
+export function isNotChainParent(uuid: string | undefined): boolean {
+  return typeof uuid === 'string' && notChainParentUuids.has(uuid)
+}
+
+/** @internal Clear notChainParent registry between tests. */
+export function clearNotChainParentForTests(): void {
+  notChainParentUuids.clear()
+}
+
+/**
+ * Official 2.1.323 #1981 (`h3i`): when a resumed session has an interrupted
+ * prompt that is NOT resumed, strip any synthetic NRR loader sentinel and mark
+ * the unresumed interrupted message so subsequent messages do NOT join their
+ * `parentUuid` onto it (nor splice away a real user prompt on restart, #2142).
+ */
+export function stripUnresumedInterruptedMessages(
+  messages: Message[],
+  interrupted:
+    | { kind: 'none' }
+    | {
+        kind: 'interrupted_prompt'
+        message: Message
+        loaderSentinelUuid?: string
+      }
+    | undefined,
+  onSpliceIndex?: (removedIndex: number) => void,
+): void {
+  if (!interrupted || interrupted.kind === 'none') return
+  const msgIdx = messages.findIndex(m => m.uuid === interrupted.message.uuid)
+  const sentinelIdx =
+    interrupted.loaderSentinelUuid !== undefined
+      ? messages.findIndex(m => m.uuid === interrupted.loaderSentinelUuid)
+      : msgIdx !== -1
+        ? msgIdx + 1
+        : -1
+  const sentinel = sentinelIdx !== -1 ? messages[sentinelIdx] : undefined
+  if (
+    sentinel?.type === 'assistant' &&
+    Array.isArray(sentinel.message?.content) &&
+    sentinel.message.content.length === 1 &&
+    sentinel.message.content[0]?.type === 'text' &&
+    sentinel.message.content[0].text === 'No response requested.'
+  ) {
+    messages.splice(sentinelIdx, 1)
+    onSpliceIndex?.(sentinelIdx)
+  }
+  const target = msgIdx !== -1 ? messages[msgIdx] : undefined
+  if (target?.uuid) {
+    // Always exclude the unresumed interrupted message from becoming the
+    // parentUuid of the next user turn (#1981).
+    markNotChainParent(target.uuid)
+  }
+  // If it was a synthetic meta continuation prompt (not a real user message),
+  // remove it from the active array; real user prompts stay visible (#2142).
+  if (target?.type === 'user' && target.isMeta === true) {
+    messages.splice(msgIdx, 1)
+    onSpliceIndex?.(msgIdx)
+  }
+}
+
+/**
+ * Official 2.1.323 #2078 (`Vut` + `U2r`): returns true when the tail of the
+ * conversation was intentionally stopped by a hook returning `continue: false`
+ * (`hook_stopped_continuation` attachment or `stop_hook_summary` with
+ * `preventedContinuation: true`), so `CLAUDE_CODE_RESUME_INTERRUPTED_TURN`
+ * must NOT re-run the stopped turn.
+ */
+export function wasTurnStoppedByHook(messages: readonly Message[]): boolean {
+  if (messages.length === 0) return false
+  let sawHookStopped = false
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!
+    if (
+      m.type === 'attachment' &&
+      (m.attachment as { type?: string } | undefined)?.type ===
+        'hook_stopped_continuation'
+    ) {
+      sawHookStopped = true
+      continue
+    }
+    if (
+      m.type === 'system' &&
+      (m as { subtype?: string; preventedContinuation?: boolean }).subtype ===
+        'stop_hook_summary' &&
+      (m as { preventedContinuation?: boolean }).preventedContinuation === true
+    ) {
+      sawHookStopped = true
+      continue
+    }
+    if (m.type === 'system' || m.type === 'progress') {
+      continue
+    }
+    if (m.type === 'user') {
+      const content = m.message?.content
+      const isToolResult =
+        Array.isArray(content) &&
+        content.some(
+          b =>
+            typeof b === 'object' &&
+            b !== null &&
+            (b as { type?: string }).type === 'tool_result',
+        )
+      if (isToolResult) {
+        if (sawHookStopped) {
+          logEvent('tengu_resume_hook_stopped_batch', {})
+          return true
+        }
+        continue
+      }
+      if (sawHookStopped) {
+        logEvent('tengu_resume_hook_stopped_batch', {})
+        return true
+      }
+      if (!m.isMeta) {
+        return false
+      }
+      continue
+    }
+    if (m.type === 'assistant') {
+      if (sawHookStopped) {
+        return true
+      }
+      return false
+    }
+    if (
+      m.type === 'attachment' &&
+      !sawHookStopped &&
+      ((m.attachment as { type?: string } | undefined)?.type ===
+        'queued_command' ||
+        (m.attachment as { type?: string } | undefined)?.type === 'poll_events')
+    ) {
+      return false
+    }
+  }
+  return sawHookStopped
+}
+
+const FILE_ARRIVAL_ATTACHMENT_TYPES = new Set([
+  'file',
+  'directory',
+  'pdf_reference',
+  'compact_file_reference',
+  'already_read_file',
+  'at_mention_reference',
+  'nested_memory',
+])
+
+/**
+ * Official 2.1.323 #2144 (`Is` / `no_reply_note`): returns true when the tail
+ * after a completed assistant reply (`stop_reason === 'end_turn'`) consists
+ * only of file-arrival / `queueTranscriptOnly` context rows — so resuming a
+ * cloud session must NOT trigger an unsolicited model call.
+ */
+export function isTrailingNoReplyNote(messages: readonly Message[]): boolean {
+  if (messages.length === 0) return false
+  let sawFileOrNote = false
+  let lastTurnIdx = -1
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!
+    if (m.type === 'system' || m.type === 'progress') continue
+    if (
+      m.type === 'attachment' &&
+      FILE_ARRIVAL_ATTACHMENT_TYPES.has(
+        (m.attachment as { type?: string } | undefined)?.type ?? '',
+      )
+    ) {
+      sawFileOrNote = true
+      continue
+    }
+    if (
+      m.type === 'user' &&
+      m.isMeta === true &&
+      (m as { queueTranscriptOnly?: boolean }).queueTranscriptOnly === true
+    ) {
+      sawFileOrNote = true
+      continue
+    }
+    if (
+      m.type === 'attachment' &&
+      ((m.attachment as { type?: string } | undefined)?.type ===
+        'prompt_snapshot' ||
+        (m.attachment as { type?: string } | undefined)?.type ===
+          'deferred_tools_record' ||
+        ((m.attachment as { hookEvent?: string; type?: string } | undefined)
+          ?.hookEvent === 'SessionStart' &&
+          ((m.attachment as { type?: string } | undefined)?.type ===
+            'hook_success' ||
+            (m.attachment as { type?: string } | undefined)?.type ===
+              'hook_non_blocking_error')))
+    ) {
+      continue
+    }
+    lastTurnIdx = i
+    break
+  }
+  if (!sawFileOrNote) return false
+  if (lastTurnIdx < 0) return true
+  const prev = messages[lastTurnIdx]!
+  return (
+    prev.type === 'assistant' &&
+    !prev.isApiErrorMessage &&
+    prev.message?.stop_reason === 'end_turn'
+  )
+}
+
 export async function recordTranscript(
   messages: Message[],
   teamInfo?: TeamInfo,
@@ -2606,13 +3052,23 @@ export async function recordTranscript(
   const sessionId = getSessionId() as UUID
   const messageSet = await getSessionMessages(sessionId)
   const newMessages: typeof cleanedMessages = []
-  let startingParentUuid: UUID | undefined = startingParentUuidHint
+  let startingParentUuid: UUID | undefined =
+    startingParentUuidHint && !isNotChainParent(startingParentUuidHint)
+      ? startingParentUuidHint
+      : undefined
   let seenNewMessage = false
   for (const m of cleanedMessages) {
     if (messageSet.has(m.uuid as UUID)) {
       // Only track skipped messages that form a prefix. After compaction,
       // messagesToKeep appear AFTER new CB/summary, so this skips them.
-      if (!seenNewMessage && isChainParticipant(m)) {
+      // Official 2.1.323 #1981 (`!F1(Xe.uuid)`): never chain onto an old
+      // unresumed interrupted message or a virtualized/reordered row.
+      if (
+        !seenNewMessage &&
+        isChainParticipant(m) &&
+        !isNotChainParent(m.uuid) &&
+        !(m as { isVirtual?: boolean }).isVirtual
+      ) {
         startingParentUuid = m.uuid as UUID
       }
     } else {
@@ -2635,7 +3091,9 @@ export async function recordTranscript(
   // slice is all-recorded (rewind, /resume scenarios where every message is
   // already in messageSet). Progress is skipped — it's written to the JSONL
   // but nothing chains TO it (see isChainParticipant).
-  const lastRecorded = newMessages.findLast(isChainParticipant)
+  const lastRecorded = newMessages.findLast(
+    m => isChainParticipant(m) && !isNotChainParent(m.uuid),
+  )
   return (lastRecorded?.uuid as UUID | undefined) ?? startingParentUuid ?? null
 }
 
@@ -3225,9 +3683,52 @@ export function compactTranscriptJsonl(
 }
 
 /**
- * 2.1.304 #968 (SEA atomic publish): Atomically compact a transcript JSONL file
- * via temp file + sync + rename so ENOSPC / disk-full never truncates or drops
- * messages from the saved transcript.
+ * Read 3 sample slices (start, middle, end — up to 4KB each) from `filePath`
+ * at `size` so `compactTranscriptFileAtomic` can detect concurrent in-place
+ * rewrites even when `ino`, `size`, and `mtimeMs` happen to match (#2104).
+ */
+async function readCompactSamples(
+  filePath: string,
+  size: number,
+): Promise<Buffer[]> {
+  const sampleBytes = 4096
+  const ranges: Array<[number, number]> = [
+    [0, Math.min(sampleBytes, size)],
+    [
+      Math.max(0, Math.floor(size / 2) - Math.floor(sampleBytes / 2)),
+      Math.min(sampleBytes, size),
+    ],
+    [Math.max(0, size - sampleBytes), Math.min(sampleBytes, size)],
+  ]
+  const fh = await fsOpen(filePath, 'r')
+  try {
+    const out: Buffer[] = []
+    for (const [offset, len] of ranges) {
+      const buf = Buffer.alloc(len)
+      let read = 0
+      while (read < len) {
+        const { bytesRead } = await fh.read(
+          buf,
+          read,
+          len - read,
+          offset + read,
+        )
+        if (bytesRead <= 0) break
+        read += bytesRead
+      }
+      out.push(buf.subarray(0, read))
+    }
+    return out
+  } finally {
+    await fh.close().catch(() => {})
+  }
+}
+
+/**
+ * 2.1.304 #968 + 2.1.323 #2104 (SEA performCompactTranscript): Atomically
+ * compact a transcript JSONL file via temp file + sync + rename, guarding
+ * against concurrent rewrites by another process with `ino` + `size` +
+ * `mtimeMs` + 3-slice content sample verification and trailing-newline check.
  */
 export async function compactTranscriptFileAtomic(
   filePath: string,
@@ -3237,8 +3738,20 @@ export async function compactTranscriptFileAtomic(
   skippedLowYield: boolean
   bytesBefore: number
   bytesAfter: number
+  abortedReason?: 'snapshot_mid_line' | 'source_changed'
 }> {
   const beforeStat = await stat(filePath)
+  const beforeSamples = await readCompactSamples(filePath, beforeStat.size)
+  const tailSample = beforeSamples[2]
+  if (!tailSample || tailSample.length === 0 || tailSample.at(-1) !== 0x0a) {
+    return {
+      compacted: false,
+      skippedLowYield: false,
+      bytesBefore: beforeStat.size,
+      bytesAfter: beforeStat.size,
+      abortedReason: 'snapshot_mid_line',
+    }
+  }
   const content = await readFile(filePath, 'utf8')
   const { compacted, skippedLowYield, bytesBefore, reclaimableBytes } =
     compactTranscriptJsonl(content, shouldKeepLine)
@@ -3252,26 +3765,50 @@ export async function compactTranscriptFileAtomic(
   }
   const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`
   let handle: Awaited<ReturnType<typeof fsOpen>> | undefined
+  let renamed = false
   try {
     handle = await fsOpen(tmpPath, 'wx', 0o600)
     await handle.writeFile(compacted, 'utf8')
-    await handle.sync()
+    try {
+      await handle.sync()
+    } catch {
+      // Best-effort on filesystems without fsync
+    }
     await handle.close()
     handle = undefined
     const currentStat = await stat(filePath)
+    // Official 2.1.323 #2104: check inode (`ino`), size, mtimeMs, AND 3-slice
+    // byte samples so concurrent replacement or in-place rewrite by another
+    // process never loses messages.
     if (
+      currentStat.ino !== beforeStat.ino ||
       currentStat.size !== beforeStat.size ||
       currentStat.mtimeMs !== beforeStat.mtimeMs
     ) {
-      // Source changed concurrently; abort without overwriting new writes.
       return {
         compacted: false,
         skippedLowYield: false,
         bytesBefore,
         bytesAfter: currentStat.size,
+        abortedReason: 'source_changed',
+      }
+    }
+    const afterSamples = await readCompactSamples(filePath, beforeStat.size)
+    const sampleChanged = beforeSamples.some(
+      (buf, idx) => !afterSamples[idx] || !buf.equals(afterSamples[idx]!),
+    )
+    if (sampleChanged) {
+      return {
+        compacted: false,
+        skippedLowYield: false,
+        bytesBefore,
+        bytesAfter: currentStat.size,
+        abortedReason: 'source_changed',
       }
     }
     await fsRename(tmpPath, filePath)
+    renamed = true
+    await fsyncDirBestEffort(filePath)
     return {
       compacted: true,
       skippedLowYield: false,
@@ -3282,7 +3819,9 @@ export async function compactTranscriptFileAtomic(
     if (handle !== undefined) {
       await handle.close().catch(() => {})
     }
-    await unlink(tmpPath).catch(() => {})
+    if (!renamed) {
+      await unlink(tmpPath).catch(() => {})
+    }
   }
 }
 
@@ -3298,16 +3837,16 @@ export async function hydrateRemoteSession(
     const remoteLogs =
       (await sessionIngress.getSessionLogs(sessionId, ingressUrl)) || []
 
-    // Ensure the project directory and session file exist
-    const projectDir = getProjectDir(getOriginalCwd())
+    // Ensure the project directory and session file exist (#1992: honor sessionProjectDir)
+    const projectDir = getSessionProjectDir() ?? getProjectDir(getOriginalCwd())
     await mkdir(projectDir, { recursive: true, mode: 0o700 })
 
     const sessionFile = getTranscriptPathForSession(sessionId)
 
-    // Replace local logs with remote logs. writeFile truncates, so no
-    // unlink is needed; an empty remoteLogs array produces an empty file.
+    // Replace local logs atomically + fsync (#2138) so a sudden stop never
+    // leaves an unreadable history file.
     const content = remoteLogs.map(e => jsonStringify(e) + '\n').join('')
-    await writeFile(sessionFile, content, { encoding: 'utf8', mode: 0o600 })
+    await writeFileAtomicDurably(sessionFile, content, 0o600)
 
     logForDebugging(`Hydrated ${remoteLogs.length} entries from remote`)
     return remoteLogs.length > 0
@@ -3389,7 +3928,9 @@ export async function hydrateFromCCRv2InternalEvents(
 
     let events = fgRead.events
     const stats = fgRead.stats
-    const projectDir = getProjectDir(getOriginalCwd())
+    // Official 2.1.323 #1992: honor sessionProjectDir so hydrated transcripts
+    // land in the pinned session directory.
+    const projectDir = getSessionProjectDir() ?? getProjectDir(getOriginalCwd())
     await mkdir(projectDir, { recursive: true, mode: 0o700 })
 
     const onDisk = await tailPromise
@@ -3432,12 +3973,27 @@ export async function hydrateFromCCRv2InternalEvents(
       tipEventId !== undefined && onDisk
         ? collectUuidsFromJsonlContent(onDisk.content)
         : null
+    // Official 2.1.323 #2141: if delta events include a compact boundary whose
+    // `preservedMessages.anchorUuid === uuid`, force a full rewrite instead of
+    // delta-appending so answers/messages preserved across compaction are never
+    // lost after a restart in a long conversation.
+    const deltaHasPreservedCompactAnchor = events.some(ev => {
+      const p = ev.payload as {
+        uuid?: unknown
+        compactMetadata?: { preservedMessages?: { anchorUuid?: unknown } }
+      }
+      return (
+        typeof p?.uuid === 'string' &&
+        p.compactMetadata?.preservedMessages?.anchorUuid === p.uuid
+      )
+    })
     const tipInLocalTailAndEndsCleanly =
       tipEventId !== undefined &&
       onDisk !== null &&
       localUuidSet !== null &&
       localUuidSet.has(tipEventId) &&
-      onDisk.content.endsWith('\n')
+      onDisk.content.endsWith('\n') &&
+      !deltaHasPreservedCompactAnchor
 
     let appliedDelta = false
     let wroteForeground = false

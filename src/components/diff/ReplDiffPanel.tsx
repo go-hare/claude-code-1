@@ -388,9 +388,14 @@ export function ReplDiffPanel({ width, minCol = 0, onAskAboutSelection }: Props)
       onWheel={handlePanelWheel}
     >
       <Box flexDirection="column" paddingX={1} paddingY={1} flexShrink={0}>
-        <Box flexDirection="row">
+        <Box flexDirection="row" height={1}>
           {headerStats}
-          <Box flexGrow={1} />
+          <Box flexGrow={1} width={0} height={1} flexWrap="wrap" justifyContent="flex-end" overflow="hidden">
+            <Box height={1} />
+            <Box width={14} marginX={2} flexShrink={0}>
+              <Text dimColor>/diff to close</Text>
+            </Box>
+          </Box>
           <ReplDiffCloseButton onClose={() => closeReplDiffTab(host, setAppState)} />
         </Box>
         {subtitle}

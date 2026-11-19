@@ -123,9 +123,17 @@ describe('marker keys', () => {
 
 describe('Izr / Jrs / mp / c1n', () => {
   test('Izr: private writes do not ask; public and unknown do', () => {
-    expect(consent.Izr({ public: false })).toEqual({
+    expect(consent.Izr({ public: false, outsideAudience: false })).toEqual({
       ask: false,
       foreignRead: false,
+    })
+    expect(consent.Izr({ public: false })).toEqual({
+      ask: true,
+      class: 'public_change',
+      answeredBy: 'classifier',
+      remember: 'this_call',
+      basis: 'facts_missing',
+      missing: 'outsideAudience',
     })
     expect(consent.Izr({ public: true })).toEqual({
       ask: true,

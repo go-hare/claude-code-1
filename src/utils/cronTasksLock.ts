@@ -50,6 +50,10 @@ export type SchedulerLockOptions = {
 let unregisterCleanup: (() => void) | undefined
 // Suppress repeat "held by X" log lines when polling a live owner.
 let lastBlockedBy: string | undefined
+// Official 2.1.323 (#2139): persist the ownerKey that acquired each lock path
+// so session switches (which change getSessionId()) do not leak the lock when
+// releaseSchedulerLock() runs.
+const acquiredOwnerKeys = new Map<string, string>()
 
 function getLockPath(dir?: string): string {
   return join(dir ?? getProjectRoot(), LOCK_FILE_REL)
@@ -95,10 +99,17 @@ async function tryCreateExclusive(
   }
 }
 
-function registerLockCleanup(opts?: SchedulerLockOptions): void {
+function registerLockCleanup(
+  opts: SchedulerLockOptions | undefined,
+  ownerKey: string,
+): void {
   unregisterCleanup?.()
+  const releaseOpts: SchedulerLockOptions = {
+    ...opts,
+    lockIdentity: ownerKey,
+  }
   unregisterCleanup = registerCleanup(async () => {
-    await releaseSchedulerLock(opts)
+    await releaseSchedulerLock(releaseOpts)
   })
 }
 
@@ -117,12 +128,15 @@ export async function tryAcquireSchedulerLock(
   opts?: SchedulerLockOptions,
 ): Promise<boolean> {
   const dir = opts?.dir
+  const lockPath = getLockPath(dir)
   // "sessionId" in the lock file is really just a stable owner key. REPL
-  // uses getSessionId(); daemon callers supply their own UUID. PID remains
-  // the liveness signal regardless.
-  const sessionId = opts?.lockIdentity ?? getSessionId()
+  // uses getSessionId() on initial acquire and persists it in acquiredOwnerKeys
+  // so session switches don't orphan the lock; daemon callers supply their own
+  // UUID. PID remains the liveness signal regardless.
+  const ownerKey =
+    opts?.lockIdentity ?? acquiredOwnerKeys.get(lockPath) ?? getSessionId()
   const lock: SchedulerLock = {
-    sessionId,
+    sessionId: ownerKey,
     pid: process.pid,
     procStart: await ownProcStartAsync(),
     acquiredAt: Date.now(),
@@ -130,7 +144,8 @@ export async function tryAcquireSchedulerLock(
 
   if (await tryCreateExclusive(lock, dir)) {
     lastBlockedBy = undefined
-    registerLockCleanup(opts)
+    acquiredOwnerKeys.set(lockPath, ownerKey)
+    registerLockCleanup(opts, ownerKey)
     logForDebugging(
       `[ScheduledTasks] acquired scheduler lock (PID ${process.pid})`,
     )
@@ -142,10 +157,11 @@ export async function tryAcquireSchedulerLock(
   // Already ours (idempotent). After --resume the session ID is restored
   // but the process has a new PID — update the lock file so other sessions
   // see a live PID and don't steal it.
-  if (existing?.sessionId === sessionId) {
+  if (existing?.sessionId === ownerKey) {
+    acquiredOwnerKeys.set(lockPath, ownerKey)
     if (existing.pid !== process.pid) {
-      await writeFile(getLockPath(dir), jsonStringify(lock))
-      registerLockCleanup(opts)
+      await writeFile(lockPath, jsonStringify(lock))
+      registerLockCleanup(opts, ownerKey)
     }
     return true
   }
@@ -172,10 +188,11 @@ export async function tryAcquireSchedulerLock(
       `[ScheduledTasks] recovering stale scheduler lock from PID ${existing.pid}`,
     )
   }
-  await unlink(getLockPath(dir)).catch(() => {})
+  await unlink(lockPath).catch(() => {})
   if (await tryCreateExclusive(lock, dir)) {
     lastBlockedBy = undefined
-    registerLockCleanup(opts)
+    acquiredOwnerKeys.set(lockPath, ownerKey)
+    registerLockCleanup(opts, ownerKey)
     return true
   }
   // Another session won the recovery race.
@@ -193,9 +210,12 @@ export async function releaseSchedulerLock(
   lastBlockedBy = undefined
 
   const dir = opts?.dir
-  const sessionId = opts?.lockIdentity ?? getSessionId()
+  const lockPath = getLockPath(dir)
+  const persistedOwnerKey = acquiredOwnerKeys.get(lockPath)
+  acquiredOwnerKeys.delete(lockPath)
+  const ownerKey = opts?.lockIdentity ?? persistedOwnerKey ?? getSessionId()
   const existing = await readLock(dir)
-  if (!existing || existing.sessionId !== sessionId) return
+  if (!existing || existing.sessionId !== ownerKey) return
   if (
     existing.pid !== process.pid &&
     isProcessRunning(existing.pid) &&
@@ -204,7 +224,7 @@ export async function releaseSchedulerLock(
     return
   }
   try {
-    await unlink(getLockPath(dir))
+    await unlink(lockPath)
     logForDebugging('[ScheduledTasks] released scheduler lock')
   } catch {
     // Already gone.

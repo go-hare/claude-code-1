@@ -201,6 +201,10 @@ export type PluginOperationResult = {
    * `--config` save and prints the unchanged-values notice.
    */
   nothingWritten?: boolean
+  /** Official 2.1.323 #2044 & #2189: exit-0 stderr printed by plugin's install command. */
+  commandStderr?: string
+  /** Official 2.1.323 #2189: true when the plugin's install command printed to stderr. */
+  commandPrinted?: boolean
 }
 
 /**
@@ -214,8 +218,8 @@ export type PluginUpdateResult = {
   oldVersion?: string
   alreadyUpToDate?: boolean
   scope?: PluginScope
-  /** SEA `ggw` — autoupdate treats this as skip, not fail. */
-  skipReason?: 'entry_helper_deferred'
+  /** SEA `ggw` + Official 2.1.323 #1965 — autoupdate treats this as skip, not fail. */
+  skipReason?: 'entry_helper_deferred' | 'engine_range'
   /** densable vun — cwe.failureCode or command_source_refused, or #1749/#1789 dependency failure codes. */
   failureCode?: string
   /** Official `folderNote` — note for folder-sourced plugins on update. */
@@ -631,7 +635,10 @@ export async function installPluginOp(
   const staleInstallWarning = preInstallRefreshWarning
     ? `. Warning: ${preInstallRefreshWarning} — installed from the cached catalog, so the version may be stale`
     : ''
-  const depNote = (result as Extract<typeof result, { ok: true }>).depNote
+  const okResult = result as Extract<typeof result, { ok: true }>
+  const depNote = okResult.depNote
+  const commandStderr = okResult.commandStderr
+  const commandPrinted = Boolean(commandStderr)
 
   if (wasInstalled && wasEnabled) {
     return {
@@ -641,6 +648,7 @@ export async function installPluginOp(
       pluginName: entry.name,
       scope,
       nothingWritten: true,
+      ...(commandStderr ? { commandStderr, commandPrinted } : {}),
     }
   }
   if (wasInstalled) {
@@ -650,6 +658,7 @@ export async function installPluginOp(
       pluginId,
       pluginName: entry.name,
       scope,
+      ...(commandStderr ? { commandStderr, commandPrinted } : {}),
     }
   }
 
@@ -659,6 +668,7 @@ export async function installPluginOp(
     pluginId,
     pluginName: entry.name,
     scope,
+    ...(commandStderr ? { commandStderr, commandPrinted } : {}),
   }
 }
 
@@ -1553,7 +1563,7 @@ export async function resolveAndInstallUpdatedPluginDependencies(opts: {
  * This is the core update execution extracted from updatePluginOp.
  * densable R0v: command sources get announce/ptm → shown consent, else recorded sourceCommand.
  */
-async function performPluginUpdate({
+export async function performPluginUpdate({
   pluginId,
   pluginName,
   entry,
@@ -1759,6 +1769,28 @@ async function performPluginUpdate({
       }
     }
 
+    // Official 2.1.323 #1965: refuse/skip updating to a version whose
+    // engines["claude-code"] range excludes this Claude Code version.
+    const {
+      checkClaudeCodeEngineRange,
+      extractClaudeCodeEngineRange,
+      formatEngineRangeGuidance,
+      formatEngineRangeMiss,
+    } = await import('../../utils/plugins/pluginEngineRange.js')
+    const entryEngineCheck = checkClaudeCodeEngineRange(
+      extractClaudeCodeEngineRange((entry as { engines?: unknown }).engines),
+    )
+    if (entryEngineCheck.kind === 'outside') {
+      return {
+        success: false,
+        message: `Update for "${pluginName}" ${formatEngineRangeMiss(entryEngineCheck.miss)}. ${formatEngineRangeGuidance(entryEngineCheck.miss)}`,
+        pluginId,
+        oldVersion,
+        scope,
+        skipReason: 'engine_range',
+      }
+    }
+
     const { marketplaceHeaders, marketplaceUrl } =
       await resolveMarketplaceArchiveAuth(pluginId)
     const cacheResult = await cachePlugin(entry.source, {
@@ -1773,6 +1805,30 @@ async function performPluginUpdate({
       operatorAuthored: trustedSettingsEntryAuth?.origin === 'settings',
       trustedSettingsEntryAuth,
     })
+
+    // Official 2.1.323 #1965: also validate engines["claude-code"] from the
+    // downloaded plugin.json manifest (marketplace entry may omit engines).
+    const manifestEngineCheck = checkClaudeCodeEngineRange(
+      extractClaudeCodeEngineRange(
+        (cacheResult.manifest as { engines?: unknown } | undefined)?.engines,
+      ),
+    )
+    if (manifestEngineCheck.kind === 'outside') {
+      if (cacheResult.path && cacheResult.path !== installation.installPath) {
+        await fs
+          .rm(cacheResult.path, { recursive: true, force: true })
+          .catch(() => {})
+      }
+      return {
+        success: false,
+        message: `Update for "${pluginName}" ${formatEngineRangeMiss(manifestEngineCheck.miss)}. ${formatEngineRangeGuidance(manifestEngineCheck.miss)}`,
+        pluginId,
+        oldVersion,
+        scope,
+        skipReason: 'engine_range',
+      }
+    }
+
     sourcePath = cacheResult.path
     shouldCleanupSource = true
     gitCommitSha = cacheResult.gitCommitSha
@@ -1845,6 +1901,31 @@ async function performPluginUpdate({
       )
     } catch {
       // Failed to load - will use other version sources
+    }
+
+    // Official 2.1.323 #1965: validate engines["claude-code"] for local
+    // marketplace plugins as well (manifest takes precedence over entry).
+    const {
+      checkClaudeCodeEngineRange,
+      extractClaudeCodeEngineRange,
+      formatEngineRangeGuidance,
+      formatEngineRangeMiss,
+    } = await import('../../utils/plugins/pluginEngineRange.js')
+    const localEngineRange =
+      extractClaudeCodeEngineRange(
+        (pluginManifest as { engines?: unknown } | undefined)?.engines,
+      ) ??
+      extractClaudeCodeEngineRange((entry as { engines?: unknown }).engines)
+    const localEngineCheck = checkClaudeCodeEngineRange(localEngineRange)
+    if (localEngineCheck.kind === 'outside') {
+      return {
+        success: false,
+        message: `Update for "${pluginName}" ${formatEngineRangeMiss(localEngineCheck.miss)}. ${formatEngineRangeGuidance(localEngineCheck.miss)}`,
+        pluginId,
+        oldVersion,
+        scope,
+        skipReason: 'engine_range',
+      }
     }
 
     // Calculate version from plugin source path

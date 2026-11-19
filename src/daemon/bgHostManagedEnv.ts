@@ -22,6 +22,15 @@ import {
   AX_SCREEN_READER_ENV_KEY,
   isScreenReaderModeEnabled,
 } from '../utils/screenReaderGate.js'
+import {
+  BG_ENV_LOGIN_SENTINEL,
+  BG_SESSION_CREDENTIAL_ENV,
+  clearPreviousAccountCredentialsFromEnv,
+  computeBgSessionCredentialAnchor,
+  getConflictingDaemonCredentialEnvKeys,
+  isValidAnthropicProfileName,
+  isValidBgSessionCredential,
+} from './bgSessionCredential.js'
 
 /** densable R_ / Me — auth tokens dropped on a host-managed / ssh child. */
 export const BG_CHILD_AUTH_TOKEN_KEYS = [
@@ -524,6 +533,16 @@ export function stripHostEntrypoint(
   }
 }
 
+/**
+ * Official 2.1.323 #2131 (`pt`): boolean flag env keys forwarded as `'1'` into
+ * dispatched background sessions when truthy in the caller environment.
+ */
+export const BG_FORWARD_BOOL_FLAG_ENV_KEYS = [
+  'CLAUDE_CODE_DISABLE_AGENT_PROGRESS_SUMMARIES',
+  'CLAUDE_CODE_DISABLE_MCP_TASKS',
+  'DISABLE_ERROR_REPORTING',
+] as const
+
 /** densable Ht */
 export function snapshotProviderEnv(
   env: NodeJS.ProcessEnv = process.env,
@@ -534,6 +553,11 @@ export function snapshotProviderEnv(
     if (value === undefined) continue
     if (value === '' && key !== 'CLAUDE_SECURESTORAGE_CONFIG_DIR') continue
     out[key] = value
+  }
+  for (const key of BG_FORWARD_BOOL_FLAG_ENV_KEYS) {
+    if (isEnvTruthy(env[key])) {
+      out[key] = '1'
+    }
   }
   return out
 }
@@ -688,11 +712,98 @@ export function buildDispatchProviderEnv(opts: {
   ) {
     out[AX_SCREEN_READER_ENV_KEY] = '1'
   }
+  // Official 2.1.323 #1993: anchor named Anthropic profile & credential identity
+  // onto dispatched background sessions (never for bare exec commands).
+  if (!opts.exec?.trim()) {
+    const rawProfile = parent.ANTHROPIC_PROFILE?.trim()
+    if (rawProfile && isValidAnthropicProfileName(rawProfile)) {
+      out.ANTHROPIC_PROFILE = rawProfile
+      if (parent.ANTHROPIC_CONFIG_DIR) {
+        out.ANTHROPIC_CONFIG_DIR = parent.ANTHROPIC_CONFIG_DIR
+      }
+    }
+    const existingAnchor = parent[BG_SESSION_CREDENTIAL_ENV]
+    if (existingAnchor && isValidBgSessionCredential(existingAnchor)) {
+      out[BG_SESSION_CREDENTIAL_ENV] = existingAnchor
+    } else {
+      const computed = computeBgSessionCredentialAnchor(parent)
+      if (computed.credential !== 'none') {
+        out[BG_SESSION_CREDENTIAL_ENV] = computed.credential
+      } else if (!isExternallyManagedProviderEnv(parent)) {
+        // Official 2.1.325 #2290 (`PUe = "env-login"`): mark sessions started on
+        // the user's saved claude.ai login so the background daemon strips any
+        // ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN inherited from its own shell.
+        out[BG_SESSION_CREDENTIAL_ENV] = BG_ENV_LOGIN_SENTINEL
+      }
+    }
+  }
   if (shouldInheritParentEndpointEnv(opts)) {
     Object.assign(out, inheritParentEndpointEnv(parent))
     Object.assign(out, copyProviderGatewayEnv(out, parent))
   }
   return out
+}
+
+/**
+ * Official 2.1.323 #1999 & 2.1.325 #2290 (`Tfa`):
+ * 1. Clear stale previous-account credential env vars from the worker
+ *    environment whenever dispatch switches to a named profile or explicitly
+ *    anchors a different sign-in than the daemon's own process env.
+ * 2. When dispatch is anchored to a claude.ai login (`env-login`) or a
+ *    specific shell credential (`env-key` / `env-apikey` / `env-authtoken` /
+ *    `env-federation` / `env-workload`), strip conflicting daemon-shell
+ *    credential keys (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+ *    `ANTHROPIC_FEDERATION_RULE_ID`, `CLAUDE_CODE_OAUTH_TOKEN`,
+ *    `ANTHROPIC_PROFILE`, `ANTHROPIC_CONFIG_DIR`) so the session never bills
+ *    the daemon shell's API key, token, or profile.
+ */
+export function applyWorkerCredentialSwitchCleanup(
+  env: Record<string, string | undefined>,
+  parentEnv: NodeJS.ProcessEnv,
+  dispatchEnv?: Record<string, string>,
+): void {
+  const dispatchAnchor = dispatchEnv?.[BG_SESSION_CREDENTIAL_ENV]
+  // #2290: strip daemon-inherited conflicting credentials (e.g. ANTHROPIC_API_KEY,
+  // ANTHROPIC_AUTH_TOKEN, CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_PROFILE,
+  // ANTHROPIC_CONFIG_DIR) when worker runs on a claude.ai login (`env-login`)
+  // or another specific shell credential.
+  const conflictingKeys = getConflictingDaemonCredentialEnvKeys(dispatchAnchor)
+  if (conflictingKeys.length > 0) {
+    const conflictingSet = new Set(conflictingKeys)
+    const dispatchUpperKeys = new Set(
+      Object.keys(dispatchEnv ?? {})
+        .filter(k => Boolean(dispatchEnv?.[k]))
+        .map(k => k.toUpperCase()),
+    )
+    for (const key of conflictingKeys) {
+      if (!dispatchUpperKeys.has(key.toUpperCase())) {
+        delete env[key]
+      }
+    }
+    for (const key of Object.keys(env)) {
+      const upper = key.toUpperCase()
+      if (conflictingSet.has(upper) && !dispatchUpperKeys.has(upper)) {
+        delete env[key]
+      }
+    }
+  }
+
+  const dispatchProfile = dispatchEnv?.ANTHROPIC_PROFILE?.trim()
+  const parentProfile = parentEnv.ANTHROPIC_PROFILE?.trim()
+  const switchingProfile =
+    Boolean(dispatchProfile && dispatchProfile !== parentProfile) ||
+    Boolean(
+      dispatchAnchor &&
+        dispatchAnchor.startsWith('profile:') &&
+        dispatchAnchor !== parentEnv[BG_SESSION_CREDENTIAL_ENV],
+    )
+  if (!switchingProfile) return
+  const preserve = new Set<string>(
+    Object.keys(dispatchEnv ?? {}).filter(
+      k => dispatchEnv?.[k] !== undefined && dispatchEnv[k] !== '',
+    ),
+  )
+  clearPreviousAccountCredentialsFromEnv(env, preserve)
 }
 
 /** densable ci() We + pe + Ge. Isolation is assigned after this. */

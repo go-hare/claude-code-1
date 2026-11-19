@@ -1608,9 +1608,11 @@ async function reloadDevMods(): Promise<DevModLoad> {
       return 'held'
     }
     await binding.reloadPlugins()
+    activeDevModLastReloadFailed = false
     activeDevModStampTracker.markReloaded(true)
     return 'reloaded'
   } catch (error) {
+    activeDevModLastReloadFailed = true
     activeDevModStampTracker.markReloaded(false)
     const msg = errorMessage(error)
     leftoverUiLog(
@@ -1905,13 +1907,40 @@ function leftoverTick(
 }
 
 /**
- * #1751 (2.1.319): Event handlers for dev-mod watching.
+ * Official 2.1.323 #2040 (`Mfo`): determine whether a watch event on `filePath`
+ * should trigger a mod hot reload. When the last reload failed (`failedReload`),
+ * ignore the stale pre-failure `trackedFiles` filter (`trackedFiles = undefined`)
+ * so a newly created code or manifest file under the mod directory triggers a reload.
+ */
+const MOD_CODE_OR_MANIFEST_RE =
+  /(?:\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)|(?:^|[\\/])(?:plugin|hooks|settings)\.json)$/i
+
+export function isRelevantModWatchFile(
+  filePath: string,
+  manifests: ReadonlySet<string>,
+  trackedFiles: ReadonlySet<string> | undefined,
+  failedReload = false,
+): boolean {
+  const effectiveTracked = failedReload ? undefined : trackedFiles
+  const resolved = resolve(filePath)
+  if (manifests.has(resolved)) return true
+  if (effectiveTracked !== undefined) {
+    return effectiveTracked.has(resolved)
+  }
+  return MOD_CODE_OR_MANIFEST_RE.test(resolved)
+}
+
+/**
+ * #1751 (2.1.319) + #2040 (2.1.323): Event handlers for dev-mod watching.
  * - `onUnlink` clears the cached stamp in `tracker` and bumps the per-path
  *   sequence number so any in-flight `readStamp` from an earlier `add`/`change`
  *   cannot write back a stale stamp or suppress a subsequent re-creation.
  * - `onFileChange` checks sequence staleness and treats a transient missing
  *   file (`tracked === undefined`) by forgetting any cached stamp and firing
  *   `onChange`.
+ * - When the last reload failed (`opts?.isReloadFailed?.() === true`), the
+ *   watcher drops any stale tracked-file filter so a file created right after
+ *   the failure always triggers a reload.
  */
 export function createDevModWatchHandlers(
   tracker: ReturnType<typeof createDevModStampTracker>,
@@ -1919,6 +1948,11 @@ export function createDevModWatchHandlers(
   readStamp: (
     filePath: string,
   ) => Promise<DevModTrackedStamp | undefined> = readDevModTrackedStamp,
+  opts?: {
+    manifests?: ReadonlySet<string>
+    getTrackedFiles?: () => ReadonlySet<string> | undefined
+    isReloadFailed?: () => boolean
+  },
 ): {
   onFileChange: (filePath: string) => Promise<void>
   onUnlink: (filePath: string) => void
@@ -1933,6 +1967,20 @@ export function createDevModWatchHandlers(
 
   return {
     async onFileChange(filePath: string): Promise<void> {
+      const failedReload = opts?.isReloadFailed?.() === true
+      if (opts?.manifests !== undefined) {
+        const trackedFiles = opts.getTrackedFiles?.()
+        if (
+          !isRelevantModWatchFile(
+            filePath,
+            opts.manifests,
+            trackedFiles,
+            failedReload,
+          )
+        ) {
+          return
+        }
+      }
       const seq = bump(filePath)
       const tracked = await readStamp(filePath)
       // If an unlink or newer file event arrived while stat/readFile was in flight,
@@ -1946,6 +1994,11 @@ export function createDevModWatchHandlers(
         tracker.forget(filePath)
         onChange()
         return
+      }
+      if (failedReload) {
+        // #2040: after a failed reload, forget any stale stamp for this file
+        // so newly created or restored files trigger a recovery reload.
+        tracker.forget(filePath)
       }
       if (tracker.shouldReload(filePath, tracked)) {
         onChange()
@@ -1961,6 +2014,9 @@ export function createDevModWatchHandlers(
     },
   }
 }
+
+/** Official 2.1.323 #2040: tracks whether the most recent mod reload failed. */
+let activeDevModLastReloadFailed = false
 
 /** densable Ro — chokidar persistent, ignoreInitial, followSymlinks:!1, 400ms. */
 function leftoverWatchRoot(
@@ -1990,6 +2046,9 @@ function leftoverWatchRoot(
     activeDevModStampTracker,
     onChange,
     readDevModTrackedStamp,
+    {
+      isReloadFailed: () => activeDevModLastReloadFailed,
+    },
   )
   const fireIfChanged = (filePath: string) => {
     void handlers.onFileChange(filePath)

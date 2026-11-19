@@ -35,10 +35,12 @@ import type {
 } from '../../services/mcp/types.js';
 import { openBrowser } from '../../utils/browser.js';
 import {
+  URL_NOT_HTTP_OR_HTTPS,
   URL_WITHHELD_MARKER,
   canOneClickOpen,
   hrefForOpen,
   isExactShowableUrl,
+  isHttpOrHttpsUrl,
   knockAcceptIfUnsafe,
   toggleAcceptDecline,
   urlOverflowsScreen,
@@ -70,6 +72,12 @@ type Props = {
   userConfirmsCompletion?: boolean;
   /** densable Host wouldTakeAnswer guard. */
   wouldTakeAnswer?: () => boolean;
+  /**
+   * Official 2.1.325 #2367 (`escapeAction`): `'answer later'` for background
+   * MCP task elicitations (Esc puts the question aside in `/tasks` without
+   * cancelling on the server) vs `'cancel'` for foreground elicitations.
+   */
+  escapeAction?: 'answer later' | 'cancel';
 };
 
 const isTextField = (s: PrimitiveSchemaDefinition) => ['string', 'number', 'integer'].includes(s.type);
@@ -158,7 +166,11 @@ export function ElicitationDialog({
   onWaitingDismiss,
   userConfirmsCompletion,
   wouldTakeAnswer,
+  escapeAction,
 }: Props): React.ReactNode {
+  const relatedTask = parseRelatedTaskMetadata((event.params as { _meta?: Record<string, unknown> })._meta);
+  const resolvedEscapeAction: 'answer later' | 'cancel' = escapeAction ?? (relatedTask ? 'answer later' : 'cancel');
+
   if (event.params.mode === 'url') {
     return (
       <ElicitationURLDialog
@@ -167,19 +179,22 @@ export function ElicitationDialog({
         onWaitingDismiss={onWaitingDismiss}
         userConfirmsCompletion={userConfirmsCompletion}
         wouldTakeAnswer={wouldTakeAnswer}
+        escapeAction={resolvedEscapeAction}
       />
     );
   }
 
-  return <ElicitationFormDialog event={event} onResponse={onResponse} />;
+  return <ElicitationFormDialog event={event} onResponse={onResponse} escapeAction={resolvedEscapeAction} />;
 }
 
 function ElicitationFormDialog({
   event,
   onResponse,
+  escapeAction = 'cancel',
 }: {
   event: ElicitationRequestEvent;
   onResponse: Props['onResponse'];
+  escapeAction?: 'answer later' | 'cancel';
 }): React.ReactNode {
   const { serverName, signal } = event;
   const request = event.params as ElicitRequestFormParams & { _meta?: Record<string, unknown> };
@@ -1189,7 +1204,12 @@ function ElicitationFormDialog({
           <Text>Press {exitState.keyName} again to exit</Text>
         ) : (
           <Byline>
-            <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="cancel" />
+            <ConfigurableShortcutHint
+              action="confirm:no"
+              context="Confirmation"
+              fallback="Esc"
+              description={escapeAction}
+            />
             <KeyboardShortcutHint shortcut="↑↓" action="navigate" />
             {currentField && <KeyboardShortcutHint shortcut="Backspace" action="unset" />}
             {currentField && currentField.schema.type === 'boolean' && (
@@ -1244,12 +1264,14 @@ function ElicitationURLDialog({
   onWaitingDismiss,
   userConfirmsCompletion = false,
   wouldTakeAnswer,
+  escapeAction = 'cancel',
 }: {
   event: ElicitationRequestEvent;
   onResponse: Props['onResponse'];
   onWaitingDismiss: Props['onWaitingDismiss'];
   userConfirmsCompletion?: boolean;
   wouldTakeAnswer?: () => boolean;
+  escapeAction?: 'answer later' | 'cancel';
 }): React.ReactNode {
   const { serverName, signal, waitingState } = event;
   const urlParams = event.params as ElicitRequestURLParams;
@@ -1304,7 +1326,11 @@ function ElicitationURLDialog({
     domain = href;
   }
 
-  const overflows = urlOverflowsScreen(href, columns, rows);
+  const isHttpOrHttps = useMemo(() => isHttpOrHttpsUrl(href), [href]);
+  const nonHttpWarningLines = isHttpOrHttps
+    ? 0
+    : Math.ceil(URL_NOT_HTTP_OR_HTTPS.length / Math.max(columns - 6, 1)) + 2;
+  const overflows = urlOverflowsScreen(href, columns, rows, nonHttpWarningLines);
   const warning = urlPromptWarning(exact, oneClick, overflows);
   const [focusedButton, setFocusedButton] = useState<'accept' | 'decline' | 'open' | 'action' | 'cancel'>(
     event.startWaiting === true
@@ -1452,6 +1478,11 @@ function ElicitationURLDialog({
           <Box marginBottom={1} flexDirection="column">
             {urlDisplay}
           </Box>
+          {oneClick && !isHttpOrHttps && (
+            <Box marginBottom={1}>
+              <Text color="warning">{URL_NOT_HTTP_OR_HTTPS}</Text>
+            </Box>
+          )}
           <Box marginBottom={1}>
             <Text dimColor italic>
               Waiting for the server to confirm completion…
@@ -1505,7 +1536,12 @@ function ElicitationURLDialog({
           <Text>Press {exitState.keyName} again to exit</Text>
         ) : (
           <Byline>
-            <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="cancel" />
+            <ConfigurableShortcutHint
+              action="confirm:no"
+              context="Confirmation"
+              fallback="Esc"
+              description={escapeAction}
+            />
             <KeyboardShortcutHint shortcut="←→" action="switch" />
           </Byline>
         )
@@ -1518,6 +1554,11 @@ function ElicitationURLDialog({
         {warning && (
           <Box marginBottom={1}>
             <Text dimColor>{warning}</Text>
+          </Box>
+        )}
+        {oneClick && !isHttpOrHttps && (
+          <Box marginBottom={1}>
+            <Text color="warning">{URL_NOT_HTTP_OR_HTTPS}</Text>
           </Box>
         )}
         <Box>

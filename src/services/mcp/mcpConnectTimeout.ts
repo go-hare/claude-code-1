@@ -19,8 +19,60 @@ import { logForDebugging } from '../../utils/debug.js'
 import { TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../utils/errors.js'
 import { isCliOwnedConfig } from './cliOwnedConfigs.js'
 
-/** densable y0 default when MCP_TIMEOUT unset / non-positive. */
+/** densable `y0` default when MCP_TIMEOUT unset / non-positive. */
 export const DEFAULT_MCP_TIMEOUT_MS = 30_000
+/** #2054: Official `Bre` — minimum 2s prewait floor for required MCP servers. */
+export const MCP_REQUIRED_SERVER_STARTUP_FLOOR_MS = 2_000
+/**
+ * #2054: Compute the effective startup prewait budget for an MCP server in SDK
+ * sessions. When settings lower `CLAUDE_CODE_MCP_STARTUP_WAIT_MS` below 2000ms
+ * after startup, servers required by `--allowedTools` or an `mcp_tool` hook
+ * still receive at least `MCP_REQUIRED_SERVER_STARTUP_FLOOR_MS` (2000ms)
+ * before the first turn.
+ */
+export function resolveMcpStartupPrewaitBudgetMs(options: {
+  configuredWaitMs?: number
+  hasPendingRequiredServers: boolean
+  elapsedMs?: number
+}): number {
+  const configured = Math.max(0, options.configuredWaitMs ?? 0)
+  const elapsed = Math.max(0, options.elapsedMs ?? 0)
+  if (
+    options.hasPendingRequiredServers &&
+    configured < MCP_REQUIRED_SERVER_STARTUP_FLOOR_MS
+  ) {
+    return Math.max(0, MCP_REQUIRED_SERVER_STARTUP_FLOOR_MS - elapsed)
+  }
+  return Math.max(0, configured - elapsed)
+}
+
+/**
+ * #2054: Extract normalized MCP server names required before the first turn
+ * from `--allowedTools` / permission allow rules and `mcp_tool` hook matchers.
+ */
+export function collectRequiredMcpPrewaitServers(input: {
+  allowedToolRules?: readonly string[]
+  mcpToolHookServers?: readonly string[]
+}): Set<string> {
+  const required = new Set<string>()
+  const addFromToolOrRule = (raw: string) => {
+    const trimmed = raw.trim()
+    const match = /^mcp__([^_()\s]+(?:_[^_()\s]+)*)(?:__|$|\()/i.exec(trimmed)
+    if (match?.[1]) {
+      required.add(match[1].replace(/[^a-zA-Z0-9_-]/g, '_'))
+    }
+  }
+  for (const rule of input.allowedToolRules ?? []) {
+    addFromToolOrRule(rule)
+  }
+  for (const server of input.mcpToolHookServers ?? []) {
+    const trimmed = server.trim()
+    if (trimmed) {
+      required.add(trimmed.replace(/[^a-zA-Z0-9_-]/g, '_'))
+    }
+  }
+  return required
+}
 /** densable Obf default when MCP_CONNECT_TIMEOUT_MS unset / non-positive. */
 export const DEFAULT_MCP_CONNECT_TIMEOUT_MS = 5_000
 /** densable RiS — reserved ms when computing auto initialize timeout (IiS). */

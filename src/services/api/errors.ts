@@ -85,6 +85,7 @@ import {
   getRateLimitErrorMessage,
   type OverageDisabledReason,
 } from '../claudeAiLimits.js'
+import { isCloudOrRemoteControlSession } from '../rateLimitMessages.js'
 import { shouldProcessRateLimits } from '../rateLimitMocking.js' // Used for /mock-limits command
 import { extractConnectionErrorDetails, formatAPIError } from './errorUtils.js'
 
@@ -279,9 +280,62 @@ const PROMPT_TOO_LONG_EXCLUSIONS = [
   'expected maxlength',
 ]
 
+/**
+ * Official 2.1.325 #2265 (`RR` / `AOs`) — third-party gateway and Azure
+ * Foundry context-length error phrases that should normalize to
+ * `PROMPT_TOO_LONG_ERROR_MESSAGE` so reactive compaction triggers instead of
+ * failing every turn with a raw 400.
+ */
+const GATEWAY_CONTEXT_LENGTH_PHRASES = [
+  'maximum context length',
+  'max context length',
+  'context_length_exceeded',
+  'exceeds the context window',
+  'contextwindowexceedederror',
+  'longer than the maximum model length',
+  "longer than the model's context length",
+  'exceeds the available context size',
+  'exceeds the maximum number of tokens allowed',
+  'exceeded model token limit',
+  'input token length too long',
+  'input tokens exceed the configured limit',
+  'maximum context limit',
+  'maximum prompt length',
+  'max prompt length',
+  'prompt exceeds max length',
+  'tokens in request more than max tokens allowed',
+  'range of input length should be',
+  'context window exceeds limit',
+  'but model only supports up to',
+  'reduce the length of the messages',
+  '`inputs` tokens + `max_new_tokens` must be',
+  'context exceeds your deployment',
+]
+
+const MEDIA_OR_FILTER_EXCLUSIONS = [
+  'output blocked by content filtering policy',
+  'could not process image',
+  'image exceeds',
+  'image dimensions exceed',
+  'could not process pdf',
+  'pdf pages',
+]
+
 const PROMPT_TOO_LONG_ERROR_STATUSES: ReadonlySet<number | undefined> = new Set(
   [undefined, 400, 413, 422],
 )
+
+function hasCapabilityRejectedToken(raw: string, token: string): boolean {
+  const prefix = `capability_rejected: ${token}`
+  let pos = 0
+  for (;;) {
+    const idx = raw.indexOf(prefix, pos)
+    if (idx === -1) return false
+    const next = raw[idx + prefix.length]
+    if (next === undefined || !/[A-Za-z0-9_:.-]/.test(next)) return true
+    pos = idx + 1
+  }
+}
 
 function isDirectPromptTooLongMessage(lower: string): boolean {
   return (
@@ -308,8 +362,10 @@ export function isBedrockInputTooLongMessage(raw: string): boolean {
 export function isPromptTooLongErrorMessage(raw: string): boolean {
   const lower = raw.toLowerCase()
   if (isDirectPromptTooLongMessage(lower)) return true
+  if (hasCapabilityRejectedToken(raw, 'prompt_too_long')) return true
   if (isBedrockInputTooLongMessage(raw)) return true
   if (PROMPT_TOO_LONG_EXCLUSIONS.some(ex => lower.includes(ex))) return false
+  if (MEDIA_OR_FILTER_EXCLUSIONS.some(ex => lower.includes(ex))) return false
   // densable z$r: "input length and `max_tokens` exceed context limit"
   if (
     lower.includes('input length and') &&
@@ -326,14 +382,9 @@ export function isPromptTooLongErrorMessage(raw: string): boolean {
   ) {
     return true
   }
-  // OpenAI / xAI / DeepSeek / vLLM Chat Completions style
-  if (
-    lower.includes('maximum prompt length') ||
-    lower.includes('max prompt length') ||
-    lower.includes('maximum context length') ||
-    lower.includes('max context length') ||
-    lower.includes('context_length_exceeded')
-  ) {
+  // Official 2.1.325 #2265 (`RR` / `AOs`): OpenAI / Azure Foundry / LiteLLM /
+  // Bedrock gateways / vLLM / TGI / xAI / DeepSeek context-length overflow errors
+  if (GATEWAY_CONTEXT_LENGTH_PHRASES.some(phrase => lower.includes(phrase))) {
     return true
   }
   // "request contains N tokens" near context/prompt length wording
@@ -759,6 +810,113 @@ function formatBedrockAuthErrorMessage(error: Error): string {
 }
 
 /**
+ * Official 2.1.323 (#1997): When a claude.ai login has expired and Claude Code
+ * fell back to a saved Console API key or `ant auth login` profile without
+ * credit, identify the fallback source so we tell the user their claude.ai
+ * login expired instead of showing bare "Credit balance is too low".
+ */
+export function getExpiredClaudeAiCreditFallbackLabel(): string | null {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const authMod =
+      require('../../utils/auth.js') as typeof import('../../utils/auth.js')
+    const oauthTokens = authMod.getClaudeAIOAuthTokens()
+    if (!oauthTokens?.accessToken) {
+      return null
+    }
+    // Only applies when the stored claude.ai OAuth token is expired.
+    const isExpired =
+      oauthTokens.expiresAt !== null &&
+      oauthTokens.expiresAt !== undefined &&
+      Date.now() >= oauthTokens.expiresAt
+    if (!isExpired) {
+      return null
+    }
+    const { key, source } = authMod.getAnthropicApiKeyWithSource()
+    if (key && source === '/login managed key') {
+      return 'your saved Claude Console API key'
+    }
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const profileMod =
+      require('../../utils/anthropicProfile.js') as typeof import('../../utils/anthropicProfile.js')
+    if (profileMod.hasAnthropicProfileAuth()) {
+      const info = profileMod.getAnthropicProfileAccountInfo()
+      const orgName =
+        typeof info?.organizationName === 'string' && info.organizationName
+          ? info.organizationName
+          : 'your Anthropic profile'
+      return orgName
+    }
+  } catch {
+    // optional modules
+  }
+  return null
+}
+
+/**
+ * Official 2.1.323 (#2006) `qlt` + `Htt('bedrock', e) === 'refused'`:
+ * Detect Amazon Bedrock model-access refusals so we tell the user to enable
+ * the model in the Amazon Bedrock console instead of refreshing AWS credentials.
+ */
+const BEDROCK_MODEL_NOT_AVAILABLE_RE =
+  /\banthropic\.\S+ is not available for this account/i
+
+export function isBedrockModelAccessRefusalError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  const provider = getAPIProvider()
+  let isBedrock = provider === 'bedrock'
+  if (!isBedrock) {
+    isBedrock = isEnvTruthy(process.env.CLAUDE_CODE_USE_BEDROCK)
+  }
+  if (!isBedrock) return false
+  const msg = error.message.toLowerCase()
+  const status = error instanceof APIError ? error.status : undefined
+  if (
+    msg.includes(
+      "you don't have access to the model with the specified model id",
+    ) ||
+    BEDROCK_MODEL_NOT_AVAILABLE_RE.test(msg) ||
+    msg.includes('marketplace subscription for this model cannot be completed')
+  ) {
+    return true
+  }
+  if (
+    status === 400 &&
+    msg.includes('the provided model identifier is invalid') &&
+    !msg.includes('on-demand throughput')
+  ) {
+    return true
+  }
+  return false
+}
+
+/**
+ * Official 2.1.323 (#2072) `Xw` — certificate name-constraint error codes that
+ * must fail fast with actionable guidance instead of retrying for minutes.
+ */
+export const NAME_CONSTRAINT_CERT_ERROR_CODES = new Set([
+  'PERMITTED_VIOLATION',
+  'EXCLUDED_VIOLATION',
+  'NAME_CONSTRAINTS_WITHOUT_SANS',
+  'UNSUPPORTED_CONSTRAINT_TYPE',
+])
+
+/**
+ * Official 2.1.323 (#2072) `ek(code)` — user-facing explanation & fix guidance
+ * for certificate name-constraint verification failures.
+ */
+export function formatNameConstraintCertErrorMessage(code: string): string {
+  switch (code) {
+    case 'NAME_CONSTRAINTS_WITHOUT_SANS':
+      return "A certificate authority in the server's chain limits the names that it may certify (a name constraint), and under such an authority this client needs the server's certificate to list its names as subject alternative names, and it lists none. Whoever runs the server, proxy or gateway can fix this with a new certificate that lists them."
+    case 'UNSUPPORTED_CONSTRAINT_TYPE':
+      return "A certificate authority in the server's chain limits the names that it may certify (a name constraint), and the limit covers a kind of name that this client can't check, usually IP addresses. This client refuses any certificate under such an authority that lists a name of that kind, whether or not the name fits. Whoever runs the server, proxy or gateway can fix this with a new certificate whose chain, including the trusted root, has no such limit, or with one that lists only DNS names that every authority in the chain allows, which clients must then use to reach the server."
+    default:
+      return "A certificate authority in the server's chain limits the names that it may certify (a name constraint), and a name in the server's certificate breaks that limit. If the certificate has no DNS subject alternative name, its common name can be checked as a DNS name, even if it's an address. Whoever runs the server, proxy or gateway can fix this with a new certificate whose names all fit the limit, or one whose chain, including the trusted root, has no such limit."
+  }
+}
+
+/**
  * densable isBedrockAuthError provider gate (USE_BEDROCK / anthropicAws / mantle).
  * Used only for GKd/VKd copy routing in getAssistantMessageFromError.
  */
@@ -1008,6 +1166,40 @@ export function extractUnknownErrorFormat(value: unknown): string | undefined {
   return undefined
 }
 
+/**
+ * Official 2.1.325 #2260: detect organization-policy / DLP request denial
+ * errors so the generated `AssistantMessage` carries `apiError: 'dlp_request_denied'`
+ * and `AssistantTextMessage.tsx` renders the dim `/rewind` + `/clear` guidance line.
+ */
+export function isDlpRequestDeniedError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  const body =
+    error instanceof APIError && error.error && typeof error.error === 'object'
+      ? (error.error as {
+          type?: unknown
+          code?: unknown
+          error?: { type?: unknown; code?: unknown; message?: unknown }
+        })
+      : undefined
+  const bodyCodes = [
+    body?.type,
+    body?.code,
+    body?.error?.type,
+    body?.error?.code,
+  ]
+  if (
+    bodyCodes.some(c => c === 'dlp_request_denied' || c === 'policy_blocked')
+  ) {
+    return true
+  }
+  const msg = error.message.toLowerCase()
+  return (
+    msg.includes('dlp_request_denied') ||
+    msg.includes('"policy_blocked"') ||
+    msg.includes('policy_blocked')
+  )
+}
+
 function attachApiErrorFields(
   message: AssistantMessage,
   error: unknown,
@@ -1036,6 +1228,11 @@ function attachApiErrorFields(
     if (requestId) {
       message.requestId = requestId
     }
+  }
+  // Official 2.1.325 #2260: guarantee `apiError: 'dlp_request_denied'` on any
+  // AssistantMessage generated from an organization policy / DLP denial.
+  if (!message.apiError && isDlpRequestDeniedError(error)) {
+    message.apiError = 'dlp_request_denied'
   }
   return message
 }
@@ -1177,9 +1374,14 @@ function buildAssistantMessageFromError(
     // said instead of a generic "Rate limit reached". Entitlement rejections
     // (e.g. 1M context without Extra Usage) and infra capacity 429s land here.
     if (error.message.includes('Extra usage is required for long context')) {
-      const hint = getIsNonInteractiveSession()
-        ? 'enable extra usage at claude.ai/settings/usage, or use --model to switch to standard context'
-        : 'run /extra-usage to enable, or /model to switch to standard context'
+      const omitUrl = isCloudOrRemoteControlSession()
+      const hint = omitUrl
+        ? getIsNonInteractiveSession()
+          ? 'enable extra usage, or use --model to switch to standard context'
+          : 'run /extra-usage to enable, or /model to switch to standard context'
+        : getIsNonInteractiveSession()
+          ? 'enable extra usage at claude.ai/settings/usage, or use --model to switch to standard context'
+          : 'run /extra-usage to enable, or /model to switch to standard context'
       return createAssistantAPIErrorMessage({
         content: `${API_ERROR_MESSAGE_PREFIX}: Extra usage is required for 1M context · ${hint}`,
         error: 'rate_limit',
@@ -1491,6 +1693,20 @@ function buildAssistantMessageFromError(
     error instanceof Error &&
     error.message.includes('Your credit balance is too low')
   ) {
+    // Official 2.1.323 (#1997): When a claude.ai login expired and Claude Code
+    // fell back to a saved Console API key or `ant auth login` profile without
+    // credit, explain that the claude.ai login expired instead of showing bare
+    // "Credit balance is too low".
+    const expiredFallbackLabel = getExpiredClaudeAiCreditFallbackLabel()
+    if (expiredFallbackLabel !== null) {
+      const billingUrl = 'https://platform.claude.com/settings/billing'
+      return createAssistantAPIErrorMessage({
+        error: 'authentication_failed',
+        content: getIsNonInteractiveSession()
+          ? `Failed to authenticate: your claude.ai login expired. Claude Code tried ${expiredFallbackLabel} instead, but it doesn't have enough credit. Run \`claude auth login\` to sign in again, or add funds: ${billingUrl}`
+          : `OAuth token expired · Please run /login · Claude Code tried ${expiredFallbackLabel} instead, but it doesn't have enough credit · Or add funds: ${billingUrl}`,
+      })
+    }
     return createAssistantAPIErrorMessage({
       content: CREDIT_BALANCE_TOO_LOW_ERROR_MESSAGE,
       error: 'billing_error',
@@ -1650,6 +1866,25 @@ function buildAssistantMessageFromError(
     }
   }
 
+  // Official 2.1.325 #2260: organization policy / DLP request denial carries
+  // `apiError: 'dlp_request_denied'` (must precede generic 400/403 handlers so
+  // a 403 policy block is not misclassified as authentication_failed).
+  if (isDlpRequestDeniedError(error) && error instanceof Error) {
+    const rawDetail =
+      error instanceof APIError &&
+      error.error &&
+      typeof error.error === 'object' &&
+      typeof (error.error as { error?: { message?: unknown } }).error
+        ?.message === 'string'
+        ? (error.error as { error: { message: string } }).error.message
+        : error.message
+    return createAssistantAPIErrorMessage({
+      content: `${API_ERROR_MESSAGE_PREFIX}: ${sanitizeGatewayErrorText(rawDetail)}`,
+      error: 'invalid_request',
+      apiError: 'dlp_request_denied',
+    })
+  }
+
   // Check for OAuth token revocation error
   if (
     error instanceof APIError &&
@@ -1709,7 +1944,18 @@ function buildAssistantMessageFromError(
 
     // densable GKd/VKd — Bedrock / AWS / mantle (constants were Cre-only until wired).
     // Align gate with withRetry isBedrockAuthError provider set.
+    // Official 2.1.323 (#2006): when Amazon Bedrock refuses the account a model
+    // (403 model access refusal), tell the user to enable the model in the
+    // Amazon Bedrock console rather than refreshing AWS credentials.
     if (isBedrockishAuthProvider()) {
+      if (isBedrockModelAccessRefusalError(error)) {
+        const switchCmd = getIsNonInteractiveSession() ? '--model' : '/model'
+        const safeMsg = sanitizeGatewayErrorText(error.message)
+        return createAssistantAPIErrorMessage({
+          error: 'authentication_failed',
+          content: `Model access error · enable this model for your account and region in the Amazon Bedrock console, or run ${switchCmd} to pick another model · ${API_ERROR_MESSAGE_PREFIX}: ${safeMsg}`,
+        })
+      }
       return createAssistantAPIErrorMessage({
         error: 'authentication_failed',
         content: formatBedrockAuthErrorMessage(error),
@@ -1805,6 +2051,14 @@ function buildAssistantMessageFromError(
     const rawFormatted = formatAPIError(error)
     const formatted = sanitizeGatewayErrorText(rawFormatted)
     const code = extractConnectionErrorDetails(error)?.code
+    // Official 2.1.323 (#2072) `Xw` / `ek`: certificate name-constraint errors
+    // fail fast with an actionable explanation of how to fix the certificate.
+    if (code !== undefined && NAME_CONSTRAINT_CERT_ERROR_CODES.has(code)) {
+      return createAssistantAPIErrorMessage({
+        content: `${API_ERROR_MESSAGE_PREFIX}: ${formatNameConstraintCertErrorMessage(code)} (${code})`,
+        error: 'unknown',
+      })
+    }
     let hint = ''
     if (
       code !== undefined &&
@@ -2112,6 +2366,12 @@ export function classifyAPIError(error: unknown): string {
 
   if (getCloudCredentialProvider(error) !== null) {
     return 'cloud_credential_error'
+  }
+
+  // Official 2.1.323 (#2006): Bedrock 403 model-access refusals classify as
+  // bedrock_model_access rather than generic auth_error.
+  if (isBedrockModelAccessRefusalError(error)) {
+    return 'bedrock_model_access'
   }
 
   // Generic auth errors

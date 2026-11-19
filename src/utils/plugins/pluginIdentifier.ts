@@ -134,8 +134,30 @@ export function localCopyShadowingSynced<
 }
 
 /**
- * densable `f3a` for `@synced`: no settings row → `defaultEnabled !== false`;
- * a present row is opt-in (`=== true`, official `AKp` for `iN`).
+ * Official 2.1.323 #2035 (`Mc`) — true in a cloud session that began as a
+ * claude.ai chat (or remote cowork chat), where synced plugins the user turned
+ * on in claude.ai should stay enabled even if their manifest has `defaultEnabled: false`.
+ */
+export function isClaudeAiChatCloudSession(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (env.CLAUDE_CODE_SESSION_ORIGIN !== 'claude_ai_chat') {
+    return false
+  }
+  return Boolean(
+    env.CLAUDE_CODE_REMOTE ||
+      env.CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE ||
+      env.CLAUDE_CODE_ENTRYPOINT === 'remote_cowork' ||
+      env.CLAUDE_CODE_ENTRYPOINT === 'remote_cowork_trigger',
+  )
+}
+
+/**
+ * densable `f3a` / Official 2.1.323 #2035 (`Cwn`) for `@synced`:
+ * - Explicit `enabledPlugins` row always wins (`=== true`).
+ * - No settings row → `defaultEnabled !== false`, EXCEPT in a claude.ai chat
+ *   cloud session where plugins synced from the user's account are enabled even
+ *   when `defaultEnabled: false`.
  */
 export function isSyncedPluginEnabled(
   pluginId: string,
@@ -143,10 +165,17 @@ export function isSyncedPluginEnabled(
   // Settings schema allows string[] values (per-marketplace lists); only
   // `=== true` opts in, so wider values are safely treated as not opted in.
   enabledPlugins: Record<string, boolean | string[] | undefined> | undefined,
+  opts?: {
+    installationPreference?: 'required' | 'auto_install'
+    env?: NodeJS.ProcessEnv
+  },
 ): boolean {
   const setting = enabledPlugins?.[pluginId]
   if (setting === undefined) {
-    return defaultEnabled !== false
+    if (opts?.installationPreference !== undefined) {
+      return true
+    }
+    return defaultEnabled !== false || isClaudeAiChatCloudSession(opts?.env)
   }
   return setting === true
 }

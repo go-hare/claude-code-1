@@ -8,6 +8,7 @@ import { Box, Text, stringWidth, useTerminalViewport, useTheme, type DOMElement 
 import { StaticRenderContext } from '../../utils/staticRender.js';
 import { useAppStateMaybeOutsideOfProvider } from '../../state/AppState.js';
 import { findToolByName, type Tool, type ToolProgressData, type Tools } from '../../Tool.js';
+import { getDisplayOnlyMcpTool } from './displayOnlyMcpTool.js';
 import type { ProgressMessage } from '../../types/message.js';
 import { getDetachedToolCall, subscribeDetachedToolCalls } from '../../utils/detachedToolCallStore.js';
 import { logError } from '../../utils/log.js';
@@ -167,9 +168,13 @@ export function AssistantToolUseMessage({
   // (BashTool → shouldUseSandbox → shell-quote parse) are expensive. Without
   // this, ~50 bash messages × shell-quote-per-render pushed transition
   // render past the shimmer tick → abort → infinite retry (#21605).
+  const isErroredTool = lookups.erroredToolUseIDs.has(param.id);
   const parsed = useMemo(() => {
     if (!tools) return null;
-    const tool = findToolByName(tools, param.name);
+    // Official 2.1.323 (#2033) `oae`: fall back to a display-only MCP tool stub
+    // when an MCP server connects late (or is disconnected) so resumed MCP tool
+    // calls stay visible and don't trigger scrollback repeats on late connect.
+    const tool = findToolByName(tools, param.name) ?? getDisplayOnlyMcpTool(param.name, { isErrored: isErroredTool });
     if (!tool) return null;
     const input = tool.inputSchema.safeParse(param.input);
     const data = input.success ? input.data : undefined;
@@ -180,7 +185,7 @@ export function AssistantToolUseMessage({
       userFacingToolNameBackgroundColor: tool.userFacingNameBackgroundColor?.(data),
       isTransparentWrapper: tool.isTransparentWrapper?.() ?? false,
     };
-  }, [tools, param]);
+  }, [tools, param, isErroredTool]);
 
   if (!parsed) {
     // Guard against undefined tools (required prop) or unknown tool name
@@ -232,7 +237,7 @@ export function AssistantToolUseMessage({
     return wrapHost(null);
   }
 
-  const renderedToolUseMessage = input.success
+  const rawRenderedToolUseMessage = input.success
     ? renderToolUseMessage(tool, input.data, {
         theme,
         verbose,
@@ -241,6 +246,13 @@ export function AssistantToolUseMessage({
         toolUseResult: output,
       })
     : null;
+  // Official 2.1.323 (#2081): Claude in Chrome tools like `browser_batch` may
+  // have no inline secondary info; never drop the tool header (tool name) in
+  // fullscreen transcript (ctrl+o) or subagent progress.
+  const renderedToolUseMessage =
+    rawRenderedToolUseMessage === null && param.name.startsWith('mcp__claude-in-chrome__')
+      ? ''
+      : rawRenderedToolUseMessage;
   if (renderedToolUseMessage === null) {
     return wrapHost(null);
   }

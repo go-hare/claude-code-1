@@ -16,10 +16,14 @@
  */
 
 import type { ToolPermissionContext, ToolUseContext } from '../Tool.js'
+import { getAgentContext } from '../utils/agentContext.js'
 import { type EffortValue, pdSessionEffort } from '../utils/effort.js'
 import type { PermissionMode } from '../types/permissions.js'
 import type { ThinkingConfig } from '../utils/thinking.js'
-import { isBypassPermissionsModeDisabled } from '../utils/permissions/permissionSetup.js'
+import {
+  applyPollEventDeliveryGuard,
+  isBypassPermissionsModeDisabled,
+} from '../utils/permissions/permissionSetup.js'
 import type { HostPermissionLayer } from './hostPermissionLayers.js'
 
 /** densable Mo-style unique preserve-order merge for rule command lists. */
@@ -78,9 +82,29 @@ function asStringArray(value: unknown): string[] {
  * ignored here (other readers).
  */
 export function getToolPermissionContextFromLayers(
-  toolUseContext: Pick<ToolUseContext, 'getAppState' | 'permissionLayers'>,
+  toolUseContext: Pick<ToolUseContext, 'getAppState' | 'permissionLayers'> & {
+    agentId?: ToolUseContext['agentId']
+  },
 ): ToolPermissionContext {
-  const base = toolUseContext.getAppState().toolPermissionContext
+  const rawBase = toolUseContext.getAppState().toolPermissionContext
+  // Official 2.1.325 #2319: during poll-event delivery (`pollEventDeliveryGuard`)
+  // or inside a background/async subagent, slash-command `allowed_tools` grants
+  // must NOT apply — clear command-scoped allow rules and skip `allowed_tools` layers.
+  const agentCtx = getAgentContext()
+  const isBackgroundSubagent =
+    agentCtx !== undefined &&
+    (agentCtx.isBackgroundAgent === true ||
+      (agentCtx.agentType === 'subagent' && agentCtx.isAsync === true))
+  const isPollGuarded =
+    (
+      rawBase as ToolPermissionContext & {
+        pollEventDeliveryGuard?: boolean
+      }
+    ).pollEventDeliveryGuard === true
+  const skipAllowedToolsLayers = isPollGuarded || isBackgroundSubagent
+  const base = skipAllowedToolsLayers
+    ? applyPollEventDeliveryGuard(rawBase)
+    : rawBase
   const layers = toolUseContext.permissionLayers
   if (!layers || layers.length === 0) return base
 
@@ -101,6 +125,9 @@ export function getToolPermissionContextFromLayers(
     if (!layer || typeof layer !== 'object') continue
     switch (layer.kind) {
       case 'allowed_tools': {
+        if (skipAllowedToolsLayers) {
+          break
+        }
         const tools = asStringArray(
           (layer as { allowedTools?: unknown }).allowedTools,
         )

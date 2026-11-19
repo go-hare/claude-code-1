@@ -40,6 +40,23 @@ export const URL_NOT_EXACT =
 export const URL_EXTENDS_PAST_SCREEN =
   'This URL extends past this screen — its beginning is not visible here. Review it in full before accepting.'
 
+/** #2047: Official `Hxe` warning when URL is not http: or https:. */
+export const URL_NOT_HTTP_OR_HTTPS =
+  'This isn\u2019t a valid http or https link, so it won\u2019t open from here.'
+
+/**
+ * #2047: Official `dTt` — returns true only for valid `http:` or `https:` URLs
+ * that can safely be handed to the OS browser.
+ */
+export function isHttpOrHttpsUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
 /**
  * densable `RMi` — hidden / format / surrogate / LS-PS / braille-blank.
  */
@@ -110,8 +127,9 @@ export function urlOverflowsScreen(
   text: string,
   columns: number,
   rows: number,
+  extraWarningLines = 0,
 ): boolean {
-  const lineBudget = rows - 12
+  const lineBudget = rows - 12 - extraWarningLines
   if (lineBudget < 1) return true
   const wrapWidth = columns - 6
   if (wrapWidth < 20) return true

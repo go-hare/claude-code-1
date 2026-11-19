@@ -3,7 +3,7 @@
  *
  * Extracted from main.tsx to enable direct testing.
  */
-import { type Command, Option } from '@commander-js/extra-typings'
+import { type Command, type Help, Option } from '@commander-js/extra-typings'
 import { cliError, cliOk } from '../../cli/exit.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -28,11 +28,177 @@ import { parseEnvVars } from '../../utils/envUtils.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 
 /**
+ * #2034: Wrap help text while preserving indented lines (e.g. CLI examples)
+ * verbatim so narrow terminals and pipes never split long example commands
+ * across lines and strip `--header` flags when pasted.
+ */
+export function wrapHelpTextPreservingIndentedLines(
+  text: string,
+  width: number,
+): string {
+  const maxWidth = Math.max(width, 1)
+  const out: string[] = []
+  for (const line of text.split('\n')) {
+    if (/^\s+\S/.test(line)) {
+      out.push(line)
+      continue
+    }
+    const tokens = line.match(/\s*\S+/g)
+    if (!tokens) {
+      out.push('')
+      continue
+    }
+    let current = ''
+    let currentLen = 0
+    let started = false
+    for (const token of tokens) {
+      const tokenLen = token.length
+      if (!started) {
+        current = token
+        currentLen = tokenLen
+        started = true
+      } else if (currentLen + tokenLen <= maxWidth) {
+        current += token
+        currentLen += tokenLen
+      } else {
+        out.push(current)
+        const trimmed = token.replace(/^\s+/, '')
+        current = trimmed
+        currentLen = trimmed.length
+      }
+    }
+    out.push(current)
+  }
+  return out.join('\n')
+}
+
+function formatHelpEntry(
+  term: string,
+  description: string,
+  padWidth: number,
+  helpWidth: number,
+): string {
+  const indent = '  '
+  if (!description) return indent + term
+  if (description.includes('\n')) {
+    const gap =
+      term.length <= padWidth ? ' '.repeat(padWidth - term.length + 2) : '  '
+    return (indent + term + gap + description).replace(/\n/g, `\n${indent}`)
+  }
+  const available = helpWidth - 2 - padWidth - 2
+  if (term.length <= padWidth && available >= 30) {
+    const gap = ' '.repeat(padWidth - term.length + 2)
+    const contIndent = ' '.repeat(2 + padWidth + 2)
+    const wrapped = wrapHelpTextPreservingIndentedLines(description, available)
+    return indent + term + gap + wrapped.replace(/\n/g, `\n${contIndent}`)
+  }
+  const contIndent = '      '
+  const wrapped = wrapHelpTextPreservingIndentedLines(
+    description,
+    helpWidth - 6,
+  )
+  return `${indent}${term}\n${contIndent}${wrapped.replace(/\n/g, `\n${contIndent}`)}`
+}
+
+export function createMcpHelpConfiguration(): Partial<Help> {
+  const formatSection = (
+    lines: string[],
+    heading: string,
+    entries: string[],
+  ) => {
+    if (entries.length === 0) return
+    lines.push(heading, ...entries, '')
+  }
+  const optionKey = (opt: Option) =>
+    opt.long?.replace(/^--/, '') ?? opt.short?.replace(/^-/, '') ?? ''
+  return Object.assign(
+    {
+      sortSubcommands: true,
+      sortOptions: true,
+      formatHelp(cmd: Command, helper: Help) {
+        const helpWidth = helper.helpWidth || 80
+        const padWidth = Math.min(helper.padWidth(cmd, helper), 36)
+        const lines: string[] = [`Usage: ${helper.commandUsage(cmd)}`, '']
+        const desc = helper.commandDescription(cmd)
+        if (desc.length > 0) {
+          lines.push(wrapHelpTextPreservingIndentedLines(desc, helpWidth), '')
+        }
+        formatSection(
+          lines,
+          'Arguments:',
+          helper
+            .visibleArguments(cmd)
+            .map(arg =>
+              formatHelpEntry(
+                helper.argumentTerm(arg),
+                helper.argumentDescription(arg),
+                padWidth,
+                helpWidth,
+              ),
+            ),
+        )
+        formatSection(
+          lines,
+          'Options:',
+          helper
+            .visibleOptions(cmd)
+            .map(opt =>
+              formatHelpEntry(
+                helper.optionTerm(opt),
+                helper.optionDescription(opt),
+                padWidth,
+                helpWidth,
+              ),
+            ),
+        )
+        if (helper.showGlobalOptions) {
+          formatSection(
+            lines,
+            'Global Options:',
+            helper
+              .visibleGlobalOptions(cmd)
+              .map(opt =>
+                formatHelpEntry(
+                  helper.optionTerm(opt),
+                  helper.optionDescription(opt),
+                  padWidth,
+                  helpWidth,
+                ),
+              ),
+          )
+        }
+        formatSection(
+          lines,
+          'Commands:',
+          helper
+            .visibleCommands(cmd)
+            .map(sub =>
+              formatHelpEntry(
+                helper.subcommandTerm(sub),
+                helper.subcommandDescription(sub),
+                padWidth,
+                helpWidth,
+              ),
+            ),
+        )
+        return lines.join('\n')
+      },
+    } satisfies Partial<Help>,
+    {
+      compareOptions: (a: Option, b: Option) =>
+        optionKey(a).localeCompare(optionKey(b)),
+    },
+  ) as Partial<Help>
+}
+
+/**
  * Registers the `mcp add` subcommand on the given Commander command.
  */
 export function registerMcpAddCommand(mcp: Command): void {
   mcp
     .command('add <name> <commandOrUrl> [args...]')
+    .summary('Add an MCP server')
+    .configureHelp(createMcpHelpConfiguration())
     .description(
       'Add an MCP server to Claude Code.\n\n' +
         'Examples:\n' +
@@ -41,7 +207,7 @@ export function registerMcpAddCommand(mcp: Command): void {
         '  # Add HTTP server with headers:\n' +
         '  claude mcp add --transport http corridor https://app.corridor.dev/api/mcp --header "Authorization: Bearer ..."\n\n' +
         '  # Add stdio server with environment variables:\n' +
-        '  claude mcp add my-server -e API_KEY=xxx -- npx my-mcp-server\n\n' +
+        '  claude mcp add my-server -e API_KEY=xxx -- node ./my-server.js\n\n' +
         '  # Add stdio server with subprocess flags:\n' +
         '  claude mcp add my-server -- my-command --some-flag arg1',
     )
@@ -60,7 +226,7 @@ export function registerMcpAddCommand(mcp: Command): void {
     )
     .option(
       '-H, --header <header...>',
-      'Set headers for HTTP/SSE servers (e.g. -H "X-Api-Key: abc123" -H "X-Custom: value")',
+      'Set headers for HTTP/SSE servers, repeat for more (e.g. -H "X-Api-Key: abc123")',
     )
     .option('--client-id <clientId>', 'OAuth client ID for HTTP/SSE servers')
     .option(

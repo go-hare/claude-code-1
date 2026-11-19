@@ -702,6 +702,53 @@ function stylesEqual(a: AnsiCode[], b: AnsiCode[]): boolean {
  * Also precomputes styleId + hyperlink per style run (not per char) — an
  * 80-char line with 3 style runs does 3 intern calls instead of 80.
  */
+/**
+ * Official 2.1.323 (#1989) `K` / `_Or` — detect a zero-width combining mark
+ * that attaches to a preceding base character, and reorder any grapheme cluster
+ * starting with combining marks so the first positive-width base codepoint
+ * precedes them (preventing accents from landing left of the text).
+ */
+function isCombiningMarkCodeUnit(ch: string): boolean {
+  if (stringWidth(ch) !== 0) return false
+  const first = getGraphemeSegmenter()
+    .segment(`a${ch}`)
+    [Symbol.iterator]()
+    .next().value?.segment
+  return first !== 'a'
+}
+
+export function reorderLeadingCombiningMarks(grapheme: string): string {
+  if (grapheme.length < 2 || grapheme.charCodeAt(0) <= 127) return grapheme
+  let markEnd = 0
+  for (const ch of grapheme) {
+    if (!isCombiningMarkCodeUnit(ch)) break
+    markEnd += ch.length
+  }
+  if (markEnd === 0) return grapheme
+  let baseEnd = markEnd
+  while (baseEnd < grapheme.length) {
+    const cp = grapheme.codePointAt(baseEnd)!
+    const ch = String.fromCodePoint(cp)
+    baseEnd += ch.length
+    if (stringWidth(ch) > 0) {
+      if (
+        baseEnd === grapheme.length &&
+        grapheme.charCodeAt(markEnd - 1) === 0x200d
+      ) {
+        return grapheme
+      }
+      const reordered =
+        grapheme.slice(markEnd, baseEnd) +
+        grapheme.slice(0, markEnd) +
+        grapheme.slice(baseEnd)
+      return stringWidth(reordered) === stringWidth(grapheme)
+        ? reordered
+        : grapheme
+    }
+  }
+  return grapheme
+}
+
 function styledCharsWithGraphemeClustering(
   chars: StyledChar[],
   stylePool: StylePool,
@@ -717,14 +764,22 @@ function styledCharsWithGraphemeClustering(
     const char = chars[i]!
     const styles = char.styles
 
-    // Different styles means we need to flush and start new buffer
-    if (bufferChars.length > 0 && !stylesEqual(styles, bufferStyles)) {
+    // Different styles means we need to flush and start new buffer — unless
+    // this char is a combining mark attaching to the previous grapheme cluster
+    // (official 2.1.323 #1989 `a5r` grapheme-preserving style boundary).
+    if (
+      bufferChars.length > 0 &&
+      !stylesEqual(styles, bufferStyles) &&
+      !isCombiningMarkCodeUnit(char.value)
+    ) {
       flushBuffer(bufferChars.join(''), bufferStyles, stylePool, result)
       bufferChars.length = 0
     }
 
     bufferChars.push(char.value)
-    bufferStyles = styles
+    if (bufferChars.length === 1) {
+      bufferStyles = styles
+    }
   }
 
   // Final flush
@@ -761,7 +816,10 @@ function flushBuffer(
     : styles
   const styleId = stylePool.intern(filteredStyles)
 
-  for (const { segment: grapheme } of getGraphemeSegmenter().segment(buffer)) {
+  for (const { segment: rawGrapheme } of getGraphemeSegmenter().segment(
+    buffer,
+  )) {
+    const grapheme = reorderLeadingCombiningMarks(rawGrapheme)
     out.push({
       value: grapheme,
       width: stringWidth(grapheme),

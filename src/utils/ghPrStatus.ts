@@ -1,14 +1,26 @@
+import { lstat, realpath } from 'fs/promises'
+import { join } from 'path'
 import { z } from 'zod/v4'
+import { getOriginalCwd } from '../bootstrap/state.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../services/analytics/index.js'
+import { getCwd } from './cwd.js'
 import { parseGitRemote } from './detectRepository.js'
-import { execFileNoThrow } from './execFileNoThrow.js'
-import { getBranch, getDefaultBranch, getIsGit, getRemoteUrl } from './git.js'
+import { getErrnoCode } from './errors.js'
+import { execFileNoThrow, execFileNoThrowWithCwd } from './execFileNoThrow.js'
+import {
+  findGitRoot,
+  getBranch,
+  getDefaultBranch,
+  getIsGit,
+  getRemoteUrl,
+} from './git.js'
 import { lazySchema } from './lazySchema.js'
 import { logForDebugging } from './debug.js'
 import { isEssentialTrafficOnly } from './privacyLevel.js'
+import { SandboxManager } from './sandbox/sandbox-adapter.js'
 import { jsonParse } from './slowOperations.js'
 import { whichSync } from './which.js'
 import { codeChangeProviderFromHostname } from './worktree.js'
@@ -63,12 +75,52 @@ class GlabMrBadgeSession {
   glabOnPath: boolean | undefined
   unauthenticatedHosts = new Set<string>()
   okEmitted = false
+  sandboxSeen = false
+  projectRoot: string | undefined
+  foldersWithGlabConfig = new Set<string>()
+  refusalsEmitted = new Set<string>()
 
   isGlabOnPath(): boolean {
     if (this.glabOnPath === undefined) {
       this.glabOnPath = whichSync('glab') !== null
     }
     return this.glabOnPath
+  }
+
+  noteProjectRoot(root: string): void {
+    this.projectRoot ??= root
+  }
+
+  noteSandbox(enabled: boolean): void {
+    if (enabled) this.sandboxSeen = true
+  }
+
+  hasSeenSandbox(): boolean {
+    return this.sandboxSeen
+  }
+
+  sessionCheckout(fallbackRoot: string): string | null {
+    const base = this.projectRoot ?? fallbackRoot
+    return findGitRoot(base) ?? null
+  }
+
+  noteGlabConfig(folder: string): void {
+    this.foldersWithGlabConfig.add(folder)
+  }
+
+  hasSeenGlabConfig(folder: string): boolean {
+    return this.foldersWithGlabConfig.has(folder)
+  }
+
+  emitRefusalOnce(code: string): void {
+    if (this.refusalsEmitted.has(code)) return
+    this.refusalsEmitted.add(code)
+    logEvent('tengu_feature_bad', {
+      feature_name:
+        'gitlab_mr_badge' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      error_code:
+        code as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
   }
 
   emitOkOnce(): void {
@@ -171,6 +223,103 @@ function isGlabErrorObject(value: unknown): boolean {
   )
 }
 
+async function hasLocalGlabConfig(
+  repoRoot: string,
+): Promise<'found' | 'none' | 'unreadable'> {
+  const glabDir = join(repoRoot, '.git', 'glab-cli')
+  try {
+    const dirStat = await lstat(glabDir)
+    if (dirStat.isSymbolicLink()) return 'found'
+    await lstat(join(glabDir, 'config.yml'))
+    return 'found'
+  } catch (err) {
+    const code = getErrnoCode(err)
+    if (code === 'ENOENT' || code === 'ENOTDIR') return 'none'
+    return 'unreadable'
+  }
+}
+
+/**
+ * Official 2.1.323 `T0` (#2181): when sandboxing is enabled, ensure the GitLab
+ * MR badge only runs for the repository checkout the sandboxed session opened
+ * in (refusing any other repo or local `.git/glab-cli` config).
+ */
+export async function resolveSandboxedGlabCwd(opts?: {
+  session?: GlabMrBadgeSession
+  sandboxEnabled?: boolean
+  originalCwd?: string
+  currentCwd?: string
+  resolveGitRoot?: (dir: string) => string | null
+  resolveRealpath?: (dir: string) => Promise<string>
+  checkLocalGlabConfig?: (
+    repoRoot: string,
+  ) => Promise<'found' | 'none' | 'unreadable'>
+}): Promise<string | null> {
+  const session = opts?.session ?? getGlabSession()
+  const originalCwd = opts?.originalCwd ?? getOriginalCwd()
+  const currentCwd = opts?.currentCwd ?? getCwd()
+  const resolveGitRoot =
+    opts?.resolveGitRoot ?? (dir => findGitRoot(dir) ?? null)
+  const resolveRealpath = opts?.resolveRealpath ?? (dir => realpath(dir))
+  const checkLocalGlabConfig = opts?.checkLocalGlabConfig ?? hasLocalGlabConfig
+
+  try {
+    session.noteProjectRoot(originalCwd)
+    const isSandboxed =
+      opts?.sandboxEnabled !== undefined
+        ? opts.sandboxEnabled
+        : SandboxManager.isSandboxingEnabled()
+    session.noteSandbox(isSandboxed)
+  } catch (err) {
+    session.noteSandbox(true)
+    logForDebugging(
+      `GitLab merge request badge: could not read the sandbox setting or the session's checkout, so the sandbox is treated as on: ${String(err)}`,
+      { level: 'warn' },
+    )
+  }
+
+  try {
+    let targetRoot = resolveGitRoot(currentCwd)
+    if (targetRoot === null) return null
+
+    if (session.hasSeenSandbox()) {
+      const sessionRoot = opts?.resolveGitRoot
+        ? resolveGitRoot(session.projectRoot ?? originalCwd)
+        : session.sessionCheckout(originalCwd)
+      if (
+        sessionRoot === null ||
+        (await resolveRealpath(sessionRoot)) !==
+          (await resolveRealpath(targetRoot))
+      ) {
+        session.emitRefusalOnce('outside_session_checkout')
+        return null
+      }
+      targetRoot = sessionRoot
+    }
+
+    if (session.hasSeenGlabConfig(targetRoot)) return null
+    if (session.hasSeenSandbox()) {
+      const configStatus = await checkLocalGlabConfig(targetRoot)
+      if (configStatus === 'found') {
+        session.noteGlabConfig(targetRoot)
+        session.emitRefusalOnce('glab_local_config')
+        return null
+      }
+      if (configStatus === 'unreadable') {
+        session.emitRefusalOnce('glab_config_unreadable')
+        return null
+      }
+    }
+    return targetRoot
+  } catch (err) {
+    logForDebugging(
+      `GitLab merge request badge: could not check which folder to run glab in, so glab was not run: ${String(err)}`,
+      { level: 'warn' },
+    )
+    return null
+  }
+}
+
 /**
  * densable `lpp` — `glab mr view -F json` for non-github remotes.
  * Returns PrStatus | null | densable also returns "fetch-failed" string for
@@ -185,17 +334,24 @@ export async function fetchGitlabMrStatus(): Promise<PrStatus | null> {
   if (codeChangeProviderFromHostname(host) === 'github') return null
   if (session.unauthenticatedHosts.has(host)) return null
 
-  const result = await execFileNoThrow('glab', ['mr', 'view', '-F', 'json'], {
-    timeout: GLAB_TIMEOUT_MS,
-    preserveOutputOnError: true,
-    useCwd: true,
-    env: {
-      ...process.env,
-      GITLAB_TOKEN: undefined,
-      GITLAB_ACCESS_TOKEN: undefined,
-      OAUTH_TOKEN: undefined,
+  const glabCwd = await resolveSandboxedGlabCwd({ session })
+  if (glabCwd === null) return null
+
+  const result = await execFileNoThrowWithCwd(
+    'glab',
+    ['mr', 'view', '-F', 'json'],
+    {
+      timeout: GLAB_TIMEOUT_MS,
+      preserveOutputOnError: true,
+      cwd: glabCwd,
+      env: {
+        ...process.env,
+        GITLAB_TOKEN: undefined,
+        GITLAB_ACCESS_TOKEN: undefined,
+        OAUTH_TOKEN: undefined,
+      },
     },
-  })
+  )
 
   if (result.code !== 0) {
     if (

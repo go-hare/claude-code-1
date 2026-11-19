@@ -9,6 +9,24 @@ import {
   parseAgentsFromJson,
 } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import {
+  bashToolCheckPermission,
+  extractShellDashCScripts,
+} from '@claude-code/builtin-tools/tools/BashTool/bashPermissions.js'
+import { powershellToolCheckPermission } from '@claude-code/builtin-tools/tools/PowerShellTool/powershellPermissions.js'
+import { SettingsSchema } from 'src/utils/settings/types.js'
+import {
+  normalizeLegacyToolName,
+  permissionRuleValueToString,
+} from 'src/utils/permissions/permissionRuleParser.js'
+import {
+  getDenyRuleForAgent,
+  getDenyRuleForTool,
+  getRuleByContentsForToolName,
+} from 'src/utils/permissions/permissions.js'
+import { matchingRuleForInput } from 'src/utils/permissions/filesystem.js'
+import { walkPermissionPaths } from 'src/utils/fsOperations.js'
+import { splitCommand_DEPRECATED } from 'src/utils/bash/commands.js'
+import {
   getAllowedChannels,
   getFlagSettingsInline,
   getMainThreadAgentType,
@@ -68,19 +86,27 @@ import {
   clearServerCache,
   connectToServer,
   fetchToolsForClient,
+  getConnectedClientWiring,
   reconnectMcpServerImpl,
+  registerConnectedClientWiring,
 } from 'src/services/mcp/client.js'
 import {
   doesEnterpriseMcpConfigExist,
   filterMcpServersByPolicy,
   getMcpConfigByName,
   isMcpServerDisabled,
+  shouldHoldConnectorApprovalWhilePluginsLoading,
 } from 'src/services/mcp/config.js'
+import {
+  attachHeadlessRemoteMcpReconnect,
+  type HeadlessMcpReconnectDeps,
+} from 'src/services/mcp/headlessMcpReconnect.js'
 import {
   buildMcpToolName,
   getMcpPrefix,
 } from 'src/services/mcp/mcpStringUtils.js'
 import type {
+  ConnectedMCPServer,
   MCPServerConnection,
   McpSdkServerConfig,
   ScopedMcpServerConfig,
@@ -262,15 +288,38 @@ export class HeadlessControlPlane {
     flow: Promise<void>
   } | null = null
 
+  // Official 2.1.325 #2305: disposer for session-level connected-client wiring
+  // so reconnected MCP clients retain headless elicitation handlers.
+  private releaseConnectedClientWiring: (() => void) | null = null
+
   constructor(
     private readonly deps: {
       output: Stream<StdoutMessage>
       getAppState: () => HeadlessAppState
       setAppState: (f: (prev: HeadlessAppState) => HeadlessAppState) => void
+      onConnectedClient?: (client: ConnectedMCPServer) => void
     },
-  ) {}
+  ) {
+    if (deps.onConnectedClient) {
+      this.releaseConnectedClientWiring = registerConnectedClientWiring(
+        deps.onConnectedClient,
+      )
+    }
+  }
+
+  /**
+   * Official 2.1.325 #2305: attach headless remote MCP reconnect + connected
+   * client wiring so mid-call reconnects keep headless elicitation handlers.
+   */
+  attachRemoteMcpReconnect(
+    deps: HeadlessMcpReconnectDeps,
+  ): (clients: readonly MCPServerConnection[]) => void {
+    return wireHeadlessMcpClientReconnect(deps)
+  }
 
   dispose(): void {
+    this.releaseConnectedClientWiring?.()
+    this.releaseConnectedClientWiring = null
     for (const ac of this.activeOAuthFlows.values()) {
       ac.abort()
     }
@@ -516,21 +565,17 @@ export class HeadlessControlPlane {
     const prevModel = getMainLoopModel()
 
     // Merge the provided settings into the in-memory flag settings
-    const existing = getFlagSettingsInline() ?? {}
+    const existing = (getFlagSettingsInline() ?? {}) as Record<string, unknown>
     const incoming = msg.request.settings
-    // Shallow-merge top-level keys; getSettingsForSource handles
-    // the deep merge with file-based flag settings via mergeWith.
-    // JSON serialization drops `undefined`, so callers use `null`
-    // to signal "clear this key". Convert nulls to deletions so
-    // SettingsSchema().safeParse() doesn't reject the whole object
-    // (z.string().optional() accepts string | undefined, not null).
-    const merged = { ...existing, ...incoming }
-    for (const key of Object.keys(merged)) {
-      if (merged[key as keyof typeof merged] === null) {
-        delete merged[key as keyof typeof merged]
-      }
+    // Official 2.1.325 #2296: validate the merged flag settings BEFORE calling
+    // setFlagSettingsInline() so a single invalid value returns a control error
+    // instead of silently discarding all settings from earlier calls.
+    const validation = validateApplyFlagSettingsPatch(existing, incoming)
+    if (!validation.ok) {
+      this.sendControlResponseError(msg, validation.error)
+      return
     }
-    setFlagSettingsInline(merged)
+    setFlagSettingsInline(validation.merged)
 
     // densable 211 review: apply model override BEFORE notifyChange so
     // applySettingsChange (settings → AppState effort/ultracode sync)
@@ -782,6 +827,11 @@ export class HeadlessControlPlane {
           const result = await opts.withControlReconnect(serverName, () =>
             reconnectMcpServerImpl(serverName, config),
           )
+          // Official 2.1.325 #2305: ensure the reconnected client keeps headless
+          // elicitation/channel wiring even when reconnected outside onclose.
+          if (result.client.type === 'connected') {
+            getConnectedClientWiring()?.(result.client)
+          }
           const prefix = getMcpPrefix(serverName)
           this.deps.setAppState(prev => ({
             ...prev,
@@ -1079,6 +1129,10 @@ export class HeadlessControlPlane {
     const result = await opts.withControlReconnect(serverName, () =>
       reconnectMcpServerImpl(serverName, config),
     )
+    // Official 2.1.325 #2305: re-wire headless elicitation handler on reconnect.
+    if (result.client.type === 'connected') {
+      getConnectedClientWiring()?.(result.client)
+    }
     const prefix = getMcpPrefix(serverName)
     this.deps.setAppState(prev => ({
       ...prev,
@@ -1659,6 +1713,481 @@ export function reregisterChannelHandlerAfterReconnect(
 }
 
 /**
+ * Official 2.1.325 #2296: validate an `apply_flag_settings` patch against
+ * `SettingsSchema` BEFORE mutating inline flag settings so a single invalid
+ * value refuses the call with an error instead of silently discarding all
+ * settings applied by earlier calls.
+ */
+export function validateApplyFlagSettingsPatch(
+  existing: Record<string, unknown>,
+  incoming: unknown,
+):
+  | { ok: true; merged: Record<string, unknown> }
+  | { ok: false; error: string } {
+  if (
+    typeof incoming !== 'object' ||
+    incoming === null ||
+    Array.isArray(incoming)
+  ) {
+    return {
+      ok: false,
+      error: 'apply_flag_settings: settings must be a plain object',
+    }
+  }
+  const merged: Record<string, unknown> = {
+    ...existing,
+    ...(incoming as Record<string, unknown>),
+  }
+  for (const key of Object.keys(merged)) {
+    if (merged[key] === null) {
+      delete merged[key]
+    }
+  }
+  const parsed = SettingsSchema().safeParse(merged)
+  if (!parsed.success) {
+    const details = parsed.error.issues
+      .slice(0, 3)
+      .map(issue =>
+        issue.path.length > 0
+          ? `${issue.path.join('.')}: ${issue.message}`
+          : issue.message,
+      )
+      .join('; ')
+    return {
+      ok: false,
+      error: `apply_flag_settings rejected invalid settings: ${details || 'invalid value'}`,
+    }
+  }
+  return { ok: true, merged }
+}
+
+/**
+ * Official 2.1.325 #2305: wire headless remote MCP reconnect + synchronous
+ * connected-client elicitation registration so a replacement connection keeps
+ * its headless elicitation handler.
+ */
+export function wireHeadlessMcpClientReconnect(
+  deps: HeadlessMcpReconnectDeps,
+): (clients: readonly MCPServerConnection[]) => void {
+  registerConnectedClientWiring(connected => {
+    deps.onReconnected(connected)
+  })
+  return attachHeadlessRemoteMcpReconnect(deps)
+}
+
+/**
+ * Official 2.1.325 #2328: determine whether a connector MCP tool approval in a
+ * cloud session must be held (not answered automatically) while plugins are
+ * still loading at startup.
+ */
+export function shouldHoldHeadlessConnectorApproval(
+  toolName: string,
+  opts?: { isRemote?: boolean; pluginStartupPending?: boolean },
+): boolean {
+  return shouldHoldConnectorApprovalWhilePluginsLoading({
+    ...opts,
+    isConnectorTool: toolName.startsWith('mcp__'),
+  })
+}
+
+/**
+ * Official 2.1.325 #2323: re-check an orphaned/delayed permission approval
+ * arriving after a restart (in self-hosted runner and `claude remote-control`
+ * sessions) against the session's current deny rules using the authoritative
+ * permission rule engine so a delayed `allow` cannot bypass deny rules.
+ */
+export function recheckOrphanedPermissionAgainstDenyRules(
+  permissionResult: PermissionResult & {
+    toolUseID?: string
+    updatedInput?: Record<string, unknown>
+  },
+  assistantMessage: {
+    message: {
+      content?: unknown
+    }
+  },
+  toolPermissionContext: ToolPermissionContext | undefined,
+  options?: {
+    tools?: Tools
+    mcpClients?: readonly MCPServerConnection[]
+  },
+): PermissionResult & { toolUseID?: string } {
+  if (permissionResult.behavior !== 'allow' || !toolPermissionContext) {
+    return permissionResult
+  }
+  const toolUseID = permissionResult.toolUseID
+  const content = assistantMessage.message?.content
+  if (!toolUseID || !Array.isArray(content)) {
+    return permissionResult
+  }
+  const block = content.find(
+    (b): b is { type: 'tool_use'; id: string; name: string; input?: unknown } =>
+      typeof b === 'object' &&
+      b !== null &&
+      (b as { type?: unknown }).type === 'tool_use' &&
+      (b as { id?: unknown }).id === toolUseID &&
+      typeof (b as { name?: unknown }).name === 'string',
+  )
+  if (!block) {
+    return permissionResult
+  }
+
+  const safeContext: ToolPermissionContext = {
+    ...toolPermissionContext,
+    alwaysAllowRules: toolPermissionContext.alwaysAllowRules ?? {},
+    alwaysDenyRules: toolPermissionContext.alwaysDenyRules ?? {},
+    alwaysAskRules: toolPermissionContext.alwaysAskRules ?? {},
+    additionalWorkingDirectories:
+      toolPermissionContext.additionalWorkingDirectories ?? new Map(),
+  }
+
+  const toolInput =
+    'updatedInput' in permissionResult &&
+    permissionResult.updatedInput !== undefined
+      ? permissionResult.updatedInput
+      : block.input
+
+  const toolDefinition = options?.tools?.find(t => t.name === block.name)
+  const canonicalToolName = normalizeLegacyToolName(block.name)
+  const toolTarget = toolDefinition ?? { name: canonicalToolName }
+
+  // 1. Whole-tool & MCP/connector/plugin-glob/Artifact-stand-in deny rules
+  const wholeToolDeny = getDenyRuleForTool(
+    safeContext,
+    toolTarget,
+    options?.mcpClients,
+  )
+  if (wholeToolDeny) {
+    const ruleText = permissionRuleValueToString(wholeToolDeny.ruleValue)
+    return {
+      behavior: 'deny',
+      message: `Permission to use ${block.name} has been denied by rule ${ruleText}.`,
+      toolUseID,
+    }
+  }
+
+  const inputRecord =
+    typeof toolInput === 'object' && toolInput !== null
+      ? (toolInput as Record<string, unknown>)
+      : undefined
+
+  // 2. Tool-specific deny rules via authoritative rule engines
+  const deniedRuleMessage = findToolSpecificDenyReason(
+    canonicalToolName,
+    block.name,
+    inputRecord,
+    safeContext,
+    toolDefinition,
+  )
+  if (deniedRuleMessage) {
+    return {
+      behavior: 'deny',
+      message: deniedRuleMessage,
+      toolUseID,
+    }
+  }
+
+  return permissionResult
+}
+
+const READ_PATH_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LSP'])
+const EDIT_PATH_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
+
+function formatDenyDecisionMessage(
+  toolName: string,
+  result: {
+    message?: string
+    decisionReason?: {
+      type: string
+      rule?: { ruleValue: { toolName: string; ruleContent?: string } }
+    }
+  },
+): string {
+  if (result.decisionReason?.type === 'rule' && result.decisionReason.rule) {
+    const ruleText = permissionRuleValueToString(
+      result.decisionReason.rule.ruleValue,
+    )
+    return `Permission to use ${toolName} has been denied by rule ${ruleText}.`
+  }
+  return (
+    result.message ?? `Permission to use ${toolName} has been denied by rule.`
+  )
+}
+
+function splitPowerShellSubcommandsForDenyCheck(command: string): string[] {
+  const segments: string[] = []
+  let start = 0
+  let inSingle = false
+  let inDouble = false
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i]!
+    if (inSingle) {
+      if (ch === "'") inSingle = false
+      continue
+    }
+    if (inDouble) {
+      if (ch === '`') {
+        i++
+        continue
+      }
+      if (ch === '"') inDouble = false
+      continue
+    }
+    if (ch === "'") {
+      inSingle = true
+      continue
+    }
+    if (ch === '"') {
+      inDouble = true
+      continue
+    }
+    if (ch === ';' || ch === '\n' || ch === '\r') {
+      const seg = command.slice(start, i).trim()
+      if (seg) segments.push(seg)
+      start = i + 1
+      continue
+    }
+    if (ch === '|' || ch === '&') {
+      if (command[i + 1] === ch) {
+        const seg = command.slice(start, i).trim()
+        if (seg) segments.push(seg)
+        i++
+        start = i + 1
+        continue
+      }
+      if (ch === '|') {
+        const seg = command.slice(start, i).trim()
+        if (seg) segments.push(seg)
+        start = i + 1
+      }
+    }
+  }
+  const tail = command.slice(start).trim()
+  if (tail) segments.push(tail)
+  return segments
+}
+
+function extractPathForOrphanedTool(
+  canonicalToolName: string,
+  input: Record<string, unknown> | undefined,
+  toolDefinition?: Tools[number],
+): string | undefined {
+  if (toolDefinition && typeof toolDefinition.getPath === 'function' && input) {
+    try {
+      const p = toolDefinition.getPath(input as never)
+      if (typeof p === 'string' && p.length > 0) return p
+    } catch {
+      // Fall back to field extraction below
+    }
+  }
+  if (!input) {
+    return canonicalToolName === 'Glob' || canonicalToolName === 'Grep'
+      ? getCwd()
+      : undefined
+  }
+  switch (canonicalToolName) {
+    case 'Read':
+    case 'Edit':
+    case 'Write':
+      if (typeof input.file_path === 'string' && input.file_path.length > 0) {
+        return input.file_path
+      }
+      return typeof input.path === 'string' && input.path.length > 0
+        ? input.path
+        : undefined
+    case 'NotebookEdit':
+      if (
+        typeof input.notebook_path === 'string' &&
+        input.notebook_path.length > 0
+      ) {
+        return input.notebook_path
+      }
+      return typeof input.file_path === 'string' && input.file_path.length > 0
+        ? input.file_path
+        : undefined
+    case 'Glob':
+    case 'Grep':
+      return typeof input.path === 'string' && input.path.length > 0
+        ? input.path
+        : getCwd()
+    case 'LSP':
+      if (typeof input.filePath === 'string' && input.filePath.length > 0) {
+        return input.filePath
+      }
+      return typeof input.file_path === 'string' && input.file_path.length > 0
+        ? input.file_path
+        : undefined
+    default:
+      return undefined
+  }
+}
+
+function findToolSpecificDenyReason(
+  canonicalToolName: string,
+  rawToolName: string,
+  input: Record<string, unknown> | undefined,
+  toolPermissionContext: ToolPermissionContext,
+  toolDefinition?: Tools[number],
+): string | null {
+  // Path tools (Read/Glob/Grep/LSP -> 'read', Edit/Write/NotebookEdit -> 'edit')
+  if (
+    READ_PATH_TOOLS.has(canonicalToolName) ||
+    EDIT_PATH_TOOLS.has(canonicalToolName)
+  ) {
+    const pathType = EDIT_PATH_TOOLS.has(canonicalToolName) ? 'edit' : 'read'
+    const targetPath = extractPathForOrphanedTool(
+      canonicalToolName,
+      input,
+      toolDefinition,
+    )
+    if (targetPath) {
+      const candidatePaths = walkPermissionPaths(targetPath).paths
+      for (const pathToCheck of candidatePaths) {
+        const denyRule = matchingRuleForInput(
+          pathToCheck,
+          toolPermissionContext,
+          pathType,
+          'deny',
+        )
+        if (denyRule) {
+          const ruleText = permissionRuleValueToString(denyRule.ruleValue)
+          return `Permission to use ${rawToolName} has been denied by rule ${ruleText}.`
+        }
+      }
+    }
+    return null
+  }
+
+  // Bash: check full command, every compound subcommand, and inner `sh -c` scripts
+  if (canonicalToolName === 'Bash') {
+    const command = typeof input?.command === 'string' ? input.command : ''
+    if (!command.trim()) return null
+    const candidates = new Set<string>([command])
+    for (const sub of splitCommand_DEPRECATED(command)) {
+      if (sub.trim()) candidates.add(sub)
+    }
+    for (const cmd of Array.from(candidates)) {
+      for (const script of extractShellDashCScripts(cmd).scripts) {
+        if (script.trim()) {
+          candidates.add(script)
+          for (const innerSub of splitCommand_DEPRECATED(script)) {
+            if (innerSub.trim()) candidates.add(innerSub)
+          }
+        }
+      }
+    }
+    for (const cmd of candidates) {
+      const result = bashToolCheckPermission(
+        { command: cmd },
+        toolPermissionContext,
+      )
+      if (result.behavior === 'deny') {
+        return formatDenyDecisionMessage(rawToolName, result)
+      }
+    }
+    return null
+  }
+
+  // PowerShell: check full command and every compound segment
+  if (canonicalToolName === 'PowerShell') {
+    const command = typeof input?.command === 'string' ? input.command : ''
+    if (!command.trim()) return null
+    const candidates = new Set<string>([
+      command,
+      ...splitPowerShellSubcommandsForDenyCheck(command),
+    ])
+    for (const cmd of candidates) {
+      const result = powershellToolCheckPermission(
+        { command: cmd },
+        toolPermissionContext,
+      )
+      if (result.behavior === 'deny') {
+        return formatDenyDecisionMessage(rawToolName, result)
+      }
+    }
+    return null
+  }
+
+  // WebFetch: check domain:<hostname> and direct URL deny rules
+  if (canonicalToolName === 'WebFetch') {
+    const rawUrl = typeof input?.url === 'string' ? input.url : undefined
+    if (!rawUrl) return null
+    const denyByContents = getRuleByContentsForToolName(
+      toolPermissionContext,
+      'WebFetch',
+      'deny',
+    )
+    if (denyByContents.size === 0) return null
+    let domainContent: string | undefined
+    try {
+      domainContent = `domain:${new URL(rawUrl).hostname.toLowerCase()}`
+    } catch {
+      domainContent = undefined
+    }
+    if (domainContent) {
+      const exactDomainRule = denyByContents.get(domainContent)
+      if (exactDomainRule) {
+        return `Permission to use ${rawToolName} has been denied by rule ${permissionRuleValueToString(exactDomainRule.ruleValue)}.`
+      }
+      for (const [ruleContent, rule] of denyByContents.entries()) {
+        if (ruleContent.toLowerCase() === domainContent) {
+          return `Permission to use ${rawToolName} has been denied by rule ${permissionRuleValueToString(rule.ruleValue)}.`
+        }
+      }
+    }
+    const directUrlRule = denyByContents.get(rawUrl)
+    if (directUrlRule) {
+      return `Permission to use ${rawToolName} has been denied by rule ${permissionRuleValueToString(directUrlRule.ruleValue)}.`
+    }
+    return null
+  }
+
+  // Agent: check Agent(<subagent_type>) deny rules
+  if (canonicalToolName === 'Agent') {
+    const subagentType =
+      typeof input?.subagent_type === 'string' ? input.subagent_type : undefined
+    if (subagentType) {
+      const agentDeny = getDenyRuleForAgent(
+        toolPermissionContext,
+        'Agent',
+        subagentType,
+      )
+      if (agentDeny) {
+        return `Permission to use ${rawToolName} has been denied by rule ${permissionRuleValueToString(agentDeny.ruleValue)}.`
+      }
+    }
+    return null
+  }
+
+  // Generic content-scoped deny rules (e.g., Skill(foo), WebSearch(bar), MCP content rules)
+  if (!input) return null
+  const denyByContents = getRuleByContentsForToolName(
+    toolPermissionContext,
+    canonicalToolName,
+    'deny',
+  )
+  if (denyByContents.size === 0) return null
+  for (const key of [
+    'skill',
+    'query',
+    'name',
+    'pattern',
+    'url',
+    'path',
+    'id',
+  ]) {
+    const val = input[key]
+    if (typeof val === 'string') {
+      const rule = denyByContents.get(val)
+      if (rule) {
+        return `Permission to use ${rawToolName} has been denied by rule ${permissionRuleValueToString(rule.ruleValue)}.`
+      }
+    }
+  }
+  return null
+}
+
+/**
  * Handles unexpected permission responses by looking up the unresolved tool
  * call in the transcript and enqueuing it for execution.
  *
@@ -1669,6 +2198,8 @@ export async function handleOrphanedPermissionResponse<
 >({
   message,
   setAppState: _setAppState,
+  getAppState,
+  tools,
   onEnqueued,
   handledToolUseIds,
   findUnresolvedToolUseFn = findUnresolvedToolUse,
@@ -1676,6 +2207,8 @@ export async function handleOrphanedPermissionResponse<
 }: {
   message: SDKControlResponse
   setAppState: HeadlessSetAppState<TState>
+  getAppState?: () => TState
+  tools?: Tools
   onEnqueued?: () => void
   handledToolUseIds: Set<string>
   findUnresolvedToolUseFn?: typeof findUnresolvedToolUse
@@ -1727,6 +2260,60 @@ export async function handleOrphanedPermissionResponse<
       return false
     }
 
+    // Official 2.1.325 #2328: in cloud sessions while plugins are still loading,
+    // do not automatically answer a connector MCP tool approval prompt.
+    const orphanedBlock = Array.isArray(assistantMessage.message?.content)
+      ? assistantMessage.message.content.find(
+          b =>
+            typeof b === 'object' &&
+            b !== null &&
+            (b as { type?: unknown }).type === 'tool_use' &&
+            (b as { id?: unknown }).id === toolUseID,
+        )
+      : undefined
+    const orphanedToolName =
+      orphanedBlock &&
+      typeof (orphanedBlock as { name?: unknown }).name === 'string'
+        ? (orphanedBlock as { name: string }).name
+        : undefined
+    if (
+      orphanedToolName !== undefined &&
+      shouldHoldHeadlessConnectorApproval(orphanedToolName)
+    ) {
+      logForDebugging(
+        `handleOrphanedPermissionResponse: holding connector tool approval (${orphanedToolName}, toolUseID=${toolUseID}) while cloud plugins are loading`,
+      )
+      return false
+    }
+
+    // Official 2.1.325 #2323: re-apply current deny rules to a delayed
+    // permission approval arriving after restart (self-hosted runner /
+    // `claude remote-control`) before enqueuing it for execution.
+    const appState = getAppState?.()
+    const mcpTools = appState?.mcp?.tools
+    const combinedTools =
+      tools && mcpTools
+        ? ([...tools, ...mcpTools] as Tools)
+        : (tools ?? mcpTools)
+    const checkedPermissionResult = recheckOrphanedPermissionAgainstDenyRules(
+      permissionResult,
+      assistantMessage,
+      appState?.toolPermissionContext,
+      {
+        tools: combinedTools,
+        mcpClients: appState?.mcp?.clients,
+      },
+    )
+    if (
+      permissionResult.behavior === 'allow' &&
+      checkedPermissionResult.behavior === 'deny'
+    ) {
+      logForDebugging(
+        `handleOrphanedPermissionResponse: overriding delayed allow with deny rule for toolUseID=${toolUseID}: ${checkedPermissionResult.message}`,
+        { level: 'warn' },
+      )
+    }
+
     handledToolUseIds.add(toolUseID)
     logForDebugging(
       `handleOrphanedPermissionResponse: enqueuing orphaned permission for toolUseID=${toolUseID} messageID=${assistantMessage.message.id}`,
@@ -1736,7 +2323,7 @@ export async function handleOrphanedPermissionResponse<
       value: [],
       skipSubmissionHooks: true,
       orphanedPermission: {
-        permissionResult,
+        permissionResult: checkedPermissionResult,
         assistantMessage,
       },
     })

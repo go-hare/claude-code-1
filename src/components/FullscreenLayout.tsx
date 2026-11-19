@@ -1527,6 +1527,8 @@ export type FullscreenLayoutProps = {
   dockWidth?: number;
   /** densable tot `dockTail` (`Nc`) — fills the prompt anchor margin gap under `dock`. */
   dockTail?: ReactNode;
+  /** Official 2.1.323 (#2096) `onLinkNotOpened` — called when Ctrl+clicking an http(s) link fails to open a browser. */
+  onLinkNotOpened?: (url: string) => void;
 };
 
 type Props = FullscreenLayoutProps;
@@ -1758,6 +1760,7 @@ export function FullscreenLayout({
   dockWidth = 0,
   dockTail,
   top,
+  onLinkNotOpened,
 }: Props): React.ReactNode {
   const { rows: terminalRows, columns } = useTerminalSize();
   // densable tot `Zot()||XMn()` — only history-search / elicitation take rows-2.
@@ -1831,6 +1834,9 @@ export function FullscreenLayout({
     }
     return !getAutoScrollEnabled() && viewportBottom < s.getScrollHeight();
   });
+  const onLinkNotOpenedRef = useRef(onLinkNotOpened);
+  onLinkNotOpenedRef.current = onLinkNotOpened;
+
   // Wire up hyperlink click handling — in fullscreen mode, mouse tracking
   // intercepts clicks before the terminal can open OSC 8 links natively.
   useLayoutEffect(() => {
@@ -1849,7 +1855,18 @@ export function FullscreenLayout({
           // detection) cause fileURLToPath to throw — ignore silently.
         }
       } else {
-        void openBrowser(url);
+        void openBrowser(url).then(opened => {
+          if (!opened) {
+            try {
+              const parsed = new URL(url);
+              if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+                onLinkNotOpenedRef.current?.(parsed.href);
+              }
+            } catch {
+              // Ignore non-URL strings
+            }
+          }
+        });
       }
     };
     return () => {

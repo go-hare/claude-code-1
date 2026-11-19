@@ -52,6 +52,7 @@ limit is a **Meter**, above). Answer it with one of these; the donut stays depri
 | The reader must… | Use |
 |---|---|
 | Compare the parts with each other, rank them, tell close values apart, or read more than 6 parts | **Ranked horizontal bars**, one per part, largest first (parts with a natural order, such as age bands, keep that order), one hue: bars on one baseline compare more exactly than segments laid end to end |
+| Render a **static image** (PNG, SVG export, slide, or printed report — no hover or tooltips) | **Ranked horizontal bars** (preserving natural order for ordered parts such as age bands) with direct value labels at each bar end, or a **thin segmented bar** paired with a visible name-and-figure list beside it; avoid relying on hover tooltips or cramming small labels onto thin slices |
 | See how one whole splits, at a glance: one bar alone in a card, no figures listed beside it | **Tall segmented bar**: each part its own block, its share or amount printed on it where it fits, and a legend of names. ≤ 6 parts; fold a tail nobody needs to read into "Other" |
 | Read the split beside its figures: down the rows of a table or list, or above a list that already gives each part's name and amount | **Thin segmented bar**, no text: the text beside it carries the figures the reader needs, and printing them again crowds the bar |
 

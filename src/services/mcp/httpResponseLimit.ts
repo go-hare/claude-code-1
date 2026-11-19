@@ -4,6 +4,10 @@
  */
 
 import type { FetchLike } from '@modelcontextprotocol/client'
+import {
+  hasDisallowedResponseEncoding,
+  parseResponseContentEncodings,
+} from '../../utils/http.js'
 
 export const HTTP_MCP_MAX_RESPONSE_BYTES = 16777216 // 16 MiB (hke)
 export const HTTP_MCP_MAX_SSE_EVENT_BYTES = 4 * HTTP_MCP_MAX_RESPONSE_BYTES // 64 MiB (rd)
@@ -115,11 +119,8 @@ export function wrapFetchWithResponseLimit(
       return response
     }
 
-    const encodings = (response.headers.get('content-encoding') ?? '')
-      .toLowerCase()
-      .split(',')
-      .map(s => s.trim())
-      .filter(s => s !== '' && s !== 'identity')
+    const contentEncodingHeader = response.headers.get('content-encoding')
+    const encodings = parseResponseContentEncodings(contentEncodingHeader)
     const primaryEncoding = encodings[0]
     const extraEncodings = encodings.slice(1)
 
@@ -134,7 +135,7 @@ export function wrapFetchWithResponseLimit(
       canDecompress && response.headers.get('content-length') !== '0'
     if (
       hasEncodedBody &&
-      (primaryEncoding === 'br' || primaryEncoding === 'zstd')
+      hasDisallowedResponseEncoding(contentEncodingHeader)
     ) {
       await response.body.cancel().catch(() => {})
       throw new Error(

@@ -2,6 +2,7 @@ import type { Dirent } from 'fs'
 import * as fs from 'fs/promises'
 import { homedir } from 'os'
 import { basename, dirname, join } from 'path'
+import { getSessionId } from '../bootstrap/state.js'
 import {
   type BgJobState,
   getJobsBaseDir,
@@ -23,6 +24,7 @@ import * as lockfile from './lockfile.js'
 import { logError } from './log.js'
 import { cleanupOldVersions } from './nativeInstaller/index.js'
 import { cleanupOldPastes } from './pasteStore.js'
+import { getClaudeTempDir } from './permissions/filesystem.js'
 import { getProjectsDir } from './sessionPaths.js'
 import {
   LITE_READ_BUF_SIZE,
@@ -674,6 +676,44 @@ async function unlinkIfOlderThan(
   return true
 }
 
+function isMissingOrNotDirError(error: unknown): boolean {
+  const code = getErrnoCode(error)
+  return code === 'ENOENT' || code === 'ENOTDIR'
+}
+
+/**
+ * Official 2.1.323 (#2158, `he` / `re` in `chunk-eejwxm3f.js` @300741000):
+ * Count unreadable directories as errors in retention cleanup instead of
+ * silently swallowing EACCES/EPERM/EIO. Missing/non-directory paths (ENOENT,
+ * ENOTDIR) are not counted as errors.
+ */
+export function recordUnreadableDirectoryError(
+  error: unknown,
+  dirPath: string,
+  result: CleanupResult,
+): void {
+  if (isMissingOrNotDirError(error)) return
+  result.errors++
+  const code = getErrnoCode(error)
+  logForDebugging(
+    `cleanup could not examine ${dirPath}: ${code ?? errorMessage(error)}`,
+    { level: 'error' },
+  )
+}
+
+async function readdirCountingErrors(
+  dirPath: string,
+  fsImpl: FsOperations,
+  result: CleanupResult,
+): Promise<Dirent[] | null> {
+  try {
+    return await fsImpl.readdir(dirPath)
+  } catch (error) {
+    recordUnreadableDirectoryError(error, dirPath, result)
+    return null
+  }
+}
+
 /**
  * densable k(e, t, r=!0) @221582127 — age files by extension, optional rmdir.
  */
@@ -686,12 +726,8 @@ async function cleanupAgedFilesInDirectory(
   const result = emptyCleanupResult()
   if (cutoff === null) return result
   const fsImpl = getFsImplementation()
-  let dirents
-  try {
-    dirents = await fsImpl.readdir(dirPath)
-  } catch {
-    return result
-  }
+  const dirents = await readdirCountingErrors(dirPath, fsImpl, result)
+  if (dirents === null) return result
   for (const dirent of dirents) {
     if (!dirent.isFile() || !dirent.name.endsWith(extension)) continue
     try {
@@ -816,7 +852,8 @@ export async function cleanupJobsRetentionSweep(
     let entries: Dirent[]
     try {
       entries = await fs.readdir(jobsDir, { withFileTypes: true })
-    } catch {
+    } catch (error) {
+      recordUnreadableDirectoryError(error, jobsDir, result)
       entries = []
     }
     for (const entry of entries) {
@@ -900,8 +937,8 @@ export async function cleanupJobsRetentionSweep(
           result.errors++
         }
       }
-    } catch {
-      // official readdir(daemon).catch(()=>[])
+    } catch (error) {
+      recordUnreadableDirectoryError(error, join(home, 'daemon'), result)
     }
   }
   return result
@@ -973,9 +1010,10 @@ async function cleanupOldFilesInDirectory(
       }
     }
   } catch (error: unknown) {
-    // Ignore if directory doesn't exist
-    if (error instanceof Error && 'code' in error && error.code !== 'ENOENT') {
-      logError(error)
+    // Ignore if directory doesn't exist; count unreadable folders as errors (#2158)
+    if (!isMissingOrNotDirError(error)) {
+      result.errors++
+      logError(error as Error)
     }
   }
 
@@ -994,10 +1032,8 @@ export async function cleanupOldMessageFiles(): Promise<CleanupResult> {
 
   // Clean up MCP logs
   try {
-    let dirents
-    try {
-      dirents = await fsImpl.readdir(baseCachePath)
-    } catch {
+    const dirents = await readdirCountingErrors(baseCachePath, fsImpl, result)
+    if (dirents === null) {
       return result
     }
 
@@ -1053,9 +1089,149 @@ async function tryRmdir(dirPath: string, fsImpl: FsOperations): Promise<void> {
   }
 }
 
+const SESSION_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+async function listActiveSessionIds(
+  fsImpl: FsOperations,
+): Promise<Set<string> | null> {
+  const sessionsDir = join(getClaudeConfigHomeDir(), 'sessions')
+  let entries: Dirent[]
+  try {
+    entries = await fsImpl.readdir(sessionsDir)
+  } catch (error) {
+    if (isMissingOrNotDirError(error)) {
+      return new Set()
+    }
+    return null
+  }
+  const active = new Set<string>()
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.json')) continue
+    try {
+      const raw = await fsImpl.readFile(join(sessionsDir, entry.name), {
+        encoding: 'utf-8',
+      })
+      const parsed: unknown = JSON.parse(raw)
+      if (typeof parsed !== 'object' || parsed === null) continue
+      const rec = parsed as { pid?: unknown; sessionId?: unknown }
+      if (
+        typeof rec.sessionId === 'string' &&
+        (typeof rec.pid !== 'number' || isProcessRunning(rec.pid))
+      ) {
+        active.add(rec.sessionId)
+      }
+    } catch (error) {
+      if (!isENOENT(error)) {
+        return null
+      }
+    }
+  }
+  return active
+}
+
+/**
+ * Official 2.1.323 (#2057, `mt(e)` post-loop sweep in `chunk-eejwxm3f.js`
+ * @300746500): When a session changed directory during its lifetime, its
+ * temporary files may live under a different project slug inside
+ * `<tmpdir>/claude-<uid>/<otherProjectSlug>/<sessionId>` than where its
+ * `.jsonl` transcript sits. Once all transcripts for an expired session are
+ * deleted, scan every project subdir under the per-user temp root and remove
+ * matching `<sessionId>` directories (excluding the current and live sessions).
+ */
+export async function cleanupExpiredSessionTempDirs(
+  expiredSessionIds: Iterable<string>,
+  opts?: {
+    tempRoot?: string
+    currentSessionId?: string
+    liveSessionIds?: Set<string> | null
+    fsImpl?: FsOperations
+  },
+): Promise<CleanupResult> {
+  const result = emptyCleanupResult()
+  const candidates = new Set<string>()
+  for (const id of expiredSessionIds) {
+    if (SESSION_UUID_RE.test(id)) {
+      candidates.add(id)
+    }
+  }
+  if (candidates.size === 0) return result
+
+  const fsImpl = opts?.fsImpl ?? getFsImplementation()
+  let tempRoot = opts?.tempRoot
+  if (tempRoot === undefined) {
+    try {
+      tempRoot = getClaudeTempDir()
+    } catch {
+      return result
+    }
+  }
+  const rootStat = await fs.lstat(tempRoot).catch((error: unknown) => {
+    recordUnreadableDirectoryError(error, tempRoot, result)
+    return null
+  })
+  if (rootStat === null || !rootStat.isDirectory()) {
+    return result
+  }
+
+  const liveSessionIds =
+    opts?.liveSessionIds !== undefined
+      ? opts.liveSessionIds
+      : await listActiveSessionIds(fsImpl)
+  if (liveSessionIds === null) {
+    result.errors++
+    return result
+  }
+
+  const currentSessionId = opts?.currentSessionId ?? getSessionId()
+  candidates.delete(currentSessionId)
+  for (const liveId of liveSessionIds) {
+    candidates.delete(liveId)
+  }
+  if (candidates.size === 0) return result
+
+  const projectSlugEntries = await readdirCountingErrors(
+    tempRoot,
+    fsImpl,
+    result,
+  )
+  if (projectSlugEntries === null) return result
+
+  for (const slugEntry of projectSlugEntries) {
+    if (!slugEntry.isDirectory()) continue
+    const slugDir = join(tempRoot, slugEntry.name)
+    const slugStat = await fs.lstat(slugDir).catch((error: unknown) => {
+      recordUnreadableDirectoryError(error, slugDir, result)
+      return null
+    })
+    if (slugStat === null || !slugStat.isDirectory()) continue
+
+    const sessionEntries = await readdirCountingErrors(slugDir, fsImpl, result)
+    if (sessionEntries === null) continue
+    for (const sessionEntry of sessionEntries) {
+      if (!candidates.has(sessionEntry.name)) continue
+      const targetPath = join(slugDir, sessionEntry.name)
+      try {
+        await removeDirectoryTreeWithRetry(targetPath, {
+          rmFn: (p, options) => fsImpl.rm(p, options),
+          lstatFn: p => fs.lstat(p),
+        })
+        result.messages++
+      } catch (error) {
+        if (!isENOENT(error)) {
+          result.errors++
+        }
+      }
+    }
+    await tryRmdir(slugDir, fsImpl)
+  }
+
+  return result
+}
+
 export async function cleanupOldSessionFiles(): Promise<CleanupResult> {
   const cutoffDate = getCutoffDate()
-  const result = emptyCleanupResult()
+  let result = emptyCleanupResult()
   if (cutoffDate === null) return result
   const projectsDir = getProjectsDir()
   const fsImpl = getFsImplementation()
@@ -1080,24 +1256,46 @@ export async function cleanupOldSessionFiles(): Promise<CleanupResult> {
         )
       }
 
-  let projectDirents
-  try {
-    projectDirents = await fsImpl.readdir(projectsDir)
-  } catch {
+  const projectDirents = await readdirCountingErrors(
+    projectsDir,
+    fsImpl,
+    result,
+  )
+  if (projectDirents === null) {
     return result
   }
 
+  // Official 2.1.323 (#2057): Track remaining `.jsonl` transcript counts per
+  // sessionId across all project dirs so sessions whose transcripts all expired
+  // also have their temporary directories cleaned up across every project slug.
+  const transcriptCountsBySession = new Map<string, number>()
+  let allProjectDirsScanned = true
+
   for (const projectDirent of projectDirents) {
-    if (!projectDirent.isDirectory()) continue
+    if (!projectDirent.isDirectory()) {
+      allProjectDirsScanned &&= projectDirent.isFile()
+      continue
+    }
     const projectDir = join(projectsDir, projectDirent.name)
 
     // Single readdir per project directory — partition into files and session dirs
     let entries
     try {
       entries = await fsImpl.readdir(projectDir)
-    } catch {
-      result.errors++
+    } catch (error) {
+      recordUnreadableDirectoryError(error, projectDir, result)
+      allProjectDirsScanned &&= isENOENT(error)
       continue
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory() && entry.name.endsWith('.jsonl')) {
+        const sid = entry.name.slice(0, -6)
+        transcriptCountsBySession.set(
+          sid,
+          (transcriptCountsBySession.get(sid) ?? 0) + 1,
+        )
+      }
     }
 
     for (const entry of entries) {
@@ -1121,6 +1319,13 @@ export async function cleanupOldSessionFiles(): Promise<CleanupResult> {
             )
           ) {
             result.messages++
+            if (entry.name.endsWith('.jsonl')) {
+              const sid = entry.name.slice(0, -6)
+              transcriptCountsBySession.set(
+                sid,
+                (transcriptCountsBySession.get(sid) ?? 1) - 1,
+              )
+            }
           }
         } catch {
           result.errors++
@@ -1137,7 +1342,8 @@ export async function cleanupOldSessionFiles(): Promise<CleanupResult> {
         let toolDirs
         try {
           toolDirs = await fsImpl.readdir(toolResultsDir)
-        } catch {
+        } catch (error) {
+          recordUnreadableDirectoryError(error, toolResultsDir, result)
           // No tool-results dir — still try to remove an empty session dir
           await tryRmdir(sessionDir, fsImpl)
           continue
@@ -1159,10 +1365,12 @@ export async function cleanupOldSessionFiles(): Promise<CleanupResult> {
             }
           } else if (toolEntry.isDirectory()) {
             const toolDirPath = join(toolResultsDir, toolEntry.name)
-            let toolFiles
-            try {
-              toolFiles = await fsImpl.readdir(toolDirPath)
-            } catch {
+            const toolFiles = await readdirCountingErrors(
+              toolDirPath,
+              fsImpl,
+              result,
+            )
+            if (toolFiles === null) {
               continue
             }
             for (const tf of toolFiles) {
@@ -1208,6 +1416,23 @@ export async function cleanupOldSessionFiles(): Promise<CleanupResult> {
     await tryRmdir(projectDir, fsImpl)
   }
 
+  // Official 2.1.323 (#2057): Clean up temporary files left behind under any
+  // project slug directory for sessions whose transcripts have all expired.
+  if (allProjectDirsScanned) {
+    const expiredSessionIds: string[] = []
+    for (const [sid, remaining] of transcriptCountsBySession) {
+      if (remaining === 0 && SESSION_UUID_RE.test(sid)) {
+        expiredSessionIds.push(sid)
+      }
+    }
+    if (expiredSessionIds.length > 0) {
+      result = addCleanupResults(
+        result,
+        await cleanupExpiredSessionTempDirs(expiredSessionIds, { fsImpl }),
+      )
+    }
+  }
+
   return result
 }
 
@@ -1227,12 +1452,8 @@ async function cleanupSingleDirectory(
   if (cutoffDate === null) return result
   const fsImpl = getFsImplementation()
 
-  let dirents
-  try {
-    dirents = await fsImpl.readdir(dirPath)
-  } catch {
-    return result
-  }
+  const dirents = await readdirCountingErrors(dirPath, fsImpl, result)
+  if (dirents === null) return result
 
   for (const dirent of dirents) {
     if (!dirent.isFile() || !dirent.name.endsWith(extension)) continue
@@ -1267,10 +1488,12 @@ export async function cleanupOldFileHistoryBackups(): Promise<CleanupResult> {
     const configDir = getClaudeConfigHomeDir()
     const fileHistoryStorageDir = join(configDir, 'file-history')
 
-    let dirents
-    try {
-      dirents = await fsImpl.readdir(fileHistoryStorageDir)
-    } catch {
+    const dirents = await readdirCountingErrors(
+      fileHistoryStorageDir,
+      fsImpl,
+      result,
+    )
+    if (dirents === null) {
       return result
     }
 
@@ -1312,10 +1535,12 @@ export async function cleanupOldSessionEnvDirs(): Promise<CleanupResult> {
     const configDir = getClaudeConfigHomeDir()
     const sessionEnvBaseDir = join(configDir, 'session-env')
 
-    let dirents
-    try {
-      dirents = await fsImpl.readdir(sessionEnvBaseDir)
-    } catch {
+    const dirents = await readdirCountingErrors(
+      sessionEnvBaseDir,
+      fsImpl,
+      result,
+    )
+    if (dirents === null) {
       return result
     }
 
@@ -1358,10 +1583,8 @@ export async function cleanupOldDebugLogs(): Promise<CleanupResult> {
   const fsImpl = getFsImplementation()
   const debugDir = join(getClaudeConfigHomeDir(), 'debug')
 
-  let dirents
-  try {
-    dirents = await fsImpl.readdir(debugDir)
-  } catch {
+  const dirents = await readdirCountingErrors(debugDir, fsImpl, result)
+  if (dirents === null) {
     return result
   }
 

@@ -160,6 +160,38 @@ function safeSpawn(
 
 const SECRET_RENEW_MIN_LEAD_MS = 900_000
 const SECRET_RENEW_MAX_LEAD_MS = 86_400_000
+/**
+ * Official 2.1.323 #2115: bound disk I/O (worktree removal, pointer clear)
+ * during session cleanup and bridge shutdown so an unresponsive filesystem
+ * never leaves sessions running at shutdown or holds finished session slots.
+ */
+const UNRESPONSIVE_DISK_CLEANUP_DEADLINE_MS = 5_000
+
+async function raceDiskCleanupDeadline<T>(
+  promise: Promise<T>,
+  label: string,
+  deadlineMs = UNRESPONSIVE_DISK_CLEANUP_DEADLINE_MS,
+): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<undefined>(resolve => {
+        timer = setTimeout(() => {
+          logForDebugging(
+            `[bridge:disk] ${label} did not finish within ${deadlineMs}ms — continuing without blocking`,
+            { level: 'warn' },
+          )
+          resolve(undefined)
+        }, deadlineMs)
+        timer.unref?.()
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
 const SECRET_RENEW_MIN_TTL_MS = 3_600_000
 const PROACTIVE_RENEW_MIN_BACKOFF_MS = 300_000
 const PROACTIVE_RENEW_MAX_BACKOFF_MS = 3_600_000
@@ -670,15 +702,18 @@ export async function runBridgeLoop(
           }
         } else {
           trackCleanup(
-            removeAgentWorktree(
-              wt.worktreePath,
-              wt.worktreeBranch,
-              wt.gitRoot,
-              wt.hookBased,
-            ).catch((err: unknown) =>
-              logger.logVerbose(
-                `Failed to remove worktree ${wt.worktreePath}: ${errorMessage(err)}`,
+            raceDiskCleanupDeadline(
+              removeAgentWorktree(
+                wt.worktreePath,
+                wt.worktreeBranch,
+                wt.gitRoot,
+                wt.hookBased,
+              ).catch((err: unknown) =>
+                logger.logVerbose(
+                  `Failed to remove worktree ${wt.worktreePath}: ${errorMessage(err)}`,
+                ),
               ),
+              `removeAgentWorktree(${wt.worktreePath})`,
             ),
           )
         }
@@ -1859,11 +1894,14 @@ export async function runBridgeLoop(
       )
       await Promise.allSettled(
         remainingWorktrees.map(wt =>
-          removeAgentWorktree(
-            wt.worktreePath,
-            wt.worktreeBranch,
-            wt.gitRoot,
-            wt.hookBased,
+          raceDiskCleanupDeadline(
+            removeAgentWorktree(
+              wt.worktreePath,
+              wt.worktreeBranch,
+              wt.gitRoot,
+              wt.hookBased,
+            ),
+            `shutdown removeAgentWorktree(${wt.worktreePath})`,
           ),
         ),
       )
@@ -3142,8 +3180,10 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
         ? 'Remote Control environments are not available for your account.'
         : `Error: ${errorMessage(err)}`,
     )
+    // Official 2.1.325 #2350 (`SLa = 69`): exit with 69 (EX_UNAVAILABLE) when
+    // registration fails so a service manager can restart `claude remote-control`.
     // eslint-disable-next-line custom-rules/no-process-exit
-    process.exit(1)
+    process.exit(BRIDGE_EXIT_CODE_REGISTRATION_FAILED)
   }
 
   // Tracks whether the --session-id resume flow completed successfully.
@@ -3548,13 +3588,42 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
     process.stdin.pause()
   }
 
-  // The bridge bypasses init.ts (and its graceful shutdown handler), so we
-  // must exit explicitly.
+  // Official 2.1.325 #2350 (`bLa = 4`): exit with status 4 when `claude
+  // remote-control` stops by itself (single-session runs and signal-aborted
+  // shutdowns still exit 0), so a service manager can restart it.
   // eslint-disable-next-line custom-rules/no-process-exit
-  process.exit(0)
+  process.exit(
+    resolveBridgeExitCode({
+      signalAborted: controller.signal.aborted,
+      spawnMode: config.spawnMode,
+    }),
+  )
 }
 
 // ─── Headless bridge (daemon worker) ────────────────────────────────────────
+
+/**
+ * Official 2.1.325 #2350 (`bLa = 4`, `SLa = 69`):
+ * `claude remote-control` exits with status 4 when it stops by itself
+ * (single-session runs still exit 0) and status 69 (`EX_UNAVAILABLE`) when it
+ * cannot register, so a service manager (systemd/launchd) can restart it.
+ */
+export const BRIDGE_EXIT_CODE_SELF_STOP = 4
+export const BRIDGE_EXIT_CODE_REGISTRATION_FAILED = 69
+
+export function resolveBridgeExitCode(opts: {
+  signalAborted: boolean
+  spawnMode: string
+  registrationFailed?: boolean
+}): number {
+  if (opts.registrationFailed) {
+    return BRIDGE_EXIT_CODE_REGISTRATION_FAILED
+  }
+  if (!opts.signalAborted && opts.spawnMode !== 'single-session') {
+    return BRIDGE_EXIT_CODE_SELF_STOP
+  }
+  return 0
+}
 
 /**
  * Thrown by runBridgeHeadless for configuration issues the supervisor should

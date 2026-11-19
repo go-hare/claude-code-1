@@ -1,4 +1,5 @@
 import axios, { type AxiosError } from 'axios'
+import { networkInterfaces } from 'os'
 import type { StdoutMessage } from 'src/entrypoints/sdk/controlTypes.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { rcLog } from '../../bridge/rcDebugLog.js'
@@ -27,6 +28,30 @@ const RECONNECT_MAX_DELAY_MS = 30_000
 const RECONNECT_GIVE_UP_MS = 600_000
 /** Server sends keepalives every 15s; treat connection as dead after 45s of silence. */
 const LIVENESS_TIMEOUT_MS = 45_000
+/**
+ * Official 2.1.323 #2111: poll OS network interface addresses every 3s so
+ * switching Wi-Fi or reconnecting a VPN triggers an immediate redial instead
+ * of waiting 45–60s+ for liveness timeout or exponential backoff.
+ */
+const NETWORK_CHANGE_POLL_MS = 3_000
+
+export function computeNetworkInterfacesFingerprint(): string {
+  try {
+    const ifaces = networkInterfaces()
+    const entries: string[] = []
+    for (const [name, addrs] of Object.entries(ifaces)) {
+      if (!addrs) continue
+      for (const addr of addrs) {
+        if (addr.internal) continue
+        entries.push(`${name}:${addr.family}:${addr.address}`)
+      }
+    }
+    entries.sort()
+    return entries.join('|')
+  } catch {
+    return ''
+  }
+}
 
 /**
  * HTTP status codes that indicate a permanent server-side rejection.
@@ -198,6 +223,9 @@ export class SSETransport implements Transport {
   // Liveness detection
   private livenessTimer: NodeJS.Timeout | null = null
   private lastActivityTime = 0
+  // Network-change fast recovery (#2111)
+  private networkCheckTimer: NodeJS.Timeout | null = null
+  private lastNetworkFingerprint: string | null = null
 
   // POST URL (derived from SSE URL)
   private postUrl: string
@@ -268,6 +296,7 @@ export class SSETransport implements Transport {
       logForDiagnosticsNoPII('error', 'cli_sse_connect_failed')
       return
     }
+    this.startNetworkChangeMonitor()
 
     this.state = 'reconnecting'
     const connectStartTime = Date.now()
@@ -299,14 +328,19 @@ export class SSETransport implements Transport {
     logForDebugging(`SSETransport: Opening ${sseUrl.href}`)
     logForDiagnosticsNoPII('info', 'cli_sse_connect_opening')
 
-    this.abortController = new AbortController()
+    const controller = new AbortController()
+    this.abortController = controller
 
     try {
       // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
       const response = await fetch(sseUrl.href, {
         headers,
-        signal: this.abortController.signal,
+        signal: controller.signal,
       })
+
+      if (controller.signal.aborted || this.abortController !== controller) {
+        return
+      }
 
       if (!response.ok) {
         const now = Date.now()
@@ -370,10 +404,10 @@ export class SSETransport implements Transport {
       this.resetLivenessTimer()
 
       // Read the SSE stream
-      await this.readStream(response.body)
+      await this.readStream(response.body, controller)
     } catch (error) {
-      if (this.abortController?.signal.aborted) {
-        // Intentional close
+      if (controller.signal.aborted || this.abortController !== controller) {
+        // Intentional close or superseded by a newer connection (e.g. onNetworkChange)
         return
       }
 
@@ -390,7 +424,10 @@ export class SSETransport implements Transport {
    * Read and process the SSE stream body.
    */
   // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
-  private async readStream(body: ReadableStream<Uint8Array>): Promise<void> {
+  private async readStream(
+    body: ReadableStream<Uint8Array>,
+    controller: AbortController,
+  ): Promise<void> {
     const reader = body.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
@@ -400,6 +437,9 @@ export class SSETransport implements Transport {
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
+        if (controller.signal.aborted || this.abortController !== controller) {
+          return
+        }
 
         buffer += decoder.decode(value, STREAM_DECODE_OPTS)
         if (buffer.length > MAX_BUFFER_BYTES) {
@@ -461,7 +501,9 @@ export class SSETransport implements Transport {
         }
       }
     } catch (error) {
-      if (this.abortController?.signal.aborted) return
+      if (controller.signal.aborted || this.abortController !== controller) {
+        return
+      }
       logForDebugging(
         `SSETransport: Stream read error: ${errorMessage(error)}`,
         { level: 'error' },
@@ -469,6 +511,10 @@ export class SSETransport implements Transport {
       logForDiagnosticsNoPII('error', 'cli_sse_stream_read_error')
     } finally {
       reader.releaseLock()
+    }
+
+    if (controller.signal.aborted || this.abortController !== controller) {
+      return
     }
 
     // Stream ended — reconnect unless we're closing
@@ -640,6 +686,59 @@ export class SSETransport implements Transport {
     }
   }
 
+  /**
+   * Official 2.1.323 #2111: detect Wi-Fi switches / VPN reconnects and redial
+   * immediately (resetting backoff) instead of staying disconnected for 60s+.
+   */
+  public startNetworkChangeMonitor(): void {
+    if (this.networkCheckTimer) return
+    this.lastNetworkFingerprint = computeNetworkInterfacesFingerprint()
+    this.networkCheckTimer = setInterval(() => {
+      if (this.state === 'closing' || this.state === 'closed') {
+        this.stopNetworkChangeMonitor()
+        return
+      }
+      const next = computeNetworkInterfacesFingerprint()
+      if (
+        this.lastNetworkFingerprint !== null &&
+        next !== this.lastNetworkFingerprint
+      ) {
+        this.lastNetworkFingerprint = next
+        this.onNetworkChange()
+      }
+    }, NETWORK_CHANGE_POLL_MS)
+    this.networkCheckTimer.unref?.()
+  }
+
+  private stopNetworkChangeMonitor(): void {
+    if (this.networkCheckTimer) {
+      clearInterval(this.networkCheckTimer)
+      this.networkCheckTimer = null
+    }
+  }
+
+  /** @internal Trigger immediate redial on network change (e.g. Wi-Fi / VPN). */
+  public onNetworkChange(): void {
+    if (this.state === 'closing' || this.state === 'closed') return
+    logForDebugging(
+      'SSETransport: Network interface change detected — reconnecting immediately',
+    )
+    this.reconnectAttempts = 0
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+      void this.connect()
+      return
+    }
+    if (this.state === 'connected' || this.abortController !== null) {
+      this.clearLivenessTimer()
+      this.abortController?.abort()
+      this.abortController = null
+      this.state = 'reconnecting'
+      void this.connect()
+    }
+  }
+
   // -----------------------------------------------------------------------
   // Write (HTTP POST) — same pattern as HybridTransport
   // -----------------------------------------------------------------------
@@ -765,6 +864,7 @@ export class SSETransport implements Transport {
       this.reconnectTimer = null
     }
     this.clearLivenessTimer()
+    this.stopNetworkChangeMonitor()
 
     this.state = 'closing'
     this.abortController?.abort()

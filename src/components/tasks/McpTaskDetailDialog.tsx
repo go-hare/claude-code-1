@@ -18,6 +18,16 @@ type Props = {
  * densable `CF` / `McpTaskDetailDialog` (@219097500).
  */
 export function McpTaskDetailDialog({ task, onDone, onKill, onBack }: Props): React.ReactNode {
+  // Official 2.1.325 #2307/#2367: when a running MCP task has an off-screen
+  // question waiting for the user's answer, Enter reopens it and closes /tasks.
+  const openQuestion = task.status === 'running' ? task.openQuestion : undefined;
+  const handleEnter = openQuestion
+    ? () => {
+        openQuestion();
+        onDone();
+      }
+    : undefined;
+
   const handleKill =
     task.status === 'running' && onKill
       ? () => {
@@ -26,7 +36,7 @@ export function McpTaskDetailDialog({ task, onDone, onKill, onBack }: Props): Re
         }
       : undefined;
 
-  useKeybindings({ 'confirm:yes': onDone }, { context: 'Confirmation' });
+  useKeybindings({ 'confirm:yes': handleEnter ?? onDone }, { context: 'Confirmation' });
 
   const handleKeyDown = (e: KeyboardEvent): void => {
     if (e.key === ' ') {
@@ -62,6 +72,7 @@ export function McpTaskDetailDialog({ task, onDone, onKill, onBack }: Props): Re
             <Text>Press {exitState.keyName} again to exit</Text>
           ) : (
             <Byline>
+              {openQuestion && <KeyboardShortcutHint shortcut="Enter" action="answer" />}
               <KeyboardShortcutHint shortcut="Esc" action="go back" />
               {task.status === 'running' && onKill && <KeyboardShortcutHint shortcut="x" action="stop" />}
             </Byline>
@@ -81,8 +92,11 @@ export function McpTaskDetailDialog({ task, onDone, onKill, onBack }: Props): Re
             {statusLabel}
             {statusMessage && <Text dimColor>{` · ${statusMessage}`}</Text>}
           </Text>
-          {task.mcpStatus === 'input_required' && task.status === 'running' && (
-            <Text dimColor>waiting for your answer in the elicitation dialog</Text>
+          {openQuestion ? (
+            <Text color="warning">the server is waiting for your answer</Text>
+          ) : (
+            task.mcpStatus === 'input_required' &&
+            task.status === 'running' && <Text dimColor>waiting for the server</Text>
           )}
           <Text dimColor>
             {elapsedPrefix}

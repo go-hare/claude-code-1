@@ -228,6 +228,13 @@ export async function pluginEvalHandler(
     process.exit(1)
     return
   }
+  if (options.outputDir === '') {
+    process.stderr.write(
+      'Error: --output-dir was given an empty path; pass a directory, or omit it to use the default results directory\n',
+    )
+    process.exit(1)
+    return
+  }
   if (options.publish === false && options.publishReport) {
     process.stderr.write(
       'Error: --no-publish and --publish-report are contradictory — pass at most one.\n',

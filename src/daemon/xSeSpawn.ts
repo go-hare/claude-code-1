@@ -37,6 +37,11 @@ import {
 } from '../utils/restricted.js'
 import { buildDispatchProviderEnv } from './bgHostManagedEnv.js'
 import {
+  BG_PROFILE_MIN_DAEMON_CAP,
+  checkBgSpawnCredentialCompatibility,
+  computeBgSessionCredentialAnchor,
+} from './bgSessionCredential.js'
+import {
   CLOUD_BG_CONFLICT,
   collectUncWarnPaths,
   doubleDashIndex,
@@ -459,6 +464,57 @@ export async function xSeSpawn(opts: XSeOpts): Promise<XSeResult> {
     }
   }
 
+  // Official 2.1.323 #1995: refuse handoff when CLAUDE_CODE_OAUTH_TOKEN would
+  // not reach the background daemon (must run in current terminal or unset).
+  const isExec = Boolean(opts.exec?.trim())
+  const effectiveCallerEnv: Record<string, string | undefined> = {
+    ...process.env,
+    ...(opts.env ?? {}),
+  }
+  const immediateCredBlock = checkBgSpawnCredentialCompatibility({
+    callerEnv: effectiveCallerEnv,
+    daemonProfileAnchorCap: BG_PROFILE_MIN_DAEMON_CAP,
+    isExec,
+  })
+  if (immediateCredBlock) {
+    return {
+      ok: false,
+      error: immediateCredBlock,
+      reason: 'credential_blocked',
+    }
+  }
+
+  // Official 2.1.323 #1998: when spawning under a named Anthropic profile,
+  // verify the running daemon advertises profile anchoring support (>= 1).
+  const callerAnchor = isExec
+    ? null
+    : computeBgSessionCredentialAnchor(effectiveCallerEnv)
+  if (callerAnchor?.profile) {
+    const { sendControlRequest } = await import('./controlSocketClient.js')
+    const ping = await sendControlRequest(
+      { op: 'ping', proto: PROTO_VERSION },
+      { timeoutMs: 2_000 },
+    )
+    if (ping.ok) {
+      const cap =
+        typeof ping.profileAnchorCap === 'number'
+          ? ping.profileAnchorCap
+          : undefined
+      const oldDaemonErr = checkBgSpawnCredentialCompatibility({
+        callerEnv: effectiveCallerEnv,
+        daemonProfileAnchorCap: cap,
+        isExec: false,
+      })
+      if (oldDaemonErr) {
+        return {
+          ok: false,
+          error: oldDaemonErr,
+          reason: 'old_daemon_profile_unsupported',
+        }
+      }
+    }
+  }
+
   const { dispatch, short, sessionId, derivedName, freshDir, idle } =
     buildDispatchRequest(opts)
   const jobDir = getJobDirPath(short)
@@ -569,6 +625,23 @@ export async function xSeSpawn(opts: XSeOpts): Promise<XSeResult> {
           ? resp.error
           : 'Previous session is still shutting down — try again in a moment',
       reason: 'stale_short',
+    }
+  }
+
+  // Official 2.1.323 #1994/#1995/#2000: daemon refused dispatch due to
+  // credential anchor mismatch/drift or unreadable anchor — never write file fallback.
+  if (code === 'EAUTHANCHOR' || reasonNorm === 'credential-anchor-refused') {
+    if (seededFresh) {
+      await rm(jobDir, { recursive: true, force: true }).catch(() => {})
+    }
+    return {
+      ok: false,
+      short,
+      error:
+        typeof resp.error === 'string' && resp.error
+          ? resp.error
+          : 'Background session credential check failed',
+      reason: 'credential_anchor_refused',
     }
   }
 

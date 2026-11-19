@@ -224,4 +224,55 @@ describe('host auth 401 recovery (official lfa / ASr)', () => {
     )
     expect(result).toBe('tok')
   })
+
+  test('#2341: withHostAuthRefreshTimeout unrefs timer and tryHostAuth401Recovery honors AbortSignal', async () => {
+    let unrefCalled = false
+    const origSetTimeout = globalThis.setTimeout
+    globalThis.setTimeout = ((
+      fn: (...args: unknown[]) => void,
+      ms?: number,
+      ...args: unknown[]
+    ) => {
+      const handle = origSetTimeout(fn, ms, ...args)
+      const origUnref = handle.unref?.bind(handle)
+      handle.unref = () => {
+        unrefCalled = true
+        return origUnref ? origUnref() : handle
+      }
+      return handle
+    }) as typeof setTimeout
+    try {
+      const res = await withHostAuthRefreshTimeout(
+        Promise.resolve('fast'),
+        10_000,
+      )
+      expect(res).toBe('fast')
+      expect(unrefCalled).toBe(true)
+    } finally {
+      globalThis.setTimeout = origSetTimeout
+    }
+
+    // Pre-aborted signal short-circuits without invoking callback
+    let callbackInvoked = false
+    setHostAuthTokenRefreshCallback(async () => {
+      callbackInvoked = true
+      return 'should-not-run'
+    })
+    const aborted = new AbortController()
+    aborted.abort()
+    expect(await tryHostAuth401Recovery(aborted.signal)).toBe('failed')
+    expect(callbackInvoked).toBe(false)
+
+    // Non-aborted signal is forwarded into callback and aborts mid-flight
+    let receivedSignal: AbortSignal | undefined
+    const midFlight = new AbortController()
+    setHostAuthTokenRefreshCallback(async sig => {
+      receivedSignal = sig
+      return await new Promise<string>(() => {})
+    })
+    const recoveryPromise = tryHostAuth401Recovery(midFlight.signal)
+    midFlight.abort()
+    expect(await recoveryPromise).toBe('failed')
+    expect(receivedSignal).toBe(midFlight.signal)
+  })
 })

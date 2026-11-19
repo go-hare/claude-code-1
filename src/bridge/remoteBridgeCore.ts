@@ -154,6 +154,10 @@ import {
   setSessionMetadataChangedListener,
   type RequiresActionDetails,
 } from '../utils/sessionState.js'
+import {
+  buildDroppedPeerMessageHoldFrame,
+  type PeerReceiptDropReason,
+} from '../utils/peerAdmission.js'
 import { buildUserDialogRequiresActionDetails } from '../utils/userDialog.js'
 import { generateShortWordSlug } from '../utils/words.js'
 
@@ -328,6 +332,14 @@ export type EnvLessBridgeParams = {
   ) => { ok: true } | { ok: false; error: string }
   /** densable 2.1.247 `onGetWorkspaceDiff` — RC working-tree diff pull. */
   onGetWorkspaceDiff?: (signal: AbortSignal) => Promise<unknown>
+  /**
+   * Official 2.1.323 #2119 (`backgroundHold` / `Sn`): when background
+   * subagents are still running at turn end, hold Remote Control state at
+   * `'running'` instead of reporting `'idle'` to phone / desktop clients.
+   */
+  backgroundHold?: {
+    holdsRunning: () => boolean
+  }
   /** #1860: Provide slash commands to deduplicate and advertise on `initialize`. */
   getInitializeCommands?: () => readonly BridgeSlashCommandInput[]
   onStateChange?: (state: BridgeState, detail?: string) => void
@@ -447,6 +459,7 @@ export async function initEnvLessBridgeCore(
     onReattachPointerDead,
     neutralFallbackTitle,
     onTransportPersistenceReady,
+    backgroundHold,
   } = params
 
   const cfg = await getEnvLessBridgeConfig()
@@ -2083,6 +2096,83 @@ export async function initEnvLessBridgeCore(
     },
   )
 
+  // Official 2.1.323 #2113 (`Jt` / `rs` / `Mo`): track terminal-only
+  // permission prompts / blocking dialogs so Remote Control reports
+  // `requires_action` instead of `running` while awaiting terminal input.
+  const terminalOnlyBlockingDialogs = new Map<
+    string,
+    RequiresActionDetails | undefined
+  >()
+  let lastUnderlyingState: 'idle' | 'running' | 'requires_action' = 'idle'
+
+  function reportEffectiveState(
+    state: 'idle' | 'running' | 'requires_action',
+    details?: RequiresActionDetails,
+  ): void {
+    if (state !== 'requires_action') {
+      lastUnderlyingState = state
+      if (terminalOnlyBlockingDialogs.size > 0) {
+        const lastEntry = [...terminalOnlyBlockingDialogs.entries()].at(-1)
+        const dialogDetails =
+          lastEntry?.[1] ??
+          (lastEntry &&
+          getFeatureValue_CACHED_MAY_BE_STALE(
+            'tengu_bridge_requires_action_details',
+            true,
+          )
+            ? buildUserDialogRequiresActionDetails(lastEntry[0], {}, '')
+            : undefined)
+        transport.reportState('requires_action', dialogDetails)
+        if (dialogDetails) {
+          transport.reportMetadata({ pending_action: dialogDetails })
+        }
+        return
+      }
+    }
+    transport.reportState(state, details)
+    if (state === 'requires_action' && details) {
+      transport.reportMetadata({ pending_action: details })
+    } else if (state !== 'requires_action') {
+      transport.reportMetadata({ pending_action: null })
+    }
+  }
+
+  function buildCanUseToolDetails(
+    requestId: string,
+    inner: Record<string, unknown>,
+  ): RequiresActionDetails {
+    const toolName =
+      typeof inner.tool_name === 'string' && inner.tool_name
+        ? inner.tool_name
+        : 'Tool'
+    const toolUseId =
+      typeof inner.tool_use_id === 'string' ? inner.tool_use_id : ''
+    const inputObj =
+      inner.input && typeof inner.input === 'object'
+        ? (inner.input as Record<string, unknown>)
+        : {}
+    const rawCommand =
+      typeof inputObj.command === 'string' ? inputObj.command : undefined
+    const explicitDesc =
+      typeof inner.description === 'string' && inner.description
+        ? inner.description
+        : typeof inputObj.description === 'string' && inputObj.description
+          ? inputObj.description
+          : undefined
+    const actionDescription =
+      explicitDesc ??
+      (rawCommand ? rawCommand.slice(0, 160) : `Approve or deny ${toolName}`)
+    return {
+      tool_name: toolName,
+      display_tool_name: toolName,
+      action_description: actionDescription,
+      ...(rawCommand ? { raw_command: rawCommand } : {}),
+      tool_use_id: toolUseId,
+      request_id: requestId,
+      input: inputObj,
+    }
+  }
+
   // densable Qt: sessionGroupingId:He, outboundOnly:B??!1,
   // getLastSequenceNum, flush for left-arrow rit CLAUDE_BRIDGE_REATTACH_SEQ.
   // outboundOnly must be a boolean on the handle so left-arrow rit() sees
@@ -2158,7 +2248,7 @@ export async function initEnvLessBridgeCore(
       // scaffolding and pure reminders should not re-open a completed turn.
       // CCRClient.reportState dedupes consecutive same-state pushes.
       if (shouldReportRunningForMessages(filtered)) {
-        transport.reportState('running')
+        reportEffectiveState('running')
       }
       logForDebugging(`[remote-bridge] Sending ${filtered.length} message(s)`)
       void transport.writeBatch(events as StdoutMessage[])
@@ -2198,33 +2288,39 @@ export async function initEnvLessBridgeCore(
         session_id: sessionId,
       } as TransportMessage
       if (isBridgePermissionForwardSubtype(subtype)) {
-        let details:
-          | ReturnType<typeof buildUserDialogRequiresActionDetails>
-          | undefined
-        if (
-          subtype === 'request_user_dialog' &&
-          getFeatureValue_CACHED_MAY_BE_STALE(
-            'tengu_bridge_requires_action_details',
-            false,
-          )
-        ) {
-          const inner = request.request as {
-            dialog_kind?: string
-            payload?: unknown
-            tool_use_id?: string
+        let details: RequiresActionDetails | undefined
+        // Official 2.1.323 #2116: default to `true` so `DISABLE_TELEMETRY` /
+        // `DO_NOT_TRACK` (which disable GrowthBook) still send permission
+        // details to phones and other devices.
+        const includeDetails = getFeatureValue_CACHED_MAY_BE_STALE(
+          'tengu_bridge_requires_action_details',
+          true,
+        )
+        if (includeDetails) {
+          if (subtype === 'request_user_dialog') {
+            // Official 2.1.323 #2112: includes `fable_overage_consent_prompt`
+            // so usage-credit consent prompts show in the Claude app.
+            const inner = request.request as {
+              dialog_kind?: string
+              payload?: unknown
+              tool_use_id?: string
+            }
+            details = buildUserDialogRequiresActionDetails(
+              inner.dialog_kind ?? 'dialog',
+              inner.payload,
+              request.request_id,
+              inner.tool_use_id,
+            )
+            pendingForwards.noteForward(request, details)
+          } else if (subtype === 'can_use_tool') {
+            details = buildCanUseToolDetails(
+              request.request_id,
+              request.request as Record<string, unknown>,
+            )
+            pendingForwards.noteForward(request, details)
           }
-          details = buildUserDialogRequiresActionDetails(
-            inner.dialog_kind ?? 'dialog',
-            inner.payload,
-            request.request_id,
-            inner.tool_use_id,
-          )
-          pendingForwards.noteForward(request, details)
         }
-        transport.reportState('requires_action', details)
-        if (details) {
-          transport.reportMetadata({ pending_action: details })
-        }
+        reportEffectiveState('requires_action', details)
       }
       void transport.write(event as StdoutMessage)
       logForDebugging(
@@ -2246,7 +2342,7 @@ export async function initEnvLessBridgeCore(
         ...response,
         session_id: sessionId,
       } as TransportMessage
-      transport.reportState('running')
+      reportEffectiveState('running')
       void transport.write(event as StdoutMessage)
       logForDebugging('[remote-bridge] Sent control_response')
     },
@@ -2265,7 +2361,7 @@ export async function initEnvLessBridgeCore(
       // Hook/classifier/channel/recheck resolved the permission locally —
       // interactiveHandler calls only cancelRequest (no sendResponse) on
       // those paths, so without this the server stays on requires_action.
-      transport.reportState('running')
+      reportEffectiveState('running')
       void transport.write(event as StdoutMessage)
       logForDebugging(
         `[remote-bridge] Sent control_cancel_request request_id=${requestId}`,
@@ -2276,13 +2372,76 @@ export async function initEnvLessBridgeCore(
         logForDebugging('[remote-bridge] Dropping result during 401 recovery')
         return
       }
-      transport.reportState('idle')
+      // Official 2.1.323 #2119 (`Sn` / `backgroundHold`): do not report `idle`
+      // while background subagents are still running.
+      const subagentsStillRunning = backgroundHold?.holdsRunning() === true
+      reportEffectiveState(subagentsStillRunning ? 'running' : 'idle')
       const resultMsg = {
         ...makeResultMessage(sessionId),
         session_id: sessionId,
       } as unknown as TransportMessage
       void transport.write(resultMsg as StdoutMessage)
       logForDebugging(`[remote-bridge] Sent result`)
+    },
+    setTerminalOnlyBlockingDialog(
+      kind: string,
+      active: boolean,
+      details?: RequiresActionDetails,
+    ) {
+      if (active) {
+        terminalOnlyBlockingDialogs.delete(kind)
+        terminalOnlyBlockingDialogs.set(kind, details)
+        const effectiveDetails =
+          details ??
+          (getFeatureValue_CACHED_MAY_BE_STALE(
+            'tengu_bridge_requires_action_details',
+            true,
+          )
+            ? buildUserDialogRequiresActionDetails(kind, {}, '')
+            : undefined)
+        reportEffectiveState('requires_action', effectiveDetails)
+      } else {
+        if (!terminalOnlyBlockingDialogs.delete(kind)) return
+        if (terminalOnlyBlockingDialogs.size > 0) {
+          const lastEntry = [...terminalOnlyBlockingDialogs.entries()].at(-1)
+          const effectiveDetails =
+            lastEntry?.[1] ??
+            (lastEntry &&
+            getFeatureValue_CACHED_MAY_BE_STALE(
+              'tengu_bridge_requires_action_details',
+              true,
+            )
+              ? buildUserDialogRequiresActionDetails(lastEntry[0], {}, '')
+              : undefined)
+          reportEffectiveState('requires_action', effectiveDetails)
+        } else {
+          reportEffectiveState(lastUnderlyingState)
+        }
+      }
+    },
+    reportPeerMessageDropped(input: {
+      messageUuid?: string
+      from: string
+      outcome: PeerReceiptDropReason
+      lane?: 'bridge' | 'stdin' | 'socket'
+    }) {
+      // Official 2.1.323 #2101: emit dropped peer_message_hold frame and
+      // settle idle state if no turn/subagent is active so Claude Desktop
+      // never remains stuck as busy after duplicate/burst peer sends.
+      const frame = buildDroppedPeerMessageHoldFrame({
+        sessionId,
+        messageUuid: input.messageUuid,
+        lane: input.lane ?? 'bridge',
+        from: input.from,
+        outcome: input.outcome,
+      })
+      void transport.write(frame as unknown as StdoutMessage)
+      if (
+        lastUnderlyingState === 'idle' &&
+        backgroundHold?.holdsRunning() !== true
+      ) {
+        reportEffectiveState('idle')
+      }
     },
     async teardown(opts?: ReplBridgeTeardownOpts) {
       unregister()

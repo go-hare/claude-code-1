@@ -142,9 +142,12 @@ mock.module('src/utils/worktree.js', () => ({
 import { WorkflowAbortedError } from '@claude-code/workflow-engine'
 import {
   claudeCodeBackend,
-  resolveAgentDefinition,
-  mapWorkflowModel,
   extractStructuredOutput,
+  extractWorkflowUsageLimitInfo,
+  mapWorkflowModel,
+  MAX_USAGE_LIMIT_RETRIES,
+  resolveAgentDefinition,
+  waitUntilUsageLimitReset,
   WORKFLOW_AGENT,
 } from '../backends/claudeCodeBackend.js'
 import { makeHostHandle } from '../hostHandle.js'
@@ -439,4 +442,117 @@ test('extractStructuredOutput: broken JSON returns null (does not throw)', () =>
   expect(
     extractStructuredOutput([{ type: 'text', text: '{"a":1,}' }]), // trailing comma — no syntax repair
   ).toBeNull()
+})
+
+test('#2203: extractWorkflowUsageLimitInfo stops at non-error assistant reply (ignores historical recovered limit)', () => {
+  const futureReset = Math.floor(Date.now() / 1000) + 600
+  const recovered = [
+    {
+      type: 'assistant',
+      error: 'rate_limit',
+      isApiErrorMessage: true,
+      apiErrorParams: {
+        rate_limit_info: { status: 'rejected', resetsAt: futureReset },
+      },
+      message: { content: [] },
+    },
+    {
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: 'Recovered and succeeded' }] },
+    },
+  ] as never[]
+  expect(extractWorkflowUsageLimitInfo(recovered)).toBeNull()
+
+  const active = [recovered[0]!] as never[]
+  const info = extractWorkflowUsageLimitInfo(active)
+  expect(info).not.toBeNull()
+  expect(info?.resetsAtMs).toBe(futureReset * 1000)
+})
+
+test('#2203: waitUntilUsageLimitReset segments waits exceeding 32-bit setTimeout max', async () => {
+  const scheduledDelays: number[] = []
+  let fakeNow = 1_000
+  const origSetTimeout = globalThis.setTimeout
+  globalThis.setTimeout = ((
+    fn: (...args: unknown[]) => void,
+    ms?: number,
+    ...args: unknown[]
+  ) => {
+    const delay = ms ?? 0
+    scheduledDelays.push(delay)
+    fakeNow += delay
+    return origSetTimeout(() => fn(...args), 0)
+  }) as typeof setTimeout
+  try {
+    const ac = new AbortController()
+    const totalWait = 2_147_483_647 + 500_000
+    const ok = await waitUntilUsageLimitReset(
+      fakeNow + totalWait,
+      ac.signal,
+      () => fakeNow,
+    )
+    expect(ok).toBe(true)
+    expect(scheduledDelays.length).toBe(2)
+    expect(scheduledDelays[0]).toBe(2_147_483_647)
+    expect(scheduledDelays[1]).toBe(500_000)
+  } finally {
+    globalThis.setTimeout = origSetTimeout
+  }
+})
+
+test('#2203: claudeCodeBackend.run caps usage-limit retries and prevents infinite recursion', async () => {
+  let invocations = 0
+  const prevDesktop = process.env.CLAUDE_CODE_DESKTOP_APP_VERSION
+  process.env.CLAUDE_CODE_DESKTOP_APP_VERSION = '1.0.0'
+  mock.module('@claude-code/builtin-tools/tools/AgentTool/runAgent.js', () => ({
+    runAgent: async function* () {
+      invocations++
+      yield {
+        type: 'assistant',
+        error: 'usage_limit_reached',
+        isApiErrorMessage: true,
+        apiErrorParams: {
+          rate_limit_info: {
+            status: 'rejected',
+            resetsAt: Date.now() - 10_000,
+          },
+        },
+        message: { content: [] },
+      }
+    },
+  }))
+  try {
+    const res = await claudeCodeBackend.run({ prompt: 'keep retrying' }, {
+      ...ctx(),
+      runId: 'usage-limit-cap-run',
+      agentId: 99,
+      minUsageLimitRetryDelayMs: 1,
+    } as never)
+    expect(res.kind).toBe('dead')
+    if (res.kind === 'dead') {
+      expect(res.reason).toBe('unknown')
+      expect(res.detail).toContain(
+        `Usage limit persisted after ${MAX_USAGE_LIMIT_RETRIES} retries`,
+      )
+    }
+    expect(invocations).toBe(MAX_USAGE_LIMIT_RETRIES + 1)
+  } finally {
+    if (prevDesktop === undefined) {
+      delete process.env.CLAUDE_CODE_DESKTOP_APP_VERSION
+    } else {
+      process.env.CLAUDE_CODE_DESKTOP_APP_VERSION = prevDesktop
+    }
+    mock.module(
+      '@claude-code/builtin-tools/tools/AgentTool/runAgent.js',
+      () => ({
+        ...runAgentSnap,
+        runAgent: async function* () {
+          yield {
+            type: 'assistant',
+            message: { content: [{ type: 'text', text: 'agent-text' }] },
+          }
+        },
+      }),
+    )
+  }
 })

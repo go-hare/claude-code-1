@@ -2,9 +2,12 @@
  * densable 2.1.289 `claude purge` / hidden `claude project purge`.
  * Plan + delete project-scoped Claude Code state using existing path helpers.
  */
-import { createInterface } from 'readline'
-import { readdir, rm, stat, readFile, writeFile } from 'fs/promises'
+import { closeSync, openSync } from 'fs'
+import { readdir, readFile, rm, stat, writeFile } from 'fs/promises'
 import { join, resolve } from 'path'
+import { createInterface } from 'readline'
+import type { Readable } from 'stream'
+import { ReadStream as TtyReadStream } from 'tty'
 import { getOriginalCwd } from '../../bootstrap/state.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -219,50 +222,179 @@ function printPlan(plan: PurgePlan): void {
   )
 }
 
-async function askYesNo(question: string): Promise<boolean> {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    process.stderr.write(
-      `${question} [y/N]\n(non-interactive stdin; pass --yes to confirm)\n`,
-    )
-    return false
-  }
-  const rl = createInterface({ input: process.stdin, output: process.stdout })
+/**
+ * Official 2.1.325 #2281 (`Xbe` + `re`): resolve an interactive keyboard stream
+ * for `claude purge`'s project picker and `-i` prompts. When stdin is piped,
+ * opens `/dev/tty` so keyboard input still works; when no terminal exists or
+ * both stdin and stdout are piped/redirected, fails immediately without hanging.
+ */
+export type PurgeTerminalInput =
+  | { kind: 'stdin'; stream: Readable; dispose: () => void }
+  | { kind: 'override'; stream: Readable; dispose: () => void }
+  | { kind: 'unavailable'; reason: 'tty_unavailable' }
+
+export type PurgeTerminalDeps = {
+  stdin?: Readable & { isTTY?: boolean }
+  stdoutIsTTY?: boolean
+  openTty?: () => Readable | null
+}
+
+function defaultOpenDevTty(): Readable | null {
+  if (process.platform === 'win32') return null
+  let fd: number | undefined
   try {
-    const answer = await new Promise<string>(resolve => {
-      rl.question(`${question} [y/N] `, resolve)
-    })
-    return /^y(es)?$/i.test(answer.trim())
-  } finally {
-    rl.close()
+    fd = openSync('/dev/tty', 'r')
+    const stream = new TtyReadStream(fd)
+    stream.on('error', () => {})
+    return stream
+  } catch {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd)
+      } catch {
+        // ignore close error
+      }
+    }
+    return null
   }
+}
+
+export function resolvePurgeTerminalInput(
+  deps?: PurgeTerminalDeps,
+): PurgeTerminalInput {
+  const stdin = deps?.stdin ?? process.stdin
+  if (stdin.isTTY) {
+    return { kind: 'stdin', stream: stdin, dispose: () => {} }
+  }
+  const openTty = deps?.openTty ?? defaultOpenDevTty
+  const ttyStream = openTty()
+  if (!ttyStream) {
+    return { kind: 'unavailable', reason: 'tty_unavailable' }
+  }
+  return {
+    kind: 'override',
+    stream: ttyStream,
+    dispose: () => {
+      try {
+        ttyStream.destroy()
+      } catch {
+        // ignore destroy error
+      }
+    },
+  }
+}
+
+export function checkPurgeInteractiveTerminal(
+  hint: string,
+  terminal: PurgeTerminalInput,
+  stdoutIsTTY: boolean = Boolean(process.stdout.isTTY),
+): string | null {
+  if (terminal.kind === 'unavailable') {
+    return `Claude Code can't prompt here: no interactive terminal is available.\n${hint}`
+  }
+  if (terminal.kind === 'override' && !stdoutIsTTY) {
+    return `Claude Code can't prompt here: stdin and stdout are both piped or redirected, so a key you press could answer a prompt you may not see.\nRun claude with its output going to the terminal.\n${hint}`
+  }
+  return null
+}
+
+async function askYesNo(
+  question: string,
+  inputStream: Readable = process.stdin,
+): Promise<boolean> {
+  // Official 2.1.325 `oYt`: `[y/N]` reads from stdin (even when piped) and
+  // resolves `false` on EOF/close so it never hangs silently without a terminal.
+  const rl = createInterface({ input: inputStream, output: process.stdout })
+  return new Promise<boolean>(resolveAnswer => {
+    let settled = false
+    const done = (val: boolean) => {
+      if (settled) return
+      settled = true
+      resolveAnswer(val)
+    }
+    rl.once('close', () => done(false))
+    rl.question(`${question} [y/N] `, answer => {
+      const t = answer.trim().toLowerCase()
+      done(t === 'y' || t === 'yes')
+      rl.close()
+    })
+  })
 }
 
 async function askInteractive(
   index: number,
   total: number,
   label: string,
-): Promise<'delete' | 'skip' | 'all'> {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    process.stderr.write(
-      `[${index}/${total}] ${label}\n(non-interactive; pass --yes or omit -i)\n`,
+  inputStream: Readable,
+): Promise<'delete' | 'skip' | 'all' | 'abort'> {
+  const rl = createInterface({ input: inputStream, output: process.stdout })
+  return new Promise<'delete' | 'skip' | 'all' | 'abort'>(resolveAnswer => {
+    let settled = false
+    const done = (val: 'delete' | 'skip' | 'all' | 'abort') => {
+      if (settled) return
+      settled = true
+      resolveAnswer(val)
+    }
+    rl.once('close', () => done('abort'))
+    rl.question(
+      `[${index}/${total}] ${label}\nDelete? [y=Delete / N=Skip / a=Delete all remaining / q=Abort] `,
+      answer => {
+        const t = answer.trim().toLowerCase()
+        if (t === 'q' || t === 'abort') done('abort')
+        else if (t === 'a' || t === 'all') done('all')
+        else if (t === 'y' || t === 'yes' || t === 'delete') done('delete')
+        else done('skip')
+        rl.close()
+      },
     )
-    return 'skip'
+  })
+}
+
+async function pickProjectToPurge(
+  inputStream: Readable,
+): Promise<string | null> {
+  const current = resolve(getOriginalCwd())
+  const known = Object.keys(getGlobalConfig().projects ?? {})
+  const seen = new Set<string>([current])
+  const choices: string[] = [current]
+  for (const p of known) {
+    if (!seen.has(p)) {
+      seen.add(p)
+      choices.push(p)
+    }
   }
-  const rl = createInterface({ input: process.stdin, output: process.stdout })
-  try {
-    const answer = await new Promise<string>(resolve => {
-      rl.question(
-        `[${index}/${total}] ${label}\nDelete? [y/N/a=Delete this and all remaining] `,
-        resolve,
-      )
-    })
-    const t = answer.trim().toLowerCase()
-    if (t === 'a' || t === 'all') return 'all'
-    if (t === 'y' || t === 'yes') return 'delete'
-    return 'skip'
-  } finally {
-    rl.close()
+  process.stdout.write('Select a project to purge:\n')
+  for (const [idx, p] of choices.entries()) {
+    const suffix = idx === 0 ? ' (current directory)' : ''
+    process.stdout.write(`  ${idx + 1}. ${p}${suffix}\n`)
   }
+  const rl = createInterface({ input: inputStream, output: process.stdout })
+  return new Promise<string | null>(resolveChoice => {
+    let settled = false
+    const done = (val: string | null) => {
+      if (settled) return
+      settled = true
+      resolveChoice(val)
+    }
+    rl.once('close', () => done(null))
+    rl.question(
+      `Enter number [1-${choices.length}] (or q to abort): `,
+      answer => {
+        const trimmed = answer.trim().toLowerCase()
+        if (!trimmed || trimmed === 'q' || trimmed === 'abort') {
+          done(null)
+        } else {
+          const num = Number.parseInt(trimmed, 10)
+          if (Number.isInteger(num) && num >= 1 && num <= choices.length) {
+            done(choices[num - 1]!)
+          } else {
+            done(null)
+          }
+        }
+        rl.close()
+      },
+    )
+  })
 }
 
 export type PurgeFailure = {
@@ -398,6 +530,7 @@ export async function purgeProjectHandler(
   options: PurgeProjectOptions,
   pathArg?: string,
   fromAlias = false,
+  terminalDeps?: PurgeTerminalDeps,
 ): Promise<void> {
   if (fromAlias) {
     process.stderr.write(
@@ -421,9 +554,57 @@ export async function purgeProjectHandler(
     return
   }
 
+  const stdoutIsTTY = terminalDeps?.stdoutIsTTY ?? Boolean(process.stdout.isTTY)
+
+  let targetPath: string | undefined
+  if (!options.all) {
+    if (pathArg) {
+      targetPath = resolveTargetPath(pathArg)
+    } else {
+      // Official 2.1.325 #2281: project picker reads `/dev/tty` when stdin is
+      // piped, and exits cleanly without hanging when no terminal is available.
+      const terminal = resolvePurgeTerminalInput(terminalDeps)
+      try {
+        const err = checkPurgeInteractiveTerminal(
+          'Or name a project path, without -i: claude purge <path>. Add --dry-run to see what it would delete.',
+          terminal,
+          stdoutIsTTY,
+        )
+        if (err) {
+          process.stderr.write(`${err}\n`)
+          logEvent('cli_purge_project', {
+            result:
+              'no_terminal' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+          process.exitCode = 1
+          return
+        }
+        if (terminal.kind === 'unavailable') {
+          process.exitCode = 1
+          return
+        }
+        const picked = await pickProjectToPurge(terminal.stream)
+        if (picked === null) {
+          process.stderr.write('Aborted.\n')
+          logEvent('cli_purge_project', {
+            result:
+              'cancelled' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+          process.exitCode = 1
+          return
+        }
+        targetPath = picked
+      } finally {
+        if (terminal.kind !== 'unavailable') {
+          terminal.dispose()
+        }
+      }
+    }
+  }
+
   const plan = options.all
     ? await buildPurgePlanForAll()
-    : await buildPurgePlanForProject(resolveTargetPath(pathArg))
+    : await buildPurgePlanForProject(targetPath!)
 
   if (plan.items.length === 0) {
     if (options.all) {
@@ -456,43 +637,82 @@ export async function purgeProjectHandler(
   }
 
   if (options.interactive) {
-    let deleteRest = false
-    let deleted = 0
-    const failures: PurgeFailure[] = []
-    for (const [i, item] of plan.items.entries()) {
-      let action: 'delete' | 'skip' | 'all' = deleteRest
-        ? 'delete'
-        : await askInteractive(i + 1, plan.items.length, item.label)
-      if (action === 'all') {
-        deleteRest = true
-        action = 'delete'
+    // Official 2.1.325 #2281: `-i` prompts open `/dev/tty` when stdin is piped
+    // and abort cleanly with no hang when no terminal is available.
+    const terminal = resolvePurgeTerminalInput(terminalDeps)
+    try {
+      const err = checkPurgeInteractiveTerminal(
+        'Or run without -i to confirm the whole list once; that [y/N] prompt reads stdin.',
+        terminal,
+        stdoutIsTTY,
+      )
+      if (err || terminal.kind === 'unavailable') {
+        process.stderr.write(
+          `${err ?? "Claude Code can't prompt here."}\nAborted. 0 item(s) deleted.\n`,
+        )
+        logEvent('cli_purge_project', {
+          result:
+            'no_terminal' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        process.exitCode = 1
+        return
       }
-      if (action === 'skip') continue
-      const failure = await deleteItem(item, plan.projectPath)
-      if (failure) {
-        failures.push(failure)
-        continue
+      let deleteRest = false
+      let deleted = 0
+      const failures: PurgeFailure[] = []
+      for (const [i, item] of plan.items.entries()) {
+        let action: 'delete' | 'skip' | 'all' | 'abort' = deleteRest
+          ? 'delete'
+          : await askInteractive(
+              i + 1,
+              plan.items.length,
+              item.label,
+              terminal.stream,
+            )
+        if (action === 'abort') {
+          process.stderr.write(`Aborted. ${deleted} item(s) deleted.\n`)
+          logEvent('cli_purge_project', {
+            result:
+              'aborted' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          })
+          process.exitCode = 1
+          return
+        }
+        if (action === 'all') {
+          deleteRest = true
+          action = 'delete'
+        }
+        if (action === 'skip') continue
+        const failure = await deleteItem(item, plan.projectPath)
+        if (failure) {
+          failures.push(failure)
+          continue
+        }
+        deleted++
       }
-      deleted++
-    }
-    const summary = `Purged ${deleted}/${plan.items.length} item(s)${plan.projectPath ? ` for ${plan.projectPath}` : ''}.`
-    if (deleted === 0 && failures.length === 0) {
-      process.stdout.write(`${summary}\n`)
-      logEvent('cli_purge_project', {
-        count:
-          0 as unknown as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      })
+      const summary = `Purged ${deleted}/${plan.items.length} item(s)${plan.projectPath ? ` for ${plan.projectPath}` : ''}.`
+      if (deleted === 0 && failures.length === 0) {
+        process.stdout.write(`${summary}\n`)
+        logEvent('cli_purge_project', {
+          count:
+            0 as unknown as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        return
+      }
+      finishPurge(failures, summary)
       return
+    } finally {
+      if (terminal.kind !== 'unavailable') {
+        terminal.dispose()
+      }
     }
-    finishPurge(failures, summary)
-    return
   }
 
   if (!options.yes) {
     const q = options.all
       ? `Delete ${plan.items.length} item(s) for ALL projects? This cannot be undone.`
       : `Delete ${plan.items.length} item(s) for ${plan.projectPath}? This cannot be undone.`
-    const ok = await askYesNo(q)
+    const ok = await askYesNo(q, terminalDeps?.stdin ?? process.stdin)
     if (!ok) {
       process.stderr.write('Aborted.\n')
       process.exitCode = 1

@@ -423,6 +423,11 @@ function emitDegraded(
 /**
  * densable tools/list ingest after toolPermissions warn: vxi then wxi.
  */
+export type DroppedMcpToolRecord = {
+  toolName: string
+  reason: string
+}
+
 export function filterListedMcpToolsBySchema<T extends ListedMcpTool>(
   tools: readonly T[],
   opts: {
@@ -430,6 +435,8 @@ export function filterListedMcpToolsBySchema<T extends ListedMcpTool>(
     config: object
     normalizeRootCombinators?: boolean
     dropInvalidSchemas?: boolean
+    /** #2151: Collect omitted tools + reasons for display in `/mcp`. */
+    onDroppedTool?: (dropped: DroppedMcpToolRecord) => void
   },
 ): T[] {
   const config = asSchemaGateConfig(opts.config)
@@ -475,6 +482,7 @@ export function filterListedMcpToolsBySchema<T extends ListedMcpTool>(
         opts.serverName,
         `Skipping tool "${tool.name}": ${why}. Other tools from this server remain available.`,
       )
+      opts.onDroppedTool?.({ toolName: tool.name, reason: why })
       return []
     }
 
@@ -495,6 +503,7 @@ export function filterListedMcpToolsBySchema<T extends ListedMcpTool>(
       opts.serverName,
       `Skipping tool "${tool.name}": its input schema would be rejected by the Anthropic API (${check.detail}). Other tools from this server remain available.`,
     )
+    opts.onDroppedTool?.({ toolName: tool.name, reason: check.detail })
     return []
   })
 

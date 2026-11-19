@@ -36,7 +36,15 @@ import {
 import { memoize } from 'lodash-es'
 import { isIP } from 'node:net'
 import { homedir } from 'os'
-import { basename, dirname, isAbsolute, join, posix, resolve } from 'path'
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  posix,
+  relative,
+  resolve,
+} from 'path'
 import { URL as NodeURL } from 'node:url'
 import {
   getAdditionalDirectoriesForClaudeMd,
@@ -47,7 +55,8 @@ import {
 } from '../../bootstrap/state.js'
 import { logForDebugging } from '../debug.js'
 import { getErrnoCode } from '../errors.js'
-import { getClaudeConfigHomeDir } from '../envUtils.js'
+import { getClaudeConfigHomeDir, isEnvTruthy } from '../envUtils.js'
+import { sandboxHelperSubprocessEnv } from '../subprocessEnv.js'
 import { expandPath } from '../path.js'
 import { settingsHaveBlockReadsOutsideWorkingDirectories } from '../permissions/outsideReads.js'
 import { isWorktreePathNetworkRelativeToCwd } from '../worktree.js'
@@ -195,7 +204,11 @@ export function ensureLinuxGitWorktreeConfigPlaceholder(path: string): void {
   }
 }
 
-/** densable 2.1.239 j() worktrees/* config.worktree denyWrite extras. */
+/**
+ * Official 2.1.323 #2174 & #2177 (`pushLinkedWorktreeConfigDenyWrite`):
+ * Protect every linked worktree's `config.worktree`, `config.worktree.lock`,
+ * `commondir`, and `glab-cli` inside `<gitDir>/worktrees/*`.
+ */
 function pushLinkedWorktreeConfigDenyWrite(
   denyWrite: string[],
   gitDir: string,
@@ -208,15 +221,418 @@ function pushLinkedWorktreeConfigDenyWrite(
       if (!ent.isDirectory() && !ent.isSymbolicLink()) continue
       const nested = join(gitDir, 'worktrees', ent.name, 'config.worktree')
       ensureLinuxGitWorktreeConfigPlaceholder(nested)
+      const nestedGlab = join(gitDir, 'worktrees', ent.name, 'glab-cli')
       denyWrite.push(
         nested,
         join(gitDir, 'worktrees', ent.name, 'config.worktree.lock'),
         join(gitDir, 'worktrees', ent.name, 'commondir'),
+        nestedGlab,
       )
     }
   } catch {
     // official j() swallows a missing worktrees dir
   }
+}
+
+/**
+ * Official 2.1.323 #2175 (`N3`): on macOS, Linux, and WSL, ignore write access
+ * granted via an `allowWrite` entry that passes through a symlink inside a
+ * writable folder leading elsewhere (outside its own spelling) or to a missing
+ * target. Users must grant the real path instead.
+ */
+export function isAllowWriteSymlinkEscapingOrDangling(
+  entry: string,
+  platform: Platform = getPlatform(),
+): boolean {
+  if (platform === 'windows') return false
+  if (entry === '.' || entry === '..') return false
+  // Strip trailing glob suffix if any (e.g. `/path/**` -> `/path`)
+  const stripped = entry.replace(/\/\*+$/, '')
+  if (!stripped || !isAbsolute(stripped)) return false
+  const isMac = platform === 'macos'
+  const macPrivateAlias =
+    isMac && (stripped.startsWith('/tmp/') || stripped.startsWith('/var/'))
+  const normalizeCmp = (p: string) => {
+    const clean = p.replace(/\/+$/, '') || '/'
+    return isMac ? clean.toLowerCase() : clean
+  }
+  const sameSpelling = (a: string, b: string) => {
+    const na = normalizeCmp(a)
+    const nb = normalizeCmp(b)
+    if (na === nb) return true
+    if (macPrivateAlias && normalizeCmp('/private' + a) === nb) return true
+    return false
+  }
+  // Walk path components from root to leaf looking for any symlink
+  const parts = stripped.split('/').filter(Boolean)
+  let current = '/'
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]!
+    const next = current === '/' ? `/${part}` : `${current}/${part}`
+    try {
+      // eslint-disable-next-line custom-rules/no-sync-fs -- config build must be sync
+      const st = lstatSync(next)
+      if (st.isSymbolicLink()) {
+        // Skip system macOS root symlinks (`/tmp`, `/var`, `/etc`)
+        if (
+          isMac &&
+          i === 0 &&
+          (part === 'tmp' || part === 'var' || part === 'etc')
+        ) {
+          current = next
+          continue
+        }
+        try {
+          // eslint-disable-next-line custom-rules/no-sync-fs -- config build must be sync
+          const resolved = realpathSync(next)
+          if (!sameSpelling(next, resolved)) {
+            return true
+          }
+        } catch {
+          // Dangling symlink pointing to a missing path -> ignore grant
+          return true
+        }
+      }
+      current = next
+    } catch (err) {
+      const code = getErrnoCode(err)
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
+        // Non-existent path without a symlink along its existing prefix is fine
+        return false
+      }
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Official 2.1.323 #2207: harden macOS Seatbelt profile in the wrapped
+ * `sandbox-exec -p '...'` command so `process-info*` is denied by default and
+ * only allowed for `(target same-sandbox)` plus `process-info-listpids` when
+ * defined — matching official SEA `@285714858` without modifying `node_modules/`.
+ */
+export function hardenMacOsSeatbeltProcessInfo(wrappedCommand: string): string {
+  if (!wrappedCommand.includes('(allow process-info* (target same-sandbox))')) {
+    return wrappedCommand
+  }
+  if (wrappedCommand.includes('(deny process-info*')) {
+    return wrappedCommand
+  }
+  const logTagMatch = /; LogTag: ([^\n'"\\]+)/.exec(wrappedCommand)
+  const logTag = logTagMatch?.[1]
+  // Inside single-quoted shell-quote arguments, a literal `'` must be escaped as `'\''`.
+  const isSingleQuoted =
+    wrappedCommand.includes("sandbox-exec -p '") ||
+    /sandbox-exec\s+-p\s+'/.test(wrappedCommand)
+  // Inside double-quoted (or backslash-escaped) shell-quote arguments (e.g. when a path
+  // contains `'`), literal `"` must be escaped as `\"` so it does not close the outer quote.
+  const isDoubleQuoted =
+    /sandbox-exec\s+-p\s+"/.test(wrappedCommand) ||
+    (!isSingleQuoted && wrappedCommand.includes('\\"'))
+  const denyLine = logTag
+    ? isDoubleQuoted
+      ? `(deny process-info* (with message \\"${logTag}\\"))`
+      : `(deny process-info* (with message "${logTag}"))`
+    : '(deny process-info*)'
+  const listPidsLine = isSingleQuoted
+    ? "(if (defined? '\\''process-info-listpids) (allow process-info-listpids))"
+    : "(if (defined? 'process-info-listpids) (allow process-info-listpids))"
+  return wrappedCommand.replace(
+    '(allow process-info* (target same-sandbox))',
+    `${denyLine}\n(allow process-info* (target same-sandbox))\n${listPidsLine}`,
+  )
+}
+
+/**
+ * Official 2.1.325 #2333 (`D5n`): native updater download staging directory
+ * (`$XDG_CACHE_HOME/claude/staging` or `~/.cache/claude/staging`).
+ */
+export function getUpdaterStagingDir(
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+): string {
+  const cacheBase = env.XDG_CACHE_HOME ?? join(home, '.cache')
+  const root = isAbsolute(cacheBase) ? cacheBase : join(home, '.cache')
+  return join(root, 'claude', 'staging')
+}
+
+/**
+ * Official 2.1.325 #2333 (`Ahe`): materialize the updater staging directory
+ * (0o700) before wrap on non-Windows so bwrap/Seatbelt deny an existing folder.
+ */
+function ensureUpdaterStagingDir(): void {
+  if (getPlatform() === 'windows') return
+  const stagingDir = getUpdaterStagingDir()
+  if (!isAbsolute(stagingDir)) return
+  try {
+    // eslint-disable-next-line custom-rules/no-sync-fs -- pre-wrap setup
+    mkdirSync(stagingDir, { recursive: true, mode: 0o700 })
+  } catch (err) {
+    logForDebugging(
+      `[sandbox] could not create the update staging folder, which is denied all the same: ${errorMessage(err)}`,
+      { level: 'error' },
+    )
+  }
+}
+
+/**
+ * Official 2.1.325 #2334 & #2358 (`_o` / `fs` / `jf`):
+ * Protect `.claude` settings, skills, agents, commands, hooks, workflows,
+ * routines, output-styles, launch/scheduled_tasks/loop configs, and `.mcp.json`
+ * inside a project, worktree, or added directory (`additionalDirectories`).
+ */
+export function pushProtectedClaudeDirEntries(
+  denyWrite: string[],
+  dir: string,
+): void {
+  denyWrite.push(
+    recordSymlinkedDenyPath(resolve(dir, '.claude', 'settings.json')),
+    recordSymlinkedDenyPath(resolve(dir, '.claude', 'settings.local.json')),
+    resolve(dir, '.claude', 'skills'),
+    resolve(dir, '.claude', 'commands'),
+    resolve(dir, '.claude', 'agents'),
+    resolve(dir, '.claude', 'hooks'),
+    resolve(dir, '.claude', 'launch.json'),
+    resolve(dir, '.claude', 'workflows'),
+    resolve(dir, '.claude', 'routines'),
+    resolve(dir, '.claude', 'output-styles'),
+    resolve(dir, '.claude', 'scheduled_tasks.json'),
+    resolve(dir, '.claude', 'loop.md'),
+    resolve(dir, '.mcp.json'),
+  )
+}
+
+/**
+ * Official 2.1.325 #2335 (`Ba` + `Hf` / `$r`):
+ * Protect git metadata inside a git directory (`hooks`, `config`, `config.lock`,
+ * `config.worktree`, `config.worktree.lock`, `commondir`, `worktrees`,
+ * `info/exclude`, `glab-cli`, and linked worktrees under `worktrees/*`).
+ */
+function pushGitDirMetadataDenyWrite(
+  denyWrite: string[],
+  gitDir: string,
+): void {
+  const worktreeConfig = join(gitDir, 'config.worktree')
+  ensureLinuxGitWorktreeConfigPlaceholder(worktreeConfig)
+  const glabDir = join(gitDir, 'glab-cli')
+  ensureLinuxGitWorktreeConfigPlaceholder(glabDir)
+  denyWrite.push(
+    join(gitDir, 'hooks'),
+    join(gitDir, 'config'),
+    join(gitDir, 'config.lock'),
+    worktreeConfig,
+    join(gitDir, 'config.worktree.lock'),
+    join(gitDir, 'commondir'),
+    join(gitDir, 'worktrees'),
+    join(gitDir, 'info', 'exclude'),
+    glabDir,
+  )
+  pushLinkedWorktreeConfigDenyWrite(denyWrite, gitDir)
+}
+
+/**
+ * Official 2.1.325 #2335 (`Hf` `$r` `commonDirDotGitGuarded`):
+ * Because a linked worktree's shared `commonDir` is added to `allowWrite` so
+ * git can update objects/refs, guard `<commonDir>/.git` against creation or
+ * tampering so a sandboxed command cannot plant a nested `.git` inside it.
+ */
+function guardWorktreeCommonDirDotGit(
+  denyWrite: string[],
+  commonDir: string,
+): void {
+  const nestedDotGit = join(commonDir, '.git')
+  let st: ReturnType<typeof lstatSync> | undefined
+  try {
+    // eslint-disable-next-line custom-rules/no-sync-fs -- refreshConfig() must be sync
+    st = lstatSync(nestedDotGit)
+  } catch {
+    st = undefined
+  }
+  if (st?.isFile()) {
+    denyWrite.push(nestedDotGit)
+  } else if (st?.isDirectory()) {
+    pushGitDirMetadataDenyWrite(denyWrite, nestedDotGit)
+  } else {
+    bareGitRepoScrubPaths.push(nestedDotGit)
+    if (st === undefined && getPlatform() === 'macos') {
+      denyWrite.push(nestedDotGit)
+      if (!/[*?]/.test(commonDir)) {
+        denyWrite.push(join(commonDir, '.[gG][iI][tT]'))
+      }
+    }
+  }
+}
+
+/**
+ * Tokenize a POSIX shell command string preserving original token slices so
+ * we can inspect and reorder bwrap mount flags without altering shell quoting.
+ */
+function tokenizeShellCommandPreservingRaw(
+  cmd: string,
+): Array<{ raw: string; value: string; sep: string }> {
+  const tokens: Array<{ raw: string; value: string; sep: string }> = []
+  let i = 0
+  const n = cmd.length
+  while (i < n) {
+    const sepStart = i
+    while (i < n && /\s/.test(cmd[i]!)) i++
+    const sep = cmd.slice(sepStart, i)
+    if (i >= n) break
+    const rawStart = i
+    let value = ''
+    while (i < n && !/\s/.test(cmd[i]!)) {
+      const ch = cmd[i]!
+      if (ch === "'") {
+        i++
+        while (i < n && cmd[i] !== "'") {
+          value += cmd[i++]
+        }
+        if (i < n) i++
+      } else if (ch === '"') {
+        i++
+        while (i < n && cmd[i] !== '"') {
+          if (cmd[i] === '\\' && i + 1 < n) {
+            i++
+            value += cmd[i++]
+          } else {
+            value += cmd[i++]
+          }
+        }
+        if (i < n) i++
+      } else if (ch === '\\' && i + 1 < n) {
+        i++
+        value += cmd[i++]
+      } else {
+        value += cmd[i++]
+      }
+    }
+    tokens.push({ raw: cmd.slice(rawStart, i), value, sep })
+  }
+  return tokens
+}
+
+function isSameOrChildPath(parent: string, child: string): boolean {
+  const normParent = parent === '/' ? '/' : parent.replace(/\/+$/, '')
+  const normChild = child === '/' ? '/' : child.replace(/\/+$/, '')
+  if (normParent === normChild) return true
+  const prefix = normParent === '/' ? '/' : `${normParent}/`
+  return normChild.startsWith(prefix)
+}
+
+function tryCanonicalPath(p: string): string {
+  try {
+    // eslint-disable-next-line custom-rules/no-sync-fs -- wrap post-process
+    return realpathSync(p)
+  } catch {
+    return p
+  }
+}
+
+/**
+ * Official 2.1.325 #2340 (SEA `gj`):
+ * Fix Linux/WSL `bwrap: Can't create file` when the working directory (an
+ * allowed write path) is below an `allowRead` folder inside a `denyRead`
+ * (such as under a symlinked home directory).
+ *
+ * `@anthropic-ai/sandbox-runtime@0.0.73` emits `--bind <writePath>` BEFORE
+ * `--ro-bind <allowRead>` right after `--tmpfs <denyDir>`, so an `allowRead`
+ * ancestor overwrites the writable child mount read-only and subsequent
+ * `--ro-bind /dev/null <stub>` mounts fail with `Can't create file`.
+ *
+ * Reordering each `--tmpfs` restore block to emit `--ro-bind` restore mounts
+ * BEFORE `--bind` restore mounts (matching 2.1.325 `gj()`) keeps the child
+ * write path writable on top of the read-only `allowRead` ancestor.
+ */
+export function fixLinuxBwrapAllowReadMountOrder(
+  wrappedCommand: string,
+): string {
+  if (!wrappedCommand.includes('--tmpfs')) {
+    return wrappedCommand
+  }
+  const tokens = tokenizeShellCommandPreservingRaw(wrappedCommand)
+  let changed = false
+
+  let idx = 0
+  while (idx < tokens.length) {
+    if (tokens[idx]?.value === '--tmpfs' && idx + 1 < tokens.length) {
+      const denyDir = tokens[idx + 1]!.value
+      const denyDirReal = tryCanonicalPath(denyDir)
+      const blockStart = idx + 2
+      let cursor = blockStart
+      const roRestoreMounts: Array<typeof tokens> = []
+      const rwRestoreMounts: Array<typeof tokens> = []
+      const rwRestorePaths: Array<{ raw: string; real: string }> = []
+
+      while (cursor + 2 < tokens.length) {
+        const flag = tokens[cursor]!.value
+        if (flag !== '--bind' && flag !== '--ro-bind') break
+        const src = tokens[cursor + 1]!.value
+        const dst = tokens[cursor + 2]!.value
+        // Stop if this is a /dev/null file mask or sentinel bind (src !== dst)
+        if (src === '/dev/null' || src !== dst) break
+        const dstReal = tryCanonicalPath(dst)
+        const underDeny =
+          isSameOrChildPath(denyDir, dst) ||
+          isSameOrChildPath(denyDirReal, dstReal)
+        if (!underDeny) break
+        const group = tokens.slice(cursor, cursor + 3)
+        if (flag === '--ro-bind') {
+          // Only treat a `--ro-bind` as an `allowRead` restore mount if it is NOT
+          // the same path as or a child of any already-collected `--bind` mount.
+          // A `--ro-bind` at or below a writable `--bind` (e.g. `.git/hooks`,
+          // `.claude/settings.json`) is a `denyWrite` protection and MUST stay
+          // after `--bind` — stop scanning the block immediately.
+          const isDenyWriteUnderRw = rwRestorePaths.some(
+            rw =>
+              isSameOrChildPath(rw.raw, dst) ||
+              isSameOrChildPath(rw.real, dstReal),
+          )
+          if (isDenyWriteUnderRw) break
+          roRestoreMounts.push(group)
+        } else {
+          rwRestoreMounts.push(group)
+          rwRestorePaths.push({ raw: dst, real: dstReal })
+        }
+        cursor += 3
+      }
+
+      if (roRestoreMounts.length > 0 && rwRestoreMounts.length > 0) {
+        // Check if any --bind appeared before a --ro-bind in the original order
+        let seenBind = false
+        let needsReorder = false
+        for (let k = blockStart; k < cursor; k += 3) {
+          if (tokens[k]!.value === '--bind') {
+            seenBind = true
+          } else if (tokens[k]!.value === '--ro-bind' && seenBind) {
+            needsReorder = true
+            break
+          }
+        }
+        if (needsReorder) {
+          // Emit --ro-bind restore mounts first (shallow-first), then --bind restore mounts
+          const reordered = [...roRestoreMounts, ...rwRestoreMounts].flat()
+          // Preserve original leading separators for each slot
+          const originalSeps = tokens
+            .slice(blockStart, cursor)
+            .map(t => t.sep || ' ')
+          for (let k = 0; k < reordered.length; k++) {
+            tokens[blockStart + k] = {
+              ...reordered[k]!,
+              sep: originalSeps[k] ?? ' ',
+            }
+          }
+          changed = true
+        }
+      }
+      idx = cursor
+    } else {
+      idx++
+    }
+  }
+
+  if (!changed) return wrappedCommand
+  return tokens.map(t => `${t.sep}${t.raw}`).join('')
 }
 
 /**
@@ -905,27 +1321,13 @@ export function convertToSandboxRuntimeConfig(
     denyWrite.push(join(WSL_WINDOWS_MANAGED_PATH, 'managed-settings.d'))
   }
 
-  // Also block settings files in the current working directory if it differs from original
-  // This handles the case where the user has cd'd to a different directory
+  // Also block settings, skills, commands, agents, hooks, workflows, routines,
+  // and .mcp.json in original and current working directories (2.1.325 #2334).
   const cwd = getCwdState()
   const originalCwd = getOriginalCwd()
+  pushProtectedClaudeDirEntries(denyWrite, originalCwd)
   if (cwd !== originalCwd) {
-    denyWrite.push(
-      recordSymlinkedDenyPath(resolve(cwd, '.claude', 'settings.json')),
-    )
-    denyWrite.push(
-      recordSymlinkedDenyPath(resolve(cwd, '.claude', 'settings.local.json')),
-    )
-  }
-
-  // Block writes to .claude/skills in both original and current working directories.
-  // The sandbox-runtime's getDangerousDirectories() protects .claude/commands and
-  // .claude/agents but not .claude/skills. Skills have the same privilege level
-  // (auto-discovered, auto-loaded, full Claude capabilities) so they need the
-  // same OS-level sandbox protection.
-  denyWrite.push(resolve(originalCwd, '.claude', 'skills'))
-  if (cwd !== originalCwd) {
-    denyWrite.push(resolve(cwd, '.claude', 'skills'))
+    pushProtectedClaudeDirEntries(denyWrite, cwd)
   }
 
   // densable jEr: for (const p of lDs(RPo())) if absolute && !BFs(resolve(p))
@@ -1002,12 +1404,55 @@ export function convertToSandboxRuntimeConfig(
   )
 
   // Claude config — modifying these lets an attacker change model, auth,
-  // permission rules, hooks, MCP servers, or sandbox settings
-  denyWrite.push(
+  // permission rules, hooks, MCP servers, or sandbox settings.
+  // Official 2.1.323 #2025: also protect legacy config file (`.config.json`
+  // inside config dir / `~/.claude/.config.json`) and backup/lock siblings.
+  const claudeConfigDir = getClaudeConfigHomeDir()
+  const claudeConfigFiles = [
     join(home, '.claude'),
     join(home, '.claude.json'),
-    getClaudeConfigHomeDir(),
-  )
+    join(home, '.claude.json.backup'),
+    join(home, '.claude.json.lock'),
+    join(home, '.claude', '.config.json'),
+    join(home, '.claude', '.config.json.backup'),
+    join(home, '.claude', '.config.json.lock'),
+    claudeConfigDir,
+    join(claudeConfigDir, '.claude.json'),
+    join(claudeConfigDir, '.claude.json.backup'),
+    join(claudeConfigDir, '.claude.json.lock'),
+    join(claudeConfigDir, '.config.json'),
+    join(claudeConfigDir, '.config.json.backup'),
+    join(claudeConfigDir, '.config.json.lock'),
+  ]
+  for (const cfgPath of claudeConfigFiles) {
+    denyWrite.push(cfgPath)
+    try {
+      const realCfg = realpathSync(cfgPath)
+      if (realCfg !== cfgPath) denyWrite.push(realCfg)
+    } catch {
+      // File may not exist; literal denyWrite still protects it
+    }
+  }
+
+  // Official 2.1.323 #2027 (`Wb`): block sandboxed commands from reading (or
+  // writing) Claude Code's file checkpoint copies (`file-history`) and daemon
+  // state under the config directory.
+  for (const sub of ['file-history', 'daemon'] as const) {
+    const protectedDir = resolve(claudeConfigDir, sub)
+    denyRead.push(protectedDir)
+    denyWrite.push(protectedDir)
+    trustedDenyRoots.push(protectedDir)
+    try {
+      const realProtected = realpathSync(protectedDir)
+      if (realProtected !== protectedDir) {
+        denyRead.push(realProtected)
+        denyWrite.push(realProtected)
+        trustedDenyRoots.push(realProtected)
+      }
+    } catch {
+      // Directory may not exist yet; literal deny still applies
+    }
+  }
 
   // Git config — core.fsmonitor / core.sshCommand escape, credential helper
   // poisoning, insteadOf URL rewriting
@@ -1054,6 +1499,30 @@ export function convertToSandboxRuntimeConfig(
     join(home, 'runners'),
     join(home, 'actions-runner'),
   )
+
+  // Official 2.1.325 #2333 (`D5n`): protect the native updater's download
+  // staging folder (`$XDG_CACHE_HOME/claude/staging` or `~/.cache/claude/staging`).
+  const updaterStagingDir = getUpdaterStagingDir()
+  if (isAbsolute(updaterStagingDir)) {
+    denyWrite.push(recordSymlinkedDenyPath(updaterStagingDir))
+    if (getPlatform() === 'macos') {
+      const stagingGrandparent = dirname(dirname(updaterStagingDir))
+      try {
+        // eslint-disable-next-line custom-rules/no-sync-fs -- refreshConfig() must be sync
+        const realGrandparent = realpathSync(stagingGrandparent)
+        if (realGrandparent !== stagingGrandparent) {
+          denyWrite.push(
+            join(
+              realGrandparent,
+              relative(stagingGrandparent, updaterStagingDir),
+            ),
+          )
+        }
+      } catch {
+        // Grandparent may not exist yet; literal denyWrite still applies
+      }
+    }
+  }
 
   // Shared temp buffer used by inline-comments — modifying this could inject
   // content into the conversation context
@@ -1111,6 +1580,15 @@ export function convertToSandboxRuntimeConfig(
   const projectGitDir = join(originalCwd, '.git')
   const projectWorktreeConfig = join(projectGitDir, 'config.worktree')
   ensureLinuxGitWorktreeConfigPlaceholder(projectWorktreeConfig)
+  // Official 2.1.323 #2174: protect `.git/glab-cli` (and materialize placeholder
+  // on Linux/WSL if `.git` is a directory so `glab config set` / `glab config edit --local`
+  // fail read-only inside the sandbox).
+  const projectGlabDir = join(projectGitDir, 'glab-cli')
+  ensureLinuxGitWorktreeConfigPlaceholder(projectGlabDir)
+  // Official 2.1.323 #2177: protect `.git/worktrees` (and materialize placeholder
+  // on Linux/WSL if missing so `git worktree add/move/remove` and commits to
+  // ungranted worktrees fail read-only).
+  const projectWorktreesDir = join(projectGitDir, 'worktrees')
   denyWrite.push(
     join(projectGitDir, 'hooks'),
     join(projectGitDir, 'config'),
@@ -1118,10 +1596,10 @@ export function convertToSandboxRuntimeConfig(
     projectWorktreeConfig,
     join(projectGitDir, 'config.worktree.lock'),
     join(projectGitDir, 'commondir'),
-    join(projectGitDir, 'worktrees'),
+    projectWorktreesDir,
     join(originalCwd, '.gitmodules'),
     join(projectGitDir, 'info', 'exclude'),
-    join(projectGitDir, 'glab-cli'),
+    projectGlabDir,
   )
   pushLinkedWorktreeConfigDenyWrite(denyWrite, projectGitDir)
 
@@ -1177,12 +1655,6 @@ export function convertToSandboxRuntimeConfig(
     // Directory may not exist if mkdirSync failed.
   }
 
-  // densable WZ returns the main `.git` dir (not the repo root). Worktree
-  // git ops need write access there for index.lock etc.
-  if (worktreeMainRepoPath && worktreeMainRepoPath !== cwd) {
-    allowWrite.push(worktreeMainRepoPath)
-  }
-
   // Include directories added via --add-dir CLI flag or /add-dir command.
   // These must be in allowWrite so that Bash commands (which run inside the
   // sandbox) can access them — not just file tools, which check permissions
@@ -1197,6 +1669,74 @@ export function convertToSandboxRuntimeConfig(
     ...getAdditionalDirectoriesForClaudeMd(),
   ])
   allowWrite.push(...additionalDirs)
+
+  // Official 2.1.325 #2358 (`jf` / `_o`): refuse sandboxed writes to `.claude`
+  // settings, skills, agents, commands, hooks, and `.mcp.json` in added
+  // directories, matching the launch folder protection.
+  for (const addedDir of additionalDirs) {
+    if (!addedDir || pathHasGlobChars(addedDir)) continue
+    pushProtectedClaudeDirEntries(denyWrite, addedDir)
+    if (getPlatform() === 'macos') {
+      try {
+        // eslint-disable-next-line custom-rules/no-sync-fs -- refreshConfig() must be sync
+        const realAddedDir = realpathSync(addedDir)
+        if (realAddedDir !== addedDir) {
+          pushProtectedClaudeDirEntries(denyWrite, realAddedDir)
+        }
+      } catch {
+        // Directory may not exist yet
+      }
+    }
+  }
+
+  // Official 2.1.323 #2177/#2174 + 2.1.325 #2334/#2335 (`Hf` / `$r`):
+  // Protect linked worktrees' shared git folder (`commonDir`), main repo
+  // `.claude` settings/hooks, and `<commonDir>/.git` across originalCwd, cwd,
+  // cached startup worktree, and any added worktree directories.
+  const linkedWorktreeCommonDirs = new Set<string>()
+  const worktreeCheckDirs = new Set<string>([originalCwd, cwd])
+  for (const addedDir of additionalDirs) {
+    if (addedDir && !pathHasGlobChars(addedDir)) {
+      worktreeCheckDirs.add(addedDir)
+    }
+  }
+  if (worktreeMainRepoPath) {
+    linkedWorktreeCommonDirs.add(worktreeMainRepoPath)
+  }
+  for (const dir of worktreeCheckDirs) {
+    const detected = detectWorktreeMainRepoPath(dir)
+    if (detected) {
+      linkedWorktreeCommonDirs.add(detected)
+      // Protect `.git` file inside a linked worktree from tampering
+      const wtDotGit = join(dir, '.git')
+      try {
+        // eslint-disable-next-line custom-rules/no-sync-fs -- refreshConfig() must be sync
+        if (lstatSync(wtDotGit).isFile()) {
+          denyWrite.push(wtDotGit)
+        }
+      } catch {
+        // Ignore if vanished
+      }
+    }
+  }
+  for (const commonDir of linkedWorktreeCommonDirs) {
+    if (commonDir !== cwd && !allowWrite.includes(commonDir)) {
+      allowWrite.push(commonDir)
+    }
+    pushGitDirMetadataDenyWrite(denyWrite, commonDir)
+    guardWorktreeCommonDirDotGit(denyWrite, commonDir)
+    // Also protect the main repo root's `.claude` settings & hooks (#2334)
+    if (basename(commonDir) === '.git') {
+      const mainRepoRoot = dirname(commonDir)
+      if (
+        mainRepoRoot &&
+        mainRepoRoot !== originalCwd &&
+        mainRepoRoot !== cwd
+      ) {
+        pushProtectedClaudeDirEntries(denyWrite, mainRepoRoot)
+      }
+    }
+  }
 
   // Iterate through each settings source to resolve paths correctly
   // Path patterns like `/foo` are relative to the settings file directory,
@@ -1360,6 +1900,29 @@ export function convertToSandboxRuntimeConfig(
         if (realF !== f) denyWrite.push(realF)
       } catch {
         // Ignore
+      }
+    }
+  }
+
+  // Official 2.1.323 #2175 (`N3`): on macOS, Linux, and WSL, ignore write
+  // access granted through a symlink inside a writable folder that leads
+  // elsewhere or to a missing path; users must grant the real path instead.
+  const currentPlat = getPlatform()
+  if (
+    currentPlat === 'macos' ||
+    currentPlat === 'linux' ||
+    currentPlat === 'wsl'
+  ) {
+    const tempDir = getClaudeTempDir()
+    for (let i = allowWrite.length - 1; i >= 0; i--) {
+      const entry = allowWrite[i]
+      if (!entry || entry === '.' || entry === tempDir) continue
+      if (isAllowWriteSymlinkEscapingOrDangling(entry, currentPlat)) {
+        logForDebugging(
+          `[Sandbox] Ignoring allowWrite entry "${entry}": it passes through a symlink leading elsewhere or to a missing path (grant the real path instead)`,
+          { level: 'warn' },
+        )
+        allowWrite.splice(i, 1)
       }
     }
   }
@@ -1817,11 +2380,11 @@ function defaultTryBubblewrap(bwrapPath: string): {
   try {
     const res = spawnSync(bwrapPath, APPARMOR_BWRAP_TRIAL_ARGS, {
       cwd: '/',
-      env: {
+      env: sandboxHelperSubprocessEnv({
         PATH: '/usr/bin:/bin',
         USER_TYPE: 'external',
         NODE_ENV: 'production',
-      },
+      }),
       stdio: ['ignore', 'ignore', 'pipe'],
       timeout: APPARMOR_BWRAP_TRIAL_TIMEOUT_MS,
       encoding: 'utf8',
@@ -1838,6 +2401,40 @@ function defaultTryBubblewrap(bwrapPath: string): {
     return { ran: false, exitCode: null, stderr: '' }
   }
 }
+
+/**
+ * Official 2.1.325 #2371/#2372 (SEA `g1(d3)`):
+ * Run a synchronous sandbox-runtime helper call with Claude Code's sign-in
+ * tokens, API keys, and `CLAUDE_CODE_CLIENT_KEY_PASSPHRASE` temporarily
+ * removed from `process.env` so child probes (`which`, `bwrap --version`,
+ * `npm root -g`, `rg`) never inherit them. Safe because JS is single-threaded
+ * across synchronous calls.
+ */
+function withStrippedSandboxHelperEnvSync<T>(fn: () => T): T {
+  const sanitized = sandboxHelperSubprocessEnv(process.env)
+  const removed: Array<[string, string | undefined]> = []
+  for (const key of Object.keys(process.env)) {
+    if (!(key in sanitized)) {
+      removed.push([key, process.env[key]])
+      delete process.env[key]
+    }
+  }
+  try {
+    return fn()
+  } finally {
+    for (const [key, val] of removed) {
+      if (val !== undefined) {
+        process.env[key] = val
+      }
+    }
+  }
+}
+
+// Forward-compatible hook for sandbox-runtime versions exposing helper env provider
+const baseSandboxWithHelperEnv = BaseSandboxManager as unknown as {
+  setHelperEnvProvider?: (provider: () => NodeJS.ProcessEnv) => void
+}
+baseSandboxWithHelperEnv.setHelperEnvProvider?.(sandboxHelperSubprocessEnv)
 
 /**
  * Official 325 `$W` (#1207): detect Ubuntu AppArmor unprivileged userns restriction
@@ -1885,10 +2482,12 @@ export function detectLinuxAppArmorUsernsRestriction(
 
 const checkDependencies = memoize((): SandboxDependencyCheck => {
   const { rgPath, rgArgs } = ripgrepCommand()
-  const base = BaseSandboxManager.checkDependencies({
-    command: rgPath,
-    args: rgArgs,
-  })
+  const base = withStrippedSandboxHelperEnvSync(() =>
+    BaseSandboxManager.checkDependencies({
+      command: rgPath,
+      args: rgArgs,
+    }),
+  )
   const platform = getPlatform()
   if (
     (platform === 'linux' || platform === 'wsl') &&
@@ -1903,31 +2502,136 @@ const checkDependencies = memoize((): SandboxDependencyCheck => {
   return base
 })
 
+// Official 2.1.323 #2017 (`Da` / `cV`): keep the sandbox on if it was already
+// enabled during the session and settings subsequently fail to read. While held
+// on by unreadable settings, auto-allow is off and dangerouslyDisableSandbox is
+// ignored until settings can be read again.
+let sandboxWasEnabled = false
+let isHeldOnByFailedSettingsRead = false
+// Official 2.1.325 #2374 (`startedOnce` / `hostedToolContainer` / `W3` / `V3`):
+// Track whether the sandbox started once in this session and whether this
+// process is running inside Anthropic's hosted cloud container.
+let sandboxStartedOnce = false
+let hostedToolContainer = false
+
+export function _resetSandboxHeldStateForTesting(): void {
+  sandboxWasEnabled = false
+  isHeldOnByFailedSettingsRead = false
+  sandboxStartedOnce = false
+  hostedToolContainer = false
+}
+
+export function markHostedToolContainer(value = true): void {
+  hostedToolContainer = value
+}
+
+export function isSandboxHeldOnByFailedSettingsRead(): boolean {
+  getSandboxEnabledSetting()
+  return isHeldOnByFailedSettingsRead
+}
+
+function setSandboxHeldOnByFailedRead(held: boolean): void {
+  if (held === isHeldOnByFailedSettingsRead) return
+  isHeldOnByFailedSettingsRead = held
+  logForDebugging(
+    held
+      ? '[sandbox] The settings could not be read, so the sandbox stays on; auto-allow is off and dangerouslyDisableSandbox is ignored until they can be read again'
+      : '[sandbox] The sandbox is no longer kept on by unreadable settings and follows the settings again',
+    { level: 'warn' },
+  )
+}
+
 function getSandboxEnabledSetting(): boolean {
   try {
     const settings = getSettings_DEPRECATED()
-    return settings?.sandbox?.enabled ?? false
+    if (settings == null) {
+      setSandboxHeldOnByFailedRead(sandboxWasEnabled)
+      return sandboxWasEnabled
+    }
+    const enabled = settings?.sandbox?.enabled ?? false
+    if (enabled) {
+      sandboxWasEnabled = true
+    }
+    setSandboxHeldOnByFailedRead(false)
+    return enabled
   } catch (error) {
     logForDebugging(`Failed to get settings for sandbox check: ${error}`)
-    return false
+    setSandboxHeldOnByFailedRead(sandboxWasEnabled)
+    return sandboxWasEnabled
   }
 }
 
+/**
+ * Official 2.1.325 #2353 & #2354 (`_pe`):
+ * - `autoAllowBashIfSandboxed` defaults to `false` (sandboxed Bash commands
+ *   follow the normal permission flow unless explicitly set to `true`).
+ * - When managed settings (`policySettings`) turn the sandbox on, auto-allow
+ *   only applies if the highest-ranking managed source explicitly sets
+ *   `autoAllowBashIfSandboxed: true`.
+ */
 function isAutoAllowBashIfSandboxedEnabled(): boolean {
+  if (isSandboxHeldOnByFailedSettingsRead()) {
+    return false
+  }
+  const policySandbox = getSettingsForSource('policySettings')?.sandbox
+  if (policySandbox?.enabled === true) {
+    return policySandbox.autoAllowBashIfSandboxed === true
+  }
+  if (policySandbox?.autoAllowBashIfSandboxed === false) {
+    return false
+  }
   const settings = getSettings_DEPRECATED()
-  return settings?.sandbox?.autoAllowBashIfSandboxed ?? true
+  return settings?.sandbox?.autoAllowBashIfSandboxed ?? false
 }
 
 function areUnsandboxedCommandsAllowed(): boolean {
+  if (isSandboxHeldOnByFailedSettingsRead()) {
+    return false
+  }
   const settings = getSettings_DEPRECATED()
   return settings?.sandbox?.allowUnsandboxedCommands ?? true
 }
 
-function isSandboxRequired(): boolean {
+function isSandboxRequiredBySettings(): boolean {
   const settings = getSettings_DEPRECATED()
   return (
     getSandboxEnabledSetting() &&
+    isPlatformInEnabledList() &&
     (settings?.sandbox?.failIfUnavailable ?? false)
+  )
+}
+
+/**
+ * Official 2.1.325 #2374 (`W3` / `V3`):
+ * Claude Code on the web, cloud scheduled tasks, and Cowork cloud sessions
+ * run inside an isolated hosted Linux container without a command sandbox
+ * (`bwrap`). Set aside `sandbox.failIfUnavailable` so those sessions can start
+ * with a warning instead of exiting fatally.
+ */
+function wouldSetAsideSandboxRequirementInHostedWorker(): boolean {
+  const isHostedLinuxContainer =
+    getPlatform() === 'linux' &&
+    process.env.CLAUDE_CODE_ENVIRONMENT_KIND === undefined &&
+    (hostedToolContainer ||
+      (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) &&
+        Boolean(
+          process.env.CLAUDE_CODE_REMOTE_SESSION_ID ||
+            process.env.CLAUDE_CODE_CONTAINER_ID,
+        )))
+  if (!isHostedLinuxContainer) return false
+  if (!isSandboxRequiredBySettings() || sandboxStartedOnce) return false
+  const deps = checkDependencies()
+  return deps.errors.length > 0
+}
+
+function isSandboxRequirementSetAsideInHostedWorker(): boolean {
+  return wouldSetAsideSandboxRequirementInHostedWorker()
+}
+
+function isSandboxRequired(): boolean {
+  return (
+    isSandboxRequiredBySettings() &&
+    !isSandboxRequirementSetAsideInHostedWorker()
   )
 }
 
@@ -2307,7 +3011,7 @@ async function setSandboxSettings(options: {
   // Note: Memoized caches auto-invalidate when settings change because they use
   // the settings object as the cache key (new settings object = cache miss)
 
-  return updateSettingsForSource('localSettings', {
+  const result = updateSettingsForSource('localSettings', {
     sandbox: {
       ...existingSettings?.sandbox,
       ...(options.enabled !== undefined && { enabled: options.enabled }),
@@ -2319,6 +3023,11 @@ async function setSandboxSettings(options: {
       }),
     },
   })
+  if (!result.error && options.enabled === false) {
+    sandboxWasEnabled = false
+    setSandboxHeldOnByFailedRead(false)
+  }
+  return result
 }
 
 /**
@@ -2345,9 +3054,12 @@ async function wrapWithSandbox(
     } else {
       throw new Error('Sandbox failed to initialize. ')
     }
-    // densable wrap: await fN(), pN(), VZ(), FZ()
+    // densable wrap: await fN(), pN(), VZ(), FZ(), Ahe()
     await ensureBridgeSpawnRootDirForWrap()
     ensureAtomicWriteStagingDirs()
+    if (!resolveSandboxFilesystemDisabled()) {
+      ensureUpdaterStagingDir()
+    }
     promoteDenyLiteralSymlinkTargets({
       getConfig: () => BaseSandboxManager.getConfig?.(),
       updateConfig: cfg => {
@@ -2368,12 +3080,25 @@ async function wrapWithSandbox(
   // override.disabled??false, else session). When disabled, package skips FS
   // mounts while still applying credentials.envVars unset/set (Vzi). No host
   // rewrite of path lists needed.
-  return BaseSandboxManager.wrapWithSandbox(
+  const wrapped = await BaseSandboxManager.wrapWithSandbox(
     command,
     binShell,
     customConfig,
     abortSignal,
   )
+  const plat = getPlatform()
+  // 2.1.323 #2207: Harden macOS Seatbelt profile so `lsof` and similar tools
+  // cannot inspect processes outside the sandbox.
+  if (plat === 'macos') {
+    return hardenMacOsSeatbeltProcessInfo(wrapped)
+  }
+  // 2.1.325 #2340: Ensure `--ro-bind` allowRead mounts precede `--bind`
+  // writePath mounts after `--tmpfs <denyRead>` so bwrap does not fail with
+  // `Can't create file` when cwd is below an `allowRead` inside a `denyRead`.
+  if (plat === 'linux' || plat === 'wsl') {
+    return fixLinuxBwrapAllowReadMountOrder(wrapped)
+  }
+  return wrapped
 }
 
 /**
@@ -2438,6 +3163,7 @@ async function initialize(
 
       // Log monitor is automatically enabled for macOS
       await BaseSandboxManager.initialize(runtimeConfig, wrappedCallback)
+      sandboxStartedOnce = true
       finishSandboxInitializeAllowlist(runtimeConfig)
       // densable FZ — record wrap write roots after init (yN)
       recordWrapWriteRoots(runtimeConfig)
@@ -2508,6 +3234,8 @@ async function reset(): Promise<void> {
   checkDependencies.cache.clear?.()
   isSupportedPlatform.cache.clear?.()
   initializationPromise = undefined
+  sandboxStartedOnce = false
+  hostedToolContainer = false
 
   // Reset the base sandbox manager
   return BaseSandboxManager.reset()
@@ -2607,6 +3335,9 @@ export interface ISandboxManager {
   isAutoAllowBashIfSandboxedEnabled(): boolean
   areUnsandboxedCommandsAllowed(): boolean
   isSandboxRequired(): boolean
+  isSandboxRequirementSetAsideInHostedWorker(): boolean
+  wouldSetAsideSandboxRequirementInHostedWorker(): boolean
+  markHostedToolContainer(value?: boolean): void
   areSandboxSettingsLockedByPolicy(): boolean
   isStrictSandboxModeConfigured(): boolean
   setSandboxSettings(options: {
@@ -2814,6 +3545,9 @@ export const SandboxManager: ISandboxManager = {
   isAutoAllowBashIfSandboxedEnabled,
   areUnsandboxedCommandsAllowed,
   isSandboxRequired,
+  isSandboxRequirementSetAsideInHostedWorker,
+  wouldSetAsideSandboxRequirementInHostedWorker,
+  markHostedToolContainer,
   areSandboxSettingsLockedByPolicy,
   isStrictSandboxModeConfigured,
   setSandboxSettings,

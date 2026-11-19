@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'async_hooks'
-import { appendFile, mkdir, symlink, unlink } from 'fs/promises'
+import { appendFile, lstat, mkdir, symlink, unlink } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
-import { dirname, join, resolve } from 'path'
+import { basename, dirname, join, resolve } from 'path'
 import { getSessionId } from 'src/bootstrap/state.js'
 
 import { type BufferedWriter, createBufferedWriter } from './bufferedWriter.js'
@@ -479,20 +479,46 @@ export function getDebugLogPath(): string {
 }
 
 /**
+ * Updates the `latest` debug log symlink in `dirname(debugLogPath)` to point
+ * to `debugLogPath`.
+ *
+ * Official 2.1.323 (#2086, @278280405):
+ * - Never create/replace `latest` when `debugLogPath` itself is named `latest`
+ *   (case-insensitive).
+ * - Never unlink or replace an existing non-symlink file or directory named
+ *   `latest` in the debug log's folder.
+ */
+export async function updateLatestDebugLogSymlinkForPath(
+  debugLogPath: string,
+): Promise<boolean> {
+  try {
+    if (basename(debugLogPath).toLowerCase() === 'latest') {
+      return false
+    }
+    const debugLogsDir = dirname(debugLogPath)
+    const latestSymlinkPath = join(debugLogsDir, 'latest')
+
+    const existing = await lstat(latestSymlinkPath).catch(() => null)
+    if (existing !== null) {
+      if (!existing.isSymbolicLink()) {
+        return false
+      }
+      await unlink(latestSymlinkPath).catch(() => {})
+    }
+    await symlink(debugLogPath, latestSymlinkPath)
+    return true
+  } catch {
+    // Silently fail if symlink creation fails
+    return false
+  }
+}
+
+/**
  * Updates the latest debug log symlink to point to the current debug log file.
  * Creates or updates a symlink at ~/.claude/debug/latest
  */
 const updateLatestDebugLogSymlink = memoize(async (): Promise<void> => {
-  try {
-    const debugLogPath = getDebugLogPath()
-    const debugLogsDir = dirname(debugLogPath)
-    const latestSymlinkPath = join(debugLogsDir, 'latest')
-
-    await unlink(latestSymlinkPath).catch(() => {})
-    await symlink(debugLogPath, latestSymlinkPath)
-  } catch {
-    // Silently fail if symlink creation fails
-  }
+  await updateLatestDebugLogSymlinkForPath(getDebugLogPath())
 })
 
 /**

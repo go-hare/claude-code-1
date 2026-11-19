@@ -40,6 +40,7 @@ import {
   clearPluginAgentCache,
   loadPluginAgents,
 } from 'src/utils/plugins/loadPluginAgents.js'
+import { registerStrictPluginOnlyChangeCallback } from 'src/utils/settings/pluginOnlyPolicy.js'
 import { HooksSchema, type HooksSettings } from 'src/utils/settings/types.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import { FILE_EDIT_TOOL_NAME } from '../FileEditTool/constants.js'
@@ -441,6 +442,12 @@ export function clearAgentDefinitionsCache(): void {
   loadMarkdownFilesForSubdir.cache?.clear?.()
   clearPluginAgentCache()
 }
+
+// Official 2.1.325 #2332: invalidate cached agents when managed
+// strictPluginOnlyCustomization changes mid-session.
+registerStrictPluginOnlyChangeCallback(() => {
+  clearAgentDefinitionsCache()
+})
 
 /**
  * densable 2.1.218: agent markdown `name` must not start with "-" or contain

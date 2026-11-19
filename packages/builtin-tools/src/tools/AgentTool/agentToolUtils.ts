@@ -702,9 +702,31 @@ export function isSubagentSafeguardsRefusal(
   )
 }
 
+/**
+ * 2.1.323 #2079 (official `Qzn(s) !== undefined || u1r(s)`): checks whether
+ * `refusingModel` actually has another model to switch to under refusal
+ * fallback. Models with no alternative (e.g. non-Anthropic/custom/haiku/legacy
+ * models with no mapped fallback target) should NOT be told that automatic
+ * model switching is off.
+ */
+export function hasRefusalFallbackTargetForModel(
+  refusingModel: string | undefined,
+): boolean {
+  if (!refusingModel) return false
+  const lower = refusingModel.toLowerCase()
+  if (!lower.includes('claude-')) return false
+  // Models in the Opus/Sonnet 4.x/5.x lineup (or when catch-all fallback is enabled)
+  // have a refusal-fallback model to switch to.
+  if (lower.includes('opus') || lower.includes('sonnet')) {
+    return true
+  }
+  return false
+}
+
 export function formatSubagentSafeguardsGuidance(
   message: MessageType,
   canSpawnNewAgent: boolean,
+  hasFallbackModel?: boolean,
 ): string {
   const raw = message as MessageType & {
     refusingModel?: string
@@ -712,9 +734,12 @@ export function formatSubagentSafeguardsGuidance(
       stop_details?: { category?: unknown } | null
     }
   }
-  const hasRefusingModel = raw.refusingModel !== undefined
+  const canSwitchToOtherModel =
+    hasFallbackModel ?? hasRefusalFallbackTargetForModel(raw.refusingModel)
   const lead =
-    !isRefusalFallbackEnabled() && hasRefusingModel
+    !isRefusalFallbackEnabled() &&
+    raw.refusingModel !== undefined &&
+    canSwitchToOtherModel
       ? 'Safeguards stopped this agent, and automatic model switching is off.'
       : 'Safeguards stopped this agent.'
   const stopDetails = raw.message?.stop_details

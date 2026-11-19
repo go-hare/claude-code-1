@@ -1,13 +1,24 @@
 import type { z } from 'zod/v4'
+import { resolve } from 'path'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
-import { getOriginalCwd } from 'src/bootstrap/state.js'
+import {
+  getAdditionalDirectoriesForClaudeMd,
+  getOriginalCwd,
+} from 'src/bootstrap/state.js'
 import {
   extractOutputRedirections,
   splitCommand_DEPRECATED,
 } from 'src/utils/bash/commands.js'
 import { tryParseShellCommand } from 'src/utils/bash/shellQuote.js'
+import { isPathTrusted } from 'src/utils/config.js'
 import { getCwd } from 'src/utils/cwd.js'
-import { isCurrentDirectoryBareGitRepo } from 'src/utils/git.js'
+import { isEnvTruthy } from 'src/utils/envUtils.js'
+import { getFsImplementation } from 'src/utils/fsOperations.js'
+import {
+  findCanonicalGitRoot,
+  findGitRoot,
+  isCurrentDirectoryBareGitRepo,
+} from 'src/utils/git.js'
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js'
 import { getPlatform } from 'src/utils/platform.js'
 import { SandboxManager } from 'src/utils/sandbox/sandbox-adapter.js'
@@ -1023,12 +1034,40 @@ const COMMAND_ALLOWLIST: Record<string, CommandConfig> = {
       '-u': 'string',
       // OMITTED (writes to disk): -D (device cache file build/update)
     },
-    // Block +m (create mount supplement file) — writes to disk.
-    // +prefix flags are treated as positional args by validateFlags,
-    // so we must catch them here. lsof accepts +m<path> (attached path, no space)
-    // with both absolute (+m/tmp/evil) and relative (+mfoo, +m.evil) paths.
-    additionalCommandIsDangerousCallback: (_rawCommand, args) =>
-      args.some(a => a === '+m' || a.startsWith('+m')),
+    // Official 2.1.323 #2010: block +m (create mount supplement file),
+    // -i with hostnames/tilde (triggers DNS lookup), unknown + flags,
+    // attached non-alpha short flags, and malformed numeric args after -[LSor].
+    additionalCommandIsDangerousCallback: (_rawCommand, args) => {
+      const safePlusFlagRe = /^\+(?:[DEMdew]|c\d*|f[cfgGn]*|[Lr]\d*)?$/
+      const numericFlagRe = /^[-+][a-zA-Z]*[LSor]$/
+      for (let i = 0; i < args.length; i++) {
+        const arg = args[i]!
+        if (arg === '+m' || arg.startsWith('+m')) return true
+        // lsof -i4@hostname / -i@hostname triggers DNS lookup
+        if (/^-[a-zA-Z]*i\S*@/.test(arg)) {
+          const afterAt = arg.slice(arg.indexOf('@') + 1)
+          const colonIdx = afterAt.indexOf(':')
+          const host = colonIdx >= 0 ? afterAt.slice(0, colonIdx) : afterAt
+          if (/[a-zA-Z]/.test(host)) return true
+        }
+        if (/^-[a-zA-Z]*i$/.test(arg)) {
+          const next = args[i + 1] ?? ''
+          if (next.includes('~')) return true
+          if (next.includes('@')) {
+            const afterAt = next.slice(next.indexOf('@') + 1)
+            const colonIdx = afterAt.indexOf(':')
+            const host = colonIdx >= 0 ? afterAt.slice(0, colonIdx) : afterAt
+            if (/[a-zA-Z]/.test(host)) return true
+          }
+        }
+        if (arg !== '--' && /^-[a-zA-Z]*[^a-zA-Z]/.test(arg)) return true
+        if (arg.startsWith('+') && !safePlusFlagRe.test(arg)) return true
+        if (/^\d+\D/.test(arg) && numericFlagRe.test(args[i - 1] ?? '')) {
+          return true
+        }
+      }
+      return false
+    },
   },
 
   pgrep: {
@@ -1998,6 +2037,50 @@ export function expandSafeDoubleQuotedPwd(
   )
 }
 
+/**
+ * Official 2.1.323 #2135 (`upn` / `dnt` / `cpn`):
+ * On Windows, file-reading commands that accept a path list (`-c`/`--check`,
+ * `@file`, `--files0-from`) or wildcard expansion cannot be auto-allowed as
+ * read-only because Windows path-list / glob expansion can traverse arbitrary
+ * paths outside permission checks.
+ */
+function matchesLongOptionPrefix(arg: string, longOpt: string): boolean {
+  const eqIdx = arg.indexOf('=')
+  const head = eqIdx >= 0 ? arg.slice(0, eqIdx) : arg
+  return head.length > 2 && longOpt.startsWith(head)
+}
+
+const isCheckFlag = (arg: string): boolean =>
+  /^-[^-]*c/.test(arg) || matchesLongOptionPrefix(arg, '--check')
+
+const isFiles0FromFlag = (arg: string): boolean =>
+  matchesLongOptionPrefix(arg, '--files0-from')
+
+const WINDOWS_PATH_LIST_READ_COMMANDS = new Map<
+  string,
+  (arg: string) => boolean
+>([
+  ['sha256sum', isCheckFlag],
+  ['sha1sum', isCheckFlag],
+  ['md5sum', isCheckFlag],
+  ['strings', arg => arg.startsWith('@')],
+  ['wc', isFiles0FromFlag],
+  ['du', isFiles0FromFlag],
+])
+
+export function isWindowsPathListReadCommandBlocked(
+  cmdName: string,
+  args: readonly string[],
+  hasGlob: boolean,
+  platform: ReturnType<typeof getPlatform> = getPlatform(),
+): boolean {
+  if (platform !== 'windows') return false
+  const checker = WINDOWS_PATH_LIST_READ_COMMANDS.get(cmdName)
+  if (!checker) return false
+  if (hasGlob) return true
+  return args.some(arg => checker(arg))
+}
+
 function isCommandReadOnly(command: string): boolean {
   // Handle common stderr-to-stdout redirection pattern
   // This handles both "command 2>&1" at the end of a full command
@@ -2031,8 +2114,18 @@ function isCommandReadOnly(command: string): boolean {
   if (expansion === 'variable') {
     return false
   }
+  const splitTokens = testCommand.trim().split(/\s+/)
+  const firstWord = splitTokens[0] ?? ''
+  if (
+    isWindowsPathListReadCommandBlocked(
+      firstWord,
+      splitTokens.slice(1),
+      expansion === 'glob',
+    )
+  ) {
+    return false
+  }
   if (expansion === 'glob') {
-    const firstWord = testCommand.trim().split(/\s+/)[0] ?? ''
     if (!SAFE_GLOB_READONLY_COMMANDS.has(firstWord)) {
       return false
     }
@@ -2299,15 +2392,28 @@ export function checkReadOnlyConstraints(
   // Race condition: a sandboxed command can create bare repo files in a subdirectory,
   // and a backgrounded git command (e.g. sleep 10 && git status) would pass the
   // isCurrentDirectoryBareGitRepo() check at evaluation time before the files exist.
+  // Official 2.1.323 #2128: on Linux with CLAUDE_CODE_SUBPROCESS_ENV_SCRUB set,
+  // compare canonical paths so symlinked workspaces do not falsely fail the
+  // original-cwd check and force read-only git commands to prompt / fail in -p.
   if (
     hasGitCommand &&
     SandboxManager.isSandboxingEnabled() &&
     getCwd() !== getOriginalCwd()
   ) {
-    return {
-      behavior: 'passthrough',
-      message:
-        'Git commands outside the original working directory require permission checks when sandbox is enabled',
+    let sameRealCwd = false
+    try {
+      const fs = getFsImplementation()
+      sameRealCwd =
+        fs.realpathSync(getCwd()) === fs.realpathSync(getOriginalCwd())
+    } catch {
+      sameRealCwd = false
+    }
+    if (!sameRealCwd) {
+      return {
+        behavior: 'passthrough',
+        message:
+          'Git commands outside the original working directory require permission checks when sandbox is enabled',
+      }
     }
   }
 
@@ -2321,6 +2427,16 @@ export function checkReadOnlyConstraints(
     },
   )
 
+  if (allSubcommandsReadOnly && hasGitCommand) {
+    const untrustedRepoReason = checkReadOnlyGitRepositoryTrust()
+    if (untrustedRepoReason !== undefined) {
+      return {
+        behavior: 'passthrough',
+        message: untrustedRepoReason,
+      }
+    }
+  }
+
   if (allSubcommandsReadOnly) {
     return {
       behavior: 'allow',
@@ -2333,4 +2449,78 @@ export function checkReadOnlyConstraints(
     behavior: 'passthrough',
     message: 'Command is not read-only, requires further permission checks',
   }
+}
+
+/**
+ * Official 2.1.325 #2355 (`Cyo` / `qhr` @289958137):
+ * When a read-only `git` command runs from a directory outside `originalCwd`,
+ * verify that the git repository it resolves to belongs to the project, a
+ * directory the user previously trusted, or a directory explicitly passed via
+ * `--add-dir` (CLI `getAdditionalDirectoriesForClaudeMd()`), NOT merely from
+ * the `permissions.additionalDirectories` setting.
+ */
+export function checkReadOnlyGitRepositoryTrust(
+  cwd: string = getCwd(),
+  originalCwd: string = getOriginalCwd(),
+): string | undefined {
+  if (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)) {
+    return undefined
+  }
+  const fs = getFsImplementation()
+  const canon = (p: string): string => {
+    try {
+      return fs.realpathSync(resolve(p))
+    } catch {
+      return resolve(p)
+    }
+  }
+  const canonCwd = canon(cwd)
+  const canonOriginal = canon(originalCwd)
+  if (canonCwd === canonOriginal) {
+    return undefined
+  }
+  const checkoutRoot = findGitRoot(cwd)
+  if (checkoutRoot === null) {
+    return undefined
+  }
+  const canonCheckout = canon(checkoutRoot)
+  const canonCheckoutMain = canon(
+    findCanonicalGitRoot(checkoutRoot) ?? checkoutRoot,
+  )
+
+  const matchesRepo = (candidateDir: string): boolean => {
+    const canonCand = canon(candidateDir)
+    if (canonCand === canonCheckout || canonCand === canonCheckoutMain) {
+      return true
+    }
+    const candGit = findGitRoot(candidateDir)
+    if (candGit !== null) {
+      const canonCandGit = canon(candGit)
+      const canonCandMain = canon(findCanonicalGitRoot(candGit) ?? candGit)
+      if (
+        canonCandGit === canonCheckout ||
+        canonCandMain === canonCheckoutMain
+      ) {
+        return true
+      }
+    }
+    return false
+  }
+
+  // 1. Same repository as the project launch directory
+  if (matchesRepo(originalCwd)) {
+    return undefined
+  }
+  // 2. Persisted trust on this checkout or its canonical repo root
+  if (isPathTrusted(checkoutRoot) || isPathTrusted(canonCheckoutMain)) {
+    return undefined
+  }
+  // 3. Explicitly named with CLI `--add-dir` (NOT `additionalDirectories` setting)
+  for (const cliAddDir of getAdditionalDirectoriesForClaudeMd()) {
+    if (matchesRepo(cliAddDir)) {
+      return undefined
+    }
+  }
+
+  return `Git would use a repository that Claude Code cannot match to this project or to one you trusted. Its settings can make git run programs. If you trust it, start Claude Code there once and accept the trust dialog, or name it with --add-dir at the start, which also loads its skills and commands. Its folder: "${checkoutRoot}"`
 }

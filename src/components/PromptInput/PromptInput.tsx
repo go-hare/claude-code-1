@@ -2950,7 +2950,10 @@ function PromptInput({
     }
 
     // Detect failed Alt shortcuts on macOS (Option key produces special characters)
-    if (getPlatform() === 'macos' && isMacosOptionChar(char)) {
+    // Official 2.1.323 (#2100): only show hint when prompt is empty (`D.value === ""`),
+    // so typing ø or π inside words on Danish/Norwegian/Faroese/Greek layouts does not
+    // trigger the Option-key hint.
+    if (getPlatform() === 'macos' && isMacosOptionChar(char) && liveInputRef.current === '') {
       const shortcut = MACOS_OPTION_SPECIAL_CHARS[char];
       const terminalName = getNativeCSIuTerminalDisplayName();
       const jsx = terminalName ? (
@@ -3170,10 +3173,18 @@ function PromptInput({
   // tightly wraps the text input so they map directly to (column, line)
   // in the Cursor wrap model. MeasuredText.getOffsetFromPosition handles
   // wide chars, wrapped lines, and clamps past-end clicks to line end.
-  // densable prompt box leftover: Ne minus measured above-prompt, then footer lines.
+  // Official 2.1.323 (#2067): account for multi-row status line height so a
+  // long prompt cannot push extra status line rows off screen in fullscreen.
+  const statusLineText = useAppState(s => s.statusLineText);
+  const extraStatusLineRows = useMemo(() => {
+    if (!statusLineText) return 0;
+    const lineCount = statusLineText.split('\n').length;
+    return Math.max(0, lineCount - 1);
+  }, [statusLineText]);
+  // densable prompt box leftover: Ne minus measured above-prompt, then footer + multi-row status line.
   const promptChromeBudget = useContext(PromptChromeBudgetContext);
   const maxVisibleLines = isFullscreenEnvEnabled()
-    ? Math.max(0, (promptChromeBudget ?? Math.floor(rows / 2)) - PROMPT_FOOTER_LINES)
+    ? Math.max(3, (promptChromeBudget ?? Math.floor(rows / 2)) - (PROMPT_FOOTER_LINES + extraStatusLineRows))
     : undefined;
 
   const handleInputClick = useCallback(

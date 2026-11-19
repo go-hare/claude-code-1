@@ -685,6 +685,115 @@ export function setBgNeedsBridgeInFlight(
   bridgeState.inFlight = p ?? null
 }
 
+/**
+ * Official 2.1.323 #2132: basic non-interactive tools whose turn-end without
+ * visible assistant text must not re-raise a stale "Needs input" state.
+ */
+const BASIC_NON_INTERACTIVE_TOOLS: ReadonlySet<string> = new Set([
+  'Bash',
+  'BashTool',
+  'Read',
+  'FileReadTool',
+  'Glob',
+  'GlobTool',
+  'Grep',
+  'GrepTool',
+  'Edit',
+  'FileEditTool',
+  'Write',
+  'FileWriteTool',
+])
+
+/**
+ * Official 2.1.323 #2132: returns true when a background turn ended with no
+ * visible assistant text and only ran basic tools (or no tools), meaning the
+ * turn should not re-surface a "Needs input" prompt.
+ */
+export function shouldSuppressTurnEndNeedsInput(opts: {
+  assistantText?: string | null
+  toolNames?: readonly string[]
+}): boolean {
+  if (typeof opts.assistantText === 'string' && opts.assistantText.trim()) {
+    return false
+  }
+  const tools = opts.toolNames ?? []
+  return tools.every(name => BASIC_NON_INTERACTIVE_TOOLS.has(name))
+}
+
+/**
+ * Official 2.1.323 #2132: clear all local needs-input slots and transition the
+ * background job state out of `tempo: 'blocked'` back to `'active'` when a
+ * reply is sent to a blocked background session.
+ */
+export async function clearBgNeedsInputOnReply(
+  jobShort?: string,
+): Promise<void> {
+  for (const src of SOURCE_PRIORITY) {
+    slots[src] = null
+  }
+  recompute()
+  const id = jobShort || resolveBgShort()
+  if (!id) return
+  try {
+    const { readBgJobState, writeBgJobState, isTerminalState } = await import(
+      '../daemon/jobState.js'
+    )
+    const current = readBgJobState(id)
+    if (!current || isTerminalState(current)) return
+    if (
+      current.tempo === 'blocked' ||
+      current.needs !== undefined ||
+      current.block !== undefined
+    ) {
+      writeBgJobState(id, {
+        ...current,
+        tempo: 'active',
+        needs: undefined,
+        block: undefined,
+        suggestedReply: undefined,
+        updatedAt: new Date().toISOString(),
+      })
+    }
+  } catch {
+    // never throw into UI/worker path
+  }
+}
+
+/**
+ * Official 2.1.323 #2127: clear stale earlier-turn status (`needs`, `block`,
+ * stale `detail`) when resuming a background session so prior-turn state does
+ * not linger in the Agents view.
+ */
+export async function clearStaleBgStatusOnResume(
+  jobShort?: string,
+): Promise<void> {
+  for (const src of SOURCE_PRIORITY) {
+    slots[src] = null
+  }
+  recompute()
+  const id = jobShort || resolveBgShort()
+  if (!id) return
+  try {
+    const { readBgJobState, writeBgJobState } = await import(
+      '../daemon/jobState.js'
+    )
+    const current = readBgJobState(id)
+    if (!current) return
+    writeBgJobState(id, {
+      ...current,
+      state: 'working',
+      tempo: 'active',
+      needs: undefined,
+      block: undefined,
+      suggestedReply: undefined,
+      detail: 'starting\u2026',
+      updatedAt: new Date().toISOString(),
+    })
+  } catch {
+    // never throw into UI/worker path
+  }
+}
+
 /** Test helper. */
 export function _resetBgNeedsInputBridgeForTests(): void {
   for (const k of SOURCE_PRIORITY) slots[k] = null

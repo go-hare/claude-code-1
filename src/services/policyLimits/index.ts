@@ -31,6 +31,7 @@ import { classifyAxiosError } from '../../utils/errors.js'
 import { safeParseJSON } from '../../utils/json.js'
 import { isFirstPartyAnthropicBaseUrl } from '../../utils/model/providers.js'
 import { isEssentialTrafficOnly } from '../../utils/privacyLevel.js'
+import { getOrgPolicyAxiosProxyConfig } from '../../utils/proxy.js'
 import { sleep } from '../../utils/sleep.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
 import { getClaudeCodeUserAgent } from '../../utils/userAgent.js'
@@ -44,6 +45,7 @@ import {
   isPolicyLimitsAllowed,
   isPolicyLimitsEligible,
   leftoverPolicyLimitsHost,
+  policyLimitsFeatureCopy,
   type PolicyLimitsFetchOutcome,
 } from '../../cli/leftoverTulip.js'
 
@@ -435,6 +437,7 @@ async function fetchPolicyLimits(
     const response = await axios.get(endpoint, {
       headers,
       timeout: FETCH_TIMEOUT_MS,
+      ...getOrgPolicyAxiosProxyConfig(),
       ...(signal ? { signal } : {}),
       validateStatus: status =>
         status === 200 || status === 304 || status === 404,
@@ -658,6 +661,46 @@ async function fetchAndLoadPolicyLimits(): Promise<
     }
     return null
   }
+}
+
+/**
+ * Official 2.1.323 (#2070): policy-level denial metadata overrides.
+ * `allow_claude_browser_extension` sets `denialNamesNoRemedy: true` so org
+ * policy denial messages do not mislead users into contacting an admin when no
+ * admin toggle exists to re-enable Claude in Chrome.
+ */
+export type PolicyDenialMetadata = {
+  readonly denialNamesNoRemedy?: boolean
+}
+
+export const POLICY_DENIAL_METADATA: Readonly<
+  Record<string, PolicyDenialMetadata>
+> = {
+  allow_claude_browser_extension: {
+    denialNamesNoRemedy: true,
+  },
+}
+
+export function policyDenialNamesNoRemedy(policy: string): boolean {
+  return POLICY_DENIAL_METADATA[policy]?.denialNamesNoRemedy === true
+}
+
+export function formatPolicyOrgDenialMessage(
+  policy: string,
+  options?: {
+    featureLabel?: string
+    verb?: string
+    adminRemedy?: string
+  },
+): string {
+  const copy = policyLimitsFeatureCopy(policy)
+  const label = options?.featureLabel ?? copy.featureLabel
+  const verb = options?.verb ?? copy.verb
+  const base = `${label} ${verb} disabled by your organization's policy.`
+  if (policyDenialNamesNoRemedy(policy) || !options?.adminRemedy) {
+    return base
+  }
+  return `${base} ${options.adminRemedy}`
 }
 
 /**

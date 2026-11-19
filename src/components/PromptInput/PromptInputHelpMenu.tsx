@@ -6,6 +6,7 @@ import { isKeybindingCustomizationEnabled } from '../../keybindings/loadUserBind
 import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
 import { isFastModeAvailable, isFastModeEnabled } from '../../utils/fastMode.js';
+import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
 import { getNewlineInstructions } from './utils.js';
 
 /** densable LK / em: keyCase lower, modSep " + ". */
@@ -42,6 +43,9 @@ export function PromptInputHelpMenu(props: Props): React.ReactNode {
   const externalEditorShortcut = formatHelpShortcut(useShortcutDisplay('chat:externalEditor', 'Chat', 'ctrl+g'));
   const terminalShortcut = formatHelpShortcut(useShortcutDisplay('app:toggleTerminal', 'Global', 'meta+j'));
   const imagePasteShortcut = formatHelpShortcut(useShortcutDisplay('chat:imagePaste', 'Chat', 'ctrl+v'));
+  const focusPanelShortcut = formatHelpShortcut(useShortcutDisplay('abovePrompt:focus', 'Chat', 'ctrl+x tab'));
+  const closePanelShortcut = formatHelpShortcut(useShortcutDisplay('pane:close', 'Pane', 'ctrl+x x'));
+  const showPanelShortcuts = isFullscreenEnvEnabled();
 
   const terminalShortcutElement = feature('TERMINAL_PANEL') ? (
     getFeatureValue_CACHED_MAY_BE_STALE('tengu_terminal_panel', false) ? (
@@ -85,6 +89,20 @@ export function PromptInputHelpMenu(props: Props): React.ReactNode {
               <KeyboardShortcutHint shortcut={todosShortcut} action="toggle tasks" />
             </Text>
           </Box>
+          {showPanelShortcuts && (
+            <>
+              <Box>
+                <Text dimColor={dimColor}>
+                  <KeyboardShortcutHint shortcut={focusPanelShortcut} action="focus next panel" />
+                </Text>
+              </Box>
+              <Box>
+                <Text dimColor={dimColor}>
+                  <KeyboardShortcutHint shortcut={closePanelShortcut} action="close focused panel" />
+                </Text>
+              </Box>
+            </>
+          )}
           {terminalShortcutElement}
           <Box>
             <Text dimColor={dimColor}>{getNewlineInstructions()}</Text>

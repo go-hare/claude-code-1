@@ -5,7 +5,12 @@ import type { LocalCommandCall } from '../../types/command.js'
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js'
 import { settingsChangeDetector } from '../../utils/settings/changeDetector.js'
 import {
+  getEnabledSettingSources,
+  type SettingSource,
+} from '../../utils/settings/constants.js'
+import {
   getInitialSettings,
+  getSettingsForSource,
   updateSettingsForSource,
 } from '../../utils/settings/settings.js'
 import {
@@ -15,6 +20,55 @@ import {
 } from '../../voice/voiceModeEnabled.js'
 
 const LANG_HINT_MAX_SHOWS = 2
+
+const PROJECT_SETTING_FILE_LABELS: Partial<Record<SettingSource, string>> = {
+  projectSettings: '.claude/settings.json',
+  localSettings: '.claude/settings.local.json',
+}
+
+/**
+ * Official 2.1.325 (#2278): check whether a higher-precedence setting source
+ * (managed/policy, `--settings` flagSettings, or project `.claude/settings*.json`)
+ * holds `voice.enabled` at a value that overrides `userSettings`.
+ */
+export function findVoiceEnabledOverrideMessage(
+  disabling: boolean,
+  getSources: () => SettingSource[] = getEnabledSettingSources,
+  readSource: (
+    source: SettingSource,
+  ) => ReturnType<typeof getSettingsForSource> = getSettingsForSource,
+): string | null {
+  const sources = getSources()
+  let holder: SettingSource | undefined
+  let heldValue: boolean | undefined
+  for (let i = sources.length - 1; i >= 0; i--) {
+    const src = sources[i]!
+    const s = readSource(src) as
+      | { voice?: { enabled?: boolean }; voiceEnabled?: boolean }
+      | null
+      | undefined
+    const val = s?.voice?.enabled ?? s?.voiceEnabled
+    if (val !== undefined) {
+      holder = src
+      heldValue = val
+      break
+    }
+  }
+  if (
+    holder !== undefined &&
+    holder !== 'userSettings' &&
+    heldValue === disabling
+  ) {
+    const sourceDesc =
+      holder === 'policySettings'
+        ? 'enterprise managed settings. Contact your organization admin to change this.'
+        : holder === 'flagSettings'
+          ? 'settings passed when Claude Code started. Restart Claude Code with different settings to change this.'
+          : `${PROJECT_SETTING_FILE_LABELS[holder] ?? holder} in this project. Edit that file to change this.`
+    return `Voice mode is turned ${heldValue ? 'on' : 'off'} by ${sourceDesc}`
+  }
+  return null
+}
 
 export const call: LocalCommandCall = async args => {
   // Check kill-switch before allowing voice mode
@@ -69,8 +123,19 @@ export const call: LocalCommandCall = async args => {
     }
   }
 
+  // Official 2.1.325 (#2278): detect higher-precedence settings holding voice.enabled
+  const wantDisable =
+    providerArg === 'off' || (!providerArg && isCurrentlyEnabled)
+  const overrideMsg = findVoiceEnabledOverrideMessage(wantDisable)
+  if (overrideMsg !== null) {
+    return {
+      type: 'text' as const,
+      value: overrideMsg,
+    }
+  }
+
   // Toggle OFF — no checks needed
-  if (isCurrentlyEnabled) {
+  if (wantDisable) {
     const result = updateSettingsForSource('userSettings', {
       voiceEnabled: false,
       voice: withVoiceEnabledFlag(currentSettings.voice, false),

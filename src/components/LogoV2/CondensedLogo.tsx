@@ -29,7 +29,7 @@ import {
 } from '../../services/analytics/index.js';
 import { useAppState } from '../../state/AppState.js';
 import { type GlobalConfig, getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
-import { getEffortSuffix, isUltracodeModeActive, pdSessionEffort } from '../../utils/effort.js';
+import { type EffortValue, getEffortSuffix, isUltracodeModeActive, pdSessionEffort } from '../../utils/effort.js';
 import { isEnvTruthy } from '../../utils/envUtils.js';
 import { truncate } from '../../utils/format.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
@@ -37,6 +37,8 @@ import {
   formatModelAndBilling,
   getLogoDisplayData,
   hasUnseenReleaseVersion,
+  sanitizeWelcomeAgentName,
+  sanitizeWelcomeCwd,
   truncatePath,
 } from '../../utils/logoV2Utils.js';
 import { parseUserSpecifiedModel, renderModelSetting } from '../../utils/model/model.js';
@@ -488,6 +490,45 @@ export function resolveWelcomeHeaderModel(args: {
   return sessionModel;
 }
 
+export function resolveWelcomeHeaderEffort(args: {
+  sessionModel: string;
+  sessionEffort: EffortValue | undefined;
+  viewingAgentTaskId?: string | null;
+  tasks?: Record<
+    string,
+    {
+      type?: string;
+      model?: string;
+      effort?: EffortValue;
+      selectedAgent?: { model?: string; effort?: EffortValue };
+    }
+  > | null;
+}): EffortValue | undefined {
+  const { sessionModel, sessionEffort, viewingAgentTaskId, tasks } = args;
+  if (!viewingAgentTaskId || !tasks) {
+    return sessionEffort;
+  }
+  const task = tasks[viewingAgentTaskId];
+  if (!task || (task.type !== 'local_agent' && task.type !== 'in_process_teammate')) {
+    return sessionEffort;
+  }
+  // Teammates run with their own independent effort config, never session effort.
+  if (task.type === 'in_process_teammate') {
+    return task.effort ?? task.selectedAgent?.effort;
+  }
+  const taskModel =
+    (typeof task.model === 'string' && task.model !== '' ? task.model : undefined) ??
+    (typeof task.selectedAgent?.model === 'string' && task.selectedAgent.model !== ''
+      ? task.selectedAgent.model
+      : undefined);
+  // Official 2.1.323 (#2092): when viewing a subagent on a different model, do
+  // not show the main session's effort level which that subagent does not use.
+  if (taskModel !== undefined && parseUserSpecifiedModel(taskModel) !== parseUserSpecifiedModel(sessionModel)) {
+    return task.effort ?? task.selectedAgent?.effort;
+  }
+  return task.effort ?? task.selectedAgent?.effort ?? sessionEffort;
+}
+
 export function CondensedLogo({ oneShotsAllowed = true }: Props = {}): ReactNode {
   const { columns } = useTerminalSize();
   const srContext = useContext(AccessibilityContext);
@@ -499,16 +540,27 @@ export function CondensedLogo({ oneShotsAllowed = true }: Props = {}): ReactNode
   const tasks = useAppState(s => s.tasks);
   const model = resolveWelcomeHeaderModel({ sessionModel, viewingAgentTaskId, tasks });
   const resolvedModel = parseUserSpecifiedModel(model);
-  const effortValue = useAppState(s => pdSessionEffort(s, resolvedModel));
+  const sessionEffort = useAppState(s => pdSessionEffort(s, resolvedModel));
+  const effortValue = resolveWelcomeHeaderEffort({
+    sessionModel,
+    sessionEffort,
+    viewingAgentTaskId,
+    tasks,
+  });
+  const isViewingSubagentOnDifferentModel =
+    Boolean(viewingAgentTaskId) && resolvedModel !== parseUserSpecifiedModel(sessionModel);
+  const effectiveUltracode = isViewingSubagentOnDifferentModel ? false : ultracode;
   const modelDisplayName = renderModelSetting(model);
-  const { version, cwd, billingType, agentName: agentNameFromSettings } = getLogoDisplayData();
+  const { version, cwd: rawCwd, billingType, agentName: agentNameFromSettings } = getLogoDisplayData();
 
-  // Prefer AppState.agent (set from --agent CLI flag) over settings
-  const agentName = agent ?? agentNameFromSettings;
+  // Official 2.1.325 (#2274): strip control characters / ANSI / line breaks
+  // from welcome header agent name and working folder.
+  const agentName = sanitizeWelcomeAgentName(agent ?? agentNameFromSettings ?? '');
+  const cwd = sanitizeWelcomeCwd(rawCwd);
   const justSwitched = getTuiJustSwitchedMode() !== undefined;
   const fullscreen = isFullscreenEnvEnabled();
   const entrance = useClawdEntrance(oneShotsAllowed && fullscreen);
-  const ultraActive = isUltracodeModeActive(resolvedModel, effortValue, ultracode);
+  const ultraActive = isUltracodeModeActive(resolvedModel, effortValue, effectiveUltracode);
   const rcStatus = useRcHeaderStatus(fullscreen && oneShotsAllowed);
 
   // Calculate available width for text content
@@ -519,7 +571,7 @@ export function CondensedLogo({ oneShotsAllowed = true }: Props = {}): ReactNode
   const versionPrefix = 'Claude Code v';
   const truncatedVersion = screenReader ? version : truncate(version, Math.max(textWidth - versionPrefix.length, 6));
 
-  const effortSuffix = getEffortSuffix(resolvedModel, effortValue, ultracode);
+  const effortSuffix = getEffortSuffix(resolvedModel, effortValue, effectiveUltracode);
   const { shouldSplit, truncatedModel, truncatedBilling } = screenReader
     ? { shouldSplit: false, truncatedModel: modelDisplayName + effortSuffix, truncatedBilling: billingType }
     : formatModelAndBilling(modelDisplayName + effortSuffix, billingType, textWidth);

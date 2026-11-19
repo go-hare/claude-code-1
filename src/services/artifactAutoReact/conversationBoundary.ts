@@ -49,6 +49,60 @@ export type ArtifactFrameUrlEntry = {
   title?: string
   updatedAt?: number
   sessionMinted?: boolean
+  dismissed?: boolean
+  mcpPublished?: boolean
+  mcpPublishedHere?: boolean
+}
+
+/**
+ * 2.1.323 #2071 (official `qss`): upserts a published artifact into `frameUrls`
+ * at the END of insertion order with a fresh `updatedAt` timestamp and clears
+ * any stale dismissed flag or duplicate row for the same slug, so the artifact
+ * preview always opens the artifact Claude just published.
+ */
+export function upsertPublishedFrameRow(
+  frameUrls: Record<string, ArtifactFrameUrlEntry> | undefined,
+  published: {
+    slug: string
+    url: string
+    title?: string
+    rowKey?: string
+    mcpPublished?: boolean
+  },
+): Record<string, ArtifactFrameUrlEntry> {
+  const existing = frameUrls ?? {}
+  const key = published.rowKey ?? `attached:${published.slug}`
+  const next: Record<string, ArtifactFrameUrlEntry> = {}
+  let prevEntry: ArtifactFrameUrlEntry | undefined
+
+  for (const [k, entry] of Object.entries(existing)) {
+    const matchesSlug =
+      k === key ||
+      k === published.slug ||
+      k === `attached:${published.slug}` ||
+      entry.url === published.url ||
+      entry.url.endsWith(`/${published.slug}`)
+    if (matchesSlug) {
+      prevEntry = entry
+      continue
+    }
+    next[k] = entry
+  }
+
+  const resolvedTitle = published.title ?? prevEntry?.title
+  next[key] = {
+    url: published.url,
+    updatedAt: Date.now(),
+    ...(resolvedTitle !== undefined ? { title: resolvedTitle } : {}),
+    ...(prevEntry?.sessionMinted ? { sessionMinted: true } : {}),
+    ...(published.mcpPublished || prevEntry?.mcpPublished
+      ? { mcpPublished: true }
+      : {}),
+    ...(published.mcpPublished || prevEntry?.mcpPublishedHere
+      ? { mcpPublishedHere: true }
+      : {}),
+  }
+  return next
 }
 
 export type ArtifactRefEntry = {

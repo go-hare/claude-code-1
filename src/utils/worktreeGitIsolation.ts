@@ -81,6 +81,184 @@ export const WORKTREE_GIT_PIN_FLAGS = ['--git-dir', '--work-tree'] as const
 
 /** densable oas — git binary name. */
 const GIT_BINARY_RE = /^git(?:\.exe|\.real|-[a-z][\w-]*)?$/i
+const SCALAR_BINARY_RE = /^scalar(?:\.exe)?$/i
+
+const GIT_MAINTENANCE_BLOCKED_SUB_RE = /^(?:register|start)$/i
+const SCALAR_BLOCKED_SUB_RE = /^(?:register|clone|reconfigure)$/i
+
+function isDynamicMaintenanceWord(word: string): boolean {
+  return (
+    /[{}]/.test(word) ||
+    am(word) ||
+    (!word.includes('/') && (Mle(word) !== -1 || word.startsWith('~')))
+  )
+}
+
+/**
+ * Official 2.1.325 #2359 (`We` / bisect / maintenance / scalar checks @306122741):
+ * Refuse `git bisect run`, `git bisect view|visualize <prog>`,
+ * `git maintenance register|start`, and `scalar` set-up commands in isolated
+ * worktrees, telling the caller what still works.
+ */
+function checkGitMaintenanceOrScalarIsolation(
+  tool: 'git maintenance' | 'scalar',
+  subArgs: string[],
+): { detail: string; remedy: string } | null {
+  let idx = 0
+  while (
+    tool === 'git maintenance' &&
+    (subArgs[idx] === '--' || subArgs[idx] === '--end-of-options')
+  ) {
+    idx++
+  }
+  const verb = subArgs[idx]
+  if (verb === undefined || verb.startsWith('-')) return null
+  const stillWorks =
+    tool === 'scalar'
+      ? 'git gc and git maintenance run still work here'
+      : 'git gc and git maintenance run, stop, unregister and is-needed still work here'
+  const isScalarRun = tool === 'scalar' && /^run$/i.test(verb)
+  const taskIdx = isScalarRun
+    ? subArgs.findIndex((tok, pos) => pos > idx && !tok.startsWith('-'))
+    : -1
+  const wordToCheck = isScalarRun
+    ? taskIdx === -1
+      ? undefined
+      : subArgs[taskIdx]
+    : verb
+  if (wordToCheck !== undefined && isDynamicMaintenanceWord(wordToCheck)) {
+    return {
+      detail: `has a word after ${isScalarRun ? 'scalar run' : tool} (${wordToCheck}) that is filled in only when the command runs, so this check can't tell whether it registers the repository for background git maintenance, which would write your global git configuration`,
+      remedy: `Spell that word out, or write a file pattern as a path (./*.ts); ${stillWorks}.`,
+    }
+  }
+  if (isScalarRun) {
+    if (wordToCheck !== undefined && /^(?:all|config)$/i.test(wordToCheck)) {
+      return {
+        detail: `is scalar run ${wordToCheck.toLowerCase()}, which registers the repository in your global git configuration and starts background git maintenance on it, a job that keeps running after this session`,
+        remedy: `Run the single task instead (scalar run fetch, commit-graph, loose-objects or pack-files); ${stillWorks}.`,
+      }
+    }
+    return null
+  }
+  const blockedRe =
+    tool === 'scalar' ? SCALAR_BLOCKED_SUB_RE : GIT_MAINTENANCE_BLOCKED_SUB_RE
+  if (!blockedRe.test(verb)) return null
+  return {
+    detail:
+      tool === 'scalar'
+        ? `is scalar ${verb.toLowerCase()}, which registers the repository in your global git configuration and starts background git maintenance on it, a job that keeps running after this session`
+        : `is git maintenance ${verb.toLowerCase()}, which registers the repository in your global git configuration and starts background git maintenance on it, a job that keeps running after this session`,
+    remedy: `Use a command that does not touch global git configuration: ${stillWorks}.`,
+  }
+}
+
+function checkWorktreeGitSubcommand(
+  argv: string[],
+  gitIdx: number,
+): { detail: string; remedy: string } | null {
+  // Check standalone `scalar` command (not after git)
+  if (gitIdx === -1) {
+    let i = 0
+    while (i < argv.length && ENV_ASSIGNMENT_RE.test(argv[i]!)) i++
+    while (i < argv.length && CD_PREFIX.has(basename(argv[i]!).toLowerCase())) {
+      i++
+    }
+    const bin = argv[i]
+    if (bin !== undefined && SCALAR_BINARY_RE.test(basename(bin))) {
+      // Skip scalar global options (-C <dir>, -c <k=v>, etc.)
+      let j = i + 1
+      while (j < argv.length) {
+        const tok = argv[j]!
+        if (tok === '--') {
+          j++
+          break
+        }
+        if (tok === '-C' || tok === '-c') {
+          j += 2
+          continue
+        }
+        if (tok.startsWith('-')) {
+          j++
+          continue
+        }
+        break
+      }
+      return checkGitMaintenanceOrScalarIsolation('scalar', argv.slice(j))
+    }
+    return null
+  }
+
+  // Locate git subcommand past global git flags
+  let idx = gitIdx + 1
+  while (idx < argv.length) {
+    const tok = argv[idx]!
+    if (tok === '--') {
+      idx++
+      break
+    }
+    if (
+      tok === '-C' ||
+      tok === '-c' ||
+      tok === '--git-dir' ||
+      tok === '--work-tree' ||
+      tok === '--config-env' ||
+      WORKTREE_GIT_OPAQUE_FLAGS.has(tok)
+    ) {
+      idx += 2
+      continue
+    }
+    if (tok.startsWith('-')) {
+      idx++
+      continue
+    }
+    break
+  }
+  const sub = argv[idx]?.toLowerCase()
+  if (!sub) return null
+  const rest = argv.slice(idx + 1)
+
+  if (sub === 'bisect') {
+    let pos = 0
+    while (
+      pos < rest.length &&
+      (rest[pos] === '--' || rest[pos]?.startsWith('-'))
+    ) {
+      pos++
+    }
+    const verb = rest[pos]
+    if (verb !== undefined) {
+      if (isDynamicMaintenanceWord(verb)) {
+        return {
+          detail: `has a word after git bisect (${verb}) that may expand, so this check can't tell which bisect verb it is`,
+          remedy: 'Spell the bisect verb out, with no glob or command output.',
+        }
+      }
+      const lowerVerb = verb.toLowerCase()
+      const nextArg = rest[pos + 1]
+      if (
+        lowerVerb === 'run' ||
+        ((lowerVerb === 'view' || lowerVerb === 'visualize') &&
+          nextArg !== undefined &&
+          !nextArg.startsWith('-'))
+      ) {
+        return {
+          detail: `asks git bisect ${lowerVerb} to start another program, which can't be verified`,
+          remedy:
+            lowerVerb === 'run'
+              ? 'Run the test yourself, then mark each commit with git bisect good or git bisect bad.'
+              : `Give git bisect ${lowerVerb} only git log options, such as --oneline.`,
+        }
+      }
+    }
+  }
+
+  if (sub === 'maintenance') {
+    return checkGitMaintenanceOrScalarIsolation('git maintenance', rest)
+  }
+
+  return null
+}
 
 /** densable eDu — eval-like wrappers (minus exec/nocorrect which are Z6g). */
 const EVAL_LIKE = new Set([
@@ -854,6 +1032,13 @@ export function checkZRuGitRedirect(
     }
 
     const E = i[f]!
+    // Official 2.1.325 #2359: block `git bisect run`, `git bisect view|visualize <prog>`,
+    // `git maintenance register|start`, and `scalar` set-up commands in isolated worktrees.
+    const subcommandViolation = checkWorktreeGitSubcommand(m.argv, E)
+    if (subcommandViolation !== null) {
+      return `${noun} is isolated in the worktree ${agentWorktree}, but this command ${subcommandViolation.detail}. Refusing to run it. ${subcommandViolation.remedy}`
+    }
+
     const Sraw = E === -1 ? null : JRu(m.argv, E)
     const S =
       Sraw !== null && Sraw.kind === 'opaque'

@@ -23,8 +23,9 @@ import {
 import { formatDuration } from '../../utils/format.js';
 import { formatModelPricing, getOpus46CostTier } from '../../utils/modelCost.js';
 import { getCanonicalName } from '../../utils/model/model.js';
+import { getAPIProvider } from '../../utils/model/providers.js';
 import { em } from '../../utils/model/modelNoticeCode.js';
-import { updateSettingsForSource } from '../../utils/settings/settings.js';
+import { getSettingsForSource, updateSettingsForSource } from '../../utils/settings/settings.js';
 import { saveFastModeWithConfigSetHook } from './index.js';
 
 export function isFastModeResearchPreview(model: string | null | undefined): boolean {
@@ -33,11 +34,31 @@ export function isFastModeResearchPreview(model: string | null | undefined): boo
   return canonical === 'claude-opus-4-8' || canonical === 'claude-opus-5';
 }
 
-function applyFastMode(enable: boolean, setAppState: (f: (prev: AppState) => AppState) => void): void {
+/**
+ * Official 2.1.323 `lse()` (#2036): whether fast mode is persisted to user settings.
+ * On Vertex (and when `fastModePerSessionOptIn` is set), fast mode applies to the
+ * current session only — yet `/fast on` and `/fast off` MUST still ask a plugin's
+ * `config.set` hook just like the `/fast` menu does.
+ */
+export function isFastModePersistedToSettings(): boolean {
+  if (getAPIProvider() === 'vertex') {
+    return false;
+  }
+  const policySettings = getSettingsForSource('policySettings');
+  const userSettings = getSettingsForSource('userSettings');
+  if (policySettings?.fastModePerSessionOptIn === true || userSettings?.fastModePerSessionOptIn === true) {
+    return false;
+  }
+  return true;
+}
+
+function applyFastMode(enable: boolean, setAppState: (f: (prev: AppState) => AppState) => void, persist = true): void {
   clearFastModeCooldown();
-  updateSettingsForSource('userSettings', {
-    fastMode: enable ? true : undefined,
-  });
+  if (persist && isFastModePersistedToSettings()) {
+    updateSettingsForSource('userSettings', {
+      fastMode: enable ? true : undefined,
+    });
+  }
   if (enable) {
     setAppState(prev => {
       // Only switch model if current model doesn't support fast mode
@@ -86,7 +107,8 @@ export function FastModePicker({
     if (finalEnabled) {
       const fastIcon = getFastIconString(finalEnabled);
       const modelUpdated = !isFastModeSupportedByModel(model) ? ` · model set to ${em(FAST_MODE_MODEL_DISPLAY)}` : '';
-      onDone(`${fastIcon} Fast mode ON${modelUpdated} · ${pricing}`);
+      const sessionSuffix = isFastModePersistedToSettings() ? '' : ' (this session only)';
+      onDone(`${fastIcon} Fast mode ON${modelUpdated} · ${pricing}${sessionSuffix}`);
     } else {
       setAppState(prev => ({ ...prev, fastMode: false }));
       onDone(`Fast mode OFF`);
@@ -192,19 +214,21 @@ export function FastModePicker({
   );
 }
 
-async function handleFastModeShortcut(
+export async function handleFastModeShortcut(
   enable: boolean,
   getAppState: () => AppState,
   setAppState: (f: (prev: AppState) => AppState) => void,
 ): Promise<string> {
   const unavailableReason = getFastModeUnavailableReason();
-  if (unavailableReason) {
+  if (unavailableReason && enable) {
     return `Fast mode unavailable: ${unavailableReason}`;
   }
 
   const { mainLoopModel, fastMode: previousFastMode } = getAppState();
+  // Official 2.1.323 dDn (#2036): always ask plugin `config.set` hooks for
+  // `/fast on` and `/fast off` even on Vertex where fast mode is session-only.
   const hookResult = await saveFastModeWithConfigSetHook(enable, previousFastMode ?? false, finalEnabled => {
-    applyFastMode(finalEnabled, setAppState);
+    applyFastMode(finalEnabled, setAppState, true);
   });
   if (hookResult.kind === 'refused') {
     return hookResult.reason ?? 'Fast mode was not changed';
@@ -221,7 +245,8 @@ async function handleFastModeShortcut(
       ? ` · model set to ${em(FAST_MODE_MODEL_DISPLAY)}`
       : '';
     const pricing = formatModelPricing(getOpus46CostTier(true));
-    return `${fastIcon} Fast mode ON${modelUpdated} · ${pricing}`;
+    const sessionSuffix = isFastModePersistedToSettings() ? '' : ' (this session only)';
+    return `${fastIcon} Fast mode ON${modelUpdated} · ${pricing}${sessionSuffix}`;
   } else {
     return `Fast mode OFF`;
   }

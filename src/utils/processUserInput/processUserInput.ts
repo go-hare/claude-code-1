@@ -155,6 +155,222 @@ export type SlashLineCheckFn = (ran: {
   argsRanWith: string
 }) => Promise<SlashLineCheckResult>
 
+/**
+ * Official 2.1.323 `BN(e)` (#2194): mask claude.ai / Desktop picked file
+ * references (`@[label](claude-ref:...)` and `@[label](https://docs.google.com/...)`)
+ * — including text typed between two picked files or after a picked file and a
+ * markdown link — so `/skill` or `@file` inside those spans no longer takes effect.
+ */
+const PICKED_FILE_REF_RE =
+  /@\[[^[\]\n]{1,200}\]\((?:claude-ref:[A-Za-z0-9:_.=;-]{0,161} "[^"\n]{1,200}"|https:\/\/docs\.google\.com\/(?:document|spreadsheets|presentation)\/d\/[\w-]{16,})\)/uy
+
+function minPos(a: number, b: number): number {
+  return a === -1 ? b : b === -1 ? a : Math.min(a, b)
+}
+
+function endOfLine(text: string, from: number): number {
+  const nl = text.indexOf('\n', from)
+  return nl === -1 ? text.length : nl
+}
+
+function isWordCharCode(text: string, idx: number): boolean {
+  const code = text.charCodeAt(idx)
+  return (
+    (code >= 48 && code <= 57) ||
+    (code >= 65 && code <= 90) ||
+    code === 95 ||
+    (code >= 97 && code <= 122)
+  )
+}
+
+function looksLikePathSegment(
+  text: string,
+  start: number,
+  end: number,
+): boolean {
+  const after = text[end + 1]
+  return (
+    !/\s/.test(text.slice(start, end)) &&
+    (after === '/' || (after === '.' && isWordCharCode(text, end + 2)))
+  )
+}
+
+function pushMaskedSpan(
+  spans: Array<{ start: number; end: number; closed: boolean }>,
+  start: number,
+  end: number,
+  closed: boolean,
+): void {
+  while ((spans.at(-1)?.start ?? -1) >= start) {
+    spans.pop()
+  }
+  const prev = spans.at(-1)
+  if (prev !== undefined && prev.end > start) {
+    if (end > prev.end) {
+      prev.end = end
+      prev.closed = closed
+    }
+    return
+  }
+  spans.push({ start, end, closed })
+}
+
+export function maskPickedFileReferences(text: string): string {
+  if (!text.includes('@[')) return text
+  const spans: Array<{ start: number; end: number; closed: boolean }> = []
+  let openBracketStart = -1
+  let lastValidRefStart = -1
+  let parenDepth = 0
+  let bracketDepth = 0
+  let multilineOpenStart = -1
+  let firstAtBracketOnLine = -1
+  let outermostAtBracket = -1
+  let sawPickedRef = false
+  let innerAtBracket = -1
+  let i = 0
+
+  while (i < text.length) {
+    const ch = text[i]
+    if (ch === '\n') {
+      multilineOpenStart =
+        bracketDepth > 0 ? minPos(multilineOpenStart, openBracketStart) : -1
+      openBracketStart = -1
+      outermostAtBracket = -1
+      innerAtBracket = -1
+      lastValidRefStart = -1
+      parenDepth = 0
+      i++
+      continue
+    }
+    const next = text[i + 1]
+    if (
+      ch === '\\' &&
+      (next === '(' ||
+        next === ')' ||
+        next === '\\' ||
+        next === '[' ||
+        (next === ']' && text[i + 2] !== '('))
+    ) {
+      if (next === ']' && multilineOpenStart !== -1) {
+        pushMaskedSpan(spans, multilineOpenStart, i + 2, true)
+      }
+      if (next === ']' && innerAtBracket !== -1) {
+        pushMaskedSpan(spans, innerAtBracket, i + 2, true)
+        innerAtBracket = -1
+      }
+      i += 2
+      continue
+    }
+    if (ch === '@' && next === '[') {
+      firstAtBracketOnLine = minPos(firstAtBracketOnLine, i)
+      PICKED_FILE_REF_RE.lastIndex = i
+      const match = PICKED_FILE_REF_RE.exec(text)
+      const pendingOpen = minPos(multilineOpenStart, openBracketStart)
+      if (match !== null && pendingOpen === -1) {
+        pushMaskedSpan(spans, firstAtBracketOnLine, i + match[0].length, true)
+        lastValidRefStart = minPos(lastValidRefStart, i)
+        sawPickedRef = true
+        i += match[0].length
+        continue
+      }
+      if (match !== null) {
+        i = endOfLine(text, i)
+        pushMaskedSpan(spans, firstAtBracketOnLine, i, false)
+        sawPickedRef = true
+        continue
+      }
+      if (openBracketStart === -1 && multilineOpenStart === -1) {
+        openBracketStart = firstAtBracketOnLine
+        outermostAtBracket = i
+      }
+      innerAtBracket = i
+      bracketDepth++
+      i += 2
+      continue
+    }
+    if (ch === '[' && bracketDepth > 0) {
+      bracketDepth++
+    } else if (ch === ']' && bracketDepth > 0) {
+      bracketDepth--
+      if (multilineOpenStart !== -1 && next !== '(') {
+        pushMaskedSpan(spans, multilineOpenStart, i + 1, true)
+      }
+      if (
+        innerAtBracket !== -1 &&
+        next !== '(' &&
+        !looksLikePathSegment(text, innerAtBracket + 2, i)
+      ) {
+        pushMaskedSpan(spans, innerAtBracket, i + 1, true)
+      }
+      innerAtBracket = -1
+      if (bracketDepth === 0 && next !== '(') {
+        if (
+          outermostAtBracket !== -1 &&
+          !looksLikePathSegment(text, outermostAtBracket + 2, i)
+        ) {
+          pushMaskedSpan(spans, outermostAtBracket, i + 1, true)
+        }
+        openBracketStart = -1
+        multilineOpenStart = -1
+        outermostAtBracket = -1
+      }
+    }
+    const isClaudeRefLink = ch === ']' && text.startsWith('](claude-ref:', i)
+    if (
+      firstAtBracketOnLine !== -1 &&
+      (isClaudeRefLink ||
+        (ch === ']' && text.startsWith('](https://docs.google.com/', i)))
+    ) {
+      const closeIdx = text.indexOf(isClaudeRefLink ? '")' : ')', i)
+      i = endOfLine(text, closeIdx === -1 ? text.length : closeIdx)
+      pushMaskedSpan(spans, firstAtBracketOnLine, i, false)
+      sawPickedRef = true
+      continue
+    }
+    const unmatchedCloseParen = ch === ')' && parenDepth === 0
+    if (
+      (ch === ']' && next === '(') ||
+      (ch === '"' && next === ')') ||
+      unmatchedCloseParen
+    ) {
+      let spanStart = minPos(
+        minPos(multilineOpenStart, openBracketStart),
+        unmatchedCloseParen ? -1 : lastValidRefStart,
+      )
+      if (spanStart === -1 && sawPickedRef && ch === '"') {
+        spanStart = firstAtBracketOnLine
+      }
+      if (spanStart !== -1) {
+        const from = i
+        i = endOfLine(text, i)
+        pushMaskedSpan(spans, spanStart, i, false)
+        if (text.slice(from, i).includes('](claude-ref:')) {
+          sawPickedRef = true
+        }
+        continue
+      }
+    }
+    if (ch === '(') {
+      parenDepth++
+    } else if (ch === ')' && parenDepth > 0) {
+      parenDepth--
+    }
+    i++
+  }
+
+  let out = ''
+  let cursor = 0
+  for (const { start, end, closed } of spans) {
+    const masked = text
+      .slice(start + 1, closed ? end - 1 : end)
+      .replace(/[^\n]/g, ' ')
+    out +=
+      text.slice(cursor, start) + '@' + masked + (closed ? text[end - 1] : '')
+    cursor = end
+  }
+  return out + text.slice(cursor)
+}
+
 function rewriteSlashArgs(
   text: string,
   ran?: { name: string; args: string; argsRanWith: string },
@@ -1285,10 +1501,19 @@ async function processUserInputBase(
     mode === 'prompt' && !isMeta && shouldQuery !== false
   const isHumanTypedPrompt = isRegularUserPrompt && origin?.kind === 'human'
   queryCheckpoint('query_attachment_loading_start')
+  // Official 2.1.323 BN (#2194): mask picked file references (`@[...](claude-ref:...)`
+  // / Google Docs links and spans between two picked files or after a picked file
+  // and a link) before extracting @file / /skill mentions and keywords.
+  const maskedInputForMentions =
+    inputString !== null ? maskPickedFileReferences(inputString) : null
+  const maskedPreExpansion =
+    preExpansionInput !== undefined
+      ? maskPickedFileReferences(preExpansionInput)
+      : undefined
   const attachmentMessages = shouldExtractAttachments
     ? await toArray(
         getAttachmentMessages(
-          inputString,
+          maskedInputForMentions,
           context,
           ideSelection ?? null,
           [], // queuedCommands - handled by query.ts for mid-turn attachments
@@ -1297,7 +1522,7 @@ async function processUserInputBase(
           {
             isRegularUserPrompt,
             isHumanTypedPrompt,
-            preExpansionInput,
+            preExpansionInput: maskedPreExpansion,
             suppressWorkflowKeyword,
           },
         ),
@@ -1364,7 +1589,9 @@ async function processUserInputBase(
     !inputString.trimStart().startsWith('/') &&
     !context.getAppState().ultraplanSessionUrl &&
     !context.getAppState().ultraplanLaunching &&
-    hasUltraplanKeyword(preExpansionInput ?? inputString)
+    hasUltraplanKeyword(
+      maskedPreExpansion ?? maskedInputForMentions ?? inputString,
+    )
   ) {
     logEvent('tengu_ultraplan_keyword', {})
     const rewritten = replaceUltraplanKeyword(inputString).trim()

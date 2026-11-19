@@ -18,6 +18,7 @@ import {
   wrapText,
 } from '../../utils/format.js'
 import { formatHostDeadAttachError } from '../../daemon/hostDeath.js'
+import { isHandedOverForUserMergeOrReview } from '../../daemon/jobState.js'
 import { isRestrictedSession } from '../../utils/restricted.js'
 import { fleetJobChildren } from './prStatuses.js'
 
@@ -82,10 +83,20 @@ export function deriveBand(session: SessionEntry): StatusBand {
     }
     return 'completed'
   }
-  if (session.status === 'waiting' || session.waitingFor) return 'blocked'
+  if (
+    (session.status === 'waiting' || session.waitingFor) &&
+    !isHandedOverForUserMergeOrReview(session.lastMessage ?? session.waitingFor)
+  ) {
+    return 'blocked'
+  }
   // Active sessions with open PR needing review
   if (session.prReviewState && session.prReviewState !== 'approved') {
     return 'review'
+  }
+  if (
+    isHandedOverForUserMergeOrReview(session.lastMessage ?? session.waitingFor)
+  ) {
+    return 'completed'
   }
   return 'active'
 }
@@ -108,6 +119,11 @@ export function deriveStatsBand(session: SessionEntry): StatsBand {
     session.status === 'idle' ||
     session.status === 'done' ||
     session.status === 'stopped'
+  ) {
+    return 'completed'
+  }
+  if (
+    isHandedOverForUserMergeOrReview(session.lastMessage ?? session.waitingFor)
   ) {
     return 'completed'
   }

@@ -9,14 +9,21 @@
 import { feature } from 'bun:bundle'
 import axios, { type AxiosRequestConfig, type AxiosResponse } from 'axios'
 import { createHash } from 'crypto'
-import { chmod, writeFile } from 'fs/promises'
+import { createWriteStream } from 'fs'
+import { chmod, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
+import { Readable, Transform } from 'stream'
+import { pipeline } from 'stream/promises'
 import { logEvent } from 'src/services/analytics/index.js'
 import type { ReleaseChannel } from '../config.js'
 import { logForDebugging } from '../debug.js'
 import { toError } from '../errors.js'
 import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
 import { getFsImplementation } from '../fsOperations.js'
+import {
+  createBoundedZstdDecompressStreams,
+  isZstdDecompressError,
+} from '../http.js'
 import { logError } from '../log.js'
 import { sleep } from '../sleep.js'
 import { jsonStringify, writeFileSync_DEPRECATED } from '../slowOperations.js'
@@ -395,20 +402,52 @@ class StallTimeoutError extends Error {
 }
 
 /**
+ * Detect stall-triggered aborts for both axios arraybuffer downloads
+ * (`axios.isCancel`) and zstd streaming `stream/promises` `pipeline()`
+ * downloads (`AbortError` / `ABORT_ERR` when `controller.signal.aborted`).
+ */
+export function isDownloadStallAbortError(
+  error: unknown,
+  signalAborted: boolean,
+): boolean {
+  if (axios.isCancel(error)) {
+    return true
+  }
+  if (!signalAborted || error === null || typeof error !== 'object') {
+    return false
+  }
+  const err = error as { name?: unknown; code?: unknown }
+  return err.name === 'AbortError' || err.code === 'ABORT_ERR'
+}
+
+export type CompressedBinaryOptions = {
+  /** Expected SHA-256 checksum of the compressed `.zst` payload */
+  checksum: string
+  /** Exact expected decompressed byte size from the signed manifest */
+  decompressedSize: number
+}
+
+/**
  * Common logic for downloading and verifying a binary.
- * Includes stall detection (aborts if no bytes for 60s) and retry logic.
+ * Includes stall detection (aborts if no bytes for 60s), retry logic, and
+ * official 2.1.325 #2258 bounded zstd streaming decompression (checking wire
+ * size, decompressed size against manifest, and ZSTD_error_* frames).
  */
 async function downloadAndVerifyBinary(
   binaryUrl: string,
   expectedChecksum: string,
   binaryPath: string,
   requestConfig: Record<string, unknown> = {},
+  compressed?: CompressedBinaryOptions,
+  signedWireSize?: number,
 ) {
   let lastError: Error | undefined
 
   for (let attempt = 1; attempt <= MAX_DOWNLOAD_RETRIES; attempt++) {
     const controller = new AbortController()
     let stallTimer: ReturnType<typeof setTimeout> | undefined
+    let writeStream: ReturnType<typeof createWriteStream> | undefined
+    let writeSucceeded = false
 
     const clearStallTimer = () => {
       if (stallTimer) {
@@ -426,6 +465,80 @@ async function downloadAndVerifyBinary(
       // Start the stall timer before the request
       resetStallTimer()
 
+      if (compressed) {
+        const response = await axios.get(binaryUrl, {
+          timeout: getDownloadDeadlineMs(),
+          responseType: 'stream',
+          signal: controller.signal,
+          ...requestConfig,
+        })
+
+        const decompressedHash = createHash('sha256')
+        const compressedHash = createHash('sha256')
+        let wireBytes = 0
+        const wireTransform = new Transform({
+          transform(chunk: Buffer, _encoding, callback) {
+            resetStallTimer()
+            wireBytes += chunk.length
+            if (signedWireSize !== undefined && wireBytes > signedWireSize) {
+              callback(
+                new Error(
+                  `Download exceeds the signed size of ${signedWireSize} bytes`,
+                ),
+              )
+              return
+            }
+            compressedHash.update(chunk)
+            callback(null, chunk)
+          },
+        })
+
+        writeStream = createWriteStream(binaryPath, {
+          highWaterMark: 4 * 1024 * 1024,
+        })
+        writeStream.on('drain', resetStallTimer)
+
+        const { decompress, guard } = createBoundedZstdDecompressStreams(
+          compressed.decompressedSize,
+          chunk => decompressedHash.update(chunk),
+        )
+
+        const sourceStream =
+          response.data instanceof Readable
+            ? response.data
+            : Readable.from([Buffer.from(response.data)])
+        await pipeline(
+          sourceStream,
+          wireTransform,
+          decompress,
+          guard,
+          writeStream,
+          {
+            signal: controller.signal,
+          },
+        )
+
+        clearStallTimer()
+
+        const actualCompressedChecksum = compressedHash.digest('hex')
+        if (actualCompressedChecksum !== compressed.checksum) {
+          throw new Error(
+            `Checksum mismatch: expected ${compressed.checksum}, got ${actualCompressedChecksum} (compressed)`,
+          )
+        }
+
+        const actualChecksum = decompressedHash.digest('hex')
+        if (actualChecksum !== expectedChecksum) {
+          throw new Error(
+            `Checksum mismatch: expected ${expectedChecksum}, got ${actualChecksum}`,
+          )
+        }
+
+        writeSucceeded = true
+        await chmod(binaryPath, 0o755)
+        return
+      }
+
       const response = await axios.get(binaryUrl, {
         // Official JJg densable: DOWNLOAD_DEADLINE_MS_FOR_TESTING || 5 min
         timeout: getDownloadDeadlineMs(),
@@ -440,9 +553,16 @@ async function downloadAndVerifyBinary(
 
       clearStallTimer()
 
+      const payload = Buffer.from(response.data)
+      if (signedWireSize !== undefined && payload.length > signedWireSize) {
+        throw new Error(
+          `Download exceeds the signed size of ${signedWireSize} bytes`,
+        )
+      }
+
       // Verify checksum
       const hash = createHash('sha256')
-      hash.update(response.data)
+      hash.update(payload)
       const actualChecksum = hash.digest('hex')
 
       if (actualChecksum !== expectedChecksum) {
@@ -452,7 +572,8 @@ async function downloadAndVerifyBinary(
       }
 
       // Write binary to disk
-      await writeFile(binaryPath, Buffer.from(response.data))
+      await writeFile(binaryPath, payload)
+      writeSucceeded = true
       await chmod(binaryPath, 0o755)
 
       // Success - return early
@@ -460,13 +581,33 @@ async function downloadAndVerifyBinary(
     } catch (error) {
       clearStallTimer()
 
-      // Check if this was a stall timeout (axios wraps abort signals in CanceledError)
-      const isStallTimeout = axios.isCancel(error)
+      const normalizedError = isZstdDecompressError(error)
+        ? Object.assign(
+            new Error(
+              `Checksum mismatch: zstd decoder rejected the frame (${(error as NodeJS.ErrnoException).code})`,
+            ),
+            { cause: error },
+          )
+        : error
+
+      if (writeStream && !writeSucceeded) {
+        const ws = writeStream
+        await new Promise<void>(resolve => ws.close(() => resolve()))
+        await rm(binaryPath, { force: true }).catch(() => {})
+      }
+
+      // Check if this was a stall timeout:
+      // - axios wraps abort signals in CanceledError
+      // - stream/promises pipeline() rejects with AbortError / ABORT_ERR on controller.abort()
+      const isStallTimeout = isDownloadStallAbortError(
+        normalizedError,
+        controller.signal.aborted,
+      )
 
       if (isStallTimeout) {
         lastError = new StallTimeoutError()
       } else {
-        lastError = toError(error)
+        lastError = toError(normalizedError)
       }
 
       // Only retry on stall timeouts

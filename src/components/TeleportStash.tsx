@@ -1,11 +1,13 @@
 import { lstat } from 'fs/promises';
-import { join, sep } from 'path';
+import { join, resolve, sep } from 'path';
 import figures from 'figures';
 import React, { useEffect, useState } from 'react';
 import { Box, Dialog, KeyboardShortcutHint, Text } from '@anthropic/ink';
 import { getCwd } from '../utils/cwd.js';
 import { logForDebugging } from '../utils/debug.js';
+import { getErrnoCode } from '../utils/errors.js';
 import { execFileNoThrowWithCwd } from '../utils/execFileNoThrow.js';
+import { truncatePathMiddle } from '../utils/format.js';
 import type { GitFileStatus } from '../utils/git.js';
 import { getFileStatus, gitExe, stashToCleanState } from '../utils/git.js';
 import { ConfirmSelect } from './ConfirmSelect.js';
@@ -19,10 +21,47 @@ export class TeleportStashRefusalError extends Error {
 }
 
 /**
- * #65 SEA `CPn` + `jvs` (@290969017, @291007500):
- * Refuse stashing when a folder on disk has replaced a tracked file or symlink
- * (including assume-unchanged entries), because `git add` + `git stash` would
- * delete the folder's contents.
+ * Official 2.1.325 `hPn` (#2336): detect an existing `.git/index.lock` before
+ * attempting to stash, and stop with actionable guidance rather than failing
+ * opaquely mid-stash.
+ */
+export async function checkGitIndexLockForStash(
+  cwd: string,
+  lstatFn: typeof lstat = lstat,
+  runGit: (args: string[]) => Promise<{ code: number; stdout: string }> = args =>
+    execFileNoThrowWithCwd(gitExe(), args, { cwd, preserveOutputOnError: false }),
+): Promise<void> {
+  const res = await runGit(['rev-parse', '--git-dir']);
+  if (res.code !== 0) {
+    throw new TeleportStashRefusalError(
+      `Nothing was stashed: could not locate this checkout's git directory (git rev-parse exited with status ${res.code}). Stash or commit your changes yourself, then run /teleport again.`,
+    );
+  }
+  const gitDir = resolve(cwd, res.stdout.trim() || '.git');
+  const lockPath = join(gitDir, 'index.lock');
+  try {
+    await lstatFn(lockPath);
+    const displayLock = truncatePathMiddle(lockPath, 200);
+    throw new TeleportStashRefusalError(
+      `Nothing was stashed: ${displayLock} exists, so another git process may be writing this checkout's index. If no other git is running, delete that file and run /teleport again.`,
+    );
+  } catch (err) {
+    if (err instanceof TeleportStashRefusalError) throw err;
+    const code = getErrnoCode(err);
+    if (code !== 'ENOENT') {
+      const displayLock = truncatePathMiddle(lockPath, 200);
+      throw new TeleportStashRefusalError(
+        `Nothing was stashed: this checkout's index could not be locked (${displayLock}${code ? `: ${code}` : ''}). Check that you can write to this checkout's .git folder, then run /teleport again.`,
+      );
+    }
+  }
+}
+
+/**
+ * #65 SEA `CPn` + `jvs` + Official 2.1.325 (#2336):
+ * Refuse stashing when `git diff-index` exits non-zero or when a folder on
+ * disk has replaced a tracked file or symlink (including assume-unchanged
+ * entries), because `git add` + `git stash` would delete the folder's contents.
  */
 export async function checkTrackedFilesReplacedByFolders(
   cwd: string,
@@ -35,7 +74,9 @@ export async function checkTrackedFilesReplacedByFolders(
     runGit(['ls-files', '-z', '-v', '-s']),
   ]);
   if (diffRes.code !== 0) {
-    return;
+    throw new TeleportStashRefusalError(
+      `Nothing was stashed: git could not inspect this checkout's tracked files (git diff-index exited with status ${diffRes.code}). Stash or commit your changes yourself, then run /teleport again.`,
+    );
   }
   const diffParts = diffRes.stdout.split('\0');
   const diffPaths = diffParts.filter(
@@ -115,7 +156,9 @@ export function TeleportStash({
   const handleStash = async () => {
     setStashing(true);
     try {
-      await checkTrackedFilesReplacedByFolders(getCwd());
+      const cwd = getCwd();
+      await checkTrackedFilesReplacedByFolders(cwd);
+      await checkGitIndexLockForStash(cwd);
       logForDebugging('Stashing changes before teleport...');
       const success = await stashToCleanState('Teleport auto-stash');
 

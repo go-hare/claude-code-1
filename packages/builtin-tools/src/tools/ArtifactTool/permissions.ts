@@ -1587,9 +1587,23 @@ export async function checkArtifactActionPermissions(
     const uploadPin = gNePin()
     const askPin = gNePin(latestOtherCommentSeq(parsed.slug))
     const mode = perms.mode
-    // densable cNn / coversSession — auto never covers; own-approval files don't.
+    // 2.1.325 #2329 / #2331: When people outside your organization can see the
+    // artifact (or audience cannot be confirmed), neither the main agent nor
+    // subagents may skip asking via prior upload approvals, and each upload asks
+    // individually (fail-closed when shareStatus is missing or outsideAudience !== false).
+    const shareStatus = yt(parsed.slug)
+    const outsideOrgOrUnknown =
+      shareStatus === undefined ||
+      shareStatus.probeFailed === true ||
+      shareStatus.mode === 'public' ||
+      shareStatus.outsideAudience !== false ||
+      shareStatus.external === true ||
+      shareStatus.outsideOrgReader === true
+    const blockPriorUploadConsent = outsideOrgOrUnknown
+    // densable cNn / coversSession — auto never covers; outside-org/subagent and own-approval files don't.
     const coversSession =
       mode !== 'auto' &&
+      !blockPriorUploadConsent &&
       judged.every(row => !uploadNeedsOwnApproval(row.gate, row.arn))
     // densable Wf — a file_paths list is all-or-nothing before any ask.
     if (batchPaths !== undefined) {
@@ -1624,6 +1638,7 @@ export async function checkArtifactActionPermissions(
       md() && isStrictHumanTurnTail(context.messages) && mode !== 'plan'
     if (
       coversSession &&
+      !blockPriorUploadConsent &&
       !hasOtherCommentSightings(parsed.slug) &&
       !fiveClassHuman &&
       hasArtifactAssetUploadConsent(context, parsed.slug)
@@ -1779,8 +1794,44 @@ export async function checkArtifactActionPermissions(
     }
   }
 
-  // tip upload (no action) — allow; densable publish has its own path
-  if (!action) {
+  // tip upload (no action) or explicit publish — 2.1.325 #2329 / #2330 / #2331:
+  // Updating an existing artifact visible outside the user's organization (or
+  // whose audience cannot be confirmed) must ask with suppressAlwaysAllowRule
+  // instead of silently returning allow (even when "don't ask again" was chosen
+  // or a subagent/auto mode makes the call).
+  if (!action || action === 'publish') {
+    if (typeof input.url === 'string' && input.url.length > 0) {
+      const { label, parsed } = viewerLabel(input.url)
+      const status = parsed ? yt(parsed.slug) : undefined
+      const isOutsideOrg =
+        status !== undefined &&
+        (status.mode === 'public' ||
+          status.outsideAudience === true ||
+          status.external === true ||
+          status.outsideOrgReader === true)
+      const isAudienceUnknown =
+        parsed === null ||
+        status === undefined ||
+        status.probeFailed === true ||
+        status.outsideAudience !== false
+      if (isOutsideOrg || isAudienceUnknown) {
+        const message = isOutsideOrg
+          ? `Claude wants to publish changes to ${label}, which people outside your organization can see. Allow Claude to change it?`
+          : `Claude couldn't check who can see ${label}. Allow Claude to change it?`
+        return {
+          behavior: 'ask',
+          message,
+          updatedInput: input,
+          suppressAlwaysAllowRule: true,
+          localDisplayOnly: true,
+          decisionReason: {
+            type: 'safetyCheck',
+            reason: message,
+            classifierApprovable: true,
+          },
+        }
+      }
+    }
     return {
       behavior: 'allow',
       updatedInput: input,

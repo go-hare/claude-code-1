@@ -252,39 +252,49 @@ export async function installPlugin(
       throw errorFromPluginFailureCode(result.message, result.failureCode)
     }
 
+    // Official 2.1.323 #2044 & #2189: when a plugin's install command exits 0
+    // and writes to stderr, surface the stderr note and use a warning mark
+    // instead of a plain success checkmark.
+    let installLine = withUnloadedSettingsWarning(
+      result.message,
+      result.scope || scope,
+    )
+    if (result.commandStderr) {
+      const { formatCommandSourceStderrNote, formatCommandSourceWarningHint } =
+        await import('../../utils/plugins/pluginCommandSource.js')
+      installLine = `${installLine}\n${formatCommandSourceStderrNote(result.commandStderr)}\n${formatCommandSourceWarningHint(false)}`
+    }
+
     if (!jsonOptions.json) {
-      console.log(
-        Io(
-          `${figures.tick} ${withUnloadedSettingsWarning(result.message, result.scope || scope)}`,
-        ),
-      )
+      const mark = result.commandPrinted ? figures.warning : figures.tick
+      console.log(Io(`${mark} ${installLine}`))
     }
 
     // densable Kao: nothingWritten skips --config save (gold `$Jy` only on write).
     let configApplied: boolean | undefined =
       configEntries && configEntries.length > 0 ? true : undefined
     let notice = ''
+    let unsetOptionCount: number | undefined
     if (result.nothingWritten) {
       if (configApplied) {
         notice = `${figures.warning} --config values were not saved, because this command changed nothing. To set them, run /plugin configure ${result.pluginId || plugin} in Claude Code.`
         configApplied = false
       }
     } else {
-      const { formatPostInstallUserConfigNotice } = await import(
+      const { formatPostInstallUserConfigResult } = await import(
         '../../utils/plugins/parsePluginCliConfig.js'
       )
-      notice = await formatPostInstallUserConfigNotice(
+      const userConfigRes = await formatPostInstallUserConfigResult(
         result.pluginId || plugin,
         configEntries,
       )
+      notice = userConfigRes.notice
+      unsetOptionCount = userConfigRes.unsetOptionCount
     }
     if (notice && !jsonOptions.json) {
       console.log(Io(notice))
     }
-    const combined = withUnloadedSettingsWarning(
-      notice ? `${result.message}\n${notice}` : result.message,
-      result.scope || scope,
-    )
+    const combined = notice ? `${installLine}\n${notice}` : installLine
     if (jsonOptions.json) {
       await printPluginCliJsonLine({
         command: 'install',
@@ -294,6 +304,8 @@ export async function installPlugin(
         scope: result.scope || scope,
         message: combined,
         configApplied,
+        ...(unsetOptionCount !== undefined ? { unsetOptionCount } : {}),
+        ...(result.commandPrinted ? { commandPrinted: true } : {}),
       })
     }
 

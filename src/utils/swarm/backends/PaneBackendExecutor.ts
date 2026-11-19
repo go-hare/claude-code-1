@@ -1,9 +1,10 @@
-import { getSessionId } from '../../../bootstrap/state.js'
+import { getOriginalCwd, getSessionId } from '../../../bootstrap/state.js'
 import type { ToolUseContext } from '../../../Tool.js'
 import { formatAgentId, parseAgentId } from '../../../utils/agentId.js'
 import { quote } from '../../../utils/bash/shellQuote.js'
 import { isInBundledMode } from '../../../utils/bundledMode.js'
 import { registerCleanup } from '../../../utils/cleanupRegistry.js'
+import { getCwd } from '../../../utils/cwd.js'
 import { logForDebugging } from '../../../utils/debug.js'
 import { jsonStringify } from '../../../utils/slowOperations.js'
 import { writeToMailbox } from '../../../utils/teammateMailbox.js'
@@ -193,7 +194,15 @@ export class PaneBackendExecutor implements TeammateExecutor {
         inheritedArgParts.push('--model', config.model)
       }
 
-      const workingDir = config.cwd
+      // Official 2.1.325 #2365: tmux and iTerm2 teammates start in the
+      // session's original folder (`getOriginalCwd()`) instead of where the
+      // shell last ran `cd`, while preserving an explicit worktree/custom cwd.
+      const workingDir =
+        this.type === 'tmux' || this.type === 'iterm2'
+          ? !config.cwd || config.cwd === getCwd()
+            ? getOriginalCwd() || config.cwd
+            : config.cwd
+          : config.cwd || getOriginalCwd()
 
       // Build environment variables to forward to teammate
       const envStr = buildInheritedEnvVars()

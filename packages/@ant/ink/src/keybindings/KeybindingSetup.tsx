@@ -253,9 +253,17 @@ export function KeybindingSetup({
       void input;
       void key;
       // densable: focused node's textEntry===true and a single printable key
-      // is input, not a shortcut.
+      // is input, not a shortcut — EXCEPT mid-chord (#1990), where the second
+      // key must still complete/cancel the pending chord instead of acting on
+      // the text field.
       const target = event.target as { attributes?: { textEntry?: boolean } } | null;
-      if (target?.attributes?.textEntry === true && event.key.length === 1 && !event.ctrl && !event.meta) {
+      if (
+        pendingChordRef.current === null &&
+        target?.attributes?.textEntry === true &&
+        event.key.length === 1 &&
+        !event.ctrl &&
+        !event.meta
+      ) {
         return;
       }
       const parsed: ParsedKey = {
@@ -416,11 +424,17 @@ function ChordInterceptor({
                 for (const registration of handlers) {
                   if (contextsSet.has(registration.context)) {
                     registration.handler();
-                    event.stopImmediatePropagation();
                     break;
                   }
                 }
               }
+            }
+            // Official 2.1.323 (#1990) `U`: swallow the completing key of a
+            // chord (unless wheel) even when the chord's action has no active
+            // handler in the current dialog/context, so e.g. Enter in
+            // `ctrl+x enter` does not act on a dialog's text field.
+            if (!key.wheelUp && !key.wheelDown) {
+              event.stopImmediatePropagation();
             }
           }
           break;

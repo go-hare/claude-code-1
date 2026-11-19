@@ -1,6 +1,6 @@
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources'
 import { randomUUID } from 'crypto'
-import { setPromptId } from 'src/bootstrap/state.js'
+import { getPromptId, setPromptId } from 'src/bootstrap/state.js'
 import type {
   AttachmentMessage,
   MessageOrigin,
@@ -11,13 +11,81 @@ import { logEvent } from '../../services/analytics/index.js'
 import type { PermissionMode } from '../../types/permissions.js'
 import { getBashTaskDeliveryBag } from '../bashTaskDeliveryOutcomes.js'
 import { createUserMessage } from '../messages.js'
-import { logOTelEvent, redactIfDisabled } from '../telemetry/events.js'
+import { formatUserPromptForOTel, logOTelEvent } from '../telemetry/events.js'
 import { startInteractionSpan } from '../telemetry/sessionTracing.js'
 import {
   matchesKeepGoingKeyword,
   matchesNegativeKeyword,
 } from '../userPromptKeywords.js'
 import { inputPromptStampTelemetry } from './artStamps.js'
+
+const CONTEXT_ONLY_XML_BLOCK_RE =
+  /^\s*<(?:ide_selection|ide_opened_file|system-reminder)\b[\s\S]*<\/(?:ide_selection|ide_opened_file|system-reminder)>\s*$/
+
+/**
+ * Official 2.1.325 #2318: extract ALL user text fragments from string or
+ * content-block array inputs so OpenTelemetry `user_prompt` events preserve
+ * earlier messages' text when queued messages merge in VS Code or when a
+ * message also includes an image block.
+ *
+ * Leading pure IDE/attachment wrapper blocks (`<ide_selection>`,
+ * `<ide_opened_file>`, `<system-reminder>`) are excluded when actual user text
+ * blocks are present.
+ */
+export function extractOtelUserPromptText(
+  input: string | Array<ContentBlockParam>,
+): string {
+  if (typeof input === 'string') {
+    return input
+  }
+  const allTexts: string[] = []
+  const nonWrapperTexts: string[] = []
+  for (const block of input) {
+    if (block.type === 'text' && typeof block.text === 'string' && block.text) {
+      allTexts.push(block.text)
+      if (!CONTEXT_ONLY_XML_BLOCK_RE.test(block.text)) {
+        nonWrapperTexts.push(block.text)
+      }
+    }
+  }
+  const chosen = nonWrapperTexts.length > 0 ? nonWrapperTexts : allTexts
+  return chosen.join('\n')
+}
+
+export type MidTurnQueuedPromptCommand = {
+  mode: string
+  value: string | Array<ContentBlockParam>
+  uuid?: string
+  isMeta?: boolean
+  origin?: MessageOrigin
+}
+
+/**
+ * Official 2.1.325 #2317 (`cu` -> `Lmt`): emit an OpenTelemetry `user_prompt`
+ * event for each user prompt delivered mid-turn while tool calls are running,
+ * tagged with `delivery.mode: "mid_turn"` and the running turn's `prompt.id`.
+ */
+export function emitMidTurnUserPromptOTelEvents(
+  commands: readonly MidTurnQueuedPromptCommand[],
+  runningPromptId: string | null | undefined = getPromptId(),
+): number {
+  let emitted = 0
+  for (const cmd of commands) {
+    if (cmd.mode !== 'prompt' || cmd.isMeta) continue
+    const text = extractOtelUserPromptText(cmd.value)
+    if (!text) continue
+    const formatted = formatUserPromptForOTel(text, cmd.origin)
+    void logOTelEvent('user_prompt', {
+      prompt_length: String(text.length),
+      prompt: formatted.prompt,
+      ...(runningPromptId ? { 'prompt.id': runningPromptId } : {}),
+      ...(cmd.uuid ? { 'message.uuid': cmd.uuid } : {}),
+      'delivery.mode': 'mid_turn',
+    })
+    emitted++
+  }
+  return emitted
+}
 
 export function processTextPrompt(
   input: string | Array<ContentBlockParam>,
@@ -43,27 +111,21 @@ export function processTextPrompt(
     typeof input === 'string'
       ? input
       : input.find(block => block.type === 'text')?.text || ''
-  startInteractionSpan(userPromptText)
+  startInteractionSpan(userPromptText, undefined, origin)
 
   // Emit user_prompt OTEL event for both string (CLI) and array (SDK/VS Code)
-  // input shapes. Previously gated on `typeof input === 'string'`, so VS Code
-  // sessions never emitted user_prompt (anthropics/claude-code#33301).
-  // For array input, use the LAST text block: createUserContent pushes the
-  // user's message last (after any <ide_selection>/attachment context blocks),
-  // so .findLast gets the actual prompt. userPromptText (first block) is kept
-  // unchanged for startInteractionSpan to preserve existing span attributes.
-  const otelPromptText =
-    typeof input === 'string'
-      ? input
-      : input.findLast(block => block.type === 'text')?.text || ''
+  // input shapes. Official 2.1.325 #2318: keep ALL user text fragments across
+  // merged queued messages and text+image messages instead of `.findLast()`.
+  const otelPromptText = extractOtelUserPromptText(input)
   // densable: message uuid is assigned before user_prompt OTel so message.uuid
   // rides the event (vc("user_prompt", {..., "message.uuid": de})).
   const messageUuid = uuid ?? randomUUID()
 
   if (otelPromptText) {
+    const formattedPrompt = formatUserPromptForOTel(otelPromptText, origin)
     void logOTelEvent('user_prompt', {
       prompt_length: String(otelPromptText.length),
-      prompt: redactIfDisabled(otelPromptText),
+      prompt: formattedPrompt.prompt,
       'prompt.id': promptId,
       'message.uuid': messageUuid,
     })

@@ -1,16 +1,13 @@
+import chalk from 'chalk'
 import type { LocalCommandResult } from '../../types/command.js'
-import { openBrowser } from '../../utils/browser.js'
 
+/**
+ * Official 2.1.323 (#2192): `/stickers` now reports that the sticker pack is
+ * all claimed for now instead of opening a browser page.
+ */
 export async function call(): Promise<LocalCommandResult> {
-  const url = 'https://www.stickermule.com/claudecode'
-  const success = await openBrowser(url)
-
-  if (success) {
-    return { type: 'text', value: 'Opening sticker page in browser…' }
-  } else {
-    return {
-      type: 'text',
-      value: `Failed to open browser. Visit: ${url}`,
-    }
+  return {
+    type: 'text',
+    value: `Claude Code sticker pack\n${chalk.dim('All claimed for now. Thanks for the love.')}`,
   }
 }

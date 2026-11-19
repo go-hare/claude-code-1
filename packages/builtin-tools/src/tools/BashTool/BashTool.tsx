@@ -43,6 +43,38 @@ import type { AssistantMessage } from 'src/types/message.js';
 import { parseForSecurity } from 'src/utils/bash/ast.js';
 import { PARSE_ABORTED, parseCommandRaw } from 'src/utils/bash/parser.js';
 import { splitCommand_DEPRECATED, splitCommandWithOperators } from 'src/utils/bash/commands.js';
+
+// Official 2.1.325 #2261 (SEA `wgi` / `bgi` / `XLo` @294153709):
+// Detect when a sandboxed git command (checkout, stash, pull --autostash, etc.)
+// failed to update sandbox-protected read-only paths (such as `.claude/`), and
+// return a warning note for Claude.
+const SANDBOX_GIT_RO_ERROR_RE =
+  /^(error|warning|fatal): (unable to (unlink|create|rmdir)|failed to open file|cannot create directory at) [^\n]*: (Read-only file system|(Device or r|R)esource busy|Operation not permitted|Permission denied)$/m;
+const SANDBOX_GIT_FATAL_RESET_RE = /^fatal: (could not (reset (--hard|index file)|move back to)|read-tree failed)/im;
+
+export function getSandboxedGitProtectedFileNote(output: string, exitCode: number): string | undefined {
+  if (!SANDBOX_GIT_RO_ERROR_RE.test(output)) {
+    return undefined;
+  }
+  const lines = output.split('\n');
+  let createdAutostash = 0;
+  let appliedAutostash = 0;
+  for (const line of lines) {
+    if (line.startsWith('Created autostash')) createdAutostash++;
+    if (line.startsWith('Applied autostash')) appliedAutostash++;
+  }
+  if (
+    SANDBOX_GIT_FATAL_RESET_RE.test(output) ||
+    createdAutostash > appliedAutostash ||
+    (/^Saved working directory/m.test(output) && /^error: unable to write file /m.test(output))
+  ) {
+    return "git stopped at a path that the sandbox keeps read-only, and may already have taken uncommitted changes out of the working tree. Unless the command was meant to discard them, they are probably in a stash, an autostash or an unreferenced commit. Stop here: change and delete nothing under .git whatever git suggests, commit nothing, and do not run the command again, inside or outside the sandbox. Tell the user and show them git's message.";
+  }
+  if (exitCode !== 0 && !/^(Switched to|HEAD is now at) /m.test(output)) {
+    return undefined;
+  }
+  return 'Whatever the exit code, git may have failed to change some files: the sandbox keeps paths such as settings and skills in .claude read-only. Those files are still as before, so do not commit them, and do not push a commit that this command made. They can run code, so do not redo the command outside the sandbox on your own: tell the user.';
+}
 import { tryParseShellCommand } from 'src/utils/bash/shellQuote.js';
 import { matchingRuleForInput } from 'src/utils/permissions/filesystem.js';
 import { extractClaudeCodeHints } from 'src/utils/claudeCodeHints.js';
@@ -54,7 +86,13 @@ import {
   isBashSandboxShowIndicatorEnabled,
 } from 'src/utils/residualFinalEnvGates.js';
 import { isENOENT, ShellError } from 'src/utils/errors.js';
-import { detectFileEncoding, detectLineEndings, getFileModificationTime, writeTextContent } from 'src/utils/file.js';
+import {
+  detectFileEncoding,
+  detectLineEndings,
+  getFileModificationTime,
+  readUnsizedFileBytes,
+  writeTextContent,
+} from 'src/utils/file.js';
 import { fileHistoryEnabled, fileHistoryTrackEdit } from 'src/utils/fileHistory.js';
 import { truncate } from 'src/utils/format.js';
 import { getFsImplementation } from 'src/utils/fsOperations.js';
@@ -229,19 +267,36 @@ export function isSearchOrReadBashCommand(command: string): {
   let hasNonNeutralCommand = false;
   let skipNextAsRedirectTarget = false;
 
-  for (const part of partsWithOperators) {
+  for (let i = 0; i < partsWithOperators.length; i++) {
+    const part = partsWithOperators[i]!;
     if (skipNextAsRedirectTarget) {
       skipNextAsRedirectTarget = false;
       continue;
     }
 
-    if (part === '>' || part === '>>' || part === '>&') {
+    // Official 2.1.323 #2011: output redirections to a real file (e.g.
+    // `cat > file <<EOF`, `cat >> out.txt`) WRITE a file and must never be
+    // classified/collapsed as "Read 1 file". Only `/dev/null` and fd dups
+    // like `>&2` / `2>&1` remain non-writing.
+    if (part === '>' || part === '>>' || part === '>|' || part === '&>' || part === '&>>' || part === '>&') {
+      const nextPart = partsWithOperators[i + 1]?.trim();
+      const isHarmlessRedirect =
+        nextPart === '/dev/null' || (part === '>&' && nextPart !== undefined && /^\d+$/.test(nextPart));
+      if (!isHarmlessRedirect) {
+        return { isSearch: false, isRead: false, isList: false };
+      }
       skipNextAsRedirectTarget = true;
       continue;
     }
 
     if (part === '||' || part === '&&' || part === '|' || part === ';') {
       continue;
+    }
+
+    // Also catch attached output redirections inside a command segment
+    // (e.g. `cat >file <<EOF` or `cat 1>file` when not split as a separate op)
+    if (/(?:^|\s)(?:\d*|&)>>?(?!&?\d+(?:\s|$))\s*(?!\/dev\/null(?:\s|$))\S/.test(part)) {
+      return { isSearch: false, isRead: false, isList: false };
     }
 
     const baseCommand = part.trim().split(/\s+/)[0];
@@ -1039,7 +1094,11 @@ export async function trackBashSingleFileReads(
         const stats = await fs.stat(absPath);
         if (!stats.isFile() || stats.size > BASH_READ_TRACK_MAX_BYTES) return;
         if (signal.aborted) return;
-        const raw = await fs.readFile(absPath, { encoding: 'utf8' });
+        // 2.1.323 #1985 (SEA @294092282): 0-byte synthetic /proc files can
+        // stream gigabytes on unbounded readFile(); use bounded readUnsizedFileBytes.
+        const raw =
+          (stats.size === 0 ? await readUnsizedFileBytes(absPath) : null)?.toString('utf8') ??
+          (await fs.readFile(absPath, { encoding: 'utf8' }));
         const normalized = raw.replaceAll('\r\n', '\n');
         const sliced = extractSliceForBashRead(normalized, h);
         if (sliced === null || (!sliced.content.trim() && normalized.trim())) {
@@ -1507,9 +1566,22 @@ export const BashTool = buildTool({
 
         // Annotate output with sandbox violations if any (stderr is in stdout)
         const originalStdout = result.stdout || '';
-        const outputWithSbFailures = SandboxManager.annotateStderrWithSandboxFailures(input.command, originalStdout);
-        // densable 2.1.243 #35: keep the appended <sandbox_violations> on
-        // success (exit 0) — error path already throws with the full annotate.
+        const baseOutputWithSbFailures = SandboxManager.annotateStderrWithSandboxFailures(
+          input.command,
+          originalStdout,
+        );
+        // Official 2.1.325 #2261 (`XLo`): when a sandboxed git command hits
+        // sandbox-protected read-only paths (e.g. `.claude/`), append a note
+        // so Claude warns the user and avoids re-running outside the sandbox.
+        const sandboxGitNote =
+          shouldUseSandbox(input) && SandboxManager.isSandboxingEnabled()
+            ? getSandboxedGitProtectedFileNote(originalStdout, result.code)
+            : undefined;
+        const outputWithSbFailures = sandboxGitNote
+          ? `${baseOutputWithSbFailures}${baseOutputWithSbFailures.endsWith('\n') ? '' : '\n'}${sandboxGitNote}`
+          : baseOutputWithSbFailures;
+        // densable 2.1.243 #35: keep the appended <sandbox_violations> (and
+        // #2261 sandbox git note) on success (exit 0) — error path already throws with the full annotate.
         sandboxViolationSuffix = extractSandboxViolationSuffix(originalStdout, outputWithSbFailures);
 
         if (result.preSpawnError) {

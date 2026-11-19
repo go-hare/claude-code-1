@@ -79,6 +79,100 @@ const GHA_SUBPROCESS_SCRUB = [
 ] as const
 
 /**
+ * 2.1.323 #2169 + 2.1.325 #2371/#2372 (SEA `JCe` / `U7r` / `hSe` / `Pt` / `B7r`):
+ * Claude Code's own sign-in tokens, API keys, mTLS client key passphrase, and
+ * host/runner credential env vars stripped from internal ripgrep, local git,
+ * and sandbox runtime helper subprocesses.
+ */
+export const CLAUDE_AUTH_SUBPROCESS_STRIP_VARS = [
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_AWS_API_KEY',
+  'ANTHROPIC_BEDROCK_MANTLE_API_KEY',
+  'ANTHROPIC_FOUNDRY_API_KEY',
+  'ANTHROPIC_FOUNDRY_AUTH_TOKEN',
+  'ANTHROPIC_CUSTOM_HEADERS',
+  'AWS_BEARER_TOKEN_BEDROCK',
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'CLAUDE_CODE_OAUTH_REFRESH_TOKEN',
+  'CLAUDE_CODE_OAUTH_SCOPES',
+  'CLAUDE_CODE_OAUTH_CLIENT_ID',
+  'CLAUDE_CODE_SESSION_ACCESS_TOKEN',
+  'CLAUDE_SESSION_INGRESS_TOKEN_FILE',
+  'CLAUDE_CODE_CLIENT_KEY_PASSPHRASE',
+  'CLAUDE_CODE_ARTIFACTS_API_TOKEN',
+  'CLAUDE_CODE_MEMORY_API_TOKEN',
+  'CLAUDE_CODE_HFI_BEARER_TOKEN',
+  'CLAUDE_CODE_MESSAGING_TOKEN',
+  'CLAUDE_CODE_MCP_SERVE_AUTH_TOKEN',
+  'AGENT_PROXY_AUTH_TOKEN',
+  'CLAUDE_CODE_HOST_CREDS_FILE',
+  'MCP_CLIENT_SECRET',
+  'MCP_XAA_IDP_CLIENT_SECRET',
+  'ENVIRONMENT_SERVICE_KEY',
+  'SELF_HOSTED_RUNNER_POOL_SECRET',
+  'SELF_HOSTED_RUNNER_ENVIRONMENT_SECRET',
+  'CLAUDE_BG_AUTH_SNAPSHOT_PATH',
+  'CLAUDE_BG_SOCKET_TOKENS_PATH',
+  'CLAUDE_BG_RV_AUTH',
+  'CLAUDE_BG_PTY_AUTH',
+  'CLAUDE_BG_CLAIM_AUTH',
+] as const
+
+const CLAUDE_AUTH_STRIP_UPPER = new Set<string>(
+  CLAUDE_AUTH_SUBPROCESS_STRIP_VARS.flatMap(v => [v, `INPUT_${v}`]),
+)
+
+/**
+ * 2.1.323 #2169 + 2.1.325 #2371/#2372: Strip Claude Code's sign-in tokens,
+ * API keys, and mTLS client key passphrase from an environment object for
+ * internal helper subprocesses (ripgrep, internal git, sandbox helpers).
+ */
+export function stripClaudeAuthEnvVars(
+  base: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const hostAuthVar = base.CLAUDE_CODE_HOST_AUTH_ENV_VAR?.trim().toUpperCase()
+  const out: NodeJS.ProcessEnv = { ...base }
+  for (const key of Object.keys(out)) {
+    const upper = key.toUpperCase()
+    if (
+      CLAUDE_AUTH_STRIP_UPPER.has(upper) ||
+      (hostAuthVar !== undefined &&
+        hostAuthVar.length > 0 &&
+        (upper === hostAuthVar || upper === `INPUT_${hostAuthVar}`))
+    ) {
+      delete out[key]
+    }
+  }
+  return out
+}
+
+/**
+ * 2.1.323 #2169 + 2.1.325 #2371/#2372: Environment for Claude Code's own
+ * ripgrep, internal git, and sandbox helper subprocesses — always omits Claude
+ * sign-in tokens, API keys, and mTLS client key passphrase regardless of
+ * `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`.
+ */
+export function internalToolSubprocessEnv(
+  extra?: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const scrubbed = stripClaudeAuthEnvVars(subprocessEnv())
+  if (!extra) return scrubbed
+  return { ...scrubbed, ...extra }
+}
+
+/**
+ * 2.1.325 #2371/#2372 (SEA `d3` / `g1(d3)`): Sanitized environment for sandbox
+ * runtime helper programs (network bridge / socat / bwrap / rg probes),
+ * stripping Claude sign-in tokens, API keys, and mTLS client key passphrase.
+ */
+export function sandboxHelperSubprocessEnv(
+  base: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  return stripClaudeAuthEnvVars(base)
+}
+
+/**
  * Returns a copy of process.env with sensitive secrets stripped, for use when
  * spawning subprocesses (Bash tool, shell snapshot, MCP stdio servers, LSP
  * servers, shell hooks).

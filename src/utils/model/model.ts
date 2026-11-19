@@ -378,20 +378,65 @@ export function getRuntimeMainLoopModel(params: {
   permissionMode: PermissionMode
   mainLoopModel: string
   exceeds200kTokens?: boolean
+  /**
+   * Official 2.1.325 #2263 (`Zw` / `gat`): explicit model setting governing
+   * plan-mode upgrades (`opusplan` / `haiku`), or `null` when a subagent has
+   * its own model and must not be upgraded to the plan-mode model.
+   */
+  setting?: ModelSetting | undefined
+  /**
+   * True when invoked for a subagent. If the subagent's `mainLoopModel`
+   * differs from the main session's resolved model (i.e. it specifies its own
+   * model), plan-mode upgrades for `opusplan`/`haiku` are skipped.
+   */
+  isSubagent?: boolean
 }): ModelName {
-  const { permissionMode, mainLoopModel, exceeds200kTokens = false } = params
+  const {
+    permissionMode,
+    mainLoopModel,
+    exceeds200kTokens = false,
+    setting,
+    isSubagent = false,
+  } = params
 
-  // opusplan uses Opus in plan mode without [1m] suffix.
+  if (permissionMode !== 'plan') {
+    return mainLoopModel
+  }
+
+  let effectiveSetting: ModelSetting | undefined
+  if (setting !== undefined) {
+    effectiveSetting = setting
+  } else if (isSubagent) {
+    // Subagent with its own model must not be moved to the main session's
+    // plan-mode model when the main setting is `opusplan` or `haiku`.
+    const sessionModel = normalizeModelStringForAPI(
+      getMainLoopModel(),
+    ).toLowerCase()
+    const subagentModel =
+      normalizeModelStringForAPI(mainLoopModel).toLowerCase()
+    if (subagentModel !== sessionModel) {
+      return mainLoopModel
+    }
+    effectiveSetting = getUserSpecifiedModelSetting()
+  } else {
+    effectiveSetting = getUserSpecifiedModelSetting()
+  }
+
+  if (effectiveSetting === null || effectiveSetting === undefined) {
+    return mainLoopModel
+  }
+
+  // opusplan uses Opus in plan mode without [1m] suffix (opusplan[1m] keeps [1m]).
   if (
-    getUserSpecifiedModelSetting() === 'opusplan' &&
-    permissionMode === 'plan' &&
+    (effectiveSetting === 'opusplan' || effectiveSetting === 'opusplan[1m]') &&
     !exceeds200kTokens
   ) {
-    return getDefaultOpusModel()
+    const opus = getDefaultOpusModel()
+    return effectiveSetting === 'opusplan[1m]' ? with1mSuffix(opus) : opus
   }
 
   // sonnetplan by default
-  if (getUserSpecifiedModelSetting() === 'haiku' && permissionMode === 'plan') {
+  if (effectiveSetting === 'haiku') {
     return getDefaultSonnetModel()
   }
 

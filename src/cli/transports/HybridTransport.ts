@@ -170,11 +170,13 @@ export class HybridTransport extends WebSocketTransport {
   }
 
   override close(): void {
-    if (this.streamEventTimer) {
-      clearTimeout(this.streamEventTimer)
-      this.streamEventTimer = null
+    // Official 2.1.323 #2145: flush buffered stream_events into the uploader
+    // BEFORE closing so streamed replies do not lose text from the middle
+    // when a container shuts down partway through a reply.
+    const pendingStreamEvents = this.takeStreamEvents()
+    if (pendingStreamEvents.length > 0) {
+      void this.uploader.enqueue(pendingStreamEvents)
     }
-    this.streamEventBuffer = []
     // Grace period for queued writes — fallback. replBridge teardown now
     // awaits archive between write and close (see CLOSE_GRACE_MS), so
     // archive latency is the primary drain window and this is a last

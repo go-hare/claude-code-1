@@ -51,6 +51,10 @@ export const ARTIFACT_ASSET_CONTENT_TYPES = new Map<string, string>([
   ['.mp4', 'video/mp4'],
   ['.webm', 'video/webm'],
   ['.pdf', 'application/pdf'],
+  [
+    '.docx',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  ],
   ['.woff2', 'font/woff2'],
   ['.woff', 'font/woff'],
   ['.ttf', 'font/ttf'],

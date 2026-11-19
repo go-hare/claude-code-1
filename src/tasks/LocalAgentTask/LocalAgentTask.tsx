@@ -2116,6 +2116,9 @@ export function completeAgentTask(result: AgentToolResult, registry: TaskRegistr
       resuming: false,
       adoptResumePending: false,
       result,
+      // 2.1.323 #2155: release completed subagent transcript from memory once
+      // finalized (unless parked interactive where user can still view live chat).
+      messages: isParkedKeepaliveAgent(completedCandidate) && !getIsNonInteractiveSession() ? task.messages : [],
       progress: {
         toolUseCount,
         tokenCount,
@@ -2182,6 +2185,8 @@ export function failAgentTask(taskId: string, error: string, registry: TaskRegis
       resuming: false,
       adoptResumePending: false,
       error,
+      // 2.1.323 #2155: release failed subagent transcript from memory
+      messages: [],
       endTime: Date.now(),
       // densable eto: leave keepaliveReasons as-is (no bot arm on fail path)
       evictAfter: computePanelEvictAfter(task, { park: false }),

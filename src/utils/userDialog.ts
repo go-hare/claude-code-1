@@ -11,11 +11,13 @@ import { resolveUserDialogTimeoutMsOrDefault } from './residualMsEnvGates.js'
 /** Official MAX_DECLARED_DIALOG_KINDS (cJr). */
 export const MAX_DECLARED_DIALOG_KINDS = 32
 
-/** Official default action copy for known dialog kinds (KDy). */
+/** Official default action copy for known dialog kinds (KDy + 2.1.323 #2112). */
 export const DEFAULT_DIALOG_ACTION_DESCRIPTIONS: Readonly<
   Record<string, string>
 > = {
   refusal_fallback_prompt: 'choose: retry on fallback model or edit prompt',
+  fable_overage_consent_prompt:
+    'choose: continue Fable 5 on usage credits or switch models',
   auto_mode_server_fallback:
     'acknowledge the classifier billing notice (Enter continues in auto mode)',
   auto_mode_outside_reads:

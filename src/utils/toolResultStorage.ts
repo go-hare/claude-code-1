@@ -3,9 +3,16 @@
  */
 
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
-import { lstat, mkdir, writeFile } from 'fs/promises'
-import { join } from 'path'
-import { getOriginalCwd, getSessionId } from '../bootstrap/state.js'
+import { randomUUID } from 'crypto'
+import { rmSync } from 'fs'
+import { lstat, mkdir, rm, writeFile } from 'fs/promises'
+import { dirname, join } from 'path'
+import {
+  getOriginalCwd,
+  getSessionId,
+  getSessionProjectDir,
+  isSessionPersistenceDisabled,
+} from '../bootstrap/state.js'
 import {
   BYTES_PER_TOKEN,
   DEFAULT_MAX_RESULT_SIZE_CHARS,
@@ -17,7 +24,9 @@ import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growt
 import { logEvent } from '../services/analytics/index.js'
 import { sanitizeToolNameForAnalytics } from '../services/analytics/metadata.js'
 import type { Message } from '../types/message.js'
+import { registerCleanup } from './cleanupRegistry.js'
 import { logForDebugging } from './debug.js'
+import { isEnvTruthy } from './envUtils.js'
 import { getErrnoCode, toError } from './errors.js'
 import { formatFileSize } from './format.js'
 import { logError } from './log.js'
@@ -97,10 +106,74 @@ export type PersistToolResultError = {
 }
 
 /**
- * Get the session directory (projectDir/sessionId)
+ * Official 2.1.323 #2102 (`iGs`): when `--no-session-persistence` or
+ * `CLAUDE_CODE_SKIP_PROMPT_HISTORY` is active, large tool results are staged
+ * in a session-scoped ephemeral directory and removed on normal exit, Ctrl+C
+ * (SIGINT), or SIGTERM.
+ */
+const ephemeralToolResultsDirs = new Map<string, string>()
+let ephemeralCleanupRegistered = false
+
+export function isEphemeralToolResultsMode(): boolean {
+  return (
+    isSessionPersistenceDisabled() ||
+    isEnvTruthy(process.env.CLAUDE_CODE_SKIP_PROMPT_HISTORY)
+  )
+}
+
+export async function cleanupEphemeralToolResultsDirs(): Promise<void> {
+  const dirs = [...ephemeralToolResultsDirs.values()]
+  ephemeralToolResultsDirs.clear()
+  for (const dir of dirs) {
+    await rm(dir, { recursive: true, force: true }).catch(logError)
+  }
+}
+
+function cleanupEphemeralToolResultsDirsSync(): void {
+  const dirs = [...ephemeralToolResultsDirs.values()]
+  ephemeralToolResultsDirs.clear()
+  for (const dir of dirs) {
+    try {
+      rmSync(dir, { recursive: true, force: true })
+    } catch {
+      // Best-effort sync backstop on process exit
+    }
+  }
+}
+
+/** @internal Reset ephemeral tool-results registry between tests. */
+export function _resetEphemeralToolResultsForTests(): void {
+  ephemeralToolResultsDirs.clear()
+}
+
+function resolveSessionProjectDir(): string {
+  // Official 2.1.323 #1992 (`gDo` / `kO`): keep large tool results in the
+  // session's pinned project dir (getSessionProjectDir()) even after entering
+  // a worktree created by a WorktreeCreate hook or belonging to a nested repo.
+  return getSessionProjectDir() ?? getProjectDir(getOriginalCwd())
+}
+
+/**
+ * Get the session directory (projectDir/sessionId), or a dedicated ephemeral
+ * directory when `--no-session-persistence` is active (#2102).
  */
 function getSessionDir(): string {
-  return join(getProjectDir(getOriginalCwd()), getSessionId())
+  const sessionId = getSessionId()
+  const projectDir = resolveSessionProjectDir()
+  if (!isEphemeralToolResultsMode()) {
+    return join(projectDir, sessionId)
+  }
+  let ephemeralDir = ephemeralToolResultsDirs.get(sessionId)
+  if (ephemeralDir === undefined) {
+    if (!ephemeralCleanupRegistered) {
+      ephemeralCleanupRegistered = true
+      registerCleanup(() => cleanupEphemeralToolResultsDirs())
+      process.on('exit', cleanupEphemeralToolResultsDirsSync)
+    }
+    ephemeralDir = join(projectDir, randomUUID())
+    ephemeralToolResultsDirs.set(sessionId, ephemeralDir)
+  }
+  return ephemeralDir
 }
 
 /**
@@ -126,7 +199,13 @@ export function getToolResultPath(id: string, isJson: boolean): string {
  */
 export async function ensureToolResultsDir(): Promise<void> {
   try {
-    await mkdir(getToolResultsDir(), { recursive: true })
+    const dir = getToolResultsDir()
+    if (isEphemeralToolResultsMode()) {
+      const ephemeralRoot = dirname(dir)
+      await mkdir(dirname(ephemeralRoot), { recursive: true })
+      await mkdir(ephemeralRoot, { recursive: true, mode: 0o700 })
+    }
+    await mkdir(dir, { recursive: true })
   } catch {
     // Directory may already exist
   }

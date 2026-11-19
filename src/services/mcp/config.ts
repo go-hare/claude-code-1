@@ -104,11 +104,13 @@ export function getEnterpriseMcpFilePath(): string {
 }
 
 /**
- * Internal utility: Add scope to server configs
+ * Internal utility: Add scope (and optional declaredIn folder ownership for
+ * project .mcp.json / local configs — Official 2.1.325 #2302) to server configs.
  */
-function addScopeToServers(
+export function addScopeToServers(
   servers: Record<string, McpServerConfig> | undefined,
   scope: ConfigScope,
+  declaredIn?: string,
 ): Record<string, ScopedMcpServerConfig> {
   if (!servers) {
     return {}
@@ -116,9 +118,95 @@ function addScopeToServers(
   const scopedServers: Record<string, ScopedMcpServerConfig> =
     Object.create(null)
   for (const [name, config] of Object.entries(servers)) {
-    scopedServers[name] = { ...config, scope }
+    scopedServers[name] = {
+      ...config,
+      scope,
+      ...(declaredIn !== undefined ? { declaredIn } : {}),
+    }
   }
   return scopedServers
+}
+
+/**
+ * Official 2.1.325 #2302 — merge folder-owned (`.mcp.json` / `local`) MCP
+ * configs with host-supplied dynamic configs after a folder move or pre-warmed
+ * start so a folder's own servers keep their `project`/`local` scope instead
+ * of being relabeled as host-added (`dynamic`) or dropped, and WebSocket (`ws`)
+ * configs remain eligible for automatic connection.
+ */
+export function mergeFolderOwnedMcpConfigs(
+  folderConfigs: Record<string, ScopedMcpServerConfig>,
+  dynamicConfigs?: Record<string, ScopedMcpServerConfig>,
+): Record<string, ScopedMcpServerConfig> {
+  const merged: Record<string, ScopedMcpServerConfig> = Object.create(null)
+  if (dynamicConfigs) {
+    Object.assign(merged, dynamicConfigs)
+  }
+  for (const [name, cfg] of Object.entries(folderConfigs)) {
+    const existing = merged[name]
+    // Folder-owned project (.mcp.json) and local configs keep their folder
+    // scope when the host also passed the same name (or after a pre-warmed
+    // claim / cwd move). Other scopes (user/plugin) yield to explicit host
+    // dynamic configs.
+    if (
+      existing === undefined ||
+      cfg.scope === 'project' ||
+      cfg.scope === 'local'
+    ) {
+      merged[name] = cfg
+    }
+  }
+  return merged
+}
+
+/**
+ * Official 2.1.325 #2302 — transport types that auto-connect on session boot /
+ * folder switch (including `ws` WebSocket MCP servers).
+ */
+export function isAutoConnectMcpTransport(
+  config: Pick<ScopedMcpServerConfig, 'type'>,
+): boolean {
+  switch (config.type) {
+    case undefined:
+    case 'stdio':
+    case 'sse':
+    case 'http':
+    case 'ws':
+    case 'sdk':
+    case 'claudeai-proxy':
+      return true
+    case 'sse-ide':
+    case 'ws-ide':
+      return false
+    default:
+      return false
+  }
+}
+
+/**
+ * Official 2.1.325 #2328 — in cloud sessions (`CLAUDE_CODE_REMOTE`), track
+ * whether plugin startup is still in flight so a connector tool's approval
+ * prompt is never auto-answered before plugins finish loading.
+ */
+let cloudPluginStartupPending = false
+
+export function setCloudPluginStartupPending(pending: boolean): void {
+  cloudPluginStartupPending = pending
+}
+
+export function isCloudPluginStartupPending(): boolean {
+  return cloudPluginStartupPending
+}
+
+export function shouldHoldConnectorApprovalWhilePluginsLoading(opts?: {
+  isRemote?: boolean
+  pluginStartupPending?: boolean
+  isConnectorTool?: boolean
+}): boolean {
+  const isRemote = opts?.isRemote ?? Boolean(process.env.CLAUDE_CODE_REMOTE)
+  const pending = opts?.pluginStartupPending ?? cloudPluginStartupPending
+  const isConnectorTool = opts?.isConnectorTool ?? true
+  return isRemote && pending && isConnectorTool
 }
 
 /**
@@ -263,9 +351,61 @@ export function getAnthropicProxyUpstreamUrls(url: string): string[] {
  * Default ignores env (plugin CLAUDE_PLUGIN_ROOT noise). Pass
  * `{ includeEnv: true }` only when env must distinguish two stdio servers.
  */
+/**
+ * Official 2.1.325 `gAt` — normalize trailing slash and strip hash for URL
+ * dedup signature comparison.
+ */
+function normalizeSignatureUrl(url: string): string {
+  try {
+    const parsed = new URL(url)
+    parsed.hash = ''
+    if (!parsed.search) parsed.search = ''
+    parsed.pathname = parsed.pathname.replace(/\/$/, '') || '/'
+    const str = parsed.toString()
+    return parsed.search ? str : str.replace(/\/$/, '')
+  } catch {
+    return url.includes('?') ? url : url.replace(/\/$/, '')
+  }
+}
+
+/**
+ * Official 2.1.325 `Wso` (#2301) — equivalent connector endpoint URL groups.
+ * In cloud sessions (`CLAUDE_CODE_REMOTE`), a dynamic connector may expose one
+ * vendor endpoint while a plugin lists a legacy/alternate URL for the same
+ * service (Atlassian, Asana, Sentry). Treating them as equivalent suppresses
+ * the duplicate plugin entry so Claude doesn't report a working connector as
+ * failed.
+ */
+export const EQUIVALENT_CONNECTOR_URL_GROUPS: readonly (readonly string[])[] = [
+  [
+    'https://mcp.atlassian.com',
+    'https://mcp.atlassian.com/v1/mcp',
+    'https://mcp.atlassian.com/v1/mcp/authv2',
+    'https://mcp.atlassian.com/v2/mcp',
+  ],
+  ['https://mcp.asana.com/v2/mcp', 'https://mcp.asana.com/sse'],
+  ['https://mcp.sentry.dev/mcp', 'https://mcp.sentry.dev/sse'],
+]
+
+/**
+ * Official 2.1.325 `Oxr` (#2301) — collapse equivalent vendor connector URL
+ * signatures to a shared `connector:<canonical>` key in remote sessions.
+ */
+export function canonicalizeRemoteConnectorSignature(
+  sig: string,
+  isRemote: boolean = Boolean(process.env.CLAUDE_CODE_REMOTE),
+): string {
+  const group = isRemote
+    ? EQUIVALENT_CONNECTOR_URL_GROUPS.find(urls =>
+        urls.some(u => `url:${u}` === sig),
+      )
+    : undefined
+  return group ? `connector:${group[0]}` : sig
+}
+
 export function getMcpServerSignature(
   config: McpServerConfig,
-  options?: { includeEnv?: boolean },
+  options?: { includeEnv?: boolean; exactUrl?: boolean },
 ): string | null {
   if (
     'configError' in config &&
@@ -294,7 +434,10 @@ export function getMcpServerSignature(
   }
   const url = getServerUrl(config)
   if (url) {
-    return `url:${unwrapCcrProxyUrl(url)}`
+    const unwrapped = unwrapCcrProxyUrl(url)
+    return options?.exactUrl
+      ? `url:${unwrapped}`
+      : `url:${normalizeSignatureUrl(unwrapped)}`
   }
   return null
 }
@@ -359,7 +502,10 @@ export function getMcpScopeConflicts(
 
   for (const { scope, servers, displayServers } of scopes) {
     for (const [name, config] of Object.entries(servers)) {
-      const sig = getMcpServerSignature(config, { includeEnv: false })
+      const sig = getMcpServerSignature(config, {
+        includeEnv: false,
+        exactUrl: true,
+      })
       if (!sig) continue
       let entries = byName.get(name)
       if (!entries) {
@@ -427,21 +573,41 @@ export function dedupPluginMcpServers(
 } {
   // Map signature -> server name so we can report which server a dup matches
   const manualSigs = new Map<string, string>()
+  // Official 2.1.325 #2301 (`qUs`): dynamic non-plugin connectors also index
+  // by canonical multi-URL equivalence group in cloud sessions.
+  const dynamicConnectorSigs = new Map<string, string>()
   for (const [name, config] of Object.entries(manualServers)) {
-    const sig = getMcpServerSignature(config)
+    const sig = getMcpServerSignature(config, { includeEnv: false })
     if (sig && !manualSigs.has(sig)) manualSigs.set(sig, name)
+    if (
+      sig &&
+      config.scope === 'dynamic' &&
+      !('pluginSource' in config && config.pluginSource !== undefined)
+    ) {
+      const canonical = canonicalizeRemoteConnectorSignature(sig)
+      if (!dynamicConnectorSigs.has(canonical)) {
+        dynamicConnectorSigs.set(canonical, name)
+      }
+    }
   }
 
   const servers: Record<string, ScopedMcpServerConfig> = Object.create(null)
   const suppressed: Array<{ name: string; duplicateOf: string }> = []
   const seenPluginSigs = new Map<string, string>()
   for (const [name, config] of Object.entries(pluginServers)) {
-    const sig = getMcpServerSignature(config)
+    const sig = getMcpServerSignature(config, { includeEnv: true })
     if (sig === null) {
       servers[name] = config
       continue
     }
-    const manualDup = manualSigs.get(sig)
+    const noEnvSig = getMcpServerSignature(config, { includeEnv: false })
+    const manualDup =
+      noEnvSig !== null
+        ? (manualSigs.get(noEnvSig) ??
+          dynamicConnectorSigs.get(
+            canonicalizeRemoteConnectorSignature(noEnvSig),
+          ))
+        : undefined
     if (manualDup !== undefined) {
       logForDebugging(
         `Suppressing plugin MCP server "${name}": duplicates manually-configured "${manualDup}"`,
@@ -1528,7 +1694,7 @@ export function getProjectMcpConfigsFromCwd(): {
 
   return {
     servers: config.mcpServers
-      ? addScopeToServers(config.mcpServers, 'project')
+      ? addScopeToServers(config.mcpServers, 'project', getCwd())
       : {},
     errors: errors || [],
   }
@@ -1603,7 +1769,11 @@ export function getMcpConfigsByScope(
 
         if (config.mcpServers) {
           // Merge servers, with files closer to CWD overriding parent configs
-          Object.assign(allServers, addScopeToServers(config.mcpServers, scope))
+          // Official 2.1.325 #2302: stamp declaredIn with the .mcp.json folder.
+          Object.assign(
+            allServers,
+            addScopeToServers(config.mcpServers, scope, dir),
+          )
         }
 
         if (errors.length > 0) {
@@ -1650,7 +1820,7 @@ export function getMcpConfigsByScope(
       })
 
       return {
-        servers: addScopeToServers(config?.mcpServers, scope),
+        servers: addScopeToServers(config?.mcpServers, scope, getCwd()),
         errors,
       }
     }
@@ -1803,7 +1973,13 @@ export async function getClaudeCodeMcpConfigs(
   const pluginMcpServers: Record<string, ScopedMcpServerConfig> =
     Object.create(null)
 
-  const pluginResult = await loadAllPluginsCacheOnly()
+  setCloudPluginStartupPending(true)
+  let pluginResult: Awaited<ReturnType<typeof loadAllPluginsCacheOnly>>
+  try {
+    pluginResult = await loadAllPluginsCacheOnly()
+  } finally {
+    setCloudPluginStartupPending(false)
+  }
 
   // Collect MCP-specific errors during server loading
   const mcpErrors: PluginError[] = []

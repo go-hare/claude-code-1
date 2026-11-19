@@ -22,7 +22,7 @@ export function canonicalOutboundPaceKey(path: string): string | undefined {
   return canonicalSocketKey(path)
 }
 
-/** densable vla / Nhn+Oe — defaults shared with harbor kite + peer admit. */
+/** densable vla / Nhn+Oe + 2.1.323 #2164 (`re` / `W`) — defaults shared with harbor kite + peer admit. */
 export const DEFAULT_HARBOR_KITE_LIMITS = {
   bucketCapacity: 30,
   refillPerSecond: 0.5,
@@ -32,6 +32,17 @@ export const DEFAULT_HARBOR_KITE_LIMITS = {
   maxTrackedSenders: 256,
   /** densable Oe — yr queue-full cap (WUt). */
   maxQueuedPeerMessages: 50,
+  /** Official 2.1.323 #2164: same-machine cross-session cap raised from 20 to 100,000. */
+  maxDesktopForwards: 100_000,
+  maxLocalRelays: 100_000,
+  countLocalHops: false,
+} as const
+
+/** Official 2.1.323 #2164 (`W`) — conservative fallbacks when GB payload is malformed. */
+export const MALFORMED_HARBOR_KITE_FALLBACKS = {
+  maxDesktopForwards: 20,
+  maxLocalRelays: 20,
+  countLocalHops: true,
 } as const
 
 export type HarborKiteLimits = {
@@ -42,6 +53,9 @@ export type HarborKiteLimits = {
   maxChainLength: number
   maxTrackedSenders: number
   maxQueuedPeerMessages: number
+  maxDesktopForwards: number
+  maxLocalRelays: number
+  countLocalHops: boolean
 }
 
 /** densable R5d — typed refuse class for outbound paced sends. */
@@ -262,6 +276,7 @@ export function createOutboundPacer(
 
 const harborKiteLimitsSchema = lazySchema(() => {
   const d = DEFAULT_HARBOR_KITE_LIMITS
+  const fb = MALFORMED_HARBOR_KITE_FALLBACKS
   return z.object({
     bucketCapacity: z.number().min(5).max(500).catch(d.bucketCapacity),
     refillPerSecond: z.number().min(0.05).max(50).catch(d.refillPerSecond),
@@ -280,6 +295,24 @@ const harborKiteLimitsSchema = lazySchema(() => {
       .min(10)
       .max(5000)
       .catch(d.maxQueuedPeerMessages),
+    maxDesktopForwards: z
+      .number()
+      .int()
+      .min(1)
+      .max(d.maxDesktopForwards)
+      .default(d.maxDesktopForwards)
+      .catch(fb.maxDesktopForwards),
+    maxLocalRelays: z
+      .number()
+      .int()
+      .min(1)
+      .max(d.maxLocalRelays)
+      .default(d.maxLocalRelays)
+      .catch(fb.maxLocalRelays),
+    countLocalHops: z
+      .boolean()
+      .default(d.countLocalHops)
+      .catch(fb.countLocalHops),
   })
 })
 
@@ -294,12 +327,22 @@ export function getHarborKiteLimits(): HarborKiteLimits {
   const parsed = harborKiteLimitsSchema().safeParse(raw)
   if (!parsed.success) {
     logForDebugging(
-      '[peer-guard] tengu_harbor_kite_limits is not an object; using defaults',
+      '[peer-guard] tengu_harbor_kite_limits is not an object; using fallbacks',
       { level: 'warn' },
     )
-    return { ...DEFAULT_HARBOR_KITE_LIMITS }
+    return { ...DEFAULT_HARBOR_KITE_LIMITS, ...MALFORMED_HARBOR_KITE_FALLBACKS }
   }
   return parsed.data
+}
+
+/**
+ * Official 2.1.323 #2164 (`eFr`): verified same-machine peers skip hop-budget
+ * counting when `countLocalHops` is false (default).
+ */
+export function shouldSkipLocalHopCount(origin: {
+  verifiedLocal?: boolean
+}): boolean {
+  return origin.verifiedLocal === true && !getHarborKiteLimits().countLocalHops
 }
 
 /**

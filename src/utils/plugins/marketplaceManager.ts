@@ -19,7 +19,7 @@
  */
 
 import axios from 'axios'
-import { readlink, writeFile } from 'fs/promises'
+import { readlink, stat, writeFile } from 'fs/promises'
 import isEqual from 'lodash-es/isEqual.js'
 import memoize from 'lodash-es/memoize.js'
 import {
@@ -75,7 +75,11 @@ import {
   getAddDirExtraMarketplaces,
 } from './addDirPluginSettings.js'
 import { markPluginVersionOrphaned } from './cacheUtils.js'
-import { classifyFetchError, logPluginFetch } from './fetchTelemetry.js'
+import {
+  classifyFetchError,
+  getPluginDownloadProxyOptions,
+  logPluginFetch,
+} from './fetchTelemetry.js'
 import {
   createMarketplaceCatalogBeforeRedirect,
   inheritedMarketplaceHeaderNames,
@@ -2085,6 +2089,123 @@ export async function selectNeededSubmodules(
   return matchSubmodulePaths(recordedSubmodules, [...needed, ...symlinkTargets])
 }
 
+/**
+ * Official 2.1.323 #2050 (`qt`): pass `-c core.longpaths=true` so git clones
+ * and submodule checkouts do not fail on Windows when a path reaches 260 chars.
+ */
+export const GIT_LONGPATHS_ARGS = ['-c', 'core.longpaths=true'] as const
+
+export type SubmoduleShaPinFailure = {
+  message: string
+  errorKind: 'sha_pin_mismatch' | 'other'
+}
+
+const SUBMODULE_CHECK_TIMEOUT_MS = 10_000
+
+async function gitRevParseVerify(
+  cwd: string,
+  ref: string,
+  env?: NodeJS.ProcessEnv,
+): Promise<string | undefined> {
+  const res = await execFileNoThrowWithCwd(
+    gitExe(),
+    [...GIT_LONGPATHS_ARGS, 'rev-parse', '--verify', '-q', ref],
+    {
+      cwd,
+      timeout: SUBMODULE_CHECK_TIMEOUT_MS,
+      stdin: 'ignore',
+      ...(env ? { env } : {}),
+    },
+  )
+  return res.code === 0 ? res.stdout.trim() : undefined
+}
+
+async function listInitializedSubmodulePaths(
+  cwd: string,
+  env?: NodeJS.ProcessEnv,
+): Promise<string[]> {
+  const res = await execFileNoThrowWithCwd(
+    gitExe(),
+    [...GIT_LONGPATHS_ARGS, 'ls-tree', '-r', '-z', 'HEAD'],
+    {
+      cwd,
+      timeout: SUBMODULE_CHECK_TIMEOUT_MS,
+      stdin: 'ignore',
+      ...(env ? { env } : {}),
+    },
+  )
+  if (res.code !== 0 || !res.stdout) return []
+  const paths: string[] = []
+  for (const entry of res.stdout.split('\0')) {
+    if (!entry.startsWith('160000 ')) continue
+    const tabIdx = entry.indexOf('\t')
+    if (tabIdx !== -1) {
+      const subPath = entry.slice(tabIdx + 1)
+      if (subPath) paths.push(subPath)
+    }
+  }
+  return paths
+}
+
+/**
+ * Official 2.1.323 #2185 (`tmo` / `TGe`): recursively verify every initialized
+ * git submodule is checked out at the exact commit its parent repository records.
+ */
+export async function verifySubmoduleShaPins(
+  checkoutDir: string,
+  opts: { env?: NodeJS.ProcessEnv; prefix?: string } = {},
+): Promise<SubmoduleShaPinFailure | undefined> {
+  const prefix = opts.prefix ?? ''
+  const subPaths = await listInitializedSubmodulePaths(checkoutDir, opts.env)
+  for (const subPath of subPaths) {
+    const subDir = join(checkoutDir, subPath)
+    try {
+      await stat(join(subDir, '.git'))
+    } catch {
+      continue
+    }
+    const label = `${prefix}${subPath}`
+    const expected = await gitRevParseVerify(
+      checkoutDir,
+      `HEAD:${subPath}`,
+      opts.env,
+    )
+    if (expected === undefined) {
+      logForDebugging(
+        `Could not check a clone's submodules: git could not read the commit recorded for "${label}"`,
+        { level: 'warn' },
+      )
+      return {
+        message: `Could not verify submodule "${label}" in cloned repository.`,
+        errorKind: 'other',
+      }
+    }
+    const actual = await gitRevParseVerify(subDir, 'HEAD', opts.env)
+    if (actual === undefined) {
+      logForDebugging(
+        `Could not check a clone's submodules: git could not read the commit checked out at "${label}"`,
+        { level: 'warn' },
+      )
+      return {
+        message: `Could not verify submodule "${label}" in cloned repository.`,
+        errorKind: 'other',
+      }
+    }
+    if (actual !== expected) {
+      return {
+        message: `SHA pin verification failed: submodule "${label}" is on commit ${actual}, but its parent repository records ${expected}. The submodule's remote may have removed the recorded commit, or have a branch named after it. Refusing to use this repository; ask the repository's maintainer to fix the submodule.`,
+        errorKind: 'sha_pin_mismatch',
+      }
+    }
+    const nested = await verifySubmoduleShaPins(subDir, {
+      env: opts.env,
+      prefix: `${label}/`,
+    })
+    if (nested !== undefined) return nested
+  }
+  return undefined
+}
+
 async function gitSubmoduleUpdate(
   cwd: string,
   credentialArgs: string[],
@@ -2137,6 +2258,7 @@ async function gitSubmoduleUpdate(
   const result = await execFileNoThrowWithCwd(
     gitExe(),
     [
+      ...GIT_LONGPATHS_ARGS,
       '-c',
       'core.sshCommand=ssh -o BatchMode=yes -o StrictHostKeyChecking=yes',
       ...credentialArgs,
@@ -2156,6 +2278,12 @@ async function gitSubmoduleUpdate(
       `git submodule update failed (non-fatal): ${result.stderr}`,
       { level: 'warn' },
     )
+  }
+  // Always verify SHA pins of any submodules that were checked out, even when
+  // git submodule update exited non-zero on another submodule.
+  const pinFailure = await verifySubmoduleShaPins(cwd, { env })
+  if (pinFailure !== undefined) {
+    throw new Error(pinFailure.message)
   }
 }
 
@@ -2277,13 +2405,115 @@ async function isGitHubSshLikelyConfigured(): Promise<boolean> {
 }
 
 /**
+ * Official 2.1.325 #2310 (`Yla` / `b6` / `T6`):
+ * Older git versions (such as 2.34) do not support `sparse-checkout set --cone`
+ * keeping root files in one step — git >= 2.35 is required. On git < 2.35,
+ * configure `core.sparseCheckout=true` + `core.sparseCheckoutCone=true` when
+ * running `sparse-checkout set -- <paths>` and then `sparse-checkout init --cone`
+ * so root files of the repository are preserved.
+ */
+export function parseGitVersionTuple(
+  versionOutput: string,
+): { major: number; minor: number } | null {
+  const m = /git version (\d+)\.(\d+)/i.exec(versionOutput)
+  if (!m) return null
+  return { major: Number(m[1]), minor: Number(m[2]) }
+}
+
+export function isGitSparseConeSetSupported(
+  version: { major: number; minor: number } | null,
+): boolean {
+  return (
+    version !== null &&
+    (version.major > 2 || (version.major === 2 && version.minor >= 35))
+  )
+}
+
+export function buildSparseCheckoutCommands(
+  sparsePaths: readonly string[],
+  supportsConeSet: boolean,
+): string[][] {
+  if (supportsConeSet) {
+    return [['sparse-checkout', 'set', '--cone', '--', ...sparsePaths]]
+  }
+  return [
+    [
+      '-c',
+      'core.sparseCheckout=true',
+      '-c',
+      'core.sparseCheckoutCone=true',
+      'sparse-checkout',
+      'set',
+      '--',
+      ...sparsePaths,
+    ],
+    ['sparse-checkout', 'init', '--cone'],
+  ]
+}
+
+async function detectGitSparseConeSetSupport(
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): Promise<boolean> {
+  const { code, stdout } = await execFileNoThrowWithCwd(
+    gitExe(),
+    ['--version'],
+    { cwd, env, timeout: 10_000, stdin: 'ignore' },
+  )
+  return code === 0 && isGitSparseConeSetSupported(parseGitVersionTuple(stdout))
+}
+
+/**
+ * Official 2.1.325 #2378 (`zH` / `q6` / `G7t` / `I8e`):
+ * Full 40-char lowercase hexadecimal commit SHA support for marketplace `ref`.
+ */
+const FULL_COMMIT_SHA_LOWER_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
+const FULL_COMMIT_SHA_ANYCASE_RE = /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/
+
+export function isFullLowercaseCommitSha(
+  ref: string | undefined,
+): ref is string {
+  return typeof ref === 'string' && FULL_COMMIT_SHA_LOWER_RE.test(ref)
+}
+
+export function checkUppercaseCommitShaRefError(
+  ref: string | undefined,
+): string | undefined {
+  if (
+    typeof ref === 'string' &&
+    !FULL_COMMIT_SHA_LOWER_RE.test(ref) &&
+    FULL_COMMIT_SHA_ANYCASE_RE.test(ref)
+  ) {
+    return `Refusing to clone: this marketplace's \`ref\` (${ref}) looks like a commit id with capital letters, which git would read as a branch name that can move. Write the id in lowercase. If your organization manages this marketplace, ask your administrator.`
+  }
+  return undefined
+}
+
+export function checkReservedOfficialMarketplaceCommitShaRef(
+  marketplaceName: string,
+  ref: string | undefined,
+): string | null {
+  if (
+    ALLOWED_OFFICIAL_MARKETPLACE_NAMES.has(marketplaceName.toLowerCase()) &&
+    typeof ref === 'string' &&
+    FULL_COMMIT_SHA_ANYCASE_RE.test(ref)
+  ) {
+    return `The name '${marketplaceName}' is reserved for official Anthropic marketplaces, which follow a branch or tag. Remove \`ref\`, or use a branch or tag.`
+  }
+  return null
+}
+
+/**
  * Check if a git error indicates authentication failure.
  * Used to provide enhanced error messages for auth failures.
+ * Official 2.1.325 #2345 (`Vri`): also matches newer git's
+ * `"unable to get password from user"` stderr.
  */
-function isAuthenticationError(stderr: string): boolean {
+export function isAuthenticationError(stderr: string): boolean {
   return (
     stderr.includes('Authentication failed') ||
     stderr.includes('could not read Username') ||
+    stderr.includes('unable to get password from user') ||
     stderr.includes('terminal prompts disabled') ||
     stderr.includes('403') ||
     stderr.includes('401')
@@ -2377,13 +2607,21 @@ export async function gitClone(
   // Official bZe / CLAUDE_CODE_PLUGIN_PREFER_HTTPS (+ REMOTE) — rewrite git@/ssh/http URLs.
   gitUrl = rewritePluginGitUrlPreferHttps(gitUrl)
 
+  // Official 2.1.325 #2378: reject uppercase commit IDs (git treats them as
+  // movable branch names) and recognize full 40-char lowercase commit SHAs.
+  const uppercaseShaError = checkUppercaseCommitShaRefError(ref)
+  if (uppercaseShaError !== undefined) {
+    return { code: 1, stderr: uppercaseShaError }
+  }
+  const commitShaPin = isFullLowercaseCommitSha(ref) ? ref : undefined
+
   const useSparse = sparsePaths && sparsePaths.length > 0
   const args = [
+    ...GIT_LONGPATHS_ARGS,
     '-c',
     'core.sshCommand=ssh -o BatchMode=yes -o StrictHostKeyChecking=yes',
     'clone',
-    '--depth',
-    '1',
+    ...(commitShaPin === undefined ? ['--depth', '1'] : []),
   ]
 
   if (useSparse) {
@@ -2392,30 +2630,125 @@ export async function gitClone(
     // for sparse clones — sparse monorepos rarely need them, and recursing
     // submodules would defeat the partial-clone bandwidth savings.
     args.push('--filter=blob:none', '--no-checkout')
+  } else if (commitShaPin !== undefined) {
+    args.push('--filter=blob:none', '--no-recurse-submodules')
   } else {
     args.push('--recurse-submodules', '--shallow-submodules')
   }
 
-  if (ref) {
+  if (commitShaPin !== undefined) {
+    args.push('--no-checkout', '--origin', 'origin')
+  } else if (ref) {
     args.push('--branch', ref)
   }
 
-  args.push(gitUrl, targetPath)
+  args.push('--', gitUrl, targetPath)
 
   const timeoutMs = getPluginGitTimeoutMs()
   logForDebugging(
     `git clone: url=${redactUrlCredentials(gitUrl)} ref=${ref ?? 'default'} timeout=${timeoutMs}ms`,
   )
 
-  const result = await execFileNoThrowWithCwd(gitExe(), args, {
+  const cloneEnv = {
+    ...process.env,
+    ...GIT_NO_PROMPT_ENV,
+    ...(skipLfs ? { GIT_LFS_SKIP_SMUDGE: '1' } : {}),
+  }
+  let result = await execFileNoThrowWithCwd(gitExe(), args, {
     timeout: timeoutMs,
     stdin: 'ignore',
-    env: {
-      ...process.env,
-      ...GIT_NO_PROMPT_ENV,
-      ...(skipLfs ? { GIT_LFS_SKIP_SMUDGE: '1' } : {}),
-    },
+    env: cloneEnv,
   })
+
+  // Official 2.1.325 #2378 (`z7t`): when `ref` is a full commit SHA, fetch
+  // all branches and tags, verify that a branch or tag holds the commit via
+  // `for-each-ref --count=1 --contains <sha>`, and move HEAD to the commit.
+  if (result.code === 0 && commitShaPin !== undefined) {
+    const fetchRes = await execFileNoThrowWithCwd(
+      gitExe(),
+      [
+        'fetch',
+        '--no-tags',
+        '--no-recurse-submodules',
+        'origin',
+        '+refs/heads/*:refs/remotes/origin/heads/*',
+        '+refs/tags/*:refs/remotes/origin/tags/*',
+      ],
+      { cwd: targetPath, timeout: timeoutMs, stdin: 'ignore', env: cloneEnv },
+    )
+    if (fetchRes.code !== 0) {
+      result = fetchRes
+    } else {
+      const containsRes = await execFileNoThrowWithCwd(
+        gitExe(),
+        [
+          'for-each-ref',
+          '--count=1',
+          '--contains',
+          commitShaPin,
+          'refs/remotes/origin/',
+        ],
+        { cwd: targetPath, timeout: timeoutMs, stdin: 'ignore', env: cloneEnv },
+      )
+      if (containsRes.code !== 0 && containsRes.code !== 129) {
+        result = containsRes
+      } else if (containsRes.code === 129 || containsRes.stdout.trim() === '') {
+        return {
+          code: 1,
+          stderr: `Refusing to use commit ${commitShaPin}, set as this marketplace's \`ref\`: no branch or tag of this repository holds it. Check that the id is right and that the commit is still on a branch or tag. If your organization manages this marketplace, ask your administrator.`,
+        }
+      } else {
+        const updateHeadRes = await execFileNoThrowWithCwd(
+          gitExe(),
+          ['update-ref', '--no-deref', 'HEAD', commitShaPin],
+          {
+            cwd: targetPath,
+            timeout: timeoutMs,
+            stdin: 'ignore',
+            env: cloneEnv,
+          },
+        )
+        if (updateHeadRes.code !== 0) {
+          result = updateHeadRes
+        } else {
+          const verifyRes = await execFileNoThrowWithCwd(
+            gitExe(),
+            ['rev-parse', '--verify', '-q', 'HEAD'],
+            {
+              cwd: targetPath,
+              timeout: timeoutMs,
+              stdin: 'ignore',
+              env: cloneEnv,
+            },
+          )
+          if (
+            verifyRes.code !== 0 ||
+            verifyRes.stdout.trim() !== commitShaPin
+          ) {
+            return {
+              code: 1,
+              stderr: `Refusing to use this repository: git did not read ${commitShaPin}, set as this marketplace's \`ref\`.`,
+            }
+          }
+          if (!useSparse) {
+            const checkoutSha = await execFileNoThrowWithCwd(
+              gitExe(),
+              ['checkout', '--detach', 'HEAD'],
+              {
+                cwd: targetPath,
+                timeout: timeoutMs,
+                stdin: 'ignore',
+                env: cloneEnv,
+              },
+            )
+            if (checkoutSha.code !== 0) {
+              result = checkoutSha
+            }
+          }
+        }
+      }
+    }
+  }
 
   // Scrub credentials from execa's error/stderr fields before any logging or
   // returning. execa's shortMessage embeds the full command line (including
@@ -2430,51 +2763,62 @@ export async function gitClone(
 
   if (result.code === 0) {
     if (useSparse) {
-      // Configure the sparse cone, then materialize only those paths.
-      // `sparse-checkout set --cone` handles both init and path selection
-      // in a single step on git >= 2.25.
-      const sparseResult = await execFileNoThrowWithCwd(
-        gitExe(),
-        ['sparse-checkout', 'set', '--cone', '--', ...sparsePaths],
-        {
-          cwd: targetPath,
-          timeout: timeoutMs,
-          stdin: 'ignore',
-          env: {
-            ...process.env,
-            ...GIT_NO_PROMPT_ENV,
-            ...(skipLfs ? { GIT_LFS_SKIP_SMUDGE: '1' } : {}),
-          },
-        },
+      // Official 2.1.325 #2310 (`b6` + `T6`): preserve repository root files
+      // on older git versions (e.g. git 2.34) where `sparse-checkout set --cone`
+      // needs `core.sparseCheckoutCone=true` + `sparse-checkout init --cone`.
+      const sparseEnv = {
+        ...process.env,
+        ...GIT_NO_PROMPT_ENV,
+        ...(skipLfs ? { GIT_LFS_SKIP_SMUDGE: '1' } : {}),
+      }
+      const supportsConeSet = await detectGitSparseConeSetSupport(
+        targetPath,
+        sparseEnv,
       )
-      if (sparseResult.code !== 0) {
-        return {
-          code: sparseResult.code,
-          stderr: `git sparse-checkout set failed: ${sparseResult.stderr}`,
+      for (const sparseArgs of buildSparseCheckoutCommands(
+        sparsePaths,
+        supportsConeSet,
+      )) {
+        const sparseResult = await execFileNoThrowWithCwd(
+          gitExe(),
+          sparseArgs,
+          {
+            cwd: targetPath,
+            timeout: timeoutMs,
+            stdin: 'ignore',
+            env: sparseEnv,
+          },
+        )
+        if (sparseResult.code !== 0) {
+          return {
+            code: sparseResult.code,
+            stderr: `git sparse-checkout failed: ${sparseResult.stderr}`,
+          }
         }
       }
 
       const checkoutResult = await execFileNoThrowWithCwd(
         gitExe(),
-        // ref was already passed to clone via --branch, so HEAD points to it;
-        // if no ref, HEAD points to the remote's default branch.
-        ['checkout', 'HEAD'],
+        ['read-tree', '-u', '--reset', 'HEAD'],
         {
           cwd: targetPath,
           timeout: timeoutMs,
           stdin: 'ignore',
-          env: {
-            ...process.env,
-            ...GIT_NO_PROMPT_ENV,
-            ...(skipLfs ? { GIT_LFS_SKIP_SMUDGE: '1' } : {}),
-          },
+          env: sparseEnv,
         },
       )
       if (checkoutResult.code !== 0) {
         return {
           code: checkoutResult.code,
-          stderr: `git checkout after sparse-checkout failed: ${checkoutResult.stderr}`,
+          stderr: `git read-tree after sparse-checkout failed: ${checkoutResult.stderr}`,
         }
+      }
+    } else {
+      // Official 2.1.323 #2185: fail marketplace clone when any initialized
+      // git submodule is not on the commit its parent repository records.
+      const pinFailure = await verifySubmoduleShaPins(targetPath)
+      if (pinFailure !== undefined) {
+        return { code: 1, stderr: pinFailure.message }
       }
     }
     logForDebugging(`git clone succeeded: ${redactUrlCredentials(gitUrl)}`)
@@ -2533,10 +2877,11 @@ export async function gitClone(
     }
 
     if (isAuthenticationError(result.stderr)) {
-      // densable aTb: host-aware credential helper hint
+      // Official 2.1.325 #2345: explain that terminal prompts and askpass
+      // programs are turned off and credential helpers must answer non-interactively.
       return {
         ...result,
-        stderr: `HTTPS authentication failed. Please ensure ${formatHttpsCredentialHelperHint(gitUrl)}.\n\nOriginal error: ${result.stderr}`,
+        stderr: `HTTPS authentication failed. Please ensure ${formatHttpsCredentialHelperHint(gitUrl)}. Claude Code runs this clone with terminal prompts and askpass programs turned off and tells credential helpers not to prompt, so git needs a credential it can get without asking you, such as one a credential helper already holds.\n\nOriginal error: ${result.stderr}`,
       }
     }
 
@@ -2623,11 +2968,21 @@ export async function reconcileSparseCheckout(
   const env = { ...process.env, ...GIT_NO_PROMPT_ENV }
 
   if (sparsePaths && sparsePaths.length > 0) {
-    return execFileNoThrowWithCwd(
-      gitExe(),
-      ['sparse-checkout', 'set', '--cone', '--', ...sparsePaths],
-      { cwd, timeout: getPluginGitTimeoutMs(), stdin: 'ignore', env },
-    )
+    // Official 2.1.325 #2310: preserve repository root files on git < 2.35 (e.g. 2.34)
+    const supportsConeSet = await detectGitSparseConeSetSupport(cwd, env)
+    for (const sparseArgs of buildSparseCheckoutCommands(
+      sparsePaths,
+      supportsConeSet,
+    )) {
+      const res = await execFileNoThrowWithCwd(gitExe(), sparseArgs, {
+        cwd,
+        timeout: getPluginGitTimeoutMs(),
+        stdin: 'ignore',
+        env,
+      })
+      if (res.code !== 0) return res
+    }
+    return { code: 0, stderr: '' }
   }
 
   const check = await execFileNoThrowWithCwd(
@@ -2950,10 +3305,19 @@ async function fetchMarketplaceFromUrl(
   const fetchStarted = performance.now()
   try {
     // SEA n7p: maxContentLength jhi=5MiB + beforeRedirect Y8p(e,k$a(t))
+    // Official 2.1.325 #2379: use CONNECT tunnel when ALL_PROXY is sole proxy.
+    const proxyOpts = getPluginDownloadProxyOptions(url)
     response = await axios.get(url, {
       timeout: 10000,
       maxContentLength: MARKETPLACE_CATALOG_MAX_BYTES,
       headers,
+      ...(proxyOpts.httpsAgent
+        ? {
+            httpsAgent: proxyOpts.httpsAgent,
+            httpAgent: proxyOpts.httpAgent,
+            proxy: proxyOpts.proxy,
+          }
+        : {}),
       beforeRedirect: createMarketplaceCatalogBeforeRedirect(
         url,
         inheritedMarketplaceHeaderNames(resolvedHeaders),
@@ -3706,10 +4070,12 @@ export async function addMarketplaceSource(
   )
 
   // Validate that reserved names come from official sources
-  const sourceValidationError = validateOfficialNameSource(
-    marketplace.name,
-    resolvedSource,
-  )
+  const sourceValidationError =
+    validateOfficialNameSource(marketplace.name, resolvedSource) ??
+    checkReservedOfficialMarketplaceCommitShaRef(
+      marketplace.name,
+      'ref' in resolvedSource ? resolvedSource.ref : undefined,
+    )
   if (sourceValidationError) {
     throw new Error(sourceValidationError)
   }

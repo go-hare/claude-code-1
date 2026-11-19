@@ -17,8 +17,10 @@ import {
   fetchToolsForClient,
   getMcpToolsCommandsAndResources,
   reconnectMcpServerImpl,
+  registerMcpToolsSwapper,
   shouldApplyMcpClientUpdate,
 } from './client.js'
+import { subscribeMcpAuthRecovered } from './auth.js'
 import {
   getMcpIdentityEpoch,
   mcpConfigDependsOnAccountIdentity,
@@ -64,6 +66,7 @@ import {
   getDisabledMcpServers,
   getMcpServerPolicyBlockReason,
   isMcpServerDisabled,
+  mergeFolderOwnedMcpConfigs,
   saveDisabledMcpServers,
   setMcpServerEnabled,
 } from 'src/services/mcp/config.js'
@@ -263,6 +266,9 @@ export function useManageMCPConnections(
 
   // Track active reconnection attempts to allow cancellation
   const reconnectTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map())
+  // Official 2.1.325 #2303: track plugin MCP servers removed while connecting
+  // so their late in-flight settlements are disposed instead of relisted in /mcp.
+  const removedStalePluginServersRef = useRef<Set<string>>(new Set())
 
   // Dedup the --channels blocked warning per skip kind so that a user who
   // sees "run /login" (auth skip), logs in, then hits the policy gate
@@ -553,6 +559,22 @@ export function useManageMCPConnections(
           }
           return
         }
+      }
+      // Official 2.1.325 #2303: drop late connection settlements for plugin
+      // MCP servers removed by a plugin reload while the connect was in flight.
+      if (
+        removedStalePluginServersRef.current.has(client.name) &&
+        (client.config.scope === 'dynamic' ||
+          client.config.pluginSource !== undefined)
+      ) {
+        logMCPDebug(
+          client.name,
+          'applyConnectionResult: plugin MCP server was removed during reload while connecting — disposing',
+        )
+        if (client.type === 'connected') {
+          void detachAndCloseConnection(client).catch(() => {})
+        }
+        return
       }
       updateServer({ ...client, tools, commands, resources })
 
@@ -1191,7 +1213,15 @@ export function useManageMCPConnections(
       const { servers: existingConfigs, errors: mcpErrors } = isStrictMcpConfig
         ? { servers: {}, errors: [] }
         : await getClaudeCodeMcpConfigs(dynamicMcpConfig)
-      const configs = { ...existingConfigs, ...dynamicMcpConfig }
+      // Official 2.1.325 #2302: preserve folder-owned (.mcp.json / local)
+      // server scopes after folder move / pre-warmed start.
+      const configs = mergeFolderOwnedMcpConfigs(
+        existingConfigs,
+        dynamicMcpConfig,
+      )
+      for (const name of Object.keys(configs)) {
+        removedStalePluginServersRef.current.delete(name)
+      }
 
       // Add MCP errors to plugin errors for UI visibility (deduplicated)
       addErrorsToAppState(setAppState, mcpErrors)
@@ -1223,7 +1253,21 @@ export function useManageMCPConnections(
           }
         },
         stale => {
+          const staleNames = new Set(stale.map(s => s.name))
+          // Official 2.1.325 #2303: purge queued pending updates for removed
+          // servers so flushPendingUpdates cannot re-add them after removal.
+          if (staleNames.size > 0) {
+            pendingUpdatesRef.current = pendingUpdatesRef.current.filter(
+              u => !staleNames.has(u.name),
+            )
+          }
           for (const s of stale) {
+            if (
+              s.config.scope === 'dynamic' ||
+              s.config.pluginSource !== undefined
+            ) {
+              removedStalePluginServersRef.current.add(s.name)
+            }
             const timer = reconnectTimersRef.current.get(s.name)
             if (timer) {
               clearTimeout(timer)
@@ -1231,6 +1275,10 @@ export function useManageMCPConnections(
             }
             if (s.type === 'connected') {
               s.client.onclose = undefined
+            }
+            // Official 2.1.325 #2303: also evict in-flight ('pending') connects
+            // from the memo cache so removed plugin servers don't stay listed.
+            if (s.type === 'connected' || s.type === 'pending') {
               void clearServerCache(s.name, s.config).catch(() => {})
             }
           }
@@ -1283,7 +1331,12 @@ export function useManageMCPConnections(
       // Add MCP errors to plugin errors for UI visibility (deduplicated)
       addErrorsToAppState(setAppState, mcpErrors)
 
-      const configs = { ...claudeCodeConfigs, ...dynamicMcpConfig }
+      // Official 2.1.325 #2302: preserve folder-owned (.mcp.json / local)
+      // server scopes and allow WebSocket (`ws`) configs to connect.
+      const configs = mergeFolderOwnedMcpConfigs(
+        claudeCodeConfigs,
+        dynamicMcpConfig,
+      )
 
       // Official #1040: protect already-registered dynamic/SDK MCP servers
       // from being overwritten later in the session by same-named settings servers.
@@ -1446,6 +1499,49 @@ export function useManageMCPConnections(
     sessionId,
     _pluginReconnectKey,
   ])
+
+  // Official 2.1.325 #2306 & #2304: register live tool swapper for mid-call
+  // reconnects and subscribe to transient OAuth refresh recovery so recovered
+  // servers leave needs-auth / failed and restore their tools & mcp_tool hooks.
+  useEffect(() => {
+    const unregisterSwapper = registerMcpToolsSwapper(
+      (serverName, tools, _config, connectedClient) => {
+        const current = store
+          .getState()
+          .mcp.clients.find(c => c.name === serverName)
+        if (!current) return false
+        updateServer({
+          ...(connectedClient ?? current),
+          tools,
+        })
+        return true
+      },
+    )
+    const unregisterAuthRecovered = subscribeMcpAuthRecovered(
+      (serverName, _serverConfig) => {
+        const current = store
+          .getState()
+          .mcp.clients.find(c => c.name === serverName)
+        if (
+          !current ||
+          (current.type !== 'needs-auth' && current.type !== 'failed')
+        ) {
+          return
+        }
+        void reconnectMcpServerImpl(serverName, current.config)
+          .then(res => {
+            if (res.client.type === 'connected') {
+              onConnectionAttempt(res)
+            }
+          })
+          .catch(() => {})
+      },
+    )
+    return () => {
+      unregisterSwapper()
+      unregisterAuthRecovered()
+    }
+  }, [store, updateServer, onConnectionAttempt])
 
   // Cleanup all timers on unmount
   useEffect(() => {

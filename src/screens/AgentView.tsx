@@ -642,7 +642,7 @@ function SessionRow({
   if (isUngroupPending) {
     detail = 'ctrl+x again to ungroup';
   } else if (isDeletePending) {
-    detail = isJustKilled ? 'stopped \u00b7 ctrl+x again to delete' : 'ctrl+x again to delete';
+    detail = isJustKilled ? 'stopped \u00b7 ctrl+x again to delete' : 'ctrl+x again to remove from the list';
   } else if (shouldShowDeleteRefusal({ state: session.daemonState, tempo: session.tempo }, deleteRefused)) {
     detail = '';
   } else if (heldInTerminal) {
@@ -1190,7 +1190,7 @@ function FleetPeekPanel({
                 />
               )}
               <KeyboardShortcutHint shortcut={replyInput.trim() || isBash ? 'esc' : 'space'} action="close" />
-              <KeyboardShortcutHint shortcut="ctrl+x" action={deleteArmed ? 'confirm' : 'delete'} />
+              <KeyboardShortcutHint shortcut="ctrl+x" action={deleteArmed ? 'confirm' : 'remove'} />
             </Byline>
           )}
         </Text>
@@ -1305,6 +1305,18 @@ function AgentViewApp({
   const [cursorOffset, setCursorOffset] = useState(0);
   const cursorOffsetRef = useRef(0);
   cursorOffsetRef.current = cursorOffset;
+  // Official 2.1.323 (#2129): double-Esc clears typed prompt into a kill buffer
+  // so accidental Esc doesn't lose a prompt, and ctrl+y restores it.
+  const killedDraftRef = useRef<string | null>(null);
+  const escClearHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (escClearHintTimerRef.current) {
+        clearTimeout(escClearHintTimerRef.current);
+        escClearHintTimerRef.current = null;
+      }
+    };
+  }, []);
   /** densable /resume past-session overlay (Tt). */
   const [resumePicker, setResumePicker] = useState<ResumePickerState | null>(null);
   /** Official Ld / yp — prompt vs bash (`!`) composer mode. */
@@ -3188,7 +3200,7 @@ function AgentViewApp({
         throw new Error(reason);
       }
     } catch (err) {
-      setError(`Couldn't delete \u2014 ${err instanceof Error ? err.message : String(err)}`);
+      setError(`Couldn't remove from the list \u2014 ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       // densable finally: i?.() release wL, then e() refresh
       releaseTombstone();
@@ -3197,11 +3209,13 @@ function AgentViewApp({
     if (!result) return;
     if (result.removed) {
       if (result.leftWorktreeDir) {
+        // Official 2.1.323 (#2191): match `claude rm` wording ("removed from the list"; conversation kept).
         setError(
-          `Worktree directory left at ${result.leftWorktreeDir} \u2014 git no longer recognized it; the session was deleted`,
+          `Worktree directory left at ${result.leftWorktreeDir} \u2014 git no longer recognized it; the session was removed from the list (conversation kept; \`claude --resume\` lists it)`,
         );
       } else {
         setError(null);
+        setInfo(`Session ${short} removed from the list (conversation kept; \`claude --resume\` lists it)`);
       }
       return;
     }
@@ -3209,7 +3223,7 @@ function AgentViewApp({
       const phrase = formatKeptWorktreeReason(result.keptReason, result.keptErrorSummary);
       // Official cp: noteDeleteRefusal(id, `worktree ${K}`).
       setDeleteRefusals(prev => noteDeleteRefusal(prev, short, `worktree ${phrase}`));
-      setError(`Worktree kept at ${result.keptWorktree} \u2014 ${phrase}; the session was not deleted`);
+      setError(`Worktree kept at ${result.keptWorktree} \u2014 ${phrase}; the session was not removed from the list`);
     }
   }, [getSelectedSession, refresh, clearDeleteArm, tombstoneJob]);
 
@@ -4686,16 +4700,53 @@ function AgentViewApp({
         return;
       }
       if (dispatchInput || dispatchMode === 'bash') {
+        // Official 2.1.323 (#2129): in full view with a non-filter prompt, Esc
+        // requires a second press to clear (saving to kill buffer for ctrl+y).
+        const step = stepAgentViewEscapeDraft({
+          simpleView,
+          queryIsFilter,
+          dispatchInput,
+          currentHint: info,
+        });
+        if (step.action === 'arm') {
+          setInfo(AGENT_VIEW_ESC_CLEAR_HINT);
+          if (escClearHintTimerRef.current) clearTimeout(escClearHintTimerRef.current);
+          escClearHintTimerRef.current = setTimeout(() => {
+            setInfo(prev => (prev === AGENT_VIEW_ESC_CLEAR_HINT ? null : prev));
+          }, AGENT_VIEW_ESC_CLEAR_TIMEOUT_MS);
+          return;
+        }
+        if (step.killedText !== null) {
+          killedDraftRef.current = step.killedText;
+        }
         setDispatchInput('');
         setCursorOffset(0);
         setDispatchMode('prompt');
         dispatchVimSetModeRef.current('INSERT');
         setVimMode('INSERT');
         setSelectedIndex(idx => findNonHeaderRowIndex(flatRows, idx));
+        if (step.nextHint !== null) {
+          setInfo(step.nextHint);
+          if (escClearHintTimerRef.current) clearTimeout(escClearHintTimerRef.current);
+          escClearHintTimerRef.current = setTimeout(() => {
+            setInfo(prev => (prev === step.nextHint ? null : prev));
+          }, AGENT_VIEW_RESTORE_HINT_TIMEOUT_MS);
+        } else if (info === AGENT_VIEW_ESC_CLEAR_HINT) {
+          setInfo(null);
+        }
       } else if (deleteConfirmSessionId || ungroupConfirmSessionId) {
         clearPending();
       } else {
         handleEscExit();
+      }
+      return;
+    } else if (key.ctrl && !key.meta && input === 'y' && killedDraftRef.current) {
+      // Official 2.1.323 (#2129): ctrl+y restores the last Esc-cleared prompt.
+      const restored = restoreAgentViewKilledDraft(dispatchInput, killedDraftRef.current);
+      setDispatchInput(restored);
+      setCursorOffset(restored.length);
+      if (info === AGENT_VIEW_RESTORE_HINT) {
+        setInfo(null);
       }
       return;
     } else if (
@@ -5222,7 +5273,7 @@ function AgentViewApp({
             <Box paddingLeft={2} flexDirection="column" marginBottom={1}>
               <Text bold>Agents View shortcuts</Text>
               <Text dimColor>enter open · space reply · ctrl+e group · ctrl+s views</Text>
-              <Text dimColor>ctrl+t pin · ctrl+r rename · ctrl+x delete/ungroup · a archive</Text>
+              <Text dimColor>ctrl+t pin · ctrl+r rename · ctrl+x remove/ungroup · a archive</Text>
               <Text dimColor>! bash · @ mention · ctrl+j for newline · shift+↑↓ reorder · alt+1-9 open</Text>
               <Text dimColor>esc to quit · ctrl+c exit · ? close</Text>
             </Box>
@@ -5946,4 +5997,44 @@ export async function renderAgentView(options?: {
     resumeHintRequested,
     forkSessionId: options?.currentSessionId ?? options?.restoreSessionId ?? lastSelectedSessionId,
   };
+}
+
+/** Official 2.1.323 (#2129): AgentView double-Esc clear + ctrl+y restore helpers. */
+export const AGENT_VIEW_ESC_CLEAR_HINT = 'Esc again to clear';
+export const AGENT_VIEW_RESTORE_HINT = 'Cleared · ctrl+y to restore';
+export const AGENT_VIEW_ESC_CLEAR_TIMEOUT_MS = 1000;
+export const AGENT_VIEW_RESTORE_HINT_TIMEOUT_MS = 5000;
+
+export function stepAgentViewEscapeDraft(params: {
+  simpleView: boolean;
+  queryIsFilter: boolean;
+  dispatchInput: string;
+  currentHint: string | null;
+}): {
+  action: 'arm' | 'clear';
+  killedText: string | null;
+  nextHint: string | null;
+} {
+  const { simpleView, queryIsFilter, dispatchInput, currentHint } = params;
+  if (simpleView) {
+    return { action: 'clear', killedText: null, nextHint: null };
+  }
+  if (queryIsFilter) {
+    return { action: 'clear', killedText: dispatchInput || null, nextHint: null };
+  }
+  if (!dispatchInput) {
+    return { action: 'clear', killedText: null, nextHint: null };
+  }
+  if (currentHint === AGENT_VIEW_ESC_CLEAR_HINT) {
+    return {
+      action: 'clear',
+      killedText: dispatchInput,
+      nextHint: AGENT_VIEW_RESTORE_HINT,
+    };
+  }
+  return { action: 'arm', killedText: null, nextHint: AGENT_VIEW_ESC_CLEAR_HINT };
+}
+
+export function restoreAgentViewKilledDraft(currentInput: string, killedDraft: string): string {
+  return currentInput ? `${currentInput}${killedDraft}` : killedDraft;
 }

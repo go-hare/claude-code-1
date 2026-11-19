@@ -101,21 +101,21 @@ export const CHROME_UPSELL_DECLINED_STEERING =
 export const CHROME_POLICY_DENIED_STEERING =
   "Browser automation is not available: this organization's managed settings do not permit the Claude in Chrome MCP server. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Do not suggest installing the extension."
 
-/** densable `WBA`. */
+/** Official 2.1.323 (#2099): tell user to restart with `claude --chrome` (not `/chrome`). */
 export const CHROME_SETUP_SKIPPED_STEERING =
-  'The user started installing the Claude in Chrome extension but chose to continue without browser tools. Do not suggest the extension again this session. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. If they finish installing later, /chrome completes the connection, and the next Claude Code session detects the extension automatically.'
+  'The user started installing the Claude in Chrome extension but chose to continue without browser tools. Do not suggest the extension again this session. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Once the extension is installed, they can get browser tools by restarting Claude Code with claude --chrome (add --resume to pick this conversation back up).'
 
-/** densable `GBA`. */
+/** Official 2.1.323 (#2099): tell user to restart with `claude --chrome` (not `/chrome`). */
 export const CHROME_SETUP_CONNECT_FAILED_STEERING =
-  'The Claude in Chrome extension was installed, but the browser connection could not be established in this session. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. The user can finish the connection with /chrome (Reconnect extension), and the next Claude Code session will detect the extension automatically.'
+  'The Claude in Chrome extension was installed, but the browser connection could not be established in this session. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. The user can try again by restarting Claude Code with claude --chrome (add --resume to pick this conversation back up).'
 
-/** densable `zMs` — em dash `—`. */
+/** Official 2.1.323 (#2099): tell user to restart with `claude --chrome` (not `/chrome`). */
 export const CHROME_SETUP_ABORTED_STEERING =
-  'Claude in Chrome setup did not complete because the turn was interrupted — the user did not choose to continue without browser tools. Continue without browser tools for now (WebFetch and WebSearch cover read-only web content). If the user finishes installing, /chrome completes the connection, and the next Claude Code session detects the extension automatically.'
+  'Claude in Chrome setup did not complete because the turn was interrupted — the user did not choose to continue without browser tools. Continue without browser tools for now (WebFetch and WebSearch cover read-only web content). Once the extension is installed, the user can get browser tools by restarting Claude Code with claude --chrome (add --resume to pick this conversation back up).'
 
-/** densable `VBA`. */
+/** Official 2.1.323 (#2099): tell user to restart with `claude --chrome` (not `/chrome`). */
 export const CHROME_SETUP_INTERNAL_ERROR_STEERING =
-  'Claude in Chrome setup ended early due to an internal error; the extension may or may not be installed. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. The user can finish setup with /chrome, and the next Claude Code session detects the extension automatically.'
+  'Claude in Chrome setup ended early due to an internal error; the extension may or may not be installed. Continue the task without browser tools (WebFetch and WebSearch cover read-only web content), or ask the user to perform browser steps manually. Once the extension is installed, the user can get browser tools by restarting Claude Code with claude --chrome (add --resume to pick this conversation back up).'
 
 /** densable `Dby`. */
 export const CHROME_POLICY_DENIED_MID_WAIT_STEERING =

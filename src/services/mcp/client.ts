@@ -28,6 +28,7 @@ import {
   JAVA_MCP_BARE_ELICITATION_HINT,
 } from './mcpV2Client.js'
 import { isChromeBrowserMcpToolBlockedByOrgPolicy } from '../../utils/claudeInChrome/chromeMcpReadOnly.js'
+import { checkMcpToolRemovedByPlugin } from '../../utils/plugins/pluginToolList.js'
 import type {
   ElicitRequestURLParams,
   ElicitResult,
@@ -96,7 +97,7 @@ import {
   type MCPProgress,
   MCPTool,
 } from '@claude-code/builtin-tools/tools/MCPTool/MCPTool.js'
-import { createMcpAuthTool } from '@claude-code/builtin-tools/tools/McpAuthTool/McpAuthTool.js'
+import { createMcpAuthTools } from '@claude-code/builtin-tools/tools/McpAuthTool/McpAuthTool.js'
 import { ReadMcpResourceTool } from '@claude-code/builtin-tools/tools/ReadMcpResourceTool/ReadMcpResourceTool.js'
 import { createAbortController } from '../../utils/abortController.js'
 import { getPlatform } from '../../utils/platform.js'
@@ -191,7 +192,11 @@ import {
   mcpToolCheckPermissionsResult,
 } from './mcpToolInteraction.js'
 import { buildMcpToolName } from './mcpStringUtils.js'
-import { filterListedMcpToolsBySchema } from './mcpToolSchema.js'
+import {
+  type DroppedMcpToolRecord,
+  filterListedMcpToolsBySchema,
+} from './mcpToolSchema.js'
+import { wrapDocsConnectorToolForTerminalAutoOpen } from './docsConnectorAutoOpen.js'
 import { normalizeNameForMCP } from './normalization.js'
 import { getLoggingSafeMcpBaseUrl } from './utils.js'
 
@@ -320,6 +325,8 @@ import {
 import {
   areMcpConfigsEqual,
   ClaudeAiProxyBearerRejectedError,
+  clearRejectedClaudeAiBearerToken,
+  hasClaudeAiBearerRecoveredAfterLogin,
   clearMcpAuthCache,
   connectAuthRejectedResult,
   createClaudeAiProxyFetch,
@@ -352,6 +359,8 @@ import {
 export {
   areMcpConfigsEqual,
   ClaudeAiProxyBearerRejectedError,
+  clearRejectedClaudeAiBearerToken,
+  hasClaudeAiBearerRecoveredAfterLogin,
   clearMcpAuthCache,
   createClaudeAiProxyFetch,
   getMcpServerConnectionBatchSize,
@@ -2240,7 +2249,7 @@ const connectToServerMemo = memoize(
         )
       }
 
-      return {
+      const connectedClientResult: ConnectedMCPServer = {
         name,
         client,
         type: 'connected' as const,
@@ -2253,6 +2262,22 @@ const connectToServerMemo = memoize(
         // densable M.protocolEra — i3r/Yrf era gate. Unset is not modern.
         protocolEra: readClientProtocolEra(client),
       }
+      // Official 2.1.325 #2305 (`Hmi()?.(Os)`): immediately run session-level
+      // connected-client wiring (e.g. headless elicitation handler) before
+      // returning so a reconnect mid-tool-call never falls back to the cancel
+      // placeholder.
+      try {
+        connectedClientWiring?.(connectedClientResult)
+      } catch (wiringErr) {
+        logMCPError(
+          name,
+          `connected-client wiring failed (placeholder retained, adoption will retry): ${errorMessage(wiringErr)}`,
+        )
+      }
+      // Official 2.1.325 #2308: notify background MCP task pollers that a fresh
+      // connection for this server is live so they resume updating.
+      notifyMcpServerConnected(connectedClientResult)
+      return connectedClientResult
     } catch (error) {
       const connectionDurationMs = Date.now() - connectStartTime
       logEvent('tengu_mcp_server_connection_failed', {
@@ -2406,12 +2431,48 @@ export const connectToServer = Object.assign(
  * @param name Server name
  * @param serverRef Server configuration
  */
+/**
+ * #2052: Official `supersededDials` WeakSet. Tracks in-flight or previously
+ * cached connect promises invalidated by removal/disconnect so a tool call
+ * racing removal can never poison a subsequently re-added server with a stale
+ * disconnected/failed cache entry.
+ */
+const supersededMcpDials = new WeakSet<Promise<MCPServerConnection>>()
+
+export function isSupersededMcpDial(
+  dial: Promise<MCPServerConnection> | undefined,
+): boolean {
+  return dial !== undefined && supersededMcpDials.has(dial)
+}
+
+export function markSupersededMcpDial(
+  name: string,
+  config: ScopedMcpServerConfig,
+): void {
+  const key = getServerCacheKey(name, config)
+  const pending = connectToServer.cache?.get?.(key) as
+    | Promise<MCPServerConnection>
+    | undefined
+  if (pending !== undefined) {
+    supersededMcpDials.add(pending)
+  }
+}
+
 export async function clearServerCache(
   name: string,
   serverRef: ScopedMcpServerConfig,
   keepAliveOut?: { connection?: ConnectedMCPServer },
 ): Promise<void> {
   const key = getServerCacheKey(name, serverRef)
+
+  // #2052: Mark any in-flight or cached dial as superseded before evicting
+  // so a late settlement or concurrent tool-call dial never clobbers a re-add.
+  const previousPending = connectToServer.cache?.get?.(key) as
+    | Promise<MCPServerConnection>
+    | undefined
+  if (previousPending !== undefined) {
+    supersededMcpDials.add(previousPending)
+  }
 
   // lodash memoize Cache supports .has; avoid connectToServer when missing so
   // disable paths do not race a brand-new Chrome native-host connect.
@@ -2556,6 +2617,10 @@ export function disposeServerConnectionDetached(
     | Promise<MCPServerConnection>
     | undefined
   if (expected !== undefined && pending !== expected) return
+  // #2052: Mark removed/detached dial as superseded before evicting cache.
+  if (pending !== undefined) {
+    supersededMcpDials.add(pending)
+  }
   evictMcpMemoCaches(key, name)
   if (pending) {
     void pending.then(
@@ -2664,6 +2729,110 @@ export function invokeToolRaw(
   return client.callTool(params, options)
 }
 
+/**
+ * Official 2.1.325 #2305 (`F9t` / `Hmi`): session-level connected-client wiring
+ * hook (e.g., headless elicitation handler registration) invoked synchronously
+ * on every newly connected MCP client before `connectToServer` returns.
+ */
+type ConnectedClientWiringFn = (client: ConnectedMCPServer) => void
+let connectedClientWiring: ConnectedClientWiringFn | undefined
+
+export function registerConnectedClientWiring(
+  wiring: ConnectedClientWiringFn | undefined,
+): () => void {
+  connectedClientWiring = wiring
+  return () => {
+    if (connectedClientWiring === wiring) {
+      connectedClientWiring = undefined
+    }
+  }
+}
+
+export function getConnectedClientWiring():
+  | ConnectedClientWiringFn
+  | undefined {
+  return connectedClientWiring
+}
+
+/**
+ * Official 2.1.325 #2306 (`Nmi` / `Brr`): live tool-pool swapper invoked after
+ * a mid-call reconnect so SDK host tool calls point to the fresh connection
+ * instead of answering "Not connected".
+ */
+type McpToolsSwapperFn = (
+  serverName: string,
+  tools: Tool[],
+  config: ScopedMcpServerConfig,
+  connectedClient?: ConnectedMCPServer,
+) => boolean
+let mcpToolsSwapper: McpToolsSwapperFn | undefined
+
+export function registerMcpToolsSwapper(
+  swapper: McpToolsSwapperFn | undefined,
+): () => void {
+  mcpToolsSwapper = swapper
+  return () => {
+    if (mcpToolsSwapper === swapper) {
+      mcpToolsSwapper = undefined
+    }
+  }
+}
+
+export function swapMcpServerTools(
+  serverName: string,
+  tools: Tool[],
+  config: ScopedMcpServerConfig,
+  connectedClient?: ConnectedMCPServer,
+): boolean {
+  if (!mcpToolsSwapper) return false
+  return mcpToolsSwapper(serverName, tools, config, connectedClient)
+}
+
+/**
+ * Official 2.1.325 #2308: per-server reconnect listener registry so background
+ * MCP tasks immediately switch to the reconnected client and resume updates.
+ */
+type McpServerConnectedListener = (client: ConnectedMCPServer) => void
+const mcpServerConnectedListeners = new Map<
+  string,
+  Set<McpServerConnectedListener>
+>()
+
+export function onMcpServerConnected(
+  serverName: string,
+  listener: McpServerConnectedListener,
+): () => void {
+  let set = mcpServerConnectedListeners.get(serverName)
+  if (!set) {
+    set = new Set()
+    mcpServerConnectedListeners.set(serverName, set)
+  }
+  set.add(listener)
+  return () => {
+    const existing = mcpServerConnectedListeners.get(serverName)
+    if (!existing) return
+    existing.delete(listener)
+    if (existing.size === 0) {
+      mcpServerConnectedListeners.delete(serverName)
+    }
+  }
+}
+
+export function notifyMcpServerConnected(client: ConnectedMCPServer): void {
+  const listeners = mcpServerConnectedListeners.get(client.name)
+  if (!listeners || listeners.size === 0) return
+  for (const listener of [...listeners]) {
+    try {
+      listener(client)
+    } catch (err) {
+      logMCPDebug(
+        client.name,
+        `onMcpServerConnected listener failed: ${errorMessage(err)}`,
+      )
+    }
+  }
+}
+
 /** Official `Fl` / `mcpClientModule`. Gold `T()` is this bag. */
 export function mcpClientModule(): {
   reconnectMcpServerImpl: typeof reconnectMcpServerImpl
@@ -2729,12 +2898,44 @@ export async function ensureConnectedClient(
     return client
   }
 
-  const connectedClient = await connectToServer(
+  const key = getServerCacheKey(client.name, client.config)
+  const cachedDial = connectToServer.cache?.get?.(key) as
+    | Promise<MCPServerConnection>
+    | undefined
+
+  // #2052: Never reuse a superseded dial left behind by a remove + re-add.
+  if (isSupersededMcpDial(cachedDial)) {
+    evictMcpMemoCaches(key, client.name)
+  }
+
+  // #2002: If a claude.ai gateway bearer token was previously rejected and the
+  // user has since run `/login` in another terminal, drop the stale failed memo
+  // and refresh keychain credentials so the connector recovers automatically.
+  if (client.config.type === 'claudeai-proxy') {
+    clearKeychainCache()
+    if (hasClaudeAiBearerRecoveredAfterLogin()) {
+      clearRejectedClaudeAiBearerToken()
+      evictMcpMemoCaches(key, client.name)
+    }
+  }
+
+  let connectedClient = await connectToServer(
     client.name,
     client.config,
     undefined,
     opts,
   )
+  // #2052: If a cached failed entry came from an earlier tool call while the
+  // server was removed/disconnected, evict it once so a re-added server dials fresh.
+  if (connectedClient.type !== 'connected' && cachedDial !== undefined) {
+    evictMcpMemoCaches(key, client.name)
+    connectedClient = await connectToServer(
+      client.name,
+      client.config,
+      undefined,
+      opts,
+    )
+  }
   if (connectedClient.type !== 'connected') {
     throw new TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS(
       `MCP server "${client.name}" is not connected`,
@@ -2747,11 +2948,90 @@ export async function ensureConnectedClient(
 // Official w7e — register dial path on host.mcpProcessWiring for vx() callers.
 registerEnsureConnectedClient(ensureConnectedClient)
 
+const NON_REAUTH_OAUTH_ERROR_CODES = new Set([
+  'invalid_grant',
+  'invalid_client',
+  'unauthorized_client',
+])
+
 /**
- * Compares two MCP server configurations to determine if they are equivalent.
- * Used to detect when a server needs to be reconnected due to config changes.
+ * #1996: Official `Wp` + `at` (`isOAuthShapedAuthError`).
+ * Classifies MCP tool-call errors from OAuth sign-in servers (such as
+ * `TOKEN_EXPIRED`, `invalid_token`, or other non-client-config OAuth errors on
+ * HTTP 401/403) so Claude asks the user to sign in again instead of ending in
+ * the raw auth-server error.
  */
+export function classifyMcpToolCallAuthError(
+  error: Error,
+  options?: { hasHeadersHelper?: boolean; pendingStepUpScope?: string },
+): 'credential_rejected' | 'step_up' | undefined {
+  const numericCode =
+    'code' in error && typeof (error as { code?: unknown }).code === 'number'
+      ? (error as { code: number }).code
+      : 'status' in error &&
+          typeof (error as { status?: unknown }).status === 'number'
+        ? (error as { status: number }).status
+        : undefined
+  const stringOAuthCode =
+    'errorCode' in error &&
+    typeof (error as { errorCode?: unknown }).errorCode === 'string'
+      ? (error as { errorCode: string }).errorCode
+      : 'code' in error &&
+          typeof (error as { code?: unknown }).code === 'string'
+        ? (error as { code: string }).code
+        : undefined
+  const isOAuthShapedAuthError =
+    stringOAuthCode !== undefined &&
+    !NON_REAUTH_OAUTH_ERROR_CODES.has(stringOAuthCode) &&
+    (/^HTTP 40[13]\b/.test(error.message) ||
+      /^(?:TOKEN_EXPIRED|EXPIRED_TOKEN|INVALID_TOKEN|UNAUTHORIZED|ACCESS_TOKEN_EXPIRED)$/i.test(
+        stringOAuthCode,
+      ))
+  const isUnauthorized =
+    error instanceof UnauthorizedError ||
+    /\bTOKEN_EXPIRED\b/.test(error.message)
+  const hasStepUp = options?.pendingStepUpScope !== undefined
+  if (
+    !(
+      numericCode === 401 ||
+      isUnauthorized ||
+      isOAuthShapedAuthError ||
+      (numericCode === 403 && options?.hasHeadersHelper) ||
+      (hasStepUp && numericCode === 403)
+    )
+  ) {
+    return undefined
+  }
+  return hasStepUp &&
+    numericCode !== 401 &&
+    !(isOAuthShapedAuthError && /^HTTP 401\b/.test(error.message))
+    ? 'step_up'
+    : 'credential_rejected'
+}
+
 const MCP_FETCH_CACHE_SIZE = 20
+
+/**
+ * #2151: Official `droppedToolsSeqByConnection` (`Lc(e)`). Ensures an older
+ * overlapping `tools/list` call never overwrites newer `client.droppedTools`.
+ */
+const droppedToolsSeqByConnection = new WeakMap<
+  MCPServerConnection,
+  { started: number; applied: number }
+>()
+
+function nextDroppedToolsSeq(client: MCPServerConnection): {
+  seq: number
+  state: { started: number; applied: number }
+} {
+  const state = droppedToolsSeqByConnection.get(client) ?? {
+    started: 0,
+    applied: 0,
+  }
+  droppedToolsSeqByConnection.set(client, state)
+  state.started += 1
+  return { seq: state.started, state }
+}
 
 export const fetchToolsForClient = memoizeWithLRU(
   async (client: MCPServerConnection): Promise<Tool[]> => {
@@ -2781,8 +3061,20 @@ export const fetchToolsForClient = memoizeWithLRU(
       client.discoveryAuthFailure = undefined
       // Note: discoveryBearerRejected is sticky until reconnect with a good token
 
+      // #2055: Drop any null/undefined/non-object entries in tools/list (e.g. from
+      // an SDK host) before Unicode sanitization and schema/name inspection so
+      // headless sessions never crash on `t.name`.
+      const validListedTools = Array.isArray(listedTools)
+        ? listedTools.filter(
+            (entry): entry is (typeof listedTools)[number] =>
+              entry !== null &&
+              typeof entry === 'object' &&
+              typeof (entry as { name?: unknown }).name === 'string',
+          )
+        : []
+
       // Sanitize tool data from MCP server
-      const toolsToProcess = recursivelySanitizeUnicode(listedTools)
+      const toolsToProcess = recursivelySanitizeUnicode(validListedTools)
 
       // Check if we should skip the mcp__ prefix for SDK MCP servers
       const skipPrefix =
@@ -2811,10 +3103,27 @@ export const fetchToolsForClient = memoizeWithLRU(
       }
 
       // densable vxi/wxi after toolPermissions warn — flatten or skip
+      // #2151: Collect omitted tools + reasons and publish onto client.droppedTools.
+      const droppedSeq = nextDroppedToolsSeq(client)
+      const droppedRaw: DroppedMcpToolRecord[] = []
       const listedAfterSchema = filterListedMcpToolsBySchema(toolsToProcess, {
         serverName: client.name,
         config: client.config,
+        onDroppedTool: entry => droppedRaw.push(entry),
       })
+      if (droppedSeq.seq > droppedSeq.state.applied) {
+        droppedSeq.state.applied = droppedSeq.seq
+        const seenDropped = new Set<string>()
+        const dedupedDropped: DroppedMcpToolRecord[] = []
+        for (const item of droppedRaw) {
+          if (!seenDropped.has(item.toolName)) {
+            seenDropped.add(item.toolName)
+            dedupedDropped.push(item)
+          }
+        }
+        client.droppedTools =
+          dedupedDropped.length > 0 ? dedupedDropped : undefined
+      }
 
       // densable jo — sse/http Design MCP on api.anthropic.com, no Authorization.
       const isFirstPartyDesignServer = isFirstPartyDesignMcpServer(
@@ -3040,9 +3349,28 @@ export const fetchToolsForClient = memoizeWithLRU(
                 let preferredClient: ConnectedMCPServer | null = null
                 for (let attempt = 0; ; attempt++) {
                   try {
-                    const connectedClient =
+                    const connectedClient: ConnectedMCPServer =
                       preferredClient ?? (await ensureConnectedClient(client))
                     preferredClient = null
+                    // Official 2.1.325 #2306: if a tool call reconnected the
+                    // MCP server (different client instance), refresh the live
+                    // tool pool so subsequent SDK host calls point to the new
+                    // connection rather than answering "Not connected".
+                    if (
+                      connectedClient !== client &&
+                      connectedClient.type === 'connected'
+                    ) {
+                      void fetchToolsForClient(connectedClient)
+                        .then(freshTools => {
+                          swapMcpServerTools(
+                            client.name,
+                            freshTools,
+                            connectedClient.config,
+                            connectedClient,
+                          )
+                        })
+                        .catch(() => {})
+                    }
                     // densable 2.1.212: MCP > threshold → auto-background
                     // eslint-disable-next-line @typescript-eslint/no-require-imports
                     const {
@@ -3095,6 +3423,7 @@ export const fetchToolsForClient = memoizeWithLRU(
                         requestDialog: context.requestDialog,
                         canUseTool: _canUseTool,
                         toolUseContext: context,
+                        model: context.options.mainLoopModel,
                       })
 
                     let mcpResult =
@@ -3156,48 +3485,133 @@ export const fetchToolsForClient = memoizeWithLRU(
                         isNonInteractiveSession:
                           context.options.isNonInteractiveSession,
                         pollToCompletion: async pollSignal => {
-                          const rawClient =
-                            connectedClient.client as unknown as {
-                              request: (
-                                req: {
-                                  method: string
-                                  params: Record<string, unknown>
-                                },
-                                opts?: { signal?: AbortSignal },
-                              ) => Promise<Record<string, unknown>>
-                            }
-                          const interval = sep2663Task.pollIntervalMs ?? 2000
-                          while (!pollSignal.aborted) {
-                            const statusRes = await rawClient.request(
-                              {
-                                method: 'tasks/get',
-                                params: { taskId: sep2663Task.mcpTaskId },
+                          type RawTaskClient = {
+                            request: (
+                              req: {
+                                method: string
+                                params: Record<string, unknown>
                               },
-                              { signal: pollSignal },
-                            )
-                            const st = String(statusRes?.status ?? '')
-                            if (st === 'completed') {
-                              return await rawClient.request(
-                                {
-                                  method: 'tasks/result',
-                                  params: { taskId: sep2663Task.mcpTaskId },
-                                },
-                                { signal: pollSignal },
-                              )
-                            }
-                            if (st === 'failed' || st === 'cancelled') {
-                              throw new Error(
-                                String(
-                                  statusRes?.statusMessage ??
-                                    `MCP task ${sep2663Task.mcpTaskId} ${st}`,
-                                ),
-                              )
-                            }
-                            await new Promise(resolve =>
-                              setTimeout(resolve, interval),
-                            )
+                              opts?: { signal?: AbortSignal },
+                            ) => Promise<Record<string, unknown>>
                           }
-                          throw new Error('MCP task polling aborted')
+                          // Official 2.1.325 #2308: follow server reconnects so
+                          // background MCP tasks keep updating when another call
+                          // drops and later reconnects the same server.
+                          let activeConnected: ConnectedMCPServer =
+                            connectedClient
+                          let wakeupResolve: (() => void) | undefined
+                          const unsubscribe = onMcpServerConnected(
+                            client.name,
+                            fresh => {
+                              activeConnected = fresh
+                              wakeupResolve?.()
+                              wakeupResolve = undefined
+                            },
+                          )
+                          const interval = sep2663Task.pollIntervalMs ?? 2000
+                          let consecutiveErrors = 0
+                          const MAX_CONSECUTIVE_POLL_ERRORS = 5
+                          try {
+                            while (!pollSignal.aborted) {
+                              const settled = await peekSettledConnection(
+                                client.name,
+                                client.config,
+                              )
+                              if (
+                                settled &&
+                                settled.type === 'connected' &&
+                                settled !== activeConnected
+                              ) {
+                                activeConnected = settled
+                              }
+                              const rawClient =
+                                activeConnected.client as unknown as RawTaskClient
+                              try {
+                                const statusRes = await rawClient.request(
+                                  {
+                                    method: 'tasks/get',
+                                    params: { taskId: sep2663Task.mcpTaskId },
+                                  },
+                                  { signal: pollSignal },
+                                )
+                                consecutiveErrors = 0
+                                const st = String(statusRes?.status ?? '')
+                                if (st === 'completed') {
+                                  return await rawClient.request(
+                                    {
+                                      method: 'tasks/result',
+                                      params: { taskId: sep2663Task.mcpTaskId },
+                                    },
+                                    { signal: pollSignal },
+                                  )
+                                }
+                                if (st === 'failed' || st === 'cancelled') {
+                                  throw new Error(
+                                    String(
+                                      statusRes?.statusMessage ??
+                                        `MCP task ${sep2663Task.mcpTaskId} ${st}`,
+                                    ),
+                                  )
+                                }
+                              } catch (pollErr) {
+                                if (pollSignal.aborted) throw pollErr
+                                // If another call reconnected the server while
+                                // this poll failed on the old socket, switch
+                                // immediately and retry without counting down.
+                                const fresh = await peekSettledConnection(
+                                  client.name,
+                                  client.config,
+                                )
+                                if (
+                                  fresh &&
+                                  fresh.type === 'connected' &&
+                                  fresh !== activeConnected
+                                ) {
+                                  activeConnected = fresh
+                                  consecutiveErrors = 0
+                                  continue
+                                }
+                                consecutiveErrors++
+                                if (
+                                  consecutiveErrors >=
+                                  MAX_CONSECUTIVE_POLL_ERRORS
+                                ) {
+                                  throw pollErr
+                                }
+                              }
+                              await new Promise<void>(resolve => {
+                                let timer: ReturnType<typeof setTimeout>
+                                const onAbort = () => {
+                                  clearTimeout(timer)
+                                  wakeupResolve = undefined
+                                  resolve()
+                                }
+                                timer = setTimeout(() => {
+                                  pollSignal.removeEventListener(
+                                    'abort',
+                                    onAbort,
+                                  )
+                                  wakeupResolve = undefined
+                                  resolve()
+                                }, interval)
+                                pollSignal.addEventListener('abort', onAbort, {
+                                  once: true,
+                                })
+                                wakeupResolve = () => {
+                                  clearTimeout(timer)
+                                  pollSignal.removeEventListener(
+                                    'abort',
+                                    onAbort,
+                                  )
+                                  wakeupResolve = undefined
+                                  resolve()
+                                }
+                              })
+                            }
+                            throw new Error('MCP task polling aborted')
+                          } finally {
+                            unsubscribe()
+                          }
                         },
                       })) as typeof mcpResult
                     }
@@ -3339,38 +3753,52 @@ export const fetchToolsForClient = memoizeWithLRU(
                             ? `Tool '${tool.name}' returned 401; re-running headersHelper and retrying once`
                             : `Tool '${tool.name}' returned 401; refresh token stored — reconnecting and retrying once`,
                         )
-                        const reconnected = await joinOrStartAuthReconnect(
-                          cacheKey,
-                          kind,
-                          async () => {
-                            await clearServerCache(client.name, client.config)
-                            return connectToServer(client.name, client.config)
-                          },
-                          join => {
-                            // Official Ze(kind, role): telemetry distinguishes
-                            // the leader reauth_retry from collateral_rejoin.
-                            if (join.role === 'leader') {
-                              logEvent(
-                                kind === 'mcp_headers_helper'
-                                  ? 'tengu_mcp_headers_helper_retry'
-                                  : 'tengu_mcp_oauth_refresh_retry',
-                                {},
-                              )
-                            } else {
-                              logEvent(
-                                kind === 'mcp_headers_helper'
-                                  ? 'tengu_mcp_headers_helper_collateral_rejoin'
-                                  : 'tengu_mcp_oauth_refresh_collateral_rejoin',
-                                {},
-                              )
-                            }
-                          },
-                        )
+                        const reconnected: MCPServerConnection =
+                          await joinOrStartAuthReconnect(
+                            cacheKey,
+                            kind,
+                            async (): Promise<MCPServerConnection> => {
+                              await clearServerCache(client.name, client.config)
+                              return connectToServer(client.name, client.config)
+                            },
+                            join => {
+                              // Official Ze(kind, role): telemetry distinguishes
+                              // the leader reauth_retry from collateral_rejoin.
+                              if (join.role === 'leader') {
+                                logEvent(
+                                  kind === 'mcp_headers_helper'
+                                    ? 'tengu_mcp_headers_helper_retry'
+                                    : 'tengu_mcp_oauth_refresh_retry',
+                                  {},
+                                )
+                              } else {
+                                logEvent(
+                                  kind === 'mcp_headers_helper'
+                                    ? 'tengu_mcp_headers_helper_collateral_rejoin'
+                                    : 'tengu_mcp_oauth_refresh_collateral_rejoin',
+                                  {},
+                                )
+                              }
+                            },
+                          )
                         if (reconnected.type === 'connected') {
                           // Official: retry the tool with the reconnected client
                           // (recursive JTo isAuthRetry). Prefer this object so
                           // we don't race another cache miss after clear+connect.
+                          // Official 2.1.325 #2306: also refresh server tools in
+                          // the live tool pool so SDK host calls point to the
+                          // new connection instead of answering "Not connected".
                           preferredClient = reconnected
+                          void fetchToolsForClient(reconnected)
+                            .then(freshTools => {
+                              swapMcpServerTools(
+                                client.name,
+                                freshTools,
+                                reconnected.config,
+                                reconnected,
+                              )
+                            })
+                            .catch(() => {})
                           continue
                         }
                         logMCPDebug(
@@ -3448,6 +3876,13 @@ export const fetchToolsForClient = memoizeWithLRU(
                 : {}),
             }
           })
+          .map(mappedTool =>
+            wrapDocsConnectorToolForTerminalAutoOpen(
+              mappedTool,
+              client.name,
+              client.config,
+            ),
+          )
           .filter(isIncludedMcpTool),
         client.name,
       )
@@ -3894,7 +4329,7 @@ export async function getMcpToolsCommandsAndResources(
         logMCPDebug(name, `Skipping connection (cached needs-auth)`)
         report({
           client: { name, type: 'needs-auth' as const, config },
-          tools: [createMcpAuthTool(name, config)],
+          tools: createMcpAuthTools(name, config),
           commands: [],
         })
         return
@@ -3907,7 +4342,7 @@ export async function getMcpToolsCommandsAndResources(
           client,
           tools:
             client.type === 'needs-auth'
-              ? [createMcpAuthTool(name, config)]
+              ? createMcpAuthTools(name, config)
               : [],
           commands: [],
         })
@@ -4099,6 +4534,7 @@ export async function callMCPToolWithUrlElicitationRetry({
   requestDialog,
   canUseTool,
   toolUseContext,
+  model,
 }: {
   client: ConnectedMCPServer
   clientConnection: MCPServerConnection
@@ -4120,6 +4556,7 @@ export async function callMCPToolWithUrlElicitationRetry({
     onProgress?: (data: MCPProgress) => void
     imageLimits?: ImageLimits
     hasResultSizeAnnotation?: boolean
+    model?: string
   }) => Promise<MCPToolCallResult>
   /** Handler for URL elicitations when no hook handles them.
    * In print/SDK mode, delegates to structuredIO. In REPL, falls back to queue. */
@@ -4145,8 +4582,18 @@ export async function callMCPToolWithUrlElicitationRetry({
   ) => Promise<unknown>
   canUseTool?: import('../../hooks/useCanUseTool.js').CanUseToolFn
   toolUseContext?: import('../../Tool.js').ToolUseContext
+  model?: string
 }): Promise<MCPToolCallResult> {
+  // Official 2.1.323 #2188 (`tLs`): refuse MCP tool call if a `tool.list`
+  // plugin hook removed this tool from the current session.
+  const pluginRemovedMessage =
+    checkMcpToolRemovedByPlugin(connectedClient.name, tool) ??
+    checkMcpToolRemovedByPlugin(normalizeNameForMCP(connectedClient.name), tool)
+  if (pluginRemovedMessage) {
+    throw new Error(pluginRemovedMessage)
+  }
   const MAX_URL_ELICITATION_RETRIES = 3
+  const effectiveModel = model ?? toolUseContext?.options.mainLoopModel
   let didStepUp = false
   for (let attempt = 0; ; attempt++) {
     try {
@@ -4159,6 +4606,7 @@ export async function callMCPToolWithUrlElicitationRetry({
         onProgress,
         imageLimits,
         hasResultSizeAnnotation,
+        model: effectiveModel,
       })
     } catch (error) {
       if (
@@ -4394,6 +4842,7 @@ async function callMCPTool({
   onProgress,
   imageLimits,
   hasResultSizeAnnotation = false,
+  model,
 }: {
   client: ConnectedMCPServer
   tool: string
@@ -4403,7 +4852,16 @@ async function callMCPTool({
   onProgress?: (data: MCPProgress) => void
   imageLimits?: ImageLimits
   hasResultSizeAnnotation?: boolean
+  model?: string
 }): Promise<MCPToolCallResult> {
+  // Official 2.1.323 #2188 (`tLs`): refuse MCP tool call if a `tool.list`
+  // plugin hook removed this tool from the current session.
+  const pluginRemovedMessage =
+    checkMcpToolRemovedByPlugin(name, tool) ??
+    checkMcpToolRemovedByPlugin(normalizeNameForMCP(name), tool)
+  if (pluginRemovedMessage) {
+    throw new Error(pluginRemovedMessage)
+  }
   const toolStartTime = Date.now()
   let progressInterval: NodeJS.Timeout | undefined
   let idleTimeoutId: NodeJS.Timeout | undefined
@@ -4600,6 +5058,7 @@ async function callMCPTool({
       name,
       imageLimits,
       hasResultSizeAnnotation,
+      model,
     )
     return {
       content,
@@ -4623,14 +5082,23 @@ async function callMCPTool({
       )
     }
 
-    // Check for 401 errors indicating expired/invalid OAuth tokens
-    // The MCP SDK's StreamableHTTPError has a `code` property with the HTTP status
+    // Check for 401/OAuth errors indicating expired/invalid OAuth tokens (#1996)
+    // The MCP SDK's StreamableHTTPError has a `code` property with the HTTP status,
+    // while sign-in servers may return OAuth-shaped errors such as `TOKEN_EXPIRED`.
     if (e instanceof Error) {
       const errorCode = 'code' in e ? (e.code as number | undefined) : undefined
-      if (errorCode === 401 || e instanceof UnauthorizedError) {
+      const hasHeadersHelper =
+        (config.type === 'http' ||
+          config.type === 'sse' ||
+          config.type === 'ws') &&
+        Boolean((config as { headersHelper?: string }).headersHelper)
+      const authClassification = classifyMcpToolCallAuthError(e, {
+        hasHeadersHelper,
+      })
+      if (authClassification === 'credential_rejected') {
         logMCPDebug(
           name,
-          `Tool call returned 401 Unauthorized - token may have expired`,
+          `Tool call returned auth rejection (${e.message}) - token may have expired`,
         )
         logEvent('tengu_mcp_tool_call_auth_error', {})
         throw new McpAuthError(
@@ -4639,7 +5107,7 @@ async function callMCPTool({
         )
       }
 
-      if (errorCode === 403) {
+      if (errorCode === 403 || authClassification === 'step_up') {
         const { extractInsufficientScope } =
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           require('./mcpStepUpReauth.js') as typeof import('./mcpStepUpReauth.js')

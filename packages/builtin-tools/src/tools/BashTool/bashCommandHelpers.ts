@@ -24,87 +24,47 @@ type CommandIdentityCheckers = {
 async function segmentedCommandPermissionResult(
   input: z.infer<typeof BashTool.inputSchema>,
   segments: string[],
+  rawPipeSegments: string[],
   bashToolHasPermissionFn: (
     input: z.infer<typeof BashTool.inputSchema>,
   ) => Promise<PermissionResult>,
   checkers: CommandIdentityCheckers,
 ): Promise<PermissionResult> {
-  // Check for multiple cd commands across all segments
-  const cdCommands = segments.filter(segment => {
-    const trimmed = segment.trim()
-    return checkers.isNormalizedCdCommand(trimmed)
-  })
-  if (cdCommands.length > 1) {
-    const decisionReason = {
-      type: 'other' as const,
-      reason:
-        'Multiple directory changes in one command require approval for clarity',
-      bashMissKind: 'multi-cd',
-    }
-    return {
-      behavior: 'ask',
-      decisionReason,
-      message: createPermissionRequestMessage(BashTool.name, decisionReason),
-    }
-  }
-
-  // SECURITY: Check for cd+git across pipe segments to prevent bare repo fsmonitor bypass.
-  // When cd and git are in different pipe segments (e.g., "cd sub && echo | git status"),
-  // each segment is checked independently and neither triggers the cd+git check in
-  // bashPermissions.ts. We must detect this cross-segment pattern here.
-  // Each pipe segment can itself be a compound command (e.g., "cd sub && echo"),
-  // so we split each segment into subcommands before checking.
-  {
-    let hasCd = false
-    let hasGit = false
-    for (const segment of segments) {
-      const subcommands = splitCommand_DEPRECATED(segment)
-      for (const sub of subcommands) {
-        const trimmed = sub.trim()
-        if (checkers.isNormalizedCdCommand(trimmed)) {
-          hasCd = true
-        }
-        if (checkers.isNormalizedGitCommand(trimmed)) {
-          hasGit = true
-        }
-      }
-    }
-    // Official: structure-create + git is checked before the plain cd+git path.
-    if (hasGit && commandWritesToGitInternalPaths(input.command)) {
-      const decisionReason = {
-        type: 'other' as const,
-        reason:
-          'This command creates git repository structure files (HEAD/objects/refs/hooks) and then runs git, which can execute hooks/fsmonitor from the created files.',
-        bashMissKind: 'cd-git-compound',
-      }
-      return {
-        behavior: 'ask',
-        decisionReason,
-        message: createPermissionRequestMessage(BashTool.name, decisionReason),
-      }
-    }
-    if (hasCd && hasGit) {
-      const decisionReason = {
-        type: 'other' as const,
-        // Official 2.1.x wording for the cd+git hook/fsmonitor surface.
-        reason:
-          'This command changes directory before running git, which can execute untrusted hooks from the target directory. Approve only if you trust it.',
-        bashMissKind: 'cd-git-compound',
-      }
-      return {
-        behavior: 'ask',
-        decisionReason,
-        message: createPermissionRequestMessage(BashTool.name, decisionReason),
-      }
-    }
-  }
-
   const segmentResults = new Map<string, PermissionResult>()
 
-  // Check each segment through the full permission system
-  for (const segment of segments) {
-    const trimmedSegment = segment.trim()
-    if (!trimmedSegment) continue // Skip empty segments
+  // Official 2.1.325 #2325/#2326 (`U_r` @290072000): evaluate every segment
+  // first (including bare output-redirection segments whose stripped form is
+  // empty, using `rawPipeSegments[i]`) so deny rules ALWAYS take precedence
+  // over ask checks like `multi-cd` or `cd+git`.
+  for (let i = 0; i < segments.length; i++) {
+    const trimmedSegment = segments[i]!.trim()
+    if (!trimmedSegment) {
+      const rawSeg = (rawPipeSegments[i] ?? '').trim()
+      if (!rawSeg) continue
+      const rawResult = await bashToolHasPermissionFn({
+        ...input,
+        command: rawSeg,
+      })
+      segmentResults.set(
+        rawSeg,
+        rawResult.behavior === 'passthrough'
+          ? {
+              behavior: 'ask',
+              message: createPermissionRequestMessage(BashTool.name, {
+                type: 'other',
+                reason:
+                  'Bare output redirection in a compound command requires approval',
+              }),
+              decisionReason: {
+                type: 'other',
+                reason:
+                  'Bare output redirection in a compound command requires approval',
+              },
+            }
+          : rawResult,
+      )
+      continue
+    }
 
     const segmentResult = await bashToolHasPermissionFn({
       ...input,
@@ -113,7 +73,7 @@ async function segmentedCommandPermissionResult(
     segmentResults.set(trimmedSegment, segmentResult)
   }
 
-  // Check if any segment is denied (after evaluating all)
+  // Check if any segment is denied (takes precedence over ask checks)
   const deniedSegment = Array.from(segmentResults.entries()).find(
     ([, result]) => result.behavior === 'deny',
   )
@@ -133,9 +93,89 @@ async function segmentedCommandPermissionResult(
     }
   }
 
-  const allAllowed = Array.from(segmentResults.values()).every(
-    result => result.behavior === 'allow',
+  // Check for multiple cd commands across all segments and subcommands (#2326)
+  let cdCount = 0
+  let hasGit = false
+  for (const segment of segments) {
+    const subcommands = splitCommand_DEPRECATED(segment)
+    for (const sub of subcommands) {
+      const trimmed = sub.trim()
+      if (checkers.isNormalizedCdCommand(trimmed)) {
+        cdCount++
+      }
+      if (checkers.isNormalizedGitCommand(trimmed)) {
+        hasGit = true
+      }
+    }
+  }
+  if (cdCount > 1) {
+    const decisionReason = {
+      type: 'other' as const,
+      reason:
+        'Multiple directory changes in one command require approval for clarity',
+      bashMissKind: 'multi-cd',
+    }
+    return {
+      behavior: 'ask',
+      decisionReason,
+      message: createPermissionRequestMessage(BashTool.name, decisionReason),
+    }
+  }
+
+  // Official: structure-create + git is checked before the plain cd+git path.
+  if (hasGit && commandWritesToGitInternalPaths(input.command)) {
+    const decisionReason = {
+      type: 'other' as const,
+      reason:
+        'This command creates git repository structure files (HEAD/objects/refs/hooks) and then runs git, which can execute hooks/fsmonitor from the created files.',
+      bashMissKind: 'cd-git-compound',
+    }
+    return {
+      behavior: 'ask',
+      decisionReason,
+      message: createPermissionRequestMessage(BashTool.name, decisionReason),
+    }
+  }
+  if (cdCount > 0 && hasGit) {
+    const decisionReason = {
+      type: 'other' as const,
+      // Official 2.1.x wording for the cd+git hook/fsmonitor surface.
+      reason:
+        'This command changes directory before running git, which can execute untrusted hooks from the target directory. Approve only if you trust it.',
+      bashMissKind: 'cd-git-compound',
+    }
+    return {
+      behavior: 'ask',
+      decisionReason,
+      message: createPermissionRequestMessage(BashTool.name, decisionReason),
+    }
+  }
+
+  // Official 2.1.325 #2326: require at least one evaluated segment and refuse
+  // to auto-allow if any pipe stage is a bare variable assignment (`FOO=bar | cmd`).
+  const hasAssignmentOnlyStage = segments.some(seg =>
+    /^[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]*\])?\+?=[^\s]*$/.test(seg.trim()),
   )
+  if (hasAssignmentOnlyStage) {
+    const decisionReason = {
+      type: 'other' as const,
+      reason:
+        "The parts of this pipe can't be checked one by one, so the command needs approval",
+      bashMissKind: 'assigned-variable',
+    }
+    return {
+      behavior: 'ask',
+      decisionReason,
+      message: createPermissionRequestMessage(BashTool.name, decisionReason),
+      suggestions: [],
+    }
+  }
+
+  const allAllowed =
+    segmentResults.size > 0 &&
+    Array.from(segmentResults.values()).every(
+      result => result.behavior === 'allow',
+    )
 
   if (allAllowed) {
     return {
@@ -278,6 +318,7 @@ async function bashToolCheckCommandOperatorPermissions(
   return segmentedCommandPermissionResult(
     input,
     segments,
+    pipeSegments,
     bashToolHasPermissionFn,
     checkers,
   )

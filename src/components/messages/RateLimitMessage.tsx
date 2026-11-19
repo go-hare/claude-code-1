@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { extraUsage } from 'src/commands/extra-usage/index.js';
+import { isCreditsRequiredRateLimit } from 'src/commands/rate-limit-options/rate-limit-options.js';
 import { Box, Text } from '@anthropic/ink';
 import { useClaudeAiLimits } from 'src/services/claudeAiLimitsHook.js';
 import { shouldProcessMockLimits } from 'src/services/rateLimitMocking.js'; // Used for /mock-limits command
@@ -102,15 +103,19 @@ export function RateLimitMessage({ text, onOpenRateLimitOptions }: RateLimitMess
   } = useClaudeAiLimits();
   const isCurrentlyRateLimited =
     status.status === 'rejected' && status.resetsAt !== undefined && !status.isUsingOverage;
-  const isUpsellSuppressed =
-    status?.rateLimitType === 'seven_day_overage_included' || status?.errorCode === 'credits_required';
+  const isCreditsRequired = isCreditsRequiredRateLimit(status);
+  const isUpsellSuppressed = status?.rateLimitType === 'seven_day_overage_included';
+  const isExtraUsageEnabled = extraUsage.isEnabled();
 
+  // Official 2.1.323 Wc (#1969): auto-open /rate-limit-options when a model needs
+  // usage credits that are turned off or used up (credits_required).
   const shouldAutoOpenRateLimitOptionsMenu =
-    canSeeRateLimitOptionsUpsell &&
     !hasOpenedInteractiveMenu &&
-    isCurrentlyRateLimited &&
     !isUpsellSuppressed &&
-    onOpenRateLimitOptions;
+    onOpenRateLimitOptions &&
+    (isCreditsRequired
+      ? shouldShowUpsell && isExtraUsageEnabled && !status.isUsingOverage
+      : canSeeRateLimitOptionsUpsell && isCurrentlyRateLimited);
 
   useEffect(() => {
     if (shouldAutoOpenRateLimitOptionsMenu) {
@@ -121,17 +126,32 @@ export function RateLimitMessage({ text, onOpenRateLimitOptions }: RateLimitMess
 
   const upsell = useMemo(() => {
     if (isUpsellSuppressed) return null;
+    if (isCreditsRequired) {
+      if (!shouldShowUpsell || !isExtraUsageEnabled || !hasClaudeAiBillingAccess() || text.includes('/usage-credits')) {
+        return null;
+      }
+      return <Text dimColor>/usage-credits to finish what you’re working on.</Text>;
+    }
     const message = getUpsellMessage({
       shouldShowUpsell,
       isMax20x,
-      isExtraUsageCommandEnabled: extraUsage.isEnabled(),
+      isExtraUsageCommandEnabled: isExtraUsageEnabled,
       shouldAutoOpenRateLimitOptionsMenu: !!shouldAutoOpenRateLimitOptionsMenu,
       isTeamOrEnterprise,
       hasBillingAccess: hasClaudeAiBillingAccess(),
     });
     if (!message) return null;
     return <Text dimColor>{message}</Text>;
-  }, [isUpsellSuppressed, shouldShowUpsell, isMax20x, isTeamOrEnterprise, shouldAutoOpenRateLimitOptionsMenu]);
+  }, [
+    isUpsellSuppressed,
+    isCreditsRequired,
+    shouldShowUpsell,
+    isExtraUsageEnabled,
+    text,
+    isMax20x,
+    isTeamOrEnterprise,
+    shouldAutoOpenRateLimitOptionsMenu,
+  ]);
 
   return (
     <MessageResponse>

@@ -689,6 +689,28 @@ export type AntAuthFallbackNotice =
   | null
 
 /**
+ * Official 2.1.323 `pw()` (#2003): detect whether `ANTHROPIC_CUSTOM_HEADERS`
+ * supplies a custom `X-Api-Key` header (case-insensitive). When present, the
+ * `ant auth login` billing fallback notice must not claim billing goes to the
+ * `ant auth login` organization.
+ */
+export function hasCustomXApiKeyHeader(
+  rawHeaders: string | undefined = process.env.ANTHROPIC_CUSTOM_HEADERS,
+): boolean {
+  if (!rawHeaders) return false
+  for (const line of rawHeaders.split(/\r?\n/)) {
+    const colon = line.indexOf(':')
+    if (colon <= 0) continue
+    const name = line.slice(0, colon).trim().toLowerCase()
+    const value = line.slice(colon + 1).trim()
+    if (name === 'x-api-key' && value.length > 0) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
  * Official 2.1.319 (#1712 & #1713): inspect active `ant auth login` Console
  * fallback state via `detectActiveConsoleFallbackCredential()`. When a
  * `claude.ai` login ended, returns the warning copy from
@@ -699,6 +721,7 @@ export function getAntAuthFallbackNotice(opts?: {
   organizationName?: string | null
   forceActive?: boolean
   loginEnded?: boolean
+  customHeaders?: string
 }): AntAuthFallbackNotice {
   try {
     if (opts?.forceActive) {
@@ -716,6 +739,8 @@ export function getAntAuthFallbackNotice(opts?: {
         text: `Signed in with ant auth login · usage billed to ${org} · /login to use a Claude subscription`,
       }
     }
+    // Official 2.1.323 (#2003): custom X-Api-Key header supersedes ant auth login billing.
+    if (hasCustomXApiKeyHeader(opts?.customHeaders)) return null
     if (getAPIProvider() !== 'firstParty') return null
     const active = detectActiveConsoleFallbackCredential()
     if (active?.kind !== 'ant_profile') return null

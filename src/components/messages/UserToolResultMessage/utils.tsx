@@ -2,6 +2,7 @@ import type { ToolUseBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import { useMemo } from 'react';
 import { findToolByName, type Tool, type Tools } from '../../../Tool.js';
 import type { buildMessageLookups } from '../../../utils/messages.js';
+import { getDisplayOnlyMcpTool } from '../displayOnlyMcpTool.js';
 
 /** densable xB — only this name recovers from base registry when missing live. */
 const BRIEF_BASE_FALLBACK_NAME = 'SendUserMessage';
@@ -25,7 +26,7 @@ export function resolveToolFromMessages(
   if (!toolUse) {
     return null;
   }
-  const tool = findToolByName(tools, toolUse.name);
+  const tool = findToolByName(tools, toolUse.name) ?? getDisplayOnlyMcpTool(toolUse.name);
   if (tool) {
     return { tool, toolUse };
   }

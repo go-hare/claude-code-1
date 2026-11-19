@@ -25,7 +25,9 @@ const diff = {
       : 'View uncommitted changes and per-turn diffs'
   },
   immediate: (_args: string, presentation?: CommandPresentation) =>
-    resolveDiffPresentation(presentation ?? 'inline') === 'fullscreen',
+    resolveDiffPresentation(
+      presentation ?? (isFullscreenEnvEnabled() ? 'fullscreen' : 'inline'),
+    ) === 'fullscreen',
   load: () => import('./diff.js'),
 } satisfies Command
 

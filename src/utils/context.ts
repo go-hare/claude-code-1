@@ -124,8 +124,66 @@ export function modelSupports1M(model: string): boolean {
 }
 
 /**
- * densable 2.1.223 #17 — model id recognized for local window assumptions.
- * Provider-prefixed Claude/Anthropic ids count (gateway discovery parity).
+ * Official 2.1.325 `SDe` + `EC()` + `Mxt` — canonical Claude model IDs known to
+ * this build. Used so unrecognized gateway/custom IDs that start with `claude-`
+ * (such as `claude-sonnet-latest`) are NOT falsely treated as recognized and
+ * therefore honor `CLAUDE_CODE_MAX_CONTEXT_TOKENS` (#2368).
+ */
+const KNOWN_CLAUDE_CANONICAL_IDS = new Set([
+  'claude-3-opus',
+  'claude-3-sonnet',
+  'claude-3-haiku',
+  'claude-3-5-haiku',
+  'claude-3-5-sonnet',
+  'claude-3-7-sonnet',
+  'claude-fable-5',
+  'claude-fable-5-1',
+  'claude-fable-5-2',
+  'claude-haiku-4-5',
+  'claude-haiku-5-5',
+  'claude-mythos-5',
+  'claude-mythos-5-1',
+  'claude-mythos-5-2',
+  'claude-mythos-preview',
+  'claude-opus-4-0',
+  'claude-opus-4-1',
+  'claude-opus-4-5',
+  'claude-opus-4-6',
+  'claude-opus-4-7',
+  'claude-opus-4-8',
+  'claude-opus-5',
+  'claude-opus-5-5',
+  'claude-sonnet-4-0',
+  'claude-sonnet-4-5',
+  'claude-sonnet-4-6',
+  'claude-sonnet-5',
+  'claude-sonnet-5-5',
+])
+
+function isKnownClaudeModelId(raw: string): boolean {
+  const stripped = raw.replace(/\[[12]m\]$/gi, '').trim()
+  if (getDensableCatalogModel(stripped) !== undefined) return true
+  const viaProvider = resolveCatalogIdFromProviderId(stripped)
+  if (viaProvider !== undefined) return true
+  const canonical = getCanonicalName(stripped)
+  if (
+    getDensableCatalogModel(canonical) !== undefined ||
+    KNOWN_CLAUDE_CANONICAL_IDS.has(canonical)
+  ) {
+    return true
+  }
+  const directCanonical = firstPartyNameToCanonical(stripped)
+  return (
+    getDensableCatalogModel(directCanonical) !== undefined ||
+    KNOWN_CLAUDE_CANONICAL_IDS.has(directCanonical)
+  )
+}
+
+/**
+ * densable 2.1.223 #17 / 2.1.325 #2368 (`MC` / `$$`) — model id recognized for
+ * local window assumptions. Provider-prefixed known Claude/Anthropic ids count,
+ * while unrecognized `claude-*` gateway aliases (e.g. `claude-sonnet-latest`)
+ * return false so `CLAUDE_CODE_MAX_CONTEXT_TOKENS` applies to them.
  */
 export function isRecognizedModelForWindowEnforcement(model: string): boolean {
   const raw = model.trim()
@@ -144,8 +202,8 @@ export function isRecognizedModelForWindowEnforcement(model: string): boolean {
   if (getDeepSeekModelContextWindow(raw) !== undefined) return true
   // Capability cache hit = /v1/models recognized this id
   if (getModelCapability(raw)) return true
-  // densable gateway filter + Anthropic family markers
-  if (/(claude|anthropic)/i.test(raw)) return true
+  // Known catalog / legacy Claude model IDs (including provider-prefixed forms)
+  if (isKnownClaudeModelId(raw)) return true
   // Alias / marketing short names
   const lower = raw.toLowerCase()
   if (
@@ -264,11 +322,11 @@ export function getContextWindowForModel(
     }
   }
 
-  // densable 2.1.223 #17 — unrecognized model IDs: enforce assumed 200K unless
-  // CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT restores wait-for-API.
-  // Official 2.1.299 (#583) xC(): behind a custom ANTHROPIC_BASE_URL gateway,
-  // unrecognized gateway-specific model IDs honor CLAUDE_CODE_MAX_CONTEXT_TOKENS
-  // (for all users) and default to 1M unless CLAUDE_CODE_DISABLE_1M_CONTEXT is set.
+  // Official 2.1.323 (#2167 / #2168) xC(): unrecognized model IDs now assume a
+  // 1M context window by default across all providers/endpoints unless
+  // CLAUDE_CODE_DISABLE_1M_CONTEXT=1 is set (which keeps 200K), or
+  // CLAUDE_CODE_MAX_CONTEXT_TOKENS overrides it explicitly, or
+  // CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT disables enforcement.
   if (!isRecognizedModelForWindowEnforcement(model)) {
     if (isUnknownModelWindowEnforcementDisabled()) {
       try {
@@ -280,17 +338,11 @@ export function getContextWindowForModel(
         return 100_000_000
       }
     }
-    if (!isFirstPartyAnthropicBaseUrl()) {
-      if (process.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS) {
-        const override = parseInt(
-          process.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS,
-          10,
-        )
-        if (!isNaN(override) && override > 0) return override
-      }
-      return is1mContextDisabled() ? MODEL_CONTEXT_WINDOW_DEFAULT : 1_000_000
+    if (process.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS) {
+      const override = parseInt(process.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS, 10)
+      if (!isNaN(override) && override > 0) return override
     }
-    return MODEL_CONTEXT_WINDOW_DEFAULT
+    return is1mContextDisabled() ? MODEL_CONTEXT_WINDOW_DEFAULT : 1_000_000
   }
 
   // Current-spec Gemini chat/text: gemini-4-argon / gemini-3.8-flash = 1M (1,048,576).

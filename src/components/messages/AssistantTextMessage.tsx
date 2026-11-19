@@ -19,6 +19,8 @@ import {
   shouldRenderClientGeneratedErrorLine,
   TOKEN_REVOKED_ERROR_MESSAGE,
 } from '../../services/api/errors.js';
+import { getIsNonInteractiveSession, getIsRemoteMode } from '../../bootstrap/state.js';
+import { useAppState } from '../../state/AppState.js';
 import { logForDebugging } from '../../utils/debug.js';
 import { isEnvTruthy } from '../../utils/envUtils.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
@@ -132,9 +134,31 @@ type Props = {
   isApiError?: boolean;
   /** densable 2.1.289 `tu` `R` — e.g. `'verification_required'` for clickable link. */
   apiErrorKind?: string;
+  /** Official 2.1.325 (#2260) — structured API error code (e.g. `'dlp_request_denied'`). */
+  apiError?: string;
   /** densable 2.1.289 `or` `xI("AssistantMessage")` requestId. */
   messageId?: string;
 };
+
+export const DLP_BLOCKED_GUIDANCE_LINE =
+  'To continue in this session, run /rewind, pick the message with the blocked content, choose Restore conversation, then change it before you send it again, or run /clear to start over. Until you do, new messages may be blocked too.';
+
+/**
+ * Official 2.1.325 `ag()` (#2260): dim guidance line rendered under an
+ * organization-policy (`dlp_request_denied`) error when the user can run
+ * `/rewind` or `/clear` in the current interactive main session.
+ */
+export function DlpBlockedGuidanceLine(): React.ReactNode {
+  const viewingAgentTaskId = useAppState(s => s.viewingAgentTaskId);
+  if (viewingAgentTaskId || getIsNonInteractiveSession() || getIsRemoteMode()) {
+    return null;
+  }
+  return (
+    <Box marginTop={1} paddingLeft={2}>
+      <Text dimColor>{DLP_BLOCKED_GUIDANCE_LINE}</Text>
+    </Box>
+  );
+}
 
 /**
  * densable 2.1.243 `Kx` display text: bare "API Error" gets the wait hint.
@@ -497,8 +521,10 @@ function AssistantTextMessageBody({
   onOpenRateLimitOptions,
   isApiError = false,
   apiErrorKind,
+  apiError,
 }: Props): React.ReactNode {
   const isSelected = useContext(MessageActionsSelectedContext);
+  const isInsideMessageResponse = useIsMessageResponse();
   if (isEmptyMessageText(text)) {
     return null;
   }
@@ -622,7 +648,21 @@ function AssistantTextMessageBody({
       // densable 2.1.243 Gx / 2.1.289 tu: `Rle || Lx(text) || wx(text)` → ru.
       if (shouldRenderClientGeneratedErrorLine(isApiError, text)) {
         const linkHref = apiErrorKind === 'verification_required' ? getVerificationLinkHref : undefined;
-        return <ClientGeneratedErrorLine text={text} verbose={verbose} addMargin={addMargin} linkHref={linkHref} />;
+        const errorNode = (
+          <ClientGeneratedErrorLine text={text} verbose={verbose} addMargin={addMargin} linkHref={linkHref} />
+        );
+        // Official 2.1.325 (#2260): show dim /rewind + /clear guidance under
+        // organization policy-blocked (`dlp_request_denied`) errors.
+        const isDlpDenied = apiError === 'dlp_request_denied' || apiErrorKind === 'dlp_request_denied';
+        if (!isDlpDenied || isInsideMessageResponse) {
+          return errorNode;
+        }
+        return (
+          <Box flexDirection="column" width="100%">
+            {errorNode}
+            <DlpBlockedGuidanceLine />
+          </Box>
+        );
       }
       // gold @202887955: one row, width 100%, children [dot, column].
       // Streaming (gold yi @203236672) is a nested inner row — do not flatten

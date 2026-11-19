@@ -169,6 +169,7 @@ import {
   formatHookProgressText,
 } from './hooks/hooksSettings.js'
 import { trackHookExecution } from './hooks/hookExecutionState.js'
+import { startHookHeartbeat } from './hooks/hookHeartbeat.js'
 import { formatHookFailureSummaryLine } from './hooks/hookFailureSummary.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { logForDebugging } from './debug.js'
@@ -205,7 +206,12 @@ import {
 import { createAttachmentMessage } from './attachments.js'
 import { noteHookFailure } from './bgNeedsInputBridge.js'
 import { all } from './generators.js'
-import { findToolByName, type Tools, type ToolUseContext } from '../Tool.js'
+import {
+  findToolByName,
+  type Tool,
+  type Tools,
+  type ToolUseContext,
+} from '../Tool.js'
 import { END_CONVERSATION_TOOL_NAME } from '@claude-code/builtin-tools/tools/EndConversationTool/prompt.js'
 import { getPluginHookRunner } from './hooks/pluginHookRunner.js'
 import { execPromptHook } from './hooks/execPromptHook.js'
@@ -2452,10 +2458,26 @@ function getToolInputForHook(hookInput: HookInput): unknown {
     : undefined
 }
 
+function isBuiltInArtifactStandInForHook(
+  tool: Pick<Tool, 'name' | 'mcpInfo'>,
+): boolean {
+  try {
+    // Lazy require avoids a top-level circular dependency between hooks.ts and
+    // permissions/permissions.ts (which imports executePermissionRequestHooks).
+    const { standsInForBuiltInArtifactTool } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./permissions/permissions.js') as typeof import('./permissions/permissions.js')
+    return standsInForBuiltInArtifactTool(tool)
+  } catch {
+    return false
+  }
+}
+
 export function getHookFamilyNames(
   toolName: string,
   toolInput: unknown,
   mcpClients?: readonly MCPServerConnection[],
+  tool?: Pick<Tool, 'name' | 'mcpInfo'>,
 ): string[] {
   const standIn = getMonitorBashStandIn(toolName, toolInput)
   const legacy = getLegacyToolNames(toolName)
@@ -2464,6 +2486,15 @@ export function getHookFamilyNames(
   const connectorAliases = getConnectorAliasesForMcpTool(toolName, mcpClients)
   const out = [...legacy, ...connectorAliases]
   if (standIn !== undefined) out.push(standIn)
+  // Official 2.1.325 #2313: cloud MCP Artifact stand-in tools also match
+  // `Artifact` hooks (via throughFamilyOnly so deny/ask hooks apply).
+  if (
+    toolName !== 'Artifact' &&
+    !out.includes('Artifact') &&
+    isBuiltInArtifactStandInForHook(tool ?? { name: toolName })
+  ) {
+    out.push('Artifact')
+  }
   return out
 }
 
@@ -2563,7 +2594,12 @@ async function prepareIfConditionMatcher(
       : undefined
 
   const hookToolInput = getToolInputForHook(hookInput)
-  const familyNames = getHookFamilyNames(toolName, hookToolInput)
+  const familyNames = getHookFamilyNames(
+    toolName,
+    hookToolInput,
+    undefined,
+    tool,
+  )
   let bashStandInPatternMatcher: ((ruleContent: string) => boolean) | undefined
   if (getMonitorBashStandIn(toolName, hookToolInput) === 'Bash' && tools) {
     const bashTool = findToolByName(tools, 'Bash')
@@ -3001,9 +3037,18 @@ export async function getMatchingHooks(
 
     // Extract hooks with their plugin context (if any)
     const hookToolInput = getToolInputForHook(hookInput)
+    const matchedTool =
+      matchQuery !== undefined && tools
+        ? findToolByName(tools, matchQuery)
+        : undefined
     const familyNames =
       matchQuery !== undefined
-        ? getHookFamilyNames(matchQuery, hookToolInput, appState?.mcp?.clients)
+        ? getHookFamilyNames(
+            matchQuery,
+            hookToolInput,
+            appState?.mcp?.clients,
+            matchedTool,
+          )
         : []
     const matchedHooks: MatchedHook[] = hookMatchers.flatMap(matcher => {
       const asOwnTool = ownToolMatchers.has(matcher)
@@ -5509,6 +5554,23 @@ async function* executeHooks({
     userHooks.map(({ hook }, index) => [hook, index]),
   )
 
+  // 2.1.323 #1970: emit 30s progress heartbeat while hooks run long in -p / SDK sessions
+  const hookHeartbeat = startHookHeartbeat({
+    hookEvent,
+    toolUseID,
+    agentId: toolUseContext?.agentId,
+    matchedHookCount: matchingHooks.length,
+    maxTimeoutMs: Math.max(
+      timeoutMs,
+      ...matchingHooks.map(({ hook }) =>
+        'timeout' in hook && typeof hook.timeout === 'number'
+          ? hook.timeout * 1000
+          : timeoutMs,
+      ),
+    ),
+    signal,
+  })
+
   try {
     // Run non-model hooks in parallel and cap prompt/agent hooks at 12 per event
     // and 24 per session (+12 overdue) (#928, #1336)
@@ -5894,6 +5956,7 @@ async function* executeHooks({
       }
     }
   } finally {
+    hookHeartbeat?.stop()
     progress?.[Symbol.dispose]()
   }
 
@@ -6305,6 +6368,22 @@ async function executeHooksOutsideREPL({
   const progressIndices = new Map(
     userHooks.map(({ hook }, index) => [hook, index]),
   )
+  // 2.1.323 #1970: 30s progress heartbeat for outside-REPL hooks (PreCompact/PostCompact)
+  const outsideHeartbeat = startHookHeartbeat({
+    hookEvent,
+    toolUseID: randomUUID(),
+    agentId,
+    matchedHookCount: matchingHooks.length,
+    maxTimeoutMs: Math.max(
+      timeoutMs,
+      ...matchingHooks.map(({ hook }) =>
+        'timeout' in hook && typeof hook.timeout === 'number'
+          ? hook.timeout * 1000
+          : timeoutMs,
+      ),
+    ),
+    signal,
+  })
   // Run all hooks in parallel with individual timeouts
   const hookPromises = matchingHooks.map(
     async (
@@ -6782,6 +6861,7 @@ async function executeHooksOutsideREPL({
         })
     }),
   ).finally(() => {
+    outsideHeartbeat?.stop()
     progress?.[Symbol.dispose]()
     releaseHold()
   })
@@ -7524,14 +7604,46 @@ export async function* executeUserPromptSubmitHooks(
     session_title: getCurrentSessionTitle(getSessionId()),
   }
 
-  yield* executeHooks({
+  // 2.1.323 #2051: when Stop is pressed right after sending a message while
+  // UserPromptSubmit (or a plugin prompt hook) is still running, treat the
+  // aborted hook as cancelled instead of surfacing an error.
+  for await (const result of executeHooks({
     hookInput,
     toolUseID: randomUUID(),
     signal: toolUseContext.abortController.signal,
     timeoutMs: USER_PROMPT_SUBMIT_HOOK_TIMEOUT_MS,
     toolUseContext,
     requestPrompt,
-  })
+  })) {
+    const hookAttachment =
+      result.message?.type === 'attachment'
+        ? result.message.attachment
+        : undefined
+    if (
+      toolUseContext.abortController.signal.aborted &&
+      (result.blockingError ||
+        hookAttachment?.type === 'hook_non_blocking_error' ||
+        hookAttachment?.type === 'hook_error_during_execution' ||
+        hookAttachment?.type === 'hook_blocking_error')
+    ) {
+      const existingToolUseID =
+        hookAttachment &&
+        'toolUseID' in hookAttachment &&
+        typeof hookAttachment.toolUseID === 'string'
+          ? hookAttachment.toolUseID
+          : randomUUID()
+      yield {
+        message: createAttachmentMessage({
+          type: 'hook_cancelled',
+          hookName: 'UserPromptSubmit',
+          toolUseID: existingToolUseID,
+          hookEvent: 'UserPromptSubmit',
+        }),
+      }
+      continue
+    }
+    yield result
+  }
 }
 
 /**
@@ -7721,6 +7833,8 @@ export type SessionStartHookExecutionOptions = {
   ) => void
   orphaned?: AbortSignal
   storageV5?: unknown
+  /** 2.1.323 #2103: subagent id forwarded on post-compaction SessionStart hooks. */
+  agentId?: string
 }
 
 /**
@@ -7819,11 +7933,23 @@ export async function* executeSessionStartHooks(
     (source === 'resume' || source === 'fork') && messages
       ? KSn(messages, model, resolvedId)
       : {}
+  // 2.1.323 #2103: forward agent_id and agent_type on post-compaction SessionStart hooks
+  const activeAgentCtx = getAgentContext()
+  const resolvedAgentId =
+    sessionStartOptions?.agentId ?? activeAgentCtx?.agentId
+  const resolvedAgentType =
+    agentType ??
+    (activeAgentCtx?.agentType === 'subagent'
+      ? activeAgentCtx.subagentName
+      : undefined)
   const hookInput: SessionStartHookInput = {
-    ...createBaseHookInput(undefined, sessionId),
+    ...createBaseHookInput(undefined, sessionId, {
+      agentId: resolvedAgentId,
+      agentType: resolvedAgentType,
+    }),
     hook_event_name: 'SessionStart',
     source,
-    agent_type: agentType,
+    agent_type: resolvedAgentType,
     model,
     session_title: getCurrentSessionTitle(asSessionId(resolvedId)),
     ...resumeFields,
@@ -8200,9 +8326,20 @@ export async function executePreCompactHooks(
   blockedBy?: string
 }> {
   if (context?.options.settingsHooksOff === true) return {}
-  const delegated = isDelegatedObservation(getAgentContext())
+  const activeAgentCtx = getAgentContext()
+  const delegated = isDelegatedObservation(activeAgentCtx)
+  // 2.1.323 #2103: include agent_id and agent_type when a subagent compacts
+  const compactAgentId = context?.agentId ?? activeAgentCtx?.agentId
+  const compactAgentType =
+    context?.agentType ??
+    (activeAgentCtx?.agentType === 'subagent'
+      ? activeAgentCtx.subagentName
+      : undefined)
   const hookInput: PreCompactHookInput = {
-    ...createBaseHookInput(undefined),
+    ...createBaseHookInput(undefined, undefined, {
+      agentId: compactAgentId,
+      agentType: compactAgentType,
+    }),
     hook_event_name: 'PreCompact',
     trigger: compactData.trigger,
     custom_instructions: compactData.customInstructions,
@@ -8215,7 +8352,7 @@ export async function executePreCompactHooks(
     timeoutMs,
     storageV5: context?.storageV5,
     credentials: context?.credentials,
-    agentId: context?.agentId,
+    agentId: compactAgentId,
   })
 
   if (results.length === 0) {
@@ -8307,13 +8444,24 @@ export async function executePostCompactHooks(
 ): Promise<{
   userDisplayMessage?: string
 }> {
+  const activeAgentCtx = getAgentContext()
   if (
     context?.options.settingsHooksOff === true ||
-    isDelegatedObservation(getAgentContext())
+    isDelegatedObservation(activeAgentCtx)
   )
     return {}
+  // 2.1.323 #2103: include agent_id and agent_type when a subagent compacts
+  const compactAgentId = context?.agentId ?? activeAgentCtx?.agentId
+  const compactAgentType =
+    context?.agentType ??
+    (activeAgentCtx?.agentType === 'subagent'
+      ? activeAgentCtx.subagentName
+      : undefined)
   const hookInput: PostCompactHookInput = {
-    ...createBaseHookInput(undefined),
+    ...createBaseHookInput(undefined, undefined, {
+      agentId: compactAgentId,
+      agentType: compactAgentType,
+    }),
     hook_event_name: 'PostCompact',
     trigger: compactData.trigger,
     compact_summary: compactData.compactSummary,
@@ -8326,7 +8474,7 @@ export async function executePostCompactHooks(
     timeoutMs,
     storageV5: context?.storageV5,
     credentials: context?.credentials,
-    agentId: context?.agentId,
+    agentId: compactAgentId,
   })
 
   if (results.length === 0) {

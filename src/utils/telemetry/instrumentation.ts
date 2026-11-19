@@ -4,7 +4,6 @@ import { logs } from '@opentelemetry/api-logs'
 // switch statements below. A process uses at most one protocol variant per
 // signal, but static imports would load all 6 (~1.2MB) on every startup.
 import {
-  envDetector,
   hostDetector,
   osDetector,
   resourceFromAttributes,
@@ -61,6 +60,10 @@ import { getMTLSConfig } from '../mtls.js'
 import { getSettings_DEPRECATED } from '../settings/settings.js'
 import { jsonStringify } from '../slowOperations.js'
 import { profileCheckpoint } from '../startupProfiler.js'
+import {
+  DEFAULT_MANAGED_RESOURCE_ATTRIBUTE_KEYS,
+  getOtelResourceAttributeStatus,
+} from '../telemetryAttributes.js'
 import { isBetaTracingEnabled } from './betaSessionTracing.js'
 import { BigQueryMetricsExporter } from './bigqueryExporter.js'
 import { ClaudeCodeDiagLogger } from './logger.js'
@@ -74,6 +77,89 @@ import {
 const DEFAULT_METRICS_EXPORT_INTERVAL_MS = 60000
 const DEFAULT_LOGS_EXPORT_INTERVAL_MS = 5000
 const DEFAULT_TRACES_EXPORT_INTERVAL_MS = 5000
+
+/** Official 2.1.323 (#2121, `jt` @311250200): default OTLP protocol when an endpoint is set. */
+export const DEFAULT_OTLP_PROTOCOL = 'http/protobuf'
+
+export type OtlpSignal = 'metrics' | 'logs' | 'traces'
+
+const OTLP_SIGNAL_ENV_SUFFIX: Record<OtlpSignal, string> = {
+  metrics: 'METRICS',
+  logs: 'LOGS',
+  traces: 'TRACES',
+}
+
+/**
+ * Official 2.1.323 (`te` @311265500): validate an `http://` or `https://` URL
+ * with a non-empty host.
+ */
+export function parseValidOtlpHttpUrl(raw: string | undefined): string | null {
+  if (!raw) return null
+  try {
+    const parsed = new URL(raw)
+    return (parsed.protocol === 'https:' || parsed.protocol === 'http:') &&
+      parsed.host
+      ? parsed.href
+      : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Official 2.1.323 (`We` / `otlpEndpointIn` @311265000): resolve the effective
+ * HTTP(S) OTLP endpoint for a signal from `OTEL_EXPORTER_OTLP_<SIGNAL>_ENDPOINT`
+ * or `OTEL_EXPORTER_OTLP_ENDPOINT`.
+ */
+export function resolveOtlpEndpointForSignal(
+  signal: OtlpSignal,
+  env: Record<string, string | undefined> = process.env,
+): string | null {
+  const upper = OTLP_SIGNAL_ENV_SUFFIX[signal]
+  const signalEndpoint = env[`OTEL_EXPORTER_OTLP_${upper}_ENDPOINT`]
+  if (signalEndpoint?.trim()) {
+    return parseValidOtlpHttpUrl(signalEndpoint)
+  }
+  const baseEndpoint = env.OTEL_EXPORTER_OTLP_ENDPOINT
+  if (!baseEndpoint?.trim() || parseValidOtlpHttpUrl(baseEndpoint) === null) {
+    return null
+  }
+  return parseValidOtlpHttpUrl(
+    `${baseEndpoint}${baseEndpoint.endsWith('/') ? '' : '/'}v1/${signal}`,
+  )
+}
+
+/**
+ * Official 2.1.323 (#2121, `Re` @311255050):
+ * Resolve OTLP protocol for `signal`, defaulting to `http/protobuf` whenever a
+ * valid HTTP(S) OTLP endpoint is configured and no explicit protocol env var is
+ * set.
+ */
+export function resolveOtlpProtocol(
+  signal: OtlpSignal,
+  env: Record<string, string | undefined> = process.env,
+): string | undefined {
+  const upper = OTLP_SIGNAL_ENV_SUFFIX[signal]
+  return (
+    env[`OTEL_EXPORTER_OTLP_${upper}_PROTOCOL`]?.trim() ||
+    env.OTEL_EXPORTER_OTLP_PROTOCOL?.trim() ||
+    (resolveOtlpEndpointForSignal(signal, env) !== null
+      ? DEFAULT_OTLP_PROTOCOL
+      : undefined)
+  )
+}
+
+function buildOtlpProtocolError(
+  signal: OtlpSignal,
+  protocol: string | undefined,
+): Error {
+  const upper = OTLP_SIGNAL_ENV_SUFFIX[signal]
+  return new Error(
+    protocol === undefined
+      ? `No protocol is set for the ${signal} OTLP exporter, and its endpoint (OTEL_EXPORTER_OTLP_${upper}_ENDPOINT if set, otherwise OTEL_EXPORTER_OTLP_ENDPOINT) is unset or not a valid http:// or https:// URL (check for stray white space)`
+      : `Unknown protocol set in OTEL_EXPORTER_OTLP_${upper}_PROTOCOL or OTEL_EXPORTER_OTLP_PROTOCOL env var: ${protocol}`,
+  )
+}
 
 class TelemetryTimeoutError extends Error {}
 
@@ -162,9 +248,7 @@ async function getOtlpReaders() {
 
       exporters.push(consoleExporter)
     } else if (exporterType === 'otlp') {
-      const protocol =
-        process.env.OTEL_EXPORTER_OTLP_METRICS_PROTOCOL?.trim() ||
-        process.env.OTEL_EXPORTER_OTLP_PROTOCOL?.trim()
+      const protocol = resolveOtlpProtocol('metrics')
 
       const { onlyConfigHeaders, ...httpConfig } = getOTLPExporterConfig(
         protocol,
@@ -214,9 +298,7 @@ async function getOtlpReaders() {
           break
         }
         default:
-          throw new Error(
-            `Unknown protocol set in OTEL_EXPORTER_OTLP_METRICS_PROTOCOL or OTEL_EXPORTER_OTLP_PROTOCOL env var: ${protocol}`,
-          )
+          throw buildOtlpProtocolError('metrics', protocol)
       }
     } else if (exporterType === 'prometheus') {
       // densable 2.1.216 #26: PrometheusSerializer emits `# UNIT` only when
@@ -248,9 +330,7 @@ async function getOtlpReaders() {
 async function getOtlpLogExporters() {
   const exporterTypes = parseExporterTypes(process.env.OTEL_LOGS_EXPORTER)
 
-  const protocol =
-    process.env.OTEL_EXPORTER_OTLP_LOGS_PROTOCOL?.trim() ||
-    process.env.OTEL_EXPORTER_OTLP_PROTOCOL?.trim()
+  const protocol = resolveOtlpProtocol('logs')
   const endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT
 
   logForDebugging(
@@ -308,9 +388,7 @@ async function getOtlpLogExporters() {
           break
         }
         default:
-          throw new Error(
-            `Unknown protocol set in OTEL_EXPORTER_OTLP_LOGS_PROTOCOL or OTEL_EXPORTER_OTLP_PROTOCOL env var: ${protocol}`,
-          )
+          throw buildOtlpProtocolError('logs', protocol)
       }
     } else {
       throw new Error(
@@ -330,9 +408,7 @@ async function getOtlpTraceExporters() {
     if (exporterType === 'console') {
       exporters.push(new ConsoleSpanExporter())
     } else if (exporterType === 'otlp') {
-      const protocol =
-        process.env.OTEL_EXPORTER_OTLP_TRACES_PROTOCOL?.trim() ||
-        process.env.OTEL_EXPORTER_OTLP_PROTOCOL?.trim()
+      const protocol = resolveOtlpProtocol('traces')
 
       const { onlyConfigHeaders, ...httpConfig } = getOTLPExporterConfig(
         protocol,
@@ -380,9 +456,7 @@ async function getOtlpTraceExporters() {
           break
         }
         default:
-          throw new Error(
-            `Unknown protocol set in OTEL_EXPORTER_OTLP_TRACES_PROTOCOL or OTEL_EXPORTER_OTLP_PROTOCOL env var: ${protocol}`,
-          )
+          throw buildOtlpProtocolError('traces', protocol)
       }
     } else {
       throw new Error(
@@ -603,9 +677,26 @@ export async function initializeTelemetry() {
     : {}
   const hostArchResource = resourceFromAttributes(hostArchAttributes)
 
-  const envResource = resourceFromAttributes(
-    envDetector.detect().attributes || {},
-  )
+  // Official 2.1.323 (#2123, `Lt` @311251300): parse OTEL_RESOURCE_ATTRIBUTES
+  // entry-by-entry so one malformed entry does not drop the valid ones.
+  // When any entry was dropped, withhold overrides of Claude-managed keys
+  // (`DEFAULT_MANAGED_RESOURCE_ATTRIBUTE_KEYS`), while still honoring
+  // explicit `OTEL_SERVICE_NAME`.
+  const parsedEnvAttrs = getOtelResourceAttributeStatus()
+  const filteredEnvAttrs: Record<string, string> = {}
+  for (const [k, v] of Object.entries(parsedEnvAttrs.attributes)) {
+    if (
+      parsedEnvAttrs.isEveryEntryRead ||
+      !DEFAULT_MANAGED_RESOURCE_ATTRIBUTE_KEYS.has(k)
+    ) {
+      filteredEnvAttrs[k] = v
+    }
+  }
+  const envServiceName = process.env.OTEL_SERVICE_NAME?.trim()
+  if (envServiceName) {
+    filteredEnvAttrs[ATTR_SERVICE_NAME] = envServiceName
+  }
+  const envResource = resourceFromAttributes(filteredEnvAttrs)
 
   // Merge resources - later resources take precedence
   const resource = baseResource
@@ -968,7 +1059,15 @@ export function getOTLPExporterConfig(
 
   // densable always wires Mvd → YAo-wrapped agents (proxy or direct), not only
   // when a proxy is set — required so Azure Monitor etc. get Content-Length.
-  const otelEndpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT
+  // Official 2.1.323 (#2122): resolve signal-specific endpoint too; unset
+  // endpoint defaults to localhost:4318 inside createOtlpHttpAgentFactory so
+  // configured proxies are bypassed for local collectors.
+  const otelEndpoint =
+    (signal
+      ? process.env[
+          `OTEL_EXPORTER_OTLP_${OTLP_SIGNAL_ENV_SUFFIX[signal]}_ENDPOINT`
+        ]
+      : undefined) || process.env.OTEL_EXPORTER_OTLP_ENDPOINT
   config.httpAgentOptions = createOtlpHttpAgentFactory(otelEndpoint)
   return config
 }

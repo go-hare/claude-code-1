@@ -17,6 +17,10 @@ import {
   getSessionBypassPermissionsMode,
 } from '../../bootstrap/state.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import {
+  getPolicyDenyKind,
+  isPolicyAllowed,
+} from '../../services/policyLimits/index.js'
 import type { ScopedMcpServerConfig } from '../../services/mcp/types.js'
 import { isInBundledMode } from '../bundledMode.js'
 import { hasOauthValidateAcceptedScope } from '../auth.js'
@@ -143,7 +147,61 @@ exec ${quote(argv)}
 export const CHROME_DISABLED_NO_VALIDATE_SCOPE =
   '[Claude in Chrome] Disabled: OAuth token has no scope accepted by /api/oauth/validate (needs user:profile, user:office, or user:ccr_inference; env-var and setup-token sessions default to user:inference only)'
 
+/**
+ * Official 2.1.323 (#2070): Claude in Chrome policy denial has `denialNamesNoRemedy: true`
+ * — never tells users to contact their admin when no admin setting can turn it on.
+ */
+export const CLAUDE_IN_CHROME_POLICY_BLOCKED_MESSAGE =
+  "Claude in Chrome is disabled by your organization's policy."
+
+export function isChromePolicyAllowed(): boolean {
+  return isPolicyAllowed('allow_claude_browser_extension')
+}
+
+/**
+ * Official 2.1.323 `g2n` (#2084): whether the user explicitly opted into
+ * Claude in Chrome via `--chrome` or `CLAUDE_CODE_ENABLE_CFC=1`.
+ */
+export function isChromeExplicitlyOptedIn(
+  chromeFlag: boolean | undefined = getChromeFlagOverride(),
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return (
+    chromeFlag === true ||
+    (chromeFlag !== false &&
+      !getIsNonInteractiveSession() &&
+      isEnvTruthy(env.CLAUDE_CODE_ENABLE_CFC))
+  )
+}
+
+/**
+ * Official 2.1.323 `jPt` / `gXo` (#2084 & #2070): in an interactive `--chrome`
+ * session where org policy disables Claude in Chrome, return the startup
+ * system-message text and severity level (`notice` on org_denied, `warning` on
+ * cache_miss) without suggesting contacting an admin.
+ */
+export function getChromeOptInRefusedStartupMessage(
+  chromeFlag: boolean | undefined = getChromeFlagOverride(),
+  env: NodeJS.ProcessEnv = process.env,
+): { text: string; level: 'info' | 'warning' } | null {
+  if (!isChromeExplicitlyOptedIn(chromeFlag, env)) {
+    return null
+  }
+  const denyKind = getPolicyDenyKind('allow_claude_browser_extension')
+  if (denyKind === null) {
+    return null
+  }
+  return {
+    text: CLAUDE_IN_CHROME_POLICY_BLOCKED_MESSAGE,
+    level: denyKind === 'org_denied' ? 'info' : 'warning',
+  }
+}
+
 export function shouldEnableClaudeInChrome(chromeFlag?: boolean): boolean {
+  // Official 2.1.323 _Ut (#2070/#2084): respect allow_claude_browser_extension policy first.
+  if (!isChromePolicyAllowed()) {
+    return false
+  }
   // densable yhn: JKn() before any flag/CFC/default path
   if (!hasOauthValidateAcceptedScope()) {
     logForDebugging(CHROME_DISABLED_NO_VALIDATE_SCOPE)

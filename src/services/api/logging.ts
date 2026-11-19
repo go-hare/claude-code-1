@@ -27,6 +27,11 @@ import {
   formatAssistantResponseForOTel,
   logOTelEvent,
 } from 'src/utils/telemetry/events.js'
+import {
+  buildOTelAttributionAttributes,
+  deriveAttributionFromQuerySource,
+  type OTelAttributionInput,
+} from 'src/utils/telemetry/pluginTelemetry.js'
 import type { ThinkingConfig } from 'src/utils/thinking.js'
 import {
   endLLMRequestSpan,
@@ -644,6 +649,7 @@ export function logAPISuccessAndDuration({
   previousRequestId,
   betas,
   effort,
+  attribution,
 }: {
   model: string
   preNormalizedModel: string
@@ -680,6 +686,8 @@ export function logAPISuccessAndDuration({
   previousRequestId?: string | null
   betas?: string[]
   effort?: string
+  /** Optional explicit attribution (agent/skill/plugin/mcp) for OTel api_request (#2126) */
+  attribution?: OTelAttributionInput
 }): void {
   const gateway = detectGateway({
     headers,
@@ -775,6 +783,12 @@ export function logAPISuccessAndDuration({
       } | null
     }
   ).cache_creation
+  const effectiveAttribution =
+    attribution ?? deriveAttributionFromQuerySource(querySource)
+  const otelAttributionAttrs = buildOTelAttributionAttributes(
+    querySource,
+    effectiveAttribution,
+  )
   void logOTelEvent('api_request', {
     model,
     input_tokens: String(usage.input_tokens),
@@ -793,6 +807,7 @@ export function logAPISuccessAndDuration({
     ...(requestId ? { request_id: requestId } : {}),
     ...(clientRequestId ? { client_request_id: clientRequestId } : {}),
     ...(querySource ? { query_source: querySource } : {}),
+    ...otelAttributionAttrs,
   })
 
   // Official 208: ou("assistant_response", …) after api_request when text present.

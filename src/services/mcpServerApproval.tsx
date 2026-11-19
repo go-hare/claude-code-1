@@ -12,6 +12,7 @@ import { isCurrentProjectTrustLatched } from '../utils/permissions/projectGrants
 import { getSettingsWithAllErrors } from '../utils/settings/allErrors.js';
 import { isLocalSettingsGitTracked } from '../utils/settings/localSettingsGitTracked.js';
 import type { ValidationError } from '../utils/settings/validation.js';
+import { isSafeModeEnabled } from '../utils/safeMode.js';
 import { getMcpConfigsByScope } from './mcp/config.js';
 import { getSessionApprovedMcpServers } from './mcp/mcpSessionApprovedServers.js';
 import { getProjectMcpServerStatus } from './mcp/utils.js';
@@ -35,7 +36,9 @@ export type PendingMcpApprovals = {
 export async function collectPendingProjectMcpApprovals(
   opts?: McpjsonServerApprovalsOpts,
 ): Promise<PendingMcpApprovals> {
-  if (opts?.strictMcpConfig) {
+  // #2046: Safe mode never starts auto-discovered project/plugin MCP servers,
+  // so skip startup project MCP approval prompts (including `claude --bg --safe-mode`).
+  if (opts?.strictMcpConfig || isSafeModeEnabled()) {
     return { pendingServers: [], pluginServerNames: new Set() };
   }
   const { servers } = getMcpConfigsByScope('project');

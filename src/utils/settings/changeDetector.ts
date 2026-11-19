@@ -33,6 +33,7 @@ import {
   hashSettingsContent,
 } from './internalWrites.js'
 import { getManagedSettingsDropInDir } from './managedPath.js'
+import { notifyStrictPluginOnlyPolicyIfChanged } from './pluginOnlyPolicy.js'
 import {
   getHkcuSettings,
   getMdmSettings,
@@ -855,6 +856,9 @@ function startMdmPolling(): void {
 
 function fanOut(source: SettingSource, extra?: SettingsChangeExtra): void {
   resetSettingsCache()
+  // Official 2.1.325 #2332: clear cached skills/agents when managed
+  // strictPluginOnlyCustomization changes in a running session.
+  notifyStrictPluginOnlyPolicyIfChanged()
   try {
     settingsChanged.emit(source, extra)
   } catch (err) {

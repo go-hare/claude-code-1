@@ -11,9 +11,11 @@ import {
   AGENT_TOOL_NAME,
   LEGACY_AGENT_TOOL_NAME,
 } from '@claude-code/builtin-tools/tools/AgentTool/constants.js'
+import { type PluginError, selectInitPluginErrors } from 'src/types/plugin.js'
 import { getAnthropicApiKeyWithSource } from '../auth.js'
 import { getCwd } from '../cwd.js'
 import { getFastModeState } from '../fastMode.js'
+import { getPolicyEnabledPluginIds } from '../plugins/pluginLoader.js'
 import { getSettings_DEPRECATED } from '../settings/settings.js'
 
 // TODO(next-minor): remove this translation once SDK consumers have migrated
@@ -41,8 +43,18 @@ export type SystemInitInputs = {
    * Surfaced on headless stream-json init as `mcp_server_errors`.
    */
   mcpServerErrors?: ReadonlyArray<Record<string, unknown>>
-  /** densable plugin_errors on init (optional). */
+  /** densable plugin_errors on init (optional pre-formatted rows). */
   pluginErrors?: ReadonlyArray<Record<string, unknown>>
+  /**
+   * Official 2.1.323 #2043: raw plugin load errors filtered through
+   * `selectInitPluginErrors(..., { policyEnabledPluginIds, isPersistedTransport })`.
+   */
+  rawPluginErrors?: readonly PluginError[]
+  /**
+   * Official 2.1.323 #2043: true when emitting over a persisted/remote
+   * transport (e.g. `sdkUrl`/RemoteIO) so managed plugin error details redact.
+   */
+  isPersistedTransport?: boolean
   /** densable plugin_warnings on init (optional). */
   pluginWarnings?: ReadonlyArray<Record<string, unknown>>
 }
@@ -93,8 +105,16 @@ export function buildSystemInitMessage(inputs: SystemInitInputs): SDKMessage {
     })),
     uuid: randomUUID(),
   }
-  // densable 2.1.219 #4 — only emit error arrays when non-empty
-  if (inputs.pluginErrors && inputs.pluginErrors.length > 0) {
+  // densable 2.1.219 #4 + Official 2.1.323 #2043 — select & optionally redact plugin_errors
+  if (inputs.rawPluginErrors && inputs.rawPluginErrors.length > 0) {
+    const selected = selectInitPluginErrors(inputs.rawPluginErrors, {
+      policyEnabledPluginIds: getPolicyEnabledPluginIds(),
+      isPersistedTransport: inputs.isPersistedTransport,
+    })
+    if (selected.length > 0) {
+      initMessage.plugin_errors = selected.map(e => ({ ...e }))
+    }
+  } else if (inputs.pluginErrors && inputs.pluginErrors.length > 0) {
     initMessage.plugin_errors = inputs.pluginErrors.map(e => ({ ...e }))
   }
   if (inputs.pluginWarnings && inputs.pluginWarnings.length > 0) {

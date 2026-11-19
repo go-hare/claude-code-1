@@ -27,6 +27,7 @@ import {
   type KeyboardEvent,
   type WheelEvent,
   hitTest,
+  isMultiCharTextEvent,
   useHoverTracked,
   AccessibilityContext,
   useFocusReclaim,
@@ -464,6 +465,7 @@ export function FePress({
 function leftoverXeFrame({
   hostRef,
   onKeyDown,
+  onPaste,
   emptyMessage,
   optionCount,
   g5Prompt,
@@ -473,6 +475,7 @@ function leftoverXeFrame({
 }: {
   hostRef: React.RefObject<DOMElement | null>;
   onKeyDown?: (event: KeyboardEvent) => void;
+  onPaste?: (event: PasteEvent) => void;
   emptyMessage?: React.ReactNode;
   optionCount: number;
   g5Prompt?: string;
@@ -487,7 +490,7 @@ function leftoverXeFrame({
     active: Boolean(g5Prompt && g5CursorActive),
   });
   return (
-    <Box ref={hostRef} flexDirection="column" tabIndex={0} onKeyDown={onKeyDown}>
+    <Box ref={hostRef} flexDirection="column" tabIndex={0} onKeyDown={onKeyDown} onPaste={onPaste}>
       {optionCount === 0 ? emptyMessage != null ? <Text dimColor>{emptyMessage}</Text> : null : children}
       {g5ShowPrompt && g5Prompt ? (
         <Box ref={g5CursorRef}>
@@ -922,6 +925,8 @@ type BaseOption<T> = {
   meta?: Array<string | number | boolean>;
   /** Official 2.1.321 (#1920): unnumbered collapsible row marker (e.g. More models). */
   marker?: string;
+  /** Official 2.1.323 (#2095): optional highlight color for option label (e.g. newest model). */
+  labelColor?: string;
 };
 
 export type OptionWithDescription<T = string> =
@@ -1666,7 +1671,11 @@ export function Select<T>({
         return;
       }
       if (srInputOption) {
-        if ((event.key.length === 1 || event.key === 'space') && !event.ctrl && !event.meta) {
+        if (
+          (event.key.length === 1 || event.key === 'space' || isMultiCharTextEvent(event)) &&
+          !event.ctrl &&
+          !event.meta
+        ) {
           event.preventDefault();
           const ch = event.key === 'space' ? ' ' : event.key;
           const next = leftoverG5Typed + ch;
@@ -1760,11 +1769,23 @@ export function Select<T>({
   };
 
   if (leftoverSrRadio) {
+    // Official 2.1.323 (#2089) `Vo`: accept pasted / dictated text into screen
+    // reader input options instead of dropping PasteEvent.
+    const handleSrPaste = (pasteEvent: PasteEvent): void => {
+      if (isDisabled || !srInputOption) return;
+      const text = pasteEvent.rawEndedWithFocusTail ? pasteEvent.text.replace(/\[[IO]$/, '') : pasteEvent.text;
+      if (text === '') return;
+      pasteEvent.preventDefault();
+      const next = leftoverG5Typed + text;
+      srInputOption.onChange(next);
+      setLeftoverG5Typed(next);
+    };
     return React.createElement(
       leftoverXeFrame,
       {
         hostRef: leftoverHostRef,
         onKeyDown: leftoverBindKeyDown,
+        onPaste: handleSrPaste,
         emptyMessage,
         optionCount: options.length,
         g5Prompt: leftoverG5Text,
@@ -2256,7 +2277,7 @@ export function Select<T>({
                       ? 'success'
                       : data.isFocused
                         ? 'suggestion'
-                        : undefined
+                        : (data.option.labelColor as TextProps['color'])
                 }
               >
                 {!hideIndexes && (
@@ -2443,9 +2464,13 @@ export function Select<T>({
           nameWidth={leftoverNn?.nameWidth}
           factsWidth={leftoverNn?.factsWidth}
         >
-          <Box flexDirection="row" flexShrink={0}>
+          <Box flexDirection="row">
             {!hideIndexes && (
-              <Text dimColor>{(option.marker !== undefined ? option.marker : `${i}.`).padEnd(maxIndexWidth + 2)}</Text>
+              <Box flexShrink={0}>
+                <Text dimColor>
+                  {(option.marker !== undefined ? option.marker : `${i}.`).padEnd(maxIndexWidth + 2)}
+                </Text>
+              </Box>
             )}
             <Text
               dimColor={isOptionDisabled}

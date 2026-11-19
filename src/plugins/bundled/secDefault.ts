@@ -159,21 +159,59 @@ export function getManagedEnabledPluginIds(): Set<string> | null {
 const MANAGED_NOT_NAMED =
   "is enabled by managed settings, but managed settings do not name the source its marketplace is registered from, so it is not treated as the organization's: its hooks module runs in the user tier. It is seated when the marketplace is registered from the source that managed settings declare for it under extraKnownMarketplaces."
 const MANAGED_NOT_IN_PLACE =
-  "is enabled by managed settings, but it is not read in place from a local folder its marketplace is registered from: it loads from a copy (the plugin cache, an archive or a seed directory), or that marketplace has no folder of its own. Nothing yet records which source a copy was taken from, so it is not treated as the organization's: its hooks module runs in the user tier, and does not load where only managed hooks may. It is seated when managed settings declare its marketplace under extraKnownMarketplaces as a local directory and that marketplace lists it by a relative path. A plugin delivered from a remote source gains the tier in a later release."
+  "is enabled by managed settings, but it is not read in place from a local folder its marketplace is registered from and is not listed in managed prependPlugins or appendPlugins for a declared remote marketplace, so it is not treated as the organization's: its hooks module runs in the user tier."
 
-/** densable `P` — seated when read in place from a declared marketplace. */
+/**
+ * Official 2.1.325 #2361: check whether a plugin ID is listed in managed
+ * settings' `prependPlugins` or `appendPlugins`.
+ */
+function isListedInManagedTierOrder(pluginId: string): boolean {
+  const policy = getSettingsForSource('policySettings')
+  if (!policy) return false
+  const target = foldCanonicalPluginId(pluginId)
+  const lists = [policy.prependPlugins, policy.appendPlugins]
+  for (const list of lists) {
+    if (!Array.isArray(list)) continue
+    if (
+      list.some(
+        item =>
+          typeof item === 'string' && foldCanonicalPluginId(item) === target,
+      )
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * densable `P` + Official 2.1.325 #2361 — seated when:
+ * 1) read in place from a local marketplace declared in managed settings, OR
+ * 2) delivered from a remote marketplace declared in managed settings, enabled
+ *    by managed settings, AND listed in managed `prependPlugins` or
+ *    `appendPlugins` (`pluginDigests` is deprecated and ignored).
+ */
 function pluginSeatedFromDeclaredMarketplace(plugin: LoadedPlugin): boolean {
   const marketplace = marketplaceSuffixFromSource(plugin.source)
   const source = plugin.marketplaceSource
   if (
     marketplace === undefined ||
     source === undefined ||
-    plugin.readInPlace !== true ||
     ALLOWED_OFFICIAL_MARKETPLACE_NAMES.has(marketplace.toLowerCase())
   ) {
     return false
   }
-  return isMarketplaceSourceDeclaredInManagedSettings(marketplace, source)
+  if (!isMarketplaceSourceDeclaredInManagedSettings(marketplace, source)) {
+    return false
+  }
+  if (plugin.readInPlace === true) {
+    return true
+  }
+  // Official 2.1.325 #2361: remote marketplace declared in managed settings +
+  // enabled + listed in managed prependPlugins or appendPlugins → org tier.
+  const isRemoteSource =
+    source.source !== 'directory' && source.source !== 'file'
+  return isRemoteSource && isListedInManagedTierOrder(plugin.source)
 }
 
 /**

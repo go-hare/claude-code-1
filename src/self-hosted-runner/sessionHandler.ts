@@ -65,6 +65,7 @@ import {
 import type { HostConfigSnapshot } from './hostConfig.js'
 import {
   assertConfigDirOutsideGlobalTemp,
+  assertRunnerPathNotSymlink,
   claudeConfigFileSuffix,
   resolveChildCwdAndAddDirs,
   resolveUnderSessionRoot,
@@ -188,6 +189,8 @@ export type HandleSessionOpts = {
    * (rootRunner deferredHold) so retire/idle does not release mid-gap.
    */
   onBgResultFollowUpBusy?: (busy: boolean, childExited?: boolean) => void
+  /** Official 2.1.323 #2172 — triggered at max-lifetime deadline to release session as paused. */
+  onMaxLifetimeDeadline?: () => void
   hooksDir?: string
   gitSshRewriteHosts?: string[]
   gitHostRewrites?: Array<[string, string]>
@@ -356,6 +359,8 @@ export type SpawnSessionChildOpts = {
   onSessionStartHookError?: () => void
   /** densable `onChildInit` — system/init or SDKStartup marker latches */
   onInitObserved?: () => void
+  /** Official 2.1.323 #2172 — request paused release when maxLifetimeMs expires. */
+  onMaxLifetimeDeadline?: () => void
   /** stdin write hook for token push (densable A) */
   onStdinReady?: (write: (line: string) => void) => void
   onTokenAck?: (requestId: string) => void
@@ -729,6 +734,7 @@ export async function spawnSessionChild(
       SessionChildSupervisor.SIGKILL_TIMEOUT_DEFAULT_MS,
     onDebug: opts.onDebug,
     onStatus: opts.onStatus,
+    onMaxLifetimeDeadline: opts.onMaxLifetimeDeadline,
   })
   const onAbort = (): void => supervisor.terminate()
   opts.signal.addEventListener('abort', onAbort, { once: true })
@@ -1158,6 +1164,9 @@ export async function handleSession(
     }
     const anthropicProxy = governed ? undefined : opts.anthropicGitProxyBaseUrl
 
+    // Official 2.1.325 #2381: refuse session if sessionDir is a symlink
+    await assertRunnerPathNotSymlink(sessionDir, 'session folder')
+
     const hooksDir = opts.hooksDir ?? process.env.SELF_HOSTED_RUNNER_HOOKS_DIR
     const workspacePaths: string[] = []
     const checkoutHookPath = await resolveHookPath(hooksDir, 'checkout')
@@ -1459,7 +1468,18 @@ export async function handleSession(
           }
 
           // densable built-in aWd path (no checkout hook)
+          // Official 2.1.325 #2381: refuse built-in repository path if it (or
+          // any segment under sessionDir) is a symbolic link. Checkout-hook
+          // checkouts above are intentionally exempt.
           const worktreePath = multiCap ? join(sessionDir, slug) : canon
+          await assertRunnerPathNotSymlink(canon, 'repository path')
+          if (worktreePath !== canon) {
+            await assertRunnerPathNotSymlink(
+              worktreePath,
+              'repository path',
+              sessionDir,
+            )
+          }
           await withCanonicalLock(canonicalLocks, canon, async () => {
             let didSanitize = false
             if (anthropicProxy || (governed && !multiCap)) {
@@ -2265,6 +2285,7 @@ export async function handleSession(
         onInitObserved: () => {
           endInitOk()
         },
+        onMaxLifetimeDeadline: opts.onMaxLifetimeDeadline,
         onStdinReady: write => {
           // densable onChildStdinReady: Qt=Wr; if(ke) Wr(Ze)
           childStdinWrite = write

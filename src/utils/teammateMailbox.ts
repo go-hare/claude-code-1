@@ -2262,3 +2262,183 @@ export function getLastPeerDmSummary(messages: Message[]): string | undefined {
   }
   return undefined
 }
+
+// ── 2.1.323 #2195: Split-pane teammate team-lead cryptographic verification ──
+
+import {
+  createPrivateKey,
+  createPublicKey,
+  generateKeyPairSync,
+  sign as cryptoSign,
+  verify as cryptoVerify,
+} from 'node:crypto'
+
+export const LEAD_MAILBOX_FRESHNESS_WINDOW_MS = 120_000
+
+const TEAM_LEAD_SENDER_NAMES = new Set(['team-lead', 'leader'])
+const spentLeadMessageIds = new Set<string>()
+let leadSessionEpochStartMs = Date.now()
+
+export type SignedTeamLeadMailboxEntry = TeammateMessage & {
+  msg_id?: string
+  lead_sig?: string
+}
+
+export type TeamLeadVerifyContext = {
+  /** Base64-encoded SPKI Ed25519 public key of the active team lead, plus issue timestamp. */
+  leadVerifyKey?: string
+  /** Timestamp (ms) when the current team lead / session started; messages older than window are rejected. */
+  leadIssuedAtMs?: number
+  /** Whether the lead process is still alive (false if teammate outlived its lead). */
+  leadAlive?: boolean
+}
+
+export type MailboxEntryTrust = 'verified' | 'forged' | 'unverifiable'
+
+export function generateTeamLeadKeyPair(): {
+  publicKeyBase64: string
+  privateKeyPem: string
+} {
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519')
+  const spkiDer = publicKey.export({ type: 'spki', format: 'der' }) as Buffer
+  const pkcs8Pem = privateKey.export({
+    type: 'pkcs8',
+    format: 'pem',
+  }) as string
+  return {
+    publicKeyBase64: spkiDer.toString('base64'),
+    privateKeyPem: pkcs8Pem,
+  }
+}
+
+function leadCanonicalPayload(entry: {
+  from: string
+  text: string
+  timestamp: string
+  msg_id: string
+}): Buffer {
+  return Buffer.from(
+    JSON.stringify([entry.msg_id, entry.from, entry.timestamp, entry.text]),
+    'utf8',
+  )
+}
+
+/**
+ * Signs a team-lead mailbox message with the lead's Ed25519 private key.
+ */
+export function signTeamLeadMailboxEntry(
+  entry: TeammateMessage,
+  privateKeyPem: string,
+  msgId: string = crypto.randomUUID(),
+): SignedTeamLeadMailboxEntry {
+  const key = createPrivateKey(privateKeyPem)
+  const sig = cryptoSign(
+    null,
+    leadCanonicalPayload({
+      from: entry.from,
+      text: entry.text,
+      timestamp: entry.timestamp,
+      msg_id: msgId,
+    }),
+    key,
+  )
+  return {
+    ...entry,
+    msg_id: msgId,
+    lead_sig: sig.toString('base64'),
+  }
+}
+
+/**
+ * Resets spent lead message IDs and advances the session epoch on `/clear` or
+ * `/resume` so prior plan approvals cannot be replayed and must be re-sent.
+ */
+export function resetTeamLeadVerificationOnSessionBoundary(
+  nowMs: number = Date.now(),
+): void {
+  spentLeadMessageIds.clear()
+  leadSessionEpochStartMs = nowMs
+}
+
+/**
+ * 2.1.323 #2195 (official `gn` / `P$e`): verifies that a mailbox entry claiming
+ * to be from the team lead is validly signed by `leadVerifyKey`, fresh within
+ * the active session epoch, not replayed, and the team lead has not exited.
+ */
+export function verifyTeamLeadMailboxEntry(
+  entry: SignedTeamLeadMailboxEntry,
+  ctx: TeamLeadVerifyContext,
+): boolean {
+  if (ctx.leadAlive === false) return false
+  if (!ctx.leadVerifyKey || !entry.msg_id || !entry.lead_sig) return false
+  if (!TEAM_LEAD_SENDER_NAMES.has(entry.from.toLowerCase())) return false
+  if (spentLeadMessageIds.has(entry.msg_id)) return false
+
+  const msgTs = Date.parse(entry.timestamp)
+  const minAcceptedTs = Math.max(
+    leadSessionEpochStartMs,
+    ctx.leadIssuedAtMs !== undefined
+      ? ctx.leadIssuedAtMs - LEAD_MAILBOX_FRESHNESS_WINDOW_MS
+      : 0,
+  )
+  if (!Number.isFinite(msgTs) || msgTs < minAcceptedTs) {
+    return false
+  }
+
+  try {
+    const pubKey = createPublicKey({
+      key: Buffer.from(ctx.leadVerifyKey, 'base64'),
+      format: 'der',
+      type: 'spki',
+    })
+    const ok = cryptoVerify(
+      null,
+      leadCanonicalPayload({
+        from: entry.from,
+        text: entry.text,
+        timestamp: entry.timestamp,
+        msg_id: entry.msg_id,
+      }),
+      pubKey,
+      Buffer.from(entry.lead_sig, 'base64'),
+    )
+    if (!ok) return false
+    spentLeadMessageIds.add(entry.msg_id)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Classifies a batch of mailbox entries for a split-pane teammate (`verified`,
+ * `forged`, or `unverifiable`). Structured lead requests (including
+ * `plan_approval_response`) that fail verification are marked `forged` and
+ * refused.
+ */
+export function classifyTeammateMailboxEntries(
+  entries: readonly SignedTeamLeadMailboxEntry[],
+  ctx: TeamLeadVerifyContext,
+): Map<SignedTeamLeadMailboxEntry, MailboxEntryTrust> {
+  const seenInBatch = new Set<string>()
+  const result = new Map<SignedTeamLeadMailboxEntry, MailboxEntryTrust>()
+  for (const entry of entries) {
+    if (
+      entry.msg_id !== undefined &&
+      !seenInBatch.has(entry.msg_id) &&
+      verifyTeamLeadMailboxEntry(entry, ctx)
+    ) {
+      seenInBatch.add(entry.msg_id)
+      result.set(entry, 'verified')
+    } else if (
+      TEAM_LEAD_SENDER_NAMES.has(entry.from.toLowerCase()) ||
+      (ctx.leadVerifyKey !== undefined &&
+        isStructuredProtocolMessage(entry.text))
+    ) {
+      result.set(entry, 'forged')
+    } else {
+      result.set(entry, 'unverifiable')
+    }
+  }
+  return result
+}

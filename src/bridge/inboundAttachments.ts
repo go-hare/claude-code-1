@@ -146,7 +146,7 @@ export type InboundAttachment = z.infer<ReturnType<typeof attachmentSchema>>
 type ResolveFailure = 'download' | 'digest_mismatch' | 'write'
 
 type ResolveOneResult =
-  | { imageBlock: ImageBlockParam }
+  | { imageBlock: ImageBlockParam; path?: string; fileName?: string }
   | { path: string; inlineFellBack?: boolean }
   | { failure: ResolveFailure; writeErrorCode?: string }
 
@@ -530,7 +530,10 @@ async function resolveOne(
     })
     if (imageBlock) {
       debug(`inlined ${att.file_uuid} (${data.length} bytes)`)
-      return { imageBlock }
+      return {
+        imageBlock,
+        ...(wroteFile ? { path: outPath, fileName: att.file_name } : {}),
+      }
     }
     if (!wroteFile) {
       return { failure: 'write', writeErrorCode }
@@ -568,9 +571,16 @@ export type MissingInboundAttachment = {
   reason: 'download' | 'write' | 'no_token' | 'count_cap'
 }
 
+export type InlinedImagePathInfo = {
+  fileName: string
+  path: string
+}
+
 export type ResolvedInboundAttachments = {
   prefix: string
   imageBlocks: ImageBlockParam[]
+  /** Official 2.1.323 #2143: disk paths of inlined images so messages naming the file can locate it. */
+  inlinedImagePaths?: InlinedImagePathInfo[]
   missingFiles?: MissingInboundAttachment[]
 }
 
@@ -659,6 +669,7 @@ export async function resolveInboundAttachments(
 
   const pathRefs: string[] = []
   const imageBlocks: ImageBlockParam[] = []
+  const inlinedImagePaths: InlinedImagePathInfo[] = []
   let inlineFellBack = 0
   let integrityTotal = 0
   let integrityOk = 0
@@ -673,6 +684,12 @@ export async function resolveInboundAttachments(
 
     if ('imageBlock' in result) {
       imageBlocks.push(result.imageBlock)
+      if (result.path && result.fileName) {
+        inlinedImagePaths.push({
+          fileName: result.fileName,
+          path: result.path,
+        })
+      }
       return
     }
     if ('path' in result) {
@@ -746,8 +763,38 @@ export async function resolveInboundAttachments(
   return {
     prefix: prefixParts.length > 0 ? prefixParts.join(' ') + ' ' : '',
     imageBlocks,
+    ...(inlinedImagePaths.length > 0 ? { inlinedImagePaths } : {}),
     ...(missingFiles.length > 0 ? { missingFiles } : {}),
   }
+}
+
+/**
+ * Official 2.1.323 #2143: when a user message in a cloud session names an
+ * attached image file that was inlined as an image block, inject its saved
+ * upload path so Claude does not report the named file as missing.
+ */
+export function buildNamedInlinedImagePathRefs(
+  content: string | Array<ContentBlockParam>,
+  inlinedImagePaths: readonly InlinedImagePathInfo[] | undefined,
+): string {
+  if (!inlinedImagePaths || inlinedImagePaths.length === 0) return ''
+  const combinedText =
+    typeof content === 'string'
+      ? content
+      : content.flatMap(b => (b.type === 'text' ? [b.text] : [])).join('\n')
+  if (!combinedText) return ''
+  const lower = combinedText.toLowerCase()
+  const refs: string[] = []
+  for (const { fileName, path } of inlinedImagePaths) {
+    const base = basename(fileName).toLowerCase()
+    if (
+      (fileName && lower.includes(fileName.toLowerCase())) ||
+      (base && lower.includes(base))
+    ) {
+      refs.push(`@"${path}"`)
+    }
+  }
+  return refs.length > 0 ? refs.join(' ') + ' ' : ''
 }
 
 /**
@@ -825,18 +872,21 @@ export async function resolveAndPrepend(
     allowInline &&
     !(typeof base === 'string' && looksLikeSlashCommandContent(base))
 
-  const { prefix, imageBlocks } = await resolveInboundAttachments(
-    attachments,
-    allowInline,
-    tryInline,
+  const { prefix, imageBlocks, inlinedImagePaths } =
+    await resolveInboundAttachments(attachments, allowInline, tryInline)
+
+  const namedImagePrefix = buildNamedInlinedImagePathRefs(
+    base,
+    inlinedImagePaths,
   )
+  const effectivePrefix = prefix + namedImagePrefix
 
   const isEmpty = typeof base === 'string' ? base === '' : base.length === 0
-  if (imageBlocks.length === 0 && !prefix && isEmpty) {
+  if (imageBlocks.length === 0 && !effectivePrefix && isEmpty) {
     return typeof base === 'string'
       ? '[attachment could not be downloaded]'
       : [{ type: 'text', text: '[attachment could not be downloaded]' }]
   }
 
-  return prependImageBlocks(prependPathRefs(base, prefix), imageBlocks)
+  return prependImageBlocks(prependPathRefs(base, effectivePrefix), imageBlocks)
 }

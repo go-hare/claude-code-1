@@ -17,6 +17,7 @@ import { DL } from '../frameDl.js'
 import { fetchFrameBoot, frameControlPlaneHeaders } from '../mint.js'
 import {
   clearAllProbeBoots,
+  hasSharedProbeToolUseId,
   ip,
   jnt,
   Kgl,
@@ -1152,13 +1153,13 @@ export async function Tu(
   opts?: { readBack?: boolean },
 ): Promise<void> {
   const status = yt(parsed.slug)
-  if (!!context.toolUseId && status?.lastProbeToolUseId === context.toolUseId) {
-    // Same toolUseId already probed. Re-run only when Jr() asked
+  if (hasSharedProbeToolUseId(status, context.toolUseId)) {
+    // Same (or shared parallel) toolUseId already probed. Re-run only when Jr() asked
     // readBack and that probe never landed caps.
     if (
       opts?.readBack !== true ||
-      status.lastCapsReadAt !== undefined ||
-      status.lastCapsReadToolUseId === context.toolUseId
+      status?.lastCapsReadAt !== undefined ||
+      status?.lastCapsReadToolUseId === context.toolUseId
     ) {
       return
     }

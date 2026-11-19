@@ -118,6 +118,14 @@ export const ExtraKnownMarketplaceSchema = lazySchema(() =>
       .describe(
         'Whether to automatically update this marketplace and its installed plugins on startup',
       ),
+    // Official 2.1.325 #2361: deprecated and ignored so existing settings load.
+    pluginDigests: z
+      .record(z.string(), z.array(z.string()).catch([]))
+      .optional()
+      .catch(undefined)
+      .describe(
+        'Deprecated and ignored: settings that hold it still load. A plugin takes the organization tier when managed settings enable it, declare its marketplace with a remote source and list it in prependPlugins or appendPlugins.',
+      ),
   }),
 )
 
@@ -777,6 +785,14 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           "Inbound cross-session peer messages (SendMessage from your other sessions): 'accept' delivers them, 'hold' parks them for your review without letting Claude act, 'refuse' opts this session out. An explicit value always wins. Unset (mode parity): a message auto-delivers only when the sending session's permission-mode class matches yours (bypass↔bypass or prompting↔prompting); a mismatched sender's message is held for your approval; a sender that asserts no class is held only while this session bypasses permission prompts.",
         ),
+      // Official 2.1.325 #2298: teammateMode settings field
+      teammateMode: z
+        .enum(['tmux', 'iterm2', 'in-process', 'auto'])
+        .optional()
+        .catch(undefined)
+        .describe(
+          'How spawned teammates execute (tmux, iterm2, in-process, auto)',
+        ),
       // densable Ktr / vCe — ProposeGoal ask policy
       modelProposedGoals: z
         .enum(['auto', 'alwaysAsk', 'disabled'])
@@ -906,16 +922,17 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'Whether to render the fork built-in status line (model + ctx + 5h/7d limits + cost + cache pill). Toggled with /statusline.',
         ),
-      // densable subagentStatusLine — per-subagent status line for agent panel rows.
-      // Receives row context as JSON on stdin; emits NDJSON {id, content} lines.
+      // Official 2.1.323 (#2210): Deprecated — kept in schema for backward compatibility
+      // so existing settings files still load, but has no runtime effect.
       subagentStatusLine: z
         .object({
           type: z.literal('command'),
           command: z.string(),
         })
         .optional()
+        .catch(undefined)
         .describe(
-          'Custom per-subagent status line shown in the agent panel; receives row context as JSON on stdin',
+          'Deprecated: no longer has any effect. Subagent rows always use the default look.',
         ),
       // Enabled plugins using marketplace-first format
       enabledPlugins: z

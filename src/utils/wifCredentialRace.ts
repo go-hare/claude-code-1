@@ -11,6 +11,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
 } from '../services/analytics/index.js'
 import { AnthropicProfileOauthError } from './anthropicProfile.js'
+import { registerCleanup } from './cleanupRegistry.js'
 import { logForDebugging } from './debug.js'
 import { errorMessage, getErrnoCode } from './errors.js'
 import * as lockfile from './lockfile.js'
@@ -33,6 +34,49 @@ const WIF_LOCK_UPDATE_MS = 5_000
 
 /** Process-global — same CI job siblings share credentials file, not memory. */
 const failedAccessTokens = new Set<string>()
+
+/**
+ * Official 2.1.325 #2289 (`D9s` / `renewsToken`) — short commands like
+ * `claude auth status` disable WIF token renewal so they never acquire/strand
+ * a credentials lock when exiting quickly.
+ */
+let wifTokenRenewalAllowed = true
+
+/** Active WIF lock release callbacks so short commands / exit release locks immediately. */
+const activeWifLockReleases = new Set<() => Promise<void>>()
+let wifExitCleanupRegistered = false
+
+export function declareNoWifTokenRenewal(): void {
+  wifTokenRenewalAllowed = false
+}
+
+export function isWifTokenRenewalAllowed(): boolean {
+  return wifTokenRenewalAllowed
+}
+
+export async function releaseAllHeldWifLocks(): Promise<void> {
+  const releases = Array.from(activeWifLockReleases)
+  activeWifLockReleases.clear()
+  await Promise.allSettled(
+    releases.map(async rel => {
+      try {
+        await rel()
+      } catch (err) {
+        if (!isIgnorableLockRelease(err)) {
+          logForDebugging(`wif: exit lock release failed: ${err}`)
+        }
+      }
+    }),
+  )
+}
+
+function ensureWifExitCleanupRegistered(): void {
+  if (wifExitCleanupRegistered) return
+  wifExitCleanupRegistered = true
+  registerCleanup(async () => {
+    await releaseAllHeldWifLocks()
+  })
+}
 
 export type WifSiblingAdoptionMode = 'always' | 'after-recorded-401'
 export type WifLockMode = keyof typeof WIF_LOCK_RETRIES
@@ -83,6 +127,8 @@ export function recordWifFailedAccessToken(token: string | undefined): void {
 
 export function clearWifCredentialRaceStateForTests(): void {
   failedAccessTokens.clear()
+  wifTokenRenewalAllowed = true
+  activeWifLockReleases.clear()
   lockForTests = undefined
   sleepForTests = undefined
 }
@@ -277,8 +323,38 @@ async function acquireWifCredentialsDirLock(
 }
 
 /**
- * Official `y` / `pe` — serialize refresh on dirname(credentialsPath).
- * fail-closed / retry-limit `d` throw; other fail-open errors skip the lock.
+ * Official 2.1.325 #2343 (`ie`) — lockless read of a still-valid cached WIF
+ * access token from the credentials file before waiting for the directory lock.
+ */
+export async function readValidCachedWifToken(
+  credentialsPath: string,
+  rejectedTokens: ReadonlySet<string> = failedAccessTokens,
+): Promise<WifAccessToken | null> {
+  const parsed = await readCredentialsRecord(credentialsPath)
+  if (!parsed) return null
+  const token = parsed.access_token
+  const rawExpires = parsed.expires_at
+  const expiresAt = rawExpires == null ? null : Number(rawExpires)
+  if (
+    typeof token === 'string' &&
+    token.length > 0 &&
+    !rejectedTokens.has(token) &&
+    (expiresAt === null ||
+      (Number.isFinite(expiresAt) &&
+        nowUnixSec() < expiresAt - WIF_CACHE_BACKGROUND_SEC))
+  ) {
+    return { token, expiresAt }
+  }
+  return null
+}
+
+/**
+ * Official `y` / `pe` + 2.1.325 #2343 (`G`) + #2289 (`D9s`):
+ * 1. When `!opts?.forceRefresh`, read a still-valid cached token from disk
+ *    WITHOUT waiting for the credentials directory lock.
+ * 2. When `declareNoWifTokenRenewal()` is active (e.g. `claude auth status`),
+ *    refuse to acquire the lock / renew the token.
+ * 3. Track active lock release handle so exit/short commands release it cleanly.
  */
 export function wrapWifCredentialsLock(
   provider: WifTokenProvider,
@@ -286,6 +362,26 @@ export function wrapWifCredentialsLock(
   mode: WifLockMode,
 ): WifTokenProvider {
   return async opts => {
+    if (!opts?.forceRefresh) {
+      try {
+        const cached = await readValidCachedWifToken(
+          credentialsPath,
+          failedAccessTokens,
+        )
+        if (cached !== null) {
+          return cached
+        }
+      } catch {
+        // Fall through to locked refresh
+      }
+    }
+    if (!wifTokenRenewalAllowed) {
+      throw new AnthropicProfileOauthError(
+        'The saved sign-in token has expired, was refused or cannot be read. This command does not renew it; a session does.',
+      )
+    }
+
+    ensureWifExitCleanupRegistered()
     const dir = dirname(credentialsPath)
     let release: (() => Promise<void>) | undefined
     try {
@@ -303,12 +399,14 @@ export function wrapWifCredentialsLock(
       )
       return provider(opts)
     }
+    activeWifLockReleases.add(release)
     try {
       logEvent('tengu_wif_user_oauth_lock_acquired', {
         mode: analyticsMode(mode),
       })
       return await provider(opts)
     } finally {
+      activeWifLockReleases.delete(release)
       logEvent('tengu_wif_user_oauth_lock_released', {
         mode: analyticsMode(mode),
       })

@@ -22,6 +22,7 @@ import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/gr
 import { hasUnquotedGlobInText } from '../worktreeGitIsolation.js'
 import { SHELL_KEYWORDS } from './bashParser.js'
 import type { Node } from './parser.js'
+import { AsyncLocalStorage } from 'async_hooks'
 import { PARSE_ABORTED, parseCommandRaw } from './parser.js'
 
 export type Redirect = {
@@ -507,6 +508,214 @@ export async function parseForSecurity(
  * still run on `cmd` — they catch tree-sitter/bash differentials that a
  * successful parse doesn't.
  */
+/**
+ * Official 2.1.323 #2149 (`Oe` / `KUr` / `fha`): CPU-time budget for Bash
+ * permission checks so a slow or busy machine gives the same verdict for the
+ * same command rather than flaking on wall-clock stalls.
+ */
+const BASH_PERMISSION_CPU_BUDGET_MS = 5000
+
+class BashPermissionCpuBudgetExceededError extends Error {
+  constructor() {
+    super('Bash permission check CPU budget exceeded')
+    this.name = 'BashPermissionCpuBudgetExceededError'
+  }
+}
+
+const bashPermissionCpuBudgetAls = new AsyncLocalStorage<{
+  left: number
+  until?: number
+  outOfTime?: boolean
+}>()
+
+export function getBashPermissionCpuTimeMs(): number {
+  const proc = process as NodeJS.Process & {
+    threadCpuUsage?: () => NodeJS.CpuUsage
+  }
+  if (typeof proc.threadCpuUsage === 'function') {
+    const { user, system } = proc.threadCpuUsage()
+    return (user + system) / 1000
+  }
+  if (typeof proc.cpuUsage === 'function') {
+    const { user, system } = proc.cpuUsage()
+    return (user + system) / 1000
+  }
+  return performance.now()
+}
+
+export async function withBashPermissionCpuBudget<T>(
+  fn: () => Promise<T> | T,
+  budgetMs = BASH_PERMISSION_CPU_BUDGET_MS,
+): Promise<{ result?: T; outOfTime: boolean }> {
+  const start = getBashPermissionCpuTimeMs()
+  const store = bashPermissionCpuBudgetAls.getStore() ?? { left: budgetMs }
+  const alreadyTimed = store.until !== undefined
+  store.until ??= start + store.left
+  try {
+    const result = await bashPermissionCpuBudgetAls.run(store, fn)
+    return { result, outOfTime: store.outOfTime === true }
+  } catch (err) {
+    if (err instanceof BashPermissionCpuBudgetExceededError) {
+      return { outOfTime: true }
+    }
+    throw err
+  } finally {
+    if (!alreadyTimed) {
+      store.until = undefined
+      store.left -= getBashPermissionCpuTimeMs() - start
+    }
+  }
+}
+
+function hasAstNodeType(node: Node, targetType: string): boolean {
+  if (node.type === targetType) return true
+  for (const child of node.children) {
+    if (child && hasAstNodeType(child, targetType)) return true
+  }
+  return false
+}
+
+/**
+ * Official 2.1.323 #2150 (`tn`): detect `{var}>file` fd-variable assignment
+ * redirects which mutate a shell variable as a side effect.
+ */
+const FD_VAR_REDIRECT_RE =
+  /(?:^|[\s;|&(])\{([A-Za-z_][A-Za-z0-9_]*)\}(?:>>?|<>|>&|<&|<)/
+
+function findUnquotedFdVarRedirect(cmd: string): string | null {
+  let inSingle = false
+  let inDouble = false
+  let escaped = false
+  let unquoted = ''
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i]!
+    if (escaped) {
+      escaped = false
+      unquoted += ' '
+      continue
+    }
+    if (ch === '\\' && !inSingle) {
+      escaped = true
+      unquoted += ' '
+      continue
+    }
+    if (ch === "'" && !inDouble) {
+      inSingle = !inSingle
+      unquoted += ' '
+      continue
+    }
+    if (ch === '"' && !inSingle) {
+      inDouble = !inDouble
+      unquoted += ' '
+      continue
+    }
+    unquoted += inSingle || inDouble ? ' ' : ch
+  }
+  const m = FD_VAR_REDIRECT_RE.exec(unquoted)
+  return m?.[1] ?? null
+}
+
+/**
+ * Official 2.1.323 #2150: empty backtick substitution (` `` `) outside single
+ * quotes collapses to empty string in bash, joining adjacent words so parsed
+ * command boundaries cannot be trusted.
+ */
+function hasUnquotedEmptyBackticks(cmd: string): boolean {
+  let inSingle = false
+  let inDouble = false
+  for (let i = 0; i < cmd.length; i++) {
+    const ch = cmd[i]!
+    if (inSingle) {
+      if (ch === "'") inSingle = false
+      continue
+    }
+    if (inDouble) {
+      if (ch === '\\' && i + 1 < cmd.length) {
+        const next = cmd[i + 1]!
+        if (
+          next === '"' ||
+          next === '\\' ||
+          next === '$' ||
+          next === '`' ||
+          next === '\n'
+        ) {
+          i++
+          continue
+        }
+      }
+      if (ch === '"') {
+        inDouble = false
+        continue
+      }
+      if (ch === '`' && cmd[i + 1] === '`') {
+        return true
+      }
+      continue
+    }
+    if (ch === '\\') {
+      i++
+      continue
+    }
+    if (ch === "'") {
+      inSingle = true
+      continue
+    }
+    if (ch === '"') {
+      inDouble = true
+      continue
+    }
+    if (ch === '`' && cmd[i + 1] === '`') {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Official 2.1.323 #2016: verify the parser consumed every non-separator byte
+ * between top-level statements and after the final statement so no part of a
+ * command can be silently skipped by the permission check.
+ */
+function checkTopLevelParserCoverage(cmd: string, root: Node): string | null {
+  if (root.type !== 'program' || root.text !== cmd) return null
+  const buf = Buffer.from(cmd, 'utf8')
+  const isGapByte = (b: number): boolean =>
+    b === 32 || b === 9 || b === 10 || b === 13 || b === 59 || b === 38
+  const skipGap = (start: number, end: number): number => {
+    let i = start
+    while (i < end) {
+      const b = buf[i]
+      if (b !== undefined && isGapByte(b)) {
+        i++
+      } else if (
+        b === 92 &&
+        (buf[i + 1] === 10 || (buf[i + 1] === 13 && buf[i + 2] === 10))
+      ) {
+        i += buf[i + 1] === 13 ? 3 : 2
+      } else {
+        break
+      }
+    }
+    return i
+  }
+  const spans = root.children
+    .filter((c): c is Node => c !== null && c !== undefined)
+    .map(c => [c.startIndex, c.endIndex] as const)
+    .sort((a, b) => a[0] - b[0])
+  if (spans.length === 0) return null
+  let cursor = 0
+  for (const [start, end] of spans) {
+    if (skipGap(cursor, start) < start) {
+      return 'Parser skipped input between top-level statements'
+    }
+    if (end > cursor) cursor = end
+  }
+  if (skipGap(cursor, buf.length) < buf.length) {
+    return 'Parser did not consume trailing input'
+  }
+  return null
+}
+
 let currentPlainUnquotedHeredocs = false
 
 export function parseForSecurityFromAst(
@@ -591,6 +800,52 @@ export function parseForSecurityFromAst(
       kind: 'too-complex',
       reason: 'Parser aborted (timeout, resource limit, or over-length)',
       nodeType: 'PARSE_ABORT',
+    }
+  }
+
+  // Official 2.1.323 #2150: reject backtick differential sentinel nodes and
+  // unquoted empty backticks (` `` `) where bash joins surrounding words.
+  for (const sentinel of [
+    'backtick_body_empty',
+    'backtick_body_overrun',
+    'backtick_escape_unsupported',
+  ]) {
+    if (hasAstNodeType(root, sentinel)) {
+      return {
+        kind: 'too-complex',
+        reason:
+          sentinel === 'backtick_body_empty'
+            ? 'empty backtick substitution — bash joins the surrounding words, so the parsed command boundaries cannot be trusted'
+            : `backtick substitution scan could not be trusted (${sentinel}) — the parsed bytes may differ from what bash executes`,
+        differential: true,
+      }
+    }
+  }
+  if (hasUnquotedEmptyBackticks(cmd)) {
+    return {
+      kind: 'too-complex',
+      reason:
+        'empty backtick substitution — bash joins the surrounding words, so the parsed command boundaries cannot be trusted',
+      differential: true,
+    }
+  }
+
+  // Official 2.1.323 #2016: ensure the parser did not skip bytes between
+  // top-level statements or leave trailing input unparsed.
+  const gapReason = checkTopLevelParserCoverage(cmd, root)
+  if (gapReason !== null) {
+    return {
+      kind: 'too-complex',
+      reason: gapReason,
+    }
+  }
+
+  // Official 2.1.323 #2150: reject `{var}>file` fd-variable assignment redirects.
+  const fdVar = findUnquotedFdVarRedirect(cmd)
+  if (fdVar !== null) {
+    return {
+      kind: 'too-complex',
+      reason: `Redirect uses {${fdVar}}> fd-variable assignment — modifies shell variable as side effect`,
     }
   }
 

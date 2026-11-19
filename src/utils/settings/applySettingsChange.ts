@@ -26,6 +26,7 @@ import { collectUngatedAdditionalDirectories } from '../permissions/projectGrant
 import { rewriteFlagSettingsTrustedNetworkDirectories } from '../permissions/trustedNetworkDirectories.js'
 import type { SettingsChangeExtra } from './changeDetector.js'
 import type { SettingSource } from './constants.js'
+import { notifyStrictPluginOnlyPolicyIfChanged } from './pluginOnlyPolicy.js'
 import { getInitialSettings, getSettingsForSource } from './settings.js'
 
 /**
@@ -183,6 +184,7 @@ export function applySettingsChange(
 
   const updatedRules = loadAllPermissionRulesFromDisk()
   updateHooksConfigSnapshot()
+  notifyStrictPluginOnlyPolicyIfChanged()
 
   setAppState(prev => {
     let newContext = syncPermissionRulesFromDisk(

@@ -58,7 +58,15 @@ import {
   writeGatewayMark,
   clearGatewayMark,
 } from './bgWorker.js'
-import { isBgGatewayMarkEnabled } from './bgHostManagedEnv.js'
+import {
+  applyWorkerCredentialSwitchCleanup,
+  isBgGatewayMarkEnabled,
+} from './bgHostManagedEnv.js'
+import {
+  BG_PROFILE_MIN_DAEMON_CAP,
+  reconcileBgJobCredentialAnchor,
+  verifyRuntimeBgCredentialAnchor,
+} from './bgSessionCredential.js'
 import {
   type BgJobState,
   readBgJobState,
@@ -1181,6 +1189,7 @@ async function handleControlRequest(
       op: 'ping',
       version: MACRO.VERSION,
       proto: PROTO_VERSION,
+      profileAnchorCap: BG_PROFILE_MIN_DAEMON_CAP,
     }
   }
   if (op === 'nudge') {
@@ -1260,6 +1269,51 @@ async function handleControlRequest(
       const d = req.d as DispatchRequest
       if (!d || !d.short || !d.sessionId) {
         return { ok: false, error: 'missing dispatch fields' }
+      }
+      // Official 2.1.323 #1993/#1994/#1995/#2000: reconcile persisted credential
+      // anchor before starting or resuming a background session so it never
+      // drifts across sign-ins or named Anthropic profiles.
+      if (d.launch?.mode !== 'exec') {
+        const credReq = {
+          short: d.short,
+          source: d.source,
+          launch: d.launch,
+          env: { ...(d.env ?? {}) },
+        }
+        const credCheck = await reconcileBgJobCredentialAnchor(credReq)
+        if (credCheck.refusal) {
+          return {
+            ok: false,
+            error: credCheck.refusal,
+            code: 'EAUTHANCHOR',
+            reason: 'credential-anchor-refused',
+          }
+        }
+        const effectiveWorkerEnv: Record<string, string | undefined> = {
+          ...process.env,
+          ...credReq.env,
+        }
+        applyWorkerCredentialSwitchCleanup(
+          effectiveWorkerEnv,
+          process.env,
+          credReq.env,
+        )
+        const runtimeCredErr = verifyRuntimeBgCredentialAnchor(
+          effectiveWorkerEnv,
+          undefined,
+          d.source === 'respawn' || d.launch?.mode === 'resume',
+        )
+        if (runtimeCredErr) {
+          return {
+            ok: false,
+            error: runtimeCredErr,
+            code: 'EAUTHANCHOR',
+            reason: 'credential-anchor-refused',
+          }
+        }
+        if (Object.keys(credReq.env).length > 0) {
+          d.env = credReq.env
+        }
       }
       // Official #49: forceUnresponsive kills an alive unresponsive worker before respawn
       if (d.forceUnresponsive) {
@@ -1423,6 +1477,26 @@ async function handleControlRequest(
           if (state?.queuedPrompt !== undefined) {
             await clearQueuedPrompt(d.short)
           }
+        }
+        // Official 2.1.323 #2127: clear stale earlier-turn blocked/needs/detail
+        // status when a background session is resumed or respawned.
+        const currentState = readBgJobState(d.short)
+        if (
+          currentState &&
+          (currentState.tempo === 'blocked' ||
+            currentState.needs !== undefined ||
+            currentState.block !== undefined ||
+            currentState.state !== 'working')
+        ) {
+          writeBgJobState(d.short, {
+            ...currentState,
+            state: 'working',
+            tempo: 'active',
+            needs: undefined,
+            block: undefined,
+            detail: 'starting\u2026',
+            updatedAt: new Date().toISOString(),
+          })
         }
       }
       dispatch(d)

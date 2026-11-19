@@ -320,10 +320,25 @@ export type WindowsPathLookupOptions = {
   realpathFn?: (p: string) => string
 }
 
+const UNREADABLE_ANCESTOR_CODES = new Set([
+  'EACCES',
+  'EPERM',
+  'ENOTDIR',
+  'ELOOP',
+  'ENAMETOOLONG',
+  'EINVAL',
+])
+
+const WINDOWS_PATH_PROBE_STALL_MS = 250
+
 type WindowsPathCache = {
   key: string
   /** lowercased dir -> lowercased file name -> actual file name */
   dirEntries: Map<string, Map<string, string>>
+  /** Official 2.1.325 #2337: cached unreadable/denied/stalled ancestor folders */
+  blockedAncestors: Set<string>
+  /** Official 2.1.325 #2337 (`yQa`): executables whose lookup could not exhaustively scan PATH */
+  namesMaybeMissed: Set<string>
   dirs: string[]
   exts: string[]
 }
@@ -332,6 +347,126 @@ let windowsPathCache: WindowsPathCache | null = null
 
 export function clearWindowsPathCacheForTesting(): void {
   windowsPathCache = null
+}
+
+/**
+ * Official 2.1.325 #2337: return ancestor directories from drive root down to
+ * `dir` (inclusive) so an unreadable ancestor (e.g. `EACCES`/`EPERM`) short-
+ * circuits every deeper PATH entry under it without repeatedly stalling.
+ */
+function getWindowsDirAncestors(dir: string): string[] {
+  const norm = pathWin32.normalize(dir).replace(/[\\/]+$/, '')
+  const parsed = pathWin32.parse(norm)
+  const root = parsed.root.replace(/[\\/]+$/, '')
+  if (!root || norm.toLowerCase() === root.toLowerCase()) {
+    return [norm]
+  }
+  const rest = norm.slice(root.length).replace(/^[\\/]+/, '')
+  if (!rest) return [norm]
+  const segments = rest.split(/[\\/]+/).filter(Boolean)
+  const ancestors: string[] = []
+  let acc = `${root}\\`
+  for (const seg of segments) {
+    acc = pathWin32.join(acc, seg)
+    ancestors.push(acc)
+  }
+  return ancestors
+}
+
+function getErrCode(err: unknown): string | undefined {
+  if (typeof err === 'object' && err !== null && 'code' in err) {
+    const code = (err as { code?: unknown }).code
+    return typeof code === 'string' ? code : undefined
+  }
+  return undefined
+}
+
+/**
+ * Official 2.1.325 #2337 (`X` + `GX`): walk ancestor directories of a Windows
+ * PATH entry before listing it. Returns:
+ * - `'ok'` if every ancestor is traversable (or missing — handled cleanly)
+ * - `'blocked'` if an ancestor cannot be opened (`EACCES`, `EPERM`, etc.) or
+ *   stalled beyond threshold; caches the failing ancestor so sibling/child
+ *   PATH entries short-circuit immediately in O(1).
+ */
+function checkWindowsPathAncestors(
+  dir: string,
+  cache: WindowsPathCache,
+  lstatImpl: (p: string) => {
+    isSymbolicLink: () => boolean
+    isDirectory: () => boolean
+  },
+  realpathImpl: (p: string) => string,
+): 'ok' | 'missing' | 'blocked' {
+  const ancestors = getWindowsDirAncestors(dir)
+  for (const anc of ancestors) {
+    const ancKey = anc.toLowerCase()
+    if (cache.blockedAncestors.has(ancKey)) {
+      return 'blocked'
+    }
+    const startNs = process.hrtime.bigint()
+    try {
+      const st = lstatImpl(anc)
+      const elapsedMs = Number(process.hrtime.bigint() - startNs) / 1e6
+      if (elapsedMs > WINDOWS_PATH_PROBE_STALL_MS) {
+        cache.blockedAncestors.add(ancKey)
+        return 'blocked'
+      }
+      if (st.isSymbolicLink()) {
+        const resolved = realpathImpl(anc)
+        if (WINDOWS_UNC_OR_NET_RE.test(resolved)) {
+          cache.blockedAncestors.add(ancKey)
+          return 'blocked'
+        }
+      } else if (!st.isDirectory()) {
+        cache.blockedAncestors.add(ancKey)
+        return 'blocked'
+      }
+    } catch (err) {
+      const code = getErrCode(err)
+      const elapsedMs = Number(process.hrtime.bigint() - startNs) / 1e6
+      if (code === 'ENOENT') {
+        if (elapsedMs > WINDOWS_PATH_PROBE_STALL_MS) {
+          cache.blockedAncestors.add(ancKey)
+          return 'blocked'
+        }
+        return 'missing'
+      }
+      if (
+        (code !== undefined && UNREADABLE_ANCESTOR_CODES.has(code)) ||
+        elapsedMs > WINDOWS_PATH_PROBE_STALL_MS
+      ) {
+        cache.blockedAncestors.add(ancKey)
+        return 'blocked'
+      }
+      return 'blocked'
+    }
+  }
+  return 'ok'
+}
+
+/**
+ * Official 2.1.325 #2337 (`yQa`): whether `where.exe` fallback is still needed
+ * after in-process PATH resolution returned `null`. Returning `false` avoids
+ * spawning blocking `where.exe` (~1s stall when PATH has unreadable folders).
+ */
+export function shouldFallbackToWhereExe(
+  executable: string,
+  rawPath: string | undefined = process.env.PATH ?? process.env.Path,
+): boolean {
+  if (!rawPath) return true
+  if (windowsPathCache?.namesMaybeMissed.has(executable.toLowerCase())) {
+    return true
+  }
+  const dirs = parseWindowsPathDirs(rawPath)
+  if (dirs.length === 0) return true
+  // Quoted semicolons or relative/UNC entries skipped by parseWindowsPathDirs
+  let inQuotes = false
+  for (const ch of rawPath) {
+    if (ch === '"') inQuotes = !inQuotes
+    else if (ch === ';' && inQuotes) return true
+  }
+  return false
 }
 
 function getEffectiveWindowsPathAndExt(opts?: WindowsPathLookupOptions): {
@@ -373,12 +508,67 @@ function parseWindowsPathDirs(rawPath: string): string[] {
   return out
 }
 
+const WINDOWS_DEFAULT_PATHEXT = ['.com', '.exe', '.bat', '.cmd'] as const
+
 function parseWindowsPathExts(rawPathExt: string): string[] {
-  const exts = rawPathExt
-    .split(';')
-    .map(e => e.trim().toLowerCase())
-    .filter(e => e.startsWith('.'))
-  return exts.length > 0 ? exts : ['.com', '.exe', '.bat', '.cmd']
+  const seen = new Set<string>()
+  const exts: string[] = []
+  for (const part of rawPathExt.split(';')) {
+    const normalized = part.trim().toLowerCase()
+    if (normalized.startsWith('.') && !seen.has(normalized)) {
+      seen.add(normalized)
+      exts.push(normalized)
+    }
+  }
+  return exts.length > 0 ? exts : [...WINDOWS_DEFAULT_PATHEXT]
+}
+
+/**
+ * 2.1.323 #2136 (SEA `Dqo` / `z` @278312493 & `xn` @286291662):
+ * On Windows, `where.exe` returns matching files in directory listing order
+ * (so `git.bat` / `git.cmd` can appear before `git.exe` in the same PATH
+ * folder). Reorder contiguous same-directory candidates by `PATHEXT` priority
+ * (preferring `.com` / `.exe` over `.bat` / `.cmd` in the same folder, matching
+ * `cmd.exe`), while preserving PATH directory search order across folders.
+ */
+export function orderWindowsSameDirCandidatesByPathExt(
+  candidates: readonly string[],
+  rawPathExt: string = process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD',
+): string[] {
+  if (candidates.length <= 1) return [...candidates]
+  const exts = parseWindowsPathExts(rawPathExt)
+  const extRank = (filePath: string): number => {
+    const ext = pathWin32.extname(filePath).toLowerCase()
+    const idx = exts.indexOf(ext)
+    if (idx !== -1) return idx
+    // Fallback if PATHEXT was customized: still prefer .com/.exe over .bat/.cmd
+    const defaultIdx = WINDOWS_DEFAULT_PATHEXT.indexOf(
+      ext as (typeof WINDOWS_DEFAULT_PATHEXT)[number],
+    )
+    return defaultIdx !== -1 ? exts.length + defaultIdx : exts.length + 100
+  }
+
+  // Group candidates by directory (preserving first-seen directory order)
+  const dirOrder: string[] = []
+  const byDir = new Map<string, string[]>()
+  for (const c of candidates) {
+    const dirKey = pathWin32.dirname(c).toLowerCase()
+    let group = byDir.get(dirKey)
+    if (!group) {
+      group = []
+      byDir.set(dirKey, group)
+      dirOrder.push(dirKey)
+    }
+    group.push(c)
+  }
+
+  const ordered: string[] = []
+  for (const dirKey of dirOrder) {
+    const group = byDir.get(dirKey)!
+    group.sort((a, b) => extRank(a) - extRank(b))
+    ordered.push(...group)
+  }
+  return ordered
 }
 
 export function resolveWindowsExecutableOnPath(
@@ -402,6 +592,8 @@ export function resolveWindowsExecutableOnPath(
     cache = {
       key: cacheKey,
       dirEntries: new Map(),
+      blockedAncestors: new Set(),
+      namesMaybeMissed: new Set(),
       dirs: parseWindowsPathDirs(rawPath),
       exts: parseWindowsPathExts(rawPathExt),
     }
@@ -425,16 +617,29 @@ export function resolveWindowsExecutableOnPath(
     const dirKey = dir.toLowerCase()
     let entries = cache.dirEntries.get(dirKey)
     if (entries === undefined) {
+      // Official 2.1.325 #2337: short-circuit PATH entries sitting under an
+      // unreadable/inaccessible ancestor folder before calling readdirSync.
+      const ancVerdict = checkWindowsPathAncestors(
+        dir,
+        cache,
+        lstatImpl,
+        realpathImpl,
+      )
       entries = new Map()
-      try {
-        for (const name of readdirImpl(dir)) {
-          const lower = name.toLowerCase()
-          if (!entries.has(lower)) {
-            entries.set(lower, name)
+      if (ancVerdict === 'ok') {
+        try {
+          for (const name of readdirImpl(dir)) {
+            const lower = name.toLowerCase()
+            if (!entries.has(lower)) {
+              entries.set(lower, name)
+            }
+          }
+        } catch (err) {
+          const code = getErrCode(err)
+          if (code !== undefined && UNREADABLE_ANCESTOR_CODES.has(code)) {
+            cache.blockedAncestors.add(dirKey)
           }
         }
-      } catch {
-        // Unreadable or absent PATH directory — cache as empty
       }
       cache.dirEntries.set(dirKey, entries)
     }
@@ -487,8 +692,10 @@ function findExecutableWithDeps(
     }
   }
 
-  // Official #1925 & #1944: try in-process PATH+PATHEXT lookup when using
-  // default deps (no spawned where.exe helper process).
+  // Official #1925, #1944 & 2.1.325 #2337: try in-process PATH+PATHEXT lookup
+  // when using default deps. When the in-process scan covered PATH cleanly
+  // (no `shouldFallbackToWhereExe`), return null directly without spawning
+  // blocking `where.exe`, avoiding ~1s startup stalls on unreadable PATH dirs.
   if (deps === DEFAULT_DEPS) {
     const fastHit = resolveWindowsExecutableOnPath(executable, {
       cwd: deps.cwdFn(),
@@ -497,6 +704,9 @@ function findExecutableWithDeps(
       return executable === 'git'
         ? resolveGitForWindowsDirectExe(fastHit, deps)
         : fastHit
+    }
+    if (!shouldFallbackToWhereExe(executable)) {
+      return null
     }
   }
 
@@ -510,10 +720,15 @@ function findExecutableWithDeps(
     //
     // Use path.win32.* so `where.exe` backslash paths keep Windows semantics
     // on any host OS.
-    const paths = result
-      .split(/\r?\n/)
-      .map(p => p.trim())
-      .filter(Boolean)
+    // 2.1.323 #2136: `where.exe` lists directory entries alphabetically, which
+    // puts `git.bat`/`git.cmd` before `git.exe` in the same folder. Order
+    // same-folder hits by PATHEXT so `.exe` beats `.cmd`/`.bat` just as cmd.exe does.
+    const paths = orderWindowsSameDirCandidatesByPathExt(
+      result
+        .split(/\r?\n/)
+        .map(p => p.trim())
+        .filter(Boolean),
+    )
     const cwd = deps.cwdFn()
 
     for (const candidatePath of paths) {

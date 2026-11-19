@@ -83,7 +83,11 @@ import {
   checkMockRateLimitError,
   isMockRateLimitError,
 } from '../rateLimitMocking.js'
-import { REPEATED_529_ERROR_MESSAGE } from './errors.js'
+import {
+  isBedrockModelAccessRefusalError,
+  NAME_CONSTRAINT_CERT_ERROR_CODES,
+  REPEATED_529_ERROR_MESSAGE,
+} from './errors.js'
 import { extractConnectionErrorDetails } from './errorUtils.js'
 import { STREAM_NO_RESPONSE_RETRY_CAP } from '../../utils/firstByteWatchdog.js'
 
@@ -444,6 +448,37 @@ export function resolveAccessFallbackModel(options: {
   return undefined
 }
 
+/**
+ * Official 2.1.325 #2341 (`ir(gi, r.signal, Q9)`): race an in-flight host auth
+ * token renewal against `signal` so stopping `claude-desktop-3p` aborts the
+ * renewal immediately instead of hanging on "Stopping" until timeout.
+ */
+export async function raceHostAuthRefreshWithSignal<T>(
+  promise: Promise<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  if (!signal) return promise
+  if (signal.aborted) {
+    throw new APIUserAbortError()
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      reject(new APIUserAbortError())
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      value => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      err => {
+        signal.removeEventListener('abort', onAbort)
+        reject(err)
+      },
+    )
+  })
+}
+
 export async function* withRetry<T>(
   getClient: () => Promise<Anthropic>,
   operation: (
@@ -476,6 +511,9 @@ export async function* withRetry<T>(
   let oauth401ForcedRefreshDone = false
   // Official 2.1.319 (#1784): attempt TLS served-chain cert repair at most once
   let tlsCertRepairAttempted = false
+  // Official 2.1.323 (#2005): allow at most one Desktop host credential renewal
+  // on 403 (expired gateway token) per request.
+  let hostAuth403Retried = false
   // densable `Fe=new Set` @184899103 — each onError retry token fires once.
   const consumedOnErrorRetryTokens = new Set<string>()
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
@@ -554,15 +592,23 @@ export async function* withRetry<T>(
       if (
         client === null ||
         (lastError instanceof APIError && lastError.status === 401) ||
+        (lastError instanceof APIError &&
+          lastError.status === 403 &&
+          isHostAuthTokenRefreshAvailable() &&
+          !hostAuth403Retried) ||
         isOAuthTokenRevokedError(lastError) ||
         isBedrockAuthError(lastError) ||
         isVertexAuthError(lastError) ||
         isStaleConnection ||
         mtlsReloadAttempted
       ) {
-        // On 401 "token expired" or 403 "token revoked", force a token refresh
+        // On 401 "token expired" or 403 "token revoked" (or Desktop host 403), force a token refresh
         if (
           (lastError instanceof APIError && lastError.status === 401) ||
+          (lastError instanceof APIError &&
+            lastError.status === 403 &&
+            isHostAuthTokenRefreshAvailable() &&
+            !hostAuth403Retried) ||
           isOAuthTokenRevokedError(lastError)
         ) {
           // densable lt / invalidateWIFToken when profile WIF drives the request
@@ -637,13 +683,31 @@ export async function* withRetry<T>(
               }
             } else if (
               lastError instanceof APIError &&
-              lastError.status === 401 &&
+              (lastError.status === 401 || lastError.status === 403) &&
               isHostAuthTokenRefreshAvailable()
             ) {
-              // Official lfa / host_auth_401_recovery — desktop host-creds path.
-              const hostResult = await tryHostAuth401Recovery()
-              if (hostResult === 'failed' || hostResult === 'exhausted') {
-                throw lastError
+              // Official lfa / host_auth_401_recovery + 2.1.323 (#2005) + 2.1.325 (#2341):
+              // On 401 or 403 (organization gateway answering expired token
+              // with 403 in Claude Desktop), ask Desktop for a fresh token and retry.
+              // Race against options.signal so stopping claude-desktop-3p aborts
+              // an in-flight token renewal immediately instead of hanging on "Stopping".
+              const is403 = lastError.status === 403
+              if (is403) {
+                hostAuth403Retried = true
+              }
+              if (options.signal?.aborted) {
+                throw new APIUserAbortError()
+              }
+              const hostResult = await raceHostAuthRefreshWithSignal(
+                tryHostAuth401Recovery(options.signal),
+                options.signal,
+              )
+              if (
+                hostResult === 'failed' ||
+                hostResult === 'exhausted' ||
+                (is403 && hostResult !== 'updated')
+              ) {
+                throw new CannotRetryError(lastError, retryContext)
               }
             }
           }
@@ -656,6 +720,7 @@ export async function* withRetry<T>(
     } catch (error) {
       // densable `if (x instanceof nd) throw x`
       if (error instanceof CannotRetryError) throw error
+      if (error instanceof APIUserAbortError) throw error
 
       lastError = error
 
@@ -906,6 +971,15 @@ export async function* withRetry<T>(
             )
           }
         }
+      }
+
+      // Official 2.1.323 (#2005): Do not retry Desktop host 403 a second time
+      if (
+        error instanceof APIError &&
+        error.status === 403 &&
+        hostAuth403Retried
+      ) {
+        throw new CannotRetryError(error, retryContext)
       }
 
       // Only retry if the error indicates we should
@@ -1232,15 +1306,36 @@ function parseOptionalNonNegativeIntEnv(name: string): number | undefined {
   return !Number.isNaN(parsed) && parsed >= 0 ? parsed : undefined
 }
 
+function parseBoundedIntEnv(
+  name: string,
+  min: number,
+  max: number,
+): number | undefined {
+  const raw = process.env[name]
+  if (raw === undefined || raw === '') return undefined
+  if (!/^\d+$/.test(raw)) return undefined
+  const parsed = parseInt(raw, 10)
+  if (Number.isNaN(parsed) || parsed < min || parsed > max) return undefined
+  return parsed
+}
+
+export const OVERLOADED_RETRY_MAX_DELAY_MIN_MS = 32000
+/** Official 2.1.323 (#2202): raised max of CLAUDE_CODE_OVERLOADED_RETRY_MAX_DELAY_MS from 64000 to 300000. */
+export const OVERLOADED_RETRY_MAX_DELAY_MAX_MS = 300000
+
 export function getOverloadedRetryBaseDelayMs(): number | undefined {
-  return parseOptionalNonNegativeIntEnv(
+  return parseBoundedIntEnv(
     'CLAUDE_CODE_OVERLOADED_RETRY_BASE_DELAY_MS',
+    500,
+    32000,
   )
 }
 
 export function getOverloadedRetryMaxDelayMs(): number | undefined {
-  return parseOptionalNonNegativeIntEnv(
+  return parseBoundedIntEnv(
     'CLAUDE_CODE_OVERLOADED_RETRY_MAX_DELAY_MS',
+    OVERLOADED_RETRY_MAX_DELAY_MIN_MS,
+    OVERLOADED_RETRY_MAX_DELAY_MAX_MS,
   )
 }
 
@@ -1464,6 +1559,11 @@ function isBedrockAuthError(error: unknown): boolean {
     isAnthropicAwsProviderEnabled() ||
     isMantleProviderEnabled()
   ) {
+    // Official 2.1.323 (#2006): Bedrock 403 model-access refusal is not a
+    // stale-credential error; do not refresh AWS credentials or retry it.
+    if (isBedrockModelAccessRefusalError(error)) {
+      return false
+    }
     // AWS libs reject without an API call if .aws holds a past Expiration value
     // otherwise, API calls that receive expired tokens give generic 403
     // "The security token included in the request is invalid"
@@ -1644,6 +1744,33 @@ function isNonRetryableCreditsRequired(error: APIError): boolean {
 }
 
 /**
+ * Official 2.1.323 (#2107): When a user explicitly chose to wait in the usage
+ * limit menu and the retry request after the wait is still refused (429 with
+ * a later reset window), do not silently advance to a later reset — signal
+ * callers to reopen the usage limit menu instead.
+ */
+export function shouldOpenUsageLimitMenuAfterWaitRefusal(
+  error: unknown,
+  opts: {
+    choseWaitInMenu: boolean
+    previousResetsAt?: number
+    nextResetsAt?: number
+  },
+): boolean {
+  if (!opts.choseWaitInMenu) return false
+  if (!(error instanceof APIError) || error.status !== 429) return false
+  if (
+    opts.previousResetsAt !== undefined &&
+    opts.nextResetsAt !== undefined &&
+    opts.nextResetsAt > opts.previousResetsAt
+  ) {
+    return true
+  }
+  const status = error.headers?.get('anthropic-ratelimit-unified-status')
+  return status === 'rejected'
+}
+
+/**
  * densable 2.1.239 Cew. Exported so #44 En_ (400 policy_blocked +
  * x-should-retry:false) can be locked without inventing a second retry gate.
  */
@@ -1739,7 +1866,12 @@ export function shouldRetry(error: APIError): boolean {
   ) {
     return true
   }
-  if (isHostAuthTokenRefreshAvailable() && error.status === 401) {
+  // Official 2.1.323 (#2005): Claude Desktop host credential refresh covers
+  // both 401 and 403 (when an organization's gateway answers an expired token with 403).
+  if (
+    isHostAuthTokenRefreshAvailable() &&
+    (error.status === 401 || error.status === 403)
+  ) {
     return true
   }
 
@@ -1766,11 +1898,17 @@ export function shouldRetry(error: APIError): boolean {
   }
 
   if (error instanceof APIConnectionError) {
+    const connCode = extractConnectionErrorDetails(error)?.code
     // densable 2.1.239 Cew: BedrockUnexpectedContentType is not retried
     // (retrying would issue a second Bedrock request / double bill).
+    if (connCode === 'BedrockUnexpectedContentType') {
+      return false
+    }
+    // Official 2.1.323 (#2072): certificate name-constraint errors never succeed
+    // on retry — fail fast instead of retrying for minutes.
     if (
-      extractConnectionErrorDetails(error)?.code ===
-      'BedrockUnexpectedContentType'
+      connCode !== undefined &&
+      NAME_CONSTRAINT_CERT_ERROR_CODES.has(connCode)
     ) {
       return false
     }

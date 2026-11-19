@@ -67,6 +67,18 @@ export class KeyboardEvent extends TerminalEvent {
   }
 }
 
+/**
+ * Official 2.1.323 (#2089) `I0t` — true when a KeyboardEvent carries multi-char
+ * text (dictated text, pasted text, or surrogate-pair/ZWJ emoji) rather than a
+ * named special key like "enter" or "escape".
+ */
+export function isMultiCharTextEvent(event: {
+  key: string
+  name: string
+}): boolean {
+  return event.key.length > 1 && event.name !== event.key
+}
+
 /** Charset of pure SGR residue: `[]<\d;Mm` + ESC (0x1b). Built without
  * control-char regex literals so biome noControlCharactersInRegex stays clean. */
 function isSgrResidueCharset(seq: string): boolean {

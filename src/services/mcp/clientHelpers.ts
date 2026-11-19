@@ -478,6 +478,7 @@ export async function processMCPResult(
   name: string, // Server name for IDE check and transformation (e.g., "slack")
   limits?: ImageLimits, // Image processing limits, plumbed to transformMCPResult
   skipLargeOutput = false, // If true, skip large-output handling for non-image content
+  model?: string, // Official 2.1.325 #2264: caller/subagent model for token sizing
 ): Promise<MCPToolResult> {
   const { content, type, schema } = await transformMCPResult(
     result,
@@ -499,7 +500,7 @@ export async function processMCPResult(
   }
 
   // Check if content needs truncation (i.e., is too large)
-  if (!(await mcpContentNeedsTruncation(content))) {
+  if (!(await mcpContentNeedsTruncation(content, model))) {
     return content
   }
 
@@ -512,7 +513,7 @@ export async function processMCPResult(
       reason: 'env_disabled',
       sizeEstimateTokens,
     } as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
-    return await truncateMcpContentIfNeeded(content)
+    return await truncateMcpContentIfNeeded(content, model)
   }
 
   // Save large output to file and return instructions for reading it
@@ -529,7 +530,7 @@ export async function processMCPResult(
       reason: 'contains_images',
       sizeEstimateTokens,
     } as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
-    return await truncateMcpContentIfNeeded(content)
+    return await truncateMcpContentIfNeeded(content, model)
   }
 
   // Generate a unique ID for the persisted file (server__tool-timestamp)

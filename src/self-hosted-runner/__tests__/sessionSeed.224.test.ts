@@ -2,7 +2,13 @@
  * densable 2.1.224 #1 residual — njv / WJl / G2h / oBh / YMt / F2h / rjv.
  */
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import {
@@ -10,10 +16,12 @@ import {
   KW_PATH_BYTE_LIMIT,
   SESSION_SEED_FS_TIMEOUT_MS,
   assertConfigDirOutsideGlobalTemp,
+  assertRunnerPathNotSymlink,
   claudeConfigFileSuffix,
   densableF2tResolved,
   densableKwTempDir,
   densableSgResolved,
+  isRunnerPathSymlinkOrNonDir,
   resolveChildCwdAndAddDirs,
   resolveUnderSessionRoot,
   seedHostConfigIntoSession,
@@ -207,5 +215,23 @@ describe('densable 2.1.224 #1 sessionSeed (D trust + sG/Kw/f2t + mcp_config)', (
     expect(() =>
       assertConfigDirOutsideGlobalTemp(join(kw, 'evil-session-config')),
     ).toThrow(/overlaps the child's auto-allowed write scope/)
+  })
+
+  test('#2381: isRunnerPathSymlinkOrNonDir detects directory symlinks even with trailing slashes', async () => {
+    const dir = tmp()
+    const realDir = join(dir, 'real-dir')
+    const linkDir = join(dir, 'link-dir')
+    mkdirSync(realDir, { recursive: true })
+    symlinkSync(realDir, linkDir)
+
+    expect(await isRunnerPathSymlinkOrNonDir(realDir)).toBe(false)
+    expect(await isRunnerPathSymlinkOrNonDir(`${realDir}/`)).toBe(false)
+    expect(await isRunnerPathSymlinkOrNonDir(linkDir)).toBe(true)
+    expect(await isRunnerPathSymlinkOrNonDir(`${linkDir}/`)).toBe(true)
+    expect(await isRunnerPathSymlinkOrNonDir(`${linkDir}///`)).toBe(true)
+
+    await expect(
+      assertRunnerPathNotSymlink(`${linkDir}/`, 'repository path'),
+    ).rejects.toThrow(/symbolic link/)
   })
 })

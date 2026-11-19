@@ -59,6 +59,10 @@ export type PluginCliJsonLine = {
   message: string
   failureCode?: string
   shownCommand?: MarketplaceShownCommandWithSha
+  /** Official 2.1.323 #1978: number of unset userConfig options after install. */
+  unsetOptionCount?: number
+  /** Official 2.1.323 #2189: true when the plugin's install command printed to stderr. */
+  commandPrinted?: boolean
   [key: string]: unknown
 }
 

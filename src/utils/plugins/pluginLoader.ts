@@ -112,7 +112,12 @@ import {
   type StorageV5,
 } from '../storageV5/index.js'
 import { isHoverRestOn } from '../storageV5/hoverRestPin.js'
-import { getSettings_DEPRECATED } from '../settings/settings.js'
+import {
+  getSettings_DEPRECATED,
+  getSettingsForSource,
+} from '../settings/settings.js'
+import { filterPluginsByEngineRange } from './pluginEngineRange.js'
+import { formatPluginAgentStartupNotice } from '../../types/plugin.js'
 import {
   clearPluginSettingsBase,
   getPluginSettingsBase,
@@ -143,9 +148,14 @@ import {
   isSourceInBlocklist,
 } from './marketplaceHelpers.js'
 import {
+  buildSparseCheckoutCommands,
+  GIT_LONGPATHS_ARGS,
   getMarketplaceCacheOnly,
   getPluginByIdCacheOnly,
+  isGitSparseConeSetSupported,
   loadKnownMarketplacesConfigSafe,
+  parseGitVersionTuple,
+  verifySubmoduleShaPins,
 } from './marketplaceManager.js'
 import {
   hasCommandPluginLinkFarm,
@@ -402,21 +412,30 @@ export async function copyDir(src: string, dest: string): Promise<void> {
     const srcPath = join(src, entry.name)
     const destPath = join(dest, entry.name)
 
+    // Official 2.1.325 #2362: skip unsafe `.mcpb-cache` entries inside plugin
+    // folders when loading/copying plugin trees.
+    if (entry.name.toLowerCase().replace(/[. ]+$/, '') === '.mcpb-cache') {
+      logForDebugging(
+        `copyDir: skipping unsafe .mcpb-cache entry in plugin folder: ${srcPath}`,
+      )
+      continue
+    }
     if (entry.isDirectory()) {
       await copyDir(srcPath, destPath)
     } else if (entry.isFile()) {
       await copyFile(srcPath, destPath)
     } else if (entry.isSymbolicLink()) {
-      const linkTarget = await readlink(srcPath)
-
       // Resolve the symlink to get the actual target path
       // This prevents circular symlinks when src and dest overlap (e.g., via symlink chains)
       let resolvedTarget: string
       try {
         resolvedTarget = await realpath(srcPath)
       } catch {
-        // Broken symlink - copy the raw link target as-is
-        await symlink(linkTarget, destPath)
+        // Official 2.1.325 #2362: skip broken/circular symlinks during plugin
+        // loading instead of copying raw dangling targets into cache.
+        logForDebugging(
+          `copyDir: skipping broken or unreadable symlink in plugin folder: ${srcPath}`,
+        )
         continue
       }
 
@@ -812,7 +831,9 @@ export async function gitClone(
 ): Promise<void> {
   // Use --recurse-submodules to initialize submodules
   // Always start with shallow clone for efficiency
+  // Official 2.1.323 #2050: enable core.longpaths=true for Windows long paths.
   const args = [
+    ...GIT_LONGPATHS_ARGS,
     'clone',
     '--depth',
     '1',
@@ -900,6 +921,20 @@ export async function gitClone(
         `Failed to checkout commit ${sha}: ${checkoutResult.stderr}`,
       )
     }
+  }
+
+  // Official 2.1.323 #2185: verify every initialized submodule matches the
+  // commit recorded by its parent repository.
+  const submodulePinFailure = await verifySubmoduleShaPins(targetPath)
+  if (submodulePinFailure !== undefined) {
+    logPluginFetch(
+      'plugin_clone',
+      gitUrl,
+      'failure',
+      performance.now() - cloneStarted,
+      submodulePinFailure.errorKind,
+    )
+    throw new Error(submodulePinFailure.message)
   }
 
   // Fire success only after ALL network ops (clone + optional SHA fetch)
@@ -1004,6 +1039,7 @@ export async function installFromGitSubdir(
   const cloneDir = `${targetPath}.clone`
 
   const cloneArgs = [
+    ...GIT_LONGPATHS_ARGS,
     'clone',
     '--depth',
     '1',
@@ -1023,15 +1059,26 @@ export async function installFromGitSubdir(
   }
 
   try {
-    const sparseResult = await execFileNoThrowWithCwd(
-      gitExe(),
-      ['sparse-checkout', 'set', '--cone', '--', subdirPath],
-      { cwd: cloneDir },
-    )
-    if (sparseResult.code !== 0) {
-      throw new Error(
-        `git sparse-checkout set failed (git >= 2.25 required for cone mode): ${sparseResult.stderr}`,
-      )
+    // Official 2.1.325 #2310: support git < 2.35 (e.g. git 2.34) sparse-checkout
+    // cone mode while preserving repository root files.
+    const gitVer = await execFileNoThrowWithCwd(gitExe(), ['--version'], {
+      cwd: cloneDir,
+    })
+    const supportsConeSet =
+      gitVer.code === 0 &&
+      isGitSparseConeSetSupported(parseGitVersionTuple(gitVer.stdout))
+    for (const sparseArgs of buildSparseCheckoutCommands(
+      [subdirPath],
+      supportsConeSet,
+    )) {
+      const sparseResult = await execFileNoThrowWithCwd(gitExe(), sparseArgs, {
+        cwd: cloneDir,
+      })
+      if (sparseResult.code !== 0) {
+        throw new Error(
+          `git sparse-checkout set failed (git >= 2.25 required for cone mode): ${sparseResult.stderr}`,
+        )
+      }
     }
 
     // Capture the resolved commit SHA before discarding the clone. The
@@ -1220,6 +1267,8 @@ export async function cachePlugin(
   gitCommitSha?: string
   /** densable Oxd producer directory for command sources */
   producerPath?: string
+  /** Official 2.1.323 #2044 & #2189: stderr printed on exit 0 by a command source */
+  commandStderr?: string
 }> {
   const cachePath = getPluginCachePath()
 
@@ -1231,6 +1280,7 @@ export async function cachePlugin(
   let shouldCleanup = false
   let gitCommitSha: string | undefined
   let producerPath: string | undefined
+  let commandStderr: string | undefined
 
   try {
     logForDebugging(
@@ -1376,6 +1426,7 @@ export async function cachePlugin(
           })
           gitCommitSha = installed.contentSha256
           producerPath = installed.producerDirectory
+          commandStderr = installed.commandStderr
           break
         }
         case 'pip':
@@ -1517,6 +1568,7 @@ export async function cachePlugin(
     manifest,
     ...(gitCommitSha && { gitCommitSha }),
     ...(producerPath !== undefined && { producerPath }),
+    ...(commandStderr !== undefined && { commandStderr }),
   }
 }
 
@@ -2400,6 +2452,16 @@ async function loadPluginsFromMarketplaces({
       const { name: pluginName, marketplace: marketplaceName } =
         parsePluginIdentifier(pluginId)
 
+      // Official 2.1.323 #2049: warn when enabledPlugins entry is a version list
+      // (only boolean true turns on a marketplace plugin).
+      if (Array.isArray(enabledValue)) {
+        warnings.push({
+          type: 'version-list-not-enabled',
+          source: pluginId,
+          plugin: pluginName,
+        })
+      }
+
       // Check if marketplace source is allowed by enterprise policy
       const marketplaceConfig = knownMarketplaces[marketplaceName!]
 
@@ -2506,6 +2568,14 @@ async function loadPluginsFromMarketplaces({
         typeof mktSource.url === 'string'
           ? mktSource.url
           : undefined
+      // Official 2.1.323 #2038: check whether this plugin is enabled ONLY by
+      // project settings (not user/local/policy) so missing installations emit
+      // `plugin-not-installed` instead of the misleading `plugin-cache-miss`.
+      const enabledOnlyByProjectSettings =
+        enabledValue === true &&
+        installEntry === undefined &&
+        isPluginEnabledOnlyByProjectSettings(pluginId)
+
       return cacheOnly
         ? loadPluginFromMarketplaceEntryCacheOnly(
             result.entry,
@@ -2516,6 +2586,7 @@ async function loadPluginsFromMarketplaces({
             installEntry?.installPath,
             warnings,
             mktSource,
+            enabledOnlyByProjectSettings,
           )
         : loadPluginFromMarketplaceEntry(
             result.entry,
@@ -2568,6 +2639,7 @@ async function loadPluginFromMarketplaceEntryCacheOnly(
   installPath: string | undefined,
   warningsOut?: PluginWarning[],
   marketplaceSource?: MarketplaceSource,
+  enabledOnlyByProjectSettings?: boolean,
 ): Promise<LoadedPlugin | null> {
   let pluginPath: string
 
@@ -2580,12 +2652,20 @@ async function loadPluginFromMarketplaceEntryCacheOnly(
         ? marketplaceInstallLocation
         : join(marketplaceInstallLocation, '..')
     } catch {
-      errorsOut.push({
-        type: 'plugin-cache-miss',
-        source: pluginId,
-        plugin: entry.name,
-        installPath: marketplaceInstallLocation,
-      })
+      if (enabledOnlyByProjectSettings) {
+        errorsOut.push({
+          type: 'plugin-not-installed',
+          source: pluginId,
+          plugin: entry.name,
+        })
+      } else {
+        errorsOut.push({
+          type: 'plugin-cache-miss',
+          source: pluginId,
+          plugin: entry.name,
+          installPath: marketplaceInstallLocation,
+        })
+      }
       return null
     }
     pluginPath = join(marketplaceDir, entry.source)
@@ -2594,12 +2674,20 @@ async function loadPluginFromMarketplaceEntryCacheOnly(
   } else {
     // External source (npm/github/url/git-subdir) — use recorded installPath.
     if (!installPath || !(await pathExists(installPath))) {
-      errorsOut.push({
-        type: 'plugin-cache-miss',
-        source: pluginId,
-        plugin: entry.name,
-        installPath: installPath ?? '(not recorded)',
-      })
+      if (enabledOnlyByProjectSettings) {
+        errorsOut.push({
+          type: 'plugin-not-installed',
+          source: pluginId,
+          plugin: entry.name,
+        })
+      } else {
+        errorsOut.push({
+          type: 'plugin-cache-miss',
+          source: pluginId,
+          plugin: entry.name,
+          installPath: installPath ?? '(not recorded)',
+        })
+      }
       return null
     }
     pluginPath = installPath
@@ -4024,6 +4112,11 @@ async function assemblePluginLoadResult(
     ...syncedResult.warnings,
   ]
 
+  // Official 2.1.323 #1965: gate enabled plugins by engines["claude-code"]
+  // BEFORE dependency verification so dependents of an incompatible plugin are
+  // also cleanly demoted.
+  filterPluginsByEngineRange(allPlugins, allErrors, allWarnings)
+
   // Verify dependencies. Runs AFTER the parallel load — deps are presence
   // checks, not load-order, so no topological sort needed. Demotion is
   // session-local: does NOT write settings (user fixes intent via /doctor).
@@ -4034,6 +4127,37 @@ async function assemblePluginLoadResult(
   allErrors.push(...depErrors)
 
   const enabledPlugins = allPlugins.filter(p => p.enabled)
+
+  // Official 2.1.323 #2211: warn when an enabled plugin provides a deprecated
+  // `agent` setting (still applies, warns at startup, list, and validate).
+  for (const p of enabledPlugins) {
+    if (p.settings?.agent !== undefined) {
+      allWarnings.push({
+        type: 'plugin-agent-setting-deprecated',
+        source: p.source,
+        plugin: p.name,
+      })
+    }
+  }
+
+  // Official 2.1.323 #2049: suppress version-list-not-enabled warnings if a
+  // same-name @inline or @synced plugin is enabled.
+  const enabledNonMarketplaceNames = new Set(
+    enabledPlugins
+      .filter(
+        p =>
+          p.source.endsWith('@inline') ||
+          p.source.endsWith(`@${SYNCED_MARKETPLACE_NAME}`),
+      )
+      .map(p => p.name.toLowerCase()),
+  )
+  const filteredWarnings = allWarnings.filter(
+    w =>
+      w.type !== 'version-list-not-enabled' ||
+      !w.plugin ||
+      !enabledNonMarketplaceNames.has(w.plugin.toLowerCase()),
+  )
+
   logForDebugging(
     `Found ${allPlugins.length} plugins (${enabledPlugins.length} enabled, ${allPlugins.length - enabledPlugins.length} disabled)`,
   )
@@ -4064,7 +4188,7 @@ async function assemblePluginLoadResult(
     enabled: enabledPlugins,
     disabled: allPlugins.filter(p => !p.enabled),
     errors: allErrors,
-    warnings: allWarnings,
+    warnings: filteredWarnings,
   }
 }
 
@@ -4097,6 +4221,7 @@ export function clearPluginCache(reason?: string): void {
     resetSettingsCache()
   }
   clearPluginSettingsBase()
+  pluginAgentSettingSource = undefined
   // TODO: Clear installed plugins cache when installedPluginsManager is implemented
 }
 
@@ -4132,12 +4257,68 @@ function mergePluginSettings(
   return merged
 }
 
+/** Official 2.1.323 #2211 (`uLa`): last enabled plugin supplying deprecated `settings.agent`. */
+let pluginAgentSettingSource: string | undefined
+
+/** Official 2.1.323 #2211: returns the plugin name that set `settings.agent`, if any. */
+export function getPluginAgentSettingSource(): string | undefined {
+  return pluginAgentSettingSource
+}
+
+/** Official 2.1.323 #2211: returns startup deprecation notice if an enabled plugin set `settings.agent`. */
+export function getPluginAgentStartupNotice(): string | undefined {
+  return pluginAgentSettingSource
+    ? formatPluginAgentStartupNotice(pluginAgentSettingSource)
+    : undefined
+}
+
+/**
+ * Official 2.1.323 #2043: return the set of plugin IDs enabled by managed
+ * (`policySettings`) settings for `selectInitPluginErrors`.
+ */
+export function getPolicyEnabledPluginIds(): Set<string> {
+  const policyEnabled = getSettingsForSource('policySettings')?.enabledPlugins
+  const ids = new Set<string>()
+  if (policyEnabled) {
+    for (const [id, value] of Object.entries(policyEnabled)) {
+      if (value === true) ids.add(id)
+    }
+  }
+  return ids
+}
+
+/**
+ * Official 2.1.323 #2038: true when `pluginId` is enabled by projectSettings
+ * and NOT enabled by userSettings, localSettings, flagSettings, or policySettings.
+ */
+export function isPluginEnabledOnlyByProjectSettings(
+  pluginId: string,
+): boolean {
+  const projectVal =
+    getSettingsForSource('projectSettings')?.enabledPlugins?.[pluginId]
+  if (projectVal !== true) return false
+  for (const source of [
+    'userSettings',
+    'localSettings',
+    'flagSettings',
+    'policySettings',
+  ] as const) {
+    if (getSettingsForSource(source)?.enabledPlugins?.[pluginId] === true) {
+      return false
+    }
+  }
+  return true
+}
+
 /**
  * Store merged plugin settings in the synchronous cache.
  * Called after loadAllPlugins resolves.
  */
 export function cachePluginSettings(plugins: LoadedPlugin[]): void {
   const settings = mergePluginSettings(plugins)
+  pluginAgentSettingSource = plugins.findLast(
+    p => p.settings?.agent !== undefined,
+  )?.name
   setPluginSettingsBase(settings)
   // Only bust the session settings cache if there are actually plugin settings
   // to merge. In the common case (no plugins, or plugins without settings) the

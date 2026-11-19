@@ -2,6 +2,7 @@ import memoize from 'lodash-es/memoize.js'
 import {
   getDefaultAwsProviderChain,
   refreshAndGetAwsCredentials,
+  validateAllowedProvider,
 } from '../auth.js'
 import { getAWSRegion, isEnvTruthy } from '../envUtils.js'
 import { logError } from '../log.js'
@@ -51,6 +52,12 @@ export function findFirstMatch(
 }
 
 async function createBedrockClient() {
+  // Official 2.1.325 #2293 (`t9e("bedrock")`): enforce allowedProviders before
+  // constructing a Bedrock client or sending requests to Amazon Bedrock.
+  const allowed = validateAllowedProvider('bedrock')
+  if (!allowed.valid) {
+    throw new Error(allowed.message)
+  }
   const { BedrockClient } = await import('@aws-sdk/client-bedrock')
   // Match the Anthropic Bedrock SDK's region behavior exactly:
   // - Reads AWS_REGION or AWS_DEFAULT_REGION env vars (not AWS config files)
@@ -107,6 +114,12 @@ async function createBedrockClient() {
 }
 
 export async function createBedrockRuntimeClient() {
+  // Official 2.1.325 #2293 (`BTa` -> `t9e("bedrock")`): enforce allowedProviders
+  // before Bedrock countTokens / runtime client creation.
+  const allowed = validateAllowedProvider('bedrock')
+  if (!allowed.valid) {
+    throw new Error(allowed.message)
+  }
   const { BedrockRuntimeClient } = await import(
     '@aws-sdk/client-bedrock-runtime'
   )

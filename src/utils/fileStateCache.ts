@@ -30,7 +30,20 @@ export type FileState = {
    * contentLength is 0 (truly empty file), not when content was stripped.
    */
   contentLength?: number
+  /**
+   * 2.1.323 #1982 (SEA `keepContent`): when true, retain inline `content` even
+   * above `MAX_INLINE_FILE_STATE_BYTES` instead of keeping hash-only metadata.
+   */
+  keepContent?: boolean
 }
+
+/**
+ * 2.1.323 #1982 (SEA `b = 4096`): files larger than 4 KiB keep only their
+ * contentHash + contentLength in FileStateCache unless `keepContent: true`,
+ * preventing memory spikes and multi-MB diffing on the next prompt after
+ * Claude changes a very large file.
+ */
+export const MAX_INLINE_FILE_STATE_BYTES = 4096
 
 /** densable DAu — content fingerprint for xOe. */
 export function fileStateContentHash(content: string): string {
@@ -118,7 +131,34 @@ export class FileStateCache {
   }
 
   set(key: string, value: FileState): this {
-    this.cache.set(normalize(key), value)
+    const normalized = normalize(key)
+    const prev = this.cache.get(normalized)
+    if (typeof value.content !== 'string') {
+      this.cache.set(normalized, value)
+      return this
+    }
+    const keepContent = value.keepContent ?? prev?.keepContent
+    const contentHash = value.contentHash ?? fileStateContentHash(value.content)
+    const contentLength = value.contentLength ?? value.content.length
+    const effectiveContent =
+      keepContent &&
+      value.content === '' &&
+      contentHash === prev?.contentHash &&
+      prev.content
+        ? prev.content
+        : value.content
+    const storedContent =
+      keepContent ||
+      Buffer.byteLength(effectiveContent, 'utf8') <= MAX_INLINE_FILE_STATE_BYTES
+        ? effectiveContent
+        : ''
+    this.cache.set(normalized, {
+      ...value,
+      ...(keepContent !== undefined ? { keepContent } : {}),
+      contentHash,
+      contentLength,
+      content: storedContent,
+    })
     return this
   }
 

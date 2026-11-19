@@ -13,7 +13,63 @@
  *       / CLAUDE_CONTEXT_COLLAPSE_MODEL
  */
 
+import { isEnvTruthy } from '../envUtils.js'
 import type { SettingsJson } from './types.js'
+
+/**
+ * Official 2.1.323 (#1968) `Z7r`: true for Claude Desktop sessions on
+ * third-party providers (host-managed provider, local, non-cowork,
+ * `claude-desktop-3p` or `local-agent` without desktop app version).
+ * In these sessions, managed settings `CLAUDE_CODE_AUTO_MODE_MODEL` is preserved.
+ */
+export function isLocalThirdPartyDesktopManagedSession(): boolean {
+  const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT
+  return (
+    isEnvTruthy(process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST) &&
+    !isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) &&
+    !isEnvTruthy(process.env.CLAUDE_CODE_IS_COWORK) &&
+    (entrypoint === 'claude-desktop-3p' ||
+      (entrypoint === 'local-agent' &&
+        (process.env.CLAUDE_CODE_DESKTOP_APP_VERSION ?? '') === ''))
+  )
+}
+
+/** Official 2.1.323 (#2120) `Ls` — boolean disable switches from parent/SDK managedSettings. */
+export const PARENT_MANAGED_DISABLE_SWITCHES = [
+  'disableRemoteControl',
+  'disableAgentView',
+  'disableWorkflows',
+  'disableArtifact',
+] as const
+
+/** Official 2.1.323 (#2120) `zs` — boolean enable off-switches from parent/SDK managedSettings. */
+export const PARENT_MANAGED_ENABLE_OFF_SWITCHES = [
+  'enableWorkflows',
+  'enableArtifact',
+] as const
+
+/**
+ * Official 2.1.323 (#2120) `Vsi` subset: extract off switches from Agent SDK /
+ * parent `managedSettings` so Remote Control, agent view, Workflows, and
+ * Artifact disable/off switches are never ignored.
+ */
+export function extractParentManagedOffSwitches(
+  parentManaged: SettingsJson | null | undefined,
+): Partial<SettingsJson> | null {
+  if (!parentManaged) return null
+  const out: Partial<SettingsJson> = {}
+  for (const key of PARENT_MANAGED_DISABLE_SWITCHES) {
+    if (parentManaged[key] === true) {
+      out[key] = true
+    }
+  }
+  for (const key of PARENT_MANAGED_ENABLE_OFF_SWITCHES) {
+    if (parentManaged[key] === false) {
+      out[key] = false
+    }
+  }
+  return Object.keys(out).length > 0 ? out : null
+}
 
 /**
  * densable p9r (model-default env keys) minus ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION
@@ -99,11 +155,14 @@ export function buildHostModelOverlay(
 }
 
 /**
- * densable b6i — mutate settings in place: drop model / fallbackModel /
+ * densable b6i / r4o — mutate settings in place: drop model / fallbackModel /
  * modelOverrides, and filter settings.env against Wfg.
+ * Official 2.1.323 (#1968): when `keepAutoModeModel` is true (Claude Desktop
+ * sessions on third-party providers), `CLAUDE_CODE_AUTO_MODE_MODEL` is kept.
  */
 export function stripHostManagedPolicyModelKeys(
   settings: SettingsJson,
+  keepAutoModeModel = false,
 ): SettingsJson {
   delete settings.model
   delete settings.fallbackModel
@@ -111,7 +170,11 @@ export function stripHostManagedPolicyModelKeys(
   if (settings.env) {
     const kept: Record<string, string> = {}
     for (const [key, value] of Object.entries(settings.env)) {
-      if (!HOST_MODEL_POLICY_STRIP_ENV_KEYS.has(key.toUpperCase())) {
+      const upper = key.toUpperCase()
+      if (
+        !HOST_MODEL_POLICY_STRIP_ENV_KEYS.has(upper) ||
+        (keepAutoModeModel && upper === 'CLAUDE_CODE_AUTO_MODE_MODEL')
+      ) {
         kept[key] = value
       }
     }
@@ -128,6 +191,7 @@ export function applyHostManagedPolicyModelPrecedence(
   policySettings: SettingsJson | null,
   hostModelOverlay: HostModelOverlay | null,
   hostManagedProvider: boolean,
+  keepAutoModeModel = isLocalThirdPartyDesktopManagedSession(),
 ): SettingsJson | null {
   if (!hostManagedProvider) {
     return policySettings
@@ -141,7 +205,7 @@ export function applyHostManagedPolicyModelPrecedence(
   if (policySettings?.env) {
     next.env = { ...policySettings.env }
   }
-  stripHostManagedPolicyModelKeys(next)
+  stripHostManagedPolicyModelKeys(next, keepAutoModeModel)
   if (hostModelOverlay) {
     Object.assign(next, hostModelOverlay)
   }

@@ -50,6 +50,7 @@ export function ExitFlow({
   getTasks,
 }: Props): React.ReactNode {
   const [choseBackground, setChoseBackground] = useState(false);
+  const [refusal, setRefusal] = useState<string | undefined>(undefined);
 
   const resolveMessages = useCallback((): readonly BackgroundSeedMessage[] | undefined => {
     return getMessages?.() ?? messages;
@@ -98,6 +99,10 @@ export function ExitFlow({
         isMidTurn={resolveMidTurn()}
         responseStreaming={resolveStreaming() === true}
         onDone={msg => onDone(msg)}
+        onRefused={reason => {
+          setRefusal(reason);
+          setChoseBackground(false);
+        }}
         getTasks={getTasks}
       />
     );
@@ -105,13 +110,16 @@ export function ExitFlow({
 
   if (backgroundItems.length > 0) {
     // feature() must be if/ternary condition only (bun:bundle).
-    const canBg = feature('BG_SESSIONS') ? msgSnap !== undefined && canOfferBackgroundAndExit(msgSnap) : false;
+    const canBg = feature('BG_SESSIONS')
+      ? msgSnap !== undefined && refusal === undefined && canOfferBackgroundAndExit(msgSnap)
+      : false;
     return (
       <ExitBackgroundWorkDialog
         items={backgroundItems}
         onExit={() => void finishExit()}
         onCancel={onCancel ?? (() => {})}
         onBackground={canBg ? () => setChoseBackground(true) : undefined}
+        refusal={refusal}
       />
     );
   }

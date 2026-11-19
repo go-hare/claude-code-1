@@ -50,6 +50,9 @@ export function parseKeystroke(input: string): ParsedKeystroke {
       case 'return':
         keystroke.key = 'enter'
         break
+      case 'del':
+        keystroke.key = 'delete'
+        break
       case 'space':
         keystroke.key = ' '
         break
@@ -183,6 +186,57 @@ export function chordToDisplayString(
   platform: DisplayPlatform = 'linux',
 ): string {
   return chord.map(ks => keystrokeToDisplayString(ks, platform)).join(' ')
+}
+
+/**
+ * Official 2.1.323 (#2074) `U` — split a single keystroke on '+' and mark any
+ * non-final non-modifier part as `lost` (e.g. "ctl" in "ctl+k").
+ */
+export function splitKeystrokeParts(
+  keystroke: string,
+): Array<{ part: string; lost: boolean }> {
+  const parts = keystroke.split('+')
+  const lastKeyIndex = parts.findLastIndex(
+    part => parseKeystroke(part).key !== '',
+  )
+  return parts.map((part, idx) => ({
+    part,
+    lost: idx !== lastKeyIndex && parseKeystroke(part).key !== '',
+  }))
+}
+
+/**
+ * Official 2.1.323 (#2074) `D` — true if any keystroke in the chord contains a
+ * misspelled modifier or non-modifier part before '+' that would otherwise be
+ * silently dropped and bind the bare key.
+ */
+export function hasLostKeystrokePart(chordInput: string): boolean {
+  if (chordInput === ' ') return false
+  return chordInput
+    .trim()
+    .split(/\s+/)
+    .some(stroke => splitKeystrokeParts(stroke).some(({ lost }) => lost))
+}
+
+/**
+ * Official 2.1.323 (#2074) `Y` — drop bindings whose key has a misspelled
+ * modifier / lost part so they are ignored instead of binding the bare key.
+ */
+export function stripLostModifierBindings(
+  blocks: KeybindingBlock[],
+): KeybindingBlock[] {
+  return blocks.map(block => {
+    const filtered: Record<string, string | null> = {}
+    for (const [key, action] of Object.entries(block.bindings)) {
+      if (!hasLostKeystrokePart(key)) {
+        filtered[key] = action
+      }
+    }
+    return {
+      context: block.context,
+      bindings: filtered,
+    }
+  })
 }
 
 /**

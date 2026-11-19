@@ -41,16 +41,22 @@ export function PermissionRequestTitle({
         </Text>
       )}
       {workerBadge && (
-        <Text dimColor>
-          {'· '}@{workerBadge.name}
-        </Text>
+        <Box flexShrink={0}>
+          <Text dimColor>
+            {'· '}@{workerBadge.name}
+          </Text>
+        </Box>
       )}
     </Box>
   );
+  // Official 2.1.323 (#2090): account for workerBadge width when checking if
+  // the queue tally aside fits on the same row so agent names are never clipped.
+  const workerBadgeWidth = workerBadge ? 1 + stringWidth(`· @${workerBadge.name}`) : 0;
   const fitsAside =
     aside !== undefined &&
     stringWidth(title) +
       (sourceLabel == null ? 0 : 1 + stringWidth(`· ${sourceLabel}`)) +
+      workerBadgeWidth +
       1 +
       stringWidth(aside.text) <=
       aside.rowColumns;

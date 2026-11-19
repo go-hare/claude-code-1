@@ -192,6 +192,32 @@ export function resolveBriefEnforceText(input?: {
 
 export { BRIEF_ENFORCE_SENTINEL }
 
+/**
+ * Official 2.1.325 #2300: track turns that have already delivered a visible
+ * `normal` brief reply so brief-mode sessions (such as Dispatch) do not send
+ * a reply again after the turn had already replied.
+ */
+const repliedTurnsBySignal = new WeakSet<AbortSignal>()
+
+export function hasBriefRepliedInTurn(
+  signal: AbortSignal | undefined,
+): boolean {
+  return signal !== undefined && repliedTurnsBySignal.has(signal)
+}
+
+export function markBriefRepliedInTurn(signal: AbortSignal | undefined): void {
+  if (signal !== undefined) {
+    repliedTurnsBySignal.add(signal)
+  }
+}
+
+export function shouldSuppressDuplicateBriefReply(
+  status: 'normal' | 'proactive',
+  signal: AbortSignal | undefined,
+): boolean {
+  return status === 'normal' && hasBriefRepliedInTurn(signal)
+}
+
 export const BriefTool = buildTool({
   name: BRIEF_TOOL_NAME,
   aliases: [LEGACY_BRIEF_TOOL_NAME],
@@ -236,6 +262,14 @@ export const BriefTool = buildTool({
     return BRIEF_TOOL_PROMPT
   },
   mapToolResultToToolResultBlockParam(output, toolUseID) {
+    if ((output as { duplicateSuppressed?: boolean }).duplicateSuppressed) {
+      return {
+        tool_use_id: toolUseID,
+        type: 'tool_result',
+        content:
+          'Reply already delivered to the user earlier in this turn; duplicate reply suppressed.',
+      }
+    }
     const n = output.attachments?.length ?? 0
     const suffix = n === 0 ? '' : ` (${n} ${plural(n, 'attachment')} included)`
     return {
@@ -248,6 +282,21 @@ export const BriefTool = buildTool({
   renderToolResultMessage,
   async call({ message, attachments, status }, context) {
     const sentAt = new Date().toISOString()
+    // Official 2.1.325 #2300: prevent brief-mode sessions (e.g. Dispatch) from
+    // sending a second reply after the turn has already replied.
+    const turnSignal = context.abortController?.signal
+    if (shouldSuppressDuplicateBriefReply(status, turnSignal)) {
+      return {
+        data: {
+          message,
+          sentAt,
+          duplicateSuppressed: true,
+        } as Output,
+      }
+    }
+    if (status === 'normal') {
+      markBriefRepliedInTurn(turnSignal)
+    }
     logEvent('tengu_brief_send', {
       proactive: status === 'proactive',
       attachment_count: attachments?.length ?? 0,

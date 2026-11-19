@@ -1921,6 +1921,12 @@ export type PrintControlExtraDeps = {
   /** densable `ew` firstParty gate. Default `getAPIProvider() === 'firstParty'`. */
   isFirstParty?: () => boolean
   /**
+   * Official 2.1.325 #2375: trust level for cloud / self-hosted connections
+   * (`'full'` | `'redacted'` | `'refused'`). Defaults to deriving from
+   * `isRemoteTransport` / `isCloudHosted` / remote env vars.
+   */
+  controlConnectionTrustLevel?: ControlConnectionTrustLevel
+  /**
    * Neighbor CCR create-session analog. Do not invent protocol in extras:
    * only call when a host injects this. Default remains unsupported.
    */
@@ -1933,6 +1939,188 @@ export type PrintControlExtraDeps = {
 }
 
 /**
+ * Official 2.1.325 #2375: control request trust level for cloud and self-hosted
+ * session connections (`$p` = refused, `Qi` = redacted/withheld, local = full).
+ */
+export type ControlConnectionTrustLevel = 'full' | 'redacted' | 'refused'
+
+export function resolveControlConnectionTrustLevel(opts?: {
+  explicitTrustLevel?: ControlConnectionTrustLevel
+  isRemoteTransport?: boolean
+  isCloudHosted?: boolean
+  env?: NodeJS.ProcessEnv
+}): ControlConnectionTrustLevel {
+  if (opts?.explicitTrustLevel) {
+    return opts.explicitTrustLevel
+  }
+  const e = opts?.env ?? process.env
+  const isSelfHostedOrCloud =
+    opts?.isCloudHosted === true ||
+    opts?.isRemoteTransport === true ||
+    Boolean(e.CLAUDE_CODE_REMOTE_SESSION_ID) ||
+    e.CLAUDE_CODE_REMOTE === '1' ||
+    e.CLAUDE_CODE_REMOTE === 'true' ||
+    e.CLAUDE_CODE_ENVIRONMENT_KIND === 'self_hosted' ||
+    Boolean(e.CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE)
+  return isSelfHostedOrCloud ? 'redacted' : 'full'
+}
+
+const BARE_TOOL_NAME_RE = /^[A-Za-z0-9_.:-]+$/
+
+/**
+ * Official 2.1.325 #2375 (`Px` / `Tx`): redact a permission rule string when
+ * sent over a cloud or self-hosted connection.
+ * - Bare tool names (`Read`, `Bash`, `mcp__foo__bar`) pass through unchanged.
+ * - Rules with arguments (`Bash(git status)`) become `Bash(withheld)`.
+ * - Rules whose tool name cannot be safely sent become `*(withheld)` for
+ *   `ask`/`deny` rules (so rule-matching clients treat them as covering every
+ *   tool) or `(withheld)` for `allow` rules.
+ */
+export function redactPermissionRuleForRemote(
+  rule: string,
+  behavior: 'allow' | 'ask' | 'deny',
+): string {
+  const trimmed = rule.trim()
+  const parenIdx = trimmed.indexOf('(')
+  if (parenIdx === -1) {
+    if (BARE_TOOL_NAME_RE.test(trimmed)) {
+      return trimmed
+    }
+    return behavior === 'allow' ? '(withheld)' : '*(withheld)'
+  }
+  const toolName = trimmed.slice(0, parenIdx).trim()
+  if (toolName && BARE_TOOL_NAME_RE.test(toolName)) {
+    return `${toolName}(withheld)`
+  }
+  return behavior === 'allow' ? '(withheld)' : '*(withheld)'
+}
+
+function redactRuleMap(
+  map: Record<string, string[]> | undefined,
+  behavior: 'allow' | 'ask' | 'deny',
+): Record<string, string[]> {
+  if (!map || typeof map !== 'object') return {}
+  const out: Record<string, string[]> = {}
+  for (const [source, rules] of Object.entries(map)) {
+    if (!Array.isArray(rules)) continue
+    out[source] = rules.map(r => redactPermissionRuleForRemote(r, behavior))
+  }
+  return out
+}
+
+/**
+ * Official 2.1.325 #2375 (`Px`): redact `list_permission_rules` state over
+ * cloud / self-hosted connections (`withheld: true`, workspace directories
+ * cleared, non-bare rules rewritten to `Tool(withheld)` / `*(withheld)`).
+ */
+export function redactPermissionRulesStateForRemote(
+  context: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  if (!context || typeof context !== 'object') {
+    return {
+      context: null,
+      withheld: true,
+      originalCwd: '',
+      workspaceDirectories: [],
+    }
+  }
+  const redactedContext: Record<string, unknown> = {
+    mode: context.mode,
+    alwaysAllowRules: redactRuleMap(
+      context.alwaysAllowRules as Record<string, string[]> | undefined,
+      'allow',
+    ),
+    alwaysDenyRules: redactRuleMap(
+      context.alwaysDenyRules as Record<string, string[]> | undefined,
+      'deny',
+    ),
+    alwaysAskRules: redactRuleMap(
+      context.alwaysAskRules as Record<string, string[]> | undefined,
+      'ask',
+    ),
+    additionalWorkingDirectories: {},
+  }
+  return {
+    context: redactedContext,
+    withheld: true,
+    originalCwd: '',
+    workspaceDirectories: [],
+  }
+}
+
+function redactSettingsPermissionsBlock(
+  settings: Record<string, unknown> | undefined,
+  isPolicySource: boolean,
+): Record<string, unknown> {
+  if (!settings || typeof settings !== 'object') return {}
+  const out: Record<string, unknown> = {}
+  const perms = settings.permissions as Record<string, unknown> | undefined
+  if (perms && typeof perms === 'object') {
+    const cleanPerms: Record<string, unknown> = {}
+    if (Array.isArray(perms.allow)) {
+      cleanPerms.allow = perms.allow
+        .filter((r): r is string => typeof r === 'string')
+        .map(r => redactPermissionRuleForRemote(r, 'allow'))
+    }
+    if (Array.isArray(perms.ask)) {
+      cleanPerms.ask = perms.ask
+        .filter((r): r is string => typeof r === 'string')
+        .map(r => redactPermissionRuleForRemote(r, 'ask'))
+    }
+    if (Array.isArray(perms.deny)) {
+      cleanPerms.deny = perms.deny
+        .filter((r): r is string => typeof r === 'string')
+        .map(r => redactPermissionRuleForRemote(r, 'deny'))
+    }
+    // additionalDirectories intentionally omitted when withheld
+    if (Object.keys(cleanPerms).length > 0) {
+      out.permissions = cleanPerms
+    }
+  }
+  if (isPolicySource && settings.disableSideloadFlags === true) {
+    out.disableSideloadFlags = true
+  }
+  return out
+}
+
+/**
+ * Official 2.1.325 #2375 (`Tx`): redact `get_settings` payload over cloud /
+ * self-hosted connections (`withheld: true`, keeping only redacted permission
+ * lists, `policySettings.disableSideloadFlags`, and path-scrubbed error entries).
+ */
+export function redactSettingsResponseForRemote(payload: {
+  effective?: Record<string, unknown>
+  sources?: Array<{ source: string; settings?: Record<string, unknown> }>
+  errors?: Array<{ file?: string; path?: string; message: string }>
+  [key: string]: unknown
+}): Record<string, unknown> {
+  const effective = redactSettingsPermissionsBlock(payload.effective, false)
+  const sources = Array.isArray(payload.sources)
+    ? payload.sources.map(entry => ({
+        source: entry.source,
+        settings: redactSettingsPermissionsBlock(
+          entry.settings,
+          entry.source === 'policySettings',
+        ),
+      }))
+    : []
+  const errors = Array.isArray(payload.errors)
+    ? payload.errors.map(() => ({
+        path: '',
+        message:
+          'Settings validation error (details withheld on this connection)',
+      }))
+    : undefined
+  return {
+    ...payload,
+    effective,
+    sources,
+    ...(errors && errors.length > 0 ? { errors } : {}),
+    withheld: true,
+  }
+}
+
+/**
  * densable print extras. Returns true when subtype is ours (even on Qe).
  */
 export function dispatchPrintControlExtra(
@@ -1942,7 +2130,19 @@ export function dispatchPrintControlExtra(
 ): boolean {
   if (!isPrintControlExtraSubtype(subtype)) return false
 
+  const trustLevel = resolveControlConnectionTrustLevel({
+    explicitTrustLevel: deps.controlConnectionTrustLevel,
+    isRemoteTransport: deps.isRemoteTransport,
+    isCloudHosted: deps.isCloudHosted?.(),
+  })
+
   if (subtype === 'get_status') {
+    // Official 2.1.325 #2375: refuse `get_status` over cloud or self-hosted
+    // session connections.
+    if (trustLevel !== 'full') {
+      deps.sendError('get_status is not available on this connection')
+      return true
+    }
     deps.defer(async () => {
       try {
         const { buildAccountProperties, buildSandboxProperties } = await import(
@@ -2614,7 +2814,23 @@ export function dispatchPrintControlExtra(
   }
 
   if (subtype === 'list_permission_rules') {
+    // Official 2.1.325 #2375: refuse or redact `list_permission_rules` over
+    // cloud / self-hosted connections based on trust level.
+    if (trustLevel === 'refused') {
+      deps.sendError(
+        'list_permission_rules is not available on this connection',
+      )
+      return true
+    }
     const context = deps.getPermissionContext()
+    if (trustLevel === 'redacted') {
+      deps.sendSuccess({
+        state: redactPermissionRulesStateForRemote(
+          context as Record<string, unknown> | null | undefined,
+        ),
+      })
+      return true
+    }
     deps.sendSuccess({
       state: { context: context ?? null },
     })

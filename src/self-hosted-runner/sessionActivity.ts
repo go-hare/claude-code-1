@@ -51,6 +51,8 @@ export type ActivityPipeState = {
   sawResult: boolean
   /** waiting_on_user sticky */
   waitingOnUser: boolean
+  /** Official 2.1.323 #2172 (`cn`) — child emitted boolean waiting_on_user on session_state_changed */
+  sawWaitingOnUserField: boolean
   /** session_state_changed seen */
   sawSessionState: boolean
   /** system/init observed */
@@ -167,6 +169,7 @@ export function createActivityPipeState(
     turnInFlight: false,
     sawResult: false,
     waitingOnUser: false,
+    sawWaitingOnUserField: false,
     sawSessionState: false,
     sawInit: false,
     sawPreInitParked: false,
@@ -562,6 +565,7 @@ export function handleActivityLine(
   if (msg.type === 'system' && msg.subtype === 'session_state_changed') {
     state.sawSessionState = true
     if (typeof msg.waiting_on_user === 'boolean') {
+      state.sawWaitingOnUserField = true
       state.waitingOnUser = msg.waiting_on_user
     }
     if (msg.state === 'idle') {
@@ -714,7 +718,9 @@ export function handleActivityLine(
       clearTimeout(state.deferredTimer)
       state.deferredTimer = undefined
     }
-    if (!state.sawSessionState) emit?.('activity')
+    if (!state.sawWaitingOnUserField && !state.sawSessionState) {
+      emit?.('activity')
+    }
     // densable: if(Ht){at("follow-up turn opened",fe); if(fe)Ke()}
     // When opening a new turn from idle, clear follow-up hold.
     if (wasIdle) {

@@ -1385,7 +1385,15 @@ Runtime:
   --log-level <level>         Log level (default: info)
   --log-file <path>           Append logs to file
                               [env: SELF_HOSTED_RUNNER_LOG_FILE]
-  --kill-session-after-min <n>
+  --kill-session-after-min <n>    Cap a session child's wall-clock life at N min (runaway backstop).
+                                  At the deadline a session that is waiting on its user (idle, parked
+                                  at a permission prompt, or still starting up) is RELEASED — paused
+                                  server-side, resumable — not killed; a turn in flight is released
+                                  when it next parks or finishes; a turn still running (or a release
+                                  the server keeps declining) is SIGTERMed at the hard cap, 15 min past
+                                  the deadline (override: SELF_HOSTED_RUNNER_MAX_LIFETIME_GRACE_MS, in
+                                  ms). Default: never. Max: ${MAX_MINUTES_FLAG}.
+                                  [env: SELF_HOSTED_RUNNER_MAX_LIFETIME_MS, in ms]
   --exit-if-unused-min <n>
   --release-idle-session-min <n>
   --hold-idle-file <path>     Do not release an idle session while <path> is a
@@ -2113,18 +2121,26 @@ export async function runPollSkeleton(
         let holdLookToken: object | undefined
         let holdLoggedActive = false
         let holdLoggedGrace = false
-        /** densable `Je` — standing release request: retire vs defer-ceiling shutdown */
-        let standingRelease: 'retire' | 'shutdown' = 'retire'
+        /** Official 2.1.323 #2172 (`ze`) — standing release request: retire, defer-ceiling shutdown, or max-age */
+        let standingRelease: 'retire' | 'shutdown' | 'max-age' = 'retire'
         const standingWhy = (): string =>
           standingRelease === 'shutdown'
             ? 'defer ceiling passed'
-            : 'retire time passed'
+            : standingRelease === 'max-age'
+              ? 'max session age reached'
+              : 'retire time passed'
         const standingWhile = (): string =>
           standingRelease === 'shutdown'
             ? 'while shutting down'
-            : 'while retiring'
+            : standingRelease === 'max-age'
+              ? 'at max session age'
+              : 'while retiring'
         const standingGrace = (): string =>
-          standingRelease === 'shutdown' ? 'shutdown grace' : 'retire grace'
+          standingRelease === 'shutdown'
+            ? 'shutdown grace'
+            : standingRelease === 'max-age'
+              ? 'max-session-age grace'
+              : 'retire grace'
 
         const clearIdleTimer = (): void => {
           if (idleTimer !== undefined) {
@@ -2296,7 +2312,9 @@ export async function runPollSkeleton(
           if (
             kind === 'awaiting-action' &&
             snap !== undefined &&
-            (snap.liveTasks > 0 || snap.wakeupInMs !== undefined)
+            (snap.liveTasks > 0 ||
+              snap.wakeupInMs !== undefined ||
+              snap.bgResultAwaitingFollowup === true)
           ) {
             const ids = snap.liveTaskIds.slice(0, 5).join(',')
             const parts = [
@@ -2305,6 +2323,9 @@ export async function runPollSkeleton(
                 : undefined,
               snap.wakeupInMs !== undefined
                 ? `wakeup pending in ${formatDelayMs(snap.wakeupInMs)}`
+                : undefined,
+              snap.bgResultAwaitingFollowup === true
+                ? 'finished background task awaiting the follow-up turn'
                 : undefined,
             ].filter(Boolean)
             opts.onStatus(
@@ -2599,7 +2620,9 @@ export async function runPollSkeleton(
           }, retireDeferredGraceMs)
         }
 
-        const requestStandingRelease = (kind: 'retire' | 'shutdown'): void => {
+        const requestStandingRelease = (
+          kind: 'retire' | 'shutdown' | 'max-age',
+        ): void => {
           if (finished || childAc.signal.aborted) return
           if (retiringThis) {
             opts.onDebug(
@@ -2667,6 +2690,7 @@ export async function runPollSkeleton(
                 checkoutHookTimeoutMs: resolveCheckoutHookTimeoutMs(),
                 startupTimeoutMs,
                 onSessionActivity,
+                onMaxLifetimeDeadline: () => requestStandingRelease('max-age'),
                 onBgTaskLedger: n => {
                   const slot = active.get(sessionId)
                   if (slot) slot.liveBgTasks = n

@@ -1,8 +1,7 @@
 import { rename } from 'fs/promises'
-import { getSessionId } from '../../bootstrap/state.js'
+import { getOriginalCwd, getSessionId } from '../../bootstrap/state.js'
 import type { AppState } from '../../state/AppStateStore.js'
 import { formatAgentId } from '../agentId.js'
-import { getCwd } from '../cwd.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage } from '../errors.js'
 import { logError } from '../log.js'
@@ -81,7 +80,8 @@ export async function initializeSessionTeam(opts?: {
           agentType: TEAM_LEAD_NAME,
           joinedAt: Date.now(),
           tmuxPaneId: 'leader',
-          cwd: getCwd(),
+          // Official 2.1.325 #2365: start in session's original folder, not last shell cd.
+          cwd: getOriginalCwd(),
           subscriptions: [],
           backendType: 'in-process',
         },
@@ -117,7 +117,8 @@ export async function initializeSessionTeam(opts?: {
           color,
           tmuxSessionName: 'in-process',
           tmuxPaneId: 'leader',
-          cwd: getCwd(),
+          // Official 2.1.325 #2365: start in session's original folder, not last shell cd.
+          cwd: getOriginalCwd(),
           spawnedAt: Date.now(),
         },
       },

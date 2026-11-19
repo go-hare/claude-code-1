@@ -11,6 +11,7 @@ import { getCwd } from '../cwd.js'
 import { getErrnoCode } from '../errors.js'
 import { getFsImplementation } from '../fsOperations.js'
 import { findGitRootUncached } from '../git.js'
+import { internalToolSubprocessEnv } from '../subprocessEnv.js'
 import { whichSync } from '../which.js'
 
 export type LocalSettingsGitTrackedValue =
@@ -104,14 +105,15 @@ export function probeLocalSettingsGitTrackedAt(
         encoding: 'utf8',
         timeout: 2000,
         windowsHide: true,
-        env: {
-          ...process.env,
+        // Official 2.1.325 #2372: strip auth secrets & mTLS client key
+        // passphrase from local git subprocesses.
+        env: internalToolSubprocessEnv({
           GIT_LITERAL_PATHSPECS: '',
           LC_ALL: 'C',
           GIT_TRACE2: '',
           GIT_TRACE2_PERF: '',
           GIT_TRACE2_EVENT: '',
-        },
+        }),
       },
     )
     if (result.error && isEnoent(result.error)) {
@@ -122,7 +124,11 @@ export function probeLocalSettingsGitTrackedAt(
       return 'tracked'
     }
     if (result.status === 128) {
-      return /^fatal: not a git repository/.test(result.stderr ?? '')
+      // Official 2.1.325 #2380: tighten to `(or any` so a broken worktree or
+      // submodule `.git` pointer mounted into a container (`fatal: not a git
+      // repository: /host/path/...`) fails closed as `'tracked'` instead of
+      // `'indeterminate'`.
+      return /^fatal: not a git repository \(or any/.test(result.stderr ?? '')
         ? 'indeterminate'
         : 'tracked'
     }
@@ -138,15 +144,72 @@ export function probeLocalSettingsGitTrackedAt(
   }
 }
 
-/** densable `qB` — cwd plus distinct git root. */
+/**
+ * densable `qB` + Official 2.1.325 #2324 (`uL`):
+ * Walk from `cwd` (and `originalCwd` if inside the repo) up through every
+ * parent directory to `gitRoot` (inclusive, normalized with `realpathSync`
+ * fallback so macOS `/var` vs `/private/var` or repo subfolders never miss a
+ * committed `.claude/settings.local.json` at the repo root or an intermediate
+ * folder).
+ */
 export function scanLocalSettingsGitTracked(
   cwd: string = getCwd(),
 ): LocalSettingsGitTrackedValue {
-  const dirs = [cwd]
-  const gitRoot = findGitRootUncached(cwd)
-  if (gitRoot !== null && resolve(gitRoot) !== resolve(cwd)) {
-    dirs.push(gitRoot)
+  const fs = getFsImplementation()
+  const canonical = (p: string): string => {
+    const abs = resolve(p)
+    try {
+      return fs.realpathSync(abs)
+    } catch {
+      return abs
+    }
   }
+  const seen = new Set<string>()
+  const dirs: string[] = []
+  const addDir = (dir: string) => {
+    const key = canonical(dir)
+    if (seen.has(key)) return
+    seen.add(key)
+    dirs.push(dir)
+  }
+
+  const resolvedCwd = resolve(cwd)
+  const gitRoot = findGitRootUncached(resolvedCwd)
+  const resolvedGitRoot = gitRoot !== null ? resolve(gitRoot) : null
+  const canonicalGitRoot =
+    resolvedGitRoot !== null ? canonical(resolvedGitRoot) : null
+
+  addDir(resolvedCwd)
+  if (resolvedGitRoot !== null && canonicalGitRoot !== null) {
+    // Walk every ancestor from cwd up to gitRoot (inclusive) so a committed
+    // `.claude/settings.local.json` in an intermediate folder or repo root is
+    // always caught when Claude Code is started inside a subfolder.
+    let current = resolvedCwd
+    while (canonical(current) !== canonicalGitRoot) {
+      const parent = resolve(current, '..')
+      if (parent === current) break
+      addDir(parent)
+      current = parent
+    }
+    addDir(resolvedGitRoot)
+  }
+
+  const origCwd = resolve(getOriginalCwd())
+  if (origCwd !== resolvedCwd) {
+    const canonicalOrig = canonical(origCwd)
+    if (
+      canonicalGitRoot === null ||
+      canonicalOrig === canonicalGitRoot ||
+      canonicalOrig.startsWith(
+        canonicalGitRoot.endsWith('/')
+          ? canonicalGitRoot
+          : `${canonicalGitRoot}/`,
+      )
+    ) {
+      addDir(origCwd)
+    }
+  }
+
   let indeterminate = false
   for (const dir of dirs) {
     const value = probeLocalSettingsGitTrackedAt(dir)

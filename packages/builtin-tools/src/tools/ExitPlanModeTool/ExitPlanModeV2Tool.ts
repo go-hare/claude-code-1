@@ -1,13 +1,14 @@
 import { feature } from 'bun:bundle'
-import { writeFile } from 'fs/promises'
 import { z } from 'zod/v4'
 import {
   getAllowedChannels,
+  getIsNonInteractiveSession,
   hasExitedPlanModeInSession,
   setHasExitedPlanMode,
   setNeedsAutoModeExitAttachment,
   setNeedsPlanModeExitAttachment,
 } from 'src/bootstrap/state.js'
+import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { logEvent } from 'src/services/analytics/index.js'
 import {
   EXIT_PLAN_MODE_TRIGGER,
@@ -32,6 +33,7 @@ import { logError } from 'src/utils/log.js'
 import {
   getPlan,
   getPlanFilePath,
+  persistApprovedPlanEdit,
   persistFileSnapshotIfRemote,
 } from 'src/utils/plans.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
@@ -149,11 +151,67 @@ export const outputSchema = lazySchema(() =>
       .describe(
         'When true, the plan approval request could not be written to the team-lead mailbox',
       ),
+    /** 2.1.325 #2268: warning notice when plansDirectory could not accept the approved edit */
+    planSaveNotice: z
+      .string()
+      .optional()
+      .describe(
+        'Warning notice emitted when the approved plan edit fell back to the default plans folder or could not be saved',
+      ),
   }),
 )
 type OutputSchema = ReturnType<typeof outputSchema>
 
 export type Output = z.infer<OutputSchema>
+
+/**
+ * 2.1.323 #2140: Detects whether a cloud, self-hosted runner, or SDK session
+ * restarted while a plan was awaiting approval (so its in-memory mode reset
+ * from 'plan' to 'default' even though an unapproved plan is still open).
+ */
+export function isRestartedPlanApprovalContext(
+  context: {
+    agentId?: string
+    messages?: ReadonlyArray<{
+      type?: string
+      message?: { content?: unknown }
+    }>
+  },
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const isRestartableHost =
+    getIsNonInteractiveSession() ||
+    isEnvTruthy(env.CLAUDE_CODE_REMOTE) ||
+    env.CLAUDE_CODE_ENTRYPOINT === 'sdk-ts' ||
+    env.CLAUDE_CODE_ENTRYPOINT === 'sdk-py' ||
+    env.CLAUDE_CODE_ENTRYPOINT === 'sdk-cli' ||
+    env.CLAUDE_CODE_ENTRYPOINT === 'self-hosted-runner'
+  if (!isRestartableHost || hasExitedPlanModeInSession()) {
+    return false
+  }
+  if (Array.isArray(context.messages) && context.messages.length > 0) {
+    let openPlan = false
+    for (const msg of context.messages) {
+      if (msg?.type !== 'assistant') continue
+      const content = msg.message?.content
+      if (!Array.isArray(content)) continue
+      for (const block of content) {
+        if (
+          block &&
+          typeof block === 'object' &&
+          'type' in block &&
+          block.type === 'tool_use'
+        ) {
+          const name = (block as { name?: string }).name
+          if (name === 'EnterPlanMode') openPlan = true
+          else if (name === 'ExitPlanMode') openPlan = false
+        }
+      }
+    }
+    if (openPlan) return true
+  }
+  return getPlan(context.agentId as Parameters<typeof getPlan>[0]) !== null
+}
 
 export const ExitPlanModeV2Tool: Tool<InputSchema, Output> = buildTool({
   name: EXIT_PLAN_MODE_V2_TOOL_NAME,
@@ -203,7 +261,8 @@ export const ExitPlanModeV2Tool: Tool<InputSchema, Output> = buildTool({
     // For non-teammates, require user confirmation to exit plan mode
     return true
   },
-  async validateInput(_input, { getAppState, options }) {
+  async validateInput(_input, context) {
+    const { getAppState, options } = context
     // Teammate AppState may show leader's mode (runAgent.ts skips override in
     // acceptEdits/bypassPermissions/auto); isPlanModeRequired() is the real source
     if (isTeammate()) {
@@ -214,6 +273,15 @@ export const ExitPlanModeV2Tool: Tool<InputSchema, Output> = buildTool({
     // Reject before checkPermissions to avoid showing the approval dialog.
     const mode = getAppState().toolPermissionContext.mode
     if (mode !== 'plan') {
+      // 2.1.323 #2140: in cloud, self-hosted runner, and SDK sessions, if the
+      // session process restarted before plan approval arrived, restore plan
+      // mode context instead of rejecting with "You are not in plan mode".
+      if (isRestartedPlanApprovalContext(context)) {
+        logForDebugging(
+          `[ExitPlanMode] Restoring plan mode after process restart (was ${mode})`,
+        )
+        return { result: true }
+      }
       logEvent('tengu_exit_plan_mode_called_outside_plan', {
         model:
           options.mainLoopModel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -254,7 +322,7 @@ export const ExitPlanModeV2Tool: Tool<InputSchema, Output> = buildTool({
   async call(input, context) {
     const isAgent = !!context.agentId
 
-    const filePath = getPlanFilePath(context.agentId)
+    let filePath = getPlanFilePath(context.agentId)
     // CCR web UI may send an edited plan via permissionResult.updatedInput.
     // queryHelpers.ts full-replaces finalInput, so when CCR sends {} (no edit)
     // input.plan is undefined -> disk fallback. The internal inputSchema omits
@@ -266,8 +334,25 @@ export const ExitPlanModeV2Tool: Tool<InputSchema, Output> = buildTool({
     // Sync disk so VerifyPlanExecution / Read see the edit. Re-snapshot
     // after: the only other persistFileSnapshotIfRemote call (api.ts) runs
     // in normalizeToolInput, pre-permission — it captured the old plan.
+    // 2.1.325 #2268 (SEA `N6s` @284740124): if `plansDirectory` cannot accept
+    // the approved edit, fall back to the default plans folder and warn where
+    // and why.
+    let planSaveNotice: string | undefined
     if (inputPlan !== undefined && filePath) {
-      await writeFile(filePath, inputPlan, 'utf-8').catch(e => logError(e))
+      const saveOutcome = await persistApprovedPlanEdit(filePath, inputPlan)
+      if (saveOutcome !== undefined) {
+        planSaveNotice = saveOutcome.notice
+        if (saveOutcome.savedTo !== undefined) {
+          filePath = saveOutcome.savedTo
+        }
+        context.addNotification?.({
+          key: 'plan-edit-save-fallback',
+          text: saveOutcome.notice,
+          priority: 'immediate',
+          color: 'warning',
+          timeoutMs: 10000,
+        })
+      }
       void persistFileSnapshotIfRemote()
     }
 
@@ -379,55 +464,65 @@ export const ExitPlanModeV2Tool: Tool<InputSchema, Output> = buildTool({
       })
     }
 
-    context.setAppState(prev => {
-      if (prev.toolPermissionContext.mode !== 'plan') return prev
-      setHasExitedPlanMode(true)
-      setNeedsPlanModeExitAttachment(true)
-      let restoreMode = prev.toolPermissionContext.prePlanMode ?? 'default'
-      if (feature('TRANSCRIPT_CLASSIFIER')) {
+    // 2.1.325 #2295: Approving a subagent's plan must NOT mutate the main
+    // session's shared permission mode or consume/revert its `prePlanMode`.
+    if (!isAgent) {
+      context.setAppState(prev => {
+        if (prev.toolPermissionContext.mode !== 'plan') return prev
+        setHasExitedPlanMode(true)
+        setNeedsPlanModeExitAttachment(true)
+        let restoreMode = prev.toolPermissionContext.prePlanMode ?? 'default'
         if (
-          restoreMode === 'auto' &&
-          !(permissionSetupModule?.isAutoModeGateEnabled() ?? false)
+          restoreMode === 'bypassPermissions' &&
+          !prev.toolPermissionContext.isBypassPermissionsModeAvailable
         ) {
           restoreMode = 'default'
         }
-        const finalRestoringAuto = restoreMode === 'auto'
-        // Capture pre-restore state — isAutoModeActive() is the authoritative
-        // signal (prePlanMode/strippedDangerousRules are stale after
-        // transitionPlanAutoMode deactivates mid-plan).
-        const autoWasUsedDuringPlan =
-          autoModeStateModule?.isAutoModeActive() ?? false
-        autoModeStateModule?.setAutoModeActive(finalRestoringAuto)
-        if (autoWasUsedDuringPlan && !finalRestoringAuto) {
-          setNeedsAutoModeExitAttachment(true)
+        if (feature('TRANSCRIPT_CLASSIFIER')) {
+          if (
+            restoreMode === 'auto' &&
+            !(permissionSetupModule?.isAutoModeGateEnabled() ?? false)
+          ) {
+            restoreMode = 'default'
+          }
+          const finalRestoringAuto = restoreMode === 'auto'
+          // Capture pre-restore state — isAutoModeActive() is the authoritative
+          // signal (prePlanMode/strippedDangerousRules are stale after
+          // transitionPlanAutoMode deactivates mid-plan).
+          const autoWasUsedDuringPlan =
+            autoModeStateModule?.isAutoModeActive() ?? false
+          autoModeStateModule?.setAutoModeActive(finalRestoringAuto)
+          if (autoWasUsedDuringPlan && !finalRestoringAuto) {
+            setNeedsAutoModeExitAttachment(true)
+          }
         }
-      }
-      // If restoring to a non-auto mode and permissions were stripped (either
-      // from entering plan from auto, or from shouldPlanUseAutoMode),
-      // restore them. If restoring to auto, keep them stripped.
-      const restoringToAuto = restoreMode === 'auto'
-      let baseContext = prev.toolPermissionContext
-      if (restoringToAuto) {
-        baseContext =
-          permissionSetupModule?.stripDangerousPermissionsForAutoMode(
-            baseContext,
-          ) ?? baseContext
-      } else if (prev.toolPermissionContext.strippedDangerousRules) {
-        baseContext =
-          permissionSetupModule?.restoreDangerousPermissions(baseContext) ??
-          baseContext
-      }
-      // densable qLe({from:"plan",to:m,trigger:"exit_plan_mode"}) before set
-      logPermissionModeChanged('plan', restoreMode, EXIT_PLAN_MODE_TRIGGER)
-      return {
-        ...prev,
-        toolPermissionContext: {
-          ...baseContext,
-          mode: restoreMode,
-          prePlanMode: undefined,
-        },
-      }
-    })
+        // If restoring to a non-auto mode and permissions were stripped (either
+        // from entering plan from auto, or from shouldPlanUseAutoMode),
+        // restore them. If restoring to auto, keep them stripped.
+        const restoringToAuto = restoreMode === 'auto'
+        let baseContext = prev.toolPermissionContext
+        if (restoringToAuto) {
+          baseContext =
+            permissionSetupModule?.stripDangerousPermissionsForAutoMode(
+              baseContext,
+            ) ?? baseContext
+        } else if (prev.toolPermissionContext.strippedDangerousRules) {
+          baseContext =
+            permissionSetupModule?.restoreDangerousPermissions(baseContext) ??
+            baseContext
+        }
+        // densable qLe({from:"plan",to:m,trigger:"exit_plan_mode"}) before set
+        logPermissionModeChanged('plan', restoreMode, EXIT_PLAN_MODE_TRIGGER)
+        return {
+          ...prev,
+          toolPermissionContext: {
+            ...baseContext,
+            mode: restoreMode,
+            prePlanMode: undefined,
+          },
+        }
+      })
+    }
 
     const hasTaskTool =
       isAgentSwarmsEnabled() &&
@@ -440,6 +535,7 @@ export const ExitPlanModeV2Tool: Tool<InputSchema, Output> = buildTool({
         filePath,
         hasTaskTool: hasTaskTool || undefined,
         planWasEdited: inputPlan !== undefined || undefined,
+        ...(planSaveNotice !== undefined && { planSaveNotice }),
       },
     }
   },
@@ -453,6 +549,7 @@ export const ExitPlanModeV2Tool: Tool<InputSchema, Output> = buildTool({
       awaitingLeaderApproval,
       requestId,
       mailboxWriteFailed,
+      planSaveNotice,
     },
     toolUseID,
   ) {
@@ -520,12 +617,14 @@ Request ID: ${requestId}`,
       ? 'Approved Plan (edited by user)'
       : 'Approved Plan'
 
+    const noticeSuffix = planSaveNotice ? `\n\nWarning: ${planSaveNotice}` : ''
+
     return {
       type: 'tool_result',
       content: `User has approved your plan. You can now start coding. Start with updating your todo list if applicable
 
 Your plan has been saved to: ${filePath}
-You can refer back to it if needed during implementation.${teamHint}
+You can refer back to it if needed during implementation.${noticeSuffix}${teamHint}
 
 ## ${planLabel}:
 ${plan}`,

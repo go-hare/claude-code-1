@@ -1098,6 +1098,47 @@ export function checkHasTrustDialogAccepted(): boolean {
   return (_trustAccepted ||= computeTrustDialogAccepted())
 }
 
+/**
+ * Official 2.1.325 #2339: on Windows, a resumed session may record a path with
+ * a different drive-letter case (`c:/Users/...` vs `C:/Users/...`) than the
+ * saved key in `config.projects`. Look up the exact key first, then fall back
+ * to swapping the drive-letter case so saved trust is preserved.
+ */
+export function getProjectConfigEntryForPath(
+  projects: Record<string, ProjectConfig | undefined> | null | undefined,
+  pathKey: string,
+): ProjectConfig | undefined {
+  if (!projects) return undefined
+  const exact = projects[pathKey]
+  if (exact !== undefined) return exact
+  if (/^[a-zA-Z]:/.test(pathKey)) {
+    const ch = pathKey[0]!
+    const flipped =
+      (ch === ch.toUpperCase() ? ch.toLowerCase() : ch.toUpperCase()) +
+      pathKey.slice(1)
+    return projects[flipped]
+  }
+  return undefined
+}
+
+function normalizeDriveLetterForCompare(pathKey: string): string {
+  return /^[a-zA-Z]:/.test(pathKey)
+    ? pathKey[0]!.toLowerCase() + pathKey.slice(1)
+    : pathKey
+}
+
+function parentConfigPathKey(pathKey: string): string {
+  if (/^[a-zA-Z]:/.test(pathKey)) {
+    const trimmed = pathKey.replace(/\/+$/, '')
+    const lastSlash = trimmed.lastIndexOf('/')
+    if (lastSlash <= 2) {
+      return `${trimmed.slice(0, 2)}/`
+    }
+    return trimmed.slice(0, lastSlash)
+  }
+  return normalizePathForConfigKey(resolve(pathKey, '..'))
+}
+
 function computeTrustDialogAccepted(): boolean {
   // Check session-level trust (for home directory case where trust is not persisted)
   // When running from home dir, trust dialog is shown but acceptance is stored
@@ -1117,7 +1158,10 @@ function computeTrustDialogAccepted(): boolean {
   // Always check where trust would be saved (git root or original cwd)
   // This is the primary location where trust is persisted by saveCurrentProjectConfig
   const projectPath = getProjectPathForConfig()
-  const projectConfig = config.projects?.[projectPath]
+  const projectConfig = getProjectConfigEntryForPath(
+    config.projects,
+    projectPath,
+  )
   if (projectConfig?.hasTrustDialogAccepted) {
     return true
   }
@@ -1165,27 +1209,31 @@ export function walkHasTrustDialogAcceptedBounded(
   gitRootKey: string | null,
 ): boolean {
   let currentPath = startPathKey
+  const cmpRoot =
+    gitRootKey !== null ? normalizeDriveLetterForCompare(gitRootKey) : null
   while (true) {
+    const cmpCurrent = normalizeDriveLetterForCompare(currentPath)
     // densable: if bound, only consider paths inside the git root
-    if (gitRootKey !== null) {
-      const rootPrefix = gitRootKey.endsWith('/')
-        ? gitRootKey
-        : `${gitRootKey}/`
-      if (currentPath !== gitRootKey && !currentPath.startsWith(rootPrefix)) {
+    if (cmpRoot !== null) {
+      const rootPrefix = cmpRoot.endsWith('/') ? cmpRoot : `${cmpRoot}/`
+      if (cmpCurrent !== cmpRoot && !cmpCurrent.startsWith(rootPrefix)) {
         return false
       }
     }
 
-    if (config.projects?.[currentPath]?.hasTrustDialogAccepted) {
+    if (
+      getProjectConfigEntryForPath(config.projects, currentPath)
+        ?.hasTrustDialogAccepted
+    ) {
       return true
     }
 
     // densable: at git root without a match — do not walk into parent repo
-    if (gitRootKey !== null && currentPath === gitRootKey) {
+    if (cmpRoot !== null && cmpCurrent === cmpRoot) {
       return false
     }
 
-    const parentPath = normalizePathForConfigKey(resolve(currentPath, '..'))
+    const parentPath = parentConfigPathKey(currentPath)
     if (parentPath === currentPath) {
       return false
     }
@@ -1214,7 +1262,9 @@ export function isPathTrusted(
     const key = normalizePathForConfigKey(
       findCanonicalGitRootUncached(dir) ?? resolve(dir),
     )
-    if (config.projects?.[key]?.hasTrustDialogAccepted) {
+    if (
+      getProjectConfigEntryForPath(config.projects, key)?.hasTrustDialogAccepted
+    ) {
       return true
     }
   }
@@ -1253,6 +1303,24 @@ function wouldLoseAuthState(fresh: {
     cached.hasCompletedOnboarding === true &&
     fresh.hasCompletedOnboarding !== true
   return lostOauth || lostOnboarding
+}
+
+/**
+ * Official 2.1.323 (#1986): Detect Out-of-Memory errors (`ENOMEM` or JSC/V8
+ * "Out of memory" message) during config persistence so startup and sign-out
+ * credential clearing never crash or abort on OOM config saves.
+ */
+export function isConfigSaveOutOfMemoryError(error: unknown): boolean {
+  if (getErrnoCode(error) === 'ENOMEM') {
+    return true
+  }
+  const msg =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : ''
+  return /out of memory/i.test(msg)
 }
 
 export function saveGlobalConfig(
@@ -1327,6 +1395,17 @@ export function saveGlobalConfig(
     logForDebugging(`Failed to save config with lock: ${error}`, {
       level: 'error',
     })
+    // Official 2.1.323 (#1986): If saving failed with Out of memory / ENOMEM,
+    // degrade gracefully without re-throwing so startup and sign-out credential
+    // clearing still complete.
+    if (isConfigSaveOutOfMemoryError(error)) {
+      doubtsNoFile = true
+      logForDebugging(
+        'saveGlobalConfig: skipping fallback write after Out of memory error; continuing without persisting.',
+        { level: 'error' },
+      )
+      return false
+    }
     // Fall back to non-locked version on error. This fallback is a race
     // window: if another process is mid-write (or the file got truncated),
     // getConfig returns defaults. Refuse to write those over a good cached
@@ -1337,58 +1416,61 @@ export function saveGlobalConfig(
     const MAX_CREATE_REFUSED_RETRIES = 4
     configCreateRefused = false
     for (let attempt = 0; attempt < MAX_CREATE_REFUSED_RETRIES; attempt++) {
-      const currentConfig = getConfig(
-        getGlobalClaudeFile(),
-        createDefaultGlobalConfig,
-      )
-      if (
-        lastGetConfigOutcome === 'read-error' ||
-        lastGetConfigOutcome === 'parse-error'
-      ) {
-        doubtsNoFile = true
-        logForDebugging(
-          'Config re-read was rejected (disk unreadable); suppressing the unlocked fallback write (saveGlobalConfig).',
-          { level: 'error' },
-        )
-        return false
-      }
-      const foundNoFile = lastGetConfigOutcome === 'enoent'
-      if (foundNoFile && doubtsNoFile) {
-        logForDebugging(
-          'saveGlobalConfig fallback: global config read as missing though there is reason to doubt it; refusing to overwrite.',
-          { level: 'warn' },
-        )
-        return false
-      }
-      if (foundNoFile) {
-        fallbackReadFoundNoFile = true
-      }
-      if (wouldLoseAuthState(currentConfig)) {
-        fallbackReadFoundNoFile = false
-        logForDebugging(
-          'saveGlobalConfig fallback: re-read config is missing auth that cache has; refusing to write. See GH #3117.',
-          { level: 'error' },
-        )
-        logEvent('tengu_config_auth_loss_prevented', {})
-        return false
-      }
-      const config = updater(currentConfig)
-      // Skip if no changes (same reference returned)
-      if (config === currentConfig) {
-        fallbackReadFoundNoFile = false
-        return true
-      }
-      const next: GlobalConfig = {
-        ...config,
-        projects: removeProjectHistory(currentConfig.projects),
-      }
-      if (jsonStringify(next) === jsonStringify(currentConfig)) {
-        fallbackReadFoundNoFile = false
-        return true
-      }
-      written = next
-      const useCreateOnly = fallbackReadFoundNoFile
+      let currentConfig: GlobalConfig
+      let next: GlobalConfig
+      let useCreateOnly = false
       try {
+        currentConfig = getConfig(
+          getGlobalClaudeFile(),
+          createDefaultGlobalConfig,
+        )
+        if (
+          lastGetConfigOutcome === 'read-error' ||
+          lastGetConfigOutcome === 'parse-error'
+        ) {
+          doubtsNoFile = true
+          logForDebugging(
+            'Config re-read was rejected (disk unreadable); suppressing the unlocked fallback write (saveGlobalConfig).',
+            { level: 'error' },
+          )
+          return false
+        }
+        const foundNoFile = lastGetConfigOutcome === 'enoent'
+        if (foundNoFile && doubtsNoFile) {
+          logForDebugging(
+            'saveGlobalConfig fallback: global config read as missing though there is reason to doubt it; refusing to overwrite.',
+            { level: 'warn' },
+          )
+          return false
+        }
+        if (foundNoFile) {
+          fallbackReadFoundNoFile = true
+        }
+        if (wouldLoseAuthState(currentConfig)) {
+          fallbackReadFoundNoFile = false
+          logForDebugging(
+            'saveGlobalConfig fallback: re-read config is missing auth that cache has; refusing to write. See GH #3117.',
+            { level: 'error' },
+          )
+          logEvent('tengu_config_auth_loss_prevented', {})
+          return false
+        }
+        const config = updater(currentConfig)
+        // Skip if no changes (same reference returned)
+        if (config === currentConfig) {
+          fallbackReadFoundNoFile = false
+          return true
+        }
+        next = {
+          ...config,
+          projects: removeProjectHistory(currentConfig.projects),
+        }
+        if (jsonStringify(next) === jsonStringify(currentConfig)) {
+          fallbackReadFoundNoFile = false
+          return true
+        }
+        written = next
+        useCreateOnly = fallbackReadFoundNoFile
         saveConfig(getGlobalClaudeFile(), written, DEFAULT_GLOBAL_CONFIG, {
           createOnly: useCreateOnly,
         })
@@ -2979,45 +3061,53 @@ export function saveCurrentProjectConfig(
     logForDebugging(`Failed to save config with lock: ${error}`, {
       level: 'error',
     })
+    if (isConfigSaveOutOfMemoryError(error)) {
+      doubtsNoFile = true
+      logForDebugging(
+        'saveCurrentProjectConfig: skipping fallback write after Out of memory error; continuing without persisting.',
+        { level: 'error' },
+      )
+      return false
+    }
 
     // Same race window as saveGlobalConfig's fallback -- refuse to write
     // defaults over good cached config. See GH #3117.
-    const config = getConfig(getGlobalClaudeFile(), createDefaultGlobalConfig)
-    if (
-      lastGetConfigOutcome === 'read-error' ||
-      lastGetConfigOutcome === 'parse-error' ||
-      (lastGetConfigOutcome === 'enoent' && doubtsNoFile)
-    ) {
-      doubtsNoFile = true
-      logForDebugging(
-        'saveCurrentProjectConfig fallback: config re-read was rejected or ENOENT is doubted; refusing to write.',
-        { level: 'error' },
-      )
-      return false
-    }
-    if (wouldLoseAuthState(config)) {
-      logForDebugging(
-        'saveCurrentProjectConfig fallback: re-read config is missing auth that cache has; refusing to write. See GH #3117.',
-        { level: 'error' },
-      )
-      logEvent('tengu_config_auth_loss_prevented', {})
-      return false
-    }
-    const currentProjectConfig =
-      config.projects?.[absolutePath] ?? DEFAULT_PROJECT_CONFIG
-    const newProjectConfig = updater(currentProjectConfig)
-    // Skip if no changes (same reference returned)
-    if (newProjectConfig === currentProjectConfig) {
-      return true
-    }
-    written = {
-      ...config,
-      projects: {
-        ...config.projects,
-        [absolutePath]: newProjectConfig,
-      },
-    }
     try {
+      const config = getConfig(getGlobalClaudeFile(), createDefaultGlobalConfig)
+      if (
+        lastGetConfigOutcome === 'read-error' ||
+        lastGetConfigOutcome === 'parse-error' ||
+        (lastGetConfigOutcome === 'enoent' && doubtsNoFile)
+      ) {
+        doubtsNoFile = true
+        logForDebugging(
+          'saveCurrentProjectConfig fallback: config re-read was rejected or ENOENT is doubted; refusing to write.',
+          { level: 'error' },
+        )
+        return false
+      }
+      if (wouldLoseAuthState(config)) {
+        logForDebugging(
+          'saveCurrentProjectConfig fallback: re-read config is missing auth that cache has; refusing to write. See GH #3117.',
+          { level: 'error' },
+        )
+        logEvent('tengu_config_auth_loss_prevented', {})
+        return false
+      }
+      const currentProjectConfig =
+        config.projects?.[absolutePath] ?? DEFAULT_PROJECT_CONFIG
+      const newProjectConfig = updater(currentProjectConfig)
+      // Skip if no changes (same reference returned)
+      if (newProjectConfig === currentProjectConfig) {
+        return true
+      }
+      written = {
+        ...config,
+        projects: {
+          ...config.projects,
+          [absolutePath]: newProjectConfig,
+        },
+      }
       saveConfig(getGlobalClaudeFile(), written, DEFAULT_GLOBAL_CONFIG)
       writeThroughGlobalConfigCache(written)
       return true

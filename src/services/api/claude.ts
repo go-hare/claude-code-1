@@ -457,6 +457,7 @@ import {
   isUnprocessableMediaError,
 } from './errors.js'
 import { extractConnectionErrorDetails } from './errorUtils.js'
+import { sanitizeLoneSurrogatesInPlace } from '../../utils/sanitization.js'
 import {
   isAnthropicMessageShape,
   type OriginatingStreamFailure,
@@ -2352,6 +2353,35 @@ async function* queryModel(
       throw new ToolSearchRefusalError(error)
     }
 
+    // Official 2.1.323 (#1987): recover from mid-conversation role:"system" and
+    // api_system cache_control rejections on non-streaming requests as well as
+    // streaming requests via the shared `onError` handler.
+    if (error instanceof APIError && error.status === 400) {
+      if (midConvFallback && isMidConvSystemRoleRejected(error)) {
+        messagesForAPI = midConvFallback()
+        midConvFallback = null
+        latchMidConvSystemRejected()
+        clearBetasCaches()
+        betas = betas.filter(b => b !== MID_CONVERSATION_SYSTEM_BETA_HEADER)
+        logForDebugging(
+          '[mid-conv-system] server rejected role:"system" — falling back to a body with no {role:"system"} turn, sticky-rejecting the beta until /clear or /compact',
+          { level: 'warn' },
+        )
+        return 'retry:mid-conv-system'
+      }
+      if (
+        shouldCacheControlOnApiSystem() &&
+        isApiSystemCacheControlRejected(error)
+      ) {
+        latchMidConvCachePromotionRejected()
+        logForDebugging(
+          '[mid-conv-system] proxy rejected cache_control on the api_system tail — demoting the breakpoint to the trailing message for this conversation',
+          { level: 'warn' },
+        )
+        return 'retry:api-system-cache-demote'
+      }
+    }
+
     return undefined
   }
 
@@ -2921,18 +2951,24 @@ async function* queryModel(
     )
     lastSentToolSchemas = resolvedTools
 
+    const messagesWithBreakpoints = addCacheBreakpoints(
+      messagesForAPI,
+      enablePromptCaching,
+      options.querySource,
+      useCachedMC,
+      consumedCacheEdits as any,
+      consumedPinnedEdits as any,
+      options.skipCacheWrite,
+      options.agentCacheTtlOverride,
+    )
+    // Official 2.1.323 (#2062): sanitize lone UTF-16 surrogates in both string
+    // values AND object keys (e.g. broken emoji characters in tool_use input
+    // parameter names) before serialization so strict JSON parsers accept them.
+    sanitizeLoneSurrogatesInPlace(messagesWithBreakpoints, true)
+
     return {
       model: normalizeModelStringForAPI(options.model),
-      messages: addCacheBreakpoints(
-        messagesForAPI,
-        enablePromptCaching,
-        options.querySource,
-        useCachedMC,
-        consumedCacheEdits as any,
-        consumedPinnedEdits as any,
-        options.skipCacheWrite,
-        options.agentCacheTtlOverride,
-      ),
+      messages: messagesWithBreakpoints,
       system,
       tools: resolvedTools,
       tool_choice: toolChoice,
@@ -4641,7 +4677,9 @@ async function* queryModel(
           // eslint-disable-next-line eslint-plugin-n/no-unsupported-features/node-builtins
           const resp = streamResponse as unknown as Response | undefined
           if (resp) {
-            extractQuotaStatusFromHeaders(resp.headers)
+            extractQuotaStatusFromHeaders(resp.headers, Date.now(), {
+              querySource: options.querySource,
+            })
             // Non-Anthropic providers that flow through this same client path
             // (Bedrock) expose their own throttle headers — let their adapter
             // overwrite the store with its bucket(s). Anthropic's adapter runs

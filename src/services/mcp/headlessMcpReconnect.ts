@@ -12,9 +12,14 @@ import { logForDebugging } from '../../utils/debug.js'
 import { errorMessage } from '../../utils/errors.js'
 import { isShuttingDown } from '../../utils/gracefulShutdown.js'
 import { logMCPDebug } from '../../utils/log.js'
-import { createMcpAuthTool } from '@claude-code/builtin-tools/tools/McpAuthTool/McpAuthTool.js'
+import { createMcpAuthTools } from '@claude-code/builtin-tools/tools/McpAuthTool/McpAuthTool.js'
 import { isMcpServerAllowedByPolicy, isMcpServerDisabled } from './config.js'
-import { getServerCacheKey, mcpClientModule } from './client.js'
+import {
+  getServerCacheKey,
+  mcpClientModule,
+  registerConnectedClientWiring,
+  registerMcpToolsSwapper,
+} from './client.js'
 import { getMcpPrefix } from './mcpStringUtils.js'
 import {
   getMcpIdentityEpoch,
@@ -161,7 +166,7 @@ export function needsAuthReconnectTools(
   name: string,
   config: ScopedMcpServerConfig,
 ): Tool[] {
-  return [createMcpAuthTool(name, config)]
+  return createMcpAuthTools(name, config)
 }
 
 /** Official `du`. */
@@ -538,19 +543,58 @@ export async function reconnectHeadlessRemoteMcpAfterClose(
   }
 }
 
+export type HeadlessRemoteMcpReconnectAttach = ((
+  clients: readonly MCPServerConnection[],
+) => void) & {
+  dispose: () => void
+  cleanup: () => void
+}
+
 /**
  * Official `mS` — attach onclose once per connected remote client (WeakSet),
  * with young-close hold-off backoff up to 30s.
  */
 export function attachHeadlessRemoteMcpReconnect(
   deps: HeadlessMcpReconnectDeps,
-): (clients: readonly MCPServerConnection[]) => void {
+): HeadlessRemoteMcpReconnectAttach {
   const wired = new WeakSet<object>()
   const latestByClient = new WeakMap<object, ConnectedMCPServer>()
   const youngClosesByClient = new WeakMap<object, number>()
   const now = deps.now ?? Date.now
   const sleep = deps.sleep ?? unrefSleep
-  return clients => {
+  // Official 2.1.325 #2305: ensure mid-tool-call reconnects immediately wire
+  // headless elicitation/channel handlers via `deps.onReconnected`.
+  const unregisterConnectedClientWiring = registerConnectedClientWiring(
+    connected => {
+      deps.onReconnected(connected)
+    },
+  )
+  // Official 2.1.325 #2306: register live tool swapper so SDK host tool calls
+  // point to the reconnected client instead of answering "Not connected".
+  const unregisterMcpToolsSwapper = registerMcpToolsSwapper(
+    (serverName, tools, config, connectedClient) => {
+      const existing = findClient(deps, serverName)
+      if (!existing) return false
+      if (
+        mcpSlotSignature(serverName, existing.config) !==
+        mcpSlotSignature(serverName, config)
+      ) {
+        return false
+      }
+      const nextClient: MCPServerConnection = connectedClient ?? existing
+      applyHeadlessMcpSettlement(deps, serverName, {
+        client: nextClient,
+        tools,
+        attemptEpoch: getMcpIdentityEpoch(),
+      })
+      return true
+    },
+  )
+  const dispose = (): void => {
+    unregisterConnectedClientWiring()
+    unregisterMcpToolsSwapper()
+  }
+  const attach = ((clients: readonly MCPServerConnection[]): void => {
     for (const connection of clients) {
       if (connection.type === 'connected') {
         latestByClient.set(connection.client, connection)
@@ -608,5 +652,8 @@ export function attachHeadlessRemoteMcpReconnect(
         setImmediate(reconnect, true)
       }
     }
-  }
+  }) as HeadlessRemoteMcpReconnectAttach
+  attach.dispose = dispose
+  attach.cleanup = dispose
+  return attach
 }

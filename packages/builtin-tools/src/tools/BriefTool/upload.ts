@@ -28,6 +28,11 @@ import { getOauthConfig } from 'src/constants/oauth.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { getPlatform } from 'src/utils/platform.js'
+import {
+  formatUnsaveableSkillRefusal,
+  isSkillAttachmentPath,
+  validateSkillAttachmentForUpload,
+} from 'src/utils/plugins/skillUploadValidation.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 
 // Matches the private_api backend limit
@@ -294,6 +299,21 @@ export async function uploadBriefAttachmentWithStatus(
       debug(`read failed for ${fullPath}: ${e}`)
       return {
         error: `upload failed: could not read file (${e instanceof Error ? e.message : String(e)})`,
+      }
+    }
+
+    // Official 2.1.323 #2146: validate SKILL.md and .skill archives before
+    // uploading to claude.ai so unsaveable skills fail fast with actionable copy.
+    if (isSkillAttachmentPath(fullPath)) {
+      const failure = validateSkillAttachmentForUpload(fullPath, content)
+      if (failure) {
+        const refusal = formatUnsaveableSkillRefusal(fullPath, content)
+        debug(`refuse skill upload ${fullPath}: ${failure.rule}`)
+        return {
+          error:
+            refusal?.message ??
+            `not sent: claude.ai would refuse to save it as a skill, because ${failure.why}.`,
+        }
       }
     }
 

@@ -1328,17 +1328,18 @@ export async function compactConversation(
       .filter(Boolean)
       .join('\n')
 
-    // Official 2.1.321 (#1862): preserve trailing unanswered background subagent
-    // `<task-notification>` user messages when compacting before Claude answers
-    // them (e.g. in auto mode when a background subagent report started a turn).
-    const preservedTaskNotifications =
-      extractUnansweredTaskNotifications(messages)
+    // Official 2.1.321 (#1862) + 2.1.323 (#1980): preserve trailing unanswered
+    // user messages (including after a prior /compact or local command such as
+    // /context) and unanswered background subagent `<task-notification>` messages
+    // so compaction never summarizes away a message Claude has not answered yet.
+    const preservedTrailingMessages =
+      extractUnansweredTrailingMessages(messages)
 
     return {
       boundaryMarker,
       summaryMessages,
-      ...(preservedTaskNotifications.length > 0
-        ? { messagesToKeep: preservedTaskNotifications }
+      ...(preservedTrailingMessages.length > 0
+        ? { messagesToKeep: preservedTrailingMessages }
         : {}),
       attachments: postCompactFileAttachments,
       hookResults: hookMessages,
@@ -2464,6 +2465,106 @@ export function extractUnansweredTaskNotifications(
   }
   const trailing = messages.slice(lastAssistantIdx + 1)
   return trailing.filter(isTaskNotificationMessage)
+}
+
+function isLocalCommandUserMessage(msg: Message): boolean {
+  if (msg.type !== 'user') return false
+  const content = msg.message?.content
+  const text =
+    typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? content
+            .filter(
+              (b): b is { type: 'text'; text: string } =>
+                typeof b === 'object' &&
+                b !== null &&
+                b.type === 'text' &&
+                typeof (b as { text?: unknown }).text === 'string',
+            )
+            .map(b => b.text)
+            .join('\n')
+        : ''
+  return (
+    text.includes('<command-name>') ||
+    text.includes('<local-command-stdout>') ||
+    text.includes('<local-command-stderr>') ||
+    text.includes('<local-command-caveat>')
+  )
+}
+
+function isToolResultUserMessage(msg: Message): boolean {
+  if (msg.type !== 'user') return false
+  const content = msg.message?.content
+  return (
+    Array.isArray(content) &&
+    content.some(
+      b => typeof b === 'object' && b !== null && b.type === 'tool_result',
+    )
+  )
+}
+
+/**
+ * Official 2.1.323 (#1980) `Yft` / `Tue` / `P$n`:
+ * Split messages so an unanswered user prompt after the last real assistant
+ * reply (even if followed by local commands like `/context` or another
+ * `/compact`) is kept verbatim rather than summarized away.
+ */
+export function splitUnansweredTrailingTurn(messages: readonly Message[]): {
+  toSummarize: Message[]
+  toKeep: Message[]
+} {
+  let lastAnsweredIdx = -1
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]
+    if (!m) continue
+    const isRealAssistant = m.type === 'assistant' && !m.isApiErrorMessage
+    const isToolResult = isToolResultUserMessage(m)
+    if (isRealAssistant || isToolResult) {
+      lastAnsweredIdx = i
+      break
+    }
+  }
+  const tailStart = lastAnsweredIdx + 1
+  for (let i = messages.length - 1; i >= tailStart; i--) {
+    const m = messages[i]
+    if (!m || m.type !== 'user') continue
+    if (
+      m.isMeta ||
+      m.isCompactSummary ||
+      isToolResultUserMessage(m) ||
+      isLocalCommandUserMessage(m)
+    ) {
+      continue
+    }
+    return {
+      toSummarize: messages.slice(0, i),
+      toKeep: messages.slice(i),
+    }
+  }
+  return {
+    toSummarize: [...messages],
+    toKeep: [],
+  }
+}
+
+/**
+ * Combined #1862 + #1980 helper: return any trailing unanswered user turn
+ * (skipping local-command / compact-summary / meta rows) or unanswered
+ * `<task-notification>` messages so compaction preserves them verbatim.
+ */
+export function extractUnansweredTrailingMessages(
+  messages: readonly Message[],
+): Message[] {
+  const { toKeep } = splitUnansweredTrailingTurn(messages)
+  if (toKeep.length > 0) {
+    // Filter out trailing local-command rows (e.g. /context) while preserving
+    // the unanswered user message and any task notifications.
+    return toKeep.filter(
+      m => isTaskNotificationMessage(m) || !isLocalCommandUserMessage(m),
+    )
+  }
+  return extractUnansweredTaskNotifications(messages)
 }
 
 /**

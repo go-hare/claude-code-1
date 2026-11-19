@@ -6,6 +6,8 @@ import {
 } from 'src/services/analytics/index.js';
 import type { TeleportRemoteResponse } from 'src/utils/conversationRecovery.js';
 import type { CodeSession } from 'src/utils/teleport/api.js';
+import { disconnectBridgeBeforeConversationSwitch } from '../bridge/replBridgeShareCheck.js';
+import { useAppStateStore } from '../state/AppState.js';
 import { errorMessage, TeleportOperationError } from '../utils/errors.js';
 import { teleportResumeCodeSession } from '../utils/teleport.js';
 
@@ -18,6 +20,7 @@ export type TeleportResumeError = {
 export type TeleportSource = 'cliArg' | 'localCommand';
 
 export function useTeleportResume(source: TeleportSource) {
+  const store = useAppStateStore();
   const [isResuming, setIsResuming] = useState(false);
   const [error, setError] = useState<TeleportResumeError | null>(null);
   const [selectedSession, setSelectedSession] = useState<CodeSession | null>(null);
@@ -35,6 +38,25 @@ export function useTeleportResume(source: TeleportSource) {
       });
 
       try {
+        // Official 2.1.325 (#2373): disconnect Remote Control before /teleport
+        // switches conversations if the connected session has a share link or
+        // share visibility cannot be checked.
+        await disconnectBridgeBeforeConversationSwitch({
+          outboundOnly: store.getState().replBridgeOutboundOnly === true,
+          onDisconnected: () => {
+            store.setState(prev =>
+              prev.replBridgeEnabled
+                ? {
+                    ...prev,
+                    replBridgeEnabled: false,
+                    replBridgeConnected: false,
+                    replBridgeSessionActive: false,
+                    replBridgeSessionGroupingId: undefined,
+                  }
+                : prev,
+            );
+          },
+        });
         const result = await teleportResumeCodeSession(session.id);
         // Track teleported session for reliability logging
         setTeleportedSessionInfo({ sessionId: session.id });
@@ -51,7 +73,7 @@ export function useTeleportResume(source: TeleportSource) {
         return null;
       }
     },
-    [source],
+    [source, store],
   );
 
   const clearError = useCallback(() => {

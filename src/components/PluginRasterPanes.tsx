@@ -5149,6 +5149,11 @@ function PluginPaneSiteBody({
   });
   const terminalSize = useTerminalSize();
   const isFullscreen = isFullscreenEnvEnabled();
+  const hasOpenDialogs = useHasOpenDialogs();
+  const isOverlayActive = useIsOverlayActive();
+  // Official 2.1.323 #1979: tell a mod's Pane when a dialog or above-prompt
+  // overlay covers the prompt (and this pane is not focused).
+  const isPromptCovered = !pane.isFocused && (hasOpenDialogs || isOverlayActive);
   const panesViewport = getPanesTerminalSize();
   const paneViewportInfo = {
     columns: panesViewport?.conversationColumns ?? terminalSize.columns,
@@ -5167,11 +5172,12 @@ function PluginPaneSiteBody({
       placement: fill ? 'dock' : 'inline',
       scroll: { offset: paneScrollOffset, bodyRows: paneViewport },
       view: viewingAgentView,
+      ...(isPromptCovered ? { isPromptCovered: true } : {}),
     },
   };
   const { drawn } = useRenderDrawing(
     input,
-    `${pane.id}\0${pane.title}\0${String(pane.isFocused)}\0${String(pane.columns)}\0${String(paneScrollOffset)}\0${String(paneViewport)}\0${fill ? 'dock' : 'inline'}\0${String(paneViewportInfo.columns)}\0${String(paneViewportInfo.rows)}\0${String(isFullscreen)}\0${JSON.stringify(viewingAgentView)}`,
+    `${pane.id}\0${pane.title}\0${String(pane.isFocused)}\0${String(pane.columns)}\0${String(paneScrollOffset)}\0${String(paneViewport)}\0${fill ? 'dock' : 'inline'}\0${String(paneViewportInfo.columns)}\0${String(paneViewportInfo.rows)}\0${String(isFullscreen)}\0${String(isPromptCovered)}\0${JSON.stringify(viewingAgentView)}`,
   );
   const paneHeldRows = useHeldSiteRows({
     isOff: siteIsOff(hasMatchingFunctionHook('ui.render', { component: 'Pane' }), input),
@@ -6859,6 +6865,34 @@ export function getAskUserQuestionSurfacePolicy(surface?: string): {
   };
 }
 
+const ENGINE_CONFIRM_METADATA_SOURCES = new Set(['mod_hot_reload', 'plugin_authoring_hand_over_check']);
+
+const registeredEngineConfirmRequestIds = new Set<string>();
+
+/**
+ * Official 2.1.323 #2039 (`GJi` / `hUt`): mark an AskUserQuestion requestId as
+ * an engine-owned confirmation question so mods cannot reword it.
+ */
+export function registerEngineConfirmQuestion(requestId: string): () => void {
+  registeredEngineConfirmRequestIds.add(requestId);
+  return () => {
+    registeredEngineConfirmRequestIds.delete(requestId);
+  };
+}
+
+/**
+ * Official 2.1.323 #2039 (`hUt` + `zJi`): true when an AskUserQuestion prompt
+ * is Claude Code's own confirmation question (e.g. `confirm_*`, `mod_hot_reload`,
+ * handover check, or registered confirmation id).
+ */
+export function isEngineConfirmationAsk(requestId: string, metadataSource?: string): boolean {
+  if (requestId.startsWith('confirm_')) return true;
+  if (metadataSource !== undefined && ENGINE_CONFIRM_METADATA_SOURCES.has(metadataSource)) {
+    return true;
+  }
+  return registeredEngineConfirmRequestIds.has(requestId);
+}
+
 /**
  * densable 2.1.289 `AskUserQuestion` `ui.render` site (`cc-plugin-mods-guide`
  * Clawd cooking `Raster` header + `{ type: "engine", ref: 0 }` slot).
@@ -6878,6 +6912,7 @@ export function PluginAskUserQuestionSite({
   children: ReactNode;
 }): ReactNode {
   useSyncExternalStore(subscribeRenderInvalidation, renderVersion, renderVersion);
+  const isEngineConfirm = isEngineConfirmationAsk(requestId, metadataSource);
   const askProps = useMemo(
     () => ({
       tool: toolName,
@@ -6892,11 +6927,18 @@ export function PluginAskUserQuestionSite({
     requestId,
     props: askProps,
   });
-  if (!hasHook) {
+  // Official 2.1.323 #2039: engine confirmation questions are drawn as asked;
+  // do not allow non-engine mods to intercept or reword them.
+  if (isEngineConfirm || !hasHook) {
     return children;
   }
   return (
-    <PluginAskUserQuestionActiveSite requestId={requestId} questions={questions} askProps={askProps}>
+    <PluginAskUserQuestionActiveSite
+      requestId={requestId}
+      questions={questions}
+      askProps={askProps}
+      isEngineConfirm={isEngineConfirm}
+    >
       {children}
     </PluginAskUserQuestionActiveSite>
   );
@@ -6906,11 +6948,13 @@ function PluginAskUserQuestionActiveSite({
   requestId,
   questions,
   askProps,
+  isEngineConfirm = false,
   children,
 }: {
   requestId: string;
   questions: readonly unknown[];
   askProps: Record<string, unknown>;
+  isEngineConfirm?: boolean;
   children: ReactNode;
 }): ReactNode {
   const { addNotification } = useNotifications();
@@ -6935,10 +6979,18 @@ function PluginAskUserQuestionActiveSite({
     () => extractDrawnPlugin(drawn, 'AskUserQuestion', requestId) ?? drawnPlugin,
     [drawn, drawnPlugin, requestId],
   );
-  const rewrittenQuestions = useMemo(
-    () => validateAskUserQuestionRewrite(engineProps?.questions, questions),
-    [engineProps?.questions, questions],
-  );
+  const rewrittenQuestions = useMemo(() => {
+    if (isEngineConfirm) {
+      if (engineProps?.questions !== undefined) {
+        logForDebugging(
+          'ui.render (AskUserQuestion): an engine confirmation is drawn as asked; ignoring a rewrite of it',
+          { level: 'warn' },
+        );
+      }
+      return questions;
+    }
+    return validateAskUserQuestionRewrite(engineProps?.questions, questions);
+  }, [isEngineConfirm, engineProps?.questions, questions]);
   const engineElement = useMemo(
     () => rewriteAskUserQuestionEngineChild(children, questions, rewrittenQuestions),
     [children, questions, rewrittenQuestions],

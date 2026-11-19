@@ -94,13 +94,15 @@ export const macOsKeychainStorage = {
     if (keychainCacheState.readInFlight) {
       return keychainCacheState.readInFlight
     }
-    // densable 2.1.225: within Qgs after MQ, return null (do not re-spawn).
+    // densable 2.1.225 + Official 2.1.323 (#2004): within failure cooldown,
+    // keep serving cached data instead of returning null ("Not logged in")
+    // when the keychain was slow to answer right after /login or refresh.
     const lastFail = keychainCacheState.lastReadFailure
     if (
       lastFail !== null &&
       Date.now() - lastFail < KEYCHAIN_READ_FAILURE_COOLDOWN_MS
     ) {
-      return null
+      return prev.data
     }
 
     const gen = keychainCacheState.generation
@@ -178,8 +180,13 @@ export const macOsKeychainStorage = {
   update(
     data: SecureStorageData,
   ): import('./types.js').SecureStorageUpdateResult {
-    // Invalidate cache before update
-    clearKeychainCache()
+    // Official 2.1.323 (#2004): mark cache expired while keeping previous data
+    // as fallback so a slow keychain write/read right after /login or refresh
+    // does not flash "Not logged in · Please run /login".
+    const prevData = keychainCacheState.cache.data
+    keychainCacheState.cache = { data: prevData, cachedAt: 0 }
+    keychainCacheState.generation++
+    keychainCacheState.readInFlight = null
 
     try {
       const storageServiceName = getMacOsKeychainStorageServiceName(
@@ -230,6 +237,14 @@ export const macOsKeychainStorage = {
 
       if (result.exitCode !== 0) {
         const timedOut = 'timedOut' in result && Boolean(result.timedOut)
+        if (timedOut) {
+          // Keep the new credentials in expired fallback cache on slow write
+          // timeout if we had no prior data, matching SEA `I8e(A ? null : e)`.
+          keychainCacheState.cache = {
+            data: prevData === null ? null : data,
+            cachedAt: 0,
+          }
+        }
         if (
           result.exitCode === SECURITY_ERR_SEC_INTERACTION_NOT_ALLOWED &&
           keychainCacheState.keychainHoldsItem
@@ -243,15 +258,27 @@ export const macOsKeychainStorage = {
         }
       }
 
-      // Update cache with new data on success
+      // Update cache with new data on success and invalidate any in-flight read
       keychainCacheState.keychainHoldsItem = true
       keychainCacheState.cache = { data, cachedAt: Date.now() }
+      keychainCacheState.lastReadFailure = null
+      keychainCacheState.generation++
+      keychainCacheState.readInFlight = null
       return { success: true }
     } catch (_e) {
       return { success: false }
     }
   },
-  invalidateCache(): void {
+  invalidateCache(opts?: { keepForFailedRead?: boolean }): void {
+    if (opts?.keepForFailedRead) {
+      keychainCacheState.cache = {
+        data: keychainCacheState.cache.data,
+        cachedAt: 0,
+      }
+      keychainCacheState.generation++
+      keychainCacheState.readInFlight = null
+      return
+    }
     clearKeychainCache()
   },
   delete(): boolean {

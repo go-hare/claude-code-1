@@ -478,6 +478,68 @@ export function getPathsForPermissionCheck(inputPath: string): string[] {
   return walkPermissionPaths(inputPath).paths
 }
 
+/**
+ * 2.1.323 #1985 (SEA `sM` @278264999):
+ * Read at most `maxBytes` from an open FileHandle in 64 KiB chunks so
+ * synthetic 0-byte `/proc` files and streams never cause OOM.
+ */
+export async function readBoundedFromHandle(
+  handle: Awaited<ReturnType<typeof open>>,
+  maxBytes: number,
+  mode?: 'file' | 'stream',
+): Promise<Buffer> {
+  const isPositional =
+    mode !== undefined ? mode === 'file' : (await handle.stat()).isFile()
+  const chunks: Buffer[] = []
+  let total = 0
+  const scratch = Buffer.allocUnsafe(Math.min(65536, Math.max(1, maxBytes)))
+  while (total < maxBytes) {
+    const remaining = maxBytes - total
+    const slice =
+      remaining < scratch.length ? scratch.subarray(0, remaining) : scratch
+    const { bytesRead } = await handle.read(
+      slice,
+      0,
+      slice.length,
+      isPositional ? total : null,
+    )
+    if (bytesRead === 0) break
+    chunks.push(Buffer.from(slice.subarray(0, bytesRead)))
+    total += bytesRead
+  }
+  return Buffer.concat(chunks, total)
+}
+
+/**
+ * 2.1.323 #1985 (SEA `Gqo` @278265200):
+ * Sync counterpart of `readBoundedFromHandle` for sync callers.
+ */
+export function readBoundedFromFdSync(
+  fd: number,
+  maxBytes: number,
+  mode: 'file' | 'stream',
+): Buffer {
+  const chunks: Buffer[] = []
+  let total = 0
+  const scratch = Buffer.allocUnsafe(Math.min(65536, Math.max(1, maxBytes)))
+  while (total < maxBytes) {
+    const remaining = maxBytes - total
+    const slice =
+      remaining < scratch.length ? scratch.subarray(0, remaining) : scratch
+    const bytesRead = fs.readSync(
+      fd,
+      slice,
+      0,
+      slice.length,
+      mode === 'file' ? total : null,
+    )
+    if (bytesRead === 0) break
+    chunks.push(Buffer.from(slice.subarray(0, bytesRead)))
+    total += bytesRead
+  }
+  return Buffer.concat(chunks, total)
+}
+
 export const NodeFsOperations: FsOperations = {
   cwd() {
     return process.cwd()
@@ -676,23 +738,13 @@ export const NodeFsOperations: FsOperations = {
     if (maxBytes === undefined) {
       return readFilePromise(fsPath)
     }
-    const handle = await open(fsPath, 'r')
+    const flags = fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK ?? 0)
+    const handle = await open(fsPath, flags)
     try {
-      const { size } = await handle.stat()
-      const readSize = Math.min(size, maxBytes)
-      const buffer = Buffer.allocUnsafe(readSize)
-      let offset = 0
-      while (offset < readSize) {
-        const { bytesRead } = await handle.read(
-          buffer,
-          offset,
-          readSize - offset,
-          offset,
-        )
-        if (bytesRead === 0) break
-        offset += bytesRead
+      if (!(await handle.stat()).isFile()) {
+        return Buffer.alloc(0)
       }
-      return offset < readSize ? buffer.subarray(0, offset) : buffer
+      return await readBoundedFromHandle(handle, maxBytes, 'file')
     } finally {
       await handle.close()
     }
@@ -717,6 +769,112 @@ export function setFsImplementation(implementation: FsOperations): void {
  */
 export function getFsImplementation(): FsOperations {
   return activeFs
+}
+
+/**
+ * 2.1.323 #2161 (SEA `y6` / `ste` @279396800):
+ * Avoid probing Linux autofs map roots (such as `/home` when mounted as an
+ * indirect autofs map, which can trigger slow/hanging NIS/LDAP lookups at
+ * startup). Also honors `CLAUDE_CODE_AUTOMOUNT_ROOTS` (delimiter-separated
+ * absolute paths) for deeper map roots.
+ */
+const AUTOFS_SUPER_MAGIC = 0x0187 // 391
+const AUTOFS_PERMANENT_ERRNO = new Set([
+  'ENOENT',
+  'ENOTDIR',
+  'EACCES',
+  'EPERM',
+  'ENOSYS',
+  'ENOTSUP',
+  'EOPNOTSUPP',
+])
+const AUTOFS_MAX_TRANSIENT_RETRIES = 2
+
+const autofsNotMapRoots = new Set<string>()
+const autofsPassingFailures = new Map<string, number>()
+
+export function _resetAutofsMapRootCacheForTesting(): void {
+  autofsNotMapRoots.clear()
+  autofsPassingFailures.clear()
+}
+
+export function isAutofsMapRoot(
+  dirPath: string,
+  opts?: {
+    platform?: ReturnType<typeof getPlatform>
+    statfsSyncFn?: (p: string) => { type: number | bigint }
+  },
+): boolean {
+  const plat = opts?.platform ?? getPlatform()
+  if ((plat !== 'linux' && plat !== 'wsl') || dirPath === '/') {
+    return false
+  }
+  const normalized = nodePath.resolve(dirPath)
+  if (normalized === '/' || nodePath.dirname(normalized) !== '/') {
+    return false
+  }
+  const useCache =
+    opts?.statfsSyncFn === undefined && opts?.platform === undefined
+  if (useCache && autofsNotMapRoots.has(normalized)) {
+    return false
+  }
+  try {
+    const statfsFn =
+      opts?.statfsSyncFn ??
+      ((p: string) =>
+        (
+          fs as unknown as {
+            statfsSync?: (p: string) => { type: number | bigint }
+          }
+        ).statfsSync?.(p))
+    const info = statfsFn(normalized)
+    if (info && Number(info.type) === AUTOFS_SUPER_MAGIC) {
+      if (useCache) autofsPassingFailures.delete(normalized)
+      return true
+    }
+  } catch (err) {
+    const code = getErrnoCode(err)
+    const isPermanent =
+      code === undefined
+        ? err instanceof TypeError
+        : AUTOFS_PERMANENT_ERRNO.has(code)
+    if (useCache) {
+      const count = (autofsPassingFailures.get(normalized) ?? 0) + 1
+      if (!isPermanent && count < AUTOFS_MAX_TRANSIENT_RETRIES) {
+        autofsPassingFailures.set(normalized, count)
+        return false
+      }
+    }
+  }
+  if (useCache) autofsNotMapRoots.add(normalized)
+  return false
+}
+
+export function isAutomountMapRoot(
+  dirPath: string,
+  opts?: {
+    envValue?: string
+    platform?: ReturnType<typeof getPlatform>
+    statfsSyncFn?: (p: string) => { type: number | bigint }
+  },
+): boolean {
+  const normalized = nodePath.resolve(dirPath)
+  const rawRoots =
+    opts?.envValue !== undefined
+      ? opts.envValue
+      : process.env.CLAUDE_CODE_AUTOMOUNT_ROOTS
+  if (rawRoots) {
+    const matched = rawRoots
+      .split(nodePath.delimiter)
+      .some(
+        entry =>
+          entry.length > 0 &&
+          nodePath.isAbsolute(entry) &&
+          nodePath.resolve(entry) === normalized,
+      )
+    if (matched) return true
+  }
+  return isAutofsMapRoot(normalized, opts)
 }
 
 /**

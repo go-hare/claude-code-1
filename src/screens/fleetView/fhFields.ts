@@ -18,6 +18,7 @@
 
 import { open, stat } from 'fs/promises'
 import { join } from 'path'
+import { isHandedOverForUserMergeOrReview } from '../../daemon/jobState.js'
 import type { SessionEntry } from '../../cli/bg/engine.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -249,6 +250,16 @@ export function fleetLoBand(
       fleetCfActivity(state.state) === 'success' &&
       isFleetSelfDrivingState(state)
     )
+  ) {
+    return 'completed'
+  }
+  // Official 2.1.325 (#2297): finished PR handed over solely for the user's
+  // own review or merge is done/completed, not waiting for input (blocked).
+  if (
+    isHandedOverForUserMergeOrReview(
+      state.detail || state.needs || undefined,
+    ) &&
+    state.tempo !== 'asking'
   ) {
     return 'completed'
   }

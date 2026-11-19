@@ -22,8 +22,13 @@ import {
 } from '@modelcontextprotocol/client'
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/client/validators/ajv'
 import { PRODUCT_URL } from '../../constants/product.js'
+import { logForDebugging } from '../../utils/debug.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { isDisklessLaunch } from '../../utils/sessionHost.js'
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../analytics/index.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
 import {
   isMcpCcrProxyServerConfig,
@@ -39,6 +44,72 @@ export type DensableClientCapabilities = NonNullable<
 
 /** Official 325 `eot` — SEP-2663 MCP tasks extension identifier. */
 export const MCP_TASKS_EXTENSION_KEY = 'io.modelcontextprotocol/tasks'
+
+/**
+ * #2170: Official `r$` / `o$` — `MCP_SDK_GENERATION=v1` compatibility mode.
+ * Because the v1 MCP client is removed, setting `MCP_SDK_GENERATION=v1` runs
+ * the v2 client in compatibility mode (earlier handshake, stripped tasks
+ * extension, and relaxed OAuth issuer sign-in checks).
+ */
+export const MCP_V1_COMPAT_WARNING =
+  'The v1 MCP client was selected, but this build has only the v2 client. It uses the older handshake and relaxed sign-in checks.'
+
+const mcpSdkGenerationLatch: {
+  latched: 'v2' | undefined
+  v1Selected: boolean
+} = {
+  latched: undefined,
+  v1Selected: false,
+}
+
+export function resetMcpSdkGenerationForTests(): void {
+  mcpSdkGenerationLatch.latched = undefined
+  mcpSdkGenerationLatch.v1Selected = false
+}
+
+export function getMcpSdkGeneration(
+  env: NodeJS.ProcessEnv = process.env,
+): 'v2' {
+  if (mcpSdkGenerationLatch.latched !== undefined) {
+    return mcpSdkGenerationLatch.latched
+  }
+  const raw = env.MCP_SDK_GENERATION
+  const parsed = raw === 'v1' || raw === 'v2' ? raw : undefined
+  if (raw !== undefined && parsed === undefined) {
+    logForDebugging(
+      `MCP_SDK_GENERATION=${raw} is invalid; expected 'v1' or 'v2' — ignoring`,
+      { level: 'warn' },
+    )
+  }
+  const requested = parsed ?? 'v2'
+  const actual: 'v2' = 'v2'
+  const source =
+    parsed === undefined
+      ? 'default'
+      : requested === actual
+        ? 'env'
+        : 'env_v1_compat'
+  mcpSdkGenerationLatch.latched = actual
+  mcpSdkGenerationLatch.v1Selected = requested === 'v1'
+  if (requested !== actual) {
+    logForDebugging(MCP_V1_COMPAT_WARNING, { level: 'warn' })
+  }
+  logForDebugging(`mcp runtime arm: ${actual} (source: ${source})`)
+  logEvent('tengu_mcp_sdk_generation', {
+    generation:
+      actual as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    source:
+      source as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  })
+  return actual
+}
+
+export function isMcpV1CompatMode(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  getMcpSdkGeneration(env)
+  return mcpSdkGenerationLatch.v1Selected
+}
 
 /**
  * Official 325 `VT` (#1701, #1805) — enable MCP tasks in the terminal without
@@ -486,7 +557,8 @@ export function densableClientInfo(): Implementation {
 export function toV2VersionNegotiation(
   plan: McpProtocolNegotiationPlan,
 ): NonNullable<ClientOptions['versionNegotiation']> {
-  if (plan.mode === 'legacy') return { mode: 'legacy' }
+  // #2170: `MCP_SDK_GENERATION=v1` forces the earlier legacy handshake.
+  if (plan.mode === 'legacy' || isMcpV1CompatMode()) return { mode: 'legacy' }
   return {
     mode: 'auto',
     probe: { timeoutMs: plan.probe.timeoutMs },
@@ -507,11 +579,18 @@ export function densableClientCapabilitiesForConnect(
     readFeature?: (key: string, def: boolean) => boolean
   } = {},
 ): DensableClientCapabilities {
-  if (opts.forceBare) return densableBareClientCapabilities()
-  if (plan.mode === 'auto') {
-    return densableFormUrlClientCapabilities(opts.readFeature)
+  const v1Compat = isMcpV1CompatMode()
+  let caps: DensableClientCapabilities
+  if (opts.forceBare) {
+    caps = densableBareClientCapabilities()
+  } else if (plan.mode === 'auto' && !v1Compat) {
+    caps = densableFormUrlClientCapabilities(opts.readFeature)
+  } else {
+    caps = densableClientCapabilitiesForServer(serverConfig, opts)
   }
-  return densableClientCapabilitiesForServer(serverConfig, opts)
+  return v1Compat
+    ? stripTasksExtensionForOlderHandshake(caps, '2025-11-25')
+    : caps
 }
 
 /** densable k(Z) — plain v2 Client, string handlers at call sites. */

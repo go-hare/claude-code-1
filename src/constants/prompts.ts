@@ -1462,7 +1462,7 @@ Use this directory for ALL temporary file needs:
 
 Only use \`/tmp\` if the user explicitly requests it.
 
-The scratchpad directory is session-specific, isolated from the user's project, and can be used freely without permission prompts. Whenever you name a file in it to the user, write the file's complete absolute path in one piece, not a bare filename, a path that starts at the scratchpad folder, or the directory followed by filenames: a shortened path is read against the working directory and leads nowhere.`
+The scratchpad directory is session-specific, isolated from the user's project, and can be used freely without permission prompts. A reboot or routine cleanup can clear it, so anything the user will want to keep belongs somewhere durable instead. Whenever you name a file in it to the user, write the file's complete absolute path in one piece, not a bare filename, a path that starts at the scratchpad folder, or the directory followed by filenames: a shortened path is read against the working directory and leads nowhere.`
 }
 
 /**

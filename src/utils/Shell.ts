@@ -82,6 +82,73 @@ const DEFAULT_TIMEOUT = 30 * 60 * 1000 // 30 minutes
  * densable `fe>0` user copy after deleted-cwd recovery to homedir (or a
  * later candidate). `fe===0` (original cwd) continues without this message.
  */
+/**
+ * Official 2.1.323 `Nls` (#2024): harden bash/zsh shell options so non-default
+ * zsh options (`EXTENDED_GLOB`, `BARE_GLOB_QUAL`, `BRACE_CCL`,
+ * `MAGIC_EQUAL_SUBST`, `EQUALS`) cannot alter command parsing relative to how
+ * permission checks evaluated the command.
+ */
+export function getShellOptionHardeningCommand(
+  shellPath: string,
+): string | null {
+  if (process.env.CLAUDE_CODE_SHELL_PREFIX) {
+    return '{ \\builtin shopt -u extglob || \\builtin setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL NO_BRACE_CCL NO_MAGIC_EQUAL_SUBST NO_EQUALS; } >/dev/null 2>&1 || true'
+  }
+  if (shellPath.includes('bash')) {
+    return '\\builtin shopt -u extglob 2>/dev/null || true'
+  }
+  if (shellPath.includes('zsh')) {
+    return '\\builtin setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL NO_BRACE_CCL NO_MAGIC_EQUAL_SUBST NO_EQUALS 2>/dev/null || true'
+  }
+  return null
+}
+
+/**
+ * Official 2.1.323 #2137 (`Gdi`/`f`): check whether a working directory is
+ * genuinely gone (ENOENT/ENOTDIR) vs a drive/filesystem where `realpath`
+ * cannot resolve the path (e.g. Windows Dokan/ImDisk/subst/WinFsp returning
+ * EINVAL/UNKNOWN/EUNKNOWN/EISDIR/ENOSYS/EPERM/EACCES while `stat` succeeds).
+ */
+export async function verifyWorkingDirectoryExists(
+  dir: string,
+  deps?: {
+    realpathFn?: (p: string) => Promise<string>
+    statFn?: (p: string) => Promise<{ isDirectory: () => boolean }>
+  },
+): Promise<{ exists: boolean; resolved: string }> {
+  const realpathImpl = deps?.realpathFn ?? (p => realpath(p))
+  const statImpl = deps?.statFn ?? (p => stat(p))
+  try {
+    const resolved = await realpathImpl(dir)
+    return { exists: true, resolved }
+  } catch (err) {
+    const code = getErrnoCode(err)
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      return { exists: false, resolved: dir }
+    }
+    // Non-deletion realpath failure (common on Windows virtual/subst drives):
+    // confirm via stat() that the directory exists and proceed without failing.
+    try {
+      const s = await statImpl(dir)
+      if (s.isDirectory()) {
+        return { exists: true, resolved: dir }
+      }
+      return { exists: false, resolved: dir }
+    } catch (statErr) {
+      const statCode = getErrnoCode(statErr)
+      if (statCode === 'ENOENT' || statCode === 'ENOTDIR') {
+        return { exists: false, resolved: dir }
+      }
+      // On Windows, if even stat returns a non-ENOENT driver error (e.g.
+      // EPERM/EACCES/UNKNOWN/EINVAL), do not falsely claim it was deleted.
+      if (getPlatform() === 'windows') {
+        return { exists: true, resolved: dir }
+      }
+      return { exists: false, resolved: dir }
+    }
+  }
+}
+
 export function shellCwdRecoveredReissueMessage(
   goneCwd: string,
   recovered: string,
@@ -469,6 +536,41 @@ export async function exec(
     })
 
   let commandString = builtCommand
+  // Official 2.1.323 #2024: upgrade bashProvider's extglob line (placed right
+  // after snapshot sourcing) to disable all dangerous non-default zsh options
+  // (`NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL NO_BRACE_CCL NO_MAGIC_EQUAL_SUBST
+  // NO_EQUALS`) via `\builtin setopt` / `\builtin shopt`.
+  if (shellType === 'bash') {
+    const hardened = getShellOptionHardeningCommand(provider.shellPath)
+    if (hardened !== null) {
+      if (
+        commandString.includes(
+          '{ shopt -u extglob || setopt NO_EXTENDED_GLOB; } >/dev/null 2>&1 || true',
+        )
+      ) {
+        commandString = commandString.replace(
+          '{ shopt -u extglob || setopt NO_EXTENDED_GLOB; } >/dev/null 2>&1 || true',
+          hardened,
+        )
+      } else if (
+        commandString.includes('setopt NO_EXTENDED_GLOB 2>/dev/null || true')
+      ) {
+        commandString = commandString.replace(
+          'setopt NO_EXTENDED_GLOB 2>/dev/null || true',
+          hardened,
+        )
+      } else if (
+        commandString.includes('shopt -u extglob 2>/dev/null || true')
+      ) {
+        commandString = commandString.replace(
+          'shopt -u extglob 2>/dev/null || true',
+          hardened,
+        )
+      } else {
+        commandString = `${hardened} && ${commandString}`
+      }
+    }
+  }
   if (shellType === 'bash' && !process.env.CLAUDE_CODE_SHELL_PREFIX) {
     const preludeParts: string[] = []
     if (getFeatureValue_CACHED_MAY_BE_STALE('tengu_swirling_koala', true)) {
@@ -507,11 +609,11 @@ export async function exec(
 
   // Recover if the current working directory no longer exists on disk.
   // This can happen when a command deletes its own CWD (e.g., temp dir cleanup).
-  // densable 2.1.217: recovery candidates [sn(), homedir, aK()]; if agentWorktree
-  // is set and the only recovery is shared checkout (index 0), refuse.
-  try {
-    await realpath(cwd)
-  } catch {
+  // Official 2.1.323 #2137: on Windows drives where `realpath` cannot resolve a
+  // folder's real path (e.g. Dokan/subst/WinFsp), do not treat non-ENOENT
+  // errors as a deleted working directory.
+  const cwdCheck = await verifyWorkingDirectoryExists(cwd)
+  if (!cwdCheck.exists) {
     const candidates: string[] = [getOriginalCwd()]
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -523,12 +625,11 @@ export async function exec(
     let recovered: string | null = null
     let recoveredIdx = -1
     for (let i = 0; i < candidates.length; i++) {
-      try {
-        recovered = await realpath(candidates[i]!)
+      const candidateCheck = await verifyWorkingDirectoryExists(candidates[i]!)
+      if (candidateCheck.exists) {
+        recovered = candidateCheck.resolved
         recoveredIdx = i
         break
-      } catch {
-        // try next
       }
     }
     if (recovered === null) {
@@ -553,14 +654,10 @@ export async function exec(
       `Shell CWD "${cwd}" no longer exists, recovering to "${recovered}"`,
     )
     setCwdState(recovered)
-    // densable: setCwd(he) then fe>0 → fail so the user re-issues (homedir
-    // / later candidate). fe===0 (original cwd) continues from recovered.
-    if (recoveredIdx > 0) {
-      return createFailedCommand(
-        shellCwdRecoveredReissueMessage(cwd, recovered),
-      )
-    }
-    cwd = recovered
+    // Official 2.1.325 #2267: never silently run the command in the recovered
+    // launch/home directory after the working directory was deleted — fail
+    // with a message so the command can be re-issued from the recovered directory.
+    return createFailedCommand(shellCwdRecoveredReissueMessage(cwd, recovered))
   }
 
   // If already aborted, don't spawn the process at all

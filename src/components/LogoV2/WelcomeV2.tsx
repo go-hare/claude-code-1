@@ -1,5 +1,5 @@
 import React, { useContext } from 'react';
-import { AccessibilityContext, Box, Link, Text, useTheme } from '@anthropic/ink';
+import { AccessibilityContext, Box, Link, Text, useModalOrTerminalSize, useTheme } from '@anthropic/ink';
 import { getAntAuthFallbackNotice } from '../../commands/login/getAuthStatus.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { resolveAutoCompactWindow } from '../../utils/autoCompactWindow.js';
@@ -57,6 +57,7 @@ export function UnrecognizedModelWarningLine({ notice }: { notice: UnrecognizedM
 }
 
 const WELCOME_V2_WIDTH = 58;
+const WELCOME_V2_MIN_COLUMNS = WELCOME_V2_WIDTH + 1;
 const WELCOME_V2_MIN_ROWS = 30;
 const DOTTED_DIVIDER = '..........................................................';
 
@@ -70,13 +71,17 @@ export function WelcomeV2({
   const [theme] = useTheme();
   const srContext = useContext(AccessibilityContext);
   const screenReader = srContext || isScreenReaderModeEnabled();
-  const { rows } = useTerminalSize();
+  const terminal = useTerminalSize();
+  const { rows } = terminal;
+  const { columns } = useModalOrTerminalSize(terminal);
   const welcomeMessage = 'Welcome to Claude Code';
   const resolvedAntAuthNotice =
     antAuthNotice !== undefined ? antAuthNotice : process.env.DEMO_VERSION ? null : getAntAuthFallbackNotice();
 
   const banner = (() => {
-    if (screenReader || rows < WELCOME_V2_MIN_ROWS) {
+    // Official 2.1.325 `lbe` (#2272): collapse wide 58-col ASCII art on narrow
+    // terminals (< 59 columns) so first-run Onboarding screens do not wrap and lose lines.
+    if (screenReader || columns < WELCOME_V2_MIN_COLUMNS || rows < WELCOME_V2_MIN_ROWS) {
       return (
         <Text>
           <Text color="claude">{welcomeMessage} </Text>

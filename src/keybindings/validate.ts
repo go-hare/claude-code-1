@@ -1,5 +1,11 @@
 import { plural } from '../utils/stringUtils.js'
-import { chordToString, parseChord, parseKeystroke } from './parser.js'
+import {
+  chordToString,
+  hasLostKeystrokePart,
+  parseChord,
+  parseKeystroke,
+  splitKeystrokeParts,
+} from './parser.js'
 import {
   getReservedShortcuts,
   normalizeKeyForComparison,
@@ -71,10 +77,52 @@ function isValidContext(value: string): value is KeybindingContextName {
   return (VALID_CONTEXTS as readonly string[]).includes(value)
 }
 
+const MODIFIER_SPECS: ReadonlyArray<{
+  name: string
+  aliases?: readonly string[]
+}> = [
+  { name: 'ctrl', aliases: ['control'] },
+  { name: 'alt', aliases: ['opt', 'option'] },
+  { name: 'shift' },
+  { name: 'meta' },
+  { name: 'cmd', aliases: ['command', 'super', 'win'] },
+]
+const MODIFIER_KEYS = ['ctrl', 'alt', 'shift', 'meta', 'super'] as const
+const MAX_DISPLAY_KEY_LEN = 80
+const MAX_LISTED_LOST_MODIFIERS = 3
+
+function truncateKeyDisplay(key: string): string {
+  return key.length > MAX_DISPLAY_KEY_LEN
+    ? `${key.slice(0, MAX_DISPLAY_KEY_LEN - 1)}…`
+    : key
+}
+
+function suggestModifierName(raw: string): string | undefined {
+  const lower = raw.toLowerCase()
+  const candidates = MODIFIER_SPECS.flatMap(spec => [
+    spec.name,
+    ...(spec.aliases ?? []),
+  ])
+  let best: string | undefined
+  let bestDist = 2 // maxEditDistance = 1 (official mCe)
+  for (const candidate of candidates) {
+    if (Math.abs(candidate.length - lower.length) > 1) continue
+    const dist = keybindingEditDistance(lower, candidate)
+    if (dist < bestDist) {
+      bestDist = dist
+      best = candidate
+    }
+  }
+  return best
+}
+
 /**
  * Validate a single keystroke string and return any parse errors.
  */
-function validateKeystroke(keystroke: string): KeybindingWarning | null {
+function validateKeystroke(
+  keystroke: string,
+  contextName?: string,
+): KeybindingWarning | null {
   const trimmed = keystroke.trim()
   const strokes = keystroke === ' ' ? [] : trimmed.split(/\s+/)
   const hasEmptyPart =
@@ -84,8 +132,7 @@ function validateKeystroke(keystroke: string): KeybindingWarning | null {
     strokes.some(stroke => parseKeystroke(stroke).key === '')
 
   if (hasEmptyPart || hasSpaceNextToPlus) {
-    const displayKey =
-      keystroke.length > 80 ? keystroke.slice(0, 79) + '…' : keystroke
+    const displayKey = truncateKeyDisplay(keystroke)
     return {
       type: 'parse_error',
       severity: 'error',
@@ -96,6 +143,73 @@ function validateKeystroke(keystroke: string): KeybindingWarning | null {
       suggestion: hasEmptyPart
         ? 'Remove extra "+" characters'
         : 'Remove the spaces next to "+"',
+    }
+  }
+
+  // Official 2.1.323 (#2074) `vn`: reject misspelled modifiers (e.g. `ctl+k`)
+  // instead of silently dropping them and binding the bare key.
+  const lostParts: string[] = []
+  const fixedStrokes: string[] = []
+  let allFixable = true
+  for (const stroke of strokes) {
+    const parsedStroke = parseKeystroke(stroke)
+    const rebuilt: string[] = []
+    for (const { part, lost } of splitKeystrokeParts(stroke)) {
+      if (!lost) {
+        rebuilt.push(part)
+        continue
+      }
+      lostParts.push(part)
+      const suggestion = suggestModifierName(part)
+      if (suggestion === undefined) {
+        allFixable = false
+        continue
+      }
+      const parsedSuggestion = parseKeystroke(suggestion)
+      if (
+        MODIFIER_KEYS.some(mod => parsedStroke[mod] && parsedSuggestion[mod])
+      ) {
+        continue
+      }
+      rebuilt.push(suggestion)
+      for (const mod of MODIFIER_KEYS) {
+        if (parsedSuggestion[mod]) parsedStroke[mod] = true
+      }
+    }
+    fixedStrokes.push(rebuilt.join('+'))
+  }
+  if (lostParts.length > 0) {
+    const uniqueLost = [...new Set(lostParts)]
+    const showCount =
+      uniqueLost.length > MAX_LISTED_LOST_MODIFIERS + 1
+        ? MAX_LISTED_LOST_MODIFIERS
+        : uniqueLost.length
+    const listed = uniqueLost
+      .slice(0, showCount)
+      .map(part => `"${truncateKeyDisplay(part)}"`)
+    if (uniqueLost.length > showCount) {
+      listed.push(`${uniqueLost.length - showCount} more`)
+    }
+    const lostLabel = new Intl.ListFormat('en', { type: 'conjunction' }).format(
+      listed,
+    )
+    const validModList = new Intl.ListFormat('en', {
+      type: 'disjunction',
+    }).format(MODIFIER_SPECS.map(spec => spec.name))
+    const verb =
+      uniqueLost.length === 1 ? 'is not a modifier' : 'are not modifiers'
+    const inCtx = contextName ? ` in ${contextName}` : ''
+    const displayKey = truncateKeyDisplay(keystroke)
+    const fixedChord = fixedStrokes.join(' ')
+    return {
+      type: 'parse_error',
+      severity: 'error',
+      message: `${lostLabel} ${verb}, so the binding "${displayKey}"${inCtx} is ignored`,
+      key: keystroke,
+      suggestion:
+        allFixable && fixedChord.length <= MAX_DISPLAY_KEY_LEN
+          ? `Did you mean "${fixedChord}"?`
+          : `Use ${validModList} before "+"; for keys pressed one after another, put a space between them, as in "ctrl+x ctrl+s"`,
     }
   }
 
@@ -177,7 +291,7 @@ function validateBlock(
   const bindings = b.bindings as Record<string, unknown>
   for (const [key, action] of Object.entries(bindings)) {
     // Validate key syntax
-    const keyError = validateKeystroke(key)
+    const keyError = validateKeystroke(key, contextName)
     if (keyError) {
       keyError.context = contextName
       warnings.push(keyError)
@@ -418,6 +532,7 @@ function getUserBindingsForValidation(
   const bindings: ParsedBinding[] = []
   for (const block of userBlocks) {
     for (const [key, action] of Object.entries(block.bindings)) {
+      if (hasLostKeystrokePart(key)) continue
       const chord = key.split(' ').map(k => parseKeystroke(k))
       bindings.push({
         chord,

@@ -37,6 +37,7 @@ import type {
 import { logForDebugging } from '../debug.js'
 import { sleep } from '../sleep.js'
 import { CLI_CU_CAPABILITIES, CLI_HOST_BUNDLE_ID } from './common.js'
+import { assertSafeKeyChord, trackHeldChord } from './keyChordSafety.js'
 import { validateHwnd } from './win32/shared.js'
 import { loadPlatform } from './platforms/index.js'
 
@@ -294,7 +295,8 @@ export function createCrossPlatformExecutor(_opts: {
     // ── Keyboard ─────────────────────────────────────────────────────────
 
     async key(keySequence: string, repeat?: number): Promise<void> {
-      const parts = keySequence.split('+').filter(p => p.length > 0)
+      const rawParts = keySequence.split('+').filter(p => p.length > 0)
+      const parts = assertSafeKeyChord(rawParts, 'Key chord')
       const n = repeat ?? 1
       for (let i = 0; i < n; i++) {
         if (i > 0) await sleep(8)
@@ -303,12 +305,18 @@ export function createCrossPlatformExecutor(_opts: {
     },
 
     async holdKey(keyNames: string[], durationMs: number): Promise<void> {
-      for (const k of keyNames) {
-        await platform.input.key(k, 'press')
-      }
-      await sleep(durationMs)
-      for (const k of [...keyNames].reverse()) {
-        await platform.input.key(k, 'release')
+      const safeKeyNames = assertSafeKeyChord(keyNames, 'Hold key')
+      const releaseTracking = trackHeldChord(safeKeyNames)
+      try {
+        for (const k of safeKeyNames) {
+          await platform.input.key(k, 'press')
+        }
+        await sleep(durationMs)
+      } finally {
+        releaseTracking()
+        for (const k of [...safeKeyNames].reverse()) {
+          await platform.input.key(k, 'release')
+        }
       }
     },
 

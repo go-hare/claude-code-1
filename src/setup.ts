@@ -65,6 +65,56 @@ import {
   worktreeBranchName,
 } from './utils/worktree.js'
 
+/**
+ * Official 2.1.325 #2299 (SEA `registerWorktreeHooksAhead` / `Dts` @314541746):
+ * Before `--worktree` runs a `WorktreeCreate` hook, register any seed
+ * marketplaces from `CLAUDE_CODE_PLUGIN_SEED_DIR` (clearing plugin/marketplace
+ * caches when seeds register on a fresh home directory) and load plugin hooks.
+ */
+export async function registerWorktreeHooksAhead(): Promise<
+  'skipped' | 'registered' | 'failed'
+> {
+  if (
+    isBareMode() ||
+    isEnvTruthy(process.env.CLAUDE_CODE_SYNC_PLUGIN_INSTALL)
+  ) {
+    logForDebugging(
+      'plugin worktree hooks not registered ahead of the worktree: startup lists no plugins here',
+    )
+    return 'skipped'
+  }
+  try {
+    const { registerSeedMarketplaces, clearMarketplacesCache } = await import(
+      './utils/plugins/marketplaceManager.js'
+    )
+    const { clearPluginCache } = await import('./utils/plugins/pluginLoader.js')
+    if (await registerSeedMarketplaces()) {
+      clearMarketplacesCache()
+      clearPluginCache(
+        'registerWorktreeHooksAhead: seed marketplaces registered',
+      )
+    }
+  } catch (error) {
+    logForDebugging(
+      `seed marketplaces not registered ahead of the worktree: ${errorMessage(error)}`,
+      { level: 'warn' },
+    )
+  }
+  try {
+    const { loadPluginHooks } = await import(
+      './utils/plugins/loadPluginHooks.js'
+    )
+    await loadPluginHooks()
+    return 'registered'
+  } catch (error) {
+    logForDebugging(
+      `plugin worktree hooks not registered ahead of the worktree (a plugin's WorktreeCreate or WorktreeRemove hook will not run): ${errorMessage(error)}`,
+      { level: 'warn' },
+    )
+    return 'failed'
+  }
+}
+
 export async function setup(
   cwd: string,
   permissionMode: PermissionMode,
@@ -222,17 +272,13 @@ export async function setup(
   // Handle worktree creation if requested
   // IMPORTANT: this must be called befiore getCommands(), otherwise /eject won't be available.
   if (worktreeEnabled) {
-    // 2.1.300 #778 (SEA registerWorktreeHooksAhead): Resolve relative --plugin-dir
-    // paths against cwd before worktree chdir, then load plugin hooks so
-    // plugin WorktreeCreate / WorktreeRemove hooks run under `--worktree`.
+    // 2.1.300 #778 + 2.1.325 #2299 (SEA registerWorktreeHooksAhead): Resolve
+    // relative --plugin-dir paths against cwd before worktree chdir, register
+    // CLAUDE_CODE_PLUGIN_SEED_DIR seed marketplaces on a fresh home dir, then
+    // load plugin hooks so plugin WorktreeCreate / WorktreeRemove hooks run.
     setInlinePlugins(getInlinePlugins().map(p => resolve(p)))
     setInlinePluginsNoMcp(getInlinePluginsNoMcp().map(p => resolve(p)))
-    if (!isBareMode()) {
-      const { loadPluginHooks } = await import(
-        './utils/plugins/loadPluginHooks.js'
-      )
-      await loadPluginHooks()
-    }
+    await registerWorktreeHooksAhead()
 
     // Mirrors bridgeMain.ts: hook-configured sessions can proceed without git
     // so createWorktreeForSession() can delegate to the hook (non-git VCS).

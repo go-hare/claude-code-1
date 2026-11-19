@@ -27,6 +27,7 @@ import {
   buildProcessWrapperProperties,
   buildSandboxProperties,
   buildSettingSourcesProperties,
+  buildTelemetryDiagnostics,
   buildAutoModeServerProperties,
   buildCrossSessionPeerAddressProperties,
   type Diagnostic,
@@ -116,6 +117,7 @@ export async function buildDiagnostics(): Promise<Diagnostic[]> {
     ...(await buildInstallationDiagnostics()),
     ...(await buildInstallationHealthDiagnostics()),
     ...(await buildMemoryDiagnostics()),
+    ...buildTelemetryDiagnostics(),
   ];
 }
 

@@ -395,6 +395,16 @@ export type ConnectedMCPServer = {
    * Optional: unset is not modern.
    */
   protocolEra?: string
+  /**
+   * #2151: Tools omitted from this server because the Anthropic API would
+   * reject their input schema, along with per-tool reasons displayed in `/mcp`.
+   */
+  droppedTools?: DroppedMcpTool[]
+}
+
+export type DroppedMcpTool = {
+  toolName: string
+  reason: string
 }
 
 export type FailedMCPServer = {

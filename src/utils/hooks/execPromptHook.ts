@@ -225,8 +225,34 @@ Condition: ${hook.prompt}`
           },
         })
       let response = await evaluate(buildMessages())
+      if (combinedSignal.aborted || signal?.aborted) {
+        return {
+          hook,
+          outcome: 'cancelled',
+          timedOut: !toolUseContext.abortController.signal.aborted,
+          message: createAttachmentMessage({
+            type: 'hook_cancelled',
+            hookName,
+            toolUseID: effectiveToolUseID,
+            hookEvent,
+          }),
+        }
+      }
       if (isPromptTooLongMessage(response) && messages?.length)
         response = await evaluate(buildMessages(0.25))
+      if (combinedSignal.aborted || signal?.aborted) {
+        return {
+          hook,
+          outcome: 'cancelled',
+          timedOut: !toolUseContext.abortController.signal.aborted,
+          message: createAttachmentMessage({
+            type: 'hook_cancelled',
+            hookName,
+            toolUseID: effectiveToolUseID,
+            hookEvent,
+          }),
+        }
+      }
       const content = extractTextContent(
         Array.isArray(response.message.content) ? response.message.content : [],
       ).trim()
@@ -291,17 +317,35 @@ Condition: ${hook.prompt}`
         }),
       }
     } catch (error) {
-      if (combinedSignal.aborted)
+      if (combinedSignal.aborted || signal?.aborted)
         return {
           hook,
           outcome: 'cancelled',
           timedOut: !toolUseContext.abortController.signal.aborted,
+          message: createAttachmentMessage({
+            type: 'hook_cancelled',
+            hookName,
+            toolUseID: effectiveToolUseID,
+            hookEvent,
+          }),
         }
       throw error
     } finally {
       cleanup()
     }
   } catch (error) {
+    if (signal?.aborted || toolUseContext.abortController.signal.aborted) {
+      return {
+        hook,
+        outcome: 'cancelled',
+        message: createAttachmentMessage({
+          type: 'hook_cancelled',
+          hookName,
+          toolUseID: effectiveToolUseID,
+          hookEvent,
+        }),
+      }
+    }
     const errorMsg = errorMessage(error)
     logForDebugging(`Hooks: Prompt hook error: ${errorMsg}`)
     return failure(`Error executing prompt hook: ${errorMsg}`)

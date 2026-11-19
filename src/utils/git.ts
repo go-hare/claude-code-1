@@ -9,7 +9,7 @@ import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
 import { logForDiagnosticsNoPII } from './diagLogs.js'
 import { execFileNoThrow } from './execFileNoThrow.js'
-import { getFsImplementation } from './fsOperations.js'
+import { getFsImplementation, isAutomountMapRoot } from './fsOperations.js'
 import {
   getCachedBranch,
   getCachedDefaultBranch,
@@ -21,24 +21,28 @@ import {
 } from './git/gitFilesystem.js'
 import { logError } from './log.js'
 import { memoizeWithLRU } from './memoize.js'
+import { internalToolSubprocessEnv } from './subprocessEnv.js'
 import { whichSync } from './which.js'
-import { resolveGitForWindowsDirectExe } from './windowsPaths.js'
+import {
+  resolveGitForWindowsDirectExe,
+  resolveWindowsExecutableOnPath,
+} from './windowsPaths.js'
 
 const GIT_ROOT_NOT_FOUND = Symbol('git-root-not-found')
 
 /**
- * 2.1.309 #1127 & #1161 (SEA V / Es / j5t):
- * Force English git messages (`LC_ALL=C`, `LANGUAGE=C`) and ignore replace
- * refs (`GIT_NO_REPLACE_OBJECTS=1`) for internal git subprocesses.
+ * 2.1.309 #1127 & #1161 (SEA V / Es / j5t) + 2.1.323 #2169:
+ * Force English git messages (`LC_ALL=C`, `LANGUAGE=C`), ignore replace
+ * refs (`GIT_NO_REPLACE_OBJECTS=1`), and strip Claude Code's own sign-in
+ * tokens and API keys so a credential helper or git hook cannot read them.
  */
 export function gitSubprocessEnv(extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
+  return internalToolSubprocessEnv({
     LC_ALL: 'C',
     LANGUAGE: 'C',
     GIT_NO_REPLACE_OBJECTS: '1',
     ...extra,
-  }
+  })
 }
 
 /**
@@ -88,21 +92,26 @@ function probeGitRoot(startPath: string): string | typeof GIT_ROOT_NOT_FOUND {
   let statCount = 0
 
   while (current !== root) {
-    try {
-      const gitPath = join(current, '.git')
-      statCount++
-      const stat = statSync(gitPath)
-      // .git can be a directory (regular repo) or file (worktree/submodule)
-      if (stat.isDirectory() || stat.isFile()) {
-        logForDiagnosticsNoPII('info', 'find_git_root_completed', {
-          duration_ms: Date.now() - startTime,
-          stat_count: statCount,
-          found: true,
-        })
-        return current.normalize('NFC')
+    // 2.1.323 #2161: Do not probe autofs map roots (e.g. `/home` on Linux)
+    // or entries in `CLAUDE_CODE_AUTOMOUNT_ROOTS` — looking up `.git` there
+    // can trigger slow/hanging automounter lookups.
+    if (!isAutomountMapRoot(current)) {
+      try {
+        const gitPath = join(current, '.git')
+        statCount++
+        const stat = statSync(gitPath)
+        // .git can be a directory (regular repo) or file (worktree/submodule)
+        if (stat.isDirectory() || stat.isFile()) {
+          logForDiagnosticsNoPII('info', 'find_git_root_completed', {
+            duration_ms: Date.now() - startTime,
+            stat_count: statCount,
+            found: true,
+          })
+          return current.normalize('NFC')
+        }
+      } catch {
+        // .git doesn't exist at this level, continue up
       }
-    } catch {
-      // .git doesn't exist at this level, continue up
     }
     const parent = dirname(current)
     if (parent === current) {
@@ -182,6 +191,25 @@ export function findGitRootUncached(startPath: string): string | null {
  * densable `Rat` — if the LRU holds a negative miss for `startPath`, drop it
  * and re-probe via the cached path (`Yc`). Positive hits stay cached.
  */
+/**
+ * Official 2.1.325 #2262 (`dan` @287565620):
+ * Check whether `dir` is inside a git work tree, supporting worktrees of bare
+ * repositories, `--separate-git-dir` checkouts, and Android `repo` checkouts.
+ */
+export async function isInsideGitWorkTree(
+  dir: string = getCwd(),
+): Promise<boolean> {
+  if (findGitRoot(dir) !== null) {
+    return true
+  }
+  const { stdout, code } = await execFileNoThrow(
+    gitExe(),
+    ['-C', dir, '--no-optional-locks', 'rev-parse', '--is-inside-work-tree'],
+    { env: gitSubprocessEnv() },
+  )
+  return code === 0 && stdout.trim() === 'true'
+}
+
 export function refreshFindGitRoot(startPath: string): string | null {
   const key = startPath
   if (findGitRootImpl.cache.get(key) === GIT_ROOT_NOT_FOUND) {
@@ -315,16 +343,26 @@ export function findCanonicalGitRootUncached(startPath: string): string | null {
 export const gitExe = memoize((): string => {
   // Every time we spawn a process, we have to lookup the path.
   // Let's instead avoid that lookup so we only do it once.
+  // 2.1.323 #2136 (SEA `xn` @286291662): On Windows, prefer `.exe` over a
+  // `.cmd`/`.bat` wrapper in the same PATH folder (matching cmd.exe PATHEXT).
+  if (process.platform === 'win32') {
+    const winFound = resolveWindowsExecutableOnPath('git') ?? whichSync('git')
+    if (!winFound) return 'git'
+    const preferred =
+      /\.(?:cmd|bat)$/i.test(winFound) &&
+      existsSync(winFound.replace(/\.(?:cmd|bat)$/i, '.exe'))
+        ? winFound.replace(/\.(?:cmd|bat)$/i, '.exe')
+        : winFound
+    return resolveGitForWindowsDirectExe(preferred, {
+      checkExists: existsSync,
+      execCommand: cmd =>
+        execSync(cmd, { stdio: 'pipe', encoding: 'utf8' }).trim(),
+      cwdFn: getCwd,
+    })
+  }
   const found = whichSync('git')
   if (!found) return 'git'
-  return process.platform === 'win32'
-    ? resolveGitForWindowsDirectExe(found, {
-        checkExists: existsSync,
-        execCommand: cmd =>
-          execSync(cmd, { stdio: 'pipe', encoding: 'utf8' }).trim(),
-        cwdFn: getCwd,
-      })
-    : found
+  return found
 })
 
 /**

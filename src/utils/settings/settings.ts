@@ -1,7 +1,7 @@
 import { readFileSync as readFileBufferSync } from 'fs'
 import { feature } from 'bun:bundle'
 import mergeWith from 'lodash-es/mergeWith.js'
-import { dirname, join, normalize, resolve } from 'path'
+import { dirname, isAbsolute, join, normalize, relative, resolve } from 'path'
 import { z } from 'zod/v4'
 import {
   getFlagSettingsInline,
@@ -69,6 +69,7 @@ import { type SettingsJson, SettingsSchema } from './types.js'
 import {
   applyHostManagedPolicyModelPrecedence,
   buildHostModelOverlay,
+  extractParentManagedOffSwitches,
 } from './hostModelOverlay.js'
 import { applySettingsKeyAliases } from './settingsAliases.js'
 import {
@@ -128,18 +129,28 @@ function loadParentManagedAndHostOverlay(): {
 }
 
 /**
- * densable nfc host finish: b6i + Object.assign(hostModelOverlay).
+ * densable nfc host finish: b6i + Object.assign(hostModelOverlay),
+ * plus Official 2.1.323 (#2120) `Vsi` off-switches from Agent SDK
+ * `managedSettings` (disableRemoteControl, disableAgentView, disableWorkflows,
+ * disableArtifact, enableWorkflows=false, enableArtifact=false).
  */
 function finishPolicySettingsForHost(
   policySettings: SettingsJson | null,
 ): SettingsJson | null {
-  const { hostModelOverlay, hostManagedProvider } =
+  const { parentSettings, hostModelOverlay, hostManagedProvider } =
     loadParentManagedAndHostOverlay()
-  return applyHostManagedPolicyModelPrecedence(
+  let resolved = applyHostManagedPolicyModelPrecedence(
     policySettings,
     hostModelOverlay,
     hostManagedProvider,
   )
+  const offSwitches = extractParentManagedOffSwitches(parentSettings)
+  if (offSwitches) {
+    resolved = resolved
+      ? ({ ...resolved, ...offSwitches } as SettingsJson)
+      : ({ ...offSwitches } as SettingsJson)
+  }
+  return resolved
 }
 
 /**
@@ -536,6 +547,19 @@ export function loadManagedFileSettings(): {
       }
       if (dropSettings && Object.keys(dropSettings).length > 0) {
         merged = mergeWith(merged, dropSettings, settingsMergeCustomizer)
+        // Official 2.1.325 #2354: when a higher-ranking managed source turns
+        // the sandbox on without explicitly setting `autoAllowBashIfSandboxed: true`,
+        // do not inherit `autoAllowBashIfSandboxed: true` from a lower-ranking managed file.
+        if (
+          dropSettings.sandbox?.enabled === true &&
+          dropSettings.sandbox.autoAllowBashIfSandboxed !== true &&
+          merged.sandbox
+        ) {
+          merged.sandbox = {
+            ...merged.sandbox,
+            autoAllowBashIfSandboxed: false,
+          }
+        }
         found = true
       }
     }
@@ -641,6 +665,10 @@ export function parseSettingsFileContent(
   // settings warning N() reads. Hold only.
   const inboundWarnings = filterInvalidCrossSessionInbound(data, path)
 
+  // Official 2.1.325 #2298 (`y_`) — strip unrecognized teammateMode so it is
+  // not applied, and emit a warning shown on startup, `claude doctor`, and `-p`.
+  const teammateModeWarnings = filterInvalidTeammateMode(data, path)
+
   const result = SettingsSchema().safeParse(data)
 
   if (!result.success) {
@@ -652,6 +680,7 @@ export function parseSettingsFileContent(
         ...ruleWarnings,
         ...sandboxWarnings,
         ...inboundWarnings,
+        ...teammateModeWarnings,
         ...errors,
       ],
     }
@@ -664,6 +693,7 @@ export function parseSettingsFileContent(
       ...ruleWarnings,
       ...sandboxWarnings,
       ...inboundWarnings,
+      ...teammateModeWarnings,
     ],
   }
 }
@@ -881,6 +911,120 @@ export function getSettingsForSource(
   return result
 }
 
+/**
+ * Official 2.1.323 (#2029): Verify that a project/local settings file (or its
+ * `.claude` parent) does not follow a symlink leading to a different folder
+ * outside the project root Claude Code checked.
+ */
+export function checkProjectSettingsSymlinkEscape(
+  source: 'projectSettings' | 'localSettings',
+  filePath: string,
+): ValidationError | null {
+  if (source === 'projectSettings' && projectSettingsAliasesUserSettings()) {
+    return null
+  }
+  const rootPath = getSettingsRootPathForSource(source)
+  const fs = getFsImplementation()
+  let canonicalRoot: string
+  try {
+    canonicalRoot = fs.realpathSync(rootPath)
+  } catch {
+    canonicalRoot = resolve(rootPath)
+  }
+
+  let resolvedPath: string
+  let isSymlink = false
+  try {
+    const resolved = safeResolvePath(fs, filePath)
+    resolvedPath = resolved.resolvedPath
+    isSymlink = resolved.isSymlink
+  } catch {
+    return null
+  }
+
+  // Also check if an intermediate parent (e.g. `.claude`) or a dangling
+  // symlink at `filePath` points outside the project root.
+  let canonicalTarget = resolvedPath
+  try {
+    canonicalTarget = fs.realpathSync(resolvedPath)
+    if (canonicalTarget !== resolve(filePath)) {
+      isSymlink = true
+    }
+  } catch {
+    // ENOENT or unreadable — handle dangling symlink at filePath first, then
+    // symlinked parent directory (e.g. `.claude -> /outside`).
+    let handledDanglingLink = false
+    try {
+      if (fs.lstatSync(filePath).isSymbolicLink()) {
+        const rawLinkTarget = fs.readlinkSync(filePath)
+        const resolvedLinkTarget = resolve(dirname(filePath), rawLinkTarget)
+        isSymlink = true
+        handledDanglingLink = true
+        try {
+          const targetParentReal = fs.realpathSync(dirname(resolvedLinkTarget))
+          canonicalTarget = join(
+            targetParentReal,
+            resolvedLinkTarget.split(/[\\/]/).pop() ?? '',
+          )
+        } catch {
+          canonicalTarget = resolvedLinkTarget
+        }
+      }
+    } catch {
+      // filePath itself does not exist; fall through to parent check
+    }
+    if (!handledDanglingLink) {
+      try {
+        const parentReal = fs.realpathSync(dirname(filePath))
+        if (parentReal !== resolve(dirname(filePath))) {
+          isSymlink = true
+          canonicalTarget = join(
+            parentReal,
+            filePath.split(/[\\/]/).pop() ?? '',
+          )
+        }
+      } catch {
+        return null
+      }
+    }
+  }
+
+  if (!isSymlink) {
+    return null
+  }
+
+  const rel = relative(canonicalRoot, canonicalTarget)
+  if (rel.startsWith('..') || isAbsolute(rel)) {
+    logForDebugging(
+      `Refusing to read ${source} at ${filePath}: symlink leads outside checked folder ${canonicalRoot} (resolved to ${canonicalTarget})`,
+      { level: 'warn' },
+    )
+    return {
+      file: filePath,
+      path: '',
+      message: `Settings file could not be verified against the route its check resolved, and was not read: ${filePath}`,
+      severity: 'fatal',
+    }
+  }
+  return null
+}
+
+function parseSettingsFileForSource(
+  source: SettingSource,
+  filePath: string,
+): {
+  settings: SettingsJson | null
+  errors: ValidationError[]
+} {
+  if (source === 'projectSettings' || source === 'localSettings') {
+    const escapeError = checkProjectSettingsSymlinkEscape(source, filePath)
+    if (escapeError) {
+      return { settings: null, errors: [escapeError] }
+    }
+  }
+  return parseSettingsFile(filePath)
+}
+
 export function getSettingsForSourceUncached(
   source: SettingSource,
 ): SettingsJson | null {
@@ -897,7 +1041,7 @@ export function getSettingsForSourceUncached(
 
   const settingsFilePath = getSettingsFilePathForSource(source)
   const { settings: fileSettings } = settingsFilePath
-    ? parseSettingsFile(settingsFilePath)
+    ? parseSettingsFileForSource(source, settingsFilePath)
     : { settings: null }
 
   // For flagSettings, merge in any inline settings set via the SDK
@@ -925,15 +1069,64 @@ export function getSettingsForSourceUncached(
   return fileSettings
 }
 
+/**
+ * Official 2.1.323 (#2187) `jHa`: repo-scoped settings keys stripped from
+ * `projectSettings` / `localSettings` in untrusted workspaces (e.g., self-hosted
+ * runners with `--trust-workspace false` or VS Code in an untrusted folder,
+ * indicated by `CLAUDE_CODE_IGNORE_PERSISTED_TRUST` / `--ignore-persisted-trust`).
+ */
+export const UNTRUSTED_WORKSPACE_STRIP_KEYS = [
+  'disableAllHooks',
+  'enabledPlugins',
+  'extraKnownMarketplaces',
+  'agent',
+  'allowedHttpHookUrls',
+  'httpHookAllowedEnvVars',
+  'autoMemoryDirectory',
+  'modelOverrides',
+  'allowedMcpServers',
+  'skipWebFetchPreflight',
+  'autoUploadSessions',
+  'xaaIdp',
+  'claudeMdExcludes',
+  'enableAllProjectMcpServers',
+  'enabledMcpjsonServers',
+] as const
+
+export function isUntrustedWorkspaceRepoSettingsRestricted(
+  source: 'projectSettings' | 'localSettings',
+): boolean {
+  const ignorePersistedTrust =
+    isEnvTruthy(process.env.CLAUDE_CODE_IGNORE_PERSISTED_TRUST) ||
+    process.argv.includes('--ignore-persisted-trust')
+  if (!ignorePersistedTrust) return false
+  if (source === 'projectSettings' && projectSettingsAliasesUserSettings()) {
+    return false
+  }
+  return true
+}
+
 function stripProjectScopedSettings(
   settings: SettingsJson,
   source: 'projectSettings' | 'localSettings',
 ): SettingsJson {
-  const afterTracing = stripProjectScopedTracingSettings(settings, source)
-  if (!afterTracing.env) return afterTracing
-  const filteredEnv = stripProjectScopeBlockedEnv(afterTracing.env, source)
-  if (filteredEnv === afterTracing.env) return afterTracing
-  return { ...afterTracing, env: filteredEnv }
+  let current = stripProjectScopedTracingSettings(settings, source)
+  if (isUntrustedWorkspaceRepoSettingsRestricted(source)) {
+    const hasRestricted = UNTRUSTED_WORKSPACE_STRIP_KEYS.some(
+      k => (current as Record<string, unknown>)[k] !== undefined,
+    )
+    if (hasRestricted) {
+      const stripped = { ...(current as Record<string, unknown>) }
+      for (const k of UNTRUSTED_WORKSPACE_STRIP_KEYS) {
+        delete stripped[k]
+      }
+      current = stripped as SettingsJson
+    }
+  }
+  if (!current.env) return current
+  const filteredEnv = stripProjectScopeBlockedEnv(current.env, source)
+  if (filteredEnv === current.env) return current
+  return { ...current, env: filteredEnv }
 }
 
 /**
@@ -1134,9 +1327,13 @@ function mergeSettingsForSource(
 }
 
 function noteLocalSettingsGitignore(): void {
+  // Official 2.1.323 (#2059) `Ybn`: pass writeOutsideGitRepo=true so
+  // `.claude/settings.local.json` is added to the global gitignore even before
+  // `git init` or on a fresh machine.
   void addFileGlobRuleToGitignore(
     getRelativeSettingsFilePathForSource('localSettings'),
     getOriginalCwd(),
+    true,
   ).then(result => {
     if (!result.written) return
     if (result.effective) {
@@ -1152,38 +1349,50 @@ function noteLocalSettingsGitignore(): void {
 }
 
 function loadExistingSettingsForWrite(
-  source: EditableSettingSource,
+  _source: EditableSettingSource,
   filePath: string,
-): { error: Error } | { settings: SettingsJson | null } {
-  let existingSettings = getSettingsForSourceUncached(source)
-  if (!existingSettings) {
-    let content: string | null = null
-    try {
-      content = readFileSync(filePath)
-    } catch (e) {
-      if (!isENOENT(e)) {
-        throw e
-      }
+): { error: Error } | { settings: SettingsJson | null; existed: boolean } {
+  // Official 2.1.323 (#1983) `Di`/`Ni`: always read FRESH from disk (never from
+  // the session parsed-file cache) so hand edits made moments earlier survive,
+  // and a file deleted during the session is seen as gone rather than
+  // resurrected from stale cache.
+  let content: string | null = null
+  try {
+    const fs = getFsImplementation()
+    const { resolvedPath } = safeResolvePath(fs, filePath)
+    content = readFileSync(resolvedPath)
+  } catch (e) {
+    if (!isENOENT(e)) {
+      throw e
     }
-    // densable 2.1.252 `di` empty-file skip
-    if (content !== null && content.trim() !== '') {
-      const rawData = safeParseJSON(content)
-      if (rawData === null) {
-        return {
-          error: new Error(
-            `Invalid JSON syntax in settings file at ${filePath}`,
-          ),
-        }
-      }
-      if (rawData && typeof rawData === 'object') {
-        existingSettings = rawData as SettingsJson
-        logForDebugging(
-          `Using raw settings from ${filePath} due to validation failure`,
-        )
-      }
+    return { settings: null, existed: false }
+  }
+
+  // densable 2.1.252 `di` empty-file skip
+  if (content.trim() === '') {
+    return { settings: null, existed: true }
+  }
+
+  const parsed = parseSettingsFileContent(content, filePath)
+  if (parsed.settings !== null) {
+    return { settings: parsed.settings, existed: true }
+  }
+
+  const rawData = safeParseJSON(content, false)
+  if (rawData === null) {
+    return {
+      error: new Error(`Invalid JSON syntax in settings file at ${filePath}`),
     }
   }
-  return { settings: existingSettings }
+  if (rawData && typeof rawData === 'object' && !Array.isArray(rawData)) {
+    logForDebugging(
+      `Using raw settings from ${filePath} due to validation failure`,
+    )
+    return { settings: rawData as SettingsJson, existed: true }
+  }
+  return {
+    error: new Error(`Invalid JSON syntax in settings file at ${filePath}`),
+  }
 }
 
 function writeSettingsFile(
@@ -1224,17 +1433,31 @@ export function updateSettingsForSource(
     return { error: null }
   }
 
+  // Official 2.1.323 (#2029/#1983): block project/local settings writes through
+  // symlinks that escape the checked project root.
+  if (source === 'projectSettings' || source === 'localSettings') {
+    const escapeError = checkProjectSettingsSymlinkEscape(source, filePath)
+    if (escapeError) {
+      return { error: new Error(escapeError.message) }
+    }
+  }
+
   try {
-    getFsImplementation().mkdirSync(dirname(filePath))
     const loaded = loadExistingSettingsForWrite(source, filePath)
     if ('error' in loaded) {
       return { error: loaded.error }
     }
-    writeSettingsFile(
-      source,
-      filePath,
-      mergeSettingsForSource(loaded.settings, settings),
-    )
+    const merged = mergeSettingsForSource(loaded.settings, settings)
+    // Official 2.1.323 (#1983): if the settings file was deleted during the
+    // session and this update leaves nothing to persist (e.g. clearing keys to
+    // `undefined` or empty patch), keep the deleted file deleted instead of
+    // recreating it as `{}`.
+    if (!loaded.existed && jsonStringify(merged) === '{}') {
+      resetSettingsCache()
+      return { error: null }
+    }
+    getFsImplementation().mkdirSync(dirname(filePath))
+    writeSettingsFile(source, filePath, merged)
   } catch (e) {
     const error = new Error(
       `Failed to read raw settings from ${filePath}: ${e}`,
@@ -1305,6 +1528,15 @@ export async function persistSettingsForSource(
   const filePath = getSettingsFilePathForSource(source)
   if (!filePath) {
     return { error: null }
+  }
+
+  // Official 2.1.323 (#2029/#1983): block project/local settings writes through
+  // symlinks that escape the checked project root.
+  if (source === 'projectSettings' || source === 'localSettings') {
+    const escapeError = checkProjectSettingsSymlinkEscape(source, filePath)
+    if (escapeError) {
+      return { error: new Error(escapeError.message) }
+    }
   }
 
   const write = settingsStorageV5Write(storageV5)
@@ -1562,6 +1794,19 @@ function loadSettingsFromDisk(): SettingsWithErrors {
             policySettings,
             settingsMergeCustomizer,
           )
+          // Official 2.1.325 #2354: when the highest-ranking managed source
+          // enables the sandbox without explicitly setting
+          // `sandbox.autoAllowBashIfSandboxed: true`, never inherit a `true`
+          // value from user/project/local settings.
+          if (
+            policySettings.sandbox?.enabled === true &&
+            policySettings.sandbox.autoAllowBashIfSandboxed !== true
+          ) {
+            mergedSettings.sandbox = {
+              ...mergedSettings.sandbox,
+              autoAllowBashIfSandboxed: false,
+            }
+          }
           // densable w6i: policy availableModels / enforceAvailableModels
           // re-applied as replace (not concat) after full merge.
           if (policySettings.availableModels !== undefined) {
@@ -1606,7 +1851,10 @@ function loadSettingsFromDisk(): SettingsWithErrors {
         if (!seenFiles.has(resolvedPath)) {
           seenFiles.add(resolvedPath)
 
-          const { settings, errors } = parseSettingsFile(filePath)
+          const { settings, errors } = parseSettingsFileForSource(
+            source,
+            filePath,
+          )
 
           // Add unique errors (deduplication)
           for (const error of errors) {
@@ -2021,6 +2269,58 @@ function filterInvalidCrossSessionInbound(
 }
 
 /**
+ * Official 2.1.325 #2298 (`y_` / `o8r`): valid `teammateMode` settings values.
+ */
+export const TEAMMATE_MODE_VALUES = [
+  'tmux',
+  'iterm2',
+  'in-process',
+  'auto',
+] as const
+
+export type TeammateModeSetting = (typeof TEAMMATE_MODE_VALUES)[number]
+
+/**
+ * Official 2.1.325 #2298 (`y_`): validate `teammateMode` in raw settings JSON.
+ * Unrecognized values are removed (not applied) and reported as a skipped
+ * warning surfaced in startup warnings, `claude doctor`, and `claude -p`.
+ */
+export function filterInvalidTeammateMode(
+  data: unknown,
+  filePath: string,
+  options?: { policySource?: boolean },
+): ValidationError[] {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return []
+  const obj = data as Record<string, unknown>
+  const value = obj.teammateMode
+  if (
+    value === undefined ||
+    (typeof value === 'string' &&
+      (TEAMMATE_MODE_VALUES as readonly string[]).includes(value))
+  ) {
+    return []
+  }
+  const isPolicy = options?.policySource === true
+  if (!isPolicy) {
+    delete obj.teammateMode
+  }
+  const expected = TEAMMATE_MODE_VALUES.map(v => `"${v}"`).join(', ')
+  const received = formatReceivedCrossSessionInbound(value)
+  const suffix = isPolicy
+    ? 'In managed settings this value is ignored and teammates use the mode from other settings or the default ("in-process").'
+    : 'This value is ignored and teammates use the mode from your other settings or the default ("in-process"); change it to one of the values above.'
+  return [
+    {
+      file: filePath,
+      path: 'teammateMode',
+      message: `"teammateMode" must be one of ${expected}; received ${received}. ${suffix}`,
+      severity: 'warning',
+      expected,
+    },
+  ]
+}
+
+/**
  * densable 2.1.248 #37 N() @196196105 sha=8852096933c85ace
  * function N(){return k_().errors.some((e)=>e.path===Zjt&&e.severity==="warning"&&!e.statusOnly)}
  */
@@ -2245,6 +2545,78 @@ export function resetManagedRereadStateForTesting(): void {
   _managedRereadGivenUp = false
 }
 
+/**
+ * Official 2.1.323 (#2058): Fresh uncached read of `managed-settings.json` and
+ * `managed-settings.d/*.json` directly from disk, bypassing the parsed-file
+ * cache so files rewritten concurrently at startup can be picked up on re-read.
+ */
+function loadManagedFileSettingsFresh(): {
+  settings: SettingsJson | null
+  errors: ValidationError[]
+  hadReadFailure: boolean
+} {
+  const errors: ValidationError[] = []
+  let merged: SettingsJson = {}
+  let found = false
+  let hadReadFailure = false
+
+  const basePath = getManagedSettingsFilePath()
+  const base = parseSettingsFileUncached(basePath)
+  errors.push(...base.errors)
+  if (base.errors.some(e => e.severity !== 'warning')) {
+    hadReadFailure = true
+  }
+  if (base.settings && Object.keys(base.settings).length > 0) {
+    merged = mergeWith(merged, base.settings, settingsMergeCustomizer)
+    found = true
+  }
+
+  const dropInDir = getManagedSettingsDropInDir()
+  try {
+    const entries = getFsImplementation()
+      .readdirSync(dropInDir)
+      .filter(
+        d =>
+          (d.isFile() || d.isSymbolicLink()) &&
+          d.name.endsWith('.json') &&
+          !d.name.startsWith('.'),
+      )
+      .map(d => d.name)
+      .sort()
+    for (const name of entries) {
+      const dropPath = join(dropInDir, name)
+      const drop = parseSettingsFileUncached(dropPath)
+      errors.push(...drop.errors)
+      if (drop.errors.some(e => e.severity !== 'warning')) {
+        hadReadFailure = true
+      }
+      if (drop.settings && Object.keys(drop.settings).length > 0) {
+        merged = mergeWith(merged, drop.settings, settingsMergeCustomizer)
+        // Official 2.1.325 #2354: keep fresh reread merge aligned with loadManagedFileSettings.
+        if (
+          drop.settings.sandbox?.enabled === true &&
+          drop.settings.sandbox.autoAllowBashIfSandboxed !== true &&
+          merged.sandbox
+        ) {
+          merged.sandbox = {
+            ...merged.sandbox,
+            autoAllowBashIfSandboxed: false,
+          }
+        }
+        found = true
+      }
+    }
+  } catch (e) {
+    const code = getErrnoCode(e)
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+      hadReadFailure = true
+      logError(e)
+    }
+  }
+
+  return { settings: found ? merged : null, errors, hadReadFailure }
+}
+
 export async function rereadManagedSettingsIfNeeded(
   timeoutMs: number = MANAGED_REREAD_TIMEOUT_MS,
 ): Promise<boolean> {
@@ -2258,6 +2630,7 @@ export async function rereadManagedSettingsIfNeeded(
   let timedOut = false
   const run = (async (): Promise<boolean> => {
     const deadline = Date.now() + timeoutMs
+    const prevJson = JSON.stringify(prev ?? null)
     for (let attempt = 0; attempt <= MANAGED_REREAD_MAX_RETRIES; attempt++) {
       const remaining = Math.max(0, deadline - Date.now())
       if (remaining === 0 && attempt > 0) {
@@ -2265,12 +2638,21 @@ export async function rereadManagedSettingsIfNeeded(
         giveUpManagedReread()
         return false
       }
-      const next = loadManagedFileSettings().settings
-      const prevJson = JSON.stringify(prev ?? null)
-      const nextJson = JSON.stringify(next ?? null)
+      // Official 2.1.323 (#2058): read fresh from disk (not cached) so a file
+      // that was being rewritten at startup is read a second time.
+      const fresh = loadManagedFileSettingsFresh()
+      const nextJson = JSON.stringify(fresh.settings ?? null)
       if (prevJson !== nextJson) {
         resetSettingsCache()
         return true
+      }
+      // If a transient read failure occurred or file was mid-rewrite, yield
+      // briefly and retry once more within the deadline.
+      if (fresh.hadReadFailure && attempt < MANAGED_REREAD_MAX_RETRIES) {
+        await new Promise(resolveDelay =>
+          setTimeout(resolveDelay, Math.min(40, remaining)),
+        )
+        continue
       }
       return false
     }

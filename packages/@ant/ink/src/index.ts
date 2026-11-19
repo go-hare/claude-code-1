@@ -46,6 +46,9 @@ export {
   keystrokeToDisplayString,
   chordToDisplayString,
   parseBindings,
+  splitKeystrokeParts,
+  hasLostKeystrokePart,
+  stripLostModifierBindings,
 } from './keybindings/parser.js'
 export {
   formatChords,
@@ -166,7 +169,11 @@ export {
   TerminalFocusEvent,
   type TerminalFocusEventType,
 } from './core/events/terminal-focus-event.js'
-export { KeyboardEvent } from './core/events/keyboard-event.js'
+export {
+  KeyboardEvent,
+  isMultiCharTextEvent,
+} from './core/events/keyboard-event.js'
+export { reorderLeadingCombiningMarks } from './core/output.js'
 export { PasteEvent } from './core/events/paste-event.js'
 export { WheelEvent } from './core/events/wheel-event.js'
 export { MouseActionEvent } from './core/events/mouse-action-event.js'

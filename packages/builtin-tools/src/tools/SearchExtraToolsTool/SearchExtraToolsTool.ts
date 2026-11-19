@@ -323,6 +323,47 @@ async function searchToolsWithKeywords(
     .map(item => item.name)
 }
 
+/**
+ * 2.1.323 #2160: Find already-loaded (non-deferred) tools matching an exact
+ * name or MCP short name (the suffix after the final `__`, e.g. `foo` for
+ * `mcp__server__foo`), including multi-word queries joined with `_`.
+ */
+export function findAlreadyLoadedToolsByShortName(
+  allTools: Tools,
+  deferredToolNames: ReadonlySet<string>,
+  rawQuery: string,
+): string[] {
+  const trimmed = rawQuery.trim()
+  if (!trimmed) return []
+  const words = trimmed
+    .split(/\s+/)
+    .map(w => w.replace(/^\+/, ''))
+    .filter(Boolean)
+  const candidates = new Set<string>([trimmed.toLowerCase()])
+  if (words.length > 1) {
+    candidates.add(words.join('_').toLowerCase())
+  }
+  for (const w of words) {
+    if (w.includes('_')) {
+      candidates.add(w.toLowerCase())
+    }
+  }
+
+  const matched: string[] = []
+  for (const tool of allTools) {
+    if (deferredToolNames.has(tool.name)) continue
+    const lowerName = tool.name.toLowerCase()
+    const lastSep = lowerName.lastIndexOf('__')
+    const shortName = lastSep >= 0 ? lowerName.slice(lastSep + 2) : lowerName
+    if (candidates.has(lowerName) || candidates.has(shortName)) {
+      if (!matched.includes(tool.name)) {
+        matched.push(tool.name)
+      }
+    }
+  }
+  return matched
+}
+
 export const SearchExtraToolsTool = buildTool({
   isEnabled() {
     return isSearchExtraToolsEnabledOptimistic()
@@ -392,6 +433,7 @@ export const SearchExtraToolsTool = buildTool({
       const found: string[] = []
       const alreadyLoaded: string[] = []
       const missing: string[] = []
+      const deferredNameSet = new Set(deferredTools.map(t => t.name))
       for (const toolName of requested) {
         const deferredMatch = findToolByName(deferredTools, toolName)
         const fullMatch = deferredMatch ?? findToolByName(tools, toolName)
@@ -403,11 +445,38 @@ export const SearchExtraToolsTool = buildTool({
             }
           }
         } else {
-          missing.push(toolName)
+          // 2.1.323 #2160: also recognize already-loaded tools searched by short name
+          const shortMatches = findAlreadyLoadedToolsByShortName(
+            tools,
+            deferredNameSet,
+            toolName,
+          )
+          if (shortMatches.length > 0) {
+            for (const name of shortMatches) {
+              if (!alreadyLoaded.includes(name)) {
+                alreadyLoaded.push(name)
+              }
+            }
+          } else {
+            missing.push(toolName)
+          }
         }
       }
 
       if (found.length === 0) {
+        if (alreadyLoaded.length > 0) {
+          logForDebugging(
+            `SearchExtraToolsTool: select matched already-loaded tools by short name: ${alreadyLoaded.join(', ')}`,
+          )
+          logSearchOutcome([], 'select')
+          return buildSearchResult(
+            [],
+            query,
+            deferredTools.length,
+            undefined,
+            alreadyLoaded,
+          )
+        }
         logForDebugging(
           `SearchExtraToolsTool: select failed — none found: ${missing.join(', ')}`,
         )
@@ -509,8 +578,25 @@ export const SearchExtraToolsTool = buildTool({
 
     logSearchOutcome(matches, 'keyword')
 
-    // Include pending server info when search finds no matches
+    // Include pending server info and already-loaded short-name matches when search finds no deferred matches
     if (matches.length === 0) {
+      const alreadyAvailableByShortName = findAlreadyLoadedToolsByShortName(
+        tools,
+        deferredToolNames,
+        query,
+      )
+      if (alreadyAvailableByShortName.length > 0) {
+        logForDebugging(
+          `SearchExtraToolsTool: keyword query matched already-loaded tools by short name: ${alreadyAvailableByShortName.join(', ')}`,
+        )
+        return buildSearchResult(
+          matches,
+          query,
+          deferredTools.length,
+          undefined,
+          alreadyAvailableByShortName,
+        )
+      }
       const pendingServers = getPendingServerNames()
       return buildSearchResult(
         matches,
@@ -547,6 +633,10 @@ export const SearchExtraToolsTool = buildTool({
   ): ToolResultBlockParam {
     if (content.matches.length === 0) {
       let text = 'No matching deferred tools found'
+      if (content.already_loaded && content.already_loaded.length > 0) {
+        const names = content.already_loaded
+        text += `. Already available in this conversation: ${names.join(', ')}. ${names.length === 1 ? 'Call it' : 'Call whichever you need'} directly.`
+      }
       if (
         content.pending_mcp_servers &&
         content.pending_mcp_servers.length > 0

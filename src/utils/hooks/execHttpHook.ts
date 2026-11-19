@@ -33,6 +33,23 @@ async function getSandboxProxyConfig(): Promise<
   // ready yet when the first hook fires.
   await SandboxManager.waitForNetworkInitialization()
 
+  // 2.1.323 #2030: on Linux when CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is set and
+  // sandbox.enabled is off (scrub-only mode with no allowedHosts), routing HTTP
+  // hooks through the sandbox proxy fails with HTTP 500. Fall back to direct
+  // SSRF-guarded fetch instead.
+  const isScrubOnly =
+    process.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB !== undefined &&
+    /^(?:1|true|yes|on)$/i.test(
+      process.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB.trim(),
+    ) &&
+    settingsModule.getInitialSettings().sandbox?.enabled !== true
+  if (
+    isScrubOnly &&
+    SandboxManager.getNetworkRestrictionConfig().allowedHosts === undefined
+  ) {
+    return undefined
+  }
+
   const proxyPort = SandboxManager.getProxyPort()
   if (!proxyPort) {
     return undefined

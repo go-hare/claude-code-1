@@ -6,6 +6,12 @@ import {
   mcpElicitationSpec,
   mcpElicitationWaitingSpec,
 } from '../../dialog/specs/jsuKinds.js'
+import {
+  isDeferredTaskElicitation,
+  isMcpTask,
+  McpTaskQuestionController,
+  type McpTaskQuestionSurfaceState,
+} from '../../tasks/McpTask/McpTask.js'
 import type { ElicitRequestParams, ElicitResult } from './types.js'
 import type { AppState } from '../../state/AppState.js'
 import {
@@ -67,6 +73,87 @@ type LeftoverMcpElicitationFlow = {
 type LeftoverMcpElicitationDeps = {
   serverName: string
   requestDialog: RequestDialog
+  setAppState: (f: (prevState: AppState) => AppState) => void
+}
+
+function extractRelatedMcpTaskId(
+  params: ElicitRequestParams,
+): string | undefined {
+  const meta = (params as { _meta?: Record<string, unknown> })._meta
+  const related =
+    meta?.['io.modelcontextprotocol/related-task'] ?? meta?.relatedTask
+  if (
+    typeof related === 'object' &&
+    related !== null &&
+    typeof (related as { taskId?: unknown }).taskId === 'string'
+  ) {
+    return (related as { taskId: string }).taskId
+  }
+  return undefined
+}
+
+function updateMatchingMcpTaskQuestionState(
+  setAppState: (f: (prevState: AppState) => AppState) => void,
+  serverName: string,
+  relatedTaskId: string | undefined,
+  openQuestion: (() => void) | undefined,
+  questionState: McpTaskQuestionSurfaceState,
+): void {
+  setAppState(prev => {
+    const tasks = prev.tasks
+    if (!tasks) return prev
+    let targetId: string | undefined
+    if (relatedTaskId) {
+      if (relatedTaskId in tasks) {
+        targetId = relatedTaskId
+      } else {
+        for (const task of Object.values(tasks)) {
+          if (
+            isMcpTask(task) &&
+            task.status === 'running' &&
+            task.mcpTaskId === relatedTaskId
+          ) {
+            targetId = task.id
+            break
+          }
+        }
+      }
+    } else {
+      for (const task of Object.values(tasks)) {
+        if (
+          isMcpTask(task) &&
+          task.status === 'running' &&
+          task.serverName === serverName
+        ) {
+          targetId = task.id
+          break
+        }
+      }
+    }
+    if (!targetId) return prev
+    const current = tasks[targetId]
+    if (!isMcpTask(current) || current.status !== 'running') return prev
+    if (
+      current.openQuestion === openQuestion &&
+      current.questionState === questionState
+    ) {
+      return prev
+    }
+    return {
+      ...prev,
+      tasks: {
+        ...tasks,
+        [targetId]: {
+          ...current,
+          openQuestion,
+          questionState,
+          ...(questionState !== undefined
+            ? { mcpStatus: 'input_required' as const }
+            : {}),
+        },
+      },
+    }
+  })
 }
 
 type LeftoverMcpElicitationHost = {
@@ -164,16 +251,103 @@ function leftoverBindMcpElicitationHost(
           if (set) set.add(flow)
           else urlFlows.set(elicitationId, new Set([flow]))
         }
-        const result = (await requestDialog(
-          mcpElicitationSpec,
-          {
-            serverName,
-            params,
-            ...(params.mode === 'url' &&
-              elicitationId === undefined && { userConfirmsCompletion: true }),
-          },
-          { signal, place: 'under' },
-        )) as ElicitResult
+        const isBackgroundTask = isBackgroundMcpTaskElicitation(params)
+        let result: ElicitResult
+        if (isBackgroundTask) {
+          const relatedTaskId = extractRelatedMcpTaskId(params)
+          let wakeReopen: (() => void) | undefined
+          const controller = new McpTaskQuestionController((openFn, state) => {
+            const wrappedOpen = openFn
+              ? () => {
+                  openFn()
+                  wakeReopen?.()
+                }
+              : undefined
+            updateMatchingMcpTaskQuestionState(
+              bound.setAppState,
+              serverName,
+              relatedTaskId,
+              wrappedOpen,
+              state,
+            )
+          })
+          try {
+            while (true) {
+              if (signal.aborted) {
+                result = { action: 'cancel' }
+                break
+              }
+              controller.set('asking')
+              result = (await requestDialog(
+                mcpElicitationSpec,
+                {
+                  serverName,
+                  params,
+                  isBackgroundTask: true,
+                  ...(params.mode === 'url' &&
+                    elicitationId === undefined && {
+                      userConfirmsCompletion: true,
+                    }),
+                },
+                { signal, place: 'under' },
+              )) as ElicitResult
+              // Official 2.1.325 #2367: Esc on a background MCP task elicitation
+              // is "answer later" — suspend without returning { action: 'cancel' }
+              // as a JSON-RPC response to the MCP server until the user reopens
+              // from /tasks or the request signal aborts.
+              if (result.action === 'cancel' && !signal.aborted) {
+                await new Promise<void>(resolve => {
+                  const onAbort = () => {
+                    wakeReopen = undefined
+                    resolve()
+                  }
+                  wakeReopen = () => {
+                    wakeReopen = undefined
+                    signal.removeEventListener('abort', onAbort)
+                    resolve()
+                  }
+                  signal.addEventListener('abort', onAbort, { once: true })
+                  controller.putAside(
+                    `${serverName}:${elicitationId ?? 'deferred'}`,
+                  )
+                  if (signal.aborted) {
+                    signal.removeEventListener('abort', onAbort)
+                    wakeReopen = undefined
+                    resolve()
+                  }
+                })
+                if (signal.aborted) {
+                  result = { action: 'cancel' }
+                  break
+                }
+                controller.takeOpen()
+                continue
+              }
+              controller.answered()
+              break
+            }
+          } finally {
+            wakeReopen = undefined
+            controller.set(undefined)
+          }
+          if (signal.aborted && result.action === 'cancel') {
+            forget(elicitationId, flow)
+            return result
+          }
+        } else {
+          result = (await requestDialog(
+            mcpElicitationSpec,
+            {
+              serverName,
+              params,
+              ...(params.mode === 'url' &&
+                elicitationId === undefined && {
+                  userConfirmsCompletion: true,
+                }),
+            },
+            { signal, place: 'under' },
+          )) as ElicitResult
+        }
         if (!signal.aborted) {
           logEvent('tengu_mcp_elicitation_response', {
             mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -258,6 +432,43 @@ function findElicitationInQueue(
   )
 }
 
+/**
+ * Official 2.1.325 #2309 (`cueBehindDraft`): a background MCP task question
+ * must NOT steal focus over a message the user is still typing; it waits behind
+ * the draft until the user sends or clears it while keeping the spinner and
+ * turn timer running.
+ */
+export function isBackgroundMcpTaskElicitation(
+  params: ElicitRequestParams,
+): boolean {
+  if (isDeferredTaskElicitation(params)) return true
+  const meta = (params as { _meta?: Record<string, unknown> })._meta
+  const related =
+    meta?.['io.modelcontextprotocol/related-task'] ?? meta?.relatedTask
+  return (
+    typeof related === 'object' &&
+    related !== null &&
+    typeof (related as { taskId?: unknown }).taskId === 'string'
+  )
+}
+
+export function getElicitationCueBehindDraft(payload: {
+  serverName: string
+  params: ElicitRequestParams
+  isBackgroundTask?: boolean
+}): { text: string; keepSpinnerRunning: true } | undefined {
+  if (
+    payload.isBackgroundTask !== true &&
+    !isBackgroundMcpTaskElicitation(payload.params)
+  ) {
+    return undefined
+  }
+  return {
+    text: `MCP task (${payload.serverName}) needs your input — send or clear your draft to answer`,
+    keepSpinnerRunning: true,
+  }
+}
+
 export function registerElicitationHandler(
   client: Client,
   serverName: string,
@@ -290,6 +501,7 @@ export function registerElicitationHandler(
       const leftoverHost = leftoverBindMcpElicitationHost(client, {
         serverName,
         requestDialog,
+        setAppState,
       })
       client.setRequestHandler('elicitation/create', async (request, ctx) =>
         trackOpenQuestion(() =>

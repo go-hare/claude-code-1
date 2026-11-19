@@ -439,7 +439,9 @@ export const SandboxSettingsSchema = lazySchema(() =>
           'Exit with an error at startup if sandbox.enabled is true but the sandbox cannot start ' +
             '(missing dependencies, unsupported platform, or platform not in enabledPlatforms). ' +
             'When false (default), a warning is shown and commands run unsandboxed. ' +
-            'Intended for managed-settings deployments that require sandboxing as a hard gate.',
+            'Intended for managed-settings deployments that require sandboxing as a hard gate. ' +
+            "A Claude Code on the web, scheduled-task or Cowork cloud session (Anthropic's cloud container, which has no command sandbox) " +
+            'starts anyway with a warning: the container isolates it, and the sandbox.filesystem and sandbox.network rules in settings are not enforced there.',
         ),
       // Note: enabledPlatforms is an undocumented setting read via .passthrough()
       // It restricts sandboxing to specific platforms (e.g., ["macos"]).
@@ -449,7 +451,12 @@ export const SandboxSettingsSchema = lazySchema(() =>
       // sandbox support is newer and less battle-tested. This allows them to
       // set enabledPlatforms: ["macos"] to disable sandbox (and auto-allow)
       // on other platforms until they're ready to expand.
-      autoAllowBashIfSandboxed: z.boolean().optional(),
+      autoAllowBashIfSandboxed: z
+        .boolean()
+        .optional()
+        .describe(
+          'macOS and Linux/WSL only: approve a Bash command that will run inside the sandbox without a permission prompt, unless a deny rule, a command-specific ask rule or a safety check stops it. Default: false, so sandboxed commands go through the same permission flow as any other command. Has no effect on native Windows.',
+        ),
       allowUnsandboxedCommands: z
         .boolean()
         .optional()

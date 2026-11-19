@@ -1,11 +1,19 @@
 /**
  * densable xSl / Fhs — permission-dialog requestSource.
  *
- * Gold 2.1.236 `xSl(toolUseContext)` (gold-iK.txt) + 2.1.239 G2e/Fhs
- * (gold-wide-nlg.txt). Fhs wraps LUf; LUf needs WPi/zPi/oge whose bodies
- * are not dumped — return undefined (G2e fallback copy) rather than
- * interpolating unsanitized names.
+ * Official 2.1.323 (#2090): `formatPermissionSourceName` sanitizes terminal
+ * escapes, control characters, and invisible Unicode formatting characters
+ * while preserving the full agent/workflow name without truncating or hiding
+ * valid names.
  */
+import { partiallySanitizeUnicode } from '../utils/sanitization.js'
+
+const ANSI_ESCAPE_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping terminal escape sequences
+  /\x1b(?:\[[0-9;?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[()][0-9A-B]|[@-Z\\-_])/g
+// biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ASCII control characters
+const CONTROL_CHARS_RE = /[\x00-\x1f\x7f-\x9f]/g
+
 export type PermissionRequestSource =
   | { type: 'remote-agent' }
   | {
@@ -35,11 +43,20 @@ export type PermissionRequestSourceContext = {
 }
 
 /**
- * densable Fhs(e){let t=LUf(e);return t===null?void 0:String(t)}
- * LUf sanitizer chain is not dumped — treat as null.
+ * Official 2.1.323 (#2090, `Fhs`/`LUf`): sanitize a subagent or workflow
+ * source name for permission/plan dialog titles without truncating or hiding
+ * legitimate agent names.
  */
-export function formatPermissionSourceName(_name: unknown): string | undefined {
-  return undefined
+export function formatPermissionSourceName(name: unknown): string | undefined {
+  if (typeof name !== 'string') return undefined
+  let cleaned = name.replace(ANSI_ESCAPE_RE, '').replace(CONTROL_CHARS_RE, ' ')
+  try {
+    cleaned = partiallySanitizeUnicode(cleaned)
+  } catch {
+    // Keep ANSI/control-stripped text if Unicode normalization hits iteration cap
+  }
+  const normalized = cleaned.replace(/\s+/g, ' ').trim()
+  return normalized.length > 0 ? normalized : undefined
 }
 
 /**

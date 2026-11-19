@@ -214,7 +214,11 @@ import {
   applyClaimWorkspaceTrust,
   handleClaimSessionRequest,
 } from 'src/cli/claimSession.js'
-import { dispatchPrintControlExtra } from 'src/cli/printControlExtras.js'
+import {
+  dispatchPrintControlExtra,
+  redactSettingsResponseForRemote,
+  resolveControlConnectionTrustLevel,
+} from 'src/cli/printControlExtras.js'
 import type { Stream } from 'src/utils/stream.js'
 import { EMPTY_USAGE } from '@ant/model-provider'
 import {
@@ -258,7 +262,13 @@ import {
 } from 'src/state/onChangeAppState.js'
 import { writeExitCause, writeExitDetail } from 'src/daemon/bgWorker.js'
 import { classifyProxyConnectError } from 'src/bridge/remoteControlEndpointReason.js'
-import { getTranscriptFullDiskState } from 'src/utils/sessionStorage.js'
+import {
+  getTranscriptFullDiskState,
+  isTrailingNoReplyNote,
+  markNotChainParent,
+  stripUnresumedInterruptedMessages,
+  wasTurnStoppedByHook,
+} from 'src/utils/sessionStorage.js'
 import {
   readPersistedSep2663TaskMetas,
   restoreSep2663Tasks,
@@ -518,7 +528,14 @@ import {
   isAutoDefaultLaunchEnabled,
   isRefusalFallbackLaneEnabled,
 } from 'src/services/mcp/vscodeIdeBridgeCallbacks.js'
-import { getAllMcpConfigs } from 'src/services/mcp/config.js'
+import {
+  getAllMcpConfigs,
+  setCloudPluginStartupPending,
+} from 'src/services/mcp/config.js'
+import {
+  applyCodeModePlan,
+  planCodeModeFromSession,
+} from 'src/services/codeMode/executor.js'
 import {
   isQualifiedForGrove,
   checkGroveForNonInteractive,
@@ -678,6 +695,20 @@ import {
 import { installPluginsForHeadless } from '../utils/plugins/headlessPluginInstall.js'
 import { refreshActivePlugins } from '../utils/plugins/refresh.js'
 import { loadAllPluginsCacheOnly } from '../utils/plugins/pluginLoader.js'
+import { setHeadlessPluginOutputFormat } from '../utils/plugins/functionHooksModules.js'
+import { formatHeadlessPluginErrors } from '../types/plugin.js'
+import {
+  markHookHeartbeatTurnPastResult,
+  registerHookHeartbeatSink,
+  setHookHeartbeatTurn,
+  stopAllHookHeartbeatsForSession,
+} from '../utils/hooks/hookHeartbeat.js'
+import { getHooksConfigFromSnapshot } from '../utils/hooks/hooksConfigSnapshot.js'
+import {
+  collectRequiredMcpPrewaitServers,
+  resolveMcpStartupPrewaitBudgetMs,
+} from '../services/mcp/mcpConnectTimeout.js'
+import { normalizeNameForMCP } from '../services/mcp/normalization.js'
 import {
   isTeamLead,
   hasActiveInProcessTeammates,
@@ -811,6 +842,7 @@ const HEADLESS_LAST_MESSAGE_SKIP_TYPES: ReadonlySet<string> = new Set([
   'autocompact_state',
   'stream_event',
   'keep_alive',
+  'tool_progress',
   'transcript_mirror',
   'streamlined_text',
   'streamlined_tool_use_summary',
@@ -1406,6 +1438,131 @@ export function reportPrintStartupFatalToJobDir(
 }
 
 /**
+ * Official 2.1.325 #2283 (`_0t` + `QJo`):
+ * When `claude -p` writes text output to a TTY, strip terminal control
+ * sequences other than SGR text styling (`\x1b[...m` with `[0-9;:]` params)
+ * and C0/C1 control characters (keeping `\t` and `\n`, normalizing `\r\n?` to
+ * `\n`). Pipes and files are unchanged.
+ */
+const NON_SGR_TTY_CONTROL_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional terminal escape/control sequence filtering
+  /(?!\x1b\[[0-9;:]*m)[\x00-\x08\x0b-\x1f\x7f-\x9f]/g
+
+export function sanitizePrintTextForTty(text: string): string {
+  return text.replace(/\r\n?/g, '\n').replace(NON_SGR_TTY_CONTROL_RE, '')
+}
+
+/**
+ * Official 2.1.325 #2376:
+ * When `claude -p` runs in a clean environment with no cached OAuth account
+ * data yet (`oauthAccount` absent or missing `billingType`/`accountCreatedAt`/
+ * `subscriptionCreatedAt`), wait for `populateOAuthAccountInfoIfNeeded()` to
+ * finish (bounded by timeout) before sending the first API request.
+ */
+export const PRINT_ACCOUNT_DATA_WAIT_TIMEOUT_MS = 10_000
+
+export function hasCachedOAuthAccountData(
+  oauthAccount:
+    | {
+        accountUuid?: string
+        organizationUuid?: string
+        billingType?: unknown
+        accountCreatedAt?: unknown
+        subscriptionCreatedAt?: unknown
+      }
+    | undefined
+    | null,
+): boolean {
+  return Boolean(
+    oauthAccount &&
+      oauthAccount.accountUuid &&
+      oauthAccount.organizationUuid &&
+      oauthAccount.billingType !== undefined &&
+      oauthAccount.accountCreatedAt !== undefined &&
+      oauthAccount.subscriptionCreatedAt !== undefined,
+  )
+}
+
+export async function waitForCachedAccountDataBeforePrint(deps?: {
+  isSubscriber?: () => boolean
+  hasProfileScope?: () => boolean
+  getOAuthAccount?: () =>
+    | {
+        accountUuid?: string
+        organizationUuid?: string
+        billingType?: unknown
+        accountCreatedAt?: unknown
+        subscriptionCreatedAt?: unknown
+      }
+    | undefined
+  populateAccountInfo?: () => Promise<boolean>
+  timeoutMs?: number
+}): Promise<{ waited: boolean; populated: boolean; timedOut: boolean }> {
+  const isSubscriber = deps?.isSubscriber ?? isClaudeAISubscriber
+  if (!isSubscriber()) {
+    return { waited: false, populated: false, timedOut: false }
+  }
+  let profileScopeOk = true
+  if (deps?.hasProfileScope) {
+    profileScopeOk = deps.hasProfileScope()
+  } else {
+    try {
+      const { hasProfileScope } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../utils/auth.js') as typeof import('../utils/auth.js')
+      profileScopeOk = hasProfileScope()
+    } catch {
+      profileScopeOk = false
+    }
+  }
+  if (!profileScopeOk) {
+    return { waited: false, populated: false, timedOut: false }
+  }
+  const currentAccount = deps?.getOAuthAccount
+    ? deps.getOAuthAccount()
+    : // eslint-disable-next-line @typescript-eslint/no-require-imports
+      (
+        require('../utils/config.js') as typeof import('../utils/config.js')
+      ).getGlobalConfig().oauthAccount
+  if (hasCachedOAuthAccountData(currentAccount)) {
+    return { waited: false, populated: false, timedOut: false }
+  }
+  const populate =
+    deps?.populateAccountInfo ??
+    (async () => {
+      const { populateOAuthAccountInfoIfNeeded } = await import(
+        '../services/oauth/client.js'
+      )
+      return populateOAuthAccountInfoIfNeeded()
+    })
+  const timeoutMs = deps?.timeoutMs ?? PRINT_ACCOUNT_DATA_WAIT_TIMEOUT_MS
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const result = await Promise.race([
+      populate().then(populated => ({ populated, timedOut: false })),
+      new Promise<{ populated: boolean; timedOut: boolean }>(resolve => {
+        timer = setTimeout(
+          () => resolve({ populated: false, timedOut: true }),
+          timeoutMs,
+        )
+        timer.unref?.()
+      }),
+    ])
+    return { waited: true, ...result }
+  } catch (err) {
+    logForDebugging(
+      `[print.ts] waitForCachedAccountDataBeforePrint failed: ${errorMessage(err)}`,
+      { level: 'warn' },
+    )
+    return { waited: true, populated: false, timedOut: false }
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer)
+    }
+  }
+}
+
+/**
  * densable `Sk` — prints each turn's text result immediately when the turn ends
  * so later background-triggered turns cannot drop earlier responses.
  */
@@ -1420,6 +1577,8 @@ export class PrintTextResults {
       maxBudgetUsd?: number
     },
     private readonly write: (text: string) => void = writeToStdout,
+    private readonly isStdoutTty: () => boolean = () =>
+      process.stdout.isTTY === true,
   ) {}
 
   printAtTurnEnd(msg: PrintTextResultMessage, extra?: string): void {
@@ -1474,12 +1633,13 @@ export class PrintTextResults {
         break
       }
     }
+    const output = this.isStdoutTty() ? sanitizePrintTextForTty(text) : text
     const prefix =
       this.printedCount === 0 ? '' : this.endsWithNewline ? '\n' : '\n\n'
-    this.write(prefix + text)
+    this.write(prefix + output)
     this.lastPrinted = msg
     this.printedCount++
-    this.endsWithNewline = text.endsWith('\n')
+    this.endsWithNewline = output.endsWith('\n')
   }
 }
 
@@ -1938,6 +2098,58 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
   }
 
   reportHeadlessSettingsValidationErrors(options.outputFormat)
+  // Official 2.1.323 #2053: notify headless plugin hooks of resolved outputFormat
+  // so buffered `--plugin-dir` (`@inline`) mod stderr flushes in text mode.
+  setHeadlessPluginOutputFormat(options.outputFormat ?? 'text')
+
+  // Official 2.1.323 #2133 & #2134: in `claude -p` text output, warn on stderr
+  // when settings block the requested model and another model is used instead,
+  // without printing generic `deniedModels`/`availableModels` notes on every run.
+  if (
+    options.userSpecifiedModel &&
+    (options.outputFormat === undefined || options.outputFormat === 'text')
+  ) {
+    try {
+      const { formatPrintBlockedModelStderrWarning } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../utils/model/modelAllowlist.js') as typeof import('../utils/model/modelAllowlist.js')
+      const { getMainLoopModel } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../utils/model/model.js') as typeof import('../utils/model/model.js')
+      const effectiveModel = getMainLoopModel()
+      const warn = formatPrintBlockedModelStderrWarning(
+        options.userSpecifiedModel,
+        effectiveModel,
+      )
+      if (warn !== null) {
+        process.stderr.write(warn)
+      }
+    } catch {
+      // optional model allowlist check
+    }
+  }
+
+  // Official 2.1.323 #2008: when `claude -p` falls back to `ant auth login`
+  // after an ended claude.ai login, warn on stderr that `claude auth logout`
+  // also removes saved MCP server logins and plugin secrets.
+  if (!options.sdkUrl) {
+    try {
+      const { getAuthStatus } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../commands/login/getAuthStatus.js') as typeof import('../commands/login/getAuthStatus.js')
+      const status = getAuthStatus() as {
+        endedClaudeAiFellBackToProfile?: boolean
+        organizationName?: string
+      }
+      if (status?.endedClaudeAiFellBackToProfile) {
+        process.stderr.write(
+          `${formatPrintEndedClaudeAiLoginWarning(status.organizationName || 'your organization')}\n`,
+        )
+      }
+    } catch {
+      // optional auth status check
+    }
+  }
 
   // Fire user settings download now so it overlaps with the MCP/tool setup
   // below. Managed settings already started in main.tsx preAction; this gives
@@ -2191,6 +2403,22 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
     installStreamJsonStdoutGuard()
   }
 
+  // Official 2.1.325 #2374: mark hosted tool containers (Claude Code on the
+  // web, cloud scheduled tasks, Cowork cloud sessions) before checking sandbox
+  // requirements so `sandbox.failIfUnavailable` is set aside with a warning
+  // instead of exiting fatally in a container that has no command sandbox.
+  const isHostedToolContainer =
+    process.env.CLAUDE_CODE_ENVIRONMENT_KIND === undefined &&
+    (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) ||
+      Boolean(
+        process.env.CLAUDE_CODE_CONTAINER_ID ||
+          process.env.CLAUDE_CODE_REMOTE_SESSION_ID ||
+          process.env.CLAUDE_CODE_REMOTE_SESSION_ORIGIN === 'cowork',
+      ))
+  if (isHostedToolContainer) {
+    SandboxManager.markHostedToolContainer()
+  }
+
   // #34044: if user explicitly set sandbox.enabled=true but deps are missing,
   // isSandboxingEnabled() returns false silently. Surface the reason so users
   // know their security config isn't being enforced.
@@ -2222,10 +2450,21 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
       gracefulShutdownSync(1)
       return
     }
-    process.stderr.write(
-      `\n⚠ Sandbox disabled: ${sandboxUnavailableReason}\n` +
-        `  Commands will run WITHOUT sandboxing. Network and filesystem restrictions will NOT be enforced.\n\n`,
-    )
+    if (SandboxManager.isSandboxRequirementSetAsideInHostedWorker()) {
+      logForDebugging(
+        `[sandbox] Hosted container has no command sandbox (${sandboxUnavailableReason}); setting aside sandbox.failIfUnavailable`,
+        { level: 'warn' },
+      )
+      process.stderr.write(
+        `\n⚠ Hosted container has no command sandbox: ${sandboxUnavailableReason}\n` +
+          `  sandbox.failIfUnavailable was set aside because this hosted container provides outer isolation without a command sandbox.\n\n`,
+      )
+    } else {
+      process.stderr.write(
+        `\n⚠ Sandbox disabled: ${sandboxUnavailableReason}\n` +
+          `  Commands will run WITHOUT sandboxing. Network and filesystem restrictions will NOT be enforced.\n\n`,
+      )
+    }
   } else if (SandboxManager.isSandboxingEnabled()) {
     // densable W4g(createSandboxAskCallback(...), getCtx, messagesRef, toolsRef)
     // — mode allow/deny/classify before SDK ask; sessionAllowedHosts on allow.
@@ -2326,6 +2565,7 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
     planModeOnResume,
     deferredToolUse,
     overdueSessionStartHooks,
+    codeModeWaitForNextPrompt,
   } = await loadInitialMessages(setAppState, {
     continue: options.continue,
     teleport: options.teleport,
@@ -2663,6 +2903,13 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
     }
   }
 
+  // Official 2.1.325 #2376: when `claude -p` has no cached OAuth account data
+  // yet (clean environment), wait for the account data fetch before sending
+  // the first API request.
+  if (!options.sdkUrl) {
+    await waitForCachedAccountDataBeforePrint()
+  }
+
   // Ensure model strings are initialized before generating model options.
   // For Bedrock users, this waits for the profile fetch to get correct region strings.
   await ensureModelStringsInitialized()
@@ -2709,6 +2956,7 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
       : null
 
   headlessProfilerCheckpoint('before_runHeadlessStreaming')
+  let emittedHeadlessPluginErrors = false
   for await (const message of runHeadlessStreaming(
     structuredIO,
     appState.mcp.clients,
@@ -2720,10 +2968,35 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
     getAppState,
     setAppState,
     agents,
-    { ...options, planModeOnResume, deferredToolUse, overdueSessionStartHooks },
+    {
+      ...options,
+      planModeOnResume,
+      deferredToolUse,
+      overdueSessionStartHooks,
+      codeModeWaitForNextPrompt,
+    },
     turnInterruptionState,
     printRequestDialog,
   )) {
+    // Official 2.1.323 #2038: in `-p` text mode, write plugin load errors
+    // (`plugin-not-installed` / `engine-range-unsatisfied`) to stderr once.
+    if (
+      isTextOutput &&
+      !emittedHeadlessPluginErrors &&
+      message.type === 'system' &&
+      (message as { subtype?: string }).subtype === 'init'
+    ) {
+      emittedHeadlessPluginErrors = true
+      const initPluginErrors = (
+        message as {
+          plugin_errors?: readonly { type?: string; message?: string }[]
+        }
+      ).plugin_errors
+      const formatted = formatHeadlessPluginErrors(initPluginErrors)
+      if (formatted) {
+        process.stderr.write(formatted)
+      }
+    }
     // densable tao — one-shot billed-classifier notice on the drain
     try {
       /* eslint-disable @typescript-eslint/no-require-imports */
@@ -2881,6 +3154,8 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
     overdueSessionStartHooks?: OverdueSessionStartHooks | undefined
     /** Official --reply-on-resume: auto-continue interrupted turn on resume. */
     replyOnResume?: boolean | undefined
+    /** Official 2.1.325 #2316: resumed Code Mode session ended mid-script; wait for next prompt. */
+    codeModeWaitForNextPrompt?: boolean | undefined
     /** densable #27 stream-json commands_changed emission gate */
     outputFormat?: string | undefined
     /** Official Jqy `planModeOnResume` — restored | declined | none */
@@ -2995,6 +3270,20 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
     null
   // Same queue sendRequest() enqueues to — one FIFO for everything.
   const output = structuredIO.outbound
+
+  // Official 2.1.323 #1970: register 30s hook progress heartbeat sink on the
+  // headless/SDK output stream so long-running hooks keep the host alive.
+  let hookHeartbeatTurnId = 0
+  const unregisterHookHeartbeatSink =
+    options.outputFormat === 'stream-json' || Boolean(options.sdkUrl)
+      ? registerHookHeartbeatSink(event => {
+          output.enqueue({
+            ...event,
+            session_id: getSessionId(),
+          } as unknown as StdoutMessage)
+          output.enqueue({ type: 'keep_alive' })
+        })
+      : undefined
 
   // densable Bbr — stream-json sessionStore parent peels transcript_mirror frames
   if (options.outputFormat === 'stream-json' && options.sessionMirror) {
@@ -3228,10 +3517,19 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
   }
   const shouldReplyOnResume =
     resumeInterruptedTurnEnv || Boolean(options.replyOnResume)
+  // Official 2.1.323 #2078 & #2144 & 2.1.325 #2316: never auto-resume a turn
+  // stopped by a hook returning `continue: false`, nor a trailing no-reply
+  // file arrival note right after a completed first reply, nor a Code Mode
+  // session that ended mid-script (`waitForNextPrompt === true`).
+  const resumeBlockedByHookOrNoReplyNote =
+    wasTurnStoppedByHook(mutableMessages) ||
+    isTrailingNoReplyNote(mutableMessages) ||
+    options.codeModeWaitForNextPrompt === true
   if (
     turnInterruptionState &&
     turnInterruptionState.kind !== 'none' &&
-    shouldReplyOnResume
+    shouldReplyOnResume &&
+    !resumeBlockedByHookOrNoReplyNote
   ) {
     logForDebugging(
       `[print.ts] Auto-resuming interrupted turn (kind: ${turnInterruptionState.kind}${options.replyOnResume ? ', reply-on-resume' : ''})`,
@@ -3319,6 +3617,15 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
       resumedTurnUserMessageUuid: interruptedMsg.uuid,
     })
     enqueue(reRunCmd)
+  } else if (turnInterruptionState && turnInterruptionState.kind !== 'none') {
+    // Official 2.1.323 #1981 & #2142: when an interrupted message is NOT
+    // resumed, strip any synthetic NRR sentinel / meta continuation and mark
+    // the interrupted message as non-chain-parent so the next user message
+    // does not join onto it, while keeping real user messages visible (#2142).
+    stripUnresumedInterruptedMessages(mutableMessages, turnInterruptionState)
+    if (turnInterruptionState.message.uuid) {
+      markNotChainParent(turnInterruptionState.message.uuid)
+    }
   }
 
   // Official Evf + Svf parked-permission resume densable — when
@@ -3333,7 +3640,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
         waitMs: number
       }
     | undefined
-  if (shouldReplyOnResume) {
+  if (shouldReplyOnResume && !options.codeModeWaitForNextPrompt) {
     try {
       const { planParkedPermissionResume } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -3419,8 +3726,10 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
   let sdkClients: MCPServerConnection[] = []
   let sdkTools: Tools = []
 
-  // Track which MCP clients have had elicitation handlers registered
-  const elicitationRegistered = new Set<string>()
+  // Official 2.1.325 #2305: track the specific connected `client` instance per
+  // server name (not just serverName) so a mid-tool-call replacement connection
+  // still gets headless elicitation handlers registered.
+  const elicitationRegistered = new Map<string, object>()
 
   /**
    * Register elicitation request/completion handlers on connected MCP clients
@@ -3433,7 +3742,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
     for (const connection of clients) {
       if (
         connection.type !== 'connected' ||
-        elicitationRegistered.has(connection.name)
+        elicitationRegistered.get(connection.name) === connection.client
       ) {
         continue
       }
@@ -3561,7 +3870,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
           },
         )
 
-        elicitationRegistered.add(serverName)
+        elicitationRegistered.set(serverName, connection.client)
       } catch {
         // setRequestHandler throws if the client wasn't created with
         // elicitation capability — skip silently
@@ -4329,6 +4638,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
 
   // NOTE: Nested function required - needs closure access to applyMcpServerChanges and updateSdkMcp
   async function installPluginsAndApplyMcpInBackground(): Promise<void> {
+    let markedCloudPluginStartup = false
     try {
       // Join point for user settings (fired at runHeadless entry) and managed
       // settings (fired in main.tsx preAction). downloadUserSettings() caches
@@ -4342,6 +4652,12 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
         isRemotePlugins = isRemoteEnvEnabled()
       } catch {
         // keep raw env fallback
+      }
+      // Official 2.1.325 #2328: hold connector MCP tool auto-approval in cloud
+      // sessions while startup plugins are still loading.
+      if (isRemotePlugins || getIsRemoteMode()) {
+        setCloudPluginStartupPending(true)
+        markedCloudPluginStartup = true
       }
       await Promise.all([
         feature('DOWNLOAD_USER_SETTINGS') &&
@@ -4360,6 +4676,10 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
       }
     } catch (error) {
       logError(error)
+    } finally {
+      if (markedCloudPluginStartup) {
+        setCloudPluginStartupPending(false)
+      }
     }
   }
 
@@ -4567,11 +4887,71 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
     headlessProfilerCheckpoint('run_entry')
     // TODO(custom-tool-refactor): Should move to the init message, like browser
 
+    // Official 2.1.323 #2054: collect MCP servers required by `--allowedTools`,
+    // permission allow rules, or `mcp_tool` hooks so first-turn prewait keeps
+    // at least the 2000ms floor even when CLAUDE_CODE_MCP_STARTUP_WAIT_MS is lower.
+    const collectRequiredMcpServers = (): Set<string> => {
+      const mcpToolHookServers: string[] = []
+      try {
+        const hooksCfg = getHooksConfigFromSnapshot()
+        if (hooksCfg) {
+          for (const matchers of Object.values(hooksCfg)) {
+            if (!Array.isArray(matchers)) continue
+            for (const matcher of matchers) {
+              if (!matcher || !Array.isArray(matcher.hooks)) continue
+              for (const hook of matcher.hooks) {
+                if (
+                  hook &&
+                  typeof hook === 'object' &&
+                  'type' in hook &&
+                  hook.type === 'mcp_tool' &&
+                  'server' in hook &&
+                  typeof hook.server === 'string'
+                ) {
+                  mcpToolHookServers.push(hook.server)
+                }
+              }
+            }
+          }
+        }
+      } catch {
+        // hooks snapshot optional
+      }
+      const allowRules = Object.values(
+        getAppState().toolPermissionContext.alwaysAllowRules ?? {},
+      )
+        .flat()
+        .filter((r): r is string => typeof r === 'string')
+      return collectRequiredMcpPrewaitServers({
+        allowedToolRules: [...(options.allowedTools ?? []), ...allowRules],
+        mcpToolHookServers,
+      })
+    }
+    const configuredMcpStartupWaitMs = (() => {
+      const raw = process.env.CLAUDE_CODE_MCP_STARTUP_WAIT_MS
+      if (raw === undefined || raw.trim() === '') return undefined
+      const parsed = Number(raw)
+      return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined
+    })()
+
     if (options.sdkUrl) {
       const { getMcpConnectTimeoutMs } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         require('../services/mcp/mcpConnectTimeout.js') as typeof import('../services/mcp/mcpConnectTimeout.js')
-      const budgetMs = getMcpConnectTimeoutMs()
+      const requiredServers = collectRequiredMcpServers()
+      const hasPendingRequiredSdk = sdkClients.some(
+        c =>
+          c.type === 'pending' &&
+          (requiredServers.has(c.name) ||
+            requiredServers.has(normalizeNameForMCP(c.name))),
+      )
+      const budgetMs =
+        configuredMcpStartupWaitMs !== undefined
+          ? resolveMcpStartupPrewaitBudgetMs({
+              configuredWaitMs: configuredMcpStartupWaitMs,
+              hasPendingRequiredServers: hasPendingRequiredSdk,
+            })
+          : getMcpConnectTimeoutMs()
       const sdkMcpUpdatePromise = updateSdkMcp('skip')
       const raced = await raceWithTimeoutMs(sdkMcpUpdatePromise, budgetMs)
       if (raced.status === 'timeout') {
@@ -5273,10 +5653,35 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
             const joins = workSecretSession?.takeFirstTurnJoins()
             const heldHearth = hearthMountStartup
             hearthMountStartup = null
+            // Official 2.1.323 #2054: wait for pending required MCP servers up
+            // to resolveMcpStartupPrewaitBudgetMs (enforces 2000ms floor).
+            const requiredServers = collectRequiredMcpServers()
+            const hasPendingRequiredMcp = () =>
+              requiredServers.size > 0 &&
+              [...getAppState().mcp.clients, ...sdkClients].some(
+                c =>
+                  c.type === 'pending' &&
+                  (requiredServers.has(c.name) ||
+                    requiredServers.has(normalizeNameForMCP(c.name))),
+              )
+            const waitForRequiredMcp = async () => {
+              if (!hasPendingRequiredMcp()) return
+              const waitStarted = Date.now()
+              while (hasPendingRequiredMcp()) {
+                const remainingMs = resolveMcpStartupPrewaitBudgetMs({
+                  configuredWaitMs: configuredMcpStartupWaitMs,
+                  hasPendingRequiredServers: true,
+                  elapsedMs: Date.now() - waitStarted,
+                })
+                if (remainingMs <= 0) break
+                await sleep(Math.min(25, remainingMs))
+              }
+            }
             await Promise.all([
               heldHearth ?? Promise.resolve(),
               joins?.replyMount ?? Promise.resolve(),
               joins?.grants ?? Promise.resolve(),
+              waitForRequiredMcp(),
             ])
           }
 
@@ -5288,6 +5693,9 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
           // const-capture: TS loses `while ((command = dequeue()))` narrowing
           // inside the closure.
           const cmd = command
+          // Official 2.1.323 #1970: advance hook heartbeat turn ID on turn start.
+          const currentHeartbeatTurn = ++hookHeartbeatTurnId
+          setHookHeartbeatTurn(currentHeartbeatTurn)
           let lastResultIsError = false
           let lastResultNumTurns = 0
           let lastResultBody = ''
@@ -5339,6 +5747,10 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                     wakeupSource: cmd.wakeupSource,
                     artifactCommentTurn: cmd.artifactCommentTurn,
                     origin: cmd.origin,
+                    isHumanTypedPrompt: (
+                      cmd as { isHumanTypedPrompt?: boolean }
+                    ).isHumanTypedPrompt,
+                    suppressWorkflowKeyword: cmd.suppressWorkflowKeyword,
                     clientPlatform: cmd.clientPlatform,
                     verifiedSlackHumanTurn: cmd.verifiedSlackHumanTurn,
                     projectsUserTurn: cmd.projectsUserTurn,
@@ -5423,6 +5835,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                     keptDeferredToolNotice:
                       'A deferred tool call could not run because its MCP server is unavailable; the call was kept in the conversation.',
                     dropsUnavailableDeferredTool: false,
+                    isPersistedTransport: Boolean(options.sdkUrl),
                     setSDKStatus: status => {
                       output.enqueue({
                         type: 'system',
@@ -5439,6 +5852,8 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                     forwardMessagesToBridge()
 
                     if (message.type === 'result') {
+                      // Official 2.1.323 #1970: suppress hook heartbeats past result.
+                      markHookHeartbeatTurnPastResult(currentHeartbeatTurn)
                       const resultMsg = message as Record<string, unknown>
                       if (
                         resultMsg.stop_reason === 'tool_deferred_unavailable' ||
@@ -5544,9 +5959,11 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
             })
             lastDispatchAborted = abortedAtResult
             // densable Dm.dropParkedBatch + Tl.clearAhead after turn settles.
+            stopAllHookHeartbeatsForSession()
             prewait.dropParkedBatch()
             startGate.clearAhead()
           } catch (error) {
+            stopAllHookHeartbeatsForSession()
             await finalizeAutonomyCommandsForTurn({
               commands: claimedAutonomyCommands,
               outcome: { type: 'failed', error },
@@ -6250,6 +6667,8 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
         unsubscribeAuthStatus?.()
         statusListeners.delete(rateLimitListener)
         controlPlane.dispose()
+        stopAllHookHeartbeatsForSession()
+        unregisterHookHeartbeatSink?.()
         output.done()
       }
     }
@@ -6706,6 +7125,10 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
     setAppState: setAppState as unknown as (
       f: (prev: HeadlessAppState) => HeadlessAppState,
     ) => void,
+    onConnectedClient: client => {
+      registerElicitationHandlers([client])
+      reregisterChannelHandlerAfterReconnect(client)
+    },
   })
 
   const sendControlResponseSuccess = (
@@ -6725,6 +7148,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
     await handleOrphanedPermissionResponse({
       message,
       setAppState,
+      getAppState,
       handledToolUseIds: handledOrphanedToolUseIds,
       onEnqueued: () => {
         // The first message of a session might be the orphaned permission
@@ -8215,6 +8639,20 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               'get_skills_dialog is not available on this connection',
             )
           } else if (req.subtype === 'get_hooks_listing') {
+            // Official 2.1.325 #2375: refuse `get_hooks_listing` on cloud /
+            // self-hosted / remote control connections.
+            const hooksTrustLevel = resolveControlConnectionTrustLevel({
+              isRemoteTransport:
+                structuredIO instanceof RemoteIO || Boolean(bridgeHandle),
+              isCloudHosted: isEnvTruthy(process.env.CLAUDE_CODE_REMOTE),
+            })
+            if (hooksTrustLevel !== 'full') {
+              sendControlResponseError(
+                msg,
+                'get_hooks_listing is not available on this connection',
+              )
+              continue
+            }
             const { listHooksForControl } = await import(
               './printControlHosts.js'
             )
@@ -8286,6 +8724,20 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               sendControlResponseSuccess(msg, {})
             }
           } else if (msg.request.subtype === 'get_settings') {
+            // Official 2.1.325 #2375: gate / redact `get_settings` over cloud
+            // or self-hosted session connections by trust level.
+            const settingsTrustLevel = resolveControlConnectionTrustLevel({
+              isRemoteTransport:
+                structuredIO instanceof RemoteIO || Boolean(bridgeHandle),
+              isCloudHosted: isEnvTruthy(process.env.CLAUDE_CODE_REMOTE),
+            })
+            if (settingsTrustLevel === 'refused') {
+              sendControlResponseError(
+                msg,
+                'get_settings is not available on this connection',
+              )
+              continue
+            }
             const currentAppState = getAppState()
             const model = getMainLoopModel()
             const sessionEffortValue = pdSessionEffort(currentAppState, model)
@@ -8311,8 +8763,20 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                 path: String(e.path ?? ''),
                 message: e.message,
               }))
-            sendControlResponseSuccess(msg, {
+            const rawSettingsPayload = {
               ...getSettingsWithSources(),
+              ...(settingsErrors.length > 0 ? { errors: settingsErrors } : {}),
+            }
+            const settingsPayload =
+              settingsTrustLevel === 'redacted'
+                ? redactSettingsResponseForRemote(
+                    rawSettingsPayload as Parameters<
+                      typeof redactSettingsResponseForRemote
+                    >[0],
+                  )
+                : rawSettingsPayload
+            sendControlResponseSuccess(msg, {
+              ...settingsPayload,
               applied: {
                 model,
                 // Numeric effort (ant-only) → null; SDK schema is string-level only.
@@ -8324,7 +8788,6 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                 effortLevels: getSupportedEffortLevels(model),
                 ultracodeOfferable: isUltracodeOfferable(model),
               },
-              ...(settingsErrors.length > 0 ? { errors: settingsErrors } : {}),
             })
           } else if (msg.request.subtype === 'stop_task') {
             const { task_id: taskId } = msg.request
@@ -8609,6 +9072,19 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                     host: getReplDiffHost(),
                     workspaceDiffComputeBudget:
                       HEADLESS_BRIDGE_WORKSPACE_DIFF_COMPUTE_BUDGET,
+                    // Official 2.1.323 #2119 (`backgroundHold` / `Sn`): keep
+                    // Remote Control state `'running'` while background
+                    // subagents are still active so phone/desktop does not
+                    // falsely show idle.
+                    backgroundHold: {
+                      holdsRunning: () =>
+                        Object.values(getAppState().tasks ?? {}).some(
+                          t =>
+                            (t.type === 'local_agent' ||
+                              t.type === 'in_process_teammate') &&
+                            t.status === 'running',
+                        ),
+                    },
                     onProjectsBindingHint: () => {
                       workSecretSession?.resyncProjectsReplyMount()
                     },
@@ -8617,8 +9093,13 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                     onInboundMessage(msg) {
                       const fields = extractInboundMessageFields(msg)
                       if (!fields) return
-                      const { content, uuid, clientPlatform, fileAttachments } =
-                        fields
+                      const {
+                        content,
+                        uuid,
+                        clientPlatform,
+                        fileAttachments,
+                        textNotTyped,
+                      } = fields
                       enqueue({
                         value: content,
                         mode: 'prompt' as const,
@@ -8632,6 +9113,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                         ...(fileAttachments.length > 0
                           ? { fileAttachments }
                           : {}),
+                        ...(textNotTyped ? { textNotTyped: true } : {}),
                       })
                       void run()
                     },
@@ -9477,7 +9959,8 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                 sendControlResponseSuccess(msg, response),
               sendError: error => sendControlResponseError(msg, error),
               defer: deferControlLifecycleUntilDone,
-              isRemoteTransport: Boolean(bridgeHandle),
+              isRemoteTransport:
+                structuredIO instanceof RemoteIO || Boolean(bridgeHandle),
               errorMessage,
               abortSignal: abortController?.signal,
               setAppState: setAppState as never,
@@ -9570,7 +10053,8 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               getSdkUrl: () => options.sdkUrl,
               getMessages: () => mutableMessages,
               isCloudHosted: () =>
-                process.env.CLAUDE_CODE_ENVIRONMENT_KIND !== undefined,
+                process.env.CLAUDE_CODE_ENVIRONMENT_KIND !== undefined ||
+                isEnvTruthy(process.env.CLAUDE_CODE_REMOTE),
               createForkSession: async input => {
                 const { createBridgeSession } = await import(
                   'src/bridge/createSession.js'
@@ -9862,6 +10346,27 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
       // reset cross-session rate-limit / loop-pause counters immediately.
       personWrote()
 
+      // Official 2.1.323 #2199: preserve host-supplied prompt provenance fields
+      // (`isHumanTypedPrompt` / `suppressWorkflowKeyword` / `origin`) onto the
+      // queued command so workflow gating receives them on `toolUseContext.promptProvenance`.
+      const rawUserMsg = userMsg as unknown as Record<string, unknown>
+      const hostIsHumanTyped =
+        typeof rawUserMsg.isHumanTypedPrompt === 'boolean'
+          ? rawUserMsg.isHumanTypedPrompt
+          : typeof rawUserMsg.is_human_typed_prompt === 'boolean'
+            ? rawUserMsg.is_human_typed_prompt
+            : undefined
+      const hostSuppressWorkflowKeyword =
+        typeof rawUserMsg.suppressWorkflowKeyword === 'boolean'
+          ? rawUserMsg.suppressWorkflowKeyword
+          : typeof rawUserMsg.suppress_workflow_keyword === 'boolean'
+            ? rawUserMsg.suppress_workflow_keyword
+            : undefined
+      const hostOrigin =
+        rawUserMsg.origin && typeof rawUserMsg.origin === 'object'
+          ? (rawUserMsg.origin as QueuedCommand['origin'])
+          : undefined
+
       enqueue({
         mode: 'prompt' as const,
         // file_attachments rides the protobuf catchall from the web composer.
@@ -9877,6 +10382,16 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
           .priority as import('src/types/textInputTypes.js').QueuePriority,
         // densable inbound D7 @202257989 — stamp file_attachments onto the queued command.
         fileAttachments: parseInboundFileAttachments(userMsg),
+        ...(hostOrigin !== undefined ? { origin: hostOrigin } : {}),
+        ...(hostSuppressWorkflowKeyword !== undefined
+          ? { suppressWorkflowKeyword: hostSuppressWorkflowKeyword }
+          : {}),
+        ...(hostIsHumanTyped !== undefined
+          ? ({ isHumanTypedPrompt: hostIsHumanTyped } as Record<
+              string,
+              unknown
+            >)
+          : {}),
         // densable 2.1.283 Zp: client_composed → skipSlash + skipAttachments;
         // seeded_summon → skipAttachments.
         // #1413: queueSkipSlashCommands + <bash-stdout>/<local-command-stdout>
@@ -9945,6 +10460,8 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
       controlPlane.dispose()
       setBackgroundCeilingProvider(undefined)
       setSpawnedTurnTakenCallback(undefined)
+      stopAllHookHeartbeatsForSession()
+      unregisterHookHeartbeatSink?.()
       output.done()
     }
   })()
@@ -10222,6 +10739,18 @@ function emitLoadError(
  *
  * @internal Exported for testing
  */
+/**
+ * Official 2.1.323 #2008: warning printed by `claude -p` when a claude.ai
+ * login ended and Claude Code fell back to `ant auth login`, explicitly noting
+ * that `claude auth logout` also removes saved MCP server logins and plugin
+ * secrets.
+ */
+export function formatPrintEndedClaudeAiLoginWarning(
+  organization: string,
+): string {
+  return `Your claude.ai login ended; continuing on the sign-in from ant auth login instead, and its usage is billed to ${organization}. Run claude auth login to sign in again. To keep using the sign-in from ant auth login without this warning, run claude auth logout. That removes the ended login and the other credentials Claude Code has saved, such as MCP server logins and plugin secrets.`
+}
+
 export function removeInterruptedMessage(
   messages: Message[],
   interruptedUserMessage: NormalizedUserMessage,
@@ -10241,6 +10770,7 @@ type LoadInitialMessagesResult = {
   planModeOnResume?: PlanModeOnResume
   deferredToolUse?: HookDeferredToolAttachment
   overdueSessionStartHooks?: OverdueSessionStartHooks
+  codeModeWaitForNextPrompt?: boolean
 }
 
 function applyPrintPlanModeResume<TState extends HeadlessAppState = AppState>(
@@ -10415,6 +10945,22 @@ async function loadInitialMessages<TState extends HeadlessAppState = AppState>(
           )
         }
 
+        // Official 2.1.325 #2316: reconcile Code Mode state on --continue and
+        // skip auto-resuming an interrupted turn when the session ended mid-script.
+        const continueCodeModePlan = planCodeModeFromSession({
+          replMode: (result as { replMode?: boolean }).replMode,
+          sessionId: result.sessionId ?? getSessionId(),
+          headless: true,
+          withinSession: false,
+          messages: result.messages,
+        })
+        if (continueCodeModePlan.refused) {
+          emitLoadError(continueCodeModePlan.refused, options.outputFormat)
+          gracefulShutdownSync(1)
+          return { messages: [] }
+        }
+        applyCodeModePlan(continueCodeModePlan)
+
         // Official 246 `my(messages)` — transcript plan, not y_u.
         const planModeOnResume = hydratePlanModeFromTranscript(
           setAppState,
@@ -10434,6 +10980,9 @@ async function loadInitialMessages<TState extends HeadlessAppState = AppState>(
           planModeOnResume,
           deferredToolUse: result.deferredToolUse,
           overdueSessionStartHooks: result.overdueSessionStartHooks,
+          ...(continueCodeModePlan.waitForNextPrompt
+            ? { codeModeWaitForNextPrompt: true }
+            : {}),
         }
       }
     } catch (error) {
@@ -10470,6 +11019,13 @@ async function loadInitialMessages<TState extends HeadlessAppState = AppState>(
       } = await import('src/utils/teleport.js')
       await validateGitState()
       const teleportResult = await teleportResumeCodeSession(options.teleport)
+      // Official 2.1.323 #2073: fail explicitly instead of opening an empty
+      // session when the server could not find the teleported session's history.
+      if (!teleportResult.log || teleportResult.log.length === 0) {
+        throw new Error(
+          `Could not find session history for teleport session ${options.teleport}`,
+        )
+      }
       const { branchError } = await checkOutTeleportedSessionBranch(
         teleportResult.branch,
       )
@@ -10481,7 +11037,10 @@ async function loadInitialMessages<TState extends HeadlessAppState = AppState>(
       }
     } catch (error) {
       logError(error)
-      gracefulShutdownSync(1)
+      // Official 2.1.323 #2073: surface the failure and exit non-zero in
+      // `claude -p --teleport` instead of silently returning empty messages.
+      emitLoadError(errorMessage(error), options.outputFormat)
+      await gracefulShutdown(1)
       return { messages: [] }
     }
   }
@@ -10801,6 +11360,22 @@ async function loadInitialMessages<TState extends HeadlessAppState = AppState>(
         )
       }
 
+      // Official 2.1.325 #2316: reconcile Code Mode state on --resume and
+      // skip auto-resuming an interrupted turn when the session ended mid-script.
+      const resumeCodeModePlan = planCodeModeFromSession({
+        replMode: (result as { replMode?: boolean }).replMode,
+        sessionId: result.sessionId ?? getSessionId(),
+        headless: true,
+        withinSession: false,
+        messages: result.messages,
+      })
+      if (resumeCodeModePlan.refused) {
+        emitLoadError(resumeCodeModePlan.refused, options.outputFormat)
+        gracefulShutdownSync(1)
+        return { messages: [] }
+      }
+      applyCodeModePlan(resumeCodeModePlan)
+
       return {
         messages: result.messages,
         turnInterruptionState: result.turnInterruptionState,
@@ -10808,6 +11383,9 @@ async function loadInitialMessages<TState extends HeadlessAppState = AppState>(
         planModeOnResume,
         deferredToolUse: result.deferredToolUse,
         overdueSessionStartHooks: result.overdueSessionStartHooks,
+        ...(resumeCodeModePlan.waitForNextPrompt
+          ? { codeModeWaitForNextPrompt: true }
+          : {}),
       }
     } catch (error) {
       logError(error)

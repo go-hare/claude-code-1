@@ -247,8 +247,10 @@ export function providerSupportsAutoMode(
 }
 
 /**
- * Official u3e densable — pure model denylist (no feature flag).
+ * Official 2.1.323 `BO` (#2019) — pure model denylist (no feature flag).
  * co() ≈ getCanonicalName(model). Provider gate is separate (t8t).
+ * Behind a 3P provider or a gateway at ANTHROPIC_BASE_URL / ANTHROPIC_UNIX_SOCKET,
+ * any model whose name contains "haiku" other than `claude-haiku-5-5` is refused.
  */
 export function planModelSupportsAutoMode(
   model: string,
@@ -269,12 +271,21 @@ export function planModelSupportsAutoMode(
   ) {
     return false
   }
-  if (
+  const isThirdParty =
     provider !== 'firstParty' &&
     provider !== 'anthropicAws' &&
-    (t === 'claude-opus-4-6' ||
-      t === 'claude-sonnet-4-6' ||
-      t.includes('haiku'))
+    provider !== 'anthropicGoogleCloud'
+  if (isThirdParty && (t === 'claude-opus-4-6' || t === 'claude-sonnet-4-6')) {
+    return false
+  }
+  const isGatewayOverFirstParty =
+    provider === 'firstParty' &&
+    (process.env.ANTHROPIC_UNIX_SOCKET !== undefined ||
+      !isFirstPartyAnthropicBaseUrl())
+  if (
+    (isThirdParty || isGatewayOverFirstParty) &&
+    t.includes('haiku') &&
+    t !== 'claude-haiku-5-5'
   ) {
     return false
   }

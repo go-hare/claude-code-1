@@ -1637,6 +1637,31 @@ export async function refreshGrowthBookFeatures(): Promise<void> {
         })
         return
       }
+    } else if (client) {
+      // Official 2.1.323 (#2001): sessions opened before sign-in created a
+      // signed-out GrowthBook client (`clientCreatedWithAuth === false`).
+      // When auth headers appear later (e.g. after /login), re-read user
+      // attributes and recreate GrowthBook so signed-out flags are replaced.
+      const prevClient = client
+      try {
+        const { checkAndRefreshOAuthTokenIfNeeded } = await import(
+          '../../utils/auth.js'
+        )
+        await checkAndRefreshOAuthTokenIfNeeded().catch(() => {})
+      } catch {
+        // ignore
+      }
+      const currentAuth = getAuthHeaders()
+      if (
+        prevClient === client &&
+        !currentAuth.error &&
+        (currentAuth.headers.Authorization ||
+          Object.keys(currentAuth.headers).length > 0)
+      ) {
+        resetUserCache()
+        refreshGrowthBookAfterAuthChange()
+        return
+      }
     }
 
     const growthBookClient = await initializeGrowthBook()

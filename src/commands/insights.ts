@@ -1962,7 +1962,7 @@ function generateHtmlReport(
         <div class="project-area">
           <div class="area-header">
             <span class="area-name">${escapeHtml(area.name)}</span>
-            <span class="area-count">~${area.session_count} sessions</span>
+            <span class="area-count">~${escapeHtml(String(area.session_count))} ${Number(area.session_count) === 1 ? 'session' : 'sessions'}</span>
           </div>
           <div class="area-desc">${escapeHtml(area.description)}</div>
         </div>
@@ -2461,7 +2461,7 @@ function generateHtmlReport(
 <body>
   <div class="container">
     <h1>Claude Code Insights</h1>
-    <p class="subtitle">${data.total_messages.toLocaleString()} messages across ${data.total_sessions} sessions${data.total_sessions_scanned && data.total_sessions_scanned > data.total_sessions ? ` (${data.total_sessions_scanned.toLocaleString()} total)` : ''} | ${data.date_range.start} to ${data.date_range.end}</p>
+    <p class="subtitle">${data.total_messages.toLocaleString()} messages across ${data.total_sessions} sessions${data.total_sessions_scanned && data.total_sessions_scanned > data.total_sessions ? ` (${data.total_sessions_scanned.toLocaleString()} total)` : ''} | ${escapeHtml(data.date_range.start)} to ${escapeHtml(data.date_range.end)}</p>
 
     ${atAGlanceHtml}
 
@@ -2995,6 +2995,24 @@ const usageReport: Command = {
     const { insights, htmlPath, data, remoteStats } = await generateUsageReport(
       { collectRemote },
     )
+
+    // Official 2.1.325 (#2277): do not claim a report is ready when no session
+    // qualified for analysis.
+    if (data.total_sessions === 0) {
+      const scanned = data.total_sessions_scanned ?? 0
+      const unit = scanned === 1 ? 'session' : 'sessions'
+      return [
+        {
+          type: 'text',
+          text: `The user just ran /insights, but no session qualified for analysis, so there is no report to share.
+
+Respond with exactly the following, and nothing else. Do not add, omit, or reword any line:
+
+There's nothing to report yet (${scanned.toLocaleString()} ${unit} found).
+/insights needs a session with at least two of your messages, lasting about a minute or more.`,
+        },
+      ]
+    }
 
     const reportUrl = `file://${htmlPath}`
 

@@ -40,6 +40,8 @@ type Props = {
   isMidTurn?: boolean;
   responseStreaming?: boolean;
   onDone: (message?: string) => void;
+  /** Official 2.1.325 (#2292): called when moving to background is refused, returning to exit dialog with focus on Stay. */
+  onRefused?: (reason: string) => void;
   /**
    * Optional AppState.tasks snapshot (or getter) for official CAo/hNo exit
    * handoff adopt.json write. When omitted, only submitDispatch runs.
@@ -283,7 +285,13 @@ export async function runExitBackgroundHandoff(input: {
   }
 }
 
-export function BackgroundAndExit({ messages, isMidTurn = false, onDone, getTasks }: Props): React.ReactNode {
+export function BackgroundAndExit({
+  messages,
+  isMidTurn = false,
+  onDone,
+  onRefused,
+  getTasks,
+}: Props): React.ReactNode {
   const started = useRef(false);
 
   useEffect(() => {
@@ -353,6 +361,10 @@ export function BackgroundAndExit({ messages, isMidTurn = false, onDone, getTask
               ok: false,
               frameLiveLost: result.frameLiveLost,
             });
+          if (onRefused) {
+            onRefused(failCopy);
+            return;
+          }
           onDone(failCopy);
           await gracefulShutdown(0, 'prompt_input_exit', {
             finalMessage: failCopy,

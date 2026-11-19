@@ -150,15 +150,29 @@ const TOOL_VERBS: Record<string, string> = {
   LSP: 'LSP',
 }
 
-function toolSummary(name: string, input: Record<string, unknown>): string {
+/**
+ * Official 2.1.323 #2117: guard all tool input fields with `typeof ... === 'string'`
+ * so a numeric/boolean/object `command` (or other field) never throws `.slice is not a function`
+ * and crashes or stalls the Remote Control host in verbose/debug mode.
+ */
+export function toolSummary(
+  name: string,
+  input: Record<string, unknown>,
+): string {
   const verb = TOOL_VERBS[name] ?? name
+  const firstString = (v: unknown, maxLen?: number): string | undefined =>
+    typeof v === 'string' && v.length > 0
+      ? maxLen !== undefined
+        ? v.slice(0, maxLen)
+        : v
+      : undefined
   const target =
-    (input.file_path as string) ??
-    (input.filePath as string) ??
-    (input.pattern as string) ??
-    (input.command as string | undefined)?.slice(0, 60) ??
-    (input.url as string) ??
-    (input.query as string) ??
+    firstString(input.file_path) ??
+    firstString(input.filePath) ??
+    firstString(input.pattern) ??
+    firstString(input.command, 60) ??
+    firstString(input.url) ??
+    firstString(input.query) ??
     ''
   if (target) {
     return `${verb} ${target}`
@@ -306,6 +320,12 @@ function inputPreview(input: Record<string, unknown>): string {
   }
   return parts.join(' ')
 }
+
+// Official 2.1.323 #2118: single in-flight guard for `stat(dir)` on spawn
+// ENOENT so repeated failed spawns on an unresponsive filesystem cannot
+// exhaust the libuv threadpool and stall the Remote Control host.
+let dirStatInFlight = false
+const DIR_STAT_TIMEOUT_MS = 1000
 
 export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
   return {
@@ -466,84 +486,109 @@ export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
       if (child.stdout) {
         const rl = createInterface({ input: child.stdout })
         rl.on('line', line => {
-          // Write raw NDJSON to transcript file
-          if (transcriptStream) {
-            transcriptStream.write(line + '\n')
-          }
-
-          // Log all messages flowing from the child CLI to the bridge
-          deps.onDebug(
-            `[bridge:ws] sessionId=${opts.sessionId} <<< ${debugTruncate(line)}`,
-          )
-
-          // In verbose mode, forward raw output to stderr
-          if (deps.verbose) {
-            process.stderr.write(line + '\n')
-          }
-
-          const extracted = extractActivities(
-            line,
-            opts.sessionId,
-            deps.onDebug,
-          )
-          for (const activity of extracted) {
-            // Maintain ring buffer
-            if (activities.length >= MAX_ACTIVITIES) {
-              activities.shift()
+          // Official 2.1.323 #2117: wrap per-line processing so a malformed
+          // tool call or unexpected payload never crashes the host or stops
+          // reading subsequent output lines.
+          try {
+            // Write raw NDJSON to transcript file
+            if (transcriptStream) {
+              transcriptStream.write(line + '\n')
             }
-            activities.push(activity)
-            currentActivity = activity
 
-            deps.onActivity?.(opts.sessionId, activity)
-          }
+            // Log all messages flowing from the child CLI to the bridge
+            deps.onDebug(
+              `[bridge:ws] sessionId=${opts.sessionId} <<< ${debugTruncate(line)}`,
+            )
 
-          // Detect control_request and replayed user messages.
-          // extractActivities parses the same line but swallows parse errors
-          // and skips 'user' type — re-parse here is cheap (NDJSON lines are
-          // small) and keeps each path self-contained.
-          {
-            let parsed: unknown
-            try {
-              parsed = jsonParse(line)
-            } catch {
-              // Non-JSON line, skip detection
+            // In verbose mode, forward raw output to stderr
+            if (deps.verbose) {
+              process.stderr.write(line + '\n')
             }
-            if (parsed && typeof parsed === 'object') {
-              const msg = parsed as Record<string, unknown>
 
-              if (msg.type === 'control_request') {
-                const request = msg.request as
-                  | Record<string, unknown>
-                  | undefined
-                if (
-                  request?.subtype === 'can_use_tool' &&
-                  deps.onPermissionRequest
+            const extracted = extractActivities(
+              line,
+              opts.sessionId,
+              deps.onDebug,
+            )
+            for (const activity of extracted) {
+              // Maintain ring buffer
+              if (activities.length >= MAX_ACTIVITIES) {
+                activities.shift()
+              }
+              activities.push(activity)
+              currentActivity = activity
+
+              deps.onActivity?.(opts.sessionId, activity)
+            }
+
+            // Detect control_request and replayed user messages.
+            // extractActivities parses the same line but swallows parse errors
+            // and skips 'user' type — re-parse here is cheap (NDJSON lines are
+            // small) and keeps each path self-contained.
+            {
+              let parsed: unknown
+              try {
+                parsed = jsonParse(line)
+              } catch {
+                // Non-JSON line, skip detection
+              }
+              if (parsed && typeof parsed === 'object') {
+                const msg = parsed as Record<string, unknown>
+
+                if (msg.type === 'control_request') {
+                  const request = msg.request as
+                    | Record<string, unknown>
+                    | undefined
+                  if (
+                    request?.subtype === 'can_use_tool' &&
+                    deps.onPermissionRequest
+                  ) {
+                    deps.onPermissionRequest(
+                      opts.sessionId,
+                      parsed as PermissionRequest,
+                      opts.accessToken,
+                    )
+                  }
+                  // interrupt is turn-level; the child handles it internally (print.ts)
+                } else if (
+                  msg.type === 'user' &&
+                  !firstUserMessageSeen &&
+                  opts.onFirstUserMessage
                 ) {
-                  deps.onPermissionRequest(
-                    opts.sessionId,
-                    parsed as PermissionRequest,
-                    opts.accessToken,
-                  )
-                }
-                // interrupt is turn-level; the child handles it internally (print.ts)
-              } else if (
-                msg.type === 'user' &&
-                !firstUserMessageSeen &&
-                opts.onFirstUserMessage
-              ) {
-                const text = extractUserMessageText(msg)
-                if (text) {
-                  firstUserMessageSeen = true
-                  opts.onFirstUserMessage(text)
+                  const text = extractUserMessageText(msg)
+                  if (text) {
+                    firstUserMessageSeen = true
+                    opts.onFirstUserMessage(text)
+                  }
                 }
               }
             }
+          } catch (err) {
+            deps.onDebug(
+              `[bridge:activity] sessionId=${opts.sessionId} failed to process a line of the session's output; moving on to the next line: ${err instanceof Error ? err.message : String(err)}`,
+            )
           }
         })
       }
 
       const done = new Promise<SessionDoneStatus>(resolve => {
         let pendingErrorCheck: Promise<void> | undefined
+
+        const resolveAfterPending = (status: SessionDoneStatus): void => {
+          if (!pendingErrorCheck) {
+            resolve(status)
+            return
+          }
+          // Official 2.1.323 #2115: never let an unresponsive-disk stat hang
+          // prevent a finished session from releasing its slot.
+          void Promise.race([
+            pendingErrorCheck,
+            new Promise<void>(r => {
+              const t = setTimeout(r, DIR_STAT_TIMEOUT_MS)
+              t.unref?.()
+            }),
+          ]).then(() => resolve(status))
+        }
 
         child.on('close', (code, signal) => {
           // Close transcript stream on exit
@@ -569,11 +614,7 @@ export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
             )
             status = 'failed'
           }
-          if (pendingErrorCheck) {
-            void pendingErrorCheck.then(() => resolve(status))
-          } else {
-            resolve(status)
-          }
+          resolveAfterPending(status)
         })
 
         child.on('error', err => {
@@ -582,19 +623,28 @@ export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
           )
           const errCode = (err as NodeJS.ErrnoException).code
           const isEnoent = errCode === 'ENOENT'
-          const checkDir = isEnoent
-            ? Promise.race([
-                stat(dir).then(
-                  s => !s.isDirectory(),
-                  e =>
-                    (e as NodeJS.ErrnoException)?.code === 'ENOENT' ||
-                    undefined,
-                ),
-                new Promise<undefined>(r =>
-                  setTimeout(() => r(undefined), 1000),
-                ),
-              ])
-            : Promise.resolve(undefined)
+          let checkDir: Promise<boolean | undefined>
+          if (isEnoent && !dirStatInFlight) {
+            dirStatInFlight = true
+            const statPromise = stat(dir)
+              .then(
+                s => !s.isDirectory(),
+                e =>
+                  (e as NodeJS.ErrnoException)?.code === 'ENOENT' || undefined,
+              )
+              .finally(() => {
+                dirStatInFlight = false
+              })
+            checkDir = Promise.race([
+              statPromise,
+              new Promise<undefined>(r => {
+                const t = setTimeout(() => r(undefined), DIR_STAT_TIMEOUT_MS)
+                t.unref?.()
+              }),
+            ])
+          } else {
+            checkDir = Promise.resolve(undefined)
+          }
           pendingErrorCheck = checkDir.then(dirMissing => {
             let msg = `spawn error: ${err.message}`
             if (dirMissing) {
@@ -604,7 +654,7 @@ export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
             }
             lastStderr.push(msg)
           })
-          void pendingErrorCheck.then(() => resolve('failed'))
+          resolveAfterPending('failed')
         })
       })
 

@@ -155,6 +155,32 @@ export type ReplBridgeHandle = {
   adoptLocalAiTitle?(): void
   /** Official leftover `M.selfTitle` — last inbound / derived RC title. */
   selfTitle?: string
+  /**
+   * Official 2.1.323 #2113 (`Jt` / `Mo`): track terminal-only permission
+   * prompts / blocking dialogs so Remote Control reports `requires_action`
+   * instead of `running` while the user must answer in the terminal.
+   */
+  setTerminalOnlyBlockingDialog?(
+    kind: string,
+    active: boolean,
+    details?: import('../utils/sessionState.js').RequiresActionDetails,
+  ): void
+  /**
+   * Official 2.1.323 #2101: notify remote host when an inbound peer message
+   * is dropped (duplicate / rate-limited / queue-full) so Desktop does not
+   * stay stuck as busy.
+   */
+  reportPeerMessageDropped?(input: {
+    messageUuid?: string
+    from: string
+    outcome:
+      | 'duplicate'
+      | 'rate-limited'
+      | 'queue-full'
+      | 'hop-loop'
+      | 'hop-runaway'
+    lane?: 'bridge' | 'stdin' | 'socket'
+  }): void
   /** Official leftover `p.titleWriter` on cb() — u8o inbound rename. */
   titleWriter?: {
     update: (

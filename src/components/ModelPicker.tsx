@@ -2,7 +2,7 @@ import figures from 'figures';
 import capitalize from 'lodash-es/capitalize.js';
 import * as React from 'react';
 import { useCallback, useMemo, useState } from 'react';
-import { Box, Byline, KeyboardShortcutHint, Pane, Ratchet, Text } from '@anthropic/ink';
+import { Box, Byline, color, KeyboardShortcutHint, Pane, Ratchet, Text, useTheme } from '@anthropic/ink';
 import { useExitOnCtrlCDWithKeybindings } from 'src/hooks/useExitOnCtrlCDWithKeybindings.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -22,9 +22,11 @@ import {
   clampEffortForModel,
   convertEffortValueToLevel,
   type EffortLevel,
+  type EffortValue,
   effortModelSettingsPatch,
   explicitSessionEffort,
   getDefaultEffortForModel,
+  getEffortEnvOverride,
   getSupportedEffortLevels,
   isEffortLaunchPinned,
   isEffortLevel,
@@ -162,6 +164,42 @@ export function findMatchingModelOptionValue(
   return typeof hit?.value === 'string' ? hit.value : undefined;
 }
 
+/** Official 2.1.323 (#2095): newest model highlighted in `/model` picker. */
+export const NEWEST_MODEL_HIGHLIGHT_NAME = 'Fable 5.2';
+
+/**
+ * Official 2.1.323 `_ce` (#2093): apply `CLAUDE_CODE_EFFORT_LEVEL` env override
+ * over a session/settings effort value so the model picker displays what the
+ * environment will actually apply rather than a hidden picked value.
+ */
+export function applyEffortEnvOverride(
+  effort: EffortValue | undefined,
+  envOverride: EffortValue | null | undefined = getEffortEnvOverride(),
+): EffortValue | undefined {
+  if (envOverride === null) return undefined;
+  return envOverride ?? effort;
+}
+
+/**
+ * Official 2.1.323 `kr` (#2095): highlight the newest model (`Fable 5.2`) in
+ * both label (`labelColor: 'claude'`) and description (claude brand ANSI color).
+ */
+export function highlightNewestModelOption<T extends { label: string; description?: string; labelColor?: string }>(
+  opt: T,
+  themeName: Parameters<typeof color>[1],
+): T & { labelColor?: string } {
+  const labelColor = opt.label?.includes(NEWEST_MODEL_HIGHLIGHT_NAME) ? 'claude' : opt.labelColor;
+  const description = (opt.description ?? '').replaceAll(
+    NEWEST_MODEL_HIGHLIGHT_NAME,
+    color('claude', themeName)(NEWEST_MODEL_HIGHLIGHT_NAME),
+  );
+  return {
+    ...opt,
+    description,
+    ...(labelColor !== undefined ? { labelColor } : {}),
+  };
+}
+
 /** Official `jh` (2.1.319 #1801 / 2.1.321 #1920): unnumbered collapsible "More models" row. */
 export const MORE_MODELS_OPTION_VALUE = '__more_models__';
 
@@ -172,6 +210,7 @@ export type ModelPickerRowOption = {
   disabled?: boolean;
   overflow?: boolean;
   marker?: string;
+  labelColor?: string;
 };
 
 /**
@@ -233,6 +272,7 @@ export function ModelPicker({
   deferEffortApply,
 }: Props): React.ReactNode {
   const setAppState = useSetAppState();
+  const [theme] = useTheme();
   const exitState = useExitOnCtrlCDWithKeybindings(onCancel, undefined, isStandaloneCommand === true);
   const { rows } = useTerminalSize();
   const isFastMode = useAppState(s => (isFastModeEnabled() ? s.fastMode : false));
@@ -265,7 +305,9 @@ export function ModelPicker({
   const settingsEffortTable = useAppState(s => s.settingsEffortTable);
   const ultracodeFlag = useAppState(s => s.ultracode);
   const [effort, setEffort] = useState<EffortLevel | undefined>(() => {
-    const pd = pdSessionEffort({ sessionEffort, settingsEffortTable }, resolveOptionModel(initialValue));
+    const pd = applyEffortEnvOverride(
+      pdSessionEffort({ sessionEffort, settingsEffortTable }, resolveOptionModel(initialValue)),
+    );
     return pd !== undefined ? convertEffortValueToLevel(pd) : undefined;
   });
 
@@ -315,11 +357,16 @@ export function ModelPicker({
 
   const allSelectOptions = useMemo(
     () =>
-      optionsWithInitial.map(opt => ({
-        ...opt,
-        value: opt.value === null ? NO_PREFERENCE : opt.value,
-      })),
-    [optionsWithInitial],
+      optionsWithInitial.map(opt =>
+        highlightNewestModelOption(
+          {
+            ...opt,
+            value: opt.value === null ? NO_PREFERENCE : opt.value,
+          },
+          theme,
+        ),
+      ),
+    [optionsWithInitial, theme],
   );
   const baseOptionValue =
     initial === null ? NO_PREFERENCE : (findMatchingModelOptionValue(modelOptions, initial) ?? initial);
@@ -365,9 +412,10 @@ export function ModelPicker({
   const handleFocus = useCallback(
     (value: string) => {
       setFocusedValue(value);
+      if (value === MORE_MODELS_OPTION_VALUE) return;
       if (!hasToggledEffort) {
         const targetModel = resolveOptionModel(value);
-        const pd = pdSessionEffort({ sessionEffort, settingsEffortTable }, targetModel);
+        const pd = applyEffortEnvOverride(pdSessionEffort({ sessionEffort, settingsEffortTable }, targetModel));
         setEffort(pd !== undefined ? convertEffortValueToLevel(pd) : getDefaultEffortLevelForOption(value));
       }
     },

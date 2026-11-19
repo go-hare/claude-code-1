@@ -268,6 +268,7 @@ async function fetchUserSettingsOnce(): Promise<SettingsSyncFetchResult> {
     const response = await axios.get(endpoint, {
       headers,
       timeout: SETTINGS_SYNC_TIMEOUT_MS,
+      proxy: false,
       validateStatus: status => status === 200 || status === 404,
     })
 
@@ -373,6 +374,7 @@ async function uploadUserSettings(
       {
         headers,
         timeout: SETTINGS_SYNC_TIMEOUT_MS,
+        proxy: false,
       },
     )
 

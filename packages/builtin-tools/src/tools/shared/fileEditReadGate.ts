@@ -19,7 +19,9 @@ import {
 } from 'src/engine/permissionLayerReaders.js'
 import type { Tool, ToolPermissionContext, ToolUseContext } from 'src/Tool.js'
 import { toolMatchesName } from 'src/Tool.js'
+import { getPathsForPermissionCheck } from 'src/utils/fsOperations.js'
 import { getCanonicalName } from 'src/utils/model/model.js'
+import type { PermissionRule } from 'src/utils/permissions/PermissionRule.js'
 import {
   checkReadPermissionForTool,
   matchingRuleForInput,
@@ -166,18 +168,16 @@ export function isReadAutoAllowedForEditGate(
 }
 
 /**
- * densable l8t(path, permissionContext):
- *   if (hB(ctx, Read, denyRules.filter(!KqS)) !== null) return true
- *   if (LNa(ctx, "read", "deny").size === 0) return false
- *   return fT(path).some(p => Dk(p, ctx, "read", "deny") !== null)
- *
- * Early Write/Edit validateInput gate (errorCode 13) — separate from unread
- * errorCode 2/6. User-facing copy is FILE_READ_DENY_CANNOT_{EDIT,WRITE}.
+ * Official 2.1.323 `n3n` (#2023): returns the Read deny rule covering
+ * `fullFilePath` across all resolved path spellings (symlinks, realpath,
+ * ancestor symlinks, Windows variants) or a tool-level Read deny rule
+ * (excluding `L8T_EXCLUDED_TOOL_DENY_SOURCES`).
  */
-export function isPathCoveredByReadDenyRule(
+export function getReadDenyRuleForPath(
   fullFilePath: string,
   permissionContext: ToolPermissionContext,
-): boolean {
+  candidatePaths?: readonly string[],
+): PermissionRule | null {
   // Tool-level Read deny, excluding densable KqS sources.
   const alwaysDenyRules = permissionContext.alwaysDenyRules ?? {}
   const filteredDenyRules = Object.fromEntries(
@@ -189,15 +189,36 @@ export function isPathCoveredByReadDenyRule(
     ...permissionContext,
     alwaysDenyRules: filteredDenyRules,
   }
-  if (getDenyRuleForTool(filteredContext, READ_PROBE) !== null) {
-    return true
+  const bareDeny = getDenyRuleForTool(filteredContext, READ_PROBE)
+  if (bareDeny !== null) {
+    return bareDeny
   }
 
-  // Path-level Read deny (densable LNa + Dk). matchingRuleForInput already
-  // expands Windows path forms; symlink multi-path fT is best-effort via the
-  // single expanded path (same as Edit/Write edit-deny checks).
+  // 2.1.323 #2023: check every resolved spelling (ps(e) / getPathsForPermissionCheck)
+  // so symlinks, realpath aliases, and ancestor symlinks pointing at a Read-denied
+  // target cannot bypass Write/Edit guards.
+  const paths = candidatePaths ?? getPathsForPermissionCheck(fullFilePath)
+  for (const p of paths) {
+    const matched = matchingRuleForInput(p, permissionContext, 'read', 'deny')
+    if (matched !== null) {
+      return matched
+    }
+  }
+  return null
+}
+
+/**
+ * densable `HL` / `l8t(path, permissionContext)` (#2023):
+ * Early Write/Edit validateInput & call gate (errorCode 13) — separate from
+ * unread errorCode 2/6. User-facing copy is FILE_READ_DENY_CANNOT_{EDIT,WRITE}.
+ */
+export function isPathCoveredByReadDenyRule(
+  fullFilePath: string,
+  permissionContext: ToolPermissionContext,
+  candidatePaths?: readonly string[],
+): boolean {
   return (
-    matchingRuleForInput(fullFilePath, permissionContext, 'read', 'deny') !==
+    getReadDenyRuleForPath(fullFilePath, permissionContext, candidatePaths) !==
     null
   )
 }

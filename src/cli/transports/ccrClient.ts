@@ -1911,16 +1911,36 @@ export class CCRClient {
     return this.internalEventUploader.pendingCount
   }
 
-  /** Clean up uploaders and timers. */
-  close(): void {
-    this.closed = true
-    this.stopHeartbeat()
-    unregisterSessionActivityCallback()
+  /**
+   * Official 2.1.323 #2145: drain buffered stream_events synchronously into
+   * the event uploader (without waiting for the 100ms timer) so shutdown
+   * mid-reply never drops already-streamed middle text chunks.
+   */
+  private drainStreamEventBufferSync(): void {
     if (this.streamEventTimer) {
       clearTimeout(this.streamEventTimer)
       this.streamEventTimer = null
     }
+    if (this.streamEventBuffer.length === 0) return
+    const buffered = this.streamEventBuffer
     this.streamEventBuffer = []
+    const payloads = accumulateStreamEvents(
+      buffered,
+      this.streamTextAccumulator,
+    )
+    if (payloads.length > 0) {
+      void this.eventUploader.enqueue(
+        payloads.map(payload => ({ payload, ephemeral: true })),
+      )
+    }
+  }
+
+  /** Clean up uploaders and timers. */
+  close(): void {
+    this.drainStreamEventBufferSync()
+    this.closed = true
+    this.stopHeartbeat()
+    unregisterSessionActivityCallback()
     this.streamTextAccumulator.byMessage.clear()
     this.streamTextAccumulator.scopeToMessage.clear()
     this.workerState.close()

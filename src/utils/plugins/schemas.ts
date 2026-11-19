@@ -251,13 +251,22 @@ export function isOfficialAnthropicsGitUrl(url: string): boolean {
  */
 export function validateOfficialNameSource(
   name: string,
-  source: { source: string; repo?: string; url?: string },
+  source: { source: string; repo?: string; url?: string; ref?: string },
 ): string | null {
   const normalizedName = name.toLowerCase()
 
   // Only validate reserved names
   if (!ALLOWED_OFFICIAL_MARKETPLACE_NAMES.has(normalizedName)) {
     return null // Not a reserved name, no source validation needed
+  }
+
+  // Official 2.1.325 #2378 (`I8e`): reserved official marketplaces must follow
+  // a branch or tag, not a pinned full commit SHA.
+  if (
+    typeof source.ref === 'string' &&
+    /^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/.test(source.ref)
+  ) {
+    return `The name '${name}' is reserved for official Anthropic marketplaces, which follow a branch or tag. Remove \`ref\`, or use a branch or tag.`
   }
 
   // Check for GitHub source type
@@ -475,6 +484,18 @@ const PluginManifestMetadataSchema = lazySchema(() =>
       .optional()
       .describe(
         'Plugins that must be enabled for this plugin to function. Bare names (no "@marketplace") are resolved against the declaring plugin\'s own marketplace.',
+      ),
+    engines: z
+      .preprocess(
+        value =>
+          value !== null && typeof value === 'object' && !Array.isArray(value)
+            ? value
+            : undefined,
+        z.record(z.string(), z.unknown()).optional(),
+      )
+      .optional()
+      .describe(
+        'Compatible runtime versions, e.g. { "claude-code": ">=2.1.0" }',
       ),
   }),
 )
@@ -1840,6 +1861,36 @@ export const PluginMarketplaceEntrySchema = lazySchema(() =>
  * Defines the structure for curated collections of plugins that can
  * be discovered and installed from a central repository.
  */
+/**
+ * Official 2.1.323 #2045 (`pf`) — tolerate malformed entries in a marketplace's
+ * `renames` map so one bad entry does not discard the rest of the map.
+ * Non-string/non-null entries become identity entries `[key, key]`, and a map
+ * with an own `__proto__` key is dropped entirely.
+ */
+export function sanitizeMarketplaceRenames(value: unknown): unknown {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return value
+  }
+  const rec = value as Record<string, unknown>
+  const malformedKeys = Object.keys(rec).filter(
+    key => typeof rec[key] !== 'string' && rec[key] !== null,
+  )
+  if (malformedKeys.length > 0) {
+    if (Object.hasOwn(rec, '__proto__')) {
+      return undefined
+    }
+    const sanitized: Record<string, unknown> = { ...rec }
+    for (const key of malformedKeys) {
+      sanitized[key] = key
+    }
+    return sanitized
+  }
+  if (Object.hasOwn(rec, '__proto__')) {
+    return undefined
+  }
+  return rec
+}
+
 export const PluginMarketplaceSchema = lazySchema(() =>
   z.object({
     name: MarketplaceNameSchema(),
@@ -1873,6 +1924,15 @@ export const PluginMarketplaceSchema = lazySchema(() =>
       .optional()
       .describe(
         "Marketplace names whose plugins may be auto-installed as dependencies. Only the root marketplace's allowlist applies \u2014 no transitive trust.",
+      ),
+    renames: z
+      .preprocess(
+        sanitizeMarketplaceRenames,
+        z.record(z.string(), z.string().nullable()).optional(),
+      )
+      .catch(undefined)
+      .describe(
+        'Append-only map of old plugin name → current name (or null when removed).',
       ),
   }),
 )
@@ -2180,6 +2240,14 @@ export const KnownMarketplaceSchema = lazySchema(() =>
       .optional()
       .describe(
         'Whether to automatically update this marketplace and its installed plugins on startup',
+      ),
+    // Official 2.1.325 #2361: deprecated and ignored so existing settings load.
+    pluginDigests: z
+      .record(z.string(), z.array(z.string()).catch([]))
+      .optional()
+      .catch(undefined)
+      .describe(
+        'Deprecated and ignored: settings that hold it still load. A plugin takes the organization tier when managed settings enable it, declare its marketplace with a remote source and list it in prependPlugins or appendPlugins.',
       ),
   }),
 )

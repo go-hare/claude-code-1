@@ -1,5 +1,5 @@
 import { readFileSync, type Dirent, type Stats } from 'fs'
-import { readdir, readFile, stat } from 'fs/promises'
+import { lstat, readdir, readFile, realpath, stat } from 'fs/promises'
 import * as path from 'path'
 import { z } from 'zod/v4'
 import { errorMessage, getErrnoCode, isENOENT } from '../errors.js'
@@ -9,7 +9,20 @@ import { jsonParse } from '../slowOperations.js'
 import { getSettingsForSource } from '../settings/settings.js'
 import type { HooksSettings } from '../settings/types.js'
 import { parseYaml } from '../yaml.js'
+import {
+  PLUGIN_AGENT_SETTING_DEPRECATED_HINT,
+  PLUGIN_AGENT_SETTING_DEPRECATED_MESSAGE,
+} from '../../types/plugin.js'
 import { applyMarketplacePluginRoot } from './marketplacePluginRoot.js'
+import {
+  extractClaudeCodeEngineRange,
+  isValidClaudeCodeEngineRange,
+} from './pluginEngineRange.js'
+import {
+  analyzeEngineCreateHookInSource,
+  formatEngineCreateNounNotes,
+  typeCheckPluginHooksModule,
+} from './pluginHooksValidate.js'
 import {
   ANTHROPIC_OWN_PLUGIN_VALIDATE_MARKETPLACE,
   checkAnthropicOwnPluginName,
@@ -436,6 +449,32 @@ export async function validatePluginManifest(
         path: 'author',
         message:
           'No author information provided. Consider adding author details for plugin attribution',
+      })
+    }
+
+    // Official 2.1.323 #1965: warn if engines["claude-code"] is present but unreadable
+    const statedEngineRange = extractClaudeCodeEngineRange(manifest.engines)
+    if (
+      statedEngineRange !== undefined &&
+      !isValidClaudeCodeEngineRange(statedEngineRange)
+    ) {
+      warnings.push({
+        path: 'engines.claude-code',
+        message:
+          typeof statedEngineRange === 'string'
+            ? `Its Claude Code range "${statedEngineRange}" isn't a version range, so it's ignored. Set engines["claude-code"] to a semver range such as ">=2.1.0".`
+            : `Its Claude Code range isn't text, so it's ignored. Set engines["claude-code"] to a semver range such as ">=2.1.0".`,
+      })
+    }
+
+    // Official 2.1.323 #2211: warn when plugin.json sets deprecated settings.agent
+    const manifestSettings = (
+      manifest as { settings?: Record<string, unknown> }
+    ).settings
+    if (manifestSettings && manifestSettings.agent !== undefined) {
+      warnings.push({
+        path: 'settings.agent',
+        message: `${PLUGIN_AGENT_SETTING_DEPRECATED_MESSAGE} ${PLUGIN_AGENT_SETTING_DEPRECATED_HINT}`,
       })
     }
   }
@@ -2570,7 +2609,13 @@ async function validateHooksJson(
       ? (parsed as { modules?: Record<string, unknown> }).modules
       : undefined
   const modulePaths: Array<[string, string]> = []
-  if (moduleEntries && typeof moduleEntries === 'object') {
+  if (Array.isArray(moduleEntries)) {
+    for (const modVal of moduleEntries) {
+      if (typeof modVal === 'string') {
+        modulePaths.push([modVal, path.resolve(hooksDir, modVal)])
+      }
+    }
+  } else if (moduleEntries && typeof moduleEntries === 'object') {
     for (const [modKey, modVal] of Object.entries(moduleEntries)) {
       if (typeof modVal === 'string') {
         modulePaths.push([modKey, path.resolve(hooksDir, modVal)])
@@ -2642,6 +2687,60 @@ async function validateHooksJson(
       })
       notes.push(...analysis.notes)
       gatingHooks.push(...analysis.gatingHooks)
+
+      // Official 2.1.323 #1967 & #2184: analyze engine.create hook `$` nouns and enforce single accepted form.
+      const engineForm = analyzeEngineCreateHookInSource(modName, modSrc)
+      if (engineForm !== undefined) {
+        if (!engineForm.isInForm) {
+          errors.push({
+            path: `modules.${modName}`,
+            message: engineForm.message,
+          })
+        } else {
+          for (const note of formatEngineCreateNounNotes(engineForm)) {
+            notes.push(`[${modName}] ${note}`)
+          }
+        }
+      }
+
+      // Official 2.1.323 #1966: type-check TypeScript hooks modules (findings as warnings; --strict fails).
+      const resolvedPluginRoot =
+        pluginDir ?? path.dirname(path.dirname(filePath))
+      let manifestDeps: unknown
+      try {
+        const rawManifest = readFileSync(
+          path.join(resolvedPluginRoot, '.claude-plugin', 'plugin.json'),
+          'utf-8',
+        )
+        const parsedManifest = jsonParse(stripBOM(rawManifest))
+        if (
+          parsedManifest !== null &&
+          typeof parsedManifest === 'object' &&
+          'dependencies' in parsedManifest
+        ) {
+          manifestDeps = (parsedManifest as { dependencies?: unknown })
+            .dependencies
+        }
+      } catch {
+        // No manifest or unreadable — proceed with undefined dependencies
+      }
+      const tc = typeCheckPluginHooksModule({
+        pluginRoot: resolvedPluginRoot,
+        moduleSpec: modName,
+        entryPath: modFullPath,
+        dependencies: manifestDeps,
+      })
+      notes.push(...tc.notes)
+      warnings.push(...tc.warnings)
+      for (const fileEntry of tc.files) {
+        const rel = path.relative(resolvedPluginRoot, fileEntry.filePath)
+        for (const w of fileEntry.warnings) {
+          warnings.push({
+            path: `${rel} (${w.path})`,
+            message: w.message,
+          })
+        }
+      }
       const stateAnalysis = analyzeHookModuleStateAndMatchers(modName, modSrc)
       if (stateAnalysis.error !== undefined) {
         errors.push({
@@ -2808,7 +2907,222 @@ export async function validatePluginContents(
     results.push(hooksResult)
   }
 
+  // Official 2.1.323 #2211: warn when plugin's settings.json sets deprecated `agent`.
+  const settingsJsonPath = path.join(pluginDir, 'settings.json')
+  try {
+    const rawSettings = await readFile(settingsJsonPath, { encoding: 'utf-8' })
+    const parsedSettings = jsonParse(stripBOM(rawSettings))
+    if (
+      parsedSettings !== null &&
+      typeof parsedSettings === 'object' &&
+      !Array.isArray(parsedSettings) &&
+      (parsedSettings as Record<string, unknown>).agent !== undefined
+    ) {
+      results.push({
+        success: true,
+        errors: [],
+        warnings: [
+          {
+            path: 'agent',
+            message: `${PLUGIN_AGENT_SETTING_DEPRECATED_MESSAGE} ${PLUGIN_AGENT_SETTING_DEPRECATED_HINT}`,
+          },
+        ],
+        filePath: settingsJsonPath,
+        fileType: 'plugin',
+      })
+    }
+  } catch {
+    // Missing or unreadable settings.json — skip
+  }
+
+  // Official 2.1.325 #2362: report unsafe paths and symlinks inside the plugin
+  // folder (escaping symlinks, broken symlinks, paths leading into `.mcpb-cache`).
+  const unsafePathResult = await scanPluginUnsafePathsAndLinks(pluginDir)
+  if (
+    unsafePathResult.errors.length > 0 ||
+    unsafePathResult.warnings.length > 0
+  ) {
+    results.push(unsafePathResult)
+  }
+
   return results
+}
+
+export const PLUGIN_MCPB_CACHE_SEGMENT = '.mcpb-cache'
+export const PLUGIN_MCPB_CACHE_UNSAFE_REASON = `it leads into ${PLUGIN_MCPB_CACHE_SEGMENT}, which Claude Code may have overwritten when it unpacked the plugin's MCP bundles; the plugin's author needs to move it to another folder`
+
+/**
+ * Official 2.1.325 #2362 (`S2e` / `UVt`): check whether a path relative to
+ * `pluginDir` traverses a `.mcpb-cache` segment (including Windows trailing
+ * dot/space normalization).
+ */
+export function isPluginPathInMcpbCache(
+  pluginDir: string,
+  candidatePath: string,
+): boolean {
+  const rel = path.relative(pluginDir, candidatePath)
+  return rel
+    .split(path.sep)
+    .some(
+      seg =>
+        seg.toLowerCase().replace(/[. ]+$/, '') === PLUGIN_MCPB_CACHE_SEGMENT,
+    )
+}
+
+/**
+ * Official 2.1.325 #2362: check whether a resolved file/directory path inside
+ * a plugin folder is safe to load (stays within `pluginDir` after resolving
+ * symlinks and does not traverse `.mcpb-cache` or parent `..` segments).
+ */
+export async function checkPluginEntryPathSafety(
+  pluginDir: string,
+  entryPath: string,
+): Promise<{ safe: true } | { safe: false; reason: string; code: string }> {
+  const rel = path.relative(pluginDir, entryPath)
+  if (
+    rel.startsWith('..') ||
+    path.isAbsolute(rel) ||
+    rel.split(path.sep).includes('..')
+  ) {
+    return {
+      safe: false,
+      code: 'path_traversal',
+      reason: `Path escapes plugin directory: ${rel}`,
+    }
+  }
+  if (isPluginPathInMcpbCache(pluginDir, entryPath)) {
+    return {
+      safe: false,
+      code: 'mcpb_cache_path',
+      reason: `Unsafe path (${rel}): ${PLUGIN_MCPB_CACHE_UNSAFE_REASON}`,
+    }
+  }
+  try {
+    const st = await lstat(entryPath)
+    if (st.isSymbolicLink()) {
+      const [rootReal, targetReal] = await Promise.all([
+        realpath(pluginDir),
+        realpath(entryPath),
+      ])
+      const realRel = path.relative(rootReal, targetReal)
+      if (
+        realRel.startsWith('..') ||
+        path.isAbsolute(realRel) ||
+        realRel.split(path.sep).includes('..')
+      ) {
+        return {
+          safe: false,
+          code: 'symlink_escapes_plugin',
+          reason: `Symlink escapes plugin directory: ${rel} -> ${targetReal}`,
+        }
+      }
+      if (isPluginPathInMcpbCache(rootReal, targetReal)) {
+        return {
+          safe: false,
+          code: 'symlink_to_mcpb_cache',
+          reason: `Symlink (${rel}) is unsafe: ${PLUGIN_MCPB_CACHE_UNSAFE_REASON}`,
+        }
+      }
+    }
+  } catch (err) {
+    const errno = getErrnoCode(err)
+    if (errno === 'ENOENT' || errno === 'ELOOP') {
+      return {
+        safe: false,
+        code: errno === 'ELOOP' ? 'symlink_loop' : 'dangling_symlink',
+        reason: `Broken or circular symlink in plugin directory: ${rel}`,
+      }
+    }
+  }
+  return { safe: true }
+}
+
+/**
+ * Official 2.1.325 #2362: walk a plugin directory and collect unsafe paths and
+ * symlinks (escaping symlinks, broken/loop symlinks, `.mcpb-cache` entries)
+ * for `claude plugin validate`.
+ */
+export async function scanPluginUnsafePathsAndLinks(
+  pluginDir: string,
+): Promise<ValidationResult> {
+  const errors: ValidationError[] = []
+  const warnings: ValidationWarning[] = []
+  const visitedDirs = new Set<string>()
+  let rootReal: string
+  try {
+    rootReal = await realpath(pluginDir)
+  } catch {
+    return {
+      success: true,
+      errors,
+      warnings,
+      filePath: pluginDir,
+      fileType: 'plugin',
+    }
+  }
+
+  const walk = async (dir: string, depth: number): Promise<void> => {
+    if (depth > 16) return
+    let entries: Dirent[]
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (entry.name === '.git' || entry.name === 'node_modules') continue
+      const fullPath = path.join(dir, entry.name)
+      const rel = path.relative(pluginDir, fullPath)
+      const normName = entry.name.toLowerCase().replace(/[. ]+$/, '')
+      if (normName === PLUGIN_MCPB_CACHE_SEGMENT) {
+        warnings.push({
+          path: rel,
+          message: `Path "${rel}" is unsafe: ${PLUGIN_MCPB_CACHE_UNSAFE_REASON}`,
+        })
+        continue
+      }
+      if (entry.isSymbolicLink()) {
+        const verdict = await checkPluginEntryPathSafety(pluginDir, fullPath)
+        if (!verdict.safe) {
+          errors.push({
+            path: rel,
+            message: verdict.reason,
+            code: verdict.code,
+          })
+        }
+        continue
+      }
+      if (entry.isDirectory()) {
+        try {
+          const dirReal = await realpath(fullPath)
+          if (visitedDirs.has(dirReal)) continue
+          const dirRel = path.relative(rootReal, dirReal)
+          if (dirRel.startsWith('..') || path.isAbsolute(dirRel)) {
+            errors.push({
+              path: rel,
+              message: `Directory escapes plugin root: ${rel}`,
+              code: 'symlink_escapes_plugin',
+            })
+            continue
+          }
+          visitedDirs.add(dirReal)
+          await walk(fullPath, depth + 1)
+        } catch {
+          // ignore unreadable subdir
+        }
+      }
+    }
+  }
+
+  visitedDirs.add(rootReal)
+  await walk(pluginDir, 0)
+  return {
+    success: errors.length === 0,
+    errors,
+    warnings,
+    filePath: pluginDir,
+    fileType: 'plugin',
+  }
 }
 
 /**

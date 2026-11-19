@@ -3,6 +3,10 @@ import { getSdkBetas, markPostCompaction } from 'src/bootstrap/state.js'
 import type { QuerySource } from '../../constants/querySource.js'
 import type { ToolUseContext } from '../../Tool.js'
 import type { Message } from '../../types/message.js'
+import {
+  getAgentContext,
+  runWithAgentContext,
+} from '../../utils/agentContext.js'
 import { getGlobalConfig } from '../../utils/config.js'
 import {
   getContextWindowForModel,
@@ -197,7 +201,38 @@ export async function getClaudeMdGrowthTokens(
   }
 }
 
-export function getAutoCompactThreshold(model: string): number {
+/**
+ * Official 2.1.323 (#2209): In Anthropic-hosted cloud sessions
+ * (`CLAUDE_CODE_REMOTE`), `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` no longer applies
+ * to auto-memory extraction or `/btw` side questions; the main conversation
+ * still follows it.
+ */
+const CLOUD_AUTOCOMPACT_PCT_EXEMPT_QUERY_SOURCES = new Set([
+  'extract_memories',
+  'auto_memory',
+  'session_memory',
+  'btw',
+  'side_question',
+])
+
+export function isCloudAutocompactPctOverrideExempt(
+  querySource?: string,
+): boolean {
+  if (!isEnvTruthy(process.env.CLAUDE_CODE_REMOTE)) {
+    return false
+  }
+  if (!querySource) return false
+  return (
+    CLOUD_AUTOCOMPACT_PCT_EXEMPT_QUERY_SOURCES.has(querySource) ||
+    querySource.startsWith('extract_memories') ||
+    querySource.startsWith('btw')
+  )
+}
+
+export function getAutoCompactThreshold(
+  model: string,
+  options?: { querySource?: string; ignorePctOverride?: boolean },
+): number {
   const effectiveContextWindow = getEffectiveContextWindowSize(model)
 
   // Official zNy cold-compact densable — larger buffer → earlier autocompact.
@@ -213,8 +248,13 @@ export function getAutoCompactThreshold(model: string): number {
 
   const autocompactThreshold = effectiveContextWindow - bufferTokens
 
-  // Override for easier testing of autocompact
-  const envPercent = process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
+  // Override for easier testing of autocompact (exempt for cloud auto-memory / /btw per #2209)
+  const exemptPctOverride =
+    options?.ignorePctOverride === true ||
+    isCloudAutocompactPctOverrideExempt(options?.querySource)
+  const envPercent = exemptPctOverride
+    ? undefined
+    : process.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
   if (envPercent) {
     const parsed = parseFloat(envPercent)
     if (!isNaN(parsed) && parsed > 0 && parsed <= 100) {
@@ -231,6 +271,7 @@ export function getAutoCompactThreshold(model: string): number {
 export function calculateTokenWarningState(
   tokenUsage: number,
   model: string,
+  options?: { querySource?: string; ignorePctOverride?: boolean },
 ): {
   percentLeft: number
   isAboveWarningThreshold: boolean
@@ -238,7 +279,7 @@ export function calculateTokenWarningState(
   isAboveAutoCompactThreshold: boolean
   isAtBlockingLimit: boolean
 } {
-  const autoCompactThreshold = getAutoCompactThreshold(model)
+  const autoCompactThreshold = getAutoCompactThreshold(model, options)
   const threshold = isAutoCompactEnabled()
     ? autoCompactThreshold
     : getEffectiveContextWindowSize(model)
@@ -446,7 +487,7 @@ export async function shouldAutoCompact(
   const claudeMdGrowth = await getClaudeMdGrowthTokens(currentClaudeMd)
   const tokenCount =
     tokenCountWithEstimation(messages) - snipTokensFreed + claudeMdGrowth
-  const threshold = getAutoCompactThreshold(model)
+  const threshold = getAutoCompactThreshold(model, { querySource })
   const effectiveWindow = getEffectiveContextWindowSize(model)
 
   logForDebugging(
@@ -454,7 +495,7 @@ export async function shouldAutoCompact(
   )
 
   const { isAboveAutoCompactThreshold, isAtBlockingLimit } =
-    calculateTokenWarningState(tokenCount, model)
+    calculateTokenWarningState(tokenCount, model, { querySource })
 
   return isAboveAutoCompactThreshold || isAtBlockingLimit
 }
@@ -580,16 +621,50 @@ export async function autoCompactIfNeeded(
     isRecompactionInChain: tracking?.compacted === true,
     turnsSincePreviousCompact: tracking?.turnCounter ?? -1,
     previousCompactTurnId: tracking?.turnId,
-    autoCompactThreshold: getAutoCompactThreshold(model),
+    autoCompactThreshold: getAutoCompactThreshold(model, { querySource }),
     querySource,
   }
 
+  // Official 2.1.323 #2103: ensure subagent identity (agent_id / agent_type)
+  // is present in AsyncLocalStorage when post-compaction SessionStart('compact')
+  // hooks run via executeSessionStartHooks.
+  const runWithSubagentCompactContext = <T>(
+    fn: () => Promise<T>,
+  ): Promise<T> => {
+    if (!toolUseContext.agentId) return fn()
+    const existing = getAgentContext()
+    if (existing?.agentId === toolUseContext.agentId) return fn()
+    const inferredSubagentName =
+      existing?.agentType === 'subagent' && existing.subagentName
+        ? existing.subagentName
+        : querySource?.startsWith('agent:builtin:')
+          ? querySource.slice('agent:builtin:'.length)
+          : querySource?.startsWith('agent:custom:')
+            ? querySource.slice('agent:custom:'.length)
+            : querySource?.startsWith('agent:')
+              ? querySource.slice('agent:'.length)
+              : undefined
+    return runWithAgentContext(
+      {
+        agentId: toolUseContext.agentId,
+        agentType: 'subagent',
+        ...(inferredSubagentName !== undefined
+          ? { subagentName: inferredSubagentName }
+          : {}),
+        isBackgroundAgent: toolUseContext.isBackgroundAgent,
+      },
+      fn,
+    )
+  }
+
   // EXPERIMENT: Try session memory compaction first
-  const sessionMemoryResult = await trySessionMemoryCompaction(
-    messages,
-    toolUseContext.agentId,
-    recompactionInfo.autoCompactThreshold,
-    toolUseContext.getAppState(),
+  const sessionMemoryResult = await runWithSubagentCompactContext(() =>
+    trySessionMemoryCompaction(
+      messages,
+      toolUseContext.agentId,
+      recompactionInfo.autoCompactThreshold,
+      toolUseContext.getAppState(),
+    ),
   )
   if (sessionMemoryResult) {
     // Reset lastSummarizedMessageId since session memory compaction prunes messages
@@ -627,16 +702,18 @@ export async function autoCompactIfNeeded(
           }
         : toolUseContext
 
-    const compactionResult = await compactConversation(
-      messages,
-      compactContext,
-      cacheSafeParams,
-      true, // Suppress user questions for autocompact
-      undefined, // No custom instructions for autocompact
-      true, // isAutoCompact
-      recompactionInfo,
-      // densable Z$o → Pqn stripNonEssential:M=!1
-      resolveColdCompactStripNonEssential(),
+    const compactionResult = await runWithSubagentCompactContext(() =>
+      compactConversation(
+        messages,
+        compactContext,
+        cacheSafeParams,
+        true, // Suppress user questions for autocompact
+        undefined, // No custom instructions for autocompact
+        true, // isAutoCompact
+        recompactionInfo,
+        // densable Z$o → Pqn stripNonEssential:M=!1
+        resolveColdCompactStripNonEssential(),
+      ),
     )
 
     // Reset lastSummarizedMessageId since legacy compaction replaces all messages

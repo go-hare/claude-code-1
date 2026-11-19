@@ -7,6 +7,7 @@ import { getAPIProvider } from 'src/utils/model/providers.js'
 import { VERTEX_COUNT_TOKENS_ALLOWED_BETAS } from '../constants/betas.js'
 import type { Attachment } from '../utils/attachments.js'
 import { getModelBetas } from '../utils/betas.js'
+import { validateAllowedProvider } from '../utils/auth.js'
 import { getVertexRegionForModel, isEnvTruthy } from '../utils/envUtils.js'
 import { logError } from '../utils/log.js'
 import { normalizeAttachmentForAPI } from '../utils/messages.js'
@@ -156,6 +157,7 @@ function stripSearchExtraToolsFieldsFromMessages(
 
 export async function countTokensWithAPI(
   content: string,
+  model?: string,
 ): Promise<number | null> {
   // Special case for empty content - API doesn't accept empty messages
   if (!content) {
@@ -167,12 +169,13 @@ export async function countTokensWithAPI(
     content: content,
   }
 
-  return countMessagesTokensWithAPI([message], [])
+  return countMessagesTokensWithAPI([message], [], model)
 }
 
 export async function countMessagesTokensWithAPI(
   messages: Anthropic.Beta.Messages.BetaMessageParam[],
   tools: Anthropic.Beta.Messages.BetaToolUnion[],
+  modelOverride?: string,
 ): Promise<number | null> {
   return withTokenCountVCR(messages, tools, async () => {
     try {
@@ -181,7 +184,9 @@ export async function countMessagesTokensWithAPI(
         return roughTokenCountEstimationForAPIRequest(messages, tools)
       }
 
-      const model = getMainLoopModel()
+      // Official 2.1.325 #2264: subagents pass their own model so file reads
+      // and MCP results are sized with the subagent's model, not the main loop's.
+      const model = modelOverride || getMainLoopModel()
       const betas = getModelBetas(model)
       const containsThinking = hasThinkingBlocks(messages)
 
@@ -551,6 +556,11 @@ async function countTokensWithBedrock({
   containsThinking: boolean
 }): Promise<number | null> {
   try {
+    // Official 2.1.325 #2293: never send conversations to Bedrock when the
+    // `allowedProviders` managed setting does not allow `bedrock`.
+    if (!validateAllowedProvider('bedrock').valid) {
+      return null
+    }
     const client = await createBedrockRuntimeClient()
     // Bedrock CountTokens requires a model ID, not an inference profile / ARN
     const modelId = isFoundationModel(model)

@@ -34,6 +34,7 @@ import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/gr
 import type { AssistantMessage, UserMessage } from '../../types/message.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from '../envUtils.js'
 import { getTelemetryAttributes } from '../telemetryAttributes.js'
+import { formatUserPromptForOTel, type OTelPromptOriginLike } from './events.js'
 import {
   addBetaInteractionAttributes,
   addBetaLLMRequestAttributes,
@@ -344,6 +345,7 @@ export type InteractionTraceContexts = {
 export function startInteractionSpan(
   userPrompt: string,
   traceContexts?: InteractionTraceContexts,
+  origin?: OTelPromptOriginLike,
 ): Span {
   ensureCleanupInterval()
 
@@ -372,10 +374,9 @@ export function startInteractionSpan(
   }
 
   const tracer = getTracer()
-  const isUserPromptLoggingEnabled = isEnvTruthy(
-    process.env.OTEL_LOG_USER_PROMPTS,
-  )
-  const promptToLog = isUserPromptLoggingEnabled ? userPrompt : '<REDACTED>'
+  // Official 2.1.323 (#2124, `qwa` + `NKs`): redact background agent replies
+  // on interaction spans when `OTEL_LOG_ASSISTANT_RESPONSES=0`.
+  const promptToLog = formatUserPromptForOTel(userPrompt, origin).prompt
 
   interactionSequence++
 

@@ -12,6 +12,7 @@
  * envelope to tengu_binary_download_*.
  */
 
+import { HttpsProxyAgent } from 'https-proxy-agent'
 import {
   logEvent,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS as SafeString,
@@ -133,4 +134,83 @@ export function classifyFetchError(error: unknown): string {
     return 'invalid_schema'
   }
   return 'other'
+}
+
+function shouldBypassNoProxy(
+  targetUrl: string,
+  env: Record<string, string | undefined>,
+): boolean {
+  const noProxyRaw = (env.no_proxy || env.NO_PROXY || '').trim().toLowerCase()
+  if (!noProxyRaw) return false
+  if (noProxyRaw === '*') return true
+  let parsed: URL
+  try {
+    parsed = new URL(targetUrl)
+  } catch {
+    return false
+  }
+  const host = parsed.hostname.toLowerCase()
+  const port = Number(parsed.port) || (parsed.protocol === 'https:' ? 443 : 80)
+  for (const token of noProxyRaw.split(/[,\s]+/)) {
+    if (!token) continue
+    const m = /^(.+):(\d+)$/.exec(token)
+    const pattern = m ? m[1]! : token
+    const patternPort = m ? Number(m[2]) : 0
+    if (patternPort && patternPort !== port) continue
+    if (pattern.startsWith('*')) {
+      if (host.endsWith(pattern.slice(1))) return true
+    } else if (pattern.startsWith('.')) {
+      if (host === pattern.slice(1) || host.endsWith(pattern)) return true
+    } else if (host === pattern || host.endsWith(`.${pattern}`)) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Official 2.1.325 #2379: resolve axios proxy options for plugin marketplace
+ * and plugin downloads. When `ALL_PROXY` / `all_proxy` is the ONLY proxy
+ * environment variable set (no `HTTP_PROXY`/`HTTPS_PROXY`), route through an
+ * HTTP CONNECT tunnel via `HttpsProxyAgent` (`proxy: false` disables axios's
+ * direct non-CONNECT proxy path so a proxy refusing CONNECT fails the request).
+ */
+export function getPluginDownloadProxyOptions(
+  targetUrl: string,
+  env: Record<string, string | undefined> = process.env,
+): {
+  httpsAgent?: HttpsProxyAgent<string>
+  httpAgent?: HttpsProxyAgent<string>
+  proxy?: false
+  allProxyUrl?: string
+} {
+  const hasSpecificProxy = Boolean(
+    env.https_proxy || env.HTTPS_PROXY || env.http_proxy || env.HTTP_PROXY,
+  )
+  if (hasSpecificProxy) {
+    return {}
+  }
+  const allProxy = (env.all_proxy || env.ALL_PROXY || '').trim()
+  if (!allProxy) {
+    return {}
+  }
+  if (shouldBypassNoProxy(targetUrl, env)) {
+    return {}
+  }
+  const normalizedProxy = allProxy.includes('://')
+    ? allProxy
+    : `http://${allProxy}`
+  try {
+    const parsed = new URL(normalizedProxy)
+    if (!parsed.host) return {}
+  } catch {
+    return {}
+  }
+  const agent = new HttpsProxyAgent(normalizedProxy)
+  return {
+    httpsAgent: agent,
+    httpAgent: agent,
+    proxy: false,
+    allProxyUrl: normalizedProxy,
+  }
 }

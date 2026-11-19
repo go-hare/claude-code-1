@@ -41,6 +41,10 @@ import {
 import { buildPluginCommandTelemetryFields } from 'src/utils/telemetry/pluginTelemetry.js'
 import { z } from 'zod/v4'
 import {
+  formatSubagentSafeguardsGuidance,
+  isSubagentSafeguardsRefusal,
+} from '../AgentTool/agentToolUtils.js'
+import {
   addInvokedSkill,
   clearInvokedSkillsForAgent,
   getInvokedSkillsForAgent,
@@ -377,10 +381,19 @@ async function executeForkedSkill(
       }
     }
 
-    const resultText = extractResultText(
+    const lastAssistant = [...agentMessages]
+      .reverse()
+      .find(m => m.type === 'assistant')
+    let resultText = extractResultText(
       agentMessages,
       'Skill execution completed',
     )
+    // 2.1.323 #2197: when safeguards stop a forked skill, instruct Claude to
+    // retry with a narrower prompt or tell the user instead of doing the work itself.
+    if (lastAssistant && isSubagentSafeguardsRefusal(lastAssistant)) {
+      const guidance = formatSubagentSafeguardsGuidance(lastAssistant, true)
+      resultText = resultText ? `${resultText}\n\n${guidance}` : guidance
+    }
     if (spawnedByWorkflowRunId !== undefined) {
       recordInvocation()
     }
@@ -734,6 +747,36 @@ export const SkillTool: Tool<InputSchema, Output, Progress> = buildTool({
             rule,
           },
         }
+      }
+    }
+
+    // Official 2.1.325 #2356: scheduled tasks and `/loop` MUST ask before
+    // running a skill that declares `allowed-tools` or `hooks` unless an
+    // explicit `Skill(name)` rule in `permissions.allow` matched above.
+    if (
+      commandObj?.type === 'prompt' &&
+      isScheduledOrLoopSkillExecution(context) &&
+      skillDeclaresAllowedToolsOrHooks(commandObj)
+    ) {
+      return {
+        behavior: 'ask',
+        message: `Scheduled task or /loop wants to run skill "${commandName}", which declares allowed-tools or hooks. Add Skill(${commandName}) to permissions.allow to run it unattended.`,
+        decisionReason: undefined,
+        suggestions: [
+          {
+            type: 'addRules' as const,
+            rules: [
+              {
+                toolName: SKILL_TOOL_NAME,
+                ruleContent: commandName,
+              },
+            ],
+            behavior: 'allow' as const,
+            destination: 'localSettings' as const,
+          },
+        ],
+        updatedInput: { skill, args },
+        metadata: { command: commandObj },
       }
     }
 
@@ -1231,6 +1274,77 @@ function skillHasOnlySafeProperties(command: Command): boolean {
     return false
   }
   return true
+}
+
+/**
+ * Official 2.1.325 #2356: returns true when a prompt skill declares non-empty
+ * `allowed-tools` (`allowedTools`) or `hooks`.
+ */
+export function skillDeclaresAllowedToolsOrHooks(
+  command: Partial<PromptCommand> | undefined,
+): boolean {
+  if (!command) return false
+  if (Array.isArray(command.allowedTools) && command.allowedTools.length > 0) {
+    return true
+  }
+  if (
+    command.hooks &&
+    typeof command.hooks === 'object' &&
+    Object.keys(command.hooks).length > 0
+  ) {
+    return true
+  }
+  return false
+}
+
+/**
+ * Official 2.1.325 #2356: detect whether the current turn is running inside a
+ * scheduled task (cron) or `/loop` invocation.
+ */
+export function isScheduledOrLoopSkillExecution(
+  context: Partial<ToolUseContext> | undefined,
+): boolean {
+  if (!context) return false
+  const opts = context.options as
+    | {
+        isCron?: boolean
+        isScheduledTask?: boolean
+        isLoop?: boolean
+        querySource?: string
+      }
+    | undefined
+  if (
+    opts?.isCron === true ||
+    opts?.isScheduledTask === true ||
+    opts?.isLoop === true
+  ) {
+    return true
+  }
+  if (
+    typeof opts?.querySource === 'string' &&
+    /(?:^|_)(?:cron|schedule|scheduled|loop)(?:$|_)/i.test(opts.querySource)
+  ) {
+    return true
+  }
+  try {
+    const state = context.getAppState?.() as
+      | {
+          activeCronTaskId?: string
+          isScheduledTurn?: boolean
+          isLoopTurn?: boolean
+        }
+      | undefined
+    if (
+      state?.activeCronTaskId !== undefined ||
+      state?.isScheduledTurn === true ||
+      state?.isLoopTurn === true
+    ) {
+      return true
+    }
+  } catch {
+    // ignore missing state
+  }
+  return false
 }
 
 function isOfficialMarketplaceSkill(command: PromptCommand): boolean {

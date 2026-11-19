@@ -30,6 +30,7 @@ import {
   getCurrentWorktreeSession,
   keepWorktree,
   killTmuxSession,
+  resolveWorktreeExitTargetDir,
 } from 'src/utils/worktree.js'
 import { EXIT_WORKTREE_TOOL_NAME } from './constants.js'
 import { getExitWorktreeToolPrompt } from './prompt.js'
@@ -251,12 +252,20 @@ export const ExitWorktreeTool: Tool<InputSchema, Output> = buildTool({
 
     // Capture before keepWorktree/cleanupWorktree null out currentWorktreeSession.
     const {
-      originalCwd,
+      originalCwd: recordedOriginalCwd,
       worktreePath,
       worktreeBranch,
       tmuxSessionName,
       originalHeadCommit,
     } = session
+    // 2.1.323 #1988: If the directory the shell was in before entering the
+    // worktree has been deleted, resolve the nearest valid fallback directory
+    // so ExitWorktree does not leave the session in a deleted/wrong folder.
+    const { targetDir: originalCwd, fellBackFromDeletedOriginalCwd } =
+      resolveWorktreeExitTargetDir(session)
+    const deletedCwdNote = fellBackFromDeletedOriginalCwd
+      ? ` (previous directory ${recordedOriginalCwd} no longer exists)`
+      : ''
 
     // --worktree startup calls setOriginalCwd(getCwd()) and
     // setProjectRoot(getCwd()) back-to-back right after setCwd(worktreePath)
@@ -295,7 +304,7 @@ export const ExitWorktreeTool: Tool<InputSchema, Output> = buildTool({
           worktreePath,
           worktreeBranch,
           tmuxSessionName,
-          message: `Exited worktree. Your work is preserved at ${worktreePath}${worktreeBranch ? ` on branch ${worktreeBranch}` : ''}. Session is now back in ${originalCwd}.${tmuxNote}`,
+          message: `Exited worktree. Your work is preserved at ${worktreePath}${worktreeBranch ? ` on branch ${worktreeBranch}` : ''}. Session is now back in ${originalCwd}${deletedCwdNote}.${tmuxNote}`,
         },
       }
     }

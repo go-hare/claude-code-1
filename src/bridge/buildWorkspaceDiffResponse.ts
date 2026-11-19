@@ -466,6 +466,39 @@ function capHunkLines(hunks: WorkspaceDiffHunk[]): WorkspaceDiffHunk[] {
  * does not take it. Keep the argument so `/remote-control` can pass a host
  * and register `onGetWorkspaceDiff`.
  */
+/**
+ * Official 2.1.323 #2080: git's well-known empty-blob SHA-1 (used by `git add -N`
+ * intent-to-add index entries before the first commit).
+ */
+const GIT_EMPTY_BLOB_OID = 'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391'
+
+/**
+ * Official 2.1.323 #2080: discover intent-to-add (`git add -N`) paths in the
+ * index (e.g. before the first commit when `git diff --cached` omits them).
+ */
+export async function listIntentToAddFiles(root: string): Promise<string[]> {
+  const res = await execFileNoThrowWithCwd(
+    gitExe(),
+    gitArgs(['--no-optional-locks', 'status', '--porcelain=v1', '-z']),
+    gitOpts(root),
+  )
+  if (res.code !== 0 || !res.stdout) return []
+  const out: string[] = []
+  const entries = res.stdout.split('\0')
+  for (let i = 0; i < entries.length; i++) {
+    const rec = entries[i]
+    if (!rec || rec.length < 4) continue
+    const x = rec[0]
+    const y = rec[1]
+    // Porcelain v1: ' A' (space + A) is an intent-to-add (`git add -N`) entry.
+    if (x === ' ' && y === 'A') {
+      const p = rec.slice(3)
+      if (isSafeGitPath(p)) out.push(p)
+    }
+  }
+  return out
+}
+
 export async function buildWorkspaceDiffResponse(
   _host: object,
   permissionContext: ToolPermissionContext,
@@ -502,12 +535,35 @@ export async function buildWorkspaceDiffResponse(
     if (file.isUntracked || file.isBinary || !isSafeGitPath(path)) continue
     files.push(path)
   }
-  if (files.length === 0) {
+  const cached = ref === '--cached'
+  if (!cached && ref !== 'HEAD' && !OID_RE.test(ref)) {
     return wrap({ hunks: [], skippedLarge: [], restricted: [] })
   }
 
-  const cached = ref === '--cached'
-  if (!cached && ref !== 'HEAD' && !OID_RE.test(ref)) {
+  // Official 2.1.323 #2080: before the first commit (`ref === '--cached'`),
+  // include files added with `git add -N` (intent-to-add) which `git diff --cached`
+  // omits because their index entry is an empty placeholder.
+  const intentToAddSet = new Set<string>()
+  if (cached) {
+    const itaPaths = await listIntentToAddFiles(rootAfter)
+    for (const p of itaPaths) {
+      intentToAddSet.add(p)
+      if (!stats.perFileStats.has(p)) {
+        stats.perFileStats.set(p, {
+          added: 0,
+          removed: 0,
+          isBinary: false,
+          isUntracked: false,
+        })
+        stats.stats.filesCount += 1
+      }
+      if (!files.includes(p)) {
+        files.push(p)
+      }
+    }
+  }
+
+  if (files.length === 0) {
     return wrap({ hunks: [], skippedLarge: [], restricted: [] })
   }
 
@@ -569,14 +625,39 @@ export async function buildWorkspaceDiffResponse(
     let oldText = ''
     let newText: string
     if (cached) {
-      if (!entry || dirtyCached?.has(path)) continue
-      if (!(await pathIsReadableResolved(abs, permissionContext))) {
-        restricted.push(path)
-        continue
+      const isIntentToAdd =
+        intentToAddSet.has(path) ||
+        (entry !== undefined &&
+          entry.oid === GIT_EMPTY_BLOB_OID &&
+          dirtyCached?.has(path) === true)
+      if (isIntentToAdd) {
+        const worktree = await readWorktreeFile(abs, permissionContext)
+        if (worktree.kind === 'restricted') {
+          restricted.push(path)
+          continue
+        }
+        if (worktree.kind === 'too-large') {
+          skippedLarge.push(path)
+          continue
+        }
+        if (worktree.kind !== 'ok') continue
+        newText = worktree.content
+        const lineCount = newText ? newText.split('\n').length : 0
+        const existingStat = stats.perFileStats.get(path)
+        if (existingStat && existingStat.added === 0 && lineCount > 0) {
+          existingStat.added = lineCount
+          stats.stats.linesAdded += lineCount
+        }
+      } else {
+        if (!entry || dirtyCached?.has(path)) continue
+        if (!(await pathIsReadableResolved(abs, permissionContext))) {
+          restricted.push(path)
+          continue
+        }
+        const blob = await catBlob(rootAfter, entry.oid)
+        if (blob === null) continue
+        newText = blob
       }
-      const blob = await catBlob(rootAfter, entry.oid)
-      if (blob === null) continue
-      newText = blob
     } else {
       const worktree = await readWorktreeFile(abs, permissionContext)
       if (worktree.kind === 'restricted') {

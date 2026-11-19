@@ -10,6 +10,7 @@
  * - Support for both JS and native builds
  */
 
+import { randomBytes } from 'crypto'
 import { constants as fsConstants, type Stats } from 'fs'
 import {
   access,
@@ -776,7 +777,10 @@ export async function updateSymlink(
   const platform = getPlatform()
   const isWindows = platform.startsWith('win32')
 
-  // On Windows, directly copy the executable instead of creating a symlink
+  // On Windows, stage the copy into a temporary sibling file FIRST, then swap
+  // via fast metadata renames so interrupting `claude update` (e.g. Ctrl+C)
+  // during the binary copy never leaves `claude` removed (official 2.1.323 #2091,
+  // `ni` @294578196).
   if (isWindows) {
     try {
       // Ensure parent directory exists
@@ -801,48 +805,62 @@ export async function updateSymlink(
         } catch {
           // Continue with copy if we can't compare
         }
-        // Use rename strategy to handle file locking on Windows
-        // Rename always works even for running executables, unlike delete
-        const oldFileName = `${symlinkPath}.old.${Date.now()}`
-        await rename(symlinkPath, oldFileName)
-
-        // Try to copy new executable, with rollback on failure
-        try {
-          await copyFile(targetPath, symlinkPath)
-          // Success - try immediate cleanup of old file (non-blocking)
-          try {
-            await unlink(oldFileName)
-          } catch {
-            // File still running - ignore, Windows will clean up eventually
-          }
-        } catch (copyError) {
-          // Copy failed - restore the old executable
-          try {
-            await rename(oldFileName, symlinkPath)
-          } catch (restoreError) {
-            // Critical: User left without working executable - prioritize restore error
-            const errorWithCause = new Error(
-              `Failed to restore old executable: ${restoreError}`,
-              { cause: copyError },
-            )
-            logError(errorWithCause)
-            throw errorWithCause
-          }
-          throw copyError
-        }
-      } else {
-        // First-time installation (no existing file to rename)
-        // Copy the executable directly; handle ENOENT from copyFile itself
-        // rather than a stat() pre-check (avoids TOCTOU + extra syscall)
-        try {
-          await copyFile(targetPath, symlinkPath)
-        } catch (e) {
-          if (isENOENT(e)) {
-            throw new Error(`Source file does not exist: ${targetPath}`)
-          }
-          throw e
-        }
       }
+
+      // Copy into a unique sibling temp file while the live executable stays intact.
+      const stagedNewPath = `${symlinkPath}.new.${process.pid}.${Date.now()}.${randomBytes(4).toString('hex')}`
+      try {
+        await copyFile(targetPath, stagedNewPath)
+      } catch (e) {
+        await unlink(stagedNewPath).catch(() => {})
+        if (isENOENT(e)) {
+          throw new Error(`Source file does not exist: ${targetPath}`)
+        }
+        throw e
+      }
+
+      try {
+        let needsSwap = existingStats !== undefined
+        if (!needsSwap) {
+          try {
+            await rename(stagedNewPath, symlinkPath)
+          } catch (renameErr) {
+            const code = getErrnoCode(renameErr)
+            if (code !== 'EEXIST' && code !== 'EPERM' && code !== 'EBUSY') {
+              throw renameErr
+            }
+            needsSwap = true
+          }
+        }
+
+        if (needsSwap) {
+          // Rename strategy handles file locking on Windows; both steps are fast
+          // metadata renames instead of a multi-second copy while claude is absent.
+          const oldFileName = `${symlinkPath}.old.${Date.now()}`
+          await rename(symlinkPath, oldFileName)
+          try {
+            await rename(stagedNewPath, symlinkPath)
+          } catch (swapErr) {
+            try {
+              await rename(oldFileName, symlinkPath)
+            } catch (restoreError) {
+              const errorWithCause = new Error(
+                `Failed to restore old executable: ${restoreError}`,
+                { cause: swapErr },
+              )
+              logError(errorWithCause)
+              throw errorWithCause
+            }
+            throw swapErr
+          }
+          // Best-effort cleanup of old file (may still be locked if running)
+          await unlink(oldFileName).catch(() => {})
+        }
+      } catch (installErr) {
+        await unlink(stagedNewPath).catch(() => {})
+        throw installErr
+      }
+
       // chmod is not needed on Windows - executability is determined by .exe extension
       return true
     } catch (error) {

@@ -754,7 +754,7 @@ Not an exception, so still judged as above: the tail asks the user a question, o
   (an earlier question still waits for an answer \u2192 blocked, as above)`
 
 const HAND_OFF_MERGE_OR_REVIEW_RE =
-  /\b(?:ready for you to (?:merge|review)|waiting on you to (?:merge|review)|awaiting your (?:merge|review)|needs your (?:review|merge)|merging is your call|over to you)\b/i
+  /\b(?:ready for (?:you to|your) (?:merge|review)|waiting on you to (?:merge|review)|awaiting your (?:merge|review)|needs your (?:review|merge)|merging is your call|over to you)\b/i
 
 const HAND_OFF_CONTINUES_OR_ASKS_RE =
   /\?|\b(?:once it is|tell me and i will|afterwards|still open|before i build|run the backfill|grant push access|want me to)\b/i

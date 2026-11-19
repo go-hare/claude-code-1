@@ -141,6 +141,108 @@ export async function withOAuthWallClockTimeout<T>(
   }
 }
 
+/**
+ * Official 2.1.323 (#2148): Format sign-in / token-exchange errors for
+ * `/login` and `claude setup-token` so rejected, unreachable, or timed-out
+ * requests clearly explain what happened and what to check.
+ */
+export function formatOAuthSignInError(
+  error: unknown,
+  action:
+    | 'token_exchange'
+    | 'profile_fetch'
+    | 'token_refresh' = 'token_exchange',
+): Error {
+  const label =
+    action === 'profile_fetch'
+      ? 'Account profile check'
+      : action === 'token_refresh'
+        ? 'Token refresh'
+        : 'Sign-in'
+
+  if (error instanceof Error) {
+    const axiosLike = error as Error & {
+      isAxiosError?: boolean
+      code?: string
+      response?: { status?: number; statusText?: string; data?: unknown }
+      cause?: { code?: string; message?: string }
+    }
+    const status = axiosLike.response?.status
+    if (typeof status === 'number') {
+      const dataObj =
+        axiosLike.response?.data && typeof axiosLike.response.data === 'object'
+          ? (axiosLike.response.data as Record<string, unknown>)
+          : undefined
+      const detail =
+        typeof dataObj?.error_description === 'string'
+          ? dataObj.error_description
+          : typeof dataObj?.message === 'string'
+            ? dataObj.message
+            : typeof dataObj?.error === 'string'
+              ? dataObj.error
+              : axiosLike.response?.statusText || ''
+      if (status === 401) {
+        return new Error(
+          detail
+            ? `Authentication failed (HTTP 401): ${detail}. Check that your login code is valid and not expired, then try again.`
+            : 'Authentication failed: Invalid or expired authorization code. Try signing in again.',
+        )
+      }
+      if (status === 403) {
+        return new Error(
+          detail
+            ? `${label} was rejected (HTTP 403): ${detail}. Check your account permissions, proxy, or firewall settings.`
+            : `${label} was rejected (HTTP 403). Check your account permissions, proxy, or firewall settings.`,
+        )
+      }
+      return new Error(
+        detail
+          ? `${label} failed (HTTP ${status}): ${detail}. Check your network or proxy settings and try again.`
+          : `${label} failed (HTTP ${status}). Check your network or proxy settings and try again.`,
+      )
+    }
+
+    const code =
+      axiosLike.code ||
+      (axiosLike.cause && typeof axiosLike.cause.code === 'string'
+        ? axiosLike.cause.code
+        : undefined)
+    if (
+      code === 'ECONNABORTED' ||
+      code === 'ETIMEDOUT' ||
+      error.name === 'OAuthWallClockTimeoutError' ||
+      /timed out/i.test(error.message)
+    ) {
+      return new Error(
+        `${label} timed out while contacting Anthropic's authentication server. Check your internet connection, VPN, and proxy settings (HTTPS_PROXY), then try again.`,
+      )
+    }
+    if (
+      code === 'ENOTFOUND' ||
+      code === 'EAI_AGAIN' ||
+      code === 'ECONNREFUSED' ||
+      code === 'ECONNRESET' ||
+      code === 'ENETUNREACH' ||
+      code === 'EHOSTUNREACH' ||
+      code === 'EPIPE'
+    ) {
+      return new Error(
+        `${label} could not reach Anthropic's authentication server (${code}). Check your internet connection, DNS, firewall, or proxy settings (HTTPS_PROXY), then try again.`,
+      )
+    }
+    if (
+      code !== undefined &&
+      /CERT|TLS|SSL|SELF_SIGNED|UNABLE_TO_VERIFY|EPROTO/.test(code)
+    ) {
+      return new Error(
+        `${label} failed TLS verification (${code}). If you are behind a corporate proxy, check NODE_EXTRA_CA_CERTS or your system certificate store.`,
+      )
+    }
+    return error
+  }
+  return new Error(`${label} failed: ${String(error)}`)
+}
+
 export async function exchangeCodeForTokens(
   authorizationCode: string,
   state: string,
@@ -165,16 +267,21 @@ export async function exchangeCodeForTokens(
     requestBody.expires_in = expiresIn
   }
 
-  const response = await withOAuthWallClockTimeout(
-    OAUTH_TOKEN_REQUEST_TIMEOUT_MS,
-    ({ timeout, signal: reqSignal }) =>
-      axios.post(getOauthConfig().TOKEN_URL, requestBody, {
-        headers: { 'Content-Type': 'application/json' },
-        timeout,
-        signal: reqSignal,
-      }),
-    signal,
-  )
+  let response
+  try {
+    response = await withOAuthWallClockTimeout(
+      OAUTH_TOKEN_REQUEST_TIMEOUT_MS,
+      ({ timeout, signal: reqSignal }) =>
+        axios.post(getOauthConfig().TOKEN_URL, requestBody, {
+          headers: { 'Content-Type': 'application/json' },
+          timeout,
+          signal: reqSignal,
+        }),
+      signal,
+    )
+  } catch (err) {
+    throw formatOAuthSignInError(err, 'token_exchange')
+  }
 
   if (response.status !== 200) {
     throw new Error(
@@ -530,11 +637,31 @@ export async function getOrganizationUUID(): Promise<string | null> {
   return profileOrgUUID
 }
 
+// Official 2.1.325 #2376: deduplicate concurrent `populateOAuthAccountInfoIfNeeded()`
+// calls (e.g., startup fire-and-forget in `init.ts` joined by
+// `waitForCachedAccountDataBeforePrint()` in `print.ts`) so only one profile
+// fetch is in flight at a time.
+let inFlightPopulateOAuthAccountInfo: Promise<boolean> | null = null
+
 /**
  * Populate the OAuth account info if it has not already been cached in config.
+ * Reuses an in-flight singleton promise so concurrent callers share one fetch.
  * @returns Whether or not the oauth account info was populated.
  */
-export async function populateOAuthAccountInfoIfNeeded(): Promise<boolean> {
+export function populateOAuthAccountInfoIfNeeded(): Promise<boolean> {
+  if (inFlightPopulateOAuthAccountInfo !== null) {
+    return inFlightPopulateOAuthAccountInfo
+  }
+  const run = populateOAuthAccountInfoIfNeededImpl().finally(() => {
+    if (inFlightPopulateOAuthAccountInfo === run) {
+      inFlightPopulateOAuthAccountInfo = null
+    }
+  })
+  inFlightPopulateOAuthAccountInfo = run
+  return run
+}
+
+async function populateOAuthAccountInfoIfNeededImpl(): Promise<boolean> {
   // Check env vars first (synchronous, no network call needed).
   // SDK callers like Cowork can provide account info directly, which also
   // eliminates the race condition where early telemetry events lack account info.

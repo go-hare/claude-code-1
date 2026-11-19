@@ -5,12 +5,15 @@ import {
   closeSessionTabGroup,
   shouldForceCloseChromeTabGroupOnClear,
 } from '../../utils/claudeInChrome/tabGroupCleanup.js'
+import { resetTeamLeadVerificationOnSessionBoundary } from '../../utils/teammateMailbox.js'
 import { clearConversation } from './conversation.js'
 
 export const call: LocalCommandCall = async (_, context) => {
   // densable WGw — capture session id before Flo/clear regenerates it.
   const sessionId = getSessionId()
   await clearConversation(context)
+  // Official 2.1.323 (#2195): invalidate prior team-lead mailbox approvals across /clear.
+  resetTeamLeadVerificationOnSessionBoundary()
   const origin = (context as { submissionOrigin?: { kind?: string } })
     .submissionOrigin
   const forceClose = shouldForceCloseChromeTabGroupOnClear(

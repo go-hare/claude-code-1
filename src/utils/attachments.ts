@@ -127,6 +127,7 @@ import {
 import { getDefaultFileReadingLimits } from '@claude-code/builtin-tools/tools/FileReadTool/limits.js'
 import {
   cacheKeys,
+  fileStateContentMatches,
   isFullEnoughFileRead,
   type FileStateCache,
 } from './fileStateCache.js'
@@ -1039,6 +1040,25 @@ export type GetAttachmentsOptions = {
   suppressWorkflowKeyword?: boolean
 }
 
+/**
+ * Official 2.1.323 BN (#2194): mask picked file references (`@[...](claude-ref:...)`
+ * / Google Docs links and spans between two picked files or after a picked file
+ * and a link) so direct callers outside `processUserInput` do not trigger
+ * `@file` / `/skill` / `ultrathink` / `workflow` extractions on picked text.
+ */
+function maskPickedRefs(text: string): string {
+  if (!text.includes('@[')) return text
+  try {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { maskPickedFileReferences } =
+      require('./processUserInput/processUserInput.js') as typeof import('./processUserInput/processUserInput.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    return maskPickedFileReferences(text)
+  } catch {
+    return text
+  }
+}
+
 export async function getAttachments(
   input: string | null,
   toolUseContext: ToolUseContext,
@@ -1084,7 +1104,12 @@ export async function getAttachments(
   // densable 2.1.228 #12 xTt: hardened skill bodies must not expand @ mentions.
   const skipAtMentions = options?.skipAtMentions === true
   const mentionsOnly = options?.inputMentionsOnly === true
-  const userInputAttachments = input
+  const maskedInput = input !== null ? maskPickedRefs(input) : null
+  const maskedPreExpansion =
+    options?.preExpansionInput !== undefined
+      ? maskPickedRefs(options.preExpansionInput)
+      : undefined
+  const userInputAttachments = maskedInput
     ? [
         ...(skipAtMentions
           ? []
@@ -1096,16 +1121,16 @@ export async function getAttachments(
                     'tengu_pure_squid',
                     false,
                   ) === true)
-                  ? Promise.resolve(processDisabledFileMentions(input))
-                  : processAtMentionedFiles(input, context),
+                  ? Promise.resolve(processDisabledFileMentions(maskedInput))
+                  : processAtMentionedFiles(maskedInput, context),
               ),
               maybe('mcp_resources', () =>
-                processMcpResourceAttachments(input, context),
+                processMcpResourceAttachments(maskedInput, context),
               ),
               maybe('agent_mentions', () =>
                 Promise.resolve(
                   processAgentMentions(
-                    input,
+                    maskedInput,
                     toolUseContext.options.agentDefinitions.activeAgents,
                   ),
                 ),
@@ -1138,7 +1163,7 @@ export async function getAttachments(
                   }
                   const result =
                     await skillSearchModules?.prefetch.getTurnZeroSkillDiscovery(
-                      input,
+                      maskedInput,
                       messages ?? [],
                       context,
                     )
@@ -1162,7 +1187,7 @@ export async function getAttachments(
                   }
                   const result =
                     await searchExtraToolsModules?.prefetch.getTurnZeroSearchExtraToolsPrefetch(
-                      input,
+                      maskedInput,
                       context.options.tools ?? [],
                     )
                   return result ? [result] : []
@@ -1239,7 +1264,7 @@ export async function getAttachments(
     maybe('ultrathink_effort', () =>
       Promise.resolve(
         getUltrathinkEffortAttachment(
-          input,
+          maskedInput,
           toolUseContext.options.mainLoopModel,
         ),
       ),
@@ -1311,9 +1336,9 @@ export async function getAttachments(
     // !suppressWorkflowKeyword && VBn() (workflowKeywordTriggerEnabled).
     maybe('workflow_keyword', () =>
       Promise.resolve(
-        getWorkflowKeywordAttachments(input, {
+        getWorkflowKeywordAttachments(maskedInput, {
           isHumanTypedPrompt: options?.isHumanTypedPrompt === true,
-          preExpansionInput: options?.preExpansionInput,
+          preExpansionInput: maskedPreExpansion,
           suppressWorkflowKeyword: options?.suppressWorkflowKeyword === true,
         }),
       ),
@@ -2005,7 +2030,8 @@ export function getWorkflowKeywordAttachments(
     ) {
       return []
     }
-    const text = opts.preExpansionInput ?? input
+    const rawText = opts.preExpansionInput ?? input
+    const text = rawText ? maskPickedRefs(rawText) : rawText
     if (!text || !hasUltracodeKeyword(text)) {
       return []
     }
@@ -2149,7 +2175,7 @@ export function getDateChangeAttachments(
  * Gold `BN` (#1287): strip `@[...]` mention tokens before ultrathink detection.
  */
 function stripAtMentionTokens(text: string): string {
-  return text.replace(/@\[[^\]]*\]/g, '')
+  return maskPickedRefs(text).replace(/@\[[^\]]*\]/g, '')
 }
 
 /**
@@ -2220,6 +2246,11 @@ export function getUltrathinkEffortAttachment(
   if (!isUltrathinkEnabled() || !input) {
     return []
   }
+  const maskedInput = maskPickedRefs(input)
+  const maskedPreExpansion =
+    options?.preExpansionInput !== undefined
+      ? maskPickedRefs(options.preExpansionInput)
+      : undefined
   const hasTypedSignal =
     options !== undefined &&
     (options.composerEnter !== undefined ||
@@ -2228,11 +2259,11 @@ export function getUltrathinkEffortAttachment(
   const matched = hasTypedSignal
     ? isTypedUltrathinkPrompt({
         composerEnter: options.composerEnter,
-        preExpansionInput: options.preExpansionInput,
+        preExpansionInput: maskedPreExpansion,
         localStdinOrigin: options.localStdinOrigin,
-        input,
+        input: maskedInput,
       })
-    : hasUltrathinkKeyword(input)
+    : hasUltrathinkKeyword(maskedInput)
   if (!matched) {
     return []
   }
@@ -3426,6 +3457,22 @@ export async function getChangedFiles(
         const result = await FileReadTool.call(fileInput, toolUseContext)
         // Extract only the changed section
         if (result.data.type === 'text') {
+          // 2.1.323 #1982 (SEA `_5(Xe, ln.data.file.content)`): compare by
+          // contentHash before treating a hash-only (>4 KiB) entry as modified
+          // or computing an expensive full diff on a touched-but-unchanged file.
+          if (fileStateContentMatches(fileState, result.data.file.content)) {
+            if (
+              fileState.contentNotInModelContext &&
+              fileState.content === ''
+            ) {
+              markContentNotInModelContext(
+                toolUseContext.readFileState,
+                normalizedPath,
+              )
+            }
+            return null
+          }
+
           if (fileState.content === '' && (fileState.contentLength ?? 0) > 0) {
             markContentNotInModelContext(
               toolUseContext.readFileState,
@@ -4235,6 +4282,7 @@ export async function getSkillListingAttachments(
 // a feature-gated module so it doesn't leak into external builds.
 
 export function extractAtMentionedFiles(content: string): string[] {
+  const masked = maskPickedRefs(content)
   // Extract filenames mentioned with @ symbol, including line range syntax: @file.txt#L10-20
   // Also supports quoted paths for files with spaces: @"my/file with spaces.txt"
   // Example: "foo bar @baz moo" would extract "baz"
@@ -4249,14 +4297,14 @@ export function extractAtMentionedFiles(content: string): string[] {
 
   // Extract quoted mentions first (skip agent mentions like @"code-reviewer (agent)")
   let match
-  while ((match = quotedAtMentionRegex.exec(content)) !== null) {
+  while ((match = quotedAtMentionRegex.exec(masked)) !== null) {
     if (match[2] && !match[2].endsWith(' (agent)')) {
       quotedMatches.push(match[2]) // The content inside quotes
     }
   }
 
   // Extract regular mentions
-  const regularMatchArray: string[] = content.match(regularAtMentionRegex) ?? []
+  const regularMatchArray: string[] = masked.match(regularAtMentionRegex) ?? []
   regularMatchArray.forEach(match => {
     const filename = match.slice(match.indexOf('@') + 1)
     // Don't include if it starts with a quote (already handled as quoted)
@@ -4270,16 +4318,18 @@ export function extractAtMentionedFiles(content: string): string[] {
 }
 
 export function extractMcpResourceMentions(content: string): string[] {
+  const masked = maskPickedRefs(content)
   // Extract MCP resources mentioned with @ symbol in format @server:uri
   // Example: "@server1:resource/path" would extract "server1:resource/path"
   const atMentionRegex = /(^|[\s。、？！])@([^\s]+:[^\s]+)\b/g
-  const matches = content.match(atMentionRegex) || []
+  const matches = masked.match(atMentionRegex) || []
 
   // Remove the prefix (everything before @) from each match
   return uniq(matches.map(match => match.slice(match.indexOf('@') + 1)))
 }
 
 export function extractAgentMentions(content: string): string[] {
+  const masked = maskPickedRefs(content)
   // Extract agent mentions in two formats:
   // 1. @agent-<agent-type> (legacy/manual typing)
   //    Example: "@agent-code-elegance-refiner" → "agent-code-elegance-refiner"
@@ -4291,7 +4341,7 @@ export function extractAgentMentions(content: string): string[] {
   // Match quoted format: @"<type> (agent)"
   const quotedAgentRegex = /(^|[\s。、？！])@"([\w:.@-]+) \(agent\)"/g
   let match
-  while ((match = quotedAgentRegex.exec(content)) !== null) {
+  while ((match = quotedAgentRegex.exec(masked)) !== null) {
     if (match[2]) {
       results.push(match[2])
     }
@@ -4299,7 +4349,7 @@ export function extractAgentMentions(content: string): string[] {
 
   // Match unquoted format: @agent-<type>
   const unquotedAgentRegex = /(^|[\s。、？！])@(agent-[\w:.@-]+)/g
-  const unquotedMatches = content.match(unquotedAgentRegex) || []
+  const unquotedMatches = masked.match(unquotedAgentRegex) || []
   for (const m of unquotedMatches) {
     results.push(m.slice(m.indexOf('@') + 1))
   }

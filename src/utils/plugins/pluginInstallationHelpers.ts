@@ -62,8 +62,15 @@ import {
   commandPluginConsentKey,
   isCommandPluginSource,
   mergePreviousProducerPaths,
+  formatCommandSourceStderrNote,
+  formatCommandSourceWarningHint,
   type CommandSourceConsent,
 } from './pluginCommandSource.js'
+import {
+  PluginEngineRangeError,
+  checkClaudeCodeEngineRange,
+  extractClaudeCodeEngineRange,
+} from './pluginEngineRange.js'
 import {
   isOfficialMarketplaceName,
   parsePluginIdentifier,
@@ -223,6 +230,8 @@ export async function cacheAndRegisterPlugin(
      * pane dwo.pinned(). Compared only when runEntryHelper && archive helper.
      */
     consentedEntryHelper?: HeadersHelperPaneShown | null
+    /** Official 2.1.323 #2044 & #2189: callback receiving exit-0 stderr from command source. */
+    onCommandStderr?: (stderr: string) => void
   },
 ): Promise<string> {
   // For local plugins, we need the resolved absolute path
@@ -297,6 +306,14 @@ export async function cacheAndRegisterPlugin(
   const { marketplaceHeaders, marketplaceUrl } =
     await resolveMarketplaceArchiveAuth(pluginId)
 
+  // Official 2.1.323 #1965: check catalog entry engines["claude-code"] before caching.
+  const entryEngineCheck = checkClaudeCodeEngineRange(
+    extractClaudeCodeEngineRange((entry as { engines?: unknown }).engines),
+  )
+  if (entryEngineCheck.kind === 'outside') {
+    throw new PluginEngineRangeError(pluginName, entryEngineCheck.miss)
+  }
+
   const cacheResult = await cachePlugin(source, {
     manifest: entry as PluginMarketplaceEntry,
     marketplaceHeaders,
@@ -309,6 +326,22 @@ export async function cacheAndRegisterPlugin(
     operatorAuthored: trustedSettingsEntryAuth?.origin === 'settings',
     trustedSettingsEntryAuth,
   })
+
+  // Official 2.1.323 #1965: also check manifest engines["claude-code"] after caching.
+  const manifestEngineCheck = checkClaudeCodeEngineRange(
+    extractClaudeCodeEngineRange(cacheResult.manifest.engines),
+  )
+  if (manifestEngineCheck.kind === 'outside') {
+    throw new PluginEngineRangeError(
+      cacheResult.manifest.name || pluginName,
+      manifestEngineCheck.miss,
+    )
+  }
+
+  // Official 2.1.323 #2044 & #2189: propagate exit-0 stderr printed by command source.
+  if (cacheResult.commandStderr) {
+    options?.onCommandStderr?.(cacheResult.commandStderr)
+  }
 
   // For local plugins, use the original source path for Git SHA calculation
   // because the cached temp directory doesn't have .git (it's copied from a
@@ -458,7 +491,13 @@ export function parsePluginId(
  * handle analytics/error-catching around this.
  */
 export type InstallCoreResult =
-  | { ok: true; closure: string[]; depNote: string }
+  | {
+      ok: true
+      closure: string[]
+      depNote: string
+      /** Official 2.1.323 #2044 & #2189: stderr printed on exit 0 by a command source */
+      commandStderr?: string
+    }
   | { ok: false; reason: 'local-source-no-location'; pluginName: string }
   | { ok: false; reason: 'settings-write-failed'; message: string }
   | {
@@ -639,6 +678,7 @@ export async function installResolvedPlugin({
 
   // ── Materialize: cache each closure member ──
   const projectPath = scope !== 'user' ? getCwd() : undefined
+  let rootCommandStderr: string | undefined
   for (const id of resolution.closure) {
     let info = depInfo.get(id)
     // Root wasn't pre-seeded (caller didn't pass marketplaceInstallLocation
@@ -673,6 +713,13 @@ export async function installResolvedPlugin({
         ...(id === pluginId && consentedEntryHelper
           ? { consentedEntryHelper }
           : {}),
+        ...(id === pluginId
+          ? {
+              onCommandStderr: stderr => {
+                rootCommandStderr = stderr
+              },
+            }
+          : {}),
       },
     )
   }
@@ -682,7 +729,12 @@ export async function installResolvedPlugin({
   const depNote = formatDependencyCountSuffix(
     resolution.closure.filter(id => id !== pluginId),
   )
-  return { ok: true, closure: resolution.closure, depNote }
+  return {
+    ok: true,
+    closure: resolution.closure,
+    depNote,
+    ...(rootCommandStderr ? { commandStderr: rootCommandStderr } : {}),
+  }
 }
 
 /**
@@ -694,6 +746,9 @@ export type InstallPluginResult =
       message: string
       /** densable: full install closure (root + deps) for activate VQS. */
       closure: string[]
+      /** Official 2.1.323 #2044 & #2189: stderr printed on exit 0 by a command source */
+      commandStderr?: string
+      commandPrinted?: boolean
     }
   | { success: false; error: string; failureCode?: string }
 
@@ -834,10 +889,17 @@ export async function installPluginFromMarketplace({
     // activatePluginsAfterInstall. Keep bare success text here.
     // Pass full dependency closure so VQS can attribute load errors on deps.
     const ok = result as Extract<InstallCoreResult, { ok: true }>
+    const commandPrinted = Boolean(ok.commandStderr)
+    const stderrDetails = ok.commandStderr
+      ? `\n${formatCommandSourceStderrNote(ok.commandStderr)}\n${formatCommandSourceWarningHint(false)}`
+      : ''
     return {
       success: true,
-      message: `✓ Installed ${entry.name}${ok.depNote}.`,
+      message: `${commandPrinted ? '⚠' : '✓'} Installed ${entry.name}${ok.depNote}.${stderrDetails}`,
       closure: ok.closure,
+      ...(ok.commandStderr
+        ? { commandStderr: ok.commandStderr, commandPrinted: true }
+        : {}),
     }
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err)

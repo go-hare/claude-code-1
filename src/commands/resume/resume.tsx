@@ -2,6 +2,7 @@ import chalk from 'chalk';
 import type { UUID } from 'crypto';
 import figures from 'figures';
 import * as React from 'react';
+import { disconnectBridgeBeforeConversationSwitch } from '../../bridge/replBridgeShareCheck.js';
 import { getOriginalCwd, getSessionId } from '../../bootstrap/state.js';
 import type { CommandResultDisplay, ResumeEntrypoint } from '../../commands.js';
 import { LogSelector } from '../../components/LogSelector.js';
@@ -30,6 +31,7 @@ import {
   searchSessionsByCustomTitle,
   type SessionLogResult,
 } from '../../utils/sessionStorage.js';
+import { resetTeamLeadVerificationOnSessionBoundary } from '../../utils/teammateMailbox.js';
 import { validateUuid } from '../../utils/uuid.js';
 
 type ResumeResult =
@@ -271,10 +273,34 @@ export function filterResumableSessions(logs: LogOption[], currentSessionId: str
 export const call: LocalJSXCommandCall = async (onDone, context, args) => {
   const onResume = async (sessionId: UUID, log: LogOption, entrypoint: ResumeEntrypoint) => {
     try {
+      // Official 2.1.325 (#2373): disconnect Remote Control first when the
+      // connected session has a share link or share visibility cannot be checked.
+      const shareCheck = await disconnectBridgeBeforeConversationSwitch({
+        outboundOnly: context.getAppState().replBridgeOutboundOnly === true,
+        onDisconnected: () => {
+          context.setAppState(prev =>
+            prev.replBridgeEnabled
+              ? {
+                  ...prev,
+                  replBridgeEnabled: false,
+                  replBridgeConnected: false,
+                  replBridgeSessionActive: false,
+                  replBridgeSessionGroupingId: undefined,
+                }
+              : prev,
+          );
+        },
+      });
       // #1501: Flush pending transcript/plan writes before switching sessions.
       await flushSessionStorage();
+      // Official 2.1.323 (#2195): invalidate prior team-lead mailbox approvals across /resume.
+      resetTeamLeadVerificationOnSessionBoundary();
       await context.resume?.(sessionId, log, entrypoint);
-      onDone(undefined, { display: 'skip' });
+      if (shareCheck.disconnected && shareCheck.notice) {
+        onDone(shareCheck.notice, { display: 'system' });
+      } else {
+        onDone(undefined, { display: 'skip' });
+      }
     } catch (error) {
       logError(error as Error);
       onDone(`Failed to resume: ${(error as Error).message}`);

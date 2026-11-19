@@ -37,6 +37,29 @@ import { densableThinkingForceParams } from '../thinking.js'
 import { PERMISSION_MODES } from '../../types/permissions.js'
 import type { AppState } from '../../state/AppStateStore.js'
 import { getClipboardPath, instances, stringWidth } from '@anthropic/ink'
+import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
+import {
+  applyPluginToolListDenyRules,
+  applyPluginToolListFilter,
+  checkMcpToolRemovedByPlugin,
+  getPluginToolListState,
+  invalidatePluginToolList,
+  isToolRemovedByPlugin,
+  recordPluginToolListAnswer,
+  resetPluginToolListState,
+  settlePluginToolList,
+} from './pluginToolList.js'
+export {
+  applyPluginToolListDenyRules,
+  applyPluginToolListFilter,
+  checkMcpToolRemovedByPlugin,
+  getPluginToolListState,
+  invalidatePluginToolList,
+  isToolRemovedByPlugin,
+  recordPluginToolListAnswer,
+  resetPluginToolListState,
+  settlePluginToolList,
+}
 import {
   getRenderVersion,
   invalidateRender,
@@ -1910,10 +1933,29 @@ export async function runFunctionHookChain(
           },
         )
         .then(reply => {
-          const workerReturned = truncateHostHookResultField(
+          const workerTruncated = truncateHostHookResultField(
             event,
             reply.returned,
           )
+          const workerRestored =
+            callOptions?.site?.restoreResult !== undefined &&
+            isEventRecord(workerTruncated)
+              ? callOptions.site.restoreResult(
+                  workerTruncated,
+                  downstreamResults,
+                  value,
+                )
+              : workerTruncated
+          const stripResultFn = resolveStripResultForSite(
+            event,
+            callOptions?.site,
+          )
+          const workerReturned =
+            stripResultFn !== undefined && isEventRecord(workerRestored)
+              ? stripResultFn(workerRestored, downstreamResults, {
+                  name: step.mod.name,
+                })
+              : workerRestored
           if (callOptions?.site?.check !== undefined) {
             const problem = callOptions.site.check(workerReturned)
             if (problem !== undefined) {
@@ -1953,6 +1995,88 @@ export async function runFunctionHookChain(
       ...outerHookOrigin,
       { plugin: step.mod.name, registration: step.registration },
     ]
+    // Official 2.1.323 #2183 (`qc` / `Zc`): on `engine.create`, any wildcard
+    // (`*`), namespace (`engine.*`), or negated (`!...`) hook is observer-only
+    // and cannot add, replace, or withhold `$` nouns — only exact `engine.create`
+    // hooks compose `$`.
+    const isObserverOnlyEngineCreate =
+      event === 'engine.create' &&
+      !hostHandler &&
+      step.hook.pattern !== 'engine.create'
+    if (isObserverOnlyEngineCreate) {
+      let cachedDownstream: Promise<unknown> | undefined
+      let observedValue: unknown
+      let observerCalledNext = false
+      const getDownstream = (): Promise<unknown> => {
+        if (cachedDownstream === undefined) {
+          cachedDownstream = runDownstream(value, floors)
+        }
+        return cachedDownstream
+      }
+      const observerNext = async () => {
+        observerCalledNext = true
+        observedValue = await getDownstream()
+        return observedValue
+      }
+      Object.assign(observerNext, {
+        to: observerNext,
+        is: (pattern: string) => functionHookPatternMatches(pattern, needle),
+        origin: callOrigin,
+        event,
+        ...(callOptions?.signal !== undefined && {
+          signal: callOptions.signal,
+        }),
+      })
+      const obsServingStore = activeHookServingAls.getStore()
+      const obsStepServingStore: HookServingContext = {
+        ...obsServingStore,
+        budgetTracker: stepBudgetTracker,
+        isDispatching: () => !downstreamSettled,
+      }
+      return Promise.resolve()
+        .then(() =>
+          activeHookServingAls.run(obsStepServingStore, () =>
+            activeHookOriginAls.run(stepHookOrigin, () =>
+              activeHookModuleAls.run(step.mod, () =>
+                step.hook.hook(engine, value, observerNext),
+              ),
+            ),
+          ),
+        )
+        .then(
+          returned => {
+            if (!observerCalledNext) {
+              logForDebugging(
+                `hooks module ${step.mod.name}: the on("${step.hook.pattern}") hook never called next at engine.create; what is beneath runs`,
+                { level: 'warn' },
+              )
+            } else if (returned !== observedValue) {
+              logForDebugging(
+                `hooks module ${step.mod.name}: the on("${step.hook.pattern}") hook returned something other than next(e) at engine.create, which it only observes; ignored`,
+                { level: 'warn' },
+              )
+            }
+            return getDownstream()
+          },
+          err => {
+            const msg = err instanceof Error ? err.message : String(err)
+            logForDebugging(
+              `hooks module ${step.mod.name}: the on("${step.hook.pattern}") hook failed at engine.create (${msg}); passed on`,
+              { level: 'warn' },
+            )
+            if (
+              cachedDownstream === undefined &&
+              callOptions?.signal?.aborted
+            ) {
+              throw err
+            }
+            return getDownstream()
+          },
+        )
+        .finally(() => {
+          leaveModule(step.mod.name)
+        })
+    }
     const running = Promise.resolve().then(() => {
       if (hostHandler) {
         callOptions?.signal?.throwIfAborted()
@@ -1976,7 +2100,7 @@ export async function runFunctionHookChain(
     return running
       .then(rawReturned => {
         const truncated = truncateHostHookResultField(event, rawReturned)
-        const returned =
+        const restored =
           !hostHandler &&
           callOptions?.site?.restoreResult !== undefined &&
           isEventRecord(truncated)
@@ -1986,6 +2110,16 @@ export async function runFunctionHookChain(
                 value,
               )
             : truncated
+        const stripResultFn = resolveStripResultForSite(
+          event,
+          callOptions?.site,
+        )
+        const returned =
+          !hostHandler && stripResultFn !== undefined && isEventRecord(restored)
+            ? stripResultFn(restored, downstreamResults, {
+                name: step.mod.name,
+              })
+            : restored
         if (!hostHandler && callOptions?.site?.check !== undefined) {
           const problem = callOptions.site.check(returned)
           if (problem !== undefined) {
@@ -2141,7 +2275,19 @@ export async function runFunctionHookChain(
               catchHandler(engine, value, catchNext),
             ),
           )
-          .then(returned => {
+          .then(rawCaught => {
+            const stripResultFn = resolveStripResultForSite(
+              event,
+              callOptions?.site,
+            )
+            const returned =
+              !hostHandler &&
+              stripResultFn !== undefined &&
+              isEventRecord(rawCaught)
+                ? stripResultFn(rawCaught, downstreamResults, {
+                    name: step.mod.name,
+                  })
+                : rawCaught
             runNode.entry = Object.freeze({
               index,
               plugin: step.mod.name,
@@ -2226,7 +2372,30 @@ export type FunctionHookHopSite = {
     priorResults: readonly Record<string, unknown>[],
     original: Record<string, unknown>,
   ) => Record<string, unknown>
+  /** Official 2.1.323 #2026: per-hop result attribution / stripping (e.g. `stripToolCheckHookResult`). */
+  stripResult?: (
+    returned: Record<string, unknown>,
+    priorResults: readonly Record<string, unknown>[],
+    handler: { name: string; isHop?: boolean; plugins?: readonly string[] },
+  ) => Record<string, unknown>
   check?: (returned: unknown) => string | undefined
+}
+
+function resolveStripResultForSite(
+  event: string,
+  site: FunctionHookHopSite | undefined,
+): FunctionHookHopSite['stripResult'] {
+  if (site?.stripResult !== undefined) {
+    return site.stripResult
+  }
+  if (event === 'tool.check') {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { stripToolCheckHookResult } =
+      require('../permissions/permissions.js') as typeof import('../permissions/permissions.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    return stripToolCheckHookResult
+  }
+  return undefined
 }
 
 function hopHandlerOf(
@@ -2496,12 +2665,21 @@ export async function runFunctionHookHop(
           },
         )
         .then(reply => {
-          const restored =
+          const preStrip =
             step.isCore !== true &&
             site?.restoreResult !== undefined &&
             isEventRecord(reply.returned)
               ? site.restoreResult(reply.returned, downstreamResults, value)
               : reply.returned
+          const stripResultFn = resolveStripResultForSite(event, site)
+          const restored =
+            step.isCore !== true &&
+            stripResultFn !== undefined &&
+            isEventRecord(preStrip)
+              ? stripResultFn(preStrip, downstreamResults, {
+                  name: step.name,
+                })
+              : preStrip
           if (step.isCore !== true && site?.check !== undefined) {
             const problem = site.check(restored)
             if (problem !== undefined) {
@@ -2538,12 +2716,21 @@ export async function runFunctionHookHop(
     watchHookBudget(running, step.name, event)
     return running
       .then(rawReturned => {
-        const returned =
+        const preStrip =
           step.isCore !== true &&
           site?.restoreResult !== undefined &&
           isEventRecord(rawReturned)
             ? site.restoreResult(rawReturned, downstreamResults, value)
             : rawReturned
+        const stripResultFn = resolveStripResultForSite(event, site)
+        const returned =
+          step.isCore !== true &&
+          stripResultFn !== undefined &&
+          isEventRecord(preStrip)
+            ? stripResultFn(preStrip, downstreamResults, {
+                name: step.name,
+              })
+            : preStrip
         if (step.isCore !== true && site?.check !== undefined) {
           const problem = site.check(returned)
           if (problem !== undefined) {
@@ -2638,7 +2825,16 @@ export async function runFunctionHookHop(
               catchHandler(engine, value, catchNext),
             ),
           )
-          .then(returned => {
+          .then(rawCaught => {
+            const stripResultFn = resolveStripResultForSite(event, site)
+            const returned =
+              step.isCore !== true &&
+              stripResultFn !== undefined &&
+              isEventRecord(rawCaught)
+                ? stripResultFn(rawCaught, downstreamResults, {
+                    name: step.name,
+                  })
+                : rawCaught
             runNode.entry = Object.freeze({
               index,
               plugin: step.name,
@@ -2786,6 +2982,10 @@ export async function runEngineCreateFold(): Promise<unknown> {
       logForDebugging(
         `hooks module ${failed.name} failed in engine.create: ${reason}; unloaded, $ built again without it`,
         { level: 'error' },
+      )
+      reportHeadlessInlineModStderr(
+        { name: failed.name, source: failed.pluginStorageId },
+        `failed in engine.create: ${reason}; unloaded`,
       )
       tried.add(failed.name)
       await retireFunctionHooksModule(failed.name)
@@ -7399,6 +7599,14 @@ async function runModelComplete(
     output_tokens: rawUsage?.output_tokens ?? 0,
     cache_read_input_tokens: rawUsage?.cache_read_input_tokens ?? 0,
     cache_creation_input_tokens: rawUsage?.cache_creation_input_tokens ?? 0,
+  }
+  // Official 2.1.325 #2370: count mod `$.model.complete` and `$.model.classify`
+  // calls in `/cost`, `$.session.usage()`, `--max-budget-usd`, and metrics.
+  try {
+    const { recordModModelUsage } = await import('../../cost-tracker.js')
+    recordModModelUsage(model, usage, 'plugin_model_complete')
+  } catch {
+    // cost tracking must never break mod model calls
   }
   void started
   if (text === '') {
@@ -15093,6 +15301,9 @@ export async function runUiHost(
       case 'prompt.attachment':
       case 'tool.describe':
       case 'tool.list':
+        pendingUiInvalidations.add(event)
+        invalidatePluginToolList()
+        break
       case 'command.describe':
       case 'config.describe':
         pendingUiInvalidations.add(event)
@@ -15617,10 +15828,20 @@ async function runToolList(plugin?: string): Promise<unknown> {
   if (!hasMatchingFunctionHookForOp('tool.list', payload, hookOrigin)) {
     return listSessionTools()
   }
+  const baseTools = await listSessionTools()
+  const baseNames = Array.isArray(baseTools)
+    ? baseTools.flatMap(t =>
+        typeof t === 'string'
+          ? [t]
+          : isEventRecord(t) && typeof t.name === 'string'
+            ? [t.name]
+            : [],
+      )
+    : []
   const out = await runFunctionHookChain(
     'tool.list',
     payload,
-    async () => ({ value: await listSessionTools() }),
+    async () => ({ value: baseTools }),
     undefined,
     undefined,
     {
@@ -15628,7 +15849,18 @@ async function runToolList(plugin?: string): Promise<unknown> {
       hookOrigin,
     },
   )
-  return unwrapOpHookResult('tool.list', out, plugin)
+  const unwrapped = unwrapOpHookResult('tool.list', out, plugin)
+  if (Array.isArray(unwrapped)) {
+    const resultNames = unwrapped.flatMap(t =>
+      typeof t === 'string'
+        ? [t]
+        : isEventRecord(t) && typeof t.name === 'string'
+          ? [t.name]
+          : [],
+    )
+    recordPluginToolListAnswer(baseNames, resultNames)
+  }
+  return unwrapped
 }
 
 async function runToolCheck(
@@ -20378,13 +20610,123 @@ function matchFieldValue(expected: unknown, actual: unknown): boolean {
   return expected === actual
 }
 
+/**
+ * Official 2.1.323 #2053 (`vnt` / `SGa`): write headless `--plugin-dir` (`@inline`)
+ * hooks worker crash / hang / unload warnings to stderr in text-output `-p` runs.
+ * Lines arriving before output format is settled are buffered and flushed when
+ * `setHeadlessPluginOutputFormat('text')` or `flushHeadlessInlineModStderr()` runs.
+ */
+let headlessPluginOutputFormat: string | null = null
+const pendingHeadlessModStderrLines: string[] = []
+const emittedHeadlessModStderrLines = new Set<string>()
+
+function isHeadlessTextStderrActive(): boolean {
+  return (
+    headlessPluginOutputFormat === 'text' &&
+    process.env.CLAUDE_CODE_SESSION_KIND !== 'bg'
+  )
+}
+
+export function setHeadlessPluginOutputFormat(format: string | null): void {
+  headlessPluginOutputFormat = format
+  if (format === 'text') {
+    flushHeadlessInlineModStderr()
+  } else if (format !== null) {
+    pendingHeadlessModStderrLines.length = 0
+  }
+}
+
+export function flushHeadlessInlineModStderr(
+  write: (text: string) => void = text => {
+    try {
+      process.stderr.write(text)
+    } catch {
+      /* ignore broken pipe */
+    }
+  },
+): string[] {
+  const queued = pendingHeadlessModStderrLines.splice(0)
+  if (!isHeadlessTextStderrActive()) return []
+  for (const line of queued) {
+    write(`${line}\n`)
+  }
+  return queued
+}
+
+export function reportHeadlessInlineModStderr(
+  plugin: { name: string; source?: string },
+  message: string,
+  opts?: {
+    isNonInteractive?: boolean
+    write?: (text: string) => void
+  },
+): boolean {
+  const nonInteractive = opts?.isNonInteractive ?? getIsNonInteractiveSession()
+  if (!nonInteractive) return false
+  if (!plugin.source || !plugin.source.endsWith('@inline')) return false
+  const clean = `${plugin.name}: ${message}`
+    .replace(/[\p{Cc}\u200E\u200F\u202A-\u202E\u2066-\u2069]/gu, ch =>
+      ch === '\n' ? '\n' : '',
+    )
+    .replaceAll('\n', '\n  ')
+  if (emittedHeadlessModStderrLines.has(clean)) return false
+  emittedHeadlessModStderrLines.add(clean)
+  if (headlessPluginOutputFormat === null) {
+    pendingHeadlessModStderrLines.push(clean)
+    return true
+  }
+  if (isHeadlessTextStderrActive()) {
+    const write =
+      opts?.write ??
+      ((text: string) => {
+        try {
+          process.stderr.write(text)
+        } catch {
+          /* ignore broken pipe */
+        }
+      })
+    write(`${clean}\n`)
+    return true
+  }
+  return false
+}
+
+export function resetHeadlessInlineModStderrState(): void {
+  headlessPluginOutputFormat = null
+  pendingHeadlessModStderrLines.length = 0
+  emittedHeadlessModStderrLines.clear()
+}
+
 /** A non-object matcher matches everything. Object/array/RegExp fields match gold `vSt`. */
-function matcherAllows(
+export function matcherAllows(
   matcher: unknown,
   event: Record<string, unknown>,
   eventName?: string,
   isBuiltin = false,
 ): boolean {
+  // Official 2.1.323 #2039: non-builtin mods may never intercept Claude Code's
+  // own AskUserQuestion confirmations (`confirm_*`, `mod_hot_reload`,
+  // `plugin_authoring_hand_over_check`).
+  if (
+    !isBuiltin &&
+    (eventName === 'ui.render' || eventName === 'classic.ui.render') &&
+    event.component === 'AskUserQuestion'
+  ) {
+    const reqId =
+      typeof event.requestId === 'string' ? event.requestId : undefined
+    const props = isEventRecord(event.props) ? event.props : undefined
+    const metaSource =
+      typeof props?.metadataSource === 'string'
+        ? props.metadataSource
+        : undefined
+    if (
+      (reqId !== undefined && reqId.startsWith('confirm_')) ||
+      metaSource === 'mod_hot_reload' ||
+      metaSource === 'plugin_authoring_hand_over_check'
+    ) {
+      return false
+    }
+  }
   if (Array.isArray(matcher)) {
     return matcher.some(entry =>
       matcherAllows(entry, event, eventName, isBuiltin),
@@ -21006,16 +21348,36 @@ export async function loadFunctionHooksModules(
         // without unloading innocent plugins and respawn with any culprit
         // excluded; if the worker is alive, only skip the failing plugin.
         if (worker.died !== undefined) {
-          if (worker.culpritPlugin !== undefined) {
-            excludedPlugins.add(worker.culpritPlugin)
+          const culpritName = worker.culpritPlugin
+          const diedReason = worker.died
+          if (culpritName !== undefined) {
+            excludedPlugins.add(culpritName)
+            const culpritInfo = plugins.find(p => p.name === culpritName)
+            reportHeadlessInlineModStderr(
+              {
+                name: culpritName,
+                source: culpritInfo?.source,
+              },
+              `${culpritName} was unloaded: it crashed the hooks worker (${diedReason})`,
+            )
+          } else {
+            reportHeadlessInlineModStderr(
+              { name: plugin.name, source: plugin.source },
+              `the hooks worker crashed during load (${diedReason})`,
+            )
           }
           await stopFunctionHooksWorker()
           workerDiedDuringPass = true
           break
         }
+        const loadErrMsg = err instanceof Error ? err.message : String(err)
         logForDebugging(
-          `hooks module ${plugin.name} failed to load: ${err instanceof Error ? err.message : String(err)}`,
+          `hooks module ${plugin.name} failed to load: ${loadErrMsg}`,
           { level: 'error' },
+        )
+        reportHeadlessInlineModStderr(
+          { name: plugin.name, source: plugin.source },
+          `hooks module did not load: ${loadErrMsg}`,
         )
         excludedPlugins.add(plugin.name)
         continue

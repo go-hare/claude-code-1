@@ -1589,6 +1589,7 @@ export function routeCloudHostedControlRequest(
     case 'get_memory_dialog':
     case 'get_skills_dialog':
     case 'get_status':
+    case 'get_hooks_listing':
     case 'export_conversation':
     case 'get_chrome_dialog':
     case 'get_chrome_browsers':
@@ -1621,7 +1622,6 @@ export function routeCloudHostedControlRequest(
     case 'stop_task':
     case 'background_tasks':
     case 'get_settings':
-    case 'get_hooks_listing':
     case 'list_permission_rules':
     case 'submit_feedback':
     case 'message_rated':

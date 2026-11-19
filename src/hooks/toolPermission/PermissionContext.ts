@@ -346,13 +346,58 @@ function createPermissionContext(
               return denyDecision
             }
             if (nonEmptyUpdatedInput) {
-              const recheck = await hasPermissionsToUseTool(
-                tool,
-                finalInput,
-                toolUseContext,
-                assistantMessage,
-                toolUseID,
-              )
+              let recheck: Awaited<ReturnType<typeof hasPermissionsToUseTool>>
+              try {
+                recheck = await hasPermissionsToUseTool(
+                  tool,
+                  finalInput,
+                  toolUseContext,
+                  assistantMessage,
+                  toolUseID,
+                )
+              } catch (err) {
+                if (toolUseContext.abortController.signal.aborted) {
+                  throw err
+                }
+                // 2.1.323 #2180: when a tool's permission check fails on input
+                // rewritten by a PermissionRequest hook, ask again (or refuse
+                // where nobody can answer, such as dontAsk/non-interactive).
+                const mode =
+                  permissionMode ??
+                  toolUseContext.getAppState().toolPermissionContext.mode
+                const failReason = {
+                  type: 'other' as const,
+                  reason: 'permission_check_crashed',
+                }
+                const failMessage = `Permission check failed for ${tool.name} on input rewritten by PermissionRequest hook.`
+                if (
+                  mode === 'dontAsk' ||
+                  toolUseContext.options.isNonInteractiveSession
+                ) {
+                  this.logDecision(
+                    { decision: 'reject', source: 'config' },
+                    { input: finalInput, permissionPromptStartTimeMs },
+                  )
+                  const denyCrash: PermissionDenyDecision & {
+                    decideLocation: 'ask-path'
+                  } = {
+                    behavior: 'deny',
+                    message: failMessage,
+                    decisionReason: failReason,
+                    decideLocation: 'ask-path',
+                  }
+                  return denyCrash
+                }
+                return {
+                  type: 'reprompt',
+                  reprompted: {
+                    behavior: 'ask',
+                    message: failMessage,
+                    decisionReason: failReason,
+                  },
+                  finalInput,
+                }
+              }
               if (recheck.behavior === 'deny') {
                 this.logDecision(
                   { decision: 'reject', source: 'config' },
@@ -367,6 +412,27 @@ function createPermissionContext(
                 return denyRecheck
               }
               if (recheck.behavior === 'ask') {
+                const mode =
+                  permissionMode ??
+                  toolUseContext.getAppState().toolPermissionContext.mode
+                if (mode === 'dontAsk') {
+                  this.logDecision(
+                    { decision: 'reject', source: 'config' },
+                    { input: finalInput, permissionPromptStartTimeMs },
+                  )
+                  const denyUnanswerable: PermissionDenyDecision & {
+                    decideLocation: 'ask-path'
+                  } = {
+                    behavior: 'deny',
+                    message: recheck.message,
+                    decisionReason: recheck.decisionReason ?? {
+                      type: 'mode',
+                      mode: 'dontAsk',
+                    },
+                    decideLocation: 'ask-path',
+                  }
+                  return denyUnanswerable
+                }
                 return {
                   type: 'reprompt',
                   reprompted: recheck,

@@ -12,8 +12,11 @@ import {
 } from 'path'
 import {
   getAdditionalDirectoriesForClaudeMd,
+  getInlinePlugins,
+  getInlinePluginsNoMcp,
   getOriginalCwd,
   getSessionId,
+  getSyncedPluginDirs,
 } from '../bootstrap/state.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -69,7 +72,10 @@ import { SandboxManager } from '../utils/sandbox/sandbox-adapter.js'
 import type { SettingSource } from '../utils/settings/constants.js'
 import { isSettingSourceEnabled } from '../utils/settings/constants.js'
 import { getManagedFilePath } from '../utils/settings/managedPath.js'
-import { isRestrictedToPluginOnly } from '../utils/settings/pluginOnlyPolicy.js'
+import {
+  isRestrictedToPluginOnly,
+  registerStrictPluginOnlyChangeCallback,
+} from '../utils/settings/pluginOnlyPolicy.js'
 import { HooksSchema, type HooksSettings } from '../utils/settings/types.js'
 import { createSignal } from '../utils/signal.js'
 import { registerMCPSkillBuilders } from './mcpSkillBuilders.js'
@@ -1228,6 +1234,13 @@ export function clearSkillCaches() {
   clearSyncedSkillLandingFailures()
 }
 
+// Official 2.1.325 #2332: invalidate cached skills when managed
+// strictPluginOnlyCustomization changes mid-session.
+registerStrictPluginOnlyChangeCallback(() => {
+  clearSkillCaches()
+  clearDynamicSkills()
+})
+
 // Backwards-compatible aliases for tests
 export { getSkillDirCommands as getCommandDirCommands }
 export { clearSkillCaches as clearCommandCaches }
@@ -1294,14 +1307,28 @@ function foldPathForPrefixMatch(p: string): string {
 }
 
 /**
- * #1942 (2.1.321): Build normalized prefixes for `~/.claude/plugins` (both raw
- * and realpath) so nested `.claude/skills` discovery never walks into or loads
- * skills from installed/cached plugin trees.
+ * #1942 (2.1.321) + Official 2.1.325 #2363: Build normalized prefixes for
+ * `~/.claude/plugins`, synced plugin dirs, AND `--plugin-dir` directories
+ * (both raw and realpath) so nested `.claude/skills` discovery never walks
+ * into or loads skills from installed/cached or `--plugin-dir` plugin trees
+ * when a session is started above them.
  */
-async function getPluginOwnedPrefixes(): Promise<string[]> {
+export async function getPluginOwnedPrefixes(
+  extraPluginDirs?: readonly string[],
+): Promise<string[]> {
   const configHome = getClaudeConfigHomeDir()
   const rawPluginsDir = join(configHome, 'plugins')
   const prefixes = new Set<string>([foldPathForPrefixMatch(rawPluginsDir)])
+  const addPrefixWithRealpath = async (dir: string): Promise<void> => {
+    const resolved = resolve(dir)
+    prefixes.add(foldPathForPrefixMatch(resolved))
+    try {
+      const real = await realpath(resolved)
+      prefixes.add(foldPathForPrefixMatch(real))
+    } catch {
+      // dir may not exist yet
+    }
+  }
   try {
     const resolvedConfigHome = await realpath(configHome)
     prefixes.add(foldPathForPrefixMatch(join(resolvedConfigHome, 'plugins')))
@@ -1313,6 +1340,19 @@ async function getPluginOwnedPrefixes(): Promise<string[]> {
     prefixes.add(foldPathForPrefixMatch(resolvedPlugins))
   } catch {
     // plugins dir may not exist yet
+  }
+  // Official 2.1.325 #2363: exclude `--plugin-dir` folders from nested
+  // `.claude/skills` discovery when started above them.
+  const pluginDirs = [
+    ...getInlinePlugins(),
+    ...getInlinePluginsNoMcp(),
+    ...getSyncedPluginDirs(),
+    ...(extraPluginDirs ?? []),
+  ]
+  for (const dir of pluginDirs) {
+    if (typeof dir === 'string' && dir.length > 0) {
+      await addPrefixWithRealpath(dir)
+    }
   }
   return [...prefixes]
 }

@@ -38,6 +38,8 @@ const CTRL_B = 0x02
 const CTRL_Z = 0x1a
 /** 'd' — secondary detach after Ctrl+B */
 const CHAR_D = 100
+/** Official 2.1.323 #2130: 800ms window for `Ctrl+B` then `d` to detach. */
+export const CTRL_B_DETACH_WINDOW_MS = 800
 
 /**
  * gold `Wt` @188315353 — CSI-only class including `|I|O|` (focus in/out).
@@ -83,6 +85,127 @@ const KITTY_CTRL_B = Buffer.from('\x1B[98;5u', 'ascii')
 const XTERM_CTRL_Z = Buffer.from('\x1B[27;5;122~', 'ascii')
 /** Xterm protocol Ctrl+B: CSI 27;5;98~ */
 const XTERM_CTRL_B = Buffer.from('\x1B[27;5;98~', 'ascii')
+
+/**
+ * Official 2.1.323 #2130: 800ms `Ctrl+B` detach state machine.
+ *
+ * Holds `Ctrl+B` for up to `windowMs` (default 800ms):
+ * - If `d` arrives within the window → detach (`onDetach()`).
+ * - If any other key arrives within the window → forward the held `Ctrl+B`
+ *   bytes immediately and process that key (so shortcuts and normal typing
+ *   pass through cleanly).
+ * - If the window expires without a follow-up key → forward the held `Ctrl+B`
+ *   bytes to the attached session (e.g., so `Ctrl+B` backgrounds a task inside
+ *   the attached session).
+ */
+export function createAttachDetachStateMachine(opts: {
+  onDetach: () => void
+  onWrite: (chunk: Buffer) => void
+  windowMs?: number
+}): {
+  feed: (data: Buffer) => void
+  dispose: () => void
+} {
+  const windowMs = opts.windowMs ?? CTRL_B_DETACH_WINDOW_MS
+  let pendingCtrlB: Buffer | null = null
+  let pendingTimer: ReturnType<typeof setTimeout> | null = null
+  let disposed = false
+
+  function clearPendingTimer(): void {
+    if (pendingTimer !== null) {
+      clearTimeout(pendingTimer)
+      pendingTimer = null
+    }
+  }
+
+  function flushPendingCtrlB(): void {
+    clearPendingTimer()
+    if (pendingCtrlB !== null) {
+      const held = pendingCtrlB
+      pendingCtrlB = null
+      if (!disposed) {
+        opts.onWrite(held)
+      }
+    }
+  }
+
+  function armPendingCtrlB(seq: Buffer): void {
+    clearPendingTimer()
+    pendingCtrlB = seq
+    pendingTimer = setTimeout(() => {
+      pendingTimer = null
+      flushPendingCtrlB()
+    }, windowMs)
+    pendingTimer.unref?.()
+  }
+
+  function dispose(): void {
+    disposed = true
+    clearPendingTimer()
+    pendingCtrlB = null
+  }
+
+  function feed(buf: Buffer): void {
+    if (disposed || buf.length === 0) return
+
+    let writeStart = 0
+
+    for (let i = 0; i < buf.length; i++) {
+      const byte = buf[i]!
+
+      if (pendingCtrlB !== null) {
+        clearPendingTimer()
+        const held = pendingCtrlB
+        pendingCtrlB = null
+        if (i > writeStart) opts.onWrite(buf.subarray(writeStart, i))
+        if (byte === CHAR_D) {
+          dispose()
+          opts.onDetach()
+          return
+        }
+        // Any non-'d' key within 800ms: forward held Ctrl+B, then handle this byte
+        opts.onWrite(held)
+        writeStart = i
+        // Fall through to inspect this byte (e.g., Ctrl+Z or a second Ctrl+B)
+      }
+
+      // Check for immediate Ctrl+Z detach
+      if (
+        byte === CTRL_Z ||
+        bufferMatchesAt(buf, i, KITTY_CTRL_Z) ||
+        bufferMatchesAt(buf, i, XTERM_CTRL_Z)
+      ) {
+        if (i > writeStart) opts.onWrite(buf.subarray(writeStart, i))
+        dispose()
+        opts.onDetach()
+        return
+      }
+
+      // Check for Ctrl+B escape prefix
+      const escLen =
+        byte === CTRL_B
+          ? 1
+          : bufferMatchesAt(buf, i, KITTY_CTRL_B)
+            ? KITTY_CTRL_B.length
+            : bufferMatchesAt(buf, i, XTERM_CTRL_B)
+              ? XTERM_CTRL_B.length
+              : 0
+      if (escLen) {
+        if (i > writeStart) opts.onWrite(buf.subarray(writeStart, i))
+        const seq = Buffer.from(buf.subarray(i, i + escLen))
+        i += escLen - 1
+        writeStart = i + 1
+        armPendingCtrlB(seq)
+      }
+    }
+
+    if (writeStart < buf.length) {
+      opts.onWrite(buf.subarray(writeStart))
+    }
+  }
+
+  return { feed, dispose }
+}
 
 /** Detach sequence to scan for in output */
 const DETACH_SEQ = Buffer.from('\x1B_cc-daemon-detach\x1B\\', 'ascii')
@@ -311,13 +434,17 @@ export async function attachToSession(
     if (stdout.removeListener) stdout.removeListener('resize', onResize)
     if (stdout.removeListener) stdout.removeListener('resize', onResize)
     clearTimeout(resizeTimer)
+    detachMachine.dispose()
 
     socket?.destroy()
     resolveResult({ outcome, msg })
   }
 
-  // --- Detach key state machine ---
-  let escapeMode = false // After Ctrl+B, next byte is literal or detach
+  // --- Detach key state machine (Official 2.1.323 #2130: 800ms Ctrl+B window) ---
+  const detachMachine = createAttachDetachStateMachine({
+    onDetach: () => finish('detached'),
+    onWrite: writeInput,
+  })
 
   /**
    * gold `Se` @188792458 — CSI-only drop until first frame when gated;
@@ -335,57 +462,8 @@ export async function attachToSession(
   }
 
   function processInput(data: Buffer): void {
-    if (done) return
-    const buf = data
-    if (buf.length === 0) return
-
-    let writeStart = 0
-
-    for (let i = 0; i < buf.length; i++) {
-      const byte = buf[i]!
-
-      if (escapeMode) {
-        escapeMode = false
-        // After Ctrl+B: 'd' = detach, anything else = send literally
-        if (i > writeStart) writeInput(buf.subarray(writeStart, i))
-        if (byte === CHAR_D) return finish('detached')
-        // Send the escaped byte literally (skip the Ctrl+B itself)
-        writeInput(Buffer.from([byte]))
-        writeStart = i + 1
-        continue
-      }
-
-      // Check for detach keys
-      if (
-        byte === CTRL_Z ||
-        bufferMatchesAt(buf, i, KITTY_CTRL_Z) ||
-        bufferMatchesAt(buf, i, XTERM_CTRL_Z)
-      ) {
-        if (i > writeStart) writeInput(buf.subarray(writeStart, i))
-        return finish('detached')
-      }
-
-      // Check for escape prefix
-      const escLen =
-        byte === CTRL_B
-          ? 1
-          : bufferMatchesAt(buf, i, KITTY_CTRL_B)
-            ? KITTY_CTRL_B.length
-            : bufferMatchesAt(buf, i, XTERM_CTRL_B)
-              ? XTERM_CTRL_B.length
-              : 0
-      if (escLen) {
-        if (i > writeStart) writeInput(buf.subarray(writeStart, i))
-        i += escLen - 1
-        writeStart = i + 1
-        escapeMode = true
-      }
-    }
-
-    // Write remaining bytes
-    if (writeStart < buf.length) {
-      writeInput(buf.subarray(writeStart))
-    }
+    if (done || data.length === 0) return
+    detachMachine.feed(data)
   }
 
   // --- Output processing ---

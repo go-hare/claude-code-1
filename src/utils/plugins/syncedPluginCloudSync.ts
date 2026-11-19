@@ -91,6 +91,18 @@ export const LIST_PLUGINS_PATH =
 export const LIST_PLUGINS_PAGE_SIZE = 100
 /** leftover 239 Fal */
 export const LIST_PLUGINS_PAGE_CAP = 20
+
+/** Official 2.1.323 #2154 (`Ssa`): maximum enabled plugins a session can list (2,000). */
+export const LIST_PLUGINS_MAX_ITEMS =
+  LIST_PLUGINS_PAGE_SIZE * LIST_PLUGINS_PAGE_CAP
+
+/** Official 2.1.323 #2154: note returned when an account exceeds 2,000 enabled plugins. */
+export function formatPluginsPageCapNote(
+  cap: number = LIST_PLUGINS_MAX_ITEMS,
+): string {
+  const formatted = cap.toLocaleString('en-US')
+  return `For the user, not for you to act on: this account has more than ${formatted} plugins turned on, which is more than a session can list, so plugins may be missing from this session. Turning enough off at claude.ai/customize/plugins/yours to get to ${formatted} or fewer fixes it for new sessions. Calling this tool again does not.`
+}
 /** leftover 239 xVS */
 const LIST_TIMEOUT_MS = 10_000
 /** leftover 239 Vzf */
@@ -228,7 +240,13 @@ export function expandOrgApiPath(path: string, orgUUID: string): string {
 
 export type ListOrgPluginsResult =
   | { success: true; plugins: SyncedCloudPlugin[] }
-  | { success: false; error: string; status?: number }
+  | {
+      success: false
+      error: string
+      status?: number
+      /** Official 2.1.323 #2154: 'page_cap' when account exceeds 2,000 enabled plugins (skips retry). */
+      kind?: 'page_cap' | 'no_scope' | 'error'
+    }
 
 type OrgCtx = {
   headers: Record<string, string>
@@ -328,6 +346,7 @@ export async function listOrgSyncedPluginsOnce(): Promise<ListOrgPluginsResult> 
     return {
       success: false,
       error: `list-plugins page cap (${LIST_PLUGINS_PAGE_CAP}) exceeded`,
+      kind: 'page_cap',
     }
   } catch (err) {
     return {
@@ -337,10 +356,15 @@ export async function listOrgSyncedPluginsOnce(): Promise<ListOrgPluginsResult> 
   }
 }
 
-/** leftover 239 AZn — one retry unless 403. */
+/**
+ * leftover 239 AZn + Official 2.1.323 #2154 — one retry unless 403 or page_cap
+ * (avoids doubling startup wait for accounts with > 2,000 enabled plugins).
+ */
 export async function listOrgSyncedPlugins(): Promise<ListOrgPluginsResult> {
   const first = await listOrgSyncedPluginsOnce()
-  if (first.success || first.status === 403) return first
+  if (first.success || first.status === 403 || first.kind === 'page_cap') {
+    return first
+  }
   await sleep(LIST_RETRY_MS)
   return listOrgSyncedPluginsOnce()
 }

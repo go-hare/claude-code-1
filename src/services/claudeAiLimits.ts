@@ -200,12 +200,19 @@ type RawWindowUtilization = {
 type RawUtilization = {
   five_hour?: RawWindowUtilization
   seven_day?: RawWindowUtilization
+  /** Official 2.1.323 (#2106): Fable weekly limit (`7d_oi`) window utilization + reset. */
+  seven_day_overage_included?: RawWindowUtilization
   /** densable 2.1.251 jL().overage — 0–1 utilization, unix-seconds reset. */
   overage?: RawWindowUtilization
 }
 let rawUtilization: RawUtilization = {}
 
-const RAW_UTILIZATION_KEYS = ['five_hour', 'seven_day', 'overage'] as const
+const RAW_UTILIZATION_KEYS = [
+  'five_hour',
+  'seven_day',
+  'seven_day_overage_included',
+  'overage',
+] as const
 
 /**
  * densable 2.1.243 `Y0a` — drop windows whose `resets_at` has passed.
@@ -236,6 +243,7 @@ export function extractRawUtilization(
   for (const [key, abbrev] of [
     ['five_hour', '5h'],
     ['seven_day', '7d'],
+    ['seven_day_overage_included', '7d_oi'],
     // Same header family as mockRateLimits overage-utilization / overage-reset.
     ['overage', 'overage'],
   ] as const) {
@@ -556,9 +564,37 @@ function cacheExtraUsageDisabledReason(headers: globalThis.Headers): void {
   }
 }
 
+/**
+ * Official 2.1.323 (#2105): Side requests on smaller models (such as session
+ * title generation, prompt suggestions, session memory, etc.) must not flip
+ * `isUsingOverage` back to false while the main model (e.g. Fable) is past its
+ * weekly limit and using usage credits, which caused the "Now using usage
+ * credits" notice to repeat or fail to show.
+ */
+const SIDE_REQUEST_RATE_LIMIT_QUERY_SOURCES = new Set([
+  'title_generation',
+  'prompt_suggestion',
+  'session_memory',
+  'extract_memories',
+  'away_summary',
+  'compact_fab_check',
+  'magic_docs',
+  'file_suggestion',
+  'slug_generation',
+  'speculation',
+])
+
+export function isSideRequestQuerySourceForRateLimits(
+  querySource?: string,
+): boolean {
+  if (!querySource) return false
+  return SIDE_REQUEST_RATE_LIMIT_QUERY_SOURCES.has(querySource)
+}
+
 export function extractQuotaStatusFromHeaders(
   headers: globalThis.Headers,
   observationAtMs: number = Date.now(),
+  opts?: { querySource?: string },
 ): void {
   // Check if we need to process rate limits
   const isSubscriber = isClaudeAISubscriber()
@@ -580,7 +616,7 @@ export function extractQuotaStatusFromHeaders(
 
   // Process headers (applies mocks from /mock-limits command if active)
   const headersToUse = processRateLimitHeaders(headers)
-  const newLimits = computeNewLimitsFromHeaders(headersToUse)
+  let newLimits = computeNewLimitsFromHeaders(headersToUse)
   // densable gold: j4e/b7u extra-usage cache BEFORE isStaleObservation.
   // Stale still writes cachedExtraUsageDisabledReason; only raw/status skip.
   cacheExtraUsageDisabledReason(headersToUse)
@@ -592,6 +628,26 @@ export function extractQuotaStatusFromHeaders(
     'anthropic',
     anthropicAdapter.parseHeaders(headersToUse),
   )
+
+  // Official 2.1.323 (#2105): A quick side request on a smaller model (e.g.
+  // Haiku naming the session) must not clear an active overage state (especially
+  // past the weekly Fable limit) or suppress/repeat "Now using usage credits".
+  if (
+    isSideRequestQuerySourceForRateLimits(opts?.querySource) &&
+    currentLimits.isUsingOverage === true &&
+    !newLimits.isUsingOverage
+  ) {
+    newLimits = {
+      ...newLimits,
+      isUsingOverage: true,
+      ...(currentLimits.rateLimitType !== undefined && {
+        rateLimitType: currentLimits.rateLimitType,
+      }),
+      ...(currentLimits.resetsAt !== undefined && {
+        resetsAt: currentLimits.resetsAt,
+      }),
+    }
+  }
 
   if (!isEqual(currentLimits, newLimits)) {
     emitStatusChange(newLimits)

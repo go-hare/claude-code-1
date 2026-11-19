@@ -450,12 +450,37 @@ export function spawnPluginCommand(
   })
 }
 
+export type CommandSourceRunOutput = {
+  dir: string
+  /** Official 2.1.323 #2044 & #2189: trimmed stderr emitted on exit 0, if any. */
+  stderr?: string
+}
+
 /**
- * densable c6_ — run marketplace command; return realpath of plugin directory.
+ * Official 2.1.323 #2044: format stderr written by a succeeding install command.
  */
-export async function runPluginCommandSource(
+export function formatCommandSourceStderrNote(stderr: string): string {
+  const clipped = clipForError(stderr.trim(), STDERR_CLIP)
+  return `The plugin's install command printed: ${clipped}`
+}
+
+/**
+ * Official 2.1.323 #2189 (`S$n` / `Tai`): warning note shown instead of a plain
+ * checkmark when a plugin's install command wrote to stderr.
+ */
+export function formatCommandSourceWarningHint(isActive = false): string {
+  return isActive
+    ? 'The plugin is active, and its install command printed a message. Check the message in your terminal in case the plugin needs another step.'
+    : 'Its install command printed a message. Check the message in your terminal in case the plugin needs another step.'
+}
+
+/**
+ * densable c6_ + Official 2.1.323 #2044 — run marketplace command and return
+ * both the resolved producer directory and any stderr printed on exit 0.
+ */
+export async function runPluginCommandSourceWithOutput(
   source: CommandPluginSource,
-): Promise<string> {
+): Promise<CommandSourceRunOutput> {
   if (areCommandPluginSourcesDisabledByPolicy()) {
     throw new PluginCommandSourceError(
       COMMAND_PLUGIN_SOURCES_DISABLED_MESSAGE,
@@ -589,7 +614,19 @@ export async function runPluginCommandSource(
   logForDebugging(
     `Plugin command source: resolved plugin directory ${resolved}`,
   )
-  return resolved
+  return {
+    dir: resolved,
+    ...(stderrClip ? { stderr: stderrClip } : {}),
+  }
+}
+
+/**
+ * densable c6_ — run marketplace command; return realpath of plugin directory.
+ */
+export async function runPluginCommandSource(
+  source: CommandPluginSource,
+): Promise<string> {
+  return (await runPluginCommandSourceWithOutput(source)).dir
 }
 
 /**
@@ -769,6 +806,8 @@ export type InstallCommandPluginResult = {
   producerDirectory: string
   contentSha256: string
   mode: 'copy' | 'link'
+  /** Official 2.1.323 #2044 & #2189: stderr printed on exit 0, if any. */
+  commandStderr?: string
 }
 
 /**
@@ -1123,7 +1162,8 @@ export async function installCommandPluginSource(
   }
   assertCommandSourceConsent(source, options.consent)
 
-  const producer = await runPluginCommandSource(source)
+  const { dir: producer, stderr: commandStderr } =
+    await runPluginCommandSourceWithOutput(source)
   if (isPluginCommandProducerCwdOrAncestor(producer)) {
     throw new PluginCommandSourceError(
       `Plugin source command printed the working directory or one of its parents (${clipForError(producer, 300)}); refusing to use it as a plugin.`,
@@ -1170,6 +1210,7 @@ export async function installCommandPluginSource(
       producerDirectory: producer,
       contentSha256: hash.digest('hex'),
       mode: 'link',
+      ...(commandStderr ? { commandStderr } : {}),
     }
   }
 
@@ -1184,5 +1225,10 @@ export async function installCommandPluginSource(
     // ignore
   }
   const contentSha256 = await hashPluginCommandDirectory(targetPath)
-  return { producerDirectory: producer, contentSha256, mode: 'copy' }
+  return {
+    producerDirectory: producer,
+    contentSha256,
+    mode: 'copy',
+    ...(commandStderr ? { commandStderr } : {}),
+  }
 }

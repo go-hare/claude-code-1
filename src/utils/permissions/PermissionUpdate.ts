@@ -7,6 +7,7 @@ import type {
 } from '../../types/permissions.js'
 import { logForDebugging } from '../debug.js'
 import type { EditableSettingSource } from '../settings/constants.js'
+import { isLocalSettingsGitTracked } from '../settings/localSettingsGitTracked.js'
 import {
   getSettingsForSource,
   updateSettingsForSource,
@@ -26,6 +27,221 @@ import { addPermissionRulesToSettings } from './permissionsLoader.js'
 
 // Re-export for backwards compatibility
 export type { AdditionalWorkingDirectory, WorkingDirectorySource }
+
+/** Official 2.1.323 #2176 (`d6t` / `cDo` / `Gma`) session-only downgrade reasons. */
+export type AllowRuleSessionOnlyReason =
+  | 'holds_secret'
+  | 'scan_failed'
+  | 'tracked_by_git'
+
+export const SESSION_ONLY_ALLOW_REASON_MESSAGES: Record<
+  AllowRuleSessionOnlyReason,
+  string
+> = {
+  holds_secret:
+    'Allowed for this session only. The rule looks like it contains a secret, so it isn’t saved to settings.',
+  scan_failed:
+    'Allowed for this session only. The rule couldn’t be checked for secrets, so it isn’t saved to settings.',
+  tracked_by_git:
+    'Allowed for this session only. Git tracks .claude/settings.local.json, so the rule isn’t saved there.',
+}
+
+const SECRET_VALUE_START = `(?:\\$?["'])*(?!\\d+:\\d|op://)[^\\s"'\`$\\%*<({|;&~./=-]`
+const SECRET_KEY_NAMES =
+  '(?:password|passwd|passphrase|_pass|(?<![a-z])(?<!--)secret(?:[_-]?key(?:_base)?)?|(?<!(?:max|min|next|starting|page|continuation)[_-])token|api[_-]?key|access[_-]?key|private[_-]?key)'
+
+// Official 2.1.323 `wp` + high-confidence credential token patterns (#2176).
+const ALLOW_RULE_SECRET_PATTERNS: readonly RegExp[] = [
+  new RegExp(`${SECRET_KEY_NAMES}=${SECRET_VALUE_START}`, 'i'),
+  new RegExp(
+    `\\$env:\\w{0,40}?${SECRET_KEY_NAMES}\\s*=\\s*${SECRET_VALUE_START}`,
+    'i',
+  ),
+  new RegExp(`${SECRET_KEY_NAMES}["']\\s*:\\s*${SECRET_VALUE_START}`, 'i'),
+  new RegExp(
+    `--(?!no-)[\\w-]{0,40}${SECRET_KEY_NAMES.replace('|private[_-]?key', '')}\\s+${SECRET_VALUE_START}`,
+    'i',
+  ),
+  new RegExp(
+    `--[\\w-]{0,40}private[_-]?key\\s+(?!(?=\\S{1,39}(?:\\s|$))\\S*[/.]|\\S{0,300}\\.(?:pem|key|p8|p12|pfx|der)(?:["')\\s]|$))${SECRET_VALUE_START}`,
+    'i',
+  ),
+  new RegExp(
+    `(?:authorization:\\s*(?:(?:bearer|basic|token|apikey)\\s+|(?!(?:bearer|basic|token|apikey)\\b))|api-key:\\s*|token:\\s+)${SECRET_VALUE_START}`,
+    'i',
+  ),
+  new RegExp(`\\bsshpass\\s+-p\\s*${SECRET_VALUE_START}`),
+  new RegExp(
+    `\\b(?:mysql|mysqldump|mysqladmin|mariadb)\\b[^|;&]{0,400}?\\s-p${SECRET_VALUE_START}`,
+  ),
+  new RegExp(
+    `\\bredis-cli\\b[^|;&]{0,400}?\\s(?:-a|--pass)\\s+${SECRET_VALUE_START}`,
+  ),
+  new RegExp(
+    `\\bdocker\\s+login\\b[^|;&]{0,400}?\\s-p\\s*${SECRET_VALUE_START}`,
+  ),
+  new RegExp(
+    `\\bcurl\\b[^|;]{0,400}?\\s(?:-u|--user)[\\s=]*["']?[^\\s:"'$]{1,100}:${SECRET_VALUE_START}`,
+  ),
+  // High-confidence provider token formats (Anthropic, OpenAI, GitHub, AWS, Slack, Google, PEM)
+  /\bsk-ant-[A-Za-z0-9_-]{20,}\b/,
+  /\bsk-(?:proj-|live-|test-)?[A-Za-z0-9_-]{24,}\b/,
+  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b/,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/,
+  /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/,
+  /\bxox[bpoas]-[A-Za-z0-9-]{10,}\b/,
+  /\bAIza[0-9A-Za-z_-]{35}\b/,
+  /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/,
+  // URL embedded credentials: https://user:secret@host
+  /\b[a-z][a-z0-9+.-]*:\/\/[^/\s:@'"]+:[^/\s@'"$]{6,}@[^\s/'"]+/i,
+]
+
+let secretScannerOverrideForTesting: ((text: string) => boolean) | undefined
+
+export function _setAllowRuleSecretScannerForTesting(
+  scanner: ((text: string) => boolean) | undefined,
+): void {
+  secretScannerOverrideForTesting = scanner
+}
+
+function scanAllowRuleForSecret(
+  rule: PermissionRuleValue,
+): 'holds_secret' | 'scan_failed' | undefined {
+  const text = `${rule.toolName} ${rule.ruleContent ?? ''}`
+  try {
+    if (secretScannerOverrideForTesting) {
+      return secretScannerOverrideForTesting(text) ? 'holds_secret' : undefined
+    }
+    const normalized = text.includes('\x00')
+      ? text.replaceAll('\x00', '')
+      : text
+    for (const pattern of ALLOW_RULE_SECRET_PATTERNS) {
+      if (pattern.test(text) || pattern.test(normalized)) {
+        return 'holds_secret'
+      }
+    }
+    return undefined
+  } catch {
+    return 'scan_failed'
+  }
+}
+
+function isLocalSettingsTrackedForAllowPersistence(): boolean {
+  try {
+    return isLocalSettingsGitTracked({ onIndeterminate: 'untracked' })
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Official 2.1.323 `cDo` (#2176): returns why an allow rule should be kept
+ * session-only instead of persisted to `destination`, or `undefined` if it may
+ * be saved to settings.
+ */
+export function classifyAllowRuleSessionOnlyReason(
+  rule: PermissionRuleValue,
+  destination: PermissionUpdateDestination,
+): AllowRuleSessionOnlyReason | undefined {
+  if (destination === 'session' || destination === 'cliArg') {
+    return undefined
+  }
+  const reason: AllowRuleSessionOnlyReason | undefined =
+    scanAllowRuleForSecret(rule) ??
+    (destination === 'localSettings' &&
+    isLocalSettingsTrackedForAllowPersistence()
+      ? 'tracked_by_git'
+      : undefined)
+  if (reason === undefined) {
+    return undefined
+  }
+  if (supportsPersistence(destination)) {
+    const existing = getSettingsForSource(destination)?.permissions?.allow
+    if (existing?.includes(permissionRuleValueToString(rule)) === true) {
+      return undefined
+    }
+  }
+  return reason
+}
+
+/**
+ * Official 2.1.323 `d6t` (#2176): splits allow rules that look like secrets or
+ * would be written to a git-tracked `.claude/settings.local.json` out of the
+ * persisted update and redirects them to `destination: 'session'`.
+ */
+export function downgradePermissionUpdateForPersistence(
+  update: PermissionUpdate,
+): {
+  updates: PermissionUpdate[]
+  reason: AllowRuleSessionOnlyReason | undefined
+} {
+  if (
+    update.type === 'removeRules' &&
+    update.behavior === 'allow' &&
+    update.destination !== 'session' &&
+    update.destination !== 'cliArg'
+  ) {
+    return {
+      updates: [update, { ...update, destination: 'session' }],
+      reason: undefined,
+    }
+  }
+  if (
+    (update.type !== 'addRules' && update.type !== 'replaceRules') ||
+    update.behavior !== 'allow'
+  ) {
+    return { updates: [update], reason: undefined }
+  }
+  const persistable: PermissionRuleValue[] = []
+  const sessionOnly: PermissionRuleValue[] = []
+  let firstReason: AllowRuleSessionOnlyReason | undefined
+  for (const rule of update.rules) {
+    const reason = classifyAllowRuleSessionOnlyReason(rule, update.destination)
+    firstReason ??= reason
+    if (reason === undefined) {
+      persistable.push(rule)
+    } else {
+      sessionOnly.push(rule)
+    }
+  }
+  if (firstReason === undefined) {
+    return { updates: [update], reason: undefined }
+  }
+  const updates: PermissionUpdate[] = []
+  if (persistable.length > 0 || update.type === 'replaceRules') {
+    updates.push({ ...update, rules: persistable })
+  }
+  if (sessionOnly.length > 0) {
+    updates.push({
+      type: 'addRules',
+      rules: sessionOnly,
+      behavior: 'allow',
+      destination: 'session',
+    })
+  }
+  return { updates, reason: firstReason }
+}
+
+/**
+ * Official 2.1.323 `sz` (#2176): downgrades a batch of permission updates for
+ * persistence and returns the combined update list plus the first user-facing
+ * downgrade reason (if any).
+ */
+export function downgradePermissionUpdatesForPersistence(
+  updates: readonly PermissionUpdate[],
+): {
+  updates: PermissionUpdate[]
+  reason: AllowRuleSessionOnlyReason | undefined
+} {
+  const out: PermissionUpdate[] = []
+  let firstReason: AllowRuleSessionOnlyReason | undefined
+  for (const update of updates) {
+    const downgraded = downgradePermissionUpdateForPersistence(update)
+    firstReason ??= downgraded.reason
+    out.push(...downgraded.updates)
+  }
+  return { updates: out, reason: firstReason }
+}
 
 export function extractRules(
   updates: PermissionUpdate[] | undefined,
@@ -56,14 +272,54 @@ export function applyPermissionUpdate(
   context: ToolPermissionContext,
   update: PermissionUpdate,
 ): ToolPermissionContext {
+  // Official 2.1.323 #2176: allow rules containing secrets or targeting a
+  // git-tracked settings.local.json are downgraded to session scope.
+  if (
+    (update.type === 'addRules' || update.type === 'replaceRules') &&
+    update.behavior === 'allow' &&
+    supportsPersistence(update.destination)
+  ) {
+    const { updates, reason } = downgradePermissionUpdateForPersistence(update)
+    if (reason !== undefined) {
+      logForDebugging(
+        `Allow rule downgraded to session-only (${reason}): ${SESSION_ONLY_ALLOW_REASON_MESSAGES[reason]}`,
+      )
+      let next = context
+      for (const u of updates) {
+        next = applySinglePermissionUpdate(next, u)
+      }
+      return next
+    }
+  }
+  return applySinglePermissionUpdate(context, update)
+}
+
+function applySinglePermissionUpdate(
+  context: ToolPermissionContext,
+  update: PermissionUpdate,
+): ToolPermissionContext {
   switch (update.type) {
     case 'setMode':
+      // Official 2.1.325 #2295 (SEA @284784602): reject unavailable bypassPermissions
+      // and clear stale `prePlanMode` whenever leaving plan mode so a subsequent
+      // plan exit cannot revert the session to an earlier permission mode.
+      if (
+        update.mode === 'bypassPermissions' &&
+        !context.isBypassPermissionsModeAvailable
+      ) {
+        logForDebugging(
+          "Ignoring permission update: setMode 'bypassPermissions' rejected — mode is not available (disableBypassPermissionsMode set, or session not launched in bypassPermissions mode)",
+        )
+        return context
+      }
       logForDebugging(
         `Applying permission update: Setting mode to '${update.mode}'`,
       )
       return {
         ...context,
         mode: update.mode,
+        ...(update.mode !== 'plan' &&
+          context.prePlanMode !== undefined && { prePlanMode: undefined }),
       }
 
     case 'addRules': {
@@ -220,6 +476,18 @@ export function supportsPersistence(
  * @param update The permission update to persist
  */
 export function persistPermissionUpdate(update: PermissionUpdate): void {
+  const { updates, reason } = downgradePermissionUpdateForPersistence(update)
+  if (reason !== undefined) {
+    logForDebugging(
+      `Not persisting allow rule(s) to '${update.destination}' (${reason}): ${SESSION_ONLY_ALLOW_REASON_MESSAGES[reason]}`,
+    )
+  }
+  for (const u of updates) {
+    persistSinglePermissionUpdate(u)
+  }
+}
+
+function persistSinglePermissionUpdate(update: PermissionUpdate): void {
   if (!supportsPersistence(update.destination)) return
   // official nf: setMode bypassPermissions is session-scoped
   if (update.type === 'setMode' && update.mode === 'bypassPermissions') {

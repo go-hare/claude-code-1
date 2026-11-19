@@ -1,4 +1,5 @@
 import { coerce } from 'semver'
+import stripAnsi from 'strip-ansi'
 import { getDirectConnectServerUrl, getSessionId } from '../bootstrap/state.js'
 import { stringWidth } from '@anthropic/ink'
 import type { LogOption } from '../types/logs.js'
@@ -264,6 +265,40 @@ export function formatReleaseNoteForDisplay(
   return truncate(note, maxWidth)
 }
 
+// biome-ignore lint/suspicious/noControlCharactersInRegex: official 2.1.325 DLe/NC welcome header sanitization strips C0/C1 control characters
+const WELCOME_CONTROL_CHARS_RE = /[\x00-\x1f\x7f-\x9f]/g
+const WELCOME_HIDDEN_UNICODE_RE =
+  /[\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF\u2028\u2029]/g
+
+function stripAnsiPerLine(text: string): string {
+  return text.replace(/[^\n\r\v\f\x85\u2028\u2029]+/g, line => stripAnsi(line))
+}
+
+/**
+ * Official 2.1.325 `DLe` (#2274): strip ANSI escapes, hidden/bidi Unicode,
+ * C0/C1 control characters, and collapse line breaks/whitespace from the
+ * welcome header agent name.
+ */
+export function sanitizeWelcomeAgentName(raw: string): string {
+  return stripAnsiPerLine(raw)
+    .replace(WELCOME_HIDDEN_UNICODE_RE, '')
+    .replace(WELCOME_CONTROL_CHARS_RE, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * Official 2.1.325 `NC` (#2274): strip ANSI escapes, hidden/bidi Unicode,
+ * control characters, and replace tabs/line breaks with spaces in welcome
+ * header working folder display.
+ */
+export function sanitizeWelcomeCwd(raw: string): string {
+  return stripAnsi(raw)
+    .replace(WELCOME_HIDDEN_UNICODE_RE, '')
+    .replace(/[\t\n\r\v\f\x85]+/g, ' ')
+    .replace(WELCOME_CONTROL_CHARS_RE, '')
+}
+
 /**
  * Gets the common logo display data used by both LogoV2 and CondensedLogo
  */
@@ -280,9 +315,11 @@ export function getLogoDisplayData(): {
     : getDisplayPath(getCwd())
   const cwd = shouldHideCwd()
     ? ''
-    : serverUrl
-      ? `${displayPath} in ${serverUrl.replace(/^https?:\/\//, '')}`
-      : displayPath
+    : sanitizeWelcomeCwd(
+        serverUrl
+          ? `${displayPath} in ${serverUrl.replace(/^https?:\/\//, '')}`
+          : displayPath,
+      )
   const provider = getAPIProvider()
   const billingType =
     provider !== 'firstParty'
@@ -290,7 +327,10 @@ export function getLogoDisplayData(): {
       : isClaudeAISubscriber()
         ? getSubscriptionName()
         : 'API Usage Billing'
-  const agentName = getInitialSettings().agent
+  const rawAgentName = getInitialSettings().agent
+  const agentName = rawAgentName
+    ? sanitizeWelcomeAgentName(rawAgentName) || undefined
+    : undefined
 
   return {
     version,

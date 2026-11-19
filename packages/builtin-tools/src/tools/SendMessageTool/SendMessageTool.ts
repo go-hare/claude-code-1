@@ -118,6 +118,132 @@ import { renderToolResultMessage, renderToolUseMessage } from './UI.js'
 /** densable D6 — reserved recipient routed to the main conversation queue. */
 export const MAIN_RECIPIENT = MAIN_RECIPIENT_NAME
 
+type BridgePeerDropOutcome =
+  | 'duplicate'
+  | 'rate-limited'
+  | 'queue-full'
+  | 'hop-loop'
+  | 'hop-runaway'
+
+/**
+ * Official 2.1.323 #2164 (`eFr`): resolve the inbound peer hopChain to forward
+ * on a cross-session send. When forwarding to a same-machine local peer from a
+ * verified local peer origin, skip hop-budget propagation if
+ * `shouldSkipLocalHopCount({ verifiedLocal })` is true.
+ */
+function resolveForwardedPeerHopChain(
+  messages: ToolUseContext['messages'],
+  targetIsLocalPeer: boolean,
+): readonly string[] | undefined {
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const { extractInboundPeerHopChain } =
+    require('src/utils/peerAdmission.js') as typeof import('src/utils/peerAdmission.js')
+  const { shouldSkipLocalHopCount } =
+    require('src/utils/udsOutboundPacer.js') as typeof import('src/utils/udsOutboundPacer.js')
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  const inboundHopChain = extractInboundPeerHopChain(messages)
+  if (inboundHopChain === undefined) return undefined
+  if (targetIsLocalPeer) {
+    let verifiedLocal = false
+    if (messages) {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i] as
+          | {
+              type?: string
+              toolUseResult?: unknown
+              isCompactSummary?: boolean
+              origin?: {
+                kind?: string
+                verifiedLocal?: boolean
+                verifiedPeerPid?: number
+                from?: string
+              }
+            }
+          | undefined
+        if (
+          !msg ||
+          msg.type !== 'user' ||
+          msg.toolUseResult ||
+          msg.isCompactSummary
+        ) {
+          continue
+        }
+        if (msg.origin?.kind === 'peer') {
+          verifiedLocal =
+            msg.origin.verifiedLocal === true ||
+            msg.origin.verifiedPeerPid !== undefined ||
+            (typeof msg.origin.from === 'string' &&
+              msg.origin.from.startsWith('uds:'))
+        }
+        break
+      }
+    }
+    if (shouldSkipLocalHopCount({ verifiedLocal })) {
+      return undefined
+    }
+  }
+  return inboundHopChain
+}
+
+/**
+ * Official 2.1.323 #2101: classify a peer drop error (outbound pacer or
+ * bridge admission rejection) and notify the active REPL bridge handle via
+ * `reportPeerMessageDropped` so Desktop does not stay stuck busy.
+ */
+function classifyPeerDropOutcome(
+  err: unknown,
+): BridgePeerDropOutcome | undefined {
+  try {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { isUdsOutboundPacedError } =
+      require('src/utils/udsOutboundPacer.js') as typeof import('src/utils/udsOutboundPacer.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    if (isUdsOutboundPacedError(err)) {
+      return 'rate-limited'
+    }
+  } catch {
+    // pacer helper optional
+  }
+  const msg = typeof err === 'string' ? err : errorMessage(err)
+  const lower = msg.toLowerCase()
+  if (lower.includes('hop-loop')) return 'hop-loop'
+  if (lower.includes('hop-runaway')) return 'hop-runaway'
+  if (lower.includes('queue-full') || lower.includes('queue full')) {
+    return 'queue-full'
+  }
+  if (
+    lower.includes('rate-limited') ||
+    lower.includes('rate limit') ||
+    lower.includes('http 429')
+  ) {
+    return 'rate-limited'
+  }
+  if (lower.includes('duplicate')) return 'duplicate'
+  return undefined
+}
+
+function notifyBridgePeerMessageDropped(
+  from: string,
+  err: unknown,
+  lane: 'bridge' | 'socket',
+): void {
+  const outcome = classifyPeerDropOutcome(err)
+  if (!outcome) return
+  try {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { getReplBridgeHandle } =
+      require('src/bridge/replBridgeHandle.js') as typeof import('src/bridge/replBridgeHandle.js')
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    getReplBridgeHandle()?.reportPeerMessageDropped?.({
+      from,
+      outcome,
+      lane,
+    })
+  } catch {
+    // bridge handle optional
+  }
+}
+
 /** densable g5 leftover — ALS + optional agentId, not ToolUseContext fields. */
 function callerIsSubagentForSend(context?: { agentId?: string }): boolean {
   /* eslint-disable @typescript-eslint/no-require-imports */
@@ -2455,8 +2581,6 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             require('src/bridge/peerSessions.js') as typeof import('src/bridge/peerSessions.js')
           const { permissionModeClassOf, shouldHonorPeerFromMode } =
             require('src/utils/crossSessionInbound.js') as typeof import('src/utils/crossSessionInbound.js')
-          const { extractInboundPeerHopChain } =
-            require('src/utils/peerAdmission.js') as typeof import('src/utils/peerAdmission.js')
           /* eslint-enable @typescript-eslint/no-require-imports */
           const perm = context.getAppState().toolPermissionContext
           const fromMode = shouldHonorPeerFromMode()
@@ -2466,7 +2590,10 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                   perm.isBypassPermissionsModeAvailable,
               })
             : undefined
-          const inboundHopChain = extractInboundPeerHopChain(context.messages)
+          const inboundHopChain = resolveForwardedPeerHopChain(
+            context.messages,
+            false,
+          )
           const result = (await postInterClaudeMessage(
             addr.target,
             input.message,
@@ -2484,6 +2611,11 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
           // address-string keys would pollute sendMessagePins and never match
           // ListAgents names (SEA: only two NKp call sites, both p.displayName).
           if (!result.ok) {
+            notifyBridgePeerMessageDropped(
+              input.to,
+              result.error ?? '',
+              'bridge',
+            )
             return {
               data: {
                 success: false,
@@ -2540,8 +2672,6 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             require('src/utils/udsClient.js') as typeof import('src/utils/udsClient.js')
           const { permissionModeClassOf, shouldHonorPeerFromMode } =
             require('src/utils/crossSessionInbound.js') as typeof import('src/utils/crossSessionInbound.js')
-          const { extractInboundPeerHopChain } =
-            require('src/utils/peerAdmission.js') as typeof import('src/utils/peerAdmission.js')
           /* eslint-enable @typescript-eslint/no-require-imports */
           try {
             // densable Wei: stamp fromMode only when harbor_kite_mode_emit is on.
@@ -2553,7 +2683,10 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                     perm.isBypassPermissionsModeAvailable,
                 })
               : undefined
-            const inboundHopChain = extractInboundPeerHopChain(context.messages)
+            const inboundHopChain = resolveForwardedPeerHopChain(
+              context.messages,
+              true,
+            )
             await sendToUdsSocket(addr.target, input.message, {
               ...(fromMode !== undefined ? { fromMode } : {}),
               ...(inboundHopChain !== undefined ? { inboundHopChain } : {}),
@@ -2613,9 +2746,12 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             }
           } catch (e) {
             // densable yZt → too_large / message_too_large (tFd text already in message)
+            notifyBridgePeerMessageDropped(recipient, e, 'socket')
             /* eslint-disable @typescript-eslint/no-require-imports */
             const idle =
               require('src/utils/udsIdleNotify.js') as typeof import('src/utils/udsIdleNotify.js')
+            const { isUdsOutboundPacedError } =
+              require('src/utils/udsOutboundPacer.js') as typeof import('src/utils/udsOutboundPacer.js')
             /* eslint-enable @typescript-eslint/no-require-imports */
             return {
               data: {
@@ -2627,7 +2763,9 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                 }`,
                 ...(isUdsMessageTooLargeError(e)
                   ? { errorClass: 'message_too_large' }
-                  : {}),
+                  : isUdsOutboundPacedError(e)
+                    ? { errorClass: e.errorClass }
+                    : {}),
               },
             }
           }
@@ -2913,8 +3051,6 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             }
             const { permissionModeClassOf, shouldHonorPeerFromMode } =
               require('src/utils/crossSessionInbound.js') as typeof import('src/utils/crossSessionInbound.js')
-            const { extractInboundPeerHopChain } =
-              require('src/utils/peerAdmission.js') as typeof import('src/utils/peerAdmission.js')
             const perm = context.getAppState().toolPermissionContext
             const fromMode = shouldHonorPeerFromMode()
               ? permissionModeClassOf({
@@ -2923,7 +3059,10 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                     perm.isBypassPermissionsModeAvailable,
                 })
               : undefined
-            const inboundHopChain = extractInboundPeerHopChain(context.messages)
+            const inboundHopChain = resolveForwardedPeerHopChain(
+              context.messages,
+              false,
+            )
             const result = (await bridgePeers.postInterClaudeMessage(
               cand.id,
               input.message,
@@ -2936,6 +3075,11 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               },
             )) as { ok: boolean; error?: string }
             if (!result.ok) {
+              notifyBridgePeerMessageDropped(
+                cand.name,
+                result.error ?? '',
+                'bridge',
+              )
               return {
                 data: {
                   success: false,
@@ -3003,8 +3147,6 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             if (gated !== undefined) return gated
           }
           try {
-            const { extractInboundPeerHopChain } =
-              require('src/utils/peerAdmission.js') as typeof import('src/utils/peerAdmission.js')
             const perm = context.getAppState().toolPermissionContext
             const fromMode = shouldHonorPeerFromMode()
               ? permissionModeClassOf({
@@ -3013,7 +3155,10 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                     perm.isBypassPermissionsModeAvailable,
                 })
               : undefined
-            const inboundHopChain = extractInboundPeerHopChain(context.messages)
+            const inboundHopChain = resolveForwardedPeerHopChain(
+              context.messages,
+              true,
+            )
             await udsClient.sendToUdsSocket(cand.id, input.message, {
               ...(fromMode !== undefined ? { fromMode } : {}),
               ...(inboundHopChain !== undefined ? { inboundHopChain } : {}),
@@ -3085,13 +3230,20 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             }
           } catch (e) {
             // densable yZt → too_large / message_too_large (tFd text already in message)
+            notifyBridgePeerMessageDropped(cand.name, e, 'socket')
+            /* eslint-disable @typescript-eslint/no-require-imports */
+            const { isUdsOutboundPacedError } =
+              require('src/utils/udsOutboundPacer.js') as typeof import('src/utils/udsOutboundPacer.js')
+            /* eslint-enable @typescript-eslint/no-require-imports */
             return {
               data: {
                 success: false,
                 message: `Failed to send to ${cand.name}: ${errorMessage(e)}`,
                 ...(isUdsMessageTooLargeError(e)
                   ? { errorClass: 'message_too_large' }
-                  : {}),
+                  : isUdsOutboundPacedError(e)
+                    ? { errorClass: e.errorClass }
+                    : {}),
               },
             }
           }

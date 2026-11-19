@@ -311,15 +311,21 @@ export async function listMcpToolsAggregated(
         timeout: getMcpTimeoutMs(),
         cacheMode: 'refresh',
       })
+      const rawTools = Array.isArray(result.tools) ? result.tools : []
+      // #2055: Guard against null/undefined/non-object entries sent by an SDK host.
+      const safeTools = rawTools.filter(
+        (entry): entry is NonNullable<typeof entry> =>
+          entry !== null && typeof entry === 'object',
+      )
       // Gold `On("tools/list", void 0, …, "complete", "aggregate")`.
       emitMcpListPaginatedOn(
         'tools/list',
         undefined,
-        result.tools.length,
+        safeTools.length,
         'complete',
         'aggregate',
       )
-      return result.tools
+      return safeTools
     } catch (error) {
       if (isMcpListPaginationExceeded(error)) {
         emitMcpListPaginatedOn(

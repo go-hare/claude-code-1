@@ -663,7 +663,10 @@ export function MCPRemoteServerMenu({
   }
 
   if (server.client.type !== 'disabled') {
-    if (server.client.type !== 'needs-auth') {
+    // #2048: When a server needs-auth but still holds its sign-in credentials
+    // (`isEffectivelyAuthenticated`), offer Reconnect (and focus it) instead of
+    // opening the page with cursor on Disable.
+    if (server.client.type !== 'needs-auth' || isEffectivelyAuthenticated) {
       menuOptions.push({
         label: 'Reconnect',
         value: 'reconnectMcpServer',
@@ -682,6 +685,15 @@ export function MCPRemoteServerMenu({
       value: 'back',
     });
   }
+
+  // #2048: Match official `un` default cursor — skip auth-maintenance entries
+  // (`reauth`, `clear-auth`, `claudeai-clear-auth`) when selecting initial focus
+  // so a server with stored sign-in opens on `Reconnect`.
+  const authMaintenanceValues = ['reauth', 'clear-auth', 'claudeai-clear-auth'];
+  const defaultFocusValue =
+    menuOptions[0] && authMaintenanceValues.includes(menuOptions[0].value)
+      ? menuOptions.find(opt => !authMaintenanceValues.includes(opt.value))?.value
+      : undefined;
 
   return (
     <Box flexDirection="column">
@@ -769,6 +781,34 @@ export function MCPRemoteServerMenu({
                 <Text color="error">{server.client.toolsListError}</Text>
               </Box>
             )}
+          {/* #2151: Show omitted tools count and per-tool schema reasons in /mcp */}
+          {server.client.type === 'connected' &&
+            !server.client.toolsListError &&
+            server.client.droppedTools &&
+            server.client.droppedTools.length > 0 && (
+              <Box flexDirection="column">
+                <Text>
+                  <Text bold>Issue: </Text>
+                  <Text dimColor>
+                    Claude wasn&apos;t given {server.client.droppedTools.length}{' '}
+                    {server.client.droppedTools.length === 1 ? 'tool' : 'tools'} because the Anthropic API would reject{' '}
+                    {server.client.droppedTools.length === 1 ? 'its input schema' : 'their input schemas'}. Once the
+                    server is fixed, choose Reconnect.
+                  </Text>
+                </Text>
+                {server.client.droppedTools.slice(0, 3).map(dropped => (
+                  <Text key={dropped.toolName} dimColor wrap="truncate-middle">
+                    {dropped.toolName || '(unnamed tool)'}: {dropped.reason}
+                  </Text>
+                ))}
+                {server.client.droppedTools.length > 3 && (
+                  <Text dimColor>
+                    … and {server.client.droppedTools.length - 3} more{' '}
+                    {server.client.droppedTools.length - 3 === 1 ? 'tool' : 'tools'}
+                  </Text>
+                )}
+              </Box>
+            )}
         </Box>
 
         {error && (
@@ -781,6 +821,7 @@ export function MCPRemoteServerMenu({
           <Box marginTop={1}>
             <Select
               options={menuOptions}
+              defaultFocusValue={defaultFocusValue}
               onChange={async value => {
                 switch (value) {
                   case 'tools':

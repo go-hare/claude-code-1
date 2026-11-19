@@ -50,6 +50,7 @@ import {
 import { drainRunLoop } from './drainRunLoop.js'
 import { notifyExpectedEscape } from './escHotkey.js'
 import { requireComputerUseInput } from './inputLoader.js'
+import { assertSafeKeyChord, trackHeldChord } from './keyChordSafety.js'
 import { requireComputerUseSwift } from './swiftLoader.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -316,6 +317,7 @@ async function animatedMove(
 export function createCliExecutor(opts: {
   getMouseAnimationEnabled: () => boolean
   getHideBeforeActionEnabled: () => boolean
+  getAllowSystemKeyCombos?: () => boolean
 }): ComputerExecutor {
   // Non-macOS: delegate entirely to the cross-platform executor.
   // No macOS code paths, no drainRunLoop, no @ant packages.
@@ -528,7 +530,11 @@ export function createCliExecutor(opts: {
      */
     async key(keySequence: string, repeat?: number): Promise<void> {
       const input = requireComputerUseInput()
-      const parts = keySequence.split('+').filter(p => p.length > 0)
+      const rawParts = keySequence.split('+').filter(p => p.length > 0)
+      const parts = assertSafeKeyChord(rawParts, 'Key chord', {
+        platform: 'darwin',
+        allowSystemKeyCombos: opts.getAllowSystemKeyCombos?.() === true,
+      })
       const isEsc = isBareEscape(parts)
       const n = repeat ?? 1
       await drainRunLoop(async () => {
@@ -542,21 +548,16 @@ export function createCliExecutor(opts: {
 
     async holdKey(keyNames: string[], durationMs: number): Promise<void> {
       const input = requireComputerUseInput()
-      // Press/release each wrapped in drainRunLoop; the sleep sits outside so
-      // durationMs isn't bounded by drainRunLoop's 30s timeout. `pressed`
-      // tracks which presses landed so a mid-press throw still releases
-      // everything that was actually pressed.
-      //
-      // `orphaned` guards against a timeout-orphan race: if the press-phase
-      // drainRunLoop times out while the esc-hotkey pump-retain keeps the
-      // pump running, the orphaned lambda would continue pushing to `pressed`
-      // after finally's releasePressed snapshotted the length — leaving keys
-      // stuck. The flag stops the lambda at the next iteration.
+      const safeKeyNames = assertSafeKeyChord(keyNames, 'Hold key', {
+        platform: 'darwin',
+        allowSystemKeyCombos: opts.getAllowSystemKeyCombos?.() === true,
+      })
+      const releaseTracking = trackHeldChord(safeKeyNames)
       const pressed: string[] = []
       let orphaned = false
       try {
         await drainRunLoop(async () => {
-          for (const k of keyNames) {
+          for (const k of safeKeyNames) {
             if (orphaned) return
             // Bare Escape: notify the CGEventTap so it doesn't fire the
             // abort callback for a model-synthesized press. Same as key().
@@ -570,15 +571,25 @@ export function createCliExecutor(opts: {
         await sleep(durationMs)
       } finally {
         orphaned = true
+        releaseTracking()
         await drainRunLoop(() => releasePressed(input, pressed))
       }
     },
 
-    async type(text: string, opts: { viaClipboard: boolean }): Promise<void> {
+    async type(
+      text: string,
+      typeOpts: { viaClipboard: boolean },
+    ): Promise<void> {
       const input = requireComputerUseInput()
-      if (opts.viaClipboard) {
+      if (typeOpts.viaClipboard) {
         await drainRunLoop(() => typeViaClipboard(input, text))
         return
+      }
+      for (const ch of text) {
+        assertSafeKeyChord([ch], 'Typed text', {
+          platform: 'darwin',
+          allowSystemKeyCombos: opts.getAllowSystemKeyCombos?.() === true,
+        })
       }
       await input.typeText(text)
     },

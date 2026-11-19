@@ -46,7 +46,9 @@ const MAX_WORKTREE_FANOUT = 50
  * storageV5 (SEA 3rd arg) is not ported — invent-ban.
  */
 
-export const BRIDGE_POINTER_TTL_MS = 4 * 60 * 60 * 1000
+// Official 2.1.323 #2114: 30 days (raised from 4 hours) so `claude remote-control`
+// keeps its computer identity when restarted in the same folder after >4 hours.
+export const BRIDGE_POINTER_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
 const BridgePointerSchema = lazySchema(() =>
   z.object({

@@ -72,7 +72,11 @@ import {
   parseFrontmatter,
   splitPathInFrontmatter,
 } from './frontmatterParser.js'
-import { getFsImplementation, safeResolvePath } from './fsOperations.js'
+import {
+  getFsImplementation,
+  isAutomountMapRoot,
+  safeResolvePath,
+} from './fsOperations.js'
 import { findCanonicalGitRoot, findGitRoot } from './git.js'
 import {
   executeInstructionsLoadedHooks,
@@ -999,6 +1003,11 @@ export const getMemoryFiles = memoize(
 
     // Process from root downward to CWD
     for (const dir of dirs.reverse()) {
+      // 2.1.323 #2161: Do not look up CLAUDE.md / .claude inside Linux autofs
+      // map roots (such as `/home`) or `CLAUDE_CODE_AUTOMOUNT_ROOTS`.
+      if (isAutomountMapRoot(dir)) {
+        continue
+      }
       // In a nested worktree, skip checked-in files from the main repo's
       // working tree (dirs inside canonicalRoot but outside the worktree).
       const skipProject =

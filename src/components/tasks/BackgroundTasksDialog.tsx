@@ -1628,7 +1628,10 @@ function toListItem(task: TaskState): ListItem {
       return {
         id: task.id,
         type: 'mcp_task',
-        label: task.description,
+        label:
+          task.status === 'running' && task.openQuestion !== undefined
+            ? `${task.description} · needs your input`
+            : task.description,
         status: task.status,
         task,
       };

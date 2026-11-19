@@ -260,6 +260,9 @@ describe('DEFAULT_HARBOR_KITE_LIMITS (vla)', () => {
       maxChainLength: 28,
       maxTrackedSenders: 256,
       maxQueuedPeerMessages: 50,
+      maxDesktopForwards: 100_000,
+      maxLocalRelays: 100_000,
+      countLocalHops: false,
     })
   })
 })

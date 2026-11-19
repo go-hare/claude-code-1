@@ -842,3 +842,32 @@ export function remapDeniedHelperModel(
   if (!isModelDeniedByPolicy(model)) return model
   return fallback
 }
+
+/**
+ * Official 2.1.323 #2133: format stderr warning for `claude -p` text output
+ * when settings (`deniedModels` / `availableModels`) block the requested model
+ * and Claude Code falls back to another model.
+ */
+export function formatPrintBlockedModelStderrWarning(
+  requestedModel: string,
+  effectiveModel: string,
+): string | null {
+  const req = requestedModel.trim()
+  if (!req) return null
+  if (isModelAllowed(req)) return null
+  const shownReq = stripContextSizeTag(req)
+  const shownEff = stripContextSizeTag(effectiveModel.trim())
+  if (shownReq === shownEff) return null
+  return `Warning: Requested model "${shownReq}" is blocked by settings; using "${shownEff}" instead.\n`
+}
+
+/**
+ * Official 2.1.323 #2134: do not print informational notes about `deniedModels`
+ * and `availableModels` entries on every `claude -p` run (`/status` and
+ * `claude doctor` still list them).
+ */
+export function shouldEmitModelPolicyCatalogNotesOnStartup(
+  isPrintMode: boolean,
+): boolean {
+  return !isPrintMode
+}

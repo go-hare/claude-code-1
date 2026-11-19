@@ -14,9 +14,18 @@ import type {
 import type {
   EditablePromptInputMode,
   PromptInputMode,
-  QueuedCommand,
+  QueuedCommand as BaseQueuedCommand,
   QueuePriority,
 } from '../types/textInputTypes.js'
+
+/**
+ * Official 2.1.323 (#2066): formally include optional `textNotTyped` on
+ * `QueuedCommand` so picked @-mention titles/names from claude.ai / desktop
+ * (tagged by `inboundMessages.ts`) propagate intact through the command queue.
+ */
+export type QueuedCommand = BaseQueuedCommand & {
+  textNotTyped?: boolean
+}
 import type { PastedContent } from './config.js'
 import { stripCrossSessionHopChain } from './crossSessionMessage.js'
 import { logForDebugging } from './debug.js'
@@ -1040,7 +1049,15 @@ export class MessageQueueInstance {
     const ideSelection = editable.findLast(
       cmd => cmd.ideSelection !== undefined,
     )?.ideSelection
-    return { text: newInput, cursorOffset, images, mode, ideSelection }
+    const textNotTyped = editable.some(cmd => cmd.textNotTyped === true)
+    return {
+      text: newInput,
+      cursorOffset,
+      images,
+      mode,
+      ideSelection,
+      ...(textNotTyped ? { textNotTyped: true } : {}),
+    }
   }
 
   popEditableAt(
@@ -1088,6 +1105,7 @@ export class MessageQueueInstance {
       images,
       mode: cmd.mode === 'bash' ? 'bash' : 'prompt',
       ideSelection: cmd.ideSelection,
+      ...(cmd.textNotTyped === true ? { textNotTyped: true } : {}),
     }
   }
 
@@ -1888,6 +1906,8 @@ export type PopAllEditableResult = {
   mode: 'bash' | 'prompt'
   /** densable pop-to-edit `returnIdeSelection`. */
   ideSelection?: QueuedCommand['ideSelection']
+  /** Official 2.1.323 (#2066): preserved when any popped entry had `textNotTyped: true`. */
+  textNotTyped?: boolean
 }
 
 /**
@@ -2016,6 +2036,9 @@ export function countRemainingWakePollEventsAfter(
  */
 export function isSlashCommand(cmd: QueuedCommand): boolean {
   if (cmd.mode === 'poll-event') {
+    return false
+  }
+  if (cmd.textNotTyped === true) {
     return false
   }
   return (

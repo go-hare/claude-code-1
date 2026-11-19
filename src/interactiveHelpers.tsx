@@ -50,6 +50,7 @@ import {
 } from './utils/residualFinalEnvGates.js';
 import { getBaseRenderOptions } from './utils/renderOptions.js';
 import { isBgSession } from './utils/concurrentSessions.js';
+import { isSafeModeEnabled } from './utils/safeMode.js';
 import { releaseEarlyInputCapture } from './utils/earlyInput.js';
 import { isFullscreenEnvEnabled, mouseTrackingProp } from './utils/fullscreen.js';
 import { getPlatform } from './utils/platform.js';
@@ -186,9 +187,13 @@ export async function showSetupScreens(
   // kn() = Qo() = Is()==="bg" → isBgSession().
   if (isBgSession() || process.env.CLAUDE_BRIDGE_REATTACH_SESSION) {
     setSessionTrustAccepted(true);
-    const mcpApprovalSkipWarning = await handleMcpjsonServerApprovals(root, {
-      strictMcpConfig,
-    });
+    // #2046: `claude --bg --safe-mode` never starts project MCP servers, so do
+    // not pause startup to prompt for project MCP server approvals.
+    const mcpApprovalSkipWarning = isSafeModeEnabled()
+      ? null
+      : await handleMcpjsonServerApprovals(root, {
+          strictMcpConfig,
+        });
     return setupScreensResult(false, mcpApprovalSkipWarning);
   }
 

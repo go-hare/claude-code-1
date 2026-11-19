@@ -1,4 +1,6 @@
+import { getCwd } from '../utils/cwd.js'
 import { parseFrontmatter } from '../utils/frontmatterParser.js'
+import { isInsideGitWorkTree } from '../utils/git.js'
 import { parseSlashCommandToolsFromFrontmatter } from '../utils/markdownConfigLoader.js'
 import { executeShellCommandsInPrompt } from '../utils/promptShellExecution.js'
 import { createMovedToPluginCommand } from './createMovedToPluginCommand.js'
@@ -195,7 +197,11 @@ Begin your analysis now. Do this in 3 steps:
 
 Your final reply must contain the markdown report and nothing else.`
 
-export default createMovedToPluginCommand({
+const SECURITY_REVIEW_ALLOWED_TOOLS = parseSlashCommandToolsFromFrontmatter(
+  parseFrontmatter(SECURITY_REVIEW_MARKDOWN).frontmatter['allowed-tools'],
+)
+
+const securityReviewBaseCommand = createMovedToPluginCommand({
   name: 'security-review',
   description:
     'Complete a security review of the pending changes on the current branch',
@@ -203,6 +209,19 @@ export default createMovedToPluginCommand({
   pluginName: 'security-review',
   pluginCommand: 'security-review',
   async getPromptWhileMarketplaceIsPrivate(_args, context) {
+    // Official 2.1.325 #2262 (`dan`): verify git work tree using findGitRoot +
+    // `git rev-parse --is-inside-work-tree` so bare-repo worktrees,
+    // `--separate-git-dir`, and Android `repo` checkouts are recognized.
+    const cwd = getCwd()
+    if (!(await isInsideGitWorkTree(cwd))) {
+      return [
+        {
+          type: 'text',
+          text: `Tell the user: /security-review needs to run inside a git repository, but the current working directory (\`${cwd}\`) is not one.\n\nIf the repository is in a subdirectory, \`cd\` into it first and then re-run /security-review.`,
+        },
+      ]
+    }
+
     // Parse frontmatter from the markdown
     const parsed = parseFrontmatter(SECURITY_REVIEW_MARKDOWN)
 
@@ -240,4 +259,12 @@ export default createMovedToPluginCommand({
       },
     ]
   },
+})
+
+// 2.1.323 #2163 (SEA `asksBeforeModelRuns: pLe` @290823115):
+// Expose `allowedTools` on the command object so SkillTool.checkPermissions
+// does not treat `/security-review` as a zero-capability safe prompt and asks
+// the user for confirmation before Claude runs it.
+export default Object.assign(securityReviewBaseCommand, {
+  allowedTools: SECURITY_REVIEW_ALLOWED_TOOLS,
 })

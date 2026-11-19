@@ -6,6 +6,10 @@ import { getOauthConfig } from '../../constants/oauth.js'
 import { logError } from '../../utils/log.js'
 import { shouldUseClaudeAIAuth } from './client.js'
 
+/** Official 2.1.325 #2288 (`k`) — plain-text page served on failed/canceled OAuth callback. */
+export const OAUTH_ERROR_REDIRECT_BODY =
+  'Sign-in was canceled or failed. You can close this window.'
+
 /**
  * Temporary localhost HTTP server that listens for OAuth authorization code redirects.
  *
@@ -105,18 +109,17 @@ export class AuthCodeListener {
   }
 
   /**
-   * Handles error case by sending a redirect to the appropriate success page with an error indicator,
-   * ensuring the browser flow is completed properly.
+   * Official 2.1.325 #2288 — serve a plain-text error/cancel page instead of
+   * redirecting the browser to CLAUDEAI_SUCCESS_URL when sign-in fails or is
+   * canceled.
    */
   handleErrorRedirect(): void {
     if (!this.pendingResponse) return
 
-    // TODO: swap to a different url once we have an error page
-    const errorUrl = getOauthConfig().CLAUDEAI_SUCCESS_URL
-
-    // Send browser to error page
-    this.pendingResponse.writeHead(302, { Location: errorUrl })
-    this.pendingResponse.end()
+    this.pendingResponse.writeHead(200, {
+      'Content-Type': 'text/plain; charset=utf-8',
+    })
+    this.pendingResponse.end(OAUTH_ERROR_REDIRECT_BODY)
     this.pendingResponse = null
 
     logEvent('tengu_oauth_automatic_redirect_error', {})
@@ -145,6 +148,23 @@ export class AuthCodeListener {
 
     const authCode = parsedUrl.searchParams.get('code') ?? undefined
     const state = parsedUrl.searchParams.get('state') ?? undefined
+    const oauthError = parsedUrl.searchParams.get('error') ?? undefined
+
+    if (!authCode && oauthError) {
+      const errorDesc =
+        parsedUrl.searchParams.get('error_description') ?? undefined
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' })
+      res.end(OAUTH_ERROR_REDIRECT_BODY)
+      logEvent('tengu_oauth_automatic_redirect_error', {})
+      this.reject(
+        new Error(
+          errorDesc
+            ? `OAuth authorization failed (${oauthError}): ${errorDesc}`
+            : `OAuth authorization failed: ${oauthError}`,
+        ),
+      )
+      return
+    }
 
     this.validateAndRespond(authCode, state, res)
   }

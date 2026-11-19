@@ -277,6 +277,17 @@ export function logPluginsEnabledForSession(
   for (const plugin of plugins) {
     const marketplace = telemetryMarketplaceForPlugin(plugin)
     const serverPluginId = telemetryServerPluginId(plugin.serverPluginId)
+    const scope = getTelemetryPluginScope(
+      plugin.name,
+      marketplace,
+      managedNames,
+    )
+    if (
+      (scope === 'official' || scope === 'default-bundle') &&
+      marketplace !== undefined
+    ) {
+      registerFirstPartyPluginForAttribution(plugin.name, marketplace)
+    }
 
     logEvent('tengu_plugin_enabled_for_session', {
       _PROTO_plugin_name:
@@ -369,5 +380,210 @@ export function logPluginLoadErrors(
       }),
       ...buildPluginTelemetryFields(pluginName, marketplace, managedNames),
     })
+  }
+}
+
+/**
+ * In-process registry of loaded official / default-bundle plugins -> marketplace
+ * name, mirroring official `fPa` / `_r().firstPartyPlugins` (@282347000).
+ */
+const firstPartyPluginsRegistry = new Map<string, string>()
+
+export function registerFirstPartyPluginForAttribution(
+  pluginName: string,
+  marketplaceName: string,
+): void {
+  firstPartyPluginsRegistry.set(pluginName, marketplaceName)
+}
+
+export function getFirstPartyPluginsForAttribution(): ReadonlyMap<
+  string,
+  string
+> {
+  return firstPartyPluginsRegistry
+}
+
+export function clearFirstPartyPluginsForAttributionForTests(): void {
+  firstPartyPluginsRegistry.clear()
+}
+
+export type OTelAttributionInput = {
+  attributionAgent?: string
+  attributionSkill?: string
+  attributionPlugin?: string
+  attributionMcpServer?: string
+  attributionMcpTool?: string
+}
+
+/**
+ * Official `Mu(s)` (@282347600): extract the plugin namespace prefix before
+ * the first `:` in a skill or agent name (`plugin:item` -> `plugin`).
+ * User-defined subagents without a plugin prefix return `undefined`.
+ */
+export function extractAttributionPluginPrefix(
+  name: string | undefined,
+): string | undefined {
+  if (!name) return undefined
+  const idx = name.indexOf(':')
+  return idx > 0 ? name.slice(0, idx) : undefined
+}
+
+/**
+ * Official `x5` + `Lc` (@282347500): derive raw attribution fields from
+ * `querySource` (`agent:builtin:<name>` / `agent:custom:<name>`) and optional
+ * active skill/plugin context.
+ */
+export function deriveAttributionFromQuerySource(
+  querySource: string | undefined,
+  activeSkill?: string,
+  explicitPlugin?: string,
+): OTelAttributionInput {
+  const withSkill = (
+    skill: string | undefined,
+    fallbackPlugin?: string,
+  ): OTelAttributionInput => {
+    if (!skill) {
+      return fallbackPlugin ? { attributionPlugin: fallbackPlugin } : {}
+    }
+    const plugin = extractAttributionPluginPrefix(skill) ?? fallbackPlugin
+    return {
+      attributionSkill: skill,
+      ...(plugin ? { attributionPlugin: plugin } : {}),
+    }
+  }
+
+  if (!querySource) return {}
+  if (querySource.startsWith('agent:builtin:')) {
+    return {
+      attributionAgent: querySource.slice('agent:builtin:'.length),
+      ...withSkill(activeSkill, explicitPlugin),
+    }
+  }
+  if (querySource.startsWith('agent:custom:')) {
+    const agentName = querySource.slice('agent:custom:'.length)
+    return {
+      attributionAgent: agentName,
+      ...withSkill(
+        activeSkill,
+        explicitPlugin ?? extractAttributionPluginPrefix(agentName),
+      ),
+    }
+  }
+  if (querySource.startsWith('agent:')) {
+    return withSkill(activeSkill, explicitPlugin)
+  }
+  if (activeSkill || explicitPlugin) {
+    return withSkill(activeSkill, explicitPlugin)
+  }
+  return {}
+}
+
+/**
+ * Official 2.1.323 (#2126, `aI` @282350766):
+ * Redact attribution fields for OpenTelemetry export.
+ *
+ * Critically, for non-builtin agents (`!querySource?.startsWith('agent:builtin:')`),
+ * `agent.name` is only kept unredacted when BOTH the active `attributionPlugin`
+ * is a first-party plugin AND the agent's own plugin prefix
+ * (`extractAttributionPluginPrefix(attributionAgent)`) is also a first-party
+ * plugin. A user-defined subagent launched by an official plugin's skill therefore
+ * gets `agent.name = 'custom'` instead of leaking the user-defined name.
+ */
+export function sanitizeAttributionForOTel(
+  querySource: string | undefined,
+  attribution: OTelAttributionInput,
+  firstPartyPlugins:
+    | ReadonlyMap<string, string>
+    | ReadonlySet<string> = firstPartyPluginsRegistry,
+): OTelAttributionInput {
+  const {
+    attributionAgent,
+    attributionSkill,
+    attributionPlugin,
+    attributionMcpServer,
+    attributionMcpTool,
+  } = attribution
+  const sanitized: OTelAttributionInput = {}
+
+  if (attributionMcpServer !== undefined) {
+    sanitized.attributionMcpServer = attributionMcpServer
+    if (attributionMcpTool !== undefined) {
+      sanitized.attributionMcpTool = attributionMcpTool
+    }
+  }
+
+  if (attributionAgent !== undefined) {
+    if (querySource?.startsWith('agent:builtin:')) {
+      sanitized.attributionAgent = attributionAgent
+    } else {
+      const agentPlugin = extractAttributionPluginPrefix(attributionAgent)
+      const isFirstPartyAgent =
+        attributionPlugin !== undefined &&
+        firstPartyPlugins.has(attributionPlugin) &&
+        agentPlugin !== undefined &&
+        firstPartyPlugins.has(agentPlugin)
+      sanitized.attributionAgent = isFirstPartyAgent
+        ? attributionAgent
+        : 'custom'
+    }
+  }
+
+  if (attributionPlugin !== undefined) {
+    if (firstPartyPlugins.has(attributionPlugin)) {
+      sanitized.attributionPlugin = attributionPlugin
+      if (attributionSkill !== undefined) {
+        sanitized.attributionSkill = attributionSkill
+      }
+    } else {
+      sanitized.attributionPlugin = 'third-party'
+      if (attributionSkill !== undefined) {
+        sanitized.attributionSkill = 'third-party'
+      }
+    }
+  } else if (attributionSkill !== undefined) {
+    sanitized.attributionSkill = attributionSkill
+  }
+
+  return sanitized
+}
+
+/**
+ * Official `eI(aI(...))` (@282350400): build OpenTelemetry attribution
+ * attributes (`agent.name`, `skill.name`, `plugin.name`, `marketplace.name`,
+ * `mcp_server.name`, `mcp_tool.name`) with `#2126` redaction applied.
+ */
+export function buildOTelAttributionAttributes(
+  querySource: string | undefined,
+  attribution: OTelAttributionInput,
+  firstPartyPlugins:
+    | ReadonlyMap<string, string>
+    | ReadonlySet<string> = firstPartyPluginsRegistry,
+): Record<string, string> {
+  const sanitized = sanitizeAttributionForOTel(
+    querySource,
+    attribution,
+    firstPartyPlugins,
+  )
+  const marketplace =
+    sanitized.attributionPlugin && firstPartyPlugins instanceof Map
+      ? firstPartyPlugins.get(sanitized.attributionPlugin)
+      : undefined
+  return {
+    ...(sanitized.attributionAgent
+      ? { 'agent.name': sanitized.attributionAgent }
+      : {}),
+    ...(sanitized.attributionSkill
+      ? { 'skill.name': sanitized.attributionSkill }
+      : {}),
+    ...(sanitized.attributionPlugin
+      ? { 'plugin.name': sanitized.attributionPlugin }
+      : {}),
+    ...(marketplace ? { 'marketplace.name': marketplace } : {}),
+    ...(sanitized.attributionMcpServer
+      ? { 'mcp_server.name': sanitized.attributionMcpServer }
+      : {}),
+    ...(sanitized.attributionMcpTool
+      ? { 'mcp_tool.name': sanitized.attributionMcpTool }
+      : {}),
   }
 }

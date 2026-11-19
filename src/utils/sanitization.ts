@@ -90,6 +90,109 @@ export function recursivelySanitizeUnicode(value: unknown): unknown {
   return value
 }
 
+// --- Lone UTF-16 surrogate sanitization (Official 2.1.323 #2062: Zu / ef / Tnr / d) ---
+
+const LONE_SURROGATE_TEST_RE =
+  /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/
+const LONE_SURROGATE_GLOBAL_RE =
+  /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g
+
+const nativeIsWellFormed: ((s: string) => boolean) | undefined =
+  typeof (String.prototype as { isWellFormed?: () => boolean }).isWellFormed ===
+  'function'
+    ? Function.prototype.call.bind(
+        (String.prototype as { isWellFormed: () => boolean }).isWellFormed,
+      )
+    : undefined
+
+const nativeToWellFormed: ((s: string) => string) | undefined =
+  typeof (String.prototype as { toWellFormed?: () => string }).toWellFormed ===
+  'function'
+    ? Function.prototype.call.bind(
+        (String.prototype as { toWellFormed: () => string }).toWellFormed,
+      )
+    : undefined
+
+/** Official `Zu` — returns true when string contains no lone UTF-16 surrogates. */
+export function isWellFormedUnicode(value: string): boolean {
+  if (nativeIsWellFormed) return nativeIsWellFormed(value)
+  return !LONE_SURROGATE_TEST_RE.test(value)
+}
+
+/** Official `ef` — replace lone UTF-16 surrogates with U+FFFD so strict JSON parsers accept it. */
+export function toWellFormedUnicode(value: string): string {
+  if (nativeToWellFormed) return nativeToWellFormed(value)
+  return value.replace(LONE_SURROGATE_GLOBAL_RE, '\uFFFD')
+}
+
+/**
+ * Official 2.1.323 (#2062) `Tnr` / `FYr` (`d(t, sanitizeKeys)`):
+ * Iteratively walk arrays and objects in-place, replacing lone UTF-16 surrogates
+ * in string values AND (when `sanitizeKeys` is true) in object property names
+ * (e.g. broken emoji characters in tool_use input parameter keys).
+ * Returns true if any value or key was mutated.
+ */
+export function sanitizeLoneSurrogatesInPlace(
+  root: unknown,
+  sanitizeKeys = true,
+): boolean {
+  let mutated = false
+  const stack: unknown[] = [root]
+  while (stack.length > 0) {
+    const current = stack.pop()
+    if (Array.isArray(current)) {
+      for (let i = 0; i < current.length; i++) {
+        const item = current[i]
+        if (typeof item === 'string') {
+          if (!isWellFormedUnicode(item)) {
+            current[i] = toWellFormedUnicode(item)
+            mutated = true
+          }
+        } else if (item !== null && typeof item === 'object') {
+          stack.push(item)
+        }
+      }
+    } else if (current !== null && typeof current === 'object') {
+      const obj = current as Record<string, unknown>
+      const keys = Object.keys(obj)
+      for (const key of keys) {
+        const val = obj[key]
+        if (typeof val === 'string') {
+          if (!isWellFormedUnicode(val)) {
+            obj[key] = toWellFormedUnicode(val)
+            mutated = true
+          }
+        } else if (val !== null && typeof val === 'object') {
+          stack.push(val)
+        }
+      }
+      if (
+        sanitizeKeys &&
+        !keys.every(isWellFormedUnicode) &&
+        Object.isExtensible(obj) &&
+        keys.every(
+          k => Object.getOwnPropertyDescriptor(obj, k)?.configurable === true,
+        )
+      ) {
+        const entries = Object.entries(obj)
+        for (const k of keys) {
+          delete obj[k]
+        }
+        for (const [k, v] of entries) {
+          Object.defineProperty(obj, toWellFormedUnicode(k), {
+            value: v,
+            writable: true,
+            enumerable: true,
+            configurable: true,
+          })
+        }
+        mutated = true
+      }
+    }
+  }
+  return mutated
+}
+
 // --- 256-char agent/skill shown-name validation (325: o8 / Enr / Qse / k5 / kH / tengu_slate_wicket) ---
 
 export const MAX_SHOWN_NAME_LENGTH = 256

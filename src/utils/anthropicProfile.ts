@@ -16,6 +16,7 @@ import {
   OAUTH_BETA_HEADER,
 } from 'src/constants/oauth.js'
 import { logEvent } from 'src/services/analytics/index.js'
+import { registerCleanup } from './cleanupRegistry.js'
 import { logForDebugging } from './debug.js'
 import { isBareMode, isEnvTruthy } from './envUtils.js'
 import { getAPIProvider } from './model/providers.js'
@@ -559,6 +560,30 @@ async function writeCredentialsAtomic(
 }
 
 let pendingProfileRefresh: Promise<ProfileUserOauthToken> | null = null
+
+const PROFILE_REFRESH_DRAIN_TIMEOUT_MS = 5000
+
+/**
+ * Official 2.1.323 (#1984): Wait for an in-flight Console profile token renewal
+ * before short-lived CLI commands (`claude plugin`, `claude mcp list`) exit, so
+ * a rotated refresh token is always written atomically to disk instead of
+ * signing the user out.
+ */
+export async function drainPendingProfileRefresh(
+  timeoutMs: number = PROFILE_REFRESH_DRAIN_TIMEOUT_MS,
+): Promise<void> {
+  const inflight = pendingProfileRefresh
+  if (!inflight) return
+  await Promise.race([
+    inflight.catch(() => {}),
+    new Promise<void>(resolve => {
+      const timer = setTimeout(resolve, timeoutMs)
+      timer.unref?.()
+    }),
+  ])
+}
+
+registerCleanup(() => drainPendingProfileRefresh())
 /** densable lt → next user_oauth resolve must forceRefresh through H. */
 let profileUserOauthForceRefresh = false
 /**

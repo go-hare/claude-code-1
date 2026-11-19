@@ -10,6 +10,7 @@ import {
 import { useAppState } from 'src/state/AppState.js';
 import {
   type DiffStats,
+  type FileHistoryState,
   fileHistoryCanRestore,
   fileHistoryEnabled,
   fileHistoryGetDiffStats,
@@ -455,49 +456,44 @@ export function MessageSelector({
   const [fileHistoryMetadata, setFileHistoryMetadata] = useState<Record<number, DiffStats | undefined>>({});
 
   useEffect(() => {
-    if (!isFileHistoryEnabled) {
+    if (!isFileHistoryEnabled || preselectedMessage) {
       return;
     }
     const controller = new AbortController();
-    const SLICE_MS = 16;
 
-    async function loadFileHistoryMetadata() {
-      const nextMetadata: Record<number, DiffStats | undefined> = {};
-      let deadline = performance.now() + SLICE_MS;
-      for (let itemIndex = messageOptions.length - 1; itemIndex >= 0; itemIndex--) {
-        if (controller.signal.aborted) return;
-        const userMessage = messageOptions[itemIndex]!;
-        if (
-          userMessage.uuid !== currentUUID &&
-          userMessage.uuid !== preClearUUID &&
-          userMessage.uuid !== extraEntryUUID
-        ) {
-          const canRestore = fileHistoryCanRestore(fileHistory, userMessage.uuid);
-          const nextUserMessage = messageOptions.at(itemIndex + 1);
-          nextMetadata[itemIndex] = canRestore
-            ? computeDiffStatsBetweenMessages(
-                messages,
-                userMessage.uuid,
-                nextUserMessage?.uuid !== currentUUID ? nextUserMessage?.uuid : undefined,
-              )
-            : undefined;
+    void loadRewindDiffStatsWithBudget({
+      messageOptions,
+      messages,
+      fileHistory,
+      currentUUID,
+      preClearUUID,
+      extraEntryUUID,
+      signal: controller.signal,
+      onPartialUpdate: partial => {
+        if (!controller.signal.aborted) {
+          setFileHistoryMetadata(partial);
         }
-        if (performance.now() >= deadline) {
-          setFileHistoryMetadata({ ...nextMetadata });
-          await new Promise<void>(resolve => setTimeout(resolve, 0));
-          deadline = performance.now() + SLICE_MS;
+      },
+    })
+      .then(finalMetadata => {
+        if (!controller.signal.aborted) {
+          setFileHistoryMetadata(finalMetadata);
         }
-      }
-      if (!controller.signal.aborted) {
-        setFileHistoryMetadata({ ...nextMetadata });
-      }
-    }
-
-    void loadFileHistoryMetadata().catch(logError);
+      })
+      .catch(logError);
     return () => {
       controller.abort();
     };
-  }, [messageOptions, messages, currentUUID, preClearUUID, fileHistory, isFileHistoryEnabled]);
+  }, [
+    messageOptions,
+    messages,
+    currentUUID,
+    preClearUUID,
+    extraEntryUUID,
+    fileHistory,
+    isFileHistoryEnabled,
+    preselectedMessage,
+  ]);
 
   const canRestoreCode =
     isFileHistoryEnabled && diffStatsForRestore?.filesChanged && diffStatsForRestore.filesChanged.length > 0;
@@ -1037,4 +1033,112 @@ export function messagesAfterAreOnlySynthetic(messages: Message[], fromIndex: nu
     // Other types (e.g., tombstone) are non-meaningful, continue
   }
   return true;
+}
+
+const DEFAULT_REWIND_DIFF_BUDGET_MS = 2000;
+
+function raceWithTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | undefined> {
+  if (timeoutMs <= 0) return Promise.resolve(undefined);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    promise.finally(() => {
+      if (timer !== undefined) clearTimeout(timer);
+    }),
+    new Promise<undefined>(resolve => {
+      timer = setTimeout(() => resolve(undefined), timeoutMs);
+    }),
+  ]);
+}
+
+/**
+ * Official 2.1.323 (#2085): asynchronously load `/rewind` diff stats with a
+ * timeout budget on the latest working-tree snapshot so network paths or hung
+ * folders never prevent older snapshot labels from appearing promptly.
+ */
+export async function loadRewindDiffStatsWithBudget(params: {
+  messageOptions: readonly UserMessage[];
+  messages: readonly Message[];
+  fileHistory: FileHistoryState;
+  currentUUID: string;
+  preClearUUID: string;
+  extraEntryUUID: string;
+  signal: AbortSignal;
+  budgetMs?: number;
+  onPartialUpdate?: (metadata: Record<number, DiffStats | undefined>) => void;
+  canRestore?: (messageId: UUID) => boolean;
+  computeWorkingTreeDiff?: (messageId: UUID) => Promise<DiffStats | undefined>;
+  computeBetweenMessagesDiff?: (fromId: UUID, toId: UUID | undefined) => DiffStats | undefined;
+}): Promise<Record<number, DiffStats | undefined>> {
+  const {
+    messageOptions,
+    messages,
+    fileHistory,
+    currentUUID,
+    preClearUUID,
+    extraEntryUUID,
+    signal,
+    budgetMs = DEFAULT_REWIND_DIFF_BUDGET_MS,
+    onPartialUpdate,
+    canRestore = id => fileHistoryCanRestore(fileHistory, id),
+    computeWorkingTreeDiff = id => fileHistoryGetDiffStats(fileHistory, id),
+    computeBetweenMessagesDiff = (fromId, toId) => computeDiffStatsBetweenMessages(messages as Message[], fromId, toId),
+  } = params;
+
+  const nextMetadata: Record<number, DiffStats | undefined> = {};
+  const SLICE_MS = 16;
+  let deadline = performance.now() + SLICE_MS;
+  let latestWorkingTreePromise: Promise<void> | undefined;
+
+  for (let itemIndex = messageOptions.length - 1; itemIndex >= 0; itemIndex--) {
+    if (signal.aborted) return nextMetadata;
+    const userMessage = messageOptions[itemIndex]!;
+    if (userMessage.uuid === currentUUID || userMessage.uuid === preClearUUID || userMessage.uuid === extraEntryUUID) {
+      continue;
+    }
+    if (!canRestore(userMessage.uuid)) {
+      nextMetadata[itemIndex] = undefined;
+      continue;
+    }
+
+    let nextIdx = itemIndex + 1;
+    while (nextIdx < messageOptions.length - 1 && !canRestore(messageOptions[nextIdx]!.uuid)) {
+      nextIdx++;
+    }
+    const nextUserMessage = messageOptions.at(nextIdx);
+    const nextUuid = nextUserMessage?.uuid !== currentUUID ? nextUserMessage?.uuid : undefined;
+
+    if (nextUuid === undefined) {
+      // Latest snapshot compares against working tree; race against budgetMs so a
+      // hung network folder doesn't block all earlier labels from rendering.
+      const idx = itemIndex;
+      const workingTreeFallback = computeBetweenMessagesDiff(userMessage.uuid, undefined);
+      nextMetadata[idx] = workingTreeFallback;
+      latestWorkingTreePromise = computeWorkingTreeDiff(userMessage.uuid)
+        .then(stats => {
+          if (stats !== undefined) {
+            nextMetadata[idx] = stats;
+          }
+        })
+        .catch(logError);
+      await raceWithTimeout(latestWorkingTreePromise, budgetMs);
+      if (signal.aborted) return nextMetadata;
+      onPartialUpdate?.({ ...nextMetadata });
+      deadline = performance.now() + SLICE_MS;
+    } else {
+      nextMetadata[itemIndex] = computeBetweenMessagesDiff(userMessage.uuid, nextUuid);
+    }
+
+    if (performance.now() >= deadline) {
+      onPartialUpdate?.({ ...nextMetadata });
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
+      deadline = performance.now() + SLICE_MS;
+    }
+  }
+
+  onPartialUpdate?.({ ...nextMetadata });
+  if (latestWorkingTreePromise) {
+    // Bound final wait so a permanently hung read never holds the promise forever.
+    await raceWithTimeout(latestWorkingTreePromise, budgetMs);
+  }
+  return { ...nextMetadata };
 }

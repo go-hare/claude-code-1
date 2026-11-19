@@ -375,3 +375,42 @@ export function addToTotalSessionCost(
   }
   return totalCost
 }
+
+/**
+ * Official 2.1.325 #2370: credit a plugin mod's `$.model.complete` or
+ * `$.model.classify` API call to the session's cost & token totals so `/cost`,
+ * `$.session.usage()`, `--max-budget-usd`, and OTEL cost/token metrics count
+ * mod model calls.
+ */
+export function recordModModelUsage(
+  model: string,
+  usage: {
+    input_tokens: number
+    output_tokens: number
+    cache_read_input_tokens?: number
+    cache_creation_input_tokens?: number
+  },
+  querySource:
+    | 'plugin_model_complete'
+    | 'plugin_model_classify' = 'plugin_model_complete',
+): number {
+  const normalizedUsage: Usage = {
+    input_tokens: usage.input_tokens,
+    output_tokens: usage.output_tokens,
+    cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
+    cache_creation_input_tokens: usage.cache_creation_input_tokens ?? 0,
+    server_tool_use: { web_search_requests: 0, web_fetch_requests: 0 },
+    service_tier: null,
+    cache_creation: {
+      ephemeral_1h_input_tokens: 0,
+      ephemeral_5m_input_tokens: 0,
+    },
+    inference_geo: null,
+    iterations: null,
+    speed: null,
+  }
+  const costUSD = calculateUSDCost(model, normalizedUsage)
+  return addToTotalSessionCost(costUSD, normalizedUsage, model, {
+    querySource,
+  })
+}

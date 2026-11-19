@@ -350,7 +350,7 @@ describe('densable 2.1.289 resolve/reply/watch leftovers', () => {
 
   test('reply Izr allows a private owned write on a human five-class turn', async () => {
     process.env.CLAUDE_CODE_ARTIFACT_FIVE_CLASS_ASKS = '1'
-    seedStatus('tu-izr')
+    seedStatus('tu-izr', { outsideAudience: false })
     const r = (await checkArtifactActionPermissions(
       { action: 'reply', url: URL, thread_id: SLUG, text: 'hi' },
       fakeContext('default', 'tu-izr', { messages: HUMAN }),

@@ -135,12 +135,173 @@ function getResponseHeader(
 // @types/turndown ships only `export =` (no .d.mts), so TS types the import
 // as the class itself while Bun wraps CJS in { default } — hence the cast.
 type TurndownCtor = typeof import('turndown')
+type TurndownNodeLike = {
+  nodeName: string
+  parentNode: TurndownNodeLike | null
+  children: ArrayLike<TurndownNodeLike>
+  getAttribute: (name: string) => string | null
+  nesting?: { indented: number; underlined: number; code: number }
+}
+
+// 2.1.323 #2056: preserve empty table cells instead of dropping them and
+// shifting later columns left (aligned with official `Cpt`/`vDn`/`IDn`/`lXr`/`dXr`).
+const tableCellContent = new WeakMap<object, string>()
+const simpleTableCache = new WeakMap<object, boolean>()
+const nestedTableCells = new WeakSet<object>()
+
+function isTableCellNode(node: TurndownNodeLike): boolean {
+  return node.nodeName === 'TD' || node.nodeName === 'TH'
+}
+
+function findAncestorNode(
+  node: TurndownNodeLike,
+  predicate: (n: TurndownNodeLike) => boolean,
+): TurndownNodeLike | null {
+  let cur = node.parentNode
+  while (cur && !predicate(cur)) {
+    cur = cur.parentNode
+  }
+  return cur
+}
+
+function isSimpleHeaderedTableCell(node: TurndownNodeLike): boolean {
+  const table = findAncestorNode(node, n => n.nodeName === 'TABLE')
+  if (!table) return false
+  let isSimple = simpleTableCache.get(table)
+  if (isSimple === undefined) {
+    const cells: TurndownNodeLike[] = []
+    for (const section of Array.from(table.children)) {
+      if (section.nodeName === 'TR') {
+        for (const cell of Array.from(section.children)) {
+          cells.push(cell)
+        }
+      } else {
+        for (const row of Array.from(section.children)) {
+          for (const cell of Array.from(row.children)) {
+            cells.push(cell)
+          }
+        }
+      }
+    }
+    isSimple =
+      cells.some(c => c.nodeName === 'TH') &&
+      cells.every(
+        c =>
+          (c.getAttribute('rowspan') ?? '1') === '1' &&
+          (c.getAttribute('colspan') ?? '1') === '1',
+      )
+    simpleTableCache.set(table, isSimple)
+    const outerCell = findAncestorNode(table, isTableCellNode)
+    if (outerCell) nestedTableCells.add(outerCell)
+  }
+  return isSimple
+}
+
+function replaceTableCell(content: string, node: TurndownNodeLike): string {
+  if (isSimpleHeaderedTableCell(node) && !nestedTableCells.has(node)) {
+    tableCellContent.set(node, content)
+  }
+  return `\n\n${content}\n\n`
+}
+
+function replaceTableRow(content: string, node: TurndownNodeLike): string {
+  const fallback = `\n\n${content}\n\n`
+  const cells = Array.from(node.children).filter(isTableCellNode)
+  const values = cells.map(cell => tableCellContent.get(cell))
+  for (const cell of cells) {
+    tableCellContent.delete(cell)
+  }
+  if (cells.length === 0 || !values.every(v => v !== undefined)) {
+    return fallback
+  }
+  const formatted = values.map(v =>
+    (v as string)
+      .trim()
+      .replace(/ {2}\n/g, '<br>')
+      .replace(/\\[\s\S]|\|/g, match => (match === '|' ? '\\|' : match)),
+  )
+  if (formatted.some(v => /[\r\n]/.test(v))) {
+    return fallback
+  }
+  return formatted.every(v => !v) ? '' : `\n| ${formatted.join(' | ')} |\n`
+}
+
+// 2.1.323 #2157: cap pathological nesting depth (aligned with official `uXr`/`cXr`/`pXr`/`mXr`)
+// so deeply nested HTML pages convert quickly with bounded memory.
+const NESTING_LIMITS = { indented: 12, underlined: 1, code: 1 } as const
+const NESTING_CATEGORY = new Map<string, keyof typeof NESTING_LIMITS>([
+  ['LI', 'indented'],
+  ['BLOCKQUOTE', 'indented'],
+  ['H1', 'underlined'],
+  ['H2', 'underlined'],
+  ['CODE', 'code'],
+])
+const ZERO_NESTING = { indented: 0, underlined: 0, code: 0 }
+
+function isPastNestingLimit(node: TurndownNodeLike): boolean {
+  const parentNesting = node.parentNode?.nesting ?? ZERO_NESTING
+  const category = NESTING_CATEGORY.get(node.nodeName)
+  if (!category) {
+    node.nesting = parentNesting
+    return false
+  }
+  node.nesting = {
+    ...parentNesting,
+    [category]: parentNesting[category] + 1,
+  }
+  return parentNesting[category] >= NESTING_LIMITS[category]
+}
+
+function replacePastNestingLimit(
+  content: string,
+  node: TurndownNodeLike,
+): string {
+  return node.nodeName === 'CODE' ? content : `\n\n${content}\n\n`
+}
+
+const MAX_TURNDOWN_INPUT_CHARS = 1_048_576
+
 let turndownServicePromise: Promise<InstanceType<TurndownCtor>> | undefined
 function getTurndownService(): Promise<InstanceType<TurndownCtor>> {
   return (turndownServicePromise ??= import('turndown').then(m => {
     const Turndown = (m as unknown as { default: TurndownCtor }).default
-    return new Turndown()
+    const service = new Turndown()
+    service.remove(['style', 'script', 'noscript', 'iframe'])
+    service.addRule('tableCell', {
+      filter: node => isTableCellNode(node as unknown as TurndownNodeLike),
+      replacement: (content, node) =>
+        replaceTableCell(content, node as unknown as TurndownNodeLike),
+    })
+    service.addRule('tableRow', {
+      filter: node => node.nodeName === 'TR',
+      replacement: (content, node) =>
+        replaceTableRow(content, node as unknown as TurndownNodeLike),
+    })
+    service.addRule('pastNestingLimit', {
+      filter: node => isPastNestingLimit(node as unknown as TurndownNodeLike),
+      replacement: (content, node) =>
+        replacePastNestingLimit(content, node as unknown as TurndownNodeLike),
+    })
+    return service
   }))
+}
+
+/**
+ * Converts HTML to Markdown using the configured Turndown instance
+ * (2.1.323 #2056 table cell preservation + #2157 nesting cap + 1MiB input cap).
+ */
+export async function convertHtmlToMarkdown(html: string): Promise<string> {
+  try {
+    let md = (await getTurndownService()).turndown(
+      html.slice(0, MAX_TURNDOWN_INPUT_CHARS),
+    )
+    if (html.length > MAX_TURNDOWN_INPUT_CHARS) {
+      md += '\n\n[Content truncated due to length...]'
+    }
+    return md
+  } catch {
+    return html
+  }
 }
 
 // PSR requested limiting the length of URLs to 250 to lower the potential
@@ -590,7 +751,7 @@ export async function getURLMarkdownContent(
   let markdownContent: string
   let contentBytes: number
   if (contentType.includes('text/html')) {
-    markdownContent = (await getTurndownService()).turndown(htmlContent)
+    markdownContent = await convertHtmlToMarkdown(htmlContent)
     contentBytes = Buffer.byteLength(markdownContent)
   } else {
     // It's not HTML - just use it raw. The decoded string's UTF-8 byte

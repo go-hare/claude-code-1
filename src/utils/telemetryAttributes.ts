@@ -6,6 +6,7 @@ import {
   isClaudeAISubscriber,
 } from './auth.js'
 import { getOrCreateUserID } from './config.js'
+import { logForDebugging } from './debug.js'
 import { envDynamic } from './envDynamic.js'
 import { isEnvTruthy } from './envUtils.js'
 import { type APIProvider, getAPIProvider } from './model/providers.js'
@@ -25,6 +26,30 @@ const METRICS_CARDINALITY_DEFAULTS = {
 }
 
 const OTEL_ATTR_MAX_LEN = 255
+const OTEL_RESOURCE_ATTR_MAX_NOTICES = 5
+
+/**
+ * Official 2.1.323 (#2123, `qms`/`ofo` @299245800):
+ * Resource attributes managed by Claude Code itself. While any entry in
+ * `OTEL_RESOURCE_ATTRIBUTES` is malformed and left off, Claude Code withholds
+ * overrides of these keys from the partial parse so built-in resource metadata
+ * stays intact.
+ */
+export const DEFAULT_MANAGED_RESOURCE_ATTRIBUTE_KEYS = new Set<string>([
+  'service.name',
+  'service.version',
+  'os.type',
+  'os.version',
+  'host.arch',
+  'wsl.version',
+])
+
+export type OtelResourceAttributesParseResult = {
+  attributes: Record<string, string>
+  notices: string[]
+  droppedEntries: Array<{ index: number; raw: string; reason: string }>
+  isEveryEntryRead: boolean
+}
 
 function isValidOtelResourceAttrToken(value: string): boolean {
   for (let i = 0; i < value.length; i++) {
@@ -34,6 +59,14 @@ function isValidOtelResourceAttrToken(value: string): boolean {
     }
   }
   return true
+}
+
+function countChar(str: string, ch: string): number {
+  let count = 0
+  for (let i = 0; i < str.length; i++) {
+    if (str[i] === ch) count++
+  }
+  return count
 }
 
 /**
@@ -72,6 +105,166 @@ function parseOtelResourceAttributes(
     return {}
   }
   return parsed
+}
+
+/**
+ * Official 2.1.323 (#2123, `g` / `XSr` @299245800):
+ * Parse `OTEL_RESOURCE_ATTRIBUTES` entry-by-entry so a single malformed entry
+ * does NOT drop all other valid attributes from the OpenTelemetry resource.
+ * Returns the parsed valid attributes plus user-facing notices naming every
+ * dropped entry (for debug logging and `/status`).
+ */
+export function parseOtelResourceAttributesDetailed(
+  raw: string | undefined,
+  includeResourceAttributes = true,
+  opts?: { logWarnings?: boolean },
+): OtelResourceAttributesParseResult {
+  const parts = (raw ?? '').split(',')
+  const attributes: Record<string, string> = {}
+  const rawNotices: string[] = []
+  const droppedEntries: Array<{ index: number; raw: string; reason: string }> =
+    []
+
+  for (let idx = 0; idx < parts.length; idx++) {
+    const entry = parts[idx]!
+    if (entry.trim() === '') continue
+    const entryNum = idx + 1
+    const prefix = `OTEL_RESOURCE_ATTRIBUTES: Entry ${entryNum} of ${parts.length} (counting every part between commas) was left off the OpenTelemetry resource because`
+    const split = entry.split('=')
+    const rawKey = (split[0] ?? '').trim()
+    const rawVal = (split[1] ?? '').trim()
+
+    if (split.length === 1) {
+      const reason =
+        'it has no "=". Write each entry as key=value, and a comma inside a value as %2C.'
+      rawNotices.push(`${prefix} ${reason}`)
+      droppedEntries.push({ index: entryNum, raw: entry, reason })
+      continue
+    }
+    if (split.length > 2) {
+      const reason =
+        'it has more than one "=". Write an "=" inside a key or value as %3D.'
+      rawNotices.push(`${prefix} ${reason}`)
+      droppedEntries.push({ index: entryNum, raw: entry, reason })
+      continue
+    }
+    if (rawKey === '') {
+      const reason =
+        'it has no key before its "=". You can put a key before the "=", or remove the entry.'
+      rawNotices.push(`${prefix} ${reason}`)
+      droppedEntries.push({ index: entryNum, raw: entry, reason })
+      continue
+    }
+
+    let decodedKey: string
+    let decodedVal: string
+    try {
+      decodedKey = decodeURIComponent(rawKey)
+      decodedVal = decodeURIComponent(rawVal)
+    } catch {
+      const reason =
+        'its percent-encoding is invalid. Each "%" must start a code such as %2C, and the codes must decode to UTF-8 text. To write a "%" itself, use %25.'
+      rawNotices.push(`${prefix} ${reason}`)
+      droppedEntries.push({ index: entryNum, raw: entry, reason })
+      continue
+    }
+
+    if (
+      decodedKey.length > OTEL_ATTR_MAX_LEN ||
+      decodedVal.length > OTEL_ATTR_MAX_LEN
+    ) {
+      const reason = `its key or value is over ${OTEL_ATTR_MAX_LEN} characters once decoded. Shorten it.`
+      rawNotices.push(`${prefix} ${reason}`)
+      droppedEntries.push({ index: entryNum, raw: entry, reason })
+      continue
+    }
+
+    attributes[decodedKey] = decodedVal
+  }
+
+  const notices = rawNotices.slice(0, OTEL_RESOURCE_ATTR_MAX_NOTICES)
+  const overflow = rawNotices.length - OTEL_RESOURCE_ATTR_MAX_NOTICES
+  if (overflow > 0) {
+    notices.push(
+      `OTEL_RESOURCE_ATTRIBUTES: ${overflow} more ${overflow === 1 ? 'entry was' : 'entries were'} left off the OpenTelemetry resource.`,
+    )
+  }
+
+  const withheldManaged = [...DEFAULT_MANAGED_RESOURCE_ATTRIBUTE_KEYS].filter(
+    k => Object.hasOwn(attributes, k),
+  )
+  if (rawNotices.length > 0 && withheldManaged.length > 0) {
+    notices.push(
+      `OTEL_RESOURCE_ATTRIBUTES: While an entry is left off, the value sets none of these OpenTelemetry resource attributes: ${withheldManaged.join(', ')}.`,
+    )
+  }
+  if (rawNotices.length > 0) {
+    notices.push(
+      `OTEL_RESOURCE_ATTRIBUTES: After you fix ${rawNotices.length === 1 ? 'that entry' : 'those entries'}, restart Claude Code. The OpenTelemetry resource is built only at startup.`,
+    )
+  }
+
+  if (
+    includeResourceAttributes &&
+    Object.keys(attributes).some(
+      k =>
+        rawNotices.length === 0 ||
+        !DEFAULT_MANAGED_RESOURCE_ATTRIBUTE_KEYS.has(k),
+    ) &&
+    Object.keys(parseOtelResourceAttributes(raw)).length === 0
+  ) {
+    const strictBlockedIndices = parts.flatMap((part, i) =>
+      countChar(part, '=') === 1 &&
+      Object.keys(parseOtelResourceAttributes(part)).length === 0
+        ? [i + 1]
+        : [],
+    )
+    if (strictBlockedIndices.length > 0) {
+      const extra = strictBlockedIndices.length - OTEL_RESOURCE_ATTR_MAX_NOTICES
+      let label = `Entry ${strictBlockedIndices[0]}`
+      if (extra > 0) {
+        label = `Entries ${strictBlockedIndices.slice(0, OTEL_RESOURCE_ATTR_MAX_NOTICES).join(', ')}, and ${extra} ${extra === 1 ? 'other' : 'others'}`
+      } else if (strictBlockedIndices.length > 2) {
+        label = `Entries ${strictBlockedIndices.slice(0, -1).join(', ')}, and ${strictBlockedIndices.at(-1)}`
+      } else if (strictBlockedIndices.length === 2) {
+        label = `Entries ${strictBlockedIndices[0]} and ${strictBlockedIndices[1]}`
+      }
+      notices.push(
+        `OTEL_RESOURCE_ATTRIBUTES: ${label} of ${parts.length} (counting every part between commas) ${strictBlockedIndices.length === 1 ? 'keeps' : 'keep'} all of this value's attributes off metric points, events, and spans. Write ${strictBlockedIndices.length === 1 ? 'it' : 'them'} with a key of letters, digits, dots, dashes, or underscores, and a value in printable ASCII without spaces, semicolons, or backslashes. In a value, percent-encode anything else: a space as %20, a "%" as %25. Keep the key and the value to ${OTEL_ATTR_MAX_LEN} characters each as written, where %20 counts as three.`,
+      )
+    }
+  }
+
+  if (opts?.logWarnings !== false) {
+    for (const notice of notices) {
+      logForDebugging(`[3P telemetry] ${notice}`, { level: 'warn' })
+    }
+  }
+
+  return {
+    attributes,
+    notices,
+    droppedEntries,
+    isEveryEntryRead: rawNotices.length === 0,
+  }
+}
+
+/**
+ * Official 2.1.323 (#2123, `XSr`): current `OTEL_RESOURCE_ATTRIBUTES` parse
+ * result & `/status` notices for the running process.
+ */
+export function getOtelResourceAttributeStatus(
+  env: NodeJS.ProcessEnv = process.env,
+  opts?: { logWarnings?: boolean },
+): OtelResourceAttributesParseResult {
+  const includeAttrEnv = env.OTEL_METRICS_INCLUDE_RESOURCE_ATTRIBUTES
+  const includeResourceAttributes =
+    includeAttrEnv === undefined ? true : isEnvTruthy(includeAttrEnv)
+  return parseOtelResourceAttributesDetailed(
+    env.OTEL_RESOURCE_ATTRIBUTES,
+    includeResourceAttributes,
+    opts,
+  )
 }
 
 function shouldIncludeAttribute(

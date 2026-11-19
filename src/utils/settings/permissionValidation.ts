@@ -67,6 +67,23 @@ function hasUnescapedWildcard(token: string): boolean {
 const BASH_RULE_SHELL_META_RE = /^(?:[|&;<>]|\d+[<>])/
 
 /**
+ * densable 2.1.323 #1973 (`$h`) — allow-rule leading env var assignment whose
+ * value contains an unescaped `*` (e.g. `Bash(PORT=* npm run dev)`). Because
+ * `*` also matches spaces, the rule can approve a different command that merely
+ * mentions the trailing command token later on the line.
+ */
+function wildcardInEnvVarValue(content: string): string | undefined {
+  if (content.endsWith(':*')) return
+  const tokens = content.trim().split(/\s+/).filter(Boolean)
+  const cmdIndex = tokens.findIndex(tok => !/^[A-Za-z_]\w*\+?=/.test(tok))
+  const cmd = tokens[cmdIndex] ?? ''
+  return !BASH_RULE_SHELL_META_RE.test(cmd) &&
+    tokens.slice(0, cmdIndex).some(hasUnescapedWildcard)
+    ? /^[^*]+/.exec(cmd)?.[0]
+    : undefined
+}
+
+/**
  * densable 2.1.246 ss — allow-rule token with a wildcard before the rest of
  * the command. Returns the argv0 when that pattern is present.
  */
@@ -126,6 +143,7 @@ export function validatePermissionRule(
   suggestion?: string
   examples?: string[]
   warning?: string
+  securityNotice?: string
 } {
   // Empty rule check
   if (!rule || rule.trim() === '') {
@@ -261,8 +279,16 @@ export function validatePermissionRule(
     // Legacy :* syntax continues to work for backwards compatibility:
     // - "npm:*" matches "npm" or "npm <anything>" (prefix matching with word boundary)
 
-    // densable 2.1.246 #1 — allow-only startup warning (valid:true + warning).
+    // densable 2.1.323 #1973 & 2.1.246 #1 — allow-only startup warnings (valid:true + warning).
     if (behavior === 'allow') {
+      const envWildcardCmd = wildcardInEnvVarValue(content)
+      if (envWildcardCmd !== undefined) {
+        return {
+          valid: true,
+          warning: `${permissionRuleValueToString(parsed)} has a * in a variable's value. A * also matches spaces, so this rule can also approve a different command that has ${envWildcardCmd} later in the line, without a prompt. Give the variable an exact value instead.`,
+          securityNotice: `${permissionRuleValueToString(parsed)} allows any command at the * in its value · use an exact value`,
+        }
+      }
       const argv0 = wildcardBeforeSubcommand(content)
       if (argv0 !== undefined) {
         const isGit = argv0 === 'git'
@@ -273,6 +299,7 @@ export function validatePermissionRule(
         return {
           valid: true,
           warning: `${permissionRuleValueToString(parsed)} has a wildcard before the rest of the command, so it also matches any options inserted at that position and approves them without a prompt.${gitExtra} Replace that * with the exact value you mean, or only use * after the subcommand${gitExample}.`,
+          securityNotice: `${permissionRuleValueToString(parsed)} allows any option at its * · use an exact value`,
         }
       }
     }

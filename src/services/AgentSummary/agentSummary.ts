@@ -14,6 +14,7 @@ import type { TaskContext } from '../../Task.js'
 import { updateAgentSummary } from '../../tasks/LocalAgentTask/LocalAgentTask.js'
 import type { AgentId } from '../../types/ids.js'
 import { logForDebugging } from '../../utils/debug.js'
+import { isEnvTruthy } from '../../utils/envUtils.js'
 import {
   type CacheSafeParams,
   runForkedAgent,
@@ -27,9 +28,24 @@ import {
 } from './summaryPrompt.js'
 
 const SUMMARY_INTERVAL_MS = 30_000
+/**
+ * 2.1.323 #2082 (official `wp = 20000`): 20s timeout per summary request so
+ * replies taking between 10 and 20 seconds do not get timed out and skipped.
+ */
+export const AGENT_SUMMARY_REQUEST_TIMEOUT_MS = 20_000
 export const AGENT_SUMMARY_MAX_HOLD_MS = 300_000
 export const AGENT_SUMMARY_HOLD_POLL_MS = 15_000
 export const AGENT_SUMMARY_COLD_CACHE_MS = 270_000
+
+/**
+ * 2.1.323 #1976: `CLAUDE_CODE_DISABLE_AGENT_PROGRESS_SUMMARIES=1` turns off
+ * subagent progress summaries and the requests that write them.
+ */
+export function isAgentProgressSummariesDisabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return isEnvTruthy(env.CLAUDE_CODE_DISABLE_AGENT_PROGRESS_SUMMARIES)
+}
 
 export type AgentOwnRequestsState = {
   lastResponseAt?: number
@@ -127,8 +143,16 @@ export function startAgentSummarization(
   const holdPollMs = dependencies.holdPollMs ?? AGENT_SUMMARY_HOLD_POLL_MS
   const nowImpl = dependencies.now ?? Date.now
 
+  // 2.1.323 #1976: do not schedule timers or issue summary requests when disabled
+  if (isAgentProgressSummariesDisabled()) {
+    logForDebuggingImpl(
+      `[AgentSummary] No progress summaries for ${taskId}: CLAUDE_CODE_DISABLE_AGENT_PROGRESS_SUMMARIES is set`,
+    )
+    return { stop: () => {} }
+  }
+
   async function runSummary(): Promise<void> {
-    if (stopped) return
+    if (stopped || isAgentProgressSummariesDisabled()) return
 
     logForDebuggingImpl(`[AgentSummary] Timer fired for agent ${agentId}`)
 
@@ -197,8 +221,18 @@ export function startAgentSummarization(
         `[AgentSummary] Forking for summary, ${summaryContext.messages.length} messages in context`,
       )
 
-      // Create abort controller for this summary
+      // Create abort controller for this summary with 20s timeout (#2082)
       summaryAbortController = new AbortController()
+      const requestTimeoutHandle = setTimeoutImpl(() => {
+        summaryAbortController?.abort()
+      }, AGENT_SUMMARY_REQUEST_TIMEOUT_MS)
+      if (
+        requestTimeoutHandle &&
+        typeof (requestTimeoutHandle as { unref?: () => void }).unref ===
+          'function'
+      ) {
+        ;(requestTimeoutHandle as { unref: () => void }).unref()
+      }
 
       // Deny tools via callback, NOT by passing tools:[] - that busts cache
       const canUseTool = async () => ({
@@ -207,50 +241,46 @@ export function startAgentSummarization(
         decisionReason: { type: 'other' as const, reason: 'summary only' },
       })
 
-      // DO NOT set maxOutputTokens here. The fork piggybacks on the main
-      // thread's prompt cache by sending identical cache-key params (system,
-      // tools, model, messages prefix, thinking config). Setting maxOutputTokens
-      // would clamp budget_tokens, creating a thinking config mismatch that
-      // invalidates the cache.
-      //
-      // ContentReplacementState is cloned by default in createSubagentContext
-      // from forkParams.toolUseContext (the subagent's LIVE state captured at
-      // onCacheSafeParams time). No explicit override needed.
-      const result = await runForkedAgentImpl({
-        promptMessages: [
-          createSummaryPromptMessage(buildSummaryPrompt(previousSummary)),
-        ],
-        cacheSafeParams: forkParams,
-        canUseTool,
-        querySource: 'agent_summary',
-        forkLabel: 'agent_summary',
-        // Official 2.1.321 (#1899): cap at 1 turn and abort immediately if the
-        // model attempts a tool_use block so summaries never run extra API turns.
-        maxTurns: 1,
-        onMessage: msg => {
-          if (
-            msg.type === 'assistant' &&
-            Array.isArray(msg.message?.content) &&
-            msg.message.content.some(b => b.type === 'tool_use')
-          ) {
-            summaryAbortController?.abort()
-            return
-          }
-          const rawMsg = msg as unknown as {
-            type?: string
-            event?: { type?: string; content_block?: { type?: string } }
-          }
-          if (
-            rawMsg.type === 'stream_event' &&
-            rawMsg.event?.type === 'content_block_start' &&
-            rawMsg.event.content_block?.type === 'tool_use'
-          ) {
-            summaryAbortController?.abort()
-          }
-        },
-        overrides: { abortController: summaryAbortController },
-        skipTranscript: true,
-      })
+      let result: Awaited<ReturnType<typeof runForkedAgentImpl>>
+      try {
+        result = await runForkedAgentImpl({
+          promptMessages: [
+            createSummaryPromptMessage(buildSummaryPrompt(previousSummary)),
+          ],
+          cacheSafeParams: forkParams,
+          canUseTool,
+          querySource: 'agent_summary',
+          forkLabel: 'agent_summary',
+          // Official 2.1.321 (#1899): cap at 1 turn and abort immediately if the
+          // model attempts a tool_use block so summaries never run extra API turns.
+          maxTurns: 1,
+          onMessage: msg => {
+            if (
+              msg.type === 'assistant' &&
+              Array.isArray(msg.message?.content) &&
+              msg.message.content.some(b => b.type === 'tool_use')
+            ) {
+              summaryAbortController?.abort()
+              return
+            }
+            const rawMsg = msg as unknown as {
+              type?: string
+              event?: { type?: string; content_block?: { type?: string } }
+            }
+            if (
+              rawMsg.type === 'stream_event' &&
+              rawMsg.event?.type === 'content_block_start' &&
+              rawMsg.event.content_block?.type === 'tool_use'
+            ) {
+              summaryAbortController?.abort()
+            }
+          },
+          overrides: { abortController: summaryAbortController },
+          skipTranscript: true,
+        })
+      } finally {
+        clearTimeoutImpl(requestTimeoutHandle)
+      }
 
       if (stopped) return
 

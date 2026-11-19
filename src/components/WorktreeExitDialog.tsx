@@ -10,7 +10,13 @@ import { Box, Text, Dialog } from '@anthropic/ink';
 import { execFileNoThrow } from '../utils/execFileNoThrow.js';
 import { getPlansDirectory } from '../utils/plans.js';
 import { setCwd } from '../utils/Shell.js';
-import { cleanupWorktree, getCurrentWorktreeSession, keepWorktree, killTmuxSession } from '../utils/worktree.js';
+import {
+  cleanupWorktree,
+  getCurrentWorktreeSession,
+  keepWorktree,
+  killTmuxSession,
+  resolveWorktreeExitTargetDir,
+} from '../utils/worktree.js';
 import { Select } from './CustomSelect/select.js';
 import { Spinner } from './Spinner.js';
 
@@ -74,8 +80,10 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
           setStatus('removing-clean');
           void cleanupWorktree()
             .then(removed => {
-              process.chdir(worktreeSession.originalCwd);
-              setCwd(worktreeSession.originalCwd);
+              // Official 2.1.323 (#1988): resolve fallback targetDir when originalCwd was deleted.
+              const { targetDir } = resolveWorktreeExitTargetDir(worktreeSession);
+              process.chdir(targetDir);
+              setCwd(targetDir);
               recordWorktreeExit();
               getPlansDirectory.cache.clear?.();
               if (removed) {
@@ -135,8 +143,9 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
         changed_files: changes.length,
       });
       await keepWorktree();
-      process.chdir(worktreeSession.originalCwd);
-      setCwd(worktreeSession.originalCwd);
+      const { targetDir } = resolveWorktreeExitTargetDir(worktreeSession);
+      process.chdir(targetDir);
+      setCwd(targetDir);
       recordWorktreeExit();
       getPlansDirectory.cache.clear?.();
       if (hasTmux) {
@@ -159,8 +168,9 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
         await killTmuxSession(worktreeSession.tmuxSessionName);
       }
       await keepWorktree();
-      process.chdir(worktreeSession.originalCwd);
-      setCwd(worktreeSession.originalCwd);
+      const { targetDir } = resolveWorktreeExitTargetDir(worktreeSession);
+      process.chdir(targetDir);
+      setCwd(targetDir);
       recordWorktreeExit();
       getPlansDirectory.cache.clear?.();
       setResultMessage(
@@ -174,8 +184,9 @@ export function WorktreeExitDialog({ onDone, onCancel }: Props): React.ReactNode
       }
       try {
         const removed = await cleanupWorktree();
-        process.chdir(worktreeSession.originalCwd);
-        setCwd(worktreeSession.originalCwd);
+        const { targetDir } = resolveWorktreeExitTargetDir(worktreeSession);
+        process.chdir(targetDir);
+        setCwd(targetDir);
         recordWorktreeExit();
         getPlansDirectory.cache.clear?.();
         if (!removed) {

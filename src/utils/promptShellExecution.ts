@@ -1,10 +1,21 @@
 import { randomUUID } from 'crypto'
+import {
+  lstatSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  statSync,
+} from 'fs'
+import { dirname, isAbsolute, join, resolve, sep } from 'path'
 import type { Tool, ToolUseContext } from '../Tool.js'
 import { BashTool } from '@claude-code/builtin-tools/tools/BashTool/BashTool.js'
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
+import { parseForSecurity } from './bash/ast.js'
+import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
 import { errorMessage, MalformedCommandError, ShellError } from './errors.js'
 import type { FrontmatterShell } from './frontmatterParser.js'
+import { isAutomountMapRoot } from './fsOperations.js'
 import { createAssistantMessage } from './messages.js'
 import { hasPermissionsToUseTool } from './permissions/permissions.js'
 import { processToolResultBlock } from './toolResultStorage.js'
@@ -138,6 +149,179 @@ export function validatePromptShellCommands(
 }
 
 /**
+ * Official 2.1.325 #2262 (SEA `b`/`_`/`v`/`P` inside `F7e` @279431000):
+ * Verify whether a `.git` file, symlink, or directory represents a legitimate
+ * git repository checkout — including worktrees of bare repositories,
+ * `--separate-git-dir` checkouts, and Android `repo` symlinked `.git` / `HEAD`.
+ */
+function hasValidGitHead(
+  gitDir: string,
+  kind: 'dir' | 'gitfile' | 'symlink',
+): boolean {
+  try {
+    const headPath = join(gitDir, 'HEAD')
+    const st = lstatSync(headPath)
+    if (
+      kind === 'gitfile' &&
+      st.isSymbolicLink() &&
+      process.platform !== 'win32'
+    ) {
+      return readlinkSync(headPath).startsWith('refs/')
+    }
+    if (!st.isFile() || st.size > 4096) return false
+    const content = readFileSync(headPath, 'utf8').slice(0, 255)
+    return (
+      /^ref:[ \t]*refs\//.test(content) ||
+      /^[0-9a-f]{40}([0-9a-f]{24})?[ \t\n\r]*$/.test(content)
+    )
+  } catch {
+    return false
+  }
+}
+
+function hasValidGitObjectsAndRefs(gitDir: string): boolean {
+  try {
+    for (const sub of ['objects', 'refs'] as const) {
+      const p = join(gitDir, sub)
+      const st = lstatSync(p)
+      if (st.isSymbolicLink()) {
+        if (!statSync(p).isDirectory()) return false
+      } else if (!st.isDirectory()) {
+        return false
+      }
+    }
+    return true
+  } catch {
+    return false
+  }
+}
+
+function isTrustedDotGitEntry(dir: string): boolean {
+  const dotGitPath = join(dir, '.git')
+  try {
+    const st = lstatSync(dotGitPath)
+    if (st.isDirectory()) {
+      return (
+        hasValidGitHead(dotGitPath, 'dir') &&
+        hasValidGitObjectsAndRefs(dotGitPath)
+      )
+    }
+    let targetRaw: string
+    let kind: 'gitfile' | 'symlink'
+    if (st.isSymbolicLink()) {
+      kind = 'symlink'
+      const linkTarget = readlinkSync(dotGitPath)
+      targetRaw = isAbsolute(linkTarget) ? linkTarget : resolve(dir, linkTarget)
+    } else if (st.isFile()) {
+      if (st.size > 4096) return false
+      const text = readFileSync(dotGitPath, 'utf8')
+      if (text.includes('\0') || !text.startsWith('gitdir: ')) return false
+      const ptr = text.slice(8).replace(/[\r\n]+$/, '')
+      if (!ptr) return false
+      kind = 'gitfile'
+      targetRaw = isAbsolute(ptr) ? ptr : resolve(dir, ptr)
+    } else {
+      return false
+    }
+    const targetCanonical = realpathSync(targetRaw)
+    if (kind === 'symlink' && lstatSync(targetCanonical).isFile()) {
+      return false
+    }
+    // Follow `commondir` if present (linked worktree / bare-repo worktree)
+    let commonCanonical = targetCanonical
+    const commonDirFile = join(targetCanonical, 'commondir')
+    try {
+      const commonSt = lstatSync(commonDirFile)
+      if (!commonSt.isFile() || commonSt.size > 4096) return false
+      const commonPtr = readFileSync(commonDirFile, 'utf8').replace(
+        /[\r\n]+$/,
+        '',
+      )
+      if (!commonPtr || commonPtr.includes('\0')) return false
+      commonCanonical = realpathSync(
+        isAbsolute(commonPtr) ? commonPtr : resolve(targetCanonical, commonPtr),
+      )
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') return false
+    }
+    if (!hasValidGitHead(targetCanonical, kind)) return false
+    return kind === 'gitfile' || hasValidGitObjectsAndRefs(commonCanonical)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 2.1.323 #2163 + 2.1.325 #2262 (SEA `F7e({ needsHead: true }) === 'bare-indicators'`):
+ * Detect whether `cwd` or an ancestor directory looks like a bare git
+ * repository (has `HEAD` + `objects/` + `refs/` directly without a valid `.git`
+ * entry). Worktrees of bare repositories, `--separate-git-dir` checkouts, and
+ * Android `repo` checkouts have a valid `.git` file/symlink that stops the
+ * upward walk so their inline git commands are not falsely blocked.
+ */
+export function detectBareGitIndicators(
+  startDir: string = getCwd(),
+): 'bare-indicators' | 'none' {
+  let cur = resolve(startDir)
+  const root = cur.substring(0, cur.indexOf(sep) + 1) || sep
+  for (;;) {
+    if (!isAutomountMapRoot(cur)) {
+      if (isTrustedDotGitEntry(cur)) {
+        return 'none'
+      }
+      // No valid `.git` here; check for bare-repository indicators (HEAD + objects + refs)
+      try {
+        const headStat = statSync(join(cur, 'HEAD'))
+        const objectsStat = statSync(join(cur, 'objects'))
+        const refsStat = statSync(join(cur, 'refs'))
+        if (
+          headStat.isFile() &&
+          objectsStat.isDirectory() &&
+          refsStat.isDirectory()
+        ) {
+          return 'bare-indicators'
+        }
+      } catch {
+        // Not a bare repo directory
+      }
+    }
+    if (cur === root) break
+    const parent = dirname(cur)
+    if (parent === cur) break
+    cur = parent
+  }
+  return 'none'
+}
+
+/**
+ * 2.1.323 #2163 (SEA @292290881):
+ * Determine whether skill inline Bash command grants (`alwaysAllowRules.command`
+ * and `allowed_tools` permission layer) must be withheld because `cwd` is
+ * inside/under a bare-repository layout and the command is non-simple or
+ * invokes `git`. Outside `auto` and `bypassPermissions`, this forces the
+ * command to stop until explicitly allowed by the user.
+ */
+export async function shouldWithholdSkillInlineGitGrants(
+  command: string,
+  cwd: string = getCwd(),
+): Promise<boolean> {
+  if (detectBareGitIndicators(cwd) !== 'bare-indicators') {
+    return false
+  }
+  const parsed = await parseForSecurity(command)
+  if (parsed.kind === 'simple') {
+    return parsed.commands.some(cmd => /\bgit\b/i.test(cmd.argv.join(' ')))
+  }
+  if (parsed.kind === 'parse-unavailable') {
+    // When tree-sitter WASM is unavailable (e.g. test harnesses), fall back to
+    // checking for shell metacharacters or any git invocation.
+    return /[;|&`$(){}<>\n\r]/.test(command) || /\bgit\b/i.test(command)
+  }
+  return true
+}
+
+/**
  * Parses prompt text and executes any embedded shell commands.
  * Supports two syntaxes:
  * - Code blocks: ```! command ```
@@ -210,11 +394,48 @@ export async function executeShellCommandsInPrompt(
   await Promise.all(
     commands.map(async ({ raw, command }) => {
       try {
+        // 2.1.323 #2163 (SEA @292290881): In bare-repository worktrees and
+        // similar folders, withhold skill-supplied `command` allow rules and
+        // `allowed_tools` layers for git / non-simple inline commands so they
+        // stop until explicitly allowed (outside auto mode and bypass).
+        const currentMode = context.getAppState().toolPermissionContext.mode
+        const withholdBareGitGrants =
+          shellTool === BashTool &&
+          currentMode !== 'auto' &&
+          currentMode !== 'bypassPermissions' &&
+          (await shouldWithholdSkillInlineGitGrants(command))
+
+        const permissionCheckContext: ToolUseContext = withholdBareGitGrants
+          ? {
+              ...context,
+              getAppState() {
+                const appState = context.getAppState()
+                return {
+                  ...appState,
+                  toolPermissionContext: {
+                    ...appState.toolPermissionContext,
+                    alwaysAllowRules: {
+                      ...appState.toolPermissionContext.alwaysAllowRules,
+                      command: [],
+                    },
+                  },
+                }
+              },
+              ...(context.permissionLayers
+                ? {
+                    permissionLayers: context.permissionLayers.filter(
+                      layer => layer.kind !== 'allowed_tools',
+                    ),
+                  }
+                : {}),
+            }
+          : context
+
         // Check permissions before executing
         const permissionResult = await hasPermissionsToUseTool(
           shellTool,
           { command },
-          context,
+          permissionCheckContext,
           createAssistantMessage({ content: [] }),
           '',
         )
@@ -223,6 +444,11 @@ export async function executeShellCommandsInPrompt(
           logForDebugging(
             `Shell command permission check failed for command in ${slashCommandName}: ${command}. Error: ${permissionResult.message}`,
           )
+          if (withholdBareGitGrants) {
+            throw new MalformedCommandError(
+              `Couldn't run \`${command}\` for ${slashCommandName}. This folder or one above it looks like a bare git repository that may not be yours, and git can run commands named in a repository's files. If you trust this folder, allow the git commands this needs, for example with /permissions, and try again.`,
+            )
+          }
           throw new MalformedCommandError(
             `Shell command permission check failed for pattern "${raw}": ${permissionResult.message || 'Permission denied'}`,
           )

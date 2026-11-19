@@ -41,6 +41,10 @@ export type McpTaskState = TaskStateBase & {
   onWorkerWakeOutcome?: (outcome: { kind: string }) => void
   endingGoesTo?: (kind: string) => void
   newsToConfirm?: Array<() => void>
+  /** Official 2.1.325 #2307/#2367: reopen callback when a background task question was put aside with Esc. */
+  openQuestion?: () => void
+  /** Official 2.1.325 #2307/#2349: current question surface state ('asking' | 'off_screen'). */
+  questionState?: 'asking' | 'off_screen'
   terminal?: {
     summary?: string
     resource_links?: unknown[]
@@ -235,6 +239,8 @@ export function completeMcpTask(
       endTime: Date.now(),
       notified: true,
       abortController: undefined,
+      openQuestion: undefined,
+      questionState: undefined,
       ...(statusMessage !== undefined ? { statusMessage } : {}),
       ...(storedLinks && storedLinks.length > 0
         ? { terminal: { ...current.terminal, resource_links: storedLinks } }
@@ -289,6 +295,8 @@ export function failMcpTask(
       endTime: Date.now(),
       notified: true,
       abortController: undefined,
+      openQuestion: undefined,
+      questionState: undefined,
       ...(statusMessage !== undefined ? { statusMessage } : {}),
       terminal: {
         ...current.terminal,
@@ -347,6 +355,8 @@ export async function killMcpTask(
       notified: true,
       abortController: undefined,
       driveAbortController: undefined,
+      openQuestion: undefined,
+      questionState: undefined,
     }
   })
   if (killed) {
@@ -716,4 +726,269 @@ export async function restoreSep2663Tasks(params: {
   }
 
   return { restoredTaskIds, skippedTaskIds }
+}
+
+// ---------------------------------------------------------------------------
+// Official 2.1.325 #2307, #2309, #2349, #2367 — Background MCP task question
+// deferral ("answer later" on Esc), reopen in /tasks, footer indicator, and
+// Claude passive notification.
+// ---------------------------------------------------------------------------
+
+const MCP_TASK_ANSWER_GRACE_MS = 5_000
+const deferredTaskElicitations = new WeakSet<object>()
+
+/** Official `L2i` — mark an elicitation params object as answerable later. */
+export function markDeferredTaskElicitation(params: object): void {
+  deferredTaskElicitations.add(params)
+}
+
+/** Official `H2i` — check whether an elicitation params object uses "answer later". */
+export function isDeferredTaskElicitation(params: unknown): boolean {
+  return (
+    typeof params === 'object' &&
+    params !== null &&
+    deferredTaskElicitations.has(params)
+  )
+}
+
+/**
+ * Official `rHn` (#2367) — sentinel returned when the user presses Esc on a
+ * background MCP task's question. Nothing is sent to the server; the task
+ * controller puts the question aside (`putAside`) so Enter in `/tasks` reopens
+ * it.
+ */
+export const MCP_TASK_DEFERRED_CANCEL = Object.freeze({
+  action: 'cancel' as const,
+})
+
+export type McpTaskQuestionSurfaceState = 'asking' | 'off_screen' | undefined
+
+/**
+ * Official `oys` (#2307 / #2367) — manages a background MCP task's question
+ * lifecycle across `asking`, `off_screen` (Esc → "answer later"), and reopen
+ * via Enter in `/tasks`.
+ */
+export class McpTaskQuestionController {
+  #state: McpTaskQuestionSurfaceState = undefined
+  #lastAnsweredAt = 0
+  #reopenPending = false
+  #held = false
+  #putAsideKeys = new Set<string>()
+  #wakeController = new AbortController()
+  #onStateChange: (
+    openFn: (() => void) | undefined,
+    state: McpTaskQuestionSurfaceState,
+  ) => void
+
+  constructor(
+    onStateChange: (
+      openFn: (() => void) | undefined,
+      state: McpTaskQuestionSurfaceState,
+    ) => void,
+  ) {
+    this.#onStateChange = onStateChange
+  }
+
+  get state(): McpTaskQuestionSurfaceState {
+    return this.#state
+  }
+
+  set(state: McpTaskQuestionSurfaceState): void {
+    if (state !== this.#state) {
+      this.#state = state
+      this.#onStateChange(state === 'off_screen' ? this.open : undefined, state)
+    }
+  }
+
+  open = (): void => {
+    if (this.#state === 'off_screen' && !this.#reopenPending) {
+      this.#reopenPending = true
+      this.#wakeController.abort()
+    }
+  }
+
+  takeOpen(): boolean {
+    const pending = this.#reopenPending
+    this.#reopenPending = false
+    if (pending) {
+      this.#held = false
+      this.#putAsideKeys.clear()
+    }
+    return pending
+  }
+
+  putAside(requestKey: string): void {
+    this.#held = true
+    this.#putAsideKeys.add(requestKey)
+    this.set('off_screen')
+  }
+
+  updateHold(activeKeys: readonly string[]): boolean {
+    this.#held =
+      activeKeys.length > 0 &&
+      (this.#held || activeKeys.some(k => this.#putAsideKeys.has(k)))
+    return this.#held
+  }
+
+  answered(now: number = Date.now()): void {
+    this.#lastAnsweredAt = now
+  }
+
+  graceLeftMs(now: number = Date.now()): number {
+    return this.#lastAnsweredAt + MCP_TASK_ANSWER_GRACE_MS - now
+  }
+
+  async sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    const signals = signal
+      ? [signal, this.#wakeController.signal]
+      : [this.#wakeController.signal]
+    const combined = AbortSignal.any(signals)
+    if (!combined.aborted) {
+      await new Promise<void>(resolve => {
+        const timer = setTimeout(() => {
+          combined.removeEventListener('abort', onAbort)
+          resolve()
+        }, ms)
+        const onAbort = () => {
+          clearTimeout(timer)
+          resolve()
+        }
+        combined.addEventListener('abort', onAbort, { once: true })
+      })
+    }
+    if (this.#wakeController.signal.aborted) {
+      this.#wakeController = new AbortController()
+    }
+  }
+}
+
+/**
+ * Official `Tn` (#2349) — passive task-notification payload telling Claude a
+ * background MCP task is waiting for the user's answer in `/tasks`.
+ */
+export function buildMcpTaskWaitingForAnswerNotification(
+  taskId: string,
+): string {
+  return `<task-notification>\n<task-id>${taskId}</task-id>\n<summary>A background MCP task is waiting for an answer in /tasks.</summary>\n<result>\nThis task's server is waiting for the user to answer a question that is not on their screen. To see it, the user runs /tasks, opens this task and presses Enter. Tell the user in one sentence. Name the task by what they asked for if this conversation shows it, and leave out its id.\n</result>\n</task-notification>`
+}
+
+/** Official `ys` (#2349) — matches a waiting-for-answer notification entry. */
+export function isMcpTaskWaitingForAnswerNotification(entry: {
+  taskId?: string
+  value: string
+}): boolean {
+  return (
+    entry.taskId !== undefined &&
+    entry.value === buildMcpTaskWaitingForAnswerNotification(entry.taskId)
+  )
+}
+
+/**
+ * Official `wn` (#2349) — enqueues the passive `/tasks` hint notification for
+ * Claude once when an MCP task question moves off-screen, and retracts it if
+ * the user opens or answers the question before delivery.
+ */
+type EnqueueMcpTaskNoticeFn = (notification: {
+  value: string
+  mode: 'task-notification'
+  skipAttachments: true
+  priority: 'next'
+  passive: true
+  taskId: string
+}) => void
+
+type RemoveQueuedMcpTaskNoticesFn = (
+  predicate: (value: string) => boolean,
+) => number
+
+export class McpTaskQuestionNoticeTracker {
+  #notified = false
+  #taskId: string
+  #enqueueNotice: EnqueueMcpTaskNoticeFn
+  #removeQueuedNotices: RemoveQueuedMcpTaskNoticesFn
+
+  constructor(
+    taskId: string,
+    deps: {
+      enqueueNotice: EnqueueMcpTaskNoticeFn
+      removeQueuedNotices: RemoveQueuedMcpTaskNoticesFn
+    },
+  ) {
+    this.#taskId = taskId
+    this.#enqueueNotice = deps.enqueueNotice
+    this.#removeQueuedNotices = deps.removeQueuedNotices
+  }
+
+  update(state: McpTaskQuestionSurfaceState): void {
+    const value = buildMcpTaskWaitingForAnswerNotification(this.#taskId)
+    if (state !== 'off_screen') {
+      const removed = this.#removeQueuedNotices(v => v === value)
+      if (state === 'asking' || removed > 0) {
+        this.#notified = false
+      }
+    } else if (!this.#notified) {
+      this.#notified = true
+      this.#enqueueNotice({
+        value,
+        mode: 'task-notification',
+        skipAttachments: true,
+        priority: 'next',
+        passive: true,
+        taskId: this.#taskId,
+      })
+    }
+  }
+}
+
+/**
+ * Official #2307 — update a running MCP task's `openQuestion` / `questionState`
+ * in AppState so the footer shows "· needs your input" and Enter in `/tasks`
+ * reopens the question.
+ */
+export function setMcpTaskQuestionState(
+  taskId: string,
+  setAppState: SetAppState,
+  openQuestion: (() => void) | undefined,
+  questionState: McpTaskQuestionSurfaceState,
+): void {
+  updateTaskState(taskId, setAppState, current => {
+    if (!isMcpTask(current) || current.status !== 'running') return current
+    if (
+      current.openQuestion === openQuestion &&
+      current.questionState === questionState
+    ) {
+      return current
+    }
+    return {
+      ...current,
+      openQuestion,
+      questionState,
+      ...(questionState !== undefined ? { mcpStatus: 'input_required' } : {}),
+    }
+  })
+}
+
+/**
+ * Official `blo` (#2307) — true when any running MCP task has an off-screen
+ * question waiting for the user's answer (drives the footer "· needs your input"
+ * warning badge).
+ */
+export function hasMcpTaskNeedingInput(
+  tasks: Iterable<unknown> | Record<string, unknown> | undefined,
+): boolean {
+  if (!tasks) return false
+  const list =
+    Symbol.iterator in Object(tasks)
+      ? (tasks as Iterable<unknown>)
+      : Object.values(tasks)
+  for (const task of list) {
+    if (
+      isMcpTask(task) &&
+      task.status === 'running' &&
+      task.openQuestion !== undefined
+    ) {
+      return true
+    }
+  }
+  return false
 }

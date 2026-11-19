@@ -112,9 +112,11 @@ const GLOBAL_IGNORE_PREFIX = '**/'
 export async function addFileGlobRuleToGitignore(
   filename: string,
   cwd: string = getCwd(),
+  writeOutsideGitRepo = false,
 ): Promise<GitignoreGlobalRuleResult> {
   try {
-    if (!(await dirIsInGitRepo(cwd))) {
+    const inGitRepo = await dirIsInGitRepo(cwd)
+    if (!inGitRepo && !writeOutsideGitRepo) {
       return { written: false, effective: false }
     }
 
@@ -123,7 +125,7 @@ export async function addFileGlobRuleToGitignore(
     const testPath = normalized.endsWith('/')
       ? `${normalized}sample-file.txt`
       : normalized
-    if (await isPathGitignored(testPath, cwd)) {
+    if (inGitRepo && (await isPathGitignored(testPath, cwd))) {
       return { written: false, effective: true }
     }
 
@@ -132,6 +134,14 @@ export async function addFileGlobRuleToGitignore(
 
     try {
       const content = await readFile(globalGitignorePath, { encoding: 'utf-8' })
+      if (!inGitRepo && content.includes(gitignoreEntry)) {
+        return {
+          written: false,
+          effective: content
+            .split('\n')
+            .some(line => line.trim() === gitignoreEntry),
+        }
+      }
       if (content.includes(gitignoreEntry)) {
         const reason = (await isPathGitTracked(testPath, cwd))
           ? 'already_tracked'
@@ -150,6 +160,10 @@ export async function addFileGlobRuleToGitignore(
       } else {
         throw e
       }
+    }
+
+    if (!inGitRepo) {
+      return { written: true, effective: true }
     }
 
     if (!(await isPathGitignored(testPath, cwd))) {

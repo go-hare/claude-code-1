@@ -59,10 +59,12 @@ import {
   getLastSessionLog,
   getSessionIdFromLog,
   isLiteLog,
+  isTrailingNoReplyNote,
   loadFullLog,
   loadMessageLogs,
   loadTranscriptFile,
   removeExtraFields,
+  wasTurnStoppedByHook,
 } from './sessionStorage.js'
 import type { ContentReplacementRecord } from './toolResultStorage.js'
 
@@ -863,6 +865,8 @@ export function detectTurnInterruption(
     return { kind: 'none' }
   }
 
+  let result: InternalInterruptionState = { kind: 'none' }
+
   if (lastMessage.type === 'user') {
     if (lastMessage.isMeta) {
       // 2.1.299 #691 (SEA H2r / tengu_partitioned_finch): if trailing meta
@@ -878,17 +882,14 @@ export function detectTurnInterruption(
       const prevIdx = findMessageBeforeContextRows(messages, lastMessageIdx)
       if (prevIdx !== -1) {
         const inner = detectTurnInterruption(messages.slice(0, prevIdx + 1))
-        if (inner.kind === 'interrupted_prompt') {
-          return { kind: 'interrupted_turn' }
-        }
-        return inner
+        result =
+          inner.kind === 'interrupted_prompt'
+            ? { kind: 'interrupted_turn' }
+            : inner
       }
+    } else if (lastMessage.isCompactSummary) {
       return { kind: 'none' }
-    }
-    if (lastMessage.isCompactSummary) {
-      return { kind: 'none' }
-    }
-    if (isToolUseResultMessage(lastMessage)) {
+    } else if (isToolUseResultMessage(lastMessage)) {
       // Brief mode (#20467) drops the trailing assistant text block, so a
       // completed brief-mode turn legitimately ends on SendUserMessage's
       // tool_result. Without this check, resume misclassifies every
@@ -904,22 +905,32 @@ export function detectTurnInterruption(
       ) {
         return { kind: 'none' }
       }
-      return { kind: 'interrupted_turn' }
+      result = { kind: 'interrupted_turn' }
+    } else {
+      // Plain text user prompt — CC hadn't started responding
+      result = {
+        kind: 'interrupted_prompt',
+        message: lastMessage as NormalizedUserMessage,
+      }
     }
-    // Plain text user prompt — CC hadn't started responding
-    return {
-      kind: 'interrupted_prompt',
-      message: lastMessage as NormalizedUserMessage,
-    }
-  }
-
-  if (lastMessage.type === 'attachment') {
+  } else if (lastMessage.type === 'attachment') {
     // Attachments are part of the user turn — the user provided context but
     // the assistant never responded.
-    return { kind: 'interrupted_turn' }
+    result = { kind: 'interrupted_turn' }
   }
 
-  return { kind: 'none' }
+  // Official 2.1.323 (#2078 & #2144): do not classify a turn as interrupted
+  // when a hook intentionally stopped continuation (`continue: false`) or when
+  // the tail consists solely of file-arrival / `queueTranscriptOnly` no-reply
+  // context rows after a completed assistant reply.
+  if (
+    result.kind !== 'none' &&
+    (wasTurnStoppedByHook(messages) || isTrailingNoReplyNote(messages))
+  ) {
+    return { kind: 'none' }
+  }
+
+  return result
 }
 
 /**

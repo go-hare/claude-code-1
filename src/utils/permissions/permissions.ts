@@ -1,6 +1,7 @@
 import { feature } from 'bun:bundle'
 import { APIUserAbortError } from '@anthropic-ai/sdk'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
+import { shouldHoldConnectorApprovalWhilePluginsLoading } from '../../services/mcp/config.js'
 import {
   buildMcpToolName,
   getToolNameForPermissionCheck,
@@ -86,6 +87,7 @@ import {
 import { isEvalConfined } from './evalConfined.js'
 import type { FunctionHookHopSite } from '../plugins/functionHooksModules.js'
 import { pinValue, restorePinnedKeys } from '../plugins/functionHooksHop.js'
+import { applyPluginToolListDenyRules } from '../plugins/pluginToolList.js'
 import {
   deletePermissionRuleFromSettings,
   type PermissionRuleFromEditableSettings,
@@ -122,6 +124,8 @@ import { checkAccountEmailUserAgent } from './accountEmailUserAgentCheck.js'
 import { getSettingsForSource } from '../settings/settings.js'
 import type { SettingSource } from '../settings/constants.js'
 import { getToolPermissionContextFromLayers } from '../../engine/permissionLayerReaders.js'
+import { getAgentContext } from '../agentContext.js'
+import { clearCommandScopedAllowRules } from './permissionSetup.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -372,8 +376,13 @@ export function avoidsPromptsByNature(context: ToolPermissionContext): boolean {
 function getEffectiveToolPermissionContext(
   context: ToolUseContext,
 ): ToolPermissionContext {
-  return applyDenyInsteadOfPrompting(
-    getToolPermissionContextFromLayers(context),
+  return applyPluginToolListDenyRules(
+    applyDenyInsteadOfPrompting(
+      stripCommandAllowedToolsForBackgroundAgent(
+        getToolPermissionContextFromLayers(context),
+        context,
+      ),
+    ),
   )
 }
 
@@ -674,6 +683,93 @@ function matchesConnectorAliasForDenyOrAsk(
 }
 
 /**
+ * Official 2.1.325 #2313 (SEA `mYa` / `Lbt` / `Vho` @289722180, @292689088,
+ * @306535905): True when a tool (including a cloud session's MCP Artifacts
+ * stand-in tool or Artifact family sub-tool) stands in for the built-in
+ * `Artifact` tool so `Artifact` deny/ask permission rules apply to it.
+ */
+const ARTIFACT_FAMILY_TOOLS = new Set([
+  'ArtifactComments',
+  'ArtifactData',
+  'ArtifactCheck',
+])
+
+const ARTIFACT_STANDIN_MCP_SERVERS = new Set([
+  'artifacts',
+  'claude_ai_artifacts',
+  'claude_ai_artifact',
+])
+
+export function standsInForBuiltInArtifactTool(
+  tool: Pick<Tool, 'name' | 'mcpInfo'>,
+): boolean {
+  if (ARTIFACT_FAMILY_TOOLS.has(tool.name)) {
+    return true
+  }
+  const mcpInfo = tool.mcpInfo as
+    | (NonNullable<Tool['mcpInfo']> & { standsInForBuiltIn?: boolean })
+    | undefined
+  if (mcpInfo?.standsInForBuiltIn === true) {
+    return true
+  }
+  if (mcpInfo?.serverName) {
+    const normServer = normalizeNameForMCP(mcpInfo.serverName).toLowerCase()
+    if (ARTIFACT_STANDIN_MCP_SERVERS.has(normServer)) {
+      return true
+    }
+  }
+  const parsed = mcpInfoFromString(tool.name)
+  if (
+    parsed !== null &&
+    ARTIFACT_STANDIN_MCP_SERVERS.has(parsed.serverName.toLowerCase())
+  ) {
+    return true
+  }
+  return false
+}
+
+export function standsInForBuiltInArtifactToolName(toolName: string): boolean {
+  if (ARTIFACT_FAMILY_TOOLS.has(toolName)) {
+    return true
+  }
+  const parsed = mcpInfoFromString(toolName)
+  return (
+    parsed !== null &&
+    ARTIFACT_STANDIN_MCP_SERVERS.has(parsed.serverName.toLowerCase())
+  )
+}
+
+/**
+ * Official 2.1.325 #2319 (SEA `a5e` / `fzt` / `IWr` @283106674):
+ * A slash command's `allowed-tools` grants (`alwaysAllowRules.command`) must
+ * NEVER leak to background/async subagents woken during or after its turn.
+ */
+export function stripCommandAllowedToolsForBackgroundAgent(
+  permissionContext: ToolPermissionContext,
+  context?: Pick<ToolUseContext, 'agentId'>,
+): ToolPermissionContext {
+  const agentCtx = getAgentContext()
+  const isBackgroundAgent =
+    agentCtx !== undefined &&
+    (agentCtx.isBackgroundAgent === true ||
+      (agentCtx.agentType === 'subagent' && agentCtx.isAsync === true))
+  const isPollGuarded =
+    (
+      permissionContext as ToolPermissionContext & {
+        pollEventDeliveryGuard?: boolean
+      }
+    ).pollEventDeliveryGuard === true
+  if (
+    !isBackgroundAgent &&
+    !isPollGuarded &&
+    !(context?.agentId !== undefined && agentCtx?.isBackgroundAgent === true)
+  ) {
+    return permissionContext
+  }
+  return clearCommandScopedAllowRules(permissionContext)
+}
+
+/**
  * Check if the entire tool matches a rule
  * For example, this matches "Bash" but not "Bash(prefix:*)" for BashTool
  * This also matches MCP tools with a server name, e.g. the rule "mcp__server1"
@@ -699,12 +795,33 @@ export function toolMatchesRule(
     return true
   }
 
-  // Glob match on tool name (e.g. mcp__a__b__*)
+  // Official 2.1.325 #2313: Deny and ask rules for `Artifact` also apply to
+  // cloud-session MCP Artifact stand-in tools and Artifact family tools.
+  // Never widen `allow` rules here.
   if (
-    rule.ruleValue.toolName.includes('*') &&
-    compileWildcardMatcher(rule.ruleValue.toolName)(nameForRuleMatch)
+    rule.ruleBehavior !== 'allow' &&
+    rule.ruleValue.toolName === 'Artifact' &&
+    standsInForBuiltInArtifactTool(tool)
   ) {
     return true
+  }
+
+  // Glob match on tool name (e.g. mcp__a__b__*)
+  // Official 2.1.325 #2322 (SEA `x` @283306800): deny and ask rules starting
+  // with `mcp__plugin_*_` match plugin MCP server/tool names case-insensitively.
+  if (rule.ruleValue.toolName.includes('*')) {
+    const caseInsensitivePluginRule =
+      rule.ruleBehavior !== 'allow' &&
+      rule.ruleValue.toolName.startsWith('mcp__plugin_*_')
+    const rulePattern = caseInsensitivePluginRule
+      ? rule.ruleValue.toolName.toLowerCase()
+      : rule.ruleValue.toolName
+    const targetName = caseInsensitivePluginRule
+      ? nameForRuleMatch.toLowerCase()
+      : nameForRuleMatch
+    if (compileWildcardMatcher(rulePattern)(targetName)) {
+      return true
+    }
   }
 
   // MCP server-level permission:
@@ -1061,7 +1178,12 @@ export function getRuleByContentsForToolName(
       rule.ruleBehavior === behavior &&
       (rule.ruleValue.toolName === toolName ||
         (behavior !== 'allow' &&
-          matchesConnectorAliasForDenyOrAsk(toolName, rule.ruleValue.toolName)))
+          (matchesConnectorAliasForDenyOrAsk(
+            toolName,
+            rule.ruleValue.toolName,
+          ) ||
+            (rule.ruleValue.toolName === 'Artifact' &&
+              standsInForBuiltInArtifactToolName(toolName)))))
     ) {
       ruleByContents.set(rule.ruleValue.ruleContent, rule)
     }
@@ -1569,19 +1691,69 @@ function markAskPersonOnly<Input extends Record<string, unknown>>(
   }
 }
 
+const TOOL_CHECK_RESULT_IDENTITY_KEYS = [
+  'decision',
+  'reason',
+  'rule',
+  'hook',
+  'setting',
+] as const
+
+/**
+ * Official 2.1.323 `sc` (#2026) — attributes a `tool.check` `ask` result to
+ * the specific plugin that asked rather than every plugin hooked on the tool.
+ * Preserves an inner plugin's `plugin` stamp when an outer handler passes the
+ * same ask result through unchanged.
+ */
+export function stripToolCheckHookResult(
+  returned: Record<string, unknown>,
+  priorResults: readonly Record<string, unknown>[],
+  handler: { name: string; isHop?: boolean; plugins?: readonly string[] },
+): Record<string, unknown> {
+  const { plugin: stamped, ...rest } = returned
+  if (rest.decision !== 'ask') return rest
+  const matchingPrior = priorResults.filter(prior =>
+    TOOL_CHECK_RESULT_IDENTITY_KEYS.every(key => prior[key] === rest[key]),
+  )
+  const inherited =
+    matchingPrior.find(prior => prior.plugin === stamped) ?? matchingPrior[0]
+  const attributedName =
+    handler.isHop !== true
+      ? handler.name
+      : typeof stamped === 'string' &&
+          handler.plugins?.includes(stamped) === true
+        ? stamped
+        : undefined
+  const hopIntroducedNew =
+    handler.isHop === true &&
+    attributedName !== undefined &&
+    matchingPrior.every(prior => prior.plugin !== stamped)
+  const chosenPlugin =
+    inherited !== undefined &&
+    typeof inherited.plugin === 'string' &&
+    !hopIntroducedNew
+      ? inherited.plugin
+      : attributedName
+  return chosenPlugin === undefined ? rest : { ...rest, plugin: chosenPlugin }
+}
+
 function applyToolCheckHookResult<Input extends Record<string, unknown>>(
   rawResult: {
     decision: 'allow' | 'ask' | 'deny'
     reason?: string
     decider?: string
+    plugin?: string
   },
   decided: PermissionDecision<Input> | undefined,
   toolName: string,
   input: Input,
   toolUseID: string | undefined,
 ): PermissionDecision<Input> {
+  // Official 2.1.323 `sEs` (#2026): attribute to the specific asking plugin
+  // (`rawResult.plugin`) when stamped, instead of naming every hooked plugin.
   const personAsked =
-    rawResult.decision === 'ask' && rawResult.decider === 'person'
+    rawResult.decision === 'ask' &&
+    (rawResult.decider === 'person' || rawResult.plugin !== undefined)
   if (decided?.behavior === rawResult.decision) {
     if (decided.behavior === 'allow') return decided
     const withMsg = rawResult.reason
@@ -1589,16 +1761,21 @@ function applyToolCheckHookResult<Input extends Record<string, unknown>>(
       : decided
     return personAsked ? markAskPersonOnly(withMsg) : withMsg
   }
-  const { getLoadedFunctionHooksModules, hasMatchingFunctionHook } =
-    getFunctionHooksMod()
-  const hookedModules = getLoadedFunctionHooksModules()
-    .filter(
-      mod =>
-        mod.status !== 'unloaded' &&
-        hasMatchingFunctionHook('tool.check', { tool: toolName }, [mod]),
-    )
-    .map(mod => mod.name)
-  const hooked = hookedModules.length > 0 ? hookedModules : ['plugin']
+  let hooked: string[]
+  if (rawResult.plugin !== undefined) {
+    hooked = [rawResult.plugin]
+  } else {
+    const { getLoadedFunctionHooksModules, hasMatchingFunctionHook } =
+      getFunctionHooksMod()
+    const hookedModules = getLoadedFunctionHooksModules()
+      .filter(
+        mod =>
+          mod.status !== 'unloaded' &&
+          hasMatchingFunctionHook('tool.check', { tool: toolName }, [mod]),
+      )
+      .map(mod => mod.name)
+    hooked = hookedModules.length > 0 ? hookedModules : ['plugin']
+  }
   const who = `${hooked.length === 1 ? 'plugin' : 'plugins'} ${hooked.join(', ')}`
   const reasonSuffix =
     rawResult.reason === undefined ? '' : `: ${rawResult.reason}`
@@ -1724,11 +1901,16 @@ export async function evaluatePermissionWithToolCheck<
       decision: 'allow' | 'ask' | 'deny'
       reason?: unknown
       decider?: unknown
+      plugin?: unknown
     }
     const decider = typeof rec.decider === 'string' ? rec.decider : undefined
+    const plugin =
+      typeof rec.plugin === 'string' && rec.plugin.length > 0
+        ? rec.plugin
+        : undefined
     const effectiveDecision =
       rec.decision === 'ask' &&
-      decider === 'person' &&
+      (decider === 'person' || plugin !== undefined) &&
       approverInfo.approver === undefined
         ? ('deny' as const)
         : rec.decision
@@ -1736,6 +1918,7 @@ export async function evaluatePermissionWithToolCheck<
       decision: effectiveDecision,
       reason: typeof rec.reason === 'string' ? rec.reason : undefined,
       ...(decider !== undefined && { decider }),
+      ...(plugin !== undefined && { plugin }),
     }
     if (normalizedResult.decision === 'deny') {
       markToolCheckEvaluatedForCall(context, toolUseID, input, {
@@ -2104,6 +2287,17 @@ const evaluateToolPermission: CanUseToolFn = async (
             'org_ask_ceiling' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           toolName: sanitizeToolNameForAnalytics(tool.name),
         })
+        return result
+      }
+      // Official 2.1.325 #2328: in cloud sessions while plugins are still
+      // loading, do not let auto mode automatically answer a connector MCP
+      // tool approval prompt — hold/ask until plugin loading completes.
+      if (
+        shouldHoldConnectorApprovalWhilePluginsLoading({
+          isConnectorTool:
+            tool.mcpInfo !== undefined || tool.name.startsWith('mcp__'),
+        })
+      ) {
         return result
       }
       if (tool.requiresUserInteraction?.() && result.behavior === 'ask') {
@@ -3159,13 +3353,13 @@ export async function checkRuleBasedPermissions(
   options?: { crashIsObjection?: boolean; planModeWriteFloor?: boolean },
 ): Promise<PermissionAskDecision | PermissionDenyDecision | null> {
   // densable bn: sticky layers overlay for rule-based checks
-  const toolPermissionContext = getToolPermissionContextFromLayers(context)
+  const toolPermissionContext = getEffectiveToolPermissionContext(context)
 
   // 1a. Entire tool is denied by rule
   const denyRule = getDenyRuleForTool(
     toolPermissionContext,
     tool,
-    context.options.mcpClients,
+    context.options?.mcpClients,
   )
   if (denyRule) {
     return {
@@ -3182,7 +3376,7 @@ export async function checkRuleBasedPermissions(
   const askRule = getAskRuleForTool(
     toolPermissionContext,
     tool,
-    context.options.mcpClients,
+    context.options?.mcpClients,
   )
   if (askRule) {
     const canSandboxAutoAllow =
@@ -3327,14 +3521,18 @@ async function hasPermissionsToUseToolInner(
   let appState = context.getAppState()
   // densable bn / getToolPermissionContext — sticky layers last-wins overlay
   // for mode / allow-deny rules / avoid_prompts / working_directory.
-  let toolPermissionContext = getToolPermissionContextFromLayers(context)
+  // Official 2.1.323 #2188: append plugin-removed tools to alwaysDenyRules.session.
+  // Official 2.1.325 #2319: strip slash-command allowed-tools for background agents.
+  let toolPermissionContext = applyPluginToolListDenyRules(
+    getEffectiveToolPermissionContext(context),
+  )
 
   // 1. Check if the tool is denied
   // 1a. Entire tool is denied
   const denyRule = getDenyRuleForTool(
     toolPermissionContext,
     tool,
-    context.options.mcpClients,
+    context.options?.mcpClients,
   )
   if (denyRule) {
     return {
@@ -3351,7 +3549,7 @@ async function hasPermissionsToUseToolInner(
   const askRule = getAskRuleForTool(
     toolPermissionContext,
     tool,
-    context.options.mcpClients,
+    context.options?.mcpClients,
   )
   if (askRule) {
     // When autoAllowBashIfSandboxed is on, sandboxed commands skip the ask rule and
@@ -3464,6 +3662,26 @@ async function hasPermissionsToUseToolInner(
     }
   }
 
+  // 1f3. Official 2.1.325 #2328: in cloud sessions while plugins are still
+  // loading, hold connector MCP tool approvals instead of auto-approving via
+  // bypassPermissions / alwaysAllow rules.
+  if (
+    shouldHoldConnectorApprovalWhilePluginsLoading({
+      isConnectorTool:
+        tool.mcpInfo !== undefined || tool.name.startsWith('mcp__'),
+    })
+  ) {
+    const decisionReason: PermissionDecisionReason = {
+      type: 'other',
+      reason: 'Holding connector tool approval while cloud plugins are loading',
+    }
+    return {
+      behavior: 'ask',
+      message: createPermissionRequestMessage(tool.name, decisionReason),
+      decisionReason,
+    }
+  }
+
   // 1g. Non-classifier-approvable safety checks (e.g. suspicious Windows path
   // tricks) are bypass-immune — they must prompt even in bypassPermissions.
   // densable 2.1.218+: classifierApprovable safetyChecks (`.claude/**`,
@@ -3490,7 +3708,9 @@ async function hasPermissionsToUseToolInner(
   // IMPORTANT: Call getAppState() to get the latest value
   appState = context.getAppState()
   // densable bn: re-materialize sticky layers after refresh
-  toolPermissionContext = getToolPermissionContextFromLayers(context)
+  toolPermissionContext = applyPluginToolListDenyRules(
+    getEffectiveToolPermissionContext(context),
+  )
   // Official snt(): effective mode for this MCP tool may demote bypass/auto
   // via per-server overrides or chrome classifier floor.
   const effectiveMode = getEffectivePermissionMode(tool, toolPermissionContext)
@@ -3512,9 +3732,9 @@ async function hasPermissionsToUseToolInner(
     }
   }
 
-  // 2b. Entire tool is allowed
+  // 2b. Entire tool is allowed (unless tool ignores whole-tool allow rules for this input, #2173)
   const alwaysAllowedRule = toolAlwaysAllowedRule(toolPermissionContext, tool)
-  if (alwaysAllowedRule) {
+  if (alwaysAllowedRule && tool.ignoresWholeToolAllowRule?.(input) !== true) {
     return {
       behavior: 'allow',
       updatedInput: getUpdatedInputOrFallback(toolPermissionResult, input),

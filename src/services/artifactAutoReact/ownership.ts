@@ -153,6 +153,51 @@ function shareModeFromBoot(
   return { mode: 'unknown', isSharedLive: true }
 }
 
+const PROBE_SHARED_WITH_CAP = 256
+
+/**
+ * Official 2.1.325 #2312 (SEA `zBe` @286618701):
+ * True when `toolUseId` is either the latest probe caller or shared an
+ * overlapping/reused probe on this slug.
+ */
+export function hasSharedProbeToolUseId(
+  status:
+    | Pick<ArtifactShareStatus, 'lastProbeToolUseId' | 'probeSharedWith'>
+    | undefined,
+  toolUseId: string | undefined,
+): boolean {
+  return (
+    toolUseId !== undefined &&
+    status !== undefined &&
+    (status.lastProbeToolUseId === toolUseId ||
+      status.probeSharedWith?.includes(toolUseId) === true)
+  )
+}
+
+/**
+ * Official 2.1.325 #2312 (SEA `mFo` @286618701):
+ * Merge `toolUseId` with any previous overlapping probe's `lastProbeToolUseId`
+ * and `probeSharedWith` list (capped at 256).
+ */
+export function mergeProbeToolUseIds(
+  prev:
+    | Pick<ArtifactShareStatus, 'lastProbeToolUseId' | 'probeSharedWith'>
+    | undefined,
+  toolUseId: string,
+  shareWithPrev: boolean,
+): { lastProbeToolUseId: string; probeSharedWith: string[] } {
+  const shared =
+    shareWithPrev && prev?.lastProbeToolUseId !== undefined
+      ? [...(prev.probeSharedWith ?? []), prev.lastProbeToolUseId]
+      : []
+  return {
+    lastProbeToolUseId: toolUseId,
+    probeSharedWith: shared
+      .filter(id => id !== toolUseId)
+      .slice(-PROBE_SHARED_WITH_CAP),
+  }
+}
+
 /** densable Egr portable merge */
 export function Egr(
   slug: string,
@@ -175,8 +220,14 @@ export function Egr(
     ...(cur?.artifactKind !== undefined
       ? { artifactKind: cur.artifactKind }
       : {}),
+    ...(cur?.outsideAudience !== undefined
+      ? { outsideAudience: cur.outsideAudience }
+      : {}),
     ...(cur?.lastProbeToolUseId
       ? { lastProbeToolUseId: cur.lastProbeToolUseId }
+      : {}),
+    ...(cur?.probeSharedWith !== undefined
+      ? { probeSharedWith: cur.probeSharedWith }
       : {}),
     ...(cur?.lastProbeAt !== undefined ? { lastProbeAt: cur.lastProbeAt } : {}),
     ...(cur?.lastProbeLandedAt !== undefined
@@ -212,11 +263,52 @@ export type OwnershipProbeResult =
       shared?: unknown
       role?: ArtifactShareRole
       cowritten?: boolean
+      outsideAudience?: boolean
       title?: string
       /** densable a.boot — non-err frame boot for probeBoots write. */
       boot?: ProbeCachedBoot
     }
   | { err: string; errorCode?: string }
+
+function parseBoolFlag(v: unknown): boolean | undefined {
+  return v === true ? true : v === false ? false : undefined
+}
+
+function deriveOutsideAudienceFromProbeFields(
+  mode: unknown,
+  role: unknown,
+): boolean | undefined {
+  if (mode === 'public' || mode === 'external') return true
+  if (mode === 'owner' || mode === 'org') return false
+  if ((mode === undefined || mode === '') && role === 'owner') return false
+  return undefined
+}
+
+function deriveOutsideAudienceFromBoot(
+  data: Record<string, unknown>,
+  perm: Record<string, unknown> | undefined,
+  tokenless: boolean,
+): boolean | undefined {
+  const explicit =
+    parseBoolFlag(data.outsideAudience) ??
+    parseBoolFlag(perm?.outsideAudience) ??
+    parseBoolFlag(data.outside_audience) ??
+    parseBoolFlag(perm?.outside_audience)
+  if (explicit !== undefined) return explicit
+  const modeRaw = perm?.mode ?? data.mode
+  if (
+    tokenless ||
+    modeRaw === 'public' ||
+    modeRaw === 'external' ||
+    data.mode === 'public' ||
+    data.mode === 'external' ||
+    data.kind === 'public'
+  ) {
+    return true
+  }
+  if (data.lean === true) return undefined
+  return deriveOutsideAudienceFromProbeFields(modeRaw, perm?.role)
+}
 
 /**
  * densable Jgl portable — ownership from frame boot perm.role.
@@ -247,6 +339,11 @@ export async function Jgl(
       : undefined
   const roleRaw = perm?.role
   const tokenless = boot.assetToken === undefined
+  const outsideAudience = deriveOutsideAudienceFromBoot(
+    boot.data,
+    perm,
+    tokenless,
+  )
   return {
     err: null,
     mode: tokenless
@@ -255,6 +352,7 @@ export async function Jgl(
     shared: boot.data.shared,
     role: tokenless && roleRaw === 'owner' ? undefined : normalizeRole(roleRaw),
     cowritten: boot.data.cowritten === true,
+    ...(outsideAudience !== undefined ? { outsideAudience } : {}),
     ...(typeof boot.data.title === 'string' ? { title: boot.data.title } : {}),
     boot: {
       err: null,
@@ -280,9 +378,13 @@ export function Kgl(
   },
 ): void {
   const now = Date.now()
+  const prev = ip(slug)
+  const overlapped =
+    prev?.lastProbeLandedAt !== undefined &&
+    meta.issuedAt <= prev.lastProbeLandedAt
   const toolPin =
     meta.consumedByCheck && meta.toolUseId !== undefined
-      ? { lastProbeToolUseId: meta.toolUseId }
+      ? mergeProbeToolUseIds(prev, meta.toolUseId, overlapped)
       : {}
   if (result.err !== null) {
     // densable Uht/Q_n — failed probe invalidates any cached probeBoot for slug.
@@ -302,10 +404,25 @@ export function Kgl(
     return
   }
   const share = shareModeFromBoot(result.mode, result.shared)
+  const bootPerm =
+    result.boot?.data.perm && typeof result.boot.data.perm === 'object'
+      ? (result.boot.data.perm as Record<string, unknown>)
+      : undefined
+  const outsideAudience =
+    result.outsideAudience !== undefined
+      ? result.outsideAudience
+      : result.boot !== undefined
+        ? deriveOutsideAudienceFromBoot(
+            result.boot.data,
+            bootPerm,
+            result.boot.assetToken === undefined,
+          )
+        : deriveOutsideAudienceFromProbeFields(result.mode, result.role)
   Egr(slug, {
     ...share,
     role: normalizeRole(result.role),
     cowritten: ip(slug)?.cowritten === true || result.cowritten === true,
+    outsideAudience,
     ...(result.title !== undefined ? { title: result.title } : {}),
     ...toolPin,
     probeFailed: false,
@@ -327,10 +444,7 @@ export async function probeArtifactOwnership(
   },
 ): Promise<ArtifactShareStatus | undefined> {
   const cur = ip(parsed.slug)
-  if (
-    opts.toolUseId !== undefined &&
-    cur?.lastProbeToolUseId === opts.toolUseId
-  ) {
+  if (hasSharedProbeToolUseId(cur, opts.toolUseId)) {
     return cur
   }
   const issuedAt = Date.now()

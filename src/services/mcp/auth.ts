@@ -557,7 +557,27 @@ export function validateSep2352Issuer<T extends { issuer?: string }>(
     }
     return stored
   }
-  return issuersMatchSep2352(stored.issuer, expectedIssuer) ? stored : undefined
+  if (issuersMatchSep2352(stored.issuer, expectedIssuer)) {
+    return stored
+  }
+  // #2170: `MCP_SDK_GENERATION=v1` relaxes OAuth issuer sign-in checks in v2 compat mode.
+  try {
+    const { isMcpV1CompatMode } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./mcpV2Client.js') as typeof import('./mcpV2Client.js')
+    if (isMcpV1CompatMode()) {
+      const msg = `Issuer mismatch in MCP OAuth check (expected ${expectedIssuer.slice(0, 100)}, received ${stored.issuer.slice(0, 100)}). Sign-in continues, because MCP_SDK_GENERATION=v1 turns this check off.`
+      if (options?.warn) {
+        options.warn(msg)
+      } else {
+        logMCPDebug('oauth', msg)
+      }
+      return stored
+    }
+  } catch {
+    // optional
+  }
+  return undefined
 }
 
 function isSameOriginUrl(a: string | URL, b: string | URL): boolean {
@@ -1605,6 +1625,46 @@ async function performMCPXaaAuth(
   }
 }
 
+const activeOAuthCallbackSubmitters = new Map<
+  string,
+  (callbackUrl: string) => boolean
+>()
+const activeOAuthCallbackStates = new Map<string, string>()
+const activeOAuthPromises = new Map<string, Promise<void>>()
+
+/**
+ * #2171: Retrieve the active manual OAuth callback submitter for an MCP server.
+ */
+export function getOAuthCallbackSubmitter(
+  serverName: string,
+): ((callbackUrl: string) => boolean) | undefined {
+  return activeOAuthCallbackSubmitters.get(serverName)
+}
+
+export function getOAuthCallbackState(serverName: string): string | undefined {
+  return activeOAuthCallbackStates.get(serverName)
+}
+
+export function setActiveOAuthPromise(
+  serverName: string,
+  promise: Promise<void>,
+): void {
+  activeOAuthPromises.set(serverName, promise)
+  void promise
+    .catch(() => {})
+    .finally(() => {
+      if (activeOAuthPromises.get(serverName) === promise) {
+        activeOAuthPromises.delete(serverName)
+      }
+    })
+}
+
+export function getActiveOAuthPromise(
+  serverName: string,
+): Promise<void> | undefined {
+  return activeOAuthPromises.get(serverName)
+}
+
 export async function performMCPOAuthFlow(
   serverName: string,
   serverConfig: McpSSEServerConfig | McpHTTPServerConfig,
@@ -1844,14 +1904,17 @@ export async function performMCPOAuthFlow(
     // arrives via onWaitingForCallback / external channel only.
     const authorizationCode = await new Promise<string>((resolve, reject) => {
       let resolved = false
+      let clearSubmitter: (() => void) | undefined
       const resolveOnce = (code: string) => {
         if (resolved) return
         resolved = true
+        clearSubmitter?.()
         resolve(code)
       }
       const rejectOnce = (error: Error) => {
         if (resolved) return
         resolved = true
+        clearSubmitter?.()
         reject(error)
       }
 
@@ -1870,46 +1933,54 @@ export async function performMCPOAuthFlow(
       // Allow manual callback URL paste for remote/browser-based environments
       // where localhost is not reachable from the user's browser. densable also
       // uses this when options.redirectUri is set (no localhost listener).
+      const submitManualCallback = (callbackUrl: string): boolean => {
+        try {
+          const parsed = new URL(callbackUrl)
+          const code = parsed.searchParams.get('code')
+          const state = parsed.searchParams.get('state')
+          const error = parsed.searchParams.get('error')
+
+          if (error) {
+            const errorDescription =
+              parsed.searchParams.get('error_description') || ''
+            cleanup()
+            rejectOnce(new Error(`OAuth error: ${error} - ${errorDescription}`))
+            return true
+          }
+
+          if (!code) {
+            // Not a valid callback URL, ignore so the user can try again
+            return false
+          }
+
+          if (state !== oauthState) {
+            return false
+          }
+
+          logMCPDebug(serverName, `Received auth code via manual callback URL`)
+          cleanup()
+          resolveOnce(code)
+          return true
+        } catch {
+          // Invalid URL, ignore so the user can try again
+          return false
+        }
+      }
+
+      activeOAuthCallbackSubmitters.set(serverName, submitManualCallback)
+      activeOAuthCallbackStates.set(serverName, oauthState)
+      clearSubmitter = () => {
+        if (
+          activeOAuthCallbackSubmitters.get(serverName) === submitManualCallback
+        ) {
+          activeOAuthCallbackSubmitters.delete(serverName)
+          activeOAuthCallbackStates.delete(serverName)
+        }
+      }
+
       if (options?.onWaitingForCallback) {
         options.onWaitingForCallback((callbackUrl: string) => {
-          try {
-            const parsed = new URL(callbackUrl)
-            const code = parsed.searchParams.get('code')
-            const state = parsed.searchParams.get('state')
-            const error = parsed.searchParams.get('error')
-
-            if (error) {
-              const errorDescription =
-                parsed.searchParams.get('error_description') || ''
-              cleanup()
-              rejectOnce(
-                new Error(`OAuth error: ${error} - ${errorDescription}`),
-              )
-              return
-            }
-
-            if (!code) {
-              // Not a valid callback URL, ignore so the user can try again
-              return
-            }
-
-            if (state !== oauthState) {
-              cleanup()
-              rejectOnce(
-                new Error('OAuth state mismatch - possible CSRF attack'),
-              )
-              return
-            }
-
-            logMCPDebug(
-              serverName,
-              `Received auth code via manual callback URL`,
-            )
-            cleanup()
-            resolveOnce(code)
-          } catch {
-            // Invalid URL, ignore so the user can try again
-          }
+          submitManualCallback(callbackUrl)
         })
       }
 
@@ -3331,8 +3402,14 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
 
         if (newTokens) {
           logMCPDebug(this.serverName, `Token refresh successful`)
+          const key = getServerKey(this.serverName, this.serverConfig)
+          const wasTransient = hasRecentTransientMcpRefreshFailure(key)
+          clearTransientMcpRefreshFailure(key)
           await this.saveTokens(newTokens)
           emitRefreshEvent('success')
+          if (wasTransient) {
+            emitMcpAuthRecovered(this.serverName, this.serverConfig)
+          }
           return newTokens
         }
 
@@ -3402,7 +3479,9 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
           return undefined
         }
 
-        // Retry on timeouts or transient server errors (v2 OAuthErrorCode)
+        // Retry on timeouts or transient server errors (v2 OAuthErrorCode).
+        // Official 2.1.325 #2304: treat non-permanent OAuthError codes
+        // (`!PERMANENT_OAUTH_REFRESH_ERROR_CODES.has(code)`) as transient too.
         const isTimeoutError =
           error instanceof Error &&
           /timeout|timed out|etimedout|econnreset/i.test(error.message)
@@ -3410,7 +3489,9 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
           error instanceof OAuthError &&
           (refreshErrCode === OAuthErrorCode.ServerError ||
             refreshErrCode === OAuthErrorCode.TemporarilyUnavailable ||
-            refreshErrCode === OAuthErrorCode.TooManyRequests)
+            refreshErrCode === OAuthErrorCode.TooManyRequests ||
+            (refreshErrCode !== undefined &&
+              !PERMANENT_OAUTH_REFRESH_ERROR_CODES.has(refreshErrCode)))
         const isRetryable = isTimeoutError || isTransientServerError
 
         if (!isRetryable || attempt >= MAX_ATTEMPTS) {
@@ -3418,6 +3499,11 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
             this.serverName,
             `Token refresh failed: ${errorMessage(error)}`,
           )
+          if (isRetryable) {
+            markTransientMcpRefreshFailure(
+              getServerKey(this.serverName, this.serverConfig),
+            )
+          }
           emitRefreshEvent(
             'failure',
             isRetryable ? 'transient_retries_exhausted' : 'request_failed',
@@ -3435,6 +3521,76 @@ export class ClaudeAuthProvider implements OAuthClientProvider {
     }
 
     return undefined
+  }
+}
+
+// Official 2.1.325 #2304: track transient OAuth refresh refusals separately
+// from permanent invalid_grant/invalid_client so a brief IdP blip never
+// sticks the server in the 15-min needs-auth cache or skips mcp_tool hooks.
+const TRANSIENT_REFRESH_FAILURE_TTL_MS = 60_000
+const transientMcpRefreshFailures = new Map<string, number>()
+
+const PERMANENT_OAUTH_REFRESH_ERROR_CODES = new Set<string>([
+  OAuthErrorCode.InvalidGrant,
+  OAuthErrorCode.InvalidClient,
+  OAuthErrorCode.UnauthorizedClient,
+  OAuthErrorCode.AccessDenied,
+  OAuthErrorCode.UnsupportedGrantType,
+  OAuthErrorCode.InvalidScope,
+])
+
+export function markTransientMcpRefreshFailure(serverKey: string): void {
+  transientMcpRefreshFailures.set(serverKey, Date.now())
+}
+
+export function clearTransientMcpRefreshFailure(serverKey: string): void {
+  transientMcpRefreshFailures.delete(serverKey)
+}
+
+export function hasRecentTransientMcpRefreshFailure(
+  serverKey: string,
+  now: number = Date.now(),
+): boolean {
+  const ts = transientMcpRefreshFailures.get(serverKey)
+  if (ts === undefined) return false
+  if (now - ts > TRANSIENT_REFRESH_FAILURE_TTL_MS) {
+    transientMcpRefreshFailures.delete(serverKey)
+    return false
+  }
+  return true
+}
+
+/**
+ * Official 2.1.325 #2304 (`PHt`): pub/sub for servers whose OAuth token
+ * refresh succeeded after a previous transient failure / needs-auth state.
+ */
+type McpAuthRecoveredListener = (
+  serverName: string,
+  serverConfig: McpSSEServerConfig | McpHTTPServerConfig,
+) => void
+
+const mcpAuthRecoveredListeners = new Set<McpAuthRecoveredListener>()
+
+export function subscribeMcpAuthRecovered(
+  listener: McpAuthRecoveredListener,
+): () => void {
+  mcpAuthRecoveredListeners.add(listener)
+  return () => {
+    mcpAuthRecoveredListeners.delete(listener)
+  }
+}
+
+export function emitMcpAuthRecovered(
+  serverName: string,
+  serverConfig: McpSSEServerConfig | McpHTTPServerConfig,
+): void {
+  clearTransientMcpRefreshFailure(getServerKey(serverName, serverConfig))
+  for (const listener of mcpAuthRecoveredListeners) {
+    try {
+      listener(serverName, serverConfig)
+    } catch {
+      // best-effort recovery notification
+    }
   }
 }
 

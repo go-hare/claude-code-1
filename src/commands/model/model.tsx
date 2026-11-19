@@ -12,7 +12,15 @@ import {
 } from '../../services/analytics/index.js';
 import { useAppState, useSetAppState } from '../../state/AppState.js';
 import type { LocalJSXCommandCall } from '../../types/command.js';
-import { type EffortLevel, getDisplayedEffortLevel, modelSupportsEffort, pdSessionEffort } from '../../utils/effort.js';
+import {
+  clampEffortForModel,
+  type EffortLevel,
+  getDisplayedEffortLevel,
+  getEffortEnvOverride,
+  modelSupportsEffort,
+  pdSessionEffort,
+  resolveAppliedEffort,
+} from '../../utils/effort.js';
 import { isBilledAsExtraUsage } from '../../utils/extraUsage.js';
 import {
   applyFastModeOnModelSwitch,
@@ -50,9 +58,29 @@ import {
   renderDefaultModelSetting,
   renderModelName,
 } from '../../utils/model/model.js';
+import { isModelDenied } from '../../utils/model/entitlementOverlay.js';
 import { formatDeniedModelsBlockMessage, isModelAllowed } from '../../utils/model/modelAllowlist.js';
 import { em } from '../../utils/model/modelNoticeCode.js';
-import { validateModel } from '../../utils/model/validateModel.js';
+import { formatModelRestrictionOrCheckError, validateModel } from '../../utils/model/validateModel.js';
+
+export { formatModelRestrictionOrCheckError };
+
+/**
+ * Official 2.1.323 `Ikt` (#2093): when `CLAUDE_CODE_EFFORT_LEVEL` overrides the
+ * picked effort level for `model`, return the notice explaining what effort
+ * actually stays active instead of misleadingly confirming the picked value.
+ */
+export function formatEffortEnvOverrideNotice(pickedEffort: EffortLevel, model: string): string | null {
+  if (getEffortEnvOverride() === undefined || !modelSupportsEffort(model)) {
+    return null;
+  }
+  const applied = resolveAppliedEffort(model, pickedEffort);
+  const clampedPicked = clampEffortForModel(pickedEffort, model);
+  if (applied === clampedPicked) {
+    return null;
+  }
+  return `effort stays ${applied === undefined ? 'auto' : String(applied)} (set by CLAUDE_CODE_EFFORT_LEVEL)`;
+}
 
 export type SaveModelHookResult = { kind: 'saved'; saved: string | null } | { kind: 'refused'; reason?: string };
 
@@ -236,11 +264,16 @@ function ModelPickerWrapper({
         ? ` for this session only (default not saved: ${persistRefusedReason})`
         : ' for this session only';
     if (effort !== undefined) {
-      const effortSaved = persistAsDefault && effort !== 'max';
-      message +=
-        persistAsDefault && !effortSaved
-          ? ` \xB7 ${em(effort)} effort for this session only`
-          : ` with ${em(effort)} effort`;
+      const envOverrideNotice = formatEffortEnvOverrideNotice(effort, toModel);
+      if (envOverrideNotice !== null) {
+        message += ` \xB7 ${envOverrideNotice}`;
+      } else {
+        const effortSaved = persistAsDefault && effort !== 'max';
+        message +=
+          persistAsDefault && !effortSaved
+            ? ` \xB7 ${em(effort)} effort for this session only`
+            : ` with ${em(effort)} effort`;
+      }
     }
 
     // densable 2.1.218 #31 — Rft/uU/dU on /model picker confirm
@@ -365,10 +398,23 @@ function SetModelAndClose({
   React.useEffect(() => {
     async function handleModelChange(): Promise<void> {
       if (model && !isModelAllowed(model)) {
-        onDone(`Model '${model}' is not available. Your organization restricts model selection.`, {
+        onDone(formatModelRestrictionOrCheckError(model).message, {
           display: 'system',
         });
         return;
+      }
+
+      // Official 2.1.325 #2286: when cached entitlement denies `model`, re-probe
+      // before reporting an org restriction so offline / network failures say
+      // Claude Code could not check instead of blaming organization policy.
+      if (model && isModelDenied(model)) {
+        const probe = await validateModel(model);
+        if (!probe.valid) {
+          onDone(formatModelRestrictionOrCheckError(model, probe).message, {
+            display: 'system',
+          });
+          return;
+        }
       }
 
       // @[MODEL LAUNCH]: Update check for 1M access.
@@ -517,9 +563,12 @@ function isSonnet1mUnavailable(model: string): boolean {
 function ShowModelAndClose({ onDone }: { onDone: (result?: string) => void }): React.ReactNode {
   const mainLoopModel = useAppState(s => s.mainLoopModel);
   const mainLoopModelForSession = useAppState(s => s.mainLoopModelForSession);
-  const effortLevel = useAppState(s => pdSessionEffort(s));
+  const pdEffort = useAppState(s => pdSessionEffort(s));
+  const activeModel = parseUserSpecifiedModel(mainLoopModelForSession ?? mainLoopModel ?? getDefaultMainLoopModel());
+  // Official 2.1.323 (#2093): honor CLAUDE_CODE_EFFORT_LEVEL override in `/model` status.
+  const effectiveEffort = getDisplayedEffortLevel(activeModel, pdEffort);
   const displayModel = em(renderModelLabel(mainLoopModel));
-  const effortInfo = effortLevel !== undefined ? ` (effort: ${effortLevel})` : '';
+  const effortInfo = effectiveEffort !== undefined ? ` (effort: ${effectiveEffort})` : '';
 
   if (
     mainLoopModelForSession !== null &&

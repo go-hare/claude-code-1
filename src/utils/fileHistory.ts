@@ -30,6 +30,7 @@ import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
 import { getErrnoCode, isENOENT } from './errors.js'
 import { pathExists } from './file.js'
 import { logError } from './log.js'
+import { isUnsafeNetworkOrNtIncludePath } from './path.js'
 import { recordFileHistorySnapshot } from './sessionStorage.js'
 
 type BackupFileName = string | null // The null value means the file does not exist in this version
@@ -478,6 +479,41 @@ export function fileHistoryCanRestore(
   return state.snapshots.some(snapshot => snapshot.messageId === messageId)
 }
 
+/** Official 2.1.323 (#2085): default budget for working-tree diff stat checks. */
+const DEFAULT_DIFF_STATS_BUDGET_MS = 2000
+
+const DIFF_BUDGET_EXCEEDED = Symbol('DIFF_BUDGET_EXCEEDED')
+
+function isNetworkOrUncDiffPath(filePath: string): boolean {
+  return (
+    isUnsafeNetworkOrNtIncludePath(filePath) ||
+    /^\/(?:net|Network\/Servers)(?:\/|$)/i.test(filePath)
+  )
+}
+
+async function raceWithDeadline<T>(
+  promise: Promise<T>,
+  countUntil: number,
+): Promise<T | typeof DIFF_BUDGET_EXCEEDED> {
+  const remainingMs = countUntil - Date.now()
+  if (remainingMs <= 0) {
+    return DIFF_BUDGET_EXCEEDED
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<typeof DIFF_BUDGET_EXCEEDED>(resolve => {
+        timer = setTimeout(() => resolve(DIFF_BUDGET_EXCEEDED), remainingMs)
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer)
+    }
+  }
+}
+
 /**
  * Computes diff stats for a file snapshot by counting the number of files that would be changed
  * if reverting to that snapshot.
@@ -485,6 +521,7 @@ export function fileHistoryCanRestore(
 export async function fileHistoryGetDiffStats(
   state: FileHistoryState,
   messageId: UUID,
+  options?: { countUntil?: number },
 ): Promise<DiffStats> {
   if (!fileHistoryEnabled()) {
     return undefined
@@ -498,11 +535,28 @@ export async function fileHistoryGetDiffStats(
     return undefined
   }
 
+  // Official 2.1.323 (#2085): bound diff-stat I/O with a `countUntil` deadline,
+  // skip network/UNC paths, and degrade read failures to `hasUncheckedFiles`
+  // rather than hanging `/rewind` or falsely marking every file as modified.
+  const countUntil =
+    options?.countUntil ?? Date.now() + DEFAULT_DIFF_STATS_BUDGET_MS
   let hasUncheckedFiles = false
   const results = await Promise.all(
     Array.from(state.trackedFiles, async trackingPath => {
       try {
+        if (isNetworkOrUncDiffPath(trackingPath)) {
+          hasUncheckedFiles = true
+          return null
+        }
         const filePath = maybeExpandFilePath(trackingPath)
+        if (isNetworkOrUncDiffPath(filePath)) {
+          hasUncheckedFiles = true
+          return null
+        }
+        if (Date.now() >= countUntil) {
+          hasUncheckedFiles = true
+          return null
+        }
         const targetBackup = targetSnapshot.trackedFileBackups[trackingPath]
 
         const backupFileName: BackupFileName | undefined = targetBackup
@@ -521,17 +575,43 @@ export async function fileHistoryGetDiffStats(
           return null
         }
 
-        const stats = await computeDiffStatsForFile(
-          filePath,
-          backupFileName === null ? undefined : backupFileName,
+        const statsOrTimeout = await raceWithDeadline(
+          computeDiffStatsForFile(
+            filePath,
+            backupFileName === null ? undefined : backupFileName,
+          ),
+          countUntil,
         )
+        if (statsOrTimeout === DIFF_BUDGET_EXCEEDED) {
+          hasUncheckedFiles = true
+          return null
+        }
+        const stats = statsOrTimeout
+        if (stats?.hasUncheckedFiles) {
+          hasUncheckedFiles = true
+          return null
+        }
         if (stats?.insertions || stats?.deletions) {
           return { filePath, stats }
         }
-        if (backupFileName === null && (await pathExists(filePath))) {
-          // Zero-byte file created after snapshot: counts as changed even
-          // though diffLines reports 0/0.
-          return { filePath, stats }
+        if (backupFileName === null) {
+          const existsCheck = await raceWithDeadline(
+            stat(filePath).then(
+              () => 'exists' as const,
+              err =>
+                isENOENT(err) ? ('missing' as const) : ('error' as const),
+            ),
+            countUntil,
+          )
+          if (existsCheck === DIFF_BUDGET_EXCEEDED || existsCheck === 'error') {
+            hasUncheckedFiles = true
+            return null
+          }
+          if (existsCheck === 'exists') {
+            // Zero-byte file created after snapshot: counts as changed even
+            // though diffLines reports 0/0.
+            return { filePath, stats }
+          }
         }
         return null
       } catch (error) {
@@ -1120,6 +1200,26 @@ function compareStatsAndContent<T extends boolean | Promise<boolean>>(
 }
 
 /**
+ * Read a file for diff stats, distinguishing ENOENT (genuinely absent) from
+ * read failures (EACCES, EIO, EISDIR, etc.) so unreadable files degrade to
+ * `hasUncheckedFiles` instead of falsely diffing against empty content (#2085).
+ */
+async function readFileForDiffStats(
+  path: string,
+): Promise<
+  { ok: true; content: string | null } | { ok: false; error: unknown }
+> {
+  try {
+    return { ok: true, content: await readFile(path, 'utf-8') }
+  } catch (error) {
+    if (isENOENT(error)) {
+      return { ok: true, content: null }
+    }
+    return { ok: false, error }
+  }
+}
+
+/**
  * Computes the number of lines changed in the diff.
  */
 async function computeDiffStatsForFile(
@@ -1134,12 +1234,26 @@ async function computeDiffStatsForFile(
       ? resolveBackupPath(backupFileName)
       : undefined
 
-    const [originalContent, backupContent] = await Promise.all([
-      readFileAsyncOrNull(originalFile),
-      backupPath ? readFileAsyncOrNull(backupPath) : null,
+    const [originalRead, backupRead] = await Promise.all([
+      readFileForDiffStats(originalFile),
+      backupPath
+        ? readFileForDiffStats(backupPath)
+        : Promise.resolve({ ok: true as const, content: null }),
     ])
 
-    if (originalContent === null && backupContent === null) {
+    if (!originalRead.ok || !backupRead.ok) {
+      return {
+        filesChanged,
+        insertions,
+        deletions,
+        hasUncheckedFiles: true,
+      }
+    }
+
+    const originalContent = originalRead.content
+    const backupContent = backupRead.content
+
+    if (originalContent === backupContent) {
       return {
         filesChanged,
         insertions,
@@ -1161,6 +1275,12 @@ async function computeDiffStatsForFile(
     })
   } catch (error) {
     logError(new Error(`FileHistory: Error generating diffStats: ${error}`))
+    return {
+      filesChanged,
+      insertions,
+      deletions,
+      hasUncheckedFiles: true,
+    }
   }
 
   return {

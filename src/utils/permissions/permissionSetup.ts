@@ -638,6 +638,18 @@ export function clearCommandScopedAllowRules(
   }
 }
 
+/**
+ * Official 2.1.325 #2319 (SEA `fzt` @283107404):
+ * Strip slash-command `allowed-tools` grants (`alwaysAllowRules.command`) and
+ * mark the permission context guarded so background/woken turns do not inherit
+ * them.
+ */
+export function applyPollEventDeliveryGuard(
+  context: ToolPermissionContext,
+): ToolPermissionContext {
+  return clearCommandScopedAllowRules(context)
+}
+
 /** densable kick-out qLe trigger (inAuto only; plan+auto has no qLe) */
 export const AUTO_GATE_DENIED_TRIGGER = 'auto_gate_denied'
 
@@ -967,17 +979,26 @@ export function initialPermissionModeFromCLI({
       orderedModes.push('bypassPermissions')
     }
   }
+  // 2.1.323 #2013: explicit `--permission-mode auto` or `defaultMode: auto`
+  // must fall back to Manual (`default`) mode when auto mode is unavailable,
+  // never falling through to a lower-priority more permissive mode.
+  const autoModeUnavailableSync =
+    autoModeCircuitBrokenSync ||
+    isAutoModeDisabledBySettings() ||
+    (feature('TRANSCRIPT_CLASSIFIER') ? false : true)
+
   if (permissionModeCli) {
     const parsedMode = permissionModeFromString(permissionModeCli)
     if (isUnconsentedBgBypass(parsedMode)) {
       notification = BG_BYPASS_DOWNGRADED_NOTIFICATION
       orderedModes.push('default')
-    } else if (feature('TRANSCRIPT_CLASSIFIER') && parsedMode === 'auto') {
-      if (autoModeCircuitBrokenSync) {
+    } else if (parsedMode === 'auto') {
+      if (autoModeUnavailableSync) {
         logForDebugging(
-          'auto mode circuit breaker active (cached) — falling back to default',
+          'auto mode unavailable (circuit breaker, disableAutoMode, or classifier disabled) — falling back to default',
           { level: 'warn' },
         )
+        orderedModes.push('default')
       } else {
         orderedModes.push('auto')
       }
@@ -992,6 +1013,12 @@ export function initialPermissionModeFromCLI({
       if (orderedModes.length === 0) {
         notification = BG_BYPASS_DOWNGRADED_NOTIFICATION
       }
+      orderedModes.push('default')
+    } else if (inheritedParsed === 'auto' && autoModeUnavailableSync) {
+      logForDebugging(
+        'inherited auto mode dropped — auto mode unavailable; falling back to default',
+        { level: 'warn' },
+      )
       orderedModes.push('default')
     } else {
       orderedModes.push(inheritedParsed)
@@ -1042,13 +1069,22 @@ export function initialPermissionModeFromCLI({
         orderedModes.push(settingsMode)
       }
     }
-    // auto from settings requires the same gate check as from CLI
-    else if (feature('TRANSCRIPT_CLASSIFIER') && settingsMode === 'auto') {
-      if (autoModeCircuitBrokenSync) {
+    // auto from settings requires the same gate check as from CLI (2.1.323 #2013)
+    else if (settingsMode === 'auto') {
+      if (!trustedSourceGrantsDefaultMode('auto')) {
         logForDebugging(
-          'auto mode circuit breaker active (cached) — falling back to default',
+          'settings defaultMode "auto" ignored — only policy/user/flag settings may grant auto mode (projectSettings and localSettings are repo-controllable)',
           { level: 'warn' },
         )
+        logEvent('tengu_settings_auto_mode_untrusted_source_ignored', {})
+      } else if (autoModeUnavailableSync) {
+        logForDebugging(
+          'auto mode unavailable (circuit breaker, disableAutoMode, or classifier disabled) — falling back to default',
+          { level: 'warn' },
+        )
+        if (!agentPermissionMode) {
+          orderedModes.push('default')
+        }
       } else {
         orderedModes.push('auto')
       }

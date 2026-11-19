@@ -16,6 +16,7 @@ import type {
 import type { PermissionDecision } from '../../types/permissions.js'
 import { createAttachmentMessage } from '../../utils/attachments.js'
 import { logForDebugging } from '../../utils/debug.js'
+import { isEnvTruthy } from '../../utils/envUtils.js'
 import { isAbortError } from '../../utils/errors.js'
 import {
   createAbortController,
@@ -157,16 +158,27 @@ function isCoworkCloudSession(): boolean {
   return ep === 'remote_cowork' || ep === 'remote_cowork_trigger'
 }
 
+function isCloudScheduledOrPersonalRestrictedSession(): boolean {
+  const ep = process.env.CLAUDE_CODE_ENTRYPOINT
+  return (
+    ep === 'remote_trigger' ||
+    isEnvTruthy(process.env.CLAUDE_CODE_RESTRICT_PERSONAL_CONFIG)
+  )
+}
+
 /**
- * Official 325 `cje` / `fje` (#1954) — in Cowork cloud sessions, PostToolUse
- * hooks may not replace AskUserQuestion or ExitPlanMode outputs.
+ * Official 325 `cje` / `fje` (#1954) & 2.1.323 #2208 (`TTo`):
+ * In Cowork cloud sessions and cloud scheduled tasks (personal-config-restricted
+ * sessions), PostToolUse hooks from user settings may not replace AskUserQuestion
+ * or ExitPlanMode outputs.
  */
 export function isPostToolUseOutputRewriteProtected(tool: Tool): boolean {
   if (tool.mcpInfo?.accountMemory === true) return true
   if (
-    isCoworkCloudSession() &&
     (tool.name === 'AskUserQuestion' || tool.name === 'ExitPlanMode') &&
-    getFeatureValue_CACHED_MAY_BE_STALE(COWORK_REWRITE_DROP_FLAG, true)
+    (isCloudScheduledOrPersonalRestrictedSession() ||
+      (isCoworkCloudSession() &&
+        getFeatureValue_CACHED_MAY_BE_STALE(COWORK_REWRITE_DROP_FLAG, true)))
   ) {
     return true
   }

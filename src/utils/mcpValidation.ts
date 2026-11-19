@@ -150,6 +150,7 @@ async function truncateContentBlocks(
 
 export async function mcpContentNeedsTruncation(
   content: MCPToolResult,
+  model?: string,
 ): Promise<boolean> {
   if (!content) return false
 
@@ -168,7 +169,9 @@ export async function mcpContentNeedsTruncation(
         ? [{ role: 'user' as const, content }]
         : [{ role: 'user' as const, content }]
 
-    const tokenCount = await countMessagesTokensWithAPI(messages, [])
+    // Official 2.1.325 #2264: pass subagent/caller model so MCP results are
+    // sized with that model instead of the main session's model.
+    const tokenCount = await countMessagesTokensWithAPI(messages, [], model)
     return !!(tokenCount && tokenCount > getMaxMcpOutputTokens())
   } catch (error) {
     logError(error)
@@ -199,8 +202,9 @@ export async function truncateMcpContent(
 
 export async function truncateMcpContentIfNeeded(
   content: MCPToolResult,
+  model?: string,
 ): Promise<MCPToolResult> {
-  if (!(await mcpContentNeedsTruncation(content))) {
+  if (!(await mcpContentNeedsTruncation(content, model))) {
     return content
   }
 

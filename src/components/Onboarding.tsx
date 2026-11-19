@@ -263,6 +263,17 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
                   : 'Option+Enter for newlines and no audible bell'
                 : 'Shift+Enter for newlines'}
             </Text>
+            {env.terminal === 'Apple_Terminal' && (
+              <>
+                <Text>
+                  For Option+Enter, this turns on Terminal.app&apos;s &quot;Use Option as Meta key&quot; setting. With
+                  it on, the Option key no longer types characters such as é, or on some keyboard layouts @, |, [, ],
+                  {' {'}, {'}'} and backslash. To undo it, uncheck &quot;Use Option as Meta key&quot; in Terminal →
+                  Settings → Profiles → Keyboard, for your default and startup profiles.
+                </Text>
+                <Text>If you say yes, restart Terminal.app for the changes to take effect.</Text>
+              </>
+            )}
             <ConfirmSelect
               confirmLabel="Yes, use recommended settings"
               cancelLabel="No, maybe later with /terminal-setup"

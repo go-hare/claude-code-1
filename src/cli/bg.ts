@@ -829,7 +829,7 @@ export async function killHandler(target: string | undefined): Promise<void> {
 export async function rmHandler(target: string | undefined): Promise<void> {
   if (target === '--help' || target === '-h') {
     process.stdout.write(
-      `Usage: claude rm <id>\n\n  Delete a background session and its worktree. Unlike \`stop\`, works on already-exited sessions.\n`,
+      `Usage: claude rm <id>\n\n  If it's safe, remove a background session from the list and delete its worktree. Its conversation is kept: \`claude --resume\` lists it. Unlike \`stop\`, works on already-exited sessions.\n`,
     )
     process.exitCode = 0
     return
@@ -896,8 +896,8 @@ export async function rmHandler(target: string | undefined): Promise<void> {
     return
   }
 
-  // densable success: removed ${n} [+ worktree left / worktree path]
-  let msg = `removed ${short}`
+  // Official 2.1.323 #2191: removed ${n} from the list [+ worktree left / worktree path]
+  let msg = `removed ${short} from the list`
   if (result.leftWorktreeDir) {
     msg += `\n  worktree directory left at ${result.leftWorktreeDir} (git no longer recognized it)`
   } else if (state?.worktreePath) {

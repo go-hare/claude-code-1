@@ -81,7 +81,8 @@ export function PluginHintMenu({
             <Text dimColor>{pluginDescription}</Text>
           </Box>
         )}
-        <Box marginTop={1}>
+        <Box marginTop={1} flexDirection="column">
+          <Text dimColor>Plugins can run code on your computer, with access to your files and shell.</Text>
           <Text>Would you like to install it?</Text>
         </Box>
         <Box>

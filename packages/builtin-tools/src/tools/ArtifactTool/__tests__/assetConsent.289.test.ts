@@ -76,6 +76,7 @@ function seedProbe(toolUseId: string, extra?: Record<string, unknown>): void {
     mode: 'owner',
     isSharedLive: false,
     role: 'owner',
+    outsideAudience: false,
     lastProbeToolUseId: toolUseId,
     lastProbeIssuedAt: Date.now(),
     ...extra,

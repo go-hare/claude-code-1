@@ -356,6 +356,32 @@ export type PluginError =
       installPath: string
     }
   | {
+      /** Official 2.1.323 #2038 — plugin enabled only in project settings and not installed */
+      type: 'plugin-not-installed'
+      source: string
+      plugin: string
+      seedHasOtherVersion?: boolean
+      registryReadFailed?: boolean
+      loadsOnFullLoad?: boolean
+      installedListHeldNote?: string
+    }
+  | {
+      /** Official 2.1.323 #1965 — plugin engines["claude-code"] range not satisfied */
+      type: 'engine-range-unsatisfied'
+      source: string
+      plugin: string
+      miss: PluginEngineRangeMiss
+    }
+  | {
+      /** Official 2.1.323 #1965 — autoupdate skipped because new version is outside engines["claude-code"] */
+      type: 'autoupdate-blocked-by-engine-range'
+      source: string
+      plugin: string
+      heldAt?: string
+      newVersion?: string
+      miss: PluginEngineRangeMiss
+    }
+  | {
       type: 'generic-error'
       source: string
       plugin?: string
@@ -371,7 +397,14 @@ export type PluginError =
       orphan?: boolean
     }
 
-/** densable Zpf / JAi warning row (folder-shadowed, ineffective-disable, …). */
+/** Official 2.1.323 #1965 — unsatisfied `engines["claude-code"]` version miss metadata. */
+export type PluginEngineRangeMiss = {
+  range: string
+  claudeCodeVersion: string
+  newerClaudeCodeMayFit: boolean
+}
+
+/** densable Zpf / JAi warning row (folder-shadowed, ineffective-disable, version-list-not-enabled, …). */
 export type PluginWarning = {
   type: string
   source?: string
@@ -380,6 +413,9 @@ export type PluginWarning = {
   component?: string
   folderPath?: string
   manifestFields?: string[]
+  statedText?: string
+  miss?: PluginEngineRangeMiss
+  overriddenBy?: string
 }
 
 export type PluginLoadResult = {
@@ -491,7 +527,167 @@ export function getPluginErrorMessage(error: PluginError): string {
     }
     case 'plugin-cache-miss':
       return `Plugin "${error.plugin}" not cached at ${error.installPath} — run /plugin to refresh`
+    case 'plugin-not-installed': {
+      if (error.installedListHeldNote) {
+        return `Plugin "${error.plugin}" is enabled in project settings, but whether it is installed could not be checked. ${error.installedListHeldNote}`
+      }
+      const installCmd = /^[\w@./:-]+$/.test(error.source)
+        ? `claude plugin install ${error.source} --scope project`
+        : null
+      return installCmd
+        ? `Plugin "${error.plugin}" is enabled in project settings but isn't installed — run \`${installCmd}\``
+        : `Plugin "${error.plugin}" is enabled in project settings but isn't installed — install it at project scope (from /plugin or claude plugin install)`
+    }
+    case 'engine-range-unsatisfied': {
+      const hint = error.miss.newerClaudeCodeMayFit
+        ? 'Run `claude update`'
+        : 'A newer version of the plugin may fit'
+      return `Plugin "${error.plugin}" needs Claude Code ${error.miss.range}, this is ${error.miss.claudeCodeVersion}. ${hint}`
+    }
+    case 'autoupdate-blocked-by-engine-range': {
+      const hint = error.miss.newerClaudeCodeMayFit
+        ? 'Run `claude update`'
+        : 'A newer version of the plugin may fit'
+      const versionDesc = error.newVersion
+        ? `Update to ${error.newVersion}`
+        : 'Update'
+      return `${versionDesc} for "${error.plugin}" needs Claude Code ${error.miss.range}, this is ${error.miss.claudeCodeVersion}. ${hint}`
+    }
   }
+}
+
+/** Official 2.1.323 #2211 (`NNo`): deprecation message for plugin `agent` setting. */
+export const PLUGIN_AGENT_SETTING_DEPRECATED_MESSAGE =
+  "A plugin's `agent` setting is deprecated and will stop applying in a future release."
+
+/** Official 2.1.323 #2211: remediation hint for plugin `agent` setting. */
+export const PLUGIN_AGENT_SETTING_DEPRECATED_HINT =
+  "To keep this plugin's agent as the default, set `agent` in your own settings or pass --agent."
+
+/** Official 2.1.323 #2211 (`bba`): startup notice when an enabled plugin sets `settings.agent`. */
+export function formatPluginAgentStartupNotice(pluginName: string): string {
+  return `Plugin "${pluginName}" set this session's agent. That will stop working in a future release: set \`agent\` in your own settings or pass --agent.`
+}
+
+/** Official 2.1.323 (#2049, #1965, #2211): user-facing message for a PluginWarning. */
+export function getPluginWarningMessage(warning: PluginWarning): string {
+  if (warning.warning) return warning.warning
+  switch (warning.type) {
+    case 'version-list-not-enabled':
+      return 'Not enabled because its enabledPlugins entry is a version list. Only the value true turns on a marketplace plugin'
+    case 'engine-range-invalid':
+      return warning.statedText === undefined
+        ? "Its Claude Code range isn't text, so it's ignored"
+        : `Its Claude Code range "${warning.statedText}" isn't a version range, so it's ignored`
+    case 'engine-range-exempt':
+      return warning.miss
+        ? `It needs Claude Code ${warning.miss.range}, this is ${warning.miss.claudeCodeVersion}. It loads anyway, because it's read from a local folder`
+        : "It loads anyway, because it's read from a local folder"
+    case 'plugin-agent-setting-deprecated':
+      return PLUGIN_AGENT_SETTING_DEPRECATED_MESSAGE
+    default:
+      return warning.type
+  }
+}
+
+/** Official 2.1.323 (#2049, #1965, #2211): remediation hint for a PluginWarning. */
+export function getPluginWarningHint(warning: PluginWarning): string {
+  switch (warning.type) {
+    case 'version-list-not-enabled':
+      return `Change its entry to "${warning.source ?? ''}": true in the settings file that holds the list. If that is managed settings, contact your administrator`
+    case 'engine-range-invalid':
+      return 'If you maintain this plugin, set engines["claude-code"] to a range such as ">=2.1.0"'
+    case 'engine-range-exempt':
+      return 'With this range, an installed copy would not load here'
+    case 'plugin-agent-setting-deprecated':
+      return PLUGIN_AGENT_SETTING_DEPRECATED_HINT
+    default:
+      return ''
+  }
+}
+
+/** Official 2.1.323 #2043 (`n0i`): redacted message for managed-settings plugin errors on persisted transports. */
+export const MANAGED_PLUGIN_ERROR_REDACTED_MESSAGE =
+  "A plugin enabled by managed settings did not load fully. The reason is not shown because it can include a file path, and this session's messages may be stored off this machine."
+
+export type InitPluginErrorRow = {
+  type: string
+  source: string
+  plugin?: string
+  message: string
+  path?: string
+}
+
+/**
+ * Official 2.1.323 #2043 (`ZIi` / `n0i`) & #2038: select plugin load errors to
+ * surface in `system/init.plugin_errors`, including errors for plugins enabled
+ * by managed (`policySettings`) settings (redacting paths on persisted transports).
+ */
+export function selectInitPluginErrors(
+  errors: readonly PluginError[],
+  opts: {
+    policyEnabledPluginIds?: ReadonlySet<string>
+    isPersistedTransport?: boolean
+  } = {},
+): InitPluginErrorRow[] {
+  const { policyEnabledPluginIds, isPersistedTransport = false } = opts
+  const rows: InitPluginErrorRow[] = []
+  for (const error of errors) {
+    const isManaged =
+      policyEnabledPluginIds !== undefined &&
+      policyEnabledPluginIds.has(error.source)
+    const isAlwaysShown =
+      error.type === 'plugin-not-installed' ||
+      error.type === 'engine-range-unsatisfied' ||
+      error.type === 'marketplace-blocked-by-policy' ||
+      error.type === 'dependency-unsatisfied' ||
+      error.type === 'plugin-not-found' ||
+      error.type === 'marketplace-not-found' ||
+      error.type === 'marketplace-load-failed' ||
+      error.type === 'manifest-parse-error' ||
+      error.type === 'manifest-validation-error' ||
+      error.type === 'generic-error'
+    if (!isAlwaysShown && !isManaged) continue
+    const path = pluginErrorInitPath(error)
+    const plugin = 'plugin' in error ? error.plugin : undefined
+    if (isManaged && isPersistedTransport) {
+      rows.push({
+        type: error.type,
+        source: error.source,
+        ...(plugin !== undefined ? { plugin } : {}),
+        message: MANAGED_PLUGIN_ERROR_REDACTED_MESSAGE,
+      })
+    } else {
+      rows.push({
+        type: error.type,
+        source: error.source,
+        ...(plugin !== undefined ? { plugin } : {}),
+        message: getPluginErrorMessage(error),
+        ...(path !== undefined ? { path } : {}),
+      })
+    }
+  }
+  return rows
+}
+
+/**
+ * Official 2.1.323 #2038 (`e0i`): format plugin load errors (`plugin-not-installed`
+ * and `engine-range-unsatisfied`) for headless `-p` text-mode stderr output.
+ */
+export function formatHeadlessPluginErrors(
+  errors: readonly { type?: string; message?: string }[] | undefined,
+): string {
+  if (!errors || errors.length === 0) return ''
+  return errors
+    .filter(
+      e =>
+        (e.type === 'plugin-not-installed' ||
+          e.type === 'engine-range-unsatisfied') &&
+        typeof e.message === 'string' &&
+        e.message.length > 0,
+    )
+    .map(e => `${e.message}\n`)
+    .join('')
 }
 
 /** densable pluginErrorInitPath — filesystem path on load errors, if any. */

@@ -17,12 +17,24 @@ import { NotebookEditTool } from '@claude-code/builtin-tools/tools/NotebookEditT
 import { WebFetchTool } from '@claude-code/builtin-tools/tools/WebFetchTool/WebFetchTool.js'
 import { TaskStopTool } from '@claude-code/builtin-tools/tools/TaskStopTool/TaskStopTool.js'
 import { BriefTool } from '@claude-code/builtin-tools/tools/BriefTool/BriefTool.js'
-// Dead code elimination: conditional import for ant-only tools
+// Dead code elimination: conditional import for ant-only / Code Mode REPL tool
 /* eslint-disable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
-const REPLTool =
-  process.env.USER_TYPE === 'ant'
-    ? require('@claude-code/builtin-tools/tools/REPLTool/REPLTool.js').REPLTool
-    : null
+let cachedReplTool: Tool | null | undefined
+function getReplTool(): Tool | null {
+  if (cachedReplTool !== undefined) return cachedReplTool
+  const baseReplTool =
+    require('@claude-code/builtin-tools/tools/REPLTool/REPLTool.js')
+      .REPLTool as Tool | null
+  if (!baseReplTool) {
+    cachedReplTool = null
+    return null
+  }
+  cachedReplTool = wrapReplToolForCodeMode(baseReplTool, () =>
+    getAllBaseTools(),
+  )
+  return cachedReplTool
+}
+const REPLTool = process.env.USER_TYPE === 'ant' ? getReplTool() : null
 // densable 2.1.289: SuggestBackgroundPR is d_e-removed (no tool BODY in SEA).
 // Keep SuggestBackgroundPRTool module for fork internals; never register in base pool.
 const SleepTool =
@@ -202,7 +214,17 @@ import {
   REPL_ONLY_TOOLS,
   isReplModeEnabled,
 } from '@claude-code/builtin-tools/tools/REPLTool/constants.js'
-export { REPL_ONLY_TOOLS }
+import {
+  CODE_MODE_ONLY_TOOLS,
+  hideCodeModeOnlyTools,
+  isCodeModeEnabled,
+  wrapReplToolForCodeMode,
+} from './services/codeMode/index.js'
+import {
+  applyPluginToolListDenyRules,
+  applyPluginToolListFilter,
+} from './utils/plugins/pluginToolList.js'
+export { CODE_MODE_ONLY_TOOLS, REPL_ONLY_TOOLS }
 /* eslint-disable @typescript-eslint/no-require-imports */
 const getPowerShellTool = () => {
   if (!isPowerShellToolEnabled()) return null
@@ -293,7 +315,11 @@ export function getAllBaseTools(): Tools {
     ...(VerifyPlanExecutionTool ? [VerifyPlanExecutionTool] : []),
     ReportFindingsTool,
     ObserverReportTool,
-    ...(process.env.USER_TYPE === 'ant' && REPLTool ? [REPLTool] : []),
+    ...(process.env.USER_TYPE === 'ant' && REPLTool
+      ? [REPLTool]
+      : isCodeModeEnabled() && getReplTool()
+        ? [getReplTool()!]
+        : []),
     ...(WorkflowTool ? [WorkflowTool] : []),
     ...(SleepTool ? [SleepTool] : []),
     EndConversationTool,
@@ -392,25 +418,29 @@ export function filterToolsByDenyRules<
     }
   },
 >(tools: readonly T[], permissionContext: ToolPermissionContext): T[] {
+  // Official 2.1.323 #2188: enforce plugin `tool.list` removals and deny rules.
+  const effectivePermissionContext =
+    applyPluginToolListDenyRules(permissionContext)
+  const pluginFilteredTools = applyPluginToolListFilter(tools)
   // Official 2.1.x: also strip org-blocked MCP tools (effectiveMaxPermission).
   // StructuredOutput is appended after getTools for --json-schema / SDK
   // json_schema and must survive `--tools ""` deny-all (densable 2.1.283).
   const dynamicRestrictedDenySet = synthesizeRestrictedDenyNames(
-    tools,
-    permissionContext,
+    pluginFilteredTools,
+    effectivePermissionContext,
   )
-  return tools.filter(tool => {
+  return pluginFilteredTools.filter(tool => {
     if (tool.name === SYNTHETIC_OUTPUT_TOOL_NAME) {
       return true
     }
     if (
-      getDenyRuleForTool(permissionContext, tool) ||
+      getDenyRuleForTool(effectivePermissionContext, tool) ||
       dynamicRestrictedDenySet.has(tool.name) ||
       tool.mcpInfo?.effectiveMaxPermission === 'blocked'
     ) {
       return false
     }
-    if (!isWithheldOutsideLaunchList(permissionContext, tool)) {
+    if (!isWithheldOutsideLaunchList(effectivePermissionContext, tool)) {
       return true
     }
     if (!withheldOutsideLaunchListLogged.has(tool.name)) {
@@ -432,11 +462,16 @@ export function filterToolsByDenyRules<
 export const getTools = (permissionContext: ToolPermissionContext): Tools => {
   // Official CLAUDE_CODE_SIMPLE densable: only Bash, Read, and Edit tools
   if (isBareMode()) {
-    // --bare + REPL mode: REPL wraps Bash/Read/Edit/etc inside the VM, so
+    // --bare + REPL/Code Mode: REPL wraps Bash/Read/Edit/etc inside the VM, so
     // return REPL instead of the raw primitives. Matches the non-bare path
-    // below which also hides REPL_ONLY_TOOLS when REPL is enabled.
-    if (isReplModeEnabled() && REPLTool) {
-      const replSimple: Tool[] = [REPLTool]
+    // below which also hides REPL_ONLY_TOOLS / CODE_MODE_ONLY_TOOLS when active.
+    const activeReplTool =
+      (isCodeModeEnabled() || isReplModeEnabled()) &&
+      (REPLTool ?? getReplTool())
+        ? (REPLTool ?? getReplTool())
+        : null
+    if (activeReplTool) {
+      const replSimple: Tool[] = [activeReplTool]
       if (feature('COORDINATOR_MODE') && isCoordinatorModeActive()) {
         replSimple.push(TaskStopTool, getSendMessageTool())
       }
@@ -464,9 +499,13 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
   // Filter out tools that are denied by the deny rules
   let allowedTools = filterToolsByDenyRules(tools, permissionContext)
 
-  // When REPL mode is enabled, hide primitive tools from direct use.
-  // They're still accessible inside REPL via the VM context.
-  if (isReplModeEnabled()) {
+  // When Code Mode (2.1.323 #1964) is enabled, hide non-Code-Mode tools from
+  // direct use so Claude invokes tools via JavaScript inside REPL.
+  if (isCodeModeEnabled()) {
+    allowedTools = hideCodeModeOnlyTools(allowedTools)
+  } else if (isReplModeEnabled()) {
+    // When REPL mode is enabled, hide primitive tools from direct use.
+    // They're still accessible inside REPL via the VM context.
     const replEnabled = allowedTools.some(tool =>
       toolMatchesName(tool, REPL_TOOL_NAME),
     )
@@ -501,10 +540,15 @@ export function assembleToolPool(
   permissionContext: ToolPermissionContext,
   mcpTools: Tools,
 ): Tools {
-  const builtInTools = getTools(permissionContext)
+  const effectivePermissionContext =
+    applyPluginToolListDenyRules(permissionContext)
+  const builtInTools = getTools(effectivePermissionContext)
 
   // Filter out MCP tools that are in the deny list
-  const allowedMcpTools = filterToolsByDenyRules(mcpTools, permissionContext)
+  const allowedMcpTools = filterToolsByDenyRules(
+    mcpTools,
+    effectivePermissionContext,
+  )
 
   // Sort each partition for prompt-cache stability, keeping built-ins as a
   // contiguous prefix. The server's claude_code_system_cache_policy places a
@@ -517,9 +561,12 @@ export function assembleToolPool(
   // Use dedupeToolsByName (not lodash uniqBy): silent name collisions hide
   // MCP/built-in identity conflicts; same logical MCP tool is still allowed.
   const byName = (a: Tool, b: Tool) => a.name.localeCompare(b.name)
-  return dedupeToolsByName(
-    [...builtInTools].sort(byName).concat(allowedMcpTools.sort(byName)),
+  const merged = applyPluginToolListFilter(
+    dedupeToolsByName(
+      [...builtInTools].sort(byName).concat(allowedMcpTools.sort(byName)),
+    ),
   )
+  return isCodeModeEnabled() ? hideCodeModeOnlyTools(merged) : merged
 }
 
 /**
@@ -540,6 +587,8 @@ export function getMergedTools(
   permissionContext: ToolPermissionContext,
   mcpTools: Tools,
 ): Tools {
-  const builtInTools = getTools(permissionContext)
-  return [...builtInTools, ...mcpTools]
+  const effectivePermissionContext =
+    applyPluginToolListDenyRules(permissionContext)
+  const builtInTools = getTools(effectivePermissionContext)
+  return applyPluginToolListFilter([...builtInTools, ...mcpTools])
 }

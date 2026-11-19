@@ -55,6 +55,15 @@ import type {
   TombstoneMessage,
 } from './types/message.js'
 import { logError } from './utils/log.js'
+import { getAgentContext, runWithAgentContext } from './utils/agentContext.js'
+import {
+  applyPluginToolListDenyRules,
+  applyPluginToolListFilter,
+} from './utils/plugins/pluginToolList.js'
+import {
+  deriveAttributionFromQuerySource,
+  type OTelAttributionInput,
+} from './utils/telemetry/pluginTelemetry.js'
 import {
   updateTurnAttributionFromCommands,
   withTurnAttributionGenerator,
@@ -71,6 +80,7 @@ import {
 import {
   THINKING_ONLY_RETRY_PROMPT,
   assistantTextHasLeakedInvoke,
+  getMaxOutputTokensRecoveryPrompt,
   malformedToolUseRetryAction,
   querySourceFamilyOf,
 } from './query/queryHelpers.js'
@@ -183,6 +193,10 @@ import {
 import { applyToolResultBudget } from './utils/toolResultStorage.js'
 import { recordContentReplacement } from './utils/sessionStorage.js'
 import { handleStopHooks, runTurnEndReactions } from './query/stopHooks.js'
+import {
+  BRIEF_ENFORCE_SENTINEL,
+  hasBriefRepliedInTurn,
+} from '@claude-code/builtin-tools/tools/BriefTool/BriefTool.js'
 import {
   getModelSwitchSession,
   takePostModelSwitchHooks,
@@ -512,13 +526,82 @@ async function* queryBody(
         })
       : null)
 
-  // Attach trace to toolUseContext so tool execution can record observations
-  const paramsWithTrace: QueryParams = langfuseTrace
-    ? {
-        ...params,
-        toolUseContext: { ...params.toolUseContext, langfuseTrace },
+  // Official 2.1.325 #2356: propagate `querySource` and scheduled-task / `/loop`
+  // execution flags into `ToolUseContext.options` so `SkillTool`
+  // (`isScheduledOrLoopSkillExecution`) asks before running skills declaring
+  // `allowed-tools` or `hooks`.
+  const existingToolOpts = params.toolUseContext
+    .options as ToolUseContext['options'] & {
+    isCron?: boolean
+    isScheduledTask?: boolean
+    isLoop?: boolean
+  }
+  const effectiveQuerySource =
+    existingToolOpts.querySource ?? params.querySource
+  let turnTriggeredByScheduledFire = false
+  let turnOriginKind: string | undefined
+  for (let i = params.messages.length - 1; i >= 0; i--) {
+    const m = params.messages[i]
+    if (!m) continue
+    if (m.type === 'assistant') break
+    if (
+      m.type === 'system' &&
+      (m as { subtype?: unknown }).subtype === 'scheduled_task_fire'
+    ) {
+      turnTriggeredByScheduledFire = true
+      break
+    }
+    if (m.type === 'user' && !m.isMeta) {
+      const originKind = (m as { origin?: { kind?: string } }).origin?.kind
+      if (originKind) {
+        turnOriginKind = originKind
       }
-    : params
+      if (
+        originKind === 'cron' ||
+        originKind === 'scheduled' ||
+        originKind === 'loop'
+      ) {
+        turnTriggeredByScheduledFire = true
+        break
+      }
+    }
+  }
+  const querySourceMatchesScheduledOrLoop =
+    typeof effectiveQuerySource === 'string' &&
+    /(?:^|_)(?:cron|schedule|scheduled|loop)(?:$|_)/i.test(effectiveQuerySource)
+  const isScheduledOrLoop =
+    existingToolOpts.isCron === true ||
+    existingToolOpts.isScheduledTask === true ||
+    existingToolOpts.isLoop === true ||
+    turnTriggeredByScheduledFire ||
+    querySourceMatchesScheduledOrLoop
+  const isLoopTurn =
+    existingToolOpts.isLoop === true ||
+    turnOriginKind === 'loop' ||
+    (typeof effectiveQuerySource === 'string' &&
+      /(?:^|_)loop(?:$|_)/i.test(effectiveQuerySource))
+  const propagatedOptions = {
+    ...existingToolOpts,
+    querySource: effectiveQuerySource,
+    ...(isScheduledOrLoop
+      ? {
+          isCron: true,
+          isScheduledTask: true,
+          isLoop: isLoopTurn,
+        }
+      : {}),
+  } as ToolUseContext['options']
+
+  // Attach trace and propagated options to toolUseContext so tool execution
+  // can record observations and inspect scheduled/loop execution context.
+  const paramsWithTrace: QueryParams = {
+    ...params,
+    toolUseContext: {
+      ...params.toolUseContext,
+      options: propagatedOptions,
+      ...(langfuseTrace ? { langfuseTrace } : {}),
+    },
+  }
 
   let boundMainThreadTurnId: string | undefined
   if (querySourceFamilyOf(paramsWithTrace.querySource) === 'main') {
@@ -1400,20 +1483,58 @@ async function* queryLoop(
             })
           } else {
             try {
-              compactionResult = await compactConversation(
-                messagesForQuery,
-                toolUseContext,
-                {
-                  systemPrompt,
-                  userContext,
-                  systemContext,
+              // Official 2.1.323 #2103: preserve subagent identity during
+              // post-compaction SessionStart('compact') hooks.
+              const runCompactWithAgent = () =>
+                compactConversation(
+                  messagesForQuery,
                   toolUseContext,
-                  forkContextMessages: messagesForQuery,
-                },
-                true,
-                undefined,
-                true,
-              )
+                  {
+                    systemPrompt,
+                    userContext,
+                    systemContext,
+                    toolUseContext,
+                    forkContextMessages: messagesForQuery,
+                  },
+                  true,
+                  undefined,
+                  true,
+                )
+              const activeAgentCtx = getAgentContext()
+              compactionResult =
+                toolUseContext.agentId &&
+                activeAgentCtx?.agentId !== toolUseContext.agentId
+                  ? await runWithAgentContext(
+                      {
+                        agentId: toolUseContext.agentId,
+                        agentType: 'subagent',
+                        ...(activeAgentCtx?.agentType === 'subagent' &&
+                        activeAgentCtx.subagentName
+                          ? { subagentName: activeAgentCtx.subagentName }
+                          : querySource?.startsWith('agent:builtin:')
+                            ? {
+                                subagentName: querySource.slice(
+                                  'agent:builtin:'.length,
+                                ),
+                              }
+                            : querySource?.startsWith('agent:custom:')
+                              ? {
+                                  subagentName: querySource.slice(
+                                    'agent:custom:'.length,
+                                  ),
+                                }
+                              : querySource?.startsWith('agent:')
+                                ? {
+                                    subagentName: querySource.slice(
+                                      'agent:'.length,
+                                    ),
+                                  }
+                                : {}),
+                        isBackgroundAgent: toolUseContext.isBackgroundAgent,
+                      },
+                      runCompactWithAgent,
+                    )
+                  : await runCompactWithAgent()
               markClassifierOverflowCompactSpent(
                 toolUseContext.agentId,
                 classifierOverflowPending.epoch,
@@ -1614,6 +1735,7 @@ async function* queryLoop(
         exceeds200kTokens:
           permissionMode === 'plan' &&
           doesMostRecentAssistantMessageExceed200k(messagesForQuery),
+        isSubagent: Boolean(toolUseContext.agentId),
       })
       // densable qs: reuse mo when model matches, else Tqe; Ase → Tqe(fallback).
       const factsCtx = {
@@ -2061,16 +2183,46 @@ async function* queryLoop(
                 return false
               }
             })()
+            // Official 2.1.323 #2126: forward active skill/plugin/agent/MCP
+            // attribution so OTel `api_request` carries complete attribution.
+            const derivedAttribution = deriveAttributionFromQuerySource(
+              querySource,
+              toolUseContext.options.activeSkill,
+            )
+            const requestAttribution: OTelAttributionInput | undefined =
+              derivedAttribution.attributionSkill !== undefined ||
+              derivedAttribution.attributionPlugin !== undefined ||
+              derivedAttribution.attributionAgent !== undefined ||
+              capturedMcpAttribution.activeMcpServer !== undefined
+                ? {
+                    ...derivedAttribution,
+                    ...(capturedMcpAttribution.activeMcpServer !== undefined
+                      ? {
+                          attributionMcpServer:
+                            capturedMcpAttribution.activeMcpServer,
+                        }
+                      : {}),
+                    ...(capturedMcpAttribution.activeMcpTool !== undefined
+                      ? {
+                          attributionMcpTool:
+                            capturedMcpAttribution.activeMcpTool,
+                        }
+                      : {}),
+                  }
+                : undefined
             const modelCallArgs: CallModelParams = {
               messages: prependUserContext(callMessages, userContext),
               systemPrompt: fullSystemPrompt,
               thinkingConfig: layeredThinkingConfig,
-              tools: toolUseContext.options.tools,
+              tools: applyPluginToolListFilter(toolUseContext.options.tools),
               signal: toolUseContext.abortController.signal,
               options: {
                 async getToolPermissionContext() {
                   // densable bn — sticky layers on each permission re-read
-                  return getToolPermissionContextFromLayers(toolUseContext)
+                  // Official 2.1.323 #2188: merge plugin tool.list deny rules.
+                  return applyPluginToolListDenyRules(
+                    getToolPermissionContextFromLayers(toolUseContext),
+                  )
                 },
                 model: currentModel,
                 modelFacts,
@@ -2192,6 +2344,11 @@ async function* queryLoop(
                 // densable activeMcpServer/Tool (Br/To) — one-shot for this request
                 activeMcpServer: capturedMcpAttribution.activeMcpServer,
                 activeMcpTool: capturedMcpAttribution.activeMcpTool,
+                ...(requestAttribution !== undefined
+                  ? ({
+                      attribution: requestAttribution,
+                    } as Partial<CallModelParams['options']>)
+                  : {}),
                 queryTracking,
                 effortValue: layeredEffortValue,
                 advisorModel: appState.advisorModel,
@@ -2249,8 +2406,10 @@ async function* queryLoop(
                   accumulateToolResultForMidTurn(
                     result.message,
                     toolResults,
-                    toolUseContext.options.refreshTools?.() ??
-                      toolUseContext.options.tools,
+                    applyPluginToolListFilter(
+                      toolUseContext.options.refreshTools?.() ??
+                        toolUseContext.options.tools,
+                    ),
                     toolUseContext.options.mainLoopModel,
                   )
                 }
@@ -3541,8 +3700,8 @@ async function* queryLoop(
             yield* leftoverDrainSpinnerModes()
             return { reason: 'rapid_refill_breaker' }
           }
-          const { result: compacted, failure: compactFailure } =
-            await reactiveCompact.tryReactiveCompact({
+          const runReactiveCompact = () =>
+            reactiveCompact.tryReactiveCompact({
               hasAttempted: hasAttemptedReactiveCompact,
               querySource,
               aborted: toolUseContext.abortController.signal.aborted,
@@ -3555,6 +3714,41 @@ async function* queryLoop(
                 forkContextMessages: messagesForQuery,
               },
             })
+          const activeReactiveAgentCtx = getAgentContext()
+          const { result: compacted, failure: compactFailure } =
+            toolUseContext.agentId &&
+            activeReactiveAgentCtx?.agentId !== toolUseContext.agentId
+              ? await runWithAgentContext(
+                  {
+                    agentId: toolUseContext.agentId,
+                    agentType: 'subagent',
+                    ...(activeReactiveAgentCtx?.agentType === 'subagent' &&
+                    activeReactiveAgentCtx.subagentName
+                      ? { subagentName: activeReactiveAgentCtx.subagentName }
+                      : querySource?.startsWith('agent:builtin:')
+                        ? {
+                            subagentName: querySource.slice(
+                              'agent:builtin:'.length,
+                            ),
+                          }
+                        : querySource?.startsWith('agent:custom:')
+                          ? {
+                              subagentName: querySource.slice(
+                                'agent:custom:'.length,
+                              ),
+                            }
+                          : querySource?.startsWith('agent:')
+                            ? {
+                                subagentName: querySource.slice(
+                                  'agent:'.length,
+                                ),
+                              }
+                            : {}),
+                    isBackgroundAgent: toolUseContext.isBackgroundAgent,
+                  },
+                  runReactiveCompact,
+                )
+              : await runReactiveCompact()
 
           if (compacted) {
             // task_budget: same carryover as the proactive path above.
@@ -3736,10 +3930,11 @@ async function* queryLoop(
           }
 
           if (maxOutputTokensRecoveryCount < MAX_OUTPUT_TOKENS_RECOVERY_LIMIT) {
+            const isSubagentQuery =
+              toolUseContext.agentId !== undefined ||
+              querySourceFamilyOf(querySource) === 'subagent'
             const recoveryMessage = createUserMessage({
-              content:
-                `Output token limit hit. Resume directly — no apology, no recap of what you were doing. ` +
-                `Pick up mid-thought if that is where the cut happened. Break remaining work into smaller pieces.`,
+              content: getMaxOutputTokensRecoveryPrompt(isSubagentQuery),
               isMeta: true,
               turnCompanion: true,
             })
@@ -3949,6 +4144,9 @@ async function* queryLoop(
           querySource !== 'agent_summary' &&
           querySource !== 'memdir_aki_extract' &&
           !messagesEndWithSuccessfulTerminalMcpTool(messagesForQuery) &&
+          // Official 2.1.325 #2300: never nudge a brief-mode session to reply
+          // again when the turn has already delivered a visible brief reply.
+          !hasBriefRepliedInTurn(toolUseContext.abortController?.signal) &&
           !assistantMessages.some(
             m =>
               Array.isArray(m.message?.content) &&
@@ -4022,6 +4220,25 @@ async function* queryLoop(
           querySource,
           stopHookActive,
         )
+
+        // Official 2.1.325 #2300: if this turn already sent a visible brief
+        // reply (`hasBriefRepliedInTurn`), strip any brief-mode enforce retry
+        // error so brief-mode sessions (e.g. Dispatch) never send a duplicate reply.
+        if (
+          stopHookResult.blockingErrors.length > 0 &&
+          hasBriefRepliedInTurn(toolUseContext.abortController?.signal)
+        ) {
+          stopHookResult.blockingErrors = stopHookResult.blockingErrors.filter(
+            msg => {
+              if (msg.type !== 'user') return true
+              const content = msg.message?.content
+              return !(
+                typeof content === 'string' &&
+                content.includes(BRIEF_ENFORCE_SENTINEL)
+              )
+            },
+          )
+        }
 
         const stopHookIsSubagent = toolUseContext.agentId !== undefined
         const stopHookGoalActive =
@@ -4300,8 +4517,10 @@ async function* queryLoop(
           accumulateToolResultForMidTurn(
             update.message,
             toolResults,
-            updatedToolUseContext.options.refreshTools?.() ??
-              updatedToolUseContext.options.tools,
+            applyPluginToolListFilter(
+              updatedToolUseContext.options.refreshTools?.() ??
+                updatedToolUseContext.options.tools,
+            ),
             updatedToolUseContext.options.mainLoopModel,
           )
         }
@@ -4684,7 +4903,9 @@ async function* queryLoop(
 
       // densable: refreshTools then refreshMcpClients before attachments.
       if (updatedToolUseContext.options.refreshTools) {
-        const refreshedTools = updatedToolUseContext.options.refreshTools()
+        const refreshedTools = applyPluginToolListFilter(
+          updatedToolUseContext.options.refreshTools(),
+        )
         if (refreshedTools !== updatedToolUseContext.options.tools) {
           const oldMcpCount = count(
             updatedToolUseContext.options.tools,
@@ -4788,6 +5009,14 @@ async function* queryLoop(
         }
         consumeFromQueue(claimedConsumedCommands)
         updateTurnAttributionFromCommands(claimedConsumedCommands)
+        // Official 2.1.325 #2317: emit OTel `user_prompt` event with
+        // `delivery.mode: "mid_turn"` and the running turn's `prompt.id`.
+        {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          const { emitMidTurnUserPromptOTelEvents } =
+            require('./utils/processUserInput/processTextPrompt.js') as typeof import('./utils/processUserInput/processTextPrompt.js')
+          emitMidTurnUserPromptOTelEvents(claimedConsumedCommands)
+        }
         // densable 2.1.246 d9n — main-thread mid-turn human prompt resets the
         // idle check-in burst (Js=isMainThread && OY(origin)).
         if (

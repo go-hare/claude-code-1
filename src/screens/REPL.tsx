@@ -70,10 +70,12 @@ import { ToolStateSlots } from '../utils/toolState.js';
 import { refreshActivePlugins } from '../utils/plugins/refresh.js';
 import { messageUuidPrefix, UUID_PREFIX_LENGTH } from '../utils/plugins/uiSelectionRowHolding.js';
 import { retireDepartedAdditionalDirectories } from '../utils/settings/applySettingsChange.js';
+import { APIError } from '@anthropic-ai/sdk';
 import {
   updateLastInteractionTime,
   getLastInteractionTime,
   getOriginalCwd,
+  setOriginalCwd,
   getProjectRoot,
   getMainThreadAgentId,
   getSessionId,
@@ -114,7 +116,45 @@ import {
   IdleReturnController,
 } from '../utils/idleReturnController.js';
 import { hasPendingLoopWakeups } from '../utils/loopDynamic.js';
-import { isQuotaAutoResumeArmed } from '../services/quotaAutoResume.js';
+import {
+  cancelQuotaAutoResume,
+  getQuotaAutoResumeState,
+  isQuotaAutoResumeArmed,
+  subscribeQuotaAutoResumeChanged,
+  subscribeQuotaAutoResumeEvents,
+} from '../services/quotaAutoResume.js';
+import { currentLimits, quotaRejectedListeners } from '../services/claudeAiLimits.js';
+import { shouldOpenUsageLimitMenuAfterWaitRefusal } from '../services/api/withRetry.js';
+import {
+  codeModeActiveBanner,
+  codeModeBackgroundRefusal,
+  codeModeRefusalReasonText,
+  codeModeRemoteControlNotice,
+  codeModeWarningNotice,
+  getCodeModeOptInState,
+  isCodeModeEnabled,
+} from '../services/codeMode/optIn.js';
+import {
+  applyCodeModePlan,
+  cloudMoveRefusal,
+  didSessionEndDuringCodeModeScript,
+  planCodeModeFromSession,
+} from '../services/codeMode/executor.js';
+import {
+  type ElicitationRequestEvent,
+  getElicitationCueBehindDraft,
+  isBackgroundMcpTaskElicitation,
+} from '../services/mcp/elicitationHandler.js';
+import {
+  isMcpTask,
+  McpTaskQuestionController,
+  McpTaskQuestionNoticeTracker,
+  setMcpTaskQuestionState,
+} from '../tasks/McpTask/McpTask.js';
+import { applyPollEventDeliveryGuard } from '../utils/permissions/permissionSetup.js';
+import { markPersonActivityForPromptSuggestion } from '../services/PromptSuggestion/promptSuggestion.js';
+import { setCwd } from '../utils/Shell.js';
+import { resetTeamLeadVerificationOnSessionBoundary } from '../utils/teammateMailbox.js';
 import { consumeEarlyInput } from '../utils/earlyInput.js';
 import { clearHeldClearedDraft } from '../utils/clearedDraftHold.js';
 import {
@@ -383,7 +423,10 @@ import {
 import { createAppStatePermissionContextSetters } from '../utils/permissions/permissionContextSetters.js';
 import { onPermissionRecheck } from '../utils/permissions/permissionRecheck.js';
 import { buildPermissionUpdates } from '../components/permissions/ExitPlanModePermissionRequest/ExitPlanModePermissionRequest.js';
-import { stripDangerousPermissionsForAutoMode } from '../utils/permissions/permissionSetup.js';
+import {
+  setPermissionModeWithGuards,
+  stripDangerousPermissionsForAutoMode,
+} from '../utils/permissions/permissionSetup.js';
 import { getScratchpadDir, isScratchpadEnabled } from '../utils/permissions/filesystem.js';
 import { WEB_FETCH_TOOL_NAME } from '@claude-code/builtin-tools/tools/WebFetchTool/prompt.js';
 import { SLEEP_TOOL_NAME } from '@claude-code/builtin-tools/tools/SleepTool/prompt.js';
@@ -509,9 +552,10 @@ import {
   isEphemeralToolProgress,
   isLoggableMessage,
   saveWorktreeState,
+  stripUnresumedInterruptedMessages,
   getAgentTranscript,
 } from '../utils/sessionStorage.js';
-import { deserializeMessages } from '../utils/conversationRecovery.js';
+import { deserializeMessagesWithInterruptDetection } from '../utils/conversationRecovery.js';
 import {
   extractReadFilesFromMessages,
   extractBashToolsFromMessages,
@@ -662,7 +706,7 @@ import {
   rewriteLeftArrowViaForAbortController,
   type LeftArrowVia,
 } from '../utils/leftArrowVia.js';
-import { getCurrentWorktreeSession } from '../utils/worktree.js';
+import { getCurrentWorktreeSession, resolveWorktreeExitTargetDir } from '../utils/worktree.js';
 import {
   type SetAppState,
   collapseBacklogTaskNotifications,
@@ -1537,15 +1581,23 @@ export function REPL({
         const t = prev.tasks[taskId];
         if (!isLocalAgentTask(t) || t.diskLoaded || !t.retain) return prev;
         const live = t.messages ?? [];
-        const liveUuids = new Set(live.map(m => m.uuid));
-        const diskOnly = result ? result.messages.filter(m => !liveUuids.has(m.uuid)) : [];
+        const disk = result?.messages ?? [];
+        const liveByUuid = new Map(live.map(m => [m.uuid, m]));
+        const diskUuids = new Set(disk.map(m => m.uuid));
+        const merged: typeof live = [];
+        for (const m of disk) {
+          merged.push(liveByUuid.get(m.uuid) ?? m);
+        }
+        for (const m of live) {
+          if (!diskUuids.has(m.uuid)) merged.push(m);
+        }
         return {
           ...prev,
           tasks: {
             ...prev.tasks,
             [taskId]: {
               ...t,
-              messages: [...diskOnly, ...live],
+              messages: merged,
               diskLoaded: true,
             },
           },
@@ -1580,8 +1632,39 @@ export function REPL({
   );
   const [submitController] = useState(() => new SubmitController({ store, turnController, messageQueue, queryGuard }));
   const [viewController] = useState(() => new ViewController());
+  // Official 2.1.323 (#1981): when resuming a session without auto-replaying
+  // an interrupted turn, strip any synthetic NRR loader sentinel and mark the
+  // unresumed interrupted prompt as not-a-chain-parent so the next user turn
+  // never chains onto it.
+  const [normalizedInitialMessages] = useState<MessageType[]>(() => {
+    const raw = initialMessages ?? [];
+    if (raw.length < 2) return raw;
+    const initMsg = store.getState().initialMessage;
+    if (initMsg && 'replay' in initMsg) return raw;
+    const lastRelevantIdx = raw.findLastIndex(m => m.type !== 'system' && m.type !== 'progress');
+    if (lastRelevantIdx < 1) return raw;
+    const sentinel = raw[lastRelevantIdx];
+    const prevMsg = raw[lastRelevantIdx - 1];
+    if (
+      sentinel?.type === 'assistant' &&
+      Array.isArray(sentinel.message?.content) &&
+      sentinel.message.content.length === 1 &&
+      sentinel.message.content[0]?.type === 'text' &&
+      sentinel.message.content[0].text === 'No response requested.' &&
+      prevMsg?.type === 'user'
+    ) {
+      const copy = [...raw];
+      stripUnresumedInterruptedMessages(copy, {
+        kind: 'interrupted_prompt',
+        message: prevMsg,
+        loaderSentinelUuid: sentinel.uuid,
+      });
+      return copy;
+    }
+    return raw;
+  });
   const [transcriptProjection] = useState(
-    () => new TranscriptProjection({ store, initialMessages: initialMessages ?? [] }),
+    () => new TranscriptProjection({ store, initialMessages: normalizedInitialMessages }),
   );
   useEffect(
     () => () => {
@@ -1778,6 +1861,32 @@ export function REPL({
       removeNotification('auth-profile-billing-notice');
     }
   }, [authChangeGenerationForAntProfile, isRemoteSession, addNotification, removeNotification]);
+  // Official 2.1.323 (#1964): surface Code Mode opt-in refusal or active status banner.
+  useEffect(() => {
+    if (isRemoteSession || getIsNonInteractiveSession() || getAgentId() !== undefined) {
+      return;
+    }
+    const optIn = getCodeModeOptInState();
+    if (optIn.state === 'refused') {
+      addNotification({
+        key: 'code-mode-status',
+        kind: 'warning',
+        priority: 'high',
+        wrap: true,
+        color: 'warning',
+        text: codeModeWarningNotice(optIn.why) || codeModeRefusalReasonText(optIn.why),
+      });
+      return;
+    }
+    if (isCodeModeEnabled()) {
+      addNotification({
+        key: 'code-mode-status',
+        priority: 'low',
+        wrap: true,
+        text: codeModeActiveBanner(),
+      });
+    }
+  }, [isRemoteSession, addNotification]);
   // densable 2.1.217 #2 — transcript saving off / write fail warnings
   usePersistenceSuppressedNotification();
   useTranscriptWriterDegradedNotification();
@@ -2361,12 +2470,21 @@ export function REPL({
   // dialogs (cost/resume nudge/…) stay open.length>0 but must not freeze the
   // tab on idle ✳ while the spinner still runs — match showSpinner's
   // hasBlockingOpenDialogs gate, not raw hasOpenDialogs.
+  const isElicitationHeldBehindDraftEarly =
+    isPromptInputActive &&
+    Boolean(
+      elicitation.queue[0] &&
+        getElicitationCueBehindDraft({
+          serverName: elicitation.queue[0].serverName,
+          params: elicitation.queue[0].params,
+        })?.keepSpinnerRunning,
+    );
   const isWaitingForApproval =
     hasBlockingOpenDialogs ||
     promptQueue.length > 0 ||
     pendingWorkerRequest ||
     pendingSandboxRequest ||
-    elicitation.queue.length > 0 ||
+    (elicitation.queue.length > 0 && !isElicitationHeldBehindDraftEarly) ||
     workerSandboxPermissions.queue.length > 0;
   // Local-jsx commands (like /plugin, /config) show user-facing dialogs that
   // wait for input. Require jsx != null — if the flag is stuck true but jsx
@@ -3240,6 +3358,174 @@ export function REPL({
   // inputValueRef / getPromptInputStoreValue() for live text.
   const inputValue = hasDraft ? getPromptInputStoreValue() : '';
 
+  // Official 2.1.325 #2307 / #2309 / #2349 / #2367:
+  // When a background MCP task elicitation arrives while the user has a non-empty
+  // draft, surface the draft-behind cue and keep the spinner running; manage
+  // per-task question surface state (asking / off_screen / reopen from /tasks)
+  // via McpTaskQuestionController + McpTaskQuestionNoticeTracker.
+  const [reopenedElicitationKey, setReopenedElicitationKey] = useState<string | null>(null);
+  const queuedElicitation = elicitation.queue[0];
+  const queuedElicitationKey = queuedElicitation
+    ? `${queuedElicitation.serverName}:${String(queuedElicitation.requestId)}`
+    : null;
+  const isReopenedElicitation = queuedElicitationKey !== null && reopenedElicitationKey === queuedElicitationKey;
+  const elicitationCueBehindDraft =
+    queuedElicitation && !isReopenedElicitation && (hasDraft || isPromptInputActive)
+      ? getElicitationCueBehindDraft({
+          serverName: queuedElicitation.serverName,
+          params: queuedElicitation.params,
+        })
+      : undefined;
+
+  const resolveMcpElicitationTaskId = useCallback(
+    (event: ElicitationRequestEvent | undefined): string | undefined => {
+      if (!event || !isBackgroundMcpTaskElicitation(event.params)) return undefined;
+      const meta = (event.params as { _meta?: Record<string, unknown> })._meta;
+      const related = meta?.['io.modelcontextprotocol/related-task'] ?? meta?.relatedTask;
+      const relatedTaskId =
+        typeof related === 'object' && related !== null && typeof (related as { taskId?: unknown }).taskId === 'string'
+          ? (related as { taskId: string }).taskId
+          : undefined;
+      const liveTasks = store.getState().tasks ?? {};
+      if (relatedTaskId) {
+        if (relatedTaskId in liveTasks) return relatedTaskId;
+        for (const task of Object.values(liveTasks)) {
+          if (isMcpTask(task) && task.status === 'running' && task.mcpTaskId === relatedTaskId) {
+            return task.id;
+          }
+        }
+        return relatedTaskId;
+      }
+      for (const task of Object.values(liveTasks)) {
+        if (isMcpTask(task) && task.status === 'running' && task.serverName === event.serverName) {
+          return task.id;
+        }
+      }
+      return undefined;
+    },
+    [store],
+  );
+
+  const mcpTaskQuestionHarnessesRef = useRef(
+    new Map<
+      string,
+      {
+        controller: McpTaskQuestionController;
+        tracker: McpTaskQuestionNoticeTracker;
+      }
+    >(),
+  );
+  const deferredMcpElicitationsRef = useRef(new Map<string, ElicitationRequestEvent>());
+  const deferredMcpAbortCleanupsRef = useRef(new Map<string, () => void>());
+
+  const clearDeferredMcpElicitation = useCallback((taskId: string) => {
+    const cleanup = deferredMcpAbortCleanupsRef.current.get(taskId);
+    if (cleanup) {
+      deferredMcpAbortCleanupsRef.current.delete(taskId);
+      cleanup();
+    }
+    deferredMcpElicitationsRef.current.delete(taskId);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      for (const cleanup of deferredMcpAbortCleanupsRef.current.values()) {
+        cleanup();
+      }
+      deferredMcpAbortCleanupsRef.current.clear();
+      deferredMcpElicitationsRef.current.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (reopenedElicitationKey === null) return;
+    const stillQueued = elicitation.queue.some(
+      item => `${item.serverName}:${String(item.requestId)}` === reopenedElicitationKey,
+    );
+    if (!stillQueued || (queuedElicitationKey !== null && queuedElicitationKey !== reopenedElicitationKey)) {
+      setReopenedElicitationKey(null);
+    }
+  }, [elicitation.queue, queuedElicitationKey, reopenedElicitationKey]);
+
+  const getOrCreateMcpTaskQuestionHarness = useCallback(
+    (taskId: string) => {
+      let existing = mcpTaskQuestionHarnessesRef.current.get(taskId);
+      if (!existing) {
+        const tracker = new McpTaskQuestionNoticeTracker(taskId, {
+          enqueueNotice: notice => {
+            messageQueue.enqueuePendingNotification(notice);
+          },
+          removeQueuedNotices: predicate =>
+            messageQueue.removeByFilter(
+              cmd => cmd.mode === 'task-notification' && typeof cmd.value === 'string' && predicate(cmd.value),
+            ).length,
+        });
+        const controller = new McpTaskQuestionController((openFn, state) => {
+          const reopenFromTasks = openFn
+            ? () => {
+                openFn();
+                const deferred = deferredMcpElicitationsRef.current.get(taskId);
+                if (deferred) {
+                  clearDeferredMcpElicitation(taskId);
+                  const reopenedKey = `${deferred.serverName}:${String(deferred.requestId)}`;
+                  setAppState(prev => {
+                    const rest = prev.elicitation.queue.filter(
+                      item => !(item.serverName === deferred.serverName && item.requestId === deferred.requestId),
+                    );
+                    return {
+                      ...prev,
+                      elicitation: {
+                        queue: [deferred, ...rest],
+                      },
+                    };
+                  });
+                  setReopenedElicitationKey(reopenedKey);
+                } else {
+                  const queuedMatch = store
+                    .getState()
+                    .elicitation.queue.find(item => resolveMcpElicitationTaskId(item) === taskId);
+                  if (queuedMatch) {
+                    const reopenedKey = `${queuedMatch.serverName}:${String(queuedMatch.requestId)}`;
+                    setAppState(prev => {
+                      const idx = prev.elicitation.queue.findIndex(
+                        item => item.serverName === queuedMatch.serverName && item.requestId === queuedMatch.requestId,
+                      );
+                      if (idx <= 0) return prev;
+                      const rest = prev.elicitation.queue.filter((_, i) => i !== idx);
+                      return {
+                        ...prev,
+                        elicitation: {
+                          queue: [prev.elicitation.queue[idx]!, ...rest],
+                        },
+                      };
+                    });
+                    setReopenedElicitationKey(reopenedKey);
+                  }
+                }
+                controller.takeOpen();
+              }
+            : undefined;
+          setMcpTaskQuestionState(taskId, setAppState, reopenFromTasks, state);
+          tracker.update(state);
+        });
+        existing = { controller, tracker };
+        mcpTaskQuestionHarnessesRef.current.set(taskId, existing);
+      }
+      return existing;
+    },
+    [clearDeferredMcpElicitation, messageQueue, resolveMcpElicitationTaskId, setAppState, store],
+  );
+
+  useEffect(() => {
+    if (!elicitationCueBehindDraft) return;
+    addNotification({
+      key: 'mcp-elicitation-behind-draft',
+      text: elicitationCueBehindDraft.text,
+      color: 'warning',
+      priority: 'high',
+    });
+  }, [elicitationCueBehindDraft?.text, addNotification]);
+
   const insertTextRef = useRef<{
     insert: (text: string) => void;
     setInputWithCursor: (value: string, cursor: number) => void;
@@ -3680,7 +3966,16 @@ export function REPL({
 
   const isTerminalFocused = useTerminalFocus();
   const terminalFocusRef = useRef(isTerminalFocused);
+  const prevTerminalFocusedRef = useRef(isTerminalFocused);
   terminalFocusRef.current = isTerminalFocused;
+  // Official 2.1.325 #2366: reset unattended prompt-suggestion backoff on focus-in.
+  useEffect(() => {
+    const wasFocused = prevTerminalFocusedRef.current;
+    prevTerminalFocusedRef.current = isTerminalFocused;
+    if (!wasFocused && isTerminalFocused) {
+      markPersonActivityForPromptSuggestion();
+    }
+  }, [isTerminalFocused]);
 
   const [theme] = useTheme();
 
@@ -3950,6 +4245,8 @@ export function REPL({
 
   // If worktree creation was slow and sparse-checkout isn't configured,
   // nudge the user toward settings.worktree.sparsePaths.
+  // Official 2.1.323 (#2094): include ".claude" in the suggested sparsePaths so
+  // worktrees retain project settings and rules.
   const worktreeTipShownRef = useRef(false);
   useEffect(() => {
     if (worktreeTipShownRef.current) return;
@@ -3961,11 +4258,44 @@ export function REPL({
     setMessages(prev => [
       ...prev,
       createSystemMessage(
-        `Worktree creation took ${secs}s. For large repos, set \`worktree.sparsePaths\` in .claude/settings.json to check out only the directories you need — e.g. \`{"worktree": {"sparsePaths": ["src", "packages/foo"]}}\`.`,
+        `Worktree creation took ${secs}s. For large repos, set \`worktree.sparsePaths\` in .claude/settings.json to check out only the directories you need — e.g. \`{"worktree": {"sparsePaths": [".claude", "src", "packages/foo"]}}\`.`,
         'info',
       ),
     ]);
   }, [setMessages]);
+
+  // Official 2.1.323 Xxt (#1975): one-time startup notice naming
+  // CLAUDE_CODE_PERFORCE_MODE when Perforce workspace settings are found and
+  // the mode is off.
+  const perforceNoticeShownRef = useRef(false);
+  useEffect(() => {
+    if (perforceNoticeShownRef.current) return;
+    perforceNoticeShownRef.current = true;
+    void import('../utils/perforceMode.js')
+      .then(({ buildPerforceModeOffNotice }) => {
+        const notice = buildPerforceModeOffNotice(getCwd());
+        if (notice) {
+          addNotification(notice);
+        }
+      })
+      .catch(() => {});
+  }, [addNotification]);
+
+  // Official 2.1.323 jPt/gXo (#2084 & #2070): in an interactive `--chrome`
+  // session where org policy disables Claude in Chrome, append a one-time
+  // non-persisted notice explaining why the session started without Chrome.
+  const chromePolicyNoticeShownRef = useRef(false);
+  useEffect(() => {
+    if (chromePolicyNoticeShownRef.current || isRemoteSession) return;
+    chromePolicyNoticeShownRef.current = true;
+    void import('../utils/claudeInChrome/setup.js')
+      .then(({ getChromeOptInRefusedStartupMessage }) => {
+        const msg = getChromeOptInRefusedStartupMessage();
+        if (!msg) return;
+        setMessages(prev => [...prev, { ...createSystemMessage(msg.text, msg.level), isMeta: false }]);
+      })
+      .catch(() => {});
+  }, [isRemoteSession, setMessages]);
 
   // Hide spinner when the only in-progress tool is Sleep
   const onlySleepToolActive = useMemo(() => {
@@ -3999,7 +4329,7 @@ export function REPL({
     (!toolJSX || toolJSX.showSpinner === true) &&
     !hasBlockingOpenDialogs &&
     promptQueue.length === 0 &&
-    elicitation.queue.length === 0 &&
+    (elicitation.queue.length === 0 || Boolean(elicitationCueBehindDraft?.keepSpinnerRunning)) &&
     workerSandboxPermissions.queue.length === 0 &&
     // Show spinner during input processing, API call, while teammates are running,
     // or while pending main-thread queue items remain (densable Xwt — not full
@@ -4092,9 +4422,54 @@ export function REPL({
     async (sessionId: UUID, log: LogOption, entrypoint: ResumeEntrypoint) => {
       const resumeStart = performance.now();
       try {
+        // Official 2.1.323 (#1964) & 2.1.325 (#2316): reconcile Code Mode opt-in
+        // state with resumed session, and wait for user's next prompt if it ended
+        // mid-script.
+        const codeModePlan = planCodeModeFromSession(
+          {
+            replMode: (log as { replMode?: boolean }).replMode,
+            sessionId,
+            withinSession: true,
+            messages: log.messages as unknown as Parameters<typeof didSessionEndDuringCodeModeScript>[0],
+          },
+          notice => {
+            addNotification({
+              key: 'code-mode-resume-notice',
+              priority: 'medium',
+              wrap: true,
+              text: notice,
+            });
+          },
+        );
+        if (codeModePlan.refused) {
+          addNotification({
+            key: 'code-mode-resume-refused',
+            kind: 'warning',
+            priority: 'immediate',
+            wrap: true,
+            color: 'warning',
+            text: codeModePlan.refused,
+          });
+          throw new Error(codeModePlan.refused);
+        }
+        applyCodeModePlan(codeModePlan);
+        const waitForNextPromptAfterCodeModeResume = codeModePlan.waitForNextPrompt === true;
+        if (waitForNextPromptAfterCodeModeResume) {
+          logForDebugging(
+            '[resume] Code Mode session ended during a script — skipping auto-continue and waiting for next prompt',
+          );
+          setAppState(prev => (prev.initialMessage ? { ...prev, initialMessage: null } : prev));
+        }
+
         // Deserialize messages to properly clean up the conversation
         // This filters unresolved tool uses and adds a synthetic assistant message if needed
-        const messages = deserializeMessages(log.messages);
+        const { messages, turnInterruptionState } = deserializeMessagesWithInterruptDetection(log.messages);
+        // Official 2.1.323 (#1981): in-session /resume does not auto-resume an
+        // interrupted turn — strip the synthetic NRR loader sentinel and mark
+        // the unresumed message so the next turn does not chain onto it.
+        if (turnInterruptionState.kind === 'interrupted_prompt') {
+          stripUnresumedInterruptedMessages(messages, turnInterruptionState);
+        }
 
         // Match coordinator/normal mode to the resumed session
         if (feature('COORDINATOR_MODE')) {
@@ -4155,7 +4530,7 @@ export function REPL({
         messages.push(...hookMessages);
         // densable LMr — SessionStart initialUserMessage is a first-turn user prompt.
         const initialUserMessage = takeInitialUserMessage();
-        if (initialUserMessage) {
+        if (initialUserMessage && !waitForNextPromptAfterCodeModeResume) {
           messages.push(
             createUserMessage({
               content: initialUserMessage,
@@ -4220,6 +4595,8 @@ export function REPL({
           log.fullPath ? dirname(log.fullPath) : null,
           entrypoint === 'fork' ? 'fork' : 'resume',
         );
+        // Official 2.1.323 (#2195): reset team-lead mailbox verification epoch on /resume.
+        resetTeamLeadVerificationOnSessionBoundary();
         // Copy file-history snapshots AFTER switchSession so getSessionId() is
         // already switched to the target/forked sessionId (and != log.forkedFromSessionId),
         // then track the in-flight promise so /rewind awaits completion (#1752).
@@ -4285,7 +4662,23 @@ export function REPL({
         // in. Same fork skip as processResumedConversation for the adopt —
         // fork materializes its own file via recordTranscript on REPL mount.
         if (entrypoint !== 'fork') {
+          // Official 2.1.323 (#1988): if the folder the shell was in before
+          // entering the worktree was deleted, resolve a safe fallback targetDir
+          // so /resume does not stay stranded inside the exited worktree.
+          const prevWorktree = getCurrentWorktreeSession();
           exitRestoredWorktree();
+          if (prevWorktree) {
+            const { targetDir, fellBackFromDeletedOriginalCwd } = resolveWorktreeExitTargetDir(prevWorktree);
+            if (fellBackFromDeletedOriginalCwd) {
+              try {
+                process.chdir(targetDir);
+                setCwd(targetDir);
+                setOriginalCwd(getCwd());
+              } catch {
+                // Best-effort fallback when originalCwd was deleted
+              }
+            }
+          }
           restoreWorktreeForResume(log.worktreeSession);
           adoptResumedSessionFile();
           void restoreRemoteAgentTasks({
@@ -4370,8 +4763,10 @@ export function REPL({
           }
         }
         // Official wvr(messages, Je) on in-session /resume — orphan scan after
-        // messages restored (skip fork: new session id, no prior orphans).
-        if (entrypoint !== 'fork') {
+        // messages restored (skip fork: new session id, no prior orphans;
+        // Official 2.1.325 #2316: also skip auto-resuming when Code Mode ended
+        // mid-script so we wait for the user's next prompt).
+        if (entrypoint !== 'fork' && !waitForNextPromptAfterCodeModeResume) {
           try {
             const { runOrphanAgentResumePass } = await import('../utils/orphanAgentResume.js');
             const liveIds = new Set<string>();
@@ -4434,7 +4829,7 @@ export function REPL({
         }
 
         // densable: if(Qn!=="fork")cu(Ws); then tengu_session_resumed.
-        if (entrypoint !== 'fork') {
+        if (entrypoint !== 'fork' && !waitForNextPromptAfterCodeModeResume) {
           offerResumeReturnIfNeeded(messages);
         }
 
@@ -4703,7 +5098,8 @@ export function REPL({
     if (leftArrowConfirm) return 'left-arrow-confirm';
 
     // Suppress interrupt dialogs while user is actively typing (gold To)
-    if (isDialogHeldBack) return undefined;
+    // unless the user explicitly reopened a background MCP task elicitation from /tasks.
+    if (isDialogHeldBack && !isReopenedElicitation) return undefined;
 
     // Permission/interactive dialogs (show unless blocked by toolJSX)
     const allowDialogsWithAnimation = !toolJSX || toolJSX.shouldContinueAnimation;
@@ -4712,7 +5108,10 @@ export function REPL({
     if (allowDialogsWithAnimation && workerSandboxPermissions.queue[0]) return 'worker-sandbox-permission';
     // densable _Zt elicitation — gold Be.queue overlay (eDo), not NMs Host.
     // Gbt mcp_url_elicitation is a separate print/SDK mailbox kind.
-    if (allowDialogsWithAnimation && elicitation.queue[0]) return 'elicitation';
+    // Official 2.1.325 #2309: hold background MCP task elicitation behind a non-empty draft,
+    // unless the user explicitly reopened it via Enter in /tasks.
+    if (allowDialogsWithAnimation && elicitation.queue[0] && (!elicitationCueBehindDraft || isReopenedElicitation))
+      return 'elicitation';
 
     if (allowDialogsWithAnimation && !isLoading && ultraplanPendingChoice) return 'ultraplan-choice';
     if (allowDialogsWithAnimation && !isLoading && ultraplanLaunchPending) return 'ultraplan-launch';
@@ -4740,6 +5139,42 @@ export function REPL({
   }
 
   const focusedInputDialog = getFocusedInputDialog();
+
+  // Official 2.1.325 #2307 / #2309 / #2349 / #2367: drive McpTaskQuestionController
+  // and McpTaskQuestionNoticeTracker as the queued background MCP elicitation moves
+  // between on-screen ('asking') and draft-held ('off_screen'), and clean up when
+  // the queued elicitation disappears externally (abort/timeout) without being deferred.
+  const prevQueuedMcpTaskIdRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const taskId = resolveMcpElicitationTaskId(queuedElicitation);
+    const prevTaskId = prevQueuedMcpTaskIdRef.current;
+    prevQueuedMcpTaskIdRef.current = taskId;
+    if (
+      prevTaskId &&
+      prevTaskId !== taskId &&
+      !deferredMcpElicitationsRef.current.has(prevTaskId) &&
+      !elicitation.queue.some(item => resolveMcpElicitationTaskId(item) === prevTaskId)
+    ) {
+      const prevHarness = mcpTaskQuestionHarnessesRef.current.get(prevTaskId);
+      if (prevHarness) {
+        prevHarness.controller.set(undefined);
+      }
+    }
+    if (!taskId) return;
+    const { controller } = getOrCreateMcpTaskQuestionHarness(taskId);
+    if (focusedInputDialog === 'elicitation') {
+      controller.set('asking');
+    } else if (elicitationCueBehindDraft) {
+      controller.set('off_screen');
+    }
+  }, [
+    elicitation.queue,
+    queuedElicitation,
+    focusedInputDialog,
+    elicitationCueBehindDraft,
+    resolveMcpElicitationTaskId,
+    getOrCreateMcpTaskQuestionHarness,
+  ]);
 
   // densable Vd / jx / G$ — Host park. zIr strings below stay for 239 SEA.
   const hostParkMode = getHostParkMode({
@@ -5182,6 +5617,22 @@ export function REPL({
   // addNotification is stable (useCallback) so the effect fires once.
   useEffect(() => {
     const reason = SandboxManager.getSandboxUnavailableReason();
+    // Official 2.1.325 #2374: in hosted containers (web / cloud scheduled / Cowork),
+    // sandbox.failIfUnavailable is set aside because the hosted container has no
+    // command sandbox — surface a warning notification instead of refusing startup.
+    if (!SandboxManager.isSandboxRequired() && SandboxManager.isSandboxRequirementSetAsideInHostedWorker()) {
+      logForDebugging(
+        `sandbox.failIfUnavailable set aside in hosted container (no command sandbox)${reason ? `: ${reason}` : ''}`,
+        { level: 'warn' },
+      );
+      addNotification({
+        key: 'sandbox-unavailable-hosted',
+        text: 'Hosted container has no command sandbox (sandbox.failIfUnavailable set aside)',
+        color: 'warning',
+        priority: 'high',
+      });
+      return;
+    }
     if (reason) {
       if (SandboxManager.isSandboxRequired()) {
         process.stderr.write(
@@ -5290,14 +5741,18 @@ export function REPL({
     [],
   );
 
+  // Official 2.1.325 #2356: tracks active scheduled/loop turn so SkillTool's
+  // isScheduledOrLoopSkillExecution(context) sees isCron / isScheduledTask / isLoop.
+  const activeScheduledTurnRef = useRef<{ isScheduledTask: true; isLoop: boolean } | null>(null);
+
   const getToolUseContext = useCallback(
     (
       messages: MessageType[],
       _newMessages: MessageType[],
       abortController: AbortController,
       mainLoopModel: string,
-    ): ProcessUserInputContext =>
-      sessionEngine.buildToolUseContext({
+    ): ProcessUserInputContext => {
+      const ctx = sessionEngine.buildToolUseContext({
         messages,
         _newMessages,
         abortController,
@@ -5397,7 +5852,22 @@ export function REPL({
         storageV5,
         credentials,
         replDiffColumns,
-      }),
+      });
+      const scheduledTurn = activeScheduledTurnRef.current;
+      if (scheduledTurn) {
+        const opts = ctx.options as typeof ctx.options & {
+          isCron?: boolean;
+          isScheduledTask?: boolean;
+          isLoop?: boolean;
+        };
+        opts.isCron = true;
+        opts.isScheduledTask = scheduledTurn.isScheduledTask;
+        if (scheduledTurn.isLoop) {
+          opts.isLoop = true;
+        }
+      }
+      return ctx;
+    },
     [
       sessionEngine,
       commands,
@@ -5613,6 +6083,18 @@ export function REPL({
 
   // Session backgrounding (Ctrl+B to background/foreground)
   const handleBackgroundQuery = useCallback(() => {
+    // Official 2.1.323 (#1964): Code Mode sessions cannot be moved to the background.
+    if (isCodeModeEnabled()) {
+      addNotification({
+        key: 'code-mode-bg-refusal',
+        kind: 'warning',
+        priority: 'immediate',
+        wrap: true,
+        color: 'warning',
+        text: codeModeBackgroundRefusal(),
+      });
+      return;
+    }
     // Stop the foreground query so the background one takes over.
     // The abort reason 'background' signals that the response should be
     // continued in the background session rather than discarded.
@@ -5764,6 +6246,123 @@ export function REPL({
     ],
   );
 
+  // Official 2.1.323 (#2132): track turn message start index and suppress false
+  // turn-end "Needs input" notifications when a background worker turn finishes
+  // with no visible assistant text and only basic non-interactive tools.
+  const turnStartMessageIndexRef = useRef(0);
+  const handleTurnComplete = useCallback(
+    async (turnMessages: MessageType[]) => {
+      if (process.env.CLAUDE_JOB_DIR || process.env.CLAUDE_CODE_SESSION_KIND === 'bg') {
+        try {
+          const { isBgJobSession, shouldSuppressTurnEndNeedsInput, clearBgNeedsInputOnReply } = await import(
+            '../utils/bgNeedsInputBridge.js'
+          );
+          if (isBgJobSession()) {
+            const turnSlice = turnMessages.slice(turnStartMessageIndexRef.current);
+            const textParts: string[] = [];
+            const toolNames: string[] = [];
+            for (const msg of turnSlice) {
+              if (msg.type !== 'assistant' || !Array.isArray(msg.message?.content)) continue;
+              for (const block of msg.message.content) {
+                if (block.type === 'text' && typeof block.text === 'string') {
+                  textParts.push(block.text);
+                } else if (block.type === 'tool_use' && typeof block.name === 'string') {
+                  toolNames.push(block.name);
+                }
+              }
+            }
+            const stateSnap = store.getState();
+            const hasActiveOverlayPrompt =
+              stateSnap.workerSandboxPermissions.queue.length > 0 || stateSnap.elicitation.queue.length > 0;
+            if (
+              !hasActiveOverlayPrompt &&
+              shouldSuppressTurnEndNeedsInput({
+                assistantText: textParts.join('\n'),
+                toolNames,
+              })
+            ) {
+              await clearBgNeedsInputOnReply();
+            }
+          }
+        } catch {
+          // Never throw into turn completion
+        }
+      }
+      await onTurnComplete?.(turnMessages);
+    },
+    [onTurnComplete, store],
+  );
+
+  // Official 2.1.323 (#2107): track explicit Wait choices from the usage limit
+  // menu so if the retry after the countdown is still refused (429), we reopen
+  // the usage limit menu instead of silently advancing to a later reset window.
+  const usageLimitMenuWaitRef = useRef<{
+    choseWaitInMenu: boolean;
+    previousResetsAt?: number;
+    fired: boolean;
+  }>({ choseWaitInMenu: false, fired: false });
+  const handleOpenRateLimitOptionsRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    const unsubEvents = subscribeQuotaAutoResumeEvents(event => {
+      if (event === 'armed' || event === 'taken-over') {
+        const st = getQuotaAutoResumeState();
+        usageLimitMenuWaitRef.current = {
+          choseWaitInMenu: true,
+          previousResetsAt: st.phase === 'armed' ? st.resetsAtSeconds : undefined,
+          fired: false,
+        };
+      } else if (event === 'fired-now') {
+        if (usageLimitMenuWaitRef.current.choseWaitInMenu) {
+          usageLimitMenuWaitRef.current.fired = true;
+        }
+      } else if (
+        event === 'cancelled' ||
+        event === 'disabled' ||
+        event === 'horizon-exceeded' ||
+        event === 'cap-exhausted' ||
+        event === 'auto-armed'
+      ) {
+        usageLimitMenuWaitRef.current = { choseWaitInMenu: false, fired: false };
+      }
+    });
+    let prevPhase = getQuotaAutoResumeState().phase;
+    const unsubChanged = subscribeQuotaAutoResumeChanged(() => {
+      const nextPhase = getQuotaAutoResumeState().phase;
+      if (prevPhase === 'armed' && nextPhase === 'idle' && usageLimitMenuWaitRef.current.choseWaitInMenu) {
+        usageLimitMenuWaitRef.current.fired = true;
+      }
+      prevPhase = nextPhase;
+    });
+    const onQuotaRejected = (limits: { status?: string; resetsAt?: number }, bucket: 'main_thread' | 'other') => {
+      if (bucket !== 'main_thread') return;
+      const waitState = usageLimitMenuWaitRef.current;
+      if (!waitState.choseWaitInMenu || !waitState.fired) return;
+      const headers = new Headers();
+      if (limits.status) {
+        headers.set('anthropic-ratelimit-unified-status', limits.status);
+      }
+      const err = new APIError(429, undefined, 'Rate limit exceeded', headers);
+      if (
+        shouldOpenUsageLimitMenuAfterWaitRefusal(err, {
+          choseWaitInMenu: true,
+          previousResetsAt: waitState.previousResetsAt,
+          nextResetsAt: limits.resetsAt,
+        })
+      ) {
+        usageLimitMenuWaitRef.current = { choseWaitInMenu: false, fired: false };
+        cancelQuotaAutoResume('dialog');
+        handleOpenRateLimitOptionsRef.current();
+      }
+    };
+    quotaRejectedListeners.add(onQuotaRejected);
+    return () => {
+      unsubEvents();
+      unsubChanged();
+      quotaRejectedListeners.delete(onQuotaRejected);
+    };
+  }, []);
+
   const onQuery = useCallback(
     (
       newMessages: MessageType[],
@@ -5780,78 +6379,106 @@ export function REPL({
       clientPlatform?: string,
       /** densable 2.1.229 — slash/skill disallowedTools for the turn. */
       additionalDisallowedTools: string[] = [],
-    ): Promise<boolean> =>
-      turnController.runTurn(
-        {
-          newMessages,
-          abortController,
-          shouldQuery,
-          additionalAllowedTools,
-          mainLoopModelParam,
-          onBeforeQueryCallback,
-          input,
-          effort,
-          stopHookActive,
-          clientPlatform,
-          additionalDisallowedTools,
-        },
-        {
-          store,
-          queryGuard,
-          initialMcpClients,
-          titleDisabled,
-          sessionTitle,
-          sessionAiTitle,
-          agentTitle,
-          haikuTitleAttemptedRef,
-          titleFallbackRef,
-          setHaikuTitle,
-          commands,
-          setConversationId,
-          setAppState,
-          messagesRef,
-          setMessages,
-          resetLoadingState,
-          setAbortController,
-          getToolUseContext,
-          toolPermissionContext,
-          terminalFocusRef,
-          mainThreadAgentDefinition,
-          customSystemPrompt,
-          appendSystemPrompt,
-          canUseTool,
-          hostEngine,
-          hostInputRef,
-          pendingQueryParamsRef,
-          onQueryEvent,
-          addNotification,
-          leftArrowDeferRef,
-          inputValueRef,
-          markIdleForkMidTurn,
-          leftArrowToAgentsFired,
-          buddyEnabled,
-          pipeReturnHadErrorRef,
-          relayPipeMessage,
-          apiMetricsRef,
-          loadingStartTimeRef,
-          totalPausedMsRef,
-          swarmStartTimeRef,
-          swarmBudgetInfoRef,
-          backgroundWaitStartTimeRef,
-          onTurnComplete,
-          resetTimingRefs,
-          responseLengthRef,
-          setStreamingToolUses,
-          clearStreamingText,
-          displayTransform,
-          mrOnBeforeQuery,
-          mrOnTurnComplete,
-          setLastQueryCompletionTime,
-          sendBridgeResultRef,
-          proactiveActive,
-          restoreMessageSyncRef,
-        },
-      ),
+    ): Promise<boolean> => {
+      turnStartMessageIndexRef.current = messagesRef.current.length;
+      return turnController
+        .runTurn(
+          {
+            newMessages,
+            abortController,
+            shouldQuery,
+            additionalAllowedTools,
+            mainLoopModelParam,
+            onBeforeQueryCallback,
+            input,
+            effort,
+            stopHookActive,
+            clientPlatform,
+            additionalDisallowedTools,
+          },
+          {
+            store,
+            queryGuard,
+            initialMcpClients,
+            titleDisabled,
+            sessionTitle,
+            sessionAiTitle,
+            agentTitle,
+            haikuTitleAttemptedRef,
+            titleFallbackRef,
+            setHaikuTitle,
+            commands,
+            setConversationId,
+            setAppState,
+            messagesRef,
+            setMessages,
+            resetLoadingState,
+            setAbortController,
+            getToolUseContext,
+            toolPermissionContext,
+            terminalFocusRef,
+            mainThreadAgentDefinition,
+            customSystemPrompt,
+            appendSystemPrompt,
+            canUseTool,
+            hostEngine,
+            hostInputRef,
+            pendingQueryParamsRef,
+            onQueryEvent,
+            addNotification,
+            leftArrowDeferRef,
+            inputValueRef,
+            markIdleForkMidTurn,
+            leftArrowToAgentsFired,
+            buddyEnabled,
+            pipeReturnHadErrorRef,
+            relayPipeMessage,
+            apiMetricsRef,
+            loadingStartTimeRef,
+            totalPausedMsRef,
+            swarmStartTimeRef,
+            swarmBudgetInfoRef,
+            backgroundWaitStartTimeRef,
+            onTurnComplete: handleTurnComplete,
+            resetTimingRefs,
+            responseLengthRef,
+            setStreamingToolUses,
+            clearStreamingText,
+            displayTransform,
+            mrOnBeforeQuery,
+            mrOnTurnComplete,
+            setLastQueryCompletionTime,
+            sendBridgeResultRef,
+            proactiveActive,
+            restoreMessageSyncRef,
+          },
+        )
+        .then(
+          ok => {
+            if (usageLimitMenuWaitRef.current.fired) {
+              usageLimitMenuWaitRef.current = { choseWaitInMenu: false, fired: false };
+            }
+            return ok;
+          },
+          err => {
+            const waitState = usageLimitMenuWaitRef.current;
+            if (
+              waitState.choseWaitInMenu &&
+              waitState.fired &&
+              shouldOpenUsageLimitMenuAfterWaitRefusal(err, {
+                choseWaitInMenu: true,
+                previousResetsAt: waitState.previousResetsAt,
+                nextResetsAt: currentLimits.resetsAt,
+              })
+            ) {
+              usageLimitMenuWaitRef.current = { choseWaitInMenu: false, fired: false };
+              cancelQuotaAutoResume('dialog');
+              handleOpenRateLimitOptionsRef.current();
+            }
+            throw err;
+          },
+        );
+    },
     [
       turnController,
       store,
@@ -5877,7 +6504,7 @@ export function REPL({
       addNotification,
       markIdleForkMidTurn,
       buddyEnabled,
-      onTurnComplete,
+      handleTurnComplete,
       resetTimingRefs,
       setStreamingToolUses,
       clearStreamingText,
@@ -5931,7 +6558,14 @@ export function REPL({
             messagesRef.current = stripped as typeof messagesRef.current;
           }
 
-          if (canReplayContinueFromMessages(messagesRef.current)) {
+          if (
+            isCodeModeEnabled() &&
+            didSessionEndDuringCodeModeScript(
+              messagesRef.current as unknown as Parameters<typeof didSessionEndDuringCodeModeScript>[0],
+            )
+          ) {
+            logForDebugging('[reply-on-resume] Code Mode session ended mid-script — waiting for next prompt');
+          } else if (canReplayContinueFromMessages(messagesRef.current)) {
             // Optional adopt.json prefill (densable mZ) — CLAUDE_JOB_DIR mid-turn
             let prefillText: string | undefined;
             let prefillBoundary: string | undefined;
@@ -6008,6 +6642,8 @@ export function REPL({
           setConversationId,
           taskRegistry,
         });
+        // Official 2.1.323 (#2195): reset team-lead mailbox verification epoch on context clear.
+        resetTeamLeadVerificationOnSessionBoundary();
         haikuTitleAttemptedRef.current = false;
         titleFallbackRef.current = undefined;
         setHaikuTitle(undefined);
@@ -6171,7 +6807,10 @@ export function REPL({
           awaitPendingHooks,
           repinScroll,
           routeToSelectedPipes,
-          onClearSubmitted: () => idleReturnController.onClearSubmitted(),
+          onClearSubmitted: () => {
+            resetTeamLeadVerificationOnSessionBoundary();
+            idleReturnController.onClearSubmitted();
+          },
           resetTimingRefs,
           consumeIdeSelection,
           recordIdeSelectionConsumedBy,
@@ -6366,6 +7005,7 @@ export function REPL({
       resetHistory: () => {},
     });
   }, []);
+  handleOpenRateLimitOptionsRef.current = handleOpenRateLimitOptions;
 
   const handleExit = useCallback(async () => {
     // densable wZt — bg detach, else pke dialog ($To) or shutting-down + exit.
@@ -6494,18 +7134,14 @@ export function REPL({
         /* eslint-enable @typescript-eslint/no-require-imports */
       }
 
-      // Restore state from the message we're rewinding to
+      // Official 2.1.323 (#2028): never blindly overwrite permission mode during
+      // rewind. Only restore message.permissionMode when it is local (not
+      // remoteSourced) and permitted by setPermissionModeWithGuards, leaving the
+      // user's active permission mode intact if the transition is disallowed.
       const permMode = message.permissionMode as InternalPermissionMode | undefined;
+      const isRemoteSourced = (message as { remoteSourced?: boolean }).remoteSourced === true;
       setAppState(prev => ({
         ...prev,
-        // Restore permission mode from the message
-        toolPermissionContext:
-          permMode && prev.toolPermissionContext.mode !== permMode
-            ? {
-                ...prev.toolPermissionContext,
-                mode: permMode,
-              }
-            : prev.toolPermissionContext,
         // Clear stale prompt suggestion from previous conversation state
         promptSuggestion: {
           text: null,
@@ -6515,6 +7151,20 @@ export function REPL({
           generationRequestId: null,
         },
       }));
+      if (permMode && !isRemoteSourced) {
+        const currentCtx = store.getState().toolPermissionContext;
+        if (currentCtx.mode !== permMode) {
+          const result = setPermissionModeWithGuards(permMode, currentCtx, updater => {
+            setAppState(prev => ({
+              ...prev,
+              toolPermissionContext: updater(prev.toolPermissionContext),
+            }));
+          });
+          if (!result.ok) {
+            logForDebugging(`[rewind] did not restore permission mode ${permMode}: ${result.error}`);
+          }
+        }
+      }
     },
     [setMessages, setAppState],
   );
@@ -6652,12 +7302,110 @@ export function REPL({
   // Don't record conversation if we only have initial messages; optimizes
   // the case where user resumes a conversation then quites before doing
   // anything else
-  useLogMessages(messages, messages.length === initialMessages?.length);
+  useLogMessages(messages, messages.length === normalizedInitialMessages.length);
+
+  // Official 2.1.323 (#2119): check whether any background subagent
+  // (`local_agent` / `in_process_teammate`) is still running so interactive
+  // Remote Control does not report `'idle'` while subagents are active.
+  const backgroundHold = useMemo(
+    () => ({
+      holdsRunning: () =>
+        Object.values(store.getState().tasks ?? {}).some(
+          t => (t.type === 'local_agent' || t.type === 'in_process_teammate') && t.status === 'running',
+        ),
+    }),
+    [store],
+  );
+  const pendingBridgeResultForBackgroundHoldRef = useRef(false);
 
   // REPL Bridge: replicate user/assistant messages to the bridge session
   // for remote access via claude.ai. No-op in external builds or when not enabled.
   const { sendBridgeResult } = useReplBridge(messages, setMessages, abortControllerRef, commands, mainLoopModel);
-  sendBridgeResultRef.current = sendBridgeResult;
+  sendBridgeResultRef.current = () => {
+    if (backgroundHold.holdsRunning()) {
+      pendingBridgeResultForBackgroundHoldRef.current = true;
+      return;
+    }
+    pendingBridgeResultForBackgroundHoldRef.current = false;
+    sendBridgeResult();
+  };
+  useEffect(() => {
+    if (!pendingBridgeResultForBackgroundHoldRef.current) return;
+    if (!backgroundHold.holdsRunning() && !isLoading) {
+      pendingBridgeResultForBackgroundHoldRef.current = false;
+      sendBridgeResult();
+    }
+  }, [tasks, isLoading, backgroundHold, sendBridgeResult]);
+
+  // Official 2.1.323 (#2113): sync terminal-only permission/blocking dialogs
+  // with the active Remote Control bridge so remote surfaces report
+  // `requires_action` instead of `running` while awaiting terminal input.
+  const activeTerminalBlockingDialogKindsRef = useRef<Set<string>>(new Set());
+  const replBridgePermissionCallbacks = useAppState(s => s.replBridgePermissionCallbacks);
+  const replBridgeSessionActive = useAppState(s => s.replBridgeSessionActive);
+  useEffect(() => {
+    const bridge = getReplBridgeHandle();
+    const prevKinds = activeTerminalBlockingDialogKindsRef.current;
+    const nextKinds = new Set<string>();
+
+    if (topDialogKind) {
+      const isTerminalOnlyPermission = isPermissionPromptDialog(topDialogKind) && !replBridgePermissionCallbacks;
+      const isTerminalOnlyDialog =
+        topDialogKind === SANDBOX_NETWORK_ACCESS_KIND || !isPermissionPromptDialog(topDialogKind);
+      if (isTerminalOnlyPermission || isTerminalOnlyDialog) {
+        nextKinds.add(topDialogKind);
+      }
+    }
+    if (workerSandboxPermissions.queue.length > 0) {
+      nextKinds.add('worker_sandbox_permission');
+    }
+    if (elicitation.queue.length > 0) {
+      nextKinds.add('mcp_elicitation');
+    }
+    if (
+      focusedInputDialog === 'left-arrow-confirm' ||
+      focusedInputDialog === 'ultraplan-choice' ||
+      focusedInputDialog === 'ultraplan-launch'
+    ) {
+      nextKinds.add(focusedInputDialog);
+    }
+    if (pke.kind === 'dialog') {
+      nextKinds.add('exit_flow');
+    }
+
+    if (bridge?.setTerminalOnlyBlockingDialog) {
+      for (const kind of prevKinds) {
+        if (!nextKinds.has(kind)) {
+          bridge.setTerminalOnlyBlockingDialog(kind, false);
+        }
+      }
+      for (const kind of nextKinds) {
+        if (!prevKinds.has(kind)) {
+          bridge.setTerminalOnlyBlockingDialog(kind, true);
+        }
+      }
+    }
+    activeTerminalBlockingDialogKindsRef.current = nextKinds;
+  }, [
+    topDialogKind,
+    replBridgePermissionCallbacks,
+    replBridgeSessionActive,
+    workerSandboxPermissions.queue.length,
+    elicitation.queue.length,
+    focusedInputDialog,
+    pke.kind,
+  ]);
+  useEffect(() => {
+    return () => {
+      const bridge = getReplBridgeHandle();
+      if (bridge?.setTerminalOnlyBlockingDialog) {
+        for (const kind of activeTerminalBlockingDialogKindsRef.current) {
+          bridge.setTerminalOnlyBlockingDialog(kind, false);
+        }
+      }
+      activeTerminalBlockingDialogKindsRef.current.clear();
+    };
+  }, []);
 
   useAfterFirstRender();
 
@@ -6693,31 +7441,57 @@ export function REPL({
       if (leftArrowToAgentsFired.current || leftArrowDeferRef.current !== null || leftArrowConfirmOpenRef.current) {
         return;
       }
-      await submitController.executeQueuedInput(queuedCommands, {
-        commands,
-        mainLoopModel,
-        ideSelection,
-        querySource: getQuerySourceForREPL(),
-        getCurrentInput: () => inputValueRef.current,
-        getMessages: () => messagesRef.current,
-        setAppState,
-        setMessages,
-        setInputValue,
-        setPastedContents,
-        setUserInputOnProcessing,
-        setToolJSX,
-        setAbortControllerForQuery,
-        addNotification,
-        getToolUseContext,
-        onQuery,
-        onBeforeQuery,
-        canUseTool,
-        awaitPendingHooks,
-        consumeIdeSelection,
-        recordIdeSelectionConsumedBy,
-        restoreIdeSelectionConsumedBy,
-        restoreHandedBackPrompt,
-      });
+      // Official 2.1.325 #2319: strip slash-command allowed-tools grants and guard
+      // permission context on poll-event delivery so woken background agents cannot inherit them.
+      if (queuedCommands.some(cmd => cmd.mode === 'poll-event')) {
+        setAppState(prev => {
+          const guarded = applyPollEventDeliveryGuard(prev.toolPermissionContext);
+          const nextCtx =
+            guarded.pollEventDeliveryGuard === true ? guarded : { ...guarded, pollEventDeliveryGuard: true as const };
+          return nextCtx === prev.toolPermissionContext ? prev : { ...prev, toolPermissionContext: nextCtx };
+        });
+      }
+      // Official 2.1.325 #2356: mark scheduled/loop queued turns so SkillTool asks
+      // before running skills that declare allowed-tools or hooks.
+      const isLoopBatch = queuedCommands.some(cmd => cmd.wakeupSource === 'loop_wakeup');
+      const isScheduledBatch =
+        isLoopBatch ||
+        queuedCommands.some(cmd => cmd.modelScheduledOrigin === true || cmd.wakeupSource === 'schedule_wakeup');
+      const prevScheduledTurn = activeScheduledTurnRef.current;
+      if (isScheduledBatch) {
+        activeScheduledTurnRef.current = { isScheduledTask: true, isLoop: isLoopBatch };
+      }
+      try {
+        await submitController.executeQueuedInput(queuedCommands, {
+          commands,
+          mainLoopModel,
+          ideSelection,
+          querySource: isLoopBatch ? 'cron_loop' : isScheduledBatch ? 'cron_scheduled' : getQuerySourceForREPL(),
+          getCurrentInput: () => inputValueRef.current,
+          getMessages: () => messagesRef.current,
+          setAppState,
+          setMessages,
+          setInputValue,
+          setPastedContents,
+          setUserInputOnProcessing,
+          setToolJSX,
+          setAbortControllerForQuery,
+          addNotification,
+          getToolUseContext,
+          onQuery,
+          onBeforeQuery,
+          canUseTool,
+          awaitPendingHooks,
+          consumeIdeSelection,
+          recordIdeSelectionConsumedBy,
+          restoreIdeSelectionConsumedBy,
+          restoreHandedBackPrompt,
+        });
+      } finally {
+        if (isScheduledBatch) {
+          activeScheduledTurnRef.current = prevScheduledTurn;
+        }
+      }
     },
     [
       submitController,
@@ -6758,11 +7532,14 @@ export function REPL({
     return subscribePromptInputCursorStore(() => {
       activityManager.recordUserActivity();
       updateLastInteractionTime(true);
+      // Official 2.1.325 #2366: resume prompt suggestions immediately on keypress.
+      markPersonActivityForPromptSuggestion();
     });
   }, []);
   useEffect(() => {
     activityManager.recordUserActivity();
     updateLastInteractionTime(true);
+    markPersonActivityForPromptSuggestion();
   }, [submitCount]);
 
   useEffect(() => {
@@ -6775,6 +7552,14 @@ export function REPL({
   // Returns true if submission succeeded, false if a query is already running
   const handleIncomingPrompt = useCallback(
     (input: string | QueuedCommand, options?: { isMeta?: boolean }): boolean => {
+      if (typeof input !== 'string' && input.mode === 'poll-event') {
+        setAppState(prev => {
+          const guarded = applyPollEventDeliveryGuard(prev.toolPermissionContext);
+          const nextCtx =
+            guarded.pollEventDeliveryGuard === true ? guarded : { ...guarded, pollEventDeliveryGuard: true as const };
+          return nextCtx === prev.toolPermissionContext ? prev : { ...prev, toolPermissionContext: nextCtx };
+        });
+      }
       return submitController.handleIncomingPrompt(
         input,
         {
@@ -6785,7 +7570,7 @@ export function REPL({
         options,
       );
     },
-    [submitController, onQuery, mainLoopModel, setAbortControllerForQuery],
+    [submitController, onQuery, mainLoopModel, setAbortControllerForQuery, setAppState],
   );
 
   const { relayPipeMessage, pipeReturnHadErrorRef } = usePipeRelay();
@@ -7051,6 +7836,7 @@ export function REPL({
 
   useInput(
     (input, key, event) => {
+      markPersonActivityForPromptSuggestion();
       if (key.ctrl || key.meta) return;
       // No Esc handling here — less has no navigating mode. Search state
       // (highlights, n/N) is just state. Esc/q/ctrl+c → transcript:exit
@@ -7107,6 +7893,7 @@ export function REPL({
   // competing for input) — same class as g/G/j/k in ScrollKeybindingHandler.
   useInput(
     (input, key, event) => {
+      markPersonActivityForPromptSuggestion();
       if (key.ctrl || key.meta) return;
       if (input === 'q') {
         // less: q quits the pager. ctrl+o toggles; q is the lineage exit.
@@ -7273,6 +8060,17 @@ export function REPL({
   // boilerplate text from its original carrier while preserving tool_results.
   const displayedAgentMessages = useMemo(() => {
     if (!viewedAgentTask) return undefined;
+    // Official 2.1.325 `KZi` (#2271): when fullscreen is off, hold back partial
+    // live subagent messages until disk bootstrap finishes so <Static> does not
+    // flush later messages and permanently drop the initial prompt.
+    if (
+      !isFullscreenEnvEnabled() &&
+      isLocalAgentTask(viewedAgentTask) &&
+      viewedAgentTask.retain &&
+      !viewedAgentTask.diskLoaded
+    ) {
+      return [];
+    }
     const agentMessages = rawAgentMessages ?? [];
     if (
       !isLocalAgentTask(viewedAgentTask) ||
@@ -7809,6 +8607,21 @@ export function REPL({
                 setCursor(null);
                 jumpToNew(scrollRef.current);
               }}
+              onLinkNotOpened={url => {
+                const noticeText = `Couldn't open your browser. Open ${url} yourself.`;
+                setMessages(prev => {
+                  const last = prev.at(-1);
+                  if (last?.type === 'system' && last.subtype === 'informational' && last.content === noticeText) {
+                    return prev;
+                  }
+                  return [...prev, createSystemMessage(noticeText, 'notice')];
+                });
+                addNotification({
+                  key: 'link-not-opened',
+                  text: "that link's address is in the main conversation",
+                  priority: 'medium',
+                });
+              }}
               scrollable={
                 <>
                   <TeammateViewHeader />
@@ -7823,7 +8636,7 @@ export function REPL({
                       tipOverlay != null ||
                       leftArrowConfirm != null ||
                       pke.kind === 'dialog' ||
-                      elicitation.queue.length > 0 ||
+                      (elicitation.queue.length > 0 && !elicitationCueBehindDraft?.keepSpinnerRunning) ||
                       workerSandboxPermissions.queue.length > 0
                     }
                     inProgressToolUseIDs={focusedInProgressToolUseIDs}
@@ -8209,6 +9022,48 @@ export function REPL({
                           onResponse={(action, content) => {
                             const currentRequest = elicitation.queue[0];
                             if (!currentRequest) return;
+                            const relatedTaskId = resolveMcpElicitationTaskId(currentRequest);
+                            // Official 2.1.325 #2307 / #2349 / #2367: Esc on a background MCP
+                            // task's question means "answer later" — send nothing to the server,
+                            // keep the question off-screen for reopen via Enter in /tasks, and
+                            // notify Claude via McpTaskQuestionNoticeTracker.
+                            if (relatedTaskId && action === 'cancel' && !currentRequest.signal?.aborted) {
+                              setReopenedElicitationKey(null);
+                              const { controller } = getOrCreateMcpTaskQuestionHarness(relatedTaskId);
+                              clearDeferredMcpElicitation(relatedTaskId);
+                              deferredMcpElicitationsRef.current.set(relatedTaskId, currentRequest);
+                              if (currentRequest.signal) {
+                                const onAbort = () => {
+                                  if (deferredMcpElicitationsRef.current.get(relatedTaskId) === currentRequest) {
+                                    clearDeferredMcpElicitation(relatedTaskId);
+                                    controller.set(undefined);
+                                  }
+                                };
+                                currentRequest.signal.addEventListener('abort', onAbort, { once: true });
+                                deferredMcpAbortCleanupsRef.current.set(relatedTaskId, () => {
+                                  currentRequest.signal.removeEventListener('abort', onAbort);
+                                });
+                              }
+                              setAppState(prev => ({
+                                ...prev,
+                                elicitation: {
+                                  queue: prev.elicitation.queue.slice(1),
+                                },
+                              }));
+                              controller.putAside(`${currentRequest.serverName}:${String(currentRequest.requestId)}`);
+                              return;
+                            }
+                            setReopenedElicitationKey(null);
+                            if (relatedTaskId) {
+                              clearDeferredMcpElicitation(relatedTaskId);
+                              const harness = mcpTaskQuestionHarnessesRef.current.get(relatedTaskId);
+                              if (harness) {
+                                harness.controller.answered();
+                                harness.controller.set(undefined);
+                              } else {
+                                setMcpTaskQuestionState(relatedTaskId, setAppState, undefined, undefined);
+                              }
+                            }
                             // Call respond callback to resolve Promise
                             currentRequest.respond({ action, content });
                             // For URL accept, keep in queue for phase 2
@@ -8224,6 +9079,17 @@ export function REPL({
                           }}
                           onWaitingDismiss={action => {
                             const currentRequest = elicitation.queue[0];
+                            const relatedTaskId = resolveMcpElicitationTaskId(currentRequest);
+                            setReopenedElicitationKey(null);
+                            if (relatedTaskId) {
+                              clearDeferredMcpElicitation(relatedTaskId);
+                              const harness = mcpTaskQuestionHarnessesRef.current.get(relatedTaskId);
+                              if (harness) {
+                                harness.controller.set(undefined);
+                              } else {
+                                setMcpTaskQuestionState(relatedTaskId, setAppState, undefined, undefined);
+                              }
+                            }
                             // Remove from queue
                             setAppState(prev => ({
                               ...prev,
@@ -8279,6 +9145,20 @@ export function REPL({
                       {focusedInputDialog === 'remote-callout' && (
                         <RemoteCallout
                           onDone={selection => {
+                            if (selection === 'enable' && isCodeModeEnabled()) {
+                              addNotification({
+                                key: 'code-mode-rc-refusal',
+                                kind: 'warning',
+                                priority: 'immediate',
+                                wrap: true,
+                                color: 'warning',
+                                text: codeModeRemoteControlNotice(),
+                              });
+                              setAppState(prev =>
+                                prev.showRemoteCallout ? { ...prev, showRemoteCallout: false } : prev,
+                              );
+                              return;
+                            }
                             setAppState(prev => {
                               if (!prev.showRemoteCallout) return prev;
                               return {
@@ -8384,6 +9264,19 @@ export function REPL({
                               prev.ultraplanLaunchPending ? { ...prev, ultraplanLaunchPending: undefined } : prev,
                             );
                             if (choice === 'cancel') return;
+                            // Official 2.1.323 (#1964): block moving an active Code Mode session to the cloud.
+                            const codeModeCloudRefusal = cloudMoveRefusal();
+                            if (codeModeCloudRefusal) {
+                              addNotification({
+                                key: 'code-mode-cloud-refusal',
+                                kind: 'warning',
+                                priority: 'immediate',
+                                wrap: true,
+                                color: 'warning',
+                                text: codeModeCloudRefusal,
+                              });
+                              return;
+                            }
                             setMessages(prev => [
                               ...prev,
                               createCommandInputMessage(formatCommandInputTags('ultraplan', blurb)),
@@ -8912,6 +9805,10 @@ export function REPL({
                                         replyOnResume,
                                         abortAfterFlush,
                                       };
+                                      // Official 2.1.323 (#1964): refuse moving a Code Mode session to the background.
+                                      if (isCodeModeEnabled()) {
+                                        return codeModeBackgroundRefusal();
+                                      }
                                       // densable qpe: jpt.current=!0; return vHy(...)
                                       leftArrowToAgentsFired.current = true;
                                       // Official 2.1.296 (#547): stop any turn or ! command started while

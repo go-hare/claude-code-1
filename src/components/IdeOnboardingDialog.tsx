@@ -69,7 +69,9 @@ export function IdeOnboardingDialog({ onDone, installationStatus }: Props): Reac
   const ideName = toIDEDisplayName(ideType);
   const installedVersion = installationStatus?.installedVersion;
   const pluginOrExtension = isJetBrains ? 'plugin' : 'extension';
-  const mentionShortcut = env.platform === 'darwin' ? 'Cmd+Option+K' : 'Ctrl+Alt+K';
+  const isMac = env.platform === 'darwin';
+  const quickLaunchShortcut = isMac ? 'Cmd+Esc' : 'Ctrl+Esc';
+  const mentionShortcut = isMac ? 'Cmd+Option+K' : 'Ctrl+Alt+K';
 
   return (
     <>
@@ -94,7 +96,8 @@ export function IdeOnboardingDialog({ onDone, installationStatus }: Props): Reac
             Review Claude Code&apos;s changes <DiffStats added={11} removed={22} /> in the comfort of your IDE
           </BulletItem>
           <BulletItem>
-            Cmd+Esc<Text dimColor> for Quick Launch</Text>
+            {quickLaunchShortcut}
+            <Text dimColor> for Quick Launch</Text>
           </BulletItem>
           <BulletItem>
             {mentionShortcut}

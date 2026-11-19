@@ -608,6 +608,29 @@ type TeammateMessageContentProps = {
   headerless?: boolean;
 };
 
+/**
+ * Official 2.1.323 (#2098) `S6o` — spell out terminal control sequences (ESC,
+ * C0/C1 controls, bidi overrides, zero-width chars) as literal `\u{HEX}` text
+ * so they display as plain text instead of taking effect on the terminal when
+ * a subagent/teammate message is expanded.
+ */
+const TERMINAL_CONTROL_OR_INVISIBLE_RE =
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional terminal control sequence detection
+  /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/gu;
+
+export function spellOutTerminalControlSequences(text: string): {
+  text: string;
+  spelledTotal: number;
+} {
+  let spelledTotal = 0;
+  const escaped = text.replace(TERMINAL_CONTROL_OR_INVISIBLE_RE, match => {
+    spelledTotal++;
+    const cp = match.codePointAt(0) ?? 0;
+    return `\\u{${cp.toString(16).toUpperCase()}}`;
+  });
+  return { text: escaped, spelledTotal };
+}
+
 export function TeammateMessageContent({
   displayName,
   inkColor,
@@ -619,16 +642,28 @@ export function TeammateMessageContent({
   headerless = false,
 }: TeammateMessageContentProps): React.ReactNode {
   const showBody = Boolean(isTranscriptMode || verbose || labelView);
+  const spelled = labelView || !content ? null : spellOutTerminalControlSequences(content);
   const renderedBody = labelView ? (
     <InboundPromptText text={truncateUserPromptText(content)} />
   ) : (
-    <Markdown stripPromptTags={false}>{content}</Markdown>
+    <Markdown stripPromptTags={false}>{spelled ? spelled.text : content}</Markdown>
   );
+  const spelledNotice =
+    spelled && spelled.spelledTotal > 0 ? (
+      <Box paddingLeft={2}>
+        <Text dimColor>
+          {spelled.spelledTotal === 1
+            ? "This message's body has 1 invisible character shown as \\u{…}. The model reads it."
+            : `This message's body has ${spelled.spelledTotal} invisible characters shown as \\u{…}. The model reads them.`}
+        </Text>
+      </Box>
+    ) : null;
   if (headerless) {
     return (
       <Box flexDirection="column" paddingLeft={2}>
         {summary ? <Text>{summary}</Text> : null}
         {content ? renderedBody : null}
+        {spelledNotice}
       </Box>
     );
   }
@@ -643,6 +678,7 @@ export function TeammateMessageContent({
         {summary && <Text> {summary}</Text>}
       </Box>
       {showBody && content && <Box paddingLeft={2}>{renderedBody}</Box>}
+      {showBody && spelledNotice}
     </Box>
   );
 }

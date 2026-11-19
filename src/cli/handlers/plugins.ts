@@ -21,7 +21,11 @@ import {
   VALID_INSTALLABLE_SCOPES,
   VALID_UPDATE_SCOPES,
 } from '../../services/plugins/pluginCliCommands.js'
-import { getPluginErrorMessage } from '../../types/plugin.js'
+import {
+  getPluginErrorMessage,
+  getPluginWarningHint,
+  getPluginWarningMessage,
+} from '../../types/plugin.js'
 import { errorMessage } from '../../utils/errors.js'
 import { logError } from '../../utils/log.js'
 import { clearAllCaches } from '../../utils/plugins/cacheUtils.js'
@@ -346,6 +350,7 @@ export async function pluginListHandler(options: {
     enabled: loadedEnabled,
     disabled: loadedDisabled,
     errors: loadErrors,
+    warnings: loadWarnings = [],
   } = await loadAllPlugins()
   const allLoadedPlugins = [...loadedEnabled, ...loadedDisabled]
   const inlinePlugins = allLoadedPlugins.filter(p =>
@@ -382,6 +387,7 @@ export async function pluginListHandler(options: {
       projectPath?: string
       mcpServers?: Record<string, unknown>
       errors?: string[]
+      warnings?: string[]
     }> = []
 
     for (const pluginId of pluginIds.sort()) {
@@ -396,6 +402,11 @@ export async function pluginListHandler(options: {
             e.source === pluginId || ('plugin' in e && e.plugin === pluginName),
         )
         .map(getPluginErrorMessage)
+      const pluginWarnings = loadWarnings
+        .filter(
+          w => w.source === pluginId || (w.plugin && w.plugin === pluginName),
+        )
+        .map(getPluginWarningMessage)
 
       for (const installation of installations) {
         // Try to find the loaded plugin to get MCP servers
@@ -423,6 +434,7 @@ export async function pluginListHandler(options: {
           projectPath: installation.projectPath,
           mcpServers,
           errors: pluginErrors.length > 0 ? pluginErrors : undefined,
+          warnings: pluginWarnings.length > 0 ? pluginWarnings : undefined,
         })
       }
     }
@@ -635,6 +647,16 @@ export async function pluginListHandler(options: {
       for (const error of pluginErrors) {
         printCli(`    Error: ${getPluginErrorMessage(error)}`)
       }
+      // Official 2.1.323 (#2049, #2211, #1965): display plugin warnings (version-list-not-enabled, deprecated agent setting, engine range).
+      const pluginWarnings = loadWarnings.filter(
+        w => w.source === pluginId || (w.plugin && w.plugin === pluginName),
+      )
+      for (const warning of pluginWarnings) {
+        const hint = getPluginWarningHint(warning)
+        printCli(
+          `    Warning: ${getPluginWarningMessage(warning)}${hint ? ` ${hint}` : ''}`,
+        )
+      }
       printCli('')
     }
   }
@@ -657,6 +679,15 @@ export async function pluginListHandler(options: {
       printCli(`    Status: ${status}`)
       for (const e of pErrors) {
         printCli(`    Error: ${getPluginErrorMessage(e)}`)
+      }
+      const pWarnings = loadWarnings.filter(
+        w => w.source === p.source || (w.plugin && w.plugin === p.name),
+      )
+      for (const w of pWarnings) {
+        const hint = getPluginWarningHint(w)
+        printCli(
+          `    Warning: ${getPluginWarningMessage(w)}${hint ? ` ${hint}` : ''}`,
+        )
       }
       printCli('')
     }
@@ -689,6 +720,15 @@ export async function pluginListHandler(options: {
       printCli(`    Status: ${status}`)
       for (const e of pErrors) {
         printCli(`    Error: ${getPluginErrorMessage(e)}`)
+      }
+      const pWarnings = loadWarnings.filter(
+        w => w.source === p.source || (w.plugin && w.plugin === p.name),
+      )
+      for (const w of pWarnings) {
+        const hint = getPluginWarningHint(w)
+        printCli(
+          `    Warning: ${getPluginWarningMessage(w)}${hint ? ` ${hint}` : ''}`,
+        )
       }
       printCli('')
     }

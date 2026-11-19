@@ -23,6 +23,8 @@ import {
 import {
   ClaudeAuthProvider,
   dialedWithoutOAuth,
+  getServerKey,
+  hasRecentTransientMcpRefreshFailure,
   wrapFetchWithStepUpDetection,
 } from './auth.js'
 import {
@@ -362,6 +364,26 @@ export function handleRemoteAuthFailure(
   serverRef: ScopedMcpServerConfig,
   transportType: 'sse' | 'http' | 'claudeai-proxy',
 ): MCPServerConnection {
+  // Official 2.1.325 #2304: if OAuth token refresh only suffered a brief
+  // transient refusal (5xx / timeout / non-permanent OAuth error), do NOT
+  // stick the server in the 15-minute needs-auth cache — allow automatic
+  // recovery and keep mcp_tool hooks active on retry.
+  const isTransientRefresh =
+    (serverRef.type === 'sse' || serverRef.type === 'http') &&
+    hasRecentTransientMcpRefreshFailure(getServerKey(name, serverRef))
+  if (isTransientRefresh) {
+    logMCPDebug(
+      name,
+      `Transient token refresh failure — skipping sticky needs-auth cache so next call can recover`,
+    )
+    return {
+      name,
+      type: 'failed',
+      config: serverRef,
+      error: 'Temporary OAuth token refresh failure',
+      errorCode: 'TRANSIENT_REFRESH_FAILED',
+    }
+  }
   logEvent('tengu_mcp_server_needs_auth', {
     transportType:
       transportType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -404,6 +426,32 @@ export function isClaudeAiBearerRejectedError(error: unknown): boolean {
     'code' in error &&
     (error as { code?: unknown }).code === 'CLAUDEAI_BEARER_REJECTED'
   )
+}
+
+/**
+ * #2002: Remember the last claude.ai bearer token rejected by the connector
+ * gateway so that when the user runs `/login` in another terminal and a new
+ * access token lands in storage, subsequent messages/calls automatically
+ * detect the refreshed sign-in and reconnect instead of staying stuck in a
+ * failed state.
+ */
+let lastRejectedClaudeAiBearerToken: string | undefined
+
+export function recordRejectedClaudeAiBearerToken(token: string): void {
+  lastRejectedClaudeAiBearerToken = token
+}
+
+export function clearRejectedClaudeAiBearerToken(): void {
+  lastRejectedClaudeAiBearerToken = undefined
+}
+
+export function hasClaudeAiBearerRecoveredAfterLogin(
+  readToken: () => string | undefined = () =>
+    getClaudeAIOAuthTokens()?.accessToken,
+): boolean {
+  if (!lastRejectedClaudeAiBearerToken) return false
+  const current = readToken()
+  return Boolean(current && current !== lastRejectedClaudeAiBearerToken)
 }
 
 /**
@@ -469,13 +517,27 @@ export function createClaudeAiProxyFetch(innerFetch: FetchLike): FetchLike {
     })
     if (!tokenChanged) {
       // densable: ELOCKED contention check — if token still same, throw LOs
+      // #2002: Also clear memoized token cache once so a fresh `/login` from
+      // another terminal is immediately picked up on the next message.
       const now = getClaudeAIOAuthTokens()?.accessToken
       if (!now || now === sentToken) {
+        recordRejectedClaudeAiBearerToken(sentToken)
         throw new ClaudeAiProxyBearerRejectedError()
       }
     }
     try {
-      return (await doRequest()).response
+      const retryResult = await doRequest()
+      if (
+        retryResult.response.status === 401 &&
+        !retryResult.response.headers.get('X-Mcp-Error-Code')
+      ) {
+        recordRejectedClaudeAiBearerToken(retryResult.sentToken)
+        throw new ClaudeAiProxyBearerRejectedError()
+      }
+      if (retryResult.response.status !== 401) {
+        clearRejectedClaudeAiBearerToken()
+      }
+      return retryResult.response
     } catch (error) {
       // densable: retry itself failed — rethrow bearer reject; else return 401
       if (isClaudeAiBearerRejectedError(error)) throw error

@@ -32,6 +32,9 @@ export function fileSuffixForOauthConfig(): string {
 
 export const CLAUDE_AI_INFERENCE_SCOPE = 'user:inference' as const
 export const CLAUDE_AI_PROFILE_SCOPE = 'user:profile' as const
+/** Official 2.1.325 #2369 (`fYr`) — privacy consent settings permission requested during /login. */
+export const PRIVACY_CONSENTS_WRITE_SCOPE =
+  'user:privacy_consents:write' as const
 const CONSOLE_SCOPE = 'org:create_api_key' as const
 export const OAUTH_BETA_HEADER = 'oauth-2025-04-20' as const
 
@@ -54,7 +57,11 @@ export const CLAUDE_AI_OAUTH_SCOPES = [
 // When logging in, request all scopes in order to handle both Console -> Claude.ai redirect
 // Ensure that `OAuthConsentPage` in apps repo is kept in sync with this list.
 export const ALL_OAUTH_SCOPES = Array.from(
-  new Set([...CONSOLE_OAUTH_SCOPES, ...CLAUDE_AI_OAUTH_SCOPES]),
+  new Set([
+    ...CONSOLE_OAUTH_SCOPES,
+    ...CLAUDE_AI_OAUTH_SCOPES,
+    PRIVACY_CONSENTS_WRITE_SCOPE,
+  ]),
 )
 
 type OauthConfig = {

@@ -153,6 +153,13 @@ export type ForkedAgentParams = {
   advisorStripPlan?: AdvisorStripPlan
   /** Pinned effort value for the forked query (e.g. plugin model.fork). */
   pinnedEffort?: import('./effort.js').EffortValue
+  /**
+   * Official 2.1.323 (#2075): by default `runForkedAgent` filters out any
+   * preserved/replayed messages whose UUID was already in `initialMessages` so
+   * recap / `awaySummary` / `/btw` never confuse an earlier parent reply for a
+   * fresh fork response. Set `true` to keep preserved messages.
+   */
+  keepPreservedMessages?: boolean
 }
 
 export type ForkedAgentResult = {
@@ -839,6 +846,7 @@ export async function runForkedAgent({
   thinkingStripPlan,
   advisorStripPlan,
   pinnedEffort,
+  keepPreservedMessages,
 }: ForkedAgentParams): Promise<ForkedAgentResult> {
   const startTime = Date.now()
   const outputMessages: Message[] = []
@@ -868,6 +876,10 @@ export async function runForkedAgent({
   // tool_uses are repaired downstream by ensureToolResultPairing in claude.ts,
   // same as the main thread — identical post-repair prefix keeps the cache hit.
   const initialMessages: Message[] = [...forkContextMessages, ...promptMessages]
+  // Official 2.1.323 (#2075): capture initial UUIDs before query() and before
+  // `finally` clears `initialMessages` so preserved/replayed parent replies are
+  // excluded unless `keepPreservedMessages === true`.
+  const initialUuids = new Set(initialMessages.map(m => m.uuid))
 
   // Generate agent ID and record initial messages for transcript
   // When skipTranscript is set, skip agent ID creation and all transcript I/O
@@ -976,8 +988,13 @@ export async function runForkedAgent({
     initialMessages.length = 0
   }
 
+  const finalMessages =
+    keepPreservedMessages === true
+      ? outputMessages
+      : outputMessages.filter(m => !initialUuids.has(m.uuid))
+
   logForDebugging(
-    `Forked agent [${forkLabel}] finished: ${outputMessages.length} messages, types=[${outputMessages.map(m => m.type).join(', ')}], totalUsage: input=${totalUsage.input_tokens} output=${totalUsage.output_tokens} cacheRead=${totalUsage.cache_read_input_tokens} cacheCreate=${totalUsage.cache_creation_input_tokens}`,
+    `Forked agent [${forkLabel}] finished: ${finalMessages.length} messages, types=[${finalMessages.map(m => m.type).join(', ')}], totalUsage: input=${totalUsage.input_tokens} output=${totalUsage.output_tokens} cacheRead=${totalUsage.cache_read_input_tokens} cacheCreate=${totalUsage.cache_creation_input_tokens}`,
   )
 
   const durationMs = Date.now() - startTime
@@ -987,13 +1004,13 @@ export async function runForkedAgent({
     forkLabel,
     querySource,
     durationMs,
-    messageCount: outputMessages.length,
+    messageCount: finalMessages.length,
     totalUsage,
     queryTracking: toolUseContext.queryTracking,
   })
 
   return {
-    messages: outputMessages,
+    messages: finalMessages,
     totalUsage,
   }
 }

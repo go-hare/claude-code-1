@@ -1,7 +1,7 @@
 import { feature } from 'bun:bundle'
 import chalk from 'chalk'
 import { spawnSync } from 'child_process'
-import { constants as fsConstants } from 'fs'
+import { constants as fsConstants, statSync } from 'fs'
 import {
   access,
   copyFile,
@@ -19,6 +19,7 @@ import {
   symlink,
   utimes,
 } from 'fs/promises'
+import { homedir } from 'os'
 import ignore from 'ignore'
 import {
   basename,
@@ -35,13 +36,20 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
-import { getSessionId } from '../bootstrap/state.js'
+import { getProjectRoot, getSessionId } from '../bootstrap/state.js'
 import { saveCurrentProjectConfig } from './config.js'
 import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
 import { errorMessage, getErrnoCode, isENOENT } from './errors.js'
+import { isAutomountMapRoot } from './fsOperations.js'
+import { stripClaudeAuthEnvVars } from './subprocessEnv.js'
 import { filterCompilableIgnorePatterns } from './ignorePatterns.js'
 import { execFileNoThrow, execFileNoThrowWithCwd } from './execFileNoThrow.js'
+import {
+  buildSparseCheckoutCommands,
+  isGitSparseConeSetSupported,
+  parseGitVersionTuple,
+} from './plugins/marketplaceManager.js'
 import { SandboxManager } from './sandbox/sandbox-adapter.js'
 import {
   registerWorktreeSessionProvider,
@@ -586,7 +594,11 @@ export function formatNoLazyFetchObjectMissingHint(
  * env cannot retarget the shared checkout. Extra overrides apply last (XB).
  */
 function gitWorktreeEnv(extra?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return scrubGitEnvForWorktree({ ...GIT_NO_PROMPT_ENV, ...extra })
+  // 2.1.323 #2169: strip Claude Code sign-in tokens / API keys from internal
+  // worktree git subprocesses in addition to git repo isolation scrubbing.
+  return stripClaudeAuthEnvVars(
+    scrubGitEnvForWorktree({ ...GIT_NO_PROMPT_ENV, ...extra }),
+  )
 }
 
 // Re-export densable XB for callers outside this module.
@@ -971,15 +983,103 @@ export function formatWorktreeResumeSkipNotice(
  * is either absent or a plain regular file / real directory — never a symlink,
  * FIFO, socket, or device (`ref_target_not_plain`).
  */
+/**
+ * 2.1.323 #2196 (SEA `CTt` / `iTt` @292824265):
+ * Verify that `.git` and every directory / file touched during worktree
+ * creation is either absent or a plain non-symlink directory / plain regular
+ * single-link file (`nlink === 1`) — refusing checkouts whose `.git` folders
+ * are links or hold hard links, such as `git-new-workdir` layouts and
+ * `cp -al` copies.
+ */
+async function checkPlainDirChain(
+  baseDir: string,
+  segments: readonly string[],
+): Promise<string | null> {
+  let cur = baseDir
+  for (const seg of segments) {
+    if (!seg) continue
+    cur = join(cur, seg)
+    try {
+      const st = await lstat(cur)
+      if (st.isSymbolicLink() || !st.isDirectory()) {
+        return cur
+      }
+    } catch (e: unknown) {
+      if (isENOENT(e)) return null
+      return cur
+    }
+  }
+  return null
+}
+
+async function checkPlainSingleLinkFile(
+  filePath: string,
+  opts?: { rejectRefOrSlashContent?: boolean },
+): Promise<string | null> {
+  try {
+    const st = await lstat(filePath)
+    if (st.isSymbolicLink() || !st.isFile() || Number(st.nlink) > 1) {
+      return filePath
+    }
+    if (opts?.rejectRefOrSlashContent) {
+      const raw = await readFile(filePath, { encoding: 'utf8' })
+      if (raw.startsWith('ref:') || /[\\/]/.test(raw)) {
+        return filePath
+      }
+    }
+    return null
+  } catch (e: unknown) {
+    if (isENOENT(e)) return null
+    return filePath
+  }
+}
+
 export async function assertGitRefTargetPlain(
   gitDir: string,
   branchName: string,
+  opts?: { repoRoot?: string; checkoutGitDir?: string },
 ): Promise<
   { ok: true } | { ok: false; reason: 'ref_target_not_plain'; entry: string }
 > {
-  // #1780: Detect reftable backend (`<gitDir>/reftable`). In reftable repos
-  // `.git/refs/heads` is a plain placeholder file rather than a directory, so
-  // walking `refs/heads/...` would falsely trigger `ref_target_not_plain`.
+  // 2.1.323 #2196: Check `.git` in repoRoot itself (refuse symlinked `.git` folder/file)
+  if (opts?.repoRoot) {
+    const dotGitPath = join(opts.repoRoot, '.git')
+    try {
+      const dotGitStat = await lstat(dotGitPath)
+      if (
+        dotGitStat.isSymbolicLink() ||
+        (!dotGitStat.isDirectory() &&
+          (!dotGitStat.isFile() || Number(dotGitStat.nlink) > 1))
+      ) {
+        return { ok: false, reason: 'ref_target_not_plain', entry: dotGitPath }
+      }
+    } catch (e: unknown) {
+      if (!isENOENT(e)) {
+        return { ok: false, reason: 'ref_target_not_plain', entry: dotGitPath }
+      }
+    }
+  }
+
+  // Check gitDir / checkoutGitDir themselves are plain non-symlink directories
+  for (const dir of [gitDir, opts?.checkoutGitDir]) {
+    if (!dir) continue
+    try {
+      const dirStat = await lstat(dir)
+      if (dirStat.isSymbolicLink() || !dirStat.isDirectory()) {
+        return { ok: false, reason: 'ref_target_not_plain', entry: dir }
+      }
+    } catch (e: unknown) {
+      if (!isENOENT(e)) {
+        return { ok: false, reason: 'ref_target_not_plain', entry: dir }
+      }
+    }
+  }
+
+  const branchParts = branchName.split('/').filter(Boolean)
+  const localGitDir = opts?.checkoutGitDir ?? gitDir
+
+  // #1780 + #2196: Detect reftable backend (`<gitDir>/reftable`). In reftable
+  // repos `.git/refs/heads` is a plain placeholder file rather than a directory.
   const reftableDir = join(gitDir, 'reftable')
   let isReftable = false
   try {
@@ -994,52 +1094,48 @@ export async function assertGitRefTargetPlain(
     }
   }
 
-  if (isReftable) {
-    for (const fixedFile of [join('reftable', 'tables.list'), 'HEAD']) {
-      const p = join(gitDir, fixedFile)
-      try {
-        const st = await lstat(p)
-        if (st.isSymbolicLink() || !st.isFile()) {
-          return { ok: false, reason: 'ref_target_not_plain', entry: p }
-        }
-      } catch (e: unknown) {
-        if (!isENOENT(e)) {
-          return { ok: false, reason: 'ref_target_not_plain', entry: p }
-        }
-      }
+  // Verify worktrees/ and logs/ directories (catching git-new-workdir symlinks)
+  const commonDirChains: Array<[string, string[]]> = [
+    [gitDir, ['worktrees']],
+    [gitDir, ['logs', 'refs', 'heads', ...branchParts.slice(0, -1)]],
+    [localGitDir, ['logs']],
+  ]
+  if (!isReftable) {
+    commonDirChains.push([
+      gitDir,
+      ['refs', 'heads', ...branchParts.slice(0, -1)],
+    ])
+  }
+  for (const [base, chain] of commonDirChains) {
+    const badDir = await checkPlainDirChain(base, chain)
+    if (badDir !== null) {
+      return { ok: false, reason: 'ref_target_not_plain', entry: badDir }
     }
-    return { ok: true }
   }
 
-  const refParts = ['refs', 'heads', ...branchName.split('/').filter(Boolean)]
-  let cur = gitDir
-  for (let i = 0; i < refParts.length; i++) {
-    cur = join(cur, refParts[i]!)
-    const isLeaf = i === refParts.length - 1
-    try {
-      const st = await lstat(cur)
-      if (st.isSymbolicLink()) {
-        return { ok: false, reason: 'ref_target_not_plain', entry: cur }
-      }
-      if (isLeaf ? !st.isFile() : !st.isDirectory()) {
-        return { ok: false, reason: 'ref_target_not_plain', entry: cur }
-      }
-    } catch (e: unknown) {
-      if (isENOENT(e)) break
-      return { ok: false, reason: 'ref_target_not_plain', entry: cur }
-    }
+  // Check fixed files for symlinks and hard links (cp -al)
+  const plainFiles: Array<[string, boolean]> = [
+    [join(localGitDir, 'HEAD'), false],
+    [join(localGitDir, 'logs', 'HEAD'), false],
+    [join(gitDir, 'packed-refs'), false],
+    [join(gitDir, 'refs', 'stash'), true],
+    [join(gitDir, 'logs', 'refs', 'stash'), false],
+  ]
+  if (isReftable) {
+    plainFiles.push([join(gitDir, 'reftable', 'tables.list'), true])
+  } else if (branchParts.length > 0) {
+    plainFiles.push([join(gitDir, 'refs', 'heads', ...branchParts), true])
+    plainFiles.push([
+      join(gitDir, 'logs', 'refs', 'heads', ...branchParts),
+      false,
+    ])
   }
-  for (const fixedFile of ['HEAD', 'packed-refs']) {
-    const p = join(gitDir, fixedFile)
-    try {
-      const st = await lstat(p)
-      if (st.isSymbolicLink() || !st.isFile()) {
-        return { ok: false, reason: 'ref_target_not_plain', entry: p }
-      }
-    } catch (e: unknown) {
-      if (!isENOENT(e)) {
-        return { ok: false, reason: 'ref_target_not_plain', entry: p }
-      }
+  for (const [filePath, rejectRefOrSlashContent] of plainFiles) {
+    const badFile = await checkPlainSingleLinkFile(filePath, {
+      rejectRefOrSlashContent,
+    })
+    if (badFile !== null) {
+      return { ok: false, reason: 'ref_target_not_plain', entry: badFile }
     }
   }
   return { ok: true }
@@ -1125,7 +1221,10 @@ export async function getOrCreateWorktree(
       // when git ref target is not a plain file (`ref_target_not_plain`).
       const gitCommonDir = await resolveCommonGitDirForRefCheck(repoRoot)
       const refCheck = gitCommonDir
-        ? await assertGitRefTargetPlain(gitCommonDir, worktreeBranch)
+        ? await assertGitRefTargetPlain(gitCommonDir, worktreeBranch, {
+            repoRoot,
+            checkoutGitDir: (await resolveGitDir(repoRoot)) ?? undefined,
+          })
         : ({ ok: true } as const)
       const sandboxBlocksReset =
         SandboxManager.isSandboxingEnabled() ||
@@ -1297,18 +1396,23 @@ export async function getOrCreateWorktree(
   // Saves a `git branch -D` subprocess (~15ms spawn overhead) on every create.
   addArgs.push('-B', worktreeBranch, worktreePath, baseSha)
 
-  // Official 2.1.319 #1780 (`ref_target_not_plain`): before creating a worktree
-  // with `git worktree add -B`, verify the branch ref path is not a symlink or
-  // non-regular file (preventing sandbox escape via symlinked `.git/refs/...`).
+  // Official 2.1.319 #1780 + 2.1.323 #2196 (`ref_target_not_plain` / `CTt`):
+  // Before creating a worktree with `git worktree add -B`, verify `.git` and
+  // git ref/log/worktrees targets are plain directories and single-link regular
+  // files (refusing git-new-workdir symlinks and `cp -al` hard-linked copies).
   const gitCommonDirForCreate = await resolveCommonGitDirForRefCheck(repoRoot)
   if (gitCommonDirForCreate) {
     const createRefCheck = await assertGitRefTargetPlain(
       gitCommonDirForCreate,
       worktreeBranch,
+      {
+        repoRoot,
+        checkoutGitDir: (await resolveGitDir(repoRoot)) ?? undefined,
+      },
     )
     if (!createRefCheck.ok) {
       throw new Error(
-        `Refusing to create worktree "${slug}": git ref target ${createRefCheck.entry} is not a plain file (ref_target_not_plain).`,
+        `Cannot create worktree "${slug}": git could write outside this repository through ${createRefCheck.entry} or a folder on the way to it, which is a link, a symbolic ref, a list naming another path or another entry that is not a plain file, or could not be checked (ref_target_not_plain). Checkouts made by git-new-workdir or older versions of Android's repo tool, and copies made with hard links (with cp -al, say), have such entries: use a plain clone instead.`,
       )
     }
   }
@@ -1359,14 +1463,29 @@ export async function getOrCreateWorktree(
       })
       throw new Error(msg)
     }
-    const { code: sparseCode, stderr: sparseErr } =
-      await execFileNoThrowWithCwd(
-        gitExe(),
-        ['sparse-checkout', 'set', '--cone', '--', ...sparsePaths],
-        { cwd: worktreePath, env: gitWorktreeEnv() },
-      )
-    if (sparseCode !== 0) {
-      await tearDown(`Failed to configure sparse-checkout: ${sparseErr}`)
+    // Official 2.1.325 #2310: preserve repository root files on git < 2.35
+    // (e.g. git 2.34) where `sparse-checkout set --cone` is unsupported.
+    const wtEnv = gitWorktreeEnv()
+    const { code: verCode, stdout: verStdout } = await execFileNoThrowWithCwd(
+      gitExe(),
+      ['--version'],
+      { cwd: worktreePath, env: wtEnv },
+    )
+    const supportsConeSet =
+      verCode === 0 &&
+      isGitSparseConeSetSupported(parseGitVersionTuple(verStdout))
+    for (const sparseArgs of buildSparseCheckoutCommands(
+      sparsePaths,
+      supportsConeSet,
+    )) {
+      const { code: sparseCode, stderr: sparseErr } =
+        await execFileNoThrowWithCwd(gitExe(), sparseArgs, {
+          cwd: worktreePath,
+          env: wtEnv,
+        })
+      if (sparseCode !== 0) {
+        await tearDown(`Failed to configure sparse-checkout: ${sparseErr}`)
+      }
     }
     const { code: coCode, stderr: coErr } = await execFileNoThrowWithCwd(
       gitExe(),
@@ -1910,6 +2029,99 @@ export async function killTmuxSession(sessionName: string): Promise<boolean> {
   return code === 0
 }
 
+/**
+ * Official 2.1.325 #2364 (`DBe` @292816531 & `L1n`/`VFe` @292862557):
+ * Screen a `WorktreeCreate` hook-returned path against dot segments and any
+ * symlink component inside the project / repository checkout root. A
+ * repository-committed symlink below the checkout root could redirect the
+ * worktree outside the repository; hooks must emit the normalized real path.
+ */
+export async function findSymlinkComponentUnderRoot(
+  targetPath: string,
+  rootDir: string,
+): Promise<{ component: string; kind: 'symlink' | 'unverifiable' } | null> {
+  const hasDotSegment = (p: string): boolean =>
+    p.split(/[\\/]/).some(seg => seg === '.' || seg === '..')
+  if (hasDotSegment(targetPath) || hasDotSegment(rootDir)) {
+    return { component: targetPath, kind: 'unverifiable' }
+  }
+  const normTarget = resolve(targetPath)
+  const normRoot = resolve(rootDir)
+  const rel = relative(normRoot, normTarget)
+  if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    return null
+  }
+  let cur = normRoot
+  for (const part of rel.split(sep)) {
+    if (!part) continue
+    cur = join(cur, part)
+    try {
+      const st = await lstat(cur)
+      if (st.isSymbolicLink()) {
+        return { component: cur, kind: 'symlink' }
+      }
+    } catch (err) {
+      if (isENOENT(err)) return null
+      return { component: cur, kind: 'unverifiable' }
+    }
+  }
+  return null
+}
+
+export async function assertHookWorktreePathSafe(
+  worktreePath: string,
+  fromCwd: string,
+): Promise<void> {
+  if (worktreePath.split(/[\\/]/).some(seg => seg === '.' || seg === '..')) {
+    throw new Error(
+      `Cannot use the WorktreeCreate hook's worktree: the hook emitted a path with dot segments (${worktreePath}). The symlink screen cannot verify a dotted spelling — have the hook emit a normalized (dot-free) absolute path and retry.`,
+    )
+  }
+  const roots = new Set<string>(
+    [findCanonicalGitRoot(fromCwd), findGitRoot(fromCwd), fromCwd].filter(
+      (r): r is string => Boolean(r),
+    ),
+  )
+  // Also include each root's canonical realpath so ancestor symlinks (e.g. macOS
+  // `/tmp` vs `/private/tmp`) cannot cause a mismatch that skips symlink screening.
+  for (const r of [...roots]) {
+    try {
+      roots.add(await realpath(r))
+    } catch {
+      // ignore if root does not exist or cannot be canonicalized
+    }
+  }
+  // Canonicalize strict ancestors of worktreePath as well (without resolving the
+  // target leaf itself) so a symlinked ancestor like `/var` -> `/private/var` or
+  // `/tmp` -> `/private/tmp` aligns with canonicalized roots.
+  const normWorktree = resolve(worktreePath)
+  const worktreeCandidates = new Set<string>([normWorktree])
+  let ancestor = dirname(normWorktree)
+  while (ancestor && ancestor !== dirname(ancestor)) {
+    try {
+      const realAncestor = await realpath(ancestor)
+      if (realAncestor !== ancestor) {
+        worktreeCandidates.add(
+          join(realAncestor, relative(ancestor, normWorktree)),
+        )
+      }
+    } catch {
+      // ignore non-existent ancestor
+    }
+    ancestor = dirname(ancestor)
+  }
+  for (const root of roots) {
+    for (const candidate of worktreeCandidates) {
+      const bad = await findSymlinkComponentUnderRoot(candidate, root)
+      if (bad) {
+        throw new Error(
+          `Cannot use the WorktreeCreate hook's worktree: ${bad.component} ${bad.kind === 'symlink' ? 'is a symlink. ' : 'could not be verified. '}A repository-committed symlink below the checkout root could redirect the worktree outside the repository. Remove the symlink (or have the hook print the real path) and retry.`,
+        )
+      }
+    }
+  }
+}
+
 export async function createWorktreeForSession(
   sessionId: string,
   slug: string,
@@ -1929,6 +2141,8 @@ export async function createWorktreeForSession(
   let session: WorktreeSession
   const hookResult = await executeWorktreeCreateHook(slug)
   if (hookResult) {
+    // Official 2.1.325 #2364: refuse hook paths going through a symlink inside the project.
+    await assertHookWorktreePathSafe(hookResult.worktreePath, originalCwd)
     logForDebugging(
       `Created hook-based worktree at: ${hookResult.worktreePath}`,
     )
@@ -2009,6 +2223,92 @@ export async function createWorktreeForSession(
   return session
 }
 
+function isExistingDirectorySync(
+  dirPath: string | undefined,
+): dirPath is string {
+  if (!dirPath) return false
+  try {
+    return statSync(dirPath).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 2.1.323 #1988: Resolve the directory to return to when exiting a worktree
+ * (via ExitWorktree, the worktree exit dialog, or `/resume`). If the folder
+ * the shell was in before entering the worktree (`originalCwd`) has been
+ * deleted, fall back cleanly to the nearest valid replacement:
+ *   1. `preEnterOriginalCwd` (if different and still exists)
+ *   2. main git repository root (`findCanonicalGitRoot(worktreePath)`)
+ *   3. nearest existing ancestor directory of `originalCwd` (skipping autofs roots)
+ *   4. `getProjectRoot()` (if not the worktree itself)
+ *   5. `homedir()`
+ */
+export function resolveWorktreeExitTargetDir(session: {
+  originalCwd: string
+  worktreePath: string
+  preEnterOriginalCwd?: string
+}): { targetDir: string; fellBackFromDeletedOriginalCwd: boolean } {
+  if (isExistingDirectorySync(session.originalCwd)) {
+    return {
+      targetDir: session.originalCwd,
+      fellBackFromDeletedOriginalCwd: false,
+    }
+  }
+
+  const normalizedWt = resolve(session.worktreePath)
+  const isDistinctExistingDir = (dir: string | undefined): dir is string => {
+    if (!dir) return false
+    const resolved = resolve(dir)
+    if (resolved === normalizedWt) return false
+    return isExistingDirectorySync(resolved)
+  }
+
+  if (isDistinctExistingDir(session.preEnterOriginalCwd)) {
+    return {
+      targetDir: resolve(session.preEnterOriginalCwd),
+      fellBackFromDeletedOriginalCwd: true,
+    }
+  }
+
+  const canonicalRoot = findCanonicalGitRoot(session.worktreePath)
+  if (canonicalRoot && isDistinctExistingDir(canonicalRoot)) {
+    return {
+      targetDir: resolve(canonicalRoot),
+      fellBackFromDeletedOriginalCwd: true,
+    }
+  }
+
+  let cur = dirname(resolve(session.originalCwd))
+  const root = cur.substring(0, cur.indexOf(sep) + 1) || sep
+  for (;;) {
+    if (!isAutomountMapRoot(cur) && isDistinctExistingDir(cur)) {
+      return {
+        targetDir: cur,
+        fellBackFromDeletedOriginalCwd: true,
+      }
+    }
+    if (cur === root) break
+    const parent = dirname(cur)
+    if (parent === cur) break
+    cur = parent
+  }
+
+  const projectRoot = getProjectRoot()
+  if (isDistinctExistingDir(projectRoot)) {
+    return {
+      targetDir: resolve(projectRoot),
+      fellBackFromDeletedOriginalCwd: true,
+    }
+  }
+
+  return {
+    targetDir: homedir(),
+    fellBackFromDeletedOriginalCwd: true,
+  }
+}
+
 export async function keepWorktree(): Promise<void> {
   if (!currentWorktreeSession) {
     return
@@ -2016,23 +2316,30 @@ export async function keepWorktree(): Promise<void> {
 
   try {
     const session = currentWorktreeSession
-    const { worktreePath, originalCwd, worktreeBranch } = session
+    const { worktreePath, worktreeBranch } = session
+    // 2.1.323 #1988: resolve fallback dir when originalCwd was deleted
+    const { targetDir } = resolveWorktreeExitTargetDir(session)
     // densable qHt(originalCwd, worktreePath) — unlock cwd for Ejr.
-    const lockGitRoot = resolveWorktreeLockGitRoot(originalCwd, worktreePath)
+    const lockGitRoot = resolveWorktreeLockGitRoot(targetDir, worktreePath)
 
-    // Change back to original directory first (densable oK(s) uses qHt root).
+    // Change back to original directory (or fallback if deleted) first.
     try {
-      process.chdir(lockGitRoot)
+      process.chdir(
+        isExistingDirectorySync(lockGitRoot) ? lockGitRoot : targetDir,
+      )
     } catch (error) {
       logForDebugging(
         `Could not chdir to original directory while keeping worktree: ${error}`,
       )
-      process.chdir(originalCwd)
+      process.chdir(targetDir)
     }
 
     // densable Qfr / Ejr — release our lock when we owned it (!enteredExisting && !hook).
     if (!session.enteredExisting && !session.hookBased) {
-      await releaseOwnWorktreeLock(worktreePath, lockGitRoot)
+      await releaseOwnWorktreeLock(
+        worktreePath,
+        isExistingDirectorySync(lockGitRoot) ? lockGitRoot : targetDir,
+      )
     }
 
     // Clear the session but keep the worktree intact
@@ -2105,11 +2412,16 @@ export async function cleanupWorktree(persist?: {
   }
 
   try {
-    const { worktreePath, originalCwd, worktreeBranch, hookBased } =
-      currentWorktreeSession
-    const gitRoot = findCanonicalGitRoot(originalCwd) ?? originalCwd
+    const session = currentWorktreeSession
+    const { worktreePath, worktreeBranch, hookBased } = session
+    // 2.1.323 #1988: resolve fallback dir when originalCwd was deleted
+    const { targetDir } = resolveWorktreeExitTargetDir(session)
+    const gitRoot =
+      findCanonicalGitRoot(targetDir) ??
+      findCanonicalGitRoot(worktreePath) ??
+      targetDir
 
-    process.chdir(originalCwd)
+    process.chdir(targetDir)
 
     let hookRemoved = false
     if (hookBased) {
@@ -2252,6 +2564,8 @@ export async function createAgentWorktree(slug: string): Promise<{
   // Try hook-based worktree creation first (allows user-configured VCS)
   const hookResult = await executeWorktreeCreateHook(slug)
   if (hookResult) {
+    // Official 2.1.325 #2364: refuse hook paths going through a symlink inside the project.
+    await assertHookWorktreePathSafe(hookResult.worktreePath, fromCwd)
     logForDebugging(
       `Created hook-based agent worktree at: ${hookResult.worktreePath}`,
     )

@@ -21,8 +21,10 @@ import {
 } from '../FullscreenLayout.js'
 import {
   AccessibilityContext,
+  isMultiCharTextEvent,
   type InputEvent,
   type KeyboardEvent,
+  type PasteEvent,
   useInput,
 } from '@anthropic/ink'
 import {
@@ -204,6 +206,7 @@ export type MultiSelectState<T> = {
   leftoverVmnToggle: ReadonlySet<number> | null
   leftoverVmnRaw: string
   leftoverBindKeyDown: (event: KeyboardEvent) => void
+  leftoverBindPaste: (event: PasteEvent) => void
 }
 
 export function useMultiSelectState<T>({
@@ -494,9 +497,21 @@ export function useMultiSelectState<T>({
         return
       }
       if (leftoverInputIndexRef.current !== null) {
-        if (event.key.length === 1 && !event.ctrl && !event.meta) {
+        if (
+          (event.key.length === 1 ||
+            event.key === 'space' ||
+            isMultiCharTextEvent(event)) &&
+          !event.ctrl &&
+          !event.meta
+        ) {
           event.preventDefault()
-          setLeftoverVmnTyped(prev => prev + event.key)
+          const ch = event.key === 'space' ? ' ' : event.key
+          const next = leftoverVmnTyped + ch
+          const opt = options[leftoverInputIndexRef.current]
+          if (opt?.type === 'input') {
+            updateInputValue(opt.value, next)
+          }
+          setLeftoverVmnTyped(next)
         }
         return
       }
@@ -730,6 +745,26 @@ export function useMultiSelectState<T>({
     { isActive: !isDisabled && !leftoverSrRadio },
   )
 
+  // Official 2.1.323 (#2089) `Vo`: accept pasted / dictated text into screen
+  // reader multi-select input options.
+  const leftoverBindPaste = useCallback(
+    (pasteEvent: PasteEvent) => {
+      if (isDisabled || leftoverInputIndexRef.current === null) return
+      const text = pasteEvent.rawEndedWithFocusTail
+        ? pasteEvent.text.replace(/\[[IO]$/, '')
+        : pasteEvent.text
+      if (text === '') return
+      pasteEvent.preventDefault()
+      const next = leftoverVmnTyped + text
+      const opt = options[leftoverInputIndexRef.current]
+      if (opt?.type === 'input') {
+        updateInputValue(opt.value, next)
+      }
+      setLeftoverVmnTyped(next)
+    },
+    [isDisabled, leftoverVmnTyped, options, updateInputValue],
+  )
+
   return {
     ...navigation,
     selectedValues,
@@ -749,5 +784,6 @@ export function useMultiSelectState<T>({
     leftoverVmnToggle,
     leftoverVmnRaw: leftoverVmnRawRef.current,
     leftoverBindKeyDown,
+    leftoverBindPaste,
   }
 }

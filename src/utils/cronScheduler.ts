@@ -121,9 +121,37 @@ export function isRecurringTaskAged(
   return Boolean(t.recurring && !t.permanent && nowMs - t.createdAt >= maxAgeMs)
 }
 
+/**
+ * Official 2.1.325 #2356: scheduled / `/loop` turn marker passed alongside
+ * cron fire callbacks so SkillTool (`isScheduledOrLoopSkillExecution`) can
+ * require confirmation for skills declaring `allowed-tools` or `hooks`.
+ */
+export type CronFireMetadata = {
+  isCron: true
+  isScheduledTask: true
+  isLoop: boolean
+  taskId?: string
+  kind?: CronTask['kind']
+  querySource: 'cron_loop' | 'cron_scheduled'
+}
+
+export function buildCronFireMetadata(
+  task?: Pick<CronTask, 'id' | 'kind'>,
+): CronFireMetadata {
+  const isLoop = task?.kind === 'loop'
+  return {
+    isCron: true,
+    isScheduledTask: true,
+    isLoop,
+    ...(task?.id !== undefined ? { taskId: task.id } : {}),
+    ...(task?.kind !== undefined ? { kind: task.kind } : {}),
+    querySource: isLoop ? 'cron_loop' : 'cron_scheduled',
+  }
+}
+
 type CronSchedulerOptions = {
   /** Called when a task fires (regular or missed-on-startup). */
-  onFire: (prompt: string) => void
+  onFire: (prompt: string, meta?: CronFireMetadata) => void
   /** While true, firing is deferred to the next tick. */
   isLoading: () => boolean
   /**
@@ -141,7 +169,11 @@ type CronSchedulerOptions = {
    * instead of just the prompt string. Returning `true` defers deletion of
    * one-shot tasks until the passed `remove()` callback is invoked.
    */
-  onFireTask?: (task: CronTask, remove?: () => void) => boolean | undefined
+  onFireTask?: (
+    task: CronTask,
+    remove?: () => void,
+    meta?: CronFireMetadata,
+  ) => boolean | undefined
   /**
    * When provided, receives the missed one-shot tasks on initial load (and
    * onFire is NOT called with the pre-formatted notification). Daemon decides
@@ -250,10 +282,15 @@ export function createCronScheduler(
   let stopped = false
   let isOwner = false
 
-  // Gold N8o (#212): track all session IDs visited by this process across
-  // /resume, /branch, /clear so file-backed tasks created earlier in this
-  // process remain owned by it even when another session holds the lock.
+  // Gold N8o (#212 & #2139): capture a stable lockIdentity at scheduler creation
+  // and pass it explicitly in lockOpts so /clear, /resume, or /branch changing
+  // getSessionId() never leaves a mismatched lock owner key behind, preventing
+  // another session or this session from taking over ended-session tasks.
   const lockSessionId = dir !== undefined ? lockIdentity : getSessionId()
+  const effectiveLockOpts =
+    dir !== undefined || lockSessionId !== undefined
+      ? { dir, lockIdentity: lockSessionId }
+      : lockOpts
   const sessionIds = new Set<string>()
   let unsubscribeSessionSwitch: (() => void) | null = null
   let transcriptSessions = new Set<string>()
@@ -394,7 +431,7 @@ export function createCronScheduler(
         keptBack = new Set(onMissed(missed, removeFileTasks) ?? [])
         for (const id of keptBack) missedAsked.add(id)
       } else {
-        onFire(buildMissedTaskNotification(missed))
+        onFire(buildMissedTaskNotification(missed), buildCronFireMetadata())
       }
       removeFileTasks(missed.filter(t => !keptBack.has(t.id)))
       logForDebugging(
@@ -469,10 +506,12 @@ export function createCronScheduler(
           t.id as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       })
       let deferDelete = false
+      const fireMeta = buildCronFireMetadata(t)
       if (onFireTask) {
-        deferDelete = onFireTask(t, () => removeFileTasks([t])) === true
+        deferDelete =
+          onFireTask(t, () => removeFileTasks([t]), fireMeta) === true
       } else {
-        onFire(t.prompt)
+        onFire(t.prompt, fireMeta)
       }
 
       // Aged-out recurring tasks fall through to the one-shot delete paths
@@ -589,20 +628,22 @@ export function createCronScheduler(
     // Acquire the per-project scheduler lock. Only the owning session runs
     // check(). Other sessions probe periodically to take over if the owner
     // dies. Prevents double-firing when multiple Claudes share a cwd.
-    isOwner = await tryAcquireSchedulerLock(lockOpts).catch(() => false)
+    isOwner = await tryAcquireSchedulerLock(effectiveLockOpts).catch(
+      () => false,
+    )
     if (stopped) {
       if (isOwner) {
         isOwner = false
-        void releaseSchedulerLock(lockOpts)
+        void releaseSchedulerLock(effectiveLockOpts)
       }
       return
     }
     if (!isOwner) {
       lockProbeTimer = setInterval(() => {
-        void tryAcquireSchedulerLock(lockOpts)
+        void tryAcquireSchedulerLock(effectiveLockOpts)
           .then(owned => {
             if (stopped) {
-              if (owned) void releaseSchedulerLock(lockOpts)
+              if (owned) void releaseSchedulerLock(effectiveLockOpts)
               return
             }
             if (owned) {
@@ -611,6 +652,11 @@ export function createCronScheduler(
                 clearInterval(lockProbeTimer)
                 lockProbeTimer = null
               }
+              // Official 2.1.323 (#2139): refresh tasks & check immediately upon
+              // taking over ownership so ended-session tasks run without delay.
+              void load(false).then(() => {
+                if (!stopped) check()
+              })
             }
           })
           .catch(e => logForDebugging(String(e), { level: 'error' }))
@@ -690,6 +736,9 @@ export function createCronScheduler(
       sessionIds.add(getSessionId())
       unsubscribeSessionSwitch ??= onSessionSwitch(newId => {
         sessionIds.add(newId)
+        if (!stopped && checkTimer !== null) {
+          void load(false)
+        }
       })
       // Auto-enable when scheduled_tasks.json has entries. CronCreateTool
       // also sets this when a task is created mid-session.
@@ -732,7 +781,7 @@ export function createCronScheduler(
       watcher = null
       if (isOwner) {
         isOwner = false
-        void releaseSchedulerLock(lockOpts)
+        void releaseSchedulerLock(effectiveLockOpts)
       }
     },
     checkNow() {

@@ -18,6 +18,7 @@ import { findExecutable } from './findExecutable.js'
 import { logError } from './log.js'
 import { getPlatform } from './platform.js'
 import { countCharInString, truncateCodeUnitsSafe } from './stringUtils.js'
+import { internalToolSubprocessEnv } from './subprocessEnv.js'
 
 const __dirname = (() => {
   if (process.env.NODE_ENV === 'test') return path.resolve(distRoot)
@@ -132,6 +133,7 @@ function readRipgrepVersion(command: string): string | null {
       encoding: 'utf8',
       timeout: 3000,
       windowsHide: true,
+      env: internalToolSubprocessEnv(),
     })
     if (r.status !== 0) return null
     const match = (r.stdout ?? '').match(/^ripgrep (\d+\.\d+\.\d+)/)
@@ -515,6 +517,7 @@ function ripGrepRaw(
     const child = spawn(rgPath, fullArgs, {
       ...(argv0 ? { argv0 } : {}),
       ...(cwd ? { cwd } : {}),
+      env: internalToolSubprocessEnv(),
       signal: abortSignal,
       // Prevent visible console window on Windows (no-op on other platforms)
       windowsHide: true,
@@ -612,6 +615,7 @@ function ripGrepRaw(
     fullArgs,
     {
       maxBuffer: MAX_BUFFER_SIZE,
+      env: internalToolSubprocessEnv(),
       signal: abortSignal,
       timeout,
       killSignal: 'SIGKILL',
@@ -644,6 +648,7 @@ async function ripGrepFileCount(
   return new Promise<number>((resolve, reject) => {
     const child = spawn(rgPath, [...rgArgs, ...args, target], {
       argv0,
+      env: internalToolSubprocessEnv(),
       signal: abortSignal,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -694,6 +699,7 @@ export async function ripGrepStream(
   return new Promise<void>((resolve, reject) => {
     const child = spawn(rgPath, [...rgArgs, ...args, target], {
       argv0,
+      env: internalToolSubprocessEnv(),
       signal: abortSignal,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'ignore'],

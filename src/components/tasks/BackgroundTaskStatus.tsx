@@ -6,6 +6,7 @@ import { stringWidth } from '@anthropic/ink';
 import { useAppState, useSetAppState } from 'src/state/AppState.js';
 import { enterTeammateView, exitTeammateView } from 'src/state/teammateViewHelpers.js';
 import { isPanelAgentTask } from 'src/tasks/LocalAgentTask/LocalAgentTask.js';
+import { hasMcpTaskNeedingInput } from 'src/tasks/McpTask/McpTask.js';
 import { getPillLabel, pillNeedsCta } from 'src/tasks/pillLabel.js';
 import { type BackgroundTaskState, isBackgroundTask, type TaskState } from 'src/tasks/types.js';
 import { calculateHorizontalScrollWindow } from 'src/utils/horizontalScroll.js';
@@ -49,6 +50,10 @@ export function BackgroundTaskStatus({
       ),
     [tasks],
   );
+
+  // Official 2.1.325 #2307: show warning badge when any running MCP task has
+  // an off-screen question waiting for the user's answer.
+  const mcpNeedsInput = hasMcpTaskNeedingInput(tasks);
 
   // Check if all tasks are in-process teammates (team mode)
   // In spinner-tree mode, don't show teammate pills (teammates appear in the spinner tree)
@@ -160,6 +165,7 @@ export function BackgroundTaskStatus({
           );
         })}
         {showRightArrow && <Text dimColor> {figures.arrowRight}</Text>}
+        {mcpNeedsInput && <Text color="warning"> · needs your input</Text>}
         <Text dimColor>
           {' · '}
           <KeyboardShortcutHint shortcut="shift + ↓" action="expand" />
@@ -185,6 +191,7 @@ export function BackgroundTaskStatus({
       <SummaryPill selected={tasksSelected} onClick={handleOpenDialog}>
         {getPillLabel(runningTasks)}
       </SummaryPill>
+      {mcpNeedsInput && <Text color="warning"> · needs your input</Text>}
       {pillNeedsCta(runningTasks) && <Text dimColor> · {figures.arrowDown} to view</Text>}
     </>
   );

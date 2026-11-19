@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto'
 import type { GoogleAuth } from 'google-auth-library'
 import {
   checkAndRefreshOAuthTokenIfNeeded,
+  ensureHomeEnvForCloudCredentials,
   getAnthropicApiKey,
   getAnthropicApiKeyWithSource,
   getApiKeyFromApiKeyHelper,
@@ -517,6 +518,9 @@ export async function getAnthropicClient({
     return new AnthropicFoundry(foundryArgs) as unknown as Anthropic
   }
   if (requestProvider === 'vertex' && useVertex) {
+    // Official 2.1.325 #2294: fall back to os.homedir() when HOME is unset so
+    // Google Cloud ADC (~/.config/gcloud/application_default_credentials.json) works.
+    ensureHomeEnvForCloudCredentials()
     // Refresh GCP credentials if gcpAuthRefresh is configured and credentials are expired
     // This is similar to how we handle AWS credential refresh for Bedrock
     if (!skipVertexAuth) {

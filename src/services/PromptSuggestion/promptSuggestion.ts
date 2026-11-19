@@ -29,6 +29,120 @@ import { isSpeculationEnabled, startSpeculation } from './speculation.js'
 
 let currentAbortController: AbortController | null = null
 
+/**
+ * Official 2.1.325 #2366 (`M = 8`, `I(e, n)`, `h8i`):
+ * After 8 consecutive turns started by background or scheduled tasks without
+ * user keypress / terminal focus / human prompt, refresh prompt suggestions
+ * only on powers of 2 (16, 32, 64, ...) until the user presses a key or
+ * returns to the terminal.
+ */
+export const UNATTENDED_PROMPT_SUGGESTION_BACKOFF_THRESHOLD = 8
+
+const UNATTENDED_TURN_ORIGINS = new Set([
+  'scheduled',
+  'cron',
+  'task-notification',
+  'task_notification',
+  'auto_continuation',
+  'peer',
+  'host_synthetic',
+  'system',
+])
+
+export type UnattendedPromptSuggestionState = {
+  personSeenAt: number
+  unattendedTurns: number
+}
+
+let lastPersonActivityAt = 0
+const defaultUnattendedState: UnattendedPromptSuggestionState = {
+  personSeenAt: 0,
+  unattendedTurns: 0,
+}
+
+/**
+ * Record user activity (terminal keypress, terminal focus return, or human
+ * prompt submit) to reset the unattended prompt suggestion backoff.
+ */
+export function markPersonActivityForPromptSuggestion(
+  timestamp: number = Date.now(),
+): void {
+  lastPersonActivityAt = Math.max(lastPersonActivityAt, timestamp)
+}
+
+export function resetUnattendedPromptSuggestionStateForTests(): void {
+  lastPersonActivityAt = 0
+  defaultUnattendedState.personSeenAt = 0
+  defaultUnattendedState.unattendedTurns = 0
+}
+
+/**
+ * Official `h8i(messages)`: returns true if the most recent turn was started
+ * by a human user rather than a background task / scheduled cron / system event.
+ */
+export function isLastTurnUserStarted(messages: readonly Message[]): boolean {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (!msg || msg.type !== 'user') continue
+    if (msg.isMeta) continue
+    // Skip tool_result-only user messages (continuation of the same turn)
+    if (
+      Array.isArray(msg.message?.content) &&
+      msg.message.content.length > 0 &&
+      msg.message.content.every(
+        b => typeof b === 'object' && b !== null && b.type === 'tool_result',
+      )
+    ) {
+      continue
+    }
+    const originKind = msg.origin?.kind
+    if (originKind && UNATTENDED_TURN_ORIGINS.has(originKind)) {
+      return false
+    }
+    const rawTurnOrigin = (msg as { turnOrigin?: unknown }).turnOrigin
+    if (
+      typeof rawTurnOrigin === 'string' &&
+      UNATTENDED_TURN_ORIGINS.has(rawTurnOrigin)
+    ) {
+      return false
+    }
+    if (
+      typeof msg.message?.content === 'string' &&
+      msg.message.content.trimStart().startsWith('<task-notification>')
+    ) {
+      return false
+    }
+    return true
+  }
+  return true
+}
+
+/**
+ * Official 2.1.325 #2366 (`I(e, n)`): returns true when this unattended turn
+ * should skip prompt suggestion generation (`'not_user_started'`).
+ */
+export function shouldBackOffUnattendedPromptSuggestion(
+  messages: readonly Message[],
+  state: UnattendedPromptSuggestionState = defaultUnattendedState,
+): boolean {
+  if (isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION)) {
+    return false
+  }
+  if (isLastTurnUserStarted(messages)) {
+    state.unattendedTurns = 0
+    return false
+  }
+  if (lastPersonActivityAt !== state.personSeenAt) {
+    state.personSeenAt = lastPersonActivityAt
+    state.unattendedTurns = 0
+  }
+  const countAfter = ++state.unattendedTurns
+  const isPowerOfTwo = (countAfter & (countAfter - 1)) === 0
+  return (
+    countAfter > UNATTENDED_PROMPT_SUGGESTION_BACKOFF_THRESHOLD && !isPowerOfTwo
+  )
+}
+
 export type PromptVariant = 'user_intent' | 'stated_intent'
 
 export function getPromptVariant(): PromptVariant {
@@ -218,6 +332,13 @@ export async function tryGenerateSuggestion(
   const suppressReason = getSuggestionSuppressReason(appState)
   if (suppressReason) {
     logSuggestionSuppressed(suppressReason, undefined, undefined, source)
+    return null
+  }
+
+  // Official 2.1.325 #2366: back off after 8 consecutive unattended
+  // (background / scheduled) turns until the user presses a key or returns.
+  if (shouldBackOffUnattendedPromptSuggestion(messages)) {
+    logSuggestionSuppressed('not_user_started', undefined, undefined, source)
     return null
   }
 

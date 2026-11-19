@@ -67,6 +67,52 @@ type Props = {
   toolDenialKind?: string;
 };
 
+/**
+ * Official 2.1.325 `xwo` / `D5i` (#2275): detect when Claude tried to invoke a
+ * user-only command (`disable-model-invocation`, UI command, or built-in CLI
+ * command) via SkillTool, and return the sanitized command name so it renders
+ * as a dim guidance line instead of a red tool error.
+ */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: official xwo rejects control chars in command names
+const UNSAFE_COMMAND_CHAR_RE = /[\x00-\x1f\x7f-\x9f\s]/;
+const LEADING_COMBINING_OR_IGNORABLE_RE = /^\p{M}|\p{Default_Ignorable_Code_Point}/u;
+const DISABLE_MODEL_INVOCATION_RE =
+  /^(?:<tool_use_error>)?Skill ([^\s<>]+) cannot be used with Skill tool due to disable-model-invocation\./;
+const USER_ONLY_COMMAND_RE = /^(?:<tool_use_error>)?([^\s<>]+) is a (?:UI|built-in CLI) command, not a skill\./;
+
+export function isSafeUserOnlyCommandName(name: string): boolean {
+  if (name.length === 0 || name.length > 128) return false;
+  if (UNSAFE_COMMAND_CHAR_RE.test(name)) return false;
+  if (LEADING_COMBINING_OR_IGNORABLE_RE.test(name)) return false;
+  return true;
+}
+
+export function extractUserOnlyCommandError(
+  content: ToolResultBlockParam['content'],
+  input?: unknown,
+): string | undefined {
+  const raw =
+    typeof content === 'string'
+      ? content
+      : Array.isArray(content) &&
+          content.length === 1 &&
+          content[0]?.type === 'text' &&
+          typeof content[0].text === 'string'
+        ? content[0].text
+        : undefined;
+  if (!raw) return undefined;
+  const match = DISABLE_MODEL_INVOCATION_RE.exec(raw) ?? USER_ONLY_COMMAND_RE.exec(raw);
+  if (!match) return undefined;
+  const fromError = match[1]?.replace(/^\/+/, '');
+  const fromInput =
+    typeof input === 'object' && input !== null && typeof (input as { skill?: unknown }).skill === 'string'
+      ? (input as { skill: string }).skill.trim().replace(/^\/+/, '')
+      : undefined;
+  const cmd = fromInput && fromInput === fromError ? fromInput : fromError;
+  if (!cmd || !isSafeUserOnlyCommandName(cmd)) return undefined;
+  return cmd;
+}
+
 export function UserToolErrorMessage({
   progressMessagesForMessage,
   tool,
@@ -122,6 +168,21 @@ export function UserToolErrorMessage({
         </Text>
       </MessageResponse>
     );
+  }
+
+  // Official 2.1.325 (#2275): render a dim line instead of a red error when
+  // Claude tries a user-only command (`disableModelInvocation`, UI, or built-in CLI).
+  if (!verbose && isTranscriptMode !== true) {
+    const userOnlyCmd = extractUserOnlyCommandError(param.content, input);
+    if (userOnlyCmd !== undefined) {
+      return (
+        <MessageResponse>
+          <Text dimColor wrap="wrap">
+            Claude couldn&apos;t run /{userOnlyCmd}. It runs only when you type it at the prompt.
+          </Text>
+        </MessageResponse>
+      );
+    }
   }
 
   // Official 2.1.292 (#231): when a mod / permission-rule denied the tool call,

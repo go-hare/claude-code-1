@@ -1,4 +1,5 @@
 import { feature } from 'bun:bundle'
+import { validateBrowserToolInput } from '../../utils/claudeInChrome/chromeCallPermission.js'
 import { remapPostToolOutput } from './postToolOutput.js'
 import {
   capHostClassifierContext,
@@ -1488,6 +1489,12 @@ export async function* runToolUse(
       return
     }
     const sanitizedToolName = sanitizeToolNameForAnalytics(toolName)
+    const mistypedHint = suggestMistypedHostConnectorTool(
+      toolName,
+      toolUseContext.options.tools,
+      toolUseContext.options.mcpClients,
+      toolUse.input,
+    )
     logForDebugging(`Unknown tool ${toolName}: ${toolUse.id}`)
     logEvent('tengu_tool_use_error', {
       error:
@@ -1518,12 +1525,12 @@ export async function* runToolUse(
         content: [
           {
             type: 'tool_result',
-            content: `<tool_use_error>Error: No such tool available: ${toolName}</tool_use_error>`,
+            content: `<tool_use_error>Error: No such tool available: ${toolName}${mistypedHint}</tool_use_error>`,
             is_error: true,
             tool_use_id: toolUse.id,
           },
         ],
-        toolUseResult: `Error: No such tool available: ${toolName}`,
+        toolUseResult: `Error: No such tool available: ${toolName}${mistypedHint}`,
         sourceToolAssistantUUID: assistantMessage.uuid,
       }),
     }
@@ -3944,6 +3951,37 @@ async function checkPermissionsAndCallTool(
     ]
   }
 
+  // 2.1.323 #2198: refuse escaped \uXXXX / JSON-text inputs on browser MCP tools
+  const browserInputErr = validateBrowserToolInput(tool, input)
+  if (browserInputErr !== null) {
+    logEvent('tengu_tool_use_error', {
+      error:
+        'InputValidationError' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      errorCode:
+        browserInputErr.errorCode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      messageID:
+        messageId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      toolName: sanitizeToolNameForAnalytics(tool.name),
+      isMcp: tool.isMcp ?? false,
+    })
+    return [
+      {
+        message: createUserMessage({
+          content: [
+            {
+              type: 'tool_result',
+              content: `<tool_use_error>${browserInputErr.message}</tool_use_error>`,
+              is_error: true,
+              tool_use_id: toolUseID,
+            },
+          ],
+          toolUseResult: browserInputErr.message,
+          sourceToolAssistantUUID: assistantMessage.uuid,
+        }),
+      },
+    ]
+  }
+
   // densable: coerceInput (legacy aliases / soft truncates) then safeParse.
   // SendMessage Cpr=200 summary truncate lands here via shapeClass truncate_summary.
   let parseTarget: unknown = input
@@ -5727,4 +5765,99 @@ export async function resolveGitCommitIdForTelemetry(
   if (!targetCwd) return parsedSha
   const head = await getHeadFn(targetCwd).catch(() => null)
   return head?.startsWith(parsedSha) ? head : parsedSha
+}
+
+function boundedEditDistance(a: string, b: string, maxDist: number): number {
+  if (Math.abs(a.length - b.length) > maxDist) return maxDist + 1
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i)
+  for (let i = 1; i <= a.length; i++) {
+    const curr = [i]
+    let rowMin = i
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      const val = Math.min(
+        (prev[j] ?? maxDist + 1) + 1,
+        (curr[j - 1] ?? maxDist + 1) + 1,
+        (prev[j - 1] ?? maxDist + 1) + cost,
+      )
+      curr[j] = val
+      if (val < rowMin) rowMin = val
+    }
+    if (rowMin > maxDist) return maxDist + 1
+    prev = curr
+  }
+  return prev[b.length] ?? maxDist + 1
+}
+
+const UUID_LIKE_CONNECTOR_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function parseMcpServerAndTool(
+  name: string,
+): { serverName: string; toolName: string } | null {
+  if (!name.startsWith('mcp__')) return null
+  const rest = name.slice(5)
+  const sep = rest.indexOf('__')
+  if (sep <= 0) return null
+  return { serverName: rest.slice(0, sep), toolName: rest.slice(sep + 2) }
+}
+
+function inputFitsSchemaProperties(
+  tool: {
+    inputJSONSchema?: {
+      properties?: Record<string, unknown>
+      required?: string[]
+    }
+  },
+  input: unknown,
+): boolean {
+  const props = tool.inputJSONSchema?.properties
+  if (props === undefined) return true
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    return false
+  }
+  const keys = Object.keys(input as Record<string, unknown>)
+  return keys.every(k => Object.hasOwn(props, k))
+}
+
+/**
+ * 2.1.323 #2153 (official `Ijs` tail): when an MCP tool call's connector ID is
+ * mistyped by 1–2 characters for a host-registered (`sdk`) MCP server, return
+ * a suggestion naming the exact tool to call.
+ */
+export function suggestMistypedHostConnectorTool(
+  requestedName: string,
+  tools: readonly Tool[],
+  mcpClients: ReadonlyArray<{ name: string; config?: { type?: string } }>,
+  input?: unknown,
+): string {
+  const parsedReq = parseMcpServerAndTool(requestedName)
+  if (!parsedReq || !parsedReq.toolName) return ''
+
+  const normalize = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, '_')
+  if (mcpClients.some(c => normalize(c.name) === parsedReq.serverName)) {
+    return ''
+  }
+
+  const sdkServerNames = new Set(
+    mcpClients
+      .filter(c => c.config?.type === 'sdk')
+      .map(c => normalize(c.name)),
+  )
+
+  const candidates = tools.filter(t => {
+    const parsed = parseMcpServerAndTool(t.name)
+    if (!parsed || parsed.toolName !== parsedReq.toolName) return false
+    const isHostSdk =
+      (t.mcpInfo as { source?: string } | undefined)?.source === 'sdk' ||
+      sdkServerNames.has(parsed.serverName)
+    if (!isHostSdk) return false
+    if (!UUID_LIKE_CONNECTOR_RE.test(parsed.serverName)) return false
+    return boundedEditDistance(parsedReq.serverName, parsed.serverName, 2) <= 2
+  })
+
+  if (candidates.length !== 1) return ''
+  const [match] = candidates
+  if (!match || !inputFitsSchemaProperties(match, input)) return ''
+  return `. Did you mean ${match.name}? Call ${match.name} instead.`
 }

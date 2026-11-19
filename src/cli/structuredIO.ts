@@ -63,6 +63,65 @@ import {
   stripWholeToolGrantsForAsk,
 } from 'src/utils/permissions/permissions.js'
 import { writeToStdout } from 'src/utils/process.js'
+
+const RULE_OFFER_VERIFIED_TOOLS = new Set(['Bash', 'PowerShell'])
+const MAX_VERIFIED_SUGGESTION_RULES = 20
+
+/**
+ * Official 2.1.325 #2357 (SEA `fn` / `ln` @309053000):
+ * Before offering `permission_suggestions` ("Always allow") to Desktop, IDE,
+ * and SDK hosts for a Bash/PowerShell ask, verify that applying those
+ * `addRules` allow suggestions alone would actually allow the command on
+ * re-check. If not (e.g. a safety check, compound command, or ask rule still
+ * blocks it), withhold the rule suggestions so hosts do not offer a misleading
+ * "Always allow" option.
+ */
+export async function filterEffectiveHostAlwaysAllowSuggestions(
+  tool: Tool,
+  input: Record<string, unknown>,
+  suggestions: InternalPermissionUpdate[] | undefined,
+  toolUseContext: ToolUseContext,
+): Promise<InternalPermissionUpdate[] | undefined> {
+  if (!RULE_OFFER_VERIFIED_TOOLS.has(tool.name) || !suggestions?.length) {
+    return suggestions
+  }
+  if (suggestions.some(s => s.type !== 'addRules')) {
+    return suggestions
+  }
+  const allRules = suggestions.flatMap(s =>
+    s.type === 'addRules' ? s.rules : [],
+  )
+  if (allRules.every(r => r.toolName === 'Read')) {
+    return suggestions
+  }
+  if (allRules.length > MAX_VERIFIED_SUGGESTION_RULES) {
+    return undefined
+  }
+  try {
+    const parsedInput = tool.inputSchema.parse(input)
+    const simulatedContext: ToolUseContext = {
+      ...toolUseContext,
+      toolUseId: undefined,
+      getAppState() {
+        const appState = toolUseContext.getAppState()
+        return {
+          ...appState,
+          toolPermissionContext: applyPermissionUpdates(
+            appState.toolPermissionContext,
+            suggestions,
+          ),
+        }
+      },
+    }
+    const recheck = await tool.checkPermissions(parsedInput, simulatedContext)
+    if (recheck.behavior === 'allow') {
+      return suggestions
+    }
+    return undefined
+  } catch {
+    return undefined
+  }
+}
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import { z } from 'zod/v4'
 import { notifyCommandLifecycle } from '../utils/commandLifecycle.js'
@@ -1078,13 +1137,23 @@ export class StructuredIO {
       parentSignal.addEventListener('abort', onParentAbort, { once: true })
 
       try {
+        // Official 2.1.325 #2357: only offer "Always allow" rule suggestions to
+        // Desktop/IDE/SDK hosts when saving them would actually allow the command.
+        const effectiveSuggestions =
+          await filterEffectiveHostAlwaysAllowSuggestions(
+            tool,
+            input,
+            mainPermissionResult.suggestions,
+            toolUseContext,
+          )
+
         // Start the hook evaluation (runs in background)
         const hookPromise = executePermissionRequestHooksForSDK(
           tool.name,
           toolUseID,
           input,
           toolUseContext,
-          mainPermissionResult.suggestions,
+          effectiveSuggestions,
           tool,
           mainPermissionResult.suppressAlwaysAllowRule === true,
         ).then(decision => ({ source: 'hook' as const, decision }))
@@ -1112,7 +1181,7 @@ export class StructuredIO {
               subtype: 'can_use_tool',
               tool_name: tool.name,
               input,
-              permission_suggestions: mainPermissionResult.suggestions,
+              permission_suggestions: effectiveSuggestions,
               blocked_path: mainPermissionResult.blockedPath,
               decision_reason: serializeDecisionReason(
                 mainPermissionResult.decisionReason,

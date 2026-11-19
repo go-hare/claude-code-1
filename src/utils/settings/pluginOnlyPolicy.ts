@@ -58,3 +58,76 @@ const ADMIN_TRUSTED_SOURCES: ReadonlySet<string> = new Set([
 export function isSourceAdminTrusted(source: string | undefined): boolean {
   return source !== undefined && ADMIN_TRUSTED_SOURCES.has(source)
 }
+
+export type StrictPluginOnlyPolicyValue =
+  | boolean
+  | readonly CustomizationSurface[]
+  | undefined
+
+type StrictPluginOnlyChangeCallback = (
+  nextPolicy: StrictPluginOnlyPolicyValue,
+) => void
+
+const strictPluginOnlyChangeCallbacks =
+  new Set<StrictPluginOnlyChangeCallback>()
+let lastStrictPluginOnlySnapshot: string | undefined
+
+function serializeStrictPluginOnlyPolicy(
+  value: StrictPluginOnlyPolicyValue,
+): string {
+  if (value === true) return 'true'
+  if (value === false) return 'false'
+  if (Array.isArray(value)) return JSON.stringify([...value].sort())
+  return 'undefined'
+}
+
+/**
+ * Official 2.1.325 #2332: register a cache-clear callback to run whenever
+ * managed `strictPluginOnlyCustomization` changes mid-session (e.g., to
+ * invalidate cached skills/agents loaded before the policy took effect).
+ */
+export function registerStrictPluginOnlyChangeCallback(
+  callback: StrictPluginOnlyChangeCallback,
+): () => void {
+  strictPluginOnlyChangeCallbacks.add(callback)
+  return () => {
+    strictPluginOnlyChangeCallbacks.delete(callback)
+  }
+}
+
+/**
+ * Official 2.1.325 #2332: check whether `policySettings.strictPluginOnlyCustomization`
+ * changed since the last observation and, if so, invoke all registered
+ * cache-clear callbacks. Returns true when a change was broadcast.
+ */
+export function notifyStrictPluginOnlyPolicyIfChanged(
+  explicitPolicy?: StrictPluginOnlyPolicyValue,
+): boolean {
+  const nextPolicy =
+    explicitPolicy !== undefined
+      ? explicitPolicy
+      : getSettingsForSource('policySettings')?.strictPluginOnlyCustomization
+  const nextSnapshot = serializeStrictPluginOnlyPolicy(nextPolicy)
+  if (lastStrictPluginOnlySnapshot === nextSnapshot) {
+    return false
+  }
+  const hadPrevious = lastStrictPluginOnlySnapshot !== undefined
+  lastStrictPluginOnlySnapshot = nextSnapshot
+  // Notify on any real change (or initial transition into a restrictive policy).
+  if (!hadPrevious && nextSnapshot === 'undefined') {
+    return false
+  }
+  for (const cb of strictPluginOnlyChangeCallbacks) {
+    try {
+      cb(nextPolicy)
+    } catch {
+      // Isolate individual cache-clear callback failures
+    }
+  }
+  return true
+}
+
+export function resetStrictPluginOnlyChangeStateForTests(): void {
+  strictPluginOnlyChangeCallbacks.clear()
+  lastStrictPluginOnlySnapshot = undefined
+}

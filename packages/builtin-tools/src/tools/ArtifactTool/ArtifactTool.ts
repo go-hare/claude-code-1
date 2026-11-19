@@ -45,6 +45,8 @@ import {
   clearDbUndeclared,
   executeArtifactDbAction,
 } from 'src/services/artifactAutoReact/artifactDb.js'
+import { un } from 'src/services/artifactAutoReact/store.js'
+import { upsertPublishedFrameRow } from 'src/services/artifactAutoReact/conversationBoundary.js'
 import { uploadArtifact } from './client.js'
 import { markdownToHtml } from './markdown.js'
 import { formatArtifactWatchStatus } from 'src/services/artifactAutoReact/watchActions.js'
@@ -596,6 +598,68 @@ export function coerceArtifactPublishInput(input: unknown): {
   return { input: parsed.data, shapeClass: 'edits_empty' }
 }
 
+/**
+ * 2.1.325 #2329 / #2330 / #2331: True when an artifact slug's share status
+ * indicates people outside the user's organization can see it, or when its
+ * audience could not be confirmed (missing status, probeFailed, or
+ * `outsideAudience !== false`).
+ */
+export function isArtifactOutsideOrgOrUnknown(slug: string): boolean {
+  const status = un().shareStatus.bySlug.get(slug) as
+    | {
+        mode?: string
+        probeFailed?: boolean
+        outsideAudience?: boolean
+        external?: boolean
+        outsideOrgReader?: boolean
+      }
+    | undefined
+  if (!status || status.probeFailed === true) return true
+  if (
+    status.mode === 'public' ||
+    status.outsideAudience === true ||
+    status.external === true ||
+    status.outsideOrgReader === true
+  ) {
+    return true
+  }
+  return status.outsideAudience !== false
+}
+
+function shouldIgnoreWholeToolAllowRuleForArtifact(input: unknown): boolean {
+  if (!input || typeof input !== 'object') return false
+  const rec = input as Record<string, unknown>
+  const action = typeof rec.action === 'string' ? rec.action : undefined
+  if (
+    action === 'live-edit' ||
+    action === 'upload_asset' ||
+    action === 'delete_asset' ||
+    action === 'write_db' ||
+    action === 'db_write' ||
+    action === 'db_str_replace' ||
+    action === 'delete' ||
+    action === 'room_send' ||
+    action === 'share' ||
+    action === 'reply' ||
+    action === 'resolve' ||
+    action === 'copy_from'
+  ) {
+    return true
+  }
+  if (
+    (action === undefined || action === 'publish') &&
+    typeof rec.url === 'string' &&
+    rec.url.length > 0
+  ) {
+    const parsed = parsedInputUrl(rec.url)
+    if (!parsed) return true
+    if (isArtifactOutsideOrgOrUnknown(parsed.slug)) {
+      return true
+    }
+  }
+  return false
+}
+
 export const ArtifactTool = buildTool({
   name: ARTIFACT_TOOL_NAME,
   // tip lowercase kept for existing transcripts / cloud upload callers
@@ -699,6 +763,18 @@ export const ArtifactTool = buildTool({
   },
   isDestructive(input) {
     return isArtifactActionDestructive(input as { action?: string })
+  },
+  /**
+   * 2.1.323 #2173 + 2.1.325 #2329 / #2330:
+   * Artifact updates/mutations and uploads ask first even under a whole-tool
+   * `Artifact` allow rule ("don't ask again") when people outside your
+   * organization can see the artifact or Claude cannot check who can.
+   */
+  ignoresWholeToolAllowRule(input: unknown): boolean {
+    return shouldIgnoreWholeToolAllowRuleForArtifact(input)
+  },
+  suppressesAlwaysAllowRule(input: unknown): boolean {
+    return shouldIgnoreWholeToolAllowRuleForArtifact(input)
   },
   getPath(input) {
     const fields = input as Record<string, unknown>
@@ -832,16 +908,28 @@ export const ArtifactTool = buildTool({
       input as Record<string, unknown>,
       context,
     )
-    // #1546: In auto mode, exempt cloud outputs / upload / write_db from
-    // interactive ask blocks unless explicitly denied.
+    // #1546 + 2.1.325 #2331: In auto mode, exempt private/in-org cloud outputs
+    // from interactive ask blocks, but NEVER bypass asks for artifacts visible
+    // outside your organization (or whose audience cannot be confirmed) — auto
+    // mode's classifier must judge every single change individually.
     const mode = context.getAppState().toolPermissionContext.mode
     const actionName =
       input && typeof input === 'object' && 'action' in input
         ? (input as { action?: string }).action
         : undefined
+    const targetUrl =
+      input && typeof input === 'object' && typeof input.url === 'string'
+        ? input.url
+        : undefined
+    const targetParsed = targetUrl ? parsedInputUrl(targetUrl) : null
+    const targetOutsideOrgOrUnknown =
+      targetParsed !== null
+        ? isArtifactOutsideOrgOrUnknown(targetParsed.slug)
+        : targetUrl !== undefined && targetUrl.length > 0
     if (
       mode === 'auto' &&
       permResult.behavior === 'ask' &&
+      !targetOutsideOrgOrUnknown &&
       (isUploadInput(input) ||
         actionName === 'write_db' ||
         actionName === 'db_write' ||
@@ -3525,6 +3613,19 @@ async function callUpload(
     if (publishedSlug) {
       artifactStore.refusedPublishBodies.delete(publishedSlug)
       clearDbUndeclared(publishedSlug)
+      // 2.1.323 #2071: move the just-published artifact to the end of frameUrls
+      // so the preview opens this newly published artifact rather than an older one.
+      context?.setAppState?.(prev => ({
+        ...prev,
+        frameUrls: upsertPublishedFrameRow(prev.frameUrls, {
+          slug: publishedSlug,
+          url: result.url,
+          title:
+            typeof (input as { title?: unknown }).title === 'string'
+              ? (input as { title: string }).title
+              : undefined,
+        }),
+      }))
       recordPublishedPathPins(publishedSlug, result.expiresAt || '1', {
         written: [{ path: targetPath, sha256: bodySha256 }],
         removed: [],

@@ -521,10 +521,29 @@ const externalTips: Tip[] = [
     },
   },
   {
+    id: 'vscode-notebook-rerun-edited-cell',
+    providerAgnostic: true,
+    maxLifetimeShows: 5,
+    content: async () =>
+      'Claude edits notebook files, not your kernel. To get a cleared output back, re-run its cell and the cells that depend on it.',
+    cooldownSessions: 8,
+    async isRelevant(context) {
+      if (!isSupportedVSCodeTerminal()) return false
+      const { readFileState } = context ?? {}
+      if (!readFileState) return false
+      return cacheKeys(readFileState).some(p =>
+        p.toLowerCase().endsWith('.ipynb'),
+      )
+    },
+  },
+  {
     id: 'install-slack-app',
     content: async () => 'Run /install-slack-app to use Claude in Slack',
     cooldownSessions: 10,
-    isRelevant: async () => !getGlobalConfig().slackAppInstallCount,
+    advertisedCommand: 'install-slack-app',
+    isRelevant: async () =>
+      !getGlobalConfig().slackAppInstallCount &&
+      isRemotePolicyAllowed('allow_remote_sessions'),
   },
   {
     id: 'permissions',

@@ -8,6 +8,8 @@
 
 import { createHmac, randomBytes } from 'crypto'
 import type { PeerReceiptDropReason } from './peerReceipts.js'
+
+export type { PeerReceiptDropReason }
 import {
   type HarborKiteLimits,
   getHarborKiteLimits,
@@ -25,7 +27,7 @@ const hopHmacKey = randomBytes(32)
 
 export type PeerAdmissionLimits = HarborKiteLimits
 
-/** densable Nhn + Oe — mirror DEFAULT_HARBOR_KITE_LIMITS (incl. queue cap). */
+/** densable Nhn + Oe + 2.1.323 #2164 — mirror DEFAULT_HARBOR_KITE_LIMITS (incl. queue & same-machine caps). */
 export const DEFAULT_PEER_ADMISSION_LIMITS: PeerAdmissionLimits = {
   bucketCapacity: 30,
   refillPerSecond: 0.5,
@@ -34,6 +36,45 @@ export const DEFAULT_PEER_ADMISSION_LIMITS: PeerAdmissionLimits = {
   maxChainLength: 28,
   maxTrackedSenders: 256,
   maxQueuedPeerMessages: 50,
+  maxDesktopForwards: 100_000,
+  maxLocalRelays: 100_000,
+  countLocalHops: false,
+}
+
+/**
+ * Official 2.1.323 #2101: settle desktop/host busy state when a peer message
+ * is dropped (duplicate, rate-limited, queue-full, hop-loop, hop-runaway) so
+ * Claude Desktop does not stay stuck as busy waiting for a turn that will
+ * never start.
+ */
+export function buildDroppedPeerMessageHoldFrame(input: {
+  sessionId: string
+  messageUuid?: string
+  lane: 'bridge' | 'stdin' | 'socket'
+  from: string
+  outcome: PeerReceiptDropReason
+}): {
+  type: 'system'
+  subtype: 'peer_message_hold'
+  state: 'dropped'
+  lane: 'bridge' | 'stdin' | 'socket'
+  from: string
+  outcome: PeerReceiptDropReason
+  session_id: string
+  message_uuid?: string
+} {
+  return {
+    type: 'system',
+    subtype: 'peer_message_hold',
+    state: 'dropped',
+    lane: input.lane,
+    from: input.from,
+    outcome: input.outcome,
+    session_id: input.sessionId,
+    ...(input.messageUuid !== undefined
+      ? { message_uuid: input.messageUuid }
+      : {}),
+  }
 }
 
 export type PeerHopChainResult =

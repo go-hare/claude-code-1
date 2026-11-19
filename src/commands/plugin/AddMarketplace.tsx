@@ -140,6 +140,12 @@ export function AddMarketplace({
           <Text dimColor> · https://example.com/marketplace.json</Text>
           <Text dimColor> · ./path/to/marketplace</Text>
           <Box marginTop={1}>
+            <Text dimColor>
+              Plugins from this marketplace can run code on your computer, with access to your files and shell. Only add
+              marketplaces you trust. You&apos;ll review its plugins before installing any.
+            </Text>
+          </Box>
+          <Box marginTop={1}>
             <TextInput
               value={inputValue}
               onChange={setInputValue}
