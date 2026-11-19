@@ -1336,6 +1336,39 @@ export function getEffortEnvOverride(): EffortValue | null | undefined {
   return parseEffortValue(envOverride)
 }
 
+/**
+ * Official GGt — parses `CLAUDE_CODE_SUBAGENT_EFFORT` via `parseEffortLevelString`.
+ * Returns undefined when unset or unrecognized (e.g. `'inherit'`).
+ */
+export function getSubagentEffortEnvOverride(): EffortLevel | undefined {
+  const raw = process.env.CLAUDE_CODE_SUBAGENT_EFFORT
+  return raw === undefined ? undefined : parseEffortLevelString(raw)
+}
+
+/**
+ * Official fus — resolves the default effort for a subagent from
+ * `CLAUDE_CODE_SUBAGENT_EFFORT` when neither the agent definition, an ineligible
+ * built-in, nor a permission layer already specifies effort.
+ */
+export function resolveSubagentDefaultEffort(opts?: {
+  agentEffort?: EffortValue
+  isIneligible?: boolean
+  hasPermissionLayerEffort?: boolean
+}): EffortLevel | undefined {
+  if (
+    opts?.agentEffort !== undefined ||
+    opts?.isIneligible ||
+    opts?.hasPermissionLayerEffort
+  ) {
+    return undefined
+  }
+  const raw = process.env.CLAUDE_CODE_SUBAGENT_EFFORT
+  if (raw === undefined) {
+    return undefined
+  }
+  return getSubagentEffortEnvOverride()
+}
+
 export type ResolveAppliedEffortOptions = {
   turnEffort?: EffortValue
   hookEffortValue?: EffortValue

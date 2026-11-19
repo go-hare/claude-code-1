@@ -231,6 +231,19 @@ export function onChangeAppState({
           worker_permission_mode: newExternal,
         })
       }
+      // Official GN (#1578): keep bg session's respawnFlags --permission-mode in sync.
+      try {
+        const { updateBgRespawnFlag } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../utils/cliRelaunch.js') as typeof import('../utils/cliRelaunch.js')
+        updateBgRespawnFlag(
+          '--permission-mode',
+          ['--inherit-permission-mode'],
+          newExternal,
+        )
+      } catch {
+        // optional
+      }
     }
     notifyPermissionModeChanged(newMode)
   }

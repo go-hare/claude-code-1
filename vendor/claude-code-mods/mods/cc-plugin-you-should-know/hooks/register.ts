@@ -1885,9 +1885,10 @@ var Jn =
   '"You should know" made this page from the conversation at the time; it is a one-off explainer, not maintained.'
 var cn =
   'Your prompt box has text in it. Send or clear it, then press again to turn suggestions off.'
-var hn = 'A dialog has the keyboard. Answer it, then press 2 again.'
-var xn = 'Your prompt box has text in it. Send or clear it, then press 2 again.'
-var gn = "The prompt box didn't take the note. Press 2 to try again."
+var hn = 'A dialog is open. Answer or close it, then try again.'
+var xn = 'Your prompt box has text in it. Send or clear it, then try again.'
+var gn =
+  'Couldn\u2019t add the note. If the box has text, send or clear it, then try again.'
 function zn(e) {
   let t = e.search(/<title[\s>]/i)
   if (t === -1) return null

@@ -1,10 +1,11 @@
+import axios from 'axios'
 import chalk from 'chalk'
 import { exec } from 'child_process'
 import { execa } from 'execa'
 import { mkdir, rm, stat } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
 import { join, resolve } from 'path'
-import { CLAUDE_AI_PROFILE_SCOPE } from 'src/constants/oauth.js'
+import { CLAUDE_AI_PROFILE_SCOPE, getOauthConfig } from 'src/constants/oauth.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -2405,7 +2406,10 @@ export type OAuthRefreshLockSnapshot = {
   mtimeMs: number | undefined
 }
 
-export function getOAuthRefreshLockOptions(claudeDir: string) {
+export function getOAuthRefreshLockOptions(
+  claudeDir: string,
+  onCompromisedCb?: () => void,
+) {
   return {
     lockfilePath: join(claudeDir, OAUTH_REFRESH_LOCK_FILENAME),
     realpath: false as const,
@@ -2415,6 +2419,7 @@ export function getOAuthRefreshLockOptions(claudeDir: string) {
       logForDebugging(`OAuth refresh lock compromised: ${err.message}`, {
         level: 'error',
       })
+      onCompromisedCb?.()
     },
   }
 }
@@ -2564,8 +2569,11 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
   }
 
   let release
+  let isCompromised = false
   const releaseHold = beginOAuthRefreshLockHold()
-  const lockOpts = getOAuthRefreshLockOptions(claudeDir)
+  const lockOpts = getOAuthRefreshLockOptions(claudeDir, () => {
+    isCompromised = true
+  })
   try {
     logEvent('tengu_oauth_token_refresh_lock_acquiring', {})
     release = await lockfile.lock(claudeDir, lockOpts)
@@ -2678,9 +2686,15 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
       return false
     }
 
+    if (isCompromised) {
+      logEvent('tengu_oauth_token_refresh_lock_compromised_pre_post', {})
+      return false
+    }
+
     logEvent('tengu_oauth_token_refresh_starting', {})
     const lockedRefreshToken = lockedTokens.refreshToken
     refreshToken = lockedRefreshToken
+    const initialAccessToken = lockedTokens.accessToken
     const refreshedTokens = await refreshOAuthToken(lockedRefreshToken, {
       // For Claude.ai subscribers, omit scopes so the default
       // CLAUDE_AI_OAUTH_SCOPES applies — this allows scope expansion
@@ -2689,6 +2703,9 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
         ? undefined
         : lockedTokens.scopes,
     })
+    if (isCompromised) {
+      logEvent('tengu_oauth_token_refresh_lock_compromised_post_post', {})
+    }
     saveOAuthTokensIfNeeded(refreshedTokens)
 
     // Clear the cache after refreshing token
@@ -2696,12 +2713,36 @@ async function checkAndRefreshOAuthTokenIfNeededImpl(
     clearKeychainCache()
     return true
   } catch (error) {
+    if (isCompromised) {
+      logForDebugging(
+        `OAuth refresh failed while lock compromised: ${errorMessage(error)}`,
+        { level: 'error' },
+      )
+      logEvent('tengu_oauth_token_refresh_lock_compromised_in_catch', {})
+      getClaudeAIOAuthTokens.cache?.clear?.()
+      clearKeychainCache()
+      const recovered = await getClaudeAIOAuthTokensAsync(credentials)
+      if (
+        recovered &&
+        (recovered.accessToken !== freshTokens.accessToken ||
+          !isOAuthTokenExpired(recovered.expiresAt))
+      ) {
+        logEvent('tengu_oauth_token_refresh_race_recovered', {})
+        return true
+      }
+      return false
+    }
+
     logError(error)
 
     getClaudeAIOAuthTokens.cache?.clear?.()
     clearKeychainCache()
     const currentTokens = await getClaudeAIOAuthTokensAsync(credentials)
-    if (currentTokens && !isOAuthTokenExpired(currentTokens.expiresAt)) {
+    if (
+      currentTokens &&
+      (currentTokens.accessToken !== freshTokens.accessToken ||
+        !isOAuthTokenExpired(currentTokens.expiresAt))
+    ) {
       logEvent('tengu_oauth_token_refresh_race_recovered', {})
       return true
     }
@@ -3705,21 +3746,18 @@ export async function validateForceLoginOrg(): Promise<OrgValidationResult> {
     source === 'CLAUDE_CODE_OAUTH_TOKEN' ||
     source === 'CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR'
 
-  const profile = await getOauthProfileFromOauthToken(tokens.accessToken)
-  if (!profile) {
+  const tokenOrgUuid = await getOauthOrgUuidFromToken(tokens.accessToken)
+  if (!tokenOrgUuid) {
     // Fail closed — we can't verify the org
     return {
       valid: false,
       message:
         `Unable to verify organization for the current authentication token.\n` +
-        `This machine requires ${requirement} but the profile could not be fetched.\n` +
-        `This may be a network error, or the token may lack the user:profile scope required for\n` +
-        `verification (tokens from 'claude setup-token' do not include this scope).\n` +
-        `Try again, or obtain a full-scope token via 'claude auth login'.`,
+        `This machine requires ${requirement} but the organization could not be verified.\n` +
+        `Try again, or obtain a token via 'claude auth login'.`,
     }
   }
 
-  const tokenOrgUuid = profile.organization.uuid
   if (permittedOrgUuids.includes(tokenOrgUuid)) {
     return { valid: true }
   }
@@ -3749,7 +3787,163 @@ export async function validateForceLoginOrg(): Promise<OrgValidationResult> {
   }
 }
 
+/**
+ * Official `OCa` (#1656): resolve the organization UUID for an OAuth access token
+ * via `/api/oauth/org` (which does not require `user:profile` scope), falling back
+ * to `/api/oauth/profile` when unavailable.
+ */
+/**
+ * Official `h0e` / `nit` / `I1o` (#1550): classify HTTP 403 responses from
+ * Cloudflare / CDN / network intermediaries vs Anthropic origin.
+ */
+export type Http403OriginKind = 'origin' | 'nonorigin_cf' | 'nonorigin_other'
+
+export function classify403Origin(
+  getHeader: (name: string) => string | undefined,
+): Http403OriginKind {
+  const reqId = getHeader('request-id')
+  if (typeof reqId === 'string' && reqId.trim().startsWith('req_')) {
+    return 'origin'
+  }
+  const cfRay = getHeader('cf-ray')
+  const server = getHeader('server')
+  if (
+    (typeof cfRay === 'string' && cfRay !== '') ||
+    (typeof server === 'string' && /cloudflare/i.test(server))
+  ) {
+    return 'nonorigin_cf'
+  }
+  return 'nonorigin_other'
+}
+
+export function isNonOrigin403(
+  kind: Http403OriginKind,
+): kind is 'nonorigin_cf' | 'nonorigin_other' {
+  return kind === 'nonorigin_cf' || kind === 'nonorigin_other'
+}
+
+export function explainNonOrigin403(
+  kind: 'nonorigin_cf' | 'nonorigin_other',
+): string {
+  switch (kind) {
+    case 'nonorigin_cf':
+      return "a network edge refused the connection before it reached Anthropic's server (HTTP 403 — Anthropic's CDN enforcing a region or network policy, or a Cloudflare gateway on this network) rather than this session; this often follows a VPN or network change"
+    case 'nonorigin_other':
+      return 'the connection was refused before it reached Anthropic (HTTP 403) — usually a proxy, VPN or firewall on this network'
+  }
+}
+
+export function getNonOrigin403HintFromError(err: unknown): string | undefined {
+  if (!axios.isAxiosError(err) || err.response?.status !== 403) {
+    return undefined
+  }
+  const headers = err.response.headers
+  const getHeader = (name: string): string | undefined => {
+    const val = headers?.[name] ?? headers?.[name.toLowerCase()]
+    return Array.isArray(val) ? String(val[0]) : val ? String(val) : undefined
+  }
+  const kind = classify403Origin(getHeader)
+  return isNonOrigin403(kind) ? explainNonOrigin403(kind) : undefined
+}
+
+/**
+ * Official `Bar` / `osr` (#1618): compute login credential expiration date and
+ * `credential_expires_at` field from stored OAuth refreshTokenExpiresAt.
+ */
+const LOGIN_EXPIRATION_DRIFT_GRACE_MS = 3 * 24 * 60 * 60 * 1000
+
+export function getLoginExpirationDate(): Date | null {
+  if (getAPIProvider() !== 'firstParty' || !isAnthropicAuthEnabled()) {
+    return null
+  }
+  const tokens = getClaudeAIOAuthTokens()
+  if (
+    !tokens?.refreshToken ||
+    typeof tokens.refreshTokenExpiresAt !== 'number' ||
+    !Number.isFinite(tokens.refreshTokenExpiresAt) ||
+    tokens.refreshTokenExpiresAt <= 0
+  ) {
+    return null
+  }
+  if (
+    typeof tokens.expiresAt === 'number' &&
+    tokens.expiresAt >
+      tokens.refreshTokenExpiresAt + LOGIN_EXPIRATION_DRIFT_GRACE_MS
+  ) {
+    return null
+  }
+  return new Date(tokens.refreshTokenExpiresAt)
+}
+
+export function getCredentialExpiresAtField(): {
+  credential_expires_at?: string
+} {
+  const expires = getLoginExpirationDate()
+  return expires === null
+    ? {}
+    : { credential_expires_at: expires.toISOString() }
+}
+
+/**
+ * Official `e9e` (#1629): resolve `allowedProviders` from managed settings.
+ */
+export function getAllowedProviders(): string[] | undefined {
+  const policy = getSettingsForSource('policySettings')
+  return policy?.allowedProviders
+}
+
+export function validateAllowedProvider(
+  provider: string = getAPIProvider(),
+):
+  | { valid: true }
+  | { valid: false; reason: 'provider_not_allowed'; message: string } {
+  const allowed = getAllowedProviders()
+  if (allowed === undefined) {
+    return { valid: true }
+  }
+  const normalized = provider === 'firstParty' ? 'anthropic' : provider
+  if (allowed.includes(normalized)) {
+    return { valid: true }
+  }
+  return {
+    valid: false,
+    reason: 'provider_not_allowed',
+    message: `API provider "${normalized}" is not allowed by this machine's managed settings (allowedProviders: ${allowed.join(', ') || 'none'}).`,
+  }
+}
+
 class GcpCredentialsTimeoutError extends Error {}
+
+export async function getOauthOrgUuidFromToken(
+  accessToken: string,
+): Promise<string | undefined> {
+  try {
+    const url = `${getOauthConfig().BASE_API_URL}/api/oauth/org`
+    const response = await axios.post<{ organization_uuid?: string }>(
+      url,
+      null,
+      {
+        headers: {
+          'User-Agent': `claude-code/${MACRO.VERSION}`,
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 10_000,
+      },
+    )
+    const orgUuid = response.data?.organization_uuid
+    if (typeof orgUuid === 'string' && orgUuid !== '') {
+      return orgUuid
+    }
+  } catch (err) {
+    logForDebugging(
+      `Failed to look up the token's organization via /api/oauth/org: ${errorMessage(err)}`,
+      { level: 'error' },
+    )
+  }
+  const profile = await getOauthProfileFromOauthToken(accessToken)
+  return profile?.organization?.uuid
+}
 
 /**
  * Official `oj` (2.1.301 #851): true when an error (or its cause chain) is a

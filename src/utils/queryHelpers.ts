@@ -818,9 +818,6 @@ export function extractReadFilesFromMessages(
             readUse &&
             content.is_error !== true &&
             typeof content.content === 'string' &&
-            // Dedup stubs contain no file content — the earlier real Read
-            // already cached it. Chronological last-wins would otherwise
-            // overwrite the real entry with stub text.
             !content.content.startsWith(FILE_UNCHANGED_STUB)
           ) {
             const msg = message as {
@@ -902,6 +899,24 @@ export function extractReadFilesFromMessages(
             }
           }
         }
+      }
+    } else if (
+      message.type === 'attachment' &&
+      message.attachment?.type === 'edited_text_file'
+    ) {
+      const att = message.attachment as {
+        filename?: string
+        rereadEntry?: { timestamp: number; isPartialView?: boolean }
+      }
+      if (typeof att.filename === 'string' && att.rereadEntry) {
+        const absolutePath = expandPath(att.filename, cwd)
+        cache.set(absolutePath, {
+          content: '',
+          timestamp: att.rereadEntry.timestamp,
+          offset: 1,
+          limit: undefined,
+          isPartialView: att.rereadEntry.isPartialView,
+        })
       }
     }
   }

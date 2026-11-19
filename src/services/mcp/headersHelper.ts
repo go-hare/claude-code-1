@@ -231,15 +231,17 @@ export async function getMcpHeadersFromHelper(
 
   try {
     logMCPDebug(serverName, 'Executing headersHelper to get dynamic headers')
+    const helperCwd = mcpHeadersHelperCwd(config)
     const execResult = await execFileNoThrowWithCwd(config.headersHelper, [], {
       shell: true,
       timeout: HEADERS_HELPER_TIMEOUT_MS,
       maxBuffer: HEADERS_HELPER_MAX_BUFFER,
-      cwd: mcpHeadersHelperCwd(config),
+      cwd: helperCwd,
       extendEnv: false,
       env: buildHeadersHelperChildEnv({
         scrubCredentialEnv: shouldScrubMcpHeadersHelperEnv(config),
         env: mcpHeadersHelperOverlay(serverName, config),
+        cwd: helperCwd,
       }),
     })
     if (execResult.code !== 0 || !execResult.stdout) {

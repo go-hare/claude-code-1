@@ -42,7 +42,7 @@ import { tryParseShellCommand } from 'src/utils/bash/shellQuote.js';
 import { matchingRuleForInput } from 'src/utils/permissions/filesystem.js';
 import { extractClaudeCodeHints } from 'src/utils/claudeCodeHints.js';
 import { detectCodeIndexingFromCommand } from 'src/utils/codeIndexing.js';
-import { clampTimeoutForAutoBackground } from 'src/utils/autoBackgroundTimeout.js';
+import { clampTimeoutForAutoBackground, resolveSubagentAutoBackgroundCapMs } from 'src/utils/autoBackgroundTimeout.js';
 import { CONTROL_CHARS_HIDDEN_IN_APPROVAL_MSG, hasNoHiddenControlChars } from 'src/utils/controlChars.js';
 import {
   isBackgroundTasksDisabled as isBackgroundTasksDisabledEnv,
@@ -1429,6 +1429,15 @@ export const BashTool = buildTool({
           isMainThread,
           toolUseId: toolUseContext.toolUseId,
           agentId: toolUseContext.agentId,
+          agentContext: (
+            toolUseContext as {
+              agentContext?: {
+                isAsync?: boolean;
+                isMainSession?: boolean;
+                agentId?: string;
+              };
+            }
+          ).agentContext,
           innerCall: toolUseContext.innerCall,
           // densable 2.1.217 VRu/ZRu — pin isolation worktree into shell gates
           agentWorktree: toolUseContext.agentWorktree,
@@ -1651,6 +1660,7 @@ async function* runShellCommand({
   isMainThread,
   toolUseId,
   agentId,
+  agentContext,
   innerCall,
   agentWorktree,
 }: {
@@ -1663,6 +1673,11 @@ async function* runShellCommand({
   isMainThread?: boolean;
   toolUseId?: string;
   agentId?: AgentId;
+  agentContext?: {
+    isAsync?: boolean;
+    isMainSession?: boolean;
+    agentId?: string;
+  };
   innerCall?: boolean;
   /** densable agentWorktree for VRu/ZRu shell isolation gates. */
   agentWorktree?: string;
@@ -1681,14 +1696,20 @@ async function* runShellCommand({
   void
 > {
   const { command, description, timeout, run_in_background } = input;
-  // Official WYn: when main agent can auto-background, env may clamp timeout.
+  // Official IDr + pSo (#1672): main agent clamps via env; async subagents cap at 180s across all providers.
   const shouldAutoBackground = !isBackgroundTasksDisabled && isAutobackgroundingAllowed(command);
   const baseTimeoutMs = Math.min(timeout || getDefaultTimeoutMs(), getMaxTimeoutMs());
+  const subagentCapMs = resolveSubagentAutoBackgroundCapMs({
+    agentId,
+    agentContext,
+    innerCall,
+  });
   const timeoutMs =
     clampTimeoutForAutoBackground({
       requestedTimeoutMs: baseTimeoutMs,
       isMainAgent: isMainThread === true,
       canAutoBackground: shouldAutoBackground,
+      subagentCapMs,
     }) ?? baseTimeoutMs;
 
   let fullOutput = '';

@@ -1388,9 +1388,21 @@ export function getAutoModeUnavailableResponse(
  */
 export function countAutoModeUnavailableResponsesInARow(
   runKey: string,
+  options?: { noCheckOnly?: boolean },
 ): number {
   return getBootstrapSessionHost().requestLatches.autoModeUnavailableResponsesInARow(
     runKey,
+    options,
+  )
+}
+
+export function dropAutoModeUnavailableResponsesOfOtherTurns(
+  runKey: string,
+  turn: number | string,
+): void {
+  getBootstrapSessionHost().requestLatches.dropAutoModeUnavailableResponsesOfOtherTurns(
+    runKey,
+    turn,
   )
 }
 

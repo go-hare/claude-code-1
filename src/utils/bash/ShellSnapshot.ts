@@ -343,7 +343,7 @@ function getUserSnapshotContent(configFile: string): string {
       # shopt before functions: a body using extglob/globstar syntax only
       # re-parses with the option on.
       echo "# Shopt" >> "$SNAPSHOT_FILE"
-      shopt -p | head -n 1000 >> "$SNAPSHOT_FILE"
+      shopt -p >> "$SNAPSHOT_FILE"
 
       echo "# Functions" >> "$SNAPSHOT_FILE"
 
@@ -355,8 +355,15 @@ function getUserSnapshotContent(configFile: string): string {
       # One eval per function so a body that no longer parses (rc=2, not fatal
       # in non-POSIX bash) drops only itself. The %q literal needs no fork
       # at source time, unlike a base64 command substitution.
-      declare -F | cut -d' ' -f3 | grep -vE '^_[^_]' | while read func; do
-        printf 'eval %q > /dev/null 2>&1\\n' "$(declare -f "$func")" >> "$SNAPSHOT_FILE"
+      declare -F | while read func; do
+        func=\${func##* } # the name: the last word of each declare -F line
+        # declare reads a name starting with - or + as an option, and eval one starting with -; other names need no "--"
+        if [[ "$func" == [-+]* ]]; then
+          printf 'eval -- %q > /dev/null 2>&1\\n' "$(declare -f -- "$func")" >> "$SNAPSHOT_FILE"
+        else
+          [[ "$func" == _[!_]* ]] ||
+            printf 'eval %q > /dev/null 2>&1\\n' "$(declare -f "$func")" >> "$SNAPSHOT_FILE"
+        fi
       done
     `
   }
@@ -365,12 +372,12 @@ function getUserSnapshotContent(configFile: string): string {
   if (isZsh) {
     content += `
       echo "# Shell Options" >> "$SNAPSHOT_FILE"
-      setopt | sed 's/^/setopt /' | head -n 1000 >> "$SNAPSHOT_FILE"
+      setopt | command awk 'NF == 1 || $2 == "on" { print "setopt " $1 }' | head -n 1000 >> "$SNAPSHOT_FILE"
     `
   } else {
     content += `
       echo "# Shell Options" >> "$SNAPSHOT_FILE"
-      set -o | grep "on" | awk '{print "set -o " $1}' | head -n 1000 >> "$SNAPSHOT_FILE"
+      set -o | awk '$2 == "on" || $1 == "monitor" {print "set -o " $1}' >> "$SNAPSHOT_FILE"
       echo "shopt -s expand_aliases" >> "$SNAPSHOT_FILE"
     `
   }
@@ -382,9 +389,11 @@ function getUserSnapshotContent(configFile: string): string {
       # Git Bash automatically creates aliases like "alias node='winpty node.exe'" for
       # programs that need Win32 Console in mintty, but winpty fails when there's no TTY
       if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "cygwin" ]]; then
-        alias | grep -v "='winpty " | sed 's/^alias //g' | sed 's/^/alias -- /' | head -n 1000 >> "$SNAPSHOT_FILE"
+        # sed, not grep -v, whose exit 1 when no alias is left ends this script under errexit and pipefail.
+        # Every line gets "alias -- " here: the filter works by line, so it can leave part of a multi-line alias behind.
+        alias | sed -e "/='winpty /d" | sed -e '1001,$d' -e 's/^alias //g' -e 's/^/alias -- /' >> "$SNAPSHOT_FILE"
       else
-        alias | sed 's/^alias //g' | sed 's/^/alias -- /' | head -n 1000 >> "$SNAPSHOT_FILE"
+        ${isZsh ? "alias | sed -e '1001,$d' -e 's/^alias //g' -e 's/^/alias -- /'" : "\\alias -p | sed -e '1001,$d' -e 's/^alias -- /alias /' -e 's/^alias /alias -- /'"} >> "$SNAPSHOT_FILE"
       fi
   `
 

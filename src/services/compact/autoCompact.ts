@@ -146,6 +146,57 @@ export function estimateMaxTurnGrowth(model: string): number {
 // in a single session, wasting ~250K API calls/day globally.
 const MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES = 3
 
+let lastSentClaudeMdTokens: number | undefined
+
+export function recordSentClaudeMdTokens(tokens: number): void {
+  lastSentClaudeMdTokens = tokens
+}
+
+export function getLastSentClaudeMdTokens(): number | undefined {
+  return lastSentClaudeMdTokens
+}
+
+export function resetSentClaudeMdTokensForTesting(): void {
+  lastSentClaudeMdTokens = undefined
+}
+
+/**
+ * #1562: When a very large CLAUDE.md changes on disk since it was last sent,
+ * compute the extra token growth so auto-compact triggers before hitting PTL.
+ */
+export async function getClaudeMdGrowthTokens(
+  providedClaudeMd?: string,
+): Promise<number> {
+  if (lastSentClaudeMdTokens === undefined) {
+    return 0
+  }
+  try {
+    const { roughTokenCountEstimation } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../tokenEstimation.js') as typeof import('../tokenEstimation.js')
+    let currentTokens = providedClaudeMd
+      ? roughTokenCountEstimation(providedClaudeMd)
+      : 0
+    try {
+      const { getUserContext } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../../context.js') as typeof import('../../context.js')
+      const userCtx = await getUserContext()
+      if (userCtx.claudeMd) {
+        currentTokens = Math.max(
+          currentTokens,
+          roughTokenCountEstimation(userCtx.claudeMd),
+        )
+      }
+    } catch {
+      // Fall back to providedClaudeMd when getUserContext is unavailable
+    }
+    return Math.max(0, currentTokens - lastSentClaudeMdTokens)
+  } catch {
+    return 0
+  }
+}
+
 export function getAutoCompactThreshold(model: string): number {
   const effectiveContextWindow = getEffectiveContextWindowSize(model)
 
@@ -334,6 +385,7 @@ export async function shouldAutoCompact(
   // pre-snip context, so tokenCountWithEstimation can't see the savings.
   // Subtract the rough-delta that snip already computed.
   snipTokensFreed = 0,
+  currentClaudeMd?: string,
 ): Promise<boolean> {
   // Recursion guards. session_memory and compact are forked agents that
   // would deadlock.
@@ -391,12 +443,14 @@ export async function shouldAutoCompact(
     }
   }
 
-  const tokenCount = tokenCountWithEstimation(messages) - snipTokensFreed
+  const claudeMdGrowth = await getClaudeMdGrowthTokens(currentClaudeMd)
+  const tokenCount =
+    tokenCountWithEstimation(messages) - snipTokensFreed + claudeMdGrowth
   const threshold = getAutoCompactThreshold(model)
   const effectiveWindow = getEffectiveContextWindowSize(model)
 
   logForDebugging(
-    `autocompact: tokens=${tokenCount} threshold=${threshold} effectiveWindow=${effectiveWindow}${snipTokensFreed > 0 ? ` snipFreed=${snipTokensFreed}` : ''}`,
+    `autocompact: tokens=${tokenCount} threshold=${threshold} effectiveWindow=${effectiveWindow}${snipTokensFreed > 0 ? ` snipFreed=${snipTokensFreed}` : ''}${claudeMdGrowth > 0 ? ` claudeMdGrowth=${claudeMdGrowth}` : ''}`,
   )
 
   const { isAboveAutoCompactThreshold, isAtBlockingLimit } =
@@ -497,6 +551,7 @@ export async function autoCompactIfNeeded(
     model,
     querySource,
     snipTokensFreed,
+    cacheSafeParams.userContext?.claudeMd,
   )
 
   if (!shouldCompact) {

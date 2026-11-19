@@ -234,13 +234,69 @@ export type DeserializeResult = {
   turnInterruptionState: TurnInterruptionState
 }
 
+const RESUME_INTERRUPTED_TURN_FLAG = 'tengu_steady_scroll'
+const RESUME_INTERRUPTED_TURN_FLAG_MIN_MS = 5_400_000
+const RESUME_INTERRUPTED_TURN_FLAG_MAX_MS = 2_592_000_000
+
+/**
+ * Official `zFt` (#1599) — synthetic assistant error emitted when an unattended
+ * start is unconfirmed; skipped during stale-turn timestamp lookup and recovery.
+ */
+export function isUnattendedStartUnconfirmedError(message: {
+  type?: unknown
+  isApiErrorMessage?: unknown
+  apiError?: unknown
+}): boolean {
+  return (
+    message.type === 'assistant' &&
+    message.isApiErrorMessage === true &&
+    message.apiError === 'unattended_start_unconfirmed'
+  )
+}
+
+/**
+ * Official `Syo(e)` (#1599) — resolve max age for interrupted-turn auto-resume
+ * from `CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS` or GrowthBook
+ * `tengu_steady_scroll` (clamped to [5_400_000, 2_592_000_000]).
+ */
+export function getResumeInterruptedTurnMaxAge(
+  excludeCcr = false,
+  env: NodeJS.ProcessEnv = process.env,
+): { maxAgeMs: number; source: 'env' | 'flag' } | undefined {
+  const raw = env.CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS
+  if (raw) {
+    const parsed = Number(raw)
+    if (parsed === 0) return undefined
+    const maxAgeMs = Number.isFinite(parsed) && parsed > 0 ? parsed : 3_600_000
+    return { maxAgeMs, source: 'env' }
+  }
+  if (excludeCcr) return undefined
+  const flagVal = getFeatureValue_CACHED_MAY_BE_STALE<number | null>(
+    RESUME_INTERRUPTED_TURN_FLAG,
+    null,
+  )
+  if (
+    typeof flagVal === 'number' &&
+    flagVal >= RESUME_INTERRUPTED_TURN_FLAG_MIN_MS &&
+    flagVal <= RESUME_INTERRUPTED_TURN_FLAG_MAX_MS
+  ) {
+    return { maxAgeMs: flagVal, source: 'flag' }
+  }
+  return undefined
+}
+
 /**
  * densable Szu — suppress auto-resume of interrupted turns older than
  * CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS (default 1h when env set but
  * non-numeric; unset → never stale).
  */
 export function isResumeInterruptedTurnStale(
-  messages: Array<{ type: string; timestamp?: string }>,
+  messages: Array<{
+    type: string
+    timestamp?: string
+    isApiErrorMessage?: unknown
+    apiError?: unknown
+  }>,
   env: NodeJS.ProcessEnv = process.env,
   nowMs: number = Date.now(),
 ): boolean {
@@ -251,7 +307,13 @@ export function isResumeInterruptedTurnStale(
   const maxAge = Number.isFinite(parsed) && parsed > 0 ? parsed : 3_600_000
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i]!
-    if (m.type === 'system' || m.type === 'progress') continue
+    if (
+      m.type === 'system' ||
+      m.type === 'progress' ||
+      isUnattendedStartUnconfirmedError(m)
+    ) {
+      continue
+    }
     const ts = Date.parse(m.timestamp ?? '')
     if (Number.isFinite(ts)) return nowMs - ts >= maxAge
   }

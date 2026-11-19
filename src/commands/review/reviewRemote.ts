@@ -1011,7 +1011,7 @@ export async function launchRemoteReview(
           }
           // densable JOo no_git_remote ultrareview-specific copy
           if (e.type === 'no_git_remote') {
-            return `${invocation} needs a GitHub remote so it can clone this repository into the cloud. If this project is not on GitHub yet, run "gh repo create --source=. --push" to create one; if a GitHub repo already exists, run "git remote add origin REPO_URL && git push -u origin HEAD".`
+            return `${invocation} needs a GitHub remote so it can clone this repository into the cloud. If this project is not on GitHub yet, you can create a repository at https://github.com/new and push to it. If a GitHub repo already exists, run \`git remote add origin REPO_URL && git push -u origin HEAD\`.`
           }
           return formatPreconditionError(e)
         })
@@ -1192,7 +1192,7 @@ export async function launchRemoteReview(
       return [
         {
           type: 'text',
-          text: `${invocation} <PR#> needs a GitHub remote so it knows which repository the PR is in. If this project is not on GitHub yet, run "gh repo create --source=. --push" to create one; if a GitHub repo already exists, run "git remote add origin REPO_URL". Or run ${invocation} with no argument to review your current branch instead.`,
+          text: `${invocation} <PR#> needs a GitHub remote so it knows which repository the PR is in. If this project is not on GitHub yet, you can create a repository at https://github.com/new and push to it. If a GitHub repo already exists, run \`git remote add origin REPO_URL\`. Or run ${invocation} with no argument to review your current branch instead.`,
         },
       ]
     }

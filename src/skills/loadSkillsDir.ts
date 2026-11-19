@@ -920,6 +920,10 @@ export const getSkillDirCommands = memoize(
       ...projectSkillsNested.flat(),
       ...additionalSkillsNested.flat(),
       ...legacyCommands,
+      ...getInMemorySyncedSkills().map(skill => ({
+        skill,
+        filePath: '',
+      })),
     ]
 
     // Deduplicate by resolved path (handles symlinks and duplicate parent directories)
@@ -1179,6 +1183,8 @@ export function clearSkillCaches() {
   loadMarkdownFilesForSubdir.cache?.clear?.()
   conditionalSkills.clear()
   activatedConditionalSkillNames.clear()
+  clearInMemorySyncedSkills()
+  clearSyncedSkillLandingFailures()
 }
 
 // Backwards-compatible aliases for tests
@@ -1687,3 +1693,101 @@ export {
   settleSyncReuseStamp,
   SYNC_REUSE_STAMP_FILENAME,
 } from '../utils/accountSkillsSyncVeto.js'
+
+/**
+ * Official #1547 (`ln = 600_000` / `failedLandings` / `r6n(..., "skill_gone")`):
+ * Retain claude.ai synced skills in memory when disk write fails, prevent
+ * repeated downloads for 10 minutes (`600_000` ms) for the same version, and
+ * prune hooks when synced skills are removed (`skill_gone`).
+ */
+export const SYNCED_SKILL_DOWNLOAD_COOLDOWN_MS = 600_000
+
+type FailedLandingRecord = {
+  version: string
+  failures: number
+  failedAtMs: number
+}
+
+const inMemorySyncedSkills = new Map<string, Command>()
+const failedSyncedSkillLandings = new Map<string, FailedLandingRecord>()
+
+export function retainInMemorySyncedSkill(
+  skillId: string,
+  command: Command,
+): void {
+  inMemorySyncedSkills.set(skillId, command)
+}
+
+export function removeInMemorySyncedSkill(skillId: string): boolean {
+  return inMemorySyncedSkills.delete(skillId)
+}
+
+export function getInMemorySyncedSkills(): Command[] {
+  return [...inMemorySyncedSkills.values()]
+}
+
+export function clearInMemorySyncedSkills(): void {
+  inMemorySyncedSkills.clear()
+}
+
+export function recordFailedSyncedSkillLanding(
+  skillId: string,
+  version: string,
+  nowMs: number = Date.now(),
+): void {
+  const prev = failedSyncedSkillLandings.get(skillId)
+  failedSyncedSkillLandings.set(skillId, {
+    version,
+    failures: prev?.version === version ? prev.failures + 1 : 1,
+    failedAtMs: nowMs,
+  })
+}
+
+export function shouldSkipSyncedSkillDownload(
+  skillId: string,
+  version: string,
+  nowMs: number = Date.now(),
+): boolean {
+  const record = failedSyncedSkillLandings.get(skillId)
+  if (!record) return false
+  if (record.version !== version) {
+    failedSyncedSkillLandings.delete(skillId)
+    return false
+  }
+  const elapsed = nowMs - record.failedAtMs
+  return elapsed >= 0 && elapsed < SYNCED_SKILL_DOWNLOAD_COOLDOWN_MS
+}
+
+export function clearSyncedSkillLandingFailures(): void {
+  failedSyncedSkillLandings.clear()
+}
+
+export type SkillHooksRemovalReason =
+  | 'sync_off'
+  | 'account_change'
+  | 'skill_gone'
+
+const SKILL_HOOKS_REMOVAL_COPY: Record<SkillHooksRemovalReason, string> = {
+  sync_off: "Skills sync is off (a setting or the organization's policy).",
+  account_change: 'A sign-out, or a sign-in not verified as the same account.',
+  skill_gone:
+    "Those skills are gone from this account's list or from the disk.",
+}
+
+/**
+ * Official `r6n(JXt, roots, reason)` — prune hooks registered by removed
+ * synced skills and log diagnostic telemetry.
+ */
+export function pruneRemovedSyncedSkillHooks(
+  removedSkillRoots: ReadonlySet<string>,
+  reason: SkillHooksRemovalReason,
+  removeHooksForRoots: (roots: ReadonlySet<string>) => number,
+): number {
+  if (removedSkillRoots.size === 0) return 0
+  const count = removeHooksForRoots(removedSkillRoots)
+  if (count === 0) return 0
+  logForDebugging(
+    `Hooks of synced skills removed: ${count}. ${SKILL_HOOKS_REMOVAL_COPY[reason]}`,
+  )
+  return count
+}

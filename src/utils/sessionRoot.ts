@@ -60,6 +60,12 @@ function namespacedSessionId(e: string, t: string): string {
   return `${i.slice(0, 8)}-${i.slice(8, 12)}-${i.slice(12, 16)}-${i.slice(16, 20)}-${i.slice(20, 32)}`
 }
 
+function isEnvTruthyLocal(value: string | undefined): boolean {
+  if (!value) return false
+  const norm = value.trim().toLowerCase()
+  return norm === '1' || norm === 'true' || norm === 'yes' || norm === 'on'
+}
+
 /**
  * Official avt @178495998 sha=9a39cc0b3ca7bb29
  * `function avt(){let e=process.env.CLAUDE_CODE_REMOTE_SESSION_ID?.trim();return e?i7(e,Z):null}`
@@ -67,6 +73,50 @@ function namespacedSessionId(e: string, t: string): string {
 function remoteSessionId(): string | null {
   const e = process.env.CLAUDE_CODE_REMOTE_SESSION_ID?.trim()
   return e ? namespacedSessionId(e, REMOTE_SESSION_NAMESPACE) : null
+}
+
+/**
+ * Official `J4a` (#1536/#1582/#1583): child session without `--sdk-url` or
+ * `mcp serve` must not inherit the parent's `CLAUDE_CODE_REMOTE_SESSION_ID`.
+ */
+export function isChildSessionWithoutSdkUrl(
+  argv: readonly string[] = process.argv ?? [],
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const rawRemote = env.CLAUDE_CODE_REMOTE_SESSION_ID?.trim()
+  if (!isEnvTruthyLocal(env.CLAUDE_CODE_CHILD_SESSION) || !rawRemote) {
+    return false
+  }
+  const dashDashIdx = argv.indexOf('--')
+  const head = argv.slice(0, dashDashIdx === -1 ? undefined : dashDashIdx)
+  const hasSdkUrl = head.some((arg, idx) =>
+    arg === '--sdk-url'
+      ? Boolean(head[idx + 1])
+      : arg.startsWith('--sdk-url=') && arg !== '--sdk-url=',
+  )
+  return !hasSdkUrl && !(argv[2] === 'mcp' && argv[3] === 'serve')
+}
+
+/**
+ * Official `gor`: returns `null` when running as an isolated child session
+ * unless `CLAUDE_CODE_DISABLE_NESTED_SESSION_ID` is truthy.
+ */
+export function isolatedRemoteSessionId(
+  argv: readonly string[] = process.argv ?? [],
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const raw = env.CLAUDE_CODE_REMOTE_SESSION_ID?.trim()
+  const remoteId = raw
+    ? namespacedSessionId(raw, REMOTE_SESSION_NAMESPACE)
+    : null
+  if (remoteId === null) return null
+  if (
+    isChildSessionWithoutSdkUrl(argv, env) &&
+    !isEnvTruthyLocal(env.CLAUDE_CODE_DISABLE_NESTED_SESSION_ID)
+  ) {
+    return null
+  }
+  return remoteId
 }
 
 export type SessionProject = {
@@ -359,7 +409,7 @@ export function createBootstrapSession(): Session {
   }
   return createRootSession({
     host: createSessionHost(),
-    id: remoteSessionId() ?? randomUUID(),
+    id: isolatedRemoteSessionId() ?? randomUUID(),
     project: { originalCwd: e, projectRoot: e, cwd: e },
   })
 }

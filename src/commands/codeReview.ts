@@ -20,6 +20,7 @@ import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.js'
 import type { Command } from '../types/command.js'
 import type { ToolUseContext } from '../Tool.js'
 import { getPrintOutputFormat } from '../bootstrap/state.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js'
 import { getCachedRepositoryHost } from '../utils/detectRepository.js'
 import { isBundledSkillKillSwitchOn } from '../skills/bundledSkills.js'
@@ -250,16 +251,47 @@ export function rememberCodeReviewMaxFindings(
   })
 }
 
+const REMOTE_REPORT_FINDINGS_ENTRYPOINTS = new Set([
+  'remote',
+  'remote_desktop',
+  'remote_mobile',
+  'remote_trigger',
+])
+
+const COWORK_ENTRYPOINTS = new Set(['remote_cowork', 'remote_cowork_trigger'])
+
 /**
- * densable `Et` — ReportFindings path is on only for a truthy env, a loaded
- * tool, and a print format other than text/json. Skill preload never uses it.
+ * densable `Et` — ReportFindings path is on for `CLAUDE_CODE_REPORT_FINDINGS`
+ * (`"spawn"`) or for Desktop/Web remote-control / cloud sessions gated by
+ * `tengu_purring_micali` (`"message"`), excluding Cowork and subagents.
  */
-function codeReviewUsesReportFindings(context: ToolUseContext): boolean {
-  if (context.options.isSkillPreload) return false
+export function codeReviewUsesReportFindings(context: ToolUseContext): boolean {
+  if (context.options.isSkillPreload || context.agentId !== undefined) {
+    return false
+  }
   const format = getPrintOutputFormat()
   if (format === 'text' || format === 'json') return false
-  if (!process.env.CLAUDE_CODE_REPORT_FINDINGS) return false
-  return context.options.tools.some(tool => tool.name === 'ReportFindings')
+  if (!context.options.tools.some(tool => tool.name === 'ReportFindings')) {
+    return false
+  }
+  if (process.env.CLAUDE_CODE_REPORT_FINDINGS) return true
+
+  const platform = context.options.messageClientPlatform
+  const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT
+  const isCowork =
+    entrypoint !== undefined && COWORK_ENTRYPOINTS.has(entrypoint)
+  const isBridge = process.env.CLAUDE_CODE_ENVIRONMENT_KIND === 'bridge'
+  const isRemoteSession =
+    Boolean(process.env.CLAUDE_CODE_REMOTE) &&
+    entrypoint !== undefined &&
+    REMOTE_REPORT_FINDINGS_ENTRYPOINTS.has(entrypoint)
+
+  return (
+    (platform === 'desktop_app' || platform === 'web_claude_ai') &&
+    !isCowork &&
+    (isBridge || isRemoteSession) &&
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_purring_micali', true)
+  )
 }
 
 /** densable `We` — ReportFindings / o5-bmin ceiling. */

@@ -3837,6 +3837,42 @@ export function buildSchemaNotSentHint(
   )
 }
 
+const MAX_NOT_LOADED_SCHEMA_CHARS = 8000
+
+/**
+ * #1663 (official yTs / Uro): intercept deferred MCP tool calls before
+ * validation/execution when the tool has not been loaded yet, and return its
+ * inputSchema so the model can load it via ToolSearch or fix the arguments.
+ */
+export function checkMcpToolNotLoaded(
+  tool: Tool,
+  messages: Message[],
+  tools: readonly { name: string }[],
+): { enforced: true; message: string } | null {
+  if (tool.isMcp !== true) return null
+  if (!isSearchExtraToolsEnabledOptimistic()) return null
+  if (!isSearchExtraToolsToolAvailable(tools)) return null
+  if (!isDeferredTool(tool)) return null
+  const discovered = extractDiscoveredToolNames(messages)
+  if (discovered.has(tool.name)) return null
+
+  let schemaHint = ''
+  if (tool.inputJSONSchema !== undefined) {
+    try {
+      const serialized = jsonStringify(tool.inputJSONSchema)
+      if (serialized.length <= MAX_NOT_LOADED_SCHEMA_CHARS) {
+        schemaHint = `\n\nThe input schema is: ${serialized}`
+      }
+    } catch {
+      // ignore unserializable schema
+    }
+  }
+  return {
+    enforced: true,
+    message: `Tool "${tool.name}" has not been loaded yet. Call ${SEARCH_EXTRA_TOOLS_TOOL_NAME} with query "select:${tool.name}" to load the tool, then call it again.${schemaHint}`,
+  }
+}
+
 async function checkPermissionsAndCallTool(
   tool: Tool,
   toolUseID: string,
@@ -3856,6 +3892,46 @@ async function checkPermissionsAndCallTool(
   ) => void,
   toolCallCapture?: ToolCallCoreCapture,
 ): Promise<MessageUpdateLazy[]> {
+  // #1663: intercept deferred MCP tool before validation/execution if not loaded
+  const notLoaded = checkMcpToolNotLoaded(
+    tool,
+    toolUseContext.messages,
+    toolUseContext.options.tools,
+  )
+  if (notLoaded?.enforced) {
+    logEvent('tengu_tool_use_not_loaded', {
+      enforced: true,
+      toolName: sanitizeToolNameForAnalytics(tool.name),
+      isMcp: true,
+    })
+    logEvent('tengu_tool_use_error', {
+      error:
+        'InputValidationError' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      errorCode:
+        'tool_not_loaded' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      messageID:
+        messageId as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      toolName: sanitizeToolNameForAnalytics(tool.name),
+      isMcp: true,
+    })
+    return [
+      {
+        message: createUserMessage({
+          content: [
+            {
+              type: 'tool_result',
+              content: `<tool_use_error>${notLoaded.message}</tool_use_error>`,
+              is_error: true,
+              tool_use_id: toolUseID,
+            },
+          ],
+          toolUseResult: notLoaded.message,
+          sourceToolAssistantUUID: assistantMessage.uuid,
+        }),
+      },
+    ]
+  }
+
   // densable: coerceInput (legacy aliases / soft truncates) then safeParse.
   // SendMessage Cpr=200 summary truncate lands here via shapeClass truncate_summary.
   let parseTarget: unknown = input

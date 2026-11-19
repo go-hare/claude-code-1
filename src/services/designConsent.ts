@@ -324,14 +324,24 @@ export async function deleteDesignConsent(
   state?: DesignSessionState,
   credentials?: unknown,
 ): Promise<void> {
-  const response = await axios.delete(consentUrl(), {
-    data: { consent: DESIGN_CONSENT_BIT },
-    headers: await designAuthHeaders(credentials),
-    timeout: 15000,
-    validateStatus: s => s < 300 || s === 404,
-  })
-  if (response.status >= 300 && response.status !== 404) {
-    throw new Error(`Couldn't revoke Design consent (${response.status}).`)
+  try {
+    const response = await axios.delete(consentUrl(), {
+      data: { consent: DESIGN_CONSENT_BIT },
+      headers: await designAuthHeaders(credentials),
+      timeout: 15000,
+      validateStatus: s => s < 300,
+    })
+    if (response.status >= 300) {
+      throw new Error(`Couldn't revoke Design consent (${response.status}).`)
+    }
+  } catch (err) {
+    if (axios.isAxiosError(err) && err.response?.status === 404) {
+      if (state) {
+        await writeFetchedConsentBit(state, DESIGN_CONSENT_BIT, false)
+      }
+      seedDesignConsentCache(false)
+    }
+    throw err
   }
   if (state) {
     await writeFetchedConsentBit(state, DESIGN_CONSENT_BIT, false)

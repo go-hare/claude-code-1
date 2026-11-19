@@ -337,7 +337,7 @@ export function syncExitReStamp(): void {
   if (exitReStampRan) return
   exitReStampRan = true
   try {
-    project?.reAppendSessionMetadata()
+    project?.reAppendSessionMetadata(false, true)
   } catch {
     // Best-effort — don't let metadata re-append crash process exit
   }
@@ -1435,7 +1435,10 @@ class Project {
    * the SDK cannot touch (last-prompt, agent-*, mode, pr-link) have no
    * external-writer concern — their caches are authoritative.
    */
-  reAppendSessionMetadata(skipTitleRefresh = false): void {
+  reAppendSessionMetadata(
+    skipTitleRefresh = false,
+    onlyIntoExisting = false,
+  ): void {
     if (!this.sessionFile) return
     const sessionId = getSessionId() as UUID
     if (!sessionId) return
@@ -1629,7 +1632,11 @@ class Project {
     if (entries.length > 0) {
       this.sealTornTailSync(this.sessionFile)
       for (const entry of entries) {
-        appendEntryToFile(this.sessionFile, entry)
+        if (onlyIntoExisting) {
+          appendEntryToExistingFileSync(this.sessionFile, entry)
+        } else {
+          appendEntryToFile(this.sessionFile, entry)
+        }
       }
     }
   }
@@ -4361,6 +4368,46 @@ function appendEntryToFile(
       )
       throw secondErr
     }
+  }
+}
+
+/**
+ * Official `I4` — sync append only into an existing, non-empty transcript file.
+ * Opens with O_RDWR | O_APPEND (no O_CREAT), returning silently on ENOENT/ENOTDIR
+ * or size === 0 so exit re-stamp never recreates a deleted transcript (#1635).
+ */
+function appendEntryToExistingFileSync(
+  fullPath: string,
+  entry: Record<string, unknown>,
+): void {
+  if (isPersistenceSuppressed()) return
+  const line = jsonStringify(entry) + '\n'
+  let fd: number
+  try {
+    fd = openSync(fullPath, fsConstants.O_RDWR | fsConstants.O_APPEND)
+  } catch (err) {
+    const code = getErrnoCode(err)
+    if (code === 'ENOENT' || code === 'ENOTDIR') return
+    throw err
+  }
+  try {
+    const { size } = fstatSync(fd)
+    if (size === 0) return
+    const tailBuf = Buffer.alloc(1)
+    const bytesRead = readSync(fd, tailBuf, 0, 1, size - 1)
+    const needsNewline = bytesRead === 1 && tailBuf[0] !== 10
+    const payload = Buffer.from(needsNewline ? `\n${line}` : line, 'utf8')
+    let written = 0
+    while (written < payload.length) {
+      const n = writeSync(fd, payload, written, payload.length - written)
+      if (n <= 0) {
+        throw new Error('appendEntryToExistingFileSync: short write')
+      }
+      written += n
+    }
+    recordTranscriptWriteSuccess(fullPath)
+  } finally {
+    closeSync(fd)
   }
 }
 

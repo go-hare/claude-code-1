@@ -212,6 +212,53 @@ async function cleanupWorkflowWorktree(
   }
 }
 
+/**
+ * Official #1648 — guard against re-running an already-completed workflow agent
+ * when a workflow resumes/recovers after a usage-limit pause.
+ */
+const completedAgentResults = new Map<string, AgentRunResult>()
+const usageLimitRecoveryRuns = new Set<string>()
+
+function completedAgentKey(runId: string, agentId: number): string {
+  return `${runId}\0${agentId}`
+}
+
+export function markWorkflowUsageLimitRecovery(runId: string): void {
+  usageLimitRecoveryRuns.add(runId)
+}
+
+export function getCompletedWorkflowAgentResult(
+  runId: string,
+  agentId: number,
+): AgentRunResult | undefined {
+  return completedAgentResults.get(completedAgentKey(runId, agentId))
+}
+
+export function recordCompletedWorkflowAgentResult(
+  runId: string,
+  agentId: number,
+  result: AgentRunResult,
+): void {
+  if (result.kind === 'ok') {
+    completedAgentResults.set(completedAgentKey(runId, agentId), result)
+  }
+}
+
+export function clearCompletedWorkflowAgentResults(runId?: string): void {
+  if (runId === undefined) {
+    completedAgentResults.clear()
+    usageLimitRecoveryRuns.clear()
+    return
+  }
+  usageLimitRecoveryRuns.delete(runId)
+  const prefix = `${runId}\0`
+  for (const key of completedAgentResults.keys()) {
+    if (key.startsWith(prefix)) {
+      completedAgentResults.delete(key)
+    }
+  }
+}
+
 /** Deeply-integrated backend: parses agent/model/tools from the live session, delegates to the core runAgent. */
 export const claudeCodeBackend: AgentAdapter = {
   id: 'claude-code',
@@ -221,6 +268,21 @@ export const claudeCodeBackend: AgentAdapter = {
     params: AgentRunParams,
     ctx: AgentAdapterContext,
   ): Promise<AgentRunResult> {
+    const isRecovery =
+      usageLimitRecoveryRuns.has(ctx.runId) ||
+      (ctx as { isUsageLimitRecovery?: boolean }).isUsageLimitRecovery === true
+    if (isRecovery) {
+      const priorCompleted = getCompletedWorkflowAgentResult(
+        ctx.runId,
+        ctx.agentId,
+      )
+      if (priorCompleted) {
+        logForDebugging(
+          `workflow agent ${ctx.runId}:${ctx.agentId} already completed; skipping re-run on usage-limit recovery`,
+        )
+        return priorCompleted
+      }
+    }
     const { toolUseContext, canUseTool } = readHostBundle(ctx.host)
     const appState = toolUseContext.getAppState()
     const agentDef = resolveAgentDefinition(params.agentType, toolUseContext)
@@ -516,7 +578,7 @@ export const claudeCodeBackend: AgentAdapter = {
           detail: preview,
         }
       }
-      return {
+      const okResult: AgentRunResult = {
         kind: 'ok',
         output: structured as object,
         usage: { outputTokens },
@@ -524,9 +586,11 @@ export const claudeCodeBackend: AgentAdapter = {
         toolCount: finalToolCount,
         tokenCount: finalTokenCount,
       }
+      recordCompletedWorkflowAgentResult(ctx.runId, ctx.agentId, okResult)
+      return okResult
     }
     const text = extractTextContent(finalized.content, '\n')
-    return {
+    const okResult: AgentRunResult = {
       kind: 'ok',
       output: text,
       usage: { outputTokens },
@@ -534,5 +598,7 @@ export const claudeCodeBackend: AgentAdapter = {
       toolCount: finalToolCount,
       tokenCount: finalTokenCount,
     }
+    recordCompletedWorkflowAgentResult(ctx.runId, ctx.agentId, okResult)
+    return okResult
   },
 }

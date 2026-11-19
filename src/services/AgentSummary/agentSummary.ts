@@ -27,6 +27,59 @@ import {
 } from './summaryPrompt.js'
 
 const SUMMARY_INTERVAL_MS = 30_000
+export const AGENT_SUMMARY_MAX_HOLD_MS = 300_000
+export const AGENT_SUMMARY_HOLD_POLL_MS = 15_000
+export const AGENT_SUMMARY_COLD_CACHE_MS = 270_000
+
+export type AgentOwnRequestsState = {
+  lastResponseAt?: number
+  isAwaitingResponse: boolean
+  responsesBegun: number
+  hasChangedModel?: boolean
+}
+
+/**
+ * Official 2.1.318 pa(jt, now) — true when the sub-agent's own prompt cache is
+ * likely cold (no response yet, or >= 270s since last response).
+ */
+export function isAgentCacheLikelyCold(
+  ownRequests: AgentOwnRequestsState,
+  now: number = Date.now(),
+): boolean {
+  return (
+    ownRequests.lastResponseAt === undefined ||
+    now - ownRequests.lastResponseAt >= AGENT_SUMMARY_COLD_CACHE_MS
+  )
+}
+
+export function shouldHoldFullSummaryForColdCache(opts: {
+  ownRequests: AgentOwnRequestsState | undefined
+  heldMs: number
+  heldAtResponsesBegun: number | undefined
+  now?: number
+  maxHoldMs?: number
+}): boolean {
+  const {
+    ownRequests,
+    heldMs,
+    heldAtResponsesBegun,
+    now = Date.now(),
+    maxHoldMs = AGENT_SUMMARY_MAX_HOLD_MS,
+  } = opts
+  if (ownRequests === undefined || ownRequests.hasChangedModel) {
+    return false
+  }
+  if (!isAgentCacheLikelyCold(ownRequests, now)) {
+    return false
+  }
+  if (!ownRequests.isAwaitingResponse) {
+    return false
+  }
+  if (heldMs >= maxHoldMs) {
+    return false
+  }
+  return heldMs === 0 || ownRequests.responsesBegun === heldAtResponsesBegun
+}
 
 export type AgentSummaryDependencies = Partial<{
   clearTimeout: typeof clearTimeout
@@ -36,6 +89,10 @@ export type AgentSummaryDependencies = Partial<{
   runForkedAgent: typeof runForkedAgent
   setTimeout: typeof setTimeout
   updateAgentSummary: typeof updateAgentSummary
+  ownRequests: AgentOwnRequestsState
+  maxHoldMs: number
+  holdPollMs: number
+  now: () => number
 }>
 
 export function startAgentSummarization(
@@ -54,6 +111,9 @@ export function startAgentSummarization(
   let stopped = false
   let previousSummary: string | null = null
   let lastHandledTranscriptFingerprint: string | null = null
+  let heldMs = 0
+  let heldAtResponsesBegun: number | undefined
+  let didHoldThisTick = false
   const clearTimeoutImpl = dependencies.clearTimeout ?? clearTimeout
   const getAgentTranscriptImpl =
     dependencies.getAgentTranscript ?? getAgentTranscript
@@ -63,6 +123,9 @@ export function startAgentSummarization(
   const setTimeoutImpl = dependencies.setTimeout ?? setTimeout
   const updateAgentSummaryImpl =
     dependencies.updateAgentSummary ?? updateAgentSummary
+  const maxHoldMs = dependencies.maxHoldMs ?? AGENT_SUMMARY_MAX_HOLD_MS
+  const holdPollMs = dependencies.holdPollMs ?? AGENT_SUMMARY_HOLD_POLL_MS
+  const nowImpl = dependencies.now ?? Date.now
 
   async function runSummary(): Promise<void> {
     if (stopped) return
@@ -96,6 +159,32 @@ export function startAgentSummarization(
           `[AgentSummary] Skipping summary for ${taskId}: no bounded context available`,
         )
         return
+      }
+
+      didHoldThisTick = false
+      if (
+        shouldHoldFullSummaryForColdCache({
+          ownRequests: dependencies.ownRequests,
+          heldMs,
+          heldAtResponsesBegun,
+          now: nowImpl(),
+          maxHoldMs,
+        })
+      ) {
+        if (heldMs === 0) {
+          logForDebuggingImpl(
+            `[AgentSummary] Holding summary for ${taskId}: the sub-agent's own request has no response yet and its prompt cache is likely cold. Looking again every ${holdPollMs / 1000}s, for ${maxHoldMs / 60_000} min at most`,
+          )
+          heldAtResponsesBegun = dependencies.ownRequests?.responsesBegun
+        }
+        heldMs += holdPollMs
+        didHoldThisTick = true
+        return
+      }
+      if (heldMs > 0) {
+        logForDebuggingImpl(
+          `[AgentSummary] The hold for ${taskId} ended after ${heldMs / 1000}s`,
+        )
       }
 
       // Build fork params with current messages
@@ -172,6 +261,10 @@ export function startAgentSummarization(
       }
     } finally {
       summaryAbortController = null
+      if (!didHoldThisTick) {
+        heldMs = 0
+        heldAtResponsesBegun = undefined
+      }
       // Reset timer on completion (not initiation) to prevent overlapping summaries
       if (!stopped) {
         scheduleNext()
@@ -181,7 +274,10 @@ export function startAgentSummarization(
 
   function scheduleNext(): void {
     if (stopped) return
-    timeoutId = setTimeoutImpl(runSummary, SUMMARY_INTERVAL_MS)
+    timeoutId = setTimeoutImpl(
+      runSummary,
+      heldMs > 0 ? holdPollMs : SUMMARY_INTERVAL_MS,
+    )
   }
 
   function stop(): void {

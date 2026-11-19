@@ -3411,6 +3411,20 @@ function relocateToolReferenceSiblings(
  * When `model` is set and J8t(model), pure-text meta attachments after a user
  * turn become `api_system` (role:system on the wire) instead of isMeta user.
  */
+const PROMPT_HOOK_ADDITIONAL_CONTEXT_NAMES = new Set([
+  'prompt.submit',
+  'prompt.mention',
+])
+
+export function isPromptHookAdditionalContextAttachment(
+  attachment: Attachment,
+): boolean {
+  return (
+    attachment.type === 'hook_additional_context' &&
+    PROMPT_HOOK_ADDITIONAL_CONTEXT_NAMES.has(attachment.hookName)
+  )
+}
+
 export function normalizeMessagesForAPI(
   messages: Message[],
   tools: Tools = [],
@@ -3848,7 +3862,13 @@ export function normalizeMessagesForAPI(
             message.attachment as Attachment,
           )
           // densable: l6s(B) on raw B before chair O5s; E.push(i?El(G):G)
-          if (midConvEnabled) {
+          // #1674 (Dyi / QFo): keep prompt.submit / prompt.mention hook_additional_context in user turn
+          if (
+            midConvEnabled &&
+            !isPromptHookAdditionalContextAttachment(
+              message.attachment as Attachment,
+            )
+          ) {
             const pure = extractPureTextFromUserMessages(rawAttachmentMessage)
             if (pure !== null) {
               metaBuffer.push(

@@ -375,6 +375,7 @@ import {
 import { getLastCacheSafeParams } from 'src/utils/forkedAgent.js'
 import {
   getAccountInformation,
+  getClaudeAIOAuthTokens,
   getOauthAccountInfo,
   isClaudeAISubscriber,
 } from 'src/utils/auth.js'
@@ -426,6 +427,7 @@ import {
   restoreSessionMetadata,
   addTranscriptMirror,
   cacheSessionTitle,
+  getTranscriptWriterDegraded,
 } from 'src/utils/sessionStorage.js'
 import { getReplBridgeHandle } from 'src/bridge/replBridgeHandle.js'
 import { incrementPromptCount } from 'src/utils/commitAttribution.js'
@@ -654,6 +656,7 @@ import {
   readUnreadMessages,
   markMessagesAsRead,
   isShutdownApproved,
+  consumePendingShutdownRequest,
 } from '../utils/teammateMailbox.js'
 import { removeTeammateFromTeamFile } from '../utils/swarm/teamHelpers.js'
 import { unassignTeammateTasks } from '../utils/tasks.js'
@@ -1306,6 +1309,69 @@ export class CostMetadataPusher {
     })
     this.lastSavedTotalCostUsd = totalCost
     this.lastPushedCostUsd = totalCost
+  }
+}
+
+const OAUTH_EXPIRY_DAY_MS = 86_400_000
+const OAUTH_EXPIRY_WINDOW_DAYS = 3
+const OAUTH_EXPIRY_WARN_LEAD_DAYS = 7 + OAUTH_EXPIRY_WINDOW_DAYS
+
+/**
+ * Official `Syi` (#1619) — warn on stderr (single line) within 10 days of
+ * claude.ai refresh token expiry in non-json/non-stream-json print mode.
+ */
+export function warnOAuthExpiryBeforePrint(
+  nowMs: number = Date.now(),
+  tokens: {
+    refreshToken?: string
+    refreshTokenExpiresAt?: number
+    expiresAt?: number
+  } | null = getAPIProvider() === 'firstParty' && isClaudeAISubscriber()
+    ? getClaudeAIOAuthTokens()
+    : null,
+  writeStderr: (line: string) => void = line => {
+    process.stderr.write(line)
+  },
+): boolean {
+  try {
+    if (
+      !tokens?.refreshToken ||
+      typeof tokens.refreshTokenExpiresAt !== 'number' ||
+      !Number.isFinite(tokens.refreshTokenExpiresAt)
+    ) {
+      return false
+    }
+    const expiresAtMs = tokens.refreshTokenExpiresAt
+    if (
+      typeof tokens.expiresAt === 'number' &&
+      tokens.expiresAt >
+        expiresAtMs + OAUTH_EXPIRY_WINDOW_DAYS * OAUTH_EXPIRY_DAY_MS
+    ) {
+      return false
+    }
+    const remainingMs = expiresAtMs - nowMs
+    if (remainingMs >= OAUTH_EXPIRY_WARN_LEAD_DAYS * OAUTH_EXPIRY_DAY_MS) {
+      return false
+    }
+    const earliestMs =
+      expiresAtMs - OAUTH_EXPIRY_WINDOW_DAYS * OAUTH_EXPIRY_DAY_MS
+    const earliest = new Date(earliestMs).toISOString().slice(0, 10)
+    const latest = new Date(expiresAtMs).toISOString().slice(0, 10)
+    const daysToEarliest =
+      Math.floor(earliestMs / OAUTH_EXPIRY_DAY_MS) -
+      Math.floor(nowMs / OAUTH_EXPIRY_DAY_MS)
+    const line =
+      remainingMs <= 0
+        ? `Warning: this sign-in may have ended between ${earliest} and ${latest}. If requests are refused, run claude auth login, or use claude setup-token for unattended jobs.\n`
+        : daysToEarliest < 1
+          ? `Warning: this sign-in can end at any time from now until ${latest}. Renewing it does not move that date. Run claude auth login now, or use claude setup-token for unattended jobs.\n`
+          : `Warning: this sign-in ends between ${earliest} and ${latest} (in ${daysToEarliest} ${daysToEarliest === 1 ? 'day' : 'days'} at the earliest). Renewing it does not move those dates. Run claude auth login before then, or use claude setup-token for unattended jobs.\n`
+    writeStderr(line)
+    logEvent('oauth_expiry_warning', {})
+    return true
+  } catch (e) {
+    logError(e)
+    return false
   }
 }
 
@@ -2099,6 +2165,9 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
   const needsFullArray = options.outputFormat === 'json' && options.verbose
   const isTextOutput =
     options.outputFormat !== 'json' && options.outputFormat !== 'stream-json'
+  if (isTextOutput) {
+    warnOAuthExpiryBeforePrint()
+  }
   const textResults = new PrintTextResults({
     maxTurns: options.maxTurns,
     maxBudgetUsd: options.maxBudgetUsd,
@@ -2241,9 +2310,29 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
     }
   }
 
-  gracefulShutdownSync(
-    lastMessage?.type === 'result' && lastMessage?.is_error ? 1 : 0,
-  )
+  let exitCode = lastMessage?.type === 'result' && lastMessage?.is_error ? 1 : 0
+  if (options.outputFormat !== 'stream-json') {
+    const degraded = getTranscriptWriterDegraded()
+    if (
+      degraded &&
+      (degraded.code === 'ENOSPC' || degraded.code === 'EDQUOT')
+    ) {
+      exitCode = 1
+      const reason =
+        degraded.code === 'EDQUOT'
+          ? 'your disk quota is used up (EDQUOT)'
+          : `the disk is full (${degraded.code})`
+      const hint =
+        degraded.code === 'EDQUOT'
+          ? 'Free up space, or ask for a larger quota, before the next run.'
+          : 'Free up space on that disk before the next run.'
+      process.stderr.write(
+        `Error: Claude Code could not save this session's transcript because ${reason}. If you resume this session, part of the conversation may be missing. ${hint}\n`,
+      )
+    }
+  }
+
+  gracefulShutdownSync(exitCode)
 }
 
 function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
@@ -2353,6 +2442,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
   let turnAbortedForShutdown = false
   let shuttingDownForPrint = false
   let abortController: AbortController | undefined
+  let pendingSetModelPromise: Promise<void> = Promise.resolve()
   // densable 2.1.289 admits/doom — run() installs live gates; interrupt
   // subscribe arms via this latch once drain is live.
   let printStartGate: ReturnType<typeof createPrintStartGate> | undefined
@@ -4091,6 +4181,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
       // ask() call so messages that queued up during a long turn coalesce
       // into a single follow-up turn instead of N separate turns.
       const drainCommandQueue = async () => {
+        await pendingSetModelPromise
         while (true) {
           // densable `odo`/`dequeueOrphansFirst`: continues===true && !holdsBack,
           // then orphans without handedOffTurn, then any !holdsBack orphan —
@@ -5482,7 +5573,14 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
             const teamName = refreshedState.teamContext?.teamName
             for (const m of unread) {
               const shutdownApproval = isShutdownApproved(m.text)
-              if (shutdownApproval && teamName) {
+              if (
+                shutdownApproval &&
+                teamName &&
+                consumePendingShutdownRequest(
+                  shutdownApproval.requestId,
+                  shutdownApproval.from,
+                )
+              ) {
                 const teammateToRemove = shutdownApproval.from
                 logForDebugging(
                   `[print.ts] Processing shutdown_approved from ${teammateToRemove}`,
@@ -6242,6 +6340,10 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
             if (abortController) {
               markSessionStoppedForPluginInput()
               abortController.abort()
+            } else {
+              // #1634: interrupt arriving while a turn is queued/waiting (e.g.
+              // right after set_model) must cancel the pending queued message.
+              printPrewait?.interruptBeforeArm(getCommandQueue())
             }
             suggestionState.abortController?.abort()
             suggestionState.abortController = null
@@ -6255,6 +6357,10 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
             if (abortController) {
               markSessionStoppedForPluginInput()
               abortController.abort()
+            } else {
+              // #1634: interrupt arriving while a turn is queued/waiting (e.g.
+              // right after set_model) must cancel the pending queued message.
+              printPrewait?.interruptBeforeArm(getCommandQueue())
             }
             suggestionState.abortController?.abort()
             suggestionState.abortController = null
@@ -6339,19 +6445,27 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
             // notifySessionMetadataChanged that used to follow here is
             // now fired by onChangeAppState (with externalized mode name).
           } else if (msg.request.subtype === 'set_model') {
-            await controlPlane.handleSetModel(
-              msg as SDKControlRequest & {
-                request: { subtype: 'set_model'; model?: string }
-              },
-              {
-                activeUserSpecifiedModel,
-                setActiveUserSpecifiedModel: model => {
-                  activeUserSpecifiedModel = model
-                },
-                mutableMessages,
-                injectModelSwitchBreadcrumbs,
-              },
-            )
+            // #1634: Do not block the stdin loop on handleSetModel so a
+            // following user message + interrupt can be read and cancelled.
+            const setModelMsg = msg as SDKControlRequest & {
+              request: { subtype: 'set_model'; model?: string }
+            }
+            deferControlLifecycleUntilDone(() => {
+              const runSetModel = () =>
+                controlPlane.handleSetModel(setModelMsg, {
+                  activeUserSpecifiedModel,
+                  setActiveUserSpecifiedModel: model => {
+                    activeUserSpecifiedModel = model
+                  },
+                  mutableMessages,
+                  injectModelSwitchBreadcrumbs,
+                })
+              pendingSetModelPromise = pendingSetModelPromise.then(
+                runSetModel,
+                runSetModel,
+              )
+              return pendingSetModelPromise
+            })
           } else if (msg.request.subtype === 'set_max_thinking_tokens') {
             if (msg.request.max_thinking_tokens === null) {
               options.thinkingConfig = undefined
@@ -7682,14 +7796,9 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
             // Haiku must not block the stdin loop, but must not mark complete early.
             const description = req.description as string
             const persist = req.persist as boolean
-            // Reuse the live controller only if it has not already been aborted
-            // (e.g. by interrupt()); an aborted signal would cause queryHaiku to
-            // immediately throw APIUserAbortError → {title: null}.
-            const titleSignal = (
-              abortController && !abortController.signal.aborted
-                ? abortController
-                : createAbortController()
-            ).signal
+            // #1544: Use an independent AbortController not tied to turn Stop
+            // so interrupting/stopping the turn does not abort title generation.
+            const titleSignal = createAbortController().signal
             deferControlLifecycleUntilDone(async () => {
               try {
                 const title = await generateSessionTitle(
@@ -9397,7 +9506,9 @@ export function createCanUseToolWithPermissionPrompt(
         toolUseContext,
         {
           askSuppressesAlwaysAllowRule:
-            mainPermissionResult.suppressAlwaysAllowRule === true,
+            mainPermissionResult.suppressAlwaysAllowRule === true ||
+            (toolUseContext as { hookCaller?: unknown }).hookCaller !==
+              undefined,
         },
       )
     } finally {

@@ -3,7 +3,10 @@ import {
   getFeatureValue_CACHED_MAY_BE_STALE,
   getFeatureValue_CACHED_WITH_REFRESH,
 } from 'src/services/analytics/growthbook.js'
-import { DEFAULT_CRON_JITTER_CONFIG } from 'src/utils/cronTasks.js'
+import {
+  DEFAULT_CRON_JITTER_CONFIG,
+  hasCronTasksSync,
+} from 'src/utils/cronTasks.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 
 const KAIROS_CRON_REFRESH_MS = 5 * 60 * 1000
@@ -59,6 +62,14 @@ export function isKairosCronEnabled(): boolean {
       )
     )
   }
+}
+
+/**
+ * Official NWn (#1557): allow CronList and CronDelete when scheduled tasks are
+ * disabled if stored durable cron tasks still exist.
+ */
+export function isCronManagementEnabled(): boolean {
+  return isKairosCronEnabled() || hasCronTasksSync()
 }
 
 /**

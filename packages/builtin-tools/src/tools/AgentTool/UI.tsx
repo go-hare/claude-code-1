@@ -22,6 +22,7 @@ import { formatDuration, formatFileSize, formatNumber } from 'src/utils/format.j
 import { buildSubagentLookups, createAssistantMessage, EMPTY_LOOKUPS } from 'src/utils/messages.js';
 import type { ModelAlias } from 'src/utils/model/aliases.js';
 import { getMainLoopModel, parseUserSpecifiedModel, renderModelName } from 'src/utils/model/model.js';
+import { isScreenReaderModeEnabled } from 'src/utils/screenReaderGate.js';
 import type { Theme, ThemeName } from 'src/utils/theme.js';
 import type { outputSchema, Progress, RemoteLaunchedOutput } from './AgentTool.js';
 import { inputSchema } from './AgentTool.js';
@@ -715,6 +716,15 @@ export function renderToolUseProgressMessage(
     return (
       <MessageResponse height={1}>
         <Text dimColor>Fetching…</Text>
+      </MessageResponse>
+    );
+  }
+
+  // #1549: Avoid high-frequency live announcements for running subagents in screen reader mode.
+  if (!isTranscriptMode && isScreenReaderModeEnabled()) {
+    return (
+      <MessageResponse height={1}>
+        <Text dimColor>Running…</Text>
       </MessageResponse>
     );
   }

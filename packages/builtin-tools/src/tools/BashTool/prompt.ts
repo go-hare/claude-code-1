@@ -1,5 +1,6 @@
 import { feature } from 'bun:bundle'
 import { prependBullets } from 'src/constants/prompts.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import * as attributionMod from 'src/utils/attribution.js'
 import { hasEmbeddedSearchTools } from 'src/utils/embeddedTools.js'
 import {
@@ -13,6 +14,7 @@ import {
   hasMatchingFunctionHook,
   runFunctionHookChain,
 } from 'src/utils/plugins/functionHooksModules.js'
+import { getShellConfig } from 'src/utils/Shell.js'
 import { SandboxManager } from 'src/utils/sandbox/sandbox-adapter.js'
 import { shouldUseSimpleSystemPrompt } from 'src/utils/simpleSystemPrompt.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
@@ -46,6 +48,46 @@ function getBackgroundUsageNote(): string | null {
     return null
   }
   return "You can use the `run_in_background` parameter to run the command in the background. Only use this if you don't need the result immediately and are OK being notified when the command completes later. You do not need to check the output right away - you'll be notified when it finishes. You do not need to use '&' at the end of the command when using this parameter."
+}
+
+/**
+ * Official kNs() (#1664): macOS /bin/bash 3.2 fails reliably on heredocs inside `$(...)`.
+ */
+export async function shouldTeachHeredocOnStdin(
+  shellPathOverride?: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<boolean> {
+  if (platform !== 'darwin') return false
+  if (!getFeatureValue_CACHED_MAY_BE_STALE('tengu_mossy_anvil', true)) {
+    return false
+  }
+  try {
+    const shellPath =
+      shellPathOverride ?? (await getShellConfig()).provider.shellPath
+    return shellPath === '/bin/bash'
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Official Kwn() (#1664): prompt guidance for macOS /bin/bash 3.2 heredoc-on-stdin.
+ */
+export async function getMacOsBash32HeredocNote(
+  includeGitExamples = shouldIncludeGitInstructions(),
+  shellPathOverride?: string,
+  platform: NodeJS.Platform = process.platform,
+): Promise<string | null> {
+  if (!(await shouldTeachHeredocOnStdin(shellPathOverride, platform))) {
+    return null
+  }
+  const [examples, pronoun] = includeGitExamples
+    ? [
+        " (`git commit -F - <<'EOF'`, `gh pr create --body-file - <<'EOF'`)",
+        'those options',
+      ]
+    : [" with `<<'EOF'`", 'that']
+  return `This tool runs macOS's /bin/bash (version 3.2), too old to run a heredoc inside \`$(...)\` reliably. Never write \`"$(cat <<'EOF' … EOF)"\`, even where other instructions show it. Pass multi-line text on stdin${examples} and end the command at \`EOF\`: run what follows as a separate call. Where a command cannot read stdin, or a skill refuses ${pronoun}, use one single-quoted string, writing each \`'\` as \`'\\''\`.`
 }
 
 const ATTRIBUTION_TEXT_SITE = {
@@ -181,6 +223,14 @@ ${GITHUB_MENTION_RULE}.
     ? `You can call multiple tools in a single response when independent. On Windows, prefer combining read-only git queries into one ${BASH_TOOL_NAME} call rather than many parallel git Bash tool calls.`
     : `You can call multiple tools in a single response. When multiple independent pieces of information are requested and all commands are likely to succeed, run multiple tool calls in parallel for optimal performance. The numbered steps below indicate which commands should be batched in parallel.`
 
+  const teachHeredocOnStdin = await shouldTeachHeredocOnStdin()
+  const commitExample = teachHeredocOnStdin
+    ? `git commit -F - <<'EOF'\nCommit message here.${commitAttribution ? `\n\n${commitAttribution}` : ''}\nEOF`
+    : `git commit -m "$(cat <<'EOF'\n   Commit message here.${commitAttribution ? `\n\n   ${commitAttribution}` : ''}\n   EOF\n   )"`
+  const prExample = teachHeredocOnStdin
+    ? `gh pr create --title "the pr title" --body-file - <<'EOF'\n## Summary\n<1-3 bullet points>\n\n## Test plan\n[Bulleted markdown checklist of TODOs for testing the pull request...]${prAttribution ? `\n\n${prAttribution}` : ''}\nEOF`
+    : `gh pr create --title "the pr title" --body "$(cat <<'EOF'\n## Summary\n<1-3 bullet points>\n\n## Test plan\n[Bulleted markdown checklist of TODOs for testing the pull request...]${prAttribution ? `\n\n${prAttribution}` : ''}\nEOF\n)"`
+
   return `# Committing changes with git
 
 Only create commits when requested by the user. If unclear, ask first. When the user asks you to create a new git commit, follow these steps carefully:
@@ -218,10 +268,7 @@ Important notes:
 - If there are no changes to commit (i.e., no untracked files and no modifications), do not create an empty commit
 - In order to ensure good formatting, ALWAYS pass the commit message via a HEREDOC, a la this example:
 <example>
-git commit -m "$(cat <<'EOF'
-   Commit message here.${commitAttribution ? `\n\n   ${commitAttribution}` : ''}
-   EOF
-   )"
+${commitExample}
 </example>
 
 # Creating pull requests
@@ -240,14 +287,7 @@ ${prStep1}
    - Push to remote with -u flag if needed
    - Create PR using gh pr create with the format below. Use a HEREDOC to pass the body to ensure correct formatting.
 <example>
-gh pr create --title "the pr title" --body "$(cat <<'EOF'
-## Summary
-<1-3 bullet points>
-
-## Test plan
-[Bulleted markdown checklist of TODOs for testing the pull request...]${prAttribution ? `\n\n${prAttribution}` : ''}
-EOF
-)"
+${prExample}
 </example>
 
 Important:
@@ -429,8 +469,10 @@ async function getLeanBashPrompt(): Promise<string> {
   // densable 2.1.289 kJn — fixed Bash tool description bullet (SEA gold).
   const outputDisplayLine =
     'Command output is displayed to you, not reliably to the user.'
+  const heredocNote = await getMacOsBash32HeredocNote()
   return [
     'Executes a bash command and returns its output.',
+    ...(heredocNote ? ['', heredocNote] : []),
     '',
     workingDirLine,
     ...toolLines,
@@ -550,10 +592,14 @@ export async function getSimplePrompt(
       : []),
   ]
 
-  const commitAndPRInstructions = await getCommitAndPRInstructions()
+  const [commitAndPRInstructions, heredocNote] = await Promise.all([
+    getCommitAndPRInstructions(),
+    getMacOsBash32HeredocNote(),
+  ])
 
   return [
     'Executes a given bash command and returns its output.',
+    ...(heredocNote ? ['', heredocNote] : []),
     '',
     `${getWorkingDirPersistenceNote()} Shell state does not persist. The shell environment is initialized from the user's profile (bash or zsh).`,
     '',

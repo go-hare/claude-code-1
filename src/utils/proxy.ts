@@ -5,6 +5,11 @@
 import axios, { type AxiosInstance } from 'axios'
 import type { LookupOptions } from 'dns'
 import type { Agent } from 'http'
+import {
+  Agent as HttpsAgent,
+  type AgentOptions as HttpsAgentOptions,
+} from 'https'
+import type { Socket } from 'net'
 import { HttpsProxyAgent, type HttpsProxyAgentOptions } from 'https-proxy-agent'
 import memoize from 'lodash-es/memoize.js'
 import type * as undici from 'undici'
@@ -32,6 +37,157 @@ export function disableKeepAlive(): void {
 
 export function _resetKeepAliveForTesting(): void {
   keepAliveDisabled = false
+  closesAfterServerError = false
+  trackedHttpsAgents.clear()
+}
+
+let closesAfterServerError = false
+const trackedHttpsAgents = new Set<HttpsAgent>()
+
+/**
+ * Official `r5t(e)` (#1588/#1589/#1590) — 5xx status codes that should drop the
+ * keep-alive connection and idle sockets (excludes 501 Not Implemented and 529
+ * Overloaded).
+ */
+export function isServerErrorClosingStatus(statusCode: number): boolean {
+  return statusCode >= 500 && statusCode !== 501 && statusCode !== 529
+}
+
+/**
+ * Official `mr(e)` — destroy all idle sockets currently in `agent.freeSockets`.
+ */
+export function destroyAgentFreeSockets(
+  agent: Pick<HttpsAgent, 'freeSockets'> | undefined,
+): void {
+  if (!agent?.freeSockets) return
+  for (const list of Object.values(agent.freeSockets)) {
+    for (const sock of [...(list ?? [])]) {
+      sock.destroy()
+    }
+  }
+}
+
+/**
+ * Official `at(e)` — prevent future free-socket pooling and destroy existing idle sockets.
+ */
+export function retireKeepAliveAgent(
+  agent:
+    | (Pick<HttpsAgent, 'freeSockets'> & { maxFreeSockets?: number })
+    | undefined,
+): void {
+  if (!agent) return
+  agent.maxFreeSockets = 0
+  destroyAgentFreeSockets(agent)
+}
+
+/**
+ * Official `class Er extends Agent` (#1588/#1589/#1590) — when a server answers
+ * with a 5xx status (other than 501 or 529), close that socket and destroy all
+ * idle freeSockets to the same `host:port:` so the next request opens a fresh
+ * connection.
+ */
+export class KeepAliveErrorClosingAgent extends HttpsAgent {
+  override keepSocketAlive(socket: Socket): boolean {
+    const httpSocket = socket as Socket & {
+      _httpMessage?: { res?: { statusCode?: number }; host?: string }
+    }
+    const req = httpSocket._httpMessage
+    const port = httpSocket.remotePort
+    const statusCode = req?.res?.statusCode
+    if (statusCode === undefined || !isServerErrorClosingStatus(statusCode)) {
+      return Boolean(super.keepSocketAlive(socket))
+    }
+    logForDebugging(
+      `HTTPS agent: a server on port ${port} answered ${statusCode}; closing that connection and the idle ones to the same host and port, so the next request opens a new one`,
+    )
+    const prefix = `${req?.host}:${port}:`
+    for (const [key, list] of Object.entries(this.freeSockets)) {
+      if (key.startsWith(prefix)) {
+        for (const sock of [...(list ?? [])]) {
+          sock.destroy()
+        }
+      }
+    }
+    return false
+  }
+}
+
+/**
+ * Official `Fxt()` — enable `KeepAliveErrorClosingAgent` for new HTTPS agents
+ * and retire/destroy idle sockets on existing tracked agents.
+ */
+export function enableClosesAfterServerError(): void {
+  closesAfterServerError = true
+  for (const agent of trackedHttpsAgents) {
+    retireKeepAliveAgent(agent)
+  }
+  trackedHttpsAgents.clear()
+  retireKeepAliveAgent(
+    axios.defaults.httpsAgent as
+      | (Pick<HttpsAgent, 'freeSockets'> & { maxFreeSockets?: number })
+      | undefined,
+  )
+  retireKeepAliveAgent(
+    axios.defaults.httpAgent as
+      | (Pick<HttpsAgent, 'freeSockets'> & { maxFreeSockets?: number })
+      | undefined,
+  )
+}
+
+export function shouldCloseAfterServerError(): boolean {
+  return closesAfterServerError
+}
+
+export function createKeepAliveHttpsAgent(
+  options: HttpsAgentOptions = {},
+): HttpsAgent {
+  const agent = closesAfterServerError
+    ? new KeepAliveErrorClosingAgent({ keepAlive: true, ...options })
+    : new HttpsAgent({ keepAlive: true, ...options })
+  trackedHttpsAgents.add(agent)
+  return agent
+}
+
+/**
+ * Destroy idle keep-alive sockets on an agent for a specific URL (e.g. when a
+ * heartbeat or request gets no response).
+ */
+export function destroyFreeSocketsForUrl(
+  agent: Pick<HttpsAgent, 'freeSockets'> | undefined,
+  rawUrl: string | undefined,
+): void {
+  if (!agent?.freeSockets || !rawUrl) return
+  let parsed: URL
+  try {
+    parsed = new URL(rawUrl)
+  } catch {
+    return
+  }
+  const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80')
+  const prefix = `${parsed.hostname.replace(/^\[(.*)\]$/, '$1')}:${port}:`
+  for (const [key, list] of Object.entries(agent.freeSockets)) {
+    if (key.startsWith(prefix)) {
+      for (const sock of [...(list ?? [])]) {
+        sock.destroy()
+      }
+    }
+  }
+}
+
+/**
+ * Official `GNa()` — destroy idle freeSockets across all tracked HTTPS agents
+ * and axios default agents.
+ */
+export function destroyAllFreeSockets(): void {
+  for (const agent of trackedHttpsAgents) {
+    destroyAgentFreeSockets(agent)
+  }
+  destroyAgentFreeSockets(
+    axios.defaults.httpsAgent as Pick<HttpsAgent, 'freeSockets'> | undefined,
+  )
+  destroyAgentFreeSockets(
+    axios.defaults.httpAgent as Pick<HttpsAgent, 'freeSockets'> | undefined,
+  )
 }
 
 /**

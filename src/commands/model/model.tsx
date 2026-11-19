@@ -23,7 +23,17 @@ import {
   resolveFastModeAfterModelSwitch,
 } from '../../utils/fastMode.js';
 import { getOauthAccountInfo } from '../../utils/auth.js';
-import { getFableSessionFallbackConsented, setFableSessionFallbackConsented } from '../../bootstrap/state.js';
+import {
+  getFableSessionFallbackConsented,
+  getIsRemoteMode,
+  setFableSessionFallbackConsented,
+} from '../../bootstrap/state.js';
+import { formatTokens } from '../../utils/format.js';
+import {
+  buildUnrecognizedModelNotice,
+  MODEL_CONFIG_WINDOW_DOCS_URL,
+  sanitizeModelForNotice,
+} from '../../utils/model/unrecognizedModelSignal.js';
 import { shouldApplyDeferredEffortCommit, shouldShowFableConsentDialog } from '../../utils/fableConsent.js';
 import { saveSessionModel } from '../../utils/sessionStorage.js';
 import { updateSettingsForSource } from '../../utils/settings/settings.js';
@@ -253,6 +263,12 @@ function ModelPickerWrapper({
       }));
     }
     message += applied.suffix;
+    if (!getIsRemoteMode()) {
+      const notice = buildUnrecognizedModelNotice(model ?? getDefaultMainLoopModel());
+      if (notice !== null) {
+        message += `\n${formatModelCommandUnrecognizedWarning(notice)}`;
+      }
+    }
     if (pre.messages.length > 0) {
       message += `\n${pre.messages.join('\n')}`;
     }
@@ -449,6 +465,12 @@ function SetModelAndClose({
       }));
       let message = `Set model to ${em(renderModelLabel(modelValue))}`;
       message += applied.suffix;
+      if (!getIsRemoteMode()) {
+        const notice = buildUnrecognizedModelNotice(modelValue ?? getDefaultMainLoopModel());
+        if (notice !== null) {
+          message += `\n${formatModelCommandUnrecognizedWarning(notice)}`;
+        }
+      }
       if (pre.messages.length > 0) {
         message += `\n${pre.messages.join('\n')}`;
       }
@@ -465,6 +487,14 @@ function SetModelAndClose({
   }, [model, onDone, setAppState]);
 
   return null;
+}
+
+function formatModelCommandUnrecognizedWarning(notice: { model: string; window: number; suggestion?: string }): string {
+  const sanitized = sanitizeModelForNotice(notice.model);
+  if (notice.suggestion !== undefined) {
+    return `Claude Code doesn't recognize the model "${sanitized}". Did you mean "${notice.suggestion}"?`;
+  }
+  return `Claude Code doesn't recognize the model "${sanitized}", so it assumes a context window of ${formatTokens(notice.window)} tokens. Update Claude Code, or see ${MODEL_CONFIG_WINDOW_DOCS_URL} to set the window.`;
 }
 
 function isKnownAlias(model: string): boolean {

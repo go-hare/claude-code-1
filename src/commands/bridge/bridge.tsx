@@ -98,13 +98,19 @@ function BridgeDisconnectDialog({ onDone }: Props): React.ReactNode {
   const sessionUrl = useAppState(s => s.replBridgeSessionUrl);
   const connectUrl = useAppState(s => s.replBridgeConnectUrl);
   const sessionActive = useAppState(s => s.replBridgeSessionActive);
+  const connected = useAppState(s => s.replBridgeConnected);
+  const reconnecting = useAppState(s => s.replBridgeReconnecting);
+  const bridgeEnabled = useAppState(s => s.replBridgeEnabled);
+  const bridgeError = useAppState(s => s.replBridgeError);
   const [showQR, setShowQR] = useState(false);
   const [qrText, setQrText] = useState('');
 
+  const isConnected = connected && !reconnecting;
+  const hasError = !isConnected && Boolean(bridgeError);
   const displayUrl = sessionActive ? sessionUrl : connectUrl;
 
   useEffect(() => {
-    if (!showQR || !displayUrl) {
+    if (!showQR || !isConnected || !displayUrl) {
       setQrText('');
       return;
     }
@@ -115,7 +121,7 @@ function BridgeDisconnectDialog({ onDone }: Props): React.ReactNode {
     } as Parameters<typeof qrToString>[1])
       .then(setQrText)
       .catch(() => setQrText(''));
-  }, [showQR, displayUrl]);
+  }, [showQR, isConnected, displayUrl]);
 
   function handleDisconnect(): void {
     setAppState(prev => {
@@ -134,7 +140,9 @@ function BridgeDisconnectDialog({ onDone }: Props): React.ReactNode {
   }
 
   function handleShowQR(): void {
-    setShowQR(prev => !prev);
+    if (isConnected) {
+      setShowQR(prev => !prev);
+    }
   }
 
   function handleContinue(): void {
@@ -145,22 +153,37 @@ function BridgeDisconnectDialog({ onDone }: Props): React.ReactNode {
 
   const actions = [
     { key: 'disconnect', label: 'Disconnect this session', facts: [] as string[], run: handleDisconnect },
-    {
-      key: 'qr',
-      label: showQR ? 'Hide QR code' : 'Show QR code',
-      facts: showQR ? [] : ['Scan with your phone to open this session'],
-      run: handleShowQR,
-    },
+    ...(isConnected || hasError
+      ? [
+          {
+            key: 'qr',
+            label: !isConnected ? 'QR code unavailable' : showQR ? 'Hide QR code' : 'Show QR code',
+            facts: isConnected && !showQR ? ['Scan with your phone to open this session'] : [],
+            run: handleShowQR,
+          },
+        ]
+      : []),
     { key: 'continue', label: 'Continue', facts: [] as string[], run: handleContinue },
   ];
+
+  const showNotConnected = hasError || (!connected && !bridgeEnabled);
 
   return (
     <Dialog title="Remote Control" onCancel={handleContinue} hideInputGuide>
       <Box flexDirection="column" gap={1}>
-        <Text>
-          This session is available in the Claude mobile app
-          {displayUrl ? ` and at ${displayUrl}` : ' and claude.ai/code'}.
-        </Text>
+        {isConnected ? (
+          <Text>
+            This session is available in the Claude mobile app
+            {displayUrl ? ` and at ${displayUrl}` : ' and claude.ai/code'}.
+          </Text>
+        ) : (
+          <Box flexDirection="column">
+            <Text color={hasError ? 'error' : 'warning'}>
+              {showNotConnected ? "Remote Control isn't connected." : 'Remote Control connecting…'}
+            </Text>
+            {bridgeError && <Text color="error">{bridgeError}</Text>}
+          </Box>
+        )}
         {showQR && qrLines.length > 0 && (
           <Box flexDirection="column">
             {qrLines.map((line, i) => (

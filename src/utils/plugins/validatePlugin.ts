@@ -3002,14 +3002,36 @@ export async function validateManifest(
     case 'marketplace':
       return validateMarketplaceManifest(filePath)
     case 'unknown': {
-      // Try to parse and guess based on content
+      // Try to parse and guess based on content (matches official marketplace add / Fs heuristic)
       try {
         const content = await readFile(absolutePath, { encoding: 'utf-8' })
-        const parsed = jsonParse(content) as Record<string, unknown>
-
-        // Heuristic: if it has a "plugins" array, it's probably a marketplace
-        if (Array.isArray(parsed.plugins)) {
-          return validateMarketplaceManifest(filePath)
+        const parsed = jsonParse(stripBOM(content))
+        if (
+          parsed !== null &&
+          typeof parsed === 'object' &&
+          !Array.isArray(parsed)
+        ) {
+          const obj = parsed as Record<string, unknown>
+          const keys = Object.keys(obj)
+          const marketplaceShape = PluginMarketplaceSchema().shape
+          const pluginShape = PluginManifestSchema().shape
+          const hasMarketplaceOnlyKey = keys.some(
+            k =>
+              Object.hasOwn(marketplaceShape, k) &&
+              !Object.hasOwn(pluginShape, k),
+          )
+          const hasPluginOnlyKey = keys.some(
+            k =>
+              Object.hasOwn(pluginShape, k) &&
+              !Object.hasOwn(marketplaceShape, k),
+          )
+          if (
+            Array.isArray(obj.plugins) ||
+            (Object.hasOwn(obj, 'plugins') && Object.hasOwn(obj, 'owner')) ||
+            (hasMarketplaceOnlyKey && !hasPluginOnlyKey)
+          ) {
+            return validateMarketplaceManifest(filePath)
+          }
         }
       } catch (e: unknown) {
         const code = getErrnoCode(e)

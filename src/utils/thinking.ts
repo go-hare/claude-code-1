@@ -1355,8 +1355,53 @@ export function classifySafeguardsNamedRetry(
   return 'retry:safeguards'
 }
 
+function isSafeguardsUnclaimedEligibleError(error: unknown): error is APIError {
+  if (!(error instanceof APIError)) return false
+  if (error.status === 400 || error.status === 422) {
+    return (
+      !isThinkingSignatureRejected(error) &&
+      !isThinkingBoundToOtherConversation(error)
+    )
+  }
+  if (error.status === 403) {
+    // Preserve model permission_error (A2e) and structured error_code (Kce) handling
+    const body =
+      error.error && typeof error.error === 'object'
+        ? (error.error as {
+            type?: unknown
+            message?: unknown
+            error?: { details?: { error_code?: unknown } }
+          })
+        : undefined
+    const msg = error.message ?? ''
+    const isModelPerm =
+      (body?.type === 'permission_error' ||
+        msg.includes('"type":"permission_error"') ||
+        msg.includes('"type": "permission_error"')) &&
+      (msg.includes('model:') ||
+        (typeof body?.message === 'string' && body.message.includes('model:')))
+    if (isModelPerm) return false
+    if (body?.error?.details?.error_code !== undefined) return false
+
+    // Preserve apiKeyHelper 403 behavior (do not treat as gateway safeguards rejection)
+    const { getAnthropicApiKeyWithSource, isClaudeAISubscriber } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./auth.js') as typeof import('./auth.js')
+    const { source } = getAnthropicApiKeyWithSource({
+      skipRetrievingKeyFromApiKeyHelper: true,
+    })
+    if (source === 'apiKeyHelper') return false
+    const provider = getAPIProvider()
+    return (
+      provider === 'gateway' ||
+      (provider === 'firstParty' && !isClaudeAISubscriber())
+    )
+  }
+  return false
+}
+
 /**
- * densable `R6e` @189304501 — `gke(Wn,!0)` then unnamed 400 while Gv is
+ * densable `R6e` @189304501 — `gke(Wn,!0)` then unnamed 400/422/gateway-403 while Gv is
  * sticky-sent and `k6e()` (3P ∧ header on the request).
  */
 export function classifySafeguardsUnclaimedRetry(
@@ -1374,16 +1419,14 @@ export function classifySafeguardsUnclaimedRetry(
   if (!isThirdPartyDangerousToolUseOnRequest(ctx.lastRequestBetas)) {
     return null
   }
-  if (
-    !isHttp400(error) ||
-    isThinkingSignatureRejected(error) ||
-    isThinkingBoundToOtherConversation(error)
-  ) {
+  if (!isSafeguardsUnclaimedEligibleError(error)) {
     return null
   }
   stickyRejectBeta(DANGEROUS_TOOL_USE_BETA_HEADER)
   logForDebugging(
-    '[server-classifier] an unrecognised HTTP 400 arrived while the dangerous-tool-use beta was on the request; retrying once without it, and auto mode decides with the local classifier for the rest of this conversation',
+    error.status === 400
+      ? '[server-classifier] an unrecognised HTTP 400 arrived while the dangerous-tool-use beta was on the request; retrying once without it, and auto mode decides with the local classifier for the rest of this conversation'
+      : `[server-classifier] an unrecognised HTTP ${error.status} arrived while the dangerous-tool-use beta was on the request; retrying once without it, and auto mode decides with the local classifier for the rest of this conversation`,
     { level: 'warn' },
   )
   logEvent('tengu_server_classifier_beta_rejected_retry', {
@@ -1392,6 +1435,7 @@ export function classifySafeguardsUnclaimedRetry(
     unnamed: false,
     foundryFeature: false,
     unclaimed: true,
+    status: error.status,
   })
   return 'retry:safeguards-unclaimed'
 }
@@ -1642,6 +1686,9 @@ export function providerSupportsThinkingBindingOn3P(
  */
 export function isUltrathinkEnabled(): boolean {
   if (!feature('ULTRATHINK')) {
+    return false
+  }
+  if (isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_ULTRATHINK)) {
     return false
   }
   return getFeatureValue_CACHED_MAY_BE_STALE('tengu_turtle_carbon', true)

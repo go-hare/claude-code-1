@@ -3,8 +3,10 @@ import { basename } from 'path'
 import { useCallback, useContext, useEffect, useRef } from 'react'
 import {
   getIsNonInteractiveSession,
+  getOriginalCwd,
   getSessionId,
 } from '../../bootstrap/state.js'
+import { getCwd } from '../../utils/cwd.js'
 import type { Command } from '../../commands.js'
 import type { Tool } from '../../Tool.js'
 import {
@@ -57,10 +59,20 @@ import {
   doesEnterpriseMcpConfigExist,
   filterMcpServersByPolicy,
   getClaudeCodeMcpConfigs,
+  getDisabledMcpServers,
   getMcpServerPolicyBlockReason,
   isMcpServerDisabled,
+  saveDisabledMcpServers,
   setMcpServerEnabled,
 } from 'src/services/mcp/config.js'
+import { notifyInternalMetadataChanged } from '../../utils/sessionState.js'
+import {
+  getActiveMcpSwitchedOffRecord,
+  isMcpSwitchedOffRecordKept,
+  McpSwitchedOffRecord,
+  type RestoredWorkerMcpState,
+  setActiveMcpSwitchedOffRecord,
+} from './mcpSwitchedOffRecord.js'
 import type { AppState } from 'src/state/AppState.js'
 import type { PluginError } from 'src/types/plugin.js'
 import { logForDebugging } from 'src/utils/debug.js'
@@ -157,6 +169,68 @@ function addErrorsToAppState(
         errors: [...prevState.plugins.errors, ...uniqueNewErrors],
       },
     }
+  })
+}
+
+/**
+ * Official #1600 — create a `McpSwitchedOffRecord` wired to project config
+ * (`getDisabledMcpServers`) and worker `internal_metadata.disabled_mcp_servers`
+ * (`notifyInternalMetadataChanged`).
+ */
+export function createManagedMcpSwitchedOffRecord(opts?: {
+  restoredWorkerState?: Promise<RestoredWorkerMcpState>
+  rereadWorkerState?: () => Promise<RestoredWorkerMcpState>
+  isKept?: boolean
+}): McpSwitchedOffRecord {
+  return new McpSwitchedOffRecord(
+    {
+      restoredWorkerState: opts?.restoredWorkerState ?? Promise.resolve(null),
+      rereadWorkerState: opts?.rereadWorkerState ?? (async () => null),
+      sessionState: {
+        notifyInternalMetadataChanged: patch =>
+          notifyInternalMetadataChanged(patch),
+      },
+    },
+    {
+      isKept: opts?.isKept ?? isMcpSwitchedOffRecordKept(),
+      getDisabledServers: getDisabledMcpServers,
+    },
+  )
+}
+
+/**
+ * Official #1600 — restore worker-persisted switched-off MCP servers into
+ * project config and close/disable any already-active connections.
+ */
+export async function restoreManagedMcpSwitchedOffRecord(
+  record: McpSwitchedOffRecord,
+  deps: {
+    getClients: () => readonly MCPServerConnection[]
+    closeConnection: (
+      name: string,
+      config: ScopedMcpServerConfig,
+    ) => Promise<void>
+    markDisabled: (name: string, config: ScopedMcpServerConfig) => void
+    closeTimeoutMs?: number
+  },
+): Promise<void> {
+  await record.restore({
+    saveDisabledServers: saveDisabledMcpServers,
+    getDisabledServers: getDisabledMcpServers,
+    getClients: deps.getClients,
+    closeClient: async (name, config, isStillSwitchedOff) => {
+      await deps.closeConnection(name, config as ScopedMcpServerConfig)
+      if (isStillSwitchedOff()) {
+        deps.markDisabled(name, config as ScopedMcpServerConfig)
+      }
+    },
+    dropClientTools: name => {
+      const current = deps.getClients().find(c => c.name === name)
+      if (current) {
+        deps.markDisabled(name, current.config)
+      }
+    },
+    closeTimeoutMs: deps.closeTimeoutMs,
   })
 }
 
@@ -402,6 +476,32 @@ export function useManageMCPConnections(
     },
     [flushPendingUpdates],
   )
+
+  // Official #1600 — bind/restore McpSwitchedOffRecord so switched-off MCP
+  // servers are restored on mount and kept synced on every toggle via
+  // setMcpServerEnabled → notifyMcpSwitchedOffSaved.
+  useEffect(() => {
+    const existing = getActiveMcpSwitchedOffRecord()
+    const owned = existing === null
+    const record = existing ?? createManagedMcpSwitchedOffRecord()
+    if (owned) {
+      setActiveMcpSwitchedOffRecord(record)
+    }
+    void restoreManagedMcpSwitchedOffRecord(record, {
+      getClients: () => store.getState().mcp.clients,
+      closeConnection: async (name, config) => {
+        await clearServerCache(name, config)
+      },
+      markDisabled: (name, config) => {
+        updateServer({ name, type: 'disabled', config })
+      },
+    })
+    return () => {
+      if (owned && getActiveMcpSwitchedOffRecord() === record) {
+        setActiveMcpSwitchedOffRecord(null)
+      }
+    }
+  }, [store, updateServer])
 
   const onConnectionAttempt = useCallback(
     ({
@@ -1076,6 +1176,8 @@ export function useManageMCPConnections(
           const { stale, ...mcpWithoutStale } = excludeStalePluginClients(
             prevMcp,
             configs,
+            getCwd(),
+            getOriginalCwd(),
           )
           const existingServerNames = new Set(
             mcpWithoutStale.clients.map(c => c.name),

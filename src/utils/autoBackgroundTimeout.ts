@@ -8,29 +8,64 @@
 
 export const AUTO_BACKGROUND_TIMEOUT_FLOOR_MS = 2000
 
+/** Official Lds = 180_000 (3 min) — subagent auto-background cap across all providers. */
+export const SUBAGENT_AUTO_BACKGROUND_CAP_MS = 180_000
+
 /**
- * Official WYn pure body.
- * Only applies when isMainAgent && canAutoBackground.
- * Invalid/non-positive env values leave requestedTimeoutMs unchanged.
+ * Official IDr (formerly WYn) pure body.
+ * When canAutoBackground is true:
+ * - Main agent uses CLAUDE_CODE_AUTO_BACKGROUND_TIMEOUT_MS
+ * - Subagents use subagentCapMs (e.g. 180_000ms)
+ * Invalid/non-positive values leave requestedTimeoutMs unchanged.
  */
 export function clampTimeoutForAutoBackground(input: {
   requestedTimeoutMs: number | undefined
   isMainAgent: boolean
   canAutoBackground: boolean
+  subagentCapMs?: number
   env?: NodeJS.ProcessEnv
   floorMs?: number
 }): number | undefined {
   const requested = input.requestedTimeoutMs
-  if (!input.isMainAgent || !input.canAutoBackground) return requested
+  if (!input.canAutoBackground) return requested
   if (requested === undefined) return requested
 
   const env = input.env ?? process.env
-  const raw = env.CLAUDE_CODE_AUTO_BACKGROUND_TIMEOUT_MS
-  if (!raw) return requested
-  const parsed = parseInt(raw, 10)
-  if (Number.isNaN(parsed) || parsed <= 0) return requested
+  const cap = input.isMainAgent
+    ? parseInt(env.CLAUDE_CODE_AUTO_BACKGROUND_TIMEOUT_MS ?? '', 10)
+    : (input.subagentCapMs ?? 0)
+  if (Number.isNaN(cap) || cap <= 0) return requested
   const floor = input.floorMs ?? AUTO_BACKGROUND_TIMEOUT_FLOOR_MS
-  return Math.min(requested, Math.max(parsed, floor))
+  return Math.min(requested, Math.max(cap, floor))
+}
+
+/**
+ * Official pSo: resolve 3-minute (180s) subagent auto-background cap for
+ * async subagents across all providers (no Bedrock/Vertex exclusion).
+ */
+export function resolveSubagentAutoBackgroundCapMs(input: {
+  agentId?: string
+  agentContext?: {
+    isAsync?: boolean
+    isMainSession?: boolean
+    agentId?: string
+  }
+  innerCall?: boolean
+  hookCaller?: unknown
+  pluginUnnamed?: boolean
+}): number {
+  if (
+    input.innerCall === true ||
+    input.hookCaller !== undefined ||
+    input.pluginUnnamed === true ||
+    !input.agentContext ||
+    input.agentContext.isMainSession === true ||
+    input.agentContext.isAsync !== true ||
+    input.agentContext.agentId !== input.agentId
+  ) {
+    return 0
+  }
+  return SUBAGENT_AUTO_BACKGROUND_CAP_MS
 }
 
 /**

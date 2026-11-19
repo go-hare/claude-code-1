@@ -112,6 +112,9 @@ export function serverClassifierBetasEligible(): boolean {
       return experimentalCapabilityBetasForClassifier()
     case 'thirdParty': {
       const provider = getAPIProvider()
+      if (readUserServerClassifierSwitch() === true && !leftoverHipaa()) {
+        return true
+      }
       return provider === 'firstParty' ||
         isAnthropicAwsOrGoogleCloudProvider(provider)
         ? experimentalCapabilityBetasForClassifier(provider)

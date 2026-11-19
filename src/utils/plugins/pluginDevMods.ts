@@ -139,6 +139,8 @@ export type PluginDevModsBinding = {
   toolContext: (abort: AbortController) => ToolUseContext
   reloadPlugins?: () => Promise<void>
   permissionMode?: () => string | undefined
+  sendDisplayRows?: (rows: unknown[]) => void
+  surface?: string
 }
 
 type DevModLoad = 'reloaded' | 'held' | 'kept-out' | 'unbound' | 'failed'
@@ -898,6 +900,101 @@ export function canAutoEnablePluginDevMods(): boolean {
   }
 }
 
+const DEV_MODS_DECLINED_UI_TEXT = 'Not turned on.'
+
+function safeUiRecord(fn: () => void): void {
+  try {
+    fn()
+  } catch (err) {
+    try {
+      const { logEvent } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../../services/analytics/index.js') as typeof import('../../services/analytics/index.js')
+      logEvent('plugin_dev_mods', { reason: asMeta('answer_not_shown') })
+    } catch {
+      // ignore
+    }
+    leftoverDebug(errorMessage(err))
+  }
+}
+
+function buildAskDisplayRows(toolUseId: string, answer: string): unknown[] {
+  const questions = [
+    {
+      question: DEV_MODS_QUESTION,
+      header: 'Mods',
+      options: ASK_CHOICES.filter(c => c.value !== 'explain').map(c => ({
+        label: c.label,
+        description: '',
+      })),
+      multiSelect: false,
+    },
+  ]
+  const toolUseResult = {
+    questions,
+    answers: { [DEV_MODS_QUESTION]: answer },
+  }
+  const { createAssistantMessage, createUserMessage } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../messages.js') as typeof import('../messages.js')
+  const { AskUserQuestionTool } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('@claude-code/builtin-tools/tools/AskUserQuestionTool/AskUserQuestionTool.js') as typeof import('@claude-code/builtin-tools/tools/AskUserQuestionTool/AskUserQuestionTool.js')
+  const assistantMsg = createAssistantMessage({
+    content: [
+      {
+        type: 'tool_use',
+        id: toolUseId,
+        name: 'AskUserQuestion',
+        input: { questions },
+      },
+    ],
+    isVirtual: true,
+  })
+  const userMsg = createUserMessage({
+    content: [
+      AskUserQuestionTool.mapToolResultToToolResultBlockParam(
+        toolUseResult,
+        toolUseId,
+      ),
+    ],
+    toolUseResult,
+    isVirtual: true,
+  })
+  return [
+    {
+      ...assistantMsg,
+      message: { ...assistantMsg.message, stop_reason: 'tool_use' },
+    },
+    userMsg,
+  ]
+}
+
+function recordAnswerInUi(
+  raw: ConfirmWithUserResult<'explain' | 'allow' | 'not_now'>,
+  toolUseId: string,
+): void {
+  safeUiRecord(() => {
+    const activeBinding = binding
+    const choiceLabel =
+      raw.kind === 'chose'
+        ? ASK_CHOICES.find(c => c.value === raw.value)?.label
+        : undefined
+    const answerText = raw.kind === 'declined' ? raw.typedAnswer : choiceLabel
+    if (answerText !== undefined) {
+      activeBinding?.sendDisplayRows?.(
+        buildAskDisplayRows(toolUseId, answerText),
+      )
+    }
+    if (choiceLabel !== undefined && activeBinding?.surface === 'terminal') {
+      leftoverUiLog('Mods', `${DEV_MODS_QUESTION} → ${choiceLabel}`)
+    }
+  })
+  if (raw.kind === 'declined') {
+    safeUiRecord(() => leftoverUiLog('Mods', DEV_MODS_DECLINED_UI_TEXT))
+  }
+}
+
 /** densable J — recurse explain up to 3. */
 async function askPluginDevModsLoop(
   folder: string,
@@ -911,8 +1008,13 @@ async function askPluginDevModsLoop(
   const when = leftoverDevModsTurn.isRunning() ? 'turn-end' : 'now'
   const question =
     depth === 0 ? shortQuestion(folder, when) : longQuestion(folder, when)
+  const captured = { id: '' }
+  const activeCanUseTool = binding.canUseTool
   const raw = await confirmWithUser({
-    canUseTool: binding.canUseTool,
+    canUseTool: (...args) => {
+      captured.id = args[4]
+      return activeCanUseTool(...args)
+    },
     toolUseContext: binding.toolContext(abort),
     source: ASK_SOURCE,
     header: 'Mods',
@@ -926,7 +1028,10 @@ async function askPluginDevModsLoop(
     raw.kind === 'declined' &&
     raw.typedAnswer !== undefined &&
     !/^\[.*\]$/u.test(raw.typedAnswer)
-  if (mapped !== 'explain' && !isTypedOther) return mapped
+  if (mapped !== 'explain' && !isTypedOther) {
+    recordAnswerInUi(raw, captured.id)
+    return mapped
+  }
   if (mapped === 'explain') {
     try {
       const { logEvent } =
@@ -937,9 +1042,18 @@ async function askPluginDevModsLoop(
       // ignore
     }
   }
-  return depth < EXPLAIN_MAX
-    ? askPluginDevModsLoop(folder, abort, depth + 1)
-    : 'decline'
+  if (depth < EXPLAIN_MAX) {
+    return askPluginDevModsLoop(folder, abort, depth + 1)
+  }
+  recordAnswerInUi(
+    isTypedOther
+      ? raw
+      : ({ kind: 'declined' } as ConfirmWithUserResult<
+          'explain' | 'allow' | 'not_now'
+        >),
+    captured.id,
+  )
+  return 'decline'
 }
 
 /** densable go */

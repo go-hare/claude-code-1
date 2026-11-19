@@ -7,6 +7,7 @@ import { realpathSync } from 'node:fs'
 import { mkdir, realpath, unlink, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, normalize, resolve, sep } from 'node:path'
 import type { HostConfigSnapshot } from './hostConfig.js'
+import { sanitizeDisabledMcpServers } from '../services/mcp/mcpSwitchedOffRecord.js'
 import {
   assertHooksDirIsPlainDirectory,
   isCcrLauncherHostSeedPath,
@@ -90,11 +91,33 @@ export async function seedPersistedWorkspaceTrust(opts: {
   /** densable Set([ht, ...qt, ...Le.canonicalRepoPath]) */
   trustPaths: string[]
   hostMcpServers?: Record<string, unknown>
+  disabledMcpServers?: readonly string[]
+  /** Optional worker `internal_metadata` payload to seed persisted `disabled_mcp_servers` (#1600). */
+  restoredInternalMetadata?: { disabled_mcp_servers?: unknown } | null
+  enabledMcpServers?: readonly string[]
   configSuffix?: string
   onDebug: (msg: string) => void
   fsTimeoutMs?: number
 }): Promise<void> {
-  const projects: Record<string, { hasTrustDialogAccepted: true }> = {}
+  const rawDisabled: unknown[] = [
+    ...(opts.disabledMcpServers ?? []),
+    ...(Array.isArray(opts.restoredInternalMetadata?.disabled_mcp_servers)
+      ? opts.restoredInternalMetadata.disabled_mcp_servers
+      : []),
+  ]
+  const disabledMcpServers =
+    rawDisabled.length > 0 ? sanitizeDisabledMcpServers(rawDisabled) : undefined
+  const enabledMcpServers = opts.enabledMcpServers
+    ? [...new Set(opts.enabledMcpServers.filter(s => s.length > 0))]
+    : undefined
+  const projects: Record<
+    string,
+    {
+      hasTrustDialogAccepted: true
+      disabledMcpServers?: string[]
+      enabledMcpServers?: string[]
+    }
+  > = {}
   for (const ar of new Set(opts.trustPaths.filter(p => p.length > 0))) {
     const normalized = normalize(ar)
     let resolved: string | undefined
@@ -118,7 +141,15 @@ export async function seedPersistedWorkspaceTrust(opts: {
         : ([] as string[])),
     ]
     for (const path of variants) {
-      projects[path] = { hasTrustDialogAccepted: true }
+      projects[path] = {
+        hasTrustDialogAccepted: true,
+        ...(disabledMcpServers && disabledMcpServers.length > 0
+          ? { disabledMcpServers }
+          : {}),
+        ...(enabledMcpServers && enabledMcpServers.length > 0
+          ? { enabledMcpServers }
+          : {}),
+      }
     }
   }
   const body = JSON.stringify({

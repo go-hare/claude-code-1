@@ -22,13 +22,19 @@ import { OAuthService } from '../../services/oauth/index.js'
 import type { OAuthTokens } from '../../services/oauth/types.js'
 import {
   clearOAuthTokenCache,
+  getAllowedProviders,
   getAnthropicApiKeyWithSource,
   getAuthTokenSource,
+  getCredentialExpiresAtField,
+  getNonOrigin403HintFromError,
   getOauthAccountInfo,
+  getOAuthRefreshExitWaitMs,
   getSubscriptionType,
   isUsing3PServices,
   saveOAuthTokensIfNeeded,
+  validateAllowedProvider,
   validateForceLoginOrg,
+  waitForHeldOAuthRefresh,
 } from '../../utils/auth.js'
 import { oauthLoginOrgUUIDHint } from '../../utils/forceLoginOrg.js'
 import { saveGlobalConfig } from '../../utils/config.js'
@@ -135,12 +141,22 @@ export async function authLogin({
   }
 
   const settings = getInitialSettings()
-  // densable A9t / ibS — forceLoginMethod hard pin; gateway cannot use CLI auth login
-  const { FORCE_LOGIN_GATEWAY_CLI_MESSAGE, resolveEffectiveForceLoginMethod } =
-    await import('../../utils/forceLoginMethod.js')
+  // densable A9t / ibS — forceLoginMethod hard pin; gateway cannot use CLI auth login without interactive /login
+  const { resolveEffectiveForceLoginMethod } = await import(
+    '../../utils/forceLoginMethod.js'
+  )
   const forcedMethod = resolveEffectiveForceLoginMethod()
   if (forcedMethod === 'gateway') {
-    process.stderr.write(`${FORCE_LOGIN_GATEWAY_CLI_MESSAGE}\n`)
+    process.stderr.write(
+      'Managed settings on this machine configure a Cloud gateway sign-in; run interactive /login to authenticate.\n',
+    )
+    await waitForHeldOAuthRefresh(getOAuthRefreshExitWaitMs(true))
+    process.exit(1)
+  }
+  const providerCheck = validateAllowedProvider('firstParty')
+  if (!providerCheck.valid) {
+    process.stderr.write(`${providerCheck.message}\n`)
+    await waitForHeldOAuthRefresh(getOAuthRefreshExitWaitMs(true))
     process.exit(1)
   }
   // Without pin, --console selects Console; --claudeai (or no flag) selects claude.ai.
@@ -207,9 +223,12 @@ export async function authLogin({
       })
       logError(err)
       const sslHint = getSSLErrorHint(err)
+      const nonOriginHint = getNonOrigin403HintFromError(err)
+      const extraHint = nonOriginHint ?? sslHint
       process.stderr.write(
-        `Login failed: ${errorMessage(err)}\n${sslHint ? sslHint + '\n' : ''}`,
+        `Login failed: ${errorMessage(err)}\n${extraHint ? extraHint + '\n' : ''}`,
       )
+      await waitForHeldOAuthRefresh(getOAuthRefreshExitWaitMs(true))
       process.exit(1)
     }
   }
@@ -257,9 +276,12 @@ export async function authLogin({
     })
     logError(err)
     const sslHint = getSSLErrorHint(err)
+    const nonOriginHint = getNonOrigin403HintFromError(err)
+    const extraHint = nonOriginHint ?? sslHint
     process.stderr.write(
-      `Login failed: ${errorMessage(err)}\n${sslHint ? sslHint + '\n' : ''}`,
+      `Login failed: ${errorMessage(err)}\n${extraHint ? extraHint + '\n' : ''}`,
     )
+    await waitForHeldOAuthRefresh(getOAuthRefreshExitWaitMs(true))
     process.exit(1)
   } finally {
     oauthService.cleanup()
@@ -335,10 +357,16 @@ export async function authStatus(opts: {
         : hasApiKeyEnvVar
           ? 'ANTHROPIC_API_KEY'
           : null
-    const output: Record<string, string | boolean | null> = {
+    const output: Record<string, string | boolean | string[] | null> = {
       loggedIn,
       authMethod,
       apiProvider,
+      loginExpiresAt:
+        getCredentialExpiresAtField().credential_expires_at ?? null,
+    }
+    const allowedProviders = getAllowedProviders()
+    if (allowedProviders !== undefined) {
+      output.allowedProviders = [...allowedProviders]
     }
     if (resolvedApiKeySource) {
       output.apiKeySource = resolvedApiKeySource
@@ -352,6 +380,7 @@ export async function authStatus(opts: {
 
     process.stdout.write(jsonStringify(output, null, 2) + '\n')
   }
+  await waitForHeldOAuthRefresh(getOAuthRefreshExitWaitMs(true))
   process.exit(loggedIn ? 0 : 1)
 }
 
@@ -364,5 +393,6 @@ export async function authLogout(): Promise<void> {
     process.exit(1)
   }
   process.stdout.write('Successfully logged out from your Anthropic account.\n')
+  await waitForHeldOAuthRefresh(getOAuthRefreshExitWaitMs(true))
   process.exit(0)
 }

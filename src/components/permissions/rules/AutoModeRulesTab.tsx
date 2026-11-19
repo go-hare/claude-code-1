@@ -3,7 +3,7 @@
  */
 import * as React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type DOMElement, Box, Text, useFocusReclaim, useTabHeaderFocus, useTabsWidth } from '@anthropic/ink';
+import { type DOMElement, Box, Dialog, Text, useFocusReclaim, useTabHeaderFocus, useTabsWidth } from '@anthropic/ink';
 import { ConfirmSelect } from '../../../components/ConfirmSelect.js';
 import { Select } from '../../../components/CustomSelect/select.js';
 import TextInput from '../../../components/TextInput.js';
@@ -228,10 +228,7 @@ export function AutoModeRulesTab({
 
   if (mode.kind === 'env-first-confirm') {
     return (
-      <Box flexDirection="column">
-        <Text bold color="permission">
-          Replace the built-in environment?
-        </Text>
+      <Dialog title="Replace the built-in environment?" color="permission" onCancel={cancel}>
         <Text>
           Writing your own environment replaces the built-in default document. You can restore it later with
           /auto-mode-setup.
@@ -248,7 +245,7 @@ export function AutoModeRulesTab({
           }}
           onCancel={cancel}
         />
-      </Box>
+      </Dialog>
     );
   }
 
@@ -309,10 +306,7 @@ export function AutoModeRulesTab({
     const lastInSection =
       entries.filter(e => e.section === mode.entry.section && e.source === 'userSettings' && !e.legacy).length <= 1;
     return (
-      <Box flexDirection="column">
-        <Text bold color="error">
-          Delete auto mode rule?
-        </Text>
+      <Dialog title="Delete auto mode rule?" color="error" onCancel={cancel}>
         <Text>{mode.entry.text}</Text>
         {lastInSection ? <Text italic>This is the last extra rule in {sectionLabel(mode.entry.section)}.</Text> : null}
         <ConfirmSelect
@@ -330,7 +324,7 @@ export function AutoModeRulesTab({
           }}
           onCancel={cancel}
         />
-      </Box>
+      </Dialog>
     );
   }
 
@@ -338,10 +332,7 @@ export function AutoModeRulesTab({
     const entry = mode.entry;
     const isSentinel = entry.text === AUTO_MODE_DEFAULTS_SENTINEL;
     return (
-      <Box flexDirection="column" gap={1} borderStyle="round" paddingLeft={1} paddingRight={1} borderColor="permission">
-        <Text bold color="permission">
-          Rule details
-        </Text>
+      <Dialog title="Rule details" color="permission" onCancel={cancel}>
         <Text bold>{entry.text}</Text>
         <Text dimColor>
           {sectionLabel(entry.section)} · {sourceDisplayName(entry.source)}
@@ -387,7 +378,7 @@ export function AutoModeRulesTab({
           />
         )}
         {error ? <Text color="error">{error}</Text> : null}
-      </Box>
+      </Dialog>
     );
   }
 

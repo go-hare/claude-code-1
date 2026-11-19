@@ -7,6 +7,8 @@ import {
   getPromptRenderEpoch,
   getSessionId,
   isSessionPersistenceDisabled,
+  getAutoModeUnavailableStopNotice,
+  setAutoModeUnavailableStopNotice,
 } from 'src/bootstrap/state.js'
 import { createSessionToolUseContext } from './engine/createSessionToolUseContext.js'
 import { clearCommandScopedAllowRules } from './utils/permissions/permissionSetup.js'
@@ -1382,6 +1384,8 @@ export class QueryEngine {
     headlessProfilerCheckpoint('system_message_yielded')
 
     if (!shouldQuery) {
+      let localCommandFallbackText: string | undefined
+      let localCommandFailed = false
       // Return the results of local slash commands.
       // Use messagesFromUserInput (not replayableMessages) for command output
       // because selectableUserMessagesFilter excludes local-command-stdout tags.
@@ -1393,11 +1397,34 @@ export class QueryEngine {
             msg.message!.content.includes(`<${LOCAL_COMMAND_STDERR_TAG}>`) ||
             msg.isCompactSummary)
         ) {
+          const stripped = stripAnsi(msg.message!.content)
+          if (msg.message!.content.includes(`<${LOCAL_COMMAND_STDERR_TAG}>`)) {
+            localCommandFailed = true
+            localCommandFallbackText ??= stripped
+              .replace(
+                new RegExp(
+                  `<${LOCAL_COMMAND_STDERR_TAG}>([\\s\\S]*?)</${LOCAL_COMMAND_STDERR_TAG}>`,
+                ),
+                '$1',
+              )
+              .trim()
+          } else if (
+            msg.message!.content.includes(`<${LOCAL_COMMAND_STDOUT_TAG}>`)
+          ) {
+            localCommandFallbackText ??= stripped
+              .replace(
+                new RegExp(
+                  `<${LOCAL_COMMAND_STDOUT_TAG}>([\\s\\S]*?)</${LOCAL_COMMAND_STDOUT_TAG}>`,
+                ),
+                '$1',
+              )
+              .trim()
+          }
           yield {
             type: 'user',
             message: {
               ...msg.message,
-              content: stripAnsi(msg.message!.content),
+              content: stripped,
             },
             session_id: getSessionId(),
             parent_tool_use_id: null,
@@ -1419,7 +1446,24 @@ export class QueryEngine {
           (msg.content.includes(`<${LOCAL_COMMAND_STDOUT_TAG}>`) ||
             msg.content.includes(`<${LOCAL_COMMAND_STDERR_TAG}>`))
         ) {
-          yield localCommandOutputToSDKAssistantMessage(msg.content, msg.uuid)
+          if (msg.content.includes(`<${LOCAL_COMMAND_STDERR_TAG}>`)) {
+            localCommandFailed = true
+          }
+          const assistantMsg = localCommandOutputToSDKAssistantMessage(
+            msg.content,
+            msg.uuid,
+          )
+          const firstBlock = assistantMsg.message?.content?.[0]
+          if (
+            firstBlock &&
+            typeof firstBlock === 'object' &&
+            'text' in firstBlock &&
+            typeof firstBlock.text === 'string' &&
+            firstBlock.text
+          ) {
+            localCommandFallbackText ??= firstBlock.text
+          }
+          yield assistantMsg
         }
 
         if (msg.type === 'system' && msg.subtype === 'compact_boundary') {
@@ -1449,11 +1493,11 @@ export class QueryEngine {
       yield {
         type: 'result',
         subtype: 'success',
-        is_error: false,
+        is_error: localCommandFailed,
         duration_ms: Date.now() - startTime,
         duration_api_ms: getTotalAPIDuration(),
         num_turns: 0,
-        result: resultText ?? '',
+        result: resultText || localCommandFallbackText || '',
         stop_reason: null,
         session_id: getSessionId(),
         total_cost_usd: getTotalCost(),
@@ -1519,8 +1563,9 @@ export class QueryEngine {
     )
     // Official ke — only this ask's hook_deferred_tool, not the whole history.
     let deferredThisTurn: HookDeferredToolAttachment | undefined
+    let terminalReason: string | undefined
 
-    for await (const message of query({
+    const queryGen = query({
       messages,
       systemPrompt,
       userContext,
@@ -1534,659 +1579,634 @@ export class QueryEngine {
       promptRenderEpoch,
       modelFacts,
       stopHookActive: options?.stopHookActive,
-    })) {
-      // densable CLI host / SDK: set_expanded_view is a tool-bridge control
-      // event, not a transcript message. Skip it here (HWf also drops it).
-      if (
-        message &&
-        typeof message === 'object' &&
-        'type' in message &&
-        (message as { type: string }).type === 'set_expanded_view'
-      ) {
-        continue
-      }
-      if (
-        message &&
-        typeof message === 'object' &&
-        'type' in message &&
-        (message as { type: string }).type === 'spinner_mode'
-      ) {
-        leftoverIhrSdkMode(
-          (
-            message as unknown as {
-              mode: import('./components/Spinner/index.js').SpinnerMode
-            }
-          ).mode,
-        )
-        continue
-      }
-      // Record assistant, user, and compact boundary messages
-      if (
-        message.type === 'assistant' ||
-        message.type === 'user' ||
-        (message.type === 'system' && message.subtype === 'compact_boundary')
-      ) {
-        // Before writing a compact boundary, flush any in-memory-only
-        // messages up through the preservedSegment tail. Attachments and
-        // progress are now recorded inline (their switch cases below), but
-        // this flush still matters for the preservedSegment tail walk.
-        // If the SDK subprocess restarts before then (claude-desktop kills
-        // between turns), tailUuid points to a never-written message →
-        // applyPreservedSegmentRelinks fails its tail→head walk → returns
-        // without pruning → resume loads full pre-compact history.
+    })
+    try {
+      while (true) {
+        const step = await queryGen.next()
+        if (step.done) {
+          terminalReason = step.value?.reason
+          break
+        }
+        const message = step.value
+        // densable CLI host / SDK: set_expanded_view is a tool-bridge control
+        // event, not a transcript message. Skip it here (HWf also drops it).
         if (
-          persistSession &&
-          message.type === 'system' &&
-          message.subtype === 'compact_boundary'
+          message &&
+          typeof message === 'object' &&
+          'type' in message &&
+          (message as { type: string }).type === 'set_expanded_view'
         ) {
-          const compactMsg = message as SystemCompactBoundaryMessage
-          const tailUuid =
-            compactMsg.compactMetadata?.preservedSegment?.tailUuid
-          if (tailUuid) {
-            const tailIdx = this.mutableMessages.findLastIndex(
-              m => m.uuid === tailUuid,
-            )
-            if (tailIdx !== -1) {
-              await recordTranscript(this.mutableMessages.slice(0, tailIdx + 1))
-            }
-          }
+          continue
         }
-        messages.push(message as Message)
-        if (persistSession) {
-          // Fire-and-forget for assistant messages. claude.ts yields one
-          // assistant message per content block, then mutates the last
-          // one's message.usage/stop_reason on message_delta — relying on
-          // the write queue's 100ms lazy jsonStringify. Awaiting here
-          // blocks ask()'s generator, so message_delta can't run until
-          // every block is consumed; the drain timer (started at block 1)
-          // elapses first. Interactive CC doesn't hit this because
-          // useLogMessages.ts fire-and-forgets. enqueueWrite is
-          // order-preserving so fire-and-forget here is safe.
-          if (message.type === 'assistant') {
-            void recordTranscript(messages)
-          } else {
-            await recordTranscript(messages)
-          }
-        }
-
-        // Acknowledge initial user messages after first transcript recording
-        if (!hasAcknowledgedInitialMessages && messagesToAck.length > 0) {
-          hasAcknowledgedInitialMessages = true
-          for (const msgToAck of messagesToAck) {
-            if (msgToAck.type === 'user') {
-              yield {
-                type: 'user',
-                message: msgToAck.message,
-                session_id: getSessionId(),
-                parent_tool_use_id: null,
-                uuid: msgToAck.uuid,
-                timestamp: msgToAck.timestamp,
-                isReplay: true,
-                ...(options?.fileAttachments?.length
-                  ? { file_attachments: options.fileAttachments }
-                  : {}),
-              } as unknown as SDKUserMessageReplay
-            }
-          }
-        }
-      }
-
-      if (message.type === 'user') {
-        turnCount++
-      }
-
-      switch (message.type) {
-        case 'tombstone': {
-          const tombstonePayload = message as unknown as {
-            message?: Message
-            displayOnly?: boolean
-          }
-          for (const ev of partialStreamCloser.onTombstone(tombstonePayload)) {
-            yield ev as unknown as SDKMessage
-          }
-          const tombstonedMsg = tombstonePayload.message
-          // v2.1.311 (#1231) & v2.1.314 (#1374): remove tombstoned/retracted
-          // messages from in-memory conversation and persisted transcript.
-          if (!tombstonePayload.displayOnly && tombstonedMsg?.uuid) {
-            const targetUuid = tombstonedMsg.uuid
-            for (let i = this.mutableMessages.length - 1; i >= 0; i--) {
-              if (this.mutableMessages[i]?.uuid === targetUuid) {
-                this.mutableMessages.splice(i, 1)
+        if (
+          message &&
+          typeof message === 'object' &&
+          'type' in message &&
+          (message as { type: string }).type === 'spinner_mode'
+        ) {
+          leftoverIhrSdkMode(
+            (
+              message as unknown as {
+                mode: import('./components/Spinner/index.js').SpinnerMode
               }
-            }
-            for (let i = messages.length - 1; i >= 0; i--) {
-              if (messages[i]?.uuid === targetUuid) {
-                messages.splice(i, 1)
-              }
-            }
-            if (persistSession) {
-              await removeTranscriptMessage(targetUuid)
-            }
-          }
+            ).mode,
+          )
+          continue
+        }
+        // Record assistant, user, and compact boundary messages
+        if (
+          message.type === 'assistant' ||
+          message.type === 'user' ||
+          (message.type === 'system' && message.subtype === 'compact_boundary')
+        ) {
+          // Before writing a compact boundary, flush any in-memory-only
+          // messages up through the preservedSegment tail. Attachments and
+          // progress are now recorded inline (their switch cases below), but
+          // this flush still matters for the preservedSegment tail walk.
+          // If the SDK subprocess restarts before then (claude-desktop kills
+          // between turns), tailUuid points to a never-written message →
+          // applyPreservedSegmentRelinks fails its tail→head walk → returns
+          // without pruning → resume loads full pre-compact history.
           if (
-            tombstonedMsg?.type === 'assistant' &&
-            Array.isArray(tombstonedMsg.message?.content)
+            persistSession &&
+            message.type === 'system' &&
+            message.subtype === 'compact_boundary'
           ) {
-            const retractedIds = tombstonedMsg.message.content.flatMap(block =>
-              block &&
-              typeof block === 'object' &&
-              block.type === 'tool_use' &&
-              block.name === SYNTHETIC_OUTPUT_TOOL_NAME &&
-              typeof block.id === 'string'
-                ? [block.id]
-                : [],
-            )
-            if (retractedIds.length > 0) {
-              tombstonedStructuredOutputCalls++
-              for (const id of retractedIds) {
-                tombstonedStructuredOutputIDs.add(id)
+            const compactMsg = message as SystemCompactBoundaryMessage
+            const tailUuid =
+              compactMsg.compactMetadata?.preservedSegment?.tailUuid
+            if (tailUuid) {
+              const tailIdx = this.mutableMessages.findLastIndex(
+                m => m.uuid === tailUuid,
+              )
+              if (tailIdx !== -1) {
+                await recordTranscript(
+                  this.mutableMessages.slice(0, tailIdx + 1),
+                )
               }
-              const isRetracted = (entry: {
-                toolUseID?: string
-                attachmentUuid: string
-              }) =>
-                entry.toolUseID === undefined ||
-                retractedIds.includes(entry.toolUseID)
-              const retractedResults =
-                survivingStructuredOutputs.filter(isRetracted)
-              for (let i = survivingStructuredOutputs.length - 1; i >= 0; i--) {
-                if (isRetracted(survivingStructuredOutputs[i]!)) {
-                  survivingStructuredOutputs.splice(i, 1)
+            }
+          }
+          messages.push(message as Message)
+          if (persistSession) {
+            // Fire-and-forget for assistant messages. claude.ts yields one
+            // assistant message per content block, then mutates the last
+            // one's message.usage/stop_reason on message_delta — relying on
+            // the write queue's 100ms lazy jsonStringify. Awaiting here
+            // blocks ask()'s generator, so message_delta can't run until
+            // every block is consumed; the drain timer (started at block 1)
+            // elapses first. Interactive CC doesn't hit this because
+            // useLogMessages.ts fire-and-forgets. enqueueWrite is
+            // order-preserving so fire-and-forget here is safe.
+            if (message.type === 'assistant') {
+              void recordTranscript(messages)
+            } else {
+              await recordTranscript(messages)
+            }
+          }
+
+          // Acknowledge initial user messages after first transcript recording
+          if (!hasAcknowledgedInitialMessages && messagesToAck.length > 0) {
+            hasAcknowledgedInitialMessages = true
+            for (const msgToAck of messagesToAck) {
+              if (msgToAck.type === 'user') {
+                yield {
+                  type: 'user',
+                  message: msgToAck.message,
+                  session_id: getSessionId(),
+                  parent_tool_use_id: null,
+                  uuid: msgToAck.uuid,
+                  timestamp: msgToAck.timestamp,
+                  isReplay: true,
+                  ...(options?.fileAttachments?.length
+                    ? { file_attachments: options.fileAttachments }
+                    : {}),
+                } as unknown as SDKUserMessageReplay
+              }
+            }
+          }
+        }
+
+        if (message.type === 'user') {
+          turnCount++
+        }
+
+        switch (message.type) {
+          case 'tombstone': {
+            const tombstonePayload = message as unknown as {
+              message?: Message
+              displayOnly?: boolean
+            }
+            for (const ev of partialStreamCloser.onTombstone(
+              tombstonePayload,
+            )) {
+              yield ev as unknown as SDKMessage
+            }
+            const tombstonedMsg = tombstonePayload.message
+            // v2.1.311 (#1231) & v2.1.314 (#1374): remove tombstoned/retracted
+            // messages from in-memory conversation and persisted transcript.
+            if (!tombstonePayload.displayOnly && tombstonedMsg?.uuid) {
+              const targetUuid = tombstonedMsg.uuid
+              for (let i = this.mutableMessages.length - 1; i >= 0; i--) {
+                if (this.mutableMessages[i]?.uuid === targetUuid) {
+                  this.mutableMessages.splice(i, 1)
                 }
               }
-              if (survivingStructuredOutputs.length === 0) {
-                structuredOutputFromTool = undefined
+              for (let i = messages.length - 1; i >= 0; i--) {
+                if (messages[i]?.uuid === targetUuid) {
+                  messages.splice(i, 1)
+                }
               }
-              logEvent('tengu_structured_output_retracted', {
-                retracted_results: retractedResults.length,
-                surviving_results: survivingStructuredOutputs.length,
-                tombstoned_calls: tombstonedStructuredOutputCalls,
-              })
-            }
-          }
-          break
-        }
-        case 'active_goal': {
-          // densable worker: setAppState only (no idle-checkin cancel here).
-          const value =
-            (message as { value?: AppState['activeGoal'] | null }).value ??
-            undefined
-          setAppState(prev =>
-            prev.activeGoal === value ? prev : { ...prev, activeGoal: value },
-          )
-          break
-        }
-        case 'assistant': {
-          // Capture stop_reason if already set (synthetic messages). For
-          // streamed responses, this is null at content_block_stop time;
-          // the real value arrives via message_delta (handled below).
-          const msg = message as Message
-          const stopReason = msg.message?.stop_reason as
-            | string
-            | null
-            | undefined
-          if (stopReason != null) {
-            lastStopReason = stopReason
-          }
-          partialStreamCloser.onAssistantMessage(msg)
-          this.mutableMessages.push(msg)
-          // densable Tth — SDK completed-message MessageDisplay (Ath→ilr→GCr)
-          // after mutableMessages.push, yield transformed when different.
-          let yieldMsg = msg
-          try {
-            const transformed = await transformCompletedAssistantMessage(
-              msg as AssistantMessage,
-              messageDisplayTurnId,
-              getAppState,
-              this.abortController.signal,
-            )
-            if (transformed !== msg) {
-              yieldMsg = transformed as Message
-            }
-          } catch {
-            // densable Tth optional on failure — emit original
-          }
-          yield* normalizeMessage(yieldMsg)
-          break
-        }
-        case 'progress': {
-          const msg = message as Message
-          this.mutableMessages.push(msg)
-          // Record inline so the dedup loop in the next ask() call sees it
-          // as already-recorded. Without this, deferred progress interleaves
-          // with already-recorded tool_results in mutableMessages, and the
-          // dedup walk freezes startingParentUuid at the wrong message —
-          // forking the chain and orphaning the conversation on resume.
-          if (persistSession) {
-            messages.push(msg)
-            await recordTranscript(messages)
-          }
-          yield* normalizeMessage(msg)
-          break
-        }
-        case 'user': {
-          const msg = message as Message
-          this.mutableMessages.push(msg)
-          yield* normalizeMessage(msg)
-          break
-        }
-        case 'stream_event': {
-          const streamMsg = message as unknown as {
-            event: Record<string, unknown>
-            ttftMs?: number
-            thinkingDisplay?: unknown
-            apiMessageId?: string
-            abandonedBlocks?: { apiMessageId: string; fromBlockIndex: number }
-            textRunsJoined?: boolean
-          }
-          const event = streamMsg.event
-          for (const ev of partialStreamCloser.onStreamEvent(
-            event,
-            currentMessageUsage,
-          )) {
-            yield ev as unknown as SDKMessage
-          }
-          if (event.type === 'message_start') {
-            // Reset current message usage for new message
-            currentMessageUsage = EMPTY_USAGE
-            // Official 2.1: per-message thinking estimate accumulator
-            thinkingTokenEstimate = 0
-            const eventMessage = event.message as {
-              usage: BetaMessageDeltaUsage
-            }
-            currentMessageUsage = updateUsage(
-              currentMessageUsage,
-              eventMessage.usage,
-            )
-          }
-          if (event.type === 'message_delta') {
-            currentMessageUsage = updateUsage(
-              currentMessageUsage,
-              event.usage as BetaMessageDeltaUsage,
-            )
-            // Capture stop_reason from message_delta. The assistant message
-            // is yielded at content_block_stop with stop_reason=null; the
-            // real value only arrives here (see claude.ts message_delta
-            // handler). Without this, result.stop_reason is always null.
-            const delta = event.delta as { stop_reason?: string | null }
-            if (delta.stop_reason != null) {
-              lastStopReason = delta.stop_reason
-            }
-          }
-          if (event.type === 'message_stop') {
-            // Accumulate current message usage into total
-            this.totalUsage = accumulateUsage(
-              this.totalUsage,
-              currentMessageUsage,
-            )
-          }
-          // Official 2.1.x: digest thinking_delta.estimated_tokens into
-          // system/thinking_tokens for Host (redacted-thinking often has no
-          // text deltas). Yield on the main stream (not gated by
-          // includePartialMessages) — same shape as official query loop.
-          if (event.type === 'content_block_delta') {
-            const delta = event.delta as {
-              type?: string
-              estimated_tokens?: unknown
+              if (persistSession) {
+                await removeTranscriptMessage(targetUuid)
+              }
             }
             if (
-              delta?.type === 'thinking_delta' &&
-              typeof delta.estimated_tokens === 'number'
+              tombstonedMsg?.type === 'assistant' &&
+              Array.isArray(tombstonedMsg.message?.content)
             ) {
-              thinkingTokenEstimate += delta.estimated_tokens
+              const retractedIds = tombstonedMsg.message.content.flatMap(
+                block =>
+                  block &&
+                  typeof block === 'object' &&
+                  block.type === 'tool_use' &&
+                  block.name === SYNTHETIC_OUTPUT_TOOL_NAME &&
+                  typeof block.id === 'string'
+                    ? [block.id]
+                    : [],
+              )
+              if (retractedIds.length > 0) {
+                tombstonedStructuredOutputCalls++
+                for (const id of retractedIds) {
+                  tombstonedStructuredOutputIDs.add(id)
+                }
+                const isRetracted = (entry: {
+                  toolUseID?: string
+                  attachmentUuid: string
+                }) =>
+                  entry.toolUseID === undefined ||
+                  retractedIds.includes(entry.toolUseID)
+                const retractedResults =
+                  survivingStructuredOutputs.filter(isRetracted)
+                for (
+                  let i = survivingStructuredOutputs.length - 1;
+                  i >= 0;
+                  i--
+                ) {
+                  if (isRetracted(survivingStructuredOutputs[i]!)) {
+                    survivingStructuredOutputs.splice(i, 1)
+                  }
+                }
+                if (survivingStructuredOutputs.length === 0) {
+                  structuredOutputFromTool = undefined
+                }
+                logEvent('tengu_structured_output_retracted', {
+                  retracted_results: retractedResults.length,
+                  surviving_results: survivingStructuredOutputs.length,
+                  tombstoned_calls: tombstonedStructuredOutputCalls,
+                })
+              }
+            }
+            break
+          }
+          case 'active_goal': {
+            // densable worker: setAppState only (no idle-checkin cancel here).
+            const value =
+              (message as { value?: AppState['activeGoal'] | null }).value ??
+              undefined
+            setAppState(prev =>
+              prev.activeGoal === value ? prev : { ...prev, activeGoal: value },
+            )
+            break
+          }
+          case 'assistant': {
+            // Capture stop_reason if already set (synthetic messages). For
+            // streamed responses, this is null at content_block_stop time;
+            // the real value arrives via message_delta (handled below).
+            const msg = message as Message
+            const stopReason = msg.message?.stop_reason as
+              | string
+              | null
+              | undefined
+            if (stopReason != null) {
+              lastStopReason = stopReason
+            }
+            partialStreamCloser.onAssistantMessage(msg)
+            this.mutableMessages.push(msg)
+            // densable Tth — SDK completed-message MessageDisplay (Ath→ilr→GCr)
+            // after mutableMessages.push, yield transformed when different.
+            let yieldMsg = msg
+            try {
+              const transformed = await transformCompletedAssistantMessage(
+                msg as AssistantMessage,
+                messageDisplayTurnId,
+                getAppState,
+                this.abortController.signal,
+              )
+              if (transformed !== msg) {
+                yieldMsg = transformed as Message
+              }
+            } catch {
+              // densable Tth optional on failure — emit original
+            }
+            yield* normalizeMessage(yieldMsg)
+            break
+          }
+          case 'progress': {
+            const msg = message as Message
+            this.mutableMessages.push(msg)
+            // Record inline so the dedup loop in the next ask() call sees it
+            // as already-recorded. Without this, deferred progress interleaves
+            // with already-recorded tool_results in mutableMessages, and the
+            // dedup walk freezes startingParentUuid at the wrong message —
+            // forking the chain and orphaning the conversation on resume.
+            if (persistSession) {
+              messages.push(msg)
+              await recordTranscript(messages)
+            }
+            yield* normalizeMessage(msg)
+            break
+          }
+          case 'user': {
+            const msg = message as Message
+            this.mutableMessages.push(msg)
+            yield* normalizeMessage(msg)
+            break
+          }
+          case 'stream_event': {
+            const streamMsg = message as unknown as {
+              event: Record<string, unknown>
+              ttftMs?: number
+              thinkingDisplay?: unknown
+              apiMessageId?: string
+              abandonedBlocks?: { apiMessageId: string; fromBlockIndex: number }
+              textRunsJoined?: boolean
+            }
+            const event = streamMsg.event
+            for (const ev of partialStreamCloser.onStreamEvent(
+              event,
+              currentMessageUsage,
+            )) {
+              yield ev as unknown as SDKMessage
+            }
+            if (event.type === 'message_start') {
+              // Reset current message usage for new message
+              currentMessageUsage = EMPTY_USAGE
+              // Official 2.1: per-message thinking estimate accumulator
+              thinkingTokenEstimate = 0
+              const eventMessage = event.message as {
+                usage: BetaMessageDeltaUsage
+              }
+              currentMessageUsage = updateUsage(
+                currentMessageUsage,
+                eventMessage.usage,
+              )
+            }
+            if (event.type === 'message_delta') {
+              currentMessageUsage = updateUsage(
+                currentMessageUsage,
+                event.usage as BetaMessageDeltaUsage,
+              )
+              // Capture stop_reason from message_delta. The assistant message
+              // is yielded at content_block_stop with stop_reason=null; the
+              // real value only arrives here (see claude.ts message_delta
+              // handler). Without this, result.stop_reason is always null.
+              const delta = event.delta as { stop_reason?: string | null }
+              if (delta.stop_reason != null) {
+                lastStopReason = delta.stop_reason
+              }
+            }
+            if (event.type === 'message_stop') {
+              // Accumulate current message usage into total
+              this.totalUsage = accumulateUsage(
+                this.totalUsage,
+                currentMessageUsage,
+              )
+            }
+            // Official 2.1.x: digest thinking_delta.estimated_tokens into
+            // system/thinking_tokens for Host (redacted-thinking often has no
+            // text deltas). Yield on the main stream (not gated by
+            // includePartialMessages) — same shape as official query loop.
+            if (event.type === 'content_block_delta') {
+              const delta = event.delta as {
+                type?: string
+                estimated_tokens?: unknown
+              }
+              if (
+                delta?.type === 'thinking_delta' &&
+                typeof delta.estimated_tokens === 'number'
+              ) {
+                thinkingTokenEstimate += delta.estimated_tokens
+                yield {
+                  type: 'system' as const,
+                  subtype: 'thinking_tokens' as const,
+                  estimated_tokens: thinkingTokenEstimate,
+                  estimated_tokens_delta: delta.estimated_tokens,
+                  session_id: getSessionId(),
+                  uuid: randomUUID(),
+                }
+              }
+            }
+
+            if (includePartialMessages) {
+              yield buildStreamEventOut(streamMsg, {
+                session_id: getSessionId(),
+                uuid: randomUUID(),
+              }) as unknown as SDKMessage
+            }
+
+            break
+          }
+          case 'attachment': {
+            const msg = message as Message
+            this.mutableMessages.push(msg)
+            // Record inline (same reason as progress above).
+            if (persistSession) {
+              messages.push(msg)
+              await recordTranscript(messages)
+            }
+
+            const attachment = msg.attachment as {
+              type: string
+              data?: unknown
+              turnCount?: number
+              maxTurns?: number
+              prompt?: string
+              source_uuid?: string
+              [key: string]: unknown
+            }
+
+            if (attachment.type === 'hook_deferred_tool') {
+              deferredThisTurn =
+                msg.attachment as unknown as HookDeferredToolAttachment
+            }
+
+            // Extract structured output from StructuredOutput tool calls
+            if (attachment.type === 'structured_output') {
+              const toolUseID = attachment.toolUseID as string | undefined
+              if (
+                toolUseID !== undefined
+                  ? tombstonedStructuredOutputIDs.has(toolUseID)
+                  : tombstonedStructuredOutputIDs.size > 0
+              ) {
+                logEvent('tengu_structured_output_late_retraction_drop', {})
+              } else {
+                survivingStructuredOutputs.push({
+                  toolUseID,
+                  attachmentUuid: msg.uuid,
+                })
+                structuredOutputFromTool = attachment.data
+              }
+            }
+            // Handle max turns reached signal from query.ts
+            else if (attachment.type === 'max_turns_reached') {
+              if (persistSession) {
+                await flushSessionStorage()
+              }
               yield {
-                type: 'system' as const,
-                subtype: 'thinking_tokens' as const,
-                estimated_tokens: thinkingTokenEstimate,
-                estimated_tokens_delta: delta.estimated_tokens,
+                type: 'result',
+                subtype: 'error_max_turns',
+                duration_ms: Date.now() - startTime,
+                duration_api_ms: getTotalAPIDuration(),
+                is_error: true,
+                num_turns: attachment.turnCount as number,
+                stop_reason: lastStopReason,
+                session_id: getSessionId(),
+                total_cost_usd: getTotalCost(),
+                usage: this.totalUsage,
+                modelUsage: getModelUsage(),
+                permission_denials: this.permissionDenials,
+                fast_mode_state: getFastModeState(
+                  mainLoopModel,
+                  initialAppState.fastMode,
+                ),
+                uuid: randomUUID(),
+                errors: [
+                  `Reached maximum number of turns (${attachment.maxTurns})`,
+                ],
+              }
+              return
+            }
+            // Yield queued_command attachments as SDK user message replays
+            else if (
+              replayUserMessages &&
+              attachment.type === 'queued_command'
+            ) {
+              yield {
+                type: 'user',
+                message: {
+                  role: 'user' as const,
+                  content: attachment.prompt,
+                },
+                session_id: getSessionId(),
+                parent_tool_use_id: null,
+                uuid: attachment.source_uuid || msg.uuid,
+                timestamp: msg.timestamp,
+                isReplay: true,
+              } as unknown as SDKUserMessageReplay
+            }
+            break
+          }
+          case 'stream_request_start': {
+            // densable Hze/Qe: map to system/status/requesting. Fi acks even
+            // when Py withholds the SDK yield (includePartialMessages).
+            if (
+              replayRequestingStatus &&
+              !hasAcknowledgedInitialMessages &&
+              messagesToAck.length > 0
+            ) {
+              hasAcknowledgedInitialMessages = true
+              for (const msgToAck of messagesToAck) {
+                if (msgToAck.type === 'user') {
+                  yield {
+                    type: 'user',
+                    message: msgToAck.message,
+                    session_id: getSessionId(),
+                    parent_tool_use_id: null,
+                    uuid: msgToAck.uuid,
+                    timestamp: msgToAck.timestamp,
+                    isReplay: true,
+                    ...(options?.fileAttachments?.length
+                      ? { file_attachments: options.fileAttachments }
+                      : {}),
+                  } as unknown as SDKUserMessageReplay
+                }
+              }
+            }
+            if (includePartialMessages) {
+              yield {
+                type: 'system',
+                subtype: 'status',
+                status: 'requesting',
                 session_id: getSessionId(),
                 uuid: randomUUID(),
               }
             }
+            break
           }
-
-          if (includePartialMessages) {
-            yield buildStreamEventOut(streamMsg, {
-              session_id: getSessionId(),
-              uuid: randomUUID(),
-            }) as unknown as SDKMessage
-          }
-
-          break
-        }
-        case 'attachment': {
-          const msg = message as Message
-          this.mutableMessages.push(msg)
-          // Record inline (same reason as progress above).
-          if (persistSession) {
-            messages.push(msg)
-            await recordTranscript(messages)
-          }
-
-          const attachment = msg.attachment as {
-            type: string
-            data?: unknown
-            turnCount?: number
-            maxTurns?: number
-            prompt?: string
-            source_uuid?: string
-            [key: string]: unknown
-          }
-
-          if (attachment.type === 'hook_deferred_tool') {
-            deferredThisTurn =
-              msg.attachment as unknown as HookDeferredToolAttachment
-          }
-
-          // Extract structured output from StructuredOutput tool calls
-          if (attachment.type === 'structured_output') {
-            const toolUseID = attachment.toolUseID as string | undefined
-            if (
-              toolUseID !== undefined
-                ? tombstonedStructuredOutputIDs.has(toolUseID)
-                : tombstonedStructuredOutputIDs.size > 0
-            ) {
-              logEvent('tengu_structured_output_late_retraction_drop', {})
-            } else {
-              survivingStructuredOutputs.push({
-                toolUseID,
-                attachmentUuid: msg.uuid,
-              })
-              structuredOutputFromTool = attachment.data
+          case 'system': {
+            const msg = message as Message
+            // Snip boundary: replay on our store to remove zombie messages and
+            // stale markers. The yielded boundary is a signal, not data to push —
+            // the replay produces its own equivalent boundary. Without this,
+            // markers persist and re-trigger on every turn, and mutableMessages
+            // never shrinks (memory leak in long SDK sessions). The subtype
+            // check lives inside the injected callback so feature-gated strings
+            // stay out of this file (excluded-strings check).
+            const snipResult = this.config.snipReplay?.(
+              msg,
+              this.mutableMessages,
+            )
+            if (snipResult !== undefined) {
+              if (snipResult.executed) {
+                this.mutableMessages.length = 0
+                this.mutableMessages.push(...snipResult.messages)
+              }
+              break
             }
-          }
-          // Handle max turns reached signal from query.ts
-          else if (attachment.type === 'max_turns_reached') {
-            if (persistSession) {
-              await flushSessionStorage()
-            }
-            yield {
-              type: 'result',
-              subtype: 'error_max_turns',
-              duration_ms: Date.now() - startTime,
-              duration_api_ms: getTotalAPIDuration(),
-              is_error: true,
-              num_turns: attachment.turnCount as number,
-              stop_reason: lastStopReason,
-              session_id: getSessionId(),
-              total_cost_usd: getTotalCost(),
-              usage: this.totalUsage,
-              modelUsage: getModelUsage(),
-              permission_denials: this.permissionDenials,
-              fast_mode_state: getFastModeState(
-                mainLoopModel,
-                initialAppState.fastMode,
-              ),
-              uuid: randomUUID(),
-              errors: [
-                `Reached maximum number of turns (${attachment.maxTurns})`,
-              ],
-            }
-            return
-          }
-          // Yield queued_command attachments as SDK user message replays
-          else if (replayUserMessages && attachment.type === 'queued_command') {
-            yield {
-              type: 'user',
-              message: {
-                role: 'user' as const,
-                content: attachment.prompt,
-              },
-              session_id: getSessionId(),
-              parent_tool_use_id: null,
-              uuid: attachment.source_uuid || msg.uuid,
-              timestamp: msg.timestamp,
-              isReplay: true,
-            } as unknown as SDKUserMessageReplay
-          }
-          break
-        }
-        case 'stream_request_start': {
-          // densable Hze/Qe: map to system/status/requesting. Fi acks even
-          // when Py withholds the SDK yield (includePartialMessages).
-          if (
-            replayRequestingStatus &&
-            !hasAcknowledgedInitialMessages &&
-            messagesToAck.length > 0
-          ) {
-            hasAcknowledgedInitialMessages = true
-            for (const msgToAck of messagesToAck) {
-              if (msgToAck.type === 'user') {
-                yield {
-                  type: 'user',
-                  message: msgToAck.message,
-                  session_id: getSessionId(),
-                  parent_tool_use_id: null,
-                  uuid: msgToAck.uuid,
-                  timestamp: msgToAck.timestamp,
-                  isReplay: true,
-                  ...(options?.fileAttachments?.length
-                    ? { file_attachments: options.fileAttachments }
-                    : {}),
-                } as unknown as SDKUserMessageReplay
+            this.mutableMessages.push(msg)
+            // Yield compact boundary messages to SDK
+            if (msg.subtype === 'compact_boundary' && msg.compactMetadata) {
+              const compactMsg = msg as SystemCompactBoundaryMessage
+              // Release pre-compaction messages for GC. The boundary was just
+              // pushed so it's the last element. query.ts already uses
+              // getMessagesAfterCompactBoundary() internally, so only
+              // post-boundary messages are needed going forward.
+              const mutableBoundaryIdx = this.mutableMessages.length - 1
+              if (mutableBoundaryIdx > 0) {
+                this.mutableMessages.splice(0, mutableBoundaryIdx)
+              }
+              const localBoundaryIdx = messages.length - 1
+              if (localBoundaryIdx > 0) {
+                messages.splice(0, localBoundaryIdx)
+              }
+
+              // densable 2.1.218 #23: emit logical_parent_uuid on mid-turn compact_boundary
+              const logicalParentUuid = (
+                compactMsg as { logicalParentUuid?: string }
+              ).logicalParentUuid
+              yield {
+                type: 'system',
+                subtype: 'compact_boundary' as const,
+                session_id: getSessionId(),
+                uuid: msg.uuid,
+                compact_metadata: toSDKCompactMetadata(
+                  compactMsg.compactMetadata,
+                ),
+                ...(logicalParentUuid !== undefined && {
+                  logical_parent_uuid: logicalParentUuid,
+                }),
               }
             }
-          }
-          if (includePartialMessages) {
-            yield {
-              type: 'system',
-              subtype: 'status',
-              status: 'requesting',
-              session_id: getSessionId(),
-              uuid: randomUUID(),
+            // densable Fi: includePartialMessages + replayAcksAtRequestDispatch
+            // also acks on system/status/requesting (CCR request-dispatch).
+            const requestingStatus = msg as {
+              subtype?: string
+              status?: string
             }
+            if (
+              replayRequestingStatus &&
+              !hasAcknowledgedInitialMessages &&
+              messagesToAck.length > 0 &&
+              requestingStatus.subtype === 'status' &&
+              requestingStatus.status === 'requesting'
+            ) {
+              hasAcknowledgedInitialMessages = true
+              for (const msgToAck of messagesToAck) {
+                if (msgToAck.type === 'user') {
+                  yield {
+                    type: 'user',
+                    message: msgToAck.message,
+                    session_id: getSessionId(),
+                    parent_tool_use_id: null,
+                    uuid: msgToAck.uuid,
+                    timestamp: msgToAck.timestamp,
+                    isReplay: true,
+                    ...(options?.fileAttachments?.length
+                      ? { file_attachments: options.fileAttachments }
+                      : {}),
+                  } as unknown as SDKUserMessageReplay
+                }
+              }
+            }
+            if (msg.subtype === 'api_error') {
+              const apiErrorMsg = msg as Message & {
+                retryAttempt: number
+                maxRetries: number
+                retryInMs: number
+                error: APIError
+              }
+              yield {
+                type: 'system',
+                subtype: 'api_retry' as const,
+                attempt: apiErrorMsg.retryAttempt,
+                max_retries: apiErrorMsg.maxRetries,
+                retry_delay_ms: apiErrorMsg.retryInMs,
+                error_status: apiErrorMsg.error.status ?? null,
+                error: categorizeRetryableAPIError(apiErrorMsg.error),
+                session_id: getSessionId(),
+                uuid: msg.uuid,
+              }
+            }
+            // Official densable: permanent model_not_found → stream
+            // system/model_fallback (snake_case Host wire). Capacity
+            // overloaded stays createSystemMessage informational only.
+            if (msg.subtype === 'model_fallback') {
+              const fb = msg as Message & {
+                subtype: 'model_fallback'
+                content?: string
+                trigger?: string
+                originalModel?: string
+                fallbackModel?: string
+              }
+              if (
+                fb.trigger === 'model_not_found' &&
+                this.config.userSpecifiedModel &&
+                typeof fb.fallbackModel === 'string' &&
+                fb.fallbackModel.length > 0
+              ) {
+                this.config.userSpecifiedModel = fb.fallbackModel
+              }
+              yield {
+                type: 'system' as const,
+                subtype: 'model_fallback' as const,
+                trigger: (fb.trigger ?? 'model_not_found') as
+                  | 'model_not_found'
+                  | 'overloaded',
+                original_model: fb.originalModel ?? '',
+                fallback_model: fb.fallbackModel ?? '',
+                content: fb.content ?? '',
+                session_id: getSessionId(),
+                uuid: msg.uuid,
+              }
+            }
+            // Don't yield other system messages in headless mode
+            break
           }
-          break
-        }
-        case 'system': {
-          const msg = message as Message
-          // Snip boundary: replay on our store to remove zombie messages and
-          // stale markers. The yielded boundary is a signal, not data to push —
-          // the replay produces its own equivalent boundary. Without this,
-          // markers persist and re-trigger on every turn, and mutableMessages
-          // never shrinks (memory leak in long SDK sessions). The subtype
-          // check lives inside the injected callback so feature-gated strings
-          // stay out of this file (excluded-strings check).
-          const snipResult = this.config.snipReplay?.(msg, this.mutableMessages)
-          if (snipResult !== undefined) {
-            if (snipResult.executed) {
-              this.mutableMessages.length = 0
-              this.mutableMessages.push(...snipResult.messages)
+          case 'tool_use_summary': {
+            const msg = message as Message & {
+              summary: unknown
+              precedingToolUseIds: unknown
+            }
+            // Yield tool use summary messages to SDK
+            yield {
+              type: 'tool_use_summary' as const,
+              summary: msg.summary,
+              preceding_tool_use_ids: msg.precedingToolUseIds,
+              session_id: getSessionId(),
+              uuid: msg.uuid,
             }
             break
           }
-          this.mutableMessages.push(msg)
-          // Yield compact boundary messages to SDK
-          if (msg.subtype === 'compact_boundary' && msg.compactMetadata) {
-            const compactMsg = msg as SystemCompactBoundaryMessage
-            // Release pre-compaction messages for GC. The boundary was just
-            // pushed so it's the last element. query.ts already uses
-            // getMessagesAfterCompactBoundary() internally, so only
-            // post-boundary messages are needed going forward.
-            const mutableBoundaryIdx = this.mutableMessages.length - 1
-            if (mutableBoundaryIdx > 0) {
-              this.mutableMessages.splice(0, mutableBoundaryIdx)
-            }
-            const localBoundaryIdx = messages.length - 1
-            if (localBoundaryIdx > 0) {
-              messages.splice(0, localBoundaryIdx)
-            }
+        }
 
-            // densable 2.1.218 #23: emit logical_parent_uuid on mid-turn compact_boundary
-            const logicalParentUuid = (
-              compactMsg as { logicalParentUuid?: string }
-            ).logicalParentUuid
-            yield {
-              type: 'system',
-              subtype: 'compact_boundary' as const,
-              session_id: getSessionId(),
-              uuid: msg.uuid,
-              compact_metadata: toSDKCompactMetadata(
-                compactMsg.compactMetadata,
-              ),
-              ...(logicalParentUuid !== undefined && {
-                logical_parent_uuid: logicalParentUuid,
-              }),
-            }
-          }
-          // densable Fi: includePartialMessages + replayAcksAtRequestDispatch
-          // also acks on system/status/requesting (CCR request-dispatch).
-          const requestingStatus = msg as {
-            subtype?: string
-            status?: string
-          }
-          if (
-            replayRequestingStatus &&
-            !hasAcknowledgedInitialMessages &&
-            messagesToAck.length > 0 &&
-            requestingStatus.subtype === 'status' &&
-            requestingStatus.status === 'requesting'
-          ) {
-            hasAcknowledgedInitialMessages = true
-            for (const msgToAck of messagesToAck) {
-              if (msgToAck.type === 'user') {
-                yield {
-                  type: 'user',
-                  message: msgToAck.message,
-                  session_id: getSessionId(),
-                  parent_tool_use_id: null,
-                  uuid: msgToAck.uuid,
-                  timestamp: msgToAck.timestamp,
-                  isReplay: true,
-                  ...(options?.fileAttachments?.length
-                    ? { file_attachments: options.fileAttachments }
-                    : {}),
-                } as unknown as SDKUserMessageReplay
-              }
-            }
-          }
-          if (msg.subtype === 'api_error') {
-            const apiErrorMsg = msg as Message & {
-              retryAttempt: number
-              maxRetries: number
-              retryInMs: number
-              error: APIError
-            }
-            yield {
-              type: 'system',
-              subtype: 'api_retry' as const,
-              attempt: apiErrorMsg.retryAttempt,
-              max_retries: apiErrorMsg.maxRetries,
-              retry_delay_ms: apiErrorMsg.retryInMs,
-              error_status: apiErrorMsg.error.status ?? null,
-              error: categorizeRetryableAPIError(apiErrorMsg.error),
-              session_id: getSessionId(),
-              uuid: msg.uuid,
-            }
-          }
-          // Official densable: permanent model_not_found → stream
-          // system/model_fallback (snake_case Host wire). Capacity
-          // overloaded stays createSystemMessage informational only.
-          if (msg.subtype === 'model_fallback') {
-            const fb = msg as Message & {
-              subtype: 'model_fallback'
-              content?: string
-              trigger?: string
-              originalModel?: string
-              fallbackModel?: string
-            }
-            if (
-              fb.trigger === 'model_not_found' &&
-              this.config.userSpecifiedModel &&
-              typeof fb.fallbackModel === 'string' &&
-              fb.fallbackModel.length > 0
-            ) {
-              this.config.userSpecifiedModel = fb.fallbackModel
-            }
-            yield {
-              type: 'system' as const,
-              subtype: 'model_fallback' as const,
-              trigger: (fb.trigger ?? 'model_not_found') as
-                | 'model_not_found'
-                | 'overloaded',
-              original_model: fb.originalModel ?? '',
-              fallback_model: fb.fallbackModel ?? '',
-              content: fb.content ?? '',
-              session_id: getSessionId(),
-              uuid: msg.uuid,
-            }
-          }
-          // Don't yield other system messages in headless mode
-          break
-        }
-        case 'tool_use_summary': {
-          const msg = message as Message & {
-            summary: unknown
-            precedingToolUseIds: unknown
-          }
-          // Yield tool use summary messages to SDK
-          yield {
-            type: 'tool_use_summary' as const,
-            summary: msg.summary,
-            preceding_tool_use_ids: msg.precedingToolUseIds,
-            session_id: getSessionId(),
-            uuid: msg.uuid,
-          }
-          break
-        }
-      }
-
-      // Check if USD budget has been exceeded
-      if (maxBudgetUsd !== undefined && getTotalCost() >= maxBudgetUsd) {
-        if (persistSession) {
-          await flushSessionStorage()
-        }
-        yield {
-          type: 'result',
-          subtype: 'error_max_budget_usd',
-          duration_ms: Date.now() - startTime,
-          duration_api_ms: getTotalAPIDuration(),
-          is_error: true,
-          num_turns: turnCount,
-          stop_reason: lastStopReason,
-          session_id: getSessionId(),
-          total_cost_usd: getTotalCost(),
-          usage: this.totalUsage,
-          modelUsage: getModelUsage(),
-          permission_denials: this.permissionDenials,
-          fast_mode_state: getFastModeState(
-            mainLoopModel,
-            initialAppState.fastMode,
-          ),
-          uuid: randomUUID(),
-          errors: [
-            `Reached maximum budget ($${maxBudgetUsd}). Increase the limit with --max-budget-usd or start a new session.`,
-          ],
-        }
-        return
-      }
-
-      // Check if structured output retry limit exceeded (only on user messages)
-      if (message.type === 'user' && jsonSchema) {
-        const currentCalls = countToolCalls(
-          this.mutableMessages,
-          SYNTHETIC_OUTPUT_TOOL_NAME,
-        )
-        const callsThisQuery = currentCalls - initialStructuredOutputCalls
-        const maxRetries = parseInt(
-          process.env.MAX_STRUCTURED_OUTPUT_RETRIES || '5',
-          10,
-        )
-        if (
-          callsThisQuery + tombstonedStructuredOutputCalls >= maxRetries &&
-          survivingStructuredOutputs.length === 0
-        ) {
+        // Check if USD budget has been exceeded
+        if (maxBudgetUsd !== undefined && getTotalCost() >= maxBudgetUsd) {
           if (persistSession) {
             await flushSessionStorage()
           }
-          for (const ev of partialStreamCloser.closeAtTurnEnd(
-            currentMessageUsage,
-          )) {
-            yield ev as unknown as SDKMessage
-          }
           yield {
             type: 'result',
-            subtype: 'error_max_structured_output_retries',
+            subtype: 'error_max_budget_usd',
             duration_ms: Date.now() - startTime,
             duration_api_ms: getTotalAPIDuration(),
             is_error: true,
@@ -2203,14 +2223,65 @@ export class QueryEngine {
             ),
             uuid: randomUUID(),
             errors: [
-              tombstonedStructuredOutputCalls > 0
-                ? `Failed to provide surviving structured output after ${maxRetries} attempts (${tombstonedStructuredOutputCalls} retracted by a model fallback)`
-                : `Failed to provide valid structured output after ${maxRetries} attempts`,
+              `Reached maximum budget ($${maxBudgetUsd}). Increase the limit with --max-budget-usd or start a new session.`,
             ],
           }
           return
         }
+
+        // Check if structured output retry limit exceeded (only on user messages)
+        if (message.type === 'user' && jsonSchema) {
+          const currentCalls = countToolCalls(
+            this.mutableMessages,
+            SYNTHETIC_OUTPUT_TOOL_NAME,
+          )
+          const callsThisQuery = currentCalls - initialStructuredOutputCalls
+          const maxRetries = parseInt(
+            process.env.MAX_STRUCTURED_OUTPUT_RETRIES || '5',
+            10,
+          )
+          if (
+            callsThisQuery + tombstonedStructuredOutputCalls >= maxRetries &&
+            survivingStructuredOutputs.length === 0
+          ) {
+            if (persistSession) {
+              await flushSessionStorage()
+            }
+            for (const ev of partialStreamCloser.closeAtTurnEnd(
+              currentMessageUsage,
+            )) {
+              yield ev as unknown as SDKMessage
+            }
+            yield {
+              type: 'result',
+              subtype: 'error_max_structured_output_retries',
+              duration_ms: Date.now() - startTime,
+              duration_api_ms: getTotalAPIDuration(),
+              is_error: true,
+              num_turns: turnCount,
+              stop_reason: lastStopReason,
+              session_id: getSessionId(),
+              total_cost_usd: getTotalCost(),
+              usage: this.totalUsage,
+              modelUsage: getModelUsage(),
+              permission_denials: this.permissionDenials,
+              fast_mode_state: getFastModeState(
+                mainLoopModel,
+                initialAppState.fastMode,
+              ),
+              uuid: randomUUID(),
+              errors: [
+                tombstonedStructuredOutputCalls > 0
+                  ? `Failed to provide surviving structured output after ${maxRetries} attempts (${tombstonedStructuredOutputCalls} retracted by a model fallback)`
+                  : `Failed to provide valid structured output after ${maxRetries} attempts`,
+              ],
+            }
+            return
+          }
+        }
       }
+    } finally {
+      await queryGen.return?.(undefined as never)
     }
 
     // Stop hooks yield progress/attachment messages AFTER the assistant
@@ -2244,6 +2315,19 @@ export class QueryEngine {
 
     for (const ev of partialStreamCloser.closeAtTurnEnd(currentMessageUsage)) {
       yield ev as unknown as SDKMessage
+    }
+
+    const autoModeStopNotice = getAutoModeUnavailableStopNotice()
+    if (autoModeStopNotice !== undefined) {
+      setAutoModeUnavailableStopNotice(undefined)
+      yield {
+        type: 'system',
+        subtype: 'informational',
+        content: autoModeStopNotice,
+        level: 'warning',
+        session_id: getSessionId(),
+        uuid: randomUUID(),
+      } as unknown as SDKMessage
     }
 
     if (
@@ -2282,7 +2366,24 @@ export class QueryEngine {
       return
     }
 
-    if (!isResultSuccessful(result, lastStopReason)) {
+    const TERMINAL_FAILURE_REASONS = new Set([
+      'aborted_streaming',
+      'aborted_tools',
+      'api_error',
+      'blocking_limit',
+      'image_error',
+      'malformed_tool_use_exhausted',
+      'model_error',
+      'prompt_too_long',
+      'rapid_refill_breaker',
+      'turn_setup_failed',
+    ])
+    const terminatedWithFailure =
+      (terminalReason !== undefined &&
+        TERMINAL_FAILURE_REASONS.has(terminalReason)) ||
+      (this.abortController.signal.aborted && terminalReason !== 'completed')
+
+    if (!isResultSuccessful(result, lastStopReason) || terminatedWithFailure) {
       yield {
         type: 'result',
         subtype: 'error_during_execution',
@@ -2291,6 +2392,9 @@ export class QueryEngine {
         is_error: true,
         num_turns: turnCount,
         stop_reason: lastStopReason,
+        ...(terminalReason !== undefined
+          ? { terminal_reason: terminalReason }
+          : {}),
         session_id: getSessionId(),
         total_cost_usd: getTotalCost(),
         usage: this.totalUsage,

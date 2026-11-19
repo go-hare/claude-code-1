@@ -17,6 +17,7 @@ type BridgePermissionCallbacks = {
     description: string,
     permissionSuggestions?: PermissionUpdate[],
     blockedPath?: string,
+    suppressAlwaysAllowRule?: boolean,
   ): void
   sendResponse(requestId: string, response: BridgePermissionResponse): void
   /** Cancel a pending control_request so the web app can dismiss its prompt. */
@@ -25,6 +26,22 @@ type BridgePermissionCallbacks = {
     requestId: string,
     handler: (response: BridgePermissionResponse) => void,
   ): () => void // returns unsubscribe
+}
+
+/**
+ * Official `Zy` / `Tmr` (#1543) — suppress "don't ask again" (`permissionSuggestions`)
+ * when a plugin mod (`hookCaller` / `pluginSteered`) invoked the tool or the
+ * permission result explicitly requested suppression.
+ */
+function shouldSuppressAlwaysAllowRule(
+  toolUseContext: { hookCaller?: unknown; pluginSteered?: unknown } | undefined,
+  explicitSuppress?: boolean,
+): boolean {
+  return (
+    explicitSuppress === true ||
+    toolUseContext?.hookCaller !== undefined ||
+    toolUseContext?.pluginSteered === true
+  )
 }
 
 /** Type predicate for validating a parsed control_response payload
@@ -100,5 +117,9 @@ function parseBridgePermissionResponse(
   return null
 }
 
-export { isBridgePermissionResponse, parseBridgePermissionResponse }
+export {
+  isBridgePermissionResponse,
+  parseBridgePermissionResponse,
+  shouldSuppressAlwaysAllowRule,
+}
 export type { BridgePermissionCallbacks, BridgePermissionResponse }

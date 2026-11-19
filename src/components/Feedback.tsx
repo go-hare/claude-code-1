@@ -502,7 +502,7 @@ export function Feedback({
       title="Submit feedback / bug report"
       onCancel={handleCancel}
       isCancelActive={step !== 'userInput' && !isTerminalStep}
-      hideInputGuide={step === 'done'}
+      hideInputGuide={step === 'done' && mode !== 'share'}
       inputGuide={
         step === 'userInput' ? (
           <Byline>
@@ -519,6 +519,13 @@ export function Feedback({
             <KeyboardShortcutHint shortcut="enter" action={MODE_COPY[mode].consentAction} />
             <KeyboardShortcutHint shortcut="left" action="change" />
             <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="cancel" />
+          </Byline>
+        ) : step === 'submitting' ? (
+          <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="cancel" />
+        ) : step === 'done' ? (
+          <Byline>
+            <KeyboardShortcutHint shortcut="c" action="copy" />
+            <KeyboardShortcutHint shortcut="enter" action="close" />
           </Byline>
         ) : null
       }

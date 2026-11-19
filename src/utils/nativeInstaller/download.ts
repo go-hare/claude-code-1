@@ -7,7 +7,7 @@
  */
 
 import { feature } from 'bun:bundle'
-import axios from 'axios'
+import axios, { type AxiosRequestConfig, type AxiosResponse } from 'axios'
 import { createHash } from 'crypto'
 import { chmod, writeFile } from 'fs/promises'
 import { join } from 'path'
@@ -75,6 +75,101 @@ export async function getLatestVersionFromArtifactory(
   return latestVersion
 }
 
+const RELEASE_FETCH_MAX_ATTEMPTS = 3
+const RELEASE_FETCH_BASE_DELAY_MS = 250
+
+function getHttpStatus(error: unknown): number | undefined {
+  if (axios.isAxiosError(error) && error.response) {
+    return error.response.status
+  }
+  if (
+    error !== null &&
+    typeof error === 'object' &&
+    'response' in error &&
+    typeof (error as { response?: { status?: unknown } }).response?.status ===
+      'number'
+  ) {
+    return (error as { response: { status: number } }).response.status
+  }
+  return undefined
+}
+
+function isNetworkOrTimeoutError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  const code = (error as NodeJS.ErrnoException).code
+  if (
+    code === 'ECONNRESET' ||
+    code === 'ECONNABORTED' ||
+    code === 'ETIMEDOUT' ||
+    code === 'EPIPE' ||
+    code === 'ENOTFOUND' ||
+    code === 'EAI_AGAIN' ||
+    code === 'ERR_NETWORK'
+  ) {
+    return true
+  }
+  return error.message.toLowerCase().includes('timeout')
+}
+
+/**
+ * Official `alsoRetry` predicate for release manifest / signature / version fetches:
+ * retry immediately on network/timeout errors (no HTTP status), 429, or >= 500.
+ */
+export function isRetryableReleaseFetchError(error: unknown): boolean {
+  const status = getHttpStatus(error)
+  return status === undefined
+    ? isNetworkOrTimeoutError(error)
+    : status === 429 || status >= 500
+}
+
+export async function fetchReleaseWithRetry<T = unknown>(
+  url: string,
+  config: AxiosRequestConfig,
+  opts: {
+    maxAttempts?: number
+    alsoRetry?: (error: unknown) => boolean
+    deadline?: AbortSignal
+    sleepFn?: (ms: number) => Promise<void>
+  } = {},
+): Promise<{ data: T; attempt: number }> {
+  const maxAttempts = opts.maxAttempts ?? RELEASE_FETCH_MAX_ATTEMPTS
+  const alsoRetry = opts.alsoRetry ?? isRetryableReleaseFetchError
+  const sleepFn = opts.sleepFn ?? sleep
+
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const response: AxiosResponse<T> = await axios.get<T>(url, {
+        ...config,
+        signal: opts.deadline ?? config.signal,
+      })
+      return { data: response.data, attempt }
+    } catch (error) {
+      const tagged = Object.assign(
+        error instanceof Error ? error : new Error(String(error)),
+        { attempt },
+      )
+      if (
+        attempt >= maxAttempts ||
+        opts.deadline?.aborted ||
+        !alsoRetry(tagged)
+      ) {
+        throw tagged
+      }
+      const jitter = 0.75 + Math.random() * 0.5
+      const delayMs = Math.round(
+        RELEASE_FETCH_BASE_DELAY_MS * 2 ** (attempt - 1) * jitter,
+      )
+      logForDebugging(
+        `Fetch of ${url} failed on attempt ${attempt}/${maxAttempts} (${getHttpStatus(tagged) ?? 'no response'}), retrying...`,
+      )
+      await sleepFn(delayMs)
+      if (opts.deadline?.aborted) {
+        throw tagged
+      }
+    }
+  }
+}
+
 export async function getLatestVersionFromBinaryRepo(
   channel: ReleaseChannel = 'latest',
   baseUrl: string,
@@ -82,16 +177,19 @@ export async function getLatestVersionFromBinaryRepo(
 ): Promise<string> {
   const startTime = Date.now()
   try {
-    const response = await axios.get(`${baseUrl}/${channel}`, {
-      timeout: 30000,
-      responseType: 'text',
-      ...authConfig,
-    })
+    const { data } = await fetchReleaseWithRetry<string>(
+      `${baseUrl}/${channel}`,
+      {
+        timeout: 30000,
+        responseType: 'text',
+        ...authConfig,
+      },
+    )
     const latencyMs = Date.now() - startTime
     logEvent('tengu_version_check_success', {
       latency_ms: latencyMs,
     })
-    return response.data.trim()
+    return data.trim()
   } catch (error) {
     const latencyMs = Date.now() - startTime
     const errorMessage = error instanceof Error ? error.message : String(error)
@@ -412,9 +510,10 @@ export async function downloadVersionFromBinaryRepo(
   logEvent('tengu_binary_download_attempt', {})
 
   // Fetch manifest to get checksum
-  let manifest
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let manifest: any
   try {
-    const manifestResponse = await axios.get(
+    const { data } = await fetchReleaseWithRetry(
       `${baseUrl}/${version}/manifest.json`,
       {
         timeout: 10000,
@@ -422,7 +521,7 @@ export async function downloadVersionFromBinaryRepo(
         ...authConfig,
       },
     )
-    manifest = manifestResponse.data
+    manifest = data
   } catch (error) {
     const latencyMs = Date.now() - startTime
     const errorMessage = error instanceof Error ? error.message : String(error)

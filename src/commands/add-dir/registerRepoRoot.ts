@@ -6,7 +6,10 @@
 import { realpath, stat } from 'fs/promises'
 import type { ToolPermissionContext } from '../../Tool.js'
 import type { AdditionalWorkingDirectory } from '../../types/permissions.js'
-import { pathInWorkingPath } from '../../utils/permissions/filesystem.js'
+import {
+  holdWorkingDirPathAsNamed,
+  pathInWorkingPath,
+} from '../../utils/permissions/filesystem.js'
 
 export type RegisterRepoRootAllowed = { allowed: true }
 export type RegisterRepoRootDenied = { allowed: false; reason: string }
@@ -196,6 +199,7 @@ export async function handleRegisterRepoRoot(
   }
 
   deps.applyAddDirectory(requestedRealpath)
+  holdWorkingDirPathAsNamed(requestedRealpath)
 
   const bootstrapDirs = deps.getBootstrapAdditionalDirs()
   if (!bootstrapDirs.includes(requestedRealpath)) {

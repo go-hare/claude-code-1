@@ -50,8 +50,14 @@ import {
   PAr,
 } from 'src/services/artifactAutoReact/readPerm/consent.js'
 import {
+  ARTIFACT_DB_ACCESS_TIERS,
+  ARTIFACT_DB_RULE_PATH_RE,
+  type ArtifactDbAccessRule,
+  areValidArtifactDbAccessRules,
   formatAssetReadResult,
   formatAssetUploadResult,
+  formatDbAccessRulesSummary,
+  formatDbRulesResetRefusal,
   formatFileListResult,
   formatFileReadResult,
   formatFilesReadResult,
@@ -184,12 +190,56 @@ const outputSchema = lazySchema(() =>
         'write_failed',
       ])
       .optional(),
+    db_access_rules: z
+      .array(
+        z.object({
+          path: z.string(),
+          read: z.string().optional(),
+          write: z.string().optional(),
+        }),
+      )
+      .optional(),
+    dropped_db_access_rules: z
+      .array(
+        z.object({
+          path: z.string(),
+          read: z.string().optional(),
+          write: z.string().optional(),
+        }),
+      )
+      .optional(),
   }),
 )
 type OutputSchema = ReturnType<typeof outputSchema>
 export type ArtifactOutput = z.infer<OutputSchema>
 
 export { formatPathPinConflictUiMessage } from 'src/services/artifactAutoReact/store.js'
+
+const storedDbAccessRules = new Map<string, ArtifactDbAccessRule[]>()
+
+export function recordStoredDbAccessRules(
+  slug: string,
+  rules: readonly ArtifactDbAccessRule[],
+): void {
+  if (rules.length === 0) {
+    storedDbAccessRules.delete(slug)
+  } else {
+    storedDbAccessRules.set(slug, [...rules])
+  }
+}
+
+export function _resetStoredDbAccessRulesForTesting(): void {
+  storedDbAccessRules.clear()
+}
+
+function formatArtifactOutputDbRulesNote(content: ArtifactOutput): string {
+  const rules = content.db_access_rules ?? []
+  const dropped = content.dropped_db_access_rules ?? []
+  if (rules.length === 0 && dropped.length === 0) {
+    return ''
+  }
+  return `\nDatabase access rules:\n${formatDbAccessRulesSummary(rules, dropped.length > 0 ? dropped : undefined)}`
+}
 
 /** Gold `JTe` — optimistic-concurrency refusal prefix. */
 export const PUBLISH_REFUSED_PREFIX =
@@ -683,12 +733,51 @@ export const ArtifactTool = buildTool({
         }
       }
     }
+    const rawCaps = (input as Record<string, unknown> | undefined)?.capabilities
+    if (
+      rawCaps !== null &&
+      typeof rawCaps === 'object' &&
+      !Array.isArray(rawCaps)
+    ) {
+      const dbCap = (rawCaps as Record<string, unknown>).db
+      if (
+        dbCap !== null &&
+        typeof dbCap === 'object' &&
+        !Array.isArray(dbCap) &&
+        Object.hasOwn(dbCap, 'rules')
+      ) {
+        const rules = (dbCap as Record<string, unknown>).rules
+        if (!areValidArtifactDbAccessRules(rules)) {
+          return {
+            result: false as const,
+            message: `capabilities.db.rules must contain valid rules with paths matching ${ARTIFACT_DB_RULE_PATH_RE.source} (or "") and read/write tiers in ${Array.from(ARTIFACT_DB_ACCESS_TIERS).join(', ')}`,
+            errorCode: 6,
+          }
+        }
+      }
+    }
     return { result: true as const }
   },
 
   toAutoClassifierInput(input: ArtifactInput) {
     if (input && 'action' in input && input.action === 'quickstart') {
       return classifyQuickstartInput(input)
+    }
+    // #1546: cloud outputs / upload / write_db provide structured classifier input
+    // instead of empty string so auto mode does not block with classifierRan=false.
+    if (isUploadInput(input)) {
+      return {
+        action: 'upload',
+        ...(typeof (input as { file_path?: unknown }).file_path === 'string'
+          ? { file_path: (input as { file_path: string }).file_path }
+          : {}),
+        ...(typeof (input as { url?: unknown }).url === 'string'
+          ? { url: (input as { url: string }).url }
+          : {}),
+      }
+    }
+    if (input && typeof input === 'object' && 'action' in input) {
+      return input
     }
     return ''
   },
@@ -731,10 +820,29 @@ export const ArtifactTool = buildTool({
         },
       }
     }
-    return checkArtifactActionPermissions(
+    const permResult = await checkArtifactActionPermissions(
       input as Record<string, unknown>,
       context,
     )
+    // #1546: In auto mode, exempt cloud outputs / upload / write_db from
+    // interactive ask blocks unless explicitly denied.
+    const mode = context.getAppState().toolPermissionContext.mode
+    const actionName =
+      input && typeof input === 'object' && 'action' in input
+        ? (input as { action?: string }).action
+        : undefined
+    if (
+      mode === 'auto' &&
+      permResult.behavior === 'ask' &&
+      (isUploadInput(input) ||
+        actionName === 'write_db' ||
+        actionName === 'db_write' ||
+        actionName === 'db_str_replace' ||
+        actionName === 'upload_asset')
+    ) {
+      return { behavior: 'allow' as const, updatedInput: input }
+    }
+    return permResult
   },
 
   renderToolUseMessage(input: Partial<ArtifactInput>) {
@@ -883,10 +991,11 @@ export const ArtifactTool = buildTool({
     // Gold hosted map: `"read"in e` → `e.read.result` (no Hg). Hg is on
     // file/asset DualInk bags (foreign + kGe(outside_writer, public_read)).
     if (content.read) {
+      const dbRulesNote = formatArtifactOutputDbRulesNote(content)
       return {
         tool_use_id: toolUseID,
         type: 'tool_result',
-        content: content.read.result.slice(0, 4000),
+        content: `${content.read.result.slice(0, 4000)}${dbRulesNote}`,
       }
     }
     if (content.replied === true) {
@@ -904,10 +1013,11 @@ export const ArtifactTool = buildTool({
       }
     }
     if (content.published === true) {
+      const dbRulesNote = formatArtifactOutputDbRulesNote(content)
       return {
         tool_use_id: toolUseID,
         type: 'tool_result',
-        content: `Artifact live-edit published${content.ver ? ` (ver ${content.ver})` : ''}`,
+        content: `Artifact live-edit published${content.ver ? ` (ver ${content.ver})` : ''}${dbRulesNote}`,
       }
     }
     if (content.watch) {
@@ -1033,10 +1143,11 @@ export const ArtifactTool = buildTool({
       typeof content.editsApplied === 'number'
         ? `\n\n${formatPublishEditsWritebackNote(content.editsApplied, 'page', content.editsNotWritten)}`
         : ''
+    const dbRulesNote = formatArtifactOutputDbRulesNote(content)
     return {
       tool_use_id: toolUseID,
       type: 'tool_result',
-      content: `Artifact uploaded: ${content.url} (id: ${content.id}, expires: ${content.expiresAt})${editsNote}`,
+      content: `Artifact uploaded: ${content.url} (id: ${content.id}, expires: ${content.expiresAt})${dbRulesNote}${editsNote}`,
     }
   },
   renderToolResultMessage,
@@ -3327,6 +3438,39 @@ async function callUpload(
     }
   }
 
+  // #1497 (official db_rules_reset_refused @297193344): refuse a republish
+  // that re-sends capabilities.db without `rules` while stored access rules exist.
+  const targetSlugForDbRules = parsedUrl?.slug ?? hash
+  const rawCaps = (input as Record<string, unknown>).capabilities
+  const dbCap =
+    rawCaps !== null && typeof rawCaps === 'object' && !Array.isArray(rawCaps)
+      ? (rawCaps as Record<string, unknown>).db
+      : undefined
+  const storedRulesForSlug = targetSlugForDbRules
+    ? storedDbAccessRules.get(targetSlugForDbRules)
+    : undefined
+  const dbCapOmitsRules =
+    dbCap === true ||
+    (dbCap !== null &&
+      typeof dbCap === 'object' &&
+      !Array.isArray(dbCap) &&
+      !Object.hasOwn(dbCap, 'rules'))
+  if (
+    storedRulesForSlug !== undefined &&
+    storedRulesForSlug.length > 0 &&
+    dbCapOmitsRules
+  ) {
+    return emptyErr(formatDbRulesResetRefusal(storedRulesForSlug))
+  }
+  const declaredDbRules: ArtifactDbAccessRule[] | undefined =
+    dbCap !== null &&
+    typeof dbCap === 'object' &&
+    !Array.isArray(dbCap) &&
+    Object.hasOwn(dbCap, 'rules') &&
+    areValidArtifactDbAccessRules((dbCap as Record<string, unknown>).rules)
+      ? ((dbCap as Record<string, unknown>).rules as ArtifactDbAccessRule[])
+      : undefined
+
   try {
     const result = await uploadArtifact({
       html,
@@ -3336,13 +3480,23 @@ async function callUpload(
       ttl,
     })
 
-    const publishedSlug = parsedUrl?.slug ?? result.id
+    const publishedSlug = parsedUrl?.slug ?? hash ?? result.id
+    let droppedDbAccessRules: ArtifactDbAccessRule[] | undefined
     if (publishedSlug) {
       artifactStore.refusedPublishBodies.delete(publishedSlug)
       recordPublishedPathPins(publishedSlug, result.expiresAt || '1', {
         written: [{ path: targetPath, sha256: bodySha256 }],
         removed: [],
       })
+      if (declaredDbRules !== undefined) {
+        const prevRules = storedDbAccessRules.get(publishedSlug) ?? []
+        const nextPaths = new Set(declaredDbRules.map(r => r.path))
+        const dropped = prevRules.filter(r => !nextPaths.has(r.path))
+        if (dropped.length > 0) {
+          droppedDbAccessRules = dropped
+        }
+        recordStoredDbAccessRules(publishedSlug, declaredDbRules)
+      }
     }
 
     let editsNotWritten: PublishEditsNotWrittenReason | undefined
@@ -3389,6 +3543,13 @@ async function callUpload(
     return {
       data: {
         ...result,
+        ...(declaredDbRules !== undefined && declaredDbRules.length > 0
+          ? { db_access_rules: declaredDbRules }
+          : {}),
+        ...(droppedDbAccessRules !== undefined &&
+        droppedDbAccessRules.length > 0
+          ? { dropped_db_access_rules: droppedDbAccessRules }
+          : {}),
         ...(edits !== undefined
           ? {
               editsApplied: edits.length,

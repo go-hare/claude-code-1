@@ -40,11 +40,19 @@ function message(
   }
 }
 
+async function seedTeamConfig(teamName: string): Promise<void> {
+  const inboxPath = getInboxPath('team-lead', teamName)
+  const teamDir = dirname(dirname(inboxPath))
+  await mkdir(teamDir, { recursive: true })
+  await writeFile(join(teamDir, 'config.json'), '{}', 'utf-8')
+}
+
 async function seedMailbox(
   agentName: string,
   teamName: string,
   messages: TeammateMessage[],
 ): Promise<void> {
+  await seedTeamConfig(teamName)
   const inboxPath = getInboxPath(agentName, teamName)
   await mkdir(dirname(inboxPath), { recursive: true })
   await writeFile(inboxPath, JSON.stringify(messages, null, 2), 'utf-8')
@@ -401,6 +409,7 @@ describe('teammate mailbox retention', () => {
   })
 
   test('writeToMailbox returns msg_id and stamps msgV on success (densable rjt)', async () => {
+    await seedTeamConfig('alpha')
     const msgId = await writeToMailbox(
       'worker',
       {

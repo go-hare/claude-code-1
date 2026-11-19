@@ -1,4 +1,4 @@
-import { existsSync } from 'fs'
+import { existsSync, statSync } from 'fs'
 import memoize from 'lodash-es/memoize.js'
 import * as path from 'path'
 import * as pathWin32 from 'path/win32'
@@ -210,9 +210,17 @@ export function shouldSkipWhereCandidateAsCwdShadow(
   if (isUnderCwdViaShadowDir(candidateDir, cwdResolved)) return true
   if (isUnderSharedWindowsAppsAlias(candidateDir, cwdResolved)) return true
 
-  // densable realpath branch: when realpath unavailable we conservatively
-  // allow (return false). Local has no realpathSync.native deps in this
-  // pure helper — lexical path is the security gate densable always runs.
+  // #1596: compare directory identity via statSync(..., { bigint: true }) `${dev}:${ino}`
+  // to catch cwd-shadowed executables reached through a junction, subst drive,
+  // symlink, or 8.3 short path alias whose lexical spelling differs from cwd.
+  const rawCandidateDir = pathWin32.dirname(candidatePath)
+  if (
+    isSameWindowsFolderIdentity(rawCandidateDir, cwd) ||
+    isSameWindowsFolderIdentity(candidateDir, cwdResolved)
+  ) {
+    return true
+  }
+
   return false
 }
 
@@ -520,3 +528,18 @@ export const posixPathToWindowsPath = memoizeWithLRU(
   (p: string) => p,
   500,
 )
+
+/**
+ * #1596: Compare two folder paths by `${dev}:${ino}` via statSync(..., { bigint: true }).
+ */
+export function isSameWindowsFolderIdentity(a: string, b: string): boolean {
+  try {
+    const stA = statSync(a, { bigint: true, throwIfNoEntry: false })
+    if (!stA || !stA.isDirectory() || stA.ino === 0n) return false
+    const stB = statSync(b, { bigint: true, throwIfNoEntry: false })
+    if (!stB || !stB.isDirectory() || stB.ino === 0n) return false
+    return `${stA.dev}:${stA.ino}` === `${stB.dev}:${stB.ino}`
+  } catch {
+    return false
+  }
+}

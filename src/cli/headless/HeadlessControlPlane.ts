@@ -1157,6 +1157,7 @@ export async function buildSdkInitializeResponse(
         | 'foundry',
     },
     pid: process.pid,
+    hook_on_failure_supported: true,
   }
 
   if (isFastModeEnabled() && isFastModeAvailable()) {
@@ -1282,11 +1283,24 @@ export async function handleInitializeRequest(
     const hooks: Partial<Record<HookEvent, HookCallbackMatcher[]>> = {}
     for (const [event, matchers] of Object.entries(request.hooks) as [
       string,
-      Array<{ hookCallbackIds: string[]; timeout?: number; matcher?: string }>,
+      Array<{
+        hookCallbackIds: string[]
+        timeout?: number
+        matcher?: string
+        onFailure?: 'continue' | 'block'
+      }>,
     ][]) {
       hooks[event as HookEvent] = matchers.map(matcher => {
+        const onFailure =
+          matcher.onFailure === 'continue' || matcher.onFailure === 'block'
+            ? matcher.onFailure
+            : undefined
         const callbacks = matcher.hookCallbackIds.map(callbackId => {
-          return structuredIO.createHookCallback(callbackId, matcher.timeout)
+          const cb = structuredIO.createHookCallback(
+            callbackId,
+            matcher.timeout,
+          )
+          return onFailure !== undefined ? { ...cb, onFailure } : cb
         })
         return {
           matcher: matcher.matcher,

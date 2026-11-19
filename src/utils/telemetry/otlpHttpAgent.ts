@@ -15,7 +15,11 @@
 
 import http from 'http'
 import https from 'https'
+import type net from 'net'
+import { isIP } from 'net'
+import { checkServerIdentity } from 'tls'
 import { HttpsProxyAgent } from 'https-proxy-agent'
+import type { HttpsProxyAgentOptions } from 'https-proxy-agent'
 import { getCACertificates } from '../caCerts.js'
 import { getMTLSConfig } from '../mtls.js'
 import { getProxyUrl, shouldBypassProxy } from '../proxy.js'
@@ -144,6 +148,148 @@ export function wrapAgentWithContentLength<T extends AgentLike>(agent: T): T {
 
 export type OtlpHttpAgentFactory = (protocol: string) => AgentLike
 
+const MAX_OTLP_PROXY_TUNNEL_MS = 25_000
+
+/**
+ * Parse a positive finite timeout in milliseconds from an env var string.
+ */
+export function parseOtlpTimeoutMs(
+  value: string | undefined,
+): number | undefined {
+  const parsed = value?.trim() ? Number(value) : Number.NaN
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
+}
+
+/**
+ * Compute the effective proxy tunnel open timeout (capped at 25s).
+ */
+export function getOtlpProxyTunnelTimeoutMs(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const base =
+    parseOtlpTimeoutMs(env.OTEL_EXPORTER_OTLP_TIMEOUT) ??
+    MAX_OTLP_PROXY_TUNNEL_MS
+  return Math.min(
+    MAX_OTLP_PROXY_TUNNEL_MS,
+    Math.max(
+      parseOtlpTimeoutMs(env.OTEL_EXPORTER_OTLP_LOGS_TIMEOUT) ?? base,
+      parseOtlpTimeoutMs(env.OTEL_EXPORTER_OTLP_METRICS_TIMEOUT) ?? base,
+      parseOtlpTimeoutMs(env.OTEL_EXPORTER_OTLP_TRACES_TIMEOUT) ?? base,
+    ),
+  )
+}
+
+function createTunnelTimeoutError(timeoutMs: number): Error & { code: string } {
+  return Object.assign(
+    new Error(
+      `Could not connect to the OpenTelemetry collector through the proxy within ${timeoutMs / 1000} seconds, so this export was not sent. Check that both can be reached.`,
+    ),
+    { code: 'ETIMEDOUT' },
+  )
+}
+
+function abortController(controller: AbortController): void {
+  controller.abort()
+}
+
+function buildTlsServerIdentityOpts(host: string): {
+  servername: string
+  checkServerIdentity: typeof checkServerIdentity
+} {
+  if (!host || isIP(host)) {
+    return {
+      servername: '',
+      checkServerIdentity: (_servername, cert) =>
+        checkServerIdentity(host, cert),
+    }
+  }
+  return {
+    servername: host,
+    checkServerIdentity,
+  }
+}
+
+/**
+ * HttpsProxyAgent subclass with explicit `isSecureEndpoint`, TLS servername
+ * preservation, and bounded proxy tunnel open timeout.
+ */
+export class OtlpProxyAgent<Uri extends string> extends HttpsProxyAgent<Uri> {
+  readonly #isSecure: boolean
+  readonly #tunnelOpensWithinMs: number
+
+  constructor(
+    opts: { isSecure: boolean; tunnelOpensWithinMs: number },
+    proxy: Uri,
+    agentOpts?: HttpsProxyAgentOptions<Uri>,
+  ) {
+    super(proxy, agentOpts)
+    this.#isSecure = opts.isSecure
+    this.#tunnelOpensWithinMs = opts.tunnelOpensWithinMs
+  }
+
+  override isSecureEndpoint(): boolean {
+    return this.#isSecure
+  }
+
+  override async connect(
+    req: http.ClientRequest,
+    opts: Parameters<HttpsProxyAgent<Uri>['connect']>[1],
+  ): Promise<net.Socket> {
+    const connectOpts = opts.secureEndpoint
+      ? (() => {
+          const host =
+            (opts as { servername?: string; host?: string }).servername ||
+            opts.host ||
+            ''
+          const origCheck = (
+            opts as { checkServerIdentity?: typeof checkServerIdentity }
+          ).checkServerIdentity
+          return {
+            ...opts,
+            ...(origCheck
+              ? {
+                  checkServerIdentity: (
+                    _servername: string,
+                    cert: Parameters<typeof checkServerIdentity>[1],
+                  ) => origCheck(host, cert),
+                }
+              : buildTlsServerIdentityOpts(host)),
+          }
+        })()
+      : opts
+
+    const controller = new AbortController()
+    const timer = setTimeout(
+      abortController,
+      this.#tunnelOpensWithinMs,
+      controller,
+    )
+    this.connectOpts = {
+      ...this.connectOpts,
+      signal: controller.signal as never,
+    }
+    try {
+      const socket = await super.connect(req, connectOpts)
+      if (this.#isSecure) {
+        socket.once('secureConnect', () => clearTimeout(timer))
+        socket.once('close', () => clearTimeout(timer))
+        controller.signal.addEventListener('abort', () =>
+          socket.destroy(createTunnelTimeoutError(this.#tunnelOpensWithinMs)),
+        )
+      } else {
+        clearTimeout(timer)
+      }
+      return socket
+    } catch (err) {
+      clearTimeout(timer)
+      if (controller.signal.aborted) {
+        throw createTunnelTimeoutError(this.#tunnelOpensWithinMs)
+      }
+      throw err
+    }
+  }
+}
+
 /**
  * densable Mvd — factory always returns YAo-wrapped agents (proxy or direct).
  */
@@ -168,20 +314,24 @@ export function createOtlpHttpAgentFactory(
     ...(caCerts && { ca: caCerts }),
   }
 
+  const tunnelOpensWithinMs = getOtlpProxyTunnelTimeoutMs()
   let httpAgent: http.Agent | undefined
   let httpsAgent: https.Agent | undefined
-  let proxyAgent: HttpsProxyAgent<string> | undefined
+  const proxyAgents = new Map<boolean, OtlpProxyAgent<string>>()
 
   return (protocol: string) => {
     if (useProxy && proxyUrl) {
+      const isSecure = protocol !== 'http:'
+      let proxyAgent = proxyAgents.get(isSecure)
       if (!proxyAgent) {
         proxyAgent = wrapAgentWithContentLength(
-          new HttpsProxyAgent(proxyUrl, {
+          new OtlpProxyAgent({ isSecure, tunnelOpensWithinMs }, proxyUrl, {
             ...tlsExtras,
             keepAlive: true,
-            maxSockets: 1,
+            maxFreeSockets: 1,
           }),
-        ) as HttpsProxyAgent<string>
+        )
+        proxyAgents.set(isSecure, proxyAgent)
         // densable: c.options = { ...c.options, ...s } for TLS on tunnel
         Object.assign(proxyAgent, {
           options: {

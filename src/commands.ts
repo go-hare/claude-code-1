@@ -64,6 +64,7 @@ import skillDoctor, {
 } from './commands/skill-doctor/index.js'
 import status from './commands/status/index.js'
 import tasks from './commands/tasks/index.js'
+import teamOnboarding from './commands/team-onboarding/index.js'
 import teleport from './commands/teleport/index.js'
 import agentsPlatform from './commands/agents-platform/index.js'
 import scheduleCommand from './commands/schedule/index.js'
@@ -533,6 +534,7 @@ const COMMANDS = memoize((): Command[] => [
   breakCacheNonInteractive,
   issue,
   share,
+  teamOnboarding,
   teleport,
   tui,
   tuiNonInteractive,
@@ -801,6 +803,11 @@ const loadAllCommands = memoize(async (cwd: string): Promise<Command[]> => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { disambiguateAddDirSkills } =
     require('./skills/loadSkillsDir.js') as typeof import('./skills/loadSkillsDir.js')
+  const headless = getIsNonInteractiveSession()
+  const filteredPluginCommands = headless
+    ? (pluginCommands as Command[]).filter(isCommandAvailableInHeadless)
+    : (pluginCommands as Command[])
+
   return applySyncedSkillShadowFilter(
     disambiguateAddDirSkills(
       stripCollidingPluginAliases(
@@ -809,7 +816,7 @@ const loadAllCommands = memoize(async (cwd: string): Promise<Command[]> => {
           ...builtinPluginSkills,
           ...skillDirCommands,
           ...(workflowCommands as Command[]),
-          ...(pluginCommands as Command[]),
+          ...filteredPluginCommands,
           ...pluginSkills,
           ...COMMANDS(),
         ]),

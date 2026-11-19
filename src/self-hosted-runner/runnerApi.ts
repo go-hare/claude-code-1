@@ -3,6 +3,10 @@
  * 1:1 from SEA — no poll-loop invent; pure API surface for root/orchestrator.
  */
 import axios, { type AxiosInstance } from 'axios'
+import {
+  destroyAllFreeSockets,
+  isServerErrorClosingStatus,
+} from '../utils/proxy.js'
 
 const ANTHROPIC_VERSION = '2023-06-01'
 
@@ -869,16 +873,30 @@ export function createSelfHostedRunnerApi(
     async heartbeat(apiBaseUrl, sessionId, sessionToken, workerEpoch, signal) {
       assertSafeId(sessionId, 'sessionId')
       const base = apiBaseUrl.replace(/\/+$/, '')
-      const res = await http.post(
-        `${base}/v1/code/sessions/${sessionId}/worker/heartbeat`,
-        { worker_epoch: workerEpoch },
-        {
-          headers: sessionAuthHeaders(sessionToken),
-          timeout: 10_000,
-          signal,
-          validateStatus: s => s < 500,
-        },
-      )
+      let res
+      try {
+        res = await http.post(
+          `${base}/v1/code/sessions/${sessionId}/worker/heartbeat`,
+          { worker_epoch: workerEpoch },
+          {
+            headers: sessionAuthHeaders(sessionToken),
+            timeout: 10_000,
+            signal,
+            validateStatus: s => s < 500,
+          },
+        )
+      } catch (err) {
+        if (
+          !signal?.aborted &&
+          (err as { response?: unknown } | undefined)?.response === undefined
+        ) {
+          destroyAllFreeSockets()
+        }
+        throw err
+      }
+      if (isServerErrorClosingStatus(res.status)) {
+        destroyAllFreeSockets()
+      }
       assertRunnerApiOk(res.status, res.data, 'Heartbeat')
     },
 

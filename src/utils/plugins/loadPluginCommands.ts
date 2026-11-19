@@ -61,6 +61,24 @@ type LoadConfig = {
 }
 
 /**
+ * Official `QR(Hr().skillContentIntern, key, content)` — intern plugin
+ * markdown bodies by file path so headless/multi-plugin sessions do not retain
+ * duplicate prompt strings across reloads.
+ */
+const pluginContentIntern = new Map<string, string>()
+
+export function internPluginContent(key: string, content: string): string {
+  const existing = pluginContentIntern.get(key)
+  if (existing === content) return existing
+  pluginContentIntern.set(key, content)
+  return content
+}
+
+export function getPluginContentInternSize(): number {
+  return pluginContentIntern.size
+}
+
+/**
  * Check if a file path is a skill file (SKILL.md)
  */
 function isSkillFile(filePath: string): boolean {
@@ -136,7 +154,7 @@ async function collectMarkdownFiles(
         frontmatter,
         frontmatterAsWritten,
         asWrittenProblem,
-        content: markdownContent,
+        content: internPluginContent(fullPath, markdownContent),
       })
     },
     { stopAtSkillDir: true, logLabel: 'commands', loadedPaths },
@@ -777,6 +795,7 @@ export const getPluginCommands = memoize(async (): Promise<Command[]> => {
 
 export function clearPluginCommandCache(): void {
   getPluginCommands.cache?.clear?.()
+  pluginContentIntern.clear()
 }
 
 /**
@@ -1061,4 +1080,5 @@ export const getPluginSkills = memoize(async (): Promise<Command[]> => {
 
 export function clearPluginSkillsCache(): void {
   getPluginSkills.cache?.clear?.()
+  pluginContentIntern.clear()
 }

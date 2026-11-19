@@ -11,7 +11,11 @@ import {
 } from 'src/utils/permissions/permissionSetup.js'
 import { isEvalConfined } from 'src/utils/permissions/evalConfined.js'
 import type { HostPermissionLayer } from 'src/engine/hostPermissionLayers.js'
-import { levelSessionEffort } from 'src/utils/effort.js'
+import {
+  type EffortValue,
+  levelSessionEffort,
+  resolveSubagentDefaultEffort,
+} from 'src/utils/effort.js'
 import {
   getMainThreadAgentId,
   getProjectRoot,
@@ -470,6 +474,42 @@ export function createSubagentRefreshTools(
   }
 }
 
+/**
+ * Official #1476 (`__r` / `fus` @297727995): resolve effective subagent effort
+ * with precedence:
+ *   1. Explicit `agentDefinition.effort`
+ *   2. `CLAUDE_CODE_SUBAGENT_EFFORT` via `resolveSubagentDefaultEffort`
+ *      (skipped for forks, ineligible built-in `web-fetch`, and when an
+ *      inherited permission layer already pins effort)
+ *   3. `undefined` (inherit parent `state.sessionEffort`)
+ */
+export function resolveRunAgentEffort(
+  agentDefinition: AgentDefinition,
+  inheritedPermissionLayers?: readonly {
+    kind: string
+    [key: string]: unknown
+  }[],
+): EffortValue | undefined {
+  if (agentDefinition.effort !== undefined) {
+    return agentDefinition.effort
+  }
+  const isFork =
+    agentDefinition.agentType === FORK_SUBAGENT_TYPE &&
+    isBuiltInAgent(agentDefinition)
+  if (isFork) {
+    return undefined
+  }
+  const isIneligible =
+    isBuiltInAgent(agentDefinition) && agentDefinition.agentType === 'web-fetch'
+  const hasPermissionLayerEffort =
+    inheritedPermissionLayers?.some(layer => layer.kind === 'effort') ?? false
+  return resolveSubagentDefaultEffort({
+    agentEffort: agentDefinition.effort,
+    isIneligible,
+    hasPermissionLayerEffort,
+  })
+}
+
 export async function* runAgent({
   agentDefinition,
   promptMessages,
@@ -579,6 +619,8 @@ export async function* runAgent({
   /** Original task description from AgentTool input. Persisted to metadata
    * so a resumed agent's notification can show the original description. */
   description?: string
+  /** Official #1592: effort-picked model inherited/resolved for subagent runs. */
+  pickedEffortModel?: string
   /**
    * densable E8 `name:H` — display name persisted to sidecar so Aye can
    * re-register agentNameRegistry after cold resume.
@@ -708,6 +750,12 @@ export async function* runAgent({
     agentDefinition.agentType === 'Plan'
       ? systemContextNoGit
       : baseSystemContext
+
+  // #1476: agent definition > CLAUDE_CODE_SUBAGENT_EFFORT > inherit parent effort
+  const resolvedSubagentEffort = resolveRunAgentEffort(
+    agentDefinition,
+    toolUseContext.permissionLayers,
+  )
 
   // Override permission mode if agent defines one
   // However, don't override if parent is in bypassPermissions or acceptEdits mode - those should always take precedence
@@ -859,10 +907,10 @@ export async function* runAgent({
       }
     }
 
-    // Override effort level if agent defines one
+    // Override effort level if agent defines one or CLAUDE_CODE_SUBAGENT_EFFORT applies
     const sessionEffort =
-      agentDefinition.effort !== undefined
-        ? levelSessionEffort(agentDefinition.effort)
+      resolvedSubagentEffort !== undefined
+        ? levelSessionEffort(resolvedSubagentEffort)
         : state.sessionEffort
 
     if (
@@ -1314,8 +1362,8 @@ export async function* runAgent({
   // densable MC @194778900 `le`: model + optional effort layer on subagent context
   const subagentPermissionLayers: HostPermissionLayer[] = [
     { kind: 'model', mainLoopModel: resolvedAgentModel },
-    ...(agentDefinition.effort !== undefined
-      ? [{ kind: 'effort' as const, effort: agentDefinition.effort }]
+    ...(resolvedSubagentEffort !== undefined
+      ? [{ kind: 'effort' as const, effort: resolvedSubagentEffort }]
       : []),
   ]
 
@@ -1346,6 +1394,15 @@ export async function* runAgent({
   // Gold: if (override?.onRetryStatus) child.onRetryStatus = override.onRetryStatus.
   if (override?.setRetryStatus) {
     agentToolUseContext.setRetryStatus = override.setRetryStatus
+  }
+  // #1592: propagate pickedEffortModel from override or parent context onto subagent context
+  const resolvedPickedEffortModel =
+    (override as { pickedEffortModel?: string } | undefined)
+      ?.pickedEffortModel ??
+    (toolUseContext as { pickedEffortModel?: string }).pickedEffortModel
+  if (resolvedPickedEffortModel !== undefined) {
+    ;(agentToolUseContext as { pickedEffortModel?: string }).pickedEffortModel =
+      resolvedPickedEffortModel
   }
 
   // Preserve tool use results for subagents with viewable transcripts (in-process teammates)

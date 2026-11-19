@@ -102,6 +102,14 @@ export function listExitBackgroundItems(
     if (!includeDream && task.type === 'dream') continue
     if (isAmbientMonitor(task)) continue
     if (isIdleTeammate(task)) continue
+    // #1593: Skip tasks marked stopsOnExit (e.g. plugin monitors).
+    if (
+      task.type === 'local_bash' &&
+      'stopsOnExit' in task &&
+      (task as { stopsOnExit?: boolean }).stopsOnExit === true
+    ) {
+      continue
+    }
     const label = TASK_TYPE_LABELS[task.type] ?? task.type
     const description =
       'description' in task && typeof task.description === 'string'

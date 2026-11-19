@@ -30,6 +30,33 @@ import {
 import type { SystemPrompt } from '../../../utils/systemPromptType.js'
 import { currentLimits } from '../../claudeAiLimits.js'
 
+function parseModelForCacheMatch(model: string): {
+  name: string
+  date?: string
+} {
+  const without1m = model.replace(/\[1m\]$/i, '')
+  const canonical = firstPartyNameToCanonical(without1m)
+  const dateMatch = without1m.match(/(?:-|@)(\d{8})(?:$|-v\d|\[)/i)
+  return {
+    name: canonical,
+    date: dateMatch?.[1],
+  }
+}
+
+/**
+ * Official wmn — compares two model strings after normalizing `[1m]` suffix,
+ * cross-region prefixes (via firstPartyNameToCanonical), and optional 8-digit
+ * date tags (an undated model matches any dated variant of the same canonical).
+ */
+export function isSameModelForPromptCaching(a: string, b: string): boolean {
+  const pa = parseModelForCacheMatch(a)
+  const pb = parseModelForCacheMatch(b)
+  return (
+    pa.name === pb.name &&
+    (pa.date === undefined || pb.date === undefined || pa.date === pb.date)
+  )
+}
+
 export function getPromptCachingEnabled(model: string): boolean {
   // Global disable takes precedence
   if (isEnvTruthy(process.env.DISABLE_PROMPT_CACHING)) return false
@@ -37,30 +64,26 @@ export function getPromptCachingEnabled(model: string): boolean {
   // Check if we should disable for small/fast model
   if (isEnvTruthy(process.env.DISABLE_PROMPT_CACHING_HAIKU)) {
     const smallFastModel = getSmallFastModel()
-    if (model === smallFastModel) return false
+    if (isSameModelForPromptCaching(model, smallFastModel)) return false
   }
 
   // Check if we should disable for default Sonnet
   if (isEnvTruthy(process.env.DISABLE_PROMPT_CACHING_SONNET)) {
     const defaultSonnet = getDefaultSonnetModel()
-    if (model === defaultSonnet) return false
+    if (isSameModelForPromptCaching(model, defaultSonnet)) return false
   }
 
   // Check if we should disable for default Opus
   if (isEnvTruthy(process.env.DISABLE_PROMPT_CACHING_OPUS)) {
     const defaultOpus = getDefaultOpusModel()
-    if (model === defaultOpus) return false
+    if (isSameModelForPromptCaching(model, defaultOpus)) return false
   }
 
   // densable Dde @189266434 — FABLE: Rfe (`claude-fable-`) || nY (env default).
   if (isEnvTruthy(process.env.DISABLE_PROMPT_CACHING_FABLE)) {
     if (model.includes('claude-fable-')) return false
     const defaultFable = process.env.ANTHROPIC_DEFAULT_FABLE_MODEL
-    if (
-      defaultFable &&
-      firstPartyNameToCanonical(model) ===
-        firstPartyNameToCanonical(defaultFable)
-    ) {
+    if (defaultFable && isSameModelForPromptCaching(model, defaultFable)) {
       return false
     }
   }

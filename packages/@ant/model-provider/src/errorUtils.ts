@@ -22,6 +22,11 @@ const SSL_ERROR_CODES = new Set([
   // Hostname/altname errors
   'ERR_TLS_CERT_ALTNAME_INVALID',
   'HOSTNAME_MISMATCH',
+  // Name constraint errors
+  'PERMITTED_VIOLATION',
+  'EXCLUDED_VIOLATION',
+  'NAME_CONSTRAINTS_WITHOUT_SANS',
+  'UNSUPPORTED_CONSTRAINT_TYPE',
   // TLS handshake errors
   'ERR_TLS_HANDSHAKE_TIMEOUT',
   'ERR_SSL_WRONG_VERSION_NUMBER',
@@ -253,6 +258,17 @@ function formatNamedConnectionError(code: string): string {
   }
 }
 
+function formatNameConstraintSslCause(code: string): string {
+  switch (code) {
+    case 'NAME_CONSTRAINTS_WITHOUT_SANS':
+      return "A certificate authority in the server's chain limits the names that it may certify (a name constraint), and under such an authority this client needs the server's certificate to list its names as subject alternative names, and it lists none. Whoever runs the server, proxy or gateway can fix this with a new certificate that lists them."
+    case 'UNSUPPORTED_CONSTRAINT_TYPE':
+      return "A certificate authority in the server's chain limits the names that it may certify (a name constraint), and the limit covers a kind of name that this client can't check, usually IP addresses. This client refuses any certificate under such an authority that lists a name of that kind, whether or not the name fits. Whoever runs the server, proxy or gateway can fix this with a new certificate whose chain, including the trusted root, has no such limit, or with one that lists only DNS names that every authority in the chain allows, which clients must then use to reach the server."
+    default:
+      return "A certificate authority in the server's chain limits the names that it may certify (a name constraint), and a name in the server's certificate breaks that limit. If the certificate has no DNS subject alternative name, its common name can be checked as a DNS name, even if it's an address. Whoever runs the server, proxy or gateway can fix this with a new certificate whose names all fit the limit, or one whose chain, including the trusted root, has no such limit."
+  }
+}
+
 export function formatAPIError(error: APIError): string {
   // Extract connection error details from the cause chain
   const connectionDetails = extractConnectionErrorDetails(error)
@@ -278,23 +294,34 @@ export function formatAPIError(error: APIError): string {
 
     // Handle SSL/TLS errors with specific messages
     if (isSSLError) {
+      const caHint =
+        'set NODE_EXTRA_CA_CERTS to that CA bundle, or add it to the system certificate store · see https://code.claude.com/docs/en/network-config'
+      const untrustedDetail = `(${code}). The certificate comes from an authority Claude Code doesn't trust, usually a TLS-inspecting corporate proxy or a gateway signed by a private CA: ${caHint}`
       switch (code) {
         case 'UNABLE_TO_VERIFY_LEAF_SIGNATURE':
-        case 'UNABLE_TO_GET_ISSUER_CERT':
         case 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY':
-          return 'Unable to connect to API: SSL certificate verification failed. Check your proxy or corporate SSL certificates'
+        case 'UNABLE_TO_GET_ISSUER_CERT':
+          if (code === 'UNABLE_TO_GET_ISSUER_CERT') {
+            return `Unable to connect to API: SSL certificate verification failed (${code}). The certificates this computer trusts include a CA certificate whose own issuer is missing, often a leftover from a renewal: remove it from the system certificate store or the NODE_EXTRA_CA_CERTS file, or add its issuer there.`
+          }
+          return `Unable to connect to API: SSL certificate verification failed (${code}). The certificates the server sent don't lead to a trusted authority. If the server leaves out an intermediate certificate, which browsers fetch by themselves, whoever runs it must have it send its full chain. If it is a TLS-inspecting corporate proxy or a gateway signed by a private CA, ${caHint}`
         case 'CERT_HAS_EXPIRED':
           return 'Unable to connect to API: SSL certificate has expired'
         case 'CERT_REVOKED':
           return 'Unable to connect to API: SSL certificate has been revoked'
         case 'DEPTH_ZERO_SELF_SIGNED_CERT':
         case 'SELF_SIGNED_CERT_IN_CHAIN':
-          return 'Unable to connect to API: Self-signed certificate detected. Check your proxy or corporate SSL certificates'
+          return `Unable to connect to API: Self-signed certificate detected ${untrustedDetail}`
         case 'ERR_TLS_CERT_ALTNAME_INVALID':
         case 'HOSTNAME_MISMATCH':
           return 'Unable to connect to API: SSL certificate hostname mismatch'
         case 'CERT_NOT_YET_VALID':
           return 'Unable to connect to API: SSL certificate is not yet valid'
+        case 'PERMITTED_VIOLATION':
+        case 'EXCLUDED_VIOLATION':
+        case 'NAME_CONSTRAINTS_WITHOUT_SANS':
+        case 'UNSUPPORTED_CONSTRAINT_TYPE':
+          return `Unable to connect to API: SSL certificate verification failed (${code}). ${formatNameConstraintSslCause(code)}`
         default:
           return `Unable to connect to API: SSL error (${code})`
       }

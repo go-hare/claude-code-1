@@ -47,6 +47,7 @@ export const SDKHookCallbackMatcherSchema = lazySchema(() =>
       matcher: z.string().optional(),
       hookCallbackIds: z.array(z.string()),
       timeout: z.number().optional(),
+      onFailure: z.enum(['continue', 'block']).optional(),
     })
     .describe('Configuration for matching and routing hook callbacks.'),
 )
@@ -94,6 +95,7 @@ export const SDKControlInitializeResponseSchema = lazySchema(() =>
         .optional()
         .describe('@internal CLI process PID for tmux socket isolation'),
       fast_mode_state: FastModeStateSchema().optional(),
+      hook_on_failure_supported: z.boolean().optional(),
     })
     .describe(
       'Response from session initialization with available commands, models, and account info.',

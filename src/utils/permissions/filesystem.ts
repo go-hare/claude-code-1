@@ -1,6 +1,12 @@
 import { feature } from 'bun:bundle'
-import { randomBytes } from 'crypto'
-import { readdirSync, readFileSync, readlinkSync, realpathSync } from 'fs'
+import { createHash, randomBytes } from 'crypto'
+import {
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  statSync,
+} from 'fs'
 import ignore from 'ignore'
 import memoize from 'lodash-es/memoize.js'
 import { homedir, tmpdir } from 'os'
@@ -725,12 +731,38 @@ export const getBundledSkillsRoot = memoize(
   },
 )
 
+const WINDOWS_MAX_TEMP_SEGMENT_LEN = 32
+
+/**
+ * Official s0() (#1597): bound sanitized cwd segment on Windows so
+ * getProjectTempDir() + session/scratchpad/task paths stay well below 260 chars.
+ */
+export function boundProjectTempSegmentForWindows(
+  sanitized: string,
+  baseDir: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform !== 'win32') return sanitized
+  const budget = Math.max(
+    16,
+    Math.min(WINDOWS_MAX_TEMP_SEGMENT_LEN, 240 - baseDir.length - 48),
+  )
+  if (sanitized.length <= budget) return sanitized
+  const hash = createHash('sha256').update(sanitized).digest('hex').slice(0, 8)
+  const prefixLen = Math.max(1, budget - 9)
+  return `${sanitized.slice(0, prefixLen)}-${hash}`
+}
+
 /**
  * Returns the project temp directory path with trailing separator.
  * Path format: /tmp/claude-{uid}/{sanitized-cwd}/
  */
 export function getProjectTempDir(): string {
-  return join(getClaudeTempDir(), sanitizePath(getOriginalCwd())) + sep
+  const baseDir = getClaudeTempDir()
+  const sanitized = sanitizePath(getOriginalCwd())
+  return (
+    join(baseDir, boundProjectTempSegmentForWindows(sanitized, baseDir)) + sep
+  )
 }
 
 /**
@@ -1279,15 +1311,56 @@ export function workingDirectoriesForOutsideReadFence(
 export const getResolvedWorkingDirPaths = memoize(getPathsForPermissionCheck)
 
 /**
+ * Official resolvedWorkingDirPaths / workingDirPathsHeldAsNamed (#1496):
+ * paths registered by register_repo_root / EnterWorktree are held as named
+ * (un-expanded) working dir paths.
+ */
+export const workingDirPathsHeldAsNamed = new Set<string>()
+export const resolvedWorkingDirPaths = new Map<string, string[]>()
+
+export function holdWorkingDirPathAsNamed(path: string): void {
+  resolvedWorkingDirPaths.set(path, [path])
+  workingDirPathsHeldAsNamed.add(path)
+}
+
+export function isWorkingDirPathHeldAsNamed(path: string): boolean {
+  return workingDirPathsHeldAsNamed.has(path)
+}
+
+/**
+ * Official #1596: compare directory identity via statSync(..., { bigint: true })
+ * using `${dev}:${ino}` (rejecting zero/sentinel ino).
+ */
+export function getFolderIdentityKey(dirPath: string): string | null {
+  try {
+    const st = statSync(dirPath, { bigint: true, throwIfNoEntry: false })
+    if (!st || !st.isDirectory() || st.ino === 0n) return null
+    return `${st.dev}:${st.ino}`
+  } catch {
+    return null
+  }
+}
+
+export function isSameFolderIdentity(a: string, b: string): boolean {
+  const idA = getFolderIdentityKey(a)
+  if (idA === null) return false
+  const idB = getFolderIdentityKey(b)
+  return idB !== null && idA === idB
+}
+
+/**
  * densable `lke` — plugin-eval child (`CLAUDE_CODE_EVAL_CONFINED`) keeps
  * `originalCwd` (`we()`) as the sandbox spelling and does not realpath it.
  * Other working dirs still resolve.
  */
 export function workingDirPathsForPermission(path: string): string[] {
+  if (isWorkingDirPathHeldAsNamed(path)) {
+    return [path]
+  }
   if (isEvalConfined() && path === getOriginalCwd()) {
     return [path]
   }
-  return getResolvedWorkingDirPaths(path)
+  return resolvedWorkingDirPaths.get(path) ?? getResolvedWorkingDirPaths(path)
 }
 
 function pathInWorkingDirectorySet(
@@ -1297,14 +1370,19 @@ function pathInWorkingDirectorySet(
 ): boolean {
   const pathsToCheck =
     precomputedPathsToCheck ?? getPathsForPermissionCheck(path)
-  const workingPaths = Array.from(directories).flatMap(wp =>
-    workingDirPathsForPermission(wp),
-  )
+  const workingEntries = Array.from(directories).flatMap(wp => {
+    const heldAsNamed = isWorkingDirPathHeldAsNamed(wp)
+    return workingDirPathsForPermission(wp).map(workingPath => ({
+      workingPath,
+      heldAsNamed,
+    }))
+  })
   return pathsToCheck.every(pathToCheck =>
-    workingPaths.some(workingPath =>
+    workingEntries.some(({ workingPath, heldAsNamed }) =>
       pathInWorkingPath(pathToCheck, workingPath, {
         caseFold: false,
         uncShapeParity: true,
+        heldAsNamed,
       }),
     ),
   )
@@ -1669,7 +1747,12 @@ export function denyBlockedOutsideReadsForFileTool(
 export function pathInWorkingPath(
   path: string,
   workingPath: string,
-  opts?: { caseFold?: boolean; uncShapeParity?: boolean },
+  opts?: {
+    caseFold?: boolean
+    uncShapeParity?: boolean
+    heldAsNamed?: boolean
+    folderIdentity?: boolean
+  },
 ): boolean {
   const caseFold = opts?.caseFold ?? true
   const uncShapeParity = opts?.uncShapeParity ?? false
@@ -1713,12 +1796,54 @@ export function pathInWorkingPath(
     return true
   }
 
-  if (containsPathTraversal(relative)) {
+  if (!containsPathTraversal(relative) && !posix.isAbsolute(relative)) {
+    return true
+  }
+
+  // #1496: paths held as named keep their exact lexical spelling only.
+  const heldAsNamed =
+    opts?.heldAsNamed ?? isWorkingDirPathHeldAsNamed(workingPath)
+  if (heldAsNamed || opts?.folderIdentity === false) {
     return false
   }
 
-  // Path is inside (relative path that doesn't go up)
-  return !posix.isAbsolute(relative)
+  // Preserve strict caseFold:false rejection when the only difference is letter case.
+  if (!caseFold) {
+    const foldedRelative = relativePath(
+      normalizeCaseForComparison(normalizedWorkingPath),
+      normalizeCaseForComparison(normalizedPath),
+    )
+    if (
+      foldedRelative === '' ||
+      (!containsPathTraversal(foldedRelative) &&
+        !posix.isAbsolute(foldedRelative))
+    ) {
+      return false
+    }
+  }
+
+  // #1596: compare directory identity via statSync(..., { bigint: true }) `${dev}:${ino}`
+  // so Windows junctions, subst drives, and 8.3 short paths pointing to the same
+  // folder as workingPath are recognized as inside the working directory.
+  if (isSameFolderIdentity(absolutePath, absoluteWorkingPath)) {
+    return true
+  }
+  const workingDirId = getFolderIdentityKey(absoluteWorkingPath)
+  if (workingDirId === null) {
+    return false
+  }
+  let cur = dirname(absolutePath)
+  for (let depth = 0; depth < 64; depth++) {
+    if (getFolderIdentityKey(cur) === workingDirId) {
+      return true
+    }
+    const parent = dirname(cur)
+    if (parent === cur) {
+      break
+    }
+    cur = parent
+  }
+  return false
 }
 
 /** densable `kJn` — settings/cwd root for a permission rule source. */

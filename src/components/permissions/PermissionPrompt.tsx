@@ -1,4 +1,5 @@
-import React, { type ReactNode, type Ref, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { type ReactNode, type Ref, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isWithinPermissionKeyGuard } from './submitGuard.js';
 import { Box, type DOMElement, Text, formatShortcutString, shortcutFormatPlatform } from '@anthropic/ink';
 import type { PermissionRequestSource } from '../../dialog/permissionRequestSource.js';
 import type { KeybindingAction } from '../../keybindings/types.js';
@@ -152,6 +153,7 @@ export function PermissionPrompt<T extends string>({
   const [rejectFeedback, setRejectFeedback] = useState('');
   const [acceptInputMode, setAcceptInputMode] = useState(false);
   const [rejectInputMode, setRejectInputMode] = useState(false);
+  const mountedAtRef = useRef(Date.now());
   const [focusedValue, setFocusedValue] = useState<T | null>(null);
   // Track whether user ever entered feedback mode (persists after collapse)
   const [acceptFeedbackModeEntered, setAcceptFeedbackModeEntered] = useState(false);
@@ -261,7 +263,7 @@ export function PermissionPrompt<T extends string>({
   // Handle selection
   const handleSelect = useCallback(
     (value: T) => {
-      if (isDisabled) return;
+      if (isDisabled || isWithinPermissionKeyGuard(mountedAtRef.current)) return;
       const option = options.find(opt => opt.value === value);
       if (!option) return;
 
@@ -345,7 +347,7 @@ export function PermissionPrompt<T extends string>({
 
   // Handle cancel (Esc)
   const handleCancel = useCallback(() => {
-    if (isDisabled) return;
+    if (isDisabled || isWithinPermissionKeyGuard(mountedAtRef.current)) return;
     logEvent('tengu_permission_request_escape', {});
     // Increment escape count for attribution tracking
     setAppState(prev => ({

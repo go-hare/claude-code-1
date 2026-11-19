@@ -55,6 +55,7 @@ import {
   getProfileAccountOnHold,
   isAccountOnHoldAppealLine,
   OAuthAccountOnHoldError,
+  OAuthRefreshDeadError,
   OAuthRefreshLockTimeoutError,
 } from '../../utils/accountOnHold.js'
 import { parseEffortUnsupportedWhenThinkingDisabled } from '../../utils/effortThinkingGuard.js'
@@ -1294,17 +1295,21 @@ function buildAssistantMessageFromError(
     })
   }
 
-  // Check for many-image dimension errors (API enforces stricter 2000px limit for many-image requests)
+  // Check for many-image dimension errors (API enforces stricter limit for many-image requests)
   if (
     error instanceof APIError &&
     error.status === 400 &&
     error.message.includes('image dimensions exceed') &&
     error.message.includes('many-image')
   ) {
+    const pxMatch = /many-image requests: (\d+) pixels/.exec(error.message)?.[1]
+    const base = `An image in the conversation exceeds the dimension limit for many-image requests${pxMatch ? ` (${pxMatch}px)` : ''}.`
     return createAssistantAPIErrorMessage({
-      content: getIsNonInteractiveSession()
-        ? 'An image in the conversation exceeds the dimension limit for many-image requests (2000px). Start a new session with fewer images.'
-        : 'An image in the conversation exceeds the dimension limit for many-image requests (2000px). Run /compact to remove old images from context, or start a new session.',
+      content:
+        !getIsNonInteractiveSession() &&
+        !isEnvTruthy(process.env.DISABLE_COMPACT)
+          ? `${base} Run /compact to remove old images from context, or start a new session.`
+          : `${base} Start a new session with fewer images.`,
       error: 'invalid_request',
       errorDetails: error.message,
     })
@@ -1572,6 +1577,27 @@ function buildAssistantMessageFromError(
     })
   }
 
+  // Official yEt — OAuthRefreshDeadError (including reachedTimeLimit)
+  if (error instanceof OAuthRefreshDeadError) {
+    const reachedTimeLimit =
+      'reachedTimeLimit' in error && error.reachedTimeLimit === true
+    const headlessTimeLimit =
+      'Failed to authenticate: this login reached its time limit and cannot be renewed. Run `claude auth login` to sign in again, or use `claude setup-token` and set CLAUDE_CODE_OAUTH_TOKEN for unattended jobs'
+    const headlessExpired =
+      'Failed to authenticate: OAuth session expired' +
+      ' and could not be refreshed'
+    return createAssistantAPIErrorMessage({
+      error: 'authentication_failed',
+      content: getIsNonInteractiveSession()
+        ? reachedTimeLimit
+          ? headlessTimeLimit
+          : headlessExpired
+        : reachedTimeLimit
+          ? 'Login reached its time limit · Please run /login'
+          : 'Login expired · Please run /login',
+    })
+  }
+
   // densable 2.1.248: if (e instanceof Zye) return Ho({error:"server_error", content: De()?API:h5t})
   if (error instanceof OAuthRefreshLockTimeoutError) {
     return createAssistantAPIErrorMessage({
@@ -1707,6 +1733,20 @@ function buildAssistantMessageFromError(
       error: 'authentication_failed',
       content: formatBedrockAuthErrorMessage(error),
     })
+  }
+
+  // Official VX(e) — cloud_credential_error for Foundry/Azure credential failures
+  {
+    const cloudProvider = getCloudCredentialProvider(error)
+    if (cloudProvider !== null) {
+      const detail = (error instanceof Error ? error.message : String(error))
+        .trimEnd()
+        .replace(/[.,!?…]+$/, '')
+      return createAssistantAPIErrorMessage({
+        error: 'cloud_credential_error' as SDKAssistantMessageError,
+        content: `${API_ERROR_MESSAGE_PREFIX}: Could not load ${cloudProvider} credentials · ${detail}. Check or refresh your ${cloudProvider} credentials and try again.`,
+      })
+    }
   }
 
   // Bedrock errors like "403 You don't have access to the model with the specified model ID."
@@ -2038,6 +2078,11 @@ export function classifyAPIError(error: unknown): string {
     return 'oauth_org_not_allowed'
   }
 
+  // Official yEt — OAuthRefreshDeadError
+  if (error instanceof OAuthRefreshDeadError) {
+    return 'auth_error'
+  }
+
   // densable `e instanceof N8 || e instanceof yz` → auth_error. N8 is not local.
   if (error instanceof OAuthAccountOnHoldError) {
     return 'auth_error'
@@ -2046,6 +2091,10 @@ export function classifyAPIError(error: unknown): string {
   // densable 2.1.248: if (e instanceof Zye) return "oauth_refresh_lock_timeout"
   if (error instanceof OAuthRefreshLockTimeoutError) {
     return 'oauth_refresh_lock_timeout'
+  }
+
+  if (getCloudCredentialProvider(error) !== null) {
+    return 'cloud_credential_error'
   }
 
   // Generic auth errors
@@ -2092,6 +2141,47 @@ export function classifyAPIError(error: unknown): string {
   }
 
   return 'unknown'
+}
+
+const AZURE_CREDENTIAL_ERROR_NAMES = new Set([
+  'CredentialUnavailableError',
+  'AuthenticationError',
+  'AggregateAuthenticationError',
+  'AuthenticationRequiredError',
+])
+
+function findErrorInCauseChain(
+  error: unknown,
+  predicate: (err: Error) => boolean,
+): Error | undefined {
+  let current: unknown = error
+  const seen = new Set<unknown>()
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current)
+    if (current instanceof Error && predicate(current)) {
+      return current
+    }
+    current = (current as { cause?: unknown }).cause
+  }
+  return undefined
+}
+
+/**
+ * Official VX — identifies cloud credential loading errors (e.g. Azure on Foundry).
+ */
+export function getCloudCredentialProvider(error: unknown): 'Azure' | null {
+  if (error instanceof APIError && error.status !== undefined) {
+    return null
+  }
+  if (
+    isEnvTruthy(process.env.CLAUDE_CODE_USE_FOUNDRY) &&
+    findErrorInCauseChain(error, err =>
+      AZURE_CREDENTIAL_ERROR_NAMES.has(err.name),
+    ) !== undefined
+  ) {
+    return 'Azure'
+  }
+  return null
 }
 
 export function categorizeRetryableAPIError(

@@ -49,6 +49,7 @@ import {
   getMcpTimeoutMs,
   isMcpCcrProxyServerConfig,
   isRememberedLegacyStdio,
+  loadRememberedLegacyStdioFromDisk,
   type ModernCompatTransportLike,
   recordRememberedLegacyStdio,
   resolveMcpNegotiationTransportKind,
@@ -925,6 +926,7 @@ const connectToServerMemo = memoize(
             ...stdioRef.env,
           }
         }
+        unsetEmptyAwsBearerTokenBedrock(stdioEnv)
         transport = new StdioClientTransport({
           command: finalCommand,
           args: finalArgs,
@@ -970,7 +972,12 @@ const connectToServerMemo = memoize(
       )
 
       // densable 2.1.232/238: Pwi(kind, serverConfig) — GB denylist after auto.
-      // SEA 325 #263: skip probe for 7 days if stdio server previously timed out/failed probe.
+      // SEA 325 #263 / #1628: lazily load persisted 7-day verdicts from disk
+      // once, then skip the probe for 7 days if this stdio server previously
+      // timed out/failed probe.
+      if (negotiationTransportKind === 'stdio') {
+        await loadRememberedLegacyStdioFromDisk(undefined, { once: true })
+      }
       const protocolPlan: McpProtocolNegotiationPlan =
         negotiationTransportKind === 'stdio' &&
         isRememberedLegacyStdio(
@@ -1231,6 +1238,7 @@ const connectToServerMemo = memoize(
             ...stdioRef.env,
           }
         }
+        unsetEmptyAwsBearerTokenBedrock(stdioEnv)
         return new StdioClientTransport({
           command: finalCommand,
           args: finalArgs,
@@ -1415,6 +1423,7 @@ const connectToServerMemo = memoize(
                 transportType: serverRef.type,
                 transport: transport as McpProbeTimedOutTransport,
                 canRecreateTransport: canRecreateForPinnedLegacy,
+                elapsedMs: Date.now() - connectStartTime,
               },
             )
             if (
@@ -2314,6 +2323,26 @@ export type EnsureConnectedClientOpts = {
  * densable ensureConnectedClient → connect with `{signal, timeoutMs}`.
  * Cache key stays name+config (`getServerCacheKey`); deadline is per-call.
  */
+/**
+ * Official `Iei(n)` (#1564) — unset `AWS_BEARER_TOKEN_BEDROCK` when empty so
+ * stdio MCP children don't inherit an empty bearer token override.
+ */
+export function unsetEmptyAwsBearerTokenBedrock(
+  env: Record<string, string>,
+): void {
+  const isWin = getPlatform() === 'windows'
+  const keys = Object.keys(env).filter(
+    k =>
+      k === 'AWS_BEARER_TOKEN_BEDROCK' ||
+      (isWin && k.toUpperCase() === 'AWS_BEARER_TOKEN_BEDROCK'),
+  )
+  if (keys.some(k => env[k] === '')) {
+    for (const k of keys) {
+      delete env[k]
+    }
+  }
+}
+
 export const connectToServer = Object.assign(
   (
     name: string,

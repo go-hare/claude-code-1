@@ -1,6 +1,6 @@
 import { feature } from 'bun:bundle'
 import mergeWith from 'lodash-es/mergeWith.js'
-import { dirname, join, resolve } from 'path'
+import { dirname, join, normalize, resolve } from 'path'
 import { z } from 'zod/v4'
 import {
   getFlagSettingsInline,
@@ -33,12 +33,26 @@ import {
   isSettingSourceEnabled,
   type SettingSource,
 } from './constants.js'
-import { markInternalWrite } from './internalWrites.js'
+import {
+  type FirstReadStatSnapshot,
+  markInternalWrite,
+  recordFirstReadStat,
+} from './internalWrites.js'
 import {
   getManagedFilePath,
   getManagedSettingsDropInDir,
 } from './managedPath.js'
 import { getHkcuSettings, getMdmSettings } from './mdm/settings.js'
+import {
+  applyRemoteSettingsConsentFreeIfEligible,
+  getActiveRemoteSettings,
+  markRemoteSettingsLoadCycleBegun,
+  markRemoteSettingsLoadCycleEnded,
+  setRemoteSettingsEligibilityMemo,
+  setRemoteSettingsLoadStatus,
+  type RemoteSettingsConsentOutcome,
+  type RemoteSettingsLoadStatus,
+} from './remoteSettingsState.js'
 import {
   getCachedParsedFile,
   getCachedSettingsForSource,
@@ -182,8 +196,8 @@ export function collectMachineLocalManagedSettings(): {
 }
 
 /**
- * densable 2.1.223 #11 — first-source-wins for policy fields, env merges per-key.
- * Remote managed-settings cache is product-cut; machine-local MDM/file/hkcu remain.
+ * densable 2.1.223 #11 / #1512 — first-source-wins for policy fields
+ * (remote > MDM > file > HKCU), env merges per-key.
  */
 function resolvePolicySettingsWithEnvMerge(): {
   policySettings: SettingsJson | null
@@ -191,10 +205,14 @@ function resolvePolicySettingsWithEnvMerge(): {
 } {
   const policyErrors: ValidationError[] = []
   let winner: SettingsJson | null = null
-  let winnerKind: 'mdm' | 'file' | 'hkcu' | null = null
+  let winnerKind: 'remote' | 'mdm' | 'file' | 'hkcu' | null = null
 
+  const remote = getActiveRemoteSettings()
   const local = collectMachineLocalManagedSettings()
-  if (local.mdm) {
+  if (remote && Object.keys(remote).length > 0) {
+    winner = remote
+    winnerKind = 'remote'
+  } else if (local.mdm) {
     winner = local.mdm
     winnerKind = 'mdm'
   } else if (local.file) {
@@ -205,7 +223,9 @@ function resolvePolicySettingsWithEnvMerge(): {
     winnerKind = 'hkcu'
   }
 
-  if (winnerKind === 'mdm') {
+  if (winnerKind === 'remote') {
+    winner = mergeManagedEnvPerKey(winner, [local.hkcu, local.file, local.mdm])
+  } else if (winnerKind === 'mdm') {
     winner = mergeManagedEnvPerKey(winner, [local.hkcu, local.file])
   } else if (winnerKind === 'file') {
     winner = mergeManagedEnvPerKey(winner, [local.hkcu])
@@ -214,21 +234,137 @@ function resolvePolicySettingsWithEnvMerge(): {
   return { policySettings: winner, policyErrors }
 }
 
+export type RemoteSettingsFetchResult =
+  | {
+      ok: true
+      settings: SettingsJson | null
+      isFirstPartyTrusted: boolean
+      hasDangerousSettingsChanged?: boolean
+    }
+  | {
+      ok: false
+      failure: { errorKind: string; httpStatus?: number }
+      staleCache?: SettingsJson | null
+      transportEnvWithheld?: boolean
+      restrictionsOnly?: boolean
+    }
+
+/**
+ * Official #1531 & #1512: Execute a remote managed settings load cycle,
+ * updating load lifecycle state/notices and applying Team/Enterprise
+ * first-party payloads consent-free when eligible.
+ */
+export async function runRemoteSettingsLoadCycle(
+  fetchRemoteSettings: () => Promise<RemoteSettingsFetchResult>,
+  opts: {
+    eligible: boolean
+    isInteractive: boolean
+    hasOpenReview?: boolean
+    promptResult?: 'approved' | 'rejected' | 'deferred_no_consent_surface'
+  },
+): Promise<{
+  applied: boolean
+  outcome: RemoteSettingsConsentOutcome | null
+  status: RemoteSettingsLoadStatus
+}> {
+  markRemoteSettingsLoadCycleBegun()
+  setRemoteSettingsEligibilityMemo(opts.eligible)
+  try {
+    if (!opts.eligible) {
+      const status: RemoteSettingsLoadStatus = { state: 'ineligible' }
+      setRemoteSettingsLoadStatus(status)
+      return { applied: false, outcome: null, status }
+    }
+
+    const fetched = await fetchRemoteSettings()
+    if (!fetched.ok) {
+      const status: RemoteSettingsLoadStatus =
+        fetched.staleCache && Object.keys(fetched.staleCache).length > 0
+          ? {
+              state: 'stale_cache',
+              failure: fetched.failure,
+              transportEnvWithheld: Boolean(fetched.transportEnvWithheld),
+            }
+          : {
+              state: 'failed',
+              failure: fetched.failure,
+              restrictionsOnly: fetched.restrictionsOnly,
+            }
+      setRemoteSettingsLoadStatus(status)
+      return { applied: false, outcome: null, status }
+    }
+
+    const payload = fetched.settings
+    if (!payload || Object.keys(payload).length === 0) {
+      const status: RemoteSettingsLoadStatus = {
+        state: 'ok',
+        hasSettings: false,
+      }
+      setRemoteSettingsLoadStatus(status)
+      return { applied: false, outcome: 'no_check_needed', status }
+    }
+
+    const applyResult = applyRemoteSettingsConsentFreeIfEligible(payload, {
+      isFirstPartyTrusted: fetched.isFirstPartyTrusted,
+      isInteractive: opts.isInteractive,
+      hasOpenReview: opts.hasOpenReview,
+      hasDangerousSettingsChanged: fetched.hasDangerousSettingsChanged,
+      promptResult: opts.promptResult,
+    })
+    if (applyResult.applied) {
+      resetSettingsCache()
+    }
+    const status: RemoteSettingsLoadStatus = {
+      state: 'ok',
+      hasSettings: applyResult.applied,
+    }
+    if (!applyResult.applied) {
+      setRemoteSettingsLoadStatus(status)
+    }
+    return {
+      applied: applyResult.applied,
+      outcome: applyResult.outcome,
+      status,
+    }
+  } catch {
+    const status: RemoteSettingsLoadStatus = {
+      state: 'failed',
+      failure: { errorKind: 'fetch_error' },
+    }
+    setRemoteSettingsLoadStatus(status)
+    return { applied: false, outcome: null, status }
+  } finally {
+    markRemoteSettingsLoadCycleEnded()
+  }
+}
+
 export {
+  applyRemoteSettingsConsentFreeIfEligible,
+  buildRemoteSettingsLoadNotice,
   evaluateStoredRemoteSettingsCopy,
   extractHelperTier,
+  getActiveRemoteSettings,
   getDroppedHelperTier,
   getRemoteHelperTierStatus,
+  getRemoteSettingsLoadStatus,
   getStoredCopyRefusal,
   getStoredCopyTrust,
   isForceRemoteSettingsRefreshBlocking,
+  markRemoteSettingsLoadCycleBegun,
+  markRemoteSettingsLoadCycleEnded,
+  onRemoteSettingsLoadStatusChanged,
   reconcileMdmAndRemoteSettings,
   recordStoredCopyRefusal,
+  releaseRemoteSettingsLoadBackstop,
   resetRemoteSettingsSessionCache,
   resolveRemoteHelperTier,
   retainDroppedHelperBaseUrlEnv,
+  setRemoteSettingsEligibilityMemo,
+  setRemoteSettingsLoadStatus,
   type HelperTier,
   type RemoteHelperTierStatus,
+  type RemoteSettingsConsentOutcome,
+  type RemoteSettingsLoadStatus,
   type StoredCopyRefusal,
   type StoredCopyTrust,
 } from './remoteSettingsState.js'
@@ -536,12 +672,29 @@ function parseSettingsFileUncached(path: string): {
   errors: ValidationError[]
 } {
   try {
-    const { resolvedPath } = safeResolvePath(getFsImplementation(), path)
+    const fs = getFsImplementation()
+    const { resolvedPath } = safeResolvePath(fs, path)
+    let firstReadStat: FirstReadStatSnapshot | undefined
+    try {
+      const s = fs.statSync(resolvedPath)
+      firstReadStat = {
+        ino: s.ino,
+        size: s.size,
+        mtimeMs: s.mtimeMs,
+        ctimeMs: s.ctimeMs,
+      }
+    } catch {
+      // Stat may fail for ENOENT/unreadable; readFileSync below handles error classification.
+    }
     const content = readFileSync(resolvedPath)
+    if (firstReadStat !== undefined) {
+      recordFirstReadStat(normalize(path), firstReadStat)
+    }
     return parseSettingsFileContent(content, path)
   } catch (error) {
     handleFileSystemError(error, path)
     if (isENOENT(error)) {
+      recordFirstReadStat(normalize(path), null)
       return { settings: null, errors: [] }
     }
     return {

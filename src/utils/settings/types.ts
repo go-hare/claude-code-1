@@ -1028,6 +1028,44 @@ export const SettingsSchema = lazySchema(() =>
             'managed settings, login fails if the authenticated account does not ' +
             'belong to a listed organization.',
         ),
+      allowedProviders: z
+        .preprocess(
+          val =>
+            Array.isArray(val)
+              ? val.filter(
+                  item =>
+                    typeof item === 'string' &&
+                    [
+                      'anthropic',
+                      'bedrock',
+                      'vertex',
+                      'foundry',
+                      'anthropicAws',
+                      'anthropicGoogleCloud',
+                      'mantle',
+                      'customEndpoint',
+                    ].includes(item),
+                )
+              : val,
+          z
+            .array(
+              z.enum([
+                'anthropic',
+                'bedrock',
+                'vertex',
+                'foundry',
+                'anthropicAws',
+                'anthropicGoogleCloud',
+                'mantle',
+                'customEndpoint',
+              ]),
+            )
+            .optional()
+            .catch(undefined),
+        )
+        .describe(
+          'Managed settings only. The API providers Claude Code may use on this machine.',
+        ),
       forceRemoteSettingsRefresh: z
         .boolean()
         .optional()

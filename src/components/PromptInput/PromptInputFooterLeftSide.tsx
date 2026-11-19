@@ -60,6 +60,17 @@ const NO_OP_SUBSCRIBE = (_cb: () => void) => () => {};
 const NULL = () => null;
 const MAX_VOICE_HINT_SHOWS = 3;
 
+/**
+ * Session-level guard so remounting PromptInputFooterLeftSide (e.g. toggling
+ * transcript or opening an overlay) does not re-increment the 3-showings cap
+ * within the same session (#1499).
+ */
+let voiceFooterHintCounted = false;
+
+export function resetVoiceFooterHintCountedForTests(): void {
+  voiceFooterHintCounted = false;
+}
+
 /** Official Hzp — flash duration after needsInput increase / succeeded increase. */
 const FLEET_NUDGE_FLASH_MS = 2_500;
 /** Official 2.1.302 (#926): hide `← for agents` 10s after session opens. */
@@ -503,20 +514,18 @@ function ModeIndicator({
     () => (getGlobalConfig().voiceFooterHintSeenCount ?? 0) < MAX_VOICE_HINT_SHOWS,
   );
   const voiceHintUnderCap = feature('VOICE_MODE') ? voiceHintUnderCapRaw : false;
-  const voiceHintIncrementedRefRaw = useRef(false);
-  const voiceHintIncrementedRef = feature('VOICE_MODE') ? voiceHintIncrementedRefRaw : null;
   useEffect(() => {
     if (feature('VOICE_MODE')) {
-      if (!voiceEnabled || !voiceHintUnderCap) return;
-      if (voiceHintIncrementedRef?.current) return;
-      if (voiceHintIncrementedRef) voiceHintIncrementedRef.current = true;
+      if (!voiceEnabled || !voiceHintUnderCap || voiceKeyShortcut === '') return;
+      if (voiceFooterHintCounted) return;
+      voiceFooterHintCounted = true;
       const newCount = (getGlobalConfig().voiceFooterHintSeenCount ?? 0) + 1;
       saveGlobalConfig(prev => {
         if ((prev.voiceFooterHintSeenCount ?? 0) >= newCount) return prev;
         return { ...prev, voiceFooterHintSeenCount: newCount };
       });
     }
-  }, [voiceEnabled, voiceHintUnderCap]);
+  }, [voiceEnabled, voiceHintUnderCap, voiceKeyShortcut]);
   const isKillAgentsConfirmShowing = useAppState(s => s.notifications.current?.key === 'kill-agents-confirm');
 
   // Derive team info from teamContext (no filesystem I/O needed)
@@ -789,6 +798,7 @@ function ModeIndicator({
     showHint &&
     voiceEnabled &&
     voiceState === 'idle' &&
+    voiceKeyShortcut !== '' &&
     hintParts.length === 0 &&
     voiceHintUnderCap &&
     !hasParkedSubagentsHint

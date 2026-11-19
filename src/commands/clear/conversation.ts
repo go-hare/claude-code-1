@@ -43,6 +43,7 @@ import { processSessionStartHooks } from '../../utils/sessionStart.js'
 import {
   clearBridgeSession,
   clearSessionMetadata,
+  flushSessionStorage,
   getAgentTranscriptPath,
   getCurrentSessionTitle,
   resetSessionFilePointer,
@@ -106,6 +107,9 @@ export async function clearConversation({
     signal: AbortSignal.timeout(sessionEndBoundMs),
     timeoutMs: sessionEndTimeoutMs,
   })
+
+  // #1501: Flush pending transcript/plan writes before rotating session ID.
+  await flushSessionStorage()
 
   // Signal to inference that this conversation's cache can be evicted.
   const lastRequestId = getLastMainRequestId()

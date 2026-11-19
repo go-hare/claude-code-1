@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from 'child_process'
 import { createWriteStream, type WriteStream } from 'fs'
+import { stat } from 'fs/promises'
 import { tmpdir } from 'os'
 import { dirname, join } from 'path'
 import { createInterface } from 'readline'
@@ -456,6 +457,8 @@ export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
       }
 
       const done = new Promise<SessionDoneStatus>(resolve => {
+        let pendingErrorCheck: Promise<void> | undefined
+
         child.on('close', (code, signal) => {
           // Close transcript stream on exit
           if (transcriptStream) {
@@ -463,21 +466,27 @@ export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
             transcriptStream = null
           }
 
+          let status: SessionDoneStatus
           if (signal === 'SIGTERM' || signal === 'SIGINT') {
             deps.onDebug(
               `[bridge:session] sessionId=${opts.sessionId} interrupted signal=${signal} pid=${child.pid}`,
             )
-            resolve('interrupted')
+            status = 'interrupted'
           } else if (code === 0) {
             deps.onDebug(
               `[bridge:session] sessionId=${opts.sessionId} completed exit_code=0 pid=${child.pid}`,
             )
-            resolve('completed')
+            status = 'completed'
           } else {
             deps.onDebug(
               `[bridge:session] sessionId=${opts.sessionId} failed exit_code=${code} pid=${child.pid}`,
             )
-            resolve('failed')
+            status = 'failed'
+          }
+          if (pendingErrorCheck) {
+            void pendingErrorCheck.then(() => resolve(status))
+          } else {
+            resolve(status)
           }
         })
 
@@ -485,7 +494,31 @@ export function createSessionSpawner(deps: SessionSpawnerDeps): SessionSpawner {
           deps.onDebug(
             `[bridge:session] sessionId=${opts.sessionId} spawn error: ${err.message}`,
           )
-          resolve('failed')
+          const errCode = (err as NodeJS.ErrnoException).code
+          const isEnoent = errCode === 'ENOENT'
+          const checkDir = isEnoent
+            ? Promise.race([
+                stat(dir).then(
+                  s => !s.isDirectory(),
+                  e =>
+                    (e as NodeJS.ErrnoException)?.code === 'ENOENT' ||
+                    undefined,
+                ),
+                new Promise<undefined>(r =>
+                  setTimeout(() => r(undefined), 1000),
+                ),
+              ])
+            : Promise.resolve(undefined)
+          pendingErrorCheck = checkDir.then(dirMissing => {
+            let msg = `spawn error: ${err.message}`
+            if (dirMissing) {
+              msg = `working folder not found: '${dir}'`
+            } else if (dirMissing === undefined && isEnoent) {
+              msg += `; check that the program and the working folder '${dir}' exist`
+            }
+            lastStderr.push(msg)
+          })
+          void pendingErrorCheck.then(() => resolve('failed'))
         })
       })
 

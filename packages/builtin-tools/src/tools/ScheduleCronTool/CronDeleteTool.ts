@@ -12,8 +12,8 @@ import {
   buildCronDeletePrompt,
   CRON_DELETE_DESCRIPTION,
   CRON_DELETE_TOOL_NAME,
+  isCronManagementEnabled,
   isDurableCronEnabled,
-  isKairosCronEnabled,
 } from './prompt.js'
 import { renderDeleteResultMessage, renderDeleteToolUseMessage } from './UI.js'
 
@@ -44,7 +44,7 @@ export const CronDeleteTool = buildTool({
     return outputSchema()
   },
   isEnabled() {
-    return isKairosCronEnabled()
+    return isCronManagementEnabled()
   },
   toAutoClassifierInput(input) {
     return input.id

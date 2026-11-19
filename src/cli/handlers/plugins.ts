@@ -76,11 +76,13 @@ import {
   getSettingsWithErrors,
   projectSettingsAliasesUserSettings,
 } from '../../utils/settings/settings.js'
+import { waitForHeldOAuthRefresh } from '../../utils/gracefulShutdown.js'
 import { cliError, cliOk } from '../exit.js'
 
-/** #902: await queued settings writes before exiting a plugin CLI subcommand. */
+/** #902 / #1626: await queued settings writes and held OAuth refresh before exiting. */
 async function drainAndExit(code: number): Promise<never> {
   await drainSettingsWrites().catch(() => {})
+  await waitForHeldOAuthRefresh(code).catch(() => {})
   process.exit(code)
   return undefined as never
 }

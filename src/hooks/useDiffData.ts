@@ -1,5 +1,5 @@
 import type { StructuredPatchHunk } from 'diff'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -33,6 +33,8 @@ function replDiffReadSad(
 }
 
 const MAX_LINES_PER_FILE = 400
+/** Official `Aeo` — delay subsequent diff refreshes to throttle git calls. */
+const DIFF_REFRESH_DELAY_MS = 150
 
 export type DiffFile = {
   path: string
@@ -84,6 +86,7 @@ export function useDiffData(
 ): DiffData {
   const [fetched, setFetched] = useState<DiffFetchState | null>(null)
   const [loading, setLoading] = useState(true)
+  const hasFetchedRef = useRef(false)
 
   useEffect(() => {
     let cancelled = false
@@ -94,6 +97,7 @@ export function useDiffData(
         const statsResult = await fetchGitDiff(mode, abort.signal)
         if (cancelled) return
         if (statsResult === null) {
+          hasFetchedRef.current = true
           replDiffReadSad('git_diff_failed')
           setLoading(false)
           return
@@ -114,20 +118,23 @@ export function useDiffData(
         } else {
           logEvent('tengu_feature_ok', { feature_name: REPL_DIFF_READ })
         }
+        hasFetchedRef.current = true
         setLoading(false)
       } catch (error) {
         if (!cancelled) {
           logError(error)
           replDiffReadSad('git_diff_threw')
+          hasFetchedRef.current = true
           setLoading(false)
         }
       }
     }
 
-    // Official first fetch delay 0 (later `HR0` has no leftover value).
+    const delayMs =
+      hasFetchedRef.current || revision !== 0 ? DIFF_REFRESH_DELAY_MS : 0
     const timer = setTimeout(() => {
       void loadDiffData()
-    }, 0)
+    }, delayMs)
 
     return () => {
       cancelled = true

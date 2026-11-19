@@ -9,8 +9,8 @@ import {
   buildCronListPrompt,
   CRON_LIST_DESCRIPTION,
   CRON_LIST_TOOL_NAME,
+  isCronManagementEnabled,
   isDurableCronEnabled,
-  isKairosCronEnabled,
 } from './prompt.js'
 import { renderListResultMessage, renderListToolUseMessage } from './UI.js'
 
@@ -46,7 +46,7 @@ export const CronListTool = buildTool({
     return outputSchema()
   },
   isEnabled() {
-    return isKairosCronEnabled()
+    return isCronManagementEnabled()
   },
   isConcurrencySafe() {
     return true

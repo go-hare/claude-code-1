@@ -21,7 +21,7 @@ import {
   searchSessionsByCustomTitle,
 } from '../../utils/sessionStorage.js'
 import { jsonStringify } from '../../utils/slowOperations.js'
-import { escapeRegExp } from '../../utils/stringUtils.js'
+import { formatForkSessionTitle } from '../../bridge/createSession.js'
 import { resetTaskListState } from '../../utils/tasks.js'
 
 type TranscriptEntry = TranscriptMessage & {
@@ -64,6 +64,7 @@ export function deriveFirstPrompt(
 async function createFork(customTitle?: string): Promise<{
   sessionId: UUID
   title: string | undefined
+  parentCustomTitle: string | undefined
   forkPath: string
   serializedMessages: SerializedMessage[]
   contentReplacementRecords: ContentReplacementEntry['replacements']
@@ -91,6 +92,18 @@ async function createFork(customTitle?: string): Promise<{
 
   // Parse all transcript entries (messages + metadata entries like content-replacement)
   const entries = parseJSONL<Entry>(transcriptContent)
+
+  let parentCustomTitle: string | undefined
+  for (const entry of entries) {
+    if (
+      entry.type === 'custom-title' &&
+      'customTitle' in entry &&
+      typeof entry.customTitle === 'string' &&
+      entry.customTitle.trim() !== ''
+    ) {
+      parentCustomTitle = entry.customTitle
+    }
+  }
 
   // Filter to only main conversation messages (exclude sidechains and non-message entries)
   const mainConversationEntries = entries.filter(
@@ -204,6 +217,7 @@ async function createFork(customTitle?: string): Promise<{
   return {
     sessionId: forkSessionId,
     title: customTitle,
+    parentCustomTitle,
     forkPath: forkSessionPath,
     serializedMessages,
     contentReplacementRecords,
@@ -211,11 +225,12 @@ async function createFork(customTitle?: string): Promise<{
 }
 
 /**
- * Generates a unique fork name by checking for collisions with existing session names.
- * If "baseName (Branch)" already exists, tries "baseName (Branch 2)", "baseName (Branch 3)", etc.
+ * Generates a unique fork name using `formatForkSessionTitle` (#1601 / #1686)
+ * and checks for collisions with existing session names.
+ * If "baseName (fork)" already exists, increments to "baseName (fork 2)", "baseName (fork 3)", etc.
  */
-async function getUniqueForkName(baseName: string): Promise<string> {
-  const candidateName = `${baseName} (Branch)`
+export async function getUniqueForkName(baseName: string): Promise<string> {
+  let candidateName = formatForkSessionTitle(baseName) || 'Forked session'
 
   // Check if this exact name already exists
   const existingWithExactName = await searchSessionsByCustomTitle(
@@ -227,34 +242,25 @@ async function getUniqueForkName(baseName: string): Promise<string> {
     return candidateName
   }
 
-  // Name collision - find a unique numbered suffix
-  // Search for all sessions that start with the base pattern
-  const existingForks = await searchSessionsByCustomTitle(`${baseName} (Branch`)
+  // Name collision - collect existing forked titles and increment via formatForkSessionTitle
+  const stemMatch = candidateName.match(/^(.*) \(fork(?: \d{1,15})?\)$/)
+  const searchPrefix = stemMatch ? `${stemMatch[1]} (fork` : candidateName
+  const existingForks = await searchSessionsByCustomTitle(searchPrefix)
 
-  // Extract existing fork numbers to find the next available
-  const usedNumbers = new Set<number>([1]) // Consider " (Branch)" as number 1
-  const forkNumberPattern = new RegExp(
-    `^${escapeRegExp(baseName)} \\(Branch(?: (\\d+))?\\)$`,
-  )
-
+  const usedTitles = new Set<string>()
   for (const session of existingForks) {
-    const match = session.customTitle?.match(forkNumberPattern)
-    if (match) {
-      if (match[1]) {
-        usedNumbers.add(parseInt(match[1], 10))
-      } else {
-        usedNumbers.add(1) // " (Branch)" without number is treated as 1
-      }
+    if (session.customTitle) {
+      usedTitles.add(session.customTitle)
     }
   }
 
-  // Find the next available number
-  let nextNumber = 2
-  while (usedNumbers.has(nextNumber)) {
-    nextNumber++
+  while (usedTitles.has(candidateName)) {
+    const next = formatForkSessionTitle(candidateName)
+    if (!next || next === candidateName) break
+    candidateName = next
   }
 
-  return `${baseName} (Branch ${nextNumber})`
+  return candidateName
 }
 
 export async function call(
@@ -270,6 +276,7 @@ export async function call(
     const {
       sessionId,
       title,
+      parentCustomTitle,
       forkPath,
       serializedMessages,
       contentReplacementRecords,
@@ -283,11 +290,9 @@ export async function call(
         | undefined,
     )
 
-    // Save custom title - use provided title or firstPrompt as default
-    // This ensures /status and /resume show the same session name
-    // Always add " (Branch)" suffix to make it clear this is a branched session
-    // Handle collisions by adding a number suffix (e.g., " (Branch 2)", " (Branch 3)")
-    const baseName = title ?? firstPrompt
+    // Save custom title - use provided title, parent session custom title, or firstPrompt
+    // Formats via formatForkSessionTitle ("Name (fork)", "Name (fork 2)", ...), preserving suffix on truncation
+    const baseName = title ?? parentCustomTitle ?? firstPrompt
     const effectiveTitle = await getUniqueForkName(baseName)
     await saveCustomTitle(sessionId, effectiveTitle, forkPath)
 

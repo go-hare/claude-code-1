@@ -5,6 +5,8 @@ import { lazySchema } from 'src/utils/lazySchema.js'
 import { SEND_USER_FILE_TOOL_NAME } from './prompt.js'
 import { isBridgeEnabled } from 'src/bridge/bridgeEnabled.js'
 import { expandPath, isDeviceOrNtNamespacePath } from 'src/utils/path.js'
+import { pathInOutsideReadFenceWorkingPath } from 'src/utils/permissions/filesystem.js'
+import { isRestrictedSession } from 'src/utils/restricted.js'
 
 const inputSchema = lazySchema(() =>
   z.strictObject({
@@ -102,6 +104,24 @@ Guidelines:
           error:
             'file_path: device- or NT-namespace paths cannot be published — spell the path plainly',
         },
+      }
+    }
+
+    // #1488: In restricted sessions, disallow sending files outside working directories.
+    if (isRestrictedSession()) {
+      const inside = pathInOutsideReadFenceWorkingPath(
+        expanded,
+        context.getAppState().toolPermissionContext,
+      )
+      if (!inside) {
+        return {
+          data: {
+            sent: false,
+            file_path,
+            error:
+              'Cannot send files outside the working directory in a restricted session.',
+          },
+        }
       }
     }
 

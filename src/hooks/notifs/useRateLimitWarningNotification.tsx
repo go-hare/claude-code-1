@@ -69,6 +69,9 @@ export function useRateLimitWarningNotification(model: string): void {
 
   // Track overage mode transitions
   const [hasShownOverageNotification, setHasShownOverageNotification] = useState(false);
+  const hasRunningSubagent = useAppState(s =>
+    Object.values(s.tasks).some(t => t.type === 'local_agent' && t.status === 'running'),
+  );
 
   // Show immediate notification when entering overage mode
   useEffect(() => {
@@ -80,14 +83,16 @@ export function useRateLimitWarningNotification(model: string): void {
         priority: 'immediate',
       });
       setHasShownOverageNotification(true);
-    } else if (!claudeAiLimits.isUsingOverage && hasShownOverageNotification) {
-      // Reset when no longer in overage mode
+    } else if (!claudeAiLimits.isUsingOverage && hasShownOverageNotification && !hasRunningSubagent) {
+      // Reset when no longer in overage mode (skip while a background subagent
+      // is running so transient subagent responses don't re-trigger every ~30s).
       setHasShownOverageNotification(false);
     }
   }, [
     claudeAiLimits.isUsingOverage,
     usingOverageText,
     hasShownOverageNotification,
+    hasRunningSubagent,
     addNotification,
     hasBillingAccess,
     isTeamOrEnterprise,

@@ -101,6 +101,8 @@ export type InProcessSpawnConfig = {
   planModeRequired: boolean
   /** Optional model override for this teammate */
   model?: string
+  /** Official #1592: effort-picked model carried on teammate spawn config. */
+  pickedEffortModel?: string
   /** densable spawn stamp; wins over session-derived M(). */
   permissionMode?: PermissionMode
   /** Leader session mode for densable `M(de(o).mode, planModeRequired)`. */
@@ -150,6 +152,13 @@ export type InProcessSpawnOutput = {
  * @param context - Context with setAppState for registering task
  * @returns Spawn result with teammate info
  */
+export function resolveSwarmPickedEffortModel(config: {
+  pickedEffortModel?: string
+  model?: string
+}): string | undefined {
+  return config.pickedEffortModel ?? config.model
+}
+
 export async function spawnInProcessTeammate(
   config: InProcessSpawnConfig,
   context: SpawnContext,

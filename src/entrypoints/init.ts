@@ -20,7 +20,14 @@ import { preconnectAnthropicApi } from '../utils/apiPreconnect.js'
 import { applyExtraCACertsFromConfig } from '../utils/caCertsConfig.js'
 import { registerCleanup } from '../utils/cleanupRegistry.js'
 import { applyHostCredsFromFileIfManaged } from '../utils/hostCredsFile.js'
-import { enableConfigs, recordFirstStartTime } from '../utils/config.js'
+import {
+  enableConfigs,
+  getUnparseableConfigAdvice,
+  recordFirstStartTime,
+  refreshGlobalConfigFromStorage,
+  reloadThroughStorageOnce,
+} from '../utils/config.js'
+import { getGlobalClaudeFile } from '../utils/env.js'
 import { logForDebugging } from '../utils/debug.js'
 import { logError } from '../utils/log.js'
 import { detectCurrentRepository } from '../utils/detectRepository.js'
@@ -155,6 +162,10 @@ export const init = memoize(async (): Promise<void> => {
       )
       const pinned = getPinnedStorageV5()
       if (isHoverRestOn() && pinned !== undefined) {
+        // Official #1662: settle owed global-config reload through StorageV5 once pinned.
+        await reloadThroughStorageOnce(() =>
+          refreshGlobalConfigFromStorage(pinned),
+        )
         const { getSettingsOwner } = await import(
           '../utils/settings/settingsCache.js'
         )
@@ -383,9 +394,12 @@ export const init = memoize(async (): Promise<void> => {
       // The dialog breaks JSON consumers (e.g. desktop marketplace plugin
       // manager running `plugin marketplace list --json` in a VM sandbox).
       if (getIsNonInteractiveSession()) {
-        process.stderr.write(
-          `Configuration error in ${error.filePath}: ${error.message}\n`,
-        )
+        const isGlobal = error.filePath === getGlobalClaudeFile()
+        const { advice, advicePrinted } = isGlobal
+          ? getUnparseableConfigAdvice()
+          : { advice: '', advicePrinted: true }
+        const message = `Configuration error in ${error.filePath}: ${error.message}\n`
+        process.stderr.write(advicePrinted ? message : message + advice)
         gracefulShutdownSync(1)
         return
       }

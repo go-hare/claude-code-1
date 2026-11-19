@@ -632,7 +632,8 @@ export async function spawnShellTask(
   input: LocalShellSpawnInput & { shellCommand: ShellCommand },
   context: TaskContext,
 ): Promise<ShellTaskHandle> {
-  const { command, description, shellCommand, toolUseId, agentId, kind, timeout, innerCall, shell } = input;
+  const { command, description, shellCommand, toolUseId, agentId, kind, timeout, innerCall, shell, stopsOnExit } =
+    input as typeof input & { stopsOnExit?: boolean };
   const { setAppState, getAppState } = context;
   const registry = createTaskRegistry(getAppState, setAppState);
 
@@ -658,6 +659,7 @@ export async function spawnShellTask(
     agentId,
     caller: shellCallerFromContext({ innerCall, agentId }),
     kind,
+    ...(stopsOnExit ? { stopsOnExit: true } : {}),
   };
 
   registerTask(taskState, setAppState);

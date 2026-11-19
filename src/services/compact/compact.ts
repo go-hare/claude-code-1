@@ -17,10 +17,7 @@ import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import type { Tool, ToolUseContext } from '../../Tool.js'
 import type { LocalAgentTaskState } from '../../tasks/LocalAgentTask/LocalAgentTask.js'
 import { FileReadTool } from '@claude-code/builtin-tools/tools/FileReadTool/FileReadTool.js'
-import {
-  FILE_READ_TOOL_NAME,
-  FILE_UNCHANGED_STUB,
-} from '@claude-code/builtin-tools/tools/FileReadTool/prompt.js'
+import { FILE_READ_TOOL_NAME } from '@claude-code/builtin-tools/tools/FileReadTool/prompt.js'
 import { SearchExtraToolsTool } from '@claude-code/builtin-tools/tools/SearchExtraToolsTool/SearchExtraToolsTool.js'
 import type { AgentId } from '../../types/ids.js'
 import type {
@@ -491,7 +488,18 @@ export function truncateHeadForPTLRetry(
       ? messages.slice(1)
       : messages
 
-  const groups = groupMessagesByApiRound(input)
+  // #1566: preserve leading isCompactSummary message when truncating head for PTL retry
+  const leadingSummary =
+    input[0]?.type === 'user' && input[0]?.isCompactSummary === true
+      ? input[0]
+      : undefined
+  const body = leadingSummary ? input.slice(1) : input
+  const bodyGroups = groupMessagesByApiRound(body)
+  const keepLeadingSummary =
+    leadingSummary !== undefined && bodyGroups.length >= 2
+  const groups = keepLeadingSummary
+    ? bodyGroups
+    : groupMessagesByApiRound(input)
   if (groups.length < 2) return null
 
   const tokenGap = getPromptTooLongTokenGap(ptlResponse)
@@ -537,6 +545,9 @@ export function truncateHeadForPTLRetry(
   if (dropCount < 1) return null
 
   const sliced = groups.slice(dropCount).flat()
+  if (keepLeadingSummary && leadingSummary) {
+    return [leadingSummary, ...sliced]
+  }
   // groupMessagesByApiRound puts the preamble in group 0 and starts every
   // subsequent group with an assistant message. Dropping group 0 leaves an
   // assistant-first sequence which the API rejects (first message must be
@@ -1584,7 +1595,7 @@ export async function partialCompactConversation(
     context.onCompactProgress?.({ type: 'compact_start' })
 
     const compactPrompt = getPartialCompactPrompt(customInstructions, direction)
-    const summaryRequest = createUserMessage({
+    let summaryRequest = createUserMessage({
       content: compactPrompt,
     })
 
@@ -1605,6 +1616,7 @@ export async function partialCompactConversation(
     let summaryResponse: AssistantMessage
     let summary: string | null
     let ptlAttempts = 0
+    let summaryBlockRetried = false
     for (;;) {
       const streamResult = await streamCompactSummary({
         messages: apiMessages,
@@ -1618,37 +1630,71 @@ export async function partialCompactConversation(
       })
       summaryResponse = streamResult.response
       summary = getAssistantMessageText(summaryResponse)
-      if (!summary?.startsWith(PROMPT_TOO_LONG_ERROR_MESSAGE)) break
+      if (summary?.startsWith(PROMPT_TOO_LONG_ERROR_MESSAGE)) {
+        ptlAttempts++
+        const truncated =
+          ptlAttempts <= MAX_PTL_RETRIES
+            ? truncateHeadForPTLRetry(
+                apiMessages,
+                summaryResponse,
+                streamResult.mediaStripped,
+              )
+            : null
+        if (!truncated) {
+          logEvent('tengu_partial_compact_failed', {
+            reason:
+              'prompt_too_long' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            ...failureMetadata,
+            ptlAttempts,
+          })
+          throw new Error(ERROR_MESSAGE_PROMPT_TOO_LONG)
+        }
+        logEvent('tengu_compact_ptl_retry', {
+          attempt: ptlAttempts,
+          droppedMessages: apiMessages.length - truncated.length,
+          remainingMessages: truncated.length,
+          path: 'partial' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        })
+        apiMessages = truncated
+        retryCacheSafeParams = {
+          ...retryCacheSafeParams,
+          forkContextMessages: truncated,
+        }
+        continue
+      }
 
-      ptlAttempts++
-      const truncated =
-        ptlAttempts <= MAX_PTL_RETRIES
-          ? truncateHeadForPTLRetry(
-              apiMessages,
-              summaryResponse,
-              streamResult.mediaStripped,
-            )
-          : null
-      if (!truncated) {
+      // #1630: reject non-summary replies before they can replace conversation
+      if (
+        summary &&
+        !startsWithApiErrorPrefix(summary) &&
+        !hasCompactSummaryTag(summary) &&
+        !hasUnclosedCompactSummaryTag(summary)
+      ) {
+        if (
+          !summaryBlockRetried &&
+          getFeatureValue_CACHED_MAY_BE_STALE('tengu_dapper_fountain', true)
+        ) {
+          summaryBlockRetried = true
+          summaryRequest = createUserMessage({
+            content: compactPrompt + COMPACT_REPLY_INSTRUCTIONS_TRAILER,
+          })
+          logForDebugging(
+            'Compact: the reply has no <summary> block, asking for the summary once more',
+            { level: 'info' },
+          )
+          continue
+        }
         logEvent('tengu_partial_compact_failed', {
           reason:
-            'prompt_too_long' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+            'no_summary_block' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           ...failureMetadata,
-          ptlAttempts,
         })
-        throw new Error(ERROR_MESSAGE_PROMPT_TOO_LONG)
+        throw new Error(
+          "Failed to generate conversation summary - the model's reply has no <summary> block",
+        )
       }
-      logEvent('tengu_compact_ptl_retry', {
-        attempt: ptlAttempts,
-        droppedMessages: apiMessages.length - truncated.length,
-        remainingMessages: truncated.length,
-        path: 'partial' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      })
-      apiMessages = truncated
-      retryCacheSafeParams = {
-        ...retryCacheSafeParams,
-        forkContextMessages: truncated,
-      }
+
+      break
     }
     if (!summary) {
       logEvent('tengu_partial_compact_failed', {
@@ -2418,22 +2464,6 @@ export async function createAsyncAgentAttachmentsIfNeeded(
  * createPostCompactFileAttachments to re-inject the real content.
  */
 function collectReadToolFilePaths(messages: Message[]): Set<string> {
-  const stubIds = new Set<string>()
-  for (const message of messages) {
-    if (message.type !== 'user' || !Array.isArray(message.message!.content)) {
-      continue
-    }
-    for (const block of message.message!.content) {
-      if (
-        block.type === 'tool_result' &&
-        typeof block.content === 'string' &&
-        block.content.startsWith(FILE_UNCHANGED_STUB)
-      ) {
-        stubIds.add(block.tool_use_id)
-      }
-    }
-  }
-
   const paths = new Set<string>()
   for (const message of messages) {
     if (
@@ -2443,11 +2473,7 @@ function collectReadToolFilePaths(messages: Message[]): Set<string> {
       continue
     }
     for (const block of message.message!.content) {
-      if (
-        block.type !== 'tool_use' ||
-        block.name !== FILE_READ_TOOL_NAME ||
-        stubIds.has(block.id)
-      ) {
+      if (block.type !== 'tool_use' || block.name !== FILE_READ_TOOL_NAME) {
         continue
       }
       const input = block.input

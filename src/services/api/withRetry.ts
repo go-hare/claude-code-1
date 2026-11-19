@@ -20,6 +20,8 @@ import {
   isFirstPartyAnthropicBaseUrl,
 } from 'src/utils/model/providers.js'
 import { getDensableCatalogModel } from 'src/utils/model/modelCatalogCapabilities.js'
+import { firstPartyNameToCanonical } from 'src/utils/model/model.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import {
   isAnthropicAwsProviderEnabled,
   isMantleProviderEnabled,
@@ -239,6 +241,8 @@ interface RetryOptions {
   maxRetries?: number
   model: string
   fallbackModel?: string
+  /** Official 2.1.316 X$e — family older-model fallback on Vertex/Bedrock access errors. */
+  accessFallbackModel?: string
   thinkingConfig: ThinkingConfig
   fastMode?: boolean
   signal?: AbortSignal
@@ -392,6 +396,34 @@ export function resolveFableAvailabilityFallbackModel(
   }
   const entry = getDensableCatalogModel(model)
   if (entry?.family === 'fable' && entry.fallback_3p) {
+    return entry.fallback_3p
+  }
+  return undefined
+}
+
+/**
+ * Official 2.1.316 X$e — resolve an older model in the same family when
+ * Vertex AI or Amazon Bedrock returns an availability / permission error.
+ */
+export function resolveAccessFallbackModel(options: {
+  model: string
+  accessFallbackModel?: string
+}): string | undefined {
+  if (
+    options.accessFallbackModel !== undefined &&
+    options.accessFallbackModel !== options.model
+  ) {
+    return options.accessFallbackModel
+  }
+  const provider = getAPIProvider()
+  if (provider !== 'vertex' && provider !== 'bedrock') {
+    return undefined
+  }
+  if (isEnvTruthy(process.env.CLAUDE_CODE_NO_MODEL_FALLBACK)) {
+    return undefined
+  }
+  const entry = getDensableCatalogModel(options.model)
+  if (entry?.fallback_3p && entry.fallback_3p !== options.model) {
     return entry.fallback_3p
   }
   return undefined
@@ -628,7 +660,8 @@ export async function* withRetry<T>(
       const effectiveFallbackModel =
         options.fallbackModel ??
         (isModelNotFound || isModelPerm
-          ? resolveFableAvailabilityFallbackModel(options.model)
+          ? (resolveAccessFallbackModel(options) ??
+            resolveFableAvailabilityFallbackModel(options.model))
           : undefined)
       if (
         (isModelNotFound || isModelPerm) &&
@@ -698,8 +731,15 @@ export async function* withRetry<T>(
 
       // Fast mode fallback: if the API rejects the fast mode parameter
       // (e.g., org doesn't have fast mode enabled), permanently disable fast
-      // mode and retry at standard speed.
-      if (wasFastModeActive && isFastModeNotEnabledError(error)) {
+      // mode and retry at standard speed — EXCEPT for Opus 4.8 after sunset
+      // (tengu_sunset_penguin_opus48), where fast mode requests must error
+      // rather than falling back to standard Opus 4.8.
+      if (
+        wasFastModeActive &&
+        (isFastModeNotEnabledError(error) ||
+          isSpeedParameterUnsupportedError(error, options.model)) &&
+        !isOpus48FastModeRemoved(options.model)
+      ) {
         handleFastModeRejectedByAPI()
         retryContext.fastMode = false
         continue
@@ -1196,6 +1236,80 @@ function isFastModeNotEnabledError(error: unknown): boolean {
     error.status === 400 &&
     (error.message?.includes('Fast mode is not enabled') ?? false)
   )
+}
+
+function isSpeedParameterUnsupportedError(
+  error: unknown,
+  model: string,
+): boolean {
+  if (!(error instanceof APIError) || error.status !== 400) {
+    return false
+  }
+  const match = error.message?.match(
+    /'([^']+)' does not support the `speed` parameter/,
+  )?.[1]
+  return (
+    match !== undefined &&
+    firstPartyNameToCanonical(match) === firstPartyNameToCanonical(model)
+  )
+}
+
+/**
+ * Official 2.1.316 Auo — deprecation notice for Opus 4.8 fast mode before the
+ * `tengu_sunset_penguin_opus48` removal date (default `'2026-11-30'`).
+ */
+export function getOpus48FastModeDeprecationNotice(
+  model: string,
+  nowMs: number = Date.now(),
+): {
+  key: 'opus48-fast-mode-deprecation'
+  text: string
+  priority: 'immediate'
+  requeueOnPreempt: true
+  color: 'warning'
+} | null {
+  if (firstPartyNameToCanonical(model) !== 'claude-opus-4-8') {
+    return null
+  }
+  const raw = getFeatureValue_CACHED_MAY_BE_STALE(
+    'tengu_sunset_penguin_opus48',
+    '2026-11-30',
+  )
+  const sunsetMs = Date.parse(raw)
+  if (Number.isNaN(sunsetMs) || nowMs >= sunsetMs) {
+    return null
+  }
+  const formatted = new Date(sunsetMs).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  })
+  return {
+    key: 'opus48-fast-mode-deprecation',
+    text: `Opus 4.8 fast mode is deprecated and will be removed on ${formatted}`,
+    priority: 'immediate',
+    requeueOnPreempt: true,
+    color: 'warning',
+  }
+}
+
+/**
+ * Returns true when `model` is Opus 4.8 and the `tengu_sunset_penguin_opus48`
+ * removal date has passed (fast mode requests must error and not fall back).
+ */
+export function isOpus48FastModeRemoved(
+  model: string,
+  nowMs: number = Date.now(),
+): boolean {
+  if (firstPartyNameToCanonical(model) !== 'claude-opus-4-8') {
+    return false
+  }
+  const raw = getFeatureValue_CACHED_MAY_BE_STALE(
+    'tengu_sunset_penguin_opus48',
+    '2026-11-30',
+  )
+  const sunsetMs = Date.parse(raw)
+  return !Number.isNaN(sunsetMs) && nowMs >= sunsetMs
 }
 
 export function is529Error(error: unknown): boolean {

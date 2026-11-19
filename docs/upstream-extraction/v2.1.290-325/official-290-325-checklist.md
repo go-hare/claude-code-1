@@ -1491,232 +1491,232 @@
 | 1470 | 2.1.314 | Fixed | [Claude Tag] Fixed Claude sometimes not answering a tag in its own thread in Slack Connect channels where both organizations have installed Claude | **N/A** | — — Slack Bot 后端，非本地 CLI |
 | 1471 | 2.1.314 | Fixed | [Claude Tag] Fixed Retry on plugin and skill pages in Claude Tag admin settings discarding unsaved access changes after a failed load; your edits now stay in place | **N/A** | — — Web 管理后台 UI，非本地 CLI |
 | 1472 | 2.1.314 | Fixed | [Claude Tag] Fixed the repositories control in Claude Tag admin settings showing the same action twice; its menu now lists only what the button doesn't already do | **N/A** | — — Web 管理后台 UI，非本地 CLI |
-| 1473 | 2.1.316 | Added | Added `CLAUDE_CODE_DISABLE_ULTRATHINK`, which turns the `ultrathink` keyword off | **UNKNOWN** | 待剥体 |
-| 1474 | 2.1.316 | Added | Added pooled group budgets to the Claude apps gateway: one monthly budget that a group's members share, on top of each member's own limit, set with `pooled_budget` on the spend limits admin API | **UNKNOWN** | 待剥体 |
-| 1475 | 2.1.316 | Added | Added `CLAUDE_CODE_DISABLE_LOOPED_CROSS_CERT_DROP` to keep system cross-certificates that certify each other in a loop, for servers whose private CA needs one | **UNKNOWN** | 待剥体 |
-| 1476 | 2.1.316 | Added | Added `CLAUDE_CODE_SUBAGENT_EFFORT` to set the effort level subagents run at when nothing else names one, instead of inheriting the session's | **UNKNOWN** | 待剥体 |
-| 1477 | 2.1.316 | Added | Added `managed.policy_mode: layered` to the Claude apps gateway: every policy that matches a developer applies, each merged over the ones listed below it, not only the first | **UNKNOWN** | 待剥体 |
-| 1478 | 2.1.316 | Added | Added `guardrail.input_tagging` on Claude apps gateway Bedrock upstreams, which wraps prompts in the input tags that an Amazon Bedrock guardrail's prompt attacks filter needs; `all_messages_and_system` also tags the system prompt | **UNKNOWN** | 待剥体 |
-| 1479 | 2.1.316 | Other | Deprecated fast mode for Opus 4.8 as of October 30, 2026; it will be removed on November 30, 2026. After removal, fast mode requests on Opus 4.8 return an error and do not fall back to standard Opus 4.8. Migrate to Opus 5.5 to keep the speedup | **UNKNOWN** | 待剥体 |
-| 1480 | 2.1.316 | Fixed | Fixed shell commands being left running on macOS and Linux when Claude Code exits by itself, for example when credentials are refused or a cloud session is archived | **UNKNOWN** | 待剥体 |
-| 1481 | 2.1.316 | Fixed | Fixed bash aliases with line breaks in their value (except in Git Bash), and functions whose names start with a dash, being garbled or lost in the Bash tool's shell | **UNKNOWN** | 待剥体 |
-| 1482 | 2.1.316 | Fixed | Fixed bash scripts started from the Bash tool stopping after their first command when `SHELLOPTS` is exported | **UNKNOWN** | 待剥体 |
-| 1483 | 2.1.316 | Fixed | Fixed PowerShell hooks not blocking on exit code 2 when the command begins with a type cast, `param`, `using` or an attribute | **UNKNOWN** | 待剥体 |
-| 1484 | 2.1.316 | Fixed | Fixed some network requests hanging when a compressed response was cut off or corrupted | **UNKNOWN** | 待剥体 |
-| 1485 | 2.1.316 | Fixed | Fixed `sonnet`, `opus` and `haiku` on Vertex AI and Amazon Bedrock showing an error mid-session instead of switching to an older model when the newest is not yet available to the account or region | **UNKNOWN** | 待剥体 |
-| 1486 | 2.1.316 | Fixed | Fixed the Claude apps gateway not checking every model a request names against `availableModels`, `deniedModels` and `models`; a request that names a blocked model now gets a 400 naming the field | **UNKNOWN** | 待剥体 |
-| 1487 | 2.1.316 | Fixed | Fixed `claude auth login` refusing to run where managed settings require a Claude apps gateway; in a terminal it now shows the gateway sign-in | **UNKNOWN** | 待剥体 |
-| 1488 | 2.1.316 | Fixed | Fixed `--restricted` sessions uploading files from outside the working directories when a Read allow rule covered them | **UNKNOWN** | 待剥体 |
-| 1489 | 2.1.316 | Fixed | Fixed prompts containing invisible characters needing a second Enter to send; plain prompts now send cleaned on the first Enter, and commands still wait for review | **UNKNOWN** | 待剥体 |
-| 1490 | 2.1.316 | Fixed | Fixed sub-agents that inherited a parent sub-agent's model moving to the main model when a background job or message woke them | **UNKNOWN** | 待剥体 |
-| 1491 | 2.1.316 | Fixed | Fixed a managed `autoMode.allow` list without `"$defaults"` getting the built-in exceptions back from a host app's `--settings`, a first rule added in `/permissions`, or `/auto-mode-setup` | **UNKNOWN** | 待剥体 |
-| 1492 | 2.1.316 | Fixed | Fixed cloud sessions and cloud scheduled tasks not being marked as failed when auto mode stopped a turn because the server returned no safety verdict | **UNKNOWN** | 待剥体 |
-| 1493 | 2.1.316 | Fixed | Fixed `claude -p` text output sometimes not saying why auto mode stopped a turn when a background agent was still running | **UNKNOWN** | 待剥体 |
-| 1494 | 2.1.316 | Fixed | Fixed `CLAUDE_CODE_AUTO_MODE_SERVER=1` being ignored in sessions started by a host application (such as Claude Desktop) behind a proxy or LLM gateway with experimental betas turned off | **UNKNOWN** | 待剥体 |
-| 1495 | 2.1.316 | Fixed | Fixed plugin MCP `headersHelper` scripts receiving a corrupted `CLAUDE_PLUGIN_ROOT` and server URL when a credential-named environment variable was set to a switch value such as `1` | **UNKNOWN** | 待剥体 |
-| 1496 | 2.1.316 | Fixed | Fixed the SDK `register_repo_root` control request not loading the CLAUDE.md of a directory outside the working directory (with `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`) | **UNKNOWN** | 待剥体 |
-| 1497 | 2.1.316 | Fixed | Fixed the Artifact tool showing `?` for artifact database access rules at the `self` level, and not quoting those rules back when it refuses a republish that would drop them | **UNKNOWN** | 待剥体 |
-| 1498 | 2.1.316 | Fixed | Fixed `/model <id>` not warning when the model isn't recognized by this version and auto-compact will assume a 200K context window | **UNKNOWN** | 待剥体 |
-| 1499 | 2.1.316 | Fixed | Fixed the "hold space to speak" hint using up its three showings in one session, and showing an empty key when push-to-talk is unbound | **UNKNOWN** | 待剥体 |
-| 1500 | 2.1.316 | Fixed | Fixed Grep and Glob never returning when the search process is killed at the timeout but does not exit, seen on Windows | **UNKNOWN** | 待剥体 |
-| 1501 | 2.1.316 | Fixed | Fixed a rare case where resuming a conversation did not restore its plan, when `/clear` or `/resume` had been run while part of that conversation was still being saved | **UNKNOWN** | 待剥体 |
-| 1502 | 2.1.316 | Fixed | Fixed first-run setup dropping words from the security notes and the terminal-setup explanation in narrow terminals | **UNKNOWN** | 待剥体 |
-| 1503 | 2.1.316 | Fixed | Fixed the Enterprise survey card taking a typed 1 or 0 after a short pause; a typed answer now needs Enter | **UNKNOWN** | 待剥体 |
-| 1504 | 2.1.316 | Other | Self-hosted runner: Fixed a message sent while Claude was working being answered after a Stop, once the session's process had been replaced | **UNKNOWN** | 待剥体 |
-| 1505 | 2.1.316 | Other | Self-hosted runner: Fixed an MCP server's on/off switch sometimes being lost when a session moved to a new machine | **UNKNOWN** | 待剥体 |
-| 1506 | 2.1.316 | Other | Windows: Fixed the Bash tool losing your aliases and functions in Git Bash when the rc file sets errexit and pipefail and only winpty aliases, or none, are defined | **UNKNOWN** | 待剥体 |
-| 1507 | 2.1.316 | Improved | Improved `/code-review` started from the Code tab in Claude Desktop or on the web: cloud and `claude remote-control` sessions now show the findings card, not a plain-text list | **UNKNOWN** | 待剥体 |
-| 1508 | 2.1.316 | Improved | Improved `/diff` on large repositories: each refresh usually runs one fewer full-repository git command, and refreshes are spaced out when git is slow | **UNKNOWN** | 待剥体 |
-| 1509 | 2.1.316 | Improved | Improved the messages shown when `/ultrareview`, a cloud session or a cloud agent finds no GitHub remote: they now say to create a repository at https://github.com/new, and `/ultrareview` no longer suggests a `gh` command that `gh` rejects | **UNKNOWN** | 待剥体 |
-| 1510 | 2.1.316 | Improved | Improved SSL certificate errors to name the likely causes, among them a server that leaves out an intermediate certificate, and the fix for each | **UNKNOWN** | 待剥体 |
-| 1511 | 2.1.316 | Changed | Changed auto mode so that an `autoMode.allow` list without `"$defaults"` no longer removes the built-in rule on scheduled-task prompts | **UNKNOWN** | 待剥体 |
-| 1512 | 2.1.316 | Changed | Changed server-managed settings for Team and Enterprise logins: settings fetched from Anthropic's API now apply without an approval prompt, and a stored copy that doesn't verify is refused | **UNKNOWN** | 待剥体 |
-| 1513 | 2.1.316 | Added | [VSCode] Added sign-in to a Claude apps gateway from the chat panel, with no terminal needed | **UNKNOWN** | 待剥体 |
-| 1514 | 2.1.316 | Changed | [VSCode] Changed `ultrathink` to run its turn at `xhigh` effort and show in a rainbow in the chat box, as in the terminal | **UNKNOWN** | 待剥体 |
-| 1515 | 2.1.316 | Fixed | [VSCode] Fixed the missing Effort slider, Ultracode switch and model name when the model setting has the `[1m]` tag, such as `opus[1m]` | **UNKNOWN** | 待剥体 |
-| 1516 | 2.1.316 | Fixed | [VSCode] Fixed saved `/btw` side-question history being deleted too early while a settings file has errors | **UNKNOWN** | 待剥体 |
-| 1517 | 2.1.316 | Fixed | [VSCode] Fixed a conversation coming back in Auto mode after a reload or restart when its plan was approved with "Yes, and manually approve edits" | **UNKNOWN** | 待剥体 |
-| 1518 | 2.1.316 | Added | [Cloud sessions] Added a form card to cloud sessions, so you can fill in or decline a form an MCP server asks for instead of the request being canceled without you seeing it | **UNKNOWN** | 待剥体 |
-| 1519 | 2.1.316 | Added | [Cloud sessions] Added a "Catching up…" line that shows while a cloud or Remote Control session you switch back to is still bringing its messages up to date | **UNKNOWN** | 待剥体 |
-| 1520 | 2.1.316 | Changed | [Cloud sessions] Changed network secrets so Enterprise members can add and delete them on their own cloud environments, instead of only viewing them | **UNKNOWN** | 待剥体 |
-| 1521 | 2.1.316 | Improved | [Cloud sessions] Improved the Changes pane for cloud sessions: the note about what the list leaves out is now a badge beside the branch name, not a row above the diff | **UNKNOWN** | 待剥体 |
-| 1522 | 2.1.316 | Fixed | [Cloud sessions] Fixed file search in a cloud session's Files pane showing folders as ../.. paths after Claude changed directory; results now show their path from the project's root | **UNKNOWN** | 待剥体 |
-| 1523 | 2.1.316 | Fixed | [Claude Tag] Fixed Claude refusing to edit or append to a canvas it made in a Slack channel, from that channel, once the canvas was also shared to another channel or a DM | **UNKNOWN** | 待剥体 |
-| 1524 | 2.1.316 | Fixed | [Claude Tag] Fixed untagged replies going unanswered in a Slack Connect thread when both organizations have installed Claude and Slack delivered the reply to the other organization's app | **UNKNOWN** | 待剥体 |
-| 1525 | 2.1.316 | Fixed | [Claude Tag] Fixed a cloud scheduled task's live status checklist in Slack staying half-done; a run can now edit the top-level messages it posted during that run | **UNKNOWN** | 待剥体 |
-| 1526 | 2.1.316 | Changed | [Claude Tag] Changed a Slack channel's Respond automatically switch to a "How Claude participates" choice on the channel's Configure page and in Claude Tag admin settings | **UNKNOWN** | 待剥体 |
-| 1527 | 2.1.316 | Added | [Code Review] Added a findings-by-severity card to the Code Review analytics page, showing the period's total findings, a daily chart stacked by severity, and each severity's count | **UNKNOWN** | 待剥体 |
-| 1528 | 2.1.317 | Added | Added a warning to `/schedule` when a new cloud scheduled task gets connectors you did not ask for, with how to remove them | **UNKNOWN** | 待剥体 |
-| 1529 | 2.1.317 | Added | Added a check that asks before a web or shell tool call sends your account email address to the network | **UNKNOWN** | 待剥体 |
-| 1530 | 2.1.317 | Added | Added `onFailure: "block"` for Agent SDK hook callbacks, so a callback that fails blocks the action instead of letting it run | **UNKNOWN** | 待剥体 |
-| 1531 | 2.1.317 | Added | Added a notice in Claude Desktop's Code tab when your organization's remote managed settings haven't loaded for the session, and another once they do | **UNKNOWN** | 待剥体 |
-| 1532 | 2.1.317 | Added | Added a notice when auto mode's check has no answer for a subagent's tool call, which used to leave nothing in the main view | **UNKNOWN** | 待剥体 |
-| 1533 | 2.1.317 | Added | Added `anthropic.plan`, `anthropic.seat_type`, `anthropic.provider` and `anthropic.custom_base_url` to OTel metrics, events and spans | **UNKNOWN** | 待剥体 |
-| 1534 | 2.1.317 | Added | Added a cost report to the Claude apps gateway admin API, `GET /v1/organizations/analytics/cost`, for reading past spend over a date range in total, per developer, per day or per IdP group | **UNKNOWN** | 待剥体 |
-| 1535 | 2.1.317 | Added | Added a daily record of each developer's IdP groups on Claude apps gateways with `admin:` set, kept for `admin.identity_retention_days`, which the cost report groups by | **UNKNOWN** | 待剥体 |
-| 1536 | 2.1.317 | Added | Added `CLAUDE_CODE_DISABLE_NESTED_SESSION_ID`: set it to `1` on a self-hosted runner to have `claude -p` run inside a session use that session's ID and transcript, as in earlier versions | **UNKNOWN** | 待剥体 |
-| 1537 | 2.1.317 | Fixed | Fixed project and local MCP servers disconnecting after the first turn in some Claude desktop sessions | **UNKNOWN** | 待剥体 |
-| 1538 | 2.1.317 | Fixed | Fixed auto mode failing every turn when an LLM gateway set as the base URL answers 403 or 422 to its server-side safety check (a 403 with an apiKeyHelper is unchanged) | **UNKNOWN** | 待剥体 |
-| 1539 | 2.1.317 | Fixed | Fixed `claude auth status` exiting before a slow token refresh was saved, which could sign you out on the next run | **UNKNOWN** | 待剥体 |
-| 1540 | 2.1.317 | Fixed | Fixed a project's `effortLevel` setting being ignored by sessions that an app starts ahead of time and then opens in the project, such as new sessions in the desktop app's Code tab | **UNKNOWN** | 待剥体 |
-| 1541 | 2.1.317 | Fixed | Fixed `claude --from-pr` reporting "No conversations found" in projects with many sessions when the linked session was older than the first page | **UNKNOWN** | 待剥体 |
-| 1542 | 2.1.317 | Fixed | Fixed the second of two simultaneous permission prompts showing no file path or command on claude.ai and the mobile apps | **UNKNOWN** | 待剥体 |
-| 1543 | 2.1.317 | Fixed | Fixed Remote Control and SDK hosts offering "don't ask again" on a mod's tool calls | **UNKNOWN** | 待剥体 |
-| 1544 | 2.1.317 | Fixed | Fixed session titles being lost in cloud and SDK sessions when a new message or Stop arrived while the title was generating | **UNKNOWN** | 待剥体 |
-| 1545 | 2.1.317 | Fixed | Fixed self-paced `/loop` wakeups sometimes not being scheduled when Claude left a field out of its request | **UNKNOWN** | 待剥体 |
-| 1546 | 2.1.317 | Fixed | Fixed auto mode in cloud sessions stopping for approval when the Artifact tool uploaded, wrote to a database or saved a file through the outputs folder | **UNKNOWN** | 待剥体 |
-| 1547 | 2.1.317 | Fixed | Fixed skills synced from claude.ai being lost or downloaded again every ten minutes when they can't be written to disk | **UNKNOWN** | 待剥体 |
-| 1548 | 2.1.317 | Fixed | Fixed `/schedule` leaving a cloud scheduled task's next run time and link out of its results after creating or updating it | **UNKNOWN** | 待剥体 |
-| 1549 | 2.1.317 | Fixed | Fixed screen readers speaking a running subagent's elapsed time and token count on every change in screen reader mode | **UNKNOWN** | 待剥体 |
-| 1550 | 2.1.317 | Fixed | Fixed a region or network block (HTTP 403) being shown as a sign-in failure; the error now explains the block | **UNKNOWN** | 待剥体 |
-| 1551 | 2.1.317 | Fixed | Fixed Claude saying a working claude.ai connector needed authorization or had failed in cloud sessions when a synced plugin included the same server | **UNKNOWN** | 待剥体 |
-| 1552 | 2.1.317 | Fixed | Fixed `claude -p` exiting 0 when a full disk or quota lost its transcript or ~/.claude.json writes; it now prints an error and, in text and json output, exits 1. Full NFS exports may be missed | **UNKNOWN** | 待剥体 |
-| 1553 | 2.1.317 | Fixed | Fixed edits to settings files made in the first second or so after launch not taking effect until a settings file changed again | **UNKNOWN** | 待剥体 |
-| 1554 | 2.1.317 | Fixed | Fixed old transcripts not being cleaned up on machines where some runs skip cleanup, such as runs using `--setting-sources` | **UNKNOWN** | 待剥体 |
-| 1555 | 2.1.317 | Fixed | Fixed deleted agent team inboxes being re-created by a teammate's late message | **UNKNOWN** | 待剥体 |
-| 1556 | 2.1.317 | Fixed | Fixed a re-created agent teammate being removed from its team by an earlier shutdown approval | **UNKNOWN** | 待剥体 |
-| 1557 | 2.1.317 | Fixed | Fixed stored scheduled tasks being impossible to list or delete after scheduled tasks were turned off | **UNKNOWN** | 待剥体 |
-| 1558 | 2.1.317 | Fixed | Fixed Claude deleting your most recently updated `/team-onboarding` guide when asked to delete one without naming which | **UNKNOWN** | 待剥体 |
-| 1559 | 2.1.317 | Fixed | Fixed Claude saying a `/team-onboarding` guide was deleted when the server refused the delete | **UNKNOWN** | 待剥体 |
-| 1560 | 2.1.317 | Fixed | Fixed the Claude apps gateway hiding Amazon Bedrock's "Input is too long." error, which left sessions failing every turn with "upstream rejected the request" instead of compacting | **UNKNOWN** | 待剥体 |
-| 1561 | 2.1.317 | Fixed | Fixed self-hosted runner sessions losing recent turns or the whole conversation when restarted while a plan waited for approval | **UNKNOWN** | 待剥体 |
-| 1562 | 2.1.317 | Fixed | Fixed "Prompt is too long" after automatic compaction in sessions whose very large CLAUDE.md changed since it was last sent | **UNKNOWN** | 待剥体 |
-| 1563 | 2.1.317 | Fixed | Fixed high memory use and slow startup in headless sessions with many plugins that register commands | **UNKNOWN** | 待剥体 |
-| 1564 | 2.1.317 | Fixed | Fixed stdio MCP servers receiving an empty `AWS_BEARER_TOKEN_BEDROCK` when their env config sets it to empty; the variable is now unset, so the server can use the machine's own AWS credentials | **UNKNOWN** | 待剥体 |
-| 1565 | 2.1.317 | Fixed | Fixed API requests failing with "unable to get local issuer certificate" behind some TLS-inspecting proxies after a root certificate renewal | **UNKNOWN** | 待剥体 |
-| 1566 | 2.1.317 | Fixed | Fixed very long conversations losing their earlier summary when compaction had to shorten its own request | **UNKNOWN** | 待剥体 |
-| 1567 | 2.1.317 | Fixed | Fixed a PDF's own metadata being able to make Read and @-mentions under-count its pages | **UNKNOWN** | 待剥体 |
-| 1568 | 2.1.317 | Fixed | Fixed `DISABLE_PROMPT_CACHING_OPUS` and `DISABLE_PROMPT_CACHING_SONNET` having no effect on `[1m]`, other-region and undated spellings of the default model | **UNKNOWN** | 待剥体 |
-| 1569 | 2.1.317 | Fixed | Fixed `/artifacts` and the Artifact tool's shared list showing no shared artifacts when you have 200 or more of your own | **UNKNOWN** | 待剥体 |
-| 1570 | 2.1.317 | Fixed | Fixed Claude treating partial Grep and Glob results as complete when a search hit its time limit | **UNKNOWN** | 待剥体 |
-| 1571 | 2.1.317 | Fixed | Fixed OpenTelemetry exports to an `https://` endpoint through a proxy never being sent when they started while another export was still in progress | **UNKNOWN** | 待剥体 |
-| 1572 | 2.1.317 | Fixed | Fixed a flood of connection attempts to a proxy that blocks (HTTP 403) OpenTelemetry exports to an `http://` endpoint | **UNKNOWN** | 待剥体 |
-| 1573 | 2.1.317 | Fixed | Fixed OpenTelemetry exports hanging indefinitely behind a proxy that never answers; they now time out after 10 seconds, or `OTEL_EXPORTER_OTLP_TIMEOUT` up to 30 seconds | **UNKNOWN** | 待剥体 |
-| 1574 | 2.1.317 | Fixed | Fixed resumed sessions telling Claude again about a file change it already knew about | **UNKNOWN** | 待剥体 |
-| 1575 | 2.1.317 | Fixed | Fixed Claude sometimes not using a built-in tool in a resumed session after an earlier call failed because the tool was switched off | **UNKNOWN** | 待剥体 |
-| 1576 | 2.1.317 | Fixed | Fixed `/remote-control` answering "Unknown command" instead of saying that Remote Control is turned off by the `disableRemoteControl` setting | **UNKNOWN** | 待剥体 |
-| 1577 | 2.1.317 | Fixed | Fixed agent team teammates in tmux or iTerm2 panes starting in auto mode when the lead session was in manual mode | **UNKNOWN** | 待剥体 |
-| 1578 | 2.1.317 | Fixed | Fixed a background session sometimes losing a just-made change of permission mode when it was upgraded or retired | **UNKNOWN** | 待剥体 |
-| 1579 | 2.1.317 | Fixed | Fixed Ctrl+C stopping all running background agents when pressed to clear typed text at the prompt | **UNKNOWN** | 待剥体 |
-| 1580 | 2.1.317 | Fixed | Fixed /feedback showing "Enter to confirm" while a report is being sent | **UNKNOWN** | 待剥体 |
-| 1581 | 2.1.317 | Fixed | Fixed child processes of a stopped shell command sometimes being sent SIGTERM twice, which could make some programs skip their cleanup | **UNKNOWN** | 待剥体 |
-| 1582 | 2.1.317 | Fixed | Fixed `claude -p` run inside a cloud or self-hosted runner session sharing that session's ID: it wrote into the session's transcript, and a restart could resume the wrong conversation | **UNKNOWN** | 待剥体 |
-| 1583 | 2.1.317 | Fixed | Fixed `claude -p` run inside a cloud or self-hosted runner session generating a title of its own and sending it to that session | **UNKNOWN** | 待剥体 |
-| 1584 | 2.1.317 | Improved | Improved the error shown on Microsoft Foundry when Azure credentials can't be loaded: it now says to check or refresh them, and reports as `cloud_credential_error` | **UNKNOWN** | 待剥体 |
-| 1585 | 2.1.317 | Improved | Improved `/design-sync` to say up front when your design system has moved to Claude, and stop before building instead of failing at upload | **UNKNOWN** | 待剥体 |
-| 1586 | 2.1.317 | Improved | Improved the startup error when a required Claude apps gateway can't be reached: it points to the network instead of a sign-in, and says when the gateway's TLS certificate can't be verified | **UNKNOWN** | 待剥体 |
-| 1587 | 2.1.317 | Improved | Improved the "Resume this session with" hint shown at exit to repeat the flags you launched with (for example `--chrome --debug`) ahead of `--resume` | **UNKNOWN** | 待剥体 |
-| 1588 | 2.1.317 | Improved | Improved how self-hosted runners recover from server errors: after a 5xx other than 501 or 529, a runner's next poll now opens a new connection instead of reusing the one that failed | **UNKNOWN** | 待剥体 |
-| 1589 | 2.1.317 | Improved | Improved how self-hosted runner sessions recover from server errors: after a 5xx other than 501 or 529, a session now opens new connections instead of reusing the one that failed | **UNKNOWN** | 待剥体 |
-| 1590 | 2.1.317 | Improved | Improved how self-hosted runner sessions recover when connections stop answering: after a heartbeat gets no answer, a session now opens new connections instead of trying each idle one in turn | **UNKNOWN** | 待剥体 |
-| 1591 | 2.1.317 | Changed | Changed SendMessage so a message to a running background agent arrives earlier: its running command moves to the background, without being stopped | **UNKNOWN** | 待剥体 |
-| 1592 | 2.1.317 | Changed | Changed subagents and teammates on a different model from the main conversation to use that model's saved effort level or its default, instead of the session's effort level | **UNKNOWN** | 待剥体 |
-| 1593 | 2.1.317 | Changed | Changed exit to skip the "Background work is running" prompt for plugin monitors | **UNKNOWN** | 待剥体 |
-| 1594 | 2.1.317 | Changed | Changed the built-in `plugin-authoring` skill to offer once, after a mod you built works, to help share the mod | **UNKNOWN** | 待剥体 |
-| 1595 | 2.1.317 | Removed | Removed the Read tool's "file unchanged since your last Read" stub: reading an unchanged file again returns its content | **UNKNOWN** | 待剥体 |
-| 1596 | 2.1.317 | Other | Windows: Fixed every tool call being refused on some volumes where the native path lookup fails; the working-directory check now compares the folder's identity instead | **UNKNOWN** | 待剥体 |
-| 1597 | 2.1.317 | Other | Windows: Fixed the session scratchpad and other temporary paths growing with your project's path length in sessions not started by Claude Desktop, which made repositories cloned into them hit the 260-character path limit | **UNKNOWN** | 待剥体 |
-| 1598 | 2.1.317 | Other | Gateway: Fixed the status line and `/usage` showing a developer's own spend limit as 100% used after their group's pooled budget ran out | **UNKNOWN** | 待剥体 |
-| 1599 | 2.1.317 | Other | Self-hosted runner: Fixed Claude not seeing the interrupted tool call when a session moves to a new runner and the turn is older than `CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS` | **UNKNOWN** | 待剥体 |
-| 1600 | 2.1.317 | Other | Self-hosted runner: Fixed an MCP server that was switched off coming back on after the session moved to a new machine, when the session service had refused to save the switch | **UNKNOWN** | 待剥体 |
-| 1601 | 2.1.317 | Other | Remote Control: Improved fork names when the app doesn't set one: a long name keeps its "(fork)" ending, and in sessions started with `claude remote-control` a fork of "Name (fork)" is "Name (fork 2)" | **UNKNOWN** | 待剥体 |
-| 1602 | 2.1.317 | Fixed | [VSCode] Fixed forked conversations dropping messages: only one of the tool calls Claude ran in parallel was kept, and the last messages a compaction kept were lost, which could leave Claude's answer without the question it answered | **UNKNOWN** | 待剥体 |
-| 1603 | 2.1.317 | Fixed | [VSCode] Fixed a message being lost when Claude did not finish starting in time: the extension now starts Claude once more before showing the error | **UNKNOWN** | 待剥体 |
-| 1604 | 2.1.317 | Fixed | [VSCode] Fixed the sign-in screen opening when a request is blocked for its region or network | **UNKNOWN** | 待剥体 |
-| 1605 | 2.1.317 | Fixed | [VSCode] Fixed the Account panel showing the plan name with a lower-cased second word | **UNKNOWN** | 待剥体 |
-| 1606 | 2.1.317 | Fixed | [VSCode] Fixed file links in a Claude tab opening on top of the chat instead of in another editor group | **UNKNOWN** | 待剥体 |
-| 1607 | 2.1.317 | Fixed | [VSCode] Fixed attachment chips, menus, banners and dialogs in the Claude panel staying small when `chat.fontSize` is raised | **UNKNOWN** | 待剥体 |
-| 1608 | 2.1.317 | Fixed | [VSCode] Fixed `ultrathink` not raising effort for its turn or showing its rainbow when telemetry is off | **UNKNOWN** | 待剥体 |
-| 1609 | 2.1.317 | Added | [Cloud sessions] Added a link card to cloud sessions, so you can open or decline a link an MCP server asks you to visit instead of the request going unseen | **UNKNOWN** | 待剥体 |
-| 1610 | 2.1.317 | Changed | [Cloud sessions] Changed the organization environment dialog in admin settings to the personal dialogs' short layout: each section opens from a row, and unsaved input asks before closing | **UNKNOWN** | 待剥体 |
-| 1611 | 2.1.317 | Fixed | [Cloud sessions] Fixed adding a network secret for a host that already has one silently replacing it; the Add secret form now refuses and points you to the existing secret | **UNKNOWN** | 待剥体 |
-| 1612 | 2.1.317 | Fixed | [Cloud sessions] Fixed new scheduled tasks ignoring your organization's default environment: the form now starts on the one an admin chose instead of the Anthropic-hosted default | **UNKNOWN** | 待剥体 |
-| 1613 | 2.1.317 | Fixed | [Remote Control] Fixed the next message to an idle session going unanswered after you restart `claude remote-control`, when you sent it within a minute of your previous message | **UNKNOWN** | 待剥体 |
-| 1614 | 2.1.317 | Changed | [Claude Tag] Changed newly pasted artifact links in Slack to show a simpler card with an Open button that opens the artifact in Claude, instead of Slack's side panel | **UNKNOWN** | 待剥体 |
-| 1615 | 2.1.318 | Added | Added a record of your answer when Claude Code asks to turn on the mods it writes in a session | **UNKNOWN** | 待剥体 |
-| 1616 | 2.1.318 | Added | Added `assume_role` on `mantle` upstreams of the Claude apps gateway, for a role in another AWS account and for per-developer AWS cost attribution | **UNKNOWN** | 待剥体 |
-| 1617 | 2.1.318 | Added | Added an `effort` option to a mod's `$.model.fork`, so a quick side job can run at `low` whatever effort the session uses; the result reports the effort sent | **UNKNOWN** | 待剥体 |
-| 1618 | 2.1.318 | Added | Added the date a stored claude.ai sign-in ends to `claude auth status` (`loginExpiresAt`) and to `claude -p` JSON results (`credential_expires_at`) | **UNKNOWN** | 待剥体 |
-| 1619 | 2.1.318 | Added | Added a one-line stderr warning to `claude -p` text output, starting 10 days before a stored claude.ai sign-in ends | **UNKNOWN** | 待剥体 |
-| 1620 | 2.1.318 | Fixed | Fixed `--continue` sometimes losing the earlier conversation after a malformed tool call's retries ran out (regression in 2.1.314) | **UNKNOWN** | 待剥体 |
-| 1621 | 2.1.318 | Fixed | Fixed macOS sessions with many running Bash commands stalling while memory grew | **UNKNOWN** | 待剥体 |
-| 1622 | 2.1.318 | Fixed | Fixed permission prompts being answered by keys typed just after sending a message, or before a slow prompt appeared | **UNKNOWN** | 待剥体 |
-| 1623 | 2.1.318 | Fixed | Fixed `/logout`, `claude auth logout` and `claude mcp remove` reporting success, and changes to trust, consent or MCP settings being dropped with no word, when the config file could not be updated on a shared network home directory | **UNKNOWN** | 待剥体 |
-| 1624 | 2.1.318 | Fixed | Fixed jobs exiting with `Not logged in` when another terminal or host signs in again to the same account and organization on the same home | **UNKNOWN** | 待剥体 |
-| 1625 | 2.1.318 | Fixed | Fixed `claude mcp add` and `remove` writing the config without its lock: they now wait for it or exit 1, though another job's save can still replace a saved server | **UNKNOWN** | 待剥体 |
-| 1626 | 2.1.318 | Fixed | Fixed `claude plugin` commands exiting before a slow token refresh was saved, which could sign you out on the next run | **UNKNOWN** | 待剥体 |
-| 1627 | 2.1.318 | Fixed | Fixed `claude plugin validate` passing a custom-named marketplace file that `claude plugin marketplace add` rejects | **UNKNOWN** | 待剥体 |
-| 1628 | 2.1.318 | Fixed | Fixed stdio MCP servers that exit on the version probe being re-probed on every start; a server that dies in under 3s for its own reason is also pinned to the legacy handshake for 7 days | **UNKNOWN** | 待剥体 |
-| 1629 | 2.1.318 | Fixed | Fixed sessions being refused at startup by an `allowedProviders` list that another login on the same machine had stored | **UNKNOWN** | 待剥体 |
-| 1630 | 2.1.318 | Fixed | Fixed idle compaction replacing a conversation with a reply that was not a summary | **UNKNOWN** | 待剥体 |
-| 1631 | 2.1.318 | Fixed | Fixed the "Now using usage credits" notice reappearing about every 30 seconds while a background subagent is running | **UNKNOWN** | 待剥体 |
-| 1632 | 2.1.318 | Fixed | Fixed custom slash commands that fail, or that only Claude can invoke, printing nothing in `claude -p` and SDK sessions | **UNKNOWN** | 待剥体 |
-| 1633 | 2.1.318 | Fixed | Fixed `claude -p` and Agent SDK sessions reporting success when an API error cut off a reply while a mod hooked `turn.step` | **UNKNOWN** | 待剥体 |
-| 1634 | 2.1.318 | Fixed | Fixed a message sent right after a model change still running after Stop in headless sessions: Stop now cancels or stops it as it would a queued message | **UNKNOWN** | 待剥体 |
-| 1635 | 2.1.318 | Fixed | Fixed a deleted session transcript being re-created with its last prompt when an idle non-interactive session exited | **UNKNOWN** | 待剥体 |
-| 1636 | 2.1.318 | Fixed | Fixed `claude remote-control` hosts, the background daemon and self-hosted runners failing to start new sessions (`spawn ENOENT`) after an update or version cleanup removed the binary of a still-running process | **UNKNOWN** | 待剥体 |
-| 1637 | 2.1.318 | Fixed | Fixed a running Claude Code process owned by another user (for example one left by `sudo claude`) being treated as dead by version cleanup, which could delete its binary | **UNKNOWN** | 待剥体 |
-| 1638 | 2.1.318 | Fixed | Fixed `/remote-control` showing a session as available after a failed connection | **UNKNOWN** | 待剥体 |
-| 1639 | 2.1.318 | Fixed | Fixed `/design revoke` reporting success when the request failed with a 404 | **UNKNOWN** | 待剥体 |
-| 1640 | 2.1.318 | Fixed | Fixed a shell command approved after a self-hosted runner or cloud session restart running in the session's start folder, not the folder it was asked in; if that folder can't be entered, it is not run | **UNKNOWN** | 待剥体 |
-| 1641 | 2.1.318 | Fixed | Fixed Claude not being told when an approved connector tool was unavailable after a cloud session restart | **UNKNOWN** | 待剥体 |
-| 1642 | 2.1.318 | Fixed | Fixed cloud sessions being stopped in the middle of a turn when the service refuses uploads for several minutes | **UNKNOWN** | 待剥体 |
-| 1643 | 2.1.318 | Fixed | Fixed variables a `Setup` hook writes to `CLAUDE_ENV_FILE` not reaching the Bash tool in some cloud sessions | **UNKNOWN** | 待剥体 |
-| 1644 | 2.1.318 | Fixed | Fixed the iPhone app showing a cloud session's turn as finished while it kept running, after a response was cut off at a tool call or a refused image or document was removed | **UNKNOWN** | 待剥体 |
-| 1645 | 2.1.318 | Fixed | Fixed a restarted session re-sending a message that failed with an API error, ahead of the newer message waiting behind it | **UNKNOWN** | 待剥体 |
-| 1646 | 2.1.318 | Fixed | Fixed a restarted session dropping its interrupted turn when the restart came right after Claude read a large image or retried a tool call | **UNKNOWN** | 待剥体 |
-| 1647 | 2.1.318 | Fixed | Fixed every connection failing when the `NODE_EXTRA_CA_CERTS` file is empty, not PEM, or starts with a damaged certificate: readable certificates are now used, with a warning on stderr | **UNKNOWN** | 待剥体 |
-| 1648 | 2.1.318 | Fixed | Fixed workflows re-running finished agents when resumed after a usage limit | **UNKNOWN** | 待剥体 |
-| 1649 | 2.1.318 | Fixed | Fixed `/mcp` in cloud sessions counting tools the model can't use; a server's row now shows how many of its tools are available | **UNKNOWN** | 待剥体 |
-| 1650 | 2.1.318 | Fixed | Fixed a duplicate notification when Claude left the status field out of a PushNotification call | **UNKNOWN** | 待剥体 |
-| 1651 | 2.1.318 | Fixed | Fixed the error for a too-large image in a request with more than 20 images always saying the limit was 2000px; it now shows the API's limit | **UNKNOWN** | 待剥体 |
-| 1652 | 2.1.318 | Fixed | Fixed the runtime in background shell details not updating while the dialog is open | **UNKNOWN** | 待剥体 |
-| 1653 | 2.1.318 | Fixed | Fixed a mod's `turn.step` hook making a stopped reply finish as a success in headless runs | **UNKNOWN** | 待剥体 |
-| 1654 | 2.1.318 | Fixed | Fixed retention cleanup leaving a home that only runs `claude -p` with no `~/.claude.json` backup: it now takes a fresh backup before deleting the last good one | **UNKNOWN** | 待剥体 |
-| 1655 | 2.1.318 | Fixed | Fixed the stored login being replaced by an empty file when a network home directory has no room left for data but still takes new files | **UNKNOWN** | 待剥体 |
-| 1656 | 2.1.318 | Fixed | Fixed tokens from `setup-token` being refused at start on machines with `forceLoginOrgUUID`, when the token belongs to a permitted organization | **UNKNOWN** | 待剥体 |
-| 1657 | 2.1.318 | Fixed | Fixed non-interactive launches replacing a `~/.claude.json` that isn't valid JSON with defaults; the start now fails, says how to restore the file, and leaves it as is (anthropics/claude-code#87551) | **UNKNOWN** | 待剥体 |
-| 1658 | 2.1.318 | Fixed | Fixed an empty `~/.claude.json` with no backup being reported as corrupted; Claude Code now starts as it does when the file is missing | **UNKNOWN** | 待剥体 |
-| 1659 | 2.1.318 | Fixed | Fixed the restore command printed for a damaged or missing `~/.claude.json` naming an empty or cut-off backup, or failing on a read-only file | **UNKNOWN** | 待剥体 |
-| 1660 | 2.1.318 | Fixed | Fixed the sign-in failure when a stored claude.ai login reaches its time limit: it now says so, and in `claude -p` names `claude auth login` and `claude setup-token` | **UNKNOWN** | 待剥体 |
-| 1661 | 2.1.318 | Improved | Improved how `~/.claude.json`, settings files and the stored login survive saves on shared network home directories: they are less often deleted, briefly emptied or replaced by a near-empty or older copy | **UNKNOWN** | 待剥体 |
-| 1662 | 2.1.318 | Improved | Improved sessions on network file systems to look again when the configuration file is wrongly reported as missing, so fewer start without your MCP servers and trusted folders | **UNKNOWN** | 待剥体 |
-| 1663 | 2.1.318 | Improved | Improved MCP tool errors: a call made before the tool is loaded now returns its input schema | **UNKNOWN** | 待剥体 |
-| 1664 | 2.1.318 | Improved | Improved the reliability of git commits and pull request creation when the Bash tool runs macOS's built-in `/bin/bash` | **UNKNOWN** | 待剥体 |
-| 1665 | 2.1.318 | Improved | Improved "Ask your admin for more usage" in the usage limit menu to send the request in one step | **UNKNOWN** | 待剥体 |
-| 1666 | 2.1.318 | Improved | Improved how fast remote sessions reconnect after a pause or sleep | **UNKNOWN** | 待剥体 |
-| 1667 | 2.1.318 | Improved | Improved You should know toasts to say "try again" instead of "press 2", which only works in the terminal | **UNKNOWN** | 待剥体 |
-| 1668 | 2.1.318 | Improved | Improved auto-update reliability: a brief network failure while verifying a release is now retried right away instead of waiting for the next check | **UNKNOWN** | 待剥体 |
-| 1669 | 2.1.318 | Improved | Improved unattended runs (`claude -p`, SDK apps) to stop rewriting `~/.claude.json` on every run when nothing in it changed | **UNKNOWN** | 待剥体 |
-| 1670 | 2.1.318 | Changed | Changed Claude Code to no longer install or update the IDE extension when started in an IDE terminal; use `/ide` from an outside terminal or your editor's extensions view | **UNKNOWN** | 待剥体 |
-| 1671 | 2.1.318 | Changed | Changed subagents to stop instead of switching models when "Switch models when a message is flagged" is set to "Ask each time" | **UNKNOWN** | 待剥体 |
-| 1672 | 2.1.318 | Changed | Changed background subagents to move a shell command to the background after 3 minutes on all providers, so the prompt cache doesn't expire while it runs | **UNKNOWN** | 待剥体 |
-| 1673 | 2.1.318 | Changed | Changed subagent progress summaries on Bedrock, Vertex, Foundry, or with telemetry off: on a cold prompt cache, one can now wait up to 5 minutes for the subagent's pending response | **UNKNOWN** | 待剥体 |
-| 1674 | 2.1.318 | Changed | Changed what a mod attaches at `prompt.submit` to stay in the user's turn rather than go out as a system message | **UNKNOWN** | 待剥体 |
-| 1675 | 2.1.318 | Changed | Changed `deniedMcpServers` URL entries to also block Anthropic-provided servers whose upstream URL matches, and connectors in cloud sessions and on self-hosted runners, where the session is given the connector's own URL; otherwise deny a connector by name | **UNKNOWN** | 待剥体 |
-| 1676 | 2.1.318 | Changed | Changed the `/permissions` rule details, built-in rules and delete confirmation views to use the standard dialog; pressing Ctrl+C twice there now goes back or cancels instead of quitting | **UNKNOWN** | 待剥体 |
-| 1677 | 2.1.318 | Changed | Changed `/claude-api managed-agents-onboard` to give a new agent's built-in tools, and a quickstart template's MCP tools, the `auto` permission policy ("Judge risky actions") by default, matching the Claude Console; say "run without asking" to opt out | **UNKNOWN** | 待剥体 |
-| 1678 | 2.1.318 | Removed | Removed the 2.1.288 fix that kept the model's earlier thinking when resuming a conversation started on 2.1.286 or earlier; that thinking can now be dropped | **UNKNOWN** | 待剥体 |
-| 1679 | 2.1.318 | Other | Gateway: Added a log warning when the Google access token from a federation (`external_account`) credentials file is about to expire | **UNKNOWN** | 待剥体 |
-| 1680 | 2.1.318 | Other | Gateway: Improved the log hints about `listen.trusted_proxies`: they now say to list only a proxy that adds the connecting address to `X-Forwarded-For` itself | **UNKNOWN** | 待剥体 |
-| 1681 | 2.1.318 | Other | Gateway: Improved the warning when AWS CountTokens fails on Amazon Bedrock: it says Claude Code, not the gateway, counts after the 501, and points at IAM only when AWS denies access | **UNKNOWN** | 待剥体 |
-| 1682 | 2.1.318 | Other | Self-hosted runner: Added `CLAUDE_RUNNER_SPAWN_REASON` to the orchestrator's spawn-runner hook environment: why Anthropic sent the request (e.g. `runner_lost`, `resumed`); unset when none was sent | **UNKNOWN** | 待剥体 |
-| 1683 | 2.1.318 | Other | Self-hosted runner: Added a startup warning when `--release-idle-session-min` is the last argument with no value (still ignored) or has a value of only spaces (still read as `0`) | **UNKNOWN** | 待剥体 |
-| 1684 | 2.1.318 | Other | Self-hosted runner: Changed the orchestrator's log lines: `ok session=…` now prints at every log level on stdout (was debug only, stderr) with `reason=…` after `jti=…`, and `nack session=…` ends its fields with `reason=…` after `retryable=…`; update scripts that match `retryable=true:` or `retryable=false:` | **UNKNOWN** | 待剥体 |
-| 1685 | 2.1.318 | Other | Remote Control: Fixed a misleading "spawn error: ENOENT" when a session's working folder is missing; the error now names the folder | **UNKNOWN** | 待剥体 |
-| 1686 | 2.1.318 | Other | Remote Control: Improved the title a fork of a terminal fork is created with when the app doesn't set one: "Name (fork 2)" | **UNKNOWN** | 待剥体 |
-| 1687 | 2.1.318 | Fixed | [VSCode] Fixed a window whose sign-in the organization's settings refuse starting a new Claude Code process in the background every minute | **UNKNOWN** | 待剥体 |
-| 1688 | 2.1.318 | Fixed | [VSCode] Fixed a long word in the chat panel's error banner pushing its close button out of view | **UNKNOWN** | 待剥体 |
-| 1689 | 2.1.318 | Improved | [VSCode] Improved the sign-in screen to show what Claude Code printed when its sign-in status check fails | **UNKNOWN** | 待剥体 |
-| 1690 | 2.1.318 | Added | [Cloud sessions] Added a No repository option: a cloud session on an Anthropic-hosted environment can now start without picking a repository | **UNKNOWN** | 待剥体 |
-| 1691 | 2.1.318 | Added | [Cloud sessions] Added the usual Chrome names to cloud sessions, so tools other than Playwright can find the built-in Chromium through google-chrome and CHROME_PATH | **UNKNOWN** | 待剥体 |
-| 1692 | 2.1.318 | Added | [Cloud sessions] Added a New session button to the card shown when a cloud session's environment was deleted, where the message box is hidden | **UNKNOWN** | 待剥体 |
-| 1693 | 2.1.318 | Fixed | [Cloud sessions] Fixed reading GitHub Actions logs in cloud sessions: `gh run view --log` and `gh api` log requests now get the log in most environments, not an unreachable redirect | **UNKNOWN** | 待剥体 |
-| 1694 | 2.1.318 | Improved | [Cloud sessions] Improved most Create PR failure messages in cloud and Remote Control sessions: they now give the reason or a link to GitHub instead of saying Try again | **UNKNOWN** | 待剥体 |
-| 1695 | 2.1.318 | Changed | [Cloud sessions] Changed connector search results to tell Claude that the search covers only part of the connector directory | **UNKNOWN** | 待剥体 |
-| 1696 | 2.1.318 | Fixed | [Remote Control] Fixed side-by-side checkouts of one repository looking identical in the environment menu's Remote Control rows; each now shows its own folder name | **UNKNOWN** | 待剥体 |
-| 1697 | 2.1.318 | Fixed | [Claude Tag] Fixed keyboard focus and screen reader announcements in Claude Tag admin setup; pressing Escape in the connect form no longer also closes the Add dialog | **UNKNOWN** | 待剥体 |
-| 1698 | 2.1.318 | Improved | [Code Review] Improved the Code Review analytics page to retry once after a server or network failure, then show a Try again banner instead of empty cards | **UNKNOWN** | 待剥体 |
+| 1473 | 2.1.316 | Added | Added `CLAUDE_CODE_DISABLE_ULTRATHINK`, which turns the `ultrathink` keyword off | **HAVE** | 待剥体 |
+| 1474 | 2.1.316 | Added | Added pooled group budgets to the Claude apps gateway: one monthly budget that a group's members share, on top of each member's own limit, set with `pooled_budget` on the spend limits admin API | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1475 | 2.1.316 | Added | Added `CLAUDE_CODE_DISABLE_LOOPED_CROSS_CERT_DROP` to keep system cross-certificates that certify each other in a loop, for servers whose private CA needs one | **HAVE** | 待剥体 |
+| 1476 | 2.1.316 | Added | Added `CLAUDE_CODE_SUBAGENT_EFFORT` to set the effort level subagents run at when nothing else names one, instead of inheriting the session's | **HAVE** | 待剥体 |
+| 1477 | 2.1.316 | Added | Added `managed.policy_mode: layered` to the Claude apps gateway: every policy that matches a developer applies, each merged over the ones listed below it, not only the first | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1478 | 2.1.316 | Added | Added `guardrail.input_tagging` on Claude apps gateway Bedrock upstreams, which wraps prompts in the input tags that an Amazon Bedrock guardrail's prompt attacks filter needs; `all_messages_and_system` also tags the system prompt | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1479 | 2.1.316 | Other | Deprecated fast mode for Opus 4.8 as of October 30, 2026; it will be removed on November 30, 2026. After removal, fast mode requests on Opus 4.8 return an error and do not fall back to standard Opus 4.8. Migrate to Opus 5.5 to keep the speedup | **HAVE** | 待剥体 |
+| 1480 | 2.1.316 | Fixed | Fixed shell commands being left running on macOS and Linux when Claude Code exits by itself, for example when credentials are refused or a cloud session is archived | **HAVE** | 待剥体 |
+| 1481 | 2.1.316 | Fixed | Fixed bash aliases with line breaks in their value (except in Git Bash), and functions whose names start with a dash, being garbled or lost in the Bash tool's shell | **HAVE** | 待剥体 |
+| 1482 | 2.1.316 | Fixed | Fixed bash scripts started from the Bash tool stopping after their first command when `SHELLOPTS` is exported | **HAVE** | 待剥体 |
+| 1483 | 2.1.316 | Fixed | Fixed PowerShell hooks not blocking on exit code 2 when the command begins with a type cast, `param`, `using` or an attribute | **HAVE** | 待剥体 |
+| 1484 | 2.1.316 | Fixed | Fixed some network requests hanging when a compressed response was cut off or corrupted | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1485 | 2.1.316 | Fixed | Fixed `sonnet`, `opus` and `haiku` on Vertex AI and Amazon Bedrock showing an error mid-session instead of switching to an older model when the newest is not yet available to the account or region | **HAVE** | 待剥体 |
+| 1486 | 2.1.316 | Fixed | Fixed the Claude apps gateway not checking every model a request names against `availableModels`, `deniedModels` and `models`; a request that names a blocked model now gets a 400 naming the field | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1487 | 2.1.316 | Fixed | Fixed `claude auth login` refusing to run where managed settings require a Claude apps gateway; in a terminal it now shows the gateway sign-in | **HAVE** | 待剥体 |
+| 1488 | 2.1.316 | Fixed | Fixed `--restricted` sessions uploading files from outside the working directories when a Read allow rule covered them | **HAVE** | 待剥体 |
+| 1489 | 2.1.316 | Fixed | Fixed prompts containing invisible characters needing a second Enter to send; plain prompts now send cleaned on the first Enter, and commands still wait for review | **HAVE** | 待剥体 |
+| 1490 | 2.1.316 | Fixed | Fixed sub-agents that inherited a parent sub-agent's model moving to the main model when a background job or message woke them | **HAVE** | 待剥体 |
+| 1491 | 2.1.316 | Fixed | Fixed a managed `autoMode.allow` list without `"$defaults"` getting the built-in exceptions back from a host app's `--settings`, a first rule added in `/permissions`, or `/auto-mode-setup` | **HAVE** | 待剥体 |
+| 1492 | 2.1.316 | Fixed | Fixed cloud sessions and cloud scheduled tasks not being marked as failed when auto mode stopped a turn because the server returned no safety verdict | **GAP** | — — 仅限云端定时任务 cloudSession 状态标记，本地无对应上下文 |
+| 1493 | 2.1.316 | Fixed | Fixed `claude -p` text output sometimes not saying why auto mode stopped a turn when a background agent was still running | **HAVE** | 待剥体 |
+| 1494 | 2.1.316 | Fixed | Fixed `CLAUDE_CODE_AUTO_MODE_SERVER=1` being ignored in sessions started by a host application (such as Claude Desktop) behind a proxy or LLM gateway with experimental betas turned off | **HAVE** | 待剥体 |
+| 1495 | 2.1.316 | Fixed | Fixed plugin MCP `headersHelper` scripts receiving a corrupted `CLAUDE_PLUGIN_ROOT` and server URL when a credential-named environment variable was set to a switch value such as `1` | **HAVE** | 待剥体 |
+| 1496 | 2.1.316 | Fixed | Fixed the SDK `register_repo_root` control request not loading the CLAUDE.md of a directory outside the working directory (with `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`) | **HAVE** | 待剥体 |
+| 1497 | 2.1.316 | Fixed | Fixed the Artifact tool showing `?` for artifact database access rules at the `self` level, and not quoting those rules back when it refuses a republish that would drop them | **HAVE** | 待剥体 |
+| 1498 | 2.1.316 | Fixed | Fixed `/model <id>` not warning when the model isn't recognized by this version and auto-compact will assume a 200K context window | **HAVE** | 待剥体 |
+| 1499 | 2.1.316 | Fixed | Fixed the "hold space to speak" hint using up its three showings in one session, and showing an empty key when push-to-talk is unbound | **HAVE** | 待剥体 |
+| 1500 | 2.1.316 | Fixed | Fixed Grep and Glob never returning when the search process is killed at the timeout but does not exit, seen on Windows | **HAVE** | 待剥体 |
+| 1501 | 2.1.316 | Fixed | Fixed a rare case where resuming a conversation did not restore its plan, when `/clear` or `/resume` had been run while part of that conversation was still being saved | **HAVE** | 待剥体 |
+| 1502 | 2.1.316 | Fixed | Fixed first-run setup dropping words from the security notes and the terminal-setup explanation in narrow terminals | **HAVE** | 待剥体 |
+| 1503 | 2.1.316 | Fixed | Fixed the Enterprise survey card taking a typed 1 or 0 after a short pause; a typed answer now needs Enter | **HAVE** | 待剥体 |
+| 1504 | 2.1.316 | Other | Self-hosted runner: Fixed a message sent while Claude was working being answered after a Stop, once the session's process had been replaced | **HAVE** | 待剥体 |
+| 1505 | 2.1.316 | Other | Self-hosted runner: Fixed an MCP server's on/off switch sometimes being lost when a session moved to a new machine | **HAVE** | 待剥体 |
+| 1506 | 2.1.316 | Other | Windows: Fixed the Bash tool losing your aliases and functions in Git Bash when the rc file sets errexit and pipefail and only winpty aliases, or none, are defined | **HAVE** | 待剥体 |
+| 1507 | 2.1.316 | Improved | Improved `/code-review` started from the Code tab in Claude Desktop or on the web: cloud and `claude remote-control` sessions now show the findings card, not a plain-text list | **HAVE** | 待剥体 |
+| 1508 | 2.1.316 | Improved | Improved `/diff` on large repositories: each refresh usually runs one fewer full-repository git command, and refreshes are spaced out when git is slow | **HAVE** | 待剥体 |
+| 1509 | 2.1.316 | Improved | Improved the messages shown when `/ultrareview`, a cloud session or a cloud agent finds no GitHub remote: they now say to create a repository at https://github.com/new, and `/ultrareview` no longer suggests a `gh` command that `gh` rejects | **HAVE** | 待剥体 |
+| 1510 | 2.1.316 | Improved | Improved SSL certificate errors to name the likely causes, among them a server that leaves out an intermediate certificate, and the fix for each | **HAVE** | 待剥体 |
+| 1511 | 2.1.316 | Changed | Changed auto mode so that an `autoMode.allow` list without `"$defaults"` no longer removes the built-in rule on scheduled-task prompts | **HAVE** | 待剥体 |
+| 1512 | 2.1.316 | Changed | Changed server-managed settings for Team and Enterprise logins: settings fetched from Anthropic's API now apply without an approval prompt, and a stored copy that doesn't verify is refused | **HAVE** | 待剥体 |
+| 1513 | 2.1.316 | Added | [VSCode] Added sign-in to a Claude apps gateway from the chat panel, with no terminal needed | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1514 | 2.1.316 | Changed | [VSCode] Changed `ultrathink` to run its turn at `xhigh` effort and show in a rainbow in the chat box, as in the terminal | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1515 | 2.1.316 | Fixed | [VSCode] Fixed the missing Effort slider, Ultracode switch and model name when the model setting has the `[1m]` tag, such as `opus[1m]` | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1516 | 2.1.316 | Fixed | [VSCode] Fixed saved `/btw` side-question history being deleted too early while a settings file has errors | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1517 | 2.1.316 | Fixed | [VSCode] Fixed a conversation coming back in Auto mode after a reload or restart when its plan was approved with "Yes, and manually approve edits" | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1518 | 2.1.316 | Added | [Cloud sessions] Added a form card to cloud sessions, so you can fill in or decline a form an MCP server asks for instead of the request being canceled without you seeing it | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1519 | 2.1.316 | Added | [Cloud sessions] Added a "Catching up…" line that shows while a cloud or Remote Control session you switch back to is still bringing its messages up to date | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1520 | 2.1.316 | Changed | [Cloud sessions] Changed network secrets so Enterprise members can add and delete them on their own cloud environments, instead of only viewing them | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1521 | 2.1.316 | Improved | [Cloud sessions] Improved the Changes pane for cloud sessions: the note about what the list leaves out is now a badge beside the branch name, not a row above the diff | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1522 | 2.1.316 | Fixed | [Cloud sessions] Fixed file search in a cloud session's Files pane showing folders as ../.. paths after Claude changed directory; results now show their path from the project's root | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1523 | 2.1.316 | Fixed | [Claude Tag] Fixed Claude refusing to edit or append to a canvas it made in a Slack channel, from that channel, once the canvas was also shared to another channel or a DM | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1524 | 2.1.316 | Fixed | [Claude Tag] Fixed untagged replies going unanswered in a Slack Connect thread when both organizations have installed Claude and Slack delivered the reply to the other organization's app | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1525 | 2.1.316 | Fixed | [Claude Tag] Fixed a cloud scheduled task's live status checklist in Slack staying half-done; a run can now edit the top-level messages it posted during that run | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1526 | 2.1.316 | Changed | [Claude Tag] Changed a Slack channel's Respond automatically switch to a "How Claude participates" choice on the channel's Configure page and in Claude Tag admin settings | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1527 | 2.1.316 | Added | [Code Review] Added a findings-by-severity card to the Code Review analytics page, showing the period's total findings, a daily chart stacked by severity, and each severity's count | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1528 | 2.1.317 | Added | Added a warning to `/schedule` when a new cloud scheduled task gets connectors you did not ask for, with how to remove them | **HAVE** | 待剥体 |
+| 1529 | 2.1.317 | Added | Added a check that asks before a web or shell tool call sends your account email address to the network | **HAVE** | 待剥体 |
+| 1530 | 2.1.317 | Added | Added `onFailure: "block"` for Agent SDK hook callbacks, so a callback that fails blocks the action instead of letting it run | **HAVE** | 待剥体 |
+| 1531 | 2.1.317 | Added | Added a notice in Claude Desktop's Code tab when your organization's remote managed settings haven't loaded for the session, and another once they do | **HAVE** | 待剥体 |
+| 1532 | 2.1.317 | Added | Added a notice when auto mode's check has no answer for a subagent's tool call, which used to leave nothing in the main view | **HAVE** | 待剥体 |
+| 1533 | 2.1.317 | Added | Added `anthropic.plan`, `anthropic.seat_type`, `anthropic.provider` and `anthropic.custom_base_url` to OTel metrics, events and spans | **HAVE** | 待剥体 |
+| 1534 | 2.1.317 | Added | Added a cost report to the Claude apps gateway admin API, `GET /v1/organizations/analytics/cost`, for reading past spend over a date range in total, per developer, per day or per IdP group | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1535 | 2.1.317 | Added | Added a daily record of each developer's IdP groups on Claude apps gateways with `admin:` set, kept for `admin.identity_retention_days`, which the cost report groups by | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1536 | 2.1.317 | Added | Added `CLAUDE_CODE_DISABLE_NESTED_SESSION_ID`: set it to `1` on a self-hosted runner to have `claude -p` run inside a session use that session's ID and transcript, as in earlier versions | **HAVE** | 待剥体 |
+| 1537 | 2.1.317 | Fixed | Fixed project and local MCP servers disconnecting after the first turn in some Claude desktop sessions | **HAVE** | 待剥体 |
+| 1538 | 2.1.317 | Fixed | Fixed auto mode failing every turn when an LLM gateway set as the base URL answers 403 or 422 to its server-side safety check (a 403 with an apiKeyHelper is unchanged) | **HAVE** | 待剥体 |
+| 1539 | 2.1.317 | Fixed | Fixed `claude auth status` exiting before a slow token refresh was saved, which could sign you out on the next run | **HAVE** | 待剥体 |
+| 1540 | 2.1.317 | Fixed | Fixed a project's `effortLevel` setting being ignored by sessions that an app starts ahead of time and then opens in the project, such as new sessions in the desktop app's Code tab | **HAVE** | 待剥体 |
+| 1541 | 2.1.317 | Fixed | Fixed `claude --from-pr` reporting "No conversations found" in projects with many sessions when the linked session was older than the first page | **HAVE** | 待剥体 |
+| 1542 | 2.1.317 | Fixed | Fixed the second of two simultaneous permission prompts showing no file path or command on claude.ai and the mobile apps | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1543 | 2.1.317 | Fixed | Fixed Remote Control and SDK hosts offering "don't ask again" on a mod's tool calls | **HAVE** | 待剥体 |
+| 1544 | 2.1.317 | Fixed | Fixed session titles being lost in cloud and SDK sessions when a new message or Stop arrived while the title was generating | **HAVE** | 待剥体 |
+| 1545 | 2.1.317 | Fixed | Fixed self-paced `/loop` wakeups sometimes not being scheduled when Claude left a field out of its request | **HAVE** | 待剥体 |
+| 1546 | 2.1.317 | Fixed | Fixed auto mode in cloud sessions stopping for approval when the Artifact tool uploaded, wrote to a database or saved a file through the outputs folder | **HAVE** | 待剥体 |
+| 1547 | 2.1.317 | Fixed | Fixed skills synced from claude.ai being lost or downloaded again every ten minutes when they can't be written to disk | **HAVE** | 待剥体 |
+| 1548 | 2.1.317 | Fixed | Fixed `/schedule` leaving a cloud scheduled task's next run time and link out of its results after creating or updating it | **HAVE** | 待剥体 |
+| 1549 | 2.1.317 | Fixed | Fixed screen readers speaking a running subagent's elapsed time and token count on every change in screen reader mode | **HAVE** | 待剥体 |
+| 1550 | 2.1.317 | Fixed | Fixed a region or network block (HTTP 403) being shown as a sign-in failure; the error now explains the block | **HAVE** | 待剥体 |
+| 1551 | 2.1.317 | Fixed | Fixed Claude saying a working claude.ai connector needed authorization or had failed in cloud sessions when a synced plugin included the same server | **HAVE** | 待剥体 |
+| 1552 | 2.1.317 | Fixed | Fixed `claude -p` exiting 0 when a full disk or quota lost its transcript or ~/.claude.json writes; it now prints an error and, in text and json output, exits 1. Full NFS exports may be missed | **HAVE** | 待剥体 |
+| 1553 | 2.1.317 | Fixed | Fixed edits to settings files made in the first second or so after launch not taking effect until a settings file changed again | **HAVE** | 待剥体 |
+| 1554 | 2.1.317 | Fixed | Fixed old transcripts not being cleaned up on machines where some runs skip cleanup, such as runs using `--setting-sources` | **HAVE** | 待剥体 |
+| 1555 | 2.1.317 | Fixed | Fixed deleted agent team inboxes being re-created by a teammate's late message | **HAVE** | 待剥体 |
+| 1556 | 2.1.317 | Fixed | Fixed a re-created agent teammate being removed from its team by an earlier shutdown approval | **HAVE** | 待剥体 |
+| 1557 | 2.1.317 | Fixed | Fixed stored scheduled tasks being impossible to list or delete after scheduled tasks were turned off | **HAVE** | 待剥体 |
+| 1558 | 2.1.317 | Fixed | Fixed Claude deleting your most recently updated `/team-onboarding` guide when asked to delete one without naming which | **HAVE** | 待剥体 |
+| 1559 | 2.1.317 | Fixed | Fixed Claude saying a `/team-onboarding` guide was deleted when the server refused the delete | **HAVE** | 待剥体 |
+| 1560 | 2.1.317 | Fixed | Fixed the Claude apps gateway hiding Amazon Bedrock's "Input is too long." error, which left sessions failing every turn with "upstream rejected the request" instead of compacting | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1561 | 2.1.317 | Fixed | Fixed self-hosted runner sessions losing recent turns or the whole conversation when restarted while a plan waited for approval | **HAVE** | 待剥体 |
+| 1562 | 2.1.317 | Fixed | Fixed "Prompt is too long" after automatic compaction in sessions whose very large CLAUDE.md changed since it was last sent | **HAVE** | 待剥体 |
+| 1563 | 2.1.317 | Fixed | Fixed high memory use and slow startup in headless sessions with many plugins that register commands | **HAVE** | 待剥体 |
+| 1564 | 2.1.317 | Fixed | Fixed stdio MCP servers receiving an empty `AWS_BEARER_TOKEN_BEDROCK` when their env config sets it to empty; the variable is now unset, so the server can use the machine's own AWS credentials | **HAVE** | 待剥体 |
+| 1565 | 2.1.317 | Fixed | Fixed API requests failing with "unable to get local issuer certificate" behind some TLS-inspecting proxies after a root certificate renewal | **HAVE** | 待剥体 |
+| 1566 | 2.1.317 | Fixed | Fixed very long conversations losing their earlier summary when compaction had to shorten its own request | **HAVE** | 待剥体 |
+| 1567 | 2.1.317 | Fixed | Fixed a PDF's own metadata being able to make Read and @-mentions under-count its pages | **HAVE** | 待剥体 |
+| 1568 | 2.1.317 | Fixed | Fixed `DISABLE_PROMPT_CACHING_OPUS` and `DISABLE_PROMPT_CACHING_SONNET` having no effect on `[1m]`, other-region and undated spellings of the default model | **HAVE** | 待剥体 |
+| 1569 | 2.1.317 | Fixed | Fixed `/artifacts` and the Artifact tool's shared list showing no shared artifacts when you have 200 or more of your own | **HAVE** | 待剥体 |
+| 1570 | 2.1.317 | Fixed | Fixed Claude treating partial Grep and Glob results as complete when a search hit its time limit | **HAVE** | 待剥体 |
+| 1571 | 2.1.317 | Fixed | Fixed OpenTelemetry exports to an `https://` endpoint through a proxy never being sent when they started while another export was still in progress | **HAVE** | 待剥体 |
+| 1572 | 2.1.317 | Fixed | Fixed a flood of connection attempts to a proxy that blocks (HTTP 403) OpenTelemetry exports to an `http://` endpoint | **HAVE** | 待剥体 |
+| 1573 | 2.1.317 | Fixed | Fixed OpenTelemetry exports hanging indefinitely behind a proxy that never answers; they now time out after 10 seconds, or `OTEL_EXPORTER_OTLP_TIMEOUT` up to 30 seconds | **HAVE** | 待剥体 |
+| 1574 | 2.1.317 | Fixed | Fixed resumed sessions telling Claude again about a file change it already knew about | **HAVE** | 待剥体 |
+| 1575 | 2.1.317 | Fixed | Fixed Claude sometimes not using a built-in tool in a resumed session after an earlier call failed because the tool was switched off | **N/A** | — — 本地仓库无 repl-mode / replMode / inPool 推断逻辑 |
+| 1576 | 2.1.317 | Fixed | Fixed `/remote-control` answering "Unknown command" instead of saying that Remote Control is turned off by the `disableRemoteControl` setting | **HAVE** | 待剥体 |
+| 1577 | 2.1.317 | Fixed | Fixed agent team teammates in tmux or iTerm2 panes starting in auto mode when the lead session was in manual mode | **HAVE** | 待剥体 |
+| 1578 | 2.1.317 | Fixed | Fixed a background session sometimes losing a just-made change of permission mode when it was upgraded or retired | **HAVE** | 待剥体 |
+| 1579 | 2.1.317 | Fixed | Fixed Ctrl+C stopping all running background agents when pressed to clear typed text at the prompt | **HAVE** | 待剥体 |
+| 1580 | 2.1.317 | Fixed | Fixed /feedback showing "Enter to confirm" while a report is being sent | **HAVE** | 待剥体 |
+| 1581 | 2.1.317 | Fixed | Fixed child processes of a stopped shell command sometimes being sent SIGTERM twice, which could make some programs skip their cleanup | **HAVE** | 待剥体 |
+| 1582 | 2.1.317 | Fixed | Fixed `claude -p` run inside a cloud or self-hosted runner session sharing that session's ID: it wrote into the session's transcript, and a restart could resume the wrong conversation | **HAVE** | 待剥体 |
+| 1583 | 2.1.317 | Fixed | Fixed `claude -p` run inside a cloud or self-hosted runner session generating a title of its own and sending it to that session | **HAVE** | 待剥体 |
+| 1584 | 2.1.317 | Improved | Improved the error shown on Microsoft Foundry when Azure credentials can't be loaded: it now says to check or refresh them, and reports as `cloud_credential_error` | **HAVE** | 待剥体 |
+| 1585 | 2.1.317 | Improved | Improved `/design-sync` to say up front when your design system has moved to Claude, and stop before building instead of failing at upload | **HAVE** | 待剥体 |
+| 1586 | 2.1.317 | Improved | Improved the startup error when a required Claude apps gateway can't be reached: it points to the network instead of a sign-in, and says when the gateway's TLS certificate can't be verified | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1587 | 2.1.317 | Improved | Improved the "Resume this session with" hint shown at exit to repeat the flags you launched with (for example `--chrome --debug`) ahead of `--resume` | **HAVE** | 待剥体 |
+| 1588 | 2.1.317 | Improved | Improved how self-hosted runners recover from server errors: after a 5xx other than 501 or 529, a runner's next poll now opens a new connection instead of reusing the one that failed | **HAVE** | 待剥体 |
+| 1589 | 2.1.317 | Improved | Improved how self-hosted runner sessions recover from server errors: after a 5xx other than 501 or 529, a session now opens new connections instead of reusing the one that failed | **HAVE** | 待剥体 |
+| 1590 | 2.1.317 | Improved | Improved how self-hosted runner sessions recover when connections stop answering: after a heartbeat gets no answer, a session now opens new connections instead of trying each idle one in turn | **HAVE** | 待剥体 |
+| 1591 | 2.1.317 | Changed | Changed SendMessage so a message to a running background agent arrives earlier: its running command moves to the background, without being stopped | **HAVE** | 待剥体 |
+| 1592 | 2.1.317 | Changed | Changed subagents and teammates on a different model from the main conversation to use that model's saved effort level or its default, instead of the session's effort level | **HAVE** | 待剥体 |
+| 1593 | 2.1.317 | Changed | Changed exit to skip the "Background work is running" prompt for plugin monitors | **HAVE** | 待剥体 |
+| 1594 | 2.1.317 | Changed | Changed the built-in `plugin-authoring` skill to offer once, after a mod you built works, to help share the mod | **HAVE** | 待剥体 |
+| 1595 | 2.1.317 | Removed | Removed the Read tool's "file unchanged since your last Read" stub: reading an unchanged file again returns its content | **HAVE** | 待剥体 |
+| 1596 | 2.1.317 | Other | Windows: Fixed every tool call being refused on some volumes where the native path lookup fails; the working-directory check now compares the folder's identity instead | **HAVE** | 待剥体 |
+| 1597 | 2.1.317 | Other | Windows: Fixed the session scratchpad and other temporary paths growing with your project's path length in sessions not started by Claude Desktop, which made repositories cloned into them hit the 260-character path limit | **HAVE** | 待剥体 |
+| 1598 | 2.1.317 | Other | Gateway: Fixed the status line and `/usage` showing a developer's own spend limit as 100% used after their group's pooled budget ran out | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1599 | 2.1.317 | Other | Self-hosted runner: Fixed Claude not seeing the interrupted tool call when a session moves to a new runner and the turn is older than `CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS` | **HAVE** | 待剥体 |
+| 1600 | 2.1.317 | Other | Self-hosted runner: Fixed an MCP server that was switched off coming back on after the session moved to a new machine, when the session service had refused to save the switch | **HAVE** | 待剥体 |
+| 1601 | 2.1.317 | Other | Remote Control: Improved fork names when the app doesn't set one: a long name keeps its "(fork)" ending, and in sessions started with `claude remote-control` a fork of "Name (fork)" is "Name (fork 2)" | **HAVE** | 待剥体 |
+| 1602 | 2.1.317 | Fixed | [VSCode] Fixed forked conversations dropping messages: only one of the tool calls Claude ran in parallel was kept, and the last messages a compaction kept were lost, which could leave Claude's answer without the question it answered | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1603 | 2.1.317 | Fixed | [VSCode] Fixed a message being lost when Claude did not finish starting in time: the extension now starts Claude once more before showing the error | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1604 | 2.1.317 | Fixed | [VSCode] Fixed the sign-in screen opening when a request is blocked for its region or network | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1605 | 2.1.317 | Fixed | [VSCode] Fixed the Account panel showing the plan name with a lower-cased second word | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1606 | 2.1.317 | Fixed | [VSCode] Fixed file links in a Claude tab opening on top of the chat instead of in another editor group | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1607 | 2.1.317 | Fixed | [VSCode] Fixed attachment chips, menus, banners and dialogs in the Claude panel staying small when `chat.fontSize` is raised | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1608 | 2.1.317 | Fixed | [VSCode] Fixed `ultrathink` not raising effort for its turn or showing its rainbow when telemetry is off | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1609 | 2.1.317 | Added | [Cloud sessions] Added a link card to cloud sessions, so you can open or decline a link an MCP server asks you to visit instead of the request going unseen | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1610 | 2.1.317 | Changed | [Cloud sessions] Changed the organization environment dialog in admin settings to the personal dialogs' short layout: each section opens from a row, and unsaved input asks before closing | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1611 | 2.1.317 | Fixed | [Cloud sessions] Fixed adding a network secret for a host that already has one silently replacing it; the Add secret form now refuses and points you to the existing secret | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1612 | 2.1.317 | Fixed | [Cloud sessions] Fixed new scheduled tasks ignoring your organization's default environment: the form now starts on the one an admin chose instead of the Anthropic-hosted default | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1613 | 2.1.317 | Fixed | [Remote Control] Fixed the next message to an idle session going unanswered after you restart `claude remote-control`, when you sent it within a minute of your previous message | **PARTIAL** | — — 需与 Remote Control 服务端 60s 重连协同，本地 bridgeMain 仅保留基础重连 |
+| 1614 | 2.1.317 | Changed | [Claude Tag] Changed newly pasted artifact links in Slack to show a simpler card with an Open button that opens the artifact in Claude, instead of Slack's side panel | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1615 | 2.1.318 | Added | Added a record of your answer when Claude Code asks to turn on the mods it writes in a session | **HAVE** | 待剥体 |
+| 1616 | 2.1.318 | Added | Added `assume_role` on `mantle` upstreams of the Claude apps gateway, for a role in another AWS account and for per-developer AWS cost attribution | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1617 | 2.1.318 | Added | Added an `effort` option to a mod's `$.model.fork`, so a quick side job can run at `low` whatever effort the session uses; the result reports the effort sent | **HAVE** | 待剥体 |
+| 1618 | 2.1.318 | Added | Added the date a stored claude.ai sign-in ends to `claude auth status` (`loginExpiresAt`) and to `claude -p` JSON results (`credential_expires_at`) | **HAVE** | 待剥体 |
+| 1619 | 2.1.318 | Added | Added a one-line stderr warning to `claude -p` text output, starting 10 days before a stored claude.ai sign-in ends | **HAVE** | 待剥体 |
+| 1620 | 2.1.318 | Fixed | Fixed `--continue` sometimes losing the earlier conversation after a malformed tool call's retries ran out (regression in 2.1.314) | **HAVE** | 待剥体 |
+| 1621 | 2.1.318 | Fixed | Fixed macOS sessions with many running Bash commands stalling while memory grew | **HAVE** | 待剥体 |
+| 1622 | 2.1.318 | Fixed | Fixed permission prompts being answered by keys typed just after sending a message, or before a slow prompt appeared | **HAVE** | 待剥体 |
+| 1623 | 2.1.318 | Fixed | Fixed `/logout`, `claude auth logout` and `claude mcp remove` reporting success, and changes to trust, consent or MCP settings being dropped with no word, when the config file could not be updated on a shared network home directory | **HAVE** | 待剥体 |
+| 1624 | 2.1.318 | Fixed | Fixed jobs exiting with `Not logged in` when another terminal or host signs in again to the same account and organization on the same home | **HAVE** | 待剥体 |
+| 1625 | 2.1.318 | Fixed | Fixed `claude mcp add` and `remove` writing the config without its lock: they now wait for it or exit 1, though another job's save can still replace a saved server | **HAVE** | 待剥体 |
+| 1626 | 2.1.318 | Fixed | Fixed `claude plugin` commands exiting before a slow token refresh was saved, which could sign you out on the next run | **HAVE** | 待剥体 |
+| 1627 | 2.1.318 | Fixed | Fixed `claude plugin validate` passing a custom-named marketplace file that `claude plugin marketplace add` rejects | **HAVE** | 待剥体 |
+| 1628 | 2.1.318 | Fixed | Fixed stdio MCP servers that exit on the version probe being re-probed on every start; a server that dies in under 3s for its own reason is also pinned to the legacy handshake for 7 days | **HAVE** | 待剥体 |
+| 1629 | 2.1.318 | Fixed | Fixed sessions being refused at startup by an `allowedProviders` list that another login on the same machine had stored | **HAVE** | 待剥体 |
+| 1630 | 2.1.318 | Fixed | Fixed idle compaction replacing a conversation with a reply that was not a summary | **HAVE** | 待剥体 |
+| 1631 | 2.1.318 | Fixed | Fixed the "Now using usage credits" notice reappearing about every 30 seconds while a background subagent is running | **HAVE** | 待剥体 |
+| 1632 | 2.1.318 | Fixed | Fixed custom slash commands that fail, or that only Claude can invoke, printing nothing in `claude -p` and SDK sessions | **HAVE** | 待剥体 |
+| 1633 | 2.1.318 | Fixed | Fixed `claude -p` and Agent SDK sessions reporting success when an API error cut off a reply while a mod hooked `turn.step` | **HAVE** | 待剥体 |
+| 1634 | 2.1.318 | Fixed | Fixed a message sent right after a model change still running after Stop in headless sessions: Stop now cancels or stops it as it would a queued message | **HAVE** | 待剥体 |
+| 1635 | 2.1.318 | Fixed | Fixed a deleted session transcript being re-created with its last prompt when an idle non-interactive session exited | **HAVE** | 待剥体 |
+| 1636 | 2.1.318 | Fixed | Fixed `claude remote-control` hosts, the background daemon and self-hosted runners failing to start new sessions (`spawn ENOENT`) after an update or version cleanup removed the binary of a still-running process | **HAVE** | 待剥体 |
+| 1637 | 2.1.318 | Fixed | Fixed a running Claude Code process owned by another user (for example one left by `sudo claude`) being treated as dead by version cleanup, which could delete its binary | **HAVE** | 待剥体 |
+| 1638 | 2.1.318 | Fixed | Fixed `/remote-control` showing a session as available after a failed connection | **HAVE** | 待剥体 |
+| 1639 | 2.1.318 | Fixed | Fixed `/design revoke` reporting success when the request failed with a 404 | **HAVE** | 待剥体 |
+| 1640 | 2.1.318 | Fixed | Fixed a shell command approved after a self-hosted runner or cloud session restart running in the session's start folder, not the folder it was asked in; if that folder can't be entered, it is not run | **GAP** | — — 需 QueryEngine + cloudSession 协同校验 start_folder，本地尚无完整路径 |
+| 1641 | 2.1.318 | Fixed | Fixed Claude not being told when an approved connector tool was unavailable after a cloud session restart | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1642 | 2.1.318 | Fixed | Fixed cloud sessions being stopped in the middle of a turn when the service refuses uploads for several minutes | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1643 | 2.1.318 | Fixed | Fixed variables a `Setup` hook writes to `CLAUDE_ENV_FILE` not reaching the Bash tool in some cloud sessions | **HAVE** | 待剥体 |
+| 1644 | 2.1.318 | Fixed | Fixed the iPhone app showing a cloud session's turn as finished while it kept running, after a response was cut off at a tool call or a refused image or document was removed | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1645 | 2.1.318 | Fixed | Fixed a restarted session re-sending a message that failed with an API error, ahead of the newer message waiting behind it | **GAP** | — — 依赖云容器会话 submitUuid/endedOnApiError 重放队列，本地基线结构不同 |
+| 1646 | 2.1.318 | Fixed | Fixed a restarted session dropping its interrupted turn when the restart came right after Claude read a large image or retried a tool call | **GAP** | — — 依赖云容器会话恢复中断回合重放队列，本地基线结构不同 |
+| 1647 | 2.1.318 | Fixed | Fixed every connection failing when the `NODE_EXTRA_CA_CERTS` file is empty, not PEM, or starts with a damaged certificate: readable certificates are now used, with a warning on stderr | **HAVE** | 待剥体 |
+| 1648 | 2.1.318 | Fixed | Fixed workflows re-running finished agents when resumed after a usage limit | **HAVE** | 待剥体 |
+| 1649 | 2.1.318 | Fixed | Fixed `/mcp` in cloud sessions counting tools the model can't use; a server's row now shows how many of its tools are available | **HAVE** | 待剥体 |
+| 1650 | 2.1.318 | Fixed | Fixed a duplicate notification when Claude left the status field out of a PushNotification call | **HAVE** | 待剥体 |
+| 1651 | 2.1.318 | Fixed | Fixed the error for a too-large image in a request with more than 20 images always saying the limit was 2000px; it now shows the API's limit | **HAVE** | 待剥体 |
+| 1652 | 2.1.318 | Fixed | Fixed the runtime in background shell details not updating while the dialog is open | **HAVE** | 待剥体 |
+| 1653 | 2.1.318 | Fixed | Fixed a mod's `turn.step` hook making a stopped reply finish as a success in headless runs | **HAVE** | 待剥体 |
+| 1654 | 2.1.318 | Fixed | Fixed retention cleanup leaving a home that only runs `claude -p` with no `~/.claude.json` backup: it now takes a fresh backup before deleting the last good one | **HAVE** | 待剥体 |
+| 1655 | 2.1.318 | Fixed | Fixed the stored login being replaced by an empty file when a network home directory has no room left for data but still takes new files | **HAVE** | 待剥体 |
+| 1656 | 2.1.318 | Fixed | Fixed tokens from `setup-token` being refused at start on machines with `forceLoginOrgUUID`, when the token belongs to a permitted organization | **HAVE** | 待剥体 |
+| 1657 | 2.1.318 | Fixed | Fixed non-interactive launches replacing a `~/.claude.json` that isn't valid JSON with defaults; the start now fails, says how to restore the file, and leaves it as is (anthropics/claude-code#87551) | **HAVE** | 待剥体 |
+| 1658 | 2.1.318 | Fixed | Fixed an empty `~/.claude.json` with no backup being reported as corrupted; Claude Code now starts as it does when the file is missing | **HAVE** | 待剥体 |
+| 1659 | 2.1.318 | Fixed | Fixed the restore command printed for a damaged or missing `~/.claude.json` naming an empty or cut-off backup, or failing on a read-only file | **HAVE** | 待剥体 |
+| 1660 | 2.1.318 | Fixed | Fixed the sign-in failure when a stored claude.ai login reaches its time limit: it now says so, and in `claude -p` names `claude auth login` and `claude setup-token` | **HAVE** | 待剥体 |
+| 1661 | 2.1.318 | Improved | Improved how `~/.claude.json`, settings files and the stored login survive saves on shared network home directories: they are less often deleted, briefly emptied or replaced by a near-empty or older copy | **HAVE** | 待剥体 |
+| 1662 | 2.1.318 | Improved | Improved sessions on network file systems to look again when the configuration file is wrongly reported as missing, so fewer start without your MCP servers and trusted folders | **HAVE** | 待剥体 |
+| 1663 | 2.1.318 | Improved | Improved MCP tool errors: a call made before the tool is loaded now returns its input schema | **HAVE** | 待剥体 |
+| 1664 | 2.1.318 | Improved | Improved the reliability of git commits and pull request creation when the Bash tool runs macOS's built-in `/bin/bash` | **HAVE** | 待剥体 |
+| 1665 | 2.1.318 | Improved | Improved "Ask your admin for more usage" in the usage limit menu to send the request in one step | **HAVE** | 待剥体 |
+| 1666 | 2.1.318 | Improved | Improved how fast remote sessions reconnect after a pause or sleep | **PARTIAL** | — — bridgeMain 已有基础 sleep/wake 检测，缺快速重连优化 |
+| 1667 | 2.1.318 | Improved | Improved You should know toasts to say "try again" instead of "press 2", which only works in the terminal | **HAVE** | 待剥体 |
+| 1668 | 2.1.318 | Improved | Improved auto-update reliability: a brief network failure while verifying a release is now retried right away instead of waiting for the next check | **HAVE** | 待剥体 |
+| 1669 | 2.1.318 | Improved | Improved unattended runs (`claude -p`, SDK apps) to stop rewriting `~/.claude.json` on every run when nothing in it changed | **HAVE** | 待剥体 |
+| 1670 | 2.1.318 | Changed | Changed Claude Code to no longer install or update the IDE extension when started in an IDE terminal; use `/ide` from an outside terminal or your editor's extensions view | **HAVE** | 待剥体 |
+| 1671 | 2.1.318 | Changed | Changed subagents to stop instead of switching models when "Switch models when a message is flagged" is set to "Ask each time" | **HAVE** | 待剥体 |
+| 1672 | 2.1.318 | Changed | Changed background subagents to move a shell command to the background after 3 minutes on all providers, so the prompt cache doesn't expire while it runs | **HAVE** | 待剥体 |
+| 1673 | 2.1.318 | Changed | Changed subagent progress summaries on Bedrock, Vertex, Foundry, or with telemetry off: on a cold prompt cache, one can now wait up to 5 minutes for the subagent's pending response | **HAVE** | 待剥体 |
+| 1674 | 2.1.318 | Changed | Changed what a mod attaches at `prompt.submit` to stay in the user's turn rather than go out as a system message | **HAVE** | 待剥体 |
+| 1675 | 2.1.318 | Changed | Changed `deniedMcpServers` URL entries to also block Anthropic-provided servers whose upstream URL matches, and connectors in cloud sessions and on self-hosted runners, where the session is given the connector's own URL; otherwise deny a connector by name | **HAVE** | 待剥体 |
+| 1676 | 2.1.318 | Changed | Changed the `/permissions` rule details, built-in rules and delete confirmation views to use the standard dialog; pressing Ctrl+C twice there now goes back or cancels instead of quitting | **HAVE** | 待剥体 |
+| 1677 | 2.1.318 | Changed | Changed `/claude-api managed-agents-onboard` to give a new agent's built-in tools, and a quickstart template's MCP tools, the `auto` permission policy ("Judge risky actions") by default, matching the Claude Console; say "run without asking" to opt out | **HAVE** | 待剥体 |
+| 1678 | 2.1.318 | Removed | Removed the 2.1.288 fix that kept the model's earlier thinking when resuming a conversation started on 2.1.286 or earlier; that thinking can now be dropped | **HAVE** | 待剥体 |
+| 1679 | 2.1.318 | Other | Gateway: Added a log warning when the Google access token from a federation (`external_account`) credentials file is about to expire | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1680 | 2.1.318 | Other | Gateway: Improved the log hints about `listen.trusted_proxies`: they now say to list only a proxy that adds the connecting address to `X-Forwarded-For` itself | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1681 | 2.1.318 | Other | Gateway: Improved the warning when AWS CountTokens fails on Amazon Bedrock: it says Claude Code, not the gateway, counts after the 501, and points at IAM only when AWS denies access | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1682 | 2.1.318 | Other | Self-hosted runner: Added `CLAUDE_RUNNER_SPAWN_REASON` to the orchestrator's spawn-runner hook environment: why Anthropic sent the request (e.g. `runner_lost`, `resumed`); unset when none was sent | **HAVE** | 待剥体 |
+| 1683 | 2.1.318 | Other | Self-hosted runner: Added a startup warning when `--release-idle-session-min` is the last argument with no value (still ignored) or has a value of only spaces (still read as `0`) | **HAVE** | 待剥体 |
+| 1684 | 2.1.318 | Other | Self-hosted runner: Changed the orchestrator's log lines: `ok session=…` now prints at every log level on stdout (was debug only, stderr) with `reason=…` after `jti=…`, and `nack session=…` ends its fields with `reason=…` after `retryable=…`; update scripts that match `retryable=true:` or `retryable=false:` | **HAVE** | 待剥体 |
+| 1685 | 2.1.318 | Other | Remote Control: Fixed a misleading "spawn error: ENOENT" when a session's working folder is missing; the error now names the folder | **HAVE** | 待剥体 |
+| 1686 | 2.1.318 | Other | Remote Control: Improved the title a fork of a terminal fork is created with when the app doesn't set one: "Name (fork 2)" | **HAVE** | 待剥体 |
+| 1687 | 2.1.318 | Fixed | [VSCode] Fixed a window whose sign-in the organization's settings refuse starting a new Claude Code process in the background every minute | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1688 | 2.1.318 | Fixed | [VSCode] Fixed a long word in the chat panel's error banner pushing its close button out of view | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1689 | 2.1.318 | Improved | [VSCode] Improved the sign-in screen to show what Claude Code printed when its sign-in status check fails | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1690 | 2.1.318 | Added | [Cloud sessions] Added a No repository option: a cloud session on an Anthropic-hosted environment can now start without picking a repository | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1691 | 2.1.318 | Added | [Cloud sessions] Added the usual Chrome names to cloud sessions, so tools other than Playwright can find the built-in Chromium through google-chrome and CHROME_PATH | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1692 | 2.1.318 | Added | [Cloud sessions] Added a New session button to the card shown when a cloud session's environment was deleted, where the message box is hidden | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1693 | 2.1.318 | Fixed | [Cloud sessions] Fixed reading GitHub Actions logs in cloud sessions: `gh run view --log` and `gh api` log requests now get the log in most environments, not an unreachable redirect | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1694 | 2.1.318 | Improved | [Cloud sessions] Improved most Create PR failure messages in cloud and Remote Control sessions: they now give the reason or a link to GitHub instead of saying Try again | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1695 | 2.1.318 | Changed | [Cloud sessions] Changed connector search results to tell Claude that the search covers only part of the connector directory | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1696 | 2.1.318 | Fixed | [Remote Control] Fixed side-by-side checkouts of one repository looking identical in the environment menu's Remote Control rows; each now shows its own folder name | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1697 | 2.1.318 | Fixed | [Claude Tag] Fixed keyboard focus and screen reader announcements in Claude Tag admin setup; pressing Escape in the connect form no longer also closes the Add dialog | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
+| 1698 | 2.1.318 | Improved | [Code Review] Improved the Code Review analytics page to retry once after a server or network failure, then show a Try again banner instead of empty cards | **N/A** | — — 非本地 CLI / 云端或网关/扩展专属 |
 | 1699 | 2.1.319 | Changed | Changed auto mode with telemetry or feature flags off, including behind LLM gateways: calls the server can't check are asked about or denied, with no fallback to the built-in classifier; set `CLAUDE_CODE_AUTO_MODE_SERVER=0` to keep using it (Bedrock, Vertex and Foundry are unchanged) | **UNKNOWN** | 待剥体 |
 | 1700 | 2.1.319 | Changed | Changed auto mode behind an LLM gateway: `CLAUDE_CODE_AUTO_MODE_SERVER=1` turns on the server-side check even with `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` set; if managed settings set the latter, they must set the `1` too | **UNKNOWN** | 待剥体 |
 | 1701 | 2.1.319 | Added | Added support for MCP tasks in the terminal: when an MCP server runs a tool call as a task, Claude Code moves it to the background right away and tells Claude the result when it finishes | **UNKNOWN** | 待剥体 |

@@ -1,9 +1,71 @@
 import type { SDKMessage } from '../entrypoints/agentSdkTypes.js'
 import { logForDebugging } from '../utils/debug.js'
 import { errorMessage } from '../utils/errors.js'
+import {
+  capSessionTitleCodePoints,
+  SESSION_TITLE_MAX_CODE_POINTS,
+  sanitizeSessionTitle,
+} from '../utils/sessionTitleSanitize.js'
 import { createTlsHandshakeTimeoutTransport } from './bridgeApi.js'
 import { extractErrorDetail } from './debugUtils.js'
 import { toCompatSessionId } from './sessionIdCompat.js'
+
+const FORK_GLYPH = '\u2442'
+const FORK_GLYPH_SUFFIX = ` ${FORK_GLYPH}`
+
+/**
+ * Official `iir` (#1601 / #1686) — format a forked session title, preserving
+ * the `(fork)` / `(fork N)` suffix on truncation and incrementing `(fork N)`
+ * when forking a terminal fork without an explicit title (`"Name (fork 2)"`).
+ */
+export function formatForkSessionTitle(rawTitle: string): string {
+  const normalized = sanitizeSessionTitle(rawTitle).replace(/\s+/g, ' ')
+  if (!normalized) return ''
+  let count = 1
+  let base = normalized
+  while (base.endsWith(FORK_GLYPH_SUFFIX)) {
+    base = base.slice(0, -FORK_GLYPH_SUFFIX.length)
+    count++
+  }
+  if (!base.replaceAll(FORK_GLYPH, '').trim()) {
+    base = normalized
+    count = 1
+  }
+  const match = base.match(/^(.*) \(fork(?: (\d{1,15}))?\)$/)
+  const prevNum = match ? Number(match[2] ?? 1) : 0
+  const suffix = match || count > 1 ? ` (fork ${prevNum + count})` : ' (fork)'
+  const stem = match?.[1] ?? base
+  const maxStem = Math.max(0, SESSION_TITLE_MAX_CODE_POINTS - suffix.length)
+  return `${capSessionTitleCodePoints(stem, maxStem).trimEnd()}${suffix}`
+}
+
+/**
+ * Official `IYo` / `WUs` (#1601 / #1686) — resolve the title for a forked
+ * session: explicit title wins; otherwise format `parentTitle` with
+ * `formatForkSessionTitle`; otherwise use `fallbackTitle` if provided.
+ */
+export function resolveForkSessionTitle(opts: {
+  explicitTitle?: string
+  parentTitle?: string
+  fallbackTitle?: string
+}): string | undefined {
+  const explicit =
+    opts.explicitTitle !== undefined
+      ? sanitizeSessionTitle(opts.explicitTitle).replace(/\s+/g, ' ').trim()
+      : ''
+  if (explicit) return explicit
+  if (opts.parentTitle !== undefined) {
+    const formatted = formatForkSessionTitle(opts.parentTitle)
+    if (formatted) return formatted
+  }
+  if (opts.fallbackTitle !== undefined) {
+    const fallback = sanitizeSessionTitle(opts.fallbackTitle)
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (fallback) return fallback
+  }
+  return undefined
+}
 
 type GitSource = {
   type: 'git_repository'
@@ -24,6 +86,8 @@ type SessionEvent = {
 export async function createBridgeSession(params: {
   environmentId: string
   title?: string
+  /** Optional parent session title when creating a forked bridge session (#1601 / #1686). */
+  forkFromTitle?: string
   events: SessionEvent[]
   gitRepoUrl: string | null
   branch: string
@@ -104,8 +168,16 @@ export async function createBridgeSession(params: {
     }
   }
 
+  const resolvedTitle =
+    params.forkFromTitle !== undefined
+      ? resolveForkSessionTitle({
+          explicitTitle: params.title,
+          parentTitle: params.forkFromTitle,
+        })
+      : params.title
+
   const requestBody = {
-    ...(params.title !== undefined && { title: params.title }),
+    ...(resolvedTitle !== undefined && { title: resolvedTitle }),
     events: params.events,
     session_context: {
       sources: gitSource ? [gitSource] : [],

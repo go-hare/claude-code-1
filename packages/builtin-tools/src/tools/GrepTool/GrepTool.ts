@@ -22,7 +22,7 @@ import {
 import type { PermissionDecision } from 'src/utils/permissions/PermissionResult.js'
 import { matchWildcardPattern } from 'src/utils/permissions/shellRuleMatching.js'
 import { getGlobExclusionsForPluginCache } from 'src/utils/plugins/orphanedPluginFilter.js'
-import { ripGrep } from 'src/utils/ripgrep.js'
+import { ripGrep, RipgrepTimeoutError } from 'src/utils/ripgrep.js'
 import { semanticBoolean } from 'src/utils/semanticBoolean.js'
 import { semanticNumber } from 'src/utils/semanticNumber.js'
 import { plural } from 'src/utils/stringUtils.js'
@@ -514,7 +514,16 @@ export const GrepTool = buildTool({
 
         results = await ripGrep(args, root.target, abortController.signal, {
           rejectOnInputError: true,
+          rejectOnPartial: true,
           cwd: root.spawnCwd,
+        }).catch(err => {
+          if (
+            err instanceof RipgrepTimeoutError &&
+            err.partialResults.length > 0
+          ) {
+            return err.partialResults
+          }
+          throw err
         })
         if (root.relativeOutput) {
           results = results.map(line =>

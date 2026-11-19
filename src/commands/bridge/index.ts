@@ -1,12 +1,24 @@
 import { feature } from 'bun:bundle'
 import { isBridgeEnabled } from '../../bridge/bridgeEnabled.js'
 import type { Command } from '../../commands.js'
+import { isRemoteControlDisabledBySettings } from '../../utils/residualFinalEnvGates.js'
+import { getInitialSettings } from '../../utils/settings/settings.js'
+
+function isRemoteControlDisabledByManagedSettings(): boolean {
+  try {
+    return isRemoteControlDisabledBySettings(
+      getInitialSettings().disableRemoteControl,
+    )
+  } catch {
+    return false
+  }
+}
 
 function isEnabled(): boolean {
   if (!feature('BRIDGE_MODE')) {
     return false
   }
-  return isBridgeEnabled()
+  return isBridgeEnabled() || isRemoteControlDisabledByManagedSettings()
 }
 
 const bridge = {
@@ -17,7 +29,7 @@ const bridge = {
   argumentHint: '[name]',
   isEnabled,
   get isHidden() {
-    return !isEnabled()
+    return !isBridgeEnabled()
   },
   immediate: true,
   load: () => import('./bridge.js'),

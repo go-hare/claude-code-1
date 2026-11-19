@@ -102,6 +102,7 @@ import {
   clearBridgeSessionMeta,
   saveBridgeSessionMeta,
 } from './bridgeSessionMeta.js'
+import { resolveForkSessionTitle } from './createSession.js'
 import {
   isArchiveSuccessStatus,
   registerBridgePlaceholder,
@@ -275,6 +276,8 @@ export type EnvLessBridgeParams = {
   baseUrl: string
   orgUUID: string
   title: string
+  /** Optional parent session title when minting a forked remote bridge session (#1601 / #1686). */
+  forkFromTitle?: string
   getAccessToken: () => string | undefined
   onAuth401?: (staleAccessToken: string) => Promise<boolean>
   /**
@@ -408,6 +411,7 @@ export async function initEnvLessBridgeCore(
     baseUrl,
     orgUUID,
     title,
+    forkFromTitle,
     getAccessToken,
     onAuth401,
     toSDKMessages,
@@ -483,6 +487,14 @@ export async function initEnvLessBridgeCore(
   let skipInitialHistoryFlush = noHistoryBackfillOpt === true
   // densable Pe=n — createCodeSession title; reset to neutral on mint-after-gone.
   let sessionTitle = title
+  if (forkFromTitle !== undefined) {
+    sessionTitle =
+      resolveForkSessionTitle({
+        explicitTitle: title,
+        parentTitle: forkFromTitle,
+        fallbackTitle: 'Forked session',
+      }) ?? 'Forked session'
+  }
   let sessionId: string
 
   async function mintFreshSession(): Promise<CodeSessionCreateResult> {

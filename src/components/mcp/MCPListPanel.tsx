@@ -17,6 +17,8 @@ import { formatFailedMcpIssue } from '../../services/mcp/mcpConnectionIssue.js';
 import { isEnterpriseManagedClaudeAiConnector } from '../../services/mcp/enterpriseManaged.js';
 import { isOfficialClaudeAiConnector } from '../../services/mcp/officialClaudeAiConnector.js';
 import type { ConfigScope } from '../../services/mcp/types.js';
+import { getIsRemoteMode } from '../../bootstrap/state.js';
+import { filterToolsByDenyRules } from '../../tools.js';
 import { describeMcpConfigFilePath, filterToolsByServer } from '../../services/mcp/utils.js';
 import { useAppState } from '../../state/AppState.js';
 import { getGlobalConfig } from '../../utils/config.js';
@@ -197,6 +199,7 @@ export function MCPListPanel({
   onToggleUnusedConnectors,
 }: Props): React.ReactNode {
   const mcpTools = useAppState(s => s.mcp.tools);
+  const toolPermissionContext = useAppState(s => s.toolPermissionContext);
   const terminalSize = useTerminalSize();
   const insideModal = useIsInsideModal();
   const { rows: availableRows } = useModalOrTerminalSize(terminalSize);
@@ -213,13 +216,26 @@ export function MCPListPanel({
   // densable 247 Et: live ref so same-tick focus + accept reads latest index.
   const selectedIndexLive = useRef(0);
 
+  const availableMcpTools = useMemo(() => {
+    if (!getIsRemoteMode()) {
+      return mcpTools;
+    }
+    return filterToolsByDenyRules(mcpTools, toolPermissionContext).filter(tool => {
+      try {
+        return tool.isEnabled();
+      } catch {
+        return true;
+      }
+    });
+  }, [mcpTools, toolPermissionContext]);
+
   const toolCountsByServer = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const server of servers) {
-      counts[server.name] = filterToolsByServer(mcpTools, server.name).length;
+      counts[server.name] = filterToolsByServer(availableMcpTools, server.name).length;
     }
     return counts;
-  }, [servers, mcpTools]);
+  }, [servers, availableMcpTools]);
 
   const serversByScope = useMemo(() => {
     const regularServers = servers.filter(s => !isOfficialClaudeAiConnector(s.client.config));

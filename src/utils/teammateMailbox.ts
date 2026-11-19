@@ -364,6 +364,79 @@ export async function readUnreadMessages(
   return unread
 }
 
+const MAX_PENDING_SHUTDOWN_REQUESTS = 200
+const pendingShutdownRequests = new Map<
+  string,
+  { addressee: string; byLead: boolean; used: boolean }
+>()
+
+/**
+ * Official `YLr` (#1556) — record an outbound `shutdown_request` so a
+ * subsequent `shutdown_approved` can be verified against `requestId` and
+ * `!entry.used` (preventing replay/forged removal).
+ */
+export function recordPendingShutdownRequest(
+  requestId: string,
+  addressee: string,
+  byLead = true,
+): void {
+  pendingShutdownRequests.set(requestId, { addressee, byLead, used: false })
+  if (pendingShutdownRequests.size > MAX_PENDING_SHUTDOWN_REQUESTS) {
+    const entries = [...pendingShutdownRequests]
+    const evict =
+      entries.find(([, v]) => v.used) ??
+      entries.find(([, v]) => !v.byLead) ??
+      entries[0]
+    if (evict) pendingShutdownRequests.delete(evict[0])
+  }
+}
+
+/**
+ * Official `S2t` (#1556) — validate and mark a `shutdown_approved` requestId
+ * as used before removing the teammate. Returns false if unknown, mismatched
+ * addressee, or already used.
+ */
+export function consumePendingShutdownRequest(
+  requestId: string,
+  addressee: string,
+): boolean {
+  const entry = pendingShutdownRequests.get(requestId)
+  if (!entry || entry.addressee !== addressee || entry.used) {
+    return false
+  }
+  entry.used = true
+  return true
+}
+
+export function resetPendingShutdownRequestsForTesting(): void {
+  pendingShutdownRequests.clear()
+}
+
+const VALID_TEAM_NAME_RE = /^[A-Za-z0-9_.-]+$/
+
+/**
+ * Official `vt` (#1555) — returns true if the named team's `config.json` is
+ * missing (ENOENT), meaning the team was deleted and late messages must not
+ * recreate its inbox file.
+ */
+async function isTeamDeleted(teamName?: string): Promise<boolean> {
+  const resolved = teamName || getTeamName()
+  if (
+    !resolved ||
+    !VALID_TEAM_NAME_RE.test(resolved) ||
+    resolved === '.' ||
+    resolved === '..'
+  ) {
+    return false
+  }
+  try {
+    await stat(join(getTeamsDir(), resolved, 'config.json'))
+    return false
+  } catch (err) {
+    return getErrnoCode(err) === 'ENOENT'
+  }
+}
+
 /**
  * densable dO / writeToMailbox (2.1.224 #9).
  *
@@ -418,6 +491,13 @@ export async function writeToMailbox(
         ),
       )
     }
+    return undefined
+  }
+
+  if (await isTeamDeleted(teamName)) {
+    logForDebugging(
+      `[TeammateMailbox] writeToMailbox: nothing written to "${recipientName}": team "${teamName || getTeamName()}" was deleted (its config.json is gone)`,
+    )
     return undefined
   }
 
@@ -476,6 +556,27 @@ export async function writeToMailbox(
     logForDebugging(
       `[TeammateMailbox] Wrote message to ${recipientName}'s inbox from ${message.from}`,
     )
+    if (await isTeamDeleted(teamName)) {
+      logForDebugging(
+        `[TeammateMailbox] writeToMailbox: removing ${inboxPath}: its team was deleted during this write`,
+      )
+      await unlink(inboxPath).catch(err => {
+        if (getErrnoCode(err) !== 'ENOENT') {
+          logForDebugging(
+            `[TeammateMailbox] writeToMailbox: could not remove ${inboxPath}: ${err}`,
+          )
+        }
+      })
+      return undefined
+    }
+    const shutdownReq = isShutdownRequest(message.text)
+    if (shutdownReq) {
+      recordPendingShutdownRequest(
+        shutdownReq.requestId,
+        recipientName,
+        message.from === TEAM_LEAD_NAME,
+      )
+    }
     return ids.msg_id
   } catch (error) {
     logForDebugging(`Failed to write to inbox for ${recipientName}: ${error}`)
@@ -1759,6 +1860,11 @@ export async function sendShutdownRequestToMailbox(
 
   // Generate a deterministic request ID for this shutdown request
   const requestId = generateRequestId('shutdown', targetName)
+  recordPendingShutdownRequest(
+    requestId,
+    targetName,
+    senderName === TEAM_LEAD_NAME,
+  )
 
   // Create and send the shutdown request message
   const shutdownMessage = createShutdownRequestMessage({

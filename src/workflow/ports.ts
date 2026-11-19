@@ -28,6 +28,7 @@ import {
   type WorkflowHostBundle,
 } from './hostHandle.js'
 import { buildRegistry } from './registry.js'
+import { clearCompletedWorkflowAgentResults } from './backends/claudeCodeBackend.js'
 import type { ProgressBus } from './progress/bus.js'
 import type { ProgressStore } from './progress/store.js'
 import {
@@ -183,6 +184,7 @@ export function createWorkflowPorts(opts: {
       taskProgressBridge.forceFlush(runId)
       completeWorkflowTask(b.taskId, b.setAppState, b.getAppState)
       logForDebugging(`workflow ${runId} completed: ${summary ?? ''}`)
+      clearCompletedWorkflowAgentResults(runId)
       bindings.delete(runId)
     },
     fail(runId, error) {
@@ -191,6 +193,7 @@ export function createWorkflowPorts(opts: {
       taskProgressBridge.forceFlush(runId)
       failWorkflowTask(b.taskId, b.setAppState, error, b.getAppState)
       logForDebugging(`workflow ${runId} failed: ${error}`)
+      clearCompletedWorkflowAgentResults(runId)
       bindings.delete(runId)
     },
     kill(runId) {
@@ -212,6 +215,7 @@ export function createWorkflowPorts(opts: {
         }
       }
       b.agentAbortControllers.clear()
+      clearCompletedWorkflowAgentResults(runId)
       bindings.delete(runId)
     },
     registerAgentAbort(runId, agentId, ac) {

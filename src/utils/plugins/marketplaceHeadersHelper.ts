@@ -9,7 +9,11 @@ import { getAllowedSettingSources } from '../../bootstrap/state.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import { checkHasTrustDialogAccepted } from '../config.js'
 import { logForDebugging } from '../debug.js'
-import { getClaudeConfigHomeDir } from '../envUtils.js'
+import {
+  getClaudeConfigHomeDir,
+  isEnvDefinedFalsy,
+  isEnvTruthy,
+} from '../envUtils.js'
 import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
 import type { SettingSource } from '../settings/constants.js'
 import {
@@ -184,6 +188,7 @@ export function listCredentialEnvKeysForHeadersHelper(
 export function buildHeadersHelperChildEnv(options: {
   scrubCredentialEnv: boolean
   env?: Record<string, string>
+  cwd?: string
 }): NodeJS.ProcessEnv {
   const base: NodeJS.ProcessEnv = { ...process.env }
   if (!options.scrubCredentialEnv) {
@@ -192,7 +197,12 @@ export function buildHeadersHelperChildEnv(options: {
   const secrets: string[] = []
   for (const key of listCredentialEnvKeysForHeadersHelper(options.env ?? {})) {
     const value = process.env[key] ?? base[key]
-    if (value !== undefined && value !== '') {
+    if (
+      value !== undefined &&
+      value !== '' &&
+      !isEnvTruthy(value) &&
+      !isEnvDefinedFalsy(value)
+    ) {
       secrets.push(value)
     }
     delete base[key]
@@ -200,10 +210,13 @@ export function buildHeadersHelperChildEnv(options: {
   secrets.sort((a, b) => b.length - a.length)
   const scrubbed: Record<string, string> = {}
   for (const [key, value] of Object.entries(options.env ?? {})) {
-    scrubbed[key] = secrets.reduce(
-      (acc, secret) => acc.split(secret).join('REDACTED'),
-      value,
-    )
+    scrubbed[key] =
+      options.cwd !== undefined && value === options.cwd
+        ? value
+        : secrets.reduce(
+            (acc, secret) => acc.split(secret).join('REDACTED'),
+            value,
+          )
   }
   return { ...base, ...scrubbed }
 }
@@ -263,6 +276,7 @@ export async function mintHeadersFromHelper(options: {
     env: buildHeadersHelperChildEnv({
       scrubCredentialEnv: options.scrubCredentialEnv,
       env: options.env,
+      cwd: options.cwd,
     }),
     extendEnv: false,
   })

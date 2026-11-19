@@ -22,6 +22,7 @@ import {
 } from 'node:fs/promises'
 import { hostname as osHostname, tmpdir } from 'node:os'
 import { join, resolve as pathResolve } from 'node:path'
+import { enableClosesAfterServerError } from '../utils/proxy.js'
 import { createNonBlockingRunnerLogWriter } from './nonBlockingLog.js'
 import {
   assertSafeId,
@@ -826,6 +827,17 @@ export type RunSpawnRunnerHookOpts = {
 }
 
 /**
+ * Official `ce(e.claims.spawn_reason)` (#1682) — env-export gate for
+ * `CLAUDE_RUNNER_SPAWN_REASON`: allow safe identifier characters only.
+ */
+export function sanitizeSpawnReason(raw: unknown): string | undefined {
+  if (typeof raw !== 'string' || raw.length === 0 || raw.length > 128) {
+    return undefined
+  }
+  return /^[A-Za-z0-9_.:/-]+$/.test(raw) ? raw : undefined
+}
+
+/**
  * densable `bFh` — validate claims, write work-order file, spawn hook.
  */
 export async function runSpawnRunnerHook(
@@ -873,6 +885,18 @@ export async function runSpawnRunnerHook(
     )
   }
 
+  const rawSpawnReason = (claims as { spawn_reason?: unknown }).spawn_reason
+  const safeSpawnReason = sanitizeSpawnReason(rawSpawnReason)
+  if (
+    typeof rawSpawnReason === 'string' &&
+    rawSpawnReason.length > 0 &&
+    safeSpawnReason === undefined
+  ) {
+    opts.onDebug(
+      `[runner:orchestrator] spawn-hint spawn_reason rejected by the env-export gate (CLAUDE_RUNNER_SPAWN_REASON left unset) (len=${rawSpawnReason.length})`,
+    )
+  }
+
   const started = Date.now()
   const workOrderFile = await writeWorkOrderFile(
     `work-order-${claims.jti}`,
@@ -891,6 +915,9 @@ export async function runSpawnRunnerHook(
     CLAUDE_RUNNER_SESSION_ID: claims.session_id,
     CLAUDE_RUNNER_SESSION_UUID: claims.session_id,
     CLAUDE_RUNNER_ATTEMPT: String(claims.attempt),
+    ...(safeSpawnReason !== undefined
+      ? { CLAUDE_RUNNER_SPAWN_REASON: safeSpawnReason }
+      : {}),
     CLAUDE_RUNNER_POOL_ID: claims.pool_id,
     CLAUDE_RUNNER_ACCOUNT_EMAIL: claims.account_email,
     CLAUDE_RUNNER_ACCOUNT_ID: claims.account_id,
@@ -1437,6 +1464,7 @@ export async function runOrchestratorLoop(
   opts: RunOrchestratorLoopOpts,
   signal: AbortSignal,
 ): Promise<void> {
+  enableClosesAfterServerError()
   const {
     apiClient,
     healthState,
@@ -1641,8 +1669,13 @@ export async function runOrchestratorLoop(
       }
       let result: HookRunResult
       let setupOk = false
+      let dispatchReason = isWarm ? 'warm' : 'unknown'
       try {
         const claims = extractSpawnHintClaims(hint, serverDate)
+        const claimReason = (claims as { spawn_reason?: unknown }).spawn_reason
+        if (typeof claimReason === 'string' && claimReason.length > 0) {
+          dispatchReason = sanitizeSpawnReason(claimReason) ?? claimReason
+        }
         result = await runHook({
           hookPath,
           jwt: hint.work_order_jwt,
@@ -1677,8 +1710,8 @@ export async function runOrchestratorLoop(
         if (isWarm) {
           healthState.last_warm_hook_ok_at = healthState.last_hook_ok_at
         }
-        onDebug(
-          `[runner:orchestrator] ok session=${hint.session_uuid} attempt=${hint.attempt} jti=${hint.jti} (${result.durationMs}ms)`,
+        onStatus(
+          `[runner:orchestrator] ok session=${hint.session_uuid} attempt=${hint.attempt} jti=${hint.jti} reason=${dispatchReason} (${result.durationMs}ms)`,
         )
         return
       }
@@ -1709,7 +1742,7 @@ export async function runOrchestratorLoop(
         return
       }
       onStatus(
-        `[runner:orchestrator] nack session=${hint.session_uuid} attempt=${hint.attempt} exit=${result.exitCode} timedOut=${result.timedOut} retryable=${retryable}: ${errText}`,
+        `[runner:orchestrator] nack session=${hint.session_uuid} attempt=${hint.attempt} exit=${result.exitCode} timedOut=${result.timedOut} retryable=${retryable} reason=${dispatchReason}: ${errText}`,
       )
       try {
         await apiClient.nackSpawnHint(

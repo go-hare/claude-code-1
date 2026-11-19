@@ -401,6 +401,8 @@ export type RefusalDialogSuppressReason =
 export type RefusalDialogDecisionInput = {
   silentAttempt?: boolean
   isMainThread?: boolean
+  /** Official 2.1.318 Dua — true when running on a subagent thread. */
+  isAgentThread?: boolean
   /** Official requestDialog host present. */
   requestDialog?: unknown
   /**
@@ -427,16 +429,17 @@ export function resolveRefusalDialogSuppressReason(
 }
 
 /**
- * Official LXl — true when main thread has no dialog host/capability AND
- * switchModelsOnFlag is explicitly false (cannot auto-switch either).
+ * Official LXl / Dua — true when on a subagent thread OR main thread has no
+ * dialog host/capability AND switchModelsOnFlag is explicitly false.
  */
 export function isRefusalFallbackStuckWithoutDialog(
   input: RefusalDialogDecisionInput,
 ): boolean {
   return (
-    input.isMainThread === true &&
-    (input.requestDialog === undefined ||
-      input.consumerLacksDialogCapability === true) &&
+    (input.isAgentThread === true ||
+      (input.isMainThread === true &&
+        (input.requestDialog === undefined ||
+          input.consumerLacksDialogCapability === true))) &&
     input.switchModelsOnFlag === false
   )
 }
@@ -1055,6 +1058,7 @@ export function planRefusalFallbackArm(input: {
   suppressionAlreadyLogged?: boolean
   requestDialog?: unknown
   isMainThread?: boolean
+  isAgentThread?: boolean
   consumerLacksDialogCapability?: boolean
   /**
    * Official $c("switchModelsOnFlag", true).value — default true means LXl
@@ -1090,10 +1094,11 @@ export function planRefusalFallbackArm(input: {
 }): RefusalFallbackArmPlan {
   const enabled = input.refusalFallbackEnabled ?? isRefusalFallbackEnabled()
   const switchModelsOnFlag = input.switchModelsOnFlag ?? true
-  // Official LXl: isMainThread && (no host || no cap) && setting === false.
+  // Official LXl / Dua: (isAgentThread || (isMainThread && (no host || no cap))) && setting === false.
   const stuck = isRefusalFallbackStuckWithoutDialog({
     requestDialog: input.requestDialog,
     isMainThread: input.isMainThread,
+    isAgentThread: input.isAgentThread,
     consumerLacksDialogCapability: input.consumerLacksDialogCapability,
     switchModelsOnFlag,
   })

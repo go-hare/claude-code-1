@@ -210,6 +210,151 @@ export function cleanupTerminalModes(): void {
 
 let resumeHintPrinted = false
 let resumeHintOmitsWorktree = false
+let resumeHintLaunchFlags: string | undefined
+
+export function setResumeHintLaunchFlags(flags: string | undefined): void {
+  resumeHintLaunchFlags = flags
+}
+
+export function getResumeHintLaunchFlags(): string | undefined {
+  return resumeHintLaunchFlags
+}
+
+const RESUME_HINT_IGNORED_OPTIONS = new Set([
+  'resume',
+  'continue',
+  'from-pr',
+  'fork-session',
+  'session-id',
+  'name',
+  'teleport',
+  'cloud',
+  'remote',
+  'desktop',
+  'environment',
+  'pool',
+  'project',
+  'ref',
+  'on-branch',
+  'correlation-id',
+  'forward-home-settings',
+  'resume-session-at',
+  'resume-drops-turn',
+  'reply-on-resume',
+  'rewind-files',
+  'worktree',
+  'tmux',
+  'background',
+  'routine',
+  'file',
+  'init',
+  'init-only',
+  'maintenance',
+  'prefill',
+  'prefill-b64',
+  'deep-link-origin',
+  'deep-link-repo',
+  'deep-link-last-fetch',
+  'deep-link-cwd-b64',
+  'watch-artifact',
+  'watch-artifact-no-autoreact',
+])
+
+const RESUME_HINT_DISALLOWED_OPTIONS = new Set([
+  'agent-id',
+  'agent-name',
+  'team-name',
+  'agent-color',
+  'agent-type',
+  'parent-session-id',
+  'lead-verify-key',
+  'plan-mode-required',
+  'inherit-permission-mode',
+  'agents-view-if-allowed',
+  'attach-serve',
+  'session-began-as-copy',
+  'messaging-socket-path',
+  'project-config-root',
+])
+
+const SAFE_FLAG_RE = /^-[\w/:@=+-]*$/
+const SAFE_ARG_RE = /^[\w./:+][\w./:@=+-]*$/
+const UNSAFE_DEVICE_PATH_RE = /(^|=)\/(dev|proc)\//
+
+export type CommanderOptionLike = {
+  short?: string
+  long?: string
+  required?: boolean
+  optional?: boolean
+  variadic?: boolean
+  name(): string
+}
+
+/**
+ * Official `Hds` (#1587) — extract safe, replayable launch flags from argv
+ * for the exit resume hint (`Resume this session with: claude <flags> --resume <id>`).
+ */
+export function extractResumeHintLaunchFlags(
+  options: readonly CommanderOptionLike[],
+  argv: readonly string[],
+): string {
+  const out: string[] = []
+  let i = 0
+  const findOpt = (flag: string) =>
+    options.find(o => o.short === flag || o.long === flag)
+
+  while (i < argv.length) {
+    const token = argv[i++]!
+    if (token === '--') break
+    if (!token.startsWith('-')) continue
+    const args: string[] = []
+    let opt = findOpt(token)
+    if (opt) {
+      if (opt.required) {
+        if (i >= argv.length) return ''
+        args.push(argv[i++]!)
+      } else if (opt.optional && i < argv.length && !argv[i]!.startsWith('-')) {
+        args.push(argv[i++]!)
+      }
+      if (opt.variadic) {
+        while (i < argv.length && !argv[i]!.startsWith('-')) {
+          args.push(argv[i++]!)
+        }
+      }
+    } else {
+      const eqIdx = token.startsWith('--') ? token.indexOf('=') : -1
+      opt = eqIdx > 2 ? findOpt(token.slice(0, eqIdx)) : undefined
+      if (!opt || !(opt.required || opt.optional)) return ''
+    }
+    const name = opt.name()
+    if (RESUME_HINT_DISALLOWED_OPTIONS.has(name)) return ''
+    if (RESUME_HINT_IGNORED_OPTIONS.has(name)) continue
+    if (
+      !SAFE_FLAG_RE.test(token) ||
+      !args.every(a => SAFE_ARG_RE.test(a)) ||
+      [token, ...args].some(a => UNSAFE_DEVICE_PATH_RE.test(a))
+    ) {
+      return ''
+    }
+    out.push(token, ...args)
+  }
+  return out.join(' ')
+}
+
+/**
+ * Official `nLi` (#1587) — consume `CLAUDE_CODE_RELAUNCH_RESUME_HINT_FLAGS`
+ * across `/tui` relaunch if valid.
+ */
+export function consumeRelaunchResumeHintFlags(
+  options: readonly CommanderOptionLike[],
+): string | undefined {
+  const raw = process.env.CLAUDE_CODE_RELAUNCH_RESUME_HINT_FLAGS
+  if (raw === undefined) return undefined
+  delete process.env.CLAUDE_CODE_RELAUNCH_RESUME_HINT_FLAGS
+  return extractResumeHintLaunchFlags(options, raw.split(' ')) === raw
+    ? raw
+    : ''
+}
 
 const WORKTREE_RESUME_ADVICE = [
   'This session ran in a worktree',
@@ -390,6 +535,7 @@ function printResumeHint(): void {
           ? { name: worktreeName, recordCleared: true }
           : undefined,
         columns: process.stdout.columns,
+        launchFlags: resumeHintLaunchFlags,
         launcherProgram: process.env.CLAUDE_CODE_RESUME_HINT_COMMAND,
       })
 
@@ -822,6 +968,7 @@ export function resetShutdownState(): void {
   resetShutdownCommittedForTests()
   resumeHintPrinted = false
   resumeHintOmitsWorktree = false
+  resumeHintLaunchFlags = undefined
   printModeSignalHandlersRegistered = false
   if (failsafeTimer !== undefined) {
     clearTimeout(failsafeTimer)

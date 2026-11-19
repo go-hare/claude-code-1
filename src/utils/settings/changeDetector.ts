@@ -1,4 +1,5 @@
 import chokidar, { type FSWatcher } from 'chokidar'
+import type { Stats } from 'fs'
 import {
   constants as fsConstants,
   watch as watchDirectory,
@@ -24,6 +25,11 @@ import {
 import {
   clearInternalWrites,
   consumeInternalWrite,
+  type FirstReadStatSnapshot,
+  forgetFirstReads,
+  getFirstReadStat,
+  getOwnWriteBeforeFirstCheck,
+  hasFirstReadStat,
   hashSettingsContent,
 } from './internalWrites.js'
 import { getManagedSettingsDropInDir } from './managedPath.js'
@@ -66,6 +72,9 @@ let directoryCheckTimer: ReturnType<typeof setInterval> | undefined
 let realpathToCanonical = new Map<string, string>()
 const closingWatchers = new Set<Promise<void>>()
 let unregisterCleanup: (() => void) | undefined
+let firstReadsChecked = false
+const firstReadHandledStats = new Map<string, Stats>()
+const lastWatchStats = new Map<string, Stats>()
 
 export type SettingsChangeExtra = {
   prevCwd?: string
@@ -183,18 +192,30 @@ function attachWatchTargets(targets: WatchTargets, generation: number): void {
     current.once('ready', resolve)
   })
   const isCurrent = () => !disposed && generation === watchGeneration
-  current.on('change', path => {
-    if (isCurrent()) handleChange(path)
-  })
+  const wrapWatchReport =
+    (handler: (path: string) => void) =>
+    (path: string, fileStats?: Stats): void => {
+      if (!isCurrent()) return
+      const canonical = canonicalPath(path)
+      if (fileStats) lastWatchStats.set(canonical, fileStats)
+      const handled = firstReadHandledStats.get(canonical)
+      firstReadHandledStats.delete(canonical)
+      if (handled && fileStats && sameFileStat(fileStats, handled)) {
+        logForDebugging(
+          `Ignored a watch report of ${canonical}: the first-read check already dealt with this version`,
+        )
+        return
+      }
+      handler(path)
+    }
+  current.on('change', wrapWatchReport(handleChange))
   current.on('unlink', path => {
     if (!isCurrent()) return
     // FSEvents may stop observing the old inode after unlink/atomic save.
     if (process.platform === 'darwin') current.add(platformPath.dirname(path))
     handleDelete(path)
   })
-  current.on('add', path => {
-    if (isCurrent()) handleAdd(path)
-  })
+  current.on('add', wrapWatchReport(handleAdd))
   current.on('error', (err: unknown) => {
     if (!isCurrent()) return
     logForDebugging(`[settings] watcher error: ${errorMessage(err)}`, {
@@ -246,6 +267,50 @@ function switchToPolling(reason: string): void {
   void rebuildWatchTargets()
 }
 
+function sameFileStat(
+  a: FirstReadStatSnapshot | Stats,
+  b: FirstReadStatSnapshot | Stats,
+): boolean {
+  return (
+    a.mtimeMs === b.mtimeMs &&
+    a.size === b.size &&
+    (a.ino === undefined || b.ino === undefined || a.ino === b.ino)
+  )
+}
+
+/** Official `gt`: detect edits to settings files between first-read and watcher ready. */
+async function checkChangedBeforeWatchLive(
+  filePath: string,
+): Promise<Stats | null> {
+  if (!hasFirstReadStat(filePath)) return null
+  const ownWrite = getOwnWriteBeforeFirstCheck(filePath)
+  try {
+    const currentStat = await stat(filePath)
+    const firstStat = getFirstReadStat(filePath)
+    if (
+      firstStat === undefined ||
+      (firstStat !== null && sameFileStat(currentStat, firstStat))
+    ) {
+      return null
+    }
+    if (ownWrite !== undefined) {
+      const hash = await readSettingsHashForEchoCheck(filePath)
+      if (hash === ownWrite.contentHash) {
+        return null
+      }
+    }
+    return currentStat
+  } catch (err) {
+    const code = getErrnoCode(err)
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+      logForDebugging(
+        `Could not check whether settings file ${filePath} changed before its watch was live: ${code ?? errorMessage(err)}`,
+      )
+    }
+    return null
+  }
+}
+
 /** Official ai/sc — wait for quiet files before replaying missed changes. */
 async function catchUp(
   files: Set<string>,
@@ -253,7 +318,12 @@ async function catchUp(
   generation: number,
   lifecycle: number,
 ): Promise<void> {
-  if (appearedDirs.size === 0 && catchUpSince === undefined) return
+  if (
+    appearedDirs.size === 0 &&
+    catchUpSince === undefined &&
+    firstReadsChecked
+  )
+    return
   await ready
   if (
     disposed ||
@@ -265,6 +335,8 @@ async function catchUp(
   // current generation may consume pending catch-up work.
   const appeared = new Set(appearedDirs)
   const since = catchUpSince
+  const checkFirstReads = !firstReadsChecked
+  if (checkFirstReads) firstReadsChecked = true
   const candidates = new Set(files)
   const dropInDir = platformPath.normalize(getManagedSettingsDropInDir())
   if (appeared.has(dropInDir) || since !== undefined) {
@@ -281,43 +353,64 @@ async function catchUp(
     }
   }
   await Promise.all(
-    [...candidates]
-      .filter(
-        path => since !== undefined || appeared.has(platformPath.dirname(path)),
-      )
-      .map(async path => {
-        try {
-          let before = await stat(path)
-          while (!disposed && generation === watchGeneration) {
-            await new Promise(resolve =>
-              setTimeout(resolve, stabilityThreshold()),
-            )
-            const after = await stat(path)
+    [...candidates].map(async path => {
+      const fromAppearedDir = appeared.has(platformPath.dirname(path))
+      const preWatchStat = checkFirstReads
+        ? await checkChangedBeforeWatchLive(path)
+        : null
+      if (!fromAppearedDir && since === undefined && preWatchStat === null) {
+        return
+      }
+      try {
+        let before = preWatchStat ?? (await stat(path))
+        while (!disposed && generation === watchGeneration) {
+          await new Promise(resolve =>
+            setTimeout(resolve, stabilityThreshold()),
+          )
+          const after = await stat(path)
+          if (
+            disposed ||
+            generation !== watchGeneration ||
+            lifecycle !== lifecycleGeneration
+          )
+            return
+          if (before.size === after.size && before.mtimeMs === after.mtimeMs) {
+            if (!after.isFile()) return
+            const lastWatched = lastWatchStats.get(path)
             if (
-              disposed ||
-              generation !== watchGeneration ||
-              lifecycle !== lifecycleGeneration
-            )
-              return
-            if (
-              before.size === after.size &&
-              before.mtimeMs === after.mtimeMs
+              preWatchStat !== null &&
+              !fromAppearedDir &&
+              since === undefined &&
+              lastWatched !== undefined &&
+              sameFileStat(lastWatched, after)
             ) {
-              if (
-                after.isFile() &&
-                (appeared.has(platformPath.dirname(path)) ||
-                  (since !== undefined && after.mtimeMs >= since))
-              )
-                handleChange(path)
               return
             }
-            before = after
+            if (
+              fromAppearedDir ||
+              preWatchStat !== null ||
+              (since !== undefined && after.mtimeMs >= since)
+            ) {
+              if (preWatchStat !== null) {
+                logForDebugging(
+                  `Settings file ${path} changed before its watch was live`,
+                )
+                firstReadHandledStats.set(path, after)
+              }
+              handleChange(path)
+            }
+            return
           }
-        } catch {
-          // The file may disappear while waiting for stability.
+          before = after
         }
-      }),
+      } catch {
+        // The file may disappear while waiting for stability.
+      }
+    }),
   )
+  if (checkFirstReads) {
+    forgetFirstReads()
+  }
   if (
     !disposed &&
     generation === watchGeneration &&
@@ -426,6 +519,9 @@ export async function dispose(): Promise<void> {
   pendingDirs.clear()
   appearedDirs.clear()
   realpathToCanonical.clear()
+  firstReadsChecked = false
+  firstReadHandledStats.clear()
+  lastWatchStats.clear()
   resolveReady?.()
   resolveReady = undefined
   clearInternalWrites()

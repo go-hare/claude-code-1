@@ -954,3 +954,60 @@ export async function acceptTuiRelaunch(input: {
     }
   }
 }
+
+/**
+ * Official `GN` (#1578) — update a flag (e.g. `--permission-mode`) in a
+ * background session's `respawnFlags` inside `CLAUDE_JOB_DIR/state.json`
+ * when `CLAUDE_CODE_SESSION_KIND === 'bg'`.
+ */
+export function updateBgRespawnFlag(
+  flag: string,
+  aliases: readonly string[],
+  value: string | null,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const jobDir = env.CLAUDE_JOB_DIR
+  if (!jobDir || env.CLAUDE_CODE_SESSION_KIND !== 'bg') return false
+  try {
+    const { basename } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('path') as typeof import('path')
+    const { readBgJobState, writeBgJobState } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../daemon/jobState.js') as typeof import('../daemon/jobState.js')
+    const short = basename(jobDir)
+    if (!short) return false
+    const state = readBgJobState(short)
+    if (!state?.respawnFlags) return false
+
+    const flagsToStrip = [flag, ...aliases]
+    const nextFlags: string[] = []
+    for (let i = 0; i < state.respawnFlags.length; i++) {
+      const tok = state.respawnFlags[i]!
+      if (flagsToStrip.some(f => tok === f || tok.startsWith(`${f}=`))) {
+        if (!tok.includes('=') && state.respawnFlags[i + 1] !== undefined) {
+          i++
+        }
+        continue
+      }
+      nextFlags.push(tok)
+    }
+    if (value !== null) {
+      nextFlags.push(flag, value)
+    }
+    if (
+      nextFlags.length === state.respawnFlags.length &&
+      nextFlags.every((f, idx) => f === state.respawnFlags[idx])
+    ) {
+      return false
+    }
+    writeBgJobState(short, {
+      ...state,
+      respawnFlags: nextFlags,
+      updatedAt: new Date().toISOString(),
+    })
+    return true
+  } catch {
+    return false
+  }
+}

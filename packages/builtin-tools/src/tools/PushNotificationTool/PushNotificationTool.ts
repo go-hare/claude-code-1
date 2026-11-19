@@ -21,6 +21,12 @@ const inputSchema = lazySchema(() =>
       .describe(
         'Notification priority. Use "high" for blockers or permission prompts.',
       ),
+    status: z
+      .enum(['proactive', 'normal'])
+      .optional()
+      .describe(
+        "Labels intent: 'normal' when replying to what the user just asked; 'proactive' when initiating (scheduled task finished, blocker surfaced, build ready).",
+      ),
   }),
 )
 type InputSchema = ReturnType<typeof inputSchema>
@@ -32,8 +38,17 @@ type PushOutput = {
   sent: boolean
   pushSent?: boolean
   localSent?: boolean
+  status?: 'proactive' | 'normal'
+  deduplicated?: boolean
   disabledReason?: PushDisabledReason
   error?: string
+}
+
+const PUSH_DEDUP_WINDOW_MS = 60_000
+const recentPushByKey = new Map<string, number>()
+
+export function _resetPushNotificationDedupForTesting(): void {
+  recentPushByKey.clear()
 }
 
 export const PushNotificationTool = buildTool({
@@ -192,6 +207,25 @@ Requires Remote Control to be configured. Respects user notification settings (t
       }
     }
 
+    const effectiveStatus = input.status ?? 'normal'
+    const dedupKey = `${input.title}\0${input.body}\0${effectiveStatus}`
+    const now = Date.now()
+    const lastSentAt = recentPushByKey.get(dedupKey)
+    if (lastSentAt !== undefined && now - lastSentAt < PUSH_DEDUP_WINDOW_MS) {
+      logForDebugging(
+        `[PushNotification] suppressed duplicate (${effectiveStatus}): ${input.title}`,
+      )
+      return {
+        data: {
+          sent: false,
+          pushSent: false,
+          localSent: false,
+          status: effectiveStatus,
+          deduplicated: true,
+        },
+      }
+    }
+
     // Try bridge delivery (for remote / remote-control / mobile viewers)
     if (hasTransport) {
       if (feature('BRIDGE_MODE')) {
@@ -214,6 +248,7 @@ Requires Remote Control to be configured. Respects user notification settings (t
                     title: input.title,
                     body: input.body,
                     priority: input.priority ?? 'normal',
+                    status: effectiveStatus,
                   },
                 ],
               },
@@ -228,10 +263,18 @@ Requires Remote Control to be configured. Respects user notification settings (t
               },
             )
             if (response.status >= 200 && response.status < 300) {
+              recentPushByKey.set(dedupKey, now)
               logForDebugging(
                 `[PushNotification] delivered via bridge session=${sessionId}`,
               )
-              return { data: { sent: true, pushSent: true, localSent } }
+              return {
+                data: {
+                  sent: true,
+                  pushSent: true,
+                  localSent,
+                  status: effectiveStatus,
+                },
+              }
             }
             logForDebugging(
               `[PushNotification] bridge delivery failed: status=${response.status}`,

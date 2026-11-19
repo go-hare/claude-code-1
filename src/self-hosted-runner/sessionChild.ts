@@ -272,6 +272,9 @@ export type BuildSessionChildEnvOpts = {
   sessionId: string
   sessionToken: string
   workerEpoch: number
+  resumeInterruptedTurnMaxAgeMs?: number
+  resumedTurnNotBefore?: number
+  boundResumedTurn?: boolean
   configDir: string
   stageFileRoot: string
   apiBaseUrl: string
@@ -398,6 +401,34 @@ export function buildSessionChildEnv(
     CCR_AUTO_MODE_SOFT_DENY: undefined,
     CLAUDE_CODE_WORKER_EPOCH: String(opts.workerEpoch),
     CLAUDE_CODE_RESUME_INTERRUPTED_TURN: opts.workerEpoch > 1 ? '1' : undefined,
+    CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS: (() => {
+      if (opts.workerEpoch <= 1) return undefined
+      const maxAgeCapMs = 3_600_000
+      const fromBound = opts.boundResumedTurn ? maxAgeCapMs : Infinity
+      const fromNotBefore =
+        opts.resumedTurnNotBefore !== undefined
+          ? Math.max(
+              1,
+              Math.min(Date.now() - opts.resumedTurnNotBefore, maxAgeCapMs),
+            )
+          : Infinity
+      const explicit =
+        opts.resumeInterruptedTurnMaxAgeMs !== undefined
+          ? opts.resumeInterruptedTurnMaxAgeMs
+          : Math.min(fromBound, fromNotBefore)
+      if (Number.isFinite(explicit)) return String(explicit)
+      const inherited =
+        process.env.CLAUDE_CODE_RESUME_INTERRUPTED_TURN_MAX_AGE_MS
+      return inherited !== undefined && inherited !== '' ? inherited : undefined
+    })(),
+    CLAUDE_CODE_PARKED_STOP_RETIRES:
+      opts.workerEpoch > 1
+        ? (process.env.CLAUDE_CODE_PARKED_STOP_RETIRES ?? '1')
+        : undefined,
+    CLAUDE_CODE_RESUME_TOLERATES_CONTEXT_APPENDS:
+      opts.workerEpoch > 1
+        ? (process.env.CLAUDE_CODE_RESUME_TOLERATES_CONTEXT_APPENDS ?? '1')
+        : undefined,
     CLAUDE_CODE_RESUME_SHOWS_CUT_OFF_CALLS:
       opts.workerEpoch > 1 &&
       process.env.CLAUDE_CODE_RESUME_SHOWS_CUT_OFF_CALLS !== '0' &&

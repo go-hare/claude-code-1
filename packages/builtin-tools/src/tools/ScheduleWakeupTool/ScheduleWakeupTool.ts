@@ -270,17 +270,6 @@ export const ScheduleWakeupTool = buildTool({
         '`prompt` is required when `stop` is not true.',
       )
     }
-    // densable: "noop"in QYs().shape && e.noop===void 0 — check live Cfr so
-    // sticky lazySchema first-resolve (default ON) cannot poison suites that
-    // flip tengu_loop_noop_fold via GrowthBook mock after schema warm-up.
-    if (
-      isLoopNoopFoldEnabled() &&
-      (input as { noop?: boolean }).noop === undefined
-    ) {
-      throw new ScheduleWakeupInputError(
-        '`noop` is required when `stop` is not true.',
-      )
-    }
     // densable !jKe → $$t("gate_off") + zeros
     if (!isKairosLoopDynamicEnabled()) {
       markLoopEnded('gate_off')

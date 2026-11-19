@@ -30,8 +30,10 @@ import {
   writeFile,
   readdir,
   lstat,
+  stat,
   access,
 } from 'fs/promises'
+import { homedir } from 'os'
 import { randomBytes } from 'crypto'
 import { spawn as nodeSpawn } from 'child_process'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
@@ -1352,6 +1354,54 @@ export function buildPtyHostSpawnArgs(
 }
 
 /** Get the binary path for spawning — official WE */
+const SEMVER_RE = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/
+const TMP_VERSION_RE = /\.tmp\.\d+\.\d+(\.\d+)?$/
+
+function compareSemverDesc(a: string, b: string): number {
+  const ma = SEMVER_RE.exec(a)
+  const mb = SEMVER_RE.exec(b)
+  if (!ma || !mb) return 0
+  for (let i = 1; i <= 3; i++) {
+    const diff = Number(mb[i]) - Number(ma[i])
+    if (diff !== 0) return diff
+  }
+  if (!ma[4] && mb[4]) return -1
+  if (ma[4] && !mb[4]) return 1
+  return 0
+}
+
+/**
+ * Official `Rdn()` (#1636) — scan `~/.local/share/claude/versions` (or
+ * `$XDG_DATA_HOME/claude/versions`) for the newest non-empty versioned binary
+ * when the current `execPath` was removed by an in-progress upgrade (ENOENT).
+ */
+export async function findFallbackVersionsBinary(
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+): Promise<string | null> {
+  const dataHome = env.XDG_DATA_HOME || join(home, '.local', 'share')
+  const versionsDir = join(dataHome, 'claude', 'versions')
+  let entries: string[]
+  try {
+    entries = await readdir(versionsDir)
+  } catch {
+    return null
+  }
+  const candidates = entries
+    .filter(n => !TMP_VERSION_RE.test(n) && SEMVER_RE.test(n))
+    .sort(compareSemverDesc)
+  for (const ver of candidates) {
+    const full = join(versionsDir, ver)
+    try {
+      const s = await stat(full)
+      if (s.isFile() && s.size > 0) return full
+    } catch {
+      // ignore unreadable entry
+    }
+  }
+  return null
+}
+
 export function getBinaryPath(opts?: { pinToCurrentBinary?: boolean }): {
   cmd: string
   prefixArgs: string[]
@@ -2378,16 +2428,20 @@ export class BgWorker {
     const cols = this.ptyCols || (dispatch.cols ?? 200)
     const rows = this.ptyRows || (dispatch.rows ?? 50)
 
-    let ptyConn: PtyConnection
+    let ptyConn: PtyConnection | undefined
+    let cmd = ''
+    let prefixArgs: string[] = []
     try {
       // densable: mode==="exec" ? {cmd:KI(launch.cmd), prefixArgs:[]} : XA(cli)
-      const { cmd, prefixArgs } =
+      const spec =
         dispatch.launch.mode === 'exec'
           ? {
               cmd: dispatch.launch.cmd || shellExecSpec('true').cmd,
               prefixArgs: [] as string[],
             }
           : getBinaryPath({ pinToCurrentBinary: true })
+      cmd = spec.cmd
+      prefixArgs = spec.prefixArgs
       ptyConn = this.spawnPty(cmd, [...prefixArgs, ...argv], {
         cols,
         rows,
@@ -2415,20 +2469,45 @@ export class BgWorker {
           this.settleCwdGone('cold')
           return
         }
-        const detail = isExec
-          ? `${dispatch.launch.cmd}: command not found`
-          : binaryMissing
-            ? 'daemon binary was deleted (upgrade in progress) — run your command again to use the new version'
-            : `Couldn't start the session. Run \`claude daemon stop --any\` (ends background sessions), then run your command again. (${(err as Error).message ?? String(err)})`
-        this.patch({ state: 'crashed', detail })
-        const msg = `\r\n\x1B[2m[${detail}]\x1B[0m\r\n`
-        this.pushRing(msg)
-        this.onStream.emit(msg)
-        this.settle('crashed')
+        if (!isExec && binaryMissing) {
+          const fallback = await findFallbackVersionsBinary()
+          logEvent('tengu_bg_daemon_spawn_versions_fallback', {
+            found: fallback !== null,
+          })
+          if (fallback !== null && fallback !== cmd) {
+            try {
+              ptyConn = this.spawnPty(fallback, [...prefixArgs, ...argv], {
+                cols,
+                rows,
+                cwd: dispatch.cwd,
+                env,
+                ptySock: this.ptySockPath ?? getPtySockPath(dispatch.short),
+                short: dispatch.short,
+              })
+            } catch {
+              ptyConn = undefined
+            }
+          }
+        }
+        if (ptyConn) {
+          // Recovered via fallback versions binary
+        } else {
+          const detail = isExec
+            ? `${dispatch.launch.cmd}: command not found`
+            : binaryMissing
+              ? 'daemon binary was deleted (upgrade in progress) — run your command again to use the new version'
+              : `Couldn't start the session. Run \`claude daemon stop --any\` (ends background sessions), then run your command again. (${(err as Error).message ?? String(err)})`
+          this.patch({ state: 'crashed', detail })
+          const msg = `\r\n\x1B[2m[${detail}]\x1B[0m\r\n`
+          this.pushRing(msg)
+          this.onStream.emit(msg)
+          this.settle('crashed')
+          return
+        }
+      } else {
+        this.scheduleRespawn(String((err as Error).message ?? err))
         return
       }
-      this.scheduleRespawn(String((err as Error).message ?? err))
-      return
     }
 
     if (dispatch.launch.mode === 'exec') {

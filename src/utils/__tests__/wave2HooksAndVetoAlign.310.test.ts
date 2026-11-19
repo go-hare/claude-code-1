@@ -12,7 +12,7 @@ import {
   remapHookInputForMatchedHook,
   remapHookInputForMonitorAsBash,
 } from '../hooks.js'
-import type { HookInput } from '../hooks.js'
+import type { HookInput } from 'src/entrypoints/agentSdkTypes.js'
 import type { AppState } from '../../state/AppStateStore.js'
 
 describe('#1296 accountSkillsSyncVeto exports resolveSyncReuseWithinMs', () => {

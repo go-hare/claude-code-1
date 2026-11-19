@@ -1358,7 +1358,9 @@ export async function initializeIdeIntegration(
   if (!skipAutoInstall && shouldAutoInstall) {
     const ideType = ideToInstallExtension ?? getTerminalIdeType()
     if (ideType) {
-      if (isVSCodeIde(ideType)) {
+      // #1670: Do not auto-install/update VSCode extension when started in an
+      // IDE terminal; only run when explicitly requested via /ide (`ideToInstallExtension`).
+      if (ideToInstallExtension && isVSCodeIde(ideType)) {
         // Official 2.1.300 (#788): launch the editor CLI once via maybeInstallIDEExtension
         // (which runs `--list-extensions --show-versions`) instead of calling
         // isIDEExtensionInstalled (`--list-extensions`) first.

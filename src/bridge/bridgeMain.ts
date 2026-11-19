@@ -2347,6 +2347,11 @@ function deriveSessionTitle(text: string): string {
   return truncateToWidth(flat, TITLE_MAX_LEN)
 }
 
+export {
+  formatForkSessionTitle,
+  resolveForkSessionTitle,
+} from './createSession.js'
+
 /**
  * One-shot fetch of a session's title via GET /v1/sessions/{id}.
  *
@@ -3217,10 +3222,12 @@ async function bridgeMainImpl(args: string[]): Promise<void> {
     null
   if (preCreateSession && !effectiveResumeSessionId && !adoptedSessionId) {
     const { createBridgeSession } = await import('./createSession.js')
+    const forkFromTitle = process.env.CLAUDE_BRIDGE_FORK_FROM_TITLE || undefined
     try {
       initialSessionId = await createBridgeSession({
         environmentId,
         title: name,
+        forkFromTitle,
         events: [],
         gitRepoUrl,
         branch,
@@ -3342,6 +3349,8 @@ export class BridgeHeadlessPermanentError extends Error {
 export type HeadlessBridgeOpts = {
   dir: string
   name?: string
+  /** Optional parent session title when pre-creating a forked bridge session (#1601 / #1686). */
+  forkFromTitle?: string
   spawnMode: 'same-dir' | 'worktree'
   capacity: number
   permissionMode?: string
@@ -3495,6 +3504,9 @@ async function runBridgeHeadlessImpl(
       const sid = await createBridgeSession({
         environmentId,
         title: opts.name,
+        forkFromTitle:
+          opts.forkFromTitle ??
+          (process.env.CLAUDE_BRIDGE_FORK_FROM_TITLE || undefined),
         events: [],
         gitRepoUrl,
         branch,

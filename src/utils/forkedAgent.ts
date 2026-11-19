@@ -151,6 +151,8 @@ export type ForkedAgentParams = {
    */
   thinkingStripPlan?: ThinkingStripPlan
   advisorStripPlan?: AdvisorStripPlan
+  /** Pinned effort value for the forked query (e.g. plugin model.fork). */
+  pinnedEffort?: import('./effort.js').EffortValue
 }
 
 export type ForkedAgentResult = {
@@ -836,6 +838,7 @@ export async function runForkedAgent({
   skipCacheWrite,
   thinkingStripPlan,
   advisorStripPlan,
+  pinnedEffort,
 }: ForkedAgentParams): Promise<ForkedAgentResult> {
   const startTime = Date.now()
   const outputMessages: Message[] = []
@@ -898,6 +901,9 @@ export async function runForkedAgent({
       skipCacheWrite,
       thinkingStripPlan,
       advisorStripPlan,
+      ...(pinnedEffort !== undefined
+        ? ({ pinnedEffort } as Record<string, unknown>)
+        : {}),
     })) {
       // Extract real usage from message_delta stream events (final usage per API call)
       if (message.type === 'stream_event') {

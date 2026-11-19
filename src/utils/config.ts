@@ -1,6 +1,6 @@
 import { feature } from 'bun:bundle'
 import { randomBytes } from 'crypto'
-import { unwatchFile, watchFile } from 'fs'
+import { unwatchFile, watchFile, writeFileSync } from 'fs'
 import memoize from 'lodash-es/memoize.js'
 import pickBy from 'lodash-es/pickBy.js'
 import { basename, dirname, join, resolve } from 'path'
@@ -42,6 +42,7 @@ import { normalizePathForConfigKey } from './path.js'
 import { getEssentialTrafficOnlyReason } from './privacyLevel.js'
 import { getManagedFilePath } from './settings/managedPath.js'
 import type { ThemeSetting } from './theme.js'
+import type { StorageV5 } from './storageV5/createLocalFsBackend.js'
 import { isHoverRestOn } from './storageV5/hoverRestPin.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -1233,19 +1234,31 @@ export function saveGlobalConfig(
    * disk write stays the path when this arg is omitted.
    */
   _storageV5?: unknown,
-): void {
+): boolean {
   void _storageV5
   if (process.env.NODE_ENV === 'test') {
     const config = updater(TEST_GLOBAL_CONFIG_FOR_TESTING)
     // Skip if no changes (same reference returned)
     if (config === TEST_GLOBAL_CONFIG_FOR_TESTING) {
-      return
+      return true
     }
     Object.assign(TEST_GLOBAL_CONFIG_FOR_TESTING, config)
-    return
+    return true
+  }
+
+  // Official `Sd` (#1657): never overwrite an unparseable global config file
+  // that startup left alone for the user to inspect/restore.
+  if (isUnparseableFileLeftAlone()) {
+    logForDebugging(
+      'config: saveGlobalConfig ran in a process that is ending because the global config file does not parse; the change is dropped and the file is left as it is',
+      { level: 'warn' },
+    )
+    return false
   }
 
   let written: GlobalConfig | null = null
+  let unchanged = false
+  let compromised = false
   try {
     const didWrite = saveConfigWithLock(
       getGlobalClaudeFile(),
@@ -1254,13 +1267,25 @@ export function saveGlobalConfig(
         const config = updater(current)
         // Skip if no changes (same reference returned)
         if (config === current) {
+          unchanged = true
           return current
         }
-        written = {
+        const next: GlobalConfig = {
           ...config,
           projects: removeProjectHistory(current.projects),
         }
+        // #1669: skip rewriting ~/.claude.json when serialized content is unchanged
+        if (jsonStringify(next) === jsonStringify(current)) {
+          unchanged = true
+          return current
+        }
+        written = next
         return written
+      },
+      {
+        onCompromised: () => {
+          compromised = true
+        },
       },
     )
     // Only write-through if we actually wrote. If the auth-loss guard
@@ -1269,6 +1294,7 @@ export function saveGlobalConfig(
     if (didWrite && written) {
       writeThroughGlobalConfigCache(written)
     }
+    return (didWrite || unchanged) && !compromised
   } catch (error) {
     logForDebugging(`Failed to save config with lock: ${error}`, {
       level: 'error',
@@ -1277,52 +1303,121 @@ export function saveGlobalConfig(
     // window: if another process is mid-write (or the file got truncated),
     // getConfig returns defaults. Refuse to write those over a good cached
     // config to avoid wiping auth. See GH #3117.
-    const currentConfig = getConfig(
-      getGlobalClaudeFile(),
-      createDefaultGlobalConfig,
-    )
-    if (wouldLoseAuthState(currentConfig)) {
-      logForDebugging(
-        'saveGlobalConfig fallback: re-read config is missing auth that cache has; refusing to write. See GH #3117.',
-        { level: 'error' },
+    // Official `is`/`kd` (#1661): retry createOnly EEXIST up to 4 times onto
+    // the now-visible file, and suppress unlocked fallback when disk is
+    // unreadable or ENOENT is doubted.
+    const MAX_CREATE_REFUSED_RETRIES = 4
+    configCreateRefused = false
+    for (let attempt = 0; attempt < MAX_CREATE_REFUSED_RETRIES; attempt++) {
+      const currentConfig = getConfig(
+        getGlobalClaudeFile(),
+        createDefaultGlobalConfig,
       )
-      logEvent('tengu_config_auth_loss_prevented', {})
-      return
-    }
-    const config = updater(currentConfig)
-    // Skip if no changes (same reference returned)
-    if (config === currentConfig) {
-      return
-    }
-    written = {
-      ...config,
-      projects: removeProjectHistory(currentConfig.projects),
-    }
-    try {
-      saveConfig(getGlobalClaudeFile(), written, DEFAULT_GLOBAL_CONFIG)
-      writeThroughGlobalConfigCache(written)
-    } catch (fallbackError) {
-      const code =
-        fallbackError !== null &&
-        typeof fallbackError === 'object' &&
-        'code' in fallbackError
-          ? String((fallbackError as { code: unknown }).code)
-          : undefined
       if (
-        fullDiskSaveCode === undefined &&
-        (code === 'ENOSPC' || code === 'EDQUOT')
+        lastGetConfigOutcome === 'read-error' ||
+        lastGetConfigOutcome === 'parse-error'
       ) {
-        fullDiskSaveCode = code
+        doubtsNoFile = true
+        logForDebugging(
+          'Config re-read was rejected (disk unreadable); suppressing the unlocked fallback write (saveGlobalConfig).',
+          { level: 'error' },
+        )
+        return false
       }
-      logForDebugging(
-        `Config fallback write also failed; continuing without persisting: ${fallbackError}`,
-        { level: 'error' },
-      )
+      const foundNoFile = lastGetConfigOutcome === 'enoent'
+      if (foundNoFile && doubtsNoFile) {
+        logForDebugging(
+          'saveGlobalConfig fallback: global config read as missing though there is reason to doubt it; refusing to overwrite.',
+          { level: 'warn' },
+        )
+        return false
+      }
+      if (foundNoFile) {
+        fallbackReadFoundNoFile = true
+      }
+      if (wouldLoseAuthState(currentConfig)) {
+        fallbackReadFoundNoFile = false
+        logForDebugging(
+          'saveGlobalConfig fallback: re-read config is missing auth that cache has; refusing to write. See GH #3117.',
+          { level: 'error' },
+        )
+        logEvent('tengu_config_auth_loss_prevented', {})
+        return false
+      }
+      const config = updater(currentConfig)
+      // Skip if no changes (same reference returned)
+      if (config === currentConfig) {
+        fallbackReadFoundNoFile = false
+        return true
+      }
+      const next: GlobalConfig = {
+        ...config,
+        projects: removeProjectHistory(currentConfig.projects),
+      }
+      if (jsonStringify(next) === jsonStringify(currentConfig)) {
+        fallbackReadFoundNoFile = false
+        return true
+      }
+      written = next
+      const useCreateOnly = fallbackReadFoundNoFile
+      try {
+        saveConfig(getGlobalClaudeFile(), written, DEFAULT_GLOBAL_CONFIG, {
+          createOnly: useCreateOnly,
+        })
+        fallbackReadFoundNoFile = false
+        writeThroughGlobalConfigCache(written)
+        return true
+      } catch (fallbackError) {
+        fallbackReadFoundNoFile = false
+        const code = getErrnoCode(fallbackError)
+        if (useCreateOnly && code === 'EEXIST') {
+          configCreateRefused = true
+          createRefusedThisProcess = true
+          doubtsNoFile = true
+          if (attempt + 1 < MAX_CREATE_REFUSED_RETRIES) {
+            logForDebugging(
+              'A create was refused, so the file is there: saving once more, onto it.',
+              { level: 'warn' },
+            )
+            configCreateRefused = false
+            continue
+          }
+          logForDebugging(
+            `A create was refused ${MAX_CREATE_REFUSED_RETRIES} times: this save is dropped.`,
+            { level: 'warn' },
+          )
+          return false
+        }
+        doubtsNoFile = true
+        if (
+          fullDiskSaveCode === undefined &&
+          (code === 'ENOSPC' || code === 'EDQUOT')
+        ) {
+          fullDiskSaveCode = code
+        }
+        logForDebugging(
+          `Config fallback write also failed; continuing without persisting: ${fallbackError}`,
+          { level: 'error' },
+        )
+        return false
+      }
     }
+    return false
   }
 }
 
 let fullDiskSaveCode: string | undefined
+let lastGetConfigOutcome: 'parsed' | 'enoent' | 'parse-error' | 'read-error' =
+  'parsed'
+let fallbackReadFoundNoFile = false
+let doubtsNoFile = false
+let configCreateRefused = false
+let createRefusedThisProcess = false
+let lookedAgainForMissingFile = false
+let reloadThroughStorageOwed = false
+let reloadThroughStoragePromise: Promise<void> | null = null
+let startupParseErrorBackupPath: string | null | undefined
+let unparseableFileLeftAlone = false
 
 /** Official 2.1.301 (#851) `pQs()` — ENOSPC/EDQUOT code from config fallback write. */
 export function getFullDiskSaveCode(): string | undefined {
@@ -1608,11 +1703,34 @@ export function readGlobalConfigFromDisk(): GlobalConfig | undefined {
     return TEST_GLOBAL_CONFIG_FOR_TESTING
   }
   try {
-    return migrateConfigFields(
-      getConfig(getGlobalClaudeFile(), createDefaultGlobalConfig),
-    )
+    const raw = getConfig(getGlobalClaudeFile(), createDefaultGlobalConfig)
+    // Official `hMe` (#1661): if ENOENT is doubted (prior create refused /
+    // unreadable disk), refuse to treat the config as absent defaults.
+    if (lastGetConfigOutcome === 'enoent' && doubtsNoFile) {
+      return undefined
+    }
+    return migrateConfigFields(raw)
   } catch {
     return undefined
+  }
+}
+
+function triggerOwedReloadThroughPinnedStorage(): void {
+  if (!reloadThroughStorageOwed || !isHoverRestOn()) {
+    return
+  }
+  try {
+    const { getPinnedStorageV5 } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./storageV5/index.js') as typeof import('./storageV5/index.js')
+    const pinned = getPinnedStorageV5()
+    if (pinned !== undefined) {
+      void reloadThroughStorageOnce(() =>
+        refreshGlobalConfigFromStorage(pinned),
+      )
+    }
+  } catch {
+    // StorageV5 optional
   }
 }
 
@@ -1620,6 +1738,10 @@ export function getGlobalConfig(): GlobalConfig {
   if (process.env.NODE_ENV === 'test') {
     return TEST_GLOBAL_CONFIG_FOR_TESTING
   }
+
+  // Official #1662: if enableConfigs() ran before a StorageV5 backend was
+  // pinned, perform the owed one-shot reload through storage once available.
+  triggerOwedReloadThroughPinnedStorage()
 
   // Fast path: pure memory read. After startup, this always hits — our own
   // writes go write-through and other instances' writes are picked up by the
@@ -1905,6 +2027,7 @@ function saveConfig<A extends object>(
   file: string,
   config: A,
   defaultConfig: A,
+  opts?: { createOnly?: boolean },
 ): void {
   // Ensure the directory exists before writing the config file
   const dir = dirname(file)
@@ -1918,15 +2041,22 @@ function saveConfig<A extends object>(
     (value, key) =>
       jsonStringify(value) !== jsonStringify(defaultConfig[key as keyof A]),
   )
-  // Write config file with secure permissions - mode only applies to new files
-  writeFileSyncAndFlush_DEPRECATED(
-    file,
-    jsonStringify(filteredConfig, null, 2),
-    {
+  const payload = jsonStringify(filteredConfig, null, 2)
+  if (opts?.createOnly) {
+    // NFS createOnly guard (#1661): refuse to overwrite if the file appeared
+    // concurrently (throws EEXIST without touching the existing file).
+    writeFileSync(file, payload, {
       encoding: 'utf-8',
       mode: 0o600,
-    },
-  )
+      flag: 'wx',
+    })
+  } else {
+    // Write config file with secure permissions - mode only applies to new files
+    writeFileSyncAndFlush_DEPRECATED(file, payload, {
+      encoding: 'utf-8',
+      mode: 0o600,
+    })
+  }
   if (file === getGlobalClaudeFile()) {
     globalConfigWriteCount++
   }
@@ -1942,6 +2072,7 @@ function saveConfigWithLock<A extends object>(
   file: string,
   createDefault: () => A,
   mergeFn: (current: A) => A,
+  opts?: { onCompromised?: (err: unknown) => void },
 ): boolean {
   const defaultConfig = createDefault()
   const dir = dirname(file)
@@ -1961,6 +2092,7 @@ function saveConfigWithLock<A extends object>(
         // becomes an unhandled exception. Log instead -- the lock being
         // stolen (e.g. after a 10s event-loop stall) is recoverable.
         logForDebugging(`Config lock compromised: ${err}`, { level: 'error' })
+        opts?.onCompromised?.(err)
       },
     })
     const lockTime = Date.now() - startTime
@@ -2119,9 +2251,15 @@ function saveConfigWithLock<A extends object>(
 // Flag to track if config reading is allowed
 let configReadingAllowed = false
 
-export function enableConfigs(): void {
+export function enableConfigs(storageV5?: StorageV5): void {
   if (configReadingAllowed) {
-    // Ensure this is idempotent
+    // Official `h3t` (#1662): when called again once StorageV5 is handed in,
+    // settle the owed one-shot reload through storage.
+    if (storageV5 !== undefined && isHoverRestOn()) {
+      void reloadThroughStorageOnce(() =>
+        refreshGlobalConfigFromStorage(storageV5),
+      )
+    }
     return
   }
 
@@ -2138,6 +2276,14 @@ export function enableConfigs(): void {
     true /* throw on invalid */,
   )
 
+  if (storageV5 === undefined) {
+    oweReloadThroughStorage()
+  } else if (isHoverRestOn()) {
+    void reloadThroughStorageOnce(() =>
+      refreshGlobalConfigFromStorage(storageV5),
+    )
+  }
+
   logForDiagnosticsNoPII('info', 'enable_configs_completed', {
     duration_ms: Date.now() - startTime,
   })
@@ -2151,13 +2297,214 @@ function getConfigBackupDir(): string {
   return join(getClaudeConfigHomeDir(), 'backups')
 }
 
+const EMPTY_OR_NULL_RE = /^[\s\0]*$/
+const MAX_BACKUP_INSPECT_BYTES = 8 * 1024 * 1024
+const IMPORTANT_BACKUP_KEYS = [
+  'numStartups',
+  'hasCompletedOnboarding',
+  'mcpServers',
+  'projects',
+] as const
+
+export function oweReloadThroughStorage(): void {
+  reloadThroughStorageOwed = true
+}
+
+export function hasOwedReloadThroughStorage(): boolean {
+  return reloadThroughStorageOwed
+}
+
+export function reloadThroughStorageOnce(
+  reload: () => Promise<void>,
+): Promise<void> {
+  if (reloadThroughStorageOwed) {
+    reloadThroughStorageOwed = false
+    reloadThroughStoragePromise = reload()
+  }
+  return reloadThroughStoragePromise ?? Promise.resolve()
+}
+
 /**
- * Find the most recent backup file for a given config file.
+ * Official `ML` / `BS` (#1662): reload global config once through a StorageV5
+ * backend and install the parsed record into the in-memory cache.
+ */
+export async function refreshGlobalConfigFromStorage(
+  storageV5: StorageV5,
+): Promise<void> {
+  try {
+    const res = await storageV5.readText([
+      { key: { namespace: 'globalConfig' } },
+    ])
+    if (!res.ok) return
+    const item = res.value.items[0]
+    if (!item?.found || item.value === undefined) return
+    const parsed = safeParseJSON(stripBOM(item.value), false)
+    if (
+      parsed === null ||
+      typeof parsed !== 'object' ||
+      Array.isArray(parsed)
+    ) {
+      return
+    }
+    const merged = migrateConfigFields({
+      ...createDefaultGlobalConfig(),
+      ...(parsed as Partial<GlobalConfig>),
+    })
+    globalConfigCache = {
+      config: merged,
+      mtime: item.mtimeMs ?? Date.now(),
+    }
+    lastReadFileStats = {
+      mtime: item.mtimeMs ?? Date.now(),
+      size: item.totalBytes,
+    }
+  } catch (err) {
+    logForDebugging(`Failed to reload global config through storage: ${err}`, {
+      level: 'warn',
+    })
+  }
+}
+
+export function leaveUnparseableFileAlone(): void {
+  unparseableFileLeftAlone = true
+}
+
+export function isUnparseableFileLeftAlone(): boolean {
+  return unparseableFileLeftAlone
+}
+
+export function getGlobalConfigWriteFlagsForTesting(): {
+  fallbackReadFoundNoFile: boolean
+  doubtsNoFile: boolean
+  configCreateRefused: boolean
+  createRefusedThisProcess: boolean
+  lastGetConfigOutcome: typeof lastGetConfigOutcome
+} {
+  return {
+    fallbackReadFoundNoFile,
+    doubtsNoFile,
+    configCreateRefused,
+    createRefusedThisProcess,
+    lastGetConfigOutcome,
+  }
+}
+
+export function resetGlobalConfigWriteFlagsForTesting(): void {
+  fallbackReadFoundNoFile = false
+  doubtsNoFile = false
+  configCreateRefused = false
+  createRefusedThisProcess = false
+  lookedAgainForMissingFile = false
+  reloadThroughStorageOwed = false
+  reloadThroughStoragePromise = null
+  startupParseErrorBackupPath = undefined
+  unparseableFileLeftAlone = false
+  lastGetConfigOutcome = 'parsed'
+  globalConfigCache = { config: null, mtime: 0 }
+}
+
+function formatBackupRestoreAdvice(file: string, backupPath: string): string {
+  return `A backup file exists at: ${backupPath}\nYou can manually restore it by running: cp -f "${backupPath}" "${file}"\n`
+}
+
+/**
+ * Official `gQs()` (#1657): mark the unparseable config file as left alone and
+ * return user-facing recovery advice for non-interactive mode.
+ */
+export function getUnparseableConfigAdvice(): {
+  advice: string
+  advicePrinted: boolean
+  backupPath: string | null | undefined
+} {
+  leaveUnparseableFileAlone()
+  const file = getGlobalClaudeFile()
+  const backupPath = startupParseErrorBackupPath
+  if (backupPath != null) {
+    return {
+      advice: formatBackupRestoreAdvice(file, backupPath),
+      advicePrinted: true,
+      backupPath,
+    }
+  }
+  return {
+    advice:
+      (backupPath === null ? 'No backup of this file was found.\n' : '') +
+      `Fix the JSON in ${file}, or move the file aside to start with default settings.\n`,
+    advicePrinted: false,
+    backupPath,
+  }
+}
+
+function selectBestBackupCandidate(
+  candidates: string[],
+  readContent: (candidate: string) => string | undefined,
+  requireParseable: boolean = false,
+): string | null {
+  let firstOauth: string | undefined
+  let firstNonEmpty: string | undefined
+  let firstUnparseable: string | undefined
+
+  for (const candidate of candidates.toReversed()) {
+    const content = readContent(candidate)
+    if (content === undefined || EMPTY_OR_NULL_RE.test(content)) {
+      continue
+    }
+    if (Buffer.byteLength(content) >= MAX_BACKUP_INSPECT_BYTES) {
+      return candidate
+    }
+    const parsed = safeParseJSON(stripBOM(content))
+    if (
+      parsed === null ||
+      typeof parsed !== 'object' ||
+      Array.isArray(parsed)
+    ) {
+      firstUnparseable ??= candidate
+      continue
+    }
+    const record = parsed as Record<string, unknown>
+    for (const key of IMPORTANT_BACKUP_KEYS) {
+      const val = record[key]
+      const nonEmpty =
+        typeof val === 'object' && val !== null
+          ? Object.keys(val).length > 0
+          : Boolean(val)
+      if (nonEmpty) {
+        return candidate
+      }
+    }
+    if ('oauthAccount' in record) {
+      firstOauth ??= candidate
+    }
+    if (Object.keys(record).length > 0) {
+      firstNonEmpty ??= candidate
+    }
+  }
+
+  if (requireParseable) {
+    return null
+  }
+  return firstOauth ?? firstNonEmpty ?? firstUnparseable ?? null
+}
+
+function readBackupCandidateSync(candidate: string): string | undefined {
+  const fs = getFsImplementation()
+  try {
+    const stat = fs.statSync(candidate)
+    if (!stat.isFile()) return ''
+    if (stat.size === 0) return ''
+    return fs.readFileSync(candidate, { encoding: 'utf-8' })
+  } catch (err) {
+    return getErrnoCode(err) === 'ENOENT' ? '' : undefined
+  }
+}
+
+/**
+ * Find the most recent non-empty, non-truncated backup file for a given config file.
  * Checks ~/.claude/backups/ first, then falls back to the legacy location
  * (next to the config file) for backwards compatibility.
  * Returns the full path to the most recent backup, or null if none exist.
  */
-function findMostRecentBackup(file: string): string | null {
+export function findMostRecentBackup(file: string): string | null {
   const fs = getFsImplementation()
   const fileBase = basename(file)
   const backupDir = getConfigBackupDir()
@@ -2168,10 +2515,11 @@ function findMostRecentBackup(file: string): string | null {
       .readdirStringSync(backupDir)
       .filter(f => f.startsWith(`${fileBase}.backup.`))
       .sort()
+      .map(f => join(backupDir, f))
 
-    const mostRecent = backups.at(-1) // Timestamps sort lexicographically
-    if (mostRecent) {
-      return join(backupDir, mostRecent)
+    const best = selectBestBackupCandidate(backups, readBackupCandidateSync)
+    if (best) {
+      return best
     }
   } catch {
     // Backup dir doesn't exist yet
@@ -2185,25 +2533,140 @@ function findMostRecentBackup(file: string): string | null {
       .readdirStringSync(fileDir)
       .filter(f => f.startsWith(`${fileBase}.backup.`))
       .sort()
+      .map(f => join(fileDir, f))
 
-    const mostRecent = backups.at(-1) // Timestamps sort lexicographically
-    if (mostRecent) {
-      return join(fileDir, mostRecent)
+    const best = selectBestBackupCandidate(backups, readBackupCandidateSync)
+    if (best) {
+      return best
     }
 
     // Check for legacy backup file (no timestamp)
     const legacyBackup = `${file}.backup`
-    try {
-      fs.statSync(legacyBackup)
-      return legacyBackup
-    } catch {
-      // Legacy backup doesn't exist
+    const legacyBest = selectBestBackupCandidate(
+      [legacyBackup],
+      readBackupCandidateSync,
+    )
+    if (legacyBest) {
+      return legacyBest
     }
   } catch {
     // Ignore errors reading directory
   }
 
   return null
+}
+
+/**
+ * Official `_Qs` (#1654): before retention cleanup deletes aged backups,
+ * ensure a home that only ran `claude -p` (which skips unchanged config
+ * writes) gets a fresh backup of `~/.claude.json` if no recent valid backup exists.
+ */
+export async function renewGlobalConfigBackupIfNeeded(
+  cutoffDate: Date,
+): Promise<void> {
+  const file = getGlobalClaudeFile()
+  const fs = getFsImplementation()
+  const fileBase = basename(file)
+  const backupDir = getConfigBackupDir()
+
+  try {
+    let entries: string[] = []
+    try {
+      entries = fs.readdirStringSync(backupDir)
+    } catch (err) {
+      if (getErrnoCode(err) === 'ENOENT') {
+        entries = []
+      } else {
+        throw err
+      }
+    }
+
+    const freshBackups: string[] = []
+    for (const name of entries) {
+      if (
+        !name.startsWith(`${fileBase}.backup.`) ||
+        !/^\d+$/.test(name.slice(`${fileBase}.backup.`.length))
+      ) {
+        continue
+      }
+      const fullPath = join(backupDir, name)
+      try {
+        const stat = fs.statSync(fullPath)
+        if (stat.isFile() && stat.mtime >= cutoffDate) {
+          freshBackups.push(fullPath)
+        }
+      } catch {
+        // Ignore stat failures
+      }
+    }
+
+    if (
+      selectBestBackupCandidate(
+        freshBackups.sort(),
+        readBackupCandidateSync,
+        true,
+      ) !== null
+    ) {
+      return
+    }
+
+    const content = fs.readFileSync(file, { encoding: 'utf-8' })
+    if (Buffer.byteLength(content) >= MAX_BACKUP_INSPECT_BYTES) {
+      return
+    }
+    if (selectBestBackupCandidate([file], () => content, true) === null) {
+      return
+    }
+
+    const stamp = Math.floor(Date.now() / 60_000) * 60_000
+    fs.mkdirSync(backupDir)
+    writeFileSyncAndFlush_DEPRECATED(
+      join(backupDir, `${fileBase}.backup.${stamp}`),
+      content,
+      { encoding: 'utf-8', mode: 0o600 },
+    )
+  } catch (err) {
+    if (getErrnoCode(err) !== 'ENOENT') {
+      logForDebugging(`Failed to renew config backup: ${err}`, {
+        level: 'error',
+      })
+    }
+  }
+}
+
+function readConfigWithNfsRetry(
+  file: string,
+  allowSecondLook: boolean,
+): string {
+  const fs = getFsImplementation()
+  try {
+    return fs.readFileSync(file, { encoding: 'utf-8' })
+  } catch (err) {
+    if (
+      !allowSecondLook ||
+      getErrnoCode(err) !== 'ENOENT' ||
+      lookedAgainForMissingFile
+    ) {
+      throw err
+    }
+    lookedAgainForMissingFile = true
+    logForDebugging('Config file read as missing at start-up: looking again.')
+    try {
+      fs.readdirStringSync(dirname(file))
+    } catch {
+      // Ignore readdir failures; only meant to revalidate NFS dentry cache
+    }
+    const content = fs.readFileSync(file, { encoding: 'utf-8' })
+    logForDebugging('Config file found on the second read.')
+    setImmediate(() => {
+      try {
+        logEvent('tengu_config_missing_read_second_look', {})
+      } catch {
+        // Ignore telemetry failure
+      }
+    })
+    return content
+  }
 }
 
 function getConfig<A>(
@@ -2219,12 +2682,24 @@ function getConfig<A>(
   const fs = getFsImplementation()
 
   try {
-    const fileContent = fs.readFileSync(file, {
-      encoding: 'utf-8',
-    })
+    const fileContent = readConfigWithNfsRetry(file, Boolean(throwOnInvalid))
+    // #1658: empty / whitespace / NUL-only config with no usable backup starts with defaults
+    if (
+      EMPTY_OR_NULL_RE.test(fileContent) &&
+      findMostRecentBackup(file) === null
+    ) {
+      lastGetConfigOutcome = throwOnInvalid ? 'enoent' : 'parse-error'
+      if (throwOnInvalid) {
+        process.stderr.write(
+          `Claude configuration file at ${file} was empty and no backup holds anything: starting with defaults.\n`,
+        )
+      }
+      return createDefault()
+    }
     try {
       // Strip BOM before parsing - PowerShell 5.x adds BOM to UTF-8 files
       const parsedConfig = jsonParse(stripBOM(fileContent))
+      lastGetConfigOutcome = 'parsed'
       return {
         ...createDefault(),
         ...parsedConfig,
@@ -2238,13 +2713,19 @@ function getConfig<A>(
   } catch (error) {
     // Handle file not found - check for backup and return default
     const errCode = getErrnoCode(error)
+    lastGetConfigOutcome =
+      error instanceof ConfigParseError
+        ? 'parse-error'
+        : errCode === 'ENOENT'
+          ? 'enoent'
+          : 'read-error'
     if (errCode === 'ENOENT') {
       const backupPath = findMostRecentBackup(file)
-      if (backupPath) {
+      if (backupPath && !createRefusedThisProcess) {
         process.stderr.write(
           `\nClaude configuration file not found at: ${file}\n` +
-            `A backup file exists at: ${backupPath}\n` +
-            `You can manually restore it by running: cp "${backupPath}" "${file}"\n\n`,
+            formatBackupRestoreAdvice(file, backupPath) +
+            '\n',
         )
       }
       return createDefault()
@@ -2252,6 +2733,9 @@ function getConfig<A>(
 
     // Re-throw ConfigParseError if throwOnInvalid is true
     if (error instanceof ConfigParseError && throwOnInvalid) {
+      if (file === getGlobalClaudeFile()) {
+        startupParseErrorBackupPath = findMostRecentBackup(file)
+      }
       throw error
     }
 
@@ -2359,10 +2843,7 @@ function getConfig<A>(
       }
 
       if (backupPath) {
-        process.stderr.write(
-          `A backup file exists at: ${backupPath}\n` +
-            `You can manually restore it by running: cp "${backupPath}" "${file}"\n\n`,
-        )
+        process.stderr.write(formatBackupRestoreAdvice(file, backupPath) + '\n')
       } else {
         process.stderr.write(`\n`)
       }
@@ -2417,16 +2898,25 @@ export function saveCurrentProjectConfig(
    * disk write stays the path when this arg is omitted.
    */
   _storageV5?: unknown,
-): void {
+): boolean {
   void _storageV5
   if (process.env.NODE_ENV === 'test') {
     const config = updater(TEST_PROJECT_CONFIG_FOR_TESTING)
     // Skip if no changes (same reference returned)
     if (config === TEST_PROJECT_CONFIG_FOR_TESTING) {
-      return
+      return true
     }
     Object.assign(TEST_PROJECT_CONFIG_FOR_TESTING, config)
-    return
+    return true
+  }
+
+  // Official `Sd` (#1657): never overwrite an unparseable global config file.
+  if (isUnparseableFileLeftAlone()) {
+    logForDebugging(
+      'config: saveCurrentProjectConfig ran in a process that is ending because the global config file does not parse; the change is dropped and the file is left as it is',
+      { level: 'warn' },
+    )
+    return false
   }
   const absolutePath = getProjectPathForConfig()
 
@@ -2456,6 +2946,7 @@ export function saveCurrentProjectConfig(
     if (didWrite && written) {
       writeThroughGlobalConfigCache(written)
     }
+    return true
   } catch (error) {
     logForDebugging(`Failed to save config with lock: ${error}`, {
       level: 'error',
@@ -2464,20 +2955,32 @@ export function saveCurrentProjectConfig(
     // Same race window as saveGlobalConfig's fallback -- refuse to write
     // defaults over good cached config. See GH #3117.
     const config = getConfig(getGlobalClaudeFile(), createDefaultGlobalConfig)
+    if (
+      lastGetConfigOutcome === 'read-error' ||
+      lastGetConfigOutcome === 'parse-error' ||
+      (lastGetConfigOutcome === 'enoent' && doubtsNoFile)
+    ) {
+      doubtsNoFile = true
+      logForDebugging(
+        'saveCurrentProjectConfig fallback: config re-read was rejected or ENOENT is doubted; refusing to write.',
+        { level: 'error' },
+      )
+      return false
+    }
     if (wouldLoseAuthState(config)) {
       logForDebugging(
         'saveCurrentProjectConfig fallback: re-read config is missing auth that cache has; refusing to write. See GH #3117.',
         { level: 'error' },
       )
       logEvent('tengu_config_auth_loss_prevented', {})
-      return
+      return false
     }
     const currentProjectConfig =
       config.projects?.[absolutePath] ?? DEFAULT_PROJECT_CONFIG
     const newProjectConfig = updater(currentProjectConfig)
     // Skip if no changes (same reference returned)
     if (newProjectConfig === currentProjectConfig) {
-      return
+      return true
     }
     written = {
       ...config,
@@ -2486,8 +2989,13 @@ export function saveCurrentProjectConfig(
         [absolutePath]: newProjectConfig,
       },
     }
-    saveConfig(getGlobalClaudeFile(), written, DEFAULT_GLOBAL_CONFIG)
-    writeThroughGlobalConfigCache(written)
+    try {
+      saveConfig(getGlobalClaudeFile(), written, DEFAULT_GLOBAL_CONFIG)
+      writeThroughGlobalConfigCache(written)
+      return true
+    } catch {
+      return false
+    }
   }
 }
 

@@ -192,6 +192,13 @@ export function ResumeConversation({
     });
   }, []);
 
+  React.useEffect(() => {
+    if (filterByPr === undefined || loading || filteredLogs.length > 0) return;
+    const ref = sessionLogResultRef.current;
+    if (!ref || ref.nextIndex >= ref.allStatLogs.length) return;
+    loadMoreLogs(50);
+  }, [filterByPr, loading, filteredLogs.length, logs.length, loadMoreLogs]);
+
   const loadLogs = React.useCallback(
     (allProjects: boolean) => {
       setLoading(true);

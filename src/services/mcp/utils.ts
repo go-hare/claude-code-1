@@ -190,8 +190,35 @@ export function excludeResourcesByServer(
  * to settings.json shouldn't reconnect it). Keys sorted so `{a:1,b:2}` and
  * `{b:2,a:1}` hash the same.
  */
+/**
+ * Official `gOo` (#1537) — strip provenance/runtime metadata before hashing so
+ * desktop/SDK sessions do not falsely mark project/local servers as stale after
+ * turn 1 when metadata fields differ.
+ */
 export function hashMcpConfig(config: ScopedMcpServerConfig): string {
-  const { scope: _scope, ...rest } = config
+  const {
+    scope: _scope,
+    pluginSource: _pluginSource,
+    pluginPath: _pluginPath,
+    relayed: _relayed,
+    hostRegistered: _hostRegistered,
+    pluginEndpointTemplated: _pluginEndpointTemplated,
+    pluginOfficialSourceVouched: _pluginOfficialSourceVouched,
+    agentSource: _agentSource,
+    declaredIn: _declaredIn,
+    readFrom: _readFrom,
+    configError: _configError,
+    configErrorReason: _configErrorReason,
+    expandedFromEnv: _expandedFromEnv,
+    configuredCommand: _configuredCommand,
+    redialToRelearnRegistration: _redialToRelearnRegistration,
+    repoResidentOrigin: _repoResidentOrigin,
+    tools: _tools,
+    discoveryCache: _discoveryCache,
+    cachedInitResponse: _cachedInitResponse,
+    cachedDiscoverResponse: _cachedDiscoverResponse,
+    ...rest
+  } = config as ScopedMcpServerConfig & Record<string, unknown>
   const stable = jsonStringify(rest, (_k, v: unknown) => {
     if (v && typeof v === 'object' && !Array.isArray(v)) {
       const obj = v as Record<string, unknown>
@@ -202,6 +229,32 @@ export function hashMcpConfig(config: ScopedMcpServerConfig): string {
     return v
   })
   return createHash('sha256').update(stable).digest('hex').slice(0, 16)
+}
+
+/**
+ * Official `eFn(config, currentWorkspaceRoot)` (#1537) — true only when a
+ * project/local client was explicitly declared under a previous workspace root.
+ */
+export function isClientDeclaredUnderPreviousWorkspaceRoot(
+  config: ScopedMcpServerConfig & {
+    declaredIn?: string
+    repoResidentOrigin?: string
+  },
+  currentWorkspaceRoot: string,
+  initialProjectRoot?: string,
+): boolean {
+  if (config.scope === 'project') {
+    const origin = config.repoResidentOrigin ?? config.declaredIn
+    return (
+      origin !== undefined &&
+      origin !== (initialProjectRoot ?? currentWorkspaceRoot)
+    )
+  }
+  return (
+    config.scope === 'local' &&
+    config.declaredIn !== undefined &&
+    config.declaredIn !== currentWorkspaceRoot
+  )
 }
 
 /**
@@ -228,6 +281,8 @@ export function excludeStalePluginClients(
     pluginReconnectKey?: number
   },
   configs: Record<string, ScopedMcpServerConfig>,
+  currentWorkspaceRoot?: string,
+  initialProjectRoot?: string,
 ): {
   clientsInitialized?: boolean
   clients: MCPServerConnection[]
@@ -238,8 +293,19 @@ export function excludeStalePluginClients(
   stale: MCPServerConnection[]
 } {
   const stale = mcp.clients.filter(c => {
+    if (
+      currentWorkspaceRoot !== undefined &&
+      isClientDeclaredUnderPreviousWorkspaceRoot(
+        c.config,
+        currentWorkspaceRoot,
+        initialProjectRoot,
+      )
+    ) {
+      return true
+    }
     const fresh = configs[c.name]
-    if (!fresh) return c.config.scope === 'dynamic'
+    if (!fresh)
+      return c.config.scope === 'dynamic' || c.config.scope === 'managed'
     return hashMcpConfig(c.config) !== hashMcpConfig(fresh)
   })
   if (stale.length === 0) {

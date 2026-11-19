@@ -8,8 +8,10 @@ import {
 import {
   clearAutoModeUnavailableResponses,
   countAutoModeUnavailableResponsesInARow,
+  dropAutoModeUnavailableResponsesOfOtherTurns,
   getAutoModeUnavailableResponse,
   noteAutoModeUnavailableResponse,
+  setAutoModeUnavailableStopNotice,
 } from '../../bootstrap/state.js'
 import type { RetryStatus } from '../advisorNetworkStall.js'
 import { describeClassifierGatewayHost } from '../../services/api/autoModeServerFallbackNotice.js'
@@ -182,12 +184,26 @@ export async function holdForConsecutiveAutoModeUnavailable(
     clearAutoModeUnavailableResponses(options.runKey)
     inRow = 0
   }
+  const activeTurn =
+    (options as { turn?: number | string; turnNow?: number | string }).turn ??
+    (options as { turnNow?: number | string }).turnNow
+  if (activeTurn !== undefined) {
+    dropAutoModeUnavailableResponsesOfOtherTurns(options.runKey, activeTurn)
+    inRow = countAutoModeUnavailableResponsesInARow(options.runKey)
+  }
+  const noCheck = (options as { noCheck?: boolean }).noCheck
+  const turn = (options as { turn?: number | string }).turn
+  const extraFields = {
+    ...(turn !== undefined ? { turn } : {}),
+    ...(noCheck ? { noCheck } : {}),
+  }
   const position = inRow + 1
   if (position >= AUTO_MODE_UNAVAILABLE_STREAK_LIMIT) {
     noteAutoModeUnavailableResponse(request, {
       runKey: options.runKey,
       position,
       waited: Promise.resolve(true),
+      ...extraFields,
     })
     return { kind: 'stop', position, recorded: true }
   }
@@ -197,6 +213,7 @@ export async function holdForConsecutiveAutoModeUnavailable(
     runKey: options.runKey,
     position,
     waited,
+    ...extraFields,
   })
   return {
     kind: 'deny',
@@ -278,6 +295,11 @@ export function denyAutoModeUnavailableStop(
       `[server-classifier] no usable verdict for ${AUTO_MODE_UNAVAILABLE_STREAK_LIMIT} responses in a row; stopping the ${isSubagent ? "agent's run" : 'turn'}`,
       { level: 'warn' },
     )
+    if (isSubagent) {
+      setAutoModeUnavailableStopNotice(
+        'Auto mode stopped a subagent because the safety check was unavailable.',
+      )
+    }
   }
   return {
     behavior: 'deny',

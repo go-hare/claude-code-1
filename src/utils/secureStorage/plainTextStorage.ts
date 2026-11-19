@@ -1,13 +1,9 @@
-import { chmodSync } from 'fs'
+import { chmodSync, closeSync, fsyncSync, openSync, writeSync } from 'fs'
 import { join } from 'path'
 import { getClaudeConfigHomeDir } from '../envUtils.js'
 import { getErrnoCode } from '../errors.js'
 import { getFsImplementation } from '../fsOperations.js'
-import {
-  jsonParse,
-  jsonStringify,
-  writeFileSync_DEPRECATED,
-} from '../slowOperations.js'
+import { jsonParse, jsonStringify } from '../slowOperations.js'
 import {
   SECURE_STORAGE_READ_FAILED,
   type ReadAsyncStrictOptions,
@@ -68,10 +64,12 @@ export const plainTextStorage = {
   },
   update(data: SecureStorageData): { success: boolean; warning?: string } {
     // sync IO: called from sync context (SecureStorage interface)
+    const { storageDir, storagePath } = getStoragePath()
+    const fs = getFsImplementation()
+    const tempPath = `${storagePath}.tmp.${process.pid}.${Math.random().toString(36).slice(2, 10)}`
     try {
-      const { storageDir, storagePath } = getStoragePath()
       try {
-        getFsImplementation().mkdirSync(storageDir)
+        fs.mkdirSync(storageDir)
       } catch (e: unknown) {
         const code = getErrnoCode(e)
         if (code !== 'EEXIST') {
@@ -79,16 +77,35 @@ export const plainTextStorage = {
         }
       }
 
-      writeFileSync_DEPRECATED(storagePath, jsonStringify(data), {
-        encoding: 'utf8',
-        flush: false,
-      })
+      // Atomic write (#1655): write to temp file, fsync (forgiving EBADF on NFS),
+      // then rename over storagePath so ENOSPC/EDQUOT never truncates .credentials.json.
+      const payload = jsonStringify(data)
+      const fd = openSync(tempPath, 'w', 0o600)
+      try {
+        writeSync(fd, payload, 0, 'utf8')
+        try {
+          fsyncSync(fd)
+        } catch (syncErr: unknown) {
+          if (getErrnoCode(syncErr) !== 'EBADF') {
+            throw syncErr
+          }
+        }
+      } finally {
+        closeSync(fd)
+      }
+      chmodSync(tempPath, 0o600)
+      fs.renameSync(tempPath, storagePath)
       chmodSync(storagePath, 0o600)
       return {
         success: true,
         warning: 'Warning: Storing credentials in plaintext.',
       }
     } catch {
+      try {
+        fs.unlinkSync(tempPath)
+      } catch {
+        // Ignore cleanup failure on temp file
+      }
       return { success: false }
     }
   },

@@ -7489,6 +7489,20 @@ async function runModelFork(
   )
   const abort = new AbortController()
   const prompt = String(input.prompt)
+  const { convertEffortValueToLevel, EFFORT_LEVELS, getEffortEnvOverride } =
+    await import('../effort.js')
+  const requestedEffort =
+    typeof input.effort === 'string'
+      ? (input.effort as (typeof EFFORT_LEVELS)[number])
+      : undefined
+  const envOverride = getEffortEnvOverride()
+  const cappedByEnv =
+    requestedEffort !== undefined &&
+    envOverride !== undefined &&
+    (envOverride === null ||
+      EFFORT_LEVELS.indexOf(requestedEffort) >
+        EFFORT_LEVELS.indexOf(convertEffortValueToLevel(envOverride)))
+  const pinnedEffort = cappedByEnv ? undefined : requestedEffort
   try {
     const { messages, totalUsage } = await runForkedAgent({
       promptMessages: [createUserMessage({ content: prompt })],
@@ -7508,24 +7522,37 @@ async function runModelFork(
       querySource: 'hook_prompt',
       forkLabel: 'plugin_model_fork',
       maxTurns: MODEL_FORK_MAX_TURNS,
+      pinnedEffort,
       skipCacheWrite: true,
       skipTranscript: true,
       overrides: { abortController: abort },
     })
     const assistants = messages.filter(message => message.type === 'assistant')
-    const replies = assistants
-      .filter(message => !message.isApiErrorMessage)
+    const nonErrorAssistants = assistants.filter(
+      message => !message.isApiErrorMessage,
+    )
+    const replies = nonErrorAssistants
       .map(message => getAssistantMessageText(message))
       .filter((text): text is string => text !== null && text !== '')
     const apiError = [...assistants]
       .reverse()
       .find(message => message.isApiErrorMessage)
+    const lastAssistant = nonErrorAssistants.at(-1) as
+      | { perTurnEffort?: unknown; effort?: unknown }
+      | undefined
+    const sentEffort = lastAssistant?.perTurnEffort ?? lastAssistant?.effort
     const usage = forkUsageOf(totalUsage)
+    const effortField = sentEffort !== undefined ? { effort: sentEffort } : {}
     if (abort.signal.aborted) {
-      return { isAnswered: false, reason: 'aborted', usage }
+      return { isAnswered: false, reason: 'aborted', usage, ...effortField }
     }
     if (replies.length > 0) {
-      return { isAnswered: true, text: replies.join('\n'), usage }
+      return {
+        isAnswered: true,
+        text: replies.join('\n'),
+        usage,
+        ...effortField,
+      }
     }
     if (apiError) {
       return {
@@ -7534,9 +7561,10 @@ async function runModelFork(
         status: null,
         error: 'unknown',
         usage,
+        ...effortField,
       }
     }
-    return { isAnswered: false, reason: 'empty-reply', usage }
+    return { isAnswered: false, reason: 'empty-reply', usage, ...effortField }
   } catch (error) {
     if (abort.signal.aborted) {
       return { isAnswered: false, reason: 'aborted', usage: EMPTY_MODEL_USAGE }

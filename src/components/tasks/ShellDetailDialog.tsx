@@ -1,11 +1,12 @@
 import React, { Suspense, use, useDeferredValue, useEffect, useState } from 'react';
 import type { DeepImmutable } from 'src/types/utils.js';
 import type { CommandResultDisplay } from '../../commands.js';
+import { useElapsedTime } from '../../hooks/useElapsedTime.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { type KeyboardEvent, Box, Byline, Dialog, KeyboardShortcutHint, stringWidth, Text } from '@anthropic/ink';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 import type { LocalShellTaskState } from '../../tasks/LocalShellTask/guards.js';
-import { formatDuration, formatFileSize, truncateToWidth } from '../../utils/format.js';
+import { formatFileSize, truncateToWidth } from '../../utils/format.js';
 import { tailFile } from '../../utils/fsOperations.js';
 import { getTaskOutputPath } from '../../utils/task/diskOutput.js';
 
@@ -40,6 +41,7 @@ async function getTaskOutput(shell: DeepImmutable<LocalShellTaskState>): Promise
 
 export function ShellDetailDialog({ shell, onDone, onKillShell, onBack }: Props): React.ReactNode {
   const { columns } = useTerminalSize();
+  const elapsedTime = useElapsedTime(shell.startTime, shell.status === 'running', 1000, 0, shell.endTime);
 
   // Promise created in initializer (not during render). For running shells,
   // the effect timer replaces it periodically to pick up new output.
@@ -144,7 +146,7 @@ export function ShellDetailDialog({ shell, onDone, onKillShell, onBack }: Props)
               <Text bold>Runtime:</Text>
             </Box>
             <Box width={valueColWidth} flexGrow={1} flexShrink={0} maxWidth={valueColWidth}>
-              <Text>{formatDuration((shell.endTime ?? Date.now()) - shell.startTime)}</Text>
+              <Text>{elapsedTime}</Text>
             </Box>
           </Box>
           <Box flexDirection="row" columnGap={TABLE_COLUMN_GAP} flexWrap="wrap">

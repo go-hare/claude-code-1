@@ -897,3 +897,127 @@ export function formatRoomSendResult(room: unknown): string {
   }
   return `Not sent (${reason}).`
 }
+
+/**
+ * #1497 (official vFo / EFo): valid database access tiers including `self`,
+ * and path segment pattern including `{self}`.
+ */
+export const ARTIFACT_DB_ACCESS_TIERS = new Set([
+  'view',
+  'interact',
+  'admin',
+  'owner',
+  'self',
+] as const)
+
+export const ARTIFACT_DB_RULE_PATH_RE =
+  /^(?:[A-Za-z0-9_.~:@+-]+|\{self\})(?:\/(?:[A-Za-z0-9_.~:@+-]+|\{self\}))*$/
+
+export type ArtifactDbAccessRule = {
+  path: string
+  read?: string
+  write?: string
+}
+
+const ARTIFACT_DB_RULE_PATH_CLIP = 80
+
+/** Official `cKs` element check: path (empty or EFo) and read/write tiers in vFo. */
+export function isValidArtifactDbAccessRule(
+  value: unknown,
+): value is ArtifactDbAccessRule {
+  if (!isRecord(value)) return false
+  const { path, read, write, ...rest } = value
+  if (Object.keys(rest).length > 0) return false
+  if (
+    typeof path !== 'string' ||
+    (path !== '' && !ARTIFACT_DB_RULE_PATH_RE.test(path))
+  ) {
+    return false
+  }
+  if (
+    read !== undefined &&
+    (typeof read !== 'string' ||
+      !(ARTIFACT_DB_ACCESS_TIERS as ReadonlySet<string>).has(read))
+  ) {
+    return false
+  }
+  if (
+    write !== undefined &&
+    (typeof write !== 'string' ||
+      !(ARTIFACT_DB_ACCESS_TIERS as ReadonlySet<string>).has(write))
+  ) {
+    return false
+  }
+  return true
+}
+
+/** Official `cKs` — true iff every entry is a valid ArtifactDbAccessRule. */
+export function areValidArtifactDbAccessRules(
+  value: unknown,
+): value is ArtifactDbAccessRule[] {
+  return Array.isArray(value) && value.every(isValidArtifactDbAccessRule)
+}
+
+function formatValidatedDbRulePath(path: unknown): string {
+  if (path === '') return '(root)'
+  if (typeof path === 'string' && ARTIFACT_DB_RULE_PATH_RE.test(path)) {
+    return modelClip(path, ARTIFACT_DB_RULE_PATH_CLIP, false)
+  }
+  return '?'
+}
+
+function formatValidatedDbRuleTier(tier: unknown): string {
+  return typeof tier === 'string' &&
+    (ARTIFACT_DB_ACCESS_TIERS as ReadonlySet<string>).has(tier)
+    ? tier
+    : '?'
+}
+
+export function formatDbAccessRulesSummary(
+  rules: readonly ArtifactDbAccessRule[],
+  droppedRules?: readonly ArtifactDbAccessRule[],
+): string {
+  const lines: string[] = []
+  for (const r of rules) {
+    const pathLabel = formatValidatedDbRulePath(r.path)
+    const parts: string[] = []
+    if (r.read !== undefined) {
+      parts.push(`read=${formatValidatedDbRuleTier(r.read)}`)
+    }
+    if (r.write !== undefined) {
+      parts.push(`write=${formatValidatedDbRuleTier(r.write)}`)
+    }
+    lines.push(`- ${pathLabel}: ${parts.join(', ') || 'default'}`)
+  }
+  if (droppedRules && droppedRules.length > 0) {
+    lines.push(
+      `⚠ ${droppedRules.length} database access ${droppedRules.length === 1 ? 'rule was' : 'rules were'} dropped on republish (re-declare if still needed): ${droppedRules.map(r => formatValidatedDbRulePath(r.path)).join(', ')}`,
+    )
+  }
+  return lines.join('\n')
+}
+
+/**
+ * Official #1497 (`db_rules_reset_refused` @297193344):
+ * Refusal echo when a republish re-sends `capabilities.db` without `rules`
+ * while the artifact already stores access rules.
+ */
+export function formatDbRulesResetRefusal(
+  storedRules: readonly ArtifactDbAccessRule[],
+): string {
+  const valid = areValidArtifactDbAccessRules(storedRules)
+  const serialized = JSON.stringify(storedRules)
+  const clipped = modelClip(serialized, 600, false)
+  const echoed = valid && clipped === serialized ? clipped : ''
+  const summary = formatDbAccessRulesSummary(storedRules, storedRules)
+  const countLabel = `${storedRules.length} ${noun(storedRules.length, 'access rule')}`
+  const rulesClause =
+    echoed !== ''
+      ? `: ${echoed}`
+      : ' (not listed here; read the artifact with action "read" to see them)'
+  const keepClause =
+    echoed !== ''
+      ? 'resend db with those rules'
+      : 'publish with capabilities omitted (the stored declaration stays as it is), or read it back and resend db with its rules'
+  return `your capabilities declaration re-sends db without its rules while the artifact stores ${countLabel}${rulesClause} — a sent db block replaces the stored one, rules included, so this publish would have reset them to the defaults (anyone who can open the artifact can read its shared data, and anyone with more than view-only access can write it). To keep them, ${keepClause}; to reset them on purpose, send db: {"rules": []}.\n${summary}`
+}

@@ -5,6 +5,7 @@
  */
 
 import { logForDebugging } from '../debug.js'
+import { createSignal } from '../signal.js'
 import type { SettingsJson } from './types.js'
 
 export type StoredCopyRefusal = {
@@ -36,6 +37,42 @@ const BASE_URL_ENV_KEYS = [
   'ANTHROPIC_FOUNDRY_BASE_URL',
 ] as const
 
+export type RemoteSettingsLoadStatus =
+  | { state: 'ok'; hasSettings: boolean }
+  | {
+      state: 'failed'
+      failure: { errorKind: string; httpStatus?: number }
+      restrictionsOnly?: boolean
+    }
+  | {
+      state: 'stale_cache'
+      failure: { errorKind: string; httpStatus?: number }
+      transportEnvWithheld: boolean
+    }
+  | { state: 'ineligible' }
+
+export type RemoteSettingsNoticeWord = 'pending' | 'missing' | 'answered'
+
+export type RemoteSettingsNoticeSaid = {
+  word: RemoteSettingsNoticeWord
+  epoch: number
+}
+
+export type RemoteSettingsNoticeResult = {
+  said: RemoteSettingsNoticeSaid | undefined
+  message: string | null
+  severity: 'notice' | 'warning'
+}
+
+export type RemoteSettingsConsentOutcome =
+  | 'approved'
+  | 'first_party_silent'
+  | 'no_check_needed'
+  | 'rejected'
+  | 'deferred_non_interactive'
+  | 'deferred_no_consent_surface'
+  | 'superseded'
+
 type RemoteSettingsRuntimeState = {
   sessionCache: SettingsJson | null
   verifiedPayload: SettingsJson | null
@@ -43,6 +80,12 @@ type RemoteSettingsRuntimeState = {
   storedCopyRefusal: StoredCopyRefusal | null
   refusedCopyHelperTier: HelperTier | null
   droppedHelperTier: HelperTier | null
+  lastLoadStatus: RemoteSettingsLoadStatus | undefined
+  loadCycleBegun: boolean
+  loadCycleEnded: boolean
+  loadBackstopReleased: boolean
+  eligibilityMemo: boolean | undefined
+  loadEpoch: number
 }
 
 const state: RemoteSettingsRuntimeState = {
@@ -52,6 +95,12 @@ const state: RemoteSettingsRuntimeState = {
   storedCopyRefusal: null,
   refusedCopyHelperTier: null,
   droppedHelperTier: null,
+  lastLoadStatus: undefined,
+  loadCycleBegun: false,
+  loadCycleEnded: false,
+  loadBackstopReleased: false,
+  eligibilityMemo: undefined,
+  loadEpoch: 0,
 }
 
 function stringOnlyEnv(
@@ -344,6 +393,249 @@ export function reconcileMdmAndRemoteSettings(
   }
 }
 
+/**
+ * Official #1531: Remote managed settings load cycle & status notifications.
+ */
+export const REMOTE_SETTINGS_STILL_LOADING_MSG =
+  'Remote managed settings are still loading'
+export const REMOTE_SETTINGS_DID_NOT_LOAD_MSG =
+  'Remote managed settings did not load'
+export const REMOTE_SETTINGS_HAVE_LOADED_MSG =
+  'Remote managed settings have now loaded'
+
+const loadStatusChanged = createSignal<[]>()
+
+/**
+ * Subscribe to remote managed settings load status / lifecycle transitions
+ * (Official `Wye` / `ysi`, #1531).
+ */
+export const onRemoteSettingsLoadStatusChanged = loadStatusChanged.subscribe
+
+export function getActiveRemoteSettings(): SettingsJson | null {
+  return state.sessionCache
+}
+
+export function setRemoteSettingsLoadStatus(
+  status: RemoteSettingsLoadStatus | undefined,
+): void {
+  state.lastLoadStatus = status
+  loadStatusChanged.emit()
+}
+
+export function getRemoteSettingsLoadStatus():
+  | RemoteSettingsLoadStatus
+  | undefined {
+  return state.lastLoadStatus
+}
+
+export function markRemoteSettingsLoadCycleBegun(): void {
+  state.loadCycleBegun = true
+  loadStatusChanged.emit()
+}
+
+export function markRemoteSettingsLoadCycleEnded(): void {
+  state.loadCycleEnded = true
+  loadStatusChanged.emit()
+}
+
+export function releaseRemoteSettingsLoadBackstop(): void {
+  state.loadBackstopReleased = true
+  loadStatusChanged.emit()
+}
+
+export function setRemoteSettingsEligibilityMemo(
+  eligible: boolean | undefined,
+): void {
+  state.eligibilityMemo = eligible
+  loadStatusChanged.emit()
+}
+
+export function bumpRemoteSettingsLoadEpoch(): number {
+  state.loadEpoch += 1
+  loadStatusChanged.emit()
+  return state.loadEpoch
+}
+
+export function isRemoteSettingsNoticeRelevant(): boolean {
+  const status = state.lastLoadStatus
+  switch (status?.state) {
+    case 'failed':
+      return true
+    case 'stale_cache':
+      return status.transportEnvWithheld
+    case undefined:
+      return (
+        state.eligibilityMemo === true &&
+        (state.loadCycleEnded || state.loadBackstopReleased)
+      )
+    default:
+      return false
+  }
+}
+
+export function formatRemoteSettingsFailureReason(
+  errorKind: string,
+  httpStatus?: number,
+): string {
+  switch (errorKind) {
+    case 'no_auth_available':
+      return 'no credentials available'
+    case 'profile_credential_error':
+      return 'the profile credential could not authenticate the fetch (details in the debug log)'
+    case 'api_key_not_sent':
+    case 'http_401':
+      return 'authentication rejected (401)'
+    case 'http_403':
+      return 'access denied (403)'
+    case 'http_4xx':
+      if (httpStatus === 204 || httpStatus === 404) {
+        return `answered by a network intermediary, not Anthropic (${httpStatus}); check this network's proxy`
+      }
+      return `client error${httpStatus ? ` (${httpStatus})` : ''}`
+    case 'http_5xx':
+      return `server error${httpStatus ? ` (${httpStatus})` : ''}`
+    case 'timeout':
+      return 'request timed out'
+    default:
+      return errorKind
+  }
+}
+
+export function buildRemoteSettingsLoadNotice(
+  prevSaid: RemoteSettingsNoticeSaid | undefined,
+): RemoteSettingsNoticeResult | null {
+  const status = state.lastLoadStatus
+  const epoch = state.loadEpoch
+  const relevant = isRemoteSettingsNoticeRelevant()
+
+  if (!relevant) {
+    if (prevSaid === undefined) return null
+    if (status?.state === 'ineligible') {
+      return { said: undefined, message: null, severity: 'notice' }
+    }
+    if (
+      prevSaid.word === 'answered' ||
+      (status?.state !== 'ok' && status?.state !== 'stale_cache')
+    ) {
+      return null
+    }
+  }
+
+  const word: RemoteSettingsNoticeWord = !relevant
+    ? 'answered'
+    : status === undefined && state.loadCycleBegun && !state.loadCycleEnded
+      ? 'pending'
+      : 'missing'
+
+  if (prevSaid?.epoch === epoch && prevSaid.word === word) {
+    return null
+  }
+
+  let message: string
+  if (status === undefined) {
+    message =
+      word === 'pending'
+        ? REMOTE_SETTINGS_STILL_LOADING_MSG
+        : REMOTE_SETTINGS_DID_NOT_LOAD_MSG
+  } else {
+    switch (status.state) {
+      case 'failed':
+        message = `Remote managed settings failed to load (${formatRemoteSettingsFailureReason(status.failure.errorKind, status.failure.httpStatus)}) · ${status.restrictionsOnly ? "the cached policy's restrictions still apply" : 'no remote policy applied'}`
+        break
+      case 'stale_cache':
+        message = `Remote managed settings failed to load (${formatRemoteSettingsFailureReason(status.failure.errorKind, status.failure.httpStatus)}) · using cached policy${status.transportEnvWithheld ? ' (proxy/CA/provider env withheld)' : ''}`
+        break
+      case 'ok':
+        message = `${REMOTE_SETTINGS_HAVE_LOADED_MSG} · ${status.hasSettings ? 'remote policy applied' : 'no remote policy to apply'}`
+        break
+      case 'ineligible':
+        return null
+    }
+  }
+
+  return {
+    said: { word, epoch },
+    message,
+    severity: word === 'answered' ? 'notice' : 'warning',
+  }
+}
+
+/**
+ * Official #1512: Team/Enterprise first-party API pull consent-free apply check.
+ * When `isFirstPartyTrusted` is true, there is no open interactive consent
+ * review, and no untrusted stored-copy refusal is active, remote settings can
+ * be applied silently without an interactive approval prompt (`first_party_silent`).
+ */
+export function shouldApplyRemoteSettingsConsentFree(opts: {
+  isFirstPartyTrusted: boolean
+  hasOpenReview?: boolean
+  hasDangerousSettingsChanged?: boolean
+}): boolean {
+  if (opts.hasOpenReview) return false
+  if (state.storedCopyRefusal !== null) return false
+  if (!opts.hasDangerousSettingsChanged) return true
+  return opts.isFirstPartyTrusted
+}
+
+export function resolveRemoteSettingsConsentOutcome(opts: {
+  isFirstPartyTrusted: boolean
+  isInteractive: boolean
+  hasOpenReview?: boolean
+  hasDangerousSettingsChanged?: boolean
+  promptResult?: 'approved' | 'rejected' | 'deferred_no_consent_surface'
+}): RemoteSettingsConsentOutcome {
+  if (!opts.hasDangerousSettingsChanged) {
+    return 'no_check_needed'
+  }
+  if (
+    shouldApplyRemoteSettingsConsentFree({
+      isFirstPartyTrusted: opts.isFirstPartyTrusted,
+      hasOpenReview: opts.hasOpenReview,
+      hasDangerousSettingsChanged: opts.hasDangerousSettingsChanged,
+    })
+  ) {
+    return 'first_party_silent'
+  }
+  if (!opts.isInteractive) {
+    return 'deferred_non_interactive'
+  }
+  return opts.promptResult ?? 'deferred_no_consent_surface'
+}
+
+export function applyRemoteSettingsConsentFreeIfEligible(
+  settings: SettingsJson,
+  opts: {
+    isFirstPartyTrusted: boolean
+    isInteractive: boolean
+    hasOpenReview?: boolean
+    hasDangerousSettingsChanged?: boolean
+    promptResult?: 'approved' | 'rejected' | 'deferred_no_consent_surface'
+  },
+): {
+  applied: boolean
+  outcome: RemoteSettingsConsentOutcome
+  persistedConsent: boolean
+} {
+  const outcome = resolveRemoteSettingsConsentOutcome(opts)
+  if (
+    outcome === 'approved' ||
+    outcome === 'first_party_silent' ||
+    outcome === 'no_check_needed'
+  ) {
+    setVerifiedRemoteSettingsForTesting(settings)
+    setRemoteSettingsLoadStatus({
+      state: 'ok',
+      hasSettings: Object.keys(settings).length > 0,
+    })
+    return { applied: true, outcome, persistedConsent: true }
+  }
+  if (outcome === 'deferred_non_interactive') {
+    state.sessionCache = settings
+    return { applied: true, outcome, persistedConsent: false }
+  }
+  return { applied: false, outcome, persistedConsent: false }
+}
+
 export function resetRemoteSettingsStateForTesting(): void {
   state.sessionCache = null
   state.verifiedPayload = null
@@ -351,4 +643,10 @@ export function resetRemoteSettingsStateForTesting(): void {
   state.storedCopyRefusal = null
   state.refusedCopyHelperTier = null
   state.droppedHelperTier = null
+  state.lastLoadStatus = undefined
+  state.loadCycleBegun = false
+  state.loadCycleEnded = false
+  state.loadBackstopReleased = false
+  state.eligibilityMemo = undefined
+  state.loadEpoch = 0
 }

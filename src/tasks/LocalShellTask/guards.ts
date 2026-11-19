@@ -36,6 +36,8 @@ export type LocalShellTaskState = TaskStateBase & {
    */
   caller?: 'turn' | 'agent' | 'inner'
   // UI display variant. 'monitor' → shows description instead of command,
+  /** #1593: True for plugin monitors that stop on exit and skip exit confirm. */
+  stopsOnExit?: boolean
   // 'Monitor details' dialog title, distinct status bar pill.
   kind?: BashTaskKind
   /**

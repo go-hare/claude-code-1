@@ -325,19 +325,46 @@ export function mergeEnvironmentAppend(
 }
 
 /**
+ * Official PQn / MZn (#1491): true when managed/policy autoMode.allow is
+ * non-empty and omits "$defaults" (i.e. replaces built-in allow defaults).
+ */
+export function hasReplacingManagedAutoModeAllow(
+  policyAutoMode?: unknown,
+): boolean {
+  const managed =
+    policyAutoMode !== undefined
+      ? policyAutoMode
+      : getSettingsForSourceUncached('policySettings')?.autoMode
+  if (!managed || typeof managed !== 'object' || Array.isArray(managed)) {
+    return false
+  }
+  const allow = (managed as { allow?: unknown }).allow
+  if (!Array.isArray(allow) || allow.length === 0) {
+    return false
+  }
+  return !allow.some(
+    s =>
+      typeof s === 'string' &&
+      stripVariationSelectors(s) === AUTO_MODE_DEFAULTS_SENTINEL,
+  )
+}
+
+/**
  * densable K3w — merge rule arrays with $defaults seed / dedupe.
  */
 export function mergeRuleArray(
   key: RuleKey,
   existing: string[],
   incoming: string[],
+  managedAllowReplacesDefaults = hasReplacingManagedAutoModeAllow(),
 ): string[] {
   const keepDefaults =
     key !== 'allow' ||
-    existing.length === 0 ||
-    existing.some(
-      s => stripVariationSelectors(s) === AUTO_MODE_DEFAULTS_SENTINEL,
-    )
+    (existing.length === 0
+      ? !managedAllowReplacesDefaults
+      : existing.some(
+          s => stripVariationSelectors(s) === AUTO_MODE_DEFAULTS_SENTINEL,
+        ))
   const seen = new Set<string>()
   const out: string[] = []
   for (const s of [AUTO_MODE_DEFAULTS_SENTINEL, ...existing, ...incoming]) {

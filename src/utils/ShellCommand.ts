@@ -5,6 +5,7 @@ import type { Readable } from 'stream'
 import treeKill from 'tree-kill'
 import { generateTaskId } from '../Task.js'
 import { getAbortReasonMessage } from './abortController.js'
+import { type CleanupUnregister, registerCleanup } from './cleanupRegistry.js'
 import { formatDuration } from './format.js'
 import {
   MAX_TASK_OUTPUT_BYTES,
@@ -146,6 +147,8 @@ export type ShellCommand = {
 
 const SIGKILL = 137
 const SIGTERM = 143
+const KILL_GRACE_MS = 1500
+const KILL_POLL_INTERVAL_MS = 100
 
 // Background tasks write stdout/stderr directly to a file fd (no JS involvement),
 // so a stuck append loop can fill the disk. Poll file size and kill when exceeded.
@@ -236,6 +239,7 @@ class ShellCommandImpl implements ShellCommand {
   #resultResolver: ((result: ExecResult) => void) | null = null
   #exitCodeResolver: ((code: number) => void) | null = null
   #boundAbortHandler: (() => void) | null = null
+  #unregisterCleanup: CleanupUnregister | null = null
   readonly taskOutput: TaskOutput
 
   static #handleTimeout(self: ShellCommandImpl): void {
@@ -347,6 +351,11 @@ class ShellCommandImpl implements ShellCommand {
       this.#abortSignal.removeEventListener('abort', boundAbortHandler)
       this.#boundAbortHandler = null
     }
+    const unregisterCleanup = this.#unregisterCleanup
+    if (unregisterCleanup) {
+      unregisterCleanup()
+      this.#unregisterCleanup = null
+    }
   }
 
   #clearBgCapTimeout(): void {
@@ -391,6 +400,11 @@ class ShellCommandImpl implements ShellCommand {
     this.#boundAbortHandler = this.#abortHandler.bind(this)
     this.#abortSignal.addEventListener('abort', this.#boundAbortHandler, {
       once: true,
+    })
+    this.#unregisterCleanup = registerCleanup(() => {
+      if (this.#status === 'running') {
+        return this.kill()
+      }
     })
 
     // Use 'exit' not 'close': 'close' waits for stdio to close, which includes
@@ -470,16 +484,86 @@ class ShellCommandImpl implements ShellCommand {
     }
   }
 
-  #doKill(code?: number): void {
+  #doKill(code?: number): Promise<void> {
     this.#status = 'killed'
-    if (this.#childProcess.pid) {
-      treeKillNoFlash(this.#childProcess.pid, 'SIGKILL')
-    }
+    const child = this.#childProcess
+    const pid = child?.pid
     this.#resolveExitCode(code ?? SIGKILL)
+    if (
+      !pid ||
+      pid <= 1 ||
+      (process.platform === 'win32' &&
+        (child.exitCode !== null || child.signalCode !== null))
+    ) {
+      return Promise.resolve()
+    }
+    if (process.platform === 'win32') {
+      treeKillNoFlash(pid, 'SIGKILL')
+      return Promise.resolve()
+    }
+    // #1581 (official Qw / #R): send SIGTERM to process group first, then
+    // escalate to SIGKILL after KILL_GRACE_MS if the tree is still alive.
+    let groupKilled = true
+    try {
+      process.kill(-pid, 'SIGTERM')
+    } catch {
+      groupKilled = false
+      try {
+        process.kill(pid, 'SIGTERM')
+      } catch {
+        // already exited
+      }
+    }
+    if (!groupKilled) {
+      treeKillNoFlash(pid, 'SIGTERM')
+    }
+    return new Promise<void>(resolve => {
+      let pollTimer: NodeJS.Timeout | undefined
+      const isTreeGone = (): boolean => {
+        for (const target of [-pid, pid]) {
+          try {
+            process.kill(target, 0)
+            return false
+          } catch (err) {
+            if ((err as NodeJS.ErrnoException)?.code !== 'ESRCH') {
+              return false
+            }
+          }
+        }
+        return true
+      }
+      const escalateTimer = setTimeout(() => {
+        if (pollTimer) clearInterval(pollTimer)
+        if (isTreeGone()) {
+          resolve()
+          return
+        }
+        try {
+          process.kill(-pid, 'SIGKILL')
+        } catch {
+          // ignore
+        }
+        treeKillNoFlash(pid, 'SIGKILL')
+        resolve()
+      }, KILL_GRACE_MS)
+      escalateTimer.unref?.()
+      if (isTreeGone()) {
+        clearTimeout(escalateTimer)
+        resolve()
+        return
+      }
+      pollTimer = setInterval(() => {
+        if (!isTreeGone()) return
+        clearTimeout(escalateTimer)
+        clearInterval(pollTimer)
+        resolve()
+      }, KILL_POLL_INTERVAL_MS)
+      pollTimer.unref?.()
+    })
   }
 
-  kill(): void {
-    this.#doKill()
+  kill(): Promise<void> {
+    return this.#doKill()
   }
 
   /**

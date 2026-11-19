@@ -5,8 +5,6 @@ description: Push a React design system to claude.ai/design. This runs a convert
 
 # Sync a design system to claude.ai/design
 
-> **Note:** Standalone Claude Design (claude.ai/design) closes by December 14, 2026. Claude Design now lives in Claude.
-
 ## What this is for
 
 **Claude Design** (claude.ai/design) is Claude's design tool: users prompt a design agent and it builds working UI - screens, flows, prototypes - rendered live in the browser from real React code. Out of the box it designs with generic components. This skill changes that: it converts the user's design-system repo into the format Claude Design consumes and uploads it, so from then on **the design agent builds with the customer's actual components** - every design it produces is on-brand, made of their real parts, and maps 1:1 onto code their engineers can ship.
@@ -27,6 +25,16 @@ This is why fidelity is the whole game: a component that renders wrong here rend
 The converter builds all of the above deterministically from the repo's own `dist/`. With a Storybook, previews come from the repo's stories and are verified against its own storybook render (kept as a local reference, never uploaded). Without one, every component still ships fully functional, and rich previews are authored from the repo's own usage examples for the components the user scopes in, graded on an absolute rubric. **Core principle: ship what the customer already built** - the bundle is their compiled `dist/`, never a reimplementation.
 
 You have a `DesignSync` tool that reads and writes the user's claude.ai/design projects. If a tool call fails with an authorization error, relay its guidance to the user verbatim - the tool's message is environment-aware (in an interactive terminal it names `/design-login`; in headless sessions like claude.ai/code it points at a path that works there) - and retry after they've acted on it.
+
+A long run gets compacted, and the conversation then keeps only the first part of this text, ending in a note that it was truncated for compaction. The whole text is at `<skill-base-dir>/SKILL.md` (the sub-skills call it the base SKILL.md): when you see that note, `Read` that file, and the sub-skill you were following, before your next step.
+
+## First, on a re-sync: has this design system moved to Claude?
+
+If `.design-sync/config.json` (or `design-sync.config.json`, its old name) holds both a `projectId` and a `pkg` - a re-sync, by §0's test - call `DesignSync(get_project)` on that project first, before moving that file, installing, or building anything (if `DesignSync` isn't in your tool list, load it via `ToolSearch(query: "select:DesignSync")`). §1 uses this result instead of calling again (a "not found" here is §1's "gone" case; after a sign-in error, make the call again once the user has dealt with it). A result with a `moveState` means the design system has moved, or is moving, to Claude, and the server refuses uploads to it: give the user the result's `notice` exactly as written, add "This sync stopped before building or uploading anything." (true, since nothing has run yet), then stop. Build, plan and upload nothing.
+
+The same holds whenever `get_project` returns a `moveState` later in a run - a `projectId` left by a run that never finished (§1, pinned), an existing project the user names or redirects the run to (§1, re-adopted), or a write the server refuses because the project has moved or is moving (call `get_project` once more, for the `notice`, which then stands in for the server's message): give the `notice` as written, say plainly what this run has already built, written or uploaded, and stop.
+
+Don't offer a new project, dropping the pinned `projectId`, or deleting anything in Claude as a way round: none of them gets the user's code into the design system that moved, and each leaves them with a second design system or with work lost. If the user asks for one of these outright, first tell them what it costs them, as just said, and go on only if they still want it; a new project is then a first-time sync (§0, §1 fresh), whose `projectId` replaces the old one in the config.
 
 ## 0. First sync? Set expectations before any work
 

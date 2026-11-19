@@ -359,7 +359,13 @@ import {
   toError,
 } from 'src/utils/errors.js';
 import { assertRegularFileWithinMaxBytes, getFsImplementation, safeResolvePath } from 'src/utils/fsOperations.js';
-import { gracefulShutdown, gracefulShutdownSync } from 'src/utils/gracefulShutdown.js';
+import {
+  consumeRelaunchResumeHintFlags,
+  extractResumeHintLaunchFlags,
+  gracefulShutdown,
+  gracefulShutdownSync,
+  setResumeHintLaunchFlags,
+} from 'src/utils/gracefulShutdown.js';
 import { setAllHookEventsEnabled } from 'src/utils/hooks/hookEvents.js';
 import { refreshModelCapabilities } from 'src/utils/model/modelCapabilities.js';
 import { peekForStdinData, writeToStderr } from 'src/utils/process.js';
@@ -1543,6 +1549,13 @@ async function run(): Promise<CommanderCommand> {
           }
         }
       }
+
+      setResumeHintLaunchFlags(
+        (options as { sdkUrl?: string }).sdkUrl !== undefined
+          ? ''
+          : (consumeRelaunchResumeHintFlags(program.options) ??
+              extractResumeHintLaunchFlags(program.options, process.argv.slice(2))),
+      );
 
       const {
         debug = false,

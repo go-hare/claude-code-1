@@ -173,6 +173,77 @@ function trimRunLogPage(
   }
 }
 
+export function summarizeTriggerResponse(
+  data: unknown,
+  origin = 'https://claude.ai',
+  now = new Date(),
+): string | undefined {
+  if (!data || typeof data !== 'object') return undefined
+  const record = data as Record<string, unknown>
+  const enabled = typeof record.enabled === 'boolean' ? record.enabled : true
+  const lines: string[] = []
+  if (typeof record.next_run_at === 'string' && record.next_run_at) {
+    const parsed = new Date(record.next_run_at)
+    if (!Number.isNaN(parsed.getTime())) {
+      const utc = parsed.toISOString().replace(/\.\d{3}Z$/, 'Z')
+      const cron =
+        typeof record.cron_expression === 'string' && record.cron_expression
+          ? record.cron_expression
+          : undefined
+      const runOnce =
+        typeof record.run_once_at === 'string' && record.run_once_at
+          ? record.run_once_at
+          : undefined
+      const label = runOnce
+        ? 'runs once'
+        : cron
+          ? `next run (cron ${cron})`
+          : 'next run'
+      if (enabled) {
+        lines.push(`→ Scheduled: ${label} (${utc} UTC)`)
+        if (runOnce && parsed.getTime() < now.getTime()) {
+          lines.push(
+            '⚠ next_run_at is in the past — confirm the date/timezone is intended.',
+          )
+        }
+      } else {
+        lines.push(`→ Disabled (next run would be ${utc} UTC)`)
+      }
+    }
+  }
+  if (typeof record.id === 'string' && record.id) {
+    lines.push(
+      `→ View/manage: ${origin.replace(/\/$/, '')}/code/routines/${record.id}`,
+    )
+  }
+  return lines.length > 0 ? lines.join('\n') : undefined
+}
+
+export function summarizeCreatedMcpConnections(
+  data: unknown,
+  requestBody?: Record<string, unknown>,
+): string | undefined {
+  if (!data || typeof data !== 'object') return undefined
+  const conns = (data as Record<string, unknown>).mcp_connections
+  if (!Array.isArray(conns) || conns.length === 0) return undefined
+  const names = conns.map(c => {
+    const raw =
+      c &&
+      typeof c === 'object' &&
+      typeof (c as { name?: unknown }).name === 'string'
+        ? (c as { name: string }).name.trim().slice(0, 100)
+        : ''
+    return raw || 'unnamed-connector'
+  })
+  const list = names.join(', ')
+  const requested =
+    Array.isArray(requestBody?.mcp_connections) &&
+    requestBody.mcp_connections.length > 0
+  return requested
+    ? `→ Connectors: ${list}`
+    : `⚠ No connectors were asked for (mcp_connections is empty or absent), but this routine has: ${list}. The server attaches the account's connected connectors when none are named, and every run of this routine can use them. Tell the user. To remove them, call update on this routine with {"clear_mcp_connections": true}, or with mcp_connections holding only the entries to keep, copied from this response. An empty mcp_connections changes nothing.`
+}
+
 export const RemoteTriggerTool = buildTool({
   name: REMOTE_TRIGGER_TOOL_NAME,
   searchHint:
@@ -359,6 +430,21 @@ export const RemoteTriggerTool = buildTool({
       }
       if (action === 'get_run_log' && ok && session_id) {
         ;({ json, summary } = trimRunLogPage(res.data, session_id))
+      }
+      if (
+        ok &&
+        (action === 'create' || action === 'update' || action === 'get')
+      ) {
+        const origin = (
+          getOauthConfig().CLAUDE_AI_ORIGIN ?? 'https://claude.ai'
+        ).replace(/\/$/, '')
+        summary = summarizeTriggerResponse(res.data, origin)
+      }
+      if (ok && action === 'create') {
+        const mcpSummary = summarizeCreatedMcpConnections(res.data, body)
+        if (mcpSummary) {
+          summary = summary ? `${summary}\n${mcpSummary}` : mcpSummary
+        }
       }
       if (ok && action === 'create_webhook_trigger') {
         const routineId = body?.routine_trigger_id

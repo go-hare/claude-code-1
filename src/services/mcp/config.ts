@@ -12,6 +12,10 @@ import {
 import { createRemoteMetaHttpConfig } from '../../bridge/hearthbotMcp.js'
 import type { PluginError } from '../../types/plugin.js'
 import { markCliOwnedConfig } from './cliOwnedConfigs.js'
+import {
+  notifyMcpSwitchedOffSaved,
+  sanitizeDisabledMcpServers,
+} from './mcpSwitchedOffRecord.js'
 import { getPluginErrorMessage } from '../../types/plugin.js'
 import {
   CLAUDE_IN_CHROME_MCP_SERVER_NAME,
@@ -20,6 +24,7 @@ import {
 import {
   getCurrentProjectConfig,
   getGlobalConfig,
+  getProjectPathForConfig,
   saveCurrentProjectConfig,
   saveGlobalConfig,
 } from '../../utils/config.js'
@@ -225,6 +230,24 @@ export function unwrapCcrProxyUrl(url: string): string {
     return original || url
   } catch {
     return url
+  }
+}
+
+/**
+ * Official `Uei(e)` (#1675) — extract all `mcp_url` upstream URLs from
+ * Anthropic / CCR proxy URLs for denylist policy matching.
+ */
+export function getAnthropicProxyUpstreamUrls(url: string): string[] {
+  if (
+    !CCR_PROXY_PATH_MARKERS.some(m => url.includes(m)) &&
+    !url.includes('mcp-proxy.anthropic.com')
+  ) {
+    return []
+  }
+  try {
+    return new URL(url).searchParams.getAll('mcp_url').filter(Boolean)
+  } catch {
+    return []
   }
 }
 
@@ -808,8 +831,32 @@ export function isMcpServerDenied(
     }
 
     const serverUrl = getServerUrl(config)
-    if (serverUrl) {
-      const expandedServerUrl = expandMcpServerSideString(serverUrl)
+    const connectorProxyUrl =
+      config.type === 'claudeai-proxy' &&
+      'id' in config &&
+      typeof config.id === 'string' &&
+      config.id
+        ? `https://mcp-proxy.anthropic.com/v1/mcp/${config.id}`
+        : null
+    if (serverUrl || connectorProxyUrl) {
+      const candidateUrls = new Set<string>()
+      if (serverUrl) {
+        const expandedServerUrl = expandMcpServerSideString(serverUrl)
+        candidateUrls.add(expandedServerUrl)
+        for (const upstream of getAnthropicProxyUpstreamUrls(
+          expandedServerUrl,
+        )) {
+          candidateUrls.add(upstream)
+        }
+      }
+      if (connectorProxyUrl) {
+        candidateUrls.add(connectorProxyUrl)
+        for (const upstream of getAnthropicProxyUpstreamUrls(
+          connectorProxyUrl,
+        )) {
+          candidateUrls.add(upstream)
+        }
+      }
       for (const entry of settings.deniedMcpServers) {
         if (!isMcpServerUrlEntry(entry)) continue
         // densable: denylist URL expansion is unaffected by J6u unsafe fail-closed
@@ -818,8 +865,10 @@ export function isMcpServerDenied(
           env,
           fallbackEnv,
         )
-        if (urlMatchesPattern(expandedServerUrl, expandedPattern)) {
-          return true
+        for (const candidateUrl of candidateUrls) {
+          if (urlMatchesPattern(candidateUrl, expandedPattern)) {
+            return true
+          }
         }
       }
     }
@@ -1100,6 +1149,90 @@ function expandEnvVars(config: McpServerConfig): {
   }
 }
 
+const MCP_CONFIG_LOCK_CONFIRM_DELAYS_MS = [50, 150, 450] as const
+
+/**
+ * Official `Fje` / `Kso` / `iCt` (#1625) — when locked write to user/local
+ * config returns false, wait and re-read from disk to confirm whether another
+ * holder wrote or left the file locked, throwing a clear exit-1 error if not.
+ */
+export async function confirmMcpConfigWrite(
+  name: string,
+  scope: 'user' | 'local',
+  op: 'add' | 'remove',
+  readGlobalConfigFromDisk?: () => Promise<Record<string, unknown> | undefined>,
+): Promise<void> {
+  const filePath = getGlobalClaudeFile()
+  const projectKey = scope === 'local' ? getProjectPathForConfig() : undefined
+  const readDisk =
+    readGlobalConfigFromDisk ??
+    (async () => {
+      const { readFile } = await import('fs/promises')
+      try {
+        const raw = await readFile(filePath, 'utf-8')
+        return JSON.parse(raw) as Record<string, unknown>
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
+          return undefined
+        }
+        throw err
+      }
+    })
+
+  let parsed: Record<string, unknown> | undefined
+  for (let i = 0; ; i++) {
+    try {
+      parsed = await readDisk()
+      break
+    } catch (err) {
+      const delay = MCP_CONFIG_LOCK_CONFIRM_DELAYS_MS[i]
+      if (delay !== undefined) {
+        await new Promise(resolve => setTimeout(resolve, delay))
+        continue
+      }
+      const action = op === 'add' ? 'saved' : 'removed'
+      const fromScope = projectKey !== undefined ? ` from ${projectKey}` : ''
+      throw new Error(
+        `MCP server "${name}" may not have been ${action}${fromScope}: ${filePath} could not be read to confirm the change (${err instanceof Error ? err.message : String(err)}).`,
+      )
+    }
+  }
+
+  if (op === 'remove' && parsed === undefined) {
+    throw new Error(
+      `MCP server "${name}" may not have been removed${projectKey !== undefined ? ` from ${projectKey}` : ''}: ${filePath} could not be read to confirm the change (the file was not found).`,
+    )
+  }
+
+  const container =
+    projectKey === undefined
+      ? parsed
+      : typeof parsed?.projects === 'object' && parsed.projects !== null
+        ? (parsed.projects as Record<string, unknown>)[projectKey]
+        : undefined
+  const mcpServers =
+    typeof container === 'object' && container !== null
+      ? (container as Record<string, unknown>).mcpServers
+      : undefined
+  const isPresent =
+    typeof mcpServers === 'object' &&
+    mcpServers !== null &&
+    Object.hasOwn(mcpServers, name)
+  if (isPresent === (op === 'add')) {
+    return
+  }
+
+  const verb =
+    op === 'add'
+      ? `was not saved to ${filePath}`
+      : `was not removed from ${filePath}`
+  const retryVerb =
+    op === 'add' ? 'add the server again' : 'remove the server again'
+  throw new Error(
+    `MCP server "${name}" ${verb}${projectKey !== undefined ? ` for ${projectKey}` : ''}. If other Claude Code processes use that file, they may have kept it locked: ${retryVerb}, with CLAUDE_CODE_CONFIG_LOCK_WAIT_MS=60000 set to wait up to a minute. If that file is read-only or protected by a sandbox, make it writable or run the command outside the sandbox first.`,
+  )
+}
+
 /**
  * Add a new MCP server configuration
  * @param name The name of the server
@@ -1219,24 +1352,42 @@ export async function addMcpConfig(
     }
 
     case 'user': {
-      saveGlobalConfig(current => ({
+      const saved = (
+        saveGlobalConfig as (
+          updater: (
+            current: ReturnType<typeof getGlobalConfig>,
+          ) => ReturnType<typeof getGlobalConfig>,
+        ) => unknown
+      )(current => ({
         ...current,
         mcpServers: {
           ...current.mcpServers,
           [name]: validatedConfig,
         },
       }))
+      if ((await Promise.resolve(saved)) === false) {
+        await confirmMcpConfigWrite(name, scope, 'add')
+      }
       break
     }
 
     case 'local': {
-      saveCurrentProjectConfig(current => ({
+      const saved = (
+        saveCurrentProjectConfig as (
+          updater: (
+            current: ReturnType<typeof getCurrentProjectConfig>,
+          ) => ReturnType<typeof getCurrentProjectConfig>,
+        ) => unknown
+      )(current => ({
         ...current,
         mcpServers: {
           ...current.mcpServers,
           [name]: validatedConfig,
         },
       }))
+      if ((await Promise.resolve(saved)) === false) {
+        await confirmMcpConfigWrite(name, scope, 'add')
+      }
       break
     }
 
@@ -1287,13 +1438,22 @@ export async function removeMcpConfig(
       if (!config.mcpServers?.[name]) {
         throw new Error(`No user-scoped MCP server found with name: ${name}`)
       }
-      saveGlobalConfig(current => {
+      const saved = (
+        saveGlobalConfig as (
+          updater: (
+            current: ReturnType<typeof getGlobalConfig>,
+          ) => ReturnType<typeof getGlobalConfig>,
+        ) => unknown
+      )(current => {
         const { [name]: _, ...restMcpServers } = current.mcpServers ?? {}
         return {
           ...current,
           mcpServers: restMcpServers,
         }
       })
+      if ((await Promise.resolve(saved)) === false) {
+        await confirmMcpConfigWrite(name, scope, 'remove')
+      }
       break
     }
 
@@ -1303,13 +1463,22 @@ export async function removeMcpConfig(
       if (!config.mcpServers?.[name]) {
         throw new Error(`No project-local MCP server found with name: ${name}`)
       }
-      saveCurrentProjectConfig(current => {
+      const saved = (
+        saveCurrentProjectConfig as (
+          updater: (
+            current: ReturnType<typeof getCurrentProjectConfig>,
+          ) => ReturnType<typeof getCurrentProjectConfig>,
+        ) => unknown
+      )(current => {
         const { [name]: _, ...restMcpServers } = current.mcpServers ?? {}
         return {
           ...current,
           mcpServers: restMcpServers,
         }
       })
+      if ((await Promise.resolve(saved)) === false) {
+        await confirmMcpConfigWrite(name, scope, 'remove')
+      }
       break
     }
 
@@ -2413,6 +2582,28 @@ export function isMcpServerDisabled(name: string): boolean {
   return disabledServers.includes(name)
 }
 
+/** Official `rvo()` — read persisted disabled MCP server names for current project. */
+export function getDisabledMcpServers(): string[] {
+  return asStringArray(getCurrentProjectConfig().disabledMcpServers)
+}
+
+/** Official `FAs(names)` — merge sanitized disabled MCP server names into current project config. */
+export function saveDisabledMcpServers(names: readonly string[]): void {
+  const sanitized = sanitizeDisabledMcpServers(names)
+  if (sanitized.length === 0) return
+  saveCurrentProjectConfig(current => {
+    const prev = asStringArray(current.disabledMcpServers)
+    const existing = new Set(prev)
+    if (sanitized.every(name => existing.has(name))) {
+      return current
+    }
+    return {
+      ...current,
+      disabledMcpServers: sanitizeDisabledMcpServers([...prev, ...sanitized]),
+    }
+  })
+}
+
 function toggleMembership(
   list: string[],
   name: string,
@@ -2457,6 +2648,8 @@ export function setMcpServerEnabled(name: string, enabled: boolean): void {
     }
     return { ...current, disabledMcpServers: next }
   })
+
+  notifyMcpSwitchedOffSaved(name, enabled)
 
   if (isBuiltinStateChange) {
     logEvent('tengu_builtin_mcp_toggle', {

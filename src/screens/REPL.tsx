@@ -719,6 +719,7 @@ import { useModelMigrationNotifications } from 'src/hooks/notifs/useModelMigrati
 import { useCanSwitchToExistingSubscription } from 'src/hooks/notifs/useCanSwitchToExistingSubscription.js';
 import { useTeammateLifecycleNotification } from 'src/hooks/notifs/useTeammateShutdownNotification.js';
 import { useFastModeNotification } from 'src/hooks/notifs/useFastModeNotification.js';
+import { useRemoteSettingsNotification } from 'src/hooks/notifs/useRemoteSettingsNotification.js';
 import { useIdleUpsellNotification } from 'src/hooks/notifs/useIdleUpsellNotification.js';
 import { usePluginMonitors } from 'src/hooks/usePluginMonitors.js';
 import { isBareMode } from 'src/utils/envUtils.js';
@@ -1674,8 +1675,9 @@ export function REPL({
   usePluginInstallationStatus();
   usePluginAutoupdateNotification();
   useSettingsErrors();
+  useRemoteSettingsNotification();
   useRateLimitWarningNotification(mainLoopModel);
-  useFastModeNotification();
+  useFastModeNotification(mainLoopModel);
   useDeprecationWarningNotification(mainLoopModel);
   useNpmDeprecationNotification();
   useOauthExpiryNotification();

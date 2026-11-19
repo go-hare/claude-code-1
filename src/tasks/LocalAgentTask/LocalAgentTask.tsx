@@ -1089,13 +1089,52 @@ export function queuePendingMessage(
           isMeta: msg.isMeta ?? false,
           ...(shownAs !== undefined ? { shownAs } : {}),
         };
-  updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => ({
-    ...task,
-    ...(origin?.kind === 'human' && task.chatEngaged !== true && task.chatPinForfeited !== true
-      ? { chatEngaged: true }
-      : {}),
-    pendingMessages: [...task.pendingMessages, entry],
-  }));
+  let isRunningBackgrounded = false;
+  updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => {
+    isRunningBackgrounded = task.status === 'running' && task.isBackgrounded === true;
+    return {
+      ...task,
+      ...(origin?.kind === 'human' && task.chatEngaged !== true && task.chatPinForfeited !== true
+        ? { chatEngaged: true }
+        : {}),
+      pendingMessages: [...task.pendingMessages, entry],
+    };
+  });
+
+  // #1591: When queuing a message for a running backgrounded agent, move any
+  // foreground shell command it is currently running to the background so the
+  // message can be delivered earlier without stopping the command.
+  if (isRunningBackgrounded) {
+    try {
+      const { backgroundTask } =
+        require('../LocalShellTask/LocalShellTask.js') as typeof import('../LocalShellTask/LocalShellTask.js');
+      const { isLocalShellTask } =
+        require('../LocalShellTask/guards.js') as typeof import('../LocalShellTask/guards.js');
+      let foregroundShellIds: string[] = [];
+      setAppState(prev => {
+        foregroundShellIds = Object.keys(prev.tasks).filter(id => {
+          const t = prev.tasks[id];
+          return isLocalShellTask(t) && t.agentId === taskId && !t.isBackgrounded && Boolean(t.shellCommand);
+        });
+        return prev;
+      });
+      if (foregroundShellIds.length > 0) {
+        let latestState: AppState | undefined;
+        setAppState(prev => {
+          latestState = prev;
+          return prev;
+        });
+        if (latestState) {
+          const registry = createTaskRegistry(() => latestState!, setAppState);
+          for (const shellId of foregroundShellIds) {
+            backgroundTask(shellId, registry);
+          }
+        }
+      }
+    } catch {
+      // best-effort: do not fail queuePendingMessage if shell backgrounding is unavailable
+    }
+  }
 }
 
 /**

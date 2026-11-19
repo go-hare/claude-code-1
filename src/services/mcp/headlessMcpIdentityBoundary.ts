@@ -378,24 +378,53 @@ export function createHeadlessMcpIdentityBoundary(
                 .map(row => [row.name, row.config]),
             ),
           }
-          const connectorSignatures = new Set(
-            Object.values(allowed)
-              .map(config => getMcpServerSignature(config))
-              .filter(signature => signature !== null),
-          )
-          const suppressedPlugins = new Set(
-            Object.entries(regular)
-              .filter(
-                ([name, config]) =>
-                  name.startsWith('plugin:') &&
-                  connectorSignatures.has(getMcpServerSignature(config) ?? ''),
-              )
-              .map(([name]) => name),
-          )
+          const eligibleConnectorSignatures = new Set<string>()
+          const ineligibleConnectorSignatures = new Set<string>()
+          for (const config of Object.values(allowed)) {
+            const sig = getMcpServerSignature(config)
+            if (!sig) continue
+            const isIneligible =
+              config.type === 'claudeai-proxy' && config.eligible === false
+            if (isIneligible) {
+              ineligibleConnectorSignatures.add(sig)
+            } else {
+              eligibleConnectorSignatures.add(sig)
+            }
+          }
+          let keepBesideIneligible: boolean | undefined
+          const suppressedPlugins = new Set<string>()
+          for (const [name, config] of Object.entries(regular)) {
+            if (!name.startsWith('plugin:')) continue
+            const sig = getMcpServerSignature(config)
+            if (!sig) continue
+            if (eligibleConnectorSignatures.has(sig)) {
+              suppressedPlugins.add(name)
+            } else if (ineligibleConnectorSignatures.has(sig)) {
+              if (keepBesideIneligible === undefined) {
+                try {
+                  const { getFeatureValue_CACHED_MAY_BE_STALE } =
+                    // eslint-disable-next-line @typescript-eslint/no-require-imports
+                    require('../analytics/growthbook.js') as typeof import('../analytics/growthbook.js')
+                  keepBesideIneligible =
+                    getFeatureValue_CACHED_MAY_BE_STALE<boolean>(
+                      'tengu_delightful_hamster',
+                      false,
+                    ) === true
+                } catch {
+                  keepBesideIneligible = false
+                }
+              }
+              if (!keepBesideIneligible) {
+                suppressedPlugins.add(name)
+              }
+            }
+          }
           for (const row of rows()) {
             if (
               suppressedPlugins.has(row.name) &&
-              (row.type === 'connected' || row.type === 'pending')
+              (row.type === 'connected' ||
+                row.type === 'pending' ||
+                row.type === 'needs-auth')
             ) {
               module().disposeServerConnectionDetached(row.name, row.config)
             }

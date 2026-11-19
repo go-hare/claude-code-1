@@ -107,6 +107,7 @@ import { EnterWorktreeTool } from '@claude-code/builtin-tools/tools/EnterWorktre
 import { ExitWorktreeTool } from '@claude-code/builtin-tools/tools/ExitWorktreeTool/ExitWorktreeTool.js'
 import { ConfigTool } from '@claude-code/builtin-tools/tools/ConfigTool/ConfigTool.js'
 import { SendFeedbackTool } from '@claude-code/builtin-tools/tools/SendFeedbackTool/SendFeedbackTool.js'
+import { ShareOnboardingGuideTool } from './commands/team-onboarding/shareOnboardingGuide.js'
 // densable ikw — always in the base pool; isEnabled() gates via GB + session + Ktr
 const ProposeGoalTool =
   require('@claude-code/builtin-tools/tools/ProposeGoalTool/ProposeGoalTool.js')
@@ -273,6 +274,7 @@ export function getAllBaseTools(): Tools {
     ConfigTool,
     // densable leftover IE() — SendFeedback is always in the base pool; aLt/Ufs gate isEnabled()
     SendFeedbackTool,
+    ShareOnboardingGuideTool,
     ProposeGoalTool,
     ...(process.env.USER_TYPE === 'ant' ? [TungstenTool] : []),
     ...(WebBrowserTool ? [WebBrowserTool] : []),

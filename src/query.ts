@@ -11,10 +11,13 @@ import {
   calculateTokenWarningState,
   checkRapidRefillBreaker,
   estimateMaxTurnGrowth,
+  getClaudeMdGrowthTokens,
   getEffectiveContextWindowSize,
   isAutoCompactEnabled,
+  recordSentClaudeMdTokens,
   type AutoCompactTrackingState,
 } from './services/compact/autoCompact.js'
+import { roughTokenCountEstimation } from './services/tokenEstimation.js'
 import {
   buildPostCompactMessages,
   compactConversation,
@@ -1821,8 +1824,13 @@ async function* queryLoop(
       // getAutoCompactThreshold which already subtracts buffer.
       if (!compactionResult && isAutoCompactEnabled()) {
         const model = layeredMainLoopModel
+        const claudeMdGrowth = await getClaudeMdGrowthTokens(
+          userContext.claudeMd,
+        )
         const currentTokens =
-          tokenCountWithEstimation(messagesForQuery) - snipTokensFreed
+          tokenCountWithEstimation(messagesForQuery) -
+          snipTokensFreed +
+          claudeMdGrowth
         const estimatedGrowth = estimateMaxTurnGrowth(model)
         const predictiveThreshold =
           getEffectiveContextWindowSize(model) - estimatedGrowth
@@ -2101,6 +2109,7 @@ async function* queryLoop(
                       declined: false,
                       requestDialog: toolUseContext.requestDialog,
                       isMainThread,
+                      isAgentThread: !isMainThread,
                       switchModelsOnFlag: getSwitchModelsOnFlag(),
                       preferenceQuestionPending:
                         refusalFallbackPreferencePending,
@@ -2221,6 +2230,7 @@ async function* queryLoop(
                     stepIndex: turnStepIndex++,
                   })
                 : deps.callModel(modelCallArgs)
+            let recordedClaudeMdTokensForRequest = false
             function* drainStreamingTools() {
               if (
                 !streamingToolExecutor ||
@@ -2629,6 +2639,22 @@ async function* queryLoop(
               let yieldMessage: typeof message = message
               if (message.type === 'assistant') {
                 const assistantMsg = message as AssistantMessage
+                // #1562: record the CLAUDE.md token count once the main-thread API
+                // request succeeds so later CLAUDE.md growth is counted in auto-compact budget.
+                if (
+                  !recordedClaudeMdTokensForRequest &&
+                  !assistantMsg.isApiErrorMessage &&
+                  toolUseContext.agentId === undefined &&
+                  querySource !== 'compact' &&
+                  querySource !== 'session_memory'
+                ) {
+                  recordedClaudeMdTokensForRequest = true
+                  recordSentClaudeMdTokens(
+                    userContext.claudeMd
+                      ? roughTokenCountEstimation(userContext.claudeMd)
+                      : 0,
+                  )
+                }
                 const contentArr = Array.isArray(assistantMsg.message?.content)
                   ? (assistantMsg.message.content as unknown as Array<{
                       type: string
@@ -3850,23 +3876,9 @@ async function* queryLoop(
             continue
           }
           if (malformedToolUse.action === 'exhausted') {
-            // v2.1.314 (#1374): retract the last broken reply and its retry
-            // prompts so they do not stay in the conversation after giving up.
+            // v2.1.318 (#1620): do not yield tombstones on malformed_tool_use_exhausted
+            // (emitting tombstones broke --continue); keep retractedMessageUuids = [].
             const retractedUuids: string[] = []
-            for (const msg of messagesForQuery) {
-              if (
-                msg.type === 'user' &&
-                msg.isMeta === true &&
-                msg.message?.content === MALFORMED_TOOL_USE_RETRY_PROMPT
-              ) {
-                retractedUuids.push(msg.uuid)
-                yield { type: 'tombstone' as const, message: msg }
-              }
-            }
-            for (const msg of assistantMessages) {
-              retractedUuids.push(msg.uuid)
-              yield { type: 'tombstone' as const, message: msg }
-            }
             const exhaustedMessage: AssistantMessage & {
               retractedMessageUuids?: string[]
             } = createAssistantAPIErrorMessage({

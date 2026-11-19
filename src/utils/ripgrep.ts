@@ -293,6 +293,8 @@ export const RIPGREP_INPUT_ERROR_RE =
 export type RipGrepOptions = {
   /** densable rejectOnInputError — throw RipgrepUsageError on exit 2 + iaT stderr. */
   rejectOnInputError?: boolean
+  /** Official rejectOnPartial (#1570) — reject with RipgrepTimeoutError on partial/truncated/timed-out output. */
+  rejectOnPartial?: boolean
   /** Optional spawn/exec cwd (densable f1e/qTm `cwd`). */
   cwd?: string
 }
@@ -544,13 +546,29 @@ function ripGrepRaw(
     })
 
     let killTimeoutId: ReturnType<typeof setTimeout> | undefined
+    let forceEndTimer: ReturnType<typeof setTimeout> | undefined
     const timeoutId = setTimeout(() => {
       if (process.platform === 'win32') {
         child.kill()
       } else {
         child.kill('SIGTERM')
         killTimeoutId = setTimeout(c => c.kill('SIGKILL'), 5_000, child)
+        killTimeoutId.unref?.()
       }
+      // #1500: fallback timer if process doesn't exit after kill — destroy streams and settle
+      forceEndTimer = setTimeout(() => {
+        if (settled) return
+        settled = true
+        clearTimeout(killTimeoutId)
+        child.stdout?.destroy()
+        child.stderr?.destroy()
+        const error: ExecFileException = new Error(
+          `ripgrep timed out after ${timeout}ms`,
+        )
+        error.signal = 'SIGKILL'
+        callback(error, stdout, stderr)
+      }, 6_000)
+      forceEndTimer.unref?.()
     }, timeout)
 
     // On Windows, both 'close' and 'error' can fire for the same process
@@ -561,6 +579,7 @@ function ripGrepRaw(
       settled = true
       clearTimeout(timeoutId)
       clearTimeout(killTimeoutId)
+      clearTimeout(forceEndTimer)
       if (code === 0 || code === 1) {
         // 0 = matches found, 1 = no matches (both are success)
         callback(null, stdout, stderr)
@@ -579,6 +598,7 @@ function ripGrepRaw(
       settled = true
       clearTimeout(timeoutId)
       clearTimeout(killTimeoutId)
+      clearTimeout(forceEndTimer)
       const error: ExecFileException = err
       callback(error, stdout, stderr)
     })
@@ -734,6 +754,15 @@ export async function ripGrep(
     ): void => {
       // Success case
       if (!error) {
+        if (options?.rejectOnPartial && stdout.length >= MAX_BUFFER_SIZE) {
+          reject(
+            new RipgrepTimeoutError(
+              'Ripgrep output exceeded the output buffer and was truncated.',
+              [],
+            ),
+          )
+          return
+        }
         resolve(
           stdout
             .trim()
@@ -823,6 +852,28 @@ export async function ripGrep(
       logForDebugging(
         `rg error (signal=${error.signal}, code=${error.code}, stderr: ${stderr}), ${lines.length} results`,
       )
+
+      // #1570: rejectOnPartial rejects with RipgrepTimeoutError on timeout/kill/overflow
+      if (
+        options?.rejectOnPartial &&
+        (isTimeout || isBufferOverflow || isUnexplainedSignal)
+      ) {
+        if (
+          abortSignal.aborted &&
+          (abortSignal.reason as { name?: string } | undefined)?.name !==
+            'TimeoutError'
+        ) {
+          reject(error)
+        } else {
+          reject(
+            new RipgrepTimeoutError(
+              'Ripgrep listing is incomplete: it timed out, was killed or exceeded the output buffer.',
+              lines,
+            ),
+          )
+        }
+        return
+      }
 
       // densable f1e: rejectOnInputError + exit 2 + empty stdout + iaT stderr → YTm
       if (

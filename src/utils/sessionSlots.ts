@@ -2327,6 +2327,8 @@ export type AutoModeUnavailableResponseRecord = {
   runKey: string
   position: number
   waited: Promise<boolean>
+  turn?: number | string
+  noCheck?: boolean
 }
 
 /** densable `Ke.#A` — in-flight classifier billing-notice choice. */
@@ -2464,12 +2466,33 @@ export class RequestLatches {
     return this.#C.get(request)
   }
   /** densable `Ke.autoModeUnavailableResponsesInARow` / `ydr`. */
-  autoModeUnavailableResponsesInARow(runKey: string): number {
+  autoModeUnavailableResponsesInARow(
+    runKey: string,
+    options?: { noCheckOnly?: boolean },
+  ): number {
     let count = 0
+    const noCheckOnly = options?.noCheckOnly ?? false
     for (const record of this.#C.values()) {
-      if (record.runKey === runKey) count++
+      if (record.runKey === runKey && (!noCheckOnly || record.noCheck)) {
+        count++
+      }
     }
     return count
+  }
+  /** densable `Ke.dropAutoModeUnavailableResponsesOfOtherTurns`. */
+  dropAutoModeUnavailableResponsesOfOtherTurns(
+    runKey: string,
+    turn: number | string,
+  ): void {
+    for (const [key, record] of this.#C) {
+      if (
+        record.runKey === runKey &&
+        record.turn !== undefined &&
+        record.turn !== turn
+      ) {
+        this.#C.delete(key)
+      }
+    }
   }
   /** densable `Ke.noteAutoModeUnavailableResponse` / `_dr`. */
   noteAutoModeUnavailableResponse(

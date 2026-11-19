@@ -18,6 +18,7 @@
  * Built-in aWd/Fjy + bjv + outcome + D trust + rBh residual
  * (B2h/Bjv/Fjv/Ijv/W2h/xjv/z2h/CKn) wired via handleSession.
  */
+import { enableClosesAfterServerError } from '../utils/proxy.js'
 import {
   constants as fsConstants,
   createWriteStream,
@@ -772,7 +773,10 @@ export function assertWindowsBaseDirSource(
  * densable `wBh` / `t_g` — parse root runner CLI args.
  * Mutates process.env for timeout/lifetime flags (1:1 densable).
  */
-export function parseRootArgs(argv: string[]): RootRunnerArgs {
+export function parseRootArgs(
+  argv: string[],
+  onWarn: (msg: string) => void = msg => console.warn(msg),
+): RootRunnerArgs {
   const envBaseDir = process.env.SELF_HOSTED_RUNNER_BASE_DIR || undefined
   const t: RootRunnerArgs = {
     apiUrl: DEFAULT_API_URL,
@@ -1060,9 +1064,18 @@ export function parseRootArgs(argv: string[]): RootRunnerArgs {
               `--release-idle-session-min must be a non-negative number of minutes (0 disables, max ${MAX_MINUTES_FLAG}), got: ${i}`,
             )
           }
+          if (i.trim() === '') {
+            onWarn(
+              "[runner:warn] --release-idle-session-min has a value of only spaces, which is read as 0: idle sessions are kept, whatever limit Anthropic's control plane sends. Give the flag a number of minutes to release them.",
+            )
+          }
           process.env.SELF_HOSTED_RUNNER_SESSION_IDLE_MS = String(s * 60 * 1000)
           t.envSetByFlag.add('SELF_HOSTED_RUNNER_SESSION_IDLE_MS')
           n++
+        } else if (i === undefined) {
+          onWarn(
+            "[runner:warn] --release-idle-session-min is the last argument and has no value after it (an unset shell variable?), so it is ignored and sets no idle limit. A runner with no idle limit set follows the one that Anthropic's control plane sends for a session, if it sends one. Give the flag a number of minutes, or 0 to keep idle sessions.",
+          )
         }
         break
       }
@@ -3013,6 +3026,7 @@ export async function selfHostedRunnerMain(
     console.log(formatRootHelp())
     return
   }
+  enableClosesAfterServerError()
 
   let args: RootRunnerArgs
   let secret: string

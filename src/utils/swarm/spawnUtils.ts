@@ -69,6 +69,13 @@ export function buildInheritedCliArgParts(options?: {
   } else if (permissionMode === 'auto') {
     // Teammates inherit auto mode so the classifier evaluates their tool calls too.
     flags.push('--permission-mode', 'auto')
+  } else if (
+    permissionMode === 'default' ||
+    permissionMode === 'plan' ||
+    permissionMode === 'dontAsk' ||
+    (permissionMode as string) === 'bubble'
+  ) {
+    flags.push('--permission-mode', 'default')
   }
 
   // Official 2.1.309 #1138: forward leader --disallowed-tools and --tools to teammates.

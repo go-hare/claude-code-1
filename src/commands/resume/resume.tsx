@@ -26,6 +26,7 @@ import {
   loadFullLog,
   loadSameRepoMessageLogs,
   loadSameRepoMessageLogsProgressive,
+  flushSessionStorage,
   searchSessionsByCustomTitle,
   type SessionLogResult,
 } from '../../utils/sessionStorage.js';
@@ -270,6 +271,8 @@ export function filterResumableSessions(logs: LogOption[], currentSessionId: str
 export const call: LocalJSXCommandCall = async (onDone, context, args) => {
   const onResume = async (sessionId: UUID, log: LogOption, entrypoint: ResumeEntrypoint) => {
     try {
+      // #1501: Flush pending transcript/plan writes before switching sessions.
+      await flushSessionStorage();
       await context.resume?.(sessionId, log, entrypoint);
       onDone(undefined, { display: 'skip' });
     } catch (error) {

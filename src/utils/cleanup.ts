@@ -28,6 +28,7 @@ import {
   readHeadAndTail,
 } from './sessionStoragePortable.js'
 import { getSettingsWithAllErrors } from './settings/allErrors.js'
+import { isSettingSourceEnabled } from './settings/constants.js'
 import {
   getSecuritySensitiveSetting,
   getSettings_DEPRECATED,
@@ -1510,22 +1511,58 @@ export async function waitForSettingsReadHooksForRetentionSweep(
   }
 }
 
-export async function cleanupOldMessageFilesInBackground(): Promise<void> {
-  await waitForSettingsReadHooksForRetentionSweep()
+export type RetentionCleanupSkipReason =
+  | 'user_source_disabled'
+  | 'settings_invalid_key_set'
 
-  // densable Jrt / $te: if settings have validation errors but a retention
-  // key was explicitly set, skip rather than falling back to defaults.
-  const { errors } = getSettingsWithAllErrors()
-  if (errors.length > 0) {
-    const blockingKey = CLEANUP_PERIOD_SETTINGS_KEYS.find(key =>
-      rawSettingsContainsKey(key),
+/**
+ * Official `qSr` (#1554): check whether retention cleanup should be skipped
+ * due to `--setting-sources` disabling `userSettings` without an enabled
+ * `cleanupPeriodDays`, or settings validation errors on retention keys.
+ */
+export function getRetentionCleanupSkipReason(opts?: {
+  userSettingsEnabled?: boolean
+  cleanupPeriodDays?: number
+  hasSettingsErrors?: boolean
+  hasExplicitRetentionKey?: boolean
+}): RetentionCleanupSkipReason | null {
+  const userSettingsEnabled =
+    opts?.userSettingsEnabled ?? isSettingSourceEnabled('userSettings')
+  const cleanupPeriodDays =
+    opts?.cleanupPeriodDays ?? getSettings_DEPRECATED()?.cleanupPeriodDays
+  if (!userSettingsEnabled && cleanupPeriodDays === undefined) {
+    logForDebugging(
+      'Skipping retention cleanup: userSettings source is disabled (--setting-sources) and no enabled source provides cleanupPeriodDays.',
     )
+    return 'user_source_disabled'
+  }
+  const hasErrors =
+    opts?.hasSettingsErrors ?? getSettingsWithAllErrors().errors.length > 0
+  if (hasErrors) {
+    const blockingKey =
+      opts?.hasExplicitRetentionKey !== undefined
+        ? opts.hasExplicitRetentionKey
+          ? CLEANUP_PERIOD_SETTINGS_KEYS[0]
+          : undefined
+        : CLEANUP_PERIOD_SETTINGS_KEYS.find(key => rawSettingsContainsKey(key))
     if (blockingKey !== undefined) {
       logForDebugging(
         `Skipping cleanup: settings have validation errors but ${blockingKey} was explicitly set. Fix settings errors to enable cleanup.`,
       )
-      return
+      return 'settings_invalid_key_set'
     }
+  }
+  return null
+}
+
+export async function cleanupOldMessageFilesInBackground(): Promise<void> {
+  await waitForSettingsReadHooksForRetentionSweep()
+
+  // Official qSr (#1554) + Jrt / $te: skip when userSettings is disabled by
+  // --setting-sources (and no enabled source sets cleanupPeriodDays), or when
+  // settings have validation errors and a retention key was explicitly set.
+  if (getRetentionCleanupSkipReason() !== null) {
+    return
   }
 
   await cleanupOldMessageFiles()
@@ -1537,6 +1574,8 @@ export async function cleanupOldMessageFilesInBackground(): Promise<void> {
   await cleanupOldImageCaches()
   const cutoffDate = getCutoffDate()
   if (cutoffDate !== null) {
+    const { renewGlobalConfigBackupIfNeeded } = await import('./config.js')
+    await renewGlobalConfigBackupIfNeeded(cutoffDate)
     await cleanupOldPastes(cutoffDate)
     const removedWorktrees = await cleanupStaleAgentWorktrees(cutoffDate)
     if (removedWorktrees > 0) {

@@ -321,6 +321,9 @@ export function buildShellSpawnEnv({
   }
   // #383 SEA: Strip daemon-injected FORCE_COLOR=3 before merging overrides
   stripDaemonForceColorFromEnv(baseSubprocessEnv)
+  // #1482: Strip SHELLOPTS so parent shell options (e.g. errexit/pipefail)
+  // do not leak into spawned child shells.
+  delete baseSubprocessEnv.SHELLOPTS
   // #1118 SEA: Prevent outer sandboxed shell from sourcing BASH_ENV / ENV
   // outside the sandbox before executing the sandboxed command.
   if (shouldUseSandbox) {
@@ -750,14 +753,12 @@ export async function exec(
     // Close our copy of the fd — the child has its own dup.
     // Must happen after wrapSpawn attaches 'error' listener, since the await
     // yields and the child's ENOENT 'error' event can fire in that window.
-    // Wrapped in its own try/catch so a close failure (e.g. EIO) doesn't fall
-    // through to the spawn-failure catch block, which would orphan the child.
+    // Fire-and-forget (official pHe) so concurrent spawns on macOS do not
+    // serialize or stall on FileHandle.close() before returning shellCommand.
     if (outputHandle !== undefined) {
-      try {
-        await outputHandle.close()
-      } catch {
+      void outputHandle.close().catch(() => {
         // fd may already be closed by the child; safe to ignore
-      }
+      })
     }
 
     // In pipe mode, attach the caller's callbacks alongside StreamWrapper.
@@ -783,7 +784,7 @@ export async function exec(
         ? posixPathToWindowsPath(cwdFilePath)
         : cwdFilePath
 
-    void shellCommand.result.then(async result => {
+    shellCommand.result = shellCommand.result.then(async result => {
       // On Linux, bwrap creates 0-byte mount-point files on the host to deny
       // writes to non-existent paths (.bashrc, HEAD, etc.). These persist after
       // bwrap exits as ghost dotfiles in cwd. Cleanup is synchronous and a no-op
@@ -825,6 +826,7 @@ export async function exec(
       } else {
         await unlinkCwdTrackingFile(nativeCwdFilePath)
       }
+      return result
     })
 
     return shellCommand

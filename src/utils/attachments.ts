@@ -542,6 +542,13 @@ export type Attachment =
       type: 'edited_text_file'
       filename: string
       snippet: string
+      rereadEntry?: {
+        timestamp: number
+        contentHash: string
+        contentLength: number
+        isPartialView?: boolean
+        readBaseline?: unknown
+      }
     }
   | {
       type: 'edited_image_file'
@@ -3441,10 +3448,31 @@ export async function getChangedFiles(
             return null
           }
 
+          const updatedState = toolUseContext.readFileState.get(normalizedPath)
+          const readBaseline = (
+            updatedState as { readBaseline?: unknown } | undefined
+          )?.readBaseline
+          const rereadEntry =
+            updatedState?.contentHash !== undefined &&
+            updatedState.contentLength !== undefined &&
+            updatedState.offset === 1 &&
+            updatedState.limit === undefined
+              ? {
+                  timestamp: updatedState.timestamp,
+                  contentHash: updatedState.contentHash,
+                  contentLength: updatedState.contentLength,
+                  ...(updatedState.isPartialView
+                    ? { isPartialView: true as const }
+                    : {}),
+                  ...(readBaseline ? { readBaseline } : {}),
+                }
+              : undefined
+
           return {
             type: 'edited_text_file' as const,
             filename: normalizedPath,
             snippet,
+            ...(rereadEntry ? { rereadEntry } : {}),
           }
         }
 
@@ -4662,17 +4690,7 @@ export async function generateFileAttachment(
 
     try {
       const result = await FileReadTool.call(fileInput, toolUseContext)
-      // densable Eio: FileRead dedup → already_read_file (content is file_unchanged)
-      if (result.data.type === 'file_unchanged') {
-        logEvent(successEventName, {})
-        return {
-          type: 'already_read_file',
-          filename,
-          displayPath: relative(getCwd(), filename),
-          content: result.data,
-        }
-      }
-      // densable: token-cap auto-page first page still routes through truncated path
+      // #1595: file_unchanged stub removed; token-cap auto-page first page still routes through truncated path
       if (
         result.data.type === 'text' &&
         result.data.file.truncatedByTokenCap === true

@@ -172,7 +172,7 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
   const securityStep = (
     <Box flexDirection="column" gap={1} paddingLeft={1}>
       <Text bold>Security notes:</Text>
-      <Box flexDirection="column" width={70}>
+      <Box flexDirection="column" maxWidth={70}>
         {/**
          * OrderedList misnumbers items when rendering conditionally,
          * so put all items in the if/else
@@ -252,7 +252,7 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
       component: (
         <Box flexDirection="column" gap={1} paddingLeft={1}>
           <Text bold>Use Claude Code&apos;s terminal setup?</Text>
-          <Box flexDirection="column" width={70} gap={1}>
+          <Box flexDirection="column" maxWidth={70} gap={1}>
             <Text>
               For the optimal coding experience, enable the recommended settings
               <Newline />

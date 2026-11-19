@@ -746,6 +746,8 @@ export function classifyMcpAutoProbeFallback(
      * fallback. Default false (unknown cause → allow fallback).
      */
     hardThrowCause?: boolean
+    /** Elapsed ms since connect start (used to detect <3s fast-dying stdio servers). */
+    elapsedMs?: number
   },
 ): McpAutoProbeFallbackDecision {
   if (!plan || plan.mode !== 'auto') return { shouldFallback: false }
@@ -766,6 +768,14 @@ export function classifyMcpAutoProbeFallback(
   if (eraFailed && isStdio) {
     return { shouldFallback: true, reason: 'closed' }
   }
+  if (
+    isStdio &&
+    (opts.elapsedMs === undefined ||
+      opts.elapsedMs <= MCP_PROTOCOL_PROBE_STDIO_CAP_MS) &&
+    isStdioProbeFastCloseError(error)
+  ) {
+    return { shouldFallback: true, reason: 'closed' }
+  }
   if (eraFailed || probeTimedOut) {
     return {
       shouldFallback: true,
@@ -773,6 +783,15 @@ export function classifyMcpAutoProbeFallback(
     }
   }
   return { shouldFallback: false }
+}
+
+function isStdioProbeFastCloseError(error: unknown): boolean {
+  const code = readErrorCode(error)
+  if (code === -32000 || code === '-32000' || code === 'EPIPE') return true
+  const msg = readErrorMessage(error)
+  return /connection closed|eof|process exited|broken pipe|stream.*destroyed/i.test(
+    msg,
+  )
 }
 
 /** densable `Math.max(1000, y0() - (Date.now() - n))`. */
@@ -844,6 +863,7 @@ export function getMcpErrorCause(error: unknown): unknown {
  * `MCP_PROTOCOL_NEGOTIATION=auto` is explicitly forced.
  */
 export const STDIO_DISCOVER_VERDICT_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 604_800_000
+const STDIO_DISCOVER_VERDICTS_MAX_BYTES = 262_144
 
 type StdioDiscoverVerdictEntry = {
   observedAt: number
@@ -851,6 +871,98 @@ type StdioDiscoverVerdictEntry = {
 }
 
 const stdioDiscoverVerdictCache = new Map<string, StdioDiscoverVerdictEntry>()
+let stdioDiscoverVerdictsLoadPromise: Promise<void> | null = null
+let stdioDiscoverVerdictsWriteChain: Promise<void> = Promise.resolve()
+let stdioDiscoverVerdictsWriteSeq = 0
+
+function getStdioDiscoverVerdictsFilePath(): string {
+  const { join } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('path') as typeof import('path')
+  const { getClaudeConfigHomeDir } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('../../utils/envUtils.js') as typeof import('../../utils/envUtils.js')
+  return join(getClaudeConfigHomeDir(), 'state', 'mcp-discover-verdicts.json')
+}
+
+export async function loadRememberedLegacyStdioFromDisk(
+  now = Date.now(),
+  options?: { once?: boolean },
+): Promise<void> {
+  if (options?.once && stdioDiscoverVerdictsLoadPromise !== null) {
+    return stdioDiscoverVerdictsLoadPromise
+  }
+  const load = (async () => {
+    try {
+      const { readFile } = await import('fs/promises')
+      const raw = await readFile(getStdioDiscoverVerdictsFilePath(), 'utf8')
+      if (Buffer.byteLength(raw, 'utf8') > STDIO_DISCOVER_VERDICTS_MAX_BYTES) {
+        return
+      }
+      const parsed = JSON.parse(raw) as Record<string, unknown>
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return
+      for (const [key, val] of Object.entries(parsed)) {
+        if (
+          val &&
+          typeof val === 'object' &&
+          typeof (val as StdioDiscoverVerdictEntry).observedAt === 'number' &&
+          typeof (val as StdioDiscoverVerdictEntry).modernProtocolVersion ===
+            'string'
+        ) {
+          const entry = val as StdioDiscoverVerdictEntry
+          const age = now - entry.observedAt
+          if (age >= 0 && age < STDIO_DISCOVER_VERDICT_TTL_MS) {
+            const existing = stdioDiscoverVerdictCache.get(key)
+            if (!existing || entry.observedAt >= existing.observedAt) {
+              stdioDiscoverVerdictCache.set(key, entry)
+            }
+          }
+        }
+      }
+    } catch {
+      // Missing or unreadable state file is non-fatal
+    }
+  })()
+  stdioDiscoverVerdictsLoadPromise = load
+  return load
+}
+
+export function persistRememberedLegacyStdioToDisk(
+  now = Date.now(),
+): Promise<void> {
+  const run = async (): Promise<void> => {
+    try {
+      const { mkdir, rename, writeFile } = await import('fs/promises')
+      const { dirname } = await import('path')
+      const filePath = getStdioDiscoverVerdictsFilePath()
+      const payload: Record<string, StdioDiscoverVerdictEntry> = {}
+      for (const [key, entry] of stdioDiscoverVerdictCache.entries()) {
+        const age = now - entry.observedAt
+        if (age >= 0 && age < STDIO_DISCOVER_VERDICT_TTL_MS) {
+          payload[key] = entry
+        }
+      }
+      await mkdir(dirname(filePath), { recursive: true, mode: 0o700 })
+      const tmpPath = `${filePath}.tmp.${process.pid}.${++stdioDiscoverVerdictsWriteSeq}`
+      await writeFile(tmpPath, JSON.stringify(payload), {
+        encoding: 'utf8',
+        mode: 0o600,
+      })
+      await rename(tmpPath, filePath)
+    } catch {
+      // Best-effort persistence
+    }
+  }
+  stdioDiscoverVerdictsWriteChain = stdioDiscoverVerdictsWriteChain.then(
+    run,
+    run,
+  )
+  return stdioDiscoverVerdictsWriteChain
+}
+
+export function flushRememberedLegacyStdioWritesForTest(): Promise<void> {
+  return stdioDiscoverVerdictsWriteChain
+}
 
 export function getStdioDiscoverVerdictKey(config: {
   type?: string
@@ -910,6 +1022,7 @@ export function recordRememberedLegacyStdio(
     observedAt: now,
     modernProtocolVersion: '2026-07-28',
   })
+  void persistRememberedLegacyStdioToDisk(now)
 }
 
 export function clearRememberedLegacyStdio(config: {
@@ -919,11 +1032,14 @@ export function clearRememberedLegacyStdio(config: {
   env?: Readonly<Record<string, string>>
 }): void {
   const key = getStdioDiscoverVerdictKey(config)
-  if (key) stdioDiscoverVerdictCache.delete(key)
+  if (key && stdioDiscoverVerdictCache.delete(key)) {
+    void persistRememberedLegacyStdioToDisk()
+  }
 }
 
 export function resetStdioDiscoverVerdictCacheForTest(): void {
   stdioDiscoverVerdictCache.clear()
+  stdioDiscoverVerdictsLoadPromise = null
 }
 
 // ── 2.1.302 #911: 2026-07-28 result compatibility shim (SEA o0o) ─────────────

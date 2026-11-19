@@ -9,6 +9,7 @@ import {
   MAX_ENTRIES,
   MAX_ENTRY_CHARS,
   autoModeBlockSchema,
+  hasReplacingManagedAutoModeAllow,
   stripVariationSelectors,
 } from './write.js'
 import { isENOENT } from '../../utils/errors.js'
@@ -293,7 +294,11 @@ export async function addAutoModeRule(
           'The environment is edited as a document — use Edit environment on the Auto mode tab.',
       }
     }
-    if (section !== 'environment' && current.length === 0) {
+    if (
+      section !== 'environment' &&
+      current.length === 0 &&
+      !(section === 'allow' && hasReplacingManagedAutoModeAllow())
+    ) {
       return [AUTO_MODE_DEFAULTS_SENTINEL, text]
     }
     return [...current, text]

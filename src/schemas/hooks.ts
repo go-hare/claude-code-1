@@ -26,7 +26,7 @@ const IfConditionSchema = lazySchema(() =>
     ),
 )
 
-const OnFailureSchema = lazySchema(() =>
+export const OnFailureSchema = lazySchema(() =>
   z
     .enum(['continue', 'block'])
     .optional()
@@ -34,6 +34,10 @@ const OnFailureSchema = lazySchema(() =>
       "What happens when this hook can't run, times out, fails with an exit code other than 0 or 2, or prints JSON that is invalid or fails validation. 'continue' (default): the failure is reported and the action goes ahead. 'block': the failure counts as exit code 2, so the action the event guards (a tool call, a permission request, a prompt) is blocked. Ignored for async hooks and on Stop, SubagentStop, TaskCompleted and TeammateIdle.",
     ),
 )
+
+export type HookOnFailure = NonNullable<
+  z.infer<ReturnType<typeof OnFailureSchema>>
+>
 
 // Internal factory for individual hook schemas (shared between exported
 // discriminated union members and the HookCommandSchema factory)

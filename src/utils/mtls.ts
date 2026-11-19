@@ -861,13 +861,17 @@ export function attachTlsHandshakeCrossCertHook(socket: tls.TLSSocket): void {
 
 /**
  * Probe a list of CA certificates for self-named / cross-signed root pairs
- * (respecting `CLAUDE_CODE_DISABLE_SELF_NAMED_CERT_DROP=1`).
+ * (respecting `CLAUDE_CODE_DISABLE_LOOPED_CROSS_CERT_DROP` and
+ * `CLAUDE_CODE_DISABLE_SELF_NAMED_CERT_DROP`).
  */
 export function probeCrossSignedRootPairs(
   certs: readonly X509Certificate[],
   env: NodeJS.ProcessEnv = process.env,
 ): DroppedCrossCertificatePair[] {
-  if (env.CLAUDE_CODE_DISABLE_SELF_NAMED_CERT_DROP === '1') {
+  if (
+    isEnvTruthy(env.CLAUDE_CODE_DISABLE_LOOPED_CROSS_CERT_DROP) ||
+    isEnvTruthy(env.CLAUDE_CODE_DISABLE_SELF_NAMED_CERT_DROP)
+  ) {
     return []
   }
   const bySubject = new Map<string, X509Certificate[]>()

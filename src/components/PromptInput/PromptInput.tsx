@@ -12,6 +12,12 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
+import {
+  formatInvisibleRemovedNotice,
+  shouldHoldInvisibleRemovalForReview,
+  stripInvisibleFromPromptInput,
+} from './invisibleStrip.js';
+import { recordPromptSubmitTime } from '../permissions/submitGuard.js';
 import { DockWidthContext, PromptChromeBudgetContext } from '../FullscreenLayout.js';
 import { isBridgeEnabled } from '../../bridge/bridgeEnabled.js';
 import { useNotifications } from 'src/context/notifications.js';
@@ -1755,6 +1761,46 @@ function PromptInput({
         return;
       }
 
+      // #1489: strip invisible characters before submit; plain prompts send
+      // cleaned on the first Enter, while commands/bash/bidi/empty hold for review.
+      let activePastedContents = livePastedContents;
+      const stripped = stripInvisibleFromPromptInput(inputParam, activePastedContents);
+      if (stripped.removed.removedTotal > 0) {
+        logEvent('tengu_prompt_invisible_strip', {
+          surface: 'prompt' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+          removed_total: stripped.removed.removedTotal,
+          removed_tags: stripped.removed.removedByClass.tags,
+          removed_bidi: stripped.removed.removedByClass.bidi,
+          removed_zero_width: stripped.removed.removedByClass.zeroWidth,
+          removed_selectors: stripped.removed.removedByClass.selectors,
+          removed_other: stripped.removed.removedByClass.other,
+        });
+        const isEmptyAfterStrip = stripped.input.trim() === '';
+        const holdForReview = shouldHoldInvisibleRemovalForReview(stripped.input, stripped.removed, mode);
+        trackAndSetInput(stripped.input, undefined, {
+          kind: 'composer',
+        });
+        liveInputRef.current = stripped.input;
+        setCursorOffset(stripped.input.length);
+        if (stripped.pastedContents !== activePastedContents) {
+          pastedContentsRef.current = stripped.pastedContents;
+          activePastedContents = stripped.pastedContents;
+        }
+        addNotification({
+          key: 'prompt-invisible-removed',
+          text: formatInvisibleRemovedNotice(
+            stripped.removed.removedTotal,
+            isEmptyAfterStrip ? 'empty' : holdForReview ? 'review' : 'cleaned',
+          ),
+          priority: 'immediate',
+          timeoutMs: 5000,
+        });
+        if (holdForReview) {
+          return;
+        }
+        inputParam = stripped.input;
+      }
+
       // If input is empty OR matches the suggestion, submit it
       // But if there are images attached, don't auto-accept the suggestion -
       // the user wants to submit just the image(s).
@@ -1767,6 +1813,7 @@ function PromptInput({
           markAccepted();
           // skipReset: resetSuggestion would abort the speculation before we accept it
           logOutcomeAtSubmission(suggestionText, { skipReset: true });
+          recordPromptSubmitTime();
 
           void onSubmitProp(
             suggestionText,
@@ -1849,6 +1896,10 @@ function PromptInput({
         return;
       }
 
+      // #1622: Record prompt submit timestamp so immediately following keys
+      // don't accidentally answer a permission prompt.
+      recordPromptSubmitTime();
+
       // PromptInput UX: Check if suggestions dropdown is showing
       // For directory suggestions, allow submission (Tab is used for completion)
       const hasDirectorySuggestions =
@@ -1893,7 +1944,7 @@ function PromptInput({
         },
         undefined,
         {
-          pastedContentsOverride: livePastedContents,
+          pastedContentsOverride: activePastedContents,
           ...(resumesStaleQuotaWait ? { resumesStaleQuotaWait: true } : {}),
           ...(submitOptions?.sendNow ? { sendNow: true } : {}),
           ...(submitOptions?.queueSubmit ? { queueSubmit: true } : {}),

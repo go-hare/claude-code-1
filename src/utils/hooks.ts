@@ -149,7 +149,6 @@ import type {
   SyncHookJSONOutput,
   AsyncHookJSONOutput,
 } from 'src/entrypoints/agentSdkTypes.js'
-export type { HookInput } from 'src/entrypoints/agentSdkTypes.js'
 import type { StatusLineCommandInput } from '../types/statusLine.js'
 import type { ElicitResult } from 'src/services/mcp/types.js'
 import type { FileSuggestionCommandInput } from '../types/fileSuggestion.js'
@@ -1916,8 +1915,11 @@ export function applyOnFailureBlockToHookResult(
 export function applyOnFailureBlockToAggregatedHookResult(
   hook: HookWithOnFailure,
   aggregated: HookOutsideReplResult,
+  hookEvent?: HookEvent,
 ): HookOutsideReplResult {
   if (
+    (hookEvent !== undefined &&
+      ON_FAILURE_BLOCK_IGNORED_EVENTS.has(hookEvent)) ||
     !isOnFailureBlock(hook) ||
     aggregated.succeeded ||
     aggregated.blocked ||
@@ -6637,6 +6639,7 @@ async function executeHooksOutsideREPL({
             ? applyOnFailureBlockToAggregatedHookResult(
                 hook as HookWithOnFailure,
                 res,
+                hookEvent,
               )
             : res,
         )
@@ -7742,6 +7745,7 @@ export async function* executeSessionStartHooks(
       storageV5,
     })
   } finally {
+    invalidateSessionEnvCache()
     stopSessionActivity('hook_exec', STARTUP_HOOK_HOLD)
   }
 }
@@ -7974,6 +7978,7 @@ export async function* executeSetupHooks(
       forceSyncExecution,
     })
   } finally {
+    invalidateSessionEnvCache()
     stopSessionActivity('hook_exec', STARTUP_HOOK_HOLD)
   }
 }

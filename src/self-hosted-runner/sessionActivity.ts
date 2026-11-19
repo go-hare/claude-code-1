@@ -90,6 +90,8 @@ export type ActivityPipeState = {
   turnBeganBeforeInitSource?: 'tee' | 'stderr'
   /** densable `Cn` — turn_began_before_init observed on activity channel */
   turnBeganBeforeInitOnTee: boolean
+  /** Official `Es` (#1504/#1561) — pre-init parked prompt seen on session_state_changed */
+  sawPreInitParked: boolean
 }
 
 function watchdogQuarterMs(limitMs: number): number {
@@ -167,6 +169,7 @@ export function createActivityPipeState(
     waitingOnUser: false,
     sawSessionState: false,
     sawInit: false,
+    sawPreInitParked: false,
     wakeupPadMs: 120_000,
     bgResultAwaitingFollowup: false,
     followUpHoldTimer: undefined,
@@ -557,15 +560,52 @@ export function handleActivityLine(
     return
   }
   if (msg.type === 'system' && msg.subtype === 'session_state_changed') {
+    state.sawSessionState = true
     if (typeof msg.waiting_on_user === 'boolean') {
-      state.sawSessionState = true
       state.waitingOnUser = msg.waiting_on_user
     }
     if (msg.state === 'idle') {
-      if (!state.sawResult) emit?.('turn-end')
+      if (
+        !state.sawResult ||
+        (state.turnBeganBeforeInitOnTee && !state.sawInit)
+      ) {
+        state.turnInFlight = false
+        state.turnBeganBeforeInitOnTee = false
+        if (
+          state.sawResult &&
+          state.sawBgResult &&
+          countNonMonitorTasks(state.tasks) === 0 &&
+          !state.waitingOnUser
+        ) {
+          startFollowUpHold(state, handlers)
+        }
+        if (
+          state.sawResult &&
+          (countNonMonitorTasks(state.tasks) > 0 ||
+            isWakeupHolding(state) ||
+            state.bgResultAwaitingFollowup)
+        ) {
+          for (const id of state.tasks.keys()) {
+            state.backgroundedTaskIds.add(id)
+          }
+          emit?.('turn-end-deferred', snapshotBgTasks(state))
+        } else {
+          emit?.('turn-end')
+        }
+      }
       return
     }
-    if (!state.sawInit) return
+    if (!state.sawInit) {
+      const parked =
+        typeof msg.waiting_on_user === 'boolean'
+          ? msg.waiting_on_user
+          : msg.state === 'requires_action'
+      if (parked) {
+        state.sawPreInitParked = true
+      } else if (!state.sawPreInitParked) {
+        return
+      }
+    }
     if (typeof msg.waiting_on_user === 'boolean') {
       emit?.(msg.waiting_on_user ? 'awaiting-action' : 'activity')
       clearFollowUpHold(

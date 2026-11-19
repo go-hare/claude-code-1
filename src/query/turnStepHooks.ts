@@ -5,7 +5,7 @@ import type {
   SystemAPIErrorMessage,
 } from '../types/message.js'
 import { logForDebugging } from '../utils/debug.js'
-import { errorMessage, isAbortError } from '../utils/errors.js'
+import { AbortError, errorMessage, isAbortError } from '../utils/errors.js'
 import { getMainThreadTurn } from '../utils/mainThreadTurn.js'
 import { createAssistantMessage } from '../utils/messages.js'
 import { parseUserSpecifiedModel } from '../utils/model/model.js'
@@ -1088,7 +1088,10 @@ export async function* streamTurnStepWithHooks(params: {
       }
     }
 
-    if (state.thrown !== undefined && !yieldedSynthesizedRecovery) {
+    if (
+      state.thrown !== undefined &&
+      (!yieldedSynthesizedRecovery || !callArgs.signal.aborted)
+    ) {
       throw state.thrown.error
     }
 
@@ -1098,11 +1101,16 @@ export async function* streamTurnStepWithHooks(params: {
       )
     }
   } catch (err) {
-    if (state.thrown !== undefined) {
+    if (
+      state.thrown !== undefined &&
+      (!callArgs.signal.aborted || isAbortError(state.thrown.error))
+    ) {
       throw state.thrown.error
     }
     if (callArgs.signal.aborted && !isAbortError(err)) {
-      throw isAbortError(callArgs.signal.reason) ? callArgs.signal.reason : err
+      throw isAbortError(callArgs.signal.reason)
+        ? callArgs.signal.reason
+        : new AbortError(errorMessage(callArgs.signal.reason))
     }
     if (state.requests === 0 && !isAbortError(err)) {
       logForDebugging(

@@ -33,7 +33,7 @@ export async function listArtifactFrames(input: {
     200,
   )
   try {
-    const res = await DL.get(`/api/frame/frames?limit=${limit}`, {
+    const res = await DL.get(`/api/frame/frames?rel=shared&limit=${limit}`, {
       signal: input.signal,
       timeoutMs: 15_000,
       headers: frameControlPlaneHeaders(),

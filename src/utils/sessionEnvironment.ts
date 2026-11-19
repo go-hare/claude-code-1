@@ -13,11 +13,13 @@ import { getPlatform } from './platform.js'
 let sessionEnvScript: string | null | undefined
 let sessionEnvOwner: string | undefined
 
-export async function getSessionEnvDirPath(): Promise<string> {
+export async function getSessionEnvDirPath(
+  sessionIdOverride?: string,
+): Promise<string> {
   const sessionEnvDir = join(
     getClaudeConfigHomeDir(),
     'session-env',
-    getSessionId(),
+    sessionIdOverride ?? getSessionId(),
   )
   await mkdir(sessionEnvDir, { recursive: true })
   return sessionEnvDir
@@ -26,9 +28,13 @@ export async function getSessionEnvDirPath(): Promise<string> {
 export async function getHookEnvFilePath(
   hookEvent: 'Setup' | 'SessionStart' | 'CwdChanged' | 'FileChanged',
   hookIndex: number,
+  envFileSessionId?: string,
 ): Promise<string> {
   const prefix = hookEvent.toLowerCase()
-  return join(await getSessionEnvDirPath(), `${prefix}-hook-${hookIndex}.sh`)
+  return join(
+    await getSessionEnvDirPath(envFileSessionId),
+    `${prefix}-hook-${hookIndex}.sh`,
+  )
 }
 
 export async function clearCwdEnvFiles(): Promise<void> {
