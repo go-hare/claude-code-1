@@ -9014,16 +9014,50 @@ export function REPL({
       ? messages
       : deferredMessages;
   const focusedConversationId = viewedAgentTask ? viewedAgentTask.id : conversationId;
+  // Derive unresolved tool_use IDs for a running local_agent from its displayed
+  // messages so active tool calls render their running indicator (matches
+  // official 2.1.328 transcripts[z].inProgressToolUseIDs in C0a).
+  const localAgentInProgressToolUseIDs = useMemo(() => {
+    if (
+      !viewedAgentTask ||
+      viewedTeammateTask ||
+      viewedAgentTask.status !== 'running' ||
+      !displayedAgentMessages ||
+      displayedAgentMessages.length === 0
+    ) {
+      return EMPTY_STRING_SET;
+    }
+    const resolved = new Set<string>();
+    const pending: string[] = [];
+    for (const m of displayedAgentMessages) {
+      const content = (m as { message?: { content?: unknown } }).message?.content;
+      if (!Array.isArray(content)) continue;
+      if (m.type === 'user') {
+        for (const b of content) {
+          if (b && typeof b === 'object' && b.type === 'tool_result' && typeof b.tool_use_id === 'string') {
+            resolved.add(b.tool_use_id);
+          }
+        }
+      } else if (m.type === 'assistant') {
+        for (const b of content) {
+          if (b && typeof b === 'object' && b.type === 'tool_use' && typeof b.id === 'string') {
+            pending.push(b.id);
+          }
+        }
+      }
+    }
+    const unresolved = pending.filter(id => !resolved.has(id));
+    return unresolved.length > 0 ? new Set(unresolved) : EMPTY_STRING_SET;
+  }, [viewedAgentTask, viewedTeammateTask, displayedAgentMessages]);
   const focusedInProgressToolUseIDs = viewedTeammateTask
     ? (viewedTeammateTask.inProgressToolUseIDs ?? EMPTY_STRING_SET)
     : viewedAgentTask
-      ? EMPTY_STRING_SET
+      ? localAgentInProgressToolUseIDs
       : inProgressToolUseIDs;
   const focusedStreamingToolUses = viewedAgentTask ? EMPTY_STREAMING_TOOL_USES : streamingToolUses;
+  // Official 2.1.328 C0a (@292634291): `isLoading: h ? h.status==="running" && !h.isIdle : r`
   const focusedIsLoading = viewedAgentTask
-    ? viewedAgentTask.status === 'running' &&
-      !(viewedAgentTask as { isIdle?: boolean }).isIdle &&
-      focusedInProgressToolUseIDs.size > 0
+    ? viewedAgentTask.status === 'running' && !(viewedAgentTask as { isIdle?: boolean }).isIdle
     : isLoading;
 
   // Hooks must run before the transcript early return (React #300 on ctrl+o).

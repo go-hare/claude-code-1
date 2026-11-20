@@ -295,20 +295,18 @@ function PromptInputQueuedCommandsImpl({
   } = resolveQueuedSendNowLayout(sendNowChord, terminalColumns);
   const sendNowHint =
     canSendNow && (sendNowChord !== '' || isFullscreen) ? (
-      <Box paddingLeft={sendNowPaddingLeft} height={1} overflow="hidden">
-        <Text dimColor>
-          {showQueuedPrefix && (
-            <>
-              <Text aria-hidden>{QUEUED_HINT_PREFIX}</Text>
-              {'Queued · '}
-            </>
-          )}
-          {isFullscreen ? (
-            <FePress onPress={handleSendNowClick}>{hintText}</FePress>
-          ) : (
-            buildSendNowHintLabel(sendNowChord)
-          )}
-        </Text>
+      <Box flexDirection="row" paddingLeft={sendNowPaddingLeft} height={1} overflow="hidden">
+        {showQueuedPrefix && (
+          <Text dimColor>
+            <Text aria-hidden>{QUEUED_HINT_PREFIX}</Text>
+            {'Queued · '}
+          </Text>
+        )}
+        {isFullscreen ? (
+          <FePress onPress={handleSendNowClick}>{hintText}</FePress>
+        ) : (
+          <Text dimColor>{buildSendNowHintLabel(sendNowChord)}</Text>
+        )}
       </Box>
     ) : null;
 

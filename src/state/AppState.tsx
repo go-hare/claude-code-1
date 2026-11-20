@@ -109,6 +109,17 @@ export function AppStateProvider({
   const [store] = useState(
     () => providedStore ?? createStore<AppState>(initialState ?? getDefaultAppState(), onChangeAppState),
   );
+
+  // Official 2.1.328 `uZr` engineStore.current — point memory permission reads
+  // at this live store so mid-session permission changes apply to CLAUDE.md /
+  // @include / .claude/rules loads (registered at launch by main.tsx for
+  // entrypoints without an AppStateProvider).
+  useEffect(() => {
+    const { registerClaudeMdPermissionContextSource } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../utils/claudemd.js') as typeof import('../utils/claudemd.js');
+    registerClaudeMdPermissionContextSource(() => store.getState().toolPermissionContext);
+  }, [store]);
   const [session] = useState(() => providedSession ?? getBootstrapSession());
   const [sessionHooks] = useState(() => {
     const registry = providedSessionHooks ?? createSessionHooksRegistry();

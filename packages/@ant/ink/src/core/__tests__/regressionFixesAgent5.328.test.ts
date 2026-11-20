@@ -179,7 +179,7 @@ describe('Regression Fix Agent 5 — Ink Core', () => {
       join(import.meta.dir, '../../components/App.tsx'),
       'utf8',
     )
-    expect(appSrc).toContain('=> boolean | void;')
+    expect(appSrc).toContain('=> boolean | undefined;')
     expect(appSrc).toContain('readKeys(this.keyReader, input, now, late)')
     expect(appSrc).toContain("splitEscPrefixedKey(item.sequence ?? '')")
     expect(appSrc).not.toContain('const soloKeypress = wantEveryKey ||')

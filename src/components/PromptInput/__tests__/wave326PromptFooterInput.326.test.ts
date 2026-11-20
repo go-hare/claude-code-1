@@ -148,7 +148,7 @@ describe('Wave 326 Group 4B — PromptInput / Footer / Hooks', () => {
       join(ROOT, 'src/components/PromptInput/useMaybeTruncateInput.ts'),
       'utf8',
     )
-    expect(truncSrc).toContain('isFullscreenEnvEnabled()')
+    expect(truncSrc).toContain('keepsFullText')
 
     const notifSrc = readFileSync(
       join(ROOT, 'src/components/PromptInput/Notifications.tsx'),

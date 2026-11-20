@@ -1399,7 +1399,8 @@ export function Select<T>({
   );
   void leftoverLayoutTick;
   const leftoverHostH = leftoverFHostHeight(leftoverModalBox, leftoverList);
-  const leftoverWidth = leftoverList?.yogaNode?.getComputedWidth() ?? 0;
+  const rawLeftoverWidth = leftoverList?.yogaNode?.getComputedWidth();
+  const leftoverWidth = rawLeftoverWidth !== undefined && Number.isFinite(rawLeftoverWidth) ? rawLeftoverWidth : 0;
   const leftoverChromeS = leftoverChromeQ(
     leftoverList,
     leftoverModalBox,

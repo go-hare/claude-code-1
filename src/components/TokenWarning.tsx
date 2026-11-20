@@ -1,7 +1,7 @@
 import { feature } from 'bun:bundle';
 import * as React from 'react';
 import { useSyncExternalStore } from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Text } from '@anthropic/ink';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js';
 import {
   calculateTokenWarningState,
@@ -112,12 +112,10 @@ export function TokenWarning({ tokenUsage, model }: Props): React.ReactNode {
   // Collapse mode: delegate to the subscribing sub-component so the
   // indicator updates live as the ctx-agent stages and commits fire, not
   // just when the next API response re-renders TokenWarning.
+  // Official 2.1.328 `j8` (@320620776): MUST return <Text> directly (never <Box>)
+  // because NotificationBody renders `notification.jsx` inside <Text wrap="truncate">.
   if (collapseMode && feature('CONTEXT_COLLAPSE')) {
-    return (
-      <Box flexDirection="row">
-        <CollapseLabel upgradeMessage={upgradeMessage} />
-      </Box>
-    );
+    return <CollapseLabel upgradeMessage={upgradeMessage} />;
   }
 
   const autocompactLabel = reactiveOnlyMode
@@ -125,21 +123,17 @@ export function TokenWarning({ tokenUsage, model }: Props): React.ReactNode {
     : `${displayPercentLeft}% until auto-compact`;
   const compactDisabled = isEnvTruthy(process.env.DISABLE_COMPACT);
 
-  return (
-    <Box flexDirection="row">
-      {showAutoCompactWarning ? (
-        <Text dimColor wrap="truncate">
-          {upgradeMessage ? `${autocompactLabel} · ${upgradeMessage}` : autocompactLabel}
-        </Text>
-      ) : (
-        <Text color="error" wrap="truncate">
-          {upgradeMessage
-            ? `Context low (${percentLeft}% remaining) · ${upgradeMessage}`
-            : compactDisabled
-              ? `Context low (${percentLeft}% remaining)`
-              : `Context low (${percentLeft}% remaining) · Run /compact to compact & continue`}
-        </Text>
-      )}
-    </Box>
+  return showAutoCompactWarning ? (
+    <Text dimColor wrap="truncate">
+      {upgradeMessage ? `${autocompactLabel} · ${upgradeMessage}` : autocompactLabel}
+    </Text>
+  ) : (
+    <Text color="error" wrap="truncate">
+      {upgradeMessage
+        ? `Context low (${percentLeft}% remaining) · ${upgradeMessage}`
+        : compactDisabled
+          ? `Context low (${percentLeft}% remaining)`
+          : `Context low (${percentLeft}% remaining) · Run /compact to compact & continue`}
+    </Text>
   );
 }

@@ -25,7 +25,11 @@ import { bindDefaultHighlightBudget, resolveHljsApi } from './highlightBound.js'
 export {
   bindDefaultHighlightBudget,
   bindHighlightBudget,
+  type ChargeHighlightWork,
+  HIGHLIGHT_MESSAGE_WORK_BUDGET,
   HighlightBoundError,
+  HighlightLimitError,
+  type HighlightWorkBudget,
   resolveHljsApi,
 } from './highlightBound.js'
 

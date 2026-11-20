@@ -118,7 +118,7 @@ describe('densable 2.1.289 Jhr mouse mods', () => {
     expect(app).toContain('attachQuietDrain: dropped')
     expect(app).toContain('endScreenReaderStartupQuiet()')
     expect(app).toContain('noteMouseObserved()')
-    expect(app).toContain('{ soloKeypress }')
+    expect(app).toContain('{ soloKeypress, pressedAt: app.pressedAt }')
     expect(app).toContain("item.kind === 'paste'")
     expect(app).toContain("item.kind === 'focus'")
     expect(app).toContain('if (!attachQuiet && items.some(isUserIntentItem))')

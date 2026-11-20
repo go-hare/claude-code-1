@@ -1504,12 +1504,15 @@ function PromptInput({
     debounceMs: 1000,
   });
 
+  const keepsFullTextRef = useRef(false);
+
   useMaybeTruncateInput({
     input,
     pastedContents,
     onInputChange: trackAndSetInput,
     setCursorOffset,
     setPastedContents,
+    keepsFullTextRef,
   });
 
   const defaultPlaceholder = usePromptInputPlaceholder({
@@ -2359,7 +2362,8 @@ function PromptInput({
   }, [input, hasTrackablePaste, setPastedContents]);
 
   function onTextPaste(rawText: string) {
-    const hadExpandPasteHint = lastCollapsedPasteIdRef.current !== null || showExpandPasteHint;
+    const prevCollapsedPasteId = lastCollapsedPasteIdRef.current;
+    const hadExpandPasteHint = prevCollapsedPasteId !== null || showExpandPasteHint;
     if (hadExpandPasteHint) {
       clearExpandPasteHint();
     }
@@ -2375,6 +2379,34 @@ function PromptInput({
       if (pastedMode !== 'prompt') {
         onModeChange(pastedMode);
         text = getValueFromInput(text);
+      }
+    }
+
+    // Official 2.1.328 (`KS` @320743337): "paste again to expand" replaces the
+    // just-inserted collapsed placeholder with its full text. In fullscreen
+    // (`maxVisibleLines !== undefined`), mark `keepsFullText` when expanding past 10k.
+    if (
+      prevCollapsedPasteId !== null &&
+      pastedContentsRef.current[prevCollapsedPasteId]?.type === 'text' &&
+      pastedContentsRef.current[prevCollapsedPasteId]?.content === text
+    ) {
+      const liveValue = liveInputRef.current;
+      const ref = parseReferences(liveValue).find(r => r.id === prevCollapsedPasteId);
+      if (ref) {
+        const expanded = liveValue.slice(0, ref.index) + text + liveValue.slice(ref.index + ref.match.length);
+        const nextCursor = ref.index + text.length;
+        if (maxVisibleLines !== undefined && expanded.length > 10_000) {
+          keepsFullTextRef.current = true;
+        }
+        trackAndSetInput(expanded);
+        setCursorOffset(nextCursor);
+        setPastedContents(prev => {
+          const next = { ...prev };
+          delete next[prevCollapsedPasteId];
+          pastedContentsRef.current = next;
+          return next;
+        });
+        return;
       }
     }
 

@@ -11,12 +11,24 @@ import hljs from 'highlight.js'
 import * as cliHighlight from 'cli-highlight'
 import {
   bindDefaultHighlightBudget,
+  HIGHLIGHT_MESSAGE_WORK_BUDGET,
   HighlightBoundError,
+  HighlightLimitError,
+  type HighlightWorkBudget,
   resolveHljsApi,
 } from 'color-diff-napi'
 
+export { HIGHLIGHT_MESSAGE_WORK_BUDGET, type HighlightWorkBudget }
+
+export type CliHighlightOptions = import('cli-highlight').HighlightOptions & {
+  /** Official 2.1.328 shared work budget decremented by highlight.js emitter work. */
+  work?: HighlightWorkBudget
+  /** Optional code fence token identity for per-render deduplication. */
+  fence?: unknown
+}
+
 export type CliHighlight = {
-  highlight: typeof import('cli-highlight').highlight
+  highlight: (code: string, options?: CliHighlightOptions) => string
   supportsLanguage: typeof import('cli-highlight').supportsLanguage
 }
 
@@ -61,12 +73,54 @@ export function stripDensableRemovedHljsLanguages(engine: HljsLike): void {
 
 // Match SEA at import time so getLanguageName / direct hljs readers agree.
 stripDensableRemovedHljsLanguages(hljs as HljsLike)
-// densable 2.1.289 `Se` — same hljs singleton ColorFile binds.
-bindDefaultHighlightBudget(resolveHljsApi(hljs))
+// densable 2.1.289 `Se` / official 2.1.328 `Ir` — same hljs singleton ColorFile binds.
+let chargeHighlightWork = bindDefaultHighlightBudget(resolveHljsApi(hljs))
 
 let loadedGetLanguage:
   | ((name: string) => { name?: string } | undefined)
   | undefined
+
+type HljsEmitterNode =
+  | string
+  | {
+      scope?: string
+      kind?: string
+      children?: HljsEmitterNode[]
+    }
+
+function colorizeEmitterNode(
+  node: HljsEmitterNode,
+  theme: Record<string, ((s: string) => string) | undefined>,
+  inToken = false,
+): string {
+  if (typeof node === 'string') {
+    if (!inToken) {
+      const fn = theme.default ?? cliHighlight.DEFAULT_THEME.default
+      return typeof fn === 'function' ? fn(node) : cliHighlight.plain(node)
+    }
+    return node
+  }
+  const children = node.children ?? []
+  const rawScope = node.scope ?? node.kind
+  if (rawScope) {
+    const scope = rawScope.replace(/^hljs-/, '')
+    const baseScope = scope.split('.')[0] ?? scope
+    const text = children
+      .map(child => colorizeEmitterNode(child, theme, true))
+      .join('')
+    const fn =
+      theme[scope] ??
+      theme[baseScope] ??
+      (cliHighlight.DEFAULT_THEME as Record<string, unknown>)[scope] ??
+      (cliHighlight.DEFAULT_THEME as Record<string, unknown>)[baseScope]
+    return typeof fn === 'function'
+      ? (fn as (s: string) => string)(text)
+      : cliHighlight.plain(text)
+  }
+  return children
+    .map(child => colorizeEmitterNode(child, theme, inToken))
+    .join('')
+}
 
 /**
  * densable oa `gN()` — sync. Official Markdown first-paints with highlight
@@ -77,33 +131,91 @@ function loadCliHighlightSync(): CliHighlight | null {
   try {
     const hljsMod = hljs as {
       getLanguage?: typeof loadedGetLanguage
+      highlight?: typeof hljs.highlight
+      highlightAuto?: typeof hljs.highlightAuto
       default?: typeof hljs
     } & HljsLike
     stripDensableRemovedHljsLanguages(hljsMod)
-    bindDefaultHighlightBudget(resolveHljsApi(hljsMod))
-    loadedGetLanguage = hljsMod.getLanguage ?? hljsMod.default?.getLanguage
+    chargeHighlightWork = bindDefaultHighlightBudget(resolveHljsApi(hljsMod))
+    const hljsRoot = hljsMod.default ?? hljsMod
+    loadedGetLanguage = hljsRoot.getLanguage?.bind(hljsRoot)
     const supportsLanguage = (name: string): boolean => {
       const id = name.toLowerCase()
       if ((DENSABLE_REMOVED_HLJS_LANGUAGES as readonly string[]).includes(id)) {
         return false
       }
-      return cliHighlight.supportsLanguage(name)
+      return (
+        Boolean(loadedGetLanguage?.(name)) ||
+        cliHighlight.supportsLanguage(name)
+      )
     }
     return {
       highlight: (code, options) => {
-        const lang =
+        const rawLang =
           options && typeof options === 'object' && 'language' in options
-            ? String(
-                (options as { language?: string }).language ?? '',
-              ).toLowerCase()
+            ? String(options.language ?? '')
             : ''
+        const lowerLang = rawLang.toLowerCase()
+        const removedLang =
+          Boolean(lowerLang) &&
+          (DENSABLE_REMOVED_HLJS_LANGUAGES as readonly string[]).includes(
+            lowerLang,
+          )
+        const effectiveLang = removedLang ? undefined : rawLang || undefined
+        const work = options?.work
         try {
-          if (
-            lang &&
-            (DENSABLE_REMOVED_HLJS_LANGUAGES as readonly string[]).includes(
-              lang,
-            )
-          ) {
+          const run = () => {
+            if (effectiveLang && loadedGetLanguage?.(effectiveLang)) {
+              return hljsRoot.highlight!(code, {
+                language: effectiveLang,
+                ignoreIllegals: options?.ignoreIllegals ?? true,
+              })
+            }
+            if (!effectiveLang) {
+              return hljsRoot.highlightAuto!(code, options?.languageSubset)
+            }
+            return null
+          }
+          const result = work ? chargeHighlightWork(work, run) : run()
+          if (result !== null) {
+            const emitter =
+              (
+                result as {
+                  _emitter?: {
+                    rootNode?: HljsEmitterNode
+                    root?: HljsEmitterNode
+                  }
+                  emitter?: {
+                    rootNode?: HljsEmitterNode
+                    root?: HljsEmitterNode
+                  }
+                }
+              )._emitter ??
+              (
+                result as {
+                  emitter?: {
+                    rootNode?: HljsEmitterNode
+                    root?: HljsEmitterNode
+                  }
+                }
+              ).emitter
+            const rootNode = emitter?.rootNode ?? emitter?.root
+            if (
+              rootNode &&
+              typeof rootNode !== 'string' &&
+              Array.isArray(rootNode.children)
+            ) {
+              const theme = (options?.theme ??
+                cliHighlight.DEFAULT_THEME) as Record<
+                string,
+                ((s: string) => string) | undefined
+              >
+              return rootNode.children
+                .map(child => colorizeEmitterNode(child, theme))
+                .join('')
+            }
+          }
+          if (removedLang) {
             return cliHighlight.highlight(code, {
               ...options,
               language: undefined,
@@ -111,7 +223,12 @@ function loadCliHighlightSync(): CliHighlight | null {
           }
           return cliHighlight.highlight(code, options)
         } catch (err) {
-          if (err instanceof HighlightBoundError) return code
+          if (
+            err instanceof HighlightBoundError ||
+            err instanceof HighlightLimitError
+          ) {
+            return code
+          }
           throw err
         }
       },

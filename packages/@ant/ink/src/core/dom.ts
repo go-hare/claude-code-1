@@ -47,6 +47,24 @@ export type DOMAccessibility = {
   preserveWhitespace?: boolean
 }
 
+export type FrameStamp = {
+  writtenAt: number
+}
+
+export type InputGateWait = {
+  isMenu?: boolean
+  owner?: unknown
+  dropped?: string | null
+  goBack?: () => void
+  onChange: (dropped: string | null | undefined, detail?: unknown) => void
+}
+
+export type InputGateNoOption = {
+  key?: string
+  isBeingTyped: () => boolean
+  goTo: () => (() => void) | undefined
+}
+
 // eslint-disable-next-line @typescript-eslint/naming-convention
 export type DOMElement = {
   nodeName: ElementNames
@@ -55,6 +73,13 @@ export type DOMElement = {
   textStyles?: TextStyles
   /** densable accessibility (not in attributes — separate field like event handlers) */
   accessibility?: DOMAccessibility
+  /** Official 2.1.328 (`InputGate` / `vSe`): frame write stamps & wait gate metadata. */
+  firstFrame?: FrameStamp
+  nextFrame?: FrameStamp
+  lastFrame?: FrameStamp
+  wait?: InputGateWait
+  no?: InputGateNoOption
+  wantEveryKey?: unknown[]
 
   // Internal properties
   onComputeLayout?: () => void
@@ -262,15 +287,32 @@ function leftoverGsMaybeStampAbsolute(
   }
 }
 
+/** Official 2.1.328 `vSe` — stamp newly attached element with root's nextFrame/lastFrame. */
+export function stampFirstFrame(
+  node: DOMNode,
+  frameKey: 'nextFrame' | 'lastFrame' = 'nextFrame',
+): void {
+  if (node.nodeName === '#text') return
+  let root: DOMElement = node
+  while (root.parentNode) {
+    root = root.parentNode
+  }
+  node.firstFrame = root[frameKey]
+}
+
 export const appendChildNode = (
   node: DOMElement,
   childNode: DOMElement,
 ): void => {
+  const sameParent = childNode.parentNode === node
   if (childNode.parentNode) {
     removeChildNode(childNode.parentNode, childNode)
   }
 
   childNode.parentNode = node
+  if (!sameParent) {
+    stampFirstFrame(childNode)
+  }
   node.childNodes.push(childNode)
 
   if (childNode.yogaNode) {
@@ -290,11 +332,15 @@ export const insertBeforeNode = (
   newChildNode: DOMNode,
   beforeChildNode: DOMNode,
 ): void => {
+  const sameParent = newChildNode.parentNode === node
   if (newChildNode.parentNode) {
     removeChildNode(newChildNode.parentNode, newChildNode)
   }
 
   newChildNode.parentNode = node
+  if (!sameParent) {
+    stampFirstFrame(newChildNode)
+  }
 
   const index = node.childNodes.indexOf(beforeChildNode)
 

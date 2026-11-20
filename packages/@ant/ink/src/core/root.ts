@@ -50,6 +50,10 @@ export type RenderOptions = {
   isScreenReaderEnabled?: boolean
   /** densable `eD()` — `et()` / createRoot pin. */
   nativeCursor?: boolean
+  /** Official 2.1.328 (`pressClock`) — monotonic clock for InputGate press timing. */
+  pressClock?: () => number
+  /** Official 2.1.328 (`timesPresses`) — enables early-key InputGate dropping when true. */
+  timesPresses?: () => boolean
 }
 
 export type Instance = {
@@ -158,6 +162,8 @@ export async function createRoot({
   onFrame,
   isScreenReaderEnabled,
   nativeCursor,
+  pressClock,
+  timesPresses,
 }: RenderOptions = {}): Promise<Root> {
   // See wrappedRender — preserve microtask boundary from the old WASM await.
   await Promise.resolve()
@@ -174,6 +180,8 @@ export async function createRoot({
     onFrame,
     isScreenReaderEnabled,
     nativeCursor: nativeCursor ?? isNativeCursorEnabled(),
+    pressClock,
+    timesPresses,
   })
 
   // Register in the instances map so that code that looks up the Ink

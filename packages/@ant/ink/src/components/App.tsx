@@ -247,13 +247,18 @@ type Props = {
   // Dispatch a keyboard event through the DOM tree. Called for each
   // parsed key alongside the legacy EventEmitter path. Returns true when a
   // listener called `event.readAsEscapeThenKey()` so App splits and replays.
-  readonly dispatchKeyboardEvent: (parsedKey: ParsedKey, extras?: { soloKeypress?: boolean }) => boolean | void;
+  readonly dispatchKeyboardEvent: (
+    parsedKey: ParsedKey,
+    extras?: { soloKeypress?: boolean; pressedAt?: number },
+  ) => boolean | undefined;
   /** densable `onInputPriorityFrame` — `Kd` paste/key (not wheel/mouse name). */
   readonly onInputPriorityFrame: () => void;
   /** 2.1.326 #203: flush pending writes & park cursor below frame before Ctrl+Z SIGTSTP. */
   readonly prepareToSuspend?: () => string;
   // Official densable lag: bracketed paste → PasteEvent on focused node.
-  readonly dispatchPasteEvent: (text: string) => void;
+  readonly dispatchPasteEvent: (text: string, pressedAt?: number) => void;
+  /** Official 2.1.328 (`pressClock`) — monotonic timestamp source for InputGate. */
+  readonly pressClock?: () => number;
   /**
    * densable `dispatchWheelEvent` — SGR wheel DOM path. Optional so
    * windowActivation stubs don't need it. Gold returns void; Yt capture
@@ -478,6 +483,8 @@ export default class App extends PureComponent<Props, State> {
   incompleteEscapeTimer: NodeJS.Timeout | null = null;
   /** densable `readArrivedAt` — pin Date.now() around discreteUpdates(v1). */
   readArrivedAt: number | null = null;
+  /** Official 2.1.328 (`pressedAt`) — pressClock timestamp for InputGate. */
+  pressedAt = 0;
   /** densable `inputNow` — `()=>this.readArrivedAt??Date.now()`. */
   inputNow = (): number => this.readArrivedAt ?? Date.now();
   /** Official 2.1.327 (#520): timestamp of the latest SIGCONT resume. */
@@ -803,6 +810,7 @@ export default class App extends PureComponent<Props, State> {
       if (result.keys.some(isInputPriorityItem)) this.props.onInputPriorityFrame();
       const prevArrived = this.readArrivedAt;
       this.readArrivedAt = Date.now();
+      this.pressedAt = this.props.pressClock?.() ?? performance.now();
       try {
         reconciler.discreteUpdates(processKeysInBatch, this, result.keys, undefined, undefined);
       } finally {
@@ -878,6 +886,9 @@ export default class App extends PureComponent<Props, State> {
 
   handleTerminalFocus = (isFocused: boolean): void => {
     const prev = getTerminalFocusState();
+    if (isFocused && prev !== 'focused') {
+      this.props.rootNode.firstFrame = { writtenAt: this.pressedAt };
+    }
     if (!isFocused || Date.now() - this.lastActivationInputTime >= WINDOW_ACTIVATION_GRACE_MS) {
       this.windowActivationClickArmed = true;
     }
@@ -1113,6 +1124,9 @@ function processKeysInBatch(app: App, items: ParsedInput[], skipAttachQuiet?: bo
     }
     if (item.kind === 'focus') {
       if (multiFlush && flushed) reconciler.flushSyncWork();
+      if (item.focused && !getTerminalFocused()) {
+        app.props.rootNode.firstFrame = { writtenAt: app.pressedAt };
+      }
       app.handleTerminalFocus(item.focused);
       if (multiFlush) reconciler.flushSyncWork();
       flushed = true;
@@ -1134,7 +1148,7 @@ function processKeysInBatch(app: App, items: ParsedInput[], skipAttachQuiet?: bo
       flushed = true;
     }
     if (item.kind === 'paste') {
-      app.props.dispatchPasteEvent(item.text);
+      app.props.dispatchPasteEvent(item.text, app.pressedAt);
       continue;
     }
     if (item.name === 'z' && item.ctrl && canSuspendOnCtrlZ()) {
@@ -1147,7 +1161,7 @@ function processKeysInBatch(app: App, items: ParsedInput[], skipAttachQuiet?: bo
         noteMouseObserved();
         app.props.dispatchWheelEvent(convertWheelIfPixels(app, item));
       }
-    } else if (app.props.dispatchKeyboardEvent(item, { soloKeypress })) {
+    } else if (app.props.dispatchKeyboardEvent(item, { soloKeypress, pressedAt: app.pressedAt })) {
       reconciler.flushSyncWork();
       processKeysInBatch(app, splitEscPrefixedKey(item.sequence ?? ''), true, undefined);
     }

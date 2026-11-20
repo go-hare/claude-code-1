@@ -767,7 +767,10 @@ export function useSelectNavigation<T>({
   // densable KMn `U||q` reset — options identity/deep OR visibleOptionCount.
   const optionsChanged =
     options !== lastOptions && !isDeepStrictEqual(options, lastOptions)
-  const visibleCountChanged = visibleOptionCount !== lastVisibleOptionCount
+  const visibleCountChanged = !Object.is(
+    visibleOptionCount,
+    lastVisibleOptionCount,
+  )
   if (optionsChanged || visibleCountChanged) {
     dispatch({
       type: 'reset',

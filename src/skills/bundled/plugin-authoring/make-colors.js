@@ -763,7 +763,8 @@ function evaluator(graph, inputs, dark) {
         throw Error(
           `The theme graph reads ${name}, which is neither a theme input nor in the graph. This is a bug in make-colors.js.`,
         )
-      return known.set(name, value), value
+      known.set(name, value)
+      return value
     }
   return name =>
     Object.hasOwn(graph, name) || Object.hasOwn(inputs, name)
@@ -994,7 +995,8 @@ function colorsAt(from, keys, where, why) {
     keys.map(k => {
       let hex =
         from[k] ?? fail(`${where} has no ${k}. ${why}: ${keys.join(', ')}.`)
-      return assertHexColor(hex, `${where}[${k}]`), [k, hex]
+      assertHexColor(hex, `${where}[${k}]`)
+      return [k, hex]
     }),
   )
 }
@@ -1067,11 +1069,8 @@ function roleSpec(v, where, grid) {
       `${where} is ${shown(v)}. Give a color like "#1e66f5", or an object with seed, stops or fillShade.`,
     )
   let spec = typeof v === 'string' ? { seed: v } : fieldsOf(v)
-  if (
-    (onlyKeys(spec, ['seed', 'stops', 'fillShade'], where),
-    spec.seed !== void 0)
-  )
-    assertHexColor(spec.seed, `${where}.seed`)
+  onlyKeys(spec, ['seed', 'stops', 'fillShade'], where)
+  if (spec.seed !== void 0) assertHexColor(spec.seed, `${where}.seed`)
   let byHand = part(spec.stops, `${where}.stops`)
   onlyKeys(byHand, grid.map(String), `${where}.stops`)
   for (let [stop, hex] of Object.entries(byHand))
@@ -1133,10 +1132,8 @@ function deriveWith(data, def) {
     'The theme definition',
   )
   let { id, label } = def
-  if (
-    (assertThemeId(id),
-    typeof label !== 'string' || label === '' || label.length > 64)
-  )
+  assertThemeId(id)
+  if (typeof label !== 'string' || label === '' || label.length > 64)
     fail(
       `The theme "${id}" needs a label of 1 to 64 characters: the name people see in a picker.`,
     )
@@ -1159,21 +1156,16 @@ function deriveWith(data, def) {
       let stock = stockInputsOf(data, mode),
         half = def[mode] === void 0 ? void 0 : part(def[mode], mode),
         out = {}
-      if (half !== void 0)
-        onlyKeys(half, ['gray', 'roles', 'git'], mode),
-          onlyKeys(
-            part(half.roles, `${mode}.roles`),
-            roleNames,
-            `${mode}.roles`,
-          )
+      if (half !== void 0) {
+        onlyKeys(half, ['gray', 'roles', 'git'], mode)
+        onlyKeys(part(half.roles, `${mode}.roles`), roleNames, `${mode}.roles`)
+      }
       let stockGray = Object.fromEntries(
           stops.map(s => [s, stock[`gray-${s}`] ?? '']),
         ),
         g = part(half?.gray, `${mode}.gray`)
-      if (
-        (onlyKeys(g, ['anchors', 'stops'], `${mode}.gray`),
-        half?.gray !== void 0 && !g.stops && !g.anchors)
-      )
+      onlyKeys(g, ['anchors', 'stops'], `${mode}.gray`)
+      if (half?.gray !== void 0 && !g.stops && !g.anchors)
         fail(
           `${mode}.gray needs "anchors" (a few colors named after what they paint, with "stops" for single stops set by hand) or "stops" alone (all ${stops.length} stops).`,
         )
@@ -1319,12 +1311,12 @@ var THEME_DERIVE_DATA = {
     darkGrayInputs: DARK_GRAY_INPUTS,
     gitFills: GIT_FILLS,
   },
-  freeze = o => (
+  freeze = o => {
     Object.values(o).forEach(v => {
       if (typeof v === 'object' && v !== null) freeze(v)
-    }),
-    Object.freeze(o)
-  )
+    })
+    return Object.freeze(o)
+  }
 function defineTheme(def) {
   return freeze(deriveWith(THEME_DERIVE_DATA, def))
 }

@@ -1407,10 +1407,15 @@ export function leftoverChromeLatch(
   width: number,
   chrome: number | null,
 ): { latch: { rows: number; width: number; chrome: number } | null; q: number | null } {
-  const same = prev !== null && prev.rows === rows && prev.width === width;
+  const safeRows = Number.isFinite(rows) ? rows : 0;
+  const safeWidth = Number.isFinite(width) ? width : 0;
+  const safeChrome = chrome !== null && Number.isFinite(chrome) ? chrome : null;
+  const same = prev !== null && Object.is(prev.rows, safeRows) && Object.is(prev.width, safeWidth);
   const nextLatch =
-    chrome !== null && (prev === null || !same || chrome > prev.chrome) ? { rows, width, chrome } : prev;
-  const q = same ? Math.max(prev?.chrome ?? 0, chrome ?? prev?.chrome ?? 0) : chrome;
+    safeChrome !== null && (prev === null || !same || safeChrome > prev.chrome)
+      ? { rows: safeRows, width: safeWidth, chrome: safeChrome }
+      : prev;
+  const q = same ? Math.max(prev?.chrome ?? 0, safeChrome ?? prev?.chrome ?? 0) : safeChrome;
   return { latch: nextLatch, q };
 }
 

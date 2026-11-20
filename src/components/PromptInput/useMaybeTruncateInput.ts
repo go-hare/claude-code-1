@@ -1,10 +1,17 @@
 import { useEffect, useRef } from 'react'
 import type { VimMode } from 'src/types/textInputTypes.js'
 import type { PastedContent } from 'src/utils/config.js'
-import { isFullscreenEnvEnabled } from 'src/utils/fullscreen.js'
 import { getPromptInputStoreVimMode } from 'src/utils/promptInputCursorStore.js'
 import { maybeTruncateInput } from './inputPaste.js'
 import { isVimModeEnabled } from './utils.js'
+
+export const TRUNCATE_INPUT_THRESHOLD = 10_000
+
+export type DraftKeepsFullText = {
+  readonly keepsFullText: boolean
+  keepFullText: () => void
+  resetKeepsFullText: () => void
+}
 
 type Props = {
   input: string
@@ -13,15 +20,23 @@ type Props = {
   setCursorOffset: (offset: number) => void
   setPastedContents: (contents: Record<number, PastedContent>) => void
   vimMode?: VimMode
+  /**
+   * Official 2.1.328 (`P_e` @320717804): draft `keepsFullText` state.
+   * Set true after truncation or when expanding a >10k paste in fullscreen
+   * (`maxVisibleLines !== undefined`); reset to false when `input === ''`.
+   */
+  keepsFullTextRef?: { current: boolean }
+  /** Optional explicit draft adapter matching official `h.keepsFullText` / `h.keepFullText()`. */
+  draft?: DraftKeepsFullText
 }
 
 /**
- * Official 2.1.326 #172:
- * - In fullscreen mode the prompt viewport scrolls, so never hide the middle of
- *   a >10,000-character paste ("paste again to expand") or typed prompt.
- * - Outside fullscreen, only auto-truncate when a >10,000-char prompt arrives
- *   all at once from an empty/restored state (e.g. MessageSelector), never
- *   mid-typing as the user crosses 10,000 characters.
+ * Official 2.1.328 (`P_e` @320717804):
+ * - Truncate >10,000-character inputs (including long-input restoration in
+ *   fullscreen) unless the draft's `keepsFullText` flag is already set.
+ * - Reset `keepsFullText` whenever `input === ''`.
+ * - Set `keepsFullText = true` after truncating once so subsequent edits or
+ *   explicit fullscreen paste expansion are not immediately re-collapsed.
  */
 export function useMaybeTruncateInput({
   input,
@@ -30,35 +45,26 @@ export function useMaybeTruncateInput({
   setCursorOffset,
   setPastedContents,
   vimMode,
+  keepsFullTextRef,
+  draft,
 }: Props) {
-  const hasAppliedTruncationRef = useRef(false)
-  const prevInputLengthRef = useRef(0)
+  const internalKeepsFullTextRef = useRef(false)
+  const keepsFullText = keepsFullTextRef ?? internalKeepsFullTextRef
 
   useEffect(() => {
-    const prevLen = prevInputLengthRef.current
-    prevInputLengthRef.current = input.length
-
     if (input === '') {
-      hasAppliedTruncationRef.current = false
+      if (draft) {
+        draft.resetKeepsFullText()
+      } else {
+        keepsFullText.current = false
+      }
       return
     }
 
-    if (isFullscreenEnvEnabled()) {
-      return
-    }
-
-    if (hasAppliedTruncationRef.current) {
-      return
-    }
-
-    if (input.length <= 10_000) {
-      return
-    }
-
-    // Do not collapse a prompt the user is actively typing past 10,000 chars
-    // (small incremental growth from a non-empty prompt).
-    if (prevLen > 0 && input.length - prevLen < 1_000) {
-      hasAppliedTruncationRef.current = true
+    const alreadyKeepsFullText = draft
+      ? draft.keepsFullText
+      : keepsFullText.current
+    if (alreadyKeepsFullText || input.length <= TRUNCATE_INPUT_THRESHOLD) {
       return
     }
 
@@ -75,7 +81,11 @@ export function useMaybeTruncateInput({
         : newInput.length
     setCursorOffset(nextOffset)
     setPastedContents(newPastedContents)
-    hasAppliedTruncationRef.current = true
+    if (draft) {
+      draft.keepFullText()
+    } else {
+      keepsFullText.current = true
+    }
   }, [
     input,
     pastedContents,
@@ -83,5 +93,7 @@ export function useMaybeTruncateInput({
     setPastedContents,
     setCursorOffset,
     vimMode,
+    keepsFullText,
+    draft,
   ])
 }

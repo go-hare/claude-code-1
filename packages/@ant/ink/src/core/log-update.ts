@@ -73,6 +73,11 @@ export class LogUpdate {
     this.scrolledOutRows = new WeakMap()
   }
 
+  /** Official 2.1.328 `LogUpdate.scrolledOutRowsOf(frame)` */
+  scrolledOutRowsOf(frame: Frame): number | undefined {
+    return this.scrolledOutRows.get(frame)
+  }
+
   forceFullReset(): void {
     this.forceReset = true
   }
@@ -335,10 +340,12 @@ export class LogUpdate {
       }
 
       // clear(N) erases UP from the current cursor row. When prev.cursor.y is
-      // above prev.screen.height - 1 (e.g. PromptInput cursor sits above the
-      // bottom divider + status bar), anchor to the actual bottom row first so
-      // trailing rows aren't left orphaned and cursor math stays exact.
-      if (prev.cursor.y !== prev.screen.height - 1) {
+      // strictly above prev.screen.height - 1 (e.g. a non-bottom cursor),
+      // anchor to the actual bottom row first so trailing rows aren't left
+      // orphaned. When prev.cursor.y >= prev.screen.height (normal main-screen
+      // Ink frames), match official 2.1.328 directly without an extra upward
+      // move before clear(linesToClear).
+      if (prev.cursor.y < prev.screen.height - 1) {
         moveCursorTo(screen, 0, prev.screen.height - 1)
       }
 

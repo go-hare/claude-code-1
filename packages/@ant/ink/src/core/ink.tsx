@@ -35,6 +35,13 @@ import { ClickEvent, EMPTY_CLICK_MODS, type ClickMods, type MouseClickResult } f
 import { KeyboardEvent } from './events/keyboard-event.js';
 import { PasteEvent } from './events/paste-event.js';
 import { FocusManager } from './focus.js';
+import {
+  INPUT_GATE_OTHER,
+  INPUT_GATE_WAY_OUT,
+  InputGate,
+  isPrintableKeyboardEvent,
+  shortcutKeyForInputGate,
+} from './inputGate.js';
 import { emptyFrame, type Diff, type Frame, type FrameEvent } from './frame.js';
 import { WheelEvent } from './events/wheel-event.js';
 import {
@@ -364,6 +371,10 @@ export type Options = {
   isScreenReaderEnabled?: boolean;
   /** densable `eD()` — `et()` / createRoot pin. */
   nativeCursor?: boolean;
+  /** Official 2.1.328 (`pressClock`) — monotonic clock for InputGate press timing. */
+  pressClock?: () => number;
+  /** Official 2.1.328 (`timesPresses`) — enables early-key InputGate dropping when true. */
+  timesPresses?: () => boolean;
 };
 
 /** No-op logger used when no logger is injected. */
@@ -636,9 +647,55 @@ export default class Ink {
     };
   };
   /**
-   * densable `tellFrameListeners(){for(let n of this.frameListeners)n()}`.
+   * Official 2.1.328 (`pressClock` / `inputGate` / `dropsInput` / `noteIfStray` /
+   * `noteFrameWritten` @307262416): early-key guard with `wantEveryKey` opt-out.
+   */
+  pressClock = (): number => this.options.pressClock?.() ?? performance.now();
+  readonly inputGate = new InputGate(owner => this.rootNode.wantEveryKey?.includes(owner) === true);
+  isTimingPresses = (): boolean => this.options.timesPresses?.() ?? false;
+  private queuedFrames: Array<{ frame: dom.FrameStamp; queuedAt: number }> = [];
+
+  dropsInput(target: dom.DOMElement, input: string, pressedAt: number | undefined, detail?: unknown): boolean {
+    if (pressedAt === undefined || !this.isTimingPresses()) return false;
+    this.noteQueueWritten();
+    return this.inputGate.drops(target, input, pressedAt, detail);
+  }
+
+  noteIfStray(event: KeyboardEvent | PasteEvent, target: dom.DOMElement): void {
+    if (
+      this.isTimingPresses() &&
+      !event.defaultPrevented &&
+      !event._isPropagationStopped() &&
+      !event.didStopImmediatePropagation()
+    ) {
+      this.inputGate.noteStrayText(target);
+    }
+  }
+
+  private noteFrameWritten(): void {
+    const frame = (this.rootNode.lastFrame = this.rootNode.nextFrame ?? {
+      writtenAt: Number.POSITIVE_INFINITY,
+    });
+    this.queuedFrames.push({ frame, queuedAt: this.pressClock() });
+    this.rootNode.nextFrame = { writtenAt: Number.POSITIVE_INFINITY };
+    this.noteQueueWritten();
+  }
+
+  private noteQueueWritten(): void {
+    const now = this.pressClock();
+    const hasQueued = Boolean(this.nonBlockingStdout?.queuedBytes());
+    this.queuedFrames = this.queuedFrames.filter(({ frame, queuedAt }) => {
+      const stillQueued = hasQueued && now - queuedAt < 2000;
+      if (!stillQueued) frame.writtenAt = now;
+      return stillQueued;
+    });
+  }
+
+  /**
+   * densable `tellFrameListeners(){this.noteFrameWritten();for(let n of this.frameListeners)n()}`.
    */
   private tellFrameListeners(): void {
+    this.noteFrameWritten();
     for (const listener of this.frameListeners) listener();
   }
   /**
@@ -871,6 +928,7 @@ export default class Ink {
     this.rootNode = dom.createNode('ink-root', Yoga.Config.create());
     this.focusManager = new FocusManager((target, event) => dispatcher.dispatchDiscrete(target, event));
     this.rootNode.focusManager = this.focusManager;
+    this.rootNode.nextFrame = { writtenAt: Number.POSITIVE_INFINITY };
     this.renderer = createRenderer(this.rootNode, this.stylePool);
     this.rootNode.onRender = this.scheduleRender;
     this.rootNode.onImmediateRender = this.onRender;
@@ -2021,8 +2079,28 @@ export default class Ink {
     // and no move is emitted.
     const decl = this.cursorDeclaration;
     const rect = decl !== null ? (decl.node.cachedLayout ?? nodeCache.get(decl.node)) : undefined;
-    const target =
+    const rawTarget =
       decl !== null && rect !== undefined ? { x: rect.x + decl.relativeX, y: rect.y + decl.relativeY } : null;
+    const didFullReset = diff.some(patch => patch.type === 'clearTerminal');
+    // Main-screen viewport top row in frame coordinates. Parking the physical
+    // cursor above viewportTop clamps at terminal row 0 while displayCursor
+    // records the unclamped y — on the next frame the preamble moves DOWN by
+    // (prevFrame.cursor.y - parked.y) from row 0, permanently overshooting
+    // downward and ghosting/duplicating lines (e.g. Select options).
+    const mainScreenViewportTop = this.altScreenActive
+      ? 0
+      : Math.max(
+          this.log.scrolledOutRowsOf(frame) ?? 0,
+          frame.cursor.y >= frame.screen.height && frame.screen.height >= frame.viewport.height
+            ? frame.screen.height - frame.viewport.height + 1
+            : 0,
+        );
+    const target =
+      rawTarget !== null &&
+      !this.altScreenActive &&
+      (rawTarget.y < mainScreenViewportTop || rawTarget.y > frame.cursor.y)
+        ? null
+        : rawTarget;
     const parked = this.displayCursor;
 
     // Preserve the empty-diff zero-write fast path: skip all cursor writes
@@ -2040,8 +2118,8 @@ export default class Ink {
       // Main-screen preamble: log-update's relative moves assume the
       // physical cursor is at prevFrame.cursor. If last frame parked it
       // elsewhere, move back before the diff runs. Alt-screen's CSI H
-      // already resets to (0,0) so no preamble needed.
-      if (parked !== null && !this.altScreenActive && hasDiff) {
+      // (and full-reset clearTerminal) already resets cursor position.
+      if (parked !== null && !this.altScreenActive && hasDiff && !didFullReset) {
         const pdx = prevFrame.cursor.x - parked.x;
         const pdy = clampVerticalMove(prevFrame.cursor.y - parked.y);
         if (pdx !== 0 || pdy !== 0) {
@@ -3723,6 +3801,7 @@ export default class Ink {
   dispatchMouseClick(col: number, row: number, isWindowActivation = false, mods?: ClickMods): MouseClickResult {
     if (!this.altScreenActive) return 'unhandled';
     const hit = hitTest(this.rootNode, col, row);
+    if (hit && this.dropsInput(hit, 'click', this.pressClock())) return 'stray';
     // Gold: g=Ls(...)&&!litWhereClicked(y,n,u). Ls is cellIsBlankForHover.
     const blank =
       cellIsBlankForHover(this.rootNode, this.frontFrame.screen, hit, col, row) && !this.litWhereClicked(hit, col, row);
@@ -3809,11 +3888,32 @@ export default class Ink {
     }
   }
 
-  dispatchKeyboardEvent(parsedKey: ParsedKey, extras?: { soloKeypress?: boolean }): boolean {
+  dispatchKeyboardEvent(parsedKey: ParsedKey, extras?: { soloKeypress?: boolean; pressedAt?: number }): boolean {
     const focusedBefore = this.focusManager.activeElement;
     const target = focusedBefore ?? this.rootNode;
     const event = new KeyboardEvent(parsedKey, extras);
+    const isWayOut = parsedKey.ctrl ? parsedKey.name === 'c' || parsedKey.name === 'd' : parsedKey.name === 'escape';
+    const isPrintable = isPrintableKeyboardEvent(event);
+    const inputTag =
+      event.name === 'escape' || (this.altScreenActive && /^page/.test(event.name))
+        ? INPUT_GATE_OTHER
+        : isWayOut
+          ? INPUT_GATE_WAY_OUT
+          : isPrintable
+            ? `"${event.key}"`
+            : event.ctrl || event.meta || event.superKey || event.shift
+              ? `"${shortcutKeyForInputGate(event) || event.sequence}"`
+              : event.name;
+    const hasInput = event.shortcutKey !== '' || event.name !== '';
+    const detail = target.attributes.textEntry === true ? undefined : event;
+    if (hasInput && this.dropsInput(target, inputTag, extras?.pressedAt, detail)) {
+      return event.isReadAsEscapeThenKey;
+    }
+
     dispatcher.dispatchDiscrete(target, event);
+    if (isPrintable) {
+      this.noteIfStray(event, target);
+    }
 
     // Tab cycling is the default action — only fires if no handler
     // called preventDefault(). Mirrors browser behavior.
@@ -3844,14 +3944,16 @@ export default class Ink {
   }
 
   /**
-   * Official densable 2.1.210 dispatchPasteEvent:
-   *   focusManager.activeElement ?? root → new PasteEvent(text) → dispatchDiscrete
+   * Official densable 2.1.210/2.1.328 dispatchPasteEvent:
+   *   focusManager.activeElement ?? root → InputGate drops check → PasteEvent → noteIfStray
    * Bracketed paste is a separate event from keydown (kind paste).
    */
-  dispatchPasteEvent(text: string): void {
+  dispatchPasteEvent(text: string, pressedAt?: number): void {
     const target = this.focusManager.activeElement ?? this.rootNode;
+    if (this.dropsInput(target, 'paste', pressedAt)) return;
     const event = new PasteEvent(text);
     dispatcher.dispatchDiscrete(target, event);
+    this.noteIfStray(event, target);
   }
 
   /**
@@ -4134,6 +4236,7 @@ export default class Ink {
         prepareToSuspend={this.prepareToSuspend}
         dispatchPasteEvent={this.dispatchPasteEvent}
         dispatchWheelEvent={this.dispatchWheelEvent}
+        pressClock={this.pressClock}
         focusManager={this.focusManager}
         rootNode={this.rootNode}
         isScreenReaderEnabled={this.isScreenReaderEnabled}

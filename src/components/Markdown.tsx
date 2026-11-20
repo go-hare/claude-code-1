@@ -4,7 +4,12 @@ import React, { useMemo, useRef, type ReactNode } from 'react';
 import { LRUCache } from 'lru-cache';
 import { useSettings } from '../hooks/useSettings.js';
 import { Ansi, Box, NoSelect, Text, useTheme, type Theme } from '@anthropic/ink';
-import { type CliHighlight, peekCliHighlight } from '../utils/cliHighlight.js';
+import {
+  type CliHighlight,
+  HIGHLIGHT_MESSAGE_WORK_BUDGET,
+  type HighlightWorkBudget,
+  peekCliHighlight,
+} from '../utils/cliHighlight.js';
 import { logForDebugging } from '../utils/debug.js';
 import { hashContent } from '../utils/hash.js';
 import { logError } from '../utils/log.js';
@@ -92,14 +97,13 @@ const tokenCache = new LRUCache<string, Token[]>({ max: 500 });
 
 // Official 2.1.296 (#537): module-level syntax-highlighted code cache so ctrl+o
 // transcript toggles don't re-run cliHighlight on every code block.
-const highlightCache = new LRUCache<string, { variant: string; code: string; highlighted: string; cost: number }>({
+const highlightCache = new LRUCache<string, { variant: string; code: string; highlighted: string }>({
   max: 500,
 });
 
-// Official 2.1.295 (#398): cap per-message highlight work and window huge
-// markdown inputs (> 1000 lines) so tens of thousands of lines don't freeze
-// the event loop or block Ctrl+C.
-const HIGHLIGHT_WORK_BUDGET = 1_600_000;
+// Official 2.1.295 (#398) & 2.1.328 (`Cr` @307762583): cap per-message highlight
+// work via the shared `{ left }` budget passed down to highlight.js, and window
+// huge markdown inputs (> 1000 lines) so huge messages don't freeze the event loop.
 const SYNTAX_HIGHLIGHT_CAP_NOTICE =
   'Syntax highlighting stops here. This message has more code than is highlighted at once.';
 
@@ -111,16 +115,19 @@ export function wrapHighlightWithCacheAndBudget(
   skipHighlightCache = false,
 ): CliHighlight | null {
   if (rawHighlight === null) return null;
-  let budgetLeft = HIGHLIGHT_WORK_BUDGET;
+  const work: HighlightWorkBudget = { left: HIGHLIGHT_MESSAGE_WORK_BUDGET };
+  const byFence = new WeakMap<object, string>();
   let capNotified = false;
   return {
     supportsLanguage: rawHighlight.supportsLanguage,
     highlight(code, options) {
+      const fenceObj = options?.fence && typeof options.fence === 'object' ? options.fence : undefined;
+      const cachedFence = fenceObj ? byFence.get(fenceObj) : undefined;
       const normalizedLang = (options?.language ?? '').trim().toLowerCase();
       // Official 2.1.328 (`Cr` @307762583): skip budget decrement, cache, and
-      // cap notices for plaintext blocks.
-      if (PLAINTEXT_LANGUAGES.has(normalizedLang)) {
-        return code;
+      // cap notices for plaintext blocks (and already-rendered fence tokens).
+      if (cachedFence !== undefined || PLAINTEXT_LANGUAGES.has(normalizedLang)) {
+        return cachedFence ?? code;
       }
       const variant = `${normalizedLang}\x00${theme}`;
       const cacheKey = skipHighlightCache ? '' : `${code.length}:${hashContent(`${variant}\x00${code}`)}`;
@@ -130,18 +137,21 @@ export function wrapHighlightWithCacheAndBudget(
           return hit.highlighted;
         }
       }
-      if (budgetLeft <= 0) {
-        const out = !capNotified && chalk.level > 0 ? `${chalk.dim(SYNTAX_HIGHLIGHT_CAP_NOTICE)}\n${code}` : code;
+      const exhausted = work.left <= 0;
+      const highlighted = exhausted ? code : rawHighlight.highlight(code, { ...options, work });
+      const out =
+        exhausted && !capNotified && chalk.level > 0
+          ? `${chalk.dim(SYNTAX_HIGHLIGHT_CAP_NOTICE)}\n${code}`
+          : highlighted;
+      if (exhausted) {
         capNotified = true;
-        return out;
+      } else if (!skipHighlightCache) {
+        highlightCache.set(cacheKey, { variant, code, highlighted: out });
       }
-      const cost = Math.max(1, code.length);
-      budgetLeft -= cost;
-      const highlighted = rawHighlight.highlight(code, options);
-      if (!skipHighlightCache) {
-        highlightCache.set(cacheKey, { variant, code, highlighted, cost });
+      if (fenceObj) {
+        byFence.set(fenceObj, out);
       }
-      return highlighted;
+      return out;
     },
   };
 }

@@ -49,6 +49,11 @@ export class SentryErrorBoundary extends React.Component<Props, State> {
 
   render(): React.ReactNode {
     if (this.state.hasError) {
+      const stackLines = this.state.errorInfo?.componentStack
+        ?.split('\n')
+        .map(line => line.trim())
+        .filter(Boolean)
+        .slice(0, 6);
       return (
         <Box flexDirection="column" paddingX={1} paddingY={1}>
           <Text color="error" bold>
@@ -56,6 +61,7 @@ export class SentryErrorBoundary extends React.Component<Props, State> {
           </Text>
           <Text color="error">{this.state.error?.message}</Text>
           {this.props.name && <Text dimColor>Boundary: {this.props.name}</Text>}
+          {stackLines && stackLines.length > 0 && <Text dimColor>{stackLines.join('\n')}</Text>}
         </Box>
       );
     }

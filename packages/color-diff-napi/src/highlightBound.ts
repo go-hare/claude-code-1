@@ -50,6 +50,15 @@ export const HIGHLIGHT_MIN_LANG_MAX_LENGTH = Math.min(
 export const HIGHLIGHT_LINE_LENGTH_SOFT_LIMIT = 256
 /** densable `hOr` — max cumulative long-line/whitespace-run work. */
 export const HIGHLIGHT_LINE_WORK_LIMIT = 16000000
+/** Official 2.1.328 `Bbl = H + E * I` — per-message highlight work budget. */
+export const HIGHLIGHT_MESSAGE_WORK_BUDGET =
+  HIGHLIGHT_BOUND_BASE + HIGHLIGHT_MAX_LENGTH * HIGHLIGHT_BOUND_PER_CHAR
+
+export type HighlightWorkBudget = { left: number }
+export type ChargeHighlightWork = <T>(
+  work: HighlightWorkBudget,
+  fn: () => T,
+) => T
 
 const COUNTED_LANGUAGES = new Set([
   'abnf',
@@ -356,17 +365,25 @@ function budgetFor(
         HIGHLIGHT_BOUND_PER_SUBLANG * fanoutOf(hljs.getLanguage(language)))
 }
 
-/** densable `ie`. */
+type SpentTally = { spent: number }
+
+const noopChargeHighlightWork: ChargeHighlightWork = (_work, fn) => fn()
+const chargeByHljs = new WeakMap<object, ChargeHighlightWork>()
+
+/** densable `ie` / official 2.1.328 `er`. */
 function boundPlugin(
   wallet: BoundWallet,
   budget: (language: string | undefined, length: number) => number,
+  tally: SpentTally,
 ) {
   return {
     'before:highlight': (event: { language?: string; code: string }) => {
       wallet.left = budget(event.language, event.code.length)
+      tally.spent = wallet.left
     },
     'after:highlight': () => {
       const over = wallet.left < 0
+      tally.spent -= Math.max(wallet.left, 0)
       wallet.left = Number.POSITIVE_INFINITY
       if (over) throw new HighlightBoundError()
     },
@@ -500,25 +517,40 @@ function limitPlugin(hljs: HljsBoundApi) {
   }
 }
 
-/** densable `z`. */
+/** densable `z` / official 2.1.328 `R` + `Z`. */
 export function bindHighlightBudget(
   hljs: HljsBoundApi,
   fanoutCap: number = HIGHLIGHT_BOUND_SUBLANGUAGE_CAP,
-): void {
+): ChargeHighlightWork {
+  const existing = chargeByHljs.get(hljs)
+  if (existing) return existing
   const raw =
     hljs.highlightAuto('', [])._emitter?.constructor ??
     hljs.highlightAuto('', []).emitter?.constructor
-  if ('isBounded' in ((raw as object) ?? {})) return
+  if ('isBounded' in ((raw as object) ?? {})) return noopChargeHighlightWork
   hljs.addPlugin(limitPlugin(hljs))
-  if (!isUnboundedEmitter(raw)) return
+  if (!isUnboundedEmitter(raw)) return noopChargeHighlightWork
   const wallet: BoundWallet = { left: Number.POSITIVE_INFINITY }
+  const tally: SpentTally = { spent: 0 }
   hljs.configure({ __emitter: boundedEmitter(raw, wallet) })
-  hljs.addPlugin(boundPlugin(wallet, budgetFor(hljs, fanoutCap)))
+  hljs.addPlugin(boundPlugin(wallet, budgetFor(hljs, fanoutCap), tally))
+  const charge: ChargeHighlightWork = (work, fn) => {
+    tally.spent = 0
+    try {
+      return fn()
+    } finally {
+      work.left -= tally.spent
+    }
+  }
+  chargeByHljs.set(hljs, charge)
+  return charge
 }
 
-/** densable `Se`. */
-export function bindDefaultHighlightBudget(hljs: HljsBoundApi): void {
-  bindHighlightBudget(hljs, HIGHLIGHT_BOUND_SUBLANGUAGE_CAP)
+/** densable `Se` / official 2.1.328 `Ir`. */
+export function bindDefaultHighlightBudget(
+  hljs: HljsBoundApi,
+): ChargeHighlightWork {
+  return bindHighlightBudget(hljs, HIGHLIGHT_BOUND_SUBLANGUAGE_CAP)
 }
 
 export function resolveHljsApi(mod: unknown): HljsBoundApi {
