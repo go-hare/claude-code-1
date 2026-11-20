@@ -146,7 +146,13 @@ function HooksOverviewMode({
   const maxOrigin = Math.max(0, visualRows.length - windowHeight);
 
   const [cursor, setCursor] = useState(() => Math.max(0, Math.min(totalSelectable - 1, defaultFocusIndex)));
-  const [origin, setOrigin] = useState(0);
+  const [origin, setOrigin] = useState(() => {
+    const initialCursor = Math.max(0, Math.min(totalSelectable - 1, defaultFocusIndex));
+    if (initialCursor === 0) return 0;
+    const targetLine = rowLineForSelectable[initialCursor] ?? 0;
+    if (targetLine < windowHeight) return 0;
+    return Math.min(maxOrigin, Math.max(0, targetLine - windowHeight + 1));
+  });
 
   const moveCursor = useCallback(
     (next: number) => {
@@ -318,6 +324,10 @@ function HooksOverviewMode({
 export function HooksConfigMenu({ toolNames, onExit }: Props): React.ReactNode {
   const [modeState, setModeState] = useState<ModeState>({ mode: 'list' });
   const [listFocusIndex, setListFocusIndex] = useState(0);
+  // #610 (2.1.328): preserve cursor position in event/matcher/hook lists when going back
+  const [eventFocusIndex, setEventFocusIndex] = useState(0);
+  const [matcherFocusByEvent, setMatcherFocusByEvent] = useState<Partial<Record<HookEvent, number>>>({});
+  const [hookFocusByKey, setHookFocusByKey] = useState<Record<string, number>>({});
 
   const [disabledByPolicy, setDisabledByPolicy] = useState(() => {
     const settings = getSettings_DEPRECATED();
@@ -514,7 +524,14 @@ export function HooksConfigMenu({ toolNames, onExit }: Props): React.ReactNode {
           hooksByEvent={hooksByEvent}
           totalHooksCount={totalHooksCount}
           restrictedByPolicy={restrictedByPolicy}
+          defaultFocusIndex={eventFocusIndex}
+          onFocus={setEventFocusIndex}
           onSelectEvent={event => {
+            const eventKeys = Object.keys(hookEventMetadata);
+            const idx = eventKeys.indexOf(event);
+            if (idx >= 0) {
+              setEventFocusIndex(idx);
+            }
             if (getMatcherMetadata(event, combinedToolNames) !== undefined) {
               setModeState({ mode: 'select-matcher', event });
             } else {
@@ -533,7 +550,15 @@ export function HooksConfigMenu({ toolNames, onExit }: Props): React.ReactNode {
           matchersForSelectedEvent={sortedMatchersForSelectedEvent}
           hooksByEventAndMatcher={hooksByEventAndMatcher}
           eventDescription={hookEventMetadata[modeState.event].description}
+          defaultFocusIndex={matcherFocusByEvent[modeState.event] ?? 0}
+          onFocus={index => {
+            setMatcherFocusByEvent(prev => ({ ...prev, [modeState.event]: index }));
+          }}
           onSelect={matcher => {
+            const idx = sortedMatchersForSelectedEvent.indexOf(matcher);
+            if (idx >= 0) {
+              setMatcherFocusByEvent(prev => ({ ...prev, [modeState.event]: idx }));
+            }
             setModeState({
               mode: 'select-hook',
               event: modeState.event,
@@ -545,14 +570,23 @@ export function HooksConfigMenu({ toolNames, onExit }: Props): React.ReactNode {
           }}
         />
       );
-    case 'select-hook':
+    case 'select-hook': {
+      const hookFocusKey = `${modeState.event}:${modeState.matcher}`;
       return (
         <SelectHookMode
           selectedEvent={modeState.event}
           selectedMatcher={modeState.matcher}
           hooksForSelectedMatcher={hooksForSelectedMatcher}
           hookEventMetadata={hookEventMetadata[modeState.event]}
+          defaultFocusIndex={hookFocusByKey[hookFocusKey] ?? 0}
+          onFocus={index => {
+            setHookFocusByKey(prev => ({ ...prev, [hookFocusKey]: index }));
+          }}
           onSelect={hook => {
+            const idx = hooksForSelectedMatcher.indexOf(hook);
+            if (idx >= 0) {
+              setHookFocusByKey(prev => ({ ...prev, [hookFocusKey]: idx }));
+            }
             setModeState({
               mode: 'view-hook',
               event: modeState.event,
@@ -572,6 +606,7 @@ export function HooksConfigMenu({ toolNames, onExit }: Props): React.ReactNode {
           }}
         />
       );
+    }
     case 'view-hook':
       return (
         <ViewHookMode

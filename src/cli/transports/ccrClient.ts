@@ -4,6 +4,7 @@ import type {
   StdoutMessage,
 } from 'src/entrypoints/sdk/controlTypes.js'
 import { decodeJwtExpiry } from '../../bridge/jwtUtils.js'
+import { buildInitialWorkerMetadataPatch } from '../../bridge/replBridgeTransport.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { logForDiagnosticsNoPII } from '../../utils/diagLogs.js'
 import { errorMessage, getErrnoCode } from '../../utils/errors.js'
@@ -1023,7 +1024,10 @@ export class CCRClient {
     this.workerEpoch = epoch
 
     // Concurrent with the init PUT — neither depends on the other.
-    const restoredPromise = this.getWorkerState()
+    let initialStateReadPending = true
+    const restoredPromise = this.getWorkerState().finally(() => {
+      initialStateReadPending = false
+    })
 
     const result = await this.request(
       'put',
@@ -1031,13 +1035,15 @@ export class CCRClient {
       {
         worker_status: 'idle',
         worker_epoch: this.workerEpoch,
-        // Clear stale pending_action/task_summary left by a prior
-        // worker crash — the in-session clears don't survive process restart.
-        external_metadata: {
-          pending_action: null,
-          task_summary: null,
-          automation_state: null,
-        },
+        // Official 2.1.328 (#585): preserve any waiting permission prompt card
+        // while the initial state GET is still pending; clear stale task/automation state.
+        external_metadata: buildInitialWorkerMetadataPatch({
+          initialStateReadPending,
+          baseMetadata: {
+            task_summary: null,
+            automation_state: null,
+          },
+        }),
       },
       'PUT worker (init)',
     )
@@ -1074,6 +1080,23 @@ export class CCRClient {
         duration_ms: durationMs,
         had_state: Boolean(metadata.external || metadata.internal),
       })
+      // Official 2.1.328 (#585): if the restored state still carried a stale
+      // `pending_action` / `pending_actions` card (preserved during the slow
+      // initial GET) and this worker is not in `requires_action`, clear it now.
+      const extMeta = metadata.external as Record<string, unknown> | null
+      const hadStalePendingAction = Boolean(
+        extMeta &&
+          (extMeta.pending_action != null || extMeta.pending_actions != null),
+      )
+      if (
+        hadStalePendingAction &&
+        (this.currentState as SessionState | null) !== 'requires_action'
+      ) {
+        this.reportMetadata({
+          pending_action: null,
+          pending_actions: null,
+        })
+      }
     }
     return metadata
   }

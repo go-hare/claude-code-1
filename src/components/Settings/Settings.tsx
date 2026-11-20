@@ -41,7 +41,7 @@ export function Settings({ onClose, context, defaultTab, openedForCost = false }
   // Kick off diagnostics once when the pane opens. Status use()s this so
   // it resolves once per /config invocation — no re-fetch flash when
   // tabbing back to Status (Tab unmounts children when not selected).
-  const [diagnosticsPromise] = useState(() => buildDiagnostics().catch(() => []));
+  const [diagnosticsPromise] = useState(() => buildDiagnostics(context).catch(() => []));
 
   useExitOnCtrlCDWithKeybindings();
 

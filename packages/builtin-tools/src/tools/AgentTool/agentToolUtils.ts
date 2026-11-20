@@ -725,6 +725,58 @@ export function formatLaterReportRefusedNotice(
 }
 
 /**
+ * Official 2.1.327 `wOn` / `kOn` (#427) — when a background agent in auto mode
+ * runs again in response to a follow-up message after already delivering its
+ * one-shot `SubagentHandback` report, its plain-text reply at the end of that
+ * run is dropped. Inform the caller explicitly and tell it how to get an answer.
+ */
+export const HANDBACK_FOLLOWUP_DROPPED_BASE = `This agent ran again after its ${SUBAGENT_HANDBACK_TOOL_NAME} report. Anything it wrote at the end of that run was not delivered, because it gets one report until its background work ends. So the report does not answer the message you sent it.`
+
+export type HandbackFollowUpDroppedHint = 'report' | 'message' | 'wait'
+
+export const HANDBACK_FOLLOWUP_DROPPED_HINTS: Record<
+  HandbackFollowUpDroppedHint,
+  string
+> = {
+  report: ` If it has not messaged you since, send it a message (${SEND_MESSAGE_TOOL_NAME}) to ask again.`,
+  message: ` If it has not messaged you since, send it a message (${SEND_MESSAGE_TOOL_NAME}) asking it to answer with ${SEND_MESSAGE_TOOL_NAME}.`,
+  wait: ' It cannot answer sooner: ask again after the notification that it finished.',
+}
+
+const handbackFollowUpDroppedAgents = new Map<
+  string,
+  HandbackFollowUpDroppedHint | undefined
+>()
+
+export function markHandbackFollowUpDropped(
+  agentId: string,
+  hint?: HandbackFollowUpDroppedHint,
+): void {
+  handbackFollowUpDroppedAgents.set(agentId, hint)
+}
+
+export function getHandbackFollowUpDropped(agentId: string): {
+  dropped: boolean
+  hint?: HandbackFollowUpDroppedHint
+} {
+  if (!handbackFollowUpDroppedAgents.has(agentId)) {
+    return { dropped: false }
+  }
+  return { dropped: true, hint: handbackFollowUpDroppedAgents.get(agentId) }
+}
+
+export function clearHandbackFollowUpDropped(agentId: string): void {
+  handbackFollowUpDroppedAgents.delete(agentId)
+}
+
+export function formatHandbackFollowUpDroppedNotice(
+  hint?: HandbackFollowUpDroppedHint,
+): string {
+  const suffix = hint ? HANDBACK_FOLLOWUP_DROPPED_HINTS[hint] : ''
+  return `${HANDBACK_FOLLOWUP_DROPPED_BASE}${suffix}\n`
+}
+
+/**
  * Official 325 `jQt` (#1815) — parent-model guidance when safeguards stop a
  * subagent: retry with a narrower prompt or pass the message to the user,
  * instead of doing the agent's work in the main conversation.
@@ -822,6 +874,10 @@ export function finalizeAgentTool(
     handbackBody?: string
     handbackFlagged?: boolean
     laterReportRefused?: boolean
+    /** Official 2.1.327 (#427): follow-up run reply was dropped after standing SubagentHandback report. */
+    handbackFollowUpDropped?: HandbackFollowUpDroppedHint | boolean
+    handbackInterim?: boolean
+    hasUnreadMessages?: boolean
     canSendMessage?: boolean
   },
 ): AgentToolResult {
@@ -975,6 +1031,37 @@ export function finalizeAgentTool(
     notes.push({
       type: 'text',
       text: formatLaterReportRefusedNotice(canSend),
+    })
+  }
+
+  // Official 2.1.327 (#427): surface dropped follow-up reply in auto mode when
+  // an agent ran again after its SubagentHandback report.
+  const trackedDropped = getHandbackFollowUpDropped(agentId)
+  const hasFollowUpDropped =
+    opts?.handbackFollowUpDropped !== undefined &&
+    opts?.handbackFollowUpDropped !== false
+      ? true
+      : trackedDropped.dropped
+  if (
+    hasFollowUpDropped &&
+    opts?.hasUnreadMessages !== true &&
+    (opts?.handbackInterim === true || !hadLaterReportRefused)
+  ) {
+    clearHandbackFollowUpDropped(agentId)
+    const canSend =
+      opts?.canSendMessage !== false &&
+      !ONE_SHOT_BUILTIN_AGENT_TYPES.has(agentType) &&
+      opts?.handbackFlagged !== true
+    const requestedHint: HandbackFollowUpDroppedHint | undefined =
+      typeof opts?.handbackFollowUpDropped === 'string'
+        ? opts.handbackFollowUpDropped
+        : trackedDropped.hint
+    const effectiveHint = !canSend
+      ? undefined
+      : (requestedHint ?? (opts?.handbackInterim === true ? 'wait' : 'report'))
+    notes.push({
+      type: 'text',
+      text: formatHandbackFollowUpDroppedNotice(effectiveHint),
     })
   }
 
@@ -1499,6 +1586,13 @@ export async function runAsyncAgentLifecycle({
           stopSummarization = stop
         }
       : undefined
+    // Capture whether a standing SubagentHandback report already existed BEFORE
+    // this run executes so a first-run SubagentHandback call is not misclassified
+    // as a dropped follow-up reply.
+    const taskBeforeRun = toolUseContext.getAppState().tasks?.[taskId] as
+      | { handbackReport?: { text: string; warning?: string } }
+      | undefined
+    const hadPriorHandbackReport = taskBeforeRun?.handbackReport !== undefined
     armStallWatchdog()
     for await (const message of makeStream(onCacheSafeParams)) {
       // densable Phn/Ohr — query yields spinner_mode for teammate Phn.setMode.
@@ -1631,8 +1725,48 @@ export async function runAsyncAgentLifecycle({
       rootSetAppState,
       toolUseContext.getAppState,
     )
+    const liveTaskBeforeFinalize = toolUseContext.getAppState().tasks?.[
+      taskId
+    ] as
+      | {
+          handbackContract?: true
+          handbackRecipient?: string
+          handbackReport?: { text: string; warning?: string }
+          pendingMessages?: unknown[]
+          keepaliveReasons?: Set<string> | Iterable<string>
+        }
+      | undefined
+    // Official 2.1.327 (#427): when a follow-up run after a standing
+    // SubagentHandback report produced a plain-text reply that cannot replace
+    // the standing report, mark the follow-up dropped so finalizeAgentTool
+    // surfaces the dropped-reply notice to the caller.
+    if (
+      hadPriorHandbackReport &&
+      liveTaskBeforeFinalize?.handbackContract === true &&
+      liveTaskBeforeFinalize.handbackRecipient !== undefined &&
+      liveTaskBeforeFinalize.handbackReport !== undefined
+    ) {
+      const lastAssistant = getLastAssistantMessage(agentMessages)
+      const hasPlainTextFollowUp =
+        lastAssistant !== undefined &&
+        Array.isArray(lastAssistant.message?.content) &&
+        lastAssistant.message.content.some(
+          block => block.type === 'text' && block.text.trim().length > 0,
+        )
+      if (hasPlainTextFollowUp) {
+        const waitingOnOwnWork = hasOwnWorkKeepaliveReason(
+          liveTaskBeforeFinalize.keepaliveReasons,
+        )
+        markHandbackFollowUpDropped(
+          taskId,
+          waitingOnOwnWork ? 'wait' : 'report',
+        )
+      }
+    }
     const agentResult = finalizeAgentTool(agentMessages, taskId, metadata, {
       suppressTelemetry: preCompleteJxt,
+      hasUnreadMessages:
+        (liveTaskBeforeFinalize?.pendingMessages?.length ?? 0) > 0,
     })
 
     // Mark task completed FIRST so TaskOutput(block=true) unblocks
@@ -1713,6 +1847,18 @@ export async function runAsyncAgentLifecycle({
     }
 
     const worktreeResult = await getWorktreeResult()
+    const liveTaskAtNotify = toolUseContext.getAppState().tasks?.[taskId] as
+      | {
+          handbackContract?: true
+          handbackRecipient?: string
+          handbackReport?: { text: string; warning?: string }
+          pendingMessages?: unknown[]
+        }
+      | undefined
+    const hasStandingHandback =
+      liveTaskAtNotify?.handbackContract === true &&
+      liveTaskAtNotify?.handbackRecipient !== undefined &&
+      liveTaskAtNotify?.handbackReport !== undefined
 
     enqueueAgentNotification({
       taskId,
@@ -1727,6 +1873,13 @@ export async function runAsyncAgentLifecycle({
         durationMs: agentResult.totalDurationMs,
       },
       toolUseId: toolUseContext.toolUseId,
+      ...(hasStandingHandback
+        ? {
+            pointsAtStandingReport: true,
+            handbackRecipient: liveTaskAtNotify.handbackRecipient,
+          }
+        : {}),
+      unreadMessages: liveTaskAtNotify?.pendingMessages?.length ?? 0,
       ...worktreeResult,
     })
   } catch (error) {
@@ -1862,4 +2015,25 @@ export async function runAsyncAgentLifecycle({
   return settledFinalText !== undefined
     ? { finalText: settledFinalText }
     : undefined
+}
+
+/**
+ * Check whether an agent task's `keepaliveReasons` (`Set<string>` on
+ * `LocalAgentTaskState`, or any `Iterable<string>`) includes own-work
+ * keepalives (`monitor:`, `workflow:`, `bash:`).
+ */
+export function hasOwnWorkKeepaliveReason(
+  keepaliveReasons: Iterable<string> | undefined,
+): boolean {
+  if (!keepaliveReasons) return false
+  for (const r of keepaliveReasons) {
+    if (
+      r.startsWith('monitor:') ||
+      r.startsWith('workflow:') ||
+      r.startsWith('bash:')
+    ) {
+      return true
+    }
+  }
+  return false
 }

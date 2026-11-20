@@ -13,6 +13,8 @@
 import type { TaskContext } from '../../Task.js'
 import { updateAgentSummary } from '../../tasks/LocalAgentTask/LocalAgentTask.js'
 import type { AgentId } from '../../types/ids.js'
+import type { AssistantMessage } from '../../types/message.js'
+import { getAgentContext } from '../../utils/agentContext.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import {
@@ -20,11 +22,25 @@ import {
   runForkedAgent,
 } from '../../utils/forkedAgent.js'
 import { logError } from '../../utils/log.js'
-import { getAgentTranscript } from '../../utils/sessionStorage.js'
-import { buildSummaryContext } from './summaryContext.js'
+import { getSmallFastModel } from '../../utils/model/model.js'
 import {
+  type APIProvider,
+  getAPIProvider,
+} from '../../utils/model/providers.js'
+import { getAgentTranscript } from '../../utils/sessionStorage.js'
+import { asSystemPrompt } from '../../utils/systemPromptType.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
+import { queryWithModel } from '../api/claude.js'
+import {
+  buildShortSummaryNotes,
+  buildSummaryContext,
+} from './summaryContext.js'
+import {
+  buildShortNotesUserPrompt,
   buildSummaryPrompt,
   createSummaryPromptMessage,
+  SHORT_NOTES_MAX_OUTPUT_TOKENS,
+  SHORT_NOTES_SUMMARY_SYSTEM_PROMPT,
 } from './summaryPrompt.js'
 
 const SUMMARY_INTERVAL_MS = 30_000
@@ -36,6 +52,134 @@ export const AGENT_SUMMARY_REQUEST_TIMEOUT_MS = 20_000
 export const AGENT_SUMMARY_MAX_HOLD_MS = 300_000
 export const AGENT_SUMMARY_HOLD_POLL_MS = 15_000
 export const AGENT_SUMMARY_COLD_CACHE_MS = 270_000
+
+/**
+ * Official 2.1.327 `Rp` / `ba()` (#526): cloud providers that always use
+ * short-notes mode with the subagent's own model (source: `'release'`).
+ */
+export const SHORT_NOTES_RELEASE_PROVIDERS = new Set<APIProvider>([
+  'bedrock',
+  'vertex',
+  'foundry',
+])
+
+export type AgentSummaryModeDecision = {
+  mode: 'short' | 'full'
+  source: 'release' | 'default' | 'growthbook' | 'override'
+}
+
+/**
+ * Official 2.1.327 `xs(e)` (#526) + 2.1.328 (#675):
+ * - Bedrock, Vertex AI, and Foundry use short-notes mode (`source: 'release'`).
+ * - Anthropic API / firstParty / gateway default to short-notes mode written by
+ *   the default small fast model (also when telemetry/GrowthBook is off), unless
+ *   `tengu_groovy_ember` explicitly configures `{ mode: 'full' }`.
+ */
+export function resolveAgentSummaryMode(opts?: {
+  provider?: APIProvider
+  flagValue?: { mode?: 'short' | 'full' } | null
+  overrideMode?: 'short' | 'full'
+}): AgentSummaryModeDecision {
+  if (opts?.overrideMode !== undefined) {
+    return { mode: opts.overrideMode, source: 'override' }
+  }
+  const provider = opts?.provider ?? getAPIProvider()
+  if (SHORT_NOTES_RELEASE_PROVIDERS.has(provider)) {
+    return { mode: 'short', source: 'release' }
+  }
+  const flag =
+    opts?.flagValue !== undefined
+      ? opts.flagValue
+      : getFeatureValue_CACHED_MAY_BE_STALE<{ mode?: 'short' | 'full' } | null>(
+          'tengu_groovy_ember',
+          null,
+        )
+  if (flag && (flag.mode === 'full' || flag.mode === 'short')) {
+    return { mode: flag.mode, source: 'growthbook' }
+  }
+  // Official 2.1.328 (#675) `Op.catch({ mode: 'short' })`: default is short
+  // notes even when GrowthBook returns null / telemetry is off.
+  return { mode: 'short', source: 'default' }
+}
+
+/**
+ * Official 2.1.327/2.1.328 `vt()` / `pt()` (#526, #675):
+ * Pick the model that writes a short-notes progress summary, or `undefined`
+ * to use full forked-conversation summarization.
+ */
+export function resolveSummaryWriterModel(opts: {
+  decision: AgentSummaryModeDecision
+  agentModel: string
+  releaseShortFailed?: boolean
+  getSmallFastModelImpl?: () => string
+}): string | undefined {
+  if (opts.decision.mode !== 'short') return undefined
+  if (opts.decision.source === 'release') {
+    return opts.releaseShortFailed ? undefined : opts.agentModel
+  }
+  try {
+    return (opts.getSmallFastModelImpl ?? getSmallFastModel)()
+  } catch (err) {
+    if (err instanceof Error) logError(err)
+    return undefined
+  }
+}
+
+const SUMMARY_MAX_CHARS = 100
+const SUMMARY_MARKDOWN_PREFIX_RE = /^(#{1,6}(\s|$)|```|~~~)/
+const SUMMARY_FENCE_RE = /```|~~~/
+const SUMMARY_XML_WRAPPER_RE = /^<([A-Za-z][\w:.-]*)>([^<>]*)<\/\1>$/
+
+function containsSummaryLineBreak(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i)
+    if (
+      code === 0x0a ||
+      code === 0x0d ||
+      code === 0x0b ||
+      code === 0x0c ||
+      code === 0x85 ||
+      code === 0x2028 ||
+      code === 0x2029
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+/**
+ * Official 2.1.328 `Pa(text, isShortNotes)` (#526, #675): validate and clean
+ * a progress summary reply (single line, <= 100 chars, no markdown fences).
+ */
+export function sanitizeAgentSummaryReply(
+  raw: string,
+  isShortNotes = false,
+): string | null {
+  const trimmed = raw.trim()
+  if (!trimmed || containsSummaryLineBreak(trimmed)) return null
+  const normalized = trimmed.replace(/\s+/g, ' ').trim()
+  if (
+    !normalized ||
+    (normalized.length > SUMMARY_MAX_CHARS &&
+      [...normalized].length > SUMMARY_MAX_CHARS)
+  ) {
+    return null
+  }
+  if (
+    SUMMARY_MARKDOWN_PREFIX_RE.test(normalized) ||
+    SUMMARY_FENCE_RE.test(normalized)
+  ) {
+    return null
+  }
+  if (!isShortNotes) return normalized
+  const unwrapped = normalized
+    .replace(SUMMARY_XML_WRAPPER_RE, '$2')
+    .replaceAll('`', '')
+  return unwrapped === normalized
+    ? normalized
+    : sanitizeAgentSummaryReply(unwrapped, true)
+}
 
 /**
  * 2.1.323 #1976: `CLAUDE_CODE_DISABLE_AGENT_PROGRESS_SUMMARIES=1` turns off
@@ -97,18 +241,33 @@ export function shouldHoldFullSummaryForColdCache(opts: {
   return heldMs === 0 || ownRequests.responsesBegun === heldAtResponsesBegun
 }
 
+export type ShortNotesSummaryRequest = {
+  model: string
+  notes: string
+  previousSummary: string | null
+  signal: AbortSignal
+  leavesEffortSupportAlone: true
+}
+
 export type AgentSummaryDependencies = Partial<{
   clearTimeout: typeof clearTimeout
   getAgentTranscript: typeof getAgentTranscript
   logError: typeof logError
   logForDebugging: typeof logForDebugging
   runForkedAgent: typeof runForkedAgent
+  runShortNotesSummary: (
+    req: ShortNotesSummaryRequest,
+  ) => Promise<AssistantMessage[]>
   setTimeout: typeof setTimeout
   updateAgentSummary: typeof updateAgentSummary
   ownRequests: AgentOwnRequestsState
   maxHoldMs: number
   holdPollMs: number
   now: () => number
+  provider: APIProvider
+  summaryMode: 'short' | 'full'
+  getSmallFastModel: () => string
+  taskDescription: string
 }>
 
 export function startAgentSummarization(
@@ -127,6 +286,8 @@ export function startAgentSummarization(
   let stopped = false
   let previousSummary: string | null = null
   let lastHandledTranscriptFingerprint: string | null = null
+  let lastHandledShortNotes: string | null = null
+  let releaseShortFailed = false
   let heldMs = 0
   let heldAtResponsesBegun: number | undefined
   let didHoldThisTick = false
@@ -142,6 +303,46 @@ export function startAgentSummarization(
   const maxHoldMs = dependencies.maxHoldMs ?? AGENT_SUMMARY_MAX_HOLD_MS
   const holdPollMs = dependencies.holdPollMs ?? AGENT_SUMMARY_HOLD_POLL_MS
   const nowImpl = dependencies.now ?? Date.now
+  const agentModel =
+    baseParams.toolUseContext?.options?.mainLoopModel ?? getSmallFastModel()
+  // Preserve legacy test harnesses that mock only `runForkedAgent` without
+  // specifying short-notes mode or a short-notes runner.
+  const defaultOverrideMode =
+    dependencies.summaryMode ??
+    (dependencies.runForkedAgent !== undefined &&
+    dependencies.runShortNotesSummary === undefined &&
+    dependencies.provider === undefined
+      ? 'full'
+      : undefined)
+  const runShortNotesSummaryImpl =
+    dependencies.runShortNotesSummary ??
+    (async (req: ShortNotesSummaryRequest): Promise<AssistantMessage[]> => {
+      const msg = await queryWithModel({
+        systemPrompt: asSystemPrompt([SHORT_NOTES_SUMMARY_SYSTEM_PROMPT]),
+        userPrompt: buildShortNotesUserPrompt({
+          notes: req.notes,
+          previousSummary: req.previousSummary,
+        }),
+        signal: req.signal,
+        options: {
+          model: req.model,
+          querySource: 'agent_summary',
+          agentContext: getAgentContext(),
+          isNonInteractiveSession:
+            baseParams.toolUseContext?.options?.isNonInteractiveSession,
+          agents: [],
+          mcpTools: [],
+          hasAppendSystemPrompt: false,
+          enablePromptCaching: false,
+          // Official 2.1.328 (#570): never disable effort for the subagent's
+          // model for the session if Bedrock/Vertex/Foundry rejects effort on
+          // this progress summary call.
+          leavesEffortSupportAlone: req.leavesEffortSupportAlone,
+          maxOutputTokensOverride: SHORT_NOTES_MAX_OUTPUT_TOKENS,
+        },
+      })
+      return [msg]
+    })
 
   // 2.1.323 #1976: do not schedule timers or issue summary requests when disabled
   if (isAgentProgressSummariesDisabled()) {
@@ -164,6 +365,90 @@ export function startAgentSummarization(
         logForDebuggingImpl(
           `[AgentSummary] Skipping summary for ${taskId}: not enough messages (${transcript?.messages.length ?? 0})`,
         )
+        return
+      }
+
+      const modeDecision = resolveAgentSummaryMode({
+        provider: dependencies.provider,
+        overrideMode: defaultOverrideMode,
+      })
+      const summaryWriterModel = resolveSummaryWriterModel({
+        decision: modeDecision,
+        agentModel,
+        releaseShortFailed,
+        getSmallFastModelImpl: dependencies.getSmallFastModel,
+      })
+
+      if (summaryWriterModel !== undefined) {
+        const notes = buildShortSummaryNotes({
+          task: dependencies.taskDescription ?? '',
+          messages: transcript.messages,
+        })
+        if (!notes || notes === lastHandledShortNotes) {
+          logForDebuggingImpl(
+            `[AgentSummary] Skipping summary for ${taskId}: ${!notes ? 'nothing to describe' : 'notes unchanged'}`,
+          )
+          return
+        }
+        lastHandledShortNotes = notes
+        logForDebuggingImpl(
+          `[AgentSummary] Asking ${summaryWriterModel} for summary from ${notes.length} characters of notes`,
+        )
+
+        summaryAbortController = new AbortController()
+        const requestTimeoutHandle = globalThis.setTimeout(() => {
+          summaryAbortController?.abort()
+        }, AGENT_SUMMARY_REQUEST_TIMEOUT_MS)
+        if (
+          requestTimeoutHandle &&
+          typeof (requestTimeoutHandle as { unref?: () => void }).unref ===
+            'function'
+        ) {
+          ;(requestTimeoutHandle as { unref: () => void }).unref()
+        }
+
+        let shortMessages: AssistantMessage[]
+        try {
+          shortMessages = await runShortNotesSummaryImpl({
+            model: summaryWriterModel,
+            notes,
+            previousSummary,
+            signal: summaryAbortController.signal,
+            leavesEffortSupportAlone: true,
+          })
+        } finally {
+          globalThis.clearTimeout(requestTimeoutHandle)
+        }
+
+        if (stopped) return
+
+        for (const msg of shortMessages) {
+          if (msg.type !== 'assistant') continue
+          if (msg.isApiErrorMessage) {
+            logForDebuggingImpl(
+              `[AgentSummary] Skipping API error message for ${taskId}`,
+            )
+            if (modeDecision.source === 'release') {
+              releaseShortFailed = true
+            }
+            continue
+          }
+          const contentArr = Array.isArray(msg.message?.content)
+            ? msg.message.content
+            : []
+          const textBlock = contentArr.find(b => b.type === 'text')
+          if (textBlock && textBlock.type === 'text' && textBlock.text.trim()) {
+            const summary = sanitizeAgentSummaryReply(textBlock.text, true)
+            if (summary !== null) {
+              logForDebuggingImpl(
+                `[AgentSummary] Summary result for ${taskId}: ${summary.length} chars`,
+              )
+              previousSummary = summary
+              updateAgentSummaryImpl(taskId, summary, setAppState)
+            }
+            break
+          }
+        }
         return
       }
 
@@ -223,7 +508,7 @@ export function startAgentSummarization(
 
       // Create abort controller for this summary with 20s timeout (#2082)
       summaryAbortController = new AbortController()
-      const requestTimeoutHandle = setTimeoutImpl(() => {
+      const requestTimeoutHandle = globalThis.setTimeout(() => {
         summaryAbortController?.abort()
       }, AGENT_SUMMARY_REQUEST_TIMEOUT_MS)
       if (
@@ -279,7 +564,7 @@ export function startAgentSummarization(
           skipTranscript: true,
         })
       } finally {
-        clearTimeoutImpl(requestTimeoutHandle)
+        globalThis.clearTimeout(requestTimeoutHandle)
       }
 
       if (stopped) return

@@ -91,6 +91,7 @@ import {
 } from './idleCompaction.js'
 import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js'
 import { checkAndDisableAutoModeIfNeeded } from '../../utils/permissions/bypassPermissionsKillswitch.js'
+import { waitForInitialPluginsLoaded } from '../../utils/plugins/pluginLoader.js'
 import {
   getScratchpadDir,
   isScratchpadEnabled,
@@ -206,6 +207,181 @@ export type DispatchReplStreamEventDeps = {
 }
 
 /**
+ * Official 2.1.328 #563 (`K5i` + `_keepReply` + `countReply`):
+ * Accurate two-part spinner token counter (`keptLength + replyLength`) that:
+ * - resets `replyLength` on `message_start` so a retried reply is never counted twice,
+ * - advances during `thinking_progress` and `thinking_signature` while Claude thinks,
+ * - snaps to authoritative `usage.output_tokens * 4` on `message_delta` and on
+ *   non-streamed `assistant` replies so non-streamed replies are never missed.
+ */
+export type SpinnerApiMetricsEntry = {
+  id?: string
+  thinkingTokenEstimate?: number
+  thinkingBlockBaseline?: number
+  sawEstimatedTokensThisBlock?: boolean
+  outputTokens?: number
+}
+
+export type SpinnerApiMetricsEvent =
+  | { type: 'start'; ttftMs?: number; id?: string; messageId?: string }
+  | { type: 'content_block_start'; id?: string }
+  | { type: 'thinking_progress'; estimatedTokensDelta: number; id?: string }
+  | { type: 'thinking_signature'; chars: number; id?: string }
+  | { type: 'end'; outputTokens: number; id?: string }
+
+export function applySpinnerApiMetricsEvent(params: {
+  entries: SpinnerApiMetricsEntry[]
+  responseLength: number
+  event: SpinnerApiMetricsEvent
+}): number {
+  const { entries, responseLength, event } = params
+  if (event.type === 'start') {
+    entries.push({ id: event.id })
+    return responseLength
+  }
+  const entry =
+    event.id != null
+      ? entries.find(m => m.id === event.id)
+      : entries.findLast(m => m.id == null)
+  if (!entry) return responseLength
+  if (event.type === 'content_block_start') {
+    entry.thinkingTokenEstimate = 0
+    entry.thinkingBlockBaseline = responseLength
+    entry.sawEstimatedTokensThisBlock = false
+    return responseLength
+  }
+  if (event.type === 'thinking_progress') {
+    entry.sawEstimatedTokensThisBlock = true
+    entry.thinkingTokenEstimate =
+      (entry.thinkingTokenEstimate ?? 0) + event.estimatedTokensDelta
+    if (entry.outputTokens == null && event.id == null) {
+      return Math.max(
+        responseLength,
+        (entry.thinkingBlockBaseline ?? 0) + entry.thinkingTokenEstimate * 4,
+      )
+    }
+    return responseLength
+  }
+  if (event.type === 'thinking_signature') {
+    if (event.chars > 0 && entry.outputTokens == null) {
+      if (entry.sawEstimatedTokensThisBlock) {
+        entry.thinkingTokenEstimate = Math.max(
+          entry.thinkingTokenEstimate ?? 0,
+          Math.ceil(event.chars / 4),
+        )
+        return Math.max(
+          responseLength,
+          (entry.thinkingBlockBaseline ?? 0) + entry.thinkingTokenEstimate * 4,
+        )
+      }
+      return responseLength + event.chars
+    }
+    return responseLength
+  }
+  entry.outputTokens = event.outputTokens
+  return event.id == null
+    ? Math.max(responseLength, event.outputTokens * 4)
+    : responseLength
+}
+
+export class SpinnerTokenCounter {
+  private keptLength = 0
+  private replyLength = 0
+  private entries: SpinnerApiMetricsEntry[] = []
+
+  get responseLength(): number {
+    return this.keptLength + this.replyLength
+  }
+
+  get tokenCount(): number {
+    return Math.round(this.responseLength / 4)
+  }
+
+  reset(): void {
+    this.keptLength = 0
+    this.replyLength = 0
+    this.entries = []
+  }
+
+  keepReply(): void {
+    this.keptLength += this.replyLength
+    this.replyLength = 0
+  }
+
+  addDeltaChars(deltaChars: number): number {
+    if (deltaChars > 0) {
+      this.replyLength += deltaChars
+    }
+    return this.responseLength
+  }
+
+  onStreamMessageStart(hasTtftMs: boolean): number {
+    if (!hasTtftMs) {
+      this.keepReply()
+    }
+    this.replyLength = 0
+    return this.responseLength
+  }
+
+  onStreamMessageDelta(outputTokens: number | undefined): number {
+    if (typeof outputTokens === 'number' && outputTokens > 0) {
+      this.replyLength = outputTokens * 4
+    }
+    return this.responseLength
+  }
+
+  onAssistantMessage(msg: {
+    isApiErrorMessage?: boolean
+    isUnmetered?: boolean
+    message?: {
+      stop_reason?: string | null
+      usage?: { output_tokens?: number | null }
+    }
+  }): number {
+    if (msg.isApiErrorMessage || msg.isUnmetered) {
+      return this.responseLength
+    }
+    const outputTokens = msg.message?.usage?.output_tokens
+    if (
+      msg.message?.stop_reason &&
+      typeof outputTokens === 'number' &&
+      outputTokens > 0
+    ) {
+      this.replyLength = outputTokens * 4
+    }
+    return this.responseLength
+  }
+
+  onApiMetricsEvent(event: SpinnerApiMetricsEvent): number {
+    if (event.type === 'start' && event.id == null) {
+      this.keepReply()
+    }
+    this.replyLength = applySpinnerApiMetricsEvent({
+      entries: this.entries,
+      responseLength: this.replyLength,
+      event,
+    })
+    return this.responseLength
+  }
+}
+
+const spinnerCountersByRef = new WeakMap<
+  { current: number },
+  SpinnerTokenCounter
+>()
+
+function getSpinnerTokenCounter(ref: { current: number }): SpinnerTokenCounter {
+  let counter = spinnerCountersByRef.get(ref)
+  if (!counter) {
+    counter = new SpinnerTokenCounter()
+    spinnerCountersByRef.set(ref, counter)
+  } else if (ref.current === 0 && counter.responseLength > 0) {
+    counter.reset()
+  }
+  return counter
+}
+
+/**
  * Dispatches a single stream event from `query()` / `runHostEngineTurn`
  * through `handleMessageFromStream` into REPL transcript and streaming UI state.
  */
@@ -236,9 +412,23 @@ export function dispatchReplStreamEvent(
     addNotification,
   } = deps
 
+  // Official 2.1.328 #563: two-part spinner token counter keyed by responseLengthRef
+  // (resets on retried message_start, advances on thinking_progress, and counts non-streamed replies).
+  const tokenCounter = getSpinnerTokenCounter(responseLengthRef)
+
   handleMessageFromStream(
     event,
     newMessage => {
+      if (newMessage.type === 'assistant') {
+        const nextLen = tokenCounter.onAssistantMessage(
+          newMessage as unknown as Parameters<
+            SpinnerTokenCounter['onAssistantMessage']
+          >[0],
+        )
+        if (nextLen !== responseLengthRef.current) {
+          setResponseLength(() => nextLen)
+        }
+      }
       if (isCompactBoundaryMessage(newMessage)) {
         if (isFullscreenEnvEnabled()) {
           setMessages(old => {
@@ -380,7 +570,8 @@ export function dispatchReplStreamEvent(
       }
     },
     deltaChars => {
-      setResponseLength(length => length + deltaChars)
+      const nextLen = tokenCounter.addDeltaChars(deltaChars)
+      setResponseLength(() => nextLen)
     },
     setStreamMode,
     setStreamingToolUses,
@@ -392,6 +583,14 @@ export function dispatchReplStreamEvent(
     },
     setStreamingThinking,
     metrics => {
+      if (metrics && typeof metrics === 'object' && 'type' in metrics) {
+        const nextLen = tokenCounter.onApiMetricsEvent(
+          metrics as SpinnerApiMetricsEvent,
+        )
+        if (nextLen !== responseLengthRef.current) {
+          setResponseLength(() => nextLen)
+        }
+      }
       let ttftMs: number | undefined
       if ('type' in metrics && metrics.type === 'start') {
         ttftMs = metrics.ttftMs
@@ -525,6 +724,43 @@ export function dispatchReplStreamEvent(
     },
     true, // densable authoringProgressSurface:!0
   )
+
+  // Official 2.1.328 #563: update two-part spinner token counter AFTER
+  // handleMessageFromStream has processed deltas/apiMetrics, and keep the
+  // prior reply count when a new stream request or refusal retry begins.
+  if (event && typeof event === 'object' && 'type' in event) {
+    if (
+      event.type === 'stream_event' &&
+      'event' in event &&
+      event.event &&
+      typeof event.event === 'object' &&
+      'type' in event.event
+    ) {
+      const streamEv = event.event as {
+        type: string
+        usage?: { output_tokens?: number }
+      }
+      if (streamEv.type === 'message_start') {
+        const hasTtft =
+          'ttftMs' in event &&
+          (event as { ttftMs?: number | null }).ttftMs != null
+        const nextLen = tokenCounter.onStreamMessageStart(hasTtft)
+        setResponseLength(() => nextLen)
+      } else if (streamEv.type === 'message_delta') {
+        const nextLen = tokenCounter.onStreamMessageDelta(
+          streamEv.usage?.output_tokens,
+        )
+        setResponseLength(() => nextLen)
+      }
+    } else if (
+      event.type === 'stream_request_start' ||
+      (event.type === 'refusal_continuation' &&
+        'phase' in event &&
+        (event as { phase?: string }).phase === 'begin')
+    ) {
+      tokenCounter.keepReply()
+    }
+  }
 }
 
 export type RunReplTurnArgs = {
@@ -878,6 +1114,11 @@ async function executeReplTurnImpl(
     return
   }
 
+  // Official 2.1.327 #398: wait for initial plugin load to settle before
+  // starting a turn (especially restarted or autonomous turns) so plugin
+  // commands, agents, and hooks are loaded before the turn runs.
+  await waitForInitialPluginsLoaded(abortController.signal)
+
   const toolUseContext = getToolUseContext(
     messagesIncludingNewMessages,
     newMessages,
@@ -972,6 +1213,31 @@ async function executeReplTurnImpl(
     stopHookActive,
     promptRenderEpoch,
     modelFacts,
+    // Official 2.1.328 #555: rebuild dynamic systemPrompt after autocompact /
+    // reactive compact the same way `/compact` does.
+    renderSystemPrompt: async ctx => {
+      const freshDefaultSystemPrompt = await getSystemPrompt(
+        ctx.options.tools,
+        ctx.options.mainLoopModel,
+        Array.from(
+          ctx
+            .getAppState()
+            .toolPermissionContext.additionalWorkingDirectories.keys(),
+        ),
+        ctx.options.mcpClients,
+      )
+      const rebuilt = buildEffectiveSystemPrompt({
+        mainThreadAgentDefinition,
+        toolUseContext: ctx,
+        customSystemPrompt,
+        defaultSystemPrompt: freshDefaultSystemPrompt,
+        appendSystemPrompt,
+      })
+      return {
+        systemPrompt: rebuilt,
+        promptRenderEpoch: getPromptRenderEpoch(),
+      }
+    },
   }
   const onAbort = () => {
     void hostEngine.interrupt('user-cancel')

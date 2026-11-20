@@ -108,6 +108,10 @@ export function extractInboundMessageFields(msg: SDKMessage):
       fileAttachments: ReturnType<typeof parseInboundFileAttachments>
       /** Official 2.1.323 #2066 (`textNotTyped`): true when @-mention titles/names came from claude.ai/desktop picker rather than user typing. */
       textNotTyped: boolean
+      /** Official 2.1.328 (#429): preserve explicit queue priority (e.g. `'later'`) on inbound peer/bridge messages so they wait for the running turn to finish. */
+      priority: 'now' | 'next' | 'later' | undefined
+      /** Official 2.1.328 (#429): preserve inbound `origin` metadata when present. */
+      origin: import('../types/message.js').MessageOrigin | undefined
     }
   | undefined {
   if (msg.type !== 'user') return undefined
@@ -122,11 +126,30 @@ export function extractInboundMessageFields(msg: SDKMessage):
       ? (msg.uuid as UUID)
       : undefined
 
+  const rec = msg as unknown as Record<string, unknown>
   // Official IPO/g94: "client_platform" in H && typeof === string
-  const rawPlatform = (msg as unknown as { client_platform?: unknown })
-    .client_platform
+  const rawPlatform = rec.client_platform
   const clientPlatform =
     typeof rawPlatform === 'string' ? rawPlatform : undefined
+
+  // Official 2.1.328 (#429): preserve `priority` (`'now' | 'next' | 'later'`)
+  // from top-level or nested `message.priority` so cross-session messages with
+  // `priority: "later"` wait for the running turn in RC & Claude Desktop.
+  const rawPriority =
+    rec.priority ??
+    (msg.message as unknown as Record<string, unknown> | undefined)?.priority
+  const priority =
+    rawPriority === 'now' || rawPriority === 'next' || rawPriority === 'later'
+      ? rawPriority
+      : undefined
+
+  const rawOrigin = rec.origin
+  const origin =
+    rawOrigin &&
+    typeof rawOrigin === 'object' &&
+    'kind' in (rawOrigin as Record<string, unknown>)
+      ? (rawOrigin as import('../types/message.js').MessageOrigin)
+      : undefined
 
   const mentionMeta = hasUntypedAtMentionMetadata(msg)
   let normalizedContent: string | Array<ContentBlockParam> = content
@@ -144,6 +167,8 @@ export function extractInboundMessageFields(msg: SDKMessage):
     clientPlatform,
     fileAttachments: parseInboundFileAttachments(msg),
     textNotTyped: hadUntypedMention,
+    priority,
+    origin,
   }
 }
 

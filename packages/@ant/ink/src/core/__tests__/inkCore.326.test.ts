@@ -92,19 +92,28 @@ afterEach(() => {
 })
 
 describe('Wave 326 Group 4A — Ink core & keybindings', () => {
-  test('#10 & #127: wrapText clip without ellipsis and truncate-end per-line preserving newlines', () => {
+  test('#10 & #127: wrapText clip without ellipsis, truncate-rows per-line preserving newlines, and truncate-end single-unit', () => {
     expect(wrapText('abcdefghij\n1234567890', 5, 'clip')).toBe('abcde\n12345')
-    const truncated = wrapText(
+    const truncatedRows = wrapText(
       'hello world\nsecond long line',
       8,
-      'truncate-end',
+      'truncate-rows',
     )
-    const lines = truncated.split('\n')
+    const lines = truncatedRows.split('\n')
     expect(lines).toHaveLength(2)
     expect(lines[0]!.endsWith('…')).toBe(true)
     expect(lines[1]!.endsWith('…')).toBe(true)
     expect(stringWidth(lines[0]!)).toBeLessThanOrEqual(8)
     expect(stringWidth(lines[1]!)).toBeLessThanOrEqual(8)
+    // Official 2.1.328 `Ad()`: truncate-end stays single-unit truncation
+    const singleUnit = wrapText(
+      'hello world\nsecond long line',
+      8,
+      'truncate-end',
+    )
+    expect(singleUnit.split('\n')).toHaveLength(1)
+    expect(singleUnit.endsWith('…')).toBe(true)
+    expect(stringWidth(singleUnit)).toBeLessThanOrEqual(8)
   })
 
   test('#48: Ink.onRender recovers from RangeError allocation failure without crashing', () => {

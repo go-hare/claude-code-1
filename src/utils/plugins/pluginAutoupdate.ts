@@ -10,11 +10,16 @@
  * but users can disable it per-marketplace.
  */
 
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../../services/analytics/index.js'
 import { updatePluginOp } from '../../services/plugins/pluginOperations.js'
 import { shouldSkipPluginAutoupdate } from '../config.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage } from '../errors.js'
 import { logError } from '../log.js'
+import { sleep } from '../sleep.js'
 import {
   getPendingUpdatesDetails,
   hasPendingUpdates,
@@ -253,14 +258,20 @@ async function updatePlugins(
   return updatePluginsForMarketplaces(autoUpdateEnabledMarketplaces)
 }
 
+/** Official 2.1.328 `pe`: max startup jitter (10 minutes) before background plugin refresh. */
+export const PLUGIN_AUTOUPDATE_MAX_JITTER_MS = 600_000
+
 /**
  * Auto-update marketplaces and plugins in the background.
  *
  * This function:
- * 1. Checks which marketplaces have autoUpdate enabled
- * 2. Refreshes only those marketplaces (git pull/re-download)
- * 3. Updates installed plugins from those marketplaces
- * 4. If any plugins were updated, notifies via the registered callback
+ * 1. Checks `shouldSkipPluginAutoupdate()` (honoring `CLAUDE_CODE_AUTOUPDATER_DISABLED_BY_HOST`)
+ * 2. Checks which marketplaces have autoUpdate enabled
+ * 3. Sleeps a random startup jitter (`0..PLUGIN_AUTOUPDATE_MAX_JITTER_MS`, unref'd)
+ * 4. Refreshes only those marketplaces (git pull/re-download)
+ * 5. Updates installed plugins from those marketplaces
+ * 6. Emits `tengu_plugin_autoupdate_pass` telemetry
+ * 7. If any plugins were updated, notifies via the registered callback
  *
  * Official Anthropic marketplaces have autoUpdate enabled by default,
  * but users can disable it per-marketplace in the UI.
@@ -268,8 +279,22 @@ async function updatePlugins(
  * This function runs silently without blocking user interaction.
  * Called from main.tsx during startup as a background job.
  */
-export function autoUpdateMarketplacesAndPluginsInBackground(): void {
+export function autoUpdateMarketplacesAndPluginsInBackground(
+  maxJitterMs: number = PLUGIN_AUTOUPDATE_MAX_JITTER_MS,
+): void {
   void (async () => {
+    let startTime = Date.now()
+    const stats = {
+      marketplaces_refreshed: 0,
+      marketplace_refresh_failed: 0,
+      marketplace_refresh_policy_skipped: 0,
+      plugins_updated: 0,
+      plugin_update_failed: 0,
+      plugins_blocked_by_pin: 0,
+      plugins_helper_deferred: 0,
+      plugins_policy_blocked: 0,
+    }
+
     if (shouldSkipPluginAutoupdate()) {
       logForDebugging('Plugin autoupdate: skipped (auto-updater disabled)')
       return
@@ -284,6 +309,13 @@ export function autoUpdateMarketplacesAndPluginsInBackground(): void {
         return
       }
 
+      // Official 2.1.328 `V()`: spread background marketplace fetches across startup window
+      if (maxJitterMs > 0) {
+        const jitterMs = Math.floor(Math.random() * maxJitterMs)
+        await sleep(jitterMs, undefined, { unref: true })
+      }
+      startTime = Date.now()
+
       // Refresh only marketplaces with autoUpdate enabled
       const refreshResults = await Promise.allSettled(
         Array.from(autoUpdateEnabledMarketplaces).map(async name => {
@@ -291,26 +323,36 @@ export function autoUpdateMarketplacesAndPluginsInBackground(): void {
             await refreshMarketplace(name, undefined, {
               disableCredentialHelper: true,
             })
+            return 'refreshed' as const
           } catch (error) {
             logForDebugging(
               `Plugin autoupdate: failed to refresh marketplace ${name}: ${errorMessage(error)}`,
               { level: 'warn' },
             )
+            return 'failed' as const
           }
         }),
       )
 
-      // Log any refresh failures
-      const failures = refreshResults.filter(r => r.status === 'rejected')
-      if (failures.length > 0) {
+      const failedCount = refreshResults.filter(
+        r =>
+          r.status === 'rejected' ||
+          (r.status === 'fulfilled' && r.value === 'failed'),
+      ).length
+      stats.marketplace_refresh_failed = failedCount
+      stats.marketplaces_refreshed =
+        autoUpdateEnabledMarketplaces.size - failedCount
+
+      if (failedCount > 0) {
         logForDebugging(
-          `Plugin autoupdate: ${failures.length} marketplace refresh(es) failed`,
+          `Plugin autoupdate: ${failedCount} marketplace refresh(es) failed`,
           { level: 'warn' },
         )
       }
 
       logForDebugging('Plugin autoupdate: checking installed plugins')
       const updatedPlugins = await updatePlugins(autoUpdateEnabledMarketplaces)
+      stats.plugins_updated = updatedPlugins.length
 
       if (updatedPlugins.length > 0) {
         if (pluginUpdateCallback) {
@@ -321,8 +363,25 @@ export function autoUpdateMarketplacesAndPluginsInBackground(): void {
           pendingNotification = updatedPlugins
         }
       }
+
+      const outcome =
+        stats.marketplace_refresh_failed > 0 || stats.plugin_update_failed > 0
+          ? 'partial'
+          : 'ok'
+      logEvent('tengu_plugin_autoupdate_pass', {
+        outcome:
+          outcome as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        ...stats,
+        duration_ms: Date.now() - startTime,
+      })
     } catch (error) {
       logError(error)
+      logEvent('tengu_plugin_autoupdate_pass', {
+        outcome:
+          'failed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+        ...stats,
+        duration_ms: Date.now() - startTime,
+      })
     }
   })()
 }

@@ -2,6 +2,7 @@
  * Package manager detection for Claude CLI
  */
 
+import { realpathSync } from 'fs'
 import { readFile } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
 import { logForDebugging } from '../debug.js'
@@ -119,6 +120,28 @@ export function detectHomebrew(): boolean {
   }
 
   return false
+}
+
+/**
+ * Extracts the Homebrew cask name (e.g. `claude-code` or `claude-code@latest`)
+ * from the running executable path (or its resolved realpath).
+ * Matches official 2.1.328 `GKt` (`@300413606`).
+ */
+export function getHomebrewCaskName(): string | null {
+  const execPath = process.execPath || process.argv[0] || ''
+  const direct = execPath.match(/\/Caskroom\/([^/]+)\//)?.[1]
+  if (direct) {
+    return direct
+  }
+  if (execPath) {
+    try {
+      const resolved = realpathSync(execPath)
+      return resolved.match(/\/Caskroom\/([^/]+)\//)?.[1] ?? null
+    } catch {
+      // execPath may not exist on disk in tests or virtual filesystems
+    }
+  }
+  return null
 }
 
 /**

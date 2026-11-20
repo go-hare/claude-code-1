@@ -12,6 +12,45 @@ import type {
 } from '../utils/sessionState.js'
 import { closeCodeForClassifiedReason } from './remintRecovery.js'
 import { registerWorker } from './workSecret.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+
+/**
+ * Official 2.1.328 (#585) `tengu_generic_yao` (default `true`):
+ * When remote session initialization runs while the initial state GET is still
+ * pending/slow, preserve any existing waiting permission prompt card
+ * (`pending_action` / `pending_actions`) instead of overwriting it with `null`
+ * in the initial `PUT /worker`, and clear only after a late read confirms no
+ * pending card remains.
+ */
+export function shouldClearPendingActionAfterLateRead(): boolean {
+  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_generic_yao', true)
+}
+
+/**
+ * Official 2.1.328 (#585): build the initial `PUT /worker` `external_metadata`
+ * patch. When `initialStateReadPending` is true and `clearsCardAfterLateRead`
+ * is enabled, omit `pending_action: null` and `pending_actions: null` so a
+ * waiting permission prompt card is not wiped out while the service is slow.
+ */
+export function buildInitialWorkerMetadataPatch(opts: {
+  initialStateReadPending: boolean
+  clearsCardAfterLateRead?: boolean
+  baseMetadata?: Record<string, unknown>
+}): Record<string, unknown> {
+  const clearsAfterLateRead =
+    opts.clearsCardAfterLateRead ?? shouldClearPendingActionAfterLateRead()
+  const base = { ...(opts.baseMetadata ?? {}) }
+  if (opts.initialStateReadPending && clearsAfterLateRead) {
+    if (base.pending_action === null) delete base.pending_action
+    if (base.pending_actions === null) delete base.pending_actions
+    return base
+  }
+  return {
+    pending_action: null,
+    pending_actions: null,
+    ...base,
+  }
+}
 
 /**
  * Transport abstraction for replBridge. Covers exactly the surface that

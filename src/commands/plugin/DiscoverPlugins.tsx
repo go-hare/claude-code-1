@@ -1,9 +1,9 @@
 import figures from 'figures';
 import * as React from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ConfigurableShortcutHint } from '../../components/ConfigurableShortcutHint.js';
 import { SearchBox } from '../../components/SearchBox.js';
-import { Byline } from '@anthropic/ink';
+import { Byline, type DOMElement, useApp } from '@anthropic/ink';
 import { useSearchInput } from '@anthropic/ink';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- useInput needed for raw search mode text input
@@ -58,7 +58,13 @@ import {
 } from './pluginDetailsHelpers.js';
 import type { ViewState as ParentViewState } from './types.js';
 import { usePagination } from './usePagination.js';
-import { computePluginListMaxVisible, usePluginListExtendedKeys } from './pluginListHelpers.js';
+import {
+  applySearchBurstInput,
+  computePluginListMaxVisible,
+  recordPluginUiClick,
+  shouldIgnorePluginEnterAction,
+  usePluginListExtendedKeys,
+} from './pluginListHelpers.js';
 
 type Props = {
   error: string | null;
@@ -141,9 +147,18 @@ export function DiscoverPlugins({
   const [installCounts, setInstallCounts] = useState<Map<string, number> | null>(null);
 
   // Search state
+  const { focusManager } = useApp();
+  const searchBoxRef = useRef<DOMElement | null>(null);
+  const lastViewTransitionAtRef = useRef(0);
+  const lastEnterAcceptAtRef = useRef(0);
   const [isSearchMode, setIsSearchModeRaw] = useState(Boolean(initialSearchQuery));
+  // Official 2.1.328 #603 & #410: keep synchronous search mode ref so rapid
+  // keystroke bursts append instead of overwriting or crashing.
+  const isSearchModeRef = useRef(isSearchMode);
+  isSearchModeRef.current = isSearchMode;
   const setIsSearchMode = useCallback(
     (active: boolean) => {
+      isSearchModeRef.current = active;
       setIsSearchModeRaw(active);
       onSearchModeChange?.(active);
     },
@@ -154,17 +169,46 @@ export function DiscoverPlugins({
   }, [setIsSearchMode]);
   const {
     query: searchQuery,
+    queryRef: searchQueryRef,
     setQuery: setSearchQuery,
     cursorOffset: searchCursorOffset,
+    cursorOffsetRef: searchCursorOffsetRef,
     setCursorOffset: setSearchCursorOffset,
-    handleKeyDown: handleSearchKeyDown,
-    handlePaste: handleSearchPaste,
+    handleKeyDown: rawHandleSearchKeyDown,
+    handlePaste: rawHandleSearchPaste,
   } = useSearchInput({
     isActive: viewState === 'plugin-list' && isSearchMode && !loading,
     onExit: () => {
       setIsSearchMode(false);
     },
   });
+  // Official 2.1.327 #410: guard against malformed/burst keyboard events.
+  const handleSearchKeyDown = useCallback(
+    (event: Parameters<typeof rawHandleSearchKeyDown>[0]) => {
+      try {
+        rawHandleSearchKeyDown(event);
+      } catch (err) {
+        logForDebugging(`DiscoverPlugins search key burst ignored: ${errorMessage(err)}`);
+      }
+    },
+    [rawHandleSearchKeyDown],
+  );
+  const handleSearchPaste = useCallback(
+    (event: Parameters<typeof rawHandleSearchPaste>[0]) => {
+      try {
+        rawHandleSearchPaste(event);
+      } catch (err) {
+        logForDebugging(`DiscoverPlugins search paste burst ignored: ${errorMessage(err)}`);
+      }
+    },
+    [rawHandleSearchPaste],
+  );
+  // Restore Ink focus to SearchBox whenever search mode activates (e.g. after tab click).
+  useEffect(() => {
+    if (viewState === 'plugin-list' && isSearchMode && searchBoxRef.current) {
+      focusManager?.focus(searchBoxRef.current);
+    }
+  }, [viewState, isSearchMode, focusManager]);
   useEffect(() => {
     if (initialSearchQuery) {
       setSearchQuery(initialSearchQuery);
@@ -543,16 +587,26 @@ export function DiscoverPlugins({
   useInput(
     (input, _key) => {
       const keyIsNotCtrlOrMeta = !_key.ctrl && !_key.meta;
-      if (!isSearchMode) {
-        // Enter search mode with '/' or any printable character (including multi-char IME/dictation input, #125)
-        if (input === '/' && keyIsNotCtrlOrMeta) {
+      if (isSearchModeRef.current) {
+        // Already entered search mode in this burst before React re-rendered
+        if (!isSearchMode && keyIsNotCtrlOrMeta && input.length > 0) {
+          const next = applySearchBurstInput(searchQueryRef.current, searchCursorOffsetRef.current, input);
+          setSearchQuery(next.query);
+          setSearchCursorOffset(next.cursorOffset);
+        }
+        return;
+      }
+      // Enter search mode with '/' or any printable character (including multi-char IME/dictation input, #125)
+      if (input === '/' && keyIsNotCtrlOrMeta) {
+        setIsSearchMode(true);
+        setSearchQuery('');
+        setSearchCursorOffset(0);
+      } else if (keyIsNotCtrlOrMeta && input.length > 0 && !/^\s+$/.test(input) && input !== ' ') {
+        const next = applySearchBurstInput('', 0, input);
+        if (next.query.length > 0) {
           setIsSearchMode(true);
-          setSearchQuery('');
-          setSearchCursorOffset(0);
-        } else if (keyIsNotCtrlOrMeta && input.length > 0 && !/^\s+$/.test(input) && input !== ' ') {
-          setIsSearchMode(true);
-          setSearchQuery(input);
-          setSearchCursorOffset(input.length);
+          setSearchQuery(next.query);
+          setSearchCursorOffset(next.cursorOffset);
         }
       }
     },
@@ -587,6 +641,7 @@ export function DiscoverPlugins({
                 targetMarketplace: plugin.marketplaceName,
               });
             } else {
+              lastViewTransitionAtRef.current = Date.now();
               setSelectedPlugin(plugin);
               setViewState('plugin-details');
               setDetailsMenuIndex(0);
@@ -653,6 +708,19 @@ export function DiscoverPlugins({
       'select:accept': () => {
         if (!selectedPlugin) return;
         const action = detailsMenuOptions[detailsMenuIndex]?.action;
+        const isInstallAction = action === 'install-user' || action === 'install-project' || action === 'install-local';
+        // Official 2.1.327 #382 & 2.1.328 #617: guard install against click+Enter or held Enter.
+        if (
+          isInstallAction &&
+          shouldIgnorePluginEnterAction({
+            lastTransitionAt: lastViewTransitionAtRef.current,
+            lastAcceptAt: lastEnterAcceptAtRef.current,
+            isBusy: isInstalling,
+          })
+        ) {
+          return;
+        }
+        lastEnterAcceptAtRef.current = Date.now();
         const hasHomepage = selectedPlugin.entry.homepage;
         const githubRepo = extractGitHubRepo(selectedPlugin);
         if (action === 'install-user') {
@@ -826,6 +894,7 @@ export function DiscoverPlugins({
       {/* Search box */}
       <Box marginBottom={1}>
         <SearchBox
+          ref={searchBoxRef}
           query={searchQuery}
           isFocused={isSearchMode}
           onFocus={enterSearchMode}
@@ -879,6 +948,7 @@ export function DiscoverPlugins({
             flexDirection="column"
             marginBottom={isLast && !error ? 0 : 1}
             onClick={() => {
+              recordPluginUiClick();
               if (isSearchMode) setIsSearchMode(false);
               pagination.handleSelectionChange(actualIndex, setSelectedIndex);
             }}

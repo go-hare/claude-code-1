@@ -1,4 +1,5 @@
 import chalk from 'chalk'
+import stripAnsi from 'strip-ansi'
 import { ctrlOToExpand } from '../components/CtrlOToExpand.js'
 import { stringWidth } from '@anthropic/ink'
 import sliceAnsi from './sliceAnsi.js'
@@ -102,11 +103,14 @@ export function renderTruncatedContent(
       if (idx === -1) break
       newlineCount++
     }
+    // Official 2.1.327 (#465) HXs: measure visible length with ANSI/OSC8
+    // stripped so links and color codes don't inflate the "+N lines" count.
     const totalLinesEstimate = Math.max(
       newlineCount + 1,
-      Math.ceil(trimmedContent.length / wrapWidth),
+      Math.ceil(stripAnsi(trimmedContent).length / wrapWidth),
     )
     estimatedRemaining = Math.max(
+      1,
       remainingLines,
       totalLinesEstimate - MAX_LINES_TO_SHOW,
     )

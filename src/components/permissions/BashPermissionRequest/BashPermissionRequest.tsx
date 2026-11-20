@@ -1,5 +1,11 @@
+import { feature } from 'bun:bundle';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Byline, KeyboardShortcutHint, Text, useTheme } from '@anthropic/ink';
+import { useAppState } from '../../../state/AppState.js';
+import { planModelSupportsAutoMode } from '../../../utils/betas.js';
+import { getMainLoopModel } from '../../../utils/model/model.js';
+import { getAPIProvider } from '../../../utils/model/providers.js';
+import { isAutoModeGateEnabled } from '../../../utils/permissions/permissionSetup.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../../services/analytics/growthbook.js';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -78,8 +84,19 @@ function BashPermissionRequestInner({
   description?: string;
 }): React.ReactNode {
   const [theme] = useTheme();
+  const toolPermissionMode = useAppState(s => s.toolPermissionContext.mode);
   const requestSource = resolvePermissionRequestSource(toolUseContext as PermissionRequestSourceContext);
   const { offered, canOfferAutoMode, enableAutoMode } = useWorkflowAutoModeOffer(requestSource);
+  // Official 2.1.328 (#662): offer auto mode on supported 3P providers (Bedrock, Vertex, Foundry, etc.)
+  // when the active model supports auto mode via `planModelSupportsAutoMode`.
+  const apiProvider = getAPIProvider();
+  const canOfferAutoModeOn3P = feature('TRANSCRIPT_CLASSIFIER')
+    ? apiProvider !== 'firstParty' &&
+      (toolPermissionMode === 'default' || toolPermissionMode === 'acceptEdits') &&
+      isAutoModeGateEnabled() &&
+      planModelSupportsAutoMode(getMainLoopModel(), apiProvider)
+    : false;
+  const effectiveCanOfferAutoMode = canOfferAutoMode || canOfferAutoModeOn3P;
   const bashOfferPayload = {
     requestId: toolUseConfirm.toolUseID,
     toolName: toolUseConfirm.tool.name,
@@ -92,7 +109,7 @@ function BashPermissionRequestInner({
   const showEnableAutoModeOption = shouldShowBashAutoModeOption(
     isBashCommandWithheld(bashOfferPayload),
     isBashAlwaysAllowVetoed(bashOfferPayload),
-    canOfferAutoMode,
+    effectiveCanOfferAutoMode,
     isBashAutoModeOfferBlocked(toolUseConfirm.permissionResult),
   );
   const {
@@ -334,6 +351,8 @@ function BashPermissionRequestInner({
         <Select
           options={options}
           inlineDescriptions
+          declineValue="no"
+          stopsAtLastRow
           onChange={onSelect}
           onCancel={() => handleReject()}
           onFocus={handleFocus}

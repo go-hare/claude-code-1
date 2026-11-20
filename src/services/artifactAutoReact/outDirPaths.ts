@@ -133,6 +133,9 @@ export function isWindowsReservedPublishedSegment(segment: string): boolean {
 /**
  * densable $em/Rto portable — published path key for list_files / read_file.
  */
+/** Official 2.1.327 `f_r` (#492) — uploaded asset page address prefix. */
+export const ARTIFACT_BLOB_URL_PREFIX_RE = /^\/?_blob\//
+
 export function normalizePublishedPath(
   path: string,
 ): { key: string } | { errMsg: string } {
@@ -140,6 +143,13 @@ export function normalizePublishedPath(
     return {
       errMsg:
         'read_file requires `path` — a published path from a list_files result',
+    }
+  }
+  // Official 2.1.327 `kV` (#492): clear guidance when a `_blob/...` uploaded
+  // asset address is passed where a published file path is expected.
+  if (path.length <= 512 && ARTIFACT_BLOB_URL_PREFIX_RE.test(path)) {
+    return {
+      errMsg: `path ${JSON.stringify(path)} is the address of an uploaded asset, not a published file. An asset is read one per call by its 32-character id, the part after "_blob/": action "read_asset" with the id as \`asset_id\``,
     }
   }
   if (path.includes('\\') || path.includes('\0')) {

@@ -100,11 +100,11 @@ export function isTuiOptedOut(): boolean {
 }
 
 const USAGE_TEXT = [
-  'Usage: /tui [subcommand]',
+  'Usage: /tui [classic|fullscreen|status|on|off|toggle]',
   '',
   '  (no args)   Toggle flicker-free TUI mode (alternate screen buffer)',
-  '  on          Enable TUI mode',
-  '  off         Disable TUI mode',
+  '  classic     Use the classic (non-fullscreen) renderer (alias: default, off)',
+  '  fullscreen  Use the fullscreen renderer (alias: on)',
   '  status      Show current TUI mode state',
   '',
   'TUI mode uses the ANSI alternate screen buffer (\\x1b[?1049h) so the',
@@ -617,16 +617,15 @@ export async function callTui(
 const tuiCommand: Command = {
   type: 'local-jsx',
   name: 'tui',
-  description:
-    'Manage flicker-free TUI mode. Open actions or run: status, on, off, toggle',
+  description: 'Set the terminal UI renderer (classic | fullscreen)',
   isHidden: false,
   isEnabled: () => !getIsNonInteractiveSession(),
-  argumentHint: '[status|on|off|toggle]',
+  argumentHint: '[classic|fullscreen]',
   bridgeSafe: true,
   getBridgeInvocationError: args =>
     args.trim()
       ? undefined
-      : 'Use /tui status/on/off/toggle over Remote Control.',
+      : 'Use /tui classic/fullscreen/status/on/off/toggle over Remote Control.',
   load: () => import('./panel.js'),
 }
 

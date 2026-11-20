@@ -63,7 +63,7 @@ describe('densable 2.1.289 Config Esc/search', () => {
   test('first Esc in search clears then exits without closing the pane', () => {
     expect(configSrc).toContain("if (e.key === 'escape')")
     expect(configSrc).toContain('setSearchQuery')
-    expect(configSrc).toContain('setIsSearchMode(false)')
+    expect(configSrc).toContain('setSearchModeSync(false)')
     expect(configSrc).toContain("e.key === '/' ? '' : e.key")
   })
 })
@@ -279,7 +279,7 @@ describe('densable 2.1.289 Usage, Stats, and MCP panels', () => {
 
   test('MCPSettings empty state and MCPListPanel unused/suppressed connectors', () => {
     expect(mcpSettingsSrc).toContain(
-      'No MCP servers configured. Run `claude doctor` if this is unexpected — it lists MCP config files that failed validation. Otherwise, run `claude mcp --help` or visit https://code.claude.com/docs/en/mcp to learn more.',
+      "No MCP servers loaded. If you just added one, restart Claude Code. If you declined a project's server, run `claude mcp reset-project-choices` first. `claude doctor` finds config problems. To add one, run `claude mcp --help` or see https://code.claude.com/docs/en/mcp",
     )
     expect(mcpListPanelSrc).toContain("label: 'Show unused connectors'")
     expect(mcpListPanelSrc).toContain('hidden — same URL as your server')

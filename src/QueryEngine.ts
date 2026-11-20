@@ -63,6 +63,34 @@ import { transformCompletedAssistantMessage } from './utils/messageDisplayTransf
 import type { OrphanedPermission } from './types/textInputTypes.js'
 import { createAbortController } from './utils/abortController.js'
 import { getCwd } from './utils/cwd.js'
+import { isEnvTruthy } from './utils/envUtils.js'
+
+/**
+ * Official 2.1.328 (#647): avoid retaining high-volume ephemeral `progress`
+ * messages (such as `bash_progress`, `tool_progress`, `agent_progress`,
+ * `mcp_progress`, `hook_progress`) inside `QueryEngine.mutableMessages`,
+ * preventing unbounded memory growth and O(N) scan slowdowns in long SDK /
+ * Desktop sessions running slow commands or tools.
+ */
+export function shouldRetainProgressInMutableMessages(msg: {
+  type?: string
+  data?: { type?: string }
+}): boolean {
+  if (msg.type !== 'progress') return true
+  const progressType = msg.data?.type
+  if (
+    progressType === 'bash_progress' ||
+    progressType === 'tool_progress' ||
+    progressType === 'agent_progress' ||
+    progressType === 'mcp_progress' ||
+    progressType === 'hook_progress' ||
+    progressType === 'waiting_for_task' ||
+    progressType === undefined
+  ) {
+    return false
+  }
+  return true
+}
 import { logForDebugging } from './utils/debug.js'
 import { isBareMode } from './utils/envUtils.js'
 import { getFastModeState } from './utils/fastMode.js'
@@ -1138,10 +1166,15 @@ export class QueryEngine {
       }
     }
 
-    // Official JNs — `Ie=hasHandled?void 0:F`; F is constructor config only.
-    const deferredToolUse = this.hasHandledDeferredToolUse
-      ? undefined
-      : configDeferredToolUse
+    // Official JNs + 2.1.328 (#545): skip resuming hook-deferred tool calls
+    // when CLAUDE_CODE_DISABLE_DEFERRED_TOOL_RESUME is truthy.
+    const deferredToolResumeDisabled = isEnvTruthy(
+      process.env.CLAUDE_CODE_DISABLE_DEFERRED_TOOL_RESUME,
+    )
+    const deferredToolUse =
+      this.hasHandledDeferredToolUse || deferredToolResumeDisabled
+        ? undefined
+        : configDeferredToolUse
     if (deferredToolUse) {
       this.hasHandledDeferredToolUse = true
       const { clearTurnAttributionKey } = await import(
@@ -1735,6 +1768,31 @@ export class QueryEngine {
       promptRenderEpoch,
       modelFacts,
       stopHookActive: options?.stopHookActive,
+      // Official 2.1.328 #555: rebuild dynamic systemPrompt after autocompact /
+      // reactive compact the same way `/compact` does.
+      renderSystemPrompt: async ctx => {
+        const { defaultSystemPrompt: freshDefault } =
+          await fetchSystemPromptParts({
+            tools: ctx.options.tools,
+            mainLoopModel: ctx.options.mainLoopModel,
+            additionalWorkingDirectories: Array.from(
+              ctx
+                .getAppState()
+                .toolPermissionContext.additionalWorkingDirectories.keys(),
+            ),
+            mcpClients: ctx.options.mcpClients,
+            customSystemPrompt: customPrompt,
+          })
+        const rebuilt = asSystemPrompt([
+          ...(customPrompt !== undefined ? [customPrompt] : freshDefault),
+          ...(memoryMechanicsPrompt ? [memoryMechanicsPrompt] : []),
+          ...(chromeResolvedAppend ? [chromeResolvedAppend] : []),
+        ])
+        return {
+          systemPrompt: rebuilt,
+          promptRenderEpoch: getPromptRenderEpoch(),
+        }
+      },
     })
     try {
       while (true) {
@@ -1969,15 +2027,18 @@ export class QueryEngine {
           }
           case 'progress': {
             const msg = message as Message
-            this.mutableMessages.push(msg)
-            // Record inline so the dedup loop in the next ask() call sees it
-            // as already-recorded. Without this, deferred progress interleaves
-            // with already-recorded tool_results in mutableMessages, and the
-            // dedup walk freezes startingParentUuid at the wrong message —
-            // forking the chain and orphaning the conversation on resume.
-            if (persistSession) {
-              messages.push(msg)
-              await recordTranscript(messages)
+            // Official 2.1.328 (#647): do NOT accumulate ephemeral progress
+            // messages (e.g. bash_progress / tool_progress / agent_progress)
+            // in `this.mutableMessages` — long SDK/desktop sessions running
+            // slow commands or tools would otherwise suffer unbounded O(N)
+            // memory growth and per-turn scan latency. Still yield to stream
+            // consumers and persist only non-ephemeral progress if required.
+            if (shouldRetainProgressInMutableMessages(msg)) {
+              this.mutableMessages.push(msg)
+              if (persistSession) {
+                messages.push(msg)
+                await recordTranscript(messages)
+              }
             }
             yield* normalizeMessage(msg)
             break

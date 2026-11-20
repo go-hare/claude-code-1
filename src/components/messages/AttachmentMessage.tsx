@@ -392,8 +392,9 @@ export function AttachmentMessage({ attachment, addMargin, verbose, isTranscript
       );
     }
     case 'hook_non_blocking_error': {
-      // Stop hooks are rendered as a summary in SystemStopHookSummaryMessage
-      if (attachment.hookEvent === 'Stop' || attachment.hookEvent === 'SubagentStop') {
+      // Official 2.1.328 (@318299679): Stop hooks are rendered as a summary in
+      // SystemStopHookSummaryMessage; SubagentStop non-blocking errors render here.
+      if (attachment.hookEvent === 'Stop') {
         return null;
       }
       // Official 2.1.326 #53 & #250 (`Wm` + `wx` + `wo`): prefer real error line over

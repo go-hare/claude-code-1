@@ -7,7 +7,7 @@
  */
 import figures from 'figures';
 import * as React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, NoSelect, Text } from '@anthropic/ink';
 import { AgentInboundOverflow } from './AgentInboundOverflow.js';
 import { CollapsedPeerMessage } from './CollapsedPeerMessage.js';
 
@@ -38,10 +38,14 @@ export function AgentInboundMessage({
   }
   return (
     <Box flexDirection="column" marginTop={addMargin ? 1 : 0} width="100%">
-      <Text dimColor>
-        <Text aria-hidden>{figures.pointerSmall} </Text>
-        Message from {name}
-      </Text>
+      <Box flexDirection="row">
+        <NoSelect fromLeftEdge minWidth={2}>
+          <Text aria-hidden dimColor>
+            {figures.pointerSmall}
+          </Text>
+        </NoSelect>
+        <Text dimColor>Message from {name}</Text>
+      </Box>
       <Box paddingLeft={2}>
         <Text wrap="wrap">{body}</Text>
       </Box>

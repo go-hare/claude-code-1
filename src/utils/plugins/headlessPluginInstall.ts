@@ -16,6 +16,10 @@ import { withDiagnosticsTiming } from '../diagLogs.js'
 import { getFsImplementation } from '../fsOperations.js'
 import { logError } from '../log.js'
 import {
+  getInFlightManagedExternalPluginFetch,
+  migrateFromEnabledPlugins,
+} from './installedPluginsManager.js'
+import {
   clearMarketplacesCache,
   getDeclaredMarketplaces,
   loadKnownMarketplacesConfig,
@@ -34,6 +38,92 @@ import {
 } from './zipCache.js'
 import { syncMarketplacesToZipCache } from './zipCacheAdapters.js'
 
+/** Official 2.1.328 `b`/`D` (#644) — max 30s drain so short runs finish recording fresh git-marketplace plugins. */
+export const HEADLESS_PLUGIN_RECORD_DRAIN_MS = 30_000
+
+let headlessInstallPass: Promise<void> | undefined
+let activeHeadlessRecordPromise: Promise<void> | undefined
+
+/**
+ * Official 2.1.328 (#644): wait up to `timeoutMs` (default 30s) for any
+ * in-flight headless enabled-plugin record/fetch pass to complete before
+ * exiting a short `claude -p`, SDK, or Claude Desktop session.
+ */
+export async function waitForHeadlessPluginInstallDrain(
+  timeoutMs: number = HEADLESS_PLUGIN_RECORD_DRAIN_MS,
+): Promise<boolean> {
+  const pending: Promise<unknown>[] = []
+  if (headlessInstallPass) pending.push(headlessInstallPass)
+  if (activeHeadlessRecordPromise) pending.push(activeHeadlessRecordPromise)
+  const bgFetch = getInFlightManagedExternalPluginFetch()
+  if (bgFetch) pending.push(bgFetch)
+  if (pending.length === 0) return true
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let completedInTime = false
+  try {
+    await Promise.race([
+      Promise.allSettled(pending).then(() => {
+        completedInTime = true
+      }),
+      new Promise<void>(resolve => {
+        timer = setTimeout(resolve, timeoutMs)
+        timer.unref?.()
+      }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+  return completedInTime
+}
+
+/**
+ * Official 2.1.328 `L` (#644): record enabled plugins immediately after fresh
+ * git marketplaces reconcile in headless/SDK/Desktop sessions, holding a
+ * bounded 30s drain so a short run does not exit before recording finishes.
+ */
+async function recordEnabledPluginsForHeadless(
+  fetchMissing: boolean,
+): Promise<void> {
+  if (process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC) {
+    logForDebugging(
+      'installPluginsForHeadless: not recording enabled plugins: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC is set; the next start records them',
+      { level: 'warn' },
+    )
+    return
+  }
+  if (process.env.CLAUDE_CODE_SYNC_PLUGIN_INSTALL) {
+    logForDebugging(
+      'installPluginsForHeadless: not recording enabled plugins: CLAUDE_CODE_SYNC_PLUGIN_INSTALL is set, so a full load follows',
+    )
+    return
+  }
+  logForDebugging('installPluginsForHeadless: recording enabled plugins')
+  const recordPromise = withDiagnosticsTiming(
+    'headless_enabled_plugins_record',
+    () => migrateFromEnabledPlugins({ fetchMissing }),
+  ).catch(err => {
+    logForDebugging(
+      `installPluginsForHeadless: failed to record enabled plugins: ${err instanceof Error ? err.message : String(err)}`,
+      { level: 'error' },
+    )
+  })
+  activeHeadlessRecordPromise = recordPromise
+  const unregisterDrain = registerCleanup(() =>
+    waitForHeadlessPluginInstallDrain(HEADLESS_PLUGIN_RECORD_DRAIN_MS).then(
+      () => undefined,
+    ),
+  )
+  try {
+    await recordPromise
+  } finally {
+    if (activeHeadlessRecordPromise === recordPromise) {
+      activeHeadlessRecordPromise = undefined
+    }
+    unregisterDrain()
+  }
+}
+
 /**
  * Install plugins for headless/CCR mode.
  *
@@ -42,7 +132,23 @@ import { syncMarketplacesToZipCache } from './zipCacheAdapters.js'
  *
  * @returns true if any plugins were installed (caller should refresh MCP)
  */
-export async function installPluginsForHeadless(): Promise<boolean> {
+export function installPluginsForHeadless(opts?: {
+  /** Official 2.1.328 (#643/#644): fetch missing managed external git plugins in background. Default true. */
+  fetchMissing?: boolean
+}): Promise<boolean> {
+  const run = (headlessInstallPass ?? Promise.resolve()).then(() =>
+    runInstallPluginsForHeadless(opts),
+  )
+  headlessInstallPass = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
+}
+
+async function runInstallPluginsForHeadless(opts?: {
+  fetchMissing?: boolean
+}): Promise<boolean> {
   const zipCacheMode = isPluginZipCacheEnabled()
   logForDebugging(
     `installPluginsForHeadless: starting${zipCacheMode ? ' (zip cache mode)' : ''}`,
@@ -155,6 +261,10 @@ export async function installPluginsForHeadless(): Promise<boolean> {
       // from the newly-materialized marketplaces.
       if (marketplacesChanged > 0) {
         clearMarketplacesCache()
+        // Official 2.1.328 (#644): record enabled plugins right after fresh git
+        // marketplaces reconcile (and kick off background git fetches for #643)
+        // so managed-settings plugins load on the next/current session quickly.
+        await recordEnabledPluginsForHeadless(opts?.fetchMissing !== false)
         clearPluginCache('headlessPluginInstall: marketplaces reconciled')
         pluginsChanged = true
       }

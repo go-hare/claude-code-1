@@ -354,15 +354,19 @@ export class StylePool {
   }
   withSelectionBg(baseId: number): number {
     const bg = this.selectionBgCode
-    if (bg === null) return this.withInverse(baseId)
     let id = this.selectionBgCache.get(baseId)
     if (id === undefined) {
-      // Keep everything except bg (49m) and inverse (27m). Fg, bold, dim,
-      // italic, underline, strikethrough all preserved.
+      // Official 2.1.327 (#451): strip existing bg (49m) and inverse (27m);
+      // when bg is null (16-color / ANSI fallback), also strip fg (39m) before
+      // pushing SGR 7 inverse so selection highlight stays readable on 16-color
+      // themes instead of clashing with explicit ANSI foreground colors.
       const kept = this.get(baseId).filter(
-        c => c.endCode !== '\x1b[49m' && c.endCode !== '\x1b[27m',
+        c =>
+          c.endCode !== '\x1b[49m' &&
+          c.endCode !== '\x1b[27m' &&
+          (bg !== null || c.endCode !== '\x1b[39m'),
       )
-      kept.push(bg)
+      kept.push(bg ?? INVERSE_CODE)
       id = this.intern(kept)
       this.selectionBgCache.set(baseId, id)
     }

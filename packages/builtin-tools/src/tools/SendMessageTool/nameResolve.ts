@@ -30,6 +30,10 @@ export type PeerCandidate = {
   ref: string
   /** Local sessions that mirror a bridge id (for claimed-locally check) */
   bridgeSessionId?: string | null
+  /** Official 2.1.328 (#588): untitled or `@`-containing RC/cloud sessions require `[ref]` to resolve. */
+  tokenOnly?: boolean
+  /** Environment kind (e.g. `'anthropic_cloud'` / `'bridge'`) when known from account listing. */
+  environmentKind?: string
 }
 
 export type NameResolveResult =
@@ -287,6 +291,7 @@ export function resolvePeerByName(args: {
   }
 
   const byKey = candidates.filter(c => c.key === key)
+  const bareByKey = byKey.filter(c => !c.tokenOnly)
 
   if (parsed) {
     const sameNameHits = byKey.filter(c =>
@@ -305,7 +310,9 @@ export function resolvePeerByName(args: {
       }
     }
     // Global: full printed ref only — never prefix-steal across names.
-    const globalExact = candidates.filter(c => c.ref === parsed.ref)
+    const globalExact = candidates.filter(
+      c => c.ref === parsed.ref || listingRefMatchesCandidate(c, parsed.ref),
+    )
     if (globalExact.length === 1) {
       return { kind: 'ok', candidate: globalExact[0]!, ...truncatedFlag }
     }
@@ -316,8 +323,20 @@ export function resolvePeerByName(args: {
     }
   }
 
+  // Official 2.1.328 (#588): token-only sessions (untitled or containing `@` → `(at)`)
+  // require explicit `name [ref]` addressing; guide the caller with the ref list.
+  if (bareByKey.length === 0 && byKey.length > 0) {
+    return {
+      kind: 'ambiguous',
+      candidates: byKey.slice(0, CLOSEST_NAME_CAP),
+      matchedBy: 'exact',
+      total: byKey.length,
+      ...truncatedFlag,
+    }
+  }
+
   // densable cKp: ambiguous → prefer live pin
-  if (byKey.length === 0) {
+  if (bareByKey.length === 0) {
     // pin-only recovery: if pin still matches a candidate under another listing name
     if (pin) {
       const pinned = candidates.find(c => c.id === pin.id)
@@ -326,7 +345,10 @@ export function resolvePeerByName(args: {
       }
     }
     // densable yRw — after exact miss, before tTl not-found
-    const prefix = findPrefixMatchingPeerCandidates(to, candidates)
+    const prefix = findPrefixMatchingPeerCandidates(
+      to,
+      candidates.filter(c => !c.tokenOnly),
+    )
     if (prefix.length > 0) {
       return {
         kind: 'ambiguous',
@@ -348,8 +370,8 @@ export function resolvePeerByName(args: {
     }
   }
 
-  if (byKey.length === 1) {
-    const only = byKey[0]!
+  if (bareByKey.length === 1) {
+    const only = bareByKey[0]!
     // If pin points elsewhere and is still live, refuse silent swap
     if (pin && pin.id !== only.id) {
       const stillLive = candidates.some(c => c.id === pin.id)
@@ -365,12 +387,12 @@ export function resolvePeerByName(args: {
 
   // ambiguous
   if (pin) {
-    const pinned = byKey.find(c => c.id === pin.id)
+    const pinned = bareByKey.find(c => c.id === pin.id)
     if (pinned) {
       return {
         kind: 'ok',
         candidate: pinned,
-        sameNamedSiblings: byKey.length - 1,
+        sameNamedSiblings: bareByKey.length - 1,
         ...truncatedFlag,
       }
     }
@@ -378,9 +400,9 @@ export function resolvePeerByName(args: {
 
   return {
     kind: 'ambiguous',
-    candidates: byKey.slice(0, CLOSEST_NAME_CAP),
+    candidates: bareByKey.slice(0, CLOSEST_NAME_CAP),
     matchedBy: 'exact',
-    total: byKey.length,
+    total: bareByKey.length,
     ...truncatedFlag,
     ...(pin &&
     (pinKind === 'remote-control' || pinKind === 'cloud') &&
@@ -525,6 +547,7 @@ export function buildPeerCandidates(args: {
   accountBridgePeers?: Array<{
     id: string
     title: string | null
+    environmentKind?: string
   }>
   /**
    * densable pYb extras — teammate / subagent / cloud-session identities that
@@ -600,13 +623,17 @@ export function buildPeerCandidates(args: {
       continue
     }
     seen.add(`bridge-session:${id}`)
-    const name = (row.title?.trim() || 'untitled').toString()
+    const rawTitle = row.title?.trim() ?? ''
+    const hasAtOrEmpty = !rawTitle || rawTitle.includes('@') || rawTitle === '*'
+    const name = rawTitle ? rawTitle.replaceAll('@', '(at)') : 'untitled'
     raw.push({
       name,
       key: normalizeAgentName(name),
       kind: 'bridge-session',
       id,
       address: `bridge:${id}`,
+      ...(hasAtOrEmpty ? { tokenOnly: true } : {}),
+      ...(row.environmentKind ? { environmentKind: row.environmentKind } : {}),
     })
   }
 

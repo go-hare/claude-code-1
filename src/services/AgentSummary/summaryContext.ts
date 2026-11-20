@@ -4,6 +4,195 @@ import type { Message } from '../../types/message.js'
 
 export const MAX_SUMMARY_CONTEXT_MESSAGES = 120
 export const MAX_SUMMARY_CONTEXT_CHARS = 200_000
+export const SHORT_NOTES_MAX_MESSAGES = 60
+export const SHORT_NOTES_TOKEN_BUDGET = 1_500
+
+function escapeXmlNote(text: string): string {
+  return text
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+}
+
+function normalizeAndClipNote(raw: string, maxChars: number): string {
+  const collapsed = raw.trim().replace(/\s+/g, ' ')
+  if (!collapsed) return ''
+  const clipped =
+    collapsed.length > maxChars ? `${collapsed.slice(0, maxChars)}…` : collapsed
+  return escapeXmlNote(clipped)
+}
+
+function estimateShortNotesTokens(text: string): number {
+  let nonAscii = 0
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) > 127) nonAscii++
+  }
+  return (text.length - nonAscii) / 3 + nonAscii
+}
+
+/**
+ * Official 2.1.327/2.1.328 `Ca()` (#526, #675): build compact XML-escaped
+ * short notes (`<task>`, `<recent_steps>`, `<started_not_finished>`) from the
+ * recent messages of a subagent instead of sending its full conversation.
+ */
+export function buildShortSummaryNotes(opts: {
+  task: string
+  messages: Message[]
+  maxTokens?: number
+}): string {
+  const maxTokens = opts.maxTokens ?? SHORT_NOTES_TOKEN_BUDGET
+  const tail = opts.messages.slice(-SHORT_NOTES_MAX_MESSAGES)
+  const lastBoundaryIdx = tail.findLastIndex(
+    m =>
+      m.type === 'system' &&
+      'subtype' in m &&
+      (m as { subtype?: string }).subtype === 'compact_boundary',
+  )
+  const windowMessages =
+    lastBoundaryIdx >= 0 ? tail.slice(lastBoundaryIdx + 1) : tail
+
+  type NoteEntry = {
+    text: string
+    call?: 'open' | 'done' | 'failed'
+    responseId?: string
+  }
+  const entries: NoteEntry[] = []
+  const openCalls = new Map<string, NoteEntry>()
+  let lastResponseId: string | undefined
+  let sawUserPromptSinceLastAssistant = false
+
+  for (const msg of windowMessages) {
+    if (msg.type === 'user') {
+      const content = msg.message?.content
+      const blocks = Array.isArray(content) ? content.filter(Boolean) : []
+      if (
+        !msg.isMeta &&
+        !blocks.some(b => typeof b === 'object' && b.type === 'tool_result') &&
+        (typeof content === 'string' ||
+          blocks.some(b => typeof b === 'object' && b.type === 'text'))
+      ) {
+        sawUserPromptSinceLastAssistant = true
+      }
+      for (const block of blocks) {
+        if (
+          typeof block === 'object' &&
+          block.type === 'tool_result' &&
+          'tool_use_id' in block &&
+          typeof block.tool_use_id === 'string'
+        ) {
+          const entry = openCalls.get(block.tool_use_id)
+          if (entry) {
+            entry.call =
+              'is_error' in block && block.is_error === true ? 'failed' : 'done'
+          }
+        }
+      }
+    } else if (
+      msg.type === 'assistant' &&
+      !msg.isApiErrorMessage &&
+      Array.isArray(msg.message?.content)
+    ) {
+      const respId = msg.message.id ?? msg.uuid
+      lastResponseId = respId
+      sawUserPromptSinceLastAssistant = false
+      for (const block of msg.message.content) {
+        if (!block || typeof block !== 'object') continue
+        if (block.type === 'text' && typeof block.text === 'string') {
+          const text = normalizeAndClipNote(block.text, 300)
+          if (text) entries.push({ text: `said: ${text}`, responseId: respId })
+        } else if (
+          block.type === 'tool_use' &&
+          typeof block.name === 'string' &&
+          typeof block.id === 'string'
+        ) {
+          const input =
+            typeof block.input === 'object' && block.input !== null
+              ? (block.input as Record<string, unknown>)
+              : {}
+          const desc =
+            typeof input.description === 'string'
+              ? input.description
+              : typeof input.command === 'string'
+                ? input.command
+                : typeof input.file_path === 'string'
+                  ? input.file_path
+                  : typeof input.pattern === 'string'
+                    ? input.pattern
+                    : ''
+          const summary = normalizeAndClipNote(
+            desc ? `${block.name} - ${desc}` : block.name,
+            160,
+          )
+          if (summary) {
+            const entry: NoteEntry = {
+              text: summary,
+              call: 'open',
+              responseId: respId,
+            }
+            entries.push(entry)
+            openCalls.set(block.id, entry)
+          }
+        }
+      }
+    }
+  }
+
+  const lines: Array<{ isOpen: boolean; text: string }> = []
+  for (const entry of entries) {
+    if (entry.call === undefined) {
+      lines.push({ isOpen: false, text: entry.text })
+    } else if (entry.call !== 'open') {
+      lines.push({
+        isOpen: false,
+        text: `did: ${entry.text}${entry.call === 'failed' ? ' (failed)' : ''}`,
+      })
+    } else if (
+      entry.responseId === lastResponseId &&
+      !sawUserPromptSinceLastAssistant
+    ) {
+      lines.push({ isOpen: true, text: entry.text })
+    }
+  }
+  if (lines.length === 0) return ''
+
+  let taskXml = ''
+  for (let limit = 800; limit >= 50; limit = Math.floor(limit / 2)) {
+    const clippedTask = normalizeAndClipNote(opts.task, limit)
+    const candidate = clippedTask ? `<task>\n${clippedTask}\n</task>` : ''
+    if (estimateShortNotesTokens(candidate) <= maxTokens / 2) {
+      taskXml = candidate
+      break
+    }
+  }
+
+  let remaining = maxTokens - estimateShortNotesTokens(taskXml)
+  let startIdx = lines.length - 1
+  for (let i = lines.length - 1; i >= 0; i--) {
+    remaining -= estimateShortNotesTokens(lines[i]?.text ?? '')
+    if (remaining < 0) break
+    startIdx = i
+  }
+  const kept = lines.slice(startIdx)
+  const formatTag = (tag: string, items: typeof kept): string =>
+    items.length > 0
+      ? `<${tag}>\n${items.map(item => item.text).join('\n')}\n</${tag}>`
+      : ''
+
+  return [
+    taskXml,
+    formatTag(
+      'recent_steps',
+      kept.filter(item => !item.isOpen),
+    ),
+    formatTag(
+      'started_not_finished',
+      kept.filter(item => item.isOpen),
+    ),
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
 
 function estimateJsonChars(
   value: unknown,

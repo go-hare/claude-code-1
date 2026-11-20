@@ -117,6 +117,23 @@ export function buildWorkflowSizeGuidelineChangeMessage(
   return `The user has configured a workflow size guideline in /config: ${formatWorkflowSizeGuidelineLabel(guideline)}`
 }
 
+/**
+ * Official 2.1.328 (#583): Workflow guidance for Code Mode — tells Claude to
+ * run workflows only when the user asks, and surfaces the workflow size
+ * configured in `/config` (or settings).
+ */
+export function buildCodeModeWorkflowGuidance(
+  globalConfigValue?: WorkflowSizeGuideline | null,
+): string {
+  const { size } = resolveSessionWorkflowSizeGuideline(globalConfigValue)
+  const cap = workflowSizeGuidelineToAgentCap(size)
+  const sizeNote =
+    size === 'unrestricted' || cap === undefined
+      ? 'The user has set the workflow size guideline to unrestricted.'
+      : `Workflow size guideline from /config: "${size}" (aim for fewer than ${cap} agents).`
+  return `Run workflows only when the user asks for a workflow. ${sizeNote}`
+}
+
 export function buildWorkflowSizeGuidelineUserChangeMessage(
   guideline: WorkflowSizeGuideline,
 ): string {

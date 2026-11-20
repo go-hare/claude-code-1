@@ -49,6 +49,12 @@ export type UseSelectStateProps<T> = {
    * densable inner oo `moreRowLines` / bn `markerLines`.
    */
   moreRowLines?: boolean
+
+  /** Official 2.1.327 (#500): stop Down arrow at last row instead of wrapping. */
+  stopsAtLastRow?: boolean
+
+  /** Stop Up arrow at first row instead of wrapping. */
+  holdsFirstRow?: boolean
 }
 
 export type SelectState<T> = {
@@ -169,6 +175,8 @@ export function useSelectState<T>({
   onFocus,
   focusValue,
   moreRowLines,
+  stopsAtLastRow,
+  holdsFirstRow,
 }: UseSelectStateProps<T>): SelectState<T> {
   const [value, setValue] = useState<T | undefined>(defaultValue)
 
@@ -179,6 +187,8 @@ export function useSelectState<T>({
     onFocus,
     focusValue,
     moreRowLines,
+    stopsAtLastRow,
+    holdsFirstRow,
   })
 
   // densable Ovl: setValue(getFocusedValue()) — not closed-over focusedValue

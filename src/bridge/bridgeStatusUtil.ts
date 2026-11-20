@@ -158,6 +158,46 @@ export const IDLE_PROJECT_HINT =
  */
 export const FAILED_FOOTER_TEXT = 'Run /remote-control to retry'
 
+/** Official 2.1.328 (#584): non-retryable Remote Control failure details. */
+export const BRIDGE_MALFORMED_RESPONSE_HINT =
+  'Remote Control got an unexpected server response — try again after updating Claude Code'
+export const BRIDGE_SESSION_NOT_BRIDGE_HINT =
+  "session can't use Remote Control. Start a new one."
+export const BRIDGE_SIGNATURE_WANTED_HINT =
+  "the session refused a request that only the computer it is bound to can sign, so signing in again won't fix it"
+
+/**
+ * Official 2.1.328 (#584) `RGn`: return true when the disconnect/failure detail
+ * already embeds a user action OR indicates a session that cannot reconnect via
+ * `/remote-control`, so callers suppress appending `" — run /remote-control to reconnect"`.
+ */
+export function isNonRetryableBridgeDetail(
+  detail: string | undefined,
+): boolean {
+  if (!detail) return false
+  return (
+    detail.includes('/login') ||
+    detail.includes('/remote-control') ||
+    detail.includes('restart') ||
+    detail.includes('policy') ||
+    detail.includes('update') ||
+    detail.includes(BRIDGE_MALFORMED_RESPONSE_HINT) ||
+    detail.includes(BRIDGE_SESSION_NOT_BRIDGE_HINT) ||
+    detail.includes(BRIDGE_SIGNATURE_WANTED_HINT)
+  )
+}
+
+/**
+ * Official 2.1.328 (#584): format the Remote Control disconnect message,
+ * omitting the reconnect hint when the session cannot reconnect.
+ */
+export function formatBridgeDisconnectMessage(detail?: string): string {
+  const suppressReconnect = isNonRetryableBridgeDetail(detail)
+  return `Remote Control disconnected${detail ? ` — ${detail}` : ''}${
+    suppressReconnect ? '' : ' — run /remote-control to reconnect'
+  }`
+}
+
 /** densable 2.1.243 #58 `_` — occupancy notice prefix (also the de-dupe key). */
 export const REMOTE_CONTROL_NOT_STARTED_HERE = 'Remote Control not started here'
 

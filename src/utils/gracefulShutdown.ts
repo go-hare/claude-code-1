@@ -26,6 +26,8 @@ import {
   NATIVE_HISTORY_BOTTOM_CHROME,
   RESET_SCROLL_REGION,
   cursorPosition,
+  flushNonBlockingStdout,
+  printsUnknownSequences,
   supportsTabStatus,
   wrapForMultiplexer,
 } from '@anthropic/ink'
@@ -97,6 +99,11 @@ export function cleanupTerminalModes(): void {
 
   try {
     const inst = instances.get(process.stdout)
+    // Official 2.1.327 (#448/#449) b2: flush queued non-blocking stdout writes
+    // and retain the instance reference so forceExit can still drainStdin even
+    // after detachForShutdown/unmount (e.g. Ctrl+C right after ← handoff or trust).
+    flushNonBlockingStdout()
+    instances.restoredAtExit = inst ?? instances.restoredAtExit
     // Disable mouse tracking FIRST, before the React unmount tree-walk.
     // The terminal needs a round-trip to process this and stop sending
     // events; doing it now (not after unmount) gives that time while
@@ -124,15 +131,18 @@ export function cleanupTerminalModes(): void {
     // unsubscribes from signal-exit, and writes 1049l exactly once.
     // Sticky-main (Axc frameSink) is not alt-screen; still unmount so
     // useAxcFrameSink cleanup / Axc.restore() can send RESET_SCROLL_REGION.
+    let exitedAltScreenViaUnmount = false
     if (inst?.isAltScreenActive || inst?.frameSink) {
       const wasAlt = Boolean(inst.isAltScreenActive)
       try {
         inst.unmount()
+        if (wasAlt) exitedAltScreenViaUnmount = true
       } catch {
         // Reconciler/render threw — fall back so printResumeHint still
         // hits the main buffer / DECSTBM is cleared.
         if (wasAlt) {
           writeSync(1, exitAltScreenSequence())
+          exitedAltScreenViaUnmount = true
         } else {
           // densable Axc.restore sequence (sync). Bare CSI r homes the cursor.
           const rows = process.stdout.rows || 24
@@ -158,6 +168,18 @@ export function cleanupTerminalModes(): void {
     const modesReset = inst?.modes.resetAll() ?? ''
     if (modesReset) {
       writeSync(1, modesReset)
+    }
+    // Official 2.1.327 (#448/#449) Ec: unconditionally emit EXIT_ALT_SCREEN
+    // when neither unmount nor modesReset emitted it (and terminal does not
+    // print unknown sequences literally). Covers Ctrl+C during alt-screen
+    // handoff (← agents view) or right after the trust dialog before REPL mounts.
+    const exitAlt = exitAltScreenSequence()
+    if (
+      !exitedAltScreenViaUnmount &&
+      !modesReset.includes(exitAlt) &&
+      !printsUnknownSequences()
+    ) {
+      writeSync(1, exitAlt)
     }
     writeSync(1, G0_USASCII)
     if (!modesReset.includes(RESET_SURFACE_COLORS)) {
@@ -575,7 +597,7 @@ function forceExit(exitCode: number): never {
   // class method knows about it; the standalone function defaults to
   // process.stdin which would early-return on isTTY=false.
   try {
-    instances.get(process.stdout)?.drainStdin()
+    ;(instances.get(process.stdout) ?? instances.restoredAtExit)?.drainStdin()
   } catch {
     // Terminal may be gone (SIGHUP). Ignore — we are about to exit.
   }
@@ -588,7 +610,14 @@ function forceExit(exitCode: number): never {
       throw e
     }
     // Fall back to SIGKILL which doesn't try to flush anything.
-    process.kill(process.pid, 'SIGKILL')
+    // Official 2.1.327 (#411): Linux LSM/seccomp may block self-signalling with
+    // EPERM; fall back to process.exitCode rather than crashing with EPERM.
+    try {
+      process.kill(process.pid, 'SIGKILL')
+    } catch {
+      process.exitCode = exitCode
+      return undefined as never
+    }
   }
   // In tests, process.exit may be mocked to return instead of exiting.
   // In production, we should never reach here.
@@ -1184,6 +1213,20 @@ export async function gracefulShutdown(
       await drainBackgroundShutdownWork()
     } catch {
       // best-effort
+    }
+  }
+
+  // Official 2.1.328 #644: in headless/non-interactive exit, wait (with
+  // bounded timeout) for any in-flight headless enabled-plugin record/fetch
+  // pass to drain before killing child processes and exiting.
+  if (getIsNonInteractiveSession()) {
+    try {
+      const { waitForHeadlessPluginInstallDrain } = await import(
+        './plugins/headlessPluginInstall.js'
+      )
+      await waitForHeadlessPluginInstallDrain()
+    } catch {
+      // best-effort — never block shutdown
     }
   }
 

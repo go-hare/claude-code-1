@@ -53,6 +53,7 @@ import {
   formatError,
   formatZodValidationError,
 } from '../../utils/toolErrors.js'
+import { mcpInfoFromString } from '../mcp/mcpStringUtils.js'
 import { isMcpTool } from '../mcp/utils.js'
 import type { McpServerType, MessageUpdateLazy } from './toolExecution.js'
 
@@ -66,6 +67,45 @@ export const ASK_USER_QUESTION_REWRITE_DROPPED_MESSAGE =
 
 export const EXIT_PLAN_MODE_REWRITE_DROPPED_MESSAGE =
   "A hook tried to change the plan, which it may not do in this session. Claude read the plan without the hook's change."
+
+export const CLAUDE_DOCS_REWRITE_DROPPED_MESSAGE =
+  "A hook tried to change a reply from Claude Docs, which it may not do in this session. The hook's change was not used."
+
+const DOCS_CONNECTOR_SERVER_NAMES = new Set(['Claude_Pages', 'Claude_Docs'])
+
+export function isAccountMemoryHookTool(tool: Tool): boolean {
+  const info = tool.mcpInfo as
+    | { accountMemoryServer?: boolean; accountMemoryHeld?: boolean }
+    | undefined
+  return info?.accountMemoryServer === true || info?.accountMemoryHeld === true
+}
+
+function isDeliveryRecordTool(tool: Tool): boolean {
+  return tool.name === 'SendUserFile' || tool.name === 'SendUserMessage'
+}
+
+function isDocsConnectorTool(tool: Tool): boolean {
+  const info = tool.mcpInfo as
+    | { docsConnector?: boolean; serverName?: string }
+    | undefined
+  if (info?.docsConnector === true) return true
+  if (info?.serverName && DOCS_CONNECTOR_SERVER_NAMES.has(info.serverName)) {
+    return true
+  }
+  const parsed = mcpInfoFromString(tool.name ?? '')
+  return Boolean(
+    parsed?.serverName && DOCS_CONNECTOR_SERVER_NAMES.has(parsed.serverName),
+  )
+}
+
+function isDisklessOrCloudSession(): boolean {
+  return (
+    isEnvTruthy(process.env.CLAUDE_CODE_DISKLESS) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) ||
+    isCoworkCloudSession() ||
+    isCloudScheduledOrPersonalRestrictedSession()
+  )
+}
 
 function isInterruptOrPermissionStopAbort(signal: AbortSignal): boolean {
   if (!signal.aborted) return false
@@ -173,9 +213,12 @@ function isCloudScheduledOrPersonalRestrictedSession(): boolean {
  * or ExitPlanMode outputs.
  */
 export function isPostToolUseOutputRewriteProtected(tool: Tool): boolean {
-  if (tool.mcpInfo?.accountMemory === true) return true
+  if (isAccountMemoryHookTool(tool)) return true
+  if (isDeliveryRecordTool(tool) && isDisklessOrCloudSession()) return true
   if (
-    (tool.name === 'AskUserQuestion' || tool.name === 'ExitPlanMode') &&
+    (tool.name === 'AskUserQuestion' ||
+      tool.name === 'ExitPlanMode' ||
+      isDocsConnectorTool(tool)) &&
     (isCloudScheduledOrPersonalRestrictedSession() ||
       (isCoworkCloudSession() &&
         getFeatureValue_CACHED_MAY_BE_STALE(COWORK_REWRITE_DROP_FLAG, true)))
@@ -191,8 +234,13 @@ export function buildDroppedOutputRewriteNotice(
   originalOutput: unknown,
   toolUseID: string,
 ): AttachmentMessage | undefined {
+  const isDelivery = isDeliveryRecordTool(tool)
+  const isDocs = isDocsConnectorTool(tool)
   if (
-    (tool.name !== 'AskUserQuestion' && tool.name !== 'ExitPlanMode') ||
+    (!isDelivery &&
+      !isDocs &&
+      tool.name !== 'AskUserQuestion' &&
+      tool.name !== 'ExitPlanMode') ||
     proposedOutput === undefined
   ) {
     return undefined
@@ -205,12 +253,17 @@ export function buildDroppedOutputRewriteNotice(
       { level: 'warn' },
     )
   }
+  if (isDelivery) {
+    return undefined
+  }
   return createAttachmentMessage({
     type: 'hook_system_message',
     content:
       tool.name === 'AskUserQuestion'
         ? ASK_USER_QUESTION_REWRITE_DROPPED_MESSAGE
-        : EXIT_PLAN_MODE_REWRITE_DROPPED_MESSAGE,
+        : tool.name === 'ExitPlanMode'
+          ? EXIT_PLAN_MODE_REWRITE_DROPPED_MESSAGE
+          : CLAUDE_DOCS_REWRITE_DROPPED_MESSAGE,
     hookName: 'Claude Code',
     toolUseID,
     hookEvent: 'PostToolUse',
@@ -343,7 +396,7 @@ export async function* runPostToolUseHooks<Input extends AnyObject, Output>(
         if (proposedOutput !== undefined) {
           if (rewriteProtected) {
             logForDebugging(
-              tool.mcpInfo?.accountMemory === true
+              isAccountMemoryHookTool(tool)
                 ? `PostToolUse hook for ${tool.name} tried to rewrite an account memory server answer; the rewrite was dropped`
                 : `PostToolUse hook for ${tool.name} tried to rewrite an output that hooks may not replace; the rewrite was dropped`,
               { level: 'warn' },
@@ -613,75 +666,93 @@ export async function collectManagedOnlyPostToolUse<
   let output = opts.output
   let rewritten = false
   const messages: MessageUpdateLazy[] = []
-  const permissionMode = toolUseContext.getAppState().toolPermissionContext.mode
-  for await (const result of executePostToolHooks(
-    tool.name,
-    toolUseID,
-    toolInput,
-    output,
-    toolUseContext,
-    permissionMode,
-    toolUseContext.abortController.signal,
-    undefined,
-    durationMs,
-    { managedHooksOnly: true },
-  )) {
-    if (result.updatedToolOutput !== undefined) {
-      if (tool.mcpInfo?.accountMemory === true) {
-        logForDebugging(
-          `PostToolUse hook for ${tool.name} tried to rewrite an account memory server answer; the rewrite was dropped`,
-          { level: 'warn' },
-        )
-      } else {
-        output = result.updatedToolOutput as Output
-        rewritten = true
+  const abortGrace = holdPostToolUseAbortGrace(toolUseContext)
+  const effectiveContext = abortGrace.context
+  try {
+    const permissionMode =
+      effectiveContext.getAppState().toolPermissionContext.mode
+    const rewriteProtected = isPostToolUseOutputRewriteProtected(tool)
+    let rewriteNoticeYielded = false
+    for await (const result of executePostToolHooks(
+      tool.name,
+      toolUseID,
+      toolInput,
+      output,
+      effectiveContext,
+      permissionMode,
+      effectiveContext.abortController.signal,
+      undefined,
+      durationMs,
+      { managedHooksOnly: true },
+    )) {
+      const proposedOutput =
+        result.updatedToolOutput !== undefined || !isMcpTool(tool)
+          ? result.updatedToolOutput
+          : result.updatedMCPToolOutput
+      if (proposedOutput !== undefined) {
+        if (rewriteProtected) {
+          logForDebugging(
+            isAccountMemoryHookTool(tool)
+              ? `PostToolUse hook for ${tool.name} tried to rewrite an account memory server answer; the rewrite was dropped`
+              : `PostToolUse hook for ${tool.name} tried to rewrite an output that hooks may not replace; the rewrite was dropped`,
+            { level: 'warn' },
+          )
+          if (!rewriteNoticeYielded) {
+            const notice = buildDroppedOutputRewriteNotice(
+              tool,
+              proposedOutput,
+              output,
+              toolUseID,
+            )
+            if (notice) {
+              rewriteNoticeYielded = true
+              messages.push({ message: notice })
+            }
+          }
+        } else {
+          output = proposedOutput as Output
+          rewritten = true
+        }
+      }
+      if (result.blockingError) {
+        messages.push({
+          message: createAttachmentMessage({
+            type: 'hook_blocking_error',
+            blockingError: result.blockingError,
+            hookName,
+            toolUseID,
+            hookEvent: 'PostToolUse',
+          }),
+        })
+      }
+      if (result.preventContinuation) {
+        messages.push({
+          message: createAttachmentMessage({
+            type: 'hook_stopped_continuation',
+            message:
+              result.stopReason || 'Execution stopped by PostToolUse hook',
+            hookName,
+            toolUseID,
+            hookEvent: 'PostToolUse',
+          }),
+        })
+        break
+      }
+      if (result.additionalContexts && result.additionalContexts.length > 0) {
+        messages.push({
+          message: createAttachmentMessage({
+            type: 'hook_additional_context',
+            content: result.additionalContexts,
+            hookName,
+            toolUseID,
+            hookEvent: 'PostToolUse',
+          }),
+        })
       }
     }
-    if (result.updatedMCPToolOutput !== undefined && isMcpTool(tool)) {
-      if (tool.mcpInfo?.accountMemory === true) {
-        logForDebugging(
-          `PostToolUse hook for ${tool.name} tried to rewrite an account memory server answer; the rewrite was dropped`,
-          { level: 'warn' },
-        )
-      } else {
-        output = result.updatedMCPToolOutput as Output
-        rewritten = true
-      }
-    }
-    if (result.blockingError) {
-      messages.push({
-        message: createAttachmentMessage({
-          type: 'hook_blocking_error',
-          blockingError: result.blockingError,
-          hookName,
-          toolUseID,
-          hookEvent: 'PostToolUse',
-        }),
-      })
-    }
-    if (result.preventContinuation) {
-      messages.push({
-        message: createAttachmentMessage({
-          type: 'hook_stopped_continuation',
-          message: result.stopReason || 'Execution stopped by PostToolUse hook',
-          hookName,
-          toolUseID,
-          hookEvent: 'PostToolUse',
-        }),
-      })
-      break
-    }
-    if (result.additionalContexts && result.additionalContexts.length > 0) {
-      messages.push({
-        message: createAttachmentMessage({
-          type: 'hook_additional_context',
-          content: result.additionalContexts,
-          hookName,
-          toolUseID,
-          hookEvent: 'PostToolUse',
-        }),
-      })
-    }
+    abortGrace.hooksEnded()
+  } finally {
+    abortGrace.dispose()
   }
   return { output, rewritten, messages }
 }
@@ -1116,7 +1187,13 @@ export async function* runPreToolUseHooks(
       tool.getToolUseSummary?.(processedInput),
     )) {
       try {
-        if (result.message) {
+        if (
+          result.message &&
+          !(
+            result.message.type === 'attachment' &&
+            result.message.attachment?.type === 'hook_blocking_error'
+          )
+        ) {
           yield {
             type: 'message',
             message: {

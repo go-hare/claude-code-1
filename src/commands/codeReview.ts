@@ -23,8 +23,162 @@ import { getPrintOutputFormat } from '../bootstrap/state.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js'
 import { getCachedRepositoryHost } from '../utils/detectRepository.js'
+import { safeParseJSON } from '../utils/json.js'
+import { partiallySanitizeUnicode } from '../utils/sanitization.js'
 import { isBundledSkillKillSwitchOn } from '../skills/bundledSkills.js'
 import { isUltrareviewEnabled } from './review/ultrareviewEnabled.js'
+
+/** Official `QOo` (2.1.328 #665) — ordered severities, most severe first. */
+export const CODE_REVIEW_SEVERITIES = [
+  'important',
+  'pre_existing',
+  'nit',
+] as const
+
+export type CodeReviewSeverity = (typeof CODE_REVIEW_SEVERITIES)[number]
+
+/** Official `Kt` (2.1.328 #665) — display badges for formatted findings. */
+export const CODE_REVIEW_SEVERITY_LABELS: Record<CodeReviewSeverity, string> = {
+  important: '🔴 Important',
+  pre_existing: '🟣 Pre-existing',
+  nit: '🟡 Nit',
+}
+
+/** Official clean-review text (2.1.328 #665). */
+export const CODE_REVIEW_NO_ISSUES = 'Code review found no issues.'
+
+const CODE_REVIEW_JSON_FENCE_RE = /^```json[ \t]*\r?\n([\s\S]*?)^```[ \t]*$/gim
+
+function normalizeCodeReviewSeverity(
+  raw: unknown,
+): CodeReviewSeverity | undefined {
+  if (typeof raw !== 'string') return undefined
+  const normalized = raw
+    .trim()
+    .toLowerCase()
+    .replace(/[-\s]+/g, '_')
+  return (CODE_REVIEW_SEVERITIES as readonly string[]).includes(normalized)
+    ? (normalized as CodeReviewSeverity)
+    : undefined
+}
+
+type ParsedCodeReviewFinding = {
+  file: string
+  line?: number | string | null
+  summary: string
+  failure_scenario?: string | null
+  severity?: CodeReviewSeverity
+}
+
+function parseCodeReviewFindingsArray(
+  raw: string,
+): ParsedCodeReviewFinding[] | undefined {
+  const parsed = safeParseJSON(raw.trim(), false)
+  if (!Array.isArray(parsed)) return undefined
+  const findings: ParsedCodeReviewFinding[] = []
+  for (const item of parsed) {
+    if (!item || typeof item !== 'object') return undefined
+    const rec = item as Record<string, unknown>
+    if (typeof rec.file !== 'string' || typeof rec.summary !== 'string') {
+      return undefined
+    }
+    if (
+      rec.line !== undefined &&
+      rec.line !== null &&
+      typeof rec.line !== 'number' &&
+      typeof rec.line !== 'string'
+    ) {
+      return undefined
+    }
+    if (
+      rec.failure_scenario !== undefined &&
+      rec.failure_scenario !== null &&
+      typeof rec.failure_scenario !== 'string'
+    ) {
+      return undefined
+    }
+    findings.push({
+      file: rec.file,
+      line: rec.line,
+      summary: rec.summary,
+      failure_scenario: rec.failure_scenario,
+      severity: normalizeCodeReviewSeverity(rec.severity),
+    })
+  }
+  return findings
+}
+
+/**
+ * Official `Xt` (2.1.328 #665) — render a JSON array of code review findings as
+ * a numbered severity-grouped list. An empty array formats as
+ * `"Code review found no issues."`.
+ */
+export function formatCodeReviewFindings(raw: string): string | undefined {
+  const data = parseCodeReviewFindingsArray(raw)
+  if (data === undefined) return undefined
+  if (data.length === 0) return CODE_REVIEW_NO_ISSUES
+
+  const buckets: Array<ParsedCodeReviewFinding[]> = [
+    ...CODE_REVIEW_SEVERITIES,
+    undefined,
+  ].map(sev => data.filter(item => item.severity === sev))
+  const ordered = buckets.flat()
+
+  const lines = ordered.map((item, idx) => {
+    const loc = item.line ? `${item.file}:${item.line}` : item.file
+    const scenario = item.failure_scenario
+      ? `\n\nFailure scenario: ${item.failure_scenario}`
+      : ''
+    const prefix = `${idx + 1}. `
+    const badge = item.severity
+      ? `${CODE_REVIEW_SEVERITY_LABELS[item.severity]} `
+      : ''
+    // Official 2.1.328 `oF(...)` — strip invisible/control Unicode characters
+    // (preserving newlines/tabs) before indenting multiline findings.
+    const sanitized = partiallySanitizeUnicode(
+      `${prefix}${badge}\`${loc}\`: ${item.summary}${scenario}`,
+    ).replace(/\p{Cc}/gu, ch => (ch === '\n' || ch === '\t' ? ch : ''))
+    return sanitized.replace(/\n(?=[^\n])/g, `\n${' '.repeat(prefix.length)}`)
+  })
+
+  const breakdown = buckets.flatMap(bucket => {
+    const first = bucket[0]
+    if (!first) return []
+    const label = first.severity
+      ? CODE_REVIEW_SEVERITY_LABELS[first.severity]
+      : 'with no severity'
+    return [`${bucket.length} ${label}`]
+  })
+
+  const headerSuffix =
+    ordered.length === 1
+      ? ''
+      : ordered.some(item => item.severity !== undefined)
+        ? ` (${breakdown.join(', ')})`
+        : ', most severe first'
+
+  const noun = ordered.length === 1 ? 'finding' : 'findings'
+  return `${ordered.length} ${noun}${headerSuffix}:\n\n${lines.join('\n\n')}`
+}
+
+/**
+ * Official `Jt` (2.1.328 #665) — `formatForegroundForkResult` hook for
+ * `/code-review`. Leaves `--output-format text|json` untouched; otherwise
+ * renders JSON findings (bare array or fenced `json` block) into the
+ * severity-badged list or `"Code review found no issues."`.
+ */
+export function formatCodeReviewForegroundForkResult(text: string): string {
+  const format = getPrintOutputFormat()
+  if (format === 'text' || format === 'json') return text
+  if (text.trimStart().startsWith('[')) {
+    const formatted = formatCodeReviewFindings(text)
+    if (formatted !== undefined) return formatted
+  }
+  return text.replace(
+    CODE_REVIEW_JSON_FENCE_RE,
+    (match, body: string) => formatCodeReviewFindings(body) ?? match,
+  )
+}
 
 const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'] as const
 type EffortLevel = (typeof EFFORT_LEVELS)[number]
@@ -75,13 +229,17 @@ export function parseCodeReviewMaxFindingsFlag(args: string): {
   return { rest, maxFindingsIgnored: true }
 }
 
-const COMMENT_INSTRUCTIONS = `
+const COMMENT_SEVERITY_IN_WORDS = `Open each finding's text with its severity in words, never with an emoji: "Important:", "Pre-existing (not from this change, not blocking):" or "Nit (optional):".`
+
+function buildCommentInstructions(includeSeverityInWords: boolean): string {
+  return `
 ## Posting to GitHub (--comment)
 The \`--comment\` flag was passed. After producing the findings list, if the
 review target is a GitHub PR, post each finding as an inline PR comment via
 \`gh api repos/{owner}/{repo}/pulls/{pr}/comments\` with a suggestion block
-when the fix is clear. If the target is not a PR, print the findings to the
+when the fix is clear.${includeSeverityInWords ? ` ${COMMENT_SEVERITY_IN_WORDS}` : ''} If the target is not a PR, print the findings to the
 terminal and note that \`--comment\` was ignored.`
+}
 
 const FIX_INSTRUCTIONS = `
 ## Applying fixes (--fix)
@@ -307,16 +465,16 @@ type CodeReviewModelFamily =
  * densable `me` cell names. Only the names that change the findings ceiling
  * matter here: `low-sonnet5` has no maximum; `o5-bmin` clamps all / >32 to 32.
  */
-const CODE_REVIEW_CELLS: Record<
+export const CODE_REVIEW_CELLS: Record<
   CodeReviewModelFamily,
   Record<EffortLevel, string>
 > = {
   default: {
-    low: 'low',
-    medium: 'o48-high-v1',
-    high: 'o48-high-v1',
-    xhigh: 'o48-xhigh-v1',
-    max: 'max',
+    low: 'bugs-low-v1',
+    medium: 'bugs-conventions-v1',
+    high: 'bugs-conventions-v1',
+    xhigh: 'bugs-conventions-xhigh-v1',
+    max: 'bugs-conventions-max-v1',
   },
   'claude-sonnet-5': {
     low: 'low-sonnet5',
@@ -517,6 +675,14 @@ function defaultMaxFindingsForLevel(level: EffortLevel): number {
   return 15
 }
 
+const BUGS_SEVERITY_GUIDANCE = `Every finding's \`severity\` is one of:
+- \`important\`: a bug that should be fixed before merging because this change adds it or makes it worse. If someone can hit it, a rare trigger does not lower the severity.
+- \`pre_existing\`: a bug that exists in the codebase but that this change did not introduce. A bug in unchanged lines is \`pre_existing\` if the change only fails to fix it, and \`important\` if the change re-exposes it.
+- \`nit\`: a minor issue, worth fixing but not blocking: a broken CLAUDE.md rule, or a bug that harms nobody, such as a misleading log line.
+
+Order findings most-severe first: \`important\`, then \`pre_existing\`, then \`nit\`. Never drop a finding for its severity.
+Write each \`summary\` in two or three short sentences. Start with the problem as a user of the code would see it. Next say where it happens and what sets it off. End with "Fix:" and the change to make, or what to check if you are not sure.`
+
 export function buildPrompt(
   level: EffortLevel,
   target: string,
@@ -529,6 +695,7 @@ export function buildPrompt(
   cell?: string,
   usesReportFindings = false,
 ): string {
+  const isBugsOnlyCell = (cell ?? '').startsWith('bugs-')
   const header = `You are performing a thorough code review at **${level}** effort level.`
 
   const targetInstr = target
@@ -544,15 +711,27 @@ export function buildPrompt(
           ? 'no maximum'
           : String(defaultMaxFindingsForLevel(level))
 
-  const phases = `
-## Review Process
+  const anglesSection = isBugsOnlyCell
+    ? level === 'low'
+      ? `### Phase 2 — Find issues (bugs)
+Flag runtime-correctness bugs visible from the hunk alone:
+- Logic errors, inverted/wrong conditions, off-by-one, null/undefined deref
+- Removed guards, falsy-zero checks, missing \`await\`, wrong-variable copy-paste, error swallowed in catch
+Do **not** flag reuse, simplification, efficiency, style, naming, or missing tests (run \`/simplify\` for cleanup passes).`
+      : `### Phase 2 — Find issues (bugs + CLAUDE.md conventions)
+Run independent analysis passes looking ONLY for:
 
-### Phase 1 — Gather context
-1. Get the diff (see target above)
-2. Read any files referenced in the diff that need full context
-3. Check for test files related to changed code
+**Correctness angles:**
+- Logic errors, off-by-one, null/undefined paths
+- Race conditions, async/await misuse
+- Removed invariants/guards or broken cross-file callers
+- Type mismatches the compiler can't catch
 
-### Phase 2 — Find issues (${level === 'low' ? '3' : level === 'medium' ? '5' : '7'} angles)
+**Conventions (CLAUDE.md) angle:**
+- Check governing \`CLAUDE.md\` / \`CLAUDE.local.md\` files for clear violations of stated rules, quoting the exact rule and the line that breaks it.
+
+Do **not** report reuse, simplification, efficiency, or altitude cleanups here (run \`/simplify\` for those).`
+    : `### Phase 2 — Find issues (${level === 'low' ? '3' : level === 'medium' ? '5' : '7'} angles)
 Run independent analysis passes looking for:
 
 **Correctness angles:**
@@ -571,26 +750,53 @@ ${
 - Does the change fit the project's architecture?
 - Are there simpler approaches the author may have missed?`
     : ''
-}
+}`
 
-For each finding, note: file, line, severity (bug/perf/style), one-line summary, and a concrete failure scenario.
+  const reportSection = usesReportFindings
+    ? isBugsOnlyCell
+      ? `Call the \`ReportFindings\` tool once with \`{level, findings}\` ranked most-severe first. Each entry has \`file\`, \`line\`, \`summary\`, \`short_summary\` (<=60 chars), \`failure_scenario\`, \`severity\` (\`important\`, \`pre_existing\`, or \`nit\`), and \`category\` (\`correctness\` or \`conventions\`). If nothing survives, call it with an empty array and do not also print the findings as text.\n\n${BUGS_SEVERITY_GUIDANCE}`
+      : `Call the \`ReportFindings\` tool once with the verified findings ranked most-severe first (pass an empty array if nothing survived verification) and do not also print the findings as text.`
+    : isBugsOnlyCell
+      ? `Return findings as a JSON array (most severe first), or \`[]\` if nothing survives:
+\`\`\`json
+[
+  {
+    "file": "path/to/file.ext",
+    "line": 123,
+    "summary": "the problem, where it happens and what sets it off. Fix: the change to make",
+    "failure_scenario": "concrete inputs/state → wrong output/crash",
+    "severity": "one of: important, nit, pre_existing"
+  }
+]
+\`\`\`
+
+${BUGS_SEVERITY_GUIDANCE}`
+      : `Present confirmed findings as a numbered list (never as a raw JSON array):
+\`\`\`
+1. [severity] file:line — title
+   Description of the issue and how to fix it.
+\`\`\``
+
+  const phases = `
+## Review Process
+
+### Phase 1 — Gather context
+1. Get the diff (see target above)
+2. Read any files referenced in the diff that need full context
+3. Check for test files related to changed code
+
+${anglesSection}
+
+For each finding, note: file, line, ${isBugsOnlyCell ? 'severity (`important`, `pre_existing`, or `nit`), summary ending with `Fix:`' : 'severity (bug/perf/style), one-line summary'}, and a concrete failure scenario.
 
 ### Phase 3 — Verify (adversarial)
 For each candidate finding, ask: "Can I construct a specific input or sequence that triggers this?" Drop findings where the answer is no.
 
 ### Phase 4 — Report
-${
-  usesReportFindings
-    ? `Call the \`ReportFindings\` tool once with the verified findings ranked most-severe first (pass an empty array if nothing survived verification) and do not also print the findings as text.`
-    : `Present confirmed findings as a numbered list (never as a raw JSON array):
-\`\`\`
-1. [severity] file:line — title
-   Description of the issue and how to fix it.
-\`\`\``
-}
+${reportSection}
 
-Cap at ${cap} findings. Prioritize bugs over style.
-If no issues found, say so clearly.`
+Cap at ${cap} findings. ${isBugsOnlyCell ? 'Correctness bugs always outrank conventions findings when the cap forces a cut.' : 'Prioritize bugs over style.'}
+If no issues found, ${isBugsOnlyCell && !usesReportFindings ? 'return `[]` (formatted as "Code review found no issues.").' : 'say so clearly.'}`
 
   return [
     ultraFallbackNote,
@@ -599,7 +805,7 @@ If no issues found, say so clearly.`
     header,
     targetInstr,
     phases,
-    comment ? COMMENT_INSTRUCTIONS : '',
+    comment ? buildCommentInstructions(isBugsOnlyCell) : '',
     fix ? FIX_INSTRUCTIONS : '',
   ]
     .filter(Boolean)
@@ -717,7 +923,7 @@ function codeReviewCommandDescription(): string {
   const postTail = ultra
     ? ' For ultra on a GitHub.com PR target, --post asks to post the finished review’s findings to the PR as a single comment from the user’s GitHub account (not a review; the launch dialog still confirms in interactive sessions, while non-interactive mode posts on the flag alone) and --no-post hides that option.'
     : ''
-  return `Review the current diff, or a PR number/branch/path target, for correctness bugs (plus reuse/simplification/efficiency cleanups where the model's recipe covers them) at the effort level given first, before any target (${EFFORT_LEVELS.join('|')}: from few high-confidence findings to many, some uncertain${effortTail}); with no level given, it reuses the level you typed last. Pass --comment to post findings as inline PR comments, or --fix to apply them to the working tree after the review. Pass --max-findings <n> to report up to n findings, or --max-findings all for every finding. The choice stays until you pass --max-findings default.${postTail}`
+  return `Review the current diff, or a PR number/branch/path target, for correctness bugs (plus broken CLAUDE.md rules and cleanups where the model's recipe covers them; see /simplify) at the effort level given first, before any target (${EFFORT_LEVELS.join('|')}: from few high-confidence findings to many, some uncertain${effortTail}); with no level given, it reuses the level you typed last. Pass --comment to post findings as inline PR comments, or --fix to apply them to the working tree after the review. Pass --max-findings <n> to report up to n findings, or --max-findings all for every finding. The choice stays until you pass --max-findings default.${postTail}`
 }
 
 /** Official `Vs` (#1293) — only use max/ultra when explicitly requested. */
@@ -740,8 +946,8 @@ const codeReview = {
   name: 'code-review',
   // densable 2.1.223: /review is an alias of /code-review
   aliases: ['review'],
-  // densable WJf menuDescription / Ea description
-  menuDescription: 'Review the current diff or a PR for bugs and cleanups',
+  // densable WJf menuDescription / Ea description (2.1.328 #664)
+  menuDescription: 'Review the current diff or a PR for bugs',
   description: codeReviewCommandDescription(),
   whenToUse: codeReviewWhenToUse(),
   argumentHint: codeReviewArgumentHint(),
@@ -759,6 +965,7 @@ const codeReview = {
   isEnabled: () => !isBundledSkillKillSwitchOn(),
   progressMessage: 'Reviewing code...',
   contentLength: 2000,
+  formatForegroundForkResult: formatCodeReviewForegroundForkResult,
   async getPromptForCommand(
     args: string,
     context: ToolUseContext,

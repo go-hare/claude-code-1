@@ -19,6 +19,38 @@ import type { Message } from '../../types/message.js'
  * cycle (CC-1180) — the cycle shifted module-init order enough to surface
  * a latent ws CJS/ESM resolution race in CI shard-2.
  */
+function isVirtualMessage(msg: Message): boolean {
+  return (
+    (msg.type === 'user' || msg.type === 'assistant') &&
+    (msg as { isVirtual?: boolean }).isVirtual === true
+  )
+}
+
+function isSyntheticApiErrorMessage(msg: Message): boolean {
+  return msg.type === 'assistant' && msg.isApiErrorMessage === true
+}
+
+function hasUnresolvedToolUseInGroup(group: readonly Message[]): boolean {
+  const unresolved = new Set<string>()
+  for (const item of group) {
+    if (item.type !== 'assistant' && item.type !== 'user') continue
+    const content = item.message?.content
+    if (!Array.isArray(content)) continue
+    for (const block of content) {
+      if (!block || typeof block !== 'object') continue
+      if (block.type === 'tool_use' && typeof block.id === 'string') {
+        unresolved.add(block.id)
+      } else if (
+        block.type === 'tool_result' &&
+        typeof block.tool_use_id === 'string'
+      ) {
+        unresolved.delete(block.tool_use_id)
+      }
+    }
+  }
+  return unresolved.size > 0
+}
+
 export function groupMessagesByApiRound(messages: Message[]): Message[][] {
   const groups: Message[][] = []
   let current: Message[] = []
@@ -31,19 +63,32 @@ export function groupMessagesByApiRound(messages: Message[]): Message[][] {
   // correctly keeps `[tu_A(id=X), result_A, tu_B(id=X)]` in one group.
   let lastAssistantId: string | undefined
 
-  // In a well-formed conversation the API contract guarantees every
-  // tool_use is resolved before the next assistant turn, so lastAssistantId
-  // alone is a sufficient boundary gate. Tracking unresolved tool_use IDs
-  // would only do work when the conversation is malformed (dangling tool_use
-  // after resume-from-partial-batch or max_tokens truncation) — and in that
-  // case it pins the gate shut forever, merging all subsequent rounds into
-  // one group. We let those boundaries fire; the summarizer fork's own
-  // ensureToolResultPairing at claude.ts:1136 repairs the dangling tu at
-  // API time.
   for (const msg of messages) {
+    // Official 2.1.327 `jee(e)` (#394): keep virtual messages in the current
+    // group, and keep synthetic/API-error messages (such as a max_output_tokens
+    // truncation notice) inside the current group whenever there is still an
+    // unanswered tool_use so compaction never splits/loses that reply's tool
+    // call and its result.
+    if (isVirtualMessage(msg)) {
+      current.push(msg)
+      continue
+    }
+    if (
+      isSyntheticApiErrorMessage(msg) &&
+      hasUnresolvedToolUseInGroup(current)
+    ) {
+      current.push(msg)
+      continue
+    }
+
+    const resumedIncompleteThinking =
+      msg.type === 'assistant' &&
+      (msg as { resumedFromIncompleteThinking?: boolean })
+        .resumedFromIncompleteThinking === true
     if (
       msg.type === 'assistant' &&
       msg.message!.id !== lastAssistantId &&
+      !resumedIncompleteThinking &&
       current.length > 0
     ) {
       groups.push(current)

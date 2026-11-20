@@ -40,6 +40,9 @@ import { getPolicySettingsOrigin, getSettingsForSource } from './settings/settin
 import type { ThemeName } from './theme.js';
 import { isHarborKiteEnabled } from './teleport/cloudPeerAccess.js';
 import { getOtelResourceAttributeStatus } from './telemetryAttributes.js';
+import { getCachedKeybindingWarnings } from '../keybindings/loadUserBindings.js';
+import { PermissionsSchema } from './settings/types.js';
+import { HOOK_EVENTS } from '../entrypoints/agentSdkTypes.js';
 import { getUdsStartFailureReason } from './udsMessaging.js';
 import type { Command } from '../commands.js';
 import { getIsRemoteMode } from '../bootstrap/state.js';
@@ -628,12 +631,238 @@ export async function buildInstallationHealthDiagnostics(): Promise<Diagnostic[]
   return items;
 }
 
+const OTEL_SIGNALS = ['metrics', 'logs', 'traces'] as const;
+type OtelSignal = (typeof OTEL_SIGNALS)[number];
+
+const OTEL_SIGNAL_ENV_SEGMENT: Record<OtelSignal, string> = {
+  metrics: 'METRICS',
+  logs: 'LOGS',
+  traces: 'TRACES',
+};
+
+function formatEnList(items: readonly string[]): string {
+  return new Intl.ListFormat('en').format(items);
+}
+
+function formatOtelMissingEndpointFix(signals: readonly OtelSignal[]): string {
+  const endpointVars = signals.map(sig => `OTEL_EXPORTER_OTLP_${OTEL_SIGNAL_ENV_SEGMENT[sig]}_ENDPOINT`);
+  const exporterVars = signals.map(sig => `OTEL_${OTEL_SIGNAL_ENV_SEGMENT[sig]}_EXPORTER`);
+  return `Set OTEL_EXPORTER_OTLP_ENDPOINT or ${formatEnList(endpointVars)}, or take otlp out of ${formatEnList(exporterVars)}. Then restart Claude Code.`;
+}
+
 /**
- * Official 2.1.323 (#2123): surface malformed OTEL_RESOURCE_ATTRIBUTES notices
- * on `/status` without emitting duplicate debug warnings on every render.
+ * Official 2.1.328 (#544) `O()`: detect when an enabled OpenTelemetry OTLP
+ * exporter has no endpoint (or neither endpoint nor protocol), so its data
+ * would fail to start or go to localhost and likely be lost.
+ */
+export function detectOtelMissingEndpointNotices(env: NodeJS.ProcessEnv = process.env): string[] {
+  if (!isEnvTruthy(env.CLAUDE_CODE_ENABLE_TELEMETRY)) return [];
+  if (isEnvTruthy(env.ENABLE_BETA_TRACING_DETAILED)) return [];
+  if (env.DISABLE_TELEMETRY || isEnvTruthy(env.DO_NOT_TRACK)) return [];
+
+  const tracesEnabled = isEnvTruthy(env.CLAUDE_CODE_ENABLE_TRACES) || Boolean(env.OTEL_TRACES_EXPORTER?.trim());
+  const otlpSignals = OTEL_SIGNALS.filter(
+    sig =>
+      (sig !== 'traces' || tracesEnabled) &&
+      (env[`OTEL_${OTEL_SIGNAL_ENV_SEGMENT[sig]}_EXPORTER`] ?? '').split(',').some(part => part.trim() === 'otlp'),
+  );
+  if (otlpSignals.length === 0) return [];
+
+  const hasSignalEndpoint = (sig: OtelSignal): boolean =>
+    Boolean(env[`OTEL_EXPORTER_OTLP_${OTEL_SIGNAL_ENV_SEGMENT[sig]}_ENDPOINT`]?.trim());
+  const hasGlobalEndpoint = Boolean(env.OTEL_EXPORTER_OTLP_ENDPOINT?.trim());
+  const hasGlobalProtocol = Boolean(env.OTEL_EXPORTER_OTLP_PROTOCOL?.trim());
+
+  const missingEndpoint = hasGlobalEndpoint ? [] : otlpSignals.filter(sig => !hasSignalEndpoint(sig));
+  if (missingEndpoint.length === 0) return [];
+
+  const missingEndpointAndProtocol = hasGlobalProtocol
+    ? []
+    : missingEndpoint.filter(sig => !env[`OTEL_EXPORTER_OTLP_${OTEL_SIGNAL_ENV_SEGMENT[sig]}_PROTOCOL`]?.trim());
+
+  if (missingEndpointAndProtocol.length > 0) {
+    const impact =
+      missingEndpointAndProtocol[0] === 'traces' ? "metrics and traces aren't sent" : "telemetry can't start";
+    return [
+      `OpenTelemetry: No endpoint or protocol is set for ${formatEnList(missingEndpointAndProtocol)}, so ${impact}. ${formatOtelMissingEndpointFix(missingEndpointAndProtocol)}`,
+    ];
+  }
+
+  return [
+    `OpenTelemetry: No endpoint is set for ${formatEnList(missingEndpoint)}, so they go to localhost, where they're lost unless a collector is running. ${formatOtelMissingEndpointFix(missingEndpoint)}`,
+  ];
+}
+
+const TOOL_HOOK_EVENTS = new Set<string>(['PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest']);
+const RULE_SYNTAX_IN_MATCHER_RE = /^[A-Z]\w*\([^|()[? :/]+[ :/][^|()[?]*\)$/;
+const MCP_SERVER_ONLY_PART_RE = /^mcp__(?!.*__)./;
+const STATUS_CONFIG_PROBLEMS_MAX = 10;
+const STATUS_CONFIG_PROBLEM_LINE_MAX = 300;
+
+/**
+ * Official 2.1.327 (#371) `$e`: detect hook matchers that can never match any
+ * tool or are invalid regular expressions.
+ */
+export function inspectHookMatcher(event: string, matcher: string): string[] {
+  if (!matcher) return [];
+  if (TOOL_HOOK_EVENTS.has(event)) {
+    const mcpParts = matcher
+      .split(/[|,]/)
+      .map(part => part.trim())
+      .filter(part => MCP_SERVER_ONLY_PART_RE.test(part));
+    if (mcpParts.length > 0) {
+      return mcpParts.map(part => `${part} matches no tool · use ${part}__.* (in a list, join names with |)`);
+    }
+  }
+  try {
+    new RegExp(matcher);
+    if (TOOL_HOOK_EVENTS.has(event) && RULE_SYNTAX_IN_MATCHER_RE.test(matcher)) {
+      return [`${matcher} matches no tool · put the rule in "if"`];
+    }
+    return [];
+  } catch {
+    return [`${matcher} isn't a valid regular expression`];
+  }
+}
+
+/**
+ * Official 2.1.327 (#371) `ke`: detect ignored permission keys, misplaced
+ * permission/hook keys at top-level settings, and hook matchers that never match.
+ */
+export function inspectSettingsConfigProblems(settings: Record<string, unknown> | null | undefined): string[] {
+  if (!settings || typeof settings !== 'object') return [];
+  const problems: string[] = [];
+  const validPermissionKeys = Object.keys(PermissionsSchema().shape);
+  const validPermissionKeySet = new Set(validPermissionKeys);
+  const validHookEvents = HOOK_EVENTS as readonly string[];
+
+  const perms = settings.permissions;
+  if (perms && typeof perms === 'object' && !Array.isArray(perms)) {
+    for (const key of Object.keys(perms as Record<string, unknown>)) {
+      if (/^[a-z]/i.test(key) && !validPermissionKeySet.has(key)) {
+        problems.push(`permissions.${key} isn't a permissions setting, so it's ignored`);
+      }
+    }
+  }
+
+  // Detect permission or hook event keys placed directly at top-level settings
+  for (const key of validPermissionKeys) {
+    if (key in settings && key !== 'permissions') {
+      problems.push(`${key} is ignored outside permissions`);
+    }
+  }
+  for (const event of validHookEvents) {
+    if (event in settings) {
+      problems.push(`${event} is ignored outside hooks`);
+    }
+  }
+
+  const hooks = settings.hooks;
+  if (hooks && typeof hooks === 'object' && !Array.isArray(hooks)) {
+    for (const [event, matchers] of Object.entries(hooks as Record<string, unknown>)) {
+      if (!Array.isArray(matchers)) continue;
+      for (const entry of matchers) {
+        if (!entry || typeof entry !== 'object') continue;
+        const matcher =
+          typeof (entry as { matcher?: unknown }).matcher === 'string' ? (entry as { matcher: string }).matcher : '';
+        for (const msg of inspectHookMatcher(event, matcher)) {
+          problems.push(`${event} hook matcher ${msg}`);
+        }
+      }
+    }
+  }
+
+  return problems;
+}
+
+/**
+ * Official 2.1.327 (#371) `ne()`: collect broken agent/skill/command/output-style
+ * files, keybinding errors, unavailable sandbox, ignored permission settings, and
+ * hook matchers that never match for `/status`.
+ */
+export function buildConfigAndFileDiagnostics(opts?: {
+  failedAgentFiles?: ReadonlyArray<{ path: string; error: string }>;
+  failedOutputStyleFiles?: ReadonlyArray<{ path: string; error: string }>;
+  commands?: ReadonlyArray<Command>;
+}): Diagnostic[] {
+  const entries: Array<[string, string | undefined]> = [];
+
+  // 1. Unavailable sandbox
+  try {
+    const depCheck = SandboxManager.checkDependencies();
+    if (SandboxManager.isSandboxingEnabled() && depCheck.errors.length > 0) {
+      entries.push(['Sandbox not running', depCheck.errors.join('; ')]);
+    }
+  } catch {
+    // best-effort
+  }
+
+  // 2. Ignored permission settings & never-matching hook matchers per enabled source
+  for (const source of getEnabledSettingSources()) {
+    try {
+      const sourceSettings = getSettingsForSource(source) as Record<string, unknown> | null | undefined;
+      if (!sourceSettings) continue;
+      const sourceName = getSettingSourceDisplayNameCapitalized(source);
+      for (const problem of inspectSettingsConfigProblems(sourceSettings)) {
+        entries.push([sourceName, problem]);
+      }
+    } catch {
+      // best-effort
+    }
+  }
+
+  // 3. Broken agent files
+  for (const failed of opts?.failedAgentFiles ?? []) {
+    entries.push([`${getDisplayPath(failed.path)} not loaded`, failed.error]);
+  }
+
+  // 4. Broken output-style files
+  for (const failed of opts?.failedOutputStyleFiles ?? []) {
+    entries.push([`${getDisplayPath(failed.path)} frontmatter`, failed.error]);
+  }
+
+  // 5. Broken skill / command frontmatter
+  for (const cmd of opts?.commands ?? []) {
+    if (cmd.type === 'prompt' && cmd.skillFile?.frontmatterProblem) {
+      entries.push([`/${cmd.name} frontmatter`, cmd.skillFile.frontmatterProblem]);
+    }
+  }
+
+  // 6. Keybinding warnings/errors
+  try {
+    for (const warning of getCachedKeybindingWarnings()) {
+      const detail = [warning.message, warning.suggestion].filter(Boolean).join(' · ');
+      entries.push(['Keybindings', detail]);
+    }
+  } catch {
+    // best-effort
+  }
+
+  const lines = entries
+    .filter(([, detail]) => Boolean(detail))
+    .map(([label, detail]) => {
+      const line = `${label}: ${detail}`;
+      return line.length > STATUS_CONFIG_PROBLEM_LINE_MAX
+        ? `${line.slice(0, STATUS_CONFIG_PROBLEM_LINE_MAX - 1)}…`
+        : line;
+    });
+
+  if (lines.length <= STATUS_CONFIG_PROBLEMS_MAX) {
+    return lines;
+  }
+  const extra = lines.length - STATUS_CONFIG_PROBLEMS_MAX;
+  return [...lines.slice(0, STATUS_CONFIG_PROBLEMS_MAX), `+${extra} more ${extra === 1 ? 'problem' : 'problems'}`];
+}
+
+/**
+ * Official 2.1.323 (#2123) + 2.1.328 (#544): surface malformed OTEL_RESOURCE_ATTRIBUTES
+ * and missing OTLP endpoint notices on `/status` without emitting duplicate debug warnings.
  */
 export function buildTelemetryDiagnostics(): Diagnostic[] {
-  return getOtelResourceAttributeStatus(process.env, { logWarnings: false }).notices;
+  return [
+    ...getOtelResourceAttributeStatus(process.env, { logWarnings: false }).notices,
+    ...detectOtelMissingEndpointNotices(process.env),
+  ];
 }
 
 /**

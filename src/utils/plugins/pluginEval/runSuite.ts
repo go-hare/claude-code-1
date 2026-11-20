@@ -47,7 +47,12 @@ import {
   writeRunMocks,
 } from './mocks.js'
 import { PluginEvalPathError } from './pathVet.js'
-import { averageScores, buildAggregateReport, evalVersion } from './report.js'
+import {
+  averageScores,
+  buildAggregateReport,
+  evalVersion,
+  formatPluginHookApprovalWarnings,
+} from './report.js'
 import { createEvalSandbox } from './sandbox.js'
 import { spawnEvalChild as spawnChild } from './spawnEval.js'
 import type {
@@ -427,6 +432,16 @@ async function runOne(
       signal: params.signal,
       credentials: params.credentials,
     })
+    const approvedByHook = agent.toolCalls
+      .filter(call => call.pluginApproval === 'applied')
+      .map(call => call.name)
+    const refusedByHook = agent.toolCalls
+      .filter(call => call.pluginApproval === 'refused')
+      .map(call => call.name)
+    const pluginHookApprovals =
+      approvedByHook.length + refusedByHook.length > 0
+        ? { approved: approvedByHook, refused: refusedByHook }
+        : undefined
     return {
       score: scoreGraders(graded.results),
       turns: agent.numTurns,
@@ -440,6 +455,9 @@ async function runOne(
         ? { auth_rejected: agent.authRejected }
         : {}),
       ...(agent.aborted ? { aborted: agent.aborted } : {}),
+      ...(pluginHookApprovals
+        ? { plugin_hook_approvals: pluginHookApprovals }
+        : {}),
     }
   } catch (error) {
     failed = true
@@ -1121,6 +1139,13 @@ export async function runPluginEvalSuite(
           `    ${grader.passed ? '✓' : '✗'} ${grader.name}${extra}: ${grader.explanation}`,
         )
       }
+      if (report.plugin_hook_approvals !== undefined) {
+        for (const warning of formatPluginHookApprovalWarnings(
+          report.plugin_hook_approvals,
+        )) {
+          onLine(`    ⚠ ${warning}`)
+        }
+      }
       // gold eg: first auth_rejected===true stops remaining jobs
       const armed = authBackstopArmed
       if (report.auth_rejected !== undefined) authBackstopArmed = false
@@ -1160,6 +1185,27 @@ export async function runPluginEvalSuite(
   if (harnessFailures > 0) {
     onNotice(
       `⚠ ${harnessFailures} ${plural(harnessFailures, 'run')} could not be started by the harness (see the errors above and the debug log); the suite exits non-zero regardless of scores`,
+    )
+  }
+  const hookApprovalSummaries = report.cases
+    .flatMap(cse => cse.runs.concat(cse.runs_without ?? []))
+    .flatMap(run =>
+      run.plugin_hook_approvals ? [run.plugin_hook_approvals] : [],
+    )
+  const refusedHookRuns = hookApprovalSummaries.filter(
+    s => s.refused.length > 0,
+  ).length
+  if (refusedHookRuns > 0) {
+    onNotice(
+      `⚠ In ${refusedHookRuns} ${plural(refusedHookRuns, 'run')}, a plugin's permission hook tried to allow calls that a deny rule blocks or that could not be checked against the deny rules, and the eval refused them. A warning under each of those runs names the tools, as does \`pluginHookApprovals\` under --json. Check that the hook is meant to allow them`,
+    )
+  }
+  const approvedHookRuns = hookApprovalSummaries.filter(
+    s => s.approved.length > 0,
+  ).length
+  if (approvedHookRuns > 0) {
+    onNotice(
+      `⚠ In ${approvedHookRuns} ${plural(approvedHookRuns, 'run')}, a plugin's permission hook approved calls that would not otherwise have run, so ${approvedHookRuns === 1 ? "that run's result" : "those runs' results"} may depend on what the calls did. A warning under each of those runs names the tools, as does \`pluginHookApprovals\` under --json. Check that the hook is meant to approve them`,
     )
   }
   const exitCode = partialReason

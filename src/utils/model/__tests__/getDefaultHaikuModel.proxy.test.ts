@@ -57,7 +57,7 @@ describe('getDefaultHaikuModel custom host', () => {
   })
 
   test('official Anthropic host keeps catalog haiku', () => {
-    expect(getDefaultHaikuModel()).toBe(getModelStrings().haiku45)
+    expect(getDefaultHaikuModel()).toBe(getModelStrings().haiku55)
   })
 
   test('custom ANTHROPIC_BASE_URL uses the user-specified model', () => {

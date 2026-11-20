@@ -462,8 +462,126 @@ export async function takeBashEditDiffSnapshot(
   }
 }
 
+const EMPTY_BLOB_SHAS = new Set([
+  'e69de29bb2d1d6434b8b29ae775ad8c2e48c5391',
+  '473a0f4c3be8a93681a267e3b1e9a7dcda1185436fe141f7749120a303721813',
+])
+
+const PREWARM_SNAPSHOT_TTL_MS = 15_000
+type PrewarmedSnapshotEntry = {
+  promise: Promise<BashEditDiffSnapshot | 'unavailable' | null>
+  startedAt: number
+  timer: ReturnType<typeof setTimeout>
+}
+const prewarmedSnapshots = new Map<string, PrewarmedSnapshotEntry>()
+
+function cleanupPrewarmedSnapshotPromise(
+  promise: Promise<BashEditDiffSnapshot | 'unavailable' | null>,
+): void {
+  void promise.then(snap => {
+    if (snap && snap !== 'unavailable') {
+      void rm(snap.gitDirectory, { recursive: true, force: true }).catch(
+        () => {},
+      )
+    }
+  })
+}
+
+function prewarmSnapshotKey(cwd: string, toolUseId?: string): string {
+  return toolUseId ? `${toolUseId}\0${cwd}` : cwd
+}
+
+function sweepExpiredPrewarmedSnapshots(nowMs: number): void {
+  for (const [key, entry] of prewarmedSnapshots) {
+    if (nowMs - entry.startedAt >= PREWARM_SNAPSHOT_TTL_MS) {
+      prewarmedSnapshots.delete(key)
+      clearTimeout(entry.timer)
+      cleanupPrewarmedSnapshotPromise(entry.promise)
+    }
+  }
+}
+
 /**
- * densable S5t — diff-tree -r --raw -p between snapshot tree and current tree.
+ * Official 2.1.327 #488: pre-warm the Bash edit diff snapshot early in auto
+ * and bypass permissions modes so the diff is ready sooner when the command
+ * finishes. Keyed by `toolUseId` (when provided) with TTL cleanup so denied
+ * or abandoned commands never leak temp dirs or poison later commands.
+ */
+export function prewarmBashEditDiffSnapshot(
+  cwd: string,
+  toolUseId?: string,
+  now: () => number = Date.now,
+): Promise<BashEditDiffSnapshot | 'unavailable' | null> {
+  const nowMs = now()
+  sweepExpiredPrewarmedSnapshots(nowMs)
+  const key = prewarmSnapshotKey(cwd, toolUseId)
+  const existing = prewarmedSnapshots.get(key)
+  if (existing) {
+    if (nowMs - existing.startedAt < PREWARM_SNAPSHOT_TTL_MS) {
+      return existing.promise
+    }
+    prewarmedSnapshots.delete(key)
+    clearTimeout(existing.timer)
+    cleanupPrewarmedSnapshotPromise(existing.promise)
+  }
+  const promise = takeBashEditDiffSnapshot(cwd)
+  const timer = setTimeout(() => {
+    const current = prewarmedSnapshots.get(key)
+    if (current?.promise === promise) {
+      prewarmedSnapshots.delete(key)
+      cleanupPrewarmedSnapshotPromise(promise)
+    }
+  }, PREWARM_SNAPSHOT_TTL_MS)
+  timer.unref()
+  prewarmedSnapshots.set(key, { promise, startedAt: nowMs, timer })
+  return promise
+}
+
+export function consumePrewarmedBashEditDiffSnapshot(
+  cwd: string,
+  toolUseId?: string,
+  now: () => number = Date.now,
+): Promise<BashEditDiffSnapshot | 'unavailable' | null> {
+  const nowMs = now()
+  const key = prewarmSnapshotKey(cwd, toolUseId)
+  const existing = prewarmedSnapshots.get(key)
+  if (existing) {
+    prewarmedSnapshots.delete(key)
+    clearTimeout(existing.timer)
+    if (nowMs - existing.startedAt < PREWARM_SNAPSHOT_TTL_MS) {
+      return existing.promise
+    }
+    cleanupPrewarmedSnapshotPromise(existing.promise)
+  }
+  return takeBashEditDiffSnapshot(cwd)
+}
+
+export function discardPrewarmedBashEditDiffSnapshot(
+  cwd: string,
+  toolUseId?: string,
+): void {
+  const key = prewarmSnapshotKey(cwd, toolUseId)
+  const existing = prewarmedSnapshots.get(key)
+  if (!existing) return
+  prewarmedSnapshots.delete(key)
+  clearTimeout(existing.timer)
+  cleanupPrewarmedSnapshotPromise(existing.promise)
+}
+
+export function _resetPrewarmedBashEditDiffSnapshotsForTesting(): void {
+  for (const entry of prewarmedSnapshots.values()) {
+    clearTimeout(entry.timer)
+    cleanupPrewarmedSnapshotPromise(entry.promise)
+  }
+  prewarmedSnapshots.clear()
+}
+
+/**
+ * densable S5t + Official 2.1.327 #418 — diff-tree -r --raw -p between
+ * snapshot tree and current tree.
+ * Binary files (no text hunks, non-empty), too-large files (failing hunksFit),
+ * and files past MAX_DIFF_FILES are omitted from `files`, counted in
+ * `moreFiles`, and named in `changedFiles` (up to MAX_CHANGED_FILES).
  */
 export async function diffBashEditDiffSnapshot(
   snapshot: BashEditDiffSnapshot,
@@ -495,21 +613,46 @@ export async function diffBashEditDiffSnapshot(
       return { files: [], moreFiles: 0, unavailable: true }
     }
     const status = new Map<string, string>()
+    const emptyByPath = new Set<string>()
     for (const match of stdout.matchAll(
       /^:\d{6} \d{6} (\S+) (\S+) ([A-Z])\t(.+)$/gm,
     )) {
+      const oldOid = match[1] ?? ''
+      const newOid = match[2] ?? ''
+      const statusCode = match[3] ?? 'M'
       const path = unescapeGitPath(match[4] ?? '')
-      if (path) status.set(path, match[3] ?? 'M')
+      if (!path) continue
+      status.set(path, statusCode)
+      if (
+        (statusCode === 'A' && EMPTY_BLOB_SHAS.has(newOid)) ||
+        (statusCode === 'D' && EMPTY_BLOB_SHAS.has(oldOid))
+      ) {
+        emptyByPath.add(path)
+      }
     }
     const hunkMap = parseDiffTreeHunks(stdout)
     const files: BashEditDiffFile[] = []
-    for (const [rel, statusCode] of status) {
+    for (const rel of emptyByPath) {
       if (files.length >= MAX_DIFF_FILES) break
-      const hunks = hunkMap.get(rel) ?? []
-      if (hunks.length > 0 && !hunksFit(hunks)) continue
+      const statusCode = status.get(rel)
       files.push({
         filePath: join(repoRoot, rel),
-        hunks,
+        hunks: [],
+        ...(statusCode === 'A' ? { created: true } : { deleted: true }),
+      })
+    }
+    for (const [rel, hunks] of hunkMap) {
+      if (files.length >= MAX_DIFF_FILES) break
+      if (emptyByPath.has(rel)) continue
+      if (!hunksFit(hunks)) continue
+      const statusCode = status.get(rel)
+      if (statusCode === undefined) continue
+      files.push({
+        filePath: join(repoRoot, rel),
+        hunks: hunks.map(h => ({
+          ...h,
+          lines: h.lines.filter(line => line !== ''),
+        })),
         ...(statusCode === 'A' ? { created: true } : {}),
         ...(statusCode === 'D' ? { deleted: true } : {}),
       })
@@ -519,7 +662,10 @@ export async function diffBashEditDiffSnapshot(
       .map(rel => join(repoRoot, rel))
     return {
       files,
-      moreFiles: Math.max(0, status.size - files.length),
+      moreFiles: Math.max(
+        0,
+        Math.max(status.size, hunkMap.size) - files.length,
+      ),
       changedFiles,
     }
   } catch (e) {
@@ -530,10 +676,22 @@ export async function diffBashEditDiffSnapshot(
   }
 }
 
+export function getOmittedBashEditDiffPaths(
+  diff: BashEditDiff,
+  maxNames?: number,
+): string[] {
+  const shown = new Set(diff.files.map(f => f.filePath))
+  const omitted = (diff.changedFiles ?? []).filter(p => !shown.has(p))
+  return maxNames === undefined ? omitted : omitted.slice(0, maxNames)
+}
+
 export function formatBashEditDiffForToolResult(
   diff: BashEditDiff | undefined,
 ): string {
-  if (!diff || diff.skipped || !diff.files?.length) return ''
+  if (!diff || diff.skipped) return ''
+  const hasShown = (diff.files?.length ?? 0) > 0
+  const hasMore = diff.moreFiles > 0
+  if (!hasShown && !hasMore) return ''
   const parts: string[] = ['<bash_edit_diff>']
   for (const file of diff.files) {
     const flag = file.created ? ' created' : file.deleted ? ' deleted' : ''
@@ -545,8 +703,24 @@ export function formatBashEditDiffForToolResult(
       parts.push(...hunk.lines.filter(line => line !== ''))
     }
   }
-  if (diff.moreFiles > 0) {
-    parts.push(`… ${diff.moreFiles} more file(s) not shown`)
+  if (hasMore) {
+    const omittedPaths = getOmittedBashEditDiffPaths(diff)
+    if (hasShown) {
+      parts.push(`… ${diff.moreFiles} more file(s) not shown`)
+    } else {
+      parts.push(
+        `${diff.moreFiles} ${diff.moreFiles === 1 ? 'file' : 'files'} changed (binary, mode only or too large to show)`,
+      )
+    }
+    for (const omitted of omittedPaths) {
+      parts.push(`  ${omitted}`)
+    }
+    const unshownCount = diff.moreFiles - omittedPaths.length
+    if (omittedPaths.length > 0 && unshownCount > 0) {
+      parts.push(
+        `… ${unshownCount} more ${unshownCount === 1 ? 'file' : 'files'}`,
+      )
+    }
   }
   parts.push('</bash_edit_diff>')
   return parts.join('\n')

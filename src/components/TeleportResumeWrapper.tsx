@@ -1,11 +1,11 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js';
 import type { TeleportRemoteResponse } from 'src/utils/conversationRecovery.js';
 import type { CodeSession } from 'src/utils/teleport/api.js';
-import { type TeleportSource, useTeleportResume } from '../hooks/useTeleportResume.js';
+import { type TeleportResumeError, type TeleportSource, useTeleportResume } from '../hooks/useTeleportResume.js';
 import { Box, Text } from '@anthropic/ink';
 import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { ResumeTask } from './ResumeTask.js';
@@ -31,6 +31,7 @@ export function TeleportResumeWrapper({
   source,
 }: TeleportResumeWrapperProps): React.ReactNode {
   const { resumeSession, isResuming, error, selectedSession } = useTeleportResume(source);
+  const reportedErrorRef = useRef<TeleportResumeError | null>(null);
 
   // Log when teleport flow starts (for funnel tracking)
   useEffect(() => {
@@ -39,16 +40,21 @@ export function TeleportResumeWrapper({
     });
   }, [source]);
 
+  // Official 2.1.327 (#456): observe fresh `error` state rather than reading a
+  // stale `error` closure inside `handleSelect` after `await resumeSession(...)`.
+  useEffect(() => {
+    if (error && onError && reportedErrorRef.current !== error) {
+      reportedErrorRef.current = error;
+      onError(error.message, error.formattedMessage);
+    } else if (!error) {
+      reportedErrorRef.current = null;
+    }
+  }, [error, onError]);
+
   const handleSelect = async (session: CodeSession) => {
     const result = await resumeSession(session);
     if (result) {
       onComplete(result);
-    } else if (error) {
-      // If there's an error handler provided, use it
-      if (onError) {
-        onError(error.message, error.formattedMessage);
-      }
-      // Otherwise the error will be displayed in the UI
     }
   };
 
@@ -57,10 +63,15 @@ export function TeleportResumeWrapper({
     onCancel();
   };
 
-  // Allow Esc to dismiss the error state
+  // Allow Esc to dismiss the standalone error state
+  const showStandaloneError = !!error && !isEmbedded && !onError;
   useKeybinding('app:interrupt', handleCancel, {
     context: 'Global',
-    isActive: !!error && !onError,
+    isActive: showStandaloneError,
+  });
+  useKeybinding('confirm:no', handleCancel, {
+    context: 'Confirmation',
+    isActive: showStandaloneError,
   });
 
   // Show loading spinner when resuming
@@ -76,22 +87,28 @@ export function TeleportResumeWrapper({
     );
   }
 
-  // Show error if there was a problem resuming
-  if (error && !onError) {
+  // Official 2.1.327 (#456): render resume failure notice both standalone (CLI)
+  // and inline inside ResumeTask (embedded /teleport).
+  const errorNotice = error && !onError && (
+    <Box flexDirection="column" marginBottom={1}>
+      <Text bold color="error">
+        Couldn&apos;t resume the session
+      </Text>
+      <Text dimColor>{error.message}</Text>
+    </Box>
+  );
+
+  // Show standalone error screen when not embedded
+  if (errorNotice && !isEmbedded) {
     return (
-      <Box flexDirection="column" padding={1}>
-        <Text bold color="error">
-          Failed to resume session
+      <Box flexDirection="column" gap={1} padding={1}>
+        {errorNotice}
+        <Text dimColor>
+          Press <Text bold>Esc</Text> to cancel
         </Text>
-        <Text dimColor>{error.message}</Text>
-        <Box marginTop={1}>
-          <Text dimColor>
-            Press <Text bold>Esc</Text> to cancel
-          </Text>
-        </Box>
       </Box>
     );
   }
 
-  return <ResumeTask onSelect={handleSelect} onCancel={handleCancel} isEmbedded={isEmbedded} />;
+  return <ResumeTask notice={errorNotice} onSelect={handleSelect} onCancel={handleCancel} isEmbedded={isEmbedded} />;
 }

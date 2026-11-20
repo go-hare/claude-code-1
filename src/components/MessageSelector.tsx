@@ -14,6 +14,7 @@ import {
   fileHistoryCanRestore,
   fileHistoryEnabled,
   fileHistoryGetDiffStats,
+  formatRewindFailedPathsMessage,
   formatRewindSkippedLinksMessage,
 } from 'src/utils/fileHistory.js';
 import { logError } from 'src/utils/log.js';
@@ -75,10 +76,13 @@ type Props = {
   onPreRestore: () => void;
   onRestoreMessage: (message: UserMessage) => Promise<void>;
   /**
-   * densable: may return `{ skippedLinks }` so partial link-safety skips
-   * surface TYn copy without treating the restore as a hard failure.
+   * densable: may return `{ skippedLinks, skippedPaths, failedPaths }` so
+   * partial link-safety skips and per-file restore failures (#396) surface
+   * warnings without silently closing `/rewind`.
    */
-  onRestoreCode: (message: UserMessage) => Promise<{ skippedLinks?: number } | undefined>;
+  onRestoreCode: (
+    message: UserMessage,
+  ) => Promise<{ skippedLinks?: number; skippedPaths?: string[]; failedPaths?: string[] } | undefined>;
   onSummarize?: (
     message: UserMessage,
     feedback?: string,
@@ -357,13 +361,17 @@ export function MessageSelector({
 
     let codeError: Error | null = null;
     let conversationError: Error | null = null;
-    // densable De — skippedLinks from onRestoreCode (TYn partial UX)
+    // densable De — skippedLinks, skippedPaths & failedPaths (#396) from onRestoreCode
     let skippedLinks = 0;
+    let skippedPaths: string[] = [];
+    let failedPaths: string[] = [];
 
     if (option === 'code' || option === 'both') {
       try {
         const restoreResult = await onRestoreCode(messageToRestore);
         skippedLinks = restoreResult?.skippedLinks ?? 0;
+        skippedPaths = restoreResult?.skippedPaths ?? [];
+        failedPaths = restoreResult?.failedPaths ?? [];
       } catch (error) {
         codeError = error as Error;
         logError(codeError);
@@ -382,18 +390,22 @@ export function MessageSelector({
     setIsRestoring(false);
     setMessageToRestore(undefined);
 
+    // Official 2.1.327 (#396): report per-file restore failures instead of closing silently.
+    const failedPathsMessage = failedPaths.length > 0 ? formatRewindFailedPathsMessage(failedPaths) : undefined;
     // densable Ge — partial restore warning (still success path for code)
-    const skippedLinksMessage = skippedLinks > 0 ? formatRewindSkippedLinksMessage(skippedLinks) : undefined;
+    const skippedLinksMessage =
+      skippedLinks > 0 ? formatRewindSkippedLinksMessage(skippedLinks, skippedPaths) : undefined;
 
-    // densable order: both fail → code fail → conversation fail and/or Ge → close
+    // densable order: both fail → code fail → conversation fail and/or failedPaths/skippedLinks → close
     if (conversationError && codeError) {
       setError(`Failed to restore the conversation and code:\n${conversationError}\n${codeError}`);
     } else if (codeError) {
       setError(`Failed to restore the code:\n${codeError}`);
-    } else if (conversationError || skippedLinksMessage) {
+    } else if (conversationError || failedPathsMessage || skippedLinksMessage) {
       setError(
         [
           conversationError ? `Failed to restore the conversation:\n${conversationError}` : undefined,
+          failedPathsMessage,
           skippedLinksMessage,
         ]
           .filter(Boolean)
@@ -419,6 +431,10 @@ export function MessageSelector({
       onClose();
       return;
     }
+    if (isRestoring && restoreWait) {
+      restoreWait.onStopWaiting();
+      return;
+    }
     if (messageToRestore && !preselectedMessage) {
       // Go back to message list instead of closing entirely
       setMessageToRestore(undefined);
@@ -426,7 +442,7 @@ export function MessageSelector({
     }
     logEvent('tengu_message_selector_cancelled', {});
     onClose();
-  }, [isSummarizing, onClose, messageToRestore, preselectedMessage]);
+  }, [isSummarizing, isRestoring, restoreWait, onClose, messageToRestore, preselectedMessage]);
 
   const moveSelectionTo = useCallback(
     (nextIndex: number) => {
@@ -540,8 +556,8 @@ export function MessageSelector({
       title="Rewind"
       color="suggestion"
       onCancel={handleEscape}
-      isCancelActive={!messageToRestore || !hasMessagesToSelect || isSummarizing}
-      hideInputGuide={!!messageToRestore && hasMessagesToSelect && !isSummarizing}
+      isCancelActive={!messageToRestore || !hasMessagesToSelect || isSummarizing || Boolean(isRestoring && restoreWait)}
+      hideInputGuide={!!messageToRestore && hasMessagesToSelect && !isSummarizing && !(isRestoring && restoreWait)}
       inputGuide={
         <Byline>
           {!error && hasMessagesToSelect && <KeyboardShortcutHint shortcut="enter" action="continue" />}

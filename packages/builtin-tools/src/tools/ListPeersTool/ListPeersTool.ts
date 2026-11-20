@@ -31,6 +31,7 @@ import {
   formatListingRow,
   formatSubagentsSection,
   formatTeammatesSection,
+  formatTokenOnlySessionName,
   isAddressableListingName,
   listSubagentsForListing,
   listTeammatesForListing,
@@ -38,9 +39,158 @@ import {
   sanitizeTeammateLabel,
   type ListingCandidate,
 } from './teammatesListing.js'
+import { randomBytes } from 'crypto'
 
-/** densable yWp */
-const LIST_AGENTS_MAX_RESULT_CHARS = 10_000
+/** densable yWp / official 2.1.328 _Ct */
+export const LIST_AGENTS_MAX_RESULT_CHARS = 10_000
+const LIST_AGENTS_CURSOR_CACHE_MAX = 32
+
+export const LIST_AGENTS_INVALID_CURSOR_MESSAGE =
+  '(that cursor is not valid: this session did not issue it, or it has expired — no agents were looked up; call again with no cursor to list them from the start)'
+export const LIST_AGENTS_EXHAUSTED_CURSOR_MESSAGE =
+  '(nothing more to list: every agent this call found is on an earlier page — call again with no cursor to list them from the start)'
+
+/**
+ * Official 2.1.328 (#440) `fMo` LRU cursor store: remembers cumulative row
+ * keys already returned by previous pages in this session (max 32 cursors).
+ */
+const listAgentsCursorCache = new Map<string, Set<string>>()
+
+export function issueListAgentsCursor(shownKeys: Set<string>): string {
+  const token = randomBytes(6).toString('hex')
+  listAgentsCursorCache.set(token, new Set(shownKeys))
+  while (listAgentsCursorCache.size > LIST_AGENTS_CURSOR_CACHE_MAX) {
+    const oldest = listAgentsCursorCache.keys().next().value
+    if (oldest === undefined) break
+    listAgentsCursorCache.delete(oldest)
+  }
+  return token
+}
+
+export function lookupListAgentsCursor(cursor: string): Set<string> | null {
+  const entry = listAgentsCursorCache.get(cursor)
+  if (!entry) return null
+  // Refresh LRU order
+  listAgentsCursorCache.delete(cursor)
+  listAgentsCursorCache.set(cursor, entry)
+  return entry
+}
+
+export function clearListAgentsCursorCacheForTests(): void {
+  listAgentsCursorCache.clear()
+}
+
+/**
+ * Official 2.1.328 (#658) `remoteControlOffNote`: explain that Remote Control
+ * is off when cloud sessions or other computers are not listed.
+ */
+export function buildRemoteControlOffNote(opts: {
+  isRemoteMode?: boolean
+  isReplBridgeActive: boolean
+  peerMessagingEnabled?: boolean
+  isFirstPartyOAuth?: boolean
+  isRcAllowed?: boolean
+  hasCloudAccess?: boolean
+  isDesktop?: boolean
+}): string | null {
+  if (opts.isRemoteMode) return null
+  if (opts.isReplBridgeActive) return null
+  if (opts.peerMessagingEnabled === false) return null
+  if (opts.isFirstPartyOAuth === false) return null
+  if (opts.isRcAllowed === false) return null
+  const label = opts.hasCloudAccess
+    ? 'Other computers'
+    : 'Cloud sessions and other computers'
+  const action = opts.isDesktop
+    ? 'the Remote Control switch in the app'
+    : '/remote-control'
+  return `[${label} are not listed because Remote Control is off in this session. The user can turn it on with ${action}; then list again.]`
+}
+
+/**
+ * Official 2.1.328 (#440): paginate a list of keyed peer rows within a char
+ * budget (default 10,000), returning the page rows, remaining count, and next
+ * cursor token when truncated.
+ */
+export function paginatePeerListingRows(
+  rows: ReadonlyArray<{ key: string; line: string }>,
+  opts?: {
+    cursor?: string
+    budgetChars?: number
+    canSendMessages?: boolean
+  },
+):
+  | { kind: 'invalid-cursor'; message: string }
+  | { kind: 'exhausted'; message: string }
+  | {
+      kind: 'page'
+      lines: string[]
+      remaining: number
+      nextCursor?: string
+      footer?: string
+    } {
+  const budget = opts?.budgetChars ?? LIST_AGENTS_MAX_RESULT_CHARS
+  let alreadyShown: Set<string> | null = null
+  if (opts?.cursor !== undefined && opts.cursor.trim() !== '') {
+    alreadyShown = lookupListAgentsCursor(opts.cursor.trim())
+    if (!alreadyShown) {
+      return {
+        kind: 'invalid-cursor',
+        message: LIST_AGENTS_INVALID_CURSOR_MESSAGE,
+      }
+    }
+  }
+
+  const unseen = alreadyShown
+    ? rows.filter(r => !alreadyShown!.has(r.key))
+    : [...rows]
+
+  if (alreadyShown && unseen.length === 0) {
+    return {
+      kind: 'exhausted',
+      message: LIST_AGENTS_EXHAUSTED_CURSOR_MESSAGE,
+    }
+  }
+
+  const pageLines: string[] = []
+  const nextShown = new Set<string>(alreadyShown ?? [])
+  let usedChars = 0
+  let includedCount = 0
+
+  for (const row of unseen) {
+    const addedLen = row.line.length + (pageLines.length > 0 ? 1 : 0)
+    if (pageLines.length > 0 && usedChars + addedLen > budget) {
+      break
+    }
+    pageLines.push(row.line)
+    nextShown.add(row.key)
+    usedChars += addedLen
+    includedCount++
+  }
+
+  const remaining = unseen.length - includedCount
+  if (remaining > 0) {
+    const nextCursor = issueListAgentsCursor(nextShown)
+    const sendHint =
+      opts?.canSendMessages === false
+        ? ''
+        : ` (or pass a target's name directly to ${SEND_MESSAGE_TOOL_NAME})`
+    const footer = `  (\u2026 ${remaining} more not shown \u2014 call again with cursor="${nextCursor}" for the next page${sendHint})`
+    return {
+      kind: 'page',
+      lines: pageLines,
+      remaining,
+      nextCursor,
+      footer,
+    }
+  }
+
+  return {
+    kind: 'page',
+    lines: pageLines,
+    remaining: 0,
+  }
+}
 
 /** densable V1w machine-empty copy when self is listed and no peers. */
 const NO_OTHER_SESSION_ON_MACHINE =
@@ -59,6 +209,13 @@ const inputSchema = lazySchema(() =>
       .max(256)
       .optional()
       .describe('Not available in this build; leave unset.'),
+    cursor: z
+      .string()
+      .max(256)
+      .optional()
+      .describe(
+        'Pagination cursor returned by a previous ListAgents call to fetch the next page of results.',
+      ),
   }),
 )
 type InputSchema = ReturnType<typeof inputSchema>
@@ -173,6 +330,12 @@ function formatPeersListing(
     listTruncated?: boolean
     cloudListFailed?: boolean
     bridgeWalkIncomplete?: boolean
+    /** Official 2.1.328 (#658): Remote Control off note when applicable. */
+    remoteControlOffNote?: string | null
+    /** Official 2.1.328 (#440): pagination cursor & budget. */
+    cursor?: string
+    pageBudgetChars?: number
+    canSendMessages?: boolean
     /** densable G1w */
     selfHeader?: string | null
     /** densable Z1w — Teammates (n): section */
@@ -188,6 +351,9 @@ function formatPeersListing(
     cloudListFailed: opts?.cloudListFailed,
     bridgeWalkIncomplete: opts?.bridgeWalkIncomplete,
   })
+  if (opts?.remoteControlOffNote) {
+    notes.push(opts.remoteControlOffNote)
+  }
   const teammatesSection = opts?.teammatesSection?.trim()
     ? opts.teammatesSection
     : null
@@ -198,6 +364,16 @@ function formatPeersListing(
 
   let peerBody: string | null
   if (peers.length === 0) {
+    if (opts?.cursor && opts.cursor.trim() !== '') {
+      const check = paginatePeerListingRows([], {
+        cursor: opts.cursor,
+        budgetChars: opts.pageBudgetChars,
+        canSendMessages: opts.canSendMessages,
+      })
+      if (check.kind !== 'page') {
+        return check.message
+      }
+    }
     // densable V1w / Q1w: teammates/subagents-only or notes-only omit the empty banner.
     if (hosted && notes.length === 0) {
       peerBody = null
@@ -210,8 +386,33 @@ function formatPeersListing(
     }
   } else {
     const now = opts?.now ?? Date.now()
-    const rows = peers.map(p => formatQ1wPeerRow(p, opts?.candidates, now))
-    peerBody = formatCappedSection('Peer sessions', rows)
+    const keyedRows = peers.map(p => ({
+      key: listingKey(peerCandidateKind(p), peerListingId(p)),
+      line: formatQ1wPeerRow(p, opts?.candidates, now),
+    }))
+    const staticOverhead =
+      (opts?.selfHeader?.length ?? 0) +
+      (subagentsSection?.length ?? 0) +
+      (teammatesSection?.length ?? 0) +
+      notes.reduce((sum, n) => sum + n.length + 4, 0) +
+      256
+    const effectiveBudget = Math.max(
+      1_000,
+      (opts?.pageBudgetChars ?? LIST_AGENTS_MAX_RESULT_CHARS) - staticOverhead,
+    )
+    const paged = paginatePeerListingRows(keyedRows, {
+      cursor: opts?.cursor,
+      budgetChars: effectiveBudget,
+      canSendMessages: opts?.canSendMessages,
+    })
+    if (paged.kind !== 'page') {
+      return paged.message
+    }
+    if (paged.footer) {
+      peerBody = `Peer sessions (${peers.length}):\n${paged.lines.join('\n')}\n${paged.footer}`
+    } else {
+      peerBody = formatCappedSection('Peer sessions', paged.lines)
+    }
     if (notes.length > 0) {
       peerBody += `\n${notes.map(n => `  ${n}`).join('\n')}`
     }
@@ -296,7 +497,18 @@ export const ListAgentsTool = buildTool({
     }
   },
 
-  async call(_input: ListAgentsInput, context) {
+  async call(input: ListAgentsInput, context) {
+    // Official 2.1.328 (#440): validate input.cursor BEFORE doing any peer
+    // lookups so callers immediately know no agents were looked up.
+    const cursorToken = input.cursor?.trim() || undefined
+    if (cursorToken !== undefined && !lookupListAgentsCursor(cursorToken)) {
+      return {
+        data: {
+          listing: LIST_AGENTS_INVALID_CURSOR_MESSAGE,
+        },
+      }
+    }
+
     const peers: PeerInfo[] = []
     const seen = new Set<string>()
     const addPeer = (peer: PeerInfo): void => {
@@ -458,7 +670,22 @@ export const ListAgentsTool = buildTool({
         const name =
           sanitizeListingName(peer.name) ??
           (peer.cwd ? sanitizeListingName(basename(peer.cwd)) : null)
-        if (name === null || !isAddressableListingName(name)) return []
+        // Official 2.1.328 (#588): cloud/bridge sessions that just started
+        // (untitled) or have `@` in their title are included as token-only
+        // candidates (`untitled` / `@` → `(at)`) with `[ref]` so they remain
+        // reachable via `SendMessage({ to: "name [ref]" })`.
+        if (name === null || !isAddressableListingName(name)) {
+          if (peer.transport === 'bridge' || peer.transport === 'cloud') {
+            return [
+              {
+                kind: peerCandidateKind(peer),
+                id: peerListingId(peer),
+                name: formatTokenOnlySessionName(peer.name),
+              },
+            ]
+          }
+          return []
+        }
         return [
           {
             kind: peerCandidateKind(peer),
@@ -476,12 +703,43 @@ export const ListAgentsTool = buildTool({
       subagentsSection = formatSubagentsSection(subagentRows, candidates)
     }
 
+    // Official 2.1.328 (#658): explain when Remote Control is off so Claude knows
+    // why cloud sessions or other computers are not listed.
+    let rcOffNote: string | null = null
+    try {
+      /* eslint-disable @typescript-eslint/no-require-imports */
+      const { isReplBridgeActive } =
+        require('src/bootstrap/state.js') as typeof import('src/bootstrap/state.js')
+      const { isClaudeAISubscriber } =
+        require('src/utils/auth.js') as typeof import('src/utils/auth.js')
+      const { getAPIProvider } =
+        require('src/utils/model/providers.js') as typeof import('src/utils/model/providers.js')
+      const { isBridgeEnabled } =
+        require('src/bridge/bridgeEnabled.js') as typeof import('src/bridge/bridgeEnabled.js')
+      /* eslint-enable @typescript-eslint/no-require-imports */
+      const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT ?? ''
+      rcOffNote = buildRemoteControlOffNote({
+        isRemoteMode: Boolean(process.env.CLAUDE_CODE_REMOTE),
+        isReplBridgeActive: isReplBridgeActive(),
+        isFirstPartyOAuth:
+          getAPIProvider() === 'firstParty' && isClaudeAISubscriber(),
+        isRcAllowed: isBridgeEnabled(),
+        hasCloudAccess:
+          cloudList.sessions.length > 0 || cloudList.unavailable === undefined,
+        isDesktop: entrypoint === 'claude-desktop' || entrypoint === 'desktop',
+      })
+    } catch {
+      // optional in isolated unit tests
+    }
+
     return {
       data: {
         listing: formatPeersListing(peers, {
           listTruncated,
           cloudListFailed,
           bridgeWalkIncomplete,
+          remoteControlOffNote: rcOffNote,
+          cursor: input.cursor,
           selfHeader: formatOwnSessionListing(self),
           teammatesSection,
           subagentsSection,

@@ -19,17 +19,41 @@ import { getInitialSettings, updateSettingsForSource } from '../utils/settings/s
 interface InstallProps {
   onDone: (result: string, options?: { display?: CommandResultDisplay }) => void;
   force?: boolean;
-  target?: string; // 'latest', 'stable', or version like '1.0.34'
+  target?: string; // 'latest', 'stable', 'rc', or version like '1.0.34'
 }
 
 type InstallState =
   | { type: 'checking' }
-  | { type: 'cleaning-npm' }
   | { type: 'installing'; version: string }
   | { type: 'setting-up' }
-  | { type: 'set-up'; messages: string[] }
-  | { type: 'success'; version: string; setupMessages?: string[] }
-  | { type: 'error'; message: string; warnings?: string[] };
+  | { type: 'success'; version: string; setupMessages: string[] }
+  | { type: 'error'; message: string; forceMayHelp?: boolean };
+
+/**
+ * Official 2.1.328: normalize an explicit install channel target for
+ * persisting `autoUpdatesChannel`. `'rc'` is mapped to `'stable'`.
+ */
+export function normalizeInstallChannelTarget(target: string | undefined): 'latest' | 'stable' | null {
+  if (target === 'latest' || target === 'stable') {
+    return target;
+  }
+  if (target === 'rc') {
+    return 'stable';
+  }
+  return null;
+}
+
+/**
+ * Official 2.1.328: whether `--force` may help recover from an install error.
+ * Signature verification failures (`ManifestSignatureError`) cannot be
+ * overridden with `--force`.
+ */
+export function shouldSuggestForceForInstallError(error: unknown): boolean {
+  if (error instanceof Error && error.name === 'ManifestSignatureError') {
+    return false;
+  }
+  return true;
+}
 
 function getInstallationPath(): string {
   const isWindows = env.platform === 'win32';
@@ -88,14 +112,36 @@ function Install({ onDone, force, target }: InstallProps): React.ReactNode {
 
         // Check specifically for lock failure
         if (result.lockFailed) {
-          throw new Error(
-            'Could not install - another process is currently installing Claude. Please try again in a moment.',
-          );
+          throw new Error('Another process is installing Claude. Try again in a moment.');
         }
 
         // If we couldn't get the version, there might be an issue
         if (!result.latestVersion) {
           logForDebugging('Install: Failed to retrieve version information during install', { level: 'error' });
+        }
+
+        // If user explicitly specified a channel, save it to settings ('rc' -> 'stable')
+        let channelSaved = false;
+        const normalizedChannel = normalizeInstallChannelTarget(target);
+        if (normalizedChannel) {
+          const { error: settingsError } = updateSettingsForSource('userSettings', {
+            autoUpdatesChannel: normalizedChannel,
+          });
+          channelSaved = settingsError === null;
+          logForDebugging(
+            channelSaved
+              ? `Install: Saved autoUpdatesChannel=${normalizedChannel} to user settings`
+              : `Install: Could not save autoUpdatesChannel=${normalizedChannel}: ${errorMessage(settingsError)}`,
+            { level: channelSaved ? 'debug' : 'warn' },
+          );
+        }
+
+        if ('skippedUnverifiedRelease' in result && result.skippedUnverifiedRelease && result.latestVersion) {
+          setState({
+            type: 'error',
+            message: `Skipped: the update target for @${channelOrVersion} resolved to ${result.latestVersion}, which predates release-signature enforcement, so this client (${MACRO.VERSION}) will not switch to it automatically.${channelSaved ? ' Channel preference saved.' : ''} Run \`claude install ${result.latestVersion}\` to install that exact version.`,
+          });
+          return;
         }
 
         if (!result.wasUpdated) {
@@ -136,38 +182,11 @@ function Install({ onDone, force, target }: InstallProps): React.ReactNode {
           forced: force ? 1 : 0,
         });
 
-        // If user explicitly specified a channel, save it to settings
-        if (target === 'latest' || target === 'stable') {
-          updateSettingsForSource('userSettings', {
-            autoUpdatesChannel: target,
-          });
-          logForDebugging(`Install: Saved autoUpdatesChannel=${target} to user settings`);
-        }
-
-        // Combine all warning/info messages (convert SetupMessage to string)
-        const allWarnings = [...warnings, ...aliasMessages.map(m => m.message)];
-
-        // Check if there were any setup errors or notes
-        if (setupMessages.length > 0) {
-          setState({
-            type: 'set-up',
-            messages: setupMessages.map(m => m.message),
-          });
-          // Still mark as success but show both setup messages and cleanup warnings
-          setTimeout(setState, 2000, {
-            type: 'success' as const,
-            version: result.latestVersion || 'current',
-            setupMessages: [...setupMessages.map(m => m.message), ...allWarnings],
-          });
-        } else {
-          // No setup messages, go straight to success (but still show cleanup warnings if any)
-          logForDebugging('Install: Shell PATH already configured');
-          setState({
-            type: 'success',
-            version: result.latestVersion || 'current',
-            setupMessages: allWarnings.length > 0 ? allWarnings : undefined,
-          });
-        }
+        setState({
+          type: 'success',
+          version: result.latestVersion || 'current',
+          setupMessages: [...setupMessages.map(m => m.message), ...warnings, ...aliasMessages.map(m => m.message)],
+        });
       } catch (error) {
         logForDebugging(`Install command failed: ${error}`, {
           level: 'error',
@@ -175,6 +194,7 @@ function Install({ onDone, force, target }: InstallProps): React.ReactNode {
         setState({
           type: 'error',
           message: errorMessage(error),
+          forceMayHelp: shouldSuggestForceForInstallError(error),
         });
       }
     }
@@ -184,31 +204,23 @@ function Install({ onDone, force, target }: InstallProps): React.ReactNode {
 
   useEffect(() => {
     if (state.type === 'success') {
-      // Give success message time to render before exiting
-      setTimeout(onDone, 2000, 'Claude Code installation completed successfully', {
-        display: 'system' as const,
+      onDone('Claude Code installation completed successfully', {
+        display: 'system',
       });
     } else if (state.type === 'error') {
-      // Give error message time to render before exiting
-      setTimeout(onDone, 3000, 'Claude Code installation failed', {
-        display: 'system' as const,
+      onDone('Claude Code installation failed', {
+        display: 'system',
       });
     }
-  }, [state, onDone]);
+  }, [state.type, onDone]);
 
   return (
     <Box flexDirection="column" marginTop={1}>
-      {state.type === 'checking' && <Text color="claude">Checking installation status...</Text>}
+      {state.type === 'checking' && <Text color="claude">Checking installation…</Text>}
 
-      {state.type === 'cleaning-npm' && <Text color="warning">Cleaning up old npm installations...</Text>}
+      {state.type === 'installing' && <Text color="claude">Installing Claude Code native build {state.version}…</Text>}
 
-      {state.type === 'installing' && (
-        <Text color="claude">Installing Claude Code native build {state.version}...</Text>
-      )}
-
-      {state.type === 'setting-up' && <Text color="claude">Setting up launcher and shell integration...</Text>}
-
-      {state.type === 'set-up' && <SetupNotes messages={state.messages} />}
+      {state.type === 'setting-up' && <Text color="claude">Setting up launcher and shell integration…</Text>}
 
       {state.type === 'success' && (
         <Box flexDirection="column" gap={1}>
@@ -239,7 +251,7 @@ function Install({ onDone, force, target }: InstallProps): React.ReactNode {
               <Text dimColor> to get started</Text>
             </Box>
           </Box>
-          {state.setupMessages && <SetupNotes messages={state.setupMessages} />}
+          {state.setupMessages.length > 0 && <SetupNotes messages={state.setupMessages} />}
         </Box>
       )}
 
@@ -247,12 +259,14 @@ function Install({ onDone, force, target }: InstallProps): React.ReactNode {
         <Box flexDirection="column" gap={1}>
           <Box>
             <StatusIcon status="error" withSpace />
-            <Text color="error">Installation failed</Text>
+            <Text color="error">Couldn't install Claude Code</Text>
           </Box>
           <Text color="error">{state.message}</Text>
-          <Box marginTop={1}>
-            <Text dimColor>Try running with --force to override checks</Text>
-          </Box>
+          {state.forceMayHelp && (
+            <Box marginTop={1}>
+              <Text dimColor>Try running with --force to override checks</Text>
+            </Box>
+          )}
         </Box>
       )}
     </Box>
@@ -275,9 +289,10 @@ export const install = {
     const nonFlagArgs = args.filter(arg => !arg.startsWith('--'));
     const target = nonFlagArgs[0]; // 'latest', 'stable', or version like '1.0.34'
 
-    const { unmount } = await render(
+    const renderPromise = render(
       <Install
-        onDone={(result, options) => {
+        onDone={async (result, options) => {
+          const { unmount } = await renderPromise;
           unmount();
           onDone(result, options);
         }}
@@ -285,5 +300,6 @@ export const install = {
         target={target}
       />,
     );
+    await renderPromise;
   },
 };

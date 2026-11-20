@@ -142,12 +142,43 @@ export function insteadOfRetryHintFromError(err: unknown): string | undefined {
 }
 
 /**
+ * Official 2.1.328 (#637) — trim long failure output while keeping the leading
+ * words that say what failed (e.g. `"checkout hook exited with code 1:\n"` or
+ * `"git clone failed: ..."`), even when a checkout hook or git printed a lot.
+ */
+export function trimFailureOutputPreservingLead(
+  cleanOutput: string,
+  maxTailChars: number = FAILURE_STDERR_TAIL_MAX,
+  leadPrefix?: string,
+): string {
+  if (cleanOutput.length <= maxTailChars) return cleanOutput
+  let preservedLead = ''
+  if (leadPrefix && cleanOutput.startsWith(leadPrefix)) {
+    preservedLead = leadPrefix
+  } else {
+    const firstNewline = cleanOutput.indexOf('\n')
+    if (firstNewline > 0 && firstNewline <= 240) {
+      preservedLead = cleanOutput.slice(0, firstNewline + 1)
+    } else if (firstNewline === -1) {
+      const colonSpace = cleanOutput.indexOf(': ')
+      if (colonSpace > 0 && colonSpace <= 200) {
+        preservedLead = cleanOutput.slice(0, colonSpace + 2)
+      }
+    }
+  }
+  const rest = cleanOutput.slice(preservedLead.length)
+  if (rest.length <= maxTailChars) return cleanOutput
+  return `${preservedLead}…${rest.slice(-maxTailChars)}`
+}
+
+/**
  * densable `jjv` — synthetic assistant + result events for failure post.
  */
 export function buildFailureWorkerEvents(
   exitCode: number | null,
   stderrTail: string,
   insteadOfRetryHint?: string,
+  leadPrefix?: string,
 ): unknown[] {
   const hint =
     insteadOfRetryHint ??
@@ -162,10 +193,11 @@ export function buildFailureWorkerEvents(
       /[\x00-\x08\x0E-\x1F\x7F-\x9F]/g,
       '',
     )
-    const s =
-      clean.length > FAILURE_STDERR_TAIL_MAX
-        ? `…${clean.slice(-FAILURE_STDERR_TAIL_MAX)}`
-        : clean
+    const s = trimFailureOutputPreservingLead(
+      clean,
+      FAILURE_STDERR_TAIL_MAX,
+      leadPrefix,
+    )
     text += `\n\nLast output before exit:\n${s}`
   }
   const assistant = {

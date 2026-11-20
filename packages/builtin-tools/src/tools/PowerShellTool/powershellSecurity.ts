@@ -27,10 +27,20 @@ import {
 } from 'src/utils/powershell/parser.js'
 import { isClmAllowedType } from './clmTypes.js'
 
-type PowerShellSecurityResult = {
+export type PowerShellSecurityResult = {
   behavior: 'passthrough' | 'ask' | 'allow'
   message?: string
+  /**
+   * Official 2.1.327 #509: when true, an allow rule naming this command
+   * cannot satisfy the ask and no rule suggestion is offered (whole-tool rule,
+   * auto mode, or bypassPermissions can still allow it).
+   */
+  ruleProof?: boolean
 }
+
+/** Official 2.1.327 #509 (`xt` @313615634). */
+export const GET_MODULE_ASK_MESSAGE =
+  'This command may run Get-Module, which can load a module manifest, and a manifest can run any command. Approve only if you trust every module or path it names or receives from the pipeline'
 
 const POWERSHELL_EXECUTABLES = new Set([
   'pwsh',
@@ -948,11 +958,33 @@ function checkModuleLoading(
 ): PowerShellSecurityResult {
   for (const cmd of getAllCommands(parsed)) {
     const lower = cmd.name.toLowerCase()
-    if (MODULE_LOADING_CMDLETS.has(lower)) {
+    const stripped = lower.includes('\\')
+      ? lower.slice(lower.lastIndexOf('\\') + 1)
+      : lower
+    if (
+      MODULE_LOADING_CMDLETS.has(lower) ||
+      MODULE_LOADING_CMDLETS.has(stripped)
+    ) {
       return {
         behavior: 'ask',
         message:
           'Command loads, installs, or downloads a PowerShell module or script, which can execute arbitrary code',
+      }
+    }
+    // Official 2.1.327 #509 (`zs` @313624947): Get-Module (and alias `gmo` /
+    // PowerShell verb-elided `module`) can load a module manifest which runs
+    // arbitrary commands. Force a rule-proof ask (cannot be satisfied by a
+    // command-specific allow rule; offers no rule suggestion).
+    const canonical = COMMON_ALIASES[stripped]?.toLowerCase() ?? stripped
+    if (
+      stripped === 'module' ||
+      stripped === 'gmo' ||
+      canonical === 'get-module'
+    ) {
+      return {
+        behavior: 'ask',
+        message: GET_MODULE_ASK_MESSAGE,
+        ruleProof: true,
       }
     }
   }

@@ -45,8 +45,8 @@ import {
 } from 'src/utils/fileHistory.js'
 import { logFileOperation } from 'src/utils/fileOperationAnalytics.js'
 import {
+  detectLineEndingsForString,
   type LineEndingType,
-  readFileSyncWithMetadata,
 } from 'src/utils/fileRead.js'
 import { formatFileSize } from 'src/utils/format.js'
 import { getFsImplementation } from 'src/utils/fsOperations.js'
@@ -442,8 +442,20 @@ export const FileEditTool = buildTool({
 
     // densable 2.1.228 #17 Edit: !p || p.isPartialView → not-read (errorCode 6)
     // unless guardSkipped = !J4t(model) && MCt(Edit, path, ...)
+    // Official 2.1.327 (#413): also allow editing unchanged files outside the
+    // project that Claude had already read in full before compaction.
     const readTimestamp = toolUseContext.readFileState.get(fullFilePath)
-    if (!readTimestamp || readTimestamp.isPartialView) {
+    const reliesOnCompactedRead =
+      !readTimestamp &&
+      hasUnchangedReadBeforeCompaction(
+        toolUseContext,
+        fullFilePath,
+        fileContent,
+      )
+    if (
+      (!readTimestamp || readTimestamp.isPartialView) &&
+      !reliesOnCompactedRead
+    ) {
       const guardSkipped = shouldSkipEditUnreadGate(
         fullFilePath,
         toolUseContext,
@@ -468,8 +480,19 @@ export const FileEditTool = buildTool({
     }
 
     // densable: if (p) { mtime > timestamp → HOe && xOe bypass, else stale errorCode 7 }
-    // Also check content/baseline even when mtime did not advance (#430 wKe).
+    // Also check content/baseline even when mtime did not advance (#430 wKe),
+    // and treat entries refreshed behind the model's back (#413 `lHo`) as stale.
     if (readTimestamp) {
+      if (readTimestamp.refreshedBehindModel === true) {
+        logEvent('tengu_edit_tool_stale_read', {})
+        return {
+          result: false,
+          behavior: 'ask',
+          message:
+            'File has been modified since read, either by the user or by a linter. Read it again before attempting to write it.',
+          errorCode: 7,
+        }
+      }
       const lastWriteTime = getFileModificationTime(fullFilePath)
       const normalizedContent = stripBom(fileContent)
       const matchesBaseline = matchesReadStateOrBaseline(
@@ -665,6 +688,7 @@ export const FileEditTool = buildTool({
     let actualOldString = old_string
     let patchForDisplay: ReturnType<typeof getPatchForDisplay> = []
     let updatedFile = ''
+    let reliesOnCompactedRead = false
     try {
       if (fileHistoryEnabled()) {
         await fileHistoryTrackEdit(
@@ -690,23 +714,22 @@ export const FileEditTool = buildTool({
           if (detected.notText) {
             throw new Error(formatNonTextFileRefusal(detected.notText))
           }
-          originalFileContents = rawBytes
-            .toString(detected.encoding)
-            .replaceAll('\r\n', '\n')
+          const raw = rawBytes.toString(detected.encoding)
+          originalFileContents = raw.replaceAll('\r\n', '\n')
           fileExists = true
           encoding = detected.encoding
-          endings = 'LF'
+          endings = detectLineEndingsForString(raw.slice(0, 4096))
         } else {
           const rawBytes = await openedRead.handle.readFile()
           const detected = detectBufferTextEncoding(rawBytes)
           if (detected.notText) {
             throw new Error(formatNonTextFileRefusal(detected.notText))
           }
-          const loaded = readFileForEdit(openedRead.ioPath)
-          originalFileContents = loaded.content
-          fileExists = loaded.fileExists
-          encoding = loaded.encoding
-          endings = loaded.lineEndings
+          const raw = rawBytes.toString(detected.encoding)
+          originalFileContents = raw.replaceAll('\r\n', '\n')
+          fileExists = true
+          encoding = detected.encoding
+          endings = detectLineEndingsForString(raw.slice(0, 4096))
         }
       } catch (e) {
         if (!isENOENT(e)) throw e
@@ -732,9 +755,16 @@ export const FileEditTool = buildTool({
         const lastWriteTime = getFileModificationTime(absoluteFilePath)
         const lastRead = readFileState.get(absoluteFilePath)
         const normalizedContent = stripBom(originalFileContents)
+        reliesOnCompactedRead =
+          !lastRead &&
+          hasUnchangedReadBeforeCompaction(
+            toolUseContext,
+            absoluteFilePath,
+            originalFileContents,
+          )
         // densable 2.1.228 #17 call-path: missing/partial may pass when the same
         // guardSkipped as validateInput would; true staleness still throws.
-        if (!lastRead || lastRead.isPartialView) {
+        if ((!lastRead || lastRead.isPartialView) && !reliesOnCompactedRead) {
           if (
             !shouldAllowCallDespiteMissingOrPartialRead(
               'edit',
@@ -746,14 +776,18 @@ export const FileEditTool = buildTool({
             throw new Error(FILE_UNEXPECTEDLY_MODIFIED_ERROR)
           }
         } else if (
-          (lastWriteTime > lastRead.timestamp ||
+          lastRead &&
+          (lastRead.refreshedBehindModel === true ||
+            lastWriteTime > lastRead.timestamp ||
             isFullEnoughFileRead(lastRead)) &&
           !(
+            lastRead.refreshedBehindModel !== true &&
             isFullEnoughFileRead(lastRead) &&
             matchesReadStateOrBaseline(lastRead, normalizedContent)
           )
         ) {
           if (
+            lastRead.refreshedBehindModel === true ||
             lastWriteTime > lastRead.timestamp ||
             isFullEnoughFileRead(lastRead)
           ) {
@@ -844,6 +878,9 @@ export const FileEditTool = buildTool({
       offset: undefined,
       limit: undefined,
     })
+    if (reliesOnCompactedRead) {
+      readFileState.renewReadBeforeCompaction(absoluteFilePath)
+    }
 
     // 7. Log events
     if (absoluteFilePath.endsWith(`${sep}CLAUDE.md`)) {
@@ -931,34 +968,6 @@ export const FileEditTool = buildTool({
 
 // --
 
-function readFileForEdit(absoluteFilePath: string): {
-  content: string
-  fileExists: boolean
-  encoding: BufferEncoding
-  lineEndings: LineEndingType
-} {
-  try {
-    // eslint-disable-next-line custom-rules/no-sync-fs
-    const meta = readFileSyncWithMetadata(absoluteFilePath)
-    return {
-      content: meta.content,
-      fileExists: true,
-      encoding: meta.encoding,
-      lineEndings: meta.lineEndings,
-    }
-  } catch (e) {
-    if (isENOENT(e)) {
-      return {
-        content: '',
-        fileExists: false,
-        encoding: 'utf8',
-        lineEndings: 'LF',
-      }
-    }
-    throw e
-  }
-}
-
 type NonTextReason = 'not_utf8' | 'nul' | 'utf16be'
 
 const NON_TEXT_REASON_DESCRIPTIONS: Record<NonTextReason, string> = {
@@ -1018,4 +1027,29 @@ function matchesReadStateOrBaseline(
     return matchesReadBaseline(readState.readBaseline, content)
   }
   return fileStateContentMatches(readState, content)
+}
+
+/**
+ * Official 2.1.327 (#413, SEA `uHo`): returns true when the file was read in
+ * full prior to compaction (`readBeforeCompaction`) and its on-disk content
+ * matches that pre-compaction read hash/baseline.
+ */
+export function hasUnchangedReadBeforeCompaction(
+  toolUseContext: Pick<ToolUseContext, 'readFileState'>,
+  fullFilePath: string,
+  fileContent: string,
+): boolean {
+  const beforeCompact =
+    toolUseContext.readFileState.readBeforeCompaction(fullFilePath)
+  if (beforeCompact === undefined) {
+    return false
+  }
+  if (
+    beforeCompact.isPartialView ||
+    beforeCompact.refreshedBehindModel === true ||
+    (beforeCompact.offset ?? 1) > 1
+  ) {
+    return false
+  }
+  return matchesReadStateOrBaseline(beforeCompact, stripBom(fileContent))
 }

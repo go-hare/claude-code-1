@@ -152,9 +152,23 @@ export function toolUseSearchText(input: unknown): string {
     'query',
     'url',
     'skill', // SkillTool
+    // Official 2.1.327 (#490): index edits and written file content
+    'old_string',
+    'new_string',
+    'content',
+    'new_source',
   ]) {
     const v = o[k]
     if (typeof v === 'string') parts.push(v)
+  }
+  // Official 2.1.327 (#490): multi-hunk edits[] (FileEdit / MultiEdit)
+  if (Array.isArray(o.edits)) {
+    for (const edit of o.edits) {
+      if (!edit || typeof edit !== 'object') continue
+      const hunk = edit as Record<string, unknown>
+      if (typeof hunk.old_string === 'string') parts.push(hunk.old_string)
+      if (typeof hunk.new_string === 'string') parts.push(hunk.new_string)
+    }
   }
   // args[] (Tmux/TungstenTool), files[] (SendUserFile) — tool-use
   // renders the joined array as the primary display. Under-count > skip.
@@ -192,9 +206,32 @@ export function toolResultSearchText(r: unknown): string {
   // durationMs-as-string). Allowlist the fields tools actually render.
   // Tools not matching any shape index empty — add them here as found.
   const parts: string[] = []
-  for (const k of ['content', 'output', 'result', 'text', 'message']) {
+  for (const k of [
+    'content',
+    'output',
+    'result',
+    'text',
+    'message',
+    // Official 2.1.327 (#490): FileEditTool result fields
+    'oldString',
+    'newString',
+  ]) {
     const v = o[k]
     if (typeof v === 'string') parts.push(v)
+  }
+  // Official 2.1.327 (#490): FileEditTool / FileWriteTool diff hunks
+  if (Array.isArray(o.structuredPatch)) {
+    for (const hunk of o.structuredPatch) {
+      if (!hunk || typeof hunk !== 'object') continue
+      const lines = (hunk as { lines?: unknown }).lines
+      if (Array.isArray(lines)) {
+        for (const line of lines) {
+          if (typeof line === 'string') {
+            parts.push(line.replace(/^[ +-]/, ''))
+          }
+        }
+      }
+    }
   }
   for (const k of ['filenames', 'lines', 'results']) {
     const v = o[k]

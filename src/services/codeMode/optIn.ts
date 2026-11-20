@@ -458,7 +458,10 @@ export async function settleCodeModeOptInAtStartup(
   if (input.lastCheck) {
     try {
       const lastRefusal = await input.lastCheck()
-      if (lastRefusal !== undefined) {
+      // Official 2.1.327 (#521): Code Mode no longer refuses to start when an
+      // installed mod hooks tool calls; admins can still keep Code Mode off in
+      // managed settings (checked via `isCodeModeDisabledByOrgOrManaged`).
+      if (lastRefusal !== undefined && lastRefusal !== 'mods') {
         const decision: CodeModeOptInDecision = {
           state: 'refused',
           why: lastRefusal,
@@ -467,12 +470,7 @@ export async function settleCodeModeOptInAtStartup(
         return decision
       }
     } catch {
-      const decision: CodeModeOptInDecision = {
-        state: 'refused',
-        why: 'mods',
-      }
-      settleCodeModeOptIn(decision)
-      return decision
+      // Do not refuse Code Mode startup due to mod hook probe failures (#521).
     }
   }
 

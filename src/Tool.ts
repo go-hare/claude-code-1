@@ -1070,6 +1070,8 @@ export type Tool<
   coerceInput?(input: unknown): {
     input: z.infer<Input>
     shapeClass: string
+    /** Official 2.1.328 (#493): optional note appended to the tool_result telling Claude which unread fields were ignored. */
+    resultNote?: string
   } | null
 
   /**

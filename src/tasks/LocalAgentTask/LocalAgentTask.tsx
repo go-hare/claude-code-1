@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs';
 import type { BetaUsage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs';
 import { getIsNonInteractiveSession, getSdkAgentProgressSummariesEnabled } from '../../bootstrap/state.js';
+import { shouldSubagentWaitForOwnSubagents } from '../../utils/forkSubagentGate.js';
 import {
   OUTPUT_FILE_TAG,
   STATUS_TAG,
@@ -570,6 +571,10 @@ export type LocalAgentTaskState = TaskStateBase & {
   type: 'local_agent';
   agentId: string;
   prompt: string;
+  /** Official 2.1.327 (#428): true when spawned/woken from a task-notification so UIs omit raw XML. */
+  promptIsNotice?: boolean;
+  /** Official 2.1.328 (#670): shared first-idle ceiling timestamp propagated across nested subagent waits. */
+  backgroundWaitFirstIdle?: number | null;
   selectedAgent?: AgentDefinition;
   agentType: string;
   /** #385 SEA `isBuiltInAgent: Nd(r)`: distinguishes custom agents named `worker` from built-in worker. */
@@ -703,7 +708,152 @@ export type LocalAgentTaskState = TaskStateBase & {
   handbackBounces?: number;
   /** densable handbackReport — last delivered payload. */
   handbackReport?: { text: string; warning?: string };
+  /** Official 2.1.327 (#427) — last recipient notified that this agent is waiting on own bg work. */
+  waitingNoticeRecipient?: string;
+  /** Official 2.1.327 (#427) — exact text of the waiting notice delivered to `waitingNoticeRecipient`. */
+  waitingNoticeText?: string;
 };
+
+/** Official `q0r` (2.1.327 #426) — 30s wait before flagging a permission-blocked agent. */
+export const AGENT_PERMISSION_WAIT_THRESHOLD_MS = 30_000;
+
+export type AgentPermissionWaitEntry = {
+  agentId: string;
+  toolName: string;
+  openedAt: number;
+};
+
+export type AgentAskNoticeAttachment = {
+  type: 'agent_ask_notice';
+  lines: string[];
+  open: string[];
+};
+
+const agentPermissionWaitsBySession = new Map<string, Map<string, AgentPermissionWaitEntry>>();
+
+function formatPermissionWaitToolLabel(tool: { name: string; isMcp?: boolean } | string): string {
+  if (typeof tool === 'string') {
+    if (tool.startsWith('mcp__')) return 'an MCP tool';
+    return tool || 'a tool';
+  }
+  if (tool.isMcp || tool.name.startsWith('mcp__')) return 'an MCP tool';
+  return tool.name || 'a tool';
+}
+
+/**
+ * Official `BSa` (2.1.327 #426) — record that a background agent opened a
+ * permission prompt under `requestId` for `tool`. Returns an unregister
+ * callback that clears the entry once answered or aborted.
+ */
+export function registerAgentPermissionWait(
+  sessionKey: string,
+  requestId: string,
+  agentId: string,
+  tool: { name: string; isMcp?: boolean } | string,
+  openedAt: number = Date.now(),
+): () => void {
+  let map = agentPermissionWaitsBySession.get(sessionKey);
+  if (!map) {
+    map = new Map();
+    agentPermissionWaitsBySession.set(sessionKey, map);
+  }
+  const entry: AgentPermissionWaitEntry = {
+    agentId,
+    toolName: formatPermissionWaitToolLabel(tool),
+    openedAt,
+  };
+  map.set(requestId, entry);
+  return () => {
+    const cur = agentPermissionWaitsBySession.get(sessionKey);
+    if (cur?.get(requestId) === entry) {
+      cur.delete(requestId);
+      if (cur.size === 0) agentPermissionWaitsBySession.delete(sessionKey);
+    }
+  };
+}
+
+export function clearAgentPermissionWaits(sessionKey?: string): void {
+  if (sessionKey === undefined) {
+    agentPermissionWaitsBySession.clear();
+    return;
+  }
+  agentPermissionWaitsBySession.delete(sessionKey);
+}
+
+function getLastAgentAskNoticeOpen(messages: readonly unknown[]): string[] {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i] as {
+      type?: string;
+      subtype?: string;
+      attachment?: { type?: string; open?: unknown };
+    };
+    if (msg?.type === 'system' && msg.subtype === 'compact_boundary') {
+      break;
+    }
+    if (
+      msg?.type === 'attachment' &&
+      msg.attachment?.type === 'agent_ask_notice' &&
+      Array.isArray(msg.attachment.open)
+    ) {
+      return msg.attachment.open.filter((id): id is string => typeof id === 'string').sort();
+    }
+  }
+  return [];
+}
+
+function arraysEqual(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * Official `WDe` (2.1.327 #426) — build an `agent_ask_notice` attachment when
+ * one or more running background agents have waited >= 30s on a permission
+ * prompt, or emit a clearing notice once none are waiting anymore.
+ */
+export function getAgentAskNoticeAttachment(
+  sessionKey: string,
+  registry: Pick<TaskRegistry, 'get'>,
+  messages: readonly unknown[],
+  recentMessages: readonly unknown[] = messages,
+  nowMs: number = Date.now(),
+): AgentAskNoticeAttachment[] {
+  const entries = agentPermissionWaitsBySession.get(sessionKey);
+  const open: string[] = [];
+  const lines: string[] = [];
+  if (entries && entries.size > 0) {
+    for (const [requestId, { agentId, toolName, openedAt }] of entries) {
+      const task = registry.get(agentId);
+      if (
+        nowMs - openedAt >= AGENT_PERMISSION_WAIT_THRESHOLD_MS &&
+        isLocalAgentTask(task) &&
+        (task.status === 'running' || isParkedKeepaliveAgent(task))
+      ) {
+        open.push(requestId);
+        const starter = task.parentAgentId === undefined ? '' : ` (started by agent ${task.parentAgentId})`;
+        lines.push(`Agent ${agentId}${starter} is waiting for permission to use ${toolName}.`);
+      }
+    }
+  }
+  const sortedOpen = [...open].sort();
+  if (
+    arraysEqual(sortedOpen, getLastAgentAskNoticeOpen(messages)) &&
+    (recentMessages === messages || arraysEqual(sortedOpen, getLastAgentAskNoticeOpen(recentMessages)))
+  ) {
+    return [];
+  }
+  if (open.length === 0) {
+    lines.push('No agent is known to be waiting for permission now.');
+  } else {
+    lines.push(
+      'An agent that is waiting cannot go on until the user answers its permission prompt. A chat message from the user or from you does not answer it. Tell the user which agents are waiting. This list replaces any earlier one.',
+    );
+  }
+  return [{ type: 'agent_ask_notice', lines, open }];
+}
 
 function initAgentTaskOutput(agentId: string): void {
   if (isTranscriptPersistenceDisabled()) {
@@ -737,6 +887,11 @@ export function updateLocalAgentIsIdle(taskId: string, isIdle: boolean, setAppSt
     if (task.isIdle === isIdle) return task;
     return { ...task, isIdle };
   });
+}
+
+/** Official 2.1.328 (#669): allow parked keepalive waits in interactive mode or when subagent-wait-for-own-subagents is active. */
+function allowsParkedSubagentKeepalive(): boolean {
+  return !getIsNonInteractiveSession() || shouldSubagentWaitForOwnSubagents({ isNonInteractive: true });
 }
 
 export function isLocalAgentTask(task: unknown): task is LocalAgentTaskState {
@@ -1102,8 +1257,12 @@ export function queuePendingMessage(
         ...(shownAs !== undefined ? { shownAs } : {}),
       };
   let isRunningBackgrounded = false;
+  let waitingNoticeRecipientToClear: string | undefined;
   updateTaskState<LocalAgentTaskState>(taskId, setAppState, task => {
     isRunningBackgrounded = task.status === 'running' && task.isBackgrounded === true;
+    if (task.waitingNoticeRecipient !== undefined) {
+      waitingNoticeRecipientToClear = task.waitingNoticeRecipient;
+    }
     return {
       ...task,
       ...(origin?.kind === 'human' && task.chatEngaged !== true && task.chatPinForfeited !== true
@@ -1112,6 +1271,24 @@ export function queuePendingMessage(
       pendingMessages: [...task.pendingMessages, entry],
     };
   });
+
+  // Official 2.1.327 (#427): clear any deduped waiting-notice recipient when a
+  // new message is queued to the agent so the next waiting notice wakes the
+  // caller again.
+  if (waitingNoticeRecipientToClear !== undefined) {
+    let stateSnapshot: AppState | undefined;
+    setAppState(prev => {
+      stateSnapshot = prev;
+      return prev;
+    });
+    if (stateSnapshot) {
+      clearAgentWaitingNotice(
+        taskId,
+        waitingNoticeRecipientToClear,
+        createTaskRegistry(() => stateSnapshot!, setAppState),
+      );
+    }
+  }
 
   // #1591: When queuing a message for a running backgrounded agent, move any
   // foreground shell command it is currently running to the background so the
@@ -1185,12 +1362,16 @@ export function drainPendingMessages(
     return [];
   }
   let drained: PendingAgentMessage[] = [];
+  let waitingNoticeRecipientToClear: string | undefined;
   setAppState(prev => {
     const task = prev.tasks?.[taskId];
     if (!isLocalAgentTask(task) || task.pendingMessages.length === 0) {
       return prev;
     }
     drained = task.pendingMessages;
+    if (task.waitingNoticeRecipient !== undefined) {
+      waitingNoticeRecipientToClear = task.waitingNoticeRecipient;
+    }
     return {
       ...prev,
       tasks: {
@@ -1202,6 +1383,9 @@ export function drainPendingMessages(
       },
     };
   });
+  if (waitingNoticeRecipientToClear !== undefined) {
+    clearAgentWaitingNotice(taskId, waitingNoticeRecipientToClear, createTaskRegistry(getAppState, setAppState));
+  }
   return drained;
 }
 
@@ -1282,6 +1466,23 @@ export function isAgentWaitingOnOwnBackgroundWork(task: TaskState | undefined): 
   return false;
 }
 
+/**
+ * Official `m7n` (2.1.327 #427) — clear a task's deduped waiting-notice
+ * recipient when the caller sends it a message so the next waiting notice
+ * wakes the caller again.
+ */
+export function clearAgentWaitingNotice(taskId: string, recipientId: string, registry: TaskRegistry): void {
+  registry.update<LocalAgentTaskState>(taskId, task =>
+    task.waitingNoticeRecipient === recipientId
+      ? { ...task, waitingNoticeRecipient: undefined, waitingNoticeText: undefined }
+      : task,
+  );
+}
+
+/** Official `dno` — placeholder text when an agent stopped waiting on its own bg work without a report. */
+export const HANDBACK_WAITING_PLACEHOLDER =
+  'This agent stopped with background work of its own still running and has not delivered a report yet.';
+
 export async function enqueueAgentNotification({
   taskId,
   description,
@@ -1296,6 +1497,9 @@ export async function enqueueAgentNotification({
   worktreePath,
   worktreeBranch,
   ownerAgentId,
+  handbackRecipient,
+  pointsAtStandingReport = false,
+  unreadMessages = 0,
   registry,
 }: {
   taskId: string;
@@ -1328,6 +1532,12 @@ export async function enqueueAgentNotification({
    * (XV re-notify path stamps it).
    */
   ownerAgentId?: string;
+  /** Official 2.1.327 (#427) — recipient of standing SubagentHandback report. */
+  handbackRecipient?: string;
+  /** Official 2.1.327 (#427) — true when interim completion points at a standing report. */
+  pointsAtStandingReport?: boolean;
+  /** Official 2.1.327 (#427) — unread follow-up messages count. */
+  unreadMessages?: number;
   /** densable Put `taskRegistry` — required Xm. */
   registry: TaskRegistry;
 }): Promise<void> {
@@ -1358,7 +1568,7 @@ export async function enqueueAgentNotification({
     const g = registry.get(owner);
     if (g && g.type === 'local_agent') {
       ownerRunning = g.status === 'running';
-      ownerWasParked = isParkedKeepaliveAgent(g) && !getIsNonInteractiveSession();
+      ownerWasParked = isParkedKeepaliveAgent(g) && allowsParkedSubagentKeepalive();
     }
   }
   // Skip tB only on first-notify + owner still running.
@@ -1432,13 +1642,19 @@ export async function enqueueAgentNotification({
     ? `\n<${WORKTREE_TAG}><${WORKTREE_PATH_TAG}>${escapeXml(worktreePath)}</${WORKTREE_PATH_TAG}>${worktreeBranch ? `<${WORKTREE_BRANCH_TAG}>${escapeXml(worktreeBranch)}</${WORKTREE_BRANCH_TAG}>` : ''}</${WORKTREE_TAG}>`
     : '';
   const lateMessageNote =
-    status === 'completed' && claimedTask && claimedTask.pendingMessages.length > 0
+    status === 'completed' &&
+    claimedTask &&
+    ((claimedTask.pendingMessages?.length ?? 0) > 0 ||
+      (unreadMessages > 0 && (claimedTask.status === 'running' || claimedTask.resuming)))
       ? " One or more messages sent to this agent arrived after this run's last step, too late for the result below. The agent is being resumed with them and will notify again. Wait for that notification before resending."
       : '';
   const usageLimitNote = usageLimit
     ? ` This agent's work so far is saved. Once its requests are accepted again, send the agent a message (${SEND_MESSAGE_TOOL_NAME}) to let it continue from where it stopped instead of starting a new agent.`
     : '';
-  const noteSection = `\n<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.${lateMessageNote}${usageLimitNote}</note>`;
+  const baseNote = waitingOnOwnWork
+    ? 'This agent stopped with background work of its own still running. It may resume on its own when that work completes or reports, and the same task-id notifies again if it does; the result below may be interim.'
+    : 'A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.';
+  const noteSection = `\n<note>${baseNote}${lateMessageNote}${usageLimitNote}</note>`;
 
   const message = `<${TASK_NOTIFICATION_TAG}>
 <${TASK_ID_TAG}>${escapeXml(taskId)}</${TASK_ID_TAG}>${toolUseIdLine}
@@ -1450,7 +1666,41 @@ export async function enqueueAgentNotification({
   // Local route: owner only while running (can drain). Parked/terminal → main.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { getMainThreadAgentId } = require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js');
-  const routeAgentId = ownerRunning && owner ? asAgentId(owner) : getMainThreadAgentId();
+  const mainThreadId = getMainThreadAgentId();
+  const routeAgentId = ownerRunning && owner ? asAgentId(owner) : mainThreadId;
+
+  // Official 2.1.327 (#427): reduce repeat wake-ups in auto mode from agents
+  // waiting on their own background commands. When the same waiting notice text
+  // was already delivered to this recipient and no new messages arrived, mark
+  // the repeat notification passive (`shouldQuery: false, handbackPointer: true`).
+  const isWaitingNoticeCandidate =
+    (finalMessage === HANDBACK_WAITING_PLACEHOLDER || pointsAtStandingReport) &&
+    waitingOnOwnWork &&
+    lateMessageNote === '' &&
+    maxTurnsReached === undefined;
+  let repeatedWaitingRecipient: string | undefined;
+  registry.update<LocalAgentTaskState>(taskId, task => {
+    const canTrack = isWaitingNoticeCandidate && task.resuming !== true;
+    if (canTrack && task.waitingNoticeText === finalMessage) {
+      repeatedWaitingRecipient = task.waitingNoticeRecipient;
+    }
+    const nextRecipient = canTrack ? String(routeAgentId) : undefined;
+    const nextText = canTrack ? finalMessage : undefined;
+    if (task.waitingNoticeRecipient === nextRecipient && task.waitingNoticeText === nextText) {
+      return task;
+    }
+    return {
+      ...task,
+      waitingNoticeRecipient: nextRecipient,
+      waitingNoticeText: nextText,
+    };
+  });
+  const effectiveHandbackRecipient = repeatedWaitingRecipient ?? handbackRecipient;
+  const suppressRepeatWake =
+    effectiveHandbackRecipient !== undefined &&
+    String(routeAgentId) === String(mainThreadId) &&
+    effectiveHandbackRecipient === String(routeAgentId);
+
   enqueuePendingNotification(
     {
       value: message,
@@ -1460,10 +1710,12 @@ export async function enqueueAgentNotification({
       skipAttachments: true,
       taskId,
       ...(usage !== undefined ? { usage } : {}),
+      ...(suppressRepeatWake ? { shouldQuery: false, handbackPointer: true } : {}),
+      ...(String(routeAgentId) !== String(mainThreadId) ? { childCompletion: { handbackRecipient } } : {}),
       // densable vh/Fe: isMeta so shouldQuery:false skip-attachment path applies;
       // do not stamp uuid (vh requires uuid===undefined).
       isMeta: true,
-    },
+    } as Parameters<typeof enqueuePendingNotification>[0],
     { turnAttribution: 'inherit' },
   );
 
@@ -2018,36 +2270,60 @@ export function rewireOrphanedOwnerNotifications(
   registry: TaskRegistry,
   opts?: { force?: boolean },
 ): void {
+  const ownerTask = registry.get(ownerTaskId);
   // Official: if (Wl(r)&&YC(r)&&!pn()) return
   if (!opts?.force) {
-    const t = registry.get(ownerTaskId);
-    if (t && t.type === 'local_agent' && isParkedKeepaliveAgent(t) && !getIsNonInteractiveSession()) {
+    if (
+      ownerTask &&
+      ownerTask.type === 'local_agent' &&
+      isParkedKeepaliveAgent(ownerTask) &&
+      allowsParkedSubagentKeepalive()
+    ) {
       return;
     }
   }
 
-  // densable Zeo: re-cf with agentId:mi() for orphaned owner-routed notifs.
+  // densable h7n/Zeo (2.1.327 #425): re-enqueue orphaned owner-routed
+  // task-notifications onto main, including when the child task was already
+  // evicted (`childCompletion !== undefined && owner?.status !== 'killed'`).
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { getMainThreadAgentId } = require('../../bootstrap/state.js') as typeof import('../../bootstrap/state.js');
   const mainId = getMainThreadAgentId();
+  type ChildCompletionCommand = {
+    childCompletion?: { handbackRecipient?: string };
+    userStopNotice?: boolean;
+  };
+  const ownerStillRunning = isLocalAgentTask(ownerTask) && ownerTask.status === 'running';
   const dequeued = dequeueAllMatching(cmd => {
+    const ext = cmd as typeof cmd & ChildCompletionCommand;
     if (cmd.mode !== 'task-notification') return false;
     if (cmd.agentId !== ownerTaskId) return false;
+    if (ext.userStopNotice === true) return false;
     const child = cmd.taskId ? registry.get(cmd.taskId) : undefined;
+    if (child === undefined) {
+      return ext.childCompletion !== undefined && ownerTask?.status !== 'killed';
+    }
     const childOwner =
-      child && child.type === 'local_agent'
+      child.type === 'local_agent'
         ? ((child as LocalAgentTaskState).ownerAgentId ?? (child as LocalAgentTaskState).notificationTargetAgentId)
-        : child && child.type === 'local_workflow'
+        : child.type === 'local_workflow'
           ? ((child as { ownerAgentId?: string; agentId?: string }).ownerAgentId ??
             (child as { agentId?: string }).agentId)
           : undefined;
     return childOwner === ownerTaskId;
   });
   for (const cmd of dequeued) {
+    const ext = cmd as typeof cmd & ChildCompletionCommand;
+    const handbackRecipient = ext.childCompletion?.handbackRecipient;
+    if (handbackRecipient === ownerTaskId && ownerStillRunning) {
+      continue;
+    }
+    const suppressWake = handbackRecipient !== undefined && handbackRecipient === String(mainId);
     enqueuePendingNotification({
       ...cmd,
       agentId: mainId,
-    });
+      ...(suppressWake ? { shouldQuery: false, handbackPointer: true } : {}),
+    } as Parameters<typeof enqueuePendingNotification>[0]);
   }
 }
 
@@ -2214,6 +2490,28 @@ export function completeAgentTask(result: AgentToolResult, registry: TaskRegistr
       ? undefined
       : computePanelEvictAfter({ retain: task.retain, keepaliveReasons: nextKeepalive }, { park: true });
 
+    const parkedForKeepalive = isParkedKeepaliveAgent(completedCandidate) && allowsParkedSubagentKeepalive();
+    let sharedBackgroundWaitFirstIdle = task.backgroundWaitFirstIdle;
+    if (parkedForKeepalive) {
+      const parentTask = task.parentAgentId ? registry.get(task.parentAgentId) : undefined;
+      const inheritedFirstIdle =
+        isLocalAgentTask(parentTask) && parentTask.backgroundWaitFirstIdle != null
+          ? parentTask.backgroundWaitFirstIdle
+          : (task.backgroundWaitFirstIdle ?? null);
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { advanceSharedPrintBgWaitFirstIdle } =
+          require('../../cli/printBgWait.js') as typeof import('../../cli/printBgWait.js');
+        sharedBackgroundWaitFirstIdle = advanceSharedPrintBgWaitFirstIdle({
+          firstIdleAt: inheritedFirstIdle,
+          hasRunningBgTasks: true,
+          now: Date.now(),
+        });
+      } catch {
+        sharedBackgroundWaitFirstIdle = inheritedFirstIdle ?? Date.now();
+      }
+    }
+
     const next = {
       ...task,
       status: 'completed' as const,
@@ -2233,14 +2531,17 @@ export function completeAgentTask(result: AgentToolResult, registry: TaskRegistr
       },
       endTime: Date.now(),
       keepaliveReasons: nextKeepalive,
+      ...(sharedBackgroundWaitFirstIdle !== undefined
+        ? { backgroundWaitFirstIdle: sharedBackgroundWaitFirstIdle }
+        : {}),
       // densable QYi(park:true): non-empty KA or chatEngaged → no grace; empty → panel grace
       evictAfter,
       abortController: undefined,
       unregisterCleanup: undefined,
       selectedAgent: undefined,
     };
-    // Official: i = YC(d) && !pn() — skip Zeo when parked interactive
-    parkedInteractive = isParkedKeepaliveAgent(next) && !getIsNonInteractiveSession();
+    // Official: i = YC(d) && (!pn() || shouldSubagentWaitForOwnSubagents) — skip Zeo when parked
+    parkedInteractive = isParkedKeepaliveAgent(next) && allowsParkedSubagentKeepalive();
     return next;
   });
   if (completed) {
@@ -2322,6 +2623,8 @@ export function registerAsyncAgent({
   agentId,
   description,
   prompt,
+  promptIsNotice,
+  backgroundWaitFirstIdle,
   selectedAgent,
   setAppState,
   parentAbortController,
@@ -2344,6 +2647,8 @@ export function registerAsyncAgent({
   agentId: string;
   description: string;
   prompt: string;
+  promptIsNotice?: boolean;
+  backgroundWaitFirstIdle?: number | null;
   selectedAgent: AgentDefinition;
   setAppState: SetAppState;
   parentAbortController?: AbortController;
@@ -2379,6 +2684,14 @@ export function registerAsyncAgent({
     : createAbortController();
 
   const resolvedOwner = ownerAgentId ?? notificationTargetAgentId;
+  let inheritedFirstIdle = backgroundWaitFirstIdle;
+  if (inheritedFirstIdle === undefined && getAppState) {
+    const parentCandidateId = parentAgentId ?? resolvedOwner;
+    const parentCandidate = parentCandidateId ? getAppState().tasks?.[parentCandidateId] : undefined;
+    if (isLocalAgentTask(parentCandidate) && parentCandidate.backgroundWaitFirstIdle != null) {
+      inheritedFirstIdle = parentCandidate.backgroundWaitFirstIdle;
+    }
+  }
 
   const taskState: LocalAgentTaskState = {
     ...createTaskStateBase(agentId, 'local_agent', description, toolUseId),
@@ -2386,6 +2699,8 @@ export function registerAsyncAgent({
     status: 'running',
     agentId,
     prompt,
+    ...(promptIsNotice === true ? { promptIsNotice: true } : {}),
+    ...(inheritedFirstIdle !== undefined ? { backgroundWaitFirstIdle: inheritedFirstIdle } : {}),
     selectedAgent,
     agentType: selectedAgent.agentType ?? 'general-purpose',
     isBuiltInAgent: isBuiltInAgent(selectedAgent),
@@ -2445,9 +2760,9 @@ export function registerAsyncAgent({
     },
   });
 
-  // densable nested spawn: if (!pn()) Gge(Re, `agent:${st}`, registry)
+  // densable nested spawn: if (!pn() || shouldSubagentWaitForOwnSubagents) Gge(Re, `agent:${st}`, registry)
   // Resume/observer stamp owner without Gge (attachOwnerKeepalive:false).
-  if (attachOwnerKeepalive && resolvedOwner && !getIsNonInteractiveSession()) {
+  if (attachOwnerKeepalive && resolvedOwner && allowsParkedSubagentKeepalive()) {
     const registry = xm(setAppState, getAppState);
     if (registry) {
       addKeepaliveReason(resolvedOwner, agentKeepaliveReason(agentId), registry);
@@ -2470,6 +2785,8 @@ export function registerAgentForeground({
   agentId,
   description,
   prompt,
+  promptIsNotice,
+  backgroundWaitFirstIdle,
   selectedAgent,
   setAppState,
   autoBackgroundMs,
@@ -2488,6 +2805,8 @@ export function registerAgentForeground({
   agentId: string;
   description: string;
   prompt: string;
+  promptIsNotice?: boolean;
+  backgroundWaitFirstIdle?: number | null;
   selectedAgent: AgentDefinition;
   setAppState: SetAppState;
   autoBackgroundMs?: number;
@@ -2525,6 +2844,14 @@ export function registerAgentForeground({
 
   // densable OSu: ownerAgentId:t at register (no Gge until mid-bg).
   const resolvedOwner = ownerAgentId ?? notificationTargetAgentId;
+  let inheritedFirstIdle = backgroundWaitFirstIdle;
+  if (inheritedFirstIdle === undefined && getAppState) {
+    const parentCandidateId = parentAgentId ?? resolvedOwner;
+    const parentCandidate = parentCandidateId ? getAppState().tasks?.[parentCandidateId] : undefined;
+    if (isLocalAgentTask(parentCandidate) && parentCandidate.backgroundWaitFirstIdle != null) {
+      inheritedFirstIdle = parentCandidate.backgroundWaitFirstIdle;
+    }
+  }
 
   const taskState: LocalAgentTaskState = {
     ...createTaskStateBase(agentId, 'local_agent', description, toolUseId),
@@ -2532,6 +2859,8 @@ export function registerAgentForeground({
     status: 'running',
     agentId,
     prompt,
+    ...(promptIsNotice === true ? { promptIsNotice: true } : {}),
+    ...(inheritedFirstIdle !== undefined ? { backgroundWaitFirstIdle: inheritedFirstIdle } : {}),
     selectedAgent,
     agentType: selectedAgent.agentType ?? 'general-purpose',
     isBuiltInAgent: isBuiltInAgent(selectedAgent),

@@ -27,8 +27,10 @@ import {
   type KeyboardEvent,
   type WheelEvent,
   hitTest,
+  isInSigcontResumeGrace,
   isMultiCharTextEvent,
   useHoverTracked,
+  useInputNow,
   AccessibilityContext,
   useFocusReclaim,
   useOptionalKeybindingContext,
@@ -135,7 +137,12 @@ import type { ImageDimensions } from '../../utils/imageResizer.js';
 import { truncateToWidth } from '../../utils/truncate.js';
 import { SelectInputOption } from './select-input-option.js';
 import { SelectOption, SelectZiOption } from './select-option.js';
-import { useSelectInput } from './use-select-input.js';
+import {
+  isMetaShortcutBound,
+  isSinglePrintableChar,
+  isWithinSigcontGraceWindow,
+  useSelectInput,
+} from './use-select-input.js';
 import { useSelectState } from './use-select-state.js';
 import { useShouldDropWheel, useStrayClickGuard } from './use-stray-click.js';
 
@@ -1184,7 +1191,72 @@ export type SelectProps<T> = {
    * densable inner oo `onRowKeyDown`.
    */
   readonly onRowKeyDown?: (event: KeyboardEvent, focusedIndex: number) => void;
+
+  /**
+   * Official 2.1.327 (#500): when true, Down arrow stops at the last row (No)
+   * instead of wrapping around, and a digit past the last option focuses No.
+   */
+  readonly stopsAtLastRow?: boolean;
+
+  /**
+   * When true, Up arrow stays on the first row instead of wrapping around.
+   */
+  readonly holdsFirstRow?: boolean;
 };
+
+/**
+ * Official 2.1.327 (#500, SEA `Yn`): permission prompts stop at the last row (No)
+ * instead of wrapping when indexes are shown (or `declineValue` is the last row).
+ */
+export function shouldStopAtLastRow<T>(
+  hideIndexes: boolean,
+  options: readonly OptionWithDescription<T>[],
+  declineValue?: T,
+  explicit?: boolean,
+): boolean {
+  if (explicit !== undefined) return explicit;
+  return !hideIndexes && declineValue !== undefined && options.at(-1)?.value === declineValue;
+}
+
+/**
+ * Official 2.1.327 (#467, SEA `kAe`): state transition for screen-reader early
+ * digit + Enter handling so an early digit+Enter clears the refusal latch and
+ * never causes the next digit to be dropped.
+ */
+export function advanceScreenReaderEarlyInput(state: {
+  earlyRefused: 'digit' | 'text' | null;
+  refusing: boolean;
+  key: 'return' | 'digit' | 'other';
+  optionCount: number;
+}): {
+  earlyRefused: 'digit' | 'text' | null;
+  action: 'ignore' | 'clear-and-warn' | 'accept';
+  warning?: string;
+} {
+  if (state.key === 'return') {
+    if (state.refusing && state.earlyRefused !== 'digit') {
+      return { earlyRefused: state.earlyRefused, action: 'ignore' };
+    }
+    if (state.earlyRefused !== null) {
+      return {
+        earlyRefused: null,
+        action: 'clear-and-warn',
+        warning: `Nothing was chosen. Enter a number between 1 and ${state.optionCount}.`,
+      };
+    }
+    return { earlyRefused: null, action: 'accept' };
+  }
+  if (state.key === 'digit') {
+    if (state.earlyRefused !== null) {
+      return { earlyRefused: state.earlyRefused, action: 'ignore' };
+    }
+    if (state.refusing) {
+      return { earlyRefused: 'digit', action: 'ignore' };
+    }
+    return { earlyRefused: null, action: 'accept' };
+  }
+  return { earlyRefused: state.earlyRefused, action: 'accept' };
+}
 
 /**
  * #865 — In vim mode, pressing Esc while typing in a free-text input option
@@ -1239,6 +1311,8 @@ export function Select<T>({
   pastedContents,
   onRemoveImage,
   onRowKeyDown,
+  stopsAtLastRow: stopsAtLastRowProp,
+  holdsFirstRow = false,
 }: SelectProps<T>): React.ReactNode {
   // Image selection mode state
   const [imagesSelected, setImagesSelected] = useState(false);
@@ -1388,6 +1462,13 @@ export function Select<T>({
     onCancel?.();
   };
 
+  const effectiveStopsAtLastRow = shouldStopAtLastRow(
+    hideIndexes && declineValue === undefined,
+    options,
+    declineValue,
+    stopsAtLastRowProp,
+  );
+
   const state = useSelectState({
     visibleOptionCount: leftoverWindow,
     moreRowLines,
@@ -1398,6 +1479,8 @@ export function Select<T>({
     onCancel: onCancel ? effectiveOnCancel : undefined,
     onFocus,
     focusValue: defaultFocusValue,
+    stopsAtLastRow: effectiveStopsAtLastRow,
+    holdsFirstRow,
   });
   focusedValueRef.current = state.focusedValue;
   useEffect(() => {
@@ -1463,13 +1546,18 @@ export function Select<T>({
       )
     : undefined;
   const leftoverScreenReader = useContext(AccessibilityContext);
-  const leftoverHasKeybinding = useOptionalKeybindingContext() !== null;
+  const keybindingCtx = useOptionalKeybindingContext();
+  const leftoverHasKeybinding = keybindingCtx !== null;
   const leftoverSrRadio = leftoverScreenReaderRadio(leftoverScreenReader, onChange !== undefined);
-  const leftoverFocusOn = leftoverBgOn(!isDisabled, leftoverSrRadio);
+  // Official 2.1.327 (#446): gate focus reclaim on options.length > 0 so late-loaded
+  // rows trigger a fresh focus reclaim when transitioning from 0 -> N rows.
+  const leftoverFocusOn = leftoverBgOn(!isDisabled && options.length > 0, leftoverSrRadio);
   const leftoverG5Nav = leftoverNavigableCount(options);
   const [leftoverG5Typed, setLeftoverG5Typed] = useState('');
   const [leftoverG5Error, setLeftoverG5Error] = useState<string | null>(null);
   const [leftoverG5ArrowNav, setLeftoverG5ArrowNav] = useState(false);
+  const inputClock = useInputNow();
+  const srEarlyRefusedRef = useRef<'digit' | 'text' | null>(null);
   const [srInputOptionValue, setSrInputOptionValue] = useState<T | null>(null);
   const srInputOption =
     srInputOptionValue !== null
@@ -1616,9 +1704,34 @@ export function Select<T>({
     // and non-key-name sequences are ignored.
     const focusedOpt = options.find(opt => opt.value === state.getFocusedValue());
     const isInputFocused = focusedOpt?.type === 'input';
+    // Official 2.1.328 (#558): in terminals that send Alt/Option as Esc + key,
+    // an unbound single-character printable Alt/Option key at a permission
+    // prompt / question declines — without hijacking bound shortcuts or named
+    // keys (e.g. Alt+Up / Alt+Down). Supports both `event.shortcutKey` (when
+    // meta clears `event.key`) and `event.key`.
+    const metaChar = event.shortcutKey || event.key;
+    if (
+      !leftoverSrRadio &&
+      (disablePrintableKeybindings || declineValue !== undefined) &&
+      !isInputFocused &&
+      event.meta &&
+      !event.ctrl &&
+      !event.superKey &&
+      isSinglePrintableChar(metaChar, event.name) &&
+      !isMetaShortcutBound(keybindingCtx, metaChar, { shift: event.shift })
+    ) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (onCancel) {
+        effectiveOnCancel();
+      } else if (declineValue !== undefined) {
+        state.focusOption(declineValue);
+      }
+      return;
+    }
     const isNonKeyName = event.key.length > 1 && event.name !== event.key;
     const isPrintable = isNonKeyName || (!event.ctrl && !event.meta && !event.superKey && [...event.key].length === 1);
-    if (disablePrintableKeybindings && !isInputFocused && isPrintable) {
+    if (!leftoverSrRadio && disablePrintableKeybindings && !isInputFocused && isPrintable) {
       event.preventDefault();
       event.stopImmediatePropagation();
       if (declineValue !== undefined) {
@@ -1630,6 +1743,7 @@ export function Select<T>({
       if (event.ctrl || event.meta) return;
       if (event.key === 'escape') {
         event.preventDefault();
+        srEarlyRefusedRef.current = null;
         if (srInputOption) {
           srInputOption.onChange(srInputOption.initialValue ?? '');
           setSrInputOptionValue(null);
@@ -1642,9 +1756,29 @@ export function Select<T>({
         onCancel?.();
         return;
       }
+      // Official 2.1.327 (#520): ignore non-Esc answers briefly after SIGCONT.
+      if (isWithinSigcontGraceWindow() || isInSigcontResumeGrace(inputClock)) {
+        return;
+      }
       if (event.key === 'return') {
         event.preventDefault();
-        if (leftoverG5Refuse(refuseInput)) return;
+        // Official 2.1.327 (#467): when a digit was refused during the early settle
+        // window, Enter clears `srEarlyRefusedRef` and notifies instead of leaving
+        // the latch stuck and dropping the next number.
+        const step = advanceScreenReaderEarlyInput({
+          earlyRefused: srEarlyRefusedRef.current,
+          refusing: leftoverG5Refuse(refuseInput),
+          key: 'return',
+          optionCount: leftoverG5Nav,
+        });
+        srEarlyRefusedRef.current = step.earlyRefused;
+        if (step.action === 'ignore') return;
+        if (step.action === 'clear-and-warn') {
+          setLeftoverG5Typed('');
+          setLeftoverG5ArrowNav(false);
+          setLeftoverG5Error(step.warning ?? null);
+          return;
+        }
         if (srInputOption) {
           leftoverG5Commit(leftoverG5Typed);
           return;
@@ -1684,6 +1818,7 @@ export function Select<T>({
       if (leftoverArrowNav && (event.name === 'up' || event.name === 'down')) {
         event.preventDefault();
         if (leftoverG5Refuse(refuseInput)) return;
+        srEarlyRefusedRef.current = null;
         setLeftoverG5Error(null);
         setLeftoverG5Typed('');
         setLeftoverG5ArrowNav(true);
@@ -1694,7 +1829,17 @@ export function Select<T>({
       }
       if (leftoverG5Digit(event.key)) {
         event.preventDefault();
-        if (leftoverG5Refuse(refuseInput)) return;
+        const step = advanceScreenReaderEarlyInput({
+          earlyRefused: srEarlyRefusedRef.current,
+          refusing: leftoverG5Refuse(refuseInput),
+          key: 'digit',
+          optionCount: leftoverG5Nav,
+        });
+        srEarlyRefusedRef.current = step.earlyRefused;
+        if (step.action === 'ignore') {
+          setLeftoverG5Error(null);
+          return;
+        }
         setLeftoverG5Error(null);
         setLeftoverG5Typed(prev => prev + event.key);
         return;
@@ -1743,6 +1888,7 @@ export function Select<T>({
     disableSelection: disableSelection || (hideIndexes || disablePrintableKeybindings ? 'numeric' : false),
     disablePrintableKeybindings,
     declineValue,
+    stopsAtLastRow: effectiveStopsAtLastRow,
     state,
     options,
     isMultiSelect: false, // Select is always single-choice

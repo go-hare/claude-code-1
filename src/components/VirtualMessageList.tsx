@@ -436,6 +436,56 @@ export function shouldCompensateHeightShrinkage(
   return prevHeight - nextHeight > viewportHeight;
 }
 
+/**
+ * Official 2.1.327 (#458): transcript search anchor keyed by message key +
+ * rowsPast (or `'bottom'` when sticky) instead of a raw `scrollTop`, so
+ * cancelling a search after scrolling far away in a long virtualized session
+ * returns accurately even when unmeasured items changed the total height.
+ */
+export type SearchAnchor = 'bottom' | { key: string; rowsPast: number };
+
+/**
+ * Official 2.1.327 (#457): compute the next match message pointer and whether
+ * a phantom/unmounted skip should continue. Bounded by `Math.min(20, matchCount)`
+ * so 1-message match lists cleanly wrap around occurrences without aborting.
+ */
+export function advanceSearchMatchPointer(
+  ptr: number,
+  delta: 1 | -1,
+  matchCount: number,
+  skipped: number,
+): { nextPtr: number; canSkipMore: boolean } | null {
+  if (matchCount <= 0) return null;
+  const nextPtr = (ptr + delta + matchCount) % matchCount;
+  const canSkipMore = skipped + 1 < Math.min(20, matchCount);
+  return { nextPtr, canSkipMore };
+}
+
+/**
+ * Official 2.1.327 (#458): resolve the estimated scrollTop for nearest-match
+ * selection given a `SearchAnchor` and the current virtualized offsets.
+ */
+export function resolveSearchAnchorScrollTop(
+  anchor: SearchAnchor | null,
+  keys: readonly string[],
+  offsets: ArrayLike<number>,
+  origin: number,
+  scrollHeight: number,
+  viewportHeight: number,
+  fallbackScrollTop: number,
+): number {
+  if (anchor === 'bottom') {
+    return Math.max(0, scrollHeight - viewportHeight);
+  }
+  if (anchor !== null) {
+    const idx = keys.indexOf(anchor.key);
+    if (idx >= 0 && idx < offsets.length) {
+      return origin + offsets[idx]! + anchor.rowsPast;
+    }
+  }
+  return fallbackScrollTop;
+}
+
 export function VirtualMessageList({
   messages,
   scrollRef,
@@ -463,8 +513,6 @@ export function VirtualMessageList({
   // compaction, /clear, or itemKey change. Duplicate sibling keys (upstream
   // uuid-dup) get `#1`, `#2`, … so React/virtual scroll never mounts two
   // rows under the same key (2.1.229 #6 long-stream double-print/disappear).
-  const [shrinkEpoch, setShrinkEpoch] = useState(0);
-  const prevMeasuredHeightsRef = useRef<Map<string, number>>(new Map());
   const keysCacheRef = useRef(createVirtualItemKeyCache());
   const keys = useMemo(
     () => buildVirtualItemKeys(messages, itemKey, keysCacheRef.current, shortMsgType),
@@ -482,7 +530,7 @@ export function VirtualMessageList({
     getItemHeight,
     onLayout: onVirtualLayout,
     scrollToIndex,
-  } = useVirtualScroll(scrollRef, keys, columns, layoutEpoch + shrinkEpoch);
+  } = useVirtualScroll(scrollRef, keys, columns, layoutEpoch);
   const [rawStart, rawEnd] = range;
   const end = Math.min(rawEnd, messages.length);
   const start = Math.min(rawStart, end);
@@ -543,6 +591,7 @@ export function VirtualMessageList({
     getItemElement,
     getItemTop,
     messages,
+    keys,
     scrollToIndex,
   });
   jumpState.current = {
@@ -551,6 +600,7 @@ export function VirtualMessageList({
     getItemElement,
     getItemTop,
     messages,
+    keys,
     scrollToIndex,
   };
 
@@ -683,37 +733,12 @@ export function VirtualMessageList({
     [scrollRef, indexByRevealRequestId],
   );
 
-  // densable `Wt` + 2.1.321 #1908 — layout-pass listener: reveal tick, `wb` `ut`,
-  // and height-shrinkage boundary re-render compensation when a tool result shrinks
-  // by more than one viewport height before scrolling off-top.
-  const rangeBoundsRef = useRef({ start, end, keys });
-  rangeBoundsRef.current = { start, end, keys };
+  // densable `Wt` — layout-pass listener: reveal tick and `wb` `ut`
+  // (height-shrinkage compensation is handled by useVirtualScroll's largeShrink → setRemeasureTick).
   const onLayout = useCallback(() => {
     tickReveal(false);
     onVirtualLayout();
-    const viewportHeight = scrollRef.current?.getViewportHeight() ?? 0;
-    if (viewportHeight <= 0) return;
-    const { start: s, end: e, keys: ks } = rangeBoundsRef.current;
-    let needsCompensate = false;
-    const prevMap = prevMeasuredHeightsRef.current;
-    for (let i = s; i < e; i++) {
-      const k = ks[i];
-      if (!k) continue;
-      const el = getItemElement(i);
-      const h = el?.yogaNode?.getComputedHeight();
-      if (h === undefined || h < 0) continue;
-      const prev = prevMap.get(k);
-      if (shouldCompensateHeightShrinkage(prev, h, viewportHeight)) {
-        needsCompensate = true;
-      }
-      if (h > 0 || prev !== undefined) {
-        prevMap.set(k, h);
-      }
-    }
-    if (needsCompensate) {
-      setShrinkEpoch(n => n + 1);
-    }
-  }, [tickReveal, onVirtualLayout, scrollRef, getItemElement]);
+  }, [tickReveal, onVirtualLayout]);
 
   useEffect(() => {
     setTranscriptRevealHost({
@@ -808,6 +833,7 @@ export function VirtualMessageList({
     idx: number;
     wantLast: boolean;
     tries: number;
+    skipped: number;
   } | null>(null);
   // Message-relative positions from scanElement. Row 0 = message top.
   // Stable across scroll — highlight computes rowOffset fresh. msgIdx
@@ -816,10 +842,6 @@ export function VirtualMessageList({
     msgIdx: number;
     positions: MatchPosition[];
   }>({ msgIdx: -1, positions: [] });
-  // Wraparound guard. Auto-advance stops if ptr wraps back to here.
-  const startPtrRef = useRef(-1);
-  // Phantom-burst cap. Resets on scan success.
-  const phantomBurstRef = useRef(0);
   // One-deep queue: n/N arriving mid-seek gets stored (not dropped) and
   // fires after the seek completes. Holding n stays smooth without
   // queueing 30 jumps. Latest press overwrites — we want the direction
@@ -827,8 +849,9 @@ export function VirtualMessageList({
   const pendingStepRef = useRef<1 | -1 | 0>(0);
   // step + highlight via ref so the seek effect reads latest without
   // closure-capture or deps churn.
-  const stepRef = useRef<(d: 1 | -1) => void>(() => {});
+  const stepRef = useRef<(d: 1 | -1, skipped?: number) => void>(() => {});
   const highlightRef = useRef<(ord: number) => void>(() => {});
+  const scrollToAnchoredRef = useRef<(idx: number, rowsPast?: number) => void>(() => {});
   const searchState = useRef({
     matches: [] as number[], // deduplicated msg indices
     ptr: 0,
@@ -840,9 +863,11 @@ export function VirtualMessageList({
     // every matched message (~1-3ms × N). total = prefixSum[matches.length].
     prefixSum: [] as number[],
   });
-  // scrollTop at the moment / was pressed. Incsearch preview-jumps snap
-  // back here when matches drop to 0. -1 = no anchor (before first /).
-  const searchAnchor = useRef(-1);
+  // Official 2.1.327 (#458): message-key anchor at the moment / was pressed.
+  // Incsearch preview-jumps and cancel snap back to this anchor accurately
+  // even when virtualized height measurements shifted during search.
+  const searchAnchor = useRef<SearchAnchor | null>(null);
+  const restoreAnchorPendingRef = useRef(false);
   const indexWarmed = useRef(false);
 
   // Scroll target for message i: land at MESSAGE TOP. est = top - HEADROOM
@@ -916,14 +941,31 @@ export function VirtualMessageList({
   const bumpSeek = useCallback(() => setSeekGen(g => g + 1), []);
 
   useEffect(() => {
+    if (restoreAnchorPendingRef.current) {
+      restoreAnchorPendingRef.current = false;
+      const anchor = searchAnchor.current;
+      if (anchor === 'bottom') {
+        scrollRef.current?.scrollToBottom();
+      } else if (anchor !== null) {
+        const idx = jumpState.current.keys.indexOf(anchor.key);
+        if (idx >= 0) {
+          scrollToAnchoredRef.current(idx, anchor.rowsPast);
+        }
+      }
+    }
     const req = scanRequestRef.current;
     if (!req) return;
-    const { idx, wantLast, tries } = req;
+    const { idx, wantLast, tries, skipped } = req;
     const s = scrollRef.current;
     if (!s) return;
     const { getItemElement, getItemTop, scrollToIndex } = jumpState.current;
     const el = getItemElement(idx);
     const h = el?.yogaNode?.getComputedHeight() ?? 0;
+    const skipNext = () => {
+      if (skipped + 1 < Math.min(20, searchState.current.matches.length)) {
+        stepRef.current(wantLast ? -1 : 1, skipped + 1);
+      }
+    };
 
     if (!el || h === 0) {
       // Not mounted after scrollToIndex. Shouldn't happen — scrollToIndex
@@ -932,10 +974,10 @@ export function VirtualMessageList({
       if (tries > 1) {
         scanRequestRef.current = null;
         logForDebugging(`seek(i=${idx}): no mount after scrollToIndex, skip`);
-        stepRef.current(wantLast ? -1 : 1);
+        skipNext();
         return;
       }
-      scanRequestRef.current = { idx, wantLast, tries: tries + 1 };
+      scanRequestRef.current = { idx, wantLast, tries: tries + 1, skipped };
       scrollToIndex(idx);
       bumpSeek();
       return;
@@ -950,18 +992,12 @@ export function VirtualMessageList({
     elementPositions.current = { msgIdx: idx, positions };
     logForDebugging(`seek(i=${idx} t=${tries}): ${positions.length} positions`);
     if (positions.length === 0) {
-      // Phantom — engine matched, render didn't. Auto-advance.
-      if (++phantomBurstRef.current > 20) {
-        phantomBurstRef.current = 0;
-        return;
-      }
-      stepRef.current(wantLast ? -1 : 1);
+      // Phantom — engine matched, render didn't. Auto-advance up to cap.
+      skipNext();
       return;
     }
-    phantomBurstRef.current = 0;
     const ord = wantLast ? positions.length - 1 : 0;
     searchState.current.screenOrd = ord;
-    startPtrRef.current = -1;
     highlightRef.current(ord);
     const pending = pendingStepRef.current;
     if (pending) {
@@ -973,9 +1009,10 @@ export function VirtualMessageList({
 
   // Scroll to message i's top, arm scanPending. scan-effect reads fresh
   // screen next tick. wantLast: N-into-message — screenOrd = length-1.
-  function jump(i: number, wantLast: boolean): void {
+  function jump(i: number, wantLast: boolean, skipped = 0): void {
     const s = scrollRef.current;
     if (!s) return;
+    releaseReveal();
     const js = jumpState.current;
     const { getItemElement, scrollToIndex } = js;
     // offsets is a Float64Array whose .length is the allocated buffer (only
@@ -985,7 +1022,8 @@ export function VirtualMessageList({
     // effect's highlight, inverse-only from scan-highlight shows.
     setPositions?.(null);
     elementPositions.current = { msgIdx: -1, positions: [] };
-    scanRequestRef.current = { idx: i, wantLast, tries: 0 };
+    scanRequestRef.current = { idx: i, wantLast, tries: 0, skipped };
+    promptJumpIdxRef.current = i;
     const el = getItemElement(i);
     const h = el?.yogaNode?.getComputedHeight() ?? 0;
     // Mounted → precise scrollTo. Unmounted → scrollToIndex mounts it
@@ -1002,9 +1040,9 @@ export function VirtualMessageList({
 
   // Advance screenOrd within elementPositions. Exhausted → ptr advances,
   // jump to next matches[ptr], re-scan. Phantom (scan found 0 after
-  // jump) triggers auto-advance from scan-effect. Wraparound guard stops
-  // if every message is a phantom.
-  function step(delta: 1 | -1): void {
+  // jump) triggers auto-advance from scan-effect bounded by `skipped`.
+  function step(delta: 1 | -1, skipped = 0): void {
+    releaseReveal();
     const st = searchState.current;
     const { matches, prefixSum } = st;
     const total = prefixSum.at(-1) ?? 0;
@@ -1017,28 +1055,19 @@ export function VirtualMessageList({
       return;
     }
 
-    if (startPtrRef.current < 0) startPtrRef.current = st.ptr;
-
     const { positions } = elementPositions.current;
     const newOrd = st.screenOrd + delta;
     if (newOrd >= 0 && newOrd < positions.length) {
       st.screenOrd = newOrd;
       highlight(newOrd); // updates badge internally
-      startPtrRef.current = -1;
       return;
     }
 
     // Exhausted visible. Advance ptr → jump → re-scan.
     const ptr = (st.ptr + delta + matches.length) % matches.length;
-    if (ptr === startPtrRef.current) {
-      setPositions?.(null);
-      startPtrRef.current = -1;
-      logForDebugging(`step: wraparound at ptr=${ptr}, all ${matches.length} msgs phantoms`);
-      return;
-    }
     st.ptr = ptr;
     st.screenOrd = 0; // resolved after scan (wantLast → length-1)
-    jump(matches[ptr]!, delta < 0);
+    jump(matches[ptr]!, delta < 0, skipped);
     // screenOrd will resolve after scan. Best-effort: prefixSum[ptr] + 0
     // for n (first pos), prefixSum[ptr+1] for N (last pos = count-1).
     // The scan-effect's highlight will be the real value; this is a
@@ -1049,7 +1078,7 @@ export function VirtualMessageList({
   stepRef.current = step;
 
   const promptJumpIdxRef = useRef<number | null>(null);
-  const pendingJumpRef = useRef<number | null>(null);
+  const pendingJumpRef = useRef<{ idx: number; rowsPast?: number } | null>(null);
 
   function getFirstContentMarginTop(el: DOMElement): number {
     let marginTop = 0;
@@ -1061,7 +1090,11 @@ export function VirtualMessageList({
     return marginTop;
   }
 
-  function scrollToMessageElement(s: ScrollBoxHandle, el: DOMElement, top: number): void {
+  function scrollToMessageElement(s: ScrollBoxHandle, el: DOMElement, top: number, rowsPast?: number): void {
+    if (rowsPast !== undefined) {
+      s.scrollTo(Math.max(0, top + rowsPast));
+      return;
+    }
     const marginTop = getFirstContentMarginTop(el);
     s.scrollTo(top + marginTop);
     s.scrollToElement(el, marginTop);
@@ -1114,12 +1147,13 @@ export function VirtualMessageList({
     return lo;
   }
 
-  function scrollToMessageIndex(idx: number): void {
+  function scrollToMessageIndex(idx: number, rowsPast?: number): void {
     const s = scrollRef.current;
     const { messages: msgs, getItemElement: getEl, scrollToIndex: scrollIdx } = jumpState.current;
     if (!s || idx < 0 || idx >= msgs.length) return;
     releaseReveal();
     scanRequestRef.current = null;
+    pendingStepRef.current = 0;
     if (s.getPendingDelta() !== 0) {
       s.scrollTo(s.getScrollTop());
     }
@@ -1128,24 +1162,25 @@ export function VirtualMessageList({
     const h = yoga?.getComputedHeight() ?? 0;
     if (el && yoga && h > 0 && yoga.getComputedWidth() > 0) {
       pendingJumpRef.current = null;
-      scrollToMessageElement(s, el, yoga.getComputedTop());
+      scrollToMessageElement(s, el, yoga.getComputedTop(), rowsPast);
       return;
     }
-    pendingJumpRef.current = idx;
+    pendingJumpRef.current = { idx, rowsPast };
     if (!el) scrollIdx(idx);
     bumpSeek();
   }
+  scrollToAnchoredRef.current = scrollToMessageIndex;
 
   useEffect(() => {
-    const idx = pendingJumpRef.current;
-    if (idx === null) return;
+    const pending = pendingJumpRef.current;
+    if (pending === null) return;
     const s = scrollRef.current;
-    const el = jumpState.current.getItemElement(idx);
+    const el = jumpState.current.getItemElement(pending.idx);
     const yoga = el?.yogaNode;
     const h = yoga?.getComputedHeight() ?? 0;
     if (s && el && yoga && h > 0 && yoga.getComputedWidth() > 0) {
       pendingJumpRef.current = null;
-      scrollToMessageElement(s, el, yoga.getComputedTop());
+      scrollToMessageElement(s, el, yoga.getComputedTop(), pending.rowsPast);
     }
   });
 
@@ -1157,6 +1192,7 @@ export function VirtualMessageList({
         const s = scrollRef.current;
         if (s) {
           releaseReveal();
+          pendingJumpRef.current = null;
           s.scrollTo(targetFor(i));
         }
       },
@@ -1188,9 +1224,10 @@ export function VirtualMessageList({
       setSearchQuery: (q: string) => {
         // New search invalidates everything.
         releaseReveal();
+        pendingJumpRef.current = null;
         scanRequestRef.current = null;
+        restoreAnchorPendingRef.current = false;
         elementPositions.current = { msgIdx: -1, positions: [] };
-        startPtrRef.current = -1;
         setPositions?.(null);
         const lq = q.toLowerCase();
         // One entry per MESSAGE (deduplicated). Boolean "does this msg
@@ -1223,11 +1260,20 @@ export function VirtualMessageList({
         // Nearest MESSAGE to the anchor. <= so ties go to later.
         let ptr = 0;
         const s = scrollRef.current;
-        const { offsets, start, getItemTop } = jumpState.current;
+        const { offsets, start, getItemTop, keys: ks } = jumpState.current;
         const firstTop = getItemTop(start);
         const origin = firstTop >= 0 ? firstTop - offsets[start]! : 0;
+        const anchor = searchAnchor.current;
         if (matches.length > 0 && s) {
-          const curTop = searchAnchor.current >= 0 ? searchAnchor.current : s.getScrollTop();
+          const curTop = resolveSearchAnchorScrollTop(
+            anchor,
+            ks,
+            offsets,
+            origin,
+            s.getScrollHeight(),
+            s.getViewportHeight(),
+            s.getScrollTop(),
+          );
           let best = Infinity;
           for (let k = 0; k < matches.length; k++) {
             const d = Math.abs(origin + offsets[matches[k]!]! - curTop);
@@ -1248,9 +1294,12 @@ export function VirtualMessageList({
           // last msg; its last occurrence is closest to where the user
           // was — minimal view movement. n advances forward from there.
           jump(matches[ptr]!, true);
-        } else if (searchAnchor.current >= 0 && s) {
-          // /foob → 0 matches → snap back to anchor. less/vim incsearch.
-          s.scrollTo(searchAnchor.current);
+        } else if (anchor !== null) {
+          // Official 2.1.327 (#458): restore keyed anchor (or bottom) via
+          // scrollToMessageIndex so long virtualized sessions land accurately.
+          restoreAnchorPendingRef.current = true;
+          bumpSeek();
+          promptJumpIdxRef.current = null;
         }
         // Global occurrence count + 1-based current. wantLast=true so the
         // scan will land on the last occurrence in matches[ptr]. Placeholder
@@ -1262,14 +1311,21 @@ export function VirtualMessageList({
       prevMatch: () => step(-1),
       setAnchor: () => {
         const s = scrollRef.current;
-        if (s) searchAnchor.current = s.getScrollTop();
+        if (!s) return;
+        const { keys: ks, getItemTop: getTop } = jumpState.current;
+        const idx = findCurrentScrollIndex();
+        const key = ks[idx];
+        const top = getTop(idx);
+        searchAnchor.current =
+          s.isSticky() || key === undefined ? 'bottom' : { key, rowsPast: top >= 0 ? s.getScrollTop() - top : 0 };
       },
       disarmSearch: () => {
-        // Manual scroll invalidates screen-absolute positions.
+        // Manual scroll invalidates screen-absolute positions and any pending jump.
         setPositions?.(null);
+        pendingJumpRef.current = null;
         scanRequestRef.current = null;
+        restoreAnchorPendingRef.current = false;
         elementPositions.current = { msgIdx: -1, positions: [] };
-        startPtrRef.current = -1;
         promptJumpIdxRef.current = null;
       },
       warmSearchIndex: async () => {

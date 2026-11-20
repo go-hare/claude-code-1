@@ -3,6 +3,7 @@ import type {
   ContentBlockParam,
   ImageBlockParam,
 } from '@anthropic-ai/sdk/resources/messages.mjs'
+import { join } from 'path'
 import {
   API_IMAGE_MAX_BASE64_SIZE,
   IMAGE_MAX_HEIGHT,
@@ -16,6 +17,7 @@ import {
   type SharpInstance,
 } from '@claude-code/builtin-tools/tools/FileReadTool/imageProcessor.js'
 import { logForDebugging } from './debug.js'
+import { getClaudeConfigHomeDir } from './envUtils.js'
 import { errorMessage } from './errors.js'
 import { formatFileSize } from './format.js'
 import { logError } from './log.js'
@@ -252,6 +254,105 @@ export function computeTargetDimensions(
     : fitImageToMaxTokens(w, h, Infinity, limits.maxImageTokens)
 }
 
+const PNG_IHDR = 0x49484452 // 'IHDR'
+const PNG_TRNS = 0x74524e53 // 'tRNS'
+const PNG_IDAT = 0x49444154 // 'IDAT'
+
+/**
+ * Official 2.1.327 #491 (`aor`): inspect PNG IHDR color type + tRNS chunk to
+ * determine whether the PNG may have transparency. Returns `false` when the
+ * PNG is definitely opaque (color type 0/2/3 with no `tRNS` chunk before `IDAT`).
+ */
+export function pngMayHaveTransparency(buf: Buffer): boolean {
+  if (
+    detectImageFormatFromBuffer(buf) !== 'image/png' ||
+    buf.length < 26 ||
+    buf.readUInt32BE(8) !== 13 ||
+    buf.readUInt32BE(12) !== PNG_IHDR
+  ) {
+    return true
+  }
+  const colorType = buf[25]
+  if (colorType !== 0 && colorType !== 2 && colorType !== 3) {
+    return true
+  }
+  let offset = 8
+  for (let i = 0; i < 1000 && offset + 8 <= buf.length; i++) {
+    const chunkType = buf.readUInt32BE(offset + 4)
+    if (chunkType === PNG_TRNS) return true
+    if (chunkType === PNG_IDAT) return false
+    offset += 12 + buf.readUInt32BE(offset)
+  }
+  return true
+}
+
+/**
+ * Official 2.1.327 #491 (`ge`): probe a 256×256 palette PNG thumbnail so opaque
+ * or non-transparent large PNGs skip slow full-res palette quantization and go
+ * straight to fast binary-search JPEG encoding.
+ */
+async function shouldTryPngPaletteCompression(
+  sharp: SharpFunction,
+  originalBuffer: Buffer,
+  candidateBuffer: Buffer,
+): Promise<boolean> {
+  if (!pngMayHaveTransparency(originalBuffer)) {
+    return false
+  }
+  try {
+    const probe = await sharp(candidateBuffer)
+      .resize(256, 256, { fit: 'inside', withoutEnlargement: true })
+      .png({ palette: true })
+      .toBuffer()
+    return pngMayHaveTransparency(probe)
+  } catch {
+    return true
+  }
+}
+
+/**
+ * Official 2.1.327 #491 (`Nsi`): compress an image buffer to fit within
+ * `maxBytes` using JPEG binary search starting at quality 90 (up to 5 search
+ * steps in [1, 89]), preserving much higher quality than the old 80/60/40/20
+ * ladder while remaining fast.
+ */
+export async function compressImageToByteBudget(
+  imageBuffer: Buffer,
+  maxBytes: number,
+  mediaType: string,
+  encodeJpeg?: (quality: number) => Promise<Buffer>,
+): Promise<Buffer> {
+  const encode =
+    encodeJpeg ??
+    (async (quality: number) => {
+      const sharp = await getImageProcessor()
+      return sharp(imageBuffer).jpeg({ quality }).toBuffer()
+    })
+  let smallest = imageBuffer
+  let high = 90
+  if (!/jpe?g/i.test(mediaType)) {
+    const q90 = await encode(90)
+    if (q90.length < smallest.length) smallest = q90
+    if (q90.length <= maxBytes) return q90
+    high = 89
+  }
+  let low = 1
+  let bestUnder: Buffer | undefined
+  for (let i = 0; i < 5; i++) {
+    const mid = Math.floor((low + high) / 2)
+    const encoded = await encode(mid)
+    if (encoded.length < smallest.length) smallest = encoded
+    if (encoded.length <= maxBytes) {
+      bestUnder = encoded
+      low = mid + 1
+    } else {
+      high = mid - 1
+    }
+    if (low > high) break
+  }
+  return bestUnder ?? smallest
+}
+
 /**
  * Extracted from FileReadTool's readImage function
  * Resizes image buffer to meet size and dimension constraints
@@ -330,9 +431,13 @@ export async function maybeResizeAndDownsampleImageBuffer(
     // If dimensions are within limits but file is too large, try compression first
     // This preserves full resolution when possible
     if (!needsDimensionResize && originalSize > targetRawSize) {
-      // For PNGs, try PNG compression first to preserve transparency
-      if (isPng) {
-        // Create fresh sharp instance for each compression attempt
+      // Official 2.1.327 #491: only run slow palette PNG compression when the
+      // PNG actually has transparency; opaque large PNGs go straight to
+      // binary-search JPEG starting at quality 90.
+      if (
+        isPng &&
+        (await shouldTryPngPaletteCompression(sharp, imageBuffer, imageBuffer))
+      ) {
         const pngCompressed = await sharp(imageBuffer)
           .png({ compressionLevel: 9, palette: true })
           .toBuffer()
@@ -349,23 +454,23 @@ export async function maybeResizeAndDownsampleImageBuffer(
           }
         }
       }
-      // Try JPEG compression (lossy but much smaller)
-      for (const quality of [80, 60, 40, 20]) {
-        // Create fresh sharp instance for each attempt
-        const compressedBuffer = await sharp(imageBuffer)
-          .jpeg({ quality })
-          .toBuffer()
-        if (compressedBuffer.length <= targetRawSize) {
-          return {
-            buffer: compressedBuffer,
-            mediaType: 'jpeg',
-            dimensions: {
-              originalWidth,
-              originalHeight,
-              displayWidth: width,
-              displayHeight: height,
-            },
-          }
+      // Binary-search JPEG compression starting at quality 90 (#491 `Nsi`)
+      const jpegCompressed = await compressImageToByteBudget(
+        imageBuffer,
+        targetRawSize,
+        normalizedMediaType,
+        quality => sharp(imageBuffer).jpeg({ quality }).toBuffer(),
+      )
+      if (jpegCompressed.length <= targetRawSize) {
+        return {
+          buffer: jpegCompressed,
+          mediaType: 'jpeg',
+          dimensions: {
+            originalWidth,
+            originalHeight,
+            displayWidth: width,
+            displayHeight: height,
+          },
         }
       }
       // Quality reduction alone wasn't enough, fall through to resize
@@ -386,8 +491,15 @@ export async function maybeResizeAndDownsampleImageBuffer(
 
     // If still too large after resize, try compression
     if (resizedImageBuffer.length > targetRawSize) {
-      // For PNGs, try PNG compression first to preserve transparency
-      if (isPng) {
+      // Official 2.1.327 #491: skip expensive palette PNG re-encode for opaque PNGs
+      if (
+        isPng &&
+        (await shouldTryPngPaletteCompression(
+          sharp,
+          imageBuffer,
+          resizedImageBuffer,
+        ))
+      ) {
         const pngCompressed = await sharp(imageBuffer)
           .resize(width, height, {
             fit: 'inside',
@@ -409,26 +521,30 @@ export async function maybeResizeAndDownsampleImageBuffer(
         }
       }
 
-      // Try JPEG with progressively lower quality
-      for (const quality of [80, 60, 40, 20]) {
-        const compressedBuffer = await sharp(imageBuffer)
-          .resize(width, height, {
-            fit: 'inside',
-            withoutEnlargement: true,
-          })
-          .jpeg({ quality })
-          .toBuffer()
-        if (compressedBuffer.length <= targetRawSize) {
-          return {
-            buffer: compressedBuffer,
-            mediaType: 'jpeg',
-            dimensions: {
-              originalWidth,
-              originalHeight,
-              displayWidth: width,
-              displayHeight: height,
-            },
-          }
+      // Binary-search JPEG starting at quality 90 (#491 `Nsi`)
+      const jpegCompressed = await compressImageToByteBudget(
+        resizedImageBuffer,
+        targetRawSize,
+        normalizedMediaType,
+        quality =>
+          sharp(imageBuffer)
+            .resize(width, height, {
+              fit: 'inside',
+              withoutEnlargement: true,
+            })
+            .jpeg({ quality })
+            .toBuffer(),
+      )
+      if (jpegCompressed.length <= targetRawSize) {
+        return {
+          buffer: jpegCompressed,
+          mediaType: 'jpeg',
+          dimensions: {
+            originalWidth,
+            originalHeight,
+            displayWidth: width,
+            displayHeight: height,
+          },
         }
       }
       // If still too large, resize smaller and compress aggressively
@@ -986,4 +1102,64 @@ export function createImageMetadataText(
   }
 
   return `[Image: ${parts.join(', ')}]`
+}
+
+/**
+ * Official 2.1.328 #606 (`$si` / `A7r`): marker used when an image is stored in
+ * the image cache for a background agent instead of inline image blocks.
+ */
+export const IMAGE_NOT_SHOWN_PREFIX = '[Image not shown, read it from '
+
+export function formatImageNotShown(cachePath: string): string {
+  return `${IMAGE_NOT_SHOWN_PREFIX}${cachePath}]`
+}
+
+const IMAGE_CACHE_REDACT_EXTS = 'png|jpe?g|gif|webp'
+
+function escapeRegExpLiteral(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Official 2.1.328 #606 (`uRr`): redact cached image path notes like
+ * `[Image not shown, read it from <cache>/image-<64hex>.png]` back to `[Image]`
+ * in user-facing transcript displays so messages sent to a background agent do
+ * not show a long filesystem path in place of a pasted image.
+ */
+export function redactImageNotShownForDisplay(
+  text: string,
+  imageCacheDir?: string | null,
+): string {
+  if (!text.includes(IMAGE_NOT_SHOWN_PREFIX)) {
+    return text
+  }
+  const cacheDir =
+    imageCacheDir !== undefined
+      ? imageCacheDir
+      : join(getClaudeConfigHomeDir(), 'image-cache')
+  if (cacheDir === null || cacheDir === '') {
+    return text
+  }
+  const escapedFlatPrefix = escapeRegExpLiteral(
+    `${IMAGE_NOT_SHOWN_PREFIX}${join(cacheDir, 'image-')}`,
+  )
+  let result = text.replace(
+    new RegExp(
+      `${escapedFlatPrefix}[0-9a-f]{64}\\.(?:${IMAGE_CACHE_REDACT_EXTS})\\]`,
+      'g',
+    ),
+    '[Image]',
+  )
+  // Also support session-scoped image-cache/<sessionId>/<file>.<ext> paths.
+  const escapedDirPrefix = escapeRegExpLiteral(
+    `${IMAGE_NOT_SHOWN_PREFIX}${cacheDir}`,
+  )
+  result = result.replace(
+    new RegExp(
+      `${escapedDirPrefix}[/\\\\][^\\]]*?(?:image-[0-9a-f]{64}|\\d+)\\.(?:${IMAGE_CACHE_REDACT_EXTS})\\]`,
+      'g',
+    ),
+    '[Image]',
+  )
+  return result
 }

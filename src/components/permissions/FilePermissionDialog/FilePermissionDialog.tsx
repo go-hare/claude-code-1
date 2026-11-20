@@ -1,6 +1,5 @@
 import { relative } from 'path';
 import React, { useMemo } from 'react';
-import { getOriginalCwd } from '../../../bootstrap/state.js';
 import { useDiffInIDE } from '../../../hooks/useDiffInIDE.js';
 import { Box, Byline, KeyboardShortcutHint, Text } from '@anthropic/ink';
 import type { ToolUseContext } from '../../../Tool.js';
@@ -8,8 +7,7 @@ import { getLanguageName } from '../../../utils/cliHighlight.js';
 import { getCwd } from '../../../utils/cwd.js';
 import { getFsImplementation, safeResolvePath } from '../../../utils/fsOperations.js';
 import { expandPath } from '../../../utils/path.js';
-import { resolveSandboxFilesystemDisabled, SandboxManager } from '../../../utils/sandbox/sandbox-adapter.js';
-import { getSettingsForSource } from '../../../utils/settings/settings.js';
+import { canSandboxFenceOutsideReads } from '../../../utils/sandbox/sandbox-adapter.js';
 import type { CompletionType } from '../../../utils/unaryLogging.js';
 import { Select } from '../../CustomSelect/index.js';
 import { ShowInIDEPrompt } from '../../ShowInIDEPrompt.js';
@@ -228,11 +226,7 @@ export function FilePermissionDialog<T extends ToolInput = ToolInput>({
     </Box>
   ) : null;
 
-  const sandboxFenced =
-    SandboxManager.isSandboxingEnabled() &&
-    !resolveSandboxFilesystemDisabled() &&
-    getSettingsForSource('policySettings')?.sandbox?.filesystem?.allowManagedReadPathsOnly !== true &&
-    !/[*?[\]]/.test(getOriginalCwd());
+  const sandboxFenced = canSandboxFenceOutsideReads();
 
   return (
     <>

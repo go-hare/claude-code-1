@@ -27,13 +27,22 @@ export const CROSS_PLATFORM_CODE_EXEC = [
   'perl',
   'php',
   'lua',
-  // Package runners
+  // Package runners (official 2.1.327 #506 `lro`)
   'npx',
   'bunx',
+  'pnpx',
   'npm run',
   'yarn run',
   'pnpm run',
   'bun run',
+  'npm exec',
+  'npm x',
+  'pnpm exec',
+  'pnpm dlx',
+  'yarn exec',
+  'yarn dlx',
+  'bun exec',
+  'bun x',
   // Shells reachable from both (Git Bash / WSL on Windows, native on Unix)
   'bash',
   'sh',

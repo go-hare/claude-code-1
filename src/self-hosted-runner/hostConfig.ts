@@ -128,6 +128,73 @@ function isNotFound(err: unknown): boolean {
 }
 
 /**
+ * Official 2.1.328 `ic` (#549) — modes accepted from host settings.json on a
+ * self-hosted runner. Other valid permission modes (such as `bypassPermissions`
+ * or `auto`) are ignored by self-hosted sessions, so warn at startup.
+ */
+export const SELF_HOSTED_ACCEPTED_HOST_DEFAULT_MODES = [
+  'default',
+  'acceptEdits',
+  'plan',
+  'dontAsk',
+] as const
+
+const ALL_KNOWN_PERMISSION_MODES = new Set([
+  'default',
+  'acceptEdits',
+  'plan',
+  'dontAsk',
+  'bypassPermissions',
+  'auto',
+  'bubble',
+])
+
+/**
+ * Official 2.1.328 `ic(snapshot)` (#549) — inspect host `settings.json` inside
+ * a `HostConfigSnapshot` (or raw JSON string) and return a startup warning when
+ * `permissions.defaultMode` is set to a mode that self-hosted sessions ignore.
+ */
+export function formatIgnoredHostDefaultModeWarning(
+  snapshot: Pick<HostConfigSnapshot, 'sourceDir' | 'files'> | undefined,
+): string | undefined {
+  if (!snapshot) return undefined
+  const settingsFile = snapshot.files.get('settings.json')
+  if (!settingsFile) return undefined
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(settingsFile.buf.toString('utf8'))
+  } catch {
+    return undefined
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return undefined
+  }
+  const permissions = (parsed as { permissions?: unknown }).permissions
+  if (
+    !permissions ||
+    typeof permissions !== 'object' ||
+    Array.isArray(permissions)
+  ) {
+    return undefined
+  }
+  const rawMode = (permissions as { defaultMode?: unknown }).defaultMode
+  if (typeof rawMode !== 'string' || !ALL_KNOWN_PERMISSION_MODES.has(rawMode)) {
+    return undefined
+  }
+  if (
+    (SELF_HOSTED_ACCEPTED_HOST_DEFAULT_MODES as readonly string[]).includes(
+      rawMode,
+    )
+  ) {
+    return undefined
+  }
+  const acceptedList = new Intl.ListFormat('en', {
+    type: 'disjunction',
+  }).format(SELF_HOSTED_ACCEPTED_HOST_DEFAULT_MODES.map(m => `"${m}"`))
+  return `permissions.defaultMode "${rawMode}" in ${join(snapshot.sourceDir, 'settings.json')} is ignored: sessions on a self-hosted runner accept only ${acceptedList} from that file. To allow or deny tools without a prompt, list them under permissions.allow or permissions.deny, then restart the runner. See "Permissions and tool approval" in the self-hosted environments documentation.`
+}
+
+/**
  * densable `Q2h` — snapshot host ~/.claude (or SELF_HOSTED_RUNNER_HOST_CONFIG_DIR).
  * Returns undefined when empty / only invalid mcpServers.
  */

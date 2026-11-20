@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { joinPromptValues } from '../printPromptBatch.js'
+import type { QueuedCommand } from '../../types/textInputTypes.js'
+import { canBatchWith, joinPromptValues } from '../printPromptBatch.js'
 
 describe('2.1.299 #657 joinPromptValues content block separator', () => {
   test('inserts newline on trailing text block when merging content-block prompts', () => {
@@ -38,5 +39,35 @@ describe('2.1.299 #657 joinPromptValues content block separator', () => {
       [{ type: 'text', text: 'caption' }],
     ])
     expect(merged).toEqual([img, { type: 'text', text: 'caption' }])
+  })
+
+  test('E-P1-2: canBatchWith refuses to merge mismatched skipSubmissionHooks prompts', () => {
+    const makePrompt = (opts: Partial<QueuedCommand> = {}): QueuedCommand => ({
+      value: 'hi',
+      mode: 'prompt',
+      isMeta: false,
+      ...opts,
+    })
+    expect(
+      canBatchWith(makePrompt({ skipSubmissionHooks: true }), makePrompt()),
+    ).toBe(false)
+    expect(
+      canBatchWith(makePrompt(), makePrompt({ skipSubmissionHooks: true })),
+    ).toBe(false)
+    expect(
+      canBatchWith(
+        makePrompt({ skipSubmissionHooks: true }),
+        makePrompt({ skipSubmissionHooks: false }),
+      ),
+    ).toBe(false)
+    expect(
+      canBatchWith(
+        makePrompt({ skipSubmissionHooks: true }),
+        makePrompt({ skipSubmissionHooks: true }),
+      ),
+    ).toBe(true)
+    expect(
+      canBatchWith(makePrompt({ skipSubmissionHooks: false }), makePrompt()),
+    ).toBe(true)
   })
 })

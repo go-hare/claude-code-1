@@ -237,35 +237,99 @@ export async function loadRecentSessionTranscripts(
   return Object.keys(transcripts).length > 0 ? transcripts : undefined;
 }
 
+const FEEDBACK_CANCELLED_MESSAGE = 'Feedback cancelled';
+
 const MODE_COPY: Record<
   FeedbackMode,
   {
     consentAction: string;
+    consentYes: string;
     consentIntro: string;
     consentFooter: string;
     submitting: string;
+    stopped: string;
   }
 > = {
   post: {
     consentAction: 'submit',
+    consentYes: 'Yes, send it',
     consentIntro: 'This report will include:',
     consentFooter: 'We may use these to debug related issues and improve Claude Code.',
     submitting: 'Submitting report…',
+    stopped: 'Stopped sending the report · Anthropic may already have it',
   },
   bundle: {
     consentAction: 'save',
+    consentYes: 'Yes, save it',
     consentIntro: 'An archive will be saved to disk containing:',
     consentFooter:
       'Nothing leaves this machine until you send the bundle file. Secrets (API keys, tokens, credentials) are redacted before writing.',
     submitting: 'Saving bundle…',
+    stopped: FEEDBACK_CANCELLED_MESSAGE,
   },
   share: {
     consentAction: 'share',
+    consentYes: 'Yes, share it',
     consentIntro: 'This shared conversation will include:',
     consentFooter: 'A shareable link will be created so you can post the conversation for debugging and support.',
     submitting: 'Uploading share…',
+    stopped: 'Stopped sharing the conversation · it may already be uploaded',
   },
 };
+
+/**
+ * Official 2.1.328 (#608, SEA `X`): resolve the close/cancel result message so
+ * closing `/bug` or `/feedback` after delivery NEVER says "cancelled".
+ */
+export function resolveFeedbackCloseMessage(params: {
+  step: Step;
+  mode: FeedbackMode;
+  bundlePath?: string | null;
+  error?: string | null;
+}): { message: string | undefined; display: CommandResultDisplay } {
+  const { step, mode, bundlePath, error } = params;
+  if (step === 'done') {
+    if (mode === 'share') {
+      return { message: undefined, display: 'skip' };
+    }
+    if (error) {
+      return { message: 'Error submitting feedback / bug report', display: 'system' };
+    }
+    if (mode === 'bundle' && bundlePath) {
+      return { message: `Feedback bundle saved to \`${bundlePath}\``, display: 'system' };
+    }
+    return { message: 'Feedback / bug report submitted', display: 'system' };
+  }
+  if (step === 'submitting') {
+    return { message: MODE_COPY[mode].stopped, display: 'system' };
+  }
+  return { message: FEEDBACK_CANCELLED_MESSAGE, display: 'system' };
+}
+
+/**
+ * Official 2.1.328 (#668): Yes/No consent options with "No, edit the report"
+ * first so repeated Enters never accidentally send a report.
+ */
+export function buildFeedbackConsentOptions(mode: FeedbackMode): Array<{ label: string; value: 'edit' | 'send' }> {
+  return [
+    { label: 'No, edit the report', value: 'edit' },
+    { label: MODE_COPY[mode].consentYes, value: 'send' },
+  ];
+}
+
+/**
+ * Official 2.1.328 (#668): Done-step options with "Close" first so repeated
+ * Enters never accidentally open GitHub.
+ */
+export function buildFeedbackDoneOptions(params: {
+  hideGitHubIssue: boolean;
+  title: string | null;
+}): Array<{ label: string; value: 'close' | 'issue' }> {
+  return [
+    { label: 'Close', value: 'close' },
+    ...(!params.hideGitHubIssue && params.title ? [{ label: 'Open a GitHub issue', value: 'issue' as const }] : []),
+  ];
+}
 
 export type FeedbackSendSnapshot =
   | { status: 'none' }
@@ -650,16 +714,26 @@ export function Feedback({
 
   const handleCancel = useCallback(() => {
     clearFeedbackDraft(sessionId);
-    if (step === 'done') {
-      onDone(undefined, { display: 'skip' });
-      return;
-    }
-    if (followSendStore) {
-      const snap = sendStore.getSnapshot();
+    // Official 2.1.328 (#608): after report delivery (`step === 'done'` or
+    // delivered/saved snapshot), closing must report submitted/saved — never cancelled.
+    const snap = sendStore.getSnapshot();
+    const effectiveStep: Step =
+      step === 'done' || snap.status === 'delivered' || snap.status === 'saved' ? 'done' : step;
+    if (effectiveStep !== 'done' && followSendStore) {
       setFrozenSnapshot(prev => prev ?? snap);
     }
-    onDone('Feedback / bug report cancelled', { display: 'system' });
-  }, [step, followSendStore, sendStore, onDone, sessionId]);
+    const { message, display } = resolveFeedbackCloseMessage({
+      step: effectiveStep,
+      mode,
+      bundlePath: bundlePath ?? (snap.status === 'saved' ? snap.bundlePath : null),
+      error,
+    });
+    if (display === 'skip') {
+      onDone(undefined, { display: 'skip' });
+    } else {
+      onDone(message, { display });
+    }
+  }, [step, mode, bundlePath, error, followSendStore, sendStore, onDone, sessionId]);
 
   // During text input, use Settings context where only Escape (not 'n') triggers confirm:no.
   // This allows typing 'n' in the text field while still supporting Escape to cancel.
@@ -672,22 +746,23 @@ export function Feedback({
 
   useInput((input, key) => {
     if (key.ctrl || key.meta) return;
-    // Allow any key press to close the dialog when done or when there's an error
+    // Official 2.1.328 (#668): done-step actions use a Select ("Close" first,
+    // "Open a GitHub issue" second), so Enter/arrows are handled by Select rather
+    // than auto-opening GitHub on repeated Enters. Printable non-digit keys still close.
     if (step === 'done') {
       if (mode === 'share') return;
-      if (!hideGitHubIssue && key.return && title) {
-        // Open GitHub issue URL when Enter is pressed
-        const issueUrl = createGitHubIssueUrl(feedbackId ?? '', title, description, getSanitizedErrorLogs());
-        void openBrowser(issueUrl);
-      }
-      if (error) {
-        onDone('Error submitting feedback / bug report', {
-          display: 'system',
-        });
-      } else if (mode === 'bundle' && bundlePath) {
-        onDone(`Feedback bundle saved to \`${bundlePath}\``, { display: 'system' });
-      } else {
-        onDone('Feedback / bug report submitted', { display: 'system' });
+      if (
+        !key.return &&
+        !key.upArrow &&
+        !key.downArrow &&
+        !key.leftArrow &&
+        !key.rightArrow &&
+        !key.escape &&
+        input.length > 0 &&
+        !/^\d$/.test(input) &&
+        !/\p{Cc}/u.test(input)
+      ) {
+        handleCancel();
       }
       return;
     }
@@ -706,10 +781,8 @@ export function Feedback({
         setStep(mode === 'share' || isRemote ? 'userInput' : 'scope');
         return;
       }
-      // Official 2.1.326 #44: only Enter submits on consent — Space no longer submits accidentally.
-      if (key.return) {
-        void submitReport();
-      }
+      // Official 2.1.328 (#668): submission is confirmed via the Yes/No Select below
+      // ("No, edit the report" first) so repeated Enters never auto-send.
     }
   });
 
@@ -848,6 +921,23 @@ export function Feedback({
               {MODE_COPY[mode].consentFooter}
             </Text>
           </Box>
+          <Box marginTop={1}>
+            <Select
+              options={buildFeedbackConsentOptions(mode)}
+              declineValue="edit"
+              hideIndexes
+              holdsFirstRow
+              disablePrintableKeybindings
+              onChange={value => {
+                if (value === 'edit') {
+                  setStep('userInput');
+                } else {
+                  void submitReport();
+                }
+              }}
+              onCancel={handleCancel}
+            />
+          </Box>
         </Box>
       )}
 
@@ -878,9 +968,6 @@ export function Feedback({
               </Box>
             </Box>
           )}
-          <Box marginTop={1}>
-            <Text dimColor>Press any key to close</Text>
-          </Box>
         </Box>
       )}
 
@@ -908,26 +995,31 @@ export function Feedback({
                 </Box>
               </>
             )}
-            <Box marginTop={1}>
-              <Text dimColor italic>
-                Any key to close
-              </Text>
-            </Box>
           </Box>
         ) : (
           <Box flexDirection="column">
             {error ? <Text color="error">{error}</Text> : <Text color="success">Thank you for your report!</Text>}
             {feedbackId && <Text dimColor>Feedback ID: {feedbackId}</Text>}
-            <Box marginTop={1}>
-              <Text dimColor italic>
-                <Byline>
-                  <KeyboardShortcutHint shortcut="enter" action="open GitHub issue" />
-                  <Text>any key to close</Text>
-                </Byline>
-              </Text>
-            </Box>
           </Box>
         ))}
+
+      {step === 'done' && mode !== 'share' && (
+        <Box marginTop={1}>
+          <Select
+            options={buildFeedbackDoneOptions({ hideGitHubIssue, title })}
+            hideIndexes
+            holdsFirstRow
+            onChange={value => {
+              if (value === 'issue' && title) {
+                const issueUrl = createGitHubIssueUrl(feedbackId ?? '', title, description, getSanitizedErrorLogs());
+                void openBrowser(issueUrl);
+              }
+              handleCancel();
+            }}
+            onCancel={handleCancel}
+          />
+        </Box>
+      )}
     </Dialog>
   );
 }

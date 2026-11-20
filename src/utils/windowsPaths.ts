@@ -9,7 +9,6 @@ import { execSync_DEPRECATED } from './execSyncWrapper.js'
 import { memoizeWithLRU } from './memoize.js'
 import { getPlatform } from './platform.js'
 import { isTestNoGitBash } from './residualFinalEnvGates.js'
-import { getInitialSettings } from './settings/settings.js'
 
 /**
  * If Windows, set the SHELL environment variable to git-bash path.
@@ -234,11 +233,37 @@ export function shouldSkipWhereCandidateAsCwdShadow(
  * without process-global mocks.
  */
 const GIT_FOR_WINDOWS_ARCHS = ['mingw64', 'ucrt64'] as const
+const GIT_FOR_WINDOWS_NON_LAUNCHER_PARENTS = new Set([
+  'mingw64',
+  'ucrt64',
+  'mingw32',
+  'clang64',
+  'clang32',
+  'clangarm64',
+  'usr',
+])
 
 /**
- * Resolve a Git for Windows `cmd\git.exe` launcher to its underlying
- * `<arch>\bin\git.exe` (for git >= 2.26) when `MSYSTEM` is unset, avoiding
- * the `cmd` wrapper process on every git invocation. Falls back to
+ * Official 2.1.328 (#486): match both `<gitRoot>\cmd\git.exe` AND
+ * `<gitRoot>\bin\git.exe` (when grandparent is not an arch/usr dir like
+ * `mingw64`, `ucrt64`, `mingw32`, `clang64`, `clang32`, `clangarm64`, `usr`).
+ */
+export function isGitForWindowsLauncherPath(candidatePath: string): boolean {
+  const normalized = pathWin32.normalize(candidatePath).toLowerCase()
+  if (normalized.endsWith('\\cmd\\git.exe')) return true
+  if (!normalized.endsWith('\\bin\\git.exe')) return false
+  const gitRoot = pathWin32.dirname(pathWin32.dirname(normalized))
+  const grandparent = pathWin32.basename(gitRoot)
+  if (!grandparent || GIT_FOR_WINDOWS_NON_LAUNCHER_PARENTS.has(grandparent)) {
+    return false
+  }
+  return true
+}
+
+/**
+ * Resolve a Git for Windows `cmd\git.exe` or top-level `bin\git.exe` launcher
+ * to its underlying `<arch>\bin\git.exe` (for git >= 2.26) when `MSYSTEM` is
+ * unset, avoiding the wrapper process on every git invocation. Falls back to
  * `launcherPath` if probing fails, is shadowed by cwd, or version < 2.26.
  */
 export function resolveGitForWindowsDirectExe(
@@ -249,7 +274,7 @@ export function resolveGitForWindowsDirectExe(
     return launcherPath
   }
   const normalizedLauncher = pathWin32.normalize(launcherPath)
-  if (!normalizedLauncher.toLowerCase().endsWith('\\cmd\\git.exe')) {
+  if (!isGitForWindowsLauncherPath(normalizedLauncher)) {
     return launcherPath
   }
   const gitRoot = pathWin32.join(normalizedLauncher, '..', '..')
@@ -476,6 +501,9 @@ function getEffectiveWindowsPathAndExt(opts?: WindowsPathLookupOptions): {
   let settingsPath = opts?.settingsPathEnv
   if (settingsPath === undefined) {
     try {
+      const { getInitialSettings } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./settings/settings.js') as typeof import('./settings/settings.js')
       const env = getInitialSettings()?.env
       settingsPath = env?.PATH ?? env?.Path
     } catch {

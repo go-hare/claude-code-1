@@ -75,6 +75,7 @@ import {
 } from './utils/errors.js'
 import {
   PROMPT_TOO_LONG_ERROR_MESSAGE,
+  getPromptTooLongTokenGap,
   isPromptTooLongMessage,
 } from './services/api/errors.js'
 import {
@@ -367,6 +368,19 @@ export type QueryParams = {
    */
   thinkingStripPlan?: import('./utils/thinking.js').ThinkingStripPlan
   advisorStripPlan?: import('./utils/messages.js').AdvisorStripPlan
+  /**
+   * Official 2.1.328 (#555): optional callback invoked after automatic or
+   * reactive compaction to rebuild the system prompt the way `/compact` does,
+   * instead of reusing the earlier session system prompt.
+   */
+  renderSystemPrompt?: (
+    context: ToolUseContext,
+    modelFacts?: ModelFacts,
+  ) => Promise<
+    | SystemPrompt
+    | { systemPrompt: SystemPrompt; promptRenderEpoch?: number }
+    | undefined
+  >
   deps?: QueryDeps
 }
 
@@ -905,9 +919,10 @@ async function* queryLoop(
   | { type: 'spinner_mode'; mode: SpinnerMode },
   Terminal
 > {
-  // Immutable params — gold does not rebuild systemPrompt after refreshTools.
-  const { systemPrompt } = params
-  let { userContext } = params
+  // Official 2.1.328 (#555): systemPrompt is rebuilt after autocompact and
+  // reactive compact when `params.renderSystemPrompt` is provided, matching `/compact`.
+  let { systemPrompt, userContext } = params
+  let needsSystemPromptRebuild = false
   const {
     systemContext,
     canUseTool,
@@ -922,7 +937,7 @@ async function* queryLoop(
   } = params
   const deps = params.deps ?? productionDeps()
   // densable `ht=e.promptRenderEpoch??tte()`, `mo=e.modelFacts` — once per query.
-  const promptRenderEpoch = params.promptRenderEpoch ?? getPromptRenderEpoch()
+  let promptRenderEpoch = params.promptRenderEpoch ?? getPromptRenderEpoch()
   let pendingModelFacts = params.modelFacts
   const turnStepFamily = querySourceFamilyOf(querySource)
   const turnStepTurnId =
@@ -1390,7 +1405,7 @@ async function* queryLoop(
         messagesForQuery = collapseResult.messages
       }
 
-      const fullSystemPrompt = asSystemPrompt(
+      let fullSystemPrompt = asSystemPrompt(
         appendSystemContext(systemPrompt, systemContext),
       )
 
@@ -1646,6 +1661,21 @@ async function* queryLoop(
 
         // Continue on with the current query call using the post compact messages
         messagesForQuery = postCompactMessages
+        // Official 2.1.328 (#555): trigger systemPrompt rebuild after automatic
+        // compaction the way `/compact` does, and refresh userContext.
+        needsSystemPromptRebuild = true
+        runPostCompactCleanup(querySource)
+        try {
+          const refreshed = await getUserContext()
+          if (
+            Object.keys(refreshed).length > 0 ||
+            Object.keys(userContext).length > 0
+          ) {
+            userContext = refreshed
+          }
+        } catch {
+          // Keep existing userContext if refresh fails
+        }
       } else if (consecutiveFailures !== undefined) {
         // Autocompact failed — propagate failure count so the circuit breaker
         // can stop retrying on the next iteration.
@@ -1654,6 +1684,41 @@ async function* queryLoop(
           consecutiveFailures,
         }
       }
+
+      const rebuildSystemPromptIfNeeded = async (): Promise<void> => {
+        if (
+          !needsSystemPromptRebuild ||
+          params.renderSystemPrompt === undefined
+        ) {
+          return
+        }
+        needsSystemPromptRebuild = false
+        try {
+          const rebuilt = await params.renderSystemPrompt(
+            toolUseContext,
+            pendingModelFacts,
+          )
+          if (rebuilt !== undefined) {
+            if ('systemPrompt' in rebuilt) {
+              systemPrompt = rebuilt.systemPrompt
+              if (rebuilt.promptRenderEpoch !== undefined) {
+                promptRenderEpoch = rebuilt.promptRenderEpoch
+              }
+            } else {
+              systemPrompt = rebuilt
+            }
+            fullSystemPrompt = asSystemPrompt(
+              appendSystemContext(systemPrompt, systemContext),
+            )
+          }
+        } catch (err) {
+          logError(err)
+        }
+      }
+
+      // Official 2.1.328 (#555): rebuild systemPrompt after autocompact /
+      // reactive compact when a renderSystemPrompt callback was provided.
+      await rebuildSystemPromptIfNeeded()
 
       //TODO: no need to set toolUseContext.messages during set-up since it is updated here
       toolUseContext = {
@@ -1992,6 +2057,10 @@ async function* queryLoop(
             messagesForQuery = buildPostCompactMessages(
               predictiveResult.compactionResult,
             )
+            // Official 2.1.328 (#555): rebuild systemPrompt after predictive autocompact too.
+            needsSystemPromptRebuild = true
+            runPostCompactCleanup(querySource)
+            await rebuildSystemPromptIfNeeded()
             // v2.1.311 (#1230): refresh userContext after auto-compact cleared caches
             try {
               const refreshed = await getUserContext()
@@ -2352,6 +2421,7 @@ async function* queryLoop(
                 queryTracking,
                 effortValue: layeredEffortValue,
                 advisorModel: appState.advisorModel,
+                continuesCutReply: maxOutputTokensRecoveryCount > 0,
                 skipCacheWrite,
                 agentCacheTtlOverride,
                 thinkingStripPlan,
@@ -3700,57 +3770,95 @@ async function* queryLoop(
             yield* leftoverDrainSpinnerModes()
             return { reason: 'rapid_refill_breaker' }
           }
+          // Official 2.1.328 (#625): bind PTL recovery compaction to a child
+          // AbortController that ALWAYS forwards parent abort (including agent
+          // hook timeout aborts) so agent hooks never run past their timeout
+          // while compacting after a prompt-too-long refusal.
+          const ptlEstimatedTokens = tokenCountWithEstimation(messagesForQuery)
+          const ptlRecoveryAbort =
+            reactiveCompact.createPtlRecoveryAbortController(
+              toolUseContext.abortController,
+              {
+                timeoutMs:
+                  reactiveCompact.computePtlRecoveryTimeoutMs(
+                    ptlEstimatedTokens,
+                  ),
+                querySource,
+              },
+            )
+          const ptlRecoveryToolUseContext: ToolUseContext = {
+            ...toolUseContext,
+            abortController: ptlRecoveryAbort.controller,
+          }
+          const ptlTokenGap = lastMessage
+            ? getPromptTooLongTokenGap(lastMessage)
+            : undefined
           const runReactiveCompact = () =>
             reactiveCompact.tryReactiveCompact({
               hasAttempted: hasAttemptedReactiveCompact,
               querySource,
-              aborted: toolUseContext.abortController.signal.aborted,
+              aborted: ptlRecoveryAbort.controller.signal.aborted,
               messages: messagesForQuery,
+              tokenGap: ptlTokenGap,
               cacheSafeParams: {
                 systemPrompt,
                 userContext,
                 systemContext,
-                toolUseContext,
+                toolUseContext: ptlRecoveryToolUseContext,
                 forkContextMessages: messagesForQuery,
               },
             })
           const activeReactiveAgentCtx = getAgentContext()
-          const { result: compacted, failure: compactFailure } =
-            toolUseContext.agentId &&
-            activeReactiveAgentCtx?.agentId !== toolUseContext.agentId
-              ? await runWithAgentContext(
-                  {
-                    agentId: toolUseContext.agentId,
-                    agentType: 'subagent',
-                    ...(activeReactiveAgentCtx?.agentType === 'subagent' &&
-                    activeReactiveAgentCtx.subagentName
-                      ? { subagentName: activeReactiveAgentCtx.subagentName }
-                      : querySource?.startsWith('agent:builtin:')
-                        ? {
-                            subagentName: querySource.slice(
-                              'agent:builtin:'.length,
-                            ),
-                          }
-                        : querySource?.startsWith('agent:custom:')
+          let compacted: Awaited<
+            ReturnType<typeof runReactiveCompact>
+          >['result']
+          let compactFailure: Awaited<
+            ReturnType<typeof runReactiveCompact>
+          >['failure']
+          try {
+            const outcome =
+              toolUseContext.agentId &&
+              activeReactiveAgentCtx?.agentId !== toolUseContext.agentId
+                ? await runWithAgentContext(
+                    {
+                      agentId: toolUseContext.agentId,
+                      agentType: 'subagent',
+                      ...(activeReactiveAgentCtx?.agentType === 'subagent' &&
+                      activeReactiveAgentCtx.subagentName
+                        ? { subagentName: activeReactiveAgentCtx.subagentName }
+                        : querySource?.startsWith('agent:builtin:')
                           ? {
                               subagentName: querySource.slice(
-                                'agent:custom:'.length,
+                                'agent:builtin:'.length,
                               ),
                             }
-                          : querySource?.startsWith('agent:')
+                          : querySource?.startsWith('agent:custom:')
                             ? {
                                 subagentName: querySource.slice(
-                                  'agent:'.length,
+                                  'agent:custom:'.length,
                                 ),
                               }
-                            : {}),
-                    isBackgroundAgent: toolUseContext.isBackgroundAgent,
-                  },
-                  runReactiveCompact,
-                )
-              : await runReactiveCompact()
+                            : querySource?.startsWith('agent:')
+                              ? {
+                                  subagentName: querySource.slice(
+                                    'agent:'.length,
+                                  ),
+                                }
+                              : {}),
+                      isBackgroundAgent: toolUseContext.isBackgroundAgent,
+                    },
+                    runReactiveCompact,
+                  )
+                : await runReactiveCompact()
+            compacted = outcome.result
+            compactFailure = outcome.failure
+          } finally {
+            ptlRecoveryAbort.cleanup()
+          }
 
           if (compacted) {
+            // Official 2.1.328 (#555): rebuild systemPrompt after reactive compact too.
+            needsSystemPromptRebuild = true
             // task_budget: same carryover as the proactive path above.
             // messagesForQuery still holds the pre-compact array here (the
             // 413-failed attempt's input).
@@ -3933,8 +4041,12 @@ async function* queryLoop(
             const isSubagentQuery =
               toolUseContext.agentId !== undefined ||
               querySourceFamilyOf(querySource) === 'subagent'
+            const nextCount = maxOutputTokensRecoveryCount + 1
             const recoveryMessage = createUserMessage({
-              content: getMaxOutputTokensRecoveryPrompt(isSubagentQuery),
+              content: getMaxOutputTokensRecoveryPrompt(
+                isSubagentQuery,
+                nextCount,
+              ),
               isMeta: true,
               turnCompanion: true,
             })
@@ -3947,7 +4059,7 @@ async function* queryLoop(
               ],
               toolUseContext: leftoverUnwrapStreamMode(toolUseContext),
               autoCompactTracking: tracking,
-              maxOutputTokensRecoveryCount: maxOutputTokensRecoveryCount + 1,
+              maxOutputTokensRecoveryCount: nextCount,
               hasAttemptedReactiveCompact,
               maxOutputTokensOverride: undefined,
               pendingToolUseSummary: undefined,
@@ -3957,7 +4069,7 @@ async function* queryLoop(
               thinkingOnlyNudged,
               transition: {
                 reason: 'max_output_tokens_recovery',
-                attempt: maxOutputTokensRecoveryCount + 1,
+                attempt: nextCount,
               },
             }
             state = next

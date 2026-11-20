@@ -451,9 +451,12 @@ export const GrepTool = buildTool({
       args.push('-c')
     }
 
-    // Add line numbers if requested
-    if (show_line_numbers && output_mode === 'content') {
-      args.push('-n')
+    // In content mode, always pass `--null` and `-n` to ripgrep so file paths
+    // end unambiguously at `\0` (avoiding `:`/`-` filename ambiguity when
+    // sorting/relativizing) and line-number prefixes can be stripped when
+    // `show_line_numbers` is false (matching official 2.1.328).
+    if (output_mode === 'content') {
+      args.push('--null', '-n')
     }
 
     // Add context flags (-C/context takes precedence over context_before/context_after)
@@ -549,27 +552,47 @@ export const GrepTool = buildTool({
     }
 
     if (output_mode === 'content') {
-      // For content mode, results are the actual content lines
-      // Convert absolute paths to relative paths to save tokens
+      // Official 2.1.327 (#414, SEA `zns`/`mHn`): sort content results by file
+      // path before paging with head_limit & offset so pages never repeat or
+      // skip matches when ripgrep returns files in non-deterministic worker order.
+      const hasContextBreaks = [
+        context,
+        context_c,
+        context_before,
+        context_after,
+      ].some(v => typeof v === 'number' && v > 0)
+      // Single-file rg output omits the filename prefix (lines start with `lineno:text`),
+      // so skip file-path sorting to preserve line order.
+      const sortedResults =
+        root?.isDirectory === false
+          ? results
+          : sortGrepContentLines(results, hasContextBreaks)
 
       // Apply head_limit first — relativize is per-line work, so
       // avoid processing lines that will be discarded (broad patterns can
       // return 10k+ lines with head_limit keeping only ~30-100).
       const { items: limitedResults, appliedLimit } = applyHeadLimit(
-        results,
+        sortedResults,
         head_limit,
         offset,
       )
 
       const finalLines = limitedResults.map(line => {
-        // Lines have format: /absolute/path:line_content or /absolute/path:num:content
-        const colonIndex = line.indexOf(':')
-        if (colonIndex > 0) {
-          const filePath = line.substring(0, colonIndex)
-          const rest = line.substring(colonIndex)
-          return toRelativePath(filePath) + rest
+        if (line === '--') return line
+        const nulIdx = line.indexOf('\0')
+        if (nulIdx < 0) {
+          // Single-file rg output omits the filename prefix (`lineno:text` or `lineno-text`).
+          return show_line_numbers ? line : line.replace(/^\d+[:-]/, '')
         }
-        return line
+        const filePath = line.substring(0, nulIdx)
+        const rest = line.substring(nulIdx + 1)
+        const lineNoMatch = /^(\d+)([:-])/.exec(rest)
+        const sep = lineNoMatch?.[2] ?? ':'
+        const formattedRest =
+          show_line_numbers || lineNoMatch === null
+            ? rest
+            : rest.substring(lineNoMatch[0].length)
+        return toRelativePath(filePath) + sep + formattedRest
       })
       const output = {
         mode: 'content' as const,
@@ -584,10 +607,12 @@ export const GrepTool = buildTool({
     }
 
     if (output_mode === 'count') {
-      // For count mode, pass through raw ripgrep output (filename:count format)
+      // Official 2.1.327 (#414, SEA `mHn`): sort count results by file path
+      // before paging with head_limit & offset so pages are deterministic.
+      const sortedCountResults = sortGrepCountLines(results)
       // Apply head_limit first to avoid relativizing entries that will be discarded.
       const { items: limitedResults, appliedLimit } = applyHeadLimit(
-        results,
+        sortedCountResults,
         head_limit,
         offset,
       )
@@ -689,8 +714,22 @@ function absolutizeRipgrepLine(
   root: SearchRoot,
   outputMode: string,
 ): string {
+  if (outputMode === 'content' && line === '--') {
+    return line
+  }
   if (outputMode !== 'content' && outputMode !== 'count') {
     return isAbsolute(line) ? line : join(root.canonical, line)
+  }
+  if (outputMode === 'content') {
+    const nulIdx = line.indexOf('\0')
+    if (nulIdx > 0) {
+      const filePath = line.slice(0, nulIdx)
+      const rest = line.slice(nulIdx)
+      const absolute = isAbsolute(filePath)
+        ? filePath
+        : join(root.canonical, filePath)
+      return absolute + rest
+    }
   }
   const sepIdx =
     outputMode === 'count' ? line.lastIndexOf(':') : line.indexOf(':')
@@ -703,4 +742,202 @@ function absolutizeRipgrepLine(
     ? filePath
     : join(root.canonical, filePath)
   return absolute + rest
+}
+
+/**
+ * Official 2.1.327 (#414, SEA `mHn`): deterministic comparator for grouped grep
+ * entries by file path (UTF-16 code-unit order, tie-breaking on joined lines).
+ */
+function compareGrepFileGroups(
+  a: { path: string; lines: string[] },
+  b: { path: string; lines: string[] },
+): number {
+  if (a.path < b.path) return -1
+  if (a.path > b.path) return 1
+  const aJoined = a.lines.join('\n')
+  const bJoined = b.lines.join('\n')
+  return aJoined < bJoined ? -1 : aJoined > bJoined ? 1 : 0
+}
+
+/**
+ * Official 2.1.327 (#414, SEA `zns`/`mHn`): group ripgrep content lines by
+ * file path (handling `\0`-delimited `--null` output, `--` context separators,
+ * `path:line:text`, `path-line-text`, and `-n: false` `path:text`/`path-text`
+ * context lines), sort file groups by path, and re-join.
+ */
+export function sortGrepContentLines(
+  lines: readonly string[],
+  hasContextBreaks = false,
+): string[] {
+  if (lines.length <= 1) return [...lines]
+  const groups: Array<{ path: string; lines: string[] }> = []
+  const byPath = new Map<string, { path: string; lines: string[] }>()
+  let currentGroup: { path: string; lines: string[] } | null = null
+  let sawSeparator = false
+  const ungrouped: string[] = []
+
+  // Split into hunks separated by `--` so before-context lines (including
+  // `-n: false` `path-text` and context text containing `:digits:` like
+  // `b.ts-1-time=12:34:56`) can resolve against match-line paths in the same
+  // hunk without mis-grouping filenames containing `-<digits>-`.
+  const hunks: string[][] = [[]]
+  for (const line of lines) {
+    if (line === '--') {
+      hunks.push([])
+    } else {
+      hunks[hunks.length - 1]!.push(line)
+    }
+  }
+
+  const analyzeHunk = (
+    hunkLines: readonly string[],
+  ): { matchPaths: string[]; hasLineNumbers: boolean } => {
+    const withLineNo = new Set<string>()
+    const withoutLineNo = new Set<string>()
+    for (const l of hunkLines) {
+      if (l.includes('\0')) continue
+      const mLineNo = /^((?:[A-Za-z]:)?[^:\r\n]+):\d+:/.exec(l)
+      if (mLineNo?.[1]) {
+        withLineNo.add(mLineNo[1])
+      } else {
+        const mColon = /^((?:[A-Za-z]:)?[^:\r\n]+):/.exec(l)
+        if (mColon?.[1]) {
+          withoutLineNo.add(mColon[1])
+        }
+      }
+    }
+    const hasLineNumbers = withLineNo.size > 0
+    const pathSet = hasLineNumbers ? withLineNo : withoutLineNo
+    const matchPaths = Array.from(pathSet).sort((a, b) => b.length - a.length)
+    return { matchPaths, hasLineNumbers }
+  }
+
+  const extractPath = (
+    line: string,
+    hunkMatchPaths: readonly string[],
+    hunkHasLineNumbers: boolean,
+  ): string | null => {
+    const nulIdx = line.indexOf('\0')
+    if (nulIdx > 0) {
+      return line.slice(0, nulIdx)
+    }
+    if (hasContextBreaks && currentGroup !== null) {
+      if (line.startsWith(currentGroup.path)) {
+        const suffix = line.slice(currentGroup.path.length)
+        if (
+          /^-\d+-/.test(suffix) ||
+          (!hunkHasLineNumbers && suffix.startsWith('-'))
+        ) {
+          return currentGroup.path
+        }
+      }
+    }
+    if (hasContextBreaks && hunkMatchPaths.length > 0) {
+      for (const candidatePath of hunkMatchPaths) {
+        if (!line.startsWith(candidatePath)) continue
+        const suffix = line.slice(candidatePath.length)
+        if (
+          /^-\d+-/.test(suffix) ||
+          (!hunkHasLineNumbers && suffix.startsWith('-'))
+        ) {
+          return candidatePath
+        }
+      }
+    }
+    const matchWithLineNo = /^((?:[A-Za-z]:)?[^:\r\n]+):\d+:/.exec(line)
+    if (matchWithLineNo?.[1]) return matchWithLineNo[1]
+    if (hasContextBreaks) {
+      const dashMatch = /^((?:[A-Za-z]:)?[^:\r\n]+?)-\d+-/.exec(line)
+      if (dashMatch?.[1]) return dashMatch[1]
+    }
+    // Fallback for `-n: false` (`path:text` without line numbers).
+    const colonMatch = /^((?:[A-Za-z]:)?[^:\r\n]+):/.exec(line)
+    if (colonMatch?.[1]) return colonMatch[1]
+    return null
+  }
+
+  for (let hunkIdx = 0; hunkIdx < hunks.length; hunkIdx++) {
+    if (hunkIdx > 0) {
+      currentGroup = null
+      sawSeparator = true
+    }
+    const hunkLines = hunks[hunkIdx]!
+    if (hunkLines.length === 0) continue
+    const { matchPaths, hasLineNumbers } = analyzeHunk(hunkLines)
+    for (const line of hunkLines) {
+      const path = extractPath(line, matchPaths, hasLineNumbers)
+      if (path === null) {
+        if (currentGroup) {
+          currentGroup.lines.push(line)
+        } else {
+          ungrouped.push(line)
+        }
+        sawSeparator = false
+        continue
+      }
+      let group = byPath.get(path)
+      if (!group) {
+        group = { path, lines: [] }
+        byPath.set(path, group)
+        groups.push(group)
+      } else if (
+        hasContextBreaks &&
+        group.lines.length > 0 &&
+        group.lines[group.lines.length - 1] !== '--' &&
+        (sawSeparator || (currentGroup !== null && currentGroup !== group))
+      ) {
+        group.lines.push('--')
+      }
+      group.lines.push(line)
+      currentGroup = group
+      sawSeparator = false
+    }
+  }
+
+  if (groups.length === 0) {
+    return [...lines]
+  }
+
+  // Strip trailing `--` separators that belonged to a file transition
+  for (const group of groups) {
+    while (
+      group.lines.length > 0 &&
+      group.lines[group.lines.length - 1] === '--'
+    ) {
+      group.lines.pop()
+    }
+  }
+
+  groups.sort(compareGrepFileGroups)
+
+  const sorted: string[] = []
+  for (const group of groups) {
+    if (group.lines.length === 0) continue
+    if (hasContextBreaks && sorted.length > 0) {
+      sorted.push('--')
+    }
+    for (const l of group.lines) {
+      sorted.push(l)
+    }
+  }
+  for (const l of ungrouped) {
+    sorted.push(l)
+  }
+  return sorted
+}
+
+/**
+ * Official 2.1.327 (#414, SEA `mHn`): sort ripgrep count lines (`path:count`)
+ * by file path before pagination.
+ */
+export function sortGrepCountLines(lines: readonly string[]): string[] {
+  if (lines.length <= 1) return [...lines]
+  return lines
+    .map(line => {
+      const colonIdx = line.lastIndexOf(':')
+      const path = colonIdx > 0 ? line.slice(0, colonIdx) : line
+      return { path, lines: [line] }
+    })
+    .sort(compareGrepFileGroups)
+    .flatMap(entry => entry.lines)
 }

@@ -22,7 +22,11 @@ import { errorMessage } from '../utils/errors.js'
 import { truncateToWidth } from '../utils/format.js'
 import { logError } from '../utils/log.js'
 import { sleep } from '../utils/sleep.js'
-import { createAgentWorktree, removeAgentWorktree } from '../utils/worktree.js'
+import {
+  createAgentWorktree,
+  hasWorktreeChanges,
+  removeAgentWorktree,
+} from '../utils/worktree.js'
 import {
   BridgeFatalError,
   createBridgeApiClient,
@@ -162,6 +166,26 @@ function safeSpawn(
 const SECRET_RENEW_MIN_LEAD_MS = 900_000
 const SECRET_RENEW_MAX_LEAD_MS = 86_400_000
 /**
+ * Official 2.1.328 (#376): decide whether a bridge worktree should be preserved
+ * on shutdown / session end instead of deleted. When the server stops in
+ * worktree mode (`sessionMayReturn: true`) for a non-hook git worktree, keep
+ * the worktree so git-ignored files (e.g. `.env`) survive session resume.
+ */
+export function shouldKeepWorktreeOnBridgeShutdown(opts: {
+  clean: boolean
+  sessionMayReturn?: boolean
+  hookBased?: boolean
+}): { keep: boolean; reason?: string } {
+  if (!opts.clean) {
+    return { keep: true, reason: 'worktree has uncommitted changes' }
+  }
+  if (opts.sessionMayReturn && !opts.hookBased) {
+    return { keep: true, reason: 'session can resume' }
+  }
+  return { keep: false }
+}
+
+/**
  * Official 2.1.323 #2115: bound disk I/O (worktree removal, pointer clear)
  * during session cleanup and bridge shutdown so an unresponsive filesystem
  * never leaves sessions running at shutdown or holds finished session slots.
@@ -283,6 +307,7 @@ export async function runBridgeLoop(
     {
       worktreePath: string
       worktreeBranch?: string
+      headCommit?: string
       gitRoot?: string
       hookBased?: boolean
     }
@@ -1284,6 +1309,7 @@ export async function runBridgeLoop(
               sessionWorktrees.set(sessionId, {
                 worktreePath: wt.worktreePath,
                 worktreeBranch: wt.worktreeBranch,
+                headCommit: wt.headCommit,
                 gitRoot: wt.gitRoot,
                 hookBased: wt.hookBased,
               })
@@ -1886,25 +1912,65 @@ export async function runBridgeLoop(
     // Snapshot and clear the map first so onSessionDone (which may fire
     // during the await below when handle.done resolves) won't try to
     // remove the same worktrees again.
+    // Official 2.1.328 (#376): when shutting down while worktree sessions may
+    // resume (`sessionMayReturn`), preserve non-hook worktrees so git-ignored
+    // files like `.env` are not deleted.
     if (sessionWorktrees.size > 0) {
       const remainingWorktrees = [...sessionWorktrees.values()]
       sessionWorktrees.clear()
-      logForDebugging(
-        `[bridge:shutdown] Cleaning up ${remainingWorktrees.length} worktree(s)`,
+      const sessionMayReturn = controller.signal.aborted
+      const decisions = await Promise.all(
+        remainingWorktrees.map(async wt => {
+          let clean = false
+          if (wt.headCommit) {
+            try {
+              const dirty = await Promise.race([
+                hasWorktreeChanges(wt.worktreePath, wt.headCommit),
+                new Promise<boolean>(resolve =>
+                  setTimeout(() => resolve(true), 3_000),
+                ),
+              ])
+              clean = !dirty
+            } catch {
+              clean = false
+            }
+          }
+          const decision = shouldKeepWorktreeOnBridgeShutdown({
+            clean,
+            sessionMayReturn,
+            hookBased: wt.hookBased,
+          })
+          return { wt, decision }
+        }),
       )
-      await Promise.allSettled(
-        remainingWorktrees.map(wt =>
-          raceDiskCleanupDeadline(
-            removeAgentWorktree(
-              wt.worktreePath,
-              wt.worktreeBranch,
-              wt.gitRoot,
-              wt.hookBased,
+      const toRemove: typeof remainingWorktrees = []
+      for (const { wt, decision } of decisions) {
+        if (decision.keep) {
+          logger.logStatus(
+            `kept worktree ${wt.worktreePath} \u00b7 ${decision.reason}`,
+          )
+        } else {
+          toRemove.push(wt)
+        }
+      }
+      if (toRemove.length > 0) {
+        logForDebugging(
+          `[bridge:shutdown] Cleaning up ${toRemove.length} worktree(s)`,
+        )
+        await Promise.allSettled(
+          toRemove.map(wt =>
+            raceDiskCleanupDeadline(
+              removeAgentWorktree(
+                wt.worktreePath,
+                wt.worktreeBranch,
+                wt.gitRoot,
+                wt.hookBased,
+              ),
+              `shutdown removeAgentWorktree(${wt.worktreePath})`,
             ),
-            `shutdown removeAgentWorktree(${wt.worktreePath})`,
           ),
-        ),
-      )
+        )
+      }
     }
 
     // Stop all active work items so the server knows they're done

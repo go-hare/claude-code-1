@@ -20,6 +20,7 @@ import { execFileNoThrow } from 'src/utils/execFileNoThrow.js'
 import { updateHooksConfigSnapshotUnderPrime } from 'src/utils/hooks/hooksConfigSnapshot.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { getPlansDirectory } from 'src/utils/plans.js'
+import type { PermissionDecision } from 'src/utils/permissions/PermissionResult.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { logError } from 'src/utils/log.js'
 import { captureSandboxRootMoveHold } from 'src/utils/sandbox/sandbox-adapter.js'
@@ -223,6 +224,83 @@ export function findActiveWorktreeTasks(
   return matches
 }
 
+type WorktreeUnsavedWorkFinding = {
+  found: string
+  next: string
+  errorCode: number
+}
+
+const CONFIRM_DISCARD_NEXT =
+  'Confirm with the user, then re-invoke with discard_changes: true — or use action: "keep" to preserve the worktree.'
+const REFUSING_DISCARD_NEXT =
+  'Refusing to remove without explicit confirmation. Confirm with the user, then re-invoke with discard_changes: true to proceed — or use action: "keep" to preserve the worktree.'
+const WAIT_TASK_NEXT =
+  'Wait for the task to finish, or ask the user before stopping it, then call this tool again — or use action: "keep" to preserve the worktree.'
+
+/**
+ * Official 2.1.327 (#498, SEA `ri`): inspect whether removing the worktree may
+ * discard unsaved work (active tasks, unverifiable git state, uncommitted files,
+ * or unmerged commits). Shared by `validateInput` and `checkPermissions`.
+ */
+async function inspectWorktreeUnsavedWork(
+  session: NonNullable<ReturnType<typeof getCurrentWorktreeSession>>,
+  context?: {
+    getAppState: () => { tasks?: Record<string, TaskStateBase> }
+    agentId?: string
+  },
+): Promise<WorktreeUnsavedWorkFinding | null> {
+  const activeTasks = findActiveWorktreeTasks(
+    context?.getAppState().tasks,
+    session.worktreePath,
+    context?.agentId,
+  )
+  if (activeTasks.length > 0) {
+    const taskLabels = activeTasks
+      .slice(0, 3)
+      .map(t => t.description || t.id)
+      .join(', ')
+    const more =
+      activeTasks.length > 3 ? ` (+${activeTasks.length - 3} more)` : ''
+    return {
+      found: `Cannot remove worktree at ${session.worktreePath} while ${activeTasks.length === 1 ? 'a background task' : `${activeTasks.length} background tasks`} (${taskLabels}${more}) may still be running in it.`,
+      next: WAIT_TASK_NEXT,
+      errorCode: 4,
+    }
+  }
+
+  const summary = await countWorktreeChanges(
+    session.worktreePath,
+    session.originalHeadCommit,
+  )
+  if (summary === null) {
+    return {
+      found: `Could not verify worktree state at ${session.worktreePath}.`,
+      next: REFUSING_DISCARD_NEXT,
+      errorCode: 3,
+    }
+  }
+  const { changedFiles, commits } = summary
+  if (changedFiles > 0 || commits > 0) {
+    const parts: string[] = []
+    if (changedFiles > 0) {
+      parts.push(
+        `${changedFiles} uncommitted ${changedFiles === 1 ? 'file' : 'files'}`,
+      )
+    }
+    if (commits > 0) {
+      parts.push(
+        `${commits} ${commits === 1 ? 'commit' : 'commits'} on ${session.worktreeBranch ?? 'the worktree branch'}`,
+      )
+    }
+    return {
+      found: `Worktree has ${parts.join(' and ')}. Removing will discard this work permanently.`,
+      next: CONFIRM_DISCARD_NEXT,
+      errorCode: 2,
+    }
+  }
+  return null
+}
+
 export const ExitWorktreeTool: Tool<InputSchema, Output> = buildTool({
   name: EXIT_WORKTREE_TOOL_NAME,
   searchHint: 'exit a worktree session and return to the original directory',
@@ -266,61 +344,46 @@ export const ExitWorktreeTool: Tool<InputSchema, Output> = buildTool({
     }
 
     if (input.action === 'remove' && !input.discard_changes) {
-      // Official 2.1.326 #314: Refuse removing the worktree while a background
-      // subagent or shell command may still be running in it unless
-      // `discard_changes: true` is passed.
-      const activeTasks = findActiveWorktreeTasks(
-        context?.getAppState().tasks,
-        session.worktreePath,
-        context?.agentId,
-      )
-      if (activeTasks.length > 0) {
-        const taskLabels = activeTasks
-          .slice(0, 3)
-          .map(t => t.description || t.id)
-          .join(', ')
-        const more =
-          activeTasks.length > 3 ? ` (+${activeTasks.length - 3} more)` : ''
+      const unsaved = await inspectWorktreeUnsavedWork(session, context)
+      if (unsaved !== null) {
         return {
           result: false,
-          message: `Cannot remove worktree at ${session.worktreePath} while ${activeTasks.length === 1 ? 'a background task' : `${activeTasks.length} background tasks`} (${taskLabels}${more}) may still be running in it. Wait for the task to finish, or ask the user before stopping it, then call this tool again — or use action: "keep" to preserve the worktree.`,
-          errorCode: 4,
-        }
-      }
-
-      const summary = await countWorktreeChanges(
-        session.worktreePath,
-        session.originalHeadCommit,
-      )
-      if (summary === null) {
-        return {
-          result: false,
-          message: `Could not verify worktree state at ${session.worktreePath}. Refusing to remove without explicit confirmation. Re-invoke with discard_changes: true to proceed — or use action: "keep" to preserve the worktree.`,
-          errorCode: 3,
-        }
-      }
-      const { changedFiles, commits } = summary
-      if (changedFiles > 0 || commits > 0) {
-        const parts: string[] = []
-        if (changedFiles > 0) {
-          parts.push(
-            `${changedFiles} uncommitted ${changedFiles === 1 ? 'file' : 'files'}`,
-          )
-        }
-        if (commits > 0) {
-          parts.push(
-            `${commits} ${commits === 1 ? 'commit' : 'commits'} on ${session.worktreeBranch ?? 'the worktree branch'}`,
-          )
-        }
-        return {
-          result: false,
-          message: `Worktree has ${parts.join(' and ')}. Removing will discard this work permanently. Confirm with the user, then re-invoke with discard_changes: true — or use action: "keep" to preserve the worktree.`,
-          errorCode: 2,
+          message: `${unsaved.found} ${unsaved.next}`,
+          errorCode: unsaved.errorCode,
         }
       }
     }
 
     return { result: true }
+  },
+  // Official 2.1.327 (#498): ask before removing a worktree that may hold
+  // unsaved work, even when `discard_changes: true` was passed. Refused in
+  // dontAsk mode or when nobody can answer, unless a whole-tool allow rule,
+  // auto mode, or bypassPermissions allows it.
+  async checkPermissions(input, context): Promise<PermissionDecision> {
+    const session = getCurrentWorktreeSession()
+    if (!session && input.discard_changes) {
+      const reason = 'The session left its worktree before this call ran.'
+      return {
+        behavior: 'deny',
+        message: reason,
+        decisionReason: { type: 'other', reason },
+      }
+    }
+    const unsaved =
+      session && input.action === 'remove' && input.discard_changes
+        ? await inspectWorktreeUnsavedWork(session, context)
+        : null
+    if (unsaved === null) {
+      return { behavior: 'allow', updatedInput: input }
+    }
+    const message = unsaved.found.replace('Nothing was removed: task', 'Task')
+    return {
+      behavior: 'ask',
+      message,
+      decisionReason: { type: 'other', reason: message },
+      suppressAlwaysAllowRule: true,
+    } as PermissionDecision
   },
   renderToolUseMessage,
   renderToolResultMessage,

@@ -201,7 +201,7 @@ describe('Wave 2 325 alignment', () => {
         message: { content: Array<{ tool_use_id: string; content: string }> }
       }
     ).message.content
-    expect(blocks[0]!.content).toBe('[Old tool result content cleared]')
+    expect(blocks[0]!.content).toStartWith('[Tool result left out:')
     expect(blocks[1]!.content).toBe('ok')
   })
 

@@ -1,10 +1,12 @@
 import { feature } from 'bun:bundle'
-import { relative } from 'path'
+import { isAbsolute, join, relative, resolve, sep } from 'path'
 import {
+  getAdditionalDirectoriesForClaudeMd,
   getIsNonInteractiveSession,
   getOriginalCwd,
   handleAutoModeTransition,
   handlePlanModeTransition,
+  setAdditionalDirectoriesForClaudeMd,
   setHasExitedPlanMode,
   setNeedsAutoModeExitAttachment,
 } from '../../bootstrap/state.js'
@@ -52,7 +54,11 @@ const autoModeStateModule = feature('TRANSCRIPT_CLASSIFIER')
   ? (require('./autoModeState.js') as typeof import('./autoModeState.js'))
   : null
 
-import { resolve } from 'path'
+import { expandPath } from '../path.js'
+import {
+  pathInWorkingPath,
+  settingsHaveBlockWritesOutsideWorkingDirectories,
+} from './filesystem.js'
 import {
   checkSecurityRestrictionGate,
   checkStatsigFeatureGate_CACHED_MAY_BE_STALE,
@@ -71,6 +77,8 @@ import {
 } from '../../services/analytics/index.js'
 import { AGENT_TOOL_NAME } from '@claude-code/builtin-tools/tools/AgentTool/constants.js'
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
+import { ENTER_WORKTREE_TOOL_NAME } from '@claude-code/builtin-tools/tools/EnterWorktreeTool/constants.js'
+import { EXIT_WORKTREE_TOOL_NAME } from '@claude-code/builtin-tools/tools/ExitWorktreeTool/constants.js'
 import { SYNTHETIC_OUTPUT_TOOL_NAME } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js'
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { POWERSHELL_TOOL_NAME } from '@claude-code/builtin-tools/tools/PowerShellTool/toolName.js'
@@ -112,9 +120,14 @@ import {
 import type { PermissionUpdateDestination } from './PermissionUpdateSchema.js'
 import {
   normalizeLegacyToolName,
+  parseDisallowedToolListFromCLI,
   permissionRuleValueFromString,
   permissionRuleValueToString,
 } from './permissionRuleParser.js'
+import {
+  matchesWildcardBroadPrefix,
+  normalizeBroadRuleContent,
+} from './broadRuleFilter.js'
 
 /**
  * Checks if a Bash permission rule is dangerous for auto mode.
@@ -140,10 +153,16 @@ export function isDangerousBashPermission(
     return true
   }
 
-  const content = ruleContent.trim().toLowerCase()
+  const content = normalizeBroadRuleContent(ruleContent)
 
   // Standalone wildcard (*) matches everything
   if (content === '*') {
+    return true
+  }
+
+  // Official 2.1.327 (#506): wildcard rules with path/version prefixes or
+  // package runners like `pnpm dlx *` or `/usr/bin/npm run:*` are broad.
+  if (matchesWildcardBroadPrefix(ruleContent, DANGEROUS_BASH_PATTERNS)) {
     return true
   }
 
@@ -202,13 +221,15 @@ export function isDangerousPowerShellPermission(
     return true
   }
 
-  const content = ruleContent.trim().toLowerCase()
+  const content = normalizeBroadRuleContent(ruleContent)
 
   // Standalone wildcard (*) matches everything
   if (content === '*') {
     return true
   }
 
+  // Official 2.1.327 (#506): wildcard rules with path/version prefixes or
+  // package runners like `pnpm dlx *` or `/usr/bin/npm run:*` are broad.
   // PS-specific cmdlet names. CROSS_PLATFORM_CODE_EXEC is shared with bash.
   const patterns: readonly string[] = [
     ...CROSS_PLATFORM_CODE_EXEC,
@@ -242,6 +263,10 @@ export function isDangerousPowerShellPermission(
     'add-type', // Add-Type -TypeDefinition '<C#>' → P/Invoke
     'new-object', // New-Object -ComObject WScript.Shell → .Run()
   ]
+
+  if (matchesWildcardBroadPrefix(ruleContent, patterns)) {
+    return true
+  }
 
   for (const pattern of patterns) {
     // patterns stored lowercase; content lowercased above
@@ -1221,6 +1246,33 @@ export function parseToolListFromCLI(tools: string[]): string[] {
   return result
 }
 
+/**
+ * Official 2.1.328 `jLo` (@303353903):
+ * Enable `blockWritesOutsideWorkingDirectories` on the permission context and
+ * narrow out worktree tools (`EnterWorktree` / `ExitWorktree`, official `[uT, AZ]`)
+ * via `alwaysDenyRules.toolsNarrowing`.
+ */
+export function applyBlockWritesOutsideWorkingDirectories(
+  context: ToolPermissionContext,
+): ToolPermissionContext {
+  const existingNarrowing = context.alwaysDenyRules.toolsNarrowing ?? []
+  const nextNarrowing = Array.from(
+    new Set([
+      ...existingNarrowing,
+      ENTER_WORKTREE_TOOL_NAME,
+      EXIT_WORKTREE_TOOL_NAME,
+    ]),
+  )
+  return {
+    ...context,
+    blockWritesOutsideWorkingDirectories: true,
+    alwaysDenyRules: {
+      ...context.alwaysDenyRules,
+      toolsNarrowing: nextNarrowing,
+    },
+  }
+}
+
 export async function initializeToolPermissionContext({
   allowedToolsCli,
   disallowedToolsCli,
@@ -1253,7 +1305,8 @@ export async function initializeToolPermissionContext({
   const parsedAllowedToolsCli = parseToolListFromCLI(allowedToolsCli).map(
     rule => permissionRuleValueToString(permissionRuleValueFromString(rule)),
   )
-  let parsedDisallowedToolsCli = parseToolListFromCLI(disallowedToolsCli)
+  let parsedDisallowedToolsCli =
+    parseDisallowedToolListFromCLI(disallowedToolsCli)
 
   // If base tools are specified, automatically deny all tools NOT in the base set
   // via toolsNarrowing (SEA fja / cO / yln) and record toolsKeptByLaunchList.
@@ -1427,12 +1480,31 @@ export async function initializeToolPermissionContext({
     },
     rulesFromDisk,
   )
+  if (settingsHaveBlockWritesOutsideWorkingDirectories()) {
+    toolPermissionContext = applyBlockWritesOutsideWorkingDirectories(
+      toolPermissionContext,
+    )
+  }
   toolPermissionContext = applyDenyInsteadOfPrompting(toolPermissionContext)
 
   // densable `xy` — skip gated project/local additionalDirectories
+  // Official 2.1.327 #511/#512: if a worktree launch folder was pinned, resolve
+  // relative CLI `--add-dir` entries against the launch folder (mapping dirs
+  // above the launch folder to only the worktree).
+  const resolvedCliAddDirs =
+    worktreeAddDirPinState.launchFolder !== undefined
+      ? addDirs.map(dir =>
+          resolveWorktreeAddDirEntry(
+            dir,
+            worktreeAddDirPinState.launchFolder!,
+            true,
+            rel => join(getCwd(), rel),
+          ),
+        )
+      : addDirs
   const allAdditionalDirectories = [
     ...collectUngatedAdditionalDirectories(),
-    ...addDirs,
+    ...resolvedCliAddDirs,
   ]
   // Parallelize fs validation; apply updates serially (cumulative context).
   // validateDirectoryForWorkspace only reads permissionContext to check if the
@@ -2350,4 +2422,219 @@ export function resolveAutoDefaultOnPolicySettingsLoad(
     ...(targetMode === 'plan' ? { prePlanMode: 'default' as const } : {}),
   }
   return { context: nextContext, exitedAutoMode: true }
+}
+
+/**
+ * Official 2.1.327 #511 & #512 (`SLe`, `dEa`, `cEa`, `uEa` @295651333):
+ * Resolve relative `--add-dir` paths when launching with `--worktree`:
+ * - Relative paths inside the launch folder (e.g. `./sub`) map to the same
+ *   relative path inside the worktree (or `./sub` for `--bg`).
+ * - Relative paths beside the launch folder (e.g. `../sibling`, #511) resolve
+ *   against the launch folder so the Bash sandbox gets that sibling folder,
+ *   not a path beside the worktree.
+ * - Relative paths above the launch folder (e.g. `..` or `../..`, #512) are
+ *   collapsed to only the worktree (or `.` for `--bg`) so the sandbox and
+ *   background session do not gain write access to parent directories outside
+ *   the worktree.
+ */
+type WorktreeAddDirPinState = {
+  typed: string[]
+  pinned: string[]
+  launchFolder?: string
+}
+
+const worktreeAddDirPinState: WorktreeAddDirPinState = {
+  typed: [],
+  pinned: [],
+  launchFolder: undefined,
+}
+
+function stripGlobTailRelativeTo(targetPath: string, baseDir: string): string {
+  const parts = relative(baseDir, targetPath).split(sep)
+  const globIndex = parts.findIndex(part => /[*?[]/.test(part))
+  return globIndex === -1
+    ? targetPath
+    : resolve(baseDir, ...parts.slice(0, globIndex))
+}
+
+export function resolveWorktreeAddDirEntry(
+  rawEntry: string,
+  launchFolder: string,
+  isWorktree: boolean,
+  mapRelativeToTarget: (rel: string) => string,
+): string {
+  const expanded = expandPath(rawEntry, launchFolder)
+  if (!expanded) return rawEntry
+  const resolvedAgainstLaunch = resolve(launchFolder, expanded)
+  const probeBase = join(
+    launchFolder,
+    ...rawEntry.split('..').map(() => 'elsewhere'),
+  )
+  const isRelative = expandPath(rawEntry, probeBase) !== expanded
+  const isInsideLaunch =
+    isRelative && pathInWorkingPath(resolvedAgainstLaunch, launchFolder)
+  const targetBase = mapRelativeToTarget('')
+  if (
+    isRelative &&
+    isWorktree &&
+    !isInsideLaunch &&
+    !(
+      isAbsolute(targetBase) &&
+      pathInWorkingPath(resolvedAgainstLaunch, targetBase)
+    ) &&
+    pathInWorkingPath(
+      launchFolder,
+      stripGlobTailRelativeTo(resolvedAgainstLaunch, launchFolder),
+    )
+  ) {
+    return resolveWorktreeAddDirEntry(
+      '.',
+      launchFolder,
+      false,
+      mapRelativeToTarget,
+    )
+  }
+  const result = isInsideLaunch
+    ? mapRelativeToTarget(relative(launchFolder, resolvedAgainstLaunch))
+    : resolvedAgainstLaunch
+  return result === result.trimEnd() ? result : `${result}${sep}.`
+}
+
+function replacePinnedAdditionalDirectories(
+  state: WorktreeAddDirPinState,
+  replacement: string[],
+): void {
+  const current = getAdditionalDirectoriesForClaudeMd()
+  setAdditionalDirectoriesForClaudeMd(
+    current.map((entry, idx) =>
+      entry === state.pinned[idx] ? (replacement[idx] ?? entry) : entry,
+    ),
+  )
+}
+
+/** Official `dEa(launchFolder, isWorktree)` — pin CLI `--add-dir` entries at launch. */
+export function pinAddDirsForWorktreeLaunch(
+  launchFolder: string,
+  isWorktree: boolean,
+  targetDir: string = getCwd(),
+): string[] {
+  const current = getAdditionalDirectoriesForClaudeMd()
+  if (current.length === 0) return []
+  worktreeAddDirPinState.typed = [...current]
+  worktreeAddDirPinState.launchFolder = launchFolder
+  worktreeAddDirPinState.pinned = current.map(entry =>
+    resolveWorktreeAddDirEntry(entry, launchFolder, isWorktree, rel =>
+      join(targetDir, rel),
+    ),
+  )
+  setAdditionalDirectoriesForClaudeMd([...worktreeAddDirPinState.pinned])
+  return [...worktreeAddDirPinState.pinned]
+}
+
+/** Official `cEa(worktreeDir)` — re-pin previously pinned `--add-dir` entries once worktree cwd is known. */
+export function repinAddDirsAfterWorktreeEnter(worktreeDir: string): string[] {
+  const { launchFolder, typed } = worktreeAddDirPinState
+  if (launchFolder === undefined) return getAdditionalDirectoriesForClaudeMd()
+  worktreeAddDirPinState.launchFolder = undefined
+  const repinned = typed.map(entry =>
+    resolveWorktreeAddDirEntry(entry, launchFolder, true, rel =>
+      join(worktreeDir, rel),
+    ),
+  )
+  replacePinnedAdditionalDirectories(worktreeAddDirPinState, repinned)
+  worktreeAddDirPinState.pinned = repinned
+  return repinned
+}
+
+/**
+ * Official 2.1.328 (#511/#512): reconcile `toolPermissionContext.additionalWorkingDirectories`
+ * after entering a `--worktree` so pre-worktree CLI `--add-dir` entries are cleanly
+ * replaced by their post-worktree resolved paths without dropping ungated settings dirs.
+ */
+export async function applyRepinnedWorktreeAddDirsToPermissionContext(
+  toolPermissionContext: ToolPermissionContext,
+  previousCliAddDirs: readonly string[],
+  repinnedCliAddDirs: readonly string[],
+): Promise<{
+  toolPermissionContext: ToolPermissionContext
+  warnings: string[]
+}> {
+  const ungatedSet = new Set<string>()
+  for (const dir of collectUngatedAdditionalDirectories()) {
+    try {
+      ungatedSet.add(resolve(expandPath(dir)))
+    } catch {
+      // ignore invalid settings path
+    }
+  }
+
+  const prevKeys = new Set<string>()
+  for (const dir of previousCliAddDirs) {
+    prevKeys.add(dir)
+    try {
+      prevKeys.add(resolve(expandPath(dir)))
+    } catch {
+      // ignore invalid path
+    }
+  }
+
+  const prunedAdditionalDirs = new Map(
+    toolPermissionContext.additionalWorkingDirectories,
+  )
+  for (const [key, entry] of prunedAdditionalDirs) {
+    if (
+      entry.source === 'cliArg' &&
+      prevKeys.has(key) &&
+      !ungatedSet.has(key)
+    ) {
+      prunedAdditionalDirs.delete(key)
+    }
+  }
+
+  let nextContext: ToolPermissionContext = {
+    ...toolPermissionContext,
+    additionalWorkingDirectories: prunedAdditionalDirs,
+  }
+  const warnings: string[] = []
+  const validationResults = await Promise.all(
+    repinnedCliAddDirs.map(dir =>
+      validateDirectoryForWorkspace(dir, nextContext),
+    ),
+  )
+  for (const result of validationResults) {
+    if (result.resultType === 'success') {
+      nextContext = applyPermissionUpdate(nextContext, {
+        type: 'addDirectories',
+        directories: [result.absolutePath],
+        destination: 'cliArg',
+      })
+    } else if (
+      result.resultType !== 'alreadyInWorkingDirectory' &&
+      result.resultType !== 'pathNotFound'
+    ) {
+      warnings.push(addDirHelpMessage(result))
+    }
+  }
+  return { toolPermissionContext: nextContext, warnings }
+}
+
+/** Official `uEa(entry, launchFolder, isWorktree)` — rewrite `--add-dir` for `--bg` child launch. */
+export function rewriteAddDirForBgWorktree(
+  rawEntry: string,
+  launchFolder: string,
+  isWorktree: boolean,
+): string {
+  return resolveWorktreeAddDirEntry(rawEntry, launchFolder, isWorktree, rel =>
+    isWorktree ? `.${sep}${rel}` : join(launchFolder, rel),
+  )
+}
+
+export function getWorktreeAddDirPinState(): Readonly<WorktreeAddDirPinState> {
+  return worktreeAddDirPinState
+}
+
+export function _resetWorktreeAddDirPinStateForTesting(): void {
+  worktreeAddDirPinState.typed = []
+  worktreeAddDirPinState.pinned = []
+  worktreeAddDirPinState.launchFolder = undefined
 }

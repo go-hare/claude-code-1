@@ -26,6 +26,8 @@ type PasteHandlerProps = {
   onPaste?: (text: string) => void
   /** Official densable d7r: underlying KeyboardEvent handler after paste guards. */
   handleKeyDown: (event: KeyboardEvent) => void
+  /** Official 2.1.328 #601 (`keepsImagePaths`): when true (e.g. `!` bash mode), keep pasted image paths as plain text instead of turning them into attachments. */
+  keepsImagePaths?: () => boolean
   onImagePaste?: (
     base64Image: string,
     mediaType?: string,
@@ -112,6 +114,7 @@ function notifyImageReadStart(cb?: () => void): void {
 export function usePasteHandler({
   onPaste,
   handleKeyDown: innerHandleKeyDown,
+  keepsImagePaths,
   onImagePaste,
   onImageReadStart,
 }: PasteHandlerProps): {
@@ -148,7 +151,8 @@ export function usePasteHandler({
   const isMacOS = React.useMemo(() => getPlatform() === 'macos', [])
   const isWsl = React.useMemo(() => getPlatform() === 'wsl', [])
   const isWindows = React.useMemo(() => getPlatform() === 'windows', [])
-  const canClipboardImage = isMacOS || isWsl || isWindows
+  const isLinux = React.useMemo(() => getPlatform() === 'linux', [])
+  const canClipboardImage = isMacOS || isWsl || isWindows || isLinux
 
   React.useEffect(() => {
     return () => {
@@ -311,7 +315,10 @@ export function usePasteHandler({
 
         const { lines, imagePaths } = splitPastedLinesForImages(pastedText)
 
-        if (onImagePaste && imagePaths.length > 0) {
+        // Official 2.1.328 #601: when keepsImagePaths() is true (e.g. `!` bash
+        // mode), keep pasted image paths as plain text instead of converting
+        // them into image attachments.
+        if (onImagePaste && !keepsImagePaths?.() && imagePaths.length > 0) {
           notifyImageReadStart(onImageReadStart)
           const isTempScreenshot =
             /\/TemporaryItems\/.*screencaptureui.*\/Screenshot/i.test(
@@ -395,6 +402,7 @@ export function usePasteHandler({
       deliverText,
       finishPaste,
       isMacOS,
+      keepsImagePaths,
       markPastePending,
       maybeReplayReturn,
       onImagePaste,

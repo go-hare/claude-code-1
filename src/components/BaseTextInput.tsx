@@ -8,7 +8,7 @@ import {
   insertInputFromKeyboardEvent,
   keyFromKeyboardEvent,
 } from '../utils/keyboardEventInput.js';
-import { Ansi, Box, Input, Text, isNativeCursorEnabled, useFocusReclaim, useInput } from '@anthropic/ink';
+import { Ansi, Box, Input, stringWidth, Text, isNativeCursorEnabled, useFocusReclaim, useInput } from '@anthropic/ink';
 import type { DOMElement, KeyboardEvent, PasteEvent } from '@anthropic/ink';
 import type { BaseInputState, BaseTextInputProps, PromptInputMode } from '../types/textInputTypes.js';
 import { leftoverXy } from '../utils/leftoverXy.js';
@@ -87,6 +87,40 @@ type BaseTextInputComponentProps = BaseTextInputProps & {
  * - d7r paste wrapper (usePasteHandler) around handleKeyDown
  * - useInput only enables raw mode (fork keybindings still listen on EventEmitter)
  */
+/**
+ * Official 2.1.327 (#464): detect when a text field clips long pasted text
+ * outside its visible viewport or single-line column width so callers can show
+ * a subtle overflow indicator instead of hiding text with no sign.
+ */
+export function computeTextOverflowIndicator(params: {
+  value: string;
+  columns: number;
+  multiline?: boolean;
+  maxVisibleLines?: number;
+  viewportCharOffset: number;
+  viewportCharEnd: number;
+}): { above: boolean; below: boolean; indicator: string | null } {
+  const { value, columns, multiline, maxVisibleLines, viewportCharOffset, viewportCharEnd } = params;
+  if (!value) return { above: false, below: false, indicator: null };
+  const above = viewportCharOffset > 0;
+  const below = viewportCharEnd > 0 && viewportCharEnd < value.length;
+  if (above || below) {
+    const hiddenBefore = above ? value.slice(0, viewportCharOffset).split('\n').length : 0;
+    const hiddenAfter = below ? value.slice(viewportCharEnd).split('\n').length : 0;
+    const parts: string[] = [];
+    if (hiddenBefore > 0) parts.push(`↑ +${hiddenBefore} ${hiddenBefore === 1 ? 'line' : 'lines'}`);
+    if (hiddenAfter > 0) parts.push(`↓ +${hiddenAfter} ${hiddenAfter === 1 ? 'line' : 'lines'}`);
+    return { above, below, indicator: `… (${parts.join(', ')} hidden)` };
+  }
+  if (!multiline && maxVisibleLines === 1 && columns > 0 && stringWidth(value) > columns) {
+    const hiddenChars = [...value].length - Math.max(0, columns);
+    if (hiddenChars > 0) {
+      return { above: false, below: true, indicator: `… (+${hiddenChars} more chars)` };
+    }
+  }
+  return { above: false, below: false, indicator: null };
+}
+
 export function BaseTextInput({
   inputState,
   children,
@@ -156,8 +190,9 @@ export function BaseTextInput({
     [onInput, onKeyDownBefore],
   );
 
-  // Official densable d7r
+  // Official densable d7r + 2.1.328 #601 (`keepsImagePaths`)
   const { handleKeyDown, handlePaste, isPasting } = usePasteHandler({
+    keepsImagePaths: () => props.getInputMode?.() === 'bash',
     onPaste: props.onPaste,
     handleKeyDown: baseHandleKeyDown,
     onImagePaste: props.onImagePaste,
@@ -237,6 +272,16 @@ export function BaseTextInput({
 
   const hasPlaceholderContent = showPlaceholder && Boolean(props.placeholderElement || renderedPlaceholder);
   const hasHighlights = Boolean(filteredHighlights && filteredHighlights.length > 0 && !hasPlaceholderContent);
+  const overflowInfo = hasPlaceholderContent
+    ? { above: false, below: false, indicator: null }
+    : computeTextOverflowIndicator({
+        value: props.value,
+        columns: props.columns,
+        multiline: props.multiline,
+        maxVisibleLines: props.maxVisibleLines,
+        viewportCharOffset,
+        viewportCharEnd,
+      });
 
   const inputProps = {
     ref: setBoxRef,
@@ -247,6 +292,12 @@ export function BaseTextInput({
     onKeyDown: isActive ? handleKeyDown : undefined,
     onPaste: isActive ? onPaste : undefined,
   };
+
+  const overflowBadge = overflowInfo.indicator ? (
+    <Box flexShrink={0}>
+      <Text dimColor>{overflowInfo.indicator}</Text>
+    </Box>
+  ) : null;
 
   // densable UTt @202724600:
   //   highlight: n7 children = [preserve Box(Z), se, i]
@@ -263,13 +314,25 @@ export function BaseTextInput({
         {props.argumentHint}
       </Text>
     ) : null;
-    return (
-      <Input {...inputProps}>
+    const highlightContent = (
+      <>
         <Box flexShrink={0} accessibility={{ preserveWhitespace: true }}>
           <HighlightedInput text={renderedValue} highlights={filteredHighlights} />
         </Box>
         {highlightHint}
         {children}
+      </>
+    );
+    return (
+      <Input {...inputProps}>
+        {overflowBadge ? (
+          <Box flexDirection="column" flexGrow={1}>
+            <Box flexDirection="row">{highlightContent}</Box>
+            {overflowBadge}
+          </Box>
+        ) : (
+          highlightContent
+        )}
       </Input>
     );
   }
@@ -293,13 +356,24 @@ export function BaseTextInput({
     </Text>
   );
 
+  const textNode = (
+    <Text wrap="truncate-end" dimColor={props.dimColor}>
+      {valueNode}
+      {argumentHint}
+      {children}
+    </Text>
+  );
+
   return (
     <Input {...inputProps}>
-      <Text wrap="truncate-end" dimColor={props.dimColor}>
-        {valueNode}
-        {argumentHint}
-        {children}
-      </Text>
+      {overflowBadge ? (
+        <Box flexDirection="column" flexGrow={1}>
+          {textNode}
+          {overflowBadge}
+        </Box>
+      ) : (
+        textNode
+      )}
     </Input>
   );
 }

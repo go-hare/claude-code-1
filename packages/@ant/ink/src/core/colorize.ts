@@ -44,13 +44,21 @@ function boostChalkLevelForXtermJs(): boolean {
  * globalSettings.env, so reading it here is correct. chalk is a singleton, so
  * this clamps ALL truecolor output (fg+bg+hex) across the entire app.
  */
-function clampChalkLevelForTmux(): boolean {
+/**
+ * Official 2.1.328 (#604): downgrade truecolor (`level > 2`) to 256-color
+ * (`level = 2`) under tmux (`$TMUX`) and GNU screen (`$STY`), unless
+ * `CLAUDE_CODE_TMUX_TRUECOLOR` is set.
+ */
+export function clampChalkLevelForTmux(
+  env: Record<string, string | undefined> = process.env,
+  target: { level: 0 | 1 | 2 | 3 } = chalk,
+): boolean {
   // bg.ts sets terminal-overrides :Tc before attach, so truecolor passes
   // through — skip the clamp. General escape hatch for anyone who's
-  // configured their tmux correctly.
-  if (process.env.CLAUDE_CODE_TMUX_TRUECOLOR) return false
-  if (process.env.TMUX && chalk.level > 2) {
-    chalk.level = 2
+  // configured their tmux/screen correctly.
+  if (env.CLAUDE_CODE_TMUX_TRUECOLOR) return false
+  if ((env.TMUX || env.STY) && target.level > 2) {
+    target.level = 2
     return true
   }
   return false

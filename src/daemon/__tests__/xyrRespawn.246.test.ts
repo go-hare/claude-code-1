@@ -27,7 +27,7 @@ afterEach(() => {
 describe('densable 2.1.246 #14 Kn respawn-in-flight', () => {
   test('source: present && !alive returns without kill; official sentence kept', () => {
     expect(src).toContain('if (!force && probe.present && !probe.alive)')
-    expect(src).toContain('return null')
+    expect(src).toContain('error: null')
     expect(src).toContain('was stopped while the respawn was in flight')
     expect(src).toContain("stateBefore.state !== 'stopped'")
   })
@@ -57,11 +57,13 @@ describe('densable 2.1.246 #14 Kn respawn-in-flight', () => {
       firstTerminalAt: null,
     })
 
-    const err = await xyrPreflightBeforeRespawn({
+    const res = await xyrPreflightBeforeRespawn({
       short: 'abcabc01',
       resumeSessionId: 'sess-1',
       hasMessages: false,
     })
-    expect(err).toBeNull()
+    expect(res.error).toBeNull()
+    expect(res.resumeSessionId).toBe('sess-1')
+    expect(res.rotated).toBe(false)
   })
 })

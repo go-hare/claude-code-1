@@ -2,6 +2,7 @@ import figures from 'figures';
 import React, { useRef, useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
 import { Box, Byline, color, Dialog, KeyboardShortcutHint, Text, useTheme } from '@anthropic/ink';
+import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
 import { getMcpConfigByName } from '../../services/mcp/config.js';
 import { useMcpReconnect, useMcpToggleEnabled } from '../../services/mcp/MCPConnectionManager.js';
 import { formatFailedMcpIssue } from '../../services/mcp/mcpConnectionIssue.js';
@@ -85,17 +86,15 @@ export function MCPStdioServerMenu({
   }
 
   menuOptions.push({
-    label: server.client.type !== 'disabled' ? 'Disable' : 'Enable',
+    label: server.client.type !== 'disabled' ? 'Disable in this project' : 'Enable',
     value: 'toggle-enabled',
   });
 
-  // If there are no other options, add a back option so Select handles escape
-  if (menuOptions.length === 0) {
-    menuOptions.push({
-      label: 'Back',
-      value: 'back',
-    });
-  }
+  // Official 2.1.328 #494: Always end server action menus with Back.
+  menuOptions.push({
+    label: 'Back',
+    value: 'back',
+  });
 
   if (isReconnecting || togglingAction !== null) {
     const heading = isReconnecting ? 'Reconnecting to ' : togglingAction === 'enabling' ? 'Enabling ' : 'Disabling ';
@@ -131,6 +130,7 @@ export function MCPStdioServerMenu({
   return (
     <Dialog
       title={`${capitalizedServerName} MCP Server`}
+      subtitle="MCP server"
       onCancel={onCancel}
       hideBorder={borderless}
       inputGuide={exitState =>
@@ -254,6 +254,8 @@ export function MCPStdioServerMenu({
         <Box marginTop={1}>
           <Select
             options={menuOptions}
+            hideIndexes={!isScreenReaderModeEnabled()}
+            disablePrintableKeybindings={!isScreenReaderModeEnabled()}
             onChange={async value => {
               if (value === 'tools') {
                 onViewTools();

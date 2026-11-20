@@ -242,7 +242,7 @@ const RELATIVE_WIN_DOT_SLASH_PREFIX_RE =
   /^\.(?:\\[\w.+@-]*[\w+@-])+(?=[ \t]|:\*$)/
 
 /** Official `Q(e)`: basename, lowercase, strip trailing version digits and `.exe`. */
-function normalizeBroadRuleProg(token: string): string {
+export function normalizeBroadRuleProg(token: string): string {
   return token
     .replace(/^.*[\\/]/s, '')
     .toLowerCase()
@@ -250,7 +250,7 @@ function normalizeBroadRuleProg(token: string): string {
 }
 
 /** Official `Z(e)`: normalize whitespace, collapse `* *`, normalize leading command. */
-function normalizeBroadRuleContent(ruleContent: string): string {
+export function normalizeBroadRuleContent(ruleContent: string): string {
   return ruleContent
     .trim()
     .toLowerCase()

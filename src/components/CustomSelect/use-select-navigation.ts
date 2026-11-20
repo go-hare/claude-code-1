@@ -89,10 +89,12 @@ type SetFocusAction<T> = {
 
 type FocusNextOptionAction = {
   type: 'focus-next-option'
+  stopsAtLastRow?: boolean
 }
 
 type FocusPreviousOptionAction = {
   type: 'focus-previous-option'
+  holdsFirstRow?: boolean
 }
 
 type FocusNextPageAction = {
@@ -118,6 +120,11 @@ const reducer = <T>(state: State<T>, action: Action<T>): State<T> => {
       const item = state.optionMap.get(state.focusedValue)
 
       if (!item) {
+        return state
+      }
+
+      // Official 2.1.327 (#500): on permission prompts, stop at No (last row) instead of wrapping.
+      if (!item.next && action.stopsAtLastRow) {
         return state
       }
 
@@ -170,6 +177,11 @@ const reducer = <T>(state: State<T>, action: Action<T>): State<T> => {
       const item = state.optionMap.get(state.focusedValue)
 
       if (!item) {
+        return state
+      }
+
+      // Official 2.1.327: optionally stop at first row instead of wrapping to last.
+      if (!item.previous && action.holdsFirstRow) {
         return state
       }
 
@@ -504,6 +516,17 @@ export type UseSelectNavigationProps<T> = {
    * Local window is already ee=B-2; this only marks je rows in the window math.
    */
   moreRowLines?: boolean
+
+  /**
+   * Official 2.1.327 (#500): when true, Down arrow stops at the last row instead
+   * of wrapping around to the first row.
+   */
+  stopsAtLastRow?: boolean
+
+  /**
+   * When true, Up arrow stays on the first row instead of wrapping to the last row.
+   */
+  holdsFirstRow?: boolean
 }
 
 export type SelectNavigation<T> = {
@@ -688,6 +711,8 @@ export function useSelectNavigation<T>({
   onFocus,
   focusValue,
   moreRowLines = false,
+  stopsAtLastRow = false,
+  holdsFirstRow = false,
 }: UseSelectNavigationProps<T>): SelectNavigation<T> {
   // densable C4i: stable mutable bag + mirrored React state.
   // Dispatch mutates bag.state synchronously so getFocusedValue() sees the
@@ -766,14 +791,16 @@ export function useSelectNavigation<T>({
   const focusNextOption = useCallback(() => {
     navigate({
       type: 'focus-next-option',
+      stopsAtLastRow,
     })
-  }, [navigate])
+  }, [navigate, stopsAtLastRow])
 
   const focusPreviousOption = useCallback(() => {
     navigate({
       type: 'focus-previous-option',
+      holdsFirstRow,
     })
-  }, [navigate])
+  }, [navigate, holdsFirstRow])
 
   const focusNextPage = useCallback(() => {
     navigate({

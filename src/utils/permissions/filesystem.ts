@@ -68,6 +68,7 @@ import { getPlanSlug, getPlansDirectory } from '../plans.js'
 import { getPlatform } from '../platform.js'
 import { getProjectDir } from '../sessionPaths.js'
 import { SETTING_SOURCES } from '../settings/constants.js'
+import { getManagedSettingsDropInDir } from '../settings/managedPath.js'
 import {
   getSettingsFilePathForSource,
   getSettingsForSource,
@@ -210,6 +211,32 @@ export function isClaudeSignInFilePath(filePath: string): boolean {
       const normTarget = caseFold ? target.toLowerCase() : target
       if (normCand === normTarget) return true
     }
+  }
+  // Hard-link guard (official 2.1.328 `wg`): also check statSync dev/ino
+  // equality against existing sign-in files so writing through a hard link
+  // cannot modify .credentials.json or .device-keys.json.
+  try {
+    // eslint-disable-next-line custom-rules/no-sync-fs -- permission check is sync
+    const candStat = statSync(expanded, { bigint: true })
+    if (candStat.isFile() && candStat.ino !== 0n) {
+      for (const target of protectedPaths) {
+        try {
+          // eslint-disable-next-line custom-rules/no-sync-fs -- permission check is sync
+          const targetStat = statSync(target, { bigint: true })
+          if (
+            targetStat.isFile() &&
+            targetStat.dev === candStat.dev &&
+            targetStat.ino === candStat.ino
+          ) {
+            return true
+          }
+        } catch {
+          // protected sign-in file does not exist or cannot be stat'd
+        }
+      }
+    }
+  } catch {
+    // candidate path does not exist yet
   }
   return false
 }
@@ -1982,6 +2009,7 @@ export function contextBlocksOutsideWrites(
 }
 
 export function settingsHaveBlockWritesOutsideWorkingDirectories(): boolean {
+  if (isEvalConfined()) return false
   return SETTING_SOURCES.some(source => {
     const perms = getSettingsForSource(source)?.permissions as
       | { blockWritesOutsideWorkingDirectories?: boolean }
@@ -1990,15 +2018,78 @@ export function settingsHaveBlockWritesOutsideWorkingDirectories(): boolean {
   })
 }
 
+function resolveManagedDropInDirWithAncestor(dirPath: string): string {
+  const fs = getFsImplementation()
+  try {
+    return fs.realpathSync(dirPath)
+  } catch (err) {
+    const code = getErrnoCode(err)
+    const parent = dirname(dirPath)
+    if (code !== 'ENOENT' || parent === dirPath) {
+      throw err
+    }
+    return join(resolveManagedDropInDirWithAncestor(parent), basename(dirPath))
+  }
+}
+
+function resolveManagedDropInDirsForWriteBlock(): {
+  dirs: string[]
+  allResolved: boolean
+} {
+  const dropInDirs = [getManagedSettingsDropInDir()]
+  const resolvedDirs: string[] = []
+  let allResolved = true
+  for (const dir of dropInDirs) {
+    resolvedDirs.push(dir)
+    try {
+      const located = resolveManagedDropInDirWithAncestor(dir)
+      resolvedDirs.push(located)
+    } catch (err) {
+      const code = getErrnoCode(err)
+      // Official 2.1.328 `yp`: EACCES / EPERM / ENOTDIR still compare by name;
+      // other resolution failures fail closed (`allResolved = false`).
+      if (code !== 'EACCES' && code !== 'EPERM' && code !== 'ENOTDIR') {
+        allResolved = false
+      }
+    }
+  }
+  return {
+    dirs: Array.from(new Set(resolvedDirs.map(normalizeCaseForComparison))),
+    allResolved,
+  }
+}
+
+/**
+ * Official 2.1.328 `xlr()` (@289266157):
+ * Treat explicit Claude settings / profile store paths and drop-in `.json`
+ * files under `managed-settings.d` as settings files. Only treat arbitrary
+ * `.json` files (`package.json`, `tsconfig.json`, etc.) as possible settings
+ * files when managed drop-in directory resolution fails (`!allResolved`).
+ */
 function isJsonOrSettingsPathForWriteBlock(
   pathsToCheck: readonly string[],
 ): boolean {
-  return pathsToCheck.some(
-    p =>
-      isClaudeSettingsPath(p) ||
-      p.toLowerCase().endsWith('.json') ||
-      isProfileStorePath(p),
+  if (
+    pathsToCheck.some(p => isClaudeSettingsPath(p) || isProfileStorePath(p))
+  ) {
+    return true
+  }
+  const jsonPaths = pathsToCheck.filter(p =>
+    expandPath(p).toLowerCase().endsWith('.json'),
   )
+  if (jsonPaths.length === 0) {
+    return false
+  }
+  const { dirs, allResolved } = resolveManagedDropInDirsForWriteBlock()
+  if (
+    jsonPaths.some(p => {
+      const parent = normalizeCaseForComparison(dirname(expandPath(p)))
+      return dirs.includes(parent)
+    })
+  ) {
+    return true
+  }
+  return !allResolved
 }
 
 /**
@@ -2144,12 +2235,14 @@ export function pathInWorkingPath(
   opts?: {
     caseFold?: boolean
     uncShapeParity?: boolean
+    skipPrivateAlias?: boolean
     heldAsNamed?: boolean
     folderIdentity?: boolean
   },
 ): boolean {
   const caseFold = opts?.caseFold ?? true
   const uncShapeParity = opts?.uncShapeParity ?? false
+  const skipPrivateAlias = opts?.skipPrivateAlias ?? false
   const absolutePath = expandPath(path)
   const absoluteWorkingPath = expandPath(workingPath)
 
@@ -2163,15 +2256,18 @@ export function pathInWorkingPath(
     return false
   }
 
-  // On macOS, handle common symlink issues:
-  // - /var -> /private/var
-  // - /tmp -> /private/tmp
-  const normalizedPath = absolutePath
-    .replace(/^\/private\/var\//, '/var/')
-    .replace(/^\/private\/tmp(\/|$)/, '/tmp$1')
-  const normalizedWorkingPath = absoluteWorkingPath
-    .replace(/^\/private\/var\//, '/var/')
-    .replace(/^\/private\/tmp(\/|$)/, '/tmp$1')
+  // Official 2.1.327 (#502, SEA `Tc`): on macOS (unless skipPrivateAlias is
+  // set), normalize /private/var and /private/tmp aliases, respecting caseFold.
+  const privateVarRe = caseFold ? /^\/private\/var\//i : /^\/private\/var\//
+  const privateTmpRe = caseFold
+    ? /^\/private\/tmp(\/|$)/i
+    : /^\/private\/tmp(\/|$)/
+  const normalizePrivateAlias = (p: string): string =>
+    skipPrivateAlias
+      ? p
+      : p.replace(privateVarRe, '/var/').replace(privateTmpRe, '/tmp$1')
+  const normalizedPath = normalizePrivateAlias(absolutePath)
+  const normalizedWorkingPath = normalizePrivateAlias(absoluteWorkingPath)
 
   // gold Vy membership uses caseFold:false. Default remains fold for
   // add-dir / claudemd callers on case-insensitive volumes.
@@ -2194,10 +2290,12 @@ export function pathInWorkingPath(
     return true
   }
 
-  // #1496: paths held as named keep their exact lexical spelling only.
+  // Official 2.1.327 (#502, SEA `Tc`): folder-identity (dev:ino) fallback is
+  // off by default so bind mounts / alternate aliases outside the lexical
+  // working directory ask for permission unless explicitly opted in.
   const heldAsNamed =
     opts?.heldAsNamed ?? isWorkingDirPathHeldAsNamed(workingPath)
-  if (heldAsNamed || opts?.folderIdentity === false) {
+  if (heldAsNamed || opts?.folderIdentity !== true) {
     return false
   }
 
@@ -3058,7 +3156,12 @@ export function checkWritePermissionForTool<Input extends AnyObject>(
         return {
           behavior: 'deny',
           message: msg,
-          decisionReason: { type: 'other', reason: msg },
+          decisionReason: {
+            type: 'safetyCheck',
+            reason: msg,
+            classifierApprovable: false,
+            circuitBreaker: 'claudeSettingsFile',
+          },
           blockedPath: rawTarget,
         }
       }

@@ -1,6 +1,7 @@
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js'
 import { z } from 'zod/v4'
 import { buildTool, type ToolDef } from 'src/Tool.js'
+import { AbortError } from 'src/utils/errors.js'
 import { lazySchema } from 'src/utils/lazySchema.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import { createAdapter } from './adapters/index.js'
@@ -291,6 +292,15 @@ export const WebSearchTool = buildTool({
                 },
               ]
             : ['No search results found.']
+        // Official 2.1.328 #594: if the search was aborted (e.g. Send now) and
+        // no real link results arrived, throw AbortError rather than telling
+        // Claude that the search found no results.
+        if (
+          context.abortController.signal.aborted &&
+          results.every(r => typeof r === 'string' || r.content.length === 0)
+        ) {
+          throw new AbortError()
+        }
         return {
           data: {
             query,
@@ -355,6 +365,15 @@ export const WebSearchTool = buildTool({
       })
     } else {
       results.push('No search results found.')
+    }
+
+    // Official 2.1.328 #594: do not tell Claude a stopped web search found no
+    // results when the abort signal fired before any results arrived.
+    if (
+      context.abortController.signal.aborted &&
+      results.every(r => typeof r === 'string' || r.content.length === 0)
+    ) {
+      throw new AbortError()
     }
 
     const data: Output = {

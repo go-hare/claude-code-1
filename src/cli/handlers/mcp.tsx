@@ -4,6 +4,7 @@
  */
 
 import { stat } from 'fs/promises';
+import { Readable } from 'node:stream';
 import pMap from 'p-map';
 import { cwd } from 'process';
 import { MCPServerDesktopImportDialog } from '../../components/MCPServerDesktopImportDialog.js';
@@ -398,6 +399,57 @@ export async function mcpGetHandler(name: string): Promise<void> {
 }
 
 // mcp add-json (lines 4801–4870)
+export const MCP_ADD_JSON_STDIN_MAX_BYTES = 1048576;
+
+export function isInsideClaudeCodeSession(env: Record<string, string | undefined> = process.env): boolean {
+  const truthy = (v: string | undefined) =>
+    v !== undefined && ['1', 'true', 'yes', 'on'].includes(v.trim().toLowerCase());
+  return truthy(env.CLAUDE_CODE_CHILD_SESSION) || truthy(env.CLAUDECODE);
+}
+
+export async function readStdinCapped(maxBytes: number, stream?: ReadableStream<Uint8Array>): Promise<string | null> {
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  const inputStream =
+    stream ??
+    (typeof Bun !== 'undefined'
+      ? Bun.stdin.stream()
+      : (Readable.toWeb(process.stdin) as unknown as ReadableStream<Uint8Array>));
+  const reader = inputStream.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks));
+}
+
+export async function readMcpAddJsonFromStdin(opts?: {
+  env?: Record<string, string | undefined>;
+  isTTY?: boolean;
+  stream?: ReadableStream<Uint8Array>;
+}): Promise<string> {
+  if (isInsideClaudeCodeSession(opts?.env)) {
+    throw new Error(
+      'Reading the JSON from stdin is refused inside a Claude Code session, because its permission prompt would not show the server. Run the command outside the session.',
+    );
+  }
+  const isTTY = opts?.isTTY ?? Boolean(process.stdin.isTTY);
+  const raw = isTTY ? '' : await readStdinCapped(MCP_ADD_JSON_STDIN_MAX_BYTES, opts?.stream);
+  if (raw === null) {
+    throw new Error('The JSON on stdin is over the limit of 1 MiB.');
+  }
+  if (raw.trim() === '') {
+    throw new Error('There is no JSON on stdin. Pipe it in, or pass it as the argument.');
+  }
+  return raw;
+}
+
 export async function mcpAddJsonHandler(
   name: string,
   json: string,
@@ -405,7 +457,8 @@ export async function mcpAddJsonHandler(
 ): Promise<void> {
   try {
     const scope = ensureConfigScope(options.scope);
-    const parsedJson = safeParseJSON(json);
+    const rawJson = json === '-' ? await readMcpAddJsonFromStdin() : json;
+    const parsedJson = safeParseJSON(rawJson);
 
     // Read secret before writing config so cancellation doesn't leave partial state
     const needsSecret =
@@ -413,7 +466,7 @@ export async function mcpAddJsonHandler(
       parsedJson &&
       typeof parsedJson === 'object' &&
       'type' in parsedJson &&
-      (parsedJson.type === 'sse' || parsedJson.type === 'http') &&
+      (parsedJson.type === 'sse' || parsedJson.type === 'http' || parsedJson.type === 'streamable-http') &&
       'url' in parsedJson &&
       typeof parsedJson.url === 'string' &&
       'oauth' in parsedJson &&
@@ -434,11 +487,15 @@ export async function mcpAddJsonHandler(
       parsedJson &&
       typeof parsedJson === 'object' &&
       'type' in parsedJson &&
-      (parsedJson.type === 'sse' || parsedJson.type === 'http') &&
+      (parsedJson.type === 'sse' || parsedJson.type === 'http' || parsedJson.type === 'streamable-http') &&
       'url' in parsedJson &&
       typeof parsedJson.url === 'string'
     ) {
-      saveMcpClientSecret(name, { type: parsedJson.type, url: parsedJson.url }, clientSecret);
+      saveMcpClientSecret(
+        name,
+        { type: parsedJson.type === 'sse' ? 'sse' : 'http', url: parsedJson.url },
+        clientSecret,
+      );
     }
 
     logEvent('tengu_mcp_add', {

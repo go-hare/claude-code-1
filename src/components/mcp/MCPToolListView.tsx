@@ -1,5 +1,6 @@
 import React from 'react';
-import { Text } from '@anthropic/ink';
+import { Byline, Dialog, KeyboardShortcutHint, Text } from '@anthropic/ink';
+import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
 import { extractMcpToolDisplayName, getMcpDisplayName } from '../../services/mcp/mcpStringUtils.js';
 import { filterToolsByServer } from '../../services/mcp/utils.js';
 import { useAppState } from '../../state/AppState.js';
@@ -7,18 +8,36 @@ import type { Tool } from '../../Tool.js';
 import { plural } from '../../utils/stringUtils.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
 import { Select } from '../CustomSelect/index.js';
-import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
 import type { ServerInfo } from './types.js';
 
 type Props = {
   server: ServerInfo;
+  /** Official 2.1.328 #462: Tool name to focus initially when returning from detail view. */
+  startOn?: string;
+  /** Official 2.1.328 #462: Fallback index to focus initially when returning from detail view. */
+  defaultFocusIndex?: number;
   onSelectTool: (tool: Tool, index: number) => void;
   onBack: () => void;
 };
 
-export function MCPToolListView({ server, onSelectTool, onBack }: Props): React.ReactNode {
+export function resolveInitialMcpToolFocusIndex(
+  orderedTools: readonly Pick<Tool, 'name'>[],
+  startOn?: string,
+  defaultFocusIndex?: number,
+): number {
+  if (orderedTools.length === 0) return 0;
+  if (startOn) {
+    const byName = orderedTools.findIndex(tool => tool.name === startOn);
+    if (byName >= 0) return byName;
+  }
+  if (typeof defaultFocusIndex === 'number' && Number.isFinite(defaultFocusIndex)) {
+    return Math.max(0, Math.min(orderedTools.length - 1, Math.trunc(defaultFocusIndex)));
+  }
+  return 0;
+}
+
+export function MCPToolListView({ server, startOn, defaultFocusIndex, onSelectTool, onBack }: Props): React.ReactNode {
   const mcpTools = useAppState(s => s.mcp.tools);
-  const [focusedIndex, setFocusedIndex] = React.useState(0);
   const [showBlockedWarning, setShowBlockedWarning] = React.useState(false);
 
   const serverTools = React.useMemo(() => {
@@ -27,11 +46,21 @@ export function MCPToolListView({ server, onSelectTool, onBack }: Props): React.
   }, [server, mcpTools]);
 
   // Official: blocked tools sort last and show disabled by org policy.
-  const orderedTools = [...serverTools].sort((a, b) => {
-    const aBlocked = a.mcpInfo?.effectiveMaxPermission === 'blocked' ? 1 : 0;
-    const bBlocked = b.mcpInfo?.effectiveMaxPermission === 'blocked' ? 1 : 0;
-    return aBlocked - bBlocked;
-  });
+  const orderedTools = React.useMemo(
+    () =>
+      [...serverTools].sort((a, b) => {
+        const aBlocked = a.mcpInfo?.effectiveMaxPermission === 'blocked' ? 1 : 0;
+        const bBlocked = b.mcpInfo?.effectiveMaxPermission === 'blocked' ? 1 : 0;
+        return aBlocked - bBlocked;
+      }),
+    [serverTools],
+  );
+
+  const initialFocusIndex = React.useMemo(
+    () => resolveInitialMcpToolFocusIndex(orderedTools, startOn, defaultFocusIndex),
+    [orderedTools, startOn, defaultFocusIndex],
+  );
+  const [focusedIndex, setFocusedIndex] = React.useState(initialFocusIndex);
 
   const blockedCount = orderedTools.filter(tool => tool.mcpInfo?.effectiveMaxPermission === 'blocked').length;
   const enabledCount = orderedTools.length - blockedCount;
@@ -103,6 +132,9 @@ export function MCPToolListView({ server, onSelectTool, onBack }: Props): React.
       ) : (
         <Select
           options={toolOptions}
+          defaultFocusValue={String(initialFocusIndex)}
+          hideIndexes={!isScreenReaderModeEnabled()}
+          disablePrintableKeybindings={!isScreenReaderModeEnabled()}
           onFocus={value => {
             setFocusedIndex(parseInt(value, 10));
             setShowBlockedWarning(false);

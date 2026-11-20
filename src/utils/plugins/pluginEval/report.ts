@@ -12,12 +12,105 @@ import type {
   AggregateReport,
   CaseLoadError,
   CaseReport,
+  PluginHookApprovalsSummary,
   PluginIdentity,
   PluginEvalHandlerOptions,
   ResolvedCase,
   RunReport,
   TrustSource,
 } from './types.js'
+
+/**
+ * Official 2.1.327 `Wvr` (#518) — format per-run warnings for calls a plugin's
+ * permission hook tried to allow over an eval deny rule (`refused`) and calls
+ * the hook approved that would not otherwise have run (`approved`).
+ */
+export function formatPluginHookApprovalWarnings(
+  summary: PluginHookApprovalsSummary,
+): string[] {
+  const formatToolCounts = (names: readonly string[]): string => {
+    const counts = new Map<string, number>()
+    for (const name of names) {
+      counts.set(name, (counts.get(name) ?? 0) + 1)
+    }
+    return Array.from(counts, ([name, count]) =>
+      count > 1 ? `${name} ×${count}` : name,
+    ).join(', ')
+  }
+  const { approved, refused } = summary
+  const warnings: string[] = []
+  if (refused.length > 0) {
+    warnings.push(
+      `A plugin's permission hook tried to allow ${refused.length} ${refused.length === 1 ? 'call' : 'calls'} that a deny rule blocks or that could not be checked against the deny rules, and the eval refused ${refused.length === 1 ? 'it' : 'them'}: ${formatToolCounts(refused)}`,
+    )
+  }
+  if (approved.length > 0) {
+    warnings.push(
+      `A plugin's permission hook approved ${approved.length} ${approved.length === 1 ? 'call' : 'calls'} that would not otherwise have run: ${formatToolCounts(approved)}`,
+    )
+  }
+  return warnings
+}
+
+/**
+ * Official 2.1.327 (#518) — resolve an eval run's permission check when a
+ * plugin's permission hook attempts to allow a tool call:
+ * - A deny rule or crashed/unfinished permission check ALWAYS stands over the
+ *   plugin hook's allow (`behavior: 'deny'`, `pluginApproval: 'refused'`).
+ * - When the call was not blocked by a deny rule and would not otherwise have
+ *   been allowed (e.g., `'ask'`), the hook's allow applies and is flagged with
+ *   `pluginApproval: 'applied'`.
+ */
+export function resolveEvalPermissionHookDecision(options: {
+  baseDecision: {
+    behavior: 'allow' | 'deny' | 'ask'
+    fromDenyRule?: boolean
+    checkCrashed?: boolean
+    checkUnfinished?: boolean
+    message?: string
+  }
+  hookDecision: { behavior: 'allow' | 'deny' | 'ask'; message?: string }
+  toolName: string
+}): {
+  behavior: 'allow' | 'deny' | 'ask'
+  message?: string
+  pluginApproval?: 'applied' | 'refused'
+} {
+  const { baseDecision, hookDecision, toolName } = options
+  if (
+    baseDecision.behavior === 'deny' &&
+    (baseDecision.fromDenyRule || baseDecision.checkCrashed)
+  ) {
+    return {
+      behavior: 'deny',
+      message: baseDecision.message,
+      ...(hookDecision.behavior === 'allow'
+        ? { pluginApproval: 'refused' as const }
+        : {}),
+    }
+  }
+  if (baseDecision.behavior === 'ask' && baseDecision.checkUnfinished) {
+    return {
+      behavior: 'deny',
+      message: `Claude Code could not finish the ${toolName} permission check, so the call was refused. A retry may fail the same way.`,
+      ...(hookDecision.behavior === 'allow'
+        ? { pluginApproval: 'refused' as const }
+        : {}),
+    }
+  }
+  if (hookDecision.behavior === 'allow') {
+    return {
+      behavior: 'allow',
+      ...(baseDecision.behavior !== 'allow'
+        ? { pluginApproval: 'applied' as const }
+        : {}),
+    }
+  }
+  return {
+    behavior: hookDecision.behavior,
+    message: hookDecision.message,
+  }
+}
 
 export function evalVersion(): string {
   try {
@@ -105,6 +198,32 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;')
 }
 
+function mapRunForJsonSchema(
+  run: RunReport,
+): RunReport & { pluginHookApprovals?: PluginHookApprovalsSummary } {
+  if (!run.plugin_hook_approvals) return run
+  const { plugin_hook_approvals, ...rest } = run
+  return {
+    ...rest,
+    pluginHookApprovals: plugin_hook_approvals,
+  }
+}
+
+function normalizeReportForJsonSchema(
+  aggregate: AggregateReport,
+): AggregateReport {
+  return {
+    ...aggregate,
+    cases: aggregate.cases.map(cse => ({
+      ...cse,
+      runs: cse.runs.map(mapRunForJsonSchema),
+      ...(cse.runs_without !== undefined
+        ? { runs_without: cse.runs_without.map(mapRunForJsonSchema) }
+        : {}),
+    })),
+  }
+}
+
 /** densable `vg`. */
 export async function validateEvalResult(params: {
   aggregate: AggregateReport
@@ -127,7 +246,10 @@ export async function validateEvalResult(params: {
   void params.caseFilter
   void params.tagFilters
   void params.threshold
-  return { result: params.aggregate, valid: true }
+  return {
+    result: normalizeReportForJsonSchema(params.aggregate),
+    valid: true,
+  }
 }
 
 /** densable `Ec`. */
@@ -147,7 +269,8 @@ export async function writeJsonResult(
     return false
   }
   try {
-    const body = `${preformatted ?? JSON.stringify(payload.result, null, 2)}\n`
+    const normalized = normalizeReportForJsonSchema(payload.result)
+    const body = `${preformatted ?? JSON.stringify(normalized, null, 2)}\n`
     if (json === true) {
       await new Promise<void>((resolveWrite, reject) => {
         process.stdout.write(body, error =>

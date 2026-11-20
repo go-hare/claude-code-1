@@ -30,6 +30,7 @@ import {
 } from '../services/analytics/index.js'
 import {
   DANGEROUS_TOOL_USE_BETA_HEADER,
+  EFFORT_BETA_HEADER,
   THINKING_BINDING_CONTROLS_BETA_HEADER,
   THINKING_DISPLAY_UPDATES_BETA_HEADER,
   THINKING_RESUMPTION_BETA_HEADER,
@@ -339,6 +340,12 @@ export type ThinkingRetryContext = {
   onThinkingStripped?: (att: ThinkingStrippedAttachment) => void
   /** densable `uO` @184977740 — prefix-lock attempt (1-based after increment). */
   prefixLockAttempt?: number
+  /**
+   * Official 2.1.328 (#570): when true (e.g. subagent progress summary writer),
+   * an effort rejection retries this request without effort but does NOT latch
+   * effort unsupported globally for the model across the session.
+   */
+  leavesEffortSupportAlone?: boolean
 }
 
 function isHttp400(error: unknown): error is APIError {
@@ -1478,18 +1485,23 @@ function classifyKueOnly(
   return null
 }
 
-/** densable `zue` @184975211. */
+/** densable `zue` @184975211 + Official 2.1.328 (#570) `leavesEffortSupportAlone`. */
 export function classifyEffortUnsupportedRetry(
   error: unknown,
-  ctx: Pick<ThinkingRetryContext, 'model' | 'servedModel'>,
+  ctx: Pick<
+    ThinkingRetryContext,
+    'model' | 'servedModel' | 'leavesEffortSupportAlone'
+  >,
 ): ThinkingDisplayRetryToken | null {
   if (!isEffortUnsupportedRejected(error)) return null
-  markEffortUnsupported(ctx.model)
-  if (ctx.servedModel !== undefined && ctx.servedModel !== ctx.model) {
-    markEffortUnsupported(ctx.servedModel)
+  if (!ctx.leavesEffortSupportAlone) {
+    markEffortUnsupported(ctx.model)
+    if (ctx.servedModel !== undefined && ctx.servedModel !== ctx.model) {
+      markEffortUnsupported(ctx.servedModel)
+    }
   }
   logForDebugging(
-    `[effort] model ${ctx.model} rejected output_config.effort; latching unsupported and retrying without it.`,
+    `[effort] the server refused effort for model ${ctx.model} (the output_config.effort field or the anthropic-beta value ${EFFORT_BETA_HEADER}). Sending the request again without either; ${ctx.leavesEffortSupportAlone ? 'other requests to this model keep theirs' : 'this Claude Code process will not send either to this model again'}.`,
     { level: 'warn' },
   )
   logEvent('tengu_effort_unsupported_retry', {
@@ -1695,10 +1707,10 @@ export function isUltrathinkEnabled(): boolean {
 }
 
 /**
- * Check if text contains the "ultrathink" keyword.
+ * Check if text contains an active (unquoted, non-code, non-path) "ultrathink" trigger.
  */
 export function hasUltrathinkKeyword(text: string): boolean {
-  return /\bultrathink\b/i.test(text)
+  return findThinkingTriggerPositions(text).length > 0
 }
 
 const THINKING_TRIGGER_DELIMITERS: Record<string, string> = {

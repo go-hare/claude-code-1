@@ -15,8 +15,123 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process'
+import { closeSync, openSync, writeSync } from 'node:fs'
+import { isatty } from 'node:tty'
 import { buildCliLaunch } from './cliLaunch.js'
 import { getScreenReaderChildEnv } from './screenReaderGate.js'
+
+/**
+ * Official 2.1.328 (#401) `oat` / `o5i`: latch tracking whether a startup
+ * relaunch (e.g., gateway sign-in or Code Mode) has already been committed so
+ * outer startup handlers do not race or return to the shell prematurely.
+ */
+let startupRelaunchStarted = false
+
+export function isStartupRelaunchStarted(): boolean {
+  return startupRelaunchStarted
+}
+
+export function markStartupRelaunchStarted(): void {
+  startupRelaunchStarted = true
+}
+
+export function resetStartupRelaunchStartedForTests(): void {
+  startupRelaunchStarted = false
+}
+
+/**
+ * Official 2.1.328 (#401): after closing a TTY fd on Unix/Linux during
+ * spawn-based relaunch, immediately re-occupy the closed fd slot with
+ * `/dev/null` so libuv/epoll does not recycle fd 0 (or other low TTY fds)
+ * and leave the replacement child detached from the controlling terminal.
+ */
+export function occupyClosedFdWithDevNull(
+  targetFd: number,
+  ops?: {
+    openDevNull?: () => number
+    closeFd?: (fd: number) => void
+  },
+): number[] {
+  const openDevNull = ops?.openDevNull ?? (() => openSync('/dev/null', 'r+'))
+  const closeFd = ops?.closeFd ?? closeSync
+  const extras: number[] = []
+  try {
+    for (;;) {
+      const opened = openDevNull()
+      if (opened === targetFd) {
+        return extras
+      }
+      extras.push(opened)
+      if (opened > targetFd) {
+        break
+      }
+    }
+  } catch {
+    // Best-effort — do not crash relaunch if /dev/null is unavailable
+  } finally {
+    for (const fd of extras) {
+      try {
+        closeFd(fd)
+      } catch {
+        // ignore
+      }
+    }
+  }
+  return extras
+}
+
+/**
+ * Official 2.1.328 (#401) `execRelaunch` TTY handoff on Unix/Linux:
+ * close parent TTY fds `0..maxFd` (skipping stdout=1 and stderr=2) after the
+ * replacement child spawns, re-occupying each closed slot with `/dev/null`.
+ */
+export function closeTtyFdsForRelaunch(opts?: {
+  maxFd?: number
+  platform?: NodeJS.Platform
+  isTtyFd?: (fd: number) => boolean
+  closeFd?: (fd: number) => void
+  openDevNull?: () => number
+}): number[] {
+  const platform = opts?.platform ?? process.platform
+  if (platform === 'win32') return []
+  const maxFd = opts?.maxFd ?? 31
+  const isTtyFd = opts?.isTtyFd ?? isatty
+  const closeFd = opts?.closeFd ?? closeSync
+  const closed: number[] = []
+  for (let fd = 0; fd <= maxFd; fd++) {
+    if (fd === 1 || fd === 2) continue
+    let tty = false
+    try {
+      tty = isTtyFd(fd)
+    } catch {
+      tty = false
+    }
+    if (!tty) continue
+    try {
+      closeFd(fd)
+      closed.push(fd)
+      occupyClosedFdWithDevNull(fd, {
+        openDevNull: opts?.openDevNull,
+        closeFd,
+      })
+    } catch {
+      // fd may already be closed
+    }
+  }
+  return closed
+}
+
+/**
+ * Official 2.1.328 (#401): write fatal relaunch spawn errors directly to fd 2
+ * via `writeSync` so output is never lost if Node/Bun streams are torn down.
+ */
+export function writeRelaunchErrorSync(message: string): void {
+  try {
+    writeSync(2, message.endsWith('\n') ? message : `${message}\n`)
+  } catch {
+    // ignore stderr write failures during relaunch teardown
+  }
+}
 
 /**
  * densable Bxa — resolve live mainLoopModelOverride for /tui relaunch argv.
@@ -920,12 +1035,17 @@ export async function acceptTuiRelaunch(input: {
       cwd: relaunchCwd,
       onSpawned() {
         childStarted = true
+        markStartupRelaunchStarted()
         // Child is in this process group. Swallow parent shutdown signals
         // for the rest of its life so Ctrl+C hits the child, not us.
         for (const sig of RELAUNCH_G_SIGNALS) {
           process.removeAllListeners(sig)
           process.on(sig, () => {})
         }
+        // Official 2.1.328 (#401): release parent TTY fds (re-occupying low fd
+        // slots with /dev/null) so Linux terminals do not return to the shell
+        // while the relaunched child owns the TTY.
+        closeTtyFdsForRelaunch()
       },
     })
     if (!spawn.ok) {

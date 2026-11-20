@@ -18,7 +18,12 @@ import { Box, Text } from '@anthropic/ink';
 import { useKeybindings } from '../keybindings/useKeybinding.js';
 import { useAppState } from '../state/AppState.js';
 import { getPluginErrorMessage } from '../types/plugin.js';
-import { getGcsDistTags, getNpmDistTags, type NpmDistTags } from '../utils/autoUpdater.js';
+import {
+  formatAutoUpdatesChannelDisplay,
+  getGcsDistTags,
+  getNpmDistTags,
+  type NpmDistTags,
+} from '../utils/autoUpdater.js';
 import { type ContextWarnings, checkContextWarnings } from '../utils/doctorContextWarnings.js';
 import { type DiagnosticInfo, getDoctorDiagnostic } from '../utils/doctorDiagnostic.js';
 import { validateBoundedIntEnvVar } from '../utils/envValidation.js';
@@ -32,6 +37,7 @@ import {
 import { getInitialSettings } from '../utils/settings/settings.js';
 import { BASH_MAX_OUTPUT_DEFAULT, BASH_MAX_OUTPUT_UPPER_LIMIT } from '../utils/shell/outputLimits.js';
 import { TASK_MAX_OUTPUT_DEFAULT, TASK_MAX_OUTPUT_UPPER_LIMIT } from '../utils/task/outputFormatting.js';
+import { formatLastUpdateResult } from '../utils/updateResult.js';
 import { getXDGStateHome } from '../utils/xdg.js';
 
 type Props = {
@@ -67,32 +73,6 @@ function DistTagsDisplay({ promise }: { promise: Promise<NpmDistTags> }): React.
       {distTags.stable && <Text>└ Stable version: {distTags.stable}</Text>}
       <Text>└ Latest version: {distTags.latest}</Text>
     </>
-  );
-}
-
-function LastUpdateDisplay(): React.ReactNode {
-  const [result, setResult] = useState<{
-    success: boolean;
-    timestamp: string;
-    toVersion?: string;
-    error?: string;
-  } | null>(null);
-  useEffect(() => {
-    void import('../utils/updateResult.js').then(({ loadLastUpdateResult }) => loadLastUpdateResult().then(setResult));
-  }, []);
-  if (!result) return null;
-  const time = new Date(result.timestamp).toLocaleString();
-  if (result.success) {
-    return (
-      <Text dimColor>
-        └ Last update: {result.toVersion ?? 'success'} ({time})
-      </Text>
-    );
-  }
-  return (
-    <Text color={'error' as never}>
-      └ Last update failed: {result.error ?? 'unknown'} ({time})
-    </Text>
   );
 }
 
@@ -309,11 +289,11 @@ export function Doctor({ onDone }: Props): React.ReactNode {
         {diagnostic.hasUpdatePermissions !== null && (
           <Text>└ Update permissions: {diagnostic.hasUpdatePermissions ? 'Yes' : 'No (requires sudo)'}</Text>
         )}
-        <Text>└ Auto-update channel: {autoUpdatesChannel}</Text>
+        <Text>└ Auto-update channel: {formatAutoUpdatesChannelDisplay(autoUpdatesChannel)}</Text>
+        <Text>└ Last update attempt: {formatLastUpdateResult(diagnostic.lastUpdateResult)}</Text>
         <Suspense fallback={null}>
           <DistTagsDisplay promise={distTagsPromise} />
         </Suspense>
-        <LastUpdateDisplay />
       </Box>
 
       <SandboxDoctorSection />

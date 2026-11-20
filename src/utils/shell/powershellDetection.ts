@@ -50,23 +50,51 @@ function logPsDetectPathHit(): void {
 }
 
 /**
- * densable `YKh` — find PowerShell, preferring Core (pwsh) over Desktop 5.1.
+ * Official 2.1.327 #485 (`Ie`): detect WindowsApps store alias path.
+ */
+function isWindowsAppsStoreAliasPath(p: string): boolean {
+  const parts = p
+    .toLowerCase()
+    .split(/[\\/]+/)
+    .filter(Boolean)
+  return parts.at(-2) === 'windowsapps' && parts.at(-3) === 'microsoft'
+}
+
+export type FindPowerShellDeps = {
+  platform?: ReturnType<typeof getPlatform>
+  env?: {
+    ProgramFiles?: string
+    LOCALAPPDATA?: string
+    USERPROFILE?: string
+    SYSTEMROOT?: string
+  }
+  whichFn?: (bin: string) => Promise<string | null>
+  probePathFn?: (p: string) => Promise<string | null>
+  probeWindowsAppsAliasFn?: (p: string) => Promise<string | null>
+  realpathFn?: (p: string) => Promise<string>
+}
+
+/**
+ * densable `YKh` + Official 2.1.327 #485 (`oe` @291979228) — find PowerShell,
+ * preferring Core (pwsh) over Desktop 5.1.
  *
- * Order (densable 2.1.212):
- * 1. `which("pwsh")` (+ Linux snap → /opt/microsoft|/usr/bin workaround)
- * 2. Windows fixed paths when PATH has no pwsh:
+ * Order (2.1.327):
+ * 1. `which("pwsh")` (+ WindowsApps store alias resolution; Linux snap workaround)
+ * 2. On Windows, check all standard install locations CONCURRENTLY via `Promise.all`:
  *    - `%ProgramFiles%\PowerShell\7\pwsh.exe`
  *    - `%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe` (via readlink)
  *    - `%USERPROFILE%\.dotnet\tools\pwsh.exe`
- * 3. `which("powershell")` (5.1)
- * 4. Windows `%SYSTEMROOT%\System32\WindowsPowerShell\v1.0\powershell.exe`
- *
- * #11: when GP blocks PS5.1, uv_spawn fails if only 5.1 is on PATH; probing
- * ProgramFiles\PowerShell\7 first keeps daemon/bg/hooks on PS7.
+ *    - `%SYSTEMROOT%\System32\WindowsPowerShell\v1.0\powershell.exe`
+ *    Prefer PS7 if found; otherwise System32's `powershell.exe` wins over any
+ *    `powershell.exe` earlier on PATH.
+ * 3. `which("powershell")` (fallback when System32 check did not find 5.1)
  */
-export async function findPowerShell(): Promise<string | null> {
+export async function findPowerShell(
+  deps?: FindPowerShellDeps,
+): Promise<string | null> {
   // Official CLAUDE_CODE_TEST_NO_PWSH — force "not found" for tests.
   if (
+    !deps &&
     (
       require('../residualFinalEnvGates.js') as typeof import('../residualFinalEnvGates.js')
     ).isTestNoPwsh()
@@ -74,17 +102,36 @@ export async function findPowerShell(): Promise<string | null> {
     return null
   }
 
-  const pwshPath = await which('pwsh')
+  const platform = deps?.platform ?? getPlatform()
+  const whichFn = deps?.whichFn ?? which
+  const probePathFn = deps?.probePathFn ?? probePath
+  const probeAliasFn = deps?.probeWindowsAppsAliasFn ?? probeWindowsAppsAlias
+  const realpathFn = deps?.realpathFn ?? realpath
+  const env = deps?.env ?? process.env
+
+  let pwshPath = await whichFn('pwsh')
+  if (
+    pwshPath &&
+    platform === 'windows' &&
+    isWindowsAppsStoreAliasPath(pwshPath)
+  ) {
+    const resolvedAlias = await probeAliasFn(pwshPath)
+    if (resolvedAlias) {
+      logPsDetectFallback('store_alias_on_path')
+      return resolvedAlias
+    }
+    pwshPath = null
+  }
   if (pwshPath) {
     // densable snap_workaround: PATH/snap launcher hangs in subprocesses.
-    if (getPlatform() === 'linux') {
-      const resolved = await realpath(pwshPath).catch(() => pwshPath)
+    if (platform === 'linux') {
+      const resolved = await realpathFn(pwshPath).catch(() => pwshPath)
       if (pwshPath.startsWith('/snap/') || resolved.startsWith('/snap/')) {
         const direct =
-          (await probePath('/opt/microsoft/powershell/7/pwsh')) ??
-          (await probePath('/usr/bin/pwsh'))
+          (await probePathFn('/opt/microsoft/powershell/7/pwsh')) ??
+          (await probePathFn('/usr/bin/pwsh'))
         if (direct) {
-          const directResolved = await realpath(direct).catch(() => direct)
+          const directResolved = await realpathFn(direct).catch(() => direct)
           if (
             !direct.startsWith('/snap/') &&
             !directResolved.startsWith('/snap/')
@@ -99,52 +146,51 @@ export async function findPowerShell(): Promise<string | null> {
     return pwshPath
   }
 
-  // densable windows_fallback_path: fixed PS7 locations when `which(pwsh)` misses.
-  // Covers MSI install not on PATH, Store alias, and dotnet tool install.
-  if (getPlatform() === 'windows') {
-    const programFiles = process.env.ProgramFiles
-    const localAppData = process.env.LOCALAPPDATA
-    const userProfile = process.env.USERPROFILE
-    const fixed =
-      (programFiles
-        ? await probePath(join(programFiles, 'PowerShell', '7', 'pwsh.exe'))
-        : null) ??
-      (localAppData
-        ? await probeWindowsAppsAlias(
+  // Official 2.1.327 #485: check all Windows standard install locations
+  // concurrently in a single Promise.all. Prefer PS7; otherwise System32's
+  // powershell.exe wins over a powershell.exe earlier on PATH.
+  if (platform === 'windows') {
+    const programFiles = env.ProgramFiles
+    const localAppData = env.LOCALAPPDATA
+    const userProfile = env.USERPROFILE
+    const systemRoot = env.SYSTEMROOT || 'C:\\Windows'
+    const [msiPs7, storePs7, dotnetPs7, system32Ps5] = await Promise.all([
+      programFiles
+        ? probePathFn(join(programFiles, 'PowerShell', '7', 'pwsh.exe'))
+        : null,
+      localAppData
+        ? probeAliasFn(
             join(localAppData, 'Microsoft', 'WindowsApps', 'pwsh.exe'),
           )
-        : null) ??
-      (userProfile
-        ? await probePath(join(userProfile, '.dotnet', 'tools', 'pwsh.exe'))
-        : null)
-    if (fixed) {
+        : null,
+      userProfile
+        ? probePathFn(join(userProfile, '.dotnet', 'tools', 'pwsh.exe'))
+        : null,
+      probePathFn(
+        join(
+          systemRoot,
+          'System32',
+          'WindowsPowerShell',
+          'v1.0',
+          'powershell.exe',
+        ),
+      ),
+    ])
+    const ps7 = msiPs7 ?? storePs7 ?? dotnetPs7
+    if (ps7) {
       logPsDetectFallback('windows_fallback_path')
-      return fixed
+      return ps7
+    }
+    if (system32Ps5) {
+      logPsDetectFallback('fell_back_to_powershell_5')
+      return system32Ps5
     }
   }
 
-  const powershellPath = await which('powershell')
+  const powershellPath = await whichFn('powershell')
   if (powershellPath) {
     logPsDetectFallback('fell_back_to_powershell_5')
     return powershellPath
-  }
-
-  // densable absolute 5.1 when PATH `powershell` is missing/blocked.
-  if (getPlatform() === 'windows') {
-    const systemRoot = process.env.SYSTEMROOT ?? 'C:\\Windows'
-    const desktop = await probePath(
-      join(
-        systemRoot,
-        'System32',
-        'WindowsPowerShell',
-        'v1.0',
-        'powershell.exe',
-      ),
-    )
-    if (desktop) {
-      logPsDetectFallback('fell_back_to_powershell_5')
-      return desktop
-    }
   }
 
   return null

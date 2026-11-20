@@ -3,7 +3,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js';
-import { setupTerminal, shouldOfferTerminalSetup } from '../commands/terminalSetup/terminalSetup.js';
+import { isVSCodeRemoteSSH, setupTerminal, shouldOfferTerminalSetup } from '../commands/terminalSetup/terminalSetup.js';
 import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { Box, Byline, KeyboardShortcutHint, Link, Newline, Text, useApp, useTheme } from '@anthropic/ink';
 import { gracefulShutdownSync } from '../utils/gracefulShutdown.js';
@@ -261,7 +261,9 @@ export function Onboarding({ onDone }: Props): React.ReactNode {
 
   steps.push({ id: 'security', component: securityStep });
 
-  if (shouldOfferTerminalSetup()) {
+  // Official 2.1.327 (#528): skip first-run terminal setup in remote VS Code,
+  // Cursor, Windsurf, and Devin Desktop sessions where it cannot change local settings.
+  if (shouldOfferTerminalSetup() && !isVSCodeRemoteSSH()) {
     steps.push({
       id: 'terminal-setup',
       component:

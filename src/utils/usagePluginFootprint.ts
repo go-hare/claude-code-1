@@ -4,7 +4,13 @@
  */
 
 import { type Command, getCommandName } from '../types/command.js'
-import { getCanonicalName, parseUserSpecifiedModel } from './model/model.js'
+import { getModelBetas } from './betas.js'
+import { getContextWindowForModel } from './context.js'
+import {
+  getCanonicalName,
+  getMainLoopModel,
+  parseUserSpecifiedModel,
+} from './model/model.js'
 import { getSettings_DEPRECATED } from './settings/settings.js'
 
 /** densable `run` / `Q2t`. */
@@ -34,12 +40,45 @@ const FOUR_CHARS_PER_TOKEN_MODELS = new Set([
   'claude-haiku-4-5',
 ])
 
-/** densable `Eh` / `Yh`. */
+/**
+ * Official `Eh` / `Yh`: 4 chars/token for legacy `rF` families and `undefined`,
+ * 3 chars/token for newer families (Opus 4.7+, Fable 5.1+, etc.).
+ * Callers that want the active model fallback when no model is explicitly picked
+ * should resolve via `resolveEffectivePluginModel` or `resolvePluginFootprintModelAndContext` (#618).
+ */
 export function skillListingCharsPerToken(model?: string | null): number {
   if (!model) return SKILL_LISTING_CHARS_PER_TOKEN
   const parsed = parseUserSpecifiedModel(model).replace(/\[1m\]$/i, '')
   const canonical = getCanonicalName(parsed).replace(/[._]/g, '-')
   return FOUR_CHARS_PER_TOKEN_MODELS.has(canonical) ? 4 : 3
+}
+
+/**
+ * Official 2.1.328 (#618): Resolve the effective model for `/usage` and `/plugin`
+ * token estimates when no model has been explicitly picked in session state.
+ */
+export function resolveEffectivePluginModel(
+  sessionModel?: string | null,
+  mainLoopModel?: string | null,
+): string {
+  return sessionModel ?? mainLoopModel ?? getMainLoopModel()
+}
+
+/**
+ * Official 2.1.328 (#618) `jo()` in `/usage`: resolve the effective model (using
+ * `getMainLoopModel()` when none was explicitly picked) AND its full context
+ * window including model betas (so 1M context models aren't capped at 2,000
+ * tokens by the 200k default).
+ */
+export function resolvePluginFootprintModelAndContext(
+  sessionModel?: string | null,
+  mainLoopModel?: string | null,
+): { model: string; charsPerToken: number; contextTokens: number } {
+  const model = resolveEffectivePluginModel(sessionModel, mainLoopModel)
+  const betas = getModelBetas(model)
+  const contextTokens = getContextWindowForModel(model, betas)
+  const charsPerToken = skillListingCharsPerToken(model)
+  return { model, charsPerToken, contextTokens }
 }
 
 /** densable `Mft` / `Twt`. */
@@ -125,14 +164,15 @@ export function skillListingDisplayName(
   return `${cmd.name} (${bare})`
 }
 
-/** densable `h` @217016050 — 2 + cmd.name.length + 2 + clipped + 1. */
+/** densable `h` @217016050 — 2 + displayName.length + 2 + clipped + 1. */
 export function skillListingChars(
   cmd: Command,
-  _all?: readonly Command[],
+  all?: readonly Command[],
 ): number {
   const desc = skillListingDescription(cmd)
   const clipped = Math.min(desc.length, skillListingMaxDescChars())
-  return 2 + cmd.name.length + 2 + clipped + 1
+  const displayName = all ? skillListingDisplayName(cmd, all) : cmd.name
+  return 2 + displayName.length + 2 + clipped + 1
 }
 
 /** densable `Oft` / `ntt`. */

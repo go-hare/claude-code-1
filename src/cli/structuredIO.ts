@@ -1,4 +1,10 @@
 import { feature } from 'bun:bundle'
+import {
+  recordSandboxStateAtHookRewrite,
+  shouldUseSandbox,
+} from '@claude-code/builtin-tools/tools/BashTool/shouldUseSandbox.js'
+import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
+import { POWERSHELL_TOOL_NAME } from '@claude-code/builtin-tools/tools/PowerShellTool/toolName.js'
 import type { ElicitResult, JSONRPCMessage } from 'src/services/mcp/types.js'
 import { randomUUID } from 'crypto'
 import type { AssistantMessage } from 'src//types/message.js'
@@ -59,7 +65,14 @@ import type {
   PermissionDecisionReason,
 } from 'src/utils/permissions/PermissionResult.js'
 import {
+  accountMemoryHookRewriteDenied,
+  didAccountMemoryHookRewriteInput,
+} from 'src/utils/hooks/toolCallManagedPass.js'
+import {
+  checkRuleBasedPermissions,
   hasPermissionsToUseTool,
+  isCoworkCloudAutoHookAllowBlocked,
+  isEvalConfined,
   stripWholeToolGrantsForAsk,
 } from 'src/utils/permissions/permissions.js'
 import { writeToStdout } from 'src/utils/process.js'
@@ -324,6 +337,8 @@ export function getCurrentStructuredIO(): StructuredIO | undefined {
 export class StructuredIO {
   readonly structuredInput: AsyncGenerator<StdinMessage | SDKMessage>
   private readonly pendingRequests = new Map<string, PendingRequest<unknown>>()
+  /** Official 2.1.328 (#673): tools with pending `can_use_tool` parks when input closed. */
+  private readonly streamClosedPendingPermissionTools = new Set<string>()
   /**
    * densable `L` with `holdAtDeadline`. The first deadline already returned
    * timed_out. The same request stays so a late answer can be classified
@@ -515,6 +530,16 @@ export class StructuredIO {
     }
     this.inputClosed = true
     for (const request of this.pendingRequests.values()) {
+      const inner = request.request.request as {
+        subtype?: string
+        tool_name?: string
+      }
+      if (
+        inner.subtype === 'can_use_tool' &&
+        typeof inner.tool_name === 'string'
+      ) {
+        this.streamClosedPendingPermissionTools.add(inner.tool_name)
+      }
       // densable jS: stream closed ≠ user interrupt — telemetry maps to config
       // (permissionStreamClosed), not user_reject / user_abort.
       request.reject(
@@ -529,6 +554,20 @@ export class StructuredIO {
       .filter(
         pr => (pr.request as { subtype?: string }).subtype === 'can_use_tool',
       )
+  }
+
+  /**
+   * Official 2.1.328 (#673): return true when a `can_use_tool` permission
+   * request for `toolName` (e.g. `'AskUserQuestion'`) is currently pending, or
+   * was still pending when the input stream closed.
+   */
+  hasPendingPermissionForTool(toolName: string): boolean {
+    if (this.streamClosedPendingPermissionTools.has(toolName)) {
+      return true
+    }
+    return this.getPendingPermissionRequests().some(
+      pr => (pr.request as { tool_name?: string }).tool_name === toolName,
+    )
   }
 
   /**
@@ -1943,7 +1982,7 @@ function exitWithMessage(message: string): never {
  * Execute PermissionRequest hooks and return a decision if one is made.
  * Returns undefined if no hook made a decision.
  */
-async function executePermissionRequestHooksForSDK(
+export async function executePermissionRequestHooksForSDK(
   toolName: string,
   toolUseID: string,
   input: Record<string, unknown>,
@@ -1973,8 +2012,92 @@ async function executePermissionRequestHooksForSDK(
         hookResult.permissionRequestResult.behavior === 'deny')
     ) {
       const decision = hookResult.permissionRequestResult
+      // densable QLn — confined child ignores PermissionRequest allow
+      if (isEvalConfined() && decision.behavior === 'allow') {
+        continue
+      }
+      // 2.1.299 #727 — Cowork cloud auto mode blocks PermissionRequest allow for shell & subagents
+      if (
+        decision.behavior === 'allow' &&
+        isCoworkCloudAutoHookAllowBlocked(tool.name, permissionMode)
+      ) {
+        logEvent('tengu_auto_mode_permission_request_allow_ignored', {})
+        continue
+      }
       if (decision.behavior === 'allow') {
-        const finalInput = decision.updatedInput || input
+        const nonEmptyUpdatedInput =
+          decision.updatedInput !== undefined &&
+          Object.keys(decision.updatedInput).length > 0
+            ? decision.updatedInput
+            : undefined
+        const finalInput = nonEmptyUpdatedInput ?? input
+        if (
+          decision.updatedInput !== undefined &&
+          didAccountMemoryHookRewriteInput(
+            tool,
+            input,
+            decision.updatedInput,
+            true,
+          )
+        ) {
+          const denial = accountMemoryHookRewriteDenied(
+            tool,
+            'PermissionRequest',
+          )
+          return {
+            behavior: 'deny',
+            message: denial.message,
+            decisionReason: {
+              type: 'hook',
+              hookName: 'PermissionRequest',
+              reason: denial.message,
+            },
+          }
+        }
+        if (nonEmptyUpdatedInput !== undefined) {
+          const objection = await checkRuleBasedPermissions(
+            tool,
+            finalInput,
+            toolUseContext,
+            { crashIsObjection: true },
+          )
+          if (objection !== null) {
+            return objection.behavior === 'ask'
+              ? {
+                  behavior: 'deny',
+                  message: objection.message,
+                  decisionReason: objection.decisionReason ?? {
+                    type: 'hook',
+                    hookName: 'PermissionRequest',
+                    reason: objection.message,
+                  },
+                }
+              : objection
+          }
+        }
+
+        // Official 2.1.328 #671: if a PermissionRequest hook rewrites a shell
+        // command to a sandbox-excluded command, record the rewritten sandbox
+        // state so the command runs outside the sandbox.
+        if (
+          nonEmptyUpdatedInput !== undefined &&
+          (tool.name === BASH_TOOL_NAME || tool.name === POWERSHELL_TOOL_NAME)
+        ) {
+          const shellType =
+            tool.name === POWERSHELL_TOOL_NAME ? 'powershell' : 'bash'
+          const rewrittenSandboxInput = {
+            ...(finalInput as {
+              command?: string
+              dangerouslyDisableSandbox?: boolean
+            }),
+            shellType: shellType as 'bash' | 'powershell',
+          }
+          recordSandboxStateAtHookRewrite(
+            toolUseID,
+            rewrittenSandboxInput,
+            shouldUseSandbox(rewrittenSandboxInput),
+          )
+        }
 
         // Apply permission updates if provided by hook ("always allow")
         const permissionUpdates = (decision.updatedPermissions ??
@@ -2017,6 +2140,12 @@ async function executePermissionRequestHooksForSDK(
         }
       } else {
         // Hook denied the permission
+        if (decision.interrupt) {
+          logForDebugging(
+            `Hook interrupt: tool=${tool.name} hookMessage=${decision.message}`,
+          )
+          toolUseContext.abortController.abort()
+        }
         return {
           behavior: 'deny',
           message:
@@ -2024,6 +2153,7 @@ async function executePermissionRequestHooksForSDK(
           decisionReason: {
             type: 'hook',
             hookName: 'PermissionRequest',
+            reason: decision.message,
           },
         }
       }

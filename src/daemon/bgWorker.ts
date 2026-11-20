@@ -3016,6 +3016,7 @@ export class BgWorker {
     const isExecInterrupt =
       this.dispatch.launch.mode === 'exec' &&
       (signal === 'SIGINT' || signal === 'SIGQUIT')
+    const isSessionIdTaken = exitCause === 'session_id_taken'
 
     let outcome: string | undefined
 
@@ -3033,6 +3034,7 @@ export class BgWorker {
     } else if (this.dispatch.launch.mode === 'exec') {
       outcome = isExecInterrupt ? 'killed' : 'crashed'
     } else if (
+      isSessionIdTaken ||
       (!this.workerReady && (this.attempt >= 2 || preInitError)) ||
       tooManyFastCrashes ||
       sameExitCause ||
@@ -3077,6 +3079,19 @@ export class BgWorker {
         detail: lastLine ? `${exitDesc} — ${lastLine}` : `${exitDesc}${detail}`,
       })
       this.settle(isExecInterrupt ? 'killed' : 'crashed')
+      return
+    }
+
+    // Official 2.1.326 #33 / 2.1.328: latch sessionIdTaken on `session_id_taken`
+    // exit so wireWorkerLifecycle persists `sessionIdTaken: true` and respawn
+    // allocates a fresh UUID instead of colliding with the live holder.
+    if (isSessionIdTaken) {
+      this.sessionIdTakenLatch = true
+      const takenMsg =
+        exitDetail ??
+        'Session ID is already in use by another live Claude session'
+      this.patch({ state: 'crashed', detail: takenMsg })
+      this.settle('crashed')
       return
     }
 

@@ -7,7 +7,7 @@ import { TOOL_SUMMARY_MAX_LENGTH } from 'src/constants/toolLimits.js';
 import { Text } from '@anthropic/ink';
 import { FILE_NOT_FOUND_CWD_NOTE, getDisplayPath } from 'src/utils/file.js';
 import { truncate } from 'src/utils/format.js';
-import { GrepTool } from '../GrepTool/GrepTool.js';
+import { renderToolResultMessage as grepRenderToolResultMessage } from '../GrepTool/UI.js';
 
 export function userFacingName(): string {
   return 'Search';
@@ -48,8 +48,14 @@ export function renderToolUseErrorMessage(
   return <FallbackToolUseErrorMessage result={result} verbose={verbose} />;
 }
 
-// Note: GlobTool reuses GrepTool's renderToolResultMessage
-export const renderToolResultMessage = GrepTool.renderToolResultMessage;
+// Note: GlobTool reuses GrepTool's renderToolResultMessage directly from GrepTool/UI.
+// Declared as a hoisted function (not `const`) so circular ESM entry via GlobTool/UI.tsx
+// never hits TDZ when GlobTool.ts builds its tool object.
+export function renderToolResultMessage(
+  ...args: Parameters<typeof grepRenderToolResultMessage>
+): ReturnType<typeof grepRenderToolResultMessage> {
+  return grepRenderToolResultMessage(...args);
+}
 
 export function getToolUseSummary(input: Partial<{ pattern: string; path: string }> | undefined): string | null {
   if (!input?.pattern) {

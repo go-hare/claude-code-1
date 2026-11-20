@@ -342,18 +342,19 @@ describe('Wave 326 Group 1 — Bash, PowerShell, Worktree, Shell & Monitor', () 
     )
   })
 
-  test('#312 evaluateBashTooLongExpansion denies with standsForDenyRules when deny rules or non-interactive, asks with unfinishedCheck otherwise', () => {
+  test('#312 / #508 evaluateBashTooLongExpansion always denies with standsForDenyRules', () => {
     const baseCtx = getEmptyToolPermissionContext()
     const longCmd = `echo $FOO ${'a'.repeat(33_000)}`
 
-    const askRes = evaluateBashTooLongExpansion(longCmd, baseCtx)
-    expect(askRes?.behavior).toBe('ask')
-    if (askRes?.behavior === 'ask') {
-      expect(askRes.message).toBe(BASH_TOO_LONG_TO_JUDGE_MESSAGE)
+    // Official 2.1.327 #508 superseded #312: always denies with guidance
+    const res = evaluateBashTooLongExpansion(longCmd, baseCtx)
+    expect(res?.behavior).toBe('deny')
+    if (res?.behavior === 'deny') {
+      expect(res.message).toBe(BASH_TOO_LONG_TO_JUDGE_MESSAGE)
       expect(
-        askRes.decisionReason?.type === 'safetyCheck' &&
-          (askRes.decisionReason as { circuitBreaker?: string }).circuitBreaker,
-      ).toBe('unfinishedCheck')
+        (res.decisionReason as { standsForDenyRules?: boolean })
+          ?.standsForDenyRules,
+      ).toBe(true)
     }
 
     const denyCtx = {

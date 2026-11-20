@@ -7,8 +7,10 @@ import {
   logEvent,
 } from 'src/services/analytics/index.js';
 import { sanitizeToolNameForAnalytics } from 'src/services/analytics/metadata.js';
+import { getSessionId } from '../bootstrap/state.js';
 import type { ToolUseConfirm } from '../components/permissions/PermissionRequest.js';
 import type { DialogStore } from '../dialog/dialogStore.js';
+import { registerAgentPermissionWait } from '../tasks/LocalAgentTask/LocalAgentTask.js';
 import { Text } from '@anthropic/ink';
 import type { Tool as ToolType, ToolUseContext } from '../Tool.js';
 import {
@@ -61,7 +63,10 @@ function useCanUseTool(
   return useCallback<CanUseToolFn>(
     async (tool, input, toolUseContext, assistantMessage, toolUseID, forceDecision) => {
       return new Promise(resolveDecision => {
+        let clearAgentPermissionWait: (() => void) | undefined;
         const resolve = (decision: PermissionDecision) => {
+          clearAgentPermissionWait?.();
+          clearAgentPermissionWait = undefined;
           resolveDecision(detachedLetGoPermissionDeny(toolUseID) ?? decision);
         };
         // densable m4n(...): no permissionContextSetter override on REPL path —
@@ -347,6 +352,16 @@ function useCanUseTool(
                 }
 
                 // Show dialog and start hooks/classifier in background
+                // Official 2.1.327 (#426): register interactive subagent permission
+                // prompts so >=30s waits emit an agent_ask_notice attachment.
+                if (toolUseContext.agentId) {
+                  clearAgentPermissionWait = registerAgentPermissionWait(
+                    getSessionId(),
+                    toolUseID,
+                    toolUseContext.agentId,
+                    { name: tool.name, isMcp: tool.isMcp },
+                  );
+                }
                 handleInteractivePermission(
                   {
                     ctx,

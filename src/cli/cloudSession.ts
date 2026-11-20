@@ -440,6 +440,8 @@ export type CloudCliOptions = {
   ref?: string
   onBranch?: string
   correlationId?: string
+  /** Official 2.1.328 (#551): repeatable `--metadata <key=value>` labels for self-hosted orchestrator hooks. */
+  metadata?: string[]
   forwardHomeSettings?: string
   print?: boolean | string
   initOnly?: boolean
@@ -484,6 +486,8 @@ export type CloudLaunchValue = {
   projectBrowse: string | null
   projectForRemoteControl: boolean
   correlationId: string | null
+  /** Official 2.1.328 (#551/#641): session metadata labels (includes `correlation_id` when `--correlation-id` is set). */
+  sessionMetadata: Record<string, string> | null
   headlessCloud: boolean
   headlessCloudPrint: boolean
   serveOnly: boolean
@@ -820,15 +824,22 @@ export async function parseCloudLaunch(
   }
 
   let correlationId: string | null = null
+  const sessionMetadataMap = new Map<string, string>()
   {
+    const metaFlag =
+      e.correlationId !== undefined
+        ? '--correlation-id'
+        : e.metadata && e.metadata.length > 0
+          ? '--metadata'
+          : undefined
+    if (metaFlag !== undefined && poolId === null) {
+      return {
+        ok: false,
+        error: `Error: ${metaFlag} requires --environment`,
+      }
+    }
     const id = e.correlationId
     if (id !== undefined) {
-      if (poolId === null) {
-        return {
-          ok: false,
-          error: 'Error: --correlation-id requires --environment',
-        }
-      }
       if (!/^[\x21-\x2C\x2E-\x7E][\x21-\x7E]{0,511}$/.test(id)) {
         return {
           ok: false,
@@ -837,6 +848,28 @@ export async function parseCloudLaunch(
         }
       }
       correlationId = id
+      // Official 2.1.328 (#641): `--correlation-id` is also stored in the
+      // session metadata map so the orchestrator always receives it.
+      sessionMetadataMap.set('correlation_id', id)
+    }
+    for (const rawEntry of e.metadata ?? []) {
+      const match = /^([a-z][a-z0-9]*(?:_[a-z0-9]+)*)=(.+)$/s.exec(rawEntry)
+      const key = match?.[1]
+      const value = match?.[2]
+      if (key === undefined || value === undefined) {
+        return {
+          ok: false,
+          error:
+            'Error: --metadata takes key=value, as in --metadata size=large. A key is lower-case letters and digits with single "_" between them, and starts with a letter',
+        }
+      }
+      if (sessionMetadataMap.has(key)) {
+        return {
+          ok: false,
+          error: `Error: the label ${key} is given twice`,
+        }
+      }
+      sessionMetadataMap.set(key, value)
     }
   }
 
@@ -970,6 +1003,10 @@ export async function parseCloudLaunch(
       projectBrowse: null,
       projectForRemoteControl: false,
       correlationId,
+      sessionMetadata:
+        sessionMetadataMap.size > 0
+          ? Object.fromEntries(sessionMetadataMap)
+          : null,
       headlessCloud,
       headlessCloudPrint,
       serveOnly,
@@ -1017,6 +1054,17 @@ export function registerCloudCliOptions(program: {
   program.addOption(new Option('--pool <pool_id>', POOL_ALIAS_HELP).hideHelp())
   program.addOption(
     new Option('--correlation-id <id>', CORRELATION_ID_HELP).hideHelp(),
+  )
+  program.addOption(
+    new Option(
+      '--metadata <key=value>',
+      "Label the session for the script that starts its machine (repeatable; requires --environment with a self-hosted environment's ID).",
+    )
+      .argParser((value: string, previous: string[] = []) => [
+        ...previous,
+        value,
+      ])
+      .hideHelp(),
   )
   program.addOption(new Option('--ref <ref>', REF_OPTION_HELP).hideHelp())
   program.addOption(

@@ -285,7 +285,8 @@ export function ModelPicker({
   const [theme] = useTheme();
   const exitState = useExitOnCtrlCDWithKeybindings(onCancel, undefined, isStandaloneCommand === true);
   // Official 2.1.326 #215: respect modal row budget in short fullscreen windows.
-  const { rows } = useModalOrTerminalSize(useTerminalSize());
+  const { rows, columns } = useModalOrTerminalSize(useTerminalSize());
+  const isNarrow = columns <= 46;
   const isFastMode = useAppState(s => (isFastModeEnabled() ? s.fastMode : false));
   // Memoize all derived values to prevent re-renders
   const modelOptions = useMemo(() => getModelOptions(isFastMode ?? false), [isFastMode]);
@@ -580,10 +581,12 @@ export function ModelPicker({
             <Box marginBottom={1} flexDirection="column">
               {focusedSupportsEffort ? (
                 <>
-                  <Text dimColor>
+                  <Text dimColor wrap="wrap">
                     <EffortLevelIndicator effort={displayEffort} />{' '}
                     {displayEffort === 'xhigh' ? 'xHigh' : capitalize(displayEffort ?? 'high')} effort
-                    {displayEffort === focusedDefaultEffort ? ' (default)' : ''} <Text dimColor>← → to adjust</Text>
+                    {displayEffort === focusedDefaultEffort ? ' (default)' : ''}
+                    {isNarrow ? '\n' : ' '}
+                    <Text dimColor>←/→ to adjust</Text>
                     {ultracodeActiveForFocused ? ' · Ultracode on (/effort)' : ''}
                   </Text>
                   {displayEffort === 'max' ? (

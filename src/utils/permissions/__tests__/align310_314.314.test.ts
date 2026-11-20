@@ -87,10 +87,11 @@ describe('v2.1.310-314 permissions & sandboxTypes alignment', () => {
     expect(isClaudeSettingsPath(projRemote)).toBe(true)
   })
 
-  test('#1354 blockWritesOutsideWorkingDirectories blocks outside paths and .json/settings files', () => {
+  test('#1354 blockWritesOutsideWorkingDirectories blocks outside paths and settings files (allowing regular .json inside cwd)', () => {
     const cwd = getOriginalCwd()
     const ctx = makeContext({ blockWritesOutsideWorkingDirectories: true })
     const outsidePath = '/tmp/outside-314-test/file.txt'
+    const insideSettings = join(cwd, '.claude', 'settings.json')
     const insideJson = join(cwd, 'package.json')
     const insideTxt = join(cwd, 'notes.txt')
 
@@ -98,16 +99,23 @@ describe('v2.1.310-314 permissions & sandboxTypes alignment', () => {
       checkBlockWritesOutsideWorkingDirectories(outsidePath, ctx),
     ).toContain('permissions.blockWritesOutsideWorkingDirectories')
     expect(
-      checkBlockWritesOutsideWorkingDirectories(insideJson, ctx),
+      checkBlockWritesOutsideWorkingDirectories(insideSettings, ctx),
     ).toContain('Writes to Claude Code settings files are blocked')
+    expect(
+      checkBlockWritesOutsideWorkingDirectories(insideJson, ctx),
+    ).toBeUndefined()
     expect(
       checkBlockWritesOutsideWorkingDirectories(insideTxt, ctx),
     ).toBeUndefined()
 
     const denyOutside = denyBlockedOutsideWritesForFileTool(outsidePath, ctx)
     expect(denyOutside?.behavior).toBe('deny')
-    const denyJson = denyBlockedOutsideWritesForFileTool(insideJson, ctx)
-    expect(denyJson?.behavior).toBe('deny')
+    const denySettings = denyBlockedOutsideWritesForFileTool(
+      insideSettings,
+      ctx,
+    )
+    expect(denySettings?.behavior).toBe('deny')
+    expect(denyBlockedOutsideWritesForFileTool(insideJson, ctx)).toBeNull()
     expect(denyBlockedOutsideWritesForFileTool(insideTxt, ctx)).toBeNull()
   })
 })

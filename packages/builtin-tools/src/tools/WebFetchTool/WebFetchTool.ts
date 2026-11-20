@@ -50,9 +50,24 @@ import {
   sliceToMax,
 } from './utils.js'
 
+/**
+ * Official 2.1.327 (#407, SEA `vTe = 2000`): maximum URL length accepted by
+ * WebFetch. Checked via `.refine(..., { abort: true })` BEFORE `.url()` so
+ * over-long URLs are rejected during schema validation before any permission
+ * prompt or URL regex stall.
+ */
+export const MAX_WEB_FETCH_URL_LENGTH = 2000
+
 const inputSchema = lazySchema(() =>
   z.strictObject({
-    url: z.string().url().describe('The URL to fetch content from'),
+    url: z
+      .string()
+      .refine(u => u.length <= MAX_WEB_FETCH_URL_LENGTH, {
+        abort: true,
+        message: `URL is longer than ${MAX_WEB_FETCH_URL_LENGTH} characters`,
+      })
+      .url()
+      .describe('The URL to fetch content from'),
     prompt: z.string().describe('The prompt to run on the fetched content'),
     offset: z
       .number()
@@ -273,21 +288,6 @@ export const WebFetchTool = Object.assign(
       const appState = context.getAppState()
       const permissionContext = appState.toolPermissionContext
 
-      // Check if the hostname is in the preapproved list
-      try {
-        const { url } = input as { url: string }
-        const parsedUrl = new URL(url)
-        if (isPreapprovedHost(parsedUrl.hostname, parsedUrl.pathname)) {
-          return {
-            behavior: 'allow',
-            updatedInput: input,
-            decisionReason: { type: 'other', reason: 'Preapproved host' },
-          }
-        }
-      } catch {
-        // If URL parsing fails, continue with normal permission checks
-      }
-
       // Check for a rule specific to the tool input (matching hostname)
       const ruleContent = webFetchToolInputToPermissionRuleContent(input)
 
@@ -337,6 +337,24 @@ export const WebFetchTool = Object.assign(
             type: 'rule',
             rule: allowRule,
           },
+        }
+      }
+
+      // Check if the hostname is in the preapproved list (after explicit rules,
+      // and disabled under CLAUDE_CODE_EVAL_CONFINED)
+      if (!isEnvTruthy(process.env.CLAUDE_CODE_EVAL_CONFINED)) {
+        try {
+          const { url } = input as { url: string }
+          const parsedUrl = new URL(url)
+          if (isPreapprovedHost(parsedUrl.hostname, parsedUrl.pathname)) {
+            return {
+              behavior: 'allow',
+              updatedInput: input,
+              decisionReason: { type: 'other', reason: 'Preapproved host' },
+            }
+          }
+        } catch {
+          // If URL parsing fails, continue with normal permission checks
         }
       }
 

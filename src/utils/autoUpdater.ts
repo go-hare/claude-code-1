@@ -1,13 +1,18 @@
 import axios from 'axios'
 import { constants as fsConstants } from 'fs'
-import { access, writeFile } from 'fs/promises'
+import { access, copyFile, rename, unlink, writeFile } from 'fs/promises'
 import { homedir } from 'os'
 import { join } from 'path'
-import { getDynamicConfig_BLOCKS_ON_INIT } from 'src/services/analytics/growthbook.js'
+import semver from 'semver'
+import {
+  getDynamicConfig_BLOCKS_ON_INIT,
+  getFeatureValue_CACHED_MAY_BE_STALE,
+} from 'src/services/analytics/growthbook.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
+import { isInBundledMode } from './bundledMode.js'
 import { type ReleaseChannel, saveGlobalConfig } from './config.js'
 import { logForDebugging } from './debug.js'
 import { env } from './env.js'
@@ -17,8 +22,11 @@ import { execFileNoThrowWithCwd } from './execFileNoThrow.js'
 import { getFsImplementation } from './fsOperations.js'
 import { gracefulShutdownSync } from './gracefulShutdown.js'
 import { logError } from './log.js'
-import { gte, lt } from './semver.js'
-import { getInitialSettings } from './settings/settings.js'
+import { gt, gte, lt, lte } from './semver.js'
+import {
+  getInitialSettings,
+  getSettingsForSource,
+} from './settings/settings.js'
 import {
   filterClaudeAliases,
   getShellConfigPaths,
@@ -27,8 +35,7 @@ import {
 } from './shellConfig.js'
 import { jsonParse } from './slowOperations.js'
 
-const GCS_BUCKET_URL =
-  'https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases'
+const GCS_BUCKET_URL = 'https://downloads.claude.ai/claude-code-releases'
 
 class AutoUpdaterError extends ClaudeError {}
 
@@ -40,8 +47,26 @@ export type InstallStatus =
   /** Newer version on registry; auto-install skipped (config/env). UI should prompt. */
   | 'available'
 
-/** densable failureHint — currently only windows exe lock surfaces in footer. */
-export type AutoUpdateFailureHint = 'windows_running_exe_lock'
+/** Official 2.1.328 failureHint values (see `KKt`). */
+export type AutoUpdateFailureHint =
+  | 'windows_running_exe_lock'
+  | 'native_binary_missing'
+  | 'registry_session_refused'
+
+export function mapFailureHintToErrorCode(
+  hint: AutoUpdateFailureHint | undefined,
+): string | null {
+  switch (hint) {
+    case 'windows_running_exe_lock':
+      return 'update_apply_exe_locked'
+    case 'native_binary_missing':
+      return 'update_apply_native_binary_missing'
+    case 'registry_session_refused':
+      return 'update_session_refused'
+    case undefined:
+      return null
+  }
+}
 
 /** densable Vpg — damp further AutoUpdater polls after this many exe-lock fails. */
 export const EXE_LOCK_FAILURE_DAMP_THRESHOLD = 2
@@ -101,6 +126,9 @@ export function classifyNpmInstallFailure(
   if (/\b(EACCES|EPERM|permission denied)\b/i.test(combinedOutput)) {
     return { status: 'no_permissions' }
   }
+  if (/postinstall\] Native package "[^"]*" not found/.test(combinedOutput)) {
+    return { status: 'install_failed', failureHint: 'native_binary_missing' }
+  }
   return { status: 'install_failed' }
 }
 
@@ -148,6 +176,95 @@ export type MaxVersionConfig = {
   ant?: string
   external_message?: string
   ant_message?: string
+  external_force_downgrade?: boolean
+}
+
+export type UpdateRestoreFailure = {
+  originalPath: string
+  preservedPath?: string
+}
+
+const AUTO_UPDATE_CHECK_THROTTLE_MS = 300_000
+let lastAutoUpdateCheckAt = 0
+let updateRestoreFailure: UpdateRestoreFailure | null = null
+
+/**
+ * 5-minute process-wide throttle for background auto-update checks.
+ * Matches official 2.1.328 `qKt` (`@300384488`).
+ */
+export function shouldThrottleAutoUpdateCheck(): boolean {
+  const now = Date.now()
+  if (now - lastAutoUpdateCheckAt < AUTO_UPDATE_CHECK_THROTTLE_MS) {
+    logForDebugging(
+      `auto-update check throttled (last check ${Math.round((now - lastAutoUpdateCheckAt) / 1000)}s ago)`,
+    )
+    return true
+  }
+  lastAutoUpdateCheckAt = now
+  return false
+}
+
+export function resetAutoUpdateCheckThrottleForTests(): void {
+  lastAutoUpdateCheckAt = 0
+}
+
+/**
+ * Display label for `autoUpdatesChannel` in UI / doctor output.
+ * Official 2.1.328 maps `'rc'` -> `'slow'`.
+ */
+export function formatAutoUpdatesChannelDisplay(
+  channel: string | undefined,
+): string {
+  return channel === 'rc' ? 'slow' : (channel ?? 'latest')
+}
+
+/**
+ * Checks GrowthBook `tengu_max_version_config.external_force_downgrade`.
+ * Matches official 2.1.328 `Ldt` (`@300384580`).
+ */
+export function isForceDowngradeEnabled(): boolean {
+  const config = getFeatureValue_CACHED_MAY_BE_STALE<MaxVersionConfig>(
+    'tengu_max_version_config',
+    {},
+  )
+  return config?.external_force_downgrade === true
+}
+
+/**
+ * Official 2.1.328 `bRt`: returns true when force-downgrade is active and
+ * currentVersion is strictly greater than maxVersion.
+ */
+export function shouldForceDowngrade(
+  currentVersion: string,
+  maxVersion: string,
+  source: 'native_update' | 'auto_updater' = 'auto_updater',
+): boolean {
+  const label = source === 'native_update' ? 'Native installer' : 'AutoUpdater'
+  const parsedCurrent = semver.parse(currentVersion)
+  if (parsedCurrent && gt(parsedCurrent.version, maxVersion)) {
+    logForDebugging(
+      `${label}: force-downgrade active — moving from ${currentVersion} to ${maxVersion}`,
+    )
+    return true
+  }
+  logForDebugging(
+    `${label}: force-downgrade flag set but current ${currentVersion} is not above ${maxVersion} — taking normal upgrade path`,
+  )
+  return false
+}
+
+/**
+ * Returns details if a Windows self-rename executable restore failed after a
+ * failed npm global update. Matches official 2.1.328 `kRt()`.
+ */
+export function getUpdateRestoreFailure(): UpdateRestoreFailure | null {
+  return updateRestoreFailure
+}
+
+export function setUpdateRestoreFailureForTests(
+  failure: UpdateRestoreFailure | null,
+): void {
+  updateRestoreFailure = failure
 }
 
 /**
@@ -248,24 +365,58 @@ async function getMaxVersionConfig(): Promise<MaxVersionConfig> {
 }
 
 /**
- * Checks if a target version should be skipped due to user's minimumVersion setting.
- * This is used when switching to stable channel - the user can choose to stay on their
- * current version until stable catches up, preventing downgrades.
+ * Returns the reason string if a target version should be skipped due to
+ * `minimumVersion` or managed policy `requiredMaximumVersion`, or null if allowed.
+ * Matches official 2.1.328 `y1o` (`@300386107`).
  */
-export function shouldSkipVersion(targetVersion: string): boolean {
+export function getVersionSkipReason(targetVersion: string): string | null {
+  if (!semver.parse(targetVersion)) {
+    logForDebugging(
+      'update target is not a valid semver version — skip checks constrain nothing',
+      { level: 'error' },
+    )
+    return null
+  }
   const settings = getInitialSettings()
   const minimumVersion = settings?.minimumVersion
-  if (!minimumVersion) {
-    return false
+  if (minimumVersion) {
+    const parsedMin = semver.parse(minimumVersion)?.version
+    if (!parsedMin) {
+      logForDebugging(
+        `minimumVersion is not a valid semver version — ignoring. Value (first 300 chars, JSON-encoded): ${JSON.stringify(minimumVersion.slice(0, 300))}`,
+        { level: 'error' },
+      )
+    } else if (!gte(targetVersion, parsedMin)) {
+      return `below your minimumVersion setting (${minimumVersion})`
+    }
   }
-  // Skip if target version is less than minimum
-  const shouldSkip = !gte(targetVersion, minimumVersion)
-  if (shouldSkip) {
-    logForDebugging(
-      `Skipping update to ${targetVersion} - below minimumVersion ${minimumVersion}`,
-    )
+  const requiredMax =
+    getSettingsForSource('policySettings')?.requiredMaximumVersion
+  if (requiredMax) {
+    const parsedMax = semver.parse(requiredMax)?.version
+    if (!parsedMax) {
+      logForDebugging(
+        `requiredMaximumVersion is not a valid semver version — ignoring. Value (first 300 chars, JSON-encoded): ${JSON.stringify(requiredMax.slice(0, 300))}`,
+        { level: 'error' },
+      )
+    } else if (!lte(targetVersion, parsedMax)) {
+      return `above your organization's requiredMaximumVersion (${requiredMax})`
+    }
   }
-  return shouldSkip
+  return null
+}
+
+/**
+ * Checks if a target version should be skipped due to user's `minimumVersion`
+ * or organization policy's `requiredMaximumVersion`.
+ * Matches official 2.1.328 `wRt` (`@300386107`).
+ */
+export function shouldSkipVersion(targetVersion: string): boolean {
+  const reason = getVersionSkipReason(targetVersion)
+  if (reason) {
+    logForDebugging(`Skipping update to ${targetVersion}: ${reason}`)
+  }
+  return reason !== null
 }
 
 // Lock file for auto-updater to prevent concurrent updates
@@ -564,7 +715,7 @@ export async function getVersionHistory(limit: number): Promise<string[]> {
 }
 
 export async function installGlobalPackage(
-  specificVersion?: string | null,
+  targetVersion?: string | null,
 ): Promise<InstallOutcome> {
   if (!(await acquireLock())) {
     logError(
@@ -608,9 +759,29 @@ To fix this issue:
     }
 
     // Use specific version if provided, otherwise use latest
-    const packageSpec = specificVersion
-      ? `${MACRO.PACKAGE_URL}@${specificVersion}`
+    const packageSpec = targetVersion
+      ? `${MACRO.PACKAGE_URL}@${targetVersion}`
       : MACRO.PACKAGE_URL
+
+    // Official 2.1.328 `XKt`: on Windows bundled npm installs, rename the running
+    // executable aside before `npm/bun install -g` so the new binary can land,
+    // and restore it if the install fails.
+    const shouldSelfRenameOnWindows =
+      process.platform === 'win32' &&
+      isInBundledMode() &&
+      process.execPath
+        .replace(/\\/g, '/')
+        .includes('/node_modules/@anthropic-ai/')
+    const renamedBackups: Array<[originalPath: string, backupPath: string]> = []
+    if (shouldSelfRenameOnWindows) {
+      const backupPath = `${process.execPath}.old.${Date.now()}`
+      try {
+        await rename(process.execPath, backupPath)
+        renamedBackups.push([process.execPath, backupPath])
+      } catch {
+        // Proceed without self-rename if OS refused
+      }
+    }
 
     // Run from home directory to avoid reading project-level .npmrc/.bunfig.toml
     // which could be maliciously crafted to redirect to an attacker's registry
@@ -620,13 +791,58 @@ To fix this issue:
       ['install', '-g', packageSpec],
       { cwd: homedir() },
     )
+    if (renamedBackups.length > 0 && installResult.code !== 0) {
+      let firstRestoreFailure: UpdateRestoreFailure | null = null
+      for (const [originalPath, backupPath] of renamedBackups) {
+        try {
+          await rename(backupPath, originalPath)
+        } catch (renameErr) {
+          try {
+            await copyFile(backupPath, originalPath)
+            logForDebugging(
+              `Restored ${originalPath} by copy after rename failed: ${renameErr}`,
+            )
+            await unlink(backupPath).catch(err =>
+              logForDebugging(
+                `Failed to remove ${backupPath} after copy-restore: ${err}`,
+              ),
+            )
+          } catch (copyErr) {
+            const preservedExists = await access(
+              backupPath,
+              fsConstants.F_OK,
+            ).then(
+              () => true,
+              () => false,
+            )
+            const failure: UpdateRestoreFailure = preservedExists
+              ? { originalPath, preservedPath: backupPath }
+              : { originalPath }
+            if (!firstRestoreFailure) {
+              firstRestoreFailure = failure
+            }
+            logError(
+              new AutoUpdaterError(
+                `Failed to restore ${originalPath} after install failure: rename: ${renameErr}; copy: ${copyErr}`,
+              ),
+            )
+          }
+        }
+      }
+      if (firstRestoreFailure) {
+        updateRestoreFailure = firstRestoreFailure
+      }
+    }
+
     if (installResult.code !== 0) {
       const combined = `${installResult.stdout} ${installResult.stderr}`
       const outcome = classifyNpmInstallFailure(combined)
       const error = new AutoUpdaterError(
         outcome.failureHint === 'windows_running_exe_lock'
           ? `Failed to install new version of claude (running executable is locked): ${combined}`
-          : `Failed to install new version of claude: ${combined}`,
+          : outcome.failureHint === 'native_binary_missing'
+            ? `Failed to install new version of claude (platform-native package missing): ${combined}`
+            : `Failed to install new version of claude: ${combined}`,
       )
       logError(error)
       return outcome
@@ -637,6 +853,7 @@ To fix this issue:
       ...current,
       installMethod: 'global',
     }))
+    updateRestoreFailure = null
 
     return { status: 'success' }
   } finally {

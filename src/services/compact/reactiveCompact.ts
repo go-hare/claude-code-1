@@ -7,10 +7,15 @@ import {
 import type { AssistantMessage, Message } from '../../types/message.js'
 import {
   type CompactionResult,
+  canOmitToolResultsToRecoverPTL,
   compactConversation,
   ERROR_MESSAGE_INCOMPLETE_RESPONSE,
   ERROR_MESSAGE_USER_ABORT,
+  isThirdPartyDesktopLargeToolResultOmissionEnabled,
+  type OmitLargestToolResultsResult,
+  omitLargestToolResultsForSummary,
 } from './compact.js'
+import { TOOL_RESULT_LEFT_OUT_PREFIX } from './prompt.js'
 import { isAutoCompactEnabled } from './autoCompact.js'
 import { logError } from '../../utils/log.js'
 import { logForDebugging } from '../../utils/debug.js'
@@ -315,6 +320,71 @@ export function isEligibleForLongContextRefusalCompact(
   return getFeatureValue_CACHED_MAY_BE_STALE('tengu_linked_rose', true)
 }
 
+export {
+  canOmitToolResultsToRecoverPTL,
+  isThirdPartyDesktopLargeToolResultOmissionEnabled,
+  type OmitLargestToolResultsResult,
+  omitLargestToolResultsForSummary,
+  TOOL_RESULT_LEFT_OUT_PREFIX,
+}
+
+const PTL_RECOVERY_MIN_TIMEOUT_MS = 600_000
+const PTL_RECOVERY_MAX_TIMEOUT_MS = 3_600_000
+
+/**
+ * Official 2.1.328 (#625): build a child AbortController for PTL compaction
+ * recovery that ALWAYS forwards parent abort (including agent-hook timeout
+ * aborts that carry no user-cancel reason) AND bounds recovery with a deadline.
+ * Prevents agent hooks from running past their timeout while compacting after
+ * a request was refused as too large.
+ */
+export function computePtlRecoveryTimeoutMs(estimatedTokens: number): number {
+  if (!Number.isFinite(estimatedTokens)) return PTL_RECOVERY_MIN_TIMEOUT_MS
+  return Math.min(
+    PTL_RECOVERY_MAX_TIMEOUT_MS,
+    Math.max(PTL_RECOVERY_MIN_TIMEOUT_MS, Math.round(estimatedTokens * 1.5)),
+  )
+}
+
+export function createPtlRecoveryAbortController(
+  parentController: AbortController,
+  opts?: {
+    timeoutMs?: number
+    querySource?: string
+  },
+): { controller: AbortController; cleanup: () => void } {
+  const controller = new AbortController()
+  const parentSignal = parentController.signal
+  const onParentAbort = () => {
+    if (!controller.signal.aborted) {
+      controller.abort(parentSignal.reason)
+    }
+  }
+  if (parentSignal.aborted) {
+    controller.abort(parentSignal.reason)
+    return { controller, cleanup: () => {} }
+  }
+  parentSignal.addEventListener('abort', onParentAbort, { once: true })
+
+  const timeoutMs = opts?.timeoutMs ?? PTL_RECOVERY_MIN_TIMEOUT_MS
+  const timer = setTimeout(() => {
+    if (!controller.signal.aborted) {
+      controller.abort(new DOMException('recovery-timeout', 'AbortError'))
+    }
+  }, timeoutMs)
+  if (timer && typeof (timer as { unref?: () => void }).unref === 'function') {
+    ;(timer as { unref: () => void }).unref()
+  }
+
+  const cleanup = () => {
+    clearTimeout(timer)
+    parentSignal.removeEventListener('abort', onParentAbort)
+  }
+  controller.signal.addEventListener('abort', cleanup, { once: true })
+
+  return { controller, cleanup }
+}
+
 export type TryReactiveCompactOutcome = {
   result: CompactionResult | null
   /** densable ia — set when compact threw; Ysa uses reason==="error"+detail */
@@ -327,6 +397,8 @@ export const tryReactiveCompact: (params: {
   aborted: boolean
   messages: Message[]
   cacheSafeParams: Record<string, unknown>
+  /** Optional token gap from PTL refusal (handled inside compactConversation) */
+  tokenGap?: number
 }) => Promise<TryReactiveCompactOutcome> = async ({
   hasAttempted,
   querySource,
@@ -350,7 +422,7 @@ export const tryReactiveCompact: (params: {
     const result = await compactConversation(
       messages,
       params.toolUseContext,
-      params,
+      { ...params, forkContextMessages: messages },
       true,
       undefined,
       true,
@@ -358,26 +430,26 @@ export const tryReactiveCompact: (params: {
         isRecompactionInChain: false,
         turnsSincePreviousCompact: 0,
         autoCompactThreshold: 0,
+        querySource: 'compact',
       },
     )
     return { result }
-  } catch (error) {
-    // densable: user Esc / incomplete compact → reason "aborted" so Ysa (oaa)
-    // stays off (Ysa only annotates reason==="error"+detail). Terminal query
-    // reason may still be prompt_too_long|image_error (SEA 231).
+  } catch (finalError) {
     if (
-      isAbortError(error) ||
-      hasExactErrorMessage(error, ERROR_MESSAGE_USER_ABORT) ||
-      hasExactErrorMessage(error, ERROR_MESSAGE_INCOMPLETE_RESPONSE)
+      isAbortError(finalError) ||
+      hasExactErrorMessage(finalError, ERROR_MESSAGE_USER_ABORT) ||
+      hasExactErrorMessage(finalError, ERROR_MESSAGE_INCOMPLETE_RESPONSE)
     ) {
+      logForDebugging('Reactive compact aborted', { level: 'info' })
       return { result: null, failure: { reason: 'aborted' } }
     }
-    const detail = error instanceof Error ? error.message : String(error)
+    const detail =
+      finalError instanceof Error ? finalError.message : String(finalError)
     logForDebugging(
       `reactiveCompact: emergency compaction failed — ${detail}`,
       { level: 'warn' },
     )
-    logError(error)
+    logError(finalError)
     return {
       result: null,
       failure: { reason: 'error', detail },

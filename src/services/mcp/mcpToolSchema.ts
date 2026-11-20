@@ -15,7 +15,11 @@ import { APIError } from '@anthropic-ai/sdk'
 import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../analytics/metadata.js'
 import { logEvent } from '../analytics/index.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
+import {
+  getFeatureValue_CACHED_MAY_BE_STALE,
+  isGrowthBookEnabled,
+} from '../analytics/growthbook.js'
+import { getAPIProvider } from '../../utils/model/providers.js'
 import { logForDebugging } from '../../utils/debug.js'
 import { logMCPDebug, logMCPError } from '../../utils/log.js'
 /** Structural config for eHi / ingest — stdio has no url. */
@@ -546,25 +550,42 @@ export function matchMcpHostnameAllowlist(
   }
 }
 
-/** densable eHi(flag, config) */
+/**
+ * Official 2.1.328 `V9()` — third-party API providers or GrowthBook/telemetry
+ * disabled: use safe on-by-default fallback allowlists (`["*"]`) for root
+ * combinator normalization and invalid schema dropping.
+ */
+export function shouldUseOffFlagFallbackDefaults(): boolean {
+  return getAPIProvider() !== 'firstParty' || !isGrowthBookEnabled()
+}
+
+/** densable eHi / Zn(flag, config, fallbackDefault) */
 export function isMcpHostnameAllowlisted(
   flag: string,
   config: object,
+  fallbackDefault: readonly string[] = [],
 ): boolean {
+  const defaultValue = shouldUseOffFlagFallbackDefaults() ? fallbackDefault : []
   return matchMcpHostnameAllowlist(
-    getFeatureValue_CACHED_MAY_BE_STALE<unknown>(flag, []),
+    getFeatureValue_CACHED_MAY_BE_STALE<unknown>(flag, defaultValue),
     config,
   )
 }
 
-/** densable GMf */
+/** densable GMf / Ph (2.1.328: defaults to ["*"] on 3P / flags-off) */
 export function shouldNormalizeMcpRootCombinators(config: object): boolean {
-  return isMcpHostnameAllowlisted(TENGU_MCP_NORMALIZE_ROOT_COMBINATORS, config)
+  return isMcpHostnameAllowlisted(
+    TENGU_MCP_NORMALIZE_ROOT_COMBINATORS,
+    config,
+    ['*'],
+  )
 }
 
-/** densable VMf */
+/** densable VMf / Rh (2.1.328: defaults to ["*"] on 3P / flags-off) */
 export function shouldDropInvalidMcpToolSchemas(config: object): boolean {
-  return isMcpHostnameAllowlisted(TENGU_MCP_DROP_INVALID_TOOL_SCHEMAS, config)
+  return isMcpHostnameAllowlisted(TENGU_MCP_DROP_INVALID_TOOL_SCHEMAS, config, [
+    '*',
+  ])
 }
 
 function mcpSchemaAnalytics(config: McpSchemaGateConfig): {

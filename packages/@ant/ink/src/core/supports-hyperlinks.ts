@@ -1,5 +1,134 @@
-import supportsHyperlinksLib from 'supports-hyperlinks'
 import { attacherCaps, printsUnknownSequences } from './termio/osc.js'
+
+const CI_HYPERLINK_ENV_KEYS = [
+  'APPVEYOR',
+  'BUILDKITE',
+  'CIRCLECI',
+  'GITHUB_ACTIONS',
+  'GITLAB_CI',
+  'TRAVIS',
+] as const
+
+function collectColorAndHyperlinkFlags(argv: readonly string[]): string {
+  let out = ''
+  for (const arg of argv) {
+    if (arg === '--') break
+    if (/^--(?:no-)?(?:color|hyperlink).*$/.test(arg)) {
+      out += `${arg}\n`
+    }
+  }
+  return out
+}
+
+function parseVersionPair(raw = ''): [number, number] {
+  if (/^\d{3,4}$/.test(raw)) {
+    return [0, Math.floor(Number(raw) / 100)]
+  }
+  return [
+    Number.parseInt(raw, 10),
+    Number.parseInt(raw.split('.', 2)[1] ?? '', 10),
+  ]
+}
+
+function supportsColorForHyperlinks(
+  env: EnvLike,
+  forceColor: string | undefined,
+  flags: string,
+): boolean {
+  let forced = false
+  if (forceColor === undefined) {
+    if (/^--(?:no-colors?|color=(?:false|never))$/m.test(flags)) return false
+    forced = /^--color(?:s|=true|=always)?$/m.test(flags)
+  } else {
+    const parsed = Number.parseInt(forceColor, 10)
+    if (parsed === 0 || forceColor === 'false') return false
+    forced = !Number.isNaN(parsed) || forceColor === '' || forceColor === 'true'
+  }
+  if (/^--color=(?:256|16m|full|truecolor)$/m.test(flags)) return true
+  const { TERM = '', TERM_PROGRAM, TEAMCITY_VERSION } = env
+  if (TERM === 'dumb') return forced
+  if (env.CI !== undefined) {
+    return (
+      forced ||
+      env.CI_NAME === 'codeship' ||
+      CI_HYPERLINK_ENV_KEYS.some(key => key in env)
+    )
+  }
+  if (TEAMCITY_VERSION !== undefined) {
+    const parts = TEAMCITY_VERSION.split('.', 3)
+    const [major = '', minor = ''] = parts
+    return major === '9'
+      ? parts.length === 3 && /^\d+$/.test(minor) && Number(minor) > 0
+      : parts.length > 1 && /^\d\d+$/.test(major)
+  }
+  return (
+    forced ||
+    env.COLORTERM !== undefined ||
+    TERM_PROGRAM === 'iTerm.app' ||
+    TERM_PROGRAM === 'Apple_Terminal' ||
+    /^(?:rxvt|screen|vt(?:100|220)|xterm)/i.test(TERM) ||
+    /ansi|color|cygwin|linux|-256$/i.test(TERM)
+  )
+}
+
+/**
+ * Official 2.1.327 (#451) inlined `supportsHyperlink(stream, env, forceColor)`:
+ * - Gates `WT_SESSION` with `!env.TMUX && env.TERM_PROGRAM !== 'tmux'` so
+ *   Windows Terminal inside old tmux (< 3.4) does not falsely claim OSC 8.
+ * - Excludes VTE 0.50.0 (`'0.50.0'` / `'5000'`), which did not support OSC 8.
+ */
+export function supportsHyperlinkStream(
+  stream: { isTTY?: boolean } | undefined,
+  env: EnvLike = process.env,
+  forceColor: string | undefined = env.FORCE_COLOR,
+  argv: readonly string[] = process.argv,
+): boolean {
+  const { FORCE_HYPERLINK } = env
+  if (FORCE_HYPERLINK) {
+    return Number.parseInt(FORCE_HYPERLINK, 10) !== 0
+  }
+  const flags = collectColorAndHyperlinkFlags(argv)
+  if (flags) {
+    if (/^--(?:no-hyperlinks?|hyperlink=(?:false|never))$/m.test(flags)) {
+      return false
+    }
+    if (/^--hyperlink=(?:true|always)$/m.test(flags)) {
+      return true
+    }
+  }
+  if (env.NETLIFY) return true
+  if (
+    (stream && !stream.isTTY) ||
+    !supportsColorForHyperlinks(env, forceColor, flags)
+  ) {
+    return false
+  }
+  if ('WT_SESSION' in env && !env.TMUX && env.TERM_PROGRAM !== 'tmux') {
+    return true
+  }
+  if (env.CI || env.TEAMCITY_VERSION) return false
+  const [major, minor] = parseVersionPair(env.TERM_PROGRAM_VERSION)
+  switch (env.TERM_PROGRAM ?? '') {
+    case 'iTerm.app':
+      return major > 3 || (major === 3 && minor >= 1)
+    case 'WezTerm':
+      return major >= 20200620
+    case 'vscode':
+      return major > 1 || (major === 1 && minor >= 72)
+    case 'ghostty':
+      return true
+  }
+  const { VTE_VERSION } = env
+  if (VTE_VERSION) {
+    const [vteMajor, vteMinor] = parseVersionPair(VTE_VERSION)
+    return (
+      VTE_VERSION !== '0.50.0' &&
+      VTE_VERSION !== '5000' &&
+      (vteMajor > 0 || vteMinor >= 50)
+    )
+  }
+  return env.TERM === 'alacritty'
+}
 
 // Additional terminals that support OSC 8 hyperlinks but aren't detected by supports-hyperlinks.
 // Checked against both TERM_PROGRAM and LC_TERMINAL (the latter is preserved inside tmux).
@@ -84,7 +213,8 @@ export function supportsHyperlinks(
   const env = options?.env ?? process.env
 
   const stdoutSupported =
-    options?.stdoutSupported ?? supportsHyperlinksLib.stdout
+    options?.stdoutSupported ??
+    supportsHyperlinkStream(process.stdout, env, env.FORCE_COLOR)
   if (stdoutSupported) {
     return true
   }

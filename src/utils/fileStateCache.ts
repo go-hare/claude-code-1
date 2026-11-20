@@ -35,6 +35,16 @@ export type FileState = {
    * above `MAX_INLINE_FILE_STATE_BYTES` instead of keeping hash-only metadata.
    */
   keepContent?: boolean
+  /**
+   * Official 2.1.327 (#413): true when the cache entry was refreshed behind
+   * the model's back and must not be retained as a pre-compaction read.
+   */
+  refreshedBehindModel?: boolean
+  /**
+   * Persisted result of evaluating whether this read covered the full file
+   * before large inline `content` (>4 KiB) is stripped to `''`.
+   */
+  fullFileRead?: boolean
 }
 
 /**
@@ -68,7 +78,7 @@ export function fileStateContentHash(content: string): string {
  */
 export function isFullEnoughFileRead(state: FileState): boolean {
   // densable H1e = mGe(e) && !e.contentNotInModelContext
-  if (state.contentNotInModelContext) {
+  if (state.contentNotInModelContext || state.refreshedBehindModel) {
     return false
   }
   if ((state.offset ?? 1) > 1 || state.isPartialView) {
@@ -76,6 +86,9 @@ export function isFullEnoughFileRead(state: FileState): boolean {
   }
   if (state.limit === undefined) {
     return true
+  }
+  if (state.fullFileRead !== undefined) {
+    return state.fullFileRead
   }
   if (state.content === '') {
     return false
@@ -195,6 +208,9 @@ export class FileStateCache {
       prev.content
         ? prev.content
         : value.content
+    const fullFileRead =
+      value.fullFileRead ??
+      isFullEnoughFileRead({ ...value, content: effectiveContent })
     const storedContent =
       keepContent ||
       Buffer.byteLength(effectiveContent, 'utf8') <= MAX_INLINE_FILE_STATE_BYTES
@@ -205,10 +221,11 @@ export class FileStateCache {
       ...(keepContent !== undefined ? { keepContent } : {}),
       contentHash,
       contentLength,
+      fullFileRead,
       content: storedContent,
     }
     this.cache.set(normalized, nextEntry)
-    if (isFullEnoughFileRead(nextEntry)) {
+    if (fullFileRead) {
       this.readsBeforeCompaction?.delete(normalized)
     }
     this.remember(normalized)
@@ -251,7 +268,7 @@ export class FileStateCache {
       new LRUCache<string, FileState>({ max: this.cache.max })
     for (const [k, entry] of this.cache.dump()) {
       const val = entry.value
-      if (!val.isPartialView && !retained.has(k)) {
+      if (!val.isPartialView && !val.refreshedBehindModel && !retained.has(k)) {
         retained.set(k, { ...val, content: '' })
       }
     }
@@ -266,7 +283,7 @@ export class FileStateCache {
   renewReadBeforeCompaction(key: string): void {
     const normalized = normalizeCacheKey(key)
     const entry = this.cache.peek(normalized)
-    if (entry !== undefined) {
+    if (entry !== undefined && !entry.refreshedBehindModel) {
       this.readsBeforeCompaction?.set(normalized, { ...entry, content: '' })
     }
   }
@@ -351,6 +368,10 @@ export function cacheKeys(cache: FileStateCache): string[] {
 export function cloneFileStateCache(cache: FileStateCache): FileStateCache {
   const cloned = createFileStateCacheWithSizeLimit(cache.max, cache.maxSize)
   cloned.load(cache.dump())
+  cloned.copyReadsBeforeCompactionFrom(cache)
+  for (const p of cache.startOnlyPaths()) {
+    cloned.markStartOnly(p)
+  }
   return cloned
 }
 

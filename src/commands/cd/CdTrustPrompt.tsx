@@ -138,7 +138,7 @@ export function CdTrustPrompt({
         <ConfirmSelect
           openedAt={openedAt}
           windowMs={CONFIRM_SELECT_ARM_MS}
-          refuseInput={() => isInputRefused() || isCutOff}
+          refuseInput={isInputRefused}
           cancelFirst
           focus="cancel"
           hideIndexes

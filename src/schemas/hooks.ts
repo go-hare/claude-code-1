@@ -237,6 +237,7 @@ function buildHookSchemas() {
       .positive()
       .optional()
       .describe('Timeout in seconds for the MCP tool call'),
+    onFailure: OnFailureSchema(),
     statusMessage: z
       .string()
       .optional()

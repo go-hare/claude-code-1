@@ -65,6 +65,8 @@ import { getErrnoCode } from '../errors.js'
 import { getClaudeConfigHomeDir, isEnvTruthy } from '../envUtils.js'
 import { sandboxHelperSubprocessEnv } from '../subprocessEnv.js'
 import { expandPath } from '../path.js'
+import { getAutoMemPath } from '../../memdir/paths.js'
+import { getProjectDir } from '../sessionPaths.js'
 import { settingsHaveBlockReadsOutsideWorkingDirectories } from '../permissions/outsideReads.js'
 import { isWorktreePathNetworkRelativeToCwd } from '../worktree.js'
 import {
@@ -113,6 +115,10 @@ import {
   getFlagMcpConfigFilePaths,
   getProfileStoreDenyPaths,
 } from '../permissions/filesystem.js'
+import {
+  getWorktreeAddDirPinState,
+  resolveWorktreeAddDirEntry,
+} from '../permissions/permissionSetup.js'
 import type { PermissionRuleValue } from '../permissions/PermissionRule.js'
 import {
   collectUngatedAdditionalDirectories,
@@ -394,9 +400,21 @@ export function collectSensitiveHomeDenyWritePaths(
  * `.git/modules`, `.git/lfs`, etc.), and ref-count/clean up each snapshot entry
  * on command completion.
  */
+type GitDirEntryKind = 'file' | 'dir' | 'symlink' | 'fifo' | 'other'
+
 type GitDirSnapshotEntry = {
-  baseline: Set<string>
+  baseline: Map<string, GitDirEntryKind>
   refCount: number
+}
+
+function classifyGitDirStat(
+  st: NonNullable<ReturnType<typeof lstatSync>>,
+): GitDirEntryKind {
+  if (st.isSymbolicLink()) return 'symlink'
+  if (st.isFIFO()) return 'fifo'
+  if (st.isDirectory()) return 'dir'
+  if (st.isFile()) return 'file'
+  return 'other'
 }
 
 const gitDirSnapshotsBeforeWrap = new Map<string, GitDirSnapshotEntry>()
@@ -412,11 +430,17 @@ function isSafeGitSymrefTarget(target: string): boolean {
 }
 
 /**
- * Official `vA()` (@291366123): returns true iff `fullPath` is a regular file
+ * Official 2.1.328 `vA()` (#628): returns true iff `fullPath` is a regular file
  * starting with `ref:` whose symref target escapes `refs/` (or exceeds scan
  * buffer without a valid `refs/` target). Opens non-blocking & no-follow.
+ * On Linux/WSL (`allowNonUtf8`), non-UTF-8 branch names decode with `\uFFFD` —
+ * replace `\uFFFD` with `_` before checking safety so valid non-UTF-8 branch
+ * names in `.git/HEAD` are not quarantined/renamed after every command.
  */
-function isEscapingGitRefFile(fullPath: string): boolean {
+export function isEscapingGitRefFile(
+  fullPath: string,
+  allowNonUtf8: boolean = getPlatform() === 'linux' || getPlatform() === 'wsl',
+): boolean {
   const flags =
     fsConstants.O_RDONLY |
     (fsConstants.O_NONBLOCK ?? 0) |
@@ -431,7 +455,10 @@ function isEscapingGitRefFile(fullPath: string): boolean {
     const text = buf.toString('utf8', 0, bytesRead)
     if (!text.startsWith('ref:')) return false
     if (bytesRead === buf.length) return true
-    const target = text.replace(/^ref:[ \t\r\n]*/, '')
+    const rawTarget = text.replace(/^ref:[ \t\r\n]*/, '')
+    const target = allowNonUtf8
+      ? rawTarget.replaceAll('\uFFFD', '_')
+      : rawTarget
     return !isSafeGitSymrefTarget(target)
   } catch {
     return false
@@ -450,8 +477,8 @@ function collectGitDirRelativeEntries(
   rootGitDir: string,
   relPrefix = '',
   depth = 0,
-  out: Set<string> = new Set(),
-): Set<string> {
+  out: Map<string, GitDirEntryKind> = new Map(),
+): Map<string, GitDirEntryKind> {
   if (depth > GIT_DIR_SCAN_MAX_DEPTH) return out
   const dir = relPrefix ? join(rootGitDir, relPrefix) : rootGitDir
   let entries: string[]
@@ -465,12 +492,13 @@ function collectGitDirRelativeEntries(
     if (name.startsWith('.claude-quarantine-')) continue
     if (depth === 0 && GIT_DIR_SCAN_SKIP_DIRS.has(name)) continue
     const rel = relPrefix ? join(relPrefix, name) : name
-    out.add(rel)
     const fullPath = join(rootGitDir, rel)
     try {
       // eslint-disable-next-line custom-rules/no-sync-fs -- pre-wrap snapshot / sync cleanup
       const st = lstatSync(fullPath)
-      if (st.isDirectory() && !st.isSymbolicLink()) {
+      const kind = classifyGitDirStat(st)
+      out.set(rel, kind)
+      if (kind === 'dir') {
         collectGitDirRelativeEntries(rootGitDir, rel, depth + 1, out)
       }
     } catch {
@@ -502,6 +530,34 @@ export function getActiveGitDirSnapshotCountForTesting(): number {
   return gitDirSnapshotsBeforeWrap.size
 }
 
+const GIT_TOP_LEVEL_REF_NAME_RE =
+  /^(.*_)?HEAD$|^(AUTO_MERGE|BISECT_EXPECTED_REV|NOTES_MERGE_PARTIAL|NOTES_MERGE_REF|MERGE_AUTOSTASH)$/i
+
+/**
+ * Official 2.1.328 (`eme` + `Khe` @291364353): returns true iff `rel` (relative
+ * to `.git`) is a ref-bearing path where git interprets a `ref:` symref target:
+ * files under `refs/` (including `worktrees/<name>/refs/` and `modules/.../refs/`)
+ * and top-level/worktree/module ref files matching `Khe`. Never matches
+ * `COMMIT_EDITMSG`, `MERGE_MSG`, `SQUASH_MSG`, `TAG_EDITMSG`, `description`,
+ * `index`, or `logs/*`.
+ */
+export function isGitRefBearingPath(rel: string): boolean {
+  const parts = rel.replace(/\\/g, '/').split('/').filter(Boolean)
+  if (parts.length === 0) return false
+  const name = parts[parts.length - 1]!
+  const dirParts = parts.slice(0, -1).map(p => p.toUpperCase())
+  const effectiveDir =
+    dirParts[0] === 'WORKTREES' ? dirParts.slice(2) : dirParts
+  const top = effectiveDir[0] ?? ''
+  if (top === 'REFS' || (top === 'MODULES' && effectiveDir.includes('REFS'))) {
+    return true
+  }
+  if (top === '' || top === 'MODULES') {
+    return GIT_TOP_LEVEL_REF_NAME_RE.test(name)
+  }
+  return false
+}
+
 export function quarantineUnexpectedGitDirEntries(cwd?: string): {
   quarantined: string[]
   removedSymlinks: string[]
@@ -518,21 +574,31 @@ export function quarantineUnexpectedGitDirEntries(cwd?: string): {
       // eslint-disable-next-line custom-rules/no-sync-fs -- cleanupAfterCommand is sync
       if (lstatSync(gitDir).isDirectory()) {
         const current = collectGitDirRelativeEntries(gitDir)
-        for (const rel of current) {
-          const isNew = !snapshot.baseline.has(rel)
-          const isTrackedRefPath =
-            rel === 'HEAD' ||
-            rel.startsWith('refs/') ||
-            rel.startsWith('refs\\')
-          if (!isNew && !isTrackedRefPath) continue
+        for (const [rel, currentKind] of current) {
+          const baselineKind = snapshot.baseline.get(rel)
+          const isNew = baselineKind === undefined
+          const replacedWithSymlink =
+            !isNew && currentKind === 'symlink' && baselineKind !== 'symlink'
+          const replacedWithFifo =
+            !isNew && currentKind === 'fifo' && baselineKind !== 'fifo'
+          const isTrackedRefPath = isGitRefBearingPath(rel)
+          if (
+            !isNew &&
+            !replacedWithSymlink &&
+            !replacedWithFifo &&
+            !isTrackedRefPath
+          ) {
+            continue
+          }
           const fullPath = join(gitDir, rel)
           try {
             // eslint-disable-next-line custom-rules/no-sync-fs -- cleanupAfterCommand is sync
             const st = lstatSync(fullPath)
-            // Official `tme`: ONLY handle newly appearing symlinks (incl. Windows
-            // junctions), FIFOs, and `ref:` symref files escaping `refs/`.
-            // Never touch regular git metadata files or directories.
-            if (isNew && st.isSymbolicLink()) {
+            // Official `tme`: handle newly appearing OR replaced symlinks
+            // (incl. Windows junctions), FIFOs, and `ref:` symref files
+            // escaping `refs/` on ref-bearing paths (`eme`/`Khe`). Never
+            // touch regular git metadata files or directories.
+            if ((isNew || replacedWithSymlink) && st.isSymbolicLink()) {
               // eslint-disable-next-line custom-rules/no-sync-fs -- cleanupAfterCommand is sync
               unlinkSync(fullPath)
               removedSymlinks.push(fullPath)
@@ -542,9 +608,12 @@ export function quarantineUnexpectedGitDirEntries(cwd?: string): {
               )
               continue
             }
-            const isFifo = isNew && st.isFIFO()
+            const isFifo = (isNew || replacedWithFifo) && st.isFIFO()
             const isUnsafeRef =
-              !isFifo && st.isFile() && isEscapingGitRefFile(fullPath)
+              !isFifo &&
+              isTrackedRefPath &&
+              st.isFile() &&
+              isEscapingGitRefFile(fullPath)
             if (isFifo || isUnsafeRef) {
               const quarantineDir = join(
                 gitDir,
@@ -1456,6 +1525,42 @@ export function resolveSandboxFilesystemDisabled(): boolean {
   return false
 }
 
+/**
+ * Official 2.1.328 (`BMt` + `dG` @291244397): returns true iff the active
+ * sandbox can enforce `permissions.blockReadsOutsideWorkingDirectories` via FS
+ * read-deny rules (independent of whether the setting is already enabled):
+ * - Sandboxing enabled
+ * - Platform is not Windows (Windows sandbox does not add read denies)
+ * - Filesystem isolation is not disabled (`!resolveSandboxFilesystemDisabled()`
+ *   and live `getConfig()?.filesystem?.disabled !== true`)
+ * - `allowManagedReadPathsOnly` is not set in `policySettings`
+ * - `getOriginalCwd()` contains no glob characters (`[*?[\]]`)
+ */
+export function canSandboxFenceOutsideReads(): boolean {
+  if (!SandboxManager.isSandboxingEnabled()) return false
+  if (getPlatform() === 'windows') return false
+  if (resolveSandboxFilesystemDisabled()) return false
+  const liveCfg = BaseSandboxManager.getConfig?.() as
+    | { filesystem?: { disabled?: boolean } }
+    | undefined
+  if (liveCfg?.filesystem?.disabled === true) return false
+  if (shouldAllowManagedReadPathsOnly()) return false
+  if (/[*?[\]]/.test(getOriginalCwd())) return false
+  return true
+}
+
+/**
+ * Official 2.1.328 (`BMt` && `h4e` @295799760): returns true iff the active
+ * sandbox actually enforces `permissions.blockReadsOutsideWorkingDirectories`
+ * via FS read-deny rules.
+ */
+export function isSandboxFencingOutsideReads(): boolean {
+  return (
+    canSandboxFenceOutsideReads() &&
+    settingsHaveBlockReadsOutsideWorkingDirectories()
+  )
+}
+
 /** densable Gvg when disabled — enforcement unrestricted (empty deny). */
 export function getDisabledSandboxFsReadConfig(): FsReadRestrictionConfig {
   return { denyOnly: [], allowWithinDeny: [] }
@@ -2148,10 +2253,23 @@ export function convertToSandboxRuntimeConfig(
   // autoAllowBashIfSandboxed is on Bash runs unprompted, so this list is the
   // only boundary left, and an untrusted project's additionalDirectories must
   // not widen it just because the app-level gate dropped them elsewhere.
-  const additionalDirs = new Set([
+  const worktreePin = getWorktreeAddDirPinState()
+  const rawAdditionalDirs = [
     ...collectUngatedAdditionalDirectories(),
     ...getAdditionalDirectoriesForClaudeMd(),
-  ])
+  ]
+  const additionalDirs = new Set(
+    worktreePin.launchFolder !== undefined
+      ? rawAdditionalDirs.map(dir =>
+          resolveWorktreeAddDirEntry(
+            dir,
+            worktreePin.launchFolder!,
+            true,
+            rel => join(cwd, rel),
+          ),
+        )
+      : rawAdditionalDirs,
+  )
   allowWrite.push(...additionalDirs)
 
   // Official 2.1.325 #2358 (`jf` / `_o`): refuse sandboxed writes to `.claude`
@@ -2420,27 +2538,15 @@ export function convertToSandboxRuntimeConfig(
   }
 
   // #1272 SEA: apply permissions.blockReadsOutsideWorkingDirectories to sandbox
-  // denyRead / allowRead unless allowManagedReadPathsOnly is enabled.
-  const allowManagedReadPathsOnly = SETTING_SOURCES.some(
-    source =>
-      isSettingSourceEnabled(source) &&
-      getSettingsForSource(source)?.sandbox?.filesystem
-        ?.allowManagedReadPathsOnly === true,
-  )
+  // denyRead / allowRead unless allowManagedReadPathsOnly is enabled in policySettings.
   if (
     settingsHaveBlockReadsOutsideWorkingDirectories() &&
-    !allowManagedReadPathsOnly
+    !shouldAllowManagedReadPathsOnly()
   ) {
-    const workingDirs = [originalCwd]
-    for (const source of SETTING_SOURCES) {
-      if (!isSettingSourceEnabled(source)) continue
-      const dirs =
-        getSettingsForSource(source)?.permissions?.additionalDirectories
-      if (!dirs) continue
-      for (const d of dirs) {
-        workingDirs.push(expandPath(d))
-      }
-    }
+    const workingDirs = [
+      originalCwd,
+      ...Array.from(additionalDirs).map(d => expandPath(d)),
+    ]
     const nonGlobWorkingDirs = workingDirs.filter(p => !/[*?[\]]/.test(p))
     const inlinePluginRoots = getInlinePluginRoots(originalCwd)
     const inlinePluginRootSet = new Set(inlinePluginRoots)
@@ -2459,6 +2565,18 @@ export function convertToSandboxRuntimeConfig(
       }
     }
 
+    // Snapshot pre-existing denyRead entries (expanded) BEFORE adding
+    // fenceRoots so reopenCandidates (originalCwd, additionalDirectories,
+    // project/memory dirs, explicit Claude subdirs) are only filtered by
+    // pre-existing denies and NOT by the fenceRoots we are about to add.
+    const existingDenies = denyRead.map(d => {
+      try {
+        return expandPath(d)
+      } catch {
+        return d
+      }
+    })
+
     const fenceRoots = [
       '~/',
       '/home/',
@@ -2472,13 +2590,23 @@ export function convertToSandboxRuntimeConfig(
     ]
     for (const rawRoot of fenceRoots) {
       const resolvedRoot = expandPath(rawRoot)
-      if (nonGlobWorkingDirs.some(wd => isPathEqualOrUnder(resolvedRoot, wd))) {
+      if (nonGlobWorkingDirs.some(wd => isPathEqualOrUnder(wd, resolvedRoot))) {
         continue
       }
       denyRead.push(resolvedRoot)
     }
 
     const claudeDir = getClaudeConfigHomeDir()
+    const projectConfigDir = getProjectDir(originalCwd)
+    let autoMemDir: string | undefined
+    try {
+      const rawAutoMem = resolve(getAutoMemPath())
+      if (!/[*?[\]]/.test(rawAutoMem)) {
+        autoMemDir = rawAutoMem
+      }
+    } catch {
+      // ignore if auto-memory path cannot be computed
+    }
     const reopenCandidates = [
       ...nonGlobWorkingDirs,
       ...inlinePluginRoots.filter(p => !/[*?[\]]/.test(p)),
@@ -2490,7 +2618,9 @@ export function convertToSandboxRuntimeConfig(
           return []
         }
       }),
-      claudeDir,
+      getClaudeTempDir(),
+      ...(!/[*?[\]]/.test(projectConfigDir) ? [projectConfigDir] : []),
+      ...(autoMemDir !== undefined ? [autoMemDir] : []),
       join(claudeDir, 'shell-snapshots'),
       join(claudeDir, 'session-env'),
       join(claudeDir, 'skills'),
@@ -2499,11 +2629,12 @@ export function convertToSandboxRuntimeConfig(
       join(claudeDir, 'agents'),
       join(claudeDir, 'commands'),
     ]
-    const existingDenies = [...denyRead]
     for (const candidate of reopenCandidates) {
       if (
         existingDenies.some(
-          d => !/[*?[\]]/.test(d) && isPathEqualOrUnder(candidate, d),
+          expandedDeny =>
+            !/[*?[\]]/.test(expandedDeny) &&
+            isPathEqualOrUnder(expandedDeny, candidate),
         )
       ) {
         continue
@@ -2997,12 +3128,48 @@ let isHeldOnByFailedSettingsRead = false
 // process is running inside Anthropic's hosted cloud container.
 let sandboxStartedOnce = false
 let hostedToolContainer = false
+// Official 2.1.328 #676 (`TPe` / `sandboxDisabledThisSession` / `initFailureReason`):
+// When sandbox fails to initialize and failIfUnavailable is not set, refuse
+// the next sandboxed Bash command and disable sandboxing for the session.
+let sandboxDisabledThisSession = false
+let initFailureReason: string | undefined
+let forcedInitFailureForTesting: string | undefined
+let lastSandboxAskCallback: SandboxAskCallback | undefined
+
+export class SandboxInitFailedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'SandboxInitFailedError'
+  }
+}
 
 export function _resetSandboxHeldStateForTesting(): void {
   sandboxWasEnabled = false
   isHeldOnByFailedSettingsRead = false
   sandboxStartedOnce = false
   hostedToolContainer = false
+  sandboxDisabledThisSession = false
+  initFailureReason = undefined
+  forcedInitFailureForTesting = undefined
+  lastSandboxAskCallback = undefined
+}
+
+export function isSandboxDisabledThisSession(): boolean {
+  return sandboxDisabledThisSession
+}
+
+export function getSandboxInitFailureReason(): string | undefined {
+  return initFailureReason
+}
+
+export function _setSandboxInitFailureForTesting(
+  reason: string | undefined,
+): void {
+  forcedInitFailureForTesting = reason
+  initFailureReason = reason
+  if (reason !== undefined) {
+    initializationPromise = undefined
+  }
 }
 
 export function markHostedToolContainer(value = true): void {
@@ -3264,6 +3431,9 @@ function isPlatformInEnabledList(): boolean {
  * This checks the user's enabled setting, platform support, and enabledPlatforms restriction
  */
 function isSandboxingEnabled(): boolean {
+  if (sandboxDisabledThisSession) {
+    return false
+  }
   if (!isSupportedPlatform()) {
     return false
   }
@@ -3635,6 +3805,49 @@ function getExcludedCommands(): string[] {
 }
 
 /**
+ * Official 2.1.328 #676 (`ensureInitializedForWrap` @291436447):
+ * Verify sandbox initialization completed before wrapping a command.
+ * When initialization failed and `sandbox.failIfUnavailable` is not set:
+ * - For Claude Code's own internal commands (`keepsSandboxOn !== false`),
+ *   refuse the command while keeping the sandbox enabled so the next command
+ *   can retry initialization.
+ * - For user/model Bash commands (`keepsSandboxOn === false`), disable
+ *   sandboxing for the rest of the session and throw `SandboxInitFailedError`
+ *   so this command is refused and clearly reports that sandboxing is off.
+ */
+export async function ensureInitializedForWrap(options?: {
+  keepsSandboxOn?: boolean
+}): Promise<void> {
+  if (!isSandboxingEnabled()) {
+    return
+  }
+  if (!initializationPromise && !sandboxDisabledThisSession) {
+    await initialize(lastSandboxAskCallback)
+  }
+  const currentInit = initializationPromise
+  if (currentInit) {
+    await currentInit
+  }
+  if (!currentInit || initializationPromise !== currentInit) {
+    const suffix = initFailureReason ? `: ${initFailureReason}` : ''
+    if (isSandboxRequired()) {
+      throw new SandboxInitFailedError(
+        `Sandbox is required but failed to initialize${suffix}. Restart to retry. Running it outside the sandbox (dangerouslyDisableSandbox) is not allowed either.`,
+      )
+    }
+    if (options?.keepsSandboxOn !== false && !sandboxDisabledThisSession) {
+      throw new SandboxInitFailedError(
+        `Sandbox is enabled but failed to initialize${suffix}. This command of Claude Code's own was not run; the sandbox stays on, and the next command tries to start it again.`,
+      )
+    }
+    sandboxDisabledThisSession = true
+    throw new SandboxInitFailedError(
+      `Sandbox is enabled but failed to initialize${suffix}. Sandboxing is disabled for the rest of this session; restart to retry.`,
+    )
+  }
+}
+
+/**
  * Wrap command with sandbox, optionally specifying the shell to use
  */
 async function wrapWithSandbox(
@@ -3642,14 +3855,11 @@ async function wrapWithSandbox(
   binShell?: string,
   customConfig?: Partial<SandboxRuntimeConfig>,
   abortSignal?: AbortSignal,
+  wrapOptions?: { keepsSandboxOn?: boolean },
 ): Promise<string> {
   // If sandboxing is enabled, ensure initialization is complete
   if (isSandboxingEnabled()) {
-    if (initializationPromise) {
-      await initializationPromise
-    } else {
-      throw new Error('Sandbox failed to initialize. ')
-    }
+    await ensureInitializedForWrap(wrapOptions)
     // densable wrap: await fN(), pN(), VZ(), FZ(), Ahe()
     await ensureBridgeSpawnRootDirForWrap()
     ensureAtomicWriteStagingDirs()
@@ -3720,6 +3930,9 @@ async function wrapWithSandbox(
 async function initialize(
   sandboxAskCallback?: SandboxAskCallback,
 ): Promise<void> {
+  if (sandboxAskCallback !== undefined) {
+    lastSandboxAskCallback = sandboxAskCallback
+  }
   // If already initializing or initialized, return the promise
   if (initializationPromise) {
     return initializationPromise
@@ -3727,6 +3940,12 @@ async function initialize(
 
   // Check if sandboxing is enabled in settings
   if (!isSandboxingEnabled()) {
+    return
+  }
+
+  if (forcedInitFailureForTesting !== undefined) {
+    initFailureReason = forcedInitFailureForTesting
+    initializationPromise = undefined
     return
   }
 
@@ -3756,6 +3975,7 @@ async function initialize(
   // race conditions where wrapWithSandbox() is called before the promise is assigned.
   // densable Te().initializationPromise is set before Pa/initialize so ro() &&= n.
   const initToken = {}
+  initFailureReason = undefined
   setSandboxInitializationPromise(initToken)
   initializationPromise = (async () => {
     try {
@@ -3807,9 +4027,10 @@ async function initialize(
       initializationPromise = undefined
       setSandboxInitializationPromise(undefined)
       failSandboxInitializeAllowlist()
+      initFailureReason = errorMessage(error)
 
       // Log error but don't throw - let sandboxing fail gracefully
-      logForDebugging(`Failed to initialize sandbox: ${errorMessage(error)}`)
+      logForDebugging(`Failed to initialize sandbox: ${initFailureReason}`)
     }
   })()
 
@@ -3849,6 +4070,9 @@ async function reset(): Promise<void> {
   initializationPromise = undefined
   sandboxStartedOnce = false
   hostedToolContainer = false
+  sandboxDisabledThisSession = false
+  initFailureReason = undefined
+  lastSandboxAskCallback = undefined
 
   // Reset the base sandbox manager
   return BaseSandboxManager.reset()
@@ -3971,11 +4195,15 @@ export interface ISandboxManager {
   getLinuxHttpSocketPath(): string | undefined
   getLinuxSocksSocketPath(): string | undefined
   waitForNetworkInitialization(): Promise<boolean>
+  ensureInitializedForWrap(options?: {
+    keepsSandboxOn?: boolean
+  }): Promise<void>
   wrapWithSandbox(
     command: string,
     binShell?: string,
     customConfig?: Partial<SandboxRuntimeConfig>,
     abortSignal?: AbortSignal,
+    wrapOptions?: { keepsSandboxOn?: boolean },
   ): Promise<string>
   cleanupAfterCommand(): void
   getSandboxViolationStore(): SandboxViolationStore
@@ -4165,6 +4393,7 @@ export const SandboxManager: ISandboxManager = {
   isStrictSandboxModeConfigured,
   setSandboxSettings,
   getExcludedCommands,
+  ensureInitializedForWrap,
   wrapWithSandbox,
   refreshConfig,
   addSessionAllowedHost,

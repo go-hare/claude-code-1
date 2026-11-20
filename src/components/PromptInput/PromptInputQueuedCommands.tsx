@@ -1,7 +1,7 @@
 import { feature } from 'bun:bundle';
 import * as React from 'react';
 import { useMemo } from 'react';
-import { Box, KeyboardShortcutHint, Text } from '@anthropic/ink';
+import { Box, formatShortcutString, KeyboardShortcutHint, stringWidth, Text } from '@anthropic/ink';
 import { useAppState, useAppStateStore } from 'src/state/AppState.js';
 import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
 import { sendQueuedNow } from '../../utils/foregroundToolCalls.js';
@@ -160,6 +160,30 @@ function processQueuedCommands(queuedCommands: QueuedCommand[]): QueuedCommand[]
   return [...otherCommands, ...visibleNotifications, overflowCommand];
 }
 
+const QUEUED_HINT_PREFIX = '  ⎿  ';
+
+/**
+ * Official 2.1.328 `wVe` (@319875771): show the `  ⎿  Queued · ` prefix only
+ * when the full line fits within `terminalColumns`; otherwise fall back to
+ * `paddingLeft={2}` so the send-now shortcut hint is not clipped.
+ */
+export function resolveQueuedSendNowLayout(
+  sendNowChord: string,
+  terminalColumns: number,
+  prefix = QUEUED_HINT_PREFIX,
+): { hintText: string; showQueuedPrefix: boolean; paddingLeft: number } {
+  const hintText =
+    sendNowChord === ''
+      ? 'click to send now'
+      : `${formatShortcutString(sendNowChord, { keyCase: 'lower' })} to send now`;
+  const showQueuedPrefix = stringWidth(`${prefix}Queued · ${hintText}`) <= terminalColumns;
+  return {
+    hintText,
+    showQueuedPrefix,
+    paddingLeft: showQueuedPrefix ? 0 : 2,
+  };
+}
+
 export function buildSendNowHintLabel(sendNowChord: string): React.ReactNode {
   return sendNowChord === '' ? (
     'click to send now'
@@ -235,6 +259,18 @@ function PromptInputQueuedCommandsImpl({
     };
   }, [queuedCommands]);
 
+  const handleSendNowClick = React.useCallback(() => {
+    if (onSendNow) {
+      return onSendNow();
+    }
+    return sendQueuedNow(store.getState, store.setState, {
+      interruptForSubmit: () => {
+        abortController?.abort();
+        return true;
+      },
+    });
+  }, [onSendNow, store, abortController]);
+
   // Don't show leader's queued commands when viewing any agent's transcript
   if (viewingAgent || prepared === null) {
     return null;
@@ -249,29 +285,26 @@ function PromptInputQueuedCommandsImpl({
   const sendNowChord = formatSendNowHint();
   const isFullscreen = isFullscreenEnvEnabled();
   const canSendNow = canShowQueueSendNowHint(queuedCommands, abortController);
-  const handleSendNowClick = React.useCallback(() => {
-    if (onSendNow) {
-      return onSendNow();
-    }
-    return sendQueuedNow(store.getState, store.setState, {
-      interruptForSubmit: () => {
-        abortController?.abort();
-        return true;
-      },
-    });
-  }, [onSendNow, store, abortController]);
-  // Official 2.1.326 #287 (`wVe`): prefix with `  ⎿  Queued · ` so the send-now
-  // hint clearly reads as a queue status line rather than part of the user's message.
+  // Official 2.1.328 `wVe` (@319875771): prefix with `  ⎿  Queued · ` when it
+  // fits in `terminalColumns`, otherwise drop the prefix with `paddingLeft={2}`
+  // so the send-now shortcut hint is never clipped on narrow terminals.
+  const {
+    hintText,
+    showQueuedPrefix,
+    paddingLeft: sendNowPaddingLeft,
+  } = resolveQueuedSendNowLayout(sendNowChord, terminalColumns);
   const sendNowHint =
     canSendNow && (sendNowChord !== '' || isFullscreen) ? (
-      <Box height={1} overflow="hidden">
+      <Box paddingLeft={sendNowPaddingLeft} height={1} overflow="hidden">
         <Text dimColor>
-          <Text aria-hidden>{'  ⎿  '}</Text>
-          {'Queued · '}
+          {showQueuedPrefix && (
+            <>
+              <Text aria-hidden>{QUEUED_HINT_PREFIX}</Text>
+              {'Queued · '}
+            </>
+          )}
           {isFullscreen ? (
-            <FePress onPress={handleSendNowClick}>
-              {sendNowChord === '' ? 'click to send now' : `${sendNowChord} to send now`}
-            </FePress>
+            <FePress onPress={handleSendNowClick}>{hintText}</FePress>
           ) : (
             buildSendNowHintLabel(sendNowChord)
           )}

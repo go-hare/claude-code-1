@@ -491,7 +491,10 @@ export function hasUnknownSequencePrintingBug(
  * literally (VTE < 0.53).
  */
 export function printsUnknownSequences(): boolean {
-  return hasUnknownSequencePrintingBug(envTerminalName())
+  return (
+    attacherCaps()?.printsUnknownSequences ??
+    hasUnknownSequencePrintingBug(envTerminalName())
+  )
 }
 
 export async function setClipboard(text: string): Promise<string> {
@@ -576,29 +579,108 @@ export async function probeLinuxClipboardTool(): Promise<void> {
 }
 
 /**
- * densable DB_ — sequential wl-copy clipboard then --primary.
- * Generation counter aborts primary write if a newer copy started.
+ * Official 2.1.328 (#598) `t9r`: spawn a Linux clipboard helper (`wl-copy`,
+ * `xclip`, `xsel`) detached in its own process group so Ctrl+Z (`SIGTSTP`)
+ * sent to Claude Code's foreground process group does not suspend the helper
+ * and freeze paste requests in other apps.
  */
-async function copyWaylandClipboardAndPrimary(text: string): Promise<void> {
+export function spawnDetachedClipboardCopy(
+  command: string,
+  args: string[],
+  timeoutMs = 5000,
+  input = '',
+  spawnFn: typeof spawn = spawn,
+): Promise<number | null> {
+  return new Promise(resolve => {
+    let proc: ReturnType<typeof spawn>
+    try {
+      proc = spawnFn(command, args, {
+        cwd: undefined,
+        detached: true,
+        stdio: ['pipe', 'ignore', 'ignore'],
+        windowsHide: true,
+      })
+    } catch {
+      resolve(null)
+      return
+    }
+    let settled = false
+    const finish = (code: number | null) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      resolve(code)
+    }
+    const timer = setTimeout(() => {
+      try {
+        proc.kill('SIGKILL')
+      } catch {
+        // ignore
+      }
+      finish(null)
+    }, timeoutMs)
+    timer.unref?.()
+    proc.once('exit', code => finish(code))
+    proc.once('close', code => finish(code))
+    proc.once('error', () => finish(null))
+    const stdin = proc.stdin as
+      | {
+          on?: (event: string, listener: () => void) => unknown
+          write?: (chunk: string) => unknown
+          end?: (chunk?: string) => unknown
+        }
+      | null
+      | undefined
+    if (stdin) {
+      stdin.on?.('error', () => {})
+      if (stdin.write) {
+        if (input) stdin.write(input)
+        stdin.end?.()
+      } else {
+        stdin.end?.(input)
+      }
+    }
+    proc.unref?.()
+  })
+}
+
+const LINUX_CLIPBOARD_ARGS: Record<
+  'wl-copy' | 'xclip' | 'xsel',
+  [string[], string[]]
+> = {
+  'wl-copy': [[], ['--primary']],
+  xclip: [
+    ['-selection', 'clipboard'],
+    ['-selection', 'primary'],
+  ],
+  xsel: [
+    ['--clipboard', '--input'],
+    ['--primary', '--input'],
+  ],
+}
+
+/**
+ * Official 2.1.328 (#598) `Z`: sequential CLIPBOARD then PRIMARY copy via
+ * detached subprocesses (`t9r`), with generation check so a newer copy aborts
+ * a stale primary write.
+ */
+async function copyLinuxClipboardAndPrimary(
+  tool: 'wl-copy' | 'xclip' | 'xsel',
+  text: string,
+): Promise<void> {
   const gen = ++waylandCopyGen
-  const opts = {
-    input: text,
-    useCwd: false,
-    timeout: 2000,
-    stdout: 'ignore' as const,
-    stderr: 'ignore' as const,
-  }
-  await execFileNoThrow('wl-copy', [], opts)
+  const [clipArgs, primaryArgs] = LINUX_CLIPBOARD_ARGS[tool]
+  await spawnDetachedClipboardCopy(tool, clipArgs, 2000, text)
   if (gen !== waylandCopyGen) return
-  await execFileNoThrow('wl-copy', ['--primary'], opts)
+  await spawnDetachedClipboardCopy(tool, primaryArgs, 2000, text)
 }
 
 /**
  * densable L3u — shell out to a native clipboard utility as OSC 52 safety net.
  * Only called when not in an SSH session (over SSH, these would write to
  * the remote machine's clipboard — OSC 52 is the right path there).
- * Fire-and-forget at call site; densable 2.1.224 #15: Linux dual-writes
- * CLIPBOARD then PRIMARY so Wayland selection paste works without race.
+ * Fire-and-forget at call site; official 2.1.328 (#598): Linux dual-writes
+ * CLIPBOARD then PRIMARY using detached helpers so Ctrl+Z never freezes paste.
  */
 function copyNative(text: string): boolean {
   const opts = { input: text, useCwd: false, timeout: 2000 }
@@ -615,22 +697,8 @@ function copyNative(text: string): boolean {
         })
         return false
       }
-      if (linuxCopy === 'wl-copy') {
-        void copyWaylandClipboardAndPrimary(text)
-        return true
-      }
-      if (linuxCopy === 'xclip') {
-        // densable: dual fire clipboard + primary (xclip does not need await race fix)
-        void execFileNoThrow('xclip', ['-selection', 'clipboard'], opts)
-        void execFileNoThrow('xclip', ['-selection', 'primary'], opts)
-        return true
-      }
-      if (linuxCopy === 'xsel') {
-        void execFileNoThrow('xsel', ['--clipboard', '--input'], opts)
-        void execFileNoThrow('xsel', ['--primary', '--input'], opts)
-        return true
-      }
-      return false
+      void copyLinuxClipboardAndPrimary(linuxCopy, text)
+      return true
     }
     case 'wsl': {
       // densable L3u wsl: powershell.exe + O3u → Windows host clipboard

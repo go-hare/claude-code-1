@@ -18,6 +18,7 @@ import { getExternalEditor } from '../../../utils/editor.js';
 import { toIDEDisplayName } from '../../../utils/ide.js';
 import { editPromptInEditor } from '../../../utils/promptEditor.js';
 import { updateLastInteractionTime } from '../../../bootstrap/state.js';
+import { ConfigurableShortcutHint } from '../../ConfigurableShortcutHint.js';
 import TextInput from '../../TextInput.js';
 import { PermissionPreviewGutter } from '../PermissionPreviewGutter.js';
 import { PermissionRequestTitle } from '../PermissionRequestTitle.js';
@@ -409,7 +410,12 @@ export function PreviewQuestionView({
                 <KeyboardShortcutHint shortcut="n" action="add notes" />
                 {questions.length > 1 && <KeyboardShortcutHint shortcut="Tab" action="switch questions" />}
                 {isInNotesInput && editorName && (
-                  <KeyboardShortcutHint shortcut="ctrl+g" action={`edit in ${editorName}`} />
+                  <ConfigurableShortcutHint
+                    action="chat:externalEditor"
+                    context="Chat"
+                    fallback="ctrl+g"
+                    description={`edit in ${editorName}`}
+                  />
                 )}
                 <KeyboardShortcutHint shortcut="Esc" action="cancel" />
               </Byline>

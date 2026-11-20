@@ -5,7 +5,7 @@ import * as path from 'path';
 import * as React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ConfigurableShortcutHint } from '../../components/ConfigurableShortcutHint.js';
-import { Byline } from '@anthropic/ink';
+import { Byline, type DOMElement, useApp } from '@anthropic/ink';
 import { MCPRemoteServerMenu } from '../../components/mcp/MCPRemoteServerMenu.js';
 import { MCPStdioServerMenu } from '../../components/mcp/MCPStdioServerMenu.js';
 import { MCPToolDetailView } from '../../components/mcp/MCPToolDetailView.js';
@@ -15,7 +15,7 @@ import { SearchBox } from '../../components/SearchBox.js';
 import { useSearchInput } from '@anthropic/ink';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- useInput needed for raw search mode text input
-import { Box, Text, useInput, useModalOrTerminalSize, useTerminalFocus } from '@anthropic/ink';
+import { Box, Text, useInput, useModalOrTerminalSize, useTerminalFocus, useWantEveryKey } from '@anthropic/ink';
 import { useKeybinding, useKeybindings } from '../../keybindings/useKeybinding.js';
 import { getBuiltinPluginDefinition } from '../../plugins/builtinPlugins.js';
 import { useMcpToggleEnabled } from '../../services/mcp/MCPConnectionManager.js';
@@ -88,7 +88,16 @@ import type { ViewState as ParentViewState } from './types.js';
 import { UnifiedInstalledCell } from './UnifiedInstalledCell.js';
 import type { UnifiedInstalledItem, UnifiedInstalledScope } from './unifiedTypes.js';
 import { usePagination } from './usePagination.js';
-import { computePluginListMaxVisible, PluginConfirmList, usePluginListExtendedKeys } from './pluginListHelpers.js';
+import {
+  applySearchBurstInput,
+  computePluginListMaxVisible,
+  ENTER_REPEAT_COOLDOWN_MS,
+  isPluginViewOpCurrent,
+  PluginConfirmList,
+  recordPluginUiClick,
+  shouldIgnorePluginEnterAction,
+  usePluginListExtendedKeys,
+} from './pluginListHelpers.js';
 
 type Props = {
   setViewState: (state: ParentViewState) => void;
@@ -556,9 +565,32 @@ export function ManagePlugins({
   const flaggedPlugins = getFlaggedPlugins();
 
   // Search state
+  const { focusManager } = useApp();
+  const searchBoxRef = useRef<DOMElement | null>(null);
+  // Official 2.1.328 #614 & #615: View generation & target-plugin guards so
+  // slow async saves/removals/uninstalls never reopen a closed page, close an
+  // open page, ask to uninstall the wrong plugin, or leave Esc trapped.
+  const viewGenRef = useRef(0);
+  const activePluginIdRef = useRef<string | null>(null);
+  const isProcessingRef = useRef(false);
+  // Official 2.1.327 #382 & 2.1.328 #617: Track transition/accept timestamps
+  // so click+Enter or held Enter cannot turn off several plugins.
+  const lastViewTransitionAtRef = useRef(0);
+  const lastEnterAcceptAtRef = useRef(0);
+  // Official 2.1.328 #462: Preserve focused MCP tool when returning from tool detail.
+  const [lastMcpToolSelection, setLastMcpToolSelection] = useState<{
+    serverName: string;
+    toolName: string;
+    toolIndex: number;
+  } | null>(null);
+  const filteredItemsLengthRef = useRef(0);
+
   const [isSearchMode, setIsSearchModeRaw] = useState(false);
+  const isSearchModeRef = useRef(isSearchMode);
+  isSearchModeRef.current = isSearchMode;
   const setIsSearchMode = useCallback(
     (active: boolean) => {
+      isSearchModeRef.current = active;
       setIsSearchModeRaw(active);
       onSearchModeChange?.(active);
     },
@@ -573,20 +605,67 @@ export function ManagePlugins({
   // View state
   const [viewState, setViewState] = useState<ViewState>('plugin-list');
 
+  const isSearchActive = viewState === 'plugin-list' && isSearchMode;
+  // Official 2.1.328 (#603): receive every keypress while search input is active.
+  useWantEveryKey(isSearchActive);
+
   const {
     query: searchQuery,
+    queryRef: searchQueryRef,
     setQuery: setSearchQuery,
     cursorOffset: searchCursorOffset,
+    cursorOffsetRef: searchCursorOffsetRef,
     setCursorOffset: setSearchCursorOffset,
-    handleKeyDown: handleSearchKeyDown,
-    handlePaste: handleSearchPaste,
+    handleKeyDown: rawHandleSearchKeyDown,
+    handlePaste: rawHandleSearchPaste,
   } = useSearchInput({
-    isActive: viewState === 'plugin-list' && isSearchMode,
+    isActive: isSearchActive,
     onExit: () => {
+      // Official 2.1.328 #616: When a search has no results, stay in search mode
+      // instead of stranding the cursor on an empty list.
+      if (filteredItemsLengthRef.current === 0 && searchQueryRef.current.length > 0) {
+        return;
+      }
       setIsSearchMode(false);
     },
   });
+  // Official 2.1.327 #410: Protect search input handlers from malformed/burst key events.
+  const handleSearchKeyDown = useCallback(
+    (event: Parameters<typeof rawHandleSearchKeyDown>[0]) => {
+      try {
+        rawHandleSearchKeyDown(event);
+      } catch (err) {
+        logForDebugging(`ManagePlugins search key burst ignored: ${errorMessage(err)}`);
+      }
+    },
+    [rawHandleSearchKeyDown],
+  );
+  const handleSearchPaste = useCallback(
+    (event: Parameters<typeof rawHandleSearchPaste>[0]) => {
+      try {
+        rawHandleSearchPaste(event);
+      } catch (err) {
+        logForDebugging(`ManagePlugins search paste burst ignored: ${errorMessage(err)}`);
+      }
+    },
+    [rawHandleSearchPaste],
+  );
+  // Official 2.1.328 #616: Always focus SearchBox when entering search mode (even
+  // after clicking the tab row, which shifts Ink focus to Tabs' header element).
+  useEffect(() => {
+    if (viewState === 'plugin-list' && isSearchMode && searchBoxRef.current) {
+      focusManager?.focus(searchBoxRef.current);
+    }
+  }, [viewState, isSearchMode, focusManager]);
   const [selectedPlugin, setSelectedPlugin] = useState<PluginState | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const bumpViewGeneration = useCallback((nextPluginId: string | null = null) => {
+    viewGenRef.current += 1;
+    activePluginIdRef.current = nextPluginId;
+    isProcessingRef.current = false;
+    lastViewTransitionAtRef.current = Date.now();
+    setIsProcessing(false);
+  }, []);
 
   // Data state
   const [marketplaces, setMarketplaces] = useState<MarketplaceInfo[]>([]);
@@ -608,21 +687,33 @@ export function ManagePlugins({
   // Handle escape to go back - viewState-dependent navigation
   const handleBack = React.useCallback(() => {
     if (viewState === 'plugin-details') {
+      bumpViewGeneration(null);
       setViewState('plugin-list');
       setSelectedPlugin(null);
       setProcessError(null);
       setPresentedHeadersHelper(null);
+    } else if (viewState === 'confirm-project-uninstall') {
+      bumpViewGeneration(selectedPlugin ? `${selectedPlugin.plugin.name}@${selectedPlugin.marketplace}` : null);
+      setViewState(selectedPlugin ? 'plugin-details' : 'plugin-list');
+      setProcessError(null);
+    } else if (typeof viewState === 'object' && viewState.type === 'confirm-data-cleanup') {
+      bumpViewGeneration(selectedPlugin ? `${selectedPlugin.plugin.name}@${selectedPlugin.marketplace}` : null);
+      setViewState(selectedPlugin ? 'plugin-details' : 'plugin-list');
+      setProcessError(null);
     } else if (typeof viewState === 'object' && viewState.type === 'failed-plugin-details') {
+      bumpViewGeneration(null);
       setViewState('plugin-list');
       setProcessError(null);
       setPresentedHeadersHelper(null);
     } else if (viewState === 'configuring') {
+      bumpViewGeneration(selectedPlugin ? `${selectedPlugin.plugin.name}@${selectedPlugin.marketplace}` : null);
       setViewState('plugin-details');
       setConfigNeeded(null);
     } else if (
       typeof viewState === 'object' &&
       (viewState.type === 'plugin-options' || viewState.type === 'configuring-options')
     ) {
+      bumpViewGeneration(null);
       // Cancel mid-sequence — plugin is already enabled, just bail to list.
       // User can configure later via the Configure options menu if they want.
       setViewState('plugin-list');
@@ -632,35 +723,40 @@ export function ManagePlugins({
         void onManageComplete();
       }
     } else if (typeof viewState === 'object' && viewState.type === 'flagged-detail') {
+      bumpViewGeneration(null);
       setViewState('plugin-list');
       setProcessError(null);
     } else if (typeof viewState === 'object' && viewState.type === 'mcp-detail') {
+      bumpViewGeneration(null);
       setViewState('plugin-list');
       setProcessError(null);
     } else if (typeof viewState === 'object' && viewState.type === 'mcp-tools') {
+      bumpViewGeneration(null);
       setViewState({ type: 'mcp-detail', client: viewState.client });
     } else if (typeof viewState === 'object' && viewState.type === 'mcp-tool-detail') {
+      bumpViewGeneration(null);
       setViewState({ type: 'mcp-tools', client: viewState.client });
     } else {
+      bumpViewGeneration(null);
       if (pendingToggles.size > 0) {
         setResult('Run /reload-plugins to apply plugin changes.');
         return;
       }
       setParentViewState({ type: 'menu' });
     }
-  }, [viewState, setParentViewState, pendingToggles, setResult]);
+  }, [viewState, selectedPlugin, bumpViewGeneration, setParentViewState, pendingToggles, setResult, onManageComplete]);
 
   // Escape when not in search mode - go back.
-  // Excludes confirm-project-uninstall (has its own confirm:no handler in
-  // Confirmation context — letting this fire would create competing handlers)
-  // and confirm-data-cleanup (uses raw useInput where n and escape are
-  // DIFFERENT actions: keep-data vs cancel).
+  // Excludes confirm-project-uninstall and confirm-data-cleanup ONLY when
+  // PluginConfirmList is active (not processing); while processing, keep Esc
+  // active here so Esc is never ignored (#615).
   useKeybinding('confirm:no', handleBack, {
     context: 'Confirmation',
     isActive:
       (viewState !== 'plugin-list' || !isSearchMode) &&
-      viewState !== 'confirm-project-uninstall' &&
-      !(typeof viewState === 'object' && viewState.type === 'confirm-data-cleanup'),
+      (isProcessing ||
+        (viewState !== 'confirm-project-uninstall' &&
+          !(typeof viewState === 'object' && viewState.type === 'confirm-data-cleanup'))),
   });
 
   // Helper to get MCP status
@@ -951,6 +1047,7 @@ export function ManagePlugins({
         ('description' in item && item.description?.toLowerCase().includes(lowerQuery)),
     );
   }, [unifiedItems, searchQuery]);
+  filteredItemsLengthRef.current = filteredItems.length;
 
   // Selection state
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -991,7 +1088,6 @@ export function ManagePlugins({
 
   // Details view state
   const [detailsMenuIndex, setDetailsMenuIndex] = useState(0);
-  const [isProcessing, setIsProcessing] = useState(false);
   const [processError, setProcessError] = useState<string | null>(null);
   // densable 2.1.238 — when update is blocked for headersHelper, show the
   // command on this pane (SEA "now shown") before the user retries.
@@ -1203,9 +1299,12 @@ export function ManagePlugins({
 
   // Handle single plugin operations from details view
   const handleSingleOperation = async (operation: 'enable' | 'disable' | 'update' | 'uninstall') => {
-    if (!selectedPlugin) return;
+    if (!selectedPlugin || isProcessingRef.current) return;
 
-    const pluginScope = selectedPlugin.scope || 'user';
+    const targetPlugin = selectedPlugin;
+    const pluginId = `${targetPlugin.plugin.name}@${targetPlugin.marketplace}`;
+    const opGen = viewGenRef.current;
+    const pluginScope = targetPlugin.scope || 'user';
     const isBuiltin = pluginScope === 'builtin';
 
     // Built-in plugins can only be enabled/disabled, not updated/uninstalled.
@@ -1220,14 +1319,16 @@ export function ManagePlugins({
       return;
     }
 
+    isProcessingRef.current = true;
     setIsProcessing(true);
     setProcessError(null);
     if (operation !== 'update') {
       setPresentedHeadersHelper(null);
     }
 
+    const isStillCurrent = () => isPluginViewOpCurrent(viewGenRef.current, opGen, activePluginIdRef.current, pluginId);
+
     try {
-      const pluginId = `${selectedPlugin.plugin.name}@${selectedPlugin.marketplace}`;
       let reverseDependents: string[] | undefined;
 
       // enable/disable omit scope — pluginScope is the install scope from
@@ -1253,26 +1354,20 @@ export function ManagePlugins({
         case 'uninstall': {
           if (isBuiltin) break; // guarded above; narrows pluginScope
           if (!isInstallableScope(pluginScope)) break;
-          // If the plugin is enabled in .claude/settings.json (shared with the
-          // team), divert to a confirmation dialog that offers to disable in
-          // settings.local.json instead. Check the settings file directly —
-          // `pluginScope` (from installed_plugins.json) can be 'user' even when
-          // the plugin is ALSO project-enabled, and uninstalling the user-scope
-          // install would leave the project enablement active.
           if (isPluginEnabledAtProjectScope(pluginId)) {
+            if (!isStillCurrent()) return;
+            isProcessingRef.current = false;
             setIsProcessing(false);
             setViewState('confirm-project-uninstall');
             return;
           }
-          // If the plugin has persistent data (${CLAUDE_PLUGIN_DATA}) AND this
-          // is the last scope, prompt before deleting it. For multi-scope
-          // installs, the op's isLastScope check won't delete regardless of
-          // the user's y/n — showing the dialog would mislead ("y" → nothing
-          // happens). Length check mirrors pluginOperations.ts:513.
           const installs = loadInstalledPluginsV2().plugins[pluginId];
           const isLastScope = !installs || installs.length <= 1;
           const dataSize = isLastScope ? await getPluginDataDirSize(pluginId) : null;
+          // Official 2.1.328 #615: Do not open uninstall confirmation if user already left this plugin.
+          if (!isStillCurrent()) return;
           if (dataSize) {
+            isProcessingRef.current = false;
             setIsProcessing(false);
             setViewState({ type: 'confirm-data-cleanup', size: dataSize });
             return;
@@ -1292,24 +1387,26 @@ export function ManagePlugins({
           let marketplaceSource: MarketplaceSource | undefined;
           try {
             const [mkt, known] = await Promise.all([
-              getMarketplace(selectedPlugin.marketplace),
+              getMarketplace(targetPlugin.marketplace),
               loadKnownMarketplacesConfig(),
             ]);
-            marketplaceEntry = mkt.plugins.find(p => p.name === selectedPlugin.plugin.name);
-            marketplaceSource = known[selectedPlugin.marketplace]?.source;
+            marketplaceEntry = mkt.plugins.find(p => p.name === targetPlugin.plugin.name);
+            marketplaceSource = known[targetPlugin.marketplace]?.source;
           } catch {
             marketplaceEntry = undefined;
             marketplaceSource = undefined;
           }
+          if (!isStillCurrent()) return;
           if (marketplaceEntry) {
             const paneBlock = gateHeadersHelperPaneForAction({
               pluginId,
               entry: marketplaceEntry,
               kind: 'update',
-              marketplaceName: selectedPlugin.marketplace,
+              marketplaceName: targetPlugin.marketplace,
               marketplaceSource,
               consented: headersHelperPane.pinned(),
               onPresentHelper: helper => {
+                if (!isStillCurrent()) return;
                 setPresentedHeadersHelper(helper);
                 headersHelperPane.record(helper);
               },
@@ -1328,10 +1425,14 @@ export function ManagePlugins({
           }
           // If already up to date, show message and exit
           if (result.alreadyUpToDate) {
-            setResult(re(`${re(selectedPlugin.plugin.name)} is already at the latest version (${result.newVersion}).`));
             if (onManageComplete) {
               await onManageComplete();
             }
+            // Official 2.1.328 #614: Do not close the currently open page if user navigated away.
+            if (!isStillCurrent()) return;
+            isProcessingRef.current = false;
+            setIsProcessing(false);
+            setResult(re(`${re(targetPlugin.plugin.name)} is already at the latest version (${result.newVersion}).`));
             setParentViewState({ type: 'menu' });
             return;
           }
@@ -1344,15 +1445,20 @@ export function ManagePlugins({
       // that handle their own settings updates, so we only need to clear caches here
       clearAllCaches();
 
-      // Prompt for manifest.userConfig + channel userConfig if the plugin ends
-      // up enabled. Re-read settings rather than keying on `operation ===
-      // 'enable'`: install enables on install, so the menu shows "Disable"
-      // first. PluginOptionsFlow itself checks getUnconfiguredOptions — if
-      // nothing needs filling, it calls onDone('skipped') immediately.
-      const pluginIdNow = `${selectedPlugin.plugin.name}@${selectedPlugin.marketplace}`;
+      // Official 2.1.328 #614 & #615: If user already went back or opened another
+      // plugin while this slow operation was running, mark changed in the
+      // background without reopening options or closing their currently open page.
+      if (!isStillCurrent()) {
+        if (onManageComplete) {
+          void onManageComplete();
+        }
+        return;
+      }
+
       const settingsAfter = getSettings_DEPRECATED();
-      const enabledAfter = settingsAfter?.enabledPlugins?.[pluginIdNow] !== false;
+      const enabledAfter = settingsAfter?.enabledPlugins?.[pluginId] !== false;
       if (enabledAfter) {
+        isProcessingRef.current = false;
         setIsProcessing(false);
         setViewState({ type: 'plugin-options' });
         return;
@@ -1373,18 +1479,24 @@ export function ManagePlugins({
         reverseDependents && reverseDependents.length > 0
           ? ` · required by ${reverseDependents.map(name => re(name)).join(', ')}`
           : '';
-      const message = `✓ ${operationName} ${re(selectedPlugin.plugin.name)}${depWarn}. Run /reload-plugins to apply.`;
-      setResult(re(message));
+      const message = `✓ ${operationName} ${re(targetPlugin.plugin.name)}${depWarn}. Run /reload-plugins to apply.`;
 
       if (onManageComplete) {
         await onManageComplete();
       }
+      if (!isStillCurrent()) return;
 
+      isProcessingRef.current = false;
+      setIsProcessing(false);
+      setResult(re(message));
       setParentViewState({ type: 'menu' });
     } catch (error) {
-      setIsProcessing(false);
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      setProcessError(`Failed to ${operation}: ${errorMessage}`);
+      if (isStillCurrent()) {
+        isProcessingRef.current = false;
+        setIsProcessing(false);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        setProcessError(`Failed to ${operation}: ${errorMessage}`);
+      }
       logError(toError(error));
     }
   };
@@ -1468,16 +1580,25 @@ export function ManagePlugins({
   // Handle accept (Enter) in plugin-list
   const handleAccept = React.useCallback(() => {
     if (selectedIndex >= filteredItems.length) return;
+    // Official 2.1.328 #617: Throttle rapid repeated Enter presses so holding
+    // Enter cannot cascade through multiple plugins.
+    const now = Date.now();
+    if (now - lastEnterAcceptAtRef.current < ENTER_REPEAT_COOLDOWN_MS) {
+      return;
+    }
+    lastEnterAcceptAtRef.current = now;
     const item = filteredItems[selectedIndex];
     if (item?.type === 'plugin') {
       const state = pluginStates.find(s => s.plugin.name === item.plugin.name && s.marketplace === item.marketplace);
       if (state) {
+        bumpViewGeneration(`${state.plugin.name}@${state.marketplace}`);
         setSelectedPlugin(state);
         setViewState('plugin-details');
         setDetailsMenuIndex(0);
         setProcessError(null);
       }
     } else if (item?.type === 'flagged-plugin') {
+      bumpViewGeneration(item.id);
       setViewState({
         type: 'flagged-detail',
         plugin: {
@@ -1491,6 +1612,7 @@ export function ManagePlugins({
       });
       setProcessError(null);
     } else if (item?.type === 'failed-plugin') {
+      bumpViewGeneration(item.id);
       setViewState({
         type: 'failed-plugin-details',
         plugin: {
@@ -1504,23 +1626,28 @@ export function ManagePlugins({
       setDetailsMenuIndex(0);
       setProcessError(null);
     } else if (item?.type === 'mcp') {
+      bumpViewGeneration(item.client.name);
       setViewState({ type: 'mcp-detail', client: item.client });
       setProcessError(null);
     }
-  }, [selectedIndex, filteredItems, pluginStates]);
+  }, [selectedIndex, filteredItems, pluginStates, bumpViewGeneration]);
 
   // Plugin-list navigation (non-search mode)
   useKeybindings(
     {
       'select:previous': () => {
-        if (selectedIndex === 0) {
+        if (filteredItems.length === 0 || selectedIndex === 0) {
           setIsSearchMode(true);
         } else {
           pagination.handleSelectionChange(selectedIndex - 1, setSelectedIndex);
         }
       },
       'select:next': () => {
-        if (selectedIndex < filteredItems.length - 1) {
+        if (filteredItems.length === 0) {
+          // Official 2.1.328 #616: With no search results, Down arrow restores
+          // search focus instead of becoming unresponsive.
+          setIsSearchMode(true);
+        } else if (selectedIndex < filteredItems.length - 1) {
           pagination.handleSelectionChange(selectedIndex + 1, setSelectedIndex);
         }
       },
@@ -1700,6 +1827,7 @@ export function ManagePlugins({
     menuItems.push({
       label: 'Back to plugin list',
       action: () => {
+        bumpViewGeneration(null);
         setViewState('plugin-list');
         setSelectedPlugin(null);
         setProcessError(null);
@@ -1707,7 +1835,7 @@ export function ManagePlugins({
     });
 
     return menuItems;
-  }, [viewState, selectedPlugin, selectedPluginHasMcpb, pluginStates]);
+  }, [viewState, selectedPlugin, selectedPluginHasMcpb, pluginStates, bumpViewGeneration]);
 
   // Plugin-details navigation
   useKeybindings(
@@ -1723,9 +1851,27 @@ export function ManagePlugins({
         }
       },
       'select:accept': () => {
-        if (detailsMenuItems[detailsMenuIndex]) {
-          detailsMenuItems[detailsMenuIndex]!.action();
+        const chosen = detailsMenuItems[detailsMenuIndex];
+        if (!chosen) return;
+        const isMutating =
+          chosen.label === 'Disable plugin' ||
+          chosen.label === 'Enable plugin' ||
+          chosen.label === 'Uninstall' ||
+          chosen.label === 'Update now';
+        // Official 2.1.327 #382 & 2.1.328 #617: Prevent click+Enter or held
+        // Enter from accidentally disabling/uninstalling/updating a plugin.
+        if (
+          isMutating &&
+          shouldIgnorePluginEnterAction({
+            lastTransitionAt: lastViewTransitionAtRef.current,
+            lastAcceptAt: lastEnterAcceptAtRef.current,
+            isBusy: isProcessingRef.current,
+          })
+        ) {
+          return;
         }
+        lastEnterAcceptAtRef.current = Date.now();
+        chosen.action();
       },
     },
     {
@@ -1739,25 +1885,30 @@ export function ManagePlugins({
     {
       'select:accept': () => {
         if (typeof viewState === 'object' && viewState.type === 'failed-plugin-details') {
+          if (
+            shouldIgnorePluginEnterAction({
+              lastTransitionAt: lastViewTransitionAtRef.current,
+              lastAcceptAt: lastEnterAcceptAtRef.current,
+              isBusy: isProcessingRef.current,
+            })
+          ) {
+            return;
+          }
+          lastEnterAcceptAtRef.current = Date.now();
+          const opGen = viewGenRef.current;
+          const pluginId = viewState.plugin.id;
+          const pluginScope = viewState.plugin.scope;
+          const isStillCurrent = () =>
+            isPluginViewOpCurrent(viewGenRef.current, opGen, activePluginIdRef.current, pluginId);
           void (async () => {
+            isProcessingRef.current = true;
             setIsProcessing(true);
             setProcessError(null);
-            const pluginId = viewState.plugin.id;
-            const pluginScope = viewState.plugin.scope;
-            // Pass scope to uninstallPluginOp so it can find the correct V2
-            // installation record and clean up on-disk files. Fall back to
-            // default scope if not installable (e.g. 'managed', though that
-            // case is guarded by isActive below). deleteDataDir=false: this
-            // is a recovery path for a plugin that failed to load — it may
-            // be reinstallable, so don't nuke ${CLAUDE_PLUGIN_DATA} silently.
-            // The normal uninstall path prompts; this one preserves.
             const result = isInstallableScope(pluginScope as PersistablePluginScope)
               ? await uninstallPluginOp(pluginId, pluginScope as InstallableScope, false)
               : await uninstallPluginOp(pluginId, 'user', false);
             let success = result.success;
             if (!success) {
-              // Plugin was never installed (only in enabledPlugins settings).
-              // Remove directly from all editable settings sources.
               const editableSources = ['userSettings' as const, 'projectSettings' as const, 'localSettings' as const];
               for (const source of editableSources) {
                 const settings = getSettingsForSource(source);
@@ -1771,17 +1922,20 @@ export function ManagePlugins({
                   success = true;
                 }
               }
-              // Clear memoized caches so next loadAllPlugins() picks up settings changes
               clearAllCaches();
             }
             if (success) {
               if (onManageComplete) {
                 await onManageComplete();
               }
+              // Official 2.1.328 #614: Do not clobber the user's open page if they left.
+              if (!isStillCurrent()) return;
+              isProcessingRef.current = false;
               setIsProcessing(false);
-              // Return to list (don't setResult — that closes the whole dialog)
               setViewState('plugin-list');
             } else {
+              if (!isStillCurrent()) return;
+              isProcessingRef.current = false;
               setIsProcessing(false);
               setProcessError(result.message);
             }
@@ -1827,23 +1981,34 @@ export function ManagePlugins({
 
   const handleConfirmDataCleanupUninstall = useCallback(
     async (deleteDataDir: boolean) => {
-      if (!selectedPlugin) return;
+      if (!selectedPlugin || isProcessingRef.current) return;
       const pluginId = `${selectedPlugin.plugin.name}@${selectedPlugin.marketplace}`;
       const pluginScope = selectedPlugin.scope;
       if (!pluginScope || pluginScope === 'builtin' || !isInstallableScope(pluginScope)) return;
+      const opGen = viewGenRef.current;
+      const isStillCurrent = () =>
+        isPluginViewOpCurrent(viewGenRef.current, opGen, activePluginIdRef.current, pluginId);
+      isProcessingRef.current = true;
       setIsProcessing(true);
       setProcessError(null);
       try {
         const result = await uninstallPluginOp(pluginId, pluginScope, deleteDataDir);
         if (!result.success) throw new Error(result.message);
         clearAllCaches();
+        if (onManageComplete) void onManageComplete();
+        // Official 2.1.328 #614 & #615: Do not close another open page if user already left.
+        if (!isStillCurrent()) return;
+        isProcessingRef.current = false;
+        setIsProcessing(false);
         const suffix = deleteDataDir ? '' : ' · data preserved';
         setResult(re(`${figures.tick} ${result.message}${suffix}`));
-        if (onManageComplete) void onManageComplete();
         setParentViewState({ type: 'menu' });
       } catch (e) {
-        setIsProcessing(false);
-        setProcessError(e instanceof Error ? e.message : String(e));
+        if (isStillCurrent()) {
+          isProcessingRef.current = false;
+          setIsProcessing(false);
+          setProcessError(e instanceof Error ? e.message : String(e));
+        }
       }
     },
     [selectedPlugin, setResult, onManageComplete, setParentViewState],
@@ -1854,8 +2019,26 @@ export function ManagePlugins({
   useInput(
     (input, key) => {
       const keyIsNotCtrlOrMeta = !key.ctrl && !key.meta;
-      if (isSearchMode) {
-        // Text input is handled by useSearchInput hook
+      if (isSearchModeRef.current) {
+        // Official 2.1.327 #410 & 2.1.328 #603: Append subsequent burst chars
+        // that arrive before React commits isSearchMode=true instead of
+        // overwriting earlier characters.
+        if (!isSearchMode && keyIsNotCtrlOrMeta && input.length > 0) {
+          const next = applySearchBurstInput(searchQueryRef.current, searchCursorOffsetRef.current, input);
+          setSearchQuery(next.query);
+          setSearchCursorOffset(next.cursorOffset);
+        }
+        return;
+      }
+
+      // Official 2.1.328 #616: Backspace on an empty search result list re-enters
+      // search mode and removes the last query char so the user is never stuck.
+      if ((key.backspace || key.delete) && searchQueryRef.current.length > 0) {
+        const shortened = searchQueryRef.current.slice(0, -1);
+        setIsSearchMode(true);
+        setSearchQuery(shortened);
+        setSearchCursorOffset(shortened.length);
+        setSelectedIndex(0);
         return;
       }
 
@@ -1873,10 +2056,13 @@ export function ManagePlugins({
         input !== 'k' &&
         input !== ' '
       ) {
-        setIsSearchMode(true);
-        setSearchQuery(input);
-        setSearchCursorOffset(input.length);
-        setSelectedIndex(0);
+        const next = applySearchBurstInput('', 0, input);
+        if (next.query.length > 0) {
+          setIsSearchMode(true);
+          setSearchQuery(next.query);
+          setSearchCursorOffset(next.cursorOffset);
+          setSelectedIndex(0);
+        }
       }
     },
     { isActive: viewState === 'plugin-list' },
@@ -1945,18 +2131,29 @@ export function ManagePlugins({
         configSchema={viewState.schema}
         initialValues={loadPluginOptions(pluginId)}
         onSave={values => {
+          const opGen = viewGenRef.current;
+          const isStillCurrent = () =>
+            isPluginViewOpCurrent(viewGenRef.current, opGen, activePluginIdRef.current, pluginId);
           void (async () => {
             try {
               await savePluginOptions(pluginId, values, viewState.schema);
               clearAllCaches();
+              // Official 2.1.328 #614: Do not close or reopen if user already went back.
+              if (!isStillCurrent()) return;
               setResult('Configuration saved. Run /reload-plugins for changes to take effect.');
             } catch (err) {
+              if (!isStillCurrent()) return;
               setProcessError(`Failed to save configuration: ${errorMessage(err)}`);
             }
-            setViewState('plugin-details');
+            if (isStillCurrent()) {
+              setViewState('plugin-details');
+            }
           })();
         }}
-        onCancel={() => setViewState('plugin-details')}
+        onCancel={() => {
+          bumpViewGeneration(pluginId);
+          setViewState('plugin-details');
+        }}
       />
     );
   }
@@ -1967,6 +2164,9 @@ export function ManagePlugins({
 
     async function handleSave(config: UserConfigValues) {
       if (!configNeeded || !selectedPlugin) return;
+      const opGen = viewGenRef.current;
+      const isStillCurrent = () =>
+        isPluginViewOpCurrent(viewGenRef.current, opGen, activePluginIdRef.current, pluginId);
 
       try {
         // Find MCPB path again
@@ -1985,6 +2185,7 @@ export function ManagePlugins({
         }
 
         if (!mcpbPath) {
+          if (!isStillCurrent()) return;
           setProcessError('No MCPB file found');
           setViewState('plugin-details');
           return;
@@ -1993,12 +2194,15 @@ export function ManagePlugins({
         // Reload with provided config
         await loadMcpbFile(mcpbPath, selectedPlugin.plugin.path, pluginId, undefined, config);
 
+        // Official 2.1.328 #614: Do not close or reopen if user already went back.
+        if (!isStillCurrent()) return;
         // Success - go back to details
         setProcessError(null);
         setConfigNeeded(null);
         setViewState('plugin-details');
         setResult('Configuration saved. Run /reload-plugins for changes to take effect.');
       } catch (err) {
+        if (!isStillCurrent()) return;
         const errorMsg = errorMessage(err);
         setProcessError(`Failed to save configuration: ${errorMsg}`);
         setViewState('plugin-details');
@@ -2006,6 +2210,7 @@ export function ManagePlugins({
     }
 
     function handleCancel() {
+      bumpViewGeneration(pluginId);
       setConfigNeeded(null);
       setViewState('plugin-details');
     }
@@ -2362,6 +2567,7 @@ export function ManagePlugins({
 
     // Common handlers for MCP menus
     const handleMcpViewTools = () => {
+      setLastMcpToolSelection(null);
       setViewState({ type: 'mcp-tools', client });
     };
 
@@ -2507,10 +2713,18 @@ export function ManagePlugins({
       };
     }
 
+    const savedToolSelection = lastMcpToolSelection?.serverName === server.name ? lastMcpToolSelection : null;
     return (
       <MCPToolListView
         server={server}
-        onSelectTool={(tool: Tool) => {
+        startOn={savedToolSelection?.toolName}
+        defaultFocusIndex={savedToolSelection?.toolIndex}
+        onSelectTool={(tool: Tool, index: number) => {
+          setLastMcpToolSelection({
+            serverName: server.name,
+            toolName: tool.name,
+            toolIndex: index,
+          });
           setViewState({ type: 'mcp-tool-detail', client, tool });
         }}
         onBack={() => setViewState({ type: 'mcp-detail', client })}
@@ -2574,6 +2788,7 @@ export function ManagePlugins({
       {/* Search box */}
       <Box marginBottom={1}>
         <SearchBox
+          ref={searchBoxRef}
           query={searchQuery}
           isFocused={isSearchMode}
           onFocus={enterSearchMode}
@@ -2652,6 +2867,7 @@ export function ManagePlugins({
             )}
             <Box
               onClick={() => {
+                recordPluginUiClick();
                 if (isSearchMode) setIsSearchMode(false);
                 pagination.handleSelectionChange(actualIndex, setSelectedIndex);
               }}

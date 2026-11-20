@@ -288,7 +288,7 @@ export function PluginOptionsDialog({
   if (descriptors.length === 0) return null;
 
   return (
-    <Dialog title={title} subtitle={subtitle} onCancel={onCancel} isCancelActive={false}>
+    <Dialog title={title} subtitle={subtitle} onCancel={onCancel} isCancelActive={false} hideBorder>
       <Box flexDirection="column">
         {descriptors.map((field, index) => {
           const raw = values[field.key] ?? '';

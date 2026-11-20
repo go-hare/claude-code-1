@@ -34,9 +34,8 @@ export function ClaudeInChromeOnboarding({ onDone }: Props): React.ReactNode {
     <Dialog title="Claude in Chrome" onCancel={onDone} color="chromeYellow">
       <Box flexDirection="column" gap={1}>
         <Text>
-          Claude in Chrome works with the Chrome extension to let you control your browser directly from Claude Code.
-          You can navigate websites, fill forms, capture screenshots, record GIFs, and debug with console logs and
-          network requests.
+          Claude can use Chrome through its extension: open sites, fill forms, take screenshots, record GIFs, and read
+          console logs and network requests.
           {!isExtensionInstalled && (
             <>
               <Newline />
@@ -47,15 +46,14 @@ export function ClaudeInChromeOnboarding({ onDone }: Props): React.ReactNode {
         </Text>
 
         <Text dimColor>
-          Site-level permissions are inherited from the Chrome extension. Manage permissions in the Chrome extension
-          settings to control which sites Claude can browse, click, and type on
+          Claude Code asks before Claude browses, clicks, or types on a site, unless your permission mode or a rule in
+          /permissions answers for you. Sites you approved in the extension don&apos;t carry over.
           {isExtensionInstalled && (
             <>
               {' '}
               (<Link url={CHROME_PERMISSIONS_URL} />)
             </>
           )}
-          .
         </Text>
         <Text dimColor>
           For more info, use{' '}

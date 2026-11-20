@@ -12,14 +12,29 @@ import * as vm from 'node:vm'
 import { setCwdState } from '../../bootstrap/state.js'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import type { Tool, ToolUseContext } from '../../Tool.js'
-import type { AssistantMessage } from '../../types/message.js'
+import type {
+  AssistantMessage,
+  AttachmentMessage,
+} from '../../types/message.js'
+import { getAgentContext } from '../../utils/agentContext.js'
+import { createAttachmentMessage } from '../../utils/attachments.js'
 import { getCwd } from '../../utils/cwd.js'
+import type {
+  ManagedPreToolPassResult,
+  ToolCallManagedPass,
+} from '../../utils/hooks/toolCallManagedPass.js'
+import type { PermissionResult } from '../../utils/permissions/PermissionResult.js'
+import {
+  buildCodeModeMcpStatusDelta,
+  CODE_MODE_STATIC_MCP_GUIDANCE,
+} from '../../utils/simpleSystemPrompt.js'
 import { McpAuthError } from '../mcp/connectionHelpers.js'
 import { mcpInfoFromString } from '../mcp/mcpStringUtils.js'
 import {
   CODE_MODE_EXPERIMENTAL_NAME,
   CODE_MODE_NAME,
   REPL_MAX_TIMEOUT_MS,
+  REPL_POST_SCRIPT_PAUSE_AUTO_MS,
   REPL_SCRIPT_FILENAME,
   REPL_SYNC_RUN_MS,
   REPL_TOOL_CALL_CAP,
@@ -40,6 +55,908 @@ export type CodeModeExecutionResult = {
   tool_calls: number
   /** Official 2.1.325 #2315: extra text typed with Yes at permission/plan dialogs. */
   userFeedback?: string[]
+  /** Official 2.1.328 #653: tool calls that were still running when the script failed. */
+  inFlightAtFailure?: string[]
+  /** Official 2.1.328 #576: top-level variables declared in a failed script that remained unset. */
+  unsetVariables?: string[]
+  /** Inner PreToolUse / PostToolUse hook returned continue: false. */
+  hookStoppedContinuation?: boolean
+  /** Stop reason from an inner hook that returned continue: false. */
+  hookStopReason?: string
+  /** Additional context emitted by inner PreToolUse / PostToolUse hooks. */
+  hookAdditionalContext?: string[]
+  /** Blocking error messages emitted by inner PostToolUse / PreToolUse hooks. */
+  hookBlockingErrors?: string[]
+}
+
+/**
+ * Official 2.1.328 (#651): Live command execution progress events emitted while
+ * a Code Mode script runs shell commands.
+ */
+export type CodeModeProgressEvent =
+  | { type: 'command_start'; command: string; toolName: string }
+  | {
+      type: 'command_output'
+      command: string
+      chunk: string
+      stream: 'stdout' | 'stderr'
+    }
+
+/**
+ * Official 2.1.327 (#386): Per-script auto-mode verdict tracker so a running
+ * Code Mode script keeps its allowed verdict when a second auto-mode-allowed
+ * script starts concurrently.
+ */
+export type AutoScriptVerdictState = 'pending' | 'allowed' | 'blocked' | 'none'
+
+export type AutoScriptRecord = {
+  id: string
+  state: AutoScriptVerdictState
+  blockedReason?: string
+}
+
+export class CodeModeAutoVerdictTracker {
+  private readonly records = new Map<string, AutoScriptRecord>()
+  private unclassifiedCodeRan = false
+
+  registerScript(id: string): AutoScriptRecord {
+    const rec: AutoScriptRecord = { id, state: 'pending' }
+    this.records.set(id, rec)
+    return rec
+  }
+
+  markAllowed(id: string): void {
+    const rec = this.records.get(id)
+    if (rec) rec.state = 'allowed'
+  }
+
+  markBlocked(id: string, reason: string): void {
+    const rec = this.records.get(id)
+    if (rec) {
+      rec.state = 'blocked'
+      rec.blockedReason = reason
+    }
+  }
+
+  markUnclassifiedCodeRan(): void {
+    this.unclassifiedCodeRan = true
+  }
+
+  endScript(id: string): void {
+    this.records.delete(id)
+  }
+
+  /**
+   * Returns true if `id` is allowed to ride its script-level auto-mode verdict.
+   * Crucially (#386), another concurrently starting script that is still pending
+   * or already allowed does NOT revoke this running script's allowed verdict.
+   */
+  ridesNow(id: string): boolean {
+    if (this.unclassifiedCodeRan) return false
+    const rec = this.records.get(id)
+    return rec !== undefined && rec.state === 'allowed'
+  }
+}
+
+/**
+ * Official 2.1.328 (#571): Pauseable timer so the 10-minute Code Mode script
+ * deadline does NOT count time spent waiting on an interactive permission
+ * prompt (outside auto/bypass), a plan approval (`ExitPlanMode`), or a user
+ * question (`AskUserQuestion`).
+ */
+export type PausableCodeModeTimer = {
+  pause: () => void
+  resume: () => void
+  clear: () => void
+  isPaused: () => boolean
+  getRemainingMs: () => number
+}
+
+export function createPausableCodeModeTimer(
+  durationMs: number,
+  onTimeout: () => void,
+  now: () => number = Date.now,
+): PausableCodeModeTimer {
+  let remainingMs = Math.max(0, durationMs)
+  let startedAt = now()
+  let pauseDepth = 0
+  let cleared = false
+  let handle: ReturnType<typeof setTimeout> | undefined
+
+  const arm = () => {
+    if (cleared || pauseDepth > 0) return
+    startedAt = now()
+    handle = setTimeout(() => {
+      if (!cleared && pauseDepth === 0) {
+        remainingMs = 0
+        onTimeout()
+      }
+    }, remainingMs)
+    if (typeof handle.unref === 'function') {
+      handle.unref()
+    }
+  }
+
+  arm()
+
+  return {
+    pause() {
+      if (cleared) return
+      if (pauseDepth === 0) {
+        if (handle !== undefined) {
+          clearTimeout(handle)
+          handle = undefined
+        }
+        remainingMs = Math.max(0, remainingMs - (now() - startedAt))
+      }
+      pauseDepth++
+    },
+    resume() {
+      if (cleared || pauseDepth === 0) return
+      pauseDepth--
+      if (pauseDepth === 0) {
+        if (remainingMs <= 0) {
+          onTimeout()
+        } else {
+          arm()
+        }
+      }
+    },
+    clear() {
+      cleared = true
+      if (handle !== undefined) {
+        clearTimeout(handle)
+        handle = undefined
+      }
+    },
+    isPaused: () => pauseDepth > 0,
+    getRemainingMs: () =>
+      pauseDepth > 0 || cleared
+        ? remainingMs
+        : Math.max(0, remainingMs - (now() - startedAt)),
+  }
+}
+
+export function shouldPauseCodeModeTimerForTool(
+  toolName: string,
+  permissionMode?: string,
+): boolean {
+  if (toolName === 'AskUserQuestion' || toolName === 'ExitPlanMode') {
+    return true
+  }
+  return permissionMode !== 'auto' && permissionMode !== 'bypassPermissions'
+}
+
+/**
+ * Official 2.1.328 (#648): Removed the 750ms post-script pause in auto and
+ * bypass-permissions modes.
+ */
+export function getCodeModePostScriptPauseMs(permissionMode?: string): number {
+  if (permissionMode === 'auto' || permissionMode === 'bypassPermissions') {
+    return REPL_POST_SCRIPT_PAUSE_AUTO_MS
+  }
+  return 0
+}
+
+/**
+ * Official 2.1.328 (#573): Scripts run in the background in auto and
+ * bypass-permissions modes whenever Code Mode is active, including sessions
+ * resumed via the `claude --resume` picker.
+ */
+export function shouldRunCodeModeScriptInBackground(
+  permissionMode: string | undefined,
+  codeModeActive: boolean = isCodeModeEnabled(),
+): boolean {
+  return (
+    codeModeActive &&
+    (permissionMode === 'auto' || permissionMode === 'bypassPermissions')
+  )
+}
+
+/**
+ * Official 2.1.328 (#574): Preserve loaded skills, hook context, and
+ * permission-approval notes across all scripts in a multi-script reply when
+ * resuming a Code Mode session.
+ */
+export type CodeModeScriptSideEffects = {
+  toolUseId: string
+  loadedSkills?: string[]
+  hookContexts?: string[]
+  approvalNotes?: string[]
+}
+
+export function mergeCodeModeReplySideEffects(
+  scripts: readonly CodeModeScriptSideEffects[],
+): {
+  loadedSkills: string[]
+  hookContexts: string[]
+  approvalNotes: string[]
+} {
+  const skills = new Set<string>()
+  const contexts: string[] = []
+  const notes: string[] = []
+  for (const s of scripts) {
+    for (const sk of s.loadedSkills ?? []) skills.add(sk)
+    for (const ctx of s.hookContexts ?? []) {
+      if (ctx) contexts.push(ctx)
+    }
+    for (const note of s.approvalNotes ?? []) {
+      if (note) notes.push(note)
+    }
+  }
+  return {
+    loadedSkills: [...skills],
+    hookContexts: contexts,
+    approvalNotes: notes,
+  }
+}
+
+/**
+ * Official 2.1.328 (#575): Notice telling Claude that a Code Mode script was
+ * cut off when resuming from the picker or in an ask-for-permission mode.
+ */
+export function buildCodeModeInterruptedScriptNotice(opts?: {
+  toolUseId?: string
+  permissionMode?: string
+  fromPicker?: boolean
+}): string {
+  const idPart = opts?.toolUseId ? ` (${opts.toolUseId})` : ''
+  return `[Code Mode script${idPart} was cut off before it finished. Variables and side effects from that script may be incomplete; check state before continuing.]`
+}
+
+/**
+ * Official 2.1.328 (#576): Extract top-level declared variable names from a
+ * script and inject guards in subsequent scripts so referencing a variable
+ * that an earlier failed script never set throws instead of silently yielding
+ * `undefined`.
+ */
+// True column-0 top-level declarations only (no leading whitespace, so indented
+// block/function-local declarations are never mistaken for top-level bindings).
+const TOP_LEVEL_DECL_RE =
+  /^(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)(?![A-Za-z0-9_$])/gm
+
+const PLAIN_ASSIGN_RE = /(?:^|;)\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*=(?!=)/gm
+
+export function extractTopLevelDeclaredVars(code: string): string[] {
+  const stripped = stripJsCommentsAndStrings(code)
+  const vars = new Set<string>()
+  for (const match of stripped.matchAll(TOP_LEVEL_DECL_RE)) {
+    const name = match[1]
+    if (name) vars.add(name)
+  }
+  return [...vars]
+}
+
+export function extractAssignedVars(code: string): string[] {
+  const stripped = stripJsCommentsAndStrings(code)
+  const vars = new Set<string>()
+  for (const match of stripped.matchAll(PLAIN_ASSIGN_RE)) {
+    const name = match[1]
+    if (name) vars.add(name)
+  }
+  return [...vars]
+}
+
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+const REGEX_PRECEDING_KEYWORDS = new Set([
+  'return',
+  'case',
+  'throw',
+  'in',
+  'instanceof',
+  'typeof',
+  'void',
+  'delete',
+  'new',
+  'do',
+  'else',
+  'yield',
+  'await',
+  'of',
+])
+
+const PAREN_STATEMENT_KEYWORDS = new Set(['if', 'while', 'for', 'with'])
+
+function isPrecededByMemberDot(out: string, start: number): boolean {
+  let k = start - 1
+  while (k >= 0 && /\s/.test(out[k]!)) k--
+  return k >= 0 && out[k] === '.'
+}
+
+function canPrecedeRegexLiteral(out: string): boolean {
+  let j = out.length - 1
+  while (j >= 0 && /\s/.test(out[j]!)) j--
+  if (j < 0) return true
+  const prev = out[j]!
+  if (
+    (prev === '+' && out[j - 1] === '+') ||
+    (prev === '-' && out[j - 1] === '-')
+  ) {
+    return false
+  }
+  if ('([{,;?:!~+-*/%^&|=<>'.includes(prev)) {
+    return true
+  }
+  if (prev === ')') {
+    let depth = 1
+    let k = j - 1
+    while (k >= 0 && depth > 0) {
+      if (out[k] === ')') depth++
+      else if (out[k] === '(') depth--
+      k--
+    }
+    if (depth === 0) {
+      while (k >= 0 && /\s/.test(out[k]!)) k--
+      if (k >= 0 && /[A-Za-z0-9_$]/.test(out[k]!)) {
+        let start = k
+        while (start > 0 && /[A-Za-z0-9_$]/.test(out[start - 1]!)) start--
+        if (!isPrecededByMemberDot(out, start)) {
+          const word = out.slice(start, k + 1)
+          if (PAREN_STATEMENT_KEYWORDS.has(word)) return true
+        }
+      }
+    }
+    return false
+  }
+  if (/[A-Za-z0-9_$]/.test(prev)) {
+    let start = j
+    while (start > 0 && /[A-Za-z0-9_$]/.test(out[start - 1]!)) start--
+    if (isPrecededByMemberDot(out, start)) return false
+    const word = out.slice(start, j + 1)
+    return REGEX_PRECEDING_KEYWORDS.has(word)
+  }
+  return false
+}
+
+/**
+ * Strip JS comments, regex literals, and string/template text (preserving
+ * `${...}` interpolation expressions) so unset-var guard detection never fires
+ * on strings, regexes, or comments.
+ */
+function stripJsCommentsAndStrings(code: string): string {
+  let out = ''
+  const templateBraceDepths: number[] = []
+  let i = 0
+  const len = code.length
+  while (i < len) {
+    const ch = code[i]!
+    const next = code[i + 1]
+    // Line comment
+    if (ch === '/' && next === '/') {
+      i += 2
+      while (i < len && code[i] !== '\n') i++
+      out += ' '
+      continue
+    }
+    // Block comment
+    if (ch === '/' && next === '*') {
+      i += 2
+      while (i < len && !(code[i] === '*' && code[i + 1] === '/')) {
+        if (code[i] === '\n') out += '\n'
+        i++
+      }
+      i += 2
+      out += ' '
+      continue
+    }
+    // Regex literal (disambiguated from division via preceding token)
+    if (ch === '/' && canPrecedeRegexLiteral(out)) {
+      i++
+      let inCharClass = false
+      while (i < len) {
+        const rc = code[i]!
+        if (rc === '\\') {
+          i += 2
+          continue
+        }
+        if (rc === '\n' || rc === '\r') {
+          break
+        }
+        if (rc === '[') {
+          inCharClass = true
+          i++
+          continue
+        }
+        if (rc === ']') {
+          inCharClass = false
+          i++
+          continue
+        }
+        if (!inCharClass && rc === '/') {
+          i++
+          while (i < len && /[a-z]/i.test(code[i]!)) i++
+          break
+        }
+        i++
+      }
+      out += '""'
+      continue
+    }
+    // Single or double quoted string
+    if (ch === "'" || ch === '"') {
+      const quote = ch
+      i++
+      while (i < len) {
+        if (code[i] === '\\') {
+          i += 2
+          continue
+        }
+        if (code[i] === quote) {
+          i++
+          break
+        }
+        i++
+      }
+      out += '""'
+      continue
+    }
+    // Template literal start or resume after closing `}` of `${...}`
+    if (ch === '`') {
+      i++
+      out += ' '
+      while (i < len) {
+        if (code[i] === '\\') {
+          i += 2
+          continue
+        }
+        if (code[i] === '$' && code[i + 1] === '{') {
+          i += 2
+          templateBraceDepths.push(0)
+          out += '('
+          break
+        }
+        if (code[i] === '`') {
+          i++
+          out += '""'
+          break
+        }
+        if (code[i] === '\n') out += '\n'
+        i++
+      }
+      continue
+    }
+    if (templateBraceDepths.length > 0) {
+      if (ch === '{') {
+        templateBraceDepths[templateBraceDepths.length - 1]! += 1
+      } else if (ch === '}') {
+        const depth = templateBraceDepths[templateBraceDepths.length - 1]!
+        if (depth === 0) {
+          templateBraceDepths.pop()
+          i++
+          out += ')'
+          // Continue scanning the enclosing template literal
+          while (i < len) {
+            if (code[i] === '\\') {
+              i += 2
+              continue
+            }
+            if (code[i] === '$' && code[i + 1] === '{') {
+              i += 2
+              templateBraceDepths.push(0)
+              out += '('
+              break
+            }
+            if (code[i] === '`') {
+              i++
+              out += '""'
+              break
+            }
+            if (code[i] === '\n') out += '\n'
+            i++
+          }
+          continue
+        }
+        templateBraceDepths[templateBraceDepths.length - 1] = depth - 1
+      }
+    }
+    out += ch
+    i++
+  }
+  return out
+}
+
+const VALID_IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/
+
+function splitTopLevelCommas(inner: string): string[] {
+  const parts: string[] = []
+  let depthCurly = 0
+  let depthSquare = 0
+  let depthParen = 0
+  let start = 0
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i]!
+    if (c === '{') depthCurly++
+    else if (c === '}') depthCurly--
+    else if (c === '[') depthSquare++
+    else if (c === ']') depthSquare--
+    else if (c === '(') depthParen++
+    else if (c === ')') depthParen--
+    else if (
+      c === ',' &&
+      depthCurly === 0 &&
+      depthSquare === 0 &&
+      depthParen === 0
+    ) {
+      parts.push(inner.slice(start, i))
+      start = i + 1
+    }
+  }
+  parts.push(inner.slice(start))
+  return parts
+}
+
+function stripTopLevelDefaultRhs(segment: string): string {
+  let depthCurly = 0
+  let depthSquare = 0
+  let depthParen = 0
+  for (let i = 0; i < segment.length; i++) {
+    const c = segment[i]!
+    if (c === '{') depthCurly++
+    else if (c === '}') depthCurly--
+    else if (c === '[') depthSquare++
+    else if (c === ']') depthSquare--
+    else if (c === '(') depthParen++
+    else if (c === ')') depthParen--
+    else if (
+      c === '=' &&
+      depthCurly === 0 &&
+      depthSquare === 0 &&
+      depthParen === 0 &&
+      segment[i + 1] !== '=' &&
+      segment[i + 1] !== '>'
+    ) {
+      return segment.slice(0, i)
+    }
+  }
+  return segment
+}
+
+function findTopLevelColon(segment: string): number {
+  let depthCurly = 0
+  let depthSquare = 0
+  let depthParen = 0
+  for (let i = 0; i < segment.length; i++) {
+    const c = segment[i]!
+    if (c === '{') depthCurly++
+    else if (c === '}') depthCurly--
+    else if (c === '[') depthSquare++
+    else if (c === ']') depthSquare--
+    else if (c === '(') depthParen++
+    else if (c === ')') depthParen--
+    else if (
+      c === ':' &&
+      depthCurly === 0 &&
+      depthSquare === 0 &&
+      depthParen === 0
+    ) {
+      return i
+    }
+  }
+  return -1
+}
+
+function collectDestructuringBindings(
+  pattern: string,
+  isObject: boolean,
+  out: Set<string>,
+): void {
+  const trimmed = pattern.trim()
+  if (trimmed.length < 2) return
+  const inner = trimmed.slice(1, -1)
+  for (const rawPart of splitTopLevelCommas(inner)) {
+    let lhs = stripTopLevelDefaultRhs(rawPart).trim()
+    if (!lhs) continue
+    if (lhs.startsWith('...')) {
+      lhs = lhs.slice(3).trim()
+    }
+    if (isObject) {
+      const colonIdx = findTopLevelColon(lhs)
+      const target = colonIdx >= 0 ? lhs.slice(colonIdx + 1).trim() : lhs
+      if (target.startsWith('{') && target.endsWith('}')) {
+        collectDestructuringBindings(target, true, out)
+      } else if (target.startsWith('[') && target.endsWith(']')) {
+        collectDestructuringBindings(target, false, out)
+      } else if (VALID_IDENTIFIER_RE.test(target)) {
+        out.add(target)
+      }
+    } else if (lhs.startsWith('{') && lhs.endsWith('}')) {
+      collectDestructuringBindings(lhs, true, out)
+    } else if (lhs.startsWith('[') && lhs.endsWith(']')) {
+      collectDestructuringBindings(lhs, false, out)
+    } else if (VALID_IDENTIFIER_RE.test(lhs)) {
+      out.add(lhs)
+    }
+  }
+}
+
+function isBoundInDestructuring(stripped: string, name: string): boolean {
+  const declRe = /\b(?:const|let|var)\s*([{[])/g
+  let match: RegExpExecArray | null
+  while ((match = declRe.exec(stripped)) !== null) {
+    const openChar = match[1]!
+    const closeChar = openChar === '{' ? '}' : ']'
+    const startIdx = match.index + match[0].length - 1
+    let depth = 0
+    let endIdx = -1
+    for (let i = startIdx; i < stripped.length; i++) {
+      const c = stripped[i]!
+      if (c === openChar) depth++
+      else if (c === closeChar) {
+        depth--
+        if (depth === 0) {
+          endIdx = i
+          break
+        }
+      }
+    }
+    if (endIdx > startIdx) {
+      const bindings = new Set<string>()
+      collectDestructuringBindings(
+        stripped.slice(startIdx, endIdx + 1),
+        openChar === '{',
+        bindings,
+      )
+      if (bindings.has(name)) return true
+      declRe.lastIndex = endIdx + 1
+    }
+  }
+  return false
+}
+
+function isIdentifierShadowedOrBound(stripped: string, name: string): boolean {
+  const esc = escapeRegExp(name)
+  const idStart = '(?<![A-Za-z0-9_$])'
+  const idEnd = '(?![A-Za-z0-9_$])'
+  // Redeclared via const/let/var/function/class or destructuring
+  if (
+    new RegExp(`\\b(?:const|let|var|function|class)\\s+${esc}${idEnd}`).test(
+      stripped,
+    ) ||
+    isBoundInDestructuring(stripped, name)
+  ) {
+    return true
+  }
+  // Directly assigned at statement start
+  if (new RegExp(`^\\s*${esc}\\s*=(?!=)`, 'm').test(stripped)) {
+    return true
+  }
+  // Checked with typeof
+  if (new RegExp(`\\btypeof\\s+${esc}${idEnd}`).test(stripped)) {
+    return true
+  }
+  // Shadowed as arrow parameter (`x => ...` or `(..., x, ...) => ...`),
+  // regular function parameter, or catch parameter
+  if (
+    new RegExp(`(?<![.A-Za-z0-9_$])${esc}\\s*=>`).test(stripped) ||
+    new RegExp(`\\([^()]*${idStart}${esc}${idEnd}[^()]*\\)\\s*=>`).test(
+      stripped,
+    ) ||
+    new RegExp(
+      `\\bfunction\\b[^{]*\\([^()]*${idStart}${esc}${idEnd}[^()]*\\)`,
+    ).test(stripped) ||
+    new RegExp(`\\bcatch\\s*\\(\\s*${esc}${idEnd}`).test(stripped)
+  ) {
+    return true
+  }
+  return false
+}
+
+export function injectUnsetVarGuards(
+  code: string,
+  unsetVars: ReadonlySet<string>,
+): string {
+  if (unsetVars.size === 0) return code
+  const stripped = stripJsCommentsAndStrings(code)
+  const guards: string[] = []
+  for (const name of unsetVars) {
+    const esc = escapeRegExp(name)
+    if (isIdentifierShadowedOrBound(stripped, name)) continue
+    const referenced = new RegExp(`(?<![.\\w$])${esc}(?![\\w$:])`).test(
+      stripped,
+    )
+    if (referenced) {
+      guards.push(
+        `if (typeof ${name} === 'undefined') { throw new ReferenceError(${JSON.stringify(`Nothing ran: it reads a variable (${name}) that an earlier step never set`)}); }`,
+      )
+    }
+  }
+  return guards.length > 0 ? `${guards.join('\n')}\n${code}` : code
+}
+
+/**
+ * Official 2.1.328 (#580): An `@`-mentioned small file must still be attached
+ * in Code Mode even if a script previously read or wrote it.
+ */
+export function shouldAttachSmallMentionedFileInCodeMode(opts: {
+  isCodeMode: boolean
+  isSmallFile: boolean
+  previouslyTouchedByScript: boolean
+}): boolean {
+  if (!opts.isSmallFile) return false
+  if (opts.isCodeMode && opts.previouslyTouchedByScript) {
+    return true
+  }
+  return true
+}
+
+/**
+ * Official 2.1.328 (#582): Do not auto-start a Claude turn in Code Mode when
+ * Esc interrupted a script and was followed by a local slash command (e.g. `/model`).
+ */
+export function shouldAutoStartCodeModeTurnAfterCommand(opts: {
+  interruptedByEsc: boolean
+  commandName?: string
+  isLocalCommand?: boolean
+}): boolean {
+  if (
+    opts.interruptedByEsc &&
+    (opts.isLocalCommand || Boolean(opts.commandName))
+  ) {
+    return false
+  }
+  return !opts.interruptedByEsc
+}
+
+/**
+ * Official 2.1.328 (#649): Diff pending/connected MCP servers for Code Mode
+ * dynamic status notices without mutating the static cached system prompt.
+ */
+export function diffCodeModeMcpServerStatus(
+  prevConnected: ReadonlySet<string>,
+  currentClients: ReadonlyArray<{ name: string; type: string }>,
+): {
+  connected: Set<string>
+  pending: string[]
+  added: string[]
+  removed: string[]
+} {
+  const connected = new Set<string>()
+  const pending: string[] = []
+  for (const c of currentClients) {
+    if (c.type === 'connected') connected.add(c.name)
+    else if (c.type === 'pending') pending.push(c.name)
+  }
+  const added = [...connected].filter(n => !prevConnected.has(n)).sort()
+  const removed = [...prevConnected].filter(n => !connected.has(n)).sort()
+  return { connected, pending: pending.sort(), added, removed }
+}
+
+/**
+ * Official 2.1.328 (#650): Shorter token-efficient tool descriptions for Code Mode.
+ */
+export function buildConciseCodeModeToolDescription(
+  toolName: string,
+  fullDescription: string,
+  maxChars = 160,
+): string {
+  const firstParagraph = fullDescription.split(/\r?\n\r?\n/)[0]?.trim() ?? ''
+  const singleLine = firstParagraph.replace(/\s+/g, ' ')
+  if (!singleLine) return toolName
+  return singleLine.length > maxChars
+    ? `${singleLine.slice(0, maxChars - 1)}…`
+    : singleLine
+}
+
+/**
+ * Official 2.1.328 `Qi` (#652): Edit diagnostics for Code Mode —
+ * 1) No-op edits (`old_string === new_string`) return `{ changed: false, noOp: true }`
+ *    without throwing or stopping the script.
+ * 2) Multiple matches report all matching line numbers.
+ * 3) Failed edits find the closest matching window in the file and show the
+ *    first differing line (`yours:` vs `file:`) and whether only whitespace differs.
+ */
+const EDIT_CLOSEST_WIDTH = 160
+const EDIT_MAX_MATCH_LINES = 20
+
+function clipEditLine(line: string, offset = 0): string {
+  const slice = line.slice(offset)
+  const clipped =
+    slice.length > EDIT_CLOSEST_WIDTH
+      ? `${slice.slice(0, EDIT_CLOSEST_WIDTH)}…`
+      : slice
+  return JSON.stringify((offset > 0 ? '…' : '') + clipped)
+}
+
+function lineBigrams(line: string): Map<string, number> {
+  const t = line.trim().slice(0, 400)
+  const map = new Map<string, number>()
+  for (let i = 0; i + 1 < t.length; i++) {
+    const bg = t.slice(i, i + 2)
+    map.set(bg, (map.get(bg) ?? 0) + 1)
+  }
+  return map
+}
+
+function bigramOverlap(a: Map<string, number>, b: Map<string, number>): number {
+  let score = 0
+  for (const [k, v] of a) {
+    const bv = b.get(k)
+    if (bv !== undefined) score += Math.min(v, bv)
+  }
+  return score
+}
+
+export function findClosestEditMatchHint(
+  fileContent: string,
+  oldString: string,
+): string {
+  if (!oldString) return ''
+  const parts = fileContent.split(oldString)
+  if (parts.length - 1 > 1) {
+    const matches: number[] = []
+    let line = 1
+    const oldLines = oldString.split('\n').length - 1
+    for (
+      let i = 0;
+      i < parts.length - 1 && matches.length < EDIT_MAX_MATCH_LINES;
+      i++
+    ) {
+      line += parts[i]!.split('\n').length - 1 + (i > 0 ? oldLines : 0)
+      matches.push(line)
+    }
+    const extra = parts.length - 1 - matches.length
+    return `lines with a match: ${[...new Set(matches)].join(', ')}${extra > 0 ? `, and ${extra} more matches` : ''}`
+  }
+  if (parts.length - 1 === 1) return ''
+
+  const needleLines = oldString.replace(/\n$/, '').split('\n')
+  const fileLines = fileContent.replace(/\n$/, '').split('\n')
+  if (fileLines.length === 0) return ''
+
+  const needleBigrams = needleLines.slice(0, 40).map(lineBigrams)
+  const fileBigrams = fileLines.map(lineBigrams)
+  let bestStart = 0
+  let bestScore = -1
+  for (let start = 0; start < fileLines.length; start++) {
+    let score = 0
+    for (
+      let j = 0;
+      j < needleBigrams.length && start + j < fileLines.length;
+      j++
+    ) {
+      score += bigramOverlap(needleBigrams[j]!, fileBigrams[start + j]!)
+    }
+    if (score > bestScore) {
+      bestScore = score
+      bestStart = start
+    }
+  }
+
+  let diffIdx = needleLines.findIndex((nl, idx) => {
+    const fl = fileLines[bestStart + idx] ?? ''
+    return needleLines.length === 1
+      ? !fl.includes(nl)
+      : idx === 0
+        ? !fl.endsWith(nl)
+        : idx === needleLines.length - 1
+          ? !fl.startsWith(nl)
+          : fl !== nl
+  })
+  if (diffIdx === -1) diffIdx = needleLines.length - 1
+  const yours = needleLines[diffIdx] ?? ''
+  const actual = fileLines[bestStart + diffIdx]
+  let common = 0
+  while (common < yours.length && yours[common] === actual?.[common]) common++
+  const offset = Math.max(0, common - EDIT_CLOSEST_WIDTH / 2)
+  const whitespaceOnly =
+    actual !== undefined &&
+    yours.replace(/\s/g, '') === actual.replace(/\s/g, '')
+  return [
+    `the closest text differs at line ${bestStart + diffIdx + 1}${whitespaceOnly ? ', only in white space' : ''}`,
+    `  yours: ${clipEditLine(yours, offset)}`,
+    `  file:  ${actual === undefined ? '(end of file)' : clipEditLine(actual, offset)}`,
+  ].join('\n')
+}
+
+export function isNoOpCodeModeEdit(input: Record<string, unknown>): boolean {
+  return (
+    typeof input.old_string === 'string' &&
+    typeof input.new_string === 'string' &&
+    input.old_string === input.new_string
+  )
 }
 
 /**
@@ -227,6 +1144,16 @@ export type ExecuteCodeModeScriptOptions = {
   toolCallCap?: number
   signal?: AbortSignal
   shellKind?: 'bash' | 'powershell'
+  /** Official 2.1.328 #581: restrict exposed primitive helpers (e.g. omit write/edit for read-only subagents). */
+  allowedTools?: ReadonlySet<string>
+  /** Official 2.1.328 #576: top-level variables declared in earlier failed scripts that remained unset. */
+  unsetVars?: ReadonlySet<string>
+  /** Official 2.1.328 #651: live progress callback for commands and streaming output. */
+  onProgress?: (event: CodeModeProgressEvent) => void
+  /** Official 2.1.328 #571: permission mode used to decide whether tool waits pause the script clock. */
+  permissionMode?: string
+  /** Optional cache lookup for already-read file contents (used for Edit closest-match hints without prompting). */
+  getCachedFileContent?: (filePath: string) => string | undefined
 }
 
 const PRIMITIVE_SHORTHAND_MAP: ReadonlyArray<readonly [string, string]> = [
@@ -516,6 +1443,11 @@ export async function executeCodeModeScript(
     toolCallCap = REPL_TOOL_CALL_CAP,
     signal,
     shellKind = 'bash',
+    allowedTools,
+    unsetVars,
+    onProgress,
+    permissionMode,
+    getCachedFileContent,
   } = options
 
   noteReplContextCreated()
@@ -523,6 +1455,12 @@ export async function executeCodeModeScript(
   const clampedTimeout = Math.max(100, Math.min(timeoutMs, REPL_MAX_TIMEOUT_MS))
   const logs: string[] = []
   let toolCalls = 0
+  let nextCallSeq = 0
+  // Official 2.1.328 (#653): track in-flight tool calls so failures report
+  // which tool calls were still running when the script failed.
+  const inFlightCalls = new Map<number, string>()
+  const scriptReadCache = new Map<string, string>()
+  let timerRef: PausableCodeModeTimer | undefined
 
   const guardedCall = async (
     toolName: string,
@@ -531,12 +1469,94 @@ export async function executeCodeModeScript(
     if (signal?.aborted) {
       throw new Error('Code Mode script aborted')
     }
+    if (
+      allowedTools &&
+      !toolName.startsWith('mcp__') &&
+      !allowedTools.has(toolName)
+    ) {
+      throw new Error(`Tool not available in Code Mode: ${toolName}`)
+    }
     if (++toolCalls > toolCallCap) {
       throw new Error(
         `Code Mode tool call limit reached (${toolCallCap} calls)`,
       )
     }
-    return await invokeTool(toolName, input)
+    // Official 2.1.328 (#652): an edit that changes nothing no longer stops a script.
+    if (toolName === 'Edit' && isNoOpCodeModeEdit(input)) {
+      return {
+        filePath: typeof input.file_path === 'string' ? input.file_path : '',
+        changed: false,
+        noOp: true,
+      }
+    }
+    const callId = ++nextCallSeq
+    const callLabel =
+      (toolName === 'Bash' || toolName === 'PowerShell') &&
+      typeof input.command === 'string'
+        ? `${toolName}(${JSON.stringify(input.command.slice(0, 60))})`
+        : toolName
+    inFlightCalls.set(callId, callLabel)
+    // Official 2.1.328 (#571): pause the script timer while waiting on prompts
+    // outside auto/bypass mode, plan approvals, or questions.
+    const shouldPause = shouldPauseCodeModeTimerForTool(
+      toolName,
+      permissionMode,
+    )
+    if (shouldPause) timerRef?.pause()
+    try {
+      const result = await invokeTool(toolName, input)
+      if (toolName === 'Read' && typeof input.file_path === 'string') {
+        const readContent =
+          result &&
+          typeof result === 'object' &&
+          'file' in result &&
+          typeof (result as { file?: { content?: unknown } }).file?.content ===
+            'string'
+            ? (result as { file: { content: string } }).file.content
+            : result &&
+                typeof result === 'object' &&
+                'content' in result &&
+                typeof (result as { content?: unknown }).content === 'string'
+              ? (result as { content: string }).content
+              : undefined
+        if (readContent !== undefined) {
+          scriptReadCache.set(input.file_path, readContent)
+        }
+      } else if (
+        toolName === 'Write' &&
+        typeof input.file_path === 'string' &&
+        typeof input.content === 'string'
+      ) {
+        scriptReadCache.set(input.file_path, input.content)
+      }
+      return result
+    } catch (err) {
+      // Official 2.1.328 (#652): on failed Edit, attach closest-match hint only
+      // from already-cached readable content (never invoke Read, which could
+      // bypass allowedTools or trigger a Read permission prompt).
+      if (
+        toolName === 'Edit' &&
+        typeof input.file_path === 'string' &&
+        typeof input.old_string === 'string' &&
+        err instanceof Error &&
+        /not found|multiple|match/i.test(err.message) &&
+        (!allowedTools || allowedTools.has('Read'))
+      ) {
+        const content =
+          scriptReadCache.get(input.file_path) ??
+          getCachedFileContent?.(input.file_path)
+        if (content !== undefined) {
+          const hint = findClosestEditMatchHint(content, input.old_string)
+          if (hint) {
+            throw new Error(`${err.message}\n${hint}`)
+          }
+        }
+      }
+      throw err
+    } finally {
+      if (shouldPause) timerRef?.resume()
+      inFlightCalls.delete(callId)
+    }
   }
 
   // Official 2.1.326 #293: `$` shell helper exposed in Code Mode VM sandbox.
@@ -562,6 +1582,12 @@ export async function executeCodeModeScript(
             : `cd ${quotedCwd} && `) + cmd
       }
       const shellToolName = shellKind === 'powershell' ? 'PowerShell' : 'Bash'
+      // Official 2.1.328 (#651): surface the running command while it executes.
+      onProgress?.({
+        type: 'command_start',
+        command: cmd,
+        toolName: shellToolName,
+      })
       const rawRes = await guardedCall(shellToolName, {
         command: cmd,
         ...(typeof ms === 'number' ? { timeout: ms } : {}),
@@ -572,23 +1598,51 @@ export async function executeCodeModeScript(
           : {}
       const stdout = typeof rec.stdout === 'string' ? rec.stdout : ''
       const stderr = typeof rec.stderr === 'string' ? rec.stderr : ''
+      if (stdout) {
+        onProgress?.({
+          type: 'command_output',
+          command: cmd,
+          chunk: stdout,
+          stream: 'stdout',
+        })
+      }
+      if (stderr) {
+        onProgress?.({
+          type: 'command_output',
+          command: cmd,
+          chunk: stderr,
+          stream: 'stderr',
+        })
+      }
       const exitCode =
         typeof rec.exitCode === 'number'
           ? rec.exitCode
           : typeof rec.code === 'number'
             ? rec.code
             : 0
+      const outputWasCut =
+        rec.truncated === true ||
+        rec.middleCut === true ||
+        rec.spillFileCut === true ||
+        stdout.includes('characters truncated') ||
+        typeof rec.persistedOutputPath === 'string'
       const out = {
         stdout,
         stderr,
         exitCode,
+        ...(outputWasCut ? { truncated: true } : {}),
         text: () => stdout,
         lines: () => stdout.split('\n'),
         json: () => JSON.parse(stdout),
       }
       if (exitCode !== 0 && !nothrow) {
+        // Official 2.1.328 (#577): explicitly tell Code Mode scripts when a
+        // failing command's long output was cut/truncated.
+        const cutNotice = outputWasCut
+          ? '\nNote: the command failed, and its output was too long to keep whole, so stdout has a "characters truncated" line where the middle was cut out.'
+          : ''
         const err = new Error(
-          `Command failed with exit code ${exitCode}${stderr ? `:\n${stderr}` : ''}`,
+          `Command failed with exit code ${exitCode}${stderr ? `:\n${stderr}` : ''}${cutNotice}`,
         )
         err.name = 'ShellError'
         throw err
@@ -696,13 +1750,27 @@ export async function executeCodeModeScript(
     isFinite,
   }
 
+  // Official 2.1.328 (#581): Only expose primitive shorthands (especially
+  // `write()` and `edit()`) when the current agent/subagent actually has those
+  // tools available.
+  const exposedTools: string[] = []
   for (const [fnName, toolName] of PRIMITIVE_SHORTHAND_MAP) {
+    if (allowedTools && !allowedTools.has(toolName)) {
+      continue
+    }
+    exposedTools.push(toolName)
     sandbox[fnName] = (input: Record<string, unknown> = {}) =>
       guardedCall(toolName, input)
   }
+  sandbox.tools = {
+    list: () => (allowedTools ? [...allowedTools] : [...exposedTools]),
+  }
 
   const context = vm.createContext(sandbox)
-  const wrappedSource = `(async () => {\n${code}\n})()`
+  // Official 2.1.328 (#576): guard references to top-level variables declared
+  // by an earlier failed script that were never set.
+  const guardedCode = unsetVars ? injectUnsetVarGuards(code, unsetVars) : code
+  const wrappedSource = `(async () => {\n${guardedCode}\n})()`
 
   try {
     const script = new vm.Script(wrappedSource, {
@@ -714,19 +1782,15 @@ export async function executeCodeModeScript(
     // Suppress unhandledRejection if runPromise rejects after timeout/abort wins the race.
     void runPromise.catch(() => {})
 
-    let timeoutHandle: ReturnType<typeof setTimeout> | undefined
     let onAbort: (() => void) | undefined
     const raced = await Promise.race([
       runPromise,
       new Promise<never>((_resolve, reject) => {
-        timeoutHandle = setTimeout(() => {
+        timerRef = createPausableCodeModeTimer(clampedTimeout, () => {
           reject(
             new Error(`Code Mode script timed out after ${clampedTimeout}ms`),
           )
-        }, clampedTimeout)
-        if (typeof timeoutHandle.unref === 'function') {
-          timeoutHandle.unref()
-        }
+        })
       }),
       ...(signal
         ? [
@@ -741,7 +1805,8 @@ export async function executeCodeModeScript(
           ]
         : []),
     ]).finally(() => {
-      if (timeoutHandle !== undefined) clearTimeout(timeoutHandle)
+      timerRef?.clear()
+      timerRef = undefined
       if (onAbort !== undefined) {
         signal?.removeEventListener('abort', onAbort)
       }
@@ -758,11 +1823,146 @@ export async function executeCodeModeScript(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     const prefix = logs.length > 0 ? `${logs.join('\n')}\n` : ''
+    // Official 2.1.328 (#653): report which tool calls were still running when
+    // the script failed.
+    const stillRunning = [...inFlightCalls.values()]
+    const runningSuffix =
+      stillRunning.length > 0
+        ? `\nStill running when script failed: ${stillRunning.join(', ')}`
+        : ''
+    // Official 2.1.328 (#576): record declared top-level variables that may
+    // have remained unset so subsequent scripts don't silently read `undefined`.
+    const unsetVariables = extractTopLevelDeclaredVars(code)
     return {
-      result: `${prefix}Error: ${message}`,
+      result: `${prefix}Error: ${message}${runningSuffix}`,
       tool_calls: toolCalls,
+      ...(stillRunning.length > 0 ? { inFlightAtFailure: stillRunning } : {}),
+      ...(unsetVariables.length > 0 ? { unsetVariables } : {}),
     }
   }
+}
+
+const CODE_MODE_VISIBLE_TOOL_NAMES = new Set([
+  'REPL',
+  'Eval',
+  'StructuredOutput',
+])
+
+const codeModeAutoVerdictTracker = new CodeModeAutoVerdictTracker()
+const sessionUnsetVarsByKey = new Map<string, Set<string>>()
+let codeModeScriptSeq = 0
+
+export function getCodeModeAutoVerdictTracker(): CodeModeAutoVerdictTracker {
+  return codeModeAutoVerdictTracker
+}
+
+export function resetCodeModeRuntimeStateForTests(): void {
+  sessionUnsetVarsByKey.clear()
+  codeModeScriptSeq = 0
+}
+
+function getDeniedToolNamesFromPermissionContext(
+  toolPermissionContext: unknown,
+): Set<string> {
+  const denied = new Set<string>()
+  if (!toolPermissionContext || typeof toolPermissionContext !== 'object') {
+    return denied
+  }
+  const alwaysDenyRules = (
+    toolPermissionContext as {
+      alwaysDenyRules?: Record<string, readonly string[] | undefined>
+    }
+  ).alwaysDenyRules
+  if (!alwaysDenyRules || typeof alwaysDenyRules !== 'object') {
+    return denied
+  }
+  for (const rules of Object.values(alwaysDenyRules)) {
+    if (!Array.isArray(rules)) continue
+    for (const rule of rules) {
+      if (typeof rule !== 'string') continue
+      const trimmed = rule.trim()
+      if (trimmed.length > 0 && !trimmed.includes('(')) {
+        denied.add(trimmed)
+      }
+    }
+  }
+  return denied
+}
+
+function resolveCodeModeEffectiveTools(
+  baseReplToolName: string,
+  resolveAvailableTools: () => readonly Tool[],
+  context: ToolUseContext,
+): Tool[] {
+  const appState = context.getAppState?.()
+  const deniedToolNames = getDeniedToolNamesFromPermissionContext(
+    appState?.toolPermissionContext,
+  )
+  const contextTools = context.options?.tools
+  const liveMcpTools = appState?.mcp?.tools ?? []
+  const hasExplicitPrimitiveTools =
+    Array.isArray(contextTools) &&
+    contextTools.some(
+      t =>
+        !CODE_MODE_VISIBLE_TOOL_NAMES.has(t.name) &&
+        t.name !== baseReplToolName,
+    )
+
+  let rawTools: readonly Tool[]
+  if (context.agentId !== undefined) {
+    if (hasExplicitPrimitiveTools) {
+      // Restricted/read-only subagent with an explicit tool pool: never union
+      // `resolveAvailableTools()` (which always includes Write/Edit).
+      rawTools = contextTools
+    } else {
+      const agentCtx = getAgentContext()
+      const subagentName =
+        agentCtx?.agentType === 'subagent' ? agentCtx.subagentName : undefined
+      const activeAgents = context.options?.agentDefinitions?.activeAgents
+      const agentDef =
+        subagentName && Array.isArray(activeAgents)
+          ? activeAgents.find(a => a.agentType === subagentName)
+          : undefined
+      if (agentDef) {
+        const disallowed = new Set(
+          (agentDef.disallowedTools ?? []).map(spec => spec.split('(')[0]!),
+        )
+        const allowList =
+          agentDef.tools &&
+          !(agentDef.tools.length === 1 && agentDef.tools[0] === '*')
+            ? new Set(agentDef.tools)
+            : undefined
+        rawTools = resolveAvailableTools().filter(t => {
+          if (disallowed.has(t.name)) return false
+          if (allowList && !allowList.has(t.name)) return false
+          return true
+        })
+      } else if (Array.isArray(contextTools)) {
+        rawTools = contextTools
+      } else {
+        rawTools = []
+      }
+    }
+  } else if (hasExplicitPrimitiveTools) {
+    // Explicit restricted tool list on main thread (e.g. `--tools Read,Grep`)
+    rawTools = [...contextTools, ...liveMcpTools]
+  } else {
+    // Main thread with Code Mode hiding primitives from `context.options.tools`
+    rawTools = [
+      ...resolveAvailableTools(),
+      ...(contextTools ?? []),
+      ...liveMcpTools,
+    ]
+  }
+
+  const seen = new Set<string>()
+  const deduped: Tool[] = []
+  for (const tool of rawTools) {
+    if (deniedToolNames.has(tool.name) || seen.has(tool.name)) continue
+    seen.add(tool.name)
+    deduped.push(tool)
+  }
+  return deduped
 }
 
 /**
@@ -774,13 +1974,50 @@ export function wrapReplToolForCodeMode(
   baseReplTool: Tool,
   resolveAvailableTools: () => readonly Tool[],
 ): Tool {
+  let prevConnectedMcpServers = new Set<string>()
+
   return {
     ...baseReplTool,
+    async prompt(options) {
+      const basePrompt = await baseReplTool.prompt(options)
+      if (!isCodeModeEnabled()) {
+        return basePrompt
+      }
+      const available = resolveAvailableTools().filter(
+        t => t.name !== baseReplTool.name,
+      )
+      const conciseLines = await Promise.all(
+        available.map(async t => {
+          const rawDesc =
+            typeof t.description === 'function'
+              ? await t.description({} as never, {
+                  isNonInteractiveSession: false,
+                  toolPermissionContext: {
+                    mode: 'default',
+                    additionalWorkingDirectories: new Map(),
+                    alwaysAllowRules: {},
+                    alwaysDenyRules: {},
+                    alwaysAskRules: {},
+                    isBypassPermissionsModeAvailable: false,
+                  },
+                  tools: available,
+                })
+              : ''
+          return `- ${t.name}: ${buildConciseCodeModeToolDescription(t.name, rawDesc)}`
+        }),
+      )
+      const toolsBlock =
+        conciseLines.length > 0
+          ? `\n\nAvailable Code Mode tools:\n${conciseLines.join('\n')}`
+          : ''
+      return `${basePrompt}${toolsBlock}\n\n${CODE_MODE_STATIC_MCP_GUIDANCE}`
+    },
     async call(
       input: { code: string },
       context: ToolUseContext,
       canUseTool: CanUseToolFn,
       parentMessage: AssistantMessage,
+      onProgress?: Parameters<Tool['call']>[4],
     ) {
       if (!isCodeModeEnabled()) {
         return await baseReplTool.call(
@@ -788,138 +2025,746 @@ export function wrapReplToolForCodeMode(
           context,
           canUseTool,
           parentMessage,
+          onProgress,
         )
       }
 
       const collectedFeedback: string[] = []
       let activeCwd = getCwd()
+      const currentPermissionMode =
+        context.getAppState?.()?.toolPermissionContext?.mode
+      const scriptId = context.toolUseId ?? `repl-${++codeModeScriptSeq}`
+      const unsetKey = context.agentId ?? 'main'
+      const priorUnsetVars = sessionUnsetVarsByKey.get(unsetKey)
 
-      const execution = await executeCodeModeScript({
-        code: input.code,
-        signal: context.abortController.signal,
-        invokeTool: async (toolName, rawInput) => {
-          const allTools = [
-            ...resolveAvailableTools(),
-            ...(context.options?.tools ?? []),
-          ]
-          const target = allTools.find(
-            t => t.name === toolName && t.name !== baseReplTool.name,
-          )
-          if (!target) {
-            throw new Error(`Tool not available in Code Mode: ${toolName}`)
+      // Official 2.1.327 (#386): register per-script auto-mode verdict so
+      // concurrent auto-allowed scripts do not revoke one another's verdict.
+      codeModeAutoVerdictTracker.registerScript(scriptId)
+      if (
+        currentPermissionMode === 'auto' ||
+        currentPermissionMode === 'bypassPermissions'
+      ) {
+        codeModeAutoVerdictTracker.markAllowed(scriptId)
+      }
+
+      // Official 2.1.328 (#581): compute the tool names allowed for this
+      // session/subagent without unconditionally unioning Write/Edit into
+      // restricted or read-only subagents.
+      const initialTools = resolveCodeModeEffectiveTools(
+        baseReplTool.name,
+        resolveAvailableTools,
+        context,
+      )
+      const allowedToolNames =
+        initialTools.length > 0 ||
+        context.agentId !== undefined ||
+        Array.isArray(context.options?.tools)
+          ? new Set(initialTools.map(t => t.name))
+          : undefined
+
+      let scriptHookHalted = false
+      let scriptHookStopReason: string | undefined
+      let innerCallSeq = 0
+      const CODE_MODE_HOOK_HALT_REFUSAL =
+        "This tool call did not run. A hook returned continue: false for another tool call from the same piece of code, so every further tool call from it is refused. The hook's reason is sent with that code's result."
+      // Official 2.1.328 (@325273887): inner hook feedback attachment types
+      // surfaced on the Code Mode script result via ToolResult.newMessages.
+      const CODE_MODE_HOOK_FEEDBACK_TYPES = new Set([
+        'hook_blocking_error',
+        'hook_additional_context',
+        'hook_stopped_continuation',
+        'hook_system_message',
+      ])
+      const collectedHookMessages: AttachmentMessage[] = []
+      const extractHookAttachmentMessage = (
+        entry: unknown,
+      ): AttachmentMessage | undefined => {
+        if (!entry || typeof entry !== 'object') return undefined
+        const obj = entry as { type?: string; message?: unknown }
+        if (obj.type === 'attachment' && 'attachment' in obj) {
+          return obj as AttachmentMessage
+        }
+        if (
+          obj.message &&
+          typeof obj.message === 'object' &&
+          (obj.message as { type?: string }).type === 'attachment' &&
+          'attachment' in (obj.message as object)
+        ) {
+          return obj.message as AttachmentMessage
+        }
+        return undefined
+      }
+      const recordHookFeedbackMessage = (
+        msg: AttachmentMessage | undefined,
+      ): void => {
+        if (!msg || msg.type !== 'attachment') return
+        const att = msg.attachment as {
+          type?: string
+          message?: string
+        }
+        if (!att?.type || !CODE_MODE_HOOK_FEEDBACK_TYPES.has(att.type)) return
+        if (att.type === 'hook_stopped_continuation') {
+          if (scriptHookHalted && scriptHookStopReason !== undefined) {
+            return
           }
-          // Official 2.1.325 #2314: always read live cwd (follows EnterWorktree)
-          // and expand `~` / relative paths against it before schema validation.
-          activeCwd = getCwd() || activeCwd
-          const normalizedInput = normalizeCodeModeToolInput(
-            toolName,
-            rawInput,
-            activeCwd,
-          )
-          const parsed = target.inputSchema.safeParse(normalizedInput)
-          if (!parsed.success) {
-            throw new Error(
-              `Invalid input for ${toolName}: ${parsed.error.message}`,
+          scriptHookHalted = true
+          if (typeof att.message === 'string' && att.message.length > 0) {
+            scriptHookStopReason = att.message
+          }
+          if (
+            !collectedHookMessages.some(
+              m => m.attachment.type === 'hook_stopped_continuation',
             )
+          ) {
+            collectedHookMessages.push(msg)
           }
-          // Official 2.1.326 #232: run tool.validateInput before canUseTool,
-          // check prefixed shell commands for dangerousRemoval circuit breakers,
-          // and suspend sandbox auto-allow on inner Code Mode calls so more
-          // sandboxed commands go through normal permission checks / ask / refuse.
-          if (typeof target.validateInput === 'function') {
-            const validation = await target.validateInput(
-              parsed.data as never,
+          return
+        }
+        collectedHookMessages.push(msg)
+      }
+
+      let execution: CodeModeExecutionResult
+      try {
+        execution = await executeCodeModeScript({
+          code: input.code,
+          signal: context.abortController.signal,
+          allowedTools: allowedToolNames,
+          unsetVars: priorUnsetVars,
+          permissionMode: currentPermissionMode,
+          getCachedFileContent:
+            !allowedToolNames || allowedToolNames.has('Read')
+              ? filePath => {
+                  const normalized = normalizeCodeModeToolInput(
+                    'Read',
+                    { file_path: filePath },
+                    activeCwd,
+                  )
+                  const resolvedPath =
+                    typeof normalized.file_path === 'string'
+                      ? normalized.file_path
+                      : filePath
+                  const entry =
+                    context.readFileState?.get(resolvedPath) ??
+                    context.readFileState?.get(filePath)
+                  return typeof entry?.content === 'string' &&
+                    entry.content.length > 0
+                    ? entry.content
+                    : undefined
+                }
+              : undefined,
+          onProgress: onProgress
+            ? event => {
+                onProgress({
+                  toolUseID: context.toolUseId ?? 'repl',
+                  data: { type: 'code_mode_progress', event } as never,
+                })
+              }
+            : undefined,
+          invokeTool: async (toolName, rawInput) => {
+            if (scriptHookHalted) {
+              throw new Error(CODE_MODE_HOOK_HALT_REFUSAL)
+            }
+            // Official 2.1.328 (#572 & #581): re-resolve live MCP tools on main
+            // thread while continuing to enforce restricted/subagent tool pools.
+            const allTools = resolveCodeModeEffectiveTools(
+              baseReplTool.name,
+              resolveAvailableTools,
               context,
             )
-            if (validation && validation.result === false) {
+            const target = allTools.find(
+              t => t.name === toolName && t.name !== baseReplTool.name,
+            )
+            if (!target) {
+              throw new Error(`Tool not available in Code Mode: ${toolName}`)
+            }
+            // Official 2.1.325 #2314: always read live cwd (follows EnterWorktree)
+            // and expand `~` / relative paths against it before schema validation.
+            activeCwd = getCwd() || activeCwd
+            const normalizedInput = normalizeCodeModeToolInput(
+              toolName,
+              rawInput,
+              activeCwd,
+            )
+            const parsed = target.inputSchema.safeParse(normalizedInput)
+            if (!parsed.success) {
               throw new Error(
-                validation.message ?? `Invalid input for ${toolName}`,
+                `Invalid input for ${toolName}: ${parsed.error.message}`,
               )
             }
-          }
-          if (toolName === 'Bash' || toolName === 'PowerShell') {
-            const prefixedRefusal = await checkPrefixedCodeModeShellCommand(
-              target,
-              parsed.data as Record<string, unknown>,
-              context,
-            )
-            if (prefixedRefusal !== undefined) {
-              throw new Error(prefixedRefusal)
+            // Official 2.1.326 #232: run tool.validateInput before canUseTool,
+            // check prefixed shell commands for dangerousRemoval circuit breakers,
+            // and suspend sandbox auto-allow on inner Code Mode calls so more
+            // sandboxed commands go through normal permission checks / ask / refuse.
+            if (typeof target.validateInput === 'function') {
+              const validation = await target.validateInput(
+                parsed.data as never,
+                context,
+              )
+              if (validation && validation.result === false) {
+                throw new Error(
+                  validation.message ?? `Invalid input for ${toolName}`,
+                )
+              }
             }
-          }
-          const innerPermissionContext: ToolUseContext = {
-            ...context,
-            permissionLayers: [
-              ...(context.permissionLayers ?? []),
-              {
-                kind: 'sandbox_auto_allow_suspended' as never,
-                allowOnly: true,
-              } as never,
-            ],
-          }
-          const permission = await canUseTool(
-            target,
-            parsed.data as Record<string, unknown>,
-            innerPermissionContext,
-            parentMessage,
-            `${context.toolUseId ?? 'repl'}:${toolName}`,
-          )
-          if (permission.behavior !== 'allow') {
-            throw new Error(
-              permission.message ?? `Permission denied for ${toolName}`,
-            )
-          }
-          const finalInput = normalizeCodeModeToolInput(
-            toolName,
-            (permission.updatedInput as Record<string, unknown> | undefined) ??
-              (parsed.data as Record<string, unknown>),
-            activeCwd,
-          )
-          let out: { data: unknown }
-          try {
-            out = await target.call(
-              finalInput as never,
-              context,
+            if (toolName === 'Bash' || toolName === 'PowerShell') {
+              const prefixedRefusal = await checkPrefixedCodeModeShellCommand(
+                target,
+                parsed.data as Record<string, unknown>,
+                context,
+              )
+              if (prefixedRefusal !== undefined) {
+                throw new Error(prefixedRefusal)
+              }
+            }
+
+            const innerToolUseId = `${context.toolUseId ?? 'repl'}:${toolName}:${++innerCallSeq}`
+            const defaultPermissionContext = {
+              mode: 'default' as const,
+              additionalWorkingDirectories: new Map(),
+              alwaysAllowRules: {},
+              alwaysDenyRules: {},
+              alwaysAskRules: {},
+              isBypassPermissionsModeAvailable: false,
+            }
+            const safeGetAppState: ToolUseContext['getAppState'] =
+              typeof context.getAppState === 'function'
+                ? () => {
+                    const st = context.getAppState()
+                    if (st?.toolPermissionContext && st?.sessionHooks) return st
+                    return {
+                      ...st,
+                      ...(st?.toolPermissionContext
+                        ? {}
+                        : { toolPermissionContext: defaultPermissionContext }),
+                      ...(st?.sessionHooks ? {} : { sessionHooks: new Map() }),
+                    }
+                  }
+                : () =>
+                    ({
+                      toolPermissionContext: defaultPermissionContext,
+                      sessionHooks: new Map(),
+                    }) as ReturnType<ToolUseContext['getAppState']>
+
+            const innerHookContext: ToolUseContext = {
+              ...context,
+              toolUseId: innerToolUseId,
+              options: context.options ?? ({} as ToolUseContext['options']),
+              getAppState: safeGetAppState,
+            }
+            const hooksActive =
+              innerHookContext.options.settingsHooksOff !== true &&
+              innerHookContext.options.bareFork !== true
+            const messageId = parentMessage?.message?.id ?? ''
+            const requestId = parentMessage?.requestId
+
+            let currentInput = parsed.data as Record<string, unknown>
+            let managedPrePassRan = false
+            let hookPermissionResult: PermissionResult | undefined
+            let shouldPreventContinuation = false
+            let stopReason: string | undefined
+
+            // Lazy-load hook & permission modules to avoid static import cycles
+            // (hooks.ts -> settings/tools -> codeMode/executor.ts).
+            const [
+              hooksMod,
+              toolHooksMod,
+              managedPassMod,
+              functionHooksHopMod,
+              mcpUtilsMod,
+            ] = await Promise.all([
+              import('../../utils/hooks.js'),
+              import('../tools/toolHooks.js'),
+              import('../../utils/hooks/toolCallManagedPass.js'),
+              import('../../utils/plugins/functionHooksHop.js'),
+              import('../mcp/utils.js'),
+            ])
+            const { executePreToolHooks } = hooksMod
+            const {
+              collectManagedOnlyPostToolUse,
+              resolveHookPermissionDecision,
+              runPostToolUseFailureHooks,
+              runPostToolUseHooks,
+              runPreToolUseHooks,
+            } = toolHooksMod
+            const { shouldPreserveManagedToolHookPass } = managedPassMod
+            const { pinValue } = functionHooksHopMod
+            const { isMcpTool } = mcpUtilsMod
+
+            // Official 2.1.328 (@325454468 / @325274402): wire full PreToolUse
+            // hooks (including managed pre-pass, updatedInput, and continue:false
+            // halting subsequent inner calls in the script) before permission/call.
+            if (hooksActive) {
+              const managedMode = safeGetAppState().toolPermissionContext.mode
+              const managedResult: ManagedPreToolPassResult = {}
+              const managedReplayYields: unknown[] = []
+              for await (const item of executePreToolHooks(
+                target.name,
+                innerToolUseId,
+                currentInput,
+                innerHookContext,
+                managedMode,
+                innerHookContext.abortController.signal,
+                undefined,
+                undefined,
+                target.getToolUseSummary?.(currentInput),
+                { managedHooksOnly: true },
+              )) {
+                if (item.preventContinuation) {
+                  const reason =
+                    item.stopReason || 'Execution stopped by PreToolUse hook'
+                  scriptHookHalted = true
+                  if (!innerHookContext.abortController.signal.aborted) {
+                    recordHookFeedbackMessage(
+                      createAttachmentMessage({
+                        type: 'hook_stopped_continuation',
+                        message: reason,
+                        hookName: `PreToolUse:${target.name}`,
+                        toolUseID: innerToolUseId,
+                        hookEvent: 'PreToolUse',
+                      }),
+                    )
+                  }
+                  throw new Error(reason)
+                }
+                if (item.blockingError) {
+                  const msg =
+                    item.blockingError.blockingError ||
+                    `PreToolUse hook blocked ${toolName}`
+                  managedResult.deny = msg
+                  throw new Error(msg)
+                }
+                if (item.permissionBehavior === 'deny') {
+                  const msg =
+                    item.hookPermissionDecisionReason ||
+                    `PreToolUse hook denied ${toolName}`
+                  managedResult.deny = msg
+                  throw new Error(msg)
+                }
+                if (item.permissionBehavior === 'ask') {
+                  managedResult.ask =
+                    item.hookPermissionDecisionReason ||
+                    `PreToolUse hook requires confirmation for ${toolName}`
+                } else if (item.permissionBehavior === 'allow') {
+                  managedResult.allow = true
+                }
+                if (item.updatedInput !== undefined) {
+                  const parsedUpdated = target.inputSchema.safeParse(
+                    item.updatedInput,
+                  )
+                  const remainingIssues = parsedUpdated.success
+                    ? []
+                    : parsedUpdated.error.issues.filter(
+                        issue => issue.code !== 'unrecognized_keys',
+                      )
+                  if (!parsedUpdated.success && remainingIssues.length > 0) {
+                    throw new Error(
+                      `PreToolUse hook for ${toolName} returned updatedInput that failed schema validation`,
+                    )
+                  }
+                  currentInput = normalizeCodeModeToolInput(
+                    toolName,
+                    item.updatedInput,
+                    activeCwd,
+                  )
+                  managedResult.updatedInput = currentInput
+                }
+                if (item.additionalContexts?.length) {
+                  managedResult.additionalContext = [
+                    ...(managedResult.additionalContext ?? []),
+                    ...item.additionalContexts,
+                  ]
+                }
+                const {
+                  permissionBehavior,
+                  hookPermissionDecisionReason: _reason,
+                  blockingError: _blocking,
+                  updatedInput: _input,
+                  additionalContexts: _contexts,
+                  ...rest
+                } = item as Record<string, unknown>
+                if (permissionBehavior === 'defer') {
+                  managedReplayYields.push({
+                    permissionBehavior,
+                    hookSource: rest.hookSource,
+                  })
+                }
+                if (Object.keys(rest).some(key => key !== 'hookSource')) {
+                  managedReplayYields.push(rest)
+                }
+              }
+              const managedPass: ToolCallManagedPass = {
+                toolUseId: innerToolUseId,
+                input: currentInput,
+                inputKey: () => pinValue(currentInput),
+                pass: { result: managedResult, yields: managedReplayYields },
+              }
+              innerHookContext.managedPass = managedPass
+              managedPrePassRan = true
+
+              for await (const hookRes of runPreToolUseHooks(
+                innerHookContext,
+                target,
+                currentInput,
+                innerToolUseId,
+                messageId,
+                requestId,
+                undefined,
+                undefined,
+              )) {
+                switch (hookRes.type) {
+                  case 'message':
+                    recordHookFeedbackMessage(
+                      extractHookAttachmentMessage(hookRes.message),
+                    )
+                    break
+                  case 'additionalContext':
+                    recordHookFeedbackMessage(
+                      extractHookAttachmentMessage(hookRes.message),
+                    )
+                    break
+                  case 'hookPermissionResult':
+                    if (
+                      hookPermissionResult?.behavior !== 'deny' ||
+                      hookRes.hookPermissionResult.behavior === 'deny'
+                    ) {
+                      hookPermissionResult = hookRes.hookPermissionResult
+                    }
+                    break
+                  case 'hookUpdatedInput':
+                    currentInput = normalizeCodeModeToolInput(
+                      toolName,
+                      hookRes.updatedInput,
+                      activeCwd,
+                    )
+                    break
+                  case 'preventContinuation':
+                    if (hookRes.shouldPreventContinuation) {
+                      shouldPreventContinuation = true
+                      scriptHookHalted = true
+                    }
+                    break
+                  case 'stopReason':
+                    stopReason = hookRes.stopReason
+                    break
+                  case 'stop': {
+                    const reason =
+                      hookRes.stopReason ??
+                      stopReason ??
+                      'Execution stopped by PreToolUse hook'
+                    if (shouldPreventContinuation || hookRes.stopReason) {
+                      scriptHookHalted = true
+                      if (!innerHookContext.abortController.signal.aborted) {
+                        recordHookFeedbackMessage(
+                          createAttachmentMessage({
+                            type: 'hook_stopped_continuation',
+                            message: reason,
+                            hookName: `PreToolUse:${target.name}`,
+                            toolUseID: innerToolUseId,
+                            hookEvent: 'PreToolUse',
+                          }),
+                        )
+                      }
+                    }
+                    throw new Error(reason)
+                  }
+                  case 'defer':
+                    throw new Error(
+                      `PreToolUse hook ${hookRes.hookName} returned permissionDecision=defer, which is not supported inside Code Mode`,
+                    )
+                }
+              }
+              if (shouldPreventContinuation) {
+                const reason =
+                  stopReason ?? 'Execution stopped by PreToolUse hook'
+                scriptHookHalted = true
+                if (!innerHookContext.abortController.signal.aborted) {
+                  recordHookFeedbackMessage(
+                    createAttachmentMessage({
+                      type: 'hook_stopped_continuation',
+                      message: reason,
+                      hookName: `PreToolUse:${target.name}`,
+                      toolUseID: innerToolUseId,
+                      hookEvent: 'PreToolUse',
+                    }),
+                  )
+                }
+                throw new Error(reason)
+              }
+            }
+
+            const ridesAutoVerdict =
+              codeModeAutoVerdictTracker.ridesNow(scriptId)
+            const innerPermissionContext: ToolUseContext = {
+              ...innerHookContext,
+              permissionLayers: [
+                ...(context.permissionLayers ?? []),
+                {
+                  kind: 'sandbox_auto_allow_suspended' as never,
+                  allowOnly: true,
+                  ridesAutoVerdict,
+                } as never,
+              ],
+            }
+            const resolved = await resolveHookPermissionDecision(
+              hookPermissionResult,
+              target,
+              currentInput,
+              innerPermissionContext,
               canUseTool,
               parentMessage,
+              innerToolUseId,
             )
-          } catch (callErr) {
-            // Official 2.1.325 #2314: sync expired MCP server auth to /mcp.
-            syncExpiredMcpAuthInCodeMode(toolName, callErr, context.setAppState)
-            throw callErr
-          }
-          // Official 2.1.325 #2314: follow newly entered worktree immediately.
-          const enteredWorktree = extractEnteredWorktreePath(toolName, out.data)
-          if (enteredWorktree) {
-            activeCwd = enteredWorktree
-            setCwdState(enteredWorktree)
-          }
-          // Official 2.1.325 #2315: forward words typed with Yes at permission
-          // dialog or plan approval back to Claude.
-          const feedback = extractApprovalUserFeedback(permission, out.data)
-          if (feedback) {
-            collectedFeedback.push(feedback)
-          }
-          return out.data
-        },
-      })
-
-      if (collectedFeedback.length > 0) {
-        const feedbackBlock = collectedFeedback
-          .map(f => `[User feedback]: ${f}`)
-          .join('\n')
-        return {
-          data: {
-            ...execution,
-            result: execution.result
-              ? `${execution.result}\n\n${feedbackBlock}`
-              : feedbackBlock,
-            userFeedback: collectedFeedback,
+            const permission = resolved.decision
+            if (permission.behavior !== 'allow') {
+              if (currentPermissionMode === 'auto') {
+                codeModeAutoVerdictTracker.markBlocked(
+                  scriptId,
+                  permission.message ?? `Permission denied for ${toolName}`,
+                )
+              }
+              throw new Error(
+                permission.message ?? `Permission denied for ${toolName}`,
+              )
+            }
+            const finalInput = normalizeCodeModeToolInput(
+              toolName,
+              (permission.updatedInput as
+                | Record<string, unknown>
+                | undefined) ?? resolved.input,
+              activeCwd,
+            )
+            const callStartMs = Date.now()
+            let out: { data: unknown }
+            try {
+              out = await target.call(
+                finalInput as never,
+                innerHookContext,
+                canUseTool,
+                parentMessage,
+              )
+            } catch (callErr) {
+              // Official 2.1.325 #2314: sync expired MCP server auth to /mcp.
+              syncExpiredMcpAuthInCodeMode(
+                toolName,
+                callErr,
+                context.setAppState,
+              )
+              if (hooksActive) {
+                const errText =
+                  callErr instanceof Error ? callErr.message : String(callErr)
+                try {
+                  for await (const failureRes of runPostToolUseFailureHooks(
+                    innerHookContext,
+                    target,
+                    innerToolUseId,
+                    messageId,
+                    finalInput,
+                    errText,
+                    innerHookContext.abortController.signal.aborted,
+                    requestId,
+                    undefined,
+                    undefined,
+                    Date.now() - callStartMs,
+                  )) {
+                    if ('message' in failureRes) {
+                      recordHookFeedbackMessage(
+                        extractHookAttachmentMessage(failureRes.message),
+                      )
+                    }
+                  }
+                } catch {
+                  // Never swallow the underlying tool error
+                }
+              }
+              throw callErr
+            }
+            const callDurationMs = Date.now() - callStartMs
+            if (hooksActive) {
+              let hookData = out.data
+              for await (const postRes of runPostToolUseHooks(
+                innerHookContext,
+                target,
+                innerToolUseId,
+                messageId,
+                finalInput,
+                hookData,
+                requestId,
+                undefined,
+                undefined,
+                callDurationMs,
+              )) {
+                if ('message' in postRes) {
+                  recordHookFeedbackMessage(
+                    extractHookAttachmentMessage(postRes.message),
+                  )
+                }
+                if (
+                  'updatedToolOutput' in postRes &&
+                  (isMcpTool(target) ||
+                    target.outputSchema?.safeParse(postRes.updatedToolOutput)
+                      ?.success !== false)
+                ) {
+                  hookData = postRes.updatedToolOutput
+                }
+              }
+              if (
+                managedPrePassRan &&
+                (shouldPreserveManagedToolHookPass(innerHookContext, target) ||
+                  target.preserveToolUseResultInSubagents === true)
+              ) {
+                const managedPost = await collectManagedOnlyPostToolUse({
+                  tool: target,
+                  toolUseID: innerToolUseId,
+                  toolInput: finalInput,
+                  output: hookData,
+                  toolUseContext: innerHookContext,
+                  durationMs: callDurationMs,
+                })
+                if (
+                  managedPost.rewritten &&
+                  (isMcpTool(target) ||
+                    target.outputSchema?.safeParse(managedPost.output)
+                      ?.success !== false)
+                ) {
+                  hookData = managedPost.output
+                }
+                for (const m of managedPost.messages) {
+                  recordHookFeedbackMessage(extractHookAttachmentMessage(m))
+                }
+              }
+              out = { ...out, data: hookData }
+            }
+            // Official 2.1.325 #2314: follow newly entered worktree immediately.
+            const enteredWorktree = extractEnteredWorktreePath(
+              toolName,
+              out.data,
+            )
+            if (enteredWorktree) {
+              activeCwd = enteredWorktree
+              setCwdState(enteredWorktree)
+            }
+            // Official 2.1.325 #2315: forward words typed with Yes at permission
+            // dialog or plan approval back to Claude.
+            const feedback = extractApprovalUserFeedback(permission, out.data)
+            if (feedback) {
+              collectedFeedback.push(feedback)
+            }
+            return out.data
           },
+        })
+      } finally {
+        codeModeAutoVerdictTracker.endScript(scriptId)
+      }
+
+      // Official 2.1.328 (#576): track top-level variables declared in a failed
+      // script so subsequent scripts guard against silently reading `undefined`.
+      if (execution.unsetVariables && execution.unsetVariables.length > 0) {
+        const nextSet = new Set(priorUnsetVars)
+        for (const v of execution.unsetVariables) {
+          nextSet.add(v)
+        }
+        sessionUnsetVarsByKey.set(unsetKey, nextSet)
+      } else if (priorUnsetVars && priorUnsetVars.size > 0) {
+        const newlySet = [
+          ...extractTopLevelDeclaredVars(input.code),
+          ...extractAssignedVars(input.code),
+        ]
+        for (const v of newlySet) {
+          priorUnsetVars.delete(v)
+        }
+        if (priorUnsetVars.size === 0) {
+          sessionUnsetVarsByKey.delete(unsetKey)
         }
       }
 
-      return { data: execution }
+      // Official 2.1.328 (#648): post-script pause (0ms in auto/bypass/default).
+      const postPauseMs = getCodeModePostScriptPauseMs(currentPermissionMode)
+      if (postPauseMs > 0) {
+        await new Promise<void>(r => setTimeout(r, postPauseMs))
+      }
+
+      // Official 2.1.328 (#649): dynamic MCP status delta without mutating the
+      // static prompt-cached system prompt.
+      const mcpClients = context.getAppState?.()?.mcp?.clients
+      let mcpDeltaNotice: string | null = null
+      if (Array.isArray(mcpClients) && mcpClients.length > 0) {
+        const diff = diffCodeModeMcpServerStatus(
+          prevConnectedMcpServers,
+          mcpClients,
+        )
+        const hadPrev = prevConnectedMcpServers.size > 0
+        prevConnectedMcpServers = diff.connected
+        mcpDeltaNotice = buildCodeModeMcpStatusDelta({
+          pendingServers: diff.pending,
+          addedServers: hadPrev ? diff.added : undefined,
+          removedServers: hadPrev ? diff.removed : undefined,
+        })
+      }
+
+      const trailingBlocks: string[] = []
+      if (collectedFeedback.length > 0) {
+        trailingBlocks.push(
+          collectedFeedback.map(f => `[User feedback]: ${f}`).join('\n'),
+        )
+      }
+      if (mcpDeltaNotice) {
+        trailingBlocks.push(mcpDeltaNotice)
+      }
+
+      const hookAdditionalContexts: string[] = []
+      const hookBlockingErrors: string[] = []
+      for (const msg of collectedHookMessages) {
+        const att = msg.attachment as {
+          type?: string
+          content?: unknown
+          blockingError?: { blockingError?: string }
+        }
+        if (
+          att.type === 'hook_additional_context' &&
+          Array.isArray(att.content)
+        ) {
+          for (const entry of att.content) {
+            if (typeof entry === 'string' && entry.length > 0) {
+              hookAdditionalContexts.push(entry)
+            }
+          }
+        } else if (
+          att.type === 'hook_blocking_error' &&
+          typeof att.blockingError?.blockingError === 'string' &&
+          att.blockingError.blockingError.length > 0
+        ) {
+          hookBlockingErrors.push(att.blockingError.blockingError)
+        }
+      }
+
+      const resultData: CodeModeExecutionResult = {
+        ...execution,
+        ...(trailingBlocks.length > 0
+          ? {
+              result: execution.result
+                ? `${execution.result}\n\n${trailingBlocks.join('\n\n')}`
+                : trailingBlocks.join('\n\n'),
+            }
+          : {}),
+        ...(collectedFeedback.length > 0
+          ? { userFeedback: collectedFeedback }
+          : {}),
+        ...(scriptHookHalted ? { hookStoppedContinuation: true } : {}),
+        ...(scriptHookStopReason !== undefined
+          ? { hookStopReason: scriptHookStopReason }
+          : {}),
+        ...(hookAdditionalContexts.length > 0
+          ? { hookAdditionalContext: hookAdditionalContexts }
+          : {}),
+        ...(hookBlockingErrors.length > 0 ? { hookBlockingErrors } : {}),
+      }
+
+      return {
+        data: resultData,
+        ...(collectedHookMessages.length > 0
+          ? { newMessages: collectedHookMessages }
+          : {}),
+      }
     },
   }
 }
@@ -936,6 +2781,16 @@ export type CodeModeResumePlan = {
    * auto-continuing the turn on resume.
    */
   waitForNextPrompt?: boolean
+  /**
+   * Official 2.1.328 #575: notice delivered to Claude when a Code Mode script
+   * was cut off before finishing (including on picker resume or ask-permission mode).
+   */
+  interruptedScriptNotice?: string
+  /**
+   * Official 2.1.328 #573: true when resumed Code Mode session is eligible to
+   * run scripts in the background in auto/bypass-permissions mode.
+   */
+  autoBackgroundEligible?: boolean
 }
 
 type ResumedTranscriptMessageLike = {
@@ -1039,6 +2894,8 @@ export function planCodeModeFromSession(
     sessionId?: string
     headless?: boolean
     withinSession?: boolean
+    permissionMode?: string
+    fromPicker?: boolean
     messages?: readonly ResumedTranscriptMessageLike[]
   },
   onNotice?: (message: string) => void,
@@ -1047,6 +2904,15 @@ export function planCodeModeFromSession(
   const isResumedCodeMode = session.replMode === true
   const waitForNextPrompt =
     isResumedCodeMode && didSessionEndDuringCodeModeScript(session.messages)
+  const interruptedScriptNotice = waitForNextPrompt
+    ? buildCodeModeInterruptedScriptNotice({
+        permissionMode: session.permissionMode,
+        fromPicker: session.fromPicker,
+      })
+    : undefined
+  const autoBackgroundEligible =
+    isResumedCodeMode &&
+    shouldRunCodeModeScriptInBackground(session.permissionMode, true)
 
   if (!canRun) {
     if (!isResumedCodeMode) {
@@ -1095,12 +2961,16 @@ export function planCodeModeFromSession(
         pin: undefined,
         switched: false,
         ...(waitForNextPrompt ? { waitForNextPrompt: true } : {}),
+        ...(interruptedScriptNotice ? { interruptedScriptNotice } : {}),
+        ...(autoBackgroundEligible ? { autoBackgroundEligible: true } : {}),
       }
     : {
         pin: undefined,
         unpin: true,
         switched: true,
         ...(waitForNextPrompt ? { waitForNextPrompt: true } : {}),
+        ...(interruptedScriptNotice ? { interruptedScriptNotice } : {}),
+        ...(autoBackgroundEligible ? { autoBackgroundEligible: true } : {}),
       }
 }
 

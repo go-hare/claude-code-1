@@ -1,9 +1,9 @@
 import chalk from 'chalk';
 import figures from 'figures';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { getAdditionalDirectoriesForClaudeMd, setAdditionalDirectoriesForClaudeMd } from '../../bootstrap/state.js';
 import type { LocalJSXCommandContext } from '../../commands.js';
-import { Select } from '../../components/CustomSelect/select.js';
+import { CONFIRM_SELECT_ARM_MS, ConfirmSelect, confirmSelectRefused } from '../../components/ConfirmSelect.js';
 import { MessageResponse } from '../../components/MessageResponse.js';
 import { AddWorkspaceDirectory } from '../../components/permissions/rules/AddWorkspaceDirectory.js';
 import { Box, Dialog, Text } from '@anthropic/ink';
@@ -33,10 +33,19 @@ export function AddedFolderTrustPrompt({
   folder: UntrustedAddedFolder;
   onAnswer: (trusted: boolean) => void;
 }): React.ReactNode {
+  const doneRef = useRef(false);
+  const [openedAt] = useState(() => Date.now());
+  const isInputRefused = () => confirmSelectRefused(openedAt, CONFIRM_SELECT_ARM_MS, Date.now());
+  const answerOnce = (trusted: boolean) => {
+    if (doneRef.current) return;
+    doneRef.current = true;
+    onAnswer(trusted);
+  };
+
   return (
     <Dialog
       title="Adding a new directory:"
-      onCancel={() => onAnswer(false)}
+      onCancel={() => answerOnce(false)}
       color="warning"
       inputGuide={exitState =>
         exitState.pending ? `Press ${exitState.keyName} again to exit` : 'Enter to confirm · Esc to cancel'
@@ -57,13 +66,25 @@ export function AddedFolderTrustPrompt({
           Claude Code in this directory and trusting it there lasts, and covers its whole repository or everything below
           it.
         </Text>
-        <Select
-          options={[
-            { value: 'no', label: 'No, cancel' },
-            { value: 'yes', label: 'Yes, I trust this folder' },
-          ]}
-          onChange={val => onAnswer(val === 'yes')}
-          onCancel={() => onAnswer(false)}
+        <ConfirmSelect
+          cancelFirst
+          focus="cancel"
+          hideIndexes
+          disablePrintableKeybindings
+          openedAt={openedAt}
+          windowMs={CONFIRM_SELECT_ARM_MS}
+          refuseInput={isInputRefused}
+          onUpFromFirstItem={() => {}}
+          cancelLabel="No, cancel"
+          confirmLabel="Yes, I trust this folder"
+          onConfirm={() => {
+            if (isInputRefused()) return;
+            answerOnce(true);
+          }}
+          onCancel={() => {
+            if (isInputRefused()) return;
+            answerOnce(false);
+          }}
         />
       </Box>
     </Dialog>

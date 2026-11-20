@@ -5599,23 +5599,25 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
       }
       if (!waitedForBoot && result.outcome === 'error' && result.msg?.includes('ENOJOB')) {
         // densable Xyr: hLp / D9e / gLp before IAe (Zxe after hasMessages)
-        const preflightErr = await xyrPreflightBeforeRespawn({
+        const preflight = await xyrPreflightBeforeRespawn({
           short: attachShort,
           resumeSessionId: resumeId,
           hasMessages: false,
           force: forceFresh,
           forceRefusalRetry: forceFresh,
         });
-        if (preflightErr) {
+        if (preflight.error) {
           // densable remount restore: BwH (enterAlt + 2J + H [+ extended keys])
           process.stdout.write(enterAltScreenSequence(supportsExtendedKeys()));
-          return { error: preflightErr };
+          return { error: preflight.error };
         }
+        const effectiveResumeId = preflight.resumeSessionId;
+        const effectiveSessionId = preflight.rotated ? effectiveResumeId : job.state.sessionId;
         // densable IAe/NPn/Xyr gate (client-side preflight + daemon re-check)
         const gate = await evaluateRespawnTranscriptGate({
           short: attachShort,
-          sessionId: job.state.sessionId,
-          resumeSessionId: resumeId,
+          sessionId: effectiveSessionId,
+          resumeSessionId: effectiveResumeId,
           cwd: job.state.cwd,
           bgIsolation: job.state.bgIsolation ?? 'none',
           linkScanPath: job.state.linkScanPath,
@@ -5637,11 +5639,11 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
         }
 
         // densable R = hasMessages && !exec → Zxe resume_session_live_elsewhere
-        if (hasMessages) {
+        if (hasMessages && !preflight.rotated) {
           const { findResumeSessionConflict: findConflict, formatResumeSessionLiveElsewhereError } = await import(
             '../daemon/xyrRespawn.js'
           );
-          const conflict = await findConflict(resumeId, {
+          const conflict = await findConflict(effectiveResumeId, {
             excludeJobIds: [short, attachShort],
           });
           if (conflict) {
@@ -5657,7 +5659,9 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
         // Daemon re-resolves and strips client args when $ is void 0.
         const { resolveRespawnLaunchPrompt } = await import('../daemon/transcriptProbe.js');
         const resumePointsElsewhere =
-          job.state.resumeSessionId !== undefined && job.state.resumeSessionId !== job.state.sessionId;
+          !preflight.rotated &&
+          job.state.resumeSessionId !== undefined &&
+          job.state.resumeSessionId !== job.state.sessionId;
         const skipIntentReplay = hasMessages || resumePointsElsewhere || forceFresh;
         const resolvedPrompt = resolveRespawnLaunchPrompt({
           queuedPrompt: job.state.queuedPrompt,
@@ -5668,7 +5672,7 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
           hasMessages && !forceFresh
             ? {
                 mode: 'resume' as const,
-                sessionId: resumeId,
+                sessionId: effectiveResumeId,
                 fork: false,
                 flagArgs: job.state.respawnFlags ?? [],
                 // densable: only attach `-- $` when $ is defined
@@ -5685,7 +5689,7 @@ async function attachToPtySession(short: string): Promise<{ error?: string }> {
             op: 'dispatch',
             d: {
               short: attachShort,
-              sessionId: job.state.sessionId,
+              sessionId: effectiveSessionId,
               intent: job.state.intent,
               source: 'respawn',
               cwd: job.state.cwd,

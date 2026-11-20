@@ -136,15 +136,31 @@ export async function packToolCallContext(
   return packed
 }
 
-export function pinHookAttachment(attachment: unknown): string {
-  if (attachment === null || typeof attachment !== 'object') {
-    return JSON.stringify(attachment)
+const PERSISTED_PATH_LINE_RE = /(Full output saved to:\s*)[^\n]+/g
+
+function normalizePersistedOutputForPin(value: unknown): unknown {
+  if (typeof value === 'string') {
+    if (!value.includes(PERSISTED_OUTPUT_OPEN)) return value
+    return value.replace(PERSISTED_PATH_LINE_RE, '$1<persisted-path>')
   }
-  return JSON.stringify(
-    Object.fromEntries(
-      Object.entries(attachment as Record<string, unknown>).toSorted(
-        ([a], [b]) => a.localeCompare(b),
-      ),
-    ),
-  )
+  if (Array.isArray(value)) {
+    return value.map(normalizePersistedOutputForPin)
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .toSorted(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => [k, normalizePersistedOutputForPin(v)]),
+    )
+  }
+  return value
+}
+
+/**
+ * Official 2.1.327 (#435): Canonical attachment pin that ignores ephemeral
+ * persisted-output filenames so long managed PostToolUse hook outputs are not
+ * delivered twice when a mod adds context to the tool call.
+ */
+export function pinHookAttachment(attachment: unknown): string {
+  return JSON.stringify(normalizePersistedOutputForPin(attachment))
 }

@@ -3609,7 +3609,8 @@ export function normalizeMessagesForAPI(
         | SystemLocalCommandMessage => {
         if (
           _.type === 'progress' ||
-          (_.type === 'system' && !isSystemLocalCommandMessage(_)) ||
+          (_.type === 'system' &&
+            (!isSystemLocalCommandMessage(_) || _.isDisplayOnly === true)) ||
           isSyntheticApiErrorMessage(_)
         ) {
           return false
@@ -6496,7 +6497,25 @@ You have exited auto mode. The user may now want to interact more directly. You 
         messageParts.push(`Delta: ${attachment.deltaSummary}`)
       }
 
-      if (attachment.outputFilePath) {
+      if (
+        attachment.taskType === 'local_agent' &&
+        displayStatus === 'completed'
+      ) {
+        const { formatCompletedSubagentCompactReminder } =
+          // eslint-disable-next-line @typescript-eslint/no-require-imports
+          require('../services/compact/compact.js') as typeof import('../services/compact/compact.js')
+        const hint = formatCompletedSubagentCompactReminder({
+          taskId: attachment.taskId,
+          status: displayStatus,
+          outputFilePath: attachment.outputFilePath,
+          canContinueAgent: (
+            attachment as typeof attachment & { canContinueAgent?: boolean }
+          ).canContinueAgent,
+        })
+        if (hint && !attachment.deltaSummary?.includes(hint)) {
+          messageParts.push(hint)
+        }
+      } else if (attachment.outputFilePath) {
         messageParts.push(
           `Read the output file to retrieve the result: ${attachment.outputFilePath}`,
         )
@@ -6943,6 +6962,15 @@ You have exited auto mode. The user may now want to interact more directly. You 
         }),
       ]
     }
+    case 'agent_ask_notice': {
+      const lines = asStringArray(attachment.lines)
+      if (lines.length === 0) {
+        return []
+      }
+      return wrapMessagesInSystemReminder([
+        createUserMessage({ content: lines.join('\n'), isMeta: true }),
+      ])
+    }
     case 'thread_state': {
       /* eslint-disable @typescript-eslint/no-require-imports */
       const { formatThreadStatePrompt } =
@@ -7260,7 +7288,7 @@ export type LocalCommandRun = { command: string; args?: string }
 
 export function createCommandInputMessage(
   content: string,
-  extras?: { commandRun?: LocalCommandRun },
+  extras?: { commandRun?: LocalCommandRun; isDisplayOnly?: boolean },
 ): SystemLocalCommandMessage {
   return {
     type: 'system',
@@ -7271,6 +7299,7 @@ export function createCommandInputMessage(
     uuid: randomUUID(),
     isMeta: false,
     ...(extras?.commandRun !== undefined && { commandRun: extras.commandRun }),
+    ...(extras?.isDisplayOnly === true && { isDisplayOnly: true }),
   } as SystemLocalCommandMessage
 }
 

@@ -29,6 +29,7 @@ import {
 } from './midConversationSystem.js'
 import { OAUTH_BETA_HEADER } from '../constants/oauth.js'
 import { isClaudeAISubscriber } from './auth.js'
+import { isContext1mBetaRefusedForModel } from './betaRefusals.js'
 import { has1mContext } from './context.js'
 import { isEnvTruthy } from './envUtils.js'
 import { getCanonicalName } from './model/model.js'
@@ -271,13 +272,15 @@ export function planModelSupportsAutoMode(
   ) {
     return false
   }
+  // Official 2.1.328 (#541 / #662, SEA `N0`/`K1`): Claude Opus 4.6 and
+  // Sonnet 4.6 are now supported in auto mode on all third-party providers
+  // (Bedrock, Google Cloud Agent Platform / Vertex, Microsoft Foundry, and
+  // Claude apps gateway) — only pre-4.6 models and non-5.5 Haiku on 3P/gateway
+  // are excluded.
   const isThirdParty =
     provider !== 'firstParty' &&
     provider !== 'anthropicAws' &&
     provider !== 'anthropicGoogleCloud'
-  if (isThirdParty && (t === 'claude-opus-4-6' || t === 'claude-sonnet-4-6')) {
-    return false
-  }
   const isGatewayOverFirstParty =
     provider === 'firstParty' &&
     (process.env.ANTHROPIC_UNIX_SOCKET !== undefined ||
@@ -531,7 +534,14 @@ export function filterBetasForProvider(betas: string[]): string[] {
   return betas.filter(b => THIRD_PARTY_BETA_ALLOWLIST.has(b))
 }
 
-export const getModelBetas = memoize((model: string): string[] => {
+function stripRefusedContext1mBeta(model: string, betas: string[]): string[] {
+  return betas.includes(CONTEXT_1M_BETA_HEADER) &&
+    isContext1mBetaRefusedForModel(model)
+    ? betas.filter(b => b !== CONTEXT_1M_BETA_HEADER)
+    : betas
+}
+
+const getBaseModelBetas = memoize((model: string): string[] => {
   const modelBetas = getAllModelBetas(model)
   let filtered =
     getAPIProvider() === 'bedrock'
@@ -542,12 +552,23 @@ export const getModelBetas = memoize((model: string): string[] => {
   return filtered
 })
 
-export const getBedrockExtraBodyParamsBetas = memoize(
+export function getModelBetas(model: string): string[] {
+  return stripRefusedContext1mBeta(model, getBaseModelBetas(model))
+}
+
+const getBaseBedrockExtraBodyParamsBetas = memoize(
   (model: string): string[] => {
     const modelBetas = getAllModelBetas(model)
     return modelBetas.filter(b => BEDROCK_EXTRA_PARAMS_HEADERS.has(b))
   },
 )
+
+export function getBedrockExtraBodyParamsBetas(model: string): string[] {
+  return stripRefusedContext1mBeta(
+    model,
+    getBaseBedrockExtraBodyParamsBetas(model),
+  )
+}
 
 /**
  * Merge SDK-provided betas with auto-detected model betas.
@@ -595,6 +616,6 @@ export function getMergedBetas(
 
 export function clearBetasCaches(): void {
   getAllModelBetas.cache?.clear?.()
-  getModelBetas.cache?.clear?.()
-  getBedrockExtraBodyParamsBetas.cache?.clear?.()
+  getBaseModelBetas.cache?.clear?.()
+  getBaseBedrockExtraBodyParamsBetas.cache?.clear?.()
 }

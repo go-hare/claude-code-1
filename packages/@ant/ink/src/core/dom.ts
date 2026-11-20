@@ -8,7 +8,11 @@ import { addPendingClear, nodeCache } from './node-cache.js'
 import squashTextNodes, {
   squashTextNodesToSegments,
 } from './squash-text-nodes.js'
-import type { Color, Styles, TextStyles } from './styles.js'
+import applyLayoutStyles, {
+  type Color,
+  type Styles,
+  type TextStyles,
+} from './styles.js'
 import { expandTabsJoin, hasEscOrC1 } from './tabstops.js'
 import wrapText from './wrap-text.js'
 
@@ -604,6 +608,60 @@ export const clearYogaNodeReferences = (node: DOMElement | TextNode): void => {
     }
   }
   node.yogaNode = undefined
+}
+
+/**
+ * Official 2.1.327 (#404 / #557) `replaceLayoutNodes` helper: rebuild fresh
+ * Yoga layout nodes for the entire DOM tree after a layout pass throws or
+ * leaves a damaged layout record, without mutating the tree if rebuilding
+ * itself fails.
+ */
+export function rebuildYogaSubtree(
+  root: DOMElement,
+  yogaConfig?: YogaNodeConfig,
+): { rootYoga: LayoutNode; commit: () => void } {
+  const built = new Map<DOMElement, LayoutNode>()
+  const build = (node: DOMElement): LayoutNode | undefined => {
+    const needsYoga =
+      node.nodeName !== 'ink-virtual-text' &&
+      node.nodeName !== 'ink-link' &&
+      node.nodeName !== 'ink-progress'
+    if (!needsYoga) return undefined
+    const fresh = createLayoutNode(yogaConfig)
+    if (node.nodeName === 'ink-text') {
+      fresh.setMeasureFunc(measureTextNode.bind(null, node))
+    } else if (node.nodeName === 'ink-raw-ansi') {
+      fresh.setMeasureFunc(measureRawAnsiNode.bind(null, node))
+    }
+    applyLayoutStyles(fresh, node.style, node.style)
+    if (node.isHidden) {
+      fresh.setDisplay(LayoutDisplay.None)
+    }
+    built.set(node, fresh)
+    let childIdx = 0
+    for (const child of node.childNodes) {
+      if (child.nodeName === '#text') continue
+      const childYoga = build(child)
+      if (childYoga) {
+        fresh.insertChild(childYoga, childIdx++)
+      }
+    }
+    return fresh
+  }
+  const rootYoga = build(root)
+  if (!rootYoga) {
+    throw new Error('ink root node did not produce a layout node')
+  }
+  return {
+    rootYoga,
+    commit: () => {
+      for (const [el, fresh] of built) {
+        el.yogaNode = fresh
+        el.cachedLayout = undefined
+        el.dirty = true
+      }
+    },
+  }
 }
 
 /**

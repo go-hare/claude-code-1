@@ -33,6 +33,7 @@ import {
 import { getPlatform } from './platform.js'
 import { getRipgrepStatus } from './ripgrep.js'
 import { SandboxManager } from './sandbox/sandbox-adapter.js'
+import { detectOtelMissingEndpointNotices } from './status.js'
 import { getManagedFilePath } from './settings/managedPath.js'
 import { CUSTOMIZATION_SURFACES } from './settings/types.js'
 import {
@@ -41,6 +42,7 @@ import {
   getShellConfigPaths,
 } from './shellConfig.js'
 import { jsonParse } from './slowOperations.js'
+import { getLastUpdateResult, type LastUpdateResult } from './updateResult.js'
 import { which } from './which.js'
 
 export type InstallationType =
@@ -59,6 +61,7 @@ export type DiagnosticInfo = {
   configInstallMethod: InstallMethod | 'not set'
   autoUpdates: string
   hasUpdatePermissions: boolean | null
+  lastUpdateResult: LastUpdateResult | null
   multipleInstallations: Array<{ type: string; path: string }>
   warnings: Array<{ issue: string; fix: string }>
   recommendation?: string
@@ -592,6 +595,25 @@ export function detectUnbracketedIpv6InjectHostWarnings(): Array<{
   ]
 }
 
+export function detectOtelMissingEndpointWarnings(
+  env: NodeJS.ProcessEnv = process.env,
+): Array<{ issue: string; fix: string }> {
+  const notices = detectOtelMissingEndpointNotices(env)
+  return notices.map(notice => {
+    const splitIdx = notice.indexOf('. Set OTEL_')
+    if (splitIdx !== -1) {
+      return {
+        issue: notice.slice(0, splitIdx + 1),
+        fix: notice.slice(splitIdx + 2),
+      }
+    }
+    return {
+      issue: notice,
+      fix: 'Set OTEL_EXPORTER_OTLP_ENDPOINT or the per-signal endpoint variable, then restart Claude Code.',
+    }
+  })
+}
+
 export async function getDoctorDiagnostic(): Promise<DiagnosticInfo> {
   const installationType = await getCurrentInstallationType()
   const version =
@@ -606,6 +628,8 @@ export async function getDoctorDiagnostic(): Promise<DiagnosticInfo> {
   // densable 2.1.229 Otv / Dtv — unreliable IPv6 domain + injectHosts spellings
   warnings.push(...detectUnbracketedIpv6DomainWarnings())
   warnings.push(...detectUnbracketedIpv6InjectHostWarnings())
+  // Official 2.1.328 (#544) — OTLP exporter enabled without endpoint
+  warnings.push(...detectOtelMissingEndpointWarnings())
 
   // Add warnings for leftover npm installations when running native
   if (installationType === 'native') {
@@ -663,8 +687,8 @@ export async function getDoctorDiagnostic(): Promise<DiagnosticInfo> {
     // Add warning if no permissions
     if (!hasUpdatePermissions && !getAutoUpdaterDisabledReason()) {
       warnings.push({
-        issue: 'Insufficient permissions for auto-updates',
-        fix: 'Do one of: (1) Re-install node without sudo, or (2) Use `claude install` for native installation',
+        issue: "Can't auto-update: npm global folder isn't writable",
+        fix: 'Run `claude install` to switch to the native installer (no sudo)\nOr reinstall with a sudo-free npm (e.g. via nvm)\nOr `npm config set prefix ~/.npm-global`, add ~/.npm-global/bin to PATH, then reinstall',
       })
     }
   }
@@ -687,6 +711,8 @@ export async function getDoctorDiagnostic(): Promise<DiagnosticInfo> {
       ? await getPackageManager()
       : undefined
 
+  const lastUpdateResult = getLastUpdateResult()
+
   const diagnostic: DiagnosticInfo = {
     installationType,
     version,
@@ -700,6 +726,7 @@ export async function getDoctorDiagnostic(): Promise<DiagnosticInfo> {
         : 'enabled'
     })(),
     hasUpdatePermissions,
+    lastUpdateResult,
     multipleInstallations,
     warnings,
     packageManager,

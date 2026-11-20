@@ -1696,6 +1696,8 @@ export async function runFunctionHookChain(
   }
   const traces: HookTrace[] = []
   const budgetMs = callOptions?.budgetMs ?? budgetMsForHookEvent(event)
+  let tailResult: unknown
+  let hasTailResult = false
   const callAt = (
     index: number,
     value: Record<string, unknown>,
@@ -1709,6 +1711,8 @@ export async function runFunctionHookChain(
         .then(() => tail(value, floors))
         .then(
           returned => {
+            tailResult = returned
+            hasTailResult = true
             runNode.entry = Object.freeze({
               index,
               plugin: 'engine',
@@ -2322,14 +2326,93 @@ export async function runFunctionHookChain(
   // densable `gSt`: nested evaluateUiRender from a hook skips sBo cache.
   return hookEvalAls.run(true, () =>
     callAt(0, payload, initialFloors, rootTraceNode)
-      .then(returned => {
-        if (
-          event === 'tool.check' &&
-          payload.ceiling === 'ask' &&
-          isEventRecord(returned) &&
-          returned.decision === 'allow'
-        ) {
-          return { ...returned, decision: 'ask' }
+      .then(async returned => {
+        if (event === 'tool.check' && isEventRecord(returned)) {
+          let result = returned
+          if (payload.ceiling === 'ask' && result.decision === 'allow') {
+            result = { ...result, decision: 'ask' }
+          }
+          // Official 2.1.327 (#518): in `claude plugin eval`, route `tool.check`
+          // decisions through `resolveEvalPermissionHookDecision` (running the
+          // base check if hooks short-circuited) and stamp `plugin_approval`.
+          if (
+            process.env.CLAUDE_CODE_EVAL_CONFINED === '1' ||
+            process.env.CLAUDE_CODE_EVAL_CONFINED === 'true'
+          ) {
+            const baseRaw = hasTailResult
+              ? tailResult
+              : await Promise.resolve()
+                  .then(() => tail(payload, initialFloors))
+                  .catch(() => ({
+                    decision: 'deny',
+                    checkCrashed: true,
+                  }))
+            const baseRec = isEventRecord(baseRaw) ? baseRaw : {}
+            const toBehavior = (
+              rec: Record<string, unknown>,
+            ): 'allow' | 'deny' | 'ask' => {
+              const candidate =
+                typeof rec.decision === 'string'
+                  ? rec.decision
+                  : typeof rec.behavior === 'string'
+                    ? rec.behavior
+                    : undefined
+              if (
+                candidate === 'allow' ||
+                candidate === 'deny' ||
+                candidate === 'ask'
+              ) {
+                return candidate
+              }
+              return 'allow'
+            }
+            const { resolveEvalPermissionHookDecision } =
+              // eslint-disable-next-line @typescript-eslint/no-require-imports
+              require('./pluginEval/report.js') as typeof import('./pluginEval/report.js')
+            const resolved = resolveEvalPermissionHookDecision({
+              baseDecision: {
+                behavior: toBehavior(baseRec),
+                fromDenyRule:
+                  baseRec.fromDenyRule === true ||
+                  typeof baseRec.rule === 'string' ||
+                  (isEventRecord(baseRec.decisionReason) &&
+                    baseRec.decisionReason.type === 'rule'),
+                checkCrashed: baseRec.checkCrashed === true,
+                checkUnfinished: baseRec.checkUnfinished === true,
+                message:
+                  typeof baseRec.reason === 'string'
+                    ? baseRec.reason
+                    : typeof baseRec.message === 'string'
+                      ? baseRec.message
+                      : undefined,
+              },
+              hookDecision: {
+                behavior: toBehavior(result),
+                message:
+                  typeof result.reason === 'string'
+                    ? result.reason
+                    : typeof result.message === 'string'
+                      ? result.message
+                      : undefined,
+              },
+              toolName:
+                typeof payload.tool === 'string' ? payload.tool : 'unknown',
+            })
+            result = {
+              ...result,
+              decision: resolved.behavior,
+              ...(resolved.message !== undefined
+                ? { reason: resolved.message }
+                : {}),
+              ...(resolved.pluginApproval !== undefined
+                ? {
+                    plugin_approval: resolved.pluginApproval,
+                    pluginApproval: resolved.pluginApproval,
+                  }
+                : {}),
+            }
+          }
+          return result
         }
         if (
           event === 'prompt.submit' &&
@@ -3294,6 +3377,46 @@ const UI_ASK_MIN_OPTIONS = 2
 const UI_ASK_DEFAULTS = ['Yes', 'No']
 const UI_ASK_NO_ANSWER_CAP = 120
 const MODEL_COMPLETE_DEFAULT_MAX_TOKENS = 1024
+/**
+ * Official 2.1.327 (#406): Detect usage-limit / rate-limit API errors so
+ * mod `$.model.complete` and `$.model.classify` calls surface the API error
+ * immediately instead of hanging in retry backoff.
+ */
+export function isModModelUsageLimitError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const err = error as {
+    status?: unknown
+    code?: unknown
+    apiError?: unknown
+    message?: unknown
+    error?: { type?: unknown; message?: unknown }
+  }
+  if (
+    err.status === 429 ||
+    err.status === 529 ||
+    err.apiError === 'rate_limit'
+  ) {
+    return true
+  }
+  const errType =
+    typeof err.error?.type === 'string' ? err.error.type.toLowerCase() : ''
+  if (
+    errType === 'rate_limit_error' ||
+    errType === 'overloaded_error' ||
+    errType === 'usage_limit_error'
+  ) {
+    return true
+  }
+  const msg =
+    `${typeof err.message === 'string' ? err.message : ''} ${typeof err.error?.message === 'string' ? err.error.message : ''}`.toLowerCase()
+  return (
+    msg.includes('rate limit') ||
+    msg.includes('usage limit') ||
+    msg.includes('too many requests') ||
+    msg.includes('quota exceeded')
+  )
+}
+
 const MODEL_COMPLETE_DEADLINE = 'model.complete deadline reached'
 /** densable `Sg` — setTimeout / AbortSignal ceiling. */
 const MODEL_COMPLETE_TIMEOUT_CAP_MS = 2_147_483_647
@@ -7577,10 +7700,28 @@ async function runModelComplete(
           : {}),
       }
     }
+    const errMsg = error instanceof Error ? error.message : String(error)
     return {
       isAnswered: false,
-      reason: 'api-error',
-      error: error instanceof Error ? error.message : String(error),
+      reason: isModModelUsageLimitError(error) ? 'rate-limit' : 'api-error',
+      error: errMsg,
+      usage: EMPTY_MODEL_USAGE,
+    }
+  }
+  // Official 2.1.327 (#406): surface API/usage-limit error responses immediately
+  // to the mod instead of returning an error text as a model answer or hanging.
+  if (response.isApiErrorMessage) {
+    const errText =
+      extractTextContent(
+        Array.isArray(response.message.content) ? response.message.content : [],
+      ).trim() || String(response.apiError ?? 'API error')
+    const isLimit =
+      response.apiError === 'rate_limit' ||
+      isModModelUsageLimitError({ message: errText })
+    return {
+      isAnswered: false,
+      reason: isLimit ? 'rate-limit' : 'api-error',
+      error: errText,
       usage: EMPTY_MODEL_USAGE,
     }
   }
@@ -7825,7 +7966,13 @@ async function runModelClassify(
     plugin,
   )
   if (!isEventRecord(complete) || complete.isAnswered !== true) {
-    throw new Error(`${prefix}$.model.classify: the request failed`)
+    const apiErr =
+      isEventRecord(complete) &&
+      typeof complete.error === 'string' &&
+      complete.error.trim() !== ''
+        ? `: ${complete.error.trim()}`
+        : ''
+    throw new Error(`${prefix}$.model.classify: the request failed${apiErr}`)
   }
   const answered = String(complete.text ?? '')
     .trim()
@@ -21465,6 +21612,41 @@ async function admitUserPluginIfAllowed(
   judges: readonly LoadedFunctionHooksModule[],
 ): Promise<boolean> {
   if (plugin.tier !== 'user') return true
+  // Official 2.1.328 (#546): block user-tier mods when org/host managed policy
+  // enables `allowManagedModsOnly`, unless the plugin is explicitly enabled by
+  // managed policy.
+  try {
+    const { isAllowManagedModsOnlyEffective } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./pluginPolicy.js') as typeof import('./pluginPolicy.js')
+    const { getSettingsForSource } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../settings/settings.js') as typeof import('../settings/settings.js')
+    const policySettings = getSettingsForSource('policySettings') as Record<
+      string,
+      unknown
+    > | null
+    if (isAllowManagedModsOnlyEffective(policySettings)) {
+      const enabledPlugins = policySettings?.enabledPlugins as
+        | Record<string, unknown>
+        | undefined
+      const enabledByPolicy =
+        enabledPlugins?.[plugin.name] === true ||
+        (Array.isArray(policySettings?.prependPlugins) &&
+          policySettings.prependPlugins.includes(plugin.name)) ||
+        (Array.isArray(policySettings?.appendPlugins) &&
+          policySettings.appendPlugins.includes(plugin.name))
+      if (!enabledByPolicy) {
+        logForDebugging(
+          `mods are limited to your organization's by policy (allowManagedModsOnly); ${plugin.name} was not loaded`,
+          { level: 'warn' },
+        )
+        return false
+      }
+    }
+  } catch {
+    // Policy check unavailable in isolated test contexts
+  }
   const activeJudges = judges.filter(
     mod => mod.tier !== 'user' && mod.status !== 'unloaded',
   )

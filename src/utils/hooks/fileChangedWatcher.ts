@@ -13,6 +13,7 @@ import {
   type HookOutsideReplResult,
 } from '../hooks.js'
 import { clearCwdEnvFiles } from '../sessionEnvironment.js'
+import { formatOutsideReplHookFailures } from './hookErrorDisplay.js'
 import { getHooksConfigFromSnapshot } from './hooksConfigSnapshot.js'
 
 let watcher: FSWatcher | null = null
@@ -201,10 +202,13 @@ function handleFileEvent(
       for (const msg of systemMessages) {
         notifyCallback?.(msg, false)
       }
-      for (const r of results) {
-        if (!r.succeeded && r.output) {
-          notifyCallback?.(r.output, true)
-        }
+      // Official 2.1.327 (#432): surface all FileChanged hook failures,
+      // including in fullscreen and when a failing hook wrote no output.
+      for (const errMsg of formatOutsideReplHookFailures(
+        'FileChanged',
+        results,
+      )) {
+        notifyCallback?.(errMsg, true)
       }
     })
     .catch(e => {
@@ -283,10 +287,13 @@ export async function onCwdChangedForHooks(
   for (const msg of hookResult.systemMessages) {
     notifyCallback?.(msg, false)
   }
-  for (const r of hookResult.results) {
-    if (!r.succeeded && r.output) {
-      notifyCallback?.(r.output, true)
-    }
+  // Official 2.1.327 (#432): surface all CwdChanged hook failures, including
+  // in fullscreen and when a failing hook wrote no output.
+  for (const errMsg of formatOutsideReplHookFailures(
+    'CwdChanged',
+    hookResult.results,
+  )) {
+    notifyCallback?.(errMsg, true)
   }
 
   // Re-resolve matcher paths against the new cwd

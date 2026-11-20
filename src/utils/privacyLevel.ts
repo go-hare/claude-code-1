@@ -48,6 +48,20 @@ export function isEssentialTrafficOnly(): boolean {
 }
 
 /**
+ * Official 2.1.327 `Oml` (#530): true when an env map disables telemetry via
+ * `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `DISABLE_TELEMETRY`, or truthy `DO_NOT_TRACK`.
+ */
+export function isTelemetryDisabledInEnv(
+  env: Record<string, string | undefined>,
+): boolean {
+  return Boolean(
+    env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC ||
+      env.DISABLE_TELEMETRY ||
+      isEnvTruthy(env.DO_NOT_TRACK),
+  )
+}
+
+/**
  * True when telemetry/analytics should be suppressed.
  * True at both `no-telemetry` and `essential-traffic` levels.
  */

@@ -263,7 +263,7 @@ describe('Wave 326 Group 4B — Messages / Spinner / Tasks / REPL', () => {
       'retryStatus={viewingAgentTaskId ? null : retryStatus}',
     )
     expect(replSrc).toContain('afterReplyText={afterReplyText}')
-    expect(replSrc).toContain('if (savedDraft.length > 0)')
+    expect(replSrc).toContain('else if (draftController.value.length > 0)')
     expect(replSrc).toContain('dialog waiting')
 
     const attSrc = readFileSync(

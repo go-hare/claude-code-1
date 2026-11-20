@@ -14,6 +14,7 @@ import { checkServerIdentity } from 'tls'
 import { HttpsProxyAgent, type HttpsProxyAgentOptions } from 'https-proxy-agent'
 import memoize from 'lodash-es/memoize.js'
 import type * as undici from 'undici'
+import { getIsNonInteractiveSession } from '../bootstrap/state.js'
 import { getCACertificates } from './caCerts.js'
 import { logForDebugging } from './debug.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
@@ -21,6 +22,7 @@ import {
   getMTLSAgent,
   getMTLSConfig,
   getTLSFetchOptions,
+  setMtlsErrorClosingAgentFactory,
   type TLSConfig,
 } from './mtls.js'
 
@@ -40,6 +42,7 @@ export function _resetKeepAliveForTesting(): void {
   keepAliveDisabled = false
   closesAfterServerError = false
   trackedHttpsAgents.clear()
+  setMtlsErrorClosingAgentFactory(null, false)
 }
 
 let closesAfterServerError = false
@@ -133,6 +136,13 @@ export function enableClosesAfterServerError(): void {
       | (Pick<HttpsAgent, 'freeSockets'> & { maxFreeSockets?: number })
       | undefined,
   )
+  setMtlsErrorClosingAgentFactory(
+    options => createKeepAliveHttpsAgent(options),
+    true,
+  )
+  if (!getProxyUrl()) {
+    axios.defaults.httpsAgent = getMTLSAgent() ?? createKeepAliveHttpsAgent()
+  }
 }
 
 export function shouldCloseAfterServerError(): boolean {
@@ -212,6 +222,163 @@ export function getAddressFamily(options: LookupOptions): 0 | 4 | 6 {
 }
 
 type EnvLike = Record<string, string | undefined>
+
+export const BARE_HOST_PORT_PROXY_RE =
+  /^(\[[0-9a-f:.]+\]|[a-z0-9_](?:[a-z0-9_-]*[a-z0-9_])?(?:\.[a-z0-9_](?:[a-z0-9_-]*[a-z0-9_])?)*):[1-9]\d{0,4}\/?$/i
+
+const PROXY_ENV_KEYS_ORDERED = [
+  'https_proxy',
+  'HTTPS_PROXY',
+  'http_proxy',
+  'HTTP_PROXY',
+] as const
+
+const REPAIRED_SCHEME_SENSITIVE_PROXY_KEYS = [
+  'https_proxy',
+  'HTTPS_PROXY',
+  'grpc_proxy',
+  'GRPC_PROXY',
+] as const
+
+let completedBareProxyRepairUrl: string | undefined
+
+export function resetBareProxyRepairStateForTests(): void {
+  completedBareProxyRepairUrl = undefined
+}
+
+export function getCompletedBareProxyRepairUrl(): string | undefined {
+  return completedBareProxyRepairUrl
+}
+
+function parseUrlHostname(raw: string): string | undefined {
+  try {
+    return new URL(raw).hostname || undefined
+  } catch {
+    return undefined
+  }
+}
+
+function hasProxyUrlScheme(raw: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(raw.trim())
+}
+
+/**
+ * Official 2.1.327 `W(e)` (#400): if `value` is a bare `host:port` (no scheme,
+ * valid hostname or IPv6 literal, <= 300 chars), return `http://${value}`;
+ * otherwise return `value` unchanged.
+ */
+export function repairBareHostPortProxyValue(value: string): string {
+  const host =
+    value.length > 300 ? undefined : BARE_HOST_PORT_PROXY_RE.exec(value)?.[1]
+  if (!host || parseUrlHostname(value)) return value
+  const candidate = `http://${value}`
+  return parseUrlHostname(candidate) === host.toLowerCase() ? candidate : value
+}
+
+/**
+ * Official 2.1.327 `z(e)` (#400): when neither stdin nor stdout is a TTY
+ * (desktop app, SDK, cron) and `https_proxy` or `HTTPS_PROXY` is a bare
+ * `host:port`, prepend `http://` to matching proxy env vars so Claude Code
+ * starts cleanly instead of failing URL parsing.
+ */
+export function repairBareProxySchemeAtStartup(opts?: {
+  env?: EnvLike
+  stdinIsTTY?: boolean
+  stdoutIsTTY?: boolean
+  isNonInteractiveSession?: boolean
+  argv?: string[]
+  hasProxyAuthHelper?: boolean
+}): { repaired: boolean; repairedKeys: string[]; repairedUrl?: string } {
+  const env = opts?.env ?? process.env
+  const activeKey = PROXY_ENV_KEYS_ORDERED.find(k => Boolean(env[k]))
+  const activeVal = activeKey ? env[activeKey] : undefined
+  if (
+    !activeKey ||
+    !activeVal ||
+    (activeKey !== 'https_proxy' && activeKey !== 'HTTPS_PROXY') ||
+    isEnvTruthy(env.CLAUDE_CODE_DISABLE_PROXY_SCHEME_REPAIR)
+  ) {
+    return { repaired: false, repairedKeys: [] }
+  }
+
+  const repaired = repairBareHostPortProxyValue(activeVal)
+  if (repaired === activeVal) {
+    return { repaired: false, repairedKeys: [] }
+  }
+
+  const isNonInteractive =
+    opts?.isNonInteractiveSession ?? getIsNonInteractiveSession()
+  const stdinTTY = opts?.stdinIsTTY ?? process.stdin.isTTY === true
+  const stdoutTTY = opts?.stdoutIsTTY ?? process.stdout.isTTY === true
+  const argv = opts?.argv ?? process.argv.slice(2)
+  if (
+    !isNonInteractive ||
+    stdinTTY ||
+    stdoutTTY ||
+    argv.some(arg => /^--(bg|background|routine)(=|$)/.test(arg))
+  ) {
+    return { repaired: false, repairedKeys: [] }
+  }
+
+  const matchingKeys = PROXY_ENV_KEYS_ORDERED.filter(k => env[k] === activeVal)
+  const hasOtherSchemeless = REPAIRED_SCHEME_SENSITIVE_PROXY_KEYS.some(k => {
+    const val = env[k]
+    return (
+      !matchingKeys.includes(k as (typeof PROXY_ENV_KEYS_ORDERED)[number]) &&
+      Boolean(val) &&
+      !hasProxyUrlScheme(val!)
+    )
+  })
+  if (
+    !matchingKeys.includes(activeKey) ||
+    hasOtherSchemeless ||
+    (isEnvTruthy(env.CLAUDE_CODE_ENABLE_PROXY_AUTH_HELPER) &&
+      opts?.hasProxyAuthHelper)
+  ) {
+    return { repaired: false, repairedKeys: [] }
+  }
+
+  for (const key of matchingKeys) {
+    env[key] = repaired
+  }
+  completedBareProxyRepairUrl = repaired
+  logForDebugging(
+    `[proxy] ${matchingKeys.join(', ')} had no scheme: used as an http:// proxy`,
+  )
+  return {
+    repaired: true,
+    repairedKeys: [...matchingKeys],
+    repairedUrl: repaired,
+  }
+}
+
+/**
+ * Official 2.1.327 `WFi(key, val)` (#400): if startup repaired a bare proxy
+ * scheme and a settings file tries to overwrite `https_proxy`/`HTTPS_PROXY`/
+ * `grpc_proxy`/`GRPC_PROXY` with another schemeless value, retain the startup
+ * repaired URL so requests keep working.
+ */
+export function preserveRepairedProxyIfBare(
+  key: string,
+  value: string,
+): string {
+  const repaired = completedBareProxyRepairUrl
+  if (
+    repaired === undefined ||
+    !REPAIRED_SCHEME_SENSITIVE_PROXY_KEYS.some(
+      k => k.toUpperCase() === key.toUpperCase(),
+    ) ||
+    value === '' ||
+    hasProxyUrlScheme(value)
+  ) {
+    return value
+  }
+  logForDebugging(
+    `[proxy] ${key} from settings has no scheme (${value}); keeping repaired startup proxy until fixed`,
+    { level: 'warn' },
+  )
+  return repaired
+}
 
 /**
  * Get the active proxy URL if one is configured
@@ -589,7 +756,7 @@ export function shouldDisableFetchTimeoutForBodyIdle(opts?: {
  *   API_FORCE_IDLE_TIMEOUT is truthy (forces undici idle timeout ON).
  *   Explicit falsy FORCE also disables undici timeout (densable Zc branch).
  */
-export function getProxyFetchOptions(opts?: {
+type ProxyFetchOptionsBase = {
   forAnthropicAPI?: boolean
   hasBodyIdleWatchdog?: boolean
   url?: string
@@ -598,22 +765,40 @@ export function getProxyFetchOptions(opts?: {
     noProxy?: string
     ca?: string
   }
-}): {
+}
+
+type ProxyFetchResultBase = {
   tls?: TLSConfig
   dispatcher?: undici.Dispatcher
   proxy?: string | { url: string; headers?: Record<string, string> }
   unix?: string
   keepalive?: false
-  timeout?: false
-} {
+}
+
+export function getProxyFetchOptions(
+  opts: ProxyFetchOptionsBase & { raisedBodyIdleTimeoutMs: number | undefined },
+): ProxyFetchResultBase & { timeout?: false | number }
+export function getProxyFetchOptions(
+  opts?: ProxyFetchOptionsBase,
+): ProxyFetchResultBase & { timeout?: false }
+export function getProxyFetchOptions(
+  opts?: ProxyFetchOptionsBase & { raisedBodyIdleTimeoutMs?: number },
+): ProxyFetchResultBase & { timeout?: false | number } {
+  // Official 2.1.328 `el(e)` (#566): when body idle watchdog disables fetch
+  // timeout, pass `timeout: false`; otherwise, if CLAUDE_STREAM_IDLE_TIMEOUT_MS
+  // raised the idle limit above 5 minutes (gateways, custom base URLs, cloud
+  // providers), pass `timeout: raisedBodyIdleTimeoutMs` so the connection does
+  // not time out at 5 minutes.
+  const timeoutOpt: false | number | undefined =
+    shouldDisableFetchTimeoutForBodyIdle(opts)
+      ? false
+      : opts?.raisedBodyIdleTimeoutMs
   const base: {
     keepalive?: false
-    timeout?: false
+    timeout?: false | number
   } = {
     ...(keepAliveDisabled ? ({ keepalive: false } as const) : {}),
-    ...(shouldDisableFetchTimeoutForBodyIdle(opts)
-      ? ({ timeout: false } as const)
-      : {}),
+    ...(timeoutOpt !== undefined ? { timeout: timeoutOpt } : {}),
   }
 
   // ANTHROPIC_UNIX_SOCKET tunnels through the `claude ssh` auth proxy, which
@@ -686,6 +871,10 @@ let proxyInterceptorId: number | undefined
 export function configureGlobalAgents(): void {
   const proxyUrl = getProxyUrl()
   const mtlsAgent = getMTLSAgent()
+  const directKeepAliveAgent =
+    !mtlsAgent && shouldCloseAfterServerError()
+      ? createKeepAliveHttpsAgent()
+      : undefined
 
   // Eject previous interceptor to avoid stacking on repeated calls
   if (proxyInterceptorId !== undefined) {
@@ -709,10 +898,13 @@ export function configureGlobalAgents(): void {
     proxyInterceptorId = axios.interceptors.request.use(config => {
       // Check if URL should bypass proxy based on NO_PROXY
       if (config.url && shouldBypassProxy(config.url)) {
-        // Bypass proxy - use mTLS agent if configured, otherwise undefined
+        // Bypass proxy - use mTLS agent or error-closing keep-alive agent if configured
         if (mtlsAgent) {
           config.httpsAgent = mtlsAgent
           config.httpAgent = mtlsAgent
+        } else if (directKeepAliveAgent) {
+          config.httpsAgent = directKeepAliveAgent
+          delete config.httpAgent
         } else {
           // Remove any proxy agents to use direct connection
           delete config.httpsAgent
@@ -732,7 +924,7 @@ export function configureGlobalAgents(): void {
       getProxyAgent(proxyUrl),
     )
   } else if (mtlsAgent) {
-    // No proxy but mTLS is configured
+    // No proxy but mTLS is configured (uses KeepAliveErrorClosingAgent when enabled)
     axios.defaults.httpsAgent = mtlsAgent
 
     // Set undici global dispatcher with mTLS
@@ -743,6 +935,9 @@ export function configureGlobalAgents(): void {
         mtlsOptions.dispatcher,
       )
     }
+  } else if (directKeepAliveAgent) {
+    // No proxy or mTLS, but server-error closing keep-alive agent is enabled
+    axios.defaults.httpsAgent = directKeepAliveAgent
   }
 }
 

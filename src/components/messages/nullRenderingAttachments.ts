@@ -66,6 +66,8 @@ const NULL_RENDERING_TYPES = [
   'thinking_stripped',
   // densable advisor_stripped — compact KEEP / retry marker; UI null
   'advisor_stripped',
+  // Official 2.1.327 (#426) agent_ask_notice — model-facing; UI null
+  'agent_ask_notice',
   // densable tool_results_cut (#1422) — model/compact marker; UI null
   'tool_results_cut',
 ] as const satisfies readonly Attachment['type'][]

@@ -32,6 +32,7 @@ export type BuiltInGhBlockReason =
   | 'older_git_proxy'
   | 'not_agent_loop'
   | 'review'
+  | 'github_tools_denied'
 
 export type BuiltInGhDecision = 'on' | 'flag_off' | BuiltInGhBlockReason
 
@@ -51,6 +52,10 @@ export type SessionBuiltInGhContext = RunnerBuiltInGhContext & {
   olderGitProxy: boolean
   childKind: 'agent-loop' | 'tools-only'
   review: boolean
+  /** Official 2.1.328 (#678): true when `--use-anthropic-gh` was left at default (not explicitly `true`). */
+  isDefaultOffer?: boolean
+  /** Official 2.1.328 (#678): true when settings guard Claude's GitHub tools by name. */
+  githubToolsDenied?: boolean
 }
 
 export const BUILT_IN_GH_REASON_TEXT: Record<BuiltInGhBlockReason, string> = {
@@ -74,6 +79,8 @@ export const BUILT_IN_GH_REASON_TEXT: Record<BuiltInGhBlockReason, string> = {
     "--use-anthropic-git-proxy is on too, and this session's git goes through Anthropic's older git proxy",
   not_agent_loop: 'this session runs tools only',
   review: 'a code review gets no GitHub sign-in',
+  github_tools_denied:
+    "the session's settings restrict Claude's GitHub tools, and it is offered by default only (--use-anthropic-gh true sets it up all the same)",
 }
 
 const USE_ANTHROPIC_GH_FLAG_LABEL =
@@ -127,8 +134,52 @@ export function evaluateRunnerBuiltInGhBlocks(
   return reasons
 }
 
+const GITHUB_TOOL_RULE_RE = /^(?:mcp__github(?:__|$)|Bash\(\s*gh(?:\s|:|$|\)))/i
+
 /**
- * Session-level built-in `gh` eligibility decision (official `Ll()`).
+ * Official 2.1.328 `as()` (#678) — detect when session/managed settings guard
+ * Claude's GitHub tools by name (deny/ask permission rules matching GitHub MCP
+ * or `Bash(gh ...)`, or deniedMcpServers/managed-mcp restrictions on GitHub).
+ */
+export function areGitHubToolsRestrictedBySettings(
+  settingsList: readonly (Record<string, unknown> | null | undefined)[],
+  hasManagedMcpPolicyRestriction = false,
+): boolean {
+  if (hasManagedMcpPolicyRestriction) return true
+  for (const settings of settingsList) {
+    if (!settings || typeof settings !== 'object') continue
+    const perms = settings.permissions as
+      | { deny?: unknown; ask?: unknown }
+      | undefined
+    for (const list of [perms?.deny, perms?.ask]) {
+      if (!Array.isArray(list)) continue
+      for (const rule of list) {
+        if (typeof rule === 'string' && GITHUB_TOOL_RULE_RE.test(rule.trim())) {
+          return true
+        }
+      }
+    }
+    const deniedMcp = settings.deniedMcpServers
+    if (Array.isArray(deniedMcp)) {
+      for (const entry of deniedMcp) {
+        if (!entry || typeof entry !== 'object') continue
+        const rec = entry as { serverName?: unknown; serverUrl?: unknown }
+        if (
+          (typeof rec.serverName === 'string' &&
+            rec.serverName.toLowerCase().includes('github')) ||
+          (typeof rec.serverUrl === 'string' &&
+            rec.serverUrl.toLowerCase().includes('/github/mcp'))
+        ) {
+          return true
+        }
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * Session-level built-in `gh` eligibility decision (official `Ll()` + 2.1.328 #678).
  */
 export function evaluateSessionBuiltInGhDecision(
   ctx: SessionBuiltInGhContext,
@@ -140,6 +191,12 @@ export function evaluateSessionBuiltInGhDecision(
   if (ctx.olderGitProxy) return 'older_git_proxy'
   if (ctx.childKind !== 'agent-loop') return 'not_agent_loop'
   if (ctx.review) return 'review'
+  // Official 2.1.328 (#678): built-in `gh api` is off by default where settings
+  // guard Claude's GitHub tools by name; explicit `--use-anthropic-gh true`
+  // (`isDefaultOffer: false`) turns it on all the same.
+  if (ctx.isDefaultOffer !== false && ctx.githubToolsDenied === true) {
+    return 'github_tools_denied'
+  }
   return 'on'
 }
 

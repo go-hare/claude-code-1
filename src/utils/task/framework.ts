@@ -1,3 +1,4 @@
+import { getMainThreadAgentId } from '../../bootstrap/state.js'
 import {
   OUTPUT_FILE_TAG,
   STATUS_TAG,
@@ -21,7 +22,8 @@ import {
   enqueuePendingNotification,
   getCommandQueue,
 } from '../messageQueueManager.js'
-import { enqueueSdkEvent } from '../sdkEventQueue.js'
+import { emitTaskTerminatedSdk, enqueueSdkEvent } from '../sdkEventQueue.js'
+import { escapeXml } from '../xml.js'
 import { getTaskOutputDelta, getTaskOutputPath } from './diskOutput.js'
 
 // Standard polling interval for all tasks
@@ -295,7 +297,10 @@ export function registerTask(task: TaskState, setAppState: SetAppState): void {
       'workflowName' in task
         ? (task.workflowName as string | undefined)
         : undefined,
-    prompt: 'prompt' in task ? (task.prompt as string) : undefined,
+    prompt:
+      'prompt' in task && !shouldSuppressTaskStartedPrompt(task)
+        ? (task.prompt as string)
+        : undefined,
     skip_transcript:
       'skipTranscript' in task
         ? (task.skipTranscript as boolean | undefined)
@@ -852,6 +857,126 @@ function enqueueTaskNotification(attachment: TaskAttachment): void {
 </${TASK_NOTIFICATION_TAG}>`
 
   enqueuePendingNotification({ value: message, mode: 'task-notification' })
+}
+
+/**
+ * Official 2.1.328 (#428): omit `prompt` on `task_started` when a
+ * `local_agent` task was woken by a background task notification
+ * (`promptIsNotice: true`), so desktop/web/VS Code do not show raw
+ * `<task-notification>` XML as the subagent prompt.
+ */
+export function shouldSuppressTaskStartedPrompt(task: {
+  type?: string
+  promptIsNotice?: boolean
+}): boolean {
+  return task.type === 'local_agent' && task.promptIsNotice === true
+}
+
+export type SweptBackgroundAgentNotification = {
+  value: string
+  mode: 'task-notification'
+  shouldQuery: false
+  isMeta: true
+  skipAttachments: true
+  priority: 'next'
+  taskId: string
+  userStopNotice: true
+}
+
+/**
+ * Official 2.1.328 (#593) `fae` / `mMr` / `task_swept_agent_notice`:
+ * When an SDK interrupt sweeps running background `local_agent` tasks owned by
+ * the main thread, enqueue a `task-notification` for each stopped agent so the
+ * model knows the agent was stopped and does not claim it is still running.
+ */
+export function notifySweptBackgroundAgents(
+  tasks: Readonly<Record<string, TaskState>>,
+  setAppState: SetAppState,
+  opts?: {
+    reason?: string
+    sweptIds?: Iterable<string>
+    enqueue?: (notification: SweptBackgroundAgentNotification) => void
+    emitTerminatedSdk?: typeof emitTaskTerminatedSdk
+  },
+): string[] {
+  const enqueue = opts?.enqueue ?? enqueuePendingNotification
+  const emitTerminated = opts?.emitTerminatedSdk ?? emitTaskTerminatedSdk
+  const reason = opts?.reason ?? 'was stopped by user interrupt'
+  const sweptIdSet = opts?.sweptIds ? new Set(opts.sweptIds) : null
+  const mainAgentId = String(getMainThreadAgentId())
+  const notifiedIds: string[] = []
+
+  for (const task of Object.values(tasks)) {
+    if (sweptIdSet && !sweptIdSet.has(task.id)) continue
+    if (task.type !== 'local_agent') continue
+    if (task.status !== 'running' && task.status !== 'killed') continue
+    if (task.notified) continue
+    if ('isBackgrounded' in task && !task.isBackgrounded) continue
+    const ownerAgentId =
+      'ownerAgentId' in task
+        ? (task.ownerAgentId as string | undefined)
+        : undefined
+    if (
+      ownerAgentId !== undefined &&
+      ownerAgentId !== 'main' &&
+      ownerAgentId !== mainAgentId
+    ) {
+      continue
+    }
+
+    const outputPath = getTaskOutputPath(task.id)
+    const summary = `Agent "${task.description}" ${reason}`
+    const toolUseIdLine = task.toolUseId
+      ? `\n<${TOOL_USE_ID_TAG}>${escapeXml(task.toolUseId)}</${TOOL_USE_ID_TAG}>`
+      : ''
+    const message = `<${TASK_NOTIFICATION_TAG}>
+<${TASK_ID_TAG}>${escapeXml(task.id)}</${TASK_ID_TAG}>${toolUseIdLine}
+<${TASK_TYPE_TAG}>${escapeXml(task.type)}</${TASK_TYPE_TAG}>
+<${OUTPUT_FILE_TAG}>${escapeXml(outputPath)}</${OUTPUT_FILE_TAG}>
+<${STATUS_TAG}>killed</${STATUS_TAG}>
+<${SUMMARY_TAG}>${escapeXml(summary)}</${SUMMARY_TAG}>
+</${TASK_NOTIFICATION_TAG}>`
+
+    // Because we mark `notified: true` below (preventing enqueueAgentNotification
+    // from emitting later), emit the once-gated SDK `system/task_notification`
+    // termination event here so SDK/Desktop/VS Code hosts transition the agent
+    // out of `running` on `interrupt` / `end_session`.
+    emitTerminated(task.id, 'stopped', {
+      toolUseId: task.toolUseId,
+      outputFile: outputPath,
+      summary,
+    })
+
+    enqueue({
+      value: message,
+      mode: 'task-notification',
+      shouldQuery: false,
+      isMeta: true,
+      skipAttachments: true,
+      priority: 'next',
+      taskId: task.id,
+      userStopNotice: true,
+    })
+    notifiedIds.push(task.id)
+  }
+
+  if (notifiedIds.length > 0) {
+    const idSet = new Set(notifiedIds)
+    setAppState(prev => {
+      let changed = false
+      const nextTasks = { ...prev.tasks }
+      for (const id of idSet) {
+        const current = nextTasks[id]
+        if (current && !current.notified) {
+          nextTasks[id] = { ...current, notified: true }
+          changed = true
+        }
+      }
+      return changed ? { ...prev, tasks: nextTasks } : prev
+    })
+  }
+
+  return notifiedIds
 }
 
 /**

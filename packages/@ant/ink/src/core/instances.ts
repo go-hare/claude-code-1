@@ -61,6 +61,8 @@ export function resetInkSessionHostForTests(): void {
  */
 class InkInstancesMap extends Map<NodeJS.WriteStream, Ink> {
   standaloneRender: Promise<unknown> | null = null
+  /** Official 2.1.327 (#448/#449): last Ink instance restored during shutdown so drainStdin still works after detach. */
+  restoredAtExit: Ink | undefined = undefined
   /** densable `it.treeRoots` — stdout → Ink for `tree()` roots. */
   readonly treeRoots = new Map<NodeJS.WriteStream, Ink>()
 
@@ -222,6 +224,7 @@ export function resetDualInkCurrentForTests(): void {
 export function resetEverMountedForTests(): void {
   everMountedFlag = false
   instances.standaloneRender = null
+  instances.restoredAtExit = undefined
   instances.treeRoots.clear()
   instances.clear()
   resetInkSessionHostForTests()

@@ -11,7 +11,7 @@ import {
 import type { LocalJSXCommandContext } from '../../commands.js';
 import { ANTHROPIC_API_KEY_NOT_USED_HINT, isAnthropicApiKeyEnvUnused } from '../../commands/login/getAuthStatus.js';
 import { useIsInsideModal } from '../../context/modalContext.js';
-import { Box, Text, useTheme } from '@anthropic/ink';
+import { Box, Text, useModalOrTerminalSize, useTerminalSize, useTheme } from '@anthropic/ink';
 import { type AppState, useAppState } from '../../state/AppState.js';
 import { getCwd } from '../../utils/cwd.js';
 import { serverCheckDeclined } from '../../services/api/autoModeServerFallbackNotice.js';
@@ -19,6 +19,7 @@ import { getCurrentSessionTitle } from '../../utils/sessionStorage.js';
 import {
   buildAccountProperties,
   buildAPIProviderProperties,
+  buildConfigAndFileDiagnostics,
   buildDisabledFeaturesProperties,
   buildIDEProperties,
   buildInstallationDiagnostics,
@@ -125,13 +126,21 @@ function buildSecondarySection({
   ];
 }
 
-export async function buildDiagnostics(): Promise<Diagnostic[]> {
+export async function buildDiagnostics(context?: LocalJSXCommandContext): Promise<Diagnostic[]> {
   // Official 2.1.326 #210: deduplicate repeated installation warnings.
+  // Official 2.1.327 #371 + 2.1.328 #544: include broken agent/skill/command/output-style files,
+  // keybinding warnings, unavailable sandbox, ignored permission settings, never-matching hooks,
+  // and OTLP missing-endpoint notices.
+  const failedAgentFiles = context?.getAppState?.()?.agentDefinitions?.failedFiles;
   return deduplicateDiagnostics([
     ...(await buildInstallationDiagnostics()),
     ...(await buildInstallationHealthDiagnostics()),
     ...(await buildMemoryDiagnostics()),
     ...buildTelemetryDiagnostics(),
+    ...buildConfigAndFileDiagnostics({
+      failedAgentFiles,
+      commands: context?.options?.commands,
+    }),
   ]);
 }
 
@@ -162,8 +171,19 @@ export function Status({ context, diagnosticsPromise }: Props): React.ReactNode 
   const mainLoopModel = useAppState(s => s.mainLoopModel);
   const mcp = useAppState(s => s.mcp);
   const permissionMode = useAppState(s => s.toolPermissionContext.mode);
+  const failedAgentFiles = useAppState(s => s.agentDefinitions.failedFiles);
   const [theme] = useTheme();
+  const { columns } = useModalOrTerminalSize(useTerminalSize());
+  const isNarrow = columns < 50;
   const [githubWeb, setGithubWeb] = useState<Property | null>(null);
+  const liveConfigDiagnostics = React.useMemo(
+    () =>
+      buildConfigAndFileDiagnostics({
+        failedAgentFiles,
+        commands: context.options.commands,
+      }),
+    [failedAgentFiles, context.options.commands],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -211,9 +231,16 @@ export function Status({ context, diagnosticsPromise }: Props): React.ReactNode 
             properties.length > 0 && (
               <Box key={i} flexDirection="column">
                 {properties.map(({ label, value, linkify }, j) => (
-                  <Box key={j} flexDirection="row" gap={1} flexShrink={0}>
+                  <Box
+                    key={j}
+                    flexDirection={isNarrow && label !== undefined ? 'column' : 'row'}
+                    gap={isNarrow ? 0 : 1}
+                    flexShrink={0}
+                  >
                     {label !== undefined && <Text bold>{label}:</Text>}
-                    <PropertyValue value={value} linkify={linkify} />
+                    <Box minWidth={0} flexShrink={1} paddingLeft={isNarrow && label !== undefined ? 2 : 0}>
+                      <PropertyValue value={value} linkify={linkify} />
+                    </Box>
                   </Box>
                 ))}
               </Box>
@@ -221,7 +248,7 @@ export function Status({ context, diagnosticsPromise }: Props): React.ReactNode 
         )}
 
         <Suspense fallback={null}>
-          <Diagnostics promise={diagnosticsPromise} />
+          <Diagnostics promise={diagnosticsPromise} extraDiagnostics={liveConfigDiagnostics} />
         </Suspense>
       </Box>
       <Text dimColor>
@@ -231,8 +258,14 @@ export function Status({ context, diagnosticsPromise }: Props): React.ReactNode 
   );
 }
 
-function Diagnostics({ promise }: { promise: Promise<Diagnostic[]> }): React.ReactNode {
-  const diagnostics = use(promise);
+function Diagnostics({
+  promise,
+  extraDiagnostics = [],
+}: {
+  promise: Promise<Diagnostic[]>;
+  extraDiagnostics?: Diagnostic[];
+}): React.ReactNode {
+  const diagnostics = deduplicateDiagnostics([...use(promise), ...extraDiagnostics]);
   if (diagnostics.length === 0) return null;
   return (
     <Box flexDirection="column" paddingBottom={1}>

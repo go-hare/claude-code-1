@@ -453,6 +453,9 @@ export const CMDLET_ALLOWLIST: Record<string, CommandConfig> = Object.assign(
         '-FullyQualifiedName',
         '-PSEdition',
       ],
+      // Official 2.1.327 #509 (`V1r()` @313511934): Get-Module can load module
+      // manifests which execute arbitrary code; no longer auto-allowed as RO.
+      additionalCommandIsDangerousCallback: () => true,
     },
     // SECURITY: Get-Help REMOVED from allowlist. Same module autoload hazard
     // as Get-Command (-Name has ValueFromPipeline=true, pipeline input bypasses

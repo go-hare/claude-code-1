@@ -14,6 +14,7 @@ import type { ImageDimensions } from '../../../utils/imageResizer.js';
 import { editPromptInEditor } from '../../../utils/promptEditor.js';
 import { updateLastInteractionTime } from '../../../bootstrap/state.js';
 import { isScreenReaderModeEnabled } from '../../../utils/screenReaderGate.js';
+import { ConfigurableShortcutHint } from '../../ConfigurableShortcutHint.js';
 import { type OptionWithDescription, Select, SelectMulti } from '../../CustomSelect/index.js';
 import { FilePathLink } from '../../FilePathLink.js';
 import { PermissionPreviewGutter } from '../PermissionPreviewGutter.js';
@@ -357,7 +358,12 @@ export function QuestionView({
                       <Text>Tab/Arrow keys to navigate</Text>
                     )}
                     {isOtherFocused && editorName && (
-                      <KeyboardShortcutHint shortcut="ctrl+g" action={`edit in ${editorName}`} />
+                      <ConfigurableShortcutHint
+                        action="chat:externalEditor"
+                        context="Chat"
+                        fallback="ctrl+g"
+                        description={`edit in ${editorName}`}
+                      />
                     )}
                     <KeyboardShortcutHint shortcut="Esc" action="cancel" />
                   </Byline>

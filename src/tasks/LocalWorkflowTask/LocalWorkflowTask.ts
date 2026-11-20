@@ -76,6 +76,8 @@ export type LocalWorkflowTaskState = TaskStateBase & {
   error?: string
   /** Engine run id (may equal task id when not resumed). densable workflowRunId. */
   workflowRunId?: string
+  /** Official 2.1.327 #388: rate-limit wait status while workflow is paused at a usage limit. */
+  rateLimitWait?: WorkflowRateLimitWaitStatus
   /** Agent that spawned this task. Used for orphan cleanup. */
   agentId?: AgentId
   /** Abort controller for cancellation. */
@@ -565,6 +567,7 @@ export function killWorkflowTask(
       evictAfter: now + WORKFLOW_PANEL_GRACE_MS,
       notified: true,
       abortController: undefined,
+      rateLimitWait: undefined,
     }
   })
   if (detached) {
@@ -720,6 +723,156 @@ export function adoptCarriedWorkflowNeedsConsent(
     )
     return false
   }
+}
+
+/**
+ * Official 2.1.327 #388 (`Pe`): notice shown when a workflow paused at a usage
+ * limit is held because the user's login changed or ended.
+ */
+export const WORKFLOW_HELD_FOR_LOGIN_NOTICE =
+  'Workflow paused · your login changed or ended · a prompt continues it on the current login · /workflows to stop it'
+
+export type WorkflowRateLimitWaitStatus = {
+  resetsAt: number
+  resumeAtMs: number
+  waitingAgents: number
+  /** Account/login identity active when the workflow paused at the usage limit. */
+  armedFor?: string | null
+  /** True while held because the login changed or ended after pausing. */
+  isHeldForLogin?: boolean
+  /** Human prompt counter snapshot when hold began. */
+  promptsAtHold?: number
+}
+
+export type WorkflowLoginCheckRelation = 'same' | 'other' | 'missing'
+
+/**
+ * Official 2.1.327 #388: evaluate whether a workflow paused at a usage limit
+ * must stay held after a login change, or whether it may resume (either because
+ * the earlier login returned or because the user typed a new prompt).
+ */
+export function evaluateWorkflowRateLimitLoginHold(opts: {
+  status: WorkflowRateLimitWaitStatus
+  loginRelation: WorkflowLoginCheckRelation
+  humanPrompts: number
+  nowMs: number
+  isInteractiveTerminal?: boolean
+}): {
+  isHeldForLogin: boolean
+  shouldResumeNow: boolean
+  shouldAnnounceHeld: boolean
+  nextStatus: WorkflowRateLimitWaitStatus
+} {
+  const {
+    status,
+    loginRelation,
+    humanPrompts,
+    nowMs,
+    isInteractiveTerminal = true,
+  } = opts
+  const remainingMs = status.resumeAtMs - nowMs
+  const wasHeld = status.isHeldForLogin === true
+  let isHeld = wasHeld
+
+  if (isInteractiveTerminal) {
+    isHeld =
+      loginRelation === 'other' ||
+      (loginRelation === 'missing' && (wasHeld || remainingMs <= 0))
+  }
+
+  const enteredHold = isHeld && !wasHeld
+  const promptsAtHold = enteredHold
+    ? humanPrompts
+    : isHeld
+      ? (status.promptsAtHold ?? humanPrompts)
+      : undefined
+  const userTypedPrompt =
+    isHeld && promptsAtHold !== undefined && humanPrompts > promptsAtHold
+  const shouldResumeNow = isHeld ? userTypedPrompt : remainingMs <= 0
+
+  return {
+    isHeldForLogin: isHeld,
+    shouldResumeNow,
+    shouldAnnounceHeld: enteredHold,
+    nextStatus: {
+      ...status,
+      isHeldForLogin: isHeld,
+      ...(promptsAtHold !== undefined ? { promptsAtHold } : {}),
+    },
+  }
+}
+
+export function setWorkflowRateLimitWait(
+  taskId: string,
+  waitStatus: WorkflowRateLimitWaitStatus | undefined,
+  setAppState: SetAppState,
+): void {
+  updateTaskState<LocalWorkflowTaskState>(taskId, setAppState, task => {
+    if (task.type !== 'local_workflow') return task
+    return {
+      ...task,
+      rateLimitWait: waitStatus,
+    }
+  })
+}
+
+/**
+ * Official 2.1.327 #388: reconcile all paused/waiting local_workflow tasks
+ * against the current login relation and human prompt counter, updating each
+ * task's `rateLimitWait` via `setWorkflowRateLimitWait` (clearing it when the
+ * workflow may resume, or persisting the login-hold state when held).
+ */
+export function reconcileWorkflowRateLimitWaitOnEvent(opts: {
+  tasks: Readonly<Record<string, unknown>>
+  loginRelation: WorkflowLoginCheckRelation
+  humanPrompts: number
+  nowMs?: number
+  isInteractiveTerminal?: boolean
+  setAppState: SetAppState
+}): {
+  anyHeld: boolean
+  shouldAnnounceHeld: boolean
+  resumedTaskIds: string[]
+} {
+  const nowMs = opts.nowMs ?? Date.now()
+  let anyHeld = false
+  let shouldAnnounceHeld = false
+  const resumedTaskIds: string[] = []
+
+  for (const task of Object.values(opts.tasks)) {
+    if (!isLocalWorkflowTask(task)) continue
+    const waitStatus: WorkflowRateLimitWaitStatus | undefined =
+      task.rateLimitWait ??
+      (task.status === 'paused'
+        ? {
+            resetsAt: Math.floor(nowMs / 1000),
+            resumeAtMs: nowMs,
+            waitingAgents: Math.max(1, task.agentCount),
+          }
+        : undefined)
+    if (!waitStatus) continue
+    const evaluated = evaluateWorkflowRateLimitLoginHold({
+      status: waitStatus,
+      loginRelation: opts.loginRelation,
+      humanPrompts: opts.humanPrompts,
+      nowMs,
+      isInteractiveTerminal: opts.isInteractiveTerminal,
+    })
+    if (evaluated.isHeldForLogin) {
+      anyHeld = true
+    }
+    if (evaluated.shouldAnnounceHeld) {
+      shouldAnnounceHeld = true
+    }
+    if (evaluated.shouldResumeNow) {
+      setWorkflowRateLimitWait(task.id, undefined, opts.setAppState)
+      resumedTaskIds.push(task.id)
+    } else {
+      setWorkflowRateLimitWait(task.id, evaluated.nextStatus, opts.setAppState)
+    }
+  }
+
+  return { anyHeld, shouldAnnounceHeld, resumedTaskIds }
 }
 
 export const LocalWorkflowTask: Task = {

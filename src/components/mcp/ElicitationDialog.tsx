@@ -4,12 +4,15 @@ import { useRegisterOverlay } from '../../context/overlayContext.js';
 import { useNotifyAfterTimeout } from '../../hooks/useNotifyAfterTimeout.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw text input for elicitation form
-import { Box, Text, useInput, useIsInsideModal, useModalOrTerminalSize } from '@anthropic/ink';
+import { Box, stringWidth, Text, useInput, useIsInsideModal, useModalOrTerminalSize } from '@anthropic/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import { useSwarmBanner } from '../PromptInput/useSwarmBanner.js';
 import { isFullscreenActive } from '../../utils/fullscreen.js';
 import {
+  ELICITATION_H_CHROME,
   ELICITATION_LINES_PER_FIELD,
+  ELICITATION_MESSAGE_MAX_LINES,
+  ELICITATION_MIN_WIDTH,
   clampElicitationText,
   computeElicitationAvailableRows,
   computeElicitationFieldWindow,
@@ -24,8 +27,8 @@ import {
   elicitationSubtitlePad,
   elicitationValueWidth,
   formatElicitationTitle,
-  wrapElicitationMessage,
 } from './elicitationLayout.js';
+import { truncateToWidth } from '../../utils/truncate.js';
 import type { ElicitationRequestEvent } from '../../services/mcp/elicitationHandler.js';
 import type {
   ElicitRequestFormParams,
@@ -90,6 +93,69 @@ export function parseRelatedTaskMetadata(meta: Record<string, unknown> | undefin
     return { taskId: (raw as { taskId: string }).taskId };
   }
   return null;
+}
+
+/**
+ * Official 2.1.327 (#464): word-wrap long MCP elicitation questions across up
+ * to `maxLines` lines instead of truncating single-line paragraphs after 1 row.
+ */
+export function wrapElicitationMessageMultiline(
+  text: string,
+  columns: number,
+  maxLines = ELICITATION_MESSAGE_MAX_LINES + 1,
+): string {
+  const width = Math.max(ELICITATION_MIN_WIDTH, columns - ELICITATION_H_CHROME);
+  const wrappedLines: string[] = [];
+
+  for (const rawLine of text.split('\n')) {
+    if (stringWidth(rawLine) <= width) {
+      wrappedLines.push(rawLine);
+      continue;
+    }
+    let remaining = rawLine;
+    while (stringWidth(remaining) > width) {
+      let splitAt = -1;
+      let accWidth = 0;
+      for (let i = 0; i < remaining.length; i++) {
+        const ch = remaining[i]!;
+        const w = stringWidth(ch);
+        if (accWidth + w > width) break;
+        accWidth += w;
+        if (ch === ' ' || ch === '\t') {
+          splitAt = i;
+        }
+      }
+      if (splitAt > 0) {
+        wrappedLines.push(remaining.slice(0, splitAt).trimEnd());
+        remaining = remaining.slice(splitAt + 1).trimStart();
+      } else {
+        // Hard-break a single long token that exceeds `width`
+        let take = 0;
+        let tokWidth = 0;
+        for (const ch of remaining) {
+          const w = stringWidth(ch);
+          if (tokWidth + w > width && take > 0) break;
+          tokWidth += w;
+          take += ch.length;
+        }
+        wrappedLines.push(remaining.slice(0, take));
+        remaining = remaining.slice(take);
+      }
+    }
+    if (remaining.length > 0) {
+      wrappedLines.push(remaining);
+    }
+  }
+
+  if (wrappedLines.length <= maxLines) {
+    return wrappedLines.join('\n');
+  }
+  if (maxLines <= 1) {
+    const suffix = ` \u2026 (+${wrappedLines.length - 1} more lines)`;
+    return truncateToWidth(wrappedLines[0] ?? '', Math.max(1, width - stringWidth(suffix))) + suffix;
+  }
+  const keep = maxLines - 1;
+  return `${wrappedLines.slice(0, keep).join('\n')}\n\u2026 (+${wrappedLines.length - keep} more lines)`;
 }
 
 /** Form property schemas may carry optional `default` (not on every PrimitiveSchema branch). */
@@ -871,7 +937,7 @@ function ElicitationFormDialog({
     schemaFields.length,
     subtitlePad,
   );
-  const wrappedMessage = wrapElicitationMessage(message, columns, messageLineBudget);
+  const wrappedMessage = wrapElicitationMessageMultiline(message, columns, messageLineBudget);
   const subtitle = wrappedMessage ? (subtitlePad ? `\n${wrappedMessage}` : wrappedMessage) : undefined;
   const remainingRows = elicitationRemainingRows(availableRows, subtitlePad, wrappedMessage, schemaFields.length);
   const expandedField =

@@ -1,12 +1,18 @@
 import { execa } from 'execa'
 import { execSync_DEPRECATED } from './execSyncWrapper.js'
-import { resolveWindowsExecutableOnPath } from './windowsPaths.js'
+
+function resolveWindowsExecutable(command: string): string | null {
+  const { resolveWindowsExecutableOnPath } =
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    require('./windowsPaths.js') as typeof import('./windowsPaths.js')
+  return resolveWindowsExecutableOnPath(command)
+}
 
 async function whichNodeAsync(command: string): Promise<string | null> {
   if (process.platform === 'win32') {
     // Official 2.1.321 #1925 & #1944: in-process PATH+PATHEXT lookup skipping
     // relative/UNC entries and network-share links, picking up settings PATH.
-    return resolveWindowsExecutableOnPath(command)
+    return resolveWindowsExecutable(command)
   }
 
   // On POSIX systems (macOS, Linux, WSL), use which
@@ -27,7 +33,7 @@ function whichNodeSync(command: string): string | null {
   if (process.platform === 'win32') {
     // Official 2.1.321 #1925 & #1944: in-process PATH+PATHEXT lookup without
     // spawning where.exe.
-    return resolveWindowsExecutableOnPath(command)
+    return resolveWindowsExecutable(command)
   }
 
   try {
@@ -57,7 +63,7 @@ export const which: (command: string) => Promise<string | null> = async (
   command: string,
 ) => {
   if (process.platform === 'win32') {
-    return resolveWindowsExecutableOnPath(command)
+    return resolveWindowsExecutable(command)
   }
   return bunWhich ? bunWhich(command) : whichNodeAsync(command)
 }
@@ -69,7 +75,7 @@ export const whichSync: (command: string) => string | null = (
   command: string,
 ) => {
   if (process.platform === 'win32') {
-    return resolveWindowsExecutableOnPath(command)
+    return resolveWindowsExecutable(command)
   }
   return bunWhich ? bunWhich(command) : whichNodeSync(command)
 }

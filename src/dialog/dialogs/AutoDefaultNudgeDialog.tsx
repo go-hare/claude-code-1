@@ -4,9 +4,14 @@
  * & #26 (capture stray typing over dialog and lock Enter until navigation).
  */
 import React, { useEffect, useRef, useState } from 'react';
-import { Box, Dialog, Text, useInput } from '@anthropic/ink';
+import { Box, Dialog, type PasteEvent, Text, useInput } from '@anthropic/ink';
 import { CONFIRM_SELECT_ARM_MS, confirmSelectRefused } from '../../components/ConfirmSelect.js';
 import { Select } from '../../components/CustomSelect/index.js';
+import {
+  type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+  logEvent,
+} from '../../services/analytics/index.js';
+import { type PermissionMode, permissionModeTitle } from '../../utils/permissions/PermissionMode.js';
 
 export type AutoDefaultNudgeResult = 'accepted' | 'declined' | 'cancelled';
 
@@ -66,7 +71,6 @@ type Props = {
 
 export function AutoDefaultNudgeDialog({ currentMode, onAnswer }: Props): React.ReactNode {
   const [openedAt] = useState(() => Date.now());
-  const [armed, setArmed] = useState(false);
   const guardRef = useRef<StrayTypingGuard | null>(null);
   if (guardRef.current === null) {
     guardRef.current = createAutoDefaultNudgeStrayTypingGuard();
@@ -74,11 +78,15 @@ export function AutoDefaultNudgeDialog({ currentMode, onAnswer }: Props): React.
   const [capturedDraft, setCapturedDraft] = useState('');
   const [enterLocked, setEnterLocked] = useState(false);
 
-  // Official 2.1.326 #25: arm after CONFIRM_SELECT_ARM_MS so a stray Enter right after setup cannot accept.
+  const loggedShownRef = useRef(false);
   useEffect(() => {
-    const timer = setTimeout(() => setArmed(true), CONFIRM_SELECT_ARM_MS);
-    return () => clearTimeout(timer);
-  }, []);
+    if (loggedShownRef.current) return;
+    loggedShownRef.current = true;
+    logEvent('tengu_auto_default_nudge_shown', {
+      current_mode: (currentMode ?? 'default') as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      surface: 'repl' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    });
+  }, [currentMode]);
 
   // Stash any captured stray typing so REPL delivers it into draftController when dialog closes (#26).
   const flushDraft = () => {
@@ -88,34 +96,54 @@ export function AutoDefaultNudgeDialog({ currentMode, onAnswer }: Props): React.
     }
   };
 
-  useInput((input, key) => {
+  const handlePaste = (event: PasteEvent) => {
+    const text = event.text;
+    if (!text) return;
     const guard = guardRef.current!;
-    if (key.upArrow || key.downArrow) {
-      guard.unlockByNavigation();
-      setEnterLocked(false);
-      return;
-    }
-    if (key.backspace || key.delete) {
-      if (guard.getDraft().length > 0) {
-        guard.backspace();
-        setCapturedDraft(guard.getDraft());
+    guard.capturePrintable(text);
+    setCapturedDraft(guard.getDraft());
+    setEnterLocked(true);
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+
+  useInput(
+    (input, key, event) => {
+      const guard = guardRef.current!;
+      if (key.upArrow || key.downArrow) {
+        guard.unlockByNavigation();
+        setEnterLocked(false);
+        return;
       }
-      return;
-    }
-    if (
-      !key.ctrl &&
-      !key.meta &&
-      !key.return &&
-      !key.escape &&
-      !key.tab &&
-      input.length > 0 &&
-      !/\p{Cc}/u.test(input)
-    ) {
-      guard.capturePrintable(input);
-      setCapturedDraft(guard.getDraft());
-      setEnterLocked(true);
-    }
-  });
+      if (key.return && guard.isEnterLocked()) {
+        event.stopImmediatePropagation();
+        return;
+      }
+      if (key.backspace || key.delete) {
+        if (guard.getDraft().length > 0) {
+          guard.backspace();
+          setCapturedDraft(guard.getDraft());
+          event.stopImmediatePropagation();
+        }
+        return;
+      }
+      if (
+        !key.ctrl &&
+        !key.meta &&
+        !key.return &&
+        !key.escape &&
+        !key.tab &&
+        input.length > 0 &&
+        !/\p{Cc}/u.test(input)
+      ) {
+        guard.capturePrintable(input);
+        setCapturedDraft(guard.getDraft());
+        setEnterLocked(true);
+        event.stopImmediatePropagation();
+      }
+    },
+    { prepend: true },
+  );
 
   const isRefused = () => confirmSelectRefused(openedAt, CONFIRM_SELECT_ARM_MS, Date.now());
 
@@ -130,25 +158,28 @@ export function AutoDefaultNudgeDialog({ currentMode, onAnswer }: Props): React.
     onAnswer(result);
   };
 
+  const currentModeLabel = permissionModeTitle((currentMode ?? 'default') as PermissionMode);
+
   return (
-    <Dialog title="Try auto mode as your default?" color="warning" onCancel={() => finish('cancelled')}>
-      <Box flexDirection="column" gap={1}>
+    <Dialog title="Make auto mode your default permission mode?" color="warning" onCancel={() => finish('declined')}>
+      <Box flexDirection="column" gap={1} onPaste={handlePaste}>
         <Text>
-          Auto mode can handle routine permission prompts for you
-          {currentMode ? ` (current mode: ${currentMode})` : ''}.
+          Auto mode lets Claude handle permission prompts automatically. Claude checks each tool call for risky actions
+          and prompt injection before executing, runs the ones it assesses as lower-risk, and blocks the rest.
         </Text>
         {capturedDraft.length > 0 ? <Text dimColor>Saved to prompt draft: {capturedDraft}</Text> : null}
         {enterLocked ? <Text dimColor>Use ↑/↓ to choose an option, or Esc to dismiss and keep typing.</Text> : null}
         <Select
           options={[
-            { value: 'accepted', label: 'Yes, set auto as default' },
-            { value: 'declined', label: 'Not now' },
+            { value: 'accepted', label: 'Yes, set auto mode as my default permission mode' },
+            { value: 'declined', label: `No, keep ${currentModeLabel}` },
           ]}
-          isDisabled={!armed}
+          hideIndexes
+          refuseInput={isRefused}
           disablePrintableKeybindings
           declineValue="declined"
           onChange={value => finish(value as 'accepted' | 'declined')}
-          onCancel={() => finish('cancelled')}
+          onCancel={() => finish('declined')}
         />
       </Box>
     </Dialog>

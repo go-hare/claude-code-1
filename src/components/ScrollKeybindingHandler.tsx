@@ -561,8 +561,11 @@ export function computeWheelStep(state: WheelAccelState, dir: 1 | -1, now: numbe
     }
 
     // Device-switch guard ①: idle disengage.
-    if (state.wheelMode && now - state.time > WHEEL_MODE_IDLE_DISENGAGE_MS) {
+    // Official 2.1.328 (#596): reset dir alongside wheelMode after an idle
+    // pause so the first opposite-direction wheel notch is not swallowed.
+    if (now - state.time > WHEEL_MODE_IDLE_DISENGAGE_MS) {
       state.wheelMode = false;
+      state.dir = 0;
       state.burstCount = 0;
       state.mult = state.base;
     }

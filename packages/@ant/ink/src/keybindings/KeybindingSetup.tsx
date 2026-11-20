@@ -17,6 +17,7 @@ import type { DOMElement } from '../core/dom.js';
 import { reclaimIfNullOrAncestor } from '../hooks/use-focus-reclaim.js';
 import useStdin from '../hooks/use-stdin.js';
 import { KeybindingProvider } from './KeybindingContext.js';
+import { formatChords, shortcutFormatPlatform } from './formatChord.js';
 import { resolveKeyWithChordState } from './resolver.js';
 // ChordInterceptor intentionally uses useInput to intercept all keystrokes before
 // other handlers process them - this is required for chord sequence support
@@ -31,10 +32,20 @@ import type {
 } from './types.js';
 
 /**
- * Timeout for chord sequences in milliseconds.
+ * Timeout for chord sequences in milliseconds (official 2.1.328 `Ze`: `Je = 3000`).
  * If the user doesn't complete the chord within this time, it's cancelled.
  */
-const CHORD_TIMEOUT_MS = 1000;
+export const CHORD_TIMEOUT_MS = 3000;
+
+export type ChordTimeoutNotification = {
+  pending: ParsedKeystroke[];
+  key: 'chord-timeout';
+  kind: 'feedback';
+  text: string;
+  row1Hint: string;
+  priority: 'immediate';
+  timeoutMs: number;
+};
 
 /** densable kmo `J` — KeyboardEvent.name → Key flag. */
 const KEYBOARD_NAME_TO_FLAG: Record<string, keyof Key> = {
@@ -81,8 +92,9 @@ function kmo(event: KeyboardEvent): { input: string; key: Key } {
     super: event.superKey,
     meta: event.meta,
   };
+  const shortcutKey = event.shortcutKey;
   return {
-    input: event.name === 'enter' ? '\n' : [...event.key].length === 1 ? event.key : '',
+    input: event.name === 'enter' ? '\n' : [...shortcutKey].length === 1 ? shortcutKey : '',
     key,
   };
 }
@@ -110,7 +122,16 @@ export type KeybindingSetupProps = {
 
   /** Optional debug logger */
   onDebugLog?: (message: string) => void;
+
+  /**
+   * Optional callback invoked when a pending chord times out after CHORD_TIMEOUT_MS
+   * (official 2.1.328 `Ze` `chord-timeout` feedback notification).
+   */
+  onChordTimeout?: (notification: ChordTimeoutNotification) => void;
 };
+
+/** Track InputEvents already chord-checked during capture phase so ChordInterceptor does not double-process them. */
+const captureCheckedEvents = new WeakSet<InputEvent>();
 
 export function KeybindingSetup({
   children,
@@ -119,6 +140,7 @@ export function KeybindingSetup({
   initWatcher,
   onWarnings,
   onDebugLog,
+  onChordTimeout,
 }: KeybindingSetupProps): React.ReactNode {
   // Load bindings synchronously for initial render
   const [loadResult, setLoadResult] = useState<KeybindingsLoadResult>(() => {
@@ -183,14 +205,29 @@ export function KeybindingSetup({
       if (pending !== null) {
         // Set timeout to cancel chord if not completed
         chordTimeoutRef.current = setTimeout(
-          (pendingChordRef, setPendingChordState) => {
+          (pendingChordRef, setPendingChordState, timedOutPending) => {
             onDebugLog?.('[keybindings] Chord timeout - cancelling');
             pendingChordRef.current = null;
             setPendingChordState(null);
+            if (onChordTimeout) {
+              const chordDisplay = formatChords([timedOutPending], {
+                platform: shortcutFormatPlatform(),
+              });
+              onChordTimeout({
+                pending: timedOutPending,
+                key: 'chord-timeout',
+                kind: 'feedback',
+                text: `${chordDisplay} cancelled · no next key within ${CHORD_TIMEOUT_MS / 1000}s`,
+                row1Hint: `${chordDisplay} timed out`,
+                priority: 'immediate',
+                timeoutMs: CHORD_TIMEOUT_MS,
+              });
+            }
           },
           CHORD_TIMEOUT_MS,
           pendingChordRef,
           setPendingChordState,
+          pending,
         );
       }
 
@@ -199,7 +236,7 @@ export function KeybindingSetup({
       // Update state to trigger re-renders for UI updates
       setPendingChordState(pending);
     },
-    [clearChordTimeout, onDebugLog],
+    [clearChordTimeout, onDebugLog, onChordTimeout],
   );
 
   useEffect(() => {
@@ -243,15 +280,80 @@ export function KeybindingSetup({
     reclaim();
     return fm.subscribe(reclaim);
   }, []);
-  // densable Yt `G` — kmo + L. Fork L is ChordInterceptor via InputEvent;
-  // only `it()` when the chord path consumes (stopImmediate). Empty capture
-  // would eat keys. App keyboard path is dispatchKeyboardEvent only (no
-  // second InputEvent emit).
+  // Shared chord interception logic used in capture phase (ahead of ALL
+  // EventEmitter listeners including `{ prepend: true }`, matching official Gt)
+  // and as a fallback in ChordInterceptor for synthetic direct 'input' emits.
+  const interceptChord = useCallback(
+    (input: string, key: Key): boolean => {
+      // Wheel events can never start chord sequences — scroll:lineUp/Down are
+      // single-key bindings handled by per-component useKeybindings hooks, not
+      // here. Skip the registry scan. Mid-chord wheel still falls through so
+      // scrolling cancels the pending chord like any other non-matching key.
+      if ((key.wheelUp || key.wheelDown) && pendingChordRef.current === null) {
+        return false;
+      }
+
+      const registry = handlerRegistryRef.current;
+      const handlerContexts = new Set<KeybindingContextName>();
+      if (registry) {
+        for (const handlers of registry.values()) {
+          for (const registration of handlers) {
+            handlerContexts.add(registration.context);
+          }
+        }
+      }
+      const contexts: KeybindingContextName[] = [...handlerContexts, ...activeContextsRef.current, 'Global'];
+      const wasInChord = pendingChordRef.current !== null;
+      const result = resolveKeyWithChordState(input, key, contexts, bindings, pendingChordRef.current);
+
+      switch (result.type) {
+        case 'chord_started':
+          setPendingChord(result.pending);
+          return true;
+
+        case 'match': {
+          setPendingChord(null);
+          if (wasInChord) {
+            const contextsSet = new Set(contexts);
+            if (registry) {
+              const handlers = registry.get(result.action);
+              if (handlers && handlers.size > 0) {
+                for (const registration of handlers) {
+                  if (contextsSet.has(registration.context)) {
+                    registration.handler();
+                    break;
+                  }
+                }
+              }
+            }
+            // Official 2.1.323 (#1990) `U`: swallow the completing key of a
+            // chord (unless wheel) even when the chord's action has no active
+            // handler in the current dialog/context.
+            return !key.wheelUp && !key.wheelDown;
+          }
+          return false;
+        }
+
+        case 'chord_cancelled':
+          setPendingChord(null);
+          return true;
+
+        case 'unbound':
+          setPendingChord(null);
+          return true;
+
+        case 'none':
+          return false;
+      }
+    },
+    [bindings, setPendingChord],
+  );
+
+  // densable Yt `G` — kmo + capture-phase chord interception ahead of
+  // `{ prepend: true }` listeners, then InputEvent dispatch.
   const handleKeyDownCapture = useCallback(
     (event: KeyboardEvent) => {
       const { input, key } = kmo(event);
-      void input;
-      void key;
       // densable: focused node's textEntry===true and a single printable key
       // is input, not a shortcut — EXCEPT mid-chord (#1990), where the second
       // key must still complete/cancel the pending chord instead of acting on
@@ -262,8 +364,13 @@ export function KeybindingSetup({
         target?.attributes?.textEntry === true &&
         event.key.length === 1 &&
         !event.ctrl &&
-        !event.meta
+        !event.meta &&
+        !event.superKey
       ) {
+        return;
+      }
+      if (interceptChord(input, key)) {
+        it(event);
         return;
       }
       const parsed: ParsedKey = {
@@ -279,18 +386,45 @@ export function KeybindingSetup({
         raw: event.sequence,
       };
       const inputEvent = new InputEvent(parsed);
+      captureCheckedEvents.add(inputEvent);
       internal_eventEmitter.emit('input', inputEvent);
       if (inputEvent.didStopImmediatePropagation()) {
         it(event);
       }
     },
-    [internal_eventEmitter],
+    [interceptChord, internal_eventEmitter],
   );
   // densable Yt `N` — onWheelCapture synthesizes wheelup/wheeldown unless
   // eo: a descendant onWheel owns the hit (ReplDiff / plugin panes).
   const handleWheelCapture = useCallback(
     (event: WheelEvent) => {
       if (wheelCaptureOwnedByDescendant(event.target, event.currentTarget, event.col, event.row)) {
+        return;
+      }
+      const wheelKey: Key = {
+        upArrow: false,
+        downArrow: false,
+        leftArrow: false,
+        rightArrow: false,
+        pageDown: false,
+        pageUp: false,
+        wheelUp: event.deltaY < 0,
+        wheelDown: event.deltaY > 0,
+        home: false,
+        end: false,
+        return: false,
+        escape: false,
+        tab: false,
+        backspace: false,
+        delete: false,
+        ctrl: event.ctrl,
+        shift: event.shift,
+        fn: false,
+        super: false,
+        meta: event.meta,
+      };
+      if (interceptChord('', wheelKey)) {
+        it(event);
         return;
       }
       const name = event.deltaY < 0 ? 'wheelup' : 'wheeldown';
@@ -307,10 +441,11 @@ export function KeybindingSetup({
         raw: '',
       };
       const inputEvent = new InputEvent(parsed);
+      captureCheckedEvents.add(inputEvent);
       internal_eventEmitter.emit('input', inputEvent);
       it(event);
     },
-    [internal_eventEmitter],
+    [interceptChord, internal_eventEmitter],
   );
 
   return (
@@ -332,13 +467,7 @@ export function KeybindingSetup({
         onKeyDownCapture={handleKeyDownCapture}
         onWheelCapture={handleWheelCapture}
       >
-        <ChordInterceptor
-          bindings={bindings}
-          pendingChordRef={pendingChordRef}
-          setPendingChord={setPendingChord}
-          activeContexts={activeContextsRef.current}
-          handlerRegistryRef={handlerRegistryRef}
-        />
+        <ChordInterceptor interceptChord={interceptChord} />
         {children}
       </Box>
     </KeybindingProvider>
@@ -346,119 +475,25 @@ export function KeybindingSetup({
 }
 
 /**
- * Global chord interceptor that registers useInput FIRST (before children).
- *
- * This component intercepts keystrokes that are part of chord sequences and
- * stops propagation before other handlers (like PromptInput) can see them.
- *
- * Without this, the second key of a chord (e.g., 'r' in "ctrl+c r") would be
- * captured by PromptInput and added to the input field before the keybinding
- * system could recognize it as completing a chord.
+ * Fallback chord interceptor for direct `internal_eventEmitter.emit('input')`
+ * paths that bypass DOM capture. Normal keyboard/wheel events are already
+ * chord-checked in capture phase before any `useInput` listener (including
+ * `{ prepend: true }`) runs.
  */
-type HandlerRegistration = {
-  action: string;
-  context: KeybindingContextName;
-  handler: () => void;
-};
-
-function ChordInterceptor({
-  bindings,
-  pendingChordRef,
-  setPendingChord,
-  activeContexts,
-  handlerRegistryRef,
-}: {
-  bindings: ParsedBinding[];
-  pendingChordRef: React.RefObject<ParsedKeystroke[] | null>;
-  setPendingChord: (pending: ParsedKeystroke[] | null) => void;
-  activeContexts: Set<KeybindingContextName>;
-  handlerRegistryRef: React.RefObject<Map<string, Set<HandlerRegistration>>>;
-}): null {
+function ChordInterceptor({ interceptChord }: { interceptChord: (input: string, key: Key) => boolean }): null {
   const handleInput = useCallback(
     (input: string, key: Key, event: InputEvent) => {
-      // Wheel events can never start chord sequences — scroll:lineUp/Down are
-      // single-key bindings handled by per-component useKeybindings hooks, not
-      // here. Skip the registry scan. Mid-chord wheel still falls through so
-      // scrolling cancels the pending chord like any other non-matching key.
-      if ((key.wheelUp || key.wheelDown) && pendingChordRef.current === null) {
+      if (captureCheckedEvents.has(event)) {
         return;
       }
-
-      // Build context list from registered handlers + activeContexts + Global
-      const registry = handlerRegistryRef.current;
-      const handlerContexts = new Set<KeybindingContextName>();
-      if (registry) {
-        for (const handlers of registry.values()) {
-          for (const registration of handlers) {
-            handlerContexts.add(registration.context);
-          }
-        }
-      }
-      const contexts: KeybindingContextName[] = [...handlerContexts, ...activeContexts, 'Global'];
-
-      // Track whether we're completing a chord (pending was non-null)
-      const wasInChord = pendingChordRef.current !== null;
-
-      // Check if this keystroke is part of a chord sequence
-      const result = resolveKeyWithChordState(input, key, contexts, bindings, pendingChordRef.current);
-
-      switch (result.type) {
-        case 'chord_started':
-          // This key starts a chord - store pending state and stop propagation
-          setPendingChord(result.pending);
-          event.stopImmediatePropagation();
-          break;
-
-        case 'match': {
-          // Clear pending state
-          setPendingChord(null);
-
-          // Only invoke handlers and stop propagation for chord completions
-          // (multi-keystroke sequences). Single-keystroke matches should propagate
-          // to per-hook handlers to avoid interfering with other input handling.
-          if (wasInChord) {
-            const contextsSet = new Set(contexts);
-            if (registry) {
-              const handlers = registry.get(result.action);
-              if (handlers && handlers.size > 0) {
-                for (const registration of handlers) {
-                  if (contextsSet.has(registration.context)) {
-                    registration.handler();
-                    break;
-                  }
-                }
-              }
-            }
-            // Official 2.1.323 (#1990) `U`: swallow the completing key of a
-            // chord (unless wheel) even when the chord's action has no active
-            // handler in the current dialog/context, so e.g. Enter in
-            // `ctrl+x enter` does not act on a dialog's text field.
-            if (!key.wheelUp && !key.wheelDown) {
-              event.stopImmediatePropagation();
-            }
-          }
-          break;
-        }
-
-        case 'chord_cancelled':
-          setPendingChord(null);
-          event.stopImmediatePropagation();
-          break;
-
-        case 'unbound':
-          setPendingChord(null);
-          event.stopImmediatePropagation();
-          break;
-
-        case 'none':
-          // No chord involvement - let other handlers process
-          break;
+      if (interceptChord(input, key)) {
+        event.stopImmediatePropagation();
       }
     },
-    [bindings, pendingChordRef, setPendingChord, activeContexts, handlerRegistryRef],
+    [interceptChord],
   );
 
-  useInput(handleInput);
+  useInput(handleInput, { prepend: true });
 
   return null;
 }

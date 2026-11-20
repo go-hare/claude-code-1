@@ -6,6 +6,7 @@ import { feature } from 'bun:bundle'
 import { randomUUID, type UUID } from 'crypto'
 import { getReplBridgeHandle } from '../../bridge/replBridgeHandle.js'
 import {
+  getIsRemoteMode,
   getLastMainRequestId,
   getOriginalCwd,
   getSessionId,
@@ -47,6 +48,8 @@ import {
   flushSessionStorage,
   getAgentTranscriptPath,
   getCurrentSessionTitle,
+  hasInternalEventWriter,
+  isTranscriptPersistenceDisabled,
   resetSessionFilePointer,
   saveWorktreeState,
 } from '../../utils/sessionStorage.js'
@@ -55,10 +58,65 @@ import {
   initTaskOutputAsSymlink,
 } from '../../utils/task/diskOutput.js'
 import { resetImageRereadState } from '../../utils/subagentCacheEvict.js'
+import {
+  getOwnTaskListId,
+  sanitizePathComponent,
+  setOwnTaskListId,
+} from '../../utils/tasks.js'
 import { getCurrentWorktreeSession } from '../../utils/worktree.js'
 import { clearSessionCaches } from './caches.js'
 
 let activeClearSessionStartController: AbortController | null = null
+
+/**
+ * Official 2.1.328 (#393): move the session-scoped task list directory when
+ * `/clear` rotates the session ID so tasks created after `/clear` belong to
+ * the new session ID and cleared tasks are never resurrected on resume, even
+ * in cloud/runner sessions with no feature flags loaded.
+ */
+export async function moveOwnTaskListOnClear(
+  _oldSessionId: string,
+  newSessionId: string,
+  opts?: {
+    tasksRootDir?: string
+    ownTaskListId?: string | null
+    setOwnTaskListId?: (id: string | undefined) => void
+  },
+): Promise<{ moved: boolean; reason?: string }> {
+  const sourceId =
+    opts && 'ownTaskListId' in opts
+      ? (opts.ownTaskListId ?? newSessionId)
+      : getOwnTaskListId(newSessionId)
+  if (!sourceId || sourceId === newSessionId) {
+    return { moved: false, reason: 'same_id' }
+  }
+  const safeSourceId = sanitizePathComponent(sourceId)
+  const safeNewSessionId = sanitizePathComponent(newSessionId)
+  if (!safeSourceId || safeSourceId === safeNewSessionId) {
+    return { moved: false, reason: 'same_id' }
+  }
+  const clearOwnTaskListId = opts?.setOwnTaskListId ?? setOwnTaskListId
+  const { rename } = await import('fs/promises')
+  const { join } = await import('path')
+  const { getClaudeConfigHomeDir } = await import('../../utils/envUtils.js')
+  const tasksRoot =
+    opts?.tasksRootDir ?? join(getClaudeConfigHomeDir(), 'tasks')
+  const oldDir = join(tasksRoot, safeSourceId)
+  const newDir = join(tasksRoot, safeNewSessionId)
+  try {
+    await rename(oldDir, newDir)
+    return { moved: true }
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException | null)?.code
+    if (code !== 'ENOENT') {
+      clearOwnTaskListId(undefined)
+    }
+    return {
+      moved: false,
+      reason: code === 'ENOENT' ? 'enoent' : (code ?? 'rename_failed'),
+    }
+  }
+}
 
 /**
  * Official 2.1.319 (#1760): compute which tasks survive /clear vs get killed.
@@ -451,7 +509,40 @@ export async function clearConversation({
 
   // Generate new session ID to provide fresh state
   // Set the old session as parent for analytics lineage tracking
+  const prevSessionId = getSessionId()
+  // Official 2.1.328 (#586) `Se() && MC() && AJn() && !J() -> $8s()`:
+  // Only withdraw an existing resume/rewind `last-prompt` checkpoint in remote
+  // CCR v2 sessions with a registered `internalEventWriter`. Local `/clear`
+  // MUST NOT write a clear-checkpoint tombstone to the pre-clear local `.jsonl`
+  // file, otherwise `claude --resume <prevSessionId>` permanently fails.
+  if (
+    getIsRemoteMode() &&
+    hasInternalEventWriter() &&
+    !isTranscriptPersistenceDisabled()
+  ) {
+    try {
+      const { saveExplicitClearCheckpoint } = await import(
+        '../../utils/sessionStorage.js'
+      )
+      await saveExplicitClearCheckpoint(prevSessionId)
+    } catch {
+      // best-effort when diskless or storage unavailable
+    }
+  }
+
   regenerateSessionId({ setCurrentAsParent: true })
+  const newSessionId = getSessionId()
+
+  // Official 2.1.328 (#393): only rename HI(sourceId) -> HI(newSessionId)
+  // when an explicit ownTaskListId differs from newSessionId (so local `/clear`
+  // never renames `<prevSessionId>` tasks into `<newSessionId>`).
+  const ownTaskSourceId = getOwnTaskListId(newSessionId)
+  if (ownTaskSourceId !== newSessionId) {
+    await moveOwnTaskListOnClear(ownTaskSourceId, newSessionId, {
+      ownTaskListId: ownTaskSourceId,
+      setOwnTaskListId,
+    })
+  }
   // densable #21 & #1773 — after new id is live, notify RC clients of
   // conversation_reset and re-emit full background_tasks_changed
   notifyRemoteConversationCleared(

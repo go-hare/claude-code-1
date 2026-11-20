@@ -21,8 +21,14 @@ import { getOriginalCwd } from '../../bootstrap/state.js'
 import type { Command } from '../../commands.js'
 import { reinitializeLspServerManager } from '../../services/lsp/manager.js'
 import type { AppState } from '../../state/AppState.js'
-import type { AgentDefinitionsResult } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
-import { getAgentDefinitionsWithOverrides } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
+import type {
+  AgentDefinition,
+  AgentDefinitionsResult,
+} from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
+import {
+  clearAgentDefinitionsCache,
+  getAgentDefinitionsWithOverrides,
+} from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import type { PluginError } from '../../types/plugin.js'
 import { logForDebugging } from '../debug.js'
 import { errorMessage } from '../errors.js'
@@ -40,7 +46,11 @@ import {
   markSyncedPluginsReloaded,
 } from './syncedPluginCloudSync.js'
 import { clearPluginCacheExclusions } from './orphanedPluginFilter.js'
-import { loadAllPlugins } from './pluginLoader.js'
+import {
+  cachePluginSettings,
+  loadAllPlugins,
+  markInitialPluginsLoaded,
+} from './pluginLoader.js'
 
 type SetAppState = (updater: (prev: AppState) => AppState) => void
 
@@ -80,9 +90,85 @@ export type RefreshActivePluginsResult = {
  * LSP: if plugins now contribute LSP servers, reinitializeLspServerManager()
  * re-reads config. Servers are lazy-started so this is just config parsing.
  */
+/**
+ * Official 2.1.327 (#398) — merge CLI `--agents` (`source === 'flagSettings'`)
+ * into freshly loaded `agentDefinitions` so agents passed via `--agents` are
+ * never lost when plugins load or reload.
+ */
+export function mergeCliAgentsIntoDefinitions(
+  loaded: AgentDefinitionsResult,
+  cliAgents: readonly AgentDefinition[],
+): AgentDefinitionsResult {
+  if (cliAgents.length === 0) return loaded
+  const cliByType = new Map<string, AgentDefinition>()
+  for (const agent of cliAgents) {
+    cliByType.set(agent.agentType, agent)
+  }
+  const mergedAll: AgentDefinition[] = [
+    ...loaded.allAgents.filter(
+      a => a.source !== 'flagSettings' || !cliByType.has(a.agentType),
+    ),
+    ...cliByType.values(),
+  ]
+  const mergedActive: AgentDefinition[] = [
+    ...loaded.activeAgents.filter(a => !cliByType.has(a.agentType)),
+    ...cliByType.values(),
+  ]
+  return {
+    ...loaded,
+    allAgents: mergedAll,
+    activeAgents: mergedActive,
+  }
+}
+
+/**
+ * Official 2.1.327 `pxo` + `fxo` (#399) — when resuming a session whose saved
+ * agent comes from a plugin and is not yet present in `agentDefinitions.activeAgents`,
+ * ensure plugins are loaded and reload agent definitions while preserving CLI
+ * `--agents`.
+ */
+export async function ensurePluginAgentLoadedForResume(options: {
+  resumedAgentName: string | undefined
+  mainThreadAgentDefinition?: AgentDefinition
+  agentDefinitions: AgentDefinitionsResult
+  cliAgents?: readonly AgentDefinition[]
+  cwd?: string
+}): Promise<AgentDefinitionsResult> {
+  const {
+    resumedAgentName,
+    mainThreadAgentDefinition,
+    agentDefinitions,
+    cliAgents = [],
+    cwd,
+  } = options
+  if (
+    !resumedAgentName ||
+    mainThreadAgentDefinition !== undefined ||
+    agentDefinitions.activeAgents.some(a => a.agentType === resumedAgentName)
+  ) {
+    return agentDefinitions
+  }
+  const pluginResult = await loadAllPlugins()
+  markInitialPluginsLoaded()
+  cachePluginSettings(pluginResult.enabled)
+  clearAgentDefinitionsCache()
+  const reloaded = await getAgentDefinitionsWithOverrides(
+    cwd ?? getOriginalCwd(),
+  )
+  const existingCli =
+    cliAgents.length > 0
+      ? cliAgents
+      : agentDefinitions.allAgents.filter(a => a.source === 'flagSettings')
+  return mergeCliAgentsIntoDefinitions(reloaded, existingCli)
+}
+
 export async function refreshActivePlugins(
   setAppState: SetAppState,
-  opts: { applyStagedInstalls?: boolean } = {},
+  opts: {
+    applyStagedInstalls?: boolean
+    /** Official 2.1.327 (#398): preserve CLI `--agents` across plugin loads/reloads. */
+    cliAgents?: readonly AgentDefinition[]
+  } = {},
 ): Promise<RefreshActivePluginsResult> {
   const applyStagedInstalls = opts.applyStagedInstalls ?? true
   const changesLandedAtStart = getPluginsSyncState().changesLanded
@@ -104,11 +190,13 @@ export async function refreshActivePlugins(
     // the plugin, returning plugin-cache-miss. loadAllPlugins warms the
     // cache-only memoize on completion, so the awaits below are ~free.
     const pluginResult = await loadAllPlugins()
-    const [pluginCommands, pluginSkills, agentDefinitions] = await Promise.all([
-      getPluginCommands(),
-      getPluginSkills(),
-      getAgentDefinitionsWithOverrides(getOriginalCwd()),
-    ])
+    markInitialPluginsLoaded()
+    const [pluginCommands, pluginSkills, loadedAgentDefinitions] =
+      await Promise.all([
+        getPluginCommands(),
+        getPluginSkills(),
+        getAgentDefinitionsWithOverrides(getOriginalCwd()),
+      ])
 
     const { enabled, disabled, errors } = pluginResult
 
@@ -139,22 +227,39 @@ export async function refreshActivePlugins(
     const mcp_count = mcpCounts.reduce((sum, n) => sum + n, 0)
     const lsp_count = lspCounts.reduce((sum, n) => sum + n, 0)
 
-    setAppState(prev => ({
-      ...prev,
-      plugins: {
-        ...prev.plugins,
-        enabled,
-        disabled,
-        commands: pluginCommands,
-        errors: mergePluginErrors(prev.plugins.errors, errors),
-        needsRefresh: false,
-      },
-      agentDefinitions,
-      mcp: {
-        ...prev.mcp,
-        pluginReconnectKey: prev.mcp.pluginReconnectKey + 1,
-      },
-    }))
+    let agentDefinitions = mergeCliAgentsIntoDefinitions(
+      loadedAgentDefinitions,
+      opts.cliAgents ?? [],
+    )
+    setAppState(prev => {
+      const prevCliAgents = prev.agentDefinitions.allAgents.filter(
+        a => a.source === 'flagSettings',
+      )
+      const effectiveCliAgents =
+        opts.cliAgents && opts.cliAgents.length > 0
+          ? opts.cliAgents
+          : prevCliAgents
+      agentDefinitions = mergeCliAgentsIntoDefinitions(
+        loadedAgentDefinitions,
+        effectiveCliAgents,
+      )
+      return {
+        ...prev,
+        plugins: {
+          ...prev.plugins,
+          enabled,
+          disabled,
+          commands: pluginCommands,
+          errors: mergePluginErrors(prev.plugins.errors, errors),
+          needsRefresh: false,
+        },
+        agentDefinitions,
+        mcp: {
+          ...prev.mcp,
+          pluginReconnectKey: prev.mcp.pluginReconnectKey + 1,
+        },
+      }
+    })
 
     // Re-initialize LSP manager so newly-loaded plugin LSP servers are picked
     // up. No-op if LSP was never initialized (headless subcommand path).

@@ -81,6 +81,8 @@ function getHookSourceFooter(hook: IndividualHookConfig): string {
       const filePath = getSettingsFilePathForSource(hook.source);
       return `To change or remove this hook, edit ${filePath ? getDisplayPath(filePath) : 'settings.json'} or ask Claude.`;
     }
+    case 'flagSettings':
+      return 'This hook comes from --settings. To change or remove it, change those settings and restart Claude Code.';
     case 'pluginHook':
       return hook.pluginName
         ? `This hook comes from the ${hook.pluginName} plugin and stops running when that plugin is disabled (/plugin).`

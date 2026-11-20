@@ -637,7 +637,9 @@ export const PATH_EXTRACTORS: Record<
   },
 }
 
-const SUPPORTED_PATH_COMMANDS = Object.keys(PATH_EXTRACTORS) as PathCommand[]
+export const SUPPORTED_PATH_COMMANDS: ReadonlySet<string> = new Set(
+  Object.keys(PATH_EXTRACTORS),
+)
 
 const ACTION_VERBS: Record<PathCommand, string> = {
   cd: 'change directories to',
@@ -1588,7 +1590,7 @@ function validateSinglePathCommand(
     if (linkCheck !== null) return linkCheck
   }
   const baseCmd = rawBaseCmd ? normalizePathCommandName(rawBaseCmd) : undefined
-  if (!baseCmd || !SUPPORTED_PATH_COMMANDS.includes(baseCmd as PathCommand)) {
+  if (!baseCmd || !SUPPORTED_PATH_COMMANDS.has(baseCmd)) {
     return {
       behavior: 'passthrough',
       message: `Command '${baseCmd}' is not a path-restricted command`,
@@ -1642,7 +1644,7 @@ function validateSinglePathCommandArgv(
     if (linkCheck !== null) return linkCheck
   }
   const baseCmd = rawBaseCmd ? normalizePathCommandName(rawBaseCmd) : undefined
-  if (!baseCmd || !SUPPORTED_PATH_COMMANDS.includes(baseCmd as PathCommand)) {
+  if (!baseCmd || !SUPPORTED_PATH_COMMANDS.has(baseCmd)) {
     return {
       behavior: 'passthrough',
       message: `Command '${baseCmd}' is not a path-restricted command`,

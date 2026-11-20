@@ -141,16 +141,6 @@ export default function wrapText(
       position = 'start'
     }
 
-    // Official 2.1.326 (#127): when truncate-end/truncate/end holds line feeds,
-    // truncate each line independently so rows after `\n` are preserved instead
-    // of being lost.
-    if (position === 'end' && (text.includes('\n') || text.includes('\r'))) {
-      return text
-        .split(/\r\n?|\n/)
-        .map(line => truncate(line, maxWidth, 'end'))
-        .join('\n')
-    }
-
     return truncate(text, maxWidth, position)
   }
 

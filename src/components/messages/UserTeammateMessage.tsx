@@ -3,7 +3,7 @@ import figures from 'figures';
 import * as React from 'react';
 import { BLACK_CIRCLE } from '../../constants/figures.js';
 import { TEAMMATE_MESSAGE_TAG } from '../../constants/xml.js';
-import { Box, StatusIcon, Text, type TextProps } from '@anthropic/ink';
+import { Box, NoSelect, StatusIcon, Text, type TextProps } from '@anthropic/ink';
 import { useAppStateMaybeOutsideOfProvider } from '../../state/AppState.js';
 import { toInkColor } from '../../utils/ink.js';
 
@@ -229,18 +229,22 @@ function TeammateIdleNotificationPanel({
 
   return (
     <Box marginTop={1} flexDirection="column">
-      <Text>
-        <Text aria-hidden color={statusColor}>
-          {BLACK_CIRCLE}
-        </Text>{' '}
-        Teammate{' '}
-        <Text color={inkColor} bold>
-          @{displayName}
-        </Text>{' '}
-        {verb}
-        {failure ? <Text dimColor>: {failure}</Text> : null}
-        {expanded && taskId ? <Text dimColor> (task #{taskId})</Text> : null}
-      </Text>
+      <Box flexDirection="row">
+        <NoSelect fromLeftEdge minWidth={2}>
+          <Text aria-hidden color={statusColor}>
+            {BLACK_CIRCLE}
+          </Text>
+        </NoSelect>
+        <Text>
+          Teammate{' '}
+          <Text color={inkColor} bold>
+            @{displayName}
+          </Text>{' '}
+          {verb}
+          {failure ? <Text dimColor>: {failure}</Text> : null}
+          {expanded && taskId ? <Text dimColor> (task #{taskId})</Text> : null}
+        </Text>
+      </Box>
       {expanded && lastDm ? (
         <Box paddingLeft={2}>
           <Text dimColor>Last DM: {lastDm}</Text>
@@ -440,9 +444,13 @@ export function UserTeammateMessage({
           node: (
             <React.Fragment key={index}>
               {summaryText.trim() ? (
-                <Box>
+                <Box flexDirection="row">
+                  <NoSelect fromLeftEdge minWidth={2}>
+                    <Text aria-hidden color={inkColor}>
+                      @
+                    </Text>
+                  </NoSelect>
                   <Text color={inkColor}>
-                    {'@ '}
                     {displayName}
                     <Text aria-hidden>{figures.pointer}</Text>
                   </Text>
@@ -495,9 +503,13 @@ export function UserTeammateMessage({
           key: index,
           node: (
             <Box key={index} flexDirection="column" marginTop={1}>
-              <Box>
+              <Box flexDirection="row">
+                <NoSelect fromLeftEdge minWidth={2}>
+                  <Text aria-hidden color={inkColor}>
+                    @
+                  </Text>
+                </NoSelect>
                 <Text color={inkColor}>
-                  {'@ '}
                   {displayName}
                   <Text aria-hidden>{figures.pointer}</Text>
                 </Text>
@@ -669,9 +681,13 @@ export function TeammateMessageContent({
   }
   return (
     <Box flexDirection="column" marginTop={1}>
-      <Box>
+      <Box flexDirection="row">
+        <NoSelect fromLeftEdge minWidth={2}>
+          <Text aria-hidden color={inkColor}>
+            @
+          </Text>
+        </NoSelect>
         <Text color={inkColor}>
-          {'@ '}
           {displayName}
           <Text aria-hidden>{figures.pointer}</Text>
         </Text>

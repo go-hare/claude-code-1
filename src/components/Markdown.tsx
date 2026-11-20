@@ -3,7 +3,7 @@ import { Marked, marked, type Token, type Tokens } from 'marked';
 import React, { useMemo, useRef, type ReactNode } from 'react';
 import { LRUCache } from 'lru-cache';
 import { useSettings } from '../hooks/useSettings.js';
-import { Ansi, Box, Text, useTheme, type Theme } from '@anthropic/ink';
+import { Ansi, Box, NoSelect, Text, useTheme, type Theme } from '@anthropic/ink';
 import { type CliHighlight, peekCliHighlight } from '../utils/cliHighlight.js';
 import { logForDebugging } from '../utils/debug.js';
 import { hashContent } from '../utils/hash.js';
@@ -13,6 +13,8 @@ import {
   configureMarked,
   endsWithBlankLine,
   formatToken,
+  lexMarkdownSafely,
+  sliceMarkdownWindowEnd,
   stripLeadingBlankTokensBeforeCode,
   stripRawOsc8Sequences,
   tokenizeCjkEmStrong,
@@ -100,7 +102,8 @@ const highlightCache = new LRUCache<string, { variant: string; code: string; hig
 const HIGHLIGHT_WORK_BUDGET = 1_600_000;
 const SYNTAX_HIGHLIGHT_CAP_NOTICE =
   'Syntax highlighting stops here. This message has more code than is highlighted at once.';
-const WINDOW_LINE_LIMIT = 1000;
+
+const PLAINTEXT_LANGUAGES = new Set(['', 'plaintext', 'plain', 'text', 'txt']);
 
 export function wrapHighlightWithCacheAndBudget(
   rawHighlight: CliHighlight | null,
@@ -113,13 +116,17 @@ export function wrapHighlightWithCacheAndBudget(
   return {
     supportsLanguage: rawHighlight.supportsLanguage,
     highlight(code, options) {
-      const lang = options?.language ?? 'plaintext';
-      const variant = `${lang}\x00${theme}`;
+      const normalizedLang = (options?.language ?? '').trim().toLowerCase();
+      // Official 2.1.328 (`Cr` @307762583): skip budget decrement, cache, and
+      // cap notices for plaintext blocks.
+      if (PLAINTEXT_LANGUAGES.has(normalizedLang)) {
+        return code;
+      }
+      const variant = `${normalizedLang}\x00${theme}`;
       const cacheKey = skipHighlightCache ? '' : `${code.length}:${hashContent(`${variant}\x00${code}`)}`;
       if (!skipHighlightCache) {
         const hit = highlightCache.get(cacheKey);
         if (hit !== undefined && hit.code === code && hit.variant === variant) {
-          budgetLeft -= hit.cost;
           return hit.highlighted;
         }
       }
@@ -284,56 +291,23 @@ function plainParagraphTokens(content: string): Token[] {
   ];
 }
 
-function splitMarkdownWindows(content: string): string[] | null {
-  const normalized = content.replace(/\r\n?/g, '\n');
-  const lines = normalized.split('\n');
-  if (lines.length <= WINDOW_LINE_LIMIT) return null;
+const WINDOW_LINE_LIMIT = 1000;
 
+export function splitMarkdownWindows(content: string): string[] {
+  const normalized = content.replace(/\r\n?/g, '\n');
   const windows: string[] = [];
   let start = 0;
-  let inFence = false;
-  let fenceChar = '';
-  let lastSafeBreak = -1;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]!;
-    const fenceMatch = /^ {0,3}(`{3,}|~{3,})/.exec(line);
-    if (fenceMatch) {
-      const ch = fenceMatch[1]![0]!;
-      if (!inFence) {
-        inFence = true;
-        fenceChar = ch;
-      } else if (ch === fenceChar) {
-        inFence = false;
-        fenceChar = '';
-      }
-    } else if (!inFence && line.trim() === '') {
-      lastSafeBreak = i + 1;
-    }
-
-    if (i - start >= WINDOW_LINE_LIMIT && lastSafeBreak > start) {
-      windows.push(lines.slice(start, lastSafeBreak).join('\n'));
-      start = lastSafeBreak;
-      lastSafeBreak = -1;
-    }
+  while (start < normalized.length) {
+    const end = sliceMarkdownWindowEnd(normalized, start, WINDOW_LINE_LIMIT);
+    windows.push(normalized.slice(start, end));
+    start = end;
   }
-  if (start < lines.length) {
-    windows.push(lines.slice(start).join('\n'));
-  }
-  return windows.length > 1 ? windows : null;
+  return windows.length > 0 ? windows : [''];
 }
 
 function safeLex(lexer: Marked | typeof marked, content: string): Token[] {
   try {
-    const windows = splitMarkdownWindows(content);
-    if (windows) {
-      const tokens: Token[] = [];
-      for (const win of windows) {
-        tokens.push(...lexer.lexer(win));
-      }
-      return tokens;
-    }
-    return lexer.lexer(content);
+    return lexMarkdownSafely(lexer, content);
   } catch (err) {
     if (err instanceof RangeError) {
       logForDebugging(`marked.lexer overflow on ${content.length} chars`, { level: 'error' });
@@ -381,6 +355,24 @@ function tokenContainsFullWidthBlock(root: Token): boolean {
   return false;
 }
 
+/**
+ * Official 2.1.328 (#600) `We`: render the blockquote bar inside `<NoSelect>`
+ * so fullscreen drag-copy does not capture the `│` border glyph.
+ */
+function QuoteBarGutter(): React.ReactNode {
+  return (
+    <NoSelect
+      flexShrink={0}
+      borderStyle="quote"
+      borderTop={false}
+      borderBottom={false}
+      borderRight={false}
+      borderDimColor
+      paddingLeft={1}
+    />
+  );
+}
+
 function MarkdownBlockquote({
   token,
   theme,
@@ -408,16 +400,11 @@ function MarkdownBlockquote({
     const joined = parts.map(p => p.text).join('');
     const body = chalk.italic((normalized ? joined : joined.replace(/^\n+/, '')).trimEnd());
     return (
-      <Box
-        borderStyle="quote"
-        borderTop={false}
-        borderBottom={false}
-        borderRight={false}
-        borderDimColor
-        paddingLeft={1}
-        maxWidth={maxWidth}
-      >
-        <Ansi dimColor={dimColor}>{body}</Ansi>
+      <Box flexDirection="row" maxWidth={maxWidth}>
+        <QuoteBarGutter />
+        <Box flexDirection="column" flexGrow={1}>
+          <Ansi dimColor={dimColor}>{body}</Ansi>
+        </Box>
       </Box>
     );
   }
@@ -456,16 +443,11 @@ function MarkdownBlockquote({
   }
 
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="quote"
-      borderTop={false}
-      borderBottom={false}
-      borderRight={false}
-      borderDimColor
-      paddingLeft={1}
-    >
-      {rows}
+    <Box flexDirection="row">
+      <QuoteBarGutter />
+      <Box flexDirection="column" flexGrow={1}>
+        {rows}
+      </Box>
     </Box>
   );
 }
@@ -477,18 +459,12 @@ function MarkdownBlockquote({
  */
 export function Markdown(props: Props): React.ReactNode {
   const settings = useSettings();
-  const [theme] = useTheme();
   // gold oa: gN() is a sync snapshot (null until loaded). Do not Suspense —
   // fallback→highlight remount DualInk leftoverGs-clears the spinner row
   // on the first streaming token. Do not subscribe — gold oa does not
   // re-render markdown when gN later lands.
   const rawHighlight = settings.syntaxHighlightingDisabled ? null : peekCliHighlight();
-  const skipHighlightCache = props.skipHighlightCache ?? false;
-  const highlight = useMemo(
-    () => wrapHighlightWithCacheAndBudget(rawHighlight, theme, skipHighlightCache),
-    [rawHighlight, theme, skipHighlightCache],
-  );
-  return <MarkdownBody {...props} highlight={highlight} />;
+  return <MarkdownBody {...props} rawHighlight={rawHighlight} />;
 }
 
 type BlockKind = 'none' | 'prose' | 'list' | 'code' | 'block';
@@ -502,11 +478,12 @@ function MarkdownBody({
   promptMode = false,
   stripPromptTags,
   skipTokenCache,
+  skipHighlightCache = false,
   tailWrap,
   capProseWidth,
   hint,
-  highlight,
-}: Props & { highlight: CliHighlight | null }): React.ReactNode {
+  rawHighlight,
+}: Props & { rawHighlight: CliHighlight | null }): React.ReactNode {
   const [theme] = useTheme();
   const settings = useSettings();
   configureMarked();
@@ -519,6 +496,11 @@ function MarkdownBody({
     const rawSource = shouldStrip ? stripPromptXMLTags(children) : children;
     const source = stripRawOsc8Sequences(rawSource);
     const tokens = lexMarkdown(source, skipTokenCache !== true, promptMode);
+    // Official 2.1.328 (`Cr`/`qn` @307762583): allocate a fresh per-render
+    // highlight budget inside the content-dependent memo so streaming chunks
+    // never cumulatively drain the budget across renders while still sharing
+    // the module-level LRU highlight cache.
+    const highlight = wrapHighlightWithCacheAndBudget(rawHighlight, theme, skipHighlightCache);
     const elements: React.ReactNode[] = [];
     let nonTableContent = '';
     let prevKind: BlockKind = 'none';
@@ -529,7 +511,7 @@ function MarkdownBody({
     function leftoverHintNode(): React.ReactNode {
       if (!leftoverHint || leftoverHintConsumed) return null;
       leftoverHintConsumed = true;
-      return <Text color="subtle"> {leftoverHint}</Text>;
+      return <Text dimColor> {leftoverHint}</Text>;
     }
 
     // densable Or `J(node, marginTop, kind)` — 1-row block rhythm + maxWidth on prose only.
@@ -634,7 +616,7 @@ function MarkdownBody({
       flushNonTableContent(tailWrap, true);
     }
     if (leftoverHint && !leftoverHintConsumed) {
-      pushBlock(<Text color="subtle">{leftoverHint}</Text>, 0, 'prose');
+      pushBlock(<Text dimColor>{leftoverHint}</Text>, 0, 'prose');
     }
     return elements;
   }, [
@@ -643,7 +625,8 @@ function MarkdownBody({
     dimColor,
     italic,
     monochrome,
-    highlight,
+    rawHighlight,
+    skipHighlightCache,
     theme,
     isScreenReader,
     skipTokenCache,
@@ -859,7 +842,8 @@ export function StreamingMarkdown({ children, hideTrailingLine = false }: Stream
       openTable !== '' || hasIncompleteOrderedPrefix || STREAM_MD_TABLE_LINE_RE.test(tailLine)
         ? combined.substring(0, lastNl)
         : combined;
-    const tokens = marked.lexer(lexSource);
+    configureMarked();
+    const tokens = lexMarkdownSafely(marked, lexSource);
     let lastContentIdx = tokens.length - 1;
     while (lastContentIdx >= 0 && tokens[lastContentIdx]!.type === 'space') {
       lastContentIdx--;
@@ -885,8 +869,10 @@ export function StreamingMarkdown({ children, hideTrailingLine = false }: Stream
       state.openTable = null;
     }
     const firstNonSpace = tokens.find(t => t.type !== 'space');
-    if (state.stablePrefix.trim() === '' && state.isListCut) {
-      state.gapAfterChunks = !(firstNonSpace?.type === 'list');
+    if (state.stablePrefix.trim() === '') {
+      state.gapAfterChunks =
+        !(state.isListCut && (firstNonSpace?.type ?? 'list') === 'list') &&
+        needsStreamChunkGap(firstToken?.type === 'space' ? 'space' : state.typeBeforeTail, firstNonSpace?.type);
     }
     const lastFrozenToken = closedTable ? lastToken : tokens[lastContentIdx - 1];
     if (advance > 0 && lastFrozenToken !== undefined) {

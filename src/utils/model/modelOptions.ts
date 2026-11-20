@@ -20,7 +20,7 @@ import {
   getSettings_DEPRECATED,
 } from '../settings/settings.js'
 import { checkOpus1mAccess, checkSonnet1mAccess } from './check1mAccess.js'
-import { getAPIProvider } from './providers.js'
+import { getAPIProvider, isFirstPartyAnthropicBaseUrl } from './providers.js'
 import { ALL_MODEL_CONFIGS } from './configs.js'
 import { isModelDenied } from './entitlementOverlay.js'
 import { FABLE_SLOGAN } from './fablePicker.js'
@@ -652,7 +652,10 @@ function getModelOptionsBase(fastMode = false): ModelOption[] {
   }
 
   // PAYG 1P API densable 2.1.289: Default + Opus 5 / Opus (1M) + Opus 4.8 + Opus 4.6 1M + Sonnet 5.5 1M + previous Sonnet 5 + Haiku
-  if (getAPIProvider() === 'firstParty') {
+  // Official 2.1.327 (#436): when ANTHROPIC_BASE_URL points to a custom LLM
+  // gateway (e.g. from project .claude/settings.json), do NOT fall into the
+  // direct first-party Anthropic API catalog; use the 3P/gateway-safe options.
+  if (getAPIProvider() === 'firstParty' && isFirstPartyAnthropicBaseUrl()) {
     const payg1POptions = [getDefaultOptionForUser(fastMode)]
     if (isOpus1mMergeEnabled()) {
       payg1POptions.push(getMergedOpus1MOption(fastMode))
@@ -855,10 +858,24 @@ export function getModelOptions(fastMode = false): ModelOption[] {
   // Official I0v: $Nn via W4r, then pZe via f0v+W4r. z4r Iyp treats fable
   // aliases and claude-fable-5 as the same row.
   // densable 2.1.219 #9: hug() strip/reapply so stale cache cannot bake P5i.
-  for (const opt of getGlobalConfig().additionalModelOptionsCache ?? []) {
-    const refreshed = applyFableCreditsLabel(opt)
-    if (!options.some(existing => isSameFablePickerRow(existing, refreshed))) {
-      insertFablePickerOption(options, refreshed)
+  // Official 2.1.327 (#436): on firstParty with a custom LLM gateway base URL
+  // (e.g. project .claude/settings.json ANTHROPIC_BASE_URL), omit disabled
+  // first-party server rows and skip direct-API-only cached options unless
+  // on direct firstParty or gateway.
+  const currentProvider = getAPIProvider()
+  const allowFirstPartyServerDisabledRows =
+    currentProvider === 'gateway' || isFirstPartyAnthropicBaseUrl()
+  if (currentProvider === 'firstParty' || currentProvider === 'gateway') {
+    for (const opt of getGlobalConfig().additionalModelOptionsCache ?? []) {
+      const refreshed = applyFableCreditsLabel(opt)
+      if (refreshed.disabled && !allowFirstPartyServerDisabledRows) {
+        continue
+      }
+      if (
+        !options.some(existing => isSameFablePickerRow(existing, refreshed))
+      ) {
+        insertFablePickerOption(options, refreshed)
+      }
     }
   }
 

@@ -1240,9 +1240,14 @@ export async function teleportToRemote(options: {
    */
   outputSchema?: Record<string, unknown>;
   /**
-   * densable Qre correlationId → session_context.correlation_id.
+   * densable Qre correlationId → session_context.correlation_id & metadata.correlation_id (#641).
    */
   correlationId?: string;
+  /**
+   * Official 2.1.328 (#551/#641): session metadata labels (`--metadata key=value`
+   * and `correlation_id`) serialized via `metadata` on session creation payloads.
+   */
+  sessionMetadata?: Record<string, string>;
   /**
    * densable zGt @185900700 extras + zo @202423559 CCR slots.
    * seedDirSync / staysAttached / deviceBinding / firstUpload are accepted;
@@ -1423,6 +1428,13 @@ export async function teleportToRemote(options: {
         permissionMode: options.permissionMode,
         ultraplan: options.ultraplan,
       });
+      const mergedSessionMetadata =
+        options.sessionMetadata || options.correlationId
+          ? {
+              ...(options.correlationId ? { correlation_id: options.correlationId } : {}),
+              ...options.sessionMetadata,
+            }
+          : undefined;
       const requestBody = {
         title: options.title || options.description || 'Remote task',
         events,
@@ -1443,6 +1455,7 @@ export async function teleportToRemote(options: {
         },
         ...sessionCreateEnvironmentFields(options.environmentId),
         ...(options.tags && { tags: options.tags }),
+        ...(mergedSessionMetadata && { metadata: mergedSessionMetadata }),
       };
       logForDebugging(
         `[teleportToRemote] explicit env ${options.environmentId}, ${Object.keys(envVars).length} env vars, ${seedBundleFileId ? `bundle=${seedBundleFileId}` : `source=${gitSource?.url ?? 'none'}@${options.branchName ?? 'default'}`}`,
@@ -1945,12 +1958,20 @@ export async function teleportToRemote(options: {
       ultraplan: options.ultraplan,
     });
 
+    const mergedSessionMetadata =
+      options.sessionMetadata || options.correlationId
+        ? {
+            ...(options.correlationId ? { correlation_id: options.correlationId } : {}),
+            ...options.sessionMetadata,
+          }
+        : undefined;
     const requestBody = {
       title: options.ultraplan ? `ultraplan: ${sessionTitle}` : sessionTitle,
       events,
       session_context: sessionContext,
       ...sessionCreateEnvironmentFields(environmentId),
       ...(options.tags && { tags: options.tags }),
+      ...(mergedSessionMetadata && { metadata: mergedSessionMetadata }),
     };
 
     logForDebugging(`Creating session with payload: ${jsonStringify(requestBody, null, 2)}`);

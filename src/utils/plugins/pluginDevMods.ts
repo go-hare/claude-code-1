@@ -7,7 +7,7 @@
 import { createHash } from 'crypto'
 import { mkdirSync, readdirSync, statSync } from 'fs'
 import chokidar from 'chokidar'
-import { mkdir, readFile, stat, utimes, writeFile } from 'fs/promises'
+import { mkdir, readdir, readFile, stat, utimes, writeFile } from 'fs/promises'
 import {
   basename,
   dirname,
@@ -1563,6 +1563,22 @@ export function createDevModStampTracker(now: () => number = Date.now) {
     getState(filePath: string): DevModStampState | undefined {
       return files.get(filePath)
     },
+    getPendingCtimeMs(): number[] {
+      const ctimes: number[] = []
+      for (const state of files.values()) {
+        if (state.taken?.ctimeMs === undefined) continue
+        const isPending =
+          !state.isServed ||
+          state.read === undefined ||
+          state.taken.stamp === undefined ||
+          state.taken.stamp.size !== state.read.size ||
+          state.taken.stamp.hash !== state.read.hash
+        if (isPending) {
+          ctimes.push(state.taken.ctimeMs)
+        }
+      }
+      return ctimes
+    },
   }
 }
 
@@ -1584,9 +1600,83 @@ async function readDevModTrackedStamp(
   }
 }
 
-/** densable gqn / M9t — held when a reload would bust the prompt cache. */
-async function reloadDevMods(): Promise<DevModLoad> {
+/**
+ * Official 2.1.328 (#623) `Rn` inside `kn(Xn, so)`: when a turn-begin rescan
+ * finishes while the turn is still running, check whether any pending file was
+ * saved *after* the turn began (`Math.floor(ctimeMs) > turnStartedAt && <= now`).
+ * If so, defer the reload until turn end instead of reloading mid-turn!
+ */
+export function shouldDeferModReloadAfterTurnBegin(options: {
+  turnStartedAt: number | undefined
+  isTurnRunning: boolean
+  pendingCtimeMs: readonly number[]
+  nowMs: number
+}): boolean {
+  const { turnStartedAt, isTurnRunning, pendingCtimeMs, nowMs } = options
+  if (turnStartedAt === undefined || !isTurnRunning) return false
+  return pendingCtimeMs.some(ctime => {
+    const floored = Math.floor(ctime)
+    return floored > turnStartedAt && floored <= nowMs
+  })
+}
+
+let activeDevModTurnStartedAt: number | undefined
+
+async function collectFolderPendingCtimeMs(
+  folder: string,
+  depth = 0,
+): Promise<number[]> {
+  if (depth > 3) return []
+  const ctimes: number[] = []
+  try {
+    const entries = await readdir(folder, { withFileTypes: true })
+    for (const entry of entries) {
+      if (entry.name === 'node_modules' || entry.name === '.git') continue
+      const fullPath = join(folder, entry.name)
+      if (entry.isFile()) {
+        const st = await stat(fullPath).catch(() => undefined)
+        if (st?.isFile()) {
+          ctimes.push(st.ctimeMs)
+        }
+      } else if (entry.isDirectory()) {
+        const nested = await collectFolderPendingCtimeMs(fullPath, depth + 1)
+        ctimes.push(...nested)
+      }
+    }
+  } catch {
+    // best-effort scan
+  }
+  return ctimes
+}
+
+/** densable gqn / M9t — held when a reload would bust the prompt cache or a mod changed mid-turn (#623). */
+async function reloadDevMods(opts?: {
+  folder?: string
+  pendingCtimeMs?: readonly number[]
+  nowMs?: number
+}): Promise<DevModLoad> {
   if (binding?.reloadPlugins === undefined) return 'unbound'
+  let pendingCtimeMs = opts?.pendingCtimeMs
+  if (pendingCtimeMs === undefined) {
+    const trackerCtimes = activeDevModStampTracker.getPendingCtimeMs()
+    if (trackerCtimes.length > 0) {
+      pendingCtimeMs = trackerCtimes
+    } else if (opts?.folder) {
+      pendingCtimeMs = await collectFolderPendingCtimeMs(opts.folder)
+    }
+  }
+  if (
+    pendingCtimeMs !== undefined &&
+    pendingCtimeMs.length > 0 &&
+    shouldDeferModReloadAfterTurnBegin({
+      turnStartedAt: activeDevModTurnStartedAt,
+      isTurnRunning: leftoverDevModsTurn.isRunning(),
+      pendingCtimeMs,
+      nowMs: opts?.nowMs ?? Date.now(),
+    })
+  ) {
+    return 'held'
+  }
   try {
     const ctx = binding.toolContext(new AbortController())
     const { assessPluginReloadCacheImpact } =
@@ -1660,22 +1750,28 @@ async function leftoverTouchFolder(folder: string): Promise<void> {
 
 function leftoverPinTurnEndTouch(): void {
   if (leftoverDevModsTurnEndUtimes.get() !== undefined) return
-  leftoverDevModsTurnEndUtimes.set(
-    leftoverDevModsTurn.onEnd(() => {
-      try {
-        for (const folder of [
-          ...(leftoverEnabledDirs.get() ?? []),
-          ...(leftoverPresentDirs.get() ?? []),
-        ]) {
-          void leftoverTouchFolder(folder)
-        }
-      } catch (error) {
-        leftoverDebug(
-          `dev mods: the turn-end refresh failed: ${errorMessage(error)}`,
-        )
+  const offBegin = leftoverDevModsTurn.onBegin(() => {
+    activeDevModTurnStartedAt = Date.now()
+  })
+  const offEnd = leftoverDevModsTurn.onEnd(() => {
+    activeDevModTurnStartedAt = undefined
+    try {
+      for (const folder of [
+        ...(leftoverEnabledDirs.get() ?? []),
+        ...(leftoverPresentDirs.get() ?? []),
+      ]) {
+        void leftoverTouchFolder(folder)
       }
-    }),
-  )
+    } catch (error) {
+      leftoverDebug(
+        `dev mods: the turn-end refresh failed: ${errorMessage(error)}`,
+      )
+    }
+  })
+  leftoverDevModsTurnEndUtimes.set(() => {
+    offBegin()
+    offEnd()
+  })
 }
 
 /** densable Wae — strip a leading `${name}: ` from the thrown message. */
@@ -1730,7 +1826,7 @@ async function leftoverEnableDevMods(
     if (!isUnasked) {
       leftoverSaveDevModsFolder(folder)
     }
-    const outcome = await reloadDevMods()
+    const outcome = await reloadDevMods({ folder })
     recordDevModLines(folder, outcome)
     try {
       const { logEvent } =
@@ -1772,7 +1868,7 @@ async function leftoverLoadDevModsAtStart(folder: string): Promise<void> {
       leftoverPruneForeignSessionDevModsDirs(sessionDevModsFolder())
       return
     }
-    recordDevModLines(folder, await reloadDevMods())
+    recordDevModLines(folder, await reloadDevMods({ folder }))
     try {
       const { logEvent } =
         // eslint-disable-next-line @typescript-eslint/no-require-imports

@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, color, Link, Text, useTheme, useTabHeaderFocus } from '@anthropic/ink';
 import type { CommandResultDisplay } from '../../types/command.js';
 import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js';
+import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
 import { Select } from '../CustomSelect/select.js';
 
 type Props = {
@@ -82,6 +83,7 @@ function OverridesSelect({ onComplete, currentMode }: Props & { currentMode: Ove
       </Box>
       <Select
         options={options}
+        hideIndexes={!isScreenReaderModeEnabled()}
         onChange={handleSelect}
         onCancel={() => onComplete(undefined, { display: 'skip' })}
         onUpFromFirstItem={focusHeader}

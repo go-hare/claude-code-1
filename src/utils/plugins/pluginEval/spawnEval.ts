@@ -1415,6 +1415,26 @@ function parseTrace(
           call.isError = b.is_error === true
         }
       }
+      // Official 2.1.327 (#518): capture `tool_result_meta[*].permission_decision.plugin_approval`
+      // (`'applied'` when a plugin permission hook let a call through, `'refused'` when
+      // eval deny rules stood over a plugin hook's allow).
+      if (Array.isArray(rec.tool_result_meta)) {
+        for (const meta of rec.tool_result_meta) {
+          if (!meta || typeof meta !== 'object') continue
+          const m = meta as {
+            id?: unknown
+            permission_decision?: { plugin_approval?: unknown }
+          }
+          const call = typeof m.id === 'string' ? byId.get(m.id) : undefined
+          const approval = m.permission_decision?.plugin_approval
+          if (
+            call !== undefined &&
+            (approval === 'applied' || approval === 'refused')
+          ) {
+            call.pluginApproval = approval
+          }
+        }
+      }
     } else if (rec.type === 'result') {
       sawResult = true
       if (typeof rec.num_turns === 'number') numTurns = rec.num_turns

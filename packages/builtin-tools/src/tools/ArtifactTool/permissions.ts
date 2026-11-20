@@ -2,6 +2,8 @@
  * densable Artifact.checkPermissions portable (2.1.239) — tip-hosted actions.
  * Source: gold-vf-call / gold-Artifact-perm-call / gold-Artifact-rest-actions-239.
  */
+import { createHash } from 'crypto'
+import { lstat, readFile, stat } from 'fs/promises'
 import type { ToolUseContext } from 'src/Tool.js'
 import type { PermissionResult } from 'src/types/permissions.js'
 import {
@@ -10,6 +12,7 @@ import {
 } from 'src/services/artifactAutoReact/readPerm/consent.js'
 import { yt } from 'src/services/artifactAutoReact/readPerm/provenance.js'
 import { getClientType } from 'src/bootstrap/state.js'
+import { isEnvTruthy } from 'src/utils/envUtils.js'
 import { isBgSession } from 'src/utils/concurrentSessions.js'
 import { isTeammate } from 'src/utils/teammate.js'
 import { isUserDrivenTurn } from 'src/utils/turnTail.js'
@@ -1800,6 +1803,52 @@ export async function checkArtifactActionPermissions(
   // instead of silently returning allow (even when "don't ask again" was chosen
   // or a subagent/auto mode makes the call).
   if (!action || action === 'publish') {
+    const isNewArtifact = !(
+      typeof input.url === 'string' && input.url.length > 0
+    )
+    const appState = context.getAppState?.() as
+      | {
+          toolPermissionContext?: { mode?: string }
+          orgRequiresNewArtifactApproval?: boolean
+        }
+      | undefined
+    // Official 2.1.327 (#419): capture source file pin + sha256 at permission
+    // time so `callUpload` can verify via `publishSourcePinMatches` that the
+    // file was not swapped (while tolerating mtimeNs-only drift on synced dirs).
+    if (typeof input.file_path === 'string' && input.file_path.length > 0) {
+      await captureApprovedPublishSourcePin(
+        context.toolUseId ?? input.file_path,
+        input.file_path,
+      )
+    }
+    const orgRequiresApproval = isOrgNewArtifactApprovalRequired(appState)
+    if (orgRequiresApproval && isNewArtifact) {
+      const mode = appState?.toolPermissionContext?.mode
+      const refusal = checkNewArtifactOrgApprovalSurface({
+        orgRequiresNewArtifactApproval: true,
+        isNewArtifact: true,
+        ...buildNewArtifactOrgApprovalSurfaceOpts(context, mode),
+      })
+      if (refusal !== null) {
+        return refusal
+      }
+      recordNewArtifactPersonOnlyAsk(context?.toolUseId)
+      return {
+        behavior: 'ask',
+        message:
+          'Claude wants to create a new Artifact on claude.ai. Your organization requires a person to approve each new artifact.',
+        updatedInput: input,
+        ...NEW_ARTIFACT_ORG_APPROVAL_ASK_FLAGS,
+        decisionReason: {
+          type: 'safetyCheck',
+          reason: 'Creating an artifact needs a person to approve it',
+          classifierApprovable: false,
+        },
+      }
+    }
+    const suppressAlwaysAllow = shouldSuppressArtifactPublishAlwaysAllow(
+      context as Parameters<typeof shouldSuppressArtifactPublishAlwaysAllow>[0],
+    )
     if (typeof input.url === 'string' && input.url.length > 0) {
       const { label, parsed } = viewerLabel(input.url)
       const status = parsed ? yt(parsed.slug) : undefined
@@ -1832,6 +1881,20 @@ export async function checkArtifactActionPermissions(
         }
       }
     }
+    if (suppressAlwaysAllow) {
+      return {
+        behavior: 'ask',
+        message:
+          'Claude wants to publish an Artifact on claude.ai. Allow this publish?',
+        updatedInput: input,
+        suppressAlwaysAllowRule: true,
+        decisionReason: {
+          type: 'other',
+          reason:
+            'Artifact publish cannot offer "don\'t ask again" in subagents or after background tasks, external messages, or compaction',
+        },
+      }
+    }
     return {
       behavior: 'allow',
       updatedInput: input,
@@ -1847,6 +1910,519 @@ export async function checkArtifactActionPermissions(
       classifierApprovable: false,
     },
   }
+}
+
+/**
+ * Official 2.1.327 `Hta` (#419): verify publish source pin between approval
+ * and publish. When `sha256` or `heldSha256` is pinned, ignore `mtimeNs`-only
+ * drift from synced/remote-backed folders.
+ */
+export type ArtifactSourceFilePin =
+  | {
+      kind: 'file'
+      dev: bigint
+      ino: bigint
+      sizeBytes: bigint
+      mtimeNs: bigint
+      leafWasLink: boolean
+    }
+  | { kind: 'absent' }
+  | { kind: 'network' }
+
+export type ArtifactApprovedSourceRecord = {
+  pin: ArtifactSourceFilePin
+  sha256?: string
+  heldSha256?: string
+}
+
+export function publishSourcePinMatches(
+  approved: ArtifactApprovedSourceRecord,
+  current: ArtifactSourceFilePin,
+): boolean {
+  if (approved.pin.kind !== 'file' || current.kind !== 'file') {
+    return approved.pin.kind === current.kind
+  }
+  return (
+    approved.pin.dev === current.dev &&
+    approved.pin.ino === current.ino &&
+    approved.pin.leafWasLink === current.leafWasLink &&
+    approved.pin.sizeBytes === current.sizeBytes &&
+    (approved.sha256 !== undefined ||
+      approved.heldSha256 !== undefined ||
+      approved.pin.mtimeNs === current.mtimeNs)
+  )
+}
+
+const MAX_APPROVED_PUBLISH_SOURCE_PINS = 64
+
+const approvedPublishSourcePins = new Map<
+  string,
+  ArtifactApprovedSourceRecord
+>()
+
+function setApprovedPublishSourcePin(
+  key: string,
+  record: ArtifactApprovedSourceRecord,
+): void {
+  if (approvedPublishSourcePins.has(key)) {
+    approvedPublishSourcePins.delete(key)
+  } else if (
+    approvedPublishSourcePins.size >= MAX_APPROVED_PUBLISH_SOURCE_PINS
+  ) {
+    const oldest = approvedPublishSourcePins.keys().next().value
+    if (oldest !== undefined) {
+      approvedPublishSourcePins.delete(oldest)
+    }
+  }
+  approvedPublishSourcePins.set(key, record)
+}
+
+export function recordApprovedPublishSourcePin(
+  key: string,
+  record: ArtifactApprovedSourceRecord,
+): void {
+  setApprovedPublishSourcePin(key, record)
+}
+
+export function consumeApprovedPublishSourcePin(
+  key: string,
+): ArtifactApprovedSourceRecord | undefined {
+  const rec = approvedPublishSourcePins.get(key)
+  if (rec !== undefined) {
+    approvedPublishSourcePins.delete(key)
+  }
+  return rec
+}
+
+async function captureApprovedPublishSourcePin(
+  key: string,
+  filePath: string,
+): Promise<void> {
+  try {
+    const { expandPath } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('src/utils/path.js') as typeof import('src/utils/path.js')
+    const expanded = expandPath(filePath)
+    const [lst, st] = await Promise.all([
+      lstat(expanded, { bigint: true }),
+      stat(expanded, { bigint: true }),
+    ])
+    if (!st.isFile()) return
+    let sha256: string | undefined
+    if (st.size <= 10n * 1024n * 1024n) {
+      const bytes = await readFile(expanded).catch(() => undefined)
+      if (bytes !== undefined) {
+        sha256 = createHash('sha256').update(bytes).digest('hex')
+      }
+    }
+    setApprovedPublishSourcePin(key, {
+      pin: {
+        kind: 'file',
+        dev: st.dev,
+        ino: st.ino,
+        sizeBytes: st.size,
+        mtimeNs: st.mtimeNs,
+        leafWasLink: lst.isSymbolicLink(),
+      },
+      ...(sha256 !== undefined ? { sha256 } : {}),
+    })
+  } catch {
+    // best-effort pin capture (e.g. non-existent path handled by validate/call)
+  }
+}
+
+/**
+ * Official 2.1.327 (#420/#421/#514/#515): check whether the user's org
+ * requires a person to approve each new artifact, reading from AppState first
+ * and falling back to managed policy settings, merged settings, and GrowthBook.
+ */
+export function isOrgNewArtifactApprovalRequired(
+  appState?: { orgRequiresNewArtifactApproval?: boolean } | null,
+): boolean {
+  if (appState?.orgRequiresNewArtifactApproval === true) {
+    return true
+  }
+  try {
+    const { getInitialSettings, getSettingsForSource } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('src/utils/settings/settings.js') as typeof import('src/utils/settings/settings.js')
+    const managed = getSettingsForSource('policySettings') as
+      | Record<string, unknown>
+      | undefined
+    if (
+      managed?.orgRequiresNewArtifactApproval === true ||
+      managed?.requireNewArtifactApproval === true
+    ) {
+      return true
+    }
+    const merged = getInitialSettings() as Record<string, unknown> | undefined
+    if (
+      merged?.orgRequiresNewArtifactApproval === true ||
+      merged?.requireNewArtifactApproval === true
+    ) {
+      return true
+    }
+  } catch {
+    // ignore in isolated harnesses
+  }
+  try {
+    const { getFeatureValue_CACHED_MAY_BE_STALE } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('src/services/analytics/growthbook.js') as typeof import('src/services/analytics/growthbook.js')
+    if (
+      getFeatureValue_CACHED_MAY_BE_STALE(
+        'tengu_org_requires_new_artifact_approval',
+        false,
+      ) === true
+    ) {
+      return true
+    }
+  } catch {
+    // ignore
+  }
+  return false
+}
+
+/**
+ * Official 2.1.327 `tir` / `nir` / `qZr` (#420, #421, #514, #515):
+ * Org-required approval of each new artifact.
+ */
+export const NEW_ARTIFACT_ORG_APPROVAL_ASK_FLAGS = {
+  suppressAlwaysAllowRule: true,
+  personOnly: true,
+  defaultToNo: true,
+  localDisplayOnly: true,
+} as const
+
+export type NewArtifactApprovalSurface = 'any' | 'to_this_call' | undefined
+
+export type NewArtifactOrgApprovalCheckOpts = {
+  orgRequiresNewArtifactApproval?: boolean
+  isNewArtifact: boolean
+  mode?: string
+  agentId?: string
+  promptsUnavailable?: boolean
+  scheduledTriggerWithoutHuman?: boolean
+  outsideOpened?: boolean
+  cloudScheduledTaskWithUserChannel?: boolean
+  agentSdkWithPermissionCallback?: boolean
+  isInteractiveSurface?: boolean
+}
+
+export function buildNewArtifactOrgApprovalSurfaceOpts(
+  context?: Omit<Partial<ToolUseContext>, 'messages'> & {
+    promptsUnavailable?: boolean
+    messages?: ReadonlyArray<{
+      type?: string
+      verifiedSlackHumanTurn?: boolean
+      origin?: { kind?: string }
+      attachment?: {
+        type?: string
+        commandMode?: string
+        verifiedSlackHumanTurn?: boolean
+      }
+    }>
+  },
+  mode?: string,
+  env: NodeJS.ProcessEnv = process.env,
+): Omit<
+  NewArtifactOrgApprovalCheckOpts,
+  'orgRequiresNewArtifactApproval' | 'isNewArtifact'
+> {
+  const entrypoint = env.CLAUDE_CODE_ENTRYPOINT
+  const isActionOrJob =
+    isEnvTruthy(env.CLAUDE_CODE_ACTION) || Boolean(env.CLAUDE_JOB_DIR?.trim())
+  const isRemoteTrigger =
+    entrypoint === 'remote_trigger' || entrypoint === 'remote_cowork_trigger'
+  const hasRemoteUserChannel = Boolean(
+    env.CLAUDE_CODE_REMOTE && env.CLAUDE_CODE_REMOTE_SESSION_ID,
+  )
+
+  let scheduledTriggerWithoutHuman = isRemoteTrigger && !hasRemoteUserChannel
+  let outsideOpened = false
+  const messages = (
+    context as
+      | {
+          messages?: ReadonlyArray<{
+            type?: string
+            verifiedSlackHumanTurn?: boolean
+            origin?: { kind?: string }
+            attachment?: {
+              type?: string
+              commandMode?: string
+              verifiedSlackHumanTurn?: boolean
+            }
+          }>
+        }
+      | undefined
+  )?.messages
+  if (messages && messages.length > 0) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]
+      if (!msg) continue
+      const originKind = msg.origin?.kind
+      if (
+        originKind === 'cron' ||
+        originKind === 'schedule' ||
+        originKind === 'scheduled' ||
+        originKind === 'task-notification' ||
+        (msg.type === 'attachment' &&
+          msg.attachment?.type === 'queued_command' &&
+          msg.attachment.commandMode === 'task-notification')
+      ) {
+        scheduledTriggerWithoutHuman = true
+        break
+      }
+      if (
+        msg.verifiedSlackHumanTurn === true ||
+        msg.attachment?.verifiedSlackHumanTurn === true ||
+        (originKind !== undefined &&
+          originKind !== 'human' &&
+          originKind !== 'local')
+      ) {
+        outsideOpened = true
+        break
+      }
+      if (msg.type === 'user') {
+        scheduledTriggerWithoutHuman = false
+        break
+      }
+    }
+  }
+
+  const agentSdkWithPermissionCallback =
+    Boolean(entrypoint?.startsWith('sdk-')) &&
+    !isActionOrJob &&
+    !isRemoteTrigger
+  const cloudScheduledTaskWithUserChannel =
+    hasRemoteUserChannel &&
+    !isActionOrJob &&
+    !(entrypoint === 'remote_trigger' && scheduledTriggerWithoutHuman)
+  const promptsUnavailable =
+    (context as { promptsUnavailable?: boolean } | undefined)
+      ?.promptsUnavailable === true ||
+    isActionOrJob ||
+    mode === 'dontAsk' ||
+    mode === 'bypassPermissions' ||
+    (context?.options?.isNonInteractiveSession === true &&
+      !agentSdkWithPermissionCallback &&
+      !cloudScheduledTaskWithUserChannel)
+  const isInteractiveSurface =
+    !context?.options?.isNonInteractiveSession &&
+    context?.agentId === undefined &&
+    !isActionOrJob &&
+    !isRemoteTrigger &&
+    !promptsUnavailable &&
+    mode !== 'bypassPermissions' &&
+    mode !== 'dontAsk' &&
+    !scheduledTriggerWithoutHuman &&
+    !outsideOpened
+
+  return {
+    mode,
+    agentId: context?.agentId,
+    isInteractiveSurface,
+    agentSdkWithPermissionCallback,
+    cloudScheduledTaskWithUserChannel,
+    scheduledTriggerWithoutHuman,
+    outsideOpened,
+    promptsUnavailable,
+  }
+}
+
+export function resolveNewArtifactApprovalSurface(
+  opts: Pick<
+    NewArtifactOrgApprovalCheckOpts,
+    | 'agentId'
+    | 'isInteractiveSurface'
+    | 'cloudScheduledTaskWithUserChannel'
+    | 'agentSdkWithPermissionCallback'
+  >,
+): NewArtifactApprovalSurface {
+  if (opts.isInteractiveSurface) return 'any'
+  if (opts.cloudScheduledTaskWithUserChannel) return 'to_this_call'
+  if (opts.agentSdkWithPermissionCallback && opts.agentId === undefined) {
+    return 'to_this_call'
+  }
+  return undefined
+}
+
+export function checkNewArtifactOrgApprovalSurface(
+  opts: NewArtifactOrgApprovalCheckOpts,
+): PermissionResult | null {
+  if (!opts.orgRequiresNewArtifactApproval || !opts.isNewArtifact) {
+    return null
+  }
+  const deny = (message: string): PermissionResult => ({
+    behavior: 'deny',
+    message,
+    decisionReason: {
+      type: 'safetyCheck',
+      reason: 'Creating an artifact needs a person to approve it',
+      classifierApprovable: false,
+    },
+  })
+  if (
+    opts.promptsUnavailable ||
+    opts.mode === 'dontAsk' ||
+    opts.mode === 'bypassPermissions' ||
+    opts.scheduledTriggerWithoutHuman ||
+    opts.outsideOpened
+  ) {
+    return deny(
+      "The user's organization requires a person to approve each new artifact, and nobody can be asked here: permission prompts are off or bypassed, or a schedule or a message from outside this session started this turn. Nothing was created or published. Tell the user they can ask for it themselves in a session that shows permission prompts, and don't retry in this turn.",
+    )
+  }
+  const surface = resolveNewArtifactApprovalSurface(opts)
+  if (surface === undefined) {
+    return deny(
+      "The user's organization requires a person to approve each new artifact, and nobody can be asked here: this kind of session can't show that an answer came from a person. Nothing was created or published. Don't retry. Tell the user they can ask for it themselves in desktop Cowork, a claude.ai chat or an interactive Claude Code session (version 2.1.309 or later).",
+    )
+  }
+  return null
+}
+
+const MAX_RECORDED_PERSON_ONLY_ASKS = 128
+const recordedPersonOnlyAskToolUseIds = new Set<string>()
+
+export function recordNewArtifactPersonOnlyAsk(toolUseId?: string): void {
+  if (!toolUseId) return
+  recordedPersonOnlyAskToolUseIds.add(toolUseId)
+  if (recordedPersonOnlyAskToolUseIds.size > MAX_RECORDED_PERSON_ONLY_ASKS) {
+    const oldest = recordedPersonOnlyAskToolUseIds.values().next().value
+    if (oldest !== undefined) {
+      recordedPersonOnlyAskToolUseIds.delete(oldest)
+    }
+  }
+}
+
+export function consumeNewArtifactPersonOnlyAsk(toolUseId?: string): boolean {
+  if (!toolUseId) return false
+  return recordedPersonOnlyAskToolUseIds.delete(toolUseId)
+}
+
+export type NewArtifactApprovalDecisionCheck = {
+  toolUseId?: string
+  toolDecisions?: Map<string, { source?: string; decision?: string }>
+  allowGivenBy?: { toolUseId?: string; approver?: string }
+  permissionPipelineResult?: {
+    behavior?: string
+    personOnly?: boolean
+    decisionReason?: { type?: string; hookSource?: string }
+  }
+  lateAnswerFor?: string
+  surface?: NewArtifactApprovalSurface
+  pluginOnly?: boolean
+}
+
+export function isNewArtifactApprovedByPerson(
+  check: NewArtifactApprovalDecisionCheck,
+): boolean {
+  if (check.pluginOnly) return false
+  if (
+    check.permissionPipelineResult?.decisionReason?.type === 'hook' &&
+    check.permissionPipelineResult.decisionReason.hookSource?.startsWith(
+      'plugin:',
+    )
+  ) {
+    return false
+  }
+  if (check.allowGivenBy?.approver === 'plugin') {
+    return false
+  }
+  const decisionEntry =
+    check.toolUseId !== undefined
+      ? check.toolDecisions?.get(check.toolUseId)
+      : undefined
+  const decisionSource = decisionEntry?.source
+  if (decisionSource !== undefined) {
+    if (decisionEntry?.decision === 'reject') {
+      return false
+    }
+    return (
+      decisionSource === 'user_temporary' || decisionSource === 'user_permanent'
+    )
+  }
+  if (check.permissionPipelineResult?.behavior === 'allow') {
+    return false
+  }
+  if (check.surface === 'any') return true
+  if (check.surface !== 'to_this_call') return false
+  const approver =
+    check.allowGivenBy !== undefined &&
+    check.allowGivenBy.toolUseId === check.toolUseId
+      ? check.allowGivenBy.approver
+      : undefined
+  if (approver === 'user') return true
+  if (approver === undefined && check.toolUseId !== undefined) {
+    return (
+      check.lateAnswerFor === check.toolUseId ||
+      (check.permissionPipelineResult?.behavior === 'ask' &&
+        check.permissionPipelineResult.personOnly === true)
+    )
+  }
+  return false
+}
+
+/**
+ * Official 2.1.327 `Ie` / `q` (#517):
+ * Stop offering "don't ask again" on the Artifact publish prompt in subagents
+ * and after a background task result, someone else's message, or a compaction.
+ */
+export function shouldSuppressArtifactPublishAlwaysAllow(context: {
+  agentId?: string
+  agentContext?: unknown
+  messages?: ReadonlyArray<{
+    type?: string
+    subtype?: string
+    isCompactSummary?: boolean
+    verifiedSlackHumanTurn?: boolean
+    origin?: { kind?: string }
+    attachment?: {
+      type?: string
+      commandMode?: string
+      verifiedSlackHumanTurn?: boolean
+    }
+  }>
+}): boolean {
+  if (context.agentId !== undefined || context.agentContext !== undefined) {
+    return true
+  }
+  const messages = context.messages
+  if (!messages || messages.length === 0) return false
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (!msg) continue
+    if (
+      msg.isCompactSummary === true ||
+      (msg.type === 'system' && msg.subtype === 'compact_boundary')
+    ) {
+      return true
+    }
+    if (
+      msg.type === 'attachment' &&
+      msg.attachment?.type === 'queued_command' &&
+      msg.attachment.commandMode === 'task-notification'
+    ) {
+      return true
+    }
+    if (msg.origin?.kind === 'task-notification') {
+      return true
+    }
+    if (
+      msg.verifiedSlackHumanTurn === true ||
+      msg.attachment?.verifiedSlackHumanTurn === true ||
+      (msg.origin?.kind !== undefined &&
+        msg.origin.kind !== 'human' &&
+        msg.origin.kind !== 'local')
+    ) {
+      return true
+    }
+    if (msg.type === 'user') {
+      return false
+    }
+  }
+  return false
 }
 
 /** densable isConcurrencySafe. */

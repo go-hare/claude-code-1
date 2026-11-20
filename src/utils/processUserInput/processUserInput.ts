@@ -41,6 +41,10 @@ import {
   createImageMetadataText,
   maybeResizeAndDownsampleImageBlock,
 } from '../imageResizer.js'
+import {
+  shouldMarkPastedContent,
+  wrapPastedContentBlock,
+} from '../../history.js'
 import { storeImages } from '../imageStore.js'
 import {
   createCommandInputMessage,
@@ -1501,6 +1505,27 @@ async function processUserInputBase(
     mode === 'prompt' && !isMeta && shouldQuery !== false
   const isHumanTypedPrompt = isRegularUserPrompt && origin?.kind === 'human'
   queryCheckpoint('query_attachment_loading_start')
+  // Official 2.1.328 #674: mark pasted text with `<pasted_content id="...">`
+  // for Claude when enabled (including on 3P providers and telemetry-off).
+  // Run BEFORE `getAttachmentMessages` so `getPastedContentNoteAttachment`
+  // emits `PASTED_CONTENT_SYSTEM_REMINDER` on Turn 1 when the paste happens.
+  const markedPromptInput =
+    mode === 'prompt' && !isMeta
+      ? markPastedTextForModel(normalizedInput, pastedContents)
+      : normalizedInput
+  const markedInputString =
+    typeof markedPromptInput === 'string'
+      ? markedPromptInput
+      : Array.isArray(markedPromptInput)
+        ? markedPromptInput
+            .filter(
+              (b): b is { type: 'text'; text: string } =>
+                b.type === 'text' && typeof b.text === 'string',
+            )
+            .map(b => b.text)
+            .join('\n')
+        : null
+
   // Official 2.1.323 BN (#2194): mask picked file references (`@[...](claude-ref:...)`
   // / Google Docs links and spans between two picked files or after a picked file
   // and a link) before extracting @file / /skill mentions and keywords.
@@ -1524,6 +1549,7 @@ async function processUserInputBase(
             isHumanTypedPrompt,
             preExpansionInput: maskedPreExpansion,
             suppressWorkflowKeyword,
+            markedInput: markedInputString,
           },
         ),
       )
@@ -1538,6 +1564,7 @@ async function processUserInputBase(
             querySource,
             {
               deliveredTurnStart: true,
+              markedInput: markedInputString,
             },
           ),
         )
@@ -1612,6 +1639,7 @@ async function processUserInputBase(
       wakeupSource,
       hostInitiator,
       checkLine,
+      imagePasteIds,
     )
     return addImageMetadataMessage(slashResult, imageMetadataTexts)
   }
@@ -1649,6 +1677,7 @@ async function processUserInputBase(
       wakeupSource,
       hostInitiator,
       checkLine,
+      imagePasteIds,
     )
     if (inlinedImageAttachment) {
       slashResult.messages.push(inlinedImageAttachment)
@@ -1692,7 +1721,7 @@ async function processUserInputBase(
   }
   const promptResult = addImageMetadataMessage(
     processTextPrompt(
-      normalizedInput,
+      markedPromptInput,
       imageContentBlocks,
       imagePasteIds,
       promptAttachments,
@@ -1712,6 +1741,86 @@ async function processUserInputBase(
     promptResult.ambientAttachmentsOwed = true
   }
   return promptResult
+}
+
+const EXISTING_PASTED_BLOCK_RE =
+  /<pasted_content\b[^>]*>[\s\S]*?<\/pasted_content\b[^>]*>/g
+
+/**
+ * Official 2.1.328 #674 (`fTt` / `kbe` / `NI`): wrap pasted text in
+ * `<pasted_content id="<4-hex>">...</pasted_content id="<4-hex>">` tags for
+ * Claude when `shouldMarkPastedContent()` is active (including on third-party
+ * providers or with telemetry/feature flags off).
+ *
+ * Uses span-tracked offset slicing (never string-pattern `String.replace`) so
+ * `$` sequences (`$$`, `$&`, `$'`, `` $` ``) are preserved verbatim and multiple
+ * pasted blocks in the same prompt are all wrapped without double-wrapping.
+ */
+export function markPastedTextForModel(
+  input: string | ContentBlockParam[],
+  pastedContents?: Record<number, PastedContent>,
+): string | ContentBlockParam[] {
+  if (!pastedContents || !shouldMarkPastedContent()) {
+    return input
+  }
+  const pastedTexts = Object.values(pastedContents)
+    .filter(
+      entry =>
+        entry.type === 'text' &&
+        !entry.unavailable &&
+        typeof entry.content === 'string' &&
+        entry.content.trim().length > 0,
+    )
+    .map(entry => entry.content)
+    .sort((a, b) => b.length - a.length)
+  if (pastedTexts.length === 0) {
+    return input
+  }
+  const wrapText = (text: string): string => {
+    let out = text
+    const wrappedSpans: Array<[number, number]> = []
+    EXISTING_PASTED_BLOCK_RE.lastIndex = 0
+    for (const match of out.matchAll(EXISTING_PASTED_BLOCK_RE)) {
+      if (match.index !== undefined) {
+        wrappedSpans.push([match.index, match.index + match[0].length])
+      }
+    }
+    for (const pasted of pastedTexts) {
+      let searchPos = 0
+      while (searchPos <= out.length - pasted.length) {
+        const idx = out.indexOf(pasted, searchPos)
+        if (idx === -1) break
+        const end = idx + pasted.length
+        const overlapping = wrappedSpans.find(([s, e]) => idx < e && end > s)
+        if (overlapping) {
+          searchPos = Math.max(overlapping[1], idx + 1)
+          continue
+        }
+        const wrapped = wrapPastedContentBlock(pasted).trim()
+        const delta = wrapped.length - pasted.length
+        out =
+          out.slice(0, idx) +
+          out.slice(idx, end).replace(pasted, () => wrapped) +
+          out.slice(end)
+        for (const span of wrappedSpans) {
+          if (span[0] >= end) {
+            span[0] += delta
+            span[1] += delta
+          }
+        }
+        wrappedSpans.push([idx, idx + wrapped.length])
+        wrappedSpans.sort((a, b) => a[0] - b[0])
+        break
+      }
+    }
+    return out
+  }
+  if (typeof input === 'string') {
+    return wrapText(input)
+  }
+  return input.map(block =>
+    block.type === 'text' ? { ...block, text: wrapText(block.text) } : block,
+  )
 }
 
 // densable Qt — isMeta + turnCompanion, no origin (cun fills origin later).

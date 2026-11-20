@@ -9,8 +9,8 @@ import { execFileNoThrow, execFileNoThrowWithCwd } from './execFileNoThrow.js'
 import { isFileWithinReadSizeLimit } from './file.js'
 import {
   findGitRoot,
-  getBranch,
-  getDefaultBranch,
+  getBranchForDir,
+  getDefaultBranchForDir,
   getGitDir,
   getIsGit,
   gitExe,
@@ -277,9 +277,10 @@ export async function resolveBranchDiffBase(
   | Exclude<BranchBaseResolve, { kind: 'error' }>
   | { kind: 'error'; reason: string }
 > {
+  const cwd = diffRoot()
   const [branch, defaultBranch] = await Promise.all([
-    getBranch(),
-    getDefaultBranch(),
+    getBranchForDir(cwd),
+    getDefaultBranchForDir(cwd),
   ])
   if (!branch || branch === 'HEAD') return { kind: 'none' }
   if (defaultBranch.startsWith('-')) return { kind: 'none' }
@@ -1010,7 +1011,7 @@ function parseRawDiffToToolUseDiff(
  */
 async function getDiffRef(gitRoot: string): Promise<string> {
   const baseBranch =
-    process.env.CLAUDE_CODE_BASE_REF || (await getDefaultBranch())
+    process.env.CLAUDE_CODE_BASE_REF || (await getDefaultBranchForDir(gitRoot))
   const { stdout, code } = await execFileNoThrowWithCwd(
     gitExe(),
     ['--no-optional-locks', 'merge-base', 'HEAD', baseBranch],

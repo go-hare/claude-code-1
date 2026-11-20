@@ -488,9 +488,31 @@ export async function isPathBehindSymlinkInSandboxWritableRoot(
 /**
  * densable MessageSelector partial-restore UX when skippedLinks > 0.
  */
-export function formatRewindSkippedLinksMessage(skippedLinks: number): string {
+export function formatRewindSkippedLinksMessage(
+  skippedLinks: number,
+  skippedPaths: readonly string[] = [],
+): string {
   const unit = skippedLinks === 1 ? 'file' : 'files'
-  return `Restored the code, but skipped ${skippedLinks} ${unit}: ${REWIND_SKIPPED_LINKS_REASON}. Skipped files were left untouched \u2014 run with --debug for the paths.`
+  const pathList = skippedPaths
+    .slice(0, 3)
+    .map(p => `\n  ${p}`)
+    .join('')
+  return `Restored the code, but skipped ${skippedLinks} ${unit}: ${REWIND_SKIPPED_LINKS_REASON}. Skipped files were left untouched \u2014 run with --debug for the paths.${pathList}`
+}
+
+/**
+ * Official 2.1.327 (#396, SEA `MessageSelector`): partial-restore failure copy
+ * listing up to 3 files that could not be restored.
+ */
+export function formatRewindFailedPathsMessage(
+  failedPaths: readonly string[],
+): string {
+  const count = failedPaths.length
+  const unit = count === 1 ? 'file' : 'files'
+  return [
+    `Couldn't restore ${count} ${unit}: the backup is missing or the file can't be written.`,
+    ...failedPaths.slice(0, 3).map(p => `  ${p}`),
+  ].join('\n')
 }
 
 /**
@@ -512,9 +534,19 @@ export async function fileHistoryRewind(
     updater: (prev: FileHistoryState) => FileHistoryState,
   ) => void,
   messageId: UUID,
-): Promise<{ filesChanged: string[]; skippedLinks: number }> {
+): Promise<{
+  filesChanged: string[]
+  skippedLinks: number
+  skippedPaths: string[]
+  failedPaths: string[]
+}> {
   if (!fileHistoryEnabled()) {
-    return { filesChanged: [], skippedLinks: 0 }
+    return {
+      filesChanged: [],
+      skippedLinks: 0,
+      skippedPaths: [],
+      failedPaths: [],
+    }
   }
 
   // Rewind is a pure filesystem side-effect and does not mutate
@@ -525,7 +557,12 @@ export async function fileHistoryRewind(
     return state
   })
   if (!captured) {
-    return { filesChanged: [], skippedLinks: 0 }
+    return {
+      filesChanged: [],
+      skippedLinks: 0,
+      skippedPaths: [],
+      failedPaths: [],
+    }
   }
 
   const targetSnapshot = captured.snapshots.findLast(
@@ -547,10 +584,30 @@ export async function fileHistoryRewind(
     logForDebugging(
       `FileHistory: [Rewind] Rewinding to snapshot for ${messageId}`,
     )
-    const { filesChanged, skippedLinks } = await applySnapshot(
+    const { filesChanged, filesFailed, skippedPaths } = await applySnapshot(
       captured,
       targetSnapshot,
     )
+    const skippedLinks = skippedPaths.length
+
+    // Official 2.1.327 (#396, SEA `U8n`): if every differing file failed to
+    // restore, throw with an explicit summary rather than reporting success.
+    if (filesFailed.length > 0 && filesChanged.length === 0) {
+      logEvent('tengu_file_history_rewind_failed', {
+        trackedFilesCount: captured.trackedFiles.size,
+        snapshotFound: true,
+        filesFailedCount: filesFailed.length,
+        skippedLinksCount: skippedLinks,
+      })
+      const fileWord = filesFailed.length === 1 ? 'file' : 'files'
+      const skipSuffix =
+        skippedLinks > 0
+          ? `, and ${skippedLinks} ${skippedLinks === 1 ? 'path was' : 'paths were'} skipped for link safety`
+          : ''
+      throw new Error(
+        `No files were restored: ${filesFailed.length} ${fileWord} failed (backup missing, or the file could not be updated)${skipSuffix}`,
+      )
+    }
 
     logForDebugging(
       `FileHistory: [Rewind] Finished rewinding to ${messageId}` +
@@ -561,9 +618,15 @@ export async function fileHistoryRewind(
     logEvent('tengu_file_history_rewind_success', {
       trackedFilesCount: captured.trackedFiles.size,
       filesChangedCount: filesChanged.length,
+      filesFailedCount: filesFailed.length,
       skippedLinksCount: skippedLinks,
     })
-    return { filesChanged, skippedLinks }
+    return {
+      filesChanged,
+      skippedLinks,
+      skippedPaths,
+      failedPaths: filesFailed,
+    }
   } catch (error) {
     logError(error)
     logEvent('tengu_file_history_rewind_failed', {
@@ -1101,12 +1164,17 @@ export async function assertRewindDestinationSafe(
 async function applySnapshot(
   state: FileHistoryState,
   targetSnapshot: FileHistorySnapshot,
-): Promise<{ filesChanged: string[]; skippedLinks: number }> {
+): Promise<{
+  filesChanged: string[]
+  filesFailed: string[]
+  skippedPaths: string[]
+}> {
   const filesChanged: string[] = []
-  let skippedLinks = 0
+  const filesFailed: string[] = []
+  const skippedPaths: string[] = []
   for (const trackingPath of state.trackedFiles) {
+    const filePath = maybeExpandFilePath(trackingPath)
     try {
-      const filePath = maybeExpandFilePath(trackingPath)
       const targetBackup = targetSnapshot.trackedFileBackups[trackingPath]
       const resolvedBackup =
         targetBackup ?? getFirstVersionBackup(trackingPath, state)
@@ -1116,6 +1184,7 @@ async function applySnapshot(
 
       if (backupFileName === undefined) {
         // Error resolving the backup, so don't touch the file
+        filesFailed.push(filePath)
         logError(
           new Error('FileHistory: Error finding the backup file to apply'),
         )
@@ -1127,7 +1196,7 @@ async function applySnapshot(
 
       // Official 2.1.326 #305: skip tracked paths behind a symlink in a sandbox-writable folder.
       if (await isPathBehindSymlinkInSandboxWritableRoot(filePath)) {
-        skippedLinks++
+        skippedPaths.push(filePath)
         logEvent('tengu_file_history_rewind_restore_file_failed', {
           dryRun: false,
         })
@@ -1142,7 +1211,7 @@ async function applySnapshot(
       const expectedParent = resolvedBackup?.realParentDir
       const safety = await assertRewindDestinationSafe(filePath, expectedParent)
       if (!safety.ok) {
-        skippedLinks++
+        skippedPaths.push(filePath)
         logEvent('tengu_file_history_rewind_restore_file_failed', {
           dryRun: false,
         })
@@ -1162,7 +1231,7 @@ async function applySnapshot(
             expectedParent,
           )
           if (typeof unlinkResult === 'object' && 'refused' in unlinkResult) {
-            skippedLinks++
+            skippedPaths.push(filePath)
             logEvent('tengu_file_history_rewind_restore_file_failed', {
               dryRun: false,
             })
@@ -1179,7 +1248,7 @@ async function applySnapshot(
         } catch (e: unknown) {
           const code = getErrnoCode(e)
           if (code === 'ENOTDIR' || code === 'ELOOP' || code === 'EISDIR') {
-            skippedLinks++
+            skippedPaths.push(filePath)
             logEvent('tengu_file_history_rewind_restore_file_failed', {
               dryRun: false,
             })
@@ -1192,7 +1261,7 @@ async function applySnapshot(
           if (code === 'EPERM') {
             const d = await lstat(filePath).catch(() => undefined)
             if (d !== undefined && !d.isFile()) {
-              skippedLinks++
+              skippedPaths.push(filePath)
               logEvent('tengu_file_history_rewind_restore_file_failed', {
                 dryRun: false,
               })
@@ -1223,18 +1292,21 @@ async function applySnapshot(
           )
           filesChanged.push(filePath)
         } else if (outcome === 'refused') {
-          skippedLinks++
+          skippedPaths.push(filePath)
+        } else {
+          // Official 2.1.327 (#396): backup-missing must be reported in filesFailed.
+          filesFailed.push(filePath)
         }
-        // backup-missing: telemetry only (not skippedLinks)
       }
     } catch (error) {
+      filesFailed.push(filePath)
       logError(error)
       logEvent('tengu_file_history_rewind_restore_file_failed', {
         dryRun: false,
       })
     }
   }
-  return { filesChanged, skippedLinks }
+  return { filesChanged, filesFailed, skippedPaths }
 }
 
 /**

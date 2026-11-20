@@ -216,6 +216,7 @@ export function canBatchWith(
     hostInitiatorKey(b.hostInitiator) === hostInitiatorKey(a.hostInitiator) &&
     !!b.skipAttachments === !!a.skipAttachments &&
     !!b.skipSlashCommands === !!a.skipSlashCommands &&
+    Boolean(b.skipSubmissionHooks) === Boolean(a.skipSubmissionHooks) &&
     !isDrainOnlyResumeCompanion(a) &&
     !isDrainOnlyResumeCompanion(b) &&
     a.seededSummon !== true &&

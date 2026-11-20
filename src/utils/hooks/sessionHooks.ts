@@ -232,7 +232,7 @@ function applyRemoveHookWithScope(
   sessionId: string,
   event: HookEvent,
   hook: HookCommand,
-  options?: { skillRoot?: string },
+  options?: { skillRoot?: string; matchByIdentity?: boolean },
 ): boolean {
   const store = sessions.get(sessionId)
   if (!store) {
@@ -244,7 +244,9 @@ function applyRemoveHookWithScope(
       if (options !== undefined && matcher.skillRoot !== options.skillRoot) {
         return matcher
       }
-      const updatedHooks = matcher.hooks.filter(h => !isHookEqual(h.hook, hook))
+      const updatedHooks = matcher.hooks.filter(h =>
+        options?.matchByIdentity ? h.hook !== hook : !isHookEqual(h.hook, hook),
+      )
       return updatedHooks.length > 0
         ? { ...matcher, hooks: updatedHooks }
         : null
@@ -275,7 +277,7 @@ export function removeSessionHook(
   sessionId: string,
   event: HookEvent,
   hook: HookCommand,
-  options?: { skillRoot?: string },
+  options?: { skillRoot?: string; matchByIdentity?: boolean },
 ): void {
   const registry = getSessionHooksRegistry(setAppState)
   if (options !== undefined) {

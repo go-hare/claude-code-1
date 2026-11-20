@@ -48,7 +48,7 @@ import {
   wrapResumePromptOrigin,
 } from 'src/utils/messages.js'
 import { getAgentModel } from 'src/utils/model/agent.js'
-import { isModelAlias, type ModelAlias } from 'src/utils/model/aliases.js'
+import { waitForInitialPluginsLoaded } from 'src/utils/plugins/pluginLoader.js'
 import { getQuerySourceForAgent } from 'src/utils/promptCategory.js'
 import {
   getAgentTranscript,
@@ -267,6 +267,77 @@ function wrapResumePromptContent(
   ]
 }
 
+/**
+ * Official 2.1.327 (#424 / #510) — detect when a finished subagent is resumed
+ * by a sibling subagent (caller is a subagent and is not the target's parent).
+ */
+export function isSiblingSubagentResume(
+  callerAgentId: string | undefined,
+  targetParentAgentId: string | undefined,
+  isObserver: boolean,
+): boolean {
+  return (
+    callerAgentId !== undefined &&
+    callerAgentId !== targetParentAgentId &&
+    !isObserver
+  )
+}
+
+const SIBLING_STRIPPED_LAYER_KINDS = new Set([
+  'effort',
+  'model',
+  'allowed_tools',
+  'permission_mode',
+  'permission_mode_cap',
+])
+
+/**
+ * Official `ze` + `T0o` (2.1.327 #424 / #510): when a sibling subagent resumes
+ * a finished subagent via SendMessage, strip the sibling's model/effort layers
+ * (`#424`) and reset permission layers/mode back to the session's permission
+ * settings (`#510`) so the resumed subagent does not inherit the sibling's
+ * model, effort, or permission grants.
+ */
+export function buildSiblingResumeToolUseContext(
+  toolUseContext: ToolUseContext,
+  sessionMainLoopModel: string,
+  sessionPermissionMode?: InternalPermissionMode,
+): ToolUseContext {
+  const filteredLayers = toolUseContext.permissionLayers?.filter(
+    layer => !SIBLING_STRIPPED_LAYER_KINDS.has(layer.kind),
+  )
+  const nextLayers: NonNullable<ToolUseContext['permissionLayers']> = [
+    ...(filteredLayers ?? []),
+    { kind: 'model', mainLoopModel: sessionMainLoopModel },
+  ]
+  const baseGetAppState = toolUseContext.getAppState
+  const wrappedGetAppState: ToolUseContext['getAppState'] =
+    sessionPermissionMode !== undefined
+      ? () => {
+          const state = baseGetAppState()
+          if (state.toolPermissionContext.mode === sessionPermissionMode) {
+            return state
+          }
+          return {
+            ...state,
+            toolPermissionContext: {
+              ...state.toolPermissionContext,
+              mode: sessionPermissionMode,
+            },
+          }
+        }
+      : baseGetAppState
+  return {
+    ...toolUseContext,
+    getAppState: wrappedGetAppState,
+    permissionLayers: nextLayers,
+    options: {
+      ...toolUseContext.options,
+      mainLoopModel: sessionMainLoopModel,
+    },
+  }
+}
+
 export async function resumeAgentBackground({
   agentId,
   prompt,
@@ -282,6 +353,9 @@ export async function resumeAgentBackground({
   awaitCompletion,
   workerPermissionMode,
   resumeSurface,
+  callerAgentId,
+  sessionMainLoopModel,
+  sessionPermissionMode,
 }: {
   agentId: string
   prompt: ResumePromptContent
@@ -333,6 +407,12 @@ export async function resumeAgentBackground({
    * Aut() resume-in-background refuse applies unless inline/reply.
    */
   resumeSurface?: 'notification' | 'inline' | 'reply'
+  /** Official 2.1.327 (#424 / #510): explicit caller agent ID when resumed by a sibling subagent. */
+  callerAgentId?: string
+  /** Official 2.1.327 (#424): session mainLoopModel used instead of a sibling's model layer. */
+  sessionMainLoopModel?: string
+  /** Official 2.1.327 (#510): session permission mode used instead of a sibling's mode layer. */
+  sessionPermissionMode?: InternalPermissionMode
 }): Promise<ResumeAgentResult> {
   const startTime = Date.now()
   const appState = toolUseContext.getAppState()
@@ -411,6 +491,9 @@ export async function resumeAgentBackground({
       awaitCompletion,
       workerPermissionMode,
       resumeSurface,
+      callerAgentId,
+      sessionMainLoopModel,
+      sessionPermissionMode,
       startTime,
       appState,
       rootSetAppState,
@@ -440,6 +523,9 @@ async function resumeAgentBackgroundAfterClaim({
   awaitCompletion,
   workerPermissionMode,
   resumeSurface,
+  callerAgentId,
+  sessionMainLoopModel,
+  sessionPermissionMode,
   startTime,
   appState,
   rootSetAppState,
@@ -459,6 +545,9 @@ async function resumeAgentBackgroundAfterClaim({
   awaitCompletion?: boolean
   workerPermissionMode?: string
   resumeSurface?: 'notification' | 'inline' | 'reply'
+  callerAgentId?: string
+  sessionMainLoopModel?: string
+  sessionPermissionMode?: InternalPermissionMode
   startTime: number
   appState: ReturnType<ToolUseContext['getAppState']>
   rootSetAppState: NonNullable<
@@ -908,12 +997,46 @@ async function resumeAgentBackgroundAfterClaim({
     )
   }
 
-  // densable Aye:
+  // densable Aye + 2.1.327 (#424 / #510 / #522 / #524):
   //   y = session mode
   //   J = isObserver ? MJe(workerPermissionMode, y) ?? y : void 0
   //   mode = J ?? workerPermissionMode ?? spawnMode ?? agent.permissionMode ?? "acceptEdits"
   // MJe only applies when sidecar isObserver (observer deliver path).
   const isObserverSidecar = meta?.isObserver === true
+  const liveTaskForSibling = toolUseContext.getAppState().tasks?.[agentId] as
+    | { parentAgentId?: string }
+    | undefined
+  const targetParentAgentId =
+    typeof liveTaskForSibling?.parentAgentId === 'string'
+      ? liveTaskForSibling.parentAgentId
+      : meta?.parentAgentId
+  const effectiveCallerAgentId = callerAgentId ?? toolUseContext.agentId
+  const effectiveSessionPermissionMode = (sessionPermissionMode ??
+    sessionMode) as InternalPermissionMode
+  const siblingResume = isSiblingSubagentResume(
+    effectiveCallerAgentId,
+    targetParentAgentId,
+    isObserverSidecar,
+  )
+  if (siblingResume) {
+    const rootModel =
+      sessionMainLoopModel ??
+      appState.mainLoopModelForSession ??
+      appState.mainLoopModel ??
+      toolUseContext.options.mainLoopModel
+    toolUseContext = buildSiblingResumeToolUseContext(
+      toolUseContext,
+      rootModel,
+      effectiveSessionPermissionMode,
+    )
+  }
+
+  // Official 2.1.327 (#524): restarted background subagents wait for initial
+  // plugins to finish loading before assembling their tool pool or running.
+  if (!isResumedFork) {
+    await waitForInitialPluginsLoaded(toolUseContext.abortController.signal)
+  }
+
   const observerCappedMode = isObserverSidecar
     ? (resolveWorkerPermissionMode(workerPermissionMode, sessionMode) ??
       sessionMode)
@@ -922,28 +1045,38 @@ async function resumeAgentBackgroundAfterClaim({
     typeof meta?.spawnMode === 'string'
       ? (meta.spawnMode as InternalPermissionMode)
       : undefined
+  // Official 2.1.327 (#510): when resumed by a sibling's message, drop the
+  // sibling's workerPermissionMode so the target agent's own metaSpawnMode and
+  // selectedAgent.permissionMode take precedence before falling back to the
+  // session's permission mode.
+  const effectiveWorkerPermissionMode = siblingResume
+    ? undefined
+    : (workerPermissionMode as InternalPermissionMode | undefined)
   const resolvedWorkerMode: InternalPermissionMode =
     observerCappedMode ??
-    (workerPermissionMode as InternalPermissionMode | undefined) ??
+    effectiveWorkerPermissionMode ??
     metaSpawnMode ??
     (selectedAgent.permissionMode as InternalPermissionMode | undefined) ??
-    'acceptEdits'
+    (siblingResume ? effectiveSessionPermissionMode : 'acceptEdits')
 
   // Resolve model for analytics metadata (runAgent resolves its own internally).
-  // densable: model pin S?.isObserver ? void 0 : S?.model; getAgentModel
-  // uses session mode, not worker mode. Only alias strings re-pin via
-  // toolSpecifiedModel; full IDs still flow through runAgent.model.
-  const resumeModelRaw =
-    isObserverSidecar || !meta?.model ? undefined : meta.model
-  const resumeModelAlias: ModelAlias | undefined =
-    resumeModelRaw && isModelAlias(resumeModelRaw) ? resumeModelRaw : undefined
+  // Official 2.1.327 (#522): keep the full model ID or alias saved in sidecar
+  // metadata when resuming non-fork/non-observer subagents (even after /model);
+  // forks inherit parent model.
+  const resumeModelSpec = isObserverSidecar
+    ? undefined
+    : isResumedFork
+      ? 'inherit'
+      : typeof meta?.model === 'string' && meta.model.length > 0
+        ? meta.model
+        : undefined
   const resolvedAgentModel = getAgentModel(
     resolveAgentDefinitionModel(
       selectedAgent,
       toolUseContext.options.mainLoopModel,
     ),
     toolUseContext.options.mainLoopModel,
-    resumeModelAlias,
+    resumeModelSpec,
     sessionMode,
   )
 
@@ -961,7 +1094,7 @@ async function resumeAgentBackgroundAfterClaim({
       subagentType: selectedAgent.agentType,
       prompt: promptText,
       description: uiDescription,
-      model: resumeModelAlias ?? resolvedAgentModel,
+      model: resumeModelSpec ?? resolvedAgentModel,
       permissionMode: resolvedWorkerMode,
       background: true,
       fork: isResumedFork,
@@ -1054,8 +1187,9 @@ async function resumeAgentBackgroundAfterClaim({
     canUseTool,
     isAsync: true,
     querySource: resumeQuerySource,
-    // densable: model pin skipped for observer (b?.isObserver?void 0:b?.model)
-    model: resumeModelAlias,
+    // densable + 2.1.327 (#522): keep saved model (full ID or alias) on resume
+    model: resumeModelSpec,
+    isResume: true,
     // Fork resume: pass parent's system prompt (cache-identical prefix).
     // Non-fork: undefined → runAgent recomputes under wrapWithCwd so
     // getCwd() sees resumedWorktreePath.
@@ -1302,10 +1436,28 @@ async function resumeAgentBackgroundAfterClaim({
   // Registry is in-memory; cold resume / process restart loses it unless we
   // rehydrate from sidecar meta.name (persisted at spawn via E8/T1e).
   // observer-activity resume stamps isObserver on the re-registered task.
+  const existingParentForIdle = resumeParentAgentId
+    ? toolUseContext.getAppState().tasks?.[resumeParentAgentId]
+    : undefined
+  const existingSelfForIdle = toolUseContext.getAppState().tasks?.[agentId]
+  const inheritedBackgroundWaitFirstIdle =
+    existingParentForIdle?.type === 'local_agent' &&
+    existingParentForIdle.backgroundWaitFirstIdle != null
+      ? existingParentForIdle.backgroundWaitFirstIdle
+      : existingSelfForIdle?.type === 'local_agent' &&
+          existingSelfForIdle.backgroundWaitFirstIdle != null
+        ? existingSelfForIdle.backgroundWaitFirstIdle
+        : undefined
   const agentBackgroundTask = registerAsyncAgent({
     agentId,
     description: uiDescription,
     prompt: promptText,
+    ...(promptOriginKind === 'task-notification'
+      ? { promptIsNotice: true }
+      : {}),
+    ...(inheritedBackgroundWaitFirstIdle !== undefined
+      ? { backgroundWaitFirstIdle: inheritedBackgroundWaitFirstIdle }
+      : {}),
     selectedAgent,
     setAppState: rootSetAppState,
     toolUseId: toolUseContext.toolUseId,

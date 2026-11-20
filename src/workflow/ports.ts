@@ -32,6 +32,7 @@ import { clearCompletedWorkflowAgentResults } from './backends/claudeCodeBackend
 import type { ProgressBus } from './progress/bus.js'
 import type { ProgressStore } from './progress/store.js'
 import {
+  WORKFLOW_PROGRESS_RESEND_INTERVAL_MS,
   installWorkflowTaskProgressBridge,
   type WorkflowTaskProgressBinding,
 } from './taskProgressBridge.js'
@@ -97,6 +98,7 @@ export function createWorkflowPorts(opts: {
     bus: opts.bus,
     store: opts.store,
     getBinding: runId => bindings.get(runId)?.progress,
+    resendIntervalMs: WORKFLOW_PROGRESS_RESEND_INTERVAL_MS,
   })
 
   // Telemetry subscription (independent of store). LogEventMetadata only accepts boolean/number/undefined,

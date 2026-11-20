@@ -24,19 +24,18 @@ export function ChannelDowngradeDialog({ currentVersion, onChoice }: Props): Rea
   }
 
   return (
-    <Dialog title="Switch to Stable Channel" onCancel={handleCancel} color="permission" hideBorder hideInputGuide>
-      <Text>
-        The stable channel may have an older version than what you&apos;re currently running ({currentVersion}).
-      </Text>
-      <Text dimColor>How would you like to handle this?</Text>
+    <Dialog title="Switch to stable channel" onCancel={handleCancel} color="permission" hideBorder hideInputGuide>
+      <Text>The stable channel may be older than the version you&apos;re running ({currentVersion}).</Text>
+      <Text>Which version do you want?</Text>
       <Select
+        declineValue="stay"
         options={[
           {
-            label: 'Allow possible downgrade to stable version',
+            label: 'Use the stable version, even if older',
             value: 'downgrade' as ChannelDowngradeChoice,
           },
           {
-            label: `Stay on current version (${currentVersion}) until stable catches up`,
+            label: `Stay on ${currentVersion} until stable catches up`,
             value: 'stay' as ChannelDowngradeChoice,
           },
         ]}

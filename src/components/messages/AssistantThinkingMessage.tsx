@@ -1,6 +1,6 @@
 import type { ThinkingBlock, ThinkingBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, NoSelect, Text } from '@anthropic/ink';
 import { THEREFORE } from '../../constants/figures.js';
 import { Markdown } from '../Markdown.js';
 import { stripPromptXMLTags } from '../../utils/emptyMessageText.js';
@@ -40,11 +40,11 @@ export function AssistantThinkingMessage({
 
   return (
     <Box flexDirection="row" marginTop={addMargin ? 1 : 0} width="100%">
-      <Box minWidth={2}>
+      <NoSelect fromLeftEdge minWidth={2}>
         <Text aria-label="thinking:" dimColor italic>
           {THEREFORE}
         </Text>
-      </Box>
+      </NoSelect>
       <Box flexDirection="column" flexGrow={1}>
         {body}
       </Box>

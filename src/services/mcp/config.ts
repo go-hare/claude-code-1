@@ -1,5 +1,5 @@
 import { feature } from 'bun:bundle'
-import { chmod, open, rename, stat, unlink } from 'fs/promises'
+import { chmod, open, readFile, rename, stat, unlink } from 'fs/promises'
 import mapValues from 'lodash-es/mapValues.js'
 import { dirname, join, parse } from 'path'
 import { getPlatform } from 'src/utils/platform.js'
@@ -10,7 +10,7 @@ import {
 } from '../../bridge/bridgeCarrier.js'
 import { createRemoteMetaHttpConfig } from '../../bridge/hearthbotMcp.js'
 import type { PluginError } from '../../types/plugin.js'
-import { markCliOwnedConfig } from './cliOwnedConfigs.js'
+import { isCliOwnedConfig, markCliOwnedConfig } from './cliOwnedConfigs.js'
 import {
   notifyMcpSwitchedOffSaved,
   sanitizeDisabledMcpServers,
@@ -216,7 +216,9 @@ export function shouldHoldConnectorApprovalWhilePluginsLoading(opts?: {
  * Preserves file permissions and flushes to disk before rename.
  * Uses the original path for rename (does not follow symlinks).
  */
-async function writeMcpjsonFile(config: McpJsonConfig): Promise<void> {
+async function writeMcpjsonFile(
+  config: Record<string, unknown>,
+): Promise<void> {
   const mcpJsonPath = join(getCwd(), '.mcp.json')
 
   // Read existing file permissions to preserve them
@@ -955,6 +957,84 @@ function expandMcpServerSideString(value: string): string {
 }
 
 /**
+ * Official 2.1.328 `Wli` (#666): match `claude.ai <displayName>` entries in
+ * `deniedMcpServers` against dynamic connector configs (cloud / self-hosted
+ * runner sessions) that carry a `displayName`.
+ */
+export function isDeniedByClaudeAiConnectorDisplayName(
+  config: McpServerConfig & { scope?: ConfigScope; displayName?: unknown },
+  deniedMcpServers: SettingsJson['deniedMcpServers'] = getMcpDenylistSettings()
+    .deniedMcpServers,
+): boolean {
+  const scope = config.scope ?? 'dynamic'
+  const rawDisplayName = (config as { displayName?: unknown }).displayName
+  const displayName =
+    scope === 'dynamic' && !isCliOwnedConfig(config)
+      ? rawDisplayName
+      : undefined
+  return (
+    typeof displayName === 'string' &&
+    deniedMcpServers?.some(
+      entry =>
+        isMcpServerNameEntry(entry) &&
+        entry.serverName === `claude.ai ${displayName}`,
+    ) === true
+  )
+}
+
+/**
+ * Official 2.1.327 `_0t` (#378 / #499): read raw `.mcp.json` preserving all
+ * sibling top-level keys (e.g. `$schema`, `servers`) alongside `mcpServers`.
+ */
+export async function readRawProjectMcpJson(cwd: string = getCwd()): Promise<{
+  mcpJson: Record<string, unknown>
+  mcpServers: Record<string, McpServerConfig>
+}> {
+  const mcpJsonPath = join(cwd, '.mcp.json')
+  let content: string
+  try {
+    content = await readFile(mcpJsonPath, 'utf8')
+  } catch (error) {
+    if (getErrnoCode(error) === 'ENOENT') {
+      return { mcpJson: {}, mcpServers: {} }
+    }
+    throw error
+  }
+  if (!content.trim()) {
+    return { mcpJson: {}, mcpServers: {} }
+  }
+  const parsed = safeParseJSON(content)
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const rec = parsed as Record<string, unknown>
+    const rawServers = rec.mcpServers === undefined ? {} : rec.mcpServers
+    if (
+      rawServers &&
+      typeof rawServers === 'object' &&
+      !Array.isArray(rawServers)
+    ) {
+      return {
+        mcpJson: rec,
+        mcpServers: { ...(rawServers as Record<string, McpServerConfig>) },
+      }
+    }
+  }
+  throw new Error(
+    '.mcp.json is malformed (not valid JSON, or mcpServers is not an object)',
+  )
+}
+
+export function hasTopLevelServersWithoutMcpServersKey(
+  mcpJson: Record<string, unknown>,
+): boolean {
+  return (
+    !Object.hasOwn(mcpJson, 'mcpServers') &&
+    Object.values(mcpJson).some(
+      value => McpServerConfigSchema().safeParse(value).success,
+    )
+  )
+}
+
+/**
  * Check if an MCP server is denied by enterprise policy
  * Checks name-based, command-based, and URL-based restrictions
  * densable rdt — policy command/url entries expand ${VAR} via Hyy (startup +
@@ -977,6 +1057,16 @@ export function isMcpServerDenied(
     if (isMcpServerNameEntry(entry) && entry.serverName === serverName) {
       return true
     }
+  }
+
+  // Official 2.1.328 `Wli` (#666): `deniedMcpServers` entries of the form
+  // `claude.ai <name>` also apply to dynamic connector servers injected in
+  // cloud / self-hosted runner sessions via their `displayName`.
+  if (
+    config &&
+    isDeniedByClaudeAiConnectorDisplayName(config, settings.deniedMcpServers)
+  ) {
+    return true
   }
 
   // Check command-based denial (stdio servers only) and URL-based denial (remote servers only)
@@ -1464,8 +1554,8 @@ export async function addMcpConfig(
   // Check if server already exists in the target scope
   switch (scope) {
     case 'project': {
-      const { servers } = getProjectMcpConfigsFromCwd()
-      if (servers[name]) {
+      const { mcpServers } = await readRawProjectMcpJson()
+      if (Object.hasOwn(mcpServers, name)) {
         throw new Error(`MCP server ${name} already exists in .mcp.json`)
       }
       break
@@ -1495,21 +1585,19 @@ export async function addMcpConfig(
   // Add based on scope
   switch (scope) {
     case 'project': {
-      const { servers: existingServers } = getProjectMcpConfigsFromCwd()
-
-      const mcpServers: Record<string, McpServerConfig> = {}
-      for (const [serverName, serverConfig] of Object.entries(
-        existingServers,
-      )) {
-        const { scope: _, ...configWithoutScope } = serverConfig
-        mcpServers[serverName] = configWithoutScope
+      const { mcpJson, mcpServers } = await readRawProjectMcpJson()
+      if (hasTopLevelServersWithoutMcpServersKey(mcpJson)) {
+        throw new Error(
+          `Can't add to .mcp.json: it lists servers at the top level, and adding an "mcpServers" key would stop a plugin from loading them. Move them under "mcpServers", then try again. If they aren't servers, add "mcpServers": {} to the file instead.`,
+        )
       }
       mcpServers[name] = validatedConfig
-      const mcpConfig = { mcpServers }
+      // Preserve all other top-level keys (e.g. $schema, servers) in .mcp.json (#378)
+      const nextJson = { ...mcpJson, mcpServers }
 
       // Write back to .mcp.json
       try {
-        await writeMcpjsonFile(mcpConfig)
+        await writeMcpjsonFile(nextJson)
       } catch (error) {
         throw new Error(`Failed to write to .mcp.json: ${error}`)
       }
@@ -1573,25 +1661,17 @@ export async function removeMcpConfig(
 ): Promise<void> {
   switch (scope) {
     case 'project': {
-      const { servers: existingServers } = getProjectMcpConfigsFromCwd()
+      const { mcpJson, mcpServers } = await readRawProjectMcpJson()
 
-      if (!existingServers[name]) {
+      if (!Object.hasOwn(mcpServers, name)) {
         throw new Error(`No MCP server found with name: ${name} in .mcp.json`)
       }
 
-      // Strip scope information when writing back to .mcp.json
-      const mcpServers: Record<string, McpServerConfig> = {}
-      for (const [serverName, serverConfig] of Object.entries(
-        existingServers,
-      )) {
-        if (serverName !== name) {
-          const { scope: _, ...configWithoutScope } = serverConfig
-          mcpServers[serverName] = configWithoutScope
-        }
-      }
-      const mcpConfig = { mcpServers }
+      delete mcpServers[name]
+      // Preserve all other top-level keys (e.g. $schema, servers) in .mcp.json (#378)
+      const nextJson = { ...mcpJson, mcpServers }
       try {
-        await writeMcpjsonFile(mcpConfig)
+        await writeMcpjsonFile(nextJson)
       } catch (error) {
         throw new Error(`Failed to remove from .mcp.json: ${error}`)
       }

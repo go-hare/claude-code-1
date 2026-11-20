@@ -10,7 +10,9 @@ import {
   ERASE_LINE,
   ERASE_SCREEN,
   ERASE_SCROLLBACK,
+  eraseToEndOfLine,
 } from './termio/csi.js'
+import { Jk } from './terminalCapabilities.js'
 
 // HVP (Horizontal Vertical Position) - legacy Windows cursor home
 const CURSOR_HOME_WINDOWS = csi(0, 'f')
@@ -78,12 +80,44 @@ export function getEraseScreenSequence(): string {
 }
 
 /**
- * densable Bj8 / eraseViewportInPlace — main-screen fullReset without wiping
- * scrollback: home, erase each viewport line, home again.
- * Sequence: CSI H + (CSI 2 K + CSI 1 B)×rows + CSI H
+ * Official 2.1.327 (#451): Ghostty keeps soft-wrap join bits across `CSI 2 K`
+ * (`erasedRowsStayJoined: true`), so resizing after a full-line erase pushes
+ * erased rows into scrollback. Detect Ghostty via env or XTVERSION probe.
  */
-export function eraseViewportInPlace(rows: number): string {
+export function isGhosttyErasedRowsStayJoined(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  if (env.TERM === 'xterm-ghostty' || env.TERM_PROGRAM === 'ghostty') {
+    return true
+  }
+  return Jk().xtversionName?.toLowerCase().startsWith('ghostty') ?? false
+}
+
+/**
+ * Official 2.1.327 `uPr` (#451): Ghostty-safe viewport erase that clears
+ * row 0 with `CSI 2 K` and each row with `CSI K` (`eraseToEndOfLine`) +
+ * `CSI 1 B` so erased rows do not stay soft-wrap joined on resize.
+ */
+export function eraseViewportInPlaceForGhostty(rows: number): string {
   if (rows <= 0) return CURSOR_HOME
+  const step = eraseToEndOfLine() + cursorDown(1)
+  return CURSOR_HOME + ERASE_LINE + step.repeat(rows) + CURSOR_HOME
+}
+
+/**
+ * densable Bj8 / eWe + Official 2.1.327 uPr (#451) — main-screen fullReset
+ * without wiping scrollback: home, erase each viewport line, home again.
+ * On Ghostty (`erasedRowsStayJoined`), uses `uPr` (`CSI K` per row) so
+ * subsequent resizes do not push erased lines into scrollback.
+ */
+export function eraseViewportInPlace(
+  rows: number,
+  erasedRowsStayJoined = isGhosttyErasedRowsStayJoined(),
+): string {
+  if (rows <= 0) return CURSOR_HOME
+  if (erasedRowsStayJoined) {
+    return eraseViewportInPlaceForGhostty(rows)
+  }
   // densable: rM+(EwH+nw8(1)).repeat(H)+rM  — ERASE_LINE then CUD 1 per row
   let body = ''
   for (let i = 0; i < rows; i++) {

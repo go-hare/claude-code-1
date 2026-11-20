@@ -15,14 +15,16 @@ import { logEvent } from '../../services/analytics/index.js';
 import { AppStateProvider } from '../../state/AppState.js';
 import { onChangeAppState } from '../../state/onChangeAppState.js';
 import { isAnthropicAuthEnabled } from '../../utils/auth.js';
+import { formatAutoUpdatesChannelDisplay } from '../../utils/autoUpdater.js';
 import { getModelMaxOutputTokens } from '../../utils/context.js';
-import { getDoctorDiagnostic } from '../../utils/doctorDiagnostic.js';
+import { type DiagnosticInfo, getDoctorDiagnostic } from '../../utils/doctorDiagnostic.js';
+import { isEnvTruthy } from '../../utils/envUtils.js';
 import { validateBoundedIntEnvVar } from '../../utils/envValidation.js';
 import { getSettingsWithAllErrors } from '../../utils/settings/allErrors.js';
 import { getInitialSettings } from '../../utils/settings/settings.js';
 import { BASH_MAX_OUTPUT_DEFAULT, BASH_MAX_OUTPUT_UPPER_LIMIT } from '../../utils/shell/outputLimits.js';
 import { plural } from '../../utils/stringUtils.js';
-import { type LastUpdateResult, loadLastUpdateResult } from '../../utils/updateResult.js';
+import { formatLastUpdateResult } from '../../utils/updateResult.js';
 import { formatCliSuccess, formatCliWarning } from '../cliStatusMarkers.js';
 
 export async function setupTokenHandler(root: Root): Promise<void> {
@@ -79,23 +81,11 @@ function sanitizeLineText(value: string): string {
   return value.replace(/[\r\n]+/g, ' ').replaceAll('`', '');
 }
 
-function formatLastUpdateAttempt(result: LastUpdateResult | null): string {
-  if (!result) return 'none recorded';
-  const datePart = sanitizeLineText(result.timestamp.slice(0, 10));
-  if (result.success) {
-    return result.toVersion ? `success → ${sanitizeLineText(result.toVersion)} (${datePart})` : `success (${datePart})`;
-  }
-  return `failed (${sanitizeLineText(result.error ?? 'unknown')}) — ${datePart}`;
-}
-
-export async function doctorHandler(root?: Root): Promise<void> {
-  logEvent('tengu_doctor_command', {});
-  root?.unmount();
-
-  const [diagnostic, lastUpdate] = await Promise.all([getDoctorDiagnostic(), loadLastUpdateResult()]);
-  const channel = getInitialSettings()?.autoUpdatesChannel ?? 'latest';
-
-  const lines: string[] = [
+/**
+ * Pure summary header lines for `claude doctor` (aligned with official 2.1.328).
+ */
+export function formatDoctorSummaryLines(diagnostic: DiagnosticInfo, channel: string | undefined): string[] {
+  return [
     'Claude Code doctor',
     '',
     `Running: ${diagnostic.installationType} (${diagnostic.version})`,
@@ -108,9 +98,19 @@ export async function doctorHandler(root?: Root): Promise<void> {
     `Config install method: ${sanitizeLineText(String(diagnostic.configInstallMethod))}`,
     `Search: ${diagnostic.ripgrepStatus.working ? 'OK' : 'Not working'} (${diagnostic.ripgrepStatus.mode === 'embedded' || diagnostic.ripgrepStatus.mode === 'builtin' ? 'bundled' : sanitizeLineText(diagnostic.ripgrepStatus.systemPath || 'system')})`,
     `Auto-updates: ${diagnostic.packageManager ? 'Managed by package manager' : sanitizeLineText(diagnostic.autoUpdates)}`,
-    `Auto-update channel: ${channel}`,
-    `Last update attempt: ${formatLastUpdateAttempt(lastUpdate)}`,
+    `Auto-update channel: ${formatAutoUpdatesChannelDisplay(channel)}`,
+    `Last update attempt: ${formatLastUpdateResult(diagnostic.lastUpdateResult)}`,
   ];
+}
+
+export async function doctorHandler(root?: Root): Promise<void> {
+  logEvent('tengu_doctor_command', {});
+  root?.unmount();
+
+  const diagnostic = await getDoctorDiagnostic();
+  const channel = getInitialSettings()?.autoUpdatesChannel ?? 'latest';
+
+  const lines: string[] = formatDoctorSummaryLines(diagnostic, channel);
 
   const { errors: settingsErrors } = getSettingsWithAllErrors();
   const nonMcpSettingsErrors = settingsErrors.filter(err => err.mcpErrorMetadata === undefined);
@@ -177,6 +177,13 @@ export async function doctorHandler(root?: Root): Promise<void> {
 
 // install handler
 export async function installHandler(target: string | undefined, options: { force?: boolean }): Promise<void> {
+  if (isEnvTruthy(process.env.DISABLE_UPDATES)) {
+    process.stdout.write(
+      'Updates are disabled by your administrator. Contact your IT team to get the latest version.\n',
+    );
+    process.exit(0);
+    return;
+  }
   const { setup } = await import('../../setup.js');
   await setup(cwd(), 'default', false, false, undefined, false);
   const { install } = await import('../../commands/install.js');

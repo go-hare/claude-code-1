@@ -227,6 +227,7 @@ import { execAgentHook } from './hooks/execAgentHook.js'
 import { execHttpHook } from './hooks/execHttpHook.js'
 import {
   formatHookErrorOutput,
+  formatOutsideReplHookFailures,
   HOOK_EXIT_127_PRETOOL_MESSAGE,
 } from './hooks/hookErrorDisplay.js'
 export {
@@ -596,6 +597,90 @@ export function formatHookCompletionDebugLog({
   return `Hooks: ${hookName} [${command}]${pluginId ? ` (plugin ${pluginId})` : ''} ${outcome} (${durationMs}ms)`
 }
 
+function isManagedEnabledPlugin(
+  pluginId?: string,
+  pluginName?: string,
+): boolean {
+  const policyEnabled = getSettingsForSource('policySettings')?.enabledPlugins
+  if (!policyEnabled) return false
+  const isEnabledEntry = (v: unknown): boolean =>
+    v === true || (Array.isArray(v) && v.length > 0)
+  if (pluginId) {
+    // Exact pluginId match only — never fall back to short pluginName, and
+    // explicit false never falls through.
+    return isEnabledEntry(policyEnabled[pluginId])
+  }
+  if (pluginName) {
+    if (Object.hasOwn(policyEnabled, pluginName)) {
+      return isEnabledEntry(policyEnabled[pluginName])
+    }
+    const prefix = `${pluginName}@`
+    for (const [key, val] of Object.entries(policyEnabled)) {
+      if (key.startsWith(prefix) && isEnabledEntry(val)) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+function areHookObjectsEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true
+  if (
+    a === null ||
+    b === null ||
+    typeof a !== 'object' ||
+    typeof b !== 'object'
+  ) {
+    return false
+  }
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) {
+      return false
+    }
+    return a.every((item, i) => areHookObjectsEqual(item, b[i]))
+  }
+  const objA = a as Record<string, unknown>
+  const objB = b as Record<string, unknown>
+  const keysA = Object.keys(objA).filter(k => objA[k] !== undefined)
+  const keysB = Object.keys(objB).filter(k => objB[k] !== undefined)
+  if (keysA.length !== keysB.length) return false
+  return keysA.every(
+    k => Object.hasOwn(objB, k) && areHookObjectsEqual(objA[k], objB[k]),
+  )
+}
+
+export function isManagedSettingsHook(
+  hook: HookCommand | HookCallback | FunctionHook,
+  hookEvent: HookEvent | 'StatusLine' | 'FileSuggestion',
+  pluginRoot?: string,
+  pluginId?: string,
+  skillRoot?: string,
+  pluginName?: string,
+): boolean {
+  if (skillRoot !== undefined) {
+    return false
+  }
+  if (pluginRoot !== undefined) {
+    return isManagedEnabledPlugin(pluginId, pluginName)
+  }
+  if (hookEvent === 'StatusLine' || hookEvent === 'FileSuggestion') {
+    const policy = getSettingsForSource('policySettings')
+    const entry =
+      hookEvent === 'StatusLine' ? policy?.statusLine : policy?.fileSuggestion
+    return (
+      hook.type === 'command' &&
+      entry?.type === 'command' &&
+      entry.command === hook.command
+    )
+  }
+  const matchers = getSettingsForSource('policySettings')?.hooks?.[hookEvent]
+  if (!matchers) return false
+  return matchers.some(m =>
+    m.hooks.some(h => h.type === hook.type && areHookObjectsEqual(h, hook)),
+  )
+}
+
 function isManagedCommandHook(
   hook: HookCommand & { type: 'command' },
   hookEvent: HookEvent | 'StatusLine' | 'FileSuggestion',
@@ -605,16 +690,12 @@ function isManagedCommandHook(
   if (pluginRoot !== undefined || skillRoot !== undefined) {
     return false
   }
-  if (hookEvent === 'StatusLine' || hookEvent === 'FileSuggestion') {
-    const policy = getSettingsForSource('policySettings')
-    const entry =
-      hookEvent === 'StatusLine' ? policy?.statusLine : policy?.fileSuggestion
-    return entry?.type === 'command' && entry.command === hook.command
-  }
-  const matchers = getSettingsForSource('policySettings')?.hooks?.[hookEvent]
-  if (!matchers) return false
-  return matchers.some(m =>
-    m.hooks.some(h => h.type === 'command' && h.command === hook.command),
+  return isManagedSettingsHook(
+    hook,
+    hookEvent,
+    pluginRoot,
+    undefined,
+    skillRoot,
   )
 }
 
@@ -1697,6 +1778,7 @@ export function isOnFailureBlock(hook: HookWithOnFailure): boolean {
         hook.asyncRewake !== true
       )
     case 'http':
+    case 'mcp_tool':
     case 'callback':
       return hook.onFailure === 'block'
     default:
@@ -2673,6 +2755,7 @@ type MatchedHook = {
   pluginId?: string
   skillRoot?: string
   hookSource?: string
+  isManagedHook?: boolean
   projectRoot?: string
   matcherIsMatchAll?: boolean
   /** densable TVt asOwnTool — plugin matcher hit the remapped own tool. */
@@ -2856,17 +2939,45 @@ function getHooksConfig(
   | SkillHookMatcher
   | SessionDerivedHookMatcher
 > {
+  const isManagedPluginMatcher = (
+    matcher:
+      | HookMatcher
+      | HookCallbackMatcher
+      | FunctionHookMatcher
+      | PluginHookMatcher
+      | SkillHookMatcher
+      | SessionDerivedHookMatcher,
+  ): boolean =>
+    'pluginRoot' in matcher &&
+    isManagedEnabledPlugin(
+      'pluginId' in matcher ? matcher.pluginId : undefined,
+      'pluginName' in matcher ? matcher.pluginName : undefined,
+    )
+
+  const disableAllIncludingManaged = shouldDisableAllHooksIncludingManaged()
   const policyMatchers =
     getSettingsForSource('policySettings')?.hooks?.[hookEvent] ?? []
+  const registeredHooks = getRegisteredHooks()?.[hookEvent]
   if (tiers?.managedHooksOnly) {
-    return shouldDisableAllHooksIncludingManaged() ? [] : policyMatchers
+    if (disableAllIncludingManaged) {
+      return []
+    }
+    const managedPluginMatchers = registeredHooks
+      ? registeredHooks.filter(isManagedPluginMatcher)
+      : []
+    return [...policyMatchers, ...managedPluginMatchers]
   }
-  const policyHooks = new Set(
-    policyMatchers.flatMap(matcher =>
-      matcher.hooks.map(hook => JSON.stringify([matcher.matcher, hook])),
-    ),
-  )
-  // Settings merging can clone source objects; compare the complete matcher/hook pair.
+  // Settings merging can clone source objects and reorder keys; compare
+  // matcher/hook pairs with key-order-independent structural equality.
+  const isPolicyHook = (
+    matcherPattern: string | undefined,
+    hook: HookCommand | HookCallback | FunctionHook,
+  ): boolean =>
+    policyMatchers.some(
+      pm =>
+        pm.matcher === matcherPattern &&
+        pm.hooks.some(ph => areHookObjectsEqual(ph, hook)),
+    )
   const hooks: Array<
     | HookMatcher
     | HookCallbackMatcher
@@ -2874,29 +2985,36 @@ function getHooksConfig(
     | PluginHookMatcher
     | SkillHookMatcher
     | SessionDerivedHookMatcher
-  > = shouldDisableAllHooksIncludingManaged()
+  > = disableAllIncludingManaged
     ? []
     : (getHooksConfigFromSnapshot()?.[hookEvent] ?? []).map(matcher => ({
         ...matcher,
         hooks: tiers?.managedHooksExcluded
-          ? matcher.hooks.filter(
-              hook => !policyHooks.has(JSON.stringify([matcher.matcher, hook])),
-            )
+          ? matcher.hooks.filter(hook => !isPolicyHook(matcher.matcher, hook))
           : matcher.hooks,
       }))
 
   // Policy filters configured sources; SDK callbacks remain host-controlled.
   const managedOnly =
-    shouldAllowManagedHooksOnly() || shouldDisableAllHooksIncludingManaged()
+    shouldAllowManagedHooksOnly() || disableAllIncludingManaged
 
   // Process registered hooks (SDK callbacks and plugin native hooks)
-  const registeredHooks = getRegisteredHooks()?.[hookEvent]
   if (registeredHooks) {
     for (const matcher of registeredHooks) {
-      // Skip plugin hooks when restricted to managed hooks only
-      // Plugin hooks have pluginRoot set, SDK callbacks do not
-      if (managedOnly && 'pluginRoot' in matcher) {
-        continue
+      // Plugin hooks have pluginRoot set, SDK callbacks do not.
+      if ('pluginRoot' in matcher) {
+        const isManagedPlugin = isManagedPluginMatcher(matcher)
+        // Managed-enabled plugin hooks run in the managedHooksOnly pass, so
+        // exclude them from the managedHooksExcluded core pass.
+        if (tiers?.managedHooksExcluded && isManagedPlugin) {
+          continue
+        }
+        // When disableAllHooksIncludingManaged is set, skip all plugin hooks.
+        // When allowManagedHooksOnly is set, keep managed-enabled plugin hooks
+        // and skip non-managed plugin hooks.
+        if (disableAllIncludingManaged || (managedOnly && !isManagedPlugin)) {
+          continue
+        }
       }
       hooks.push(matcher)
     }
@@ -3089,59 +3207,76 @@ export async function getMatchingHooks(
       const pluginRoot =
         'pluginRoot' in matcher ? matcher.pluginRoot : undefined
       const pluginId = 'pluginId' in matcher ? matcher.pluginId : undefined
+      const pluginName =
+        'pluginName' in matcher ? matcher.pluginName : undefined
       const skillRoot = 'skillRoot' in matcher ? matcher.skillRoot : undefined
       const hookSource = pluginRoot
-        ? 'pluginName' in matcher
-          ? `plugin:${matcher.pluginName}`
+        ? pluginName
+          ? `plugin:${pluginName}`
           : 'plugin'
         : skillRoot
           ? 'skillName' in matcher
             ? `skill:${matcher.skillName}`
             : 'skill'
           : 'settings'
-      return matcher.hooks.map(hook => ({
-        hook,
-        pluginRoot,
-        pluginId,
-        skillRoot,
-        hookSource,
-        matcherIsMatchAll:
-          !matcher.matcher ||
-          matcher.matcher === '*' ||
-          matcher.matcher === '.*',
-        ...('projectRoot' in matcher &&
-        typeof matcher.projectRoot === 'string' &&
-        !('pluginRoot' in matcher) &&
-        !('skillRoot' in matcher) &&
-        !('deviceOwner' in matcher) &&
-        !('origin' in matcher)
-          ? { projectRoot: matcher.projectRoot }
-          : {}),
-        ...(asOwnTool && {
-          asOwnTool: true,
-          asStandIn: directHit,
-        }),
-        ...(familyHit !== undefined && {
-          matcherMetThroughOtherName: familyHit,
-          throughFamilyOnly: true,
-        }),
-        ...('sdkHost' in matcher &&
-        (matcher as { sdkHost?: boolean }).sdkHost === true
-          ? { sdkHost: true }
-          : {}),
-        ...('hostOwnsStdin' in matcher &&
-        (matcher as { hostOwnsStdin?: boolean }).hostOwnsStdin === true
-          ? { hostOwnsStdin: true }
-          : {}),
-        ...('deviceForwarded' in matcher &&
-        (matcher as { deviceForwarded?: boolean }).deviceForwarded === true
-          ? { deviceForwarded: true }
-          : {}),
-        ...('sessionServer' in matcher &&
-        (matcher as { sessionServer?: boolean }).sessionServer === true
-          ? { sessionServer: true }
-          : {}),
-      }))
+      return matcher.hooks.map(hook => {
+        const isManagedHook =
+          tiers?.managedHooksExcluded === true
+            ? false
+            : tiers?.managedHooksOnly === true ||
+              isManagedSettingsHook(
+                hook,
+                hookEvent,
+                pluginRoot,
+                pluginId,
+                skillRoot,
+                pluginName,
+              )
+        return {
+          hook,
+          pluginRoot,
+          pluginId,
+          skillRoot,
+          hookSource,
+          isManagedHook,
+          matcherIsMatchAll:
+            !matcher.matcher ||
+            matcher.matcher === '*' ||
+            matcher.matcher === '.*',
+          ...('projectRoot' in matcher &&
+          typeof matcher.projectRoot === 'string' &&
+          !('pluginRoot' in matcher) &&
+          !('skillRoot' in matcher) &&
+          !('deviceOwner' in matcher) &&
+          !('origin' in matcher)
+            ? { projectRoot: matcher.projectRoot }
+            : {}),
+          ...(asOwnTool && {
+            asOwnTool: true,
+            asStandIn: directHit,
+          }),
+          ...(familyHit !== undefined && {
+            matcherMetThroughOtherName: familyHit,
+            throughFamilyOnly: true,
+          }),
+          ...('sdkHost' in matcher &&
+          (matcher as { sdkHost?: boolean }).sdkHost === true
+            ? { sdkHost: true }
+            : {}),
+          ...('hostOwnsStdin' in matcher &&
+          (matcher as { hostOwnsStdin?: boolean }).hostOwnsStdin === true
+            ? { hostOwnsStdin: true }
+            : {}),
+          ...('deviceForwarded' in matcher &&
+          (matcher as { deviceForwarded?: boolean }).deviceForwarded === true
+            ? { deviceForwarded: true }
+            : {}),
+          ...('sessionServer' in matcher &&
+          (matcher as { sessionServer?: boolean }).sessionServer === true
+            ? { sessionServer: true }
+            : {}),
+        }
+      })
     })
 
     // Deduplicate hooks by command/prompt/url within the same source context.
@@ -4844,7 +4979,10 @@ async function* executeHooks({
                   jsonInput,
                   signal,
                   timeoutMs,
-                  { hookSource: matchedHook.hookSource },
+                  {
+                    hookSource: matchedHook.hookSource,
+                    isManagedHook: matchedHook.isManagedHook,
+                  },
                 )
               : await execMcpToolHook(
                   hook,
@@ -6438,7 +6576,15 @@ async function executeHooksOutsideREPL({
   // Run all hooks in parallel with individual timeouts
   const hookPromises = matchingHooks.map(
     async (
-      { hook, pluginRoot, pluginId, skillRoot, projectRoot, hookSource },
+      {
+        hook,
+        pluginRoot,
+        pluginId,
+        skillRoot,
+        projectRoot,
+        hookSource,
+        isManagedHook,
+      },
       hookIndex,
     ) => {
       // Gold289 SKo/_Ko are fixed false/null in this build: no usable
@@ -6606,7 +6752,7 @@ async function executeHooksOutsideREPL({
                   jsonInput,
                   signal,
                   timeoutMs,
-                  { hookSource },
+                  { hookSource, isManagedHook },
                 )
               : await execMcpToolHook(
                   hook,
@@ -7027,8 +7173,15 @@ export async function* executePreToolHooks<ToolInput>(
     for (const item of replay.yields) {
       yield item as AggregatedHookResult
     }
-    // Uat separates the managed decision from replayable diagnostics. Keep
-    // that decision as a floor while the excluded user chain runs.
+    // Uat / pit(managed, core) separates the managed decision from replayable
+    // diagnostics. Keep the managed decision as a floor while the excluded user
+    // chain runs, and track core decision vs passthrough updatedInput separately
+    // so non-deny core/user updatedInput always supersedes managed updatedInput
+    // without promoting passthrough-only rewrites onto bare managed allow.
+    const managedUpdatedInput: Record<string, unknown> | undefined =
+      replay.result.updatedInput
+    let latestCoreDecisionUpdatedInput: Record<string, unknown> | undefined
+    let hasCorePassthroughUpdatedInput = false
     let decision: AggregatedHookResult =
       replay.result.deny !== undefined
         ? {
@@ -7039,9 +7192,17 @@ export async function* executePreToolHooks<ToolInput>(
           ? {
               permissionBehavior: 'ask',
               hookPermissionDecisionReason: replay.result.ask,
+              ...(managedUpdatedInput !== undefined && {
+                updatedInput: managedUpdatedInput,
+              }),
             }
           : replay.result.allow === true
-            ? { permissionBehavior: 'allow' }
+            ? {
+                permissionBehavior: 'allow',
+                ...(managedUpdatedInput !== undefined && {
+                  updatedInput: managedUpdatedInput,
+                }),
+              }
             : {}
     const rank = (behavior: AggregatedHookResult['permissionBehavior']) =>
       behavior === 'deny'
@@ -7072,6 +7233,18 @@ export async function* executePreToolHooks<ToolInput>(
       toolInputSummary,
       managedHooksExcluded: true,
     })) {
+      if (item.updatedInput !== undefined) {
+        if (item.permissionBehavior === undefined) {
+          hasCorePassthroughUpdatedInput = true
+          latestCoreDecisionUpdatedInput = undefined
+        } else if (
+          item.permissionBehavior !== 'deny' &&
+          item.permissionBehavior !== 'defer'
+        ) {
+          latestCoreDecisionUpdatedInput = item.updatedInput
+          hasCorePassthroughUpdatedInput = false
+        }
+      }
       const itemMeta = item as AggregatedHookResult & {
         hostsOwnAsk?: boolean
         serversOwnAsk?: boolean
@@ -7094,19 +7267,57 @@ export async function* executePreToolHooks<ToolInput>(
           hookSource: item.hookSource,
           ...(itemMeta.hostsOwnAsk && { hostsOwnAsk: true }),
           ...(itemMeta.serversOwnAsk && { serversOwnAsk: true }),
+          ...(item.updatedInput !== undefined &&
+            item.permissionBehavior !== 'deny' && {
+              updatedInput: item.updatedInput,
+            }),
         } as AggregatedHookResult
       }
-      // Defer has its own latch in the core consumer; diagnostics and input
-      // rewrites must also retain their original ordering.
+      // Defer has its own latch in the core consumer; diagnostics and
+      // passthrough input rewrites retain their original ordering while
+      // decision-attached updatedInput stays on the yielded decision so
+      // interactive tools (e.g. AskUserQuestion) see interactionSatisfied.
       const {
         permissionBehavior,
         hookPermissionDecisionReason: _reason,
+        updatedInput,
         ...rest
       } = item
-      if (permissionBehavior === 'defer') yield item
-      else yield rest
+      if (permissionBehavior === 'defer') {
+        yield item
+      } else if (
+        permissionBehavior === undefined &&
+        updatedInput !== undefined
+      ) {
+        yield { ...rest, updatedInput }
+      } else if (Object.keys(rest).length > 0) {
+        yield rest
+      }
     }
-    if (decision.permissionBehavior !== undefined) yield decision
+    if (decision.permissionBehavior !== undefined) {
+      if (decision.permissionBehavior === 'deny') {
+        const { updatedInput: _drop, ...denyDecision } = decision
+        yield denyDecision
+      } else if (latestCoreDecisionUpdatedInput !== undefined) {
+        yield { ...decision, updatedInput: latestCoreDecisionUpdatedInput }
+      } else if (hasCorePassthroughUpdatedInput) {
+        const { updatedInput: _dropStale, ...decisionWithoutUpdatedInput } =
+          decision
+        yield decisionWithoutUpdatedInput
+      } else if (
+        decision.updatedInput === undefined &&
+        managedUpdatedInput !== undefined
+      ) {
+        yield { ...decision, updatedInput: managedUpdatedInput }
+      } else {
+        yield decision
+      }
+    } else if (
+      !hasCorePassthroughUpdatedInput &&
+      managedUpdatedInput !== undefined
+    ) {
+      yield { updatedInput: managedUpdatedInput }
+    }
     return
   }
   // gold Rze @185182837: early-return only when settings/session AND
@@ -7634,6 +7845,17 @@ export async function* executeTaskCompletedHooks(
  * @param toolUseContext ToolUseContext for prompt-based hooks
  * @returns Async generator that yields progress messages and hook results
  */
+/**
+ * Official 2.1.328 (#663): Code Mode no longer runs UserPromptSubmit hooks
+ * (managed ones included) on scripts' output. To redact Code Mode script
+ * output, configure a PostToolUse hook returning `updatedToolOutput`.
+ */
+export function shouldSkipUserPromptSubmitForCodeModeScriptOutput(opts?: {
+  isCodeModeScriptOutput?: boolean
+}): boolean {
+  return opts?.isCodeModeScriptOutput === true
+}
+
 export async function* executeUserPromptSubmitHooks(
   prompt: string,
   permissionMode: string,
@@ -7642,7 +7864,11 @@ export async function* executeUserPromptSubmitHooks(
     sourceName: string,
     toolInputSummary?: string | null,
   ) => (request: PromptRequest) => Promise<PromptResponse>,
+  options?: { isCodeModeScriptOutput?: boolean },
 ): AsyncGenerator<AggregatedHookResult> {
+  if (shouldSkipUserPromptSubmitForCodeModeScriptOutput(options)) {
+    return
+  }
   const appState = toolUseContext.getAppState()
   const sessionId = toolUseContext.agentId ?? getSessionId()
   if (!hasHookForEvent('UserPromptSubmit', appState, sessionId)) {
@@ -8606,12 +8832,46 @@ export async function executeSessionEndHooks(
     credentials,
   })
 
-  // During shutdown, Ink is unmounted so we can write directly to stderr
-  for (const result of results) {
-    if (!result.succeeded && result.output) {
-      process.stderr.write(
-        `SessionEnd hook [${result.command}] failed: ${result.output}\n`,
-      )
+  // Official 2.1.327 (#432): surface non-throwing SessionEnd hook failures
+  // (including empty-output failures and in-session `/clear` & `/resume` runs)
+  // via UI notifications when Ink is mounted, or stderr during shutdown.
+  const failureMessages = formatOutsideReplHookFailures('SessionEnd', results)
+  if (failureMessages.length > 0) {
+    if (setAppState && (reason === 'clear' || reason === 'resume')) {
+      setAppState(prev => {
+        if (!prev?.notifications) return prev
+        const queued = failureMessages.map((text, idx) => ({
+          key:
+            idx === 0
+              ? 'session-end-hook-error'
+              : `session-end-hook-error-${idx}`,
+          text,
+          color: 'error' as const,
+          priority: 'high' as const,
+        }))
+        if (!prev.notifications.current) {
+          return {
+            ...prev,
+            notifications: {
+              ...prev.notifications,
+              current: queued[0]!,
+              queue: [...queued.slice(1), ...prev.notifications.queue],
+            },
+          }
+        }
+        return {
+          ...prev,
+          notifications: {
+            ...prev.notifications,
+            queue: [...prev.notifications.queue, ...queued],
+          },
+        }
+      })
+    } else {
+      // During shutdown, Ink is unmounted so we can write directly to stderr
+      for (const errMsg of failureMessages) {
+        process.stderr.write(`${errMsg}\n`)
+      }
     }
   }
 
@@ -9556,14 +9816,23 @@ async function executeHookCallback({
  * blocking the git-worktree fallback.
  */
 export function hasWorktreeCreateHook(): boolean {
+  if (shouldDisableAllHooksIncludingManaged()) return false
   const snapshotHooks = getHooksConfigFromSnapshot()?.['WorktreeCreate']
   if (snapshotHooks && snapshotHooks.length > 0) return true
   const registeredHooks = getRegisteredHooks()?.['WorktreeCreate']
   if (!registeredHooks || registeredHooks.length === 0) return false
-  // Mirror getHooksConfig(): skip plugin hooks in managed-only mode
+  // Mirror getHooksConfig(): skip non-managed plugin hooks in managed-only mode
   const managedOnly = shouldAllowManagedHooksOnly()
   return registeredHooks.some(
-    matcher => !(managedOnly && 'pluginRoot' in matcher),
+    matcher =>
+      !(
+        managedOnly &&
+        'pluginRoot' in matcher &&
+        !isManagedEnabledPlugin(
+          'pluginId' in matcher ? matcher.pluginId : undefined,
+          'pluginName' in matcher ? matcher.pluginName : undefined,
+        )
+      ),
   )
 }
 
@@ -9572,13 +9841,22 @@ export function hasWorktreeCreateHook(): boolean {
  * cleanupWorktree: hook fail + gjr → keep; !gjr → git fallback.
  */
 export function hasWorktreeRemoveHook(): boolean {
+  if (shouldDisableAllHooksIncludingManaged()) return false
   const snapshotHooks = getHooksConfigFromSnapshot()?.['WorktreeRemove']
   if (snapshotHooks && snapshotHooks.length > 0) return true
   const registeredHooks = getRegisteredHooks()?.['WorktreeRemove']
   if (!registeredHooks || registeredHooks.length === 0) return false
   const managedOnly = shouldAllowManagedHooksOnly()
   return registeredHooks.some(
-    matcher => !(managedOnly && 'pluginRoot' in matcher),
+    matcher =>
+      !(
+        managedOnly &&
+        'pluginRoot' in matcher &&
+        !isManagedEnabledPlugin(
+          'pluginId' in matcher ? matcher.pluginId : undefined,
+          'pluginName' in matcher ? matcher.pluginName : undefined,
+        )
+      ),
   )
 }
 

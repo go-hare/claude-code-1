@@ -59,7 +59,7 @@ import {
   isNetworkUncPath,
   isNtObjectNamespacePath,
 } from './path.js'
-import { stripDaemonForceColorFromEnv } from './envUtils.js'
+import { isEnvTruthy, stripDaemonForceColorFromEnv } from './envUtils.js'
 import { SandboxManager } from './sandbox/sandbox-adapter.js'
 import {
   getSessionEnvironmentVariables,
@@ -67,7 +67,14 @@ import {
 } from './sessionEnvironment.js'
 import { createBashShellProvider } from './shell/bashProvider.js'
 import { getCachedPowerShellPath } from './shell/powershellDetection.js'
-import { createPowerShellProvider } from './shell/powershellProvider.js'
+import {
+  createPowerShellProvider,
+  markPowerShellCommandEnded,
+  recordPowerShellCommandLaunch,
+  startWaitingPowerShell,
+  takeWaitingPowerShell,
+  type WaitingPowerShellLaunch,
+} from './shell/powershellProvider.js'
 import type { ShellProvider, ShellType } from './shell/shellProvider.js'
 import {
   attachPidToToolMemoryCgroup,
@@ -388,15 +395,6 @@ export function buildShellSpawnEnv({
   }
   // #383 SEA: Strip daemon-injected FORCE_COLOR=3 before merging overrides
   stripDaemonForceColorFromEnv(baseSubprocessEnv)
-  // #1482: Strip SHELLOPTS so parent shell options (e.g. errexit/pipefail)
-  // do not leak into spawned child shells.
-  delete baseSubprocessEnv.SHELLOPTS
-  // #1118 SEA: Prevent outer sandboxed shell from sourcing BASH_ENV / ENV
-  // outside the sandbox before executing the sandboxed command.
-  if (shouldUseSandbox) {
-    delete baseSubprocessEnv.BASH_ENV
-    delete baseSubprocessEnv.ENV
-  }
   const env: Record<string, string | undefined> = {
     ...baseSubprocessEnv,
     SHELL: shellType === 'bash' ? binShell : undefined,
@@ -411,6 +409,15 @@ export function buildShellSpawnEnv({
     CLAUDE_CODE_CHILD_SESSION: '1',
     CLAUDE_PID: String(process.pid),
     ...envOverrides,
+  }
+  // #1482: Strip SHELLOPTS after merging envOverrides so parent/override shell
+  // options (e.g. errexit/pipefail) do not leak into spawned child shells.
+  delete env.SHELLOPTS
+  // #1118 SEA: Prevent outer sandboxed shell from sourcing BASH_ENV / ENV
+  // outside the sandbox before executing the sandboxed command.
+  if (shouldUseSandbox) {
+    delete env.BASH_ENV
+    delete env.ENV
   }
   // #1440 (official T6n / x6n): strip exported which/unsetenv functions when tengu_swirling_koala is on
   if (getFeatureValue_CACHED_MAY_BE_STALE('tengu_swirling_koala', true)) {
@@ -456,8 +463,53 @@ let snapshotStartedAheadAt: number | null = null
 let snapshotSettled = false
 let snapshotHeadStartSkipReason: string | null = null
 
-export function startBashSnapshotHeadStart(now: () => number = Date.now): void {
-  if (snapshotSettled) return
+export type BashSnapshotHeadStartSkipReason =
+  | 'switched_off'
+  | 'sandbox'
+  | 'plan'
+  | 'subagent'
+  | 'untrusted'
+  | 'too_old'
+
+/**
+ * Official 2.1.327 #475: determine whether head-starting the Bash shell
+ * snapshot should be skipped (`CLAUDE_CODE_DISABLE_SHELL_HEAD_START=1`,
+ * sandbox enabled, plan mode, or subagent).
+ */
+export function evaluateBashSnapshotHeadStartSkip(opts?: {
+  permissionMode?: string
+  isSubagent?: boolean
+  isSandboxEnabled?: boolean
+}): BashSnapshotHeadStartSkipReason | null {
+  if (isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_SHELL_HEAD_START)) {
+    return 'switched_off'
+  }
+  if (opts?.isSandboxEnabled) {
+    return 'sandbox'
+  }
+  if (opts?.permissionMode === 'plan') {
+    return 'plan'
+  }
+  if (opts?.isSubagent) {
+    return 'subagent'
+  }
+  return null
+}
+
+export function startBashSnapshotHeadStart(
+  now: () => number = Date.now,
+  opts?: {
+    permissionMode?: string
+    isSubagent?: boolean
+    isSandboxEnabled?: boolean
+  },
+): boolean {
+  if (snapshotSettled) return false
+  const skipReason = evaluateBashSnapshotHeadStartSkip(opts)
+  if (skipReason !== null) {
+    snapshotHeadStartSkipReason = skipReason
+    return false
+  }
   snapshotStartedAheadAt = now()
   snapshotHeadStartSkipReason = null
   void getShellConfig()
@@ -470,6 +522,7 @@ export function startBashSnapshotHeadStart(now: () => number = Date.now): void {
       getShellConfig.cache.clear?.()
       snapshotStartedAheadAt = null
     })
+  return true
 }
 
 export function consumeBashSnapshotHeadStart(now: () => number = Date.now): {
@@ -554,6 +607,13 @@ export type ExecOptions = {
    * BashTool + PowerShellTool pass true; other callers leave off.
    */
   useToolMemoryCgroup?: boolean
+  /**
+   * Official 2.1.328 #676 (`keepsSandboxOn`): when true (internal Claude Code
+   * commands), a sandbox init failure keeps the sandbox enabled so the next
+   * command retries initialization instead of disabling sandboxing for the
+   * rest of the session.
+   */
+  keepsSandboxOn?: boolean
 }
 
 /**
@@ -616,7 +676,9 @@ export async function exec(
   if (shellType === 'bash') {
     const hardened = getShellOptionHardeningCommand(provider.shellPath)
     if (hardened !== null) {
-      if (
+      if (commandString.includes(hardened)) {
+        // Already hardened; avoid double-patching (`\builtin \builtin`).
+      } else if (
         commandString.includes(
           '{ shopt -u extglob || setopt NO_EXTENDED_GLOB; } >/dev/null 2>&1 || true',
         )
@@ -797,6 +859,7 @@ export async function exec(
       sandboxBinShell,
       undefined,
       abortSignal,
+      { keepsSandboxOn: options?.keepsSandboxOn === true },
     )
     // Create sandbox temp directory for sandboxed processes with secure permissions
     try {
@@ -836,7 +899,47 @@ export async function exec(
   // StreamWrapper → TaskOutput in-memory buffer instead of a file fd.
   // This lets callers receive real-time stdout callbacks.
   const usePipeMode = !!onStdout
-  const taskId = generateTaskId('local_bash')
+  const powerShellPluginBinPaths =
+    shellType === 'powershell' && !shouldUseSandbox
+      ? await getPowerShellPluginBinPaths()
+      : []
+  const spawnEnv = buildShellSpawnEnv({
+    shellType,
+    binShell,
+    envOverrides,
+    spawnEnvPluginBinPaths: powerShellPluginBinPaths,
+    envDefaults: resolveCapturedShellExportsForSpawn(
+      shellType,
+      shouldUseSandbox ?? false,
+    ),
+    shouldUseSandbox: shouldUseSandbox ?? false,
+  })
+  const canUseWaitingPowerShell =
+    shellType === 'powershell' &&
+    !shouldUseSandbox &&
+    !usePipeMode &&
+    getPlatform() === 'windows'
+  const psLaunch: WaitingPowerShellLaunch | undefined = canUseWaitingPowerShell
+    ? { powershellPath: spawnBinary, cwd, env: spawnEnv }
+    : undefined
+
+  // Official 2.1.327 #487: reuse a pre-warmed waiting PowerShell process on
+  // Windows when cwd, executable, and environment match.
+  let reusedWaitingPowerShell = canUseWaitingPowerShell
+    ? await takeWaitingPowerShell(cwd, abortSignal)
+    : undefined
+  if (
+    reusedWaitingPowerShell !== undefined &&
+    psLaunch !== undefined &&
+    !reusedWaitingPowerShell.fits(psLaunch, commandString)
+  ) {
+    reusedWaitingPowerShell = undefined
+  }
+  if (psLaunch !== undefined) {
+    recordPowerShellCommandLaunch(psLaunch)
+  }
+
+  const taskId = reusedWaitingPowerShell?.taskId ?? generateTaskId('local_bash')
   const taskOutput = new TaskOutput(taskId, onProgress ?? null, !usePipeMode)
   let outputHandle: FileHandle | undefined
   let childProcess: ChildProcess | undefined
@@ -844,72 +947,78 @@ export async function exec(
   try {
     await mkdir(getTaskOutputDir(), { recursive: true })
 
-    // In file mode, both stdout and stderr go to the same file fd.
-    // On POSIX, O_APPEND makes each write atomic (seek-to-end + write), so
-    // stdout and stderr are interleaved chronologically without tearing.
-    // densable 2.1.251 Que/nt exclusive create: O_CREAT|O_EXCL|O_NOFOLLOW
-    // (windows 'wx'). O_EXCL refuses a pre-planted symlink/hardlink leaf;
-    // O_NOFOLLOW blocks follow-on open races from the sandbox.
-    // On Windows, numeric flags can produce EINVAL through libuv — use 'wx'.
-    // 'wx' grants FILE_WRITE_DATA (unlike 'a'), so MSYS2/Cygwin does not
-    // discard inherited-handle output. Atomicity is preserved because
-    // duplicated handles share the same FILE_OBJECT with
-    // FILE_SYNCHRONOUS_IO_NONALERT.
-    if (!usePipeMode) {
-      const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0
-      outputHandle = await open(
-        taskOutput.path,
-        process.platform === 'win32'
-          ? 'wx'
-          : fsConstants.O_WRONLY |
-              fsConstants.O_APPEND |
-              fsConstants.O_CREAT |
-              fsConstants.O_EXCL |
-              O_NOFOLLOW,
-      )
+    if (reusedWaitingPowerShell !== undefined) {
+      childProcess = reusedWaitingPowerShell.handOver(spawnEnv, commandString)
+    } else {
+      // In file mode, both stdout and stderr go to the same file fd.
+      // On POSIX, O_APPEND makes each write atomic (seek-to-end + write), so
+      // stdout and stderr are interleaved chronologically without tearing.
+      // densable 2.1.251 Que/nt exclusive create: O_CREAT|O_EXCL|O_NOFOLLOW
+      // (windows 'wx'). O_EXCL refuses a pre-planted symlink/hardlink leaf;
+      // O_NOFOLLOW blocks follow-on open races from the sandbox.
+      // On Windows, numeric flags can produce EINVAL through libuv — use 'wx'.
+      // 'wx' grants FILE_WRITE_DATA (unlike 'a'), so MSYS2/Cygwin does not
+      // discard inherited-handle output. Atomicity is preserved because
+      // duplicated handles share the same FILE_OBJECT with
+      // FILE_SYNCHRONOUS_IO_NONALERT.
+      if (!usePipeMode) {
+        const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0
+        outputHandle = await open(
+          taskOutput.path,
+          process.platform === 'win32'
+            ? 'wx'
+            : fsConstants.O_WRONLY |
+                fsConstants.O_APPEND |
+                fsConstants.O_CREAT |
+                fsConstants.O_EXCL |
+                O_NOFOLLOW,
+        )
+      }
+
+      // densable 2.1.233: yhp.spawn(..., { cgroup: y ? Qfp() : void 0 }).
+      // Bun's child_process.spawn accepts `cgroup` (atomic at process create).
+      // Pure Node has no cgroup option → post-spawn cgroup.procs attach only.
+      const cgroupDir = resolveToolMemoryCgroupForSpawn(useToolMemoryCgroup)
+      const useAtomicCgroup =
+        typeof Bun !== 'undefined' && cgroupDir !== undefined
+
+      childProcess = spawn(spawnBinary, shellArgs, {
+        env: spawnEnv,
+        cwd,
+        // densable 2.1.214 #21: PowerShell provider.stdin === 'ignore' so children
+        // waiting on stdin do not hang until tool timeout. Bash keeps 'pipe'.
+        stdio: usePipeMode
+          ? [provider.stdin ?? 'pipe', 'pipe', 'pipe']
+          : [provider.stdin ?? 'pipe', outputHandle?.fd, outputHandle?.fd],
+        // Don't pass the signal - we'll handle termination ourselves with tree-kill
+        detached: provider.detached,
+        // Prevent visible console window on Windows (no-op on other platforms)
+        windowsHide: true,
+        // densable SEA: cgroup:y?Qfp():void 0 — Bun child_process only
+        ...(useAtomicCgroup
+          ? ({ cgroup: cgroupDir } as { cgroup: string })
+          : {}),
+      })
+
+      // Node fallback only — densable does not post-attach when cgroup: is set.
+      if (useToolMemoryCgroup && !useAtomicCgroup) {
+        attachPidToToolMemoryCgroup(childProcess.pid)
+      }
     }
 
-    // densable 2.1.233: yhp.spawn(..., { cgroup: y ? Qfp() : void 0 }).
-    // Bun's child_process.spawn accepts `cgroup` (atomic at process create).
-    // Pure Node has no cgroup option → post-spawn cgroup.procs attach only.
-    const cgroupDir = resolveToolMemoryCgroupForSpawn(useToolMemoryCgroup)
-    const useAtomicCgroup =
-      typeof Bun !== 'undefined' && cgroupDir !== undefined
-
-    const powerShellPluginBinPaths =
-      shellType === 'powershell' && !shouldUseSandbox
-        ? await getPowerShellPluginBinPaths()
-        : []
-
-    childProcess = spawn(spawnBinary, shellArgs, {
-      env: buildShellSpawnEnv({
-        shellType,
-        binShell,
-        envOverrides,
-        spawnEnvPluginBinPaths: powerShellPluginBinPaths,
-        envDefaults: resolveCapturedShellExportsForSpawn(
-          shellType,
-          shouldUseSandbox ?? false,
-        ),
-        shouldUseSandbox: shouldUseSandbox ?? false,
-      }),
-      cwd,
-      // densable 2.1.214 #21: PowerShell provider.stdin === 'ignore' so children
-      // waiting on stdin do not hang until tool timeout. Bash keeps 'pipe'.
-      stdio: usePipeMode
-        ? [provider.stdin ?? 'pipe', 'pipe', 'pipe']
-        : [provider.stdin ?? 'pipe', outputHandle?.fd, outputHandle?.fd],
-      // Don't pass the signal - we'll handle termination ourselves with tree-kill
-      detached: provider.detached,
-      // Prevent visible console window on Windows (no-op on other platforms)
-      windowsHide: true,
-      // densable SEA: cgroup:y?Qfp():void 0 — Bun child_process only
-      ...(useAtomicCgroup ? ({ cgroup: cgroupDir } as { cgroup: string }) : {}),
-    })
-
-    // Node fallback only — densable does not post-attach when cgroup: is set.
-    if (useToolMemoryCgroup && !useAtomicCgroup) {
-      attachPidToToolMemoryCgroup(childProcess.pid)
+    if (canUseWaitingPowerShell) {
+      childProcess.once('exit', () => {
+        markPowerShellCommandEnded()
+        const nextTaskId = generateTaskId('local_bash')
+        const nextOutputPath = new TaskOutput(nextTaskId, null, true).path
+        void startWaitingPowerShell({
+          taskId: nextTaskId,
+          outputPath: nextOutputPath,
+          sandboxEnabled:
+            SandboxManager.isSandboxingEnabled() ||
+            SandboxManager.isSandboxEnabledInSettings(),
+        })
+      })
     }
 
     const shellCommand = wrapSpawn(

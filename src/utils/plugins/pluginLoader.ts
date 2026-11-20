@@ -4477,6 +4477,90 @@ export function cachePluginSettings(plugins: LoadedPlugin[]): void {
 }
 
 /**
+ * Official 2.1.327 (#524) — initial plugin load readiness gate (`_O`).
+ * Restarted background subagents and autonomous turns await this barrier so
+ * they do not run before initial plugins finish loading.
+ */
+let initialPluginLoadPromise: Promise<void> | undefined
+let initialPluginsLoaded = false
+
+/**
+ * Register the in-flight initial plugin load promise. Subsequent callers of
+ * `waitForInitialPluginsLoaded` will wait until it settles (or until aborted).
+ */
+export function beginInitialPluginLoad(loadPromise: Promise<unknown>): void {
+  initialPluginsLoaded = false
+  const tracked = Promise.resolve(loadPromise).then(
+    () => {
+      if (initialPluginLoadPromise === tracked) {
+        initialPluginsLoaded = true
+        initialPluginLoadPromise = undefined
+      }
+    },
+    () => {
+      if (initialPluginLoadPromise === tracked) {
+        initialPluginsLoaded = true
+        initialPluginLoadPromise = undefined
+      }
+    },
+  )
+  initialPluginLoadPromise = tracked
+}
+
+/**
+ * Mark initial plugin loading as complete (e.g. after `loadAllPlugins` or
+ * `refreshActivePlugins` resolves).
+ */
+export function markInitialPluginsLoaded(): void {
+  initialPluginsLoaded = true
+  initialPluginLoadPromise = undefined
+}
+
+/**
+ * Await any in-flight initial plugin load, aborting early if `signal` aborts.
+ * Resolves immediately when no initial plugin load is pending.
+ */
+export function waitForInitialPluginsLoaded(
+  signal?: AbortSignal,
+): Promise<void> | undefined {
+  if (initialPluginsLoaded || initialPluginLoadPromise === undefined) {
+    return undefined
+  }
+  const pending = initialPluginLoadPromise
+  if (!signal) return pending
+  if (signal.aborted) {
+    return Promise.reject(
+      signal.reason ?? new DOMException('Aborted', 'AbortError'),
+    )
+  }
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => {
+      reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
+    pending.then(
+      () => {
+        signal.removeEventListener('abort', onAbort)
+        resolve()
+      },
+      err => {
+        signal.removeEventListener('abort', onAbort)
+        reject(err)
+      },
+    )
+  })
+}
+
+export function isInitialPluginLoadPending(): boolean {
+  return !initialPluginsLoaded && initialPluginLoadPromise !== undefined
+}
+
+export function resetInitialPluginLoadForTests(): void {
+  initialPluginLoadPromise = undefined
+  initialPluginsLoaded = false
+}
+
+/**
  * Type predicate: check if a value is a non-null, non-array object (i.e., a record).
  */
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -51,6 +51,10 @@ export type OtelResourceAttributesParseResult = {
   isEveryEntryRead: boolean
 }
 
+function isValidOtelResourceAttrKey(key: string): boolean {
+  return /^[A-Za-z0-9._-]+$/.test(key)
+}
+
 function isValidOtelResourceAttrToken(value: string): boolean {
   for (let i = 0; i < value.length; i++) {
     const code = value.charCodeAt(i)
@@ -70,39 +74,38 @@ function countChar(str: string, ch: string): number {
 }
 
 /**
- * Official 2.1.325 `y5n` (#1873): parse comma-separated `OTEL_RESOURCE_ATTRIBUTES`
- * `key=value` pairs so explicit `vcs.*` overrides take precedence over git discovery.
+ * Official 2.1.325 `y5n` (#1873) + 2.1.328 `gio` (#624): parse comma-separated
+ * `OTEL_RESOURCE_ATTRIBUTES` `key=value` pairs entry-by-entry so one malformed
+ * entry drops only itself instead of wiping out all other valid labels on
+ * metric points, events, and spans.
  */
-function parseOtelResourceAttributes(
+export function parseOtelResourceAttributes(
   raw: string | undefined,
 ): Record<string, string> {
   if (!raw) return {}
   const parsed: Record<string, string> = {}
-  try {
-    for (const pair of raw.split(',')) {
-      const [rawKey, rawVal, ...rest] = pair.split('=')
-      if (rawKey === undefined || rawVal === undefined || rest.length > 0) {
-        continue
-      }
-      const key = rawKey.trim()
-      const val = rawVal.trim().split(/^"|"$/).join('')
-      if (
-        key.length === 0 ||
-        key.length > OTEL_ATTR_MAX_LEN ||
-        !isValidOtelResourceAttrToken(key)
-      ) {
-        throw new Error('invalid resource attribute key')
-      }
-      if (
-        val.length > OTEL_ATTR_MAX_LEN ||
-        !isValidOtelResourceAttrToken(val)
-      ) {
-        throw new Error('invalid resource attribute value')
-      }
-      parsed[key] = decodeURIComponent(val)
+  for (const pair of raw.split(',')) {
+    const trimmedPair = pair.trim()
+    if (trimmedPair === '') continue
+    const [rawKey, rawVal, ...rest] = pair.split('=')
+    if (rawKey === undefined || rawVal === undefined || rest.length > 0) {
+      continue
     }
-  } catch {
-    return {}
+    const key = rawKey.trim()
+    const val = rawVal.trim().split(/^"|"$/).join('')
+    if (
+      key.length === 0 ||
+      key.length > OTEL_ATTR_MAX_LEN ||
+      !isValidOtelResourceAttrKey(key)
+    ) {
+      continue
+    }
+    if (val.length > OTEL_ATTR_MAX_LEN || !isValidOtelResourceAttrToken(val)) {
+      continue
+    }
+    try {
+      parsed[key] = decodeURIComponent(val)
+    } catch {}
   }
   return parsed
 }
@@ -204,35 +207,28 @@ export function parseOtelResourceAttributesDetailed(
     )
   }
 
-  if (
+  // Official 2.1.328 (#624): only malformed entries are left off metric points,
+  // events, and spans; valid entries remain active.
+  const strictBlockedIndices = parts.flatMap((part, i) =>
     includeResourceAttributes &&
-    Object.keys(attributes).some(
-      k =>
-        rawNotices.length === 0 ||
-        !DEFAULT_MANAGED_RESOURCE_ATTRIBUTE_KEYS.has(k),
-    ) &&
-    Object.keys(parseOtelResourceAttributes(raw)).length === 0
-  ) {
-    const strictBlockedIndices = parts.flatMap((part, i) =>
-      countChar(part, '=') === 1 &&
-      Object.keys(parseOtelResourceAttributes(part)).length === 0
-        ? [i + 1]
-        : [],
-    )
-    if (strictBlockedIndices.length > 0) {
-      const extra = strictBlockedIndices.length - OTEL_RESOURCE_ATTR_MAX_NOTICES
-      let label = `Entry ${strictBlockedIndices[0]}`
-      if (extra > 0) {
-        label = `Entries ${strictBlockedIndices.slice(0, OTEL_RESOURCE_ATTR_MAX_NOTICES).join(', ')}, and ${extra} ${extra === 1 ? 'other' : 'others'}`
-      } else if (strictBlockedIndices.length > 2) {
-        label = `Entries ${strictBlockedIndices.slice(0, -1).join(', ')}, and ${strictBlockedIndices.at(-1)}`
-      } else if (strictBlockedIndices.length === 2) {
-        label = `Entries ${strictBlockedIndices[0]} and ${strictBlockedIndices[1]}`
-      }
-      notices.push(
-        `OTEL_RESOURCE_ATTRIBUTES: ${label} of ${parts.length} (counting every part between commas) ${strictBlockedIndices.length === 1 ? 'keeps' : 'keep'} all of this value's attributes off metric points, events, and spans. Write ${strictBlockedIndices.length === 1 ? 'it' : 'them'} with a key of letters, digits, dots, dashes, or underscores, and a value in printable ASCII without spaces, semicolons, or backslashes. In a value, percent-encode anything else: a space as %20, a "%" as %25. Keep the key and the value to ${OTEL_ATTR_MAX_LEN} characters each as written, where %20 counts as three.`,
-      )
+    countChar(part, '=') === 1 &&
+    Object.keys(parseOtelResourceAttributes(part)).length === 0
+      ? [i + 1]
+      : [],
+  )
+  if (strictBlockedIndices.length > 0) {
+    const extra = strictBlockedIndices.length - OTEL_RESOURCE_ATTR_MAX_NOTICES
+    let label = `Entry ${strictBlockedIndices[0]}`
+    if (extra > 0) {
+      label = `Entries ${strictBlockedIndices.slice(0, OTEL_RESOURCE_ATTR_MAX_NOTICES).join(', ')}, and ${extra} ${extra === 1 ? 'other' : 'others'}`
+    } else if (strictBlockedIndices.length > 2) {
+      label = `Entries ${strictBlockedIndices.slice(0, -1).join(', ')}, and ${strictBlockedIndices.at(-1)}`
+    } else if (strictBlockedIndices.length === 2) {
+      label = `Entries ${strictBlockedIndices[0]} and ${strictBlockedIndices[1]}`
     }
+    notices.push(
+      `OTEL_RESOURCE_ATTRIBUTES: ${label} of ${parts.length} (counting every part between commas) ${strictBlockedIndices.length === 1 ? 'was' : 'were'} left off metric points, events, and spans. Write ${strictBlockedIndices.length === 1 ? 'it' : 'them'} with a key of letters, digits, dots, dashes, or underscores, and a value in printable ASCII without spaces, semicolons, or backslashes. In a value, percent-encode anything else: a space as %20, a "%" as %25. Keep the key and the value to ${OTEL_ATTR_MAX_LEN} characters each as written, where %20 counts as three.`,
+    )
   }
 
   if (opts?.logWarnings !== false) {

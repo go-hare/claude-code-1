@@ -1,6 +1,7 @@
 import type { ToolPermissionContext } from 'src/Tool.js'
 import { splitCommand_DEPRECATED } from 'src/utils/bash/commands.js'
 import { tryParseShellCommand } from 'src/utils/bash/shellQuote.js'
+import { buildOutsideReadSedAsk } from 'src/utils/permissions/outsideReads.js'
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js'
 
 /**
@@ -761,6 +762,9 @@ export function checkSedConstraints(
   // densable reason string is explicit; keep bashMissKind sed-dangerous.
   // densable K0e=1e4 — keep literal 10000 to match Eys gate without cyclic imports
   if (input.command.length > 10000) {
+    if (toolPermissionContext.blockReadsOutsideWorkingDirectories === true) {
+      return buildOutsideReadSedAsk() as unknown as PermissionResult
+    }
     return {
       behavior: 'ask',
       message:
@@ -791,6 +795,9 @@ export function checkSedConstraints(
     })
 
     if (!isAllowed) {
+      if (toolPermissionContext.blockReadsOutsideWorkingDirectories === true) {
+        return buildOutsideReadSedAsk() as unknown as PermissionResult
+      }
       return {
         behavior: 'ask',
         message:

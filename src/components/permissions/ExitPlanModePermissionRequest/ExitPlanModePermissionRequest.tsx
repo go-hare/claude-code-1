@@ -37,6 +37,7 @@ import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '@claude-code/builtin-tools/tools/Ex
 import type { AllowedPrompt } from '@claude-code/builtin-tools/tools/ExitPlanModeTool/ExitPlanModeV2Tool.js';
 import { TEAM_CREATE_TOOL_NAME } from '@claude-code/builtin-tools/tools/TeamCreateTool/constants.js';
 import { isAgentSwarmsEnabled } from '../../../utils/agentSwarmsEnabled.js';
+import { planModelSupportsAutoMode } from '../../../utils/betas.js';
 import { calculateContextPercentages, getContextWindowForModel } from '../../../utils/context.js';
 import { getExternalEditor } from '../../../utils/editor.js';
 import { getDisplayPath } from '../../../utils/file.js';
@@ -44,6 +45,7 @@ import { toIDEDisplayName } from '../../../utils/ide.js';
 import { logError } from '../../../utils/log.js';
 import { createUserMessage } from '../../../utils/messages.js';
 import { getMainLoopModel, getRuntimeMainLoopModel } from '../../../utils/model/model.js';
+import { getAPIProvider } from '../../../utils/model/providers.js';
 import {
   createPromptRuleContent,
   isClassifierPermissionsEnabled,
@@ -68,9 +70,9 @@ import {
   saveCustomTitle,
 } from '../../../utils/sessionStorage.js';
 import { getSettings_DEPRECATED } from '../../../utils/settings/settings.js';
+import { ConfigurableShortcutHint } from '../../ConfigurableShortcutHint.js';
 import { type OptionWithDescription, Select } from '../../CustomSelect/index.js';
 import { Markdown } from '../../Markdown.js';
-import { KeyboardShortcutHint } from '../../design-system/KeyboardShortcutHint.js';
 import { PermissionDialog } from '../PermissionDialog.js';
 import { PermissionOverflowBox } from '../PermissionOverflowBox.js';
 import type { PermissionRequestProps } from '../PermissionRequest.js';
@@ -215,15 +217,23 @@ export function ExitPlanModePermissionRequest({
   const usage = toolUseConfirm.assistantMessage.message.usage;
   const { mode, isAutoModeAvailable, isBypassPermissionsModeAvailable } = toolPermissionContext;
   const autoGateOn = isAutoModeGateEnabled();
+  // Official 2.1.328 (#662): offer auto mode on supported 3P providers (Bedrock, Vertex, Foundry, etc.)
+  // when the active plan model supports auto mode via `planModelSupportsAutoMode`.
+  const apiProvider = getAPIProvider();
+  const effectiveAutoModeAvailable =
+    isAutoModeAvailable ||
+    (feature('TRANSCRIPT_CLASSIFIER')
+      ? apiProvider !== 'firstParty' && autoGateOn && planModelSupportsAutoMode(getMainLoopModel(), apiProvider)
+      : false);
   const keepContext = useMemo(
     () =>
       buildExitPlanKeepContext({
         isBypassPermissionsModeAvailable,
         offerResumeAuto: feature('TRANSCRIPT_CLASSIFIER')
-          ? offerExitPlanResumeAuto(isAutoModeAvailable, autoGateOn)
+          ? offerExitPlanResumeAuto(effectiveAutoModeAvailable, autoGateOn)
           : false,
       }),
-    [isBypassPermissionsModeAvailable, isAutoModeAvailable, autoGateOn],
+    [isBypassPermissionsModeAvailable, effectiveAutoModeAvailable, autoGateOn],
   );
   // Official 2.1.326 #343: subagent plan approval uses a 2-option card with default mode + No.
   const isSubagentPlan =
@@ -241,7 +251,7 @@ export function ExitPlanModePermissionRequest({
               mode,
             )
           : null,
-        isAutoModeAvailable,
+        isAutoModeAvailable: effectiveAutoModeAvailable,
         isBypassPermissionsModeAvailable,
         keepContext,
         showUltraplan,
@@ -252,7 +262,7 @@ export function ExitPlanModePermissionRequest({
       showClearContext,
       usage,
       mode,
-      isAutoModeAvailable,
+      effectiveAutoModeAvailable,
       isBypassPermissionsModeAvailable,
       keepContext,
       showUltraplan,
@@ -874,7 +884,8 @@ export function ExitPlanModePermissionRequest({
             options={options}
             hideIndexes={isSubagentPlan}
             disablePrintableKeybindings={isSubagentPlan}
-            declineValue={isSubagentPlan ? 'no' : undefined}
+            declineValue="no"
+            stopsAtLastRow
             onChange={handleResponse}
             onCancel={() => handleCancelRef.current?.()}
             onImagePaste={onImagePaste}
@@ -886,7 +897,12 @@ export function ExitPlanModePermissionRequest({
           <Box marginTop={1}>
             <Text>
               <Text dimColor>
-                <KeyboardShortcutHint shortcut="ctrl+g" action={`edit in ${editorName}`} />
+                <ConfigurableShortcutHint
+                  action="chat:externalEditor"
+                  context="Chat"
+                  fallback="ctrl+g"
+                  description={`edit in ${editorName}`}
+                />
                 {isV2 && planFilePath ? ` · ${getDisplayPath(planFilePath)}` : null}
               </Text>
               {showSaveMessage && (

@@ -291,6 +291,7 @@ function wireWorkerLifecycle(
                 : (detail || base.detail).replace(/; respawning$/, ''),
             tempo: 'idle',
             inFlight: undefined,
+            ...(worker.sessionIdTaken ? { sessionIdTaken: true } : {}),
             updatedAt: now,
             firstTerminalAt: base.firstTerminalAt ?? now,
           })
@@ -488,6 +489,8 @@ export async function startBgManager(opts?: {
   onLog?: (msg: string) => void
   spawnPty?: SpawnPtyFn
   getAuthSnapshot?: () => Promise<string | undefined>
+  /** Official 2.1.328 (#387): current account identity (`accountUuid orgUuid`) for spare invalidation. */
+  getAccountKey?: () => Promise<string | null>
   onKeepAliveChange?: () => void
   onShutdown?: () => void
   onNudge?: () => Promise<boolean>
@@ -504,9 +507,22 @@ export async function startBgManager(opts?: {
   let closed = false
   let adoptionComplete = false
   let hasDispatched = false
-  // Official Y / A — held spare + in-flight refill
+  // Official Y / A / E — held spare, in-flight refill, and account key at spawn (#387)
   let heldSpare: HeldSpare | null = null
+  let heldSpareAccountPromise: Promise<string | null> | null = null
   let spareRefilling = false
+  const getCurrentAccountKey: () => Promise<string | null> =
+    opts?.getAccountKey ??
+    (async () => {
+      try {
+        const { getOauthAccountInfoFromDisk } = await import('../utils/auth.js')
+        const info = getOauthAccountInfoFromDisk()
+        if (!info?.accountUuid && !info?.organizationUuid) return null
+        return `${info.accountUuid ?? ''} ${info.organizationUuid ?? ''}`
+      } catch {
+        return null
+      }
+    })
   /**
    * Local product: shorts with in-flight claimSpare (await sendClaim, no
    * handles entry yet). densable D3q registers handle first so oAp sees a
@@ -555,6 +571,7 @@ export async function startBgManager(opts?: {
       return
     }
     spareRefilling = true
+    const accountAtSpawnPromise = getCurrentAccountKey().catch(() => null)
     let spawned: HeldSpare | null = null
     let exitedBeforeAssign = false
     void spawnSpare({
@@ -566,6 +583,7 @@ export async function startBgManager(opts?: {
         }
         if (heldSpare === spawned) {
           heldSpare = null
+          heldSpareAccountPromise = null
           // Official: only refill if spare lived ≥2s (avoid crash loops)
           if (Date.now() - spawned.startedAt >= 2000) refillSpare()
         }
@@ -578,6 +596,7 @@ export async function startBgManager(opts?: {
           return
         }
         heldSpare = spare
+        heldSpareAccountPromise = accountAtSpawnPromise
         logEvent('tengu_bg_spare_spawn', {})
       })
       .catch((err: unknown) => {
@@ -654,6 +673,14 @@ export async function startBgManager(opts?: {
     retryCount = 0,
     afterUpgrade?: boolean,
   ): void => {
+    void handleDispatchAsync(req, retryCount, afterUpgrade)
+  }
+
+  const handleDispatchAsync = async (
+    req: DispatchRequest,
+    retryCount = 0,
+    afterUpgrade?: boolean,
+  ): Promise<void> => {
     if (closed) return
     hasDispatched = true
 
@@ -686,6 +713,32 @@ export async function startBgManager(opts?: {
       }
     }
 
+    // Official 2.1.326 #14 & 2.1.328 #387: perform async gateway-mark hydration
+    // and held-spare account-key validation BEFORE checking `handles` /
+    // `claimingShorts` and BEFORE `seedJobState(req)` so no async yield sits
+    // between duplicate-dispatch checks and handle/claim registration.
+    if (isBgGatewayMarkEnabled() && !req.gatewayRouted) {
+      await hydrateGatewayMark(req)
+      if (closed) return
+    }
+    if (heldSpare) {
+      const spare = heldSpare
+      const spareAccountP = heldSpareAccountPromise
+      const currentAccount = await getCurrentAccountKey().catch(() => null)
+      const spareAccount = spareAccountP
+        ? await spareAccountP.catch(() => null)
+        : null
+      if (currentAccount === null || currentAccount !== spareAccount) {
+        log("bg: the account may differ from the spare's, discarding the spare")
+        if (heldSpare === spare) {
+          spare.dispose()
+          heldSpare = null
+          heldSpareAccountPromise = null
+        }
+      }
+      if (closed) return
+    }
+
     const existingHandle = handles.get(req.short)
     if (existingHandle) {
       if (
@@ -716,12 +769,6 @@ export async function startBgManager(opts?: {
           : `bg: dup dispatch ${req.short} dropped (existing handle still live)`,
       )
       return
-    }
-    // Official 2.1.326 #14: do NOT wipe an existing `gateway-routed` marker
-    // on disk when re-dispatched without the gateway; `doSpawn` hydrates it
-    // and stops before sending any model request.
-    if (isBgGatewayMarkEnabled() && !req.gatewayRouted) {
-      void hydrateGatewayMark(req)
     }
     // Claim in flight (no handle yet) — retry like settling, never cold-parallel.
     if (claimingShorts.has(req.short)) {
@@ -780,6 +827,7 @@ export async function startBgManager(opts?: {
     ) {
       const spare = heldSpare
       heldSpare = null
+      heldSpareAccountPromise = null
       // Occupy short before await sendClaim so concurrent dispatch + oAp
       // see "in flight" rather than empty (product vs densable fire-and-forget).
       claimingShorts.add(req.short)

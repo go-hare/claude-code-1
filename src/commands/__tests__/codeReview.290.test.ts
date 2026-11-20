@@ -6,11 +6,13 @@ import {
 } from '../codeReview.js'
 
 describe('v2.1.290 codeReview medium effort alignment (#153)', () => {
-  test('default family maps medium to o48-high-v1', () => {
+  test('default family maps medium to bugs-conventions-v1', () => {
     expect(codeReviewModelFamily(undefined)).toBe('default')
-    expect(codeReviewEffortCell(undefined, 'medium')).toBe('o48-high-v1')
+    expect(codeReviewEffortCell(undefined, 'medium')).toBe(
+      'bugs-conventions-v1',
+    )
     expect(codeReviewEffortCell('claude-sonnet-4-6', 'medium')).toBe(
-      'o48-high-v1',
+      'bugs-conventions-v1',
     )
   })
 

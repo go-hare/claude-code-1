@@ -182,6 +182,11 @@ export type GraderResult = {
   scored?: boolean
 }
 
+export type PluginHookApprovalsSummary = {
+  approved: string[]
+  refused: string[]
+}
+
 export type ToolCallRecord = {
   name: string
   input: unknown
@@ -189,6 +194,8 @@ export type ToolCallRecord = {
   output?: string
   isError?: boolean
   deniedByChild?: boolean
+  /** Official 2.1.327 (#518) — plugin permission hook outcome recorded in trace. */
+  pluginApproval?: 'applied' | 'refused'
   mock?: { responder?: string; verdict: string }
 }
 
@@ -225,6 +232,8 @@ export type RunReport = {
   auth_rejected?: boolean | null
   ended_on_api_error?: boolean
   aborted?: { server: string; tool: string; reason: string }
+  /** Official 2.1.327 (#518) — tool calls approved or blocked-from-hook-override by a plugin permission hook. */
+  plugin_hook_approvals?: PluginHookApprovalsSummary
 }
 
 export type CaseReport = {

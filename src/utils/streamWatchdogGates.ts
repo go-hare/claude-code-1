@@ -45,6 +45,23 @@ export function resolveStreamIdleTimeoutMs(
 }
 
 /**
+ * Official 2.1.328 `Q7o` (#566):
+ * When `CLAUDE_STREAM_IDLE_TIMEOUT_MS` exceeds the 5-minute connection idle
+ * floor (300_000ms), return the raised connection idle timeout clamped to
+ * 30 minutes (1_800_000ms) so gateways, custom base URLs, and cloud providers
+ * honor `CLAUDE_STREAM_IDLE_TIMEOUT_MS` instead of timing out at 5 minutes.
+ */
+export function resolveRaisedConnectionIdleTimeoutMs(
+  env: NodeJS.ProcessEnv = process.env,
+): number | undefined {
+  const n = Number(env.CLAUDE_STREAM_IDLE_TIMEOUT_MS)
+  if (!Number.isFinite(n) || n <= STREAM_IDLE_TIMEOUT_FLOOR_MS) {
+    return undefined
+  }
+  return Math.min(n, BYTE_STREAM_IDLE_TIMEOUT_MAX_MS)
+}
+
+/**
  * Official Zgc densable — byte-body watchdog master switch.
  * - ou(CLAUDE_ENABLE_BYTE_WATCHDOG) → false
  * - truthy BYTE → true

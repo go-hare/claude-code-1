@@ -70,7 +70,11 @@ export function classifyFailedTurnAction(
     type: string
     isApiErrorMessage?: boolean
     error?: string
+    apiError?: string
     apiErrorStatus?: number
+    quotaLimits?: unknown
+    resendCannotCure?: boolean
+    apiErrorIsTransient?: boolean
     message?: { content?: unknown }
   }>,
 ): FailedRequestAction | null {
@@ -87,6 +91,7 @@ export function classifyFailedTurnAction(
     if (msg.type !== 'assistant') return null
     if (msg.isApiErrorMessage !== true) return null
     const err = msg.error
+    const apiError = msg.apiError
     const status = msg.apiErrorStatus
     const content = msg.message?.content
     const text = Array.isArray(content)
@@ -102,7 +107,24 @@ export function classifyFailedTurnAction(
           .join(' ')
           .toLowerCase()
       : ''
-    if (err === 'rate_limit' || status === 429) return 'wait'
+    // Official 2.1.327 #463: never show "Resend your message" hints after spend
+    // caps, usage limits, or quota limits (account_limit -> 'wait' -> undefined).
+    const isSpendCapOrUsageLimit =
+      apiError === 'usage_limit_reached' ||
+      msg.quotaLimits !== undefined ||
+      text.includes('spending cap') ||
+      text.includes('spend cap') ||
+      text.includes('spending limit') ||
+      text.includes('extra usage') ||
+      text.includes('usage limit') ||
+      text.includes('credit balance') ||
+      text.includes('monthly limit')
+    if (err === 'rate_limit' || status === 429 || isSpendCapOrUsageLimit) {
+      return 'wait'
+    }
+    if (msg.resendCannotCure === true || msg.apiErrorIsTransient === false) {
+      return 'blocked'
+    }
     if (
       err === 'authentication_failed' ||
       err === 'billing_error' ||

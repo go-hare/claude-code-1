@@ -7,6 +7,7 @@ import type { SandboxDependencyCheck } from '../../utils/sandbox/sandbox-adapter
 import { clearSandboxRootMoveHold, SandboxManager } from '../../utils/sandbox/sandbox-adapter.js';
 import { getSettings_DEPRECATED, getSettingsFilePathForSource } from '../../utils/settings/settings.js';
 import { getErrnoCode } from '../../utils/errors.js';
+import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
 import { Select } from '../CustomSelect/select.js';
 import { SandboxConfigTab } from './SandboxConfigTab.js';
 import { SandboxDependenciesTab } from './SandboxDependenciesTab.js';
@@ -199,12 +200,13 @@ function SandboxModeTab({
       <Box marginBottom={1}>
         <Text bold>Configure mode</Text>
       </Box>
-      {/* Official 2.1.326 #29: disable printable keybindings in /sandbox mode selector. */}
+      {/* Official 2.1.326 #29 & 2.1.327 #507: disable printable keybindings and hide indexes when screen reader is off. */}
       <Select
         options={options}
         defaultValue={currentMode}
         defaultFocusValue={currentMode}
         disablePrintableKeybindings
+        hideIndexes={!isScreenReaderModeEnabled()}
         onChange={onSelect}
         onCancel={() => onComplete(undefined, { display: 'skip' })}
         onUpFromFirstItem={focusHeader}

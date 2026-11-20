@@ -107,6 +107,19 @@ export function isAddressableListingName(value: string): boolean {
   )
 }
 
+/**
+ * Official 2.1.328 (#588): sanitize a cloud/bridge session title that failed
+ * bare-name validation (e.g. just-started empty title or title containing `@`)
+ * into a token-only display label (`untitled` or `@` → `(at)`) so it can still
+ * be listed with `[ref]` and reached via `SendMessage({ to: "name [ref]" })`.
+ */
+export function formatTokenOnlySessionName(rawTitle: unknown): string {
+  if (typeof rawTitle !== 'string') return 'untitled'
+  const cleaned = sanitizeListingName(rawTitle.replaceAll('@', '(at)'))
+  if (!cleaned || cleaned === 'untitled session') return 'untitled'
+  return cleaned
+}
+
 /** densable Abr */
 export function formatListingAge(ms: number): string {
   return formatDuration(Math.max(0, ms), { mostSignificantOnly: true })

@@ -174,10 +174,58 @@ export function hasPendingSessionWakeup(
   )
 }
 
-/** Stderr line when ceiling exceeded (official message). */
-export function formatPrintBgWaitCeilingMessage(ceilingMs: number): string {
+/**
+ * Official 2.1.328 (#670) `tengu_print_ceiling_stop_agents` (default `true`):
+ * whether exceeding `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` actively stops
+ * remaining background subagents (and those they are waiting for).
+ */
+export function shouldStopAgentsOnPrintBgCeiling(gbValue?: boolean): boolean {
+  if (gbValue !== undefined) return gbValue
+  try {
+    const { getFeatureValue_CACHED_MAY_BE_STALE } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../services/analytics/growthbook.js') as typeof import('../services/analytics/growthbook.js')
+    return getFeatureValue_CACHED_MAY_BE_STALE(
+      'tengu_print_ceiling_stop_agents',
+      true,
+    )
+  } catch {
+    return true
+  }
+}
+
+/**
+ * Official 2.1.328 (#670): keep a single shared `firstIdle` timestamp across
+ * a background subagent and any nested subagents it waits for, so chained
+ * waits with `CLAUDE_CODE_FORK_SUBAGENT=0` count against one 10-minute wait
+ * budget (`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`) instead of resetting per turn.
+ */
+export function advanceSharedPrintBgWaitFirstIdle(opts: {
+  firstIdleAt: number | null
+  hasRunningBgTasks: boolean
+  now: number
+}): number | null {
+  if (!opts.hasRunningBgTasks) {
+    return null
+  }
+  return opts.firstIdleAt ?? opts.now
+}
+
+/** Stderr line when ceiling exceeded (official 2.1.328 message when stopping agents). */
+export function formatPrintBgWaitCeilingMessage(
+  ceilingMs: number,
+  summary?: string,
+): string {
+  const secs = Math.round(ceilingMs / 1000)
+  const duration = secs >= 60 && secs % 60 === 0 ? `${secs / 60}m` : `${secs}s`
+  if (summary) {
+    return (
+      `Background tasks still running ${duration} after the last turn (${summary}); ` +
+      'stopping them. Set CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 to wait indefinitely.\n'
+    )
+  }
   return (
-    `Background tasks still running after ${Math.round(ceilingMs / 1000)}s; ` +
+    `Background tasks still running after ${secs}s; ` +
     'terminating. Set CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 to wait indefinitely.\n'
   )
 }

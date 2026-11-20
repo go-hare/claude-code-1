@@ -99,7 +99,7 @@ export interface HistoryEntry {
   pastedContents: Record<number, PastedContent>
 }
 
-export type ReleaseChannel = 'stable' | 'latest'
+export type ReleaseChannel = 'stable' | 'latest' | 'rc'
 
 export type ProjectConfig = {
   allowedTools: string[]
@@ -2809,6 +2809,13 @@ function getConfig<A>(
     try {
       // Strip BOM before parsing - PowerShell 5.x adds BOM to UTF-8 files
       const parsedConfig = jsonParse(stripBOM(fileContent))
+      if (
+        parsedConfig === null ||
+        typeof parsedConfig !== 'object' ||
+        Array.isArray(parsedConfig)
+      ) {
+        throw new Error('Configuration file root must be a JSON object')
+      }
       lastGetConfigOutcome = 'parsed'
       return {
         ...createDefault(),
@@ -2839,6 +2846,30 @@ function getConfig<A>(
         )
       }
       return createDefault()
+    }
+
+    // Official 2.1.328 (#636): under CLAUDE_CODE_IGNORE_PERSISTED_TRUST=1 /
+    // --ignore-persisted-trust (self-hosted runner `--trust-workspace false`),
+    // fall back cleanly to defaults with MCP servers disabled on damaged JSON
+    // without crashing or enabling MCP servers.
+    if (
+      error instanceof ConfigParseError &&
+      (isEnvTruthy(process.env.CLAUDE_CODE_IGNORE_PERSISTED_TRUST) ||
+        process.argv.includes('--ignore-persisted-trust'))
+    ) {
+      logForDebugging(
+        `Config file at ${file} is damaged under CLAUDE_CODE_IGNORE_PERSISTED_TRUST; falling back to defaults with MCP servers disabled: ${error.message}`,
+        { level: 'warn' },
+      )
+      const fallback = createDefault()
+      if (
+        fallback &&
+        typeof fallback === 'object' &&
+        'mcpServers' in fallback
+      ) {
+        ;(fallback as Record<string, unknown>).mcpServers = {}
+      }
+      return fallback
     }
 
     // Re-throw ConfigParseError if throwOnInvalid is true
@@ -3121,17 +3152,87 @@ export function isAutoUpdaterDisabled(): boolean {
   return getAutoUpdaterDisabledReason() !== null
 }
 
+function isAutoupdateEnvDisabledEntry([key, val]: [string, unknown]): boolean {
+  if (typeof val !== 'string') {
+    return false
+  }
+  switch (key.toUpperCase()) {
+    case 'DISABLE_AUTOUPDATER':
+    case 'DISABLE_UPDATES':
+      return isEnvTruthy(val)
+    case 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC':
+      return val !== ''
+    default:
+      return false
+  }
+}
+
+/**
+ * Official 2.1.328 `findSkipReasonUnderHostPin` (`@309764788`):
+ * When the IDE host pins Claude Code's binary version by setting both
+ * `DISABLE_AUTOUPDATER=1` and `CLAUDE_CODE_AUTOUPDATER_DISABLED_BY_HOST=1`,
+ * plugin autoupdate still runs unless user/managed settings or config explicitly
+ * disable updates (or settings cannot be trusted/read).
+ */
+function findSkipReasonUnderHostPin(
+  configEnv: Record<string, string> | undefined,
+): string | null {
+  try {
+    // Lazy require avoids settings ↔ config circular init
+    const { getEnabledSettingSources } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./settings/constants.js') as typeof import('./settings/constants.js')
+    const { getSettingsForSource, getSettingsWithErrors } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./settings/settings.js') as typeof import('./settings/settings.js')
+    const sources = getEnabledSettingSources()
+    if (!sources.includes('userSettings')) {
+      return 'user settings not read'
+    }
+    if (
+      getSettingsWithErrors().errors.some(
+        err =>
+          err.severity !== 'warning' || err.path === 'env' || err.path === '',
+      )
+    ) {
+      return 'settings not readable'
+    }
+    const envMaps = [
+      configEnv,
+      ...sources.map(source => getSettingsForSource(source)?.env),
+    ]
+    const disabledInSettings = envMaps.some(envObj =>
+      Object.entries(envObj ?? {}).some(isAutoupdateEnvDisabledEntry),
+    )
+    return disabledInSettings ? 'turned off in settings' : null
+  } catch {
+    return 'settings not readable'
+  }
+}
+
 /**
  * Returns true if plugin autoupdate should be skipped.
- * This checks if the auto-updater is disabled AND the FORCE_AUTOUPDATE_PLUGINS
- * env var is not set to 'true'. The env var allows forcing plugin autoupdate
- * even when the auto-updater is otherwise disabled.
+ * Matches official 2.1.328 `uMe` (`@286481500`):
+ * - `FORCE_AUTOUPDATE_PLUGINS` always allows plugin autoupdate.
+ * - When `CLAUDE_CODE_AUTOUPDATER_DISABLED_BY_HOST` is set, IDE-hosted sessions
+ *   still auto-update plugins unless `DISABLE_UPDATES`, non-essential traffic,
+ *   `config.autoUpdates === false`, or user/managed settings env disabled updates.
  */
 export function shouldSkipPluginAutoupdate(): boolean {
-  return (
-    isAutoUpdaterDisabled() &&
-    !isEnvTruthy(process.env.FORCE_AUTOUPDATE_PLUGINS)
-  )
+  if (isEnvTruthy(process.env.FORCE_AUTOUPDATE_PLUGINS)) {
+    return false
+  }
+  if (!isEnvTruthy(process.env.CLAUDE_CODE_AUTOUPDATER_DISABLED_BY_HOST)) {
+    return isAutoUpdaterDisabled()
+  }
+  if (getAutoUpdaterDisabledReasonInternal(false) !== null) {
+    return true
+  }
+  const reason = findSkipReasonUnderHostPin(getGlobalConfig().env)
+  if (reason !== null) {
+    logForDebugging(`Plugin autoupdate: off under the host's pin (${reason})`)
+  }
+  return reason !== null
 }
 
 export type AutoUpdaterDisabledReason =
@@ -3146,20 +3247,25 @@ export function formatAutoUpdaterDisabledReason(
     case 'development':
       return 'development build'
     case 'env':
-      return `${reason.envVar} set`
+      return `set by env: ${reason.envVar}`
     case 'config':
       return 'config'
   }
 }
 
-export function getAutoUpdaterDisabledReason(): AutoUpdaterDisabledReason | null {
+function getAutoUpdaterDisabledReasonInternal(
+  checkDisableAutoUpdaterEnv: boolean,
+): AutoUpdaterDisabledReason | null {
+  if (isEnvTruthy(process.env.DISABLE_UPDATES)) {
+    return { type: 'env', envVar: 'DISABLE_UPDATES' }
+  }
   if (process.env.NODE_ENV === 'development') {
     return { type: 'development' }
   }
   // Opt-out only (align densable). Fork used to require ENABLE_AUTOUPDATER=1,
   // which hid the REPL update banner for every npm install of @go-hare/claude-code.
   // DISABLE_AUTOUPDATER=1 or config.autoUpdates=false still hard-off.
-  if (isEnvTruthy(process.env.DISABLE_AUTOUPDATER)) {
+  if (checkDisableAutoUpdaterEnv) {
     return { type: 'env', envVar: 'DISABLE_AUTOUPDATER' }
   }
   const essentialTrafficEnvVar = getEssentialTrafficOnlyReason()
@@ -3175,6 +3281,12 @@ export function getAutoUpdaterDisabledReason(): AutoUpdaterDisabledReason | null
     return { type: 'config' }
   }
   return null
+}
+
+export function getAutoUpdaterDisabledReason(): AutoUpdaterDisabledReason | null {
+  return getAutoUpdaterDisabledReasonInternal(
+    isEnvTruthy(process.env.DISABLE_AUTOUPDATER),
+  )
 }
 
 export function getOrCreateUserID(): string {

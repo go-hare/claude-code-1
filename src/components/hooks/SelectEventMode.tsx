@@ -14,11 +14,20 @@ type Props = {
   hooksByEvent: Partial<Record<HookEvent, number>>;
   totalHooksCount?: number;
   restrictedByPolicy?: boolean;
+  defaultFocusIndex?: number;
+  onFocus?: (index: number) => void;
   onSelectEvent: (event: HookEvent) => void;
   onCancel: () => void;
 };
 
-export function SelectEventMode({ hookEventMetadata, hooksByEvent, onSelectEvent, onCancel }: Props): React.ReactNode {
+export function SelectEventMode({
+  hookEventMetadata,
+  hooksByEvent,
+  defaultFocusIndex,
+  onFocus,
+  onSelectEvent,
+  onCancel,
+}: Props): React.ReactNode {
   const entries = React.useMemo(() => Object.entries(hookEventMetadata), [hookEventMetadata]);
   const eventsWithHooks = React.useMemo(
     () => count(entries, ([name]) => (hooksByEvent[name as HookEvent] ?? 0) > 0),
@@ -55,6 +64,8 @@ export function SelectEventMode({ hookEventMetadata, hooksByEvent, onSelectEvent
     >
       <ItemList
         options={options}
+        defaultFocusIndex={defaultFocusIndex}
+        onFocus={onFocus}
         onSelect={index => {
           const entry = entries[index];
           if (entry) {

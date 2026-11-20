@@ -31,10 +31,12 @@ import {
 import { getRawUtilization } from '../../services/claudeAiLimits.js';
 import { spendLimitBarProps } from './spendLimitBar.js';
 import { useAppState } from '../../state/AppState.js';
-import { getContextWindowForModel } from '../../utils/context.js';
 import { isEnvTruthy } from '../../utils/envUtils.js';
 import { errorMessage } from '../../utils/errors.js';
-import { aggregatePluginSkillListing, skillListingCharsPerToken } from '../../utils/usagePluginFootprint.js';
+import {
+  aggregatePluginSkillListing,
+  resolvePluginFootprintModelAndContext,
+} from '../../utils/usagePluginFootprint.js';
 import {
   BEHAVIOR_PCT_MIN,
   behaviorsOverMin,
@@ -401,18 +403,17 @@ function PluginSkillListingFootprint({ maxWidth }: { maxWidth?: number }): React
   const mcpCommands = useAppState(s => s.mcp.commands);
   const mainLoopModel = useAppState(s => s.mainLoopModel);
   const mainLoopModelForSession = useAppState(s => s.mainLoopModelForSession);
-  const effectiveModel = mainLoopModelForSession ?? mainLoopModel ?? undefined;
   const footprint = React.useMemo(() => {
-    const charsPerToken = skillListingCharsPerToken(effectiveModel);
-    const contextTokens = effectiveModel ? getContextWindowForModel(effectiveModel) : undefined;
+    const { charsPerToken, contextTokens } = resolvePluginFootprintModelAndContext(
+      mainLoopModelForSession,
+      mainLoopModel,
+    );
     return aggregatePluginSkillListing([...pluginCommands, ...mcpCommands], charsPerToken, contextTokens);
-  }, [pluginCommands, mcpCommands, effectiveModel]);
+  }, [pluginCommands, mcpCommands, mainLoopModelForSession, mainLoopModel]);
   if (footprint.byPlugin.length === 0) {
     return null;
   }
-  const cap = footprint.overBudget
-    ? ' (capped at the listing budget; per-plugin figures above are pre-truncation)'
-    : '';
+  const cap = footprint.overBudget ? ' (capped at the listing limit; per-plugin figures above are before the cap)' : '';
   const labelWidth = maxWidth !== undefined ? Math.min(28, Math.max(12, Math.floor(maxWidth * 0.45))) : 28;
   return (
     <Box flexDirection="column" marginTop={1} flexShrink={0}>

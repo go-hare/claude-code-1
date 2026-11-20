@@ -11,6 +11,7 @@ import {
   useTheme,
   useThemeSetting,
   useTerminalFocus,
+  useWantEveryKey,
 } from '@anthropic/ink';
 import * as React from 'react';
 import { useState, useCallback, useLayoutEffect, useRef } from 'react';
@@ -89,7 +90,7 @@ export type SaveAutoUpdatesChannelHookResult =
  */
 export async function saveAutoUpdatesChannelWithConfigSetHook(
   nextChannel: 'latest' | 'stable',
-  previousChannel: 'latest' | 'stable',
+  previousChannel: 'latest' | 'stable' | 'rc',
   applyPersist: (finalChannel: 'latest' | 'stable') => void,
   signal?: AbortSignal,
 ): Promise<SaveAutoUpdatesChannelHookResult> {
@@ -127,6 +128,7 @@ export async function saveAutoUpdatesChannelWithConfigSetHook(
     return { kind: 'refused', reason: message };
   }
 }
+import { formatAutoUpdatesChannelDisplay } from '../../utils/autoUpdater.js';
 import {
   getGlobalConfig,
   getAutoUpdaterDisabledReason,
@@ -193,7 +195,11 @@ import {
   type CrossSessionInbound,
   type DialogExpiry,
 } from '../../utils/settings/settings.js';
-import { isSettingSourceEnabled } from '../../utils/settings/constants.js';
+import {
+  getSettingSourceDisplayNameCapitalized,
+  isSettingSourceEnabled,
+  type SettingSource,
+} from '../../utils/settings/constants.js';
 import type { SettingsJson } from '../../utils/settings/types.js';
 import type { ThemeSetting } from '../../utils/theme.js';
 import { getThemeSetting } from '../../utils/themeSetting.js';
@@ -731,12 +737,91 @@ function RemoteHomeSettingsConfirmation({
           { label: 'Not now', value: 'not_now' },
         ]}
         defaultFocusValue="not_now"
+        hideIndexes={!isScreenReaderModeEnabled()}
         isDisabled={submitting}
         onChange={value => handleChoice(value as 'forward' | 'keep_local' | 'not_now')}
         onCancel={() => handleChoice('not_now')}
       />
     </Dialog>
   );
+}
+
+/**
+ * Official 2.1.327 (#395) `gUe` / `iUt`: warning shown under the prompt when a
+ * settings change from `/config` (or similar commands) fails to save to disk.
+ */
+export const SETTINGS_SAVE_FAILED_NOTIFICATION_KEY = 'setting-not-saved';
+export const SETTINGS_SAVE_FAILED_MESSAGE =
+  "a settings change wasn't saved · check that your settings files are valid and writable";
+
+/**
+ * Setting sources that override `userSettings` in highest-wins precedence order.
+ * Official 2.1.327 (#372) `Fe` / `I`.
+ */
+const HIGHER_PRECEDENCE_SOURCES: readonly SettingSource[] = [
+  'policySettings',
+  'flagSettings',
+  'localSettings',
+  'projectSettings',
+];
+
+/**
+ * Map `/config` UI row IDs to their underlying `SettingsJson` key so `/config`
+ * can display an override note when a higher-precedence source overrides a row.
+ */
+const CONFIG_ROW_ID_TO_SETTINGS_KEY: Record<string, keyof SettingsJson> = {
+  autoCompact: 'autoCompactEnabled' as keyof SettingsJson,
+  autoScroll: 'autoScrollEnabled' as keyof SettingsJson,
+  autoUpdatesChannel: 'autoUpdatesChannel',
+  checkpoints: 'fileCheckpointingEnabled' as keyof SettingsJson,
+  editor: 'editorMode' as keyof SettingsJson,
+  language: 'language',
+  model: 'model',
+  notifChannel: 'preferredNotifChannel' as keyof SettingsJson,
+  outputStyle: 'outputStyle',
+  permissionMode: 'permissions',
+  precomputeCompactionEnabled: 'precomputeCompactionEnabled' as keyof SettingsJson,
+  progressBar: 'terminalProgressBarEnabled' as keyof SettingsJson,
+  promptSuggestionEnabled: 'promptSuggestionEnabled',
+  recap: 'awaySummaryEnabled' as keyof SettingsJson,
+  teammateMode: 'teammateMode',
+  theme: 'theme' as keyof SettingsJson,
+  thinking: 'alwaysThinkingEnabled',
+  timeFormat: 'timeFormat' as keyof SettingsJson,
+  timestamps: 'showMessageTimestamps' as keyof SettingsJson,
+  turnDuration: 'showTurnDuration' as keyof SettingsJson,
+  verbose: 'verbose' as keyof SettingsJson,
+  workflowKeywordTriggerEnabled: 'workflowKeywordTriggerEnabled' as keyof SettingsJson,
+};
+
+/**
+ * Official 2.1.327 (#372) `Fe`: find the highest-precedence enabled source
+ * above `userSettings` that sets `key`.
+ */
+export function getHigherPrecedenceSettingSource(key: keyof SettingsJson): SettingSource | undefined {
+  for (const source of HIGHER_PRECEDENCE_SOURCES) {
+    if (!isSettingSourceEnabled(source)) continue;
+    const settings = getSettingsForSource(source);
+    if (!settings) continue;
+    if (key === 'permissions') {
+      if (settings.permissions?.defaultMode !== undefined) return source;
+      continue;
+    }
+    if (settings[key] !== undefined) {
+      return source;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Official 2.1.327 (#372) `I(key)`: human-readable note explaining when another
+ * settings source overrides what `/config` saves to user settings.
+ */
+export function getConfigOverrideNotice(rowIdOrKey: string): string | undefined {
+  const settingsKey = (CONFIG_ROW_ID_TO_SETTINGS_KEY[rowIdOrKey] ?? rowIdOrKey) as keyof SettingsJson;
+  const source = getHigherPrecedenceSettingSource(settingsKey);
+  return source ? `${getSettingSourceDisplayNameCapitalized(source)} override what you save here` : undefined;
 }
 
 type SubMenu =
@@ -1639,7 +1724,7 @@ export function hKe(n: ConfigHkeBag): { settings: Setting[] } {
         : {
             id: 'autoUpdatesChannel',
             label: 'Auto-update channel',
-            value: settingsData?.autoUpdatesChannel ?? 'latest',
+            value: formatAutoUpdatesChannelDisplay(settingsData?.autoUpdatesChannel),
             type: 'managedEnum' as const,
             onChange() {
               // Handled via toggleSetting -> 'ChannelDowngrade'
@@ -2545,6 +2630,26 @@ export function Config({
   const containerRef = useRef<DOMElement>(null);
   useFocusReclaim(containerRef, isScreenReader ? false : !headerFocused);
 
+  // #603 (2.1.328): keep synchronous refs in lockstep with isSearchMode / isSearchActive
+  // so a fast burst of keystrokes entering search mode never drops characters 2..N
+  // or `j`/`k` before React commits `isSearchMode = true`.
+  const isSearchModeRef = useRef(isSearchMode);
+  isSearchModeRef.current = isSearchMode;
+  const isSearchActive = isSearchMode && showSubmenu === null && !headerFocused;
+  const isSearchActiveRef = useRef(isSearchActive);
+  isSearchActiveRef.current = isSearchActive;
+  const setSearchModeSync = useCallback(
+    (next: boolean) => {
+      isSearchModeRef.current = next;
+      isSearchActiveRef.current = next && showSubmenu === null && !headerFocused;
+      setIsSearchMode(next);
+    },
+    [showSubmenu, headerFocused],
+  );
+
+  // Official 2.1.328 (#603): receive every keypress while search input is active.
+  useWantEveryKey(isSearchActive);
+
   const {
     query: searchQuery,
     setQuery: setSearchQuery,
@@ -2552,8 +2657,9 @@ export function Config({
     handleKeyDown: handleSearchKeyDown,
     handlePaste: handleSearchPaste,
   } = useSearchInput({
-    isActive: isSearchMode && showSubmenu === null && !headerFocused,
-    onExit: () => setIsSearchMode(false),
+    isActive: isSearchActive,
+    isActiveRef: isSearchActiveRef,
+    onExit: () => setSearchModeSync(false),
     onExitUp: focusHeader,
     // Ctrl+C/D must reach Settings' useExitOnCtrlCD; 'd' also avoids
     // double-action (delete-char + exit-pending).
@@ -2572,16 +2678,40 @@ export function Config({
 
   const isFileCheckpointingAvailable = !isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_FILE_CHECKPOINTING);
 
+  const [saveFailedWarning, setSaveFailedWarning] = useState(false);
+
+  // Official 2.1.327 (#395) `fx`: surface a persistent warning under the prompt
+  // whenever saving a settings change to disk fails.
+  const reportSaveResult = useCallback(
+    <T extends { error?: Error | null } | undefined>(result: T): T => {
+      if (result?.error) {
+        setSaveFailedWarning(true);
+        addNotification({
+          key: SETTINGS_SAVE_FAILED_NOTIFICATION_KEY,
+          text: SETTINGS_SAVE_FAILED_MESSAGE,
+          color: 'warning',
+          priority: 'medium',
+        });
+      }
+      return result;
+    },
+    [addNotification],
+  );
+
   // densable bvr F/B/W. Official: if $t() && D !== undefined, pass D as last
   // persist arg. Local has no $t()/tn().storageV5 host — disk path (omit D).
   function F(patch: SettingsJson) {
-    return updateSettingsForSource('userSettings', patch);
+    return reportSaveResult(updateSettingsForSource('userSettings', patch));
   }
   function B<K extends keyof SettingsJson>(key: K, value: SettingsJson[K]) {
-    return updateSettingsForSource('userSettings', { [key]: value } as SettingsJson);
+    return reportSaveResult(updateSettingsForSource('userSettings', { [key]: value } as SettingsJson));
   }
   function W(updater: (current: GlobalConfig) => GlobalConfig) {
-    saveGlobalConfig(updater);
+    try {
+      saveGlobalConfig(updater);
+    } catch (err) {
+      reportSaveResult({ error: err instanceof Error ? err : new Error(String(err)) });
+    }
   }
 
   const memoryFiles = React.use(getMemoryFiles(true)) as MemoryFileInfo[];
@@ -3081,15 +3211,23 @@ export function Config({
   // Disable when submenu is open so the submenu's Dialog handles ESC, and in
   // search mode so the onKeyDown handler (which clears-then-exits search)
   // wins — otherwise Escape in search would jump straight to close.
-  useKeybinding('confirm:no', handleSaveAndClose, {
-    context: 'Settings',
-    isActive: showSubmenu === null && !isSearchMode && !headerFocused,
-  });
+  useKeybinding(
+    'confirm:no',
+    () => {
+      if (isSearchModeRef.current) return false;
+      handleSaveAndClose();
+    },
+    {
+      context: 'Settings',
+      isActive: showSubmenu === null && !isSearchMode && !headerFocused,
+    },
+  );
   // Both Enter (settings:close in defaultBindings) and Space (select:accept)
   // change/open the focused setting when not in search mode.
   useKeybinding(
     'settings:close',
     () => {
+      if (isSearchModeRef.current) return false;
       toggleSetting();
     },
     {
@@ -3274,29 +3412,49 @@ export function Config({
   useKeybindings(
     {
       'select:previous': () => {
+        if (isSearchModeRef.current) return false;
         if (selectedIndexLive.current === 0) {
           // ↑ at top enters search mode so users can type-to-filter after
           // reaching the list boundary. Wheel-up (scroll:lineUp) clamps
           // instead — overshoot shouldn't move focus away from the list.
           setShowThinkingWarning(false);
-          setIsSearchMode(true);
+          setSearchModeSync(true);
           setScrollOffset(0);
         } else {
           moveSelection(-1);
         }
       },
-      'select:next': () => moveSelection(1),
+      'select:next': () => {
+        if (isSearchModeRef.current) return false;
+        moveSelection(1);
+      },
       // Wheel. ScrollKeybindingHandler's scroll:line* returns false (not
       // consumed) when the ScrollBox content fits — which it always does
       // here because the list is paginated (slice). The event falls through
       // to this handler which navigates the list, clamping at boundaries.
-      'scroll:lineUp': () => moveSelection(-1),
-      'scroll:lineDown': () => moveSelection(1),
-      'select:accept': toggleSetting,
-      'select:previousValue': () => toggleSetting(),
-      'select:nextValue': () => toggleSetting(),
+      'scroll:lineUp': () => {
+        if (isSearchModeRef.current) return false;
+        moveSelection(-1);
+      },
+      'scroll:lineDown': () => {
+        if (isSearchModeRef.current) return false;
+        moveSelection(1);
+      },
+      'select:accept': () => {
+        if (isSearchModeRef.current) return false;
+        toggleSetting();
+      },
+      'select:previousValue': () => {
+        if (isSearchModeRef.current) return false;
+        toggleSetting();
+      },
+      'select:nextValue': () => {
+        if (isSearchModeRef.current) return false;
+        toggleSetting();
+      },
       'settings:search': () => {
-        setIsSearchMode(true);
+        if (isSearchModeRef.current) return false;
+        setSearchModeSync(true);
         setSearchQuery('');
       },
     },
@@ -3315,7 +3473,7 @@ export function Config({
       if (headerFocused) return;
       // densable Wl: search — first Esc clears query, second Esc exits search
       // (`be()` / Ye(!1)). Settings confirm:no stays ceded while header unfocused.
-      if (isSearchMode) {
+      if (isSearchModeRef.current) {
         if ((e.key === 'return' || e.key === 'down') && filteredSettingsItems.length === 0) {
           e.preventDefault();
           return;
@@ -3323,16 +3481,11 @@ export function Config({
         handleSearchKeyDown(e);
         if (e.key === 'escape') {
           e.preventDefault();
-          if (searchQuery.length > 0) {
-            setSearchQuery('');
-          } else {
-            setIsSearchMode(false);
-          }
           return;
         }
         if (e.key === 'return' || e.key === 'down' || e.key === 'wheeldown') {
           e.preventDefault();
-          setIsSearchMode(false);
+          setSearchModeSync(false);
           setSelectedIndex(0);
           setScrollOffset(0);
           return;
@@ -3358,7 +3511,7 @@ export function Config({
         toggleSetting();
         return;
       }
-      // Official 2.1.326 #125: printable chars or multi-char IME / dictation input enter search; `/` opens empty search.
+      // Official 2.1.326 #125 + 2.1.328 #603: printable chars or multi-char IME / dictation input enter search; `/` opens empty search.
       if (e.ctrl || e.meta) return;
       if (e.key === 'j' || e.key === 'k') return;
       const isNamedNonPrintable =
@@ -3379,15 +3532,15 @@ export function Config({
         e.key.length > 0 && e.key !== ' ' && !isNamedNonPrintable && !/\p{Cc}/u.test(e.key);
       if (isPrintableSearchInput) {
         e.preventDefault();
-        setIsSearchMode(true);
+        setSearchModeSync(true);
         setSearchQuery(e.key === '/' ? '' : e.key);
       }
     },
     [
       showSubmenu,
       headerFocused,
-      isSearchMode,
       searchQuery,
+      setSearchModeSync,
       setSearchQuery,
       toggleSetting,
       handleSearchKeyDown,
@@ -3611,6 +3764,7 @@ export function Config({
           hideInputGuide
         >
           <Select
+            hideIndexes={!isScreenReaderModeEnabled()}
             options={agentsViewItems.map(item => ({
               label: `${item.label}: ${item.value}`,
               value: item.id,
@@ -3647,6 +3801,7 @@ export function Config({
             hideInputGuide
           >
             <Select
+              hideIndexes={!isScreenReaderModeEnabled()}
               options={enumPickerSetting.options.map(option => ({
                 label: option,
                 value: option,
@@ -3721,7 +3876,7 @@ export function Config({
         </Dialog>
       ) : showSubmenu === 'EnableAutoUpdates' ? (
         <Dialog
-          title="Enable Auto-Updates"
+          title="Enable auto-updates"
           onCancel={() => {
             setShowSubmenu(null);
             setTabsHidden(false);
@@ -3733,7 +3888,7 @@ export function Config({
             <>
               <Text>
                 {autoUpdaterDisabledReason?.type === 'env'
-                  ? 'Auto-updates are controlled by an environment variable and cannot be changed here.'
+                  ? "Auto-updates are set by an environment variable and can't be changed here."
                   : 'Auto-updates are disabled in development builds.'}
               </Text>
               {autoUpdaterDisabledReason?.type === 'env' && (
@@ -3742,6 +3897,7 @@ export function Config({
             </>
           ) : (
             <Select
+              hideIndexes={!isScreenReaderModeEnabled()}
               options={[
                 {
                   label: 'Enable with latest channel',
@@ -3753,27 +3909,31 @@ export function Config({
                 },
               ]}
               onChange={(channel: string) => {
-                isDirty.current = true;
                 setShowSubmenu(null);
                 setTabsHidden(false);
 
-                W(current => ({
-                  ...current,
-                  autoUpdates: true,
-                }));
-                setGlobalConfig({ ...getGlobalConfig(), autoUpdates: true });
+                const nextChannel = channel as 'latest' | 'stable';
+                const previousChannel = (settingsData?.autoUpdatesChannel ?? 'latest') as 'latest' | 'stable';
+                void saveAutoUpdatesChannelWithConfigSetHook(nextChannel, previousChannel, finalChannel => {
+                  isDirty.current = true;
+                  W(current => ({
+                    ...current,
+                    autoUpdates: true,
+                  }));
+                  setGlobalConfig({ ...getGlobalConfig(), autoUpdates: true });
 
-                F({
-                  autoUpdatesChannel: channel as 'latest' | 'stable',
-                  minimumVersion: undefined,
-                });
-                setSettingsData(prev => ({
-                  ...prev,
-                  autoUpdatesChannel: channel as 'latest' | 'stable',
-                  minimumVersion: undefined,
-                }));
-                logEvent('tengu_autoupdate_enabled', {
-                  channel: channel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  F({
+                    autoUpdatesChannel: finalChannel,
+                    minimumVersion: undefined,
+                  });
+                  setSettingsData(prev => ({
+                    ...prev,
+                    autoUpdatesChannel: finalChannel,
+                    minimumVersion: undefined,
+                  }));
+                  logEvent('tengu_autoupdate_enabled', {
+                    channel: finalChannel as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+                  });
                 });
               }}
             />
@@ -3823,7 +3983,7 @@ export function Config({
           <Box
             onClick={() => {
               if (headerFocused) blurHeader();
-              setIsSearchMode(true);
+              setSearchModeSync(true);
             }}
           >
             <SearchBox
@@ -3840,7 +4000,7 @@ export function Config({
               if (showSubmenu !== null || filteredSettingsItems.length === 0 || e.deltaY === 0) return;
               e.stopImmediatePropagation();
               if (headerFocused) blurHeader();
-              if (isSearchMode) setIsSearchMode(false);
+              if (isSearchModeRef.current) setSearchModeSync(false);
               moveSelection(e.deltaY > 0 ? 1 : -1);
             }}
           >
@@ -3874,7 +4034,7 @@ export function Config({
                         onClick={e => {
                           e.stopImmediatePropagation();
                           if (headerFocused) blurHeader();
-                          if (isSearchMode) setIsSearchMode(false);
+                          if (isSearchModeRef.current) setSearchModeSync(false);
                           const alreadySelected = isSelected;
                           setShowThinkingWarning(false);
                           setSelectedIndex(entry.settingIndex);
@@ -3898,7 +4058,7 @@ export function Config({
                           onClick={e => {
                             e.stopImmediatePropagation();
                             if (headerFocused) blurHeader();
-                            if (isSearchMode) setIsSearchMode(false);
+                            if (isSearchModeRef.current) setSearchModeSync(false);
                             setShowThinkingWarning(false);
                             setSelectedIndex(entry.settingIndex);
                             adjustScrollOffset(entry.settingIndex);
@@ -3974,6 +4134,22 @@ export function Config({
           {/* densable sda: footer is flexShrink:0 + measured so list maxVisible
               never eats its rows (fullscreen /config keyboard-hint clip). */}
           <Box ref={footerRef} flexDirection="column" flexShrink={0} minWidth={0}>
+            {!headerFocused &&
+              !isSearchMode &&
+              (() => {
+                const activeSetting = filteredSettingsItems[selectedIndex];
+                const overrideNote = activeSetting ? getConfigOverrideNotice(activeSetting.id) : undefined;
+                return overrideNote ? (
+                  <Text color="warning" wrap="wrap">
+                    {overrideNote}
+                  </Text>
+                ) : null;
+              })()}
+            {saveFailedWarning ? (
+              <Text color="warning" wrap="wrap">
+                {SETTINGS_SAVE_FAILED_MESSAGE}
+              </Text>
+            ) : null}
             {headerFocused ? (
               <Text dimColor wrap="truncate-end">
                 <Byline>

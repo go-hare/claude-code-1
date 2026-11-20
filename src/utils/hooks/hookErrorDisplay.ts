@@ -13,6 +13,67 @@ export const HOOK_ERROR_EXPANDED_MAX_CHARS = 10_000
 export const HOOK_EXIT_127_PRETOOL_MESSAGE =
   'Exit 127, likely a missing program: The check may not have run. See /hooks.'
 
+/**
+ * Official 2.1.327 (#433): Distinguish a Stop hook that failed to run from
+ * one that ran and reported a problem.
+ */
+export const STOP_HOOK_FAILED_HEADLINE = 'Stop hook failed'
+export const STOP_HOOK_PROBLEM_HEADLINE = 'Stop hook reported a problem'
+
+export function classifyStopHookErrorHeadline(opts: {
+  failedToRun: boolean
+  reason?: string
+}): { headline: string; color: 'error' | 'warning' } {
+  const isFailure =
+    opts.failedToRun ||
+    (typeof opts.reason === 'string' &&
+      opts.reason.startsWith('Stop hook failed'))
+  return isFailure
+    ? { headline: STOP_HOOK_FAILED_HEADLINE, color: 'error' }
+    : { headline: STOP_HOOK_PROBLEM_HEADLINE, color: 'warning' }
+}
+
+/**
+ * Official 2.1.327 (#431): Format a clear user-facing error when a
+ * UserPromptSubmit hook blocks a message sent while Claude works in a cloud
+ * session.
+ */
+export function formatCloudUserPromptSubmitBlockError(
+  blockingError: string | undefined,
+): string {
+  const detail = blockingError?.trim()
+  return detail
+    ? `UserPromptSubmit hook blocked this message: ${detail}`
+    : 'UserPromptSubmit hook blocked this message.'
+}
+
+/**
+ * Official 2.1.327 (#432): Collect user-visible error messages from failing
+ * SessionEnd hooks (e.g. at `/clear` and `/resume`) or env hooks
+ * (`CwdChanged`, `FileChanged`).
+ */
+export function formatOutsideReplHookFailures(
+  hookEvent: 'SessionEnd' | 'CwdChanged' | 'FileChanged',
+  results: ReadonlyArray<{
+    command: string
+    succeeded: boolean
+    output: string
+    cancelled?: boolean
+  }>,
+): string[] {
+  const errors: string[] = []
+  for (const r of results) {
+    if (r.succeeded || r.cancelled) continue
+    const detail = formatHookErrorOutput(r.output) || r.output.trim()
+    errors.push(
+      detail
+        ? `${hookEvent} hook failed (${r.command}): ${detail}`
+        : `${hookEvent} hook failed (${r.command})`,
+    )
+  }
+  return errors
+}
+
 const STACK_TRACE_FIRST_LINE_RE =
   /^(?:\S+|(?:\/|[A-Za-z]:\\).*):\d+$|^Traceback \(most recent call last\):$|^File ".*", line \d+$/
 

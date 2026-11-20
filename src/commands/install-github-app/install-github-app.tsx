@@ -7,7 +7,7 @@ import {
 import { WorkflowMultiselectDialog } from '../../components/WorkflowMultiselectDialog.js';
 import { GITHUB_ACTION_SETUP_DOCS_URL } from '../../constants/github-app.js';
 import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
-import { type KeyboardEvent, Box } from '@anthropic/ink';
+import { type KeyboardEvent, Box, LoadingState } from '@anthropic/ink';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import { getAnthropicApiKey, isAnthropicAuthEnabled } from '../../utils/auth.js';
 import { openBrowser } from '../../utils/browser.js';
@@ -18,6 +18,7 @@ import { ApiKeyStep } from './ApiKeyStep.js';
 import { CheckExistingSecretStep } from './CheckExistingSecretStep.js';
 import { CheckGitHubStep } from './CheckGitHubStep.js';
 import { ChooseRepoStep } from './ChooseRepoStep.js';
+import { ConfirmSetupStep } from './ConfirmSetupStep.js';
 import { CreatingStep } from './CreatingStep.js';
 import { ErrorStep } from './ErrorStep.js';
 import { ExistingWorkflowStep } from './ExistingWorkflowStep.js';
@@ -27,6 +28,28 @@ import { SuccessStep } from './SuccessStep.js';
 import { setupGitHubActions } from './setupGitHubActions.js';
 import type { State, Warning, Workflow } from './types.js';
 import { WarningsStep } from './WarningsStep.js';
+
+/**
+ * Official 2.1.328 (#613) `Dt`: when updating an existing `.github/workflows/claude.yml`,
+ * narrow `selectedWorkflows` to `['claude']` so we don't also add `claude-code-review.yml`.
+ */
+export function resolveWorkflowsForExistingWorkflowAction(
+  action: 'update' | 'skip' | 'exit',
+  currentWorkflows: Workflow[],
+): Workflow[] {
+  if (action === 'update' || action === 'skip') {
+    return ['claude'];
+  }
+  return currentWorkflows;
+}
+
+/**
+ * Official 2.1.327 (#368) `A(apiKey, secretName)`: decide whether to show the
+ * final repository-changes confirmation step before running GitHub Actions setup.
+ */
+export function shouldConfirmBeforeRepoChanges(apiKey: string | null, workflowAction?: string): boolean {
+  return !(apiKey === null && workflowAction === 'skip');
+}
 
 const INITIAL_STATE: State = {
   step: 'check-gh',
@@ -56,10 +79,20 @@ function InstallGitHubApp(props: { onDone: (message: string) => void }): React.R
       | 'new'
       | 'oauth',
   });
+  const secretCheckGenRef = React.useRef(0);
+  const isCheckingSecretRef = React.useRef(false);
+  const unmountedRef = React.useRef(false);
+  const stepRef = React.useRef(state.step);
+  stepRef.current = state.step;
   useExitOnCtrlCDWithKeybindings();
 
   React.useEffect(() => {
     logEvent('tengu_install_github_app_started', {});
+    return () => {
+      unmountedRef.current = true;
+      secretCheckGenRef.current += 1;
+      isCheckingSecretRef.current = false;
+    };
   }, []);
 
   const checkGitHubCLI = useCallback(async () => {
@@ -255,6 +288,13 @@ function InstallGitHubApp(props: { onDone: (message: string) => void }): React.R
         };
       }
 
+      if (/SAML enforcement/i.test(result.stderr)) {
+        return {
+          hasAccess: false,
+          error: 'saml_enforcement',
+        };
+      }
+
       return { hasAccess: false };
     } catch {
       return { hasAccess: false };
@@ -271,6 +311,21 @@ function InstallGitHubApp(props: { onDone: (message: string) => void }): React.R
 
     return checkFileResult.code === 0;
   }
+
+  const queueOrRunSetup = useCallback(
+    async (apiKeyOrOAuthToken: string | null, secretName: string) => {
+      if (!shouldConfirmBeforeRepoChanges(apiKeyOrOAuthToken, state.workflowAction)) {
+        await runSetupGitHubActions(apiKeyOrOAuthToken, secretName);
+        return;
+      }
+      setState(prev => ({
+        ...prev,
+        step: 'confirm-setup',
+        pendingSetup: { apiKey: apiKeyOrOAuthToken, secretName },
+      }));
+    },
+    [runSetupGitHubActions, state.workflowAction],
+  );
 
   async function checkExistingSecret() {
     const checkSecretsResult = await execFileNoThrow('gh', [
@@ -297,13 +352,12 @@ function InstallGitHubApp(props: { onDone: (message: string) => void }): React.R
       } else {
         // No existing secret found
         if (existingApiKey) {
-          // User has local key, skip to creating with it
           setState(prev => ({
             ...prev,
             apiKeyOrOAuthToken: existingApiKey,
             useExistingKey: true,
           }));
-          await runSetupGitHubActions(existingApiKey, state.secretName);
+          await queueOrRunSetup(existingApiKey, state.secretName);
         } else {
           // No local key, go to API key step
           setState(prev => ({ ...prev, step: 'api-key' }));
@@ -312,13 +366,12 @@ function InstallGitHubApp(props: { onDone: (message: string) => void }): React.R
     } else {
       // Error checking secrets
       if (existingApiKey) {
-        // User has local key, skip to creating with it
         setState(prev => ({
           ...prev,
           apiKeyOrOAuthToken: existingApiKey,
           useExistingKey: true,
         }));
-        await runSetupGitHubActions(existingApiKey, state.secretName);
+        await queueOrRunSetup(existingApiKey, state.secretName);
       } else {
         // No local key, go to API key step
         setState(prev => ({ ...prev, step: 'api-key' }));
@@ -326,7 +379,19 @@ function InstallGitHubApp(props: { onDone: (message: string) => void }): React.R
     }
   }
 
-  const handleSubmit = async () => {
+  type SubmitOverride = {
+    useCurrentRepo?: boolean;
+    selectedRepoName?: string;
+    useExistingSecret?: boolean;
+    secretName?: string;
+    selectedApiKeyOption?: 'existing' | 'new' | 'oauth';
+    apiKeyOrOAuthToken?: string;
+  };
+
+  const handleSubmit = async (override?: SubmitOverride) => {
+    if (state.isCheckingSecret || isCheckingSecretRef.current) {
+      return;
+    }
     if (state.step === 'warnings') {
       logEvent('tengu_install_github_app_step_completed', {
         step: 'warnings' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -334,7 +399,13 @@ function InstallGitHubApp(props: { onDone: (message: string) => void }): React.R
       setState(prev => ({ ...prev, step: 'install-app' }));
       setTimeout(openGitHubAppInstallation, 0);
     } else if (state.step === 'choose-repo') {
-      let repoName = state.useCurrentRepo ? state.currentRepo : state.selectedRepoName;
+      const useCurrentRepo = override?.useCurrentRepo ?? state.useCurrentRepo;
+      let repoName =
+        override?.selectedRepoName !== undefined
+          ? override.selectedRepoName
+          : useCurrentRepo
+            ? state.currentRepo
+            : state.selectedRepoName;
 
       if (!repoName.trim()) {
         return;
@@ -368,7 +439,7 @@ function InstallGitHubApp(props: { onDone: (message: string) => void }): React.R
       if (permissionCheck.error === 'repository_not_found') {
         repoWarnings.push({
           title: 'Repository not found',
-          message: `Repository ${repoName} was not found or you don't have access.`,
+          message: `Repository ${repoName} wasn't found or you don't have access.`,
           instructions: [
             `Check that the repository name is correct: ${repoName}`,
             'Ensure you have access to this repository',
@@ -376,9 +447,19 @@ function InstallGitHubApp(props: { onDone: (message: string) => void }): React.R
             'You can add the repo scope with: gh auth refresh -h github.com -s repo,workflow',
           ],
         });
+      } else if (permissionCheck.error === 'saml_enforcement') {
+        repoWarnings.push({
+          title: 'Single sign-on authorization needed',
+          message: `${repoName} belongs to an organization that enforces SAML single sign-on, and your GitHub CLI token isn't authorized for it yet.`,
+          instructions: [
+            'Re-authorize your GitHub CLI login with the repo and workflow scopes',
+            'Authorize the organization when GitHub prompts for single sign-on, then run /install-github-app again',
+            'If you use a personal access token (GH_TOKEN): open https://github.com/settings/tokens, choose Configure SSO, and authorize the organization',
+          ],
+        });
       } else if (!permissionCheck.hasAccess) {
         repoWarnings.push({
-          title: 'Admin permissions required',
+          title: 'Admin permissions needed',
           message: `You might need admin permissions on ${repoName} to set up GitHub Actions.`,
           instructions: [
             'Repository admins can install GitHub Apps and set secrets',
@@ -394,6 +475,7 @@ function InstallGitHubApp(props: { onDone: (message: string) => void }): React.R
         const allWarnings = [...state.warnings, ...repoWarnings];
         setState(prev => ({
           ...prev,
+          useCurrentRepo,
           selectedRepoName: repoName,
           workflowExists,
           warnings: allWarnings,
@@ -405,6 +487,7 @@ function InstallGitHubApp(props: { onDone: (message: string) => void }): React.R
         });
         setState(prev => ({
           ...prev,
+          useCurrentRepo,
           selectedRepoName: repoName,
           workflowExists,
           step: 'install-app',
@@ -426,43 +509,51 @@ function InstallGitHubApp(props: { onDone: (message: string) => void }): React.R
       // Handled by the WorkflowMultiselectDialog component
       return;
     } else if (state.step === 'check-existing-secret') {
+      const useExistingSecret = override?.useExistingSecret ?? state.useExistingSecret;
+      const secretName = override?.secretName ?? state.secretName;
+      if (!useExistingSecret && !secretName.trim()) {
+        return;
+      }
       logEvent('tengu_install_github_app_step_completed', {
         step: 'check-existing-secret' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
       });
-      if (state.useExistingSecret) {
-        await runSetupGitHubActions(null, state.secretName);
+      if (useExistingSecret) {
+        await queueOrRunSetup(null, secretName);
       } else {
         // User wants to use a new secret name with their API key
-        await runSetupGitHubActions(state.apiKeyOrOAuthToken, state.secretName);
+        await queueOrRunSetup(state.apiKeyOrOAuthToken || existingApiKey, secretName);
       }
     } else if (state.step === 'api-key') {
       // In the new flow, api-key step only appears when user has no existing key
       // They either entered a new key or will create OAuth token
-      if (state.selectedApiKeyOption === 'oauth') {
+      const selectedApiKeyOption = override?.selectedApiKeyOption ?? state.selectedApiKeyOption;
+      if (selectedApiKeyOption === 'oauth') {
         // OAuth flow already handled by handleCreateOAuthToken
         return;
       }
 
       // If user selected 'existing' option, use the existing API key
-      const apiKeyToUse = state.selectedApiKeyOption === 'existing' ? existingApiKey : state.apiKeyOrOAuthToken;
+      const apiKeyToUse =
+        selectedApiKeyOption === 'existing'
+          ? existingApiKey
+          : (override?.apiKeyOrOAuthToken ?? state.apiKeyOrOAuthToken);
 
       if (!apiKeyToUse) {
         logEvent('tengu_install_github_app_error', {
           reason: 'api_key_missing' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         });
-        setState(prev => ({
-          ...prev,
-          step: 'error',
-          error: 'API key is required',
-        }));
         return;
       }
 
       // Store the API key being used (either existing or newly entered)
+      const checkGen = ++secretCheckGenRef.current;
+      isCheckingSecretRef.current = true;
       setState(prev => ({
         ...prev,
+        selectedApiKeyOption,
         apiKeyOrOAuthToken: apiKeyToUse,
-        useExistingKey: state.selectedApiKeyOption === 'existing',
+        useExistingKey: selectedApiKeyOption === 'existing',
+        isCheckingSecret: true,
       }));
 
       // Check if ANTHROPIC_API_KEY secret already exists
@@ -474,6 +565,12 @@ function InstallGitHubApp(props: { onDone: (message: string) => void }): React.R
         '--repo',
         state.selectedRepoName,
       ]);
+
+      if (unmountedRef.current || secretCheckGenRef.current !== checkGen || stepRef.current !== 'api-key') {
+        return;
+      }
+      isCheckingSecretRef.current = false;
+      setState(prev => ({ ...prev, isCheckingSecret: false }));
 
       if (checkSecretsResult.code === 0) {
         const lines = checkSecretsResult.stdout.split('\n');
@@ -494,15 +591,15 @@ function InstallGitHubApp(props: { onDone: (message: string) => void }): React.R
           logEvent('tengu_install_github_app_step_completed', {
             step: 'api-key' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
           });
-          // No existing secret, proceed to creating
-          await runSetupGitHubActions(apiKeyToUse, state.secretName);
+          // No existing secret, proceed to confirmation
+          await queueOrRunSetup(apiKeyToUse, state.secretName);
         }
       } else {
         logEvent('tengu_install_github_app_step_completed', {
           step: 'api-key' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
         });
         // Error checking secrets, proceed anyway
-        await runSetupGitHubActions(apiKeyToUse, state.secretName);
+        await queueOrRunSetup(apiKeyToUse, state.secretName);
       }
     }
   };
@@ -526,22 +623,20 @@ function InstallGitHubApp(props: { onDone: (message: string) => void }): React.R
     setState(prev => ({ ...prev, step: 'oauth-flow' }));
   }, []);
 
-  const handleOAuthSuccess = useCallback(
-    (token: string) => {
-      logEvent('tengu_install_github_app_step_completed', {
-        step: 'oauth-flow' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      });
-      setState(prev => ({
-        ...prev,
-        apiKeyOrOAuthToken: token,
-        useExistingKey: false,
-        secretName: 'CLAUDE_CODE_OAUTH_TOKEN',
-        authType: 'oauth_token',
-      }));
-      void runSetupGitHubActions(token, 'CLAUDE_CODE_OAUTH_TOKEN');
-    },
-    [runSetupGitHubActions],
-  );
+  const handleOAuthSuccess = useCallback((token: string) => {
+    logEvent('tengu_install_github_app_step_completed', {
+      step: 'oauth-flow' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    });
+    setState(prev => ({
+      ...prev,
+      apiKeyOrOAuthToken: token,
+      useExistingKey: false,
+      secretName: 'CLAUDE_CODE_OAUTH_TOKEN',
+      authType: 'oauth_token',
+      step: 'confirm-setup',
+      pendingSetup: { apiKey: token, secretName: 'CLAUDE_CODE_OAUTH_TOKEN' },
+    }));
+  }, []);
 
   const handleOAuthCancel = useCallback(() => {
     setState(prev => ({ ...prev, step: 'api-key' }));
@@ -582,7 +677,13 @@ function InstallGitHubApp(props: { onDone: (message: string) => void }): React.R
       step: 'check-existing-workflow' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     });
 
-    setState(prev => ({ ...prev, workflowAction: action }));
+    // Official 2.1.328 (#613): updating an existing workflow updates only
+    // .github/workflows/claude.yml instead of adding claude-code-review.yml.
+    setState(prev => ({
+      ...prev,
+      workflowAction: action,
+      selectedWorkflows: resolveWorkflowsForExistingWorkflowAction(action, prev.selectedWorkflows),
+    }));
 
     if (action === 'skip' || action === 'update') {
       // Check if user has existing local API key
@@ -623,6 +724,7 @@ function InstallGitHubApp(props: { onDone: (message: string) => void }): React.R
           onRepoUrlChange={handleRepoUrlChange}
           onToggleUseCurrentRepo={handleToggleUseCurrentRepo}
           onSubmit={handleSubmit}
+          onCancel={() => props.onDone('Installation cancelled')}
         />
       );
     case 'install-app':
@@ -637,20 +739,45 @@ function InstallGitHubApp(props: { onDone: (message: string) => void }): React.R
           onToggleUseExistingSecret={handleToggleUseExistingSecret}
           onSecretNameChange={handleSecretNameChange}
           onSubmit={handleSubmit}
+          onCancel={() => props.onDone('Installation cancelled')}
         />
       );
     case 'api-key':
       return (
-        <ApiKeyStep
-          existingApiKey={existingApiKey}
-          useExistingKey={state.useExistingKey}
-          apiKeyOrOAuthToken={state.apiKeyOrOAuthToken}
-          onApiKeyChange={handleApiKeyChange}
-          onToggleUseExistingKey={handleToggleUseExistingKey}
-          onSubmit={handleSubmit}
-          onCreateOAuthToken={isAnthropicAuthEnabled() ? handleCreateOAuthToken : undefined}
-          selectedOption={state.selectedApiKeyOption}
-          onSelectOption={handleApiKeyOptionChange}
+        <Box flexDirection="column" gap={1}>
+          <ApiKeyStep
+            existingApiKey={existingApiKey}
+            useExistingKey={state.useExistingKey}
+            apiKeyOrOAuthToken={state.apiKeyOrOAuthToken}
+            onApiKeyChange={handleApiKeyChange}
+            onToggleUseExistingKey={handleToggleUseExistingKey}
+            onSubmit={handleSubmit}
+            onCreateOAuthToken={isAnthropicAuthEnabled() ? handleCreateOAuthToken : undefined}
+            selectedOption={state.selectedApiKeyOption}
+            onSelectOption={handleApiKeyOptionChange}
+            isDisabled={Boolean(state.isCheckingSecret)}
+            onCancel={() => {
+              secretCheckGenRef.current += 1;
+              isCheckingSecretRef.current = false;
+              props.onDone('Installation cancelled');
+            }}
+          />
+          {state.isCheckingSecret && <LoadingState message="Checking for an existing ANTHROPIC_API_KEY secret…" />}
+        </Box>
+      );
+    case 'confirm-setup':
+      return (
+        <ConfirmSetupStep
+          repo={state.selectedRepoName}
+          secretName={state.pendingSetup?.apiKey ? state.pendingSetup.secretName : undefined}
+          secretKind={state.authType === 'oauth_token' ? 'token' : 'API key'}
+          workflowCount={state.workflowAction === 'skip' ? 0 : state.selectedWorkflows.length}
+          onConfirm={() => {
+            if (state.pendingSetup) {
+              void runSetupGitHubActions(state.pendingSetup.apiKey, state.pendingSetup.secretName);
+            }
+          }}
+          onCancel={() => props.onDone('Installation cancelled')}
         />
       );
     case 'creating':

@@ -14,6 +14,7 @@ import { getSessionHooks } from './sessionHooks.js'
 
 export type HookSource =
   | EditableSettingSource
+  | 'flagSettings'
   | 'policySettings'
   | 'pluginHook'
   | 'sessionHook'
@@ -145,12 +146,13 @@ export function getAllHooks(appState: AppState): IndividualHookConfig[] {
   // If allowManagedHooksOnly is set, don't show any hooks in the UI
   // (user/project/local are blocked, and managed hooks are intentionally hidden)
   if (!restrictedToManagedOnly) {
-    // Get hooks from all editable sources
-    const sources = [
+    // Get hooks from all editable sources + `--settings` (flagSettings) (#454)
+    const sources: Array<EditableSettingSource | 'flagSettings'> = [
       'userSettings',
       'projectSettings',
       'localSettings',
-    ] as EditableSettingSource[]
+      'flagSettings',
+    ]
 
     // Track which settings files we've already processed to avoid duplicates
     // (e.g., when running from home directory, userSettings and projectSettings
@@ -221,6 +223,8 @@ export function hookSourceDescriptionDisplayString(source: HookSource): string {
       return 'Project settings (.claude/settings.json)'
     case 'localSettings':
       return 'Local settings (.claude/settings.local.json)'
+    case 'flagSettings':
+      return 'Startup settings (--settings option)'
     case 'pluginHook':
       // TODO: Get the actual plugin hook file paths instead of using glob pattern
       // We should capture the specific plugin paths during hook registration and display them here
@@ -243,6 +247,8 @@ export function hookSourceHeaderDisplayString(source: HookSource): string {
       return 'Project Settings'
     case 'localSettings':
       return 'Local Settings'
+    case 'flagSettings':
+      return 'Startup settings'
     case 'pluginHook':
       return 'Plugin Hooks'
     case 'sessionHook':
@@ -262,6 +268,8 @@ export function hookSourceInlineDisplayString(source: HookSource): string {
       return 'Project'
     case 'localSettings':
       return 'Local'
+    case 'flagSettings':
+      return 'Startup'
     case 'pluginHook':
       return 'Plugin'
     case 'sessionHook':
@@ -282,12 +290,16 @@ export function sortMatchersByPriority(
   selectedEvent: HookEvent,
 ): string[] {
   // Create a priority map based on SOURCES order (lower index = higher priority)
+  // Official 2.1.327 (#454): flagSettings (--settings) sorts ahead of file sources (-1)
   const sourcePriority = SOURCES.reduce(
     (acc, source, index) => {
       acc[source] = index
       return acc
     },
-    {} as Record<EditableSettingSource, number>,
+    { flagSettings: -1 } as Record<
+      EditableSettingSource | 'flagSettings',
+      number
+    >,
   )
 
   return [...matchers].sort((a, b) => {
@@ -302,7 +314,8 @@ export function sortMatchersByPriority(
     const getSourcePriority = (source: HookSource) =>
       source === 'pluginHook' || source === 'builtinHook'
         ? 999
-        : sourcePriority[source as EditableSettingSource]
+        : (sourcePriority[source as EditableSettingSource | 'flagSettings'] ??
+          998)
 
     const aHighestPriority = Math.min(...aSources.map(getSourcePriority))
     const bHighestPriority = Math.min(...bSources.map(getSourcePriority))

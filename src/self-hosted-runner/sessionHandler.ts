@@ -37,6 +37,7 @@ import {
   sessionIngressTokenPath,
 } from './sessionChild.js'
 import {
+  computePostSessionDiskProbeTimeoutMs,
   DEFAULT_CHECKOUT_HOOK_TIMEOUT_MS,
   isCheckoutHookSourceType,
   mapSourcesForCheckout,
@@ -63,6 +64,7 @@ import {
   SessionChildSupervisor,
 } from './sessionChildSupervisor.js'
 import {
+  areGitHubToolsRestrictedBySettings,
   BUILT_IN_GH_REASON_TEXT,
   GH_STANDIN_STANDALONE_PROXY,
   evaluateSessionBuiltInGhDecision,
@@ -74,6 +76,7 @@ import {
   assertConfigDirOutsideGlobalTemp,
   assertRunnerPathNotSymlink,
   claudeConfigFileSuffix,
+  ensureReadableSessionClaudeJson,
   resolveChildCwdAndAddDirs,
   resolveUnderSessionRoot,
   seedHostConfigIntoSession,
@@ -118,13 +121,19 @@ import {
   createGitTlsSessionState,
   formatCertificatesLeftOutWarning,
   formatRunnerMountTlsWarning,
+  GOVERNED_GIT_DISABLE_PROACTIVE_AUTH_KEY,
   governedSigningEntries,
   governedGitSpawn,
   prepareGitTlsTrustBundle,
 } from './gitConfigure.js'
-import { truncateSessionErrorText } from './sessionText.js'
+import {
+  buildSelfHostedSessionAppendPrompt,
+  truncateSessionErrorText,
+  type SkippedSessionRepository,
+} from './sessionText.js'
 import {
   addSessionWorktree,
+  assertPushTargetRepoPathNotSymlink,
   cleanupOutcomeBranch,
   cleanupSessionWorktrees,
   createOutcomeBranch,
@@ -143,6 +152,7 @@ import {
   pushOutcomeBranch,
   resetGovernedOriginToUpstream,
   resetStaleGitProxyCredHelper,
+  resolveRepositoryFolderPath,
   revParseVerify,
   sanitizeCanonicalGitState,
   sanitizePermanentRefWording,
@@ -151,6 +161,7 @@ import {
   wireGitProxyRepoLocalCredHelper,
   withCanonicalLock,
   type GitPrepareSource,
+  type RepositoryFolderMapping,
   type SessionWorktree,
 } from './gitPrepare.js'
 
@@ -201,6 +212,8 @@ export type HandleSessionOpts = {
   hooksDir?: string
   gitSshRewriteHosts?: string[]
   gitHostRewrites?: Array<[string, string]>
+  /** Official 2.1.328 (#548): per-repo folder overrides (`--repository-folder`). */
+  repositoryFolders?: RepositoryFolderMapping[]
   pushOutcomeOnRelease?: boolean
   postSessionHookTimeoutMs?: number
   checkoutHookTimeoutMs?: number
@@ -375,6 +388,8 @@ export type SpawnSessionChildOpts = {
   onTokenAck?: (requestId: string) => void
   /** #1781: Forward `--trust-workspace` to child env (`CLAUDE_CODE_IGNORE_PERSISTED_TRUST: '1'` when false). */
   trustWorkspace?: boolean
+  /** Official 2.1.328 (#640/#661): appended system prompt notes for missing repos / resumed work verification. */
+  appendSystemPrompt?: string
 }
 
 function errMsg(err: unknown): string {
@@ -656,6 +671,7 @@ export async function spawnSessionChild(
     launcherSettingsPath: opts.launcherSettingsPath,
     addDirs: opts.addDirs,
     claudeCodeArgs: opts.claudeCodeArgs,
+    appendSystemPrompt: opts.appendSystemPrompt,
     onDebug: opts.onDebug,
   })
   const env = buildSessionChildEnv({
@@ -885,6 +901,42 @@ export async function spawnSessionChild(
 }
 
 /**
+ * Official 2.1.328 (#380): decide whether a JSONL stdin line carrying a
+ * post-restart permission `control_response` should be dropped because the
+ * session already stopped/settled or newer user input superseded it.
+ */
+export function shouldDropRunnerPermissionResponse(
+  line: string,
+  opts: {
+    sessionStoppedAfterRestart?: boolean
+    behindNewInput?: boolean
+    alreadySettled?: boolean
+  },
+): boolean {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(line)
+  } catch {
+    return false
+  }
+  if (!parsed || typeof parsed !== 'object') return false
+  const msg = parsed as { type?: unknown; response?: { subtype?: unknown } }
+  if (msg.type !== 'control_response') return false
+  try {
+    const { shouldDropOrphanedPermissionAfterStop } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../cli/headless/HeadlessControlPlane.js') as typeof import('../cli/headless/HeadlessControlPlane.js')
+    return shouldDropOrphanedPermissionAfterStop(opts)
+  } catch {
+    return (
+      opts.sessionStoppedAfterRestart === true ||
+      opts.behindNewInput === true ||
+      opts.alreadySettled === true
+    )
+  }
+}
+
+/**
  * densable `rBh` — handle one assigned session through spawn (core path).
  */
 export async function handleSession(
@@ -914,6 +966,10 @@ export async function handleSession(
   const gitconfigPath = join(baseDir, '_sessions', `${sessionId}.gitconfig`)
   const debugFile = join(configDir, 'claude-code-debug.txt')
   const stageFileRoot = join(baseDir, '_sessions', `${sessionId}.uploads`)
+  // Note: do NOT call setOwnTaskListId(sessionId) here in the parent runner
+  // process — handleSession spawns an isolated child `claude` process (which
+  // sets its own task list ID from `--session-id` / restoreTaskListOnSelfHostedRunnerResume),
+  // and mutating the parent singleton races under `--capacity > 1`.
   const multiCap = capacity > 1
   const restoreHooks = opts.configureGitHookStubs !== undefined && !multiCap
   const initStartedAt = Date.now()
@@ -1330,6 +1386,20 @@ export async function handleSession(
         gitconfigPath,
         opts.governedGitConfigSeed ?? '',
       )
+      // Official 2.1.328 (#633): explicitly disable inherited http.proactiveAuth
+      // in the governed gitconfig so host-level settings do not break fetch/push.
+      await governedGitSpawn([
+        'config',
+        '--file',
+        gitconfigPath,
+        '--replace-all',
+        GOVERNED_GIT_DISABLE_PROACTIVE_AUTH_KEY,
+        'none',
+      ]).catch(err =>
+        onDebug(
+          `[runner:session] governed git: could not set ${GOVERNED_GIT_DISABLE_PROACTIVE_AUTH_KEY}=none: ${errMsg(err)}`,
+        ),
+      )
       if (restoreHooks) {
         for (const [k, v] of governedSigningEntries(baseDir)) {
           await governedGitSpawn([
@@ -1388,6 +1458,7 @@ export async function handleSession(
     })
 
     // densable: prepare sources — H2h checkout hook OR aWd built-in clone
+    const skippedRepositories: SkippedSessionRepository[] = []
     if (mapped.length > 0) {
       onStatus(
         `[runner:session] Preparing ${mapped.length} git ${
@@ -1412,7 +1483,14 @@ export async function handleSession(
       for (const src of mapped) {
         if (!isCheckoutHookSourceType(src.type)) continue
         const slug = sourceCheckoutSlug(src)
-        const canon = sourceCanonicalPath(baseDir, src)
+        const defaultCanon = sourceCanonicalPath(baseDir, src)
+        const canon = defaultCanon
+          ? resolveRepositoryFolderPath(
+              src.repo,
+              opts.repositoryFolders,
+              defaultCanon,
+            )
+          : undefined
         if (!slug || !canon) {
           exitBeforeInit(true)
           throw new Error(
@@ -1424,6 +1502,11 @@ export async function handleSession(
           step_detail: src.repo,
         })
         const isWorkRepo = (pushBranchMap.get(src.repo)?.length ?? 0) > 0
+        // Official 2.1.328 (#681): refuse symbolic-link push-target repo paths
+        // early before cloning/fetching at capacity 1.
+        if (!multiCap && !checkoutHookPath && isWorkRepo) {
+          await assertPushTargetRepoPathNotSymlink(canon, baseDir)
+        }
         try {
           if (checkoutHookPath) {
             if (src.ref && !isSafeGitRevision(src.ref)) {
@@ -1491,88 +1574,96 @@ export async function handleSession(
               sessionDir,
             )
           }
-          await withCanonicalLock(canonicalLocks, canon, async () => {
-            let didSanitize = false
-            if (anthropicProxy || (governed && !multiCap)) {
-              if (shouldSanitizeCanonical(onStatus, canon)) {
-                await sanitizeCanonicalGitState(canon, onDebug, src.url)
-                didSanitize = true
+          await withCanonicalLock(
+            canonicalLocks,
+            canon,
+            async () => {
+              let didSanitize = false
+              if (anthropicProxy || (governed && !multiCap)) {
+                if (shouldSanitizeCanonical(onStatus, canon)) {
+                  await sanitizeCanonicalGitState(canon, onDebug, src.url)
+                  didSanitize = true
+                }
+              } else {
+                await resetStaleGitProxyCredHelper(canon, onDebug, !multiCap)
               }
-            } else {
-              await resetStaleGitProxyCredHelper(canon, onDebug, !multiCap)
-            }
-            const prepSource: GitPrepareSource = {
-              type: src.type,
-              repo: src.repo,
-              ref: src.ref,
-              url: src.url,
-              getAuthToken: src.getAuthToken,
-              governedMount: src.governedMount,
-              upstreamUrl: src.upstreamUrl,
-              ...(didSanitize && {
-                sanitized: { onIndexFromHead: () => {} },
-              }),
-            }
-            await prepareSources({
-              baseDir,
-              sources: [prepSource],
-              alwaysFetch: true,
-              skipReset: multiCap,
-              skipValidation: Boolean(
-                process.env.CLAUDE_RUNNER_TRUST_CANONICAL_PREWARM && !multiCap,
-              ),
-              onDebug,
-              onPhase: (phase, ms, extra) => {
-                api
-                  .postWorkerEvents(
-                    apiBaseUrl,
-                    sessionId,
-                    sessionToken,
-                    epoch,
-                    [prepClonePhaseEvent(src.repo, phase, ms, extra)],
-                    signal,
-                  )
-                  .catch(err =>
-                    onDebug(
-                      `[runner:session] prep-phase event post failed: ${errMsg(err)}`,
-                    ),
-                  )
-              },
-              onProgress: (cmd, progress) => {
-                const detail =
-                  progress.total !== undefined
-                    ? ` (${progress.done}/${progress.total})`
-                    : ''
-                void postStep(
-                  'clone',
-                  'started',
-                  `${src.repo} — ${progress.label} ${progress.pct}%${detail}`,
-                  {
-                    step_detail: src.repo,
-                    clone_sub: cmd,
-                    progress_label: progress.label,
-                    progress_pct: String(progress.pct),
-                    ...(progress.done !== undefined
-                      ? { progress_done: String(progress.done) }
-                      : {}),
-                    ...(progress.total !== undefined
-                      ? { progress_total: String(progress.total) }
-                      : {}),
-                  },
-                )
-              },
-              signal,
-            })
-            if (multiCap) {
-              await addSessionWorktree({
-                canonicalRepoPath: canon,
-                worktreePath,
+              const prepSource: GitPrepareSource = {
+                type: src.type,
+                repo: src.repo,
                 ref: src.ref,
+                url: src.url,
+                getAuthToken: src.getAuthToken,
+                governedMount: src.governedMount,
+                upstreamUrl: src.upstreamUrl,
+                ...(didSanitize && {
+                  sanitized: { onIndexFromHead: () => {} },
+                }),
+              }
+              await prepareSources({
+                baseDir,
+                repoPath: canon,
+                repositoryFolders: opts.repositoryFolders,
+                sources: [prepSource],
+                alwaysFetch: true,
+                skipReset: multiCap,
+                skipValidation: Boolean(
+                  process.env.CLAUDE_RUNNER_TRUST_CANONICAL_PREWARM &&
+                    !multiCap,
+                ),
                 onDebug,
+                onPhase: (phase, ms, extra) => {
+                  api
+                    .postWorkerEvents(
+                      apiBaseUrl,
+                      sessionId,
+                      sessionToken,
+                      epoch,
+                      [prepClonePhaseEvent(src.repo, phase, ms, extra)],
+                      signal,
+                    )
+                    .catch(err =>
+                      onDebug(
+                        `[runner:session] prep-phase event post failed: ${errMsg(err)}`,
+                      ),
+                    )
+                },
+                onProgress: (cmd, progress) => {
+                  const detail =
+                    progress.total !== undefined
+                      ? ` (${progress.done}/${progress.total})`
+                      : ''
+                  void postStep(
+                    'clone',
+                    'started',
+                    `${src.repo} — ${progress.label} ${progress.pct}%${detail}`,
+                    {
+                      step_detail: src.repo,
+                      clone_sub: cmd,
+                      progress_label: progress.label,
+                      progress_pct: String(progress.pct),
+                      ...(progress.done !== undefined
+                        ? { progress_done: String(progress.done) }
+                        : {}),
+                      ...(progress.total !== undefined
+                        ? { progress_total: String(progress.total) }
+                        : {}),
+                    },
+                  )
+                },
                 signal,
               })
-            }
-          })
+              if (multiCap) {
+                await addSessionWorktree({
+                  canonicalRepoPath: canon,
+                  worktreePath,
+                  ref: src.ref,
+                  onDebug,
+                  signal,
+                })
+              }
+            },
+            signal,
+          )
           if (multiCap) {
             worktrees.push({
               canonicalRepoPath: canon,
@@ -1595,6 +1686,10 @@ export async function handleSession(
           ) {
             if (!isWorkRepo) {
               const refLabel = src.ref ? `'${src.ref}'` : 'the configured ref'
+              skippedRepositories.push({
+                repo: src.repo,
+                reason: `source ref ${refLabel} no longer exists on remote`,
+              })
               onDebug(
                 `[runner:session] context source ${src.repo} ref ${refLabel} permanently not found on remote; skipping (not a work repo — no push_targets entry)`,
               )
@@ -1615,6 +1710,10 @@ export async function handleSession(
           // densable 2.1.228 #6 — checkout hook fail on non-work context repo
           // (no push_targets): warn + skip instead of aborting the session.
           if (checkoutHookPath && !isWorkRepo && !signal.aborted) {
+            skippedRepositories.push({
+              repo: src.repo,
+              reason: 'its checkout hook failed',
+            })
             onDebug(
               `[runner:warn] checkout hook failed for context source ${src.repo} (context_source_checkout_hook_failed); not a work repo (no push_targets entry), skipping it: ${msg}`,
             )
@@ -1635,6 +1734,10 @@ export async function handleSession(
           ) {
             lastSkippedError ??= err
             lastThrottledError ??= err
+            skippedRepositories.push({
+              repo: src.repo,
+              reason: `told to try again later (${REPOSITORY_THROTTLE_LABELS[err.throttle]})`,
+            })
             onDebug(
               `[runner:warn] could not read context source ${src.repo} (told to try again later: ${REPOSITORY_THROTTLE_LABELS[err.throttle]}); not a work repo (no push_targets entry), skipping it: ${msg}`,
             )
@@ -1842,6 +1945,16 @@ export async function handleSession(
         configSuffix: claudeConfigFileSuffix(),
         onDebug,
       })
+    } else {
+      // Official 2.1.328 (#636): even with `--trust-workspace false`, replace a
+      // damaged `.claude.json` with clean defaults (MCP servers disabled) so the
+      // session child does not abort on startup.
+      await ensureReadableSessionClaudeJson({
+        configDir,
+        trustWorkspace: false,
+        configSuffix: claudeConfigFileSuffix(),
+        onStatus,
+      })
     }
 
     // densable remote mcp_config.content (base64) → mcp-config.json
@@ -1966,12 +2079,27 @@ export async function handleSession(
         }
       }
 
-      const postPath = await resolveHookPath(hooksDir, 'post-session')
+      const postHookBudgetMs =
+        opts.postSessionHookTimeoutMs ??
+        (readEnvMs('SELF_HOSTED_RUNNER_POST_SESSION_HOOK_TIMEOUT_MS') ||
+          DEFAULT_POST_SESSION_HOOK_TIMEOUT_MS)
+      // Official 2.1.328 (#638): size the post-session disk/hook probe timeout
+      // for slow mounts without consuming the final save budget.
+      const diskProbeTimeoutMs = computePostSessionDiskProbeTimeoutMs(
+        postHookBudgetMs,
+        Boolean(hooksDir),
+      )
+      const postPath = await withTimeoutMs(
+        resolveHookPath(hooksDir, 'post-session'),
+        diskProbeTimeoutMs,
+        '[runner:hook:post-session] hook probe',
+      ).catch(err => {
+        onDebug(
+          `[runner:hook:post-session] hook probe failed/timed out after ${diskProbeTimeoutMs}ms: ${errMsg(err)}`,
+        )
+        return undefined
+      })
       if (postPath) {
-        const timeoutMs =
-          opts.postSessionHookTimeoutMs ??
-          (readEnvMs('SELF_HOSTED_RUNNER_POST_SESSION_HOOK_TIMEOUT_MS') ||
-            DEFAULT_POST_SESSION_HOOK_TIMEOUT_MS)
         await runPostSessionHook({
           hookPath: postPath,
           sessionId,
@@ -1982,7 +2110,7 @@ export async function handleSession(
           apiBaseUrl,
           sessionAccessToken: sessionToken,
           cwd: sessionDir,
-          timeoutMs,
+          timeoutMs: postHookBudgetMs,
           clientPlatform: opts.clientPlatform,
           onStatus,
           onDebug,
@@ -2258,8 +2386,25 @@ export async function handleSession(
     let ghStandinShimDir: string | undefined
     const useAnthropicGhOpt = opts.useAnthropicGh ?? 'default'
     if (useAnthropicGhOpt !== false) {
+      let hostSettingsObj: Record<string, unknown> | undefined
+      const rawHostSettings =
+        opts.hostConfigSnapshot?.files.get('settings.json')
+      if (rawHostSettings) {
+        try {
+          const parsed = JSON.parse(rawHostSettings.buf.toString('utf8'))
+          if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            hostSettingsObj = parsed as Record<string, unknown>
+          }
+        } catch {
+          // ignore unreadable host settings here
+        }
+      }
       const ghDecision = evaluateSessionBuiltInGhDecision({
         flag: true,
+        isDefaultOffer: useAnthropicGhOpt === 'default',
+        githubToolsDenied: areGitHubToolsRestrictedBySettings([
+          hostSettingsObj,
+        ]),
         windows: process.platform === 'win32',
         capacity,
         standaloneProxy: Boolean(
@@ -2374,13 +2519,34 @@ export async function handleSession(
         onMaxLifetimeDeadline: opts.onMaxLifetimeDeadline,
         onStdinReady: write => {
           // densable onChildStdinReady: Qt=Wr; if(ke) Wr(Ze)
-          childStdinWrite = write
+          childStdinWrite = line => {
+            // Official 2.1.328 (#380): drop post-restart orphaned permission
+            // responses when Stop/end_session settled the session or newer
+            // input arrived ahead of the approval.
+            if (
+              epoch > 1 &&
+              shouldDropRunnerPermissionResponse(line, {
+                sessionStoppedAfterRestart:
+                  sessionGoneNotified || sessionEnding,
+              })
+            ) {
+              onDebug(
+                `[runner:session] ${sessionId} dropping post-restart permission response after stop`,
+              )
+              return
+            }
+            write(line)
+          }
           if (sessionGoneNotified) write(endSessionLine)
         },
         onTokenAck: requestId => {
           pendingTokenAcks.delete(requestId)
         },
         trustWorkspace: opts.trustWorkspace,
+        appendSystemPrompt: buildSelfHostedSessionAppendPrompt({
+          isResumed: epoch > 1,
+          skippedRepositories,
+        }),
       })
     } catch (err) {
       onStatus(`[runner:session] ${sessionId} spawn failed: ${errMsg(err)}`)

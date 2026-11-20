@@ -62,7 +62,14 @@ import {
   getXDGDataHome,
   getXDGStateHome,
 } from '../xdg.js'
-import { downloadVersion, getLatestVersion } from './download.js'
+import {
+  downloadVersion,
+  getLatestVersion,
+  isRegistrySessionRefusedError,
+  RegistrySessionRefusedError,
+} from './download.js'
+
+export { isRegistrySessionRefusedError, RegistrySessionRefusedError }
 import {
   acquireProcessLifetimeLock,
   cleanupStaleLocks,
@@ -634,6 +641,7 @@ async function updateLatest(
   wasSkipped?: boolean
   lockFailed?: boolean
   lockHolderPid?: number
+  skippedUnverifiedRelease?: boolean
 }> {
   const startTime = Date.now()
   let version = await getLatestVersion(channelOrVersion)
@@ -1111,12 +1119,13 @@ export async function checkInstall(
   return messages
 }
 
-type InstallLatestResult = {
+export type InstallLatestResult = {
   latestVersion: string | null
   wasUpdated: boolean
   wasSkipped?: boolean
   lockFailed?: boolean
   lockHolderPid?: number
+  skippedUnverifiedRelease?: boolean
 }
 
 // In-process singleflight guard. NativeAutoUpdater remounts whenever the
@@ -1185,6 +1194,7 @@ async function installLatestImpl(
     latestVersion: updateResult.latestVersion,
     wasUpdated: updateResult.success && !updateResult.wasSkipped,
     wasSkipped: updateResult.wasSkipped,
+    skippedUnverifiedRelease: updateResult.skippedUnverifiedRelease,
     lockFailed: false,
   }
 }

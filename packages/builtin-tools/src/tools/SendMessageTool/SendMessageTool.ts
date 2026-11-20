@@ -1727,6 +1727,11 @@ async function tryDeliverToLocalAgent(
         },
       }
     }
+    const sessionMainLoopModel =
+      appState.mainLoopModelForSession ??
+      appState.mainLoopModel ??
+      context.options.mainLoopModel
+    const sessionPermissionMode = appState.toolPermissionContext.mode
     try {
       // densable agent-stopped → Y8a = X8a(..., "reply"): awaitCompletion + D5f.
       // No continueInterruptedTurn — always append the SendMessage body and re-run.
@@ -1740,6 +1745,10 @@ async function tryDeliverToLocalAgent(
         promptIsMeta: true,
         // densable X8a(K="reply") awaits lifecycle → finalText for D5f
         awaitCompletion: true,
+        // Official 2.1.327 (#424 / #510): thread caller + session model/permission mode
+        callerAgentId: context.agentId,
+        sessionMainLoopModel,
+        sessionPermissionMode,
       })
       const blockedWait = result.finalText !== undefined
       const after = context.getAppState().tasks[agentId]
@@ -1769,6 +1778,11 @@ async function tryDeliverToLocalAgent(
     if (observerRefuse) return observerRefuse
     const { origin: sendOrigin, body: sendBody } =
       resolveSendMessageOriginAndBody(context, message)
+    const sessionMainLoopModel =
+      appState.mainLoopModelForSession ??
+      appState.mainLoopModel ??
+      context.options.mainLoopModel
+    const sessionPermissionMode = appState.toolPermissionContext.mode
     try {
       // densable agent-evicted cold path — same Y8a reply await + D5f surface
       const result = await resumeAgentBackground({
@@ -1780,6 +1794,10 @@ async function tryDeliverToLocalAgent(
         promptOrigin: sendOrigin,
         promptIsMeta: true,
         awaitCompletion: true,
+        // Official 2.1.327 (#424 / #510): thread caller + session model/permission mode
+        callerAgentId: context.agentId,
+        sessionMainLoopModel,
+        sessionPermissionMode,
       })
       const blockedWait = result.finalText !== undefined
       return {
@@ -2600,24 +2618,25 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             }
           }
           /* eslint-disable @typescript-eslint/no-require-imports */
-          const { postInterClaudeMessage } =
+          const { formatInterClaudeSendFailure, postInterClaudeMessage } =
             require('src/bridge/peerSessions.js') as typeof import('src/bridge/peerSessions.js')
           const { permissionModeClassOf, shouldHonorPeerFromMode } =
             require('src/utils/crossSessionInbound.js') as typeof import('src/utils/crossSessionInbound.js')
           /* eslint-enable @typescript-eslint/no-require-imports */
           const perm = context.getAppState().toolPermissionContext
+          const senderModeClass = permissionModeClassOf({
+            mode: perm.mode,
+            isBypassPermissionsModeAvailable:
+              perm.isBypassPermissionsModeAvailable,
+          })
           const fromMode = shouldHonorPeerFromMode()
-            ? permissionModeClassOf({
-                mode: perm.mode,
-                isBypassPermissionsModeAvailable:
-                  perm.isBypassPermissionsModeAvailable,
-              })
+            ? senderModeClass
             : undefined
           const inboundHopChain = resolveForwardedPeerHopChain(
             context.messages,
             false,
           )
-          const result = (await postInterClaudeMessage(
+          const result = await postInterClaudeMessage(
             addr.target,
             input.message,
             {
@@ -2627,26 +2646,31 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                 ? { fromPlugin: context.hookCaller }
                 : {}),
             },
-          )) as { ok: boolean; error?: string }
+          )
           const preview = input.summary || truncate(input.message, 50)
           // densable NKp only fires on bare-name / name [ref] resolve success
           // (displayName). Explicit bridge:/uds: scheme paths do NOT pin —
           // address-string keys would pollute sendMessagePins and never match
           // ListAgents names (SEA: only two NKp call sites, both p.displayName).
           if (!result.ok) {
-            notifyBridgePeerMessageDropped(
-              input.to,
-              result.error ?? '',
-              'bridge',
-            )
+            if (!result.mayHaveArrived) {
+              notifyBridgePeerMessageDropped(
+                input.to,
+                result.error ?? '',
+                'bridge',
+              )
+            }
             return {
               data: {
                 success: false,
-                message: `Failed to send to ${input.to}: ${result.error ?? 'unknown'}`,
+                message: formatInterClaudeSendFailure(input.to, result),
               },
             }
           }
           let message = `”${preview}” → ${input.to}`
+          if (senderModeClass === 'bypass' && addr.target.startsWith('cse_')) {
+            message = appendBypassCloudHoldWarning(message, input.to)
+          }
           // I7 — message+notify on bridge: deliver text, refuse subscribe.
           if (notifyIdle) {
             /* eslint-disable @typescript-eslint/no-require-imports */
@@ -3087,18 +3111,19 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             const { permissionModeClassOf, shouldHonorPeerFromMode } =
               require('src/utils/crossSessionInbound.js') as typeof import('src/utils/crossSessionInbound.js')
             const perm = context.getAppState().toolPermissionContext
+            const senderModeClass = permissionModeClassOf({
+              mode: perm.mode,
+              isBypassPermissionsModeAvailable:
+                perm.isBypassPermissionsModeAvailable,
+            })
             const fromMode = shouldHonorPeerFromMode()
-              ? permissionModeClassOf({
-                  mode: perm.mode,
-                  isBypassPermissionsModeAvailable:
-                    perm.isBypassPermissionsModeAvailable,
-                })
+              ? senderModeClass
               : undefined
             const inboundHopChain = resolveForwardedPeerHopChain(
               context.messages,
               false,
             )
-            const result = (await bridgePeers.postInterClaudeMessage(
+            const result = await bridgePeers.postInterClaudeMessage(
               cand.id,
               input.message,
               {
@@ -3108,17 +3133,22 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
                   ? { fromPlugin: context.hookCaller }
                   : {}),
               },
-            )) as { ok: boolean; error?: string }
+            )
             if (!result.ok) {
-              notifyBridgePeerMessageDropped(
-                cand.name,
-                result.error ?? '',
-                'bridge',
-              )
+              if (!result.mayHaveArrived) {
+                notifyBridgePeerMessageDropped(
+                  cand.name,
+                  result.error ?? '',
+                  'bridge',
+                )
+              }
               return {
                 data: {
                   success: false,
-                  message: `Failed to send to ${cand.name}: ${result.error ?? 'unknown'}`,
+                  message: bridgePeers.formatInterClaudeSendFailure(
+                    cand.name,
+                    result,
+                  ),
                 },
               }
             }
@@ -3137,6 +3167,13 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
               `“${preview}” → ${cand.name} (a Claude session on another machine, over Remote Control)${siblingNote}`,
               resolved.searchTruncated,
             )
+            if (
+              senderModeClass === 'bypass' &&
+              (cand.environmentKind === 'anthropic_cloud' ||
+                cand.id.startsWith('cse_'))
+            ) {
+              message = appendBypassCloudHoldWarning(message, cand.name)
+            }
             // I7 — bare→bridge message+notify: deliver, refuse subscribe.
             if (notifyIdle) {
               /* eslint-disable @typescript-eslint/no-require-imports */
@@ -3294,6 +3331,44 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             },
             context,
           )
+          // Official 2.1.328 (#658): when Remote Control is off, explain that
+          // cloud sessions / other computers are not listed until RC is on.
+          let rcNote: string | null = null
+          try {
+            /* eslint-disable @typescript-eslint/no-require-imports */
+            const { isReplBridgeActive } =
+              require('src/bootstrap/state.js') as typeof import('src/bootstrap/state.js')
+            const { isClaudeAISubscriber } =
+              require('src/utils/auth.js') as typeof import('src/utils/auth.js')
+            const { getAPIProvider } =
+              require('src/utils/model/providers.js') as typeof import('src/utils/model/providers.js')
+            const { isBridgeEnabled } =
+              require('src/bridge/bridgeEnabled.js') as typeof import('src/bridge/bridgeEnabled.js')
+            const { buildRemoteControlOffNote } =
+              require('../ListPeersTool/ListPeersTool.js') as typeof import('../ListPeersTool/ListPeersTool.js')
+            /* eslint-enable @typescript-eslint/no-require-imports */
+            const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT ?? ''
+            rcNote = buildRemoteControlOffNote({
+              isRemoteMode: Boolean(process.env.CLAUDE_CODE_REMOTE),
+              isReplBridgeActive: isReplBridgeActive(),
+              isFirstPartyOAuth:
+                getAPIProvider() === 'firstParty' && isClaudeAISubscriber(),
+              isRcAllowed: isBridgeEnabled(),
+              hasCloudAccess: cloudList.sessions.length > 0,
+              isDesktop:
+                entrypoint === 'claude-desktop' || entrypoint === 'desktop',
+            })
+          } catch {
+            // optional
+          }
+          if (rcNote && typeof miss.data.message === 'string') {
+            return {
+              data: {
+                ...miss.data,
+                message: `${miss.data.message}\n${rcNote}`,
+              },
+            }
+          }
           return { data: miss.data }
         }
       }
@@ -3402,3 +3477,34 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
     renderToolUseMessage,
     renderToolResultMessage,
   } satisfies ToolDef<InputSchema, SendMessageToolOutput>)
+
+/**
+ * Official 2.1.328 (#543): warn when a session running in bypass/skip-permissions
+ * mode sends a message to a cloud session, because the cloud session may hold
+ * the message for user approval and drop it unread after about 5 minutes.
+ */
+export function appendBypassCloudHoldWarning(
+  baseMessage: string,
+  target: string,
+): string {
+  return (
+    `${baseMessage}; this session skips permission prompts, so ${target} may ` +
+    `hold the message for your user's approval and drop it unread after about 5 ` +
+    `minutes — tell your user, who can switch this session to another permission ` +
+    `mode and have you send it again`
+  )
+}
+
+/**
+ * Official 2.1.328 (#543): shorter display suffix for UI rendering when a
+ * bypass-mode session messages a cloud session.
+ */
+export function appendBypassCloudHoldDisplayNote(
+  display: string,
+  target: string,
+): string {
+  return (
+    `${display} (this session skips permission prompts, so ${target} may hold ` +
+    `the message and drop it after about 5 minutes)`
+  )
+}

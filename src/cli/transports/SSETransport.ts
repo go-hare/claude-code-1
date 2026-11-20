@@ -174,6 +174,12 @@ type SSETransportState =
  * and catch_up_truncated are client-channel-only (see notifier.go and
  * event_stream.go SubscriberClient guard).
  */
+const SERVER_ONLY_SSE_EVENT_TYPES = new Set([
+  'workflow_launch',
+  'queued_notification',
+  'session_notice',
+])
+
 export type StreamClientEvent = {
   event_id: string
   sequence_num: number
@@ -562,9 +568,28 @@ export class SSETransport implements Transport {
         `SSETransport: Event seq=${ev.sequence_num} event_id=${ev.event_id} event_type=${ev.event_type} payload_type=${String(payload.type)}${sessionLabel}`,
       )
       logForDiagnosticsNoPII('info', 'cli_sse_message_received')
-      // Pass the unwrapped payload as newline-delimited JSON,
-      // matching the format that StructuredIO/WebSocketTransport consumers expect
-      this.onData?.(jsonStringify(payload) + '\n')
+      // Official 2.1.328 `Jzs` / `Ajr`: enforce server-only event types match
+      // envelope `ev.event_type` and drop worker-echoed `control_request` frames.
+      if (
+        typeof payload.type === 'string' &&
+        SERVER_ONLY_SSE_EVENT_TYPES.has(payload.type) &&
+        ev.event_type !== payload.type
+      ) {
+        logForDiagnosticsNoPII(
+          'warn',
+          'cli_sse_server_only_event_type_mismatch',
+          {
+            event_type: ev.event_type,
+            payload_type: payload.type,
+          },
+        )
+      } else if (payload.type === 'control_request' && ev.source === 'worker') {
+        logForDiagnosticsNoPII('warn', 'cli_sse_worker_control_request_dropped')
+      } else {
+        // Pass the unwrapped payload as newline-delimited JSON,
+        // matching the format that StructuredIO/WebSocketTransport consumers expect
+        this.onData?.(jsonStringify(payload) + '\n')
+      }
     } else {
       logForDebugging(
         `SSETransport: Ignoring client_event with no type in payload: event_id=${ev.event_id}`,

@@ -377,6 +377,23 @@ export const SettingsSchema = lazySchema(() =>
       env: EnvironmentVariablesSchema()
         .optional()
         .describe('Environment variables to set for Claude Code sessions'),
+      // Official 2.1.327 (#374): billing group / project attribution tag for
+      // Claude apps gateways that set `admin.billing_group_tag`.
+      attributionProject: z
+        .string()
+        .optional()
+        .describe(
+          'Billing group or project identifier sent in request tags when a Claude apps gateway sets admin.billing_group_tag.',
+        ),
+      attributionProjectPolicy: z
+        .object({
+          default: z.string().optional(),
+        })
+        .passthrough()
+        .optional()
+        .describe(
+          'Managed policy default for attributionProject when no lower-level setting specifies one.',
+        ),
       // Attribution for commits and PRs
       attribution: z
         .object({
@@ -1634,7 +1651,7 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .describe('Remote session configuration'),
       autoUpdatesChannel: z
-        .enum(['latest', 'stable'])
+        .enum(['latest', 'stable', 'rc'])
         .optional()
         .describe('Release channel for auto-updates (latest or stable)'),
       ...(feature('LODESTONE')
@@ -1652,6 +1669,18 @@ export const SettingsSchema = lazySchema(() =>
         .optional()
         .describe(
           'Minimum version to stay on - prevents downgrades when switching to stable channel',
+        ),
+      requiredMinimumVersion: z
+        .string()
+        .optional()
+        .describe(
+          'Minimum Claude Code version required to start. If the running version is older, Claude Code exits at startup with instructions to update. Only enforced from managed (policy) settings.',
+        ),
+      requiredMaximumVersion: z
+        .string()
+        .optional()
+        .describe(
+          'Maximum Claude Code version allowed to start. If the running version is newer, Claude Code exits at startup with instructions to install an approved version. Only enforced from managed (policy) settings.',
         ),
       plansDirectory: z
         .string()

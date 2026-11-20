@@ -164,7 +164,10 @@ export function classifierGatewayHostPayload(): ClassifierGatewayHost {
   return host === undefined ? {} : { gatewayHost: host }
 }
 
-/** densable `B5t` — English gold copy. */
+/** Official 2.1.327 (#505, SEA `B5t`) — English gold copy. */
+const AUTO_MODE_FALLBACK_REMOVAL_PARAGRAPH =
+  'Auto mode works for now, and its classifier requests are billed as before. An upcoming release removes this fallback. In sessions like this one, each checked action will then be asked about or denied.'
+
 export function autoModeClassifierBillingNoticeCopy(
   payload: ClassifierGatewayHost,
 ): AutoModeClassifierBillingNoticeCopy {
@@ -174,7 +177,7 @@ export function autoModeClassifierBillingNoticeCopy(
         "We're changing auto mode to no longer charge for classifier requests in Claude Code.",
       paragraphs: [
         `However, this session isn't eligible because your requests go through ${payload.gatewayHost}, which isn't compatible with this update.`,
-        'Nothing breaks: auto mode keeps working, and its classifier requests are billed as before.',
+        AUTO_MODE_FALLBACK_REMOVAL_PARAGRAPH,
         `To fix it and access the new version of auto mode, ask your gateway to implement: ${AUTO_MODE_CLASSIFIER_BILLING_DOCS_URL}`,
       ],
     }
@@ -184,7 +187,7 @@ export function autoModeClassifierBillingNoticeCopy(
       "We're changing auto mode to no longer charge for classifier requests in Claude Code.",
     paragraphs: [
       "However, this session isn't eligible.",
-      'Nothing breaks: auto mode keeps working, and its classifier requests are billed as before.',
+      AUTO_MODE_FALLBACK_REMOVAL_PARAGRAPH,
       `If this keeps happening, contact support or your company's admin: ${AUTO_MODE_CLASSIFIER_BILLING_DOCS_URL}`,
     ],
   }

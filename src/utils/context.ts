@@ -1,6 +1,7 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
 import { CONTEXT_1M_BETA_HEADER } from '../constants/betas.js'
 import { readMergedClientData } from '../cli/clientDataUrl.js'
+import { isContext1mBetaRefusedForModel } from './betaRefusals.js'
 import { logForDebugging } from './debug.js'
 import { isEnvTruthy } from './envUtils.js'
 import { getCanonicalName } from './model/model.js'
@@ -29,8 +30,14 @@ export const MODEL_CONTEXT_WINDOW_DEFAULT = 200_000
 export const COMPACT_MAX_OUTPUT_TOKENS = 20_000
 
 // Default max output tokens
+// Official 2.1.327 `Als` / `Cls` (#481): unrecognized models start at 32,000
+// output tokens and can continue a cut reply up to 128,000 output tokens.
 const MAX_OUTPUT_TOKENS_DEFAULT = 32_000
-const MAX_OUTPUT_TOKENS_UPPER_LIMIT = 64_000
+const MAX_OUTPUT_TOKENS_UPPER_LIMIT = 128_000
+export const UNRECOGNIZED_MODEL_DEFAULT_MAX_OUTPUT_TOKENS =
+  MAX_OUTPUT_TOKENS_DEFAULT
+export const UNRECOGNIZED_MODEL_CONTINUATION_MAX_OUTPUT_TOKENS =
+  MAX_OUTPUT_TOKENS_UPPER_LIMIT
 
 // Capped default for slot-reservation optimization. BQ p99 output = 4,911
 // tokens, so 32k/64k defaults over-reserve 8-16× slot capacity. With the cap
@@ -352,8 +359,12 @@ export function getContextWindowForModel(
     return applyDisable1mClamp(geminiContextWindow)
   }
 
-  // [1m] suffix — explicit client-side opt-in, respected over all detection
-  if (has1mContext(model)) {
+  const context1mBetaRefused = isContext1mBetaRefusedForModel(model)
+
+  // [1m] suffix — explicit client-side opt-in, respected over all detection,
+  // unless this session's backend refused the context-1m beta for this model
+  // (size as untagged on subsequent turns).
+  if (has1mContext(model) && !context1mBetaRefused) {
     return applyDisable1mClamp(1_000_000)
   }
 
@@ -399,20 +410,25 @@ export function getContextWindowForModel(
   // already handled; also honor [1m]-less models that still carry the beta
   // when DISABLE_1M is off (catalog + any claude id with beta is not enough —
   // keep catalog for beta path, but final clamp covers all >200K).
-  if (betas?.includes(CONTEXT_1M_BETA_HEADER) && modelSupports1M(model)) {
+  if (
+    !context1mBetaRefused &&
+    betas?.includes(CONTEXT_1M_BETA_HEADER) &&
+    modelSupports1M(model)
+  ) {
     return applyDisable1mClamp(1_000_000)
   }
   // Beta present on any recognized Claude model under densable "every native 1M":
   // if capability said so we'd have returned; for fixed-list miss with beta,
   // still treat as 1M when DISABLE_1M is off and id looks Claude-family.
   if (
+    !context1mBetaRefused &&
     betas?.includes(CONTEXT_1M_BETA_HEADER) &&
     !is1mContextDisabled() &&
     /(claude|anthropic)/i.test(model)
   ) {
     return 1_000_000
   }
-  if (getSonnet1mExpTreatmentEnabled(model)) {
+  if (!context1mBetaRefused && getSonnet1mExpTreatmentEnabled(model)) {
     return applyDisable1mClamp(1_000_000)
   }
   if (process.env.USER_TYPE === 'ant') {
@@ -488,25 +504,38 @@ export function calculateContextPercentages(
 }
 
 /**
- * Returns the model's default and upper limit for max output tokens.
+ * Official 2.1.327 `gT(e)` (#481): returns the model's default, upper limit,
+ * and whether those bounds were assumed because the model is unrecognized.
  */
-export function getModelMaxOutputTokens(model: string): {
+export function getModelMaxOutputTokensDetailed(model: string): {
   default: number
   upperLimit: number
+  isAssumed: boolean
 } {
   let defaultTokens: number
   let upperLimit: number
+  let isAssumed = false
 
   if (process.env.USER_TYPE === 'ant') {
     const antModel = resolveAntModel(model.toLowerCase())
     if (antModel) {
       defaultTokens = antModel.defaultMaxTokens ?? MAX_OUTPUT_TOKENS_DEFAULT
       upperLimit = antModel.upperMaxTokensLimit ?? MAX_OUTPUT_TOKENS_UPPER_LIMIT
-      return { default: defaultTokens, upperLimit }
+      return { default: defaultTokens, upperLimit, isAssumed: false }
     }
   }
 
   const m = getCanonicalName(model)
+  const stripped = model.replace(/\[[12]m\]$/gi, '').trim()
+  const catalogEntry =
+    getDensableCatalogModel(m) ??
+    getDensableCatalogModel(stripped) ??
+    getDensableCatalogModel(firstPartyNameToCanonical(stripped)) ??
+    (() => {
+      const via = resolveCatalogIdFromProviderId(stripped)
+      return via ? getDensableCatalogModel(via) : undefined
+    })()
+  const catalogMaxOutput = catalogEntry?.max_output_tokens
 
   // GPT-5.6 family: official 128k max output (OpenAI model card).
   // Do not reuse getChatGPTModelContextWindow here — that now also
@@ -514,6 +543,12 @@ export function getModelMaxOutputTokens(model: string): {
   if (isGpt56FamilyModel(model)) {
     defaultTokens = 32_000
     upperLimit = CHATGPT_CODEX_MAX_OUTPUT_TOKENS
+  } else if (catalogMaxOutput) {
+    // Official 2.1.328 gT(e): honor catalog max_output_tokens (Opus 5.5,
+    // Sonnet 5.5, Haiku 5.5, Fable 5.x, Mythos 5.x, etc.) before legacy
+    // family checks or unrecognized-model isAssumed fallback.
+    defaultTokens = catalogMaxOutput.default
+    upperLimit = catalogMaxOutput.upper
   } else if (m.includes('opus-4-8') || m.includes('opus-4-7')) {
     // densable catalog opus-4-7/4-8: default 64000 / upper 128000
     defaultTokens = 64_000
@@ -552,15 +587,76 @@ export function getModelMaxOutputTokens(model: string): {
   } else {
     defaultTokens = MAX_OUTPUT_TOKENS_DEFAULT
     upperLimit = MAX_OUTPUT_TOKENS_UPPER_LIMIT
+    isAssumed = true
   }
 
   const cap = getModelCapability(model)
   if (cap?.max_tokens && cap.max_tokens >= 4_096) {
     upperLimit = cap.max_tokens
-    defaultTokens = Math.min(defaultTokens, upperLimit)
+    defaultTokens = Math.min(
+      isAssumed ? MAX_OUTPUT_TOKENS_UPPER_LIMIT : defaultTokens,
+      upperLimit,
+    )
+    isAssumed = false
   }
 
+  return { default: defaultTokens, upperLimit, isAssumed }
+}
+
+/**
+ * Returns the model's default and upper limit for max output tokens.
+ */
+export function getModelMaxOutputTokens(model: string): {
+  default: number
+  upperLimit: number
+} {
+  const { default: defaultTokens, upperLimit } =
+    getModelMaxOutputTokensDetailed(model)
   return { default: defaultTokens, upperLimit }
+}
+
+/**
+ * Official 2.1.327 `Pls(e)` (#481): true when `model` is unrecognized (using
+ * assumed output limits) and `CLAUDE_CODE_MAX_OUTPUT_TOKENS` is not overriding it.
+ */
+export function isUnrecognizedModelMaxOutputTokensAssumed(
+  model: string,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const override = Number(env.CLAUDE_CODE_MAX_OUTPUT_TOKENS)
+  const hasPositiveOverride = Number.isFinite(override) && override > 0
+  return (
+    getModelMaxOutputTokensDetailed(model).isAssumed && !hasPositiveOverride
+  )
+}
+
+/**
+ * Official 2.1.327 `xCt.ceiling` (#481): compute the effective max_tokens
+ * limit when continuing a reply that hit the output token limit on an
+ * unrecognized model (raising 32,000 -> 128,000 unless capped by server ceiling).
+ */
+export function resolveOutputTokenLimitForContinuation(opts: {
+  model: string
+  requestedMaxTokens: number
+  continuesCutReply?: boolean
+  cachedModelCeiling?: number
+  isSecurityControl?: boolean
+  env?: NodeJS.ProcessEnv
+}): number {
+  if (opts.isSecurityControl) {
+    return opts.requestedMaxTokens
+  }
+  const base =
+    opts.continuesCutReply &&
+    isUnrecognizedModelMaxOutputTokensAssumed(opts.model, opts.env)
+      ? Math.max(
+          opts.requestedMaxTokens,
+          UNRECOGNIZED_MODEL_CONTINUATION_MAX_OUTPUT_TOKENS,
+        )
+      : opts.requestedMaxTokens
+  return opts.cachedModelCeiling !== undefined
+    ? Math.min(base, opts.cachedModelCeiling)
+    : base
 }
 
 /**
@@ -571,6 +667,9 @@ export function getModelMaxOutputTokens(model: string): {
  * strict thinking token budget.
  */
 export function getMaxThinkingTokensForModel(model: string): number {
+  if (isUnrecognizedModelMaxOutputTokensAssumed(model)) {
+    return MAX_OUTPUT_TOKENS_DEFAULT - 1
+  }
   return getModelMaxOutputTokens(model).upperLimit - 1
 }
 

@@ -198,3 +198,161 @@ function findLastUnescapedChar(str: string, char: string): number {
   }
   return -1
 }
+
+/**
+ * Official 2.1.327 (#384, SEA `TM`): classify a permission rule string into
+ * bare tool name, valid `Tool(content)` call, or malformed.
+ */
+export function parsePermissionRuleShape(
+  ruleString: string,
+):
+  | { kind: 'bare' }
+  | { kind: 'malformed' }
+  | { kind: 'call'; toolName: string; rawContent: string } {
+  if (!ruleString.includes('(') && !ruleString.includes(')')) {
+    return { kind: 'bare' }
+  }
+  const openIdx = findFirstUnescapedChar(ruleString, '(')
+  const closeIdx = findLastUnescapedChar(ruleString, ')')
+  if (openIdx === -1 && closeIdx === -1) {
+    return { kind: 'bare' }
+  }
+  const toolName = ruleString.substring(0, openIdx)
+  if (
+    openIdx === -1 ||
+    closeIdx <= openIdx ||
+    closeIdx !== ruleString.length - 1 ||
+    /[()]/.test(toolName)
+  ) {
+    return { kind: 'malformed' }
+  }
+  return {
+    kind: 'call',
+    toolName,
+    rawContent: ruleString.substring(openIdx + 1, closeIdx),
+  }
+}
+
+/**
+ * Official 2.1.327 (#384, SEA `m`): split a CLI tool-rule string on commas and
+ * spaces only at parenthesis depth 0 (honoring backslash escapes), so rules
+ * whose content contains nested parentheses like `Bash(foo(bar) baz)` stay
+ * intact instead of splitting at the inner `)`.
+ */
+export function splitToolListBalanced(str: string): string[] {
+  const result: string[] = []
+  let start = 0
+  let depth = 0
+  let sawUnmatchedClose = false
+  for (let i = 0; i <= str.length; i++) {
+    const ch = str[i]
+    if (ch === '\\') {
+      i++
+    } else if (ch === '(') {
+      depth++
+    } else if (ch === ')') {
+      if (depth === 0) sawUnmatchedClose = true
+      depth = Math.max(depth - 1, 0)
+    } else if (
+      i === str.length ||
+      (depth === 0 && (ch === ',' || ch === ' '))
+    ) {
+      if (depth === 0 && !sawUnmatchedClose) {
+        const piece = str.slice(start, i).trim()
+        if (piece) result.push(piece)
+      }
+      start = i + 1
+      sawUnmatchedClose = false
+    }
+  }
+  return result
+}
+
+/**
+ * Official 2.1.327 (#384, SEA `mf`): legacy flat-paren splitter.
+ */
+function splitToolListLegacy(tools: readonly string[]): string[] {
+  if (tools.length === 0) return []
+  const result: string[] = []
+  for (const toolString of tools) {
+    if (!toolString) continue
+    let current = ''
+    let inParens = false
+    for (const ch of toolString) {
+      switch (ch) {
+        case '(':
+          inParens = true
+          current += ch
+          break
+        case ')':
+          inParens = false
+          current += ch
+          break
+        case ',':
+          if (inParens) {
+            current += ch
+          } else {
+            if (current.trim()) result.push(current.trim())
+            current = ''
+          }
+          break
+        case ' ':
+          if (inParens) {
+            current += ch
+          } else if (current.trim()) {
+            result.push(current.trim())
+            current = ''
+          }
+          break
+        default:
+          if (current || ch.trim()) current += ch
+      }
+    }
+    if (current.trim()) result.push(current.trim())
+  }
+  return result
+}
+
+/**
+ * Official 2.1.327 (#384, SEA `hbr`): recover `--disallowedTools` rules whose
+ * content contains parentheses followed by a space or comma (e.g.
+ * `Bash(foo(bar) baz)`) that the flat-paren splitter broke apart.
+ */
+export function extractParenthesizedDisallowedRules(
+  tools: readonly string[],
+): string[] {
+  const legacySet = new Set(splitToolListLegacy(tools))
+  const recovered = tools
+    .flatMap(entry => (entry ? splitToolListBalanced(entry) : []))
+    .filter(rule => {
+      const shape = parsePermissionRuleShape(rule)
+      if (
+        shape.kind !== 'call' ||
+        shape.toolName === '' ||
+        !/\)[ ,]/.test(shape.rawContent) ||
+        /^[\s\uFEFF./~\\]*!/.test(shape.rawContent)
+      ) {
+        return false
+      }
+      const firstLegacy = splitToolListLegacy([rule])[0]
+      return (
+        firstLegacy !== undefined &&
+        legacySet.has(firstLegacy) &&
+        parsePermissionRuleShape(firstLegacy).kind === 'call'
+      )
+    })
+  return Array.from(new Set(recovered))
+}
+
+/**
+ * Official 2.1.327 (#384, SEA `gbr`): parse `--disallowedTools` preserving both
+ * legacy tokens and balanced rules containing nested parentheses in their content.
+ */
+export function parseDisallowedToolListFromCLI(
+  tools: readonly string[],
+): string[] {
+  return [
+    ...splitToolListLegacy(tools),
+    ...extractParenthesizedDisallowedRules(tools),
+  ]
+}

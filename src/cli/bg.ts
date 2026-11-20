@@ -9,6 +9,7 @@ import { dispatcherReattachEnv } from '../utils/bgDispatcherAccount.js'
 import { tryProcessCwd } from '../utils/cachePaths.js'
 import { getClaudeConfigHomeDir } from '../utils/envUtils.js'
 import { isProcessRunning } from '../utils/genericProcessUtils.js'
+import { rewriteAddDirForBgWorktree } from '../utils/permissions/permissionSetup.js'
 import { jsonParse } from '../utils/slowOperations.js'
 import { selectEngine } from './bg/engines/index.js'
 import type { SessionEntry } from './bg/engine.js'
@@ -965,6 +966,54 @@ export function extractAddDirValues(argv: readonly string[]): string[] {
 }
 
 /**
+ * Official 2.1.327 (#511/#512): rewrite `--add-dir` entries forwarded into a
+ * `--bg` child (worktree or non-worktree) via `rewriteAddDirForBgWorktree`.
+ */
+export function rewriteBgAddDirArgv(
+  argv: readonly string[],
+  launchCwd: string,
+  isWorktree: boolean,
+): string[] {
+  const out: string[] = []
+  for (let i = 0; i < argv.length; i++) {
+    const token = argv[i]!
+    if (token === '--') {
+      out.push(...argv.slice(i))
+      break
+    }
+    if (token.startsWith('--add-dir=')) {
+      const val = token.slice('--add-dir='.length)
+      out.push(
+        val
+          ? `--add-dir=${rewriteAddDirForBgWorktree(val, launchCwd, isWorktree)}`
+          : token,
+      )
+      continue
+    }
+    if (token === '--add-dir') {
+      out.push(token)
+      let end = i + 1
+      while (
+        end < argv.length &&
+        argv[end] !== '--' &&
+        !looksLikeOption(argv[end]!)
+      ) {
+        out.push(rewriteAddDirForBgWorktree(argv[end]!, launchCwd, isWorktree))
+        end++
+      }
+      i = end - 1
+      continue
+    }
+    const end = lastValueSlot(argv, i)
+    for (let j = i; j <= end && j < argv.length; j++) {
+      out.push(argv[j]!)
+    }
+    i = end
+  }
+  return out
+}
+
+/**
  * Official 2.1.326 #323 (`jn`): return the formatted description of the first
  * untrusted `--add-dir` folder in `argv`, or `undefined` if all are trusted.
  */
@@ -1036,11 +1085,25 @@ export async function handleBgStart(args: string[]): Promise<void> {
     // non-fatal diagnostic
   }
 
+  // Official 2.1.327 (#511/#512): rewrite `--add-dir` paths for `--bg` child
+  // worktree/non-worktree launch before forwarding argv into daemon or engine.
+  const launchCwd = tryProcessCwd()
+  const isWorktreeLaunch =
+    findRootFlagIndex(
+      t => t === '--worktree' || t === '-w' || t.startsWith('--worktree='),
+      filteredArgs,
+    ) !== -1
+  const forwardedArgs = rewriteBgAddDirArgv(
+    filteredArgs,
+    launchCwd,
+    isWorktreeLaunch,
+  )
+
   // densable e6_ + xSe shell (gate before any spawn). Use full argv so
   // `--print`/`bypass`/`auto` flags densable blocks are visible.
   try {
     const { gateBgSpawnArgs, xSeSpawn } = await import('../daemon/xSeSpawn.js')
-    const gate = gateBgSpawnArgs(filteredArgs)
+    const gate = gateBgSpawnArgs(forwardedArgs)
     if (gate) {
       console.error(gate)
       process.exitCode = 1
@@ -1050,8 +1113,8 @@ export async function handleBgStart(args: string[]): Promise<void> {
     // densable Bq_/xSe: prefer daemon dispatch (source shell).
     // Full Uq_ peel happens inside xSeSpawn from argv (agent/name/resume/intent).
     const { peelUqArgv } = await import('../daemon/uqArgvPeel.js')
-    const peeled = peelUqArgv(filteredArgs)
-    const isBareLaunch = hasRootFlag('--bare', filteredArgs)
+    const peeled = peelUqArgv(forwardedArgs)
+    const isBareLaunch = hasRootFlag('--bare', forwardedArgs)
     let isApiKeyApprovedForBare: boolean | undefined
     if (isBareLaunch && process.env.ANTHROPIC_API_KEY) {
       try {
@@ -1069,7 +1132,7 @@ export async function handleBgStart(args: string[]): Promise<void> {
       agent: peeled.agent,
       resumeSessionId: peeled.resumeSessionId,
       forkSession: peeled.hasForkSession ? true : undefined,
-      argv: filteredArgs,
+      argv: forwardedArgs,
       source: 'shell',
       extraArgs: peeled.allowlistedRespawnFlags,
       ...(isBareLaunch
@@ -1158,7 +1221,7 @@ export async function handleBgStart(args: string[]): Promise<void> {
   try {
     const result = await engine.start({
       sessionName,
-      args: filteredArgs,
+      args: forwardedArgs,
       // densable So leftover engine: `reattachEnv: {...i, ...!exec && urr(awn())}`.
       // No exec on this path — always urr(awn()). Child engines stamp SESSION_KIND=bg.
       env: {
@@ -1166,7 +1229,7 @@ export async function handleBgStart(args: string[]): Promise<void> {
         ...dispatcherReattachEnv(getDispatcherAccountFromOauthToken()),
       },
       logPath,
-      cwd: tryProcessCwd(),
+      cwd: launchCwd,
     })
 
     // Official Vdt post-spawn hints.

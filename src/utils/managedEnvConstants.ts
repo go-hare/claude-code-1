@@ -1,3 +1,6 @@
+import { logForDebugging } from './debug.js'
+import { isTelemetryDisabledInEnv } from './privacyLevel.js'
+
 /**
  * Environment variables that control inference routing: which provider to use,
  * which endpoint to hit, and which model IDs to send.
@@ -915,22 +918,144 @@ export function isProjectScopeBlockedEnvVar(
 }
 
 /**
- * SEA `Q(env, source)` — strips `PROJECT_SCOPE_BLOCKED_ENV_VARS` when `source`
- * is `'projectSettings'` or `'localSettings'`.
+ * Official 2.1.327 `Be` / `xe` / `oe` (#530):
+ * Flag- and plugin-delivery env vars ignored from repo `.claude/settings*.json`
+ * in Anthropic-hosted cloud sessions (`CLAUDE_CODE_REMOTE=1` non-BYOC).
+ */
+export const CLOUD_SESSION_REPO_BLOCKED_FLAG_ENV_VARS = new Set([
+  'CLAUDE_CODE_DISABLE_FEATURE_FLAGS',
+  'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+  'DISABLE_GROWTHBOOK',
+])
+
+export const CLOUD_SESSION_REPO_BLOCKED_PLUGIN_ENV_VARS = new Set([
+  'CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS',
+  'CLAUDE_CODE_SKIP_PLUGIN_MCP_SERVERS',
+  'CLAUDE_CODE_SYNC_PLUGIN_INSTALL',
+  'CLAUDE_CODE_SYNC_PLUGINS_DOWNLOAD_STALL_MS',
+  'CLAUDE_CODE_SYNC_PLUGINS_INSTALL_TIMEOUT_MS',
+  'CLAUDE_CODE_SYNC_PLUGINS_MCP_TIMEOUT_MS',
+  'CLAUDE_CODE_SYNC_PLUGIN_INSTALL_TIMEOUT_MS',
+  'CLAUDE_CODE_SYNC_SKILLS_INSTALL_TIMEOUT_MS',
+  'CLAUDE_CODE_SYNC_SKILLS_WAIT_TIMEOUT_MS',
+])
+
+export const CLOUD_SESSION_REPO_BLOCKED_ENV_VARS = new Set([
+  ...CLOUD_SESSION_REPO_BLOCKED_FLAG_ENV_VARS,
+  ...CLOUD_SESSION_REPO_BLOCKED_PLUGIN_ENV_VARS,
+])
+
+/**
+ * Official 2.1.327 `mkr` (#530): telemetry-disabling env vars that a repo in an
+ * Anthropic-hosted cloud session can use to turn telemetry OFF, but never back ON.
+ * `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is downgraded to `DISABLE_TELEMETRY=1`.
+ */
+export const CLOUD_SESSION_REPO_TELEMETRY_ENV_VARS = new Set([
+  'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+  'DISABLE_TELEMETRY',
+  'DO_NOT_TRACK',
+])
+
+/**
+ * Official 2.1.327 `Fve()` (#530): true when running in an Anthropic-hosted
+ * cloud session (remote container, excluding self-hosted BYOC runners).
+ */
+export function isAnthropicHostedCloudSession(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const remote = env.CLAUDE_CODE_REMOTE
+  const isRemote =
+    remote === '1' ||
+    remote?.toLowerCase().trim() === 'true' ||
+    remote?.toLowerCase().trim() === 'yes' ||
+    remote?.toLowerCase().trim() === 'on'
+  if (!isRemote) return false
+  if (env.CLAUDE_CODE_ENVIRONMENT_KIND === 'byoc') return false
+  if (env.CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE === 'self_hosted') return false
+  return true
+}
+
+function isRepoReEnablingTelemetry(key: string, value: unknown): boolean {
+  const upper = key.toUpperCase()
+  if (!CLOUD_SESSION_REPO_TELEMETRY_ENV_VARS.has(upper)) return false
+  const strVal =
+    typeof value === 'string'
+      ? value
+      : typeof value === 'number' || typeof value === 'boolean'
+        ? String(value)
+        : undefined
+  return !isTelemetryDisabledInEnv({ [upper]: strVal })
+}
+
+const cloudRepoStripWarnedKeys = new Set<string>()
+
+export function clearCloudSessionRepoStripWarnsForTests(): void {
+  cloudRepoStripWarnedKeys.clear()
+}
+
+/**
+ * SEA `Q(env, source)` + Official 2.1.327 `Je` (#530):
+ * Strips `PROJECT_SCOPE_BLOCKED_ENV_VARS` when `source` is `'projectSettings'`
+ * or `'localSettings'`. In Anthropic-hosted cloud sessions, also ignores repo
+ * flag/plugin delivery env vars and downgrades repo
+ * `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` to at most `DISABLE_TELEMETRY=1`.
  */
 export function stripProjectScopeBlockedEnv(
   env: Record<string, string> | undefined,
   source: string,
+  opts?: {
+    cloudSession?: boolean
+    warnedKeys?: Set<string>
+  },
 ): Record<string, string> {
   if (!env) return {}
   if (source !== 'projectSettings' && source !== 'localSettings') {
     return env
   }
+  const inCloudSession =
+    opts?.cloudSession !== undefined
+      ? opts.cloudSession
+      : isAnthropicHostedCloudSession()
+  const warned = opts?.warnedKeys ?? cloudRepoStripWarnedKeys
   let stripped: Record<string, string> | undefined
+  let shouldDisableTelemetry = false
+
   for (const key of Object.keys(env)) {
-    if (!isProjectScopeBlockedEnvVar(key, env[key])) continue
+    const upper = key.toUpperCase()
+    const val = env[key]
+    if (
+      inCloudSession &&
+      (CLOUD_SESSION_REPO_BLOCKED_ENV_VARS.has(upper) ||
+        isRepoReEnablingTelemetry(key, val))
+    ) {
+      stripped ??= { ...env }
+      delete stripped[key]
+      const isTelemetryVar = CLOUD_SESSION_REPO_TELEMETRY_ENV_VARS.has(upper)
+      const reEnabling = isRepoReEnablingTelemetry(key, val)
+      if (isTelemetryVar && !reEnabling) {
+        shouldDisableTelemetry = true
+      }
+      if (!warned.has(key)) {
+        warned.add(key)
+        const fileLabel =
+          source === 'localSettings'
+            ? '.claude/settings.local.json'
+            : '.claude/settings.json'
+        logForDebugging(
+          reEnabling
+            ? `${key} in ${fileLabel} is ignored: in an Anthropic-hosted cloud session, a repository's settings can turn telemetry off but not back on.`
+            : `${key} in ${fileLabel} is ignored${isTelemetryVar ? ', apart from turning telemetry off' : ''}: in an Anthropic-hosted cloud session, a repository's settings can't set it, because it can keep feature flags or required plugins and skills out of the session. Set it in the cloud environment's variables instead.`,
+          { level: 'warn' },
+        )
+      }
+      continue
+    }
+    if (!isProjectScopeBlockedEnvVar(key, val)) continue
     stripped ??= { ...env }
     delete stripped[key]
+  }
+  if (stripped && shouldDisableTelemetry) {
+    stripped.DISABLE_TELEMETRY ||= '1'
   }
   return stripped ?? env
 }

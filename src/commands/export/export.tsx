@@ -1,14 +1,76 @@
-import { join } from 'path';
+import { mkdirSync, writeFileSync } from 'fs';
+import { dirname, extname, isAbsolute, join, resolve } from 'path';
 import React from 'react';
 import { getClipboardPath } from '@anthropic/ink';
+import { getOriginalCwd } from '../../bootstrap/state.js';
 import { ExportDialog } from '../../components/ExportDialog.js';
 import type { ToolUseContext } from '../../Tool.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
 import type { Message } from '../../types/message.js';
 import { getCwd } from '../../utils/cwd.js';
 import { renderMessagesToPlainText } from '../../utils/exportRenderer.js';
-import { writeFileSync_DEPRECATED } from '../../utils/slowOperations.js';
+import { isRemoteWorkspace } from '../../utils/ultraplanKeyword.js';
 import { CLIPBOARD_COPY_STATUS, type ClipboardCopyOutcome } from '../copy/copy.js';
+
+/**
+ * Official 2.1.327 (#379) `v`: thrown when exporting in refuse mode to an
+ * existing file so `/export <name>` keeps the existing file and tells the user
+ * to run `/export` to overwrite it, and the dialog can prompt to overwrite.
+ */
+export class ExportFileExistsError extends Error {
+  readonly filepath: string;
+  constructor(filepath: string) {
+    super('the file already exists · run /export to overwrite it');
+    this.name = 'ExportFileExistsError';
+    this.filepath = filepath;
+  }
+}
+
+/**
+ * Official 2.1.327 (#379) + 2.1.328 (#611): reject empty filenames (preventing
+ * writing `.txt`), append `.txt` only when no extension is present, and resolve
+ * relative to launch dir (in remote workspace) or current working directory.
+ */
+export function resolveExportFilePath(rawFilename: string, baseDir?: string): string {
+  const trimmed = rawFilename.trim();
+  if (!trimmed || trimmed === '.txt') {
+    throw new Error("Filename can't be empty");
+  }
+  const finalFilename = extname(trimmed) === '' ? `${trimmed}.txt` : trimmed;
+  if (isAbsolute(finalFilename)) {
+    return finalFilename;
+  }
+  const dir = baseDir ?? (isRemoteWorkspace() ? getOriginalCwd() : getCwd());
+  return resolve(dir, finalFilename);
+}
+
+/**
+ * Official 2.1.327 (#379) `C`: atomic create-only (`flag: 'wx'`) when
+ * `mode === 'refuse'` so existing files are never silently overwritten.
+ */
+export function writeExportFile(
+  rawFilename: string,
+  content: string,
+  mode: 'refuse' | 'overwrite' = 'refuse',
+  baseDir?: string,
+): string {
+  const filepath = resolveExportFilePath(rawFilename, baseDir);
+  mkdirSync(dirname(filepath), { recursive: true });
+  try {
+    writeFileSync(filepath, content, {
+      encoding: 'utf-8',
+      flag: mode === 'refuse' ? 'wx' : 'w',
+      flush: true,
+    });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException | null)?.code;
+    if (code === 'EEXIST') {
+      throw new ExportFileExistsError(filepath);
+    }
+    throw error;
+  }
+  return filepath;
+}
 
 const EXPORT_CLIPBOARD_HINT: Record<ClipboardCopyOutcome, string> = {
   native: '',
@@ -92,21 +154,15 @@ export async function call(
   // Render the conversation content
   const content = await exportWithReactRenderer(context);
 
-  // If args are provided, write directly to file and skip dialog
+  // If args are provided, write directly to file and skip dialog (refuse overwrite!)
   const filename = args.trim();
   if (filename) {
-    const finalFilename = filename.endsWith('.txt') ? filename : filename.replace(/\.[^.]+$/, '') + '.txt';
-    const filepath = join(getCwd(), finalFilename);
-
     try {
-      writeFileSync_DEPRECATED(filepath, content, {
-        encoding: 'utf-8',
-        flush: true,
-      });
-      onDone(`Conversation exported to: ${filepath}`);
+      const filepath = writeExportFile(filename, content, 'refuse');
+      onDone(`Conversation exported to ${filepath}`);
       return null;
     } catch (error) {
-      onDone(`Failed to export conversation: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      onDone(`Couldn't export conversation: ${error instanceof Error ? error.message : 'Unknown error'}`);
       return null;
     }
   }

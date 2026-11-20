@@ -6,7 +6,7 @@
  */
 import { createHash } from 'crypto'
 import { constants as fsConstants } from 'fs'
-import { open, readFile, stat } from 'fs/promises'
+import { lstat, open, readFile, stat } from 'fs/promises'
 import { z } from 'zod/v4'
 import type { Tool, ToolResultBlockParam, ToolUseContext } from 'src/Tool.js'
 import { buildTool } from 'src/Tool.js'
@@ -91,10 +91,18 @@ import {
 import { renderToolResultMessage } from './UI.js'
 import {
   ARTIFACT_DELETE_PIN,
+  buildNewArtifactOrgApprovalSurfaceOpts,
   checkArtifactActionPermissions,
+  checkNewArtifactOrgApprovalSurface,
+  consumeApprovedPublishSourcePin,
+  consumeNewArtifactPersonOnlyAsk,
   isArtifactActionConcurrencySafe,
   isArtifactActionDestructive,
   isArtifactActionReadOnly,
+  isNewArtifactApprovedByPerson,
+  isOrgNewArtifactApprovalRequired,
+  publishSourcePinMatches,
+  resolveNewArtifactApprovalSurface,
 } from './permissions.js'
 import {
   ArtifactQuickstartUnavailableError,
@@ -577,27 +585,123 @@ function getTargetArtifactEnv(): 'prod' | 'staging' {
   }
 }
 
+/**
+ * Official 2.1.327 `b_r` (#516): refused immediately once settings turn
+ * Artifacts off, including in already-running sessions.
+ */
+export const ARTIFACTS_SWITCHED_OFF_MESSAGE =
+  'Artifacts are turned off in settings, so every Artifact call is refused and this one did nothing. Do not retry it, do not try another Artifact action and do not change the setting; tell the user that Artifacts are off.'
+
+const ARTIFACT_BLOB_PREFIX_RE = /^\/?_blob\//
+const ARTIFACT_ASSET_HEX_RE = /^[0-9a-f]{32}$/
+
+const IGNORED_ARTIFACT_FIELDS: Record<
+  string,
+  { key: 'prompt' | 'limit' | 'label'; note: string }
+> = {
+  read_file: {
+    key: 'prompt',
+    note: 'Note: `prompt` was ignored. Only a read of the page itself takes it; a file or asset is not summarized.',
+  },
+  read_asset: {
+    key: 'prompt',
+    note: 'Note: `prompt` was ignored. Only a read of the page itself takes it; a file or asset is not summarized.',
+  },
+  list_files: {
+    key: 'limit',
+    note: 'Note: `limit` was ignored. It does not apply to a listing of files or assets, so this listing was not shortened.',
+  },
+  list_assets: {
+    key: 'limit',
+    note: 'Note: `limit` was ignored. It does not apply to a listing of files or assets, so this listing was not shortened.',
+  },
+  upload_asset: {
+    key: 'label',
+    note: 'Note: `label` was ignored. It names a published version, and an asset upload makes none.',
+  },
+}
+
+const LEGACY_IGNORED_ARTIFACT_KEYS = ['note', 'lang'] as const
+
 export function coerceArtifactPublishInput(input: unknown): {
   input: ArtifactInput
   shapeClass: string
+  resultNote?: string
 } | null {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     return null
   }
   const record = input as Record<string, unknown>
-  const isPublish = record.action === undefined || record.action === 'publish'
-  const hasEmptyEdits =
-    isPublish && Array.isArray(record.edits) && record.edits.length === 0
-  if (!hasEmptyEdits) {
+  const rest: Record<string, unknown> = { ...record }
+  const shapeClasses: string[] = []
+  let resultNote: string | undefined
+
+  // #492: Allow reading an uploaded file by the `_blob/<32-hex>` or `/_blob/<32-hex>`
+  // address shown on the artifact's page.
+  if (
+    record.action === 'read' &&
+    typeof record.path === 'string' &&
+    record.type_url === undefined &&
+    record.out_dir === undefined
+  ) {
+    const stripped = record.path.replace(ARTIFACT_BLOB_PREFIX_RE, '')
+    if (stripped !== record.path && ARTIFACT_ASSET_HEX_RE.test(stripped)) {
+      delete rest.path
+      rest.action = 'read_asset'
+      rest.asset_id = stripped
+      shapeClasses.push('asset_url_to_id')
+    }
+  } else if (
+    record.action === 'read_asset' &&
+    typeof record.asset_id === 'string'
+  ) {
+    const stripped = record.asset_id.replace(ARTIFACT_BLOB_PREFIX_RE, '')
+    if (stripped !== record.asset_id && ARTIFACT_ASSET_HEX_RE.test(stripped)) {
+      rest.asset_id = stripped
+      shapeClasses.push('asset_url_to_id')
+    }
+  }
+
+  // Strip legacy keys (note, lang)
+  for (const legacyKey of LEGACY_IGNORED_ARTIFACT_KEYS) {
+    if (legacyKey in rest) {
+      delete rest[legacyKey]
+      shapeClasses.push(`legacy_${legacyKey}`)
+    }
+  }
+
+  // #493: Ignore `prompt`, `limit`, and `label` on actions that do not use them
+  const effectiveAction =
+    typeof rest.action === 'string' ? rest.action : undefined
+  const ignoredRule =
+    effectiveAction !== undefined
+      ? IGNORED_ARTIFACT_FIELDS[effectiveAction]
+      : undefined
+  if (ignoredRule && rest[ignoredRule.key] !== undefined) {
+    delete rest[ignoredRule.key]
+    shapeClasses.push(`${ignoredRule.key}_unread`)
+    resultNote = ignoredRule.note
+  }
+
+  // Empty `edits: []` on publish
+  const isPublish = rest.action === undefined || rest.action === 'publish'
+  if (isPublish && Array.isArray(rest.edits) && rest.edits.length === 0) {
+    delete rest.edits
+    shapeClasses.push('edits_empty')
+  }
+
+  if (shapeClasses.length === 0) {
     return null
   }
-  const rest = { ...record }
-  delete rest.edits
   const parsed = inputSchema().safeParse(rest)
   if (!parsed.success) {
     return null
   }
-  return { input: parsed.data, shapeClass: 'edits_empty' }
+  return {
+    input: parsed.data,
+    shapeClass: shapeClasses.join('+'),
+    ...(resultNote !== undefined ? { resultNote } : {}),
+  }
 }
 
 /**
@@ -803,8 +907,36 @@ export const ArtifactTool = buildTool({
   },
 
   async validateInput(input: ArtifactInput) {
+    // Official 2.1.327 (#516): refuse Artifact calls once settings turn Artifacts
+    // off, even in sessions already running.
+    if (isArtifactToolDisabled()) {
+      return {
+        result: false as const,
+        message: ARTIFACTS_SWITCHED_OFF_MESSAGE,
+        errorCode: 25,
+      }
+    }
     if (input && 'action' in input && input.action === 'quickstart') {
       return validateQuickstartInput(input)
+    }
+    // Official 2.1.327 (#492): read_file with `_blob/...` uploaded asset address
+    // fails with guidance to read uploads one per call, by id.
+    if (input && 'action' in input && input.action === 'read_file') {
+      const candidatePaths: string[] = []
+      if (typeof input.path === 'string') candidatePaths.push(input.path)
+      if (Array.isArray(input.paths)) {
+        for (const p of input.paths) {
+          if (typeof p === 'string') candidatePaths.push(p)
+        }
+      }
+      const blobPath = candidatePaths.find(p => ARTIFACT_BLOB_PREFIX_RE.test(p))
+      if (blobPath !== undefined) {
+        return {
+          result: false as const,
+          message: `path ${JSON.stringify(blobPath)} is the address of an uploaded asset, not a published file. An asset is read one per call by its 32-character id, the part after "_blob/": action "read_asset" with the id as \`asset_id\``,
+          errorCode: 1,
+        }
+      }
     }
     if (input && typeof input.url === 'string') {
       const parsed = parseArtifactUrlInput(input.url)
@@ -876,6 +1008,18 @@ export const ArtifactTool = buildTool({
   },
 
   async checkPermissions(input: ArtifactInput, context) {
+    // Official 2.1.327 (#516): refuse calls immediately once settings turn
+    // Artifacts off, even in already-running sessions.
+    if (isArtifactToolDisabled()) {
+      return {
+        behavior: 'deny' as const,
+        message: ARTIFACTS_SWITCHED_OFF_MESSAGE,
+        decisionReason: {
+          type: 'other' as const,
+          reason: 'switched_off',
+        },
+      }
+    }
     if (!isUploadInput(input) && !isArtifactToolRegistered()) {
       return {
         behavior: 'deny' as const,
@@ -928,9 +1072,18 @@ export const ArtifactTool = buildTool({
       targetParsed !== null
         ? isArtifactOutsideOrgOrUnknown(targetParsed.slug)
         : targetUrl !== undefined && targetUrl.length > 0
+    const suppressAlwaysAllow =
+      'suppressAlwaysAllowRule' in permResult &&
+      (permResult as { suppressAlwaysAllowRule?: boolean })
+        .suppressAlwaysAllowRule === true
     if (
       mode === 'auto' &&
       permResult.behavior === 'ask' &&
+      !suppressAlwaysAllow &&
+      !(
+        permResult.decisionReason?.type === 'safetyCheck' &&
+        permResult.decisionReason.classifierApprovable === false
+      ) &&
       !targetOutsideOrgOrUnknown &&
       (isUploadInput(input) ||
         actionName === 'write_db' ||
@@ -1094,10 +1247,19 @@ export const ArtifactTool = buildTool({
     // file/asset DualInk bags (foreign + kGe(outside_writer, public_read)).
     if (content.read) {
       const dbRulesNote = formatArtifactOutputDbRulesNote(content)
+      const readMeta = content.read as typeof content.read & {
+        audience?: string
+        folder_audience?: ArtifactFolderAudience
+      }
+      const readVisNote = formatArtifactPublishVisibilityNote(
+        readMeta.audience,
+        readMeta.folder_audience,
+      )
+      const readVisSuffix = readVisNote ? `\n\n${readVisNote}` : ''
       return {
         tool_use_id: toolUseID,
         type: 'tool_result',
-        content: `${content.read.result.slice(0, 4000)}${dbRulesNote}`,
+        content: `${content.read.result.slice(0, 4000)}${dbRulesNote}${readVisSuffix}`,
       }
     }
     if (content.replied === true) {
@@ -1271,6 +1433,18 @@ export const ArtifactTool = buildTool({
   ) {
     void _canUseTool
     void _parentMessage
+    // Official 2.1.327 (#516): refuse calls once settings turn Artifacts off,
+    // including in sessions already running.
+    if (isArtifactToolDisabled()) {
+      return {
+        data: {
+          id: '',
+          url: '',
+          expiresAt: '',
+          error: ARTIFACTS_SWITCHED_OFF_MESSAGE,
+        },
+      }
+    }
     const signal = context?.abortController?.signal
     if (!isUploadInput(input)) {
       if (!isArtifactToolRegistered()) {
@@ -3369,6 +3543,76 @@ async function callUpload(
   }
   const { hash } = input
   const ttl = input.ttl ?? 7
+  const isNewArtifact = !(typeof input.url === 'string' && input.url.length > 0)
+
+  // Official 2.1.327 (#420/#421/#514/#515): enforce human approval before
+  // creating a new artifact when the organization requires it.
+  const appStateForApproval = context?.getAppState?.() as
+    | {
+        orgRequiresNewArtifactApproval?: boolean
+        toolPermissionContext?: { mode?: string }
+      }
+    | undefined
+  if (isNewArtifact && isOrgNewArtifactApprovalRequired(appStateForApproval)) {
+    const surfaceOpts = buildNewArtifactOrgApprovalSurfaceOpts(
+      context,
+      appStateForApproval?.toolPermissionContext?.mode,
+    )
+    const surfaceDenial = checkNewArtifactOrgApprovalSurface({
+      orgRequiresNewArtifactApproval: true,
+      isNewArtifact,
+      ...surfaceOpts,
+    })
+    if (surfaceDenial?.behavior === 'deny') {
+      return emptyErr(surfaceDenial.message)
+    }
+    const surface = resolveNewArtifactApprovalSurface(surfaceOpts)
+    const personOnlyAskRecorded = consumeNewArtifactPersonOnlyAsk(
+      context?.toolUseId,
+    )
+    const ctxMeta = context as unknown as
+      | {
+          toolDecisions?: Map<string, { source?: string; decision?: string }>
+          allowGivenBy?: { toolUseId?: string; approver?: string }
+          permissionPipelineResult?: {
+            behavior?: string
+            personOnly?: boolean
+            decisionReason?: { type?: string; hookSource?: string }
+          }
+          permissionPhase?: {
+            pipeline?: {
+              result?: {
+                behavior?: string
+                personOnly?: boolean
+                decisionReason?: { type?: string; hookSource?: string }
+              }
+            }
+          }
+          lateAnswerFor?: string
+        }
+      | undefined
+    const explicitPipelineResult =
+      ctxMeta?.permissionPipelineResult ??
+      ctxMeta?.permissionPhase?.pipeline?.result
+    if (
+      !isNewArtifactApprovedByPerson({
+        toolUseId: context?.toolUseId,
+        toolDecisions: ctxMeta?.toolDecisions,
+        allowGivenBy: ctxMeta?.allowGivenBy,
+        permissionPipelineResult:
+          explicitPipelineResult ??
+          (ctxMeta?.allowGivenBy === undefined && personOnlyAskRecorded
+            ? { behavior: 'ask', personOnly: true }
+            : undefined),
+        lateAnswerFor: ctxMeta?.lateAnswerFor,
+        surface,
+      })
+    ) {
+      return emptyErr(
+        "The user's organization requires a person to approve each new artifact, and no human approval was recorded for this call. Nothing was created or published.",
+      )
+    }
+  }
 
   const expanded = expandPath(file_path)
   if (
@@ -3389,8 +3633,13 @@ async function callUpload(
   let size: number
   let fileDev: bigint
   let fileIno: bigint
+  let fileMtimeNs: bigint
+  let fileLeafWasLink = false
   try {
-    const fileStat = await stat(expanded, { bigint: true })
+    const [linkStat, fileStat] = await Promise.all([
+      lstat(expanded, { bigint: true }),
+      stat(expanded, { bigint: true }),
+    ])
     if (!fileStat.isFile()) {
       return {
         data: {
@@ -3404,6 +3653,8 @@ async function callUpload(
     size = Number(fileStat.size)
     fileDev = fileStat.dev
     fileIno = fileStat.ino
+    fileMtimeNs = fileStat.mtimeNs
+    fileLeafWasLink = linkStat.isSymbolicLink()
   } catch {
     return {
       data: {
@@ -3413,6 +3664,31 @@ async function callUpload(
         error: `File does not exist or is not readable: ${expanded}`,
       },
     }
+  }
+
+  // Official 2.1.327 (#419): verify the source file still matches the pin
+  // captured at permission-approval time (ignoring mtimeNs-only drift when
+  // sha256/heldSha256 is pinned).
+  const approvedSourcePin =
+    (context?.toolUseId
+      ? consumeApprovedPublishSourcePin(context.toolUseId)
+      : undefined) ??
+    consumeApprovedPublishSourcePin(file_path) ??
+    consumeApprovedPublishSourcePin(expanded)
+  if (
+    approvedSourcePin !== undefined &&
+    !publishSourcePinMatches(approvedSourcePin, {
+      kind: 'file',
+      dev: fileDev,
+      ino: fileIno,
+      sizeBytes: BigInt(size),
+      mtimeNs: fileMtimeNs,
+      leafWasLink: fileLeafWasLink,
+    })
+  ) {
+    return emptyErr(
+      `The source file ${file_path} changed between approval and publish; nothing was published. Re-read or re-approve before publishing again.`,
+    )
   }
 
   if (size > 10 * 1024 * 1024) {
@@ -3438,6 +3714,12 @@ async function callUpload(
         error: `Failed to read file: ${expanded}`,
       },
     }
+  }
+  const expectedSha = approvedSourcePin?.sha256 ?? approvedSourcePin?.heldSha256
+  if (expectedSha !== undefined && sha256Hex(origBytes) !== expectedSha) {
+    return emptyErr(
+      `The source file ${file_path} changed between approval and publish; nothing was published. Re-read or re-approve before publishing again.`,
+    )
   }
   let rawContent = decodePublishSourceBytes(origBytes)
 

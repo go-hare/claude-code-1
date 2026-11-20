@@ -10,7 +10,6 @@
 import { relative } from 'path';
 import React, { isValidElement, useCallback, useState } from 'react';
 import { Box, Byline, KeyboardShortcutHint, Text } from '@anthropic/ink';
-import { getOriginalCwd } from '../../bootstrap/state.js';
 import { FileEditToolDiff } from '../../components/FileEditToolDiff.js';
 import { PermissionDialog } from '../../components/permissions/PermissionDialog.js';
 import { PermissionOverflowBox } from '../../components/permissions/PermissionOverflowBox.js';
@@ -26,8 +25,7 @@ import type { NotebookCellType } from '../../types/notebook.js';
 import { getCwd } from '../../utils/cwd.js';
 import { isSupportedVSCodeTerminal } from '../../utils/ide.js';
 import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js';
-import { resolveSandboxFilesystemDisabled, SandboxManager } from '../../utils/sandbox/sandbox-adapter.js';
-import { getSettingsForSource } from '../../utils/settings/settings.js';
+import { canSandboxFenceOutsideReads } from '../../utils/sandbox/sandbox-adapter.js';
 import type { DialogRendererProps } from '../DialogHost.js';
 import type { FilePermissionContent } from '../filePermissionPreview.js';
 import {
@@ -49,15 +47,6 @@ import {
   OUTSIDE_READS_OPTION_ASK_AGAIN,
   OUTSIDE_READS_OPTION_BLOCK,
 } from '../../utils/permissions/outsideReads.js';
-
-function isOutsideReadSandboxFenced(): boolean {
-  return (
-    SandboxManager.isSandboxingEnabled() &&
-    !resolveSandboxFilesystemDisabled() &&
-    getSettingsForSource('policySettings')?.sandbox?.filesystem?.allowManagedReadPathsOnly !== true &&
-    !/[*?[\]]/.test(getOriginalCwd())
-  );
-}
 
 function notebookCellType(raw: string | undefined): NotebookCellType | undefined {
   if (raw === 'code' || raw === 'markdown' || raw === 'raw') {
@@ -229,7 +218,7 @@ export function PermissionFileDialog({ payload, answer }: DialogRendererProps): 
           : contentPreview(p.content, p.contentWithheld, p)}
         {offersBlockOutsideReads && (
           <Box paddingX={1} marginBottom={1}>
-            <Text dimColor>{outsideReadsExplainer(isOutsideReadSandboxFenced())}</Text>
+            <Text dimColor>{outsideReadsExplainer(canSandboxFenceOutsideReads())}</Text>
           </Box>
         )}
         <Box flexDirection="column" paddingX={1}>

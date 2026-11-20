@@ -127,7 +127,7 @@ export function registerCliHostCommands(
 
   mcp
     .command('add-json <name> <json>')
-    .description(describe(['mcp', 'add-json']))
+    .description(`${describe(['mcp', 'add-json'])}, or - to read it from stdin`)
     .option(
       '-s, --scope <scope>',
       'Configuration scope (local, user, or project)',

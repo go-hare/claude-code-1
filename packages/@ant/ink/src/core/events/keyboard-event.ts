@@ -24,6 +24,12 @@ import { TerminalEvent } from './terminal-event.js'
  */
 export class KeyboardEvent extends TerminalEvent {
   readonly key: string
+  /**
+   * Official 2.1.328 (#595): the raw key character/name used for shortcut
+   * matching, even when `key` is cleared to `""` to prevent modified shortcuts
+   * (such as Cmd+letter) from being inserted as text into prompts.
+   */
+  readonly shortcutKey: string
   readonly name: string
   readonly sequence: string
   readonly ctrl: boolean
@@ -40,14 +46,24 @@ export class KeyboardEvent extends TerminalEvent {
   constructor(parsedKey: ParsedKey, extras?: { soloKeypress?: boolean }) {
     super('keydown', { bubbles: true, cancelable: true })
 
-    this.key = keyFromParsed(parsedKey)
     this.name = parsedKey.name ?? ''
     this.sequence = parsedKey.sequence ?? ''
     this.ctrl = parsedKey.ctrl
     this.shift = parsedKey.shift
-    this.meta = parsedKey.meta || parsedKey.option
+    this.meta =
+      parsedKey.meta || parsedKey.option || isEscPrefixedKey(this.sequence)
     this.superKey = parsedKey.super
     this.fn = parsedKey.fn
+    this.shortcutKey = keyFromParsed(parsedKey)
+    // Official 2.1.328 (#595 / @307105742): suppress printable character
+    // insertion when Meta/Alt or Super/Cmd is held (single char or return) or
+    // when Ctrl is held with digits/space (`^[0-9 ]$`), while keeping
+    // `shortcutKey` intact for keybinding resolution.
+    const suppressModifiedText =
+      this.meta || this.superKey
+        ? [...this.shortcutKey].length === 1 || this.name === 'return'
+        : this.ctrl && /^[0-9 ]$/.test(this.shortcutKey)
+    this.key = suppressModifiedText ? '' : this.shortcutKey
     this.soloKeypress = extras?.soloKeypress
     this.readLate = parsedKey.readLate === true
   }

@@ -10,7 +10,6 @@ export type {
   BatchToolUseRef,
   AttachmentMessage,
   ProgressMessage,
-  SystemLocalCommandMessage,
   SystemMessage,
   UserMessage,
   NormalizedUserMessage,
@@ -54,8 +53,13 @@ import type {
 import type {
   AssistantMessage,
   CollapsibleMessage,
+  SystemLocalCommandMessage as BaseSystemLocalCommandMessage,
   UserMessage,
 } from '@ant/model-provider'
+
+export type SystemLocalCommandMessage = BaseSystemLocalCommandMessage & {
+  isDisplayOnly?: boolean
+}
 import type { UUID } from 'crypto'
 import type { StopHookInfo } from '@ant/model-provider'
 

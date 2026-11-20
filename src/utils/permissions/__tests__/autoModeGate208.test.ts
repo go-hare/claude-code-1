@@ -61,9 +61,9 @@ describe('planModelSupportsAutoMode (official u3e densable)', () => {
     )
   })
 
-  test('3P denies opus-4-6 / sonnet-4-6 / haiku; allows others', () => {
-    expect(planModelSupportsAutoMode('claude-opus-4-6', 'bedrock')).toBe(false)
-    expect(planModelSupportsAutoMode('claude-sonnet-4-6', 'vertex')).toBe(false)
+  test('3P allows opus-4-6 / sonnet-4-6 / opus-4-7 (2.1.328 #541/#662); denies haiku', () => {
+    expect(planModelSupportsAutoMode('claude-opus-4-6', 'bedrock')).toBe(true)
+    expect(planModelSupportsAutoMode('claude-sonnet-4-6', 'vertex')).toBe(true)
     expect(planModelSupportsAutoMode('claude-haiku-4-5', 'bedrock')).toBe(false)
     // 3P still allows e.g. opus-4-7 if not on denylist
     expect(planModelSupportsAutoMode('claude-opus-4-7', 'bedrock')).toBe(true)

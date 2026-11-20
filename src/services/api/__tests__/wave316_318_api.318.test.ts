@@ -119,15 +119,21 @@ describe('Wave 316-318 Group B: API / Model Provider', () => {
   test('#1485: resolveAccessFallbackModel falls back to older family model on Vertex/Bedrock', () => {
     setEnv('CLAUDE_CODE_USE_BEDROCK', '1')
     const fb = resolveAccessFallbackModel({
-      model: 'claude-sonnet-4-6',
+      model: 'us.anthropic.claude-sonnet-4-6',
     })
-    expect(fb).toBe('claude-sonnet-4-5')
+    expect(fb).toBe('us.anthropic.claude-sonnet-4-5-20250929-v1:0')
     expect(
       resolveAccessFallbackModel({
         model: 'claude-sonnet-4-6',
         accessFallbackModel: 'custom-fallback',
       }),
     ).toBe('custom-fallback')
+    setEnv('CLAUDE_CODE_DISABLE_MODEL_ACCESS_FALLBACK', '1')
+    expect(
+      resolveAccessFallbackModel({
+        model: 'us.anthropic.claude-sonnet-4-6',
+      }),
+    ).toBeUndefined()
   })
 
   test('#1568: isSameModelForPromptCaching normalizes [1m], cross-region, and undated variants', () => {

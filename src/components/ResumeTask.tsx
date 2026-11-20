@@ -7,6 +7,7 @@ import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { useShortcutDisplay } from '../keybindings/useShortcutDisplay.js';
 import { logForDebugging } from '../utils/debug.js';
 import { detectCurrentRepository } from '../utils/detectRepository.js';
+import { resolveEffectiveForceLoginMethod } from '../utils/forceLoginMethod.js';
 import { formatRelativeTime, truncate } from '../utils/format.js';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
 import { Select } from './CustomSelect/index.js';
@@ -18,6 +19,8 @@ type Props = {
   onSelect: (session: CodeSession) => void;
   onCancel: () => void;
   isEmbedded?: boolean;
+  /** Official 2.1.327 (#456): inline resume error notice shown above the session list. */
+  notice?: React.ReactNode;
 };
 
 type LoadErrorType = 'network' | 'auth' | 'api' | 'other';
@@ -25,7 +28,20 @@ type LoadErrorType = 'network' | 'auth' | 'api' | 'other';
 const UPDATED_STRING = 'Updated';
 const SPACE_BETWEEN_TABLE_COLUMNS = '  ';
 
-export function ResumeTask({ onSelect, onCancel, isEmbedded = false }: Props): React.ReactNode {
+/** Official 2.1.327 (#381): Enter must not close `/teleport`'s load error screen. */
+export function shouldCloseResumeLoadErrorOnKey(
+  loadErrorType: LoadErrorType | null,
+  key: { return?: boolean; ctrl?: boolean; escape?: boolean },
+  input = '',
+): boolean {
+  if (loadErrorType === null) return false;
+  if (key.return) return false;
+  if (key.escape) return true;
+  if (key.ctrl && input === 'c') return true;
+  return false;
+}
+
+export function ResumeTask({ onSelect, onCancel, isEmbedded = false, notice }: Props): React.ReactNode {
   const { rows, columns } = useTerminalSize();
   const [sessions, setSessions] = useState<CodeSession[]>([]);
   const [currentRepo, setCurrentRepo] = useState<string | null>(null);
@@ -105,11 +121,8 @@ export function ResumeTask({ onSelect, onCancel, isEmbedded = false }: Props): R
       return;
     }
 
-    // Handle enter key for error states to allow continuation with regular teleport
-    if (loadErrorType !== null && key.return) {
-      onCancel(); // This will continue with regular teleport flow
-      return;
-    }
+    // Official 2.1.327 (#381): do NOT close the load error screen on Enter;
+    // only Ctrl+R retries and Esc / Ctrl+C cancels.
   });
 
   const handleErrorComplete = useCallback(() => {
@@ -198,6 +211,7 @@ export function ResumeTask({ onSelect, onCancel, isEmbedded = false }: Props): R
 
   return (
     <Box flexDirection="column" padding={1}>
+      {notice}
       <Text bold>
         Select a session to resume
         {showScrollPosition && (
@@ -288,15 +302,24 @@ function renderErrorSpecificGuidance(errorType: LoadErrorType): React.ReactNode 
         </Box>
       );
 
-    case 'auth':
+    case 'auth': {
+      const forcedConsole = resolveEffectiveForceLoginMethod() === 'console';
       return (
         <Box marginY={1} flexDirection="column">
           <Text dimColor>Teleport requires a Claude account</Text>
-          <Text dimColor>
-            Run <Text bold>/login</Text> and select &quot;Claude account with subscription&quot;
-          </Text>
+          {forcedConsole ? (
+            <Text dimColor>
+              This computer&apos;s settings require a Console sign-in (forceLoginMethod). Ask your administrator to
+              change it.
+            </Text>
+          ) : (
+            <Text dimColor>
+              Run <Text bold>/login</Text> and select &quot;Claude account with subscription&quot;
+            </Text>
+          )}
         </Box>
       );
+    }
 
     case 'api':
       return (

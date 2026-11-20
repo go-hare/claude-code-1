@@ -7,6 +7,7 @@
  * extract: docs/upstream-extraction/v2.1.212/xyr_full.extract.md
  */
 
+import { randomUUID } from 'node:crypto'
 import { sendControlRequest } from './controlSocket.js'
 
 export type AliveProbe = {
@@ -215,12 +216,45 @@ export async function findResumeSessionConflict(
 }
 
 /**
+ * Official 2.1.326 #33 / 2.1.328: when a job's persisted `sessionIdTaken`
+ * flag is true, allocate a fresh UUID and clear `sessionIdTaken: undefined`
+ * on the job state so reopening does not collide with the live holder.
+ */
+export async function resolveRespawnSessionIdOnTaken(
+  short: string,
+  currentSessionId: string,
+): Promise<{ sessionId: string; replaced: boolean }> {
+  const { readBgJobState, writeBgJobState } = await import('./jobState.js')
+  const state = readBgJobState(short)
+  if (state?.sessionIdTaken !== true) {
+    return { sessionId: currentSessionId, replaced: false }
+  }
+  const freshSessionId = randomUUID()
+  writeBgJobState(short, {
+    ...state,
+    sessionId: freshSessionId,
+    resumeSessionId: freshSessionId,
+    sessionIdTaken: undefined,
+    updatedAt: new Date().toISOString(),
+  })
+  return { sessionId: freshSessionId, replaced: true }
+}
+
+export type XyrPreflightResult = {
+  error: string | null
+  resumeSessionId: string
+  rotated: boolean
+}
+
+/**
  * densable Xyr preflight before dispatch on ENOJOB reopen:
  * 1) hLp alive → already running (unless force)
  * 2) D9e kill + wait present clear when was alive
- * 3) Zxe conflict when hasMessages resume
+ * 3) Allocate fresh sessionId if `state.sessionIdTaken === true`
+ * 4) Zxe conflict when hasMessages resume
  *
- * Returns error string to show user, or null to continue.
+ * Returns `{ error, resumeSessionId, rotated }` so callers propagate any
+ * rotated `sessionId` to transcript gating, conflict checks, and dispatch.
  */
 export async function xyrPreflightBeforeRespawn(opts: {
   short: string
@@ -228,17 +262,25 @@ export async function xyrPreflightBeforeRespawn(opts: {
   hasMessages: boolean
   force?: boolean
   forceRefusalRetry?: boolean
-}): Promise<string | null> {
+}): Promise<XyrPreflightResult> {
   const force = opts.force === true || opts.forceRefusalRetry === true
   const probe = await probeJobAlive(opts.short)
   if (!force && probe.alive) {
-    return `Session ${opts.short} is already running`
+    return {
+      error: `Session ${opts.short} is already running`,
+      resumeSessionId: opts.resumeSessionId,
+      rotated: false,
+    }
   }
 
   // densable 2.1.246 Kn: present && !alive is a booting worker. Killing it
   // is the Windows "stopped while the respawn was in flight" race.
   if (!force && probe.present && !probe.alive) {
-    return null
+    return {
+      error: null,
+      resumeSessionId: opts.resumeSessionId,
+      rotated: false,
+    }
   }
 
   const { readBgJobState } = await import('./jobState.js')
@@ -250,10 +292,13 @@ export async function xyrPreflightBeforeRespawn(opts: {
     if (probe.alive || probe.present) {
       const kill = await killJobConfirmed(opts.short, { force })
       if (probe.alive && !kill.confirmed) {
-        return (
-          kill.error ??
-          "Couldn't stop the previous worker — supervisor may be starting, retry in a moment"
-        )
+        return {
+          error:
+            kill.error ??
+            "Couldn't stop the previous worker — supervisor may be starting, retry in a moment",
+          resumeSessionId: opts.resumeSessionId,
+          rotated: false,
+        }
       }
       const waitEnd = Date.now() + 3000
       while (Date.now() < waitEnd) {
@@ -267,23 +312,40 @@ export async function xyrPreflightBeforeRespawn(opts: {
   if (!force && stateBefore && stateBefore.state !== 'stopped') {
     const stateAfter = readBgJobState(opts.short)
     if (stateAfter?.state === 'stopped') {
-      return `Session ${opts.short} was stopped while the respawn was in flight`
+      return {
+        error: `Session ${opts.short} was stopped while the respawn was in flight`,
+        resumeSessionId: opts.resumeSessionId,
+        rotated: false,
+      }
     }
   }
+
+  // Official 2.1.326 #33 / 2.1.328: if a newer session took over this job's
+  // sessionId, allocate a fresh UUID and clear `sessionIdTaken`.
+  const { sessionId: effectiveResumeSessionId, replaced: sessionIdReplaced } =
+    await resolveRespawnSessionIdOnTaken(opts.short, opts.resumeSessionId)
 
   // densable R path: resume conflict only when hasMessages.
   // Official: prefer interactive holder → v$e; else long fallback.
   // Own jobId is OK (filtered via excludeJobIds).
-  if (opts.hasMessages) {
-    const conflict = await findResumeSessionConflict(opts.resumeSessionId, {
+  if (opts.hasMessages && !sessionIdReplaced) {
+    const conflict = await findResumeSessionConflict(effectiveResumeSessionId, {
       excludeJobIds: [opts.short],
     })
     if (conflict) {
-      return formatResumeSessionLiveElsewhereError(conflict.kind)
+      return {
+        error: formatResumeSessionLiveElsewhereError(conflict.kind),
+        resumeSessionId: effectiveResumeSessionId,
+        rotated: sessionIdReplaced,
+      }
     }
   }
 
-  return null
+  return {
+    error: null,
+    resumeSessionId: effectiveResumeSessionId,
+    rotated: sessionIdReplaced,
+  }
 }
 
 function sleep(ms: number): Promise<void> {

@@ -1,8 +1,5 @@
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
-import type { StructuredPatchHunk } from 'diff';
-import { isAbsolute, resolve } from 'path';
 import * as React from 'react';
-import { Suspense, use, useState } from 'react';
 import { MessageResponse } from 'src/components/MessageResponse.js';
 import { extractTag } from 'src/utils/messages.js';
 import { CtrlOToExpand } from 'src/components/CtrlOToExpand.js';
@@ -16,14 +13,10 @@ import { Box, Text, stringWidth, wrapText } from '@anthropic/ink';
 import { FilePathLink } from 'src/components/FilePathLink.js';
 import type { ToolProgressData } from 'src/Tool.js';
 import type { ProgressMessage } from 'src/types/message.js';
-import { getCwd } from 'src/utils/cwd.js';
-import { getPatchForDisplay } from 'src/utils/diff.js';
 import { getDisplayPath } from 'src/utils/file.js';
-import { logError } from 'src/utils/log.js';
 import { isAutoMemPath } from 'src/memdir/paths.js';
 import { isScratchpadFile } from 'src/utils/permissions/filesystem.js';
 import { getPlansDirectory } from 'src/utils/plans.js';
-import { openForScan, readCapped } from 'src/utils/readEditContext.js';
 import { firstLineOf, plural } from 'src/utils/stringUtils.js';
 import type { Output } from './FileWriteTool.js';
 
@@ -236,116 +229,23 @@ export function renderToolUseMessage(
   );
 }
 
+// Official 2.1.327 (#409): show a short content preview directly without reading
+// the existing file from disk or computing a full diff, avoiding UI freezes when
+// rejecting a write to a very large file.
 export function renderToolUseRejectedMessage(
   { file_path, content }: { file_path: string; content: string },
   { style, verbose }: { style?: 'condensed'; verbose: boolean },
 ): React.ReactNode {
-  return <WriteRejectionDiff filePath={file_path} content={content} style={style} verbose={verbose} />;
-}
-
-type RejectionDiffData =
-  | { type: 'create' }
-  | { type: 'update'; patch: StructuredPatchHunk[]; oldContent: string }
-  | { type: 'error' };
-
-function WriteRejectionDiff({
-  filePath,
-  content,
-  style,
-  verbose,
-}: {
-  filePath: string;
-  content: string;
-  style?: 'condensed';
-  verbose: boolean;
-}): React.ReactNode {
-  const [dataPromise] = useState(() => loadRejectionDiff(filePath, content));
-  const firstLine = content.split('\n')[0] ?? null;
-  const createFallback = (
+  return (
     <FileEditToolUseRejectedMessage
-      file_path={filePath}
+      file_path={file_path}
       operation="write"
       content={content}
-      firstLine={firstLine}
-      verbose={verbose}
-    />
-  );
-  return (
-    <Suspense fallback={createFallback}>
-      <WriteRejectionBody
-        promise={dataPromise}
-        filePath={filePath}
-        firstLine={firstLine}
-        createFallback={createFallback}
-        style={style}
-        verbose={verbose}
-      />
-    </Suspense>
-  );
-}
-
-function WriteRejectionBody({
-  promise,
-  filePath,
-  firstLine,
-  createFallback,
-  style,
-  verbose,
-}: {
-  promise: Promise<RejectionDiffData>;
-  filePath: string;
-  firstLine: string | null;
-  createFallback: React.ReactNode;
-  style?: 'condensed';
-  verbose: boolean;
-}): React.ReactNode {
-  const data = use(promise);
-  if (data.type === 'create') return createFallback;
-  if (data.type === 'error') {
-    return (
-      <MessageResponse>
-        <Text>(No changes)</Text>
-      </MessageResponse>
-    );
-  }
-  return (
-    <FileEditToolUseRejectedMessage
-      file_path={filePath}
-      operation="update"
-      patch={data.patch}
-      firstLine={firstLine}
-      fileContent={data.oldContent}
+      firstLine={null}
       style={style}
       verbose={verbose}
     />
   );
-}
-
-async function loadRejectionDiff(filePath: string, content: string): Promise<RejectionDiffData> {
-  try {
-    const fullFilePath = isAbsolute(filePath) ? filePath : resolve(getCwd(), filePath);
-    const handle = await openForScan(fullFilePath);
-    if (handle === null) return { type: 'create' };
-    let oldContent: string | null;
-    try {
-      oldContent = await readCapped(handle);
-    } finally {
-      await handle.close();
-    }
-    // File exceeds MAX_SCAN_BYTES — fall back to the create view rather than
-    // OOMing on a diff of a multi-GB file.
-    if (oldContent === null) return { type: 'create' };
-    const patch = getPatchForDisplay({
-      filePath,
-      fileContents: oldContent,
-      edits: [{ old_string: oldContent, new_string: content, replace_all: false }],
-    });
-    return { type: 'update', patch, oldContent };
-  } catch (e) {
-    // User may have manually applied the change while the diff was shown.
-    logError(e as Error);
-    return { type: 'error' };
-  }
 }
 
 export function renderToolUseErrorMessage(

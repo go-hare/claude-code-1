@@ -1,11 +1,16 @@
-import { readdir, readFile } from 'fs/promises'
+import { spawn, type ChildProcess } from 'child_process'
+import { createHmac, randomBytes, randomUUID } from 'crypto'
+import { closeSync, ftruncateSync, openSync, writeFileSync } from 'fs'
+import { access, open, readdir, readFile, unlink } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { join as posixJoin } from 'path/posix'
 import { getSessionId } from 'src/bootstrap/state.js'
+import { registerCleanup } from '../cleanupRegistry.js'
 import { logForDebugging } from '../debug.js'
 import {
   getClaudeConfigHomeDir,
+  isEnvTruthy,
   shouldStripDaemonForceColor,
 } from '../envUtils.js'
 import { getErrnoCode } from '../errors.js'
@@ -287,4 +292,513 @@ export function createPowerShellProvider(shellPath: string): ShellProvider {
       return env
     },
   }
+}
+
+// ============================================================================
+// Official 2.1.327 #487 (`jco` / `WEa` / `qco` / `zco` @298070200):
+// Pre-warm a waiting PowerShell process on Windows to save ~0.5s per command.
+// ============================================================================
+
+export const PS_HANDOVER_PATH_ENV = 'CLAUDE_CODE_PS_HANDOVER_PATH'
+export const PS_HANDOVER_KEY_ENV = 'CLAUDE_CODE_PS_HANDOVER_KEY'
+const STARTING_MARK_SUFFIX = '.starting'
+const WAITING_PS_MAX_AGE_MS = 120_000
+const WAITING_PS_READY_TIMEOUT_MS = 10_000
+const WAITING_PS_HANDOVER_CLEANUP_DELAY_MS = 5_000
+export const MAX_UNFIT_WAITING_PS = 4
+export const MAX_FAILED_WAITING_PS = 3
+const MAX_IDLE_SKIP_POWERSHELLS = 16
+
+const VOLATILE_HANDOVER_ENV_KEYS = new Set([
+  PS_HANDOVER_PATH_ENV,
+  PS_HANDOVER_KEY_ENV,
+])
+
+export type WaitingPowerShellLaunch = {
+  powershellPath: string
+  cwd: string
+  env: Record<string, string | undefined>
+}
+
+export type WaitingPowerShellDiscardReason = 'unused' | 'unfit' | 'ended_early'
+
+export type PowerShellHeadStartState = {
+  isPowerShellHeadStartAsked: boolean
+  lastPowerShellLaunch: WaitingPowerShellLaunch | undefined
+  waitingPowerShell: WaitingPowerShell | undefined
+  isStartingWaitingPowerShell: boolean
+  unfitWaitingPowerShells: number
+  failedWaitingPowerShells: number
+  idleWaitingPowerShells: number
+  powerShellStartsToSkip: number
+  commandsEnded: number
+}
+
+const headStartState: PowerShellHeadStartState = {
+  isPowerShellHeadStartAsked: false,
+  lastPowerShellLaunch: undefined,
+  waitingPowerShell: undefined,
+  isStartingWaitingPowerShell: false,
+  unfitWaitingPowerShells: 0,
+  failedWaitingPowerShells: 0,
+  idleWaitingPowerShells: 0,
+  powerShellStartsToSkip: 0,
+  commandsEnded: 0,
+}
+
+/** Official `uSe`: stable JSON fingerprint of launch env excluding volatile keys. */
+export function normalizeWaitingPowerShellEnv(
+  env: Record<string, string | undefined>,
+): string {
+  return JSON.stringify(
+    Object.entries(env)
+      .filter(([k, v]) => v !== undefined && !VOLATILE_HANDOVER_ENV_KEYS.has(k))
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+  )
+}
+
+/** Official `Uco`: true iff two PowerShell launches have matching executable, cwd, and env. */
+export function waitingPowerShellLaunchesMatch(
+  a: WaitingPowerShellLaunch,
+  b: WaitingPowerShellLaunch,
+): boolean {
+  return (
+    a.powershellPath === b.powershellPath &&
+    a.cwd === b.cwd &&
+    normalizeWaitingPowerShellEnv(a.env) ===
+      normalizeWaitingPowerShellEnv(b.env)
+  )
+}
+
+/** Compute uppercase SHA-256 HMAC protecting the handover script file. */
+export function computePowerShellHandOverHmac(
+  keyHex: string,
+  payload: string,
+): string {
+  return createHmac('sha256', keyHex)
+    .update(payload)
+    .digest('hex')
+    .toUpperCase()
+}
+
+/**
+ * Bootstrap script run by a waiting PowerShell process: removes the `.starting`
+ * sentinel once the PS runtime is initialized, polls the handover file until
+ * the host writes `<HMAC>\n<script>`, verifies HMAC-SHA256, and executes it.
+ */
+export function buildWaitingPowerShellBootstrapScript(): string {
+  return [
+    `$__ccPath = $env:${PS_HANDOVER_PATH_ENV}`,
+    `$__ccKey = $env:${PS_HANDOVER_KEY_ENV}`,
+    `Remove-Item Env:${PS_HANDOVER_PATH_ENV}, Env:${PS_HANDOVER_KEY_ENV} -ErrorAction SilentlyContinue`,
+    `Remove-Item -LiteralPath ($__ccPath + '${STARTING_MARK_SUFFIX}') -Force -ErrorAction SilentlyContinue`,
+    `$__ccDeadline = [DateTime]::UtcNow.AddMilliseconds(${WAITING_PS_MAX_AGE_MS})`,
+    `while ($true) {`,
+    `  if ([DateTime]::UtcNow -ge $__ccDeadline) { exit 0 }`,
+    `  if (-not (Test-Path -LiteralPath $__ccPath)) { exit 0 }`,
+    `  $__ccRaw = ''`,
+    `  try { $__ccFs = [System.IO.File]::Open($__ccPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, ([System.IO.FileShare]::ReadWrite -bor [System.IO.FileShare]::Delete)); $__ccSr = $null; try { $__ccSr = [System.IO.StreamReader]::new($__ccFs, [System.Text.Encoding]::UTF8); $__ccRaw = $__ccSr.ReadToEnd() } finally { if ($null -ne $__ccSr) { $__ccSr.Dispose() }; $__ccFs.Dispose() } } catch { $__ccRaw = '' }`,
+    `  if ($__ccRaw.Length -gt 0) { break }`,
+    `  Start-Sleep -Milliseconds 10`,
+    `}`,
+    `$__ccNl = $__ccRaw.IndexOf([char]10)`,
+    `if ($__ccNl -lt 0) { exit 1 }`,
+    `$__ccSig = $__ccRaw.Substring(0, $__ccNl).Trim()`,
+    `$__ccBody = $__ccRaw.Substring($__ccNl + 1)`,
+    `$__ccHmac = [System.Security.Cryptography.HMACSHA256]::new([System.Text.Encoding]::UTF8.GetBytes($__ccKey))`,
+    `$__ccCalc = ([BitConverter]::ToString($__ccHmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($__ccBody))) -replace '-', '').ToUpperInvariant()`,
+    `if ($__ccCalc -ne $__ccSig) { exit 1 }`,
+    `Remove-Variable __ccPath, __ccKey, __ccDeadline, __ccFs, __ccSr, __ccRaw, __ccNl, __ccSig, __ccHmac, __ccCalc -ErrorAction SilentlyContinue`,
+    `$Error.Clear()`,
+    `Invoke-Expression -Command ($__ccBody + [char]10 + 'if (-not $? -and -not (Test-Path variable:_ec)) { $host.SetShouldExit(1) }')`,
+  ].join('; ')
+}
+
+export class WaitingPowerShell {
+  readonly taskId: string
+  readonly outputPath: string
+  readonly handOverFile: { path: string; key: string; fd: number }
+  readonly launch: WaitingPowerShellLaunch
+  readonly child: ChildProcess
+  readonly startedAt: number
+  private readonly state: PowerShellHeadStartState
+  private readonly waitLimit: ReturnType<typeof setTimeout>
+  private readonly unregisterCleanup: () => void
+  private readonly commandsEndedAtStart: number
+  private isSettled = false
+  private errorOrExitCounted = false
+  private hitWaitLimit = false
+  private isHandOverFileOpen = true
+
+  constructor(
+    taskId: string,
+    outputPath: string,
+    handOverFile: { path: string; key: string; fd: number },
+    launch: WaitingPowerShellLaunch,
+    child: ChildProcess,
+    state: PowerShellHeadStartState = headStartState,
+    now: () => number = Date.now,
+  ) {
+    this.taskId = taskId
+    this.outputPath = outputPath
+    this.handOverFile = handOverFile
+    this.launch = launch
+    this.child = child
+    this.state = state
+    this.startedAt = now()
+    this.commandsEndedAtStart = state.commandsEnded
+    this.unregisterCleanup = registerCleanup(() => this.discard('unused'))
+    this.waitLimit = setTimeout(() => {
+      this.hitWaitLimit = true
+      this.state.powerShellStartsToSkip = Math.min(
+        2 ** ++this.state.idleWaitingPowerShells - 1,
+        MAX_IDLE_SKIP_POWERSHELLS,
+      )
+      void this.discard('unused')
+    }, WAITING_PS_MAX_AGE_MS)
+    this.waitLimit.unref()
+    if (child.listenerCount('error') === 0) {
+      child.once('error', () => {
+        void this.handleSpawnError()
+      })
+    }
+    child.once('exit', () => {
+      if (!this.isSettled && !this.errorOrExitCounted) {
+        this.errorOrExitCounted = true
+        this.state.failedWaitingPowerShells++
+      }
+      this.settle()
+      this.removeHandOverFiles()
+    })
+  }
+
+  async handleSpawnError(): Promise<void> {
+    if (!this.isSettled && !this.errorOrExitCounted) {
+      this.errorOrExitCounted = true
+      this.state.failedWaitingPowerShells++
+    }
+    await this.discard('ended_early')
+  }
+
+  get startingMarkPath(): string {
+    return this.handOverFile.path + STARTING_MARK_SUFFIX
+  }
+
+  isAlive(): boolean {
+    return (
+      this.child.pid !== undefined &&
+      this.child.exitCode === null &&
+      this.child.signalCode === null
+    )
+  }
+
+  hasWaitedTooLong(now: () => number = Date.now): boolean {
+    return now() - this.startedAt >= WAITING_PS_MAX_AGE_MS || this.hitWaitLimit
+  }
+
+  isWaiting(now: () => number = Date.now): boolean {
+    return !this.isSettled && this.isAlive() && !this.hasWaitedTooLong(now)
+  }
+
+  isIn(cwd: string): boolean {
+    return cwd === this.launch.cwd
+  }
+
+  stopWaitLimit(): void {
+    clearTimeout(this.waitLimit)
+  }
+
+  hasOutlastedACommand(): boolean {
+    return this.commandsEndedAtStart !== this.state.commandsEnded
+  }
+
+  async isReady(signal?: AbortSignal): Promise<boolean> {
+    while (!this.isSettled && this.isAlive() && signal?.aborted !== true) {
+      const markExists = await access(this.startingMarkPath).then(
+        () => true,
+        () => false,
+      )
+      if (!markExists) {
+        return access(this.handOverFile.path).then(
+          () => true,
+          () => false,
+        )
+      }
+      if (Date.now() - this.startedAt > WAITING_PS_READY_TIMEOUT_MS) {
+        return false
+      }
+      await new Promise(resolve => setTimeout(resolve, 10))
+    }
+    return false
+  }
+
+  /** Official `jco.fits`: verify the waiting process matches launch & script constraints. */
+  fits(launch: WaitingPowerShellLaunch, script: string): boolean {
+    if (!this.isAlive() || this.hasOutlastedACommand()) {
+      void this.discard('unused')
+      return false
+    }
+    const ok =
+      waitingPowerShellLaunchesMatch(launch, this.launch) &&
+      !script.includes('\x00')
+    if (!ok) {
+      this.state.unfitWaitingPowerShells++
+      void this.discard('unfit')
+    }
+    return ok
+  }
+
+  /** Official `jco.handOver`: write HMAC-signed script into handover file and transfer child. */
+  handOver(
+    env: Record<string, string | undefined>,
+    script: string,
+  ): ChildProcess {
+    if (
+      this.isSettled ||
+      !this.isAlive() ||
+      normalizeWaitingPowerShellEnv(env) !==
+        normalizeWaitingPowerShellEnv(this.launch.env)
+    ) {
+      throw new Error(
+        "This command didn't run. Its shell ended, or its environment changed, as it was starting. Run it again.",
+      )
+    }
+    const sig = computePowerShellHandOverHmac(this.handOverFile.key, script)
+    try {
+      // eslint-disable-next-line custom-rules/no-sync-fs -- atomic handover write to open fd
+      writeFileSync(this.handOverFile.fd, `${sig}\n${script}`)
+    } catch (err) {
+      logForDebugging(`The hand-over to a waiting PowerShell failed: ${err}`)
+      this.wipeHandOverFile()
+      this.state.failedWaitingPowerShells = MAX_FAILED_WAITING_PS
+      void this.discard('ended_early')
+      throw new Error(
+        "This command couldn't be handed to the shell, and the shell was ended. Check whether the command had begun, then run it again.",
+      )
+    }
+    this.state.failedWaitingPowerShells = 0
+    this.state.idleWaitingPowerShells = 0
+    const cleanupTimer = setTimeout(
+      () => this.removeHandOverFiles(),
+      WAITING_PS_HANDOVER_CLEANUP_DELAY_MS,
+    )
+    cleanupTimer.unref()
+    this.settle()
+    return this.child
+  }
+
+  async discard(_reason: WaitingPowerShellDiscardReason): Promise<void> {
+    if (this.isSettled) return
+    this.settle()
+    if (this.isAlive()) {
+      try {
+        this.child.kill()
+      } catch {
+        // ignore kill errors
+      }
+    }
+    this.removeHandOverFiles()
+    await unlink(this.outputPath).catch(() => {})
+  }
+
+  private settle(): void {
+    if (this.isSettled) return
+    this.isSettled = true
+    clearTimeout(this.waitLimit)
+    this.unregisterCleanup()
+  }
+
+  private removeHandOverFiles(): void {
+    this.wipeHandOverFile()
+    for (const p of [this.handOverFile.path, this.startingMarkPath]) {
+      void unlink(p).catch(() => {})
+    }
+  }
+
+  private wipeHandOverFile(): void {
+    if (!this.isHandOverFileOpen) return
+    this.isHandOverFileOpen = false
+    try {
+      // eslint-disable-next-line custom-rules/no-sync-fs -- scrub handover fd on teardown
+      ftruncateSync(this.handOverFile.fd, 0)
+    } catch {
+      // ignore truncate errors
+    }
+    try {
+      // eslint-disable-next-line custom-rules/no-sync-fs -- close handover fd on teardown
+      closeSync(this.handOverFile.fd)
+    } catch {
+      // ignore close errors
+    }
+  }
+}
+
+/** Official `zco`: remember the most recent Windows PowerShell launch configuration. */
+export function recordPowerShellCommandLaunch(
+  launch: WaitingPowerShellLaunch,
+): void {
+  const prev = headStartState.lastPowerShellLaunch
+  if (prev !== undefined && waitingPowerShellLaunchesMatch(prev, launch)) {
+    headStartState.unfitWaitingPowerShells = 0
+  }
+  headStartState.lastPowerShellLaunch = launch
+}
+
+export function markPowerShellCommandEnded(): void {
+  headStartState.commandsEnded++
+}
+
+export type StartWaitingPowerShellOptions = {
+  taskId: string
+  outputPath: string
+  sandboxEnabled: boolean
+  platform?: ReturnType<typeof getPlatform>
+}
+
+/**
+ * Official 2.1.327 #487 (`WEa`): spawn a pre-warmed waiting PowerShell process
+ * on Windows when head-start is enabled and sandbox is off.
+ */
+export async function startWaitingPowerShell(
+  opts: StartWaitingPowerShellOptions,
+): Promise<boolean> {
+  headStartState.isPowerShellHeadStartAsked = true
+  const platform = opts.platform ?? getPlatform()
+  if (platform !== 'windows') return false
+  if (isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_SHELL_HEAD_START)) {
+    return false
+  }
+  if (opts.sandboxEnabled) return false
+  const launch = headStartState.lastPowerShellLaunch
+  if (
+    launch === undefined ||
+    headStartState.isStartingWaitingPowerShell ||
+    headStartState.waitingPowerShell?.isWaiting() === true ||
+    headStartState.unfitWaitingPowerShells >= MAX_UNFIT_WAITING_PS ||
+    headStartState.failedWaitingPowerShells >= MAX_FAILED_WAITING_PS
+  ) {
+    return false
+  }
+  if (headStartState.powerShellStartsToSkip > 0) {
+    headStartState.powerShellStartsToSkip--
+    return false
+  }
+  headStartState.isStartingWaitingPowerShell = true
+  let outputHandle: Awaited<ReturnType<typeof open>> | undefined
+  let handOverPath: string | undefined
+  let handOverFd: number | undefined
+  try {
+    await headStartState.waitingPowerShell?.discard('unused')
+    headStartState.waitingPowerShell = undefined
+    outputHandle = await open(opts.outputPath, 'wx')
+    handOverPath = join(tmpdir(), `claude-ps-handover-${randomUUID()}`)
+    const key = randomBytes(32).toString('hex')
+    // eslint-disable-next-line custom-rules/no-sync-fs -- exclusive handover file creation
+    handOverFd = openSync(handOverPath, 'wx')
+    // eslint-disable-next-line custom-rules/no-sync-fs -- create starting sentinel
+    writeFileSync(handOverPath + STARTING_MARK_SUFFIX, '', { flag: 'wx' })
+    const bootstrapScript = buildWaitingPowerShellBootstrapScript()
+    const env: NodeJS.ProcessEnv = {
+      ...launch.env,
+      [PS_HANDOVER_PATH_ENV]: handOverPath,
+      [PS_HANDOVER_KEY_ENV]: key,
+    }
+    const child = spawn(
+      launch.powershellPath,
+      buildPowerShellArgs(bootstrapScript),
+      {
+        cwd: launch.cwd,
+        env,
+        stdio: ['ignore', outputHandle.fd, outputHandle.fd],
+        detached: false,
+        windowsHide: true,
+      },
+    )
+    let waiting: WaitingPowerShell | undefined
+    child.once('error', err => {
+      logForDebugging(`Waiting PowerShell process error: ${err}`)
+      if (waiting !== undefined) {
+        void waiting.handleSpawnError()
+      } else {
+        headStartState.failedWaitingPowerShells++
+      }
+    })
+    void outputHandle.close().catch(() => {})
+    outputHandle = undefined
+    waiting = new WaitingPowerShell(
+      opts.taskId,
+      opts.outputPath,
+      { path: handOverPath, key, fd: handOverFd },
+      launch,
+      child,
+      headStartState,
+    )
+    headStartState.waitingPowerShell = waiting
+    handOverFd = undefined
+    handOverPath = undefined
+    return true
+  } catch (err) {
+    headStartState.failedWaitingPowerShells++
+    logForDebugging(`A PowerShell could not be started ahead: ${err}`)
+    return false
+  } finally {
+    headStartState.isStartingWaitingPowerShell = false
+    if (outputHandle !== undefined) {
+      await outputHandle.close().catch(() => {})
+      await unlink(opts.outputPath).catch(() => {})
+    }
+    if (handOverFd !== undefined) {
+      try {
+        // eslint-disable-next-line custom-rules/no-sync-fs -- cleanup on error
+        closeSync(handOverFd)
+      } catch {
+        // ignore
+      }
+    }
+    if (handOverPath !== undefined) {
+      await unlink(handOverPath).catch(() => {})
+      await unlink(handOverPath + STARTING_MARK_SUFFIX).catch(() => {})
+    }
+  }
+}
+
+/** Official `qco`: claim the waiting PowerShell if it is in `cwd` and ready. */
+export async function takeWaitingPowerShell(
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<WaitingPowerShell | undefined> {
+  const waiting = headStartState.waitingPowerShell
+  if (waiting === undefined || !waiting.isIn(cwd)) return undefined
+  headStartState.waitingPowerShell = undefined
+  waiting.stopWaitLimit()
+  if (waiting.hasWaitedTooLong() || waiting.hasOutlastedACommand()) {
+    await waiting.discard('unused')
+    return undefined
+  }
+  if (await waiting.isReady(signal)) {
+    return waiting
+  }
+  if (!signal?.aborted && waiting.isAlive()) {
+    headStartState.failedWaitingPowerShells = MAX_FAILED_WAITING_PS
+  }
+  await waiting.discard(signal?.aborted ? 'unused' : 'ended_early')
+  return undefined
+}
+
+export function getWaitingPowerShellState(): Readonly<PowerShellHeadStartState> {
+  return headStartState
+}
+
+export async function resetWaitingPowerShellForTesting(): Promise<void> {
+  const existing = headStartState.waitingPowerShell
+  headStartState.waitingPowerShell = undefined
+  await existing?.discard('unused')
+  headStartState.isPowerShellHeadStartAsked = false
+  headStartState.lastPowerShellLaunch = undefined
+  headStartState.isStartingWaitingPowerShell = false
+  headStartState.unfitWaitingPowerShells = 0
+  headStartState.failedWaitingPowerShells = 0
+  headStartState.idleWaitingPowerShells = 0
+  headStartState.powerShellStartsToSkip = 0
+  headStartState.commandsEnded = 0
 }

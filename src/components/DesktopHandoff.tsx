@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import type { CommandResultDisplay } from '../commands.js';
-// eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw input for "any key" dismiss and y/n prompt
+// eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw input for "any key" dismiss on error
 import { Box, Dialog, LoadingState, Text, useInput } from '@anthropic/ink';
 import { getDesktopInstallStatus, openCurrentSessionInDesktop } from '../utils/desktopDeepLink.js';
 import { openBrowser } from '../utils/browser.js';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
+import { Select } from './CustomSelect/index.js';
 
 import { requestBgDetach } from '../daemon/rendezvousServer.js';
 import {
@@ -176,35 +177,41 @@ export function DesktopHandoff({ onDone }: Props): React.ReactNode {
   const [downloadMessage, setDownloadMessage] = useState<string>('');
 
   const handleCancel = useCallback(() => {
-    onDone(`Cancelled. Learn more about Claude Desktop at ${DESKTOP_DOCS_URL}`, { display: 'system' });
+    onDone(`Didn't open Claude Desktop. Learn more at ${DESKTOP_DOCS_URL}`, { display: 'system' });
   }, [onDone]);
 
-  useInput((input, key) => {
-    if (key.escape) {
-      return;
-    }
-    if (key.meta && (input === 'c' || input === 'd')) {
-      handleCancel();
-      return;
-    }
-    if (key.ctrl || key.meta) {
-      return;
-    }
-    if (state === 'error') {
-      onDone(error ?? 'Unknown error', { display: 'system' });
-      return;
-    }
-    if (state === 'prompt-download') {
-      if (input === 'y' || input === 'Y') {
+  const handleDownloadChoice = useCallback(
+    (choice: 'download' | 'cancel') => {
+      if (choice === 'download') {
         openBrowser(getDownloadUrl()).catch(() => {});
         onDone(`Starting download. Re-run /desktop once you’ve installed the app.\nLearn more at ${DESKTOP_DOCS_URL}`, {
           display: 'system',
         });
-      } else if (input === 'n' || input === 'N') {
-        onDone(`The desktop app is required for /desktop. Learn more at ${DESKTOP_DOCS_URL}`, { display: 'system' });
+      } else {
+        handleCancel();
       }
-    }
-  });
+    },
+    [handleCancel, onDone],
+  );
+
+  useInput(
+    (input, key) => {
+      if (key.escape) {
+        return;
+      }
+      if (key.meta && (input === 'c' || input === 'd')) {
+        handleCancel();
+        return;
+      }
+      if (key.ctrl || key.meta) {
+        return;
+      }
+      if (state === 'error') {
+        onDone(error ?? 'Unknown error', { display: 'system' });
+      }
+    },
+    { isActive: state === 'error' },
+  );
 
   useEffect(() => {
     async function performHandoff(): Promise<void> {
@@ -217,13 +224,13 @@ export function DesktopHandoff({ onDone }: Props): React.ReactNode {
       const installStatus = await getDesktopInstallStatus();
 
       if (installStatus.status === 'not-installed') {
-        setDownloadMessage('Claude Desktop is not installed.');
+        setDownloadMessage("Claude Desktop isn't installed.");
         setState('prompt-download');
         return;
       }
 
       if (installStatus.status === 'version-too-old') {
-        setDownloadMessage(`Claude Desktop needs to be updated (found v${installStatus.version}, need v1.1.2396+).`);
+        setDownloadMessage(`Claude Desktop needs an update (found v${installStatus.version}, need v1.1.2396+).`);
         setState('prompt-download');
         return;
       }
@@ -290,15 +297,25 @@ export function DesktopHandoff({ onDone }: Props): React.ReactNode {
   if (state === 'prompt-download') {
     return (
       <Dialog
-        title="Claude Desktop"
+        title="Download Claude Desktop?"
         onCancel={handleCancel}
         inputGuide={
           <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="cancel" />
         }
       >
-        <Box flexDirection="column">
+        <Box flexDirection="column" gap={1}>
           <Text>{downloadMessage}</Text>
-          <Text>Download now? (y/n)</Text>
+          <Select<'download' | 'cancel'>
+            options={[
+              { label: 'Yes, download', value: 'download' },
+              { label: 'Not now', value: 'cancel' },
+            ]}
+            defaultFocusValue="cancel"
+            hideIndexes
+            disablePrintableKeybindings
+            onChange={handleDownloadChoice}
+            onCancel={handleCancel}
+          />
         </Box>
       </Dialog>
     );

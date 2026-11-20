@@ -93,6 +93,15 @@ import type { ReadResourceResult } from 'src/services/mcp/types.js'
 import type { Command } from '../types/command.js'
 import uniqBy from 'lodash-es/uniqBy.js'
 import { getProjectRoot } from '../bootstrap/state.js'
+import {
+  formatPastedContentOpenTag,
+  PASTED_CONTENT_SYSTEM_REMINDER,
+  shouldInjectPastedContentReminder,
+} from '../history.js'
+import { shouldAttachSmallMentionedFileInCodeMode } from '../services/codeMode/executor.js'
+import { isCodeModeEnabled } from '../services/codeMode/optIn.js'
+import { formatCompletedSubagentCompactReminder } from '../services/compact/compact.js'
+import { formatCloudUserPromptSubmitBlockError } from './hooks/hookErrorDisplay.js'
 import { formatCommandsWithinBudget } from '@claude-code/builtin-tools/tools/SkillTool/prompt.js'
 import { getContextWindowForModel } from './context.js'
 import type { DiscoverySignal } from '../services/skillSearch/signals.js'
@@ -163,7 +172,10 @@ import {
   applyTaskOffsetsAndEvictions,
 } from './task/framework.js'
 import { getTaskOutputPath } from './task/diskOutput.js'
-import { drainPendingMessages } from '../tasks/LocalAgentTask/LocalAgentTask.js'
+import {
+  drainPendingMessages,
+  getAgentAskNoticeAttachment,
+} from '../tasks/LocalAgentTask/LocalAgentTask.js'
 import type { TaskType, TaskStatus } from '../Task.js'
 import {
   getOriginalCwd,
@@ -219,6 +231,7 @@ import {
 import { logForDebugging } from './debug.js'
 import {
   extractTextContent,
+  getMessagesAfterCompactBoundary,
   getUserMessageText,
   isThinkingMessage,
 } from './messages.js'
@@ -780,6 +793,8 @@ export type Attachment =
       description: string
       deltaSummary: string | null
       outputFilePath?: string
+      /** Official 2.1.327 #482: whether the caller can continue the agent via SendMessage. */
+      canContinueAgent?: boolean
     }
   | AsyncHookResponseAttachment
   | {
@@ -960,6 +975,12 @@ export type Attachment =
       repliesSinceUser: number
     }
   | {
+      /** Official 2.1.327 (#426): background agents waiting >=30s on permission prompts. */
+      type: 'agent_ask_notice'
+      lines: string[]
+      open: string[]
+    }
+  | {
       type: 'goal_status'
       met: boolean
       sentinel?: boolean
@@ -1038,6 +1059,12 @@ export type GetAttachmentsOptions = {
   preExpansionInput?: string
   /** densable suppressWorkflowKeyword — force-skip p2y for this turn. */
   suppressWorkflowKeyword?: boolean
+  /**
+   * Official 2.1.328 #674: prompt text after `markPastedTextForModel` wraps
+   * pasted blocks in `<pasted_content id="...">` so Turn-1 reminders and
+   * paste-aware checks see the marked text immediately.
+   */
+  markedInput?: string | null
 }
 
 /**
@@ -1264,7 +1291,9 @@ export async function getAttachments(
     maybe('ultrathink_effort', () =>
       Promise.resolve(
         getUltrathinkEffortAttachment(
-          maskedInput,
+          options?.markedInput
+            ? maskPickedRefs(options.markedInput)
+            : maskedInput,
           toolUseContext.options.mainLoopModel,
         ),
       ),
@@ -1391,7 +1420,13 @@ export async function getAttachments(
       getAgentPendingMessageAttachments(toolUseContext),
     ),
     maybe('critical_system_reminder', () =>
-      Promise.resolve(getCriticalSystemReminderAttachment(toolUseContext)),
+      Promise.resolve([
+        ...getCriticalSystemReminderAttachment(toolUseContext),
+        ...getPastedContentNoteAttachment(
+          options?.markedInput ?? input,
+          messages ?? [],
+        ),
+      ]),
     ),
     ...(feature('COMPACTION_REMINDERS')
       ? [
@@ -1435,6 +1470,19 @@ export async function getAttachments(
         maybe('unified_tasks', async () =>
           getUnifiedTaskAttachments(toolUseContext),
         ),
+        // Official 2.1.327 (#426): surface background agents waiting >=30s on permission prompts.
+        maybe('agent_ask_notice', () => {
+          const registry = toolUseContext.taskRegistry ?? {
+            get: (id: string) => toolUseContext.getAppState().tasks[id],
+          }
+          return Promise.resolve(
+            getAgentAskNoticeAttachment(
+              getSessionId(),
+              registry,
+              getMessagesAfterCompactBoundary(messages ?? []),
+            ),
+          )
+        }),
         maybe('async_hook_responses', async () =>
           getAsyncHookResponseAttachments(messages),
         ),
@@ -2179,11 +2227,12 @@ function stripAtMentionTokens(text: string): string {
 }
 
 /**
- * Gold `Nqo` (#1287): strip `<pasted_content id="...">...</pasted_content>` blocks.
+ * Gold `Nqo` (#1287) + Official 2.1.328 #674: strip
+ * `<pasted_content id="...">...</pasted_content id="...">` (and plain closing) blocks.
  */
 function stripPastedContentBlocks(text: string): string {
   return text
-    .replace(/<pasted_content\b[^>]*>[\s\S]*?<\/pasted_content>/g, '')
+    .replace(/<pasted_content\b[^>]*>[\s\S]*?<\/pasted_content\b[^>]*>/g, '')
     .trim()
 }
 
@@ -2707,6 +2756,73 @@ function getCriticalSystemReminderAttachment(
 }
 
 /**
+ * Official 2.1.328 #674 (`Lp`): inject the `<pasted_content>` system reminder
+ * once when a turn contains session-tagged `<pasted_content id="...">` blocks
+ * and `shouldInjectPastedContentReminder()` is active (default ON on 3P
+ * providers or with telemetry/feature flags off).
+ */
+export function getPastedContentNoteAttachment(
+  input: string | null,
+  messages: readonly Message[],
+): Attachment[] {
+  if (!shouldInjectPastedContentReminder()) {
+    return []
+  }
+  const openTag = formatPastedContentOpenTag()
+  const recentMessages = getMessagesAfterCompactBoundary(messages as Message[])
+  let hasPastedBlock = typeof input === 'string' && input.includes(openTag)
+  for (const msg of recentMessages) {
+    if (
+      msg.type === 'attachment' &&
+      msg.attachment?.type === 'critical_system_reminder' &&
+      msg.attachment.content === PASTED_CONTENT_SYSTEM_REMINDER
+    ) {
+      return []
+    }
+    if (!hasPastedBlock && msg.type === 'user') {
+      const content = msg.message?.content
+      if (typeof content === 'string') {
+        if (content.includes(openTag)) hasPastedBlock = true
+      } else if (Array.isArray(content)) {
+        for (const block of content) {
+          if (
+            block &&
+            typeof block === 'object' &&
+            'type' in block &&
+            block.type === 'text' &&
+            'text' in block &&
+            typeof block.text === 'string' &&
+            block.text.includes(openTag)
+          ) {
+            hasPastedBlock = true
+            break
+          }
+        }
+      }
+    }
+  }
+  if (!hasPastedBlock) {
+    return []
+  }
+  return [
+    {
+      type: 'critical_system_reminder',
+      content: PASTED_CONTENT_SYSTEM_REMINDER,
+    },
+  ]
+}
+
+/**
+ * Official 2.1.327 #431: format a clear user-facing error when a mid-turn
+ * cloud message is blocked by a `UserPromptSubmit` hook.
+ */
+export function formatMidTurnCloudUserPromptSubmitBlock(
+  blockingError: string | undefined,
+): string {
+  return formatCloudUserPromptSubmitBlockError(blockingError)
+}
+
+/**
  * densable tmr (@190637700) — non-default style → {type:output_style, style, turnReminder?}
  * Prefers waitingTurnReminder when background tasks are running on the main thread.
  */
@@ -3129,13 +3245,28 @@ async function getOpenedFileFromIDE(
 }
 
 /**
+ * Official 2.1.327 #408 (`uho = 100`): cap `@`-mention file lookups per
+ * message at 100 so a prompt with thousands of `@` mentions never stalls
+ * before Claude replies.
+ */
+export const MAX_AT_MENTION_FILES = 100
+
+/**
  * Official Ups(): when CLAUDE_CODE_DISABLE_FILE_MENTIONS is set, do not read
  * or attach `@`-mentioned file contents; emit an `at_mention_reference` with
  * just the paths so the model can read them with its file tools.
  */
 export function processDisabledFileMentions(input: string): Attachment[] {
-  const files = extractAtMentionedFiles(input)
-  if (files.length === 0) return []
+  const allFiles = extractAtMentionedFiles(input)
+  if (allFiles.length === 0) return []
+  const files = allFiles.slice(0, MAX_AT_MENTION_FILES)
+  if (allFiles.length > MAX_AT_MENTION_FILES) {
+    logEvent('tengu_at_mention_unreported', {
+      mention_type:
+        'file' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      count: allFiles.length - MAX_AT_MENTION_FILES,
+    })
+  }
   return [
     {
       type: 'at_mention_reference',
@@ -3148,8 +3279,16 @@ async function processAtMentionedFiles(
   input: string,
   toolUseContext: ToolUseContext,
 ): Promise<Attachment[]> {
-  const files = extractAtMentionedFiles(input)
-  if (files.length === 0) return []
+  const allFiles = extractAtMentionedFiles(input)
+  if (allFiles.length === 0) return []
+  if (allFiles.length > MAX_AT_MENTION_FILES) {
+    logEvent('tengu_at_mention_unreported', {
+      mention_type:
+        'file' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      count: allFiles.length - MAX_AT_MENTION_FILES,
+    })
+  }
+  const files = allFiles.slice(0, MAX_AT_MENTION_FILES)
 
   const appState = toolUseContext.getAppState()
   const results = await Promise.all(
@@ -3413,6 +3552,20 @@ function markContentNotInModelContext(
   readFileState.set(filename, { ...entry, contentNotInModelContext: true })
 }
 
+/**
+ * Official 2.1.327 (#413): mark a `readFileState` entry refreshed by
+ * `getChangedFiles` behind the model's back so `clearForCompaction()` does not
+ * retain it as if the model had explicitly read the new file contents.
+ */
+function markRefreshedBehindModel(
+  readFileState: FileStateCache,
+  filename: string,
+): void {
+  const entry = readFileState.get(filename)
+  if (!entry) return
+  readFileState.set(filename, { ...entry, refreshedBehindModel: true })
+}
+
 export async function getChangedFiles(
   toolUseContext: ToolUseContext,
 ): Promise<Attachment[]> {
@@ -3478,6 +3631,10 @@ export async function getChangedFiles(
               toolUseContext.readFileState,
               normalizedPath,
             )
+            markRefreshedBehindModel(
+              toolUseContext.readFileState,
+              normalizedPath,
+            )
             return {
               type: 'edited_text_file' as const,
               filename: normalizedPath,
@@ -3494,6 +3651,8 @@ export async function getChangedFiles(
           if (snippet === '') {
             return null
           }
+
+          markRefreshedBehindModel(toolUseContext.readFileState, normalizedPath)
 
           const updatedState = toolUseContext.readFileState.get(normalizedPath)
           const readBaseline = (
@@ -3525,6 +3684,7 @@ export async function getChangedFiles(
 
         // For non-text files (images), apply the same token limit logic as FileReadTool
         if (result.data.type === 'image') {
+          markRefreshedBehindModel(toolUseContext.readFileState, normalizedPath)
           try {
             const data = await readImageWithTokenBudget(normalizedPath)
             return {
@@ -4646,8 +4806,24 @@ export async function generateFileAttachment(
   // entry still matches mtime. Partial/offset / contentNotInModelContext /
   // empty-but-nonzero contentLength must re-read so @-mention is not empty
   // after file-modifying hooks or tools.
+  // Official 2.1.328 #580: in Code Mode, small `@`-mentioned files previously
+  // read/written by a script must still be attached rather than skipped as
+  // `already_read_file`.
   const existingFileState = toolUseContext.readFileState.get(filename)
-  if (existingFileState && mode === 'at-mention') {
+  const codeModeActive = isCodeModeEnabled()
+  const isSmallExistingFile =
+    existingFileState !== undefined &&
+    existingFileState.content.length <=
+      getDefaultFileReadingLimits().maxSizeBytes
+  const forceAttachInCodeMode =
+    existingFileState !== undefined &&
+    codeModeActive &&
+    shouldAttachSmallMentionedFileInCodeMode({
+      isCodeMode: true,
+      isSmallFile: isSmallExistingFile,
+      previouslyTouchedByScript: true,
+    })
+  if (existingFileState && mode === 'at-mention' && !forceAttachInCodeMode) {
     // densable: H1e(l) && (l.content !== "" || (l.contentLength ?? 0) === 0)
     const fullEnough =
       isFullEnoughFileRead(existingFileState) &&
@@ -5025,15 +5201,41 @@ async function getUnifiedTaskAttachments(
   )
 
   // Convert TaskAttachment to Attachment format
-  return attachments.map(taskAttachment => ({
-    type: 'task_status' as const,
-    taskId: taskAttachment.taskId,
-    taskType: taskAttachment.taskType,
-    status: taskAttachment.status,
-    description: taskAttachment.description,
-    deltaSummary: taskAttachment.deltaSummary,
-    outputFilePath: getTaskOutputPath(taskAttachment.taskId),
-  }))
+  // Official 2.1.327 #482: enrich completed local_agent task_status attachments
+  // with `formatCompletedSubagentCompactReminder` so post-compaction reminders
+  // tell Claude how to read the output file or ask the agent via SendMessage.
+  const tools = toolUseContext.options?.tools ?? []
+  const canContinueAgent =
+    tools.length === 0 || tools.some(tool => tool.name === 'SendMessage')
+  return attachments.map(taskAttachment => {
+    const outputFilePath = getTaskOutputPath(taskAttachment.taskId)
+    const compactReminder =
+      taskAttachment.taskType === 'local_agent' &&
+      taskAttachment.status === 'completed'
+        ? formatCompletedSubagentCompactReminder({
+            taskId: taskAttachment.taskId,
+            status: taskAttachment.status,
+            outputFilePath,
+            canContinueAgent,
+          })
+        : undefined
+    const deltaSummary =
+      compactReminder && !taskAttachment.deltaSummary?.includes(compactReminder)
+        ? taskAttachment.deltaSummary
+          ? `${taskAttachment.deltaSummary}\n${compactReminder}`
+          : compactReminder
+        : taskAttachment.deltaSummary
+    return {
+      type: 'task_status' as const,
+      taskId: taskAttachment.taskId,
+      taskType: taskAttachment.taskType,
+      status: taskAttachment.status,
+      description: taskAttachment.description,
+      deltaSummary,
+      outputFilePath,
+      canContinueAgent,
+    }
+  })
 }
 
 function extractSessionStartResponseTexts(response: unknown): string[] {

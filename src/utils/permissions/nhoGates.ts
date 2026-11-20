@@ -288,6 +288,21 @@ export function isClassifierRoutedSafetyCheck(check: {
 }
 
 /**
+ * Official 2.1.328 `DNi` (@283889913):
+ * `(e.also ?? []).some(o => { const s = Mot[o]; return s?.bypassImmune === true && !s.classifierRouted })`.
+ * Prevents a classifier-routed primary circuitBreaker from bypassing a
+ * bypass-immune non-classifier secondary breaker listed in `also`.
+ */
+export function hasBypassImmuneNonClassifierAlsoBreaker(check: {
+  also?: readonly string[]
+}): boolean {
+  return (check.also ?? []).some(breaker => {
+    const policy = lookupCircuitBreakerPolicy(breaker)
+    return policy?.bypassImmune === true && !policy.classifierRouted
+  })
+}
+
+/**
  * densable `_p(e, n=()=>!0)` — walk safetyCheck / nested subcommandResults.
  * Do not import permissions.ts (cycle).
  */

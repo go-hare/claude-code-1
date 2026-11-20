@@ -207,7 +207,10 @@ export {
   type ProgramStatusOptions,
   type ProgramStatusState,
   wrapForMultiplexer,
+  printsUnknownSequences,
+  spawnDetachedClipboardCopy,
 } from './core/termio/osc.js'
+export { flushNonBlockingStdout } from './core/nonBlockingStdout.js'
 export {
   DISABLE_KITTY_KEYBOARD,
   DISABLE_MODIFY_OTHER_KEYS,
@@ -363,6 +366,13 @@ export { default as AccessibilityContext } from './components/AccessibilityConte
 export {
   default as InputNowContext,
   useInputNow,
+  useWantEveryKey,
+  noteResumed,
+  getLastResumedAt,
+  isInSigcontResumeGrace,
+  SIGCONT_RESUME_GRACE_MS,
+  _resetSigcontResumeGraceForTesting,
+  type InputClock,
 } from './components/InputNowContext.js'
 
 // App types

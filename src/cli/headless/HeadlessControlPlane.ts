@@ -2193,6 +2193,79 @@ function findToolSpecificDenyReason(
  *
  * Returns true if a permission was enqueued, false otherwise.
  */
+/**
+ * Official 2.1.328 (#673) `V9` + `CRo` (`tengu_cinder_swift`):
+ * When the input stream closes while an `AskUserQuestion` prompt is parked,
+ * end/interrupt the turn instead of synthesizing a deny result that lets the
+ * model keep running without an answer. Default fallback is `'interrupt'` on
+ * 3P providers or when GrowthBook/feature flags/telemetry are off, and `'off'`
+ * otherwise unless overridden by `tengu_cinder_swift`.
+ */
+export function shouldInterruptParkedQuestionOnStreamClose(opts?: {
+  isFirstParty?: boolean
+  isGrowthBookEnabled?: boolean
+  flagValue?: string
+}): boolean {
+  if (opts?.flagValue !== undefined) {
+    return opts.flagValue === 'interrupt'
+  }
+  let isFirstParty = opts?.isFirstParty
+  if (isFirstParty === undefined) {
+    try {
+      const { getAPIProvider } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../../utils/model/providers.js') as typeof import('../../utils/model/providers.js')
+      isFirstParty = getAPIProvider() === 'firstParty'
+    } catch {
+      isFirstParty = false
+    }
+  }
+  let gbEnabled = opts?.isGrowthBookEnabled
+  if (gbEnabled === undefined) {
+    try {
+      const { isGrowthBookEnabled } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../../services/analytics/growthbook.js') as typeof import('../../services/analytics/growthbook.js')
+      gbEnabled =
+        typeof isGrowthBookEnabled === 'function'
+          ? isGrowthBookEnabled()
+          : false
+    } catch {
+      gbEnabled = false
+    }
+  }
+  const fallback = !isFirstParty || !gbEnabled ? 'interrupt' : 'off'
+  try {
+    const { getFeatureValue_CACHED_MAY_BE_STALE } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../services/analytics/growthbook.js') as typeof import('../../services/analytics/growthbook.js')
+    return (
+      getFeatureValue_CACHED_MAY_BE_STALE('tengu_cinder_swift', fallback) ===
+      'interrupt'
+    )
+  } catch {
+    return fallback === 'interrupt'
+  }
+}
+
+/**
+ * Official 2.1.328 (#380): decide whether an orphaned/delayed permission
+ * approval arriving after a restart should be dropped because a Stop/interrupt
+ * already settled the session or newer user input arrived ahead of it.
+ * Unconditionally active even in cloud/runner sessions with no feature flags loaded.
+ */
+export function shouldDropOrphanedPermissionAfterStop(opts: {
+  sessionStoppedAfterRestart?: boolean
+  behindNewInput?: boolean
+  alreadySettled?: boolean
+}): boolean {
+  return (
+    opts.sessionStoppedAfterRestart === true ||
+    opts.behindNewInput === true ||
+    opts.alreadySettled === true
+  )
+}
+
 export async function handleOrphanedPermissionResponse<
   TState extends HeadlessAppState = AppState,
 >({
@@ -2204,6 +2277,8 @@ export async function handleOrphanedPermissionResponse<
   handledToolUseIds,
   findUnresolvedToolUseFn = findUnresolvedToolUse,
   enqueueFn = enqueue,
+  sessionStoppedAfterRestart,
+  behindNewInput,
 }: {
   message: SDKControlResponse
   setAppState: HeadlessSetAppState<TState>
@@ -2213,7 +2288,22 @@ export async function handleOrphanedPermissionResponse<
   handledToolUseIds: Set<string>
   findUnresolvedToolUseFn?: typeof findUnresolvedToolUse
   enqueueFn?: typeof enqueue
+  /** Official 2.1.328 (#380): true when Stop arrived before/during restart. */
+  sessionStoppedAfterRestart?: boolean
+  /** Official 2.1.328 (#380): true when newer user input superseded the parked tool call. */
+  behindNewInput?: boolean
 }): Promise<boolean> {
+  if (
+    shouldDropOrphanedPermissionAfterStop({
+      sessionStoppedAfterRestart,
+      behindNewInput,
+    })
+  ) {
+    logForDebugging(
+      `handleOrphanedPermissionResponse: dropping delayed approval (stopped=${Boolean(sessionStoppedAfterRestart)}, behindNewInput=${Boolean(behindNewInput)})`,
+    )
+    return false
+  }
   const responseInner = message.response as
     | {
         subtype?: string

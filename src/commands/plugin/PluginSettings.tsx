@@ -51,7 +51,12 @@ import {
   getErrorGuidance,
   type PluginErrorExtended,
 } from './PluginErrors.js';
-import { clampMultilineError, PluginConfirmList, truncateStatsColumn } from './pluginListHelpers.js';
+import {
+  clampMultilineError,
+  PluginConfirmList,
+  recordPluginUiClick,
+  truncateStatsColumn,
+} from './pluginListHelpers.js';
 import { type ParsedCommand, parsePluginArgs } from './parseArgs.js';
 import type { PluginSettingsProps, ViewState } from './types.js';
 import { PluginEval } from './PluginEval.js';
@@ -1261,6 +1266,11 @@ export function PluginSettings({
   // Handle tab switching (called by Tabs component)
   const handleTabChange = useCallback((tabId: string) => {
     const tab = tabId as TabId;
+    // Official 2.1.327 #382 & 2.1.328 #616: Reset childSearchActive when
+    // switching tabs so tab navigation and Installed tab typing/arrows never
+    // get stuck, and record tab interaction to guard accidental immediate Enter.
+    setChildSearchActive(false);
+    recordPluginUiClick();
     setActiveTab(tab);
     setError(null);
     switch (tab) {

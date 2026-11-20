@@ -22,6 +22,9 @@ type Props = {
   onComplete: (result?: string, options?: { display?: CommandResultDisplay }) => void;
 };
 
+export const NO_MCP_SERVERS_MESSAGE =
+  "No MCP servers loaded. If you just added one, restart Claude Code. If you declined a project's server, run `claude mcp reset-project-choices` first. `claude doctor` finds config problems. To add one, run `claude mcp --help` or see https://code.claude.com/docs/en/mcp";
+
 export function MCPSettings({ onComplete }: Props): React.ReactNode {
   const mcp = useAppState(s => s.mcp);
   const agentDefinitions = useAppState(s => s.agentDefinitions);
@@ -31,6 +34,12 @@ export function MCPSettings({ onComplete }: Props): React.ReactNode {
   });
   const [servers, setServers] = React.useState<ServerInfo[]>([]);
   const [showUnusedConnectors, setShowUnusedConnectors] = React.useState(false);
+  // Official 2.1.328 #462: Preserve focused tool when returning from tool detail -> tool list.
+  const [lastToolSelection, setLastToolSelection] = React.useState<{
+    serverName: string;
+    toolName: string;
+    toolIndex: number;
+  } | null>(null);
   const suppressedClaudeAiConnectors = (mcp as { suppressedClaudeAiConnectors?: SuppressedClaudeAiConnector[] })
     .suppressedClaudeAiConnectors;
 
@@ -127,9 +136,7 @@ export function MCPSettings({ onComplete }: Props): React.ReactNode {
 
     // Only show "no servers" message if no regular servers AND no agent servers
     if (servers.length === 0 && agentMcpServers.length === 0 && (suppressedClaudeAiConnectors?.length ?? 0) === 0) {
-      onComplete(
-        'No MCP servers configured. Run `claude doctor` if this is unexpected — it lists MCP config files that failed validation. Otherwise, run `claude mcp --help` or visit https://code.claude.com/docs/en/mcp to learn more.',
-      );
+      onComplete(NO_MCP_SERVERS_MESSAGE);
     }
   }, [
     servers.length,
@@ -167,7 +174,10 @@ export function MCPSettings({ onComplete }: Props): React.ReactNode {
           <MCPStdioServerMenu
             server={viewState.server}
             serverToolsCount={serverTools.length}
-            onViewTools={() => setViewState({ type: 'server-tools', server: viewState.server })}
+            onViewTools={() => {
+              setLastToolSelection(null);
+              setViewState({ type: 'server-tools', server: viewState.server });
+            }}
             onCancel={() => setViewState({ type: 'list', defaultTab })}
             onComplete={onComplete}
           />
@@ -177,7 +187,10 @@ export function MCPSettings({ onComplete }: Props): React.ReactNode {
           <MCPRemoteServerMenu
             server={viewState.server}
             serverToolsCount={serverTools.length}
-            onViewTools={() => setViewState({ type: 'server-tools', server: viewState.server })}
+            onViewTools={() => {
+              setLastToolSelection(null);
+              setViewState({ type: 'server-tools', server: viewState.server });
+            }}
             onCancel={() => setViewState({ type: 'list', defaultTab })}
             onComplete={onComplete}
           />
@@ -185,20 +198,29 @@ export function MCPSettings({ onComplete }: Props): React.ReactNode {
       }
     }
 
-    case 'server-tools':
+    case 'server-tools': {
+      const savedSelection = lastToolSelection?.serverName === viewState.server.name ? lastToolSelection : null;
       return (
         <MCPToolListView
           server={viewState.server}
-          onSelectTool={(_, index) =>
+          startOn={savedSelection?.toolName}
+          defaultFocusIndex={savedSelection?.toolIndex}
+          onSelectTool={(tool, index) => {
+            setLastToolSelection({
+              serverName: viewState.server.name,
+              toolName: tool.name,
+              toolIndex: index,
+            });
             setViewState({
               type: 'server-tool-detail',
               server: viewState.server,
               toolIndex: index,
-            })
-          }
+            });
+          }}
           onBack={() => setViewState({ type: 'server-menu', server: viewState.server })}
         />
       );
+    }
 
     case 'server-tool-detail': {
       const serverTools = filterToolsByServer(mcp.tools, viewState.server.name);

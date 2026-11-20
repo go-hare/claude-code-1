@@ -120,6 +120,7 @@ import type {
 } from './processUserInput.js';
 import { parseStackedSlashCommands, shouldParseStackedSlash, STACKED_SLASH_LIMIT } from './stackedSlashExpansion.js';
 import { getDisabledCommandReason } from '../status.js';
+import { formatCodeReviewForegroundForkResult } from '../../commands/codeReview.js';
 
 const COMMANDS_ANSWERING_OWN_HELP = new Set([
   'model',
@@ -805,6 +806,26 @@ async function executeForkedSlashCommand(
   }
 
   let resultText = extractResultText(agentMessages, 'Command completed');
+  // Official 2.1.328 #664 / #665: apply command-specific foreground fork result
+  // formatter (including `/code-review` severity-badged JSON findings formatter).
+  const formatForegroundForkResult = (
+    command as PromptCommand & {
+      formatForegroundForkResult?: (text: string) => string;
+    }
+  ).formatForegroundForkResult;
+  if (typeof formatForegroundForkResult === 'function') {
+    try {
+      resultText = formatForegroundForkResult(resultText);
+    } catch (err) {
+      logError(err);
+    }
+  } else if (command.name === 'code-review') {
+    try {
+      resultText = formatCodeReviewForegroundForkResult(resultText);
+    } catch (err) {
+      logError(err);
+    }
+  }
 
   logForDebugging(`Forked slash command /${command.name} completed with agent ${agentId}`);
 
@@ -907,6 +928,8 @@ async function processSlashCommandBody(
   /** densable yn pt — ELt host_initiator on tengu_input_command. */
   hostInitiator?: unknown,
   checkLine?: SlashLineCheckFn,
+  /** Official 2.1.327 #397: preserve pasted image IDs when `/` input falls back to a regular prompt (e.g. `/tmp/a.txt`). */
+  imagePasteIds: number[] = [],
 ): Promise<ProcessUserInputBaseResult> {
   // Official 2.1.326 #130: rewrite `/<builtin> --help` -> `/help <builtin>` and
   // `/help <answersHelp>` -> `/<cmd> --help` before dispatching the command.
@@ -1046,11 +1069,19 @@ async function processSlashCommandBody(
       prompt: redactIfDisabled(inputString),
       'prompt.id': promptId,
     });
+    // Official 2.1.327 #397: preserve pasted imageContentBlocks + imagePasteIds
+    // when a prompt starting with `/` (e.g. `/tmp/a.txt`) falls back to a
+    // regular user prompt instead of a slash command.
+    const fallbackContent =
+      imageContentBlocks.length > 0
+        ? [...precedingInputBlocks, { type: 'text' as const, text: inputString }, ...imageContentBlocks]
+        : prepareUserContent({ inputString, precedingInputBlocks });
     return {
       messages: [
         createUserMessage({
-          content: prepareUserContent({ inputString, precedingInputBlocks }),
+          content: fallbackContent,
           uuid: uuid,
+          imagePasteIds: imagePasteIds.length > 0 ? imagePasteIds : undefined,
         }),
         ...attachmentMessages,
       ],
@@ -1406,6 +1437,7 @@ export async function processSlashCommand(
   wakeupSource?: string,
   hostInitiator?: unknown,
   checkLine?: SlashLineCheckFn,
+  imagePasteIds: number[] = [],
 ): Promise<ProcessUserInputBaseResult> {
   using commandRun = wrapCommandRunWait(takeCommandRunWait(uuid));
   try {
@@ -1425,6 +1457,7 @@ export async function processSlashCommand(
       wakeupSource,
       hostInitiator,
       checkLine,
+      imagePasteIds,
     );
     commandRun.settle({
       text: result.resultText,
@@ -1791,18 +1824,35 @@ async function getMessagesForSlashCommand(
             };
           }
 
-          // Text result — use system message so it doesn't render as a user bubble
+          // Text result — use system message so it doesn't render as a user bubble.
+          // Official 2.1.328 (#677): honor isDisplayOnly + metaMessages (e.g. /list-agents).
           const outputTag = result.level === 'error' ? 'local-command-stderr' : 'local-command-stdout';
+          const textResultExtras = result as {
+            isDisplayOnly?: boolean;
+            metaMessages?: string[];
+          };
+          const isDisplayOnly = textResultExtras.isDisplayOnly === true;
+          const rawMetaMessages = Array.isArray(textResultExtras.metaMessages) ? textResultExtras.metaMessages : [];
+          const metaMessages = rawMetaMessages.map((content: string) => createUserMessage({ content, isMeta: true }));
+          const inputMessage = isDisplayOnly
+            ? createCommandInputMessage(formatCommandInput(command, displayArgs), {
+                commandRun: slashCommandRun(command, argsForDispatch),
+                isDisplayOnly: true,
+              })
+            : userMessage;
           return {
             messages: [
-              userMessage,
+              inputMessage,
               createCommandInputMessage(`<${outputTag}>${result.value}</${outputTag}>`, {
                 commandRun: slashCommandRun(command, argsForDispatch),
+                ...(isDisplayOnly && { isDisplayOnly: true }),
               }),
+              ...metaMessages,
             ],
             shouldQuery: false,
             command,
             resultText: result.value,
+            ...(rawMetaMessages.length > 0 && { metaTexts: rawMetaMessages }),
           };
         } catch (e) {
           logError(e);

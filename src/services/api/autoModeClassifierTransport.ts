@@ -164,14 +164,41 @@ export function readExternalAutoModeServerRaw(
 }
 
 /**
- * Official 2.1.319 `uwt` (`sie`) — switch on MV(), no default (openai/gemini/grok → falsy).
- * - #1700: behind an LLM gateway (`rGn()`), `CLAUDE_CODE_AUTO_MODE_SERVER=1` turns on
- *   the server-side check even with `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` set; if
- *   managed settings set `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`, managed settings
- *   must also set `CLAUDE_CODE_AUTO_MODE_SERVER=1`.
- * - #1777: when server-managed settings cannot be fetched (`remoteSettingsFailed`),
- *   `CLAUDE_CODE_AUTO_MODE_SERVER=1` in local managed settings is still honored.
- * - #1806: `CLAUDE_CODE_AUTO_MODE_SERVER` must be truthy outside project/local settings.
+ * Official 2.1.328 (#565, SEA `EP`): setting aside
+ * `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` for the server classifier is ONLY
+ * permitted inside Claude Desktop (`CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`) and
+ * when `tengu_drifting_valley` is enabled. Outside Claude Desktop, setting
+ * `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` keeps experimental classifier betas
+ * off behind beta-rejecting gateways and on Bedrock, Vertex/Agent Platform,
+ * Foundry, and Claude apps gateway.
+ */
+export function isBetasSwitchSetAside(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (leftoverHipaa()) return false
+  if (!env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS) return false
+  if (isEnvTruthy(env.CLAUDE_CODE_SIMULATE_PROXY_USAGE)) return false
+  // Outside Claude Desktop, never set aside CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS.
+  const isHostManagedDesktop =
+    isEnvTruthy(env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST) ||
+    env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop'
+  if (!isHostManagedDesktop) return false
+  if (readUserServerClassifierSwitch(env) === false) return false
+  if (
+    getAPIProvider() === 'firstParty' &&
+    (env.ANTHROPIC_UNIX_SOCKET !== undefined || !isFirstPartyAnthropicBaseUrl())
+  ) {
+    return false
+  }
+  return featureBool('tengu_drifting_valley', false)
+}
+
+/**
+ * Official 2.1.319/2.1.328 `q4t` (`sie`) — switch on MV(), no default (openai/gemini/grok → falsy).
+ * - #565: outside Claude Desktop with `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` set,
+ *   never send the server-classifier beta header on Bedrock, Vertex/Agent Platform,
+ *   Foundry, Claude apps gateway, or beta-rejecting gateways (falls back to local
+ *   classifier cleanly instead of failing every turn with HTTP 400).
  */
 export function serverClassifierBetasEligible(opts?: {
   remoteSettingsEligible?: boolean
@@ -179,12 +206,12 @@ export function serverClassifierBetasEligible(opts?: {
 }): boolean {
   switch (classifyClassifierProviderKind()) {
     case 'firstParty':
-      // Official 2.1.326 #298 (`q4t`): for HIPAA Cowork orgs on a direct
-      // Anthropic API connection, enable the server-side classifier just like
-      // other orgs unless CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS is set.
+      // Official 2.1.326 #298 / 2.1.328 #565 (`q4t`):
       return (
         experimentalCapabilityBetasForClassifier() ||
-        (leftoverHipaa() && !process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS)
+        (leftoverHipaa() &&
+          !process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS) ||
+        isBetasSwitchSetAside()
       )
     case 'thirdParty': {
       const provider = getAPIProvider()
@@ -208,10 +235,26 @@ export function serverClassifierBetasEligible(opts?: {
       ) {
         return true
       }
-      return provider === 'firstParty' ||
+      if (
+        provider === 'firstParty' ||
         isAnthropicAwsOrGoogleCloudProvider(provider)
-        ? experimentalCapabilityBetasForClassifier(provider)
-        : !leftoverHipaa()
+      ) {
+        return (
+          experimentalCapabilityBetasForClassifier(provider) ||
+          isBetasSwitchSetAside()
+        )
+      }
+      // Official 2.1.328 #565: on Bedrock, Vertex/Agent Platform, Foundry, or
+      // gateway, respect CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS outside Claude
+      // Desktop unless explicitly overridden via CLAUDE_CODE_AUTO_MODE_SERVER=1.
+      if (
+        Boolean(process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS) &&
+        !isBetasSwitchSetAside() &&
+        readUserServerClassifierSwitch() !== true
+      ) {
+        return false
+      }
+      return !leftoverHipaa()
     }
     default:
       return false
@@ -479,7 +522,8 @@ export function isServerClassifierTransportOn(mode: PermissionMode): boolean {
 }
 
 /**
- * densable `oc` @182067269 — canonical is an old model (bedrock/mantle Yl).
+ * Official 2.1.328 (#541, SEA `Um`) — canonical is an old model (bedrock/mantle).
+ * Opus 4.6 and Sonnet 4.6 are now supported on Bedrock/Mantle/3P.
  */
 export function isOldModelForBedrockMantleClassifier(
   canonical: string,
@@ -489,10 +533,8 @@ export function isOldModelForBedrockMantleClassifier(
     canonical === 'claude-opus-4-0' ||
     canonical === 'claude-opus-4-1' ||
     canonical === 'claude-opus-4-5' ||
-    canonical === 'claude-opus-4-6' ||
     canonical === 'claude-sonnet-4-0' ||
     canonical === 'claude-sonnet-4-5' ||
-    canonical === 'claude-sonnet-4-6' ||
     canonical === 'claude-haiku-4-5'
   )
 }

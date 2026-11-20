@@ -123,6 +123,52 @@ const CLAUDE_AUTH_STRIP_UPPER = new Set<string>(
   CLAUDE_AUTH_SUBPROCESS_STRIP_VARS.flatMap(v => [v, `INPUT_${v}`]),
 )
 
+function hasNonEmptyEnvKeyCaseInsensitive(
+  env: Record<string, string | undefined>,
+  upperName: string,
+): boolean {
+  return Object.entries(env).some(
+    ([k, v]) => Boolean(v) && k.toUpperCase() === upperName,
+  )
+}
+
+/**
+ * Official 2.1.327 `XUi` (#389): true when `parentEnv` carried the session's
+ * `CLAUDE_CODE_OAUTH_TOKEN` but `childEnv` does not inherit either
+ * `CLAUDE_CODE_OAUTH_TOKEN` or `CLAUDE_CODE_OAUTH_REFRESH_TOKEN`.
+ */
+export function shouldDropOAuthScopesForChild(
+  parentEnv: Record<string, string | undefined>,
+  childEnv: Record<string, string | undefined>,
+): boolean {
+  return (
+    hasNonEmptyEnvKeyCaseInsensitive(parentEnv, 'CLAUDE_CODE_OAUTH_TOKEN') &&
+    !hasNonEmptyEnvKeyCaseInsensitive(childEnv, 'CLAUDE_CODE_OAUTH_TOKEN') &&
+    !hasNonEmptyEnvKeyCaseInsensitive(
+      childEnv,
+      'CLAUDE_CODE_OAUTH_REFRESH_TOKEN',
+    )
+  )
+}
+
+/**
+ * Official 2.1.327 `Nyo` (#389): when a child command does not receive the
+ * session's `CLAUDE_CODE_OAUTH_TOKEN` (or refresh token), also strip its
+ * `CLAUDE_CODE_OAUTH_SCOPES` so a nested `claude` running with its own token
+ * is not refused by `forceLoginOrgUUID` scope checks.
+ */
+export function stripOAuthScopesIfTokenRemoved(
+  parentEnv: Record<string, string | undefined>,
+  childEnv: Record<string, string | undefined>,
+): void {
+  if (!shouldDropOAuthScopesForChild(parentEnv, childEnv)) return
+  for (const key of Object.keys(childEnv)) {
+    if (key.toUpperCase() === 'CLAUDE_CODE_OAUTH_SCOPES') {
+      delete childEnv[key]
+    }
+  }
+}
+
 /**
  * 2.1.323 #2169 + 2.1.325 #2371/#2372: Strip Claude Code's sign-in tokens,
  * API keys, and mTLS client key passphrase from an environment object for
@@ -144,6 +190,7 @@ export function stripClaudeAuthEnvVars(
       delete out[key]
     }
   }
+  stripOAuthScopesIfTokenRemoved(base, out)
   return out
 }
 
@@ -230,12 +277,19 @@ export function subprocessEnv(): NodeJS.ProcessEnv {
   const screenReaderEnv = getScreenReaderChildEnv()
   const settingsEnv = getSettings_DEPRECATED()?.env ?? {}
   const stripForceColor = shouldStripDaemonForceColor(settingsEnv)
+  // Official 2.1.328 `@285188211` (#442): strip CLAUDE_CODE_RETRY_WATCHDOG from
+  // Bash/tool/hook child subprocesses so nested `claude -p` invocations do not
+  // inherit the parent self-hosted session's rate-limit wait policy.
+  const hasRetryWatchdog = Object.keys(process.env).some(
+    k => k.toUpperCase() === 'CLAUDE_CODE_RETRY_WATCHDOG',
+  )
 
   if (!shouldScrubSubprocessEnv()) {
     if (
       Object.keys(proxyEnv).length === 0 &&
       Object.keys(screenReaderEnv).length === 0 &&
-      !stripForceColor
+      !stripForceColor &&
+      !hasRetryWatchdog
     ) {
       return process.env
     }
@@ -247,6 +301,13 @@ export function subprocessEnv(): NodeJS.ProcessEnv {
     if (stripForceColor) {
       stripDaemonForceColorFromEnv(env, settingsEnv)
     }
+    if (hasRetryWatchdog) {
+      for (const k of Object.keys(env)) {
+        if (k.toUpperCase() === 'CLAUDE_CODE_RETRY_WATCHDOG') {
+          delete env[k]
+        }
+      }
+    }
     return env
   }
   const env: NodeJS.ProcessEnv = {
@@ -257,11 +318,21 @@ export function subprocessEnv(): NodeJS.ProcessEnv {
   if (stripForceColor) {
     stripDaemonForceColorFromEnv(env, settingsEnv)
   }
+  if (hasRetryWatchdog) {
+    for (const k of Object.keys(env)) {
+      if (k.toUpperCase() === 'CLAUDE_CODE_RETRY_WATCHDOG') {
+        delete env[k]
+      }
+    }
+  }
   for (const k of GHA_SUBPROCESS_SCRUB) {
     delete env[k]
     // GitHub Actions auto-creates INPUT_<NAME> for `with:` inputs, duplicating
     // secrets like INPUT_ANTHROPIC_API_KEY. No-op for vars that aren't action inputs.
     delete env[`INPUT_${k}`]
   }
+  // Official 2.1.327 (#389) `Nyo`: drop CLAUDE_CODE_OAUTH_SCOPES whenever the
+  // session's OAuth token was removed so nested `claude` runs with its own token.
+  stripOAuthScopesIfTokenRemoved(process.env, env)
   return env
 }

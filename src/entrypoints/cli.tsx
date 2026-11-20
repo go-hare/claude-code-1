@@ -52,6 +52,21 @@ if (forceInteractiveEarly) {
 // eslint-disable-next-line custom-rules/no-top-level-side-effects, custom-rules/no-process-env-top-level
 process.env.NoDefaultCurrentDirectoryInExePath = '1';
 
+// #626: chalk's supports-color returns Math.min(parseInt(FORCE_COLOR, 10), 3)
+// without a lower bound; negative values (e.g. FORCE_COLOR=-1) throw
+// "The `level` option should be an integer from 0 to 3" at module load.
+// Sanitize before any dynamic import initializes chalk.
+export function sanitizeForceColorEnv(env: NodeJS.ProcessEnv = process.env): void {
+  const raw = env.FORCE_COLOR;
+  if (raw !== undefined) {
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isNaN(parsed) && parsed < 0) {
+      env.FORCE_COLOR = '0';
+    }
+  }
+}
+sanitizeForceColorEnv();
+
 // Bugfix for corepack auto-pinning, which adds yarnpkg to peoples' package.jsons
 // eslint-disable-next-line custom-rules/no-top-level-side-effects
 process.env.COREPACK_ENABLE_AUTO_PIN = '0';

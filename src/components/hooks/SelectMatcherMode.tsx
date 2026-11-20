@@ -23,6 +23,8 @@ type Props = {
   matchersForSelectedEvent: string[];
   hooksByEventAndMatcher: Record<HookEvent, Record<string, IndividualHookConfig[]>>;
   eventDescription: string;
+  defaultFocusIndex?: number;
+  onFocus?: (index: number) => void;
   onSelect: (matcher: string) => void;
   onCancel: () => void;
 };
@@ -32,6 +34,8 @@ export function SelectMatcherMode({
   matchersForSelectedEvent,
   hooksByEventAndMatcher,
   eventDescription,
+  defaultFocusIndex,
+  onFocus,
   onSelect,
   onCancel,
 }: Props): React.ReactNode {
@@ -78,6 +82,8 @@ export function SelectMatcherMode({
       }
     >
       <ItemList
+        defaultFocusIndex={defaultFocusIndex}
+        onFocus={onFocus}
         options={matchersWithSources.map(item => ({
           icon: <Text dimColor>[{item.sources.map(hookSourceInlineDisplayString).join(', ')}]</Text>,
           label: item.matcher || '(all)',

@@ -11,13 +11,20 @@ import {
   mkdir,
   mkdtemp,
   open,
+  readdir,
   readFile,
+  realpath,
   rm,
+  rmdir,
   stat,
   writeFile,
 } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import {
+  buildGovernedGitHostConfigBlock,
+  shouldSkipAgentProxyGitSetupInChildSession,
+} from '../utils/agentProxy/ghShim.js'
 
 /** densable `f2h` */
 export const GIT_PROXY_CRED_HELPER_CONTENT = `#!/bin/sh
@@ -137,6 +144,12 @@ export function isGovernedGitConfigAllowed(
   value: string,
 ): boolean {
   const k = key.toLowerCase()
+  if (
+    k === GOVERNED_GIT_DISABLE_PROACTIVE_AUTH_KEY.toLowerCase() ||
+    /^http\..*\.proactiveauth$/.test(k)
+  ) {
+    return false
+  }
   if (k.startsWith('user.')) return true
   if (k === 'core.autocrlf' || k === 'core.safecrlf' || k === 'core.eol') {
     return true
@@ -214,6 +227,156 @@ async function runGit(
   })
 }
 
+const WIPABLE_DIR_ERROR_CODES = new Set([
+  'EBUSY',
+  'EINVAL',
+  'EACCES',
+  'EPERM',
+  'EROFS',
+])
+
+function isStrictAncestorPath(parent: string, child: string): boolean {
+  const normParent = resolve(parent).replace(/[/\\]+$/, '')
+  const normChild = resolve(child).replace(/[/\\]+$/, '')
+  if (normParent === normChild) return false
+  return (
+    normChild.startsWith(`${normParent}/`) ||
+    normChild.startsWith(`${normParent}\\`)
+  )
+}
+
+function isSameOrAncestorPath(parent: string, child: string): boolean {
+  const normParent = resolve(parent).replace(/[/\\]+$/, '')
+  const normChild = resolve(child).replace(/[/\\]+$/, '')
+  return (
+    normParent === normChild ||
+    normChild.startsWith(`${normParent}/`) ||
+    normChild.startsWith(`${normParent}\\`)
+  )
+}
+
+/**
+ * Official 2.1.328 `MR` (#377) — safely wipe HOME-level git config for
+ * `--use-anthropic-git-proxy`. If `GIT_CONFIG_GLOBAL` names a directory that is
+ * non-empty, cannot be removed, or holds any of the reset paths (`~/.gitconfig`,
+ * `$XDG_CONFIG_HOME/git`, or `.runner`) — unless it lies in or equals one of
+ * those reset paths — leave it alone and return `'kept'` so the runner ignores
+ * `GIT_CONFIG_GLOBAL`, falls back to `~/.gitconfig` (or `.runner/gitconfig`),
+ * and warns instead of deleting the user's directory!
+ */
+export async function wipeHomeGitConfigForProxy(opts: {
+  globalCfgPath: string
+  homeGitconfigPath: string
+  xdgGitDirs: readonly string[]
+  runnerDir: string
+}): Promise<'wiped' | 'kept'> {
+  const { globalCfgPath, homeGitconfigPath, xdgGitDirs, runnerDir } = opts
+  const resetTargets = [homeGitconfigPath, ...xdgGitDirs, runnerDir]
+
+  // Step 1 (Official `MR` `o`): check BEFORE wiping whether GIT_CONFIG_GLOBAL
+  // strictly holds (is a strict ancestor of) any reset target (e.g. HOME or ~/.config).
+  const holdsResetTarget = resetTargets.some(t =>
+    isStrictAncestorPath(globalCfgPath, t),
+  )
+
+  // Step 2 (Official `MR` `i`): if not a strict ancestor, attempt safe removal
+  // of GIT_CONFIG_GLOBAL itself BEFORE wiping resetTargets. Non-empty directories
+  // are preserved (`leftDirectory = true`) unless later removed as part of a reset target.
+  let leftDirectory = false
+  if (!holdsResetTarget) {
+    try {
+      const st = await lstat(globalCfgPath).catch((err: unknown) => {
+        const code = (err as NodeJS.ErrnoException).code
+        if (code === 'ENOENT' || code === 'ENOTDIR') return undefined
+        throw err
+      })
+      if (st?.isDirectory()) {
+        const entries = await readdir(globalCfgPath).catch(() => null)
+        if (entries === null || entries.length > 0) {
+          leftDirectory = true
+        } else {
+          try {
+            await rmdir(globalCfgPath)
+          } catch (rmErr) {
+            const code = (rmErr as NodeJS.ErrnoException).code
+            if (code && WIPABLE_DIR_ERROR_CODES.has(code)) {
+              const resolvedTargets = await Promise.all(
+                [globalCfgPath, ...resetTargets].map(p =>
+                  realpath(p).catch(() => resolve(p)),
+                ),
+              )
+              const [resolvedGlobal = globalCfgPath, ...resolvedResets] =
+                resolvedTargets
+              if (
+                resolvedResets.some(t =>
+                  isSameOrAncestorPath(t, resolvedGlobal),
+                )
+              ) {
+                throw rmErr
+              }
+              leftDirectory = true
+            } else {
+              leftDirectory = true
+            }
+          }
+        }
+      } else if (st) {
+        await rm(globalCfgPath, { force: true })
+      }
+    } catch (err) {
+      const st = await lstat(globalCfgPath).catch(() => undefined)
+      const code = (err as NodeJS.ErrnoException).code
+      const resolvedTargets = await Promise.all(
+        [globalCfgPath, ...resetTargets].map(p =>
+          realpath(p).catch(() => resolve(p)),
+        ),
+      )
+      const [resolvedGlobal = globalCfgPath, ...resolvedResets] =
+        resolvedTargets
+      if (
+        st?.isDirectory() !== true ||
+        !code ||
+        !WIPABLE_DIR_ERROR_CODES.has(code) ||
+        resolvedResets.some(t => isSameOrAncestorPath(t, resolvedGlobal))
+      ) {
+        throw err
+      }
+      leftDirectory = true
+    }
+  }
+
+  // Step 3: always wipe runner-owned HOME-level git locations.
+  await rm(homeGitconfigPath, { recursive: true, force: true })
+  for (const dir of xdgGitDirs) {
+    await rm(dir, { recursive: true, force: true })
+  }
+  await rm(runnerDir, { recursive: true, force: true })
+
+  // Step 4: report `'kept'` ONLY when GIT_CONFIG_GLOBAL was a strict ancestor
+  // OR it was left as a directory that STILL EXISTS after wiping resetTargets
+  // (if it equaled or lay inside xdgGitDirs / runnerDir, Step 3 wiped it so
+  // lstat returns ENOENT and we accurately report `'wiped'`).
+  if (
+    holdsResetTarget ||
+    (leftDirectory &&
+      (await lstat(globalCfgPath).then(
+        () => true,
+        (err: unknown) => (err as NodeJS.ErrnoException).code !== 'ENOENT',
+      )))
+  ) {
+    return 'kept'
+  }
+  await mkdir(dirname(globalCfgPath), { recursive: true })
+  return 'wiped'
+}
+
+/**
+ * Official 2.1.328 (#633) — git config entry disabling inherited
+ * `http.proactiveAuth` on governed/Anthropic-managed git hosts so a host's
+ * global or system `http.proactiveAuth` setting does not break fetch or push.
+ */
+export const GOVERNED_GIT_DISABLE_PROACTIVE_AUTH_KEY = 'http.proactiveAuth'
+
 /**
  * densable `GJl` — git with GIT_CONFIG_GLOBAL/SYSTEM null for governed seed ops.
  */
@@ -252,6 +415,10 @@ export async function configureAnthropicGitProxy(opts: {
   apiBaseUrl: string
   baseDir: string
   gitConfigPath?: string
+  governedHostBlocks?: ReadonlyArray<
+    Parameters<typeof buildGovernedGitHostConfigBlock>[0]
+  >
+  env?: NodeJS.ProcessEnv
   onStatus: (msg: string) => void
 }): Promise<string> {
   const base = opts.apiBaseUrl.replace(/\/+$/, '')
@@ -262,6 +429,14 @@ export async function configureAnthropicGitProxy(opts: {
     throw new Error(
       `--use-anthropic-git-proxy: apiBaseUrl is not a valid URL: ${opts.apiBaseUrl}`,
     )
+  }
+  // Official 2.1.328 (#632): nested `claude` child sessions must not re-arm or
+  // overwrite the parent session's governed git proxy / GIT_CONFIG_GLOBAL.
+  if (shouldSkipAgentProxyGitSetupInChildSession(opts.env)) {
+    opts.onStatus(
+      '[runner:git] skipping agent-proxy git setup inside nested child session (CLAUDE_CODE_CHILD_SESSION)',
+    )
+    return base
   }
   const runnerDir = join(opts.baseDir, '.runner')
   await mkdir(runnerDir, { recursive: true })
@@ -284,6 +459,21 @@ export async function configureAnthropicGitProxy(opts: {
         `git config ${k} failed: ${r.stderr.trim() || r.stdout.trim()}`,
       )
     }
+  }
+  if (
+    opts.gitConfigPath &&
+    opts.governedHostBlocks &&
+    opts.governedHostBlocks.length > 0
+  ) {
+    const existing = await readFile(opts.gitConfigPath, 'utf8').catch(() => '')
+    const renderedBlocks = opts.governedHostBlocks
+      .map(block => buildGovernedGitHostConfigBlock(block))
+      .join('')
+    await writeFile(
+      opts.gitConfigPath,
+      `${existing}${existing.endsWith('\n') || existing.length === 0 ? '' : '\n'}${renderedBlocks}`,
+      { mode: 0o600 },
+    )
   }
   opts.onStatus(
     `[runner:git] --use-anthropic-git-proxy: credential helper registered for https://${host} (${helper})`,

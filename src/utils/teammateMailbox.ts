@@ -43,6 +43,37 @@ const LOCK_OPTIONS = {
   },
 }
 
+/**
+ * Official 2.1.328 (#656): serialize in-process mailbox operations targeting the
+ * same inbox path BEFORE acquiring the filesystem lockfile so starting several
+ * in-process teammates at once does not contend on `ELOCKED` ("Lock file is
+ * already being held").
+ */
+const inProcessMailboxQueues = new Map<string, Promise<unknown>>()
+
+export async function withInProcessMailboxLock<T>(
+  inboxPath: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const prev = inProcessMailboxQueues.get(inboxPath) ?? Promise.resolve()
+  let releaseQueue: () => void = () => {}
+  const gate = new Promise<void>(resolve => {
+    releaseQueue = resolve
+  })
+  const tail = prev.then(() => gate)
+  inProcessMailboxQueues.set(inboxPath, tail)
+
+  await prev
+  try {
+    return await fn()
+  } finally {
+    releaseQueue()
+    if (inProcessMailboxQueues.get(inboxPath) === tail) {
+      inProcessMailboxQueues.delete(inboxPath)
+    }
+  }
+}
+
 export const MAX_MAILBOX_MESSAGES = 1_000
 export const MAX_READ_MAILBOX_MESSAGES = 200
 export const MAX_UNREAD_PROTOCOL_MAILBOX_MESSAGES = 2_000
@@ -518,75 +549,79 @@ export async function writeToMailbox(
   )
 
   // Ensure the inbox file exists before locking (proper-lockfile requires the file to exist)
-  try {
-    await writeFile(inboxPath, '[]', { encoding: 'utf-8', flag: 'wx' })
-    logForDebugging(`[TeammateMailbox] writeToMailbox: created new inbox file`)
-  } catch (error) {
-    const code = getErrnoCode(error)
-    if (code !== 'EEXIST') {
+  return withInProcessMailboxLock(inboxPath, async () => {
+    try {
+      await writeFile(inboxPath, '[]', { encoding: 'utf-8', flag: 'wx' })
       logForDebugging(
-        `[TeammateMailbox] writeToMailbox: failed to create inbox file: ${error}`,
+        `[TeammateMailbox] writeToMailbox: created new inbox file`,
       )
-      // densable: only logError when not a "known" soft fs condition; still soft-fail.
+    } catch (error) {
+      const code = getErrnoCode(error)
+      if (code !== 'EEXIST') {
+        logForDebugging(
+          `[TeammateMailbox] writeToMailbox: failed to create inbox file: ${error}`,
+        )
+        // densable: only logError when not a "known" soft fs condition; still soft-fail.
+        logError(error)
+        return undefined
+      }
+    }
+
+    let release: (() => Promise<void>) | undefined
+    try {
+      release = await lockfile.lock(inboxPath, {
+        lockfilePath: lockFilePath,
+        ...LOCK_OPTIONS,
+      })
+
+      // Re-read messages after acquiring lock to get the latest state
+      const messages = await readMailboxForMutation(recipientName, teamName)
+
+      const ids = newMailboxMessageIds()
+      const newMessage = toMailboxMessage({
+        ...message,
+        ...ids,
+        read: false,
+      })
+
+      messages.push(newMessage)
+
+      await writeCompactedMailbox(inboxPath, messages, 'writeToMailbox')
+      logForDebugging(
+        `[TeammateMailbox] Wrote message to ${recipientName}'s inbox from ${message.from}`,
+      )
+      if (await isTeamDeleted(teamName)) {
+        logForDebugging(
+          `[TeammateMailbox] writeToMailbox: removing ${inboxPath}: its team was deleted during this write`,
+        )
+        await unlink(inboxPath).catch(err => {
+          if (getErrnoCode(err) !== 'ENOENT') {
+            logForDebugging(
+              `[TeammateMailbox] writeToMailbox: could not remove ${inboxPath}: ${err}`,
+            )
+          }
+        })
+        return undefined
+      }
+      const shutdownReq = isShutdownRequest(message.text)
+      if (shutdownReq) {
+        recordPendingShutdownRequest(
+          shutdownReq.requestId,
+          recipientName,
+          message.from === TEAM_LEAD_NAME,
+        )
+      }
+      return ids.msg_id
+    } catch (error) {
+      logForDebugging(`Failed to write to inbox for ${recipientName}: ${error}`)
       logError(error)
       return undefined
+    } finally {
+      if (release) {
+        await release()
+      }
     }
-  }
-
-  let release: (() => Promise<void>) | undefined
-  try {
-    release = await lockfile.lock(inboxPath, {
-      lockfilePath: lockFilePath,
-      ...LOCK_OPTIONS,
-    })
-
-    // Re-read messages after acquiring lock to get the latest state
-    const messages = await readMailboxForMutation(recipientName, teamName)
-
-    const ids = newMailboxMessageIds()
-    const newMessage = toMailboxMessage({
-      ...message,
-      ...ids,
-      read: false,
-    })
-
-    messages.push(newMessage)
-
-    await writeCompactedMailbox(inboxPath, messages, 'writeToMailbox')
-    logForDebugging(
-      `[TeammateMailbox] Wrote message to ${recipientName}'s inbox from ${message.from}`,
-    )
-    if (await isTeamDeleted(teamName)) {
-      logForDebugging(
-        `[TeammateMailbox] writeToMailbox: removing ${inboxPath}: its team was deleted during this write`,
-      )
-      await unlink(inboxPath).catch(err => {
-        if (getErrnoCode(err) !== 'ENOENT') {
-          logForDebugging(
-            `[TeammateMailbox] writeToMailbox: could not remove ${inboxPath}: ${err}`,
-          )
-        }
-      })
-      return undefined
-    }
-    const shutdownReq = isShutdownRequest(message.text)
-    if (shutdownReq) {
-      recordPendingShutdownRequest(
-        shutdownReq.requestId,
-        recipientName,
-        message.from === TEAM_LEAD_NAME,
-      )
-    }
-    return ids.msg_id
-  } catch (error) {
-    logForDebugging(`Failed to write to inbox for ${recipientName}: ${error}`)
-    logError(error)
-    return undefined
-  } finally {
-    if (release) {
-      await release()
-    }
-  }
+  })
 }
 
 /**
@@ -608,64 +643,72 @@ export async function markMessageAsReadByIndex(
 
   const lockFilePath = `${inboxPath}.lock`
 
-  let release: (() => Promise<void>) | undefined
-  try {
-    logForDebugging(
-      `[TeammateMailbox] markMessageAsReadByIndex: acquiring lock...`,
-    )
-    release = await lockfile.lock(inboxPath, {
-      lockfilePath: lockFilePath,
-      ...LOCK_OPTIONS,
-    })
-    logForDebugging(`[TeammateMailbox] markMessageAsReadByIndex: lock acquired`)
-
-    // Re-read messages after acquiring lock to get the latest state
-    const messages = await readMailboxForMutation(agentName, teamName)
-    logForDebugging(
-      `[TeammateMailbox] markMessageAsReadByIndex: read ${messages.length} messages after lock`,
-    )
-
-    if (messageIndex < 0 || messageIndex >= messages.length) {
+  return withInProcessMailboxLock(inboxPath, async () => {
+    let release: (() => Promise<void>) | undefined
+    try {
       logForDebugging(
-        `[TeammateMailbox] markMessageAsReadByIndex: index ${messageIndex} out of bounds (${messages.length} messages)`,
+        `[TeammateMailbox] markMessageAsReadByIndex: acquiring lock...`,
       )
-      return
-    }
-
-    const message = messages[messageIndex]
-    if (!message || message.read) {
+      release = await lockfile.lock(inboxPath, {
+        lockfilePath: lockFilePath,
+        ...LOCK_OPTIONS,
+      })
       logForDebugging(
-        `[TeammateMailbox] markMessageAsReadByIndex: message already read or missing`,
+        `[TeammateMailbox] markMessageAsReadByIndex: lock acquired`,
       )
-      return
-    }
 
-    messages[messageIndex] = { ...message, read: true }
+      // Re-read messages after acquiring lock to get the latest state
+      const messages = await readMailboxForMutation(agentName, teamName)
+      logForDebugging(
+        `[TeammateMailbox] markMessageAsReadByIndex: read ${messages.length} messages after lock`,
+      )
 
-    await writeCompactedMailbox(inboxPath, messages, 'markMessageAsReadByIndex')
-    logForDebugging(
-      `[TeammateMailbox] markMessageAsReadByIndex: marked message at index ${messageIndex} as read`,
-    )
-  } catch (error) {
-    const code = getErrnoCode(error)
-    if (code === 'ENOENT') {
-      logForDebugging(
-        `[TeammateMailbox] markMessageAsReadByIndex: file does not exist at ${inboxPath}`,
+      if (messageIndex < 0 || messageIndex >= messages.length) {
+        logForDebugging(
+          `[TeammateMailbox] markMessageAsReadByIndex: index ${messageIndex} out of bounds (${messages.length} messages)`,
+        )
+        return
+      }
+
+      const message = messages[messageIndex]
+      if (!message || message.read) {
+        logForDebugging(
+          `[TeammateMailbox] markMessageAsReadByIndex: message already read or missing`,
+        )
+        return
+      }
+
+      messages[messageIndex] = { ...message, read: true }
+
+      await writeCompactedMailbox(
+        inboxPath,
+        messages,
+        'markMessageAsReadByIndex',
       )
-      return
-    }
-    logForDebugging(
-      `[TeammateMailbox] markMessageAsReadByIndex FAILED for ${agentName}: ${error}`,
-    )
-    logError(error)
-  } finally {
-    if (release) {
-      await release()
       logForDebugging(
-        `[TeammateMailbox] markMessageAsReadByIndex: lock released`,
+        `[TeammateMailbox] markMessageAsReadByIndex: marked message at index ${messageIndex} as read`,
       )
+    } catch (error) {
+      const code = getErrnoCode(error)
+      if (code === 'ENOENT') {
+        logForDebugging(
+          `[TeammateMailbox] markMessageAsReadByIndex: file does not exist at ${inboxPath}`,
+        )
+        return
+      }
+      logForDebugging(
+        `[TeammateMailbox] markMessageAsReadByIndex FAILED for ${agentName}: ${error}`,
+      )
+      logError(error)
+    } finally {
+      if (release) {
+        await release()
+        logForDebugging(
+          `[TeammateMailbox] markMessageAsReadByIndex: lock released`,
+        )
+      }
     }
-  }
+  })
 }
 
 export async function markMessageAsReadByIdentity(
@@ -676,36 +719,38 @@ export async function markMessageAsReadByIdentity(
   const inboxPath = getInboxPath(agentName, teamName)
   const lockFilePath = `${inboxPath}.lock`
 
-  let release: (() => Promise<void>) | undefined
-  try {
-    release = await lockfile.lock(inboxPath, {
-      lockfilePath: lockFilePath,
-      ...LOCK_OPTIONS,
-    })
+  return withInProcessMailboxLock(inboxPath, async () => {
+    let release: (() => Promise<void>) | undefined
+    try {
+      release = await lockfile.lock(inboxPath, {
+        lockfilePath: lockFilePath,
+        ...LOCK_OPTIONS,
+      })
 
-    const messages = await readMailboxForMutation(agentName, teamName)
-    const messageIndex = messages.findIndex(message => {
-      return !message.read && sameMailboxMessage(message, expectedMessage)
-    })
-    if (messageIndex < 0) return false
+      const messages = await readMailboxForMutation(agentName, teamName)
+      const messageIndex = messages.findIndex(message => {
+        return !message.read && sameMailboxMessage(message, expectedMessage)
+      })
+      if (messageIndex < 0) return false
 
-    messages[messageIndex] = { ...messages[messageIndex]!, read: true }
-    await writeCompactedMailbox(
-      inboxPath,
-      messages,
-      'markMessageAsReadByIdentity',
-    )
-    return true
-  } catch (error) {
-    const code = getErrnoCode(error)
-    if (code === 'ENOENT') return false
-    logError(error)
-    return false
-  } finally {
-    if (release) {
-      await release()
+      messages[messageIndex] = { ...messages[messageIndex]!, read: true }
+      await writeCompactedMailbox(
+        inboxPath,
+        messages,
+        'markMessageAsReadByIdentity',
+      )
+      return true
+    } catch (error) {
+      const code = getErrnoCode(error)
+      if (code === 'ENOENT') return false
+      logError(error)
+      return false
+    } finally {
+      if (release) {
+        await release()
+      }
     }
-  }
+  })
 }
 
 /**
@@ -725,58 +770,60 @@ export async function markMessagesAsRead(
 
   const lockFilePath = `${inboxPath}.lock`
 
-  let release: (() => Promise<void>) | undefined
-  try {
-    logForDebugging(`[TeammateMailbox] markMessagesAsRead: acquiring lock...`)
-    release = await lockfile.lock(inboxPath, {
-      lockfilePath: lockFilePath,
-      ...LOCK_OPTIONS,
-    })
-    logForDebugging(`[TeammateMailbox] markMessagesAsRead: lock acquired`)
+  return withInProcessMailboxLock(inboxPath, async () => {
+    let release: (() => Promise<void>) | undefined
+    try {
+      logForDebugging(`[TeammateMailbox] markMessagesAsRead: acquiring lock...`)
+      release = await lockfile.lock(inboxPath, {
+        lockfilePath: lockFilePath,
+        ...LOCK_OPTIONS,
+      })
+      logForDebugging(`[TeammateMailbox] markMessagesAsRead: lock acquired`)
 
-    // Re-read messages after acquiring lock to get the latest state
-    const messages = await readMailboxForMutation(agentName, teamName)
-    logForDebugging(
-      `[TeammateMailbox] markMessagesAsRead: read ${messages.length} messages after lock`,
-    )
-
-    if (messages.length === 0) {
+      // Re-read messages after acquiring lock to get the latest state
+      const messages = await readMailboxForMutation(agentName, teamName)
       logForDebugging(
-        `[TeammateMailbox] markMessagesAsRead: no messages to mark`,
+        `[TeammateMailbox] markMessagesAsRead: read ${messages.length} messages after lock`,
       )
-      return
-    }
 
-    const unreadCount = count(messages, m => !m.read)
-    logForDebugging(
-      `[TeammateMailbox] markMessagesAsRead: ${unreadCount} unread of ${messages.length} total`,
-    )
+      if (messages.length === 0) {
+        logForDebugging(
+          `[TeammateMailbox] markMessagesAsRead: no messages to mark`,
+        )
+        return
+      }
 
-    // messages comes from jsonParse — fresh, unshared objects safe to mutate
-    for (const m of messages) m.read = true
-
-    await writeCompactedMailbox(inboxPath, messages, 'markMessagesAsRead')
-    logForDebugging(
-      `[TeammateMailbox] markMessagesAsRead: WROTE ${unreadCount} message(s) as read to ${inboxPath}`,
-    )
-  } catch (error) {
-    const code = getErrnoCode(error)
-    if (code === 'ENOENT') {
+      const unreadCount = count(messages, m => !m.read)
       logForDebugging(
-        `[TeammateMailbox] markMessagesAsRead: file does not exist at ${inboxPath}`,
+        `[TeammateMailbox] markMessagesAsRead: ${unreadCount} unread of ${messages.length} total`,
       )
-      return
+
+      // messages comes from jsonParse — fresh, unshared objects safe to mutate
+      for (const m of messages) m.read = true
+
+      await writeCompactedMailbox(inboxPath, messages, 'markMessagesAsRead')
+      logForDebugging(
+        `[TeammateMailbox] markMessagesAsRead: WROTE ${unreadCount} message(s) as read to ${inboxPath}`,
+      )
+    } catch (error) {
+      const code = getErrnoCode(error)
+      if (code === 'ENOENT') {
+        logForDebugging(
+          `[TeammateMailbox] markMessagesAsRead: file does not exist at ${inboxPath}`,
+        )
+        return
+      }
+      logForDebugging(
+        `[TeammateMailbox] markMessagesAsRead FAILED for ${agentName}: ${error}`,
+      )
+      logError(error)
+    } finally {
+      if (release) {
+        await release()
+        logForDebugging(`[TeammateMailbox] markMessagesAsRead: lock released`)
+      }
     }
-    logForDebugging(
-      `[TeammateMailbox] markMessagesAsRead FAILED for ${agentName}: ${error}`,
-    )
-    logError(error)
-  } finally {
-    if (release) {
-      await release()
-      logForDebugging(`[TeammateMailbox] markMessagesAsRead: lock released`)
-    }
-  }
+  })
 }
 
 /**
@@ -2138,43 +2185,45 @@ export async function markMessagesAsReadByPredicate(
   const inboxPath = getInboxPath(agentName, teamName)
 
   const lockFilePath = `${inboxPath}.lock`
-  let release: (() => Promise<void>) | undefined
+  return withInProcessMailboxLock(inboxPath, async () => {
+    let release: (() => Promise<void>) | undefined
 
-  try {
-    release = await lockfile.lock(inboxPath, {
-      lockfilePath: lockFilePath,
-      ...LOCK_OPTIONS,
-    })
+    try {
+      release = await lockfile.lock(inboxPath, {
+        lockfilePath: lockFilePath,
+        ...LOCK_OPTIONS,
+      })
 
-    const messages = await readMailboxForMutation(agentName, teamName)
-    if (messages.length === 0) {
-      return
-    }
+      const messages = await readMailboxForMutation(agentName, teamName)
+      if (messages.length === 0) {
+        return
+      }
 
-    const updatedMessages = messages.map(m =>
-      !m.read && predicate(m) ? { ...m, read: true } : m,
-    )
+      const updatedMessages = messages.map(m =>
+        !m.read && predicate(m) ? { ...m, read: true } : m,
+      )
 
-    await writeCompactedMailbox(
-      inboxPath,
-      updatedMessages,
-      'markMessagesAsReadByPredicate',
-    )
-  } catch (error) {
-    const code = getErrnoCode(error)
-    if (code === 'ENOENT') {
-      return
-    }
-    logError(error)
-  } finally {
-    if (release) {
-      try {
-        await release()
-      } catch {
-        // Lock may have already been released
+      await writeCompactedMailbox(
+        inboxPath,
+        updatedMessages,
+        'markMessagesAsReadByPredicate',
+      )
+    } catch (error) {
+      const code = getErrnoCode(error)
+      if (code === 'ENOENT') {
+        return
+      }
+      logError(error)
+    } finally {
+      if (release) {
+        try {
+          await release()
+        } catch {
+          // Lock may have already been released
+        }
       }
     }
-  }
+  })
 }
 
 /**

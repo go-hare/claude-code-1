@@ -1,6 +1,7 @@
 import {
   getMainLoopModelOverride,
   getModelStrings as getModelStringsState,
+  resetModelStringsForTestingOnly,
   setModelStrings as setModelStringsState,
 } from 'src/bootstrap/state.js'
 import { parseAwsIniSections } from '../aws.js'
@@ -361,4 +362,63 @@ export async function ensureModelStringsInitialized(): Promise<void> {
 
   // For Bedrock, wait for the profile fetch
   await updateBedrockModelStrings()
+}
+
+/**
+ * Official 2.1.327 `kcl` / `V_l` / `Rxl` / `Jmn` (#436):
+ * Track provider + routing env keys (including `ANTHROPIC_BASE_URL` set by a
+ * project's `.claude/settings.json` after startup) and reset provider-bound
+ * model caches when the effective route moves so `/model` never shows stale
+ * first-party models for an LLM gateway.
+ */
+export const PROVIDER_BOUND_ROUTE_ENV_KEYS = [
+  'CLAUDE_CODE_USE_BEDROCK',
+  'CLAUDE_CODE_USE_VERTEX',
+  'CLAUDE_CODE_USE_FOUNDRY',
+  'CLAUDE_CODE_USE_ANTHROPIC_AWS',
+  'CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD',
+  'CLAUDE_CODE_USE_MANTLE',
+  'CLAUDE_CODE_USE_GATEWAY',
+  'ANTHROPIC_BASE_URL',
+  '_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL',
+  'ANTHROPIC_BEDROCK_BASE_URL',
+  'ANTHROPIC_VERTEX_BASE_URL',
+  'ANTHROPIC_FOUNDRY_BASE_URL',
+  'ANTHROPIC_AWS_BASE_URL',
+  'ANTHROPIC_GOOGLE_CLOUD_BASE_URL',
+  'ANTHROPIC_BEDROCK_MANTLE_BASE_URL',
+  'AWS_REGION',
+  'AWS_DEFAULT_REGION',
+  'AWS_PROFILE',
+  'CLOUD_ML_REGION',
+  'ANTHROPIC_VERTEX_PROJECT_ID',
+  'ANTHROPIC_FOUNDRY_RESOURCE',
+  'ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION',
+] as const
+
+export function getProviderBoundRouteSnapshot(
+  env: NodeJS.ProcessEnv = process.env,
+): readonly (string | undefined)[] {
+  return [
+    getAPIProvider(),
+    ...PROVIDER_BOUND_ROUTE_ENV_KEYS.map(key => env[key]),
+  ]
+}
+
+export function resetProviderBoundCaches(): void {
+  resetModelStringsForTestingOnly()
+}
+
+export function resetProviderBoundCachesIfMoved(
+  previousRoute: readonly (string | undefined)[],
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const current = getProviderBoundRouteSnapshot(env)
+  const moved =
+    current.length !== previousRoute.length ||
+    current.some((val, i) => val !== previousRoute[i])
+  if (moved) {
+    resetProviderBoundCaches()
+  }
+  return moved
 }

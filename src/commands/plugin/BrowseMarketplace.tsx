@@ -53,7 +53,12 @@ import {
 } from './pluginDetailsHelpers.js';
 import type { ViewState as ParentViewState } from './types.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { computePluginListMaxVisible, usePluginListExtendedKeys } from './pluginListHelpers.js';
+import {
+  computePluginListMaxVisible,
+  recordPluginUiClick,
+  shouldIgnorePluginEnterAction,
+  usePluginListExtendedKeys,
+} from './pluginListHelpers.js';
 import { usePagination } from './usePagination.js';
 
 type Props = {
@@ -188,6 +193,8 @@ export function BrowseMarketplace({
   // Details view state
   const [detailsMenuIndex, setDetailsMenuIndex] = useState(0);
   const [isInstalling, setIsInstalling] = useState(false);
+  const lastViewTransitionAtRef = React.useRef(0);
+  const lastEnterAcceptAtRef = React.useRef(0);
   const [installError, setInstallError] = useState<string | null>(null);
 
   // Warning state for non-critical errors (e.g., some marketplaces failed to load)
@@ -653,6 +660,7 @@ export function BrowseMarketplace({
                 targetMarketplace: plugin.marketplaceName,
               });
             } else {
+              lastViewTransitionAtRef.current = Date.now();
               setSelectedPlugin(plugin);
               setViewState('plugin-details');
               setDetailsMenuIndex(0);
@@ -713,6 +721,18 @@ export function BrowseMarketplace({
       'select:accept': () => {
         if (!selectedPlugin) return;
         const action = detailsMenuOptions[detailsMenuIndex]?.action;
+        const isInstallAction = action === 'install-user' || action === 'install-project' || action === 'install-local';
+        if (
+          isInstallAction &&
+          shouldIgnorePluginEnterAction({
+            lastTransitionAt: lastViewTransitionAtRef.current,
+            lastAcceptAt: lastEnterAcceptAtRef.current,
+            isBusy: isInstalling,
+          })
+        ) {
+          return;
+        }
+        lastEnterAcceptAtRef.current = Date.now();
         const hasHomepage = selectedPlugin.entry.homepage;
         const githubRepo = extractGitHubRepo(selectedPlugin);
         if (action === 'install-user') {
@@ -1080,7 +1100,10 @@ export function BrowseMarketplace({
             key={plugin.pluginId}
             flexDirection="column"
             marginBottom={isLast && !error ? 0 : 1}
-            onClick={() => pagination.handleSelectionChange(actualIndex, setSelectedIndex)}
+            onClick={() => {
+              recordPluginUiClick();
+              pagination.handleSelectionChange(actualIndex, setSelectedIndex);
+            }}
           >
             <Box>
               <Text color={isSelected ? 'suggestion' : undefined}>{isSelected ? figures.pointer : ' '} </Text>

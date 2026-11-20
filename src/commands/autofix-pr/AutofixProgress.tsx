@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, Dialog, KeyboardShortcutHint, Text } from '@anthropic/ink';
 import type { Theme } from '../../utils/theme.js';
 
 export type AutofixPhase =
@@ -16,6 +16,29 @@ interface AutofixProgressProps {
   target: string;
   sessionUrl?: string;
   errorMessage?: string;
+  /** Official 2.1.327 (#447): Esc immediately dismisses the dialog and stops any started session asynchronously. */
+  onCancel?: () => void;
+}
+
+/**
+ * Official 2.1.327 (#447) `ee`: cancellation message shown immediately when Esc
+ * closes `/autofix-pr`. Before spawning begins, says only "Autofix PR cancelled";
+ * once launching may have started a cloud session, explains that stopping runs
+ * in the background and any failure will be reported afterwards with a link.
+ */
+export function formatAutofixCancelMessage(phase: AutofixPhase | 'checking' | 'spawning' | 'subscribing'): string {
+  if (phase === 'detecting' || phase === 'checking' || phase === 'checking_eligibility') {
+    return 'Autofix PR cancelled';
+  }
+  return 'Autofix PR cancelled. Any cloud session it started will be stopped. If that fails, a link to stop it yourself will appear here.';
+}
+
+/**
+ * Official 2.1.327 (#447) `ue`: message reported afterwards if stopping a
+ * started cloud session failed after Esc closed the dialog.
+ */
+export function formatAutofixStopFailedMessage(sessionUrl: string): string {
+  return `A cloud session had already started and Claude Code couldn't stop it, so it may still work on the PR. Stop it here: ${sessionUrl}`;
 }
 
 const PHASE_LABELS: Record<AutofixPhase, string> = {
@@ -45,12 +68,18 @@ function phaseIndex(phase: AutofixPhase): number {
  * Inline progress component for /autofix-pr.
  * Rendered by the REPL alongside the onDone text message.
  */
-export function AutofixProgress({ phase, target, sessionUrl, errorMessage }: AutofixProgressProps): React.ReactElement {
+export function AutofixProgress({
+  phase,
+  target,
+  sessionUrl,
+  errorMessage,
+  onCancel,
+}: AutofixProgressProps): React.ReactElement {
   const currentIdx = phaseIndex(phase);
   const isError = phase === 'error';
 
-  return (
-    <Box flexDirection="column" marginTop={1} marginBottom={1}>
+  const body = (
+    <Box flexDirection="column" marginTop={onCancel ? 0 : 1} marginBottom={onCancel ? 0 : 1}>
       <Box>
         <Text bold>Autofix PR </Text>
         <Text color={'claude' as keyof Theme}>{target}</Text>
@@ -81,4 +110,18 @@ export function AutofixProgress({ phase, target, sessionUrl, errorMessage }: Aut
       )}
     </Box>
   );
+
+  if (onCancel) {
+    return (
+      <Dialog
+        title="Autofix PR"
+        onCancel={onCancel}
+        inputGuide={<KeyboardShortcutHint shortcut="esc" action="cancel" />}
+      >
+        {body}
+      </Dialog>
+    );
+  }
+
+  return body;
 }

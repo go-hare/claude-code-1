@@ -245,18 +245,120 @@ async function hasClipboardImageWin32(): Promise<boolean> {
  * WSL-as-linux powershell.exe host path remains residual (SUb returns
  * commands for process.platform table keys only — no Wt() switch in SUb).
  */
+const LINUX_XCLIP_READ_ARGS = ['-selection', 'clipboard', '-o', '-t'] as const
+const LINUX_CLIPBOARD_TOOLS = [
+  {
+    list: ['xclip', ...LINUX_XCLIP_READ_ARGS, 'TARGETS'] as const,
+    read: ['xclip', ...LINUX_XCLIP_READ_ARGS] as const,
+  },
+  {
+    list: ['wl-paste', '--list-types'] as const,
+    read: ['wl-paste', '--type'] as const,
+  },
+] as const
+const LINUX_CLIPBOARD_IMAGE_SUBTYPES = [
+  'png',
+  'jpeg',
+  'jpg',
+  'webp',
+  'gif',
+  'bmp',
+] as const
+
+export type LinuxClipboardExecFn = (
+  cmd: string,
+  args: string[],
+  opts: { timeout: number; encoding?: BufferEncoding },
+) => Promise<{ code: number; stdout: string }>
+
+async function defaultLinuxClipboardExec(
+  cmd: string,
+  args: string[],
+  opts: { timeout: number; encoding?: BufferEncoding },
+): Promise<{ code: number; stdout: string }> {
+  if (opts.encoding === 'latin1') {
+    const res = await execa(cmd, args, {
+      reject: false,
+      timeout: opts.timeout,
+      encoding: 'buffer',
+      stripFinalNewline: false,
+    })
+    const buf = Buffer.isBuffer(res.stdout)
+      ? res.stdout
+      : Buffer.from(res.stdout ?? '')
+    return {
+      code: res.exitCode ?? 1,
+      stdout: buf.toString('latin1'),
+    }
+  }
+  const res = await execFileNoThrowWithCwd(cmd, args, {
+    timeout: opts.timeout,
+  })
+  return { code: res.code, stdout: res.stdout }
+}
+
+/**
+ * Official 2.1.328 #599 (`B()`): read Linux clipboard image directly into a
+ * Buffer using Wayland (`wl-paste`) or X11 (`xclip`), ordered by
+ * `WAYLAND_DISPLAY`. Avoids shell pipelines and stale temp screenshot files,
+ * bounds list/read with explicit timeouts (3s / 30s) so Ctrl+V never hangs,
+ * and stops immediately when the active clipboard tool reports no image MIME
+ * type instead of pasting a stale image.
+ */
+export async function readLinuxClipboardImageBuffer(
+  env: NodeJS.ProcessEnv = process.env,
+  execFn: LinuxClipboardExecFn = defaultLinuxClipboardExec,
+): Promise<Buffer | null> {
+  const orderedTools = env.WAYLAND_DISPLAY
+    ? [...LINUX_CLIPBOARD_TOOLS].reverse()
+    : [...LINUX_CLIPBOARD_TOOLS]
+  for (const { list, read } of orderedTools) {
+    const listed = await execFn(list[0], [...list.slice(1)], { timeout: 3000 })
+    if (listed.code !== 0) {
+      continue
+    }
+    const types = listed.stdout.split('\n').map(line => line.trim())
+    const imageMime = LINUX_CLIPBOARD_IMAGE_SUBTYPES.map(
+      sub => `image/${sub}`,
+    ).find(mime => types.includes(mime))
+    if (imageMime === undefined) {
+      return null
+    }
+    const fetched = await execFn(read[0], [...read.slice(1), imageMime], {
+      timeout: 30000,
+      encoding: 'latin1',
+    })
+    return fetched.code === 0 ? Buffer.from(fetched.stdout, 'latin1') : null
+  }
+  return null
+}
+
+export async function hasLinuxClipboardImage(
+  env: NodeJS.ProcessEnv = process.env,
+  execFn: LinuxClipboardExecFn = defaultLinuxClipboardExec,
+): Promise<boolean> {
+  const orderedTools = env.WAYLAND_DISPLAY
+    ? [...LINUX_CLIPBOARD_TOOLS].reverse()
+    : [...LINUX_CLIPBOARD_TOOLS]
+  for (const { list } of orderedTools) {
+    const listed = await execFn(list[0], [...list.slice(1)], { timeout: 3000 })
+    if (listed.code !== 0) {
+      continue
+    }
+    const types = listed.stdout.split('\n').map(line => line.trim())
+    return LINUX_CLIPBOARD_IMAGE_SUBTYPES.some(sub =>
+      types.includes(`image/${sub}`),
+    )
+  }
+  return false
+}
+
 export async function hasImageInClipboard(): Promise<boolean> {
   if (process.platform === 'win32') {
     return hasClipboardImageWin32()
   }
   if (process.platform === 'linux') {
-    // densable SUb linux.checkImage — exact SEA pipeline (xclip TARGETS then
-    // wl-paste -l). No Wt/WSL host invent: SUb keys on process.platform only.
-    const result = await execFileNoThrowWithCwd('/bin/sh', [
-      '-c',
-      'xclip -selection clipboard -t TARGETS -o 2>/dev/null | grep -E "image/(png|jpeg|jpg|gif|webp|bmp)" || wl-paste -l 2>/dev/null | grep -E "image/(png|jpeg|jpg|gif|webp|bmp)"',
-    ])
-    return result.code === 0
+    return hasLinuxClipboardImage()
   }
   if (process.platform !== 'darwin') {
     return false
@@ -703,6 +805,21 @@ export async function getImageFromClipboard(): Promise<ImageWithDimensions | nul
       } catch {
         // best-effort
       }
+      return null
+    }
+  }
+
+  // Official 2.1.328 #599: Linux direct buffer clipboard read (Wayland/X11)
+  // without shell pipelines or temp screenshot files.
+  if (process.platform === 'linux') {
+    try {
+      const imageBuffer = await readLinuxClipboardImageBuffer()
+      if (!imageBuffer || imageBuffer.length === 0) {
+        return null
+      }
+      return await finalizeClipboardImageBuffer(imageBuffer)
+    } catch (e) {
+      logError(e as Error)
       return null
     }
   }

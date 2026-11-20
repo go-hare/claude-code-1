@@ -362,8 +362,10 @@ export function PermissionPrompt<T extends string>({
   useKeybindings(keybindingHandlers, { context: 'Confirmation' });
 
   // Handle cancel (Esc)
+  // Official 2.1.327 (#445): Esc is NEVER blocked by the permission mount/submit
+  // settle guard — the user can always immediately dismiss a newly appeared prompt.
   const handleCancel = useCallback(() => {
-    if (isDisabled || isWithinPermissionKeyGuard(mountedAtRef.current)) return;
+    if (isDisabled) return;
     logEvent('tengu_permission_request_escape', {});
     // Increment escape count for attribution tracking
     setAppState(prev => ({
@@ -376,11 +378,22 @@ export function PermissionPrompt<T extends string>({
     onCancel?.();
   }, [isDisabled, onCancel, setAppState]);
 
+  // Official 2.1.327 (#500): permission prompt Select stops at No instead of
+  // wrapping around, and typing a digit past the last answer focuses No.
+  const declineOptionValue = useMemo(() => {
+    const rejectOpt = safeOptions.find(opt => opt.feedbackConfig?.type === 'reject');
+    if (rejectOpt) return rejectOpt.value;
+    const lastOpt = safeOptions.at(-1);
+    return lastOpt?.value === 'no' ? lastOpt.value : undefined;
+  }, [safeOptions]);
+
   const select = (
     <Select
       options={selectOptions}
       inlineDescriptions
       isDisabled={isDisabled}
+      declineValue={declineOptionValue}
+      stopsAtLastRow={declineOptionValue !== undefined}
       onChange={handleSelect}
       onCancel={handleCancel}
       onFocus={value => {

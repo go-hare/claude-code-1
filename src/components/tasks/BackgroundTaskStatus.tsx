@@ -118,10 +118,16 @@ export function BackgroundTaskStatus({
     [allPills],
   );
 
+  // Hoisted above conditional returns to satisfy Rules of Hooks when
+  // runningTasks.length transitions between 0 and >=1.
+  const handleOpenDialog = useMemo(() => (onOpenDialog ? () => onOpenDialog() : undefined), [onOpenDialog]);
+
   if (allTeammates || (!showSpinnerTree && isViewingTeammate)) {
     const selectedIdx = tasksSelected ? teammateFooterIndex : -1;
-    // Which agent is currently foregrounded (bold)
-    const viewedIdx = viewingAgentTaskId ? teammateEntries.findIndex(t => t.id === viewingAgentTaskId) + 1 : 0; // 0 = main/leader
+    // Which agent is currently foregrounded (bold) — match against sorted allPills
+    // by taskId (not unsorted teammateEntries) so active-first sorting highlights
+    // the actual viewed teammate.
+    const viewedIdx = viewingAgentTaskId ? allPills.findIndex(p => p.taskId === viewingAgentTaskId) : 0; // 0 = main/leader
 
     // Calculate available width for pills
     // Reserve space for: arrows, hint, and minimal padding
@@ -183,8 +189,6 @@ export function BackgroundTaskStatus({
   if (runningTasks.length === 0) {
     return null;
   }
-
-  const handleOpenDialog = useMemo(() => (onOpenDialog ? () => onOpenDialog() : undefined), [onOpenDialog]);
 
   return (
     <>

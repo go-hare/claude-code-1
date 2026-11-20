@@ -4,6 +4,130 @@ import { Box, Byline, KeyboardShortcutHint, Text, useInput } from '@anthropic/in
 import figures from 'figures';
 import { useKeybindings } from '../../keybindings/useKeybinding.js';
 
+export const CLICK_TO_ENTER_GUARD_MS = 350;
+export const POST_TRANSITION_ENTER_GUARD_MS = 300;
+export const ENTER_REPEAT_COOLDOWN_MS = 350;
+
+let lastPluginUiClickAt = 0;
+
+/**
+ * Official 2.1.327 #382: Record a mouse click in `/plugin` (row click, tab click,
+ * or pane click) so an immediate Enter doesn't accidentally install or disable
+ * a plugin.
+ */
+export function recordPluginUiClick(now = Date.now()): void {
+  lastPluginUiClickAt = now;
+}
+
+export function getLastPluginUiClickAt(): number {
+  return lastPluginUiClickAt;
+}
+
+export function resetPluginUiClickForTests(): void {
+  lastPluginUiClickAt = 0;
+}
+
+/**
+ * Official 2.1.327 #382 & 2.1.328 #617: Guard `/plugin` Enter actions against
+ * (a) a click followed immediately by Enter,
+ * (b) a held/repeated Enter right after transitioning into a details view,
+ * (c) rapid key-repeat Enter bursts turning off several plugins in a row, and
+ * (d) duplicate triggers while an async operation is already running.
+ */
+export function shouldIgnorePluginEnterAction(params: {
+  now?: number;
+  lastClickAt?: number;
+  lastTransitionAt?: number;
+  lastAcceptAt?: number;
+  isBusy?: boolean;
+  isRepeat?: boolean;
+  clickGuardMs?: number;
+  transitionGuardMs?: number;
+  repeatCooldownMs?: number;
+}): boolean {
+  const now = params.now ?? Date.now();
+  if (params.isBusy) return true;
+  if (params.isRepeat) return true;
+  const clickGuard = params.clickGuardMs ?? CLICK_TO_ENTER_GUARD_MS;
+  const lastClick = params.lastClickAt ?? lastPluginUiClickAt;
+  if (lastClick > 0 && now - lastClick >= 0 && now - lastClick < clickGuard) {
+    return true;
+  }
+  const transitionGuard = params.transitionGuardMs ?? POST_TRANSITION_ENTER_GUARD_MS;
+  if (
+    params.lastTransitionAt &&
+    params.lastTransitionAt > 0 &&
+    now - params.lastTransitionAt >= 0 &&
+    now - params.lastTransitionAt < transitionGuard
+  ) {
+    return true;
+  }
+  const repeatCooldown = params.repeatCooldownMs ?? ENTER_REPEAT_COOLDOWN_MS;
+  if (
+    params.lastAcceptAt &&
+    params.lastAcceptAt > 0 &&
+    now - params.lastAcceptAt >= 0 &&
+    now - params.lastAcceptAt < repeatCooldown
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Official 2.1.327 #410: Strip raw control characters from keystroke bursts
+ * entering `/plugin` search boxes so escape/control bursts cannot crash or
+ * corrupt cursor slicing.
+ */
+export function sanitizeSearchBurstInput(raw: string): string {
+  // Remove C0 control chars and DEL while preserving printable Unicode characters.
+  let out = '';
+  for (let i = 0; i < raw.length; i++) {
+    const code = raw.charCodeAt(i);
+    if (code >= 0x20 && code !== 0x7f) {
+      out += raw[i]!;
+    }
+  }
+  return out;
+}
+
+/**
+ * Official 2.1.327 #410 & #603: Safely apply a burst of characters into the
+ * search query with cursor clamping.
+ */
+export function applySearchBurstInput(
+  currentQuery: string,
+  cursorOffset: number,
+  rawInput: string,
+): { query: string; cursorOffset: number } {
+  const safeOffset = Math.max(
+    0,
+    Math.min(currentQuery.length, Number.isFinite(cursorOffset) ? Math.trunc(cursorOffset) : currentQuery.length),
+  );
+  const clean = sanitizeSearchBurstInput(rawInput);
+  if (!clean) {
+    return { query: currentQuery, cursorOffset: safeOffset };
+  }
+  const nextQuery = currentQuery.slice(0, safeOffset) + clean + currentQuery.slice(safeOffset);
+  return { query: nextQuery, cursorOffset: safeOffset + clean.length };
+}
+
+/**
+ * Official 2.1.328 #614 & #615: Verify that an async plugin save/removal/update
+ * still belongs to the currently active view generation and plugin target before
+ * mutating view state, opening a confirmation dialog, or closing the open page.
+ */
+export function isPluginViewOpCurrent(
+  currentGen: number,
+  opGen: number,
+  currentTargetId: string | null,
+  opTargetId: string | null,
+): boolean {
+  if (currentGen !== opGen) return false;
+  if (opTargetId !== null && currentTargetId !== opTargetId) return false;
+  return true;
+}
+
 /**
  * Official 2.1.326 #270 / #272: compute how many list rows fit in the current
  * terminal height so the cursor, scroll cues, and key hints stay on screen even

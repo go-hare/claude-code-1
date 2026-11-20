@@ -266,6 +266,8 @@ export function buildLeanSimpleSystemPrompt(input: {
   ownershipFrame?: boolean
   env?: NodeJS.ProcessEnv
   cyberRiskInstruction: string
+  /** Official 2.1.328 (#649): include static prompt-cache-safe Code Mode MCP guidance when active. */
+  codeModeActive?: boolean
 }): string {
   const env = input.env ?? process.env
   const ownership = input.ownershipFrame ?? isOwnershipFrameEnabled(env)
@@ -284,6 +286,9 @@ export function buildLeanSimpleSystemPrompt(input: {
   // Official ieu(..., "lean") harness bullet for system-reminder tags.
   const systemReminderLine =
     '`<system-reminder>` tags in messages and tool results are injected by the harness, not the user.'
+  const codeModeMcpLine = input.codeModeActive
+    ? `\n - ${CODE_MODE_STATIC_MCP_GUIDANCE}`
+    : ''
 
   return `
 ${intro}
@@ -295,7 +300,7 @@ ${input.cyberRiskInstruction}
  - Tools run behind a user-selected permission mode; a denied call means the user declined it — adjust, don't retry verbatim.
  - ${systemReminderLine} Hooks may intercept tool calls; treat hook output as user feedback.
  - Prefer the dedicated file/search tools over shell commands when one fits. Independent tool calls can run in parallel in one response.
- - Reference code as \`file_path:line_number\` — it's clickable.`
+ - Reference code as \`file_path:line_number\` — it's clickable.${codeModeMcpLine}`
 }
 
 /**
@@ -316,4 +321,36 @@ export function getLeanActionCautionSection(input?: {
     ? 'For actions that are hard to reverse or outward-facing, confirm first unless durably authorized or explicitly told to proceed without asking.'
     : "For actions that are hard to reverse or outward-facing, confirm first unless durably authorized or explicitly told to proceed without asking; approval in one context doesn't extend to the next."
   return `${confirm} Sending content to an external service publishes it; it may be cached or indexed even if later deleted. Before deleting or overwriting, look at the target. Report outcomes faithfully: if tests fail, say so with the output; if a step was skipped, say that; when something is done and verified, state it plainly without hedging.`
+}
+
+/**
+ * Official 2.1.328 (#649): Static prompt-cache-safe MCP guidance for Code Mode
+ * sessions, plus dynamic status/change notices when MCP servers are still
+ * connecting or when the list of MCP servers changes.
+ */
+export const CODE_MODE_STATIC_MCP_GUIDANCE =
+  'MCP tools are callable inside Code Mode scripts once their server is connected. If an MCP server is still connecting, call WaitForMcpServers to wait for it before invoking its tools in a script.'
+
+export function buildCodeModeMcpStatusDelta(opts: {
+  pendingServers: readonly string[]
+  addedServers?: readonly string[]
+  removedServers?: readonly string[]
+}): string | null {
+  const lines: string[] = []
+  if (opts.pendingServers.length > 0) {
+    lines.push(
+      `MCP servers still connecting: ${opts.pendingServers.join(', ')}. Call WaitForMcpServers if the user's request needs tools from them; once connected, their tools become callable inside REPL scripts.`,
+    )
+  }
+  if (opts.addedServers && opts.addedServers.length > 0) {
+    lines.push(
+      `MCP servers now available in Code Mode scripts: ${opts.addedServers.join(', ')}.`,
+    )
+  }
+  if (opts.removedServers && opts.removedServers.length > 0) {
+    lines.push(
+      `MCP servers no longer available in Code Mode scripts: ${opts.removedServers.join(', ')}.`,
+    )
+  }
+  return lines.length > 0 ? lines.join('\n') : null
 }

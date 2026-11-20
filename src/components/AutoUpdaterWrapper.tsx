@@ -1,9 +1,8 @@
-import { feature } from 'bun:bundle';
 import * as React from 'react';
 import type { AutoUpdaterResult } from '../utils/autoUpdater.js';
-import { isAutoUpdaterDisabled } from '../utils/config.js';
 import { logForDebugging } from '../utils/debug.js';
 import { getCurrentInstallationType } from '../utils/doctorDiagnostic.js';
+import { leftoverY } from '../utils/leftoverOt.js';
 import { AutoUpdater } from './AutoUpdater.js';
 import { NativeAutoUpdater } from './NativeAutoUpdater.js';
 import { PackageManagerAutoUpdater } from './PackageManagerAutoUpdater.js';
@@ -15,6 +14,8 @@ type Props = {
   autoUpdaterResult: AutoUpdaterResult | null;
   showSuccessMessage: boolean;
   verbose: boolean;
+  withSeparator?: boolean;
+  atPrompt?: boolean;
 };
 
 /** densable 2.1.238 DGT — first auto-update check waits until ~10s uptime. */
@@ -25,6 +26,8 @@ export function getUpdateCheckStartupDelayMs(uptimeSeconds: number = process.upt
   return Math.max(0, UPDATE_CHECK_STARTUP_DELAY_MS - uptimeSeconds * 1000);
 }
 
+let hasAttemptedDetectionInProcess = false;
+
 export function AutoUpdaterWrapper({
   isUpdating,
   onChangeIsUpdating,
@@ -32,43 +35,53 @@ export function AutoUpdaterWrapper({
   autoUpdaterResult,
   showSuccessMessage,
   verbose,
+  withSeparator,
+  atPrompt,
 }: Props): React.ReactNode {
   const [useNativeInstaller, setUseNativeInstaller] = React.useState<boolean | null>(null);
   const [isPackageManager, setIsPackageManager] = React.useState<boolean | null>(null);
-  // densable kOl: hold mounting Updater until startup delay elapses
-  const [startupDelayDone, setStartupDelayDone] = React.useState(() => getUpdateCheckStartupDelayMs() === 0);
+  const [delayMs] = React.useState<number>(() => getUpdateCheckStartupDelayMs());
 
   React.useEffect(() => {
-    if (startupDelayDone) return;
-    const remaining = getUpdateCheckStartupDelayMs();
-    if (remaining <= 0) {
-      setStartupDelayDone(true);
-      return;
-    }
-    const timer = setTimeout(() => setStartupDelayDone(true), remaining);
-    return () => clearTimeout(timer);
-  }, [startupDelayDone]);
+    let cancelled = false;
 
-  React.useEffect(() => {
     async function checkInstallation() {
-      // Skip installation type detection if auto-updates are disabled (ant-only)
-      // This avoids potentially slow package manager detection (spawnSync calls)
-      if (feature('SKIP_DETECTION_WHEN_AUTOUPDATES_DISABLED') && isAutoUpdaterDisabled()) {
-        logForDebugging('AutoUpdaterWrapper: Skipping detection, auto-updates disabled');
+      const firstInProcess = !hasAttemptedDetectionInProcess;
+      hasAttemptedDetectionInProcess = true;
+      const startTime = Date.now();
+      const installationType = await getCurrentInstallationType();
+      leftoverY('update_detection', {
+        duration_ms: Date.now() - startTime,
+        first_in_process: firstInProcess,
+        installation_type: installationType,
+      });
+      logForDebugging(`AutoUpdaterWrapper: Installation type: ${installationType}`);
+      if (cancelled) {
         return;
       }
-
-      const installationType = await getCurrentInstallationType();
-      logForDebugging(`AutoUpdaterWrapper: Installation type: ${installationType}`);
       setUseNativeInstaller(installationType === 'native');
       setIsPackageManager(installationType === 'package-manager');
     }
 
-    void checkInstallation();
-  }, []);
+    if (delayMs <= 0) {
+      void checkInstallation();
+      return () => {
+        cancelled = true;
+      };
+    }
 
-  // Don't render until we know the installation type and startup delay has elapsed
-  if (!startupDelayDone || useNativeInstaller === null || isPackageManager === null) {
+    const timer = setTimeout(() => {
+      void checkInstallation();
+    }, delayMs);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [delayMs]);
+
+  // Don't render until we know the installation type
+  if (useNativeInstaller === null || isPackageManager === null) {
     return null;
   }
 
@@ -81,20 +94,24 @@ export function AutoUpdaterWrapper({
         isUpdating={isUpdating}
         onChangeIsUpdating={onChangeIsUpdating}
         showSuccessMessage={showSuccessMessage}
+        withSeparator={withSeparator}
       />
     );
   }
 
-  const Updater = useNativeInstaller ? NativeAutoUpdater : AutoUpdater;
+  const sharedProps = {
+    verbose,
+    onAutoUpdaterResult,
+    autoUpdaterResult,
+    isUpdating,
+    onChangeIsUpdating,
+    showSuccessMessage,
+    withSeparator,
+  };
 
-  return (
-    <Updater
-      verbose={verbose}
-      onAutoUpdaterResult={onAutoUpdaterResult}
-      autoUpdaterResult={autoUpdaterResult}
-      isUpdating={isUpdating}
-      onChangeIsUpdating={onChangeIsUpdating}
-      showSuccessMessage={showSuccessMessage}
-    />
+  return useNativeInstaller ? (
+    <NativeAutoUpdater {...sharedProps} atPrompt={atPrompt} />
+  ) : (
+    <AutoUpdater {...sharedProps} />
   );
 }

@@ -17,6 +17,7 @@ import {
   Link,
   Text,
   KeyboardShortcutHint,
+  useInput,
   useIsInsideModal,
   MODAL_LAYOUT_PADDING_X,
 } from '@anthropic/ink';
@@ -65,11 +66,25 @@ type Props = {
    * marginX:-q out of Pane / FullscreenLayout padding.
    */
   urlOutdent?: number;
+  /** Official 2.1.328 (#619): notify parent /login Dialog when an inner step owns Esc so Esc goes back instead of closing /login. */
+  onHandlesEscapeChange?: (handlesEscape: boolean) => void;
+  /** Official 2.1.327 (#464): notify parent /login Dialog when a 3rd-party platform step (Bedrock/Vertex) is active so it suppresses duplicate chrome/dividers. */
+  onPlatformStepChange?: (inPlatformStep: boolean) => void;
+  /** Notify parent /login Dialog whether the flow is on the idle method picker (for gating outer W/D shortcuts). */
+  onIdleStateChange?: (isIdle: boolean) => void;
 };
 
 type OAuthStatus =
   | { state: 'idle' } // Initial state, waiting to select login method
   | { state: 'platform_setup' } // Show platform setup info (Bedrock/Vertex/Foundry)
+  | {
+      state: 'bedrock_access_keys';
+      accessKeyId: string;
+      secretAccessKey: string;
+      sessionToken: string;
+      activeField: 'access_key_id' | 'secret_access_key' | 'session_token';
+    } // Official 2.1.328 (#619): Bedrock AWS access keys step (Esc goes back to platform_setup)
+  | { state: 'vertex_setup' } // Vertex AI setup step (no doubled divider inside /login)
   | {
       state: 'custom_platform';
       baseUrl: string;
@@ -126,9 +141,43 @@ type OAuthStatus =
 export const AUTH_CODE_REFUSED_MESSAGE =
   "That code wasn't accepted. It may be incomplete, expired, already used, or from an earlier sign-in attempt. Sign in again to get a new code.";
 
+/**
+ * Official 2.1.327 (#472, SEA `A` / `vqo` / `Eqo`): sign-in error messages
+ * must NOT point to "Claude account with subscription" when `forceLoginMethod`
+ * is set to `'console'`.
+ */
+export function formatConsoleNonConsoleAccountError(forceLoginMethod?: string): string {
+  const guidance =
+    forceLoginMethod === 'console'
+      ? "This computer's settings require a Console sign-in (forceLoginMethod). Sign in again with a Console account. To get one, go to https://platform.claude.com or ask your administrator."
+      : 'To use a Claude subscription, sign in again and select "Claude account with subscription". To pay for API usage, set up a Console account at https://platform.claude.com and sign in again.';
+  return `This sign-in isn't for an Anthropic Console account, so Claude Code can't use it. Nothing on this computer changed. ${guidance}`;
+}
+
+/** Official 2.1.327 (#472, SEA `vqo` vs `Eqo`): saved Console sign-in error message. */
+export function formatConsoleSavedSignInError(forceLoginMethod?: string): string {
+  if (forceLoginMethod === 'console') {
+    return "Claude Code can't use the Anthropic Console sign-in saved on this computer, usually because it isn't for a Console account · Run /login and sign in with a Console account · To get one, go to https://platform.claude.com or ask your administrator";
+  }
+  return 'Claude Code can\'t use the Anthropic Console sign-in saved on this computer, usually because it isn\'t for a Console account · Run /login and select "Claude account with subscription", or set up a Console account at https://platform.claude.com and run /login again, or use an Anthropic API key instead';
+}
+
 /** Official 2.1.326 #57: refusal when signing into Anthropic Console with a non-Console (subscription) account. */
-export const NOT_CONSOLE_ACCOUNT_MESSAGE =
-  "This sign-in isn't for an Anthropic Console account, so Claude Code can't use it. Nothing on this computer changed. Choose Claude subscription to sign in with that account, or sign in with an Anthropic Console account instead.";
+export const NOT_CONSOLE_ACCOUNT_MESSAGE = formatConsoleNonConsoleAccountError(undefined);
+
+/**
+ * Official 2.1.328 (#619): target state when pressing Esc on Bedrock/Vertex
+ * sub-steps inside `/login` — returns to the previous step instead of closing `/login`.
+ */
+export function resolveLoginSubstepEscapeTarget(state: OAuthStatus['state']): 'platform_setup' | 'idle' | null {
+  if (state === 'bedrock_access_keys' || state === 'vertex_setup') {
+    return 'platform_setup';
+  }
+  if (state === 'platform_setup' || state === 'console_method') {
+    return 'idle';
+  }
+  return null;
+}
 
 /** Official 2.1.326 #57: check if an OAuth profile organization_type is a non-Console account. */
 export function isNonConsoleOrganizationType(orgType: string | undefined | null): boolean {
@@ -231,6 +280,9 @@ export function ConsoleOAuthFlow({
   mode = 'login',
   forceLoginMethod: forceLoginMethodProp,
   urlOutdent: urlOutdentProp = 0,
+  onHandlesEscapeChange,
+  onPlatformStepChange,
+  onIdleStateChange,
 }: Props): React.ReactNode {
   // densable Zo / er / F — q = (useIsInsideModal() ? Io : 0) + urlOutdent
   const urlOutdent = (useIsInsideModal() ? MODAL_LAYOUT_PADDING_X : 0) + urlOutdentProp;
@@ -349,18 +401,6 @@ export function ConsoleOAuthFlow({
     },
   );
 
-  // Handle Enter to continue from platform setup
-  useKeybinding(
-    'confirm:yes',
-    () => {
-      setOAuthStatus({ state: 'idle' });
-    },
-    {
-      context: 'Confirmation',
-      isActive: oauthStatus.state === 'platform_setup',
-    },
-  );
-
   // Handle Enter to retry on error state
   useKeybinding(
     'confirm:yes',
@@ -379,9 +419,66 @@ export function ConsoleOAuthFlow({
     },
   );
 
+  // Official 2.1.328 (#619): Esc on Bedrock access keys / Vertex / platform setup
+  // goes back one step instead of closing `/login`.
+  const substepEscapeTarget = resolveLoginSubstepEscapeTarget(oauthStatus.state);
+  useKeybinding(
+    'confirm:no',
+    () => {
+      if (substepEscapeTarget !== null) {
+        setOAuthStatus({ state: substepEscapeTarget });
+      }
+    },
+    {
+      context: 'Confirmation',
+      isActive: substepEscapeTarget !== null,
+    },
+  );
+
   // Official 2.1.326 #66: Esc while waiting for browser/code clears input or goes back one screen.
   const canEscGoBack =
     oauthStatus.state === 'waiting_for_login' && !isFinishingSignIn && mode !== 'setup-token' && !forceLoginMethod;
+
+  useKeybinding(
+    'confirm:no',
+    () => {
+      setOAuthStatus({ state: 'idle' });
+    },
+    {
+      context: 'Confirmation',
+      isActive: oauthStatus.state === 'chatgpt_subscription',
+    },
+  );
+
+  const handlesEscape =
+    substepEscapeTarget !== null ||
+    canEscGoBack ||
+    oauthStatus.state === 'custom_platform' ||
+    oauthStatus.state === 'openai_chat_api' ||
+    oauthStatus.state === 'gemini_api' ||
+    oauthStatus.state === 'chatgpt_subscription' ||
+    oauthStatus.state === 'china_provider_select' ||
+    oauthStatus.state === 'china_mode_select' ||
+    oauthStatus.state === 'china_model_select' ||
+    oauthStatus.state === 'china_apikey' ||
+    (oauthStatus.state === 'gateway_setup' && !gatewayScreenLocked);
+
+  useEffect(() => {
+    onHandlesEscapeChange?.(handlesEscape);
+  }, [handlesEscape, onHandlesEscapeChange]);
+
+  const isIdle = oauthStatus.state === 'idle';
+  useEffect(() => {
+    onIdleStateChange?.(isIdle);
+  }, [isIdle, onIdleStateChange]);
+
+  const inPlatformStep =
+    oauthStatus.state === 'platform_setup' ||
+    oauthStatus.state === 'bedrock_access_keys' ||
+    oauthStatus.state === 'vertex_setup';
+  useEffect(() => {
+    onPlatformStepChange?.(inPlatformStep);
+  }, [inPlatformStep, onPlatformStepChange]);
   useKeybinding(
     'confirm:no',
     () => {
@@ -584,7 +681,7 @@ export function ConsoleOAuthFlow({
             setIsFinishingSignIn(false);
             setOAuthStatus({
               state: 'error',
-              message: NOT_CONSOLE_ACCOUNT_MESSAGE,
+              message: formatConsoleNonConsoleAccountError(forceLoginMethod),
               verbatim: true,
               toRetry: { state: 'idle' },
             });
@@ -1074,717 +1171,17 @@ function OAuthStatusMessage({
         </Box>
       );
 
-    case 'custom_platform': {
-      type Field = 'base_url' | 'api_key' | 'haiku_model' | 'sonnet_model' | 'opus_model';
-      const FIELDS: Field[] = ['base_url', 'api_key', 'haiku_model', 'sonnet_model', 'opus_model'];
-      const cp = oauthStatus as {
-        state: 'custom_platform';
-        activeField: Field;
-        baseUrl: string;
-        apiKey: string;
-        haikuModel: string;
-        sonnetModel: string;
-        opusModel: string;
-      };
-      const { activeField, baseUrl, apiKey, haikuModel, sonnetModel, opusModel } = cp;
-      const displayValues: Record<Field, string> = {
-        base_url: baseUrl,
-        api_key: apiKey,
-        haiku_model: haikuModel,
-        sonnet_model: sonnetModel,
-        opus_model: opusModel,
-      };
+    case 'custom_platform':
+      return <CustomPlatformStep oauthStatus={oauthStatus} setOAuthStatus={setOAuthStatus} onDone={onDone} />;
 
-      const [inputValue, setInputValue] = useState(() => displayValues[activeField]);
-      const [inputCursorOffset, setInputCursorOffset] = useState(() => displayValues[activeField].length);
+    case 'openai_chat_api':
+      return <OpenAIChatApiStep oauthStatus={oauthStatus} setOAuthStatus={setOAuthStatus} onDone={onDone} />;
 
-      const buildState = useCallback(
-        (field: Field, value: string, newActive?: Field) => {
-          const s = {
-            state: 'custom_platform' as const,
-            activeField: newActive ?? activeField,
-            baseUrl,
-            apiKey,
-            haikuModel,
-            sonnetModel,
-            opusModel,
-          };
-          switch (field) {
-            case 'base_url':
-              return { ...s, baseUrl: value };
-            case 'api_key':
-              return { ...s, apiKey: value };
-            case 'haiku_model':
-              return { ...s, haikuModel: value };
-            case 'sonnet_model':
-              return { ...s, sonnetModel: value };
-            case 'opus_model':
-              return { ...s, opusModel: value };
-          }
-        },
-        [activeField, baseUrl, apiKey, haikuModel, sonnetModel, opusModel],
-      );
+    case 'chatgpt_subscription':
+      return <ChatGptSubscriptionStep oauthStatus={oauthStatus} setOAuthStatus={setOAuthStatus} onDone={onDone} />;
 
-      const _switchTo = useCallback(
-        (target: Field) => {
-          setOAuthStatus(buildState(activeField, inputValue, target));
-          setInputValue(displayValues[target] ?? '');
-          setInputCursorOffset((displayValues[target] ?? '').length);
-        },
-        [activeField, inputValue, displayValues, buildState, setOAuthStatus],
-      );
-
-      const doSave = useCallback(() => {
-        const finalVals = { ...displayValues, [activeField]: inputValue };
-        const env: Record<string, string> = {};
-
-        // Validate base_url if provided
-        if (finalVals.base_url) {
-          try {
-            new URL(finalVals.base_url);
-          } catch {
-            setOAuthStatus({
-              state: 'error',
-              message: 'Invalid base URL: please enter a full URL including protocol (e.g., https://api.example.com)',
-              toRetry: {
-                state: 'custom_platform',
-                baseUrl: '',
-                apiKey: '',
-                haikuModel: '',
-                sonnetModel: '',
-                opusModel: '',
-                activeField: 'base_url',
-              },
-            });
-            return;
-          }
-          env.ANTHROPIC_BASE_URL = finalVals.base_url;
-        }
-
-        if (finalVals.api_key) env.ANTHROPIC_AUTH_TOKEN = finalVals.api_key;
-        if (finalVals.haiku_model) env.ANTHROPIC_DEFAULT_HAIKU_MODEL = finalVals.haiku_model;
-        if (finalVals.sonnet_model) env.ANTHROPIC_DEFAULT_SONNET_MODEL = finalVals.sonnet_model;
-        if (finalVals.opus_model) env.ANTHROPIC_DEFAULT_OPUS_MODEL = finalVals.opus_model;
-        const { error } = updateSettingsForSource('userSettings', {
-          modelType: 'anthropic',
-          env,
-        } as unknown as Parameters<typeof updateSettingsForSource>[1]);
-        if (error) {
-          setOAuthStatus({
-            state: 'error',
-            message: 'Failed to save settings. Please try again.',
-            toRetry: {
-              state: 'custom_platform',
-              baseUrl: finalVals.base_url ?? '',
-              apiKey: finalVals.api_key ?? '',
-              haikuModel: finalVals.haiku_model ?? '',
-              sonnetModel: finalVals.sonnet_model ?? '',
-              opusModel: finalVals.opus_model ?? '',
-              activeField: 'base_url',
-            },
-          });
-        } else {
-          for (const [k, v] of Object.entries(env)) process.env[k] = v;
-          setOAuthStatus({ state: 'success' });
-          void onDone();
-        }
-      }, [activeField, inputValue, displayValues, setOAuthStatus, onDone]);
-
-      const handleEnter = useCallback(() => {
-        const idx = FIELDS.indexOf(activeField);
-        if (idx === FIELDS.length - 1) {
-          setOAuthStatus(buildState(activeField, inputValue));
-          doSave();
-        } else {
-          const next = FIELDS[idx + 1]!;
-          setOAuthStatus(buildState(activeField, inputValue, next));
-          setInputValue(displayValues[next] ?? '');
-          setInputCursorOffset((displayValues[next] ?? '').length);
-        }
-      }, [activeField, inputValue, buildState, doSave, displayValues, setOAuthStatus]);
-
-      useKeybinding(
-        'tabs:next',
-        () => {
-          const idx = FIELDS.indexOf(activeField);
-          if (idx < FIELDS.length - 1) {
-            setOAuthStatus(buildState(activeField, inputValue, FIELDS[idx + 1]));
-            setInputValue(displayValues[FIELDS[idx + 1]!] ?? '');
-            setInputCursorOffset((displayValues[FIELDS[idx + 1]!] ?? '').length);
-          }
-        },
-        { context: 'FormField' },
-      );
-      useKeybinding(
-        'tabs:previous',
-        () => {
-          const idx = FIELDS.indexOf(activeField);
-          if (idx > 0) {
-            setOAuthStatus(buildState(activeField, inputValue, FIELDS[idx - 1]));
-            setInputValue(displayValues[FIELDS[idx - 1]!] ?? '');
-            setInputCursorOffset((displayValues[FIELDS[idx - 1]!] ?? '').length);
-          }
-        },
-        { context: 'FormField' },
-      );
-      useKeybinding(
-        'confirm:no',
-        () => {
-          setOAuthStatus({ state: 'idle' });
-        },
-        { context: 'Confirmation' },
-      );
-
-      const columns = useTerminalSize().columns - 20;
-
-      const renderRow = (field: Field, label: string, opts?: { mask?: boolean; placeholder?: string }) => {
-        const active = activeField === field;
-        const val = displayValues[field];
-        return (
-          <Box>
-            <Text backgroundColor={active ? 'suggestion' : undefined} color={active ? 'inverseText' : undefined}>
-              {` ${label} `}
-            </Text>
-            <Text> </Text>
-            {active ? (
-              <TextInput
-                value={inputValue}
-                onChange={setInputValue}
-                onSubmit={handleEnter}
-                cursorOffset={inputCursorOffset}
-                onChangeCursorOffset={setInputCursorOffset}
-                columns={columns}
-                mask={opts?.mask ? '*' : undefined}
-                focus={true}
-              />
-            ) : val ? (
-              <Text color="success">
-                {opts?.mask ? val.slice(0, 8) + '\u00b7'.repeat(Math.max(0, val.length - 8)) : val}
-              </Text>
-            ) : null}
-          </Box>
-        );
-      };
-
-      return (
-        <Box flexDirection="column" gap={1}>
-          <Text bold>Anthropic Compatible Setup</Text>
-          <Box flexDirection="column" gap={1}>
-            {renderRow('base_url', 'Base URL ')}
-            {renderRow('api_key', 'API Key  ', { mask: true })}
-            {renderRow('haiku_model', 'Haiku    ')}
-            {renderRow('sonnet_model', 'Sonnet   ')}
-            {renderRow('opus_model', 'Opus     ')}
-          </Box>
-          <Text dimColor>↑↓/Tab to switch · Enter on last field to save · Esc to go back</Text>
-        </Box>
-      );
-    }
-
-    case 'openai_chat_api': {
-      type OpenAIField = 'base_url' | 'api_key' | 'haiku_model' | 'sonnet_model' | 'opus_model';
-      const OPENAI_FIELDS: OpenAIField[] = ['base_url', 'api_key', 'haiku_model', 'sonnet_model', 'opus_model'];
-      const op = oauthStatus as {
-        state: 'openai_chat_api';
-        activeField: OpenAIField;
-        baseUrl: string;
-        apiKey: string;
-        haikuModel: string;
-        sonnetModel: string;
-        opusModel: string;
-      };
-      const { activeField, baseUrl, apiKey, haikuModel, sonnetModel, opusModel } = op;
-      const openaiDisplayValues: Record<OpenAIField, string> = {
-        base_url: baseUrl,
-        api_key: apiKey,
-        haiku_model: haikuModel,
-        sonnet_model: sonnetModel,
-        opus_model: opusModel,
-      };
-
-      const [openaiInputValue, setOpenaiInputValue] = useState(() => openaiDisplayValues[activeField]);
-      const [openaiInputCursorOffset, setOpenaiInputCursorOffset] = useState(
-        () => openaiDisplayValues[activeField].length,
-      );
-
-      const buildOpenAIState = useCallback(
-        (field: OpenAIField, value: string, newActive?: OpenAIField) => {
-          const s = {
-            state: 'openai_chat_api' as const,
-            activeField: newActive ?? activeField,
-            baseUrl,
-            apiKey,
-            haikuModel,
-            sonnetModel,
-            opusModel,
-          };
-          switch (field) {
-            case 'base_url':
-              return { ...s, baseUrl: value };
-            case 'api_key':
-              return { ...s, apiKey: value };
-            case 'haiku_model':
-              return { ...s, haikuModel: value };
-            case 'sonnet_model':
-              return { ...s, sonnetModel: value };
-            case 'opus_model':
-              return { ...s, opusModel: value };
-          }
-        },
-        [activeField, baseUrl, apiKey, haikuModel, sonnetModel, opusModel],
-      );
-
-      const doOpenAISave = useCallback(() => {
-        const finalVals = { ...openaiDisplayValues, [activeField]: openaiInputValue };
-        const env: Record<string, string | undefined> = {
-          OPENAI_AUTH_MODE: undefined,
-        };
-
-        // Validate base_url if provided
-        if (finalVals.base_url) {
-          try {
-            new URL(finalVals.base_url);
-          } catch {
-            setOAuthStatus({
-              state: 'error',
-              message: 'Invalid base URL: please enter a full URL including protocol (e.g., https://api.example.com)',
-              toRetry: {
-                state: 'openai_chat_api',
-                baseUrl: '',
-                apiKey: '',
-                haikuModel: '',
-                sonnetModel: '',
-                opusModel: '',
-                activeField: 'base_url',
-              },
-            });
-            return;
-          }
-          env.OPENAI_BASE_URL = finalVals.base_url;
-        }
-
-        if (finalVals.api_key) env.OPENAI_API_KEY = finalVals.api_key;
-        if (finalVals.haiku_model) env.OPENAI_DEFAULT_HAIKU_MODEL = finalVals.haiku_model;
-        if (finalVals.sonnet_model) env.OPENAI_DEFAULT_SONNET_MODEL = finalVals.sonnet_model;
-        if (finalVals.opus_model) env.OPENAI_DEFAULT_OPUS_MODEL = finalVals.opus_model;
-        const settingsUpdate: Parameters<typeof updateSettingsForSource>[1] = {
-          modelType: 'openai',
-          env: env as unknown as Record<string, string>,
-        };
-        const { error } = updateSettingsForSource('userSettings', settingsUpdate);
-        if (error) {
-          setOAuthStatus({
-            state: 'error',
-            message: 'Failed to save settings. Please try again.',
-            toRetry: {
-              state: 'openai_chat_api',
-              baseUrl: finalVals.base_url ?? '',
-              apiKey: finalVals.api_key ?? '',
-              haikuModel: finalVals.haiku_model ?? '',
-              sonnetModel: finalVals.sonnet_model ?? '',
-              opusModel: finalVals.opus_model ?? '',
-              activeField: 'base_url',
-            },
-          });
-        } else {
-          for (const [k, v] of Object.entries(env)) {
-            if (v === undefined) {
-              delete process.env[k];
-            } else {
-              process.env[k] = v;
-            }
-          }
-          // Drop any cached OpenAI client so the next request rebuilds it
-          // with the new env vars. Also clear ChatGPT auth file so a prior
-          // ChatGPT Subscription login can't leak into the OpenAI Compatible path.
-          clearOpenAIClientCache();
-          void removeChatGPTAuth().catch(() => {});
-          setOAuthStatus({ state: 'success' });
-          void onDone();
-        }
-      }, [activeField, openaiInputValue, openaiDisplayValues, setOAuthStatus, onDone]);
-
-      const handleOpenAIEnter = useCallback(() => {
-        const idx = OPENAI_FIELDS.indexOf(activeField);
-        if (idx === OPENAI_FIELDS.length - 1) {
-          setOAuthStatus(buildOpenAIState(activeField, openaiInputValue));
-          doOpenAISave();
-        } else {
-          const next = OPENAI_FIELDS[idx + 1]!;
-          setOAuthStatus(buildOpenAIState(activeField, openaiInputValue, next));
-          setOpenaiInputValue(openaiDisplayValues[next] ?? '');
-          setOpenaiInputCursorOffset((openaiDisplayValues[next] ?? '').length);
-        }
-      }, [activeField, openaiInputValue, buildOpenAIState, doOpenAISave, openaiDisplayValues, setOAuthStatus]);
-
-      useKeybinding(
-        'tabs:next',
-        () => {
-          const idx = OPENAI_FIELDS.indexOf(activeField);
-          if (idx < OPENAI_FIELDS.length - 1) {
-            setOAuthStatus(buildOpenAIState(activeField, openaiInputValue, OPENAI_FIELDS[idx + 1]));
-            setOpenaiInputValue(openaiDisplayValues[OPENAI_FIELDS[idx + 1]!] ?? '');
-            setOpenaiInputCursorOffset((openaiDisplayValues[OPENAI_FIELDS[idx + 1]!] ?? '').length);
-          }
-        },
-        { context: 'FormField' },
-      );
-      useKeybinding(
-        'tabs:previous',
-        () => {
-          const idx = OPENAI_FIELDS.indexOf(activeField);
-          if (idx > 0) {
-            setOAuthStatus(buildOpenAIState(activeField, openaiInputValue, OPENAI_FIELDS[idx - 1]));
-            setOpenaiInputValue(openaiDisplayValues[OPENAI_FIELDS[idx - 1]!] ?? '');
-            setOpenaiInputCursorOffset((openaiDisplayValues[OPENAI_FIELDS[idx - 1]!] ?? '').length);
-          }
-        },
-        { context: 'FormField' },
-      );
-      useKeybinding(
-        'confirm:no',
-        () => {
-          setOAuthStatus({ state: 'idle' });
-        },
-        { context: 'Confirmation' },
-      );
-
-      const openaiColumns = useTerminalSize().columns - 20;
-
-      const renderOpenAIRow = (field: OpenAIField, label: string, opts?: { mask?: boolean }) => {
-        const active = activeField === field;
-        const val = openaiDisplayValues[field];
-        return (
-          <Box>
-            <Text backgroundColor={active ? 'suggestion' : undefined} color={active ? 'inverseText' : undefined}>
-              {` ${label} `}
-            </Text>
-            <Text> </Text>
-            {active ? (
-              <TextInput
-                value={openaiInputValue}
-                onChange={setOpenaiInputValue}
-                onSubmit={handleOpenAIEnter}
-                cursorOffset={openaiInputCursorOffset}
-                onChangeCursorOffset={setOpenaiInputCursorOffset}
-                columns={openaiColumns}
-                mask={opts?.mask ? '*' : undefined}
-                focus={true}
-              />
-            ) : val ? (
-              <Text color="success">
-                {opts?.mask ? val.slice(0, 8) + '\u00b7'.repeat(Math.max(0, val.length - 8)) : val}
-              </Text>
-            ) : null}
-          </Box>
-        );
-      };
-
-      return (
-        <Box flexDirection="column" gap={1}>
-          <Text bold>OpenAI Compatible API Setup</Text>
-          <Text dimColor>Configure an OpenAI Chat Completions compatible endpoint (e.g. Ollama, DeepSeek, vLLM).</Text>
-          <Box flexDirection="column" gap={1}>
-            {renderOpenAIRow('base_url', 'Base URL ')}
-            {renderOpenAIRow('api_key', 'API Key  ', { mask: true })}
-            {renderOpenAIRow('haiku_model', 'Haiku    ')}
-            {renderOpenAIRow('sonnet_model', 'Sonnet   ')}
-            {renderOpenAIRow('opus_model', 'Opus     ')}
-          </Box>
-          <Text dimColor>↑↓/Tab to switch · Enter on last field to save · Esc to go back</Text>
-        </Box>
-      );
-    }
-
-    case 'chatgpt_subscription': {
-      const status = oauthStatus as {
-        state: 'chatgpt_subscription';
-        phase: 'requesting' | 'waiting';
-        deviceCode?: ChatGPTDeviceCode;
-      };
-      const startedRef = useRef(false);
-
-      useEffect(() => {
-        if (startedRef.current) return;
-        startedRef.current = true;
-        let cancelled = false;
-        const controller = new AbortController();
-        async function runLogin() {
-          try {
-            const deviceCode = await requestChatGPTDeviceCode();
-            if (cancelled) return;
-            setOAuthStatus({
-              state: 'chatgpt_subscription',
-              phase: 'waiting',
-              deviceCode,
-            });
-            void openBrowser(deviceCode.verificationUrl);
-            await completeChatGPTDeviceLogin(deviceCode, controller.signal);
-            if (cancelled) return;
-            const env: Record<string, string> = {
-              OPENAI_AUTH_MODE: 'chatgpt',
-            };
-            const settingsUpdate: Parameters<typeof updateSettingsForSource>[1] = {
-              modelType: 'openai',
-              env,
-            };
-            const { error } = updateSettingsForSource('userSettings', settingsUpdate);
-            if (error) {
-              throw new Error('Failed to save settings. Please try again.');
-            }
-            for (const [k, v] of Object.entries(env)) process.env[k] = v;
-            // Drop any cached OpenAI client built from prior OpenAI Compatible
-            // env vars; the ChatGPT Subscription path bypasses the SDK client
-            // entirely (uses createChatGPTResponsesStream) but a stale cached
-            // client would still be picked up by sideQuery.
-            clearOpenAIClientCache();
-            setOAuthStatus({ state: 'success' });
-            void onDone();
-          } catch (err) {
-            if (cancelled) return;
-            setOAuthStatus({
-              state: 'error',
-              message: (err as Error).message,
-              toRetry: {
-                state: 'chatgpt_subscription',
-                phase: 'requesting',
-              },
-            });
-          }
-        }
-        void runLogin();
-        return () => {
-          cancelled = true;
-          controller.abort();
-        };
-      }, [setOAuthStatus, onDone]);
-
-      return (
-        <Box flexDirection="column" gap={1}>
-          <Text bold>ChatGPT Account Setup</Text>
-          {status.phase === 'requesting' && (
-            <Box>
-              <Spinner />
-              <Text>Requesting sign-in code…</Text>
-            </Box>
-          )}
-          {status.phase === 'waiting' && status.deviceCode && (
-            <Box flexDirection="column" gap={1}>
-              <Text>Open this link and sign in with your ChatGPT account:</Text>
-              <Link url={status.deviceCode.verificationUrl}>
-                <Text dimColor>{status.deviceCode.verificationUrl}</Text>
-              </Link>
-              <Text>
-                Enter code: <Text bold>{status.deviceCode.userCode}</Text>
-              </Text>
-              <Box>
-                <Spinner />
-                <Text>Waiting for ChatGPT authorization…</Text>
-              </Box>
-            </Box>
-          )}
-          <Text dimColor>Esc to go back. Device codes expire after 15 minutes.</Text>
-        </Box>
-      );
-    }
-
-    case 'gemini_api': {
-      type GeminiField = 'base_url' | 'api_key' | 'haiku_model' | 'sonnet_model' | 'opus_model';
-      const GEMINI_FIELDS: GeminiField[] = ['base_url', 'api_key', 'haiku_model', 'sonnet_model', 'opus_model'];
-      const gp = oauthStatus as {
-        state: 'gemini_api';
-        activeField: GeminiField;
-        baseUrl: string;
-        apiKey: string;
-        haikuModel: string;
-        sonnetModel: string;
-        opusModel: string;
-      };
-      const { activeField, baseUrl, apiKey, haikuModel, sonnetModel, opusModel } = gp;
-      const geminiDisplayValues: Record<GeminiField, string> = {
-        base_url: baseUrl,
-        api_key: apiKey,
-        haiku_model: haikuModel,
-        sonnet_model: sonnetModel,
-        opus_model: opusModel,
-      };
-
-      const [geminiInputValue, setGeminiInputValue] = useState(() => geminiDisplayValues[activeField]);
-      const [geminiInputCursorOffset, setGeminiInputCursorOffset] = useState(
-        () => geminiDisplayValues[activeField].length,
-      );
-
-      const buildGeminiState = useCallback(
-        (field: GeminiField, value: string, newActive?: GeminiField) => {
-          const s = {
-            state: 'gemini_api' as const,
-            activeField: newActive ?? activeField,
-            baseUrl,
-            apiKey,
-            haikuModel,
-            sonnetModel,
-            opusModel,
-          };
-          switch (field) {
-            case 'base_url':
-              return { ...s, baseUrl: value };
-            case 'api_key':
-              return { ...s, apiKey: value };
-            case 'haiku_model':
-              return { ...s, haikuModel: value };
-            case 'sonnet_model':
-              return { ...s, sonnetModel: value };
-            case 'opus_model':
-              return { ...s, opusModel: value };
-          }
-        },
-        [activeField, baseUrl, apiKey, haikuModel, sonnetModel, opusModel],
-      );
-
-      const doGeminiSave = useCallback(() => {
-        const finalVals = { ...geminiDisplayValues, [activeField]: geminiInputValue };
-        if (!finalVals.haiku_model || !finalVals.sonnet_model || !finalVals.opus_model) {
-          setOAuthStatus({
-            state: 'error',
-            message: 'Gemini setup requires Haiku, Sonnet, and Opus model names.',
-            toRetry: {
-              state: 'gemini_api',
-              baseUrl: finalVals.base_url,
-              apiKey: finalVals.api_key,
-              haikuModel: finalVals.haiku_model,
-              sonnetModel: finalVals.sonnet_model,
-              opusModel: finalVals.opus_model,
-              activeField,
-            },
-          });
-          return;
-        }
-
-        const env: Record<string, string> = {};
-        if (finalVals.base_url) env.GEMINI_BASE_URL = finalVals.base_url;
-        if (finalVals.api_key) env.GEMINI_API_KEY = finalVals.api_key;
-        if (finalVals.haiku_model) env.GEMINI_DEFAULT_HAIKU_MODEL = finalVals.haiku_model;
-        if (finalVals.sonnet_model) env.GEMINI_DEFAULT_SONNET_MODEL = finalVals.sonnet_model;
-        if (finalVals.opus_model) env.GEMINI_DEFAULT_OPUS_MODEL = finalVals.opus_model;
-        const { error } = updateSettingsForSource('userSettings', {
-          modelType: 'gemini',
-          env,
-        } as unknown as Parameters<typeof updateSettingsForSource>[1]);
-        if (error) {
-          setOAuthStatus({
-            state: 'error',
-            message: `Failed to save: ${error.message}`,
-            toRetry: {
-              state: 'gemini_api',
-              baseUrl: '',
-              apiKey: '',
-              haikuModel: '',
-              sonnetModel: '',
-              opusModel: '',
-              activeField: 'base_url',
-            },
-          });
-        } else {
-          for (const [k, v] of Object.entries(env)) process.env[k] = v;
-          setOAuthStatus({ state: 'success' });
-          void onDone();
-        }
-      }, [activeField, geminiInputValue, geminiDisplayValues, onDone, setOAuthStatus]);
-
-      const handleGeminiEnter = useCallback(() => {
-        const idx = GEMINI_FIELDS.indexOf(activeField);
-        if (idx === GEMINI_FIELDS.length - 1) {
-          setOAuthStatus(buildGeminiState(activeField, geminiInputValue));
-          doGeminiSave();
-        } else {
-          const next = GEMINI_FIELDS[idx + 1]!;
-          setOAuthStatus(buildGeminiState(activeField, geminiInputValue, next));
-          setGeminiInputValue(geminiDisplayValues[next] ?? '');
-          setGeminiInputCursorOffset((geminiDisplayValues[next] ?? '').length);
-        }
-      }, [activeField, buildGeminiState, doGeminiSave, geminiDisplayValues, geminiInputValue, setOAuthStatus]);
-
-      useKeybinding(
-        'tabs:next',
-        () => {
-          const idx = GEMINI_FIELDS.indexOf(activeField);
-          if (idx < GEMINI_FIELDS.length - 1) {
-            setOAuthStatus(buildGeminiState(activeField, geminiInputValue, GEMINI_FIELDS[idx + 1]));
-            setGeminiInputValue(geminiDisplayValues[GEMINI_FIELDS[idx + 1]!] ?? '');
-            setGeminiInputCursorOffset((geminiDisplayValues[GEMINI_FIELDS[idx + 1]!] ?? '').length);
-          }
-        },
-        { context: 'FormField' },
-      );
-      useKeybinding(
-        'tabs:previous',
-        () => {
-          const idx = GEMINI_FIELDS.indexOf(activeField);
-          if (idx > 0) {
-            setOAuthStatus(buildGeminiState(activeField, geminiInputValue, GEMINI_FIELDS[idx - 1]));
-            setGeminiInputValue(geminiDisplayValues[GEMINI_FIELDS[idx - 1]!] ?? '');
-            setGeminiInputCursorOffset((geminiDisplayValues[GEMINI_FIELDS[idx - 1]!] ?? '').length);
-          }
-        },
-        { context: 'FormField' },
-      );
-      useKeybinding(
-        'confirm:no',
-        () => {
-          setOAuthStatus({ state: 'idle' });
-        },
-        { context: 'Confirmation' },
-      );
-
-      const geminiColumns = useTerminalSize().columns - 20;
-
-      const renderGeminiRow = (field: GeminiField, label: string, opts?: { mask?: boolean }) => {
-        const active = activeField === field;
-        const val = geminiDisplayValues[field];
-        return (
-          <Box>
-            <Text backgroundColor={active ? 'suggestion' : undefined} color={active ? 'inverseText' : undefined}>
-              {` ${label} `}
-            </Text>
-            <Text> </Text>
-            {active ? (
-              <TextInput
-                value={geminiInputValue}
-                onChange={setGeminiInputValue}
-                onSubmit={handleGeminiEnter}
-                cursorOffset={geminiInputCursorOffset}
-                onChangeCursorOffset={setGeminiInputCursorOffset}
-                columns={geminiColumns}
-                mask={opts?.mask ? '*' : undefined}
-                focus={true}
-              />
-            ) : val ? (
-              <Text color="success">
-                {opts?.mask ? val.slice(0, 8) + '\u00b7'.repeat(Math.max(0, val.length - 8)) : val}
-              </Text>
-            ) : null}
-          </Box>
-        );
-      };
-
-      return (
-        <Box flexDirection="column" gap={1}>
-          <Text bold>Gemini API Setup</Text>
-          <Text dimColor>
-            Configure a Gemini Generate Content compatible endpoint. Base URL is optional and defaults to Google&apos;s
-            v1beta API.
-          </Text>
-          <Box flexDirection="column" gap={1}>
-            {renderGeminiRow('base_url', 'Base URL ')}
-            {renderGeminiRow('api_key', 'API Key  ', { mask: true })}
-            {renderGeminiRow('haiku_model', 'Haiku    ')}
-            {renderGeminiRow('sonnet_model', 'Sonnet   ')}
-            {renderGeminiRow('opus_model', 'Opus     ')}
-          </Box>
-          <Text dimColor>↑↓/Tab to switch · Enter on last field to save · Esc to go back</Text>
-        </Box>
-      );
-    }
+    case 'gemini_api':
+      return <GeminiApiStep oauthStatus={oauthStatus} setOAuthStatus={setOAuthStatus} onDone={onDone} />;
 
     case 'china_provider_select': {
       return (
@@ -1812,6 +1209,7 @@ function OAuthStatusMessage({
                   setOAuthStatus({ state: 'china_model_select', provider, mode: 'api', activeIndex: 0 });
                 }
               }}
+              onCancel={() => setOAuthStatus({ state: 'idle' })}
             />
           </Box>
         </Box>
@@ -1849,6 +1247,7 @@ function OAuthStatusMessage({
                   activeIndex: 0,
                 });
               }}
+              onCancel={() => setOAuthStatus({ state: 'china_provider_select', activeIndex: 0 })}
             />
           </Box>
           <Text dimColor>
@@ -1905,202 +1304,98 @@ function OAuthStatusMessage({
                 logEvent('tengu_china_model_selected', {});
                 setOAuthStatus({ state: 'china_apikey', provider, mode: accessMode, modelId: value, apiKey: '' });
               }}
+              onCancel={() =>
+                setOAuthStatus(
+                  provider.codingPlan
+                    ? { state: 'china_mode_select', provider, activeIndex: 0 }
+                    : { state: 'china_provider_select', activeIndex: 0 },
+                )
+              }
             />
           </Box>
         </Box>
       );
     }
 
-    case 'china_apikey': {
-      const { provider, mode: accessMode, modelId } = oauthStatus;
-
-      const [chinaKeyValue, setChinaKeyValue] = useState('');
-      const [chinaKeyCursor, setChinaKeyCursor] = useState(0);
-      const [chinaKeyError, setChinaKeyError] = useState<string | null>(null);
-
-      const doChinaSave = useCallback(() => {
-        const effectiveModelId = modelId === '__custom__' ? chinaKeyValue.trim() : modelId;
-        if (!effectiveModelId) {
-          setChinaKeyError(modelId === '__custom__' ? 'Please enter a model name' : 'Please enter an API key');
-          return;
-        }
-        if (modelId === '__custom__') {
-          logEvent('tengu_china_custom_model_entered', {});
-          setOAuthStatus({ state: 'china_apikey', provider, mode: accessMode, modelId: effectiveModelId, apiKey: '' });
-          setChinaKeyValue('');
-          setChinaKeyError(null);
-          return;
-        }
-        if (!chinaKeyValue.trim()) {
-          setChinaKeyError('Please enter an API key');
-          return;
-        }
-        const baseUrl = resolveChinaProviderBaseURL(provider.id, accessMode);
-        const env: Record<string, string | undefined> = {
-          OPENAI_AUTH_MODE: undefined,
-          OPENAI_BASE_URL: baseUrl,
-          OPENAI_API_KEY: chinaKeyValue.trim(),
-          OPENAI_DEFAULT_SONNET_MODEL: modelId,
-          OPENAI_DEFAULT_HAIKU_MODEL: modelId,
-          OPENAI_DEFAULT_OPUS_MODEL: modelId,
-        };
-        const settingsUpdate: Parameters<typeof updateSettingsForSource>[1] = {
-          modelType: 'openai',
-          env: env as unknown as Record<string, string>,
-        };
-        const { error } = updateSettingsForSource('userSettings', settingsUpdate);
-        if (error) {
-          setOAuthStatus({
-            state: 'error',
-            message: 'Failed to save settings. Please try again.',
-            toRetry: { state: 'china_apikey', provider, mode: accessMode, modelId, apiKey: chinaKeyValue },
-          });
-        } else {
-          for (const [k, v] of Object.entries(env)) {
-            if (v === undefined) {
-              delete process.env[k];
-            } else {
-              process.env[k] = v;
-            }
-          }
-          // Drop any cached OpenAI client and ChatGPT auth so the new
-          // provider/credentials take effect on the next request.
-          clearOpenAIClientCache();
-          void removeChatGPTAuth().catch(() => {});
-          logEvent('tengu_china_login_success', {});
-          setOAuthStatus({ state: 'success' });
-          void onDone();
-        }
-      }, [chinaKeyValue, provider, accessMode, modelId, onDone, setOAuthStatus]);
-
-      useKeybinding(
-        'confirm:no',
-        () => {
-          setOAuthStatus({ state: 'china_model_select', provider, mode: accessMode, activeIndex: 0 });
-        },
-        { context: 'Confirmation' },
-      );
-
-      const isCustomModelEntry = modelId === '__custom__';
-      const allModels = CHINA_LLM_PROVIDERS.flatMap(p =>
-        p.models.map(m => ({ id: m.id, label: m.label, provider: p.label })),
-      );
-      const modelSuggestions = isCustomModelEntry
-        ? chinaKeyValue.trim()
-          ? allModels.filter(m => m.id.toLowerCase().includes(chinaKeyValue.trim().toLowerCase()))
-          : allModels
-        : [];
-      const keyPage = isCustomModelEntry
-        ? provider.apiKeyPage
-        : accessMode === 'coding-plan' && provider.codingPlan
-          ? provider.codingPlan.purchasePage
-          : provider.apiKeyPage;
-      const keyFormat = isCustomModelEntry
-        ? provider.keyFormat
-        : accessMode === 'coding-plan' && provider.codingPlan
-          ? provider.codingPlan.keyFormat
-          : provider.keyFormat;
-
-      return (
-        <Box flexDirection="column" gap={1} marginTop={1}>
-          <Text bold>
-            {provider.icon} {provider.label} {isCustomModelEntry ? '— Custom Model' : 'API Key'}
-          </Text>
-          <Box flexDirection="column" gap={0}>
-            {isCustomModelEntry ? (
-              <Text dimColor> Enter any model ID supported by this provider. Browse models: {provider.modelsPage}</Text>
-            ) : (
-              <>
-                <Text dimColor> Get your key: {keyPage}</Text>
-                <Text dimColor>
-                  {' '}
-                  {accessMode === 'coding-plan' ? 'Use your Coding Plan credential here' : provider.freeTier}
-                </Text>
-                <Text dimColor> Key format: {keyFormat}</Text>
-              </>
-            )}
-          </Box>
-          <Box>
-            <Text>{isCustomModelEntry ? 'Model name: ' : 'API Key: '}</Text>
-            <TextInput
-              value={chinaKeyValue}
-              onChange={v => {
-                setChinaKeyValue(v);
-                setChinaKeyError(null);
-              }}
-              onSubmit={doChinaSave}
-              cursorOffset={chinaKeyCursor}
-              onChangeCursorOffset={setChinaKeyCursor}
-              columns={useTerminalSize().columns - 12}
-              mask={isCustomModelEntry ? undefined : '*'}
-              focus={true}
-            />
-          </Box>
-          {chinaKeyError ? <Text color="error">{chinaKeyError}</Text> : null}
-          {isCustomModelEntry && modelSuggestions.length > 0 && (
-            <Box flexDirection="column" gap={0}>
-              <Text dimColor>{chinaKeyValue.trim() ? 'Matching models:' : 'Known models:'}</Text>
-              {modelSuggestions.map(m => (
-                <Text key={m.id} dimColor>
-                  {' '}
-                  {m.id}{' '}
-                  <Text>
-                    ({m.label} — {m.provider})
-                  </Text>
-                </Text>
-              ))}
-            </Box>
-          )}
-          <Text dimColor>
-            {isCustomModelEntry ? 'Enter to continue · Esc to go back' : 'Enter to confirm · Esc to go back'}
-          </Text>
-        </Box>
-      );
-    }
+    case 'china_apikey':
+      return <ChinaApiKeyStep oauthStatus={oauthStatus} setOAuthStatus={setOAuthStatus} onDone={onDone} />;
 
     case 'platform_setup':
       return (
         <Box flexDirection="column" gap={1} marginTop={1}>
           <Text bold>Using 3rd-party platforms</Text>
 
-          <Box flexDirection="column" gap={1}>
-            <Text>
-              Claude Code supports Amazon Bedrock, Microsoft Foundry, and Vertex AI. Set the required environment
-              variables, then restart Claude Code.
+          <Select
+            options={[
+              { label: 'Amazon Bedrock (AWS access keys)', value: 'bedrock_access_keys' },
+              { label: 'Google Vertex AI', value: 'vertex_setup' },
+              { label: 'Go back', value: 'back' },
+            ]}
+            onChange={value => {
+              if (value === 'bedrock_access_keys') {
+                setOAuthStatus({
+                  state: 'bedrock_access_keys',
+                  accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? '',
+                  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? '',
+                  sessionToken: process.env.AWS_SESSION_TOKEN ?? '',
+                  activeField: 'access_key_id',
+                });
+              } else if (value === 'vertex_setup') {
+                setOAuthStatus({ state: 'vertex_setup' });
+              } else {
+                setOAuthStatus({ state: 'idle' });
+              }
+            }}
+            onCancel={() => setOAuthStatus({ state: 'idle' })}
+          />
+
+          <Box flexDirection="column">
+            <Text dimColor>
+              Documentation: Bedrock ({' '}
+              <Link url="https://code.claude.com/docs/en/amazon-bedrock">
+                https://code.claude.com/docs/en/amazon-bedrock
+              </Link>{' '}
+              ) · Foundry ({' '}
+              <Link url="https://code.claude.com/docs/en/microsoft-foundry">
+                https://code.claude.com/docs/en/microsoft-foundry
+              </Link>{' '}
+              ) · Vertex AI ({' '}
+              <Link url="https://code.claude.com/docs/en/google-vertex-ai">
+                https://code.claude.com/docs/en/google-vertex-ai
+              </Link>{' '}
+              )
             </Text>
-
-            <Text>
-              If you are part of an enterprise organization, contact your administrator for setup instructions.
-            </Text>
-
-            <Box flexDirection="column" marginTop={1}>
-              <Text bold>Documentation:</Text>
-              <Text>
-                · Amazon Bedrock:{' '}
-                <Link url="https://code.claude.com/docs/en/amazon-bedrock">
-                  https://code.claude.com/docs/en/amazon-bedrock
-                </Link>
-              </Text>
-              <Text>
-                · Microsoft Foundry:{' '}
-                <Link url="https://code.claude.com/docs/en/microsoft-foundry">
-                  https://code.claude.com/docs/en/microsoft-foundry
-                </Link>
-              </Text>
-              <Text>
-                · Vertex AI:{' '}
-                <Link url="https://code.claude.com/docs/en/google-vertex-ai">
-                  https://code.claude.com/docs/en/google-vertex-ai
-                </Link>
-              </Text>
-            </Box>
-
-            <Box marginTop={1}>
-              <Text dimColor>
-                Press <Text bold>Enter</Text> to go back to login options.
-              </Text>
-            </Box>
           </Box>
+        </Box>
+      );
+
+    case 'bedrock_access_keys':
+      return (
+        <BedrockAccessKeysStep
+          oauthStatus={oauthStatus}
+          textInputColumns={textInputColumns}
+          setOAuthStatus={setOAuthStatus}
+          onDone={onDone}
+        />
+      );
+
+    case 'vertex_setup':
+      return (
+        <Box flexDirection="column" gap={1} marginTop={1}>
+          <Text bold>Set up Google Vertex AI</Text>
+          <Text>
+            Set <Text bold>CLAUDE_CODE_USE_VERTEX=1</Text> and configure Google Cloud credentials, then restart Claude
+            Code.
+          </Text>
+          <Text dimColor>
+            Docs:{' '}
+            <Link url="https://code.claude.com/docs/en/google-vertex-ai">
+              https://code.claude.com/docs/en/google-vertex-ai
+            </Link>
+          </Text>
+          <Text dimColor>
+            Press <Text bold>Esc</Text> to go back.
+          </Text>
         </Box>
       );
 
@@ -2226,4 +1521,1088 @@ function OAuthStatusMessage({
     default:
       return null;
   }
+}
+
+type BedrockAccessKeysStatus = Extract<OAuthStatus, { state: 'bedrock_access_keys' }>;
+
+/**
+ * Official 2.1.328 (#619): interactive AWS access key step for Amazon Bedrock
+ * with editable per-field cursorOffset state and credential persistence on submit.
+ */
+function BedrockAccessKeysStep({
+  oauthStatus,
+  textInputColumns,
+  setOAuthStatus,
+  onDone,
+}: {
+  oauthStatus: BedrockAccessKeysStatus;
+  textInputColumns: number;
+  setOAuthStatus: (status: OAuthStatus) => void;
+  onDone: () => void | Promise<void>;
+}): React.ReactElement {
+  const [cursorOffsets, setCursorOffsets] = useState<{
+    access_key_id: number;
+    secret_access_key: number;
+    session_token: number;
+  }>({
+    access_key_id: oauthStatus.accessKeyId.length,
+    secret_access_key: oauthStatus.secretAccessKey.length,
+    session_token: oauthStatus.sessionToken.length,
+  });
+
+  const BEDROCK_FIELDS: ReadonlyArray<BedrockAccessKeysStatus['activeField']> = [
+    'access_key_id',
+    'secret_access_key',
+    'session_token',
+  ];
+
+  const moveField = useCallback(
+    (delta: 1 | -1) => {
+      const idx = BEDROCK_FIELDS.indexOf(oauthStatus.activeField);
+      const nextField = BEDROCK_FIELDS[(idx + delta + BEDROCK_FIELDS.length) % BEDROCK_FIELDS.length]!;
+      const nextValue =
+        nextField === 'access_key_id'
+          ? oauthStatus.accessKeyId
+          : nextField === 'secret_access_key'
+            ? oauthStatus.secretAccessKey
+            : oauthStatus.sessionToken;
+      setOAuthStatus({ ...oauthStatus, activeField: nextField });
+      setCursorOffsets(prev => ({
+        ...prev,
+        [nextField]: nextValue.length,
+      }));
+    },
+    [oauthStatus, setOAuthStatus],
+  );
+
+  useInput((_input, key) => {
+    if ((key.tab && key.shift) || key.upArrow) {
+      moveField(-1);
+    } else if (key.tab || key.downArrow) {
+      moveField(1);
+    }
+  });
+
+  const handleApplyCredentials = useCallback(
+    (submittedSessionToken?: string) => {
+      const effectiveSessionToken = submittedSessionToken ?? oauthStatus.sessionToken;
+      const nextStatus: BedrockAccessKeysStatus = {
+        ...oauthStatus,
+        sessionToken: effectiveSessionToken,
+      };
+      const accessKeyId = nextStatus.accessKeyId.trim();
+      const secretAccessKey = nextStatus.secretAccessKey.trim();
+      const sessionToken = nextStatus.sessionToken.trim();
+      if (!accessKeyId || !secretAccessKey) {
+        setOAuthStatus({
+          state: 'error',
+          message: 'Both AWS Access key ID and Secret access key are required for Amazon Bedrock.',
+          toRetry: {
+            ...nextStatus,
+            activeField: !accessKeyId ? 'access_key_id' : 'secret_access_key',
+          },
+        });
+        return;
+      }
+      const env: Record<string, string> = {
+        CLAUDE_CODE_USE_BEDROCK: '1',
+        AWS_ACCESS_KEY_ID: accessKeyId,
+        AWS_SECRET_ACCESS_KEY: secretAccessKey,
+        ...(sessionToken ? { AWS_SESSION_TOKEN: sessionToken } : {}),
+      };
+      const { error } = updateSettingsForSource('userSettings', {
+        env,
+      } as unknown as Parameters<typeof updateSettingsForSource>[1]);
+      if (error) {
+        setOAuthStatus({
+          state: 'error',
+          message: 'Failed to save AWS Bedrock credentials. Please try again.',
+          toRetry: nextStatus,
+        });
+        return;
+      }
+      for (const [k, v] of Object.entries(env)) {
+        process.env[k] = v;
+      }
+      setOAuthStatus({ state: 'success' });
+      void onDone();
+    },
+    [oauthStatus, setOAuthStatus, onDone],
+  );
+
+  const cols = Math.max(20, textInputColumns);
+
+  return (
+    <Box flexDirection="column" gap={1} marginTop={1}>
+      <Text bold>Set up Amazon Bedrock · AWS access keys</Text>
+      <Text dimColor>
+        Enter your AWS credentials or press <Text bold>Esc</Text> to go back.
+      </Text>
+      <Box flexDirection="column">
+        <Text>Access key ID</Text>
+        <TextInput
+          value={oauthStatus.accessKeyId}
+          onChange={value => {
+            setOAuthStatus({ ...oauthStatus, accessKeyId: value });
+            setCursorOffsets(prev => ({
+              ...prev,
+              access_key_id: Math.min(prev.access_key_id, value.length),
+            }));
+          }}
+          onSubmit={submittedValue => {
+            const nextAccessKeyId = submittedValue ?? oauthStatus.accessKeyId;
+            setOAuthStatus({
+              ...oauthStatus,
+              accessKeyId: nextAccessKeyId,
+              activeField: 'secret_access_key',
+            });
+            setCursorOffsets(prev => ({
+              ...prev,
+              access_key_id: Math.min(prev.access_key_id, nextAccessKeyId.length),
+              secret_access_key: oauthStatus.secretAccessKey.length,
+            }));
+          }}
+          placeholder="AKIA…"
+          columns={cols}
+          cursorOffset={Math.min(cursorOffsets.access_key_id, oauthStatus.accessKeyId.length)}
+          onChangeCursorOffset={offset => setCursorOffsets(prev => ({ ...prev, access_key_id: offset }))}
+          showCursor={oauthStatus.activeField === 'access_key_id'}
+          focus={oauthStatus.activeField === 'access_key_id'}
+        />
+      </Box>
+      <Box flexDirection="column">
+        <Text>Secret access key</Text>
+        <TextInput
+          value={oauthStatus.secretAccessKey}
+          onChange={value => {
+            setOAuthStatus({ ...oauthStatus, secretAccessKey: value });
+            setCursorOffsets(prev => ({
+              ...prev,
+              secret_access_key: Math.min(prev.secret_access_key, value.length),
+            }));
+          }}
+          onSubmit={submittedValue => {
+            const nextSecretAccessKey = submittedValue ?? oauthStatus.secretAccessKey;
+            setOAuthStatus({
+              ...oauthStatus,
+              secretAccessKey: nextSecretAccessKey,
+              activeField: 'session_token',
+            });
+            setCursorOffsets(prev => ({
+              ...prev,
+              secret_access_key: Math.min(prev.secret_access_key, nextSecretAccessKey.length),
+              session_token: oauthStatus.sessionToken.length,
+            }));
+          }}
+          mask="*"
+          columns={cols}
+          cursorOffset={Math.min(cursorOffsets.secret_access_key, oauthStatus.secretAccessKey.length)}
+          onChangeCursorOffset={offset => setCursorOffsets(prev => ({ ...prev, secret_access_key: offset }))}
+          showCursor={oauthStatus.activeField === 'secret_access_key'}
+          focus={oauthStatus.activeField === 'secret_access_key'}
+        />
+      </Box>
+      <Box flexDirection="column">
+        <Text>Session token (optional)</Text>
+        <TextInput
+          value={oauthStatus.sessionToken}
+          onChange={value => {
+            setOAuthStatus({ ...oauthStatus, sessionToken: value });
+            setCursorOffsets(prev => ({
+              ...prev,
+              session_token: Math.min(prev.session_token, value.length),
+            }));
+          }}
+          onSubmit={submittedValue => handleApplyCredentials(submittedValue)}
+          mask="*"
+          columns={cols}
+          cursorOffset={Math.min(cursorOffsets.session_token, oauthStatus.sessionToken.length)}
+          onChangeCursorOffset={offset => setCursorOffsets(prev => ({ ...prev, session_token: offset }))}
+          showCursor={oauthStatus.activeField === 'session_token'}
+          focus={oauthStatus.activeField === 'session_token'}
+        />
+      </Box>
+    </Box>
+  );
+}
+
+type CustomPlatformStatus = Extract<OAuthStatus, { state: 'custom_platform' }>;
+type CustomPlatformField = CustomPlatformStatus['activeField'];
+const CUSTOM_PLATFORM_FIELDS: readonly CustomPlatformField[] = [
+  'base_url',
+  'api_key',
+  'haiku_model',
+  'sonnet_model',
+  'opus_model',
+];
+
+function CustomPlatformStep({
+  oauthStatus,
+  setOAuthStatus,
+  onDone,
+}: {
+  oauthStatus: CustomPlatformStatus;
+  setOAuthStatus: (status: OAuthStatus) => void;
+  onDone: () => void | Promise<void>;
+}): React.ReactElement {
+  const { activeField, baseUrl, apiKey, haikuModel, sonnetModel, opusModel } = oauthStatus;
+  const displayValues: Record<CustomPlatformField, string> = {
+    base_url: baseUrl,
+    api_key: apiKey,
+    haiku_model: haikuModel,
+    sonnet_model: sonnetModel,
+    opus_model: opusModel,
+  };
+
+  const [inputValue, setInputValue] = useState(() => displayValues[activeField]);
+  const [inputCursorOffset, setInputCursorOffset] = useState(() => displayValues[activeField].length);
+
+  const buildState = useCallback(
+    (field: CustomPlatformField, value: string, newActive?: CustomPlatformField): CustomPlatformStatus => {
+      const s: CustomPlatformStatus = {
+        state: 'custom_platform',
+        activeField: newActive ?? activeField,
+        baseUrl,
+        apiKey,
+        haikuModel,
+        sonnetModel,
+        opusModel,
+      };
+      switch (field) {
+        case 'base_url':
+          return { ...s, baseUrl: value };
+        case 'api_key':
+          return { ...s, apiKey: value };
+        case 'haiku_model':
+          return { ...s, haikuModel: value };
+        case 'sonnet_model':
+          return { ...s, sonnetModel: value };
+        case 'opus_model':
+          return { ...s, opusModel: value };
+      }
+    },
+    [activeField, baseUrl, apiKey, haikuModel, sonnetModel, opusModel],
+  );
+
+  const doSave = useCallback(() => {
+    const finalVals = { ...displayValues, [activeField]: inputValue };
+    const env: Record<string, string> = {};
+
+    // Validate base_url if provided
+    if (finalVals.base_url) {
+      try {
+        new URL(finalVals.base_url);
+      } catch {
+        setOAuthStatus({
+          state: 'error',
+          message: 'Invalid base URL: please enter a full URL including protocol (e.g., https://api.example.com)',
+          toRetry: {
+            state: 'custom_platform',
+            baseUrl: '',
+            apiKey: '',
+            haikuModel: '',
+            sonnetModel: '',
+            opusModel: '',
+            activeField: 'base_url',
+          },
+        });
+        return;
+      }
+      env.ANTHROPIC_BASE_URL = finalVals.base_url;
+    }
+
+    if (finalVals.api_key) env.ANTHROPIC_AUTH_TOKEN = finalVals.api_key;
+    if (finalVals.haiku_model) env.ANTHROPIC_DEFAULT_HAIKU_MODEL = finalVals.haiku_model;
+    if (finalVals.sonnet_model) env.ANTHROPIC_DEFAULT_SONNET_MODEL = finalVals.sonnet_model;
+    if (finalVals.opus_model) env.ANTHROPIC_DEFAULT_OPUS_MODEL = finalVals.opus_model;
+    const { error } = updateSettingsForSource('userSettings', {
+      modelType: 'anthropic',
+      env,
+    } as unknown as Parameters<typeof updateSettingsForSource>[1]);
+    if (error) {
+      setOAuthStatus({
+        state: 'error',
+        message: 'Failed to save settings. Please try again.',
+        toRetry: {
+          state: 'custom_platform',
+          baseUrl: finalVals.base_url ?? '',
+          apiKey: finalVals.api_key ?? '',
+          haikuModel: finalVals.haiku_model ?? '',
+          sonnetModel: finalVals.sonnet_model ?? '',
+          opusModel: finalVals.opus_model ?? '',
+          activeField: 'base_url',
+        },
+      });
+    } else {
+      for (const [k, v] of Object.entries(env)) process.env[k] = v;
+      setOAuthStatus({ state: 'success' });
+      void onDone();
+    }
+  }, [activeField, inputValue, displayValues, setOAuthStatus, onDone]);
+
+  const handleEnter = useCallback(() => {
+    const idx = CUSTOM_PLATFORM_FIELDS.indexOf(activeField);
+    if (idx === CUSTOM_PLATFORM_FIELDS.length - 1) {
+      setOAuthStatus(buildState(activeField, inputValue));
+      doSave();
+    } else {
+      const next = CUSTOM_PLATFORM_FIELDS[idx + 1]!;
+      setOAuthStatus(buildState(activeField, inputValue, next));
+      setInputValue(displayValues[next] ?? '');
+      setInputCursorOffset((displayValues[next] ?? '').length);
+    }
+  }, [activeField, inputValue, buildState, doSave, displayValues, setOAuthStatus]);
+
+  useKeybinding(
+    'tabs:next',
+    () => {
+      const idx = CUSTOM_PLATFORM_FIELDS.indexOf(activeField);
+      if (idx < CUSTOM_PLATFORM_FIELDS.length - 1) {
+        const next = CUSTOM_PLATFORM_FIELDS[idx + 1]!;
+        setOAuthStatus(buildState(activeField, inputValue, next));
+        setInputValue(displayValues[next] ?? '');
+        setInputCursorOffset((displayValues[next] ?? '').length);
+      }
+    },
+    { context: 'FormField' },
+  );
+  useKeybinding(
+    'tabs:previous',
+    () => {
+      const idx = CUSTOM_PLATFORM_FIELDS.indexOf(activeField);
+      if (idx > 0) {
+        const prev = CUSTOM_PLATFORM_FIELDS[idx - 1]!;
+        setOAuthStatus(buildState(activeField, inputValue, prev));
+        setInputValue(displayValues[prev] ?? '');
+        setInputCursorOffset((displayValues[prev] ?? '').length);
+      }
+    },
+    { context: 'FormField' },
+  );
+  useKeybinding(
+    'confirm:no',
+    () => {
+      setOAuthStatus({ state: 'idle' });
+    },
+    { context: 'Confirmation' },
+  );
+
+  const columns = useTerminalSize().columns - 20;
+
+  const renderRow = (field: CustomPlatformField, label: string, opts?: { mask?: boolean; placeholder?: string }) => {
+    const active = activeField === field;
+    const val = displayValues[field];
+    return (
+      <Box>
+        <Text backgroundColor={active ? 'suggestion' : undefined} color={active ? 'inverseText' : undefined}>
+          {` ${label} `}
+        </Text>
+        <Text> </Text>
+        {active ? (
+          <TextInput
+            value={inputValue}
+            onChange={setInputValue}
+            onSubmit={handleEnter}
+            cursorOffset={inputCursorOffset}
+            onChangeCursorOffset={setInputCursorOffset}
+            columns={columns}
+            mask={opts?.mask ? '*' : undefined}
+            focus={true}
+          />
+        ) : val ? (
+          <Text color="success">
+            {opts?.mask ? val.slice(0, 8) + '\u00b7'.repeat(Math.max(0, val.length - 8)) : val}
+          </Text>
+        ) : null}
+      </Box>
+    );
+  };
+
+  return (
+    <Box flexDirection="column" gap={1}>
+      <Text bold>Anthropic Compatible Setup</Text>
+      <Box flexDirection="column" gap={1}>
+        {renderRow('base_url', 'Base URL ')}
+        {renderRow('api_key', 'API Key  ', { mask: true })}
+        {renderRow('haiku_model', 'Haiku    ')}
+        {renderRow('sonnet_model', 'Sonnet   ')}
+        {renderRow('opus_model', 'Opus     ')}
+      </Box>
+      <Text dimColor>↑↓/Tab to switch · Enter on last field to save · Esc to go back</Text>
+    </Box>
+  );
+}
+
+type OpenAIChatApiStatus = Extract<OAuthStatus, { state: 'openai_chat_api' }>;
+type OpenAIField = OpenAIChatApiStatus['activeField'];
+const OPENAI_FIELDS: readonly OpenAIField[] = ['base_url', 'api_key', 'haiku_model', 'sonnet_model', 'opus_model'];
+
+function OpenAIChatApiStep({
+  oauthStatus,
+  setOAuthStatus,
+  onDone,
+}: {
+  oauthStatus: OpenAIChatApiStatus;
+  setOAuthStatus: (status: OAuthStatus) => void;
+  onDone: () => void | Promise<void>;
+}): React.ReactElement {
+  const { activeField, baseUrl, apiKey, haikuModel, sonnetModel, opusModel } = oauthStatus;
+  const openaiDisplayValues: Record<OpenAIField, string> = {
+    base_url: baseUrl,
+    api_key: apiKey,
+    haiku_model: haikuModel,
+    sonnet_model: sonnetModel,
+    opus_model: opusModel,
+  };
+
+  const [openaiInputValue, setOpenaiInputValue] = useState(() => openaiDisplayValues[activeField]);
+  const [openaiInputCursorOffset, setOpenaiInputCursorOffset] = useState(() => openaiDisplayValues[activeField].length);
+
+  const buildOpenAIState = useCallback(
+    (field: OpenAIField, value: string, newActive?: OpenAIField): OpenAIChatApiStatus => {
+      const s: OpenAIChatApiStatus = {
+        state: 'openai_chat_api',
+        activeField: newActive ?? activeField,
+        baseUrl,
+        apiKey,
+        haikuModel,
+        sonnetModel,
+        opusModel,
+      };
+      switch (field) {
+        case 'base_url':
+          return { ...s, baseUrl: value };
+        case 'api_key':
+          return { ...s, apiKey: value };
+        case 'haiku_model':
+          return { ...s, haikuModel: value };
+        case 'sonnet_model':
+          return { ...s, sonnetModel: value };
+        case 'opus_model':
+          return { ...s, opusModel: value };
+      }
+    },
+    [activeField, baseUrl, apiKey, haikuModel, sonnetModel, opusModel],
+  );
+
+  const doOpenAISave = useCallback(() => {
+    const finalVals = { ...openaiDisplayValues, [activeField]: openaiInputValue };
+    const env: Record<string, string | undefined> = {
+      OPENAI_AUTH_MODE: undefined,
+    };
+
+    // Validate base_url if provided
+    if (finalVals.base_url) {
+      try {
+        new URL(finalVals.base_url);
+      } catch {
+        setOAuthStatus({
+          state: 'error',
+          message: 'Invalid base URL: please enter a full URL including protocol (e.g., https://api.example.com)',
+          toRetry: {
+            state: 'openai_chat_api',
+            baseUrl: '',
+            apiKey: '',
+            haikuModel: '',
+            sonnetModel: '',
+            opusModel: '',
+            activeField: 'base_url',
+          },
+        });
+        return;
+      }
+      env.OPENAI_BASE_URL = finalVals.base_url;
+    }
+
+    if (finalVals.api_key) env.OPENAI_API_KEY = finalVals.api_key;
+    if (finalVals.haiku_model) env.OPENAI_DEFAULT_HAIKU_MODEL = finalVals.haiku_model;
+    if (finalVals.sonnet_model) env.OPENAI_DEFAULT_SONNET_MODEL = finalVals.sonnet_model;
+    if (finalVals.opus_model) env.OPENAI_DEFAULT_OPUS_MODEL = finalVals.opus_model;
+    const settingsUpdate: Parameters<typeof updateSettingsForSource>[1] = {
+      modelType: 'openai',
+      env: env as unknown as Record<string, string>,
+    };
+    const { error } = updateSettingsForSource('userSettings', settingsUpdate);
+    if (error) {
+      setOAuthStatus({
+        state: 'error',
+        message: 'Failed to save settings. Please try again.',
+        toRetry: {
+          state: 'openai_chat_api',
+          baseUrl: finalVals.base_url ?? '',
+          apiKey: finalVals.api_key ?? '',
+          haikuModel: finalVals.haiku_model ?? '',
+          sonnetModel: finalVals.sonnet_model ?? '',
+          opusModel: finalVals.opus_model ?? '',
+          activeField: 'base_url',
+        },
+      });
+    } else {
+      for (const [k, v] of Object.entries(env)) {
+        if (v === undefined) {
+          delete process.env[k];
+        } else {
+          process.env[k] = v;
+        }
+      }
+      // Drop any cached OpenAI client so the next request rebuilds it
+      // with the new env vars. Also clear ChatGPT auth file so a prior
+      // ChatGPT Subscription login can't leak into the OpenAI Compatible path.
+      clearOpenAIClientCache();
+      void removeChatGPTAuth().catch(() => {});
+      setOAuthStatus({ state: 'success' });
+      void onDone();
+    }
+  }, [activeField, openaiInputValue, openaiDisplayValues, setOAuthStatus, onDone]);
+
+  const handleOpenAIEnter = useCallback(() => {
+    const idx = OPENAI_FIELDS.indexOf(activeField);
+    if (idx === OPENAI_FIELDS.length - 1) {
+      setOAuthStatus(buildOpenAIState(activeField, openaiInputValue));
+      doOpenAISave();
+    } else {
+      const next = OPENAI_FIELDS[idx + 1]!;
+      setOAuthStatus(buildOpenAIState(activeField, openaiInputValue, next));
+      setOpenaiInputValue(openaiDisplayValues[next] ?? '');
+      setOpenaiInputCursorOffset((openaiDisplayValues[next] ?? '').length);
+    }
+  }, [activeField, openaiInputValue, buildOpenAIState, doOpenAISave, openaiDisplayValues, setOAuthStatus]);
+
+  useKeybinding(
+    'tabs:next',
+    () => {
+      const idx = OPENAI_FIELDS.indexOf(activeField);
+      if (idx < OPENAI_FIELDS.length - 1) {
+        const next = OPENAI_FIELDS[idx + 1]!;
+        setOAuthStatus(buildOpenAIState(activeField, openaiInputValue, next));
+        setOpenaiInputValue(openaiDisplayValues[next] ?? '');
+        setOpenaiInputCursorOffset((openaiDisplayValues[next] ?? '').length);
+      }
+    },
+    { context: 'FormField' },
+  );
+  useKeybinding(
+    'tabs:previous',
+    () => {
+      const idx = OPENAI_FIELDS.indexOf(activeField);
+      if (idx > 0) {
+        const prev = OPENAI_FIELDS[idx - 1]!;
+        setOAuthStatus(buildOpenAIState(activeField, openaiInputValue, prev));
+        setOpenaiInputValue(openaiDisplayValues[prev] ?? '');
+        setOpenaiInputCursorOffset((openaiDisplayValues[prev] ?? '').length);
+      }
+    },
+    { context: 'FormField' },
+  );
+  useKeybinding(
+    'confirm:no',
+    () => {
+      setOAuthStatus({ state: 'idle' });
+    },
+    { context: 'Confirmation' },
+  );
+
+  const openaiColumns = useTerminalSize().columns - 20;
+
+  const renderOpenAIRow = (field: OpenAIField, label: string, opts?: { mask?: boolean }) => {
+    const active = activeField === field;
+    const val = openaiDisplayValues[field];
+    return (
+      <Box>
+        <Text backgroundColor={active ? 'suggestion' : undefined} color={active ? 'inverseText' : undefined}>
+          {` ${label} `}
+        </Text>
+        <Text> </Text>
+        {active ? (
+          <TextInput
+            value={openaiInputValue}
+            onChange={setOpenaiInputValue}
+            onSubmit={handleOpenAIEnter}
+            cursorOffset={openaiInputCursorOffset}
+            onChangeCursorOffset={setOpenaiInputCursorOffset}
+            columns={openaiColumns}
+            mask={opts?.mask ? '*' : undefined}
+            focus={true}
+          />
+        ) : val ? (
+          <Text color="success">
+            {opts?.mask ? val.slice(0, 8) + '\u00b7'.repeat(Math.max(0, val.length - 8)) : val}
+          </Text>
+        ) : null}
+      </Box>
+    );
+  };
+
+  return (
+    <Box flexDirection="column" gap={1}>
+      <Text bold>OpenAI Compatible API Setup</Text>
+      <Text dimColor>Configure an OpenAI Chat Completions compatible endpoint (e.g. Ollama, DeepSeek, vLLM).</Text>
+      <Box flexDirection="column" gap={1}>
+        {renderOpenAIRow('base_url', 'Base URL ')}
+        {renderOpenAIRow('api_key', 'API Key  ', { mask: true })}
+        {renderOpenAIRow('haiku_model', 'Haiku    ')}
+        {renderOpenAIRow('sonnet_model', 'Sonnet   ')}
+        {renderOpenAIRow('opus_model', 'Opus     ')}
+      </Box>
+      <Text dimColor>↑↓/Tab to switch · Enter on last field to save · Esc to go back</Text>
+    </Box>
+  );
+}
+
+type ChatGptSubscriptionStatus = Extract<OAuthStatus, { state: 'chatgpt_subscription' }>;
+
+function ChatGptSubscriptionStep({
+  oauthStatus,
+  setOAuthStatus,
+  onDone,
+}: {
+  oauthStatus: ChatGptSubscriptionStatus;
+  setOAuthStatus: (status: OAuthStatus) => void;
+  onDone: () => void | Promise<void>;
+}): React.ReactElement {
+  const startedRef = useRef(false);
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+
+  useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+    let cancelled = false;
+    const controller = new AbortController();
+    async function runLogin() {
+      try {
+        const deviceCode = await requestChatGPTDeviceCode();
+        if (cancelled) return;
+        setOAuthStatus({
+          state: 'chatgpt_subscription',
+          phase: 'waiting',
+          deviceCode,
+        });
+        void openBrowser(deviceCode.verificationUrl);
+        await completeChatGPTDeviceLogin(deviceCode, controller.signal);
+        if (cancelled) return;
+        const env: Record<string, string> = {
+          OPENAI_AUTH_MODE: 'chatgpt',
+        };
+        const settingsUpdate: Parameters<typeof updateSettingsForSource>[1] = {
+          modelType: 'openai',
+          env,
+        };
+        const { error } = updateSettingsForSource('userSettings', settingsUpdate);
+        if (error) {
+          throw new Error('Failed to save settings. Please try again.');
+        }
+        for (const [k, v] of Object.entries(env)) process.env[k] = v;
+        // Drop any cached OpenAI client built from prior OpenAI Compatible
+        // env vars; the ChatGPT Subscription path bypasses the SDK client
+        // entirely (uses createChatGPTResponsesStream) but a stale cached
+        // client would still be picked up by sideQuery.
+        clearOpenAIClientCache();
+        setOAuthStatus({ state: 'success' });
+        void onDoneRef.current();
+      } catch (err) {
+        if (cancelled) return;
+        setOAuthStatus({
+          state: 'error',
+          message: (err as Error).message,
+          toRetry: {
+            state: 'chatgpt_subscription',
+            phase: 'requesting',
+          },
+        });
+      }
+    }
+    void runLogin();
+    return () => {
+      cancelled = true;
+      startedRef.current = false;
+      controller.abort();
+    };
+  }, [setOAuthStatus]);
+
+  return (
+    <Box flexDirection="column" gap={1}>
+      <Text bold>ChatGPT Account Setup</Text>
+      {oauthStatus.phase === 'requesting' && (
+        <Box>
+          <Spinner />
+          <Text>Requesting sign-in code…</Text>
+        </Box>
+      )}
+      {oauthStatus.phase === 'waiting' && oauthStatus.deviceCode && (
+        <Box flexDirection="column" gap={1}>
+          <Text>Open this link and sign in with your ChatGPT account:</Text>
+          <Link url={oauthStatus.deviceCode.verificationUrl}>
+            <Text dimColor>{oauthStatus.deviceCode.verificationUrl}</Text>
+          </Link>
+          <Text>
+            Enter code: <Text bold>{oauthStatus.deviceCode.userCode}</Text>
+          </Text>
+          <Box>
+            <Spinner />
+            <Text>Waiting for ChatGPT authorization…</Text>
+          </Box>
+        </Box>
+      )}
+      <Text dimColor>Esc to go back. Device codes expire after 15 minutes.</Text>
+    </Box>
+  );
+}
+
+type GeminiApiStatus = Extract<OAuthStatus, { state: 'gemini_api' }>;
+type GeminiField = GeminiApiStatus['activeField'];
+const GEMINI_FIELDS: readonly GeminiField[] = ['base_url', 'api_key', 'haiku_model', 'sonnet_model', 'opus_model'];
+
+function GeminiApiStep({
+  oauthStatus,
+  setOAuthStatus,
+  onDone,
+}: {
+  oauthStatus: GeminiApiStatus;
+  setOAuthStatus: (status: OAuthStatus) => void;
+  onDone: () => void | Promise<void>;
+}): React.ReactElement {
+  const { activeField, baseUrl, apiKey, haikuModel, sonnetModel, opusModel } = oauthStatus;
+  const geminiDisplayValues: Record<GeminiField, string> = {
+    base_url: baseUrl,
+    api_key: apiKey,
+    haiku_model: haikuModel,
+    sonnet_model: sonnetModel,
+    opus_model: opusModel,
+  };
+
+  const [geminiInputValue, setGeminiInputValue] = useState(() => geminiDisplayValues[activeField]);
+  const [geminiInputCursorOffset, setGeminiInputCursorOffset] = useState(() => geminiDisplayValues[activeField].length);
+
+  const buildGeminiState = useCallback(
+    (field: GeminiField, value: string, newActive?: GeminiField): GeminiApiStatus => {
+      const s: GeminiApiStatus = {
+        state: 'gemini_api',
+        activeField: newActive ?? activeField,
+        baseUrl,
+        apiKey,
+        haikuModel,
+        sonnetModel,
+        opusModel,
+      };
+      switch (field) {
+        case 'base_url':
+          return { ...s, baseUrl: value };
+        case 'api_key':
+          return { ...s, apiKey: value };
+        case 'haiku_model':
+          return { ...s, haikuModel: value };
+        case 'sonnet_model':
+          return { ...s, sonnetModel: value };
+        case 'opus_model':
+          return { ...s, opusModel: value };
+      }
+    },
+    [activeField, baseUrl, apiKey, haikuModel, sonnetModel, opusModel],
+  );
+
+  const doGeminiSave = useCallback(() => {
+    const finalVals = { ...geminiDisplayValues, [activeField]: geminiInputValue };
+    if (!finalVals.haiku_model || !finalVals.sonnet_model || !finalVals.opus_model) {
+      setOAuthStatus({
+        state: 'error',
+        message: 'Gemini setup requires Haiku, Sonnet, and Opus model names.',
+        toRetry: {
+          state: 'gemini_api',
+          baseUrl: finalVals.base_url,
+          apiKey: finalVals.api_key,
+          haikuModel: finalVals.haiku_model,
+          sonnetModel: finalVals.sonnet_model,
+          opusModel: finalVals.opus_model,
+          activeField,
+        },
+      });
+      return;
+    }
+
+    const env: Record<string, string> = {};
+    if (finalVals.base_url) env.GEMINI_BASE_URL = finalVals.base_url;
+    if (finalVals.api_key) env.GEMINI_API_KEY = finalVals.api_key;
+    if (finalVals.haiku_model) env.GEMINI_DEFAULT_HAIKU_MODEL = finalVals.haiku_model;
+    if (finalVals.sonnet_model) env.GEMINI_DEFAULT_SONNET_MODEL = finalVals.sonnet_model;
+    if (finalVals.opus_model) env.GEMINI_DEFAULT_OPUS_MODEL = finalVals.opus_model;
+    const { error } = updateSettingsForSource('userSettings', {
+      modelType: 'gemini',
+      env,
+    } as unknown as Parameters<typeof updateSettingsForSource>[1]);
+    if (error) {
+      setOAuthStatus({
+        state: 'error',
+        message: `Failed to save: ${error.message}`,
+        toRetry: {
+          state: 'gemini_api',
+          baseUrl: '',
+          apiKey: '',
+          haikuModel: '',
+          sonnetModel: '',
+          opusModel: '',
+          activeField: 'base_url',
+        },
+      });
+    } else {
+      for (const [k, v] of Object.entries(env)) process.env[k] = v;
+      setOAuthStatus({ state: 'success' });
+      void onDone();
+    }
+  }, [activeField, geminiInputValue, geminiDisplayValues, onDone, setOAuthStatus]);
+
+  const handleGeminiEnter = useCallback(() => {
+    const idx = GEMINI_FIELDS.indexOf(activeField);
+    if (idx === GEMINI_FIELDS.length - 1) {
+      setOAuthStatus(buildGeminiState(activeField, geminiInputValue));
+      doGeminiSave();
+    } else {
+      const next = GEMINI_FIELDS[idx + 1]!;
+      setOAuthStatus(buildGeminiState(activeField, geminiInputValue, next));
+      setGeminiInputValue(geminiDisplayValues[next] ?? '');
+      setGeminiInputCursorOffset((geminiDisplayValues[next] ?? '').length);
+    }
+  }, [activeField, buildGeminiState, doGeminiSave, geminiDisplayValues, geminiInputValue, setOAuthStatus]);
+
+  useKeybinding(
+    'tabs:next',
+    () => {
+      const idx = GEMINI_FIELDS.indexOf(activeField);
+      if (idx < GEMINI_FIELDS.length - 1) {
+        const next = GEMINI_FIELDS[idx + 1]!;
+        setOAuthStatus(buildGeminiState(activeField, geminiInputValue, next));
+        setGeminiInputValue(geminiDisplayValues[next] ?? '');
+        setGeminiInputCursorOffset((geminiDisplayValues[next] ?? '').length);
+      }
+    },
+    { context: 'FormField' },
+  );
+  useKeybinding(
+    'tabs:previous',
+    () => {
+      const idx = GEMINI_FIELDS.indexOf(activeField);
+      if (idx > 0) {
+        const prev = GEMINI_FIELDS[idx - 1]!;
+        setOAuthStatus(buildGeminiState(activeField, geminiInputValue, prev));
+        setGeminiInputValue(geminiDisplayValues[prev] ?? '');
+        setGeminiInputCursorOffset((geminiDisplayValues[prev] ?? '').length);
+      }
+    },
+    { context: 'FormField' },
+  );
+  useKeybinding(
+    'confirm:no',
+    () => {
+      setOAuthStatus({ state: 'idle' });
+    },
+    { context: 'Confirmation' },
+  );
+
+  const geminiColumns = useTerminalSize().columns - 20;
+
+  const renderGeminiRow = (field: GeminiField, label: string, opts?: { mask?: boolean }) => {
+    const active = activeField === field;
+    const val = geminiDisplayValues[field];
+    return (
+      <Box>
+        <Text backgroundColor={active ? 'suggestion' : undefined} color={active ? 'inverseText' : undefined}>
+          {` ${label} `}
+        </Text>
+        <Text> </Text>
+        {active ? (
+          <TextInput
+            value={geminiInputValue}
+            onChange={setGeminiInputValue}
+            onSubmit={handleGeminiEnter}
+            cursorOffset={geminiInputCursorOffset}
+            onChangeCursorOffset={setGeminiInputCursorOffset}
+            columns={geminiColumns}
+            mask={opts?.mask ? '*' : undefined}
+            focus={true}
+          />
+        ) : val ? (
+          <Text color="success">
+            {opts?.mask ? val.slice(0, 8) + '\u00b7'.repeat(Math.max(0, val.length - 8)) : val}
+          </Text>
+        ) : null}
+      </Box>
+    );
+  };
+
+  return (
+    <Box flexDirection="column" gap={1}>
+      <Text bold>Gemini API Setup</Text>
+      <Text dimColor>
+        Configure a Gemini Generate Content compatible endpoint. Base URL is optional and defaults to Google&apos;s
+        v1beta API.
+      </Text>
+      <Box flexDirection="column" gap={1}>
+        {renderGeminiRow('base_url', 'Base URL ')}
+        {renderGeminiRow('api_key', 'API Key  ', { mask: true })}
+        {renderGeminiRow('haiku_model', 'Haiku    ')}
+        {renderGeminiRow('sonnet_model', 'Sonnet   ')}
+        {renderGeminiRow('opus_model', 'Opus     ')}
+      </Box>
+      <Text dimColor>↑↓/Tab to switch · Enter on last field to save · Esc to go back</Text>
+    </Box>
+  );
+}
+
+type ChinaApiKeyStatus = Extract<OAuthStatus, { state: 'china_apikey' }>;
+
+function ChinaApiKeyStep({
+  oauthStatus,
+  setOAuthStatus,
+  onDone,
+}: {
+  oauthStatus: ChinaApiKeyStatus;
+  setOAuthStatus: (status: OAuthStatus) => void;
+  onDone: () => void | Promise<void>;
+}): React.ReactElement {
+  const { provider, mode: accessMode, modelId } = oauthStatus;
+
+  const [chinaKeyValue, setChinaKeyValue] = useState('');
+  const [chinaKeyCursor, setChinaKeyCursor] = useState(0);
+  const [chinaKeyError, setChinaKeyError] = useState<string | null>(null);
+  const terminalColumns = useTerminalSize().columns;
+
+  const doChinaSave = useCallback(() => {
+    const effectiveModelId = modelId === '__custom__' ? chinaKeyValue.trim() : modelId;
+    if (!effectiveModelId) {
+      setChinaKeyError(modelId === '__custom__' ? 'Please enter a model name' : 'Please enter an API key');
+      return;
+    }
+    if (modelId === '__custom__') {
+      logEvent('tengu_china_custom_model_entered', {});
+      setOAuthStatus({ state: 'china_apikey', provider, mode: accessMode, modelId: effectiveModelId, apiKey: '' });
+      setChinaKeyValue('');
+      setChinaKeyCursor(0);
+      setChinaKeyError(null);
+      return;
+    }
+    if (!chinaKeyValue.trim()) {
+      setChinaKeyError('Please enter an API key');
+      return;
+    }
+    const baseUrl = resolveChinaProviderBaseURL(provider.id, accessMode);
+    const env: Record<string, string | undefined> = {
+      OPENAI_AUTH_MODE: undefined,
+      OPENAI_BASE_URL: baseUrl,
+      OPENAI_API_KEY: chinaKeyValue.trim(),
+      OPENAI_DEFAULT_SONNET_MODEL: modelId,
+      OPENAI_DEFAULT_HAIKU_MODEL: modelId,
+      OPENAI_DEFAULT_OPUS_MODEL: modelId,
+    };
+    const settingsUpdate: Parameters<typeof updateSettingsForSource>[1] = {
+      modelType: 'openai',
+      env: env as unknown as Record<string, string>,
+    };
+    const { error } = updateSettingsForSource('userSettings', settingsUpdate);
+    if (error) {
+      setOAuthStatus({
+        state: 'error',
+        message: 'Failed to save settings. Please try again.',
+        toRetry: { state: 'china_apikey', provider, mode: accessMode, modelId, apiKey: chinaKeyValue },
+      });
+    } else {
+      for (const [k, v] of Object.entries(env)) {
+        if (v === undefined) {
+          delete process.env[k];
+        } else {
+          process.env[k] = v;
+        }
+      }
+      // Drop any cached OpenAI client and ChatGPT auth so the new
+      // provider/credentials take effect on the next request.
+      clearOpenAIClientCache();
+      void removeChatGPTAuth().catch(() => {});
+      logEvent('tengu_china_login_success', {});
+      setOAuthStatus({ state: 'success' });
+      void onDone();
+    }
+  }, [chinaKeyValue, provider, accessMode, modelId, onDone, setOAuthStatus]);
+
+  useKeybinding(
+    'confirm:no',
+    () => {
+      setOAuthStatus({ state: 'china_model_select', provider, mode: accessMode, activeIndex: 0 });
+    },
+    { context: 'Confirmation' },
+  );
+
+  const isCustomModelEntry = modelId === '__custom__';
+  const allModels = CHINA_LLM_PROVIDERS.flatMap(p =>
+    p.models.map(m => ({ id: m.id, label: m.label, provider: p.label })),
+  );
+  const modelSuggestions = isCustomModelEntry
+    ? chinaKeyValue.trim()
+      ? allModels.filter(m => m.id.toLowerCase().includes(chinaKeyValue.trim().toLowerCase()))
+      : allModels
+    : [];
+  const keyPage = isCustomModelEntry
+    ? provider.apiKeyPage
+    : accessMode === 'coding-plan' && provider.codingPlan
+      ? provider.codingPlan.purchasePage
+      : provider.apiKeyPage;
+  const keyFormat = isCustomModelEntry
+    ? provider.keyFormat
+    : accessMode === 'coding-plan' && provider.codingPlan
+      ? provider.codingPlan.keyFormat
+      : provider.keyFormat;
+
+  return (
+    <Box flexDirection="column" gap={1} marginTop={1}>
+      <Text bold>
+        {provider.icon} {provider.label} {isCustomModelEntry ? '— Custom Model' : 'API Key'}
+      </Text>
+      <Box flexDirection="column" gap={0}>
+        {isCustomModelEntry ? (
+          <Text dimColor> Enter any model ID supported by this provider. Browse models: {provider.modelsPage}</Text>
+        ) : (
+          <>
+            <Text dimColor> Get your key: {keyPage}</Text>
+            <Text dimColor>
+              {' '}
+              {accessMode === 'coding-plan' ? 'Use your Coding Plan credential here' : provider.freeTier}
+            </Text>
+            <Text dimColor> Key format: {keyFormat}</Text>
+          </>
+        )}
+      </Box>
+      <Box>
+        <Text>{isCustomModelEntry ? 'Model name: ' : 'API Key: '}</Text>
+        <TextInput
+          value={chinaKeyValue}
+          onChange={v => {
+            setChinaKeyValue(v);
+            setChinaKeyError(null);
+          }}
+          onSubmit={doChinaSave}
+          cursorOffset={chinaKeyCursor}
+          onChangeCursorOffset={setChinaKeyCursor}
+          columns={terminalColumns - 12}
+          mask={isCustomModelEntry ? undefined : '*'}
+          focus={true}
+        />
+      </Box>
+      {chinaKeyError ? <Text color="error">{chinaKeyError}</Text> : null}
+      {isCustomModelEntry && modelSuggestions.length > 0 && (
+        <Box flexDirection="column" gap={0}>
+          <Text dimColor>{chinaKeyValue.trim() ? 'Matching models:' : 'Known models:'}</Text>
+          {modelSuggestions.map(m => (
+            <Text key={m.id} dimColor>
+              {' '}
+              {m.id}{' '}
+              <Text>
+                ({m.label} — {m.provider})
+              </Text>
+            </Text>
+          ))}
+        </Box>
+      )}
+      <Text dimColor>
+        {isCustomModelEntry ? 'Enter to continue · Esc to go back' : 'Enter to confirm · Esc to go back'}
+      </Text>
+    </Box>
+  );
 }

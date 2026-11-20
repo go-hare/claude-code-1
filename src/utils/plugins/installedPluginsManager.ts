@@ -30,13 +30,16 @@ import {
   emitCommandProducerDirsChanged,
 } from './commandProducerDirs.js'
 import { getClaudeConfigHomeDir } from '../envUtils.js'
+import { isShuttingDown } from '../gracefulShutdown.js'
 import { getPluginsDirectory } from './pluginDirectories.js'
+import { isSourceAllowedByPolicy } from './marketplaceHelpers.js'
 import {
   type InstalledPlugin,
   InstalledPluginsFileSchemaV1,
   InstalledPluginsFileSchemaV2,
   type InstalledPluginsFileV1,
   type InstalledPluginsFileV2,
+  type MarketplaceSource,
   type PluginInstallationEntry,
   type PluginScope,
 } from './schemas.js'
@@ -1228,7 +1231,164 @@ function getPluginVersionFromManifest(
  * Being present in enabledPlugins (whether true or false) indicates the plugin
  * has been installed. The enabled/disabled state remains in settings.json.
  */
-export async function migrateFromEnabledPlugins(): Promise<void> {
+/**
+ * Official 2.1.328 `$t` (#643) — true when a managed-settings plugin has its
+ * own external git repository (`github`, `url`, or `git-subdir`) outside the
+ * official marketplace and is therefore eligible for background fetching into
+ * the plugin cache for a later session.
+ */
+export function isManagedExternalGitPluginCandidate(
+  pluginId: string,
+  source: unknown,
+  scope: PluginScope,
+): boolean {
+  if (scope !== 'managed') return false
+  if (pluginId.endsWith('@claude-plugins-official')) return false
+  if (!source || typeof source !== 'object') return false
+  const srcType = (source as { source?: unknown }).source
+  return srcType === 'github' || srcType === 'url' || srcType === 'git-subdir'
+}
+
+export type UncachedManagedExternalPlugin = {
+  pluginId: string
+  entry: unknown
+  marketplaceInstallLocation: string
+  marketplaceSource?: MarketplaceSource
+}
+
+let enabledPluginsFetchPromise: Promise<void> | undefined
+const enabledPluginsBeingFetched = new Set<string>()
+
+/** Return any in-flight background fetch of managed external git plugins (#643). */
+export function getInFlightManagedExternalPluginFetch():
+  | Promise<void>
+  | undefined {
+  return enabledPluginsFetchPromise
+}
+
+/**
+ * Official 2.1.328 `iNi` (#643) — schedule a background fetch of managed
+ * external git plugins (`github`, `url`, `git-subdir`) that were not yet in the
+ * plugin cache during `migrateFromEnabledPlugins`, so a subsequent session can
+ * load them immediately. Respects `CLAUDE_CODE_SYNC_PLUGIN_INSTALL`,
+ * `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, process exit, plugin & marketplace
+ * source policy blocks, and in-flight dedupe.
+ */
+export function scheduleManagedExternalPluginBackgroundFetch(
+  candidates: readonly UncachedManagedExternalPlugin[],
+  options?: {
+    fetcher?: (candidate: UncachedManagedExternalPlugin) => Promise<boolean>
+    onFetchedAny?: () => Promise<void>
+    isTrafficDisabled?: () => boolean
+    isBlockedByPolicy?: (pluginId: string) => boolean
+    isExiting?: () => boolean
+    isMarketplaceSourceBlocked?: (
+      source: MarketplaceSource | undefined,
+    ) => boolean
+  },
+): Promise<void> | undefined {
+  if (candidates.length === 0) return undefined
+  if (process.env.CLAUDE_CODE_SYNC_PLUGIN_INSTALL) return undefined
+  const trafficDisabled =
+    options?.isTrafficDisabled ??
+    (() => Boolean(process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC))
+  const blockedCheck = options?.isBlockedByPolicy ?? (() => false)
+  const exitingCheck = options?.isExiting ?? isShuttingDown
+  const marketplaceSourceBlockedCheck =
+    options?.isMarketplaceSourceBlocked ??
+    (source => source !== undefined && !isSourceAllowedByPolicy(source))
+
+  const toFetch = candidates.filter(
+    c => !enabledPluginsBeingFetched.has(c.pluginId),
+  )
+  if (toFetch.length === 0) return enabledPluginsFetchPromise
+
+  for (const c of toFetch) {
+    enabledPluginsBeingFetched.add(c.pluginId)
+  }
+
+  const prev = enabledPluginsFetchPromise ?? Promise.resolve()
+  const next = prev
+    .then(async () => {
+      let fetchedAny = false
+      for (const candidate of toFetch) {
+        if (exitingCheck()) {
+          logForDebugging(
+            `Not fetching external plugin ${candidate.pluginId}: exiting`,
+          )
+          continue
+        }
+        if (trafficDisabled()) {
+          logForDebugging(
+            `Not fetching external plugin ${candidate.pluginId}: CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC is set; a plugin reload (/reload-plugins) fetches it`,
+            { level: 'warn' },
+          )
+          continue
+        }
+        if (
+          blockedCheck(candidate.pluginId) ||
+          marketplaceSourceBlockedCheck(candidate.marketplaceSource)
+        ) {
+          logForDebugging(
+            `Not fetching external plugin ${candidate.pluginId}: blocked by policy`,
+          )
+          continue
+        }
+        logForDebugging(
+          `Fetching external plugin ${candidate.pluginId} into the cache`,
+        )
+        try {
+          if (options?.fetcher) {
+            if (await options.fetcher(candidate)) {
+              fetchedAny = true
+            }
+          } else {
+            const { cacheAndRegisterPlugin } = await import(
+              './pluginInstallationHelpers.js'
+            )
+            await cacheAndRegisterPlugin(
+              candidate.pluginId,
+              candidate.entry as Parameters<typeof cacheAndRegisterPlugin>[1],
+              'managed',
+              undefined,
+            )
+            fetchedAny = true
+          }
+        } catch (err) {
+          logForDebugging(
+            `Failed background fetch of managed external plugin ${candidate.pluginId}: ${errorMessage(err)}`,
+            { level: 'warn' },
+          )
+        }
+      }
+      if (fetchedAny) {
+        if (options?.onFetchedAny) {
+          await options.onFetchedAny()
+        } else {
+          await migrateFromEnabledPlugins({ fetchMissing: false })
+        }
+      }
+    })
+    .catch(err => {
+      logError(err)
+    })
+    .finally(() => {
+      for (const c of toFetch) {
+        enabledPluginsBeingFetched.delete(c.pluginId)
+      }
+      if (enabledPluginsFetchPromise === next) {
+        enabledPluginsFetchPromise = undefined
+      }
+    })
+
+  enabledPluginsFetchPromise = next
+  return next
+}
+
+export async function migrateFromEnabledPlugins(opts?: {
+  /** Official 2.1.328 (#643): fetch missing managed external git plugins in background. Default true. */
+  fetchMissing?: boolean
+}): Promise<void> {
   // Use merged settings for shouldSkipSync check
   const settings = getSettings_DEPRECATED()
   const enabledPlugins = settings.enabledPlugins || {}
@@ -1312,6 +1472,7 @@ export async function migrateFromEnabledPlugins(): Promise<void> {
   // Step 3: Update V2 scopes based on settings.json (settings is source of truth)
   let updatedCount = 0
   let addedCount = 0
+  const uncachedManagedGitPlugins: UncachedManagedExternalPlugin[] = []
 
   for (const [pluginId, scopeInfo] of pluginScopeFromSettings) {
     const existingInstallations = v2Plugins[pluginId]
@@ -1419,6 +1580,24 @@ export async function migrateFromEnabledPlugins(): Promise<void> {
             logForDebugging(
               `External plugin ${pluginId} not in cache, skipping`,
             )
+            if (
+              isManagedExternalGitPluginCandidate(
+                pluginId,
+                entry.source,
+                scopeInfo.scope,
+              )
+            ) {
+              const { loadKnownMarketplacesConfigSafe } = await import(
+                './marketplaceManager.js'
+              )
+              const knownMarketplaces = await loadKnownMarketplacesConfigSafe()
+              uncachedManagedGitPlugins.push({
+                pluginId,
+                entry,
+                marketplaceInstallLocation,
+                marketplaceSource: knownMarketplaces[marketplace]?.source,
+              })
+            }
             continue
           }
 
@@ -1472,5 +1651,14 @@ export async function migrateFromEnabledPlugins(): Promise<void> {
     logForDebugging(
       `Sync completed: ${addedCount} added, ${updatedCount} updated in installed_plugins.json`,
     )
+  }
+
+  // Official 2.1.328 (#643): kick off background fetch of uncached managed
+  // external git plugins (`github` / `url` / `git-subdir`) for a later session.
+  if (opts?.fetchMissing !== false && uncachedManagedGitPlugins.length > 0) {
+    const { isPluginBlockedByPolicy } = await import('./pluginPolicy.js')
+    scheduleManagedExternalPluginBackgroundFetch(uncachedManagedGitPlugins, {
+      isBlockedByPolicy: isPluginBlockedByPolicy,
+    })
   }
 }

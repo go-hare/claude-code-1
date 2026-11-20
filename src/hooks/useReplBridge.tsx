@@ -428,27 +428,32 @@ export function useReplBridge(
       }
 
       /**
-       * densable qe — system warning with reconnect shortcut unless detail already
-       * embeds an action (/login, /remote-control, restart, policy, update).
+       * Official 2.1.328 (#584) `ga` / `qe`: system warning with reconnect
+       * shortcut unless detail already embeds an action or marks the session as
+       * non-reconnectable, deduplicated against both `prev.at(-1)` and the last
+       * appended disconnect message UUID so repeated disconnects never stack.
        */
+      let lastDisconnectNotice: { content: string; uuid: string } | undefined;
       function appendBridgeDisconnectMessage(detail?: string): void {
         if (outboundOnly) return;
-        const hasAction =
-          !!detail &&
-          (detail.includes('/login') ||
-            detail.includes('/remote-control') ||
-            detail.includes('restart') ||
-            detail.includes('policy') ||
-            detail.includes('update'));
-        const content = `Remote Control disconnected${detail ? ` — ${detail}` : ''}${
-          hasAction ? '' : ' — run /remote-control to reconnect'
-        }`;
+        const { formatBridgeDisconnectMessage } =
+          require('../bridge/bridgeStatusUtil.js') as typeof import('../bridge/bridgeStatusUtil.js');
+        const content = formatBridgeDisconnectMessage(detail);
         setMessages(prev => {
           const last = prev.at(-1);
           if (last?.type === 'system' && last.subtype === 'informational' && last.content === content) {
             return prev;
           }
-          return [...prev, createSystemMessage(content, 'warning')];
+          if (
+            lastDisconnectNotice &&
+            lastDisconnectNotice.content === content &&
+            prev.some(m => m.uuid === lastDisconnectNotice?.uuid)
+          ) {
+            return prev;
+          }
+          const msg = createSystemMessage(content, 'warning');
+          lastDisconnectNotice = { content, uuid: msg.uuid };
+          return [...prev, msg];
         });
       }
 
@@ -677,7 +682,7 @@ export function useReplBridge(
               const fields = extractInboundMessageFields(msg);
               if (!fields) return;
 
-              const { uuid, clientPlatform, fileAttachments } = fields;
+              const { uuid, clientPlatform, fileAttachments, priority, origin, textNotTyped } = fields;
 
               // Dynamic import keeps the bridge code out of non-BRIDGE_MODE builds.
               const { resolveAndPrepend } = await import('../bridge/inboundAttachments.js');
@@ -703,6 +708,12 @@ export function useReplBridge(
                 value: content,
                 mode: 'prompt' as const,
                 uuid,
+                // Official 2.1.328 (#429): preserve explicit queue priority
+                // (e.g. `priority: 'later'`) so cross-session messages wait for
+                // the running turn to finish instead of joining mid-turn.
+                ...(priority !== undefined ? { priority } : {}),
+                ...(origin !== undefined ? { origin } : {}),
+                ...(textNotTyped ? { textNotTyped: true } : {}),
                 // skipSlashCommands stays true as defense-in-depth —
                 // processUserInputBase overrides it internally when bridgeOrigin
                 // is set AND the resolved command passes isBridgeSafeCommand.

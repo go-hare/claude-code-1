@@ -140,13 +140,21 @@ const READLINE_WORD_RE = /[\p{L}\p{N}][\p{L}\p{N}\p{M}]*/gu
 
 export class Cursor {
   readonly offset: number
+  /**
+   * Official 2.1.327 (#459): preserved visual column across consecutive
+   * `up()` / `down()` moves over shorter or blank lines. Reset to undefined
+   * on horizontal movement or edits.
+   */
+  readonly stickyColumn: number | undefined
   constructor(
     readonly measuredText: MeasuredText,
     offset: number = 0,
     readonly selection: number = 0,
+    stickyColumn?: number,
   ) {
     // it's ok for the cursor to be 1 char beyond the end of the string
     this.offset = Math.max(0, Math.min(this.text.length, offset))
+    this.stickyColumn = stickyColumn
   }
 
   static fromText(
@@ -373,8 +381,9 @@ export class Cursor {
     return this.snapOutOfPlaceholder(offset, toward)
   }
 
-  up(): Cursor {
-    const { line, column } = this.getPosition()
+  up(preferredColumn?: number): Cursor {
+    const { line, column: currentColumn } = this.getPosition()
+    const targetColumn = preferredColumn ?? this.stickyColumn ?? currentColumn
     if (line === 0) {
       return this
     }
@@ -385,20 +394,21 @@ export class Cursor {
     }
 
     const prevLineDisplayWidth = stringWidth(prevLine)
-    if (column > prevLineDisplayWidth) {
+    if (targetColumn > prevLineDisplayWidth) {
       const newOffset = this.getOffset({
         line: line - 1,
         column: prevLineDisplayWidth,
       })
-      return new Cursor(this.measuredText, newOffset, 0)
+      return new Cursor(this.measuredText, newOffset, 0, targetColumn)
     }
 
-    const newOffset = this.getOffset({ line: line - 1, column })
-    return new Cursor(this.measuredText, newOffset, 0)
+    const newOffset = this.getOffset({ line: line - 1, column: targetColumn })
+    return new Cursor(this.measuredText, newOffset, 0, targetColumn)
   }
 
-  down(): Cursor {
-    const { line, column } = this.getPosition()
+  down(preferredColumn?: number): Cursor {
+    const { line, column: currentColumn } = this.getPosition()
+    const targetColumn = preferredColumn ?? this.stickyColumn ?? currentColumn
     if (line >= this.measuredText.lineCount - 1) {
       return this
     }
@@ -411,23 +421,23 @@ export class Cursor {
       return this
     }
 
-    // If the current column is past the end of the next line,
-    // move to the end of the next line
+    // If the target column is past the end of the next line,
+    // move to the end of the next line while remembering targetColumn
     const nextLineDisplayWidth = stringWidth(nextLine)
-    if (column > nextLineDisplayWidth) {
+    if (targetColumn > nextLineDisplayWidth) {
       const newOffset = this.getOffset({
         line: line + 1,
         column: nextLineDisplayWidth,
       })
-      return new Cursor(this.measuredText, newOffset, 0)
+      return new Cursor(this.measuredText, newOffset, 0, targetColumn)
     }
 
-    // Otherwise, move to the same column on the next line
+    // Otherwise, move to the target column on the next line
     const newOffset = this.getOffset({
       line: line + 1,
-      column,
+      column: targetColumn,
     })
-    return new Cursor(this.measuredText, newOffset, 0)
+    return new Cursor(this.measuredText, newOffset, 0, targetColumn)
   }
 
   /**

@@ -26,6 +26,7 @@ import {
   type KeyboardEvent,
   type WheelEvent,
   useApp,
+  useFocusReclaim,
   useHoverTracked,
   useModalOrTerminalSize,
   useTerminalSize,
@@ -184,14 +185,26 @@ export function ItemList<T>({
     return isNavigable(initial) ? initial : findNavigable(initial, 1);
   });
   const cursorValue = options[cursor]?.value;
+  const prevOptionsLengthRef = useRef(options.length);
   useEffect(() => {
+    const prevLen = prevOptionsLengthRef.current;
+    prevOptionsLengthRef.current = options.length;
+    // Official 2.1.327 (#446): when rows load late (0 -> N), initialize focus
+    // to the first navigable row (respecting defaultFocusIndex) and reset scroll.
+    if (prevLen === 0 && options.length > 0) {
+      const initial = Math.min(defaultFocusIndex, Math.max(0, options.length - 1));
+      const next = isNavigable(initial) ? initial : findNavigable(initial, 1);
+      setCursor(next);
+      setFrom(0);
+      return;
+    }
     const found = options.findIndex(option => !option.heading && option.value === cursorValue);
     if (found >= 0 && found !== cursor) setCursor(found);
     else if (!isNavigable(cursor)) {
       const fallback = findNavigable(cursor, 1);
       if (fallback !== cursor) setCursor(fallback);
     }
-  }, [options, cursor, cursorValue]);
+  }, [options, cursor, cursorValue, defaultFocusIndex]);
   const [from, setFrom] = useState(0);
   const fromRef = useRef(from);
   fromRef.current = from;
@@ -281,6 +294,9 @@ export function ItemList<T>({
   };
   const binding = useOptionalKeybindingContext();
   const keysOn = !isDisabled && options.length > 0 && binding !== null;
+  // Official 2.1.327 (#446): reclaim Ink focus once late-loaded rows arrive so
+  // Enter and arrow keys are never ignored after transitioning from 0 -> N rows.
+  useFocusReclaim(listRef, !isDisabled && options.length > 0);
   useKeybinding('select:next', () => step(1), { context: 'Select', isActive: keysOn });
   useKeybinding('select:previous', () => step(-1), { context: 'Select', isActive: keysOn });
   useKeybinding('select:pageDown', () => page(1), { context: 'Select', isActive: keysOn });
@@ -293,8 +309,26 @@ export function ItemList<T>({
     isActive: keysOn && onSelect !== undefined,
   });
   const onKeyDown = (event: KeyboardEvent): void => {
-    if (binding !== null || isDisabled || options.length === 0 || event.key !== 'return') return;
-    onSelect?.(cursor);
+    if (binding !== null || isDisabled || options.length === 0) return;
+    if (event.key === 'return') {
+      onSelect?.(cursor);
+    } else if (event.name === 'down' || event.key === 'down') {
+      step(1);
+    } else if (event.name === 'up' || event.key === 'up') {
+      step(-1);
+    } else if (event.name === 'pagedown' || event.key === 'pagedown') {
+      page(1);
+    } else if (event.name === 'pageup' || event.key === 'pageup') {
+      page(-1);
+    } else if (event.name === 'home' || event.key === 'home') {
+      move(firstNavigable, 1);
+    } else if (event.name === 'end' || event.key === 'end') {
+      move(lastNavigable, -1);
+    } else if ((event.name === 'escape' || event.key === 'escape') && onCancel !== undefined) {
+      onCancel();
+    } else {
+      return;
+    }
     event.preventDefault();
     event.stopImmediatePropagation();
   };

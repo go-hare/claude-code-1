@@ -4078,6 +4078,7 @@ async function isUpstreamGoneWithNoUniqueCommits(
       '--no-merges',
       '--max-count=1',
       `${originHeadRef}...HEAD`,
+      '--',
     ],
     { cwd: worktreePath, env: gitWorktreeEnv() },
   )
@@ -4166,6 +4167,7 @@ export async function isJobWorktreeFullyUpstream(
     'HEAD',
     '--not',
     '--remotes',
+    '--',
   ]
   const unique = await execFileNoThrowWithCwd(gitExe(), remotesOnly, {
     cwd: worktreePath,
@@ -4550,7 +4552,7 @@ export async function hasWorktreeChanges(
   const { code: revListCode, stdout: revListOutput } =
     await execFileNoThrowWithCwd(
       gitExe(),
-      ['rev-list', '--count', `${headCommit}..HEAD`],
+      ['rev-list', '--count', `${headCommit}..HEAD`, '--'],
       { cwd: worktreePath, env: gitWorktreeEnv() },
     )
   if (revListCode !== 0) {
@@ -4626,7 +4628,7 @@ export async function healOrphanedWorktreeDir(
   if (remoteRes.stdout.trim().length > 0 && revParseRes.code === 0) {
     const unpushedRes = await execFileNoThrowWithCwd(
       gitExe(),
-      ['rev-list', '--max-count=1', worktreeBranch, '--not', '--remotes'],
+      ['rev-list', '--max-count=1', worktreeBranch, '--not', '--remotes', '--'],
       { cwd: repoRoot, env: gitWorktreeEnv() },
     )
     if (unpushedRes.code !== 0) {
@@ -4700,7 +4702,7 @@ export async function inspectWorktreeHeadState(params: {
     if (!originalHeadCommit) return null
     const res = await execFileNoThrowWithCwd(
       gitExe(),
-      ['rev-list', '--count', ...refs, '--not', originalHeadCommit],
+      ['rev-list', '--count', ...refs, '--not', originalHeadCommit, '--'],
       { cwd: worktreePath, env: gitWorktreeEnv() },
     )
     if (res.code !== 0) return null

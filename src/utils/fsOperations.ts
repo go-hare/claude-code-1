@@ -267,24 +267,187 @@ export function isDuplicatePath(
 }
 
 /**
+ * Official 2.1.327 (#501, SEA `PSo` / `Fe` / `tt`):
+ * Detect symbolic link targets whose literal text cannot be safely vetted:
+ * - Contains U+FFFD replacement char (non-UTF-8 symlink target)
+ * - Points to a UNC / network path (directly or after leading `..` segments)
+ * - Points into `/proc/<pid|self>/root|cwd|exe|fd|map_files` or `/dev/fd`
+ * - On Windows: drive-relative (`C:foo`), root-relative (`\foo`), non-drive/UNC
+ *   device namespace (`\\?\...`), trailing dot/space, or reserved device name.
+ */
+const WINDOWS_RESERVED_DEVICE_RE =
+  /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i
+export const PROC_OR_DEV_MAGIC_LINK_RE =
+  /^\/(?:dev\/fd|proc\/(?:self|thread-self|\d+)(?:\/task\/\d+)?\/(?:root|cwd|exe|fd|map_files))(?:\/|$)/i
+
+function isProcOrDevMagicLinkPath(p: string): boolean {
+  const normalized = nodePath.posix.normalize(p.replaceAll('\\', '/'))
+  return PROC_OR_DEV_MAGIC_LINK_RE.test(normalized)
+}
+
+export function isOpaqueSymlinkTarget(
+  target: string,
+  isWindows = getPlatform() === 'windows',
+): boolean {
+  if (target.includes('\uFFFD')) return true
+  const strippedLeadingUp = nodePath.isAbsolute(target)
+    ? target
+    : target.replace(/^(?:\.\.(?:[\\/]|$))+/, '')
+  if (
+    strippedLeadingUp.startsWith('//') ||
+    strippedLeadingUp.startsWith('\\\\')
+  ) {
+    return true
+  }
+  if (isProcOrDevMagicLinkPath(target)) {
+    return true
+  }
+  if (isWindows) {
+    if (/^(?:[A-Za-z]:(?![\\/])|[\\/](?![\\/]))/.test(target)) return true
+    if (
+      /^[\\/]{2}\?[\\/]/.test(target) &&
+      !/^[\\/]{2}\?[\\/](?:[A-Za-z]:[\\/]|UNC[\\/])/i.test(target)
+    ) {
+      return true
+    }
+    const parts = target.split(/[\\/]/)
+    if (
+      parts.some(
+        seg =>
+          seg !== '.' &&
+          seg !== '..' &&
+          (/[. ]$/.test(seg) || WINDOWS_RESERVED_DEVICE_RE.test(seg)),
+      )
+    ) {
+      return true
+    }
+  }
+  return false
+}
+
+const MAX_SYMLINK_HOPS = 32
+const BINARY_SEARCH_DEPTH_THRESHOLD = 8
+
+/**
  * Resolve the deepest existing ancestor of a path via realpathSync, walking
  * up until it succeeds. Detects dangling symlinks (link entry exists, target
  * doesn't) via lstat and resolves them via readlink.
  *
- * Use when the input path may not exist (new file writes) and you need to
- * know where the write would ACTUALLY land after the OS follows symlinks.
- *
- * Returns the resolved absolute path with non-existent tail segments
- * rejoined, or undefined if no symlink was found in any existing ancestor
- * (the path's existing ancestors all resolve to themselves).
- *
- * Handles: live parent symlinks, dangling file symlinks, dangling parent
- * symlinks. Same core algorithm as teamMemPaths.ts:realpathDeepestExisting.
+ * Official 2.1.327 (#489): on deeply nested missing paths on macOS/Linux,
+ * uses binary search over path components (`O(log depth)` `lstatSync` calls
+ * instead of `O(depth)`) before resolving the deepest existing ancestor.
  */
-export function resolveDeepestExistingAncestorSync(
+function resolveSymlinkAncestorWithMetaSync(
+  fs: FsOperations,
+  dir: string,
+  segments: readonly string[],
+): { resolved: string | undefined; opaque: boolean } {
+  let rawTarget: string
+  try {
+    rawTarget = fs.readlinkSync(dir)
+  } catch {
+    return { resolved: undefined, opaque: true }
+  }
+  // Official 2.1.327 (#501): check raw readlink target BEFORE nodePath.resolve
+  // so relative opaque targets like `../../\\server\share` cannot bypass.
+  if (isOpaqueSymlinkTarget(rawTarget)) {
+    return { resolved: rawTarget, opaque: true }
+  }
+  try {
+    const resolvedDir = fs.realpathSync(dir)
+    const resolved =
+      segments.length === 0
+        ? resolvedDir
+        : nodePath.join(resolvedDir, ...segments)
+    return { resolved, opaque: isOpaqueSymlinkTarget(resolved) }
+  } catch {
+    // Dangling symlink: realpath failed but lstat/readlink saw the link entry.
+    const absTarget = nodePath.isAbsolute(rawTarget)
+      ? rawTarget
+      : nodePath.resolve(nodePath.dirname(dir), rawTarget)
+    const resolved =
+      segments.length === 0 ? absTarget : nodePath.join(absTarget, ...segments)
+    return { resolved, opaque: isOpaqueSymlinkTarget(resolved) }
+  }
+}
+
+function resolveDeepestExistingAncestorWithMetaSync(
   fs: FsOperations,
   absolutePath: string,
-): string | undefined {
+): { resolved: string | undefined; opaque: boolean } {
+  const normalized = nodePath.normalize(absolutePath)
+  // Fast binary-search path for deeply nested missing paths without `..`
+  if (
+    getPlatform() !== 'windows' &&
+    normalized.startsWith('/') &&
+    !normalized.includes('/../') &&
+    !normalized.endsWith('/..')
+  ) {
+    const parts = normalized.split('/').filter(Boolean)
+    if (parts.length > BINARY_SEARCH_DEPTH_THRESHOLD) {
+      // Binary search for the deepest prefix index in [0, parts.length] that
+      // does NOT fail with ENOENT/ENOTDIR/ENAMETOOLONG.
+      let lo = 0
+      let hi = parts.length
+      let deepestFound: { prefix: string; stats: fs.Stats } | null = null
+      let fellBackToLinear = false
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >>> 1
+        const candidate = `/${parts.slice(0, mid).join('/')}`
+        try {
+          const st = fs.lstatSync(candidate)
+          lo = mid
+          deepestFound = { prefix: candidate, stats: st }
+        } catch (err) {
+          const code = getErrnoCode(err)
+          if (
+            code === 'ENOENT' ||
+            code === 'ENOTDIR' ||
+            code === 'ENAMETOOLONG'
+          ) {
+            hi = mid - 1
+          } else {
+            // Non-missing error (e.g. EACCES/ELOOP): fall back to linear walk-up
+            // so existing symlink ancestors above this prefix are still resolved.
+            fellBackToLinear = true
+            break
+          }
+        }
+      }
+      if (!fellBackToLinear) {
+        if (lo === 0) return { resolved: undefined, opaque: false }
+        const dir = `/${parts.slice(0, lo).join('/')}`
+        const segments = parts.slice(lo)
+        let st = deepestFound?.prefix === dir ? deepestFound.stats : undefined
+        if (!st) {
+          try {
+            st = fs.lstatSync(dir)
+          } catch {
+            fellBackToLinear = true
+          }
+        }
+        if (!fellBackToLinear && st) {
+          if (st.isSymbolicLink()) {
+            return resolveSymlinkAncestorWithMetaSync(fs, dir, segments)
+          }
+          try {
+            const resolved = fs.realpathSync(dir)
+            if (resolved !== dir) {
+              const joined =
+                segments.length === 0
+                  ? resolved
+                  : nodePath.join(resolved, ...segments)
+              return { resolved: joined, opaque: isOpaqueSymlinkTarget(joined) }
+            }
+          } catch {
+            // realpath failed (e.g. EACCES in ancestors)
+          }
+          return { resolved: undefined, opaque: false }
+        }
+      }
+    }
+  }
+
   let dir = absolutePath
   const segments: string[] = []
   // Walk up using lstat (cheap, O(1)) to find the first existing component.
@@ -295,47 +458,40 @@ export function resolveDeepestExistingAncestorSync(
     try {
       st = fs.lstatSync(dir)
     } catch {
-      // lstat failed: truly non-existent. Walk up.
+      // lstat failed: non-existent or inaccessible. Walk up.
       segments.unshift(nodePath.basename(dir))
       dir = nodePath.dirname(dir)
       continue
     }
     if (st.isSymbolicLink()) {
-      // Found a symlink (live or dangling). Try realpath first (resolves
-      // chained symlinks); fall back to readlink for dangling symlinks.
-      try {
-        const resolved = fs.realpathSync(dir)
-        return segments.length === 0
-          ? resolved
-          : nodePath.join(resolved, ...segments)
-      } catch {
-        // Dangling: realpath failed but lstat saw the link entry.
-        const target = fs.readlinkSync(dir)
-        const absTarget = nodePath.isAbsolute(target)
-          ? target
-          : nodePath.resolve(nodePath.dirname(dir), target)
-        return segments.length === 0
-          ? absTarget
-          : nodePath.join(absTarget, ...segments)
-      }
+      return resolveSymlinkAncestorWithMetaSync(fs, dir, segments)
     }
     // Existing non-symlink component. One realpath call resolves any
     // symlinks in its ancestors. If none, return undefined (no symlink).
     try {
       const resolved = fs.realpathSync(dir)
       if (resolved !== dir) {
-        return segments.length === 0
-          ? resolved
-          : nodePath.join(resolved, ...segments)
+        const joined =
+          segments.length === 0
+            ? resolved
+            : nodePath.join(resolved, ...segments)
+        return { resolved: joined, opaque: isOpaqueSymlinkTarget(joined) }
       }
     } catch {
       // realpath can still fail (e.g. EACCES in ancestors). Return
       // undefined — we can't resolve, and the logical path is already
       // in pathSet for the caller.
     }
-    return undefined
+    return { resolved: undefined, opaque: false }
   }
-  return undefined
+  return { resolved: undefined, opaque: false }
+}
+
+export function resolveDeepestExistingAncestorSync(
+  fs: FsOperations,
+  absolutePath: string,
+): string | undefined {
+  return resolveDeepestExistingAncestorWithMetaSync(fs, absolutePath).resolved
 }
 
 export type PermissionPathWalk = {
@@ -374,15 +530,20 @@ export function walkPermissionPaths(inputPath: string): PermissionPathWalk {
   let hopStarted = false
   let unresolved = false
 
+  // Official 2.1.327 (#501): reject magic /proc or /dev/fd link paths upfront.
+  if (isProcOrDevMagicLinkPath(path)) {
+    return { paths: Array.from(pathSet), unresolved: true }
+  }
+
   // Follow the symlink chain, collecting ALL intermediate targets
   // This handles cases like: test.txt -> /etc/passwd -> /private/etc/passwd
   // We want to check all three paths, not just test.txt and /private/etc/passwd
   try {
     let currentPath = path
     const visited = new Set<string>()
-    const maxDepth = 40 // Prevent runaway loops, matches typical SYMLOOP_MAX
+    let hops = 0
 
-    for (let depth = 0; depth < maxDepth; depth++) {
+    for (;;) {
       // Prevent infinite loops from circular symlinks
       if (visited.has(currentPath)) {
         break
@@ -392,17 +553,33 @@ export function walkPermissionPaths(inputPath: string): PermissionPathWalk {
       let stats: fs.Stats
       try {
         // gold C() lstat/readlink — do not existsSync-skip after a hop:
-        // EACCES on the landing is unresolved, ENOENT is still the new-file
-        // / dangling case (ancestor resolve only on the original spelling).
+        // EACCES on the landing is unresolved, ENOENT resolves the deepest
+        // existing ancestor on ANY hop so dangling symlinks pointing through
+        // directory symlinks or chained dangling symlinks are fully walked.
         stats = fsImpl.lstatSync(currentPath)
       } catch (error) {
         const code = getErrnoCode(error)
         if (code === 'ENOENT') {
-          if (currentPath === path) {
-            const resolved = resolveDeepestExistingAncestorSync(fsImpl, path)
-            if (resolved !== undefined) {
-              pathSet.add(resolved)
+          const { resolved, opaque } =
+            resolveDeepestExistingAncestorWithMetaSync(fsImpl, currentPath)
+          if (opaque) {
+            unresolved = true
+            break
+          }
+          if (resolved !== undefined && !visited.has(resolved)) {
+            if (isProcOrDevMagicLinkPath(resolved)) {
+              unresolved = true
+              break
             }
+            pathSet.add(resolved)
+            hopStarted = true
+            hops++
+            if (hops > MAX_SYMLINK_HOPS) {
+              unresolved = true
+              break
+            }
+            currentPath = resolved
+            continue
           }
           break
         }
@@ -424,13 +601,32 @@ export function walkPermissionPaths(inputPath: string): PermissionPathWalk {
       }
 
       hopStarted = true
+      hops++
+      // Official 2.1.327 (#501, SEA `C = 32`): refuse symlink chains longer
+      // than MAX_SYMLINK_HOPS (32) rather than silently truncating them.
+      if (hops > MAX_SYMLINK_HOPS) {
+        unresolved = true
+        break
+      }
       // Get the immediate symlink target
       const target = fsImpl.readlinkSync(currentPath)
+      // Official 2.1.327 (#501, SEA `PSo`): refuse opaque/unvettable symlink
+      // targets (non-UTF-8 `\uFFFD`, UNC/network targets, `/proc/<pid>/fd`,
+      // or Windows drive-relative/reserved targets).
+      if (isOpaqueSymlinkTarget(target)) {
+        unresolved = true
+        break
+      }
 
       // If target is relative, resolve it relative to the symlink's directory
       const absoluteTarget = nodePath.isAbsolute(target)
         ? target
         : nodePath.resolve(nodePath.dirname(currentPath), target)
+
+      if (isProcOrDevMagicLinkPath(absoluteTarget)) {
+        unresolved = true
+        break
+      }
 
       // Add this intermediate target to the set
       pathSet.add(absoluteTarget)

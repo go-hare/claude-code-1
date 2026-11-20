@@ -25,7 +25,7 @@ import {
   fchmod,
   type WriteStream,
 } from 'node:fs'
-import { access, lstat, mkdir, readFile, rm } from 'node:fs/promises'
+import { access, lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { getErrnoCode } from 'src/utils/errors.js'
 import { isPluginFsNetworkOrDevicePath } from 'src/utils/path.js'
 import { homedir, hostname } from 'node:os'
@@ -38,7 +38,12 @@ import {
   sep as pathSep,
 } from 'node:path'
 import { isEnvDefinedFalsy, isEnvTruthy } from 'src/utils/envUtils.js'
-import { sanitizePermanentRefWording } from './gitPrepare.js'
+import {
+  parseRepositoryFolderSpec,
+  sanitizePermanentRefWording,
+  validateRepositoryFolderSpecs,
+  type RepositoryFolderMapping,
+} from './gitPrepare.js'
 import {
   type UseAnthropicGhSetting,
   formatBuiltInGhStartupLines,
@@ -56,6 +61,7 @@ import {
   configureGitSigning,
   GIT_PROXY_CRED_HELPER_CONTENT,
   gitProxyCredHelperPath,
+  wipeHomeGitConfigForProxy,
   type GitArtifactFile,
 } from './gitConfigure.js'
 import {
@@ -68,7 +74,11 @@ import {
   type RunnerHealthState,
 } from './healthMetrics.js'
 import { getPostSessionHookInFlightCount } from './postSessionInFlight.js'
-import { snapshotHostConfig, type HostConfigSnapshot } from './hostConfig.js'
+import {
+  formatIgnoredHostDefaultModeWarning,
+  snapshotHostConfig,
+  type HostConfigSnapshot,
+} from './hostConfig.js'
 import { readWarmupCompleteOs } from './prefetchWarmup.js'
 import {
   createSelfHostedRunnerApi,
@@ -209,6 +219,8 @@ export type RootRunnerArgs = {
   poolSecretFile: string | undefined
   gitSshRewriteHosts: string[]
   gitHostRewrites: Array<[string, string]>
+  /** Official 2.1.328 (#548): `--repository-folder` per-repo directory overrides (requires `--capacity 1`). */
+  repositoryFolders?: RepositoryFolderMapping[]
   useAnthropicGitProxy: boolean
   /** Official 2.1.326 #339: `--use-anthropic-gh` / `SELF_HOSTED_RUNNER_USE_ANTHROPIC_GH` (default `'default'`, i.e. on). */
   useAnthropicGh: UseAnthropicGhSetting
@@ -809,6 +821,7 @@ export function parseRootArgs(
     poolSecretFile: undefined,
     gitSshRewriteHosts: [],
     gitHostRewrites: [],
+    repositoryFolders: [],
     useAnthropicGitProxy: isEnvTruthy(process.env.CLAUDE_RUNNER_USE_GIT_PROXY),
     useAnthropicGh: parseUseAnthropicGhEnv(
       process.env.SELF_HOSTED_RUNNER_USE_ANTHROPIC_GH,
@@ -915,6 +928,17 @@ export function parseRootArgs(
           throw new Error(`duplicate --git-host-rewrite for '${a}'`)
         }
         t.gitHostRewrites.push([a, l])
+        n++
+        break
+      }
+      case '--repository-folder': {
+        if (!i) {
+          throw new Error(
+            '--repository-folder requires <owner/repo>=<absolute-path>',
+          )
+        }
+        t.repositoryFolders ??= []
+        t.repositoryFolders.push(parseRepositoryFolderSpec(i))
         n++
         break
       }
@@ -1504,6 +1528,8 @@ export type PollSkeletonOpts = {
   healthState?: RunnerHealthState
   gitSshRewriteHosts?: string[]
   gitHostRewrites?: Array<[string, string]>
+  /** Official 2.1.328 (#548): per-repo folder overrides (`--repository-folder`). */
+  repositoryFolders?: RepositoryFolderMapping[]
   pushOutcomeOnRelease?: boolean
   trustWorkspace?: boolean
   removeSessionState?: boolean
@@ -2715,6 +2741,7 @@ export async function runPollSkeleton(
                 skipSpawn: opts.skipSessionSpawn === true,
                 gitSshRewriteHosts: opts.gitSshRewriteHosts,
                 gitHostRewrites: opts.gitHostRewrites,
+                repositoryFolders: opts.repositoryFolders,
                 pushOutcomeOnRelease: opts.pushOutcomeOnRelease,
                 postSessionHookTimeoutMs,
                 checkoutHookTimeoutMs: resolveCheckoutHookTimeoutMs(),
@@ -3091,6 +3118,169 @@ export type SelfHostedRunnerMainDeps = {
  * Lands: help, parseArgs, secret, logging, register, health HTTP, poll + SSE.
  * aWd/bjv/outcome + full Ane (VE_/KE_) + kjv confine + D trust seed + full xBh drain/retire wired.
  */
+/**
+ * Official 2.1.328 (#634) `Qs` / `Vw` / `jw` / `zw` / `Np`:
+ * When startup fails AFTER `registerRunner` has already succeeded, report the
+ * startup failure against any session already assigned to an on-demand runner
+ * (`mayHoldSession`) and deregister with an explicit reason instead of leaving
+ * a dead runner on the server until lease expiry.
+ */
+export type StartupFatalCode =
+  | 'gitconfig_wipe_failed'
+  | 'configure_git_failed'
+  | 'git_proxy_setup_failed'
+  | 'startup_failed'
+
+export const STARTUP_FAILURE_DEREGISTER_REASONS: Record<
+  StartupFatalCode,
+  string
+> = {
+  gitconfig_wipe_failed: 'startup_git_proxy_setup_failed',
+  git_proxy_setup_failed: 'startup_git_proxy_setup_failed',
+  configure_git_failed: 'startup_configure_git_failed',
+  startup_failed: 'startup_failed',
+}
+
+export class StartupFatalError extends Error {
+  readonly code: StartupFatalCode
+  constructor(code: StartupFatalCode, message: string) {
+    super(message)
+    this.code = code
+    this.name = 'StartupFatalError'
+  }
+}
+
+export type RegisteredRunnerStartupHandle = {
+  apiClient: SelfHostedRunnerApi
+  runnerId: string
+  getRunnerToken: () => string
+  mayHoldSession: boolean
+  stopRequested: () => boolean
+  abort: () => void
+  onStatus: (msg: string) => void
+  onDebug: (msg: string) => void
+  reportTimeoutMs?: number
+  deregisterTimeoutMs?: number
+  settleDelayMs?: number
+}
+
+const POST_REGISTER_REPORT_TIMEOUT_MS = 4_000
+const POST_REGISTER_DEREGISTER_TIMEOUT_MS = 5_000
+
+async function reportStartupFailureForAssignedSessions(
+  handle: RegisteredRunnerStartupHandle,
+  code: StartupFatalCode,
+  signal: AbortSignal,
+): Promise<void> {
+  const poll = await handle.apiClient.pollWork(
+    handle.getRunnerToken(),
+    handle.runnerId,
+    0,
+    signal,
+  )
+  if (poll.lease_expires_at === undefined) {
+    throw new Error('PollWork: the answer has no lease_expires_at')
+  }
+  for (const sessionId of poll.assignment_ids) {
+    signal.throwIfAborted()
+    const res = await handle.apiClient.reportSessionFailure(
+      handle.getRunnerToken(),
+      sessionId,
+      `runner startup failed (${code}); the last [runner:fatal] line in that runner's log says why`,
+    )
+    signal.throwIfAborted()
+    if (typeof res.stuck !== 'boolean') {
+      throw new Error('ReportSessionFailure: the answer has no stuck field')
+    }
+    handle.onStatus(
+      `[runner:exit] Reported this startup failure for session ${sessionId}; the server ${
+        res.stuck
+          ? 'will not offer it to another runner until an environment admin retries it'
+          : 'may retry it on another runner'
+      }`,
+    )
+  }
+}
+
+export async function reportAndDeregisterOnPostRegisterFailure(
+  err: unknown,
+  handle: RegisteredRunnerStartupHandle,
+): Promise<{ reported: boolean; deregistered: boolean; reason?: string }> {
+  handle.abort()
+  const code: StartupFatalCode =
+    err instanceof StartupFatalError ? err.code : 'startup_failed'
+  const detail =
+    err instanceof StartupFatalError
+      ? err.message
+      : `unexpected startup failure: ${redactLogText(
+          err instanceof Error && err.stack ? err.stack : errMsg(err),
+        )}. If it keeps happening, contact your Anthropic account team and include this line.`
+  handle.onStatus(`[runner:fatal] ${detail} (startup_fatal:${code})`)
+
+  const settleDelayMs = handle.settleDelayMs ?? 100
+  if (settleDelayMs > 0) {
+    await new Promise(resolve => setTimeout(resolve, settleDelayMs))
+  }
+
+  const stopping = handle.stopRequested()
+  let reported = false
+  if (handle.mayHoldSession && stopping) {
+    handle.onStatus(
+      '[runner:exit] Not reporting this startup failure against the session: a shutdown signal had arrived, so a stop may be what failed the step',
+    )
+  } else if (handle.mayHoldSession) {
+    const reportAc = new AbortController()
+    const reportTimeoutMs =
+      handle.reportTimeoutMs ?? POST_REGISTER_REPORT_TIMEOUT_MS
+    try {
+      await withTimeoutMs(
+        reportStartupFailureForAssignedSessions(handle, code, reportAc.signal),
+        reportTimeoutMs,
+        '[runner:exit] report',
+      )
+      reported = true
+    } catch (reportErr) {
+      const timedOut =
+        reportErr instanceof Error && reportErr.message.includes('timed out')
+      handle.onStatus(
+        `[runner:exit] Could not confirm that the server recorded this startup failure (${
+          timedOut
+            ? `no answer within ${reportTimeoutMs / 1000} s`
+            : redactLogText(errMsg(reportErr))
+        }), so this runner exits without deregistering; after its lease expires the server removes it and takes back any session it holds`,
+      )
+      return { reported: false, deregistered: false }
+    } finally {
+      reportAc.abort()
+    }
+  }
+
+  const reason = stopping
+    ? 'shutdown_signal'
+    : STARTUP_FAILURE_DEREGISTER_REASONS[code]
+  const deregTimeoutMs =
+    handle.deregisterTimeoutMs ?? POST_REGISTER_DEREGISTER_TIMEOUT_MS
+  try {
+    await withTimeoutMs(
+      handle.apiClient.deregisterRunner(handle.getRunnerToken(), { reason }),
+      deregTimeoutMs,
+      '[runner:exit] deregister',
+    )
+    handle.onStatus(
+      `[runner:exit] Deregistered after startup failure (startup_fatal:${code})`,
+    )
+    return { reported, deregistered: true, reason }
+  } catch (deregErr) {
+    handle.onDebug(
+      `[runner:exit] deregisterRunner failed (best-effort): ${errMsg(deregErr)}`,
+    )
+    handle.onStatus(
+      `[runner:exit] Could not tell the server this runner is leaving (${redactLogText(errMsg(deregErr))}); after its lease expires the server removes it`,
+    )
+    return { reported, deregistered: false, reason }
+  }
+}
+
 export async function selfHostedRunnerMain(
   argv: string[],
   deps: SelfHostedRunnerMainDeps = {},
@@ -3252,8 +3442,24 @@ export async function selfHostedRunnerMain(
     }
   }
 
+  if (args.repositoryFolders && args.repositoryFolders.length > 0) {
+    try {
+      await validateRepositoryFolderSpecs(args.repositoryFolders, {
+        capacity: args.capacity,
+        baseDir: args.baseDir,
+        homeDir: homedir(),
+      })
+    } catch (err) {
+      onStatus(`[runner:fatal] ${errMsg(err)}`)
+      await flushLog()
+      process.exit(1)
+    }
+  }
+
   // densable azv git-proxy/configure order:
-  // 1) wipe HOME git configs when proxy  2) configureGit  3) configure proxy + snapshot
+  // 1) early CLI flag validation for git proxy (before registration).
+  // Actual git wipe, --configure-git, and --use-anthropic-git-proxy setup run
+  // AFTER registration so failures report/deregister cleanly (#634).
   let gitProxyGlobalConfigPath: string | undefined
   let gitProxyGlobalConfigSnapshot: string | undefined
   let gitProxyCredHelper: { path: string; content: string } | undefined
@@ -3280,77 +3486,6 @@ export async function selfHostedRunnerMain(
     }
     gitProxyGlobalConfigPath =
       process.env.GIT_CONFIG_GLOBAL || join(homedir(), '.gitconfig')
-    try {
-      const st = await lstat(gitProxyGlobalConfigPath).catch(() => undefined)
-      if (st && (st.isCharacterDevice() || st.isBlockDevice())) {
-        onStatus(
-          `[runner:fatal] --use-anthropic-git-proxy requires a writable global git config, but GIT_CONFIG_GLOBAL resolves to ${gitProxyGlobalConfigPath} which is not a regular file. The proxy flag writes its credential helper there and restores it at each session start. Unset GIT_CONFIG_GLOBAL or point it at a regular file path.`,
-        )
-        await flushLog()
-        process.exit(1)
-      }
-      const xdg = process.env.XDG_CONFIG_HOME || join(homedir(), '.config')
-      onStatus(
-        `[runner:git] --use-anthropic-git-proxy: wiping HOME-level git config (${gitProxyGlobalConfigPath}, ${join(xdg, 'git')}, ${join(args.baseDir, '.runner')}) for cross-session isolation. Operator-provisioned git config must live in system config (/etc/gitconfig) or via --configure-git; see the self-hosted runners guide.`,
-      )
-      await rm(gitProxyGlobalConfigPath, { recursive: true, force: true })
-      await rm(join(homedir(), '.gitconfig'), {
-        recursive: true,
-        force: true,
-      })
-      await rm(join(xdg, 'git'), { recursive: true, force: true })
-      await rm(join(args.baseDir, '.runner'), {
-        recursive: true,
-        force: true,
-      })
-      await mkdir(dirname(gitProxyGlobalConfigPath), { recursive: true })
-    } catch (err) {
-      onStatus(
-        `[runner:fatal] --use-anthropic-git-proxy wipe failed: ${errMsg(err)}`,
-      )
-      await flushLog()
-      process.exit(1)
-    }
-  }
-
-  if (args.configureGit) {
-    try {
-      await configureGitSigning({
-        baseDir: args.baseDir,
-        execPath,
-        onStatus,
-      })
-      configureGitHookStubs = coauthorHookStubs(args.baseDir)
-      configureGitSigningArtifacts = codeSignArtifacts(args.baseDir, execPath)
-    } catch (err) {
-      onStatus(`[runner:fatal] --configure-git failed: ${errMsg(err)}`)
-      await flushLog()
-      process.exit(1)
-    }
-  }
-
-  if (args.useAnthropicGitProxy) {
-    try {
-      await configureAnthropicGitProxy({
-        apiBaseUrl: args.apiUrl,
-        baseDir: args.baseDir,
-        onStatus,
-      })
-      gitProxyGlobalConfigSnapshot = await readFile(
-        gitProxyGlobalConfigPath!,
-        'utf-8',
-      ).catch(() => '')
-      gitProxyCredHelper = {
-        path: gitProxyCredHelperPath(args.baseDir),
-        content: GIT_PROXY_CRED_HELPER_CONTENT,
-      }
-    } catch (err) {
-      onStatus(
-        `[runner:fatal] --use-anthropic-git-proxy failed: ${errMsg(err)}`,
-      )
-      await flushLog()
-      process.exit(1)
-    }
   }
 
   const apiFactory = deps.apiFactory ?? createSelfHostedRunnerApi
@@ -3538,8 +3673,155 @@ export async function selfHostedRunnerMain(
   runnerTokenRefresh.schedule(RUNNER_TOKEN_LABEL, runnerToken)
 
   // densable Q2h / eBh — startup snapshots passed into xBh → rBh
-  const hostConfigSnapshot = await snapshotHostConfig(onStatus)
-  const governedGitConfigSeed = await captureGovernedGitConfigSeed(onDebug)
+  // Official 2.1.328 (#634): if post-register startup fails before entering the
+  // poll loop, report startup failure (for on-demand runners) and deregister
+  // with an explicit reason.
+  let hostConfigSnapshot: HostConfigSnapshot | undefined
+  let governedGitConfigSeed: string | undefined
+  try {
+    if (args.useAnthropicGitProxy) {
+      gitProxyGlobalConfigPath =
+        gitProxyGlobalConfigPath ||
+        process.env.GIT_CONFIG_GLOBAL ||
+        join(homedir(), '.gitconfig')
+      try {
+        const st = await lstat(gitProxyGlobalConfigPath).catch(() => undefined)
+        if (st && (st.isCharacterDevice() || st.isBlockDevice())) {
+          throw new StartupFatalError(
+            'gitconfig_wipe_failed',
+            `--use-anthropic-git-proxy requires a writable global git config, but GIT_CONFIG_GLOBAL resolves to ${gitProxyGlobalConfigPath} which is not a regular file. The proxy flag writes its credential helper there and restores it at each session start. Unset GIT_CONFIG_GLOBAL or point it at a regular file path.`,
+          )
+        }
+        const xdg = process.env.XDG_CONFIG_HOME || join(homedir(), '.config')
+        const homeGitconfigPath = join(homedir(), '.gitconfig')
+        const xdgGitDirs = [join(xdg, 'git')]
+        const runnerDir = join(args.baseDir, '.runner')
+        onStatus(
+          `[runner:git] --use-anthropic-git-proxy: wiping HOME-level git config (${gitProxyGlobalConfigPath}${
+            st?.isDirectory() && gitProxyGlobalConfigPath !== homeGitconfigPath
+              ? ' (a directory: left alone if it is not empty or holds one of the others, unless it lies in one of them)'
+              : ''
+          }, ${xdgGitDirs.join(', ')}, ${runnerDir}) for cross-session isolation. Operator-provisioned git config must live in system config (/etc/gitconfig) or via --configure-git; see "Git authentication" in the self-hosted runners guide.`,
+        )
+        const wipeOutcome = await wipeHomeGitConfigForProxy({
+          globalCfgPath: gitProxyGlobalConfigPath,
+          homeGitconfigPath,
+          xdgGitDirs,
+          runnerDir,
+        })
+        if (wipeOutcome === 'kept') {
+          const origPath = gitProxyGlobalConfigPath
+          let homeWriteErr: string | undefined
+          try {
+            await writeFile(homeGitconfigPath, '', { flag: 'wx' })
+          } catch (writeErr) {
+            homeWriteErr = errMsg(writeErr)
+          }
+          gitProxyGlobalConfigPath =
+            homeWriteErr === undefined
+              ? homeGitconfigPath
+              : join(runnerDir, 'gitconfig')
+          process.env.GIT_CONFIG_GLOBAL = gitProxyGlobalConfigPath
+          onStatus(
+            `[runner:warn] --use-anthropic-git-proxy: GIT_CONFIG_GLOBAL names ${origPath}, ${
+              st?.isDirectory()
+                ? 'which is a directory, not a git config file'
+                : 'which would hold the places that the runner resets'
+            }. The runner has not deleted it, unless it lies in one of the places that it resets. It ignores that value for itself and its sessions, and uses ${gitProxyGlobalConfigPath} as the global git config${
+              homeWriteErr === undefined
+                ? ''
+                : ` (${homeGitconfigPath} could not be written: ${homeWriteErr})`
+            }. Point GIT_CONFIG_GLOBAL at a file path${
+              homeWriteErr === undefined
+                ? ', or unset it if HOME is set'
+                : ' that can be written'
+            }.`,
+          )
+        }
+        await mkdir(dirname(gitProxyGlobalConfigPath), { recursive: true })
+      } catch (err) {
+        if (err instanceof StartupFatalError) throw err
+        throw new StartupFatalError(
+          'gitconfig_wipe_failed',
+          `--use-anthropic-git-proxy failed: could not wipe and recreate the HOME-level git config: ${errMsg(err)}. Check that this account can delete and recreate that path, and that it is not a mount point.`,
+        )
+      }
+    }
+
+    if (args.configureGit) {
+      try {
+        await configureGitSigning({
+          baseDir: args.baseDir,
+          execPath,
+          onStatus,
+        })
+        configureGitHookStubs = coauthorHookStubs(args.baseDir)
+        configureGitSigningArtifacts = codeSignArtifacts(args.baseDir, execPath)
+      } catch (err) {
+        throw new StartupFatalError(
+          'configure_git_failed',
+          `--configure-git failed: ${errMsg(err)}. Check git is on PATH and ${gitProxyGlobalConfigPath ?? '~/.gitconfig'} is writable.`,
+        )
+      }
+    }
+
+    if (args.useAnthropicGitProxy) {
+      try {
+        await configureAnthropicGitProxy({
+          apiBaseUrl: args.apiUrl,
+          baseDir: args.baseDir,
+          onStatus,
+        })
+        gitProxyGlobalConfigSnapshot = await readFile(
+          gitProxyGlobalConfigPath!,
+          'utf-8',
+        ).catch(() => '')
+        gitProxyCredHelper = {
+          path: gitProxyCredHelperPath(args.baseDir),
+          content: GIT_PROXY_CRED_HELPER_CONTENT,
+        }
+      } catch (err) {
+        throw new StartupFatalError(
+          'git_proxy_setup_failed',
+          `--use-anthropic-git-proxy failed: ${errMsg(err)}. Check git is on PATH and ${gitProxyGlobalConfigPath} is writable.`,
+        )
+      }
+    }
+
+    hostConfigSnapshot = await snapshotHostConfig(onStatus)
+    // Official 2.1.328 (#549): warn once if host settings.json sets an ignored defaultMode.
+    const ignoredDefaultModeWarning =
+      formatIgnoredHostDefaultModeWarning(hostConfigSnapshot)
+    if (ignoredDefaultModeWarning) {
+      onStatus(ignoredDefaultModeWarning)
+    }
+    governedGitConfigSeed = await captureGovernedGitConfigSeed(onDebug)
+  } catch (startupErr) {
+    await reportAndDeregisterOnPostRegisterFailure(startupErr, {
+      apiClient: api,
+      runnerId,
+      getRunnerToken: () => tokenState.runnerToken,
+      mayHoldSession: extractSpawnSessionId(secret) !== null,
+      stopRequested: () => shutdownPhase !== 'running',
+      abort: () => ac.abort(),
+      onStatus,
+      onDebug,
+    })
+    runnerTokenRefresh.cancelAll()
+    healthServer?.close()
+    if (egressProxy) {
+      await withTimeoutMs(
+        egressProxy.close(),
+        2000,
+        '[runner:exit] egress proxy close',
+      ).catch(() => {})
+    }
+    process.removeListener('SIGTERM', onTerm)
+    process.removeListener('SIGINT', onInt)
+    await flushLog()
+    logWriter?.close()
+    process.exit(1)
+  }
 
   for (const line of formatBuiltInGhStartupLines(
     {
@@ -3574,6 +3856,7 @@ export async function selfHostedRunnerMain(
         healthState,
         gitSshRewriteHosts: args.gitSshRewriteHosts,
         gitHostRewrites: args.gitHostRewrites,
+        repositoryFolders: args.repositoryFolders,
         pushOutcomeOnRelease: args.pushOutcomeOnRelease,
         trustWorkspace: args.trustWorkspace,
         removeSessionState: args.removeSessionState,

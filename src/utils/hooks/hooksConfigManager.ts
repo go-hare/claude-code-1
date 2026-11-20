@@ -38,7 +38,7 @@ export const getHookEventMetadata = memoize(
       PostToolUse: {
         summary: 'After tool execution',
         description:
-          'Input to command is JSON with fields "inputs" (tool call arguments) and "response" (tool call response).\nExit code 0 - stdout shown in transcript mode (ctrl+o)\nExit code 2 - show stderr to model immediately\nOther exit codes - show stderr to user only',
+          'Input to command is JSON with tool_name, tool_input, tool_response, and tool_use_id.\nExit code 0 - stdout/stderr not shown\nExit code 2 - show stderr to model immediately\nOther exit codes - show stderr to user only',
         matcherMetadata: {
           fieldToMatch: 'tool_name',
           values: toolNames,
@@ -47,7 +47,7 @@ export const getHookEventMetadata = memoize(
       PostToolUseFailure: {
         summary: 'After tool execution fails',
         description:
-          'Input to command is JSON with tool_name, tool_input, tool_use_id, error, error_type, is_interrupt, and is_timeout.\nExit code 0 - stdout shown in transcript mode (ctrl+o)\nExit code 2 - show stderr to model immediately\nOther exit codes - show stderr to user only',
+          'Input to command is JSON with tool_name, tool_input, tool_use_id, error, and is_interrupt.\nExit code 0 - stdout/stderr not shown\nExit code 2 - show stderr to model immediately\nOther exit codes - show stderr to user only',
         matcherMetadata: {
           fieldToMatch: 'tool_name',
           values: toolNames,
@@ -63,9 +63,9 @@ export const getHookEventMetadata = memoize(
         },
       },
       PermissionDenied: {
-        summary: 'After auto mode classifier denies a tool call',
+        summary: 'After auto mode denies a tool call',
         description:
-          'Input to command is JSON with tool_name, tool_input, tool_use_id, and reason.\nReturn {"hookSpecificOutput":{"hookEventName":"PermissionDenied","retry":true}} to tell the model it may retry.\nExit code 0 - stdout shown in transcript mode (ctrl+o)\nOther exit codes - show stderr to user only',
+          'Input to command is JSON with tool_name, tool_input, tool_use_id, and reason.\nReturn {"hookSpecificOutput":{"hookEventName":"PermissionDenied","retry":true}} to tell the model it may retry.\nExit code 0 - stdout/stderr not shown\nOther exit codes - show stderr to user only',
         matcherMetadata: {
           fieldToMatch: 'tool_name',
           values: toolNames,
@@ -136,7 +136,7 @@ export const getHookEventMetadata = memoize(
       SubagentStart: {
         summary: 'When a subagent (Agent tool call) is started',
         description:
-          'Input to command is JSON with agent_id and agent_type.\nExit code 0 - stdout shown to subagent\nBlocking errors are ignored\nOther exit codes - show stderr to user only',
+          'Input to command is JSON with agent_id and agent_type.\nExit code 0 - JSON additionalContext shown to subagent\nExit code 2 - show stderr to user only\nOther exit codes - show stderr to user only',
         matcherMetadata: {
           fieldToMatch: 'agent_type',
           values: [], // Will be populated with available agent types
@@ -171,14 +171,15 @@ export const getHookEventMetadata = memoize(
         },
       },
       PreModelSwitch: {
-        summary: 'Before a model switch',
+        summary:
+          'Before a requested model switch (/model, model picker, set_model)',
         description:
-          'Input is JSON with from_model, to_model, and requested_model.\nExit code 0 - continue the switch\nExit code 2 - block the switch\nOther exit codes - show stderr to user only',
+          'Input to command is JSON with from_model, to_model, requested_model, source, context_tokens and the estimated re-cache cost.\nExit code 0 - switch proceeds; JSON permissionDecision allow/deny/ask as for PreToolUse\nExit code 2 - block the switch and show stderr to user\nOther exit codes - show stderr to user only and continue',
       },
       PostModelSwitch: {
-        summary: 'After a model switch',
+        summary: 'After the session model changes (any cause)',
         description:
-          'Input is JSON with from_model, to_model, and requested_model.\nExit code 0 - stdout may be shown\nOther exit codes - show stderr to user only',
+          'Input to command is JSON with from_model, to_model, requested_model, source, context_tokens and the estimated re-cache cost.\nExit code 0 - stdout shown to Claude on the next request\nOther exit codes - show stderr to user only',
       },
       SessionEnd: {
         summary: 'When a session is ending',
@@ -186,13 +187,13 @@ export const getHookEventMetadata = memoize(
           'Input to command is JSON with session end reason.\nExit code 0 - command completes successfully\nOther exit codes - show stderr to user only',
         matcherMetadata: {
           fieldToMatch: 'reason',
-          values: ['clear', 'logout', 'prompt_input_exit', 'other'],
+          values: ['clear', 'resume', 'logout', 'prompt_input_exit', 'other'],
         },
       },
       PermissionRequest: {
         summary: 'When a permission dialog is displayed',
         description:
-          'Input to command is JSON with tool_name, tool_input, and tool_use_id.\nOutput JSON with hookSpecificOutput containing decision to allow or deny.\nExit code 0 - use hook decision if provided\nOther exit codes - show stderr to user only',
+          'Input to command is JSON with tool_name, tool_input, and permission_suggestions.\nOutput JSON with hookSpecificOutput containing decision to allow or deny.\nExit code 0 - use hook decision if provided\nOther exit codes - show stderr to user only',
         matcherMetadata: {
           fieldToMatch: 'tool_name',
           values: toolNames,
@@ -201,7 +202,7 @@ export const getHookEventMetadata = memoize(
       Setup: {
         summary: 'Repo setup hooks for init and maintenance',
         description:
-          'Input to command is JSON with trigger (init or maintenance).\nExit code 0 - stdout shown to Claude\nBlocking errors are ignored\nOther exit codes - show stderr to user only',
+          'Input to command is JSON with trigger (init or maintenance).\nExit code 0 - JSON additionalContext shown to Claude\nExit code 2 - show stderr to user only\nOther exit codes - show stderr to user only',
         matcherMetadata: {
           fieldToMatch: 'trigger',
           values: ['init', 'maintenance'],
@@ -297,9 +298,9 @@ export const getHookEventMetadata = memoize(
           'Input to command is JSON with directory (absolute path) and source ("slash_command" for /add-dir, "register_repo_root" for the SDK control_request).\nThe matcher field matches against source.\nExit code 0 - command completes successfully\nOther exit codes - show stderr to user only',
       },
       MessageDisplay: {
-        summary: 'When an assistant message is about to be displayed',
+        summary: 'While assistant message text is displayed',
         description:
-          'Input to command is JSON with message_text (the assistant message content).\nHook output can include hookSpecificOutput.transformedText to replace the displayed text, or hookSpecificOutput.hidden=true to hide the message entirely.\nExit code 0 - command completes successfully\nOther exit codes - show stderr to user only',
+          'Input to command is JSON with turn_id, message_id, index, final, and delta (the new text chunk).\nExit code 0 - command completes successfully\nOther exit codes - show stderr to user only',
       },
     }
   },

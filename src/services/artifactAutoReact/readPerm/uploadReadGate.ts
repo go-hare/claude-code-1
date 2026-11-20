@@ -675,7 +675,11 @@ export function openPinnedUpload(input: {
     }
     const expected =
       pinned !== undefined ? pinned.identity : uploadFileIdentity(listed)
-    if (expected === null || uploadFileIdentity(opened) !== expected) {
+    const hasDigest = pinned?.digest !== undefined
+    if (
+      expected === null ||
+      !uploadIdentityMatches(uploadFileIdentity(opened), expected, hasDigest)
+    ) {
       return pinReadError('changed', PIN_CHANGED)
     }
     const again = resolveUploadSource(input.spelled)
@@ -713,12 +717,43 @@ export function closePinnedUpload(fd: number): void {
   closeSync(fd)
 }
 
+/**
+ * Official 2.1.327 `Hta` (#419): compare `dev:ino:size:mtimeNs` file identity.
+ * When a content digest (sha256) is recorded on the approval pin, ignore
+ * `mtimeNs`-only changes (e.g. synced or remote-backed folders updating
+ * timestamps without modifying file contents), since content integrity is
+ * verified by sha256.
+ */
+export function uploadIdentityMatches(
+  current: string | null,
+  expected: string | null,
+  hasContentDigest: boolean,
+): boolean {
+  if (current === null || expected === null) return false
+  if (current === expected) return true
+  if (!hasContentDigest) return false
+  const curParts = current.split(':')
+  const expParts = expected.split(':')
+  if (curParts.length < 3 || expParts.length < 3) return false
+  return (
+    curParts[0] === expParts[0] &&
+    curParts[1] === expParts[1] &&
+    curParts[2] === expParts[2]
+  )
+}
+
 /** densable xTr — read the opened fd, then close it. */
 export function readOpenedUpload(opened: OpenedUpload): UploadByteRead {
   const { fd, size, identity, digest, real } = opened
   try {
     const again = fstatSync(fd, { bigint: true })
-    if (uploadFileIdentity(again) !== identity) {
+    if (
+      !uploadIdentityMatches(
+        uploadFileIdentity(again),
+        identity,
+        digest !== undefined,
+      )
+    ) {
       return pinReadError('changed', PIN_CHANGED)
     }
     const bytes = Buffer.allocUnsafe(size)

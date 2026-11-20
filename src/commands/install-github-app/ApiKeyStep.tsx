@@ -1,8 +1,9 @@
 import { useCallback, useState } from 'react';
+import { Select } from '../../components/CustomSelect/index.js';
 import TextInput from '../../components/TextInput.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { Box, color, Text, useTheme } from '@anthropic/ink';
-import { useKeybindings } from '../../keybindings/useKeybinding.js';
+import { useKeybinding } from '../../keybindings/useKeybinding.js';
+import { Box, Text } from '@anthropic/ink';
 
 interface ApiKeyStepProps {
   existingApiKey: string | null;
@@ -10,10 +11,12 @@ interface ApiKeyStepProps {
   apiKeyOrOAuthToken: string;
   onApiKeyChange: (value: string) => void;
   onToggleUseExistingKey: (useExisting: boolean) => void;
-  onSubmit: () => void;
+  onSubmit: (override?: { selectedApiKeyOption: 'existing' | 'new' | 'oauth'; apiKeyOrOAuthToken?: string }) => void;
   onCreateOAuthToken?: () => void;
   selectedOption?: 'existing' | 'new' | 'oauth';
   onSelectOption?: (option: 'existing' | 'new' | 'oauth') => void;
+  onCancel?: () => void;
+  isDisabled?: boolean;
 }
 
 export function ApiKeyStep({
@@ -25,109 +28,116 @@ export function ApiKeyStep({
   onCreateOAuthToken,
   selectedOption = existingApiKey ? 'existing' : onCreateOAuthToken ? 'oauth' : 'new',
   onSelectOption,
+  onCancel,
+  isDisabled = false,
 }: ApiKeyStepProps) {
-  const [cursorOffset, setCursorOffset] = useState(0);
+  const [cursorOffset, setCursorOffset] = useState(apiKeyOrOAuthToken.length);
+  const [showEmptyError, setShowEmptyError] = useState(false);
+  const [enteringNewKey, setEnteringNewKey] = useState(!existingApiKey && !onCreateOAuthToken);
   const terminalSize = useTerminalSize();
-  const [theme] = useTheme();
+  const textInputColumns = Math.max(20, terminalSize.columns - 6);
 
-  const handlePrevious = useCallback(() => {
-    if (selectedOption === 'new' && onCreateOAuthToken) {
-      // From 'new' go up to 'oauth'
-      onSelectOption?.('oauth');
-    } else if (selectedOption === 'oauth' && existingApiKey) {
-      // From 'oauth' go up to 'existing' (only if it exists)
-      onSelectOption?.('existing');
-      onToggleUseExistingKey(true);
-    }
-  }, [selectedOption, onCreateOAuthToken, existingApiKey, onSelectOption, onToggleUseExistingKey]);
+  const options: Array<{ label: string; value: 'existing' | 'oauth' | 'new' }> = [];
+  if (existingApiKey) {
+    options.push({ label: 'Use your existing Claude Code API key', value: 'existing' });
+  }
+  if (onCreateOAuthToken) {
+    options.push({ label: 'Create a long-lived token with your Claude subscription', value: 'oauth' });
+  }
+  options.push({ label: 'Enter a new API key', value: 'new' });
 
-  const handleNext = useCallback(() => {
-    if (selectedOption === 'existing') {
-      // From 'existing' go down to 'oauth' (if available) or 'new'
-      onSelectOption?.(onCreateOAuthToken ? 'oauth' : 'new');
-      onToggleUseExistingKey(false);
-    } else if (selectedOption === 'oauth') {
-      // From 'oauth' go down to 'new'
-      onSelectOption?.('new');
-    }
-  }, [selectedOption, onCreateOAuthToken, onSelectOption, onToggleUseExistingKey]);
+  const showTextInput = enteringNewKey || options.length === 1;
 
-  const handleConfirm = useCallback(() => {
-    if (selectedOption === 'oauth' && onCreateOAuthToken) {
-      onCreateOAuthToken();
+  const handleBackOrCancel = useCallback(() => {
+    if (isDisabled) return;
+    if (options.length > 1) {
+      setEnteringNewKey(false);
     } else {
-      onSubmit();
+      onCancel?.();
     }
-  }, [selectedOption, onCreateOAuthToken, onSubmit]);
+  }, [isDisabled, options.length, onCancel]);
 
-  // When the text input is visible, omit confirm:yes so bare 'y' passes
-  // through to the input instead of submitting. TextInput's onSubmit handles
-  // Enter. Keep the Confirmation context (not Settings) to avoid j/k bindings.
-  const isTextInputVisible = selectedOption === 'new';
-  useKeybindings(
-    {
-      'confirm:previous': handlePrevious,
-      'confirm:next': handleNext,
-      'confirm:yes': handleConfirm,
-    },
-    { context: 'Confirmation', isActive: !isTextInputVisible },
-  );
-  useKeybindings(
-    {
-      'confirm:previous': handlePrevious,
-      'confirm:next': handleNext,
-    },
-    { context: 'Confirmation', isActive: isTextInputVisible },
-  );
+  useKeybinding('confirm:no', handleBackOrCancel, {
+    context: 'Settings',
+    isActive: showTextInput && !isDisabled,
+  });
 
   return (
-    <>
-      <Box flexDirection="column" borderStyle="round" paddingX={1}>
-        <Box flexDirection="column" marginBottom={1}>
-          <Text bold>Install GitHub App</Text>
-          <Text dimColor>Choose API key</Text>
-        </Box>
-        {existingApiKey && (
-          <Box marginBottom={1}>
-            <Text>
-              {selectedOption === 'existing' ? color('success', theme)('> ') : '  '}
-              Use your existing Claude Code API key
-            </Text>
-          </Box>
-        )}
-        {onCreateOAuthToken && (
-          <Box marginBottom={1}>
-            <Text>
-              {selectedOption === 'oauth' ? color('success', theme)('> ') : '  '}
-              Create a long-lived token with your Claude subscription
-            </Text>
-          </Box>
-        )}
-        <Box marginBottom={1}>
-          <Text>
-            {selectedOption === 'new' ? color('success', theme)('> ') : '  '}
-            Enter a new API key
-          </Text>
-        </Box>
-        {selectedOption === 'new' && (
+    <Box flexDirection="column" borderStyle="round" paddingX={1} gap={1}>
+      <Box flexDirection="column">
+        <Text bold>Install GitHub App</Text>
+        <Text dimColor>API key</Text>
+      </Box>
+      {showTextInput ? (
+        <Box flexDirection="column" gap={1}>
           <TextInput
             value={apiKeyOrOAuthToken}
-            onChange={onApiKeyChange}
-            onSubmit={onSubmit}
-            onPaste={onApiKeyChange}
-            focus={true}
-            placeholder="sk-ant… (Create a new key at https://platform.claude.com/settings/keys)"
+            onChange={value => {
+              if (isDisabled) return;
+              onApiKeyChange(value);
+              setShowEmptyError(false);
+            }}
+            onSubmit={submittedValue => {
+              if (isDisabled) return;
+              const value = submittedValue ?? apiKeyOrOAuthToken;
+              if (!value.trim()) {
+                setShowEmptyError(true);
+                return;
+              }
+              onSubmit({ selectedApiKeyOption: 'new', apiKeyOrOAuthToken: value });
+            }}
+            onPaste={value => {
+              if (isDisabled) return;
+              const trimmed = value.trim();
+              onApiKeyChange(trimmed);
+              setCursorOffset(trimmed.length);
+              setShowEmptyError(false);
+            }}
+            onExit={handleBackOrCancel}
+            focus={!isDisabled}
+            placeholder="sk-ant…"
             mask="*"
-            columns={terminalSize.columns}
-            cursorOffset={cursorOffset}
+            columns={textInputColumns}
+            cursorOffset={Math.min(cursorOffset, apiKeyOrOAuthToken.length)}
             onChangeCursorOffset={setCursorOffset}
-            showCursor={true}
+            showCursor={!isDisabled}
           />
-        )}
-      </Box>
-      <Box marginLeft={3}>
-        <Text dimColor>↑/↓ to select · Enter to continue</Text>
-      </Box>
-    </>
+          {showEmptyError ? (
+            <Text color="error">Enter an API key to continue</Text>
+          ) : (
+            <Text dimColor>Create a key at https://platform.claude.com/settings/keys</Text>
+          )}
+        </Box>
+      ) : (
+        <Select<'existing' | 'oauth' | 'new'>
+          options={options}
+          defaultFocusValue={selectedOption}
+          isDisabled={isDisabled}
+          hideIndexes
+          disablePrintableKeybindings
+          onFocus={value => {
+            onSelectOption?.(value);
+            onToggleUseExistingKey(value === 'existing');
+          }}
+          onChange={value => {
+            if (isDisabled) return;
+            onSelectOption?.(value);
+            onToggleUseExistingKey(value === 'existing');
+            if (value === 'oauth' && onCreateOAuthToken) {
+              onCreateOAuthToken();
+              return;
+            }
+            if (value === 'new') {
+              setEnteringNewKey(true);
+              setCursorOffset(apiKeyOrOAuthToken.length);
+              setShowEmptyError(false);
+              return;
+            }
+            onSubmit({ selectedApiKeyOption: value });
+          }}
+          onCancel={isDisabled ? undefined : onCancel}
+        />
+      )}
+    </Box>
   );
 }

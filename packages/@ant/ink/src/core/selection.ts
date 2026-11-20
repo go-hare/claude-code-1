@@ -1111,6 +1111,23 @@ export function captureScrolledRows(
       }
     }
   } else {
+    // Official 2.1.328 (#600): when dragging upward scrolls a soft-wrapped
+    // continuation row off the bottom, the preceding on-screen row's trailing
+    // spaces will be trimmed once it is no longer followed by that soft-wrap
+    // row. Preserve those trailing spaces at the start of captured[0].
+    if (capturedSW[0] && lo > start.row) {
+      const prevColStart =
+        lo - 1 === start.row ? Math.max(start.col, range.lo) : range.lo
+      const prevLine = extractRowText(
+        screen,
+        lo - 1,
+        prevColStart,
+        range.hi,
+        false,
+        range,
+      )
+      captured[0] = prevLine.slice(prevLine.trimEnd().length) + captured[0]
+    }
     // Newest rows go at the TOP of the below-accumulator — they're
     // closest to the on-screen content.
     s.scrolledOffBelow.unshift(...captured)

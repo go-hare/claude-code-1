@@ -101,7 +101,7 @@ import { expandPath } from 'src/utils/path.js';
 import { remoteHostForwardRefusal } from 'src/services/tools/remoteToolHost.js';
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js';
 import { maybeRecordPluginHint } from 'src/utils/plugins/hintRecommendation.js';
-import { exec } from 'src/utils/Shell.js';
+import { exec, startBashSnapshotHeadStart } from 'src/utils/Shell.js';
 import type { ExecResult } from 'src/utils/ShellCommand.js';
 import { SandboxManager } from 'src/utils/sandbox/sandbox-adapter.js';
 import { semanticBoolean } from 'src/utils/semanticBoolean.js';
@@ -150,11 +150,13 @@ import {
   matchBashHookIfPattern,
 } from './hookIfFallback.js';
 import {
+  consumePrewarmedBashEditDiffSnapshot,
   diffBashEditDiffSnapshot,
+  discardPrewarmedBashEditDiffSnapshot,
   formatBashEditDiffForToolResult,
   isBashEditDiffEnabled,
   isGitStateSwitchCommand,
-  takeBashEditDiffSnapshot,
+  prewarmBashEditDiffSnapshot,
 } from './bashEditDiff.js';
 import {
   BackgroundHint,
@@ -1362,8 +1364,39 @@ export const BashTool = buildTool({
   },
   async checkPermissions(input, context): Promise<PermissionResult> {
     const sandboxAtStart = shouldUseSandbox(input);
+    const permissionMode = context.getAppState().toolPermissionContext.mode;
+    // Official 2.1.327 #475: head-start the Bash shell snapshot before approval
+    // resolves so the session's first Bash command starts faster.
+    startBashSnapshotHeadStart(Date.now, {
+      permissionMode,
+      isSubagent: Boolean(context.agentId),
+      isSandboxEnabled: sandboxAtStart,
+    });
+    // Official 2.1.327 #488: in auto and bypassPermissions modes, pre-warm the
+    // repo edit-diff snapshot early so the diff is ready sooner.
+    const isBackgroundInput = 'run_in_background' in input && Boolean(input.run_in_background);
+    const isSimulatedSed = '_simulatedSedEdit' in input && Boolean(input._simulatedSedEdit);
+    const prewarmCwd = getCwd();
+    const shouldPrewarmEditDiff =
+      (permissionMode === 'auto' || permissionMode === 'bypassPermissions') &&
+      isBashEditDiffEnabled(permissionMode) &&
+      !isBackgroundInput &&
+      !isSimulatedSed &&
+      !isGitStateSwitchCommand(input.command);
+    if (shouldPrewarmEditDiff) {
+      void prewarmBashEditDiffSnapshot(prewarmCwd, context.toolUseId);
+    }
     try {
-      return await bashToolHasPermission(input, context);
+      const permResult = await bashToolHasPermission(input, context);
+      if (shouldPrewarmEditDiff && permResult.behavior === 'deny') {
+        discardPrewarmedBashEditDiffSnapshot(prewarmCwd, context.toolUseId);
+      }
+      return permResult;
+    } catch (err) {
+      if (shouldPrewarmEditDiff) {
+        discardPrewarmedBashEditDiffSnapshot(prewarmCwd, context.toolUseId);
+      }
+      throw err;
     } finally {
       // Official 2.1.326 #303 (`CSn`): record whether this call was checked as
       // sandboxed so hook/SDK rewrites stay in the sandbox unless the approver
@@ -1538,7 +1571,10 @@ export const BashTool = buildTool({
     const captureEditDiff =
       isBashEditDiffEnabled(permissionMode) && !input.run_in_background && !input._simulatedSedEdit;
     const skipGitSwitch = captureEditDiff && isGitStateSwitchCommand(input.command);
-    const editDiffSnapshot = captureEditDiff && !skipGitSwitch ? await takeBashEditDiffSnapshot(getCwd()) : null;
+    const editDiffSnapshot =
+      captureEditDiff && !skipGitSwitch
+        ? await consumePrewarmedBashEditDiffSnapshot(getCwd(), toolUseContext.toolUseId)
+        : null;
     const coordinatorWriteValidation = await validateCoordinatorBashWriteAccess(input.command, toolUseContext.agentId);
     if (!coordinatorWriteValidation.result) {
       return {

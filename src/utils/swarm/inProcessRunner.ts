@@ -42,9 +42,13 @@ import {
   createProgressTracker,
   getProgressUpdate,
   rebuildProgressFromMessages,
+  registerAgentPermissionWait,
   scheduleDeferredAgentProgressRebuild,
   updateAgentProgress,
 } from '../../tasks/LocalAgentTask/LocalAgentTask.js'
+import { bytesPerTokenForModel } from '../analyzeContext.js'
+import { getSessionId } from '../../bootstrap/state.js'
+import { getAgentModel } from '../model/agent.js'
 import type { CustomAgentDefinition } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js'
 import {
   isRunAgentSpinnerMode,
@@ -144,6 +148,40 @@ type SetAppStateFn = (updater: (prev: AppState) => AppState) => void
 const PERMISSION_POLL_INTERVAL_MS = 500
 
 /**
+ * Official 2.1.327 (#423): compute an in-process teammate's own resolved model,
+ * compaction threshold, and model-rate-adjusted token estimate so teammates
+ * running on a different model from the team lead compact at their own limit
+ * and on their own model, at that model's bytes-per-token rate.
+ */
+export function resolveTeammateCompactionParams(
+  messages: readonly Message[],
+  options: {
+    agentModel?: string
+    requestedModel?: string
+    leadModel: string
+    permissionMode?: AppState['toolPermissionContext']['mode']
+  },
+): {
+  model: string
+  bytesPerToken: number
+  estimatedTokens: number
+  threshold: number
+} {
+  const model = getAgentModel(
+    options.agentModel,
+    options.leadModel,
+    options.requestedModel,
+    options.permissionMode,
+  )
+  const bytesPerToken = bytesPerTokenForModel(model)
+  // tokenCountWithEstimation preserves exact API-reported usage unscaled and
+  // scales only the unmeasured tail estimate proportionally to bytesPerToken.
+  const estimatedTokens = tokenCountWithEstimation(messages, bytesPerToken)
+  const threshold = getAutoCompactThreshold(model)
+  return { model, bytesPerToken, estimatedTokens, threshold }
+}
+
+/**
  * Creates a canUseTool function for in-process teammates that properly resolves
  * 'ask' permissions via the UI rather than treating them as denials.
  *
@@ -229,10 +267,20 @@ function createInProcessCanUseTool(
       return new Promise<PermissionDecision>(resolve => {
         let decisionMade = false
         const permissionStartMs = Date.now()
+        // Official 2.1.327 (#426): register permission wait so >= 30s prompts surface
+        // an agent_ask_notice instead of reporting the agent as merely running.
+        const clearPermissionWait = registerAgentPermissionWait(
+          getSessionId(),
+          toolUseID,
+          identity.agentId,
+          { name: (tool as Tool).name, isMcp: (tool as Tool).isMcp },
+          permissionStartMs,
+        )
 
         // Report permission wait time to the caller so it can be
         // subtracted from the displayed elapsed time.
         const reportPermissionWait = () => {
+          clearPermissionWait()
           onPermissionWaitMs?.(Date.now() - permissionStartMs)
         }
 
@@ -1078,6 +1126,14 @@ export async function runInProcessTeammate(
     isBackgroundAgent: true,
   }
 
+  // Resolve teammate's initial model so system prompt matches its own model.
+  const initialTeammateModel = getAgentModel(
+    agentDefinition?.model,
+    toolUseContext.options.mainLoopModel,
+    model,
+    toolUseContext.getAppState().toolPermissionContext.mode,
+  )
+
   // Build system prompt based on systemPromptMode
   let teammateSystemPrompt: string
   if (systemPromptMode === 'replace' && systemPrompt) {
@@ -1085,7 +1141,7 @@ export async function runInProcessTeammate(
   } else {
     const fullSystemPromptParts = await getSystemPrompt(
       toolUseContext.options.tools,
-      toolUseContext.options.mainLoopModel,
+      initialTeammateModel,
       undefined,
       toolUseContext.options.mcpClients,
     )
@@ -1229,23 +1285,34 @@ export async function runInProcessTeammate(
       const userMessage = createUserMessage({ content: currentPrompt })
       const promptMessages: Message[] = [userMessage]
 
-      // Check if compaction is needed before building context
+      // Official 2.1.327 (#423): Check if compaction is needed using the
+      // teammate's own resolved model, context limit, and bytes-per-token rate
+      // (not the team lead's model or context limit).
       let contextMessages = allMessages
-      const tokenCount = tokenCountWithEstimation(allMessages)
+      const compactionParams = resolveTeammateCompactionParams(allMessages, {
+        agentModel: resolvedAgentDefinition.model,
+        requestedModel: model,
+        leadModel: toolUseContext.options.mainLoopModel,
+        permissionMode: toolUseContext.getAppState().toolPermissionContext.mode,
+      })
+      const tokenCount = compactionParams.estimatedTokens
       if (
         !isEnvTruthy(process.env.DISABLE_COMPACT) &&
-        tokenCount >
-          getAutoCompactThreshold(toolUseContext.options.mainLoopModel)
+        tokenCount > compactionParams.threshold
       ) {
         logForDebugging(
-          `[inProcessRunner] ${identity.agentId} compacting history (${tokenCount} tokens)`,
+          `[inProcessRunner] ${identity.agentId} compacting history (${tokenCount} tokens, model=${compactionParams.model}, threshold=${compactionParams.threshold})`,
         )
         // Create an isolated copy of toolUseContext so that compaction
-        // does not clear the main session's readFileState cache or
-        // trigger the main session's UI callbacks.
+        // runs on the teammate's own model and does not clear the main
+        // session's readFileState cache or trigger the main session's UI callbacks.
         // Gold `_Bo` `onRetryStatus:void 0` — compact isolate does not Phn.
         const isolatedContext: ToolUseContext = {
           ...toolUseContext,
+          options: {
+            ...toolUseContext.options,
+            mainLoopModel: compactionParams.model,
+          },
           readFileState: cloneFileStateCache(toolUseContext.readFileState),
           onCompactProgress: undefined,
           setStreamMode: undefined,

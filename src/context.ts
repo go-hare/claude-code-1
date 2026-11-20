@@ -63,6 +63,57 @@ type GitStatusPrefetchEntry = {
 
 let pendingGitStatusPrefetch: GitStatusPrefetchEntry | null = null
 
+/**
+ * Official 2.1.328 (#527) `mrl` / `jxi`: share parsed `git status --short`
+ * summary per `(cwd, head)` across startup callers so non-interactive `-p`
+ * mode runs fewer duplicate git commands before the first model request.
+ */
+export type SharedGitStatusSummary = {
+  isCleanTree: boolean
+  changedFileCount: number
+  untrackedFileCount: number
+}
+
+const sharedGitStatusByKey = new Map<string, SharedGitStatusSummary>()
+
+export function parseGitStatusShortSummary(
+  stdout: string,
+): SharedGitStatusSummary {
+  let changedFileCount = 0
+  let untrackedFileCount = 0
+  for (const rawLine of stdout.split('\n')) {
+    const line = rawLine.trimEnd()
+    if (line === '' || line.startsWith('## ')) continue
+    if (line.startsWith('??')) {
+      untrackedFileCount++
+    } else {
+      changedFileCount++
+    }
+  }
+  return {
+    isCleanTree: changedFileCount + untrackedFileCount === 0,
+    changedFileCount,
+    untrackedFileCount,
+  }
+}
+
+export function recordSharedGitStatusSummary(
+  cwd: string,
+  summary: SharedGitStatusSummary,
+): void {
+  sharedGitStatusByKey.set(cwd, summary)
+}
+
+export function getSharedGitStatusSummary(
+  cwd: string = getCwd(),
+): SharedGitStatusSummary | undefined {
+  return sharedGitStatusByKey.get(cwd)
+}
+
+export function clearSharedGitStatusSummaryForTests(): void {
+  sharedGitStatusByKey.clear()
+}
+
 async function computeGitStatusUncached(): Promise<string | null> {
   if (process.env.NODE_ENV === 'test') {
     // Avoid cycles in tests
@@ -88,12 +139,17 @@ async function computeGitStatusUncached(): Promise<string | null> {
 
   try {
     const gitCmdsStart = Date.now()
+    const cwd = getCwd()
     const [branch, mainBranch, status, log, userName] = await Promise.all([
       getBranch(),
       getDefaultBranch(),
       execFileNoThrow(gitExe(), ['--no-optional-locks', 'status', '--short'], {
         preserveOutputOnError: false,
-      }).then(({ stdout, code }) => (code === 0 ? stdout.trimEnd() : null)),
+      }).then(({ stdout, code }) => {
+        if (code !== 0) return null
+        recordSharedGitStatusSummary(cwd, parseGitStatusShortSummary(stdout))
+        return stdout.trimEnd()
+      }),
       execFileNoThrow(
         gitExe(),
         ['--no-optional-locks', 'log', '--oneline', '-n', '5'],

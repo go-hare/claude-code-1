@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import { randomBytes } from 'crypto';
-import { copyFile, mkdir, readFile, writeFile } from 'fs/promises';
+import { copyFile, lstat, mkdir, readFile, writeFile } from 'fs/promises';
 import { homedir, platform } from 'os';
 import { dirname, join } from 'path';
 import * as React from 'react';
@@ -201,13 +201,13 @@ function TerminalSetupConfirmDialog({
 }
 
 /**
- * Detect if we're running in a VSCode Remote SSH session.
- * In this case, keybindings need to be installed on the LOCAL machine,
- * not the remote server where Claude is running.
+ * Detect if we're running in a remote VS Code, Cursor, Windsurf, or Devin Desktop session.
+ * Official 2.1.327 (#528, SEA `Ocn`): in remote sessions keybindings cannot be
+ * changed on the local host, so first-run onboarding skips terminal setup.
  */
-function isVSCodeRemoteSSH(): boolean {
-  const askpassMain = process.env.VSCODE_GIT_ASKPASS_MAIN ?? '';
-  const path = process.env.PATH ?? '';
+export function isVSCodeRemoteSSH(envVars: NodeJS.ProcessEnv = process.env): boolean {
+  const askpassMain = envVars.VSCODE_GIT_ASKPASS_MAIN ?? '';
+  const path = envVars.PATH ?? '';
 
   // Check both env vars - VSCODE_GIT_ASKPASS_MAIN is more reliable when git extension
   // is active, and PATH is a fallback. Omit path separator for Windows compatibility.
@@ -215,9 +215,11 @@ function isVSCodeRemoteSSH(): boolean {
     askpassMain.includes('.vscode-server') ||
     askpassMain.includes('.cursor-server') ||
     askpassMain.includes('.windsurf-server') ||
+    askpassMain.includes('.devin-server') ||
     path.includes('.vscode-server') ||
     path.includes('.cursor-server') ||
-    path.includes('.windsurf-server')
+    path.includes('.windsurf-server') ||
+    path.includes('.devin-server')
   );
 }
 
@@ -781,19 +783,26 @@ export async function installZedShiftEnterKeymap(
   const installedMessage = `${color('success', theme)('Installed Zed Shift+Enter key binding')}${EOL}${seePath}${EOL}`;
   const unreadMessage = `${color('warning', theme)("Couldn't read your Zed keymap, so it was left unchanged.")}${EOL}${manualBlock}${EOL}`;
   const notListMessage = `${color('warning', theme)("Your Zed keymap isn't a readable list of keybindings, so it was left unchanged.")}${EOL}${manualBlock}${EOL}`;
+  // Official 2.1.328 (#612, SEA `Dn`): leave symlinked keymap.json untouched with manual instructions.
+  const symlinkMessage = `${color('warning', theme)('Your Zed keymap is a symbolic link, so it was left unchanged.')}${EOL}${manualBlock}${EOL}${chalk.dim('Then run /terminal-setup again.')}${EOL}`;
 
   try {
     await mkdir(zedDir, { recursive: true });
     let contents: string | null = null;
+    let keymapStat: Awaited<ReturnType<typeof lstat>> | null = null;
     try {
+      keymapStat = await lstat(keymapPath);
       contents = await readFile(keymapPath, { encoding: 'utf-8' });
     } catch (error: unknown) {
       if (!isFsInaccessible(error)) throw error;
-      if (!isENOENT(error)) {
+      if (!isENOENT(error) || keymapStat?.isFile()) {
         return { message: unreadMessage, installed: false };
       }
     }
     if (contents === null || contents.trim() === '') {
+      if (keymapStat?.isSymbolicLink()) {
+        return { message: symlinkMessage, installed: false };
+      }
       await writeFile(
         keymapPath,
         jsonStringify([{ context: 'Terminal', bindings: { 'shift-enter': [...ZED_SHIFT_ENTER] } }], null, 2) + EOL,
@@ -813,6 +822,9 @@ export async function installZedShiftEnterKeymap(
         message: `${color('success', theme)('Zed Shift+Enter key binding already configured')}${EOL}${seePath}${EOL}`,
         installed: true,
       };
+    }
+    if (keymapStat?.isSymbolicLink()) {
+      return { message: symlinkMessage, installed: false };
     }
 
     const randomSha = randomBytes(4).toString('hex');

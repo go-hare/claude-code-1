@@ -54,7 +54,10 @@ import {
 // initializeTelemetry is loaded lazily via import() in setMeterState() to defer
 // ~400KB of OpenTelemetry + protobuf modules until telemetry is actually initialized.
 // gRPC exporters (~700KB via @grpc/grpc-js) are further lazy-loaded within instrumentation.ts.
-import { configureGlobalAgents } from '../utils/proxy.js'
+import {
+  configureGlobalAgents,
+  repairBareProxySchemeAtStartup,
+} from '../utils/proxy.js'
 import { isBetaTracingEnabled } from '../utils/telemetry/betaSessionTracing.js'
 import {
   getVcsRepositoryTelemetryAttributes,
@@ -275,6 +278,13 @@ export const init = memoize(async (): Promise<void> => {
     // Full environment variables are applied after trust is established
     const envVarsStart = Date.now()
     applySafeConfigEnvironmentVariables()
+
+    // Official 2.1.327 (#400): repair bare host:port HTTPS_PROXY / https_proxy
+    // immediately after safe config env vars are applied and before
+    // configureGlobalAgents() initializes HTTP/HTTPS agents.
+    repairBareProxySchemeAtStartup({
+      hasProxyAuthHelper: Boolean(getInitialSettings()?.proxyAuthHelper),
+    })
 
     // Official 2.1.321 (#1940): migrate saved `claude-fable-5-1` user pick to `fable`.
     try {

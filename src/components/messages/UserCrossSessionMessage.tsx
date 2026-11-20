@@ -8,7 +8,7 @@
 import type { TextBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import figures from 'figures';
 import * as React from 'react';
-import { Box, Text } from '@anthropic/ink';
+import { Box, NoSelect, Text } from '@anthropic/ink';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 import { useAppStateMaybeOutsideOfProvider } from '../../state/AppState.js';
 import { toInkColor } from '../../utils/ink.js';
@@ -118,12 +118,18 @@ export function UserCrossSessionMessage({
     <InboundPromptText text={truncateUserPromptText(body)} />
   ) : qmExpanded ? (
     <Box flexDirection="column" marginTop={addMargin ? 1 : 0} width="100%">
-      <Text color={toInkColor(undefined)}>
-        {'@ '}
-        {displayName}
-        {senderPlugin ? <Text dimColor>{` <${senderPlugin} plugin>`}</Text> : null}
-        <Text aria-hidden>{figures.pointer}</Text>
-      </Text>
+      <Box flexDirection="row">
+        <NoSelect fromLeftEdge minWidth={2}>
+          <Text aria-hidden color={toInkColor(undefined)}>
+            @
+          </Text>
+        </NoSelect>
+        <Text color={toInkColor(undefined)}>
+          {displayName}
+          {senderPlugin ? <Text dimColor>{` <${senderPlugin} plugin>`}</Text> : null}
+          <Text aria-hidden>{figures.pointer}</Text>
+        </Text>
+      </Box>
       <Box paddingLeft={2}>
         <Markdown stripPromptTags={false}>{body}</Markdown>
       </Box>

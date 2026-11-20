@@ -6,10 +6,10 @@ import {
 } from 'src/services/analytics/index.js';
 import type { CommandResultDisplay } from '../../commands.js';
 import { getOauthConfig } from '../../constants/oauth.js';
-import { useExitOnCtrlCDWithKeybindings } from '../../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
 // eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw j/k/arrow menu navigation
-import { Box, color, Link, Text, useInput, useTheme } from '@anthropic/ink';
+import { Box, Byline, color, Dialog, KeyboardShortcutHint, Link, Text, useInput, useTheme } from '@anthropic/ink';
+import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
 import type { ClipboardPath } from '@anthropic/ink';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import {
@@ -39,7 +39,6 @@ import { logMCPDebug } from '../../utils/log.js';
 import { capitalize } from '../../utils/stringUtils.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
 import { Select } from '../CustomSelect/index.js';
-import { Byline, KeyboardShortcutHint } from '@anthropic/ink';
 import { Spinner } from '../Spinner.js';
 import TextInput from '../TextInput.js';
 import { CapabilitiesSection } from './CapabilitiesSection.js';
@@ -86,7 +85,6 @@ export function MCPRemoteServerMenu({
   borderless = false,
 }: Props): React.ReactNode {
   const [theme] = useTheme();
-  const exitState = useExitOnCtrlCDWithKeybindings();
   const { columns: terminalColumns } = useTerminalSize();
   const [isAuthenticating, setIsAuthenticating] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -703,18 +701,16 @@ export function MCPRemoteServerMenu({
       });
     }
     menuOptions.push({
-      label: 'Disable',
+      label: 'Disable in this project',
       value: 'toggle-enabled',
     });
   }
 
-  // If there are no other options, add a back option so Select handles escape
-  if (menuOptions.length === 0) {
-    menuOptions.push({
-      label: 'Back',
-      value: 'back',
-    });
-  }
+  // Official 2.1.328 #494: Always end server action menus with Back.
+  menuOptions.push({
+    label: 'Back',
+    value: 'back',
+  });
 
   // #2048: Match official `un` default cursor — skip auth-maintenance entries
   // (`reauth`, `clear-auth`, `claudeai-clear-auth`) when selecting initial focus
@@ -726,204 +722,201 @@ export function MCPRemoteServerMenu({
       : undefined;
 
   return (
-    <Box flexDirection="column">
-      <Box flexDirection="column" paddingX={1} borderStyle={borderless ? undefined : 'round'}>
-        <Box marginBottom={1}>
-          <Text bold>{capitalizedServerName} MCP Server</Text>
+    <Dialog
+      title={`${capitalizedServerName} MCP Server`}
+      subtitle="MCP server"
+      onCancel={onCancel}
+      hideBorder={borderless}
+      inputGuide={exitState =>
+        exitState.pending ? (
+          <Text>Press {exitState.keyName} again to exit</Text>
+        ) : (
+          <Byline>
+            <KeyboardShortcutHint shortcut="↑↓" action="navigate" />
+            <KeyboardShortcutHint shortcut="Enter" action="select" />
+            <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="back" />
+          </Byline>
+        )
+      }
+    >
+      <Box flexDirection="column" gap={0}>
+        <Box>
+          <Text bold>Status: </Text>
+          {server.client.type === 'disabled' ? (
+            <Text>{color('inactive', theme)(figures.radioOff)} disabled</Text>
+          ) : server.client.type === 'connected' ? (
+            <Text>{color('success', theme)(figures.tick)} connected</Text>
+          ) : server.client.type === 'pending' ? (
+            <>
+              <Text dimColor>{figures.radioOff}</Text>
+              <Text> connecting…</Text>
+            </>
+          ) : server.client.type === 'needs-auth' ? (
+            <Text>{color('warning', theme)(figures.triangleUpOutline)} needs authentication</Text>
+          ) : (
+            <Text>{color('error', theme)(figures.cross)} failed</Text>
+          )}
         </Box>
 
-        <Box flexDirection="column" gap={0}>
+        {server.transport !== 'claudeai-proxy' && (
           <Box>
-            <Text bold>Status: </Text>
-            {server.client.type === 'disabled' ? (
-              <Text>{color('inactive', theme)(figures.radioOff)} disabled</Text>
-            ) : server.client.type === 'connected' ? (
-              <Text>{color('success', theme)(figures.tick)} connected</Text>
-            ) : server.client.type === 'pending' ? (
-              <>
-                <Text dimColor>{figures.radioOff}</Text>
-                <Text> connecting…</Text>
-              </>
-            ) : server.client.type === 'needs-auth' ? (
-              <Text>{color('warning', theme)(figures.triangleUpOutline)} needs authentication</Text>
+            <Text bold>Auth: </Text>
+            {isEffectivelyAuthenticated ? (
+              <Text>{color('success', theme)(figures.tick)} authenticated</Text>
+            ) : isConnectedWithTools ? (
+              <Text dimColor>not signed in</Text>
             ) : (
-              <Text>{color('error', theme)(figures.cross)} failed</Text>
+              <Text>{color('error', theme)(figures.cross)} not authenticated</Text>
             )}
           </Box>
+        )}
 
-          {server.transport !== 'claudeai-proxy' && (
+        {server.transport === 'claudeai-proxy' && server.scope === 'claudeai' && server.config.enterpriseManaged && (
+          <Box>
+            <Text bold>Managed: </Text>
+            <Text dimColor>by your organization</Text>
+          </Box>
+        )}
+
+        <Box>
+          <Text bold>URL: </Text>
+          <Text dimColor>{server.config.url}</Text>
+        </Box>
+
+        <Box>
+          <Text bold>Config location: </Text>
+          <Text dimColor>{describeMcpConfigFilePath(server.scope)}</Text>
+        </Box>
+
+        {server.client.type === 'connected' && (
+          <CapabilitiesSection
+            serverToolsCount={serverToolsCount}
+            serverPromptsCount={serverCommandsCount}
+            serverResourcesCount={mcp.resources[server.name]?.length || 0}
+          />
+        )}
+
+        {server.client.type === 'connected' && serverToolsCount > 0 && (
+          <Box>
+            <Text bold>Tools: </Text>
+            <Text dimColor>{serverToolsCount} tools</Text>
+          </Box>
+        )}
+
+        {/* densable: connected + discoveryBearerRejected → /login Issue (not needs-auth) */}
+        {server.client.type === 'connected' && server.client.discoveryBearerRejected && (
+          <Box>
+            <Text bold>Issue: </Text>
+            <Text color="error">claude.ai rejected the session token. Run /login, then reconnect.</Text>
+          </Box>
+        )}
+        {server.client.type === 'connected' &&
+          !server.client.discoveryBearerRejected &&
+          server.client.toolsListError && (
             <Box>
-              <Text bold>Auth: </Text>
-              {isEffectivelyAuthenticated ? (
-                <Text>{color('success', theme)(figures.tick)} authenticated</Text>
-              ) : isConnectedWithTools ? (
-                <Text dimColor>not signed in</Text>
-              ) : (
-                <Text>{color('error', theme)(figures.cross)} not authenticated</Text>
+              <Text bold>Issue: </Text>
+              <Text color="error">{server.client.toolsListError}</Text>
+            </Box>
+          )}
+        {/* #2151: Show omitted tools count and per-tool schema reasons in /mcp */}
+        {server.client.type === 'connected' &&
+          !server.client.toolsListError &&
+          server.client.droppedTools &&
+          server.client.droppedTools.length > 0 && (
+            <Box flexDirection="column">
+              <Text>
+                <Text bold>Issue: </Text>
+                <Text dimColor>
+                  Claude wasn&apos;t given {server.client.droppedTools.length}{' '}
+                  {server.client.droppedTools.length === 1 ? 'tool' : 'tools'} because the Anthropic API would reject{' '}
+                  {server.client.droppedTools.length === 1 ? 'its input schema' : 'their input schemas'}. Once the
+                  server is fixed, choose Reconnect.
+                </Text>
+              </Text>
+              {server.client.droppedTools.slice(0, 3).map(dropped => (
+                <Text key={dropped.toolName} dimColor wrap="truncate-middle">
+                  {dropped.toolName || '(unnamed tool)'}: {dropped.reason}
+                </Text>
+              ))}
+              {server.client.droppedTools.length > 3 && (
+                <Text dimColor>
+                  … and {server.client.droppedTools.length - 3} more{' '}
+                  {server.client.droppedTools.length - 3 === 1 ? 'tool' : 'tools'}
+                </Text>
               )}
             </Box>
           )}
+      </Box>
 
-          {server.transport === 'claudeai-proxy' && server.scope === 'claudeai' && server.config.enterpriseManaged && (
-            <Box>
-              <Text bold>Managed: </Text>
-              <Text dimColor>by your organization</Text>
-            </Box>
-          )}
-
-          <Box>
-            <Text bold>URL: </Text>
-            <Text dimColor>{server.config.url}</Text>
-          </Box>
-
-          <Box>
-            <Text bold>Config location: </Text>
-            <Text dimColor>{describeMcpConfigFilePath(server.scope)}</Text>
-          </Box>
-
-          {server.client.type === 'connected' && (
-            <CapabilitiesSection
-              serverToolsCount={serverToolsCount}
-              serverPromptsCount={serverCommandsCount}
-              serverResourcesCount={mcp.resources[server.name]?.length || 0}
-            />
-          )}
-
-          {server.client.type === 'connected' && serverToolsCount > 0 && (
-            <Box>
-              <Text bold>Tools: </Text>
-              <Text dimColor>{serverToolsCount} tools</Text>
-            </Box>
-          )}
-
-          {/* densable: connected + discoveryBearerRejected → /login Issue (not needs-auth) */}
-          {server.client.type === 'connected' && server.client.discoveryBearerRejected && (
-            <Box>
-              <Text bold>Issue: </Text>
-              <Text color="error">claude.ai rejected the session token. Run /login, then reconnect.</Text>
-            </Box>
-          )}
-          {server.client.type === 'connected' &&
-            !server.client.discoveryBearerRejected &&
-            server.client.toolsListError && (
-              <Box>
-                <Text bold>Issue: </Text>
-                <Text color="error">{server.client.toolsListError}</Text>
-              </Box>
-            )}
-          {/* #2151: Show omitted tools count and per-tool schema reasons in /mcp */}
-          {server.client.type === 'connected' &&
-            !server.client.toolsListError &&
-            server.client.droppedTools &&
-            server.client.droppedTools.length > 0 && (
-              <Box flexDirection="column">
-                <Text>
-                  <Text bold>Issue: </Text>
-                  <Text dimColor>
-                    Claude wasn&apos;t given {server.client.droppedTools.length}{' '}
-                    {server.client.droppedTools.length === 1 ? 'tool' : 'tools'} because the Anthropic API would reject{' '}
-                    {server.client.droppedTools.length === 1 ? 'its input schema' : 'their input schemas'}. Once the
-                    server is fixed, choose Reconnect.
-                  </Text>
-                </Text>
-                {server.client.droppedTools.slice(0, 3).map(dropped => (
-                  <Text key={dropped.toolName} dimColor wrap="truncate-middle">
-                    {dropped.toolName || '(unnamed tool)'}: {dropped.reason}
-                  </Text>
-                ))}
-                {server.client.droppedTools.length > 3 && (
-                  <Text dimColor>
-                    … and {server.client.droppedTools.length - 3} more{' '}
-                    {server.client.droppedTools.length - 3 === 1 ? 'tool' : 'tools'}
-                  </Text>
-                )}
-              </Box>
-            )}
+      {error && (
+        <Box marginTop={1}>
+          <Text color="error">Error: {error}</Text>
         </Box>
+      )}
 
-        {error && (
-          <Box marginTop={1}>
-            <Text color="error">Error: {error}</Text>
-          </Box>
-        )}
-
-        {menuOptions.length > 0 && (
-          <Box marginTop={1}>
-            <Select
-              options={menuOptions}
-              defaultFocusValue={defaultFocusValue}
-              onChange={async value => {
-                switch (value) {
-                  case 'tools':
-                    onViewTools();
-                    break;
-                  case 'auth':
-                  case 'reauth':
-                    await handleAuthenticate();
-                    break;
-                  case 'clear-auth':
-                    await handleClearAuth();
-                    break;
-                  case 'claudeai-auth':
-                    await handleClaudeAIAuth();
-                    break;
-                  case 'claudeai-clear-auth':
-                    handleClaudeAIClearAuth();
-                    break;
-                  case 'reconnectMcpServer':
-                    setIsReconnecting(true);
-                    try {
-                      const result = await reconnectMcpServer(server.name);
-                      if (server.config.type === 'claudeai-proxy') {
-                        logEvent('tengu_claudeai_mcp_reconnect', {
-                          success: result.client.type === 'connected',
-                        });
-                      }
-                      const { message } = handleReconnectResult(result, server.name, {
-                        hasHeadersHelper: Boolean(
-                          'headersHelper' in server.config &&
-                            (server.config as { headersHelper?: string }).headersHelper,
-                        ),
+      {menuOptions.length > 0 && (
+        <Box marginTop={1}>
+          <Select
+            options={menuOptions}
+            defaultFocusValue={defaultFocusValue}
+            hideIndexes={!isScreenReaderModeEnabled()}
+            disablePrintableKeybindings={!isScreenReaderModeEnabled()}
+            onChange={async value => {
+              switch (value) {
+                case 'tools':
+                  onViewTools();
+                  break;
+                case 'auth':
+                case 'reauth':
+                  await handleAuthenticate();
+                  break;
+                case 'clear-auth':
+                  await handleClearAuth();
+                  break;
+                case 'claudeai-auth':
+                  await handleClaudeAIAuth();
+                  break;
+                case 'claudeai-clear-auth':
+                  handleClaudeAIClearAuth();
+                  break;
+                case 'reconnectMcpServer':
+                  setIsReconnecting(true);
+                  try {
+                    const result = await reconnectMcpServer(server.name);
+                    if (server.config.type === 'claudeai-proxy') {
+                      logEvent('tengu_claudeai_mcp_reconnect', {
+                        success: result.client.type === 'connected',
                       });
-                      onComplete?.(message);
-                    } catch (err) {
-                      if (server.config.type === 'claudeai-proxy') {
-                        logEvent('tengu_claudeai_mcp_reconnect', {
-                          success: false,
-                        });
-                      }
-                      onComplete?.(handleReconnectError(err, server.name));
-                    } finally {
-                      setIsReconnecting(false);
                     }
-                    break;
-                  case 'toggle-enabled':
-                    await handleToggleEnabled();
-                    break;
-                  case 'back':
-                    onCancel();
-                    break;
-                }
-              }}
-              onCancel={onCancel}
-            />
-          </Box>
-        )}
-      </Box>
-
-      <Box marginTop={1}>
-        <Text dimColor italic>
-          {exitState.pending ? (
-            <>Press {exitState.keyName} again to exit</>
-          ) : (
-            <Byline>
-              <KeyboardShortcutHint shortcut="↑↓" action="navigate" />
-              <KeyboardShortcutHint shortcut="Enter" action="select" />
-              <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="back" />
-            </Byline>
-          )}
-        </Text>
-      </Box>
-    </Box>
+                    const { message } = handleReconnectResult(result, server.name, {
+                      hasHeadersHelper: Boolean(
+                        'headersHelper' in server.config && (server.config as { headersHelper?: string }).headersHelper,
+                      ),
+                    });
+                    onComplete?.(message);
+                  } catch (err) {
+                    if (server.config.type === 'claudeai-proxy') {
+                      logEvent('tengu_claudeai_mcp_reconnect', {
+                        success: false,
+                      });
+                    }
+                    onComplete?.(handleReconnectError(err, server.name));
+                  } finally {
+                    setIsReconnecting(false);
+                  }
+                  break;
+                case 'toggle-enabled':
+                  await handleToggleEnabled();
+                  break;
+                case 'back':
+                  onCancel();
+                  break;
+              }
+            }}
+            onCancel={onCancel}
+          />
+        </Box>
+      )}
+    </Dialog>
   );
 }

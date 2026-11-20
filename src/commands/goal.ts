@@ -73,8 +73,34 @@ export function logGoalTooLong(): void {
 }
 
 /**
- * densable SIe — goal Stop hooks are prompt hooks on matcher "" with no
- * skillRoot. Skill and frontmatter hooks stay.
+ * Official 2.1.328 (#607): Track `/goal`-registered Stop hook instances by
+ * object identity so `/goal` never removes a skill's Stop hook or ends early
+ * on another Stop hook's result when both share the same prompt wording.
+ */
+const goalOwnedStopHooks = new WeakSet<object>()
+
+export function markGoalStopHook(hook: HookCommand): HookCommand {
+  goalOwnedStopHooks.add(hook)
+  return hook
+}
+
+export function isGoalOwnedStopHook(hook: unknown): hook is {
+  type: 'prompt'
+  prompt: string
+} {
+  return (
+    typeof hook === 'object' &&
+    hook !== null &&
+    goalOwnedStopHooks.has(hook) &&
+    (hook as { type?: unknown }).type === 'prompt' &&
+    typeof (hook as { prompt?: unknown }).prompt === 'string'
+  )
+}
+
+/**
+ * densable SIe + 2.1.328 (#607) — goal Stop hooks are `/goal`-owned prompt
+ * hooks on matcher "" with no skillRoot. Skill and other prompt hooks stay
+ * untouched even if they have the same wording.
  */
 function listGoalStopHooks(
   appState: AppState,
@@ -86,7 +112,7 @@ function listGoalStopHooks(
   for (const matcher of stopMatchers) {
     if (matcher.matcher !== '' || matcher.skillRoot !== undefined) continue
     for (const hook of matcher.hooks) {
-      if (hook.type === 'prompt') found.push(hook)
+      if (isGoalOwnedStopHook(hook)) found.push(hook)
     }
   }
   return found
@@ -99,7 +125,10 @@ function removeGoalStopHooks(
 ): HookCommand[] {
   const hooks = listGoalStopHooks(appState, sessionId)
   for (const hook of hooks) {
-    removeSessionHook(setAppState, sessionId, 'Stop', hook)
+    removeSessionHook(setAppState, sessionId, 'Stop', hook, {
+      skillRoot: undefined,
+      matchByIdentity: true,
+    })
   }
   return hooks
 }
@@ -207,7 +236,10 @@ export async function applyGoalClear(
   if (condition === undefined) return null
   bumpGoalMutationEpoch()
   for (const hook of hooks) {
-    removeSessionHook(context.setAppState, sessionId, 'Stop', hook)
+    removeSessionHook(context.setAppState, sessionId, 'Stop', hook, {
+      skillRoot: undefined,
+      matchByIdentity: true,
+    })
   }
   if (activeGoal !== undefined) logGoalCleared(activeGoal, 'user_clear')
   context.setAppState(prev =>
@@ -248,10 +280,10 @@ export async function applyGoalSet(
     logGoalCleared(appState.activeGoal, 'superseded')
   }
   removeGoalStopHooks(context.setAppState, appState, sessionId)
-  const hookCommand: HookCommand = {
+  const hookCommand: HookCommand = markGoalStopHook({
     type: 'prompt',
     prompt: input,
-  }
+  })
   addSessionHook(context.setAppState, sessionId, 'Stop', '', hookCommand)
   const tokensAtStart = getTotalOutputTokens()
   context.setAppState(prev => ({

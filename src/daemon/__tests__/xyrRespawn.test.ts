@@ -90,12 +90,13 @@ describe('xyrRespawn densable hLp/D9e/Zxe', () => {
       alive: true,
       present: true,
     }))
-    const err = await xyrPreflightBeforeRespawn({
+    const res = await xyrPreflightBeforeRespawn({
       short: 'abc',
       resumeSessionId: 'sess-1',
       hasMessages: false,
     })
-    expect(err).toBe('Session abc is already running')
+    expect(res.error).toBe('Session abc is already running')
+    expect(res.rotated).toBe(false)
   })
 
   test('xyrPreflight force skips already-running refuse', async () => {
@@ -118,13 +119,14 @@ describe('xyrRespawn densable hLp/D9e/Zxe', () => {
         return { ok: true }
       },
     )
-    const err = await xyrPreflightBeforeRespawn({
+    const res = await xyrPreflightBeforeRespawn({
       short: 'abc',
       resumeSessionId: 'sess-1',
       hasMessages: false,
       force: true,
     })
-    expect(err).toBeNull()
+    expect(res.error).toBeNull()
+    expect(res.resumeSessionId).toBe('sess-1')
     expect(killCalled).toBe(true)
   })
 
@@ -175,12 +177,12 @@ describe('xyrRespawn densable hLp/D9e/Zxe', () => {
         jobId: 'other',
       },
     ])
-    const err = await xyrPreflightBeforeRespawn({
+    const res = await xyrPreflightBeforeRespawn({
       short: 'mine',
       resumeSessionId: 'sess-1',
       hasMessages: true,
     })
-    expect(err).toBe(
+    expect(res.error).toBe(
       "Can't open \u2014 this session is running in another terminal",
     )
   })
@@ -200,12 +202,14 @@ describe('xyrRespawn densable hLp/D9e/Zxe', () => {
         jobId: 'other',
       },
     ])
-    const err = await xyrPreflightBeforeRespawn({
+    const res = await xyrPreflightBeforeRespawn({
       short: 'mine',
       resumeSessionId: 'sess-1',
       hasMessages: true,
     })
-    expect(err).toContain('already open in another running Claude session')
+    expect(res.error).toContain(
+      'already open in another running Claude session',
+    )
   })
 
   test('Yia fallback returns anyMatch false when empty', async () => {
@@ -228,12 +232,80 @@ describe('xyrRespawn densable hLp/D9e/Zxe', () => {
         return { ok: true }
       },
     )
-    const err = await xyrPreflightBeforeRespawn({
+    const res = await xyrPreflightBeforeRespawn({
       short: 'abc',
       resumeSessionId: 'sess-1',
       hasMessages: false,
     })
-    expect(err).toBeNull()
+    expect(res.error).toBeNull()
+    expect(res.resumeSessionId).toBe('sess-1')
     expect(killCalled).toBe(false)
+  })
+
+  test('BH3-P0-4: returns rotated resumeSessionId when jobState.sessionIdTaken is true and updates jobState', async () => {
+    const { mkdtempSync, readFileSync, rmSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const prevCfg = process.env.CLAUDE_CONFIG_DIR
+    const dir = mkdtempSync(join(tmpdir(), 'bh3-p0-4-'))
+    process.env.CLAUDE_CONFIG_DIR = dir
+    try {
+      const { readBgJobState, writeBgJobState } = await import('../jobState.js')
+      writeBgJobState('rot12345', {
+        state: 'stopped',
+        detail: '',
+        tempo: 'idle',
+        output: null,
+        children: null,
+        template: 'bg',
+        respawnFlags: [],
+        intent: 'work',
+        sessionId: 'stolen-sess-id',
+        resumeSessionId: 'stolen-sess-id',
+        sessionIdTaken: true,
+        cwd: dir,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        firstTerminalAt: new Date().toISOString(),
+      })
+      listAllLiveSessions.mockImplementation(async () => [
+        {
+          sessionId: 'stolen-sess-id',
+          pid: process.pid + 1,
+          kind: 'interactive',
+          jobId: 'other-job',
+        },
+      ])
+
+      const res = await xyrPreflightBeforeRespawn({
+        short: 'rot12345',
+        resumeSessionId: 'stolen-sess-id',
+        hasMessages: true,
+      })
+      expect(res.error).toBeNull()
+      expect(res.rotated).toBe(true)
+      expect(res.resumeSessionId).not.toBe('stolen-sess-id')
+
+      const updated = readBgJobState('rot12345')
+      expect(updated?.sessionId).toBe(res.resumeSessionId)
+      expect(updated?.resumeSessionId).toBe(res.resumeSessionId)
+      expect(updated?.sessionIdTaken).toBeUndefined()
+
+      // Verify AgentView propagates rotated effectiveResumeId & effectiveSessionId
+      const agentViewSrc = readFileSync(
+        join(import.meta.dir, '../../screens/AgentView.tsx'),
+        'utf8',
+      )
+      expect(agentViewSrc).toContain(
+        'const effectiveResumeId = preflight.resumeSessionId',
+      )
+      expect(agentViewSrc).toContain(
+        'const effectiveSessionId = preflight.rotated ? effectiveResumeId : job.state.sessionId',
+      )
+    } finally {
+      if (prevCfg === undefined) delete process.env.CLAUDE_CONFIG_DIR
+      else process.env.CLAUDE_CONFIG_DIR = prevCfg
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

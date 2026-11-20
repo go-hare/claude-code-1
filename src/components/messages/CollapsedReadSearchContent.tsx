@@ -335,6 +335,10 @@ function VerboseToolUse({
   outputOverride?: { value: unknown };
 }): React.ReactNode {
   const bg = useSelectedMessageBg();
+  // #196 (2.1.326): clicking open a collapsed running command row in fullscreen
+  // must render live output and timer via renderToolUseProgressMessage.
+  // Hoisted above early return so Rules of Hooks are never violated.
+  const { columns, rows } = useTerminalSize();
   // Same REPL-primitive fallback as getSearchExtraToolsOrReadInfo — REPL mode strips
   // these from the execution tools list, but virtual messages still need them
   // to render in verbose mode.
@@ -387,7 +391,6 @@ function VerboseToolUse({
       : undefined;
   // #196 (2.1.326): clicking open a collapsed running command row in fullscreen
   // must render live output and timer via renderToolUseProgressMessage.
-  const { columns, rows } = useTerminalSize();
   const liveProgressResult =
     !isResolved && isInProgress && tool.renderToolUseProgressMessage
       ? tool.renderToolUseProgressMessage(filterToolProgressMessages(progressMessages), {
@@ -667,6 +670,10 @@ export function CollapsedReadSearchContent({
   const maxListCountRef = useRef(0);
   const maxMcpCountRef = useRef(0);
   const maxBashCountRef = useRef(0);
+  // #193 (2.1.326): track when each tool ID actually enters inProgressToolUseIDs
+  // so the fullscreen tool timer excludes time spent waiting at a permission
+  // prompt or queued behind another command. Hoisted above early returns.
+  const toolRunStartedAtRef = useRef<Map<string, number>>(new Map());
   maxReadCountRef.current = Math.max(maxReadCountRef.current, rawReadCount);
   maxSearchCountRef.current = Math.max(maxSearchCountRef.current, rawSearchCount);
   maxListCountRef.current = Math.max(maxListCountRef.current, rawListCount);
@@ -968,7 +975,6 @@ export function CollapsedReadSearchContent({
   // #193 (2.1.326): track when each tool ID actually enters inProgressToolUseIDs
   // so the fullscreen tool timer excludes time spent waiting at a permission
   // prompt or queued behind another command.
-  const toolRunStartedAtRef = useRef<Map<string, number>>(new Map());
   let activeToolAnchorMs = 0;
   if (isActiveGroup && isFullscreenEnvEnabled()) {
     const nowMs = Date.now();

@@ -3,6 +3,12 @@
  * Pure recovered surface — full process lifecycle lives in sessionHandler.
  */
 import { join } from 'node:path'
+import {
+  isAnthropicManagedGitActiveForPhase,
+  shouldSkipAgentProxyGitSetupInChildSession,
+  stripAnthropicManagedGitEnv,
+  type WrapperScriptPhase,
+} from '../utils/agentProxy/ghShim.js'
 import { sessionChildProxyEnvOverlay } from './egressProxyAuth.js'
 
 /** densable `ojv` — flags blocked from server-supplied claude_code_args */
@@ -187,6 +193,8 @@ export type BuildSessionChildArgsOpts = {
   /** densable `launcherSettingsPath` / Pe → `--settings` */
   launcherSettingsPath?: string
   addDirs?: string[]
+  /** Official 2.1.328 (#640 / #661) — optional `--append-system-prompt` (missing repos / resumed work check). */
+  appendSystemPrompt?: string
   /** densable remote config `claude_code_args` object */
   claudeCodeArgs?: Record<string, unknown>
   onDebug?: (msg: string) => void
@@ -228,7 +236,6 @@ export function buildSessionChildArgs(
   for (const dir of opts.addDirs ?? []) {
     argv.push('--add-dir', dir)
   }
-
   const rawArgs = opts.claudeCodeArgs ?? {}
   let serverArgs = sanitizeServerClaudeCodeArgs(rawArgs)
   if (
@@ -248,6 +255,20 @@ export function buildSessionChildArgs(
   if (serverArgs.tools === '') {
     const { tools: _drop, ...rest } = serverArgs
     serverArgs = rest
+  }
+
+  // Official 2.1.328 `Fd` — merge runner appendSystemPrompt with server-supplied
+  // `append-system-prompt` into a single `--append-system-prompt` arg.
+  if (opts.appendSystemPrompt && opts.appendSystemPrompt.trim().length > 0) {
+    const existing = serverArgs['append-system-prompt']
+    const existingStr =
+      typeof existing === 'string' && existing.length > 0 ? existing : undefined
+    serverArgs = {
+      ...serverArgs,
+      'append-system-prompt': existingStr
+        ? `${existingStr}\n\n${opts.appendSystemPrompt}`
+        : opts.appendSystemPrompt,
+    }
   }
 
   const added = mergeClaudeCodeArgs(
@@ -291,6 +312,52 @@ export type BuildSessionChildEnvOpts = {
   mcpConfigPath?: string
   /** #1781: When false (`--trust-workspace false`), inject `CLAUDE_CODE_IGNORE_PERSISTED_TRUST: '1'`. */
   trustWorkspace?: boolean
+  /** Official 2.1.328 (#679): lifecycle phase controlling whether Anthropic-managed git env is active. */
+  phase?: WrapperScriptPhase
+}
+
+/**
+ * Official 2.1.327 (#442): retry-watchdog environment variables that belong
+ * to the self-hosted session's own CCR child and must not cause nested
+ * `claude -p` subprocesses launched by scripts/hooks to wait out rate limits.
+ */
+export const SESSION_RETRY_ENV_KEYS = [
+  'CLAUDE_CODE_RETRY_WATCHDOG',
+  'CLAUDE_CODE_RETRY_WATCHDOG_SCOPE',
+  'CLAUDE_CODE_MAX_RETRIES',
+  'CLAUDE_CODE_OVERLOADED_RETRY_MAX_WAIT_MS',
+] as const
+
+/**
+ * Official 2.1.327 (#442): strip the self-hosted session's retry-watchdog
+ * env vars before spawning a nested `claude -p` subprocess from a script or
+ * hook so the nested process does not inherit the session's wait-out-rate-limit
+ * policy.
+ */
+export function stripSessionRetryEnvForChildSubprocess(
+  env: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const next: NodeJS.ProcessEnv = { ...env }
+  for (const key of SESSION_RETRY_ENV_KEYS) {
+    delete next[key]
+  }
+  return next
+}
+
+/**
+ * Official 2.1.327 (#442) — `ME()` predicate: true only when
+ * `CLAUDE_CODE_RETRY_WATCHDOG` is truthy AND `CLAUDE_CODE_RETRY_WATCHDOG_SCOPE`
+ * is not `'capacity'`. Nested subprocesses launched by tools/hooks have
+ * `CLAUDE_CODE_RETRY_WATCHDOG` stripped by `subprocessEnv()`.
+ */
+export function isSessionRetryWatchdogActive(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const raw = env.CLAUDE_CODE_RETRY_WATCHDOG
+  const enabled = raw === '1' || raw === 'true'
+  if (!enabled) return false
+  if (env.CLAUDE_CODE_RETRY_WATCHDOG_SCOPE === 'capacity') return false
+  return true
 }
 
 /**
@@ -325,12 +392,21 @@ export function buildSessionChildEnv(
         }
       : {}
 
+  const managedGitActive = isAnthropicManagedGitActiveForPhase(
+    opts.phase ?? 'session_claude_active',
+  )
+  const skipChildGitSetup = shouldSkipAgentProxyGitSetupInChildSession(envVars)
   const useGoverned =
-    Boolean(opts.governedGitConfig) || Boolean(opts.governedGhPathShim)
+    managedGitActive &&
+    !skipChildGitSetup &&
+    (Boolean(opts.governedGitConfig) || Boolean(opts.governedGhPathShim))
+
+  const mergedBaseEnv = managedGitActive
+    ? { ...process.env, ...envVars }
+    : stripAnthropicManagedGitEnv({ ...process.env, ...envVars })
 
   const env: NodeJS.ProcessEnv = {
-    ...process.env,
-    ...envVars,
+    ...mergedBaseEnv,
     CLAUDE_CODE_SESSION_ACCESS_TOKEN: opts.sessionToken,
     CLAUDE_SESSION_INGRESS_TOKEN_FILE: sessionIngressTokenPath(
       opts.configDir,
@@ -371,8 +447,16 @@ export function buildSessionChildEnv(
     CLAUDE_RUNNER_CLAUDE_BIN: process.execPath,
     CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
     CLAUDE_CODE_REMOTE_SESSION_ID: opts.sessionId,
-    CLAUDE_CODE_REMOTE_SESSION_UUID:
-      remoteSessionUuidFromId(opts.sessionId) ?? undefined,
+    // Official 2.1.328 (#680): set both CLAUDE_RUNNER_SESSION_UUID and
+    // CLAUDE_CODE_REMOTE_SESSION_UUID for the session.
+    ...(remoteSessionUuidFromId(opts.sessionId)
+      ? {
+          CLAUDE_RUNNER_SESSION_UUID: remoteSessionUuidFromId(opts.sessionId),
+          CLAUDE_CODE_REMOTE_SESSION_UUID: remoteSessionUuidFromId(
+            opts.sessionId,
+          ),
+        }
+      : {}),
     CLAUDE_CODE_ACCOUNT_UUID: envVars.CLAUDE_CODE_ACCOUNT_UUID,
     CLAUDE_CODE_ORGANIZATION_UUID: envVars.CLAUDE_CODE_ORGANIZATION_UUID,
     CCR_SESSION_ACCOUNT_EMAIL: email ?? undefined,
@@ -382,18 +466,24 @@ export function buildSessionChildEnv(
       ? { USE_STAGING_OAUTH: '1' }
       : { USE_STAGING_OAUTH: undefined }),
     CLAUDE_CODE_USE_CCR_V2: '1',
-    CLAUDE_CODE_AGENT_PROXY_GIT_CONFIG: opts.governedGitConfig
-      ? '1'
-      : undefined,
-    CLAUDE_CODE_AGENT_PROXY_GH_SHIM: opts.governedGhPathShim ? '1' : undefined,
-    ...(opts.governedGitConfig && opts.governedGitConfigPath
-      ? { GIT_CONFIG_GLOBAL: opts.governedGitConfigPath }
+    ...(managedGitActive && !skipChildGitSetup
+      ? {
+          CLAUDE_CODE_AGENT_PROXY_GIT_CONFIG: opts.governedGitConfig
+            ? '1'
+            : undefined,
+          CLAUDE_CODE_AGENT_PROXY_GH_SHIM: opts.governedGhPathShim
+            ? '1'
+            : undefined,
+          ...(opts.governedGitConfig && opts.governedGitConfigPath
+            ? { GIT_CONFIG_GLOBAL: opts.governedGitConfigPath }
+            : {}),
+          ...(useGoverned
+            ? { CCR_AGENT_PROXY_ENABLED: '1' }
+            : envVars.AGENT_PROXY_URL || opts.agentProxyUrlFromEnv
+              ? {}
+              : { CCR_AGENT_PROXY_ENABLED: undefined }),
+        }
       : {}),
-    ...(useGoverned
-      ? { CCR_AGENT_PROXY_ENABLED: '1' }
-      : envVars.AGENT_PROXY_URL || opts.agentProxyUrlFromEnv
-        ? {}
-        : { CCR_AGENT_PROXY_ENABLED: undefined }),
     SELF_HOSTED_RUNNER_POOL_SECRET: undefined,
     SELF_HOSTED_RUNNER_ENVIRONMENT_SECRET: undefined,
     ...sessionChildProxyEnvOverlay(),

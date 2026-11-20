@@ -835,6 +835,7 @@ async function attachDefaultReadme(opts: {
   context?: Partial<ToolUseContext>
 }): Promise<{
   docs?: Array<{ path: string; text: string }>
+  token_files?: string[]
   unavailable?: string
   store?: true
 }> {
@@ -881,6 +882,28 @@ async function attachDefaultReadme(opts: {
       unavailable: store.why ?? files.why ?? 'it has no README to read',
     }
   }
+  // Official 2.1.327 (#468): list the design system's published files so
+  // `quickstartResult.ts` receives `token_files` and omits absent token cards.
+  let tokenFiles: string[] | undefined
+  if (!storeWins && filesOk && pair.project.failed === undefined) {
+    try {
+      const { listArtifactFiles } = await import(
+        'src/services/artifactAutoReact/restApis.js'
+      )
+      const listed = await listArtifactFiles({ slug, signal: opts.signal })
+      if (listed.kind === 'ok') {
+        const { partitionDesignSystemTokenFiles } = await import(
+          './quickstartResult.js'
+        )
+        tokenFiles = partitionDesignSystemTokenFiles(
+          filesIsProject,
+          listed.files.map(f => f.path),
+        ).present.map(p => p.path)
+      }
+    } catch {
+      // Leave token_files undefined if file listing is unavailable
+    }
+  }
   // Gold j: project path or a store doc suppresses the store-ruled note.
   const storeRuled = storeSkip === 'deny'
   const storeAsk = storeSkip === 'ask'
@@ -894,6 +917,7 @@ async function attachDefaultReadme(opts: {
           : undefined
   return {
     docs: [picked],
+    ...(tokenFiles !== undefined ? { token_files: tokenFiles } : {}),
     ...(storeWins ? { store: true as const } : {}),
     ...(storeNote !== undefined ? { unavailable: storeNote } : {}),
   }
@@ -1311,6 +1335,10 @@ async function listDesignSystems(opts: {
   })
   if (readme.docs) {
     ;(bag.design_system as Record<string, unknown>).docs = readme.docs
+  }
+  if (readme.token_files !== undefined) {
+    ;(bag.design_system as Record<string, unknown>).token_files =
+      readme.token_files
   }
   if (readme.unavailable) {
     ;(bag.design_system as Record<string, unknown>).unavailable =

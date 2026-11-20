@@ -18,8 +18,11 @@ import {
 import {
   COST_HAIKU_35,
   COST_HAIKU_45,
+  COST_HAIKU_55,
   COST_TIER_10_50,
   COST_TIER_15_75,
+  COST_TIER_2_10,
+  COST_TIER_2_10_CACHE_READ_0_10,
   COST_TIER_3_15,
   COST_TIER_5_25,
   DENSABLE_PRICING_TIERS,
@@ -52,11 +55,14 @@ const LEGACY_CATALOG_IDS = [
 const CURRENT_CATALOG_IDS = [
   ...LEGACY_CATALOG_IDS,
   'claude-fable-5-2',
+  'claude-haiku-5-5',
+  'claude-mythos-5-1',
+  'claude-mythos-5-2',
   'claude-sonnet-5-5',
 ].sort()
 
-describe('densable 2.1.219 catalog contracts with 2.1.289 model additions', () => {
-  test('SQ: schema_version 1, legacy entries plus Sonnet 5.5, 8 pricing tiers', () => {
+describe('official 2.1.328 catalog contracts (Ips)', () => {
+  test('SQ: schema_version 1, 24 models including 328 additions, 12 pricing tiers', () => {
     const sq = getDensableModelCatalog()
     expect(sq.schema_version).toBe(1)
     expect(sq.models.map(model => model.id).sort()).toEqual(CURRENT_CATALOG_IDS)
@@ -64,21 +70,24 @@ describe('densable 2.1.219 catalog contracts with 2.1.289 model additions', () =
       [
         'haiku_35',
         'haiku_45',
+        'haiku_55',
         'tier_10_50',
         'tier_10_50_cache_read_0_25',
         'tier_15_75',
+        'tier_2_10',
+        'tier_2_10_cache_read_0_10',
         'tier_3_15',
         'tier_4_20_cache_read_0_20',
         'tier_5_25',
         'tier_8_40_cache_read_0_20',
       ].sort(),
     )
-    expect(sq.best).toBe('fable')
+    expect(sq.best).toBe('opus')
     expect(sq.latest_per_family).toEqual({
       fable: 'claude-fable-5-2',
       opus: 'claude-opus-5-5',
       sonnet: 'claude-sonnet-5-5',
-      haiku: 'claude-haiku-4-5',
+      haiku: 'claude-haiku-5-5',
     })
     expect(Object.keys(sq.aliases).sort()).toEqual([
       'fable',
@@ -107,14 +116,14 @@ describe('densable 2.1.219 catalog contracts with 2.1.289 model additions', () =
     expect(m!.default_effort).toBeDefined()
   })
 
-  test('fast_mode only on opus-4-7 / 4-8 / 5', () => {
+  test('fast_mode on official 328 models', () => {
     const withFast = getDensableModelCatalog()
       .models.filter(m => m.capabilities.includes('fast_mode'))
       .map(m => m.id)
       .sort()
     expect(withFast).toEqual([
       'claude-fable-5-2',
-      'claude-opus-4-7',
+      'claude-mythos-5-2',
       'claude-opus-4-8',
       'claude-opus-5',
       'claude-opus-5-5',
@@ -123,10 +132,11 @@ describe('densable 2.1.219 catalog contracts with 2.1.289 model additions', () =
 
   test('ON(fast_mode) true for positive set', () => {
     for (const id of [
-      'claude-opus-4-7',
       'claude-opus-4-8',
       'claude-opus-5',
-      'claude-opus-4-7-20250514',
+      'claude-opus-5-5',
+      'claude-fable-5-2',
+      'claude-mythos-5-2',
       'us.anthropic.claude-opus-5',
       'claude-opus-5[1m]',
     ]) {
@@ -165,7 +175,8 @@ describe('densable 2.1.219 catalog contracts with 2.1.289 model additions', () =
       'claude-sonnet-4-6',
     )
     expect(resolveCatalogAlias('sonnet', 'gateway')).toBe('claude-sonnet-4-6')
-    expect(resolveCatalogAlias('haiku')).toBe('claude-haiku-4-5')
+    expect(resolveCatalogAlias('haiku')).toBe('claude-haiku-5-5')
+    expect(resolveCatalogAlias('haiku', 'bedrock')).toBe('claude-haiku-4-5')
     expect(resolveCatalogAlias('fable')).toBe('claude-fable-5-2')
     expect(resolveCatalogAlias('fable', 'gateway')).toBe('claude-fable-5')
     expect(resolveCatalogAlias('opus', 'foundry')).toBe('claude-opus-4-6')
@@ -187,7 +198,10 @@ describe('densable 2.1.219 catalog contracts with 2.1.289 model additions', () =
     expect(tig['claude-mythos-5']).toEqual(COST_TIER_10_50)
     expect(tig['claude-3-5-haiku']).toEqual(COST_HAIKU_35)
     expect(tig['claude-haiku-4-5']).toEqual(COST_HAIKU_45)
-    expect(tig['claude-sonnet-5']).toEqual(COST_TIER_3_15)
+    expect(tig['claude-haiku-5-5']).toEqual(COST_HAIKU_55)
+    expect(tig['claude-sonnet-5']).toEqual(COST_TIER_2_10)
+    expect(tig['claude-sonnet-5-5']).toEqual(COST_TIER_2_10_CACHE_READ_0_10)
+    expect(tig['claude-sonnet-4-6']).toEqual(COST_TIER_3_15)
     expect(TIG_MODEL_COSTS['claude-opus-4-8']).toEqual(COST_TIER_5_25)
   })
 

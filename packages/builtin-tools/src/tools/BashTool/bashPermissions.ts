@@ -39,6 +39,12 @@ import {
   isDangerousRemovalPath,
 } from 'src/utils/permissions/pathValidation.js'
 import { buildUnfinishedCheckAsk } from 'src/utils/permissions/nhoGates.js'
+import {
+  buildOutsideReadUnanalyzableAsk,
+  checkBashArgvUnderOutsideReadsBlock,
+  isOutsideReadsBlockedReason,
+  isStdinCodeInterpreterArgv,
+} from 'src/utils/permissions/outsideReads.js'
 import type {
   ClassifierBehavior,
   ClassifierResult,
@@ -75,7 +81,10 @@ import {
 } from 'src/utils/permissions/shellRuleMatching.js'
 import { getPlatform } from 'src/utils/platform.js'
 import { isEnvTruthy } from 'src/utils/envUtils.js'
-import { SandboxManager } from 'src/utils/sandbox/sandbox-adapter.js'
+import {
+  isSandboxFencingOutsideReads,
+  SandboxManager,
+} from 'src/utils/sandbox/sandbox-adapter.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import { windowsPathToPosixPath } from 'src/utils/windowsPaths.js'
 import { BashTool } from './BashTool.js'
@@ -87,6 +96,7 @@ import {
 import { checkPermissionMode } from './modeValidation.js'
 import {
   checkPathConstraints,
+  SUPPORTED_PATH_COMMANDS,
   validateOutputRedirections,
 } from './pathValidation.js'
 import { checkAccountEmailUserAgent } from 'src/utils/permissions/accountEmailUserAgentCheck.js'
@@ -1766,6 +1776,73 @@ export const bashToolCheckPermission = (
     astCommand?.redirects,
     pathAstCommands,
   )
+  if (pathResult.behavior === 'deny') {
+    return pathResult
+  }
+
+  // Official 2.1.327 (#503 / #504, SEA `Pjo` + `KYr`):
+  // Under `permissions.blockReadsOutsideWorkingDirectories`, inspect env-var
+  // prefixes, interpreters (`python -c`, `node -e`, etc.), `xargs`, `git -C`,
+  // and arbitrary command path arguments for Read/Edit deny rules (deny) and
+  // outside-working-directory / dynamic reads (bypass-immune ask).
+  const blockOutsideReads =
+    toolPermissionContext.blockReadsOutsideWorkingDirectories === true
+  if (blockOutsideReads) {
+    const sandboxFenced = isSandboxFencingOutsideReadsForCall(
+      input,
+      toolPermissionContext,
+    )
+    if (hasUnsafeEnvVarPrefix(command, astCommand) && !sandboxFenced) {
+      return buildOutsideReadUnanalyzableAsk(
+        'An environment variable prefix that is not known to be safe cannot be checked against the read block',
+      ) as unknown as PermissionResult
+    }
+    const argvForOutsideRead =
+      astCommand?.argv ??
+      (() => {
+        const parsed = tryParseShellCommand(command)
+        if (parsed.success) {
+          const strTokens = parsed.tokens.filter(
+            (t): t is string => typeof t === 'string',
+          )
+          if (strTokens.length > 0) return strTokens
+        }
+        return command.trim().split(/\s+/).filter(Boolean)
+      })()
+    const outsideReadResult = checkBashArgvUnderOutsideReadsBlock(
+      argvForOutsideRead,
+      effectiveCwd,
+      toolPermissionContext,
+      {
+        hasCdInCompound: compoundCommandHasCd === true,
+        sandboxFenced,
+        knownPathHandledCommands: SUPPORTED_PATH_COMMANDS,
+      },
+    )
+    if (outsideReadResult !== undefined) {
+      if (outsideReadResult.behavior === 'deny') {
+        return outsideReadResult as unknown as PermissionResult
+      }
+      if (
+        pathResult.behavior !== 'ask' ||
+        isOutsideReadsBlockedReason(outsideReadResult.decisionReason)
+      ) {
+        return outsideReadResult as unknown as PermissionResult
+      }
+    }
+    // Official 2.1.327 (#503): under `permissions.blockReadsOutsideWorkingDirectories`,
+    // run sed constraints BEFORE non-bypass-immune pathResult asks and BEFORE
+    // exactMatchResult / matchingAllowRules so `Bash(sed *)`, `bypassPermissions`,
+    // or `auto` cannot bypass non-allowlisted sed scripts.
+    const sedConstraintResult = checkSedConstraints(
+      input,
+      toolPermissionContext,
+    )
+    if (sedConstraintResult.behavior !== 'passthrough') {
+      return sedConstraintResult
+    }
+  }
+
   if (pathResult.behavior !== 'passthrough') {
     return pathResult
   }
@@ -1788,9 +1865,14 @@ export const bashToolCheckPermission = (
   }
 
   // 5b. Check sed constraints (blocks dangerous sed operations before mode auto-allow)
-  const sedConstraintResult = checkSedConstraints(input, toolPermissionContext)
-  if (sedConstraintResult.behavior !== 'passthrough') {
-    return sedConstraintResult
+  if (!blockOutsideReads) {
+    const sedConstraintResult = checkSedConstraints(
+      input,
+      toolPermissionContext,
+    )
+    if (sedConstraintResult.behavior !== 'passthrough') {
+      return sedConstraintResult
+    }
   }
 
   // 6. Check for mode-specific permission handling
@@ -1938,36 +2020,171 @@ export function evaluateBashTooLongExpansion(
       BASH_HAS_EXPANSION_SYNTAX_RE.test(command))
   if (!isTooLong) return null
 
-  const hasAnyDenyRules = Object.values(
-    toolPermissionContext.alwaysDenyRules,
-  ).some(rules => Array.isArray(rules) && rules.length > 0)
-  const cannotAsk =
-    options?.hasNoInteractivePrompt === true ||
-    toolPermissionContext.shouldAvoidPermissionPrompts === true
-
   try {
-    logEvent('tengu_bash_too_long_to_judge', {})
+    if (
+      (toolPermissionContext as { modeBeforeRewrite?: string })
+        .modeBeforeRewrite === undefined
+    ) {
+      logEvent('tengu_bash_too_long_to_judge', {})
+    }
   } catch {
     // non-fatal telemetry
   }
 
-  if (hasAnyDenyRules || cannotAsk) {
-    return {
-      behavior: 'deny',
-      message: BASH_TOO_LONG_TO_JUDGE_MESSAGE,
-      decisionReason: {
-        type: 'other',
-        reason: BASH_TOO_LONG_TO_JUDGE_MESSAGE,
-        standsForDenyRules: true,
-      } as PermissionDecisionReason,
-    }
-  }
-
-  return buildUnfinishedCheckAsk({
+  // Official 2.1.327 (#508, SEA `Ojo`/`Bpt`): ALWAYS deny Bash commands whose
+  // variables/substitutions expand past the permission check limit, telling
+  // Claude to use shorter values or a file.
+  return {
+    behavior: 'deny',
     message: BASH_TOO_LONG_TO_JUDGE_MESSAGE,
-    reason:
-      'command variables and substitutions expand past the permission check limit',
-  }) as unknown as PermissionResult
+    decisionReason: {
+      type: 'other',
+      reason: BASH_TOO_LONG_TO_JUDGE_MESSAGE,
+      standsForDenyRules: true,
+    } as PermissionDecisionReason,
+  }
+}
+
+const UNANALYZABLE_BASH_MISS_KINDS = new Set([
+  'too-complex',
+  'semantics',
+  'multi-cd',
+  'shell-operators',
+  'cd-git-compound',
+  'process-substitution',
+  'loop-later-pass',
+])
+
+/**
+ * Official 2.1.328 `Jpt` + `PIn`: when `blockReadsOutsideWorkingDirectories`
+ * is active and the sandbox is NOT fencing outside reads, upgrade any
+ * unanalyzable `bashMissKind` ask to `buildOutsideReadUnanalyzableAsk`
+ * (`circuitBreaker: 'outsideReadsBlocked'`, bypass-immune, not classifier-routed).
+ */
+function upgradeUnanalyzableAskForOutsideReads(
+  result: PermissionResult,
+  input: z.infer<typeof BashTool.inputSchema>,
+  toolPermissionContext: ToolPermissionContext,
+): PermissionResult {
+  if (result.behavior !== 'ask') return result
+  const reason = result.decisionReason as
+    | { type?: string; reason?: string; bashMissKind?: string }
+    | undefined
+  if (
+    reason?.type !== 'other' ||
+    reason.bashMissKind === undefined ||
+    !UNANALYZABLE_BASH_MISS_KINDS.has(reason.bashMissKind)
+  ) {
+    return result
+  }
+  if (
+    toolPermissionContext.blockReadsOutsideWorkingDirectories === true &&
+    !isSandboxFencingOutsideReadsForCall(input, toolPermissionContext)
+  ) {
+    return buildOutsideReadUnanalyzableAsk(
+      reason.reason ?? result.message,
+    ) as unknown as PermissionResult
+  }
+  return result
+}
+
+function extractArgvBeforeRedirect(segment: string): string[] {
+  const firstLine = segment.split(/\r?\n/, 1)[0] ?? ''
+  const parsed = tryParseShellCommand(firstLine)
+  if (parsed.success) {
+    const argv: string[] = []
+    for (const tok of parsed.tokens) {
+      if (typeof tok !== 'string') break
+      argv.push(tok)
+    }
+    if (argv.length > 0) return argv
+  }
+  return firstLine
+    .replace(/<<<?[\s\S]*$/, '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+}
+
+function hasLegacyStdinCodeInterpreter(command: string): boolean {
+  const hasHeredocOrHereString = /<<</.test(command) || /<<(?!<)/.test(command)
+  const hasPipe = command.includes('|')
+  if (!hasHeredocOrHereString && !hasPipe) return false
+  const subs = splitCommand(command)
+  return subs.some((seg, idx) => {
+    const segHasHeredoc = /<<</.test(seg) || /<<(?!<)/.test(seg)
+    const receivesStdin = segHasHeredoc || (idx > 0 && hasPipe)
+    if (!receivesStdin) return false
+    return isStdinCodeInterpreterArgv(extractArgvBeforeRedirect(seg))
+  })
+}
+
+function isSandboxFencingOutsideReadsForCall(
+  input: z.infer<typeof BashTool.inputSchema>,
+  toolPermissionContext: ToolPermissionContext,
+): boolean {
+  return (
+    toolPermissionContext.servedCall !== true &&
+    shouldUseSandbox(input) &&
+    isSandboxFencingOutsideReads()
+  )
+}
+
+/**
+ * Official 2.1.327 (#478, SEA `fpe`): build the refusal/ask decision when the
+ * dangerous `rm` check cannot parse a shell command. When the command contains
+ * no `rm`/`rmdir`, tell Claude that harmless commands that delete nothing can
+ * be resent in plain syntax (while anything deleting files still needs the user).
+ */
+export function buildUnparsedDangerousRmAsk(
+  commandText: string,
+  unparsedLineText?: string,
+  opts?: { alsoOutsideReadsBlocked?: boolean },
+): PermissionResult {
+  const texts =
+    unparsedLineText !== undefined
+      ? [unparsedLineText, commandText]
+      : [commandText]
+  const mentionsRm = texts.some(t => /\brm(?:dir)?\b/i.test(t))
+  if (mentionsRm) {
+    const res = dangerousRemovalAsk(
+      'rm',
+      'This command could not be checked for dangerous rm operations: the shell may read it differently than it was parsed. This requires explicit approval.',
+      'not ruled out — the shell may read this command differently than it was parsed',
+    )
+    if (
+      opts?.alsoOutsideReadsBlocked &&
+      res.behavior === 'ask' &&
+      res.decisionReason?.type === 'safetyCheck'
+    ) {
+      return {
+        ...res,
+        decisionReason: {
+          ...res.decisionReason,
+          also: ['outsideReadsBlocked'],
+        } as PermissionDecisionReason,
+      }
+    }
+    return res
+  }
+  const lead =
+    "Claude Code can't be sure it read this command the way the shell will, so it can't rule out a dangerous removal."
+  return {
+    behavior: 'ask',
+    message: `${lead} This requires explicit approval. A command that deletes nothing can be sent again in plain syntax that bash and zsh both read, and that is not a workaround. A command that deletes anything, by rm or any other means, needs the user: do not send that part again.`,
+    decisionReason: {
+      type: 'safetyCheck',
+      reason: `${lead} Read the command, and don't go ahead if you can't tell what it does.`,
+      classifierApprovable: false,
+      circuitBreaker: 'dangerousRemoval',
+      removalRule: 'unparsed_line',
+      ...(opts?.alsoOutsideReadsBlocked
+        ? { also: ['outsideReadsBlocked'] }
+        : {}),
+    } as PermissionDecisionReason,
+    suggestions: [],
+    suppressAlwaysAllowRule: true,
+  }
 }
 
 /**
@@ -4089,10 +4306,10 @@ export async function bashToolHasPermission(
       return abortTooLong
     }
   }
-  const result = applyAssignedVariableGate(
-    input.command,
-    innerResult,
-    astCapture.astResult,
+  const result = upgradeUnanalyzableAskForOutsideReads(
+    applyAssignedVariableGate(input.command, innerResult, astCapture.astResult),
+    input,
+    context.getAppState().toolPermissionContext,
   )
   return enforceDangerouslyDisableSandboxAsk(
     input,
@@ -4194,11 +4411,20 @@ async function bashToolHasPermissionInner(
       appState.toolPermissionContext,
     )
     if (redirectDeny !== null) return redirectDeny
+    const outsideReadsBlockedAndUnfenced =
+      appState.toolPermissionContext.blockReadsOutsideWorkingDirectories ===
+        true &&
+      !isSandboxFencingOutsideReadsForCall(
+        input,
+        appState.toolPermissionContext,
+      )
     // #73 SEA `plainUnquotedHeredocs` + `tengu_amber_larch` (@290168397):
     // Sandboxed commands that pipe a plain unquoted heredoc into another
-    // command (`cat <<EOF | python3`) can be auto-allowed by the sandbox.
+    // command (`cat <<EOF | python3`) can be auto-allowed by the sandbox
+    // (unless outside-reads block is active and NOT fenced by the sandbox).
     const canTryPlainUnquotedHeredoc =
       !context.forRemoteExecution &&
+      !outsideReadsBlockedAndUnfenced &&
       ((astResult.nodeType === 'heredoc_redirect' &&
         astResult.differential === true) ||
         (astResult.nodeType === 'pipeline' &&
@@ -4223,6 +4449,24 @@ async function bashToolHasPermissionInner(
           return sandboxAutoAllowResult
         }
       }
+    }
+    // Official 2.1.327 (#478, SEA `fpe`): when the parser fails on an ERROR
+    // syntax node, return the dangerousRemoval unparsed_line ask — with the
+    // plain-syntax resend guidance when the command contains no `rm`/`rmdir`.
+    // When blockReadsOutsideWorkingDirectories is active and unfenced, also
+    // attach `also: ['outsideReadsBlocked']` so bypassPermissions / auto mode
+    // cannot waive it.
+    if (astResult.nodeType === 'ERROR') {
+      return buildUnparsedDangerousRmAsk(input.command, undefined, {
+        alsoOutsideReadsBlocked: outsideReadsBlockedAndUnfenced,
+      })
+    }
+    // Official 2.1.327 (#503, SEA `dte`): under blockReadsOutsideWorkingDirectories,
+    // an unanalyzable command asks with circuitBreaker: 'outsideReadsBlocked'.
+    if (outsideReadsBlockedAndUnfenced) {
+      return buildOutsideReadUnanalyzableAsk(
+        astResult.reason,
+      ) as unknown as PermissionResult
     }
     const decisionReason: PermissionDecisionReason = {
       type: 'other' as const,
@@ -4249,6 +4493,29 @@ async function bashToolHasPermissionInner(
   }
 
   if (astResult.kind === 'simple') {
+    // Official 2.1.328 (`UYr` @295873453): under blockReadsOutsideWorkingDirectories,
+    // an interpreter reading code from stdin via heredoc (`<<`), here-string (`<<<`),
+    // or a pipeline (`idx > 0 && command.includes('|')`) cannot be checked against
+    // the read block. Must run before checkSemantics / bashSecurity newline checks.
+    if (
+      appState.toolPermissionContext.blockReadsOutsideWorkingDirectories ===
+        true &&
+      astResult.commands.some(
+        (sc, idx) =>
+          isStdinCodeInterpreterArgv(sc.argv) &&
+          (/<<</.test(input.command) ||
+            /<<(?!<)/.test(input.command) ||
+            (idx > 0 && input.command.includes('|'))),
+      ) &&
+      !isSandboxFencingOutsideReadsForCall(
+        input,
+        appState.toolPermissionContext,
+      )
+    ) {
+      return buildOutsideReadUnanalyzableAsk(
+        'code on stdin cannot be checked against the read block',
+      ) as unknown as PermissionResult
+    }
     // Clean parse: check semantic-level concerns (zsh builtins, eval, etc.)
     // that tokenize fine but are dangerous by name.
     const sem = checkSemantics(astResult.commands)
@@ -4261,9 +4528,22 @@ async function bashToolHasPermissionInner(
         astResult.commands,
       )
       if (earlyExit !== null) return earlyExit
+      const semReason = (sem as { ok: false; reason: string }).reason
+      if (
+        appState.toolPermissionContext.blockReadsOutsideWorkingDirectories ===
+          true &&
+        !isSandboxFencingOutsideReadsForCall(
+          input,
+          appState.toolPermissionContext,
+        )
+      ) {
+        return buildOutsideReadUnanalyzableAsk(
+          semReason,
+        ) as unknown as PermissionResult
+      }
       const decisionReason: PermissionDecisionReason = {
         type: 'other' as const,
-        reason: (sem as { ok: false; reason: string }).reason,
+        reason: semReason,
         bashMissKind: 'semantics',
       }
       return {
@@ -4295,15 +4575,45 @@ async function bashToolHasPermissionInner(
     )
     const parseResult = tryParseShellCommand(input.command)
     if (!parseResult.success) {
+      const parseReason = `Command contains malformed syntax that cannot be parsed: ${(parseResult as { success: false; error: string }).error}`
+      if (
+        appState.toolPermissionContext.blockReadsOutsideWorkingDirectories ===
+          true &&
+        !isSandboxFencingOutsideReadsForCall(
+          input,
+          appState.toolPermissionContext,
+        )
+      ) {
+        return buildOutsideReadUnanalyzableAsk(
+          parseReason,
+        ) as unknown as PermissionResult
+      }
       const decisionReason = {
         type: 'other' as const,
-        reason: `Command contains malformed syntax that cannot be parsed: ${(parseResult as { success: false; error: string }).error}`,
+        reason: parseReason,
       }
       return {
         behavior: 'ask',
         decisionReason,
         message: createPermissionRequestMessage(BashTool.name, decisionReason),
       }
+    }
+    // Official 2.1.328 (`UYr` @295873453) legacy fallback when tree-sitter is
+    // unavailable: gate stdin-code interpreters (`<<`, `<<<`, `|`) BEFORE
+    // bashSecurity.ts newline checks so `circuitBreaker: 'outsideReadsBlocked'`
+    // is preserved.
+    if (
+      appState.toolPermissionContext.blockReadsOutsideWorkingDirectories ===
+        true &&
+      !isSandboxFencingOutsideReadsForCall(
+        input,
+        appState.toolPermissionContext,
+      ) &&
+      hasLegacyStdinCodeInterpreter(input.command)
+    ) {
+      return buildOutsideReadUnanalyzableAsk(
+        'code on stdin cannot be checked against the read block',
+      ) as unknown as PermissionResult
     }
   }
 
@@ -4314,10 +4624,17 @@ async function bashToolHasPermissionInner(
       layer => layer.kind === 'sandbox_auto_allow_suspended',
     ) === true
 
+  const outsideReadsBlockedAndUnfencedForAutoAllow =
+    appState.toolPermissionContext.blockReadsOutsideWorkingDirectories ===
+      true &&
+    !isSandboxFencingOutsideReadsForCall(input, appState.toolPermissionContext)
+
   // Check sandbox auto-allow (which respects explicit deny/ask rules)
-  // Only call this if sandboxing and auto-allow are both enabled
+  // Only call this if sandboxing and auto-allow are both enabled, and
+  // outside-reads block is either off or actually enforced by the sandbox.
   if (
     !isSandboxAutoAllowSuspended &&
+    !outsideReadsBlockedAndUnfencedForAutoAllow &&
     SandboxManager.isSandboxingEnabled() &&
     SandboxManager.isAutoAllowBashIfSandboxedEnabled() &&
     shouldUseSandbox(input)
@@ -4886,6 +5203,16 @@ async function bashToolHasPermissionInner(
           }
         : {}),
     }
+  }
+
+  // Official 2.1.327 (#503): under blockReadsOutsideWorkingDirectories, a
+  // bypass-immune outside-reads ask from any subcommand (e.g. non-allowlisted
+  // sed or outside path) must never be bypassed by a compound exact allow rule.
+  const outsideReadsSubresult = subcommandPermissionDecisions.find(
+    d => d.behavior === 'ask' && isOutsideReadsBlockedReason(d.decisionReason),
+  )
+  if (outsideReadsSubresult !== undefined) {
+    return outsideReadsSubresult
   }
 
   // Allow if exact command was allowed

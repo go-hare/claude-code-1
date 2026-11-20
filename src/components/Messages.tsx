@@ -11,7 +11,7 @@ import { getBootstrapSession, getUserPromptWaitingFor, subscribeUserPromptWaitin
 import type { Command } from '../commands.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
 import type { ScrollBoxHandle } from '@anthropic/ink';
-import { TerminalWriteProvider, useTerminalNotification } from '@anthropic/ink';
+import { TerminalWriteContext, useTerminalNotification } from '@anthropic/ink';
 import { Box } from '@anthropic/ink';
 import { registerTerminalSequenceWriter, unregisterTerminalSequenceWriter } from '../utils/hooks/terminalSequence.js';
 import { useShortcutDisplay } from '../keybindings/useShortcutDisplay.js';
@@ -419,6 +419,8 @@ type Props = {
   /** Hide the logo/header - used for subagent zoom view */
   hideLogo?: boolean;
   isLoading: boolean;
+  /** Official 2.1.327 #434: true while only a Stop hook is running after the reply finished, so Focus view does not keep the finished reply folded/hidden. */
+  isStopHookRunning?: boolean;
   /** In transcript mode, hide all thinking blocks except the last one */
   hidePastThinking?: boolean;
   /**
@@ -1164,6 +1166,7 @@ const MessagesImpl = ({
   onOpenRateLimitOptions,
   hideLogo = false,
   isLoading,
+  isStopHookRunning = false,
   hidePastThinking = false,
   hasStreamingText,
   streamingDisplayStore,
@@ -1392,11 +1395,14 @@ const MessagesImpl = ({
       if (task?.type === 'local_agent') return task.result?.toolStats;
       return undefined;
     };
+    // Official 2.1.327 #434: stop keeping the finished reply folded/hidden in
+    // Focus view while a Stop hook is running.
+    const focusIsLoading = isLoading && !isStopHookRunning;
     const afterFocus =
       focusTranscriptActive && !isTranscriptMode
         ? (filterForFocusTranscript(collapsedBase as Parameters<typeof filterForFocusTranscript>[0], {
             tools,
-            isLoading,
+            isLoading: focusIsLoading,
             getAgentToolStats,
           }) as typeof collapsedBase)
         : collapsedBase;
@@ -1474,6 +1480,7 @@ const MessagesImpl = ({
     isBriefOnly,
     focusTranscriptActive,
     isLoading,
+    isStopHookRunning,
     appStore,
     virtualScrollRuntimeGate,
     collapseCache,
@@ -1700,7 +1707,7 @@ const MessagesImpl = ({
   }, [progress]);
 
   // densable @207959580: SOr(Xr) / bOr(Xr) bind Ink stdout writeRaw to terminalSequence.
-  const writeRaw = useContext(TerminalWriteProvider as unknown as React.Context<((sequence: string) => void) | null>);
+  const writeRaw = useContext(TerminalWriteContext);
   useEffect(() => {
     if (!writeRaw) return;
     registerTerminalSequenceWriter(writeRaw);
@@ -1846,17 +1853,18 @@ const MessagesImpl = ({
   );
 
   // Official 2.1.326 #114 (`hasLaterTurn`): only the latest turn_duration (when
-  // idle) may show "N shell still running"; earlier turns always suppress it.
+  // idle and at or after lastContentIndex) may show "N shell still running";
+  // earlier turns always suppress it.
   const latestTurnDurationUuid = useMemo<string | null>(() => {
     if (isLoading) return null;
     for (let i = renderableMessages.length - 1; i >= 0; i--) {
       const m = renderableMessages[i];
       if (m && m.type === 'system' && m.subtype === 'turn_duration' && 'uuid' in m && typeof m.uuid === 'string') {
-        return m.uuid;
+        return i >= lastContentIndex ? m.uuid : null;
       }
     }
     return null;
-  }, [renderableMessages, isLoading]);
+  }, [renderableMessages, isLoading, lastContentIndex]);
 
   return (
     <SentryErrorBoundary name="MessagesBoundary">

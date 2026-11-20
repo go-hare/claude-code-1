@@ -20,8 +20,14 @@ import { loadPluginLspServers } from '../utils/plugins/lspPluginIntegration.js'
 import { loadPluginMcpServers } from '../utils/plugins/mcpPluginIntegration.js'
 import { detectAndUninstallDelistedPlugins } from '../utils/plugins/pluginBlocklist.js'
 import { getFlaggedPlugins } from '../utils/plugins/pluginFlagging.js'
-import { loadAllPlugins } from '../utils/plugins/pluginLoader.js'
-import { refreshActivePlugins } from '../utils/plugins/refresh.js'
+import {
+  beginInitialPluginLoad,
+  loadAllPlugins,
+} from '../utils/plugins/pluginLoader.js'
+import {
+  mergeCliAgentsIntoDefinitions,
+  refreshActivePlugins,
+} from '../utils/plugins/refresh.js'
 import type { PluginLoadResult } from '../types/plugin.js'
 import { isBackgroundPluginRefreshEnabled } from '../utils/residualMoreEnvGates.js'
 
@@ -171,8 +177,32 @@ export function useManagePlugins({
         })
         const mergedErrors = [...filteredExisting, ...errors]
 
+        // Official 2.1.327 #398 / #399: preserve CLI `--agents` definitions when
+        // plugin agents finish loading so CLI-supplied agents are never dropped.
+        const nextAgentDefinitions =
+          agents.length > 0
+            ? mergeCliAgentsIntoDefinitions(
+                {
+                  allAgents: [
+                    ...prevState.agentDefinitions.allAgents.filter(
+                      a => a.source !== 'plugin',
+                    ),
+                    ...agents,
+                  ],
+                  activeAgents: [
+                    ...prevState.agentDefinitions.activeAgents.filter(
+                      a => a.source !== 'plugin',
+                    ),
+                    ...agents,
+                  ],
+                },
+                prevState.agentDefinitions.allAgents,
+              )
+            : prevState.agentDefinitions
+
         return {
           ...prevState,
+          agentDefinitions: nextAgentDefinitions,
           plugins: {
             ...prevState.plugins,
             enabled,
@@ -280,7 +310,11 @@ export function useManagePlugins({
   // Load plugins on mount and emit telemetry
   useEffect(() => {
     if (!enabled) return
-    void initialPluginLoad().then(metrics => {
+    // Official 2.1.327 #398: register initial plugin load promise so restarted
+    // or autonomous turns can await `waitForInitialPluginsLoaded()`.
+    const loadPromise = initialPluginLoad()
+    beginInitialPluginLoad(loadPromise)
+    void loadPromise.then(metrics => {
       const { ant_enabled_names, ...baseMetrics } = metrics
       const allMetrics = {
         ...baseMetrics,

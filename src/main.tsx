@@ -28,7 +28,7 @@ import { getOauthConfig } from './constants/oauth.js';
 import { getRemoteSessionUrl } from './constants/product.js';
 import { getSystemContext, getUserContext } from './context.js';
 import { init, initializeTelemetryAfterTrust } from './entrypoints/init.js';
-import { addToHistory } from './history.js';
+import { addToHistory, shouldOmitPromptFromHistory } from './history.js';
 import { registerCliHostCommands } from './cli/registerCliHostCommands.js';
 import {
   applyHomeSettingsHostConsent,
@@ -172,7 +172,7 @@ const assistantModule = feature('KAIROS')
   : null;
 const kairosGate = feature('KAIROS') ? (require('./assistant/gate.js') as typeof import('./assistant/gate.js')) : null;
 
-import { relative, resolve } from 'path';
+import { isAbsolute, relative, resolve } from 'path';
 import { isAnalyticsDisabled } from 'src/services/analytics/config.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js';
 import {
@@ -270,14 +270,18 @@ import {
   refuseRestrictedBypass,
 } from './utils/restricted.js';
 import {
+  applyRepinnedWorktreeAddDirsToPermissionContext,
   getAutoModeEnabledStateIfCached,
+  getWorktreeAddDirPinState,
   initializeToolPermissionContext,
   initialPermissionModeFromCLI,
   subprocessEnvScrubNotification,
   permissionModeSuppliedOnInvocationFromKo,
   isDefaultPermissionModeAuto,
   parseToolListFromCLI,
+  pinAddDirsForWorktreeLaunch,
   removeDangerousPermissions,
+  repinAddDirsAfterWorktreeEnter,
   stripDangerousPermissionsForAutoMode,
   verifyAutoModeGateAccess,
 } from './utils/permissions/permissionSetup.js';
@@ -286,6 +290,7 @@ import { initializeVersionedPlugins } from './utils/plugins/installedPluginsMana
 import { getManagedPluginNames } from './utils/plugins/managedPlugins.js';
 import { getGlobExclusionsForPluginCache } from './utils/plugins/orphanedPluginFilter.js';
 import { getPluginSeedDirs } from './utils/plugins/pluginDirectories.js';
+import { ensurePluginAgentLoadedForResume, mergeCliAgentsIntoDefinitions } from './utils/plugins/refresh.js';
 import { countFilesRoundedRg } from './utils/ripgrep.js';
 import { processSessionStartHooks, processSetupHooks } from './utils/sessionStart.js';
 import {
@@ -300,6 +305,7 @@ import {
 import {
   getInitialSettings,
   getManagedSettingsKeysForLogging,
+  getSettings_DEPRECATED,
   getSettingsForSource,
   getSettingsWithErrors,
   rereadManagedSettingsIfNeeded,
@@ -2628,6 +2634,14 @@ async function run(): Promise<CommanderCommand> {
       if (await rereadManagedSettingsIfNeeded()) {
         applyConfigEnvironmentVariables();
       }
+      const preSetupCwd = getCwd();
+      // Official 2.1.327 (#511/#512): pin CLI `--add-dir` entries against launchCwd
+      // BEFORE initializeToolPermissionContext and before entering the worktree so
+      // `--worktree --add-dir ..` never grants parent access, then repin against
+      // the worktree dir after setup() chdirs.
+      if (worktreeEnabled) {
+        pinAddDirsForWorktreeLaunch(preSetupCwd, true);
+      }
       const initResult = await initializeToolPermissionContext({
         allowedToolsCli: allowedTools,
         disallowedToolsCli: disallowedTools,
@@ -2883,7 +2897,6 @@ async function run(): Promise<CommanderCommand> {
       // doesn't contend with getCommands' file reads. Gated on !worktreeEnabled
       // since --worktree makes setup() process.chdir() (setup.ts:203), and
       // commands/agents need the post-chdir cwd.
-      const preSetupCwd = getCwd();
       primeBundledCommandSources(process.env.CLAUDE_CODE_ENTRYPOINT);
       // Official 2.1.326 #119: when `--worktree` setup takes longer than 1s on
       // an interactive TTY, print a dimmed progress line to stderr.
@@ -2945,6 +2958,23 @@ async function run(): Promise<CommanderCommand> {
         }
       }
       logForDebugging(`[STARTUP] setup() completed in ${Date.now() - setupStart}ms`);
+      let repinnedAddDirsForTrust: readonly string[] | undefined;
+      if (worktreeEnabled) {
+        const previousPinnedAddDirs = [...getWorktreeAddDirPinState().pinned];
+        const repinnedAddDirs = repinAddDirsAfterWorktreeEnter(getCwd());
+        repinnedAddDirsForTrust = repinnedAddDirs;
+        if (addDir.length > 0) {
+          const repinResult = await applyRepinnedWorktreeAddDirsToPermissionContext(
+            toolPermissionContext,
+            previousPinnedAddDirs,
+            repinnedAddDirs,
+          );
+          toolPermissionContext = repinResult.toolPermissionContext;
+          repinResult.warnings.forEach(warning => {
+            console.error(warning);
+          });
+        }
+      }
       profileCheckpoint('action_after_setup');
 
       // Replay user messages into stream-json only when the socket was
@@ -3069,12 +3099,11 @@ async function run(): Promise<CommanderCommand> {
         }
       }
 
-      // Merge CLI agents with existing ones
-      const allAgents = [...agentDefinitionsResult.allAgents, ...cliAgents];
+      // Merge CLI agents with existing ones (Official 2.1.327 #398)
+      const mergedAgentDefs = mergeCliAgentsIntoDefinitions(agentDefinitionsResult, cliAgents);
       const agentDefinitions = {
-        ...agentDefinitionsResult,
-        allAgents,
-        activeAgents: getActiveAgentsFromList(allAgents),
+        ...mergedAgentDefs,
+        activeAgents: getActiveAgentsFromList(mergedAgentDefs.allAgents),
       };
 
       // Look up main thread agent from CLI flag or settings
@@ -3409,8 +3438,12 @@ async function run(): Promise<CommanderCommand> {
             import('./commands/add-dir/add-dir.js'),
           ]);
           const seenTrustedPaths = new Set<string>();
-          for (const rawDir of addDir) {
-            const untrusted = folderToTrustBeforeAdding(rawDir);
+          for (let i = 0; i < addDir.length; i++) {
+            const rawDir = addDir[i]!;
+            const resolvedDir =
+              repinnedAddDirsForTrust?.[i] ??
+              (worktreeEnabled && !isAbsolute(rawDir) ? resolve(preSetupCwd, rawDir) : rawDir);
+            const untrusted = folderToTrustBeforeAdding(resolvedDir);
             if (!untrusted || seenTrustedPaths.has(untrusted.path)) {
               continue;
             }
@@ -3898,6 +3931,7 @@ async function run(): Promise<CommanderCommand> {
             explicitRef: cloudLaunch.poolOnBranch ?? cloudLaunch.poolRef ?? undefined,
             poolId: cloudLaunch.poolId,
             correlationId: cloudLaunch.correlationId ?? undefined,
+            sessionMetadata: cloudLaunch.sessionMetadata ?? undefined,
             onCreateFail: message => {
               process.stderr.write(`Error: ${message}\n`);
             },
@@ -4633,8 +4667,8 @@ async function run(): Promise<CommanderCommand> {
           computeInitialTeamContext()) as AppState['teamContext'],
       };
 
-      // Add CLI initial prompt to history
-      if (inputPrompt) {
+      // Add CLI initial prompt to history (Official 2.1.327 #525)
+      if (inputPrompt && !shouldOmitPromptFromHistory()) {
         addToHistory(String(inputPrompt));
       }
 
@@ -4714,6 +4748,31 @@ async function run(): Promise<CommanderCommand> {
         cliAgents,
         initialState,
       };
+      // Official 2.1.327 (#398/#399): ensure plugin agents are loaded for resume
+      // while preserving CLI `--agents`.
+      const prepareResumeContextWithPluginAgent = async (
+        resumedAgentName: string | undefined,
+        baseContext: typeof resumeContext,
+      ): Promise<typeof resumeContext> => {
+        const updatedAgentDefs = await ensurePluginAgentLoadedForResume({
+          resumedAgentName,
+          mainThreadAgentDefinition: baseContext.mainThreadAgentDefinition,
+          agentDefinitions: baseContext.agentDefinitions,
+          cliAgents: baseContext.cliAgents,
+          cwd: baseContext.currentCwd,
+        });
+        if (updatedAgentDefs === baseContext.agentDefinitions) {
+          return baseContext;
+        }
+        return {
+          ...baseContext,
+          agentDefinitions: updatedAgentDefs,
+          initialState: {
+            ...baseContext.initialState,
+            agentDefinitions: updatedAgentDefs,
+          },
+        };
+      };
       const launchMode = determineMainLaunchMode({
         isNonInteractiveSession,
         continueRequested: !!options.continue,
@@ -4788,17 +4847,20 @@ async function run(): Promise<CommanderCommand> {
               replyOnResume: skipAutoResumeForCodeModeContinue ? false : !!options.replyOnResume,
               continueRequested: true,
             },
-            skipAutoResumeForCodeModeContinue &&
-              resumeContext.initialState.initialMessage &&
-              'replay' in resumeContext.initialState.initialMessage
-              ? {
-                  ...resumeContext,
-                  initialState: {
-                    ...resumeContext.initialState,
-                    initialMessage: null,
-                  },
-                }
-              : resumeContext,
+            await prepareResumeContextWithPluginAgent(
+              result.agentSetting,
+              skipAutoResumeForCodeModeContinue &&
+                resumeContext.initialState.initialMessage &&
+                'replay' in resumeContext.initialState.initialMessage
+                ? {
+                    ...resumeContext,
+                    initialState: {
+                      ...resumeContext.initialState,
+                      initialMessage: null,
+                    },
+                  }
+                : resumeContext,
+            ),
           );
           if (!options.forkSession) {
             const { restoreSessionTaskListId } = await import('./utils/tasks.js');
@@ -5269,6 +5331,7 @@ async function run(): Promise<CommanderCommand> {
                 explicitRef: cloudLaunch.poolOnBranch ?? cloudLaunch.poolRef ?? undefined,
                 poolId: cloudLaunch.poolId,
                 correlationId: cloudLaunch.correlationId ?? undefined,
+                sessionMetadata: cloudLaunch.sessionMetadata ?? undefined,
                 onCreateFail: message => {
                   poolCreateFailMessage = message;
                   process.stderr.write(`\n${message}\n`);
@@ -5528,17 +5591,20 @@ async function run(): Promise<CommanderCommand> {
                       transcriptPath: result.fullPath,
                       ...(skipAutoResumeForFileCodeMode ? { replyOnResume: false } : {}),
                     },
-                    skipAutoResumeForFileCodeMode &&
-                      resumeContext.initialState.initialMessage &&
-                      'replay' in resumeContext.initialState.initialMessage
-                      ? {
-                          ...resumeContext,
-                          initialState: {
-                            ...resumeContext.initialState,
-                            initialMessage: null,
-                          },
-                        }
-                      : resumeContext,
+                    await prepareResumeContextWithPluginAgent(
+                      result.agentSetting,
+                      skipAutoResumeForFileCodeMode &&
+                        resumeContext.initialState.initialMessage &&
+                        'replay' in resumeContext.initialState.initialMessage
+                        ? {
+                            ...resumeContext,
+                            initialState: {
+                              ...resumeContext.initialState,
+                              initialMessage: null,
+                            },
+                          }
+                        : resumeContext,
+                    ),
                   );
                   if (!options.forkSession) {
                     const { restoreSessionTaskListId } = await import('./utils/tasks.js');
@@ -5628,17 +5694,20 @@ async function run(): Promise<CommanderCommand> {
                 transcriptPath: fullPath,
                 replyOnResume: skipAutoResumeForCodeMode ? false : !!options.replyOnResume,
               },
-              skipAutoResumeForCodeMode &&
-                resumeContext.initialState.initialMessage &&
-                'replay' in resumeContext.initialState.initialMessage
-                ? {
-                    ...resumeContext,
-                    initialState: {
-                      ...resumeContext.initialState,
-                      initialMessage: null,
-                    },
-                  }
-                : resumeContext,
+              await prepareResumeContextWithPluginAgent(
+                result.agentSetting,
+                skipAutoResumeForCodeMode &&
+                  resumeContext.initialState.initialMessage &&
+                  'replay' in resumeContext.initialState.initialMessage
+                  ? {
+                      ...resumeContext,
+                      initialState: {
+                        ...resumeContext.initialState,
+                        initialMessage: null,
+                      },
+                    }
+                  : resumeContext,
+              ),
             );
             if (!options.forkSession) {
               const { restoreSessionTaskListId } = await import('./utils/tasks.js');
@@ -6166,7 +6235,7 @@ async function run(): Promise<CommanderCommand> {
 
   mcp
     .command('add-json <name> <json>')
-    .description('Add an MCP server (stdio, SSE, HTTP, or WebSocket) with a JSON string')
+    .description('Add an MCP server (stdio, SSE, HTTP, or WebSocket) with a JSON string, or - to read it from stdin')
     .option('-s, --scope <scope>', 'Configuration scope (local, user, or project)', 'local')
     .option('--client-secret', 'Prompt for OAuth client secret (or set MCP_CLIENT_SECRET env var)')
     .action(async (name: string, json: string, options: { scope?: string; clientSecret?: true }) => {

@@ -279,8 +279,11 @@ export function applyPermissionUpdate(
 ): ToolPermissionContext {
   // Official 2.1.323 #2176: allow rules containing secrets or targeting a
   // git-tracked settings.local.json are downgraded to session scope.
+  // Removing a persisted allow rule must also remove any downgraded session copy.
   if (
-    (update.type === 'addRules' || update.type === 'replaceRules') &&
+    (update.type === 'addRules' ||
+      update.type === 'replaceRules' ||
+      update.type === 'removeRules') &&
     update.behavior === 'allow' &&
     supportsPersistence(update.destination)
   ) {
@@ -289,6 +292,8 @@ export function applyPermissionUpdate(
       logForDebugging(
         `Allow rule downgraded to session-only (${reason}): ${SESSION_ONLY_ALLOW_REASON_MESSAGES[reason]}`,
       )
+    }
+    if (updates.length > 1 || reason !== undefined) {
       let next = context
       for (const u of updates) {
         next = applySinglePermissionUpdate(next, u)

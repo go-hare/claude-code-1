@@ -110,13 +110,15 @@ export async function maybeRequestAutoDefaultNudge(
     { queueBehind: true },
   )
 
+  // External cancellation (e.g. session exit / dialog store dismiss) must NOT
+  // latch hasSeenAutoDefaultNudge; user Esc emits 'declined' from the dialog.
+  if (result !== 'accepted' && result !== 'declined') {
+    return 'opened'
+  }
+
   if (getGlobalConfig().hasSeenAutoDefaultNudge) return 'opened'
 
-  const choice = autoDefaultNudgeChoice(
-    result === 'accepted' || result === 'declined' || result === 'cancelled'
-      ? result
-      : 'cancelled',
-  )
+  const choice = autoDefaultNudgeChoice(result)
   let outcome: AutoDefaultNudgeOutcome
   if (choice === 'accept') {
     outcome = applyAutoDefaultNudgeAccept(

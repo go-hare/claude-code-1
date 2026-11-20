@@ -22,6 +22,10 @@ import {
 } from 'src/utils/permissions/permissions.js'
 import { buildUnfinishedCheckAsk } from 'src/utils/permissions/nhoGates.js'
 import {
+  buildOutsideReadUnanalyzableAsk,
+  isOutsideReadsBlockedReason,
+} from 'src/utils/permissions/outsideReads.js'
+import {
   matchWildcardPattern,
   parsePermissionRule,
   type ShellPermissionRule,
@@ -727,6 +731,7 @@ async function getSubCommandsForPermissionCheck(
 export async function powershellToolHasPermission(
   input: PowerShellInput,
   context: ToolUseContext,
+  _parsedForTesting?: ParsedPowerShellCommand,
 ): Promise<PermissionResult> {
   const toolPermissionContext = context.getAppState().toolPermissionContext
   const command = input.command.trim()
@@ -744,7 +749,7 @@ export async function powershellToolHasPermission(
   }
 
   // Parse the command once and thread through all sub-functions
-  const parsed = await parsePowerShellCommand(command)
+  const parsed = _parsedForTesting ?? (await parsePowerShellCommand(command))
 
   // SECURITY: Check deny/ask rules BEFORE parse validity check.
   // Deny rules operate on the raw command string and don't need the parsed AST.
@@ -896,12 +901,25 @@ export async function powershellToolHasPermission(
   // exact-allows downgrade to ask when pwsh is degraded — fail-safe.
   // Module-qualified cmdlets (Module\Cmdlet) also classify 'application'
   // (same `\`); same fail-safe over-fire.
+  const GET_MODULE_PARSE_FAILED_RE =
+    /(?<![\w-])(?:get-module|gmo|module)(?![\w-])/i
+  const commandBacktickStrippedForModule = command
+    .replace(/`[\r\n]+\s*/g, '')
+    .replace(/`/g, '')
+  const commandQuoteStrippedForModule =
+    commandBacktickStrippedForModule.replace(/['"]/g, '')
+  const mentionsGetModuleUnparsed =
+    GET_MODULE_PARSE_FAILED_RE.test(command) ||
+    GET_MODULE_PARSE_FAILED_RE.test(commandBacktickStrippedForModule) ||
+    GET_MODULE_PARSE_FAILED_RE.test(commandQuoteStrippedForModule)
+
   if (
     exactMatchResult.behavior === 'allow' &&
     !parsed.valid &&
     parsed.errors[0]?.errorId !== PS_UNSAFE_PARSE_TIME_CODE_LOAD_ERROR_ID &&
     preParseAskDecision === null &&
-    classifyCommandName(command.split(/\s+/)[0] ?? '') !== 'application'
+    classifyCommandName(command.split(/\s+/)[0] ?? '') !== 'application' &&
+    !mentionsGetModuleUnparsed
   ) {
     return exactMatchResult
   }
@@ -1011,6 +1029,12 @@ export async function powershellToolHasPermission(
           toolPermissionContext.blockReadsOutsideWorkingDirectories,
       }) as unknown as PermissionResult
     }
+    const parseErrorReason = `Command contains malformed syntax that cannot be parsed: ${parsed.errors[0]?.message ?? 'unknown error'}`
+    if (toolPermissionContext.blockReadsOutsideWorkingDirectories === true) {
+      return buildOutsideReadUnanalyzableAsk(
+        parseErrorReason,
+      ) as unknown as PermissionResult
+    }
     // Preserve pre-parse ask messaging when parse fails. The deferred ask
     // (2b prefix rule or UNC) carries a better decisionReason than the
     // generic parse-error ask. Sub-command deny can't run the AST loop
@@ -1020,7 +1044,7 @@ export async function powershellToolHasPermission(
     }
     const decisionReason = {
       type: 'other' as const,
-      reason: `Command contains malformed syntax that cannot be parsed: ${parsed.errors[0]?.message ?? 'unknown error'}`,
+      reason: parseErrorReason,
     }
     return {
       behavior: 'ask',
@@ -1069,24 +1093,37 @@ export async function powershellToolHasPermission(
   // Decision: security check — was step 3 (:630-650).
   // powershellCommandIsSafe returns 'ask' for subexpressions, script blocks,
   // encoded commands, download cradles, etc. Only 'ask' | 'passthrough'.
+  let ruleProofAskDecision: PermissionResult | undefined
   const safetyResult = powershellCommandIsSafe(command, parsed)
   if (safetyResult.behavior !== 'passthrough') {
-    const decisionReason: PermissionDecisionReason = {
-      type: 'other' as const,
-      reason:
-        safetyResult.behavior === 'ask' && safetyResult.message
-          ? safetyResult.message
-          : 'This command contains patterns that could pose security risks and requires approval',
+    const reason =
+      safetyResult.behavior === 'ask' && safetyResult.message
+        ? safetyResult.message
+        : 'This command contains patterns that could pose security risks and requires approval'
+    const safetyAskDecision: PermissionResult =
+      toolPermissionContext.blockReadsOutsideWorkingDirectories === true
+        ? buildOutsideReadUnanalyzableAsk(reason)
+        : (() => {
+            const decisionReason: PermissionDecisionReason = {
+              type: 'other' as const,
+              reason,
+            }
+            return {
+              behavior: 'ask' as const,
+              message: createPermissionRequestMessage(
+                POWERSHELL_TOOL_NAME,
+                decisionReason,
+              ),
+              decisionReason,
+              suggestions: safetyResult.ruleProof
+                ? []
+                : suggestionForExactCommand(command),
+            }
+          })()
+    if (safetyResult.ruleProof === true) {
+      ruleProofAskDecision = safetyAskDecision
     }
-    decisions.push({
-      behavior: 'ask',
-      message: createPermissionRequestMessage(
-        POWERSHELL_TOOL_NAME,
-        decisionReason,
-      ),
-      decisionReason,
-      suggestions: suggestionForExactCommand(command),
-    })
+    decisions.push(safetyAskDecision)
   }
 
   // Decision: using statements / script requirements — invisible to AST block walk.
@@ -1576,7 +1613,13 @@ export async function powershellToolHasPermission(
   if (deniedDecision !== undefined) {
     return deniedDecision
   }
-  const askDecision = decisions.find(d => d.behavior === 'ask')
+  const askDecision =
+    decisions.find(
+      d =>
+        d.behavior === 'ask' && isOutsideReadsBlockedReason(d.decisionReason),
+    ) ??
+    ruleProofAskDecision ??
+    decisions.find(d => d.behavior === 'ask')
   if (askDecision !== undefined) {
     return askDecision
   }

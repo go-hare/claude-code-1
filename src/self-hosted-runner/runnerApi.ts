@@ -334,6 +334,7 @@ export type SpawnHint = {
   attempt: number
   work_order_jwt: string
   sources: unknown[]
+  metadata?: Record<string, { value?: string } | string>
   [key: string]: unknown
 }
 
@@ -345,6 +346,8 @@ export type PollSpawnHintsResult = {
   circuit_broken_count: number
   pool_pending_session_count: number
   pool_active_session_count: number
+  /** Official 2.1.328 (#553): lease-expiry give-ups since the prior poll. */
+  given_up_count?: number
   server_date: string | null
 }
 
@@ -373,7 +376,7 @@ export type SelfHostedRunnerApi = {
       [key: string]: unknown
     },
     signal?: AbortSignal,
-  ) => Promise<void>
+  ) => Promise<{ gave_up?: boolean } | void>
   pollWork: (
     runnerToken: string,
     runnerId: string,
@@ -402,7 +405,10 @@ export type SelfHostedRunnerApi = {
     runnerToken: string,
     sessionId: string,
   ) => Promise<{ released: boolean }>
-  deregisterRunner: (runnerToken: string) => Promise<void>
+  deregisterRunner: (
+    runnerToken: string,
+    opts?: { reason?: string },
+  ) => Promise<void>
   refreshToken: (
     runnerToken: string,
   ) => Promise<{ token: string; [key: string]: unknown }>
@@ -544,6 +550,12 @@ export function createSelfHostedRunnerApi(
           (data.pool_pending_session_count as number | undefined) ?? 0,
         pool_active_session_count:
           (data.pool_active_session_count as number | undefined) ?? 0,
+        given_up_count:
+          typeof data.given_up_count === 'number' &&
+          Number.isInteger(data.given_up_count) &&
+          data.given_up_count >= 0
+            ? data.given_up_count
+            : 0,
         server_date: serverDate,
       }
       debug(
@@ -570,6 +582,12 @@ export function createSelfHostedRunnerApi(
       )
       assertRunnerApiOk(res.status, res.data, 'NackSpawnHint')
       debug(`[runner:api] NackSpawnHint -> ${res.status}`)
+      return {
+        gave_up:
+          res.data !== null &&
+          typeof res.data === 'object' &&
+          (res.data as { gave_up?: unknown }).gave_up === true,
+      }
     },
 
     async pollWork(
@@ -625,6 +643,22 @@ export function createSelfHostedRunnerApi(
           'PollWork: response assignment_ids contains a malformed session id — rejecting the malformed poll response',
         )
       }
+      const leaseExpiresAt = (data as { lease_expires_at?: unknown })
+        .lease_expires_at
+      // Official 2.1.328 (#629): a proxy or web filter answering HTTP 200 with
+      // `{}` has neither `assignment_ids` array nor a valid `lease_expires_at`
+      // date — reject so the poll loop retries instead of stopping all sessions.
+      if (
+        !Array.isArray(assignmentIdsRaw) &&
+        !(
+          typeof leaseExpiresAt === 'string' &&
+          Number.isFinite(Date.parse(leaseExpiresAt))
+        )
+      ) {
+        throw new Error(
+          'PollWork: response has no assignment_ids array and no lease_expires_at date, so it most likely did not come from the API (check any proxy or gateway between this host and the API) — rejecting the malformed poll response',
+        )
+      }
       const assignmentIds =
         (data as { assignment_ids?: string[] }).assignment_ids ?? []
       if (assignmentIds.length === 0) {
@@ -639,8 +673,6 @@ export function createSelfHostedRunnerApi(
           `[runner:api] PollWork -> ${res.status} assignments=${assignmentIds.length}`,
         )
       }
-      const leaseExpiresAt = (data as { lease_expires_at?: unknown })
-        .lease_expires_at
       const sessionAssignments = (data as { session_assignments?: unknown })
         .session_assignments
       return {
@@ -726,11 +758,13 @@ export function createSelfHostedRunnerApi(
       return { released: Boolean(released) }
     },
 
-    async deregisterRunner(runnerToken) {
-      debug('[runner:api] POST /v1/code/runners/self-hosted/deregister')
+    async deregisterRunner(runnerToken, opts) {
+      debug(
+        `[runner:api] POST /v1/code/runners/self-hosted/deregister${opts?.reason ? ` reason=${opts.reason}` : ''}`,
+      )
       const res = await http.post(
         `${baseUrl}/v1/code/runners/self-hosted/deregister`,
-        {},
+        opts?.reason ? { reason: opts.reason } : {},
         {
           headers: runnerAuthHeaders(runnerToken, runnerVersion),
           timeout: 10_000,

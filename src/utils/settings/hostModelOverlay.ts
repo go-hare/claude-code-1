@@ -303,3 +303,41 @@ export function applyHostManagedPolicyModelPrecedence(
   }
   return next
 }
+
+/**
+ * Official 2.1.328 (#546): merge an embedding host's managed-settings overlay
+ * (`allowManagedHooksOnly`, `disableAllHooks`, `disableCommandPluginSources`,
+ * `pluginConfigs['policy@builtin'].options.allowManagedModsOnly` /
+ * `forceHotReloadPrompt`) onto admin managed settings while ensuring admin's
+ * explicit settings always win. Uses lazy require to stay cycle-free with
+ * `pluginPolicy.ts -> settings.ts -> hostModelOverlay.ts`.
+ */
+export function applyHostPolicyOverlay(
+  adminManagedSettings: SettingsJson | null,
+  parentManaged: SettingsJson | null | undefined,
+): SettingsJson | null {
+  if (!parentManaged) return adminManagedSettings
+  try {
+    const {
+      buildHostOverlayManagedSettings,
+      mergeManagedSettingsWithHostOverlay,
+    } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../plugins/pluginPolicy.js') as typeof import('../plugins/pluginPolicy.js')
+    const hostOverlay = buildHostOverlayManagedSettings(
+      parentManaged as Record<string, unknown>,
+    )
+    if (Object.keys(hostOverlay).length === 0) {
+      return adminManagedSettings
+    }
+    const merged = mergeManagedSettingsWithHostOverlay(
+      adminManagedSettings as Record<string, unknown> | null,
+      hostOverlay,
+    )
+    return Object.keys(merged).length > 0
+      ? (merged as SettingsJson)
+      : adminManagedSettings
+  } catch {
+    return adminManagedSettings
+  }
+}

@@ -35,8 +35,8 @@ describe('2.1.309 sandbox & protected path alignment (#1118, #1119, #1120, #1128
   test('#1118: Shell.ts strips -l/--login and deletes BASH_ENV/ENV when shouldUseSandbox', () => {
     const src = readFileSync(join(import.meta.dir, '../../Shell.ts'), 'utf-8')
     expect(src).toContain("arg !== '-l' && arg !== '--login'")
-    expect(src).toContain('delete baseSubprocessEnv.BASH_ENV')
-    expect(src).toContain('delete baseSubprocessEnv.ENV')
+    expect(src).toContain('delete env.BASH_ENV')
+    expect(src).toContain('delete env.ENV')
   })
 
   test('#1119: expandSymlinkedDenyWriteGlobs emits realpath-resolved glob for symlinked parent', () => {

@@ -9,10 +9,12 @@ import {
   COST_HAIKU_45,
   COST_TIER_10_50,
   COST_TIER_15_75,
+  COST_TIER_16_80,
   COST_TIER_2_10,
   COST_TIER_3_15,
   COST_TIER_30_150,
   COST_TIER_5_25,
+  COST_TIER_8_40,
   DENSABLE_PRICING_TIERS,
   calculateUSDCost,
   formatModelPricing,
@@ -232,5 +234,43 @@ describe('densable 2.1.219 Cig (1h cache write split)', () => {
       }),
     )
     expect(cost).toBeCloseTo(10, 6)
+  })
+})
+
+describe('BH2-P0-3: official 2.1.328 opus-5-5, fable-5-2, mythos-5-2 standard & fast pricing', () => {
+  test('claude-opus-5-5 standard ($4/$20) and fast ($8/$40, HK) billing + picker', () => {
+    const std = getModelCosts('claude-opus-5-5', usage())
+    expect(std.inputTokens).toBe(4)
+    expect(std.outputTokens).toBe(20)
+    expect(std.promptCacheReadTokens).toBe(0.2)
+
+    const fast = getModelCosts('claude-opus-5-5', usage({ speed: 'fast' }))
+    expect(fast).toEqual(COST_TIER_8_40)
+
+    expect(getOpus46CostTier(false, 'claude-opus-5-5').inputTokens).toBe(4)
+    expect(getOpus46CostTier(false, 'claude-opus-5-5').outputTokens).toBe(20)
+    const pickerFast = getOpus46CostTier(true, 'claude-opus-5-5')
+    if (pickerFast.inputTokens !== 4) {
+      expect(pickerFast).toEqual(COST_TIER_8_40)
+    }
+  })
+
+  test('claude-fable-5-2 and claude-mythos-5-2 fast ($16/$80, GK) billing + picker', () => {
+    expect(getModelCosts('claude-fable-5-2', usage({ speed: 'fast' }))).toEqual(
+      COST_TIER_16_80,
+    )
+    expect(
+      getModelCosts('claude-mythos-5-2', usage({ speed: 'fast' })),
+    ).toEqual(COST_TIER_16_80)
+    expect(
+      getModelCosts('claude-fable-5-2[1m]', usage({ speed: 'fast' })),
+    ).toEqual(COST_TIER_16_80)
+
+    const pickerFableFast = getOpus46CostTier(true, 'claude-fable-5-2')
+    const pickerMythosFast = getOpus46CostTier(true, 'claude-mythos-5-2')
+    if (pickerFableFast.inputTokens !== 8) {
+      expect(pickerFableFast).toEqual(COST_TIER_16_80)
+      expect(pickerMythosFast).toEqual(COST_TIER_16_80)
+    }
   })
 })

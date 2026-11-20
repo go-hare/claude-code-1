@@ -33,6 +33,7 @@ import { getPlatform } from '../../platform.js'
 import { SandboxManager } from '../../sandbox/sandbox-adapter.js'
 import { getSettingsForSource } from '../../settings/settings.js'
 import { jsonStringify } from '../../slowOperations.js'
+import { stripOAuthScopesIfTokenRemoved } from '../../subprocessEnv.js'
 import { EVAL_ARTIFACTS_DIR, SHELL_UNCONFINED } from './constants.js'
 import {
   isEvalPrefixedSecretEnvKey,
@@ -1915,14 +1916,38 @@ function sandboxCredentialEnvVars(
     ...EVAL_SANDBOX_PROXY_ENV_VARS,
     ...scanEnvValuesForCredentials(childEnv),
   ])
-  return names
-    .filter(name => {
-      if (Object.hasOwn(caseEnv, name) && childEnv[name] === caseEnv[name]) {
-        return false
-      }
-      return true
-    })
-    .map(name => ({ name, mode: 'deny' as const }))
+  const denied = names.filter(name => {
+    if (Object.hasOwn(caseEnv, name) && childEnv[name] === caseEnv[name]) {
+      return false
+    }
+    return true
+  })
+  // Official 2.1.327 (#389): when CLAUDE_CODE_OAUTH_TOKEN is stripped from a
+  // sandboxed eval command's env, also strip CLAUDE_CODE_OAUTH_SCOPES via
+  // stripOAuthScopesIfTokenRemoved so nested `claude` processes with their own
+  // token are not refused by forceLoginOrgUUID.
+  const deniedUpper = new Set(denied.map(name => name.toUpperCase()))
+  const simulatedChildEnv: Record<string, string | undefined> = {}
+  for (const [k, v] of Object.entries(childEnv)) {
+    if (!deniedUpper.has(k.toUpperCase())) {
+      simulatedChildEnv[k] = v
+    }
+  }
+  const scopesBefore = Object.keys(simulatedChildEnv).filter(
+    k => k.toUpperCase() === 'CLAUDE_CODE_OAUTH_SCOPES',
+  )
+  stripOAuthScopesIfTokenRemoved(childEnv, simulatedChildEnv)
+  for (const key of scopesBefore) {
+    if (
+      !(key in simulatedChildEnv) &&
+      !(Object.hasOwn(caseEnv, key) && childEnv[key] === caseEnv[key]) &&
+      !deniedUpper.has(key.toUpperCase())
+    ) {
+      denied.push(key)
+      deniedUpper.add(key.toUpperCase())
+    }
+  }
+  return denied.map(name => ({ name, mode: 'deny' as const }))
 }
 
 function policySandboxesDefault(): Record<string, unknown>[] {

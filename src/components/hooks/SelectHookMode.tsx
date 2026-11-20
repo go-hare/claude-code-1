@@ -17,6 +17,8 @@ type Props = {
   selectedMatcher: string | null;
   hooksForSelectedMatcher: IndividualHookConfig[];
   hookEventMetadata: HookEventMetadata;
+  defaultFocusIndex?: number;
+  onFocus?: (index: number) => void;
   onSelect: (hook: IndividualHookConfig) => void;
   onCancel: () => void;
 };
@@ -26,6 +28,8 @@ export function SelectHookMode({
   selectedMatcher,
   hooksForSelectedMatcher,
   hookEventMetadata,
+  defaultFocusIndex,
+  onFocus,
   onSelect,
   onCancel,
 }: Props): React.ReactNode {
@@ -63,6 +67,8 @@ export function SelectHookMode({
       }
     >
       <ItemList
+        defaultFocusIndex={defaultFocusIndex}
+        onFocus={onFocus}
         options={hooksForSelectedMatcher.map((hook, index) => ({
           label: getHookDisplayText(hook.config),
           value: String(index),

@@ -70,7 +70,10 @@ import {
   isCodeEditingTool,
 } from '../../hooks/toolPermission/permissionLogging.js'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
-import { detachedLetGoPermissionDeny } from '../../utils/permissions/permissions.js'
+import {
+  consumePermissionPipelineResult,
+  detachedLetGoPermissionDeny,
+} from '../../utils/permissions/permissions.js'
 import {
   findToolByName,
   type Tool,
@@ -3761,20 +3764,11 @@ async function dispatchCheckPermissionsAndCallTool(
       })
     }
     const coreOutput = capture.output?.value
-    // densable DVt: wrap `{deny}` + last core → kce messages only
+    // Official 2.1.328 (#667): managed PostToolUse hooks must NOT fire for
+    // tool calls refused before they ran (`!reachedTool && !isHooksAnswer`):
+    // no log entry, rewrite, block, or stop there.
     if (capture.deny !== undefined) {
-      if (coreOutput === undefined) {
-        return messages
-      }
-      const kce = await collectManagedOnlyPostToolUse({
-        tool,
-        toolUseID,
-        toolInput: effectiveHookInput as Record<string, unknown>,
-        output: coreOutput,
-        toolUseContext,
-        durationMs: capture.durationMs,
-      })
-      return [...messages, ...kce.messages]
+      return messages
     }
     const output = capture.detached
       ? undefined
@@ -4128,12 +4122,17 @@ async function checkPermissionsAndCallTool(
   // densable: coerceInput (legacy aliases / soft truncates) then safeParse.
   // SendMessage Cpr=200 summary truncate lands here via shapeClass truncate_summary.
   let parseTarget: unknown = input
-  let coerceMeta: { shapeClass: string } | null = null
+  let coerceMeta: { shapeClass: string; resultNote?: string } | null = null
   if (tool.coerceInput) {
     const coerced = tool.coerceInput(input)
     if (coerced !== null) {
       parseTarget = coerced.input
-      coerceMeta = { shapeClass: coerced.shapeClass }
+      coerceMeta = {
+        shapeClass: coerced.shapeClass,
+        ...(coerced.resultNote !== undefined
+          ? { resultNote: coerced.resultNote }
+          : {}),
+      }
     }
   }
   const parsedInput = tool.inputSchema.safeParse(parseTarget)
@@ -4617,15 +4616,26 @@ async function checkPermissionsAndCallTool(
   const permissionMode = bnPermissionContext(toolUseContext).mode
   const permissionStart = Date.now()
 
-  const resolved = await resolveHookPermissionDecision(
-    hookPermissionResult,
-    tool,
-    processedInput,
-    toolUseContext,
-    canUseTool,
-    assistantMessage,
-    toolUseID,
-  )
+  toolUseContext.toolDecisions ??= new Map()
+  const permissionCheckContext =
+    toolUseContext.toolUseId === toolUseID
+      ? toolUseContext
+      : { ...toolUseContext, toolUseId: toolUseID }
+  let permissionPipelineResult: PermissionDecision | undefined
+  let resolved: Awaited<ReturnType<typeof resolveHookPermissionDecision>>
+  try {
+    resolved = await resolveHookPermissionDecision(
+      hookPermissionResult,
+      tool,
+      processedInput,
+      permissionCheckContext,
+      canUseTool,
+      assistantMessage,
+      toolUseID,
+    )
+  } finally {
+    permissionPipelineResult = consumePermissionPipelineResult(toolUseID)
+  }
   const permissionDecision =
     detachedLetGoPermissionDeny(toolUseID) ?? resolved.decision
   processedInput = resolved.input
@@ -5051,11 +5061,60 @@ async function checkPermissionsAndCallTool(
     //
     // The invoke lambda is shared between the flag-on (wrapper) and flag-off
     // (direct) paths so that post-call processing is never duplicated.
+    const deriveAllowGivenByApprover = (
+      decision: PermissionDecision,
+    ): 'user' | 'classifier' | 'auto_mode' | 'hook' | undefined => {
+      const reason =
+        decision.behavior === 'allow' ? decision.decisionReason : undefined
+      switch (reason?.type) {
+        case 'permissionPromptTool':
+          return 'user'
+        case 'classifier':
+          return reason.classifier === 'auto-mode' &&
+            (reason as { classifierAllowed?: boolean }).classifierAllowed ===
+              true
+            ? 'classifier'
+            : undefined
+        case 'mode':
+          return reason.mode === 'auto' &&
+            (reason as { denialLimitRun?: boolean }).denialLimitRun !== true &&
+            (reason as { scriptCheckDeferred?: boolean })
+              .scriptCheckDeferred !== true
+            ? 'auto_mode'
+            : undefined
+        case 'hook':
+          return 'hook'
+        default:
+          return undefined
+      }
+    }
+
     const runPostPermissionCall = async (
       callCtx: ToolUseContext,
       callCanUseTool: CanUseToolFn,
       progressFn: typeof onToolProgress,
     ) => {
+      const allowApprover = deriveAllowGivenByApprover(permissionDecision)
+      const existingMeta = callCtx as unknown as {
+        allowGivenBy?: { toolUseId?: string; approver?: string }
+        permissionPipelineResult?: PermissionDecision
+        permissionPhase?: { pipeline?: { result?: PermissionDecision } }
+      }
+      const effectiveAllowGivenBy =
+        existingMeta.allowGivenBy ??
+        (allowApprover !== undefined
+          ? { toolUseId: toolUseID, approver: allowApprover }
+          : undefined)
+      const isNonHumanAllowOverride =
+        permissionDecision.behavior === 'allow' &&
+        permissionDecision.decisionReason !== undefined &&
+        permissionDecision.decisionReason.type !== 'permissionPromptTool'
+      const effectivePermissionPipelineResult =
+        existingMeta.permissionPipelineResult ??
+        existingMeta.permissionPhase?.pipeline?.result ??
+        (isNonHumanAllowOverride
+          ? permissionDecision
+          : permissionPipelineResult)
       const invokeToolCall = () =>
         tool.call(
           callInput,
@@ -5063,9 +5122,22 @@ async function checkPermissionsAndCallTool(
             ...callCtx,
             toolUseId: toolUseID,
             userModified: permissionDecision.userModified ?? false,
+            ...(effectivePermissionPipelineResult !== undefined && {
+              permissionPipelineResult: effectivePermissionPipelineResult,
+              permissionPhase: {
+                ...existingMeta.permissionPhase,
+                pipeline: {
+                  ...existingMeta.permissionPhase?.pipeline,
+                  result: effectivePermissionPipelineResult,
+                },
+              },
+            }),
+            ...(effectiveAllowGivenBy !== undefined && {
+              allowGivenBy: effectiveAllowGivenBy,
+            }),
             // gold @184489530 — call never inherits the Desktop-forward stamp.
             desktopForwardToolUseId: undefined,
-          },
+          } as ToolUseContext,
           callCanUseTool,
           assistantMessage,
           progress => {
@@ -5443,13 +5515,17 @@ async function checkPermissionsAndCallTool(
     ) {
       // Use the pre-mapped block when available (non-MCP tools where hooks
       // don't modify the output), otherwise map from scratch.
-      const toolResultBlock = preMappedBlock
+      const rawToolResultBlock = preMappedBlock
         ? await processPreMappedToolResultBlock(
             preMappedBlock,
             tool.name,
             tool.maxResultSizeChars,
           )
         : await processToolResultBlock(tool, toolUseResult, toolUseID)
+      const toolResultBlock = appendCoerceResultNoteToToolResultBlock(
+        rawToolResultBlock,
+        coerceMeta?.resultNote,
+      )
 
       // Build content blocks - tool result first, then optional feedback
       const contentBlocks: ContentBlockParam[] = [toolResultBlock]
@@ -6003,4 +6079,33 @@ export function suggestMistypedHostConnectorTool(
   const [match] = candidates
   if (!match || !inputFitsSchemaProperties(match, input)) return ''
   return `. Did you mean ${match.name}? Call ${match.name} instead.`
+}
+
+/**
+ * Official 2.1.328 (#493): attach `coerceInput().resultNote` (e.g. ignored
+ * Artifact `prompt`/`limit`/`label` fields) to the mapped `tool_result` block
+ * so Claude sees what was dropped without rejecting the call.
+ */
+export function appendCoerceResultNoteToToolResultBlock(
+  block: ToolResultBlockParam,
+  resultNote?: string,
+): ToolResultBlockParam {
+  if (!resultNote) return block
+  const content = block.content
+  if (typeof content === 'string') {
+    return {
+      ...block,
+      content: content.length > 0 ? `${content}\n\n${resultNote}` : resultNote,
+    }
+  }
+  if (Array.isArray(content)) {
+    return {
+      ...block,
+      content: [...content, { type: 'text', text: resultNote }],
+    }
+  }
+  return {
+    ...block,
+    content: resultNote,
+  }
 }

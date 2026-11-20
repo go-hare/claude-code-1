@@ -58,7 +58,12 @@ function extractImage(
   return undefined
 }
 
-function processOutput(output: NotebookCellOutput) {
+function processOutput(
+  output: NotebookCellOutput | null | undefined,
+): NotebookCellSourceOutput | undefined {
+  if (!output || typeof output !== 'object') {
+    return undefined
+  }
   switch (output.output_type) {
     case 'stream':
       return {
@@ -102,7 +107,16 @@ function processCell(
   }
 
   if (cell.cell_type === 'code' && cell.outputs?.length) {
-    const outputs = cell.outputs.map(processOutput)
+    const rawOutputs = cell.outputs.map(processOutput)
+    const outputs = rawOutputs.filter(
+      (output): output is NotebookCellSourceOutput => output !== undefined,
+    )
+    if (outputs.length < rawOutputs.length) {
+      outputs.push({
+        output_type: 'stream',
+        text: 'Outputs of an unknown type are not shown.',
+      })
+    }
     if (!includeLargeOutputs && isLargeOutputs(outputs)) {
       cellData.outputs = [
         {
@@ -156,8 +170,21 @@ function cellOutputToToolResult(output: NotebookCellSourceOutput) {
 
 function getToolResultFromCell(cell: NotebookCellSource) {
   const contentResult = cellContentToToolResult(cell)
-  const outputResults = cell.outputs?.flatMap(cellOutputToToolResult)
-  return [contentResult, ...(outputResults ?? [])]
+  const rawOutputs = cell.outputs ?? []
+  const knownOutputs = rawOutputs.filter(
+    (o): o is NotebookCellSourceOutput => o != null,
+  )
+  const results: (TextBlockParam | ImageBlockParam)[] = [
+    contentResult,
+    ...knownOutputs.flatMap(cellOutputToToolResult),
+  ]
+  if (knownOutputs.length < rawOutputs.length) {
+    results.push({
+      text: '\nOutputs of an unknown type are not shown.',
+      type: 'text',
+    })
+  }
+  return results
 }
 
 /**

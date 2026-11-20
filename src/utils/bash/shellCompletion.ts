@@ -112,6 +112,16 @@ export function parseShellCompletionInputContext(
   const parseResult = tryParseShellCommand(beforeCursor)
   if (!parseResult.success) {
     // Fallback to simple parsing
+    // Official 2.1.327 #460: check whether the last token before cursor follows a
+    // command separator (&&, ||, ;, |) so Tab completes a command, not a file.
+    if (/(?:&&|\|\||[;|])\s*$/.test(beforeCursor)) {
+      return { prefix: '', completionType: 'command' }
+    }
+    const afterOpMatch = beforeCursor.match(/(?:&&|\|\||[;|])\s*([^\s]+)$/)
+    if (afterOpMatch) {
+      const prefix = afterOpMatch[1] ?? ''
+      return { prefix, completionType: getCompletionTypeFromPrefix(prefix) }
+    }
     const tokens = beforeCursor.split(/\s+/)
     const prefix = tokens[tokens.length - 1] || ''
     const isFirstToken = tokens.length === 1 && !beforeCursor.includes(' ')
@@ -125,16 +135,18 @@ export function parseShellCompletionInputContext(
     return { prefix, completionType }
   }
 
+  // Official 2.1.327 #460: when the last parsed token is a command operator
+  // (&&, ||, ;, |), the next token position expects a command (even if there
+  // is a trailing space like `echo hi && ` or `echo hi | `).
+  const lastParsedToken = parseResult.tokens[parseResult.tokens.length - 1]
+  if (lastParsedToken !== undefined && isCommandOperator(lastParsedToken)) {
+    return { prefix: '', completionType: 'command' }
+  }
+
   // Extract current token
   const lastToken = findLastStringToken(parseResult.tokens)
   if (!lastToken) {
-    // No string token found - check if after operator
-    const lastParsedToken = parseResult.tokens[parseResult.tokens.length - 1]
-    const completionType =
-      lastParsedToken && isCommandOperator(lastParsedToken)
-        ? 'command'
-        : 'command' // Default to command at start
-    return { prefix: '', completionType }
+    return { prefix: '', completionType: 'command' }
   }
 
   // If there's a trailing space, the user is starting a new argument

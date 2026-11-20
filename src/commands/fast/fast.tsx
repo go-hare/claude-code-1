@@ -22,7 +22,7 @@ import {
 } from '../../utils/fastMode.js';
 import { formatDuration } from '../../utils/format.js';
 import { formatModelPricing, getOpus46CostTier } from '../../utils/modelCost.js';
-import { getCanonicalName } from '../../utils/model/model.js';
+import { getCanonicalName, getDefaultMainLoopModelSetting } from '../../utils/model/model.js';
 import { getAPIProvider } from '../../utils/model/providers.js';
 import { em } from '../../utils/model/modelNoticeCode.js';
 import { getSettingsForSource, updateSettingsForSource } from '../../utils/settings/settings.js';
@@ -32,6 +32,18 @@ export function isFastModeResearchPreview(model: string | null | undefined): boo
   const resolved = model && isFastModeSupportedByModel(model) ? model : getFastModeModel();
   const canonical = getCanonicalName(resolved);
   return canonical === 'claude-opus-4-8' || canonical === 'claude-opus-5';
+}
+
+/**
+ * Official 2.1.328 `qLo(oo)` — resolve fast mode pricing for the active model
+ * (or the fast-mode target model if the active model does not support fast mode)
+ * so Opus 5.5 displays `$8/$40 per Mtok` and Fable 5.2 displays `$16/$80 per Mtok`.
+ */
+export function formatFastModePricingForModel(model: string | null | undefined): string {
+  const effectiveModel = isFastModeSupportedByModel(model ?? null)
+    ? (model ?? getDefaultMainLoopModelSetting())
+    : getFastModeModel();
+  return formatModelPricing(getOpus46CostTier(true, effectiveModel));
 }
 
 /**
@@ -88,7 +100,7 @@ export function FastModePicker({
   const runtimeState = getFastModeRuntimeState();
   const isCooldown = runtimeState.status === 'cooldown';
   const isUnavailable = unavailableReason !== null;
-  const pricing = formatModelPricing(getOpus46CostTier(true));
+  const pricing = formatFastModePricingForModel(model);
 
   async function handleConfirm(): Promise<void> {
     if (isUnavailable) return;
@@ -244,7 +256,7 @@ export async function handleFastModeShortcut(
     const modelUpdated = !isFastModeSupportedByModel(mainLoopModel)
       ? ` · model set to ${em(FAST_MODE_MODEL_DISPLAY)}`
       : '';
-    const pricing = formatModelPricing(getOpus46CostTier(true));
+    const pricing = formatFastModePricingForModel(mainLoopModel);
     const sessionSuffix = isFastModePersistedToSettings() ? '' : ' (this session only)';
     return `${fastIcon} Fast mode ON${modelUpdated} · ${pricing}${sessionSuffix}`;
   } else {

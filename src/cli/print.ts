@@ -511,7 +511,12 @@ import {
 import {
   executeDirectoryAddedHooks,
   executeNotificationHooks,
+  executeUserPromptSubmitHooks,
+  hasHookForEvent,
 } from 'src/utils/hooks.js'
+import { formatCloudUserPromptSubmitBlockError } from 'src/utils/hooks/hookErrorDisplay.js'
+import { resolveModelFacts } from 'src/utils/model/modelFacts.js'
+import { restoreTaskListOnSelfHostedRunnerResume } from 'src/utils/tasks.js'
 import { clearMemoryFileCaches } from 'src/utils/claudemd.js'
 import { applyPermissionUpdate } from 'src/utils/permissions/PermissionUpdate.js'
 import { handleRegisterRepoRoot } from 'src/commands/add-dir/registerRepoRoot.js'
@@ -631,6 +636,7 @@ import {
   handleChannelEnable,
   reregisterChannelHandlerAfterReconnect,
   handleOrphanedPermissionResponse,
+  shouldInterruptParkedQuestionOnStreamClose,
   permissionPoliciesFromDynamicMcpConfigs,
   handleMcpSetServers,
   reconcileMcpServers,
@@ -645,6 +651,7 @@ export type {
 export {
   HeadlessControlPlane,
   handleOrphanedPermissionResponse,
+  shouldInterruptParkedQuestionOnStreamClose,
   permissionPoliciesFromDynamicMcpConfigs,
   handleMcpSetServers,
   reconcileMcpServers,
@@ -694,7 +701,10 @@ import {
   isEnvTruthy,
   isEnvDefinedFalsy,
 } from '../utils/envUtils.js'
-import { installPluginsForHeadless } from '../utils/plugins/headlessPluginInstall.js'
+import {
+  installPluginsForHeadless,
+  waitForHeadlessPluginInstallDrain,
+} from '../utils/plugins/headlessPluginInstall.js'
 import { refreshActivePlugins } from '../utils/plugins/refresh.js'
 import { loadAllPluginsCacheOnly } from '../utils/plugins/pluginLoader.js'
 import { setHeadlessPluginOutputFormat } from '../utils/plugins/functionHooksModules.js'
@@ -725,7 +735,10 @@ import {
 } from '../utils/teammateMailbox.js'
 import { removeTeammateFromTeamFile } from '../utils/swarm/teamHelpers.js'
 import { unassignTeammateTasks } from '../utils/tasks.js'
-import { getRunningTasks } from '../utils/task/framework.js'
+import {
+  getRunningTasks,
+  notifySweptBackgroundAgents,
+} from '../utils/task/framework.js'
 import { isBackgroundTask } from '../tasks/types.js'
 import { stopTask } from '../tasks/stopTask.js'
 import {
@@ -733,6 +746,7 @@ import {
   backgroundTaskByToolUseId,
 } from '../tasks/LocalShellTask/LocalShellTask.js'
 import {
+  advanceSharedPrintBgWaitFirstIdle,
   canReportSessionIdleWithBgActivity,
   formatPrintBgWaitCeilingMessage,
   formatPrintWindDownMessage,
@@ -740,6 +754,7 @@ import {
   hasPendingSessionWakeup,
   nextPrintBgWaitGate,
   PRINT_BG_WAIT_GRACE_MS,
+  shouldStopAgentsOnPrintBgCeiling,
 } from './printBgWait.js'
 import {
   formatPrintBudgetHaltDebug,
@@ -1662,6 +1677,75 @@ export class PrintRetryNoticeWriter {
       this.deps.writeStderr ?? ((text: string) => process.stderr.write(text))
     write(`${chalk.dim(`${body} \u00b7 attempt ${msg.attempt}${ofMax}`)}\n`)
   }
+}
+
+/**
+ * Official 2.1.328 (#659) `tengu_dreamy_reef` (default `true`):
+ * In `claude -p` text output mode (neither `json` nor `stream-json`), write a
+ * concise notice on stderr when a cross-session peer message is held or
+ * dropped, explaining how to allow inbound peer messages.
+ */
+export class PrintPeerHoldNoticeWriter {
+  constructor(
+    private readonly outputFormat: string | undefined,
+    private readonly deps: {
+      writeStderr?: (text: string) => void
+      isEnabled?: () => boolean
+      settingsHint?: string
+    } = {},
+  ) {}
+
+  observe(msg: {
+    type?: string
+    subtype?: string
+    from?: string
+    state?: string
+    outcome?: string
+    reason?: string
+    cause?: string
+  }): string | undefined {
+    if (
+      this.outputFormat === 'json' ||
+      this.outputFormat === 'stream-json' ||
+      msg.type !== 'system' ||
+      msg.subtype !== 'peer_message_hold'
+    ) {
+      return undefined
+    }
+    const enabled =
+      this.deps.isEnabled?.() ??
+      getFeatureValue_CACHED_MAY_BE_STALE('tengu_dreamy_reef', true)
+    if (!enabled) return undefined
+
+    const sender = msg.from ? ` from "${msg.from}"` : ''
+    const state = msg.state ?? msg.outcome ?? 'held'
+    const actionVerb =
+      state === 'dropped' ||
+      state === 'expired' ||
+      state === 'denied' ||
+      state === 'refused'
+        ? `dropped (${state})`
+        : 'held for approval'
+    const allowHint =
+      this.deps.settingsHint ??
+      'run with --settings and a file that sets "crossSessionInbound" to "accept"'
+    const text = `Cross-session message${sender} was ${actionVerb}. To allow incoming cross-session messages here, ${allowHint}.`
+    const write =
+      this.deps.writeStderr ?? ((s: string) => process.stderr.write(s))
+    write(`${text}\n`)
+    return text
+  }
+}
+
+/**
+ * Official 2.1.328 (#545): returns true when `CLAUDE_CODE_DISABLE_DEFERRED_TOOL_RESUME`
+ * is truthy, disabling automatic resumption of hook-deferred tool calls on
+ * `claude -p --resume` / `--continue`.
+ */
+export function isDeferredToolResumeDisabled(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return isEnvTruthy(env.CLAUDE_CODE_DISABLE_DEFERRED_TOOL_RESUME)
 }
 
 /**
@@ -2682,7 +2766,7 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
     turnInterruptionState,
     agentSetting: resumedAgentSetting,
     planModeOnResume,
-    deferredToolUse,
+    deferredToolUse: loadedDeferredToolUse,
     overdueSessionStartHooks,
     codeModeWaitForNextPrompt,
   } = await loadInitialMessages(setAppState, {
@@ -2703,6 +2787,11 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
         ? (structuredIO as RemoteIO).hydratePrefetch
         : null,
   })
+  // Official 2.1.328 (#545): skip resuming hook-deferred tool calls when
+  // CLAUDE_CODE_DISABLE_DEFERRED_TOOL_RESUME is set.
+  const deferredToolUse = isDeferredToolResumeDisabled()
+    ? undefined
+    : loadedDeferredToolUse
 
   // SessionStart hooks can emit initialUserMessage — the first user turn for
   // headless orchestrator sessions where stdin is empty and additionalContext
@@ -2863,6 +2952,25 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
   void import('../utils/sandbox/sandboxNetworkHeadlessRefs.js').then(m => {
     m.setSandboxNetworkHeadlessTools(filteredTools)
   })
+
+  // Official 2.1.328 #639 (`task_list_restore_on_runner`): when a self-hosted
+  // runner session resumes in a new Claude config directory, restore its task
+  // list from the resumed transcript before the first turn.
+  if (
+    (hasResumeOrContinue || initialMessages.length > 0) &&
+    !options.forkSession
+  ) {
+    try {
+      await restoreTaskListOnSelfHostedRunnerResume({
+        sessionId: getSessionId(),
+        messages: initialMessages,
+      })
+    } catch (err) {
+      logForDebugging(
+        `[print.ts] restoreTaskListOnSelfHostedRunnerResume failed: ${errorMessage(err)}`,
+      )
+    }
+  }
 
   // Official 2.1.325 #1717: on headless `--resume` / `--continue`, read
   // persisted SEP-2663 MCP task sidecar metadata and re-attach pollers via
@@ -3052,6 +3160,9 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
     maxBudgetUsd: options.maxBudgetUsd,
   })
   const retryNoticeWriter = new PrintRetryNoticeWriter(options.outputFormat)
+  const peerHoldNoticeWriter = new PrintPeerHoldNoticeWriter(
+    options.outputFormat,
+  )
   const messages: SDKMessage[] = []
   let lastMessage: SDKMessage | undefined
   // Streamlined mode transforms messages when CLAUDE_CODE_STREAMLINED_OUTPUT=true and using stream-json
@@ -3109,6 +3220,19 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
         error_status?: number | null
         error?: string
         no_response?: { waited_ms: number; retry_wait_ms: number }
+      },
+    )
+    // Official 2.1.328 (#659): surface held/dropped cross-session peer message
+    // notices on stderr in `-p` text output mode.
+    peerHoldNoticeWriter.observe(
+      message as {
+        type?: string
+        subtype?: string
+        from?: string
+        state?: string
+        outcome?: string
+        reason?: string
+        cause?: string
       },
     )
     // Official 2.1.323 #2038: in `-p` text mode, write plugin load errors
@@ -3227,6 +3351,14 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
     } catch {
       // Module load failure — non-critical at shutdown
     }
+  }
+
+  // Official 2.1.328 #644: wait (bounded 30s) for any in-flight headless
+  // enabled-plugin record/fetch pass before exiting a short headless session.
+  try {
+    await waitForHeadlessPluginInstallDrain()
+  } catch {
+    // Non-critical at shutdown
   }
 
   let exitCode =
@@ -4855,30 +4987,22 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
   // settings were fetched. Without clearing, getCommands() would rebuild
   // from a stale plugin list.
   async function refreshPluginState(): Promise<void> {
+    // Preserve SDK/CLI-provided agents (--agents CLI flag or SDK initialize
+    // control_request) across plugin reload (#398).
+    const sdkAgents = currentAgents.filter(a => a.source === 'flagSettings')
     // refreshActivePlugins handles the full cache sweep (clearAllCaches),
     // reloads all plugin component loaders, writes AppState.plugins +
     // AppState.agentDefinitions, registers hooks, and bumps mcp.pluginReconnectKey.
-    const { agentDefinitions: freshAgentDefs } =
-      await refreshActivePlugins(setAppState)
+    const { agentDefinitions: freshAgentDefs } = await refreshActivePlugins(
+      setAppState,
+      { cliAgents: sdkAgents },
+    )
 
     // Headless-specific: currentCommands/currentAgents are local mutable refs
     // captured by the query loop (REPL uses AppState instead). getCommands is
     // fresh because refreshActivePlugins cleared its cache.
     currentCommands = await getCommands(getCwd())
-
-    // Preserve SDK-provided agents (--agents CLI flag or SDK initialize
-    // control_request) — both inject via parseAgentsFromJson with
-    // source='flagSettings'. loadMarkdownFilesForSubdir never assigns this
-    // source, so it cleanly discriminates "injected, not disk-loadable".
-    //
-    // The previous filter used a negative set-diff (!freshAgentTypes.has(a))
-    // which also matched plugin agents that were in the poisoned initial
-    // currentAgents but correctly excluded from freshAgentDefs after managed
-    // settings applied — leaking policy-blocked agents into the init message.
-    // See gh-23085: isBridgeEnabled() at Commander-definition time poisoned
-    // the settings cache before setEligibility(true) ran.
-    const sdkAgents = currentAgents.filter(a => a.source === 'flagSettings')
-    currentAgents = [...freshAgentDefs.allAgents, ...sdkAgents]
+    currentAgents = freshAgentDefs.allAgents
   }
 
   // Re-diff MCP configs after plugin state changes. Filters to
@@ -5255,6 +5379,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
       let waitingForAgents = false
       // Official print bg wait ceiling (dEf/pEf): track elapsed wait + wind-down.
       let printBgWaitStartedAt: number | null = null
+      let printBgWaitFirstIdleAt: number | null = null
       let printBgWaitDeadline: number | null = null
       let printBgWaitSwept = false
       let printBgWaitCeilingWarned = false
@@ -5885,11 +6010,17 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                 await sleep(Math.min(25, remainingMs))
               }
             }
+            // Official 2.1.327 #402: wait for model settings bootstrap before
+            // the first request (defaults to 10s in non-interactive mode).
+            const firstTurnModel = activeUserSpecifiedModel
+              ? parseUserSpecifiedModel(activeUserSpecifiedModel)
+              : getMainLoopModel()
             await Promise.all([
               heldHearth ?? Promise.resolve(),
               joins?.replyMount ?? Promise.resolve(),
               joins?.grants ?? Promise.resolve(),
               waitForRequiredMcp(),
+              resolveModelFacts(firstTurnModel, { abortController }),
             ])
           }
 
@@ -6460,8 +6591,18 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                 }
               }
               const ceiling = getPrintBgWaitCeilingMs()
+              // Official 2.1.328 (#670): count a background subagent and any
+              // subagents it waits for against ONE shared 10-minute wait budget
+              // (`printBgWaitFirstIdleAt`), never resetting per intermediate turn.
+              printBgWaitFirstIdleAt = advanceSharedPrintBgWaitFirstIdle({
+                firstIdleAt: printBgWaitFirstIdleAt,
+                hasRunningBgTasks: runningBg.length > 0,
+                now,
+              })
+              const waitOriginAt =
+                printBgWaitFirstIdleAt ?? printBgWaitStartedAt
               const ceilingExceeded =
-                ceiling !== null && now - printBgWaitStartedAt >= ceiling
+                ceiling !== null && now - waitOriginAt >= ceiling
 
               // Official: stderr once when ceiling exceeded.
               if (
@@ -6470,7 +6611,13 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                 ceiling !== null
               ) {
                 printBgWaitCeilingWarned = true
-                process.stderr.write(formatPrintBgWaitCeilingMessage(ceiling))
+                const bgSummary = runningBg
+                  .slice(0, 3)
+                  .map(t => t.description || t.id)
+                  .join(', ')
+                process.stderr.write(
+                  formatPrintBgWaitCeilingMessage(ceiling, bgSummary),
+                )
               }
 
               const holdForBackgroundShells =
@@ -6519,7 +6666,11 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               printBgWaitDeadline = gate.deadline
               printBgWaitSwept = gate.swept
 
-              if (gate.shouldSweep || (ceilingExceeded && inputClosed)) {
+              if (
+                gate.shouldSweep ||
+                (ceilingExceeded &&
+                  (inputClosed || shouldStopAgentsOnPrintBgCeiling()))
+              ) {
                 // Official fEf — typed wind-down messages + print_wind_down telemetry
                 for (const t of runningBg) {
                   try {
@@ -6549,12 +6700,14 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                 }
                 waitingForAgents = false
                 printBgWaitStartedAt = null
+                printBgWaitFirstIdleAt = null
                 printBgWaitDeadline = null
                 printBgWaitSwept = false
               } else if (ceilingExceeded) {
                 // Ceiling hit while input still open: stop blocking exit.
                 waitingForAgents = false
                 printBgWaitStartedAt = null
+                printBgWaitFirstIdleAt = null
               } else {
                 await sleep(100)
               }
@@ -6562,6 +6715,11 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
             // Loop back to drain any newly queued commands
           } else {
             printBgWaitStartedAt = null
+            // Official 2.1.328 (#670): only clear shared first-idle timer once
+            // no background tasks remain running in the chain.
+            if (getRunningTasks(getAppState()).length === 0) {
+              printBgWaitFirstIdleAt = null
+            }
             printBgWaitDeadline = null
             printBgWaitSwept = false
             printBgWaitCeilingWarned = false
@@ -6903,6 +7061,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
         controlPlane.dispose()
         stopAllHookHeartbeatsForSession()
         unregisterHookHeartbeatSink?.()
+        drainPrintSdkEvents()
         output.done()
       }
     }
@@ -7378,12 +7537,14 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
   // Handle unexpected permission responses by looking up the unresolved tool
   // call in the transcript and executing it
   const handledOrphanedToolUseIds = new Set<string>()
+  let sessionStoppedAfterRestart = false
   structuredIO.setUnexpectedResponseCallback(async message => {
     await handleOrphanedPermissionResponse({
       message,
       setAppState,
       getAppState,
       handledToolUseIds: handledOrphanedToolUseIds,
+      sessionStoppedAfterRestart,
       onEnqueued: () => {
         // The first message of a session might be the orphaned permission
         // check rather than a user prompt, so kick off the loop.
@@ -7418,6 +7579,7 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
       }
     }
     let initialized = false
+    const midTurnHookRunner = createMidTurnHookRunner()
     logForDiagnosticsNoPII('info', 'cli_message_loop_started')
     for await (const message of structuredIO.structuredInput) {
       // Non-user events are handled inline (no queue). started→completed in
@@ -7541,9 +7703,11 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               mcpStartupAbortRef.current.abort()
             }
             if (abortController) {
+              sessionStoppedAfterRestart = true
               markSessionStoppedForPluginInput()
               abortController.abort()
             } else {
+              sessionStoppedAfterRestart = true
               // Official 2.1.326 #95: if Stop arrived while restarting and the
               // auto-resumed cut-off turn is still queued, cancel it and persist
               // an interruption marker so a later restart will not re-run it.
@@ -7578,6 +7742,31 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               // right after set_model) must cancel the pending queued message.
               printPrewait?.interruptBeforeArm(getCommandQueue())
             }
+            // Official 2.1.328 (#593): notify the model when SDK interrupt
+            // stops background subagents so it does not claim they are still running.
+            const bgAgentsOnInterrupt = Object.values(
+              getAppState().tasks ?? {},
+            ).filter(
+              t =>
+                t.type === 'local_agent' &&
+                t.status === 'running' &&
+                (!('isBackgrounded' in t) || t.isBackgrounded),
+            )
+            if (bgAgentsOnInterrupt.length > 0) {
+              for (const agentTask of bgAgentsOnInterrupt) {
+                void stopTask(agentTask.id, {
+                  getAppState,
+                  setAppState,
+                  source: 'user',
+                }).catch(() => undefined)
+              }
+              notifySweptBackgroundAgents(getAppState().tasks, setAppState, {
+                sweptIds: bgAgentsOnInterrupt.map(t => t.id),
+              })
+              drainPrintSdkEvents()
+            }
+            midTurnHookRunner.abortAll()
+            drainPrintSdkEvents()
             suggestionState.abortController?.abort()
             suggestionState.abortController = null
             suggestionState.lastEmitted = null
@@ -7585,6 +7774,8 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
             sendControlResponseSuccess(msg)
           } else if (req.subtype === 'end_session') {
             rapidFollowupDrain.endSessionRequested = true
+            midTurnHookRunner.abortAll()
+            drainPrintSdkEvents()
             if (
               mcpStartupAbortRef.current &&
               !mcpStartupAbortRef.current.signal.aborted
@@ -7595,9 +7786,11 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               `[print.ts] end_session received, reason=${req.reason ?? 'unspecified'}`,
             )
             if (abortController) {
+              sessionStoppedAfterRestart = true
               markSessionStoppedForPluginInput()
               abortController.abort()
             } else {
+              sessionStoppedAfterRestart = true
               // Official 2.1.326 #95: if Stop arrived while restarting and the
               // auto-resumed cut-off turn is still queued, cancel it and persist
               // an interruption marker so a later restart will not re-run it.
@@ -7631,6 +7824,29 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
               // #1634: interrupt arriving while a turn is queued/waiting (e.g.
               // right after set_model) must cancel the pending queued message.
               printPrewait?.interruptBeforeArm(getCommandQueue())
+            }
+            // Official 2.1.328 (#593): notify the model when SDK interrupt
+            // stops background subagents so it does not claim they are still running.
+            const bgAgentsOnInterrupt = Object.values(
+              getAppState().tasks ?? {},
+            ).filter(
+              t =>
+                t.type === 'local_agent' &&
+                t.status === 'running' &&
+                (!('isBackgrounded' in t) || t.isBackgrounded),
+            )
+            if (bgAgentsOnInterrupt.length > 0) {
+              for (const agentTask of bgAgentsOnInterrupt) {
+                void stopTask(agentTask.id, {
+                  getAppState,
+                  setAppState,
+                  source: 'user',
+                }).catch(() => undefined)
+              }
+              notifySweptBackgroundAgents(getAppState().tasks, setAppState, {
+                sweptIds: bgAgentsOnInterrupt.map(t => t.id),
+              })
+              drainPrintSdkEvents()
             }
             suggestionState.abortController?.abort()
             suggestionState.abortController = null
@@ -9387,10 +9603,10 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                     host: getReplDiffHost(),
                     workspaceDiffComputeBudget:
                       HEADLESS_BRIDGE_WORKSPACE_DIFF_COMPUTE_BUDGET,
-                    // Official 2.1.323 #2119 (`backgroundHold` / `Sn`): keep
-                    // Remote Control state `'running'` while background
-                    // subagents are still active so phone/desktop does not
-                    // falsely show idle.
+                    // Official 2.1.323 #2119 + 2.1.328 #592 (`runningHold`):
+                    // report `'running'` only when a turn or background subagent
+                    // is truly active so idle Desktop/VS Code sessions turning
+                    // RC on stay `'idle'`.
                     backgroundHold: {
                       holdsRunning: () =>
                         Object.values(getAppState().tasks ?? {}).some(
@@ -9399,7 +9615,19 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                               t.type === 'in_process_teammate') &&
                             t.status === 'running',
                         ),
+                      isTurnUnderWay: () => Boolean(abortController),
+                      queuedTurnCount: () => getCommandQueue().length,
                     },
+                    initialWorkerState:
+                      Boolean(abortController) ||
+                      Object.values(getAppState().tasks ?? {}).some(
+                        t =>
+                          (t.type === 'local_agent' ||
+                            t.type === 'in_process_teammate') &&
+                          t.status === 'running',
+                      )
+                        ? 'running'
+                        : 'idle',
                     onProjectsBindingHint: () => {
                       workSecretSession?.resyncProjectsReplyMount()
                     },
@@ -9414,11 +9642,18 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
                         clientPlatform,
                         fileAttachments,
                         textNotTyped,
+                        priority,
+                        origin,
                       } = fields
                       enqueue({
                         value: content,
                         mode: 'prompt' as const,
                         uuid,
+                        // Official 2.1.328 (#429): preserve `priority` (e.g.
+                        // `'later'`) and `origin` on cross-session inbound
+                        // messages so they wait for the running turn in RC / Desktop.
+                        ...(priority !== undefined ? { priority } : {}),
+                        ...(origin !== undefined ? { origin } : {}),
                         skipSlashCommands: true,
                         // Official: stamp clientPlatform so concurrent re-queue
                         // and drain can round-trip remote platform identity.
@@ -10682,82 +10917,293 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
           ? (rawUserMsg.origin as QueuedCommand['origin'])
           : undefined
 
-      enqueue({
-        mode: 'prompt' as const,
-        // file_attachments rides the protobuf catchall from the web composer.
-        // Same-ref no-op when absent (no 'file_attachments' key).
-        value: await resizeInboundImageBlocks(
+      const enqueueInboundUserMessage = async (extra?: {
+        skipSubmissionHooks?: boolean
+        additionalContexts?: readonly string[]
+      }): Promise<void> => {
+        const resolvedContent = await resizeInboundImageBlocks(
           await resolveAndPrepend(
             userMsg,
             (userMsg.message as { content: ContentBlockParam[] }).content,
           ),
-        ),
-        uuid: userMsg.uuid as `${string}-${string}-${string}-${string}-${string}`,
-        priority: (userMsg as { priority?: string })
-          .priority as import('src/types/textInputTypes.js').QueuePriority,
-        // densable inbound D7 @202257989 — stamp file_attachments onto the queued command.
-        fileAttachments: parseInboundFileAttachments(userMsg),
-        ...(hostOrigin !== undefined ? { origin: hostOrigin } : {}),
-        ...(hostSuppressWorkflowKeyword !== undefined
-          ? { suppressWorkflowKeyword: hostSuppressWorkflowKeyword }
-          : {}),
-        ...(hostIsHumanTyped !== undefined
-          ? ({ isHumanTypedPrompt: hostIsHumanTyped } as Record<
-              string,
-              unknown
-            >)
-          : {}),
-        // densable 2.1.283 Zp: client_composed → skipSlash + skipAttachments;
-        // seeded_summon → skipAttachments.
-        // #1413: queueSkipSlashCommands + <bash-stdout>/<local-command-stdout>
-        ...(userMsg.client_composed === true
-          ? { skipSlashCommands: true, skipAttachments: true }
-          : userMsg.seeded_summon === true
-            ? { skipAttachments: true }
-            : (userMsg as { queueSkipSlashCommands?: boolean })
-                  .queueSkipSlashCommands === true
-              ? { skipSlashCommands: true }
-              : {}),
-      })
-      // densable afterEnqueue hp/bo @199194235 — claim SessionStart wait
-      {
-        const content = (userMsg.message as { content?: unknown })?.content
-        const ackText =
-          typeof content === 'string'
-            ? content
-            : Array.isArray(content)
+        )
+        const valueWithHookContext =
+          extra?.additionalContexts && extra.additionalContexts.length > 0
+            ? appendHookAdditionalContextToPromptContent(
+                resolvedContent,
+                extra.additionalContexts,
+              )
+            : resolvedContent
+        enqueue({
+          mode: 'prompt' as const,
+          // file_attachments rides the protobuf catchall from the web composer.
+          // Same-ref no-op when absent (no 'file_attachments' key).
+          value: valueWithHookContext,
+          uuid: userMsg.uuid as `${string}-${string}-${string}-${string}-${string}`,
+          priority: (userMsg as { priority?: string })
+            .priority as import('src/types/textInputTypes.js').QueuePriority,
+          // densable inbound D7 @202257989 — stamp file_attachments onto the queued command.
+          fileAttachments: parseInboundFileAttachments(userMsg),
+          ...(extra?.skipSubmissionHooks === true
+            ? { skipSubmissionHooks: true }
+            : {}),
+          ...(hostOrigin !== undefined ? { origin: hostOrigin } : {}),
+          ...(hostSuppressWorkflowKeyword !== undefined
+            ? { suppressWorkflowKeyword: hostSuppressWorkflowKeyword }
+            : {}),
+          ...(hostIsHumanTyped !== undefined
+            ? ({ isHumanTypedPrompt: hostIsHumanTyped } as Record<
+                string,
+                unknown
+              >)
+            : {}),
+          // densable 2.1.283 Zp: client_composed → skipSlash + skipAttachments;
+          // seeded_summon → skipAttachments.
+          // #1413: queueSkipSlashCommands + <bash-stdout>/<local-command-stdout>
+          ...(userMsg.client_composed === true
+            ? { skipSlashCommands: true, skipAttachments: true }
+            : userMsg.seeded_summon === true
+              ? { skipAttachments: true }
+              : (userMsg as { queueSkipSlashCommands?: boolean })
+                    .queueSkipSlashCommands === true
+                ? { skipSlashCommands: true }
+                : {}),
+        })
+        // densable afterEnqueue hp/bo @199194235 — claim SessionStart wait
+        {
+          const content = (userMsg.message as { content?: unknown })?.content
+          const ackText =
+            typeof content === 'string'
               ? content
-                  .map(b =>
-                    b &&
-                    typeof b === 'object' &&
-                    'type' in b &&
-                    b.type === 'text' &&
-                    'text' in b &&
-                    typeof b.text === 'string'
-                      ? b.text
-                      : '',
-                  )
-                  .join('')
-              : undefined
-        if (ackText !== undefined) {
-          claimFirstTurnAck?.({ queued: ackText })
+              : Array.isArray(content)
+                ? content
+                    .map(b =>
+                      b &&
+                      typeof b === 'object' &&
+                      'type' in b &&
+                      b.type === 'text' &&
+                      'text' in b &&
+                      typeof b.text === 'string'
+                        ? b.text
+                        : '',
+                    )
+                    .join('')
+                : undefined
+          if (ackText !== undefined) {
+            claimFirstTurnAck?.({ queued: ackText })
+          }
+        }
+        // Increment prompt count for attribution tracking and save snapshot
+        // The snapshot persists promptCount so it survives compaction
+        if (feature('COMMIT_ATTRIBUTION')) {
+          setAppState(prev => ({
+            ...prev,
+            attribution: incrementPromptCount(prev.attribution, snapshot => {
+              void recordAttributionSnapshot(snapshot).catch(error => {
+                logForDebugging(
+                  `Attribution: Failed to save snapshot: ${error}`,
+                )
+              })
+            }),
+          }))
+        }
+        void run()
+      }
+
+      // Official 2.1.327 #431 + BH3-P1-5: evaluate mid-turn cloud
+      // UserPromptSubmit hooks asynchronously on a serialized runner so slow
+      // hooks never stall `interrupt` / `end_session` / `stop_task` control
+      // requests on `structuredIO`, and non-blocking results are preserved and
+      // marked `skipSubmissionHooks: true` so `promptSubmit.ts` never executes
+      // the hook a second time when dequeued.
+      const shouldRunMidTurnCloudHook =
+        running &&
+        (getIsRemoteMode() || structuredIO instanceof RemoteIO) &&
+        hasHookForEvent('UserPromptSubmit', getAppState(), getSessionId())
+      const rawMidTurnContent = (userMsg.message as { content?: unknown })
+        ?.content
+      const midTurnPromptText = shouldRunMidTurnCloudHook
+        ? typeof rawMidTurnContent === 'string'
+          ? rawMidTurnContent
+          : Array.isArray(rawMidTurnContent)
+            ? rawMidTurnContent
+                .map(b =>
+                  b &&
+                  typeof b === 'object' &&
+                  'type' in b &&
+                  b.type === 'text' &&
+                  'text' in b &&
+                  typeof b.text === 'string'
+                    ? b.text
+                    : '',
+                )
+                .join('\n')
+            : ''
+        : ''
+
+      let midTurnLifecycleCancelled = false
+      const cancelMidTurnUserMessage = (): void => {
+        if (midTurnLifecycleCancelled) return
+        midTurnLifecycleCancelled = true
+        if (userMsg.uuid) {
+          notifyCommandLifecycle(userMsg.uuid as string, 'cancelled')
         }
       }
-      // Increment prompt count for attribution tracking and save snapshot
-      // The snapshot persists promptCount so it survives compaction
-      if (feature('COMMIT_ATTRIBUTION')) {
-        setAppState(prev => ({
-          ...prev,
-          attribution: incrementPromptCount(prev.attribution, snapshot => {
-            void recordAttributionSnapshot(snapshot).catch(error => {
-              logForDebugging(`Attribution: Failed to save snapshot: ${error}`)
-            })
-          }),
-        }))
+
+      if (shouldRunMidTurnCloudHook && midTurnPromptText.trim().length > 0) {
+        midTurnHookRunner.schedule(async evalSignal => {
+          if (evalSignal.aborted || rapidFollowupDrain.endSessionRequested) {
+            cancelMidTurnUserMessage()
+            return
+          }
+          const evalAbort = createAbortController()
+          const onEvalAbort = () => {
+            if (!evalAbort.signal.aborted) evalAbort.abort()
+          }
+          evalSignal.addEventListener('abort', onEvalAbort, { once: true })
+          let outcome: MidTurnCloudHookOutcome
+          try {
+            const hookCtx = {
+              abortController: evalAbort,
+              getAppState,
+              setAppState,
+              options: {
+                commands: currentCommands,
+                tools: buildAllTools(getAppState()),
+                mainLoopModel: activeUserSpecifiedModel
+                  ? parseUserSpecifiedModel(activeUserSpecifiedModel)
+                  : getMainLoopModel(),
+                mcpClients: [
+                  ...getAppState().mcp.clients,
+                  ...sdkClients,
+                  ...dynamicMcpState.clients,
+                ],
+                isNonInteractiveSession: true,
+              },
+              messages: mutableMessages,
+              readFileState,
+            } as unknown as Parameters<typeof executeUserPromptSubmitHooks>[2]
+            outcome = await evaluateMidTurnCloudUserPromptSubmitHooks(
+              midTurnPromptText,
+              () =>
+                executeUserPromptSubmitHooks(
+                  midTurnPromptText,
+                  getAppState().toolPermissionContext.mode,
+                  hookCtx,
+                ),
+              evalSignal,
+            )
+          } catch (err) {
+            logForDebugging(
+              `[print.ts] Mid-turn cloud UserPromptSubmit hook error: ${errorMessage(err)}`,
+              { level: 'warn' },
+            )
+            outcome = {
+              kind: 'allow',
+              additionalContexts: [],
+            }
+          } finally {
+            evalSignal.removeEventListener('abort', onEvalAbort)
+          }
+          if (
+            outcome.kind === 'cancelled' ||
+            evalSignal.aborted ||
+            rapidFollowupDrain.endSessionRequested
+          ) {
+            cancelMidTurnUserMessage()
+            return
+          }
+          if (outcome.kind === 'blocked' || outcome.kind === 'stopped') {
+            output.enqueue({
+              type: 'assistant',
+              message: {
+                id: `msg_${randomUUID()}`,
+                type: 'message',
+                role: 'assistant',
+                model: '<synthetic>',
+                content: [{ type: 'text', text: outcome.message }],
+                stop_reason: null,
+                stop_sequence: null,
+                usage: EMPTY_USAGE,
+              },
+              parent_tool_use_id: null,
+              session_id: getSessionId(),
+              uuid: randomUUID(),
+            } as unknown as StdoutMessage)
+            if (userMsg.uuid) {
+              notifyCommandLifecycle(userMsg.uuid as string, 'completed')
+            }
+            return
+          }
+          if (outcome.sessionTitle) {
+            try {
+              const { saveCustomTitle } = await import(
+                'src/utils/sessionStorage.js'
+              )
+              await saveCustomTitle(
+                getSessionId() as import('crypto').UUID,
+                outcome.sessionTitle,
+                undefined,
+                'user',
+              )
+            } catch {
+              // best-effort title persistence
+            }
+          }
+          if (evalSignal.aborted || rapidFollowupDrain.endSessionRequested) {
+            cancelMidTurnUserMessage()
+            return
+          }
+          await enqueueInboundUserMessage({
+            skipSubmissionHooks: true,
+            additionalContexts: outcome.additionalContexts,
+          })
+        }, cancelMidTurnUserMessage)
+        continue
       }
-      void run()
+
+      if (midTurnHookRunner.hasPending) {
+        midTurnHookRunner.schedule(async evalSignal => {
+          if (evalSignal.aborted || rapidFollowupDrain.endSessionRequested) {
+            cancelMidTurnUserMessage()
+            return
+          }
+          await enqueueInboundUserMessage()
+        }, cancelMidTurnUserMessage)
+        continue
+      }
+
+      await enqueueInboundUserMessage()
+    }
+    if (!rapidFollowupDrain.endSessionRequested) {
+      await midTurnHookRunner.waitForIdle()
     }
     inputClosed = true
+    // Official 2.1.328 (#673) `tengu_cinder_swift`: when the input stream
+    // closes with an open/parked AskUserQuestion prompt (default ON for 3P
+    // providers or when telemetry/GrowthBook is off), abort/end the active
+    // turn instead of synthesizing a denial that lets the model keep running.
+    if (
+      running &&
+      abortController &&
+      shouldInterruptParkedQuestionOnStreamClose()
+    ) {
+      const hasPendingQuestion =
+        typeof (
+          structuredIO as {
+            hasPendingPermissionForTool?: (name: string) => boolean
+          }
+        ).hasPendingPermissionForTool === 'function'
+          ? (
+              structuredIO as unknown as {
+                hasPendingPermissionForTool: (name: string) => boolean
+              }
+            ).hasPendingPermissionForTool('AskUserQuestion')
+          : false
+      if (hasPendingQuestion) {
+        abortController.abort()
+      }
+    }
     claimFirstTurnAck?.({ cannotQueue: 'the input ended first' })
     cronScheduler?.stop()
     if (!running) {
@@ -10777,11 +11223,187 @@ function runHeadlessStreaming<TState extends HeadlessAppState = AppState>(
       setSpawnedTurnTakenCallback(undefined)
       stopAllHookHeartbeatsForSession()
       unregisterHookHeartbeatSink?.()
+      drainPrintSdkEvents()
       output.done()
     }
   })()
 
   return output
+}
+
+export type MidTurnCloudHookOutcome =
+  | { kind: 'blocked'; message: string }
+  | { kind: 'stopped'; message: string }
+  | { kind: 'cancelled' }
+  | {
+      kind: 'allow'
+      additionalContexts: string[]
+      sessionTitle?: string
+    }
+
+/**
+ * Append non-blocking `UserPromptSubmit` hook `additionalContexts` onto a
+ * mid-turn prompt payload so both mid-turn `queued_command` drains and
+ * between-turn `processUserInput` runs receive them without re-executing hooks.
+ */
+export function appendHookAdditionalContextToPromptContent<
+  T extends string | ContentBlockParam[],
+>(content: T, additionalContexts: readonly string[]): T {
+  if (additionalContexts.length === 0) return content
+  const reminder = `<system-reminder>\nUserPromptSubmit hook additional context: ${additionalContexts.join('\n')}\n</system-reminder>`
+  if (typeof content === 'string') {
+    return `${content}\n\n${reminder}` as T
+  }
+  return [...content, { type: 'text', text: reminder }] as T
+}
+
+/**
+ * Evaluate `UserPromptSubmit` hooks for a mid-turn cloud message, capturing
+ * blocking errors, `preventContinuation`, `additionalContexts`, and
+ * `sessionTitle` in a single pass.
+ *
+ * Note: per `coreSchemas.ts`, `promptSubmit.ts`, and official 2.1.328
+ * (`@300834196`), `suppressOriginalPrompt` only omits the original prompt from
+ * `decision: "block"` messages — never from allowed prompts. Cloud mid-turn
+ * block messages (`formatCloudUserPromptSubmitBlockError`) already omit the
+ * original prompt unconditionally.
+ */
+export async function evaluateMidTurnCloudUserPromptSubmitHooks(
+  _promptText: string,
+  evaluate: () => AsyncIterable<{
+    blockingError?: { blockingError: string }
+    preventContinuation?: boolean
+    stopReason?: string
+    additionalContexts?: string[]
+    sessionTitle?: string
+    suppressOriginalPrompt?: boolean
+  }>,
+  signal: AbortSignal,
+): Promise<MidTurnCloudHookOutcome> {
+  const additionalContexts: string[] = []
+  let sessionTitle: string | undefined
+  for await (const hookResult of evaluate()) {
+    if (signal.aborted) {
+      return { kind: 'cancelled' }
+    }
+    if (hookResult.sessionTitle) {
+      sessionTitle = hookResult.sessionTitle
+    }
+    if (hookResult.blockingError) {
+      return {
+        kind: 'blocked',
+        message: formatCloudUserPromptSubmitBlockError(
+          hookResult.blockingError.blockingError,
+        ),
+      }
+    }
+    if (hookResult.preventContinuation) {
+      return {
+        kind: 'stopped',
+        message: hookResult.stopReason
+          ? `Operation stopped by hook: ${hookResult.stopReason}`
+          : 'Operation stopped by hook',
+      }
+    }
+    if (
+      hookResult.additionalContexts &&
+      hookResult.additionalContexts.length > 0
+    ) {
+      additionalContexts.push(...hookResult.additionalContexts)
+    }
+  }
+  if (signal.aborted) {
+    return { kind: 'cancelled' }
+  }
+  return {
+    kind: 'allow',
+    additionalContexts,
+    sessionTitle,
+  }
+}
+
+/**
+ * Serialized non-blocking runner for mid-turn cloud `UserPromptSubmit` hook
+ * evaluation. Keeps user messages in strict arrival order while ensuring slow
+ * hooks never stall `interrupt` / `end_session` / `stop_task` control requests.
+ */
+export function createMidTurnHookRunner(): {
+  readonly hasPending: boolean
+  schedule: (
+    task: (signal: AbortSignal) => Promise<void>,
+    onCancel?: () => void,
+  ) => void
+  abortAll: () => void
+  waitForIdle: () => Promise<void>
+} {
+  let chain: Promise<void> = Promise.resolve()
+  let pendingCount = 0
+  type RunnerEntry = {
+    controller: AbortController
+    started: boolean
+    cancelled: boolean
+    onCancel?: () => void
+  }
+  const activeEntries = new Set<RunnerEntry>()
+  const fireCancelOnce = (entry: RunnerEntry): void => {
+    if (entry.cancelled) return
+    entry.cancelled = true
+    try {
+      entry.onCancel?.()
+    } catch {
+      // best-effort cancel notification
+    }
+  }
+  return {
+    get hasPending(): boolean {
+      return pendingCount > 0
+    },
+    schedule(
+      task: (signal: AbortSignal) => Promise<void>,
+      onCancel?: () => void,
+    ): void {
+      pendingCount++
+      const entry: RunnerEntry = {
+        controller: createAbortController(),
+        started: false,
+        cancelled: false,
+        onCancel,
+      }
+      activeEntries.add(entry)
+      chain = chain
+        .then(async () => {
+          if (entry.controller.signal.aborted) {
+            fireCancelOnce(entry)
+            return
+          }
+          entry.started = true
+          await task(entry.controller.signal)
+        })
+        .catch(err => {
+          logForDebugging(
+            `[print.ts] Mid-turn cloud UserPromptSubmit hook error: ${errorMessage(err)}`,
+            { level: 'warn' },
+          )
+        })
+        .finally(() => {
+          activeEntries.delete(entry)
+          pendingCount--
+        })
+    },
+    abortAll(): void {
+      for (const entry of activeEntries) {
+        if (!entry.controller.signal.aborted) {
+          entry.controller.abort()
+        }
+        if (!entry.started) {
+          fireCancelOnce(entry)
+        }
+      }
+    },
+    waitForIdle(): Promise<void> {
+      return chain
+    },
+  }
 }
 
 /**

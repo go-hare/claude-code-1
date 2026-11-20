@@ -3,7 +3,7 @@ import Fuse from 'fuse.js';
 import { basename, sep } from 'path';
 import React from 'react';
 import { getOriginalCwd, getSessionId } from '../bootstrap/state.js';
-import { useModalOrTerminalSize } from '../context/modalContext.js';
+import { useIsInsideModal, useModalOrTerminalSize } from '../context/modalContext.js';
 import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useSearchInput } from '@anthropic/ink';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
@@ -146,13 +146,40 @@ function buildLogLabel(
   return `${truncatedSummary}${sidechainSuffix}${sessionCountSuffix}${artifactSuffix}`;
 }
 
-function buildLogMetadata(log: LogOption, options?: { isChild?: boolean; showProjectPath?: boolean }): string {
-  const { isChild = false, showProjectPath = false } = options || {};
+export function buildLogMetadata(
+  log: LogOption,
+  options?: { isChild?: boolean; showProjectPath?: boolean; maxWidth?: number },
+): string {
+  const { isChild = false, showProjectPath = false, maxWidth } = options || {};
   // Match the child prefix width for proper alignment
   const childPadding = isChild ? '    ' : ''; // 4 spaces to match '  ▸ '
   const baseMetadata = formatLogMetadata(log);
   const projectSuffix = showProjectPath && log.projectPath ? ` · ${log.projectPath}` : '';
-  return childPadding + baseMetadata + projectSuffix;
+  const combined = childPadding + baseMetadata + projectSuffix;
+  // Official 2.1.327 (#461): truncate long branch/projectPath metadata to one
+  // line so wide rows never wrap and push the selected session off-screen.
+  if (maxWidth !== undefined && maxWidth > 0) {
+    return truncateToWidth(combined, maxWidth);
+  }
+  return combined;
+}
+
+/**
+ * Official 2.1.327 (#463): compute visible session count using the tighter
+ * modal header overhead (6 vs 8 lines) so `/resume` doesn't list one session
+ * fewer than the window has room for.
+ */
+export function computeLogSelectorVisibleCount(params: {
+  maxHeight: number;
+  isInsideModal: boolean;
+  showAdditionalFilterLine: boolean;
+  hasSnippets?: boolean;
+  footerLines?: number;
+}): number {
+  const { maxHeight, isInsideModal, showAdditionalFilterLine, hasSnippets = false, footerLines = 2 } = params;
+  const headerLines = (isInsideModal ? 6 : 8) + (showAdditionalFilterLine ? 1 : 0);
+  const linesPerItem = hasSnippets ? 4 : 3;
+  return Math.max(1, Math.floor((maxHeight - headerLines - footerLines) / linesPerItem));
 }
 
 export function LogSelector({
@@ -174,6 +201,7 @@ export function LogSelector({
   const terminalSize = useTerminalSize();
   // Prefer modal inner size when hosted in FullscreenLayout's bottom pane so
   // labels/footers respect the modal's horizontal padding (columns - 4).
+  const isInsideModal = useIsInsideModal();
   const modalOrTerm = useModalOrTerminalSize(terminalSize);
   const columns = forceWidth === undefined ? modalOrTerm.columns : forceWidth;
   const exitState = useExitOnCtrlCDWithKeybindings(onCancel);
@@ -482,6 +510,7 @@ export function LogSelector({
   // Calculate available width inside Pane (`xt = Le - 2 * zb`, `we = max(30, xt - 4)`)
   const innerPaneWidth = columns - 2 * PANE_PADDING_X_INLINE;
   const maxLabelWidth = Math.max(30, innerPaneWidth - 4);
+  const maxMetadataWidth = Math.max(30, innerPaneWidth - 2);
 
   // Build tree nodes for grouped view
   const treeNodes = React.useMemo<LogTreeNode[]>(() => {
@@ -501,6 +530,7 @@ export function LogSelector({
         // Single log - no children
         const metadata = buildLogMetadata(latestLog, {
           showProjectPath: showAllProjects,
+          maxWidth: maxMetadataWidth,
         });
         return {
           id: `log:${sessionId}:0`,
@@ -520,6 +550,7 @@ export function LogSelector({
         const childMetadata = buildLogMetadata(log, {
           isChild: true,
           showProjectPath: showAllProjects,
+          maxWidth: maxMetadataWidth,
         });
         return {
           id: `log:${sessionId}:${index + 1}`,
@@ -532,6 +563,7 @@ export function LogSelector({
 
       const parentMetadata = buildLogMetadata(latestLog, {
         showProjectPath: showAllProjects,
+        maxWidth: maxMetadataWidth,
       });
       return {
         id: `group:${sessionId}`,
@@ -545,7 +577,15 @@ export function LogSelector({
         children,
       };
     });
-  }, [isResumeWithRenameEnabled, displayedLogs, maxLabelWidth, showAllProjects, snippets, highlightColor]);
+  }, [
+    isResumeWithRenameEnabled,
+    displayedLogs,
+    maxLabelWidth,
+    maxMetadataWidth,
+    showAllProjects,
+    snippets,
+    highlightColor,
+  ]);
 
   // Build options for old flat list view
   const flatOptions = React.useMemo(() => {
@@ -558,21 +598,29 @@ export function LogSelector({
       const summaryWithSidechain = rawSummary + (log.isSidechain ? ' (sidechain)' : '');
       const summary = normalizeAndTruncateToWidth(summaryWithSidechain, maxLabelWidth);
 
-      const baseDescription = formatLogMetadata(log);
-      const projectSuffix = showAllProjects && log.projectPath ? ` · ${log.projectPath}` : '';
+      const metadata = buildLogMetadata(log, {
+        showProjectPath: showAllProjects,
+        maxWidth: maxMetadataWidth,
+      });
       const snippet = snippets.get(log);
       const snippetStr = snippet ? formatSnippet(snippet, highlightColor) : null;
 
       return {
         label: summary,
-        description: snippetStr
-          ? `${baseDescription}${projectSuffix}\n  ${snippetStr}`
-          : baseDescription + projectSuffix,
+        description: snippetStr ? `${metadata}\n  ${snippetStr}` : metadata,
         dimDescription: true,
         value: index.toString(),
       };
     });
-  }, [isResumeWithRenameEnabled, displayedLogs, highlightColor, maxLabelWidth, showAllProjects, snippets]);
+  }, [
+    isResumeWithRenameEnabled,
+    displayedLogs,
+    highlightColor,
+    maxLabelWidth,
+    maxMetadataWidth,
+    showAllProjects,
+    snippets,
+  ]);
 
   // Derive the focused log from focusedNode
   const focusedLog = focusedNode?.value.log ?? null;
@@ -835,9 +883,14 @@ export function LogSelector({
   const showAdditionalFilterLine =
     (filterIndicators.length > 0 || waitingForWorktreeIndicator) && viewMode !== 'search';
 
-  const headerLines = 8 + (showAdditionalFilterLine ? 1 : 0);
   const footerLines = 2;
-  const visibleCount = Math.max(1, Math.floor((maxHeight - headerLines - footerLines) / 3));
+  const visibleCount = computeLogSelectorVisibleCount({
+    maxHeight,
+    isInsideModal,
+    showAdditionalFilterLine,
+    hasSnippets: snippets.size > 0,
+    footerLines,
+  });
 
   const totalLogCount = logs.length;
   const loadMoreTrackerRef = React.useRef({ focusedIndex: -1, visible: -1, empty: 0 });
@@ -911,7 +964,7 @@ export function LogSelector({
       {showAdditionalFilterLine &&
         (filterIndicators.length > 0 ? (
           <Box flexShrink={0} paddingLeft={2}>
-            <Text dimColor>
+            <Text dimColor wrap="truncate-end">
               <Byline>{filterIndicators}</Byline>
             </Text>
           </Box>

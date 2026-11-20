@@ -66,7 +66,39 @@ type MarketplaceState = {
   autoUpdate?: boolean;
   /** densable `$u` note — load error or zip-stem updates. */
   note?: string;
+  /** Official 2.1.327 #484: Per-marketplace load error isolated to this marketplace. */
+  loadError?: string;
 };
+
+/**
+ * Official 2.1.327 #484: Removal confirmation copy explicitly warns that
+ * removing a marketplace also deletes its plugins' settings and saved data.
+ */
+export function formatMarketplaceRemoveWarning(pluginCount: number): string {
+  return `This will also uninstall ${pluginCount} ${plural(pluginCount, 'plugin')} and delete ${pluginCount === 1 ? 'its' : 'their'} settings and saved data:`;
+}
+
+/**
+ * Official 2.1.327 #484: A marketplace's details page must not display an error
+ * that belongs to a different marketplace (e.g. a list-level partial load
+ * warning when this marketplace loaded cleanly, or an action error from another
+ * marketplace).
+ */
+export function shouldShowMarketplaceDetailsError(
+  marketplace: Pick<MarketplaceState, 'name' | 'pluginCount' | 'loadError'>,
+  processError: string | null,
+  listLoadError: string | null,
+  processErrorTarget: string | null,
+): boolean {
+  if (!processError) return false;
+  if (processErrorTarget !== null) {
+    return processErrorTarget === marketplace.name;
+  }
+  if (listLoadError !== null && processError === listLoadError) {
+    return marketplace.pluginCount === undefined || Boolean(marketplace.loadError);
+  }
+  return true;
+}
 
 type InternalViewState = 'list' | 'details' | 'confirm-remove';
 
@@ -86,6 +118,8 @@ export function ManageMarketplaces({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processError, setProcessError] = useState<string | null>(null);
+  const [processErrorTarget, setProcessErrorTarget] = useState<string | null>(null);
+  const [listLoadError, setListLoadError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [progressMessage, setProgressMessage] = useState<string | null>(null);
   const [internalView, setInternalView] = useState<InternalViewState>('list');
@@ -104,6 +138,7 @@ export function ManageMarketplaces({
         // Load marketplaces with graceful degradation
         const { marketplaces, failures } = await loadMarketplacesWithGracefulDegradation(config);
 
+        const failureByName = new Map(failures.map(f => [f.name, f.error]));
         const states: MarketplaceState[] = [];
         for (const { name, config: entry, data: marketplace } of marketplaces) {
           // Get all plugins installed from this marketplace
@@ -111,6 +146,7 @@ export function ManageMarketplaces({
           const note = formatClaudeAiMarketplaceNote(
             countClaudeAiZipStemMismatches(marketplace, installedFromMarketplace),
           );
+          const loadError = failureByName.get(name);
 
           states.push({
             name,
@@ -122,6 +158,7 @@ export function ManageMarketplaces({
             pendingRemove: false,
             autoUpdate: isMarketplaceAutoUpdate(name, entry),
             ...(note !== undefined && { note }),
+            ...(loadError !== undefined && { loadError }),
           });
         }
 
@@ -138,7 +175,9 @@ export function ManageMarketplaces({
         const errorResult = formatMarketplaceLoadingErrors(failures, successCount);
         if (errorResult) {
           if (errorResult.type === 'warning') {
+            setListLoadError(errorResult.message);
             setProcessError(errorResult.message);
+            setProcessErrorTarget(null);
           } else {
             throw new Error(errorResult.message);
           }
@@ -286,11 +325,13 @@ export function ManageMarketplaces({
       const { enabled, disabled } = await loadAllPlugins();
       const allPlugins = [...enabled, ...disabled];
 
-      const { marketplaces } = await loadMarketplacesWithGracefulDegradation(config);
+      const { marketplaces, failures: reloadFailures } = await loadMarketplacesWithGracefulDegradation(config);
+      const reloadFailureByName = new Map(reloadFailures.map(f => [f.name, f.error]));
 
       const newStates: MarketplaceState[] = [];
       for (const { name, config: entry, data: marketplace } of marketplaces) {
         const installedFromMarketplace = allPlugins.filter(plugin => plugin.source.endsWith(`@${name}`));
+        const loadError = reloadFailureByName.get(name);
 
         newStates.push({
           name,
@@ -301,6 +342,7 @@ export function ManageMarketplaces({
           pendingUpdate: false,
           pendingRemove: false,
           autoUpdate: isMarketplaceAutoUpdate(name, entry),
+          ...(loadError !== undefined && { loadError }),
         });
       }
 
@@ -347,6 +389,7 @@ export function ManageMarketplaces({
     } catch (err) {
       const errorMsg = errorMessage(err);
       setProcessError(errorMsg);
+      setProcessErrorTarget(wasInDetailsView && selectedMarketplace ? selectedMarketplace.name : null);
       if (setError) {
         setError(errorMsg);
       }
@@ -395,7 +438,7 @@ export function ManageMarketplaces({
     // Only show auto-update toggle if auto-updater is not globally disabled
     if (!shouldSkipPluginAutoupdate()) {
       options.push({
-        label: marketplace.autoUpdate ? 'Disable auto-update' : 'Enable auto-update',
+        label: marketplace.autoUpdate ? 'Turn off auto-update' : 'Turn on auto-update',
         value: 'toggle-auto-update',
       });
     }
@@ -420,6 +463,7 @@ export function ManageMarketplaces({
       setSelectedMarketplace(prev => (prev ? { ...prev, autoUpdate: newAutoUpdate } : prev));
     } catch (err) {
       setProcessError(err instanceof Error ? err.message : 'Failed to update setting');
+      setProcessErrorTarget(marketplace.name);
     }
   };
 
@@ -484,6 +528,11 @@ export function ManageMarketplaces({
         } else {
           const marketplace = marketplaceStates[marketplaceIndex];
           if (marketplace) {
+            if (processErrorTarget !== null && processErrorTarget !== marketplace.name) {
+              setProcessError(null);
+              setProcessErrorTarget(null);
+            }
+            setSuccessMessage(null);
             setSelectedMarketplace(marketplace);
             setInternalView('details');
             setDetailsMenuIndex(0);
@@ -633,10 +682,7 @@ export function ManageMarketplaces({
         <Box flexDirection="column">
           {pluginCount > 0 ? (
             <Box marginTop={1}>
-              <Text color="warning">
-                This also uninstalls {pluginCount} {plural(pluginCount, 'plugin')} and deletes their saved data, options
-                and secrets:
-              </Text>
+              <Text color="warning">{formatMarketplaceRemoveWarning(pluginCount)}</Text>
             </Box>
           ) : (
             <Box marginTop={1}>
@@ -737,12 +783,22 @@ export function ManageMarketplaces({
           </Box>
         )}
 
-        {/* Error message */}
-        {!isUpdating && processError && (
-          <Box marginTop={1}>
-            <Text color="error">{processError}</Text>
-          </Box>
-        )}
+        {/* Error message — Official 2.1.327 #484: isolate per-marketplace errors */}
+        {!isUpdating &&
+          (selectedMarketplace.loadError ? (
+            <Box marginTop={1}>
+              <Text color="error">{selectedMarketplace.loadError}</Text>
+            </Box>
+          ) : shouldShowMarketplaceDetailsError(
+              selectedMarketplace,
+              processError,
+              listLoadError,
+              processErrorTarget,
+            ) ? (
+            <Box marginTop={1}>
+              <Text color="error">{processError}</Text>
+            </Box>
+          ) : null)}
 
         {/* Menu options */}
         {!isUpdating && (
@@ -765,9 +821,7 @@ export function ManageMarketplaces({
         {/* Show explanatory text at the bottom when auto-update is enabled */}
         {!isUpdating && !shouldSkipPluginAutoupdate() && selectedMarketplace.autoUpdate && (
           <Box marginTop={1}>
-            <Text dimColor>
-              Auto-update enabled. Claude Code will automatically update this marketplace and its installed plugins.
-            </Text>
+            <Text dimColor>Auto-update is on for this marketplace and its installed plugins.</Text>
           </Box>
         )}
 

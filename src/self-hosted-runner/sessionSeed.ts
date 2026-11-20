@@ -4,7 +4,14 @@
  *   F2h debug token write, D trust seed, mcp_config write, sG/Kw/f2t EKn.
  */
 import { realpathSync } from 'node:fs'
-import { lstat, mkdir, realpath, unlink, writeFile } from 'node:fs/promises'
+import {
+  lstat,
+  mkdir,
+  readFile,
+  realpath,
+  unlink,
+  writeFile,
+} from 'node:fs/promises'
 import {
   dirname,
   isAbsolute,
@@ -174,6 +181,66 @@ export async function seedPersistedWorkspaceTrust(opts: {
   opts.onDebug(
     `[runner:session] Seeded persisted trust for ${Object.keys(projects).length} path(s) in ${outPath}`,
   )
+}
+
+/**
+ * Official 2.1.328 (#636) — when a session starts under `--trust-workspace false`
+ * with an existing damaged `.claude.json` (corrupt JSON / non-object), repair
+ * it back to clean defaults with MCP servers disabled (`disabledMcpServers`,
+ * empty `mcpServers`) so later starts do not fail repeatedly.
+ */
+export async function ensureReadableSessionClaudeJson(opts: {
+  configDir: string
+  trustWorkspace: boolean
+  disabledMcpServers?: readonly string[]
+  configSuffix?: string
+  onStatus: (msg: string) => void
+  fsTimeoutMs?: number
+}): Promise<{ repaired: boolean; path: string }> {
+  const suffix = opts.configSuffix ?? claudeConfigFileSuffix()
+  const outPath = join(opts.configDir, `.claude${suffix}.json`)
+  let raw: string | undefined
+  try {
+    raw = await withTimeoutMs(
+      readFile(outPath, 'utf-8'),
+      opts.fsTimeoutMs ?? SEED_FS_OP_TIMEOUT_MS,
+      `readFile ${outPath}`,
+    )
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      return { repaired: false, path: outPath }
+    }
+    throw err
+  }
+  let valid = false
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    valid =
+      parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+  } catch {
+    valid = false
+  }
+  if (valid) return { repaired: false, path: outPath }
+
+  // Damaged .claude.json — under `--trust-workspace false`, rewrite clean
+  // defaults with MCP servers turned off so the session can start cleanly.
+  const disabled = opts.disabledMcpServers
+    ? sanitizeDisabledMcpServers([...opts.disabledMcpServers])
+    : []
+  const cleanDefaults: Record<string, unknown> = {
+    mcpServers: {},
+    ...(disabled.length > 0 ? { disabledMcpServers: disabled } : {}),
+  }
+  await withTimeoutMs(
+    writeFile(outPath, JSON.stringify(cleanDefaults, null, 2), { mode: 0o600 }),
+    opts.fsTimeoutMs ?? SEED_FS_OP_TIMEOUT_MS,
+    `writeFile ${outPath}`,
+  )
+  opts.onStatus(
+    `[runner:warn] Damaged ${outPath} replaced with defaults (MCP servers disabled${opts.trustWorkspace ? '' : ', --trust-workspace false'})`,
+  )
+  return { repaired: true, path: outPath }
 }
 
 /**

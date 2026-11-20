@@ -68,6 +68,7 @@ import {
 import { type SettingsJson, SettingsSchema } from './types.js'
 import {
   applyHostManagedPolicyModelPrecedence,
+  applyHostPolicyOverlay,
   buildHostModelOverlay,
   extractParentManagedOffSwitches,
 } from './hostModelOverlay.js'
@@ -153,6 +154,9 @@ function finishPolicySettingsForHost(
       ? ({ ...resolved, ...offSwitches } as SettingsJson)
       : ({ ...offSwitches } as SettingsJson)
   }
+  // Official 2.1.328 (#546): apply embedding host managed-settings overlay
+  // (including policy@builtin allowManagedModsOnly) while admin settings win.
+  resolved = applyHostPolicyOverlay(resolved, parentSettings)
   return resolved
 }
 

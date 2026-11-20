@@ -33,14 +33,68 @@ const TASK_TYPE_LABELS: Record<string, string> = {
   in_process_teammate: 'teammate',
   dream: 'dream',
   auto_mode_scan: 'auto-mode scan',
+  local_memory_import: 'memory import',
+  post_turn_memory: 'memory save',
   remote_agent: 'cloud session',
 }
 
-function isIdleTeammate(task: TaskState): boolean {
+function isTerminalTaskStatus(status: unknown): boolean {
   return (
-    task.type === 'in_process_teammate' &&
-    'isIdle' in task &&
-    (task as { isIdle?: boolean }).isIdle === true
+    status === 'completed' ||
+    status === 'failed' ||
+    status === 'killed' ||
+    status === 'cancelled' ||
+    status === 'stopped'
+  )
+}
+
+function isTaskAborted(task: TaskState): boolean {
+  switch (task.type) {
+    case 'local_agent':
+      return (
+        'abortController' in task &&
+        (task as { abortController?: AbortController }).abortController?.signal
+          .aborted === true
+      )
+    case 'in_process_teammate':
+      return (
+        'currentWorkAbortController' in task &&
+        (task as { currentWorkAbortController?: AbortController })
+          .currentWorkAbortController?.signal.aborted === true
+      )
+    case 'local_bash':
+      return (
+        'shellCommand' in task &&
+        (task as { shellCommand?: { status?: string } }).shellCommand
+          ?.status === 'killed'
+      )
+    default:
+      return false
+  }
+}
+
+function isMonitorTask(task: TaskState): boolean {
+  return (
+    (task.type === 'local_bash' &&
+      'kind' in task &&
+      (task as { kind?: string }).kind === 'monitor') ||
+    task.type === 'monitor_mcp' ||
+    ((task as { type?: string }).type === 'monitor_ws' &&
+      !isAmbientMonitor(task))
+  )
+}
+
+function isIdleTeammate(task: TaskState): boolean {
+  if (task.type !== 'in_process_teammate') return false
+  const t = task as {
+    isIdle?: boolean
+    awaitingPlanApproval?: boolean
+    pendingUserMessages?: unknown[]
+  }
+  return (
+    t.isIdle === true &&
+    !t.awaitingPlanApproval &&
+    !(Array.isArray(t.pendingUserMessages) && t.pendingUserMessages.length > 0)
   )
 }
 
@@ -87,30 +141,55 @@ export function listScheduledTaskItems(
 }
 
 /**
- * densable Jeh(tasks) — items shown by Lbs exit background-work prompt.
- * Used by densable wZt (Ctrl+C / handleExit).
+ * Official 2.1.328 (#620) `sHr(tasks, { backgroundOnly, includeDream })` —
+ * unified background work list used by both Ctrl+D (`backgroundOnly: true`)
+ * and `/exit` (`backgroundOnly: false`), skipping terminal/stopped/aborted
+ * tasks (including stopped workflows).
  */
 export function listExitBackgroundItems(
   tasks: Record<string, TaskState> | null | undefined,
-  opts: { includeDream?: boolean } = {},
+  opts: { includeDream?: boolean; backgroundOnly?: boolean } = {},
 ): ExitBackgroundWorkItem[] {
   const includeDream = opts.includeDream === true
+  const backgroundOnly = opts.backgroundOnly ?? true
+  const taskList = Object.values(tasks ?? {})
+  const deadAgentIds = new Set<string>()
+  for (const task of taskList) {
+    if (
+      task.type === 'local_agent' &&
+      'agentType' in task &&
+      (task as { agentType?: string }).agentType !== 'main-session' &&
+      (isTaskAborted(task) || task.status === 'killed')
+    ) {
+      const agentId =
+        (task as { agentId?: string; id?: string }).agentId ?? task.id
+      if (agentId) deadAgentIds.add(agentId)
+    }
+  }
   const items: ExitBackgroundWorkItem[] = []
-  for (const task of Object.values(tasks ?? {})) {
-    if (!isBackgroundTask(task)) continue
+  for (const task of taskList) {
+    if (isTerminalTaskStatus(task.status)) continue
+    if (backgroundOnly && !isBackgroundTask(task)) continue
+    if (isTaskAborted(task)) continue
     if (task.type === 'remote_agent') continue
     if (!includeDream && task.type === 'dream') continue
+    if ((task as { type?: string }).type === 'post_turn_memory') continue
     if (isAmbientMonitor(task)) continue
     if (isIdleTeammate(task)) continue
-    // #1593: Skip tasks marked stopsOnExit (e.g. plugin monitors).
-    if (
-      task.type === 'local_bash' &&
-      'stopsOnExit' in task &&
-      (task as { stopsOnExit?: boolean }).stopsOnExit === true
-    ) {
-      continue
+    if (task.type === 'local_bash') {
+      const agentId = (task as { agentId?: string }).agentId
+      if (agentId && deadAgentIds.has(agentId)) continue
+      // #1593: Skip tasks marked stopsOnExit (e.g. plugin monitors).
+      if (
+        'stopsOnExit' in task &&
+        (task as { stopsOnExit?: boolean }).stopsOnExit === true
+      ) {
+        continue
+      }
     }
-    const label = TASK_TYPE_LABELS[task.type] ?? task.type
+    const label = isMonitorTask(task)
+      ? 'monitor'
+      : (TASK_TYPE_LABELS[task.type] ?? task.type)
     const description =
       'description' in task && typeof task.description === 'string'
         ? task.description
@@ -132,22 +211,32 @@ const ZEH_KIND_LABELS: Record<string, string> = {
 
 export type ListExitInFlightOpts = {
   /**
-   * When provided, rebuild densable GJr snapshot live (foreground /exit —
-   * tip JFa only stamps shs inside bg job sessions).
+   * When provided, uses the unified 2.1.328 `sHr` task listing (`backgroundOnly: false`)
+   * so `/exit` and Ctrl+D describe running work identically and ignore stopped workflows.
    */
   tasks?: Record<string, TaskState> | null
   todos?: TodoItem[] | null
   /** Override registry / live build (tests). */
   snapshot?: BgInFlightSnapshot | null
+  /** Optional background-only filter (defaults to false for `/exit`). */
+  backgroundOnly?: boolean
 }
 
 /**
- * densable Zeh() — Lbs items from GJr inFlightSnapshot (fan items), not Jeh(tasks).
- * Gold /exit wO0 uses Zeh; skip todo / doneAt; optional auto_mode_scan row; + XFl.
+ * Official 2.1.328 (#620): when called with live `tasks` (as `/exit` does),
+ * delegates to the unified `listExitBackgroundItems` (`sHr`, `backgroundOnly: false`)
+ * so `/exit` and Ctrl+D describe running work identically and stopped workflows
+ * are never reported. Keeps snapshot-based fallback for explicit snapshot callers.
  */
 export function listExitInFlightItems(
   opts: ListExitInFlightOpts = {},
 ): ExitBackgroundWorkItem[] {
+  if (opts.snapshot === undefined && opts.tasks !== undefined) {
+    return listExitBackgroundItems(opts.tasks, {
+      backgroundOnly: opts.backgroundOnly ?? false,
+    })
+  }
+
   const snap =
     opts.snapshot ??
     (opts.tasks !== undefined

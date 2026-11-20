@@ -174,11 +174,18 @@ export function useTextInput({
   const liveOffsetRef = externalLiveOffsetRef ?? ownedLiveOffsetRef
   const prevPropValueRef = useRef(originalValue)
   const prevPropOffsetRef = useRef(offset)
+  // Official 2.1.327 (#459): preserve preferred visual column across consecutive
+  // up/down moves over shorter or blank lines; reset on horizontal moves/edits.
+  const preferredColumnRef = useRef<number | undefined>(undefined)
   if (prevPropValueRef.current !== originalValue) {
     prevPropValueRef.current = originalValue
     liveValueRef.current = originalValue
+    preferredColumnRef.current = undefined
   }
   if (prevPropOffsetRef.current !== offset) {
+    if (offset !== liveOffsetRef.current) {
+      preferredColumnRef.current = undefined
+    }
     prevPropOffsetRef.current = offset
     liveOffsetRef.current = offset
   }
@@ -481,6 +488,7 @@ export function useTextInput({
 
   function upOrHistoryUp() {
     if (disableCursorMovementForUpDownKeys) {
+      preferredColumnRef.current = undefined
       onHistoryUp?.()
       return cursor
     }
@@ -490,12 +498,16 @@ export function useTextInput({
       cursor.getPosition().line <=
         cursor.measuredText.getPositionFromOffset(pillText.length).line
     ) {
+      preferredColumnRef.current = undefined
       onHistoryUp()
       return cursor
     }
+    const targetColumn =
+      preferredColumnRef.current ?? cursor.getPosition().column
     // Try to move by wrapped lines first
-    const cursorUp = cursor.up()
+    const cursorUp = cursor.up(targetColumn)
     if (!cursorUp.equals(cursor)) {
+      preferredColumnRef.current = cursorUp.stickyColumn ?? targetColumn
       return cursorUp
     }
 
@@ -504,22 +516,28 @@ export function useTextInput({
     if (multiline) {
       const cursorUpLogical = cursor.upLogicalLine()
       if (!cursorUpLogical.equals(cursor)) {
+        preferredColumnRef.current = targetColumn
         return cursorUpLogical
       }
     }
 
     // Can't move up at all - trigger history navigation
+    preferredColumnRef.current = undefined
     onHistoryUp?.()
     return cursor
   }
   function downOrHistoryDown() {
     if (disableCursorMovementForUpDownKeys) {
+      preferredColumnRef.current = undefined
       onHistoryDown?.()
       return cursor
     }
+    const targetColumn =
+      preferredColumnRef.current ?? cursor.getPosition().column
     // Try to move by wrapped lines first
-    const cursorDown = cursor.down()
+    const cursorDown = cursor.down(targetColumn)
     if (!cursorDown.equals(cursor)) {
+      preferredColumnRef.current = cursorDown.stickyColumn ?? targetColumn
       return cursorDown
     }
 
@@ -528,11 +546,13 @@ export function useTextInput({
     if (multiline) {
       const cursorDownLogical = cursor.downLogicalLine()
       if (!cursorDownLogical.equals(cursor)) {
+        preferredColumnRef.current = targetColumn
         return cursorDownLogical
       }
     }
 
     // Can't move down at all - trigger history navigation
+    preferredColumnRef.current = undefined
     onHistoryDown?.()
     return cursor
   }
@@ -686,6 +706,23 @@ export function useTextInput({
     return (key.ctrl || key.meta) && input === 'y'
   }
 
+  // Official 2.1.327 (#459): vertical movement keys preserve preferredColumnRef;
+  // all horizontal movements and edits reset it.
+  function isVerticalMoveKey(key: Key, input: string): boolean {
+    if (
+      (key.upArrow || key.downArrow) &&
+      !key.shift &&
+      !key.ctrl &&
+      !key.meta &&
+      !key.super
+    ) {
+      return true
+    }
+    return (
+      key.ctrl && !key.meta && !key.super && (input === 'p' || input === 'n')
+    )
+  }
+
   function onInput(input: string, key: Key, _event?: InputEvent): void {
     // Note: Image paste shortcut (chat:imagePaste) is handled via useKeybindings in PromptInput
 
@@ -739,6 +776,7 @@ export function useTextInput({
       if (!cursor.equals(currentCursor)) {
         commitLiveCursor(currentCursor)
       }
+      preferredColumnRef.current = undefined
       resetKillAccumulation()
       resetYankState()
       return
@@ -752,6 +790,11 @@ export function useTextInput({
     // Reset yank state for non-yank keys (breaks yank-pop chain)
     if (!isYankKey(key, filteredInput)) {
       resetYankState()
+    }
+
+    // Reset preferred column on any horizontal movement or edit
+    if (!isVerticalMoveKey(key, filteredInput)) {
+      preferredColumnRef.current = undefined
     }
 
     const nextCursor = mapKey(key)(filteredInput)

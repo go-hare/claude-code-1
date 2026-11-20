@@ -58,6 +58,33 @@ let cachedAgentBundle: {
   agent: HttpsAgent | undefined
 } | null = null
 
+type MtlsHttpsAgentFactory = (options: https.AgentOptions) => HttpsAgent
+let mtlsErrorClosingAgentFactory: MtlsHttpsAgentFactory | null = null
+let mtlsClosesAfterServerError = false
+
+/**
+ * Wire `KeepAliveErrorClosingAgent` construction into `getMTLSAgent()` when
+ * `enableClosesAfterServerError()` is active without introducing an ESM cycle
+ * between `mtls.ts` and `proxy.ts`.
+ */
+export function setMtlsErrorClosingAgentFactory(
+  factory: MtlsHttpsAgentFactory | null,
+  enabled: boolean,
+): void {
+  mtlsErrorClosingAgentFactory = factory
+  mtlsClosesAfterServerError = enabled
+  if (cachedAgentBundle?.agent) {
+    cachedAgentBundle.agent.maxFreeSockets = 0
+    for (const sockets of Object.values(cachedAgentBundle.agent.freeSockets)) {
+      for (const sock of [...(sockets ?? [])]) {
+        sock.destroy()
+      }
+    }
+  }
+  getMTLSAgent.cache.clear?.()
+  cachedAgentBundle = null
+}
+
 /**
  * Official densable — detect whether cert/key file cache entries changed.
  */
@@ -510,7 +537,10 @@ export const getMTLSAgent = memoize((): HttpsAgent | undefined => {
   }
 
   logForDebugging('mTLS: Creating HTTPS agent with custom certificates')
-  const agent = new HttpsAgent(agentOptions)
+  const agent =
+    mtlsClosesAfterServerError && mtlsErrorClosingAgentFactory
+      ? mtlsErrorClosingAgentFactory(agentOptions)
+      : new HttpsAgent(agentOptions)
   cachedAgentBundle = { config: mtlsConfig, ca: caCerts, agent }
   return agent
 })

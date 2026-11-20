@@ -21,17 +21,20 @@ import {
 } from '../FullscreenLayout.js'
 import {
   AccessibilityContext,
+  isInSigcontResumeGrace,
   isMultiCharTextEvent,
   type InputEvent,
   type KeyboardEvent,
   type PasteEvent,
   useInput,
+  useInputNow,
 } from '@anthropic/ink'
 import {
   normalizeFullWidthDigits,
   normalizeFullWidthSpace,
 } from '../../utils/stringUtils.js'
 import type { OptionWithDescription } from './select.js'
+import { isWithinSigcontGraceWindow } from './use-select-input.js'
 import { useSelectNavigation } from './use-select-navigation.js'
 
 export type UseMultiSelectStateProps<T> = {
@@ -248,6 +251,7 @@ export function useMultiSelectState<T>({
   const leftoverArrowNav = leftoverG5Dze(arrowNav)
   const leftoverRaceRef = useRef(false)
   const leftoverStashRef = useRef<T[] | null>(null)
+  const inputClock = useInputNow()
   const leftoverInputIndexRef = useRef<number | null>(null)
   const leftoverVmnRawRef = useRef('')
   const [leftoverVmnTyped, setLeftoverVmnTyped] = useState('')
@@ -425,6 +429,10 @@ export function useMultiSelectState<T>({
         onCancel()
         return
       }
+      // Official 2.1.327 (#520): ignore non-Esc answers briefly after SIGCONT.
+      if (isWithinSigcontGraceWindow() || isInSigcontResumeGrace(inputClock)) {
+        return
+      }
       if (event.key === 'return' && event.name === 'return') {
         event.preventDefault()
         if (leftoverRaceRef.current) {
@@ -546,6 +554,7 @@ export function useMultiSelectState<T>({
     },
     [
       isDisabled,
+      inputClock,
       leftoverArrowNav,
       leftoverVmnArrowIndex,
       leftoverVmnCommit,
@@ -719,6 +728,12 @@ export function useMultiSelectState<T>({
 
       // densable VMn typed buffer — Enter submits leftoverVmnParseOptions.
       if (key.return && leftoverVmnTyped.length > 0) {
+        if (
+          isWithinSigcontGraceWindow() ||
+          isInSigcontResumeGrace(inputClock)
+        ) {
+          return
+        }
         if (leftoverRaceRef.current) {
           leftoverG5Refuse(refuseInput)
           leftoverRaceRef.current = false
@@ -733,6 +748,12 @@ export function useMultiSelectState<T>({
 
       // Handle Enter or Space for selection/submit
       if (key.return || normalizeFullWidthSpace(input) === ' ') {
+        if (
+          isWithinSigcontGraceWindow() ||
+          isInSigcontResumeGrace(inputClock)
+        ) {
+          return
+        }
         if (leftoverG5Refuse(refuseInput)) return
         // Ctrl+Enter from input field submits
         if (key.ctrl && key.return && isInInput && onSubmit) {
@@ -762,6 +783,12 @@ export function useMultiSelectState<T>({
 
       // densable VMn `^[0-9, ]$` buffer (visual Space still toggles above).
       if (!hideIndexes && leftoverVmnToken(normalizedInput)) {
+        if (
+          isWithinSigcontGraceWindow() ||
+          isInSigcontResumeGrace(inputClock)
+        ) {
+          return
+        }
         if (leftoverRaceRef.current) {
           leftoverG5Refuse(refuseInput)
           return

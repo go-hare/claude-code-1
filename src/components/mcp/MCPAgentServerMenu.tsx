@@ -1,13 +1,13 @@
 import figures from 'figures';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { CommandResultDisplay } from '../../commands.js';
-import { Box, color, Link, Text, useTheme } from '@anthropic/ink';
+import { Box, Byline, color, Dialog, KeyboardShortcutHint, Link, Text, useTheme } from '@anthropic/ink';
+import { isScreenReaderModeEnabled } from '../../utils/screenReaderGate.js';
 import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import { AuthenticationCancelledError, performMCPOAuthFlow } from '../../services/mcp/auth.js';
 import { capitalize } from '../../utils/stringUtils.js';
 import { ConfigurableShortcutHint } from '../ConfigurableShortcutHint.js';
 import { Select } from '../CustomSelect/index.js';
-import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
 import { Spinner } from '../Spinner.js';
 import type { AgentMcpServerInfo } from './types.js';
 
@@ -124,7 +124,7 @@ export function MCPAgentServerMenu({ agentServer, onCancel, onComplete }: Props)
   return (
     <Dialog
       title={`${capitalizedServerName} MCP Server`}
-      subtitle="agent-only"
+      subtitle="agent-only MCP server"
       onCancel={onCancel}
       inputGuide={exitState =>
         exitState.pending ? (
@@ -193,6 +193,8 @@ export function MCPAgentServerMenu({ agentServer, onCancel, onComplete }: Props)
       <Box>
         <Select
           options={menuOptions}
+          hideIndexes={!isScreenReaderModeEnabled()}
+          disablePrintableKeybindings={!isScreenReaderModeEnabled()}
           onChange={async value => {
             switch (value) {
               case 'auth':

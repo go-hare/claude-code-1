@@ -1,15 +1,17 @@
 import { useCallback, useState } from 'react';
+import { Select } from '../../components/CustomSelect/index.js';
 import TextInput from '../../components/TextInput.js';
 import { useTerminalSize } from '../../hooks/useTerminalSize.js';
-import { Box, color, Text, useTheme } from '@anthropic/ink';
-import { useKeybindings } from '../../keybindings/useKeybinding.js';
+import { useKeybinding } from '../../keybindings/useKeybinding.js';
+import { Box, Text } from '@anthropic/ink';
 
 interface CheckExistingSecretStepProps {
   useExistingSecret: boolean;
   secretName: string;
   onToggleUseExistingSecret: (useExisting: boolean) => void;
   onSecretNameChange: (value: string) => void;
-  onSubmit: () => void;
+  onSubmit: (override?: { useExistingSecret: boolean; secretName?: string }) => void;
+  onCancel?: () => void;
 }
 
 export function CheckExistingSecretStep({
@@ -18,79 +20,86 @@ export function CheckExistingSecretStep({
   onToggleUseExistingSecret,
   onSecretNameChange,
   onSubmit,
+  onCancel,
 }: CheckExistingSecretStepProps) {
-  const [cursorOffset, setCursorOffset] = useState(0);
+  const [cursorOffset, setCursorOffset] = useState(secretName.length);
+  const [showEmptyError, setShowEmptyError] = useState(false);
+  const [editingNewName, setEditingNewName] = useState(!useExistingSecret);
   const terminalSize = useTerminalSize();
-  const [theme] = useTheme();
+  const textInputColumns = Math.max(20, terminalSize.columns - 6);
 
-  // When the text input is visible, omit confirm:yes so bare 'y' passes
-  // through to the input instead of submitting. TextInput's onSubmit handles
-  // Enter. Keep the Confirmation context (not Settings) to avoid j/k bindings.
-  const handlePrevious = useCallback(() => onToggleUseExistingSecret(true), [onToggleUseExistingSecret]);
-  const handleNext = useCallback(() => onToggleUseExistingSecret(false), [onToggleUseExistingSecret]);
-  useKeybindings(
-    {
-      'confirm:previous': handlePrevious,
-      'confirm:next': handleNext,
-      'confirm:yes': onSubmit,
-    },
-    { context: 'Confirmation', isActive: useExistingSecret },
-  );
-  useKeybindings(
-    {
-      'confirm:previous': handlePrevious,
-      'confirm:next': handleNext,
-    },
-    { context: 'Confirmation', isActive: !useExistingSecret },
-  );
+  const handleBackOrCancel = useCallback(() => {
+    setEditingNewName(false);
+    onToggleUseExistingSecret(true);
+  }, [onToggleUseExistingSecret]);
+
+  useKeybinding('confirm:no', handleBackOrCancel, {
+    context: 'Settings',
+    isActive: editingNewName,
+  });
 
   return (
-    <>
-      <Box flexDirection="column" borderStyle="round" paddingX={1}>
-        <Box flexDirection="column" marginBottom={1}>
-          <Text bold>Install GitHub App</Text>
-          <Text dimColor>Setup API key secret</Text>
-        </Box>
-        <Box marginBottom={1}>
-          <Text color="warning">ANTHROPIC_API_KEY already exists in repository secrets!</Text>
-        </Box>
-        <Box marginBottom={1}>
-          <Text>Would you like to:</Text>
-        </Box>
-        <Box marginBottom={1}>
-          <Text>
-            {useExistingSecret ? color('success', theme)('> ') : '  '}
-            Use the existing API key
-          </Text>
-        </Box>
-        <Box marginBottom={1}>
-          <Text>
-            {!useExistingSecret ? color('success', theme)('> ') : '  '}
-            Create a new secret with a different name
-          </Text>
-        </Box>
-        {!useExistingSecret && (
-          <>
-            <Box marginBottom={1}>
-              <Text>Enter new secret name (alphanumeric with underscores):</Text>
-            </Box>
-            <TextInput
-              value={secretName}
-              onChange={onSecretNameChange}
-              onSubmit={onSubmit}
-              focus={true}
-              placeholder="e.g., CLAUDE_API_KEY"
-              columns={terminalSize.columns}
-              cursorOffset={cursorOffset}
-              onChangeCursorOffset={setCursorOffset}
-              showCursor={true}
-            />
-          </>
-        )}
+    <Box flexDirection="column" borderStyle="round" paddingX={1} gap={1}>
+      <Box flexDirection="column">
+        <Text bold>Install GitHub App</Text>
+        <Text dimColor>Existing secret</Text>
       </Box>
-      <Box marginLeft={3}>
-        <Text dimColor>↑/↓ to select · Enter to continue</Text>
-      </Box>
-    </>
+      <Text color="warning">ANTHROPIC_API_KEY already exists in repository secrets</Text>
+      {!editingNewName ? (
+        <Select<'existing' | 'new'>
+          options={[
+            { label: 'Use the existing API key', value: 'existing' },
+            { label: 'New secret name', value: 'new' },
+          ]}
+          defaultFocusValue={useExistingSecret ? 'existing' : 'new'}
+          hideIndexes
+          onFocus={value => {
+            onToggleUseExistingSecret(value === 'existing');
+            setShowEmptyError(false);
+          }}
+          onChange={value => {
+            if (value === 'existing') {
+              onToggleUseExistingSecret(true);
+              onSubmit({ useExistingSecret: true, secretName: 'ANTHROPIC_API_KEY' });
+            } else {
+              onToggleUseExistingSecret(false);
+              setCursorOffset(0);
+              setEditingNewName(true);
+            }
+          }}
+          onCancel={onCancel}
+        />
+      ) : (
+        <Box flexDirection="column" gap={1}>
+          <TextInput
+            value={secretName}
+            onChange={value => {
+              setShowEmptyError(false);
+              onSecretNameChange(value);
+            }}
+            onSubmit={submittedValue => {
+              const value = submittedValue ?? secretName;
+              if (!value.trim()) {
+                setShowEmptyError(true);
+                return;
+              }
+              onSubmit({ useExistingSecret: false, secretName: value });
+            }}
+            onExit={handleBackOrCancel}
+            focus={true}
+            placeholder="CLAUDE_API_KEY"
+            columns={textInputColumns}
+            cursorOffset={Math.min(cursorOffset, secretName.length)}
+            onChangeCursorOffset={setCursorOffset}
+            showCursor={true}
+          />
+          {showEmptyError ? (
+            <Text color="error">Enter a secret name to continue</Text>
+          ) : (
+            <Text dimColor>A name takes letters, numbers and underscores</Text>
+          )}
+        </Box>
+      )}
+    </Box>
   );
 }

@@ -764,6 +764,22 @@ export default class Ink {
   private mainScreenBehindAlt: { viewport: { width: number; height: number }; erase: string } | undefined;
   private isFinishingWrites = false;
   private renderAllocFailures = 0;
+  private isRedrawingAtOnce = false;
+  private unwritten:
+    | {
+        tries: number;
+        isLost: boolean;
+        wasContaminated: boolean;
+        error: unknown;
+        shown: {
+          nativeCursorVisible: boolean;
+          displayCursor: { x: number; y: number; emittedRows: number } | null;
+          frontFrame: Frame;
+          backFrame: Frame;
+          mainScreenBehindAlt: { viewport: { width: number; height: number }; erase: string } | undefined;
+        };
+      }
+    | undefined = undefined;
   private readonly logger: Logger;
 
   constructor(private readonly options: Options) {
@@ -916,7 +932,14 @@ export default class Ink {
     // resetFrames+imagesStale+scheduleRender (App resume() reasserts DEC);
     // else reenter. Main: clear mainScreenBehindAlt, reset frames, imagesStale,
     // nativeCursorVisible=accessibilityMode. No analog mouse write on SIGCONT.
-    process.kill(process.pid, 'SIGWINCH');
+    // Official 2.1.327 (#411): in restricted sandboxes process.kill can throw
+    // EPERM; fall back to emitting SIGWINCH directly on the process.
+    try {
+      process.kill(process.pid, 'SIGWINCH');
+    } catch (err) {
+      this.logger.debug(`Can't send SIGWINCH on resume, emitting it: ${String(err)}`, { level: 'warn' });
+      setImmediate(() => process.emit('SIGWINCH'));
+    }
     if (this.altScreenActive) {
       if (this.modes.isSuspended) {
         this.resetFramesForAltScreen();
@@ -1193,7 +1216,11 @@ export default class Ink {
   }
 
   /**
-   * densable relayoutFromScratch — clearLayoutCacheRecursive then re-layout.
+   * densable relayoutFromScratch + Official 2.1.327 (#404/#557)
+   * `replaceLayoutNodes`: clearLayoutCacheRecursive and re-layout; if the
+   * Yoga tree itself is damaged, rebuild fresh Yoga nodes for the DOM tree
+   * and invalidate the previous frame so the screen recovers instead of
+   * freezing.
    */
   private relayoutFromScratch(
     yogaNode: NonNullable<typeof this.rootNode.yogaNode>,
@@ -1201,6 +1228,15 @@ export default class Ink {
     try {
       yogaNode.clearLayoutCacheRecursive?.();
       this.calculateYogaLayout(yogaNode);
+      return { recovered: true };
+    } catch {
+      // Fall through to full Yoga node replacement below.
+    }
+    try {
+      const rebuilt = dom.rebuildYogaSubtree(this.rootNode, Yoga.Config.create());
+      this.calculateYogaLayout(rebuilt.rootYoga);
+      rebuilt.commit();
+      this.prevFrameContaminated = true;
       return { recovered: true };
     } catch (retryFault) {
       try {
@@ -1467,10 +1503,90 @@ export default class Ink {
     }
   }
 
+  private static readonly MAX_UNWRITTEN_RETRIES = 3;
+
+  /**
+   * Official 2.1.327 (#403) `beginFrame`: snapshot displayed state before
+   * painting so a failed frame (e.g. transient OOM / RangeError) can be rolled
+   * back and retried cleanly instead of leaving the screen blank or frozen.
+   */
+  private beginFrame(): void {
+    if (!this.options.stdout.isTTY) return;
+    this.unwritten = {
+      tries: 0,
+      isLost: false,
+      wasContaminated: this.prevFrameContaminated,
+      ...this.unwritten,
+      error: undefined,
+      shown: {
+        nativeCursorVisible: this.nativeCursorVisible,
+        displayCursor: this.displayCursor,
+        frontFrame: this.frontFrame,
+        backFrame: this.backFrame,
+        mainScreenBehindAlt: this.mainScreenBehindAlt,
+      },
+    };
+  }
+
+  private takeBackUnwrittenFrame(snapshot: NonNullable<typeof this.unwritten>): void {
+    snapshot.isLost = true;
+    this.nativeCursorVisible = snapshot.shown.nativeCursorVisible;
+    this.displayCursor = snapshot.shown.displayCursor;
+    this.frontFrame = snapshot.shown.frontFrame;
+    this.backFrame = snapshot.shown.backFrame;
+    this.mainScreenBehindAlt = snapshot.shown.mainScreenBehindAlt;
+    this.log.reset();
+  }
+
   onRender() {
     if (this.isUnmounted || this.isHandedOff) {
       return;
     }
+    try {
+      this.drawFrame();
+      if (!this.unwritten?.isLost) {
+        this.unwritten = undefined;
+      }
+    } catch (err) {
+      const snapshot = this.unwritten;
+      if (!snapshot || snapshot.error === err) {
+        throw err;
+      }
+      snapshot.error = err;
+      const canRetryAtOnce = !snapshot.isLost && !this.isRedrawingAtOnce;
+      this.takeBackUnwrittenFrame(snapshot);
+      if (err instanceof RangeError) {
+        this.handleRenderAllocationFailure('onRender', err);
+      }
+      if (!canRetryAtOnce && ++snapshot.tries > Ink.MAX_UNWRITTEN_RETRIES) {
+        this.prevFrameContaminated = snapshot.wasContaminated;
+        if (err instanceof RangeError) {
+          this.unwritten = undefined;
+          return;
+        }
+        throw err;
+      }
+      this.prevFrameContaminated = true;
+      this.imagesStale = true;
+      if (canRetryAtOnce) {
+        this.isRedrawingAtOnce = true;
+        try {
+          this.onRender();
+        } finally {
+          this.isRedrawingAtOnce = false;
+        }
+      }
+      if (this.unwritten?.isLost && !this.isRedrawingAtOnce) {
+        this.scheduleRender();
+      }
+    }
+  }
+
+  private drawFrame() {
+    if (this.isUnmounted || this.isHandedOff) {
+      return;
+    }
+    this.beginFrame();
     // densable: if(this.hasRendered&&!this.isExiting)this.ensureInteractive();
     // this.hasRendered=!0
     if (this.hasRendered && !this.isExiting) {
@@ -1515,6 +1631,7 @@ export default class Ink {
       this.writeKeptForNextFrame();
       this.leftAltScreenSinceFrame = false;
       this.onRenderScreenReader();
+      this.unwritten = undefined;
       return;
     }
 
@@ -1563,7 +1680,7 @@ export default class Ink {
         });
         return frame;
       } catch (err) {
-        if (err instanceof RangeError) {
+        if (err instanceof RangeError && !this.unwritten) {
           this.handleRenderAllocationFailure('renderer', err);
           return undefined;
         }
@@ -1599,6 +1716,7 @@ export default class Ink {
           durationMs: performance.now() - renderStart,
           flickers: [],
         });
+        this.unwritten = undefined;
         return;
       }
     }
@@ -1816,7 +1934,7 @@ export default class Ink {
     try {
       diff = this.log.render(prevFrame, frame, this.altScreenActive, this.decstbmSafe());
     } catch (err) {
-      if (err instanceof RangeError) {
+      if (err instanceof RangeError && !this.unwritten) {
         this.handleRenderAllocationFailure('diff', err);
         return;
       }
@@ -1996,7 +2114,8 @@ export default class Ink {
     const tmuxHost = Jk();
     const tmuxPane = tmuxHost.tmuxPane;
     const isTmux = Boolean(process.env.TMUX);
-    this.terminalImages.isTmuxPassthrough = Boolean(tmuxPane && tmuxPane.passthrough !== 'off');
+    const isTmuxPassthrough = Boolean(isTmux && tmuxPane && tmuxPane.passthrough !== 'off');
+    this.terminalImages.isTmuxPassthrough = isTmuxPassthrough;
     const allowDraw = isTmuxPaneFresh(isTmux, tmuxHost.tmuxPaneAnsweredAt, performance.now());
     const tmuxMoveTo = tmuxPane
       ? (col: number, row: number) =>
@@ -2027,9 +2146,15 @@ export default class Ink {
 
     const tWrite = performance.now();
     this.leftAltScreenSinceFrame = false;
+    // Official 2.1.327 (#452): skip BSU/ESU sync markers when tmux
+    // allow-passthrough is enabled and passthrough images are active/draining,
+    // so tmux and the outer kitty/Ghostty/iTerm2 terminal do not desync and
+    // garble rows.
+    const skipSync = this.skipSyncMarkers() || (isTmuxPassthrough && (this.terminalImages.size > 0 || imageSeq !== ''));
     // densable dyr(this.terminal,X,skipSyncMarkers(),f,this.takeKeptForNextFrame())
-    writeDiffToTerminal(this.terminal, optimized, this.skipSyncMarkers(), terminalRows, this.takeKeptForNextFrame());
+    writeDiffToTerminal(this.terminal, optimized, skipSync, terminalRows, this.takeKeptForNextFrame());
     const writeMs = performance.now() - tWrite;
+    this.unwritten = undefined;
 
     // densable: this.prevFrameContaminated=!1 then repaintAfterStaleAbsolutePaint.
     // Gold does not keep selActive/hlActive on the flag — F||L already full-damage

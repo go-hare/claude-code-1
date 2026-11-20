@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { type OptionWithDescription, Select } from '../../components/CustomSelect/select.js';
 import { Dialog } from '@anthropic/ink';
 import { Box, Text } from '@anthropic/ink';
+import { useKeybinding } from '../../keybindings/useKeybinding.js';
 import { useAppState, useSetAppState } from '../../state/AppState.js';
 import type { LocalJSXCommandCall } from '../../types/command.js';
 import { openBrowser } from '../../utils/browser.js';
@@ -69,11 +70,15 @@ export function formatChromeReconnectOutcome(
 type MenuAction =
   | 'install-extension'
   | 'install-local'
+  | 'select-browser'
   | 'reconnect'
   | 'connect-local'
   | 'manage-permissions'
   | 'toggle-session'
   | 'toggle-default';
+
+export const CHROME_PERMISSIONS_NOTICE =
+  'For one session, start with claude --chrome or claude --no-chrome. Claude Code asks before Claude acts on a site, unless your permission mode or a rule in /permissions answers for you.';
 
 type Props = {
   onDone: (result?: string) => void;
@@ -96,6 +101,7 @@ function ClaudeInChromeMenu({
   const setAppState = useSetAppState();
   const reconnectMcpServer = useOptionalMcpReconnect();
   const [selectKey, setSelectKey] = useState(0);
+  const [subview, setSubview] = useState<'menu' | 'select-browser'>('menu');
   const [enabledByDefault, setEnabledByDefault] = useState(configEnabled ?? false);
   const [showInstallHint, setShowInstallHint] = useState(false);
   const [isExtensionInstalled, setIsExtensionInstalled] = useState(installed);
@@ -334,6 +340,9 @@ function ClaudeInChromeMenu({
           }
         })();
         break;
+      case 'select-browser':
+        setSubview('select-browser');
+        break;
       case 'reconnect': {
         setSelectKey(k => k + 1);
         void isChromeExtensionInstalled().then(extInstalled => {
@@ -434,6 +443,8 @@ function ClaudeInChromeMenu({
     });
   }
 
+  const pairedBrowserName = getGlobalConfig().chromeExtension?.pairedDeviceName;
+
   // Fork: no claude.ai subscription gate — any local user can mount Chrome MCP
   // (densable UI still requires subscriber / ant). WSL remains unsupported.
   if (!isWSL) {
@@ -443,6 +454,14 @@ function ClaudeInChromeMenu({
       description: isSessionWired
         ? 'Unload Claude in Chrome MCP for this session only (does not change default)'
         : 'Hot-mount Claude in Chrome MCP for this session only (does not change default)',
+    });
+  }
+
+  if (isConnected) {
+    options.push({
+      label: pairedBrowserName ? `Select browser (${pairedBrowserName})` : 'Select browser',
+      value: 'select-browser',
+      description: 'Choose which connected Chrome browser to use',
     });
   }
 
@@ -480,14 +499,25 @@ function ClaudeInChromeMenu({
   );
 
   const isDisabled = isWSL;
+  const inBrowserList = subview === 'select-browser' && isConnected;
+
+  // #466 (2.1.327): Esc goes back from browser list to menu instead of closing
+  // /chrome by passing `isCancelActive={!inBrowserList}` to Dialog.
+  useKeybinding(
+    'confirm:no',
+    () => {
+      setSubview('menu');
+      setSelectKey(k => k + 1);
+    },
+    { context: 'Confirmation', isActive: inBrowserList },
+  );
 
   return (
-    <Dialog title="Claude in Chrome" onCancel={() => onDone()} color="chromeYellow">
+    <Dialog title="Claude in Chrome" onCancel={() => onDone()} isCancelActive={!inBrowserList} color="chromeYellow">
       <Box flexDirection="column" gap={1}>
         <Text>
-          Claude in Chrome works with the Chrome extension to let you control your browser directly from Claude Code.
-          Navigate websites, fill forms, capture screenshots, record GIFs, and debug with console logs and network
-          requests.
+          Let Claude use your Chrome browser: open sites, fill forms, take screenshots, and read console logs and
+          network requests.
         </Text>
 
         {isWSL && <Text color="error">Claude in Chrome is not supported in WSL at this time.</Text>}
@@ -514,9 +544,31 @@ function ClaudeInChromeMenu({
                     <Text color="warning">Not detected</Text>
                   )}
                 </Text>
+                {isConnected && pairedBrowserName && (
+                  <Text>
+                    Browser: <Text>{pairedBrowserName}</Text>
+                  </Text>
+                )}
               </Box>
             )}
-            <Select key={selectKey} options={options} onChange={handleAction} hideIndexes />
+            {inBrowserList ? (
+              <Select
+                options={[
+                  {
+                    label: pairedBrowserName ?? 'Current Chrome browser',
+                    value: 'current',
+                  },
+                  { label: 'Back', value: 'back' },
+                ]}
+                hideIndexes
+                onChange={() => {
+                  setSubview('menu');
+                  setSelectKey(k => k + 1);
+                }}
+              />
+            ) : (
+              <Select key={selectKey} options={options} onChange={handleAction} hideIndexes />
+            )}
 
             {showInstallHint && (
               <Text color="warning">
@@ -531,18 +583,7 @@ function ClaudeInChromeMenu({
 
             {reconnectStatus && <Text color={reconnectStatus.color}>{reconnectStatus.text}</Text>}
 
-            <Text>
-              <Text dimColor>Usage: </Text>
-              <Text>claude --chrome</Text>
-              <Text dimColor> or </Text>
-              <Text>claude --no-chrome</Text>
-              <Text dimColor> · This session mounts/unmounts MCP without changing Enabled by default</Text>
-            </Text>
-
-            <Text dimColor>
-              Site-level permissions are inherited from the Chrome extension. Manage permissions in the Chrome extension
-              settings to control which sites Claude can browse, click, and type on.
-            </Text>
+            <Text dimColor>{CHROME_PERMISSIONS_NOTICE}</Text>
           </>
         )}
         <Text dimColor>Learn more: https://code.claude.com/docs/en/chrome</Text>

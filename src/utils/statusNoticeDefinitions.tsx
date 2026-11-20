@@ -12,18 +12,27 @@ import { GuestPassesNotice, shouldShowGuestPassesUpsell } from '../components/Lo
 import { getLargeMemoryFiles, MAX_MEMORY_CHARACTER_COUNT, type MemoryFileInfo } from './claudemd.js';
 import figures from 'figures';
 import { getCwd } from './cwd.js';
-import { relative } from 'path';
+import { readFileSync } from 'fs';
+import { join, relative } from 'path';
 import { formatNumber } from './format.js';
 import type { getGlobalConfig } from './config.js';
 import { pickCompanyAnnouncement } from './companyAnnouncement.js';
 import { getDebugLogPath, isDebugMode, isDebugToStdErr } from './debug.js';
 import { isEnvTruthy } from './envUtils.js';
 import {
+  formatApiKeyProfileConflictWarning,
+  getActiveAnthropicProfileName,
+  getAnthropicConfigDir,
+  getAnthropicProfileAuthKind,
+  getAnthropicProfileSource,
+} from './anthropicProfile.js';
+import {
   getAnthropicApiKeyWithSource,
   getApiKeyFromConfigOrMacOSKeychain,
   getAuthTokenSource,
   isClaudeAISubscriber,
 } from './auth.js';
+import { getAPIProvider } from './model/providers.js';
 import type { AgentDefinitionsResult } from '@claude-code/builtin-tools/tools/AgentTool/loadAgentsDir.js';
 import { getAgentDescriptionsTotalTokens, AGENT_DESCRIPTIONS_THRESHOLD } from './statusNoticeHelpers.js';
 import { isSupportedJetBrainsTerminal, toIDEDisplayName, getTerminalIdeType } from './ide.js';
@@ -247,6 +256,27 @@ const apiKeyConflictNotice: StatusNoticeDefinition = {
   },
 };
 
+function isActiveProfileCreatedByClaudeCode(): boolean | null {
+  try {
+    const source = getAnthropicProfileSource();
+    if (source === null || source === 'env-quad') return null;
+    const configDir = getAnthropicConfigDir();
+    if (!configDir) return null;
+    const profileName =
+      source === 'profile-explicit'
+        ? (process.env.ANTHROPIC_PROFILE?.trim() ?? 'default')
+        : getActiveAnthropicProfileName(configDir);
+    const raw = readFileSync(join(configDir, 'configs', `${profileName}.json`), 'utf8');
+    const parsed = JSON.parse(raw) as { created_by?: unknown };
+    if (typeof parsed?.created_by === 'string') {
+      return parsed.created_by === 'claude-code';
+    }
+    return false;
+  } catch {
+    return null;
+  }
+}
+
 const bothAuthMethodsNotice: StatusNoticeDefinition = {
   id: 'both-auth-methods',
   tier: 'warning',
@@ -267,6 +297,31 @@ const bothAuthMethodsNotice: StatusNoticeDefinition = {
       skipRetrievingKeyFromApiKeyHelper: true,
     });
     const authTokenInfo = getAuthTokenSource();
+    // Official 2.1.327 (#483): actionable API key vs Anthropic profile conflict warning.
+    if (authTokenInfo.source === 'anthropic-profile' || (authTokenInfo.source as string) === 'profile') {
+      const settings = getInitialSettings();
+      const warning = formatApiKeyProfileConflictWarning({
+        apiKeySource,
+        profileAuthKind: getAnthropicProfileAuthKind(),
+        createdByClaudeCode: isActiveProfileCreatedByClaudeCode(),
+        consoleProfileLoginAllowed:
+          getAPIProvider() === 'firstParty' &&
+          settings.forceLoginOrgUUID === undefined &&
+          settings.forceLoginMethod !== 'claudeai',
+        hasEnvApiKey: Boolean(process.env.ANTHROPIC_API_KEY),
+        forceLoginMethod: settings.forceLoginMethod,
+      });
+      return (
+        <Box flexDirection="column" marginTop={1}>
+          <NoticeStatusRow status="warning">{warning.headline}</NoticeStatusRow>
+          {warning.switchHint && (
+            <Box flexDirection="column" paddingLeft={2}>
+              <Text dimColor>{warning.switchHint}</Text>
+            </Box>
+          )}
+        </Box>
+      );
+    }
     return (
       <Box flexDirection="column" marginTop={1}>
         <NoticeStatusRow status="warning">

@@ -12,7 +12,15 @@ import {
   stripProjectScopeBlockedEnv,
 } from './managedEnvConstants.js'
 import { clearMTLSCache } from './mtls.js'
-import { clearProxyCache, configureGlobalAgents } from './proxy.js'
+import {
+  getProviderBoundRouteSnapshot,
+  resetProviderBoundCachesIfMoved,
+} from './model/modelStrings.js'
+import {
+  clearProxyCache,
+  configureGlobalAgents,
+  preserveRepairedProxyIfBare,
+} from './proxy.js'
 import { stripProjectScopedTracingEnv } from './projectScopedTracingStrip.js'
 import { isSettingSourceEnabled } from './settings/constants.js'
 import {
@@ -690,6 +698,20 @@ function withoutCcdSpawnEnvKeys(
   return out
 }
 
+function applyEnvWithBareProxyGuard(
+  env: Record<string, string>,
+): Record<string, string> {
+  let out: Record<string, string> | undefined
+  for (const [key, value] of Object.entries(env)) {
+    const guarded = preserveRepairedProxyIfBare(key, value)
+    if (guarded !== value) {
+      out ??= { ...env }
+      out[key] = guarded
+    }
+  }
+  return out ?? env
+}
+
 /**
  * Compose the strip filters applied to every settings-sourced env object.
  */
@@ -699,17 +721,19 @@ function filterSettingsEnv(
 ): Record<string, string> {
   // densable N first in the gold filter chain (project/local vyr keys),
   // followed by SEA Q() PROJECT_SCOPE_BLOCKED_ENV_VARS stripping.
-  return withoutCcdSpawnEnvKeys(
-    withoutHostManagedProviderVars(
-      withoutSSHTunnelVars(
-        stripProjectScopeBlockedEnv(
-          stripProjectScopedTracingEnv(env, source),
-          source,
+  return applyEnvWithBareProxyGuard(
+    withoutCcdSpawnEnvKeys(
+      withoutHostManagedProviderVars(
+        withoutSSHTunnelVars(
+          stripProjectScopeBlockedEnv(
+            stripProjectScopedTracingEnv(env, source),
+            source,
+          ),
         ),
+        source,
       ),
       source,
     ),
-    source,
   )
 }
 
@@ -828,6 +852,11 @@ export function applyConfigEnvironmentVariables(): void {
   // densable pz/Put — ensure VQr freeze even if safe-path was skipped.
   getFrozenStartupEnv()
 
+  // Official 2.1.327 (#436) `V_l` / `Rxl`: snapshot provider/routing env before
+  // applying project settings so setting ANTHROPIC_BASE_URL to an LLM gateway
+  // invalidates stale first-party model caches.
+  const previousProviderRoute = getProviderBoundRouteSnapshot()
+
   appliedGlobalConfigEnv = filterSettingsEnv(
     getGlobalConfig().env,
     'globalConfig',
@@ -841,6 +870,9 @@ export function applyConfigEnvironmentVariables(): void {
 
   // densable Sz → dTd() after settings env Object.assign (policy wins merge).
   applyManagedOtelEndpointSupremacy()
+
+  // Official 2.1.327 (#436): reset provider-bound model caches if route moved.
+  resetProviderBoundCachesIfMoved(previousProviderRoute)
 
   // Clear caches so agents are rebuilt with the new env vars
   clearCACertsCache()

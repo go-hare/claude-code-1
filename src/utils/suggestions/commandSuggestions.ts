@@ -361,6 +361,33 @@ export function dropShadowedBundledSkills(commands: Command[]): Command[] {
   return output
 }
 
+let dedupedCommandsCache: { input: Command[]; output: Command[] } | undefined
+
+/**
+ * Official 2.1.327 #455: deduplicate commands/skills that share the same
+ * user-facing name, keeping the first occurrence (matching slash dispatch so
+ * the `/` menu never lists duplicate rows that all invoke the first skill).
+ */
+export function dedupeCommandsByName(commands: Command[]): Command[] {
+  if (dedupedCommandsCache?.input === commands) {
+    return dedupedCommandsCache.output
+  }
+  const seen = new Set<string>()
+  let dropped = false
+  const kept = commands.filter(cmd => {
+    const name = getCommandName(cmd)
+    if (seen.has(name)) {
+      dropped = true
+      return false
+    }
+    seen.add(name)
+    return true
+  })
+  const output = dropped ? kept : commands
+  dedupedCommandsCache = { input: commands, output }
+  return output
+}
+
 /**
  * Generate command suggestions based on input
  */
@@ -378,7 +405,7 @@ export function generateCommandSuggestions(
     return []
   }
 
-  const commands = dropShadowedBundledSkills(allCommands)
+  const commands = dedupeCommandsByName(dropShadowedBundledSkills(allCommands))
 
   const query = input.slice(1).toLowerCase().trim()
   const lanesEnabled = isMenuKindLanesEnabled()

@@ -309,11 +309,46 @@ export type PostInterClaudeMessageOptions = {
   fromPlugin?: string
 }
 
+export type PostInterClaudeMessageResult =
+  | { ok: true }
+  | {
+      ok: false
+      error: string
+      /** Official 2.1.328 (#430): true when timeout / 408 / ambiguous transport error means the server may have accepted the message. */
+      mayHaveArrived?: boolean
+      /** Official 2.1.328 (#430): true ONLY on 404/410/session-ended responses (NOT timeout or 429 rate limit). */
+      sessionMayHaveEnded?: boolean
+    }
+
+/**
+ * Official 2.1.328 (#430): format a cross-session bridge/cloud send failure.
+ * When `mayHaveArrived` is true (timeout / 408 / ambiguous network error),
+ * warn Claude not to resend blindly and never report a stale-address error.
+ */
+export function formatInterClaudeSendFailure(
+  target: string,
+  result: {
+    error?: string
+    mayHaveArrived?: boolean
+    sessionMayHaveEnded?: boolean
+  },
+): string {
+  const errText = result.error || 'unknown'
+  if (result.mayHaveArrived) {
+    return (
+      `Sending to ${target} was not confirmed (${errText}), so the message may have arrived. ` +
+      `Do not send it again unless you learn that it did not arrive, or that session may get it twice. ` +
+      `Tell your user, or check with that session later.`
+    )
+  }
+  return `Failed to send to ${target}: ${errText}`
+}
+
 export async function postInterClaudeMessage(
   target: string,
   message: string,
   opts?: PostInterClaudeMessageOptions,
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<PostInterClaudeMessageResult> {
   try {
     const handle = getReplBridgeHandle()
     if (!handle) {
@@ -407,10 +442,56 @@ export async function postInterClaudeMessage(
         ? response.data.error.message
         : `HTTP ${response.status}`
     logForDebugging(`[bridge:peer] Send failed: ${detail}`)
-    return { ok: false, error: detail }
+    // Official 2.1.328 (#430): distinguish ambiguous timeouts (408) and rate
+    // limits (429) from genuinely ended/gone sessions (404/410).
+    if (response.status === 408) {
+      return {
+        ok: false,
+        error: detail,
+        mayHaveArrived: true,
+        sessionMayHaveEnded: false,
+      }
+    }
+    if (response.status === 429) {
+      return {
+        ok: false,
+        error: detail,
+        mayHaveArrived: false,
+        sessionMayHaveEnded: false,
+      }
+    }
+    if (response.status === 404 || response.status === 410) {
+      return {
+        ok: false,
+        error: detail,
+        mayHaveArrived: false,
+        sessionMayHaveEnded: true,
+      }
+    }
+    return {
+      ok: false,
+      error: detail,
+      mayHaveArrived: response.status >= 500,
+      sessionMayHaveEnded: false,
+    }
   } catch (err: unknown) {
     const msg = errorMessage(err)
     logForDebugging(`[bridge:peer] postInterClaudeMessage error: ${msg}`)
-    return { ok: false, error: msg }
+    const code =
+      err && typeof err === 'object' && 'code' in err
+        ? String((err as { code?: unknown }).code)
+        : ''
+    const isTimeoutOrAmbiguous =
+      code === 'ECONNABORTED' ||
+      code === 'ETIMEDOUT' ||
+      code === 'ECONNRESET' ||
+      code === 'EPIPE' ||
+      /timeout|timed out|socket hang up|aborted/i.test(msg)
+    return {
+      ok: false,
+      error: msg,
+      mayHaveArrived: isTimeoutOrAmbiguous,
+      sessionMayHaveEnded: false,
+    }
   }
 }

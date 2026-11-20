@@ -12,11 +12,13 @@ import {
   mkdir,
   readdir,
   readFile,
+  realpath,
   rm,
+  stat,
   unlink,
   writeFile,
 } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { isSafeGitRevision, isSafeGitUrl } from './orchestrator.js'
 import { withTimeoutMs } from './rootRunner.js'
@@ -1490,6 +1492,14 @@ export async function ensureRepository(
     GIT_MKDIR_TIMEOUT_MS,
     `[runner:stuck] mkdir ${baseDir} (check NFS/CSI mount health)`,
   )
+  const repoParentDir = dirname(ctx.repoPath)
+  if (repoParentDir !== baseDir) {
+    await withTimeoutMs(
+      mkdir(repoParentDir, { recursive: true }),
+      GIT_MKDIR_TIMEOUT_MS,
+      `[runner:stuck] mkdir ${repoParentDir} (check NFS/CSI mount health)`,
+    )
+  }
   await runGitPrepare(ctx, '', ['init', ctx.repoPath])
   await runGitPrepare(ctx, ctx.repoPath, ['config', 'gc.auto', '0']).catch(
     () => {},
@@ -1835,6 +1845,8 @@ export async function ensureTargetBranch(
  */
 export async function prepareOneRepo(opts: {
   baseDir: string
+  /** Official 2.1.328 (#548): explicit target directory from `--repository-folder`. */
+  repoPath?: string
   source: GitPrepareSource
   targetBranch?: string
   skipValidation?: boolean
@@ -1847,6 +1859,7 @@ export async function prepareOneRepo(opts: {
 }): Promise<{ repoExisted: boolean }> {
   const {
     baseDir: t,
+    repoPath: explicitRepoPath,
     source: r,
     targetBranch: n,
     skipValidation: o,
@@ -1859,10 +1872,12 @@ export async function prepareOneRepo(opts: {
   } = opts
   const d = resolveSourceGitUrl(r)
   const p = r.getAuthToken ? d : embedTokenInGitUrl(d, r.token)
-  const f = sourceCanonicalPath(t, {
-    type: r.type,
-    repo: r.repo,
-  })
+  const f =
+    explicitRepoPath ??
+    sourceCanonicalPath(t, {
+      type: r.type,
+      repo: r.repo,
+    })
   if (!f) {
     throw new Error(`Could not determine repository directory for: ${r.repo}`)
   }
@@ -1965,6 +1980,10 @@ export async function prepareOneRepoTimed(
  */
 export async function prepareSources(opts: {
   baseDir: string
+  /** Official 2.1.328 (#548): explicit target path override (single-source call from sessionHandler). */
+  repoPath?: string
+  /** Official 2.1.328 (#548): `--repository-folder` mappings resolved per source. */
+  repositoryFolders?: readonly RepositoryFolderMapping[]
   sources: GitPrepareSource[]
   outcomes?: OutcomeTarget[]
   skipValidation?: boolean
@@ -1977,6 +1996,8 @@ export async function prepareSources(opts: {
 }): Promise<void> {
   const {
     baseDir: t,
+    repoPath: explicitRepoPath,
+    repositoryFolders,
     sources: r,
     outcomes: n,
     skipValidation: o,
@@ -1993,8 +2014,22 @@ export async function prepareSources(opts: {
       a(`[byoc:git] Skipping unsupported source type: ${p.type}`)
       continue
     }
+    const resolvedRepoPath =
+      explicitRepoPath ??
+      (repositoryFolders && repositoryFolders.length > 0
+        ? (() => {
+            const fallback = sourceCanonicalPath(t, {
+              type: p.type,
+              repo: p.repo,
+            })
+            return fallback
+              ? resolveRepositoryFolderPath(p.repo, repositoryFolders, fallback)
+              : undefined
+          })()
+        : undefined)
     await prepareOneRepoTimed({
       baseDir: t,
+      repoPath: resolvedRepoPath,
       source: p,
       targetBranch: d.get(p.repo),
       skipValidation: o ?? false,
@@ -2129,9 +2164,16 @@ export async function sanitizeCanonicalGitState(
     for (const f of a) {
       const m = CANONICAL_KEEP.get(f)
       if (m) {
-        const h = await lstat(join(n, f)).catch(() => undefined)
+        // Official 2.1.328 (#630): only treat ENOENT/ENOTDIR as missing; a
+        // temporary disk error (EIO/ESTALE/etc.) must fail the start instead of
+        // falling through to `rm` and deleting a kept clone's objects or refs!
+        const h = await lstat(join(n, f)).catch((err: unknown) => {
+          const code = (err as NodeJS.ErrnoException).code
+          if (code === 'ENOENT' || code === 'ENOTDIR') return undefined
+          throw err
+        })
+        if (!h) continue
         if (
-          h &&
           !h.isSymbolicLink() &&
           (m === 'dir' ? h.isDirectory() : h.isFile())
         ) {
@@ -2218,24 +2260,316 @@ export function shouldSanitizeCanonical(
   return false
 }
 
-/** densable `ijv` — per-key serial lock map */
+/**
+ * densable `ijv` + Official 2.1.328 (#635) — per-key serial lock map.
+ * When `signal` is supplied and aborts while waiting for another session's
+ * repo preparation on the same key (`--capacity > 1`), stop waiting immediately
+ * so archiving or requeueing takes effect without blocking on the peer session.
+ */
 export async function withCanonicalLock<T>(
   locks: Map<string, Promise<unknown>>,
   key: string,
   fn: () => Promise<T>,
+  signal?: AbortSignal,
 ): Promise<T> {
-  const n = locks.get(key) ?? Promise.resolve()
-  let o!: () => void
-  const i = new Promise<void>(s => {
-    o = s
+  if (signal?.aborted) {
+    throw signal.reason ?? new DOMException('Aborted', 'AbortError')
+  }
+  const prev = locks.get(key) ?? Promise.resolve()
+  let release!: () => void
+  const mine = new Promise<void>(resolve => {
+    release = resolve
   })
-  locks.set(key, i)
-  await n.catch(() => {})
+  locks.set(key, mine)
+  let acquired = false
   try {
+    if (signal) {
+      await new Promise<void>((resolve, reject) => {
+        if (signal.aborted) {
+          reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+          return
+        }
+        const onAbort = () => {
+          reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+        }
+        signal.addEventListener('abort', onAbort, { once: true })
+        prev
+          .catch(() => {})
+          .then(() => {
+            signal.removeEventListener('abort', onAbort)
+            if (signal.aborted) {
+              reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+            } else {
+              resolve()
+            }
+          })
+      })
+    } else {
+      await prev.catch(() => {})
+    }
+    acquired = true
     return await fn()
   } finally {
-    o()
-    if (locks.get(key) === i) locks.delete(key)
+    // Release our slot in the chain (wait for prev only if we didn't acquire yet
+    // so downstream waiters don't overlap with prev's still-running prep).
+    if (acquired) {
+      release()
+      if (locks.get(key) === mine) locks.delete(key)
+    } else {
+      void prev
+        .catch(() => {})
+        .finally(() => {
+          release()
+          if (locks.get(key) === mine) locks.delete(key)
+        })
+    }
+  }
+}
+
+export type RepositoryFolderMapping = {
+  /** Exact `owner/repo` or wildcard `owner/*`. */
+  repository: string
+  /** Absolute target folder path (cannot be a symbolic link). */
+  dir: string
+}
+
+const REPO_FOLDER_SPEC_RE = /^([a-zA-Z0-9._-]+\/(?:[a-zA-Z0-9._-]+|\*))=(.+)$/
+
+/**
+ * Official 2.1.328 (#548) — parse `--repository-folder <owner/repo=path>` or
+ * `<owner/*=dir>` for `--capacity 1`.
+ */
+export function parseRepositoryFolderSpec(
+  raw: string,
+): RepositoryFolderMapping {
+  const match = REPO_FOLDER_SPEC_RE.exec(raw.trim())
+  if (!match || !match[1] || !match[2]) {
+    throw new Error(
+      `--repository-folder cannot read "${raw}". Use <owner/repo>=<absolute-path> or <owner/*>=<absolute-dir>.`,
+    )
+  }
+  const repository = match[1]
+  let dir = match[2].trim()
+  if (repository.endsWith('/*') && dir.endsWith('/*')) {
+    dir = dir.slice(0, -2)
+  }
+  if (!dir.startsWith('/') && !/^[A-Za-z]:[\\/]/.test(dir)) {
+    throw new Error(
+      `--repository-folder path for ${repository} must be an absolute path: "${dir}"`,
+    )
+  }
+  return { repository, dir }
+}
+
+const HOME_SETTINGS_SEGMENT_RE = /^(\.|Library$|AppData$)/i
+
+async function resolveBestRealpath(p: string): Promise<string> {
+  const abs = resolve(p)
+  try {
+    return await realpath(abs)
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if ((code === 'ENOENT' || code === 'ENOTDIR') && dirname(abs) !== abs) {
+      return join(await resolveBestRealpath(dirname(abs)), basename(abs))
+    }
+    return abs
+  }
+}
+
+/**
+ * Official 2.1.328 `Dc` (#548) — validate `--repository-folder` mappings:
+ * requires `--capacity 1`, validates existence/directory/no-symlink via
+ * `realpath` + `stat().isDirectory()`, rejects overlap with baseDir/tempDirs,
+ * rejects `$HOME` itself, parents of `$HOME`, and home settings dirs
+ * (`.*`, `Library`, `AppData`), while allowing normal subdirectories of `$HOME`.
+ */
+export async function validateRepositoryFolderSpecs(
+  specs: readonly RepositoryFolderMapping[],
+  opts: {
+    capacity: number
+    baseDir: string
+    homeDir?: string
+    temporaryDirs?: readonly string[]
+  },
+): Promise<void> {
+  if (specs.length === 0) return
+  if (opts.capacity !== 1) {
+    throw new Error(
+      '--repository-folder requires --capacity 1 (sessions share the named folder directly).',
+    )
+  }
+  const seenRepos = new Set<string>()
+  const seenDirs: Array<{ repository: string; dir: string }> = []
+  const rawForbiddenRoots = [
+    opts.baseDir,
+    ...(opts.temporaryDirs ?? ['/tmp', '/var/tmp', '/dev/shm']),
+  ].filter((p): p is string => typeof p === 'string' && p.length > 0)
+  const forbiddenRoots = await Promise.all(
+    rawForbiddenRoots.map(p => resolveBestRealpath(p)),
+  )
+  const normHome =
+    typeof opts.homeDir === 'string' && opts.homeDir.length > 0
+      ? await resolveBestRealpath(opts.homeDir)
+      : undefined
+  const homePrefix =
+    normHome !== undefined
+      ? normHome.endsWith(sep)
+        ? normHome
+        : normHome + sep
+      : undefined
+
+  for (const spec of specs) {
+    const key = spec.repository.toLowerCase()
+    if (seenRepos.has(key)) {
+      throw new Error(
+        `--repository-folder lists "${spec.repository}" more than once.`,
+      )
+    }
+    seenRepos.add(key)
+
+    const normalizedDir = resolve(spec.dir)
+    let realDir: string
+    try {
+      realDir = await realpath(normalizedDir)
+    } catch (err) {
+      throw new Error(
+        `--repository-folder cannot use "${spec.dir}" for ${spec.repository}: ${errText(err)}. It has to be there when the runner starts.`,
+      )
+    }
+    let dirStat: Awaited<ReturnType<typeof stat>>
+    try {
+      dirStat = await stat(realDir)
+    } catch (err) {
+      throw new Error(
+        `--repository-folder cannot use "${spec.dir}" for ${spec.repository}: ${errText(err)}`,
+      )
+    }
+    if (!dirStat.isDirectory()) {
+      throw new Error(
+        `--repository-folder cannot use "${spec.dir}" for ${spec.repository}: it is no folder.`,
+      )
+    }
+    if (realDir !== normalizedDir) {
+      throw new Error(
+        `--repository-folder cannot use "${spec.dir}" for ${spec.repository}: path cannot be a symbolic link (real path: ${realDir}).`,
+      )
+    }
+
+    const dirPrefix = normalizedDir.endsWith(sep)
+      ? normalizedDir
+      : normalizedDir + sep
+    for (const normRoot of forbiddenRoots) {
+      const rootPrefix = normRoot.endsWith(sep) ? normRoot : normRoot + sep
+      if (
+        normalizedDir === normRoot ||
+        normalizedDir.startsWith(rootPrefix) ||
+        normRoot.startsWith(dirPrefix)
+      ) {
+        throw new Error(
+          `--repository-folder cannot use "${spec.dir}" for ${spec.repository}: overlaps with ${normRoot}.`,
+        )
+      }
+    }
+
+    if (normHome !== undefined && homePrefix !== undefined) {
+      if (normalizedDir === normHome || normHome.startsWith(dirPrefix)) {
+        throw new Error(
+          `--repository-folder cannot use "${spec.dir}" for ${spec.repository}: it is or holds the home directory (${normHome}).`,
+        )
+      }
+      if (normalizedDir.startsWith(homePrefix)) {
+        const firstSeg = relative(normHome, normalizedDir).split(sep)[0] ?? ''
+        if (HOME_SETTINGS_SEGMENT_RE.test(firstSeg)) {
+          throw new Error(
+            `--repository-folder cannot use "${spec.dir}" for ${spec.repository}: it lies in the home directory where the settings of the user's programs stand.`,
+          )
+        }
+      }
+    }
+
+    for (const prev of seenDirs) {
+      const prevPrefix = prev.dir.endsWith(sep) ? prev.dir : prev.dir + sep
+      if (
+        normalizedDir === prev.dir ||
+        normalizedDir.startsWith(prevPrefix) ||
+        prev.dir.startsWith(dirPrefix)
+      ) {
+        throw new Error(
+          `--repository-folder cannot use "${spec.dir}" for ${spec.repository}: overlaps with ${prev.repository} (${prev.dir}).`,
+        )
+      }
+    }
+    seenDirs.push({ repository: spec.repository, dir: normalizedDir })
+  }
+}
+
+/**
+ * Official 2.1.328 (#548) — resolve the folder path for a repository using
+ * `--repository-folder` mappings (exact `owner/repo` wins over `owner/*`),
+ * falling back to `fallbackPath` under `--base-dir`.
+ */
+export function resolveRepositoryFolderPath(
+  repo: string,
+  specs: readonly RepositoryFolderMapping[] | undefined,
+  fallbackPath: string,
+): string {
+  if (!specs || specs.length === 0) return fallbackPath
+  const lower = repo.toLowerCase()
+  const exact = specs.find(s => s.repository.toLowerCase() === lower)
+  if (exact) return exact.dir
+  const slashIdx = repo.indexOf('/')
+  if (slashIdx > 0) {
+    const owner = repo.slice(0, slashIdx)
+    const name = repo.slice(slashIdx + 1)
+    const wild = specs.find(
+      s => s.repository.toLowerCase() === `${owner.toLowerCase()}/*`,
+    )
+    if (wild && name && !name.includes('/') && name !== '.' && name !== '..') {
+      return join(wild.dir, name)
+    }
+  }
+  return fallbackPath
+}
+
+/**
+ * Official 2.1.328 (#681) — at `--capacity 1`, refuse a session early (before
+ * cloning/fetching) when the path of a repository it pushes to is a symbolic link.
+ */
+export async function assertPushTargetRepoPathNotSymlink(
+  repoPath: string,
+  baseDir?: string,
+): Promise<void> {
+  const st = await lstat(repoPath).catch((err: unknown) => {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === 'ENOENT' || code === 'ENOTDIR') return undefined
+    throw err
+  })
+  if (st?.isSymbolicLink()) {
+    throw new Error(
+      `Refusing session at --capacity 1: repository path "${repoPath}" is a symbolic link.`,
+    )
+  }
+  // Also check intermediate segments between baseDir and repoPath if under baseDir
+  if (baseDir) {
+    const normBase = baseDir.replace(/[/\\]+$/, '')
+    const normRepo = repoPath.replace(/[/\\]+$/, '')
+    if (normRepo.startsWith(normBase + '/')) {
+      const relParts = normRepo.slice(normBase.length + 1).split('/')
+      let cur = normBase
+      for (const seg of relParts) {
+        cur = join(cur, seg)
+        const segSt = await lstat(cur).catch((err: unknown) => {
+          const code = (err as NodeJS.ErrnoException).code
+          if (code === 'ENOENT' || code === 'ENOTDIR') return undefined
+          throw err
+        })
+        if (segSt?.isSymbolicLink()) {
+          throw new Error(
+            `Refusing session at --capacity 1: repository path "${repoPath}" traverses a symbolic link at "${cur}".`,
+          )
+        }
+      }
+    }
   }
 }
 

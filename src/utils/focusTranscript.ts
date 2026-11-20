@@ -368,15 +368,49 @@ function isEmptyAssistantMsg(msg: FocusTranscriptMessage): boolean {
   return b?.type === 'text' && isEmptyAssistantText(b.text)
 }
 
-/** Thinking / attachment / system (strip for open-tail scan) */
-function isStreamingSkippable(msg: FocusTranscriptMessage): boolean {
+/** Thinking / attachment / system / progress (strip for open-tail scan) */
+export function isStreamingSkippable(msg: FocusTranscriptMessage): boolean {
   if (msg.type === 'assistant') {
     const b = firstBlock(msg)
     return b?.type === 'thinking' || b?.type === 'redacted_thinking'
   }
   if (msg.type === 'attachment') return true
   if (msg.type === 'system') return true
+  if (msg.type === 'progress') return true
   return false
+}
+
+/**
+ * Official 2.1.327 (#434): true when the current open turn already ends with a
+ * settled assistant reply (`stop_reason !== null`) once trailing skippable rows
+ * (thinking, system, attachment, Stop hook progress) are skipped.
+ */
+export function hasSettledAssistantReply(
+  messages: ReadonlyArray<FocusTranscriptMessage>,
+): boolean {
+  let i = messages.length - 1
+  while (i >= 0 && isStreamingSkippable(messages[i]!)) i--
+  if (i < 0) return false
+  const msg = messages[i]!
+  if (isTurnBoundary(msg)) return false
+  return (
+    msg.type === 'assistant' &&
+    msg.message?.stop_reason !== null &&
+    msg.message?.stop_reason !== undefined &&
+    (isRealAssistantText(msg) || isEmptyAssistantMsg(msg))
+  )
+}
+
+/**
+ * Official 2.1.327 (#434): whether focus view should keep holding the streaming
+ * preview while a Stop hook is running (`isLoading === true`). Returns `false`
+ * once the turn's finished assistant reply is settled (`stop_reason !== null`),
+ * preventing focus view from keeping the finished reply hidden during Stop hooks.
+ */
+export function shouldFocusHoldPreviewDuringStopHook(
+  messages: ReadonlyArray<FocusTranscriptMessage>,
+): boolean {
+  return !hasSettledAssistantReply(messages)
 }
 
 /**

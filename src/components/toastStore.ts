@@ -178,6 +178,38 @@ export function expireToasts(now: number): void {
   else scheduleExpiry(now)
 }
 
+export const PLUGIN_TOAST_KEY_PREFIX = 'plugin-toast-'
+
+/**
+ * Official 2.1.328 #622 (`dSl`): scope notification-bar toast keys by plugin
+ * name (`plugin-toast-<plugin>:<id>`) so one plugin's toast can never collide
+ * with or render another plugin's text.
+ */
+export function formatPluginToastKey(
+  plugin: string | undefined,
+  id: string,
+): string {
+  return plugin
+    ? `${PLUGIN_TOAST_KEY_PREFIX}${plugin}:${id}`
+    : `${PLUGIN_TOAST_KEY_PREFIX}${id}`
+}
+
+/**
+ * Official 2.1.328 #622 (`EW`): extract the owning plugin name from a
+ * plugin-scoped toast key (`plugin-toast-<plugin>:<id>`).
+ */
+export function parsePluginToastOwner(
+  key: string | undefined,
+): string | undefined {
+  if (!key || !key.startsWith(PLUGIN_TOAST_KEY_PREFIX)) {
+    return undefined
+  }
+  const rest = key.slice(PLUGIN_TOAST_KEY_PREFIX.length)
+  const sep = rest.indexOf(':')
+  if (sep <= 0) return undefined
+  return rest.slice(0, sep)
+}
+
 export function dropToast(id: string): void {
   publish(items.filter(item => item.id !== id))
 }

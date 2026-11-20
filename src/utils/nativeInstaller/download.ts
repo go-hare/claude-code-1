@@ -17,7 +17,7 @@ import { pipeline } from 'stream/promises'
 import { logEvent } from 'src/services/analytics/index.js'
 import type { ReleaseChannel } from '../config.js'
 import { logForDebugging } from '../debug.js'
-import { toError } from '../errors.js'
+import { ClaudeError, toError } from '../errors.js'
 import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
 import { getFsImplementation } from '../fsOperations.js'
 import {
@@ -28,15 +28,29 @@ import { logError } from '../log.js'
 import { sleep } from '../sleep.js'
 import { jsonStringify, writeFileSync_DEPRECATED } from '../slowOperations.js'
 import {
-  resolveDownloadDeadlineMsForTestingOrDefault,
-  resolveStallTimeoutMsForTestingOrDefault,
+  resolveDownloadDeadlineMsForTesting,
+  resolveStallTimeoutMsForTesting,
 } from '../residualFinalEnvGates.js'
 import { getBinaryName, getPlatform } from './installer.js'
 
-const GCS_BUCKET_URL =
-  'https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases'
+const GCS_BUCKET_URL = 'https://downloads.claude.ai/claude-code-releases'
 export const ARTIFACTORY_REGISTRY_URL =
   'https://artifactory.infra.ant.dev/artifactory/api/npm/npm-all/'
+
+/** Official 2.1.328 `S6s`: raised when the release server refuses the session. */
+export class RegistrySessionRefusedError extends ClaudeError {
+  constructor(message: string) {
+    super(message)
+    this.name = 'RegistrySessionRefusedError'
+  }
+}
+
+export function isRegistrySessionRefusedError(err: unknown): boolean {
+  return (
+    err instanceof RegistrySessionRefusedError ||
+    (err instanceof Error && err.name === 'RegistrySessionRefusedError')
+  )
+}
 
 export async function getLatestVersionFromArtifactory(
   tag: string = 'latest',
@@ -238,9 +252,9 @@ export async function getLatestVersion(
     return normalized
   }
 
-  // ReleaseChannel validation
+  // ReleaseChannel validation (official 2.1.328 `Wjr` allows 'stable' | 'latest' | 'rc')
   const channel = channelOrVersion as ReleaseChannel
-  if (channel !== 'stable' && channel !== 'latest') {
+  if (channel !== 'stable' && channel !== 'latest' && channel !== 'rc') {
     throw new Error(
       `Invalid channel: ${channelOrVersion}. Use 'stable' or 'latest'`,
     )
@@ -378,25 +392,23 @@ export async function downloadVersionFromArtifactory(
 }
 
 // Stall timeout: abort if no bytes received for this duration
-// Official YJg / KJg — STALL_TIMEOUT_MS_FOR_TESTING || 60_000
-const DEFAULT_STALL_TIMEOUT_MS = 60000 // 60 seconds
-// Official JJg / fzu default download deadline (5 min) when testing override unset.
-const DEFAULT_DOWNLOAD_DEADLINE_MS = 5 * 60000
+// Official 2.1.328 `cr` = 120_000ms (2 minutes)
+const DEFAULT_STALL_TIMEOUT_MS = 120_000
+// Official 2.1.328 `Lt` = 600_000ms (10 minutes)
+const DEFAULT_DOWNLOAD_DEADLINE_MS = 600_000
 const MAX_DOWNLOAD_RETRIES = 3
 
 function getStallTimeoutMs(): number {
-  // Official YJg — STALL_TIMEOUT_MS_FOR_TESTING || 60_000
-  return resolveStallTimeoutMsForTestingOrDefault()
+  return resolveStallTimeoutMsForTesting() ?? DEFAULT_STALL_TIMEOUT_MS
 }
 
 function getDownloadDeadlineMs(): number {
-  // Official JJg — DOWNLOAD_DEADLINE_MS_FOR_TESTING || 5 min
-  return resolveDownloadDeadlineMsForTestingOrDefault()
+  return resolveDownloadDeadlineMsForTesting() ?? DEFAULT_DOWNLOAD_DEADLINE_MS
 }
 
 class StallTimeoutError extends Error {
   constructor() {
-    super('Download stalled: no data received for 60 seconds')
+    super('Download stalled: no data received for 120 seconds')
     this.name = 'StallTimeoutError'
   }
 }
@@ -771,4 +783,5 @@ export async function downloadVersion(
 // Exported for testing
 export { StallTimeoutError, MAX_DOWNLOAD_RETRIES }
 export const STALL_TIMEOUT_MS = DEFAULT_STALL_TIMEOUT_MS
+export const DOWNLOAD_DEADLINE_MS = DEFAULT_DOWNLOAD_DEADLINE_MS
 export const _downloadAndVerifyBinaryForTesting = downloadAndVerifyBinary

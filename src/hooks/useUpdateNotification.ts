@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useMemo } from 'react'
 import { major, minor, patch } from 'semver'
 
 export function getSemverPart(version: string): string {
@@ -17,17 +17,13 @@ export function useUpdateNotification(
   updatedVersion: string | null | undefined,
   initialVersion: string = MACRO.VERSION,
 ): string | null {
-  const lastNotifiedRef = useRef<string | null>(getSemverPart(initialVersion))
-
-  const updatedSemver = updatedVersion ? getSemverPart(updatedVersion) : null
-  if (!updatedSemver) {
-    return null
-  }
-
-  if (updatedSemver !== lastNotifiedRef.current) {
-    lastNotifiedRef.current = updatedSemver
-    return updatedSemver
-  }
-
-  return null
+  return useMemo(() => {
+    if (!updatedVersion) {
+      return null
+    }
+    const updatedSemver = getSemverPart(updatedVersion)
+    return updatedSemver === getSemverPart(initialVersion)
+      ? null
+      : updatedSemver
+  }, [updatedVersion, initialVersion])
 }

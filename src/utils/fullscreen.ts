@@ -51,7 +51,7 @@ export const FULLSCREEN_BOOT_PENDING_TTL_MS = 600_000
 export const FULLSCREEN_BOOT_CROSS_HOST_TTL_MS = 2_592_000_000
 
 /** densable oSw — classic fallback stderr (single strike). */
-export const FULLSCREEN_CLASSIC_FALLBACK_MESSAGE = `Claude Code's fullscreen renderer didn't finish starting last time on this machine, so this launch is using the classic renderer. It will try fullscreen again next launch; /tui default keeps the classic renderer.
+export const FULLSCREEN_CLASSIC_FALLBACK_MESSAGE = `Claude Code's fullscreen renderer didn't finish starting last time on this machine, so this launch is using the classic renderer. It will try fullscreen again next launch; /tui classic keeps the classic renderer.
 `
 /** densable iSw — sticky-off stderr (tripped). */
 export const FULLSCREEN_STICKY_OFF_MESSAGE = `Claude Code's fullscreen renderer has repeatedly failed to start on this machine, so it has been turned off here. Run /tui fullscreen to try it again (this also resets after an update).

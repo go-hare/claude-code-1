@@ -1,6 +1,7 @@
 import React, { useCallback } from 'react';
 import { BLACK_CIRCLE } from '../../constants/figures.js';
-import { Box, Button, Link, Text } from '@anthropic/ink';
+// eslint-disable-next-line custom-rules/prefer-use-keybindings -- raw escape dismiss for transcript share prompt (#609)
+import { Box, Button, Link, Text, useInput } from '@anthropic/ink';
 import { useDebouncedDigitInput } from './useDebouncedDigitInput.js';
 
 export type TranscriptShareResponse = 'yes' | 'no' | 'dont_ask_again';
@@ -45,6 +46,14 @@ export function TranscriptSharePrompt({ onSelect, inputValue, setInputValue }: P
     },
     [onSelect, setInputValue],
   );
+
+  // Official 2.1.328 (#609): Esc dismisses the transcript share question for Pro/Max users.
+  useInput((_input, key, event) => {
+    if (key.escape) {
+      event.stopImmediatePropagation();
+      handleSelect('no');
+    }
+  });
 
   useDebouncedDigitInput({
     inputValue,

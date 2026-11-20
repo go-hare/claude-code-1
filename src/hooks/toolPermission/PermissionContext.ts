@@ -22,7 +22,12 @@ import type {
   ToolUseContext,
 } from '../../Tool.js'
 import { awaitClassifierAutoApproval } from '@claude-code/builtin-tools/tools/BashTool/bashPermissions.js'
+import {
+  recordSandboxStateAtHookRewrite,
+  shouldUseSandbox,
+} from '@claude-code/builtin-tools/tools/BashTool/shouldUseSandbox.js'
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
+import { POWERSHELL_TOOL_NAME } from '@claude-code/builtin-tools/tools/PowerShellTool/toolName.js'
 import type { AssistantMessage } from '../../types/message.js'
 import type {
   PendingClassifierCheck,
@@ -447,12 +452,57 @@ function createPermissionContext(
                   }
                   return denyUnanswerable
                 }
+                // Official 2.1.328 #671: record rewritten sandbox state before
+                // reprompting so if the user approves the rewritten command, it
+                // runs with the rewritten command's sandbox decision.
+                if (
+                  tool.name === BASH_TOOL_NAME ||
+                  tool.name === POWERSHELL_TOOL_NAME
+                ) {
+                  const shellType =
+                    tool.name === POWERSHELL_TOOL_NAME ? 'powershell' : 'bash'
+                  const rewrittenSandboxInput = {
+                    ...(finalInput as {
+                      command?: string
+                      dangerouslyDisableSandbox?: boolean
+                    }),
+                    shellType: shellType as 'bash' | 'powershell',
+                  }
+                  recordSandboxStateAtHookRewrite(
+                    toolUseID,
+                    rewrittenSandboxInput,
+                    shouldUseSandbox(rewrittenSandboxInput),
+                  )
+                }
                 return {
                   type: 'reprompt',
                   reprompted: recheck,
                   finalInput,
                 }
               }
+            }
+            // Official 2.1.328 #671: if a PermissionRequest hook rewrites a
+            // Bash/PowerShell command to a sandbox-excluded command, record the
+            // rewritten sandbox state so the command runs outside the sandbox.
+            if (
+              decision.updatedInput &&
+              (tool.name === BASH_TOOL_NAME ||
+                tool.name === POWERSHELL_TOOL_NAME)
+            ) {
+              const shellType =
+                tool.name === POWERSHELL_TOOL_NAME ? 'powershell' : 'bash'
+              const rewrittenSandboxInput = {
+                ...(finalInput as {
+                  command?: string
+                  dangerouslyDisableSandbox?: boolean
+                }),
+                shellType: shellType as 'bash' | 'powershell',
+              }
+              recordSandboxStateAtHookRewrite(
+                toolUseID,
+                rewrittenSandboxInput,
+                shouldUseSandbox(rewrittenSandboxInput),
+              )
             }
             return await this.handleHookAllow(
               finalInput,

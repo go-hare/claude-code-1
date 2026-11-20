@@ -100,3 +100,44 @@ export function isForkSubagentEnabled(input?: {
   const src = resolveForkSubagentSource(input)
   return src === 'env' || src === 'default'
 }
+
+/**
+ * Official 2.1.328 (#669) `tengu_graceful_pudding` (default `true`):
+ * In `claude -p`, Agent SDK, Claude Desktop, and VS Code, when
+ * `CLAUDE_CODE_FORK_SUBAGENT=0`, subagents wait for their own background
+ * subagents by default before returning so results are not dropped.
+ */
+export function shouldSubagentWaitForOwnSubagents(input?: {
+  env?: NodeJS.ProcessEnv
+  isNonInteractive?: boolean
+  entrypoint?: string
+  gbValue?: boolean
+}): boolean {
+  const env = input?.env ?? process.env
+  if (!isEnvDefinedFalsy(env.CLAUDE_CODE_FORK_SUBAGENT)) {
+    return false
+  }
+  const entrypoint = input?.entrypoint ?? env.CLAUDE_CODE_ENTRYPOINT ?? ''
+  const isHostNonInteractiveOrIde =
+    input?.isNonInteractive === true ||
+    entrypoint === 'sdk-cli' ||
+    entrypoint === 'sdk-ts' ||
+    entrypoint === 'sdk-py' ||
+    entrypoint === 'claude-vscode' ||
+    entrypoint === 'claude-desktop' ||
+    entrypoint === 'desktop'
+  if (!isHostNonInteractiveOrIde) {
+    return false
+  }
+  if (input?.gbValue !== undefined) {
+    return input.gbValue
+  }
+  try {
+    const { getFeatureValue_CACHED_MAY_BE_STALE } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../services/analytics/growthbook.js') as typeof import('../services/analytics/growthbook.js')
+    return getFeatureValue_CACHED_MAY_BE_STALE('tengu_graceful_pudding', true)
+  } catch {
+    return true
+  }
+}

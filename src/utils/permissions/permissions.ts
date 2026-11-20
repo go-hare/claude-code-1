@@ -26,6 +26,7 @@ import {
   autoModeHasDenyRules,
   buildUnfinishedCheckAsk,
   formatNonInteractiveAskCauseMessage,
+  hasBypassImmuneNonClassifierAlsoBreaker,
   hasClassifierRoutedSafetyCheck,
   hasUnwaivableBypassImmuneSafetyCheck,
   isClassifierRoutedSafetyCheck,
@@ -38,7 +39,10 @@ import { workflowNeedsUsageConsentPrompt } from './workflowUsageConsent.js'
 import { isSessionBypassClass } from './planBypass.js'
 import type { Tool, ToolPermissionContext, ToolUseContext } from '../../Tool.js'
 import { AGENT_TOOL_NAME } from '@claude-code/builtin-tools/tools/AgentTool/constants.js'
-import { shouldUseSandbox } from '@claude-code/builtin-tools/tools/BashTool/shouldUseSandbox.js'
+import {
+  recordSandboxStateAtHookRewrite,
+  shouldUseSandbox,
+} from '@claude-code/builtin-tools/tools/BashTool/shouldUseSandbox.js'
 import { BASH_TOOL_NAME } from '@claude-code/builtin-tools/tools/BashTool/toolName.js'
 import { POWERSHELL_TOOL_NAME } from '@claude-code/builtin-tools/tools/PowerShellTool/toolName.js'
 import { REPL_TOOL_NAME } from '@claude-code/builtin-tools/tools/REPLTool/constants.js'
@@ -129,7 +133,15 @@ import { getSettingsForSource } from '../settings/settings.js'
 import type { SettingSource } from '../settings/constants.js'
 import { getToolPermissionContextFromLayers } from '../../engine/permissionLayerReaders.js'
 import { getAgentContext } from '../agentContext.js'
-import { clearCommandScopedAllowRules } from './permissionSetup.js'
+import {
+  applyBlockWritesOutsideWorkingDirectories,
+  clearCommandScopedAllowRules,
+} from './permissionSetup.js'
+import { settingsHaveBlockWritesOutsideWorkingDirectories } from './filesystem.js'
+import {
+  accountMemoryHookRewriteDenied,
+  didAccountMemoryHookRewriteInput,
+} from '../hooks/toolCallManagedPass.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -239,6 +251,113 @@ export function isAutoModeDroppedHearthbotAllow(toolName: string): boolean {
   return HEARTHBOT_AUTO_DROPPED_ALLOW_TOOLS.has(toolName)
 }
 
+/**
+ * Official 2.1.327 (#441, SEA `J` / `Se` WeakMap):
+ * Cache parsed permission rules and a per-tool index (`withContentByToolName`)
+ * per rule-string array so sessions with tens of thousands of connector tool
+ * permissions do not re-parse every rule string on every tool call / turn.
+ */
+type ParsedRuleBucket = {
+  readonly rules: readonly PermissionRule[]
+  readonly withContentByToolName: ReadonlyMap<string, readonly PermissionRule[]>
+}
+
+type CachedRuleBucketEntry = {
+  readonly source: PermissionRuleSource
+  readonly ruleBehavior: PermissionBehavior
+  readonly ruleStrings: readonly string[]
+  readonly parsed: ParsedRuleBucket
+}
+
+const parsedRuleBucketCache = new WeakMap<
+  readonly string[],
+  CachedRuleBucketEntry
+>()
+
+function clonePermissionRule(rule: PermissionRule): PermissionRule {
+  return {
+    source: rule.source,
+    ruleBehavior: rule.ruleBehavior,
+    ruleValue: { ...rule.ruleValue },
+  }
+}
+
+function getParsedRuleBucket(
+  rawRules: readonly string[],
+  source: PermissionRuleSource,
+  ruleBehavior: PermissionBehavior,
+): ParsedRuleBucket {
+  const cached = parsedRuleBucketCache.get(rawRules)
+  if (
+    cached !== undefined &&
+    cached.source === source &&
+    cached.ruleBehavior === ruleBehavior &&
+    cached.ruleStrings.length === rawRules.length
+  ) {
+    let same = true
+    for (let i = 0; i < rawRules.length; i++) {
+      if (cached.ruleStrings[i] !== rawRules[i]) {
+        same = false
+        break
+      }
+    }
+    if (same) {
+      return cached.parsed
+    }
+  }
+
+  const snapshot = rawRules.slice()
+  const rules: PermissionRule[] = []
+  const withContentByToolName = new Map<string, PermissionRule[]>()
+  for (const ruleString of snapshot) {
+    const ruleValue = Object.freeze(permissionRuleValueFromString(ruleString))
+    const rule: PermissionRule = Object.freeze({
+      source,
+      ruleBehavior,
+      ruleValue,
+    })
+    rules.push(rule)
+    if (ruleValue.ruleContent !== undefined) {
+      const bucket = withContentByToolName.get(ruleValue.toolName)
+      if (bucket === undefined) {
+        withContentByToolName.set(ruleValue.toolName, [rule])
+      } else {
+        bucket.push(rule)
+      }
+    }
+  }
+  const parsed: ParsedRuleBucket = { rules, withContentByToolName }
+  parsedRuleBucketCache.set(rawRules, {
+    source,
+    ruleBehavior,
+    ruleStrings: snapshot,
+    parsed,
+  })
+  return parsed
+}
+
+function collectRulesForBehavior(
+  rulesBySource: Partial<Record<PermissionRuleSource, readonly string[]>>,
+  sources: readonly PermissionRuleSource[],
+  behavior: PermissionBehavior,
+  onlyWithContentForTool?: string,
+): PermissionRule[] {
+  const out: PermissionRule[] = []
+  for (const source of sources) {
+    const rawRules = rulesBySource[source]
+    if (!rawRules || rawRules.length === 0) continue
+    const bucket = getParsedRuleBucket(rawRules, source, behavior)
+    const slice =
+      onlyWithContentForTool !== undefined
+        ? (bucket.withContentByToolName.get(onlyWithContentForTool) ?? [])
+        : bucket.rules
+    for (const rule of slice) {
+      out.push(rule)
+    }
+  }
+  return out
+}
+
 export function getAllowRules(
   context: ToolPermissionContext,
 ): PermissionRule[] {
@@ -253,25 +372,23 @@ export function getAllowRules(
   const sources = isEvalConfined()
     ? (['cliArg'] as const satisfies readonly PermissionRuleSource[])
     : PERMISSION_RULE_SOURCES
-  return sources.flatMap(source =>
-    (context.alwaysAllowRules[source] || []).flatMap(ruleString => {
-      const ruleValue = permissionRuleValueFromString(ruleString)
-      if (
-        filterBroadRules &&
-        (isBroadRule(ruleValue.toolName, ruleValue.ruleContent) ||
-          isAutoModeDroppedHearthbotAllow(ruleValue.toolName))
-      ) {
-        return []
-      }
-      return [
-        {
-          source,
-          ruleBehavior: 'allow' as const,
-          ruleValue,
-        },
-      ]
-    }),
+  const rules = collectRulesForBehavior(
+    context.alwaysAllowRules,
+    sources,
+    'allow',
   )
+  const out: PermissionRule[] = []
+  for (const rule of rules) {
+    if (
+      filterBroadRules &&
+      (isBroadRule(rule.ruleValue.toolName, rule.ruleValue.ruleContent) ||
+        isAutoModeDroppedHearthbotAllow(rule.ruleValue.toolName))
+    ) {
+      continue
+    }
+    out.push(clonePermissionRule(rule))
+  }
+  return out
 }
 
 type SafetyCheckDecisionReason = Extract<
@@ -505,23 +622,19 @@ export function createPermissionRequestMessage(
 }
 
 export function getDenyRules(context: ToolPermissionContext): PermissionRule[] {
-  return PERMISSION_RULE_SOURCES.flatMap(source =>
-    (context.alwaysDenyRules[source] || []).map(ruleString => ({
-      source,
-      ruleBehavior: 'deny',
-      ruleValue: permissionRuleValueFromString(ruleString),
-    })),
-  )
+  return collectRulesForBehavior(
+    context.alwaysDenyRules,
+    PERMISSION_RULE_SOURCES,
+    'deny',
+  ).map(clonePermissionRule)
 }
 
 export function getAskRules(context: ToolPermissionContext): PermissionRule[] {
-  return PERMISSION_RULE_SOURCES.flatMap(source =>
-    (context.alwaysAskRules[source] || []).map(ruleString => ({
-      source,
-      ruleBehavior: 'ask',
-      ruleValue: permissionRuleValueFromString(ruleString),
-    })),
-  )
+  return collectRulesForBehavior(
+    context.alwaysAskRules,
+    PERMISSION_RULE_SOURCES,
+    'ask',
+  ).map(clonePermissionRule)
 }
 
 const MCP_PREFIX = 'mcp__'
@@ -1149,32 +1262,68 @@ export function getRuleByContentsForToolName(
   behavior: PermissionBehavior,
 ): Map<string, PermissionRule> {
   const ruleByContents = new Map<string, PermissionRule>()
-  let rules: PermissionRule[] = []
-  switch (behavior) {
-    case 'allow':
-      rules = getAllowRules(context)
-      break
-    case 'deny':
-      rules = getDenyRules(context)
-      break
-    case 'ask':
-      rules = getAskRules(context)
-      break
+  const sources =
+    behavior === 'allow' && isEvalConfined()
+      ? (['cliArg'] as const satisfies readonly PermissionRuleSource[])
+      : PERMISSION_RULE_SOURCES
+  const filterBroadRules =
+    behavior === 'allow' &&
+    isAutoModeFilteringActive(
+      context.mode,
+      autoModeStateModule?.isAutoModeActive() ?? false,
+      context.servedCall === true,
+    )
+  const rulesBySource =
+    behavior === 'allow'
+      ? context.alwaysAllowRules
+      : behavior === 'deny'
+        ? context.alwaysDenyRules
+        : context.alwaysAskRules
+
+  // Official 2.1.327 (#441, SEA `ROe`/`Pe`): O(1) per-tool bucket lookup for
+  // exact tool names so tens of thousands of connector tool permissions never
+  // slow down Bash/Read/Edit/etc. lookups on every turn.
+  const isMcpOrArtifactTool =
+    toolName.startsWith(MCP_PREFIX) ||
+    standsInForBuiltInArtifactToolName(toolName)
+
+  if (behavior === 'allow' || !isMcpOrArtifactTool) {
+    const matchingRules = collectRulesForBehavior(
+      rulesBySource,
+      sources,
+      behavior,
+      toolName,
+    )
+    for (const rule of matchingRules) {
+      if (rule.ruleValue.ruleContent === undefined) continue
+      if (
+        filterBroadRules &&
+        (isBroadRule(rule.ruleValue.toolName, rule.ruleValue.ruleContent) ||
+          isAutoModeDroppedHearthbotAllow(rule.ruleValue.toolName))
+      ) {
+        continue
+      }
+      ruleByContents.set(rule.ruleValue.ruleContent, clonePermissionRule(rule))
+    }
+    return ruleByContents
   }
-  for (const rule of rules) {
+
+  // For MCP/Artifact deny/ask queries, also check aliased tool names using
+  // the cached parsed buckets (still avoids re-parsing all strings).
+  const candidateRules = collectRulesForBehavior(
+    rulesBySource,
+    sources,
+    behavior,
+  )
+  for (const rule of candidateRules) {
     if (
       rule.ruleValue.ruleContent !== undefined &&
-      rule.ruleBehavior === behavior &&
       (rule.ruleValue.toolName === toolName ||
-        (behavior !== 'allow' &&
-          (matchesConnectorAliasForDenyOrAsk(
-            toolName,
-            rule.ruleValue.toolName,
-          ) ||
-            (rule.ruleValue.toolName === 'Artifact' &&
-              standsInForBuiltInArtifactToolName(toolName)))))
+        matchesConnectorAliasForDenyOrAsk(toolName, rule.ruleValue.toolName) ||
+        (rule.ruleValue.toolName === 'Artifact' &&
+          standsInForBuiltInArtifactToolName(toolName)))
     ) {
-      ruleByContents.set(rule.ruleValue.ruleContent, rule)
+      ruleByContents.set(rule.ruleValue.ruleContent, clonePermissionRule(rule))
     }
   }
   return ruleByContents
@@ -1242,7 +1391,78 @@ async function runPermissionRequestHooksForHeadlessAgent(
         continue
       }
       if (decision.behavior === 'allow') {
-        const finalInput = decision.updatedInput ?? input
+        const nonEmptyUpdatedInput =
+          decision.updatedInput !== undefined &&
+          Object.keys(decision.updatedInput).length > 0
+            ? decision.updatedInput
+            : undefined
+        const finalInput = nonEmptyUpdatedInput ?? input
+        if (
+          decision.updatedInput !== undefined &&
+          didAccountMemoryHookRewriteInput(
+            tool,
+            input,
+            decision.updatedInput,
+            true,
+          )
+        ) {
+          const denial = accountMemoryHookRewriteDenied(
+            tool,
+            'PermissionRequest',
+          )
+          return {
+            behavior: 'deny',
+            message: denial.message,
+            decisionReason: {
+              type: 'hook',
+              hookName: 'PermissionRequest',
+              reason: denial.message,
+            },
+          }
+        }
+        if (nonEmptyUpdatedInput !== undefined) {
+          const objection = await checkRuleBasedPermissions(
+            tool,
+            finalInput,
+            context,
+            { crashIsObjection: true },
+          )
+          if (objection !== null) {
+            return objection.behavior === 'ask'
+              ? {
+                  behavior: 'deny',
+                  message: objection.message,
+                  decisionReason: objection.decisionReason ?? {
+                    type: 'hook',
+                    hookName: 'PermissionRequest',
+                    reason: objection.message,
+                  },
+                }
+              : objection
+          }
+        }
+        // Official 2.1.328 #671: if a PermissionRequest hook rewrites a shell
+        // command to a sandbox-excluded command, record the rewritten sandbox
+        // state so the command runs outside the sandbox.
+        if (
+          nonEmptyUpdatedInput !== undefined &&
+          (tool.name === BASH_TOOL_NAME || tool.name === POWERSHELL_TOOL_NAME)
+        ) {
+          const shellType =
+            tool.name === POWERSHELL_TOOL_NAME ? 'powershell' : 'bash'
+          const rewrittenSandboxInput = {
+            ...(finalInput as {
+              command?: string
+              dangerouslyDisableSandbox?: boolean
+            }),
+            shellType: shellType as 'bash' | 'powershell',
+          }
+          recordSandboxStateAtHookRewrite(
+            toolUseID,
+            rewrittenSandboxInput,
+            shouldUseSandbox(rewrittenSandboxInput),
+          )
+        }
         // Persist permission updates if provided
         if (decision.updatedPermissions?.length) {
           persistPermissionUpdates(decision.updatedPermissions as any)
@@ -2058,11 +2278,54 @@ export function askIsHeldForQueuedMessage(
   }
 }
 
+const MAX_RECORDED_PIPELINE_RESULTS = 256
+const permissionPipelineResultsByToolUseId = new Map<
+  string,
+  PermissionDecision
+>()
+
+/**
+ * Record the post-pipeline `hasPermissionsToUseTool` result for a tool use so
+ * `toolExecution.ts` can surface the real pipeline outcome (e.g. `ask` with
+ * `personOnly: true` vs a rule/mode/classifier `allow`) to `tool.call`
+ * (official 2.1.328 `permissionPhase.pipeline.result`).
+ */
+export function recordPermissionPipelineResult(
+  toolUseID: string | undefined,
+  decision: PermissionDecision,
+): void {
+  if (!toolUseID) return
+  permissionPipelineResultsByToolUseId.set(toolUseID, decision)
+  if (
+    permissionPipelineResultsByToolUseId.size > MAX_RECORDED_PIPELINE_RESULTS
+  ) {
+    const oldest = permissionPipelineResultsByToolUseId.keys().next().value
+    if (oldest !== undefined) {
+      permissionPipelineResultsByToolUseId.delete(oldest)
+    }
+  }
+}
+
+export function consumePermissionPipelineResult(
+  toolUseID: string | undefined,
+): PermissionDecision | undefined {
+  if (!toolUseID) return undefined
+  const result = permissionPipelineResultsByToolUseId.get(toolUseID)
+  permissionPipelineResultsByToolUseId.delete(toolUseID)
+  return result
+}
+
 export const hasPermissionsToUseTool: CanUseToolFn = async (...args) => {
-  const before = detachedLetGoPermissionDeny(args[4])
-  if (before) return before
+  const toolUseID = args[4]
+  const before = detachedLetGoPermissionDeny(toolUseID)
+  if (before) {
+    recordPermissionPipelineResult(toolUseID, before)
+    return before
+  }
   const result = await evaluateToolPermission(...args)
-  return detachedLetGoPermissionDeny(args[4]) ?? result
+  const finalResult = detachedLetGoPermissionDeny(toolUseID) ?? result
+  recordPermissionPipelineResult(toolUseID, finalResult)
+  return finalResult
 }
 
 const evaluateToolPermission: CanUseToolFn = async (
@@ -2076,15 +2339,21 @@ const evaluateToolPermission: CanUseToolFn = async (
   const letGoDeny = detachedLetGoPermissionDeny(toolUseID)
   if (letGoDeny) return letGoDeny
 
+  const evalContext =
+    toolUseID && context.toolUseId !== toolUseID
+      ? { ...context, toolUseId: toolUseID }
+      : context
+
   const result =
     forceDecision !== undefined
       ? forceDecision
       : await evaluatePermissionWithToolCheck({
           tool,
           input,
-          context,
+          context: evalContext,
           toolUseID,
-          evaluate: () => hasPermissionsToUseToolInner(tool, input, context),
+          evaluate: () =>
+            hasPermissionsToUseToolInner(tool, input, evalContext),
         })
 
   // Reset consecutive denials on any allowed tool use in auto mode.
@@ -2169,7 +2438,11 @@ const evaluateToolPermission: CanUseToolFn = async (
         result.decisionReason,
         check =>
           !check.classifierApprovable &&
-          !(isClassifierRoutedSafetyCheck(check) && autoContext),
+          !(
+            isClassifierRoutedSafetyCheck(check) &&
+            !hasBypassImmuneNonClassifierAlsoBreaker(check) &&
+            autoContext
+          ),
       )
       if (forcedSafetyCheck) {
         if (layeredPermissionContext.shouldAvoidPermissionPrompts) {
@@ -3271,7 +3544,7 @@ function handleDenialLimitExceeded(
     toolName: sanitizeToolNameForAnalytics(tool.name),
   })
 
-  if (isHeadless) {
+  if (avoidsPromptsByNature(effectivePermCtx)) {
     throw new AbortError(
       'Agent aborted: too many classifier denials in headless mode',
     )
@@ -3348,8 +3621,10 @@ export async function checkRuleBasedPermissions(
   context: ToolUseContext,
   options?: { crashIsObjection?: boolean; planModeWriteFloor?: boolean },
 ): Promise<PermissionAskDecision | PermissionDenyDecision | null> {
-  // densable bn: sticky layers overlay for rule-based checks
-  const toolPermissionContext = getEffectiveToolPermissionContext(context)
+  // densable bn: sticky layers overlay + plugin tool.list deny rules for rule-based checks
+  const toolPermissionContext = applyPluginToolListDenyRules(
+    getEffectiveToolPermissionContext(context),
+  )
 
   // 1a. Entire tool is denied by rule
   const denyRule = getDenyRuleForTool(
@@ -3963,7 +4238,11 @@ export function syncPermissionRulesFromDisk(
   }
 
   const updates = convertRulesToUpdates(rules, 'replaceRules')
-  return applyPermissionUpdates(context, updates)
+  let next = applyPermissionUpdates(context, updates)
+  if (settingsHaveBlockWritesOutsideWorkingDirectories()) {
+    next = applyBlockWritesOutsideWorkingDirectories(next)
+  }
+  return next
 }
 
 /**

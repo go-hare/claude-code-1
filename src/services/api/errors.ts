@@ -937,7 +937,37 @@ export function getTokenRevokedErrorMessage(): string {
     : TOKEN_REVOKED_ERROR_MESSAGE
 }
 
+export const OAUTH_CONSOLE_SAVED_SIGN_IN_ERROR_MESSAGE =
+  'Claude Code can\'t use the Anthropic Console sign-in saved on this computer, usually because it isn\'t for a Console account · Run /login and select "Claude account with subscription", or set up a Console account at https://platform.claude.com and run /login again, or use an Anthropic API key instead'
+
+export const OAUTH_CONSOLE_SAVED_SIGN_IN_FORCED_CONSOLE_ERROR_MESSAGE =
+  "Claude Code can't use the Anthropic Console sign-in saved on this computer, usually because it isn't for a Console account · Run /login and sign in with a Console account · To get one, go to https://platform.claude.com or ask your administrator"
+
 export function getOauthOrgNotAllowedErrorMessage(): string {
+  // Official 2.1.327 (#472, SEA `$ds`): when an implicit user_oauth profile
+  // (saved Console sign-in) hits org-not-allowed, use the Console saved
+  // sign-in copy and never point to "Claude account with subscription" when
+  // `forceLoginMethod` resolves to `'console'`.
+  try {
+    const { isProfileAuthActive, isProfileImplicitUserOauth } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('../../utils/anthropicProfile.js') as typeof import('../../utils/anthropicProfile.js')
+    if (
+      isProfileAuthActive({
+        storedClaudeAiLogin: Boolean(getClaudeAIOAuthTokens()?.accessToken),
+      }) &&
+      isProfileImplicitUserOauth()
+    ) {
+      const { resolveEffectiveForceLoginMethod } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('../../utils/forceLoginMethod.js') as typeof import('../../utils/forceLoginMethod.js')
+      return resolveEffectiveForceLoginMethod() === 'console'
+        ? OAUTH_CONSOLE_SAVED_SIGN_IN_FORCED_CONSOLE_ERROR_MESSAGE
+        : OAUTH_CONSOLE_SAVED_SIGN_IN_ERROR_MESSAGE
+    }
+  } catch {
+    // Fall through to subscription/org error message
+  }
   const subscriptionType = getSubscriptionType()
   if (subscriptionType === 'pro' || subscriptionType === 'max') {
     return OAUTH_SUBSCRIPTION_BILLING_ERROR_MESSAGE
@@ -1510,6 +1540,37 @@ export function isDlpRequestDeniedError(error: unknown): boolean {
   )
 }
 
+/**
+ * Official 2.1.328 `pB` / `R0n` (#564): detect `extra_usage_out_of_credits`
+ * error code (which can arrive mid-stream without an HTTP status).
+ */
+export const EXTRA_USAGE_OUT_OF_CREDITS_CODE = 'extra_usage_out_of_credits'
+
+export function isExtraUsageOutOfCreditsError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  if (
+    error instanceof APIError &&
+    error.error &&
+    typeof error.error === 'object'
+  ) {
+    const body = error.error as {
+      code?: unknown
+      error?: { code?: unknown; type?: unknown }
+    }
+    if (
+      body.code === EXTRA_USAGE_OUT_OF_CREDITS_CODE ||
+      body.error?.code === EXTRA_USAGE_OUT_OF_CREDITS_CODE
+    ) {
+      return true
+    }
+  }
+  const code = (error as { code?: unknown }).code
+  if (code === EXTRA_USAGE_OUT_OF_CREDITS_CODE) {
+    return true
+  }
+  return error.message.includes(EXTRA_USAGE_OUT_OF_CREDITS_CODE)
+}
+
 function attachApiErrorFields(
   message: AssistantMessage,
   error: unknown,
@@ -1591,6 +1652,20 @@ function buildAssistantMessageFromError(
   if (error instanceof ImageSizeError || error instanceof ImageResizeError) {
     return createAssistantAPIErrorMessage({
       content: getImageTooLargeErrorMessage(),
+    })
+  }
+
+  // Official 2.1.328 (#564) `R0n(e) && e.status === void 0`:
+  // When usage credits run out mid-response, the SSE error arrives without an
+  // HTTP status (`status === undefined`). Show the dedicated usage-credits
+  // message instead of falling through to a rate limit error.
+  if (
+    isExtraUsageOutOfCreditsError(error) &&
+    !(error instanceof APIError && error.status !== undefined)
+  ) {
+    return createAssistantAPIErrorMessage({
+      content: `${API_ERROR_MESSAGE_PREFIX}: Usage credits ran out before the response was finished.`,
+      error: 'unknown',
     })
   }
 
@@ -3069,7 +3144,7 @@ export function decideContext1mBetaRetry(params: {
   error: unknown
   phase: Context1mBetaRetryPhase
   context1mBetaSent: boolean
-  isKnownNative1mModel?: boolean
+  isDirectAnthropicProvider?: boolean
   isFirstParty?: boolean
 }): {
   action: 'retry:context-1m-beta' | null
@@ -3079,7 +3154,7 @@ export function decideContext1mBetaRetry(params: {
     error,
     phase,
     context1mBetaSent,
-    isKnownNative1mModel = false,
+    isDirectAnthropicProvider = false,
     isFirstParty = false,
   } = params
   if (!(error instanceof APIError) || error.status !== 400) {
@@ -3097,7 +3172,7 @@ export function decideContext1mBetaRetry(params: {
   }
   if (
     !context1mBetaSent ||
-    isKnownNative1mModel ||
+    isDirectAnthropicProvider ||
     !(explicit || (vague && !isFirstParty))
   ) {
     return { action: null, nextPhase: phase }

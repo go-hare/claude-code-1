@@ -9,6 +9,11 @@ import { access, stat } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { basename, join } from 'node:path'
 import { getPostSessionHookInFlight } from './postSessionInFlight.js'
+import {
+  isAnthropicManagedGitActiveForPhase,
+  stripAnthropicManagedGitEnv,
+  type WrapperScriptPhase,
+} from '../utils/agentProxy/ghShim.js'
 import { redactLogText, withTimeoutMs } from './rootRunner.js'
 import { remoteSessionUuidFromId } from './sessionChild.js'
 
@@ -372,12 +377,16 @@ export function mapSourcesForCheckout(
   return out
 }
 
-/** densable `D2h` — strip pool secrets from hook child env */
+/** densable `D2h` — strip pool secrets and non-active Anthropic-managed git env (#679) from hook child env */
 export function buildHookBaseEnv(
   env: NodeJS.ProcessEnv = process.env,
+  phase: WrapperScriptPhase = 'before_session_claude',
 ): NodeJS.ProcessEnv {
+  const baseEnv = isAnthropicManagedGitActiveForPhase(phase)
+    ? env
+    : stripAnthropicManagedGitEnv(env)
   return {
-    ...env,
+    ...baseEnv,
     SELF_HOSTED_RUNNER_POOL_SECRET: undefined,
     SELF_HOSTED_RUNNER_ENVIRONMENT_SECRET: undefined,
     CCR_AUTO_MODE_APPLY: undefined,
@@ -463,14 +472,56 @@ export type CheckoutHookOpts = {
 }
 
 /**
+ * Official 2.1.328 `Uan` (#680) — both `CLAUDE_RUNNER_SESSION_UUID` and
+ * `CLAUDE_CODE_REMOTE_SESSION_UUID` are set for the session and its `checkout`,
+ * `post-session`, and `spawn-runner` hooks.
+ */
+export function runnerSessionUuidEnv(sessionUuid: string | undefined): {
+  CLAUDE_RUNNER_SESSION_UUID?: string
+  CLAUDE_CODE_REMOTE_SESSION_UUID?: string
+} {
+  if (!sessionUuid) return {}
+  return {
+    CLAUDE_RUNNER_SESSION_UUID: sessionUuid,
+    CLAUDE_CODE_REMOTE_SESSION_UUID: sessionUuid,
+  }
+}
+
+/** Official 2.1.328 `zd` (#638) — 25s final save budget & extended disk-stall probe for post-session hook. */
+export const POST_SESSION_FINAL_SAVE_BUDGET_MS = 25_000
+export const POST_SESSION_DISK_PROBE_BASE_MS = 10_000
+export const POST_SESSION_DISK_PROBE_MAX_MS = 60_000
+
+/**
+ * Official 2.1.328 (#638): when a post-session hook or final checkpoint is
+ * configured, give the session-folder liveness probe up to
+ * `max(10s, min(60s, floor(postSessionTimeoutMs / 2)))` (typically 30s — 25s
+ * longer than a 5s probe on a dead disk) so brief disk stalls don't skip the
+ * post-session hook.
+ */
+export function computePostSessionDiskProbeTimeoutMs(
+  postSessionTimeoutMs: number,
+  hasPostSessionHookOrSave: boolean,
+): number {
+  const extended = Math.max(
+    POST_SESSION_DISK_PROBE_BASE_MS,
+    Math.min(
+      POST_SESSION_DISK_PROBE_MAX_MS,
+      Math.floor(postSessionTimeoutMs / 2),
+    ),
+  )
+  return hasPostSessionHookOrSave ? extended : POST_SESSION_DISK_PROBE_BASE_MS
+}
+
+/**
  * densable `H2h` — run checkout hook; require checkoutPath dir (+ .git unless skip).
  */
 export async function runCheckoutHook(opts: CheckoutHookOpts): Promise<void> {
   const spawnFn = opts.spawnFn ?? spawn
   const env: NodeJS.ProcessEnv = {
-    ...buildHookBaseEnv(),
+    ...buildHookBaseEnv(process.env, 'before_session_claude'),
     CLAUDE_RUNNER_SESSION_ID: opts.sessionId.replace(/^cse_/, 'session_'),
-    CLAUDE_RUNNER_SESSION_UUID: remoteSessionUuidFromId(opts.sessionId),
+    ...runnerSessionUuidEnv(remoteSessionUuidFromId(opts.sessionId)),
     CLAUDE_RUNNER_REPO_URL: opts.repoUrl,
     CLAUDE_RUNNER_REPO_REF: opts.repoRef ?? '',
     CLAUDE_RUNNER_CHECKOUT_PATH: opts.checkoutPath,
@@ -787,9 +838,9 @@ export async function runPostSessionHook(
   const spawnFn = opts.spawnFn ?? spawn
   const clientPlatformEnv = formatClientPlatformForEnv(opts.clientPlatform)
   const env: NodeJS.ProcessEnv = {
-    ...buildHookBaseEnv(),
+    ...buildHookBaseEnv(process.env, 'after_session_claude'),
     CLAUDE_RUNNER_SESSION_ID: opts.sessionId.replace(/^cse_/, 'session_'),
-    CLAUDE_RUNNER_SESSION_UUID: remoteSessionUuidFromId(opts.sessionId),
+    ...runnerSessionUuidEnv(remoteSessionUuidFromId(opts.sessionId)),
     CLAUDE_RUNNER_EXIT_REASON: opts.exitReason,
     CLAUDE_RUNNER_DEBUG_LOG_PATH: opts.debugLogPath,
     CLAUDE_RUNNER_WORKSPACE_PATHS: opts.workspacePaths.join(':'),

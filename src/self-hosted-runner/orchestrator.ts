@@ -35,6 +35,7 @@ import {
   type SpawnHint,
 } from './runnerApi.js'
 import { parseDenseInt, redactLogText, withTimeoutMs } from './rootRunner.js'
+import { runnerSessionUuidEnv } from './sessionHooks.js'
 import { assertOrchestratorProxyAuthUnset } from './egressProxyAuth.js'
 import {
   startScmConnector,
@@ -115,6 +116,131 @@ export const ORCH_POLL_ERROR_KINDS = [
   '4xx',
 ] as const
 
+/**
+ * Official 2.1.328 (#552) `Xzi` — spawn reason series for
+ * `claude_code_self_hosted_orchestrator_session_queue_wait_by_reason_seconds`.
+ */
+export const ORCH_SPAWN_REASONS = [
+  'session_created',
+  'no_runner_registered',
+  'hook_failed',
+  'runner_lost',
+  'runner_reported_failure',
+  'resumed',
+  'requeued',
+  'server_retry',
+  'prewarm',
+  'other',
+  'none',
+] as const
+
+export type OrchSpawnReason = (typeof ORCH_SPAWN_REASONS)[number]
+
+const KNOWN_ORCH_SPAWN_REASONS = new Set<string>(
+  ORCH_SPAWN_REASONS.filter(r => r !== 'none' && r !== 'other'),
+)
+
+/** Official 2.1.328 (#552) `Jzi` — bucket a raw `spawn_reason` into the fixed label set. */
+export function classifyOrchestratorSpawnReason(raw: unknown): OrchSpawnReason {
+  if (typeof raw !== 'string' || raw.length === 0) return 'none'
+  if (KNOWN_ORCH_SPAWN_REASONS.has(raw)) return raw as OrchSpawnReason
+  return 'other'
+}
+
+/**
+ * Official 2.1.328 (#553) `wt()` — give-up causes for
+ * `claude_code_self_hosted_orchestrator_sessions_given_up_total`.
+ */
+export type SessionsGivenUpCounts = {
+  lease_expiry: number
+  hook_declined: number
+  retries_exhausted: number
+}
+
+export function emptySessionsGivenUp(): SessionsGivenUpCounts {
+  return {
+    lease_expiry: 0,
+    hook_declined: 0,
+    retries_exhausted: 0,
+  }
+}
+
+/**
+ * Official 2.1.328 (#550) `--hook-label` validation & env extraction (`Pe`/`Ie`/`Ae`/`Ce`/`De`/`pe`/`Me`/`ce`/`he`).
+ */
+export type HookLabelRule = Set<string> | { min: number; max: number }
+
+const HOOK_LABEL_KEY_RE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$/
+const HOOK_LABEL_WORD_RE = /^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$/
+const HOOK_LABEL_RANGE_RE = /^(0|[1-9][0-9]{0,8})\.\.(0|[1-9][0-9]{0,8})$/
+const HOOK_LABEL_INT_RE = /^(?:0|[1-9][0-9]{0,8})$/
+const HOOK_LABEL_DISALLOWED_WORD_RE = /^(?:any|[0-9]+-[0-9]+)$/
+
+export function parseHookLabelSpec(raw: string): [string, HookLabelRule] {
+  const [label = '', values = '', ...extra] = raw.split('=')
+  if (HOOK_LABEL_KEY_RE.test(label) && extra.length === 0) {
+    const rangeMatch = HOOK_LABEL_RANGE_RE.exec(values)
+    if (rangeMatch === null) {
+      const words = values.split(',')
+      if (
+        words.every(
+          w =>
+            HOOK_LABEL_WORD_RE.test(w) &&
+            !HOOK_LABEL_DISALLOWED_WORD_RE.test(w),
+        )
+      ) {
+        return [label, new Set(words)]
+      }
+    } else if (Number(rangeMatch[1]) <= Number(rangeMatch[2])) {
+      return [label, { min: Number(rangeMatch[1]), max: Number(rangeMatch[2]) }]
+    }
+  }
+  throw new Error(
+    `--hook-label cannot read "${raw}". It takes words, as in size=small,large, or a range from low to high, as in cpus=1..64, of up to nine digits with no leading zero. A label: lower-case letters and digits, single "_" between, first a letter. A word: letters and digits, single ".", "_" or "-" between, not "any" or 1-64.`,
+  )
+}
+
+export function isHookLabelValueAllowed(
+  rule: HookLabelRule,
+  value: unknown,
+): boolean {
+  if (typeof value !== 'string') return false
+  if ('min' in rule) {
+    return (
+      HOOK_LABEL_INT_RE.test(value) &&
+      Number(value) >= rule.min &&
+      Number(value) <= rule.max
+    )
+  }
+  return rule.has(value)
+}
+
+/** Official 2.1.328 (#550) `ce`: thrown when a session label is not allowed by `--hook-label`. */
+export class HookLabelDisallowedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'HookLabelDisallowedError'
+  }
+}
+
+export function buildHookLabelEnv(
+  hookLabels: ReadonlyMap<string, HookLabelRule>,
+  metadata: Record<string, { value?: string } | string> | undefined,
+): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = {}
+  for (const [label, rule] of hookLabels) {
+    const rawEntry = metadata?.[label]
+    const value = typeof rawEntry === 'string' ? rawEntry : rawEntry?.value
+    if (value !== undefined && !isHookLabelValueAllowed(rule, value)) {
+      throw new HookLabelDisallowedError(
+        `the session's label "${label}" has a value that --hook-label does not allow`,
+      )
+    }
+    out[`CLAUDE_RUNNER_META_${label.toUpperCase()}`] = value
+  }
+  return out
+}
+
 export type ScmConnectorConfig = {
   host: string
   port: number
@@ -160,6 +286,26 @@ export function emptySessionQueueWaits(): OrchHistogram {
   }
 }
 
+/** Official 2.1.328 (#552) `Nt()` */
+export function emptySessionQueueWaitsByReason(): Record<
+  OrchSpawnReason,
+  OrchHistogram
+> {
+  return {
+    session_created: emptySessionQueueWaits(),
+    no_runner_registered: emptySessionQueueWaits(),
+    hook_failed: emptySessionQueueWaits(),
+    runner_lost: emptySessionQueueWaits(),
+    runner_reported_failure: emptySessionQueueWaits(),
+    resumed: emptySessionQueueWaits(),
+    requeued: emptySessionQueueWaits(),
+    server_retry: emptySessionQueueWaits(),
+    prewarm: emptySessionQueueWaits(),
+    other: emptySessionQueueWaits(),
+    none: emptySessionQueueWaits(),
+  }
+}
+
 /** densable `Aqv` */
 export function observeSpawnHookDuration(
   h: OrchHistogram,
@@ -197,6 +343,8 @@ export type OrchestratorArgs = {
   hookConcurrency: number
   hookTimeoutMs: number
   expectedSpawnSeconds: number
+  /** Official 2.1.328 (#550) `--hook-label` allow-list map. */
+  hookLabels?: Map<string, HookLabelRule>
   minIdle: number
   debugDir: string | undefined
   logLevel: string
@@ -405,6 +553,7 @@ function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
 
 /** densable `jFh` */
 export function parseOrchestratorArgs(argv: string[]): OrchestratorArgs {
+  const hookLabels = new Map<string, HookLabelRule>()
   const t: OrchestratorArgs = {
     apiUrl: ORCH_DEFAULT_API_URL,
     hooksDir: process.env.SELF_HOSTED_RUNNER_HOOKS_DIR
@@ -418,6 +567,7 @@ export function parseOrchestratorArgs(argv: string[]): OrchestratorArgs {
     hookConcurrency: ORCH_DEFAULT_HOOK_CONCURRENCY,
     hookTimeoutMs: ORCH_DEFAULT_HOOK_TIMEOUT_MS,
     expectedSpawnSeconds: ORCH_DEFAULT_EXPECTED_SPAWN_SECONDS,
+    hookLabels,
     minIdle: 0,
     debugDir: process.env.SELF_HOSTED_RUNNER_DEBUG_DIR,
     logLevel: 'info',
@@ -513,6 +663,22 @@ export function parseOrchestratorArgs(argv: string[]): OrchestratorArgs {
           i++
         }
         break
+      case '--hook-label': {
+        const [label, rule] = parseHookLabelSpec(val ?? '')
+        if (argv[i + 2]?.startsWith('-') === false) {
+          throw new Error(
+            '--hook-label takes one argument: put commas between the words, as in size=small,large, and give each label a flag of its own',
+          )
+        }
+        if (hookLabels.has(label)) {
+          throw new Error(
+            '--hook-label names one label twice: give all its values in one flag, as in size=small,large',
+          )
+        }
+        hookLabels.set(label, rule)
+        i++
+        break
+      }
       case '--min-idle':
         if (val) {
           const d = parseInt(val, 10)
@@ -624,6 +790,12 @@ export function parseOrchestratorArgs(argv: string[]): OrchestratorArgs {
     )
   }
 
+  if (hookLabels.size > 0 && t.minIdle > 0) {
+    throw new Error(
+      '--hook-label cannot be used with --min-idle: a standby runner ignores the labels of the session that it takes. Remove one of the two',
+    )
+  }
+
   if (
     t.hookTimeoutMs + ORCH_SIGKILL_GRACE_MS >=
     t.expectedSpawnSeconds * 1000
@@ -709,6 +881,13 @@ export function extractSpawnHintClaims(
     revision: s.revision ?? '',
   }))
   const attempt = coerceAttempt(hint.attempt)
+  const metaCorr = hint.metadata?.correlation_id
+  const metaCorrStr =
+    typeof metaCorr === 'string'
+      ? metaCorr
+      : typeof metaCorr?.value === 'string'
+        ? metaCorr.value
+        : ''
   return {
     jti: String(hint.jti || str('jti') || ''),
     session_id: String(hint.session_uuid ?? ''),
@@ -721,7 +900,9 @@ export function extractSpawnHintClaims(
     primary_repo_url: sources[0]?.url ?? '',
     primary_repo_revision: sources[0]?.revision ?? '',
     correlation_id:
-      typeof hint.correlation_id === 'string' ? hint.correlation_id : '',
+      typeof hint.correlation_id === 'string' && hint.correlation_id.length > 0
+        ? hint.correlation_id
+        : metaCorrStr,
   }
 }
 
@@ -819,6 +1000,8 @@ export type RunSpawnRunnerHookOpts = {
   hookPath: string
   jwt: string
   claims: SpawnHintClaims
+  /** Official 2.1.328 (#550): `CLAUDE_RUNNER_META_<LABEL>` env map from `--hook-label`. */
+  labels?: Record<string, string | undefined>
   timeoutMs: number
   debugDir?: string
   signal?: AbortSignal
@@ -913,7 +1096,7 @@ export async function runSpawnRunnerHook(
     CLAUDE_RUNNER_WORK_ORDER_FILE: workOrderFile,
     CLAUDE_RUNNER_ORDER_ID: claims.jti,
     CLAUDE_RUNNER_SESSION_ID: claims.session_id,
-    CLAUDE_RUNNER_SESSION_UUID: claims.session_id,
+    ...runnerSessionUuidEnv(claims.session_id),
     CLAUDE_RUNNER_ATTEMPT: String(claims.attempt),
     ...(safeSpawnReason !== undefined
       ? { CLAUDE_RUNNER_SPAWN_REASON: safeSpawnReason }
@@ -927,6 +1110,7 @@ export async function runSpawnRunnerHook(
     CLAUDE_RUNNER_REPO_SOURCES:
       claims.repo_sources.length > 0 ? JSON.stringify(claims.repo_sources) : '',
     CLAUDE_RUNNER_CORRELATION_ID: claims.correlation_id,
+    ...(opts.labels ?? {}),
   }
 
   let stderrTail = ''
@@ -1231,6 +1415,10 @@ export type OrchestratorHealthState = {
   spawnHookDurations: OrchHistogram
   /** densable qFh — present always; seat hints only */
   sessionQueueWaits: OrchHistogram
+  /** Official 2.1.328 (#552) — seat queue waits split by spawn reason */
+  sessionQueueWaitsByReason?: Record<OrchSpawnReason, OrchHistogram>
+  /** Official 2.1.328 (#553) — sessions given up by cause */
+  sessionsGivenUp?: SessionsGivenUpCounts
   /** densable RFh — null when --scm-connector-host unset */
   scm_connector: ScmConnectorHealth | null
 }
@@ -1309,10 +1497,33 @@ export function renderOrchestratorMetrics(
     out += `claude_code_self_hosted_orchestrator_session_queue_wait_seconds_sum ${a.sum}\n`
     out += `claude_code_self_hosted_orchestrator_session_queue_wait_seconds_count ${a.count}\n`
   }
+  out += `# HELP claude_code_self_hosted_orchestrator_session_queue_wait_by_reason_seconds Seconds a session waited in the queue before the orchestrator claimed it: the observations of claude_code_self_hosted_orchestrator_session_queue_wait_seconds, by the reason Anthropic gave for the spawn hint (CLAUDE_RUNNER_SPAWN_REASON). reason="session_created": a new session, first try; reason="resumed": a released or paused session that was re-opened, first try. A retry counts under its own reason. reason="none": no reason given; reason="other": a reason this version does not know.\n`
+  out += `# TYPE claude_code_self_hosted_orchestrator_session_queue_wait_by_reason_seconds histogram\n`
+  {
+    const byReason =
+      state.sessionQueueWaitsByReason ?? emptySessionQueueWaitsByReason()
+    for (const reason of ORCH_SPAWN_REASONS) {
+      const h = byReason[reason]
+      for (let i = 0; i < ORCH_SESSION_QUEUE_WAIT_BUCKETS.length; i++) {
+        out += `claude_code_self_hosted_orchestrator_session_queue_wait_by_reason_seconds_bucket{reason="${reason}",le="${ORCH_SESSION_QUEUE_WAIT_BUCKETS[i]}"} ${h.buckets[i]}\n`
+      }
+      out += `claude_code_self_hosted_orchestrator_session_queue_wait_by_reason_seconds_bucket{reason="${reason}",le="+Inf"} ${h.count}\n`
+      out += `claude_code_self_hosted_orchestrator_session_queue_wait_by_reason_seconds_sum{reason="${reason}"} ${h.sum}\n`
+      out += `claude_code_self_hosted_orchestrator_session_queue_wait_by_reason_seconds_count{reason="${reason}"} ${h.count}\n`
+    }
+  }
   out += `# HELP claude_code_self_hosted_orchestrator_poll_errors_total PollSpawnHints request failures by error kind (transport=no HTTP response; timeout=client deadline; 5xx/429/4xx by status). All five series present from process start so rate() works and absent() means process-down.\n`
   out += `# TYPE claude_code_self_hosted_orchestrator_poll_errors_total counter\n`
   for (const kind of ORCH_POLL_ERROR_KINDS) {
     out += `claude_code_self_hosted_orchestrator_poll_errors_total{error_kind="${kind}"} ${state.pollErrors[kind]}\n`
+  }
+  out += `# HELP claude_code_self_hosted_orchestrator_sessions_given_up_total Times since process start that Anthropic gave up starting a runner for a session, as its answers to this orchestrator said. lease_expiry: at least ten tries in a row gave no runner, the last because none registered in time. retries_exhausted: at least ten in a row gave none, the last by a retryable failure that this orchestrator reported. Tries that never reached an orchestrator count among the ten. hook_declined: this orchestrator reported a non-retryable failure (the hook exited 2 or more, could not be executed, or was not run because a session label has a value that --hook-label does not allow). Each give-up is counted by at most one instance; SUM across instances.\n`
+  out += `# TYPE claude_code_self_hosted_orchestrator_sessions_given_up_total counter\n`
+  {
+    const givenUp = state.sessionsGivenUp ?? emptySessionsGivenUp()
+    for (const [cause, count] of Object.entries(givenUp)) {
+      out += `claude_code_self_hosted_orchestrator_sessions_given_up_total{cause="${cause}"} ${count}\n`
+    }
   }
   out += `# HELP claude_code_self_hosted_orchestrator_clock_skew_seconds Local-minus-server clock skew from the most recent PollSpawnHints Date header. Sample omitted until measured.\n`
   out += `# TYPE claude_code_self_hosted_orchestrator_clock_skew_seconds gauge\n`
@@ -1484,6 +1695,24 @@ export async function runOrchestratorLoop(
       ? AbortSignal.timeout(5000)
       : signal
 
+  const hookLabels = args.hookLabels ?? new Map<string, HookLabelRule>()
+  const sessionsGivenUp =
+    healthState.sessionsGivenUp ??
+    (healthState.sessionsGivenUp = emptySessionsGivenUp())
+  const sessionQueueWaitsByReason =
+    healthState.sessionQueueWaitsByReason ??
+    (healthState.sessionQueueWaitsByReason = emptySessionQueueWaitsByReason())
+
+  const nackHint = async (
+    body: Parameters<SelfHostedRunnerApi['nackSpawnHint']>[0],
+    sig: AbortSignal,
+  ): Promise<void> => {
+    const res = await apiClient.nackSpawnHint(body, sig)
+    if (res?.gave_up) {
+      sessionsGivenUp[body.retryable ? 'retries_exhausted' : 'hook_declined']++
+    }
+  }
+
   let backoff = ORCH_POLL_BACKOFF_INITIAL_MS
 
   while (!stopSignal.aborted && !signal.aborted) {
@@ -1556,6 +1785,7 @@ export async function runOrchestratorLoop(
       poll.pool_pending_session_count ?? null
     healthState.pool_active_session_count =
       poll.pool_active_session_count ?? null
+    sessionsGivenUp.lease_expiry += poll.given_up_count ?? 0
 
     const take = poll.hints.slice(0, args.hookConcurrency)
     const over = poll.hints.slice(args.hookConcurrency)
@@ -1563,21 +1793,19 @@ export async function runOrchestratorLoop(
       onStatus(
         `[runner:orchestrator] server over-returned hint session=${hint.session_uuid} (got ${poll.hints.length}, max=${args.hookConcurrency}) — nacking retryably`,
       )
-      await apiClient
-        .nackSpawnHint(
-          {
-            session_uuid: hint.session_uuid,
-            attempt: hint.attempt,
-            error: 'orchestrator: server over-returned hints (>max)',
-            retryable: true,
-          },
-          signal,
-        )
-        .catch(err =>
-          onStatus(
-            `[runner:orchestrator] nack of over-returned hint failed: ${errMsg(err)} — lease expiry will re-admit`,
-          ),
-        )
+      await nackHint(
+        {
+          session_uuid: hint.session_uuid,
+          attempt: hint.attempt,
+          error: 'orchestrator: server over-returned hints (>max)',
+          retryable: true,
+        },
+        signal,
+      ).catch(err =>
+        onStatus(
+          `[runner:orchestrator] nack of over-returned hint failed: ${errMsg(err)} — lease expiry will re-admit`,
+        ),
+      )
     }
 
     const warmBudget = Math.max(0, args.hookConcurrency - take.length)
@@ -1612,21 +1840,19 @@ export async function runOrchestratorLoop(
         )
       }
       for (const hint of handBackHints) {
-        await apiClient
-          .nackSpawnHint(
-            {
-              session_uuid: hint.session_uuid,
-              attempt: hint.attempt,
-              error: 'orchestrator: shutting down during drain',
-              retryable: true,
-            },
-            nackSignal(),
-          )
-          .catch(err =>
-            onStatus(
-              `[runner:orchestrator] stop: handback nack failed: ${errMsg(err)}`,
-            ),
-          )
+        await nackHint(
+          {
+            session_uuid: hint.session_uuid,
+            attempt: hint.attempt,
+            error: 'orchestrator: shutting down during drain',
+            retryable: true,
+          },
+          nackSignal(),
+        ).catch(err =>
+          onStatus(
+            `[runner:orchestrator] stop: handback nack failed: ${errMsg(err)}`,
+          ),
+        )
       }
     }
 
@@ -1648,21 +1874,24 @@ export async function runOrchestratorLoop(
     ): Promise<void> => {
       healthState.last_hint_at = Date.now()
       if (isWarm) healthState.warm_hints_dispatched++
-      // densable Rqv — seat hints only (queue_wait_started_at vs HTTP Date)
+      // densable Rqv + Official 2.1.328 (#552) — seat hints only
       if (!isWarm) {
         const startedAt = hint.queue_wait_started_at
-        if (
-          typeof startedAt === 'string' &&
-          startedAt.length > 0 &&
-          typeof serverDate === 'string' &&
-          serverDate.length > 0
-        ) {
+        if (typeof startedAt === 'string' && startedAt.length > 0) {
           const a = Date.parse(startedAt)
-          const b = Date.parse(serverDate)
-          if (!Number.isNaN(a) && !Number.isNaN(b)) {
+          const parsedServer =
+            typeof serverDate === 'string' && serverDate.length > 0
+              ? Date.parse(serverDate)
+              : Date.now()
+          const b = Number.isFinite(parsedServer) ? parsedServer : Date.now()
+          if (Number.isFinite(a) && Number.isFinite(b)) {
+            const waitSec = (b - a) / 1000
+            observeSessionQueueWait(healthState.sessionQueueWaits, waitSec)
             observeSessionQueueWait(
-              healthState.sessionQueueWaits,
-              (b - a) / 1000,
+              sessionQueueWaitsByReason[
+                classifyOrchestratorSpawnReason(hint.spawn_reason)
+              ],
+              waitSec,
             )
           }
         }
@@ -1676,10 +1905,12 @@ export async function runOrchestratorLoop(
         if (typeof claimReason === 'string' && claimReason.length > 0) {
           dispatchReason = sanitizeSpawnReason(claimReason) ?? claimReason
         }
+        const labels = buildHookLabelEnv(hookLabels, hint.metadata)
         result = await runHook({
           hookPath,
           jwt: hint.work_order_jwt,
           claims,
+          labels,
           timeoutMs: args.hookTimeoutMs,
           debugDir: args.debugDir,
           signal,
@@ -1690,7 +1921,7 @@ export async function runOrchestratorLoop(
       } catch (err) {
         result = {
           ok: false,
-          exitCode: 1,
+          exitCode: err instanceof HookLabelDisallowedError ? 2 : 1,
           timedOut: false,
           execError: false,
           stderrTail: `spawn-runner hook setup failed: ${errMsg(err)}`,
@@ -1745,7 +1976,7 @@ export async function runOrchestratorLoop(
         `[runner:orchestrator] nack session=${hint.session_uuid} attempt=${hint.attempt} exit=${result.exitCode} timedOut=${result.timedOut} retryable=${retryable} reason=${dispatchReason}: ${errText}`,
       )
       try {
-        await apiClient.nackSpawnHint(
+        await nackHint(
           {
             session_uuid: hint.session_uuid,
             attempt: hint.attempt,
@@ -1794,6 +2025,12 @@ Hook:
   --hook-concurrency <n>      Max spawn-runner hooks running in parallel (default: ${ORCH_DEFAULT_HOOK_CONCURRENCY}).
                               Also caps how many hints are claimed per poll.
   --hook-timeout <sec>        SIGTERM the hook after <sec> seconds (default: ${ORCH_DEFAULT_HOOK_TIMEOUT_MS / 1000}).
+  --hook-label <label>=<values>
+                              Hand this entry of a session's metadata to the hook as
+                              CLAUDE_RUNNER_META_<LABEL>. <values>: words (size=small,large) or a
+                              range of whole numbers (cpus=1..64). For a session with another value
+                              the hook does not run. Repeatable, once for each label; --min-idle
+                              must be 0.
   --expected-spawn-seconds <n>  p99 boot time for runners this orchestrator spawns
                               (default: ${ORCH_DEFAULT_EXPECTED_SPAWN_SECONDS}). Sent on every Poll as the
                               server-side lease; if the runner doesn't register before then, the
@@ -1936,6 +2173,8 @@ export async function selfHostedRunnerOrchestratorMain(
     pollErrors: emptyRunnerErrorCounts(),
     spawnHookDurations: emptySpawnHookDurations(),
     sessionQueueWaits: emptySessionQueueWaits(),
+    sessionQueueWaitsByReason: emptySessionQueueWaitsByReason(),
+    sessionsGivenUp: emptySessionsGivenUp(),
     scm_connector: args.scmConnector ? emptyScmConnectorHealth() : null,
   }
 

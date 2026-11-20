@@ -22,8 +22,8 @@
  * ON returns true | undefined (never false).
  */
 
+import { firstPartyNameToCanonical } from './canonicalName.js'
 import { DENSABLE_EHL_CATALOG } from './densableEhlCatalog.219.js'
-import { firstPartyNameToCanonical } from './model.js'
 
 export type DensablePricingTierRaw = {
   readonly input: number
@@ -32,6 +32,15 @@ export type DensablePricingTierRaw = {
   readonly cache_write_1h?: number
   readonly cache_read?: number
   readonly web_search?: number
+  readonly long_prompt?: {
+    readonly above_prompt_tokens: number
+    readonly input: number
+    readonly output: number
+    readonly cache_write_5m?: number
+    readonly cache_write_1h?: number
+    readonly cache_read?: number
+    readonly web_search?: number
+  }
 }
 
 export type DensableProviderIds = {
@@ -60,6 +69,7 @@ export type DensableCatalogModel = {
   readonly fallback_3p?: string
   readonly context?: {
     readonly window: number
+    readonly maximum_window?: number
     readonly native_1m?: boolean
     readonly native_1m_3p?: {
       readonly bedrock?: true
@@ -67,6 +77,7 @@ export type DensableCatalogModel = {
       readonly foundry?: true
     }
     readonly supports_1m_beta?: boolean
+    readonly clamp_long_context_without_beta?: boolean
     readonly supports_1m_suffix?: boolean
   }
   readonly max_output_tokens?: {
@@ -76,9 +87,11 @@ export type DensableCatalogModel = {
   readonly pricing?: string | DensablePricingTierRaw
   readonly capabilities: readonly string[]
   readonly default_effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+  readonly effort_cost_index?: Readonly<Record<string, number>>
   readonly image_limits?: {
     readonly maxWidth?: number
     readonly maxHeight?: number
+    readonly maxImageTokens?: number
     readonly maxBase64Size?: number
   }
   readonly advisor_rank?: number
@@ -295,6 +308,15 @@ export type CatalogModelCosts = {
   promptCacheWrite1hTokens?: number
   promptCacheReadTokens: number
   webSearchRequests: number
+  longPrompt?: {
+    abovePromptTokens: number
+    inputTokens: number
+    outputTokens: number
+    promptCacheWriteTokens: number
+    promptCacheWrite1hTokens?: number
+    promptCacheReadTokens: number
+    webSearchRequests: number
+  }
 }
 
 export function nIcFromPricingTier(
@@ -307,6 +329,23 @@ export function nIcFromPricingTier(
     promptCacheWrite1hTokens: pricing.cache_write_1h,
     promptCacheReadTokens: pricing.cache_read ?? pricing.input * 0.1,
     webSearchRequests: pricing.web_search ?? 0.01,
+    ...(pricing.long_prompt
+      ? {
+          longPrompt: {
+            abovePromptTokens: pricing.long_prompt.above_prompt_tokens,
+            inputTokens: pricing.long_prompt.input,
+            outputTokens: pricing.long_prompt.output,
+            promptCacheWriteTokens:
+              pricing.long_prompt.cache_write_5m ??
+              pricing.long_prompt.input * 1.25,
+            promptCacheWrite1hTokens: pricing.long_prompt.cache_write_1h,
+            promptCacheReadTokens:
+              pricing.long_prompt.cache_read ?? pricing.long_prompt.input * 0.1,
+            webSearchRequests:
+              pricing.long_prompt.web_search ?? pricing.web_search ?? 0.01,
+          },
+        }
+      : {}),
   }
 }
 

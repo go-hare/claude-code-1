@@ -134,35 +134,80 @@ function quotedArtifactAddress(url: string): string {
   return JSON.stringify(shown)
 }
 
+const TOKEN_CARD_SPECS = [
+  { name: 'api/tokens.md', holds: 'palette, type, fonts' },
+  { name: 'tokens.json', holds: 'exact token values' },
+] as const
+
 /**
- * Gold `ue` — other token cards, after an attached design-system README.
- * Store uses `and`, not the `with` in `ay`.
+ * Gold `bIo` — partition expected token card paths into `present` and `absent`
+ * using the design system's `token_files` file listing when provided.
+ * When `tokenFiles` is not an array, assume both standard token files exist.
+ */
+export function partitionDesignSystemTokenFiles(
+  projectReadme: boolean,
+  tokenFiles: unknown,
+): {
+  present: Array<{ path: string; holds: string }>
+  absent: string[]
+} {
+  const prefix = projectReadme ? 'project/' : ''
+  const present: Array<{ path: string; holds: string }> = []
+  const absent: string[] = []
+  const knownFiles = Array.isArray(tokenFiles) ? tokenFiles : null
+  for (const spec of TOKEN_CARD_SPECS) {
+    const path = `${prefix}${spec.name}`
+    if (knownFiles === null || knownFiles.includes(path)) {
+      present.push({ path, holds: spec.holds })
+    } else {
+      absent.push(path)
+    }
+  }
+  return { present, absent }
+}
+
+/**
+ * Gold `ge` — other token cards, after an attached design-system README.
+ * Store uses `and`, not the `with` in `Ze`.
  */
 function otherTokenCards(
   url: string,
   store: boolean,
   projectReadme: boolean,
+  tokenFiles?: unknown,
 ): string {
   const shown = quotedArtifactAddress(url)
-  if (projectReadme) {
-    const action = isArtifactDamsonToolset()
-      ? 'action "read"'
-      : 'action "read_file"'
-    return `Its other cards are not attached: read one when you need it with ${action}, \`url\`: ${shown}, and a \`path\`: "project/api/tokens.md" (palette, type, fonts); "project/tokens.json" (exact token values); or, where the README's index is shown, a card it names, at "project/" followed by the path the index gives.`
-  }
-  if (store) {
+  if (store && !projectReadme) {
     const action = isArtifactDamsonToolset()
       ? 'the ArtifactData tool, action "get"'
       : 'action "read_db" and `db_op`: "get"'
     return `Its other cards are not attached: read one when you need it with ${action}, \`url\`: ${shown}, and a \`collection\` and \`doc_id\`: "api" and "tokens.md" (palette, type, fonts); "ds" and "tokens" (exact token values); "ds" and "meta" (the system's record). Where the README's index is shown, read a card it names by the collection and doc id the index gives.`
   }
-  const action = isArtifactDamsonToolset()
-    ? 'action "read"'
-    : 'action "read_file"'
-  return `Its other cards are not attached: read one when you need it with ${action}, \`url\`: ${shown}, and a \`path\`: "api/tokens.md" (palette, type, fonts); "tokens.json" (exact token values); or, where the README's index is shown, a card it names, by its path there.`
+  const { present, absent } = partitionDesignSystemTokenFiles(
+    projectReadme,
+    tokenFiles,
+  )
+  const actionWithUrl = `${
+    isArtifactDamsonToolset() ? 'action "read"' : 'action "read_file"'
+  }, \`url\`: ${shown}`
+  const absentNote = `Its file list has no ${absent.map(p => `"${p}"`).join(' and no ')}.`
+  if (present.length === 0) {
+    return `${absentNote} Where the README's index is shown, read a card it names with ${actionWithUrl}, and \`path\` set to ${
+      projectReadme
+        ? '"project/" followed by the path the index gives'
+        : 'its path there'
+    }.`
+  }
+  return `Its other cards are not attached: read one when you need it with ${actionWithUrl}, and a \`path\`: ${present
+    .map(g => `"${g.path}" (${g.holds}); `)
+    .join('')}or, where the README's index is shown, a card it names, ${
+    projectReadme
+      ? 'at "project/" followed by the path the index gives'
+      : 'by its path there'
+  }.${absent.length === 0 ? '' : ` ${absentNote}`}`
 }
 
-/** Gold `ay` analog — token cards; store uses read_db collection api/ds. */
+/** Gold `Ze` analog — token cards; store uses read_db collection api/ds. */
 function tokenCards(bag: Record<string, unknown>): string {
   const system = asRecord(bag.design_system)
   if (system === undefined || typeof system.url !== 'string') return ''
@@ -175,15 +220,25 @@ function tokenCards(bag: Record<string, unknown>): string {
     return ` In the same message, read that design system's token cards — ${action}, \`url\`: ${url}, once with \`collection\`: "api", \`doc_id\`: "tokens.md" and once with \`collection\`: "ds", \`doc_id\`: "tokens" — since the type's instructions will ask for them.`
   }
   const docs = Array.isArray(system.docs) ? system.docs : []
-  const projectPrefix = docs.some(
+  const projectReadme = docs.some(
     doc => asRecord(doc)?.path === 'project/README.md',
   )
-    ? 'project/'
-    : ''
+  const { present } = partitionDesignSystemTokenFiles(
+    projectReadme,
+    system.token_files,
+  )
+  if (present.length === 0) return ''
   const action = isArtifactDamsonToolset()
     ? 'action "read"'
     : 'action "read_file"'
-  return ` In the same message, read that design system's token cards — ${action}, \`url\`: ${url}, once with \`path\`: "${projectPrefix}api/tokens.md" and once with \`path\`: "${projectPrefix}tokens.json" — since the type's instructions will ask for them.`
+  const singular = present.length === 1
+  return ` In the same message, read that design system's token ${
+    singular ? 'card' : 'cards'
+  } — ${action}, \`url\`: ${url}, ${present
+    .map(c => `${singular ? '' : 'once with '}\`path\`: "${c.path}"`)
+    .join(' and ')} — since the type's instructions will ask for ${
+    singular ? 'it' : 'them'
+  }.`
 }
 
 function designSystemsNotListedNote(note: string): string {
@@ -284,7 +339,7 @@ function defaultReadmeAttachment(bag: Record<string, unknown>): {
   )
   const cards =
     typeof system.url === 'string'
-      ? `${otherTokenCards(system.url, system.store === true, projectReadme)}\n\n`
+      ? `${otherTokenCards(system.url, system.store === true, projectReadme, system.token_files)}\n\n`
       : ''
   return { attached: true, text: `\n\n${cards}${parts.join('\n\n')}` }
 }

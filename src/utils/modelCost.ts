@@ -27,8 +27,8 @@ import {
   expandTigModelCosts,
   DENSABLE_PRICING_TIERS_FROM_CATALOG,
 } from './model/modelCatalogCapabilities.js'
+import { firstPartyNameToCanonical } from './model/canonicalName.js'
 import {
-  firstPartyNameToCanonical,
   getCanonicalName,
   getDefaultMainLoopModelSetting,
   type ModelShortName,
@@ -162,15 +162,78 @@ export const COST_TIER_30_150 = {
   webSearchRequests: 0.01,
 } as const satisfies ModelCosts
 
+/**
+ * Official 2.1.328 HK — fast-mode pricing for claude-opus-5-5 ($8/$40,
+ * 5m write $10, 1h write $16, cache read $0.40).
+ */
+export const COST_TIER_8_40 = {
+  inputTokens: 8,
+  outputTokens: 40,
+  promptCacheWriteTokens: 10,
+  promptCacheWrite1hTokens: 16,
+  promptCacheReadTokens: 0.4,
+  webSearchRequests: 0.01,
+} as const satisfies ModelCosts
+
+/**
+ * Official 2.1.328 GK — fast-mode pricing for claude-fable-5-2 and
+ * claude-mythos-5-2 ($16/$80, 5m write $20, 1h write $32, cache read $0.40).
+ */
+export const COST_TIER_16_80 = {
+  inputTokens: 16,
+  outputTokens: 80,
+  promptCacheWriteTokens: 20,
+  promptCacheWrite1hTokens: 32,
+  promptCacheReadTokens: 0.4,
+  webSearchRequests: 0.01,
+} as const satisfies ModelCosts
+
 const DEFAULT_UNKNOWN_MODEL_COST = COST_TIER_5_25
 
 /**
- * densable GHt(e) — picker pricing when fast mode is globally enabled (`vl()`).
- *   opus-5 | opus-4-8 → u7n ($10/$50)
- *   else → LIc ($30/$150)
- * When fast is off / disabled, densable returns Uot[e]??d7n ($5/$25 for current Opus).
+ * Official 2.1.328 Yv(e) — fast-mode cost tier lookup by canonical model name.
+ */
+function getFastModeCostTier(
+  shortName: ModelShortName,
+): ModelCosts | undefined {
+  if (
+    shortName === firstPartyNameToCanonical('claude-fable-5-2') ||
+    shortName === firstPartyNameToCanonical('claude-mythos-5-2')
+  ) {
+    return COST_TIER_16_80
+  }
+  if (
+    shortName === firstPartyNameToCanonical(CLAUDE_OPUS_5_5_CONFIG.firstParty)
+  ) {
+    return COST_TIER_8_40
+  }
+  if (
+    shortName ===
+      firstPartyNameToCanonical(CLAUDE_OPUS_4_8_CONFIG.firstParty) ||
+    shortName === firstPartyNameToCanonical(CLAUDE_OPUS_5_CONFIG.firstParty)
+  ) {
+    return COST_TIER_10_50
+  }
+  if (
+    shortName ===
+      firstPartyNameToCanonical(CLAUDE_OPUS_4_6_CONFIG.firstParty) ||
+    shortName === firstPartyNameToCanonical(CLAUDE_OPUS_4_7_CONFIG.firstParty)
+  ) {
+    return COST_TIER_30_150
+  }
+  return undefined
+}
+
+/**
+ * Official 2.1.328 els(e) / GHt(e) — picker pricing when fast mode is enabled.
+ *   fable-5-2 | mythos-5-2 → GK ($16/$80)
+ *   opus-5-5 → HK ($8/$40)
+ *   opus-5 | opus-4-8 → V_ ($10/$50)
+ *   else → Kv ($30/$150)
+ * When fast is off / disabled, returns MODEL_COSTS[model] ?? COST_TIER_5_25
+ * (e.g. $4/$20 for claude-opus-5-5, $5/$25 for opus-5/4.7/4.8).
  *
- * @param model Canonical or full model id for the picker row (required for correct GHt).
+ * @param model Canonical or full model id for the picker row.
  * @param fastMode Whether this row is showing the fast-mode price column.
  */
 export function getOpus46CostTier(
@@ -178,32 +241,17 @@ export function getOpus46CostTier(
   model?: string,
 ): ModelCosts {
   if (!(isFastModeEnabled() && fastMode)) {
+    if (model) {
+      return MODEL_COSTS[toCostCanonical(model)] ?? COST_TIER_5_25
+    }
     return COST_TIER_5_25
   }
-  // densable GHt(e). When model omitted (e.g. /fast UI defaulting to Opus 5),
-  // treat as opus-5 → u7n — densable /fast copy is Opus 5, not LIc fallthrough.
+  // When model omitted (e.g. /fast UI defaulting to Opus 5), keep COST_TIER_10_50.
   if (!model) {
     return COST_TIER_10_50
   }
   const shortName = toCostCanonical(model)
-  const opus55 = firstPartyNameToCanonical(CLAUDE_OPUS_5_5_CONFIG.firstParty)
-  if (shortName === opus55) {
-    // densable Qg — opus-5-5 fast ($8/$40)
-    return {
-      inputTokens: 8,
-      outputTokens: 40,
-      promptCacheWriteTokens: 10,
-      promptCacheWrite1hTokens: 16,
-      promptCacheReadTokens: 0.4,
-      webSearchRequests: 0.01,
-    }
-  }
-  const opus5 = firstPartyNameToCanonical(CLAUDE_OPUS_5_CONFIG.firstParty)
-  const opus48 = firstPartyNameToCanonical(CLAUDE_OPUS_4_8_CONFIG.firstParty)
-  if (shortName === opus5 || shortName === opus48) {
-    return COST_TIER_10_50
-  }
-  return COST_TIER_30_150
+  return getFastModeCostTier(shortName) ?? COST_TIER_30_150
 }
 
 // @[MODEL LAUNCH]: Add a pricing entry for the new model below.
@@ -349,20 +397,15 @@ function tokensToUSDCost(modelCosts: ModelCosts, usage: Usage): number {
  *   else → Uot / MODEL_COSTS
  */
 export function getModelCosts(model: string, usage: Usage): ModelCosts {
-  // densable Pji: r=lo(e) — alias/override resolve then QO short name
+  // Official 2.1.328 Pji / Yv: resolve short name, apply fast-mode tier override.
   const shortName = toCostCanonical(model)
   const isFast = usage.speed === 'fast'
 
-  const opus5 = firstPartyNameToCanonical(CLAUDE_OPUS_5_CONFIG.firstParty)
-  const opus48 = firstPartyNameToCanonical(CLAUDE_OPUS_4_8_CONFIG.firstParty)
-  const opus46 = firstPartyNameToCanonical(CLAUDE_OPUS_4_6_CONFIG.firstParty)
-  const opus47 = firstPartyNameToCanonical(CLAUDE_OPUS_4_7_CONFIG.firstParty)
-
-  if (isFast && (shortName === opus5 || shortName === opus48)) {
-    return COST_TIER_10_50
-  }
-  if (isFast && (shortName === opus46 || shortName === opus47)) {
-    return COST_TIER_30_150
+  if (isFast) {
+    const fastTier = getFastModeCostTier(shortName)
+    if (fastTier) {
+      return fastTier
+    }
   }
 
   const costs = MODEL_COSTS[shortName]

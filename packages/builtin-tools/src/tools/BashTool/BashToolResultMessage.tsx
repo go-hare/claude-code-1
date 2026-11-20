@@ -11,7 +11,12 @@ import { useTerminalSize } from 'src/hooks/useTerminalSize.js';
 import { count } from 'src/utils/array.js';
 import { getDisplayPath } from 'src/utils/file.js';
 import { formatFileSize } from 'src/utils/format.js';
-import { commandHasGitStateSwitch, type BashEditDiff, type BashEditDiffHunk } from './bashEditDiff.js';
+import {
+  commandHasGitStateSwitch,
+  getOmittedBashEditDiffPaths,
+  type BashEditDiff,
+  type BashEditDiffHunk,
+} from './bashEditDiff.js';
 import type { Out as BashOut } from './BashTool.js';
 
 type Props = {
@@ -23,6 +28,7 @@ type Props = {
 };
 
 const MAX_BASH_DIFF_LINES = 40;
+const MAX_OMITTED_DIFF_NAMES = 3;
 const CONCURRENT_COMMAND_NOTE =
   '(another command ran in this repository at the same time; a change made by either may show under either result)';
 const TREE_MOVED_NOTE =
@@ -90,6 +96,7 @@ function BashEditDiffView({
       ? '(files that changed while this command ran, by the command or by another process; a convenience view, not a review or audit of the command)'
       : null;
   const sharedNote = diff.shared ? CONCURRENT_COMMAND_NOTE : null;
+  const omittedPaths = getOmittedBashEditDiffPaths(diff, verbose ? undefined : MAX_OMITTED_DIFF_NAMES);
   const hideBody = (style === 'condensed' || treeMoved) && !verbose;
   return (
     <Box flexDirection="column">
@@ -128,12 +135,25 @@ function BashEditDiffView({
       })}
       {diff.moreFiles > 0 ? (
         <MessageResponse>
-          <Text dimColor>
-            {diff.files.length > 0
-              ? `… ${diff.moreFiles} more ${diff.moreFiles === 1 ? 'file' : 'files'} changed`
-              : `${formatFileCount(diff.moreFiles)} changed (binary, mode only or too large to show)`}
-            {diff.unavailable ? ' (part of the diff is unavailable)' : ''}
-          </Text>
+          <Box flexDirection="column">
+            <Text dimColor>
+              {diff.files.length > 0
+                ? `… ${diff.moreFiles} more ${diff.moreFiles === 1 ? 'file' : 'files'} changed`
+                : `${formatFileCount(diff.moreFiles)} changed (binary, mode only or too large to show)`}
+              {diff.unavailable ? ' (part of the diff is unavailable)' : ''}
+            </Text>
+            {omittedPaths.map(filePath => (
+              <Text key={filePath} dimColor>
+                {verbose ? filePath : getDisplayPath(filePath)}
+              </Text>
+            ))}
+            {omittedPaths.length > 0 && diff.moreFiles > omittedPaths.length ? (
+              <Text dimColor>
+                … {diff.moreFiles - omittedPaths.length} more{' '}
+                {diff.moreFiles - omittedPaths.length === 1 ? 'file' : 'files'}
+              </Text>
+            ) : null}
+          </Box>
         </MessageResponse>
       ) : null}
       {treeMoved ? (

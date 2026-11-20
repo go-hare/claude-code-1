@@ -130,6 +130,7 @@ import {
 } from '../tokenEstimation.js'
 import { groupMessagesByApiRound } from './grouping.js'
 import { getRuntimeMainLoopModel } from '../../utils/model/model.js'
+import { getAPIProvider } from '../../utils/model/providers.js'
 import {
   collectToolNamesUsedBeforeCompact,
   COMPACT_REPLY_INSTRUCTIONS_TRAILER,
@@ -140,7 +141,9 @@ import {
   hasCompactSummaryBlock,
   hasCompactSummaryTag,
   hasUnclosedCompactSummaryTag,
+  LEFT_OUT_TOOL_RESULTS_NOTE,
   SUMMARY_DO_NOT_ANSWER_REMINDER,
+  TOOL_RESULT_LEFT_OUT_PREFIX,
 } from './prompt.js'
 import { isLongContextCreditsRequiredMessage } from './reactiveCompact.js'
 
@@ -565,88 +568,257 @@ export function truncateHeadForPTLRetry(
   return sliced
 }
 
-const COMPACT_LEFT_OUT_TOOL_RESULT_PLACEHOLDER =
-  '[Old tool result content cleared]'
+export { TOOL_RESULT_LEFT_OUT_PREFIX }
+
 const COMPACT_LEAVE_OUT_GAP_MULTIPLIER = 1.1
 const COMPACT_LEAVE_OUT_FRACTION = 0.5
 
 /**
- * Gold `NIn` / `EFt` (#1200): leave out the largest `tool_result` payloads
- * from a summary request when there are too few API-round groups (< 3) for
- * head truncation to make progress.
+ * Official 2.1.328 `R9r()` (#567):
+ * True for Claude Desktop sessions on third-party providers (excluding
+ * host-scheduled tasks), gated by `tengu_generic_papert` (defaulting to the
+ * 3P Desktop non-scheduled predicate).
+ */
+export function isThirdPartyDesktopLargeToolResultOmissionEnabled(opts?: {
+  env?: NodeJS.ProcessEnv
+  provider?: string
+  flagValue?: boolean
+}): boolean {
+  const env = opts?.env ?? process.env
+  const entrypoint = env.CLAUDE_CODE_ENTRYPOINT
+  const isDesktop3p =
+    isEnvTruthy(env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST) &&
+    (entrypoint === 'claude-desktop-3p' ||
+      (entrypoint === 'local-agent' &&
+        (env.CLAUDE_CODE_DESKTOP_APP_VERSION ?? '') === ''))
+  const isScheduledRun = isEnvTruthy(env.CLAUDE_CODE_HOST_SCHEDULED_RUN)
+  const provider = opts?.provider ?? getAPIProvider()
+  const isThirdParty = provider !== 'firstParty'
+  const defaultEnabled = isDesktop3p && !isScheduledRun && isThirdParty
+  if (opts?.flagValue !== undefined) {
+    return opts.flagValue
+  }
+  return getFeatureValue_CACHED_MAY_BE_STALE(
+    'tengu_generic_papert',
+    defaultEnabled,
+  )
+}
+
+function estimateToolResultChars(content: unknown): number {
+  if (typeof content === 'string') return content.length
+  if (Array.isArray(content)) {
+    let total = 0
+    for (const block of content) {
+      if (!block || typeof block !== 'object') continue
+      if (
+        'type' in block &&
+        block.type === 'text' &&
+        'text' in block &&
+        typeof block.text === 'string'
+      ) {
+        total += block.text.length
+      } else {
+        try {
+          total += JSON.stringify(block).length
+        } catch {
+          total += 1024
+        }
+      }
+    }
+    return total
+  }
+  return 0
+}
+
+function formatByteSizeForSummaryNote(chars: number): string {
+  if (chars >= 1_000_000) return `${(chars / 1_000_000).toFixed(1)} MB`
+  if (chars >= 1_000) return `${Math.round(chars / 1_000)} KB`
+  return `${chars} B`
+}
+
+export type OmitLargestToolResultsResult = {
+  messages: Message[]
+  leftOutIds: string[]
+  tokensFreed: number
+}
+
+/**
+ * Official 2.1.328 `c6n()` / `Sws()` (#567):
+ * Single consolidated PTL tool-result omission pass replacing the largest
+ * `tool_result` payloads with a bracketed `[Tool result left out: ...]`
+ * placeholder so compaction requests recover from "Prompt is too long".
+ */
+export function omitLargestToolResultsForSummary(
+  messages: Message[],
+  opts?: {
+    tokenGap?: number
+    omitAll?: boolean
+    alreadyLeftOut?: ReadonlySet<string>
+    bytesPerToken?: number
+  },
+): OmitLargestToolResultsResult | null {
+  const bytesPerToken = opts?.bytesPerToken ?? 3
+  const alreadyLeftOut = opts?.alreadyLeftOut ?? new Set<string>()
+  type Candidate = {
+    id: string
+    chars: number
+    tokens: number
+  }
+  const candidates: Candidate[] = []
+  for (const msg of messages) {
+    if (msg.type !== 'user') continue
+    const content = msg.message?.content
+    if (!Array.isArray(content)) continue
+    for (const block of content) {
+      if (
+        !block ||
+        typeof block !== 'object' ||
+        block.type !== 'tool_result' ||
+        typeof block.tool_use_id !== 'string'
+      ) {
+        continue
+      }
+      if (alreadyLeftOut.has(block.tool_use_id)) continue
+      if (
+        typeof block.content === 'string' &&
+        block.content.startsWith(TOOL_RESULT_LEFT_OUT_PREFIX)
+      ) {
+        continue
+      }
+      const chars = estimateToolResultChars(block.content)
+      if (chars <= 0) continue
+      candidates.push({
+        id: block.tool_use_id,
+        chars,
+        tokens: Math.ceil(chars / bytesPerToken),
+      })
+    }
+  }
+  if (candidates.length === 0) return null
+
+  const totalTokens = candidates.reduce((acc, c) => acc + c.tokens, 0)
+  const targetTokens = opts?.omitAll
+    ? Number.POSITIVE_INFINITY
+    : opts?.tokenGap !== undefined && opts.tokenGap > 0
+      ? opts.tokenGap * COMPACT_LEAVE_OUT_GAP_MULTIPLIER
+      : totalTokens * COMPACT_LEAVE_OUT_FRACTION
+
+  const sorted = [...candidates].sort((a, b) => b.tokens - a.tokens)
+  const replacements = new Map<string, string>()
+  let freed = 0
+  for (const item of sorted) {
+    if (freed >= targetTokens && replacements.size > 0) break
+    replacements.set(
+      item.id,
+      `${TOOL_RESULT_LEFT_OUT_PREFIX} too large for this summary request (${formatByteSizeForSummaryNote(item.chars)}). The call was made and may have had effects; its output is not available.]`,
+    )
+    freed += item.tokens
+  }
+  if (replacements.size === 0) return null
+
+  const rewritten = messages.map(msg => {
+    if (msg.type !== 'user' || !Array.isArray(msg.message?.content)) {
+      return msg
+    }
+    let changed = false
+    const nextContent = msg.message.content.map(block => {
+      if (
+        block &&
+        typeof block === 'object' &&
+        block.type === 'tool_result' &&
+        typeof block.tool_use_id === 'string'
+      ) {
+        const placeholder = replacements.get(block.tool_use_id)
+        if (placeholder !== undefined) {
+          changed = true
+          return { ...block, content: placeholder }
+        }
+      }
+      return block
+    })
+    return changed
+      ? ({
+          ...msg,
+          message: { ...msg.message, content: nextContent },
+        } as Message)
+      : msg
+  })
+
+  return {
+    messages: rewritten,
+    leftOutIds: [...replacements.keys()],
+    tokensFreed: freed,
+  }
+}
+
+/** Official 2.1.328 `QTa()` (#567): check whether leaving out tool results can recover PTL. */
+export function canOmitToolResultsToRecoverPTL(
+  messages: Message[],
+  opts?: {
+    env?: NodeJS.ProcessEnv
+    provider?: string
+    flagValue?: boolean
+  },
+): boolean {
+  if (!isThirdPartyDesktopLargeToolResultOmissionEnabled(opts)) {
+    return false
+  }
+  return omitLargestToolResultsForSummary(messages) !== null
+}
+
+/**
+ * Check whether any message already contains a `[Tool result left out:` placeholder.
+ */
+export function hasLeftOutToolResultPlaceholders(messages: Message[]): boolean {
+  for (const msg of messages) {
+    if (msg.type !== 'user' || !Array.isArray(msg.message?.content)) continue
+    for (const block of msg.message.content) {
+      if (
+        block &&
+        typeof block === 'object' &&
+        block.type === 'tool_result' &&
+        typeof block.content === 'string' &&
+        block.content.startsWith(TOOL_RESULT_LEFT_OUT_PREFIX)
+      ) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * Official 2.1.328 `b6n` prompt assembly: append `LEFT_OUT_TOOL_RESULTS_NOTE`
+ * whenever any tool result has been left out of the summary request.
+ */
+export function buildCompactSummaryRequestContent(opts: {
+  basePrompt: string
+  hasLeftOutToolResults: boolean
+  includeReplyInstructionsTrailer?: boolean
+}): string {
+  return (
+    opts.basePrompt +
+    (opts.hasLeftOutToolResults ? LEFT_OUT_TOOL_RESULTS_NOTE : '') +
+    (opts.includeReplyInstructionsTrailer
+      ? COMPACT_REPLY_INSTRUCTIONS_TRAILER
+      : '')
+  )
+}
+
+/**
+ * Back-compat wrapper around `omitLargestToolResultsForSummary` (`c6n`/`Sws`).
  */
 export function leaveOutToolResultsForPTLRetry(
   messages: Message[],
   tokenGap?: number,
   leaveAll = false,
 ): Message[] | null {
-  type Candidate = { id: string; tokens: number }
-  const candidates: Candidate[] = []
-  for (const msg of messages) {
-    if (msg.type !== 'user' || !Array.isArray(msg.message?.content)) continue
-    for (const block of msg.message.content) {
-      if (
-        typeof block !== 'object' ||
-        block === null ||
-        block.type !== 'tool_result'
-      ) {
-        continue
-      }
-      if (block.content === COMPACT_LEFT_OUT_TOOL_RESULT_PLACEHOLDER) continue
-      const tokens = roughTokenCountEstimationForMessages([msg])
-      const rawLen =
-        typeof block.content === 'string'
-          ? block.content.length
-          : JSON.stringify(block.content ?? '').length
-      const est = Math.max(1, Math.min(tokens, Math.ceil(rawLen / 4)))
-      candidates.push({ id: block.tool_use_id, tokens: est })
-    }
-  }
-  if (candidates.length === 0) return null
-  const totalTokens = candidates.reduce((acc, c) => acc + c.tokens, 0)
-  const targetTokens = leaveAll
-    ? Infinity
-    : tokenGap !== undefined
-      ? tokenGap * COMPACT_LEAVE_OUT_GAP_MULTIPLIER
-      : totalTokens * COMPACT_LEAVE_OUT_FRACTION
-
-  const sorted = [...candidates].sort((a, b) => b.tokens - a.tokens)
-  const toClear = new Set<string>()
-  let clearedTokens = 0
-  for (const c of sorted) {
-    if (clearedTokens >= targetTokens) break
-    toClear.add(c.id)
-    clearedTokens += c.tokens
-  }
-  if (toClear.size === 0) return null
-
-  let anyChanged = false
-  const next = messages.map(msg => {
-    if (msg.type !== 'user' || !Array.isArray(msg.message?.content)) return msg
-    let msgChanged = false
-    const nextContent = msg.message.content.map(block => {
-      if (
-        typeof block !== 'object' ||
-        block === null ||
-        block.type !== 'tool_result' ||
-        !toClear.has(block.tool_use_id)
-      ) {
-        return block
-      }
-      if (block.content === COMPACT_LEFT_OUT_TOOL_RESULT_PLACEHOLDER) {
-        return block
-      }
-      msgChanged = true
-      return {
-        ...block,
-        content: COMPACT_LEFT_OUT_TOOL_RESULT_PLACEHOLDER,
-      }
-    })
-    if (!msgChanged) return msg
-    anyChanged = true
-    return { ...msg, message: { ...msg.message, content: nextContent } }
-  })
-  return anyChanged ? next : null
+  return (
+    omitLargestToolResultsForSummary(messages, {
+      tokenGap,
+      omitAll: leaveAll,
+    })?.messages ?? null
+  )
 }
 
 export const ERROR_MESSAGE_PROMPT_TOO_LONG =
@@ -951,16 +1123,22 @@ export async function compactConversation(
     )
 
     const compactPrompt = getCompactPrompt(customInstructions)
+    let messagesToSummarize = messages
+    let hasLeftOutToolResults =
+      hasLeftOutToolResultPlaceholders(messagesToSummarize)
+    let summaryBlockRetried = false
     let summaryRequest = createUserMessage({
-      content: compactPrompt,
+      content: buildCompactSummaryRequestContent({
+        basePrompt: compactPrompt,
+        hasLeftOutToolResults,
+        includeReplyInstructionsTrailer: false,
+      }),
     })
 
-    let messagesToSummarize = messages
     let retryCacheSafeParams = cacheSafeParams
     let summaryResponse: AssistantMessage
     let summary: string | null
     let ptlAttempts = 0
-    let summaryBlockRetried = false
     for (;;) {
       const streamResult = await streamCompactSummary({
         messages: messagesToSummarize,
@@ -986,21 +1164,37 @@ export async function compactConversation(
       const isDenseSizeRefusal =
         streamResult.mediaStripped && isMediaSizeErrorMessage(summaryResponse)
       if (isPtlOrCredits || isDenseSizeRefusal) {
-        // CC-1180 + v2.1.325 (#1200): SEA Xft/NIn — when < 3 groups, try
-        // leaving out largest tool results first; otherwise truncate head.
+        // CC-1180 + Official 2.1.328 c6n/QTa/Sws (#567, #1200): when gated by
+        // tengu_generic_papert and < 3 API-round groups, leave out the largest
+        // tool results with `[Tool result left out: ...]` and append
+        // LEFT_OUT_TOOL_RESULTS_NOTE; otherwise fall back to head truncation.
         ptlAttempts++
         const canLeaveOut =
           ptlAttempts <= MAX_PTL_RETRIES &&
+          isThirdPartyDesktopLargeToolResultOmissionEnabled() &&
           groupMessagesByApiRound(messagesToSummarize).length < 3
-        const leftOut = canLeaveOut
-          ? leaveOutToolResultsForPTLRetry(
-              messagesToSummarize,
-              getPromptTooLongTokenGap(summaryResponse),
-              ptlAttempts >= MAX_PTL_RETRIES,
-            )
+        const leftOutResult = canLeaveOut
+          ? omitLargestToolResultsForSummary(messagesToSummarize, {
+              tokenGap: getPromptTooLongTokenGap(summaryResponse),
+              omitAll: ptlAttempts >= MAX_PTL_RETRIES,
+            })
           : null
+        if (leftOutResult) {
+          hasLeftOutToolResults = true
+          summaryRequest = createUserMessage({
+            content: buildCompactSummaryRequestContent({
+              basePrompt: compactPrompt,
+              hasLeftOutToolResults,
+              includeReplyInstructionsTrailer: summaryBlockRetried,
+            }),
+          })
+          logForDebugging(
+            `Compact PTL retry: left out ${leftOutResult.leftOutIds.length} large tool result(s) (~${leftOutResult.tokensFreed} tokens)`,
+            { level: 'warn' },
+          )
+        }
         const truncated =
-          leftOut ??
+          leftOutResult?.messages ??
           (ptlAttempts <= MAX_PTL_RETRIES
             ? truncateHeadForPTLRetry(
                 messagesToSummarize,
@@ -1047,7 +1241,11 @@ export async function compactConversation(
         ) {
           summaryBlockRetried = true
           summaryRequest = createUserMessage({
-            content: compactPrompt + COMPACT_REPLY_INSTRUCTIONS_TRAILER,
+            content: buildCompactSummaryRequestContent({
+              basePrompt: compactPrompt,
+              hasLeftOutToolResults,
+              includeReplyInstructionsTrailer: true,
+            }),
           })
           logForDebugging(
             'Compact: the reply has no <summary> block, asking for the summary once more',
@@ -2648,6 +2846,57 @@ export function isAsyncAgentOwnedByContext(
  * doesn't spawn a duplicate) and agents that have finished but whose results
  * haven't been retrieved yet.
  */
+/**
+ * Official 2.1.327 (#482): format the post-compaction retrieval instruction for
+ * a completed subagent. When an output file path is available AND the caller can
+ * continue agents via `SendMessage`, tell Claude to fall back to asking the
+ * agent with `SendMessage` if it cannot read the output file. When no output
+ * file path is available (e.g. Read/Bash unavailable), tell Claude directly to
+ * ask the agent with `SendMessage`.
+ */
+export function formatCompletedSubagentCompactReminder(opts: {
+  taskId: string
+  status: string
+  outputFilePath?: string
+  canContinueAgent?: boolean
+  shimmeringClockEnabled?: boolean
+}): string | undefined {
+  const canContinue = opts.canContinueAgent !== false
+  const clockEnabled =
+    opts.shimmeringClockEnabled !== undefined
+      ? opts.shimmeringClockEnabled
+      : getFeatureValue_CACHED_MAY_BE_STALE('tengu_shimmering_clock', true) !==
+        false
+  if (opts.outputFilePath) {
+    const fallbackNote =
+      canContinue && opts.status === 'completed' && clockEnabled
+        ? ` (if you cannot read it and do not already have its result, ask agent ${opts.taskId} with SendMessage)`
+        : ''
+    return `Read the output file to retrieve the result: ${opts.outputFilePath}${fallbackNote}`
+  }
+  if (canContinue) {
+    return 'Send it a message with SendMessage to retrieve its result.'
+  }
+  return undefined
+}
+
+function contextHasOutputFileReadTools(context: ToolUseContext): boolean {
+  const tools = context.options?.tools ?? []
+  if (tools.length === 0) return true
+  return tools.some(
+    tool =>
+      tool.name === FILE_READ_TOOL_NAME ||
+      tool.name === 'Bash' ||
+      tool.name === 'PowerShell',
+  )
+}
+
+function contextHasSendMessageTool(context: ToolUseContext): boolean {
+  const tools = context.options?.tools ?? []
+  if (tools.length === 0) return true
+  return tools.some(tool => tool.name === 'SendMessage')
+}
+
 export async function createAsyncAgentAttachmentsIfNeeded(
   context: ToolUseContext,
 ): Promise<AttachmentMessage[]> {
@@ -2655,6 +2904,8 @@ export async function createAsyncAgentAttachmentsIfNeeded(
   const asyncAgents = Object.values(appState.tasks).filter(
     (task): task is LocalAgentTaskState => task.type === 'local_agent',
   )
+  const canReadOutputFile = contextHasOutputFileReadTools(context)
+  const canContinueAgent = contextHasSendMessageTool(context)
 
   return asyncAgents.flatMap(agent => {
     if (
@@ -2664,6 +2915,18 @@ export async function createAsyncAgentAttachmentsIfNeeded(
     ) {
       return []
     }
+    const outputFilePath = canReadOutputFile
+      ? getTaskOutputPath(agent.agentId)
+      : undefined
+    const completedHint =
+      agent.status === 'completed' && canContinueAgent
+        ? formatCompletedSubagentCompactReminder({
+            taskId: agent.agentId,
+            status: agent.status,
+            outputFilePath,
+            canContinueAgent,
+          })
+        : undefined
     return [
       createAttachmentMessage({
         type: 'task_status',
@@ -2674,9 +2937,10 @@ export async function createAsyncAgentAttachmentsIfNeeded(
         deltaSummary:
           agent.status === 'running'
             ? (agent.progress?.summary ?? null)
-            : (agent.error ?? null),
-        outputFilePath: getTaskOutputPath(agent.agentId),
-      }),
+            : (agent.error ?? completedHint ?? null),
+        outputFilePath,
+        canContinueAgent,
+      } as Parameters<typeof createAttachmentMessage>[0]),
     ]
   })
 }

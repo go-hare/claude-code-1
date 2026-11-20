@@ -95,12 +95,12 @@ export async function ensureLocalPackageEnvironment(): Promise<boolean> {
 
 /**
  * Install or update Claude CLI package in the local directory
- * @param channel - Release channel to use (latest or stable)
- * @param specificVersion - Optional specific version to install (overrides channel)
+ * @param channel - Release channel to use (latest, stable, or rc)
+ * @param targetVersion - Optional specific version to install (overrides channel)
  */
 export async function installOrUpdateClaudePackage(
-  channel: ReleaseChannel,
-  specificVersion?: string | null,
+  channel: ReleaseChannel = 'latest',
+  targetVersion?: string | null,
 ): Promise<InstallOutcome> {
   try {
     // First ensure the environment is set up
@@ -109,8 +109,8 @@ export async function installOrUpdateClaudePackage(
     }
 
     // Use specific version if provided, otherwise use channel tag
-    const versionSpec = specificVersion
-      ? specificVersion
+    const versionSpec = targetVersion
+      ? targetVersion
       : channel === 'stable'
         ? 'stable'
         : 'latest'

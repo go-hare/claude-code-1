@@ -4,13 +4,26 @@ import { Select } from '../../components/CustomSelect/select.js';
 import type { ArtifactInfo } from './scanner.js';
 import { openBrowser } from 'src/utils/browser.js';
 
+export const ARTIFACTS_PARTIAL_LOAD_WARNING = "Couldn't load the whole list";
+
 type Props = {
   artifacts: ArtifactInfo[];
   onExit: () => void;
   onDelete?: (artifact: ArtifactInfo) => void;
+  /** Official 2.1.327 (#422): show loading / partial-load warning instead of "No artifacts yet". */
+  loading?: boolean;
+  incomplete?: boolean;
+  loadError?: string | null;
 };
 
-export function ArtifactsMenu({ artifacts, onExit, onDelete }: Props): React.ReactElement {
+export function ArtifactsMenu({
+  artifacts,
+  onExit,
+  onDelete,
+  loading = false,
+  incomplete = false,
+  loadError = null,
+}: Props): React.ReactElement {
   const [items, setItems] = React.useState<ArtifactInfo[]>(artifacts);
   const [selected, setSelected] = React.useState(0);
   const [confirmTarget, setConfirmTarget] = React.useState<ArtifactInfo | null>(null);
@@ -42,7 +55,7 @@ export function ArtifactsMenu({ artifacts, onExit, onDelete }: Props): React.Rea
         }
         return;
       }
-      if (input === 'd') {
+      if (input === 'd' && onDelete) {
         const target = items[selected];
         if (target) {
           setConfirmTarget(target);
@@ -82,7 +95,9 @@ export function ArtifactsMenu({ artifacts, onExit, onDelete }: Props): React.Rea
               { label: 'No, keep it', value: 'keep' },
               { label: 'Yes, delete it', value: 'delete' },
             ]}
-            defaultValue="keep"
+            defaultFocusValue="keep"
+            hideIndexes
+            disablePrintableKeybindings
             onChange={value => {
               if (value === 'delete') {
                 onDelete?.(confirmTarget);
@@ -95,14 +110,35 @@ export function ArtifactsMenu({ artifacts, onExit, onDelete }: Props): React.Rea
           />
         </Box>
       ) : items.length === 0 ? (
-        <Text color="subtle">No artifacts uploaded this session. Run /use-artifacts to learn how.</Text>
+        loading ? (
+          <Text color="subtle">Loading artifacts…</Text>
+        ) : loadError ? (
+          <Text color="error">{loadError}</Text>
+        ) : incomplete ? (
+          <Text color="warning">{ARTIFACTS_PARTIAL_LOAD_WARNING}</Text>
+        ) : (
+          <Text color="subtle">No artifacts uploaded this session. Run /use-artifacts to learn how.</Text>
+        )
       ) : (
         <Box flexDirection="column">
           {items.map((a, idx) => (
             <ArtifactRow key={a.toolUseId} artifact={a} isSelected={idx === selected} />
           ))}
+          {incomplete ? (
+            <Box marginTop={1}>
+              <Text color="warning">{ARTIFACTS_PARTIAL_LOAD_WARNING}</Text>
+            </Box>
+          ) : loading ? (
+            <Box marginTop={1}>
+              <Text color="subtle">Loading artifacts…</Text>
+            </Box>
+          ) : null}
           <Box marginTop={1}>
-            <Text color="subtle">{'↑/↓ select · Enter open · c copy URL · d delete · Esc exit'}</Text>
+            <Text color="subtle">
+              {onDelete
+                ? '↑/↓ select · Enter open · c copy URL · d delete · Esc exit'
+                : '↑/↓ select · Enter open · c copy URL · Esc exit'}
+            </Text>
           </Box>
         </Box>
       )}

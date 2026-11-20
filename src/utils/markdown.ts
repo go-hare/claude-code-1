@@ -102,12 +102,191 @@ export function stripRawOsc8Sequences(text: string): string {
 }
 
 /**
+ * Official 2.1.328 (#556) `N = 1000`, `Te = 100`, `Ee = N * Te = 100_000`:
+ * freeze guards for very long or malformed markdown inputs.
+ */
+export const MARKDOWN_WINDOW_LINES = 1000
+export const MARKDOWN_WINDOW_AVG_LINE_CHARS = 100
+export const MAX_MARKDOWN_LINE_LENGTH =
+  MARKDOWN_WINDOW_LINES * MARKDOWN_WINDOW_AVG_LINE_CHARS
+
+/** Official 2.1.328 (#556) `F(e)`: true if any single line exceeds `maxLineLength`. */
+export function hasOverlongMarkdownLine(
+  text: string,
+  maxLineLength: number = MAX_MARKDOWN_LINE_LENGTH,
+): boolean {
+  let start = 0
+  while (start < text.length) {
+    const nl = text.indexOf('\n', start)
+    const end = nl === -1 ? text.length : nl
+    if (end - start > maxLineLength) return true
+    start = end + 1
+  }
+  return false
+}
+
+/**
+ * Official 2.1.328 (#556) `O(e, t, n)`: advance up to `maxLines` newlines OR
+ * `maxLines * MARKDOWN_WINDOW_AVG_LINE_CHARS` chars from `start`.
+ */
+export function sliceMarkdownWindowEnd(
+  text: string,
+  start: number,
+  maxLines: number = MARKDOWN_WINDOW_LINES,
+): number {
+  let pos = start
+  const maxChars = maxLines * MARKDOWN_WINDOW_AVG_LINE_CHARS
+  for (
+    let i = 0;
+    i < maxLines && pos < text.length && pos - start < maxChars;
+    i++
+  ) {
+    const nl = text.indexOf('\n', pos)
+    pos = nl === -1 ? text.length : nl + 1
+  }
+  return pos
+}
+
+function makePlainParagraphToken(raw: string): Token {
+  return {
+    type: 'paragraph',
+    raw,
+    text: raw,
+    tokens: [{ type: 'text', raw, text: raw }],
+  } as Token
+}
+
+/**
+ * Official 2.1.328 (#556) `E2t`/`ut`: lex markdown safely with freeze guards:
+ * 1. Any single line > `MAX_MARKDOWN_LINE_LENGTH` (100k chars) bypasses
+ *    `marked.lexer` and renders as plain text to avoid catastrophic regex
+ *    backtracking.
+ * 2. Multi-window inputs (> 1000 lines or > 100k chars) split at blank-line
+ *    boundaries outside fenced code blocks, falling back to newline boundaries
+ *    within each bounded window so inputs with zero blank lines (huge malformed
+ *    tables/lists/paragraphs) never feed unbounded text to `marked.lexer`.
+ * 3. `RangeError` or unexpected parser failure degrades cleanly to plain text.
+ */
+export function lexMarkdownSafely(
+  lexer: { lexer: (src: string) => Token[] },
+  content: string,
+): Token[] {
+  const normalized = content.replace(/\r\n?/g, '\n')
+  if (hasOverlongMarkdownLine(normalized)) {
+    return [makePlainParagraphToken(normalized)]
+  }
+  try {
+    const firstWindowEnd = sliceMarkdownWindowEnd(
+      normalized,
+      0,
+      MARKDOWN_WINDOW_LINES,
+    )
+    if (firstWindowEnd >= normalized.length) {
+      return lexer.lexer(normalized)
+    }
+
+    const tokens: Token[] = []
+    let pos = 0
+    while (pos < normalized.length) {
+      let winEnd = sliceMarkdownWindowEnd(
+        normalized,
+        pos,
+        MARKDOWN_WINDOW_LINES,
+      )
+      if (winEnd <= pos) {
+        // Safety against degenerate non-advancing slice
+        const nl = normalized.indexOf('\n', pos)
+        winEnd = nl === -1 ? normalized.length : nl + 1
+      }
+      if (winEnd < normalized.length) {
+        // Prefer splitting on a blank line (`\n\n`) inside the window when not
+        // inside an open fence, so valid blocks stay intact across windows.
+        const chunk = normalized.slice(pos, winEnd)
+        let inFence = false
+        let fenceChar = ''
+        let lastBlankEnd = -1
+        let lineStart = 0
+        while (lineStart < chunk.length) {
+          const nl = chunk.indexOf('\n', lineStart)
+          const lineEnd = nl === -1 ? chunk.length : nl
+          const line = chunk.slice(lineStart, lineEnd)
+          const fenceMatch = /^ {0,3}(`{3,}|~{3,})/.exec(line)
+          if (fenceMatch) {
+            const ch = fenceMatch[1]![0]!
+            if (!inFence) {
+              inFence = true
+              fenceChar = ch
+            } else if (ch === fenceChar) {
+              inFence = false
+              fenceChar = ''
+            }
+          } else if (!inFence && line.trim() === '' && nl !== -1) {
+            lastBlankEnd = nl + 1
+          }
+          lineStart = nl === -1 ? chunk.length : nl + 1
+        }
+        if (lastBlankEnd > 0) {
+          winEnd = pos + lastBlankEnd
+        }
+      }
+      const slice = normalized.slice(pos, winEnd)
+      if (hasOverlongMarkdownLine(slice)) {
+        tokens.push(makePlainParagraphToken(slice))
+      } else {
+        const chunkTokens = lexer.lexer(slice)
+        for (const tok of chunkTokens) {
+          const prev = tokens.at(-1)
+          if (prev?.type === 'space' && tok.type === 'space') {
+            prev.raw += tok.raw
+          } else {
+            tokens.push(tok)
+          }
+        }
+      }
+      pos = winEnd
+    }
+    return tokens
+  } catch (err) {
+    if (err instanceof RangeError) {
+      logForDebugging(`marked.lexer overflow on ${content.length} chars`, {
+        level: 'error',
+      })
+    }
+    return [makePlainParagraphToken(normalized)]
+  }
+}
+
+/**
  * densable `PPE` — escape unescaped `|` inside matching backtick spans so
  * GFM table tokenization does not treat code-cell pipes as column separators
  * (SEA CXr / j6m.table; changelog 2.1.234 #10).
+ * Official 2.1.328 (#556): linear-time O(N) backtick index prevents quadratic
+ * freezes on malformed lines containing thousands of unmatched backticks.
  */
 export function escapePipesInInlineCode(line: string): string {
   if (!line.includes('`') || !line.includes('|')) return line
+  if (line.length > MAX_MARKDOWN_LINE_LENGTH) return line
+  // Pre-index all backtick runs by length so closing lookup is O(1) amortized.
+  const runsByLen = new Map<number, number[]>()
+  const runPtrByLen = new Map<number, number>()
+  let scan = 0
+  while (scan < line.length) {
+    if (line[scan] !== '`') {
+      scan++
+      continue
+    }
+    const start = scan
+    while (line[scan] === '`') scan++
+    const len = scan - start
+    let arr = runsByLen.get(len)
+    if (!arr) {
+      arr = []
+      runsByLen.set(len, arr)
+      runPtrByLen.set(len, 0)
+    }
+    arr.push(start)
+  }
+
   let out = ''
   let i = 0
   while (i < line.length) {
@@ -118,20 +297,16 @@ export function escapePipesInInlineCode(line: string): string {
     let tickLen = 0
     while (line[i + tickLen] === '`') tickLen++
     const open = line.slice(i, i + tickLen)
-    let scan = i + tickLen
+    const positions = runsByLen.get(tickLen)
+    let ptr = runPtrByLen.get(tickLen) ?? 0
     let closeAt = -1
-    while (scan < line.length) {
-      if (line[scan] !== '`') {
-        scan++
-        continue
+    if (positions) {
+      while (ptr < positions.length && positions[ptr]! <= i) ptr++
+      runPtrByLen.set(tickLen, ptr)
+      if (ptr < positions.length) {
+        closeAt = positions[ptr]!
+        runPtrByLen.set(tickLen, ptr + 1)
       }
-      let closeLen = 0
-      while (line[scan + closeLen] === '`') closeLen++
-      if (closeLen === tickLen) {
-        closeAt = scan
-        break
-      }
-      scan += closeLen
     }
     if (closeAt === -1) {
       out += open
@@ -550,8 +725,7 @@ export function applyMarkdown(
   highlight: CliHighlight | null = null,
 ): string {
   configureMarked()
-  return marked
-    .lexer(stripPromptXMLTags(content))
+  return lexMarkdownSafely(marked, stripPromptXMLTags(content))
     .map(_ => formatToken(_, theme, 0, null, null, highlight))
     .join('')
     .trim()

@@ -195,7 +195,9 @@ function PromptInputFooter({
   }
 
   if (helpOpen) {
-    return <PromptInputHelpMenu dimColor={true} fixedWidth={true} paddingX={2} />;
+    // Official 2.1.328 #602: still surface the Ctrl+C / Ctrl+D exit warning
+    // while the `?` shortcuts help list is open so Ctrl+C never appears silent.
+    return <PromptInputHelpMenu dimColor={true} fixedWidth={true} paddingX={2} exitMessage={exitMessage} />;
   }
 
   return (

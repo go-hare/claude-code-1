@@ -20,8 +20,11 @@ import {
   getAPIProviderForStatsig,
   isFirstPartyAnthropicBaseUrl,
 } from 'src/utils/model/providers.js'
-import { getDensableCatalogModel } from 'src/utils/model/modelCatalogCapabilities.js'
-import { firstPartyNameToCanonical } from 'src/utils/model/model.js'
+import {
+  getDensableCatalogModel,
+  resolveCatalogIdFromProviderId,
+} from 'src/utils/model/modelCatalogCapabilities.js'
+import { firstPartyNameToCanonical } from 'src/utils/model/canonicalName.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import {
   isAnthropicAwsProviderEnabled,
@@ -83,6 +86,7 @@ import {
   checkMockRateLimitError,
   isMockRateLimitError,
 } from '../rateLimitMocking.js'
+import { getClientTargetUrl } from './client.js'
 import {
   isBedrockModelAccessRefusalError,
   NAME_CONSTRAINT_CERT_ERROR_CODES,
@@ -512,6 +516,38 @@ export function isModelPermissionAPIError(error: unknown): boolean {
   return isPermission && mentionsModel
 }
 
+function resolveCatalogEntryForModel(model: string) {
+  const stripped = model.replace(/\[1m\]/gi, '').trim()
+  const viaProvider = resolveCatalogIdFromProviderId(stripped)
+  return (
+    getDensableCatalogModel(stripped) ??
+    (viaProvider ? getDensableCatalogModel(viaProvider) : undefined) ??
+    getDensableCatalogModel(firstPartyNameToCanonical(stripped))
+  )
+}
+
+function resolveCatalogFallbackModelId(
+  fallbackCatalogId: string,
+  provider: ReturnType<typeof getAPIProvider>,
+): string {
+  const providerKey =
+    provider === 'firstParty'
+      ? 'first_party'
+      : provider === 'anthropicAws'
+        ? 'anthropic_aws'
+        : provider === 'anthropicGoogleCloud'
+          ? 'anthropic_google_cloud'
+          : provider
+  const target = getDensableCatalogModel(fallbackCatalogId)
+  const providerIds = target?.provider_ids as
+    | Record<string, string | null | undefined>
+    | undefined
+  const mapped = providerIds?.[providerKey]
+  return typeof mapped === 'string' && mapped.length > 0
+    ? mapped
+    : fallbackCatalogId
+}
+
 /**
  * Official 2.1.301 (#850): when the newest Fable model is not available to an
  * organization on the first-party Anthropic API, fall back once to the previous
@@ -520,12 +556,20 @@ export function isModelPermissionAPIError(error: unknown): boolean {
 export function resolveFableAvailabilityFallbackModel(
   model: string,
 ): string | undefined {
-  if (getAPIProvider() !== 'firstParty') {
+  const provider = getAPIProvider()
+  if (provider !== 'firstParty') {
     return undefined
   }
-  const entry = getDensableCatalogModel(model)
+  if (
+    isEnvTruthy(process.env.CLAUDE_CODE_NO_MODEL_FALLBACK) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_MODEL_ACCESS_FALLBACK)
+  ) {
+    return undefined
+  }
+  const entry = resolveCatalogEntryForModel(model)
   if (entry?.family === 'fable' && entry.fallback_3p) {
-    return entry.fallback_3p
+    const resolved = resolveCatalogFallbackModelId(entry.fallback_3p, provider)
+    return resolved !== model ? resolved : undefined
   }
   return undefined
 }
@@ -548,12 +592,18 @@ export function resolveAccessFallbackModel(options: {
   if (provider !== 'vertex' && provider !== 'bedrock') {
     return undefined
   }
-  if (isEnvTruthy(process.env.CLAUDE_CODE_NO_MODEL_FALLBACK)) {
+  if (
+    isEnvTruthy(process.env.CLAUDE_CODE_NO_MODEL_FALLBACK) ||
+    isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_MODEL_ACCESS_FALLBACK)
+  ) {
     return undefined
   }
-  const entry = getDensableCatalogModel(options.model)
-  if (entry?.fallback_3p && entry.fallback_3p !== options.model) {
-    return entry.fallback_3p
+  const entry = resolveCatalogEntryForModel(options.model)
+  if (entry?.fallback_3p) {
+    const resolved = resolveCatalogFallbackModelId(entry.fallback_3p, provider)
+    if (resolved !== options.model) {
+      return resolved
+    }
   }
   return undefined
 }
@@ -952,7 +1002,10 @@ export async function* withRetry<T>(
       if (!tlsCertRepairAttempted && isTlsCertificateVerificationError(error)) {
         tlsCertRepairAttempted = true
         const apiUrl =
-          process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com'
+          (client as { baseURL?: string } | null)?.baseURL ||
+          getClientTargetUrl(getAPIProvider(), options.model) ||
+          process.env.ANTHROPIC_BASE_URL ||
+          'https://api.anthropic.com'
         const repairOutcome = await readApiServedCertificateChain(apiUrl, {
           signal: options.signal,
           afterModelRequest: true,
@@ -2133,14 +2186,22 @@ const DEFAULT_RETRY_WATCHDOG_MAX = 300
 const MAX_RETRIES_CLAMP = 15
 let maxRetriesClampWarned = false
 
-function isRetryWatchdogActive(
+export function isRetryWatchdogActive(
   watchdog: string | undefined = process.env.CLAUDE_CODE_RETRY_WATCHDOG,
+  scope: string | undefined = process.env.CLAUDE_CODE_RETRY_WATCHDOG_SCOPE,
 ): boolean {
   if (watchdog === undefined || watchdog === '') return false
   if (watchdog === '0' || watchdog.toLowerCase() === 'false') return false
   const parsed = parseInt(watchdog, 10)
-  if (!Number.isNaN(parsed) && parsed > 1) return true
-  return isEnvTruthy(watchdog) || Number.isNaN(parsed) || parsed === 1
+  const truthyOrBudget =
+    (!Number.isNaN(parsed) && parsed > 1) ||
+    isEnvTruthy(watchdog) ||
+    Number.isNaN(parsed) ||
+    parsed === 1
+  if (!truthyOrBudget) return false
+  // Official 2.1.328 ME() (#442): active when CLAUDE_CODE_RETRY_WATCHDOG is set
+  // and CLAUDE_CODE_RETRY_WATCHDOG_SCOPE !== 'capacity'.
+  return scope !== 'capacity'
 }
 
 export function getDefaultMaxRetries(): number {
@@ -2172,9 +2233,10 @@ export function getDefaultMaxRetries(): number {
     }
     return parsed
   }
-  // Official 2.1.199 stream-retry budget for transient mid-response drops.
+  // Official 2.1.199 stream-retry budget for transient mid-response drops
+  // (gated by watchdogActive so scoped/nested `claude -p` stays on default).
   const watchdog = process.env.CLAUDE_CODE_RETRY_WATCHDOG
-  if (watchdog !== undefined && watchdog !== '') {
+  if (watchdogActive && watchdog !== undefined && watchdog !== '') {
     if (watchdog === '0' || watchdog.toLowerCase() === 'false') {
       return DEFAULT_MAX_RETRIES
     }

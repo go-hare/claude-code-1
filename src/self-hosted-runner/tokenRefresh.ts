@@ -159,6 +159,33 @@ export function createTokenRefreshScheduler(
     )
   }
 
+  const DUAL_DEADLINE_STEP_MS = 60_000
+
+  const scheduleAt = (
+    sessionId: string,
+    wallDeadlineMs: number,
+    gen: number,
+  ): void => {
+    failCounts.delete(sessionId)
+    const monoDeadlineMs = performance.now() + wallDeadlineMs - Date.now()
+    const tick = (): void => {
+      if (generations.get(sessionId) !== gen) return
+      const remaining = Math.ceil(
+        Math.min(
+          wallDeadlineMs - Date.now(),
+          monoDeadlineMs - performance.now(),
+        ),
+      )
+      if (remaining <= 0) {
+        void doRefresh(sessionId, gen)
+        return
+      }
+      const t = setTimeout(tick, Math.min(remaining, DUAL_DEADLINE_STEP_MS))
+      timers.set(sessionId, t)
+    }
+    tick()
+  }
+
   function schedule(
     sessionId: string,
     token: string,
@@ -176,16 +203,25 @@ export function createTokenRefreshScheduler(
     if (prev) clearTimeout(prev)
     const gen = bumpGen(sessionId)
     const expiresIso = new Date(exp * 1000).toISOString()
-    // 2.1.326 #100: guard against tight refresh loops when the local clock
-    // runs ahead and a newly refreshed token is already past or within buffer.
+    // Official 2.1.328 `Ctn` (#100 / #631): bound wait by min(wallUntilMs,
+    // lifetimeMs - elapsedMs) and drive the timer via the 60s dual-deadline
+    // loop (`Math.min(wallDeadline - Date.now(), monoDeadline - performance.now())`).
     const payload = decodeJwtPayload(token)
     const lifetimeMs =
       payload !== null && typeof payload.iat === 'number' && payload.iat < exp
         ? (exp - payload.iat) * 1000
         : Number.POSITIVE_INFINITY
-    const untilMs = Math.min(exp * 1000 - Date.now(), lifetimeMs - elapsedMs)
+    const wallUntilMs = exp * 1000 - Date.now()
+    const monotonicUntilMs =
+      lifetimeMs < Number.POSITIVE_INFINITY
+        ? lifetimeMs - elapsedMs
+        : Number.POSITIVE_INFINITY
+    const untilMs = Math.min(wallUntilMs, monotonicUntilMs)
     const buffer = adaptiveBuffer
-      ? Math.min(refreshBufferMs, Math.max(1000, Math.floor(untilMs * 0.2)))
+      ? Math.min(
+          refreshBufferMs,
+          Math.max(1000, Math.floor(Math.max(untilMs, 0) * 0.2)),
+        )
       : refreshBufferMs
     const rawDelay = untilMs - buffer
     let delay = Math.max(rawDelay, 0)
@@ -207,12 +243,7 @@ export function createTokenRefreshScheduler(
         `[${opts.label}:token] Scheduled token refresh for sessionId=${sessionId} in ${formatDelay(delay)} (expires=${expiresIso}, buffer=${bufferLog}s)`,
       )
     }
-    if (delay <= 0) {
-      void doRefresh(sessionId, gen)
-      return
-    }
-    const t = setTimeout(doRefresh, delay, sessionId, gen)
-    timers.set(sessionId, t)
+    scheduleAt(sessionId, Date.now() + delay, gen)
   }
 
   function scheduleFromExpiresIn(
@@ -226,8 +257,7 @@ export function createTokenRefreshScheduler(
     log(
       `[${opts.label}:token] Scheduled token refresh for sessionId=${sessionId} in ${formatDelay(delay)} (expires_in=${expiresInSeconds}s, buffer=${refreshBufferMs / 1000}s)`,
     )
-    const t = setTimeout(doRefresh, delay, sessionId, gen)
-    timers.set(sessionId, t)
+    scheduleAt(sessionId, Date.now() + delay, gen)
   }
 
   function cancel(sessionId: string): void {

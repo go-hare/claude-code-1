@@ -44,6 +44,7 @@ import { asSessionId } from '../types/ids.js'
 import { errorMessage } from '../utils/errors.js'
 import { isInBundledMode } from '../utils/bundledMode.js'
 import { restrictedSpawnEnv } from '../utils/restricted.js'
+import { stripOAuthScopesIfTokenRemoved } from '../utils/subprocessEnv.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 
 // ---------------------------------------------------------------------------
@@ -196,9 +197,12 @@ export async function applySpareClaimAndRunMain(
   }
   // densable: strip host auth tokens then Object.assign(process.env, e.env).
   // Product: also deny loader/shell injection keys from claim.env.
+  // Official 2.1.327 (#389): drop stale CLAUDE_CODE_OAUTH_SCOPES when OAuth token is stripped.
+  const prevEnv = { ...process.env }
   delete process.env.ANTHROPIC_AUTH_TOKEN
   delete process.env.ANTHROPIC_API_KEY
   delete process.env.CLAUDE_CODE_OAUTH_TOKEN
+  stripOAuthScopesIfTokenRemoved(prevEnv, process.env)
   Object.assign(process.env, sanitizeClaimEnv(claim.env))
   process.argv = [process.argv[0]!, process.argv[1]!, ...claim.argv]
   const { main } = await mainImport
@@ -348,6 +352,8 @@ export function buildSpareHostEnv(opts?: {
   if (process.platform === 'darwin') {
     delete env.CLAUDE_CODE_OAUTH_TOKEN
   }
+  // Official 2.1.327 (#389): strip CLAUDE_CODE_OAUTH_SCOPES whenever OAuth token was removed.
+  stripOAuthScopesIfTokenRemoved(process.env, env)
   Object.assign(env, restrictedSpawnEnv(), {
     CLAUDE_CODE_SESSION_KIND: 'bg',
     CLAUDE_BG_SOURCE: 'spare',

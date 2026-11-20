@@ -10,8 +10,8 @@
 //   { "tasks": [{ id, cron, prompt, createdAt, recurring?, permanent? }] }
 
 import { randomUUID } from 'crypto'
-import { readFileSync } from 'fs'
-import { mkdir } from 'fs/promises'
+import { lstatSync, readFileSync, statSync } from 'fs'
+import { lstat, mkdir, stat } from 'fs/promises'
 import { join } from 'path'
 import {
   addSessionCronTask,
@@ -22,7 +22,7 @@ import {
 } from '../bootstrap/state.js'
 import { computeNextCronRun, parseCronExpression } from './cron.js'
 import { logForDebugging } from './debug.js'
-import { isFsInaccessible } from './errors.js'
+import { getErrnoCode } from './errors.js'
 import { getFsImplementation } from './fsOperations.js'
 import { getProcessStartTime } from './genericProcessUtils.js'
 import { safeParseJSON } from './json.js'
@@ -107,34 +107,179 @@ export function getCronFilePath(dir?: string): string {
   return join(dir ?? getProjectRoot(), CRON_FILE_REL)
 }
 
-const UNREADABLE_TASKS_ERROR =
-  'The scheduled tasks file (.claude/scheduled_tasks.json) could not be read as a list of tasks, so nothing was removed from it. Check or repair that file, then try again.'
+export const UNREADABLE_TASKS_ERROR =
+  'The scheduled tasks file (.claude/scheduled_tasks.json) could not be read as a list of tasks, so it was not changed. Check or repair that file, then try again.'
+
+const MAX_CRON_FILE_BYTES = 1_048_576
+const MAX_PRESERVED_DEPTH = 16
+const MAX_STORED_PLUGIN_NAME_LEN = 256
+// biome-ignore lint/suspicious/noControlCharactersInRegex: reject ASCII control characters in stored plugin names
+const CONTROL_CHAR_RE = /[\x00-\x1f\x7f]/
+
+function isValidStoredPluginName(plugin: unknown): boolean {
+  return (
+    typeof plugin === 'string' &&
+    plugin !== '' &&
+    plugin.length <= MAX_STORED_PLUGIN_NAME_LEN &&
+    !CONTROL_CHAR_RE.test(plugin)
+  )
+}
+
+/**
+ * Official `Mn` — only missing-file errors (`ENOENT`/`ENOTDIR`) mean "no tasks yet".
+ * Permission/loop/I/O errors (`EACCES`, `EPERM`, `ELOOP`, etc.) must return
+ * `'unreadable'` so writers never clobber an existing file they could not read.
+ */
+function isCronFileMissing(e: unknown): boolean {
+  const code = getErrnoCode(e)
+  return code === 'ENOENT' || code === 'ENOTDIR'
+}
+
+/** Official `C$t` — guard preserved raw task entries against deep nesting. */
+function exceedsMaxDepth(value: unknown, maxDepth: number): boolean {
+  if (typeof value !== 'object' || value === null) return false
+  const stack: Array<{ container: object; depth: number }> = [
+    { container: value, depth: 1 },
+  ]
+  for (let frame = stack.pop(); frame; frame = stack.pop()) {
+    if (frame.depth > maxDepth) return true
+    const children = Array.isArray(frame.container)
+      ? frame.container
+      : Object.values(frame.container)
+    for (const child of children) {
+      if (typeof child === 'object' && child !== null) {
+        stack.push({ container: child, depth: frame.depth + 1 })
+      }
+    }
+  }
+  return false
+}
+
+function skipJsonString(json: string, startQuoteIdx: number): number {
+  for (
+    let idx = json.indexOf('"', startQuoteIdx + 1);
+    idx !== -1;
+    idx = json.indexOf('"', idx + 1)
+  ) {
+    let slashes = 0
+    while (json.charCodeAt(idx - 1 - slashes) === 92) slashes++
+    if (slashes % 2 === 0) return idx
+  }
+  return json.length - 1
+}
+
+/**
+ * Official `MSo` — estimate whether `JSON.stringify(value, null, indent)` fits
+ * within `maxBytes` given its compact JSON representation.
+ */
+function fitsPrettyJsonBudget(
+  compactJson: string,
+  indent: number,
+  maxBytes: number,
+): boolean {
+  let len = compactJson.length
+  let depth = 0
+  for (let i = 0; i < compactJson.length && len <= maxBytes; i++) {
+    const ch = compactJson.charCodeAt(i)
+    if (ch === 34) {
+      i = skipJsonString(compactJson, i)
+    } else if (ch === 91 || ch === 123) {
+      const next = compactJson.charCodeAt(i + 1)
+      if (next === 93 || next === 125) {
+        i++
+      } else {
+        len += 1 + indent * ++depth
+      }
+    } else if (ch === 93 || ch === 125) {
+      len += 1 + indent * --depth
+    } else if (ch === 44) {
+      len += 1 + indent * depth
+    } else if (ch === 58) {
+      len++
+    }
+  }
+  return len <= maxBytes
+}
 
 /**
  * Read and parse .claude/scheduled_tasks.json. Returns an empty task list if the file
  * is missing, empty, or malformed. Tasks with invalid cron strings are
  * silently dropped (logged at debug level) so a single bad entry never
- * blocks the whole file.
+ * blocks the whole file. When `preserved` is supplied, malformed / typoed
+ * entries are collected into it so subsequent writes keep them intact.
  */
-export async function readCronTasks(dir?: string): Promise<CronTask[]> {
-  const result = await readCronTasksStrict(dir)
+export async function readCronTasks(
+  dir?: string,
+  preserved?: unknown[],
+): Promise<CronTask[]> {
+  const result = await readCronTasksStrict(dir, preserved)
   return result === 'unreadable' ? [] : result
 }
 
 /**
- * densable `PRo` — strict variant returning `'unreadable'` when the file exists
- * but cannot be read or parsed as `{ tasks: [...] }`, so `removeCronTasks` refuses
- * to clobber a corrupted file.
+ * densable `L8r` — strict variant returning `'unreadable'` when the file exists
+ * but cannot be read or parsed as `{ tasks: [...] }`, so writers refuse to
+ * clobber an unreadable or corrupted file.
+ * When `preserved` is supplied, entries with typos/malformed fields or invalid
+ * cron expressions (whose `plugin` field is valid or absent) are appended to
+ * `preserved` so saves do not delete them.
  */
+const STEP_MINUTES_CRON_RE = /^\*\/\d+ \* \* \* \*$/
+const PROMPT_CACHE_TTL_MS = 300_000
+
+/**
+ * Official 2.1.328 `D8r`: durable scheduled tasks are unavailable when the
+ * session was started with `--project-config-root` (unless an explicit `dir`
+ * is passed by the caller or matches the project root).
+ */
+export function isBlockedByProjectConfigRoot(dir?: string): boolean {
+  if (dir !== undefined) return false
+  let root: string | undefined = process.env.CLAUDE_PROJECT_CONFIG_ROOT
+  if (!root) {
+    const argv = process.argv
+    for (let i = 0; i < argv.length; i++) {
+      const arg = argv[i]
+      if (arg === '--project-config-root' && typeof argv[i + 1] === 'string') {
+        root = argv[i + 1]
+        break
+      }
+      if (arg?.startsWith('--project-config-root=')) {
+        root = arg.slice('--project-config-root='.length)
+        break
+      }
+    }
+  }
+  return typeof root === 'string' && root.length > 0
+}
+
 export async function readCronTasksStrict(
   dir?: string,
+  preserved?: unknown[],
 ): Promise<CronTask[] | 'unreadable'> {
+  if (isBlockedByProjectConfigRoot(dir)) return []
   const fs = getFsImplementation()
+  const root = dir ?? getProjectRoot()
+  const filePath = getCronFilePath(dir)
+  const needsChainGuard = !isClaudeConfigDirPath(join(root, '.claude'))
   let raw: string
   try {
-    raw = await fs.readFile(getCronFilePath(dir), { encoding: 'utf-8' })
+    if (needsChainGuard) {
+      const claudeDirStat = await lstat(join(root, '.claude')).catch(err => {
+        if (isCronFileMissing(err)) return undefined
+        throw err
+      })
+      if (claudeDirStat?.isSymbolicLink()) return 'unreadable'
+    }
+    const fileStat = needsChainGuard
+      ? await lstat(filePath)
+      : await stat(filePath)
+    if (needsChainGuard && fileStat.isSymbolicLink()) return 'unreadable'
+    if (!fileStat.isFile() || fileStat.size > MAX_CRON_FILE_BYTES) {
+      return 'unreadable'
+    }
+    raw = await fs.readFile(filePath, { encoding: 'utf-8' })
   } catch (e: unknown) {
-    if (isFsInaccessible(e)) return []
+    if (isCronFileMissing(e)) return []
     logError(e)
     return 'unreadable'
   }
@@ -147,6 +292,13 @@ export async function readCronTasksStrict(
 
   const out: CronTask[] = []
   for (const t of file.tasks) {
+    const rawRec =
+      t !== null && typeof t === 'object'
+        ? (t as Record<string, unknown>)
+        : undefined
+    const hasInvalidPlugin =
+      rawRec?.plugin !== undefined && !isValidStoredPluginName(rawRec.plugin)
+    const keepList = hasInvalidPlugin ? undefined : preserved
     if (
       !t ||
       typeof t.id !== 'string' ||
@@ -157,11 +309,19 @@ export async function readCronTasksStrict(
       logForDebugging(
         `[ScheduledTasks] skipping malformed task: ${jsonStringify(t)}`,
       )
+      keepList?.push(t)
       continue
     }
     if (!parseCronExpression(t.cron)) {
       logForDebugging(
         `[ScheduledTasks] skipping task ${t.id} with invalid cron '${t.cron}'`,
+      )
+      keepList?.push(t)
+      continue
+    }
+    if (hasInvalidPlugin) {
+      logForDebugging(
+        `[ScheduledTasks] skipping task ${t.id}: its plugin name fails the rule for a stored name`,
       )
       continue
     }
@@ -205,10 +365,25 @@ export function isCronTaskEnabled(task: Pick<CronTask, 'enabled'>): boolean {
  * cronScheduler.start() to decide whether to auto-enable. One file read.
  */
 export function hasCronTasksSync(dir?: string): boolean {
+  if (isBlockedByProjectConfigRoot(dir)) return false
+  const root = dir ?? getProjectRoot()
+  const filePath = getCronFilePath(dir)
+  const needsChainGuard = !isClaudeConfigDirPath(join(root, '.claude'))
   let raw: string
   try {
+    if (needsChainGuard) {
+      // eslint-disable-next-line custom-rules/no-sync-fs -- called once from cronScheduler.start()
+      const claudeDirStat = lstatSync(join(root, '.claude'))
+      if (claudeDirStat.isSymbolicLink()) return false
+    }
     // eslint-disable-next-line custom-rules/no-sync-fs -- called once from cronScheduler.start()
-    raw = readFileSync(getCronFilePath(dir), 'utf-8')
+    const fileStat = needsChainGuard ? lstatSync(filePath) : statSync(filePath)
+    if (needsChainGuard && fileStat.isSymbolicLink()) return false
+    if (!fileStat.isFile() || fileStat.size > MAX_CRON_FILE_BYTES) {
+      return false
+    }
+    // eslint-disable-next-line custom-rules/no-sync-fs -- called once from cronScheduler.start()
+    raw = readFileSync(filePath, 'utf-8')
   } catch {
     return false
   }
@@ -219,17 +394,24 @@ export function hasCronTasksSync(dir?: string): boolean {
 }
 
 /**
- * densable nWr — overwrite .claude/scheduled_tasks.json with the given tasks.
+ * densable H8r — overwrite .claude/scheduled_tasks.json with the given tasks.
  * Creates .claude/ if missing. Empty task list writes an empty file (rather
  * than deleting) so the file watcher sees a change event on last-task-removed.
  *
  * Project roots: YNn chain guard + M6 O_NOFOLLOW (checkParentDir + staging).
  * Claude config home `.claude`: allowSymlink (VEt) — user-scope may use links.
+ * Preserved malformed/typoed entries are appended when within depth & 1 MiB budget.
  */
 export async function writeCronTasks(
   tasks: CronTask[],
   dir?: string,
+  preserved: unknown[] = [],
 ): Promise<void> {
+  if (isBlockedByProjectConfigRoot(dir)) {
+    throw new Error(
+      'Durable scheduled tasks are unavailable in a session started with --project-config-root',
+    )
+  }
   const root = dir ?? getProjectRoot()
   const claudeDir = join(root, '.claude')
   // densable: needsChainGuard = !VEt(join(root, ".claude"))
@@ -241,9 +423,20 @@ export async function writeCronTasks(
   // Strip the runtime-only `durable` flag — everything on disk is durable
   // by definition, and keeping the flag out means readCronTasks() naturally
   // yields durable: undefined without having to set it explicitly.
-  const body: CronFile = {
-    tasks: tasks.map(({ durable: _durable, ...rest }) => rest),
-  }
+  const cleanTasks = tasks.map(({ durable: _durable, ...rest }) => rest)
+  const safePreserved = preserved.filter(
+    entry => !exceedsMaxDepth(entry, MAX_PRESERVED_DEPTH),
+  )
+  const combined = { tasks: [...cleanTasks, ...safePreserved] }
+  const compact = jsonStringify(combined)
+  const utf8Overhead = Buffer.byteLength(compact) - compact.length
+  const body = fitsPrettyJsonBudget(
+    compact,
+    2,
+    MAX_CRON_FILE_BYTES - utf8Overhead - 1,
+  )
+    ? combined
+    : { tasks: cleanTasks }
   await writeFileAndFlush(
     getCronFilePath(root),
     jsonStringify(body, null, 2) + '\n',
@@ -289,7 +482,10 @@ export async function addCronTask(
   durable: boolean,
   agentId?: string,
   createdAtMs: number = Date.now(),
+  plugin?: string,
 ): Promise<string> {
+  const validPlugin =
+    plugin !== undefined && isValidStoredPluginName(plugin) ? plugin : undefined
   // Short ID — 8 hex chars is plenty for MAX_JOBS=50, avoids slice/prefix
   // juggling between the tool layer (shows short IDs) and disk.
   const id = randomUUID().slice(0, 8)
@@ -299,12 +495,17 @@ export async function addCronTask(
     prompt,
     createdAt: createdAtMs,
     ...(recurring ? { recurring: true } : {}),
+    ...(validPlugin !== undefined ? { plugin: validPlugin } : {}),
   }
   if (!durable) {
     addSessionCronTask({ ...task, ...(agentId ? { agentId } : {}) })
     return id
   }
-  const tasks = await readCronTasks()
+  const preserved: unknown[] = []
+  const tasks = await readCronTasksStrict(undefined, preserved)
+  if (tasks === 'unreadable') {
+    throw new Error(UNREADABLE_TASKS_ERROR)
+  }
   tasks.push({
     ...task,
     createdBySessionId: getSessionId(),
@@ -312,7 +513,7 @@ export async function addCronTask(
     createdByProcStart: getOwnProcStartToken(),
     createdInProject: getProjectRoot(),
   })
-  await writeCronTasks(tasks)
+  await writeCronTasks(tasks, undefined, preserved)
   return id
 }
 
@@ -339,13 +540,14 @@ export async function removeCronTasks(
     return
   }
   const idSet = new Set(ids)
-  const tasks = await readCronTasksStrict(dir)
+  const preserved: unknown[] = []
+  const tasks = await readCronTasksStrict(dir, preserved)
   if (tasks === 'unreadable') {
     throw new Error(UNREADABLE_TASKS_ERROR)
   }
   const remaining = tasks.filter(t => !idSet.has(t.id))
   if (remaining.length === tasks.length) return
-  await writeCronTasks(remaining, dir)
+  await writeCronTasks(remaining, dir, preserved)
 }
 
 /**
@@ -366,7 +568,9 @@ export async function markCronTasksFired(
 ): Promise<void> {
   if (ids.length === 0) return
   const idSet = new Set(ids)
-  const tasks = await readCronTasks(dir)
+  const preserved: unknown[] = []
+  const tasks = await readCronTasksStrict(dir, preserved)
+  if (tasks === 'unreadable') return
   let changed = false
   for (const t of tasks) {
     if (idSet.has(t.id)) {
@@ -375,7 +579,7 @@ export async function markCronTasksFired(
     }
   }
   if (!changed) return
-  await writeCronTasks(tasks, dir)
+  await writeCronTasks(tasks, dir, preserved)
 }
 
 /**
@@ -386,7 +590,11 @@ export async function toggleCronTaskEnabled(
   id: string,
   dir?: string,
 ): Promise<boolean | null> {
-  const tasks = await readCronTasks(dir)
+  const preserved: unknown[] = []
+  const tasks = await readCronTasksStrict(dir, preserved)
+  if (tasks === 'unreadable') {
+    throw new Error(UNREADABLE_TASKS_ERROR)
+  }
   const idx = tasks.findIndex(t => t.id === id)
   if (idx < 0) return null
   const current = isCronTaskEnabled(tasks[idx]!)
@@ -399,7 +607,7 @@ export async function toggleCronTaskEnabled(
   } else {
     tasks[idx] = { ...prev, enabled: false }
   }
-  await writeCronTasks(tasks, dir)
+  await writeCronTasks(tasks, dir, preserved)
   return next
 }
 
@@ -417,7 +625,11 @@ export async function upsertCronTask(
   },
   dir?: string,
 ): Promise<'created' | 'updated'> {
-  const tasks = await readCronTasks(dir)
+  const preserved: unknown[] = []
+  const tasks = await readCronTasksStrict(dir, preserved)
+  if (tasks === 'unreadable') {
+    throw new Error(UNREADABLE_TASKS_ERROR)
+  }
   const idx = tasks.findIndex(t => t.id === input.id)
   if (idx >= 0) {
     const prev = tasks[idx]!
@@ -441,7 +653,7 @@ export async function upsertCronTask(
     if (cleaned.recurring !== true) delete cleaned.recurring
     if (cleaned.enabled !== false) delete cleaned.enabled
     tasks[idx] = cleaned
-    await writeCronTasks(tasks, dir)
+    await writeCronTasks(tasks, dir, preserved)
     return 'updated'
   }
   const task: CronTask = {
@@ -453,7 +665,7 @@ export async function upsertCronTask(
     ...(input.enabled === false ? { enabled: false } : {}),
   }
   tasks.push(task)
-  await writeCronTasks(tasks, dir)
+  await writeCronTasks(tasks, dir, preserved)
   return 'created'
 }
 
@@ -535,8 +747,8 @@ export type CronJitterConfig = {
 }
 
 export const DEFAULT_CRON_JITTER_CONFIG: CronJitterConfig = {
-  recurringFrac: 0.1,
-  recurringCapMs: 15 * 60 * 1000,
+  recurringFrac: 0.5,
+  recurringCapMs: 30 * 60 * 1000,
   oneShotMaxMs: 90 * 1000,
   oneShotFloorMs: 0,
   oneShotMinuteMod: 30,
@@ -562,9 +774,9 @@ function jitterFrac(taskId: string): number {
  *
  * The delay is proportional to the current gap between fires
  * ({@link CronJitterConfig.recurringFrac}, capped at
- * {@link CronJitterConfig.recurringCapMs}) so at defaults an hourly task
- * spreads across [:00, :06) but a per-minute task only spreads by a few
- * seconds.
+ * {@link CronJitterConfig.recurringCapMs}). For step-minute cron expressions
+ * straddling the 5-minute prompt-cache TTL, snaps `cacheLeadMs` earlier to
+ * keep the prompt cache warm (official 2.1.328 `Rtr`).
  *
  * Only used for recurring tasks. One-shot tasks use
  * {@link oneShotJitteredNextCronRunMs} (backward jitter, minute-gated).
@@ -581,8 +793,19 @@ export function jitteredNextCronRunMs(
   // No second match in the next year (e.g. pinned date) → nothing to
   // proportion against, and near-certainly not a herd risk. Fire on t1.
   if (t2 === null) return t1
+  const gap = t2 - t1
+  const cacheLeadMs = cfg.cacheLeadMs ?? 0
+  if (
+    STEP_MINUTES_CRON_RE.test(cron) &&
+    cacheLeadMs > 0 &&
+    cacheLeadMs < gap &&
+    gap >= PROMPT_CACHE_TTL_MS &&
+    gap - cacheLeadMs < PROMPT_CACHE_TTL_MS
+  ) {
+    return fromMs + gap - cacheLeadMs
+  }
   const jitter = Math.min(
-    jitterFrac(taskId) * cfg.recurringFrac * (t2 - t1),
+    jitterFrac(taskId) * cfg.recurringFrac * gap,
     cfg.recurringCapMs,
   )
   return t1 + jitter

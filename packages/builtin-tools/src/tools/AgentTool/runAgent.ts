@@ -135,6 +135,9 @@ import {
   HANDBACK_REMINDER_LEAD,
 } from '../SubagentHandbackTool/prompt.js'
 import { getAgentModel } from 'src/utils/model/agent.js'
+import { waitForSubagentModelSettings } from 'src/utils/model/modelFacts.js'
+import { shouldSubagentWaitForOwnSubagents } from 'src/utils/forkSubagentGate.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { getStreamJsonStdoutWriter } from 'src/utils/streamJsonStdoutWriter.js'
 import { normalizeMessage } from 'src/utils/queryHelpers.js'
 import type { StdoutMessage } from 'src/entrypoints/sdk/controlTypes.js'
@@ -512,6 +515,32 @@ export function resolveRunAgentEffort(
   })
 }
 
+/**
+ * Official 2.1.327 (#522): decide which model string to persist in the
+ * subagent's sidecar metadata. When an explicit model was passed, persist it;
+ * otherwise on a fresh non-fork launch persist the resolved model the subagent
+ * started on (gated by `tengu_graceful_pudding`, default true) so later resumes
+ * stay on that model even if the main session switches via `/model`.
+ */
+export function resolvePersistedAgentModel(options: {
+  explicitModel?: string
+  resolvedAgentModel: string
+  isResume: boolean
+  isFork: boolean
+}): string | undefined {
+  if (options.explicitModel) {
+    return String(options.explicitModel)
+  }
+  if (
+    !options.isResume &&
+    !options.isFork &&
+    getFeatureValue_CACHED_MAY_BE_STALE('tengu_graceful_pudding', true)
+  ) {
+    return options.resolvedAgentModel
+  }
+  return undefined
+}
+
 export async function* runAgent({
   agentDefinition,
   promptMessages,
@@ -523,6 +552,7 @@ export async function* runAgent({
   querySource,
   override,
   model,
+  isResume,
   maxTurns,
   preserveToolUseResults,
   availableTools,
@@ -573,7 +603,9 @@ export async function* runAgent({
     /** Official Lto `forkReadFileState` (`g`) passed through nK override. */
     readFileState?: FileStateCache
   }
-  model?: ModelAlias
+  model?: ModelAlias | string
+  /** Official 2.1.327 (#522): true when resuming an existing agent. */
+  isResume?: boolean
   maxTurns?: number
   /** Preserve toolUseResult on messages for subagents with viewable transcripts */
   preserveToolUseResults?: boolean
@@ -684,6 +716,11 @@ export async function* runAgent({
     model,
     permissionMode,
   )
+
+  // Official 2.1.327 (#523): first subagent on a model waits up to 1.5s
+  // (10s in `claude -p`) for that model's settings from Anthropic before
+  // starting, instead of starting without them.
+  await waitForSubagentModelSettings(resolvedAgentModel, toolUseContext)
 
   const agentId = override?.agentId ? override.agentId : createAgentId()
 
@@ -1437,14 +1474,25 @@ export async function* runAgent({
   void recordSidechainTranscript(initialMessages, agentId).catch(_err =>
     logForDebugging(`Failed to record sidechain transcript: ${_err}`),
   )
-  // densable vp_/H4d spawn identity (changelog #7):
+  // densable vp_/H4d spawn identity (changelog #7) + 2.1.327 (#522):
   // {agentType, isFork when fork+built-in, worktree*, cwd, spawnMode,
   //  description, name, toolUseId, parentAgentId, spawnDepth, model, …}
   // H4d merge preserves $Ns observer keys when omitted.
+  // #522: when launched without an explicit model on a fresh non-fork run,
+  // persist the resolved model so resuming stays on the model it started on
+  // even after the main session switches models via `/model`.
+  const isForkSubagent =
+    agentDefinition.agentType === FORK_SUBAGENT_TYPE &&
+    isBuiltInAgent(agentDefinition)
+  const persistedModel = resolvePersistedAgentModel({
+    explicitModel: model,
+    resolvedAgentModel,
+    isResume: isResume === true,
+    isFork: isForkSubagent,
+  })
   void writeAgentMetadata(agentId, {
     agentType: agentDefinition.agentType,
-    ...(agentDefinition.agentType === FORK_SUBAGENT_TYPE &&
-      isBuiltInAgent(agentDefinition) && { isFork: true as const }),
+    ...(isForkSubagent && { isFork: true as const }),
     ...(worktreePath && { worktreePath }),
     ...(worktreePath && worktreeBranch && { worktreeBranch }),
     ...(cwd && { cwd }),
@@ -1455,7 +1503,7 @@ export async function* runAgent({
     ...(toolUseId && { toolUseId }),
     ...(parentAgentId && { parentAgentId }),
     ...(spawnDepth !== undefined && { spawnDepth }),
-    ...(model && { model: String(model) }),
+    ...(persistedModel && { model: persistedModel }),
     ...(agentDefinition.permissionMode && {
       permissionMode: agentDefinition.permissionMode,
     }),
@@ -1814,13 +1862,100 @@ export async function* runAgent({
         )
       },
     )
+    const waitForOwnSubagents = shouldSubagentWaitForOwnSubagents({
+      isNonInteractive: getIsNonInteractiveSession(),
+    })
+    const hasRunningOwnedSubagents =
+      waitForOwnSubagents &&
+      Object.values(allTasks).some(
+        task =>
+          isLocalAgentTask(task) &&
+          task.status === 'running' &&
+          (task.ownerAgentId === agentId || task.parentAgentId === agentId),
+      )
     const keepaliveGated = Boolean(
       isAsync &&
         queryCompleted &&
         !agentAbortController.signal.aborted &&
-        (hasKeepaliveReasons || hasRunningOwnedBackgroundTasks),
+        (hasKeepaliveReasons ||
+          hasRunningOwnedBackgroundTasks ||
+          hasRunningOwnedSubagents),
     )
+    // Official 2.1.328 (#670): when a subagent stays parked waiting on its own
+    // background subagents, share a single parent `backgroundWaitFirstIdle`
+    // ceiling timestamp across nested subagent waits so chained waits do not
+    // reset the wait budget.
+    if (keepaliveGated && isLocalAgentTask(liveAgentTask)) {
+      try {
+        /* eslint-disable @typescript-eslint/no-require-imports */
+        const { advanceSharedPrintBgWaitFirstIdle } =
+          require('src/cli/printBgWait.js') as typeof import('src/cli/printBgWait.js')
+        /* eslint-enable @typescript-eslint/no-require-imports */
+        const parentTask = liveAgentTask.parentAgentId
+          ? allTasks[liveAgentTask.parentAgentId]
+          : undefined
+        const inheritedFirstIdle =
+          isLocalAgentTask(parentTask) &&
+          parentTask.backgroundWaitFirstIdle != null
+            ? parentTask.backgroundWaitFirstIdle
+            : (liveAgentTask.backgroundWaitFirstIdle ?? null)
+        const sharedFirstIdle = advanceSharedPrintBgWaitFirstIdle({
+          firstIdleAt: inheritedFirstIdle,
+          hasRunningBgTasks: true,
+          now: Date.now(),
+        })
+        if (sharedFirstIdle !== null) {
+          updateTaskState<
+            import('src/tasks/LocalAgentTask/LocalAgentTask.js').LocalAgentTaskState
+          >(agentId, rootSetAppState, t =>
+            t.backgroundWaitFirstIdle === sharedFirstIdle
+              ? t
+              : { ...t, backgroundWaitFirstIdle: sharedFirstIdle },
+          )
+          for (const task of Object.values(allTasks)) {
+            if (
+              isLocalAgentTask(task) &&
+              task.status === 'running' &&
+              (task.ownerAgentId === agentId ||
+                task.parentAgentId === agentId) &&
+              task.backgroundWaitFirstIdle !== sharedFirstIdle
+            ) {
+              updateTaskState<
+                import('src/tasks/LocalAgentTask/LocalAgentTask.js').LocalAgentTaskState
+              >(task.id, rootSetAppState, t => ({
+                ...t,
+                backgroundWaitFirstIdle: sharedFirstIdle,
+              }))
+            }
+          }
+        }
+      } catch {
+        // Best-effort ceiling timestamp sharing
+      }
+    }
     if (!keepaliveGated) {
+      // Official 2.1.327 (#425): if this subagent ended cleanly by itself
+      // without reading a background child agent's completion notification,
+      // rewire orphaned notifications to the main conversation.
+      if (!agentAbortController.signal.aborted) {
+        try {
+          /* eslint-disable @typescript-eslint/no-require-imports */
+          const { rewireOrphanedOwnerNotifications } =
+            require('src/tasks/LocalAgentTask/LocalAgentTask.js') as typeof import('src/tasks/LocalAgentTask/LocalAgentTask.js')
+          const { createTaskRegistry } =
+            require('src/utils/taskRegistry.js') as typeof import('src/utils/taskRegistry.js')
+          /* eslint-enable @typescript-eslint/no-require-imports */
+          rewireOrphanedOwnerNotifications(
+            agentId,
+            toolUseContext.taskRegistry ??
+              createTaskRegistry(toolUseContext.getAppState, rootSetAppState),
+          )
+        } catch (err) {
+          logForDebugging(
+            `[runAgent] failed to rewire orphaned owner notifications for ${agentId}: ${err instanceof Error ? err.message : String(err)}`,
+          )
+        }
+      }
       killShellTasksForAgent(
         agentId,
         toolUseContext.getAppState,

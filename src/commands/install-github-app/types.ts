@@ -23,6 +23,8 @@ export type State = {
   selectedApiKeyOption: 'existing' | 'new' | 'oauth'
   authType: 'api_key' | 'oauth_token'
   workflowAction?: string
+  isCheckingSecret?: boolean
+  pendingSetup?: { apiKey: string | null; secretName: string }
   error?: string
   errorReason?: string
   errorInstructions?: string[]

@@ -27,6 +27,11 @@ export const POLL_CACHE_TTL_MARGIN_MS = 30_000
 export const REPL_PART_CAP = 30_000
 export const REPL_TOOL_CALL_CAP = 50_000
 export const REPL_MAX_REFUSALS_WHEN_OVER = 20
+/**
+ * Official 2.1.328 (#648): removed the 750ms post-script pause in auto and
+ * bypass-permissions modes.
+ */
+export const REPL_POST_SCRIPT_PAUSE_AUTO_MS = 0
 
 /**
  * Official `JOe` (`CODE_MODE_ONLY_TOOLS`): core primitive tools hidden from direct

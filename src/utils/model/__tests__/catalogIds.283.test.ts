@@ -13,6 +13,8 @@ import {
   getDefaultOpusModel,
   getDefaultSonnetModel,
   getMarketingNameForModel,
+  getPublicModelDisplayName,
+  isNonCustomOpusModel,
 } from '../model.js'
 import { resolveCatalogAlias } from '../modelCatalogCapabilities.js'
 
@@ -95,8 +97,14 @@ describe('densable 2.1.283 catalog ids', () => {
     expect(resolveCatalogAlias('sonnet', 'bedrock')).toBe('claude-sonnet-4-5')
   })
 
-  test('best alias is Fable (catalog best:"fable")', () => {
-    expect(getBestModel()).toBe('claude-fable-5-2')
+  test('best alias respects catalog best:"opus" (claude-opus-5-5)', () => {
+    expect(getBestModel()).toBe('claude-opus-5-5')
+  })
+
+  test('BH2-P1-5: getPublicModelDisplayName and isNonCustomOpusModel recognize claude-opus-5-5', () => {
+    expect(getPublicModelDisplayName('claude-opus-5-5')).toBe('Opus 5.5')
+    expect(getPublicModelDisplayName('claude-opus-5-5[1m]')).toBe('Opus 5.5')
+    expect(isNonCustomOpusModel('claude-opus-5-5')).toBe(true)
   })
 
   test('effort catalog rows: opus-5-5 default medium, fable-5-1 high', () => {

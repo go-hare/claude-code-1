@@ -1014,6 +1014,7 @@ function applyStylesToWrappedText(
   originalPlain: string,
   trimEnabled: boolean = false,
   softWrapKinds?: readonly SoftWrapKindValue[],
+  truncateRows: boolean = false,
 ): string {
   const lines = wrappedPlain.split('\n')
   const resultLines: string[] = []
@@ -1083,6 +1084,14 @@ function applyStylesToWrappedText(
     }
 
     resultLines.push(styledLine)
+
+    // Official 2.1.328 `Am`: in truncate-rows / clip mode each line may have
+    // been truncated before its original line break, so advance charIndex to
+    // the next newline before aligning the next line's segment styles.
+    if (truncateRows) {
+      const nextNl = originalPlain.slice(charIndex).search(/[\r\n]/)
+      charIndex = nextNl === -1 ? originalPlain.length : charIndex + nextNl
+    }
 
     // Skip newline character in original that corresponds to this line break.
     // This is needed when the original text contains actual newlines (not just
@@ -1766,6 +1775,7 @@ function renderNodeToOutput(
             plainText,
             textWrap === 'wrap-trim',
             w.softWrap,
+            textWrap === 'truncate-rows' || textWrap === 'clip',
           )
           // Hyperlinks are handled per-run in applyStylesToWrappedText via
           // wrapWithOsc8Link, similar to how styles are applied per-run.

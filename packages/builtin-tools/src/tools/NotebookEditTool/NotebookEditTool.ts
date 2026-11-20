@@ -557,9 +557,11 @@ export const NotebookEditTool = buildTool({
           targetCell.cell_type = cell_type
         }
       }
-      // Write back to file
+      // Write back to file, preserving the original trailing newline (#416).
       const IPYNB_INDENT = 1
-      const updatedContent = jsonStringify(notebook, null, IPYNB_INDENT)
+      const updatedContent =
+        jsonStringify(notebook, null, IPYNB_INDENT) +
+        (content.endsWith('\n') ? '\n' : '')
       await openedWrite.recheckBeforeWrite()
       writeTextContent(
         openedWrite.ioPath,

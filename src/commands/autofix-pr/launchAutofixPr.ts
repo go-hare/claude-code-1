@@ -23,7 +23,12 @@ import {
 import type { LocalJSXCommandCall } from '../../types/command.js'
 import { detectCurrentRepositoryWithHost } from '../../utils/detectRepository.js'
 import { archiveRemoteSession, teleportToRemote } from '../../utils/teleport.js'
-import { AutofixProgress } from './AutofixProgress.js'
+import {
+  type AutofixPhase,
+  AutofixProgress,
+  formatAutofixCancelMessage,
+  formatAutofixStopFailedMessage,
+} from './AutofixProgress.js'
 import { createAutofixTeammate } from './inProcessAgent.js'
 import {
   clearActiveMonitor,
@@ -98,6 +103,466 @@ function makeErrorText(message: string, code: string): string {
       code as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   })
   return `Autofix PR failed: ${message}`
+}
+
+/**
+ * Official 2.1.327 (#447) `ke`: non-blocking Esc cancellation coordinator for
+ * `/autofix-pr`. Pressing Esc closes the dialog immediately via `onDone` and
+ * aborts the launch signal; if stopping a cloud session that already started
+ * fails in the background, `onLateStopFailure` is invoked afterwards with the
+ * session link so the user can stop it themselves.
+ */
+export function createAutofixCancelController(opts: {
+  onDone: (message: string, options?: { display?: 'system' }) => void
+  onLateStopFailure?: (message: string) => void
+  stopSession?: (sessionId: string) => Promise<boolean>
+}): {
+  signal: AbortSignal
+  setPhase: (phase: AutofixPhase) => void
+  setStartedSessionId: (sessionId: string) => void
+  cancelNow: () => void
+  reportLateStopIfNeeded: (sessionId: string) => Promise<string | null>
+  isCancelled: () => boolean
+} {
+  const abortController = new AbortController()
+  let currentPhase: AutofixPhase = 'detecting'
+  let startedSessionId: string | null = null
+  let doneCalled = false
+
+  const stopSessionFn = opts.stopSession ?? archiveRemoteSession
+
+  const reportLateStopIfNeeded = async (
+    sessionId: string,
+  ): Promise<string | null> => {
+    let stopped = false
+    try {
+      stopped = await stopSessionFn(sessionId)
+    } catch {
+      stopped = false
+    }
+    if (stopped) return null
+    const msg = formatAutofixStopFailedMessage(
+      getRemoteTaskSessionUrl(sessionId),
+    )
+    opts.onLateStopFailure?.(msg)
+    return msg
+  }
+
+  return {
+    signal: abortController.signal,
+    setPhase(phase: AutofixPhase) {
+      currentPhase = phase
+    },
+    setStartedSessionId(sessionId: string) {
+      startedSessionId = sessionId
+    },
+    cancelNow() {
+      if (doneCalled) return
+      doneCalled = true
+      abortController.abort()
+      // Close the dialog at once — never hold the keyboard while stopping!
+      opts.onDone(formatAutofixCancelMessage(currentPhase), {
+        display: 'system',
+      })
+      if (startedSessionId) {
+        void reportLateStopIfNeeded(startedSessionId)
+      }
+    },
+    reportLateStopIfNeeded,
+    isCancelled() {
+      return abortController.signal.aborted
+    },
+  }
+}
+
+type AutofixStartParsed = Extract<
+  ReturnType<typeof parseAutofixArgs>,
+  { action: 'start' }
+>
+
+function wireLateStopFailure(
+  context: Parameters<LocalJSXCommandCall>[1],
+): (message: string) => void {
+  return (message: string) => {
+    context.addNotification?.({
+      key: 'autofix-pr-stop-failed',
+      kind: 'warning',
+      text: message,
+      color: 'warning',
+      priority: 'high',
+    })
+  }
+}
+
+async function runAutofixPrLaunch({
+  parsed,
+  onDone,
+  context,
+  cancelController,
+  onPhaseChange,
+  onTargetChange,
+  onComplete,
+  onError,
+}: {
+  parsed: AutofixStartParsed
+  onDone: Parameters<LocalJSXCommandCall>[0]
+  context: Parameters<LocalJSXCommandCall>[1]
+  cancelController: ReturnType<typeof createAutofixCancelController>
+  onPhaseChange?: (phase: AutofixPhase) => void
+  onTargetChange?: (target: string) => void
+  onComplete?: (info: { target: string; sessionUrl: string }) => void
+  onError?: (message: string) => void
+}): Promise<{ target: string; sessionUrl: string } | null> {
+  const setPhase = (phase: AutofixPhase): void => {
+    cancelController.setPhase(phase)
+    onPhaseChange?.(phase)
+  }
+
+  try {
+    setPhase('detecting')
+
+    // 4.1 resolve owner/repo. Always detect cwd repo first because teleport
+    // takes the git source from the working directory; cross-repo args that
+    // don't match cwd would silently work on the wrong repo.
+    let detected: { host: string; owner: string; name: string } | null
+    try {
+      detected = await detectCurrentRepositoryWithHost()
+    } catch {
+      if (cancelController.isCancelled()) return null
+      const msg = makeErrorText(
+        'Cannot detect GitHub repo from current directory.',
+        'session_create_failed',
+      )
+      setPhase('error')
+      onError?.(msg)
+      onDone(msg, { display: 'system' })
+      return null
+    }
+    if (cancelController.isCancelled()) return null
+    if (!detected || detected.host !== 'github.com') {
+      const msg = makeErrorText(
+        'Cannot detect GitHub repo from current directory.',
+        'session_create_failed',
+      )
+      setPhase('error')
+      onError?.(msg)
+      onDone(msg, { display: 'system' })
+      return null
+    }
+
+    // Cross-repo args (owner/repo#n) must match the current working directory;
+    // teleport's git source is taken from cwd, so a mismatch would create a
+    // session against the wrong repo. Accept both as a safety check rather
+    // than as a real cross-repo capability — true cross-repo support requires
+    // a separate clone path not yet implemented here.
+    if (
+      (parsed.owner && parsed.owner !== detected.owner) ||
+      (parsed.repo && parsed.repo !== detected.name)
+    ) {
+      const msg = makeErrorText(
+        `Cross-repo autofix is not supported from this directory. Run from ${detected.owner}/${detected.name} or pass only the PR number.`,
+        'repo_mismatch',
+      )
+      setPhase('error')
+      onError?.(msg)
+      onDone(msg, { display: 'system' })
+      return null
+    }
+    const owner = detected.owner
+    const repo = detected.name
+    const { prNumber } = parsed
+    const target = `${owner}/${repo}#${prNumber}`
+    onTargetChange?.(target)
+
+    // 4.2 singleton lock — already monitoring this exact PR
+    if (isMonitoring(owner, repo, prNumber)) {
+      logEvent('tengu_autofix_pr_result', {
+        result:
+          'success_rc' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      })
+      onDone(`Already monitoring ${repo}#${prNumber} in background.`, {
+        display: 'system',
+      })
+      return null
+    }
+
+    // 4.3 eligibility check (tolerate no_remote_environment, surface real reasons).
+    // skipBundle:true matches the teleport call below — autofix needs to push
+    // back to GitHub, which a git bundle cannot do.
+    setPhase('checking_eligibility')
+    const eligibility = await checkRemoteAgentEligibility({ skipBundle: true })
+    if (cancelController.isCancelled()) return null
+    if (!eligibility.eligible) {
+      const blockers = eligibility.errors.filter(
+        (e: BackgroundRemoteSessionPrecondition) =>
+          e.type !== 'no_remote_environment',
+      )
+      if (blockers.length > 0) {
+        const reasons = blockers.map(formatPreconditionError).join('\n')
+        const msg = makeErrorText(
+          `Remote agent not available:\n${reasons}`,
+          'session_create_failed',
+        )
+        setPhase('error')
+        onError?.(msg)
+        onDone(msg, { display: 'system' })
+        return null
+      }
+    }
+
+    // 4.4 detect skills
+    const skills = detectAutofixSkills(process.cwd())
+    const skillsHint = formatSkillsHint(skills)
+
+    // 4.5 compose message
+    const branchName = `refs/pull/${prNumber}/head`
+    const initialMessage = `Auto-fix failing CI checks on PR #${prNumber} in ${owner}/${repo}.${skillsHint}
+
+When you finish (or hit a blocker you can't recover from), output the following XML tag as your final message so the local user gets a structured summary:
+
+<autofix-result>
+  <pr-number>${prNumber}</pr-number>
+  <commits-pushed>
+    <commit sha="...">commit message</commit>
+  </commits-pushed>
+  <files-changed>
+    <file path="...">N changes</file>
+  </files-changed>
+  <ci-status>green | red | pending | unknown</ci-status>
+  <summary>One-sentence summary of what was fixed or why it could not be fixed.</summary>
+</autofix-result>
+
+If no fix was needed, omit <commits-pushed> and <files-changed> and explain in <summary>. If you only attempted partial work, list the commits you did push and explain the remainder in <summary>.`
+
+    // 4.6 in-process teammate
+    const teammate = createAutofixTeammate(initialMessage, target)
+    cancelController.signal.addEventListener(
+      'abort',
+      () => teammate.abortController.abort(),
+      { once: true },
+    )
+
+    // 4.7 acquire lock atomically BEFORE doing any awaits. This closes the
+    // TOCTOU race where two concurrent invocations both see active=null and
+    // both try to create remote sessions.
+    setPhase('acquiring_lock')
+    const lockAcquired = trySetActiveMonitor({
+      taskId: teammate.taskId,
+      owner,
+      repo,
+      prNumber,
+      abortController: teammate.abortController,
+      startedAt: Date.now(),
+    })
+    if (!lockAcquired) {
+      const existing = getActiveMonitor()
+      const msg = makeErrorText(
+        `already monitoring ${existing?.repo}#${existing?.prNumber}. Run /autofix-pr stop first.`,
+        'rc_already_monitoring_other',
+      )
+      setPhase('error')
+      onError?.(msg)
+      onDone(msg, { display: 'system' })
+      return null
+    }
+
+    // 4.8 teleport — wire BOTH onBundleFail and onCreateFail so HTTP-layer
+    // failures (4xx/5xx, expired token, invalid PR ref) reach the user with
+    // the upstream message instead of the generic fallback.
+    let teleportFailMsg: string | undefined
+    const captureFailMsg = (msg: string) => {
+      teleportFailMsg = msg
+    }
+    let session: { id: string; title: string } | null = null
+    setPhase('launching')
+    try {
+      session = await teleportToRemote({
+        initialMessage,
+        source: 'autofix_pr',
+        branchName,
+        skipBundle: true,
+        title: `Autofix PR: ${target}`,
+        useDefaultEnvironment: true,
+        signal: teammate.abortController.signal,
+        githubPr: { owner, repo, number: prNumber },
+        onBundleFail: captureFailMsg,
+        onCreateFail: captureFailMsg,
+      })
+    } catch (teleErr: unknown) {
+      clearActiveMonitor(teammate.taskId)
+      if (cancelController.isCancelled()) return null
+      const teleMsg =
+        teleErr instanceof Error ? teleErr.message : String(teleErr)
+      const msg = makeErrorText(
+        `teleport failed: ${teleMsg}`,
+        'teleport_failed',
+      )
+      setPhase('error')
+      onError?.(msg)
+      onDone(msg, { display: 'system' })
+      return null
+    }
+
+    if (!session) {
+      clearActiveMonitor(teammate.taskId)
+      if (cancelController.isCancelled()) return null
+      const msg = makeErrorText(
+        teleportFailMsg ?? 'remote session creation failed.',
+        'session_create_failed',
+      )
+      setPhase('error')
+      onError?.(msg)
+      onDone(msg, { display: 'system' })
+      return null
+    }
+
+    cancelController.setStartedSessionId(session.id)
+    if (cancelController.isCancelled()) {
+      clearActiveMonitor(teammate.taskId)
+      void cancelController.reportLateStopIfNeeded(session.id)
+      return null
+    }
+
+    // 4.8b capture PR head SHA before registering so the completionChecker
+    // can detect when the agent has pushed new commits.
+    const initialHeadSha =
+      (await fetchPrHeadSha(owner, repo, prNumber).catch(() => null)) ??
+      undefined
+    if (cancelController.isCancelled()) {
+      clearActiveMonitor(teammate.taskId)
+      void cancelController.reportLateStopIfNeeded(session.id)
+      return null
+    }
+
+    // 4.9 register task. If this throws, release the lock so the user can retry.
+    try {
+      const { taskId: frameworkTaskId } = registerRemoteAgentTask({
+        remoteTaskType: 'autofix-pr',
+        session,
+        command: `/autofix-pr ${prNumber}`,
+        context,
+        isLongRunning: true,
+        remoteTaskMetadata: { owner, repo, prNumber, initialHeadSha },
+      })
+      updateActiveMonitor({ taskId: frameworkTaskId, sessionId: session.id })
+    } catch (regErr: unknown) {
+      clearActiveMonitor(teammate.taskId)
+      if (cancelController.isCancelled()) return null
+      const regMsg = regErr instanceof Error ? regErr.message : String(regErr)
+      let stopFailureNote = ''
+      try {
+        const stopped = await archiveRemoteSession(session.id)
+        if (!stopped) {
+          stopFailureNote = ` A cloud session had already started and Claude Code couldn't stop it, so it may still work on the PR. Stop it here: ${getRemoteTaskSessionUrl(session.id)}`
+        }
+      } catch {
+        stopFailureNote = ` A cloud session had already started and Claude Code couldn't stop it, so it may still work on the PR. Stop it here: ${getRemoteTaskSessionUrl(session.id)}`
+      }
+      const msg = makeErrorText(
+        `task registration failed: ${regMsg}.${stopFailureNote}`,
+        'registration_failed',
+      )
+      setPhase('error')
+      onError?.(msg)
+      onDone(msg, { display: 'system' })
+      return null
+    }
+
+    // 4.10 PR webhook subscription (feature-gated, non-fatal)
+    if (feature('KAIROS_GITHUB_WEBHOOKS')) {
+      // kairos client not available in this repo — skip silently
+    }
+
+    // 4.11 success
+    setPhase('done')
+    const sessionUrl = getRemoteTaskSessionUrl(session.id)
+    logEvent('tengu_autofix_pr_result', {
+      result:
+        'success_rc' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    onComplete?.({ target, sessionUrl })
+    onDone(`Autofix launched for ${target}. Track: ${sessionUrl}`, {
+      display: 'system',
+    })
+    return { target, sessionUrl }
+  } catch (err: unknown) {
+    if (cancelController.isCancelled()) return null
+    const msg = err instanceof Error ? err.message : String(err)
+    logEvent('tengu_autofix_pr_result', {
+      result:
+        'failed' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      error_code:
+        'exception' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    })
+    setPhase('error')
+    onError?.(`Autofix PR failed: ${msg}`)
+    onDone(`Autofix PR failed: ${msg}`, { display: 'system' })
+    return null
+  }
+}
+
+/**
+ * Official 2.1.327 (#447): stateful launcher returned immediately from
+ * `callAutofixPr` in interactive REPL sessions so `<AutofixProgress>` is
+ * mounted while the async launch pipeline runs and Esc cancels immediately.
+ */
+export function AutofixLauncher({
+  parsed,
+  onDone,
+  context,
+}: {
+  parsed: AutofixStartParsed
+  onDone: Parameters<LocalJSXCommandCall>[0]
+  context: Parameters<LocalJSXCommandCall>[1]
+}): React.ReactElement {
+  const initialTarget =
+    parsed.owner && parsed.repo
+      ? `${parsed.owner}/${parsed.repo}#${parsed.prNumber}`
+      : `#${parsed.prNumber}`
+  const [phase, setPhase] = React.useState<AutofixPhase>('detecting')
+  const [target, setTarget] = React.useState(initialTarget)
+  const [sessionUrl, setSessionUrl] = React.useState<string | undefined>(
+    undefined,
+  )
+  const [errorMessage, setErrorMessage] = React.useState<string | undefined>(
+    undefined,
+  )
+
+  const cancelControllerRef = React.useRef<ReturnType<
+    typeof createAutofixCancelController
+  > | null>(null)
+  if (cancelControllerRef.current === null) {
+    cancelControllerRef.current = createAutofixCancelController({
+      onDone,
+      stopSession: archiveRemoteSession,
+      onLateStopFailure: wireLateStopFailure(context),
+    })
+  }
+  const cancelController = cancelControllerRef.current
+
+  React.useEffect(() => {
+    void runAutofixPrLaunch({
+      parsed,
+      onDone,
+      context,
+      cancelController,
+      onPhaseChange: setPhase,
+      onTargetChange: setTarget,
+      onComplete: info => {
+        setTarget(info.target)
+        setSessionUrl(info.sessionUrl)
+      },
+      onError: setErrorMessage,
+    })
+  }, [parsed, onDone, context, cancelController])
+
+  return React.createElement(AutofixProgress, {
+    phase,
+    target,
+    sessionUrl,
+    errorMessage,
+    onCancel: cancelController.cancelNow,
+  })
 }
 
 export const callAutofixPr: LocalJSXCommandCall = async (
@@ -182,267 +647,34 @@ export const callAutofixPr: LocalJSXCommandCall = async (
       ) as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
     })
 
-    // 4.1 resolve owner/repo. Always detect cwd repo first because teleport
-    // takes the git source from the working directory; cross-repo args that
-    // don't match cwd would silently work on the wrong repo.
-    let detected: { host: string; owner: string; name: string } | null
-    try {
-      detected = await detectCurrentRepositoryWithHost()
-    } catch {
-      onDone(
-        makeErrorText(
-          'Cannot detect GitHub repo from current directory.',
-          'session_create_failed',
-        ),
-        { display: 'system' },
-      )
-      return null
-    }
-    if (!detected || detected.host !== 'github.com') {
-      onDone(
-        makeErrorText(
-          'Cannot detect GitHub repo from current directory.',
-          'session_create_failed',
-        ),
-        { display: 'system' },
-      )
-      return null
-    }
-
-    // Cross-repo args (owner/repo#n) must match the current working directory;
-    // teleport's git source is taken from cwd, so a mismatch would create a
-    // session against the wrong repo. Accept both as a safety check rather
-    // than as a real cross-repo capability — true cross-repo support requires
-    // a separate clone path not yet implemented here.
-    if (
-      (parsed.owner && parsed.owner !== detected.owner) ||
-      (parsed.repo && parsed.repo !== detected.name)
-    ) {
-      onDone(
-        makeErrorText(
-          `Cross-repo autofix is not supported from this directory. Run from ${detected.owner}/${detected.name} or pass only the PR number.`,
-          'repo_mismatch',
-        ),
-        { display: 'system' },
-      )
-      return null
-    }
-    const owner = detected.owner
-    const repo = detected.name
-
-    const { prNumber } = parsed
-
-    // 4.2 singleton lock — already monitoring this exact PR
-    if (isMonitoring(owner, repo, prNumber)) {
-      logEvent('tengu_autofix_pr_result', {
-        result:
-          'success_rc' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-      })
-      onDone(`Already monitoring ${repo}#${prNumber} in background.`, {
-        display: 'system',
-      })
-      return null
-    }
-
-    // 4.2b note: the existing-different-PR check is folded into the
-    // trySetActiveMonitor call below. Doing the check + set atomically there
-    // avoids a TOCTOU window between the read and the write under concurrent
-    // invocations.
-
-    // 4.3 eligibility check (tolerate no_remote_environment, surface real reasons).
-    // skipBundle:true matches the teleport call below — autofix needs to push
-    // back to GitHub, which a git bundle cannot do.
-    const eligibility = await checkRemoteAgentEligibility({ skipBundle: true })
-    if (!eligibility.eligible) {
-      // Discriminated union: TypeScript narrows `eligibility` here, no cast needed.
-      const blockers = eligibility.errors.filter(
-        (e: BackgroundRemoteSessionPrecondition) =>
-          e.type !== 'no_remote_environment',
-      )
-      if (blockers.length > 0) {
-        const reasons = blockers.map(formatPreconditionError).join('\n')
-        onDone(
-          makeErrorText(
-            `Remote agent not available:\n${reasons}`,
-            'session_create_failed',
-          ),
-          { display: 'system' },
-        )
-        return null
-      }
-    }
-
-    // 4.4 detect skills
-    const skills = detectAutofixSkills(process.cwd())
-    const skillsHint = formatSkillsHint(skills)
-
-    // 4.5 compose message
-    const target = `${owner}/${repo}#${prNumber}`
-    const branchName = `refs/pull/${prNumber}/head`
-    const initialMessage = `Auto-fix failing CI checks on PR #${prNumber} in ${owner}/${repo}.${skillsHint}
-
-When you finish (or hit a blocker you can't recover from), output the following XML tag as your final message so the local user gets a structured summary:
-
-<autofix-result>
-  <pr-number>${prNumber}</pr-number>
-  <commits-pushed>
-    <commit sha="...">commit message</commit>
-  </commits-pushed>
-  <files-changed>
-    <file path="...">N changes</file>
-  </files-changed>
-  <ci-status>green | red | pending | unknown</ci-status>
-  <summary>One-sentence summary of what was fixed or why it could not be fixed.</summary>
-</autofix-result>
-
-If no fix was needed, omit <commits-pushed> and <files-changed> and explain in <summary>. If you only attempted partial work, list the commits you did push and explain the remainder in <summary>.`
-
-    // 4.6 in-process teammate
-    const teammate = createAutofixTeammate(initialMessage, target)
-
-    // 4.7 acquire lock atomically BEFORE doing any awaits. This closes the
-    // TOCTOU race where two concurrent invocations both see active=null and
-    // both try to create remote sessions.
-    const lockAcquired = trySetActiveMonitor({
-      taskId: teammate.taskId,
-      owner,
-      repo,
-      prNumber,
-      abortController: teammate.abortController,
-      startedAt: Date.now(),
-    })
-    if (!lockAcquired) {
-      const existing = getActiveMonitor()
-      onDone(
-        makeErrorText(
-          `already monitoring ${existing?.repo}#${existing?.prNumber}. Run /autofix-pr stop first.`,
-          'rc_already_monitoring_other',
-        ),
-        { display: 'system' },
-      )
-      return null
-    }
-
-    // 4.8 teleport — wire BOTH onBundleFail and onCreateFail so HTTP-layer
-    // failures (4xx/5xx, expired token, invalid PR ref) reach the user with
-    // the upstream message instead of the generic fallback. skipBundle:true
-    // is required for autofix: the remote container must push back to GitHub,
-    // which a bundle-cloned source cannot do (teleport.tsx documents this).
-    // Note: refs/pull/<n>/head is not a pushable ref. We do NOT pass
-    // reuseOutcomeBranch — the orchestrator generates a claude/* branch and
-    // the user pushes/PRs from claude.ai/code.
-    let teleportFailMsg: string | undefined
-    const captureFailMsg = (msg: string) => {
-      teleportFailMsg = msg
-    }
-    let session: { id: string; title: string } | null = null
-    try {
-      session = await teleportToRemote({
-        initialMessage,
-        source: 'autofix_pr',
-        branchName,
-        skipBundle: true,
-        title: `Autofix PR: ${target}`,
-        useDefaultEnvironment: true,
-        signal: teammate.abortController.signal,
-        githubPr: { owner, repo, number: prNumber },
-        onBundleFail: captureFailMsg,
-        onCreateFail: captureFailMsg,
-      })
-    } catch (teleErr: unknown) {
-      clearActiveMonitor(teammate.taskId)
-      const teleMsg =
-        teleErr instanceof Error ? teleErr.message : String(teleErr)
-      onDone(makeErrorText(`teleport failed: ${teleMsg}`, 'teleport_failed'), {
-        display: 'system',
-      })
-      return null
-    }
-
-    if (!session) {
-      clearActiveMonitor(teammate.taskId)
-      onDone(
-        makeErrorText(
-          teleportFailMsg ?? 'remote session creation failed.',
-          'session_create_failed',
-        ),
-        { display: 'system' },
-      )
-      return null
-    }
-
-    // 4.8b capture PR head SHA before registering so the completionChecker
-    // can detect when the agent has pushed new commits. Best-effort — if gh
-    // is unavailable or the call fails, leave initialHeadSha undefined and
-    // the checker falls back to terminal-state-only completion (closed /
-    // merged). Don't block on this; teleport succeeded already.
-    const initialHeadSha =
-      (await fetchPrHeadSha(owner, repo, prNumber).catch(() => null)) ??
-      undefined
-
-    // 4.9 register task. If this throws, release the lock so the user can
-    // retry — the remote CCR session is already created so we surface a
-    // dedicated error code.
-    //
-    // After registration succeeds, swap the lock's taskId from the tentative
-    // teammate UUID (used to acquire the lock atomically before teleport) to
-    // the framework-assigned taskId. Without this swap, the framework's own
-    // cleanup path (clearActiveMonitor(frameworkTaskId) on natural completion)
-    // would no-op against a lock keyed by teammate.taskId, leaving the
-    // singleton lock dangling and blocking future /autofix-pr invocations.
-    try {
-      const { taskId: frameworkTaskId } = registerRemoteAgentTask({
-        remoteTaskType: 'autofix-pr',
-        session,
-        command: `/autofix-pr ${prNumber}`,
+    // Official 2.1.327 (#447): in interactive REPL sessions, return a stateful
+    // <AutofixLauncher> immediately so <AutofixProgress> mounts live and Esc
+    // cancels immediately without waiting for network calls to finish.
+    if (context?.options && !context.options.isNonInteractiveSession) {
+      return React.createElement(AutofixLauncher, {
+        parsed,
+        onDone,
         context,
-        isLongRunning: true,
-        remoteTaskMetadata: { owner, repo, prNumber, initialHeadSha },
       })
-      updateActiveMonitor({ taskId: frameworkTaskId, sessionId: session.id })
-    } catch (regErr: unknown) {
-      clearActiveMonitor(teammate.taskId)
-      const regMsg = regErr instanceof Error ? regErr.message : String(regErr)
-      let stopFailureNote = ''
-      try {
-        const stopped = await archiveRemoteSession(session.id)
-        if (!stopped) {
-          stopFailureNote = ` A cloud session had already started and Claude Code couldn't stop it, so it may still work on the PR. Stop it here: ${getRemoteTaskSessionUrl(session.id)}`
-        }
-      } catch {
-        stopFailureNote = ` A cloud session had already started and Claude Code couldn't stop it, so it may still work on the PR. Stop it here: ${getRemoteTaskSessionUrl(session.id)}`
-      }
-      onDone(
-        makeErrorText(
-          `task registration failed: ${regMsg}.${stopFailureNote}`,
-          'registration_failed',
-        ),
-        { display: 'system' },
-      )
-      return null
     }
 
-    // 4.10 PR webhook subscription (feature-gated, non-fatal)
-    if (feature('KAIROS_GITHUB_WEBHOOKS')) {
-      // kairos client not available in this repo — skip silently
-    }
-
-    // 4.11 success
-    const sessionUrl = getRemoteTaskSessionUrl(session.id)
-    logEvent('tengu_autofix_pr_result', {
-      result:
-        'success_rc' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+    const cancelController = createAutofixCancelController({
+      onDone,
+      stopSession: archiveRemoteSession,
+      onLateStopFailure: wireLateStopFailure(context),
     })
-    // Also call onDone so callers that listen to the callback get notified.
-    onDone(`Autofix launched for ${target}. Track: ${sessionUrl}`, {
-      display: 'system',
+    const completed = await runAutofixPrLaunch({
+      parsed,
+      onDone,
+      context,
+      cancelController,
     })
-    // Return a React progress UI showing the completed pipeline.
-    // The REPL renders the returned React element inline alongside the text.
+    if (!completed) return null
     return React.createElement(AutofixProgress, {
       phase: 'done',
-      target,
-      sessionUrl,
+      target: completed.target,
+      sessionUrl: completed.sessionUrl,
+      onCancel: cancelController.cancelNow,
     })
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err)

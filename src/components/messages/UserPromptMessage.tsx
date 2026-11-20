@@ -3,10 +3,12 @@ import type { TextBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import figures from 'figures';
 import React, { useContext, useMemo } from 'react';
 import { getKairosActive, getUserMsgOptIn } from '../../bootstrap/state.js';
+import { shouldMarkPastedContent, unwrapPastedContentForDisplay } from '../../history.js';
 import { Box, Text } from '@anthropic/ink';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
 import { useAppState } from '../../state/AppState.js';
 import { isEnvTruthy } from '../../utils/envUtils.js';
+import { redactImageNotShownForDisplay } from '../../utils/imageResizer.js';
 import { logError } from '../../utils/log.js';
 import { countCharInString } from '../../utils/stringUtils.js';
 import { MessageActionsSelectedContext } from '../messageActions.js';
@@ -44,7 +46,14 @@ export function UserPromptMessage({
   hidePluginOriginHeader = false,
   rewrittenText,
 }: Props): React.ReactNode {
-  const text = rewrittenText ?? param.text;
+  const rawText = rewrittenText ?? param.text;
+  // Official 2.1.328 (`Odn` = `ARr(NI() ? Dml(d, lGe()) : d)`): unwrap
+  // `<pasted_content id="...">` display tags when pasted content marking is enabled.
+  const unwrappedText = shouldMarkPastedContent() ? unwrapPastedContentForDisplay(rawText) : rawText;
+  // Official 2.1.328 #606 (`uRr`): redact `[Image not shown, read it from <cache>]`
+  // back to `[Image]` in user prompt display so background-agent messages do not
+  // display a long filesystem cache path.
+  const text = !isTranscriptMode ? redactImageNotShownForDisplay(unwrappedText) : unwrappedText;
   // REPL.tsx passes isBriefOnly={viewedTeammateTask ? false : isBriefOnly}
   // but that prop isn't threaded this deep — replicate the override by
   // reading viewingAgentTaskId directly. Computed here (not in the child)

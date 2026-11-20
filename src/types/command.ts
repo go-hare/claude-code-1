@@ -14,7 +14,15 @@ import type { Message } from './message.js'
 import type { PluginManifest } from './plugin.js'
 
 export type LocalCommandResult =
-  | { type: 'text'; value: string; level?: 'error' }
+  | {
+      type: 'text'
+      value: string
+      level?: 'error'
+      /** Official 2.1.328 (#677): display-only output excluded from model API messages. */
+      isDisplayOnly?: boolean
+      /** Official 2.1.328 (#677): model-visible isMeta messages emitted alongside display output. */
+      metaMessages?: string[]
+    }
   | {
       type: 'compact'
       compactionResult: CompactionResult
@@ -128,6 +136,11 @@ export type PromptCommand = {
     frontmatterAsWritten?: unknown
     frontmatterProblem?: string
   }
+  /**
+   * Official 2.1.328 (#664/#665): optional hook to format foreground `context: fork`
+   * results (e.g. `/code-review` JSON findings → severity-badged list).
+   */
+  formatForegroundForkResult?(text: string): string
   getPromptForCommand(
     args: string,
     context: ToolUseContext,

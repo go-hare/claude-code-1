@@ -72,14 +72,27 @@ function TranscriptOverlayPad({ collapsed, children }: { collapsed: boolean; chi
 }
 
 /**
+ * Official 2.1.328 (#605) `Qc`: only `priority === 'immediate'` notifications
+ * are shown on the modal divider row; lower-priority background notifications
+ * must not cut into the top border of open dialogs in fullscreen mode.
+ */
+export function shouldShowModalDividerNotification(
+  current: { priority?: string; exemptFromDiffPanelHold?: boolean } | null | undefined,
+  hold: boolean,
+): boolean {
+  if (!current || current.priority !== 'immediate') return false;
+  return isNotificationVisible(current as Parameters<typeof isNotificationVisible>[0], hold);
+}
+
+/**
  * Current notification on the modal divider row.
- * Paints nothing unless a notification is current. The trailing ▔ is omitted:
+ * Paints nothing unless an immediate notification is current. The trailing ▔ is omitted:
  * terminals without that glyph draw it as a box.
  */
 function ModalDividerTail(): React.ReactNode {
   const current = useAppState(s => s.notifications.current);
   const hold = useAppState(notificationsHoldToasts);
-  if (!isNotificationVisible(current, hold)) return null;
+  if (!shouldShowModalDividerNotification(current, hold) || !current) return null;
   return (
     <Box flexShrink={0} maxWidth="100%" overflow="hidden">
       <Text> </Text>
@@ -2196,6 +2209,9 @@ export function getJumpToBottomPillBaseLabel(count: number, askBelow = false): s
 // (not the full terminal once /diff is open). Shows "Jump to bottom" when
 // count is 0 (scrolled away but no new messages yet), or "Waiting for your answer"
 // when `askBelow` is true (2.1.326 #191).
+const NOOP_SUBSCRIBE_SELECTION = () => () => {};
+const FALSE_HAS_SELECTION = () => false;
+
 function NewMessagesPill({
   count,
   askBelow = false,
@@ -2207,7 +2223,14 @@ function NewMessagesPill({
 }): React.ReactNode {
   const [hover, setHover] = useState(false);
   const selection = useSelection();
-  const hasActiveSelection = useSyncExternalStore(selection.subscribe, selection.hasSelection);
+  // Official 2.1.328 (#600) `Q2t(!askBelow && !hover)`: hide the pill while
+  // selecting text (unless hovered or waiting for an answer) so text beneath
+  // the pill is revealed and included when copying.
+  const hideOnSelection = !askBelow && !hover;
+  const hasActiveSelection = useSyncExternalStore(
+    hideOnSelection ? selection.subscribe : NOOP_SUBSCRIBE_SELECTION,
+    hideOnSelection ? selection.hasSelection : FALSE_HAS_SELECTION,
+  );
   const { columns } = useTerminalSize();
   const terminalFocused = useTerminalFocus();
   // Official defaults (vRp/CRp densables via platform table).

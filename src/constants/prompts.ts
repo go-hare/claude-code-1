@@ -52,6 +52,9 @@ import { isPowerShellToolEnabled } from '../utils/shell/shellToolUtils.js'
 import { findGitBashPathOrNull } from '../utils/windowsPaths.js'
 import { getPlatform } from '../utils/platform.js'
 import { isReplModeEnabled } from '@claude-code/builtin-tools/tools/REPLTool/constants.js'
+import { buildCodeModeWorkflowGuidance } from '../utils/workflowSizeGuideline.js'
+import { areBackgroundTasksDisabled } from '../utils/sessionBackgroundGates.js'
+import { getGlobalConfig } from '../utils/config.js'
 import { feature } from 'bun:bundle'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { getEffectiveContextWindowSize } from '../services/compact/autoCompact.js'
@@ -282,20 +285,72 @@ Examples of the kind of risky actions that warrant user confirmation:
 When you encounter an obstacle, do not use destructive actions as a shortcut to simply make it go away. For instance, try to identify root causes and fix underlying issues rather than bypassing safety checks (e.g. --no-verify). If you discover unexpected state like unfamiliar files, branches, or configuration, investigate before deleting or overwriting, as it may represent the user's in-progress work. If you're unsure whether the user would want something kept, prefer a reversible step (move it aside, rename it, or stash it) over deleting; files you created yourself this session (scratch outputs, experiment intermediates) are yours to clean up freely. For example, typically resolve merge conflicts rather than discarding changes; similarly, if a lock file exists, investigate what process holds it rather than deleting it. In a git repository, run \`git status\` before any command that could discard uncommitted work (git checkout/restore/reset/clean, rm -rf on a repo path, restoring from a snapshot), and stash (with \`-u\` for untracked) or commit anything you find first. And when staging or committing: review what's included (\`git status\` after a broad \`git add\`), and if you see anything suspicious that might reveal secrets — even if the filename looks innocuous — double-check the file's contents before pushing. In short: only take risky actions carefully, and when in doubt, ask before acting. Follow both the spirit and letter of these instructions - measure twice, cut once.`
 }
 
-function getUsingYourToolsSection(enabledTools: Set<string>): string {
+/**
+ * Official 2.1.328 (#654): dev-server guidance for Code Mode in auto and
+ * bypass-permissions modes so dev servers run as background tasks in `/tasks`.
+ */
+export function buildCodeModeDevServerGuidance(
+  mode?: string,
+  backgroundTasksDisabled = false,
+): string {
+  if (backgroundTasksDisabled) {
+    return 'To keep a dev server or a watcher running, start it without awaiting it; it is stopped at its timeout.'
+  }
+  const isAutoOrBypass = mode === 'auto' || mode === 'bypassPermissions'
+  if (isAutoOrBypass) {
+    return "To keep a dev server or a watcher running in auto or bypass-permissions mode, await it with a short timeout: `const server = await $`npm run dev`.timeout(3000)` moves it to a background task shown in `/tasks`, where the user can see and stop it, and `server.running.outputPath` names the file with its output. Don't use `nohup`, `setsid` or `&` for this: Claude Code can't show or stop what they start."
+  }
+  return 'To keep a dev server or a watcher running, await it with a short timeout (`$`npm run dev`.timeout(3000)`) so it moves to a background task shown in `/tasks` instead of using `nohup`, `setsid`, or `&`.'
+}
+
+/**
+ * Official 2.1.328 (#655): Windows Code Mode shell guidance — scripts' shell
+ * commands run in Git Bash, and PowerShell aliases run instead of functions
+ * with the same name.
+ */
+export function buildWindowsCodeModeShellGuidance(
+  platform: NodeJS.Platform = process.platform,
+): string | null {
+  if (platform !== 'win32') return null
+  return "On Windows, Code Mode scripts' shell commands run in Git Bash. When calling PowerShell, note that PowerShell aliases take precedence over functions with the same name."
+}
+
+function getUsingYourToolsSection(
+  enabledTools: Set<string>,
+  permissionMode?: string,
+): string {
   const taskToolName = [TASK_CREATE_TOOL_NAME, TODO_WRITE_TOOL_NAME].find(n =>
     enabledTools.has(n),
   )
 
-  // In REPL mode, Read/Write/Edit/Glob/Grep/Bash/Agent are hidden from direct
-  // use (REPL_ONLY_TOOLS). The "prefer dedicated tools over Bash" guidance is
-  // irrelevant — REPL's own prompt covers how to call them from scripts.
+  // In REPL / Code Mode, Read/Write/Edit/Glob/Grep/Bash/Agent are hidden from
+  // direct use (CODE_MODE_ONLY_TOOLS). Include concise Code Mode guidance for
+  // tasks, workflows (#583), dev servers (#654), and Windows shells (#655).
   if (isReplModeEnabled()) {
+    let workflowGuideline: string | undefined
+    try {
+      const cfg = getGlobalConfig() as { workflowSizeGuideline?: unknown }
+      workflowGuideline = buildCodeModeWorkflowGuidance(
+        cfg.workflowSizeGuideline as Parameters<
+          typeof buildCodeModeWorkflowGuidance
+        >[0],
+      )
+    } catch {
+      workflowGuideline = buildCodeModeWorkflowGuidance()
+    }
+    const resolvedMode =
+      permissionMode ?? getInitialSettings().permissions?.defaultMode
     const items = [
       taskToolName
-        ? `Break down and manage your work with the ${taskToolName} tool. These tools are helpful for planning your work and helping the user track your progress. Mark each task as completed as soon as you are done with the task. Do not batch up multiple tasks before marking them as completed.`
+        ? `Use ${taskToolName} to plan and track work; mark tasks completed as soon as done.`
         : null,
-    ].filter(item => item !== null)
+      workflowGuideline,
+      buildCodeModeDevServerGuidance(
+        resolvedMode,
+        areBackgroundTasksDisabled(),
+      ),
+      buildWindowsCodeModeShellGuidance(),
+    ].filter((item): item is string => item !== null)
     if (items.length === 0) return ''
     return [`# Using your tools`, ...prependBullets(items)].join(`\n`)
   }
@@ -637,6 +692,7 @@ export type GetSystemPromptOptions = {
   teammate?: boolean
   isDetached?: boolean
   hookOrigin?: string
+  permissionMode?: string
 }
 
 export async function getSystemPrompt(
@@ -1092,7 +1148,13 @@ ${CYBER_RISK_INSTRUCTION}`,
                   : null,
               ],
               ['actions', getActionsSection()],
-              ['tools', getUsingYourToolsSection(effectiveEnabledTools)],
+              [
+                'tools',
+                getUsingYourToolsSection(
+                  effectiveEnabledTools,
+                  options?.permissionMode,
+                ),
+              ],
               ['tone', getOutputEfficiencySection()],
               ...staticMemoryPair,
             ])
@@ -1146,7 +1208,7 @@ ${CYBER_RISK_INSTRUCTION}`,
       ? getSimpleDoingTasksSection()
       : null,
     getActionsSection(),
-    getUsingYourToolsSection(enabledTools),
+    getUsingYourToolsSection(enabledTools, options?.permissionMode),
     getOutputEfficiencySection(),
     staticMemorySection,
     // === BOUNDARY MARKER - DO NOT MOVE OR REMOVE ===

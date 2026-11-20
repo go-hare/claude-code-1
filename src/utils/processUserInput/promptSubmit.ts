@@ -24,6 +24,7 @@ import {
   hasHookForEvent,
   shouldSkipHookDueToTrust,
 } from '../hooks.js'
+import { formatCloudUserPromptSubmitBlockError } from '../hooks/hookErrorDisplay.js'
 import { getHooksConfigFromSnapshot } from '../hooks/hooksConfigSnapshot.js'
 import {
   getSessionFunctionHooks,
@@ -441,6 +442,10 @@ export async function runUserPromptSubmit(
   result: SubmitResult,
   context: ToolUseContext,
   _originalInput?: string | unknown,
+  options?: {
+    isCloudMidTurn?: boolean
+    isCodeModeScriptOutput?: boolean
+  },
 ): Promise<UpsOutcome> {
   const appState = context.getAppState()
   let suppressOriginalPrompt = false
@@ -450,6 +455,9 @@ export async function runUserPromptSubmit(
     appState.toolPermissionContext.mode,
     context,
     context.requestPrompt,
+    options?.isCodeModeScriptOutput
+      ? { isCodeModeScriptOutput: true }
+      : undefined,
   )) {
     if (hookResult.message?.type === 'progress') {
       continue
@@ -461,9 +469,11 @@ export async function runUserPromptSubmit(
       suppressOriginalPrompt = true
     }
     if (hookResult.blockingError) {
-      const blockingMessage = getUserPromptSubmitHookBlockingMessage(
-        hookResult.blockingError,
-      )
+      const blockingMessage = options?.isCloudMidTurn
+        ? formatCloudUserPromptSubmitBlockError(
+            hookResult.blockingError.blockingError,
+          )
+        : getUserPromptSubmitHookBlockingMessage(hookResult.blockingError)
       const blockText = suppressOriginalPrompt
         ? blockingMessage
         : `${blockingMessage}\n\nOriginal prompt: ${text}`
@@ -898,6 +908,19 @@ export async function runPromptSubmit({
     result.resultText = scratch.resultText
   }
 
+  const isCloudMidTurn =
+    Boolean(bridgeOrigin) ||
+    (typeof origin === 'object' &&
+      origin !== null &&
+      'kind' in origin &&
+      ((origin as { kind?: unknown }).kind === 'bridge' ||
+        (origin as { kind?: unknown }).kind === 'cloud'))
+  const isCodeModeScriptOutput =
+    typeof origin === 'object' &&
+    origin !== null &&
+    'kind' in origin &&
+    (origin as { kind?: unknown }).kind === 'code-mode-script-output'
+
   const tail = async (event: Record<string, unknown>) => {
     const nextText = typeof event.text === 'string' ? event.text : text
     const scratch = cloneResult(result)
@@ -906,6 +929,7 @@ export async function runPromptSubmit({
       scratch,
       context,
       originalInput,
+      { isCloudMidTurn, isCodeModeScriptOutput },
     )
     const pass = { scratch, outcome: upsOutcome }
     passes.set(nextText, pass)

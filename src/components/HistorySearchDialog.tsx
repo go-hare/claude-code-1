@@ -4,7 +4,7 @@ import { getProjectRoot, getSessionId } from '../bootstrap/state.js';
 import { useRegisterOverlay } from '../context/overlayContext.js';
 import { getTimestampedHistory, type TimestampedHistoryEntry } from '../history.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
-import { Box, FuzzyPicker, type FuzzyPickerHandle, Text, stringWidth, wrapAnsi } from '@anthropic/ink';
+import { Box, FuzzyPicker, type FuzzyPickerHandle, Text, stringWidth, useWantEveryKey, wrapAnsi } from '@anthropic/ink';
 import { ConfigurableShortcutHint } from './ConfigurableShortcutHint.js';
 import { isVimModeEnabled } from './PromptInput/utils.js';
 import { useRegisterKeybindingContext } from '../keybindings/KeybindingContext.js';
@@ -47,6 +47,8 @@ type Scan = {
 export function HistorySearchDialog({ initialQuery, onSelect, onCancel }: Props): React.ReactNode {
   useRegisterOverlay('history-search');
   useRegisterKeybindingContext('HistorySearch');
+  // Official 2.1.328 (#603): receive every keypress while history search input is active.
+  useWantEveryKey(true);
   const { columns } = useTerminalSize();
 
   const [scope, setScope] = useState<HistorySearchScope>('everywhere');

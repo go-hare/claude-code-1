@@ -338,12 +338,16 @@ export type EnvLessBridgeParams = {
   /** densable 2.1.247 `onGetWorkspaceDiff` — RC working-tree diff pull. */
   onGetWorkspaceDiff?: (signal: AbortSignal) => Promise<unknown>
   /**
-   * Official 2.1.323 #2119 (`backgroundHold` / `Sn`): when background
-   * subagents are still running at turn end, hold Remote Control state at
-   * `'running'` instead of reporting `'idle'` to phone / desktop clients.
+   * Official 2.1.323 #2119 + 2.1.328 #592 (`backgroundHold` / `runningHold`):
+   * hold Remote Control state at `'running'` only while a turn or background
+   * subagents are actually active; idle Desktop/VS Code sessions turning
+   * Remote Control on must report `'idle'`.
    */
   backgroundHold?: {
     holdsRunning: () => boolean
+    queuedTurnCount?: () => number
+    isTurnUnderWay?: () => boolean
+    sessionState?: () => 'idle' | 'running' | 'requires_action'
   }
   /**
    * Official 2.1.326 #94: initial worker state when Remote Control is turned on
@@ -500,6 +504,35 @@ export function buildCanUseToolDetailsPayload(
 }
 
 /**
+ * Official 2.1.328 (#592): compute the effective initial worker status when
+ * Remote Control is turned on in Desktop/VS Code/CLI. An idle session with no
+ * active turn, no queued turns, and no running background subagents MUST start
+ * as `'idle'` rather than `'running'`.
+ */
+export function resolveInitialRemoteWorkerState(opts: {
+  isTurnUnderWay?: boolean
+  holdsRunning?: boolean
+  queuedTurnCount?: number
+  explicitInitialState?: 'idle' | 'running'
+}): 'idle' | 'running' {
+  if (
+    opts.isTurnUnderWay === true ||
+    opts.holdsRunning === true ||
+    (opts.queuedTurnCount ?? 0) > 0
+  ) {
+    return 'running'
+  }
+  if (
+    opts.isTurnUnderWay === false &&
+    opts.holdsRunning === false &&
+    (opts.queuedTurnCount ?? 0) === 0
+  ) {
+    return 'idle'
+  }
+  return opts.explicitInitialState ?? 'idle'
+}
+
+/**
  * Create a session, fetch a worker JWT, connect the v2 transport.
  *
  * Returns null on any pre-flight failure (session create failed, /bridge
@@ -547,7 +580,13 @@ export async function initEnvLessBridgeCore(
     initialWorkerState,
   } = params
 
-  let replyTurnActive = initialWorkerState === 'running'
+  const effectiveInitialWorkerState = resolveInitialRemoteWorkerState({
+    isTurnUnderWay: backgroundHold?.isTurnUnderWay?.(),
+    holdsRunning: backgroundHold?.holdsRunning(),
+    queuedTurnCount: backgroundHold?.queuedTurnCount?.(),
+    explicitInitialState: initialWorkerState,
+  })
+  let replyTurnActive = effectiveInitialWorkerState === 'running'
 
   const cfg = await getEnvLessBridgeConfig()
 
@@ -2209,7 +2248,8 @@ export async function initEnvLessBridgeCore(
   >()
   const blockingDialogRefCounts = new Map<string, number>()
   let lastUnderlyingState: 'idle' | 'running' | 'requires_action' =
-    initialWorkerState === 'running' ? 'running' : 'idle'
+    effectiveInitialWorkerState === 'running' ? 'running' : 'idle'
+  let hasReportedPendingAction = false
 
   function reportEffectiveState(
     state: 'idle' | 'running' | 'requires_action',
@@ -2231,6 +2271,7 @@ export async function initEnvLessBridgeCore(
             : undefined)
         transport.reportState('requires_action', dialogDetails)
         if (dialogDetails) {
+          hasReportedPendingAction = true
           transport.reportMetadata({ pending_action: dialogDetails })
         }
         return
@@ -2238,18 +2279,29 @@ export async function initEnvLessBridgeCore(
     }
     transport.reportState(state, details)
     if (state === 'requires_action' && details) {
+      hasReportedPendingAction = true
       transport.reportMetadata({ pending_action: details })
     } else if (state !== 'requires_action') {
-      transport.reportMetadata({ pending_action: null })
+      // Official 2.1.328 (#585): preserve a waiting server-side permission
+      // card during slow restarts when `clearsCardAfterLateRead` is enabled
+      // until the worker has actually reported/cleared a card itself.
+      const { shouldClearPendingActionAfterLateRead } =
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        require('./replBridgeTransport.js') as typeof import('./replBridgeTransport.js')
+      if (
+        hasReportedPendingAction ||
+        !shouldClearPendingActionAfterLateRead()
+      ) {
+        hasReportedPendingAction = false
+        transport.reportMetadata({ pending_action: null })
+      }
     }
   }
 
-  // Official 2.1.326 #94: if Remote Control was turned on while a tool or turn
-  // was already running in the terminal, immediately report `'running'` instead
-  // of staying stuck on `'idle'` until the next user prompt.
-  if (initialWorkerState === 'running') {
-    reportEffectiveState('running')
-  }
+  // Official 2.1.326 #94 + 2.1.328 #592: report the effective initial worker
+  // state (`'running'` only when a turn/subagent is active; `'idle'` otherwise
+  // so idle Desktop/VS Code sessions turning RC on never appear as running).
+  reportEffectiveState(effectiveInitialWorkerState)
 
   function buildCanUseToolDetails(
     requestId: string,

@@ -1,5 +1,5 @@
 import Anthropic, { type ClientOptions } from '@anthropic-ai/sdk'
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import type { GoogleAuth } from 'google-auth-library'
 import {
   checkAndRefreshOAuthTokenIfNeeded,
@@ -37,8 +37,11 @@ import { wrapFetchWithFirstByteWatchdog } from 'src/utils/firstByteWatchdog.js'
 import { getProxyFetchOptions } from 'src/utils/proxy.js'
 import {
   resolveByteStreamIdleTimeoutMs,
+  resolveRaisedConnectionIdleTimeoutMs,
   shouldEnableBodyIdleWatchdog,
 } from 'src/utils/streamWatchdogGates.js'
+import { getSettingsForSource } from 'src/utils/settings/settings.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import {
   getIsNonInteractiveSession,
   getSessionId,
@@ -102,6 +105,211 @@ import { assertValidOutgoingHeaders } from './invalidRequestHeader.js'
  * 4. Fallback region (us-east5)
  */
 
+export const MANAGED_SETTINGS_CHECKSUM_HEADER =
+  'x-claude-code-managed-settings-checksum'
+
+function canonicalizeForChecksum(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeForChecksum)
+  }
+  if (value !== null && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      out[key] = canonicalizeForChecksum(
+        (value as Record<string, unknown>)[key],
+      )
+    }
+    return out
+  }
+  return value
+}
+
+/**
+ * Official 2.1.327 `l2` (#373): deterministic `sha256:<hex>` checksum computed
+ * over canonically key-sorted JSON of loaded managed settings.
+ */
+export function computeManagedSettingsChecksum(settings: unknown): string {
+  const canonicalJson = JSON.stringify(canonicalizeForChecksum(settings))
+  return `sha256:${createHash('sha256').update(canonicalJson).digest('hex')}`
+}
+
+/**
+ * Official 2.1.327 `fQr` (#373): whether gateway hint headers are enabled.
+ */
+export function shouldSendGatewayHintHeaders(
+  provider: ReturnType<typeof getAPIProvider> = getAPIProvider(),
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const explicit = env.CLAUDE_CODE_GATEWAY_HINT_HEADERS
+  if (explicit !== undefined) {
+    return isEnvTruthy(explicit)
+  }
+  if (provider === 'gateway') return true
+  if (provider !== 'firstParty') return false
+  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_splendid_sutton', false)
+}
+
+/**
+ * Official 2.1.327 `NA` / `Ms` (#373): return
+ * `{ 'x-claude-code-managed-settings-checksum': 'sha256:...' }` when managed
+ * settings set `CLAUDE_CODE_GATEWAY_HINT_HEADERS=1`, gateway hint headers are
+ * active, the request goes to a gateway or custom base URL (not direct
+ * api.anthropic.com and not `ANTHROPIC_UNIX_SOCKET`), and `policySettings` are
+ * loaded.
+ */
+export function getManagedSettingsChecksumHeader(opts?: {
+  provider?: ReturnType<typeof getAPIProvider>
+  env?: NodeJS.ProcessEnv
+  policySettings?: Record<string, unknown> | null
+}): Record<string, string> {
+  const env = opts?.env ?? process.env
+  const provider = opts?.provider ?? getAPIProvider()
+  if (provider !== 'gateway' && provider !== 'firstParty') return {}
+  if (env.ANTHROPIC_UNIX_SOCKET) return {}
+  if (provider === 'firstParty' && isFirstPartyAnthropicBaseUrl(env)) {
+    return {}
+  }
+  if (!shouldSendGatewayHintHeaders(provider, env)) return {}
+  const policySettings =
+    opts?.policySettings !== undefined
+      ? opts.policySettings
+      : (getSettingsForSource('policySettings') as Record<
+          string,
+          unknown
+        > | null)
+  if (!policySettings) return {}
+  const policyEnv =
+    typeof policySettings.env === 'object' && policySettings.env !== null
+      ? (policySettings.env as Record<string, unknown>)
+      : undefined
+  const policyHintHeader = policyEnv?.CLAUDE_CODE_GATEWAY_HINT_HEADERS
+  if (
+    !isEnvTruthy(
+      typeof policyHintHeader === 'string' ||
+        typeof policyHintHeader === 'boolean' ||
+        typeof policyHintHeader === 'number'
+        ? String(policyHintHeader)
+        : undefined,
+    )
+  ) {
+    return {}
+  }
+  return {
+    [MANAGED_SETTINGS_CHECKSUM_HEADER]:
+      computeManagedSettingsChecksum(policySettings),
+  }
+}
+
+/**
+ * Official 2.1.327 `Dls` (#374): decode unverified JWT payload and extract
+ * `billing_group_tag` claim if present as a non-empty string.
+ */
+export function extractBillingGroupTagFromJwt(
+  jwt: string | undefined,
+): string | undefined {
+  if (!jwt) return undefined
+  const firstDot = jwt.indexOf('.')
+  const secondDot = firstDot >= 0 ? jwt.indexOf('.', firstDot + 1) : -1
+  if (firstDot < 0 || secondDot < 0) return undefined
+  try {
+    const payload = JSON.parse(
+      Buffer.from(jwt.slice(firstDot + 1, secondDot), 'base64url').toString(
+        'utf8',
+      ),
+    ) as Record<string, unknown>
+    const tag = payload?.billing_group_tag
+    return typeof tag === 'string' && tag.trim().length > 0
+      ? tag.trim()
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Official 2.1.327 `vCn` (#374): resolve `attributionProject` from
+ * `CLAUDE_CODE_ATTRIBUTION_PROJECT`, settings cascade
+ * (`localSettings > projectSettings > userSettings > flagSettings > policySettings`),
+ * or `policySettings.attributionProjectPolicy.default`.
+ */
+export function resolveAttributionProject(opts?: {
+  env?: NodeJS.ProcessEnv
+  getSourceSettings?: (
+    source:
+      | 'localSettings'
+      | 'projectSettings'
+      | 'userSettings'
+      | 'flagSettings'
+      | 'policySettings',
+  ) => Record<string, unknown> | null
+}): { written: string | undefined; source?: string } {
+  const env = opts?.env ?? process.env
+  const fromEnv = env.CLAUDE_CODE_ATTRIBUTION_PROJECT
+  if (fromEnv !== undefined && fromEnv.trim() !== '') {
+    return { written: fromEnv.trim(), source: 'harness' }
+  }
+  const readSource =
+    opts?.getSourceSettings ??
+    (src => getSettingsForSource(src) as Record<string, unknown> | null)
+  const cascade = [
+    'localSettings',
+    'projectSettings',
+    'userSettings',
+    'flagSettings',
+    'policySettings',
+  ] as const
+  for (const src of cascade) {
+    const val = readSource(src)?.attributionProject
+    if (typeof val === 'string' && val.trim() !== '') {
+      return { written: val.trim(), source: src }
+    }
+  }
+  const policyDefault = (
+    readSource('policySettings')?.attributionProjectPolicy as
+      | { default?: unknown }
+      | undefined
+  )?.default
+  if (typeof policyDefault === 'string' && policyDefault.trim() !== '') {
+    return { written: policyDefault.trim(), source: 'admin_default' }
+  }
+  return { written: undefined }
+}
+
+/**
+ * Official 2.1.327 `RQ()` (#374): when the active Claude apps gateway JWT
+ * carries `billing_group_tag` and `attributionProject` is resolved, return
+ * `{ tags: { [billingGroupTag]: attributionProject } }` for Messages requests.
+ */
+export function getBillingGroupRequestTags(opts?: {
+  jwt?: string
+  env?: NodeJS.ProcessEnv
+  getSourceSettings?: (
+    source:
+      | 'localSettings'
+      | 'projectSettings'
+      | 'userSettings'
+      | 'flagSettings'
+      | 'policySettings',
+  ) => Record<string, unknown> | null
+}): { tags?: Record<string, string> } {
+  const jwt = opts?.jwt ?? getGatewayAuth()?.jwt
+  const billingGroupTag = extractBillingGroupTagFromJwt(jwt)
+  if (!billingGroupTag) return {}
+  try {
+    const { written } = resolveAttributionProject({
+      env: opts?.env,
+      getSourceSettings: opts?.getSourceSettings,
+    })
+    return written ? { tags: { [billingGroupTag]: written } } : {}
+  } catch (err) {
+    logForDebugging(
+      `Billing group not sent: ${err instanceof Error ? err.message : String(err)}`,
+      { level: 'warn' },
+    )
+    return {}
+  }
+}
+
 function createStderrLogger(): ClientOptions['logger'] {
   return {
     error: (msg, ...args) =>
@@ -113,7 +321,7 @@ function createStderrLogger(): ClientOptions['logger'] {
   }
 }
 
-function getClientTargetUrl(
+export function getClientTargetUrl(
   provider: ReturnType<typeof getAPIProvider>,
   model: string | undefined,
 ): string | undefined {
@@ -303,6 +511,13 @@ export async function getAnthropicClient({
   // CLAUDE_CODE_USE_GATEWAY does not mis-route to BedrockClient.
   const requestProvider = getAPIProvider()
 
+  // Official 2.1.327 (#373): send x-claude-code-managed-settings-checksum
+  // gateway hint header when managed settings set CLAUDE_CODE_GATEWAY_HINT_HEADERS=1.
+  Object.assign(
+    defaultHeaders,
+    getManagedSettingsChecksumHeader({ provider: requestProvider }),
+  )
+
   // Skip apiKeyHelper headers when a gateway JWT session is active.
   // densable `g` — GMo return value, used by FTn as authorizationSource.
   let authorizationSource: string | null = null
@@ -365,9 +580,13 @@ export async function getAnthropicClient({
   // densable J_: proxy / unix / mTLS fetchOptions only.
   // Enterprise TLS pin (densable uIc / B_c) is NOT on the Anthropic SDK path —
   // densable applies pin only to managed-settings axios (Cad + httpsAgent).
+  // Official 2.1.328 (#566): pass raisedBodyIdleTimeoutMs when
+  // CLAUDE_STREAM_IDLE_TIMEOUT_MS > 300s so gateways, custom base URLs, and
+  // cloud providers lengthen their connection idle timeout up to 30 min.
   const baseFetchOptions = getProxyFetchOptions({
     forAnthropicAPI: true,
     hasBodyIdleWatchdog,
+    raisedBodyIdleTimeoutMs: resolveRaisedConnectionIdleTimeoutMs(),
     url: getClientTargetUrl(requestProvider, model),
   }) as ClientOptions['fetchOptions'] & {
     dispatcher?: unknown

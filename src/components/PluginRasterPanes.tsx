@@ -3049,9 +3049,11 @@ function clampModTextLines(text: string, maxLines: number): string {
   return kept.join('\n');
 }
 
+const TRUNCATE_ROWS_WRAPS = new Set(['end', 'truncate', 'truncate-end', 'clip']);
+
 function textStyleFrom(props: Record<string, unknown> | undefined): Partial<ComponentProps<typeof Text>> {
   if (props === undefined) return {};
-  const isClip = props.wrap === 'clip';
+  const wrap = props.wrap;
   return {
     ...(boolProp(props, 'bold') !== undefined && { bold: boolProp(props, 'bold') }),
     ...(boolProp(props, 'dimColor') !== undefined && { dimColor: boolProp(props, 'dimColor') }),
@@ -3065,15 +3067,14 @@ function textStyleFrom(props: Record<string, unknown> | undefined): Partial<Comp
     ...(typeof props.backgroundColor === 'string' && {
       backgroundColor: resolvePluginColor(props.backgroundColor) as ComponentProps<typeof Text>['backgroundColor'],
     }),
-    ...((props.wrap === 'wrap' ||
-      props.wrap === 'end' ||
-      props.wrap === 'middle' ||
-      props.wrap === 'truncate' ||
-      props.wrap === 'truncate-start' ||
-      props.wrap === 'truncate-middle' ||
-      props.wrap === 'truncate-end') && { wrap: props.wrap }),
-    // Official 2.1.326 #10: `wrap="clip"` keeps single-line clipping without wrapping.
-    ...(isClip && { wrap: 'truncate-end' as ComponentProps<typeof Text>['wrap'] }),
+    // Official 2.1.328 (`bi`): map end/truncate/truncate-end/clip → truncate-rows.
+    ...(typeof wrap === 'string' && TRUNCATE_ROWS_WRAPS.has(wrap)
+      ? { wrap: 'truncate-rows' as ComponentProps<typeof Text>['wrap'] }
+      : (wrap === 'wrap' ||
+          wrap === 'middle' ||
+          wrap === 'truncate-start' ||
+          wrap === 'truncate-middle' ||
+          wrap === 'truncate-rows') && { wrap }),
   };
 }
 

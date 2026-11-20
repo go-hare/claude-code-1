@@ -154,9 +154,9 @@ const daemonCmd =
 const jobCmd = feature('TEMPLATES')
   ? require('./commands/job/index.js').default
   : null
-const peersCmd = feature('UDS_INBOX')
+const listAgentsCmd = feature('UDS_INBOX')
   ? (
-      require('./commands/peers/index.js') as typeof import('./commands/peers/index.js')
+      require('./commands/list-agents/index.js') as typeof import('./commands/list-agents/index.js')
     ).default
   : null
 const attachCmd = feature('UDS_INBOX')
@@ -502,7 +502,7 @@ const COMMANDS = memoize((): Command[] => [
   designRevoke,
   designLogin,
   passes,
-  ...(peersCmd ? [peersCmd] : []),
+  ...(listAgentsCmd ? [listAgentsCmd] : []),
   ...(attachCmd ? [attachCmd] : []),
   ...(detachCmd ? [detachCmd] : []),
   ...(sendCmd ? [sendCmd] : []),
@@ -728,7 +728,7 @@ export function filterValidCommands(commands: Command[]): Command[] {
   for (const cmd of commands) {
     let displayName: unknown
     try {
-      displayName = cmd.userFacingName?.()
+      displayName = cmd.userFacingName ? cmd.userFacingName() : cmd.name
     } catch {
       displayName = undefined
     }

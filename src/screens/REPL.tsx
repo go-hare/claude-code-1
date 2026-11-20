@@ -30,13 +30,14 @@ import { useSearchHighlight } from '@anthropic/ink';
 import type { JumpHandle } from '../components/VirtualMessageList.js';
 import { renderMessagesToPlainText } from '../utils/exportRenderer.js';
 import { getExternalEditor, openFileInExternalEditor } from '../utils/editor.js';
-import { pickTranscriptVirtualScrollHints, TRANSCRIPT_FOOTER_RIGHT_BADGE } from '../utils/transcriptFooterHints.js';
+import { TRANSCRIPT_FOOTER_RIGHT_BADGE } from '../utils/transcriptFooterHints.js';
 import { writeFile } from 'fs/promises';
 import {
   type TabStatusKind,
   Box,
   Byline,
   Text,
+  formatShortcutString,
   stringWidth,
   useStdin,
   useTheme,
@@ -77,7 +78,22 @@ import {
   READ_FILE_STATE_CACHE_SIZE,
 } from '../utils/fileStateCache.js';
 import { ToolStateSlots } from '../utils/toolState.js';
-import { refreshActivePlugins } from '../utils/plugins/refresh.js';
+import {
+  ensurePluginAgentLoadedForResume,
+  mergeCliAgentsIntoDefinitions,
+  refreshActivePlugins,
+} from '../utils/plugins/refresh.js';
+import { setEnvHookNotifier } from '../utils/hooks/fileChangedWatcher.js';
+import { formatOutsideReplHookFailures } from '../utils/hooks/hookErrorDisplay.js';
+import { formatImageNotShown } from '../utils/imageResizer.js';
+import { storeImages } from '../utils/imageStore.js';
+import {
+  evaluateWorkflowRateLimitLoginHold,
+  isLocalWorkflowTask,
+  reconcileWorkflowRateLimitWaitOnEvent,
+  setWorkflowRateLimitWait,
+  WORKFLOW_HELD_FOR_LOGIN_NOTICE,
+} from '../tasks/LocalWorkflowTask/LocalWorkflowTask.js';
 import { messageUuidPrefix, UUID_PREFIX_LENGTH } from '../utils/plugins/uiSelectionRowHolding.js';
 import { retireDepartedAdditionalDirectories } from '../utils/settings/applySettingsChange.js';
 import { APIError } from '@anthropic-ai/sdk';
@@ -149,7 +165,9 @@ import {
   applyCodeModePlan,
   cloudMoveRefusal,
   didSessionEndDuringCodeModeScript,
+  mergeCodeModeReplySideEffects,
   planCodeModeFromSession,
+  shouldAutoStartCodeModeTurnAfterCommand,
 } from '../services/codeMode/executor.js';
 import {
   type ElicitationRequestEvent,
@@ -579,6 +597,8 @@ import {
   saveWorktreeState,
   stripUnresumedInterruptedMessages,
   getAgentTranscript,
+  hasMissingEarlierMessages,
+  createMissingEarlierMessagesWarning,
 } from '../utils/sessionStorage.js';
 import { deserializeMessagesWithInterruptDetection } from '../utils/conversationRecovery.js';
 import {
@@ -864,7 +884,7 @@ import { UltraplanLaunchDialog } from '../components/ultraplan/UltraplanLaunchDi
 import type { RemoteMessageContent } from '../utils/teleport/api.js';
 import { FullscreenLayout, useUnseenDivider, computeUnseenDivider } from '../components/FullscreenLayout.js';
 import { ToastStackView } from '../components/PromptInput/Notifications.js';
-import { getToasts, pushToast } from '../components/toastStore.js';
+import { formatPluginToastKey, getToasts, pushToast } from '../components/toastStore.js';
 import { ReplDiffSidebarController } from '../components/diff/ReplDiffSidebarController.js';
 import {
   computeDiffSidebarWidth,
@@ -921,6 +941,15 @@ function median(values: number[]): number {
 }
 
 /**
+ * Official 2.1.328 #606: format a cached image path for a background-agent
+ * message as `[Image not shown, read it from <cache>]` so the UI display
+ * redactor can show `[Image]` instead of a long filesystem path.
+ */
+export function formatBackgroundAgentImageNote(cachePath: string): string {
+  return formatImageNotShown(cachePath);
+}
+
+/**
  * #117 (2.1.326): convert pasted image references inside a prompt submitted to
  * a viewed background agent into Anthropic image content blocks instead of raw
  * `[Image #N]` text.
@@ -928,33 +957,55 @@ function median(values: number[]): number {
 export function buildAgentMessageContentWithImages(
   input: string,
   pastedContents?: Record<number, PastedContent>,
+  opts?: {
+    inlineImages?: boolean;
+    cachedImagePaths?: ReadonlyMap<number, string>;
+  },
 ): string | ContentBlockParam[] {
   if (!pastedContents || Object.keys(pastedContents).length === 0) {
     return input;
   }
+  const allowInline = opts?.inlineImages !== false;
   const refs = parseReferences(input);
   const imageBlocks: ContentBlockParam[] = [];
+  const fallbackImageNotes = new Map<number, string>();
   const seenImageIds = new Set<number>();
   for (const ref of refs) {
     const item = pastedContents[ref.id];
     if (item?.type === 'image' && !seenImageIds.has(ref.id)) {
       seenImageIds.add(ref.id);
-      imageBlocks.push({
-        type: 'image',
-        source: {
-          type: 'base64',
-          media_type: (item.mediaType || 'image/png') as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp',
-          data: item.content,
-        },
-      });
+      if (allowInline && !item.unavailable && typeof item.content === 'string' && item.content.length > 0) {
+        imageBlocks.push({
+          type: 'image',
+          source: {
+            type: 'base64',
+            media_type: (item.mediaType || 'image/png') as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp',
+            data: item.content,
+          },
+        });
+      } else {
+        const cachePath = opts?.cachedImagePaths?.get(ref.id) ?? item.filename;
+        if (cachePath) {
+          fallbackImageNotes.set(ref.id, formatBackgroundAgentImageNote(cachePath));
+        }
+      }
     }
   }
   const expanded = expandPastedTextRefs(input, pastedContents);
+  const withNotes =
+    fallbackImageNotes.size > 0
+      ? expanded.replace(/\[Image #(\d+)\]/g, (match, idStr: string) => {
+          const note = fallbackImageNotes.get(Number(idStr));
+          return note ?? match;
+        })
+      : expanded;
   if (imageBlocks.length === 0) {
-    return expanded;
+    return withNotes;
   }
-  // Strip `[Image #N]` placeholders from the accompanying text block if images are attached.
-  const cleanedText = expanded.replace(/\[Image #\d+\]/g, '').trim();
+  // Strip `[Image #N]` placeholders for inline images while preserving any fallback notes.
+  const cleanedText = withNotes
+    .replace(/\[Image #(\d+)\]/g, (match, idStr: string) => (fallbackImageNotes.has(Number(idStr)) ? match : ''))
+    .trim();
   return [...imageBlocks, ...(cleanedText ? [{ type: 'text' as const, text: cleanedText }] : [])];
 }
 
@@ -1148,6 +1199,10 @@ function TranscriptModeFooter({
   const toggleShortcut = useShortcutDisplay('app:toggleTranscript', 'Global', 'ctrl+o');
   const showAllShortcut = useShortcutDisplay('transcript:toggleShowAll', 'Transcript', 'ctrl+e');
   const { columns } = useTerminalSize();
+  // Official 2.1.328 `aj`: statusLabel preempts the right-side `verbose ` badge.
+  const statusLabel = hasDialogWaiting ? 'dialog waiting' : isWorking ? 'working' : undefined;
+  const showVerboseBadge = statusLabel === undefined;
+  const rightBadge = showVerboseBadge ? TRANSCRIPT_FOOTER_RIGHT_BADGE : '';
   // densable Ktn: short editor basename (≤8) for "v to open in <editor>".
   const editorName = (() => {
     const editor = getExternalEditor();
@@ -1156,22 +1211,26 @@ function TranscriptModeFooter({
     return base && base.length <= 8 ? base : undefined;
   })();
   const openInLabel = editorName ? `open in ${editorName}` : 'open in editor';
-  // densable CZa F0S: ↑↓ scroll · v to <editor> · ? for shortcuts
+  // Official 2.1.328 `aj`: ↑/↓ to scroll · v to <editor> · ? for shortcuts
   // Width gate collapses only this segment so the sticky left side never wraps.
-  const fullVirtualHints = `${figures.arrowUp}${figures.arrowDown} scroll · v to ${openInLabel} · ? for shortcuts`;
-  const virtualHints = pickTranscriptVirtualScrollHints(columns, {
-    stringWidth,
-    toggleShortcut,
-    fullHints: fullVirtualHints,
-    status,
-    rightBadge: TRANSCRIPT_FOOTER_RIGHT_BADGE,
-  });
+  const fullVirtualHints = `${figures.arrowUp}/${figures.arrowDown} to scroll · v to ${openInLabel} · ? for shortcuts`;
+  const virtualHints =
+    2 +
+      stringWidth(
+        [statusLabel ?? '', 'Showing detailed transcript', `${toggleShortcut} to toggle`, fullVirtualHints]
+          .filter(s => s !== '')
+          .join(' · '),
+      ) +
+      stringWidth(status ? `${status} ` : rightBadge) <
+    columns
+      ? fullVirtualHints
+      : '? for shortcuts';
   const midHint = searchBadge
     ? 'n/N to navigate'
     : virtualScroll
       ? virtualHints
       : suppressShowAll
-        ? ''
+        ? `v to ${openInLabel}`
         : `${showAllShortcut} to ${showAllInTranscript ? 'collapse' : 'show all'}`;
   return (
     <Box
@@ -1187,13 +1246,11 @@ function TranscriptModeFooter({
       paddingLeft={2}
       width="100%"
     >
-      {/* densable CZa + #214 (2.1.326): show working/dialog-waiting indicator before transcript label. */}
+      {/* Official 2.1.328 `aj`: show working/dialog-waiting indicator before transcript label. */}
       <Text dimColor wrap="truncate-end">
         <Byline>
-          {hasDialogWaiting ? (
-            <Text color="permission">dialog waiting</Text>
-          ) : isWorking ? (
-            <Text color="claude">working</Text>
+          {statusLabel !== undefined ? (
+            <Text color={hasDialogWaiting ? 'permission' : 'claude'}>{statusLabel}</Text>
           ) : null}
           <Text>Showing detailed transcript</Text>
           <Text>{toggleShortcut} to toggle</Text>
@@ -1209,21 +1266,127 @@ function TranscriptModeFooter({
           <Text>{status} </Text>
         </>
       ) : searchBadge ? (
-        // Engine-counted — close enough for a rough location hint. May
-        // drift from render-count for ghost/phantom messages.
+        // Official 2.1.328 `Bce`: `${current} of ${count} `
         <>
           <Box flexGrow={1} />
           <Text dimColor>
-            {searchBadge.current}/{searchBadge.count}
-            {'  '}
+            {searchBadge.current} of {searchBadge.count}{' '}
           </Text>
         </>
-      ) : (
+      ) : showVerboseBadge ? (
         <>
           <Box flexGrow={1} />
           <Text dimColor>{TRANSCRIPT_FOOTER_RIGHT_BADGE}</Text>
         </>
-      )}
+      ) : null}
+    </Box>
+  );
+}
+
+const TRANSCRIPT_SHORTCUTS_FORMAT = { keyCase: 'lower' as const, shiftAsCase: true };
+const TRANSCRIPT_SHORTCUTS_PAD_X = 2;
+const TRANSCRIPT_SHORTCUTS_COL_GAP = 4;
+
+/**
+ * Official 2.1.328 `Hce` (`TranscriptShortcutsHelp`): build ordered shortcut
+ * hint strings with exit and close first so they stay visible in short windows.
+ */
+export function buildTranscriptShortcutHints(opts: {
+  exitShortcut: string;
+  toggleShortcut: string;
+  editorName?: string;
+}): string[] {
+  const fmt = (chord: string | readonly string[], action: string): string => {
+    const painted = formatShortcutString(chord, TRANSCRIPT_SHORTCUTS_FORMAT);
+    return painted ? `${painted} to ${action}` : '';
+  };
+  return [
+    fmt([opts.exitShortcut, opts.toggleShortcut], 'exit'),
+    fmt('?', 'close'),
+    fmt(['up', 'down', 'j', 'k'], 'scroll'),
+    fmt(['ctrl+u', 'ctrl+d'], 'move half a page'),
+    fmt(['space', 'b'], 'move a page'),
+    fmt(['g', 'shift+g'], 'go to top/bottom'),
+    fmt(['{', '}'], 'jump between prompts'),
+    fmt('/', 'search'),
+    fmt(['n', 'shift+n'], 'cycle matches'),
+    fmt('[', 'print to scrollback'),
+    fmt('v', `open in ${opts.editorName ?? 'editor'}`),
+  ].filter(Boolean);
+}
+
+/**
+ * Official 2.1.328 `AWt`: pack shortcut hints into columns starting at 3 rows
+ * per column, widening row count until all columns fit in `columns`, and cap
+ * rows per column in very short windows so exit/close hints stay visible.
+ */
+export function packTranscriptShortcutColumns(
+  hints: readonly string[],
+  columns: number,
+  rows?: number,
+  measure: (s: string) => number = stringWidth,
+): string[][] {
+  const items = hints.filter(Boolean);
+  let cols: string[][] = [];
+  for (let rowsPerCol = 3; ; rowsPerCol++) {
+    cols = [];
+    for (let i = 0; i < items.length; i += rowsPerCol) {
+      cols.push(items.slice(i, i + rowsPerCol));
+    }
+    const totalColWidth = cols.reduce(
+      (sum, col) => sum + col.reduce((max, item) => Math.max(max, measure(item)), 0),
+      0,
+    );
+    if (
+      2 * TRANSCRIPT_SHORTCUTS_PAD_X + TRANSCRIPT_SHORTCUTS_COL_GAP * (cols.length - 1) + totalColWidth <= columns ||
+      cols.length <= 1
+    ) {
+      break;
+    }
+  }
+  if (rows !== undefined) {
+    // Keep at least the first 2 rows (exit + close) visible in short windows.
+    const maxRows = Math.max(2, rows - 2);
+    cols = cols.map(col => (col.length > maxRows ? col.slice(0, maxRows) : col));
+  }
+  return cols;
+}
+
+/** Official 2.1.328 `Hce`: `?` shortcuts overlay for fullscreen transcript mode. */
+function TranscriptShortcutsHelp(): React.ReactNode {
+  const toggleShortcut = useShortcutDisplay('app:toggleTranscript', 'Global', 'ctrl+o');
+  const exitShortcut = useShortcutDisplay('transcript:exit', 'Transcript', 'q');
+  const { columns, rows } = useTerminalSize();
+  const editorName = (() => {
+    const editor = getExternalEditor();
+    if (!editor) return undefined;
+    const base = basename(editor.split(' ')[0] ?? '');
+    return base && base.length <= 8 ? base : undefined;
+  })();
+  const hints = buildTranscriptShortcutHints({ exitShortcut, toggleShortcut, editorName });
+  const cols = packTranscriptShortcutColumns(hints, columns, rows);
+  return (
+    <Box
+      noSelect
+      borderTopDimColor
+      borderBottom={false}
+      borderLeft={false}
+      borderRight={false}
+      borderStyle="single"
+      marginTop={1}
+      width="100%"
+    >
+      <Box flexShrink={0} paddingX={TRANSCRIPT_SHORTCUTS_PAD_X} flexDirection="row" gap={TRANSCRIPT_SHORTCUTS_COL_GAP}>
+        {cols.map((col, colIdx) => (
+          <Box key={colIdx} flexDirection="column">
+            {col.map(hint => (
+              <Text key={hint} dimColor>
+                {hint}
+              </Text>
+            ))}
+          </Box>
+        ))}
+      </Box>
     </Box>
   );
 }
@@ -3096,8 +3259,10 @@ export function REPL({
         logForDebugging(`$.ui.toast: stacked (${getToasts().length} up)`);
         return;
       }
+      // Official 2.1.328 #622 (`dSl`): scope toast key by plugin name (`plugin-toast-<plugin>:<id>`)
+      // instead of bare `plugin-toast-${randomUUID()}` so one plugin's toast cannot collide with another's.
       addNotification({
-        key: `plugin-toast-${randomUUID()}`,
+        key: formatPluginToastKey(toast.plugin, randomUUID()),
         kind: 'event',
         text: `${toast.plugin}: ${toast.text}`,
         priority: 'immediate',
@@ -4829,13 +4994,32 @@ export function REPL({
     })),
   );
 
+  // Official 2.1.327 #432: ensure CwdChanged / FileChanged hook failure notices
+  // still surface in fullscreen mode (where Notifications.tsx is unmounted).
+  useEffect(() => {
+    if (!isFullscreenEnvEnabled()) return;
+    setEnvHookNotifier((text, isError) => {
+      addNotification({
+        key: 'env-hook-status',
+        text,
+        color: isError ? 'error' : undefined,
+        priority: isError ? 'high' : 'low',
+      });
+    });
+    return () => setEnvHookNotifier(null);
+  }, [addNotification]);
+
+  const codeModeAutoBackgroundEligibleRef = useRef(false);
+  const codeModeInterruptedByEscRef = useRef(false);
+
   const resume = useCallback(
     async (sessionId: UUID, log: LogOption, entrypoint: ResumeEntrypoint) => {
       const resumeStart = performance.now();
       try {
-        // Official 2.1.323 (#1964) & 2.1.325 (#2316): reconcile Code Mode opt-in
-        // state with resumed session, and wait for user's next prompt if it ended
-        // mid-script.
+        // Official 2.1.323 (#1964) & 2.1.325 (#2316) & 2.1.328 (#573/#574/#575/#582):
+        // reconcile Code Mode opt-in state with resumed session, track
+        // autoBackgroundEligible, surface interruptedScriptNotice, and wait for
+        // user's next prompt if it ended mid-script.
         const codeModePlan = planCodeModeFromSession(
           {
             replMode: (log as { replMode?: boolean }).replMode,
@@ -4864,7 +5048,24 @@ export function REPL({
           throw new Error(codeModePlan.refused);
         }
         applyCodeModePlan(codeModePlan);
-        const waitForNextPromptAfterCodeModeResume = codeModePlan.waitForNextPrompt === true;
+        codeModeAutoBackgroundEligibleRef.current = codeModePlan.autoBackgroundEligible === true;
+        const waitForNextPromptAfterCodeModeResume =
+          codeModePlan.waitForNextPrompt === true ||
+          !shouldAutoStartCodeModeTurnAfterCommand({
+            interruptedByEsc: codeModeInterruptedByEscRef.current,
+            commandName: 'resume',
+            isLocalCommand: true,
+          });
+        if (codeModePlan.interruptedScriptNotice) {
+          addNotification({
+            key: 'code-mode-interrupted-script',
+            kind: 'warning',
+            priority: 'medium',
+            wrap: true,
+            color: 'warning',
+            text: codeModePlan.interruptedScriptNotice,
+          });
+        }
         if (waitForNextPromptAfterCodeModeResume) {
           logForDebugging(
             '[resume] Code Mode session ended during a script — skipping auto-continue and waiting for next prompt',
@@ -4875,6 +5076,29 @@ export function REPL({
         // Deserialize messages to properly clean up the conversation
         // This filters unresolved tool uses and adds a synthetic assistant message if needed
         const { messages, turnInterruptionState } = deserializeMessagesWithInterruptDetection(log.messages);
+        // Official 2.1.328 #370: warn when an interactively resumed transcript
+        // is missing earlier messages (damaged/truncated parent chain).
+        const logTranscriptEntries = log.messages as unknown as Parameters<typeof hasMissingEarlierMessages>[0];
+        const logTranscriptMap = new Map(
+          logTranscriptEntries
+            .filter(entry => typeof entry?.uuid === 'string')
+            .map(entry => [entry.uuid, entry] as const),
+        );
+        if (hasMissingEarlierMessages(logTranscriptEntries, logTranscriptMap)) {
+          const warningEntry = createMissingEarlierMessagesWarning();
+          messages.unshift(createSystemMessage(warningEntry.content, 'warning'));
+        }
+        if (codeModePlan.interruptedScriptNotice) {
+          const mergedSideEffects = mergeCodeModeReplySideEffects([
+            {
+              toolUseId: 'resume',
+              hookContexts: [codeModePlan.interruptedScriptNotice],
+            },
+          ]);
+          for (const ctxNote of mergedSideEffects.hookContexts) {
+            messages.push(createSystemMessage(ctxNote, 'warning'));
+          }
+        }
         // Official 2.1.323 (#1981): in-session /resume does not auto-resume an
         // interrupted turn — strip the synthetic NRR loader sentinel and mark
         // the unresumed message so the next turn does not chain onto it.
@@ -4906,28 +5130,55 @@ export function REPL({
             getAgentDefinitionsWithOverrides.cache.clear?.();
             const freshAgentDefs = await getAgentDefinitionsWithOverrides(getOriginalCwd());
 
-            setAppState(prev => ({
-              ...prev,
-              agentDefinitions: {
-                ...freshAgentDefs,
-                allAgents: freshAgentDefs.allAgents,
-                activeAgents: getActiveAgentsFromList(freshAgentDefs.allAgents),
-              },
-            }));
+            setAppState(prev => {
+              // Official 2.1.327 #398: preserve CLI `--agents` across mode-switch reload.
+              const cliAgents = prev.agentDefinitions.allAgents.filter(a => a.source === 'flagSettings');
+              const mergedDefs = mergeCliAgentsIntoDefinitions(
+                {
+                  ...freshAgentDefs,
+                  allAgents: freshAgentDefs.allAgents,
+                  activeAgents: getActiveAgentsFromList(freshAgentDefs.allAgents),
+                },
+                cliAgents,
+              );
+              return {
+                ...prev,
+                agentDefinitions: mergedDefs,
+              };
+            });
             messages.push(createSystemMessage(warning, 'warning'));
           }
         }
 
         // Fire SessionEnd hooks for the current session before starting the
         // resumed one, mirroring the /clear flow in conversation.ts.
+        // Official 2.1.327 #432: surface SessionEnd hook failures on /resume.
         const sessionEndTimeoutMs = getSessionEndHookTimeoutMs();
         const sessionEndBoundMs = getSessionEndHooksBoundMs();
-        await executeSessionEndHooks('resume', {
-          getAppState: () => store.getState(),
-          setAppState,
-          signal: AbortSignal.timeout(sessionEndBoundMs),
-          timeoutMs: sessionEndTimeoutMs,
-        });
+        try {
+          await executeSessionEndHooks('resume', {
+            getAppState: () => store.getState(),
+            setAppState,
+            signal: AbortSignal.timeout(sessionEndBoundMs),
+            timeoutMs: sessionEndTimeoutMs,
+          });
+        } catch (sessionEndError) {
+          const formatted = formatOutsideReplHookFailures('SessionEnd', [
+            {
+              command: 'SessionEnd',
+              succeeded: false,
+              output: sessionEndError instanceof Error ? sessionEndError.message : String(sessionEndError),
+            },
+          ]);
+          for (const errText of formatted) {
+            addNotification({
+              key: 'session-end-hook-error',
+              text: errText,
+              color: 'error',
+              priority: 'high',
+            });
+          }
+        }
 
         // densable 2.1.214 #47: I1e(xr==="fork"?"fork":"resume", ...)
         const hookMessages = await processSessionStartHooks(entrypoint === 'fork' ? 'fork' : 'resume', {
@@ -4957,13 +5208,28 @@ export function REPL({
           void copyPlanForResume(log, asSessionId(sessionId));
         }
 
+        // Official 2.1.327 #399 / #524: ensure plugin agents are loaded before
+        // restoring a resumed session's saved agent setting.
+        const effectiveAgentDefinitions = await ensurePluginAgentLoadedForResume({
+          resumedAgentName: log.agentSetting,
+          mainThreadAgentDefinition: initialMainThreadAgentDefinition,
+          agentDefinitions: store.getState().agentDefinitions,
+          cwd: log.projectPath ?? getOriginalCwd(),
+        });
+        if (effectiveAgentDefinitions !== store.getState().agentDefinitions) {
+          setAppState(prev => ({
+            ...prev,
+            agentDefinitions: effectiveAgentDefinitions,
+          }));
+        }
+
         // Restore agent setting from the resumed conversation
         // Always reset to the new session's values (or clear if none),
         // matching the standaloneAgentContext pattern below
         const { agentDefinition: restoredAgent } = restoreAgentFromSession(
           log.agentSetting,
           initialMainThreadAgentDefinition,
-          agentDefinitions,
+          effectiveAgentDefinitions,
         );
         setMainThreadAgentDefinition(restoredAgent);
         setAppState(prev => ({ ...prev, agent: restoredAgent?.agentType }));
@@ -5766,6 +6032,12 @@ export function REPL({
 
     logForDebugging(`[onCancel] focusedInputDialog=${focusedInputDialog} streamMode=${streamMode}`);
     setLastTurnStopTime(Date.now());
+    // Official 2.1.328 (#582): remember when Esc interrupts an active Code Mode
+    // turn so subsequent local slash commands (e.g. `/model`) do not auto-start
+    // a new model turn until the user submits a fresh prompt.
+    if (isCodeModeEnabled() && (isLoading || abortControllerRef.current)) {
+      codeModeInterruptedByEscRef.current = true;
+    }
 
     // Official 2.1.295 (#382): ensure direct onCancel also cancels pending /loop wakeups.
     try {
@@ -6494,8 +6766,9 @@ export function REPL({
 
   // Session backgrounding (Ctrl+B to background/foreground)
   const handleBackgroundQuery = useCallback(() => {
-    // Official 2.1.323 (#1964): Code Mode sessions cannot be moved to the background.
-    if (isCodeModeEnabled()) {
+    // Official 2.1.323 (#1964) & 2.1.328 (#573): Code Mode sessions cannot be
+    // moved to the background unless `plan.autoBackgroundEligible` is set.
+    if (isCodeModeEnabled() && !codeModeAutoBackgroundEligibleRef.current) {
       addNotification({
         key: 'code-mode-bg-refusal',
         kind: 'warning',
@@ -6707,6 +6980,7 @@ export function REPL({
   // Official 2.1.323 (#2107): track explicit Wait choices from the usage limit
   // menu so if the retry after the countdown is still refused (429), we reopen
   // the usage limit menu instead of silently advancing to a later reset window.
+  const workflowHumanPromptCountRef = useRef(0);
   const usageLimitMenuWaitRef = useRef<{
     choseWaitInMenu: boolean;
     previousResetsAt?: number;
@@ -6723,17 +6997,52 @@ export function REPL({
           previousResetsAt: st.phase === 'armed' ? st.resetsAtSeconds : undefined,
           fired: false,
         };
+        // Official 2.1.327 (#388): stamp rateLimitWait on any running/paused
+        // local_workflow tasks so login-change holding tracks their wait state.
+        if (st.phase === 'armed') {
+          const resetsAt = st.resetsAtSeconds ?? Math.floor(st.fireAtMs / 1000);
+          for (const t of Object.values(store.getState().tasks ?? {})) {
+            if (isLocalWorkflowTask(t) && (t.status === 'running' || t.status === 'paused')) {
+              setWorkflowRateLimitWait(
+                t.id,
+                {
+                  resetsAt,
+                  resumeAtMs: st.fireAtMs,
+                  waitingAgents: Math.max(1, t.agentCount),
+                },
+                setAppState,
+              );
+            }
+          }
+        }
       } else if (event === 'fired-now') {
         if (usageLimitMenuWaitRef.current.choseWaitInMenu) {
           usageLimitMenuWaitRef.current.fired = true;
         }
+        reconcileWorkflowRateLimitWaitOnEvent({
+          tasks: store.getState().tasks ?? {},
+          loginRelation: 'same',
+          humanPrompts: workflowHumanPromptCountRef.current,
+          nowMs: Date.now(),
+          setAppState,
+        });
       } else if (event === 'login-changed') {
-        // #336 (Sub-Wave 326-I wire): notify user when login changes or ends while waiting.
+        // #336 (Sub-Wave 326-I wire) & #388 (2.1.327): notify user when login
+        // changes or ends while waiting; evaluate workflow login hold via
+        // `evaluateWorkflowRateLimitLoginHold` and persist via `setWorkflowRateLimitWait`.
         usageLimitMenuWaitRef.current = { choseWaitInMenu: false, fired: false };
+        const holdResult = reconcileWorkflowRateLimitWaitOnEvent({
+          tasks: store.getState().tasks ?? {},
+          loginRelation: 'other',
+          humanPrompts: workflowHumanPromptCountRef.current,
+          nowMs: Date.now(),
+          setAppState,
+        });
+        const hasPausedWorkflow = holdResult.anyHeld;
         addNotification({
-          key: 'quota-auto-resume-login-changed',
+          key: hasPausedWorkflow ? 'workflow-rate-limit-held-login' : 'quota-auto-resume-login-changed',
           kind: 'warning',
-          text: AUTO_CONTINUE_LOGIN_CHANGED_NOTICE,
+          text: hasPausedWorkflow ? WORKFLOW_HELD_FOR_LOGIN_NOTICE : AUTO_CONTINUE_LOGIN_CHANGED_NOTICE,
           priority: 'immediate',
           timeoutMs: 8_000,
         });
@@ -6745,6 +7054,13 @@ export function REPL({
         event === 'auto-armed'
       ) {
         usageLimitMenuWaitRef.current = { choseWaitInMenu: false, fired: false };
+        if (event === 'cancelled' || event === 'disabled') {
+          for (const t of Object.values(store.getState().tasks ?? {})) {
+            if (isLocalWorkflowTask(t) && t.rateLimitWait !== undefined) {
+              setWorkflowRateLimitWait(t.id, undefined, setAppState);
+            }
+          }
+        }
       }
     });
     let prevPhase = getQuotaAutoResumeState().phase;
@@ -6802,12 +7118,31 @@ export function REPL({
       additionalDisallowedTools: string[] = [],
     ): Promise<boolean> => {
       turnStartMessageIndexRef.current = messagesRef.current.length;
+      const trimmedInput = input?.trimStart() ?? '';
+      const isSlashInput = trimmedInput.startsWith('/');
+      const commandName = isSlashInput ? trimmedInput.slice(1).split(/\s+/)[0] : undefined;
+      let effectiveShouldQuery = shouldQuery;
+      if (isCodeModeEnabled()) {
+        if (isSlashInput && codeModeInterruptedByEscRef.current) {
+          if (
+            !shouldAutoStartCodeModeTurnAfterCommand({
+              interruptedByEsc: codeModeInterruptedByEscRef.current,
+              commandName,
+              isLocalCommand: !shouldQuery,
+            })
+          ) {
+            effectiveShouldQuery = false;
+          }
+        } else if (!isSlashInput && shouldQuery) {
+          codeModeInterruptedByEscRef.current = false;
+        }
+      }
       return turnController
         .runTurn(
           {
             newMessages,
             abortController,
-            shouldQuery,
+            shouldQuery: effectiveShouldQuery,
             additionalAllowedTools,
             mainLoopModelParam,
             onBeforeQueryCallback,
@@ -7184,6 +7519,27 @@ export function REPL({
         composerEnter?: unknown;
       },
     ) => {
+      const trimmedSubmit = input.trimStart();
+      if (trimmedSubmit.length > 0 && !trimmedSubmit.startsWith('/')) {
+        // Official 2.1.328 (#582): fresh user prompt clears Esc interrupt guard.
+        codeModeInterruptedByEscRef.current = false;
+        // Official 2.1.327 (#388): typing a new prompt continues any workflow
+        // held for a login change on the current login.
+        workflowHumanPromptCountRef.current += 1;
+        for (const t of Object.values(store.getState().tasks ?? {})) {
+          if (isLocalWorkflowTask(t) && t.rateLimitWait?.isHeldForLogin) {
+            const evaluated = evaluateWorkflowRateLimitLoginHold({
+              status: t.rateLimitWait,
+              loginRelation: 'other',
+              humanPrompts: workflowHumanPromptCountRef.current,
+              nowMs: Date.now(),
+            });
+            if (evaluated.shouldResumeNow) {
+              setWorkflowRateLimitWait(t.id, undefined, setAppState);
+            }
+          }
+        }
+      }
       await submitController.submit(
         input,
         helpers,
@@ -7291,11 +7647,27 @@ export function REPL({
       helpers: PromptInputHelpers,
       submittedPastedContents?: Record<number, PastedContent>,
     ) => {
-      // #117 (2.1.326): convert pasted `[Image #N]` placeholders into image content blocks
-      // so images pasted while viewing a background agent do not arrive as literal `[Image #1]` text.
+      // #117 (2.1.326) & #606 (2.1.328): convert pasted `[Image #N]` placeholders
+      // into inline image blocks when supported, or `[Image not shown, read it from <cache>]`
+      // notes via `formatBackgroundAgentImageNote` when inline images cannot be sent.
       const effectivePasted = submittedPastedContents ?? pastedContents;
-      const agentMessageContent = buildAgentMessageContentWithImages(input, effectivePasted);
-      const expandedPromptText = expandPastedTextRefs(input, effectivePasted);
+      const pastedImageValues = Object.values(effectivePasted).filter(p => p.type === 'image');
+      let cachedImagePaths: ReadonlyMap<number, string> = store.getState().storedImagePaths;
+      if (
+        pastedImageValues.length > 0 &&
+        (!isLocalAgentTask(task) || pastedImageValues.some(p => p.unavailable || !p.content))
+      ) {
+        const stored = await storeImages(effectivePasted, setAppState).catch(() => new Map<number, string>());
+        if (stored.size > 0) {
+          cachedImagePaths = new Map([...cachedImagePaths, ...stored]);
+        }
+      }
+      const agentMessageContent = buildAgentMessageContentWithImages(input, effectivePasted, {
+        inlineImages: isLocalAgentTask(task),
+        cachedImagePaths,
+      });
+      const expandedPromptText =
+        typeof agentMessageContent === 'string' ? agentMessageContent : expandPastedTextRefs(input, effectivePasted);
       if (isLocalAgentTask(task)) {
         appendMessageToLocalAgent(task.id, createUserMessage({ content: agentMessageContent }), setAppState);
         if (task.status === 'running') {
@@ -7440,10 +7812,16 @@ export function REPL({
   }, [initialMessages, initialMessage, offerResumeReturnIfNeeded]);
 
   // #40 (2.1.326): do not auto-open the usage limit menu while the user is
-  // typing a draft so an existing draft/pastedContents is never erased.
+  // typing a prompt draft so an existing draft/pastedContents is never erased.
+  // Official 2.1.327 #383: if the composer is in `!` bash mode (half-typed `!`
+  // command), clear the bash draft and reset to prompt mode before opening
+  // `/rate-limit-options` so an extra Enter after the usage limit menu never
+  // executes the half-typed shell command.
   const handleOpenRateLimitOptions = useCallback(() => {
-    const savedDraft = draftController.value;
-    if (savedDraft.length > 0) {
+    if (draftController.mode === 'bash') {
+      draftController.clear();
+      draftController.setMode('prompt');
+    } else if (draftController.value.length > 0) {
       return;
     }
     void onSubmitRef.current('/rate-limit-options', {
@@ -8306,6 +8684,7 @@ export function REPL({
   // working after Enter dismisses the bar (less semantics).
   const jumpRef = useRef<JumpHandle | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [transcriptHelpOpen, setTranscriptHelpOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchCount, setSearchCount] = useState(0);
   const [searchCurrent, setSearchCurrent] = useState(0);
@@ -8327,6 +8706,7 @@ export function REPL({
         // mount-effect calls setSearchQuery.
         jumpRef.current?.setAnchor();
         setSearchOpen(true);
+        setTranscriptHelpOpen(false);
         event.stopImmediatePropagation();
         return;
       }
@@ -8371,13 +8751,16 @@ export function REPL({
 
   // Transcript escape hatches. Bare letters in modal context (no prompt
   // competing for input) — same class as g/G/j/k in ScrollKeybindingHandler.
+  // Note: `q` is handled by `useGlobalKeybindings`'s `transcript:exit` binding
+  // (`q` / `escape` / `ctrl+c`), which exits transcript mode cleanly and invokes
+  // `onExitTranscript` (`handleExitTranscript`) to clear `frozenTranscriptState`.
   useInput(
     (input, key, event) => {
       markPersonActivityForPromptSuggestion();
       if (key.ctrl || key.meta) return;
-      if (input === 'q') {
-        // less: q quits the pager. ctrl+o toggles; q is the lineage exit.
-        handleExitTranscript();
+      if (input === '?' && !dumpMode) {
+        // Official 2.1.328 `d5`: toggle TranscriptShortcutsHelp (`Hce`) overlay.
+        setTranscriptHelpOpen(prev => !prev);
         event.stopImmediatePropagation();
         return;
       }
@@ -8388,12 +8771,14 @@ export function REPL({
         // ~4898 wires editorStatus, confirming v is meant to stay live.
         setDumpMode(true);
         setShowAllInTranscript(true);
+        setTranscriptHelpOpen(false);
         event.stopImmediatePropagation();
       } else if (input === 'v') {
         // less-style: v opens the file in $VISUAL/$EDITOR. Render the full
         // transcript (same path /export uses), write to tmp, hand off.
         // openFileInExternalEditor handles alt-screen suspend/resume for
         // terminal editors; GUI editors spawn detached.
+        setTranscriptHelpOpen(false);
         event.stopImmediatePropagation();
         // Drop double-taps: the render is async and a second press before it
         // completes would run a second parallel render (double memory, two
@@ -8451,6 +8836,7 @@ export function REPL({
       setSearchCount(0);
       setSearchCurrent(0);
       setSearchOpen(false);
+      setTranscriptHelpOpen(false);
       editorGenRef.current++;
       clearTimeout(editorTimerRef.current);
       setDumpMode(false);
@@ -8680,6 +9066,29 @@ export function REPL({
   // densable yh / inputOwnsEscape → mee promptOwnsEscape.
   const [inlineGripLit, setInlineGripLit] = useState(false);
 
+  // In fullscreen, ALL local-jsx slash commands float in the modal slot —
+  // FullscreenLayout wraps them in an absolute-positioned bottom-anchored
+  // pane (▔ divider, ModalContext). Pane/Dialog inside detect the context
+  // and skip their own top-level frame. Non-fullscreen keeps the inline
+  // render paths below. Commands that used to route through bottom
+  // (immediate: /model, /mcp, /btw, ...) and scrollable (non-immediate:
+  // /config, /theme, /diff, ...) both go here now.
+  // Hoisted above the `screen === 'transcript'` early return so toggling
+  // Ctrl+O never violates React's Rules of Hooks.
+  const toolJsxCentered = isFullscreenEnvEnabled() && toolJSX?.isLocalJSXCommand === true;
+  const topDialogIsModal = isTopDialogModalLayout(topDialogKind);
+  const dialogOverPanel = topDialogIsModal && toolJsxCentered;
+  const prevDialogOverPanelRef = useRef(false);
+  useEffect(() => {
+    if (prevDialogOverPanelRef.current && !dialogOverPanel) {
+      // Official 2.1.321 (#1876): when a dialog over a command panel unmounts,
+      // flip dialogHostUnmounted so the underlying command panel immediately re-mounts/restores.
+      setDialogHostUnmounted(true);
+      queueMicrotask(() => setDialogHostUnmounted(false));
+    }
+    prevDialogOverPanelRef.current = dialogOverPanel;
+  }, [dialogOverPanel]);
+
   if (screen === 'transcript') {
     // Virtual scroll replaces the 30-message cap: everything is scrollable
     // and memory is bounded by the viewport. Without it, wrapping transcript
@@ -8816,6 +9225,8 @@ export function REPL({
                   }}
                   setHighlight={setHighlight}
                 />
+              ) : transcriptHelpOpen ? (
+                <TranscriptShortcutsHelp />
               ) : (
                 <TranscriptModeFooter
                   showAllInTranscript={showAllInTranscript}
@@ -8904,26 +9315,6 @@ export function REPL({
   const companionVisible =
     !toolJSX?.shouldHidePromptInput && !anyInputOverlay && !showBashesDialog && !hidePromptForHardNms;
 
-  // In fullscreen, ALL local-jsx slash commands float in the modal slot —
-  // FullscreenLayout wraps them in an absolute-positioned bottom-anchored
-  // pane (▔ divider, ModalContext). Pane/Dialog inside detect the context
-  // and skip their own top-level frame. Non-fullscreen keeps the inline
-  // render paths below. Commands that used to route through bottom
-  // (immediate: /model, /mcp, /btw, ...) and scrollable (non-immediate:
-  // /config, /theme, /diff, ...) both go here now.
-  const toolJsxCentered = isFullscreenEnvEnabled() && toolJSX?.isLocalJSXCommand === true;
-  const topDialogIsModal = isTopDialogModalLayout(topDialogKind);
-  const dialogOverPanel = topDialogIsModal && toolJsxCentered;
-  const prevDialogOverPanelRef = useRef(false);
-  useEffect(() => {
-    if (prevDialogOverPanelRef.current && !dialogOverPanel) {
-      // Official 2.1.321 (#1876): when a dialog over a command panel unmounts,
-      // flip dialogHostUnmounted so the underlying command panel immediately re-mounts/restores.
-      setDialogHostUnmounted(true);
-      queueMicrotask(() => setDialogHostUnmounted(false));
-    }
-    prevDialogOverPanelRef.current = dialogOverPanel;
-  }, [dialogOverPanel]);
   const dialogPanelVis = computeDialogPanelVisibility({
     onScreenBlockingKind: topDialogKind ?? null,
     modalSlotActive: isFullscreenModalChromeActive({
@@ -9134,6 +9525,7 @@ export function REPL({
                     onOpenRateLimitOptions={handleOpenRateLimitOptions}
                     hideLogo={!!viewedAgentTask}
                     isLoading={focusedIsLoading}
+                    isStopHookRunning={Boolean(stopHookSpinnerSuffix)}
                     hasStreamingText={isLoading && !viewedAgentTask && hasStreamingText && !focusFoldHoldsPreview}
                     streamingDisplayStore={streamingDisplayStore}
                     isBriefOnly={viewedAgentTask ? false : isBriefOnly}

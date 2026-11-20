@@ -2759,6 +2759,8 @@ function PromptInput({
 
   // Handler for chat:imagePaste - paste image from clipboard
   const handleImagePaste = useCallback(() => {
+    // Official 2.1.328 #601: do not attach images while in `!` bash mode.
+    if (mode === 'bash') return;
     captureImagePasteAnchor();
     void getImageFromClipboard().then(imageData => {
       if (imageData) {
@@ -3631,6 +3633,30 @@ function PromptInput({
     [onSubmit],
   );
 
+  // #284 (2.1.326): in fullscreen mode, show hidden line counts on prompt borders.
+  // Hoisted above all early returns so opening any picker/editor never violates Rules of Hooks.
+  const { linesAbove, linesBelow } = useMemo(
+    () =>
+      computePromptViewportOverflow(
+        leadingPillText + input,
+        textInputColumns,
+        leadingPillText.length + cursorOffset,
+        maxVisibleLines,
+      ),
+    [leadingPillText, input, textInputColumns, cursorOffset, maxVisibleLines],
+  );
+
+  const handleFooterPaste = useCallback(
+    (event: { text: string; defaultPrevented?: boolean; preventDefault: () => void }) => {
+      if (!footerItemSelected || event.defaultPrevented) return;
+      if (event.text === '') return;
+      event.preventDefault();
+      selectFooterItem(null);
+      onTextPaste(event.text);
+    },
+    [footerItemSelected, selectFooterItem, onTextPaste],
+  );
+
   if (showBashesDialog) {
     return (
       <BackgroundTasksDialog
@@ -3837,7 +3863,9 @@ function PromptInput({
     placeholder,
     onExit,
     onExitMessage: (show, key) => setExitMessage({ show, key }),
-    onImagePaste,
+    // Official 2.1.328 #601: disable image paste interception in `!` bash mode
+    // so pasting an image file path stays plain text instead of an attachment.
+    onImagePaste: mode === 'bash' ? undefined : onImagePaste,
     columns: textInputColumns,
     maxVisibleLines,
     disableCursorMovementForUpDownKeys: suggestions.length > 0 || !!footerItemSelected,
@@ -3941,21 +3969,11 @@ function PromptInput({
     : undefined;
 
   const historyChip = formatHistoryBorderLabel(historyIndex, historyTotal, historyEdited);
-  // #284 (2.1.326): in fullscreen mode, show hidden line counts on prompt borders.
-  const { linesAbove, linesBelow } = useMemo(
-    () =>
-      computePromptViewportOverflow(
-        leadingPillText + input,
-        textInputColumns,
-        leadingPillText.length + cursorOffset,
-        maxVisibleLines,
-      ),
-    [leadingPillText, input, textInputColumns, cursorOffset, maxVisibleLines],
-  );
-  const topMoreBorderText: BorderTextOptions | undefined =
-    linesAbove > 0
+  const topStartLabel = [historyChip, linesAbove > 0 ? `↑ ${linesAbove} more` : undefined].filter(Boolean).join(' · ');
+  const topStartBorderText: BorderTextOptions | undefined =
+    topStartLabel !== ''
       ? {
-          content: ` ${chalk.dim(`↑ ${linesAbove} more`)} `,
+          content: ` ${chalk.dim(topStartLabel)} `,
           position: 'top',
           align: 'start',
           offset: 2,
@@ -3965,34 +3983,20 @@ function PromptInput({
     linesBelow > 0
       ? {
           content: ` ${chalk.dim(`↓ ${linesBelow} more`)} `,
-          position: 'bottom',
+          position: 'top',
           align: 'start',
           offset: 2,
         }
       : undefined;
-  const promptBorderText: BorderTextOptions | undefined = historyChip
-    ? {
-        content: ` ${chalk.dim(historyChip)} `,
-        position: 'top',
-        align: 'start',
-        offset: 2,
-      }
-    : (topMoreBorderText ??
-      buildBorderText(showFastIcon ?? false, showFastIconHint, fastModeCooldown, ultracodeActive));
+  const endBadgeBorderText = buildBorderText(
+    showFastIcon ?? false,
+    showFastIconHint,
+    fastModeCooldown,
+    ultracodeActive,
+  );
 
   const hasStash = stashedPrompt !== undefined;
   const aboveNotificationWidth = dockWidth > 0 ? Math.max(0, promptInputColumns - dockWidth) : '100%';
-
-  const handleFooterPaste = useCallback(
-    (event: { text: string; defaultPrevented?: boolean; preventDefault: () => void }) => {
-      if (!footerItemSelected || event.defaultPrevented) return;
-      if (event.text === '') return;
-      event.preventDefault();
-      selectFooterItem(null);
-      onTextPaste(event.text);
-    },
-    [footerItemSelected, selectFooterItem, onTextPaste],
-  );
 
   return (
     <Box
@@ -4072,12 +4076,16 @@ function PromptInput({
             </Text>
           )}
           <Box flexDirection="row" width={promptInputColumns}>
-            <PromptInputModeIndicator
-              mode={mode}
-              isLoading={isLoading}
-              viewingAgentName={viewingAgentName}
-              viewingAgentColor={viewingAgentColor}
-            />
+            {linesAbove > 0 && mode !== 'bash' ? (
+              <Box width={2} flexShrink={0} />
+            ) : (
+              <PromptInputModeIndicator
+                mode={mode}
+                isLoading={isLoading}
+                viewingAgentName={viewingAgentName}
+                viewingAgentColor={viewingAgentColor}
+              />
+            )}
             <Box flexGrow={1} flexShrink={1} tabIndex={-1} onClick={handleInputClick}>
               {textInputElement}
             </Box>
@@ -4100,56 +4108,82 @@ function PromptInput({
               width={promptInputColumns}
               flexShrink={0}
             >
-              <PromptInputModeIndicator
-                mode={mode}
-                isLoading={isLoading}
-                viewingAgentName={viewingAgentName}
-                viewingAgentColor={viewingAgentColor}
-              />
-              <Box flexGrow={1} flexShrink={1} tabIndex={-1} onClick={handleInputClick}>
-                {textInputElement}
-              </Box>
-            </Box>
-          ) : (
-            // #284 (2.1.326): keep JSX tree depth stable across linesBelow === 0 vs > 0
-            // so `textInputElement` (`BaseTextInput`) never unmounts/remounts on scroll.
-            <Box
-              flexDirection="column"
-              borderColor={getBorderColor()}
-              borderStyle="round"
-              borderTop={true}
-              borderBottom={false}
-              borderLeft={false}
-              borderRight={false}
-              width={promptInputColumns}
-              flexShrink={0}
-              borderText={promptBorderText}
-            >
-              <Box
-                flexDirection="row"
-                alignItems="flex-start"
-                justifyContent="flex-start"
-                borderColor={getBorderColor()}
-                borderStyle="round"
-                borderTop={false}
-                borderBottom={true}
-                borderLeft={false}
-                borderRight={false}
-                width={promptInputColumns}
-                flexShrink={0}
-                borderText={bottomMoreBorderText}
-              >
+              {linesAbove > 0 && mode !== 'bash' ? (
+                <Box width={2} flexShrink={0} />
+              ) : (
                 <PromptInputModeIndicator
                   mode={mode}
                   isLoading={isLoading}
                   viewingAgentName={viewingAgentName}
                   viewingAgentColor={viewingAgentColor}
                 />
+              )}
+              <Box flexGrow={1} flexShrink={1} tabIndex={-1} onClick={handleInputClick}>
+                {textInputElement}
+              </Box>
+            </Box>
+          ) : (
+            // #284 (2.1.326/328): keep JSX tree depth stable across linesBelow === 0 vs > 0
+            // and render start-aligned history/overflow chip beside end-aligned badges.
+            <>
+              <Box flexDirection="row" width={promptInputColumns} flexShrink={0}>
+                {topStartBorderText ? (
+                  <Box
+                    borderColor={getBorderColor()}
+                    borderStyle="round"
+                    borderTop={true}
+                    borderBottom={false}
+                    borderLeft={false}
+                    borderRight={false}
+                    width={stringWidth(topStartLabel) + 6}
+                    flexShrink={0}
+                    borderText={topStartBorderText}
+                  />
+                ) : null}
+                <Box
+                  borderColor={getBorderColor()}
+                  borderStyle="round"
+                  borderTop={true}
+                  borderBottom={false}
+                  borderLeft={false}
+                  borderRight={false}
+                  flexGrow={1}
+                  borderText={endBadgeBorderText}
+                />
+              </Box>
+              <Box
+                flexDirection="row"
+                alignItems="flex-start"
+                justifyContent="flex-start"
+                width={promptInputColumns}
+                flexShrink={0}
+              >
+                {linesAbove > 0 && mode !== 'bash' ? (
+                  <Box width={2} flexShrink={0} />
+                ) : (
+                  <PromptInputModeIndicator
+                    mode={mode}
+                    isLoading={isLoading}
+                    viewingAgentName={viewingAgentName}
+                    viewingAgentColor={viewingAgentColor}
+                  />
+                )}
                 <Box flexGrow={1} flexShrink={1} tabIndex={-1} onClick={handleInputClick}>
                   {textInputElement}
                 </Box>
               </Box>
-            </Box>
+              <Box
+                borderColor={getBorderColor()}
+                borderStyle="round"
+                borderTop={true}
+                borderBottom={false}
+                borderLeft={false}
+                borderRight={false}
+                width={promptInputColumns}
+                flexShrink={0}
+                borderText={bottomMoreBorderText}
+              />
+            </>
           )}
         </>
       )}

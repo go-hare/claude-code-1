@@ -57,6 +57,71 @@ const MAX_CHUNK_BYTES = 512 * 1024
 // Sidecar idle timeout is 50s; ping well inside that.
 const PING_INTERVAL_MS = 30_000
 
+// Official 2.1.328 (#405): cap concurrent client TCP connections and sweep
+// connections that open a socket without sending a complete CONNECT request
+// head within `requestHeadTimeoutMs`.
+export const DEFAULT_MAX_CLIENT_CONNECTIONS = 8192
+export const DEFAULT_REQUEST_HEAD_TIMEOUT_MS = 30_000
+
+export type UpstreamProxyRelayStats = {
+  maxClientConnections: number
+  clientConnections: number
+  clientConnectionsPeak: number
+  clientConnectionsRefused: number
+  requestHeadTimeoutMs: number
+  requestHeadTimeouts: number
+}
+
+const relayStats: UpstreamProxyRelayStats = {
+  maxClientConnections: DEFAULT_MAX_CLIENT_CONNECTIONS,
+  clientConnections: 0,
+  clientConnectionsPeak: 0,
+  clientConnectionsRefused: 0,
+  requestHeadTimeoutMs: DEFAULT_REQUEST_HEAD_TIMEOUT_MS,
+  requestHeadTimeouts: 0,
+}
+
+export function getUpstreamProxyRelayStats(): Readonly<UpstreamProxyRelayStats> {
+  return { ...relayStats }
+}
+
+export function resetUpstreamProxyRelayStatsForTests(): void {
+  relayStats.maxClientConnections = DEFAULT_MAX_CLIENT_CONNECTIONS
+  relayStats.clientConnections = 0
+  relayStats.clientConnectionsPeak = 0
+  relayStats.clientConnectionsRefused = 0
+  relayStats.requestHeadTimeoutMs = DEFAULT_REQUEST_HEAD_TIMEOUT_MS
+  relayStats.requestHeadTimeouts = 0
+}
+
+export function buildTooManyConnectionsResponse(maxConns: number): string {
+  const body =
+    `this proxy already has ${maxConns} connections open, the most it allows, ` +
+    `so it refused this one. Run fewer downloads or requests at once, or stop ` +
+    `a program that leaves connections open, then retry.`
+  return (
+    'HTTP/1.1 503 Service Unavailable\r\n' +
+    'Content-Type: text/plain; charset=utf-8\r\n' +
+    `Content-Length: ${Buffer.byteLength(body)}\r\n` +
+    'Connection: close\r\n\r\n' +
+    body
+  )
+}
+
+export function buildRequestHeadTimeoutResponse(timeoutMs: number): string {
+  const secs = Math.max(1, Math.round(timeoutMs / 1000))
+  const body =
+    `no complete CONNECT request arrived within ${secs} s after this connection ` +
+    `opened, so the proxy closed it. Open a new connection to retry.`
+  return (
+    'HTTP/1.1 408 Request Timeout\r\n' +
+    'Content-Type: text/plain; charset=utf-8\r\n' +
+    `Content-Length: ${Buffer.byteLength(body)}\r\n` +
+    'Connection: close\r\n\r\n' +
+    body
+  )
+}
+
 /**
  * Encode an UpstreamProxyChunk protobuf message by hand.
  *
@@ -156,6 +221,7 @@ export function buildAgentProxyStatusBody(
 ): string {
   return JSON.stringify(
     {
+      ...relayStats,
       ...extra,
       recentRelayFailures: [...recentRelayFailures],
     },
@@ -164,38 +230,176 @@ export function buildAgentProxyStatusBody(
   )
 }
 
+type HeadTimeoutEntry = {
+  sock: ClientSocket
+  st: ConnState
+}
+
+/**
+ * Short grace window after writing HTTP 408/503 and calling `sock.end()`
+ * before forcibly destroying the socket so slowloris peers that never send
+ * TCP FIN cannot hold FDs in `FIN_WAIT_2` indefinitely.
+ */
+const HEAD_TIMEOUT_DESTROY_GRACE_MS = 250
+
+let activeDestroyTimerCount = 0
+
+export function getActiveDestroyTimerCountForTests(): number {
+  return activeDestroyTimerCount
+}
+
+/**
+ * Official 2.1.328 (#405): two-bucket (`young` / `old`) request-head timeout
+ * sweeper so idle/half-open client sockets that never finish sending a CONNECT
+ * request head are closed with HTTP 408 without allocating a per-socket timer.
+ */
+function createHeadTimeoutSweeper(timeoutMs: number): {
+  track: (entry: HeadTimeoutEntry) => void
+  untrack: (st: ConnState) => void
+  scheduleDestroy: (sock: ClientSocket, st: ConnState) => void
+  cancelDestroy: (st: ConnState) => void
+  stop: () => void
+} {
+  let young = new Map<ConnState, HeadTimeoutEntry>()
+  let old = new Map<ConnState, HeadTimeoutEntry>()
+  let timer: ReturnType<typeof setInterval> | null = null
+  const destroyTimers = new Set<ReturnType<typeof setTimeout>>()
+
+  const cancelDestroy = (st: ConnState): void => {
+    const dt = st.destroyTimer
+    if (!dt) return
+    clearTimeout(dt)
+    if (destroyTimers.delete(dt)) {
+      activeDestroyTimerCount = Math.max(0, activeDestroyTimerCount - 1)
+    }
+    st.destroyTimer = undefined
+    st.cancelDestroy = undefined
+  }
+
+  const scheduleDestroy = (sock: ClientSocket, st: ConnState): void => {
+    if (!sock.destroy) return
+    if (st.destroyTimer) {
+      cancelDestroy(st)
+    }
+    const dt = setTimeout(() => {
+      if (destroyTimers.delete(dt)) {
+        activeDestroyTimerCount = Math.max(0, activeDestroyTimerCount - 1)
+      }
+      if (st.destroyTimer === dt) {
+        st.destroyTimer = undefined
+        st.cancelDestroy = undefined
+      }
+      try {
+        sock.destroy?.()
+      } catch {
+        // ignore
+      }
+    }, HEAD_TIMEOUT_DESTROY_GRACE_MS)
+    if (typeof dt === 'object' && 'unref' in dt) {
+      dt.unref()
+    }
+    st.destroyTimer = dt
+    st.cancelDestroy = () => cancelDestroy(st)
+    destroyTimers.add(dt)
+    activeDestroyTimerCount++
+  }
+
+  const sweep = (): void => {
+    const expired = old
+    old = young
+    young = new Map()
+    for (const { sock, st } of expired.values()) {
+      if (st.closed || !st.awaitingHead) continue
+      st.awaitingHead = false
+      relayStats.requestHeadTimeouts++
+      recordRelayFailure('request_head_timeout', st.connectTarget)
+      try {
+        sock.write(buildRequestHeadTimeoutResponse(timeoutMs))
+      } catch {
+        // ignore write errors on half-closed socket
+      }
+      try {
+        sock.end()
+      } catch {
+        // ignore
+      }
+      // Immediately release the connection slot (cleanupConn is idempotent via
+      // st.counted) and schedule hard destroy so stalled peers that never send
+      // TCP FIN cannot leak slots or FDs.
+      cleanupConn(st)
+      scheduleDestroy(sock, st)
+    }
+    if (young.size === 0 && old.size === 0 && timer !== null) {
+      clearInterval(timer)
+      timer = null
+    }
+  }
+
+  const ensureTimer = (): void => {
+    if (timer !== null || timeoutMs <= 0) return
+    timer = setInterval(sweep, timeoutMs)
+    if (typeof timer === 'object' && 'unref' in timer) {
+      timer.unref()
+    }
+  }
+
+  return {
+    track(entry) {
+      if (timeoutMs <= 0) return
+      young.set(entry.st, entry)
+      ensureTimer()
+    },
+    untrack(st) {
+      young.delete(st)
+      old.delete(st)
+    },
+    scheduleDestroy,
+    cancelDestroy,
+    stop() {
+      young.clear()
+      old.clear()
+      if (timer !== null) {
+        clearInterval(timer)
+        timer = null
+      }
+      for (const dt of destroyTimers) {
+        clearTimeout(dt)
+      }
+      activeDestroyTimerCount = Math.max(
+        0,
+        activeDestroyTimerCount - destroyTimers.size,
+      )
+      destroyTimers.clear()
+    },
+  }
+}
+
 type ConnState = {
   ws?: WebSocketLike
   connectBuf: Buffer
   pinger?: ReturnType<typeof setInterval>
-  // Bytes that arrived after the CONNECT header but before ws.onopen fired.
-  // TCP can coalesce CONNECT + ClientHello into one packet, and the socket's
-  // data callback can fire again while the WS handshake is still in flight.
-  // Both cases would silently drop bytes without this buffer.
   pending: Buffer[]
   wsOpen: boolean
-  // Set once the server's 200 Connection Established has been forwarded and
-  // the tunnel is carrying TLS. After that, writing a plaintext 502 would
-  // corrupt the client's TLS stream — just close instead.
   established: boolean
-  // Official 2.1.325 #1892: gateway answered HTTP 4xx/5xx to CONNECT.
   connectRejected?: boolean
-  // WS onerror is always followed by onclose; without a guard the second
-  // handler would sock.end() an already-ended socket. First caller wins.
   closed: boolean
-  /** CONNECT target host:port when known (for failure records). */
   connectTarget?: string
+  /** Official 2.1.328 (#405): true until complete request head arrives or socket closes. */
+  awaitingHead: boolean
+  /** True once counted in `relayStats.clientConnections`. */
+  counted: boolean
+  /** Callback to remove from the head-timeout sweeper. */
+  untrackHead?: () => void
+  /** Bounded hard-destroy fallback timer after half-close (408/503). */
+  destroyTimer?: ReturnType<typeof setTimeout>
+  /** Callback to cancel `destroyTimer` and remove it from the sweeper set. */
+  cancelDestroy?: () => void
 }
 
-/**
- * Minimal socket abstraction so the CONNECT parser and WS tunnel plumbing
- * are runtime-agnostic. Implementations handle write backpressure internally:
- * Bun's sock.write() does partial writes and needs explicit tail-queueing;
- * Node's net.Socket buffers unconditionally and never drops bytes.
- */
 type ClientSocket = {
   write: (data: Uint8Array | string) => void
   end: () => void
+  destroy?: () => void
 }
 
 function newConnState(): ConnState {
@@ -205,7 +409,42 @@ function newConnState(): ConnState {
     wsOpen: false,
     established: false,
     closed: false,
+    awaitingHead: true,
+    counted: false,
   }
+}
+
+function trackAcceptedConn(
+  sock: ClientSocket,
+  st: ConnState,
+  maxClientConnections: number,
+  sweeper: ReturnType<typeof createHeadTimeoutSweeper>,
+): boolean {
+  if (relayStats.clientConnections >= maxClientConnections) {
+    relayStats.clientConnectionsRefused++
+    st.awaitingHead = false
+    st.closed = true
+    try {
+      sock.write(buildTooManyConnectionsResponse(maxClientConnections))
+    } catch {
+      // ignore
+    }
+    try {
+      sock.end()
+    } catch {
+      // ignore
+    }
+    sweeper.scheduleDestroy(sock, st)
+    return false
+  }
+  relayStats.clientConnections++
+  st.counted = true
+  if (relayStats.clientConnections > relayStats.clientConnectionsPeak) {
+    relayStats.clientConnectionsPeak = relayStats.clientConnections
+  }
+  sweeper.track({ sock, st })
+  st.untrackHead = () => sweeper.untrack(st)
+  return true
 }
 
 /**
@@ -217,18 +456,35 @@ export async function startUpstreamProxyRelay(opts: {
   wsUrl: string
   sessionId: string
   token: string
+  maxClientConnections?: number
+  requestHeadTimeoutMs?: number
 }): Promise<UpstreamProxyRelay> {
   const authHeader =
     'Basic ' + Buffer.from(`${opts.sessionId}:${opts.token}`).toString('base64')
-  // WS upgrade itself is auth-gated (proto authn: PRIVATE_API) — the gateway
-  // wants the session-ingress JWT on the upgrade request, separate from the
-  // Proxy-Authorization that rides inside the tunneled CONNECT.
   const wsAuthHeader = `Bearer ${opts.token}`
+  const maxClientConnections =
+    opts.maxClientConnections ?? DEFAULT_MAX_CLIENT_CONNECTIONS
+  const requestHeadTimeoutMs =
+    opts.requestHeadTimeoutMs ?? DEFAULT_REQUEST_HEAD_TIMEOUT_MS
+  relayStats.maxClientConnections = maxClientConnections
+  relayStats.requestHeadTimeoutMs = requestHeadTimeoutMs
 
   const relay =
     typeof Bun !== 'undefined'
-      ? startBunRelay(opts.wsUrl, authHeader, wsAuthHeader)
-      : await startNodeRelay(opts.wsUrl, authHeader, wsAuthHeader)
+      ? startBunRelay(
+          opts.wsUrl,
+          authHeader,
+          wsAuthHeader,
+          maxClientConnections,
+          requestHeadTimeoutMs,
+        )
+      : await startNodeRelay(
+          opts.wsUrl,
+          authHeader,
+          wsAuthHeader,
+          maxClientConnections,
+          requestHeadTimeoutMs,
+        )
 
   logForDebugging(`[upstreamproxy] relay listening on 127.0.0.1:${relay.port}`)
   return relay
@@ -238,13 +494,41 @@ function startBunRelay(
   wsUrl: string,
   authHeader: string,
   wsAuthHeader: string,
+  maxClientConnections = DEFAULT_MAX_CLIENT_CONNECTIONS,
+  requestHeadTimeoutMs = DEFAULT_REQUEST_HEAD_TIMEOUT_MS,
 ): UpstreamProxyRelay {
-  // Bun TCP sockets don't auto-buffer partial writes: sock.write() returns
-  // the byte count actually handed to the kernel, and the remainder is
-  // silently dropped. When the kernel buffer fills, we queue the tail and
-  // let the drain handler flush it. Per-socket because the adapter closure
-  // outlives individual handler calls.
   type BunState = ConnState & { writeBuf: Uint8Array[] }
+  const sweeper = createHeadTimeoutSweeper(requestHeadTimeoutMs)
+  relayStats.maxClientConnections = maxClientConnections
+  relayStats.requestHeadTimeoutMs = requestHeadTimeoutMs
+
+  const makeAdapter = (
+    sock: {
+      write: (d: Uint8Array) => number
+      end: () => void
+      terminate?: () => void
+    },
+    st: BunState,
+  ): ClientSocket => ({
+    write: payload => {
+      const bytes =
+        typeof payload === 'string' ? Buffer.from(payload, 'utf8') : payload
+      if (st.writeBuf.length > 0) {
+        st.writeBuf.push(bytes)
+        return
+      }
+      const n = sock.write(bytes)
+      if (n < bytes.length) st.writeBuf.push(bytes.subarray(n))
+    },
+    end: () => sock.end(),
+    destroy: () => {
+      if (typeof sock.terminate === 'function') {
+        sock.terminate()
+      } else {
+        sock.end()
+      }
+    },
+  })
 
   // eslint-disable-next-line custom-rules/require-bun-typeof-guard -- caller dispatches on typeof Bun
   const server = Bun.listen<BunState>({
@@ -252,26 +536,26 @@ function startBunRelay(
     port: 0,
     socket: {
       open(sock) {
-        sock.data = { ...newConnState(), writeBuf: [] }
+        const st: BunState = { ...newConnState(), writeBuf: [] }
+        sock.data = st
+        trackAcceptedConn(
+          makeAdapter(sock, st),
+          st,
+          maxClientConnections,
+          sweeper,
+        )
       },
       data(sock, data) {
         const st = sock.data
-        const adapter: ClientSocket = {
-          write: payload => {
-            const bytes =
-              typeof payload === 'string'
-                ? Buffer.from(payload, 'utf8')
-                : payload
-            if (st.writeBuf.length > 0) {
-              st.writeBuf.push(bytes)
-              return
-            }
-            const n = sock.write(bytes)
-            if (n < bytes.length) st.writeBuf.push(bytes.subarray(n))
-          },
-          end: () => sock.end(),
-        }
-        handleData(adapter, st, data, wsUrl, authHeader, wsAuthHeader)
+        if (st.closed) return
+        handleData(
+          makeAdapter(sock, st),
+          st,
+          data,
+          wsUrl,
+          authHeader,
+          wsAuthHeader,
+        )
       },
       drain(sock) {
         const st = sock.data
@@ -286,10 +570,12 @@ function startBunRelay(
         }
       },
       close(sock) {
+        sweeper.cancelDestroy(sock.data)
         cleanupConn(sock.data)
       },
       error(sock, err) {
         logForDebugging(`[upstreamproxy] client socket error: ${err.message}`)
+        sweeper.cancelDestroy(sock.data)
         cleanupConn(sock.data)
       },
     },
@@ -297,7 +583,10 @@ function startBunRelay(
 
   return {
     port: server.port,
-    stop: () => server.stop(true),
+    stop: () => {
+      sweeper.stop()
+      server.stop(true)
+    },
   }
 }
 
@@ -307,29 +596,42 @@ export async function startNodeRelay(
   wsUrl: string,
   authHeader: string,
   wsAuthHeader: string,
+  maxClientConnections = DEFAULT_MAX_CLIENT_CONNECTIONS,
+  requestHeadTimeoutMs = DEFAULT_REQUEST_HEAD_TIMEOUT_MS,
 ): Promise<UpstreamProxyRelay> {
   nodeWSCtor = (await import('ws')).default
   const states = new WeakMap<NodeSocket, ConnState>()
+  const sweeper = createHeadTimeoutSweeper(requestHeadTimeoutMs)
+  relayStats.maxClientConnections = maxClientConnections
+  relayStats.requestHeadTimeoutMs = requestHeadTimeoutMs
 
   const server = createServer(sock => {
     const st = newConnState()
     states.set(sock, st)
-    // Node's sock.write() buffers internally — a false return signals
-    // backpressure but the bytes are already queued, so no tail-tracking
-    // needed for correctness. Week-1 payloads won't stress the buffer.
     const adapter: ClientSocket = {
       write: payload => {
         sock.write(typeof payload === 'string' ? payload : Buffer.from(payload))
       },
       end: () => sock.end(),
+      destroy: () => sock.destroy(),
     }
-    sock.on('data', (data: Buffer) =>
-      handleData(adapter, st, data, wsUrl, authHeader, wsAuthHeader),
-    )
-    sock.on('close', () => cleanupConn(states.get(sock)))
+    sock.on('close', () => {
+      const s = states.get(sock)
+      if (s) sweeper.cancelDestroy(s)
+      cleanupConn(s)
+    })
     sock.on('error', err => {
       logForDebugging(`[upstreamproxy] client socket error: ${err.message}`)
-      cleanupConn(states.get(sock))
+      const s = states.get(sock)
+      if (s) sweeper.cancelDestroy(s)
+      cleanupConn(s)
+    })
+    if (!trackAcceptedConn(adapter, st, maxClientConnections, sweeper)) {
+      return
+    }
+    sock.on('data', (data: Buffer) => {
+      if (st.closed) return
+      handleData(adapter, st, data, wsUrl, authHeader, wsAuthHeader)
     })
   })
 
@@ -343,7 +645,10 @@ export async function startNodeRelay(
       }
       resolve({
         port: addr.port,
-        stop: () => server.close(),
+        stop: () => {
+          sweeper.stop()
+          server.close()
+        },
       })
     })
   })
@@ -376,6 +681,8 @@ function handleData(
       return
     }
     const reqHead = st.connectBuf.subarray(0, headerEnd).toString('utf8')
+    st.awaitingHead = false
+    st.untrackHead?.()
     const firstLine = reqHead.split('\r\n')[0] ?? ''
     // densable 2.1.251 #48: GET /__agentproxy/status → recentRelayFailures.
     if (
@@ -548,6 +855,13 @@ function forwardToWs(ws: WebSocketLike, data: Buffer): void {
 function cleanupConn(st: ConnState | undefined): void {
   if (!st) return
   if (st.pinger) clearInterval(st.pinger)
+  st.awaitingHead = false
+  st.untrackHead?.()
+  st.cancelDestroy?.()
+  if (st.counted) {
+    st.counted = false
+    relayStats.clientConnections = Math.max(0, relayStats.clientConnections - 1)
+  }
   // Client hangup hits sock close → here → ws.close() → onclose. Latch
   // closed first so onclose does not record a successful hangup as
   // #48 "connection reset". Server/WS abort still records in onerror/onclose

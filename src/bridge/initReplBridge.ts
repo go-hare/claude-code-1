@@ -115,9 +115,12 @@ import type { BridgeWorkerType } from './types.js'
 
 export type InitBridgeOptions = {
   onInboundMessage?: (msg: SDKMessage) => void | Promise<void>
-  /** Official 2.1.323 #2119: hold Remote Control state at `'running'` while background subagents run. */
+  /** Official 2.1.323 #2119 + 2.1.328 #592: hold Remote Control state at `'running'` only while a turn or background subagents are active. */
   backgroundHold?: {
     holdsRunning: () => boolean
+    queuedTurnCount?: () => number
+    isTurnUnderWay?: () => boolean
+    sessionState?: () => 'idle' | 'running' | 'requires_action'
   }
   /**
    * Official 2.1.326 #94: initial worker state when Remote Control is turned on

@@ -60,6 +60,9 @@ const KITTY_FLAGS_RE = /^\x1b\[\?(\d+)u$/
 // Ctrl+F3 = CSI 1;5 R, etc.) — plain CSI row;col R is genuinely ambiguous.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
 const CURSOR_POSITION_RE = /^\x1b\[\?(\d+);(\d+)R$/
+// Official 2.1.328 `Te`: plain CPR reply excluding modified F3 (`CSI 1;2..16 R`).
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
+const CURSOR_REPORT_RE = /^\x1b\[(?!1;(?:\d|1[0-6])R)(\d+);(\d+)R$/
 // XTWINOPS cell size: CSI 6 ; height ; width t  — answer to CSI 16 t.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
 const CELL_SIZE_RE = /^\x1b\[6;(\d+);(\d+)t$/
@@ -95,6 +98,9 @@ const HELD_SGR_MOUSE_PREFIX_MAX = 32
 /** densable 2.1.247 jM — completed SGR after flushed ESC / ESC[. */
 // biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
 const FLUSHED_ESCAPE_MOUSE_COMPLETE_RE = /^\x1b\[<\d+;-?\d+;-?\d+[Mm]/
+/** Official 2.1.328 (#559) `Be`: flushed escape introducers that can prefix a split paste or terminal reply. */
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape sequence parsing
+const FLUSHABLE_ESCAPE_PREFIX_RE = /^\x1b[[\]P_]?$/
 // densable 2.1.228 kTd text-branch orphan mouse recovery (was ZXc):
 // whole-token only — not prefix peel, not multi-event burst, not embedded.
 //   /^\[<\d+;\d+;\d+[Mm]$/   SGR
@@ -201,8 +207,10 @@ export type TerminalResponse =
   | { type: 'da2'; params: number[] }
   /** Kitty keyboard protocol: current flags (answer to CSI ? u) */
   | { type: 'kittyKeyboard'; flags: number }
-  /** DSR: cursor position report (answer to CSI 6 n) */
+  /** DSR: cursor position report (answer to CSI ? 6 n) */
   | { type: 'cursorPosition'; row: number; col: number }
+  /** Official 2.1.328 (#559): plain CPR reply (answer to CSI 6 n) */
+  | { type: 'cursorReport'; row: number; col: number }
   /** densable theme notify — DEC 2031 report. `dark` is true for `?997;1n`. */
   | { type: 'themeNotify'; dark: boolean }
   /** OSC response: generic operating-system-command reply (e.g. OSC 11 bg color) */
@@ -252,6 +260,14 @@ function parseTerminalResponse(s: string): TerminalResponse | null {
     if ((m = CURSOR_POSITION_RE.exec(s))) {
       return {
         type: 'cursorPosition',
+        row: parseInt(m[1]!, 10),
+        col: parseInt(m[2]!, 10),
+      }
+    }
+
+    if ((m = CURSOR_REPORT_RE.exec(s))) {
+      return {
+        type: 'cursorReport',
         row: parseInt(m[1]!, 10),
         col: parseInt(m[2]!, 10),
       }
@@ -419,6 +435,38 @@ function isRxvtEscPrefixedAlt(): boolean {
   return Wy() === 'rxvt'
 }
 
+/**
+ * Official 2.1.328 (#597): true when running in Konsole outside tmux/screen
+ * (where Shift+Enter arrives as `ESC O M`).
+ */
+export function isKonsoleTerminal(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  const attachedTerminal = (attacherCaps() as { terminal?: string } | null)
+    ?.terminal
+  if (attachedTerminal !== undefined) {
+    return attachedTerminal === 'konsole'
+  }
+  if (env.TERM_PROGRAM || env.TMUX || env.STY) return false
+  return Boolean(env.KONSOLE_VERSION)
+}
+
+/**
+ * Official 2.1.328 (#559) `Ue`: check whether prepending a flushed escape
+ * introducer (`ESC`, `ESC[`, `ESC]`, `ESC P`, `ESC _`) to the next chunk
+ * completes a bracketed-paste opener, an SGR mouse event, or a terminal reply
+ * (OSC/DCS/APC/DECRPM/DA1/DA2/CPR/etc.) that was cut in two by a slow link.
+ */
+function isReassembledTerminalOrPasteSequence(combined: string): boolean {
+  const first =
+    createTokenizer({ x10Mouse: true }).feed(combined)[0]?.value ?? ''
+  return (
+    first === PASTE_START ||
+    SGR_MOUSE_RE.test(first) ||
+    parseTerminalResponse(first) !== null
+  )
+}
+
 function inputToString(input: Buffer | string): string {
   if (Buffer.isBuffer(input)) {
     if (input[0]! > 127 && input[1] === undefined) {
@@ -492,17 +540,38 @@ export function parseMultipleKeypresses(
       droppedMousePrefix = held
       tokens = []
     } else {
-      if (held === '\x1b' || held === '\x1b[') {
+      if (FLUSHABLE_ESCAPE_PREFIX_RE.test(held)) {
         flushedEscapePrefix = held
       }
       tokens = tokenizer.flush()
     }
+  } else if (isFlush) {
+    tokens = tokenizer.flush()
   } else {
-    tokens = isFlush ? tokenizer.flush() : tokenizer.feed(inputString)
+    // Official 2.1.328 (#559): if a slow connection cut a bracketed paste
+    // (`ESC[200~`) or a terminal reply (OSC/DCS/APC/DECRPM/etc.) right after
+    // its escape introducer (`ESC`, `ESC[`, `ESC]`, `ESC P`, `ESC _`),
+    // reassemble it before tokenizing so the tail is not typed into the prompt.
+    const combined = flushedEscapeWorking + inputString
+    if (
+      combined !== inputString &&
+      isReassembledTerminalOrPasteSequence(combined)
+    ) {
+      flushedEscapeWorking = ''
+      tokens = tokenizer.feed(combined)
+    } else {
+      tokens = tokenizer.feed(inputString)
+    }
   }
 
   const keys: ParsedInput[] = []
-  let inPaste = prevState.mode === 'IN_PASTE'
+  // Official 2.1.328 (#559): if a paste's opening marker was lost/split and
+  // PASTE_END arrives before PASTE_START in this chunk, still treat the chunk
+  // as paste rather than typing it as individual keys.
+  let inPaste =
+    prevState.mode === 'IN_PASTE' ||
+    tokens.find(t => t.value === PASTE_START || t.value === PASTE_END)
+      ?.value === PASTE_END
   let pasteBuffer = prevState.pasteBuffer
   // Gold `qy` keeps the same array identity until a high-byte run mutates it.
   // `Ed` uses `g.pendingByteEvents!==R.pendingByteEvents` to extend Fl.
@@ -724,9 +793,10 @@ export function parseMultipleKeypresses(
   return [keys, newState]
 }
 
-/** Official 2.1.325 (#864) `Qc` — true when sequence starts with ESC and has trailing chars. */
+/** Official 2.1.325 (#864) / 2.1.328 `cl` — ESC + printable char (not CSI/OSC/DCS/APC/SS3/ST). */
 export function isEscPrefixedKey(sequence: string): boolean {
-  return sequence.length > 1 && sequence.startsWith('\x1b')
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: ESC-prefixed key check
+  return /^\x1b(?![[\]\\_]|O.|P[^a-z ])\P{Cc}/u.test(sequence)
 }
 
 /**
@@ -1358,9 +1428,11 @@ function parseMouseEvent(s: string): ParsedMouse | null {
   const match = SGR_MOUSE_RE.exec(s)
   if (!match) return null
   const button = parseInt(match[1]!, 10)
-  // Wheel events (bit 6 set, low bits 0/1 for up/down) stay as ParsedKey
-  // so the keybinding system can route them to scroll handlers.
-  if ((button & 0x40) !== 0) return null
+  // Official 2.1.328 (#596): mask 0xc0 (64 | 128) skips BOTH wheel events
+  // (bit 6 = 64, handled as ParsedKey for scroll keybindings) AND extra/side
+  // mouse buttons (bit 7 = 128, e.g. buttons 8/9 Back/Forward) so side
+  // buttons do not fall through as left/middle/right clicks.
+  if ((button & 0xc0) !== 0) return null
   return {
     kind: 'mouse',
     button,
@@ -1423,11 +1495,19 @@ function parseKeypress(s: string = ''): ParsedKey {
       return altGrTextKey(s, primary, mods.shift)
     }
     const baseLayoutKey = match[3] ? parseInt(match[3], 10) : undefined
+    // Official 2.1.328 (#597): use kitty CSI u base-layout key for Ctrl with
+    // non-ASCII primary (> 127) AND for Alt/Meta on non-Latin keyboard layouts
+    // (primary >= 0x0370 Greek/Cyrillic/Hebrew/Arabic/etc. with ASCII a-z base)
+    // so Alt shortcuts work on non-Latin layouts without hijacking Latin AltGr.
     const usedBaseLayoutKey =
-      mods.ctrl &&
-      primary > 127 &&
       baseLayoutKey !== undefined &&
-      Number.isFinite(baseLayoutKey)
+      Number.isFinite(baseLayoutKey) &&
+      (mods.ctrl
+        ? primary > 127
+        : mods.meta &&
+          primary >= 880 &&
+          baseLayoutKey >= 97 &&
+          baseLayoutKey <= 122)
     const namedCode = usedBaseLayoutKey ? baseLayoutKey : primary
     const remapped = traditionalCtrlAliasName(mods, namedCode)
     const name = remapped ?? keycodeToName(namedCode)
@@ -1560,7 +1640,10 @@ function parseKeypress(s: string = ''): ParsedKey {
     // densable: `g==="[P"&&x===0&&mx()?"delete":Ex[g]`
     key.name =
       code === '[P' && modifier === 0 && isStTerm() ? 'delete' : keyName[code]
-    key.shift = isShiftKey(code) || key.shift
+    // Official 2.1.328 (#597): Konsole outside tmux/ssh emits `ESC O M`
+    // (`code === 'OM'`) for Shift+Enter.
+    key.shift =
+      isShiftKey(code) || key.shift || (code === 'OM' && isKonsoleTerminal())
     key.ctrl = isCtrlKey(code) || key.ctrl
   }
 

@@ -111,6 +111,18 @@ export function latchDeclaredTools(
   return set
 }
 
+import {
+  clearContext1mBetaRefusedModels,
+  isContext1mBetaRefusedForModel,
+  markContext1mBetaRefusedForModel,
+} from '../../utils/betaRefusals.js'
+
+export {
+  clearContext1mBetaRefusedModels,
+  isContext1mBetaRefusedForModel,
+  markContext1mBetaRefusedForModel,
+}
+
 export function computeDeferredToolNamesForRequest(
   tools: Tools,
   useSearchExtraTools: boolean,
@@ -154,6 +166,7 @@ import {
   CAPPED_DEFAULT_MAX_TOKENS,
   getModelMaxOutputTokens,
   getSonnet1mExpTreatmentEnabled,
+  resolveOutputTokenLimitForContinuation,
 } from '../../utils/context.js'
 import {
   clampEffortToCap,
@@ -442,7 +455,11 @@ import {
   convertToolsToLangfuse,
 } from '../langfuse/convert.js'
 import { withStreamingVCR, withVCR } from '../vcr.js'
-import { CLIENT_REQUEST_ID_HEADER, getAnthropicClient } from './client.js'
+import {
+  CLIENT_REQUEST_ID_HEADER,
+  getAnthropicClient,
+  getBillingGroupRequestTags,
+} from './client.js'
 import { NO_CONTENT_MESSAGE } from '../../constants/messages.js'
 import {
   API_ERROR_MESSAGE_PREFIX,
@@ -751,6 +768,18 @@ export type Options = {
   outputFormat?: BetaJSONOutputFormat
   fastMode?: boolean
   advisorModel?: string
+  /**
+   * Official 2.1.327 (#481): true when continuing a reply that hit the output
+   * token limit; allows unrecognized models cut at 32,000 tokens to continue
+   * with a limit of 128,000 tokens.
+   */
+  continuesCutReply?: boolean
+  /**
+   * Official 2.1.328 (#570): when true (e.g. subagent progress summaries), an
+   * effort rejection retries without effort on this call only, without turning
+   * effort off for the model across the session.
+   */
+  leavesEffortSupportAlone?: boolean
   addNotification?: (notif: Notification) => void
   /**
    * densable 2.1.214 #39 onRetryStatus — stream stall / retry UI status.
@@ -1297,7 +1326,9 @@ async function* queryModel(
           (isStickyBetaRejected(THINKING_RESUMPTION_BETA_HEADER) ||
             getThinkingResumptionRefused())) ||
         (b === DANGEROUS_TOOL_USE_BETA_HEADER &&
-          isStickyBetaRejected(DANGEROUS_TOOL_USE_BETA_HEADER))
+          isStickyBetaRejected(DANGEROUS_TOOL_USE_BETA_HEADER)) ||
+        (b === CONTEXT_1M_BETA_HEADER &&
+          isContext1mBetaRefusedForModel(options.model))
       ),
   )
 
@@ -2054,6 +2085,11 @@ async function* queryModel(
   // Capture the betas sent in the last API request, including the ones that
   // were dynamically added, so we can log and send it to telemetry.
   let lastRequestBetas: string[] | undefined
+  // Official G9e — Bedrock extra body anthropic_beta entries sent on the last request.
+  let lastRequestBedrockBetas: string[] = []
+  // Per-request Bedrock extra-body beta headers stripped after rejection so
+  // paramsFromContext does not re-add them from getBedrockExtraBodyParamsBetas.
+  const strippedBedrockBetas = new Set<string>()
   // densable `O1e` @184960115 — last thinking.display actually put on the wire.
   let lastSentThinkingDisplay: string | undefined
   // densable `sT`/`JR` @184946314 — last request carried OL + block_binding.
@@ -2149,6 +2185,7 @@ async function* queryModel(
           markRelayThinkingStripRecorded('marker')
         },
         prefixLockAttempt: prefixLockStripAttempt + 1,
+        leavesEffortSupportAlone: options.leavesEffortSupportAlone,
       },
     )
     if (token === 'retry:thinking-display-updates') {
@@ -2181,6 +2218,9 @@ async function* queryModel(
     }
     if (token === 'retry:effort-unsupported') {
       betas = betas.filter(b => b !== EFFORT_BETA_HEADER)
+      if (options.leavesEffortSupportAlone) {
+        effort = undefined
+      }
     }
     if (token != null) {
       return token
@@ -2211,18 +2251,32 @@ async function* queryModel(
       }
     }
 
-    // Official M0o (#12) — strip all rejected beta headers at once (including
-    // non-400 statuses such as 422) and log tengu_beta_400_healed.
-    const rejectedBetas = findRejectedBetaHeaders(error, lastBetas)
+    // Official s9o / nwt (#12 / 2.1.328) — runs BEFORE d9o (decideContext1mBetaRetry)
+    // in N9o = [..., s9o, OTe, d9o, ...]. Strip all rejected non-1m beta headers at
+    // once (including non-400 statuses such as 422) and log tengu_beta_400_healed.
+    // Exclude CONTEXT_1M_BETA_HEADER (official Jcs) so it is exclusively handled
+    // by decideContext1mBetaRetry and never silently stripped on direct 1P.
+    const nonContext1mSentBetas = [
+      ...lastBetas,
+      ...lastRequestBedrockBetas,
+    ].filter(b => b !== CONTEXT_1M_BETA_HEADER)
+    const rejectedBetas = findRejectedBetaHeaders(error, nonContext1mSentBetas)
     if (rejectedBetas.length > 0) {
       const rejectedSet = new Set(rejectedBetas.map(r => r.header))
       betas = betas.filter(b => !rejectedSet.has(b))
+      for (const h of rejectedSet) {
+        strippedBedrockBetas.add(h)
+      }
       if (
         rejectedSet.has(EFFORT_BETA_HEADER) &&
         error instanceof APIError &&
         error.status === 400
       ) {
-        markEffortUnsupported(options.model)
+        if (options.leavesEffortSupportAlone) {
+          effort = undefined
+        } else {
+          markEffortUnsupported(options.model)
+        }
       }
       for (const match of rejectedBetas) {
         logEvent('tengu_beta_400_healed', {
@@ -2238,19 +2292,28 @@ async function* queryModel(
       return `retry:beta-rejected:${rejectedBetas.map(r => r.header).join(',')}`
     }
 
-    // Official I0o (2.1.295 #358) — resend once without context-1m beta when a
-    // gateway / 3P provider rejects it (including vague "invalid beta flag" 400).
+    // Official d9o / Rve (2.1.295 #358 / 2.1.328) — runs AFTER s9o so dual-beta
+    // 400s (e.g. rejecting both effort and context-1m) strip the non-1m beta first,
+    // then retry without context-1m on the next attempt and latch
+    // markContext1mBetaRefusedForModel on retry success, while direct Anthropic
+    // providers (1P or anthropicAws with default base URL) never silently strip
+    // context-1m. Check both header betas and Bedrock extra body betas.
+    const provider = getAPIProvider()
+    const isDirectAnthropicProvider =
+      (provider === 'firstParty' && isFirstPartyAnthropicBaseUrl()) ||
+      (provider === 'anthropicAws' && !process.env.ANTHROPIC_AWS_BASE_URL)
+    const hasContext1mBeta =
+      lastBetas.includes(CONTEXT_1M_BETA_HEADER) ||
+      lastRequestBedrockBetas.includes(CONTEXT_1M_BETA_HEADER)
     const context1mRetry = decideContext1mBetaRetry({
       error,
       phase: context1mBetaRetryPhase,
-      context1mBetaSent: lastBetas.includes(CONTEXT_1M_BETA_HEADER),
-      isKnownNative1mModel: false,
-      isFirstParty:
-        getAPIProvider() === 'firstParty' && isFirstPartyAnthropicBaseUrl(),
+      context1mBetaSent: hasContext1mBeta,
+      isDirectAnthropicProvider,
+      isFirstParty: isDirectAnthropicProvider,
     })
     context1mBetaRetryPhase = context1mRetry.nextPhase
     if (context1mRetry.action === 'retry:context-1m-beta') {
-      betas = betas.filter(b => b !== CONTEXT_1M_BETA_HEADER)
       logForDebugging(
         `[betas] an HTTP 400 ${context1mRetry.nextPhase === 'retrying' ? 'reads as the backend rejecting' : 'says "invalid beta flag", which may be about'} ${CONTEXT_1M_BETA_HEADER}; resending once without it`,
         { level: 'warn' },
@@ -2445,10 +2508,17 @@ async function* queryModel(
   let serverClassifierRequest: ServerClassifierRequest | undefined
 
   const paramsFromContext = (retryContext: RetryContext) => {
-    let betasParams = [...betas]
+    const omitContext1mBeta =
+      (context1mBetaRetryPhase !== 'idle' &&
+        context1mBetaRetryPhase !== 'spent') ||
+      isContext1mBetaRefusedForModel(retryContext.model)
+    let betasParams = betas.filter(
+      b => b !== CONTEXT_1M_BETA_HEADER || !omitContext1mBeta,
+    )
 
     // Append 1M beta dynamically for the Sonnet 1M experiment.
     if (
+      !omitContext1mBeta &&
       context1mBetaRetryPhase === 'idle' &&
       !betasParams.includes(CONTEXT_1M_BETA_HEADER) &&
       getSonnet1mExpTreatmentEnabled(retryContext.model)
@@ -2459,8 +2529,13 @@ async function* queryModel(
     // For Bedrock, include model-based betas (no tool search header — self-built search)
     const bedrockBetas =
       getAPIProvider() === 'bedrock'
-        ? [...getBedrockExtraBodyParamsBetas(retryContext.model)]
+        ? getBedrockExtraBodyParamsBetas(retryContext.model).filter(
+            b =>
+              !strippedBedrockBetas.has(b) &&
+              (b !== CONTEXT_1M_BETA_HEADER || !omitContext1mBeta),
+          )
         : []
+    lastRequestBedrockBetas = bedrockBetas
     const extraBodyParams = getExtraBodyParams(bedrockBetas)
     const provider = getAPIProvider()
     const isBedrock = provider === 'bedrock'
@@ -2547,7 +2622,8 @@ async function* queryModel(
     }
 
     // Retry context gets preference because it tries to course correct if we exceed the context window limit.
-    // Official 2.1.326 (#51): apply any session-cached model output ceiling learned from API 400 rejections.
+    // Official 2.1.326 (#51) + 2.1.327 (#481): apply any session-cached model
+    // output ceiling AND raise unrecognized models cut at 32k to 128k on continuation.
     const cachedModelCeiling = getCachedModelMaxTokensCeiling(
       retryContext.model,
     )
@@ -2555,10 +2631,17 @@ async function* queryModel(
       retryContext?.maxTokensOverride ||
       options.maxOutputTokensOverride ||
       getMaxOutputTokensForModel(options.model)
-    const maxOutputTokens =
-      cachedModelCeiling !== undefined
-        ? Math.min(rawMaxOutputTokens, cachedModelCeiling)
-        : rawMaxOutputTokens
+    const maxOutputTokens = resolveOutputTokenLimitForContinuation({
+      model: options.model,
+      requestedMaxTokens: rawMaxOutputTokens,
+      continuesCutReply:
+        options.continuesCutReply === true &&
+        options.querySource !== 'hook_agent',
+      cachedModelCeiling,
+      isSecurityControl:
+        options.querySource === 'auto_mode' ||
+        options.querySource === 'auto_mode_investigator',
+    })
 
     // Official DISABLE_THINKING / DISABLE_ADAPTIVE_THINKING densables.
     let thinkingDisabled = isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_THINKING)
@@ -3053,6 +3136,8 @@ async function* queryModel(
       // densable Ht.fallbacks + fallback_credit_token stamp
       ...serverFallbackBody,
       ...creditStamp,
+      // Official 2.1.327 (#374) `RQ()`: billing group tag for Claude apps gateways
+      ...getBillingGroupRequestTags(),
       ...(sendServerClassifier &&
         classifierContext !== undefined && {
           safeguards: [
@@ -4594,6 +4679,7 @@ async function* queryModel(
                 const unnamed = active1mPhase === 'guessing'
                 context1mBetaRetryPhase = 'spent'
                 betas = betas.filter(b => b !== CONTEXT_1M_BETA_HEADER)
+                markContext1mBetaRefusedForModel(options.model)
                 logEvent('tengu_beta_400_healed', {
                   beta: CONTEXT_1M_BETA_HEADER as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                   model:

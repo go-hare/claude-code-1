@@ -1,5 +1,5 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
-import { Box, Link, Text, type DOMElement, type TextProps } from '@anthropic/ink';
+import { Box, Link, NoSelect, Text, type DOMElement, type TextProps } from '@anthropic/ink';
 import { FilePathLink } from '../FilePathLink.js';
 import { feature } from 'bun:bundle';
 import * as React from 'react';
@@ -157,11 +157,11 @@ export function SystemTextMessage({ message, addMargin, verbose, isTranscriptMod
   if (message.subtype === 'away_summary') {
     return (
       <Box flexDirection="row" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
-        <Box minWidth={2}>
+        <NoSelect fromLeftEdge minWidth={2}>
           <Text dimColor aria-hidden>
             {REFERENCE_MARK}
           </Text>
-        </Box>
+        </NoSelect>
         <Box maxWidth={maxProseWidth}>
           <Text>
             <Text dimColor bold>
@@ -180,11 +180,11 @@ export function SystemTextMessage({ message, addMargin, verbose, isTranscriptMod
   if (message.subtype === 'agents_killed') {
     return (
       <Box flexDirection="row" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
-        <Box minWidth={2}>
+        <NoSelect fromLeftEdge minWidth={2}>
           <Text aria-hidden color="error">
             {BLACK_CIRCLE}
           </Text>
-        </Box>
+        </NoSelect>
         <Text dimColor>All background agents stopped</Text>
       </Box>
     );
@@ -208,11 +208,11 @@ export function SystemTextMessage({ message, addMargin, verbose, isTranscriptMod
     return (
       <Box flexDirection="column" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
         <Box flexDirection="row" width="100%">
-          <Box minWidth={2}>
+          <NoSelect fromLeftEdge minWidth={2}>
             <Text aria-label="warning:" color="warning">
               {BLACK_CIRCLE}
             </Text>
-          </Box>
+          </NoSelect>
           <Text color="warning" bold wrap="wrap">
             {String(message.content ?? '')}
           </Text>
@@ -232,11 +232,11 @@ export function SystemTextMessage({ message, addMargin, verbose, isTranscriptMod
     const isBold = trigger === 'model_not_found' || trigger === 'permission_denied';
     return (
       <Box flexDirection="row" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
-        <Box minWidth={2}>
+        <NoSelect fromLeftEdge minWidth={2}>
           <Text aria-label="warning:" color="warning">
             {BLACK_CIRCLE}
           </Text>
-        </Box>
+        </NoSelect>
         <Text color="warning" bold={isBold} wrap="wrap">
           {String(message.content ?? '')}
         </Text>
@@ -250,11 +250,13 @@ export function SystemTextMessage({ message, addMargin, verbose, isTranscriptMod
 
   if (message.subtype === 'scheduled_task_fire') {
     return (
-      <Box marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
-        <Text dimColor>
-          <Text aria-hidden>{TEARDROP_ASTERISK} </Text>
-          {String(message.content ?? '')}
-        </Text>
+      <Box flexDirection="row" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
+        <NoSelect fromLeftEdge minWidth={2}>
+          <Text aria-hidden dimColor>
+            {TEARDROP_ASTERISK}
+          </Text>
+        </NoSelect>
+        <Text dimColor>{String(message.content ?? '')}</Text>
       </Box>
     );
   }
@@ -266,10 +268,12 @@ export function SystemTextMessage({ message, addMargin, verbose, isTranscriptMod
       return null;
     }
     return (
-      <Box marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
-        <Text aria-hidden dimColor>
-          {TEARDROP_ASTERISK}{' '}
-        </Text>
+      <Box flexDirection="row" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
+        <NoSelect fromLeftEdge minWidth={2}>
+          <Text aria-hidden dimColor>
+            {TEARDROP_ASTERISK}
+          </Text>
+        </NoSelect>
         {commands.length > 0 ? (
           <>
             <Text>Allowed </Text>
@@ -368,9 +372,9 @@ function StopHookSummaryMessage({
 
   return (
     <Box flexDirection="row" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
-      <Box minWidth={2}>
+      <NoSelect fromLeftEdge minWidth={2}>
         <Text aria-hidden>{BLACK_CIRCLE}</Text>
-      </Box>
+      </NoSelect>
       <Box flexDirection="column" width={columns - 10}>
         <Text>
           Ran <Text bold>{hookCount}</Text> {message.hookLabel ?? 'stop'} {hookCount === 1 ? 'hook' : 'hooks'}
@@ -439,11 +443,11 @@ function SystemTextMessageInner({
   return (
     <Box flexDirection="row" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
       {dot && (
-        <Box minWidth={2}>
+        <NoSelect fromLeftEdge minWidth={2}>
           <Text aria-hidden color={color} dimColor={dimColor}>
             {BLACK_CIRCLE}
           </Text>
-        </Box>
+        </NoSelect>
       )}
       <Box flexDirection="column" width={columns - 10}>
         <Text color={color} dimColor={dimColor} wrap="wrap">
@@ -574,11 +578,11 @@ function TurnDurationMessage({
       {...(rendered.pluginTree === undefined && rendered.minHeight !== undefined && { minHeight: rendered.minHeight })}
     >
       <Box flexDirection="row" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
-        <Box minWidth={2}>
+        <NoSelect fromLeftEdge minWidth={2}>
           <Text aria-hidden dimColor>
             {TEARDROP_ASTERISK}
           </Text>
-        </Box>
+        </NoSelect>
         <Text>
           {showTurnDuration &&
             (waitingForBg ? (
@@ -668,11 +672,11 @@ function MemorySavedMessage({
   return (
     <Box flexDirection="column" marginTop={addMargin ? 1 : 0} backgroundColor={bg}>
       <Box flexDirection="row">
-        <Box minWidth={2}>
+        <NoSelect fromLeftEdge minWidth={2}>
           <Text dimColor aria-hidden>
             {BLACK_CIRCLE}
           </Text>
-        </Box>
+        </NoSelect>
         <Text>
           {(message.verb as string) ?? 'Saved'} {parts.join(' \u00B7 ')}
         </Text>
@@ -705,9 +709,9 @@ function ThinkingMessage({
   const bg = useSelectedMessageBg();
   return (
     <Box flexDirection="row" marginTop={addMargin ? 1 : 0} backgroundColor={bg} width="100%">
-      <Box minWidth={2}>
+      <NoSelect fromLeftEdge minWidth={2}>
         <Text dimColor>{TEARDROP_ASTERISK}</Text>
-      </Box>
+      </NoSelect>
       <Text dimColor>{String(message.content ?? '')}</Text>
     </Box>
   );

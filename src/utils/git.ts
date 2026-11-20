@@ -8,16 +8,21 @@ import { hasBinaryExtension, isBinaryContent } from '../constants/files.js'
 import { getCwd } from './cwd.js'
 import { logForDebugging } from './debug.js'
 import { logForDiagnosticsNoPII } from './diagLogs.js'
-import { execFileNoThrow } from './execFileNoThrow.js'
+import { execFileNoThrow, execFileNoThrowWithCwd } from './execFileNoThrow.js'
 import { getFsImplementation, isAutomountMapRoot } from './fsOperations.js'
 import {
   getCachedBranch,
   getCachedDefaultBranch,
   getCachedHead,
   getCachedRemoteUrl,
+  getCommonDir,
   getWorktreeCountFromFs,
+  isSafeRefName,
   isShallowClone as isShallowCloneFs,
+  readGitHead,
+  readRawSymref,
   resolveGitDir,
+  resolveRef,
 } from './git/gitFilesystem.js'
 import { logError } from './log.js'
 import { memoizeWithLRU } from './memoize.js'
@@ -494,6 +499,108 @@ export const getBranch = async (): Promise<string> => {
 
 export const getDefaultBranch = async (): Promise<string> => {
   return getCachedDefaultBranch()
+}
+
+/**
+ * Official 2.1.328 (#590) `myo`: resolve the current branch for a specific
+ * directory (rather than the process-wide cached watcher anchored to
+ * originalCwd) so diffs after `cd` into another repo see that repo's branch.
+ */
+export async function getBranchForDir(cwd: string): Promise<string> {
+  const gitDir = await resolveGitDir(cwd)
+  if (gitDir) {
+    const head = await readGitHead(gitDir)
+    if (head) {
+      if (head.type === 'branch' && isSafeRefName(head.name)) {
+        return head.name
+      }
+      if (head.type === 'detached') {
+        return 'HEAD'
+      }
+    }
+  }
+  const { stdout, code } = await execFileNoThrowWithCwd(
+    gitExe(),
+    [...gitFastConfigArgs(), 'rev-parse', '--abbrev-ref', 'HEAD'],
+    {
+      cwd,
+      env: gitSubprocessEnv(),
+      preserveOutputOnError: false,
+    },
+  )
+  if (code !== 0) return ''
+  const branch = stdout.trim()
+  return branch === 'HEAD' || isSafeRefName(branch) ? branch : ''
+}
+
+/**
+ * Official 2.1.328 (#590) `d1n`: resolve the default branch (`origin/HEAD`
+ * symref or `main`/`master` fallback) for a specific directory without using
+ * the original-cwd watcher cache.
+ */
+export async function getDefaultBranchForDir(cwd: string): Promise<string> {
+  const gitDir = await resolveGitDir(cwd)
+  if (gitDir) {
+    const commonDir = (await getCommonDir(gitDir)) ?? gitDir
+    const originHead = await readRawSymref(
+      commonDir,
+      'refs/remotes/origin/HEAD',
+      'refs/remotes/origin/',
+    )
+    if (originHead && isSafeRefName(originHead)) {
+      return originHead
+    }
+    const [hasMain, hasMaster] = await Promise.all([
+      resolveRef(gitDir, 'refs/remotes/origin/main').then(
+        r => r ?? resolveRef(gitDir, 'refs/heads/main'),
+      ),
+      resolveRef(gitDir, 'refs/remotes/origin/master').then(
+        r => r ?? resolveRef(gitDir, 'refs/heads/master'),
+      ),
+    ])
+    if (hasMain) return 'main'
+    if (hasMaster) return 'master'
+  }
+  const { stdout, code } = await execFileNoThrowWithCwd(
+    gitExe(),
+    [...gitFastConfigArgs(), 'symbolic-ref', 'refs/remotes/origin/HEAD'],
+    { cwd, env: gitSubprocessEnv(), preserveOutputOnError: false },
+  )
+  if (code === 0) {
+    const trimmed = stdout.trim()
+    const prefix = 'refs/remotes/origin/'
+    const candidate = trimmed.startsWith(prefix)
+      ? trimmed.slice(prefix.length)
+      : trimmed
+    if (candidate && isSafeRefName(candidate)) {
+      return candidate
+    }
+  }
+  const { code: mainCode } = await execFileNoThrowWithCwd(
+    gitExe(),
+    [
+      ...gitFastConfigArgs(),
+      'show-ref',
+      '--verify',
+      '--quiet',
+      'refs/heads/main',
+    ],
+    { cwd, env: gitSubprocessEnv(), preserveOutputOnError: false },
+  )
+  if (mainCode === 0) return 'main'
+  const { code: masterCode } = await execFileNoThrowWithCwd(
+    gitExe(),
+    [
+      ...gitFastConfigArgs(),
+      'show-ref',
+      '--verify',
+      '--quiet',
+      'refs/heads/master',
+    ],
+    { cwd, env: gitSubprocessEnv(), preserveOutputOnError: false },
+  )
+  if (masterCode === 0) return 'master'
+  return 'main'
 }
 
 export const getRemoteUrl = async (): Promise<string | null> => {

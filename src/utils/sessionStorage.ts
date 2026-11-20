@@ -1,5 +1,5 @@
 import { feature } from 'bun:bundle'
-import { createHash, type UUID } from 'crypto'
+import { createHash, randomUUID, type UUID } from 'crypto'
 import type { Dirent } from 'fs'
 import { getSessionOnceLatches } from './sessionRoot.js'
 // Sync fs primitives for readFileTailSync — separate from fs/promises
@@ -585,6 +585,16 @@ export function isCompactPairWithheldFromRemote(): boolean {
  */
 export function setInternalEventWriter(writer: InternalEventWriter): void {
   getProject().setInternalEventWriter(writer)
+}
+
+/** Official 2.1.328 `AJn()`: true when a CCR v2 internal event writer is registered. */
+export function hasInternalEventWriter(): boolean {
+  return getProject().hasInternalEventWriter()
+}
+
+/** Official 2.1.328 `clearInternalEventWriter()`: unregister CCR v2 internal event writer. */
+export function clearInternalEventWriter(): void {
+  getProject().clearInternalEventWriter()
 }
 
 /**
@@ -2762,6 +2772,20 @@ class Project {
     this.FLUSH_INTERVAL_MS = REMOTE_FLUSH_INTERVAL_MS
   }
 
+  hasInternalEventWriter(): boolean {
+    return this.internalEventWriter !== null
+  }
+
+  getInternalEventWriter(): InternalEventWriter | null {
+    return this.internalEventWriter
+  }
+
+  clearInternalEventWriter(): void {
+    if (!this.internalEventWriter) return
+    this.internalEventWriter = null
+    logForDebugging('CCR v2 internal event writer cleared')
+  }
+
   setInternalEventReader(reader: InternalEventReader): void {
     this.internalEventReader = reader
     logForDebugging(
@@ -4575,6 +4599,695 @@ function findLatestMessage<T extends { timestamp: string }>(
  */
 export const MAX_CHAIN_GAP_BRIDGES = 16
 
+/**
+ * Official 2.1.328 (#370) `tqs`: warning text shown as a non-persisted system
+ * message when part of a resumed session's transcript file is missing or
+ * damaged and earlier messages could not be loaded.
+ */
+export const MISSING_EARLIER_MESSAGES_WARNING =
+  "Earlier messages couldn't be loaded because part of this session's file is missing or damaged. Claude won't see them, so repeat anything it still needs."
+
+/**
+ * Official 2.1.328 (#370) `Grn(e)`: returns true when earlier messages of a
+ * resumed transcript could not be loaded (either the read ended truncated or
+ * the earliest loaded non-compact-boundary message references a missing
+ * `parentUuid` absent from the loaded message map).
+ */
+export function hasMissingEarlierMessages(
+  transcript: readonly TranscriptMessage[],
+  messages: ReadonlyMap<UUID, TranscriptMessage>,
+  readTruncated?: boolean,
+): boolean {
+  if (readTruncated) return true
+  const first = transcript[0]
+  if (!first) return false
+  if (isCompactBoundaryTranscriptMessage(first)) return false
+  return Boolean(first.parentUuid && !messages.has(first.parentUuid))
+}
+
+/**
+ * Official 2.1.328 (#370) `tqs(e)`: build the non-persisted warning system
+ * message (`persist: false`) for a truncated/damaged transcript load.
+ */
+export function createMissingEarlierMessagesWarning(): {
+  type: 'system'
+  subtype: 'informational'
+  content: string
+  level: 'warning'
+  uuid: UUID
+  timestamp: string
+  persist: false
+} {
+  return {
+    type: 'system',
+    subtype: 'informational',
+    content: MISSING_EARLIER_MESSAGES_WARNING,
+    level: 'warning',
+    uuid: randomUUID(),
+    timestamp: new Date().toISOString(),
+    persist: false,
+  }
+}
+
+/**
+ * Official 2.1.328 `Fsn`: true when a JSONL transcript line is a `last-prompt`
+ * row carrying a `leafUuid` resume/rewind checkpoint.
+ */
+function isLeafCheckpointLine(line: string): boolean {
+  if (!line.includes('"type":"last-prompt"') || !line.includes('"leafUuid":')) {
+    return false
+  }
+  try {
+    const parsed = jsonParse(line) as { type?: unknown; leafUuid?: unknown }
+    return parsed.type === 'last-prompt' && parsed.leafUuid !== undefined
+  } catch {
+    return false
+  }
+}
+
+async function hasLeafCheckpointInTranscriptFile(
+  filePath: string,
+): Promise<boolean> {
+  try {
+    const raw = await readFile(filePath, 'utf8')
+    return raw.split('\n').some(isLeafCheckpointLine)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Official 2.1.328 (#586) `$8s` / `performLeafCheckpointWithdrawal`:
+ * Withdraw an existing resume/rewind `last-prompt` checkpoint (`leafUuid: null,
+ * explicit: true`) on `/clear` in remote CCR v2 sessions (where an
+ * `internalEventWriter` is registered) so resuming a cloud session after rewind
+ * + `/clear` stays cleared instead of reviving pre-clear messages.
+ *
+ * Local sessions (without an explicit `filePath` override and without a CCR
+ * `internalEventWriter`) MUST NOT write a clear-checkpoint tombstone to the
+ * pre-clear local `.jsonl` file, otherwise `claude --resume <prevSessionId>`
+ * permanently fails with `No valid conversation chain found in JSONL file`.
+ */
+export async function saveExplicitClearCheckpoint(
+  sessionId: string,
+  filePath?: string,
+): Promise<void> {
+  const isLiveSessionCall = filePath === undefined
+  if (isLiveSessionCall) {
+    if (isTranscriptPersistenceDisabled() || !hasInternalEventWriter()) {
+      return
+    }
+  }
+  const targetPath = filePath ?? getTranscriptPathForSession(sessionId)
+  if (isLiveSessionCall) {
+    const hasCheckpoint = await hasLeafCheckpointInTranscriptFile(targetPath)
+    if (!hasCheckpoint) {
+      logForDebugging(
+        `/clear: no resume checkpoint in the transcript it left, so none withdrawn: ${targetPath}`,
+      )
+      return
+    }
+  }
+  const entry = {
+    type: 'last-prompt',
+    lastPrompt: '',
+    sessionId,
+    leafUuid: null,
+    explicit: true,
+    rewound: false,
+  }
+  try {
+    await fsAppendFile(targetPath, `${jsonStringify(entry)}\n`, {
+      encoding: 'utf8',
+    })
+  } catch {
+    // Best-effort — directory or file may not exist yet for an empty session
+  }
+  if (isLiveSessionCall) {
+    const writer = getProject().getInternalEventWriter()
+    if (writer) {
+      try {
+        await writer('last-prompt', entry, {})
+      } catch {
+        // Best-effort CCR mirror
+      }
+    }
+  }
+}
+
+/**
+ * Official 2.1.328 (#391) `vrn`: re-link any message whose `parentUuid` points
+ * at a dropped/empty/invalid row (`droppedParents`) to its nearest surviving
+ * ancestor via path-compressed walks so empty replies or killed commands do
+ * not sever the resumed conversation chain.
+ */
+export function relinkDroppedTranscriptRows(
+  messages: Map<UUID, TranscriptMessage>,
+  droppedParents: ReadonlyMap<UUID, UUID | null>,
+): number {
+  if (droppedParents.size === 0) return 0
+  const resolvedCache = new Map<UUID, UUID | null>()
+  const resolveSurvivingParent = (start: UUID): UUID | null => {
+    const visited: UUID[] = []
+    const seen = new Set<UUID>()
+    let cur: UUID | null | undefined = start
+    while (
+      cur &&
+      !messages.has(cur) &&
+      droppedParents.has(cur) &&
+      !seen.has(cur)
+    ) {
+      if (resolvedCache.has(cur)) {
+        cur = resolvedCache.get(cur) ?? null
+        break
+      }
+      seen.add(cur)
+      visited.push(cur)
+      cur = droppedParents.get(cur) ?? null
+    }
+    const target = cur && !seen.has(cur) ? cur : null
+    for (const v of visited) {
+      resolvedCache.set(v, target)
+    }
+    return target
+  }
+
+  let relinked = 0
+  for (const [uuid, msg] of messages) {
+    if (
+      msg.parentUuid &&
+      !messages.has(msg.parentUuid) &&
+      droppedParents.has(msg.parentUuid)
+    ) {
+      const nextParent = resolveSurvivingParent(msg.parentUuid)
+      if (nextParent !== msg.parentUuid) {
+        messages.set(uuid, { ...msg, parentUuid: nextParent })
+        relinked++
+      }
+    }
+  }
+  return relinked
+}
+
+/**
+ * Official 2.1.328 `Crn` (#391): validate/repair `user`/`assistant` message
+ * content during transcript load — drops null/non-object messages, drops empty
+ * string assistant content, wraps non-empty string assistant content into a
+ * single `{ type: 'text', text }` block, and filters malformed blocks from
+ * content arrays (dropping the row if zero valid blocks remain).
+ */
+export function repairTranscriptMessageContent(
+  role: 'user' | 'assistant',
+  message: unknown,
+):
+  | 'keep'
+  | 'drop'
+  | {
+      content: unknown[]
+      droppedBlocks: number
+      wrapped: boolean
+    } {
+  if (!message || typeof message !== 'object') return 'drop'
+  const rec = message as { content?: unknown }
+  const content = rec.content
+  if (typeof content === 'string') {
+    if (role !== 'assistant') return 'keep'
+    if (content.trim() === '') return 'drop'
+    return {
+      content: [{ type: 'text', text: content }],
+      droppedBlocks: 0,
+      wrapped: true,
+    }
+  }
+  if (!Array.isArray(content)) return 'drop'
+  const isValidBlock = (block: unknown): boolean =>
+    block !== null &&
+    typeof block === 'object' &&
+    typeof (block as { type?: unknown }).type === 'string'
+  if (content.every(isValidBlock)) return 'keep'
+  const valid = content.filter(isValidBlock)
+  if (valid.length === 0) return 'drop'
+  return {
+    content: valid,
+    droppedBlocks: content.length - valid.length,
+    wrapped: false,
+  }
+}
+
+/**
+ * Official 2.1.328 (#390/#391/#392/#586) `KAe` (`CheckpointReachTracker`):
+ * tracks explicit rewind vs non-rewound `/clear` checkpoints and verifies
+ * whether a newly written post-checkpoint row actually extends past a rewind
+ * (or whether an explicit `/clear` cleared the conversation).
+ */
+export class CheckpointReachTracker {
+  cleared = false
+  rewoundClear = false
+  checkpointLeafUuid: UUID | undefined
+  checkpointExplicit = false
+  lastPromptWasRewound = false
+  rewindCutUuid: UUID | undefined
+  postRewindRows: Map<UUID, UUID | null> | undefined
+
+  onMessage(entry: TranscriptMessage, isNewMessage: boolean): void {
+    if (entry.isSidechain) return
+    if (isNewMessage) {
+      this.postRewindRows?.set(entry.uuid, entry.parentUuid ?? null)
+    }
+    this.checkpointExplicit = false
+    this.cleared = false
+    this.rewoundClear = false
+    this.lastPromptWasRewound = false
+  }
+
+  onCompactBoundary(): void {
+    this.checkpointLeafUuid = undefined
+    this.checkpointExplicit = false
+    this.lastPromptWasRewound = false
+    this.rewindCutUuid = undefined
+    this.postRewindRows = undefined
+  }
+
+  onLastPrompt(lp: {
+    leafUuid?: UUID | null
+    explicit?: boolean
+    rewound?: boolean
+    cutUuid?: UUID
+  }): void {
+    if (lp.leafUuid) {
+      const isRewound = lp.rewound === true
+      this.rewindCutUuid = isRewound
+        ? lp.cutUuid
+        : this.lastPromptWasRewound && lp.leafUuid === this.checkpointLeafUuid
+          ? this.rewindCutUuid
+          : undefined
+      this.checkpointExplicit =
+        lp.explicit === true ||
+        (this.checkpointExplicit && lp.leafUuid === this.checkpointLeafUuid)
+      this.lastPromptWasRewound =
+        isRewound ||
+        (this.lastPromptWasRewound && lp.leafUuid === this.checkpointLeafUuid)
+      this.postRewindRows = isRewound ? new Map() : undefined
+      this.checkpointLeafUuid = lp.leafUuid
+      this.cleared = false
+      this.rewoundClear = false
+    } else if (lp.leafUuid === null && lp.explicit === true) {
+      // Official 2.1.328 (#586): explicit non-rewound `/clear` clears rewind
+      // tracking state completely so the cleared session never revives rewound turns.
+      this.cleared = true
+      this.rewoundClear = lp.rewound === true
+      this.rewindCutUuid = lp.rewound === true ? lp.cutUuid : undefined
+      this.checkpointLeafUuid = undefined
+      this.checkpointExplicit = false
+      this.lastPromptWasRewound = false
+      if (!this.rewoundClear) {
+        this.postRewindRows = undefined
+      }
+    }
+  }
+}
+
+/**
+ * Official 2.1.328 (#562) `Knn`: splice rows that were persisted ahead of a
+ * late-saved put-back `tool_result` directly under `hangUnderUuid` so recent
+ * messages or compaction summaries are not orphaned on cloud session resume.
+ */
+export function spliceRowsAheadOfPutBack(
+  messages: Map<UUID, TranscriptMessage>,
+  aheadRowUuids: readonly UUID[],
+  hangUnderUuid: UUID,
+): number {
+  if (aheadRowUuids.length === 0 || !messages.has(hangUnderUuid)) return 0
+  let parentUuid: UUID = hangUnderUuid
+  let spliced = 0
+  for (const rowUuid of aheadRowUuids) {
+    const row = messages.get(rowUuid)
+    if (!row || row.uuid === hangUnderUuid) continue
+    if (row.parentUuid !== parentUuid) {
+      messages.set(rowUuid, { ...row, parentUuid })
+      spliced++
+    }
+    parentUuid = rowUuid
+  }
+  return spliced
+}
+
+const PUT_BACK_MAX_ROWS = 100
+const DISALLOWED_PUT_BACK_ATTACHMENT_TYPES = new Set<string | undefined>([
+  undefined,
+  'queued_command',
+  'project_doc_reads',
+  'message_pdf_reads',
+])
+
+function hasContentBlockOfType(content: unknown, blockType: string): boolean {
+  if (!Array.isArray(content)) return false
+  return content.some(
+    b =>
+      b !== null &&
+      typeof b === 'object' &&
+      (b as { type?: unknown }).type === blockType,
+  )
+}
+
+/** Official 2.1.328 `_L`: auxiliary transcript row eligible for put-back splicing. */
+function isPutBackAuxiliaryRow(row: TranscriptMessage): boolean {
+  if (row.type === 'attachment') return true
+  if (row.type === 'system') {
+    return (row as { subtype?: string }).subtype !== 'compact_boundary'
+  }
+  return (
+    row.type === 'user' &&
+    row.isMeta === true &&
+    !hasContentBlockOfType(row.message?.content, 'tool_result')
+  )
+}
+
+/** Official 2.1.328 `tgr`: true when a slice still has an unmatched `tool_use`. */
+function hasUnmatchedToolUseInSlice(
+  slice: readonly TranscriptMessage[],
+): boolean {
+  const open = new Set<string>()
+  for (const row of slice) {
+    const content =
+      row.type === 'assistant' || row.type === 'user'
+        ? row.message?.content
+        : undefined
+    if (!Array.isArray(content)) continue
+    for (const block of content) {
+      if (!block || typeof block !== 'object') continue
+      const b = block as { type?: unknown; id?: unknown; tool_use_id?: unknown }
+      if (b.type === 'tool_use' && typeof b.id === 'string') {
+        open.add(b.id)
+      } else if (
+        b.type === 'tool_result' &&
+        typeof b.tool_use_id === 'string'
+      ) {
+        open.delete(b.tool_use_id)
+      }
+    }
+  }
+  return open.size > 0
+}
+
+/** Official 2.1.328 `ngr`: validate `rowsAheadOfPutBack` for a put-back `tool_result` row. */
+function validateRowsAheadOfPutBack(
+  row: TranscriptMessage,
+  messages: ReadonlyMap<UUID, TranscriptMessage>,
+  seen: ReadonlySet<UUID>,
+): string | { rows: TranscriptMessage[]; hangUnder: UUID | null } {
+  const raw = (row as unknown as { rowsAheadOfPutBack?: unknown })
+    .rowsAheadOfPutBack
+  if (
+    !Array.isArray(raw) ||
+    raw.length > PUT_BACK_MAX_ROWS ||
+    row.type !== 'user' ||
+    !hasContentBlockOfType(row.message?.content, 'tool_result')
+  ) {
+    return 'malformed'
+  }
+  const rows: TranscriptMessage[] = []
+  let hangUnder: UUID | null = null
+  for (const id of new Set(raw)) {
+    const cand = typeof id === 'string' ? messages.get(id as UUID) : undefined
+    if (cand === undefined) return 'row_not_loaded'
+    if (seen.has(cand.uuid)) continue
+    const attType =
+      cand.type === 'attachment'
+        ? (cand as { attachment?: { type?: string } }).attachment?.type
+        : undefined
+    const candRec = cand as unknown as {
+      taskDelivery?: unknown
+      queueTranscriptOnly?: unknown
+    }
+    if (
+      cand.isSidechain !== row.isSidechain ||
+      (cand.type === 'attachment' &&
+        DISALLOWED_PUT_BACK_ATTACHMENT_TYPES.has(attType)) ||
+      (cand.type === 'user' && candRec.taskDelivery !== undefined) ||
+      !(
+        isPutBackAuxiliaryRow(cand) ||
+        (cand.type === 'user' &&
+          candRec.queueTranscriptOnly === true &&
+          !hasContentBlockOfType(cand.message?.content, 'tool_result'))
+      )
+    ) {
+      return 'row_kind'
+    }
+    let parent: UUID | null = cand.parentUuid
+    for (let hops = 0; parent === null || !seen.has(parent); hops++) {
+      const parentRow = parent === null ? undefined : messages.get(parent)
+      if (parentRow === undefined || hops > PUT_BACK_MAX_ROWS) {
+        return 'row_hangs_elsewhere'
+      }
+      parent = parentRow.parentUuid
+    }
+    if (rows.length > 0 && parent !== hangUnder) {
+      return 'row_hangs_elsewhere'
+    }
+    hangUnder = parent
+    rows.push(cand)
+  }
+  return { rows, hangUnder }
+}
+
+/**
+ * Official 2.1.328 `Knn` (#562): splice validated `rowsAheadOfPutBack` auxiliary
+ * rows into the reconstructed chain array without mutating `messages`.
+ */
+export function splicePutBackAheadRows(
+  messages: ReadonlyMap<UUID, TranscriptMessage>,
+  chain: TranscriptMessage[],
+  seen: Set<UUID>,
+): { chain: TranscriptMessage[]; left: string[] } {
+  let result = chain
+  const left: string[] = []
+  for (const row of chain) {
+    if (
+      row.type !== 'user' ||
+      (row as unknown as { rowsAheadOfPutBack?: unknown })
+        .rowsAheadOfPutBack === undefined
+    ) {
+      continue
+    }
+    const validated = validateRowsAheadOfPutBack(row, messages, seen)
+    if (typeof validated === 'string') {
+      left.push(validated)
+      continue
+    }
+    if (validated.rows.length === 0) continue
+    const parentRow = row.parentUuid ? messages.get(row.parentUuid) : undefined
+    const assistantMsgId =
+      parentRow?.type === 'assistant'
+        ? (parentRow.message as { id?: string } | undefined)?.id
+        : undefined
+    const firstReplyIdx = assistantMsgId
+      ? result.findIndex(
+          w =>
+            w.type === 'assistant' &&
+            (w.message as { id?: string } | undefined)?.id === assistantMsgId,
+        )
+      : -1
+    const hangIdx = result.findIndex(w => w.uuid === validated.hangUnder)
+    const putBackIdx = result.indexOf(row)
+    if (
+      firstReplyIdx === -1 ||
+      hangIdx === -1 ||
+      hangIdx >= putBackIdx ||
+      (hangIdx < firstReplyIdx &&
+        validated.hangUnder !== result[firstReplyIdx]?.parentUuid) ||
+      (result[hangIdx]?.type === 'assistant' &&
+        hasUnmatchedToolUseInSlice(result.slice(firstReplyIdx, hangIdx + 1)) &&
+        result.slice(hangIdx + 1, putBackIdx).some(w => w.type === 'assistant'))
+    ) {
+      left.push(
+        firstReplyIdx === -1 ? 'reply_not_on_chain' : 'row_hangs_elsewhere',
+      )
+      continue
+    }
+    for (const spliced of validated.rows) {
+      seen.add(spliced.uuid)
+    }
+    result = [
+      ...result.slice(0, hangIdx + 1),
+      ...validated.rows,
+      ...result.slice(hangIdx + 1),
+    ]
+  }
+  return { chain: result, left }
+}
+
+/**
+ * Official 2.1.328 (#646) `orn` / `rrn` / `ptt`: bounded 1024-entry map from
+ * assistant `tool_use` ID -> tool name used during transcript load to strip
+ * duplicated large payloads (`base64`, `content`, `stdout`, `stderr`,
+ * `originalFile`) from `toolUseResult` on resume while preserving `message.content`.
+ */
+const SLIM_TOOL_USE_WINDOW_MAX = 1024
+
+export class ToolUseNameWindow {
+  private readonly map = new Map<string, string>()
+
+  recordAssistantMessage(entry: TranscriptMessage): void {
+    if (entry.type !== 'assistant') return
+    const content = entry.message?.content
+    if (!Array.isArray(content)) return
+    for (const block of content as unknown as Array<Record<string, unknown>>) {
+      if (
+        block &&
+        block.type === 'tool_use' &&
+        typeof block.id === 'string' &&
+        typeof block.name === 'string'
+      ) {
+        this.map.set(block.id, block.name)
+        if (this.map.size > SLIM_TOOL_USE_WINDOW_MAX) {
+          const oldest = this.map.keys().next().value
+          if (oldest !== undefined) this.map.delete(oldest)
+        }
+      }
+    }
+  }
+
+  getToolName(toolUseId: string): string | undefined {
+    return this.map.get(toolUseId)
+  }
+}
+
+/**
+ * Official 2.1.328 (#646): slim duplicated payloads in `entry.toolUseResult`
+ * when resuming a session (especially sessions with many Read images/PDFs).
+ */
+export function slimToolUseResultForResume<T extends TranscriptMessage>(
+  entry: T,
+  window: ToolUseNameWindow,
+): T {
+  window.recordAssistantMessage(entry)
+  if (entry.type !== 'user') return entry
+  const rec = entry as unknown as {
+    toolUseResult?: Record<string, unknown>
+    message?: { content?: unknown }
+  }
+  if (!rec.toolUseResult || typeof rec.toolUseResult !== 'object') {
+    return entry
+  }
+  const content = rec.message?.content
+  let toolName: string | undefined
+  if (Array.isArray(content)) {
+    for (const block of content as Array<Record<string, unknown>>) {
+      if (
+        block &&
+        block.type === 'tool_result' &&
+        typeof block.tool_use_id === 'string'
+      ) {
+        toolName = window.getToolName(block.tool_use_id)
+        if (toolName) break
+      }
+    }
+  }
+  const res = rec.toolUseResult
+  let slimmed: Record<string, unknown> | undefined
+  if (
+    toolName === 'Read' ||
+    toolName === 'FileReadTool' ||
+    (toolName === undefined &&
+      (res.type === 'image' || res.type === 'pdf') &&
+      typeof res.file === 'object' &&
+      res.file !== null)
+  ) {
+    const file = res.file as Record<string, unknown> | undefined
+    if (file && typeof file === 'object') {
+      if (
+        (res.type === 'image' || res.type === 'pdf') &&
+        typeof file.base64 === 'string' &&
+        file.base64.length > 0
+      ) {
+        slimmed = { ...res, file: { ...file, base64: '' } }
+      } else if (
+        res.type === 'text' &&
+        typeof file.content === 'string' &&
+        file.content.length > 0
+      ) {
+        slimmed = { ...res, file: { ...file, content: '' } }
+      }
+    }
+  } else if (toolName === 'Bash') {
+    if (
+      (typeof res.stdout === 'string' && res.stdout.length > 0) ||
+      (typeof res.stderr === 'string' && res.stderr.length > 0)
+    ) {
+      slimmed = { ...res, stdout: '', stderr: '' }
+    }
+  } else if (toolName === 'Edit') {
+    if (typeof res.originalFile === 'string' && res.originalFile.length > 0) {
+      slimmed = { ...res, originalFile: null }
+    }
+  } else if (toolName === 'Write' && res.type === 'update') {
+    if (
+      (typeof res.content === 'string' && res.content.length > 0) ||
+      (typeof res.originalFile === 'string' && res.originalFile.length > 0)
+    ) {
+      slimmed = { ...res, content: '', originalFile: null }
+    }
+  }
+  if (!slimmed) return entry
+  return { ...entry, toolUseResult: slimmed }
+}
+
+/**
+ * Official 2.1.328 (#645) `Jnn`: memoized parent-walk resolution for terminal
+ * non-conversational entries, avoiding O(N^2) repeated walks on large sessions.
+ */
+export function resolveTerminalConversationalAncestors(
+  terminalMessages: readonly TranscriptMessage[],
+  messages: ReadonlyMap<UUID, TranscriptMessage>,
+  hasUserAssistantChild?: ReadonlySet<UUID>,
+): { leafUuids: Set<UUID>; hasCycle: boolean } {
+  const leafUuids = new Set<UUID>()
+  const memo = new Map<UUID, UUID | null>()
+  let hasCycle = false
+
+  for (const terminal of terminalMessages) {
+    const visited: UUID[] = []
+    const seen = new Set<UUID>()
+    let current: TranscriptMessage | undefined = terminal
+    let resolved: UUID | null = null
+
+    while (current) {
+      if (memo.has(current.uuid)) {
+        resolved = memo.get(current.uuid) ?? null
+        break
+      }
+      if (seen.has(current.uuid)) {
+        hasCycle = true
+        resolved = null
+        break
+      }
+      seen.add(current.uuid)
+      visited.push(current.uuid)
+      if (current.type === 'user' || current.type === 'assistant') {
+        resolved = current.uuid
+        break
+      }
+      current = current.parentUuid
+        ? messages.get(current.parentUuid)
+        : undefined
+    }
+
+    for (const v of visited) {
+      memo.set(v, resolved)
+    }
+
+    if (
+      resolved !== null &&
+      (!hasUserAssistantChild || !hasUserAssistantChild.has(resolved))
+    ) {
+      leafUuids.add(resolved)
+    }
+  }
+
+  return { leafUuids, hasCycle }
+}
+
 function isCompactBoundaryTranscriptMessage(
   entry: TranscriptMessage | undefined,
 ): boolean {
@@ -4586,44 +5299,193 @@ function isCompactBoundaryTranscriptMessage(
   )
 }
 
-function findNearestPrecedingLeaf(
-  messages: Map<UUID, TranscriptMessage>,
-  orphan: TranscriptMessage,
-  seen: Set<UUID>,
-): TranscriptMessage | undefined {
-  const candidates: TranscriptMessage[] = []
-  for (const entry of messages.values()) {
-    if (entry.uuid === orphan.uuid) break
-    if (isCompactBoundaryTranscriptMessage(entry)) {
-      // Do not bridge an orphan back across a compact_boundary.
-      candidates.length = 0
-      continue
+/**
+ * Official 2.1.328 (#645) `Vnn`: O(N log N) pre-indexed preceding-leaf lookup
+ * with union-find path compression (`previousCandidate`) so bridging multiple
+ * broken parent links in large transcripts runs in O(1) amortized time instead
+ * of rescanning all `messages` (O(N^2)).
+ */
+class FastParentGapIndex {
+  private readonly ordered: TranscriptMessage[]
+  private readonly indexByUuid = new Map<UUID, number>()
+  private readonly nonSidechainChildren = new Map<UUID, number[]>()
+  private readonly bridgedParents = new Set<UUID>()
+  private readonly laterReferencedCandidates: number[] = []
+  private readonly prevCandidate: Int32Array
+  private readonly lastBoundaryBefore: Int32Array
+
+  constructor(messages: ReadonlyMap<UUID, TranscriptMessage>) {
+    this.ordered = [...messages.values()]
+    const n = this.ordered.length
+    this.prevCandidate = new Int32Array(n)
+    this.lastBoundaryBefore = new Int32Array(n)
+    for (let i = 0; i < n; i++) {
+      const m = this.ordered[i]!
+      this.indexByUuid.set(m.uuid, i)
+      // Official 2.1.328 `i_r`: only non-sidechain rows mark a parent as
+      // referenced on the main conversation chain.
+      if (!m.isSidechain && m.parentUuid) {
+        const list = this.nonSidechainChildren.get(m.parentUuid)
+        if (list) {
+          list.push(i)
+        } else {
+          this.nonSidechainChildren.set(m.parentUuid, [i])
+        }
+      }
     }
-    if (!entry.isSidechain && entry.timestamp <= orphan.timestamp) {
-      candidates.push(entry)
+    const suffixMinTs = new Array<string>(n)
+    if (n > 0) {
+      let minTs = this.ordered[n - 1]!.timestamp
+      suffixMinTs[n - 1] = minTs
+      for (let i = n - 2; i >= 0; i--) {
+        const ts = this.ordered[i]!.timestamp
+        if (ts < minTs) {
+          minTs = ts
+        }
+        suffixMinTs[i] = minTs
+      }
+    }
+    let lastBoundary = -1
+    for (let i = 0; i < n; i++) {
+      const m = this.ordered[i]!
+      this.lastBoundaryBefore[i] = lastBoundary
+      if (isCompactBoundaryTranscriptMessage(m)) {
+        lastBoundary = i
+      }
+      const isBaseEligible =
+        !m.isSidechain && !(m.type === 'system' && !m.parentUuid)
+      const children = this.nonSidechainChildren.get(m.uuid)
+      const hasNonSidechainChild = children !== undefined && children.length > 0
+      const eligibleLeaf = isBaseEligible && !hasNonSidechainChild
+      this.prevCandidate[i] = eligibleLeaf ? i : i - 1
+      // Track non-sidechain nodes whose earliest non-sidechain child is NOT
+      // immediately adjacent, precedes `i`, or has a later timestamp than some
+      // subsequent row (clock skew / out-of-order timestamps), so they remain
+      // discoverable as leaves while preserving O(N) on monotonic transcripts.
+      if (
+        isBaseEligible &&
+        hasNonSidechainChild &&
+        (children[0]! > i + 1 ||
+          children[0]! < i ||
+          (i + 2 < n &&
+            this.ordered[children[0]!]!.timestamp > suffixMinTs[i + 2]!))
+      ) {
+        this.laterReferencedCandidates.push(i)
+      }
     }
   }
-  const referencedParents = new Set(candidates.map(c => c.parentUuid))
-  let best: TranscriptMessage | undefined
-  for (const cand of candidates) {
-    if (
-      !seen.has(cand.uuid) &&
-      !referencedParents.has(cand.uuid) &&
-      !(cand.type === 'system' && !cand.parentUuid) &&
-      (!best || cand.timestamp >= best.timestamp)
+
+  private isReferencedBefore(
+    uuid: UUID,
+    orphanIdx: number,
+    orphanTimestamp: string,
+  ): boolean {
+    const children = this.nonSidechainChildren.get(uuid)
+    if (!children) return false
+    for (const childIdx of children) {
+      if (childIdx >= orphanIdx) break
+      if (this.ordered[childIdx]!.timestamp <= orphanTimestamp) {
+        return true
+      }
+    }
+    return false
+  }
+
+  private findPrev(idx: number): number {
+    if (idx < 0) return -1
+    let cur = idx
+    while (cur >= 0 && this.prevCandidate[cur] !== cur) {
+      const next = this.prevCandidate[cur]!
+      if (next >= 0 && this.prevCandidate[next] !== next) {
+        this.prevCandidate[cur] = this.prevCandidate[next]!
+      }
+      cur = next
+    }
+    return cur
+  }
+
+  findNearestPrecedingLeaf(
+    orphan: TranscriptMessage,
+    seen: ReadonlySet<UUID>,
+  ): TranscriptMessage | undefined {
+    const orphanIdx = this.indexByUuid.get(orphan.uuid)
+    if (orphanIdx === undefined || orphanIdx <= 0) return undefined
+    const minBoundaryIdx = this.lastBoundaryBefore[orphanIdx]!
+    let best: TranscriptMessage | undefined
+    let bestIdx = -1
+
+    const consider = (idx: number): void => {
+      if (idx < minBoundaryIdx || idx >= orphanIdx) return
+      const cand = this.ordered[idx]!
+      if (cand.isSidechain) return
+      if (cand.type === 'system' && !cand.parentUuid) return
+      if (seen.has(cand.uuid) || this.bridgedParents.has(cand.uuid)) return
+      if (this.isReferencedBefore(cand.uuid, orphanIdx, orphan.timestamp)) {
+        return
+      }
+      if (cand.timestamp > orphan.timestamp) return
+      // Official 2.1.328 `i_r`: prefer the highest timestamp; on equal
+      // timestamps prefer the LATEST preceding leaf (larger index).
+      if (
+        !best ||
+        cand.timestamp > best.timestamp ||
+        (cand.timestamp === best.timestamp && idx > bestIdx)
+      ) {
+        best = cand
+        bestIdx = idx
+      }
+    }
+
+    for (
+      let i = this.findPrev(orphanIdx - 1);
+      i >= 0;
+      i = this.findPrev(i - 1)
     ) {
-      best = cand
+      if (i < minBoundaryIdx) break
+      const cand = this.ordered[i]!
+      if (seen.has(cand.uuid) || this.bridgedParents.has(cand.uuid)) {
+        this.prevCandidate[i] = i - 1
+        continue
+      }
+      consider(i)
     }
+
+    // Also check immediately preceding node (in case its only child is at
+    // orphanIdx) and any node whose earliest non-sidechain child lies past i+1.
+    consider(orphanIdx - 1)
+    for (const idx of this.laterReferencedCandidates) {
+      if (idx >= orphanIdx) break
+      consider(idx)
+    }
+
+    if (best) {
+      this.bridgedParents.add(best.uuid)
+      if (this.prevCandidate[bestIdx] === bestIdx) {
+        this.prevCandidate[bestIdx] = bestIdx - 1
+      }
+      return best
+    }
+    if (minBoundaryIdx >= 0) {
+      const boundary = this.ordered[minBoundaryIdx]!
+      // Official 2.1.328 (#562): when a late-saved message after compaction
+      // has a broken parentUuid and no normal leaf precedes it, anchor to
+      // the compact_boundary itself rather than losing the compaction summary.
+      if (
+        isCompactBoundaryTranscriptMessage(boundary) &&
+        !seen.has(boundary.uuid)
+      ) {
+        return boundary
+      }
+    }
+    return undefined
   }
-  return best
 }
 
 /**
- * Official 2.1.326 #30 (`s_r` / `i_r`): repair broken `parentUuid` chains when
- * a message points at a missing parent UUID (for example, after a crash where
- * the previous turn ended with an empty reply that was never persisted).
- * Mutates `messages` entries in place with repaired `parentUuid` and returns
- * the number of gaps bridged.
+ * Official 2.1.326 #30 + 2.1.328 #562/#645 (`s_r` / `Vnn`): repair broken
+ * `parentUuid` chains when a message points at a missing parent UUID (empty
+ * reply crash or late-saved message after compaction). Uses `FastParentGapIndex`
+ * for O(N) performance on large transcripts and preserves compaction anchors.
  */
 export function bridgeBrokenParentChain(
   messages: Map<UUID, TranscriptMessage>,
@@ -4633,13 +5495,15 @@ export function bridgeBrokenParentChain(
   if (!leafUuid) return 0
   const seen = new Set<UUID>()
   let bridges = 0
+  let index: FastParentGapIndex | undefined
   let current = messages.get(leafUuid)
   while (current?.parentUuid && !seen.has(current.uuid)) {
     if (isCompactBoundaryTranscriptMessage(current)) break
     seen.add(current.uuid)
     let parent = messages.get(current.parentUuid)
     if (!parent && bridges < maxBridges) {
-      parent = findNearestPrecedingLeaf(messages, current, seen)
+      index ??= new FastParentGapIndex(messages)
+      parent = index.findNearestPrecedingLeaf(current, seen)
       if (parent) {
         messages.set(current.uuid, {
           ...current,
@@ -4651,6 +5515,99 @@ export function bridgeBrokenParentChain(
     current = parent
   }
   return bridges
+}
+
+const CHAIN_TIMESTAMP_FALLBACK_WINDOW_MS = 5_000
+
+type TimedFallbackEntry = {
+  time: number
+  entry: TranscriptMessage
+}
+
+type TimedFallbackIndex = {
+  timedEntries: TimedFallbackEntry[]
+  previousCandidate: Int32Array
+}
+
+type TimedFallbackState = {
+  entriesBySide?: Map<boolean, TranscriptMessage[]>
+  timedSides: Map<boolean, TimedFallbackIndex>
+}
+
+function isFileSnapshotEntry(entry: TranscriptMessage): boolean {
+  return (
+    entry.type === 'system' &&
+    (entry as { subtype?: string }).subtype === 'file_snapshot'
+  )
+}
+
+/**
+ * Official 2.1.328 `Vnn` (#645): non-mutating 5,000ms numeric-timestamp parent
+ * fallback for broken `parentUuid` links, skipping `file_snapshot` rows and
+ * already-visited entries via binary search + path-compressed `Int32Array`.
+ */
+function findNearestTimedFallbackParent(
+  state: TimedFallbackState,
+  messages: ReadonlyMap<UUID, TranscriptMessage>,
+  orphan: TranscriptMessage,
+  seen: ReadonlySet<UUID>,
+): TranscriptMessage | undefined {
+  const orphanTime = new Date(orphan.timestamp).getTime()
+  if (Number.isNaN(orphanTime)) return undefined
+  const isSidechain = Boolean(orphan.isSidechain)
+  let sideIndex = state.timedSides.get(isSidechain)
+  if (!sideIndex) {
+    if (!state.entriesBySide) {
+      state.entriesBySide = new Map<boolean, TranscriptMessage[]>()
+      for (const m of messages.values()) {
+        const side = Boolean(m.isSidechain)
+        const list = state.entriesBySide.get(side)
+        if (list) list.push(m)
+        else state.entriesBySide.set(side, [m])
+      }
+    }
+    const timed: TimedFallbackEntry[] = []
+    for (const m of state.entriesBySide.get(isSidechain) ?? []) {
+      if (seen.has(m.uuid)) continue
+      if (isFileSnapshotEntry(m)) continue
+      const t = new Date(m.timestamp).getTime()
+      if (!Number.isNaN(t)) timed.push({ time: t, entry: m })
+    }
+    timed.reverse().sort((a, b) => a.time - b.time)
+    const prev = new Int32Array(timed.length)
+    for (let i = 0; i < timed.length; i++) prev[i] = i
+    sideIndex = { timedEntries: timed, previousCandidate: prev }
+    state.timedSides.set(isSidechain, sideIndex)
+  }
+  let hi = sideIndex.timedEntries.length
+  let lo = 0
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1
+    if (sideIndex.timedEntries[mid]!.time <= orphanTime) lo = mid + 1
+    else hi = mid
+  }
+  let idx = hi - 1
+  while (idx >= 0) {
+    const prev = sideIndex.previousCandidate[idx]!
+    if (prev !== idx) {
+      idx = prev
+    } else if (seen.has(sideIndex.timedEntries[idx]!.entry.uuid)) {
+      sideIndex.previousCandidate[idx] = idx - 1
+      idx -= 1
+    } else {
+      break
+    }
+  }
+  let compress = hi - 1
+  while (compress > idx) {
+    const next = sideIndex.previousCandidate[compress]!
+    sideIndex.previousCandidate[compress] = idx
+    compress = next
+  }
+  const match = idx >= 0 ? sideIndex.timedEntries[idx] : undefined
+  return match && orphanTime - match.time <= CHAIN_TIMESTAMP_FALLBACK_WINDOW_MS
+    ? match.entry
+    : undefined
 }
 
 /**
@@ -4665,11 +5622,9 @@ export function buildConversationChain(
   messages: Map<UUID, TranscriptMessage>,
   leafMessage: TranscriptMessage,
 ): TranscriptMessage[] {
-  // Official 2.1.326 #30: bridge any dangling parentUuid gaps (such as after
-  // a crash when the previous turn ended with an empty reply) before walking.
-  bridgeBrokenParentChain(messages, leafMessage.uuid)
   const transcript: TranscriptMessage[] = []
   const seen = new Set<UUID>()
+  let fallbackState: TimedFallbackState | undefined
   let currentMsg: TranscriptMessage | undefined =
     messages.get(leafMessage.uuid) ?? leafMessage
   while (currentMsg) {
@@ -4684,12 +5639,29 @@ export function buildConversationChain(
     }
     seen.add(currentMsg.uuid)
     transcript.push(currentMsg)
-    currentMsg = currentMsg.parentUuid
-      ? messages.get(currentMsg.parentUuid)
-      : undefined
+    if (!currentMsg.parentUuid) {
+      currentMsg = undefined
+      continue
+    }
+    let nextMsg = messages.get(currentMsg.parentUuid)
+    if (!nextMsg) {
+      fallbackState ??= { timedSides: new Map() }
+      nextMsg = findNearestTimedFallbackParent(
+        fallbackState,
+        messages,
+        currentMsg,
+        seen,
+      )
+    }
+    currentMsg = nextMsg
   }
   transcript.reverse()
-  return recoverOrphanedParallelToolResults(messages, transcript, seen)
+  const recovered = recoverOrphanedParallelToolResults(
+    messages,
+    transcript,
+    seen,
+  )
+  return splicePutBackAheadRows(messages, recovered, seen).chain
 }
 
 /**
@@ -4733,26 +5705,79 @@ function recoverOrphanedParallelToolResults(
   }
 
   // O(n) precompute: sibling groups and TR index.
-  // TRs indexed by parentUuid — insertMessageChain:~894 already wrote that
-  // as the srcUUID, and --fork-session strips srcUUID but keeps parentUuid.
+  // Official 2.1.328 (#587) `l_r`: index tool_result user rows not only by
+  // parentUuid, but also by sourceToolAssistantUUID and by matching
+  // tool_use_id -> emitting assistant (with matching isSidechain & agentId)
+  // so retried dropped model streams never lose a turn's tool calls & results.
   const siblingsByMsgId = new Map<string, TranscriptMessage[]>()
   const toolResultsByAsst = new Map<UUID, TranscriptMessage[]>()
+  const assistantByToolUseId = new Map<string, TranscriptMessage>()
+  const addToolResultForAsst = (
+    asstUuid: UUID,
+    tr: TranscriptMessage,
+  ): void => {
+    const group = toolResultsByAsst.get(asstUuid)
+    if (group) {
+      if (!group.includes(tr)) group.push(tr)
+    } else {
+      toolResultsByAsst.set(asstUuid, [tr])
+    }
+  }
   for (const m of messages.values()) {
-    if (m.type === 'assistant' && m.message!.id) {
-      const group = siblingsByMsgId.get(m.message!.id)
-      if (group) group.push(m)
-      else siblingsByMsgId.set(m.message!.id, [m])
-    } else if (
+    if (m.type === 'assistant') {
+      if (m.message?.id) {
+        const group = siblingsByMsgId.get(m.message.id)
+        if (group) group.push(m)
+        else siblingsByMsgId.set(m.message.id, [m])
+      }
+      if (Array.isArray(m.message?.content)) {
+        for (const block of m.message.content as unknown as Array<
+          Record<string, unknown>
+        >) {
+          if (block?.type === 'tool_use' && typeof block.id === 'string') {
+            assistantByToolUseId.set(block.id, m)
+          }
+        }
+      }
+    }
+  }
+  for (const m of messages.values()) {
+    if (
       m.type === 'user' &&
-      m.parentUuid &&
-      Array.isArray(m.message!.content) &&
-      (m.message!.content as Array<{ type: string }>).some(
+      Array.isArray(m.message?.content) &&
+      (m.message.content as Array<{ type: string }>).some(
         b => b.type === 'tool_result',
       )
     ) {
-      const group = toolResultsByAsst.get(m.parentUuid)
-      if (group) group.push(m)
-      else toolResultsByAsst.set(m.parentUuid, [m])
+      if (m.parentUuid) {
+        addToolResultForAsst(m.parentUuid, m)
+      }
+      const srcAsst = (m as unknown as { sourceToolAssistantUUID?: UUID })
+        .sourceToolAssistantUUID
+      if (srcAsst && srcAsst !== m.parentUuid) {
+        addToolResultForAsst(srcAsst, m)
+      }
+      const mAgentId = (m as unknown as { agentId?: string }).agentId
+      for (const block of m.message.content as unknown as Array<
+        Record<string, unknown>
+      >) {
+        if (
+          block?.type === 'tool_result' &&
+          typeof block.tool_use_id === 'string'
+        ) {
+          const ownerAsst = assistantByToolUseId.get(block.tool_use_id)
+          if (ownerAsst) {
+            const ownerAgentId = (ownerAsst as unknown as { agentId?: string })
+              .agentId
+            if (
+              Boolean(ownerAsst.isSidechain) === Boolean(m.isSidechain) &&
+              ownerAgentId === mAgentId
+            ) {
+              addToolResultForAsst(ownerAsst.uuid, m)
+            }
+          }
+        }
+      }
     }
   }
 
@@ -4920,6 +5945,7 @@ export async function loadTranscriptFromFile(
       bridgeOwnerAccountUuids,
       bridgeOwnerOrganizationUuids,
       historySuppressed,
+      readTruncated,
     } = await loadTranscriptFile(filePath)
 
     if (messages.size === 0) {
@@ -4937,25 +5963,47 @@ export async function loadTranscriptFromFile(
 
     // Build the conversation chain backwards from leaf to root
     const transcript = buildConversationChain(messages, leafMessage)
+    const truncatedEarlier = hasMissingEarlierMessages(
+      transcript,
+      messages,
+      readTruncated,
+    )
 
     const summary = summaries.get(leafMessage.uuid)
     const customTitle = customTitles.get(leafMessage.sessionId as UUID)
     const tag = tags.get(leafMessage.sessionId as UUID)
     const sessionId = leafMessage.sessionId as UUID
     const bridgeSessionId = bridgeSessionIds.get(sessionId)
+    const baseLog = convertToLogOption(
+      transcript,
+      0,
+      summary,
+      customTitle,
+      buildFileHistorySnapshotChain(fileHistorySnapshots, transcript),
+      tag,
+      filePath,
+      buildAttributionSnapshotChain(attributionSnapshots, transcript),
+      undefined,
+      contentReplacements.get(sessionId) ?? [],
+    )
+    // Official 2.1.328 (#370): prepend a non-persisted warning when earlier
+    // messages couldn't be loaded due to a missing or damaged session file.
+    if (truncatedEarlier) {
+      baseLog.messages = [
+        {
+          ...createMissingEarlierMessagesWarning(),
+          parentUuid: null,
+          isSidechain: false,
+          userType: 'external',
+          cwd: getCwd(),
+          sessionId,
+          version: MACRO.VERSION,
+        } as unknown as SerializedMessage,
+        ...baseLog.messages,
+      ]
+    }
     const log = {
-      ...convertToLogOption(
-        transcript,
-        0,
-        summary,
-        customTitle,
-        buildFileHistorySnapshotChain(fileHistorySnapshots, transcript),
-        tag,
-        filePath,
-        buildAttributionSnapshotChain(attributionSnapshots, transcript),
-        undefined,
-        contentReplacements.get(sessionId) ?? [],
-      ),
+      ...baseLog,
       aiTitle: aiTitles.get(sessionId),
       contextCollapseCommits: contextCollapseCommits.filter(
         e => e.sessionId === sessionId,
@@ -7702,7 +8750,12 @@ export async function streamTranscriptFileLowMemory(
  */
 export async function loadTranscriptFile(
   filePath: string,
-  opts?: { keepAllLeaves?: boolean; lowMemoryMode?: boolean },
+  opts?: {
+    keepAllLeaves?: boolean
+    lowMemoryMode?: boolean
+    /** Official 2.1.328 (#479): internal flag preventing >1 retry when transcript read ends early. */
+    afterEarlyEnd?: boolean
+  },
 ): Promise<{
   messages: Map<UUID, TranscriptMessage>
   summaries: Map<UUID, string>
@@ -7749,6 +8802,8 @@ export async function loadTranscriptFile(
   historySuppressed: Set<UUID>
   /** densable costStates — last-wins `type:"cost-state"` per sessionId. */
   costStates: Map<UUID, CostStateEntry>
+  /** Official 2.1.328 (#370/#479): true when transcript read ended short or damaged. */
+  readTruncated?: boolean
 }> {
   const messages = new Map<UUID, TranscriptMessage>()
   const summaries = new Map<UUID, string>()
@@ -7790,15 +8845,15 @@ export async function loadTranscriptFile(
   // Last-wins — later entries supersede.
   let contextCollapseSnapshot: ContextCollapseSnapshotEntry | undefined
 
-  // Official #437: track last-prompt rewind/checkpoint state so removed turns
-  // do not come back and a new prompt sent after /rewind is preserved.
-  let checkpointLeafUuid: UUID | undefined
-  let checkpointExplicit = false
-  let lastPromptWasRewound = false
-  let rewindCutUuid: UUID | undefined
-  let resetChain = false
+  // Official #437 + 2.1.328 (#390/#391/#392/#586): track last-prompt
+  // rewind/checkpoint state via CheckpointReachTracker so removed turns do not
+  // come back, rewind + /clear stays cleared, and new prompts after Stop/rewind
+  // are preserved.
+  const checkpoint = new CheckpointReachTracker()
   let lastNonSidechainUuid: UUID | undefined
-  let postRewindRows: Map<UUID, UUID | null> | undefined
+  let readEndedEarly = false
+  let expectedFileSize: number | undefined
+  const droppedParentMap = new Map<UUID, UUID | null>()
 
   function isTypedUserPromptRow(msg: TranscriptMessage | undefined): boolean {
     if (!msg || msg.type !== 'user') return false
@@ -7889,6 +8944,7 @@ export async function loadTranscriptFile(
       try {
         if (!precompactSkipDisabled) {
           const { size } = await stat(filePath)
+          expectedFileSize = size
           if (size > SKIP_PRECOMPACT_THRESHOLD) {
             const fastHead = !opts?.keepAllLeaves
               ? await tryLoadResumeHeadRows(filePath, size).catch(() => null)
@@ -7917,7 +8973,21 @@ export async function loadTranscriptFile(
           }
         }
         if (buf === null) {
+          if (expectedFileSize === undefined) {
+            try {
+              expectedFileSize = (await stat(filePath)).size
+            } catch {
+              // ignore stat error before readFile
+            }
+          }
           buf = await readFile(filePath)
+          if (
+            expectedFileSize !== undefined &&
+            expectedFileSize > 0 &&
+            buf.length < expectedFileSize
+          ) {
+            readEndedEarly = true
+          }
           tailTorn = buf.length > 0 && buf[buf.length - 1] !== 0x0a
         }
       } catch (readErr) {
@@ -8057,20 +9127,57 @@ export async function loadTranscriptFile(
           )
           continue
         }
+        let admittedTranscriptEntry: TranscriptMessage | undefined
         if (isTranscriptMessage(entry)) {
-          if (entry.parentUuid && progressBridge.has(entry.parentUuid)) {
-            entry.parentUuid = progressBridge.get(entry.parentUuid) ?? null
-          }
-          const isNewMessage = !messages.has(entry.uuid)
-          messages.set(entry.uuid, entry)
-          if (!entry.isSidechain) {
-            if (isNewMessage) {
-              postRewindRows?.set(entry.uuid, entry.parentUuid ?? null)
+          if (entry.type === 'user' || entry.type === 'assistant') {
+            const repair = repairTranscriptMessageContent(
+              entry.type,
+              entry.message,
+            )
+            if (repair === 'keep') {
+              admittedTranscriptEntry = entry
+            } else if (repair !== 'drop') {
+              admittedTranscriptEntry = {
+                ...entry,
+                message: {
+                  ...(entry.message as unknown as Record<string, unknown>),
+                  content: repair.content,
+                },
+              } as TranscriptMessage
             }
-            lastNonSidechainUuid = entry.uuid
-            checkpointExplicit = false
-            resetChain = false
-            lastPromptWasRewound = false
+          } else {
+            admittedTranscriptEntry = entry
+          }
+        }
+        if (admittedTranscriptEntry) {
+          if (
+            admittedTranscriptEntry.parentUuid &&
+            progressBridge.has(admittedTranscriptEntry.parentUuid)
+          ) {
+            admittedTranscriptEntry = {
+              ...admittedTranscriptEntry,
+              parentUuid:
+                progressBridge.get(admittedTranscriptEntry.parentUuid) ?? null,
+            }
+          }
+          const isNewMessage = !messages.has(admittedTranscriptEntry.uuid)
+          // Official 2.1.328 (#390): when a headless/remote message is resent
+          // with the same UUID after a process kill, do NOT clobber its
+          // already-recorded parentUuid chain link with null or a disconnected
+          // parent.
+          const existing = isNewMessage
+            ? undefined
+            : messages.get(admittedTranscriptEntry.uuid)
+          const mergedEntry =
+            existing &&
+            existing.parentUuid &&
+            !admittedTranscriptEntry.parentUuid
+              ? { ...admittedTranscriptEntry, parentUuid: existing.parentUuid }
+              : admittedTranscriptEntry
+          messages.set(mergedEntry.uuid, mergedEntry)
+          checkpoint.onMessage(mergedEntry, isNewMessage)
+          if (!mergedEntry.isSidechain) {
+            lastNonSidechainUuid = mergedEntry.uuid
           }
           // Compact boundary: prior marble-origami-commit entries reference
           // messages that won't be in the post-boundary chain. The >5MB
@@ -8079,36 +9186,41 @@ export async function loadTranscriptFile(
           // here. Without this, getStats().collapsedSpans in /context
           // overcounts (projectView silently skips the stale commits but
           // they're still in the log).
-          if (isCompactBoundaryMessage(entry)) {
+          if (isCompactBoundaryMessage(mergedEntry)) {
             contextCollapseCommits.length = 0
             contextCollapseSnapshot = undefined
-            checkpointLeafUuid = undefined
-            checkpointExplicit = false
+            checkpoint.onCompactBoundary()
           }
         } else if (entry.type === 'last-prompt') {
           const lp = entry as LastPromptMessage & { cutUuid?: UUID }
-          if (lp.leafUuid) {
-            rewindCutUuid =
-              lp.rewound === true
-                ? lp.cutUuid
-                : lastPromptWasRewound && lp.leafUuid === checkpointLeafUuid
-                  ? rewindCutUuid
-                  : undefined
-            checkpointExplicit =
-              lp.explicit === true ||
-              (checkpointExplicit && lp.leafUuid === checkpointLeafUuid)
-            lastPromptWasRewound =
-              lp.rewound === true ||
-              (lastPromptWasRewound && lp.leafUuid === checkpointLeafUuid)
-            postRewindRows = lp.rewound === true ? new Map() : undefined
-            checkpointLeafUuid = lp.leafUuid as UUID
-            resetChain = false
-          } else if (lp.leafUuid === null && lp.explicit === true) {
-            resetChain = true
-            rewindCutUuid = lp.rewound === true ? lp.cutUuid : undefined
-            checkpointLeafUuid = undefined
-            checkpointExplicit = false
-            lastPromptWasRewound = false
+          checkpoint.onLastPrompt({
+            leafUuid: lp.leafUuid as UUID | null | undefined,
+            explicit: lp.explicit,
+            rewound: lp.rewound,
+            cutUuid: lp.cutUuid,
+          })
+        } else if (
+          'uuid' in entry &&
+          typeof (entry as unknown as { uuid?: unknown }).uuid === 'string' &&
+          'parentUuid' in entry &&
+          ['user', 'assistant', 'system', 'attachment', 'progress'].includes(
+            (entry as unknown as { type?: string }).type ?? '',
+          )
+        ) {
+          // Official 2.1.328 (#391) `vrn`: remember dropped/non-transcript row
+          // parent pointers (only when uuid is not already admitted) so
+          // surviving children re-link cleanly.
+          const droppedRec = entry as unknown as {
+            uuid: UUID
+            parentUuid?: UUID | null
+          }
+          if (!messages.has(droppedRec.uuid)) {
+            const rawParent = droppedRec.parentUuid ?? null
+            const bridgedParent =
+              rawParent && progressBridge.has(rawParent)
+                ? (progressBridge.get(rawParent) ?? null)
+                : rawParent
+            droppedParentMap.set(droppedRec.uuid, bridgedParent)
           }
         } else if (entry.type === 'summary' && entry.leafUuid) {
           summaries.set(entry.leafUuid, entry.summary)
@@ -8231,25 +9343,22 @@ export async function loadTranscriptFile(
     // File doesn't exist or can't be read
   }
 
+  // Official 2.1.328 (#391): re-link children whose parent was a dropped row.
+  relinkDroppedTranscriptRows(messages, droppedParentMap)
   applyPreservedSegmentRelinks(messages)
   applySnipRemovals(messages)
 
-  // Official 2.1.326 #30: bridge any dangling parentUuid gaps left after a crash
-  // when a previous turn ended with an empty reply. Must run after preserved
-  // segment relinks and snip removals so intentional relinks/snips are respected.
-  if (lastNonSidechainUuid) {
+  // Official 2.1.326 #30 + 2.1.328 #562/#645: bridge dangling parentUuid gaps
+  // on cloud/CCR sessions (local sessions use non-mutating 5s fallback in
+  // buildConversationChain).
+  const isCloudOrCcrSession =
+    isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) ||
+    Boolean(process.env.CLAUDE_CODE_REMOTE_SESSION_ID)
+  if (lastNonSidechainUuid && isCloudOrCcrSession) {
     bridgeBrokenParentChain(messages, lastNonSidechainUuid)
   }
 
   // Compute leaf UUIDs once at load time
-  // Only user/assistant messages should be considered as leaves for anchoring resume.
-  // Other message types (system, attachment) are metadata or auxiliary and shouldn't
-  // anchor a conversation chain.
-  //
-  // We use standard parent relationship for main chain detection, but also need to
-  // handle cases where the last message is a system/metadata message.
-  // For each conversation chain (identified by following parent links), the leaf
-  // is the most recent user/assistant message.
   const allMessages = [...messages.values()]
 
   // Standard leaf computation using parent relationships
@@ -8262,26 +9371,26 @@ export async function loadTranscriptFile(
   // Find all terminal messages (messages with no children)
   const terminalMessages = allMessages.filter(msg => !parentUuids.has(msg.uuid))
 
-  const leafUuids = new Set<UUID>()
+  let leafUuids = new Set<UUID>()
   let hasCycle = false
 
-  if (!opts?.keepAllLeaves && resetChain) {
-    // Rewound to before the first message: return empty leafUuids so removed
-    // turns do not come back on resume.
+  if (!opts?.keepAllLeaves && checkpoint.cleared) {
+    // Rewound to before the first message or explicitly cleared via `/clear`:
+    // return empty leafUuids so removed/cleared turns do not come back on resume.
   } else if (
     !opts?.keepAllLeaves &&
-    checkpointLeafUuid &&
-    messages.has(checkpointLeafUuid)
+    checkpoint.checkpointLeafUuid &&
+    messages.has(checkpoint.checkpointLeafUuid)
   ) {
-    let selectedUuid: UUID = checkpointLeafUuid
+    let selectedUuid: UUID = checkpoint.checkpointLeafUuid
     if (
       lastNonSidechainUuid &&
-      lastNonSidechainUuid !== checkpointLeafUuid &&
+      lastNonSidechainUuid !== checkpoint.checkpointLeafUuid &&
       hasNewPromptPastRewind(
-        postRewindRows,
+        checkpoint.postRewindRows,
         lastNonSidechainUuid,
-        checkpointLeafUuid,
-        rewindCutUuid,
+        checkpoint.checkpointLeafUuid,
+        checkpoint.rewindCutUuid,
       )
     ) {
       selectedUuid = lastNonSidechainUuid
@@ -8306,59 +9415,28 @@ export async function loadTranscriptFile(
     getFeatureValue_CACHED_MAY_BE_STALE('tengu_pebble_leaf_prune', false)
   ) {
     // Build a set of UUIDs that have user/assistant children
-    // (these are mid-conversation nodes, not dead ends)
     const hasUserAssistantChild = new Set<UUID>()
     for (const msg of allMessages) {
       if (msg.parentUuid && (msg.type === 'user' || msg.type === 'assistant')) {
         hasUserAssistantChild.add(msg.parentUuid)
       }
     }
-
-    // For each terminal message, walk back to find the nearest user/assistant ancestor.
-    // Skip ancestors that already have user/assistant children - those are mid-conversation
-    // nodes where the conversation continued (e.g., an assistant tool_use message whose
-    // progress child is terminal, but whose tool_result child continues the conversation).
-    for (const terminal of terminalMessages) {
-      const seen = new Set<UUID>()
-      let current: TranscriptMessage | undefined = terminal
-      while (current) {
-        if (seen.has(current.uuid)) {
-          hasCycle = true
-          break
-        }
-        seen.add(current.uuid)
-        if (current.type === 'user' || current.type === 'assistant') {
-          if (!hasUserAssistantChild.has(current.uuid)) {
-            leafUuids.add(current.uuid)
-          }
-          break
-        }
-        current = current.parentUuid
-          ? messages.get(current.parentUuid)
-          : undefined
-      }
-    }
+    // Official 2.1.328 (#645) `Jnn`: memoized O(N) terminal ancestor walk
+    const resolved = resolveTerminalConversationalAncestors(
+      terminalMessages,
+      messages,
+      hasUserAssistantChild,
+    )
+    leafUuids = resolved.leafUuids
+    hasCycle = resolved.hasCycle
   } else {
-    // Original leaf computation: walk back from terminal messages to find
-    // the nearest user/assistant ancestor unconditionally
-    for (const terminal of terminalMessages) {
-      const seen = new Set<UUID>()
-      let current: TranscriptMessage | undefined = terminal
-      while (current) {
-        if (seen.has(current.uuid)) {
-          hasCycle = true
-          break
-        }
-        seen.add(current.uuid)
-        if (current.type === 'user' || current.type === 'assistant') {
-          leafUuids.add(current.uuid)
-          break
-        }
-        current = current.parentUuid
-          ? messages.get(current.parentUuid)
-          : undefined
-      }
-    }
+    // Official 2.1.328 (#645) `Jnn`: memoized O(N) terminal ancestor walk
+    const resolved = resolveTerminalConversationalAncestors(
+      terminalMessages,
+      messages,
+    )
+    leafUuids = resolved.leafUuids
+    hasCycle = resolved.hasCycle
   }
 
   if (hasCycle) {
@@ -8375,7 +9453,7 @@ export async function loadTranscriptFile(
     }
   }
 
-  return {
+  const firstResult = {
     messages,
     summaries,
     customTitles,
@@ -8409,7 +9487,35 @@ export async function loadTranscriptFile(
     bridgeOwnerOrganizationUuids,
     historySuppressed,
     costStates,
+    readTruncated: readEndedEarly,
   }
+
+  // Official 2.1.328 (#479) `Wxe`: if the transcript read ended early (fewer
+  // bytes than stat size), retry ONCE before returning. Keep the retry result
+  // if it returned at least one message; otherwise keep the first read.
+  if (readEndedEarly) {
+    if (!opts?.afterEarlyEnd) {
+      logForDebugging(
+        `[sessionStorage] transcript_read_ended_early (loaded_again): ${filePath}`,
+      )
+      const secondResult = await loadTranscriptFile(filePath, {
+        ...opts,
+        afterEarlyEnd: true,
+      })
+      if (secondResult.messages.size > 0) {
+        return secondResult
+      }
+      logForDebugging(
+        `[sessionStorage] transcript_read_ended_early (kept_first): ${filePath}`,
+      )
+      return firstResult
+    }
+    logForDebugging(
+      `[sessionStorage] transcript_read_ended_early (kept_short): ${filePath}`,
+    )
+  }
+
+  return firstResult
 }
 
 /**

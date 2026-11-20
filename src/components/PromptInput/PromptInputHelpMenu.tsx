@@ -1,27 +1,49 @@
 import { feature } from 'bun:bundle';
 import * as React from 'react';
-import { Box, KeyboardShortcutHint, Text } from '@anthropic/ink';
+import { useSyncExternalStore } from 'react';
+import { Box, formatShortcutString, KeyboardShortcutHint, Text } from '@anthropic/ink';
 import { getPlatform } from 'src/utils/platform.js';
+import { useOptionalKeybindingContext } from '../../keybindings/KeybindingContext.js';
 import { isKeybindingCustomizationEnabled } from '../../keybindings/loadUserBindings.js';
 import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js';
+import { modelSupportsEffort } from '../../utils/effort.js';
 import { isFastModeAvailable, isFastModeEnabled } from '../../utils/fastMode.js';
-import { isFullscreenEnvEnabled } from '../../utils/fullscreen.js';
-import { useTerminalSize } from '../../hooks/useTerminalSize.js';
+import { getMainLoopModel } from '../../utils/model/model.js';
+import { getPanesState, subscribePanes } from '../../utils/plugins/functionHooksModules.js';
 import { getNewlineInstructions } from './utils.js';
 
-/** densable LK / em: keyCase lower, modSep " + ". */
-function formatHelpShortcut(shortcut: string): string {
-  let s = shortcut.replace(/\+/g, ' + ');
-  // densable U.alt.lower(macos) → opt. Model picker is alt/opt, not meta.
-  if (getPlatform() === 'macos') {
-    s = s.replace(/\balt\b/g, 'opt').replace(/\bmeta\b/g, 'opt');
-  }
-  // densable undo chord ctrl+shift+- paints as underscore (shift + minus).
-  if (s.endsWith(' + -')) {
-    s = `${s.slice(0, -3)}_`;
-  }
-  return s;
+/** Official 2.1.328 `gln`: `var ep = { keyCase: "lower" }, B9 = 2`. */
+const HELP_SHORTCUT_FORMAT = { keyCase: 'lower' as const };
+const HELP_COLUMN_PADDING_RIGHT = 2;
+
+/**
+ * Official 2.1.328 `a_e`: collapse shared multi-keystroke chord prefix across
+ * increase/decrease effort shortcuts (e.g. `ctrl+x =` + `ctrl+x -` → `ctrl+x =/-`;
+ * `shift+up` + `shift+down` → `shift+↑/↓`).
+ */
+export function formatEffortShortcutPair(increaseShortcut: string, decreaseShortcut: string): string {
+  const sharedChordPrefix =
+    / \S$/.test(increaseShortcut) &&
+    / \S$/.test(decreaseShortcut) &&
+    increaseShortcut.slice(0, -1) === decreaseShortcut.slice(0, -1);
+  const chords = [increaseShortcut, sharedChordPrefix ? decreaseShortcut.slice(-1) : decreaseShortcut];
+  return formatShortcutString(chords, HELP_SHORTCUT_FORMAT);
+}
+
+function EffortShortcutHint({ dimColor }: { dimColor?: boolean }): React.ReactNode {
+  const kbCtx = useOptionalKeybindingContext();
+  const increaseShortcut = kbCtx?.getDisplayText('chat:increaseEffort', 'Chat') ?? 'shift+up';
+  const decreaseShortcut = kbCtx?.getDisplayText('chat:decreaseEffort', 'Chat') ?? 'shift+down';
+  const formatted = formatEffortShortcutPair(increaseShortcut, decreaseShortcut);
+  if (!formatted) return null;
+  return (
+    <Box>
+      <Text dimColor={dimColor}>
+        <KeyboardShortcutHint shortcut={formatted} action="change effort" />
+      </Text>
+    </Box>
+  );
 }
 
 type Props = {
@@ -29,49 +51,46 @@ type Props = {
   fixedWidth?: boolean;
   gap?: number;
   paddingX?: number;
+  /** Official 2.1.328 #602: show exit warning (e.g. Press Ctrl-C again to exit) while `?` help is open. */
+  exitMessage?: {
+    show: boolean;
+    key?: string;
+  };
 };
 
 export function PromptInputHelpMenu(props: Props): React.ReactNode {
-  const { dimColor, fixedWidth, gap, paddingX } = props;
-  const { columns, rows } = useTerminalSize();
-  // Official 2.1.326 #229 (`gln`): keep explicit horizontal separation between
-  // shortcut columns so narrow terminals never run columns together, and stack
-  // or tighten height in short fullscreen windows so bottom rows aren't clipped.
-  const isNarrow = columns < 80;
-  const isShortFullscreen = isFullscreenEnvEnabled() && rows < 24;
-  const colGap = gap ?? (isNarrow ? 2 : 3);
-  const colPaddingRight = isNarrow ? 2 : 3;
+  const { dimColor, fixedWidth, gap, paddingX, exitMessage } = props;
 
-  const transcriptShortcut = formatHelpShortcut(useShortcutDisplay('app:toggleTranscript', 'Global', 'ctrl+o'));
-  const todosShortcut = formatHelpShortcut(useShortcutDisplay('app:toggleTodos', 'Global', 'ctrl+t'));
-  const undoShortcut = formatHelpShortcut(useShortcutDisplay('chat:undo', 'Chat', 'ctrl+_'));
-  const stashShortcut = formatHelpShortcut(useShortcutDisplay('chat:stash', 'Chat', 'ctrl+s'));
-  const cycleModeShortcut = formatHelpShortcut(useShortcutDisplay('chat:cycleMode', 'Chat', 'shift+tab'));
-  const modelPickerShortcut = formatHelpShortcut(useShortcutDisplay('chat:modelPicker', 'Chat', 'alt+p'));
-  const fastModeShortcut = formatHelpShortcut(useShortcutDisplay('chat:fastMode', 'Chat', 'alt+o'));
-  const externalEditorShortcut = formatHelpShortcut(useShortcutDisplay('chat:externalEditor', 'Chat', 'ctrl+g'));
-  const terminalShortcut = formatHelpShortcut(useShortcutDisplay('app:toggleTerminal', 'Global', 'meta+j'));
-  const imagePasteShortcut = formatHelpShortcut(useShortcutDisplay('chat:imagePaste', 'Chat', 'ctrl+v'));
-  const focusPanelShortcut = formatHelpShortcut(useShortcutDisplay('abovePrompt:focus', 'Chat', 'ctrl+x tab'));
-  const closePanelShortcut = formatHelpShortcut(useShortcutDisplay('pane:close', 'Pane', 'ctrl+x x'));
-  const showPanelShortcuts = isFullscreenEnvEnabled() && !isShortFullscreen;
+  const transcriptShortcut = useShortcutDisplay('app:toggleTranscript', 'Global', 'ctrl+o');
+  const todosShortcut = useShortcutDisplay('app:toggleTodos', 'Global', 'ctrl+t');
+  const undoShortcut = useShortcutDisplay('chat:undo', 'Chat', 'ctrl+_');
+  const stashShortcut = useShortcutDisplay('chat:stash', 'Chat', 'ctrl+s');
+  const cycleModeShortcut = useShortcutDisplay('chat:cycleMode', 'Chat', 'shift+tab');
+  const modelPickerShortcut = useShortcutDisplay('chat:modelPicker', 'Chat', 'alt+p');
+  const fastModeShortcut = useShortcutDisplay('chat:fastMode', 'Chat', 'alt+o');
+  const externalEditorShortcut = useShortcutDisplay('chat:externalEditor', 'Chat', 'ctrl+g');
+  const terminalShortcut = useShortcutDisplay('app:toggleTerminal', 'Global', 'meta+j');
+  const imagePasteShortcut = useShortcutDisplay('chat:imagePaste', 'Chat', 'ctrl+v');
+  const focusPanelShortcut = useShortcutDisplay('abovePrompt:focus', 'Chat', 'ctrl+x tab');
+  const closePanelShortcut = useShortcutDisplay('pane:close', 'Pane', 'ctrl+x x');
+  // Official 2.1.328 `gln`: `Ot = Hp(aq)` where `aq = h => h.open.length > 0`.
+  const hasOpenPanels = useSyncExternalStore(subscribePanes, () => getPanesState().open.length > 0);
+  // Official 2.1.328 `gln`: `qet(dt()) ? <a_e dimColor={C} /> : null`.
+  const showEffortRow = modelSupportsEffort(getMainLoopModel());
+  const exitWarningText = exitMessage?.show ? `Press ${exitMessage.key ?? 'Ctrl-C'} again to exit` : null;
 
   const terminalShortcutElement = feature('TERMINAL_PANEL') ? (
     getFeatureValue_CACHED_MAY_BE_STALE('tengu_terminal_panel', false) ? (
       <Box>
-        <Text dimColor={dimColor}>{terminalShortcut} for terminal</Text>
+        <Text dimColor={dimColor}>{formatShortcutString(terminalShortcut, HELP_SHORTCUT_FORMAT)} for terminal</Text>
       </Box>
     ) : null
   ) : null;
 
   return (
     <Box paddingX={paddingX} flexDirection="column">
-      <Box flexDirection={isNarrow ? 'column' : 'row'} gap={isNarrow ? 0 : colGap}>
-        <Box
-          flexDirection="column"
-          width={fixedWidth && !isNarrow ? 24 : undefined}
-          paddingRight={isNarrow ? 0 : colPaddingRight}
-        >
+      <Box flexDirection="row" gap={gap}>
+        <Box flexDirection="column" width={fixedWidth ? 24 : undefined} paddingRight={HELP_COLUMN_PADDING_RIGHT}>
           <Box>
             <Text dimColor={dimColor}>! for shell mode</Text>
           </Box>
@@ -85,37 +104,50 @@ export function PromptInputHelpMenu(props: Props): React.ReactNode {
             <Text dimColor={dimColor}>/btw for side question</Text>
           </Box>
         </Box>
-        <Box
-          flexDirection="column"
-          width={fixedWidth && !isNarrow ? 35 : undefined}
-          paddingRight={isNarrow ? 0 : colPaddingRight}
-        >
-          <Box>
-            <Text dimColor={dimColor}>double tap esc to clear input</Text>
-          </Box>
+        <Box flexDirection="column" width={fixedWidth ? 35 : undefined} paddingRight={HELP_COLUMN_PADDING_RIGHT}>
           <Box>
             <Text dimColor={dimColor}>
-              <KeyboardShortcutHint shortcut={cycleModeShortcut} action="auto-accept edits" />
+              <KeyboardShortcutHint shortcut="escape escape" action="clear input" format={HELP_SHORTCUT_FORMAT} />
             </Text>
           </Box>
           <Box>
-            <Text dimColor={dimColor}>{transcriptShortcut} for verbose output</Text>
+            <Text dimColor={dimColor}>
+              <KeyboardShortcutHint shortcut={cycleModeShortcut} action="cycle modes" format={HELP_SHORTCUT_FORMAT} />
+            </Text>
+          </Box>
+          {showEffortRow ? <EffortShortcutHint dimColor={dimColor} /> : null}
+          <Box>
+            <Text dimColor={dimColor}>
+              <KeyboardShortcutHint
+                shortcut={transcriptShortcut}
+                action="see full transcript"
+                format={HELP_SHORTCUT_FORMAT}
+              />
+            </Text>
           </Box>
           <Box>
             <Text dimColor={dimColor}>
-              <KeyboardShortcutHint shortcut={todosShortcut} action="toggle tasks" />
+              <KeyboardShortcutHint shortcut={todosShortcut} action="toggle tasks" format={HELP_SHORTCUT_FORMAT} />
             </Text>
           </Box>
-          {showPanelShortcuts && (
+          {hasOpenPanels && (
             <>
               <Box>
                 <Text dimColor={dimColor}>
-                  <KeyboardShortcutHint shortcut={focusPanelShortcut} action="focus next panel" />
+                  <KeyboardShortcutHint
+                    shortcut={focusPanelShortcut}
+                    action="focus next panel"
+                    format={HELP_SHORTCUT_FORMAT}
+                  />
                 </Text>
               </Box>
               <Box>
                 <Text dimColor={dimColor}>
-                  <KeyboardShortcutHint shortcut={closePanelShortcut} action="close focused panel" />
+                  <KeyboardShortcutHint
+                    shortcut={closePanelShortcut}
+                    action="close focused panel"
+                    format={HELP_SHORTCUT_FORMAT}
+                  />
                 </Text>
               </Box>
             </>
@@ -128,41 +160,53 @@ export function PromptInputHelpMenu(props: Props): React.ReactNode {
         <Box flexDirection="column">
           <Box>
             <Text dimColor={dimColor}>
-              <KeyboardShortcutHint shortcut={undoShortcut} action="undo" />
+              <KeyboardShortcutHint shortcut={undoShortcut} action="undo" format={HELP_SHORTCUT_FORMAT} />
             </Text>
           </Box>
           {getPlatform() !== 'windows' && (
             <Box>
               <Text dimColor={dimColor}>
-                <KeyboardShortcutHint shortcut="ctrl + z" action="suspend" />
+                <KeyboardShortcutHint shortcut="ctrl+z" action="suspend" format={HELP_SHORTCUT_FORMAT} />
               </Text>
             </Box>
           )}
           <Box>
             <Text dimColor={dimColor}>
-              <KeyboardShortcutHint shortcut={imagePasteShortcut} action="paste images" />
+              <KeyboardShortcutHint shortcut={imagePasteShortcut} action="paste images" format={HELP_SHORTCUT_FORMAT} />
             </Text>
           </Box>
           <Box>
             <Text dimColor={dimColor}>
-              <KeyboardShortcutHint shortcut={modelPickerShortcut} action="switch model" />
+              <KeyboardShortcutHint
+                shortcut={modelPickerShortcut}
+                action="switch model"
+                format={HELP_SHORTCUT_FORMAT}
+              />
             </Text>
           </Box>
           {isFastModeEnabled() && isFastModeAvailable() && (
             <Box>
               <Text dimColor={dimColor}>
-                <KeyboardShortcutHint shortcut={fastModeShortcut} action="toggle fast mode" />
+                <KeyboardShortcutHint
+                  shortcut={fastModeShortcut}
+                  action="toggle fast mode"
+                  format={HELP_SHORTCUT_FORMAT}
+                />
               </Text>
             </Box>
           )}
           <Box>
             <Text dimColor={dimColor}>
-              <KeyboardShortcutHint shortcut={stashShortcut} action="stash prompt" />
+              <KeyboardShortcutHint shortcut={stashShortcut} action="stash prompt" format={HELP_SHORTCUT_FORMAT} />
             </Text>
           </Box>
           <Box flexShrink={0}>
             <Text dimColor={dimColor}>
-              <KeyboardShortcutHint shortcut={externalEditorShortcut} action="edit in $EDITOR" />
+              <KeyboardShortcutHint
+                shortcut={externalEditorShortcut}
+                action="edit in $EDITOR"
+                format={HELP_SHORTCUT_FORMAT}
+              />
             </Text>
           </Box>
           {isKeybindingCustomizationEnabled() && (
@@ -172,6 +216,11 @@ export function PromptInputHelpMenu(props: Props): React.ReactNode {
           )}
         </Box>
       </Box>
+      {exitWarningText && (
+        <Box flexShrink={0}>
+          <Text dimColor>{exitWarningText}</Text>
+        </Box>
+      )}
     </Box>
   );
 }

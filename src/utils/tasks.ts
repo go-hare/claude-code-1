@@ -1158,3 +1158,279 @@ export async function unassignTeammateTasks(
 }
 
 export const DEFAULT_TASKS_MODE_TASK_LIST_ID = 'tasklist'
+
+export type ReconstructedTaskList = {
+  tasks: Task[]
+  highestId: number
+}
+
+/**
+ * Official 2.1.328 `cZi` (#639) — reconstruct the active task list from a
+ * resumed session's transcript messages (`TaskCreate` / `TaskUpdate` tool calls
+ * and results) so a self-hosted runner session resuming in a fresh Claude
+ * config directory does not lose its task list.
+ */
+export function reconstructTasksFromTranscriptMessages(
+  messages: readonly unknown[],
+): ReconstructedTaskList {
+  const tasksById = new Map<string, Task>()
+  const pendingCreates = new Map<
+    string,
+    {
+      subject: string
+      description: string
+      activeForm?: string
+      metadata?: Record<string, unknown>
+    }
+  >()
+  const pendingUpdates = new Map<string, Record<string, unknown>>()
+  let highestId = 0
+
+  for (const msg of messages) {
+    if (!msg || typeof msg !== 'object') continue
+    const rec = msg as {
+      type?: unknown
+      message?: { content?: unknown }
+      toolUseResult?: unknown
+    }
+    const content = rec.message?.content
+    if (!Array.isArray(content)) continue
+
+    if (rec.type === 'assistant') {
+      for (const block of content) {
+        if (!block || typeof block !== 'object') continue
+        const b = block as {
+          type?: unknown
+          id?: unknown
+          name?: unknown
+          input?: unknown
+        }
+        if (b.type !== 'tool_use' || typeof b.id !== 'string') continue
+        const input =
+          b.input && typeof b.input === 'object'
+            ? (b.input as Record<string, unknown>)
+            : undefined
+        if (!input) continue
+
+        if (b.name === 'TaskCreate' && typeof input.subject === 'string') {
+          pendingCreates.set(b.id, {
+            subject: input.subject,
+            description:
+              typeof input.description === 'string' ? input.description : '',
+            ...(typeof input.activeForm === 'string'
+              ? { activeForm: input.activeForm }
+              : {}),
+            ...(input.metadata && typeof input.metadata === 'object'
+              ? { metadata: input.metadata as Record<string, unknown> }
+              : {}),
+          })
+        } else if (
+          b.name === 'TaskUpdate' &&
+          typeof input.taskId === 'string'
+        ) {
+          pendingUpdates.set(b.id, input)
+        }
+      }
+    } else if (rec.type === 'user') {
+      for (const block of content) {
+        if (!block || typeof block !== 'object') continue
+        const b = block as {
+          type?: unknown
+          tool_use_id?: unknown
+          is_error?: unknown
+          content?: unknown
+        }
+        if (b.type !== 'tool_result' || typeof b.tool_use_id !== 'string') {
+          continue
+        }
+        if (b.is_error === true) {
+          pendingCreates.delete(b.tool_use_id)
+          pendingUpdates.delete(b.tool_use_id)
+          continue
+        }
+        const pendingUpdate = pendingUpdates.get(b.tool_use_id)
+        if (pendingUpdate) {
+          pendingUpdates.delete(b.tool_use_id)
+          const taskId = pendingUpdate.taskId as string
+          const numId = Number.parseInt(taskId, 10)
+          if (Number.isFinite(numId) && numId > highestId) highestId = numId
+          if (pendingUpdate.status === 'deleted') {
+            tasksById.delete(taskId)
+            continue
+          }
+          const existing = tasksById.get(taskId)
+          if (existing) {
+            if (typeof pendingUpdate.subject === 'string') {
+              existing.subject = pendingUpdate.subject
+            }
+            if (typeof pendingUpdate.description === 'string') {
+              existing.description = pendingUpdate.description
+            }
+            if (typeof pendingUpdate.activeForm === 'string') {
+              existing.activeForm = pendingUpdate.activeForm
+            }
+            if (
+              pendingUpdate.status === 'pending' ||
+              pendingUpdate.status === 'in_progress' ||
+              pendingUpdate.status === 'completed'
+            ) {
+              existing.status = pendingUpdate.status
+            }
+            if (typeof pendingUpdate.owner === 'string') {
+              existing.owner = pendingUpdate.owner
+            }
+            if (Array.isArray(pendingUpdate.addBlocks)) {
+              for (const id of pendingUpdate.addBlocks) {
+                if (typeof id === 'string' && !existing.blocks.includes(id)) {
+                  existing.blocks.push(id)
+                }
+              }
+            }
+            if (Array.isArray(pendingUpdate.addBlockedBy)) {
+              for (const id of pendingUpdate.addBlockedBy) {
+                if (
+                  typeof id === 'string' &&
+                  !existing.blockedBy.includes(id)
+                ) {
+                  existing.blockedBy.push(id)
+                }
+              }
+            }
+            if (
+              pendingUpdate.metadata &&
+              typeof pendingUpdate.metadata === 'object'
+            ) {
+              existing.metadata = {
+                ...(existing.metadata ?? {}),
+                ...(pendingUpdate.metadata as Record<string, unknown>),
+              }
+            }
+          }
+          continue
+        }
+        const pending = pendingCreates.get(b.tool_use_id)
+        if (!pending) continue
+        pendingCreates.delete(b.tool_use_id)
+
+        // Extract assigned task id from toolUseResult.task.id or text `"Task #<id>"`
+        let id: string | undefined
+        const resultObj =
+          rec.toolUseResult && typeof rec.toolUseResult === 'object'
+            ? (rec.toolUseResult as { task?: { id?: unknown }; id?: unknown })
+            : undefined
+        if (typeof resultObj?.task?.id === 'string') {
+          id = resultObj.task.id
+        } else if (typeof resultObj?.id === 'string') {
+          id = resultObj.id
+        } else if (typeof b.content === 'string') {
+          const match = /Task #(\d+)/.exec(b.content)
+          if (match?.[1]) id = match[1]
+        } else if (Array.isArray(b.content)) {
+          for (const part of b.content) {
+            if (
+              part &&
+              typeof part === 'object' &&
+              typeof (part as { text?: unknown }).text === 'string'
+            ) {
+              const match = /Task #(\d+)/.exec((part as { text: string }).text)
+              if (match?.[1]) {
+                id = match[1]
+                break
+              }
+            }
+          }
+        }
+        if (!id) {
+          id = String(highestId + 1)
+        }
+        const numId = Number.parseInt(id, 10)
+        if (Number.isFinite(numId) && numId > highestId) highestId = numId
+        tasksById.set(id, {
+          id,
+          subject: pending.subject,
+          description: pending.description,
+          ...(pending.activeForm ? { activeForm: pending.activeForm } : {}),
+          status: 'pending',
+          blocks: [],
+          blockedBy: [],
+          ...(pending.metadata ? { metadata: pending.metadata } : {}),
+        })
+      }
+    }
+  }
+
+  return {
+    tasks: [...tasksById.values()],
+    highestId,
+  }
+}
+
+/**
+ * Official 2.1.328 `EE` (`task_list_restore_on_runner`, #639) — when a
+ * self-hosted runner session resumes in a new Claude config directory, restore
+ * its task list from the resumed transcript if the new config directory has no
+ * task files yet, and bump the high-water mark so new tasks do not collide.
+ */
+export async function restoreTaskListOnSelfHostedRunnerResume(options: {
+  sessionId: string
+  messages: readonly unknown[]
+  isSelfHostedRunner?: boolean
+}): Promise<{ restored: boolean; writtenCount: number; highestId: number }> {
+  const isSelfHosted =
+    options.isSelfHostedRunner ??
+    process.env.CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE === 'self_hosted'
+  if (!isSelfHosted) {
+    return { restored: false, writtenCount: 0, highestId: 0 }
+  }
+  setOwnTaskListId(options.sessionId)
+  const listId = getTaskListId()
+  if (listId !== options.sessionId) {
+    return { restored: false, writtenCount: 0, highestId: 0 }
+  }
+
+  const { tasks, highestId } = reconstructTasksFromTranscriptMessages(
+    options.messages,
+  )
+  if (tasks.length === 0 && highestId === 0) {
+    return { restored: false, writtenCount: 0, highestId: 0 }
+  }
+
+  const bumpHighWaterMark = async (target: number): Promise<void> => {
+    if (target <= 0) return
+    const current = await readHighWaterMark(listId)
+    if (target > current) {
+      await writeHighWaterMark(listId, target)
+    }
+  }
+
+  const existing = await listTasks(listId)
+  if (existing.length > 0) {
+    // Already populated — leave existing tasks alone, bump high-water mark
+    await bumpHighWaterMark(highestId)
+    return { restored: false, writtenCount: 0, highestId }
+  }
+
+  await ensureTasksDir(listId)
+  const dir = getTasksDir(listId)
+  let writtenCount = 0
+  for (const task of tasks) {
+    const filePath = join(dir, `${sanitizePathComponent(task.id)}.json`)
+    try {
+      await writeFile(filePath, jsonStringify(task, null, 2), {
+        encoding: 'utf-8',
+        flag: 'wx',
+      })
+      writtenCount++
+    } catch {
+      // Leave existing file alone if another writer raced us
+    }
+  }
+  await bumpHighWaterMark(highestId)
+  if (writtenCount > 0) {
+    notifyTasksUpdated()
+    logForDebugging(
+      `[Tasks] boot restore: restored ${writtenCount} of ${tasks.length} task(s) from transcript into ${listId}`,
+    )
+  }
+  return { restored: writtenCount > 0, writtenCount, highestId }
+}

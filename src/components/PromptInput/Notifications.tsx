@@ -673,6 +673,7 @@ export function Notifications({
       (!isFullscreen && (isAutoUpdating || hasVisibleAutoUpdaterResult)),
   );
   const hasLeftOrGoalOrStash = hasLeftContent || hasStash || hasActiveGoal;
+  const autoUpdaterWithSeparator = isFullscreen ? hasLeftOrGoalOrStash : undefined;
   const autoUpdaterElement = (
     /* Keep mounted: unmount re-fires AutoUpdater initial check (PR#22413). */
     <AutoUpdaterWrapper
@@ -682,6 +683,8 @@ export function Notifications({
       isUpdating={isAutoUpdating}
       onChangeIsUpdating={onChangeIsUpdating}
       showSuccessMessage={showUpdaterSuccess}
+      withSeparator={autoUpdaterWithSeparator}
+      atPrompt
     />
   );
 
@@ -715,9 +718,6 @@ export function Notifications({
             maxWidth={hasLeftOrGoalOrStash ? '60%' : undefined}
             display={isVoiceActive || criticalMemoryShowing ? 'none' : 'flex'}
           >
-            {hasLeftOrGoalOrStash && (isAutoUpdating || hasVisibleAutoUpdaterResult) ? (
-              <Text dimColor>{' · '}</Text>
-            ) : null}
             {autoUpdaterElement}
           </Box>
         )}

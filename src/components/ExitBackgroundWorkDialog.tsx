@@ -7,6 +7,7 @@ import { Box, Dialog, Text, useIsInsideModal, useModalOrTerminalSize } from '@an
 import { markSessionExiting } from '../dialog/useDialogMailboxBridge.js';
 import { useExitOnCtrlCDWithKeybindings } from '../hooks/useExitOnCtrlCDWithKeybindings.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';
+import { useKeybinding } from '../keybindings/useKeybinding.js';
 import { logEvent } from '../services/analytics/index.js';
 import type { ExitBackgroundWorkItem } from '../utils/exitBackgroundItems.js';
 import { isFullscreenActive } from '../utils/fullscreen.js';
@@ -63,13 +64,20 @@ export function ExitBackgroundWorkDialog({ items, onExit, onCancel, onBackground
     });
   }
 
+  const handleCancel = (): void => {
+    track('stay');
+    onCancel();
+  };
+
   // Official 2.1.326 #108: mark session exiting on double Ctrl+C/Ctrl+D before Ink unmounts
   // so pending background-agent permission dialogs are not resolved as user refusal.
-  useExitOnCtrlCDWithKeybindings(() => {
+  const exitState = useExitOnCtrlCDWithKeybindings(() => {
     markSessionExiting();
     track('exit');
     onExit();
   });
+
+  useKeybinding('confirm:no', handleCancel, { context: 'Confirmation' });
 
   function handleChange(choice: Choice): void {
     track(choice);
@@ -79,7 +87,6 @@ export function ExitBackgroundWorkDialog({ items, onExit, onCancel, onBackground
         onExit();
         return;
       case 'background':
-        markSessionExiting();
         onBackground?.();
         return;
       case 'stay':
@@ -92,10 +99,9 @@ export function ExitBackgroundWorkDialog({ items, onExit, onCancel, onBackground
     <Dialog
       title="Background work is running"
       subtitle="The following will stop when you exit:"
-      onCancel={() => {
-        track('stay');
-        onCancel();
-      }}
+      onCancel={handleCancel}
+      isCancelActive={false}
+      inputGuide={exitState.pending ? <Text>Press {exitState.keyName} again to exit</Text> : undefined}
     >
       <Box flexDirection="column" gap={0}>
         {visible.map((item, i) => (

@@ -18,6 +18,7 @@
  *     Go regex are kept (JS $ matches end-of-string in default mode).
  */
 
+import { logError } from '../../utils/log.js'
 import { capitalize } from '../../utils/stringUtils.js'
 
 type SecretRule = {
@@ -76,24 +77,24 @@ const GITLAB_TOKEN_BODY = `${GITLAB_TOKEN_CHAR}{20,}(?:\\.[0-9a-z]{9})?`
 
 const SECRET_RULES: SecretRule[] = [
   // — densable low-confidence (full redact only; not used by scanForSecrets high path) —
-  {
-    id: 'url-userinfo',
-    source: ':\\/\\/([^/@\\s]+)@',
-    confidence: 'low',
-  },
+  // NOTE: `url-userinfo` (`://([^/@\s]+)@`) is handled by `redactUrlUserinfoLinear`
+  // in O(N) time (#489) to avoid quadratic regex scanning on very long text with URLs.
   {
     id: 'gcp-service-account',
+    prefilter: /\.iam\.gserviceaccount\.com/i,
     source: '\\b([a-z0-9-]+@[a-z0-9-]+\\.iam\\.gserviceaccount\\.com)\\b',
     flags: 'i',
     confidence: 'low',
   },
   {
     id: 'loose-anthropic-key',
+    prefilter: /sk-ant/,
     source: '\\b(sk-ant-?[\\w-]{10,})',
     confidence: 'low',
   },
   {
     id: 'http-auth-scheme',
+    prefilter: /\b(?:Bearer|Basic)\s/i,
     source: '\\b(?:Bearer|Basic)\\s+([A-Za-z0-9+/=._~-]{20,})',
     flags: 'i',
     confidence: 'low',
@@ -121,6 +122,7 @@ const SECRET_RULES: SecretRule[] = [
   },
   {
     id: 'azure-ad-client-secret',
+    prefilter: /\dQ~/,
     source:
       '(?:^|[\\\\\'"\\x60\\s>=:(,)])([a-zA-Z0-9_~.]{3}\\dQ~[a-zA-Z0-9_~.-]{31,34})(?:$|[\\\\\'"\\x60\\s<),])',
   },
@@ -150,6 +152,7 @@ const SECRET_RULES: SecretRule[] = [
   },
   {
     id: 'openai-api-key',
+    prefilter: /T3BlbkFJ/,
     // densable WKc split: modern openai-api-key + openai-legacy-api-key
     source: 'sk-[A-Za-z0-9_-]{8,200}T3BlbkFJ[A-Za-z0-9_-]{8,200}',
   },
@@ -275,6 +278,7 @@ const SECRET_RULES: SecretRule[] = [
   },
   {
     id: 'slack-webhook-url',
+    prefilter: /hooks\.slack\.com/i,
     source:
       '(?:https?://)?hooks\\.slack\\.com/(?:services|workflows|triggers)/[A-Za-z0-9+/_-]{40,}',
     flags: 'i',
@@ -304,6 +308,7 @@ const SECRET_RULES: SecretRule[] = [
   },
   {
     id: 'hashicorp-tf-api-token',
+    prefilter: /\.atlasv1\./,
     // gitleaks: (?i)[a-z0-9]{14}\.(?-i:atlasv1)\.[a-z0-9\-_=]{60,70}
     // → JS: case-insensitive hex+alnum prefix, literal "atlasv1", case-insensitive suffix
     source: '[a-zA-Z0-9]{14}\\.atlasv1\\.[a-zA-Z0-9\\-_=]{60,70}',
@@ -466,17 +471,26 @@ function compileDisplayRules(): CompiledRule[] {
 }
 
 function getScanRules(): CompiledRule[] {
-  scanRules ??= compileRules(false)
+  if (scanRules === null) {
+    assertSecretScannerMemoryHeadroom()
+    scanRules = compileRules(false)
+  }
   return scanRules
 }
 
 function getFullRedactRules(): CompiledRule[] {
-  fullRedactRules ??= compileRules(true)
+  if (fullRedactRules === null) {
+    assertSecretScannerMemoryHeadroom()
+    fullRedactRules = compileRules(true)
+  }
   return fullRedactRules
 }
 
 function getDisplayRedactRules(): CompiledRule[] {
-  displayRedactRules ??= compileDisplayRules()
+  if (displayRedactRules === null) {
+    assertSecretScannerMemoryHeadroom()
+    displayRedactRules = compileDisplayRules()
+  }
   return displayRedactRules
 }
 
@@ -581,6 +595,134 @@ function ruleIdToLabel(ruleId: string): string {
 }
 
 /**
+ * Official 2.1.328 (#627, SEA `ojt`): fallback returned when secret masking
+ * fails due to OOM / allocation failure so redaction never crashes or leaks
+ * raw text.
+ */
+export const SECRET_REDACTION_OOM_FALLBACK = '[hidden for privacy]'
+
+type SecretScannerErrorReporter = (err: unknown) => void
+let secretScannerErrorReporter: SecretScannerErrorReporter | undefined
+
+export function setSecretScannerErrorReporter(
+  reporter: SecretScannerErrorReporter | undefined,
+): void {
+  secretScannerErrorReporter = reporter
+}
+
+function reportSecretScannerError(err: unknown): void {
+  try {
+    if (secretScannerErrorReporter !== undefined) {
+      secretScannerErrorReporter(err)
+    } else {
+      logError(err)
+    }
+  } catch {
+    // ignore reporter failures
+  }
+}
+
+/**
+ * Official 2.1.328 (#627, SEA `T.make`): probe whether enough heap/buffer
+ * headroom exists before running regex compilation/redaction in low-memory
+ * environments, freeing the probe buffer immediately via `ArrayBuffer.transfer(0)`.
+ */
+let memoryProbeOverrideForTest: (() => void) | undefined
+
+export function setSecretScannerMemoryProbeForTest(
+  probe: (() => void) | undefined,
+): void {
+  memoryProbeOverrideForTest = probe
+  scanRules = null
+  fullRedactRules = null
+  displayRedactRules = null
+  redactResultCache.clear()
+}
+
+const OOM_PROBE_BYTES = 2 * 1024 * 1024
+
+function assertSecretScannerMemoryHeadroom(): void {
+  if (memoryProbeOverrideForTest !== undefined) {
+    memoryProbeOverrideForTest()
+    return
+  }
+  if (
+    typeof Bun === 'undefined' ||
+    typeof ArrayBuffer.prototype.transfer !== 'function'
+  ) {
+    return
+  }
+  const buf = Buffer.allocUnsafeSlow(OOM_PROBE_BYTES).buffer
+  buf.transfer(0)
+}
+
+/**
+ * Official 2.1.327 (#489, SEA `Me`): linear-time O(N) redaction of URL
+ * userinfo (`scheme://user:pass@host`) without quadratic regex backtracking on
+ * very long text containing URLs.
+ */
+export function redactUrlUserinfoLinear(text: string): string {
+  const firstScheme = text.indexOf('://')
+  if (firstScheme === -1) return text
+  const firstAt = text.indexOf('@', firstScheme + 3)
+  if (firstAt === -1) return text
+
+  let out = ''
+  let copyFrom = 0
+  let schemeIdx = firstScheme
+  let nextAt = firstAt
+
+  while (schemeIdx !== -1 && nextAt !== -1) {
+    const userStart = schemeIdx + 3
+    if (nextAt < userStart) {
+      nextAt = text.indexOf('@', userStart)
+      if (nextAt === -1) break
+    }
+    // Scan from userStart up to nextAt; stop early on `/` or whitespace (which
+    // terminate the authority section). Any single char is visited at most once
+    // because if we hit a terminator at `i`, the next `://` must be at >= `i`.
+    let validUserinfo = nextAt > userStart
+    let blockedAt = -1
+    if (validUserinfo) {
+      for (let i = userStart; i < nextAt; i++) {
+        const ch = text.charCodeAt(i)
+        if (
+          ch === 47 /* / */ ||
+          ch === 32 /* space */ ||
+          ch === 9 /* \t */ ||
+          ch === 10 /* \n */ ||
+          ch === 13 /* \r */ ||
+          ch === 11 /* \v */ ||
+          ch === 12 /* \f */
+        ) {
+          validUserinfo = false
+          blockedAt = i
+          break
+        }
+      }
+    }
+    if (validUserinfo) {
+      out += text.slice(copyFrom, userStart) + '[REDACTED]@'
+      copyFrom = nextAt + 1
+      schemeIdx = text.indexOf('://', copyFrom)
+      if (schemeIdx !== -1) {
+        nextAt = text.indexOf('@', schemeIdx + 3)
+      }
+    } else {
+      const resumeFrom =
+        blockedAt !== -1
+          ? text.charCodeAt(blockedAt) === 47 /* / */
+            ? Math.max(userStart, blockedAt - 1)
+            : blockedAt + 1
+          : userStart
+      schemeIdx = text.indexOf('://', resumeFrom)
+    }
+  }
+
+  return copyFrom === 0 ? text : out + text.slice(copyFrom)
+}
+
+/**
  * Scan a string for potential secrets.
  *
  * densable `VKc.scan` / `p6t`: only high-confidence rules + private-key
@@ -590,25 +732,28 @@ function ruleIdToLabel(ruleId: string): string {
 export function scanForSecrets(content: string): SecretMatch[] {
   const matches: SecretMatch[] = []
   const seen = new Set<string>()
+  try {
+    for (const rule of getScanRules()) {
+      if (rule.confidence !== 'high') continue
+      if (seen.has(rule.id)) continue
+      if (rule.prefilter?.test(content) === false) continue
+      if (rule.re.test(content)) {
+        seen.add(rule.id)
+        matches.push({
+          ruleId: rule.id,
+          label: ruleIdToLabel(rule.id),
+        })
+      }
+    }
 
-  for (const rule of getScanRules()) {
-    if (rule.confidence !== 'high') continue
-    if (seen.has(rule.id)) continue
-    if (rule.prefilter?.test(content) === false) continue
-    if (rule.re.test(content)) {
-      seen.add(rule.id)
+    if (hasPrivateKeyBlock(content) && !seen.has('private-key')) {
       matches.push({
-        ruleId: rule.id,
-        label: ruleIdToLabel(rule.id),
+        ruleId: 'private-key',
+        label: 'Private Key',
       })
     }
-  }
-
-  if (hasPrivateKeyBlock(content) && !seen.has('private-key')) {
-    matches.push({
-      ruleId: 'private-key',
-      label: 'Private Key',
-    })
+  } catch (err) {
+    reportSecretScannerError(err)
   }
 
   return matches
@@ -618,6 +763,7 @@ export function scanForSecrets(content: string): SecretMatch[] {
  * densable `pp` / `VKc.redact` — full-strength redaction (logs, bridge
  * summaries). Applies all rules + PEM block redaction (Lhy). Oversized /
  * truncated private keys still redact when BEGIN+END markers are found.
+ * Never crashes on OOM (#627): falls back to `[hidden for privacy]`.
  */
 export function redactSecrets(content: string): string {
   const cacheable = content.length <= REDACT_CACHE_VALUE_MAX
@@ -626,10 +772,17 @@ export function redactSecrets(content: string): string {
     if (hit !== undefined) return hit
   }
 
-  let out = redactPrivateKeyBlocks(content)
-  for (const rule of getFullRedactRules()) {
-    if (rule.prefilter?.test(out) === false) continue
-    out = out.replace(rule.re, replaceMatchWithRedacted)
+  let out: string
+  try {
+    out = redactPrivateKeyBlocks(content)
+    out = redactUrlUserinfoLinear(out)
+    for (const rule of getFullRedactRules()) {
+      if (rule.prefilter?.test(out) === false) continue
+      out = out.replace(rule.re, replaceMatchWithRedacted)
+    }
+  } catch (err) {
+    reportSecretScannerError(err)
+    return SECRET_REDACTION_OOM_FALLBACK
   }
 
   if (cacheable) {
@@ -650,14 +803,19 @@ export function redactSecrets(content: string): string {
  * field values; oversized PEMs go through full `redactSecrets` elsewhere).
  */
 export function redactSecretsForDisplay(content: string): string {
-  let out = content
-  for (const rule of getDisplayRedactRules()) {
-    if (rule.confidence !== 'high' || rule.prefilter?.test(out) === false) {
-      continue
+  try {
+    let out = content
+    for (const rule of getDisplayRedactRules()) {
+      if (rule.confidence !== 'high' || rule.prefilter?.test(out) === false) {
+        continue
+      }
+      out = out.replace(rule.re, displayRedactReplacer)
     }
-    out = out.replace(rule.re, displayRedactReplacer)
+    return out
+  } catch (err) {
+    reportSecretScannerError(err)
+    return SECRET_REDACTION_OOM_FALLBACK
   }
-  return out
 }
 
 /**

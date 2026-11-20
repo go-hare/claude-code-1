@@ -32,6 +32,80 @@ export const WORKFLOW_TASK_PROGRESS_FLUSH_MS = 16
  */
 export const WORKFLOW_TASK_PROGRESS_MIN_SDK_GAP_MS = 250
 
+/**
+ * Official 2.1.328 (#591): legacy 1-hour workflow progress resend cutoff only
+ * applies to legacy Claude Desktop sessions; IDE extensions (`claude-vscode`),
+ * SDK apps (`sdk-*`), and modern Desktop keep resending workflow progress while
+ * the workflow is still running.
+ */
+export const WORKFLOW_PROGRESS_LEGACY_CUTOFF_MS = 3_600_000
+export const WORKFLOW_PROGRESS_RESEND_INTERVAL_MS = 30_000
+
+const WORKFLOW_RESEND_UNBOUNDED_MIN_DESKTOP_VERSION = '6.7665.0'
+const DESKTOP_HOST_ENTRYPOINTS = new Set([
+  'claude-desktop',
+  'claude-desktop-3p',
+  'local-agent',
+  'desktop',
+])
+
+function compareSemverMajorMinorPatch(a: string, b: string): number {
+  const pa = a.split('.').map(n => parseInt(n, 10) || 0)
+  const pb = b.split('.').map(n => parseInt(n, 10) || 0)
+  for (let i = 0; i < 3; i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0)
+    if (diff !== 0) return diff
+  }
+  return 0
+}
+
+/**
+ * Official 2.1.328 `Din()` — read host Desktop app version from
+ * `CLAUDE_CODE_DESKTOP_APP_VERSION` when running under a Desktop entrypoint.
+ */
+export function getDesktopHostAppVersion(
+  entrypoint: string = process.env.CLAUDE_CODE_ENTRYPOINT ?? '',
+): string | undefined {
+  if (DESKTOP_HOST_ENTRYPOINTS.has(entrypoint)) {
+    const raw = process.env.CLAUDE_CODE_DESKTOP_APP_VERSION?.trim()
+    return raw && raw.length > 0 ? raw : undefined
+  }
+  return undefined
+}
+
+/**
+ * Official 2.1.328 (#591): decide whether a running workflow should resend
+ * progress frames after `elapsedSinceLastProgressMs`. Returns `true` unless
+ * running on a legacy Claude Desktop host older than the cutoff-free version
+ * AND more than 1 hour has elapsed since the last progress update.
+ */
+export function shouldResendWorkflowProgress(opts: {
+  isNonInteractive: boolean
+  elapsedSinceLastProgressMs: number
+  entrypoint?: string
+  desktopVersion?: string
+}): boolean {
+  if (!opts.isNonInteractive) return true
+  const entrypoint = opts.entrypoint ?? process.env.CLAUDE_CODE_ENTRYPOINT ?? ''
+  if (!DESKTOP_HOST_ENTRYPOINTS.has(entrypoint)) {
+    // IDE extensions (claude-vscode) and SDK apps (sdk-ts / sdk-py / sdk-cli)
+    // no longer cut off after 1 hour.
+    return true
+  }
+  const desktopVersion =
+    opts.desktopVersion ?? getDesktopHostAppVersion(entrypoint)
+  if (
+    desktopVersion &&
+    compareSemverMajorMinorPatch(
+      desktopVersion,
+      WORKFLOW_RESEND_UNBOUNDED_MIN_DESKTOP_VERSION,
+    ) >= 0
+  ) {
+    return true
+  }
+  return opts.elapsedSinceLastProgressMs < WORKFLOW_PROGRESS_LEGACY_CUTOFF_MS
+}
+
 export type WorkflowTaskProgressBinding = {
   taskId: string
   toolUseId?: string
@@ -211,6 +285,12 @@ export function mapProgressEventToSdk(
   }
 }
 
+export type WorkflowTaskProgressEmitParams = Parameters<
+  typeof emitTaskProgress
+>[0] & {
+  resent?: boolean
+}
+
 export type InstallWorkflowTaskProgressBridgeOpts = {
   bus: ProgressBus
   store: ProgressStore
@@ -218,7 +298,14 @@ export type InstallWorkflowTaskProgressBridgeOpts = {
   /** Override for tests (default WORKFLOW_TASK_PROGRESS_FLUSH_MS). */
   flushMs?: number
   /** Override emit for tests. */
-  emit?: typeof emitTaskProgress
+  emit?: (params: WorkflowTaskProgressEmitParams) => void
+  /**
+   * Official 2.1.328 (#591): periodic resend check interval (ms) for keeping
+   * RC/IDE/SDK sessions updated when a workflow runs without emitting new
+   * deltas for >1h. Defaults to `WORKFLOW_PROGRESS_RESEND_INTERVAL_MS` (30s);
+   * pass `0` to disable in unit tests.
+   */
+  resendIntervalMs?: number
 }
 
 /**
@@ -230,8 +317,12 @@ export function installWorkflowTaskProgressBridge(
   opts: InstallWorkflowTaskProgressBridgeOpts,
 ): { dispose: () => void; forceFlush: (runId?: string) => void } {
   const flushMs = opts.flushMs ?? WORKFLOW_TASK_PROGRESS_FLUSH_MS
-  const emit = opts.emit ?? emitTaskProgress
+  const emit =
+    opts.emit ??
+    ((params: WorkflowTaskProgressEmitParams) => emitTaskProgress(params))
   const buffers = new Map<string, RunBuffer>()
+  const lastProgressAtByRun = new Map<string, number>()
+  const lastBatchByRun = new Map<string, SdkWorkflowProgress[]>()
   /** densable IGg last SDK emit time (for xGg gap when rate-limited). */
   let lastSdkEmitAt = 0
 
@@ -335,6 +426,8 @@ export function installWorkflowTaskProgressBridge(
       : binding.description
 
     lastSdkEmitAt = now
+    lastProgressAtByRun.set(runId, now)
+    lastBatchByRun.set(runId, forSdk)
     emit({
       taskId: binding.taskId,
       toolUseId: binding.toolUseId,
@@ -344,6 +437,7 @@ export function installWorkflowTaskProgressBridge(
       toolUses,
       lastToolName: lastAgent?.lastToolName ?? lastAgent?.label,
       summary: binding.summary ?? binding.description,
+      workflowProgress: forSdk,
     })
   }
 
@@ -383,19 +477,77 @@ export function installWorkflowTaskProgressBridge(
     if (event.type === 'run_done') {
       flushOne(runId, true)
       buffers.delete(runId)
+      lastProgressAtByRun.delete(runId)
+      lastBatchByRun.delete(runId)
     }
   }
 
   const unsubscribe = opts.bus.subscribe(onEvent)
 
+  const resendActiveRuns = (now = Date.now()): number => {
+    let resent = 0
+    for (const [runId, lastAt] of lastProgressAtByRun) {
+      const binding = opts.getBinding(runId)
+      if (!binding) continue
+      const lastBatch = lastBatchByRun.get(runId)
+      if (!lastBatch || lastBatch.length === 0) continue
+      if (
+        !shouldResendWorkflowProgress({
+          isNonInteractive: getIsNonInteractiveSession(),
+          elapsedSinceLastProgressMs: Math.max(0, now - lastAt),
+        })
+      ) {
+        continue
+      }
+      const run = opts.store.get(runId)
+      let totalTokens = 0
+      let toolUses = 0
+      if (run) {
+        for (const a of run.agents) {
+          totalTokens += a.tokenCount ?? 0
+          toolUses += a.toolCount ?? 0
+        }
+      }
+      emit({
+        taskId: binding.taskId,
+        toolUseId: binding.toolUseId,
+        description: binding.description,
+        startTime: binding.startTime,
+        totalTokens,
+        toolUses,
+        summary: binding.summary ?? binding.description,
+        workflowProgress: lastBatch,
+        resent: true,
+      })
+      resent++
+    }
+    return resent
+  }
+
+  const effectiveResendIntervalMs =
+    opts.resendIntervalMs ?? WORKFLOW_PROGRESS_RESEND_INTERVAL_MS
+  let resendTimer: ReturnType<typeof setInterval> | undefined
+  if (effectiveResendIntervalMs > 0) {
+    resendTimer = setInterval(() => {
+      resendActiveRuns()
+    }, effectiveResendIntervalMs)
+    resendTimer.unref?.()
+  }
+
   return {
     dispose: () => {
+      if (resendTimer !== undefined) {
+        clearInterval(resendTimer)
+        resendTimer = undefined
+      }
       unsubscribe()
       for (const [runId, buf] of buffers) {
         if (buf.timer !== undefined) clearTimeout(buf.timer)
         flushOne(runId, true)
       }
       buffers.clear()
+      lastProgressAtByRun.clear()
+      lastBatchByRun.clear()
     },
     forceFlush: (runId?: string) => {
       if (runId) {

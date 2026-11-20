@@ -182,6 +182,7 @@ export function ResumeConversation({
     }
 
     void enrichLogs(ref.allStatLogs, ref.nextIndex, count).then(result => {
+      if (sessionLogResultRef.current !== ref) return;
       ref.nextIndex = result.nextIndex;
       const more = ref.nextIndex < ref.allStatLogs.length;
       setHasMore(more);

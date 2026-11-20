@@ -209,6 +209,54 @@ function tail6(value: string): string {
   return value.length <= 6 ? value : `…${value.slice(-6)}`
 }
 
+/**
+ * Official 2.1.327 (#483, SEA authConflictNotice): improved warning when both
+ * an API key and an Anthropic profile are set — states which credential is in
+ * use and gives actionable instructions for switching to the profile.
+ */
+export type ApiKeyProfileConflictWarning = {
+  headline: string
+  switchHint: string | null
+}
+
+const REMOVE_API_KEY_APPROVAL_HINT =
+  'claude /logout then say "No" to the API key approval before login'
+
+export function formatApiKeyProfileConflictWarning(opts: {
+  apiKeySource: string
+  profileAuthKind?: AnthropicProfileAuthType | null
+  createdByClaudeCode?: boolean | null
+  consoleProfileLoginAllowed?: boolean
+  hasEnvApiKey?: boolean
+  forceLoginMethod?: string | undefined
+}): ApiKeyProfileConflictWarning {
+  const isManagedKey = opts.apiKeySource === '/login managed key'
+  const headline = `Using ${isManagedKey ? 'the API key saved by /login' : opts.apiKeySource} instead of your Anthropic profile`
+
+  let switchHint: string | null = null
+  if (!isManagedKey) {
+    switchHint = `unset ANTHROPIC_API_KEY, or ${REMOVE_API_KEY_APPROVAL_HINT}`
+  } else if (
+    opts.profileAuthKind === 'oidc_federation' ||
+    opts.createdByClaudeCode === false
+  ) {
+    switchHint =
+      '/logout to remove the key (also removes MCP server logins and plugin secrets)'
+  } else if (
+    opts.createdByClaudeCode === true &&
+    opts.forceLoginMethod === undefined &&
+    opts.consoleProfileLoginAllowed !== false
+  ) {
+    switchHint = `${opts.hasEnvApiKey ? 'unset ANTHROPIC_API_KEY and restart, then ' : ''}/login and sign in to Console without an API key (removes the saved key)`
+  }
+
+  return {
+    headline,
+    switchHint:
+      switchHint !== null ? `· to use the profile: ${switchHint}` : null,
+  }
+}
+
 /** densable Ewn — /login status line. No network. */
 export function describeAnthropicProfile(
   env: NodeJS.ProcessEnv = process.env,

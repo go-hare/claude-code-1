@@ -56,6 +56,60 @@ export type ElicitationRequestEvent = {
   startWaiting?: boolean
 }
 
+const MAX_LOGGED_FIELD_NAMES = 100
+const MAX_LOGGED_FIELD_NAME_LEN = 100
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function formatElicitationFieldNames(obj: unknown): string {
+  if (!isPlainRecord(obj)) return '[]'
+  const keys = Object.keys(obj)
+  const shown = keys
+    .slice(0, MAX_LOGGED_FIELD_NAMES)
+    .map(k =>
+      k.length > MAX_LOGGED_FIELD_NAME_LEN
+        ? `[name too long to show: ${k.length} characters]`
+        : k,
+    )
+  const extra = keys.length - shown.length
+  return extra > 0
+    ? `${jsonStringify(shown)} and ${extra} more`
+    : jsonStringify(shown)
+}
+
+/**
+ * Official 2.1.327 `nKt` — log only elicitation mode and requested schema field names,
+ * never raw prompt text, URLs, or form contents.
+ */
+export function formatElicitationRequestForLog(params: unknown): string {
+  const rec = isPlainRecord(params) ? params : {}
+  const requestedSchema = rec.requestedSchema
+  const mode = rec.mode === 'url' ? 'url' : 'form'
+  const properties = isPlainRecord(requestedSchema)
+    ? requestedSchema.properties
+    : undefined
+  return `mode=${mode} fields=${formatElicitationFieldNames(properties)}`
+}
+
+/**
+ * Official 2.1.327 `BAt` — log only elicitation response action, mode, and answered field names,
+ * never field values.
+ */
+export function formatElicitationResponseForLog(
+  mode: 'form' | 'url',
+  result: ElicitResult,
+): string {
+  const action =
+    result.action === 'accept' ||
+    result.action === 'decline' ||
+    result.action === 'cancel'
+      ? result.action
+      : 'other'
+  return `action=${action} mode=${mode} fields=${formatElicitationFieldNames(result.content)}`
+}
+
 function getElicitationMode(params: ElicitRequestParams): 'form' | 'url' {
   return params.mode === 'url' ? 'url' : 'form'
 }
@@ -211,7 +265,7 @@ function leftoverBindMcpElicitationHost(
       const mode = getElicitationMode(params)
       logMCPDebug(
         serverName,
-        `Received elicitation request: ${jsonStringify(request)}`,
+        `Received elicitation request: ${formatElicitationRequestForLog(params)}`,
       )
       logEvent('tengu_mcp_elicitation_shown', {
         mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -225,7 +279,7 @@ function leftoverBindMcpElicitationHost(
         if (hookResponse) {
           logMCPDebug(
             serverName,
-            `Elicitation resolved by hook: ${jsonStringify(hookResponse)}`,
+            `Elicitation resolved by hook: ${formatElicitationResponseForLog(mode, hookResponse)}`,
           )
           logEvent('tengu_mcp_elicitation_response', {
             mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -385,7 +439,7 @@ function leftoverBindMcpElicitationHost(
         }
         logMCPDebug(
           serverName,
-          `Elicitation response: ${jsonStringify(result)}`,
+          `Elicitation response: ${formatElicitationResponseForLog(mode, result)}`,
         )
         const hooked = await runElicitationResultHooks(
           serverName,
@@ -556,12 +610,12 @@ export function registerElicitationHandler(
     // v2 BaseContext: signal/id live on ctx.mcpReq (not top-level extra).
     client.setRequestHandler('elicitation/create', async (request, ctx) =>
       trackOpenQuestion(async () => {
+        const mode = getElicitationMode(request.params)
         logMCPDebug(
           serverName,
-          `Received elicitation request: ${jsonStringify(request)}`,
+          `Received elicitation request: ${formatElicitationRequestForLog(request.params)}`,
         )
 
-        const mode = getElicitationMode(request.params)
         const signal = ctx.mcpReq.signal
         const requestId = ctx.mcpReq.id
 
@@ -579,7 +633,7 @@ export function registerElicitationHandler(
           if (hookResponse) {
             logMCPDebug(
               serverName,
-              `Elicitation resolved by hook: ${jsonStringify(hookResponse)}`,
+              `Elicitation resolved by hook: ${formatElicitationResponseForLog(mode, hookResponse)}`,
             )
             logEvent('tengu_mcp_elicitation_response', {
               mode: mode as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -637,7 +691,7 @@ export function registerElicitationHandler(
           const rawResult = await response
           logMCPDebug(
             serverName,
-            `Elicitation response: ${jsonStringify(rawResult)}`,
+            `Elicitation response: ${formatElicitationResponseForLog(mode, rawResult)}`,
           )
           const result = await runElicitationResultHooks(
             serverName,

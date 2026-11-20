@@ -12,6 +12,7 @@ import {
   usePreviewTheme,
   useTheme,
   useThemeSetting,
+  useWantEveryKey,
   type DOMElement,
 } from '@anthropic/ink';
 import { useOptionalKeybindingContext, useRegisterKeybindingContext } from '../keybindings/KeybindingContext.js';
@@ -74,6 +75,11 @@ export function ThemePicker({
   const setAppState = useSetAppState();
   const keybindingContext = useOptionalKeybindingContext();
 
+  // Official 2.1.328 (#603): receive every keypress in /theme and ignore
+  // trailing batched focus/select events once a choice or cancel is committed.
+  useWantEveryKey(true);
+  const committedRef = React.useRef<boolean>(false);
+
   // Register ThemePicker context so its keybindings take precedence over Global
   useRegisterKeybindingContext('ThemePicker');
 
@@ -81,10 +87,12 @@ export function ThemePicker({
   const editCustomShortcut = useShortcutDisplay('theme:editCustom', 'ThemePicker', 'ctrl+e');
   const cancelTheme = skipExitHandling
     ? () => {
+        committedRef.current = true;
         cancelPreview();
         onCancelProp?.();
       }
     : () => {
+        committedRef.current = true;
         cancelPreview();
         void gracefulShutdown(0);
       };
@@ -168,7 +176,9 @@ export function ThemePicker({
   const focusedCustomTheme = focusedSlug !== null ? customThemes.find(theme => theme.slug === focusedSlug) : undefined;
   const editingCustom = focusedCustomTheme !== undefined;
   const editCustomTheme = () => {
+    if (committedRef.current) return;
     if (focusedCustomTheme && onCustomTheme) {
+      committedRef.current = true;
       savePreview();
       onCustomTheme(focusedCustomTheme);
     }
@@ -234,6 +244,7 @@ export function ThemePicker({
           options={themeOptions}
           defaultFocusIndex={defaultFocusIndex}
           onFocus={index => {
+            if (committedRef.current) return;
             const setting = themeOptions[index]?.value;
             if (setting === undefined || setting === focusedValue) return;
             setFocusedValue(setting);
@@ -245,8 +256,10 @@ export function ThemePicker({
             setPreviewTheme(setting as ThemeSetting);
           }}
           onSelect={index => {
+            if (committedRef.current) return;
             const setting = themeOptions[index]?.value;
             if (setting === undefined) return;
+            committedRef.current = true;
             if (setting === NEW_CUSTOM_THEME) {
               cancelPreview();
               onCustomTheme?.(undefined);

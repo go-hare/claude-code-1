@@ -43,7 +43,7 @@ import {
   readKeys,
   type KeyReader,
 } from '../core/keyReader.js';
-import type { ParsedInput, ParsedKey, ParsedMouse } from '../core/parse-keypress.js';
+import { splitEscPrefixedKey, type ParsedInput, type ParsedKey, type ParsedMouse } from '../core/parse-keypress.js';
 import reconciler from '../core/reconciler.js';
 import { Ns } from '../core/instances.js';
 import { clearSelection, finishSelection, hasSelection, type SelectionState } from '../core/selection.js';
@@ -74,7 +74,7 @@ import AppContext from './AppContext.js';
 import { ClockProvider } from './ClockContext.js';
 import CursorDeclarationContext, { type CursorDeclarationSetter } from './CursorDeclarationContext.js';
 import ErrorOverview from './ErrorOverview.js';
-import InputNowContext from './InputNowContext.js';
+import InputNowContext, { type InputClock, noteResumed as recordModuleResumed } from './InputNowContext.js';
 import StdinContext from './StdinContext.js';
 import { TerminalFocusProvider } from './TerminalFocusContext.js';
 import { TerminalSizeContext } from './TerminalSizeContext.js';
@@ -245,8 +245,9 @@ type Props = {
   // magnifiers track the input. Optional so testing.tsx doesn't stub it.
   readonly onCursorDeclaration?: CursorDeclarationSetter;
   // Dispatch a keyboard event through the DOM tree. Called for each
-  // parsed key alongside the legacy EventEmitter path.
-  readonly dispatchKeyboardEvent: (parsedKey: ParsedKey, extras?: { soloKeypress?: boolean }) => void;
+  // parsed key alongside the legacy EventEmitter path. Returns true when a
+  // listener called `event.readAsEscapeThenKey()` so App splits and replays.
+  readonly dispatchKeyboardEvent: (parsedKey: ParsedKey, extras?: { soloKeypress?: boolean }) => boolean | void;
   /** densable `onInputPriorityFrame` — `Kd` paste/key (not wheel/mouse name). */
   readonly onInputPriorityFrame: () => void;
   /** 2.1.326 #203: flush pending writes & park cursor below frame before Ctrl+Z SIGTSTP. */
@@ -479,6 +480,37 @@ export default class App extends PureComponent<Props, State> {
   readArrivedAt: number | null = null;
   /** densable `inputNow` — `()=>this.readArrivedAt??Date.now()`. */
   inputNow = (): number => this.readArrivedAt ?? Date.now();
+  /** Official 2.1.327 (#520): timestamp of the latest SIGCONT resume. */
+  resumedAt: number | undefined = undefined;
+  /** Official 2.1.327 (#520): stamp SIGCONT resume time on both instance and module. */
+  noteResumed = (): void => {
+    const now = Date.now();
+    this.resumedAt = now;
+    recordModuleResumed(now);
+  };
+  /** Official 2.1.328 (#603): active wantEveryKey owners registered on this App. */
+  readonly wantEveryKeyOwners: unknown[] = [];
+  /** Official 2.1.327/328 `inputClock` provided via InputNowContext. */
+  inputClock: InputClock = Object.assign(this.inputNow, {
+    resumedAt: () => this.resumedAt,
+    wantEveryKey: (owner: unknown) => {
+      this.wantEveryKeyOwners.push(owner);
+      const root = this.props.rootNode as { wantEveryKey?: unknown[] } | undefined;
+      if (root) {
+        const list = (root.wantEveryKey ??= []);
+        list.push(owner);
+      }
+      return () => {
+        const idx = this.wantEveryKeyOwners.indexOf(owner);
+        if (idx !== -1) this.wantEveryKeyOwners.splice(idx, 1);
+        const list = (this.props.rootNode as { wantEveryKey?: unknown[] } | undefined)?.wantEveryKey;
+        if (list) {
+          const rIdx = list.indexOf(owner);
+          if (rIdx !== -1) list.splice(rIdx, 1);
+        }
+      };
+    },
+  });
 
   // Gold: querier=stdout.isTTY&&stdin.isTTY?new jon(stdout):null
   querier = this.props.stdout.isTTY && this.props.stdin.isTTY ? new TerminalQuerier(this.props.stdout) : null;
@@ -568,7 +600,7 @@ export default class App extends PureComponent<Props, State> {
             <TerminalFocusProvider>
               <ClockProvider>
                 <CursorDeclarationContext.Provider value={this.props.onCursorDeclaration ?? (() => {})}>
-                  <InputNowContext.Provider value={this.inputNow}>
+                  <InputNowContext.Provider value={this.inputClock}>
                     {this.state.error ? <ErrorOverview error={this.state.error} /> : this.props.children}
                   </InputNowContext.Provider>
                 </CursorDeclarationContext.Provider>
@@ -754,8 +786,8 @@ export default class App extends PureComponent<Props, State> {
     this.applyKeysRead(flushKeys(this.keyReader, now), now);
   };
 
-  processInput = (input: string | Buffer | null, now: number): void => {
-    this.applyKeysRead(readKeys(this.keyReader, input, now), now);
+  processInput = (input: string | Buffer | null, now: number, late = false): void => {
+    this.applyKeysRead(readKeys(this.keyReader, input, now, late), now);
   };
 
   applyKeysRead = (result: { keys: ParsedInput[]; reader: KeyReader; wakeAt: number | null }, now: number): void => {
@@ -917,7 +949,17 @@ export default class App extends PureComponent<Props, State> {
         const a11y = Boolean(process.env.CLAUDE_CODE_ACCESSIBILITY) || (this.props.isScreenReaderEnabled ?? false);
         this.props.stdout.write(modes.resume() + (a11y ? '' : HIDE_CURSOR));
       }
-      this.internal_eventEmitter.emit('resume');
+      // Official 2.1.327 (#520): mark SIGCONT resume grace before/after resume event.
+      this.noteResumed();
+      queueMicrotask(() => {
+        if (this.hasReleasedTerminal) {
+          return;
+        }
+        reconciler.flushSyncFromReconciler(() => {
+          this.internal_eventEmitter.emit('resume');
+        });
+        queueMicrotask(this.noteResumed);
+      });
     };
 
     process.on('SIGCONT', resumeHandler);
@@ -928,7 +970,15 @@ export default class App extends PureComponent<Props, State> {
     }
     flushNonBlockingStdout();
     // densable: process.kill(0, "SIGTSTP") — group TSTP, not SIGSTOP on pid.
-    process.kill(0, 'SIGTSTP');
+    // Official 2.1.327 (#411): Linux LSM/seccomp may block self-signalling with EPERM.
+    try {
+      process.kill(0, 'SIGTSTP');
+    } catch (err) {
+      defaultCallbacks.logForDebugging(`Can't send SIGTSTP on suspend: ${err}`, { level: 'warn' });
+      resumeHandler();
+      return;
+    }
+    this.noteResumed();
   };
 }
 
@@ -1011,9 +1061,11 @@ function trackAppArrowBurst(app: App, items: ParsedInput[]): void {
 
 // Helper to process all keys within a single discrete update context.
 // discreteUpdates expects (fn, a, b, c, d) -> fn(a, b, c, d)
-function processKeysInBatch(app: App, items: ParsedInput[], _unused1: undefined, _unused2: undefined): void {
+function processKeysInBatch(app: App, items: ParsedInput[], skipAttachQuiet?: boolean, _unused2?: undefined): void {
+  // Official 2.1.328: attachQuietDrain is never bypassed by wantEveryKey
+  // (wantEveryKey only opts out of InputGate).
   // densable v1: Ext(Date.now()); if(!y&&u.some(Id)) lae(), yor()
-  const attachQuiet = isAttachUnstable(Date.now());
+  const attachQuiet = !skipAttachQuiet && isAttachUnstable(Date.now());
   if (!attachQuiet && items.some(isUserIntentItem)) {
     defaultCallbacks.updateLastInteractionTime();
     endScreenReaderStartupQuiet();
@@ -1095,8 +1147,9 @@ function processKeysInBatch(app: App, items: ParsedInput[], _unused1: undefined,
         noteMouseObserved();
         app.props.dispatchWheelEvent(convertWheelIfPixels(app, item));
       }
-    } else {
-      app.props.dispatchKeyboardEvent(item, { soloKeypress });
+    } else if (app.props.dispatchKeyboardEvent(item, { soloKeypress })) {
+      reconciler.flushSyncWork();
+      processKeysInBatch(app, splitEscPrefixedKey(item.sequence ?? ''), true, undefined);
     }
   }
   if (multiFlush && flushed) reconciler.flushSyncWork();
@@ -1350,6 +1403,11 @@ export function handleMouseEvent(app: App, m: ParsedMouse): void {
   // highlight. The anchor check guards against an orphaned release (no
   // prior press — e.g. button was held when mouse tracking was enabled).
   if (!hasSelection(sel) && sel.anchor) {
+    // Official 2.1.328 (#596): clear anchor on click release so a subsequent
+    // orphaned release (e.g. GNOME Terminal intercepting Ctrl+click press to
+    // open an OSC 8 link natively and still forwarding mouse-up to the PTY)
+    // cannot re-enter this click handler and open the link a second time.
+    sel.anchor = null;
     // Single click: dispatch DOM click immediately (cursor repositioning
     // etc. are latency-sensitive). If no DOM handler consumed it, defer
     // the hyperlink check so a second click can cancel it.

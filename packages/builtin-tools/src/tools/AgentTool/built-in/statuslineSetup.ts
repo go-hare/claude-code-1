@@ -1,6 +1,30 @@
+import { homedir } from 'os'
+import { resolve, sep } from 'path'
+import { getClaudeConfigHomeDir } from 'src/utils/envUtils.js'
 import { getPlatform } from 'src/utils/platform.js'
 import { findGitBashPathOrNull } from 'src/utils/windowsPaths.js'
 import type { BuiltInAgentDefinition } from '../loadAgentsDir.js'
+
+/**
+ * Official 2.1.327 (#437) `fvs`: resolve the active Claude config directory
+ * (respecting `CLAUDE_CONFIG_DIR`) so `/statusline` edits the right
+ * `settings.json` instead of always `~/.claude/settings.json`.
+ */
+export function getStatuslineConfigDirDisplay(): string {
+  const custom = process.env.CLAUDE_CONFIG_DIR?.trim()
+  if (!custom) {
+    return '~/.claude'
+  }
+  const abs = resolve(getClaudeConfigHomeDir())
+  const home = resolve(homedir())
+  const shortened =
+    abs === home
+      ? '~'
+      : abs.startsWith(home + sep)
+        ? `~${abs.slice(home.length)}`
+        : abs
+  return shortened.replaceAll(sep, '/')
+}
 
 function getWindowsGitBashPathNotice(): string {
   if (getPlatform() !== 'windows' || findGitBashPathOrNull() === null) {
@@ -14,8 +38,9 @@ function getWindowsGitBashPathNotice(): string {
 `
 }
 
-const getStatuslineSystemPrompt =
-  (): string => `You are a status line setup agent for Claude Code. Your job is to create or update the statusLine command in the user's Claude Code settings.
+export const getStatuslineSystemPrompt = (): string => {
+  const configDir = getStatuslineConfigDirDisplay()
+  return `You are a status line setup agent for Claude Code. Your job is to create or update the statusLine command in the user's Claude Code settings.
 
 When asked to convert the user's shell PS1 configuration, follow these steps:
 1. Read the user's shell configuration files in this order of preference:
@@ -184,10 +209,10 @@ How to use the statusLine command:
    To display the open PR (or GitLab MR) for the current branch when one exists:
    - input=$(cat); pr=$(echo "$input" | jq -r '.pr.number // empty'); [ -n "$pr" ] && { [ "$(echo "$input" | jq -r '.pr.kind // empty')" = "mr" ] && label="MR !$pr" || label="PR #$pr"; echo "$label ($(echo "$input" | jq -r '.pr.review_state // "open"'))"; }
 
-2. For longer commands, you can save a new file in the user's ~/.claude directory, e.g.:
-   - ~/.claude/statusline-command.sh and reference that file in the settings.
+2. For longer commands, you can save a new file in the user's ${configDir} directory, e.g.:
+   - ${configDir}/statusline-command.sh and reference that file in the settings.
 ${getWindowsGitBashPathNotice()}
-3. Update the user's ~/.claude/settings.json with:
+3. Update the user's ${configDir}/settings.json with:
    {
      "statusLine": {
        "type": "command",
@@ -195,7 +220,7 @@ ${getWindowsGitBashPathNotice()}
      }
    }
 
-4. If ~/.claude/settings.json is a symlink, update the target file instead.
+4. If ${configDir}/settings.json is a symlink, update the target file instead.
 
 Guidelines:
 - Preserve existing settings when updating
@@ -204,6 +229,7 @@ Guidelines:
 - IMPORTANT: At the end of your response, inform the parent agent that this "statusline-setup" agent must be used for further status line changes.
   Also ensure that the user is informed that they can ask Claude to continue to make changes to the status line.
 `
+}
 
 export const STATUSLINE_SETUP_AGENT: BuiltInAgentDefinition = {
   agentType: 'statusline-setup',

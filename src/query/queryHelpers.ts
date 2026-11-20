@@ -84,7 +84,7 @@ export const MAIN_MAX_OUTPUT_TOKENS_RECOVERY_PROMPT =
   `Pick up mid-thought if that is where the cut happened. Break remaining work into smaller pieces.`
 
 /**
- * Official 2.1.325 #2342 (`gGo`): subagent max_output_tokens_recovery asks for
+ * Official 2.1.325 #2342 (`cmo`): subagent max_output_tokens_recovery asks for
  * the WHOLE answer again, more briefly, because the caller only receives the
  * final message rather than concatenated pieces.
  */
@@ -93,10 +93,28 @@ export const SUBAGENT_MAX_OUTPUT_TOKENS_RECOVERY_PROMPT =
   `If you were giving your final answer, give the whole answer again, more briefly — no apology, no mention of the cut-off. ` +
   `Otherwise continue the work in smaller pieces.`
 
-export function getMaxOutputTokensRecoveryPrompt(isSubagent: boolean): string {
-  return isSubagent
-    ? SUBAGENT_MAX_OUTPUT_TOKENS_RECOVERY_PROMPT
-    : MAIN_MAX_OUTPUT_TOKENS_RECOVERY_PROMPT
+/**
+ * Official 2.1.327 #480 (`Yus`): when a subagent hits the output token limit a
+ * second time, tighten to half the length (keeping exact text untouched) and
+ * instruct it to say up front in the first line if the answer is partial.
+ */
+export const SUBAGENT_MAX_OUTPUT_TOKENS_SECOND_RECOVERY_PROMPT =
+  `Output token limit hit again. Your caller does not receive an answer in pieces. ` +
+  `If you were giving your final answer, give the whole answer in at most half the length of your last attempt: ` +
+  `keep every item and cut the detail. Do not shorten text that must stay exact, such as code, data or translations. ` +
+  `If it cannot be made that short, say so in your first line, then give what fits. ` +
+  `If you were not giving your final answer, continue the work in smaller pieces.`
+
+export function getMaxOutputTokensRecoveryPrompt(
+  isSubagent: boolean,
+  attempt = 1,
+): string {
+  if (!isSubagent) {
+    return MAIN_MAX_OUTPUT_TOKENS_RECOVERY_PROMPT
+  }
+  return attempt >= 2
+    ? SUBAGENT_MAX_OUTPUT_TOKENS_SECOND_RECOVERY_PROMPT
+    : SUBAGENT_MAX_OUTPUT_TOKENS_RECOVERY_PROMPT
 }
 
 /**

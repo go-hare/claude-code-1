@@ -1,4 +1,6 @@
 import { feature } from 'bun:bundle'
+import { isIP } from 'net'
+import { hostname as osHostname } from 'os'
 import { basename } from 'path'
 import { useCallback, useContext, useEffect, useRef } from 'react'
 import {
@@ -139,6 +141,539 @@ const MAX_RECONNECT_ATTEMPTS = 5
 const INITIAL_BACKOFF_MS = 1000
 const MAX_BACKOFF_MS = 30000
 
+// Official 2.1.327 `COn` / `Cso` / `MWt` / `i` (#412): slow background retry
+// (~1 day across 69 attempts, 15s -> 15m cap + proportional jitter) for remote
+// HTTPS hostname MCP servers after prolonged outages (e.g. VPN drop).
+export const SLOW_RECONNECT_MAX_ATTEMPTS = 69
+export const SLOW_RECONNECT_BASE_MS = 15_000
+export const SLOW_RECONNECT_CAP_MS = 900_000
+
+export function computeSlowReconnectDelayMs(
+  attempt: number,
+  random: () => number = Math.random,
+): number {
+  const base = Math.min(
+    SLOW_RECONNECT_BASE_MS * 2 ** Math.max(0, attempt - 1),
+    SLOW_RECONNECT_CAP_MS,
+  )
+  // Proportional jitter (ratio 1): [base, 2 * base]
+  return Math.round(base * (1 + random()))
+}
+
+export function isRemoteHttpsHostnameUrl(
+  url: unknown,
+  localHost: string = osHostname(),
+): boolean {
+  if (typeof url !== 'string') return false
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return false
+  }
+  if (parsed.protocol !== 'https:') return false
+  const host = parsed.hostname.replace(/\.+$/, '').toLowerCase()
+  if (!host) return false
+  // Must be a hostname, not an IP literal (IPv4 or IPv6)
+  if (isIP(host.replace(/^\[|\]$/, '')) !== 0) return false
+  // Exclude localhost, single-label/mDNS/local-machine hostnames
+  if (
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    !host.includes('.')
+  ) {
+    return false
+  }
+  const localNormalized = localHost.replace(/\.+$/, '').toLowerCase()
+  if (localNormalized && host === localNormalized) return false
+  return true
+}
+
+export function isEligibleForSlowBackgroundReconnect(
+  config: ScopedMcpServerConfig,
+  opts?: { localHostname?: string },
+): boolean {
+  if (config.type === 'claudeai-proxy') {
+    const proxyUrl =
+      'url' in config && typeof config.url === 'string'
+        ? config.url
+        : 'id' in config && typeof config.id === 'string' && config.id
+          ? `https://mcp-proxy.anthropic.com/v1/mcp/${config.id}`
+          : undefined
+    return isRemoteHttpsHostnameUrl(proxyUrl, opts?.localHostname)
+  }
+  if (config.type !== 'http' && config.type !== 'sse') {
+    return false
+  }
+  if (config.oauth?.xaa || config.oauth?.authServerMetadataUrl) {
+    return false
+  }
+  return isRemoteHttpsHostnameUrl(config.url, opts?.localHostname)
+}
+
+export type SlowBackgroundReconnectDeps = {
+  timers: Map<string, NodeJS.Timeout>
+  getLiveRow: (name: string) => MCPServerConnection | undefined
+  onConnectionAttempt: (result: {
+    client: MCPServerConnection
+    tools: Tool[]
+    commands: Command[]
+    resources?: ServerResource[]
+    attemptEpoch?: number
+  }) => void
+  reconnect?: typeof reconnectMcpServerImpl
+  detachAndClose?: typeof detachAndCloseConnection
+  getIdentityEpoch?: () => number
+  isDisabled?: (name: string) => boolean
+  getPolicyBlockReason?: typeof getMcpServerPolicyBlockReason
+  computeDelayMs?: (attempt: number) => number
+  maxAttempts?: number
+}
+
+/**
+ * Official 2.1.327-328 `dsn` / `Mz` (#412): schedule slow background reconnect
+ * attempts for an eligible remote HTTPS hostname MCP server.
+ *
+ * - Captures `attemptEpoch = getIdentityEpoch()` and forwards it to `onConnectionAttempt`.
+ * - Re-checks timer ownership, disabled state, identity epoch, managed policy block,
+ *   and live `'failed'` row before applying any settlement.
+ * - Always calls `detachAndClose(result.client)` if a superseded/cancelled/stale
+ *   attempt settles as `'connected'` so open transports never leak.
+ */
+export function startSlowBackgroundReconnectForServer(
+  serverName: string,
+  serverConfig: ScopedMcpServerConfig,
+  deps: SlowBackgroundReconnectDeps,
+): boolean {
+  if (!isEligibleForSlowBackgroundReconnect(serverConfig)) {
+    return false
+  }
+  const isDisabled = deps.isDisabled ?? isMcpServerDisabled
+  const getPolicyBlockReason =
+    deps.getPolicyBlockReason ?? getMcpServerPolicyBlockReason
+  const getIdentityEpoch = deps.getIdentityEpoch ?? getMcpIdentityEpoch
+  const reconnect = deps.reconnect ?? reconnectMcpServerImpl
+  const detachAndClose = deps.detachAndClose ?? detachAndCloseConnection
+  const computeDelayMs = deps.computeDelayMs ?? computeSlowReconnectDelayMs
+  const maxAttempts = deps.maxAttempts ?? SLOW_RECONNECT_MAX_ATTEMPTS
+
+  if (deps.timers.has(serverName)) {
+    return false
+  }
+  if (isDisabled(serverName)) {
+    return false
+  }
+  if (getPolicyBlockReason(serverName, serverConfig) === 'managed-policy') {
+    return false
+  }
+
+  const attemptEpoch = getIdentityEpoch()
+  let slowAttempt = 0
+
+  const isStillValid = (timer: NodeJS.Timeout): boolean => {
+    if (deps.timers.get(serverName) !== timer) return false
+    if (isDisabled(serverName)) return false
+    if (
+      getIdentityEpoch() !== attemptEpoch &&
+      mcpConfigDependsOnAccountIdentity(serverConfig)
+    ) {
+      return false
+    }
+    if (getPolicyBlockReason(serverName, serverConfig) === 'managed-policy') {
+      return false
+    }
+    const liveRow = deps.getLiveRow(serverName)
+    if (liveRow?.type !== 'failed') {
+      return false
+    }
+    return true
+  }
+
+  const disposeIfStaleConnected = (
+    settledClient: MCPServerConnection,
+  ): void => {
+    if (settledClient.type !== 'connected') return
+    const liveRow = deps.getLiveRow(serverName)
+    if (
+      !(
+        liveRow?.type === 'connected' && liveRow.client === settledClient.client
+      )
+    ) {
+      void detachAndClose(settledClient).catch(() => {})
+    }
+  }
+
+  const scheduleNextSlowAttempt = () => {
+    if (slowAttempt >= maxAttempts) {
+      deps.timers.delete(serverName)
+      return
+    }
+    if (isDisabled(serverName)) {
+      deps.timers.delete(serverName)
+      return
+    }
+    if (getPolicyBlockReason(serverName, serverConfig) === 'managed-policy') {
+      deps.timers.delete(serverName)
+      return
+    }
+    const delayMs = computeDelayMs(slowAttempt + 1)
+    logMCPDebug(
+      serverName,
+      `Scheduling slow background reconnect attempt ${slowAttempt + 1}/${maxAttempts} in ${delayMs}ms`,
+    )
+    // eslint-disable-next-line no-restricted-syntax -- timer stored in ref for cancellation
+    const timer = setTimeout(async () => {
+      if (!isStillValid(timer)) {
+        if (deps.timers.get(serverName) === timer) {
+          deps.timers.delete(serverName)
+        }
+        return
+      }
+      slowAttempt += 1
+      logMCPDebug(serverName, `Background reconnect attempt ${slowAttempt}`)
+      try {
+        const result = await reconnect(serverName, serverConfig)
+        if (!isStillValid(timer)) {
+          disposeIfStaleConnected(result.client)
+          if (deps.timers.get(serverName) === timer) {
+            deps.timers.delete(serverName)
+          }
+          return
+        }
+        if (
+          result.client.type === 'connected' ||
+          result.client.type === 'needs-auth'
+        ) {
+          deps.timers.delete(serverName)
+          deps.onConnectionAttempt({ ...result, attemptEpoch })
+          return
+        }
+      } catch (err) {
+        if (deps.timers.get(serverName) !== timer) {
+          return
+        }
+        logMCPError(
+          serverName,
+          `Background reconnect attempt ${slowAttempt} threw: ${err}`,
+        )
+      }
+      if (!isStillValid(timer)) {
+        if (deps.timers.get(serverName) === timer) {
+          deps.timers.delete(serverName)
+        }
+        return
+      }
+      scheduleNextSlowAttempt()
+    }, delayMs)
+    timer.unref?.()
+    deps.timers.set(serverName, timer)
+  }
+
+  scheduleNextSlowAttempt()
+  return true
+}
+
+export type FastReconnectBackoffDeps = {
+  timers: Map<string, NodeJS.Timeout>
+  generations: Map<string, number>
+  getLiveRow: (name: string) => MCPServerConnection | undefined
+  updateServer: (update: MCPServerConnection) => void
+  onConnectionAttempt: (result: {
+    client: MCPServerConnection
+    tools: Tool[]
+    commands: Command[]
+    resources?: ServerResource[]
+    attemptEpoch?: number
+  }) => void
+  onExhaustedFailed?: () => void
+  reconnect?: typeof reconnectMcpServerImpl
+  detachAndClose?: typeof detachAndCloseConnection
+  getIdentityEpoch?: () => number
+  isDisabled?: (name: string) => boolean
+  getPolicyBlockReason?: typeof getMcpServerPolicyBlockReason
+  maxAttempts?: number
+  initialBackoffMs?: number
+  maxBackoffMs?: number
+  closedClientRef?: unknown
+}
+
+export function bumpReconnectGeneration(
+  generations: Map<string, number>,
+  serverName: string,
+): number {
+  const next = (generations.get(serverName) ?? 0) + 1
+  generations.set(serverName, next)
+  return next
+}
+
+/**
+ * Automatic fast-backoff reconnection for remote MCP transports after `onclose`.
+ *
+ * - Claims a per-server generation counter so manual reconnects, disables,
+ *   removals, unmounts, or newer connections supersede any in-flight attempt.
+ * - Re-checks supersession before and after `await reconnect(...)` and disposes
+ *   any late connected transport via `detachAndClose` to avoid leaks.
+ * - Emits clean `PendingMCPServer` / `FailedMCPServer` rows without spreading a
+ *   stale `client.client` handle from the closed `ConnectedMCPServer`.
+ */
+export async function runReconnectWithBackoffForServer(
+  serverName: string,
+  serverConfig: ScopedMcpServerConfig,
+  deps: FastReconnectBackoffDeps,
+): Promise<void> {
+  const isDisabled = deps.isDisabled ?? isMcpServerDisabled
+  const getPolicyBlockReason =
+    deps.getPolicyBlockReason ?? getMcpServerPolicyBlockReason
+  const getIdentityEpoch = deps.getIdentityEpoch ?? getMcpIdentityEpoch
+  const reconnect = deps.reconnect ?? reconnectMcpServerImpl
+  const detachAndClose = deps.detachAndClose ?? detachAndCloseConnection
+  const maxAttempts = deps.maxAttempts ?? MAX_RECONNECT_ATTEMPTS
+  const initialBackoffMs = deps.initialBackoffMs ?? INITIAL_BACKOFF_MS
+  const maxBackoffMs = deps.maxBackoffMs ?? MAX_BACKOFF_MS
+  const transportType = getTransportDisplayName(serverConfig.type ?? 'stdio')
+
+  const existingTimer = deps.timers.get(serverName)
+  if (existingTimer) {
+    clearTimeout(existingTimer)
+    deps.timers.delete(serverName)
+  }
+
+  const generation = bumpReconnectGeneration(deps.generations, serverName)
+  const attemptEpoch = getIdentityEpoch()
+  let activeTimer: NodeJS.Timeout | undefined
+
+  const clearOwnedTimer = () => {
+    if (
+      activeTimer !== undefined &&
+      deps.timers.get(serverName) === activeTimer
+    ) {
+      clearTimeout(activeTimer)
+      deps.timers.delete(serverName)
+    }
+    activeTimer = undefined
+  }
+
+  type SupersessionReason =
+    | 'generation'
+    | 'disabled'
+    | 'identity-epoch'
+    | 'managed-policy'
+    | 'live-row'
+    | null
+
+  const getSupersessionReason = (): SupersessionReason => {
+    if (deps.generations.get(serverName) !== generation) return 'generation'
+    if (isDisabled(serverName)) return 'disabled'
+    if (
+      getIdentityEpoch() !== attemptEpoch &&
+      mcpConfigDependsOnAccountIdentity(serverConfig)
+    ) {
+      return 'identity-epoch'
+    }
+    if (getPolicyBlockReason(serverName, serverConfig) === 'managed-policy') {
+      return 'managed-policy'
+    }
+    const liveRow = deps.getLiveRow(serverName)
+    if (liveRow === undefined || liveRow.type === 'disabled') {
+      return 'live-row'
+    }
+    if (
+      liveRow.type === 'connected' &&
+      (deps.closedClientRef === undefined ||
+        liveRow.client !== deps.closedClientRef)
+    ) {
+      return 'live-row'
+    }
+    return null
+  }
+
+  const settleIfPendingOnSupersession = (reason: SupersessionReason): void => {
+    if (
+      reason !== 'disabled' &&
+      reason !== 'managed-policy' &&
+      reason !== 'identity-epoch'
+    ) {
+      return
+    }
+    const liveRow = deps.getLiveRow(serverName)
+    if (liveRow?.type !== 'pending') {
+      return
+    }
+    deps.updateServer({
+      name: serverName,
+      config: serverConfig,
+      type: reason === 'disabled' ? 'disabled' : 'failed',
+    })
+  }
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const preAttemptSupersession = getSupersessionReason()
+    if (preAttemptSupersession !== null) {
+      logMCPDebug(
+        serverName,
+        `Automatic reconnection superseded before attempt ${attempt} (${preAttemptSupersession}), stopping retry`,
+      )
+      settleIfPendingOnSupersession(preAttemptSupersession)
+      clearOwnedTimer()
+      return
+    }
+
+    deps.updateServer({
+      name: serverName,
+      config: serverConfig,
+      type: 'pending',
+      reconnectAttempt: attempt,
+      maxReconnectAttempts: maxAttempts,
+    })
+
+    const reconnectStartTime = Date.now()
+    try {
+      const result = await reconnect(serverName, serverConfig)
+      const elapsed = Date.now() - reconnectStartTime
+
+      const inFlightSupersession = getSupersessionReason()
+      if (inFlightSupersession !== null) {
+        logMCPDebug(
+          serverName,
+          `Automatic reconnection attempt ${attempt} superseded while in flight (${inFlightSupersession}); discarding result`,
+        )
+        if (result.client.type === 'connected') {
+          void detachAndClose(result.client).catch(() => {})
+        }
+        settleIfPendingOnSupersession(inFlightSupersession)
+        clearOwnedTimer()
+        return
+      }
+
+      if (result.client.type === 'connected') {
+        logMCPDebug(
+          serverName,
+          `${transportType} reconnection successful after ${elapsed}ms (attempt ${attempt})`,
+        )
+        clearOwnedTimer()
+        deps.onConnectionAttempt({ ...result, attemptEpoch })
+        return
+      }
+
+      if (result.client.type === 'needs-auth') {
+        logMCPDebug(
+          serverName,
+          `${transportType} reconnection attempt ${attempt} requires authentication; stopping backoff`,
+        )
+        clearOwnedTimer()
+        deps.onConnectionAttempt({ ...result, attemptEpoch })
+        return
+      }
+
+      logMCPDebug(
+        serverName,
+        `${transportType} reconnection attempt ${attempt} completed with status: ${result.client.type}`,
+      )
+
+      if (attempt === maxAttempts) {
+        logMCPDebug(
+          serverName,
+          `Max reconnection attempts (${maxAttempts}) reached, giving up`,
+        )
+        clearOwnedTimer()
+        const cleanClient: MCPServerConnection =
+          result.client.type === 'failed'
+            ? {
+                name: result.client.name,
+                config: result.client.config,
+                type: 'failed',
+                ...(result.client.error !== undefined
+                  ? { error: result.client.error }
+                  : {}),
+                ...(result.client.errorCode !== undefined
+                  ? { errorCode: result.client.errorCode }
+                  : {}),
+                ...(result.client.displayDetail !== undefined
+                  ? { displayDetail: result.client.displayDetail }
+                  : {}),
+              }
+            : result.client
+        deps.onConnectionAttempt({
+          ...result,
+          client: cleanClient,
+          attemptEpoch,
+        })
+        if (cleanClient.type === 'failed' && getSupersessionReason() === null) {
+          deps.onExhaustedFailed?.()
+        }
+        return
+      }
+    } catch (error) {
+      const elapsed = Date.now() - reconnectStartTime
+      const catchSupersession = getSupersessionReason()
+      if (catchSupersession !== null) {
+        logMCPDebug(
+          serverName,
+          `Automatic reconnection attempt ${attempt} failed after supersession (${catchSupersession}); ignoring`,
+        )
+        settleIfPendingOnSupersession(catchSupersession)
+        clearOwnedTimer()
+        return
+      }
+      logMCPError(
+        serverName,
+        `${transportType} reconnection attempt ${attempt} failed after ${elapsed}ms: ${error}`,
+      )
+
+      if (attempt === maxAttempts) {
+        logMCPDebug(
+          serverName,
+          `Max reconnection attempts (${maxAttempts}) reached, giving up`,
+        )
+        clearOwnedTimer()
+        deps.updateServer({
+          name: serverName,
+          config: serverConfig,
+          type: 'failed',
+        })
+        if (getSupersessionReason() === null) {
+          deps.onExhaustedFailed?.()
+        }
+        return
+      }
+    }
+
+    const postAttemptSupersession = getSupersessionReason()
+    if (postAttemptSupersession !== null) {
+      settleIfPendingOnSupersession(postAttemptSupersession)
+      clearOwnedTimer()
+      return
+    }
+
+    const backoffMs = Math.min(
+      initialBackoffMs * 2 ** (attempt - 1),
+      maxBackoffMs,
+    )
+    logMCPDebug(
+      serverName,
+      `Scheduling reconnection attempt ${attempt + 1} in ${backoffMs}ms`,
+    )
+
+    await new Promise<void>(resolve => {
+      // eslint-disable-next-line no-restricted-syntax -- timer stored in ref for cancellation; sleep() doesn't expose the handle
+      const timer = setTimeout(() => {
+        if (deps.timers.get(serverName) === timer) {
+          deps.timers.delete(serverName)
+        }
+        if (activeTimer === timer) {
+          activeTimer = undefined
+        }
+        resolve()
+      }, backoffMs)
+      timer.unref?.()
+      activeTimer = timer
+      deps.timers.set(serverName, timer)
+    })
+  }
+}
+
 /**
  * Create a unique key for a plugin error to enable deduplication
  */
@@ -270,6 +805,9 @@ export function useManageMCPConnections(
 
   // Track active reconnection attempts to allow cancellation
   const reconnectTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map())
+  // Per-server reconnect generation counter so manual reconnects, disables,
+  // removals, and newer connections supersede any in-flight backoff attempt.
+  const reconnectGenerationsRef = useRef<Map<string, number>>(new Map())
   // Official 2.1.325 #2303: track plugin MCP servers removed while connecting
   // so their late in-flight settlements are disposed instead of relisted in /mcp.
   const removedStalePluginServersRef = useRef<Set<string>>(new Set())
@@ -605,6 +1143,12 @@ export function useManageMCPConnections(
       // Handle side effects based on client state
       switch (client.type) {
         case 'connected': {
+          bumpReconnectGeneration(reconnectGenerationsRef.current, client.name)
+          const pendingTimer = reconnectTimersRef.current.get(client.name)
+          if (pendingTimer) {
+            clearTimeout(pendingTimer)
+            reconnectTimersRef.current.delete(client.name)
+          }
           // Overwrite the default elicitation handler registered in connectToServer.
           // Gold pct: requestDialog(W7) Host; Be.queue only when mailbox is absent.
           registerElicitationHandler(
@@ -617,6 +1161,21 @@ export function useManageMCPConnections(
           )
 
           client.client.onclose = () => {
+            client.client.onclose = undefined
+            const liveRow = store
+              .getState()
+              .mcp.clients.find(c => c.name === client.name)
+            if (
+              liveRow?.type === 'connected' &&
+              liveRow.client !== client.client
+            ) {
+              logMCPDebug(
+                client.name,
+                'Ignoring onclose from superseded MCP client connection',
+              )
+              return
+            }
+
             const configType = client.config.type ?? 'stdio'
 
             clearServerCache(client.name, client.config).catch(() => {
@@ -646,111 +1205,47 @@ export function useManageMCPConnections(
                 `${transportType} transport closed/disconnected, attempting automatic reconnection`,
               )
 
-              // Cancel any existing reconnection attempt for this server
-              const existingTimer = reconnectTimersRef.current.get(client.name)
-              if (existingTimer) {
-                clearTimeout(existingTimer)
-                reconnectTimersRef.current.delete(client.name)
+              // Official 2.1.327 (#412): after fast retries exhaust on an eligible
+              // remote HTTPS hostname server, continue slow background retries (~1 day)
+              // so prolonged VPN/network outages self-heal.
+              const startSlowBackgroundReconnect = () => {
+                startSlowBackgroundReconnectForServer(
+                  client.name,
+                  client.config,
+                  {
+                    timers: reconnectTimersRef.current,
+                    getLiveRow: name =>
+                      store.getState().mcp.clients.find(c => c.name === name),
+                    onConnectionAttempt,
+                  },
+                )
               }
 
-              // Attempt reconnection with exponential backoff
-              const reconnectWithBackoff = async () => {
-                for (
-                  let attempt = 1;
-                  attempt <= MAX_RECONNECT_ATTEMPTS;
-                  attempt++
-                ) {
-                  // Check if server was disabled while we were waiting
-                  if (isMcpServerDisabled(client.name)) {
-                    logMCPDebug(
-                      client.name,
-                      `Server disabled during reconnection, stopping retry`,
-                    )
-                    reconnectTimersRef.current.delete(client.name)
-                    return
-                  }
-
-                  updateServer({
-                    ...client,
-                    type: 'pending',
-                    reconnectAttempt: attempt,
-                    maxReconnectAttempts: MAX_RECONNECT_ATTEMPTS,
-                  })
-
-                  const reconnectStartTime = Date.now()
-                  try {
-                    const result = await reconnectMcpServerImpl(
-                      client.name,
-                      client.config,
-                    )
-                    const elapsed = Date.now() - reconnectStartTime
-
-                    if (result.client.type === 'connected') {
-                      logMCPDebug(
-                        client.name,
-                        `${transportType} reconnection successful after ${elapsed}ms (attempt ${attempt})`,
-                      )
-                      reconnectTimersRef.current.delete(client.name)
-                      onConnectionAttempt(result)
-                      return
-                    }
-
-                    logMCPDebug(
-                      client.name,
-                      `${transportType} reconnection attempt ${attempt} completed with status: ${result.client.type}`,
-                    )
-
-                    // On final attempt, update state with the result
-                    if (attempt === MAX_RECONNECT_ATTEMPTS) {
-                      logMCPDebug(
-                        client.name,
-                        `Max reconnection attempts (${MAX_RECONNECT_ATTEMPTS}) reached, giving up`,
-                      )
-                      reconnectTimersRef.current.delete(client.name)
-                      onConnectionAttempt(result)
-                      return
-                    }
-                  } catch (error) {
-                    const elapsed = Date.now() - reconnectStartTime
-                    logMCPError(
-                      client.name,
-                      `${transportType} reconnection attempt ${attempt} failed after ${elapsed}ms: ${error}`,
-                    )
-
-                    // On final attempt, mark as failed
-                    if (attempt === MAX_RECONNECT_ATTEMPTS) {
-                      logMCPDebug(
-                        client.name,
-                        `Max reconnection attempts (${MAX_RECONNECT_ATTEMPTS}) reached, giving up`,
-                      )
-                      reconnectTimersRef.current.delete(client.name)
-                      updateServer({ ...client, type: 'failed' })
-                      return
-                    }
-                  }
-
-                  // Schedule next retry with exponential backoff
-                  const backoffMs = Math.min(
-                    INITIAL_BACKOFF_MS * 2 ** (attempt - 1),
-                    MAX_BACKOFF_MS,
-                  )
-                  logMCPDebug(
-                    client.name,
-                    `Scheduling reconnection attempt ${attempt + 1} in ${backoffMs}ms`,
-                  )
-
-                  await new Promise<void>(resolve => {
-                    // eslint-disable-next-line no-restricted-syntax -- timer stored in ref for cancellation; sleep() doesn't expose the handle
-                    const timer = setTimeout(resolve, backoffMs)
-                    reconnectTimersRef.current.set(client.name, timer)
-                  })
-                }
-              }
-
-              void reconnectWithBackoff()
+              void runReconnectWithBackoffForServer(
+                client.name,
+                client.config,
+                {
+                  timers: reconnectTimersRef.current,
+                  generations: reconnectGenerationsRef.current,
+                  getLiveRow: name =>
+                    store.getState().mcp.clients.find(c => c.name === name),
+                  updateServer,
+                  onConnectionAttempt,
+                  onExhaustedFailed: startSlowBackgroundReconnect,
+                  closedClientRef: client.client,
+                },
+              )
             } else {
+              bumpReconnectGeneration(
+                reconnectGenerationsRef.current,
+                client.name,
+              )
               channelRegisteredServersRef.current.delete(client.name)
-              updateServer({ ...client, type: 'failed' })
+              updateServer({
+                name: client.name,
+                config: client.config,
+                type: 'failed',
+              })
             }
           }
 
@@ -1215,10 +1710,29 @@ export function useManageMCPConnections(
           break
         }
 
+        case 'failed': {
+          // Official 2.1.327 (#412): trigger slow background reconnect for
+          // eligible remote HTTPS servers that fail at startup/reconnect so
+          // prolonged outages self-heal automatically.
+          startSlowBackgroundReconnectForServer(client.name, client.config, {
+            timers: reconnectTimersRef.current,
+            getLiveRow: name =>
+              store.getState().mcp.clients.find(c => c.name === name),
+            onConnectionAttempt,
+          })
+          break
+        }
         case 'needs-auth':
-        case 'failed':
+        case 'disabled': {
+          bumpReconnectGeneration(reconnectGenerationsRef.current, client.name)
+          const pendingTimer = reconnectTimersRef.current.get(client.name)
+          if (pendingTimer) {
+            clearTimeout(pendingTimer)
+            reconnectTimersRef.current.delete(client.name)
+          }
+          break
+        }
         case 'pending':
-        case 'disabled':
           break
       }
     },
@@ -1292,6 +1806,7 @@ export function useManageMCPConnections(
             ) {
               removedStalePluginServersRef.current.add(s.name)
             }
+            bumpReconnectGeneration(reconnectGenerationsRef.current, s.name)
             const timer = reconnectTimersRef.current.get(s.name)
             if (timer) {
               clearTimeout(timer)
@@ -1573,11 +2088,15 @@ export function useManageMCPConnections(
   // Cleanup all timers on unmount
   useEffect(() => {
     const timers = reconnectTimersRef.current
+    const generations = reconnectGenerationsRef.current
     return () => {
       for (const timer of timers.values()) {
         clearTimeout(timer)
       }
       timers.clear()
+      for (const serverName of generations.keys()) {
+        bumpReconnectGeneration(generations, serverName)
+      }
       // Flush any pending batched MCP updates before unmount
       if (flushTimerRef.current !== null) {
         clearTimeout(flushTimerRef.current)
@@ -1599,7 +2118,8 @@ export function useManageMCPConnections(
         throw new Error(`MCP server ${serverName} not found`)
       }
 
-      // Cancel any pending automatic reconnection attempt
+      // Cancel any pending or in-flight automatic reconnection attempt
+      bumpReconnectGeneration(reconnectGenerationsRef.current, serverName)
       const existingTimer = reconnectTimersRef.current.get(serverName)
       if (existingTimer) {
         clearTimeout(existingTimer)
@@ -1629,14 +2149,15 @@ export function useManageMCPConnections(
 
       const isCurrentlyDisabled = client.type === 'disabled'
 
-      if (!isCurrentlyDisabled) {
-        // Cancel any pending automatic reconnection attempt
-        const existingTimer = reconnectTimersRef.current.get(serverName)
-        if (existingTimer) {
-          clearTimeout(existingTimer)
-          reconnectTimersRef.current.delete(serverName)
-        }
+      // Supersede any pending or in-flight automatic reconnection attempt
+      bumpReconnectGeneration(reconnectGenerationsRef.current, serverName)
+      const existingTimer = reconnectTimersRef.current.get(serverName)
+      if (existingTimer) {
+        clearTimeout(existingTimer)
+        reconnectTimersRef.current.delete(serverName)
+      }
 
+      if (!isCurrentlyDisabled) {
         // Persist disabled state to disk FIRST before clearing cache
         // This is important because the onclose handler checks disk state
         setMcpServerEnabled(serverName, false)

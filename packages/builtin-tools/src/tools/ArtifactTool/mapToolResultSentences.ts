@@ -1022,10 +1022,16 @@ export function isFolderInheritedAudience(
   return folderAudience === 'others' || folderAudience === 'unknown'
 }
 
+const AGENT_SCOPED_VISIBILITY =
+  "This artifact belongs to an agent rather than a person: it is visible to everyone with access to that agent (for Claude in Slack, everyone who can see the channel), not private. To share it more widely, a person adds people from its page's Share where that is offered, or makes a copy from the page and shares the copy."
+
 export function formatArtifactPublishVisibilityNote(
   audience?: string,
   folderAudience?: ArtifactFolderAudience,
 ): string {
+  if (audience === 'agent_scoped') {
+    return AGENT_SCOPED_VISIBILITY
+  }
   if (audience === 'owner' && isFolderInheritedAudience(folderAudience)) {
     return `This artifact's owner, the people the owner has given access, and people with access to the folder it's in can open the link. ${CANNOT_CHANGE_SHARING} If the page is meant for someone without access to that folder, tell the user when you present the page that they cannot open it until it is shared with them. ${SHARING_CAN_CHANGE}`
   }
@@ -1033,10 +1039,19 @@ export function formatArtifactPublishVisibilityNote(
     return `This artifact is private: only its owner and the people the owner has given access can open the link. ${CANNOT_CHANGE_SHARING} If the page is meant for someone else, tell the user when you present the page that those people cannot open it until it is shared with them. ${SHARING_CAN_CHANGE}`
   }
   if (audience === 'org') {
-    return `This artifact is shared with everyone in the user's organization; people outside it cannot open the link unless the owner invites them by email or picks "Anyone with the link" where offered. ${CANNOT_CHANGE_SHARING} ${SHARING_CAN_CHANGE}`
+    return `This artifact is shared with everyone in the user's organization; people outside it cannot open the link unless the owner invites them by email or picks "Anyone with the link" where offered. ${CANNOT_CHANGE_SHARING} If the page is meant for someone outside the organization, say so when you present the page. ${SHARING_CAN_CHANGE}`
+  }
+  if (audience === 'users') {
+    return `This artifact is shared with specific people the owner chose; nobody else can open the link unless a folder it's in gives them access, and someone outside the user's organization needs an email invite or "Anyone with the link" where offered. ${CANNOT_CHANGE_SHARING} If the page is meant for anyone else, say so when you present the page. ${SHARING_CAN_CHANGE}`
   }
   if (audience === 'public') {
-    return `This artifact is shared as "Anyone with the link". ${CANNOT_CHANGE_SHARING} ${SHARING_CAN_CHANGE}`
+    return `This artifact is shared as "Anyone with the link" (an organization setting can still block public links). ${CANNOT_CHANGE_SHARING}`
+  }
+  if (audience === 'unknown') {
+    return `This artifact is shared with others (unrecognized share mode — treating as shared). ${CANNOT_CHANGE_SHARING}`
+  }
+  if (audience === 'other_org_public') {
+    return 'This artifact belongs to another organization and is shared as "Anyone with the link", which only that organization can change. That organization may have pinned an earlier version for viewers, who then won\'t see this publish.'
   }
   if (audience === 'other_org') {
     return 'This artifact belongs to another organization and is not shared as "Anyone with the link". This result does not say who else can open it, so do not call it private.'

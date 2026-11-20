@@ -27,6 +27,9 @@ export type SearchInputBuffer = {
 
 type UseSearchInputOptions = {
   isActive: boolean
+  /** Optional synchronous ref override for isActive so fast typing bursts
+   *  entering search mode are not dropped before React commits isActive=true. */
+  isActiveRef?: { readonly current: boolean }
   onExit: () => void
   onCancel?: () => void
   onExitUp?: () => void
@@ -71,6 +74,7 @@ const noopSubscribeBuffer =
 /** Gold 289 ph: focused input handlers, with the prompt's shared Cursor/kill ring. */
 export function useSearchInput({
   isActive,
+  isActiveRef,
   onExit,
   onCancel,
   onExitUp,
@@ -175,7 +179,8 @@ export function useSearchInput({
   }
   const willInsertNewline = useCallback(
     (event: KeyboardEvent): boolean => {
-      if (!isActive || !multiline || event.name !== 'return') return false
+      const active = isActiveRef ? isActiveRef.current : isActive
+      if (!active || !multiline || event.name !== 'return') return false
       const offset = cursorOffsetRef.current
       return (
         (offset > 0 && queryRef.current[offset - 1] === '\\') ||
@@ -183,10 +188,11 @@ export function useSearchInput({
         event.meta
       )
     },
-    [isActive, multiline, cursorOffsetRef, queryRef],
+    [isActive, isActiveRef, multiline, cursorOffsetRef, queryRef],
   )
   const handleKeyDown = (event: KeyboardEvent): void => {
-    if (!isActive) return
+    const active = isActiveRef ? isActiveRef.current : isActive
+    if (!active) return
     const text = queryRef.current
     const offset = cursorOffsetRef.current
     const cursor = Cursor.fromText(text, effectiveColumns, offset)
@@ -380,7 +386,8 @@ export function useSearchInput({
     }
   }
   const handlePaste = (event: PasteEvent): void => {
-    if (!isActive || event.text.length === 0) return
+    const active = isActiveRef ? isActiveRef.current : isActive
+    if (!active || event.text.length === 0) return
     event.preventDefault()
     const text = multiline
       ? event.text.replace(/\r\n|\r/g, '\n')

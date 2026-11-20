@@ -7,7 +7,10 @@
  */
 
 import { CONTEXT_1M_BETA_HEADER } from '../../constants/betas.js'
-import { getSdkBetas } from '../../bootstrap/state.js'
+import {
+  getIsNonInteractiveSession,
+  getSdkBetas,
+} from '../../bootstrap/state.js'
 import {
   catalogDeclaresNative1mWindow,
   getContextWindowForModel,
@@ -264,32 +267,98 @@ export function getInFlightClientDataFetch(
 }
 
 /**
- * densable `Tqe` — wait on in-flight client-data fetch when one exists, then
- * `zu`.
+ * Official 2.1.327 `NWs` / `FWs` (#402, #523):
+ * Interactive & subagent model settings wait budget is 1.5s; `claude -p`
+ * (non-interactive) waits up to 10s before continuing without them so a
+ * stalled proxy fetch never hangs before the first request.
+ */
+export const MODEL_CLIENT_DATA_WAIT_INTERACTIVE_MS = 1_500
+export const MODEL_CLIENT_DATA_WAIT_PRINT_MS = 10_000
+
+export function getModelClientDataWaitTimeoutMs(
+  isNonInteractive = getIsNonInteractiveSession(),
+): number {
+  return isNonInteractive
+    ? MODEL_CLIENT_DATA_WAIT_PRINT_MS
+    : MODEL_CLIENT_DATA_WAIT_INTERACTIVE_MS
+}
+
+export type ResolveModelFactsOptions = {
+  timeoutMs?: number
+  onlyStartsClientDataFetch?: boolean
+  isNonInteractive?: boolean
+  inflightFetchOverride?: Promise<unknown>
+}
+
+/**
+ * densable `Tqe` / Official 2.1.327 `_xe` (#402, #523) — wait on in-flight
+ * client-data fetch when one exists (up to 1.5s interactive / 10s in `claude -p`,
+ * or canceled immediately by `ctx.abortController.signal`), then return `zu`.
  */
 export async function resolveModelFacts(
   model: string,
   ctx?: ResolveModelFactsContext,
-  timeoutMs = 1500,
+  timeoutOrOpts?: number | ResolveModelFactsOptions,
 ): Promise<ModelFacts> {
+  const opts: ResolveModelFactsOptions =
+    typeof timeoutOrOpts === 'number'
+      ? { timeoutMs: timeoutOrOpts }
+      : (timeoutOrOpts ?? {})
+  const timeoutMs =
+    opts.timeoutMs ?? getModelClientDataWaitTimeoutMs(opts.isNonInteractive)
   try {
-    const inflight = getInFlightClientDataFetch(ctx)
+    const inflight =
+      opts.inflightFetchOverride ?? getInFlightClientDataFetch(ctx)
     if (
       inflight !== undefined &&
+      !opts.onlyStartsClientDataFetch &&
       getFeatureValue_CACHED_MAY_BE_STALE('tengu_deep_shore', true)
     ) {
-      await Promise.race([
-        inflight.then(
+      const signal = ctx?.abortController?.signal
+      if (!signal?.aborted) {
+        const settled = inflight.then(
           () => true,
           () => false,
-        ),
-        sleep(timeoutMs),
-      ])
+        )
+        const races: Promise<unknown>[] = [settled, sleep(timeoutMs)]
+        let onAbort: (() => void) | undefined
+        if (signal) {
+          races.push(
+            new Promise<false>(resolve => {
+              onAbort = () => resolve(false)
+              signal.addEventListener('abort', onAbort, { once: true })
+            }),
+          )
+        }
+        try {
+          await Promise.race(races)
+        } finally {
+          if (signal && onAbort) {
+            signal.removeEventListener('abort', onAbort)
+          }
+        }
+      }
     }
   } catch {
-    // gold Tqe swallows wait errors then still returns zu(e)
+    // gold Tqe / _xe swallows wait errors then still returns zu(e)
   }
   return getModelFacts(model)
+}
+
+/**
+ * Official 2.1.327 (#523): first subagent on a model waits up to 1.5s
+ * (10s in `claude -p`) for that model's settings from Anthropic before
+ * starting, instead of starting without them.
+ */
+export async function waitForSubagentModelSettings(
+  model: string,
+  ctx?: ResolveModelFactsContext,
+  opts?: Omit<ResolveModelFactsOptions, 'onlyStartsClientDataFetch'>,
+): Promise<ModelFacts> {
+  return resolveModelFacts(model, ctx, {
+    ...opts,
+    onlyStartsClientDataFetch: false,
+  })
 }
 
 /**

@@ -106,9 +106,248 @@ export function sha256Hex(buf: Buffer | string): string {
   return createHash('sha256').update(buf).digest('hex')
 }
 
+function sanitizeChromeUploadPathForMessage(path: string): string {
+  // Official 2.1.328 `lVe`: replace quotes and control/line-separator chars with U+FFFD
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional control character sanitization
+  return path.replace(/["\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, '\uFFFD')
+}
+
 /** densable Med */
 export function chromeFileUploadDeniedMessage(path: string): string {
-  return `Cannot upload "${path}": only files this session is allowed to read can be uploaded. Ask the user to share the file with this session, or to add its folder with /add-dir.`
+  return `Cannot upload "${sanitizeChromeUploadPathForMessage(path)}": only files this session is allowed to read can be uploaded. Ask the user to share the file with this session, or to add its folder with /add-dir.`
+}
+
+export function chromeFileUploadCredentialDeniedMessage(path: string): string {
+  return `Cannot upload "${sanitizeChromeUploadPathForMessage(path)}": Claude in Chrome refuses to upload credential files. Ask the user to attach the file to the page themselves.`
+}
+
+// Official 2.1.327-328 `MG` / `nXr` / `b9` / `we` / `b` / `Re` / `q` / `Tii` / `Cii` (#513):
+// refuse uploading credential files and local secret stores via Claude in Chrome `file_upload`.
+const SAFE_CREDENTIAL_TEMPLATE_EXTS = new Set([
+  'example',
+  'sample',
+  'template',
+  'dist',
+])
+
+const CREDENTIAL_EXACT_BASENAMES = new Set([
+  '.env',
+  '.envrc',
+  '.mcp.json',
+  '.gitconfig',
+  '.yarnrc',
+  '.yarnrc.yml',
+  '.pgpass',
+  '.my.cnf',
+  '.mylogin.cnf',
+  '.terraformrc',
+  'terraform.rc',
+  'credentials.tfrc.json',
+  '.boto',
+  '.s3cfg',
+  'kubeconfig',
+  'kubeconfig.yaml',
+  'kubeconfig.yml',
+  'kubeconfig.json',
+  '.bashrc',
+  '.bash_profile',
+  '.bash_login',
+  '.bash_logout',
+  '.bash_aliases',
+  '.profile',
+  '.zshrc',
+  '.zshenv',
+  '.zprofile',
+  '.zlogin',
+  '.zlogout',
+  'config.fish',
+  'microsoft.powershell_profile.ps1',
+  'microsoft.vscode_profile.ps1',
+  'microsoft.powershellise_profile.ps1',
+  '.bash_history',
+  '.zsh_history',
+  'fish_history',
+  'consolehost_history.txt',
+  '.python_history',
+  '.node_repl_history',
+  '.psql_history',
+  '.mysql_history',
+  'deploy_key',
+  'credentials.json',
+  'application_default_credentials.json',
+  'fish_variables',
+  'htpasswd',
+  '.htpasswd',
+  '.htdigest',
+  '.msmtprc',
+  '.fetchmailrc',
+  '.sentryclirc',
+  '.dev.vars',
+  '.secrets',
+  '.vault-token',
+  '.dockercfg',
+  '.clasprc.json',
+  '.transifexrc',
+  '.databrickscfg',
+  '.ftpconfig',
+  '.remote-sync.json',
+  '.wakatime.cfg',
+  '.netrc',
+  '_netrc',
+  '.npmrc',
+  '.pypirc',
+  '.git-credentials',
+  'id_rsa',
+  'id_dsa',
+  'id_ecdsa',
+  'id_ed25519',
+  'id_xmss',
+])
+
+// Official 2.1.328 `b` + `Ne` + `we`
+const CREDENTIAL_BASENAME_REGEX =
+  /^(?:service[-_]account(?:[-_]?key)?\.json|serviceaccountkey\.json|client_secret_.+\.apps\.googleusercontent\.com\.json|ssh_host_(?:rsa|dsa|ecdsa|ed25519)_key|fishd\.[0-9a-f]{12}|\.claude.*\.json)$/
+
+const CREDENTIAL_KEY_OR_SECRET_REGEX =
+  /(?:\.(?:pem|key|p12|pfx|keystore|jks)|_(?:rsa|dsa|ecdsa|ed25519)(?:_sk(?:_rk(?:_.*)?)?)?|secrets?\.(?:ya?ml|json|toml))$/
+
+const CREDENTIAL_PREFIX_REGEX = /^\.(?:dev\.vars\.|vault_pass|env\.)/
+const CREDENTIAL_EXT_REGEX =
+  /^(.*)\.(?:tfstate(?:\.\d+)?|tfvars(?:\.json)?|kdbx|ovpn)$/
+
+// Official 2.1.328 `Tii`
+const CREDENTIAL_DIR_SEGMENTS = new Set([
+  '.ssh',
+  '.aws',
+  '.azure',
+  '.gnupg',
+  '.kube',
+  '.docker',
+])
+
+// Official 2.1.328 `Cii` + `MMt`
+const CREDENTIAL_MULTI_SEGMENTS: ReadonlyArray<readonly string[]> = [
+  ['.config', 'git'],
+  ['.config', 'gh'],
+  ['.config', 'glab-cli'],
+  ['.config', 'gcloud'],
+  ['appdata', 'roaming', 'gcloud'],
+  ['.cargo', 'credentials'],
+  ['.cargo', 'credentials.toml'],
+  ['.gem', 'credentials'],
+  ['.m2', 'settings.xml'],
+  ['.gradle', 'gradle.properties'],
+  ['documents', 'powershell', 'profile.ps1'],
+  ['documents', 'windowspowershell', 'profile.ps1'],
+  ['.config', 'powershell', 'profile.ps1'],
+  ['.claude', 'settings.json'],
+  ['.claude', 'settings.local.json'],
+  ['.claude', 'state'],
+  ['appdata', 'roaming', 'github cli'],
+  ['appdata', 'roaming', 'gh'],
+  ['appdata', 'roaming', 'glab-cli'],
+  ['appdata', 'roaming', 'gnupg'],
+  ['appdata', 'local', 'microsoft', 'credentials'],
+  ['appdata', 'roaming', 'microsoft', 'credentials'],
+  ['appdata', 'local', 'microsoft', 'vault'],
+  ['appdata', 'roaming', 'microsoft', 'vault'],
+  ['appdata', 'roaming', 'microsoft', 'protect'],
+  ['library', 'keychains'],
+  ['git', 'credentials'],
+  ['.git', 'credentials'],
+  ['gh', 'hosts.yml'],
+  ['gcloud', 'credentials.db'],
+  ['gcloud', 'access_tokens.db'],
+]
+
+function hasSafeTemplateExt(name: string): boolean {
+  const lastSegment = name.split('.').at(-1) ?? ''
+  return SAFE_CREDENTIAL_TEMPLATE_EXTS.has(lastSegment)
+}
+
+function hasContiguousSegments(
+  parts: readonly string[],
+  seq: readonly string[],
+): boolean {
+  if (seq.length === 0 || parts.length < seq.length) return false
+  for (let i = 0; i <= parts.length - seq.length; i++) {
+    let matched = true
+    for (let j = 0; j < seq.length; j++) {
+      if (parts[i + j] !== seq[j]) {
+        matched = false
+        break
+      }
+    }
+    if (matched) return true
+  }
+  return false
+}
+
+function isCredentialPathSingle(filePath: string): boolean {
+  const normalized = filePath.normalize('NFC').replace(/\\/g, '/')
+  const parts = normalized
+    .split('/')
+    .filter(Boolean)
+    .map(p => p.toLowerCase())
+  const base = parts.at(-1)
+  if (!base) return false
+  // Directory checks (`Tii`, `Cii`, `MMt`, and `.git/config`)
+  for (const seg of parts) {
+    if (CREDENTIAL_DIR_SEGMENTS.has(seg)) return true
+  }
+  for (const seq of CREDENTIAL_MULTI_SEGMENTS) {
+    if (hasContiguousSegments(parts, seq)) return true
+  }
+  if (
+    (base === 'config' || base.startsWith('config.')) &&
+    parts.slice(0, -1).some(seg => seg.endsWith('.git'))
+  ) {
+    return true
+  }
+  if (CREDENTIAL_EXACT_BASENAMES.has(base)) return true
+  if (CREDENTIAL_BASENAME_REGEX.test(base)) return true
+  if (CREDENTIAL_KEY_OR_SECRET_REGEX.test(base)) return true
+  if (base.startsWith('kubeconfig') && !hasSafeTemplateExt(base)) return true
+  // Official `Re`: `*.env` (e.g. `prod.env`), exempting safe templates like `example.env`
+  if (
+    base.endsWith('.env') &&
+    !hasSafeTemplateExt(base.slice(0, -'.env'.length))
+  ) {
+    return true
+  }
+  if (CREDENTIAL_PREFIX_REGEX.test(base) && !hasSafeTemplateExt(base)) {
+    return true
+  }
+  const extMatch = CREDENTIAL_EXT_REGEX.exec(base)
+  if (extMatch && !hasSafeTemplateExt(extMatch[1] ?? '')) {
+    return true
+  }
+  return false
+}
+
+export function isCredentialFileForChromeUpload(
+  requestedPath: string,
+  realPath?: string,
+): boolean {
+  if (isCredentialPathSingle(requestedPath)) return true
+  if (
+    realPath &&
+    realPath !== requestedPath &&
+    isCredentialPathSingle(realPath)
+  ) {
+    return true
+  }
+  return false
+}
+
+class ChromeUploadCredentialError extends Error {
+  constructor(
+    message: string,
+    readonly detail: string,
+  ) {
+    super(message)
+    this.name = 'ChromeUploadCredentialError'
+  }
 }
 
 /** densable lrr */
@@ -288,6 +527,28 @@ export async function assertChromeUploadPath(
         'claudeInChrome/fileUpload: path matches a read ask rule',
       )
     }
+  }
+
+  // Official 2.1.327 (#513): refuse uploading credential files unless explicitly
+  // placed by the user into the session's attachments root.
+  const attachmentsRoot = getChromeSessionUploadsDir()
+  const attachmentsReal = await realpathAsync(attachmentsRoot).catch(
+    () => attachmentsRoot,
+  )
+  const inAttachmentsRoot =
+    normalizeCaseForComparison(realPath) ===
+      normalizeCaseForComparison(attachmentsReal) ||
+    normalizeCaseForComparison(realPath).startsWith(
+      normalizeCaseForComparison(attachmentsReal) + sep,
+    )
+  if (
+    !inAttachmentsRoot &&
+    isCredentialFileForChromeUpload(expanded, realPath)
+  ) {
+    throw new ChromeUploadCredentialError(
+      `credential file refused: ${originalPath}`,
+      'claudeInChrome/fileUpload: credential file rejected (#513)',
+    )
   }
 
   // Session upload roots (attachments / staging)
@@ -539,6 +800,9 @@ async function expandFileUploadPaths(
       logForDebugging(
         `[chrome file_upload] rejected path: ${entry} (${e instanceof Error ? e.message : String(e)})`,
       )
+      if (e instanceof ChromeUploadCredentialError) {
+        return { error: chromeFileUploadCredentialDeniedMessage(entry) }
+      }
       return { error: chromeFileUploadDeniedMessage(entry) }
     }
 

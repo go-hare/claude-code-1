@@ -86,11 +86,8 @@ function extendedKeysOn(): string {
 }
 
 function extendedKeysOff(): string {
-  if (!supportsExtendedKeys()) return ''
-  return (
-    (printsUnknownSequences() ? '' : DISABLE_MODIFY_OTHER_KEYS) +
-    DISABLE_KITTY_KEYBOARD
-  )
+  if (!supportsExtendedKeys() || printsUnknownSequences()) return ''
+  return DISABLE_MODIFY_OTHER_KEYS + DISABLE_KITTY_KEYBOARD
 }
 
 function kittyPop(): string {

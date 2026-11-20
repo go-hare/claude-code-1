@@ -70,7 +70,9 @@ import {
   saveCacheSafeParams,
 } from '../utils/forkedAgent.js'
 import { getSessionId } from '../bootstrap/state.js'
+import { isGoalOwnedStopHook } from '../commands/goal.js'
 import { getTotalOutputTokens } from '../cost-tracker.js'
+import { classifyStopHookErrorHeadline } from '../utils/hooks/hookErrorDisplay.js'
 import { isHookEqual } from '../utils/hooks/hooksSettings.js'
 import { getSessionHooks } from '../utils/hooks/sessionHooks.js'
 
@@ -92,13 +94,15 @@ function isGoalPromptHook(
   condition: string | undefined,
 ): hook is { type: 'prompt'; prompt: string } {
   if (!condition) return false
-  if (typeof hook !== 'object' || hook === null) return false
-  const h = hook as { type?: string; prompt?: string }
-  return h.type === 'prompt' && h.prompt === condition
+  // Official 2.1.328 (#607): only `/goal`-owned Stop hooks match; never a
+  // skill's or another hook's Stop hook that happens to share the same wording.
+  if (!isGoalOwnedStopHook(hook)) return false
+  return hook.prompt === condition
 }
 
 /**
- * densable Ne — hook still registered on Stop (z5n / isHookEqual).
+ * densable Ne + 2.1.328 (#607) — hook still registered as a `/goal`-owned
+ * Stop hook (matcher has no `skillRoot` and exact hook identity matches).
  * SubagentStop never hits this: Stop registry only.
  */
 function matchRegisteredStopHook(
@@ -106,15 +110,17 @@ function matchRegisteredStopHook(
   sessionId: string,
   hook: unknown,
 ): hook is { type: 'prompt'; prompt: string } {
-  if (!hook || typeof hook !== 'object' || !('type' in hook)) return false
-  const candidate = hook as { type?: string; prompt?: string }
-  if (candidate.type !== 'prompt') return false
+  if (!isGoalOwnedStopHook(hook)) return false
   const matchers =
     getSessionHooks(appState, sessionId, 'Stop').get('Stop') ?? []
-  return matchers.some(matcher =>
-    matcher.hooks.some(registered =>
-      isHookEqual(registered, hook as { type: 'prompt'; prompt: string }),
-    ),
+  return matchers.some(
+    matcher =>
+      matcher.skillRoot === undefined &&
+      matcher.hooks.some(
+        registered =>
+          registered === hook ||
+          (isGoalOwnedStopHook(registered) && isHookEqual(registered, hook)),
+      ),
   )
 }
 
@@ -539,6 +545,7 @@ export async function* handleStopHooks(
     let stopReason = ''
     let hasOutput = false
     const hookErrors: string[] = []
+    const failedToRunErrorIndices: number[] = []
     const hookInfos: StopHookInfo[] = []
     const hookAdditionalContexts: string[] = []
 
@@ -567,6 +574,7 @@ export async function* handleStopHooks(
               attachment.hookEvent === 'SubagentStop')
           ) {
             if (attachment.type === 'hook_non_blocking_error') {
+              failedToRunErrorIndices.push(hookErrors.length)
               hookErrors.push(
                 (attachment.stderr as string) ||
                   `Exit code ${attachment.exitCode}`,
@@ -582,6 +590,7 @@ export async function* handleStopHooks(
                 })
               }
             } else if (attachment.type === 'hook_error_during_execution') {
+              failedToRunErrorIndices.push(hookErrors.length)
               hookErrors.push(attachment.content as string)
               hasOutput = true
               if (isGoalPromptHook(result.hook, goalAtStop?.condition)) {
@@ -630,6 +639,7 @@ export async function* handleStopHooks(
                     sessionId,
                     'Stop',
                     goalHook,
+                    { skillRoot: undefined, matchByIdentity: true },
                   )
                   if (liveGoal?.condition === goalHook.prompt) {
                     goalPass = 'met'
@@ -796,7 +806,7 @@ export async function* handleStopHooks(
 
     // Create summary system message if hooks ran
     if (hookCount > 0) {
-      yield createStopHookSummaryMessage(
+      const summaryMessage = createStopHookSummaryMessage(
         hookCount,
         hookInfos,
         hookErrors,
@@ -809,17 +819,40 @@ export async function* handleStopHooks(
         undefined,
         hookAdditionalContexts.length > 0 ? hookAdditionalContexts : undefined,
       )
+      if (failedToRunErrorIndices.length > 0) {
+        ;(
+          summaryMessage as typeof summaryMessage & {
+            hookErrorFailedIndices?: number[]
+          }
+        ).hookErrorFailedIndices = failedToRunErrorIndices
+      }
+      yield summaryMessage
 
-      // Send notification about errors (shown in verbose/transcript mode via ctrl+o)
+      // Official 2.1.327 (#432, #433): Distinguish failed-to-run Stop hooks
+      // from hooks that ran and reported a problem, and notify on SubagentStop
+      // failures in background agents as well.
       if (hookErrors.length > 0) {
         const expandShortcut = getShortcutDisplay(
           'app:toggleTranscript',
           'Global',
           'ctrl+o',
         )
+        const anyFailedToRun = failedToRunErrorIndices.length > 0
+        const { headline } = classifyStopHookErrorHeadline({
+          failedToRun: anyFailedToRun,
+        })
+        const hookLabel = toolUseContext.agentId ? 'SubagentStop' : 'Stop'
+        const prefix =
+          hookLabel === 'SubagentStop'
+            ? anyFailedToRun
+              ? 'SubagentStop hook failed'
+              : 'SubagentStop hook reported a problem'
+            : headline
         toolUseContext.addNotification?.({
-          key: 'stop-hook-error',
-          text: `Stop hook error occurred \u00b7 ${expandShortcut} to see`,
+          key: toolUseContext.agentId
+            ? `subagent-stop-hook-error-${toolUseContext.agentId}`
+            : 'stop-hook-error',
+          text: `${prefix} \u00b7 ${expandShortcut} to see`,
           priority: 'immediate',
         })
       }

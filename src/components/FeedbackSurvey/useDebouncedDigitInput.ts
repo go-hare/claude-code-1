@@ -72,7 +72,7 @@ export function useDebouncedDigitInput<T extends string = string>({
   callbacksRef.current = { setInputValue, isValidDigit, onDigit }
 
   useInput(
-    (_input, key) => {
+    (_input, key, event) => {
       if (!enterConfirms || !enabled || (once && hasTriggeredRef.current)) {
         return
       }
@@ -91,6 +91,7 @@ export function useDebouncedDigitInput<T extends string = string>({
       if (!callbacksRef.current.isValidDigit(lastChar)) {
         return
       }
+      event.stopImmediatePropagation()
       if (debounceRef.current !== null) {
         clearTimeout(debounceRef.current)
         debounceRef.current = null

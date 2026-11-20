@@ -301,6 +301,14 @@ export function Login(props: {
   // densable I() / V / x — urlOutdent is Pane paddingX (modal 1, inline 2)
   const urlOutdent = useIsInsideModal() ? PANE_PADDING_X_MODAL : PANE_PADDING_X_INLINE;
   const [showWorkspaceKeyInput, setShowWorkspaceKeyInput] = React.useState(false);
+  // Official 2.1.328 (#619): when an inner /login substep (e.g. Bedrock access keys)
+  // owns Esc, disable the outer Dialog's Esc cancel so Esc goes back one step.
+  const [oauthHandlesEscape, setOauthHandlesEscape] = React.useState(false);
+  // Official 2.1.327 (#464): suppress extra summary/chrome while inside Bedrock/Vertex
+  // setup steps so `/login` never renders a doubled divider line.
+  const [inPlatformStep, setInPlatformStep] = React.useState(false);
+  // Only handle W/D workspace key shortcuts while ConsoleOAuthFlow is on its idle method picker.
+  const [inOAuthIdle, setInOAuthIdle] = React.useState(true);
   // 'idle' | 'confirm-remove' | 'removing' | { error: string }
   const [removeState, setRemoveState] = React.useState<
     { phase: 'idle' } | { phase: 'confirm-remove' } | { phase: 'removing' } | { phase: 'error'; message: string }
@@ -320,7 +328,7 @@ export function Login(props: {
   // W = enter/replace key; D = delete (only when stored in settings)
   useInput(
     (input: string) => {
-      if (showWorkspaceKeyInput) return;
+      if (showWorkspaceKeyInput || !inOAuthIdle) return;
       if (removeState.phase === 'confirm-remove') {
         if (input === 'y' || input === 'Y') {
           setRemoveState({ phase: 'removing' });
@@ -352,13 +360,23 @@ export function Login(props: {
         setRemoveState({ phase: 'confirm-remove' });
       }
     },
-    { isActive: !showWorkspaceKeyInput },
+    { isActive: !showWorkspaceKeyInput && inOAuthIdle },
   );
 
   const handleWorkspaceKeySaved = React.useCallback(() => {
     refreshLiveStatus();
     setShowWorkspaceKeyInput(false);
   }, [refreshLiveStatus]);
+
+  const { onDone } = props;
+
+  const handleDialogCancel = React.useCallback(() => {
+    onDone(false, mainLoopModel);
+  }, [onDone, mainLoopModel]);
+
+  const handleOAuthDone = React.useCallback(() => {
+    onDone(true, mainLoopModel);
+  }, [onDone, mainLoopModel]);
 
   const handleWorkspaceKeyCancel = React.useCallback(() => {
     setShowWorkspaceKeyInput(false);
@@ -367,18 +385,24 @@ export function Login(props: {
   return (
     <Dialog
       title="Login"
-      onCancel={() => props.onDone(false, mainLoopModel)}
+      onCancel={handleDialogCancel}
+      isCancelActive={!oauthHandlesEscape && !showWorkspaceKeyInput}
       color="permission"
       inputGuide={exitState =>
         exitState.pending ? (
           <Text>Press {exitState.keyName} again to exit</Text>
         ) : (
-          <ConfigurableShortcutHint action="confirm:no" context="Confirmation" fallback="Esc" description="cancel" />
+          <ConfigurableShortcutHint
+            action="confirm:no"
+            context="Confirmation"
+            fallback="Esc"
+            description={oauthHandlesEscape ? 'go back' : 'cancel'}
+          />
         )
       }
     >
       <Box flexDirection="column">
-        {liveAuthStatus !== undefined && (
+        {!inPlatformStep && liveAuthStatus !== undefined && (
           <Box marginBottom={1}>
             <AuthPlaneSummary status={liveAuthStatus} />
           </Box>
@@ -395,22 +419,27 @@ export function Login(props: {
           </Box>
         ) : (
           <>
-            <Box flexDirection="column" marginBottom={1}>
-              {!workspaceKeySet ? (
-                <Text dimColor>Press W to enter workspace API key (saves to settings, no restart needed)</Text>
-              ) : workspaceKeyFromSettings ? (
-                <Text dimColor>Press W to replace workspace API key · Press D to remove it</Text>
-              ) : (
-                <Text dimColor>
-                  Workspace API key from ANTHROPIC_API_KEY env. Press W to override with a settings-saved key.
-                </Text>
-              )}
-              {removeState.phase === 'error' && <Text color="error">{removeState.message}</Text>}
-            </Box>
+            {!inPlatformStep && (
+              <Box flexDirection="column" marginBottom={1}>
+                {!workspaceKeySet ? (
+                  <Text dimColor>Press W to enter workspace API key (saves to settings, no restart needed)</Text>
+                ) : workspaceKeyFromSettings ? (
+                  <Text dimColor>Press W to replace workspace API key · Press D to remove it</Text>
+                ) : (
+                  <Text dimColor>
+                    Workspace API key from ANTHROPIC_API_KEY env. Press W to override with a settings-saved key.
+                  </Text>
+                )}
+                {removeState.phase === 'error' && <Text color="error">{removeState.message}</Text>}
+              </Box>
+            )}
             <ConsoleOAuthFlow
-              onDone={() => props.onDone(true, mainLoopModel)}
+              onDone={handleOAuthDone}
               startingMessage={props.startingMessage}
               urlOutdent={urlOutdent}
+              onHandlesEscapeChange={setOauthHandlesEscape}
+              onPlatformStepChange={setInPlatformStep}
+              onIdleStateChange={setInOAuthIdle}
             />
           </>
         )}

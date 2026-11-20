@@ -602,13 +602,33 @@ export function BackgroundTasksDialog({
   const ignoreNextKillRef = useRef(false);
   const optionToRowIndexRef = useRef<Map<number, number>>(new Map());
 
-  // densable sAt: keep the cursor on the same id when the list mutates; the
-  // following x is ignored if the focused row vanished so a shifted row is not
-  // killed by accident.
+  // densable sAt / 2.1.327 (#444): keep the cursor on the same id when the list
+  // mutates; the following x is ignored if the focused row vanished so a shifted
+  // row is not killed by accident. While viewing task details, keep prevRowsRef
+  // untouched so returning to the list still sees that the stopped task vanished
+  // and ignores a stray second `x` press.
   useEffect(() => {
+    if (viewState.mode !== 'list') {
+      return;
+    }
     if (prevRowsRef.current === null) {
       prevRowsRef.current = rows;
-      selectedIdRef.current = rows[0]?.id;
+      const prevId = selectedIdRef.current;
+      if (prevId !== undefined && !rows.some(r => r.id === prevId)) {
+        ignoreNextKillRef.current = true;
+      }
+      if (prevId !== undefined) {
+        const nextIdx = rows.findIndex(r => r.id === prevId);
+        if (nextIdx !== -1) {
+          if (nextIdx !== selectedIndexLive.current) {
+            setSelectedIndex(nextIdx);
+          }
+          return;
+        }
+      }
+      const clamped = Math.max(0, Math.min(selectedIndexLive.current, Math.max(rows.length - 1, 0)));
+      selectedIdRef.current = rows[clamped]?.id;
+      setSelectedIndex(clamped);
       return;
     }
     prevRowsRef.current = rows;
@@ -626,7 +646,7 @@ export function BackgroundTasksDialog({
     const clamped = Math.max(0, Math.min(selectedIndexLive.current, Math.max(rows.length - 1, 0)));
     selectedIdRef.current = rows[clamped]?.id;
     setSelectedIndex(clamped);
-  }, [rows]);
+  }, [rows, viewState.mode]);
 
   const handleRowFocus = (rawIndex: number): void => {
     const index = optionToRowIndexRef.current.get(rawIndex) ?? rawIndex;
@@ -878,6 +898,10 @@ export function BackgroundTasksDialog({
             });
           });
         } else {
+          // #444 (2.1.327): reset prevRowsRef on detail -> list exit so the
+          // list detects the vanished task and ignores a stray second `x`.
+          prevRowsRef.current = null;
+          ignoreNextKillRef.current = true;
           setViewState({ mode: 'list' });
         }
       }
@@ -891,11 +915,221 @@ export function BackgroundTasksDialog({
       onDone('Background dialog dismissed', { display: 'skip' });
     } else {
       skippedListOnMount.current = false;
+      prevRowsRef.current = null;
       setViewState({ mode: 'list' });
     }
   };
 
   const hasMultipleRunningLocalAgents = count(agentTasks, t => t.status === 'running') > 1;
+
+  // Hoisted above the detail-view early return to satisfy Rules of Hooks when
+  // entering or leaving any task detail view.
+  const sections = useMemo(
+    () =>
+      [
+        {
+          key: 'agents',
+          items: teammateTasks,
+          heading:
+            bashTasks.length > 0 ||
+            remoteSessions.length > 0 ||
+            agentTasks.length > 0 ||
+            completedAgentTasks.length > 0 ? (
+              <Text dimColor>
+                <Text bold>{'  '}Agents</Text> ({count(teammateTasks, i => i.type !== 'leader')})
+              </Text>
+            ) : null,
+        },
+        {
+          key: 'shells',
+          items: bashTasks,
+          heading:
+            teammateTasks.length > 0 ||
+            remoteSessions.length > 0 ||
+            agentTasks.length > 0 ||
+            completedAgentTasks.length > 0 ? (
+              <Text dimColor>
+                <Text bold>{'  '}Shells</Text> ({bashTasks.length})
+              </Text>
+            ) : null,
+        },
+        {
+          key: 'monitors',
+          items: mcpMonitors,
+          heading: (
+            <Text dimColor>
+              <Text bold>{'  '}Monitors</Text> ({mcpMonitors.length})
+            </Text>
+          ),
+        },
+        {
+          key: 'mcp-tasks',
+          items: mcpTasks,
+          heading: (
+            <Text dimColor>
+              <Text bold>{'  '}MCP tasks</Text> ({mcpTasks.length})
+            </Text>
+          ),
+        },
+        {
+          key: 'cloud-agents',
+          items: remoteSessions,
+          heading: (
+            <Text dimColor>
+              <Text bold>{'  '}Cloud agents</Text> ({remoteSessions.length})
+            </Text>
+          ),
+        },
+        {
+          key: 'local-agents',
+          items: agentTasks,
+          heading: (
+            <Text dimColor>
+              <Text bold>{'  '}Local agents</Text> ({agentTasks.length})
+            </Text>
+          ),
+        },
+        {
+          key: 'completed',
+          items: completedAgentTasks,
+          heading: (
+            <Text dimColor>
+              <Text bold>{'  '}Completed</Text> ({completedAgentTasks.length})
+            </Text>
+          ),
+        },
+        {
+          key: 'earlier-in-session',
+          items: earlierSubagentTasks,
+          heading: showEarlierSubagents ? (
+            <Text dimColor>
+              <Text bold>
+                {'  '}
+                {EARLIER_IN_SESSION_LABEL}
+              </Text>{' '}
+              ({earlierSubagentTasks.length})
+            </Text>
+          ) : null,
+        },
+        {
+          key: 'workflows',
+          items: workflowTasks,
+          heading: (
+            <Text dimColor>
+              <Text bold>{'  '}Dynamic workflows</Text> ({workflowTasks.length})
+            </Text>
+          ),
+        },
+        { key: 'dream', items: dreamTasks, heading: null },
+        { key: 'auto-mode-scan', items: autoModeScanTasks, heading: null },
+        {
+          key: 'self-managed',
+          items: selfManagedTasks,
+          heading: showSystemTasks ? (
+            <Text dimColor>
+              <Text bold>
+                {'  '}
+                {SYSTEM_TASKS_LABEL}
+              </Text>{' '}
+              ({selfManagedTasks.length})
+            </Text>
+          ) : null,
+        },
+      ].filter(section => section.items.length > 0),
+    [
+      teammateTasks,
+      bashTasks,
+      mcpMonitors,
+      mcpTasks,
+      remoteSessions,
+      agentTasks,
+      completedAgentTasks,
+      earlierSubagentTasks,
+      showEarlierSubagents,
+      workflowTasks,
+      dreamTasks,
+      autoModeScanTasks,
+      selfManagedTasks,
+      showSystemTasks,
+    ],
+  );
+
+  const { itemListOptions, optionToRowIndex, rowToOptionIndex } = useMemo(() => {
+    const options: Array<{
+      label: ReactNode;
+      value: string;
+      icon?: ReactNode;
+      facts?: readonly string[];
+      heading?: boolean;
+    }> = [];
+    const optToRow = new Map<number, number>();
+    const rowToOpt = new Map<number, number>();
+    const leader = teammateTasks.find(i => i.type === 'leader');
+    let rowIdx = 0;
+
+    sections.forEach((section, sectionIdx) => {
+      if (sectionIdx > 0) {
+        options.push({
+          heading: true,
+          value: `${section.key}-gap`,
+          label: '',
+        });
+      }
+      if (section.heading) {
+        options.push({
+          heading: true,
+          value: `${section.key}-heading`,
+          label: section.heading,
+        });
+      }
+      if (section.key === 'agents') {
+        for (const [teamName, members] of teams) {
+          options.push({
+            heading: true,
+            value: `${teamName}-team`,
+            label: `Team: ${teamName} (${members.length + (leader ? 1 : 0)})`,
+          });
+          if (leader) {
+            const optIdx = options.length;
+            optToRow.set(optIdx, rowIdx);
+            rowToOpt.set(rowIdx, optIdx);
+            rowIdx++;
+            options.push(buildItemListOption(leader, `${leader.id}-${teamName}`, tasks, agentNameRegistry));
+          }
+          for (const member of members) {
+            const optIdx = options.length;
+            optToRow.set(optIdx, rowIdx);
+            rowToOpt.set(rowIdx, optIdx);
+            rowIdx++;
+            options.push(buildItemListOption(member, member.id, tasks, agentNameRegistry));
+          }
+        }
+      } else {
+        for (const item of section.items) {
+          const optIdx = options.length;
+          optToRow.set(optIdx, rowIdx);
+          rowToOpt.set(rowIdx, optIdx);
+          rowIdx++;
+          options.push(buildItemListOption(item, item.id, tasks, agentNameRegistry));
+        }
+      }
+    });
+
+    return { itemListOptions: options, optionToRowIndex: optToRow, rowToOptionIndex: rowToOpt };
+  }, [sections, teammateTasks, teams, tasks, agentNameRegistry]);
+
+  optionToRowIndexRef.current = optionToRowIndex;
+
+  const defaultFocusIndex = useMemo(() => {
+    const rowIdx = (() => {
+      if (selectedIdRef.current) {
+        const found = rows.findIndex(r => r.id === selectedIdRef.current);
+        if (found !== -1) return found;
+      }
+      return Math.min(selectedIndex, Math.max(0, rows.length - 1));
+    })();
+    return rowToOptionIndex.get(rowIdx) ?? rowIdx;
+  }, [rows, selectedIndex, rowToOptionIndex]);
 
   // If an item is selected, show the appropriate view
   if (viewState.mode !== 'list' && viewState.mode !== 'actions' && typedTasks) {
@@ -1205,213 +1439,6 @@ export function BackgroundTasksDialog({
     }
     return <Byline>{actions}</Byline>;
   }
-
-  const sections = useMemo(
-    () =>
-      [
-        {
-          key: 'agents',
-          items: teammateTasks,
-          heading:
-            bashTasks.length > 0 ||
-            remoteSessions.length > 0 ||
-            agentTasks.length > 0 ||
-            completedAgentTasks.length > 0 ? (
-              <Text dimColor>
-                <Text bold>{'  '}Agents</Text> ({count(teammateTasks, i => i.type !== 'leader')})
-              </Text>
-            ) : null,
-        },
-        {
-          key: 'shells',
-          items: bashTasks,
-          heading:
-            teammateTasks.length > 0 ||
-            remoteSessions.length > 0 ||
-            agentTasks.length > 0 ||
-            completedAgentTasks.length > 0 ? (
-              <Text dimColor>
-                <Text bold>{'  '}Shells</Text> ({bashTasks.length})
-              </Text>
-            ) : null,
-        },
-        {
-          key: 'monitors',
-          items: mcpMonitors,
-          heading: (
-            <Text dimColor>
-              <Text bold>{'  '}Monitors</Text> ({mcpMonitors.length})
-            </Text>
-          ),
-        },
-        {
-          key: 'mcp-tasks',
-          items: mcpTasks,
-          heading: (
-            <Text dimColor>
-              <Text bold>{'  '}MCP tasks</Text> ({mcpTasks.length})
-            </Text>
-          ),
-        },
-        {
-          key: 'cloud-agents',
-          items: remoteSessions,
-          heading: (
-            <Text dimColor>
-              <Text bold>{'  '}Cloud agents</Text> ({remoteSessions.length})
-            </Text>
-          ),
-        },
-        {
-          key: 'local-agents',
-          items: agentTasks,
-          heading: (
-            <Text dimColor>
-              <Text bold>{'  '}Local agents</Text> ({agentTasks.length})
-            </Text>
-          ),
-        },
-        {
-          key: 'completed',
-          items: completedAgentTasks,
-          heading: (
-            <Text dimColor>
-              <Text bold>{'  '}Completed</Text> ({completedAgentTasks.length})
-            </Text>
-          ),
-        },
-        {
-          key: 'earlier-in-session',
-          items: earlierSubagentTasks,
-          heading: showEarlierSubagents ? (
-            <Text dimColor>
-              <Text bold>
-                {'  '}
-                {EARLIER_IN_SESSION_LABEL}
-              </Text>{' '}
-              ({earlierSubagentTasks.length})
-            </Text>
-          ) : null,
-        },
-        {
-          key: 'workflows',
-          items: workflowTasks,
-          heading: (
-            <Text dimColor>
-              <Text bold>{'  '}Dynamic workflows</Text> ({workflowTasks.length})
-            </Text>
-          ),
-        },
-        { key: 'dream', items: dreamTasks, heading: null },
-        { key: 'auto-mode-scan', items: autoModeScanTasks, heading: null },
-        {
-          key: 'self-managed',
-          items: selfManagedTasks,
-          heading: showSystemTasks ? (
-            <Text dimColor>
-              <Text bold>
-                {'  '}
-                {SYSTEM_TASKS_LABEL}
-              </Text>{' '}
-              ({selfManagedTasks.length})
-            </Text>
-          ) : null,
-        },
-      ].filter(section => section.items.length > 0),
-    [
-      teammateTasks,
-      bashTasks,
-      mcpMonitors,
-      mcpTasks,
-      remoteSessions,
-      agentTasks,
-      completedAgentTasks,
-      earlierSubagentTasks,
-      showEarlierSubagents,
-      workflowTasks,
-      dreamTasks,
-      autoModeScanTasks,
-      selfManagedTasks,
-      showSystemTasks,
-    ],
-  );
-
-  const { itemListOptions, optionToRowIndex, rowToOptionIndex } = useMemo(() => {
-    const options: Array<{
-      label: ReactNode;
-      value: string;
-      icon?: ReactNode;
-      facts?: readonly string[];
-      heading?: boolean;
-    }> = [];
-    const optToRow = new Map<number, number>();
-    const rowToOpt = new Map<number, number>();
-    const leader = teammateTasks.find(i => i.type === 'leader');
-    let rowIdx = 0;
-
-    sections.forEach((section, sectionIdx) => {
-      if (sectionIdx > 0) {
-        options.push({
-          heading: true,
-          value: `${section.key}-gap`,
-          label: '',
-        });
-      }
-      if (section.heading) {
-        options.push({
-          heading: true,
-          value: `${section.key}-heading`,
-          label: section.heading,
-        });
-      }
-      if (section.key === 'agents') {
-        for (const [teamName, members] of teams) {
-          options.push({
-            heading: true,
-            value: `${teamName}-team`,
-            label: `Team: ${teamName} (${members.length + (leader ? 1 : 0)})`,
-          });
-          if (leader) {
-            const optIdx = options.length;
-            optToRow.set(optIdx, rowIdx);
-            rowToOpt.set(rowIdx, optIdx);
-            rowIdx++;
-            options.push(buildItemListOption(leader, `${leader.id}-${teamName}`, tasks, agentNameRegistry));
-          }
-          for (const member of members) {
-            const optIdx = options.length;
-            optToRow.set(optIdx, rowIdx);
-            rowToOpt.set(rowIdx, optIdx);
-            rowIdx++;
-            options.push(buildItemListOption(member, member.id, tasks, agentNameRegistry));
-          }
-        }
-      } else {
-        for (const item of section.items) {
-          const optIdx = options.length;
-          optToRow.set(optIdx, rowIdx);
-          rowToOpt.set(rowIdx, optIdx);
-          rowIdx++;
-          options.push(buildItemListOption(item, item.id, tasks, agentNameRegistry));
-        }
-      }
-    });
-
-    return { itemListOptions: options, optionToRowIndex: optToRow, rowToOptionIndex: rowToOpt };
-  }, [sections, teammateTasks, teams, tasks, agentNameRegistry]);
-
-  optionToRowIndexRef.current = optionToRowIndex;
-
-  const defaultFocusIndex = useMemo(() => {
-    const rowIdx = (() => {
-      if (selectedIdRef.current) {
-        const found = rows.findIndex(r => r.id === selectedIdRef.current);
-        if (found !== -1) return found;
-      }
-      return Math.min(selectedIndex, Math.max(0, rows.length - 1));
-    })();
-    return rowToOptionIndex.get(rowIdx) ?? rowIdx;
-  }, [rows, selectedIndex, rowToOptionIndex]);
 
   const visibleOptionCount = Math.min(itemListOptions.length, Math.max(7, Math.floor(termRows / 2)));
   const actionsItem =

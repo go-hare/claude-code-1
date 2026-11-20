@@ -721,13 +721,32 @@ export const SANDBOX_GONE_SINCE_CHECK_MESSAGE =
 export const KEPT_IN_SANDBOX_SINCE_CHECK_NOTE =
   "This command started in the sandbox because its permission check relied on the sandbox, although the settings or this call's input exempt it. Sandbox limits may explain a failure here. Running it again repeats the permission check, which may keep it in the sandbox again."
 
-type SandboxCheckRecord = {
+type SandboxCheckEntry = {
   input: { command?: string; dangerouslyDisableSandbox?: boolean }
   note: typeof SANDBOX_CHECK_NOTED_YES | typeof SANDBOX_CHECK_NOTED_NO
 }
 
+type SandboxCheckRecord = {
+  checked?: SandboxCheckEntry
+  rewriteNoted?: SandboxCheckEntry
+}
+
 const sandboxCheckRecordsByToolUseId = new Map<string, SandboxCheckRecord>()
 const MAX_SANDBOX_CHECK_RECORDS = 512
+
+function ensureSandboxRecordSlot(toolUseId: string): SandboxCheckRecord {
+  const existing = sandboxCheckRecordsByToolUseId.get(toolUseId)
+  if (existing) return existing
+  if (sandboxCheckRecordsByToolUseId.size >= MAX_SANDBOX_CHECK_RECORDS) {
+    const firstKey = sandboxCheckRecordsByToolUseId.keys().next().value
+    if (firstKey !== undefined) {
+      sandboxCheckRecordsByToolUseId.delete(firstKey)
+    }
+  }
+  const fresh: SandboxCheckRecord = {}
+  sandboxCheckRecordsByToolUseId.set(toolUseId, fresh)
+  return fresh
+}
 
 export function recordSandboxStateAtCheck(
   toolUseId: string | undefined,
@@ -735,44 +754,75 @@ export function recordSandboxStateAtCheck(
   wasSandboxed: boolean,
 ): void {
   if (!toolUseId) return
-  const existing = sandboxCheckRecordsByToolUseId.get(toolUseId)
+  const record = ensureSandboxRecordSlot(toolUseId)
   // Official 2.1.326 #303: preserve an existing 'counted as sandboxed' initial
   // record for the same toolUseId instead of overwriting it when a
   // PermissionRequest hook re-runs checkPermissions with rewritten updatedInput.
-  if (existing?.note === SANDBOX_CHECK_NOTED_YES) {
+  if (record.checked?.note === SANDBOX_CHECK_NOTED_YES) {
     return
   }
-  if (
-    !existing &&
-    sandboxCheckRecordsByToolUseId.size >= MAX_SANDBOX_CHECK_RECORDS
-  ) {
-    const firstKey = sandboxCheckRecordsByToolUseId.keys().next().value
-    if (firstKey !== undefined) {
-      sandboxCheckRecordsByToolUseId.delete(firstKey)
-    }
-  }
-  sandboxCheckRecordsByToolUseId.set(toolUseId, {
+  record.checked = {
     input: {
       command: input.command,
       dangerouslyDisableSandbox: input.dangerouslyDisableSandbox === true,
     },
     note: wasSandboxed ? SANDBOX_CHECK_NOTED_YES : SANDBOX_CHECK_NOTED_NO,
-  })
+  }
+  record.rewriteNoted = undefined
 }
 
 /**
- * Official 2.1.326 `aut` (#303):
- * Returns `true` when the original command was checked as sandboxed AND the
- * final (possibly hook/SDK-rewritten) input must stay in the sandbox.
- * Returns `false` if the approver explicitly added `dangerouslyDisableSandbox: true`
- * when the checked original did not have it.
+ * Official 2.1.328 #671 (`EYt` / `aut` @294193103):
+ * Record the sandbox state evaluated for a PermissionRequest hook's rewritten
+ * input (`updatedInput`). When the hook rewrites a command to one excluded
+ * from the sandbox (e.g. matching `sandbox.excludedCommands`), `rewriteNoted`
+ * records `SANDBOX_CHECK_NOTED_NO` so `shouldKeepRewrittenCommandInSandbox`
+ * allows the rewritten command to run outside the sandbox.
+ */
+export function recordSandboxStateAtHookRewrite(
+  toolUseId: string | undefined,
+  rewrittenInput: Partial<SandboxInput>,
+  wasSandboxed: boolean,
+): void {
+  if (!toolUseId) return
+  const record = ensureSandboxRecordSlot(toolUseId)
+  record.rewriteNoted = {
+    input: {
+      command: rewrittenInput.command,
+      dangerouslyDisableSandbox:
+        rewrittenInput.dangerouslyDisableSandbox === true,
+    },
+    note: wasSandboxed ? SANDBOX_CHECK_NOTED_YES : SANDBOX_CHECK_NOTED_NO,
+  }
+}
+
+/**
+ * Official 2.1.326 `aut` (#303) refined by 2.1.328 #671:
+ * If a PermissionRequest hook rewrite was noted for the exact final input
+ * (`command` and `dangerouslyDisableSandbox`), follow `rewriteNoted` (so a
+ * rewrite to a sandbox-excluded command runs outside the sandbox).
+ * Otherwise, returns `true` when the original command was checked as sandboxed
+ * AND the final input did not newly add `dangerouslyDisableSandbox: true`.
  */
 export function shouldKeepRewrittenCommandInSandbox(
   toolUseId: string | undefined,
   finalInput: Partial<SandboxInput>,
 ): boolean {
   if (!toolUseId) return false
-  const checked = sandboxCheckRecordsByToolUseId.get(toolUseId)
+  const record = sandboxCheckRecordsByToolUseId.get(toolUseId)
+  if (!record) return false
+  const rewritten = record.rewriteNoted
+  if (
+    rewritten &&
+    (rewritten.note === SANDBOX_CHECK_NOTED_YES ||
+      rewritten.note === SANDBOX_CHECK_NOTED_NO) &&
+    rewritten.input.command === finalInput.command &&
+    (rewritten.input.dangerouslyDisableSandbox === true) ===
+      (finalInput.dangerouslyDisableSandbox === true)
+  ) {
+    return rewritten.note === SANDBOX_CHECK_NOTED_YES
+  }
+  const checked = record.checked
   if (!checked) return false
   return (
     checked.note === SANDBOX_CHECK_NOTED_YES &&
