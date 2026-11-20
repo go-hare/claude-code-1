@@ -175,13 +175,20 @@ const RULE_CONTENT_FIELD_BY_TOOL = new Map<string, string>([
  * ruleContentField prefix is treated as a literal string and never matches).
  */
 export function findNoOpPermissionRuleWarnings(
-  ctx: Pick<ToolPermissionContext, 'alwaysDenyRules' | 'alwaysAskRules'>,
+  ctx: Pick<ToolPermissionContext, 'alwaysDenyRules' | 'alwaysAskRules'> | undefined,
 ): string[] {
+  if (!ctx) return [];
   const warnings: string[] = [];
-  const checkRules = (rulesBySource: Record<string, readonly string[]>, behaviorLabel: 'Deny' | 'Ask') => {
+  const checkRules = (
+    rulesBySource: Record<string, readonly string[] | undefined> | undefined,
+    behaviorLabel: 'Deny' | 'Ask',
+  ) => {
+    if (!rulesBySource) return;
     for (const [source, rules] of Object.entries(rulesBySource)) {
-      if (source === 'session') continue;
+      if (source === 'session' || source === 'toolsNarrowing') continue;
+      if (!Array.isArray(rules)) continue;
       for (const raw of rules) {
+        if (typeof raw !== 'string') continue;
         const parsed = permissionRuleValueFromString(raw);
         const { toolName, ruleContent } = parsed;
         const field = RULE_CONTENT_FIELD_BY_TOOL.get(toolName);

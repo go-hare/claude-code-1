@@ -141,6 +141,24 @@ describe('Components 2.1.304–2.1.309 alignment', () => {
     ])
   })
 
+  test('#1047 findNoOpPermissionRuleWarnings safely ignores undefined source entries and toolsNarrowing', () => {
+    expect(findNoOpPermissionRuleWarnings(undefined)).toEqual([])
+    const warnings = findNoOpPermissionRuleWarnings({
+      alwaysDenyRules: {
+        userSettings: undefined,
+        cliArg: undefined,
+        toolsNarrowing: ['Bash(command:ignored)'],
+      },
+      alwaysAskRules: {
+        projectSettings: undefined,
+        localSettings: ['Bash(command:rm)'],
+      },
+    })
+    expect(warnings).toEqual([
+      'Ask rule Bash(command:rm) never matches · use Bash(…)',
+    ])
+  })
+
   test('#1059 pluginPaneDockColumns caps chosen and requested widths at 45% of terminal width and columns - 60', () => {
     // At 120 cols: min(floor(120 * 0.45)=54, 120-60=60) = 54
     expect(pluginPaneDockColumns(120, 80)).toBe(54)
