@@ -631,20 +631,30 @@ export function isUnrecognizedModelMaxOutputTokensAssumed(
 }
 
 /**
- * Official 2.1.327 `xCt.ceiling` (#481): compute the effective max_tokens
- * limit when continuing a reply that hit the output token limit on an
- * unrecognized model (raising 32,000 -> 128,000 unless capped by server ceiling).
+ * Official 2.1.328 `xCt.ceiling` + `Math.min($n?.maxTokensOverride || ..., nR.ceiling(...))` (#481):
+ * compute the effective max_tokens limit when continuing a reply that hit the
+ * output token limit on an unrecognized model (raising 32,000 -> 128,000 unless
+ * capped by a retry-lowered override or learned server ceiling).
  */
 export function resolveOutputTokenLimitForContinuation(opts: {
   model: string
   requestedMaxTokens: number
   continuesCutReply?: boolean
   cachedModelCeiling?: number
+  retryMaxTokensOverride?: number
   isSecurityControl?: boolean
   env?: NodeJS.ProcessEnv
 }): number {
+  const retryCap =
+    opts.retryMaxTokensOverride !== undefined &&
+    Number.isFinite(opts.retryMaxTokensOverride) &&
+    opts.retryMaxTokensOverride > 0
+      ? opts.retryMaxTokensOverride
+      : undefined
   if (opts.isSecurityControl) {
-    return opts.requestedMaxTokens
+    return retryCap !== undefined
+      ? Math.min(opts.requestedMaxTokens, retryCap)
+      : opts.requestedMaxTokens
   }
   const base =
     opts.continuesCutReply &&
@@ -654,8 +664,12 @@ export function resolveOutputTokenLimitForContinuation(opts: {
           UNRECOGNIZED_MODEL_CONTINUATION_MAX_OUTPUT_TOKENS,
         )
       : opts.requestedMaxTokens
-  return opts.cachedModelCeiling !== undefined
-    ? Math.min(base, opts.cachedModelCeiling)
+  const effectiveCeiling = Math.min(
+    retryCap ?? Infinity,
+    opts.cachedModelCeiling ?? Infinity,
+  )
+  return Number.isFinite(effectiveCeiling)
+    ? Math.min(base, effectiveCeiling)
     : base
 }
 

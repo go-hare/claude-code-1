@@ -44,6 +44,7 @@ import { emitTaskTerminatedSdk } from '../utils/sdkEventQueue.js'
 import { escapeXml } from '../utils/xml.js'
 import {
   getAgentTranscriptPath,
+  isLoggableMessage,
   recordSidechainTranscript,
 } from '../utils/sessionStorage.js'
 import {
@@ -414,7 +415,9 @@ export function startBackgroundSession({
       const recentActivities: ToolActivity[] = []
       let toolCount = 0
       let tokenCount = 0
-      let lastRecordedUuid: UUID | null = messages.at(-1)?.uuid ?? null
+      // Official 2.1.328 (@299972802): `e.findLast(mb)?.uuid ?? null`
+      let lastRecordedUuid: UUID | null =
+        messages.findLast(isLoggableMessage)?.uuid ?? null
 
       // Mark toolUseContext as background so tool/api activity resolves HOn.
       const bgToolUseContext = {
@@ -466,7 +469,9 @@ export function startBackgroundSession({
         void recordSidechainTranscript([msg], taskId, lastRecordedUuid).catch(
           err => logForDebugging(`bg-session transcript write failed: ${err}`),
         )
-        lastRecordedUuid = msg.uuid
+        if (isLoggableMessage(msg)) {
+          lastRecordedUuid = msg.uuid
+        }
 
         if (msg.type === 'assistant') {
           const contentBlocks = (msg.message?.content ?? []) as Array<{

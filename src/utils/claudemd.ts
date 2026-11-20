@@ -76,6 +76,7 @@ import {
   getFsImplementation,
   isAutomountMapRoot,
   safeResolvePath,
+  walkPermissionPaths,
 } from './fsOperations.js'
 import { findCanonicalGitRoot, findGitRoot } from './git.js'
 import {
@@ -86,10 +87,21 @@ import {
 } from './hooks.js'
 import type { MemoryType } from './memory/types.js'
 import { expandPath, isUnsafeNetworkOrNtIncludePath } from './path.js'
-import { pathInWorkingPath } from './permissions/filesystem.js'
-import { isSettingSourceEnabled } from './settings/constants.js'
-import { getInitialSettings } from './settings/settings.js'
+import {
+  matchingRuleForInput,
+  pathInOutsideReadFenceWorkingPath,
+  pathInWorkingPath,
+} from './permissions/filesystem.js'
+import {
+  getEnabledSettingSources,
+  isSettingSourceEnabled,
+} from './settings/constants.js'
+import {
+  getInitialSettings,
+  getSettingsForSource,
+} from './settings/settings.js'
 import { isSafeGlobPattern } from './settings/validation.js'
+import type { ToolPermissionContext } from '../Tool.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const teamMemPaths = feature('TEAMMEM')
@@ -491,18 +503,237 @@ function handleMemoryFileReadError(error: unknown, filePath: string): void {
   }
 }
 
+/** Official 2.1.328 `X3t = 4194304` (4 MiB) max byte limit for memory file reads. */
+const MAX_MEMORY_FILE_BYTES = 4 * 1024 * 1024
+
+/**
+ * Official 2.1.328 (`H` / `held` permission-controlled reader passed to `are` /
+ * `$ht` / `QHe` / `lzo`): returns the UTF-8 text of `filePath` if permitted by
+ * `Read(...)` deny rules and outside-read bounds, or `undefined` if withheld/missing.
+ */
+export type MemoryFilePermissionReader = (
+  filePath: string,
+  maxBytes: number,
+) => Promise<string | undefined>
+
+let claudeMdPermissionContext: ToolPermissionContext | undefined
+
+let getLiveClaudeMdPermissionContext:
+  | (() => ToolPermissionContext | undefined)
+  | undefined
+
+/**
+ * Official 2.1.328 (`Wut`): register the session's launch ToolPermissionContext
+ * (`judgedBy`) so recursive CLAUDE.md / @include / rules loading checks Read
+ * deny rules. Official `uZr` resolves readers from the live engineStore context
+ * first and only falls back to `judgedBy`, which is what
+ * `registerClaudeMdPermissionContextSource` supplies.
+ */
+export function setClaudeMdPermissionContext(
+  context: ToolPermissionContext | undefined,
+): void {
+  claudeMdPermissionContext = context
+}
+
+/**
+ * Official 2.1.328 (`uZr` → `e.engineStore.current?.getState().toolPermissionContext`):
+ * register a getter that returns the session's *current* ToolPermissionContext
+ * so permission changes made mid-session (e.g. /permissions, settings sync)
+ * apply to subsequent memory loads. Called once at session init.
+ */
+export function registerClaudeMdPermissionContextSource(
+  getter: (() => ToolPermissionContext | undefined) | undefined,
+): void {
+  getLiveClaudeMdPermissionContext = getter
+}
+
+function hasWholeToolReadDenyRule(context: ToolPermissionContext): boolean {
+  for (const rules of Object.values(context.alwaysDenyRules)) {
+    if (rules?.some(r => r === 'Read' || r === 'Read(*)')) {
+      return true
+    }
+  }
+  return false
+}
+
+function hasAnyReadDenyRule(context: ToolPermissionContext): boolean {
+  for (const rules of Object.values(context.alwaysDenyRules)) {
+    if (rules?.some(r => r === 'Read' || r.startsWith('Read('))) {
+      return true
+    }
+  }
+  return false
+}
+
+function buildSettingsPermissionContextForMemory():
+  | ToolPermissionContext
+  | undefined {
+  const alwaysDenyRules: ToolPermissionContext['alwaysDenyRules'] = {}
+  let hasReadDeny = false
+  for (const source of getEnabledSettingSources()) {
+    const deny = getSettingsForSource(source)?.permissions?.deny
+    if (deny && deny.length > 0) {
+      alwaysDenyRules[source] = deny
+      if (deny.some(r => r === 'Read' || r.startsWith('Read('))) {
+        hasReadDeny = true
+      }
+    }
+  }
+  const blockOutside = settingsHaveBlockReadsOutsideWorkingDirectories()
+  if (!hasReadDeny && !blockOutside) {
+    return undefined
+  }
+  const additionalWorkingDirectories = new Map<
+    string,
+    { path: string; source: 'cliArg' }
+  >()
+  for (const dir of getAdditionalDirectoriesForClaudeMd()) {
+    additionalWorkingDirectories.set(dir, { path: dir, source: 'cliArg' })
+  }
+  return {
+    mode: 'default',
+    additionalWorkingDirectories,
+    alwaysAllowRules: {},
+    alwaysDenyRules,
+    alwaysAskRules: {},
+    isBypassPermissionsModeAvailable: false,
+    blockReadsOutsideWorkingDirectories: blockOutside,
+  }
+}
+
+function resolveEffectiveMemoryPermissionContext():
+  | ToolPermissionContext
+  | undefined {
+  // Official `uZr`: live engineStore context → `judgedBy` (launch context
+  // registered via Wut) → default. The settings-source builder is our
+  // `md()`-style default for entrypoints that never register a session
+  // context (print mode before store creation, standalone loaders).
+  const ctx =
+    getLiveClaudeMdPermissionContext?.() ??
+    claudeMdPermissionContext ??
+    buildSettingsPermissionContextForMemory()
+  if (!ctx) return undefined
+  if (
+    !hasAnyReadDenyRule(ctx) &&
+    ctx.restricted !== true &&
+    ctx.blockReadsOutsideWorkingDirectories !== true
+  ) {
+    return undefined
+  }
+  return ctx
+}
+
+/**
+ * Official 2.1.328 (`Awl` / `ne` / `Jt`): creates a permission-controlled reader
+ * that walks symlink hops via `walkPermissionPaths`, rejects unresolved symlinks,
+ * refuses any path covered by a `Read(...)` deny rule, and (when `enforceOutsideBlock`
+ * is enabled) refuses paths outside the outside-read fence working directories.
+ */
+export function createMemoryPermissionReader(
+  context: ToolPermissionContext,
+  opts?: {
+    enforceOutsideBlock?: boolean
+    onWithheld?: (filePath: string, why: WithheldMemoryWhy) => void
+  },
+): MemoryFilePermissionReader {
+  const enforceOutsideBlock = opts?.enforceOutsideBlock === true
+  const noteWithheldIfNonDirExists = async (
+    filePath: string,
+    why: WithheldMemoryWhy,
+  ): Promise<void> => {
+    try {
+      const fs = getFsImplementation()
+      const st = fs.lstatSync(filePath)
+      if (st.isDirectory()) return
+    } catch {
+      return
+    }
+    recordWithheldMemoryPaths([{ path: filePath, why }])
+    opts?.onWithheld?.(filePath, why)
+  }
+
+  return async (
+    filePath: string,
+    maxBytes: number,
+  ): Promise<string | undefined> => {
+    if (hasWholeToolReadDenyRule(context)) {
+      await noteWithheldIfNonDirExists(filePath, 'denied')
+      return undefined
+    }
+
+    const walked = walkPermissionPaths(filePath)
+    if (walked.unresolved) {
+      await noteWithheldIfNonDirExists(filePath, 'unsettled')
+      return undefined
+    }
+
+    for (const candidatePath of walked.paths) {
+      if (
+        matchingRuleForInput(candidatePath, context, 'read', 'deny') !== null
+      ) {
+        await noteWithheldIfNonDirExists(filePath, 'denied')
+        return undefined
+      }
+    }
+
+    if (
+      enforceOutsideBlock &&
+      (context.blockReadsOutsideWorkingDirectories === true ||
+        context.restricted === true) &&
+      !pathInOutsideReadFenceWorkingPath(filePath, context, walked.paths)
+    ) {
+      await noteWithheldIfNonDirExists(filePath, 'outside')
+      return undefined
+    }
+
+    try {
+      const fs = getFsImplementation()
+      const rawContent = await fs.readFile(filePath, { encoding: 'utf-8' })
+      if (Buffer.byteLength(rawContent, 'utf-8') > maxBytes) {
+        return undefined
+      }
+      return rawContent
+    } catch (error) {
+      handleMemoryFileReadError(error, filePath)
+      return undefined
+    }
+  }
+}
+
+function getDefaultPermissionReaderForMemoryType(
+  type: MemoryType,
+  opts?: { enforceOutsideBlock?: boolean },
+): MemoryFilePermissionReader | undefined {
+  if (type === 'User' || type === 'Managed') {
+    return undefined
+  }
+  const ctx = resolveEffectiveMemoryPermissionContext()
+  if (!ctx) return undefined
+  return createMemoryPermissionReader(ctx, opts)
+}
+
 /**
  * Used by processMemoryFile → getMemoryFiles so the event loop stays
  * responsive during the directory walk (many readFile attempts, most
  * ENOENT). When includeBasePath is given, @include paths are resolved in
  * the same lex pass and returned alongside the parsed file.
+ * Official 2.1.328 (`$ht`): when `permissionReader` (`held`) is provided,
+ * reads through it so Read deny rules and outside-read checks apply uniformly.
  */
 async function safelyReadMemoryFileAsync(
   filePath: string,
   type: MemoryType,
   includeBasePath?: string,
+  permissionReader?: MemoryFilePermissionReader,
 ): Promise<{ info: MemoryFileInfo | null; includePaths: string[] }> {
   try {
+    if (permissionReader) {
+      const rawContent = await permissionReader(filePath, MAX_MEMORY_FILE_BYTES)
+      if (rawContent === undefined) {
+        return { info: null, includePaths: [] }
+      }
+      return parseMemoryFileContent(rawContent, filePath, type, includeBasePath)
+    }
     const fs = getFsImplementation()
     const rawContent = await fs.readFile(filePath, { encoding: 'utf-8' })
     return parseMemoryFileContent(rawContent, filePath, type, includeBasePath)
@@ -746,6 +977,7 @@ export async function processMemoryFile(
   includeExternal: boolean,
   depth: number = 0,
   parent?: string,
+  permissionReader?: MemoryFilePermissionReader,
 ): Promise<MemoryFileInfo[]> {
   // Skip if already processed or max depth exceeded.
   // Normalize paths for comparison to handle Windows drive letter casing
@@ -794,13 +1026,27 @@ export async function processMemoryFile(
     return []
   }
 
+  // Official 2.1.328 (`are` + `H`): resolve permission-controlled reader for
+  // this file and pass it recursively to every `@include` target so nested
+  // files covered by `Read(...)` deny rules cannot enter context.
+  const effectivePermissionReader =
+    permissionReader ??
+    getDefaultPermissionReaderForMemoryType(type, {
+      enforceOutsideBlock: depth > 0 || isSymlink,
+    })
+
   processedPaths.add(normalizedPath)
   if (isSymlink) {
     processedPaths.add(normalizePathForComparison(resolvedPath))
   }
 
   const { info: memoryFile, includePaths: resolvedIncludePaths } =
-    await safelyReadMemoryFileAsync(filePath, type, resolvedPath)
+    await safelyReadMemoryFileAsync(
+      filePath,
+      type,
+      resolvedPath,
+      effectivePermissionReader,
+    )
   if (!memoryFile || !memoryFile.content.trim()) {
     return []
   }
@@ -823,7 +1069,8 @@ export async function processMemoryFile(
       continue
     }
 
-    // Recursively process included files with this file as parent
+    // Recursively process included files with this file as parent and
+    // propagate the permission-controlled reader (official `are(..., H)`).
     const includedFiles = await processMemoryFile(
       resolvedIncludePath,
       type,
@@ -831,6 +1078,7 @@ export async function processMemoryFile(
       includeExternal,
       depth + 1,
       filePath, // Pass current file as parent
+      effectivePermissionReader,
     )
     result.push(...includedFiles)
   }
@@ -855,6 +1103,7 @@ export async function processMdRules({
   includeExternal,
   conditionalRule,
   visitedDirs = new Set(),
+  permissionReader,
 }: {
   rulesDir: string
   type: MemoryType
@@ -862,10 +1111,14 @@ export async function processMdRules({
   includeExternal: boolean
   conditionalRule: boolean
   visitedDirs?: Set<string>
+  permissionReader?: MemoryFilePermissionReader
 }): Promise<MemoryFileInfo[]> {
   if (visitedDirs.has(rulesDir)) {
     return []
   }
+
+  const effectivePermissionReader =
+    permissionReader ?? getDefaultPermissionReaderForMemoryType(type)
 
   try {
     const fs = getFsImplementation()
@@ -922,14 +1175,31 @@ export async function processMdRules({
             includeExternal,
             conditionalRule,
             visitedDirs,
+            permissionReader: effectivePermissionReader,
           })),
         )
       } else if (isFile && entry.name.endsWith('.md')) {
+        // Official `QHe`: when a rule entry is symlinked (`entryPath !== resolvedEntryPath`),
+        // also check the symlink spelling via permissionReader so Read deny on the symlink path applies.
+        if (
+          effectivePermissionReader &&
+          entryPath !== resolvedEntryPath &&
+          !processedPaths.has(normalizePathForComparison(resolvedEntryPath)) &&
+          (await effectivePermissionReader(
+            entryPath,
+            MAX_MEMORY_FILE_BYTES,
+          )) === undefined
+        ) {
+          continue
+        }
         const files = await processMemoryFile(
           resolvedEntryPath,
           type,
           processedPaths,
           includeExternal,
+          0,
+          undefined,
+          effectivePermissionReader,
         )
         result.push(
           ...files.filter(f => (conditionalRule ? f.globs : !f.globs)),
@@ -1036,6 +1306,21 @@ export const getMemoryFiles = memoize(
         normalizePathForComparison(canonicalRoot) &&
       pathInWorkingPath(gitRoot, canonicalRoot)
 
+    // Official 2.1.328 (`Hme` / `Pn`): build permission-controlled readers once
+    // for this load pass so Project/Local CLAUDE.md, rules, and recursive
+    // `@include` files all enforce `Read(...)` deny rules and outside-read bounds.
+    const memoryPermCtx = resolveEffectiveMemoryPermissionContext()
+    const withinPermissionReader = memoryPermCtx
+      ? createMemoryPermissionReader(memoryPermCtx, {
+          enforceOutsideBlock: true,
+        })
+      : undefined
+    const abovePermissionReader = memoryPermCtx
+      ? createMemoryPermissionReader(memoryPermCtx, {
+          enforceOutsideBlock: false,
+        })
+      : undefined
+
     // Process from root downward to CWD
     for (const dir of dirs.reverse()) {
       // 2.1.323 #2161: Do not look up CLAUDE.md / .claude inside Linux autofs
@@ -1049,6 +1334,8 @@ export const getMemoryFiles = memoize(
         isNestedWorktree &&
         pathInWorkingPath(dir, canonicalRoot) &&
         !pathInWorkingPath(dir, gitRoot)
+      const dirPermissionReader =
+        dir === originalCwd ? withinPermissionReader : abovePermissionReader
 
       // Try reading CLAUDE.md (Project) - only if projectSettings is enabled
       if (isSettingSourceEnabled('projectSettings') && !skipProject) {
@@ -1059,6 +1346,9 @@ export const getMemoryFiles = memoize(
             'Project',
             processedPaths,
             includeExternal,
+            0,
+            undefined,
+            dirPermissionReader,
           )),
         )
 
@@ -1070,6 +1360,9 @@ export const getMemoryFiles = memoize(
             'Project',
             processedPaths,
             includeExternal,
+            0,
+            undefined,
+            dirPermissionReader,
           )),
         )
 
@@ -1082,6 +1375,7 @@ export const getMemoryFiles = memoize(
             processedPaths,
             includeExternal,
             conditionalRule: false,
+            permissionReader: dirPermissionReader,
           })),
         )
       }
@@ -1095,6 +1389,9 @@ export const getMemoryFiles = memoize(
             'Local',
             processedPaths,
             includeExternal,
+            0,
+            undefined,
+            dirPermissionReader,
           )),
         )
       }
@@ -1126,6 +1423,9 @@ export const getMemoryFiles = memoize(
             'Project',
             processedPaths,
             includeExternal,
+            0,
+            undefined,
+            withinPermissionReader,
           )),
         )
 
@@ -1137,6 +1437,9 @@ export const getMemoryFiles = memoize(
             'Project',
             processedPaths,
             includeExternal,
+            0,
+            undefined,
+            withinPermissionReader,
           )),
         )
 
@@ -1149,6 +1452,7 @@ export const getMemoryFiles = memoize(
             processedPaths,
             includeExternal,
             conditionalRule: false,
+            permissionReader: withinPermissionReader,
           })),
         )
       }
@@ -1464,8 +1768,11 @@ export async function getMemoryFilesForNestedDirectory(
   dir: string,
   targetPath: string,
   processedPaths: Set<string>,
+  permissionReader?: MemoryFilePermissionReader,
 ): Promise<MemoryFileInfo[]> {
   const result: MemoryFileInfo[] = []
+  const effectivePermissionReader =
+    permissionReader ?? getDefaultPermissionReaderForMemoryType('Project')
 
   // Process project memory files (CLAUDE.md and .claude/CLAUDE.md)
   if (isSettingSourceEnabled('projectSettings')) {
@@ -1476,6 +1783,9 @@ export async function getMemoryFilesForNestedDirectory(
         'Project',
         processedPaths,
         false,
+        0,
+        undefined,
+        effectivePermissionReader,
       )),
     )
     const dotClaudePath = join(dir, '.claude', 'CLAUDE.md')
@@ -1485,6 +1795,9 @@ export async function getMemoryFilesForNestedDirectory(
         'Project',
         processedPaths,
         false,
+        0,
+        undefined,
+        effectivePermissionReader,
       )),
     )
   }
@@ -1493,7 +1806,15 @@ export async function getMemoryFilesForNestedDirectory(
   if (isSettingSourceEnabled('localSettings')) {
     const localPath = join(dir, 'CLAUDE.local.md')
     result.push(
-      ...(await processMemoryFile(localPath, 'Local', processedPaths, false)),
+      ...(await processMemoryFile(
+        localPath,
+        'Local',
+        processedPaths,
+        false,
+        0,
+        undefined,
+        effectivePermissionReader,
+      )),
     )
   }
 
@@ -1509,6 +1830,7 @@ export async function getMemoryFilesForNestedDirectory(
       processedPaths: unconditionalProcessedPaths,
       includeExternal: false,
       conditionalRule: false,
+      permissionReader: effectivePermissionReader,
     })),
   )
 
@@ -1520,6 +1842,7 @@ export async function getMemoryFilesForNestedDirectory(
       'Project',
       processedPaths,
       false,
+      effectivePermissionReader,
     )),
   )
 
@@ -1544,6 +1867,7 @@ export async function getConditionalRulesForCwdLevelDirectory(
   dir: string,
   targetPath: string,
   processedPaths: Set<string>,
+  permissionReader?: MemoryFilePermissionReader,
 ): Promise<MemoryFileInfo[]> {
   const rulesDir = join(dir, '.claude', 'rules')
   return processConditionedMdRules(
@@ -1552,6 +1876,7 @@ export async function getConditionalRulesForCwdLevelDirectory(
     'Project',
     processedPaths,
     false,
+    permissionReader,
   )
 }
 
@@ -1571,6 +1896,7 @@ export async function processConditionedMdRules(
   type: MemoryType,
   processedPaths: Set<string>,
   includeExternal: boolean,
+  permissionReader?: MemoryFilePermissionReader,
 ): Promise<MemoryFileInfo[]> {
   const conditionedRuleMdFiles = await processMdRules({
     rulesDir,
@@ -1578,6 +1904,7 @@ export async function processConditionedMdRules(
     processedPaths,
     includeExternal,
     conditionalRule: true,
+    permissionReader,
   })
 
   // Filter to only include files whose globs patterns match the targetPath

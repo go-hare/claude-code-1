@@ -1348,7 +1348,7 @@ export async function loadConversationForResume(
   /** #520: SessionStart hooks still running after CLAUDE_CODE_RESUME_SESSIONSTART_HOOKS_WAIT_MS. */
   overdueSessionStartHooks?: OverdueSessionStartHooks
 } | null> {
-  let resolvedHookPromise: Promise<void | (() => void) | undefined> | undefined
+  let resolvedHookPromise: Promise<(() => void) | undefined> | undefined
   const fireSessionResolved = (
     resolvedSessionId: string,
     transcriptPath: string | undefined,
@@ -1357,10 +1357,12 @@ export async function loadConversationForResume(
     if (hook === undefined) return
     resolvedHookPromise ??= Promise.resolve()
       .then(() => hook({ sessionId: resolvedSessionId, transcriptPath }))
+      .then(res => (typeof res === 'function' ? res : undefined))
       .catch(err => {
         logForDebugging(
           `resume: onSessionResolved hook failed: ${errorMessage(err)}`,
         )
+        return undefined
       })
   }
   const cleanupSessionResolved = () => {

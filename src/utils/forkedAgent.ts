@@ -69,7 +69,10 @@ import {
 } from '../bootstrap/state.js'
 import { getAgentContext } from './agentContext.js'
 import { WEB_FETCH_TOOL_NAME } from '@claude-code/builtin-tools/tools/WebFetchTool/prompt.js'
-import { recordSidechainTranscript } from './sessionStorage.js'
+import {
+  isLoggableMessage,
+  recordSidechainTranscript,
+} from './sessionStorage.js'
 import type { SystemPrompt } from './systemPromptType.js'
 import {
   type ContentReplacementState,
@@ -892,10 +895,7 @@ export async function runForkedAgent({
       ),
     )
     // Track the last recorded message UUID for parent chain continuity
-    lastRecordedUuid =
-      initialMessages.length > 0
-        ? initialMessages[initialMessages.length - 1]!.uuid
-        : null
+    lastRecordedUuid = initialMessages.findLast(isLoggableMessage)?.uuid ?? null
   }
 
   // Run the query loop with isolated context (cache-safe params preserved)
@@ -976,7 +976,7 @@ export async function runForkedAgent({
               `Forked agent [${forkLabel}] failed to record transcript: ${err}`,
             ),
         )
-        if (msg.type !== 'progress') {
+        if (msg.type !== 'progress' && isLoggableMessage(msg)) {
           lastRecordedUuid = msg.uuid
         }
       }

@@ -3139,15 +3139,8 @@ export async function recordSidechainTranscript(
   agentId?: string,
   startingParentUuid?: UUID | null,
 ) {
-  // 2.1.307 #1089 (SEA pyt): Do not persist in-progress streaming assistant
-  // chunks with `stop_reason === null` (placeholder all-zero usage); wait for
-  // the finalized message with a non-null stop_reason.
-  const settledMessages = messages.filter(
-    m => !(m.type === 'assistant' && m.message?.stop_reason === null),
-  )
-  if (settledMessages.length === 0) return
   await getProject().insertMessageChain(
-    cleanMessagesForLogging(settledMessages),
+    cleanMessagesForLogging(messages),
     true,
     agentId,
     startingParentUuid,

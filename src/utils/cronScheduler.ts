@@ -363,7 +363,8 @@ export function createCronScheduler(
   }
 
   async function load(initial: boolean) {
-    const next = await readCronTasks(dir)
+    const preserved: unknown[] = []
+    const next = await readCronTasks(dir, preserved)
     const projectRoot = dir ?? getProjectRoot()
     const foundSessions = await findTranscriptSessions(
       next.filter(t => t.createdInProject === undefined),
@@ -398,7 +399,7 @@ export function createCronScheduler(
       }
     }
     if (refreshedPids) {
-      await writeCronTasks(next, dir).catch(e =>
+      await writeCronTasks(next, dir, preserved).catch(e =>
         logForDebugging(`[ScheduledTasks] failed to refresh task pids: ${e}`),
       )
     }

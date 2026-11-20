@@ -373,38 +373,47 @@ const SAFE_NO_FILE_READ_COMMANDS = new Set([
   'df',
 ])
 
+/** Official 2.1.328 `omt` — safe env var names allowed under the read block. */
 const SAFE_ENV_ASSIGN_NAMES = new Set([
-  'CI',
-  'TERM',
-  'NO_COLOR',
-  'FORCE_COLOR',
-  'COLORTERM',
-  'CLICOLOR',
-  'CLICOLOR_FORCE',
-  'TZ',
-  'LANG',
-  'LC_ALL',
-  'LC_CTYPE',
-  'LC_MESSAGES',
-  'LC_COLLATE',
-  'LC_NUMERIC',
-  'LC_TIME',
-  'DEBUG',
-  'VERBOSE',
-  'QUIET',
-  'NODE_ENV',
-  'RUST_LOG',
-  'RUST_BACKTRACE',
-  'GOFLAGS',
-  'CGO_ENABLED',
+  'GOEXPERIMENT',
   'GOOS',
   'GOARCH',
-  'PYTHONDONTWRITEBYTECODE',
+  'CGO_ENABLED',
+  'GO111MODULE',
+  'RUST_BACKTRACE',
+  'RUST_LOG',
+  'NODE_ENV',
   'PYTHONUNBUFFERED',
-  'GIT_PAGER',
-  'PAGER',
+  'PYTHONDONTWRITEBYTECODE',
+  'PYTEST_DISABLE_PLUGIN_AUTOLOAD',
+  'PYTEST_DEBUG',
+  'ANTHROPIC_API_KEY',
+  'LANG',
+  'LANGUAGE',
+  'LC_ALL',
+  'LC_CTYPE',
+  'LC_TIME',
+  'CHARSET',
+  'TERM',
+  'COLORTERM',
+  'NO_COLOR',
+  'FORCE_COLOR',
+  'TZ',
+  'LS_COLORS',
+  'LSCOLORS',
+  'GREP_COLOR',
+  'GREP_COLORS',
+  'GCC_COLORS',
+  'TIME_STYLE',
+  'BLOCK_SIZE',
+  'BLOCKSIZE',
   'COLUMNS',
   'LINES',
+  'CLICOLOR',
+  'CLICOLOR_FORCE',
+  'CI',
+  'DEBIAN_FRONTEND',
+  'GIT_TERMINAL_PROMPT',
 ])
 
 /** Official `YO`: true when a decisionReason is an outsideReadsBlocked safety check. */
@@ -557,24 +566,29 @@ function skipEnvFlags(argv: readonly string[]): number {
   return i < argv.length ? i : -1
 }
 
-const DANGEROUS_GIT_CONFIG_EXACT_KEYS = new Set([
+const DANGEROUS_GIT_CONFIG_EXEC_KEYS = new Set([
   'core.fsmonitor',
   'core.sshcommand',
-  'core.pager',
   'core.editor',
   'core.askpass',
   'core.hookspath',
-  'core.attributesfile',
-  'core.excludesfile',
-  'core.alternate',
+  'core.gitproxy',
+  'core.alternaterefscommand',
   'diff.external',
   'credential.helper',
   'sequence.editor',
-  'include.path',
   'uploadpack.packobjectshook',
   'gpg.program',
   'gpg.ssh.program',
   'gpg.x509.program',
+  'interactive.difffilter',
+])
+
+const GIT_CONFIG_PATH_KEYS = new Set([
+  'core.attributesfile',
+  'core.excludesfile',
+  'core.alternate',
+  'include.path',
   'http.cookiefile',
   'http.sslcainfo',
   'http.sslcapath',
@@ -584,20 +598,47 @@ const DANGEROUS_GIT_CONFIG_EXACT_KEYS = new Set([
   'blame.ignorerevsfile',
   'mailmap.file',
   'mailmap.blob',
+  'init.templatedir',
 ])
+
+const SAFE_GIT_PAGER_VALUE_RE =
+  /^(?:|cat|true|false|(?:less|more)(?:\s+-[A-Za-z0-9]+)*)$/
+
+function isPathBearingGitConfigKey(key: string): boolean {
+  const lower = key.toLowerCase()
+  return GIT_CONFIG_PATH_KEYS.has(lower) || /^includeif\..*\.path$/.test(lower)
+}
 
 function isDangerousGitConfigOverride(key: string, value: string): boolean {
   if (value.trimStart().startsWith('!')) return true
   const lower = key.toLowerCase()
-  if (DANGEROUS_GIT_CONFIG_EXACT_KEYS.has(lower)) return true
-  if (lower.startsWith('pager.')) {
-    const trimmed = value.trim().toLowerCase()
-    return trimmed !== 'false' && trimmed !== 'true'
+  if (lower === 'core.pager' || lower.startsWith('pager.')) {
+    return !SAFE_GIT_PAGER_VALUE_RE.test(value.trim())
+  }
+  if (DANGEROUS_GIT_CONFIG_EXEC_KEYS.has(lower)) {
+    return value.trim() !== ''
   }
   return (
-    /^(?:alias|filter|difftool|mergetool|includeif)\./.test(lower) ||
-    /^diff\.[^.]+\.(?:textconv|command)$/.test(lower)
+    /^(?:alias|filter|difftool|mergetool|sendemail|instaweb|browser|ssh|guitool|man|trailer|imap)\./.test(
+      lower,
+    ) ||
+    /^protocol\.(?:ext|fd)\./.test(lower) ||
+    /^diff\.[^.]+\.(?:textconv|command)$/.test(lower) ||
+    /^remote\.[^.]+\.(?:uploadpack|receivepack|vcs)$/.test(lower) ||
+    /^submodule\.[^.]+\.update$/.test(lower)
   )
+}
+
+/** Strip git pathspec magic prefixes like `:(top)`, `:(exclude)`, `:!`, `:^`, `:/`. */
+function stripGitPathspecMagic(token: string): string {
+  const parenMagic = /^:\([^)]*\)/.exec(token)
+  if (parenMagic !== null) {
+    return token.slice(parenMagic[0].length)
+  }
+  if (/^:[!^/]/.test(token)) {
+    return token.slice(2)
+  }
+  return token
 }
 
 const LOCALE_ENV_ASSIGN_NAMES = new Set(['LANG', 'LC_ALL', 'LC_CTYPE'])
@@ -833,13 +874,13 @@ export function checkBashArgvUnderOutsideReadsBlock(
   const base = cmd.slice(cmd.lastIndexOf('/') + 1)
 
   // Lazy require to avoid circular import between outsideReads and pathValidation/fs
-  const { existsSync } =
+  const { existsSync, lstatSync } =
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     require('fs') as typeof import('fs')
-  const { isAbsolute, resolve } =
+  const { dirname, isAbsolute, join, resolve } =
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     require('path') as typeof import('path')
-  const { getPathsForPermissionCheck } =
+  const { getFsImplementation, safeResolvePath, walkPermissionPaths } =
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     require('../fsOperations.js') as typeof import('../fsOperations.js')
   const { expandTilde, hasGlobBeforeDotDot } =
@@ -856,9 +897,82 @@ export function checkBashArgvUnderOutsideReadsBlock(
   const hasGlob = (p: string): boolean => /[*?[\]]/.test(p)
   const hasPathTraversal = (p: string): boolean =>
     /(?:^|[\\/])\.\.(?:[\\/]|$)/.test(p)
+  /** Official `_Ve`: true when `..` appears after a non-empty directory segment. */
+  const hasDotDotAfterSegment = (p: string): boolean => {
+    const parts = p.split(/[\\/]/)
+    let seenSegment = false
+    for (const part of parts) {
+      if (part === '' || part === '.') continue
+      if (part === '..') {
+        if (seenSegment) return true
+      } else {
+        seenSegment = true
+      }
+    }
+    return false
+  }
 
-  const findReadOrEditDenyRule = (targetPath: string) => {
-    for (const candidatePath of getPathsForPermissionCheck(targetPath)) {
+  /**
+   * Official `Z`: walk path segments left-to-right so symlinks before `..`
+   * (e.g. `dir_link/../outside`) are resolved to their real target BEFORE
+   * applying `..` instead of lexically collapsing `dir_link/..` inside cwd.
+   */
+  const resolvePathSegmentsForOutsideReads = (
+    p: string,
+  ): {
+    targetPath: string
+    lexicalPath: string
+    segmentUnresolved: boolean
+  } => {
+    const lexicalPath = isAbsolute(p) ? p : resolve(cwd, p)
+    if (!hasPathTraversal(p)) {
+      return {
+        targetPath: lexicalPath,
+        lexicalPath,
+        segmentUnresolved: false,
+      }
+    }
+    const fsImpl = getFsImplementation()
+    const rawCombined = isAbsolute(p) ? p : `${cwd}/${p}`
+    const normalizedCombined = rawCombined.replace(/\\/g, '/')
+    const winDriveMatch = /^([A-Za-z]:)(\/|$)/.exec(normalizedCombined)
+    let current = winDriveMatch ? `${winDriveMatch[1]}/` : '/'
+    const rest = winDriveMatch
+      ? normalizedCombined.slice(winDriveMatch[0].length)
+      : normalizedCombined
+    let pending: string[] = []
+    for (const seg of rest.split('/')) {
+      if (seg === '' || seg === '.') continue
+      if (seg !== '..') {
+        pending.push(seg)
+        continue
+      }
+      if (pending.length > 0) {
+        const joined = join(current, ...pending)
+        const resolved = safeResolvePath(fsImpl, joined)
+        if (!resolved.isCanonical) {
+          return {
+            targetPath: lexicalPath,
+            lexicalPath,
+            segmentUnresolved: hasDotDotAfterSegment(p),
+          }
+        }
+        current = resolved.resolvedPath
+        pending = []
+      }
+      current = dirname(current)
+    }
+    return {
+      targetPath: join(current, ...pending),
+      lexicalPath,
+      segmentUnresolved: false,
+    }
+  }
+
+  const findReadOrEditDenyRuleForPaths = (
+    candidatePaths: readonly string[],
+  ) => {
+    for (const candidatePath of candidatePaths) {
       const rule =
         matchingRuleForInput(candidatePath, context, 'read', 'deny') ??
         matchingRuleForInput(candidatePath, context, 'edit', 'deny')
@@ -870,6 +984,10 @@ export function checkBashArgvUnderOutsideReadsBlock(
   const checkNamedPath = (
     cmdLabel: string,
     rawToken: string,
+    pathOpts?: {
+      requireInsideEvenIfNonexistent?: boolean
+      ignoreHasCdInCompound?: boolean
+    },
   ):
     | PermissionAskDecision
     | { behavior: 'deny'; message: string; decisionReason?: unknown }
@@ -889,7 +1007,11 @@ export function checkBashArgvUnderOutsideReadsBlock(
     if (isUnc(expanded)) {
       return buildOutsideReadRuntimePathAsk(cmdLabel)
     }
-    if (opts?.hasCdInCompound && !isAbsolute(expanded)) {
+    if (
+      opts?.hasCdInCompound &&
+      !pathOpts?.ignoreHasCdInCompound &&
+      !isAbsolute(expanded)
+    ) {
       return buildOutsideReadRuntimePathAsk(cmdLabel)
     }
     let pathToCheck = expanded
@@ -915,44 +1037,82 @@ export function checkBashArgvUnderOutsideReadsBlock(
               : sliced
       }
       pathToCheck = dirPart
-      const resolvedDir = isAbsolute(dirPart) ? dirPart : resolve(cwd, dirPart)
-      const denyRule = findReadOrEditDenyRule(resolvedDir)
-      if (denyRule !== null) {
+      const resolvedDirInfo = resolvePathSegmentsForOutsideReads(dirPart)
+      const walkedDir = walkPermissionPaths(resolvedDirInfo.targetPath)
+      const dirDenyRule = findReadOrEditDenyRuleForPaths(walkedDir.paths)
+      if (dirDenyRule !== null) {
         return {
           behavior: 'deny',
-          message: `${cmdLabel} in '${resolvedDir}' was blocked by a deny rule`,
-          decisionReason: { type: 'rule', rule: denyRule },
+          message: `${cmdLabel} in '${resolvedDirInfo.targetPath}' was blocked by a deny rule`,
+          decisionReason: { type: 'rule', rule: dirDenyRule },
         }
       }
       if (hasPathTraversal(expanded) || hasGlobBeforeDotDot(expanded)) {
         return buildOutsideReadRuntimePathAsk(cmdLabel)
       }
     }
-    const resolvedPath = isAbsolute(pathToCheck)
-      ? pathToCheck
-      : resolve(cwd, pathToCheck)
-    const denyRule = findReadOrEditDenyRule(resolvedPath)
+    const { targetPath, lexicalPath, segmentUnresolved } =
+      resolvePathSegmentsForOutsideReads(pathToCheck)
+    const walked = walkPermissionPaths(targetPath)
+    const denyCandidates =
+      lexicalPath !== targetPath
+        ? [...walked.paths, ...walkPermissionPaths(lexicalPath).paths]
+        : walked.paths
+    const denyRule = findReadOrEditDenyRuleForPaths(denyCandidates)
     if (denyRule !== null) {
       return {
         behavior: 'deny',
-        message: `${cmdLabel} in '${resolvedPath}' was blocked by a deny rule`,
+        message: `${cmdLabel} in '${targetPath}' was blocked by a deny rule`,
         decisionReason: { type: 'rule', rule: denyRule },
       }
     }
-    // Check if path exists (or has `..` traversal) before enforcing outside-working-dir ask
-    let exists = false
-    try {
-      exists = existsSync(resolvedPath)
-    } catch {
-      exists = false
-    }
-    if (!hasPathTraversal(pathToCheck) && !exists) {
-      return undefined
-    }
-    if (!pathInOutsideReadFenceWorkingPath(resolvedPath, context)) {
+    if (segmentUnresolved || walked.unresolved) {
+      const reason = `${cmdLabel} names '${rawToken}', which cannot be checked against the read block (permissions.blockReadsOutsideWorkingDirectories)`
       return {
         behavior: 'ask',
-        message: `${cmdLabel} names '${resolvedPath}', outside the working directories, which the read block does not allow without asking (permissions.blockReadsOutsideWorkingDirectories). Add the directory with /add-dir, or remove that setting.`,
+        message: reason,
+        decisionReason: {
+          type: 'safetyCheck',
+          reason,
+          classifierApprovable: false,
+          circuitBreaker: 'outsideReadsBlocked',
+        } as PermissionAskDecision['decisionReason'],
+      }
+    }
+    // Check if path exists or is a symlink (including dangling symlinks)
+    // before enforcing outside-working-dir ask
+    let existsOrIsSymlink = false
+    try {
+      existsOrIsSymlink = existsSync(targetPath)
+    } catch {
+      existsOrIsSymlink = false
+    }
+    if (!existsOrIsSymlink) {
+      try {
+        lstatSync(targetPath)
+        existsOrIsSymlink = true
+      } catch {
+        existsOrIsSymlink = false
+      }
+    }
+    if (
+      !pathOpts?.requireInsideEvenIfNonexistent &&
+      !hasPathTraversal(pathToCheck) &&
+      !existsOrIsSymlink
+    ) {
+      return undefined
+    }
+    const outsideHop = walked.paths.find(
+      hop => !pathInOutsideReadFenceWorkingPath(hop, context, [hop]),
+    )
+    if (
+      outsideHop !== undefined ||
+      !pathInOutsideReadFenceWorkingPath(targetPath, context, walked.paths)
+    ) {
+      const reportedPath = outsideHop ?? targetPath
+      return {
+        behavior: 'ask',
+        message: `${cmdLabel} names '${reportedPath}', outside the working directories, which the read block does not allow without asking (permissions.blockReadsOutsideWorkingDirectories). Add the directory with /add-dir, or remove that setting.`,
         decisionReason: {
           type: 'safetyCheck',
           reason: OUTSIDE_READS_BLOCKED_REASON,
@@ -1006,10 +1166,17 @@ export function checkBashArgvUnderOutsideReadsBlock(
     let firstAsk: PermissionAskDecision | undefined
     const checkGitCandidate = (
       cand: string,
+      candOpts?: {
+        requireInsideEvenIfNonexistent?: boolean
+        ignoreHasCdInCompound?: boolean
+      },
     ):
       | { behavior: 'deny'; message: string; decisionReason?: unknown }
       | undefined => {
-      const res = checkNamedPath(base, cand)
+      const res = checkNamedPath(base, cand, {
+        ignoreHasCdInCompound: true,
+        ...candOpts,
+      })
       if (!res) return undefined
       if (res.behavior === 'deny') return res
       firstAsk ??= res
@@ -1094,8 +1261,13 @@ export function checkBashArgvUnderOutsideReadsBlock(
           if (eqIdx > 0) {
             const key = spec.slice(0, eqIdx).trim()
             const val = spec.slice(eqIdx + 1)
-            const deny = checkGitCandidate(val)
-            if (deny) return deny
+            const pathBearing = isPathBearingGitConfigKey(key)
+            if (val.trim() !== '') {
+              const deny = checkGitCandidate(val, {
+                requireInsideEvenIfNonexistent: pathBearing,
+              })
+              if (deny) return deny
+            }
             if (!sandboxFenced && isDangerousGitConfigOverride(key, val)) {
               firstAsk ??= buildOutsideReadUnanalyzableAsk(
                 `git -c ${key}=... can execute external commands or read external config, which cannot be checked against the read block`,
@@ -1174,12 +1346,13 @@ export function checkBashArgvUnderOutsideReadsBlock(
         continue
       }
       const eqIdx = arg.indexOf('=')
+      const strippedPathspec = stripGitPathspecMagic(arg)
       const candidates =
         !afterDoubleDash &&
         eqIdx > 0 &&
         /^[A-Za-z_][A-Za-z0-9_]*$/.test(arg.slice(0, eqIdx))
-          ? [arg, arg.slice(eqIdx + 1)]
-          : [arg]
+          ? [strippedPathspec, arg.slice(eqIdx + 1)]
+          : [strippedPathspec]
       for (const cand of candidates) {
         const deny = checkGitCandidate(cand)
         if (deny) return deny

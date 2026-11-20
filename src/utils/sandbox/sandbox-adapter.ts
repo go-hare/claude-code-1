@@ -403,8 +403,13 @@ export function collectSensitiveHomeDenyWritePaths(
  */
 type GitDirEntryKind = 'file' | 'dir' | 'symlink' | 'fifo' | 'other'
 
+type GitDirBaselineEntry = {
+  kind: GitDirEntryKind
+  linkTarget?: string
+}
+
 type GitDirSnapshotEntry = {
-  baseline: Map<string, GitDirEntryKind>
+  baseline: Map<string, GitDirBaselineEntry>
   refCount: number
 }
 
@@ -418,10 +423,20 @@ function classifyGitDirStat(
   return 'other'
 }
 
+function readGitDirSymlinkTarget(fullPath: string): string {
+  try {
+    // eslint-disable-next-line custom-rules/no-sync-fs -- pre-wrap snapshot / sync cleanup
+    return readlinkSync(fullPath, 'latin1')
+  } catch (err) {
+    return `\x00${getErrnoCode(err) ?? 'ERR'}`
+  }
+}
+
 const gitDirSnapshotsBeforeWrap = new Map<string, GitDirSnapshotEntry>()
-const GIT_SYMREF_SCAN_BYTES = 4096
-const GIT_DIR_SCAN_MAX_DEPTH = 8
-const GIT_DIR_SCAN_SKIP_DIRS = new Set(['objects'])
+/** Official 2.1.328 `jS = 512` — max symref scan buffer size in bytes. */
+const GIT_SYMREF_SCAN_BYTES = 512
+/** Loose-object fanout directory names under `.git/objects/` (`00`..`ff`). */
+const GIT_OBJECTS_FANOUT_RE = /^[0-9a-f]{2}$/i
 
 function isSafeGitSymrefTarget(target: string): boolean {
   const trimmed = target.trimEnd()
@@ -476,54 +491,107 @@ export function isEscapingGitRefFile(
 
 function collectGitDirRelativeEntries(
   rootGitDir: string,
-  relPrefix = '',
-  depth = 0,
-  out: Map<string, GitDirEntryKind> = new Map(),
-): Map<string, GitDirEntryKind> {
-  if (depth > GIT_DIR_SCAN_MAX_DEPTH) return out
-  const dir = relPrefix ? join(rootGitDir, relPrefix) : rootGitDir
-  let entries: string[]
+  out: Map<string, GitDirBaselineEntry> = new Map(),
+): Map<string, GitDirBaselineEntry> {
+  // Iterative traversal without artificial depth cutoff. Only real directories
+  // (`lstatSync` -> `isDirectory()`, never following symlinks) are descended
+  // into, and visited `(dev, ino)` pairs guard against bind-mount cycles.
+  // `.git/objects/info` and `.git/objects/pack` ARE scanned; only loose-object
+  // hex fanout dirs (`.git/objects/[0-9a-f]{2}`) are skipped when they are dirs.
+  const stack: string[] = ['']
+  const visitedDirInodes = new Set<string>()
   try {
     // eslint-disable-next-line custom-rules/no-sync-fs -- pre-wrap snapshot / sync cleanup
-    entries = readdirSync(dir)
+    const rootStat = lstatSync(rootGitDir)
+    if (rootStat.ino) {
+      visitedDirInodes.add(`${rootStat.dev}:${rootStat.ino}`)
+    }
   } catch {
     return out
   }
-  for (const name of entries) {
-    if (name.startsWith('.claude-quarantine-')) continue
-    if (depth === 0 && GIT_DIR_SCAN_SKIP_DIRS.has(name)) continue
-    const rel = relPrefix ? join(relPrefix, name) : name
-    const fullPath = join(rootGitDir, rel)
+
+  while (stack.length > 0) {
+    const relPrefix = stack.pop()!
+    const dir = relPrefix ? join(rootGitDir, relPrefix) : rootGitDir
+    let entries: string[]
     try {
       // eslint-disable-next-line custom-rules/no-sync-fs -- pre-wrap snapshot / sync cleanup
-      const st = lstatSync(fullPath)
-      const kind = classifyGitDirStat(st)
-      out.set(rel, kind)
-      if (kind === 'dir') {
-        collectGitDirRelativeEntries(rootGitDir, rel, depth + 1, out)
-      }
+      entries = readdirSync(dir)
     } catch {
-      // ignore vanished entries
+      continue
+    }
+    for (const name of entries) {
+      if (name.startsWith('.claude-quarantine-')) continue
+      const rel = relPrefix ? join(relPrefix, name) : name
+      const fullPath = join(rootGitDir, rel)
+      try {
+        // eslint-disable-next-line custom-rules/no-sync-fs -- pre-wrap snapshot / sync cleanup
+        const st = lstatSync(fullPath)
+        const kind = classifyGitDirStat(st)
+        if (kind === 'symlink') {
+          out.set(rel, { kind, linkTarget: readGitDirSymlinkTarget(fullPath) })
+          continue
+        }
+        out.set(rel, { kind })
+        if (kind === 'dir') {
+          if (relPrefix === 'objects' && GIT_OBJECTS_FANOUT_RE.test(name)) {
+            continue
+          }
+          if (st.ino) {
+            const inodeKey = `${st.dev}:${st.ino}`
+            if (visitedDirInodes.has(inodeKey)) continue
+            visitedDirInodes.add(inodeKey)
+          }
+          stack.push(rel)
+        }
+      } catch {
+        // ignore vanished entries
+      }
     }
   }
   return out
 }
 
-export function snapshotGitDirBeforeSandboxWrap(cwd: string): void {
-  const gitDir = join(cwd, '.git')
-  const existing = gitDirSnapshotsBeforeWrap.get(gitDir)
-  if (existing) {
-    existing.refCount += 1
-    return
+function resolveUniqueGitDirs(
+  cwd: string,
+  additionalWorkingDirectories?: readonly string[],
+): string[] {
+  const roots = [cwd, ...(additionalWorkingDirectories ?? [])]
+  const seen = new Set<string>()
+  const gitDirs: string[] = []
+  for (const rawRoot of roots) {
+    if (!rawRoot) continue
+    const expandedRoot = resolve(expandPath(rawRoot))
+    const gitDir = join(expandedRoot, '.git')
+    if (seen.has(gitDir)) continue
+    seen.add(gitDir)
+    gitDirs.push(gitDir)
   }
-  try {
-    // eslint-disable-next-line custom-rules/no-sync-fs -- pre-wrap snapshot
-    const st = lstatSync(gitDir)
-    if (!st.isDirectory()) return
-    const baseline = collectGitDirRelativeEntries(gitDir)
-    gitDirSnapshotsBeforeWrap.set(gitDir, { baseline, refCount: 1 })
-  } catch {
-    // No .git directory at cwd
+  return gitDirs
+}
+
+export function snapshotGitDirBeforeSandboxWrap(
+  cwd: string,
+  additionalWorkingDirectories?: readonly string[],
+): void {
+  for (const gitDir of resolveUniqueGitDirs(
+    cwd,
+    additionalWorkingDirectories,
+  )) {
+    const existing = gitDirSnapshotsBeforeWrap.get(gitDir)
+    if (existing) {
+      existing.refCount += 1
+      continue
+    }
+    try {
+      // eslint-disable-next-line custom-rules/no-sync-fs -- pre-wrap snapshot
+      const st = lstatSync(gitDir)
+      if (!st.isDirectory()) continue
+      const baseline = collectGitDirRelativeEntries(gitDir)
+      gitDirSnapshotsBeforeWrap.set(gitDir, { baseline, refCount: 1 })
+    } catch {
+      // No .git directory at this working root
+    }
   }
 }
 
@@ -559,15 +627,19 @@ export function isGitRefBearingPath(rel: string): boolean {
   return false
 }
 
-export function quarantineUnexpectedGitDirEntries(cwd?: string): {
+export function quarantineUnexpectedGitDirEntries(
+  cwd?: string,
+  additionalWorkingDirectories?: readonly string[],
+): {
   quarantined: string[]
   removedSymlinks: string[]
 } {
   const quarantined: string[] = []
   const removedSymlinks: string[] = []
   const targets = cwd
-    ? [join(cwd, '.git')]
+    ? resolveUniqueGitDirs(cwd, additionalWorkingDirectories)
     : Array.from(gitDirSnapshotsBeforeWrap.keys())
+  let quarantineSeq = 0
   for (const gitDir of targets) {
     const snapshot = gitDirSnapshotsBeforeWrap.get(gitDir)
     if (!snapshot) continue
@@ -575,17 +647,27 @@ export function quarantineUnexpectedGitDirEntries(cwd?: string): {
       // eslint-disable-next-line custom-rules/no-sync-fs -- cleanupAfterCommand is sync
       if (lstatSync(gitDir).isDirectory()) {
         const current = collectGitDirRelativeEntries(gitDir)
-        for (const [rel, currentKind] of current) {
-          const baselineKind = snapshot.baseline.get(rel)
-          const isNew = baselineKind === undefined
+        for (const [rel, currentEntry] of current) {
+          const baselineEntry = snapshot.baseline.get(rel)
+          const isNew = baselineEntry === undefined
           const replacedWithSymlink =
-            !isNew && currentKind === 'symlink' && baselineKind !== 'symlink'
+            !isNew &&
+            currentEntry.kind === 'symlink' &&
+            baselineEntry.kind !== 'symlink'
+          const retargetedSymlink =
+            !isNew &&
+            currentEntry.kind === 'symlink' &&
+            baselineEntry.kind === 'symlink' &&
+            baselineEntry.linkTarget !== currentEntry.linkTarget
           const replacedWithFifo =
-            !isNew && currentKind === 'fifo' && baselineKind !== 'fifo'
+            !isNew &&
+            currentEntry.kind === 'fifo' &&
+            baselineEntry.kind !== 'fifo'
           const isTrackedRefPath = isGitRefBearingPath(rel)
           if (
             !isNew &&
             !replacedWithSymlink &&
+            !retargetedSymlink &&
             !replacedWithFifo &&
             !isTrackedRefPath
           ) {
@@ -595,41 +677,50 @@ export function quarantineUnexpectedGitDirEntries(cwd?: string): {
           try {
             // eslint-disable-next-line custom-rules/no-sync-fs -- cleanupAfterCommand is sync
             const st = lstatSync(fullPath)
-            // Official `tme`: handle newly appearing OR replaced symlinks
-            // (incl. Windows junctions), FIFOs, and `ref:` symref files
-            // escaping `refs/` on ref-bearing paths (`eme`/`Khe`). Never
-            // touch regular git metadata files or directories.
-            if ((isNew || replacedWithSymlink) && st.isSymbolicLink()) {
-              // eslint-disable-next-line custom-rules/no-sync-fs -- cleanupAfterCommand is sync
-              unlinkSync(fullPath)
-              removedSymlinks.push(fullPath)
-              logForDebugging(
-                `[Sandbox] Removed unexpected symlink planted in .git: ${fullPath}`,
-                { level: 'warn' },
-              )
-              continue
-            }
-            const isFifo = (isNew || replacedWithFifo) && st.isFIFO()
+            // Official `tme`: move aside newly appearing, replaced, or
+            // retargeted symlinks (incl. Windows junctions), FIFOs, and `ref:`
+            // symref files escaping `refs/` on ref-bearing paths (`eme`/`Khe`)
+            // into a recoverable quarantine directory (falling back to unlink
+            // only if rename fails). Never touch regular git metadata files.
+            const isUnexpectedSymlink =
+              (isNew || replacedWithSymlink || retargetedSymlink) &&
+              st.isSymbolicLink()
+            const isFifo =
+              !isUnexpectedSymlink && (isNew || replacedWithFifo) && st.isFIFO()
             const isUnsafeRef =
+              !isUnexpectedSymlink &&
               !isFifo &&
               isTrackedRefPath &&
               st.isFile() &&
               isEscapingGitRefFile(fullPath)
-            if (isFifo || isUnsafeRef) {
+            if (isUnexpectedSymlink || isFifo || isUnsafeRef) {
               const quarantineDir = join(
                 gitDir,
                 '.claude-quarantine-unexpected',
               )
+              const kindLabel = isUnexpectedSymlink
+                ? retargetedSymlink
+                  ? 'retargeted symlink'
+                  : 'symlink'
+                : isFifo
+                  ? 'FIFO'
+                  : 'escaping ref file'
               try {
                 // eslint-disable-next-line custom-rules/no-sync-fs -- cleanupAfterCommand is sync
                 mkdirSync(quarantineDir, { recursive: true, mode: 0o700 })
                 const safeName = rel.replace(/[\\/]/g, '_')
-                const dest = join(quarantineDir, `${Date.now()}-${safeName}`)
+                const dest = join(
+                  quarantineDir,
+                  `${Date.now()}-${++quarantineSeq}-${safeName}`,
+                )
                 // eslint-disable-next-line custom-rules/no-sync-fs -- cleanupAfterCommand is sync
                 renameSync(fullPath, dest)
                 quarantined.push(fullPath)
+                if (isUnexpectedSymlink) {
+                  removedSymlinks.push(fullPath)
+                }
                 logForDebugging(
-                  `[Sandbox] Set aside planted ${isFifo ? 'FIFO' : 'escaping ref file'} ${fullPath} -> ${dest}`,
+                  `[Sandbox] Set aside planted ${kindLabel} ${fullPath} -> ${dest}`,
                   { level: 'warn' },
                 )
               } catch {
@@ -637,6 +728,9 @@ export function quarantineUnexpectedGitDirEntries(cwd?: string): {
                 // eslint-disable-next-line custom-rules/no-sync-fs -- cleanupAfterCommand is sync
                 unlinkSync(fullPath)
                 quarantined.push(fullPath)
+                if (isUnexpectedSymlink) {
+                  removedSymlinks.push(fullPath)
+                }
               }
             }
           } catch {
@@ -3867,20 +3961,19 @@ async function wrapWithSandbox(
     if (!resolveSandboxFilesystemDisabled()) {
       ensureUpdaterStagingDir()
     }
-    // Official 2.1.326 #301: snapshot .git before sandboxed command so
-    // unexpected entries planted inside .git/ are set aside after the command.
-    snapshotGitDirBeforeSandboxWrap(getOriginalCwd())
-    if (getCwd() !== getOriginalCwd()) {
-      snapshotGitDirBeforeSandboxWrap(getCwd())
-    }
-    // Official 2.1.326 #302: on Linux/WSL, pre-create missing `--add-dir`
-    // folders before each sandboxed command so bwrap can bind-mount them.
+    // Official 2.1.326 #302 / #301: collect `--add-dir` / additional working
+    // directories, snapshot `.git` across cwd + additionalWorkingDirectories,
+    // and pre-create missing Linux/WSL add-dirs before bwrap bind-mounts.
     const configuredAddDirs = Array.from(
       new Set([
         ...(getSettings_DEPRECATED()?.permissions?.additionalDirectories ?? []),
         ...getAdditionalDirectoriesForClaudeMd(),
       ]),
     )
+    snapshotGitDirBeforeSandboxWrap(getOriginalCwd(), [
+      getCwd(),
+      ...configuredAddDirs,
+    ])
     if (configuredAddDirs.length > 0) {
       precreateMissingLinuxAddDirs(configuredAddDirs)
     }

@@ -151,6 +151,7 @@ import {
 import type { ModelAlias } from 'src/utils/model/aliases.js'
 import {
   clearAgentTranscriptSubdir,
+  isLoggableMessage,
   recordSidechainTranscript,
   setAgentTranscriptSubdir,
   writeAgentMetadata,
@@ -1515,8 +1516,13 @@ export async function* runAgent({
     ...(forkedSkillName && { forkedSkillName }),
   }).catch(_err => logForDebugging(`Failed to write agent metadata: ${_err}`))
 
-  // Track the last recorded message UUID for parent chain continuity
-  let lastRecordedUuid: UUID | null = initialMessages.at(-1)?.uuid ?? null
+  // Track the last recorded message UUID for parent chain continuity.
+  // Official 2.1.328 runAgent (@303263876): `qn.findLast(mb)?.uuid ?? ts` —
+  // must skip non-loggable attachments (e.g. deferred_tools_delta) so the first
+  // assistant message chains onto the persisted initial user prompt instead of
+  // a dropped attachment UUID.
+  let lastRecordedUuid: UUID | null =
+    initialMessages.findLast(isLoggableMessage)?.uuid ?? null
 
   // Create Langfuse sub-agent trace (no-op if not configured).
   // Sub-agent trace shares the same sessionId as the parent, so Langfuse
@@ -1665,7 +1671,9 @@ export async function* runAgent({
           logForDebugging(`Failed to record sidechain transcript: ${err}`),
         )
         if (message.type !== 'progress') {
-          lastRecordedUuid = message.uuid
+          if (isLoggableMessage(message)) {
+            lastRecordedUuid = message.uuid
+          }
           turnHookTracker.saw(message)
         }
 

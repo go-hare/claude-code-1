@@ -2666,6 +2666,22 @@ async function run(): Promise<CommanderCommand> {
       let toolPermissionContext = initResult.toolPermissionContext;
       const { warnings, dangerousPermissions, overlyBroadBashPermissions } = initResult;
 
+      // Official 2.1.328 (`Wut(ee, he)` + `uZr` engineStore fallback): register
+      // the launch permission context and a live-context source so recursive
+      // CLAUDE.md / @include / .claude/rules reads apply `Read(...)` deny rules
+      // against the same context the tools see. Registered here (before the
+      // interactive store exists) so both headless and REPL loads are covered;
+      // the live getter is wired to the store below where each is created.
+      {
+        const { setClaudeMdPermissionContext, registerClaudeMdPermissionContextSource } = await import(
+          './utils/claudemd.js'
+        );
+        setClaudeMdPermissionContext(toolPermissionContext);
+        // Default live source mirrors the launch context until a store-backed
+        // getter replaces it at store creation.
+        registerClaudeMdPermissionContextSource(() => toolPermissionContext);
+      }
+
       // Handle overly broad shell allow rules (Bash(*), PowerShell(*))
       if (overlyBroadBashPermissions.length > 0) {
         for (const permission of overlyBroadBashPermissions) {
@@ -4164,6 +4180,13 @@ async function run(): Promise<CommanderCommand> {
         const headlessStore = createStore<HeadlessAppState>(headlessInitialState, ({ newState, oldState }) =>
           onChangeAppState({ newState: newState as AppState, oldState: oldState as AppState }),
         );
+
+        // Official `uZr` engineStore.current — memory reads see the live context
+        // (mid-session /permissions and settings sync changes), not just launch.
+        {
+          const { registerClaudeMdPermissionContextSource } = await import('./utils/claudemd.js');
+          registerClaudeMdPermissionContextSource(() => headlessStore.getState().toolPermissionContext);
+        }
 
         // Async check of auto mode gate — corrects state and disables auto if needed.
         if (feature('TRANSCRIPT_CLASSIFIER')) {
