@@ -263,6 +263,10 @@ export function getClaudeInChromeMCPToolOverrides(toolName: string): {
     progressMessagesForMessage: unknown[],
     options: { verbose: boolean },
   ) => React.ReactNode;
+  checkPermissions: (
+    input: unknown,
+    context: import('../../Tool.js').ToolUseContext,
+  ) => Promise<import('../../types/permissions.js').PermissionResult>;
   call: (
     args: Record<string, unknown>,
     context: import('../../Tool.js').ToolUseContext,
@@ -291,6 +295,16 @@ export function getClaudeInChromeMCPToolOverrides(toolName: string): {
         return null;
       }
       return renderChromeToolResultMessage(output, toolName as ChromeToolName, verbose);
+    },
+    /**
+     * Official 2.1.328 (`SWs` @343712000): resolve tab URL via
+     * `resolveTabUrlWithRetry` before execution and stash host/URL for `.call()`.
+     */
+    async checkPermissions(input, context) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { checkChromeToolPermissions } =
+        require('./chromeCallPermission.js') as typeof import('./chromeCallPermission.js');
+      return checkChromeToolPermissions(toolName, input, context);
     },
     /**
      * densable VQt `call` arm → ie(t,o,s,T).

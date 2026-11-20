@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
+import { createBridgeClient } from '@ant/claude-for-chrome-mcp'
 import {
+  checkChromeToolPermissions,
   matchTabUrl,
   resolveTabUrlWithRetry,
   TAB_LOOKUP_CAP_MS,
@@ -9,6 +11,7 @@ import {
   getChromeInstallSessionState,
   resetChromeInstallSessionState,
 } from '../sessionState.js'
+import { getClaudeInChromeMCPToolOverrides } from '../toolRendering.js'
 
 describe('2.1.293 #325 Chrome slow tab lookup retry', () => {
   test('constants match SEA 325 (5000ms cap, 2500ms retry delay)', () => {
@@ -100,6 +103,100 @@ describe('2.1.293 #325 Chrome slow tab lookup retry', () => {
       connectMs: 1,
       callMs: 5,
     })
+    resetChromeInstallSessionState()
+  })
+
+  test('2.1.328: BridgeClient implements hasActiveSelection() and tool overrides wire checkPermissions via resolveTabUrlWithRetry', async () => {
+    const noopLogger = {
+      info: () => {},
+      error: () => {},
+      warn: () => {},
+      debug: () => {},
+      silly: () => {},
+    }
+    const client = createBridgeClient({
+      serverName: 'claude-in-chrome',
+      logger: noopLogger,
+      socketPath: '',
+      clientTypeId: 'claude-code',
+      onToolCallDisconnected: () => 'disconnected',
+      onAuthenticationError: () => {},
+      bridgeConfig: {
+        url: 'wss://bridge.example.test',
+        getUserId: async () => 'user-1',
+        getOAuthToken: async () => 'tok-1',
+      },
+    })
+    expect(typeof client.hasActiveSelection).toBe('function')
+    expect(client.hasActiveSelection?.()).toBe(false)
+    client.selectExtensionById?.('dev-123', 'Chrome')
+    expect(client.hasActiveSelection?.()).toBe(true)
+    expect(client.getSelectedDeviceId?.()).toBe('dev-123')
+
+    // Production tool overrides expose checkPermissions
+    const overrides = getClaudeInChromeMCPToolOverrides('computer')
+    expect(typeof overrides.checkPermissions).toBe('function')
+
+    // checkChromeToolPermissions resolves tab URL via retry helper and stashes host/URL
+    resetChromeInstallSessionState()
+    let resolvedTabId: number | undefined
+    const perm = await checkChromeToolPermissions(
+      'computer',
+      { tabId: 77, action: 'screenshot' },
+      { toolUseId: 'tu-chrome-77' },
+      {
+        resolveTabUrl: async tabId => {
+          resolvedTabId = tabId
+          return {
+            ok: true,
+            url: 'https://docs.anthropic.com/en/docs',
+            connectMs: 1,
+            callMs: 3,
+          }
+        },
+      },
+    )
+    expect(resolvedTabId).toBe(77)
+    expect(perm.behavior).toBe('passthrough')
+    const state = getChromeInstallSessionState()
+    expect(state.resolvedHostByToolUseId.get('tu-chrome-77')?.host).toBe(
+      'docs.anthropic.com',
+    )
+    expect(state.resolvedUrlByToolUseId.get('tu-chrome-77')).toBe(
+      'https://docs.anthropic.com/en/docs',
+    )
+
+    // Non-web tab URL (chrome://) is denied
+    const deniedNonWeb = await checkChromeToolPermissions(
+      'computer',
+      { tabId: 88 },
+      { toolUseId: 'tu-chrome-88' },
+      {
+        resolveTabUrl: async () => ({
+          ok: true,
+          url: 'chrome://settings',
+          connectMs: 1,
+          callMs: 1,
+        }),
+      },
+    )
+    expect(deniedNonWeb.behavior).toBe('deny')
+
+    // Unresolved tab URL is denied
+    const deniedUnresolved = await checkChromeToolPermissions(
+      'computer',
+      { tabId: 99 },
+      { toolUseId: 'tu-chrome-99' },
+      {
+        resolveTabUrl: async () => ({
+          ok: false,
+          failure: 'answer_timeout_after_retry',
+          connectMs: 1,
+          callMs: 5000,
+        }),
+      },
+    )
+    expect(deniedUnresolved.behavior).toBe('deny')
     resetChromeInstallSessionState()
   })
 })

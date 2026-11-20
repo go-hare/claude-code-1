@@ -33,7 +33,7 @@ import { detectImageFormatFromBase64 } from '../imageResizer.js';
 import { checkComputerUseLock, tryAcquireComputerUseLock } from './computerUseLock.js';
 import { registerEscHotkey } from './escHotkey.js';
 import { getChicagoCoordinateMode } from './gates.js';
-import { getComputerUseHostAdapter } from './hostAdapter.js';
+import { getComputerUseHostAdapter, setComputerUseSystemKeyCombosReader } from './hostAdapter.js';
 import { getComputerUseMCPRenderingOverrides } from './toolRendering.js';
 
 type CallOverride = Pick<Tool, 'call'>['call'];
@@ -263,6 +263,9 @@ export function buildSessionContext(): ComputerUseSessionContext {
 function getOrBind(): Binding {
   if (binding) return binding;
   const ctx = buildSessionContext();
+  // Wire live session grantFlags.systemKeyCombos into hostAdapter's executor
+  // (official 2.1.328 `le`: `!o?.ctx.getGrantFlags().systemKeyCombos`).
+  setComputerUseSystemKeyCombosReader(() => (currentToolUseContext ? ctx.getGrantFlags().systemKeyCombos : false));
   binding = {
     ctx,
     dispatch: bindSessionContext(getComputerUseHostAdapter(), getChicagoCoordinateMode(), ctx),

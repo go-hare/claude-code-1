@@ -164,14 +164,23 @@ describe('Wave 327-328 API, Compact & AgentSummary', () => {
         env: {},
         getSourceSettings: src => {
           if (src === 'projectSettings')
-            return { attributionProject: 'team-alpha' }
+            return {
+              attributionProject: '550e8400-e29b-41d4-a716-446655440004',
+            }
           if (src === 'policySettings') {
-            return { attributionProjectPolicy: { default: 'default-group' } }
+            return {
+              attributionProjectPolicy: {
+                default: '550e8400-e29b-41d4-a716-446655440006',
+              },
+            }
           }
           return null
         },
       })
-      expect(res).toEqual({ written: 'team-alpha', source: 'projectSettings' })
+      expect(res).toMatchObject({
+        written: '550e8400-e29b-41d4-a716-446655440004',
+        source: 'projectSettings',
+      })
 
       const jwt = makeJwt({ billing_group_tag: 'billing_group' })
       expect(
@@ -180,15 +189,24 @@ describe('Wave 327-328 API, Compact & AgentSummary', () => {
           env: {},
           getSourceSettings: src =>
             src === 'policySettings'
-              ? { attributionProjectPolicy: { default: 'org-default' } }
+              ? {
+                  attributionProjectPolicy: {
+                    default: '550e8400-e29b-41d4-a716-446655440006',
+                  },
+                }
               : null,
         }),
-      ).toEqual({ tags: { billing_group: 'org-default' } })
+      ).toEqual({
+        tags: { billing_group: '550e8400-e29b-41d4-a716-446655440006' },
+      })
 
       expect(
         getBillingGroupRequestTags({
           jwt: makeJwt({ sub: 'user-1' }),
-          env: { CLAUDE_CODE_ATTRIBUTION_PROJECT: 'proj-1' },
+          env: {
+            CLAUDE_CODE_ATTRIBUTION_PROJECT:
+              '550e8400-e29b-41d4-a716-446655440000',
+          },
         }),
       ).toEqual({})
     })

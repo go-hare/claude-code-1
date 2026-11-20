@@ -593,6 +593,20 @@ export class BridgeClient implements SocketClient {
     )
   }
 
+  /** Official 2.1.328 (`hasActiveSelection` @334207956): true when a browser extension is actively selected. */
+  public hasActiveSelection(): boolean {
+    return this.selectedDeviceId !== undefined
+  }
+
+  /** Official 2.1.328 (`getSelectedDeviceId` @334207956): active or persisted device ID. */
+  public getSelectedDeviceId(): string | undefined {
+    return (
+      this.selectedDeviceId ??
+      this.persistedDeviceId ??
+      this.context.getPersistedDeviceId?.()
+    )
+  }
+
   /**
    * Switch to a different browser. Broadcasts a pairing request and blocks
    * until a response arrives or timeout (120s). Returns the paired extension

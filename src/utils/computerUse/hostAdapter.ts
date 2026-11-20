@@ -65,6 +65,28 @@ function checkScreenRecordingJXA(): boolean {
 }
 
 let cached: ComputerUseHostAdapter | undefined
+let systemKeyCombosGrantReader: () => boolean = () => false
+
+/**
+ * Register the live `systemKeyCombos` grant reader from the bound Computer Use
+ * session context (official `le` @308632000: `o?.ctx.getGrantFlags().systemKeyCombos`).
+ */
+export function setComputerUseSystemKeyCombosReader(
+  reader: (() => boolean) | undefined,
+): void {
+  systemKeyCombosGrantReader = reader ?? (() => false)
+}
+
+/**
+ * Returns whether the active Computer Use session has granted `systemKeyCombos`.
+ */
+export function isComputerUseSystemKeyCombosGranted(): boolean {
+  try {
+    return systemKeyCombosGrantReader() === true
+  } catch {
+    return false
+  }
+}
 
 /**
  * Process-lifetime singleton. Built once on first CU tool call; native modules
@@ -80,6 +102,7 @@ export function getComputerUseHostAdapter(): ComputerUseHostAdapter {
     executor: createCliExecutor({
       getMouseAnimationEnabled: () => getChicagoSubGates().mouseAnimation,
       getHideBeforeActionEnabled: () => getChicagoSubGates().hideBeforeAction,
+      getAllowSystemKeyCombos: isComputerUseSystemKeyCombosGranted,
     }),
     ensureOsPermissions: async () => {
       if (process.platform !== 'darwin') return { granted: true }

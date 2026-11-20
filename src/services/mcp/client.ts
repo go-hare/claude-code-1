@@ -3437,7 +3437,11 @@ export const fetchToolsForClient = memoizeWithLRU(
                   markMcpServerLoggable(client.name)
                 }
 
-                const toolUseId = extractToolUseId(parentMessage)
+                // Official 2.1.328 (@335374540): prefer context.toolUseId (set by
+                // Code Mode inner calls and sub-dispatches) before falling back to
+                // scanning parentMessage for the first tool_use block.
+                const toolUseId =
+                  context.toolUseId ?? extractToolUseId(parentMessage)
                 const meta = toolUseId
                   ? { 'claudecode/toolUseId': toolUseId }
                   : {}

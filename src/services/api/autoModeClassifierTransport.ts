@@ -164,13 +164,12 @@ export function readExternalAutoModeServerRaw(
 }
 
 /**
- * Official 2.1.328 (#565, SEA `EP`): setting aside
- * `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` for the server classifier is ONLY
- * permitted inside Claude Desktop (`CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`) and
- * when `tengu_drifting_valley` is enabled. Outside Claude Desktop, setting
- * `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` keeps experimental classifier betas
- * off behind beta-rejecting gateways and on Bedrock, Vertex/Agent Platform,
- * Foundry, and Claude apps gateway.
+ * Official 2.1.328 (`EP`): setting aside `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`
+ * for the server classifier is gated by `Bn()` (`getAPIProvider() === 'firstParty'`),
+ * direct first-party Anthropic endpoint (not behind a custom gateway or unix socket),
+ * `!CLAUDE_CODE_SIMULATE_PROXY_USAGE`, user switch not off, and `tengu_drifting_valley`.
+ * Normal first-party CLI sessions ARE eligible when those conditions hold; 3P providers
+ * (Bedrock, Vertex, Foundry, gateway) are NOT (`getAPIProvider() !== 'firstParty'`).
  */
 export function isBetasSwitchSetAside(
   env: NodeJS.ProcessEnv = process.env,
@@ -178,15 +177,12 @@ export function isBetasSwitchSetAside(
   if (leftoverHipaa()) return false
   if (!env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS) return false
   if (isEnvTruthy(env.CLAUDE_CODE_SIMULATE_PROXY_USAGE)) return false
-  // Outside Claude Desktop, never set aside CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS.
-  const isHostManagedDesktop =
-    isEnvTruthy(env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST) ||
-    env.CLAUDE_CODE_ENTRYPOINT === 'claude-desktop'
-  if (!isHostManagedDesktop) return false
+  // Official 2.1.328 `EP`: `Bn()` === `getAPIProvider() === 'firstParty'`
+  if (getAPIProvider() !== 'firstParty') return false
   if (readUserServerClassifierSwitch(env) === false) return false
   if (
-    getAPIProvider() === 'firstParty' &&
-    (env.ANTHROPIC_UNIX_SOCKET !== undefined || !isFirstPartyAnthropicBaseUrl())
+    env.ANTHROPIC_UNIX_SOCKET !== undefined ||
+    !isFirstPartyAnthropicBaseUrl()
   ) {
     return false
   }
@@ -244,11 +240,13 @@ export function serverClassifierBetasEligible(opts?: {
           isBetasSwitchSetAside()
         )
       }
-      // Official 2.1.328 #565: on Bedrock, Vertex/Agent Platform, Foundry, or
-      // gateway, respect CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS outside Claude
-      // Desktop unless explicitly overridden via CLAUDE_CODE_AUTO_MODE_SERVER=1.
+      // Official 2.1.328 #565 (`Tfo`): on Bedrock, Vertex/Agent Platform,
+      // Foundry, or gateway, respect CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS
+      // unless host-managed (`CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`) or
+      // explicitly overridden via CLAUDE_CODE_AUTO_MODE_SERVER=1.
       if (
         Boolean(process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS) &&
+        !process.env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST &&
         !isBetasSwitchSetAside() &&
         readUserServerClassifierSwitch() !== true
       ) {
@@ -351,7 +349,10 @@ export function isLocalAutoModeClassifierSwitchedOff(
   ) {
     return false
   }
-  if (leftoverHipaa() || experimentalBetasDisabledRaw()) {
+  if (
+    leftoverHipaa() ||
+    (experimentalBetasDisabledRaw() && !isBetasSwitchSetAside())
+  ) {
     return false
   }
   const userSwitch = peekUserServerClassifierSwitch()
@@ -388,7 +389,8 @@ export function thirdPartyServerClassifierOn(
     userSwitch ??
     !(
       Boolean(env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS) &&
-      !env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST
+      !env.CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST &&
+      getAPIProvider() !== 'firstParty'
     )
   return thirdPartyServerClassifierEnabled
 }

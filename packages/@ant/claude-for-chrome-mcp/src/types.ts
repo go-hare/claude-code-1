@@ -212,4 +212,8 @@ export interface SocketClient {
   >
   /** densable selectExtensionById — pick browser without pairing broadcast. */
   selectExtensionById?(deviceId: string, name: string): void
+  /** Official 2.1.328 — true when a specific browser extension is actively selected. */
+  hasActiveSelection?(): boolean
+  /** Official 2.1.328 — active or persisted selected browser device ID. */
+  getSelectedDeviceId?(): string | undefined
 }

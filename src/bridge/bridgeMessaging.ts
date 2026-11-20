@@ -380,6 +380,7 @@ function isPromiseLike<T>(v: unknown): v is PromiseLike<T> {
 }
 
 export async function resolveAsyncSetModelVerdict(opts: {
+  // biome-ignore lint/suspicious/noConfusingVoidType: load-bearing void for async () => {} implementors
   verdict: PromiseLike<SetModelVerdict | void>
   respond: (
     payload:
@@ -868,6 +869,7 @@ export function handleServerControlRequest(
       const verdict = onSetModel?.(
         typeof requested === 'string' ? requested : undefined,
       )
+      // biome-ignore lint/suspicious/noConfusingVoidType: matches onSetModel Promise<SetModelVerdict | void>
       if (isPromiseLike<SetModelVerdict | void>(verdict)) {
         void resolveAsyncSetModelVerdict({
           verdict,

@@ -1,3 +1,5 @@
+import { realpathSync } from 'fs'
+import { resolve as resolvePath } from 'path'
 import { normalizeLanguageForSTT } from '../../hooks/useVoice.js'
 import { getShortcutDisplay } from '../../keybindings/shortcutFormat.js'
 import { logEvent } from '../../services/analytics/index.js'
@@ -10,6 +12,7 @@ import {
 } from '../../utils/settings/constants.js'
 import {
   getInitialSettings,
+  getSettingsFilePathForSource,
   getSettingsForSource,
   updateSettingsForSource,
 } from '../../utils/settings/settings.js'
@@ -26,10 +29,33 @@ const PROJECT_SETTING_FILE_LABELS: Partial<Record<SettingSource, string>> = {
   localSettings: '.claude/settings.local.json',
 }
 
+function canonicalizeSettingsPath(filePath: string): string {
+  try {
+    return realpathSync(filePath)
+  } catch {
+    return resolvePath(filePath)
+  }
+}
+
+function isProjectSettingsSameFileAsUserSettings(
+  getFilePath: (
+    source: SettingSource,
+  ) => string | undefined = getSettingsFilePathForSource,
+): boolean {
+  const projectPath = getFilePath('projectSettings')
+  const userPath = getFilePath('userSettings')
+  if (!projectPath || !userPath) return false
+  return (
+    canonicalizeSettingsPath(projectPath) === canonicalizeSettingsPath(userPath)
+  )
+}
+
 /**
- * Official 2.1.325 (#2278): check whether a higher-precedence setting source
- * (managed/policy, `--settings` flagSettings, or project `.claude/settings*.json`)
- * holds `voice.enabled` at a value that overrides `userSettings`.
+ * Official 2.1.325 (#2278) & 2.1.328 (`mDi`): check whether a higher-precedence
+ * setting source (managed/policy, `--settings` flagSettings, or project
+ * `.claude/settings*.json`) holds `voice.enabled` at a value that overrides
+ * `userSettings`. Skips `projectSettings` when its canonicalized path points
+ * to the same physical file as `userSettings`.
  */
 export function findVoiceEnabledOverrideMessage(
   disabling: boolean,
@@ -37,12 +63,20 @@ export function findVoiceEnabledOverrideMessage(
   readSource: (
     source: SettingSource,
   ) => ReturnType<typeof getSettingsForSource> = getSettingsForSource,
+  getFilePath: (
+    source: SettingSource,
+  ) => string | undefined = getSettingsFilePathForSource,
 ): string | null {
   const sources = getSources()
+  const projectAliasesUser =
+    isProjectSettingsSameFileAsUserSettings(getFilePath)
   let holder: SettingSource | undefined
   let heldValue: boolean | undefined
   for (let i = sources.length - 1; i >= 0; i--) {
     const src = sources[i]!
+    if (src === 'projectSettings' && projectAliasesUser) {
+      continue
+    }
     const s = readSource(src) as
       | { voice?: { enabled?: boolean }; voiceEnabled?: boolean }
       | null

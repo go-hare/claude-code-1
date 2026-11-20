@@ -14,7 +14,12 @@ import {
   updateGroveSettings,
 } from '../../services/api/grove.js';
 import type { LocalJSXCommandOnDone } from '../../types/command.js';
-import { getClaudeAIOAuthTokens, getOauthAccountInfo } from '../../utils/auth.js';
+import {
+  getClaudeAIOAuthTokens,
+  getOauthAccountInfo,
+  getOauthAccountInfoFromDisk,
+  isClaudeAISubscriber,
+} from '../../utils/auth.js';
 import { getSecureStorage } from '../../utils/secureStorage/index.js';
 
 const PRIVACY_SETTINGS_URL = 'https://claude.ai/settings/data-privacy-controls';
@@ -23,17 +28,25 @@ const FETCH_ERROR_MESSAGE = `Unable to fetch your privacy settings at this time.
 const ACCOUNT_CHANGED_MESSAGE = 'The signed-in account changed.';
 const SAVE_FAILED_MESSAGE = "Couldn't save your privacy setting.";
 
+export type AccountIdentity = {
+  accessToken?: string;
+  accountUuid?: string;
+};
+
 export type AccountSnapshot = {
   accessToken?: string;
   accountUuid?: string;
+  held?: AccountIdentity | null;
+  stored?: AccountIdentity | null;
+  diskAccountUuid?: string;
 };
 
 export type AccountCheckResult = 'same' | 'changed' | 'unconfirmed';
 
 /**
- * Official 2.1.326 #72: capture the active OAuth account identity when
- * `/privacy-settings` opens so we refuse to save onto a different account if
- * another terminal signed in while the dialog was open.
+ * Official 2.1.328: capture both the process-held OAuth tokens and fresh live
+ * secure-storage credentials so switching accounts in another terminal is
+ * detected even while this process still holds the previous account in memory.
  */
 export async function capturePrivacyAccountSnapshot(): Promise<AccountSnapshot | undefined> {
   try {
@@ -43,14 +56,56 @@ export async function capturePrivacyAccountSnapshot(): Promise<AccountSnapshot |
     const stored = (await storage.readAsync())?.claudeAiOauth as
       | { accessToken?: string; accountUuid?: string }
       | undefined;
-    const oauthInfo = getOauthAccountInfo();
-    const accessToken = held?.accessToken ?? stored?.accessToken;
+    const diskAccountUuid = getOauthAccountInfoFromDisk()?.accountUuid ?? getOauthAccountInfo()?.accountUuid;
+    const heldIdentity: AccountIdentity | null = held
+      ? {
+          accessToken: held.accessToken,
+          accountUuid: (held as { accountUuid?: string }).accountUuid,
+        }
+      : null;
+    const storedIdentity: AccountIdentity | null = stored
+      ? {
+          accessToken: stored.accessToken,
+          accountUuid: stored.accountUuid,
+        }
+      : null;
+    // Prefer live stored identity over stale in-process held identity for the
+    // summary fields so callers inspecting the snapshot directly see live storage.
+    const accessToken = storedIdentity?.accessToken ?? heldIdentity?.accessToken;
     const accountUuid =
-      (held as { accountUuid?: string } | null)?.accountUuid ?? stored?.accountUuid ?? oauthInfo?.accountUuid;
-    return { accessToken, accountUuid };
+      storedIdentity?.accountUuid ??
+      (storedIdentity?.accessToken && storedIdentity.accessToken !== heldIdentity?.accessToken
+        ? diskAccountUuid
+        : undefined) ??
+      heldIdentity?.accountUuid ??
+      diskAccountUuid;
+    return {
+      accessToken,
+      accountUuid,
+      held: heldIdentity,
+      stored: storedIdentity,
+      diskAccountUuid,
+    };
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Official 2.1.328 `R = k(l?.stored?.accountUuid)`: detects when live storage
+ * has already switched to a different account before `/privacy-settings` opens.
+ */
+export function isPrivacyAccountChangedAtOpen(opened: AccountSnapshot | undefined): boolean {
+  if (!opened) return false;
+  const heldToken = opened.held?.accessToken;
+  const heldUuid = opened.held?.accountUuid;
+  const storedToken = opened.stored?.accessToken;
+  const storedUuid =
+    opened.stored?.accountUuid ??
+    (storedToken && heldToken && storedToken !== heldToken ? opened.diskAccountUuid : undefined);
+  const effectiveHeldUuid =
+    heldUuid ?? (heldToken !== undefined && heldToken === storedToken ? opened.diskAccountUuid : undefined);
+  return Boolean(storedUuid && effectiveHeldUuid && storedUuid !== effectiveHeldUuid);
 }
 
 export async function verifyPrivacyAccountUnchanged(
@@ -60,6 +115,53 @@ export async function verifyPrivacyAccountUnchanged(
   if (!openedWith) return 'unconfirmed';
   const current = await captureFn();
   if (!current) return 'unconfirmed';
+
+  const openedHeld = openedWith.held;
+  const openedStored = openedWith.stored;
+  const openedAccessToken = openedHeld?.accessToken ?? openedWith.accessToken;
+  const openedHeldUuid = openedHeld?.accountUuid;
+  const openedAccountUuid =
+    openedHeldUuid ??
+    (openedAccessToken === (openedStored?.accessToken ?? openedWith.accessToken)
+      ? (openedStored?.accountUuid ?? openedWith.diskAccountUuid ?? openedWith.accountUuid)
+      : (openedWith.accountUuid ?? openedStored?.accountUuid ?? openedWith.diskAccountUuid));
+
+  const isDifferentAccount = (uuid?: string): boolean =>
+    Boolean(uuid && openedAccountUuid && uuid !== openedAccountUuid);
+
+  const hasSplitIdentity =
+    openedWith.held !== undefined ||
+    openedWith.stored !== undefined ||
+    current.held !== undefined ||
+    current.stored !== undefined;
+
+  if (hasSplitIdentity) {
+    const currentHeld = current.held ?? undefined;
+    const currentStored = current.stored ?? undefined;
+    const currentStoredToken = currentStored?.accessToken;
+    const currentStoredUuid =
+      currentStored?.accountUuid ??
+      (currentStoredToken && currentStoredToken !== openedAccessToken ? current.diskAccountUuid : undefined);
+
+    // Official 2.1.328 `E()`: check live storage BEFORE trusting in-process held
+    // tokens so an account switch in another terminal is never masked by stale `held`.
+    if (isDifferentAccount(currentStoredUuid)) {
+      return 'changed';
+    }
+    if (openedStored?.accessToken && !currentStoredToken && !current.diskAccountUuid) {
+      return 'changed';
+    }
+    if (
+      currentHeld &&
+      (currentHeld.accessToken === openedAccessToken ||
+        (openedHeldUuid && currentHeld.accountUuid === openedHeldUuid && isClaudeAISubscriber()))
+    ) {
+      return 'same';
+    }
+    const fallbackUuid = currentHeld?.accountUuid ?? current.diskAccountUuid ?? current.accountUuid;
+    return isDifferentAccount(fallbackUuid) || (!currentHeld && !fallbackUuid) ? 'changed' : 'unconfirmed';
+  }
+
   if (openedWith.accountUuid && current.accountUuid && current.accountUuid !== openedWith.accountUuid) {
     return 'changed';
   }
@@ -158,7 +260,7 @@ export function createSerializedPrivacyToggleController(deps: {
   };
 }
 
-function HardenedPrivacySettingsDialog({
+export function HardenedPrivacySettingsDialog({
   settings,
   domainExcluded,
   lockedByClaudeScience,
@@ -184,7 +286,17 @@ function HardenedPrivacySettingsDialog({
       initialEnabled: Boolean(settings.grove_enabled),
       confirmSave,
       saveSetting: async enabled => {
-        await updateGroveSettings(enabled);
+        const saved = await updateGroveSettings(enabled);
+        // Official `X` @330053699: `pe = Ae ?? await h()` — on failure the
+        // PATCH resolves `undefined` and the caller re-reads live settings;
+        // if the effective value differs from the requested target the UI
+        // shows SAVE_FAILED. `saved === false` is a server-side OFF, also a
+        // mismatch vs an ON request (and vice-versa).
+        const refreshed = await getGroveSettings();
+        const effective = saved ?? (refreshed.success ? refreshed.data.grove_enabled : undefined) ?? undefined;
+        if (effective !== enabled) {
+          throw new Error("Couldn't save your choice. Please try again.");
+        }
       },
       onStateChange: state => {
         setGroveEnabled(state.enabled);
@@ -263,13 +375,17 @@ function HardenedPrivacySettingsDialog({
 }
 
 export async function call(onDone: LocalJSXCommandOnDone): Promise<React.ReactNode | null> {
+  const openedAccount = await capturePrivacyAccountSnapshot();
+  if (!openedAccount || isPrivacyAccountChangedAtOpen(openedAccount)) {
+    onDone(FALLBACK_MESSAGE);
+    return null;
+  }
+
   const qualified = await isQualifiedForGrove();
   if (!qualified) {
     onDone(FALLBACK_MESSAGE);
     return null;
   }
-
-  const openedAccount = await capturePrivacyAccountSnapshot();
 
   getGroveSettings.cache.clear?.();
   getGroveNoticeConfig.cache.clear?.();
@@ -285,6 +401,8 @@ export async function call(onDone: LocalJSXCommandOnDone): Promise<React.ReactNo
   let chosenValue: boolean | undefined;
   let failedReason: string | undefined;
   let active = true;
+  let saveAttempted = false;
+  let pendingCloseToken: symbol | undefined;
 
   async function confirmSave(): Promise<{ ok: boolean; error?: string }> {
     if (!active || failedReason) {
@@ -292,6 +410,7 @@ export async function call(onDone: LocalJSXCommandOnDone): Promise<React.ReactNo
     }
     const status = await verifyPrivacyAccountUnchanged(openedAccount);
     if (status === 'same') {
+      saveAttempted = true;
       return { ok: true };
     }
     const prefix = status === 'changed' ? ACCOUNT_CHANGED_MESSAGE : '';
@@ -299,12 +418,21 @@ export async function call(onDone: LocalJSXCommandOnDone): Promise<React.ReactNo
     return { ok: false, error: failedReason };
   }
 
+  function onOffPicked() {
+    if (pendingCloseToken) {
+      pendingCloseToken = undefined;
+      active = true;
+    }
+  }
+
   async function onDoneWithDecision(decision: GroveDecision) {
     if (!failedReason && (decision === 'escape' || decision === 'defer')) {
-      active = false;
-      onDone('Privacy settings dialog dismissed', {
-        display: 'system',
-      });
+      if (!saveAttempted) {
+        active = false;
+        onDone('Privacy settings dialog dismissed', {
+          display: 'system',
+        });
+      }
       return;
     }
     if (decision === 'accept_opt_in' || decision === 'accept_opt_out') {
@@ -322,8 +450,12 @@ export async function call(onDone: LocalJSXCommandOnDone): Promise<React.ReactNo
       return;
     }
 
-    // Official 2.1.326 #72: verify signed-in account didn't change before reporting status.
+    const token = Symbol();
+    pendingCloseToken = token;
+
+    // Official 2.1.326 #72 & 2.1.328: verify signed-in account didn't change before reporting status.
     const accountStatus = await verifyPrivacyAccountUnchanged(openedAccount);
+    if (pendingCloseToken !== token) return;
     if (accountStatus !== 'same') {
       onDone(accountStatus === 'changed' ? `${ACCOUNT_CHANGED_MESSAGE} ${FALLBACK_MESSAGE}` : FETCH_ERROR_MESSAGE, {
         display: 'system',
@@ -335,6 +467,7 @@ export async function call(onDone: LocalJSXCommandOnDone): Promise<React.ReactNo
     // picking OFF right after ON never reports stale "set to true".
     getGroveSettings.cache.clear?.();
     const updatedSettingsResult = await getGroveSettings();
+    if (pendingCloseToken !== token) return;
     if (!updatedSettingsResult.success) {
       onDone(
         chosenValue === undefined
@@ -373,21 +506,37 @@ export async function call(onDone: LocalJSXCommandOnDone): Promise<React.ReactNo
 
   // Show privacy settings directly if the user has already accepted the terms.
   if (settings.grove_enabled !== null) {
+    const lockedByClaudeScience = config.grove_locked_by_claude_science === true;
     return (
       <HardenedPrivacySettingsDialog
         settings={settings}
         domainExcluded={config?.domain_excluded}
+        lockedByClaudeScience={lockedByClaudeScience}
         confirmSave={confirmSave}
         onChoose={val => {
           chosenValue = val;
         }}
-        onDone={() => {
-          void onDoneWithSettingsCheck();
-        }}
+        onDone={
+          lockedByClaudeScience
+            ? () => {
+                onDone(undefined, { display: 'skip' });
+              }
+            : () => {
+                void onDoneWithSettingsCheck();
+              }
+        }
       />
     );
   }
 
   // Show the GroveDialog for users who haven't accepted terms yet
-  return <GroveDialog showIfAlreadyViewed={true} onDone={onDoneWithDecision} location={'settings'} />;
+  return (
+    <GroveDialog
+      showIfAlreadyViewed={true}
+      confirmSave={confirmSave}
+      onOffPicked={onOffPicked}
+      onDone={onDoneWithDecision}
+      location={'settings'}
+    />
+  );
 }

@@ -32,6 +32,7 @@ export type GroveConfig = {
   domain_excluded: boolean
   notice_is_grace_period: boolean
   notice_reminder_frequency: number | null
+  grove_locked_by_claude_science?: boolean
 }
 
 /**
@@ -105,29 +106,43 @@ export async function markGroveNoticeViewed(): Promise<void> {
         },
       )
     })
-    // This mutates grove_notice_viewed_at server-side — Grove.tsx:87 reads it
-    // to decide whether to show the dialog. Without invalidation a same-session
-    // remount would read stale viewed_at:null and re-show the dialog.
-    getGroveSettings.cache.clear?.()
   } catch (err) {
     logError(err)
+  } finally {
+    // This mutates grove_notice_viewed_at server-side — Grove.tsx reads it
+    // to decide whether to show the dialog. Always invalidate on settle so
+    // a same-session remount never reads stale viewed_at:null.
+    getGroveSettings.cache.clear?.()
   }
 }
 
 /**
- * Update Grove settings for the user account
+ * Update Grove settings for the user account.
+ * Official 2.1.328 `Wmn`:
+ * - Supports `{ onlyIfUnset: true }` which appends `?opt_in_only_if_unset=grove_enabled`
+ *   so initial terms ON cannot silently flip an account that is already OFF.
+ * - Returns the server's boolean `grove_enabled` when present in the response.
+ * - Clears cached `getGroveSettings` in `finally` (both on success and failure).
+ * - On error logs and returns `undefined` (official `catch` falls through to
+ *   `return`, it does not rethrow) — callers detect failure via `undefined`,
+ *   never confuse it with a server `false` (which means `already_off`).
  */
 export async function updateGroveSettings(
   groveEnabled: boolean,
-): Promise<void> {
+  options: { onlyIfUnset?: boolean } = {},
+): Promise<boolean | undefined> {
+  const { onlyIfUnset = false } = options
   try {
-    await withOAuth401Retry(() => {
+    const response = await withOAuth401Retry(() => {
       const authHeaders = getAuthHeaders()
       if (authHeaders.error) {
         throw new Error(`Failed to get auth headers: ${authHeaders.error}`)
       }
-      return axios.patch(
-        `${getOauthConfig().BASE_API_URL}/api/oauth/account/settings`,
+      const path = onlyIfUnset
+        ? '/api/oauth/account/settings?opt_in_only_if_unset=grove_enabled'
+        : '/api/oauth/account/settings'
+      return axios.patch<{ grove_enabled?: unknown }>(
+        `${getOauthConfig().BASE_API_URL}${path}`,
         {
           grove_enabled: groveEnabled,
         },
@@ -139,11 +154,20 @@ export async function updateGroveSettings(
         },
       )
     })
-    // Invalidate memoized settings so the post-toggle confirmation
-    // read in privacy-settings.tsx picks up the new value.
-    getGroveSettings.cache.clear?.()
+    const data = response?.data
+    return typeof data === 'object' &&
+      data !== null &&
+      'grove_enabled' in data &&
+      typeof data.grove_enabled === 'boolean'
+      ? data.grove_enabled
+      : undefined
   } catch (err) {
     logError(err)
+    return undefined
+  } finally {
+    // Always invalidate memoized settings so subsequent reads (both after
+    // success and after failure) never serve stale cached state.
+    getGroveSettings.cache.clear?.()
   }
 }
 
@@ -259,6 +283,7 @@ export const getGroveNoticeConfig = memoize(
         domain_excluded,
         notice_is_grace_period,
         notice_reminder_frequency,
+        grove_locked_by_claude_science,
       } = response.data
 
       return {
@@ -268,6 +293,8 @@ export const getGroveNoticeConfig = memoize(
           domain_excluded: domain_excluded ?? false,
           notice_is_grace_period: notice_is_grace_period ?? true,
           notice_reminder_frequency,
+          grove_locked_by_claude_science:
+            grove_locked_by_claude_science === true,
         },
       }
     } catch (err) {

@@ -376,7 +376,7 @@ export type SelfHostedRunnerApi = {
       [key: string]: unknown
     },
     signal?: AbortSignal,
-  ) => Promise<{ gave_up?: boolean } | void>
+  ) => Promise<{ gave_up?: boolean } | undefined> | Promise<void>
   pollWork: (
     runnerToken: string,
     runnerId: string,

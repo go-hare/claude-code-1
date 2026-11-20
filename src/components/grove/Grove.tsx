@@ -18,9 +18,101 @@ import { Byline, Dialog, KeyboardShortcutHint } from '@anthropic/ink';
 
 export type GroveDecision = 'accept_opt_in' | 'accept_opt_out' | 'defer' | 'escape' | 'skip_rendering';
 
+export type GroveConfirmSave = () => Promise<{ ok: boolean; error?: string }>;
+
+export type GroveChoiceOutcome =
+  | { kind: 'done'; decision: 'accept_opt_in' | 'accept_opt_out' | 'defer' | 'escape' }
+  | { kind: 'blocked'; error: string }
+  | { kind: 'already_off' }
+  | { kind: 'superseded' };
+
+/**
+ * Official 2.1.328 `OEo` decision executor for initial Consumer Terms / Grove save:
+ * - Runs pre-save `confirmSave` account verification before writing `accept_opt_in` / `accept_opt_out`.
+ * - Passes `{ onlyIfUnset: true }` when saving `accept_opt_in` so ON cannot silently flip an account
+ *   whose setting was already OFF elsewhere, returning `{ kind: 'already_off' }` when the server keeps OFF.
+ */
+export async function submitGroveDialogDecision(params: {
+  value: 'accept_opt_in' | 'accept_opt_out' | 'defer' | 'escape';
+  confirmSave?: GroveConfirmSave;
+  onOffPicked?: () => void;
+  isOffPicked: () => boolean;
+  markOffPicked: () => void;
+  noticeIsGracePeriod?: boolean;
+  saveSetting?: (groveEnabled: boolean, options?: { onlyIfUnset?: boolean }) => Promise<boolean | undefined>;
+}): Promise<GroveChoiceOutcome> {
+  const {
+    value,
+    confirmSave,
+    onOffPicked,
+    isOffPicked,
+    markOffPicked,
+    noticeIsGracePeriod,
+    saveSetting = updateGroveSettings,
+  } = params;
+
+  if (value === 'accept_opt_in' && isOffPicked()) {
+    return { kind: 'superseded' };
+  }
+  if (value === 'accept_opt_out') {
+    markOffPicked();
+    onOffPicked?.();
+  }
+  if ((value === 'accept_opt_in' || value === 'accept_opt_out') && confirmSave) {
+    const check = await confirmSave();
+    if (!check.ok) {
+      return {
+        kind: 'blocked',
+        error: check.error ?? "Couldn't save your choice. Please try again.",
+      };
+    }
+  }
+
+  switch (value) {
+    case 'accept_opt_in': {
+      if (isOffPicked()) {
+        return { kind: 'superseded' };
+      }
+      const savedValue = await saveSetting(true, { onlyIfUnset: true });
+      const alreadyOff = savedValue === false;
+      logEvent('tengu_grove_policy_submitted', {
+        state: !alreadyOff,
+        dismissable: noticeIsGracePeriod as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      });
+      if (isOffPicked()) {
+        return { kind: 'superseded' };
+      }
+      if (alreadyOff) {
+        return { kind: 'already_off' };
+      }
+      break;
+    }
+    case 'accept_opt_out': {
+      await saveSetting(false);
+      logEvent('tengu_grove_policy_submitted', {
+        state: false,
+        dismissable: noticeIsGracePeriod as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
+      });
+      break;
+    }
+    case 'defer':
+      logEvent('tengu_grove_policy_dismissed', {
+        state: true,
+      });
+      break;
+    case 'escape':
+      logEvent('tengu_grove_policy_escaped', {});
+      break;
+  }
+
+  return { kind: 'done', decision: value };
+}
+
 type Props = {
   showIfAlreadyViewed: boolean;
   location: 'settings' | 'policy_update_modal' | 'onboarding';
+  confirmSave?: GroveConfirmSave;
+  onOffPicked?: () => void;
   onDone(decision: GroveDecision): void;
 };
 
@@ -113,15 +205,32 @@ function PostGracePeriodContentBody(): React.ReactNode {
   );
 }
 
-export function GroveDialog({ showIfAlreadyViewed, location, onDone }: Props): React.ReactNode {
+export function GroveDialog({
+  showIfAlreadyViewed,
+  location,
+  confirmSave,
+  onOffPicked,
+  onDone,
+}: Props): React.ReactNode {
   const [shouldShowDialog, setShouldShowDialog] = useState<boolean | null>(null);
   const [groveConfig, setGroveConfig] = useState<GroveConfig | null>(null);
-  // Official 2.1.326 #70: lock selection while saving so keys pressed in flight
-  // cannot overwrite an OFF answer with ON.
+  // Official 2.1.326 #70 & 2.1.328 `OEo`: lock selection while saving so keys pressed
+  // in flight cannot overwrite an OFF answer with ON, and surface blocked/already-off states.
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [blockedError, setBlockedError] = useState<string | null>(null);
+  const [wasAlreadyOff, setWasAlreadyOff] = useState(false);
   const savingRef = useRef(false);
   const offPickedRef = useRef(false);
+
+  useInput(
+    (_input, key) => {
+      if (key.return) {
+        onDone('accept_opt_out');
+      }
+    },
+    { isActive: wasAlreadyOff },
+  );
 
   useEffect(() => {
     async function checkGroveSettings() {
@@ -162,6 +271,38 @@ export function GroveDialog({ showIfAlreadyViewed, location, onDone }: Props): R
     return null;
   }
 
+  if (blockedError) {
+    return (
+      <Dialog title="Help improve our AI models" color="professionalBlue" onCancel={() => onDone('escape')}>
+        <Text color="error">
+          <StatusIcon status="error" withSpace />
+          {blockedError}
+        </Text>
+      </Dialog>
+    );
+  }
+
+  if (wasAlreadyOff) {
+    return (
+      <Dialog
+        title="Help improve our AI models"
+        color="professionalBlue"
+        onCancel={() => onDone('accept_opt_out')}
+        inputGuide={
+          <Byline>
+            <KeyboardShortcutHint shortcut="Enter" action="continue" />
+            <KeyboardShortcutHint shortcut="Esc" action="close" />
+          </Byline>
+        }
+      >
+        <Text>
+          This setting wasn&apos;t turned on. It&apos;s off for your account. You can review it any time with
+          /privacy-settings.
+        </Text>
+      </Dialog>
+    );
+  }
+
   async function onChange(value: 'accept_opt_in' | 'accept_opt_out' | 'defer' | 'escape') {
     if (savingRef.current) {
       return;
@@ -169,43 +310,40 @@ export function GroveDialog({ showIfAlreadyViewed, location, onDone }: Props): R
     if (value === 'accept_opt_in' && offPickedRef.current) {
       return;
     }
-    savingRef.current = true;
-    setSaving(true);
-    setSaveError(null);
-    if (value === 'accept_opt_out') {
-      offPickedRef.current = true;
+    if (value === 'defer' && offPickedRef.current) {
+      return;
+    }
+    if (value !== 'defer' && value !== 'escape') {
+      savingRef.current = true;
+      setSaving(true);
+      setSaveError(null);
     }
     try {
-      switch (value) {
-        case 'accept_opt_in': {
-          await updateGroveSettings(true);
-          logEvent('tengu_grove_policy_submitted', {
-            state: true,
-            dismissable:
-              groveConfig?.notice_is_grace_period as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          });
-          break;
-        }
-        case 'accept_opt_out': {
-          await updateGroveSettings(false);
-          logEvent('tengu_grove_policy_submitted', {
-            state: false,
-            dismissable:
-              groveConfig?.notice_is_grace_period as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-          });
-          break;
-        }
-        case 'defer':
-          logEvent('tengu_grove_policy_dismissed', {
-            state: true,
-          });
-          break;
-        case 'escape':
-          logEvent('tengu_grove_policy_escaped', {});
-          break;
+      const outcome = await submitGroveDialogDecision({
+        value,
+        confirmSave,
+        onOffPicked,
+        isOffPicked: () => offPickedRef.current,
+        markOffPicked: () => {
+          offPickedRef.current = true;
+        },
+        noticeIsGracePeriod: groveConfig?.notice_is_grace_period,
+      });
+      if (outcome.kind === 'blocked') {
+        savingRef.current = false;
+        setSaving(false);
+        setBlockedError(outcome.error);
+        return;
       }
-
-      onDone(value);
+      if (outcome.kind === 'already_off') {
+        savingRef.current = false;
+        setSaving(false);
+        setWasAlreadyOff(true);
+        return;
+      }
+      if (outcome.kind === 'done') {
+        onDone(outcome.decision);
+      }
     } catch (err) {
       savingRef.current = false;
       setSaving(false);
@@ -213,24 +351,27 @@ export function GroveDialog({ showIfAlreadyViewed, location, onDone }: Props): R
     }
   }
 
-  const acceptOptions = groveConfig?.domain_excluded
-    ? [
-        {
-          label: 'Accept terms · Help improve our AI models: OFF (for emails with your domain)',
-          value: 'accept_opt_out',
-        },
-      ]
-    : [
-        {
-          label: 'Accept terms · Help improve our AI models: ON',
-          value: 'accept_opt_in',
-          disabled: saving || offPickedRef.current,
-        },
-        {
-          label: 'Accept terms · Help improve our AI models: OFF',
-          value: 'accept_opt_out',
-        },
-      ];
+  const offOption = {
+    label: 'Accept terms · Help improve our AI models: OFF',
+    value: 'accept_opt_out',
+  };
+  const acceptOptions = groveConfig?.grove_locked_by_claude_science
+    ? [offOption]
+    : groveConfig?.domain_excluded
+      ? [
+          {
+            label: 'Accept terms · Help improve our AI models: OFF (for emails with your domain)',
+            value: 'accept_opt_out',
+          },
+        ]
+      : [
+          {
+            label: 'Accept terms · Help improve our AI models: ON',
+            value: 'accept_opt_in',
+            disabled: saving || offPickedRef.current,
+          },
+          offOption,
+        ];
 
   function handleCancel(): void {
     if (savingRef.current) {

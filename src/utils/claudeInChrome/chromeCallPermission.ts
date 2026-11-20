@@ -20,9 +20,11 @@ import {
 } from '../../bootstrap/state.js'
 import { logEvent } from '../../services/analytics/index.js'
 import type { ToolPermissionContext, ToolUseContext } from '../../Tool.js'
+import type { PermissionResult } from '../../types/permissions.js'
 import {
   getChromeInstallSessionState,
   rememberLastExecutedTabUrl,
+  rememberResolvedChromeHost,
   type ResolvedChromeHost,
 } from './sessionState.js'
 
@@ -533,6 +535,175 @@ export async function resolveTabUrlWithRetry(
     return first
   }
   return rescued
+}
+
+const NO_TAB_ID_CHROME_TOOLS = new Set([
+  'tabs_context_mcp',
+  'tabs_create_mcp',
+  'tabs_close_mcp',
+  'resize_window',
+  'shortcuts_list',
+  'list_connected_browsers',
+  'switch_browser',
+  'select_browser',
+])
+
+function parseWebUrl(raw: string): { host: string; href: string } | undefined {
+  try {
+    const parsed = new URL(raw)
+    if (
+      (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') ||
+      parsed.host === ''
+    ) {
+      return undefined
+    }
+    return { host: parsed.host, href: parsed.href }
+  } catch {
+    return undefined
+  }
+}
+
+function extractChromePermissionTarget(
+  toolName: string,
+  input: Record<string, unknown>,
+): { toolName: string; input: Record<string, unknown> } | undefined {
+  if (toolName === 'browser_batch') {
+    const actions = Array.isArray(input.actions) ? input.actions : []
+    for (const item of actions) {
+      if (
+        item &&
+        typeof item === 'object' &&
+        typeof (item as { name?: unknown }).name === 'string'
+      ) {
+        const actionName = (item as { name: string }).name
+        const actionInput =
+          (item as { input?: unknown }).input &&
+          typeof (item as { input?: unknown }).input === 'object' &&
+          !Array.isArray((item as { input?: unknown }).input)
+            ? (item as { input: Record<string, unknown> }).input
+            : {}
+        if (
+          actionName === 'navigate' ||
+          typeof actionInput.tabId === 'number'
+        ) {
+          return { toolName: actionName, input: actionInput }
+        }
+      }
+    }
+    return undefined
+  }
+  return { toolName, input }
+}
+
+/**
+ * Official 2.1.328 (`SWs` @343712000): resolve target tab URL via
+ * `resolveTabUrlWithRetry` during Chrome MCP tool `checkPermissions`, deny
+ * unresolved/non-web targets, and stash resolved host/URL for `.call()`.
+ */
+export async function checkChromeToolPermissions(
+  toolName: string,
+  input: unknown,
+  context: Pick<ToolUseContext, 'toolUseId'>,
+  opts?: {
+    resolveTabUrl?: typeof resolveTabUrlWithRetry
+  },
+): Promise<PermissionResult> {
+  const obj =
+    input !== null && typeof input === 'object' && !Array.isArray(input)
+      ? (input as Record<string, unknown>)
+      : {}
+  const fullyQualifiedName = `mcp__claude-in-chrome__${toolName}`
+
+  if (
+    toolName === 'navigate' &&
+    typeof obj.url === 'string' &&
+    (obj.url.trim().toLowerCase() === 'back' ||
+      obj.url.trim().toLowerCase() === 'forward')
+  ) {
+    return { behavior: 'allow', updatedInput: obj }
+  }
+
+  const target = extractChromePermissionTarget(toolName, obj)
+  let resolvedWeb: { host: string; href: string } | undefined
+
+  if (
+    target &&
+    target.toolName === 'navigate' &&
+    typeof target.input.url === 'string'
+  ) {
+    resolvedWeb = parseWebUrl(target.input.url)
+    if (!resolvedWeb) {
+      logEvent('chrome_permission_prompt', {})
+      return {
+        behavior: 'deny',
+        message:
+          "Can't interact with browser-internal or unparseable URLs. Navigate to a web page first.",
+        decisionReason: {
+          type: 'other',
+          reason: 'Claude in Chrome: non-web or unparseable URL',
+        },
+      }
+    }
+  } else if (
+    target &&
+    !NO_TAB_ID_CHROME_TOOLS.has(target.toolName) &&
+    typeof target.input.tabId === 'number'
+  ) {
+    const resolveTab = opts?.resolveTabUrl ?? resolveTabUrlWithRetry
+    const tabRes = await resolveTab(target.input.tabId)
+    if (!tabRes.ok) {
+      logEvent('chrome_permission_prompt', {})
+      return {
+        behavior: 'deny',
+        message:
+          "Couldn't determine which page this action targets. Re-read tabs_context_mcp and try again.",
+        decisionReason: {
+          type: 'other',
+          reason: 'Claude in Chrome: tab URL unresolved',
+        },
+      }
+    }
+    resolvedWeb = parseWebUrl(tabRes.url)
+    if (!resolvedWeb) {
+      logEvent('chrome_permission_prompt', {})
+      return {
+        behavior: 'deny',
+        message:
+          "Can't interact with browser-internal or unparseable URLs. Navigate to a web page first.",
+        decisionReason: {
+          type: 'other',
+          reason: 'Claude in Chrome: non-web or unparseable tab URL',
+        },
+      }
+    }
+  }
+
+  if (resolvedWeb && context.toolUseId) {
+    rememberResolvedChromeHost(context.toolUseId, { host: resolvedWeb.host })
+    const state = getChromeInstallSessionState()
+    if (state.resolvedUrlByToolUseId.size >= 200) {
+      state.resolvedUrlByToolUseId.clear()
+    }
+    state.resolvedUrlByToolUseId.set(context.toolUseId, resolvedWeb.href)
+  }
+
+  return {
+    behavior: 'passthrough',
+    message: 'MCPTool requires permission.',
+    suggestions: [
+      {
+        type: 'addRules',
+        rules: [
+          {
+            toolName: fullyQualifiedName,
+            ruleContent: undefined,
+          },
+        ],
+        behavior: 'allow',
+        destination: 'session',
+      },
+    ],
+  }
 }
 
 // ── 2.1.323 #2198: Browser tool call escaped / JSON-text input refusal ──────

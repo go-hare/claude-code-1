@@ -2622,13 +2622,14 @@ async function* queryModel(
     }
 
     // Retry context gets preference because it tries to course correct if we exceed the context window limit.
-    // Official 2.1.326 (#51) + 2.1.327 (#481): apply any session-cached model
-    // output ceiling AND raise unrecognized models cut at 32k to 128k on continuation.
+    // Official 2.1.326 (#51) + 2.1.328 (`Math.min($n?.maxTokensOverride || ie.maxOutputTokensOverride || Infinity, nR.ceiling(dn.maxOutputTokens))`):
+    // apply any session-cached model output ceiling AND any retry-lowered
+    // max_tokens override as strict upper caps so unknown-model continuation
+    // never bumps a server-lowered cap (e.g. 16384) back up to 128000.
     const cachedModelCeiling = getCachedModelMaxTokensCeiling(
       retryContext.model,
     )
     const rawMaxOutputTokens =
-      retryContext?.maxTokensOverride ||
       options.maxOutputTokensOverride ||
       getMaxOutputTokensForModel(options.model)
     const maxOutputTokens = resolveOutputTokenLimitForContinuation({
@@ -2636,8 +2637,10 @@ async function* queryModel(
       requestedMaxTokens: rawMaxOutputTokens,
       continuesCutReply:
         options.continuesCutReply === true &&
-        options.querySource !== 'hook_agent',
+        options.querySource !== 'hook_agent' &&
+        !options.maxOutputTokensOverride,
       cachedModelCeiling,
+      retryMaxTokensOverride: retryContext?.maxTokensOverride,
       isSecurityControl:
         options.querySource === 'auto_mode' ||
         options.querySource === 'auto_mode_investigator',
@@ -3238,11 +3241,15 @@ async function* queryModel(
   let thinkingOnlyStaleRetryCount = 0
   // Official Qc.outputFiltered (#14) — retry streaming once on outputFiltered
   let outputFilteredRetryCount = 0
+  // Official 2.1.328 `xCt.onReplyBegun()`: hold retry-lowered max_tokens ceiling
+  // until the response stream actually starts (`message_start`).
+  let confirmPendingMaxTokensCeiling: (() => void) | undefined
 
   // densable labeled stream loop (`e:`): withRetry + for-await + partial path.
   while (true) {
     try {
       try {
+        confirmPendingMaxTokensCeiling = undefined
         queryCheckpoint('query_client_creation_start')
         const generator = withRetry(
           () =>
@@ -3400,6 +3407,10 @@ async function* queryModel(
             querySource: options.querySource,
             onError: onThinkingDisplayApiError,
             onRetryStatus: options.onRetryStatus,
+            deferMaxTokensCeilingConfirmation: true,
+            onPendingMaxTokensCeiling: pending => {
+              confirmPendingMaxTokensCeiling = pending.confirm
+            },
           },
         )
 
@@ -3880,6 +3891,10 @@ async function* queryModel(
 
             switch (part.type) {
               case 'message_start': {
+                if (confirmPendingMaxTokensCeiling) {
+                  confirmPendingMaxTokensCeiling()
+                  confirmPendingMaxTokensCeiling = undefined
+                }
                 partialMessage = part.message
                 ttftMs = Date.now() - start
                 usage = updateUsage(usage, part.message?.usage)

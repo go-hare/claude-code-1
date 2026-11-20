@@ -226,43 +226,152 @@ export function extractBillingGroupTagFromJwt(
   }
 }
 
+const ATTRIBUTION_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const BASE58_ALPHABET =
+  '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+const TAGGED_ID_BODY_LENGTH = 22
+const TAGGED_ID_RE =
+  /^(?:claude_proj|chan)_(?:staging_|local_)?01[1-9A-HJ-NP-Za-km-z]{22}$/
+const TAGGED_ID_MAX = (1n << 128n) - 1n
+
 /**
- * Official 2.1.327 `vCn` (#374): resolve `attributionProject` from
- * `CLAUDE_CODE_ATTRIBUTION_PROJECT`, settings cascade
- * (`localSettings > projectSettings > userSettings > flagSettings > policySettings`),
- * or `policySettings.attributionProjectPolicy.default`.
+ * Official 2.1.328 `uYo` (@292329xxx): normalize an attributionProject value to
+ * its tagged id — a UUID is encoded as `claude_proj_01<base58-22>`; an existing
+ * `claude_proj[_staging_|_local_]_01…`/`chan_…` tagged id is accepted verbatim
+ * when its base58 body decodes within 128 bits. Anything else returns undefined
+ * and the caller records the source in `ignored`.
+ */
+export function normalizeAttributionProjectId(
+  value: string,
+): string | undefined {
+  const trimmed = value.trim()
+  if (ATTRIBUTION_UUID_RE.test(trimmed)) {
+    let n = BigInt(`0x${trimmed.replaceAll('-', '')}`)
+    let body = ''
+    while (n > 0n) {
+      body = BASE58_ALPHABET[Number(n % 58n)] + body
+      n /= 58n
+    }
+    return `claude_proj_01${body.padStart(
+      TAGGED_ID_BODY_LENGTH,
+      BASE58_ALPHABET[0],
+    )}`
+  }
+  if (!TAGGED_ID_RE.test(trimmed)) return undefined
+  let decoded = 0n
+  for (const ch of trimmed.slice(-TAGGED_ID_BODY_LENGTH)) {
+    decoded = decoded * 58n + BigInt(BASE58_ALPHABET.indexOf(ch))
+  }
+  return decoded <= TAGGED_ID_MAX ? trimmed : undefined
+}
+
+export type AttributionProjectSource =
+  | 'harness'
+  | 'user'
+  | 'project'
+  | 'local'
+  | 'flag'
+  | 'managed'
+  | 'admin_default'
+
+export type AttributionProjectResolution = {
+  project?: { taggedId: string; source: AttributionProjectSource }
+  written: string | undefined
+  ignored: AttributionProjectSource[]
+  serverStated?: true
+  source?: string
+}
+
+/**
+ * Official 2.1.328 `vCn` (@292329208): resolve `attributionProject` from a
+ * server-stated tagged id, `CLAUDE_CODE_ATTRIBUTION_PROJECT`, the settings
+ * cascade in highest-to-lowest precedence
+ * (`policySettings > flagSettings > localSettings > projectSettings > userSettings`),
+ * or `policySettings.attributionProjectPolicy.default`. A valid value normalizes
+ * to a tagged id via `uYo`; an invalid one is ignored and its source recorded.
  */
 export function resolveAttributionProject(opts?: {
   env?: NodeJS.ProcessEnv
+  serverStatedTaggedId?: string
   getSourceSettings?: (
     source:
+      | 'policySettings'
+      | 'flagSettings'
       | 'localSettings'
       | 'projectSettings'
-      | 'userSettings'
-      | 'flagSettings'
-      | 'policySettings',
+      | 'userSettings',
   ) => Record<string, unknown> | null
-}): { written: string | undefined; source?: string } {
+  normalizeId?: (value: string) => string | undefined
+}): AttributionProjectResolution {
+  const normalize = opts?.normalizeId ?? normalizeAttributionProjectId
+  const ignored: AttributionProjectSource[] = []
+  if (opts?.serverStatedTaggedId !== undefined) {
+    return {
+      project: { taggedId: opts.serverStatedTaggedId, source: 'harness' },
+      written: opts.serverStatedTaggedId,
+      ignored,
+      serverStated: true,
+      source: 'harness',
+    }
+  }
   const env = opts?.env ?? process.env
   const fromEnv = env.CLAUDE_CODE_ATTRIBUTION_PROJECT
   if (fromEnv !== undefined && fromEnv.trim() !== '') {
-    return { written: fromEnv.trim(), source: 'harness' }
+    const taggedId = normalize(fromEnv)
+    if (taggedId !== undefined) {
+      return {
+        project: { taggedId, source: 'harness' },
+        written: fromEnv.trim(),
+        ignored,
+        source: 'harness',
+      }
+    }
+    ignored.push('harness')
   }
   const readSource =
     opts?.getSourceSettings ??
     (src => getSettingsForSource(src) as Record<string, unknown> | null)
+  // Official 2.1.328 `vCn` walks `zo()` (`Gs`) from highest to lowest precedence:
+  // policySettings > flagSettings > localSettings > projectSettings > userSettings.
   const cascade = [
+    'policySettings',
+    'flagSettings',
     'localSettings',
     'projectSettings',
     'userSettings',
-    'flagSettings',
-    'policySettings',
   ] as const
+  const sourceNames: Record<
+    (typeof cascade)[number],
+    AttributionProjectSource
+  > = {
+    userSettings: 'user',
+    projectSettings: 'project',
+    localSettings: 'local',
+    flagSettings: 'flag',
+    policySettings: 'managed',
+  }
   for (const src of cascade) {
     const val = readSource(src)?.attributionProject
+    if (val === undefined) continue
     if (typeof val === 'string' && val.trim() !== '') {
-      return { written: val.trim(), source: src }
+      const taggedId = normalize(val)
+      if (taggedId !== undefined) {
+        return {
+          project: { taggedId, source: sourceNames[src] },
+          written: val.trim(),
+          ignored,
+          source: src,
+        }
+      }
+      ignored.push(sourceNames[src])
+      // Official vCn: an invalid value in a source is ignored and the cascade
+      // stops — lower-precedence settings files cannot name a project.
+      break
     }
+    // Official vCn: an explicitly set empty string stops lower-precedence
+    // settings files from naming a project while still allowing admin_default.
+    break
   }
   const policyDefault = (
     readSource('policySettings')?.attributionProjectPolicy as
@@ -270,9 +379,18 @@ export function resolveAttributionProject(opts?: {
       | undefined
   )?.default
   if (typeof policyDefault === 'string' && policyDefault.trim() !== '') {
-    return { written: policyDefault.trim(), source: 'admin_default' }
+    const taggedId = normalize(policyDefault)
+    if (taggedId !== undefined) {
+      return {
+        project: { taggedId, source: 'admin_default' },
+        written: policyDefault.trim(),
+        ignored,
+        source: 'admin_default',
+      }
+    }
+    ignored.push('admin_default')
   }
-  return { written: undefined }
+  return { project: undefined, written: undefined, ignored }
 }
 
 /**

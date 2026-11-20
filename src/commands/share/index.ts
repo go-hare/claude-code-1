@@ -95,7 +95,8 @@ const SECRET_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
 // Official #501 (xA / A$ / T$ / C$ / R$ / O$ / z$) — key-value secret redactor
 // supporting keys with no value and JSON written inside a shell string
 // (up to 7 backslashes before quotes).
-const SECRET_KEY_NAME = String.raw`(?:aws[-_]?)?(?:secret[-_]?(?:access[-_]?)?key|session[-_]?token|security[-_]?token|bearer[-_]?token[-_]?bedrock)(?![A-Za-z0-9_-])`
+const SECRET_KEY_NAME =
+  '(?:aws[-_]?)?(?:secret[-_]?(?:access[-_]?)?key|session[-_]?token|security[-_]?token|bearer[-_]?token[-_]?bedrock)(?![A-Za-z0-9_-])'
 const SECRET_KEY_PREFIX = String.raw`(?:${SECRET_KEY_NAME}(?:\\{0,7}["'\`])?[ \t]*[:=][ \t]*(?:\\{0,7}["'\`])?|<${SECRET_KEY_NAME}>)`
 const SECRET_VALUE_LOOKAHEAD = String.raw`(?![{[(=]|arn:|~[\\/]|[a-z]:[\\/]|\\\\|(?:\.{1,2})?\/[^\s"':/]+\/[^\s"':]|[a-z][a-z0-9+.-]*:(?:[a-z][a-z0-9+.-]*:)?(?:\/\/|\\\/\\\/)|E[A-Z0-9]{1,15}: )`
 const SECRET_VALUE_BODY = String.raw`(?:(?!arn:)(?!plugin:)(?!https?:\/\/)(?!bearer\s)[A-Za-z0-9_]|[+/=%.@-](?!(?:ssh|git|gs|s3|file|s?ftp|wss?|postgres(?:ql)?|mysql|mongodb(?:\+srv)?|rediss?|amqps?):\/\/)|\\\/)+`

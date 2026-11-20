@@ -318,6 +318,10 @@ export function createCliExecutor(opts: {
   getMouseAnimationEnabled: () => boolean
   getHideBeforeActionEnabled: () => boolean
   getAllowSystemKeyCombos?: () => boolean
+  /** Optional test injection hooks for keyboard/mouse input & run-loop pump. */
+  getInput?: () => Input
+  swiftOverride?: ReturnType<typeof requireComputerUseSwift>
+  runOnMainLoop?: <T>(fn: () => Promise<T>) => Promise<T>
 }): ComputerExecutor {
   // Non-macOS: delegate entirely to the cross-platform executor.
   // No macOS code paths, no drainRunLoop, no @ant packages.
@@ -331,7 +335,9 @@ export function createCliExecutor(opts: {
   // ── macOS: native @ant packages ─────────────────────────────────────
   // Everything below is macOS-only. No platform checks needed.
 
-  const cu = requireComputerUseSwift()
+  const cu = opts.swiftOverride ?? requireComputerUseSwift()
+  const getInput = opts.getInput ?? requireComputerUseInput
+  const runOnMainLoop = opts.runOnMainLoop ?? drainRunLoop
 
   const { getMouseAnimationEnabled, getHideBeforeActionEnabled } = opts
   const terminalBundleId = getTerminalBundleId()
@@ -529,25 +535,30 @@ export function createCliExecutor(opts: {
      * nothing stuck. 8ms between iterations — 125Hz USB polling cadence.
      */
     async key(keySequence: string, repeat?: number): Promise<void> {
-      const input = requireComputerUseInput()
+      const input = getInput()
       const rawParts = keySequence.split('+').filter(p => p.length > 0)
       const parts = assertSafeKeyChord(rawParts, 'Key chord', {
         platform: 'darwin',
         allowSystemKeyCombos: opts.getAllowSystemKeyCombos?.() === true,
       })
-      const isEsc = isBareEscape(parts)
-      const n = repeat ?? 1
-      await drainRunLoop(async () => {
-        for (let i = 0; i < n; i++) {
-          if (i > 0) await sleep(8)
-          if (isEsc) notifyExpectedEscape()
-          await input.keys(parts)
-        }
-      })
+      const releaseTracking = trackHeldChord(parts)
+      try {
+        const isEsc = isBareEscape(parts)
+        const n = repeat ?? 1
+        await runOnMainLoop(async () => {
+          for (let i = 0; i < n; i++) {
+            if (i > 0) await sleep(8)
+            if (isEsc) notifyExpectedEscape()
+            await input.keys(parts)
+          }
+        })
+      } finally {
+        releaseTracking()
+      }
     },
 
     async holdKey(keyNames: string[], durationMs: number): Promise<void> {
-      const input = requireComputerUseInput()
+      const input = getInput()
       const safeKeyNames = assertSafeKeyChord(keyNames, 'Hold key', {
         platform: 'darwin',
         allowSystemKeyCombos: opts.getAllowSystemKeyCombos?.() === true,
@@ -556,7 +567,7 @@ export function createCliExecutor(opts: {
       const pressed: string[] = []
       let orphaned = false
       try {
-        await drainRunLoop(async () => {
+        await runOnMainLoop(async () => {
           for (const k of safeKeyNames) {
             if (orphaned) return
             // Bare Escape: notify the CGEventTap so it doesn't fire the
@@ -571,8 +582,11 @@ export function createCliExecutor(opts: {
         await sleep(durationMs)
       } finally {
         orphaned = true
-        releaseTracking()
-        await drainRunLoop(() => releasePressed(input, pressed))
+        try {
+          await runOnMainLoop(() => releasePressed(input, pressed))
+        } finally {
+          releaseTracking()
+        }
       }
     },
 
@@ -580,18 +594,24 @@ export function createCliExecutor(opts: {
       text: string,
       typeOpts: { viaClipboard: boolean },
     ): Promise<void> {
-      const input = requireComputerUseInput()
+      const input = getInput()
       if (typeOpts.viaClipboard) {
-        await drainRunLoop(() => typeViaClipboard(input, text))
+        await runOnMainLoop(() => typeViaClipboard(input, text))
         return
       }
-      for (const ch of text) {
+      const chars = [...text]
+      for (const ch of chars) {
         assertSafeKeyChord([ch], 'Typed text', {
           platform: 'darwin',
           allowSystemKeyCombos: opts.getAllowSystemKeyCombos?.() === true,
         })
       }
-      await input.typeText(text)
+      const releaseTracking = trackHeldChord(chars)
+      try {
+        await input.typeText(text)
+      } finally {
+        releaseTracking()
+      }
     },
 
     readClipboard: readClipboardViaPbpaste,
@@ -601,7 +621,7 @@ export function createCliExecutor(opts: {
     // ── Mouse ────────────────────────────────────────────────────────────
 
     async moveMouse(x: number, y: number): Promise<void> {
-      await moveAndSettle(requireComputerUseInput(), x, y)
+      await moveAndSettle(getInput(), x, y)
     },
 
     /**
@@ -618,16 +638,29 @@ export function createCliExecutor(opts: {
       count: 1 | 2 | 3,
       modifiers?: string[],
     ): Promise<void> {
-      const input = requireComputerUseInput()
-      await moveAndSettle(input, x, y)
-      if (modifiers && modifiers.length > 0) {
-        await drainRunLoop(() =>
-          withModifiers(input, modifiers, () =>
-            input.mouseButton(button, 'click', count),
-          ),
-        )
-      } else {
-        await input.mouseButton(button, 'click', count)
+      const safeMods =
+        modifiers !== undefined && modifiers.length > 0
+          ? assertSafeKeyChord(modifiers, 'Key chord', {
+              platform: 'darwin',
+              allowSystemKeyCombos: opts.getAllowSystemKeyCombos?.() === true,
+            })
+          : undefined
+      const releaseTracking =
+        safeMods !== undefined ? trackHeldChord(safeMods) : undefined
+      try {
+        const input = getInput()
+        await moveAndSettle(input, x, y)
+        if (safeMods && safeMods.length > 0) {
+          await runOnMainLoop(() =>
+            withModifiers(input, safeMods, () =>
+              input.mouseButton(button, 'click', count),
+            ),
+          )
+        } else {
+          await input.mouseButton(button, 'click', count)
+        }
+      } finally {
+        releaseTracking?.()
       }
     },
 

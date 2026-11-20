@@ -6,6 +6,11 @@ import {
   APIError,
   APIUserAbortError,
 } from '@anthropic-ai/sdk'
+import {
+  getSessionId,
+  getStickyBetas,
+  onSessionSwitch,
+} from 'src/bootstrap/state.js'
 import type { QuerySource } from 'src/constants/querySource.js'
 import type { SystemAPIErrorMessage } from 'src/types/message.js'
 import {
@@ -58,6 +63,7 @@ import {
   isHostAuthTokenRefreshAvailable,
   tryHostAuth401Recovery,
 } from '../../utils/hostCredsFile.js'
+import { getSdkOauthTokenRefreshCallback } from '../../utils/sdkOauthTokenRefresh.js'
 import {
   type CooldownReason,
   handleFastModeOverageRejection,
@@ -227,16 +233,71 @@ const STALE_CONNECTION_CODES = new Set([
 
 /** densable EYy / 2.1.214 #18+#46 + 2.1.321 #1878 StreamTruncated */
 /**
- * Official 2.1.326 (#51) `gxs` / `hxs` / `xCt` / `y9e`:
+ * Official 2.1.326 (#51) + 2.1.328 `gxs` / `hxs` / `xCt` / `y9e` / `Rbo`:
  * When the API rejects a request with HTTP 400
  * `max_tokens: X > Y, which is the maximum allowed number of output tokens for ...`
  * lower `max_tokens` to the API-reported maximum `Y` (>= 4096), retry once,
- * and remember that ceiling per normalized model until `/clear`.
+ * and remember that ceiling per normalized model ONLY once the reply actually
+ * begins (`message_start` for streaming or validated response for non-streaming),
+ * clearing automatically on `/clear`, compaction, `/resume` (session switch),
+ * `clearBetaHeaderLatches()` / `resetStickyBetas()`, or provider/endpoint/auth
+ * changes.
  */
 const API_MAX_TOKENS_CEILING_RE =
   /max_tokens:\s*(\d+)\s*>\s*(\d+),\s*which is the maximum allowed number of output tokens for\b/i
 export const MIN_API_MAX_TOKENS_CEILING = 4096
-const modelMaxTokensCeilingCache = new Map<string, number>()
+
+type ModelMaxTokensCeilingBucket = {
+  scopeKey: string
+  ceilings: Map<string, number>
+}
+
+const modelMaxTokensCeilingByStickyBetas = new WeakMap<
+  object,
+  ModelMaxTokensCeilingBucket
+>()
+
+function getLearnedMaxTokensScopeKey(): string {
+  const provider = getAPIProvider()
+  const baseUrl =
+    process.env.ANTHROPIC_BASE_URL ??
+    process.env.ANTHROPIC_FOUNDRY_BASE_URL ??
+    process.env.ANTHROPIC_VERTEX_BASE_URL ??
+    process.env.ANTHROPIC_BEDROCK_BASE_URL ??
+    ''
+  const sessionId = getSessionId()
+  const authMode = process.env.ANTHROPIC_API_KEY
+    ? 'api_key'
+    : process.env.ANTHROPIC_AUTH_TOKEN
+      ? 'auth_token'
+      : process.env.CLAUDE_CODE_OAUTH_TOKEN
+        ? 'oauth_env'
+        : 'default'
+  return `${sessionId}\0${provider}\0${baseUrl}\0${authMode}`
+}
+
+function getActiveModelMaxTokensCeilingMap(
+  createIfMissing: boolean,
+): Map<string, number> | undefined {
+  const stickyBetas = getStickyBetas()
+  const scopeKey = getLearnedMaxTokensScopeKey()
+  const existing = modelMaxTokensCeilingByStickyBetas.get(stickyBetas)
+  if (existing && existing.scopeKey === scopeKey) {
+    return existing.ceilings
+  }
+  if (!createIfMissing) {
+    if (existing) {
+      modelMaxTokensCeilingByStickyBetas.delete(stickyBetas)
+    }
+    return undefined
+  }
+  const next: ModelMaxTokensCeilingBucket = {
+    scopeKey,
+    ceilings: new Map<string, number>(),
+  }
+  modelMaxTokensCeilingByStickyBetas.set(stickyBetas, next)
+  return next.ceilings
+}
 
 function normalizeModelKeyForCeiling(model: string): string {
   return model.trim().toLowerCase()
@@ -245,7 +306,9 @@ function normalizeModelKeyForCeiling(model: string): string {
 export function getCachedModelMaxTokensCeiling(
   model: string,
 ): number | undefined {
-  return modelMaxTokensCeilingCache.get(normalizeModelKeyForCeiling(model))
+  return getActiveModelMaxTokensCeilingMap(false)?.get(
+    normalizeModelKeyForCeiling(model),
+  )
 }
 
 export function setCachedModelMaxTokensCeiling(
@@ -253,16 +316,39 @@ export function setCachedModelMaxTokensCeiling(
   maxTokens: number,
 ): void {
   if (maxTokens >= MIN_API_MAX_TOKENS_CEILING) {
-    modelMaxTokensCeilingCache.set(
+    getActiveModelMaxTokensCeilingMap(true)?.set(
       normalizeModelKeyForCeiling(model),
       maxTokens,
     )
   }
 }
 
-export function clearCachedModelMaxTokensCeilings(): void {
-  modelMaxTokensCeilingCache.clear()
+/**
+ * Official 2.1.328 `xCt.onReplyBegun()`: commit a retry-lowered max_tokens
+ * ceiling into the session cache ONLY once the reply stream actually begins
+ * (`message_start`) or a non-streaming response succeeds.
+ */
+export function confirmModelMaxTokensCeiling(
+  model: string,
+  maxTokens: number,
+): void {
+  if (maxTokens < MIN_API_MAX_TOKENS_CEILING) return
+  if (getCachedModelMaxTokensCeiling(model) === maxTokens) return
+  setCachedModelMaxTokensCeiling(model, maxTokens)
+  logForDebugging(
+    `[max_tokens] A request for ${model} failed, and a reply began when it was sent again with max_tokens set to ${maxTokens}. Until the next /clear, compaction, resume or provider change, max_tokens for this model is capped at ${maxTokens}. Set CLAUDE_CODE_MAX_OUTPUT_TOKENS to pick a different limit.`,
+    { level: 'warn' },
+  )
 }
+
+export function clearCachedModelMaxTokensCeilings(): void {
+  modelMaxTokensCeilingByStickyBetas.delete(getStickyBetas())
+}
+
+// Clear learned ceilings on /resume, /clear, and session switch (`switchSession` / `regenerateSessionId`).
+onSessionSwitch(() => {
+  clearCachedModelMaxTokensCeilings()
+})
 
 export function parseApiMaxTokensCeilingError(
   error: unknown,
@@ -284,20 +370,68 @@ export function parseApiMaxTokensCeilingError(
 }
 
 /**
- * Official 2.1.326 (#62) `J1e` / `S_e`: in Claude Desktop's Code tab, a
- * one-off 401 that is not explicitly an expired token retries once more after
- * 1500ms before asking the Desktop host for a token refresh.
+ * Official 2.1.328 `J1e` / `S_e` / `Z1e` / `aAt` (#62): in Claude Desktop's
+ * Code tab (OAuth session managed by SDK host callback with no local refresh
+ * token), a one-off 401 that is not explicitly an expired/revoked token retries
+ * once after 1500ms with the original credential before asking the host for a
+ * token refresh.
  */
 export const DESKTOP_CODE_TAB_ONE_OFF_401_RETRY_DELAY_MS = 1500
 
+const DESKTOP_ONE_OFF_401_PASSED_STATUSES = new Set([
+  400, 403, 404, 409, 422, 424, 429,
+])
+
+type DesktopOneOff401State =
+  | { state: 'unused' }
+  | { state: 'due'; token: string }
+  | { state: 'sent'; token: string }
+  | { state: 'passed' }
+  | { state: 'refused' }
+
+function advanceDesktopOneOff401State(
+  state: DesktopOneOff401State,
+  currentToken: string | undefined,
+  error: unknown,
+): DesktopOneOff401State {
+  switch (state.state) {
+    case 'unused':
+    case 'passed':
+    case 'refused':
+      return state
+    case 'due':
+      return { state: 'unused' }
+    case 'sent': {
+      if (currentToken !== state.token) {
+        return { state: 'unused' }
+      }
+      if (error === null) {
+        return { state: 'passed' }
+      }
+      if (!(error instanceof APIError) || error.status === undefined) {
+        return state
+      }
+      if (error.status === 401 || isOAuthTokenRevokedError(error)) {
+        return { state: 'refused' }
+      }
+      if (DESKTOP_ONE_OFF_401_PASSED_STATUSES.has(error.status)) {
+        return { state: 'passed' }
+      }
+      return state
+    }
+  }
+}
+
 export function isDesktopCodeTabOneOff401Eligible(error: unknown): boolean {
   if (!(error instanceof APIError) || error.status !== 401) return false
+  if (isOAuthTokenRevokedError(error)) return false
   const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT
   if (entrypoint !== 'claude-desktop' && entrypoint !== 'claude-desktop-3p') {
     return false
   }
   if (
     isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) ||
+    Boolean(process.env.CLAUDE_CODE_REMOTE_SESSION_ID) ||
     isEnvTruthy(process.env.CLAUDE_CODE_IS_COWORK)
   ) {
     return false
@@ -308,11 +442,22 @@ export function isDesktopCodeTabOneOff401Eligible(error: unknown): boolean {
   ) {
     return false
   }
+  const structuredCode = (
+    error.error as
+      | { error?: { details?: { error_code?: unknown } } }
+      | undefined
+  )?.error?.details?.error_code
+  if (structuredCode === 'token_expired') {
+    return false
+  }
   const lower = error.message.toLowerCase()
   if (
     lower.includes('token_expired') ||
     lower.includes('oauth token has expired')
   ) {
+    return false
+  }
+  if (getFeatureValue_CACHED_MAY_BE_STALE('tengu_tidy_swing', false)) {
     return false
   }
   return true
@@ -407,6 +552,20 @@ interface RetryOptions {
   ) => void
   /** Official 2.1.305 (#1035): check whether a usage limit lifted early. */
   isUsageLimitLifted?: () => Promise<boolean>
+  /**
+   * Official 2.1.328 `xCt.onReplyBegun()`: when true (streaming requests), do
+   * not commit a retry-lowered max_tokens ceiling when `operation` returns the
+   * stream object; deliver it to `onPendingMaxTokensCeiling` so the caller can
+   * confirm once `message_start` arrives.
+   */
+  deferMaxTokensCeilingConfirmation?: boolean
+  onPendingMaxTokensCeiling?: (pending: {
+    model: string
+    limit: number
+    confirm: () => void
+  }) => void
+  /** Test override for the 1500ms Desktop Code tab one-off 401 retry delay. */
+  desktopOneOff401DelayMs?: number
 }
 
 export class CannotRetryError extends Error {
@@ -674,12 +833,17 @@ export async function* withRetry<T>(
   // Official 2.1.323 (#2005): allow at most one Desktop host credential renewal
   // on 403 (expired gateway token) per request.
   let hostAuth403Retried = false
-  // Official 2.1.326 (#62): allow one direct 1500ms retry in Desktop Code tab
-  // on a non-expired 401 before escalating to host credential refresh.
-  let desktopOneOff401State: 'unused' | 'retried' = 'unused'
-  // Official 2.1.326 (#51): allow lowering max_tokens to API-reported ceiling once
+  // Official 2.1.328 (`tn` / `J1e` / `S_e`): allow one direct 1500ms resend
+  // with the original OAuth credential in Desktop Code tab before asking the
+  // SDK host callback for a token refresh.
+  let desktopOneOff401State: DesktopOneOff401State = { state: 'unused' }
+  let lastClientOAuthAccessToken: string | undefined
+  // Official 2.1.326 (#51) + 2.1.328 `xCt`: allow lowering max_tokens to API-reported ceiling once
   let maxTokensCeilingAdjusted = false
   let pendingModelMaxTokensCeiling: { model: string; limit: number } | undefined
+  const isSecurityControlQuery =
+    options.querySource === 'auto_mode' ||
+    options.querySource === 'auto_mode_investigator'
   // densable `Fe=new Set` @184899103 — each onError retry token fires once.
   const consumedOnErrorRetryTokens = new Set<string>()
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
@@ -799,8 +963,18 @@ export async function* withRetry<T>(
             handledProfileWif = false
           }
           if (!handledProfileWif) {
-            const failedAccessToken = getClaudeAIOAuthTokens()?.accessToken
-            if (failedAccessToken) {
+            const failedAccessToken =
+              lastClientOAuthAccessToken ??
+              getClaudeAIOAuthTokens()?.accessToken
+            if (desktopOneOff401State.state === 'due') {
+              // Official 2.1.328 (`if (tn.state === "due") tn = { state: "sent", token: tn.token }`):
+              // resend once with the original OAuth credential before calling
+              // handleOAuth401Error / SDK host token refresh.
+              desktopOneOff401State = {
+                state: 'sent',
+                token: desktopOneOff401State.token,
+              }
+            } else if (failedAccessToken) {
               // Official 2.1.319 (#1722): on repeated 401s within the same
               // request, adopt a token refreshed by another session instead of
               // forcing another refresh_token call every retry.
@@ -832,7 +1006,8 @@ export async function* withRetry<T>(
               }
               const latestAccessToken = getClaudeAIOAuthTokens()?.accessToken
               if (
-                oauth401ForcedRefreshDone &&
+                (oauth401ForcedRefreshDone ||
+                  getSdkOauthTokenRefreshCallback() !== null) &&
                 (latestAccessToken === failedAccessToken ||
                   latestAccessToken === undefined)
               ) {
@@ -852,64 +1027,71 @@ export async function* withRetry<T>(
               (lastError.status === 401 || lastError.status === 403) &&
               isHostAuthTokenRefreshAvailable()
             ) {
-              // Official 2.1.326 (#62) `J1e`: in Claude Desktop's Code tab,
-              // retry a one-off non-expired 401 once after 1500ms before asking
-              // the Desktop host for a token refresh.
+              // Official lfa / host_auth_401_recovery + 2.1.323 (#2005) + 2.1.325 (#2341):
+              // On 401 or 403 (organization gateway answering expired token
+              // with 403 in Claude Desktop), ask Desktop for a fresh token and retry.
+              // Race against options.signal so stopping claude-desktop-3p aborts
+              // an in-flight token renewal immediately instead of hanging on "Stopping".
+              const is403 = lastError.status === 403
+              if (is403) {
+                hostAuth403Retried = true
+              }
+              if (options.signal?.aborted) {
+                throw new APIUserAbortError()
+              }
+              const hostResult = await raceHostAuthRefreshWithSignal(
+                tryHostAuth401Recovery(options.signal),
+                options.signal,
+              )
               if (
-                desktopOneOff401State === 'unused' &&
-                isDesktopCodeTabOneOff401Eligible(lastError)
+                hostResult === 'failed' ||
+                hostResult === 'exhausted' ||
+                (is403 && hostResult !== 'updated')
               ) {
-                desktopOneOff401State = 'retried'
-                logForDebugging(
-                  `[auth] Desktop Code tab one-off 401 — retrying once after ${DESKTOP_CODE_TAB_ONE_OFF_401_RETRY_DELAY_MS}ms before requesting host token refresh`,
-                )
-                await sleep(
-                  DESKTOP_CODE_TAB_ONE_OFF_401_RETRY_DELAY_MS,
-                  options.signal,
-                  { abortError: () => new APIUserAbortError() },
-                )
-              } else {
-                // Official lfa / host_auth_401_recovery + 2.1.323 (#2005) + 2.1.325 (#2341):
-                // On 401 or 403 (organization gateway answering expired token
-                // with 403 in Claude Desktop), ask Desktop for a fresh token and retry.
-                // Race against options.signal so stopping claude-desktop-3p aborts
-                // an in-flight token renewal immediately instead of hanging on "Stopping".
-                const is403 = lastError.status === 403
-                if (is403) {
-                  hostAuth403Retried = true
-                }
-                if (options.signal?.aborted) {
-                  throw new APIUserAbortError()
-                }
-                const hostResult = await raceHostAuthRefreshWithSignal(
-                  tryHostAuth401Recovery(options.signal),
-                  options.signal,
-                )
-                if (
-                  hostResult === 'failed' ||
-                  hostResult === 'exhausted' ||
-                  (is403 && hostResult !== 'updated')
-                ) {
-                  throw new CannotRetryError(lastError, retryContext)
-                }
+                throw new CannotRetryError(lastError, retryContext)
               }
             }
           }
         }
         client = await getClient()
+        lastClientOAuthAccessToken = getClaudeAIOAuthTokens()?.accessToken
       }
 
       options.onRetryStatus?.(null)
       const result = await operation(client, attempt, retryContext)
+      desktopOneOff401State = advanceDesktopOneOff401State(
+        desktopOneOff401State,
+        lastClientOAuthAccessToken,
+        null,
+      )
       if (pendingModelMaxTokensCeiling) {
-        setCachedModelMaxTokensCeiling(
-          pendingModelMaxTokensCeiling.model,
-          pendingModelMaxTokensCeiling.limit,
-        )
+        const pending = pendingModelMaxTokensCeiling
         pendingModelMaxTokensCeiling = undefined
+        const isStreamResult =
+          result !== null &&
+          typeof result === 'object' &&
+          Symbol.asyncIterator in result
+        if (options.deferMaxTokensCeilingConfirmation || isStreamResult) {
+          options.onPendingMaxTokensCeiling?.({
+            model: pending.model,
+            limit: pending.limit,
+            confirm: () =>
+              confirmModelMaxTokensCeiling(pending.model, pending.limit),
+          })
+        } else {
+          confirmModelMaxTokensCeiling(pending.model, pending.limit)
+        }
       }
       return result
     } catch (error) {
+      const wasDesktopOneOff401Sent = desktopOneOff401State.state === 'sent'
+      desktopOneOff401State = advanceDesktopOneOff401State(
+        desktopOneOff401State,
+        lastClientOAuthAccessToken,
+        error,
+      )
+      const refusedAfterDesktopOneOff401 =
+        wasDesktopOneOff401Sent && desktopOneOff401State.state === 'refused'
       // densable `if (x instanceof nd) throw x`
       if (error instanceof CannotRetryError) throw error
       if (error instanceof APIUserAbortError) throw error
@@ -1180,7 +1362,11 @@ export async function* withRetry<T>(
       // Only retry if the error indicates we should
       const persistent =
         isPersistentRetryEnabled() && isTransientCapacityError(error)
-      if (attempt > maxRetries && !persistent) {
+      if (refusedAfterDesktopOneOff401 && !persistent) {
+        // Official 2.1.328 (`if (yo && !Hs && !wd) is--`): do not burn a retry
+        // attempt when the one-shot Desktop OAuth resend is refused again with 401.
+        attempt--
+      } else if (attempt > maxRetries && !persistent) {
         throw new CannotRetryError(error, retryContext)
       }
 
@@ -1241,12 +1427,13 @@ export async function* withRetry<T>(
       // densable 2.1.218 RFo: clamp to availableContext ONLY (no thinking inflate)
       // and abort when the adjustment makes no progress (doomed identical re-send).
       if (error instanceof APIError) {
-        // Official 2.1.326 (#51) `xCt`: if API says `max_tokens: X > Y, which is
+        // Official 2.1.326 (#51) + 2.1.328 `xCt`: if API says `max_tokens: X > Y, which is
         // the maximum allowed number of output tokens for ...`, lower max_tokens
-        // to Y (>= 4096), retry once, and cache on success until /clear.
-        const ceilingData = !maxTokensCeilingAdjusted
-          ? parseApiMaxTokensCeilingError(error)
-          : null
+        // to Y (>= 4096), retry once, and cache only once the reply begins.
+        const ceilingData =
+          !isSecurityControlQuery && !maxTokensCeilingAdjusted
+            ? parseApiMaxTokensCeilingError(error)
+            : null
         if (
           ceilingData &&
           (retryContext.maxTokensOverride === undefined ||
@@ -1362,7 +1549,37 @@ export async function* withRetry<T>(
       }
 
       let delayMs: number
-      if (persistent && error instanceof APIError && error.status === 429) {
+      let suppressRetryBanner = false
+      const oauthTokensNow = getClaudeAIOAuthTokens()
+      const desktopOneOff401Token =
+        !persistent &&
+        !watchdogActive &&
+        desktopOneOff401State.state === 'unused' &&
+        lastClientOAuthAccessToken !== undefined &&
+        !oauth401ForcedRefreshDone &&
+        !oauthTokensNow?.refreshToken &&
+        getSdkOauthTokenRefreshCallback() !== null &&
+        isDesktopCodeTabOneOff401Eligible(error)
+          ? lastClientOAuthAccessToken
+          : undefined
+
+      if (desktopOneOff401Token !== undefined) {
+        desktopOneOff401State = {
+          state: 'due',
+          token: desktopOneOff401Token,
+        }
+        delayMs =
+          options.desktopOneOff401DelayMs ??
+          DESKTOP_CODE_TAB_ONE_OFF_401_RETRY_DELAY_MS
+        suppressRetryBanner = true
+        logForDebugging(
+          `A 401 under an SDK host: sending the request once more in ${delayMs} ms, before the host is asked for a token`,
+        )
+      } else if (
+        persistent &&
+        error instanceof APIError &&
+        error.status === 429
+      ) {
         persistentAttempt++
         // Window-based limits (e.g. 5hr Max/Pro) include a reset timestamp.
         // Wait until reset rather than polling every 5 min uselessly.
@@ -1422,17 +1639,21 @@ export async function* withRetry<T>(
         provider: getAPIProviderForStatsig(),
       })
 
-      options.onRetryStatus?.({
-        kind: 'retrying',
-        deadline: Date.now() + delayMs,
-        attempt: reportedAttempt,
-        maxRetries,
-        error: {
-          status: error instanceof APIError ? error.status : undefined,
-          formatted:
-            error instanceof APIError ? error.message : errorMessage(error),
-        },
-      })
+      if (suppressRetryBanner) {
+        options.onRetryStatus?.(null)
+      } else {
+        options.onRetryStatus?.({
+          kind: 'retrying',
+          deadline: Date.now() + delayMs,
+          attempt: reportedAttempt,
+          maxRetries,
+          error: {
+            status: error instanceof APIError ? error.status : undefined,
+            formatted:
+              error instanceof APIError ? error.message : errorMessage(error),
+          },
+        })
+      }
 
       if (persistent) {
         if (delayMs > 60_000) {
@@ -1496,7 +1717,7 @@ export async function* withRetry<T>(
         // persistentAttempt counter which keeps growing to the 5-min cap.
         if (attempt >= maxRetries) attempt = maxRetries
       } else {
-        if (error instanceof APIError) {
+        if (error instanceof APIError && !suppressRetryBanner) {
           yield createSystemAPIErrorMessage(error, delayMs, attempt, maxRetries)
         }
         await sleep(delayMs, options.signal, { abortError })

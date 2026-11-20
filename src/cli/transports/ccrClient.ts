@@ -361,7 +361,6 @@ type CcrWorkerStateUploaderConfig = {
 export class CcrWorkerStateUploader {
   private inflight: Promise<void> | null = null
   private pending: Record<string, unknown> | null = null
-  private sending: Record<string, unknown> | null = null
   private requeued: Record<string, unknown> | null = null
   private requeuedMetadata: Record<string, unknown> | null = null
   private closingToNewPatches = new AbortController()
@@ -501,7 +500,6 @@ export class CcrWorkerStateUploader {
     if (!payload) return
     this.inflight = this.sendWithRetry(payload, isRequeued).then(() => {
       this.inflight = null
-      this.sending = null
       if (
         (this.pending || this.requeued || this.requeuedMetadata) &&
         !this.closed
@@ -518,7 +516,6 @@ export class CcrWorkerStateUploader {
     let current = payload
     let failures = 0
     while (!this.closed) {
-      this.sending = current
       if (await this.config.send(current)) return
       if (
         this.isClosedToNewPatches &&
@@ -762,8 +759,6 @@ export class CCRClient {
    * path is a process global and would stomp across sessions.
    */
   private readonly getAuthHeaders: () => Record<string, string>
-  private droppedWorkerStatePatchCount = 0
-  private droppedOwedMetadataPatchCount = 0
 
   constructor(
     transport: SSETransport,
@@ -814,20 +809,12 @@ export class CCRClient {
           logForDiagnosticsNoPII('warn', 'cli_worker_state_4xx_dropped', {
             status: result.status,
           })
-          this.droppedWorkerStatePatchCount++
-          if (this.workerState.keepsWithoutStatus(body)) {
-            this.droppedOwedMetadataPatchCount++
-          }
           return true
         }
         if (isWorkerStateRefused4xx(result.status)) {
           logForDiagnosticsNoPII('warn', 'cli_worker_state_4xx_dropped', {
             status: result.status,
           })
-          this.droppedWorkerStatePatchCount++
-          if (this.workerState.keepsWithoutStatus(body)) {
-            this.droppedOwedMetadataPatchCount++
-          }
           const {
             internal_metadata: internalMetaRaw,
             external_metadata: externalMetaRaw,
