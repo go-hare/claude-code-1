@@ -52,6 +52,11 @@ import { isPowerShellToolEnabled } from '../utils/shell/shellToolUtils.js'
 import { findGitBashPathOrNull } from '../utils/windowsPaths.js'
 import { getPlatform } from '../utils/platform.js'
 import { isReplModeEnabled } from '@claude-code/builtin-tools/tools/REPLTool/constants.js'
+import {
+  chromeSectionForWire,
+  isCodeModeEnabled,
+  memorySectionForWire,
+} from '../services/codeMode/optIn.js'
 import { buildCodeModeWorkflowGuidance } from '../utils/workflowSizeGuideline.js'
 import { areBackgroundTasksDisabled } from '../utils/sessionBackgroundGates.js'
 import { getGlobalConfig } from '../utils/config.js'
@@ -326,7 +331,7 @@ function getUsingYourToolsSection(
   // In REPL / Code Mode, Read/Write/Edit/Glob/Grep/Bash/Agent are hidden from
   // direct use (CODE_MODE_ONLY_TOOLS). Include concise Code Mode guidance for
   // tasks, workflows (#583), dev servers (#654), and Windows shells (#655).
-  if (isReplModeEnabled()) {
+  if (isCodeModeEnabled() || isReplModeEnabled()) {
     let workflowGuideline: string | undefined
     try {
       const cfg = getGlobalConfig() as { workflowSizeGuideline?: unknown }
@@ -802,7 +807,8 @@ export async function getSystemPrompt(
 
 ${CYBER_RISK_INSTRUCTION}`,
       getSystemRemindersSection(),
-      await loadMemoryPrompt(),
+      memorySectionForWire(await loadMemoryPrompt(), tools),
+      chromeSectionForWire(),
       envInfo,
       getLanguageSection(settings.language),
       // When delta enabled, instructions are announced via persisted
@@ -858,9 +864,15 @@ ${CYBER_RISK_INSTRUCTION}`,
     ],
     [
       'memory',
-      systemPromptSection('memory', () =>
-        options?.excludeDynamicSections ? null : loadMemoryPrompt(),
+      systemPromptSection('memory', async () =>
+        options?.excludeDynamicSections
+          ? null
+          : memorySectionForWire(await loadMemoryPrompt(), tools),
       ),
+    ],
+    [
+      'chrome_code_mode',
+      systemPromptSection('chrome_code_mode', () => chromeSectionForWire()),
     ],
     [
       'ant_model_override',

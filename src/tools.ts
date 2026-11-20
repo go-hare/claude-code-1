@@ -17,6 +17,7 @@ import { NotebookEditTool } from '@claude-code/builtin-tools/tools/NotebookEditT
 import { WebFetchTool } from '@claude-code/builtin-tools/tools/WebFetchTool/WebFetchTool.js'
 import { TaskStopTool } from '@claude-code/builtin-tools/tools/TaskStopTool/TaskStopTool.js'
 import { BriefTool } from '@claude-code/builtin-tools/tools/BriefTool/BriefTool.js'
+import { PollTool } from '@claude-code/builtin-tools/tools/PollTool/PollTool.js'
 // Dead code elimination: conditional import for ant-only / Code Mode REPL tool
 /* eslint-disable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 let cachedReplTool: Tool | null | undefined
@@ -318,7 +319,7 @@ export function getAllBaseTools(): Tools {
     ObserverReportTool,
     ...(process.env.USER_TYPE === 'ant' && REPLTool
       ? [REPLTool]
-      : isCodeModeEnabled() && getReplTool()
+      : (isCodeModeEnabled() || isReplModeEnabled()) && getReplTool()
         ? [getReplTool()!]
         : []),
     ...(WorkflowTool ? [WorkflowTool] : []),
@@ -329,6 +330,7 @@ export function getAllBaseTools(): Tools {
     ...(RemoteTriggerTool ? [RemoteTriggerTool] : []),
     ...(MonitorTool ? [MonitorTool] : []),
     GetTaskTool,
+    PollTool,
     BriefTool,
     ...(SendUserFileTool ? [SendUserFileTool] : []),
     ...(PushNotificationTool ? [PushNotificationTool] : []),
@@ -473,6 +475,9 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
         : null
     if (activeReplTool) {
       const replSimple: Tool[] = [activeReplTool]
+      if (isCodeModeEnabled() && PollTool.isEnabled()) {
+        replSimple.push(PollTool)
+      }
       if (feature('COORDINATOR_MODE') && isCoordinatorModeActive()) {
         replSimple.push(TaskStopTool, getSendMessageTool())
       }

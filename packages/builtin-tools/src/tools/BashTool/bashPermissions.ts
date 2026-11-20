@@ -1,6 +1,7 @@
 import { feature } from 'bun:bundle'
 import { APIUserAbortError } from '@anthropic-ai/sdk'
 import type { z } from 'zod/v4'
+import { isSandboxAutoAllowSuspendedInLayers } from 'src/engine/hostPermissionLayers.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -4422,8 +4423,16 @@ async function bashToolHasPermissionInner(
     // Sandboxed commands that pipe a plain unquoted heredoc into another
     // command (`cat <<EOF | python3`) can be auto-allowed by the sandbox
     // (unless outside-reads block is active and NOT fenced by the sandbox).
+    const isSandboxAutoAllowSuspendedForHeredoc =
+      (
+        appState.toolPermissionContext as {
+          sandboxAutoAllowSuspended?: boolean
+        }
+      ).sandboxAutoAllowSuspended === true ||
+      isSandboxAutoAllowSuspendedInLayers(context.permissionLayers)
     const canTryPlainUnquotedHeredoc =
       !context.forRemoteExecution &&
+      !isSandboxAutoAllowSuspendedForHeredoc &&
       !outsideReadsBlockedAndUnfenced &&
       ((astResult.nodeType === 'heredoc_redirect' &&
         astResult.differential === true) ||
@@ -4620,9 +4629,7 @@ async function bashToolHasPermissionInner(
   const isSandboxAutoAllowSuspended =
     (appState.toolPermissionContext as { sandboxAutoAllowSuspended?: boolean })
       .sandboxAutoAllowSuspended === true ||
-    context.permissionLayers?.some(
-      layer => layer.kind === 'sandbox_auto_allow_suspended',
-    ) === true
+    isSandboxAutoAllowSuspendedInLayers(context.permissionLayers)
 
   const outsideReadsBlockedAndUnfencedForAutoAllow =
     appState.toolPermissionContext.blockReadsOutsideWorkingDirectories ===

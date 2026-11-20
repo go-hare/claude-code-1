@@ -616,6 +616,24 @@ export type ToolUseContext = {
    * tool.call always clears the stamp (gold @184489530).
    */
   desktopForwardToolUseId?: string
+  /**
+   * Official 2.1.328 Code Mode auto-mode verdict fields.
+   * - `autoModeClassified`: set on outer REPL/Eval tool.call context when the
+   *   auto-mode classifier approved the script.
+   * - `autoModeScriptCheckDeferred`: set on outer REPL/Eval tool.call context
+   *   when outer script classification was deferred until an inner tool call.
+   * - `replScriptInner`: set on inner tool calls riding an allowed outer script
+   *   verdict in auto mode.
+   * - `replScriptCheckNow`: set when executor flushes a deferred outer script
+   *   check through canUseTool so permissions.ts runs the classifier immediately.
+   * - `replScriptAtLimit`: set on inner tool calls when the script hit the
+   *   auto-mode denial limit and must not ride the outer verdict.
+   */
+  autoModeClassified?: boolean
+  autoModeScriptCheckDeferred?: boolean
+  replScriptInner?: boolean
+  replScriptCheckNow?: boolean
+  replScriptAtLimit?: boolean
   messages: Message[]
   /**
    * Official sameTurnToolUses — prior tool_use blocks from the same assistant
@@ -1098,6 +1116,12 @@ export type Tool<
 
   // Optional method for tools that operate on a file path
   getPath?(input: z.infer<Input>): string
+
+  /**
+   * Optional note displayed in permission prompts for this tool (e.g., Code Mode
+   * REPL/Eval permission context note).
+   */
+  permissionNote?: (input: unknown, mode?: string) => string | undefined
 
   /**
    * Prepare a matcher for hook `if` conditions (permission-rule patterns like

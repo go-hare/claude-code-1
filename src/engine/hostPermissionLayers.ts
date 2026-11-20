@@ -30,6 +30,8 @@ export type HostPermissionLayer =
   /** densable bn also walks these; sticky Me does not emit them */
   | { kind: 'disallowed_tools'; disallowedTools: unknown }
   | { kind: 'avoid_prompts' }
+  /** Official 2.1.328: suspend sandbox auto-allow (e.g. inner Code Mode calls). */
+  | { kind: 'sandbox_auto_allow_suspended'; allowOnly?: boolean }
 
 export type HostStickyControlState = {
   model: string | null
@@ -76,6 +78,25 @@ export function hasStickyPermissionLayers(
   return (
     buildHostPermissionLayers({ sticky, hostOwnsPermissionMode }).length > 0
   )
+}
+
+/**
+ * Official 2.1.328 (`Z` / `W5r` / `e$t`): returns true when `permissionLayers`
+ * carries a `sandbox_auto_allow_suspended` layer. When `ignoreAllowOnly` is
+ * true (matching `W5r` for non-auto-allow rule checks), layers with
+ * `allowOnly: true` are ignored.
+ */
+export function isSandboxAutoAllowSuspendedInLayers(
+  layers: ReadonlyArray<{ kind: string; allowOnly?: boolean }> | undefined,
+  opts?: { ignoreAllowOnly?: boolean },
+): boolean {
+  if (!layers || layers.length === 0) return false
+  for (const layer of layers) {
+    if (layer?.kind !== 'sandbox_auto_allow_suspended') continue
+    if (opts?.ignoreAllowOnly === true && layer.allowOnly === true) continue
+    return true
+  }
+  return false
 }
 
 /**

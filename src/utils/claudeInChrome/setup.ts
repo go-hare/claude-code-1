@@ -18,6 +18,10 @@ import {
 } from '../../bootstrap/state.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import {
+  codeModeChromeNotice,
+  isCodeModeEnabled,
+} from '../../services/codeMode/optIn.js'
+import {
   getPolicyDenyKind,
   isPolicyAllowed,
 } from '../../services/policyLimits/index.js'
@@ -198,6 +202,11 @@ export function getChromeOptInRefusedStartupMessage(
 }
 
 export function shouldEnableClaudeInChrome(chromeFlag?: boolean): boolean {
+  // Official 2.1.328 zG/Fsr/xfi: Claude in Chrome is disabled while Code Mode is active.
+  if (isCodeModeEnabled()) {
+    logForDebugging(codeModeChromeNotice(chromeFlag === true))
+    return false
+  }
   // Official 2.1.323 _Ut (#2070/#2084): respect allow_claude_browser_extension policy first.
   if (!isChromePolicyAllowed()) {
     return false

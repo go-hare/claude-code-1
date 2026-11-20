@@ -9,18 +9,41 @@ const inputSchema = lazySchema(() =>
     code: z
       .string()
       .describe(
-        'The code to execute in the REPL. Can call any primitive tool (Read, Write, Edit, Glob, Grep, Bash, NotebookEdit, Agent) via their APIs.',
+        'The code to execute in the REPL. Can call any available tool (Read, Write, Edit, Glob, Grep, Bash, PowerShell, NotebookEdit, Agent, MCP tools) via their APIs.',
       ),
+    description: z
+      .string()
+      .optional()
+      .describe('Optional short one-line summary of what this script does.'),
+    timeout: z
+      .number()
+      .optional()
+      .describe('Optional timeout in milliseconds for script execution.'),
   }),
 )
 type InputSchema = ReturnType<typeof inputSchema>
 type REPLInput = z.infer<InputSchema>
 
-type REPLOutput = { result: string; tool_calls: number }
+export type REPLMediaBlock =
+  | {
+      type: 'image'
+      source: { type: 'base64'; media_type: string; data: string }
+    }
+  | {
+      type: 'document'
+      source: { type: 'base64'; media_type: string; data: string }
+    }
+
+type REPLOutput = {
+  result: string
+  tool_calls: number
+  media?: REPLMediaBlock[]
+}
 
 export const REPLTool = buildTool({
   name: REPL_TOOL_NAME,
-  searchHint: 'repl execute batch code read write edit glob grep bash',
+  aliases: ['Eval'],
+  searchHint: 'repl eval execute batch code read write edit glob grep bash',
   // densable 2.1.248 #1 Unt — official enablesCodeExecution:!0 @185592858
   enablesCodeExecution: true,
   maxResultSizeChars: 100_000,
@@ -34,7 +57,7 @@ export const REPLTool = buildTool({
     return 'Execute code in the REPL environment with access to all primitive tools'
   },
   async prompt() {
-    return `Execute code in the REPL — a sandboxed environment with direct access to primitive tools (Read, Write, Edit, Glob, Grep, Bash, NotebookEdit, Agent).
+    return `Execute code in the REPL — a sandboxed environment with direct access to primitive tools (Read, Write, Edit, Glob, Grep, Bash, PowerShell, NotebookEdit, Agent).
 
 When REPL mode is active, primitive tools are only accessible through this tool. Use REPL for:
 - Batch operations across many files
@@ -55,11 +78,31 @@ The REPL runs in a VM context with tool APIs available as functions. Results fro
     return true
   },
 
+  toAutoClassifierInput(input: REPLInput) {
+    return input.code
+  },
+
+  getToolUseSummary(input: Partial<REPLInput> | undefined): string | null {
+    if (!input) return null
+    const desc =
+      typeof input.description === 'string' ? input.description.trim() : ''
+    if (desc.length > 0) return desc
+    const firstLine = (input.code ?? '')
+      .split(/\r?\n/)
+      .map(l => l.trim())
+      .find(l => l.length > 0)
+    if (!firstLine) return null
+    return firstLine.length > 80 ? `${firstLine.slice(0, 77)}...` : firstLine
+  },
+
   userFacingName() {
     return REPL_TOOL_NAME
   },
 
   renderToolUseMessage(input: Partial<REPLInput>) {
+    const desc =
+      typeof input.description === 'string' ? input.description.trim() : ''
+    if (desc.length > 0) return desc
     const code = input.code ?? ''
     const preview = code.length > 80 ? code.slice(0, 77) + '...' : code
     return `REPL: ${preview}`
@@ -69,6 +112,27 @@ The REPL runs in a VM context with tool APIs available as functions. Results fro
     content: REPLOutput,
     toolUseID: string,
   ): ToolResultBlockParam {
+    if (Array.isArray(content.media) && content.media.length > 0) {
+      return {
+        tool_use_id: toolUseID,
+        type: 'tool_result',
+        content: [
+          { type: 'text', text: content.result },
+          ...(content.media as unknown as Array<{
+            type: 'image'
+            source: {
+              type: 'base64'
+              media_type:
+                | 'image/jpeg'
+                | 'image/png'
+                | 'image/gif'
+                | 'image/webp'
+              data: string
+            }
+          }>),
+        ],
+      }
+    }
     return {
       tool_use_id: toolUseID,
       type: 'tool_result',

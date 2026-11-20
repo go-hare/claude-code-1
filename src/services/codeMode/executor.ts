@@ -6,12 +6,16 @@
  * through the session's permission pipeline (`canUseTool`) inside a sandboxed
  * Node `vm` context.
  */
+import { isReplModeEnabled } from '@claude-code/builtin-tools/tools/REPLTool/constants.js'
+import type { REPLMediaBlock } from '@claude-code/builtin-tools/tools/REPLTool/REPLTool.js'
+import { randomBytes } from 'node:crypto'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import * as vm from 'node:vm'
 import { setCwdState } from '../../bootstrap/state.js'
+import type { HostPermissionLayer } from '../../engine/hostPermissionLayers.js'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
-import type { Tool, ToolUseContext } from '../../Tool.js'
+import type { Tool, ToolResult, ToolUseContext } from '../../Tool.js'
 import type {
   AssistantMessage,
   AttachmentMessage,
@@ -24,6 +28,7 @@ import type {
   ToolCallManagedPass,
 } from '../../utils/hooks/toolCallManagedPass.js'
 import type { PermissionResult } from '../../utils/permissions/PermissionResult.js'
+import { saveReplMode } from '../../utils/sessionStorage.js'
 import {
   buildCodeModeMcpStatusDelta,
   CODE_MODE_STATIC_MCP_GUIDANCE,
@@ -33,12 +38,17 @@ import { mcpInfoFromString } from '../mcp/mcpStringUtils.js'
 import {
   CODE_MODE_EXPERIMENTAL_NAME,
   CODE_MODE_NAME,
+  REPL_DETACH_AFTER_MS,
+  REPL_MAIN_THREAD_KEY,
   REPL_MAX_TIMEOUT_MS,
+  REPL_PART_CAP,
   REPL_POST_SCRIPT_PAUSE_AUTO_MS,
   REPL_SCRIPT_FILENAME,
+  REPL_SETTLE_WINDOW_MS,
   REPL_SYNC_RUN_MS,
   REPL_TOOL_CALL_CAP,
 } from './constants.js'
+import * as optInModule from './optIn.js'
 import {
   codeModeBeforePin,
   codeModeRefusalReasonText,
@@ -49,6 +59,7 @@ import {
   pinCodeMode,
   unpinCodeMode,
 } from './optIn.js'
+import { ASYNC_REPL_MAX_EVALS, getReplSessions } from './replSessions.js'
 
 export type CodeModeExecutionResult = {
   result: string
@@ -67,6 +78,14 @@ export type CodeModeExecutionResult = {
   hookAdditionalContext?: string[]
   /** Blocking error messages emitted by inner PostToolUse / PreToolUse hooks. */
   hookBlockingErrors?: string[]
+  /** Official 2.1.328 (`cs.mapToolResultToToolResultBlockParam`): media blocks (images/documents) returned by inner tools. */
+  media?: REPLMediaBlock[]
+  /** Official 2.1.328: async REPL eval ID assigned by ReplSessions. */
+  evalId?: number
+  /** Official 2.1.328: elapsed milliseconds for async REPL eval. */
+  ms?: number
+  /** Official 2.1.328: true when the eval was dispatched asynchronously past the settle window (or rejected by cap). */
+  asyncDispatched?: boolean
 }
 
 /**
@@ -83,25 +102,150 @@ export type CodeModeProgressEvent =
     }
 
 /**
- * Official 2.1.327 (#386): Per-script auto-mode verdict tracker so a running
- * Code Mode script keeps its allowed verdict when a second auto-mode-allowed
- * script starts concurrently.
+ * Official 2.1.327 (#386) & 2.1.328 (`J.scriptChecks`): Per-script auto-mode
+ * verdict tracker with deferred script classification and a stop chain so:
+ * - A running Code Mode script keeps its allowed verdict when a second
+ *   auto-mode-allowed script starts concurrently (#386).
+ * - Scripts deferred in `auto` mode (`autoModeScriptCheckDeferred`) remain
+ *   `unchecked` until an inner tool call needs a verdict, at which point
+ *   `awaitVerdict` runs the deferred script check once for the queued batch.
+ * - If the classifier/monitor blocks the batch, every queued script's `stop()`
+ *   callback fires (aborting in-flight scripts immediately) and subsequent
+ *   calls are refused.
  */
-export type AutoScriptVerdictState = 'pending' | 'allowed' | 'blocked' | 'none'
+export type AutoScriptVerdictState =
+  | 'pending'
+  | 'unchecked'
+  | 'allowed'
+  | 'blocked'
+  | 'atLimit'
+  | 'none'
 
 export type AutoScriptRecord = {
   id: string
   state: AutoScriptVerdictState
   blockedReason?: string
+  blockedDecision?: PermissionResult
+}
+
+export type DeferredAutoScriptCheckEntry = {
+  id: string
+  code: string
+  toolUseId: string
+  runCheck: (
+    combinedCode: string,
+    context: ToolUseContext,
+    canUseTool: CanUseToolFn,
+  ) => Promise<PermissionResult>
+  stop: (
+    message: string,
+    batchSize: number,
+    cause: 'classifier' | 'monitor',
+  ) => void
+}
+
+export type AutoScriptAwaitVerdictResult =
+  | { kind: 'ride' }
+  | { kind: 'checkCall' }
+  | { kind: 'blocked'; decision: PermissionResult }
+
+/**
+ * Official 2.1.328 (`Md`): map a deferred script check's `PermissionResult` to
+ * its `AutoScriptVerdictState`.
+ */
+export function classifyAutoModeScriptDecision(
+  decision: PermissionResult,
+): AutoScriptVerdictState {
+  const reason = decision.decisionReason as
+    | {
+        type?: string
+        classifierAllowed?: boolean
+        denialLimitRun?: boolean
+        monitorBlocked?: boolean
+        reason?: string
+      }
+    | undefined
+  if (decision.behavior === 'allow') {
+    if (reason?.type === 'mode' && reason.denialLimitRun === true) {
+      return 'atLimit'
+    }
+    if (reason?.type === 'classifier' && reason.classifierAllowed === true) {
+      return 'allowed'
+    }
+    // Plain allow from classifier / test stub without denialLimitRun
+    if (reason?.type === 'classifier' || reason === undefined) {
+      return 'allowed'
+    }
+    return 'none'
+  }
+  if (decision.behavior === 'ask') {
+    const hasDenialLimitFallback =
+      'denialLimitFallback' in decision &&
+      (decision as { denialLimitFallback?: unknown }).denialLimitFallback !==
+        undefined
+    return hasDenialLimitFallback || reason?.type === 'classifier'
+      ? 'atLimit'
+      : 'none'
+  }
+  if (decision.behavior === 'deny') {
+    if (reason?.type === 'classifier' && reason.monitorBlocked === true) {
+      return 'blocked'
+    }
+    return 'blocked'
+  }
+  return 'none'
+}
+
+export function formatAutoModeScriptBlockedMessage(
+  reason: string,
+  batchSize: number,
+  cause: 'classifier' | 'monitor' = 'classifier',
+): string {
+  const otherCount = Math.max(0, batchSize - 1)
+  const batchSuffix =
+    otherCount > 0
+      ? ` (along with ${otherCount} other ${otherCount === 1 ? 'script' : 'scripts'} in this REPL that it had not checked yet)`
+      : ''
+  const prefix =
+    cause === 'monitor'
+      ? "The API's escape monitor blocked this Code Mode script"
+      : 'Auto mode blocked this Code Mode script'
+  return `${prefix}${batchSuffix}: ${reason}`
 }
 
 export class CodeModeAutoVerdictTracker {
   private readonly records = new Map<string, AutoScriptRecord>()
+  private readonly unchecked: DeferredAutoScriptCheckEntry[] = []
+  private inFlight: Promise<{ settled: boolean; error?: unknown }> | undefined
   private unclassifiedCodeRan = false
+  private everAdded = false
 
-  registerScript(id: string): AutoScriptRecord {
-    const rec: AutoScriptRecord = { id, state: 'pending' }
+  registerScript(
+    id: string,
+    initialState: AutoScriptVerdictState = 'pending',
+  ): AutoScriptRecord {
+    const rec: AutoScriptRecord = { id, state: initialState }
     this.records.set(id, rec)
+    return rec
+  }
+
+  getRecord(id: string): AutoScriptRecord | undefined {
+    return this.records.get(id)
+  }
+
+  inUse(): boolean {
+    return this.everAdded
+  }
+
+  hasUnclassifiedCodeRan(): boolean {
+    return this.unclassifiedCodeRan
+  }
+
+  addDeferredCheck(entry: DeferredAutoScriptCheckEntry): AutoScriptRecord {
+    this.everAdded = true
+    const rec = this.records.get(entry.id) ?? this.registerScript(entry.id)
+    rec.state = 'unchecked'
+    this.unchecked.push(entry)
     return rec
   }
 
@@ -110,11 +254,12 @@ export class CodeModeAutoVerdictTracker {
     if (rec) rec.state = 'allowed'
   }
 
-  markBlocked(id: string, reason: string): void {
+  markBlocked(id: string, reason: string, decision?: PermissionResult): void {
     const rec = this.records.get(id)
     if (rec) {
       rec.state = 'blocked'
       rec.blockedReason = reason
+      if (decision) rec.blockedDecision = decision
     }
   }
 
@@ -122,8 +267,32 @@ export class CodeModeAutoVerdictTracker {
     this.unclassifiedCodeRan = true
   }
 
+  dropUnchecked(): void {
+    for (const entry of this.unchecked.splice(0)) {
+      const rec = this.records.get(entry.id)
+      if (rec && rec.state === 'unchecked') {
+        rec.state = 'none'
+      }
+    }
+  }
+
   endScript(id: string): void {
+    // Official `J.scriptChecks.ended`: neutralize stop callback on any queued
+    // deferred entry for an already-finished script.
+    for (const entry of this.unchecked) {
+      if (entry.id === id) {
+        entry.stop = () => {}
+      }
+    }
     this.records.delete(id)
+  }
+
+  reset(): void {
+    this.records.clear()
+    this.unchecked.length = 0
+    this.inFlight = undefined
+    this.unclassifiedCodeRan = false
+    this.everAdded = false
   }
 
   /**
@@ -133,8 +302,109 @@ export class CodeModeAutoVerdictTracker {
    */
   ridesNow(id: string): boolean {
     if (this.unclassifiedCodeRan) return false
+    if (this.unchecked.length > 0) return false
     const rec = this.records.get(id)
     return rec !== undefined && rec.state === 'allowed'
+  }
+
+  /**
+   * Official 2.1.328 (`scriptChecks.awaitVerdict`): resolve any queued deferred
+   * script checks before an inner tool runs. On deny/block, fires every queued
+   * script's `stop` callback so running scripts abort immediately and no
+   * further inner tools execute.
+   */
+  async awaitVerdict(
+    id: string,
+    context: ToolUseContext,
+    canUseTool: CanUseToolFn,
+  ): Promise<AutoScriptAwaitVerdictResult> {
+    for (;;) {
+      const rec = this.records.get(id)
+      if (rec?.state === 'blocked' && rec.blockedDecision !== undefined) {
+        return { kind: 'blocked', decision: rec.blockedDecision }
+      }
+      if (this.unclassifiedCodeRan) {
+        return { kind: 'checkCall' }
+      }
+      if (this.unchecked.length === 0) {
+        return rec?.state === 'allowed'
+          ? { kind: 'ride' }
+          : { kind: 'checkCall' }
+      }
+      if (context.abortController?.signal?.aborted) {
+        throw new Error('Code Mode script aborted')
+      }
+      const isLeader = this.inFlight === undefined
+      const checkPromise = (this.inFlight ??= this.runBatchCheck(
+        context,
+        canUseTool,
+      ).finally(() => {
+        this.inFlight = undefined
+      }))
+      const outcome = await checkPromise
+      if (outcome.settled) continue
+      if (isLeader && outcome.error !== undefined) {
+        throw outcome.error
+      }
+      return { kind: 'checkCall' }
+    }
+  }
+
+  private async runBatchCheck(
+    context: ToolUseContext,
+    canUseTool: CanUseToolFn,
+  ): Promise<{ settled: boolean; error?: unknown }> {
+    const batch = this.unchecked.slice()
+    const latest = batch.at(-1)
+    if (!latest) return { settled: true }
+    const combinedCode =
+      batch.length === 1
+        ? latest.code
+        : batch.map((e, i) => `// script ${i + 1}\n${e.code}`).join('\n\n')
+    let decision: PermissionResult
+    try {
+      decision = await latest.runCheck(combinedCode, context, canUseTool)
+    } catch (err) {
+      return { settled: false, error: err }
+    }
+    this.unchecked.splice(0, batch.length)
+    const verdictState = classifyAutoModeScriptDecision(decision)
+    const reasonObj = decision.decisionReason as
+      | { type?: string; monitorBlocked?: boolean }
+      | undefined
+    const cause: 'classifier' | 'monitor' =
+      decision.behavior === 'deny' &&
+      reasonObj?.type === 'classifier' &&
+      reasonObj.monitorBlocked === true
+        ? 'monitor'
+        : 'classifier'
+
+    for (const entry of batch) {
+      const rec = this.records.get(entry.id)
+      if (rec) {
+        rec.state = verdictState
+        if (verdictState === 'blocked' && decision.behavior === 'deny') {
+          rec.blockedReason = decision.message
+          rec.blockedDecision = decision
+        }
+      }
+      if (verdictState === 'blocked' && decision.behavior === 'deny') {
+        try {
+          entry.stop(
+            decision.message || 'Blocked by auto mode',
+            batch.length,
+            cause,
+          )
+        } catch {
+          // Stop callback failure must not prevent stopping remaining scripts in the batch
+        }
+      }
+    }
+    if (verdictState !== 'allowed') {
+      this.unclassifiedCodeRan = true
+      this.dropUnchecked()
+    }
+    return { settled: true }
   }
 }
 
@@ -1135,6 +1405,7 @@ export function extractApprovalUserFeedback(
 export type CodeModeToolInvoker = (
   toolName: string,
   input: Record<string, unknown>,
+  execSignal?: AbortSignal,
 ) => Promise<unknown>
 
 export type ExecuteCodeModeScriptOptions = {
@@ -1144,6 +1415,8 @@ export type ExecuteCodeModeScriptOptions = {
   toolCallCap?: number
   signal?: AbortSignal
   shellKind?: 'bash' | 'powershell'
+  /** Official 2.1.328: per-agent/session VM key for persistent VM context reuse across turns. */
+  sessionKey?: string
   /** Official 2.1.328 #581: restrict exposed primitive helpers (e.g. omit write/edit for read-only subagents). */
   allowedTools?: ReadonlySet<string>
   /** Official 2.1.328 #576: top-level variables declared in earlier failed scripts that remained unset. */
@@ -1154,6 +1427,12 @@ export type ExecuteCodeModeScriptOptions = {
   permissionMode?: string
   /** Optional cache lookup for already-read file contents (used for Edit closest-match hints without prompting). */
   getCachedFileContent?: (filePath: string) => string | undefined
+  /** Optional list of all available tool names to expose as PascalCase globals inside the VM. */
+  availableToolNames?: readonly string[]
+  /** Optional tool metadata for `searchTools()` and `describeTool()` helpers inside the VM. */
+  toolDescriptors?: ReadonlyArray<{ name: string; description: string }>
+  /** Official 2.1.328: eval ID for `self.running()` self-identification inside the VM. */
+  evalId?: number
 }
 
 const PRIMITIVE_SHORTHAND_MAP: ReadonlyArray<readonly [string, string]> = [
@@ -1163,6 +1442,7 @@ const PRIMITIVE_SHORTHAND_MAP: ReadonlyArray<readonly [string, string]> = [
   ['glob', 'Glob'],
   ['grep', 'Grep'],
   ['bash', 'Bash'],
+  ['powerShell', 'PowerShell'],
   ['notebookEdit', 'NotebookEdit'],
   ['agent', 'Agent'],
 ]
@@ -1419,6 +1699,22 @@ export async function checkPrefixedCodeModeShellCommand(
   return undefined
 }
 
+/**
+ * Official 2.1.328 (`On`/`Dr`/`REPL_PART_CAP`): cap long output parts at 30,000
+ * characters using a 60% head / 40% tail elision so giant outputs don't blow up
+ * context.
+ */
+export function elideReplOutputPart(
+  text: string,
+  cap: number = REPL_PART_CAP,
+): string {
+  if (text.length <= cap) return text
+  const headLen = Math.floor(cap * 0.6)
+  const tailLen = Math.max(0, cap - headLen)
+  const omitted = text.length - headLen - tailLen
+  return `${text.slice(0, headLen)}\n... [${omitted} characters elided] ...\n${text.slice(text.length - tailLen)}`
+}
+
 function formatValueForOutput(value: unknown): string {
   if (value === undefined) return ''
   if (typeof value === 'string') return value
@@ -1429,8 +1725,1735 @@ function formatValueForOutput(value: unknown): string {
   }
 }
 
+type RealmBridge = {
+  cloneToRealm: (val: unknown) => unknown
+  makeError: (message: string, name?: string) => Error
+  wrapSyncHostFn: (fn: (...args: unknown[]) => unknown) => unknown
+  wrapIdentityHostFn: (fn: (...args: unknown[]) => unknown) => unknown
+  wrapAsyncHostFn: (fn: (...args: unknown[]) => unknown) => unknown
+  createRealmObj: (
+    entries: ReadonlyArray<readonly [string, unknown]>,
+  ) => unknown
+  createNullProtoObj: (
+    entries: ReadonlyArray<readonly [string, unknown]>,
+  ) => unknown
+  createDollarFn: (
+    dispatchHost: (
+      first: unknown,
+      values: unknown[],
+    ) => (
+      nothrow: boolean,
+      ms: number | undefined,
+      cwd: string | undefined,
+      env: unknown,
+    ) => Promise<Record<string, unknown>>,
+    escapeHost: (s: unknown) => string,
+  ) => unknown
+}
+
+const REALM_BRIDGE_INIT_SOURCE = `(() => {
+  const _Object = Object;
+  const _Array = Array;
+  const _Error = Error;
+  const _TypeError = TypeError;
+  const _RangeError = RangeError;
+  const _Promise = Promise;
+  const _Map = Map;
+  const _Set = Set;
+  const _RegExp = RegExp;
+  const _Date = Date;
+  const _Uint8Array = Uint8Array;
+  const _WeakMap = WeakMap;
+  const _JSON = JSON;
+  const _keys = _Object.keys;
+  const _getPrototypeOf = _Object.getPrototypeOf;
+  const _create = _Object.create;
+  const _isArray = _Array.isArray;
+  const _toString = _Object.prototype.toString;
+
+  const makeError = (message, name) => {
+    const msg = typeof message === 'string' ? message : String(message ?? '');
+    let err;
+    if (name === 'RangeError') err = new _RangeError(msg);
+    else if (name === 'TypeError') err = new _TypeError(msg);
+    else {
+      err = new _Error(msg);
+      if (typeof name === 'string' && name.length > 0 && name !== 'Error') {
+        err.name = name;
+      }
+    }
+    return err;
+  };
+
+  const errInfo = (err) => ({
+    msg: err && typeof err === 'object' && typeof err.message === 'string' ? err.message : String(err),
+    name: err && typeof err === 'object' && typeof err.name === 'string' ? err.name : 'Error',
+  });
+
+  const cloneToRealm = (val, seen) => {
+    if (val === null || val === undefined) return val;
+    const t = typeof val;
+    if (t === 'string' || t === 'number' || t === 'boolean' || t === 'bigint' || t === 'symbol') {
+      return val;
+    }
+    if (t === 'function') return undefined;
+    if (!seen) seen = new _WeakMap();
+    if (seen.has(val)) return seen.get(val);
+
+    const tag = _toString.call(val);
+    if (tag === '[object Date]' && typeof val.getTime === 'function') {
+      const d = new _Date(val.getTime());
+      seen.set(val, d);
+      return d;
+    }
+    if (tag === '[object RegExp]' && typeof val.source === 'string') {
+      const r = new _RegExp(val.source, typeof val.flags === 'string' ? val.flags : '');
+      seen.set(val, r);
+      return r;
+    }
+    if (typeof val.byteLength === 'number' && typeof val.length === 'number' && typeof val.subarray === 'function') {
+      const u = new _Uint8Array(val.length);
+      for (let i = 0; i < val.length; i++) u[i] = val[i];
+      seen.set(val, u);
+      return u;
+    }
+    if (val instanceof _Error || tag === '[object Error]') {
+      const info = errInfo(val);
+      const e = makeError(info.msg, info.name);
+      seen.set(val, e);
+      return e;
+    }
+    if (tag === '[object Map]' && typeof val.forEach === 'function') {
+      const m = new _Map();
+      seen.set(val, m);
+      val.forEach((v, k) => m.set(cloneToRealm(k, seen), cloneToRealm(v, seen)));
+      return m;
+    }
+    if (tag === '[object Set]' && typeof val.forEach === 'function') {
+      const s = new _Set();
+      seen.set(val, s);
+      val.forEach((v) => s.add(cloneToRealm(v, seen)));
+      return s;
+    }
+    if (_isArray(val)) {
+      const arr = new _Array(val.length);
+      seen.set(val, arr);
+      for (let i = 0; i < val.length; i++) {
+        arr[i] = cloneToRealm(val[i], seen);
+      }
+      return arr;
+    }
+    const obj = _getPrototypeOf(val) === null ? _create(null) : {};
+    seen.set(val, obj);
+    const keys = _keys(val);
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[i];
+      const v = val[k];
+      if (typeof v !== 'function') {
+        obj[k] = cloneToRealm(v, seen);
+      }
+    }
+    return obj;
+  };
+
+  const wrapSyncHostFn = (fn) => function (...args) {
+    try {
+      return cloneToRealm(fn.apply(this, args));
+    } catch (err) {
+      const info = errInfo(err);
+      throw makeError(info.msg, info.name);
+    }
+  };
+
+  const wrapIdentityHostFn = (fn) => function (...args) {
+    try {
+      return fn.apply(this, args);
+    } catch (err) {
+      const info = errInfo(err);
+      throw makeError(info.msg, info.name);
+    }
+  };
+
+  const wrapAsyncHostFn = (fn) => function (...args) {
+    return new _Promise((resolve, reject) => {
+      let res;
+      try {
+        res = fn.apply(this, args);
+      } catch (err) {
+        const info = errInfo(err);
+        reject(makeError(info.msg, info.name));
+        return;
+      }
+      if (res && typeof res.then === 'function') {
+        res.then(
+          (val) => resolve(cloneToRealm(val)),
+          (err) => {
+            const info = errInfo(err);
+            reject(makeError(info.msg, info.name));
+          },
+        );
+      } else {
+        resolve(cloneToRealm(res));
+      }
+    });
+  };
+
+  const createRealmObj = (entries) => {
+    const obj = {};
+    for (let i = 0; i < entries.length; i++) {
+      obj[entries[i][0]] = entries[i][1];
+    }
+    return obj;
+  };
+
+  const createNullProtoObj = (entries) => {
+    const obj = _create(null);
+    for (let i = 0; i < entries.length; i++) {
+      obj[entries[i][0]] = entries[i][1];
+    }
+    return obj;
+  };
+
+  const createShellPromise = (runHost) => {
+    const opts = { nothrow: false, ms: undefined, cwd: undefined, env: undefined };
+    const p = new _Promise((resolve, reject) => {
+      _Promise.resolve().then(() => {
+        let res;
+        try {
+          res = runHost(opts.nothrow, opts.ms, opts.cwd, opts.env);
+        } catch (err) {
+          const info = errInfo(err);
+          reject(makeError(info.msg, info.name));
+          return;
+        }
+        res.then(
+          (rawOut) => {
+            const out = cloneToRealm(rawOut);
+            out.text = function () { return out.stdout; };
+            out.lines = function () { return out.stdout.split('\\n'); };
+            out.json = function () { return _JSON.parse(out.stdout); };
+            resolve(out);
+          },
+          (err) => {
+            const info = errInfo(err);
+            reject(makeError(info.msg, info.name));
+          },
+        );
+      });
+    });
+    p.nothrow = function () { opts.nothrow = true; return p; };
+    p.throws = function (on) { opts.nothrow = !on; return p; };
+    p.quiet = function () { return p; };
+    p.timeout = function (n) { opts.ms = n; return p; };
+    p.cwd = function (d) { opts.cwd = String(d); return p; };
+    p.env = function (e) { opts.env = e; return p; };
+    p.text = function () { return p.then((o) => o.stdout); };
+    p.lines = function () { return p.then((o) => o.stdout.split('\\n')); };
+    p.json = function () { return p.then((o) => _JSON.parse(o.stdout)); };
+    return p;
+  };
+
+  const createDollarFn = (dispatchHost, escapeHost) => {
+    const fn = function (first, ...values) {
+      let handle;
+      try {
+        handle = dispatchHost(first, values);
+      } catch (err) {
+        const info = errInfo(err);
+        throw makeError(info.msg, info.name);
+      }
+      return createShellPromise(handle);
+    };
+    fn.escape = wrapSyncHostFn(escapeHost);
+    return fn;
+  };
+
+  return {
+    cloneToRealm,
+    makeError,
+    wrapSyncHostFn,
+    wrapIdentityHostFn,
+    wrapAsyncHostFn,
+    createRealmObj,
+    createNullProtoObj,
+    createDollarFn,
+  };
+})()`
+
+type PersistentCodeModeVmSession = {
+  sandbox: Record<string, unknown>
+  context: vm.Context
+  bridge: RealmBridge
+  checkBudgetImpl: (() => void) | undefined
+  /** Tracks `{ raw: "..." }` literals written directly in script source and their original string value. */
+  rawLiteralValues: WeakMap<object, string>
+  /** Per-session randomized non-enumerable identifier for marking script-authored `{ raw }` literals. */
+  rawLiteralMarkerName: string
+  /** Console ring buffer persisted across turns in this VM session. */
+  consoleBuffer: string[]
+  consoleDropped: number
+  /** Per-turn wall clock + step budget state (official `steps` object). */
+  turnState: {
+    bound: number
+    deadline: number
+    lastClock: number
+    stride: number
+    left: number
+    rest: number
+    budget: number
+    stopped: boolean
+    budgetStopped: boolean
+    clockStops: number
+    budgetStops: number
+  }
+}
+
+const MAX_PERSISTENT_VM_SESSIONS = 32
+const persistentVmSessionsByKey = new Map<string, PersistentCodeModeVmSession>()
+
+let cachedReplTranspiler:
+  | { transformSync: (code: string) => string }
+  | null
+  | undefined
+
+function getReplTranspiler(): {
+  transformSync: (code: string) => string
+} | null {
+  if (cachedReplTranspiler !== undefined) return cachedReplTranspiler
+  const bunGlobal = (
+    globalThis as unknown as {
+      Bun?: {
+        Transpiler?: new (opts: {
+          loader: string
+          replMode: boolean
+          macro: boolean
+        }) => { transformSync: (code: string) => string }
+      }
+    }
+  ).Bun
+  if (typeof bunGlobal?.Transpiler === 'function') {
+    cachedReplTranspiler = new bunGlobal.Transpiler({
+      loader: 'js',
+      replMode: true,
+      macro: false,
+    })
+  } else {
+    cachedReplTranspiler = null
+  }
+  return cachedReplTranspiler
+}
+
 /**
- * Executes a JavaScript snippet inside an isolated VM context, exposing async
+ * Per-turn step budget, mirroring official `ur()` (REPL step budget) and the
+ * stride allocator in `Uc`. A turn is the code from the script's start, a tool
+ * call's result, or a timer's firing until the next tool call's result/timer.
+ */
+const CODE_MODE_STEP_BUDGET = 50_000_000
+const CODE_MODE_STRIDE_CLOCK_MS = 25
+const CODE_MODE_MAX_STRIDE = 1_000
+
+function makeTurnState(): PersistentCodeModeVmSession['turnState'] {
+  return {
+    bound: 0,
+    deadline: 0,
+    lastClock: 0,
+    stride: 1,
+    left: 0,
+    rest: 0,
+    budget: CODE_MODE_STEP_BUDGET,
+    stopped: false,
+    budgetStopped: false,
+    clockStops: 0,
+    budgetStops: 0,
+  }
+}
+
+/**
+ * Official 2.1.328 (`Go`/`Uc`/`Mr`): start a new turn — the script's own run
+ * time, excluding time spent inside tool calls. `boundMs` is the wall clock.
+ */
+function startCodeModeTurn(
+  session: PersistentCodeModeVmSession,
+  boundMs: number,
+): void {
+  const s = session.turnState
+  const now = Date.now()
+  s.bound = boundMs
+  s.deadline = now + boundMs
+  s.lastClock = now
+  s.stride = 1
+  s.rest = s.budget
+  s.stopped = false
+  s.budgetStopped = false
+  s.left = 0
+}
+
+/**
+ * Official 2.1.328 (the counter returned by `Uc`'s injected shim): charge one
+ * step. Throws a RangeError when the turn's wall clock or step budget runs out.
+ * Tool-call wait time is excluded because the turn is only re-armed on resume.
+ */
+function chargeCodeModeStep(session: PersistentCodeModeVmSession): void {
+  const s = session.turnState
+  if (s.bound === 0) return
+  s.left--
+  if (s.left > 0) return
+  if (s.rest <= 0) {
+    s.left = 0
+    if (!s.budgetStopped) {
+      s.budgetStopped = true
+      s.budgetStops++
+    }
+    throw new RangeError(
+      `REPL: a turn ran ${s.budget} steps, its budget (a step is one pass through a loop or one call of a function), and was stopped. A turn is the code that runs from the script's start, a tool call's result or a timer's firing until the next tool call's result or timer. End the loop, or await a tool call or a timer in it.`,
+    )
+  }
+  const now = Date.now()
+  if (now > s.deadline) {
+    s.left = 0
+    if (!s.stopped) {
+      s.stopped = true
+      s.clockStops++
+    }
+    // Surface the same wall-clock timeout the deadline timer reports — the
+    // script overran its bound; keep the canonical "timed out after Xms" text
+    // so callers see one consistent stop reason.
+    throw new RangeError(`Code Mode script timed out after ${s.bound}ms`)
+  }
+  const stride =
+    now - s.lastClock >= CODE_MODE_STRIDE_CLOCK_MS
+      ? 1
+      : s.stride < CODE_MODE_MAX_STRIDE
+        ? s.stride * 2
+        : CODE_MODE_MAX_STRIDE
+  s.lastClock = now
+  s.stride = stride
+  const take = stride < s.rest ? stride : s.rest
+  s.rest -= take
+  s.left = take - 1
+}
+
+const CONSOLE_RING_BUFFER_MAX = 500
+
+function createCodeModeVmSession(): PersistentCodeModeVmSession {
+  // Official `Go`/`$c`/`Tl`: the realm starts from a null-prototype sandbox and
+  // exposes ONLY realm-sealed bridge objects/functions — no host intrinsics.
+  const sandbox: Record<string, unknown> = { __proto__: null } as Record<
+    string,
+    unknown
+  >
+  const rawLiteralValues = new WeakMap<object, string>()
+  const rawLiteralMarkerName = `__cm_raw_${randomBytes(6).toString('hex')}`
+  const session: PersistentCodeModeVmSession = {
+    sandbox,
+    context: undefined as unknown as vm.Context,
+    bridge: undefined as unknown as RealmBridge,
+    checkBudgetImpl: undefined,
+    rawLiteralValues,
+    rawLiteralMarkerName,
+    consoleBuffer: [],
+    consoleDropped: 0,
+    turnState: makeTurnState(),
+  }
+  // Official `kee({...},{codeGeneration:{strings:false}}): eval() and
+  // `new Function()` are disabled inside the realm — script code can only run
+  // through the instrumented transform, so it cannot bypass `__checkBudget`.
+  session.context = vm.createContext(sandbox, {
+    codeGeneration: { strings: false, wasm: false },
+  })
+  // Initialize realm-side bridge capturing realm intrinsics before any user code runs.
+  session.bridge = new vm.Script(REALM_BRIDGE_INIT_SOURCE, {
+    filename: 'code-mode-realm-init.js',
+  }).runInContext(session.context) as RealmBridge
+
+  // Official `jc`/`Uc`: instrumented loops & functions call `__checkBudget` —
+  // expose it as a realm-sealed callable throwing realm-side Errors.
+  Object.defineProperty(sandbox, '__checkBudget', {
+    value: session.bridge.wrapSyncHostFn(() => {
+      chargeCodeModeStep(session)
+      session.checkBudgetImpl?.()
+    }),
+    writable: false,
+    enumerable: false,
+    configurable: false,
+  })
+
+  // Official `zc`/`fr`: mark single-key `{ raw: expr }` literals written directly
+  // in script source so `$` can distinguish them from external/parsed objects.
+  // Uses a per-session randomized non-enumerable identifier and
+  // `wrapIdentityHostFn` so user scripts cannot trivially guess/invoke it and
+  // the exact same realm object is returned.
+  Object.defineProperty(sandbox, rawLiteralMarkerName, {
+    value: session.bridge.wrapIdentityHostFn((val: unknown) => {
+      if (
+        val !== null &&
+        typeof val === 'object' &&
+        Object.keys(val).length === 1 &&
+        Object.hasOwn(val, 'raw') &&
+        typeof (val as { raw?: unknown }).raw === 'string'
+      ) {
+        rawLiteralValues.set(val, (val as { raw: string }).raw)
+      }
+      return val
+    }),
+    writable: false,
+    enumerable: false,
+    configurable: false,
+  })
+
+  // Official `Tl`: expose `atob` / `btoa` as realm-sealed sync functions.
+  sandbox.atob = session.bridge.wrapSyncHostFn((input: unknown) =>
+    Buffer.from(String(input), 'base64').toString('binary'),
+  )
+  sandbox.btoa = session.bridge.wrapSyncHostFn((input: unknown) =>
+    Buffer.from(String(input), 'binary').toString('base64'),
+  )
+
+  return session
+}
+
+/**
+ * Seal a sync host function for realm exposure (official `o.fn`/`St(e,name,o.fn)`).
+ */
+function sealForRealm(
+  session: PersistentCodeModeVmSession,
+  fn: (...args: never[]) => unknown,
+): unknown {
+  return session.bridge.wrapSyncHostFn(fn as (...args: unknown[]) => unknown)
+}
+
+/**
+ * Seal an async host function for realm exposure so returned Promises, resolved
+ * values, and rejected Errors all belong to the VM realm.
+ */
+function sealAsyncForRealm(
+  session: PersistentCodeModeVmSession,
+  fn: (...args: never[]) => unknown,
+): unknown {
+  return session.bridge.wrapAsyncHostFn(fn as (...args: unknown[]) => unknown)
+}
+
+function getOrCreatePersistentVmSession(
+  sessionKey: string,
+): PersistentCodeModeVmSession {
+  const existing = persistentVmSessionsByKey.get(sessionKey)
+  if (existing) {
+    // Refresh LRU order
+    persistentVmSessionsByKey.delete(sessionKey)
+    persistentVmSessionsByKey.set(sessionKey, existing)
+    return existing
+  }
+  if (persistentVmSessionsByKey.size >= MAX_PERSISTENT_VM_SESSIONS) {
+    const oldestKey = persistentVmSessionsByKey.keys().next().value
+    if (oldestKey !== undefined) {
+      persistentVmSessionsByKey.delete(oldestKey)
+      sessionUnsetVarsByKey.delete(oldestKey)
+    }
+  }
+  const created = createCodeModeVmSession()
+  persistentVmSessionsByKey.set(sessionKey, created)
+  return created
+}
+
+/**
+ * Clear persistent Code Mode VM context(s) and unset-var tracking (on session
+ * reset, clear, or eviction).
+ */
+export function clearCodeModeVmSession(sessionKey?: string): void {
+  if (sessionKey !== undefined) {
+    persistentVmSessionsByKey.delete(sessionKey)
+    sessionUnsetVarsByKey.delete(sessionKey)
+    getReplSessions().clear([sessionKey])
+  } else {
+    persistentVmSessionsByKey.clear()
+    sessionUnsetVarsByKey.clear()
+    getReplSessions().clear()
+  }
+}
+
+function skipWsAndComments(code: string, start: number): number {
+  let i = start
+  const len = code.length
+  while (i < len) {
+    const ch = code[i]!
+    const next = code[i + 1]
+    if (/\s/.test(ch)) {
+      i++
+      continue
+    }
+    if (ch === '/' && next === '/') {
+      i += 2
+      while (i < len && code[i] !== '\n') i++
+      continue
+    }
+    if (ch === '/' && next === '*') {
+      i += 2
+      while (i < len && !(code[i] === '*' && code[i + 1] === '/')) i++
+      i = Math.min(len, i + 2)
+      continue
+    }
+    break
+  }
+  return i
+}
+
+function scanStringLiteralEnd(code: string, start: number): number {
+  const quote = code[start]!
+  let i = start + 1
+  const len = code.length
+  while (i < len) {
+    if (code[i] === '\\') {
+      i += 2
+      continue
+    }
+    if (code[i] === quote) return i + 1
+    i++
+  }
+  return len
+}
+
+function scanRegexLiteralEnd(code: string, start: number): number {
+  let i = start + 1
+  const len = code.length
+  let inCharClass = false
+  while (i < len) {
+    const rc = code[i]!
+    if (rc === '\\') {
+      i += 2
+      continue
+    }
+    if (rc === '\n' || rc === '\r') return i
+    if (rc === '[') {
+      inCharClass = true
+      i++
+      continue
+    }
+    if (rc === ']') {
+      inCharClass = false
+      i++
+      continue
+    }
+    if (!inCharClass && rc === '/') {
+      i++
+      while (i < len && /[a-z]/i.test(code[i]!)) i++
+      return i
+    }
+    i++
+  }
+  return len
+}
+
+function findMatchingDelimiter(
+  code: string,
+  openIdx: number,
+  openChar: '(' | '{' | '[',
+  closeChar: ')' | '}' | ']',
+): number {
+  let depth = 0
+  let i = openIdx
+  const len = code.length
+  let emitted = ''
+  const templateBraceDepths: number[] = []
+  while (i < len) {
+    const ch = code[i]!
+    const next = code[i + 1]
+    if (ch === '/' && next === '/') {
+      i += 2
+      while (i < len && code[i] !== '\n') i++
+      emitted += ' '
+      continue
+    }
+    if (ch === '/' && next === '*') {
+      i += 2
+      while (i < len && !(code[i] === '*' && code[i + 1] === '/')) i++
+      i = Math.min(len, i + 2)
+      emitted += ' '
+      continue
+    }
+    if (ch === "'" || ch === '"') {
+      i = scanStringLiteralEnd(code, i)
+      emitted += '""'
+      continue
+    }
+    if (ch === '`') {
+      i++
+      emitted += ' '
+      while (i < len) {
+        if (code[i] === '\\') {
+          i += 2
+          continue
+        }
+        if (code[i] === '$' && code[i + 1] === '{') {
+          i += 2
+          templateBraceDepths.push(0)
+          emitted += '('
+          break
+        }
+        if (code[i] === '`') {
+          i++
+          emitted += '""'
+          break
+        }
+        i++
+      }
+      continue
+    }
+    if (templateBraceDepths.length > 0) {
+      if (ch === '{') {
+        templateBraceDepths[templateBraceDepths.length - 1]! += 1
+        emitted += ch
+        i++
+        continue
+      }
+      if (ch === '}') {
+        const td = templateBraceDepths[templateBraceDepths.length - 1]!
+        if (td === 0) {
+          templateBraceDepths.pop()
+          emitted += ')'
+          i++
+          while (i < len) {
+            if (code[i] === '\\') {
+              i += 2
+              continue
+            }
+            if (code[i] === '$' && code[i + 1] === '{') {
+              i += 2
+              templateBraceDepths.push(0)
+              emitted += '('
+              break
+            }
+            if (code[i] === '`') {
+              i++
+              emitted += '""'
+              break
+            }
+            i++
+          }
+          continue
+        }
+        templateBraceDepths[templateBraceDepths.length - 1] = td - 1
+        emitted += ch
+        i++
+        continue
+      }
+    }
+    if (ch === '/' && canPrecedeRegexLiteral(emitted)) {
+      i = scanRegexLiteralEnd(code, i)
+      emitted += '""'
+      continue
+    }
+    if (ch === openChar) depth++
+    else if (ch === closeChar) {
+      depth--
+      if (depth === 0) return i
+    }
+    emitted += ch
+    i++
+  }
+  return -1
+}
+
+function findTopLevelSemicolons(inner: string): number[] {
+  const semis: number[] = []
+  let depthParen = 0
+  let depthBracket = 0
+  let depthCurly = 0
+  let i = 0
+  const len = inner.length
+  let emitted = ''
+  const templateBraceDepths: number[] = []
+  while (i < len) {
+    const ch = inner[i]!
+    const next = inner[i + 1]
+    if (ch === '/' && next === '/') {
+      i += 2
+      while (i < len && inner[i] !== '\n') i++
+      emitted += ' '
+      continue
+    }
+    if (ch === '/' && next === '*') {
+      i += 2
+      while (i < len && !(inner[i] === '*' && inner[i + 1] === '/')) i++
+      i = Math.min(len, i + 2)
+      emitted += ' '
+      continue
+    }
+    if (ch === "'" || ch === '"') {
+      i = scanStringLiteralEnd(inner, i)
+      emitted += '""'
+      continue
+    }
+    if (ch === '`') {
+      i++
+      while (i < len) {
+        if (inner[i] === '\\') {
+          i += 2
+          continue
+        }
+        if (inner[i] === '$' && inner[i + 1] === '{') {
+          i += 2
+          templateBraceDepths.push(0)
+          break
+        }
+        if (inner[i] === '`') {
+          i++
+          break
+        }
+        i++
+      }
+      emitted += '""'
+      continue
+    }
+    if (templateBraceDepths.length > 0) {
+      if (ch === '{') {
+        templateBraceDepths[templateBraceDepths.length - 1]! += 1
+        i++
+        continue
+      }
+      if (ch === '}') {
+        const td = templateBraceDepths[templateBraceDepths.length - 1]!
+        if (td === 0) {
+          templateBraceDepths.pop()
+          i++
+          while (i < len) {
+            if (inner[i] === '\\') {
+              i += 2
+              continue
+            }
+            if (inner[i] === '$' && inner[i + 1] === '{') {
+              i += 2
+              templateBraceDepths.push(0)
+              break
+            }
+            if (inner[i] === '`') {
+              i++
+              break
+            }
+            i++
+          }
+          continue
+        }
+        templateBraceDepths[templateBraceDepths.length - 1] = td - 1
+        i++
+        continue
+      }
+    }
+    if (ch === '/' && canPrecedeRegexLiteral(emitted)) {
+      i = scanRegexLiteralEnd(inner, i)
+      emitted += '""'
+      continue
+    }
+    if (ch === '(') depthParen++
+    else if (ch === ')') depthParen--
+    else if (ch === '[') depthBracket++
+    else if (ch === ']') depthBracket--
+    else if (ch === '{') depthCurly++
+    else if (ch === '}') depthCurly--
+    else if (
+      ch === ';' &&
+      depthParen === 0 &&
+      depthBracket === 0 &&
+      depthCurly === 0
+    ) {
+      semis.push(i)
+    }
+    emitted += ch
+    i++
+  }
+  return semis
+}
+
+function findSingleStatementEnd(code: string, start: number): number {
+  let depthParen = 0
+  let depthBracket = 0
+  let depthCurly = 0
+  let i = start
+  const len = code.length
+  let emitted = ''
+  while (i < len) {
+    const ch = code[i]!
+    const next = code[i + 1]
+    if (ch === '/' && next === '/') {
+      i += 2
+      while (i < len && code[i] !== '\n') i++
+      if (depthParen === 0 && depthBracket === 0 && depthCurly === 0) {
+        return i
+      }
+      continue
+    }
+    if (ch === '/' && next === '*') {
+      i += 2
+      while (i < len && !(code[i] === '*' && code[i + 1] === '/')) i++
+      i = Math.min(len, i + 2)
+      continue
+    }
+    if (ch === "'" || ch === '"') {
+      i = scanStringLiteralEnd(code, i)
+      emitted += '""'
+      continue
+    }
+    if (ch === '`') {
+      i++
+      let td = 0
+      while (i < len) {
+        if (code[i] === '\\') {
+          i += 2
+          continue
+        }
+        if (td === 0 && code[i] === '$' && code[i + 1] === '{') {
+          td = 1
+          i += 2
+          continue
+        }
+        if (td > 0) {
+          if (code[i] === '{') td++
+          else if (code[i] === '}') td--
+          i++
+          continue
+        }
+        if (code[i] === '`') {
+          i++
+          break
+        }
+        i++
+      }
+      emitted += '""'
+      continue
+    }
+    if (ch === '/' && canPrecedeRegexLiteral(emitted)) {
+      i = scanRegexLiteralEnd(code, i)
+      emitted += '""'
+      continue
+    }
+    if (ch === '(') depthParen++
+    else if (ch === ')') depthParen--
+    else if (ch === '[') depthBracket++
+    else if (ch === ']') depthBracket--
+    else if (ch === '{') depthCurly++
+    else if (ch === '}') {
+      if (depthCurly === 0) return i
+      depthCurly--
+    } else if (depthParen === 0 && depthBracket === 0 && depthCurly === 0) {
+      if (ch === ';') return i + 1
+      if (ch === '\n') return i
+    }
+    emitted += ch
+    i++
+  }
+  return len
+}
+
+/**
+ * Official 2.1.328 (`ua`): instrument `for`, `for await`, `while`, and `do`
+ * loops with `__checkBudget()` so synchronous infinite loops AFTER an `await`
+ * (when `vm.Script.runInContext({ timeout })` no longer applies) terminate
+ * cleanly within the script's timeout budget instead of hanging the event loop.
+ * Safely skips strings, template literal text, comments, and regex literals.
+ */
+export function instrumentCodeModeLoops(source: string): string {
+  let out = ''
+  let i = 0
+  const len = source.length
+  let braceDepth = 0
+  const doBlockBraceDepths: number[] = []
+  const doSingleStmtDepths: number[] = []
+  let expectDoWhileTail = false
+  const templateBraceDepths: number[] = []
+
+  const isIdentStart = (c: string) => /[A-Za-z_$]/.test(c)
+  const isIdentPart = (c: string) => /[A-Za-z0-9_$]/.test(c)
+
+  while (i < len) {
+    const ch = source[i]!
+    const next = source[i + 1]
+
+    // Line comment
+    if (ch === '/' && next === '/') {
+      const start = i
+      i += 2
+      while (i < len && source[i] !== '\n') i++
+      out += source.slice(start, i)
+      continue
+    }
+    // Block comment
+    if (ch === '/' && next === '*') {
+      const start = i
+      i += 2
+      while (i < len && !(source[i] === '*' && source[i + 1] === '/')) i++
+      i = Math.min(len, i + 2)
+      out += source.slice(start, i)
+      continue
+    }
+    // Quoted string
+    if (ch === "'" || ch === '"') {
+      const end = scanStringLiteralEnd(source, i)
+      out += source.slice(i, end)
+      i = end
+      expectDoWhileTail = false
+      continue
+    }
+    // Template literal
+    if (ch === '`') {
+      const start = i
+      i++
+      while (i < len) {
+        if (source[i] === '\\') {
+          i += 2
+          continue
+        }
+        if (source[i] === '$' && source[i + 1] === '{') {
+          i += 2
+          templateBraceDepths.push(0)
+          break
+        }
+        if (source[i] === '`') {
+          i++
+          break
+        }
+        i++
+      }
+      out += source.slice(start, i)
+      expectDoWhileTail = false
+      continue
+    }
+    // Inside template `${...}` interpolation
+    if (templateBraceDepths.length > 0) {
+      if (ch === '{') {
+        templateBraceDepths[templateBraceDepths.length - 1]! += 1
+        out += ch
+        i++
+        continue
+      }
+      if (ch === '}') {
+        const td = templateBraceDepths[templateBraceDepths.length - 1]!
+        if (td === 0) {
+          templateBraceDepths.pop()
+          const resumeStart = i
+          i++
+          while (i < len) {
+            if (source[i] === '\\') {
+              i += 2
+              continue
+            }
+            if (source[i] === '$' && source[i + 1] === '{') {
+              i += 2
+              templateBraceDepths.push(0)
+              break
+            }
+            if (source[i] === '`') {
+              i++
+              break
+            }
+            i++
+          }
+          out += source.slice(resumeStart, i)
+          continue
+        }
+        templateBraceDepths[templateBraceDepths.length - 1] = td - 1
+        out += ch
+        i++
+        continue
+      }
+    }
+    // Regex literal
+    if (ch === '/' && canPrecedeRegexLiteral(out)) {
+      const end = scanRegexLiteralEnd(source, i)
+      out += source.slice(i, end)
+      i = end
+      expectDoWhileTail = false
+      continue
+    }
+
+    if (/\s/.test(ch)) {
+      out += ch
+      i++
+      continue
+    }
+
+    if (ch === '{') {
+      braceDepth++
+      out += ch
+      i++
+      expectDoWhileTail = false
+      continue
+    }
+    if (ch === '}') {
+      braceDepth = Math.max(0, braceDepth - 1)
+      out += ch
+      i++
+      if (
+        doBlockBraceDepths.length > 0 &&
+        doBlockBraceDepths[doBlockBraceDepths.length - 1] === braceDepth
+      ) {
+        doBlockBraceDepths.pop()
+        expectDoWhileTail = true
+      } else {
+        expectDoWhileTail = false
+      }
+      continue
+    }
+
+    if (isIdentStart(ch)) {
+      const idStart = i
+      i++
+      while (i < len && isIdentPart(source[i]!)) i++
+      const word = source.slice(idStart, i)
+      const precededByDot = isPrecededByMemberDot(out, out.length)
+      const afterWs = skipWsAndComments(source, i)
+      const isObjectKey = source[afterWs] === ':'
+
+      if (!precededByDot && !isObjectKey && word === 'do') {
+        expectDoWhileTail = false
+        if (source[afterWs] === '{') {
+          doBlockBraceDepths.push(braceDepth)
+          braceDepth++
+          out += `${word}${source.slice(i, afterWs)}{ __checkBudget(); `
+          i = afterWs + 1
+          continue
+        }
+        // Single-statement `do stmt; while (cond)` — guard on the matching `while`
+        doSingleStmtDepths.push(braceDepth)
+        out += word
+        continue
+      }
+
+      if (!precededByDot && !isObjectKey && word === 'while') {
+        const isDoBlockTail = expectDoWhileTail
+        expectDoWhileTail = false
+        const isDoSingleTail =
+          !isDoBlockTail &&
+          doSingleStmtDepths.length > 0 &&
+          doSingleStmtDepths[doSingleStmtDepths.length - 1] === braceDepth
+
+        if (source[afterWs] === '(') {
+          const closeParen = findMatchingDelimiter(source, afterWs, '(', ')')
+          if (closeParen !== -1) {
+            const condInner = source.slice(afterWs + 1, closeParen)
+            const instrCond = instrumentCodeModeLoops(condInner)
+            if (isDoBlockTail) {
+              out += `${word}${source.slice(i, afterWs)}(${instrCond})`
+              i = closeParen + 1
+              continue
+            }
+            if (isDoSingleTail) {
+              doSingleStmtDepths.pop()
+              out += `${word}${source.slice(i, afterWs)}((__checkBudget(), (${instrCond})))`
+              i = closeParen + 1
+              continue
+            }
+            const bodyIdx = skipWsAndComments(source, closeParen + 1)
+            const between = source.slice(closeParen + 1, bodyIdx)
+            if (source[bodyIdx] === '{') {
+              braceDepth++
+              out += `${word}${source.slice(i, afterWs)}(${instrCond})${between}{ __checkBudget(); `
+              i = bodyIdx + 1
+              continue
+            }
+            if (source[bodyIdx] === ';') {
+              out += `${word}${source.slice(i, afterWs)}(${instrCond})${between}{ __checkBudget(); }`
+              i = bodyIdx + 1
+              continue
+            }
+            // Single-statement `while (cond) stmt`
+            out += `${word}${source.slice(i, afterWs)}((__checkBudget(), (${instrCond})))`
+            i = closeParen + 1
+            continue
+          }
+        }
+        out += word
+        continue
+      }
+
+      if (!precededByDot && !isObjectKey && word === 'for') {
+        expectDoWhileTail = false
+        let headerStart = afterWs
+        if (
+          source.slice(headerStart, headerStart + 5) === 'await' &&
+          !isIdentPart(source[headerStart + 5] ?? '')
+        ) {
+          headerStart = skipWsAndComments(source, headerStart + 5)
+        }
+        if (source[headerStart] === '(') {
+          const closeParen = findMatchingDelimiter(
+            source,
+            headerStart,
+            '(',
+            ')',
+          )
+          if (closeParen !== -1) {
+            const prefixBeforeParen = source.slice(i, headerStart)
+            const headerInner = source.slice(headerStart + 1, closeParen)
+            const bodyIdx = skipWsAndComments(source, closeParen + 1)
+            const between = source.slice(closeParen + 1, bodyIdx)
+            if (source[bodyIdx] === '{') {
+              braceDepth++
+              out += `${word}${prefixBeforeParen}(${instrumentCodeModeLoops(headerInner)})${between}{ __checkBudget(); `
+              i = bodyIdx + 1
+              continue
+            }
+            if (source[bodyIdx] === ';') {
+              out += `${word}${prefixBeforeParen}(${instrumentCodeModeLoops(headerInner)})${between}{ __checkBudget(); }`
+              i = bodyIdx + 1
+              continue
+            }
+            const semis = findTopLevelSemicolons(headerInner)
+            if (semis.length === 2) {
+              const initPart = instrumentCodeModeLoops(
+                headerInner.slice(0, semis[0]!),
+              )
+              const rawTest = headerInner.slice(semis[0]! + 1, semis[1]!).trim()
+              const updatePart = instrumentCodeModeLoops(
+                headerInner.slice(semis[1]! + 1),
+              )
+              const guardedTest =
+                rawTest.length > 0
+                  ? `(__checkBudget(), (${instrumentCodeModeLoops(rawTest)}))`
+                  : '(__checkBudget(), true)'
+              out += `${word}${prefixBeforeParen}(${initPart}; ${guardedTest}; ${updatePart})`
+              i = closeParen + 1
+              continue
+            }
+            // Single-statement `for (x of y) stmt` / `for (k in obj) stmt`
+            const stmtEnd = findSingleStatementEnd(source, bodyIdx)
+            const stmtText = source.slice(bodyIdx, stmtEnd)
+            out += `${word}${prefixBeforeParen}(${instrumentCodeModeLoops(headerInner)})${between}{ __checkBudget(); ${instrumentCodeModeLoops(stmtText)} }`
+            i = stmtEnd
+            continue
+          }
+        }
+        out += word
+        continue
+      }
+
+      if (!precededByDot && !isObjectKey && word === 'function') {
+        expectDoWhileTail = false
+        let scan = afterWs
+        if (source[scan] === '*') {
+          scan = skipWsAndComments(source, scan + 1)
+        }
+        if (scan < len && isIdentStart(source[scan]!)) {
+          scan++
+          while (scan < len && isIdentPart(source[scan]!)) scan++
+          scan = skipWsAndComments(source, scan)
+        }
+        if (source[scan] === '(') {
+          const closeParen = findMatchingDelimiter(source, scan, '(', ')')
+          if (closeParen !== -1) {
+            const bodyIdx = skipWsAndComments(source, closeParen + 1)
+            if (source[bodyIdx] === '{') {
+              braceDepth++
+              const paramInner = source.slice(scan + 1, closeParen)
+              out += `${word}${source.slice(i, scan)}(${instrumentCodeModeLoops(paramInner)})${source.slice(closeParen + 1, bodyIdx)}{ __checkBudget(); `
+              i = bodyIdx + 1
+              continue
+            }
+          }
+        }
+        out += word
+        continue
+      }
+
+      expectDoWhileTail = false
+      out += word
+      continue
+    }
+
+    // Arrow function block body: `=> {`
+    if (ch === '=' && next === '>') {
+      expectDoWhileTail = false
+      const afterArrow = skipWsAndComments(source, i + 2)
+      if (source[afterArrow] === '{') {
+        braceDepth++
+        out += `${source.slice(i, afterArrow)}{ __checkBudget(); `
+        i = afterArrow + 1
+        continue
+      }
+      out += '=>'
+      i += 2
+      continue
+    }
+
+    expectDoWhileTail = false
+    out += ch
+    i++
+  }
+
+  return out
+}
+
+/**
+ * Official 2.1.328 (`zc`/`fr`): wrap single-key `{ raw: expr }` object literals
+ * written directly in script source with `__markRawLiteral({ raw: expr })` so
+ * `$` can distinguish script-authored `{ raw }` literals from external/parsed
+ * objects or mutated literals.
+ */
+export function markCodeModeRawLiterals(
+  source: string,
+  markerName = '__markRawLiteral',
+): string {
+  let out = ''
+  let i = 0
+  const len = source.length
+  const templateBraceDepths: number[] = []
+
+  const isIdentPart = (c: string) => /[A-Za-z0-9_$]/.test(c)
+
+  while (i < len) {
+    const ch = source[i]!
+    const next = source[i + 1]
+
+    if (ch === '/' && next === '/') {
+      const start = i
+      i += 2
+      while (i < len && source[i] !== '\n') i++
+      out += source.slice(start, i)
+      continue
+    }
+    if (ch === '/' && next === '*') {
+      const start = i
+      i += 2
+      while (i < len && !(source[i] === '*' && source[i + 1] === '/')) i++
+      i = Math.min(len, i + 2)
+      out += source.slice(start, i)
+      continue
+    }
+    if (ch === "'" || ch === '"') {
+      const end = scanStringLiteralEnd(source, i)
+      out += source.slice(i, end)
+      i = end
+      continue
+    }
+    if (ch === '`') {
+      const start = i
+      i++
+      while (i < len) {
+        if (source[i] === '\\') {
+          i += 2
+          continue
+        }
+        if (source[i] === '$' && source[i + 1] === '{') {
+          i += 2
+          templateBraceDepths.push(0)
+          break
+        }
+        if (source[i] === '`') {
+          i++
+          break
+        }
+        i++
+      }
+      out += source.slice(start, i)
+      continue
+    }
+    if (templateBraceDepths.length > 0 && ch === '}') {
+      const td = templateBraceDepths[templateBraceDepths.length - 1]!
+      if (td === 0) {
+        templateBraceDepths.pop()
+        const resumeStart = i
+        i++
+        while (i < len) {
+          if (source[i] === '\\') {
+            i += 2
+            continue
+          }
+          if (source[i] === '$' && source[i + 1] === '{') {
+            i += 2
+            templateBraceDepths.push(0)
+            break
+          }
+          if (source[i] === '`') {
+            i++
+            break
+          }
+          i++
+        }
+        out += source.slice(resumeStart, i)
+        continue
+      }
+      templateBraceDepths[templateBraceDepths.length - 1] = td - 1
+      out += ch
+      i++
+      continue
+    }
+    if (ch === '/' && canPrecedeRegexLiteral(out)) {
+      const end = scanRegexLiteralEnd(source, i)
+      out += source.slice(i, end)
+      i = end
+      continue
+    }
+
+    if (ch === '{') {
+      const closeIdx = findMatchingDelimiter(source, i, '{', '}')
+      if (closeIdx !== -1) {
+        const inner = source.slice(i + 1, closeIdx)
+        const keyStart = skipWsAndComments(inner, 0)
+        // Check if object literal has a single `raw` key: `{ raw: expr }` (with optional trailing comma)
+        if (
+          inner.slice(keyStart, keyStart + 3) === 'raw' &&
+          !isIdentPart(inner[keyStart + 3] ?? '')
+        ) {
+          const afterKey = skipWsAndComments(inner, keyStart + 3)
+          if (inner[afterKey] === ':') {
+            const parts = splitTopLevelCommas(inner).filter(
+              p => p.trim().length > 0,
+            )
+            if (parts.length === 1) {
+              // Ensure `{` is in an expression position (e.g. after `(`, `,`, `=`, `:`, `[`, `?`, `return`, `${`, etc.)
+              let prevIdx = out.length - 1
+              while (prevIdx >= 0 && /\s/.test(out[prevIdx]!)) prevIdx--
+              const prevChar = prevIdx >= 0 ? out[prevIdx]! : ''
+              const isExprPos =
+                prevChar === '' ||
+                '([,=?:!+-*/%&|^~{'.includes(prevChar) ||
+                (prevChar === '>' && out[prevIdx - 1] === '=') ||
+                /\b(?:return|yield|await|throw|of|in)$/.test(
+                  out.slice(Math.max(0, prevIdx - 10), prevIdx + 1),
+                )
+              if (isExprPos) {
+                const valueExpr = inner.slice(afterKey + 1)
+                out += `${markerName}({ raw:${markCodeModeRawLiterals(valueExpr, markerName)}})`
+                i = closeIdx + 1
+                continue
+              }
+            }
+          }
+        }
+      }
+      if (templateBraceDepths.length > 0) {
+        templateBraceDepths[templateBraceDepths.length - 1]! += 1
+      }
+      out += ch
+      i++
+      continue
+    }
+
+    out += ch
+    i++
+  }
+
+  return out
+}
+
+const STATIC_IMPORT_RE =
+  /(?:^|[;\n])\s*import\s+(?:[\s\S]*?\s+from\s+['"]|['"])/
+
+function rejectStaticImports(code: string): void {
+  const stripped = stripJsCommentsAndStrings(code)
+  if (STATIC_IMPORT_RE.test(stripped)) {
+    throw new SyntaxError(
+      'Code Mode scripts cannot use `import` statements; use the provided global tools and helpers instead.',
+    )
+  }
+}
+
+/**
+ * Fallback transform when a script combines top-level `return` with `await`
+ * (which `Bun.Transpiler({ replMode: true })` rejects as ESM top-level return)
+ * or when running under a non-Bun runtime. Hoists top-level declarations to
+ * `var` outside `(async () => { ... })()` so bindings persist across turns.
+ */
+function transformWithTopLevelHoistAndAsyncIife(code: string): string {
+  const hoisted = new Set<string>()
+  const parts: string[] = []
+  let i = 0
+  const len = code.length
+  let braceDepth = 0
+  let parenDepth = 0
+  let bracketDepth = 0
+  let emitted = ''
+  const templateBraceDepths: number[] = []
+  const isIdentStart = (c: string) => /[A-Za-z_$]/.test(c)
+  const isIdentPart = (c: string) => /[A-Za-z0-9_$]/.test(c)
+  const isAtTopLevel = () =>
+    braceDepth === 0 &&
+    parenDepth === 0 &&
+    bracketDepth === 0 &&
+    templateBraceDepths.length === 0
+
+  while (i < len) {
+    const ch = code[i]!
+    const next = code[i + 1]
+    if (ch === '/' && next === '/') {
+      const start = i
+      i += 2
+      while (i < len && code[i] !== '\n') i++
+      parts.push(code.slice(start, i))
+      emitted += ' '
+      continue
+    }
+    if (ch === '/' && next === '*') {
+      const start = i
+      i += 2
+      while (i < len && !(code[i] === '*' && code[i + 1] === '/')) i++
+      i = Math.min(len, i + 2)
+      parts.push(code.slice(start, i))
+      emitted += ' '
+      continue
+    }
+    if (ch === "'" || ch === '"') {
+      const end = scanStringLiteralEnd(code, i)
+      parts.push(code.slice(i, end))
+      emitted += '""'
+      i = end
+      continue
+    }
+    if (ch === '`') {
+      const start = i
+      i++
+      while (i < len) {
+        if (code[i] === '\\') {
+          i += 2
+          continue
+        }
+        if (code[i] === '$' && code[i + 1] === '{') {
+          i += 2
+          templateBraceDepths.push(0)
+          break
+        }
+        if (code[i] === '`') {
+          i++
+          break
+        }
+        i++
+      }
+      parts.push(code.slice(start, i))
+      emitted += ' '
+      continue
+    }
+    if (templateBraceDepths.length > 0) {
+      if (ch === '{') {
+        templateBraceDepths[templateBraceDepths.length - 1]! += 1
+        parts.push(ch)
+        emitted += ch
+        i++
+        continue
+      }
+      if (ch === '}') {
+        const td = templateBraceDepths[templateBraceDepths.length - 1]!
+        if (td === 0) {
+          templateBraceDepths.pop()
+          const resumeStart = i
+          i++
+          while (i < len) {
+            if (code[i] === '\\') {
+              i += 2
+              continue
+            }
+            if (code[i] === '$' && code[i + 1] === '{') {
+              i += 2
+              templateBraceDepths.push(0)
+              break
+            }
+            if (code[i] === '`') {
+              i++
+              break
+            }
+            i++
+          }
+          parts.push(code.slice(resumeStart, i))
+          emitted += ')'
+          continue
+        }
+        templateBraceDepths[templateBraceDepths.length - 1] = td - 1
+        parts.push(ch)
+        emitted += ch
+        i++
+        continue
+      }
+    }
+    if (ch === '/' && canPrecedeRegexLiteral(emitted)) {
+      const end = scanRegexLiteralEnd(code, i)
+      parts.push(code.slice(i, end))
+      emitted += '""'
+      i = end
+      continue
+    }
+
+    if (isAtTopLevel() && isIdentStart(ch)) {
+      const idStart = i
+      i++
+      while (i < len && isIdentPart(code[i]!)) i++
+      const word = code.slice(idStart, i)
+      const afterWs = skipWsAndComments(code, i)
+
+      if (
+        (word === 'const' || word === 'let' || word === 'var') &&
+        !isPrecededByMemberDot(emitted, emitted.length)
+      ) {
+        const targetChar = code[afterWs]
+        if (targetChar && isIdentStart(targetChar)) {
+          let nameEnd = afterWs + 1
+          while (nameEnd < len && isIdentPart(code[nameEnd]!)) nameEnd++
+          const varName = code.slice(afterWs, nameEnd)
+          const eqIdx = skipWsAndComments(code, nameEnd)
+          if (code[eqIdx] === '=' && code[eqIdx + 1] !== '=') {
+            hoisted.add(varName)
+            parts.push(varName)
+            emitted += varName
+            i = nameEnd
+            continue
+          }
+          if (code[eqIdx] === ';' || code[eqIdx] === '\n' || eqIdx >= len) {
+            hoisted.add(varName)
+            i = nameEnd
+            continue
+          }
+        } else if (targetChar === '{' || targetChar === '[') {
+          const closeChar = targetChar === '{' ? '}' : ']'
+          const closeIdx = findMatchingDelimiter(
+            code,
+            afterWs,
+            targetChar,
+            closeChar,
+          )
+          if (closeIdx !== -1) {
+            const pattern = code.slice(afterWs, closeIdx + 1)
+            const eqIdx = skipWsAndComments(code, closeIdx + 1)
+            if (code[eqIdx] === '=' && code[eqIdx + 1] !== '=') {
+              collectDestructuringBindings(
+                stripJsCommentsAndStrings(pattern),
+                targetChar === '{',
+                hoisted,
+              )
+              const stmtEnd = findSingleStatementEnd(code, eqIdx + 1)
+              const rhs = code.slice(eqIdx + 1, stmtEnd).replace(/;\s*$/, '')
+              const wrapped = `(${pattern} = ${rhs});`
+              parts.push(wrapped)
+              emitted += wrapped
+              i = stmtEnd
+              continue
+            }
+          }
+        }
+      } else if (
+        word === 'function' &&
+        !isPrecededByMemberDot(emitted, emitted.length)
+      ) {
+        let fnNameStart = afterWs
+        if (code[fnNameStart] === '*') {
+          fnNameStart = skipWsAndComments(code, fnNameStart + 1)
+        }
+        if (fnNameStart < len && isIdentStart(code[fnNameStart]!)) {
+          let fnNameEnd = fnNameStart + 1
+          while (fnNameEnd < len && isIdentPart(code[fnNameEnd]!)) fnNameEnd++
+          const fnName = code.slice(fnNameStart, fnNameEnd)
+          hoisted.add(fnName)
+          parts.push(`globalThis.${fnName} = ${fnName}; ${word}`)
+          emitted += word
+          continue
+        }
+      } else if (
+        word === 'async' &&
+        !isPrecededByMemberDot(emitted, emitted.length) &&
+        code.slice(afterWs, afterWs + 8) === 'function' &&
+        !isIdentPart(code[afterWs + 8] ?? '')
+      ) {
+        let fnNameStart = skipWsAndComments(code, afterWs + 8)
+        if (code[fnNameStart] === '*') {
+          fnNameStart = skipWsAndComments(code, fnNameStart + 1)
+        }
+        if (fnNameStart < len && isIdentStart(code[fnNameStart]!)) {
+          let fnNameEnd = fnNameStart + 1
+          while (fnNameEnd < len && isIdentPart(code[fnNameEnd]!)) fnNameEnd++
+          const fnName = code.slice(fnNameStart, fnNameEnd)
+          hoisted.add(fnName)
+          parts.push(`globalThis.${fnName} = ${fnName}; ${word}`)
+          emitted += word
+          continue
+        }
+      } else if (
+        word === 'class' &&
+        !isPrecededByMemberDot(emitted, emitted.length) &&
+        afterWs < len &&
+        isIdentStart(code[afterWs]!)
+      ) {
+        let clsEnd = afterWs + 1
+        while (clsEnd < len && isIdentPart(code[clsEnd]!)) clsEnd++
+        const clsName = code.slice(afterWs, clsEnd)
+        hoisted.add(clsName)
+        parts.push(`${clsName} = class`)
+        emitted += 'class'
+        continue
+      }
+
+      parts.push(word)
+      emitted += word
+      continue
+    }
+
+    if (ch === '{') braceDepth++
+    else if (ch === '}') braceDepth = Math.max(0, braceDepth - 1)
+    else if (ch === '(') parenDepth++
+    else if (ch === ')') parenDepth = Math.max(0, parenDepth - 1)
+    else if (ch === '[') bracketDepth++
+    else if (ch === ']') bracketDepth = Math.max(0, bracketDepth - 1)
+
+    parts.push(ch)
+    emitted += ch
+    i++
+  }
+
+  const varDecls = [...hoisted].map(name => `var ${name};`).join('\n')
+  const prefix = varDecls ? `${varDecls}\n` : ''
+  return `${prefix}(async () => {\n${parts.join('')}\n})()`
+}
+
+/**
+ * Official 2.1.328 (`jl`/`ep` + `ua`): transform a Code Mode script so
+ * top-level `const`/`let`/`var`/`function`/`class` bindings persist onto the
+ * VM context across turns and all loops call `__checkBudget()`.
+ */
+export function transformCodeModeScript(
+  code: string,
+  rawLiteralMarkerName = '__markRawLiteral',
+): string {
+  rejectStaticImports(code)
+  const rawMarked = markCodeModeRawLiterals(code, rawLiteralMarkerName)
+  const transpiler = getReplTranspiler()
+  let transformed: string
+  if (transpiler) {
+    try {
+      transformed = transpiler.transformSync(rawMarked)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (/top-level return/i.test(msg)) {
+        transformed = transformWithTopLevelHoistAndAsyncIife(rawMarked)
+      } else if (rawMarked.trimStart().startsWith('{')) {
+        try {
+          transformed = transpiler.transformSync(`(${rawMarked}\n)`)
+        } catch {
+          try {
+            transformed = transpiler.transformSync(`;${rawMarked}`)
+          } catch {
+            transformed = transformWithTopLevelHoistAndAsyncIife(rawMarked)
+          }
+        }
+      } else {
+        throw err
+      }
+    }
+  } else {
+    transformed = transformWithTopLevelHoistAndAsyncIife(rawMarked)
+  }
+  return instrumentCodeModeLoops(transformed)
+}
+
+function unwrapReplTransformValue(raw: unknown): unknown {
+  if (
+    raw !== null &&
+    typeof raw === 'object' &&
+    Object.getPrototypeOf(raw) === null &&
+    Object.hasOwn(raw, 'value') &&
+    Object.keys(raw).length === 1
+  ) {
+    return (raw as { value: unknown }).value
+  }
+  return raw
+}
+
+/**
+ * Executes a JavaScript snippet inside a sandboxed VM context (reused per
+ * `sessionKey` across turns so top-level bindings persist), exposing async
  * bindings for primitive tools and `callTool(name, input)`.
  */
 export async function executeCodeModeScript(
@@ -1443,11 +3466,15 @@ export async function executeCodeModeScript(
     toolCallCap = REPL_TOOL_CALL_CAP,
     signal,
     shellKind = 'bash',
+    sessionKey,
     allowedTools,
     unsetVars,
     onProgress,
     permissionMode,
     getCachedFileContent,
+    availableToolNames,
+    toolDescriptors,
+    evalId,
   } = options
 
   noteReplContextCreated()
@@ -1460,14 +3487,56 @@ export async function executeCodeModeScript(
   // which tool calls were still running when the script failed.
   const inFlightCalls = new Map<number, string>()
   const scriptReadCache = new Map<string, string>()
+
+  // Execution-scoped stop/abort state so timeout or external abort immediately
+  // stops in-flight waits, aborts inner tools, and refuses any subsequent
+  // zombie tool calls from background continuations.
+  const execAbortController = new AbortController()
+  let stopped = false
+  let stopMessage = ''
+  let inFlightSnapshotAtStop: string[] | undefined
+  let stopReject: ((err: Error) => void) | undefined
+  const stopPromise = new Promise<never>((_resolve, reject) => {
+    stopReject = reject
+  })
+  void stopPromise.catch(() => {})
+
+  const triggerStop = (message: string) => {
+    if (stopped) return
+    stopped = true
+    stopMessage = message
+    inFlightSnapshotAtStop = [...inFlightCalls.values()]
+    const err = new Error(message)
+    if (!execAbortController.signal.aborted) {
+      execAbortController.abort(err)
+    }
+    stopReject?.(err)
+  }
+
+  const isStopped = () =>
+    stopped || signal?.aborted === true || execAbortController.signal.aborted
+
+  const getStopMessage = () =>
+    stopped ? stopMessage : 'Code Mode script aborted'
+
   let timerRef: PausableCodeModeTimer | undefined
+  // Official `ft`/`startsNoMoreCalls`: after the script's deadline (or abort)
+  // the realm must refuse to start NEW tool calls. Set before `runInContext`
+  // so the check lives in guardedCall's entry path, not the timer.
+  let noMoreCalls = false
 
   const guardedCall = async (
     toolName: string,
     input: Record<string, unknown> = {},
   ): Promise<unknown> => {
-    if (signal?.aborted) {
-      throw new Error('Code Mode script aborted')
+    // Official `ft` (`It.startsNoMoreCalls=!0`): once the turn deadline/abort
+    // fires, zombie continuations cannot start new tool calls — they throw
+    // the timeout message directly.
+    if (noMoreCalls) {
+      throw new Error(getStopMessage())
+    }
+    if (isStopped()) {
+      throw new Error(getStopMessage())
     }
     if (
       allowedTools &&
@@ -1496,15 +3565,31 @@ export async function executeCodeModeScript(
         ? `${toolName}(${JSON.stringify(input.command.slice(0, 60))})`
         : toolName
     inFlightCalls.set(callId, callLabel)
-    // Official 2.1.328 (#571): pause the script timer while waiting on prompts
-    // outside auto/bypass mode, plan approvals, or questions.
+    // Official `Wl`/`Xo`/`Mr`: the step-budget turn only counts *script* code —
+    // disarm it while inside a tool call. The elapsed deadline timer keeps
+    // running so a tool that hangs still aborts the whole execution.
+    const turn = vmSession.turnState
+    const wasArmed = turn.bound !== 0
+    turn.bound = 0
     const shouldPause = shouldPauseCodeModeTimerForTool(
       toolName,
       permissionMode,
     )
     if (shouldPause) timerRef?.pause()
     try {
-      const result = await invokeTool(toolName, input)
+      const toolPromise = Promise.resolve(
+        invokeTool(toolName, input, execAbortController.signal),
+      )
+      void toolPromise.catch(() => {})
+      const result = await Promise.race([toolPromise, stopPromise])
+      // Official `wl`/`Mr`: on resume, re-arm a fresh turn so a tool call that
+      // consumed most of the wall clock doesn't falsely charge it to the script.
+      if (wasArmed && !isStopped()) {
+        startCodeModeTurn(vmSession, clampedTimeout)
+      }
+      if (isStopped()) {
+        throw new Error(getStopMessage())
+      }
       if (toolName === 'Read' && typeof input.file_path === 'string') {
         const readContent =
           result &&
@@ -1531,6 +3616,9 @@ export async function executeCodeModeScript(
       }
       return result
     } catch (err) {
+      if (isStopped()) {
+        throw new Error(getStopMessage())
+      }
       // Official 2.1.328 (#652): on failed Edit, attach closest-match hint only
       // from already-cached readable content (never invoke Read, which could
       // bypass allowedTools or trigger a Read permission prompt).
@@ -1555,21 +3643,39 @@ export async function executeCodeModeScript(
       throw err
     } finally {
       if (shouldPause) timerRef?.resume()
-      inFlightCalls.delete(callId)
+      if (wasArmed && !isStopped()) {
+        startCodeModeTurn(vmSession, clampedTimeout)
+      }
+      if (!stopped) {
+        inFlightCalls.delete(callId)
+      }
     }
   }
 
-  // Official 2.1.326 #293: `$` shell helper exposed in Code Mode VM sandbox.
-  // Refuses invalid interpolated values, non-literal `{ raw }`, arrays in
-  // non-word-boundary / redirect positions, PowerShell typographic quotes, and
-  // invalid `.env()` keys BEFORE invoking Bash/PowerShell (nothing runs).
-  const startShellCommand = (command: string, initialTimeout?: number) => {
-    let nothrow = false
-    let ms = initialTimeout
-    let cwdVal: string | undefined
-    let envVal: unknown
-    const p = (async () => {
-      await Promise.resolve()
+  const vmSession =
+    sessionKey !== undefined
+      ? getOrCreatePersistentVmSession(sessionKey)
+      : createCodeModeVmSession()
+  const { sandbox, context, bridge } = vmSession
+
+  // Official 2.1.326 #293 + 2.1.328 (`$c`/`zc`/`Fc`): `$` shell helper exposed
+  // as a 100% realm-sealed callable with realm `$.escape` and realm Promise.
+  const mayLeaveUnquoted = (v: object): boolean =>
+    Object.keys(v).length === 1 &&
+    Object.hasOwn(v, 'raw') &&
+    vmSession.rawLiteralValues.get(v) === (v as { raw: unknown }).raw
+
+  const createShellRunner = (command: string, initialTimeout?: number) => {
+    return async (
+      nothrow: boolean,
+      msOverride: number | undefined,
+      cwdVal: string | undefined,
+      envVal: unknown,
+    ): Promise<Record<string, unknown>> => {
+      if (isStopped()) {
+        throw new Error(getStopMessage())
+      }
+      const ms = msOverride ?? initialTimeout
       let cmd = String(command)
       if (envVal !== undefined) {
         cmd = buildCodeModeShellEnvPrefix(envVal, shellKind) + cmd
@@ -1582,7 +3688,6 @@ export async function executeCodeModeScript(
             : `cd ${quotedCwd} && `) + cmd
       }
       const shellToolName = shellKind === 'powershell' ? 'PowerShell' : 'Bash'
-      // Official 2.1.328 (#651): surface the running command while it executes.
       onProgress?.({
         type: 'command_start',
         command: cmd,
@@ -1626,18 +3731,7 @@ export async function executeCodeModeScript(
         rec.spillFileCut === true ||
         stdout.includes('characters truncated') ||
         typeof rec.persistedOutputPath === 'string'
-      const out = {
-        stdout,
-        stderr,
-        exitCode,
-        ...(outputWasCut ? { truncated: true } : {}),
-        text: () => stdout,
-        lines: () => stdout.split('\n'),
-        json: () => JSON.parse(stdout),
-      }
       if (exitCode !== 0 && !nothrow) {
-        // Official 2.1.328 (#577): explicitly tell Code Mode scripts when a
-        // failing command's long output was cut/truncated.
         const cutNotice = outputWasCut
           ? '\nNote: the command failed, and its output was too long to keep whole, so stdout has a "characters truncated" line where the middle was cut out.'
           : ''
@@ -1647,177 +3741,362 @@ export async function executeCodeModeScript(
         err.name = 'ShellError'
         throw err
       }
-      return out
-    })()
-    void p.catch(() => {})
-    const shellPromise = p as Promise<{
-      stdout: string
-      stderr: string
-      exitCode: number
-      text: () => string
-      lines: () => string[]
-      json: () => unknown
-    }> & {
-      nothrow: () => typeof shellPromise
-      throws: (on: boolean) => typeof shellPromise
-      quiet: () => typeof shellPromise
-      timeout: (n: number) => typeof shellPromise
-      cwd: (d: string) => typeof shellPromise
-      env: (e: unknown) => typeof shellPromise
-      text: () => Promise<string>
-      lines: () => Promise<string[]>
-      json: () => Promise<unknown>
+      return {
+        stdout,
+        stderr,
+        exitCode,
+        ...(outputWasCut ? { truncated: true } : {}),
+      }
     }
-    shellPromise.nothrow = () => {
-      nothrow = true
-      return shellPromise
-    }
-    shellPromise.throws = (on: boolean) => {
-      nothrow = !on
-      return shellPromise
-    }
-    shellPromise.quiet = () => shellPromise
-    shellPromise.timeout = (n: number) => {
-      ms = n
-      return shellPromise
-    }
-    shellPromise.cwd = (d: string) => {
-      cwdVal = String(d)
-      return shellPromise
-    }
-    shellPromise.env = (e: unknown) => {
-      envVal = e
-      return shellPromise
-    }
-    shellPromise.text = () => p.then(o => o.stdout)
-    shellPromise.lines = () => p.then(o => o.stdout.split('\n'))
-    shellPromise.json = () => p.then(o => JSON.parse(o.stdout))
-    return shellPromise
   }
 
-  const dollarHelper = Object.assign(
-    (first: unknown, ...values: unknown[]) => {
-      if (Array.isArray(first) && Object.hasOwn(first, 'raw')) {
-        const rendered = renderCodeModeShellTemplate(
-          first as readonly string[] & { raw?: readonly string[] },
-          values,
-          { shellKind },
-        )
-        return startShellCommand(rendered)
-      }
-      return startShellCommand(
-        String(first),
-        typeof values[0] === 'number' ? values[0] : undefined,
+  const dispatchDollar = (first: unknown, values: unknown[]) => {
+    if (Array.isArray(first) && Object.hasOwn(first, 'raw')) {
+      const rendered = renderCodeModeShellTemplate(
+        first as readonly string[] & { raw?: readonly string[] },
+        values,
+        { shellKind, mayLeaveUnquoted },
       )
+      return createShellRunner(rendered)
+    }
+    return createShellRunner(
+      String(first),
+      typeof values[0] === 'number' ? values[0] : undefined,
+    )
+  }
+
+  // Track script timers so they are always cleared in `finally` and re-arm the
+  // turn clock on fire (official `Tl`).
+  const activeTimeouts = new Set<ReturnType<typeof setTimeout>>()
+  const activeIntervals = new Set<ReturnType<typeof setInterval>>()
+  const clearAllScriptTimers = () => {
+    for (const h of activeTimeouts) clearTimeout(h)
+    activeTimeouts.clear()
+    for (const h of activeIntervals) clearInterval(h)
+    activeIntervals.clear()
+  }
+
+  let nextTimerId = 1
+  const timeoutById = new Map<number, ReturnType<typeof setTimeout>>()
+  const intervalById = new Map<number, ReturnType<typeof setInterval>>()
+
+  sandbox.setTimeout = sealForRealm(
+    vmSession,
+    (cb: unknown, delayMs?: unknown, ...args: unknown[]) => {
+      if (typeof cb !== 'function') {
+        throw new TypeError('setTimeout callback must be a function')
+      }
+      const id = nextTimerId++
+      const ms = Math.max(0, Number(delayMs) || 0)
+      const handle = setTimeout(() => {
+        activeTimeouts.delete(handle)
+        timeoutById.delete(id)
+        if (isStopped()) return
+        startCodeModeTurn(vmSession, clampedTimeout)
+        try {
+          ;(cb as (...a: unknown[]) => unknown)(...args)
+        } catch {
+          // Unhandled timer errors must not crash host process
+        }
+      }, ms)
+      if (typeof handle.unref === 'function') handle.unref()
+      activeTimeouts.add(handle)
+      timeoutById.set(id, handle)
+      return id
     },
-    {
-      escape: (s: unknown) => quoteCodeModeShellArg(s, shellKind),
+  )
+  sandbox.clearTimeout = sealForRealm(vmSession, (id: unknown) => {
+    const h = timeoutById.get(Number(id))
+    if (h !== undefined) {
+      clearTimeout(h)
+      activeTimeouts.delete(h)
+      timeoutById.delete(Number(id))
+    }
+  })
+  sandbox.setInterval = sealForRealm(
+    vmSession,
+    (cb: unknown, delayMs?: unknown, ...args: unknown[]) => {
+      if (typeof cb !== 'function') {
+        throw new TypeError('setInterval callback must be a function')
+      }
+      const id = nextTimerId++
+      const ms = Math.max(10, Number(delayMs) || 10)
+      const handle = setInterval(() => {
+        if (isStopped()) {
+          clearInterval(handle)
+          activeIntervals.delete(handle)
+          intervalById.delete(id)
+          return
+        }
+        startCodeModeTurn(vmSession, clampedTimeout)
+        try {
+          ;(cb as (...a: unknown[]) => unknown)(...args)
+        } catch {
+          // Unhandled interval errors must not crash host process
+        }
+      }, ms)
+      if (typeof handle.unref === 'function') handle.unref()
+      activeIntervals.add(handle)
+      intervalById.set(id, handle)
+      return id
+    },
+  )
+  sandbox.clearInterval = sealForRealm(vmSession, (id: unknown) => {
+    const h = intervalById.get(Number(id))
+    if (h !== undefined) {
+      clearInterval(h)
+      activeIntervals.delete(h)
+      intervalById.delete(Number(id))
+    }
+  })
+
+  // Official `Tl`/`St(e,"console",...)`: expose ONLY realm-sealed objects and
+  // callables so `.constructor` can never escape to host intrinsics.
+  const pushLog = (...args: unknown[]) => {
+    const line = args.map(a => formatValueForOutput(a)).join(' ')
+    logs.push(line)
+    vmSession.consoleBuffer.push(line)
+    if (vmSession.consoleBuffer.length > CONSOLE_RING_BUFFER_MAX) {
+      vmSession.consoleBuffer.shift()
+      vmSession.consoleDropped++
+    }
+  }
+  const sealedPushLog = sealForRealm(vmSession, pushLog)
+  sandbox.console = bridge.createRealmObj([
+    ['log', sealedPushLog],
+    ['warn', sealedPushLog],
+    ['error', sealedPushLog],
+    ['info', sealedPushLog],
+    ['debug', sealedPushLog],
+    [
+      'tail',
+      sealForRealm(vmSession, (n?: unknown) => {
+        const count =
+          typeof n === 'number' && Number.isFinite(n) && n >= 0
+            ? Math.floor(n)
+            : 20
+        return vmSession.consoleBuffer.slice(-count)
+      }),
+    ],
+    ['buffer', sealForRealm(vmSession, () => [...vmSession.consoleBuffer])],
+    ['dropped', sealForRealm(vmSession, () => vmSession.consoleDropped)],
+  ])
+  sandbox.log = sealedPushLog
+  // Official 2.1.328: expose realm-sealed `self.running()` returning `{ list, abort }`
+  // backed by `ReplSessions.access(...)`. Every returned value is cloned into the VM
+  // realm by `sealForRealm` (`bridge.wrapSyncHostFn`) so zero host escape is possible.
+  const evalsAccess = getReplSessions().access(
+    sessionKey ?? REPL_MAIN_THREAD_KEY,
+    () => evalId,
+  )
+  const sealedRunningList = sealForRealm(vmSession, () => evalsAccess.list())
+  const sealedRunningAbort = sealForRealm(vmSession, (targetId: unknown) =>
+    evalsAccess.abort(Number(targetId)),
+  )
+  const sealedRunningHandle = bridge.createRealmObj([
+    ['list', sealedRunningList],
+    ['abort', sealedRunningAbort],
+  ])
+  sandbox.running = bridge.wrapIdentityHostFn(() => sealedRunningHandle)
+  sandbox.self = sandbox
+  sandbox.preview = sealForRealm(
+    vmSession,
+    (value: unknown, maxChars: unknown = 2000) => {
+      const limit =
+        typeof maxChars === 'number' &&
+        Number.isFinite(maxChars) &&
+        maxChars > 0
+          ? Math.floor(maxChars)
+          : 2000
+      return elideReplOutputPart(formatValueForOutput(value), limit)
     },
   )
 
-  const sandbox: Record<string, unknown> = {
-    console: {
-      log: (...args: unknown[]) =>
-        logs.push(args.map(a => formatValueForOutput(a)).join(' ')),
-      warn: (...args: unknown[]) =>
-        logs.push(args.map(a => formatValueForOutput(a)).join(' ')),
-      error: (...args: unknown[]) =>
-        logs.push(args.map(a => formatValueForOutput(a)).join(' ')),
-    },
-    callTool: guardedCall,
-    $: dollarHelper,
-    JSON,
-    Math,
-    Date,
-    RegExp,
-    Array,
-    Object,
-    String,
-    Number,
-    Boolean,
-    Map,
-    Set,
-    Promise,
-    Error,
-    TypeError,
-    RangeError,
-    SyntaxError,
-    encodeURIComponent,
-    decodeURIComponent,
-    parseInt,
-    parseFloat,
-    isNaN,
-    isFinite,
-  }
+  sandbox.callTool = sealAsyncForRealm(vmSession, guardedCall)
+  sandbox.$ = bridge.createDollarFn(dispatchDollar, (s: unknown) =>
+    quoteCodeModeShellArg(s, shellKind),
+  )
 
-  // Official 2.1.328 (#581): Only expose primitive shorthands (especially
-  // `write()` and `edit()`) when the current agent/subagent actually has those
-  // tools available.
+  // Official 2.1.328 (#581 & `Tl`): expose both lowercase shorthands (for
+  // backward compatibility) AND PascalCase tool names (`Read`, `Write`, `Edit`,
+  // `Glob`, `Grep`, `Bash`, `PowerShell`, `NotebookEdit`, `Agent`, MCP tools,
+  // etc.), strictly respecting `allowedTools`.
   const exposedTools: string[] = []
+  const exposedToolSet = new Set<string>()
   for (const [fnName, toolName] of PRIMITIVE_SHORTHAND_MAP) {
     if (allowedTools && !allowedTools.has(toolName)) {
+      delete sandbox[fnName]
+      delete sandbox[toolName]
       continue
     }
     exposedTools.push(toolName)
-    sandbox[fnName] = (input: Record<string, unknown> = {}) =>
-      guardedCall(toolName, input)
+    exposedToolSet.add(toolName)
+    const sealedTool = sealAsyncForRealm(
+      vmSession,
+      (input: Record<string, unknown> = {}) => guardedCall(toolName, input),
+    )
+    sandbox[fnName] = sealedTool
+    sandbox[toolName] = sealedTool
   }
-  sandbox.tools = {
-    list: () => (allowedTools ? [...allowedTools] : [...exposedTools]),
+  const extraToolNames = [
+    ...(availableToolNames ?? []),
+    ...(allowedTools ? [...allowedTools] : []),
+  ]
+  for (const toolName of extraToolNames) {
+    if (
+      exposedToolSet.has(toolName) ||
+      !VALID_IDENTIFIER_RE.test(toolName) ||
+      toolName === 'REPL' ||
+      toolName === 'Eval'
+    ) {
+      continue
+    }
+    if (
+      allowedTools &&
+      !toolName.startsWith('mcp__') &&
+      !allowedTools.has(toolName)
+    ) {
+      delete sandbox[toolName]
+      continue
+    }
+    exposedTools.push(toolName)
+    exposedToolSet.add(toolName)
+    sandbox[toolName] = sealAsyncForRealm(
+      vmSession,
+      (input: Record<string, unknown> = {}) => guardedCall(toolName, input),
+    )
   }
 
-  const context = vm.createContext(sandbox)
-  // Official 2.1.328 (#576): guard references to top-level variables declared
-  // by an earlier failed script that were never set.
-  const guardedCode = unsetVars ? injectUnsetVarGuards(code, unsetVars) : code
-  const wrappedSource = `(async () => {\n${guardedCode}\n})()`
+  const descriptorList =
+    toolDescriptors ?? exposedTools.map(name => ({ name, description: name }))
+  sandbox.searchTools = sealForRealm(
+    vmSession,
+    (query: unknown, limit: unknown = 10) => {
+      const q = String(query ?? '')
+        .toLowerCase()
+        .trim()
+      const max =
+        typeof limit === 'number' && Number.isFinite(limit) && limit > 0
+          ? Math.floor(limit)
+          : 10
+      return descriptorList
+        .filter(
+          d =>
+            !q ||
+            d.name.toLowerCase().includes(q) ||
+            d.description.toLowerCase().includes(q),
+        )
+        .slice(0, max)
+        .map(d => ({ name: d.name, description: d.description }))
+    },
+  )
+  sandbox.describeTool = sealForRealm(vmSession, (name: unknown) => {
+    const targetName = String(name ?? '')
+    const found = descriptorList.find(d => d.name === targetName)
+    return found ? { name: found.name, description: found.description } : null
+  })
+
+  sandbox.tools = bridge.createRealmObj([
+    [
+      'list',
+      sealForRealm(vmSession, () =>
+        allowedTools ? [...allowedTools] : [...exposedTools],
+      ),
+    ],
+  ])
+
+  // Official `Uc`: instrumented loops call `__checkBudget` every step; the
+  // per-turn stride allocator in `chargeCodeModeStep` enforces the wall clock
+  // and step budget. Host-side, a stopped run also throws.
+  vmSession.checkBudgetImpl = () => {
+    if (isStopped()) {
+      throw new Error(getStopMessage())
+    }
+  }
+
+  let onAbort: (() => void) | undefined
+  // Official `ft`: the pausable deadline timer aborts the whole execution once
+  // real elapsed time exceeds the budget — covers tool calls that never return
+  // and async hangs. `runInContext` has no `timeout` so a single long tool call
+  // doesn't count as script time; the step budget handles sync spin.
+  timerRef = createPausableCodeModeTimer(clampedTimeout, () => {
+    noMoreCalls = true
+    triggerStop(`Code Mode script timed out after ${clampedTimeout}ms`)
+  })
+  const getAbortReasonMessage = (): string => {
+    const reason = signal?.reason
+    if (reason instanceof Error && reason.message.length > 0) {
+      return reason.message
+    }
+    if (typeof reason === 'string' && reason.length > 0) {
+      return reason
+    }
+    return 'Code Mode script aborted'
+  }
+
+  if (signal) {
+    if (signal.aborted) {
+      triggerStop(getAbortReasonMessage())
+    } else {
+      onAbort = () => triggerStop(getAbortReasonMessage())
+      signal.addEventListener('abort', onAbort, { once: true })
+    }
+  }
 
   try {
+    if (isStopped()) {
+      throw new Error(getStopMessage())
+    }
+    // Official 2.1.328 (#576): guard references to top-level variables declared
+    // by an earlier failed script that were never set.
+    const guardedCode = unsetVars ? injectUnsetVarGuards(code, unsetVars) : code
+    const wrappedSource = transformCodeModeScript(
+      guardedCode,
+      vmSession.rawLiteralMarkerName,
+    )
     const script = new vm.Script(wrappedSource, {
       filename: REPL_SCRIPT_FILENAME,
+      importModuleDynamically: (() => {
+        throw new Error('Dynamic import() is not allowed in Code Mode scripts')
+      }) as never,
     })
-    const runPromise = Promise.resolve(
-      script.runInContext(context, { timeout: clampedTimeout }),
-    )
+    let rawRun: unknown
+    try {
+      // Official `Xo`/`El`: arm a fresh turn before the script starts — the
+      // wall clock only covers script code. Tool calls must ALSO be free of
+      // the runInContext `timeout` (a single call may legitimately take most
+      // of it), so we do NOT pass a vm timeout; step budget + pausable timer
+      // handle both sync spin and async hang.
+      startCodeModeTurn(vmSession, clampedTimeout)
+      rawRun = script.runInContext(context)
+    } catch (syncErr) {
+      if (
+        syncErr &&
+        typeof syncErr === 'object' &&
+        (syncErr as { code?: unknown }).code === 'ERR_SCRIPT_EXECUTION_TIMEOUT'
+      ) {
+        noMoreCalls = true
+        triggerStop(`Code Mode script timed out after ${clampedTimeout}ms`)
+        throw new Error(getStopMessage())
+      }
+      throw syncErr
+    }
+    const runPromise = Promise.resolve(rawRun)
     // Suppress unhandledRejection if runPromise rejects after timeout/abort wins the race.
     void runPromise.catch(() => {})
 
-    let onAbort: (() => void) | undefined
-    const raced = await Promise.race([
-      runPromise,
-      new Promise<never>((_resolve, reject) => {
-        timerRef = createPausableCodeModeTimer(clampedTimeout, () => {
-          reject(
-            new Error(`Code Mode script timed out after ${clampedTimeout}ms`),
-          )
-        })
-      }),
-      ...(signal
-        ? [
-            new Promise<never>((_resolve, reject) => {
-              if (signal.aborted) {
-                reject(new Error('Code Mode script aborted'))
-                return
-              }
-              onAbort = () => reject(new Error('Code Mode script aborted'))
-              signal.addEventListener('abort', onAbort, { once: true })
-            }),
-          ]
-        : []),
-    ]).finally(() => {
-      timerRef?.clear()
-      timerRef = undefined
-      if (onAbort !== undefined) {
-        signal?.removeEventListener('abort', onAbort)
-      }
-    })
+    const raced = await Promise.race([runPromise, stopPromise])
+    noMoreCalls = true
+    const unwrapped = unwrapReplTransformValue(raced)
 
-    const outputParts: string[] = [...logs]
-    if (raced !== undefined) {
-      outputParts.push(formatValueForOutput(raced))
+    const outputParts: string[] = logs.map(l => elideReplOutputPart(l))
+    if (unwrapped !== undefined) {
+      outputParts.push(elideReplOutputPart(formatValueForOutput(unwrapped)))
     }
     return {
-      result: outputParts.join('\n') || '(completed with no output)',
+      result:
+        elideReplOutputPart(outputParts.join('\n')) ||
+        '(completed with no output)',
       tool_calls: toolCalls,
     }
   } catch (err) {
@@ -1825,19 +4104,31 @@ export async function executeCodeModeScript(
     const prefix = logs.length > 0 ? `${logs.join('\n')}\n` : ''
     // Official 2.1.328 (#653): report which tool calls were still running when
     // the script failed.
-    const stillRunning = [...inFlightCalls.values()]
+    const stillRunning = inFlightSnapshotAtStop ?? [...inFlightCalls.values()]
     const runningSuffix =
       stillRunning.length > 0
         ? `\nStill running when script failed: ${stillRunning.join(', ')}`
         : ''
-    // Official 2.1.328 (#576): record declared top-level variables that may
-    // have remained unset so subsequent scripts don't silently read `undefined`.
-    const unsetVariables = extractTopLevelDeclaredVars(code)
+    // Official 2.1.328 (#576): record declared top-level variables that remained
+    // unset so subsequent scripts don't silently read `undefined`.
+    const unsetVariables = extractTopLevelDeclaredVars(code).filter(
+      varName => sandbox[varName] === undefined,
+    )
     return {
       result: `${prefix}Error: ${message}${runningSuffix}`,
       tool_calls: toolCalls,
       ...(stillRunning.length > 0 ? { inFlightAtFailure: stillRunning } : {}),
       ...(unsetVariables.length > 0 ? { unsetVariables } : {}),
+    }
+  } finally {
+    clearAllScriptTimers()
+    timerRef?.clear()
+    timerRef = undefined
+    if (onAbort !== undefined) {
+      signal?.removeEventListener('abort', onAbort)
+    }
+    if (!stopped) {
+      vmSession.checkBudgetImpl = undefined
     }
   }
 }
@@ -1857,7 +4148,9 @@ export function getCodeModeAutoVerdictTracker(): CodeModeAutoVerdictTracker {
 }
 
 export function resetCodeModeRuntimeStateForTests(): void {
+  persistentVmSessionsByKey.clear()
   sessionUnsetVarsByKey.clear()
+  codeModeAutoVerdictTracker.reset()
   codeModeScriptSeq = 0
 }
 
@@ -1965,6 +4258,36 @@ function resolveCodeModeEffectiveTools(
   return deduped
 }
 
+function extractMediaBlocksFromToolData(data: unknown): REPLMediaBlock[] {
+  const blocks: REPLMediaBlock[] = []
+  if (!data || typeof data !== 'object') return blocks
+  const rec = data as Record<string, unknown>
+  // FileReadTool image/pdf shape: { type: 'image'|'pdf', file: { base64, type } }
+  if (
+    (rec.type === 'image' || rec.type === 'pdf') &&
+    rec.file &&
+    typeof rec.file === 'object'
+  ) {
+    const f = rec.file as { base64?: unknown; type?: unknown }
+    if (typeof f.base64 === 'string' && f.base64.length > 0) {
+      blocks.push({
+        type: rec.type === 'pdf' ? 'document' : 'image',
+        source: {
+          type: 'base64',
+          media_type:
+            typeof f.type === 'string'
+              ? f.type
+              : rec.type === 'pdf'
+                ? 'application/pdf'
+                : 'image/png',
+          data: f.base64,
+        },
+      })
+    }
+  }
+  return blocks
+}
+
 /**
  * Wraps the base `REPLTool` so that when Code Mode is active, `call()` executes
  * JavaScript in the VM sandbox and routes every nested tool invocation through
@@ -1978,6 +4301,53 @@ export function wrapReplToolForCodeMode(
 
   return {
     ...baseReplTool,
+    aliases: ['Eval'],
+    isEnabled() {
+      return isCodeModeEnabled() || isReplModeEnabled()
+    },
+    userFacingName() {
+      return isCodeModeEnabled() ? 'Code' : baseReplTool.name
+    },
+    toAutoClassifierInput(input: unknown) {
+      return input &&
+        typeof input === 'object' &&
+        typeof (input as { code?: unknown }).code === 'string'
+        ? (input as { code: string }).code
+        : ''
+    },
+    suppressesAlwaysAllowRule() {
+      return isCodeModeEnabled()
+    },
+    permissionNote(input: unknown, mode?: string) {
+      if (!isCodeModeEnabled()) return undefined
+      const desc =
+        typeof input === 'object' &&
+        input !== null &&
+        'description' in input &&
+        typeof (input as { description?: unknown }).description === 'string'
+          ? (input as { description: string }).description.trim()
+          : ''
+      const baseNote =
+        desc === ''
+          ? "Yes runs Claude's code."
+          : "Yes runs Claude's code. The line at the top is Claude's own summary of it, and nothing checks it against the code."
+      return mode === undefined || mode === 'bypassPermissions'
+        ? baseNote
+        : `${baseNote} Each tool call that needs approval while this code runs is still checked on its own, by auto mode, by you or by a hook you've set up.`
+    },
+    async checkPermissions(input: unknown, context: ToolUseContext) {
+      const mode = context.getAppState?.()?.toolPermissionContext?.mode
+      if (mode === 'auto') {
+        return {
+          behavior: 'passthrough' as const,
+          message: `${CODE_MODE_NAME} script requires classifier review.`,
+        }
+      }
+      return {
+        behavior: 'allow' as const,
+        updatedInput: input as Record<string, unknown>,
+      }
+    },
     async prompt(options) {
       const basePrompt = await baseReplTool.prompt(options)
       if (!isCodeModeEnabled()) {
@@ -2008,12 +4378,19 @@ export function wrapReplToolForCodeMode(
       )
       const toolsBlock =
         conciseLines.length > 0
-          ? `\n\nAvailable Code Mode tools:\n${conciseLines.join('\n')}`
+          ? `\n\nAvailable Code Mode tools (callable as async global functions, e.g. \`await Read({ file_path })\`, \`await Bash({ command })\`, or via \`callTool(name, input)\`):\n${conciseLines.join('\n')}`
           : ''
-      return `${basePrompt}${toolsBlock}\n\n${CODE_MODE_STATIC_MCP_GUIDANCE}`
+      const runtimeGuidance = [
+        'VM Runtime Globals & Helpers:',
+        '- Available tools are exposed as async global functions by name (PascalCase, e.g. `Read`, `Write`, `Edit`, `Glob`, `Grep`, `Bash`, `PowerShell`, `NotebookEdit`, `Agent`, and connected `mcp__*` tools) as well as lowercase shorthands.',
+        '- `$` shell template helper: ``await $`git status` `` with safe quoting, `.nothrow()`, `.throws()`, `.quiet()`, `.timeout(ms)`, `.cwd(dir)`, `.env(obj)`, `.text()`, `.lines()`, `.json()`, `$.escape(s)`, and script-authored `{ raw: "..." }` literals.',
+        '- Logging & inspection: `console.log`/`self.log`/`log`, `console.tail(n)`, `console.buffer()`, `console.dropped()`, `preview(value, maxChars)`, `searchTools(query, limit)`, `describeTool(name)`, `tools.list()`.',
+        '- Top-level bindings (`const`/`let`/`var`/`function`/`class`) persist across calls in the same session.',
+      ].join('\n')
+      return `${basePrompt}\n\n${runtimeGuidance}${toolsBlock}\n\n${CODE_MODE_STATIC_MCP_GUIDANCE}`
     },
     async call(
-      input: { code: string },
+      input: { code: string; description?: string; timeout?: number },
       context: ToolUseContext,
       canUseTool: CanUseToolFn,
       parentMessage: AssistantMessage,
@@ -2031,20 +4408,86 @@ export function wrapReplToolForCodeMode(
 
       const collectedFeedback: string[] = []
       let activeCwd = getCwd()
+      let activeScriptContext: ToolUseContext = context
       const currentPermissionMode =
         context.getAppState?.()?.toolPermissionContext?.mode
       const scriptId = context.toolUseId ?? `repl-${++codeModeScriptSeq}`
       const unsetKey = context.agentId ?? 'main'
       const priorUnsetVars = sessionUnsetVarsByKey.get(unsetKey)
 
-      // Official 2.1.327 (#386): register per-script auto-mode verdict so
-      // concurrent auto-allowed scripts do not revoke one another's verdict.
+      // Official 2.1.328: persist replMode=true for this session so resume
+      // recovers Code Mode cleanly.
+      try {
+        saveReplMode(true)
+      } catch {
+        // Best-effort outside full session storage lifecycle (e.g. unit tests)
+      }
+
+      // Per-script abort controller wired to parent abort + auto-mode stop chain
+      const scriptAbortController = new AbortController()
+      const parentSignal = context.abortController.signal
+      let onParentAbort: (() => void) | undefined
+      if (parentSignal.aborted) {
+        scriptAbortController.abort(parentSignal.reason)
+      } else {
+        onParentAbort = () => scriptAbortController.abort(parentSignal.reason)
+        parentSignal.addEventListener('abort', onParentAbort, { once: true })
+      }
+      let scriptAutoBlockedReason: string | undefined
+
+      // Official 2.1.327 (#386) & 2.1.328 (`J.scriptChecks`):
+      // Do NOT unconditionally mark `auto` mode scripts allowed.
+      // - `bypassPermissions` or already-classified `autoModeClassified` -> allowed
+      // - `auto` with `autoModeScriptCheckDeferred` -> queued as `unchecked`
+      //   with deferred classifier check & stop chain
+      // - unclassified `auto` script -> mark unclassifiedCodeRan & drop unchecked
+      const autoModeClassified =
+        (context as { autoModeClassified?: boolean }).autoModeClassified ===
+        true
+      const autoModeScriptCheckDeferred =
+        (context as { autoModeScriptCheckDeferred?: boolean })
+          .autoModeScriptCheckDeferred === true
+
       codeModeAutoVerdictTracker.registerScript(scriptId)
-      if (
-        currentPermissionMode === 'auto' ||
-        currentPermissionMode === 'bypassPermissions'
-      ) {
+      if (currentPermissionMode === 'bypassPermissions') {
         codeModeAutoVerdictTracker.markAllowed(scriptId)
+      } else if (currentPermissionMode === 'auto') {
+        if (autoModeClassified) {
+          codeModeAutoVerdictTracker.markAllowed(scriptId)
+        } else if (
+          autoModeScriptCheckDeferred &&
+          !codeModeAutoVerdictTracker.hasUnclassifiedCodeRan()
+        ) {
+          codeModeAutoVerdictTracker.addDeferredCheck({
+            id: scriptId,
+            code: input.code,
+            toolUseId: scriptId,
+            runCheck: async (combinedCode, checkCtx, checkCanUseTool) =>
+              checkCanUseTool(
+                baseReplTool,
+                { ...input, code: combinedCode },
+                {
+                  ...checkCtx,
+                  replScriptCheckNow: true,
+                } as ToolUseContext,
+                parentMessage,
+                scriptId,
+              ),
+            stop: (reason, batchSize, cause) => {
+              scriptAutoBlockedReason = formatAutoModeScriptBlockedMessage(
+                reason,
+                batchSize,
+                cause,
+              )
+              if (!scriptAbortController.signal.aborted) {
+                scriptAbortController.abort(new Error(scriptAutoBlockedReason))
+              }
+            },
+          })
+        } else {
+          codeModeAutoVerdictTracker.markUnclassifiedCodeRan()
+          codeModeAutoVerdictTracker.dropUnchecked()
+        }
       }
 
       // Official 2.1.328 (#581): compute the tool names allowed for this
@@ -2076,6 +4519,44 @@ export function wrapReplToolForCodeMode(
         'hook_system_message',
       ])
       const collectedHookMessages: AttachmentMessage[] = []
+      const collectedToolNewMessages: NonNullable<
+        ToolResult<unknown>['newMessages']
+      > = []
+      const seenToolNewMessageKeys = new Set<string>()
+      const collectedContextModifiers: Array<
+        NonNullable<ToolResult<unknown>['contextModifier']>
+      > = []
+      const collectedContextLayers: NonNullable<
+        ToolResult<unknown>['contextLayers']
+      > = []
+      const collectedMedia: REPLMediaBlock[] = []
+
+      const extractTextFromSkillMessages = (
+        msgs: NonNullable<ToolResult<unknown>['newMessages']>,
+      ): string => {
+        const chunks: string[] = []
+        for (const m of msgs) {
+          if (m.type !== 'user' || !('message' in m) || !m.message) continue
+          const content = m.message.content
+          if (typeof content === 'string') {
+            const trimmed = content.trim()
+            if (trimmed.length > 0) chunks.push(trimmed)
+          } else if (Array.isArray(content)) {
+            for (const block of content) {
+              if (
+                block &&
+                typeof block === 'object' &&
+                (block as { type?: unknown }).type === 'text' &&
+                typeof (block as { text?: unknown }).text === 'string'
+              ) {
+                const trimmed = (block as { text: string }).text.trim()
+                if (trimmed.length > 0) chunks.push(trimmed)
+              }
+            }
+          }
+        }
+        return chunks.join('\n\n')
+      }
       const extractHookAttachmentMessage = (
         entry: unknown,
       ): AttachmentMessage | undefined => {
@@ -2123,12 +4604,18 @@ export function wrapReplToolForCodeMode(
         collectedHookMessages.push(msg)
       }
 
-      let execution: CodeModeExecutionResult
-      try {
-        execution = await executeCodeModeScript({
+      const runScript = (
+        overrideSignal: AbortSignal,
+        assignedEvalId?: number,
+      ): Promise<CodeModeExecutionResult> =>
+        executeCodeModeScript({
           code: input.code,
-          signal: context.abortController.signal,
+          timeoutMs: input.timeout,
+          signal: overrideSignal,
+          sessionKey: unsetKey,
+          evalId: assignedEvalId,
           allowedTools: allowedToolNames,
+          availableToolNames: initialTools.map(t => t.name),
           unsetVars: priorUnsetVars,
           permissionMode: currentPermissionMode,
           getCachedFileContent:
@@ -2144,8 +4631,8 @@ export function wrapReplToolForCodeMode(
                       ? normalized.file_path
                       : filePath
                   const entry =
-                    context.readFileState?.get(resolvedPath) ??
-                    context.readFileState?.get(filePath)
+                    activeScriptContext.readFileState?.get(resolvedPath) ??
+                    activeScriptContext.readFileState?.get(filePath)
                   return typeof entry?.content === 'string' &&
                     entry.content.length > 0
                     ? entry.content
@@ -2160,7 +4647,15 @@ export function wrapReplToolForCodeMode(
                 })
               }
             : undefined,
-          invokeTool: async (toolName, rawInput) => {
+          invokeTool: async (toolName, rawInput, execSignal) => {
+            if (scriptAutoBlockedReason !== undefined) {
+              throw new Error(scriptAutoBlockedReason)
+            }
+            if (execSignal?.aborted || scriptAbortController.signal.aborted) {
+              throw new Error(
+                scriptAutoBlockedReason ?? 'Code Mode script aborted',
+              )
+            }
             if (scriptHookHalted) {
               throw new Error(CODE_MODE_HOOK_HALT_REFUSAL)
             }
@@ -2169,7 +4664,7 @@ export function wrapReplToolForCodeMode(
             const allTools = resolveCodeModeEffectiveTools(
               baseReplTool.name,
               resolveAvailableTools,
-              context,
+              activeScriptContext,
             )
             const target = allTools.find(
               t => t.name === toolName && t.name !== baseReplTool.name,
@@ -2198,7 +4693,7 @@ export function wrapReplToolForCodeMode(
             if (typeof target.validateInput === 'function') {
               const validation = await target.validateInput(
                 parsed.data as never,
-                context,
+                activeScriptContext,
               )
               if (validation && validation.result === false) {
                 throw new Error(
@@ -2210,7 +4705,7 @@ export function wrapReplToolForCodeMode(
               const prefixedRefusal = await checkPrefixedCodeModeShellCommand(
                 target,
                 parsed.data as Record<string, unknown>,
-                context,
+                activeScriptContext,
               )
               if (prefixedRefusal !== undefined) {
                 throw new Error(prefixedRefusal)
@@ -2227,9 +4722,9 @@ export function wrapReplToolForCodeMode(
               isBypassPermissionsModeAvailable: false,
             }
             const safeGetAppState: ToolUseContext['getAppState'] =
-              typeof context.getAppState === 'function'
+              typeof activeScriptContext.getAppState === 'function'
                 ? () => {
-                    const st = context.getAppState()
+                    const st = activeScriptContext.getAppState()
                     if (st?.toolPermissionContext && st?.sessionHooks) return st
                     return {
                       ...st,
@@ -2245,10 +4740,34 @@ export function wrapReplToolForCodeMode(
                       sessionHooks: new Map(),
                     }) as ReturnType<ToolUseContext['getAppState']>
 
+            // Wire per-call AbortController so script timeout / auto-mode stop
+            // aborts in-flight inner tools immediately.
+            const innerCallAbortController = new AbortController()
+            let onExecAbort: (() => void) | undefined
+            if (execSignal?.aborted || scriptAbortController.signal.aborted) {
+              innerCallAbortController.abort(
+                execSignal?.reason ?? scriptAbortController.signal.reason,
+              )
+            } else {
+              onExecAbort = () =>
+                innerCallAbortController.abort(
+                  execSignal?.reason ?? scriptAbortController.signal.reason,
+                )
+              execSignal?.addEventListener('abort', onExecAbort, { once: true })
+              scriptAbortController.signal.addEventListener(
+                'abort',
+                onExecAbort,
+                { once: true },
+              )
+            }
+
             const innerHookContext: ToolUseContext = {
-              ...context,
+              ...activeScriptContext,
+              abortController: innerCallAbortController,
               toolUseId: innerToolUseId,
-              options: context.options ?? ({} as ToolUseContext['options']),
+              options:
+                activeScriptContext.options ??
+                ({} as ToolUseContext['options']),
               getAppState: safeGetAppState,
             }
             const hooksActive =
@@ -2492,17 +5011,48 @@ export function wrapReplToolForCodeMode(
               }
             }
 
+            // Official 2.1.328 (`J.scriptChecks.awaitVerdict`): if this script
+            // has a deferred auto-mode check, run it before executing the inner
+            // tool and fire the stop chain if blocked.
+            const scriptRecord = codeModeAutoVerdictTracker.getRecord(scriptId)
+            if (scriptRecord?.state === 'unchecked') {
+              const deferredVerdict =
+                await codeModeAutoVerdictTracker.awaitVerdict(
+                  scriptId,
+                  innerHookContext,
+                  canUseTool,
+                )
+              if (deferredVerdict.kind === 'blocked') {
+                const blockedMsg =
+                  scriptAutoBlockedReason ??
+                  (deferredVerdict.decision.behavior === 'deny'
+                    ? deferredVerdict.decision.message
+                    : undefined) ??
+                  `Permission denied for ${toolName}`
+                throw new Error(blockedMsg)
+              }
+            }
+            if (scriptAutoBlockedReason !== undefined) {
+              throw new Error(scriptAutoBlockedReason)
+            }
+
             const ridesAutoVerdict =
               codeModeAutoVerdictTracker.ridesNow(scriptId)
+            const currentScriptState =
+              codeModeAutoVerdictTracker.getRecord(scriptId)?.state
+            const suspendLayer: HostPermissionLayer = {
+              kind: 'sandbox_auto_allow_suspended',
+              allowOnly: true,
+            }
             const innerPermissionContext: ToolUseContext = {
               ...innerHookContext,
+              ...(ridesAutoVerdict ? { replScriptInner: true } : {}),
+              ...(currentScriptState === 'atLimit'
+                ? { replScriptAtLimit: true }
+                : {}),
               permissionLayers: [
-                ...(context.permissionLayers ?? []),
-                {
-                  kind: 'sandbox_auto_allow_suspended' as never,
-                  allowOnly: true,
-                  ridesAutoVerdict,
-                } as never,
+                ...(activeScriptContext.permissionLayers ?? []),
+                suspendLayer,
               ],
             }
             const resolved = await resolveHookPermissionDecision(
@@ -2520,6 +5070,7 @@ export function wrapReplToolForCodeMode(
                 codeModeAutoVerdictTracker.markBlocked(
                   scriptId,
                   permission.message ?? `Permission denied for ${toolName}`,
+                  permission,
                 )
               }
               throw new Error(
@@ -2534,14 +5085,14 @@ export function wrapReplToolForCodeMode(
               activeCwd,
             )
             const callStartMs = Date.now()
-            let out: { data: unknown }
+            let out: ToolResult<unknown>
             try {
-              out = await target.call(
+              out = (await target.call(
                 finalInput as never,
                 innerHookContext,
                 canUseTool,
                 parentMessage,
-              )
+              )) as ToolResult<unknown>
             } catch (callErr) {
               // Official 2.1.325 #2314: sync expired MCP server auth to /mcp.
               syncExpiredMcpAuthInCodeMode(
@@ -2577,6 +5128,14 @@ export function wrapReplToolForCodeMode(
                 }
               }
               throw callErr
+            } finally {
+              if (onExecAbort !== undefined) {
+                execSignal?.removeEventListener('abort', onExecAbort)
+                scriptAbortController.signal.removeEventListener(
+                  'abort',
+                  onExecAbort,
+                )
+              }
             }
             const callDurationMs = Date.now() - callStartMs
             if (hooksActive) {
@@ -2634,6 +5193,46 @@ export function wrapReplToolForCodeMode(
               }
               out = { ...out, data: hookData }
             }
+            // Official 2.1.328 (@325563762): forward inner Skill (and any inner
+            // tool's) `newMessages`, `contextModifier`, and `contextLayers` to
+            // the outer REPLTool result and apply modifiers immediately for
+            // subsequent calls within the same script.
+            if (Array.isArray(out.newMessages) && out.newMessages.length > 0) {
+              for (const m of out.newMessages) {
+                let dedupeKey: string
+                try {
+                  dedupeKey = JSON.stringify(
+                    (m.type === 'user' || m.type === 'assistant') &&
+                      'message' in m
+                      ? [m.type, m.message?.content]
+                      : m,
+                  )
+                } catch {
+                  dedupeKey = String(collectedToolNewMessages.length)
+                }
+                if (seenToolNewMessageKeys.has(dedupeKey)) continue
+                seenToolNewMessageKeys.add(dedupeKey)
+                collectedToolNewMessages.push(m)
+              }
+            }
+            if (typeof out.contextModifier === 'function') {
+              collectedContextModifiers.push(out.contextModifier)
+              activeScriptContext = out.contextModifier(activeScriptContext)
+            }
+            if (
+              Array.isArray(out.contextLayers) &&
+              out.contextLayers.length > 0
+            ) {
+              collectedContextLayers.push(...out.contextLayers)
+              activeScriptContext = {
+                ...activeScriptContext,
+                permissionLayers: [
+                  ...(activeScriptContext.permissionLayers ?? []),
+                  ...out.contextLayers,
+                ],
+              }
+            }
+
             // Official 2.1.325 #2314: follow newly entered worktree immediately.
             const enteredWorktree = extractEnteredWorktreePath(
               toolName,
@@ -2649,11 +5248,188 @@ export function wrapReplToolForCodeMode(
             if (feedback) {
               collectedFeedback.push(feedback)
             }
+            if (
+              toolName === 'Skill' &&
+              Array.isArray(out.newMessages) &&
+              out.newMessages.length > 0 &&
+              out.data &&
+              typeof out.data === 'object' &&
+              !Array.isArray(out.data)
+            ) {
+              const rec = out.data as Record<string, unknown>
+              if (
+                rec.body === undefined &&
+                rec.content === undefined &&
+                rec.prompt === undefined
+              ) {
+                const body = extractTextFromSkillMessages(out.newMessages)
+                if (body.length > 0) {
+                  return { ...rec, body }
+                }
+              }
+            }
+            const mediaBlocks = extractMediaBlocksFromToolData(out.data)
+            if (mediaBlocks.length > 0) {
+              collectedMedia.push(...mediaBlocks)
+            }
             return out.data
           },
         })
-      } finally {
-        codeModeAutoVerdictTracker.endScript(scriptId)
+
+      const optInAsync = optInModule as {
+        isAsyncReplEnabled?: () => boolean
+        isAsyncLaneMode?: (mode?: string) => boolean
+      }
+      const isAsyncReplActive =
+        optInAsync.isAsyncReplEnabled?.() === true &&
+        optInAsync.isAsyncLaneMode?.(currentPermissionMode) === true
+
+      let execution: CodeModeExecutionResult
+      if (isAsyncReplActive) {
+        const sessions = getReplSessions()
+        if (sessions.depth(unsetKey) >= ASYNC_REPL_MAX_EVALS) {
+          codeModeAutoVerdictTracker.endScript(scriptId)
+          if (onParentAbort !== undefined) {
+            parentSignal.removeEventListener('abort', onParentAbort)
+          }
+          return {
+            data: {
+              result: `Error: async REPL dispatch rejected: ${sessions.depth(unsetKey)} evals already waiting or running on this context — wait for their settles (Poll) before dispatching more`,
+              tool_calls: 0,
+              asyncDispatched: true,
+            },
+          }
+        }
+
+        const evalStartMs = Date.now()
+        let returnedReceipt = false
+        let settledExecution: CodeModeExecutionResult | undefined
+        let resolveSettled: ((res: CodeModeExecutionResult) => void) | undefined
+        const settledPromise = new Promise<CodeModeExecutionResult>(resolve => {
+          resolveSettled = resolve
+        })
+
+        let dispatchedEvalId = 0
+        const handle = sessions.dispatch(
+          unsetKey,
+          async controller => {
+            try {
+              const res = await runScript(controller.signal, dispatchedEvalId)
+              settledExecution = res
+              return res.result
+            } finally {
+              codeModeAutoVerdictTracker.endScript(scriptId)
+              if (onParentAbort !== undefined) {
+                parentSignal.removeEventListener('abort', onParentAbort)
+              }
+            }
+          },
+          {
+            description: input.description,
+            toolUseId: context.toolUseId,
+            signal: scriptAbortController.signal,
+            detachAfterMs: REPL_DETACH_AFTER_MS,
+            deliver: async (evalId, output, isError, retired) => {
+              const elapsedMs = Date.now() - evalStartMs
+              const finalExec: CodeModeExecutionResult = settledExecution
+                ? { ...settledExecution, evalId, ms: elapsedMs }
+                : {
+                    result: output,
+                    tool_calls: 0,
+                    evalId,
+                    ms: elapsedMs,
+                  }
+              if (!returnedReceipt) {
+                resolveSettled?.(finalExec)
+                return
+              }
+              if (retired) return
+              try {
+                const mqm = (await import(
+                  '../../utils/messageQueueManager.js'
+                )) as {
+                  enqueueReplEvalPollEvent?: (opts: {
+                    evalId: number
+                    content: string
+                    isError?: boolean
+                    ms?: number
+                    agentId?: string
+                    toolUseId?: string
+                    startsTurn?: boolean
+                    wake?: boolean
+                    media?: unknown[]
+                  }) => void
+                }
+                mqm.enqueueReplEvalPollEvent?.({
+                  evalId,
+                  content: output,
+                  isError,
+                  ms: elapsedMs,
+                  agentId: context.agentId,
+                  toolUseId: context.toolUseId,
+                  startsTurn: true,
+                  wake: true,
+                  media:
+                    collectedMedia.length > 0 ? [...collectedMedia] : undefined,
+                })
+              } catch {
+                // Best-effort outside full message queue lifecycle.
+              }
+            },
+          },
+          input.code,
+        )
+        dispatchedEvalId = handle.evalId
+
+        const rawSettleWindowMs = (
+          input as unknown as { settleWindowMs?: unknown }
+        ).settleWindowMs
+        const settleWindowMs =
+          typeof rawSettleWindowMs === 'number'
+            ? Math.max(0, rawSettleWindowMs)
+            : REPL_SETTLE_WINDOW_MS
+
+        let windowTimer: ReturnType<typeof setTimeout> | undefined
+        const raced = await Promise.race<
+          | { kind: 'settled'; execution: CodeModeExecutionResult }
+          | { kind: 'dispatched' }
+        >([
+          settledPromise.then(execRes => ({
+            kind: 'settled' as const,
+            execution: execRes,
+          })),
+          new Promise<{ kind: 'dispatched' }>(resolve => {
+            windowTimer = setTimeout(
+              () => resolve({ kind: 'dispatched' }),
+              settleWindowMs,
+            )
+            windowTimer.unref?.()
+          }),
+        ])
+        if (windowTimer !== undefined) clearTimeout(windowTimer)
+
+        if (raced.kind === 'dispatched') {
+          returnedReceipt = true
+          sessions.callReturned(unsetKey, handle.evalId)
+          return {
+            data: {
+              result: `(dispatched #${handle.evalId})`,
+              tool_calls: 0,
+              evalId: handle.evalId,
+              asyncDispatched: true,
+            },
+          }
+        }
+        execution = raced.execution
+      } else {
+        try {
+          execution = await runScript(scriptAbortController.signal)
+        } finally {
+          codeModeAutoVerdictTracker.endScript(scriptId)
+          if (onParentAbort !== undefined) {
+            parentSignal.removeEventListener('abort', onParentAbort)
+          }
+        }
       }
 
       // Official 2.1.328 (#576): track top-level variables declared in a failed
@@ -2757,12 +5533,27 @@ export function wrapReplToolForCodeMode(
           ? { hookAdditionalContext: hookAdditionalContexts }
           : {}),
         ...(hookBlockingErrors.length > 0 ? { hookBlockingErrors } : {}),
+        ...(collectedMedia.length > 0 ? { media: collectedMedia } : {}),
       }
+
+      const allNewMessages = [
+        ...collectedHookMessages,
+        ...collectedToolNewMessages,
+      ]
+      const composedContextModifier =
+        collectedContextModifiers.length > 0
+          ? (ctx: ToolUseContext) =>
+              collectedContextModifiers.reduce((acc, mod) => mod(acc), ctx)
+          : undefined
 
       return {
         data: resultData,
-        ...(collectedHookMessages.length > 0
-          ? { newMessages: collectedHookMessages }
+        ...(allNewMessages.length > 0 ? { newMessages: allNewMessages } : {}),
+        ...(composedContextModifier
+          ? { contextModifier: composedContextModifier }
+          : {}),
+        ...(collectedContextLayers.length > 0
+          ? { contextLayers: collectedContextLayers }
           : {}),
       }
     },
@@ -2775,6 +5566,13 @@ export type CodeModeResumePlan = {
   switched: boolean
   refused?: string
   refusedWhy?: string
+  /** Official 2.1.328 (`C`): true when an sdkUrlWorker session is downgraded out of Code Mode. */
+  declined?: boolean
+  /** Official 2.1.328 (`C`/`M`): notice + reminder when taken out of Code Mode on sdkUrlWorker. */
+  takenOut?: {
+    notice: string
+    reminder: string
+  }
   /**
    * Official 2.1.325 #2316: true when the resumed session ended mid-Code Mode
    * script — the host MUST wait for the user's next prompt instead of
@@ -2883,25 +5681,177 @@ export function didSessionEndDuringCodeModeScript(
   return pendingReplToolUseIds.size > 0 || lastMeaningfulWasInterruptedRepl
 }
 
+const NO_SUCH_TOOL_PREFIX = '<tool_use_error>Error: No such tool available: '
+const REPL_UNAVAILABLE_PREFIX = 'Error: REPL tool is not available'
+const REPL_TOOL_NAMES_FOR_INFERENCE = new Set(['REPL', 'Eval'])
+const ORDINARY_PRIMITIVE_TOOLS_FOR_INFERENCE = new Set([
+  'Bash',
+  'PowerShell',
+  'Read',
+  'Write',
+  'Edit',
+  'Glob',
+  'Grep',
+  'NotebookEdit',
+  'Agent',
+  'WebFetch',
+  'WebSearch',
+])
+
+function extractToolResultBlockText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content) && content.length > 0) {
+    const first = content[0]
+    if (typeof first === 'string') return first
+    if (
+      first &&
+      typeof first === 'object' &&
+      (first as { type?: unknown }).type === 'text' &&
+      typeof (first as { text?: unknown }).text === 'string'
+    ) {
+      return (first as { text: string }).text
+    }
+  }
+  return ''
+}
+
 /**
- * Official `planCodeModeFromSession` (`chunk-w140y4g2`): determines how to
+ * Official 2.1.328 (`m` + `_` / `g` @328432100): infer whether a resumed
+ * session was running in Code Mode (`replMode`) from historical tool calls in
+ * its transcript when explicit `replMode` metadata is absent.
+ *
+ * Returns `true` when the last completed pool-identifying tool call was a
+ * successful `REPL` / `Eval` call, `false` when it was an ordinary primitive
+ * tool call that was in the active pool, or `undefined` when inconclusive.
+ */
+export function inferReplModeFromMessages(
+  messages: readonly ResumedTranscriptMessageLike[] | undefined,
+): boolean | undefined {
+  if (!messages || messages.length === 0) return undefined
+  try {
+    const replResult = new Set<string>()
+    const inPool = new Set<string>()
+    for (const msg of messages) {
+      if (!msg || typeof msg !== 'object' || msg.type !== 'user') continue
+      const content = msg.message?.content
+      if (!Array.isArray(content)) continue
+      for (const block of content) {
+        if (
+          !block ||
+          typeof block !== 'object' ||
+          (block as { type?: unknown }).type !== 'tool_result'
+        ) {
+          continue
+        }
+        const rec = block as {
+          tool_use_id?: unknown
+          is_error?: unknown
+          content?: unknown
+        }
+        if (typeof rec.tool_use_id !== 'string') continue
+        const text = extractToolResultBlockText(rec.content)
+        if (rec.is_error !== true) {
+          if (
+            !text.startsWith(NO_SUCH_TOOL_PREFIX) &&
+            !text.startsWith(REPL_UNAVAILABLE_PREFIX)
+          ) {
+            replResult.add(rec.tool_use_id)
+          }
+          inPool.add(rec.tool_use_id)
+          continue
+        }
+        if (
+          !text.startsWith(NO_SUCH_TOOL_PREFIX) &&
+          !text.startsWith(REPL_UNAVAILABLE_PREFIX)
+        ) {
+          inPool.add(rec.tool_use_id)
+        }
+      }
+    }
+
+    let inferred: boolean | undefined
+    for (const msg of messages) {
+      if (
+        !msg ||
+        typeof msg !== 'object' ||
+        msg.type !== 'assistant' ||
+        (msg as { isVirtual?: unknown }).isVirtual === true
+      ) {
+        continue
+      }
+      const content = msg.message?.content
+      if (!Array.isArray(content)) continue
+      for (const block of content) {
+        if (
+          !block ||
+          typeof block !== 'object' ||
+          (block as { type?: unknown }).type !== 'tool_use'
+        ) {
+          continue
+        }
+        const rec = block as { name?: unknown; id?: unknown }
+        if (typeof rec.name !== 'string' || typeof rec.id !== 'string') continue
+        if (
+          REPL_TOOL_NAMES_FOR_INFERENCE.has(rec.name) &&
+          replResult.has(rec.id)
+        ) {
+          inferred = true
+        } else if (
+          ORDINARY_PRIMITIVE_TOOLS_FOR_INFERENCE.has(rec.name) &&
+          inPool.has(rec.id)
+        ) {
+          inferred = false
+        }
+      }
+    }
+    return inferred
+  } catch {
+    return undefined
+  }
+}
+
+function isSandboxHostListsBlockingCodeMode(): boolean {
+  const maybeFn = (
+    optInModule as { sandboxHostListsBlockCodeMode?: () => boolean }
+  ).sandboxHostListsBlockCodeMode
+  return typeof maybeFn === 'function' ? maybeFn() === true : false
+}
+
+function buildCodeModeTakenOutReminder(header: string): string {
+  return [
+    header,
+    'Do not call REPL or Eval. They may still be in your tool list, but every call to them is refused. Disregard their descriptions, including the statement that you have no other tools.',
+    'Use your other tools instead.',
+    'The variables and functions that your earlier scripts defined are gone.',
+    `If this conversation later continues in a session that gives you no tools other than REPL and Eval, ${CODE_MODE_NAME} is on there: disregard this reminder.`,
+  ].join('\n- ')
+}
+
+/**
+ * Official `planCodeModeFromSession` (`chunk@328409226`): determines how to
  * reconcile the current Code Mode opt-in state with a resumed session's
- * `replMode` flag, and whether to wait for the user's next prompt (#2316).
+ * `replMode` flag (falling back to inferring `replMode` from historical
+ * `REPL` tool calls when explicit metadata is absent), handles `sdkUrlWorker`
+ * degradation, and whether to wait for the user's next prompt (#2316).
  */
 export function planCodeModeFromSession(
   session: {
     replMode?: boolean
     sessionId?: string
+    source?: string
     headless?: boolean
     withinSession?: boolean
+    sdkUrlWorker?: boolean
     permissionMode?: string
     fromPicker?: boolean
     messages?: readonly ResumedTranscriptMessageLike[]
   },
   onNotice?: (message: string) => void,
 ): CodeModeResumePlan {
-  const canRun = codeModeBeforePin()
-  const isResumedCodeMode = session.replMode === true
+  const canRun = codeModeBeforePin() && !isSandboxHostListsBlockingCodeMode()
+  const resolvedReplMode =
+    session.replMode ?? inferReplModeFromMessages(session.messages) ?? false
+  const isResumedCodeMode = resolvedReplMode === true
   const waitForNextPrompt =
     isResumedCodeMode && didSessionEndDuringCodeModeScript(session.messages)
   const interruptedScriptNotice = waitForNextPrompt
@@ -2914,21 +5864,44 @@ export function planCodeModeFromSession(
     isResumedCodeMode &&
     shouldRunCodeModeScriptInBackground(session.permissionMode, true)
 
-  if (!canRun) {
+  if (!canRun && session.sdkUrlWorker !== true) {
     if (!isResumedCodeMode) {
       return { pin: undefined, switched: false }
     }
     const optIn = getCodeModeOptInState()
     const base = `This session was started in ${CODE_MODE_EXPERIMENTAL_NAME}`
+    const resumeId =
+      session.source === 'store' || session.source === undefined
+        ? session.sessionId
+        : undefined
+    const resumeArg = resumeId ? `--resume ${resumeId}` : undefined
+    const exitPrefix = session.withinSession === true ? 'exit and ' : ''
+    const envName = 'CLAUDE_CODE_REPL'
+
     if (optIn.state === 'refused') {
+      const reason = codeModeRefusalReasonText(optIn.why)
+      const tail =
+        resumeArg === undefined
+          ? ''
+          : optIn.why === 'declined'
+            ? ` To resume it, ${exitPrefix}${formatCodeModeCommand(1, resumeArg, 'step')} and choose Yes.`
+            : ''
       return {
         pin: undefined,
         switched: false,
-        refused: `${base}, which ${codeModeRefusalReasonText(optIn.why)}, so it can't be resumed.`,
+        refused: `${base}, which ${reason}, so it can't be resumed.${tail}`,
         refusedWhy: `opt_in_refused_${optIn.why}`,
       }
     }
-    if (optIn.state === 'not_asked' && optIn.turnedOffIn === 'managed') {
+    if (optIn.state === 'on') {
+      return {
+        pin: undefined,
+        switched: false,
+        refused: `${base}, which can't be turned on again until you quit Claude Code, so it can't be resumed here. To resume it, quit and ${resumeArg === undefined ? `start Claude Code again with ${envName}=1 set` : formatCodeModeCommand(1, resumeArg, 'step')}.`,
+        refusedWhy: 'opt_in_on_but_mode_unavailable',
+      }
+    }
+    if (optIn.turnedOffIn === 'managed') {
       return {
         pin: undefined,
         switched: false,
@@ -2936,25 +5909,76 @@ export function planCodeModeFromSession(
         refusedWhy: 'opt_in_off_managed',
       }
     }
-    const resumeArg = session.sessionId
-      ? `--resume ${session.sessionId}`
-      : undefined
+    if (optIn.turnedOffIn === 'settings') {
+      return {
+        pin: undefined,
+        switched: false,
+        refused: `${base}, which ${envName} in your settings turns off, so it can't be resumed. To resume it, remove that value (from ~/.claude/settings.json, ~/.claude.json or the file given to --settings) and set the variable to 1 in your shell or in ~/.claude/settings.json.`,
+        refusedWhy: 'opt_in_off_settings',
+      }
+    }
+    const howToResume =
+      resumeArg === undefined
+        ? `To resume it, ${exitPrefix}start Claude Code with ${envName}=1 set.`
+        : `To resume it, ${exitPrefix}${formatCodeModeCommand(1, resumeArg, 'step')}.`
+    if (optIn.turnedOffIn === 'shell') {
+      return {
+        pin: undefined,
+        switched: false,
+        refused: `${base}, but ${envName} in your shell turns ${CODE_MODE_NAME} off, so it can't be resumed.\n${howToResume}`,
+        refusedWhy: 'opt_in_off_shell',
+      }
+    }
+    if (session.headless === true) {
+      return {
+        pin: undefined,
+        switched: false,
+        refused: `${base}, which ${codeModeRefusalReasonText('entrypoint')}, so it can't be resumed here.${resumeArg === undefined ? '' : ` Resume it in the terminal: ${formatCodeModeCommand(1, resumeArg)}`}`,
+        refusedWhy: 'not_asked_headless',
+      }
+    }
+    if (session.source !== undefined && session.source !== 'store') {
+      return {
+        pin: undefined,
+        switched: false,
+        refused: `${base}, which is off, so it can't be resumed.\n${howToResume}`,
+        refusedWhy: 'not_from_store',
+      }
+    }
     return {
       pin: undefined,
       switched: false,
-      refused: `${base}, which is off, so it can't be resumed.\nTo resume it, ${session.withinSession ? 'exit and ' : ''}${formatCodeModeCommand(1, resumeArg, 'step')}.`,
-      refusedWhy: session.headless ? 'not_asked_headless' : 'not_asked',
+      refused: `${base}, which is off, so it can't be resumed.\n${howToResume}`,
+      refusedWhy: 'not_asked',
     }
   }
 
   const currentlyOn = isCodeModeEnabled()
   if (!isResumedCodeMode) {
+    if (!canRun) {
+      return { pin: undefined, switched: false }
+    }
     onNotice?.(
       `${CODE_MODE_NAME} is on, but this session isn't using it, so it continues with the ordinary tools. New sessions use ${CODE_MODE_NAME}.`,
     )
     return currentlyOn
       ? { pin: false, switched: true }
       : { pin: undefined, switched: false }
+  }
+  if (!canRun) {
+    const notice = `This session was started in ${CODE_MODE_EXPERIMENTAL_NAME}, which isn't available where it runs now. It continues with the ordinary tools and stays out of ${CODE_MODE_NAME} from now on.`
+    onNotice?.(notice)
+    return {
+      pin: undefined,
+      switched: false,
+      declined: true,
+      takenOut: {
+        notice,
+        reminder: buildCodeModeTakenOutReminder(
+          `${CODE_MODE_NAME} is off in this session.`,
+        ),
+      },
+    }
   }
   return currentlyOn
     ? {
@@ -2975,13 +5999,19 @@ export function planCodeModeFromSession(
 }
 
 /**
- * Official `applyCodeModePlan`: pins or unpins Code Mode for a resumed session.
+ * Official `applyCodeModePlan`: pins or unpins Code Mode for a resumed session
+ * and persists the resulting `replMode` state to session storage.
  */
 export function applyCodeModePlan(plan: CodeModeResumePlan): void {
   if (plan.unpin) {
     unpinCodeMode()
   } else if (plan.pin !== undefined) {
     pinCodeMode(plan.pin)
+  }
+  try {
+    saveReplMode(isCodeModeEnabled())
+  } catch {
+    // Best-effort outside full session storage lifecycle
   }
 }
 

@@ -1,6 +1,7 @@
 import type { CoordinateMode, CuSubGates } from '@ant/computer-use-mcp/types'
 
 import { getDynamicConfig_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import { isCodeModeEnabled } from '../../services/codeMode/optIn.js'
 import { isEnvTruthy } from '../envUtils.js'
 
 type ChicagoConfig = CuSubGates & {
@@ -40,6 +41,10 @@ function hasRequiredSubscription(): boolean {
 }
 
 export function getChicagoEnabled(): boolean {
+  // Official 2.1.328: Computer Use is disabled while Code Mode is active.
+  if (isCodeModeEnabled()) {
+    return false
+  }
   // Disable for ants whose shell inherited monorepo dev config.
   // MONOREPO_ROOT_DIR is exported by config/local/zsh/zshrc, which
   // laptop-setup.sh wires into ~/.zshrc — its presence is the cheap

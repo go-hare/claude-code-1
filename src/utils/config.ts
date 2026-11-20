@@ -372,6 +372,10 @@ export type GlobalConfig = {
   hasSeenAutoDefaultNudge?: boolean
   /** densable `hasSeenAutoModeOutsideReadPrompt` — first auto-mode outside-read Yes/Block latch. */
   hasSeenAutoModeOutsideReadPrompt?: boolean
+  /** Official 2.1.328: user accepted Code Mode caveats dialog. */
+  codeModeCaveatsAcceptedV1?: boolean
+  /** Official 2.1.328: user accepted Code Mode auto-mode safety check caveat. */
+  codeModeAutoModeCaveatAcceptedV1?: boolean
 
   // Transcript share prompt tracking ("Don't ask again")
   transcriptShareDismissed?: boolean

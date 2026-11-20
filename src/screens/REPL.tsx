@@ -159,10 +159,13 @@ import {
   codeModeRemoteControlNotice,
   codeModeWarningNotice,
   getCodeModeOptInState,
+  getCodeModeStateVersion,
   isCodeModeEnabled,
+  subscribeCodeModeState,
 } from '../services/codeMode/optIn.js';
 import {
   applyCodeModePlan,
+  clearCodeModeVmSession,
   cloudMoveRefusal,
   didSessionEndDuringCodeModeScript,
   mergeCodeModeReplySideEffects,
@@ -2148,10 +2151,15 @@ export function REPL({
   const isBriefOnly = useAppState(s => s.isBriefOnly);
   const briefTranscript = useAppState(s => s.briefTranscript);
 
-  const localTools = useMemo(
-    () => getTools(toolPermissionContext),
-    [toolPermissionContext, proactiveActive, isBriefOnly],
+  const codeModeVersion = React.useSyncExternalStore(
+    subscribeCodeModeState,
+    getCodeModeStateVersion,
+    getCodeModeStateVersion,
   );
+  const localTools = useMemo(() => {
+    void codeModeVersion;
+    return getTools(toolPermissionContext);
+  }, [toolPermissionContext, proactiveActive, isBriefOnly, codeModeVersion]);
 
   useKickOffCheckAndDisableAutoModeIfNeeded();
 
@@ -5025,6 +5033,8 @@ export function REPL({
             replMode: (log as { replMode?: boolean }).replMode,
             sessionId,
             withinSession: true,
+            source: 'store',
+            permissionMode: store.getState().toolPermissionContext.mode,
             messages: log.messages as unknown as Parameters<typeof didSessionEndDuringCodeModeScript>[0],
           },
           notice => {
@@ -5048,6 +5058,8 @@ export function REPL({
           throw new Error(codeModePlan.refused);
         }
         applyCodeModePlan(codeModePlan);
+        // Official 2.1.328: clear VM session state when switching sessions on /resume.
+        clearCodeModeVmSession();
         codeModeAutoBackgroundEligibleRef.current = codeModePlan.autoBackgroundEligible === true;
         const waitForNextPromptAfterCodeModeResume =
           codeModePlan.waitForNextPrompt === true ||
@@ -6766,9 +6778,10 @@ export function REPL({
 
   // Session backgrounding (Ctrl+B to background/foreground)
   const handleBackgroundQuery = useCallback(() => {
-    // Official 2.1.323 (#1964) & 2.1.328 (#573): Code Mode sessions cannot be
-    // moved to the background unless `plan.autoBackgroundEligible` is set.
-    if (isCodeModeEnabled() && !codeModeAutoBackgroundEligibleRef.current) {
+    // Official 2.1.323 (#1964) & 2.1.328 (`lht`): Ctrl+B session backgrounding
+    // is always refused when Code Mode is active (distinct from auto-mode
+    // background scripts).
+    if (isCodeModeEnabled()) {
       addNotification({
         key: 'code-mode-bg-refusal',
         kind: 'warning',

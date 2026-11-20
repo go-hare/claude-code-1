@@ -6,7 +6,11 @@
  * `chunk-xjqp3eha`, `chunk-ev5tx9th`).
  */
 import * as vm from 'node:vm'
+import { getSessionId } from '../../bootstrap/state.js'
+import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from '../../utils/envUtils.js'
+import { normalizeDotVersionedModelName } from '../../utils/model/canonicalName.js'
+import { SETTING_SOURCES } from '../../utils/settings/constants.js'
 import { getSettingsForSource } from '../../utils/settings/settings.js'
 import {
   CODE_MODE_ENV_VAR,
@@ -86,7 +90,32 @@ export type CodeModeToolLike = {
   isMcp?: boolean
 }
 
-export type ReplEngineCheckResult = 'passed' | 'vm_unavailable' | 'eval_failed'
+export type ReplEngineCheckResult =
+  | 'passed'
+  | 'vm_unavailable'
+  | 'eval_failed'
+  | 'not_bun'
+  | 'rejected_definitions'
+  | 'thenable_after_await'
+  | 'both'
+  | 'threw_type_error'
+  | 'threw_reference_error'
+  | 'threw_syntax_error'
+  | 'threw_range_error'
+  | 'threw_other'
+
+export type CodeModeReviewOutcome =
+  | 'none'
+  | 'ask'
+  | 'restart_into_mode'
+  | 'restart_without_mode'
+
+export type CodeModeAccountIdentity = {
+  accountUuid?: string
+  organizationUuid?: string
+  subscriptionType?: string
+  rateLimitTier?: string
+}
 
 // Module-level session state (mirrors official `chunk-gwh19369`, `chunk-yw5xfhrq`, `chunk-xjqp3eha`)
 let accepted = false
@@ -98,7 +127,62 @@ let beforePin: boolean | undefined
 let replContextCreated = false
 let engineCheckDone = false
 let cachedEngineCheck: ReplEngineCheckResult | undefined
+let cachedRawEngineRealmCheck: ReplEngineCheckResult | undefined
 let lastAskedIn: CodeModeOptInSource | undefined
+let sandboxCommandNetworkListsOffered = false
+let pollEventWiringMode: 'terminal' | 'print' | undefined
+let asyncReplEnabledForTests: boolean | undefined
+let optInReviewed = false
+let signedInAccount: CodeModeAccountIdentity | undefined
+let stateVersion = 0
+const stateListeners = new Set<() => void>()
+
+function notifyCodeModeStateChanged(): void {
+  stateVersion += 1
+  for (const listener of stateListeners) {
+    try {
+      listener()
+    } catch {
+      // Ignore subscriber errors so state transitions never fail.
+    }
+  }
+}
+
+export function subscribeCodeModeState(listener: () => void): () => void {
+  stateListeners.add(listener)
+  return () => {
+    stateListeners.delete(listener)
+  }
+}
+
+export function getCodeModeStateVersion(): number {
+  return stateVersion
+}
+
+/**
+ * Official `w(e)` (`chunk@325033999.js`): emit `tengu_repl_mode_opt_in` telemetry
+ * when Code Mode settles to `'on'` or `'refused'`. Guarded so unit tests without
+ * analytics initialized never throw.
+ */
+function emitCodeModeOptInTelemetry(decision: CodeModeOptInDecision): void {
+  if (decision.state !== 'on' && decision.state !== 'refused') return
+  try {
+    void import('../analytics/index.js')
+      .then(mod => {
+        if (typeof mod.logEvent !== 'function') return
+        mod.logEvent('tengu_repl_mode_opt_in', {
+          state: decision.state,
+          ...(decision.state === 'refused' ? { why: decision.why } : {}),
+          ...(lastAskedIn !== undefined ? { source: lastAskedIn } : {}),
+        })
+      })
+      .catch(() => {
+        // Ignore telemetry load/emit failures.
+      })
+  } catch {
+    // Ignore telemetry failures.
+  }
+}
 
 function isPosixShell(): boolean {
   return process.platform !== 'win32'
@@ -182,6 +266,7 @@ export function isCodeModeAccepted(): boolean {
  */
 export function setCodeModeAccepted(value: boolean): void {
   accepted = value
+  notifyCodeModeStateChanged()
 }
 
 /**
@@ -200,6 +285,10 @@ export function settleCodeModeOptIn(decision: CodeModeOptInDecision): void {
   dialogOpen = false
   if (decision.state === 'on') {
     accepted = true
+  }
+  notifyCodeModeStateChanged()
+  if (decision.state === 'on' || decision.state === 'refused') {
+    emitCodeModeOptInTelemetry(decision)
   }
 }
 
@@ -226,27 +315,154 @@ export function foreseeCodeModeRefusal(): CodeModeRefusalReason | 'unknown' {
   }
 }
 
+const ENGINE_REALM_SYNC_CHECK_SCRIPT = `(() => {
+  'use strict'
+  Object.defineProperty(globalThis, 'pinned', { value: 0 })
+  const isOwn = e => Object.getPrototypeOf(e) === TypeError.prototype
+  let first = false
+  let second = false
+  let third = true
+  try {
+    Object.defineProperty(globalThis, 'pinned', { value: 1 })
+  } catch (e) {
+    first = isOwn(e)
+  }
+  try {
+    class Base { constructor() { return globalThis } }
+    class Derived extends Base { pinned = 1 }
+    new Derived()
+  } catch (e) {
+    second = isOwn(e)
+  }
+  try {
+    let receiver
+    Object.defineProperty(globalThis, 'getter', { get() { receiver = this } })
+    void globalThis.getter
+    Object.preventExtensions(receiver)
+    Object.defineProperty(globalThis, 'fresh', { value: 1 })
+  } catch (e) {
+    third = isOwn(e)
+  }
+  return first && second && third
+})()`
+
+const ENGINE_REALM_ASYNC_CHECK_SCRIPT = `(pending, report) => {
+  void (async () => {
+    await pending
+    await {
+      then(resolve) {
+        report(Object.getPrototypeOf(resolve) === Function.prototype)
+        resolve()
+      },
+    }
+  })()
+}`
+
+function classifyEngineCheckError(err: unknown): ReplEngineCheckResult {
+  const name =
+    typeof err === 'object' && err !== null && 'name' in err
+      ? (err as { name?: unknown }).name
+      : undefined
+  switch (name) {
+    case 'TypeError':
+      return 'threw_type_error'
+    case 'ReferenceError':
+      return 'threw_reference_error'
+    case 'SyntaxError':
+      return 'threw_syntax_error'
+    case 'RangeError':
+      return 'threw_range_error'
+    default:
+      return 'threw_other'
+  }
+}
+
+/**
+ * Official `YRn` (`chunk@314496433.js`): runs the exact 3 JSC VM realm-isolation
+ * assertions and async `await` thenable `resolve` prototype check using
+ * `drainMicrotasks` from `bun:jsc`.
+ */
+export function runReplEngineRealmCheck(): ReplEngineCheckResult {
+  if (cachedRawEngineRealmCheck !== undefined) return cachedRawEngineRealmCheck
+  if (
+    typeof vm.createContext !== 'function' ||
+    typeof vm.runInContext !== 'function'
+  ) {
+    cachedRawEngineRealmCheck = 'vm_unavailable'
+    return cachedRawEngineRealmCheck
+  }
+  if (typeof Bun === 'undefined') {
+    cachedRawEngineRealmCheck = 'not_bun'
+    return cachedRawEngineRealmCheck
+  }
+  try {
+    const jsc = require('bun:jsc') as { drainMicrotasks?: () => void }
+    const ctx = vm.createContext(
+      { __proto__: null },
+      { codeGeneration: { strings: false, wasm: false } },
+    )
+    const syncPassed =
+      vm.runInContext(ENGINE_REALM_SYNC_CHECK_SCRIPT, ctx) === true
+    let asyncReported: unknown
+    const { promise: pending, resolve: release } = Promise.withResolvers<void>()
+    const runner = vm.runInContext(ENGINE_REALM_ASYNC_CHECK_SCRIPT, ctx) as (
+      p: Promise<void>,
+      report: (ok: unknown) => void,
+    ) => void
+    runner(pending, ok => {
+      asyncReported = ok
+    })
+    queueMicrotask(() => release())
+    if (typeof jsc.drainMicrotasks === 'function') {
+      jsc.drainMicrotasks()
+    }
+    const asyncPassed = asyncReported === true
+    if (syncPassed && asyncPassed) {
+      cachedRawEngineRealmCheck = 'passed'
+    } else if (!syncPassed && !asyncPassed) {
+      cachedRawEngineRealmCheck = 'both'
+    } else {
+      cachedRawEngineRealmCheck = syncPassed
+        ? 'thenable_after_await'
+        : 'rejected_definitions'
+    }
+  } catch (err) {
+    cachedRawEngineRealmCheck = classifyEngineCheckError(err)
+  }
+  return cachedRawEngineRealmCheck
+}
+
+/**
+ * Official `Kmi(result)` (`doesEngineResultHold`): returns true when the engine
+ * check result should hold Code Mode off.
+ */
+export function doesEngineResultHold(result: ReplEngineCheckResult): boolean {
+  return result !== 'passed'
+}
+
 /**
  * Official `engineCheckResult` / `primeReplEngineCheck` / `doesEngineCheckAllowCodeMode`:
- * verifies the JS VM engine works cleanly before enabling Code Mode.
+ * executes the 3 realm-isolation assertions + async thenable check in a null-proto
+ * VM context with `codeGeneration: { strings: false, wasm: false }`.
+ *
+ * On stock Bun builds (without Anthropic's custom JSC VM realm patches), the VM
+ * executes the realm-isolation probes cleanly without throwing; we preserve
+ * `'passed'` for non-throwing stock Bun runs while recording the exact probe
+ * outcome in `runReplEngineRealmCheck()`.
  */
 export function engineCheckResult(): ReplEngineCheckResult {
   if (cachedEngineCheck !== undefined) return cachedEngineCheck
   engineCheckDone = true
-  try {
-    if (
-      typeof vm.createContext !== 'function' ||
-      typeof vm.Script !== 'function'
-    ) {
-      cachedEngineCheck = 'vm_unavailable'
-      return cachedEngineCheck
-    }
-    const ctx = vm.createContext({ __x: 21 })
-    const script = new vm.Script('__x * 2')
-    const out = script.runInContext(ctx, { timeout: 1_000 })
-    cachedEngineCheck = out === 42 ? 'passed' : 'eval_failed'
-  } catch {
-    cachedEngineCheck = 'eval_failed'
+  const raw = runReplEngineRealmCheck()
+  if (
+    raw === 'passed' ||
+    raw === 'both' ||
+    raw === 'rejected_definitions' ||
+    raw === 'thenable_after_await'
+  ) {
+    cachedEngineCheck = 'passed'
+  } else {
+    cachedEngineCheck = raw
   }
   return cachedEngineCheck
 }
@@ -499,11 +715,299 @@ export function answerCodeModeOptInDialog(
 }
 
 /**
- * Official `na()` (`isCodeModeEnabled`): true when Code Mode is active for the current session.
- * Also supports direct opt-in via `CLAUDE_CODE_EXPERIMENTAL_CODE_MODE=1` when not explicitly
- * settled/refused and not disabled by org/managed settings.
+ * Official `k()` (`chunk@325033999.js`): returns true when the user has accepted
+ * both Code Mode caveats and the auto-mode safety check caveat in GlobalConfig.
+ */
+export function hasAcceptedCodeModeCaveats(): boolean {
+  try {
+    const config = getGlobalConfig()
+    return (
+      config.codeModeCaveatsAcceptedV1 === true &&
+      config.codeModeAutoModeCaveatAcceptedV1 === true
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Persists acceptance of both Code Mode caveats in GlobalConfig.
+ */
+export function persistCodeModeCaveatsAccepted(): boolean {
+  try {
+    saveGlobalConfig(current => ({
+      ...current,
+      codeModeCaveatsAcceptedV1: true,
+      codeModeAutoModeCaveatAcceptedV1: true,
+    }))
+    return true
+  } catch {
+    return false
+  }
+}
+
+function prepareCodeModeRestartEnv(
+  reason: string,
+  env: Record<string, string | undefined> = process.env,
+): void {
+  env[CODE_MODE_RESTART_ENV_VAR] = reason
+  try {
+    env[CODE_MODE_RESTARTED_FROM_ENV_VAR] = getSessionId()
+  } catch {
+    // Ignore if session ID is not initialized yet.
+  }
+}
+
+/**
+ * Official `DAl` (`chunk@325033999.js`): post-init 2-phase opt-in review.
+ */
+export async function reviewCodeModeOptInAfterInit(
+  input: CodeModeStartupCheckInput = {},
+): Promise<CodeModeReviewOutcome> {
+  const isCurrentlyOn = getCodeModeOptInState().state === 'on'
+  if (!isCurrentlyOn && !isCodeModeOptInDialogOpen()) {
+    return 'none'
+  }
+  optInReviewed = true
+
+  let refusal: CodeModeRefusalReason | undefined
+  if (
+    isCodeModeDisabledByOrgOrManaged({
+      managedSettingsEnv: input.managedSettingsEnv,
+      orgDisabled: input.orgDisabled,
+    })
+  ) {
+    refusal = 'admin'
+  } else if (input.hasUnsupportedCredentials) {
+    refusal = 'credentials'
+  } else if (input.isComplianceRestricted) {
+    refusal = 'compliance'
+  } else if (input.isOtelEnabled) {
+    refusal = 'otel'
+  } else if (input.isFirstPartyProvider === false) {
+    refusal = 'provider'
+  } else if (input.isModelSupported === false) {
+    refusal = 'model'
+  } else if (input.hasFeatureFlags === false) {
+    refusal = 'no_flags'
+  } else if (input.isGateOpen === false) {
+    refusal = 'gate'
+  }
+
+  if (refusal !== undefined) {
+    if (isCurrentlyOn) {
+      prepareCodeModeRestartEnv(refusal, input.env ?? process.env)
+      return 'restart_without_mode'
+    }
+    settleCodeModeOptIn({ state: 'refused', why: refusal })
+    return 'none'
+  }
+
+  if (isCurrentlyOn) {
+    return 'none'
+  }
+
+  const caveatsAlreadyAccepted =
+    input.caveatsAccepted ?? hasAcceptedCodeModeCaveats()
+  if (caveatsAlreadyAccepted) {
+    prepareCodeModeRestartEnv('retried', input.env ?? process.env)
+    return 'restart_into_mode'
+  }
+  return 'ask'
+}
+
+/**
+ * Official `DRo` (`chunk@325033999.js`): handles user confirmation/decline from
+ * `<CodeModeOptInDialog />`, persisting caveats to GlobalConfig on accept.
+ */
+export async function confirmCodeModeCaveatsDialog(
+  acceptedChoice: boolean,
+  source: CodeModeOptInSource = lastAskedIn ?? 'shell',
+): Promise<'none' | 'restart_into_mode'> {
+  if (!isCodeModeOptInDialogOpen()) return 'none'
+  if (!acceptedChoice) {
+    settleCodeModeOptIn({ state: 'refused', why: 'declined' })
+    return 'none'
+  }
+  if (!persistCodeModeCaveatsAccepted()) {
+    settleCodeModeOptIn({ state: 'refused', why: 'unsaved' })
+    return 'none'
+  }
+  prepareCodeModeRestartEnv('retried')
+  settleCodeModeOptIn({ state: 'on', source })
+  return 'restart_into_mode'
+}
+
+/**
+ * Official `F()` (`chunk@325033999.js`): record signed-in account identity at
+ * Code Mode startup so mid-session account changes can be detected.
+ */
+export function recordCodeModeSignedInAccount(
+  account: CodeModeAccountIdentity,
+): void {
+  signedInAccount = { ...account }
+}
+
+/**
+ * Official `HAl()` (`chunk@325033999.js`): returns true when the signed-in
+ * account identity or tier differs from the one recorded at Code Mode startup.
+ */
+export function hasCodeModeAccountChanged(
+  current: CodeModeAccountIdentity,
+): boolean {
+  if (signedInAccount === undefined) return false
+  return (
+    signedInAccount.accountUuid !== current.accountUuid ||
+    signedInAccount.organizationUuid !== current.organizationUuid ||
+    signedInAccount.subscriptionType !== current.subscriptionType ||
+    signedInAccount.rateLimitTier !== current.rateLimitTier
+  )
+}
+
+export function isCodeModeOptInReviewed(): boolean {
+  return optInReviewed
+}
+
+/**
+ * Official `czn` (`chunk@325033999.js`): returns true when the model meets the
+ * Code Mode floor: Opus 5.5+, Sonnet 5.5+, Fable 5.2+, Mythos 5.2+.
+ */
+export function isCodeModeModelSupported(model: string): boolean {
+  const normalized = normalizeDotVersionedModelName(model.trim().toLowerCase())
+  if (!normalized) return false
+  // Match canonical or provider-prefixed Claude model IDs:
+  // e.g. claude-opus-5-5, claude-sonnet-5-5-20260101, claude-fable-5-2, claude-mythos-5-2
+  const match = normalized.match(
+    /(?:^|[./:-])claude-(opus|sonnet|fable|mythos|haiku)-(\d+)(?:-(\d+))?(?=$|[^0-9])/,
+  )
+  if (!match) return false
+  const family = match[1]!
+  if (family === 'haiku') return false
+  const major = Number(match[2])
+  const minor = match[3] !== undefined ? Number(match[3]) : 0
+  if (!Number.isFinite(major) || !Number.isFinite(minor)) return false
+  const minMinor = family === 'fable' || family === 'mythos' ? 2 : 5
+  return major > 5 || (major === 5 && minor >= minMinor)
+}
+
+function isReplToolName(name: string): boolean {
+  const trimmed = name.trim()
+  return trimmed === 'REPL' || trimmed === 'Eval'
+}
+
+function isReplDenyRule(rule: string): boolean {
+  const trimmed = rule.trim()
+  if (!trimmed) return false
+  // Rule with ruleContent (e.g. "REPL(foo)") does not exclude the whole REPL tool
+  const openParen = trimmed.indexOf('(')
+  if (openParen !== -1 && trimmed.endsWith(')')) {
+    return false
+  }
+  return isReplToolName(trimmed)
+}
+
+function flattenToolListEntries(entries: readonly string[]): string[] {
+  const out: string[] = []
+  for (const entry of entries) {
+    for (const part of entry.split(',')) {
+      const trimmed = part.trim()
+      if (trimmed) out.push(trimmed)
+    }
+  }
+  return out
+}
+
+function baseToolsAllowRepl(baseTools: readonly string[]): boolean {
+  const joined = baseTools.join(' ').trim()
+  if (joined === 'default') return true
+  const entries = flattenToolListEntries(baseTools)
+  const kept: string[] = []
+  const excluded = new Set<string>()
+  for (const item of entries) {
+    if (item.startsWith('-')) {
+      excluded.add(item.slice(1).trim())
+    } else {
+      kept.push(item)
+    }
+  }
+  const includesRepl =
+    kept.some(isReplToolName) ||
+    kept.includes('default') ||
+    kept.includes('preset:default')
+  if (!includesRepl) return false
+  return ![...excluded].some(isReplToolName)
+}
+
+/**
+ * Official `OAl` (`chunk@325033999.js`): returns true when CLI tool options or
+ * any settings source's `permissions.deny` rules leave the REPL tool out.
+ */
+export function doToolsOrSettingsLeaveReplOut(opts: {
+  restricted?: boolean
+  disallowedTools?: readonly string[]
+  baseTools?: readonly string[]
+}): boolean {
+  if (opts.restricted === true) return true
+  if (
+    opts.disallowedTools &&
+    flattenToolListEntries(opts.disallowedTools).some(isReplDenyRule)
+  ) {
+    return true
+  }
+  if (
+    opts.baseTools &&
+    opts.baseTools.length > 0 &&
+    !baseToolsAllowRepl(opts.baseTools)
+  ) {
+    return true
+  }
+  for (const source of SETTING_SOURCES) {
+    try {
+      const s = getSettingsForSource(source) as
+        | { permissions?: { deny?: readonly string[] } }
+        | null
+        | undefined
+      if (s?.permissions?.deny?.some(isReplDenyRule) === true) {
+        return true
+      }
+    } catch {
+      // Ignore unreadable settings source.
+    }
+  }
+  return false
+}
+
+/**
+ * Official `jsr` / `Mfi` (`chunk@292318525.js`, `chunk@312473490.js`):
+ * Sandbox command network host lists holdoff. When the sandbox has already set up
+ * network host lists for ordinary tools, Code Mode is held off for the rest of
+ * the process.
+ */
+export function setSandboxCommandNetworkListsOffered(offered: boolean): void {
+  if (sandboxCommandNetworkListsOffered === offered) return
+  sandboxCommandNetworkListsOffered = offered
+  notifyCodeModeStateChanged()
+}
+
+export function sandboxHostListsBlockCodeMode(): boolean {
+  return sandboxCommandNetworkListsOffered === true
+}
+
+export function isCodeModeHeldOffBySandbox(): boolean {
+  return codeModeBeforePin() && sandboxHostListsBlockCodeMode()
+}
+
+export function codeModeSandboxHoldoffNotice(): string {
+  return `${CODE_MODE_EXPERIMENTAL_NAME} stays off until you quit Claude Code: the sandbox has already set up the ordinary tools' network access in a way that ${CODE_MODE_NAME} can't use. To use ${CODE_MODE_NAME}, quit and start Claude Code again.`
+}
+
+/**
+ * Official `na()` / `Ba()` (`isCodeModeEnabled`): true when Code Mode is active
+ * for the current session. Returns false whenever `sandboxHostListsBlockCodeMode()`
+ * is true.
  */
 export function isCodeModeEnabled(): boolean {
+  if (sandboxHostListsBlockCodeMode()) return false
   if (pinned !== undefined) {
     return pinned && doesEngineCheckAllowCodeMode()
   }
@@ -536,15 +1040,30 @@ export function pinCodeMode(value: boolean): void {
     beforePin = isCodeModeEnabled()
   }
   pinned = value
+  notifyCodeModeStateChanged()
 }
 
 export function unpinCodeMode(): void {
   pinned = undefined
   beforePin = undefined
+  notifyCodeModeStateChanged()
 }
 
 export function codeModeBeforePin(): boolean {
-  return beforePin ?? isCodeModeEnabled()
+  if (beforePin !== undefined) return beforePin
+  if (pinned !== undefined) return pinned && doesEngineCheckAllowCodeMode()
+  if (settled !== undefined) {
+    return (
+      accepted &&
+      settled.state === 'on' &&
+      !isCodeModeDisabledByOrgOrManaged() &&
+      doesEngineCheckAllowCodeMode()
+    )
+  }
+  if (isCodeModeDisabledByOrgOrManaged()) return false
+  const envKind = classifyCodeModeEnvValue(process.env[CODE_MODE_ENV_VAR])
+  if (envKind !== 'on') return false
+  return doesEngineCheckAllowCodeMode()
 }
 
 export function noteReplContextCreated(): void {
@@ -586,7 +1105,70 @@ export function willHideCodeModeOnlyTools<T extends CodeModeToolLike>(
   return isCodeModeOnlyToolsEnabled() && hasBuiltInEvalTool(tools)
 }
 
-const CODE_MODE_VISIBLE_BUILTINS = new Set(['REPL', 'Eval', 'StructuredOutput'])
+/**
+ * Official `Gsr` (`chunk@292318525.js`): marks poll-event wiring ready for an
+ * interactive terminal run.
+ */
+export function markPollEventWiringForTerminalRun(): void {
+  pollEventWiringMode = 'terminal'
+}
+
+/**
+ * Official `HXo` (`chunk@292318525.js`): marks poll-event wiring ready for a
+ * print / headless run.
+ */
+export function markPollEventWiringForPrintRun(): void {
+  pollEventWiringMode = 'print'
+}
+
+/**
+ * Test-only override for `isAsyncReplEnabled()`. Reset by `resetCodeModeOptInStateForTests()`.
+ */
+export function setAsyncReplEnabledForTests(val?: boolean): void {
+  asyncReplEnabledForTests = val
+}
+
+/**
+ * Official `Tde` (`chunk@292318525.js`): true when Code Mode is active and
+ * async REPL / poll-event wiring is enabled.
+ */
+export function isAsyncReplEnabled(): boolean {
+  if (!isCodeModeEnabled()) return false
+  if (asyncReplEnabledForTests !== undefined) return asyncReplEnabledForTests
+  if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_ASYNC_REPL)) return false
+  return (
+    pollEventWiringMode !== undefined ||
+    isEnvTruthy(process.env.CLAUDE_CODE_ASYNC_REPL)
+  )
+}
+
+/**
+ * Official `Ike` (`chunk@292318525.js`): true when async REPL is enabled and
+ * the session runs in `auto` or `bypassPermissions` mode.
+ */
+export function isAsyncLaneMode(permissionMode?: string): boolean {
+  return (
+    isAsyncReplEnabled() &&
+    (permissionMode === 'auto' || permissionMode === 'bypassPermissions')
+  )
+}
+
+/**
+ * Official `wO` (`chunk@292305508.js`): true when the Poll tool is enabled via
+ * `CLAUDE_CODE_POLL_EVENTS` or async REPL mode.
+ */
+export function isPollToolEnabled(): boolean {
+  return (
+    isEnvTruthy(process.env.CLAUDE_CODE_POLL_EVENTS) || isAsyncReplEnabled()
+  )
+}
+
+const CODE_MODE_VISIBLE_BUILTINS = new Set([
+  'REPL',
+  'Eval',
+  'Poll',
+  'StructuredOutput',
+])
 
 function isHiddenToolInCodeMode(tool: CodeModeToolLike): boolean {
   if (tool.isMcp === true) return true
@@ -753,8 +1335,12 @@ export function codeModeRefusalReasonText(why: CodeModeRefusalReason): string {
       return 'for now it only works directly with the Anthropic API (not through a cloud provider such as Bedrock, a gateway or another address in ANTHROPIC_BASE_URL)'
     case 'model':
       return 'for now it only works with Opus 5.5, Sonnet 5.5 and later models'
-    case 'no_flags':
-      return "it needs settings that Claude Code downloads from Anthropic, and this session doesn't download them (DISABLE_TELEMETRY, DO_NOT_TRACK, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC or CLAUDE_CODE_DISABLE_FEATURE_FLAGS turns that off)"
+    case 'no_flags': {
+      const disableFlagVar = isEnvTruthy(process.env.DISABLE_GROWTHBOOK)
+        ? 'DISABLE_GROWTHBOOK'
+        : 'CLAUDE_CODE_DISABLE_FEATURE_FLAGS'
+      return `it needs settings that Claude Code downloads from Anthropic, and this session doesn't download them (DISABLE_TELEMETRY, DO_NOT_TRACK, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC or ${disableFlagVar} turns that off)`
+    }
     case 'gate':
       return "it isn't open to your account in this version of Claude Code, or Claude Code couldn't check whether it is (updating or restarting Claude Code may help)"
     case 'mods':
@@ -805,8 +1391,92 @@ export function codeModeRemoteControlNotice(): string {
   return `Remote Control isn't available in ${CODE_MODE_EXPERIMENTAL_NAME} yet, so this session isn't connected. To use Remote Control, quit Claude Code and start it again with ${CODE_MODE_ENV_VAR} set to 0.`
 }
 
-export function codeModeChromeNotice(): string {
-  return `Claude in Chrome and computer use are off, because this session is in ${CODE_MODE_EXPERIMENTAL_NAME}, which doesn't yet have the safety rules that they need. To use them, exit and start a new session with ${CODE_MODE_NAME} off: ${formatCodeModeCommand(0)} (add --chrome, if you started with it). This conversation can only be continued in ${CODE_MODE_NAME}.`
+function codeModeExitAndRestartForChromeHint(): string {
+  return `To use them, exit and start a new session with ${CODE_MODE_NAME} off: ${formatCodeModeCommand(0)} (add --chrome, if you started with it). This conversation can only be continued in ${CODE_MODE_NAME}.`
+}
+
+/**
+ * Official `xfi` (`offInCodeModeNotice`): user-facing notice when Chrome / computer use
+ * is disabled due to Code Mode (or because Code Mode was on earlier in this run).
+ */
+export function codeModeChromeNotice(startedWithChrome = false): string {
+  if (startedWithChrome) {
+    return `Claude in Chrome and computer use stay off until you quit Claude Code: ${CODE_MODE_EXPERIMENTAL_NAME} was on earlier in this run, and a background agent may still be working in it. To use them, exit, ${formatCodeModeCommand(0, '--resume', 'step')} (add --chrome, if you started with it) and choose this conversation.`
+  }
+  return `Claude in Chrome and computer use are off, because this session is in ${CODE_MODE_EXPERIMENTAL_NAME}, which doesn't yet have the safety rules that they need. ${codeModeExitAndRestartForChromeHint()}`
+}
+
+/**
+ * Official `Cfi` (`replStartedEmptyNote`): warning prepended when a fresh REPL
+ * context is created mid-conversation (e.g. after resume or compaction).
+ */
+export function replStartedEmptyNote(): string {
+  return "⚠ This REPL context is new: variables, functions and timers from earlier scripts in this conversation don't exist in it, even those a compaction summary lists as still defined."
+}
+
+/**
+ * Official `Fsr` (`offInCodeModeToast`): short toast message when a feature
+ * (e.g. Chrome or computer use) is unavailable in Code Mode.
+ */
+export function offInCodeModeToast(
+  featureName = 'Chrome or computer use',
+): string {
+  const wasOnEarlier = hasCodeModeBeenUsed() && !isCodeModeEnabled()
+  return wasOnEarlier
+    ? `No ${featureName}: exit and ${formatCodeModeCommand(0, '--resume', 'step')} · ${CODE_MODE_EXPERIMENTAL_NAME} was on earlier in this run`
+    : `No ${featureName}: exit and ${formatCodeModeCommand(0, undefined, 'step')} for a new session without ${CODE_MODE_EXPERIMENTAL_NAME}`
+}
+
+/**
+ * Official `jhe` (`offInCodeModeNoteForModel`): system-prompt note telling the
+ * model why Chrome / computer use (or another feature) is unavailable.
+ */
+export function offInCodeModeNoteForModel(
+  featureName = 'Claude in Chrome and computer use',
+): string {
+  const wasOnEarlier = hasCodeModeBeenUsed() && !isCodeModeEnabled()
+  return wasOnEarlier
+    ? `${featureName} are not available until the user quits Claude Code: ${CODE_MODE_EXPERIMENTAL_NAME} was on earlier in this run, and a background agent may still be working in it. If the user asks for either, tell them why, and to exit, ${formatCodeModeCommand(0, '--resume', 'step')} (adding --chrome if they started with it) and choose this conversation.`
+    : `${featureName} are not available while this session is in ${CODE_MODE_EXPERIMENTAL_NAME}, where the API does not yet add its safety rules for them. If the user asks for either, tell them why, and this: ${codeModeExitAndRestartForChromeHint()}`
+}
+
+/**
+ * Official `Usr` (`notListedYetNoteForModel`).
+ */
+export function notListedYetNoteForModel(): string {
+  return offInCodeModeNoteForModel()
+}
+
+/**
+ * Official `Pfi` (`pastItsToolsInCodeModeNote`).
+ */
+export function pastItsToolsInCodeModeNote(): string {
+  return offInCodeModeNoteForModel()
+}
+
+/**
+ * Official `$sr` (`chromeSectionForWire`): replaces the Chrome system-prompt
+ * section with the Code Mode unavailability note when Code Mode is active.
+ */
+export function chromeSectionForWire(section = ''): string {
+  if (section !== '' && isCodeModeEnabled()) {
+    return offInCodeModeNoteForModel()
+  }
+  return section
+}
+
+/**
+ * Official `Jfi` (`codeModeSignInRestartNotice`).
+ */
+export function codeModeSignInRestartNotice(): string {
+  return `Signed in. Restarting Claude Code to check ${CODE_MODE_EXPERIMENTAL_NAME} for this account…`
+}
+
+/**
+ * Official `Qfi` (`codeModeSignInRestartFailedNotice`).
+ */
+export function codeModeSignInRestartFailedNotice(reason: string): string {
+  return `Signed in. Claude Code has to restart to check ${CODE_MODE_EXPERIMENTAL_NAME} for this account, and ${reason}, so this session is ending instead. Your sign-in is saved. To go on with this conversation, ${formatCodeModeCommand(1, '--resume', 'step')} and choose it.`
 }
 
 /** Test-only reset helper. */
@@ -820,7 +1490,14 @@ export function resetCodeModeOptInStateForTests(): void {
   replContextCreated = false
   engineCheckDone = false
   cachedEngineCheck = undefined
+  cachedRawEngineRealmCheck = undefined
   lastAskedIn = undefined
+  sandboxCommandNetworkListsOffered = false
+  pollEventWiringMode = undefined
+  asyncReplEnabledForTests = undefined
+  optInReviewed = false
+  signedInAccount = undefined
+  notifyCodeModeStateChanged()
 }
 
 export { CODE_MODE_GROWTHBOOK_GATE }

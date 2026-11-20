@@ -52,6 +52,8 @@ export {
   LIST_PEERS_LEGACY_TOOL_NAME,
 } from './tools/ListPeersTool/constants.js'
 export { MonitorTool } from './tools/MonitorTool/MonitorTool.js'
+export { PollTool } from './tools/PollTool/PollTool.js'
+export { POLL_TOOL_NAME } from './tools/PollTool/constants.js'
 export { PowerShellTool } from './tools/PowerShellTool/PowerShellTool.js'
 export { PushNotificationTool } from './tools/PushNotificationTool/PushNotificationTool.js'
 export { REPLTool } from './tools/REPLTool/REPLTool.js'

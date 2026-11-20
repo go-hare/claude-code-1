@@ -20,6 +20,7 @@ import {
   SandboxRuntimeConfigSchema,
   SandboxViolationStore,
 } from '@anthropic-ai/sandbox-runtime'
+import { setSandboxCommandNetworkListsOffered } from '../../services/codeMode/optIn.js'
 import { spawnSync } from 'child_process'
 import {
   closeSync,
@@ -3993,6 +3994,10 @@ async function initialize(
 
       const settings = getSettings_DEPRECATED()
       const runtimeConfig = convertToSandboxRuntimeConfig(settings)
+      const hasNetworkLists =
+        (runtimeConfig.network?.allowedDomains?.length ?? 0) > 0 ||
+        (runtimeConfig.network?.deniedDomains?.length ?? 0) > 0
+      setSandboxCommandNetworkListsOffered(hasNetworkLists)
 
       // Log monitor is automatically enabled for macOS
       await BaseSandboxManager.initialize(runtimeConfig, wrappedCallback)
@@ -4073,6 +4078,7 @@ async function reset(): Promise<void> {
   sandboxDisabledThisSession = false
   initFailureReason = undefined
   lastSandboxAskCallback = undefined
+  setSandboxCommandNetworkListsOffered(false)
 
   // Reset the base sandbox manager
   return BaseSandboxManager.reset()

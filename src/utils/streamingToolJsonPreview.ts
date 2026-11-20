@@ -6,6 +6,7 @@
  * for live display (throttled 100ms, cap 8192).
  */
 
+import { isCodeModeEnabled } from '../services/codeMode/optIn.js'
 import { isEnvTruthy } from './envUtils.js'
 
 /** densable XAb — min ms between REPL code preview flushes */
@@ -31,6 +32,7 @@ export function isReplStreamingPreviewEnabled(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   if (!isEnvTruthy(env.CLAUDE_REPL_VERBOSE)) return false
+  if (isCodeModeEnabled()) return true
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { isReplModeEnabled } =

@@ -854,6 +854,7 @@ export const PROJECT_SCOPE_BLOCKED_ENV_VARS = new Set([
   'CLAUDE_CHROME_CLASSIFIER_FLOOR',
   'CLAUDE_CHROME_PERMISSION_MODE',
   'CLAUDE_CODE_ENABLE_CFC',
+  'CLAUDE_CODE_EXPERIMENTAL_CODE_MODE',
   'CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL',
 ])
 
@@ -909,6 +910,9 @@ export function isProjectScopeBlockedEnvVar(
     case 'CLAUDE_CHROME_PERMISSION_MODE':
       return value !== 'ask'
     case 'CLAUDE_CODE_ENABLE_CFC':
+    case 'CLAUDE_CODE_EXPERIMENTAL_CODE_MODE':
+    case 'ENABLE_BETA_TRACING_DETAILED':
+    case 'OTEL_LOG_RAW_API_BODIES':
       return !isFalsyString(value)
     case 'CLAUDE_CODE_MODEL_CATALOG':
       return String(value).trim().toLowerCase() !== 'off'

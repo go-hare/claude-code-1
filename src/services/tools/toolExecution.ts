@@ -5115,6 +5115,22 @@ async function checkPermissionsAndCallTool(
         (isNonHumanAllowOverride
           ? permissionDecision
           : permissionPipelineResult)
+      const isAutoModeClassifiedAllow =
+        permissionDecision.behavior === 'allow' &&
+        permissionDecision.decisionReason?.type === 'classifier' &&
+        permissionDecision.decisionReason.classifier === 'auto-mode' &&
+        permissionDecision.decisionReason.noVerdict !== true
+      const isAutoModeScriptCheckDeferred =
+        permissionDecision.behavior === 'allow' &&
+        ((permissionDecision.decisionReason?.type === 'other' &&
+          permissionDecision.decisionReason.reason ===
+            'deferred_repl_script_check') ||
+          (permissionDecision.decisionReason?.type === 'mode' &&
+            (
+              permissionDecision.decisionReason as {
+                scriptCheckDeferred?: boolean
+              }
+            ).scriptCheckDeferred === true))
       const invokeToolCall = () =>
         tool.call(
           callInput,
@@ -5122,6 +5138,10 @@ async function checkPermissionsAndCallTool(
             ...callCtx,
             toolUseId: toolUseID,
             userModified: permissionDecision.userModified ?? false,
+            autoModeClassified: isAutoModeClassifiedAllow ? true : undefined,
+            autoModeScriptCheckDeferred: isAutoModeScriptCheckDeferred
+              ? true
+              : undefined,
             ...(effectivePermissionPipelineResult !== undefined && {
               permissionPipelineResult: effectivePermissionPipelineResult,
               permissionPhase: {

@@ -1,5 +1,9 @@
 import { getSessionId } from '../../bootstrap/state.js'
 import { clearCachedModelMaxTokensCeilings } from '../../services/api/withRetry.js'
+import {
+  codeModeSandboxHoldoffNotice,
+  isCodeModeHeldOffBySandbox,
+} from '../../services/codeMode/optIn.js'
 import type { LocalCommandCall } from '../../types/command.js'
 import { logError } from '../../utils/log.js'
 import {
@@ -27,5 +31,8 @@ export const call: LocalCommandCall = async (_, context) => {
     sessionId,
     onlyIfEmpty: !forceClose,
   }).catch(logError)
-  return { type: 'text', value: '' }
+  return {
+    type: 'text',
+    value: isCodeModeHeldOffBySandbox() ? codeModeSandboxHoldoffNotice() : '',
+  }
 }

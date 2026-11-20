@@ -20,6 +20,7 @@ import {
   getParentSessionId as getParentSessionIdFromState,
 } from '../../bootstrap/state.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
+import { codeModeTelemetryFields } from '../codeMode/optIn.js'
 import { isOfficialMcpUrl } from '../mcp/officialRegistry.js'
 import { isClaudeAISubscriber, getSubscriptionType } from '../../utils/auth.js'
 import { getRepoRemoteHash } from '../../utils/git.js'
@@ -979,6 +980,7 @@ export function to1PEventFormat(
       ...(kairosActive && { is_assistant_mode: true }),
       ...(skillMode && { skill_mode: skillMode }),
       ...(observerMode && { observer_mode: observerMode }),
+      ...codeModeTelemetryFields(),
       ...additionalMetadata,
     },
   }

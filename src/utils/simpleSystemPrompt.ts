@@ -12,6 +12,7 @@
  * reh is the velvet_cascade / simple_system_prompt model list (injected).
  */
 
+import { isCodeModeEnabled } from '../services/codeMode/optIn.js'
 import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 import {
   isBasaltCoveEnabled,
@@ -286,7 +287,8 @@ export function buildLeanSimpleSystemPrompt(input: {
   // Official ieu(..., "lean") harness bullet for system-reminder tags.
   const systemReminderLine =
     '`<system-reminder>` tags in messages and tool results are injected by the harness, not the user.'
-  const codeModeMcpLine = input.codeModeActive
+  const codeModeActive = input.codeModeActive ?? isCodeModeEnabled()
+  const codeModeMcpLine = codeModeActive
     ? `\n - ${CODE_MODE_STATIC_MCP_GUIDANCE}`
     : ''
 
@@ -329,7 +331,7 @@ export function getLeanActionCautionSection(input?: {
  * connecting or when the list of MCP servers changes.
  */
 export const CODE_MODE_STATIC_MCP_GUIDANCE =
-  'MCP tools are callable inside Code Mode scripts once their server is connected. If an MCP server is still connecting, call WaitForMcpServers to wait for it before invoking its tools in a script.'
+  'MCP tools are callable inside Code Mode scripts once their server connects; use searchTools to discover connected MCP tools.'
 
 export function buildCodeModeMcpStatusDelta(opts: {
   pendingServers: readonly string[]
@@ -339,7 +341,7 @@ export function buildCodeModeMcpStatusDelta(opts: {
   const lines: string[] = []
   if (opts.pendingServers.length > 0) {
     lines.push(
-      `MCP servers still connecting: ${opts.pendingServers.join(', ')}. Call WaitForMcpServers if the user's request needs tools from them; once connected, their tools become callable inside REPL scripts.`,
+      `MCP servers still connecting: ${opts.pendingServers.join(', ')}. Once connected, their tools become callable inside Code Mode scripts and discoverable via searchTools.`,
     )
   }
   if (opts.addedServers && opts.addedServers.length > 0) {

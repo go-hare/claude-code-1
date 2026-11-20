@@ -20,7 +20,11 @@ import { createStreamlinedTransformer } from 'src/utils/streamlinedTransform.js'
 import { installStreamJsonStdoutGuard } from 'src/utils/streamJsonStdoutGuard.js'
 import type { ToolPermissionContext } from 'src/Tool.js'
 import type { ThinkingConfig } from 'src/utils/thinking.js'
-import { assembleToolPool, filterToolsByDenyRules } from 'src/tools.js'
+import {
+  assembleToolPool,
+  filterToolsByDenyRules,
+  getTools,
+} from 'src/tools.js'
 import uniqBy from 'lodash-es/uniqBy.js'
 import { uniq } from 'src/utils/array.js'
 import { mergeAndFilterTools } from 'src/utils/toolPool.js'
@@ -2769,6 +2773,7 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
     deferredToolUse: loadedDeferredToolUse,
     overdueSessionStartHooks,
     codeModeWaitForNextPrompt,
+    codeModeSwitched,
   } = await loadInitialMessages(setAppState, {
     continue: options.continue,
     teleport: options.teleport,
@@ -2787,6 +2792,16 @@ export async function runHeadless<TState extends HeadlessAppState = AppState>(
         ? (structuredIO as RemoteIO).hydratePrefetch
         : null,
   })
+  // Official 2.1.328: if --continue/--resume switched Code Mode state, rebuild
+  // the built-in tool pool so headless execution uses the updated tool set.
+  if (codeModeSwitched) {
+    const syntheticTool = tools.find(t => t.name === SYNTHETIC_OUTPUT_TOOL_NAME)
+    const rebuilt = getTools(getAppState().toolPermissionContext)
+    tools =
+      syntheticTool && !rebuilt.some(t => t.name === SYNTHETIC_OUTPUT_TOOL_NAME)
+        ? [...rebuilt, syntheticTool]
+        : rebuilt
+  }
   // Official 2.1.328 (#545): skip resuming hook-deferred tool calls when
   // CLAUDE_CODE_DISABLE_DEFERRED_TOOL_RESUME is set.
   const deferredToolUse = isDeferredToolResumeDisabled()
@@ -11708,6 +11723,7 @@ type LoadInitialMessagesResult = {
   deferredToolUse?: HookDeferredToolAttachment
   overdueSessionStartHooks?: OverdueSessionStartHooks
   codeModeWaitForNextPrompt?: boolean
+  codeModeSwitched?: boolean
 }
 
 function applyPrintPlanModeResume<TState extends HeadlessAppState = AppState>(
@@ -11889,6 +11905,7 @@ async function loadInitialMessages<TState extends HeadlessAppState = AppState>(
           sessionId: result.sessionId ?? getSessionId(),
           headless: true,
           withinSession: false,
+          source: 'store',
           messages: result.messages,
         })
         if (continueCodeModePlan.refused) {
@@ -11920,6 +11937,7 @@ async function loadInitialMessages<TState extends HeadlessAppState = AppState>(
           ...(continueCodeModePlan.waitForNextPrompt
             ? { codeModeWaitForNextPrompt: true }
             : {}),
+          ...(continueCodeModePlan.switched ? { codeModeSwitched: true } : {}),
         }
       }
     } catch (error) {
@@ -12304,6 +12322,7 @@ async function loadInitialMessages<TState extends HeadlessAppState = AppState>(
         sessionId: result.sessionId ?? getSessionId(),
         headless: true,
         withinSession: false,
+        source: 'store',
         messages: result.messages,
       })
       if (resumeCodeModePlan.refused) {
@@ -12323,6 +12342,7 @@ async function loadInitialMessages<TState extends HeadlessAppState = AppState>(
         ...(resumeCodeModePlan.waitForNextPrompt
           ? { codeModeWaitForNextPrompt: true }
           : {}),
+        ...(resumeCodeModePlan.switched ? { codeModeSwitched: true } : {}),
       }
     } catch (error) {
       logError(error)

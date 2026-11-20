@@ -17,6 +17,7 @@ import {
 } from '../services/analytics/index.js'
 import { GREP_TOOL_NAME } from '@claude-code/builtin-tools/tools/GrepTool/prompt.js'
 import { isReplModeEnabled } from '@claude-code/builtin-tools/tools/REPLTool/constants.js'
+import { isCodeModeEnabled } from '../services/codeMode/optIn.js'
 import { logForDebugging } from '../utils/debug.js'
 import { hasEmbeddedSearchTools } from '../utils/embeddedTools.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
@@ -415,7 +416,8 @@ export function buildSearchingPastContextSection(autoMemDir: string): string[] {
   // In REPL mode, both Grep and Bash are hidden from direct use — the model
   // calls them from inside REPL scripts, so the grep shell form is what it
   // will write in the script anyway.
-  const embedded = hasEmbeddedSearchTools() || isReplModeEnabled()
+  const embedded =
+    hasEmbeddedSearchTools() || isReplModeEnabled() || isCodeModeEnabled()
   const memSearch = embedded
     ? `grep -rn "<search term>" ${autoMemDir} --include="*.md"`
     : `${GREP_TOOL_NAME} with pattern="<search term>" path="${autoMemDir}" glob="*.md"`

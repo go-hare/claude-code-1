@@ -15,6 +15,7 @@ import { Box, Text, useModalOrTerminalSize, useTerminalSize, useTheme } from '@a
 import { type AppState, useAppState } from '../../state/AppState.js';
 import { getCwd } from '../../utils/cwd.js';
 import { serverCheckDeclined } from '../../services/api/autoModeServerFallbackNotice.js';
+import { codeModeStatusLine, isCodeModeEnabled } from '../../services/codeMode/optIn.js';
 import { getCurrentSessionTitle } from '../../utils/sessionStorage.js';
 import {
   buildAccountProperties,
@@ -121,6 +122,11 @@ function buildSecondarySection({
     ...buildAutoModeServerProperties(permissionMode, {
       serverCheckDeclined: serverCheckDeclined(),
     }),
+    // Official 2.1.328 y5i: show Code Mode status row when applicable.
+    ...(() => {
+      const value = codeModeStatusLine(isCodeModeEnabled());
+      return value === undefined ? [] : [{ label: 'Code Mode', value }];
+    })(),
     // Official 2.1.326 #4: show when provider or env var turns built-in features off.
     ...buildDisabledFeaturesProperties(context.options.commands),
   ];

@@ -1,5 +1,9 @@
 // biome-ignore-all assist/source/organizeImports: ANT-ONLY import markers must not be reordered
-import { useMemo } from 'react'
+import { useMemo, useSyncExternalStore } from 'react'
+import {
+  getCodeModeStateVersion,
+  subscribeCodeModeState,
+} from '../services/codeMode/optIn.js'
 import type { Tools, ToolPermissionContext } from '../Tool.js'
 import { assembleToolPool } from '../tools.js'
 import { mergeAndFilterTools } from '../utils/toolPool.js'
@@ -23,7 +27,13 @@ export function useMergedTools(
 ): Tools {
   let replBridgeEnabled = false
   let replBridgeOutboundOnly = false
+  const codeModeVersion = useSyncExternalStore(
+    subscribeCodeModeState,
+    getCodeModeStateVersion,
+    getCodeModeStateVersion,
+  )
   return useMemo(() => {
+    void codeModeVersion
     // assembleToolPool is the shared function that both REPL and runAgent use.
     // It handles: getTools() + MCP deny-rule filtering + dedup + MCP CLI exclusion.
     const assembled = assembleToolPool(toolPermissionContext, mcpTools)
@@ -39,5 +49,6 @@ export function useMergedTools(
     toolPermissionContext,
     replBridgeEnabled,
     replBridgeOutboundOnly,
+    codeModeVersion,
   ])
 }

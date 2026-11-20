@@ -103,6 +103,7 @@ import type { HeadlessAppState, ToolInputJSONSchema } from './Tool.js';
 import {
   createSyntheticOutputTool,
   isSyntheticOutputToolEnabled,
+  SYNTHETIC_OUTPUT_TOOL_NAME,
 } from '@claude-code/builtin-tools/tools/SyntheticOutputTool/SyntheticOutputTool.js';
 import { getTools } from './tools.js';
 import {
@@ -478,7 +479,17 @@ import {
 } from './utils/plugins/pluginLoader.js';
 import { getAPIProvider } from './utils/model/providers.js';
 import { applyCodeModePlan, planCodeModeFromSession } from './services/codeMode/executor.js';
-import { codeModeWarningNotice, hasBuiltInEvalTool, settleCodeModeOptInAtStartup } from './services/codeMode/optIn.js';
+import {
+  codeModeWarningNotice,
+  doToolsOrSettingsLeaveReplOut,
+  getCodeModeOptInState,
+  hasAcceptedCodeModeCaveats,
+  isCodeModeModelSupported,
+  isCodeModeOptInDialogOpen,
+  markPollEventWiringForPrintRun,
+  markPollEventWiringForTerminalRun,
+  settleCodeModeOptInAtStartup,
+} from './services/codeMode/optIn.js';
 import { migrateChangelogFromConfig } from './utils/releaseNotes.js';
 import { SandboxManager } from './utils/sandbox/sandbox-adapter.js';
 import { fetchSession, prepareApiRequest } from './utils/teleport/api.js';
@@ -2827,6 +2838,50 @@ async function run(): Promise<CommanderCommand> {
       // The later REPL-path maybeActivateProactive() calls are idempotent.
       maybeActivateProactive(options);
 
+      // Official 2.1.328 (`Gsr` / `HXo`): mark poll-event wiring for terminal vs print runs.
+      if (isNonInteractiveSession) {
+        markPollEventWiringForPrintRun();
+      } else {
+        markPollEventWiringForTerminalRun();
+      }
+
+      // Official 2.1.328 (`IAl`): settle Code Mode opt-in BEFORE getTools()
+      // and BEFORE runHeadless() so both interactive and `-p` sessions build
+      // their tool pools with the settled Code Mode state.
+      const startupModelForCodeMode = parseUserSpecifiedModel(options.model ?? getDefaultMainLoopModel());
+      let codeModeDecision = await settleCodeModeOptInAtStartup({
+        isNonInteractive: isNonInteractiveSession,
+        isRemote: remote !== null || teleport !== null,
+        isTeammate: Boolean(storedTeammateOpts?.agentId),
+        isRemoteControl: Boolean(remoteControl || getRemoteControlAtStartup()),
+        isBackground: process.env.CLAUDE_CODE_SESSION_KIND === 'bg',
+        isDemoOrCi: isEnvTruthy(process.env.CI) || isEnvTruthy(process.env.IS_DEMO),
+        hasAgentTeams: isAgentSwarmsEnabled(),
+        isFirstPartyProvider: getAPIProvider() === 'firstParty',
+        hasUnsupportedCredentials: Boolean(
+          process.env.ANTHROPIC_AUTH_TOKEN ||
+            process.env.ANTHROPIC_CUSTOM_HEADERS ||
+            getInitialSettings()?.apiKeyHelper,
+        ),
+        isOtelEnabled:
+          isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_TELEMETRY) ||
+          isEnvTruthy(process.env.ENABLE_BETA_TRACING_DETAILED),
+        isModelSupported: isCodeModeModelSupported(startupModelForCodeMode),
+        hasFeatureFlags: !(
+          Boolean(process.env.DISABLE_TELEMETRY) ||
+          isEnvTruthy(process.env.DO_NOT_TRACK) ||
+          isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC) ||
+          isEnvTruthy(process.env.CLAUDE_CODE_DISABLE_FEATURE_FLAGS) ||
+          isEnvTruthy(process.env.DISABLE_GROWTHBOOK)
+        ),
+        caveatsAccepted: isNonInteractiveSession ? undefined : hasAcceptedCodeModeCaveats(),
+        toolsLeaveReplOut: doToolsOrSettingsLeaveReplOut({
+          restricted: toolPermissionContext.restricted,
+          disallowedTools: options.disallowedTools,
+          baseTools: Array.isArray(options.tools) ? options.tools : undefined,
+        }),
+      });
+
       let tools = getTools(toolPermissionContext);
 
       // Apply coordinator mode tool filtering for headless path
@@ -2836,6 +2891,19 @@ async function run(): Promise<CommanderCommand> {
         const { applyCoordinatorToolFilter } = await import('./utils/toolPool.js');
         tools = applyCoordinatorToolFilter(tools);
       }
+
+      const rebuildToolsForCodeModeSwitch = async (): Promise<void> => {
+        const syntheticTool = tools.find(t => t.name === SYNTHETIC_OUTPUT_TOOL_NAME);
+        let rebuilt = getTools(toolPermissionContext);
+        if (feature('COORDINATOR_MODE') && isCoordinatorModeEnv()) {
+          const { applyCoordinatorToolFilter } = await import('./utils/toolPool.js');
+          rebuilt = applyCoordinatorToolFilter(rebuilt);
+        }
+        tools =
+          syntheticTool && !rebuilt.some(t => t.name === SYNTHETIC_OUTPUT_TOOL_NAME)
+            ? [...rebuilt, syntheticTool]
+            : rebuilt;
+      };
 
       profileCheckpoint('action_tools_loaded');
 
@@ -3458,6 +3526,19 @@ async function run(): Promise<CommanderCommand> {
             }
             seenTrustedPaths.add(untrusted.path);
           }
+        }
+
+        // Official 2.1.328 (`CodeModeOptIn`): show caveats confirmation dialog
+        // when Code Mode opt-in was requested without prior caveat acceptance.
+        if (isCodeModeOptInDialogOpen()) {
+          const { CodeModeOptInDialog } = await import('./components/CodeModeOptInDialog.js');
+          const outcome = await showSetupDialog<'none' | 'restart_into_mode' | 'restart_without_mode'>(root, done => (
+            <CodeModeOptInDialog onDone={done} />
+          ));
+          if (outcome === 'restart_into_mode') {
+            await rebuildToolsForCodeModeSwitch();
+          }
+          codeModeDecision = getCodeModeOptInState();
         }
 
         // Now that trust is established and GrowthBook has auth headers,
@@ -4370,29 +4451,11 @@ async function run(): Promise<CommanderCommand> {
         color?: 'warning';
         priority: 'high';
       }> = [];
-      // Official 2.1.323 #1964: settle Code Mode opt-in for interactive CLI startup.
-      const codeModeDecision = await settleCodeModeOptInAtStartup({
-        isNonInteractive: isNonInteractiveSession,
-        isRemote: remote !== null || teleport !== undefined,
-        isTeammate: Boolean(storedTeammateOpts?.agentId),
-        isRemoteControl: Boolean(remoteControl || getRemoteControlAtStartup()),
-        isBackground: process.env.CLAUDE_CODE_SESSION_KIND === 'bg',
-        isDemoOrCi: isEnvTruthy(process.env.CI) || isEnvTruthy(process.env.IS_DEMO),
-        hasAgentTeams: isAgentSwarmsEnabled(),
-        isFirstPartyProvider: getAPIProvider() === 'firstParty',
-        isOtelEnabled:
-          isEnvTruthy(process.env.CLAUDE_CODE_ENABLE_TELEMETRY) ||
-          isEnvTruthy(process.env.ENABLE_BETA_TRACING_DETAILED),
-        toolsLeaveReplOut:
-          Boolean(
-            toolPermissionContext.restricted ||
-              options.tools !== undefined ||
-              (options.disallowedTools && options.disallowedTools.length > 0),
-          ) && !hasBuiltInEvalTool(tools),
-      });
+      // Official 2.1.328: surface Code Mode refusal once using the shared
+      // `'code-mode-status'` key so REPL.tsx does not emit a duplicate toast.
       if (codeModeDecision.state === 'refused') {
         initialNotifications.push({
-          key: 'code-mode-refused-notice',
+          key: 'code-mode-status',
           text: codeModeWarningNotice(codeModeDecision.why),
           color: 'warning',
           priority: 'high',
@@ -4836,6 +4899,9 @@ async function run(): Promise<CommanderCommand> {
             return await exitWithError(root, continueCodeModePlan.refused);
           }
           applyCodeModePlan(continueCodeModePlan);
+          if (continueCodeModePlan.switched) {
+            await rebuildToolsForCodeModeSwitch();
+          }
           const skipAutoResumeForCodeModeContinue = continueCodeModePlan.waitForNextPrompt === true;
 
           const loaded = await processResumedConversation(
@@ -5582,6 +5648,9 @@ async function run(): Promise<CommanderCommand> {
                     return await exitWithError(root, fileResumeCodeModePlan.refused);
                   }
                   applyCodeModePlan(fileResumeCodeModePlan);
+                  if (fileResumeCodeModePlan.switched) {
+                    await rebuildToolsForCodeModeSwitch();
+                  }
                   const skipAutoResumeForFileCodeMode = fileResumeCodeModePlan.waitForNextPrompt === true;
 
                   processedResume = await processResumedConversation(
@@ -5683,6 +5752,9 @@ async function run(): Promise<CommanderCommand> {
               return await exitWithError(root, resumeCodeModePlan.refused);
             }
             applyCodeModePlan(resumeCodeModePlan);
+            if (resumeCodeModePlan.switched) {
+              await rebuildToolsForCodeModeSwitch();
+            }
             const skipAutoResumeForCodeMode = resumeCodeModePlan.waitForNextPrompt === true;
 
             const fullPath = matchedLog?.fullPath ?? result.fullPath;

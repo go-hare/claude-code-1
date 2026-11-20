@@ -1,4 +1,13 @@
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
+import {
+  buildPollEventEnvelope,
+  mintPollEventNonce,
+  POLL_CHUNK_MAX_BYTES,
+  POLL_CHUNK_MAX_EVENTS,
+  POLL_EVENT_KIND_REPL_EVAL,
+  POLL_EVENT_KIND_REPL_STATUS,
+  stampPollEventNonce,
+} from '@claude-code/builtin-tools/tools/PollTool/constants.js'
 import type { Permutations } from 'src/types/utils.js'
 import { addToHistory } from '../history.js'
 import {
@@ -23,8 +32,13 @@ import type {
  * `QueuedCommand` so picked @-mention titles/names from claude.ai / desktop
  * (tagged by `inboundMessages.ts`) propagate intact through the command queue.
  */
-export type QueuedCommand = BaseQueuedCommand & {
+export type QueuedCommand = Omit<BaseQueuedCommand, 'pollEvent'> & {
   textNotTyped?: boolean
+  pollEvent?: NonNullable<BaseQueuedCommand['pollEvent']> & {
+    group?: string
+    startsTurn?: boolean
+    settleDelivered?: () => void
+  }
 }
 import type { PastedContent } from './config.js'
 import { stripCrossSessionHopChain } from './crossSessionMessage.js'
@@ -390,6 +404,8 @@ export class MessageQueueInstance {
   private readonly foldInFlight = new Set<string>()
   /** densable `qe` — mid-turn fold suspended. `Ft` is `qe` (gold also ORs `Mr()`). */
   private midTurnFoldSuspended = false
+  /** Official 2.1.328 — active Poll tool calls keyed by agentId (or '__main__'). */
+  private readonly activePollCalls = new Set<string>()
 
   /**
    * Subscribe to command queue changes.
@@ -900,6 +916,7 @@ export class MessageQueueInstance {
     this.cancelPendingAcked.clear()
     this.foldInFlight.clear()
     this.midTurnFoldSuspended = false
+    this.activePollCalls.clear()
     this.commandsConsumed.clear()
     this.commandsDiscarded.clear()
   }
@@ -1126,6 +1143,91 @@ export class MessageQueueInstance {
         !takenSet.has(cmd) &&
         (agentId === undefined || cmd.agentId === agentId),
     ).length
+  }
+
+  /**
+   * Official 2.1.328 `tryBeginPollCall` — prevents duplicate concurrent Poll
+   * calls per thread/agent.
+   */
+  tryBeginPollCall(agentId?: string): boolean {
+    const key = agentId ?? '__main__'
+    if (this.activePollCalls.has(key)) {
+      return false
+    }
+    this.activePollCalls.add(key)
+    return true
+  }
+
+  /** Official 2.1.328 `endPollCall` — releases the active Poll call guard. */
+  endPollCall(agentId?: string): void {
+    const key = agentId ?? '__main__'
+    this.activePollCalls.delete(key)
+  }
+
+  /**
+   * Official 2.1.328 `drainPollEventChunk` (`Iir`) — drains up to
+   * `POLL_CHUNK_MAX_EVENTS` (20) events / `POLL_CHUNK_MAX_BYTES` (32KB),
+   * keeping consecutive events with the same `pollEvent.group` together, and
+   * returns the remaining wake poll-event count for the same thread/agent.
+   */
+  drainPollEventChunk(agentId?: string): {
+    commands: QueuedCommand[]
+    remainingWakeCount: number
+  } {
+    const matchesTarget = (cmd: QueuedCommand): boolean =>
+      cmd.mode === 'poll-event' &&
+      (agentId === undefined
+        ? isMainThreadQueuedCommand(cmd)
+        : cmd.agentId === agentId)
+
+    const matching = this.commandQueue.filter(matchesTarget)
+    if (matching.length === 0) {
+      return { commands: [], remainingWakeCount: 0 }
+    }
+
+    const chunk: QueuedCommand[] = []
+    let bytes = 0
+    for (let i = 0; i < matching.length; ) {
+      const groupId = matching[i]!.pollEvent?.group
+      let end = i + 1
+      while (
+        groupId !== undefined &&
+        end < matching.length &&
+        matching[end]!.pollEvent?.group === groupId
+      ) {
+        end++
+      }
+      const group = matching.slice(i, end)
+      const groupBytes = group.reduce((sum, cmd) => {
+        const envBytes = Buffer.byteLength(
+          cmd.pollEvent?.envelope ?? '',
+          'utf8',
+        )
+        return sum + envBytes
+      }, 0)
+      if (
+        chunk.length > 0 &&
+        (chunk.length + group.length > POLL_CHUNK_MAX_EVENTS ||
+          bytes + groupBytes > POLL_CHUNK_MAX_BYTES)
+      ) {
+        break
+      }
+      chunk.push(...group)
+      bytes += groupBytes
+      i = end
+    }
+
+    const takenSet = new Set(chunk)
+    const remaining = this.commandQueue.filter(cmd => !takenSet.has(cmd))
+    this.commandQueue.length = 0
+    this.commandQueue.push(...remaining)
+    this.notifySubscribers()
+
+    const remainingWakeCount = this.commandQueue.filter(
+      cmd => matchesTarget(cmd) && cmd.pollEvent?.wake === true,
+    ).length
+
+    return { commands: chunk, remainingWakeCount }
   }
 }
 
@@ -1791,6 +1893,116 @@ export function isQueuedCommandEditable(cmd: QueuedCommand): boolean {
     !cmd.isMeta &&
     isHumanLikeOrigin(cmd.origin)
   )
+}
+
+// ============================================================================
+// Official 2.1.328 Poll call lifecycle & poll-event enqueue helpers
+// ============================================================================
+
+export function tryBeginPollCall(agentId?: string): boolean {
+  return activeQueue.tryBeginPollCall(agentId)
+}
+
+export function endPollCall(agentId?: string): void {
+  activeQueue.endPollCall(agentId)
+}
+
+export function drainPollEventChunk(agentId?: string): {
+  commands: QueuedCommand[]
+  remainingWakeCount: number
+} {
+  return activeQueue.drainPollEventChunk(agentId)
+}
+
+export function enqueueReplEvalPollEvent(opts: {
+  evalId: number
+  content: string
+  isError?: boolean
+  ms?: number
+  agentId?: string
+  toolUseId?: string
+  startsTurn?: boolean
+  wake?: boolean
+  media?: unknown[]
+}): void {
+  const attrs: Record<string, string> = {
+    eval: String(opts.evalId),
+  }
+  if (opts.ms !== undefined) {
+    attrs.ms = String(Math.max(0, Math.round(opts.ms)))
+  }
+  if (opts.isError) {
+    attrs.status = 'error'
+  }
+  const rawEnvelope = buildPollEventEnvelope({
+    kind: POLL_EVENT_KIND_REPL_EVAL,
+    at: new Date().toISOString(),
+    content: '',
+    attributes: attrs,
+    children: [
+      {
+        tag: opts.isError ? 'error' : 'result',
+        text: opts.content,
+      },
+    ],
+  })
+  const nonce = mintPollEventNonce()
+  const envelope = stampPollEventNonce(rawEnvelope, nonce, 'element')
+  const cmd: QueuedCommand = withMainThreadAgentId({
+    value: envelope,
+    mode: 'poll-event',
+    priority: 'now',
+    ...(opts.agentId !== undefined && {
+      agentId: opts.agentId as QueuedCommand['agentId'],
+    }),
+    pollEvent: {
+      kind: POLL_EVENT_KIND_REPL_EVAL,
+      envelope,
+      wake: opts.wake ?? true,
+      ...(opts.startsTurn !== undefined && { startsTurn: opts.startsTurn }),
+      ...(opts.media !== undefined && { media: opts.media }),
+    },
+  })
+  activeQueue.enqueue(cmd)
+}
+
+export function enqueueReplStatusPollEvent(opts: {
+  ledger: ReadonlyArray<{
+    id: number
+    state: string
+    runningMs: number
+    snippet: string
+  }>
+  agentId?: string
+}): void {
+  const lines = opts.ledger.map(
+    entry =>
+      `#${entry.id} (${entry.state}, ${Math.round(entry.runningMs / 1000)}s): ${entry.snippet}`,
+  )
+  const rawEnvelope = buildPollEventEnvelope({
+    kind: POLL_EVENT_KIND_REPL_STATUS,
+    at: new Date().toISOString(),
+    content: lines.join('\n'),
+    attributes: {
+      pending: String(opts.ledger.length),
+    },
+  })
+  const nonce = mintPollEventNonce()
+  const envelope = stampPollEventNonce(rawEnvelope, nonce, 'element')
+  const cmd: QueuedCommand = withMainThreadAgentId({
+    value: envelope,
+    mode: 'poll-event',
+    priority: 'now',
+    ...(opts.agentId !== undefined && {
+      agentId: opts.agentId as QueuedCommand['agentId'],
+    }),
+    pollEvent: {
+      kind: POLL_EVENT_KIND_REPL_STATUS,
+      envelope,
+      wake: false,
+    },
+  })
+  activeQueue.enqueue(cmd)
 }
 
 /** densable `tp && uf` — main-thread editable, for T7e / zZe. */

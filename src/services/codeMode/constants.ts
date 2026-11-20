@@ -34,24 +34,24 @@ export const REPL_MAX_REFUSALS_WHEN_OVER = 20
 export const REPL_POST_SCRIPT_PAUSE_AUTO_MS = 0
 
 /**
- * Official `JOe` (`CODE_MODE_ONLY_TOOLS`): core primitive tools hidden from direct
+ * Official `FFe` (`CODE_MODE_ONLY_TOOLS`): core primitive tools hidden from direct
  * model tool-calling when Code Mode is active (invoked via JS in REPL instead).
  */
 export const CODE_MODE_ONLY_TOOLS: ReadonlySet<string> = new Set([
   'Read',
-  'Write',
-  'Edit',
   'Glob',
   'Grep',
   'Bash',
+  'PowerShell',
+  'NotebookEdit',
 ])
 
 /**
- * Official `Djs` (`REPL_PRIMITIVE_TOOL_NAMES`): full set of built-in primitive
+ * Official `Hfi` (`REPL_PRIMITIVE_TOOL_NAMES`): full set of built-in primitive
  * tools exposed as JS functions inside the Code Mode REPL context.
  */
 export const REPL_PRIMITIVE_TOOL_NAMES: ReadonlySet<string> = new Set([
   ...CODE_MODE_ONLY_TOOLS,
-  'NotebookEdit',
-  'Agent',
+  'Write',
+  'Edit',
 ])

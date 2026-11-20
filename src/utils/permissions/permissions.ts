@@ -1,5 +1,6 @@
 import { feature } from 'bun:bundle'
 import { APIUserAbortError } from '@anthropic-ai/sdk'
+import { isSandboxAutoAllowSuspendedInLayers } from '../../engine/hostPermissionLayers.js'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import { shouldHoldConnectorApprovalWhilePluginsLoading } from '../../services/mcp/config.js'
 import {
@@ -1105,6 +1106,25 @@ export function getAutoModeDenialAllowRuleToolName(
     return toolName
   }
   return toolName
+}
+
+/**
+ * Official 2.1.328 (`Z` / `e$t`): returns true when sandbox auto-allow is
+ * suspended either directly on `toolPermissionContext` or via an active
+ * `sandbox_auto_allow_suspended` entry in `context.permissionLayers`.
+ */
+export function isSandboxAutoAllowSuspended(
+  toolPermissionContext: ToolPermissionContext,
+  context?: Pick<ToolUseContext, 'permissionLayers'>,
+  opts?: { ignoreAllowOnly?: boolean },
+): boolean {
+  if (
+    (toolPermissionContext as { sandboxAutoAllowSuspended?: boolean })
+      .sandboxAutoAllowSuspended === true
+  ) {
+    return true
+  }
+  return isSandboxAutoAllowSuspendedInLayers(context?.permissionLayers, opts)
 }
 
 /**
@@ -2663,11 +2683,13 @@ const evaluateToolPermission: CanUseToolFn = async (
       )
       // gold NHo br=xe==="plan"&&!hn — skip acceptEdits when effective plan
       // OR hn (E1t server-held classifier ask).
+      const isReplOrEvalTool =
+        tool.name === REPL_TOOL_NAME || tool.name === 'Eval'
       const skipAcceptEditsFastPathForPlan =
         effectiveModeForAuto === 'plan' || isServerHeldClassifierAsk(result)
       if (
         result.behavior === 'ask' &&
-        tool.name !== REPL_TOOL_NAME &&
+        !isReplOrEvalTool &&
         !classifierDecisionModule!.isAutoModeFastPathExcludedTool(tool.name) &&
         !editClassificationGated &&
         !skipAcceptEditsFastPathForPlan &&
@@ -2850,6 +2872,73 @@ const evaluateToolPermission: CanUseToolFn = async (
           behavior: 'allow',
           updatedInput: result.updatedInput ?? input,
           decisionReason: { type: 'mode', mode: 'auto' },
+        }
+      }
+
+      // Official 2.1.328 Code Mode auto-mode inner-call & deferred-script handling:
+      // 1) replScriptAtLimit: script hit the auto-mode denial limit — do NOT ride
+      //    the outer verdict; fall back to normal ask (or dontAsk deny).
+      if (context.replScriptAtLimit === true) {
+        logForDebugging(
+          `Skipping auto mode classifier for ${tool.name}: outer REPL script is at denial limit (replScriptAtLimit), falling back to prompt`,
+        )
+        if (effectiveModeForAuto === 'dontAsk') {
+          return {
+            behavior: 'deny',
+            decisionReason: { type: 'mode', mode: 'dontAsk' },
+            message: DONT_ASK_REJECT_MESSAGE(tool.name),
+          }
+        }
+        return result
+      }
+
+      // 2) replScriptInner: inner tool call from a classified/allowed Code Mode
+      //    script in auto mode rides the outer script verdict without re-invoking
+      //    the classifier, while still respecting explicit deny/ask rules,
+      //    hookAskFloor, sandbox_auto_allow_suspended, and safety circuit breakers.
+      if (
+        context.replScriptInner === true &&
+        result.behavior === 'ask' &&
+        effectiveModeForAuto === 'auto' &&
+        context.hookAskFloor !== true &&
+        !isServerHeldClassifierAsk(result) &&
+        !hasClassifierRoutedSafetyCheck(result.decisionReason)
+      ) {
+        if (!shouldHoldConsecutiveDenials(context)) {
+          persistDenialState(context, recordSuccess(denialState))
+        }
+        logForDebugging(
+          `Skipping auto mode classifier for ${tool.name}: riding outer REPL script verdict (replScriptInner)`,
+        )
+        return {
+          behavior: 'allow',
+          updatedInput: result.updatedInput ?? input,
+          decisionReason: { type: 'mode', mode: 'auto' },
+        }
+      }
+
+      // 3) Outer REPL/Eval in auto mode: when replScriptCheckNow !== true,
+      //    defer script classification until the first inner tool call (executor
+      //    registers a deferred check and flushes with replScriptCheckNow: true).
+      if (
+        isReplOrEvalTool &&
+        context.replScriptCheckNow !== true &&
+        result.behavior === 'ask' &&
+        effectiveModeForAuto === 'auto' &&
+        context.hookAskFloor !== true &&
+        !isServerHeldClassifierAsk(result) &&
+        !hasClassifierRoutedSafetyCheck(result.decisionReason)
+      ) {
+        logForDebugging(
+          `Deferring auto mode classifier check for outer ${tool.name} script`,
+        )
+        return {
+          behavior: 'allow',
+          updatedInput: result.updatedInput ?? input,
+          decisionReason: {
+            type: 'other',
+            reason: 'deferred_repl_script_check',
+          },
         }
       }
 
@@ -3652,6 +3741,7 @@ export async function checkRuleBasedPermissions(
   if (askRule) {
     const canSandboxAutoAllow =
       tool.name === BASH_TOOL_NAME &&
+      !isSandboxAutoAllowSuspended(toolPermissionContext, context) &&
       SandboxManager.isSandboxingEnabled() &&
       SandboxManager.isAutoAllowBashIfSandboxedEnabled() &&
       shouldUseSandbox(input)
@@ -3840,6 +3930,7 @@ async function hasPermissionsToUseToolInner(
     // commands, dangerouslyDisableSandbox) still need to respect the ask rule.
     const canSandboxAutoAllow =
       tool.name === BASH_TOOL_NAME &&
+      !isSandboxAutoAllowSuspended(toolPermissionContext, context) &&
       SandboxManager.isSandboxingEnabled() &&
       SandboxManager.isAutoAllowBashIfSandboxedEnabled() &&
       shouldUseSandbox(input)

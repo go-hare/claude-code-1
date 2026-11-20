@@ -21,6 +21,7 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from '../../services/analytics/index.js'
+import { clearCodeModeVmSession } from '../../services/codeMode/executor.js'
 import type { AppState } from '../../state/AppState.js'
 import { isInProcessTeammateTask } from '../../tasks/InProcessTeammateTask/types.js'
 import {
@@ -338,6 +339,8 @@ export async function clearConversation({
   // tasks (invoked skills, pending permission callbacks, dump state, cache-break
   // tracking) is retained so those agents keep functioning.
   clearSessionCaches(preservedAgentIds)
+  // Official 2.1.328: clear Code Mode VM session state on /clear.
+  clearCodeModeVmSession()
   // Official 2.1.325 #1929: reset unchanged-image re-read tracking on /clear.
   resetImageRereadState()
 

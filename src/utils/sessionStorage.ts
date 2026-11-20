@@ -1350,6 +1350,8 @@ class Project {
   currentSessionAgentSetting: string | undefined
   currentSessionMode: 'coordinator' | 'normal' | undefined
   currentSessionModel: string | undefined
+  /** Official 2.1.328: last-wins `type:"repl-mode"` Code Mode session state. */
+  currentSessionCodeMode: boolean | undefined
   /** densable `currentSessionDevModsFolder` — consented mods folder (`iLr`). */
   currentSessionDevModsFolder: string | undefined
   // Tri-state: undefined = never touched (don't write), null = exited worktree,
@@ -1981,6 +1983,13 @@ class Project {
         sessionId,
       })
     }
+    if (this.currentSessionCodeMode !== undefined) {
+      entries.push({
+        type: 'repl-mode',
+        replMode: this.currentSessionCodeMode,
+        sessionId,
+      } as unknown as Entry)
+    }
     if (this.currentSessionModel) {
       entries.push({
         type: 'session-model',
@@ -2449,6 +2458,9 @@ class Project {
       void this.enqueueWrite(sessionFile, entry)
     } else if (entry.type === 'mode') {
       // Mode entries can always be appended
+      void this.enqueueWrite(sessionFile, entry)
+    } else if ((entry as { type?: string }).type === 'repl-mode') {
+      // Official 2.1.328: repl-mode entries can always be appended
       void this.enqueueWrite(sessionFile, entry)
     } else if (entry.type === 'worktree-state') {
       void this.enqueueWrite(sessionFile, entry)
@@ -5934,6 +5946,7 @@ export async function loadTranscriptFromFile(
       leafUuids,
       contentReplacements,
       worktreeStates,
+      replModes,
       devModsFolders,
       endedByModelSessions,
       relocatedCwds,
@@ -6015,6 +6028,9 @@ export async function loadTranscriptFromFile(
       worktreeSession: worktreeStates.has(sessionId)
         ? worktreeStates.get(sessionId)
         : undefined,
+      ...(replModes.has(sessionId)
+        ? { replMode: replModes.get(sessionId) }
+        : {}),
       devModsFolder: devModsFolders.get(sessionId),
       // densable OGe({}, sessionId ? endedSet.has(sessionId) : false)
       endedByModel: endedByModelSessions.has(sessionId),
@@ -6869,6 +6885,8 @@ export function restoreSessionMetadata(meta: {
   agentColor?: string
   agentSetting?: string
   mode?: 'coordinator' | 'normal'
+  /** Official 2.1.328: restored Code Mode (`repl-mode`) session flag. */
+  replMode?: boolean
   sessionModel?: string
   worktreeSession?:
     | (PersistedWorktreeSession & { extensionRoot?: string })
@@ -6914,6 +6932,8 @@ export function restoreSessionMetadata(meta: {
   if (meta.agentColor) project.currentSessionAgentColor = meta.agentColor
   if (meta.agentSetting) project.currentSessionAgentSetting = meta.agentSetting
   if (meta.mode) project.currentSessionMode = meta.mode
+  if (meta.replMode !== undefined)
+    project.currentSessionCodeMode = meta.replMode
   if (meta.sessionModel) project.currentSessionModel = meta.sessionModel
   if (meta.worktreeSession !== undefined)
     project.currentSessionWorktree = meta.worktreeSession
@@ -6975,6 +6995,7 @@ export function clearSessionMetadata(
   project.currentSessionLastPrompt = undefined
   project.currentSessionAgentSetting = undefined
   project.currentSessionMode = undefined
+  project.currentSessionCodeMode = undefined
   project.currentSessionModel = undefined
   project.currentSessionWorktree = undefined
   project.currentSessionDevModsFolder = undefined
@@ -7540,6 +7561,40 @@ export function saveMode(mode: 'coordinator' | 'normal'): void {
 }
 
 /**
+ * Official 2.1.328 (`y`/`Gj`/`fJe` repl-mode persistence): record the session's
+ * Code Mode (`replMode`) flag in project state and persist a `type: 'repl-mode'`
+ * entry to the active session transcript when available.
+ */
+export function saveReplMode(
+  replMode: boolean,
+  sessionId?: UUID,
+  opts?: { typedEvents?: boolean },
+): void {
+  const project = getProject()
+  const changed = project.currentSessionCodeMode !== replMode
+  project.currentSessionCodeMode = replMode
+  if (!changed) return
+  const sid = sessionId ?? (getSessionId() as UUID | undefined)
+  if (sid) {
+    void project
+      .appendEntry(
+        {
+          type: 'repl-mode',
+          replMode,
+          ...(opts?.typedEvents ? { typedEvents: true } : {}),
+          sessionId: sid,
+        } as unknown as Entry,
+        sid,
+      )
+      .catch(() => {})
+  }
+}
+
+export function getCurrentSessionReplMode(): boolean | undefined {
+  return getProject().currentSessionCodeMode
+}
+
+/**
  * Record the model the user selected via /model so it survives resume.
  */
 export function saveSessionModel(model: string | null): void {
@@ -7971,6 +8026,7 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
       prRepositories,
       modes,
       worktreeStates,
+      replModes,
       devModsFolders,
       goals,
       fileHistorySnapshots,
@@ -8056,6 +8112,11 @@ export async function loadFullLog(log: LogOption): Promise<LogOption> {
       agentColor: sessionId ? agentColors.get(sessionId) : log.agentColor,
       agentSetting: sessionId ? agentSettings.get(sessionId) : log.agentSetting,
       mode: sessionId ? (modes.get(sessionId) as LogOption['mode']) : log.mode,
+      ...(sessionId && replModes.has(sessionId)
+        ? { replMode: replModes.get(sessionId) }
+        : (log as LogOption & { replMode?: boolean }).replMode !== undefined
+          ? { replMode: (log as LogOption & { replMode?: boolean }).replMode }
+          : {}),
       worktreeSession:
         sessionId && worktreeStates.has(sessionId)
           ? worktreeStates.get(sessionId)
@@ -8770,6 +8831,7 @@ export async function loadTranscriptFile(
   prUrls: Map<UUID, string>
   prRepositories: Map<UUID, string>
   modes: Map<UUID, string>
+  replModes: Map<UUID, boolean>
   worktreeStates: Map<UUID, PersistedWorktreeSession | null>
   /** densable currentSessionDevModsFolder last-wins. */
   devModsFolders: Map<UUID, string>
@@ -8817,6 +8879,7 @@ export async function loadTranscriptFile(
   const prUrls = new Map<UUID, string>()
   const prRepositories = new Map<UUID, string>()
   const modes = new Map<UUID, string>()
+  const replModes = new Map<UUID, boolean>()
   const worktreeStates = new Map<UUID, PersistedWorktreeSession | null>()
   const devModsFolders = new Map<UUID, string>()
   const goals = new Map<UUID, GoalState>()
@@ -9061,6 +9124,18 @@ export async function loadTranscriptFile(
           agentSettings.set(entry.sessionId, entry.agentSetting)
         } else if (entry.type === 'mode' && entry.sessionId) {
           modes.set(entry.sessionId, entry.mode)
+        } else if (
+          (entry as { type?: string }).type === 'repl-mode' &&
+          'sessionId' in entry &&
+          typeof (entry as unknown as { sessionId?: unknown }).sessionId ===
+            'string' &&
+          typeof (entry as unknown as { replMode?: unknown }).replMode ===
+            'boolean'
+        ) {
+          replModes.set(
+            (entry as unknown as { sessionId: UUID }).sessionId,
+            (entry as unknown as { replMode: boolean }).replMode,
+          )
         } else if (entry.type === 'worktree-state' && entry.sessionId) {
           worktreeStates.set(entry.sessionId, entry.worktreeSession)
         } else if (entry.type === 'dev-mods' && entry.sessionId) {
@@ -9241,6 +9316,18 @@ export async function loadTranscriptFile(
           agentSettings.set(entry.sessionId, entry.agentSetting)
         } else if (entry.type === 'mode' && entry.sessionId) {
           modes.set(entry.sessionId, entry.mode)
+        } else if (
+          (entry as { type?: string }).type === 'repl-mode' &&
+          'sessionId' in entry &&
+          typeof (entry as unknown as { sessionId?: unknown }).sessionId ===
+            'string' &&
+          typeof (entry as unknown as { replMode?: unknown }).replMode ===
+            'boolean'
+        ) {
+          replModes.set(
+            (entry as unknown as { sessionId: UUID }).sessionId,
+            (entry as unknown as { replMode: boolean }).replMode,
+          )
         } else if (entry.type === 'worktree-state' && entry.sessionId) {
           worktreeStates.set(entry.sessionId, entry.worktreeSession)
         } else if (entry.type === 'dev-mods' && entry.sessionId) {
@@ -9467,6 +9554,7 @@ export async function loadTranscriptFile(
     prRepositories,
     modes,
     worktreeStates,
+    replModes,
     devModsFolders,
     goals,
     fileHistorySnapshots,
@@ -9618,6 +9706,7 @@ export async function getLastSessionLog(
     tags,
     agentSettings,
     worktreeStates,
+    replModes,
     devModsFolders,
     fileHistorySnapshots,
     attributionSnapshots,
@@ -9672,6 +9761,7 @@ export async function getLastSessionLog(
     ),
     aiTitle: aiTitles.get(sessionId),
     worktreeSession: worktreeStates.get(sessionId),
+    ...(replModes.has(sessionId) ? { replMode: replModes.get(sessionId) } : {}),
     devModsFolder: devModsFolders.get(sessionId),
     goal: goals.get(sessionId),
     contextCollapseCommits: contextCollapseCommits.filter(
@@ -10003,10 +10093,17 @@ export async function getAgentTranscript(agentId: AgentId): Promise<{
     }
 
     // Find the most recent leaf message with this agentId
+    // Official 2.1.328 (@294985027): exclude trailing compact_boundary leaves.
     const parentUuids = new Set(agentMessages.map(msg => msg.parentUuid))
     const leafMessage = findLatestMessage(
       agentMessages,
-      msg => !parentUuids.has(msg.uuid),
+      msg =>
+        !parentUuids.has(msg.uuid) &&
+        !(
+          msg.type === 'system' &&
+          'subtype' in msg &&
+          msg.subtype === 'compact_boundary'
+        ),
     )
 
     if (!leafMessage) {
@@ -10446,6 +10543,7 @@ export async function loadAllLogsFromSessionFile(
     prUrls,
     prRepositories,
     modes,
+    replModes,
     fileHistorySnapshots,
     attributionSnapshots,
     contentReplacements,
@@ -10520,6 +10618,9 @@ export async function loadAllLogsFromSessionFile(
       agentColor: agentColors.get(sessionId),
       agentSetting: agentSettings.get(sessionId),
       mode: modes.get(sessionId) as LogOption['mode'],
+      ...(replModes.has(sessionId)
+        ? { replMode: replModes.get(sessionId) }
+        : {}),
       prNumber: prNumbers.get(sessionId),
       prUrl: prUrls.get(sessionId),
       prRepository: prRepositories.get(sessionId),
