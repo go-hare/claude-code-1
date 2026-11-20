@@ -1730,8 +1730,8 @@ async function tryDeliverToLocalAgent(
     const sessionMainLoopModel =
       appState.mainLoopModelForSession ??
       appState.mainLoopModel ??
-      context.options.mainLoopModel
-    const sessionPermissionMode = appState.toolPermissionContext.mode
+      context.options?.mainLoopModel
+    const sessionPermissionMode = appState.toolPermissionContext?.mode
     try {
       // densable agent-stopped → Y8a = X8a(..., "reply"): awaitCompletion + D5f.
       // No continueInterruptedTurn — always append the SendMessage body and re-run.
@@ -1781,8 +1781,8 @@ async function tryDeliverToLocalAgent(
     const sessionMainLoopModel =
       appState.mainLoopModelForSession ??
       appState.mainLoopModel ??
-      context.options.mainLoopModel
-    const sessionPermissionMode = appState.toolPermissionContext.mode
+      context.options?.mainLoopModel
+    const sessionPermissionMode = appState.toolPermissionContext?.mode
     try {
       // densable agent-evicted cold path — same Y8a reply await + D5f surface
       const result = await resumeAgentBackground({

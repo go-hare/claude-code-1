@@ -3104,8 +3104,8 @@ async function* queryModel(
       enablePromptCaching,
       options.querySource,
       useCachedMC,
-      consumedCacheEdits as any,
-      consumedPinnedEdits as any,
+      consumedCacheEdits,
+      consumedPinnedEdits,
       options.skipCacheWrite,
       options.agentCacheTtlOverride,
     )

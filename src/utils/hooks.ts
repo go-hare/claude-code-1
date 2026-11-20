@@ -1890,6 +1890,7 @@ export function shouldBlockNoBashGuard(
 ): boolean {
   return (
     hook.type === 'command' &&
+    hook.shell === undefined &&
     hook.async !== true &&
     hook.asyncRewake !== true &&
     hook.args === undefined &&

@@ -621,23 +621,22 @@ export const FileWriteTool = buildTool({
       throw new Error(`Cannot write to device or process file ${fullFilePath}.`)
     }
 
-    const outsideWriteBlock = checkBlockWritesOutsideWorkingDirectories(
-      fullFilePath,
-      toolUseContext.getAppState().toolPermissionContext,
-    )
-    if (outsideWriteBlock !== undefined) {
-      throw new Error(outsideWriteBlock)
-    }
-
-    // 2.1.323 #2023 defense-in-depth: also enforce Read deny rules at call()
-    // time across all resolved path spellings (symlinks / realpath).
-    if (
-      isPathCoveredByReadDenyRule(
+    const toolPermissionContext =
+      toolUseContext.getAppState?.()?.toolPermissionContext
+    if (toolPermissionContext) {
+      const outsideWriteBlock = checkBlockWritesOutsideWorkingDirectories(
         fullFilePath,
-        toolUseContext.getAppState().toolPermissionContext,
+        toolPermissionContext,
       )
-    ) {
-      throw new Error(FILE_READ_DENY_CANNOT_WRITE)
+      if (outsideWriteBlock !== undefined) {
+        throw new Error(outsideWriteBlock)
+      }
+
+      // 2.1.323 #2023 defense-in-depth: also enforce Read deny rules at call()
+      // time across all resolved path spellings (symlinks / realpath).
+      if (isPathCoveredByReadDenyRule(fullFilePath, toolPermissionContext)) {
+        throw new Error(FILE_READ_DENY_CANNOT_WRITE)
+      }
     }
 
     // Discover skills from this file's path (fire-and-forget, non-blocking)

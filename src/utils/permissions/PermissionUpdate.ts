@@ -611,12 +611,12 @@ function persistSinglePermissionUpdate(update: PermissionUpdate): boolean {
       logForDebugging(
         `Persisting mode '${update.mode}' to ${update.destination}`,
       )
-      const { error } = updateSettingsForSource(update.destination, {
+      const res = updateSettingsForSource(update.destination, {
         permissions: {
           defaultMode: update.mode,
         },
       })
-      return error === null
+      return (res?.error ?? null) === null
     }
 
     case 'replaceRules': {
@@ -624,12 +624,12 @@ function persistSinglePermissionUpdate(update: PermissionUpdate): boolean {
         `Replacing all ${update.behavior} rules in ${update.destination} with ${update.rules.length} rule(s)`,
       )
       const ruleStrings = update.rules.map(permissionRuleValueToString)
-      const { error } = updateSettingsForSource(update.destination, {
+      const res = updateSettingsForSource(update.destination, {
         permissions: {
           [update.behavior]: ruleStrings,
         },
       })
-      return error === null
+      return (res?.error ?? null) === null
     }
 
     default:

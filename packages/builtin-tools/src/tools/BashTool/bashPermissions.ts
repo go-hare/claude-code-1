@@ -3732,6 +3732,40 @@ function braceTokenExpandsToRm(token: string): boolean {
   )
 }
 
+const ANSI_C_QUOTE_DECODE_RE =
+  /\\(?:x([0-9a-fA-F]{1,2})|u([0-9a-fA-F]{1,4})|U([0-9a-fA-F]{1,8})|([0-7]{1,3})|c(.))/g
+
+function decodeAnsiCQuotedEscapes(script: string): string {
+  return script.replace(
+    /\$'((?:\\.|[^'])*)'/g,
+    (_whole, inner: string) =>
+      `'${inner.replace(
+        ANSI_C_QUOTE_DECODE_RE,
+        (
+          m,
+          hex?: string,
+          u4?: string,
+          u8?: string,
+          oct?: string,
+          ctrl?: string,
+        ) => {
+          try {
+            if (hex !== undefined) return String.fromCharCode(parseInt(hex, 16))
+            if (u4 !== undefined) return String.fromCodePoint(parseInt(u4, 16))
+            if (u8 !== undefined) return String.fromCodePoint(parseInt(u8, 16))
+            if (oct !== undefined) return String.fromCharCode(parseInt(oct, 8))
+            if (ctrl !== undefined) {
+              return String.fromCharCode(ctrl.toUpperCase().charCodeAt(0) & 31)
+            }
+          } catch {
+            // Invalid code point — preserve original escape
+          }
+          return m
+        },
+      )}'`,
+  )
+}
+
 function mayContainRmInvocation(script: string): boolean {
   const rmWordRe =
     /(?:^|[^\w.-]|\$\{[^{}:-]*:?-)rm(?:dir)?(?:\.exe)?(?![\w.-])/i
@@ -3742,11 +3776,15 @@ function mayContainRmInvocation(script: string): boolean {
   const unwrapDefault = (s: string): string =>
     s.replace(/\$\{[^{}:=?+-]*:?[-=?+]([^{}]*)\}/g, '$1')
   const joined = script.replace(/\\\n/g, '')
+  const decoded = decodeAnsiCQuotedEscapes(joined)
   const dequote = (s: string): string => s.replace(/\$(?=['"])|['"\\]/g, '')
   const baseForms = [
     joined,
+    decoded,
     dequote(joined),
+    dequote(decoded),
     dequote(joined.replace(/\\[ntr]/g, ' ')),
+    dequote(decoded.replace(/\\[ntr]/g, ' ')),
   ].flatMap(form => [form, unwrapDefault(form)])
   const expandedForms = varPatterns.flatMap(re =>
     [' ', ''].flatMap(rep => [
@@ -3799,11 +3837,13 @@ export function checkDangerousRmInShellDashC(
   if (!hadShellDashC) return null
 
   if (unreadable && shouldPromptUnreadableShellDashC(command)) {
-    // Official 2.1.326 #13 / 2.1.328 `zOn`: only emit "Dangerous rm operation" /
-    // "runs rm" when the command actually may contain an `rm` invocation;
-    // commands with no `rm` return null so normal permission/classifier checks
-    // evaluate them (never emitting an unwaivable `unfinishedCheck` harsher than `rm`).
-    if (mayContainRmInvocation(command)) {
+    // Official 2.1.326 #13 / 2.1.328 `zOn` / `ZLe`: prompt on strict mode
+    // (`CLAUDE_CODE_STRICT_INLINE_SHELL_RM_PROMPT=1`) or when the command
+    // (including decoded `$'...'` ANSI-C escapes) may invoke `rm`.
+    if (
+      !isRelaxedInlineShellRmPromptEnabled() ||
+      mayContainRmInvocation(command)
+    ) {
       return dangerousRemovalAsk(
         'rm',
         'This command passes a shell -c script that runs rm, and Claude Code could not check the script for dangerous removals. Approve only if you have read the script.',
@@ -3826,7 +3866,11 @@ export function checkDangerousRmInShellDashC(
         nested.unreadable &&
         shouldPromptUnreadableShellDashC(command, unit)
       ) {
-        if (mayContainRmInvocation(command) || mayContainRmInvocation(unit)) {
+        if (
+          !isRelaxedInlineShellRmPromptEnabled() ||
+          mayContainRmInvocation(command) ||
+          mayContainRmInvocation(unit)
+        ) {
           return dangerousRemovalAsk(
             'rm',
             'This command passes a shell -c script that runs rm, and Claude Code could not check the script for dangerous removals. Approve only if you have read the script.',

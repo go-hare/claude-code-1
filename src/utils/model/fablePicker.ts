@@ -307,7 +307,7 @@ export function maybeInsertFablePickerRow<T extends FablePickerOption>(
     if (custom) {
       insertFablePickerOption(options, custom as T, deps.insertDeps)
     } else if (
-      isAnthropicAwsFamilyProvider(provider) &&
+      (isAnthropicAwsFamilyProvider(provider) || provider === 'gateway') &&
       isFable5AvailableOnProvider(provider)
     ) {
       insertFablePickerOption(

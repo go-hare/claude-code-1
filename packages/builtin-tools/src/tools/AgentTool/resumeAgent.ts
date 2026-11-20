@@ -420,7 +420,7 @@ export async function resumeAgentBackground({
   // reaches the root store so task registration/progress/kill stay visible.
   const rootSetAppState =
     toolUseContext.setAppStateForTasks ?? toolUseContext.setAppState
-  const sessionMode = appState.toolPermissionContext.mode
+  const sessionMode = appState.toolPermissionContext?.mode
 
   // densable Fle — before CAS. Import bag lazily to keep resumeAgent
   // free of hard cycles with task framework.

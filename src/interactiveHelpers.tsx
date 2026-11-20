@@ -157,7 +157,7 @@ export function showSetupDialog<T = void>(
     );
     // Official 2.1.326 #68/#69: if Ink unmounts early (e.g., Ctrl+C/Ctrl+D),
     // avoid hanging forever awaiting `done` and flush a clean newline before exit.
-    void root.waitUntilExit().then(
+    void root.waitUntilExit?.()?.then(
       () => {
         if (!settled) {
           settled = true;

@@ -1890,12 +1890,13 @@ function getToolCheckApprover(context: ToolUseContext): {
 function safeCheckIsReadOnly(
   tool: Tool,
   input: unknown,
-  context: ToolUseContext,
+  _context: ToolUseContext,
 ): { isReadOnly: true } | Record<string, never> {
   if (typeof tool.isReadOnly !== 'function') return {}
   try {
     const parsed = tool.inputSchema?.safeParse?.(input)
-    return parsed?.success && tool.isReadOnly(parsed.data)
+    if (parsed !== undefined && !parsed.success) return {}
+    return tool.isReadOnly((parsed ? parsed.data : input) as never)
       ? { isReadOnly: true }
       : {}
   } catch (err) {

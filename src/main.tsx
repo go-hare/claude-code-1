@@ -2738,6 +2738,26 @@ async function run(): Promise<CommanderCommand> {
             })
           : Promise.resolve(Object.create(null) as Record<string, ScopedMcpServerConfig>);
 
+      // Official 2.1.325 (#1295 / `chunk@308207798`): kick off published 3P
+      // model catalog startup load on Bedrock / Vertex / Mantle / Foundry.
+      {
+        const startupProvider = getAPIProvider();
+        if (
+          startupProvider === 'bedrock' ||
+          startupProvider === 'vertex' ||
+          startupProvider === 'mantle' ||
+          startupProvider === 'foundry'
+        ) {
+          void import('./utils/model/thirdPartyModelUpgrade.js')
+            .then(mod =>
+              mod.initThirdPartyModelCatalogStartup({
+                headless: isNonInteractiveSession,
+              }),
+            )
+            .catch(() => {});
+        }
+      }
+
       // Kick off MCP config loading early (safe - just reads files, no execution).
       // Both interactive and -p use getClaudeCodeMcpConfigs (local file reads only).
       // The local promise is awaited later (before prefetchAllMcpResources) to

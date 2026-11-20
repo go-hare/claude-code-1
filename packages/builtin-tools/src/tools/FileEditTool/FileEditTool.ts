@@ -628,23 +628,24 @@ export const FileEditTool = buildTool({
 
     const absoluteFilePath = expandPath(file_path)
 
-    const outsideWriteBlock = checkBlockWritesOutsideWorkingDirectories(
-      absoluteFilePath,
-      toolUseContext.getAppState().toolPermissionContext,
-    )
-    if (outsideWriteBlock !== undefined) {
-      throw new Error(outsideWriteBlock)
-    }
-
-    // 2.1.323 #2023 defense-in-depth: also enforce Read deny rules at call()
-    // time across all resolved path spellings (symlinks / realpath).
-    if (
-      isPathCoveredByReadDenyRule(
+    const toolPermissionContext =
+      toolUseContext.getAppState?.()?.toolPermissionContext
+    if (toolPermissionContext) {
+      const outsideWriteBlock = checkBlockWritesOutsideWorkingDirectories(
         absoluteFilePath,
-        toolUseContext.getAppState().toolPermissionContext,
+        toolPermissionContext,
       )
-    ) {
-      throw new Error(FILE_READ_DENY_CANNOT_EDIT)
+      if (outsideWriteBlock !== undefined) {
+        throw new Error(outsideWriteBlock)
+      }
+
+      // 2.1.323 #2023 defense-in-depth: also enforce Read deny rules at call()
+      // time across all resolved path spellings (symlinks / realpath).
+      if (
+        isPathCoveredByReadDenyRule(absoluteFilePath, toolPermissionContext)
+      ) {
+        throw new Error(FILE_READ_DENY_CANNOT_EDIT)
+      }
     }
 
     // Discover skills from this file's path (fire-and-forget, non-blocking)
@@ -1040,7 +1041,7 @@ export function hasUnchangedReadBeforeCompaction(
   fileContent: string,
 ): boolean {
   const beforeCompact =
-    toolUseContext.readFileState.readBeforeCompaction(fullFilePath)
+    toolUseContext.readFileState.readBeforeCompaction?.(fullFilePath)
   if (beforeCompact === undefined) {
     return false
   }

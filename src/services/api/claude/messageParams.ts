@@ -247,9 +247,17 @@ function isToolResultBlock(
   )
 }
 
+type CachedMCEditItem =
+  | { type: 'delete'; cache_reference: string }
+  | { type: string; tool_use_id: string }
+
 type CachedMCEditsBlock = {
   type: 'cache_edits'
-  edits: { type: 'delete'; cache_reference: string }[]
+  edits: CachedMCEditItem[]
+}
+
+function getCacheEditRef(edit: CachedMCEditItem): string {
+  return 'cache_reference' in edit ? edit.cache_reference : edit.tool_use_id
 }
 
 type CachedMCPinnedEdits = {
@@ -373,10 +381,11 @@ export function addCacheBreakpoints(
   // Helper to deduplicate a cache_edits block against already-seen deletions
   const deduplicateEdits = (block: CachedMCEditsBlock): CachedMCEditsBlock => {
     const uniqueEdits = block.edits.filter(edit => {
-      if (seenDeleteRefs.has(edit.cache_reference)) {
+      const ref = getCacheEditRef(edit)
+      if (seenDeleteRefs.has(ref)) {
         return false
       }
-      seenDeleteRefs.add(edit.cache_reference)
+      seenDeleteRefs.add(ref)
       return true
     })
     return { ...block, edits: uniqueEdits }
@@ -408,10 +417,13 @@ export function addCacheBreakpoints(
           }
           insertBlockAfterToolResults(msg.content, dedupedNewEdits)
           // Pin so this block is re-sent at the same position in future calls
-          pinCacheEdits(i, newCacheEdits as any)
+          pinCacheEdits(
+            i,
+            newCacheEdits as unknown as import('../../compact/cachedMicrocompact.js').CacheEditsBlock,
+          )
 
           logForDebugging(
-            `Added cache_edits block with ${dedupedNewEdits.edits.length} deletion(s) to message[${i}]: ${dedupedNewEdits.edits.map(e => e.cache_reference).join(', ')}`,
+            `Added cache_edits block with ${dedupedNewEdits.edits.length} deletion(s) to message[${i}]: ${dedupedNewEdits.edits.map(getCacheEditRef).join(', ')}`,
           )
           break
         }

@@ -1191,6 +1191,9 @@ function openProxyConnectTunnel(
           servername: proxyHost,
         })
       : net.connect({ host: proxyHost, port: proxyPort })
+    if (isHttpsProxy) {
+      attachTlsHandshakeCrossCertHook(socket as tls.TLSSocket)
+    }
 
     let settled = false
     let buffered = Buffer.alloc(0)
@@ -1318,6 +1321,7 @@ export async function readPeerChainViaTlsHandshake(
           servername: host,
           rejectUnauthorized: false,
         })
+    attachTlsHandshakeCrossCertHook(socket)
 
     const finish = (val: X509Certificate[] | null) => {
       if (settled) return
